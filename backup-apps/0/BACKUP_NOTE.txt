@@ -1,0 +1,5 @@
+“backup-apps/0 = app locale Experience Builder”
+
+“your-extensions = widget custom”
+
+“EXB version: 1.19”
