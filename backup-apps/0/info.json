@@ -2,7 +2,7 @@
   "created": 1768910842505,
   "description": "",
   "id": "0",
-  "modified": 1768919139266,
+  "modified": 1769176409578,
   "owner": "spuddu_cbsm_hub",
   "tags": [],
   "thumbnail": null,
@@ -15,7 +15,7 @@
     "JavaScript",
     "status: Published",
     "version:1.19.0",
-    "modified: 1768919132210",
+    "modified: 1769164530286",
     "publishVersion:1.19.0"
   ],
   "portalUrl": "https://cbsm-hub.maps.arcgis.com",

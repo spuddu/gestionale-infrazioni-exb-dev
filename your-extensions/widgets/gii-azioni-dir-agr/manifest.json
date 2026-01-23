@@ -1,0 +1,12 @@
+{
+  "name": "gii-azioni-dir-agr",
+  "label": "Azioni – DIR AGR",
+  "type": "widget",
+  "version": "1.0.0",
+  "exbVersion": "1.19.0",
+  "author": "CBSM",
+  "description": "",
+  "dependency": ["jimu-arcgis"],
+  "translatedLocales": ["it"],
+  "defaultSize": { "width": 520, "height": 80 }
+}
