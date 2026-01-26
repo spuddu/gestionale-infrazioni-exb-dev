@@ -84,7 +84,7 @@ function Inner (props: { ds: any; roleSuffix: string; buttonText: string }) {
   }, [liveOid, livePresaVal, idFieldName])
 
   // === Regole messaggi UX ===
-  // - nessuna selezione -> "Selezionare una riga." (a meno che stia mostrando OK appena successo: lo lasciamo 5s)
+  // - nessuna selezione -> "Selezionare una riga." (a meno che stia mostrando OK appena successo: lo lasciamo 2.5s)
   // - selezione presente -> nessun messaggio (salvo loading o errore/ok “attivi”)
   // - se cambia record -> cancella ok/err e lascia nessun messaggio (oppure se poi non c’è selezione -> "Selezionare una riga.")
   const lastOidRef = React.useRef<number | null>(null)
@@ -173,7 +173,7 @@ function Inner (props: { ds: any; roleSuffix: string; buttonText: string }) {
       await refreshRootAndDerived(ds)
 
       // dopo success ok, spesso la selezione sparisce perché il record esce dalla vista
-      // non forziamo un altro messaggio: dopo 5s tornerà a "Selezionare una riga." se non selezioni altro
+      // non forziamo un altro messaggio: dopo 2.5s tornerà a "Selezionare una riga." se non selezioni altro
       setTimeout(() => {
         setMsg(prev => {
           // se nel frattempo hai selezionato altro o c'è un errore, non tocco
@@ -184,7 +184,7 @@ function Inner (props: { ds: any; roleSuffix: string; buttonText: string }) {
             ? null
             : { kind: 'info', text: 'Selezionare una riga.', refOid: null }
         })
-      }, 5000)
+      }, 2500)
     } catch (e: any) {
       // ❌ Errore: mostra errore reale
       const txt = e?.message ? String(e.message) : String(e)
@@ -197,7 +197,7 @@ function Inner (props: { ds: any; roleSuffix: string; buttonText: string }) {
   return (
     <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
       <div style={{ fontSize: 13 }}>
-        N.pratica: <span style={{ fontWeight: 700 }}>{snap.oid != null ? String(snap.oid) : '—'}</span>
+        OID: <span style={{ fontWeight: 700 }}>{snap.oid != null ? String(snap.oid) : '—'}</span>
       </div>
 
       <Button type='primary' onClick={onClick} disabled={!canRun}>

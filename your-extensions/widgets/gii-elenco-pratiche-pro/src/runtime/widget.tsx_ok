@@ -1,0 +1,389 @@
+/** @jsx jsx */
+import { React, jsx, css, Immutable, type AllWidgetProps, DataSourceStatus } from 'jimu-core'
+import { DataSourceComponent } from 'jimu-core'
+import { Button, Modal, ModalBody, ModalFooter } from 'jimu-ui'
+import { type IMConfig, defaultConfig } from '../config'
+
+type Props = AllWidgetProps<IMConfig>
+
+async function presaInCaricoByObjectId (
+  ds: any,
+  oid: number,
+  fieldStatoPresa: string,
+  fieldDataPresa: string,
+  valorePresa: number
+): Promise<{ ok: boolean, error?: string }> {
+  try {
+    const layer = ds?.getLayer?.() || ds?.layer
+    if (!layer || typeof layer.applyEdits !== 'function') {
+      return { ok: false, error: 'Layer/applyEdits non disponibili.' }
+    }
+
+    const oidField = layer.objectIdField || 'OBJECTID'
+    const attrs: any = { [oidField]: oid }
+    if (fieldStatoPresa) attrs[fieldStatoPresa] = valorePresa
+    if (fieldDataPresa) attrs[fieldDataPresa] = Date.now()
+
+    const res = await layer.applyEdits({ updateFeatures: [{ attributes: attrs }] })
+    const r0 = res?.updateFeatureResults?.[0]
+    const ok =
+      (r0 && r0.error == null && (r0.objectId != null || r0.globalId != null)) ||
+      (r0 && (r0 as any).success === true)
+
+    if (!ok) {
+      const errMsg =
+        r0?.error?.message ||
+        res?.error?.message ||
+        'applyEdits non ha restituito un risultato valido.'
+      return { ok: false, error: errMsg }
+    }
+
+    return { ok: true }
+  } catch (e: any) {
+    return { ok: false, error: e?.message || String(e) }
+  }
+}
+
+export default function Widget (props: Props) {
+  const cfg = (props.config as any) ?? defaultConfig
+  const useDs = props.useDataSources?.[0]
+
+  const [confirmOpen, setConfirmOpen] = React.useState(false)
+  const [pendingOid, setPendingOid] = React.useState<number | null>(null)
+  const [pendingPratica, setPendingPratica] = React.useState<string>('')
+  const [busy, setBusy] = React.useState(false)
+  const [msg, setMsg] = React.useState<string>('')
+
+  const colW = {
+    pratica: Number(cfg.colWPratica ?? 90),
+    data: Number(cfg.colWData ?? 160),
+    stato: Number(cfg.colWStato ?? 220),
+    ufficio: Number(cfg.colWUfficio ?? 170),
+    azioni: Number(cfg.colWAzioni ?? 190)
+  }
+
+  // Ultima colonna cresce su schermi larghi (così NON hai scrollbar X “gratis”)
+  const gridTemplate =
+    `${colW.pratica}px ${colW.data}px ${colW.stato}px ${colW.ufficio}px minmax(${colW.azioni}px, 1fr)`
+
+  const padFirst = Number(cfg.paddingLeftFirstCol ?? 0)
+  const btnW = Number(cfg.btnWidth ?? 150)
+
+  const styles = css`
+    /* Riempimento “aggressivo” dello spazio widget */
+    .wrap {
+      width: 100%;
+      height: 100%;
+      min-height: 0;
+      position: relative;
+    }
+
+    .card {
+      position: absolute;
+      inset: 0;
+
+      display: flex;
+      flex-direction: column;
+      min-height: 0;
+      overflow: hidden;
+
+      background: #fff;
+      border-radius: 14px;
+      border: 1px solid rgba(0,0,0,0.08);
+      box-shadow: none;
+    }
+
+    /* UNICO scroll container (Y + X) che occupa SEMPRE tutta l’altezza */
+    .scroll {
+      flex: 1 1 0;
+      min-height: 0;
+      overflow: auto;
+      background: #fff;
+    }
+
+    /* Header sticky DENTRO lo scroll: segue X e resta su */
+    .header {
+      display: ${cfg.showHeader ? 'grid' : 'none'};
+      grid-template-columns: ${gridTemplate};
+      min-width: 100%;
+
+      padding: 14px 14px 10px 14px;
+      font-weight: 600;
+      font-size: 13px;
+      color: rgba(0,0,0,0.7);
+      border-bottom: 1px solid rgba(0,0,0,0.06);
+
+      position: sticky;
+      top: 0;
+      z-index: 3;
+      background: #fff;
+      user-select: none;
+    }
+    .header > div:first-of-type { padding-left: ${padFirst}px; }
+    .header .azioniHeader { justify-self: start; text-align: left; }
+
+    .row {
+      display: grid;
+      grid-template-columns: ${gridTemplate};
+      min-width: 100%;
+
+      align-items: center;
+      padding: 10px 14px;
+      cursor: pointer;
+
+      box-sizing: border-box;
+      border: ${Number(cfg.selectedBorderWidth ?? 2)}px solid transparent;
+      border-radius: 10px;
+
+      transition: background-color 120ms ease, border-color 120ms ease;
+    }
+
+    .row.even { background: var(--zebraEvenBg); }
+    .row.odd  { background: var(--zebraOddBg); }
+
+    .row:hover { background: var(--hoverBg); }
+    .row.selected {
+      background: var(--selectedBg);
+      border-color: var(--selectedBorderColor);
+    }
+
+    .cell {
+      font-size: 13px;
+      color: rgba(0,0,0,0.78);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .cell.first { padding-left: ${padFirst}px; }
+
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      padding: 6px 12px;
+      border-radius: 999px;
+      font-size: 12px;
+      font-weight: 600;
+      border: 1px solid rgba(0,0,0,0.06);
+      max-width: 100%;
+    }
+    .badge.take { background: #fff2b8; color: #6d4b00; }
+    .badge.taken { background: #d7ebff; color: #1d4f91; }
+    .badge.unk { background: #eef1f4; color: #6b7280; }
+
+    .azioniCell { justify-self: start; }
+
+    .btnAction {
+      width: ${btnW}px;
+      min-width: ${btnW}px;
+      border-radius: 10px;
+      padding: 8px 12px;
+      font-weight: 700;
+      justify-content: center;
+    }
+    .btnDisabledLook {
+      background: #e5e7eb !important;
+      border-color: #d1d5db !important;
+      color: #6b7280 !important;
+    }
+
+    .empty {
+      padding: 12px 14px;
+      color: rgba(0,0,0,0.6);
+      font-size: 13px;
+    }
+
+    .msg {
+      padding: 8px 14px;
+      font-size: 12px;
+      color: rgba(0,0,0,0.7);
+      border-top: 1px solid rgba(0,0,0,0.06);
+      background: #fff;
+    }
+  `
+
+  const vars: React.CSSProperties = {
+    ['--zebraEvenBg' as any]: cfg.zebraEvenBg || '#ffffff',
+    ['--zebraOddBg' as any]: cfg.zebraOddBg || '#f7f8fa',
+    ['--hoverBg' as any]: cfg.hoverBg || '#f1f6ff',
+    ['--selectedBg' as any]: cfg.selectedBg || '#eaf2ff',
+    ['--selectedBorderColor' as any]: cfg.selectedBorderColor || '#2f6fed'
+  }
+
+  const safeValue = (obj: any, field: string) => (obj && field ? obj[field] : null)
+
+  const fmtDate = (v: any) => {
+    if (v == null || v === '') return '—'
+    try {
+      const d = typeof v === 'number' ? new Date(v) : new Date(v)
+      if (isNaN(d.getTime())) return String(v)
+      const dd = String(d.getDate()).padStart(2, '0')
+      const mm = String(d.getMonth() + 1).padStart(2, '0')
+      const yy = String(d.getFullYear()).slice(-2)
+      const hh = String(d.getHours()).padStart(2, '0')
+      const mi = String(d.getMinutes()).padStart(2, '0')
+      return `${dd}/${mm}/${yy}, ${hh}:${mi}`
+    } catch {
+      return String(v)
+    }
+  }
+
+  const selectRow = (ds: any, oid: number) => {
+    try {
+      if (typeof ds.selectRecordsByIds === 'function') return ds.selectRecordsByIds([oid])
+      if (typeof ds.selectRecordById === 'function') return ds.selectRecordById(oid)
+    } catch {}
+  }
+
+  const onClickTake = (ds: any, oid: number, praticaLabel: string, canTake: boolean) => {
+    selectRow(ds, oid)
+    if (!canTake) return
+    setPendingOid(oid)
+    setPendingPratica(praticaLabel)
+    setConfirmOpen(true)
+  }
+
+  const doTake = async (ds: any) => {
+    if (!pendingOid) return
+    setBusy(true)
+    setMsg('')
+
+    const res = await presaInCaricoByObjectId(
+      ds,
+      pendingOid,
+      cfg.fieldStatoPresa,
+      cfg.fieldDataPresa,
+      Number(cfg.valorePresa)
+    )
+
+    if (res.ok) {
+      setMsg('Presa in carico salvata.')
+      try { await ds?.refresh?.() } catch {}
+      try { await ds?.load?.() } catch {}
+      setConfirmOpen(false)
+    } else {
+      setMsg(`Errore salvataggio: ${res.error || 'errore non specificato'}`)
+    }
+
+    setBusy(false)
+  }
+
+  if (!useDs) return <div style={{ padding: 12 }}>Configura un Data Source.</div>
+
+  const query: any = {
+    where: '1=1',
+    outFields: ['*'],
+    pageSize: Number(cfg.pageSize ?? 200),
+    orderByFields: cfg.orderByField ? [`${cfg.orderByField} ${cfg.orderByDir || 'DESC'}`] : []
+  }
+
+  return (
+    <DataSourceComponent
+      useDataSource={useDs as any}
+      widgetId={props.id}
+      query={Immutable(query) as any}
+    >
+      {(ds: any, info: any) => {
+        const status = info?.status
+        const records = ds?.getRecords?.() ?? []
+
+        const selected = ds?.getSelectedRecords?.()?.[0]
+        const selectedOid =
+          selected?.getId?.() ??
+          selected?.getData?.()?.objectid ??
+          selected?.getData?.()?.OBJECTID ??
+          null
+
+        return (
+          <div className="wrap" css={styles} style={vars}>
+            <div className="card">
+              <div className="scroll">
+                <div className="header">
+                  <div>N. pratica</div>
+                  <div>Data rilevazione</div>
+                  <div>Stato della pratica</div>
+                  <div>Ufficio di Zona</div>
+                  <div className="azioniHeader">Azioni</div>
+                </div>
+
+                {status === DataSourceStatus.Loading && records.length === 0 ? (
+                  <div className="empty">Caricamento…</div>
+                ) : null}
+
+                {status !== DataSourceStatus.Loading && records.length === 0 ? (
+                  <div className="empty">Nessun record trovato (view/filtro/permessi).</div>
+                ) : null}
+
+                {records.map((r: any, i: number) => {
+                  const data = r?.getData?.() ?? {}
+                  const oid = r?.getId?.() ?? data?.objectid ?? data?.OBJECTID
+
+                  const pratica = safeValue(data, cfg.fieldPratica)
+                  const dtRil = safeValue(data, cfg.fieldDataRilevazione)
+                  const uff = safeValue(data, cfg.fieldUfficio)
+                  const stato = safeValue(data, cfg.fieldStatoPresa)
+
+                  const canTake = String(stato) === String(cfg.valoreDaPrendere)
+                  const isTaken = String(stato) === String(cfg.valorePresa)
+
+                  const badgeLabel = canTake
+                    ? (cfg.labelDaPrendere || 'Da prendere in carico')
+                    : isTaken
+                      ? (cfg.labelPresa || 'Presa in carico')
+                      : '—'
+
+                  const badgeClass = canTake ? 'badge take' : isTaken ? 'badge taken' : 'badge unk'
+                  const btnText = canTake ? (cfg.labelBtnTakeAttivo || 'Prendi in carico') : (cfg.labelBtnTakeDisattivo || 'Già in carico')
+
+                  const isSelected = selectedOid != null && String(selectedOid) === String(oid)
+                  const zebraClass = cfg.zebra ? (i % 2 === 0 ? 'even' : 'odd') : ''
+
+                  return (
+                    <div
+                      key={String(oid)}
+                      className={`row ${zebraClass} ${isSelected ? 'selected' : ''}`}
+                      onClick={() => selectRow(ds, oid)}
+                    >
+                      <div className="cell first">{pratica ?? '—'}</div>
+                      <div className="cell">{fmtDate(dtRil)}</div>
+                      <div className="cell"><span className={badgeClass}>{badgeLabel}</span></div>
+                      <div className="cell">{uff ?? '—'}</div>
+
+                      <div className="cell azioniCell">
+                        <Button
+                          className={`btnAction ${canTake ? '' : 'btnDisabledLook'}`}
+                          type="primary"
+                          onClick={(e) => {
+                            e.preventDefault()
+                            e.stopPropagation()
+                            onClickTake(ds, oid, String(pratica ?? oid), canTake)
+                          }}
+                        >
+                          {btnText}
+                        </Button>
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
+
+              {msg ? <div className="msg">{msg}</div> : null}
+            </div>
+
+            <Modal isOpen={confirmOpen} toggle={() => !busy && setConfirmOpen(false)}>
+              <ModalBody>
+                Sei sicuro di voler prendere in carico la pratica <b>{pendingPratica}</b>?
+              </ModalBody>
+              <ModalFooter>
+                <Button disabled={busy} onClick={() => setConfirmOpen(false)}>Annulla</Button>
+                <Button type="primary" disabled={busy} onClick={() => doTake(ds)}>
+                  {busy ? 'Salvataggio…' : 'Conferma'}
+                </Button>
+              </ModalFooter>
+            </Modal>
+          </div>
+        )
+      }}
+    </DataSourceComponent>
+  )
+}
