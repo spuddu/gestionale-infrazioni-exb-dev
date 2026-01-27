@@ -1,25 +1,50 @@
 import { type ImmutableObject, Immutable } from 'jimu-core'
 
+export type SortDir = 'ASC' | 'DESC'
+
+export interface FilterTab {
+  dataSourceId: string
+  label: string
+}
+
+export interface ColWidths {
+  pratica: number
+  data: number
+  ufficio: number
+  stato: number
+  dt_presa: number
+}
+
 export interface Config {
+  // --- Etichette filtri (tabs) per datasourceId
+  filterTabs: FilterTab[]
+
+  // --- Ordinamento default (dalla sezione contenuti)
+  orderByField: string
+  orderByDir: SortDir
+
+  // --- Campi layer
   fieldPratica: string
   fieldDataRilevazione: string
   fieldUfficio: string
   fieldStatoPresa: string
   fieldDataPresa: string
 
+  // --- Valori dominio / logica
   valoreDaPrendere: number
   valorePresa: number
 
+  // --- Testi
   labelDaPrendere: string
   labelPresa: string
   labelBtnTakeAttivo: string
   labelBtnTakeDisattivo: string
 
+  // --- Query
   whereClause: string
   pageSize: number
-  orderByField: string
-  orderByDir: 'ASC' | 'DESC'
 
+  // --- Header labels
   showHeader: boolean
   headerPratica: string
   headerData: string
@@ -28,17 +53,22 @@ export interface Config {
   headerDtPresa: string
   headerAzioni: string
 
+  // --- Layout colonne
   paddingLeftFirstCol: number
   gap: number
   btnWidth: number
-  colWidths: {
-    pratica: number
-    data: number
-    ufficio: number
-    stato: number
-    dt_presa: number
-  }
+  colWidths: ColWidths
 
+  // --- Vista lista (stile List widget)
+  rowGap: number
+  rowPaddingX: number
+  rowPaddingY: number
+  rowMinHeight: number
+  rowRadius: number
+  rowBorderWidth: number
+  rowBorderColor: string
+
+  // --- Stili righe
   zebraEvenBg: string
   zebraOddBg: string
   hoverBg: string
@@ -46,19 +76,28 @@ export interface Config {
   selectedBorderColor: string
   selectedBorderWidth: number
 
-  // chip
+  // --- Messaggi
+  msgSuccess: string
+  msgErrorPrefix: string
+  confirmTitle: string
+  confirmMessage: string
+  confirmYes: string
+  confirmNo: string
+  emptyMessage: string
+  errorNoDs: string
+
+  // --- Chip stato: aspetto
   statoChipRadius: number
   statoChipPadX: number
   statoChipPadY: number
   statoChipBorderW: number
-
-  // ✅ formato testo chip
   statoChipFontWeight: number
   statoChipFontSize: number
   statoChipFontStyle: 'normal' | 'italic'
-  statoChipTextTransform: 'none' | 'uppercase' | 'capitalize'
+  statoChipTextTransform: 'none' | 'uppercase' | 'lowercase' | 'capitalize'
   statoChipLetterSpacing: number
 
+  // --- Chip stato: colori
   statoBgDaPrendere: string
   statoTextDaPrendere: string
   statoBorderDaPrendere: string
@@ -70,20 +109,16 @@ export interface Config {
   statoBgAltro: string
   statoTextAltro: string
   statoBorderAltro: string
-
-  emptyMessage: string
-  errorNoDs: string
-  msgSuccess: string
-  msgErrorPrefix: string
-  confirmTitle: string
-  confirmMessage: string
-  confirmYes: string
-  confirmNo: string
 }
 
 export type IMConfig = ImmutableObject<Config>
 
 export const defaultConfig: IMConfig = Immutable({
+  filterTabs: [],
+
+  orderByField: 'objectid',
+  orderByDir: 'DESC',
+
   fieldPratica: 'objectid',
   fieldDataRilevazione: 'data_rilevazione',
   fieldUfficio: 'ufficio_zona',
@@ -99,9 +134,7 @@ export const defaultConfig: IMConfig = Immutable({
   labelBtnTakeDisattivo: 'Già in carico',
 
   whereClause: '1=1',
-  pageSize: 50,
-  orderByField: '',
-  orderByDir: 'ASC',
+  pageSize: 200,
 
   showHeader: true,
   headerPratica: 'N. pratica',
@@ -114,8 +147,21 @@ export const defaultConfig: IMConfig = Immutable({
   paddingLeftFirstCol: 0,
   gap: 12,
   btnWidth: 160,
+  colWidths: {
+    pratica: 140,
+    data: 140,
+    ufficio: 180,
+    stato: 220,
+    dt_presa: 180
+  },
 
-  colWidths: { pratica: 140, data: 140, ufficio: 180, stato: 220, dt_presa: 180 },
+  rowGap: 8,
+  rowPaddingX: 12,
+  rowPaddingY: 10,
+  rowMinHeight: 44,
+  rowRadius: 12,
+  rowBorderWidth: 1,
+  rowBorderColor: 'rgba(0,0,0,0.08)',
 
   zebraEvenBg: '#ffffff',
   zebraOddBg: '#fbfbfb',
@@ -124,12 +170,19 @@ export const defaultConfig: IMConfig = Immutable({
   selectedBorderColor: '#2f6fed',
   selectedBorderWidth: 2,
 
+  msgSuccess: 'Presa in carico salvata.',
+  msgErrorPrefix: 'Errore salvataggio: ',
+  confirmTitle: 'Conferma',
+  confirmMessage: 'Vuoi prendere in carico questa pratica?',
+  confirmYes: 'Sì',
+  confirmNo: 'No',
+  emptyMessage: 'Nessun record trovato (view/filtro/permessi).',
+  errorNoDs: 'Configura la fonte dati del widget.',
+
   statoChipRadius: 999,
   statoChipPadX: 10,
   statoChipPadY: 4,
   statoChipBorderW: 1,
-
-  // ✅ defaults formato testo
   statoChipFontWeight: 600,
   statoChipFontSize: 12,
   statoChipFontStyle: 'normal',
@@ -146,17 +199,7 @@ export const defaultConfig: IMConfig = Immutable({
 
   statoBgAltro: '#f2f2f2',
   statoTextAltro: '#333333',
-  statoBorderAltro: '#d0d0d0',
-
-  emptyMessage: 'Nessun record trovato (view/filtro/permessi).',
-  errorNoDs: 'Configura la fonte dati del widget.',
-  msgSuccess: 'Presa in carico salvata.',
-  msgErrorPrefix: 'Errore salvataggio: ',
-
-  confirmTitle: 'Conferma',
-  confirmMessage: 'Vuoi prendere in carico questa pratica?',
-  confirmYes: 'Sì',
-  confirmNo: 'No'
+  statoBorderAltro: '#d0d0d0'
 })
 
 export default defaultConfig
