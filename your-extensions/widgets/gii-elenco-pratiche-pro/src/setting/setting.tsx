@@ -1,353 +1,357 @@
 /** @jsx jsx */
-import { React, jsx, Immutable, type ImmutableObject, type UseDataSource, DataSourceTypes } from 'jimu-core'
-import { type AllWidgetSettingProps } from 'jimu-for-builder'
-import { SettingSection, SettingRow } from 'jimu-ui/advanced/setting-components'
+import { React, jsx, Immutable, DataSourceTypes, DataSourceManager } from 'jimu-core'
+import type { AllWidgetSettingProps } from 'jimu-for-builder'
 import { DataSourceSelector } from 'jimu-ui/advanced/data-source-selector'
-import { Label, Switch, TextInput, NumericInput, Select, Option } from 'jimu-ui'
+import { SettingSection, SettingRow } from 'jimu-ui/advanced/setting-components'
+import type { IMConfig } from '../config'
+import { defaultConfig } from '../config'
 
-import defaultConfig, { type Config } from '../config'
-
-type IMConfig = ImmutableObject<Config>
 type Props = AllWidgetSettingProps<IMConfig>
 
-const rowStackStyle: React.CSSProperties = {
-  display: 'flex',
-  flexDirection: 'column',
-  width: '100%',
-  gap: 6
+const RowStack = (props: { label: string, children: React.ReactNode }) => {
+  return (
+    <SettingRow>
+      <div style={{ width: '100%' }}>
+        <div style={{ fontWeight: 600, marginBottom: 6 }}>{props.label}</div>
+        {props.children}
+      </div>
+    </SettingRow>
+  )
 }
 
-const helpStyle: React.CSSProperties = {
-  fontSize: 12,
-  opacity: 0.75,
-  lineHeight: 1.25
+const parseNum = (v: any, fallback: number): number => {
+  const n = Number(v)
+  return Number.isFinite(n) ? n : fallback
 }
 
-const colorRowStyle: React.CSSProperties = {
-  display: 'flex',
-  alignItems: 'center',
-  gap: 10
-}
-
-const colorInputStyle: React.CSSProperties = {
-  width: 34,
-  height: 28,
-  padding: 0,
-  border: 'none',
-  background: 'transparent',
-  cursor: 'pointer'
-}
-
-function safeHex (v: any, fallback = '#000000'): string {
-  const s = String(v ?? '').trim()
-  return /^#([0-9a-fA-F]{6})$/.test(s) ? s : fallback
-}
-
-export default class Setting extends React.PureComponent<Props> {
-  private getConfig (): Config {
-    const base = defaultConfig
-    const cur = (this.props.config?.asMutable?.({ deep: true }) ?? {}) as Partial<Config>
-    return { ...base, ...cur } as Config
+const isHexColor = (v: string): boolean => /^#[0-9A-Fa-f]{6}$/.test(v)
+const normalizeHex = (v: string): string => {
+  const s = (v || '').trim()
+  if (isHexColor(s)) return s
+  const m = s.match(/^#([0-9A-Fa-f]{3})$/)
+  if (m) {
+    const r = m[1][0]; const g = m[1][1]; const b = m[1][2]
+    return `#${r}${r}${g}${g}${b}${b}`
   }
+  return ''
+}
 
-  private updateConfig<K extends keyof Config> (key: K, value: Config[K]): void {
-    const cfg = this.props.config ?? Immutable(defaultConfig)
-    this.props.onSettingChange({
-      id: this.props.id,
-      config: cfg.set(key as string, value as any)
+const ColorRow = (props: {
+  label: string
+  value: string
+  presets: string[]
+  onChange: (v: string) => void
+}) => {
+  const vNorm = normalizeHex(props.value)
+  const pickerValue = vNorm || '#000000'
+
+  return (
+    <RowStack label={props.label}>
+      <div style={{ display: 'grid', gridTemplateColumns: '42px 1fr', gap: 10, alignItems: 'center' }}>
+        <input
+          type='color'
+          value={pickerValue}
+          onChange={(e) => props.onChange((e.target as HTMLInputElement).value)}
+          title='Scegli colore'
+          style={{ width: 42, height: 34, padding: 0, border: 'none', background: 'transparent' }}
+        />
+        <input
+          style={{ width: '100%', padding: '6px 8px' }}
+          value={props.value || ''}
+          placeholder='#RRGGBB'
+          onChange={(e) => props.onChange((e.target as HTMLInputElement).value)}
+        />
+      </div>
+
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 8 }}>
+        {props.presets.map((c) => (
+          <button
+            key={c}
+            type='button'
+            onClick={() => props.onChange(c)}
+            title={c}
+            style={{
+              width: 18,
+              height: 18,
+              borderRadius: 4,
+              border: '1px solid rgba(0,0,0,0.2)',
+              background: c,
+              cursor: 'pointer'
+            }}
+          />
+        ))}
+      </div>
+    </RowStack>
+  )
+}
+
+export default function Setting (props: Props) {
+  const cfg: any = (props.config ?? defaultConfig) as any
+
+  const update = (key: string, value: any) => {
+    props.onSettingChange({
+      id: props.id,
+      config: cfg.set(key, value)
     })
   }
 
-  private onDataSourceChange = (useDataSources: UseDataSource[]): void => {
-    this.props.onSettingChange({ id: this.props.id, useDataSources })
+  const updateIn = (path: any[], value: any) => {
+    props.onSettingChange({
+      id: props.id,
+      config: cfg.setIn(path, value)
+    })
   }
 
-  private renderStackRow (label: string, control: React.ReactNode, help?: string): JSX.Element {
-    return (
-      <SettingRow>
-        <div style={rowStackStyle}>
-          <Label style={{ margin: 0 }}>{label}</Label>
-          {help && <div style={helpStyle}>{help}</div>}
-          <div>{control}</div>
-        </div>
-      </SettingRow>
-    )
+  const dsTypes = Immutable([DataSourceTypes.FeatureLayer]) as any
+
+  const onDsChange = (useDataSources: any) => {
+    props.onSettingChange({ id: props.id, useDataSources })
   }
 
-  private renderColorRow (label: string, key: keyof Config, help?: string): JSX.Element {
-    const cfg = this.getConfig()
-    const hex = safeHex((cfg as any)[key], '#2d7ff9')
-    return this.renderStackRow(
-      label,
-      <div style={colorRowStyle}>
-        <input
-          type='color'
-          value={hex}
-          style={colorInputStyle}
-          onChange={(e) => this.updateConfig(key as any, e.target.value as any)}
-        />
-        <TextInput
-          value={hex}
-          onChange={(e) => this.updateConfig(key as any, e.target.value as any)}
-          style={{ width: '100%' }}
-          placeholder='#RRGGBB'
-        />
-      </div>,
-      help
-    )
-  }
+  const inputStyle: React.CSSProperties = { width: '100%', padding: '6px 8px' }
 
-  render (): JSX.Element {
-    const cfg = this.getConfig()
+  // -----------------------------
+  // Campi disponibili dal datasource
+  // -----------------------------
+  const [orderFields, setOrderFields] = React.useState<Array<{ name: string, label: string }>>([])
 
-    return (
-      <div className='gii-elenco-pratiche-pro-setting' style={{ padding: 12 }}>
-        {/* Sorgente dati */}
-        <SettingSection title='Sorgente dati'>
-          {this.renderStackRow(
-            'Feature layer / view',
+  React.useEffect(() => {
+    let canceled = false
+
+    async function loadFields () {
+      try {
+        const uds = props.useDataSources?.[0]
+        if (!uds) { if (!canceled) setOrderFields([]); return }
+
+        const dsm = DataSourceManager.getInstance()
+        let ds: any = dsm.getDataSource(uds.dataSourceId)
+
+        if (!ds && (dsm as any).createDataSourceByUseDataSource) {
+          ds = await (dsm as any).createDataSourceByUseDataSource(uds)
+        }
+
+        const schema = ds?.getSchema?.()
+        const fieldsObj = schema?.fields || {}
+        const names = Object.keys(fieldsObj)
+
+        const items = names.map((n) => {
+          const f = fieldsObj[n] || {}
+          const label = (f.alias || f.label || n) as string
+          return { name: n, label: label || n }
+        }).sort((a, b) => a.label.localeCompare(b.label, 'it'))
+
+        if (!canceled) setOrderFields(items)
+      } catch {
+        if (!canceled) setOrderFields([])
+      }
+    }
+
+    loadFields()
+    return () => { canceled = true }
+  }, [props.useDataSources])
+
+  // palette base
+  const palette = [
+    '#ffffff', '#000000', '#f2f2f2', '#d0d0d0', '#333333',
+    '#eaf2ff', '#2f6fed',
+    '#fff7e6', '#ffd18a',
+    '#eaf7ef', '#9ad2ae',
+    '#ffe5e5', '#ff8a8a'
+  ]
+
+  return (
+    <div style={{ padding: 12 }}>
+      <SettingSection title='Fonte dati'>
+        <SettingRow>
+          <div style={{ width: '100%' }}>
+            <div style={{ fontWeight: 600, marginBottom: 6 }}>Layer / View</div>
             <DataSourceSelector
-              types={[DataSourceTypes.FeatureLayer]}
-              useDataSources={this.props.useDataSources as any}
-              mustUseDataSource
-              onChange={this.onDataSourceChange}
-              widgetId={this.props.id}
+              widgetId={props.id}
+              useDataSources={props.useDataSources as any}
+              types={dsTypes}
+              isMultiple={false}
+              mustUseDataSource={true}
+              onChange={onDsChange}
             />
-          )}
-        </SettingSection>
+          </div>
+        </SettingRow>
+      </SettingSection>
 
-        {/* Campi */}
-        <SettingSection title='Colonne (mockup)'>
-          {this.renderStackRow(
-            'Mostra intestazione colonne',
-            <Switch
-              checked={!!cfg.showHeader}
-              onChange={(e) => this.updateConfig('showHeader', e.target.checked)}
-            />,
-            'Se disattivi, restano solo le righe.'
-          )}
+      <SettingSection title='Campi (nomi esatti)'>
+        <RowStack label='Campo pratica (es. objectid / numero_pratica)'>
+          <input style={inputStyle} value={cfg.fieldPratica || ''} onChange={(e) => update('fieldPratica', (e.target as HTMLInputElement).value)} />
+        </RowStack>
 
-          {this.renderStackRow(
-            'Campo N.pratica',
-            <TextInput
-              value={cfg.fieldPratica}
-              onChange={(e) => this.updateConfig('fieldPratica', e.target.value)}
-              style={{ width: '100%' }}
-              placeholder='objectid'
-            />,
-            'Deve essere il FIELD NAME del layer/view.'
-          )}
+        <RowStack label='Campo data rilevazione (es. data_rilevazione)'>
+          <input style={inputStyle} value={cfg.fieldDataRilevazione || ''} onChange={(e) => update('fieldDataRilevazione', (e.target as HTMLInputElement).value)} />
+        </RowStack>
 
-          {this.renderStackRow(
-            'Campo Data rilevazione',
-            <TextInput
-              value={cfg.fieldDataRilevazione}
-              onChange={(e) => this.updateConfig('fieldDataRilevazione', e.target.value)}
-              style={{ width: '100%' }}
-              placeholder='data_rilevazione'
-            />
-          )}
+        <RowStack label='Campo ufficio (es. ufficio_zona)'>
+          <input style={inputStyle} value={cfg.fieldUfficio || ''} onChange={(e) => update('fieldUfficio', (e.target as HTMLInputElement).value)} />
+        </RowStack>
 
-          {this.renderStackRow(
-            'Campo Ufficio',
-            <TextInput
-              value={cfg.fieldUfficioZona}
-              onChange={(e) => this.updateConfig('fieldUfficioZona', e.target.value)}
-              style={{ width: '100%' }}
-              placeholder='ufficio_zona'
-            />
-          )}
+        <RowStack label='Campo stato presa in carico (es. presa_in_carico_DIR_AGR)'>
+          <input style={inputStyle} value={cfg.fieldStatoPresa || ''} onChange={(e) => update('fieldStatoPresa', (e.target as HTMLInputElement).value)} />
+        </RowStack>
 
-          {this.renderStackRow(
-            'Campo Stato (presa_in_carico)',
-            <TextInput
-              value={cfg.fieldPresaInCarico}
-              onChange={(e) => this.updateConfig('fieldPresaInCarico', e.target.value)}
-              style={{ width: '100%' }}
-              placeholder='presa_in_carico_DIR_AGR'
-            />
-          )}
+        <RowStack label='Campo data presa in carico (es. dt_presa_in_carico_DIR_AGR)'>
+          <input style={inputStyle} value={cfg.fieldDataPresa || ''} onChange={(e) => update('fieldDataPresa', (e.target as HTMLInputElement).value)} />
+        </RowStack>
+      </SettingSection>
 
-          {this.renderStackRow(
-            'Campo Data presa in carico',
-            <TextInput
-              value={cfg.fieldDtPresaInCarico}
-              onChange={(e) => this.updateConfig('fieldDtPresaInCarico', e.target.value)}
-              style={{ width: '100%' }}
-              placeholder='dt_presa_in_carico_DIR_AGR'
-            />
-          )}
+      <SettingSection title='Query / Ordinamento'>
+        <RowStack label='Filtro (WHERE)'>
+          <input style={inputStyle} value={cfg.whereClause || '1=1'} onChange={(e) => update('whereClause', (e.target as HTMLInputElement).value)} />
+        </RowStack>
 
-          {this.renderStackRow(
-            'Valore “da prendere in carico”',
-            <NumericInput
-              value={cfg.valoreDaPrendere}
-              onChange={(v) => this.updateConfig('valoreDaPrendere', Number(v))}
-              style={{ width: '100%' }}
-              min={0}
-              step={1}
-            />
-          )}
+        <RowStack label='Page size'>
+          <input
+            style={inputStyle}
+            type='number'
+            value={String(cfg.pageSize ?? 50)}
+            onChange={(e) => update('pageSize', parseNum((e.target as HTMLInputElement).value, 50))}
+          />
+        </RowStack>
 
-          {this.renderStackRow(
-            'Valore “presa in carico”',
-            <NumericInput
-              value={cfg.valorePresa}
-              onChange={(v) => this.updateConfig('valorePresa', Number(v))}
-              style={{ width: '100%' }}
-              min={0}
-              step={1}
-            />
-          )}
-        </SettingSection>
+        <RowStack label='Ordina per campo (orderByField)'>
+          <select
+            style={inputStyle}
+            value={cfg.orderByField || ''}
+            onChange={(e) => update('orderByField', (e.target as HTMLSelectElement).value)}
+          >
+            <option value=''>— nessuno —</option>
+            {orderFields.map(f => (
+              <option key={f.name} value={f.name}>
+                {f.label} ({f.name})
+              </option>
+            ))}
+          </select>
+          <div style={{ marginTop: 6, fontSize: 12, opacity: 0.75 }}>
+            Se la lista è vuota, seleziona prima il Layer/View.
+          </div>
+        </RowStack>
 
-        {/* Ordinamento */}
-        <SettingSection title='Query e ordinamento'>
-          {this.renderStackRow(
-            'Max record (page size)',
-            <NumericInput
-              value={cfg.pageSize}
-              onChange={(v) => this.updateConfig('pageSize', Number(v))}
-              style={{ width: '100%' }}
-              min={1}
-              step={1}
-            />
-          )}
+        <RowStack label='Direzione ordine (ASC/DESC)'>
+          <select style={inputStyle} value={(cfg.orderByDir || 'ASC') as any} onChange={(e) => update('orderByDir', (e.target as HTMLSelectElement).value)}>
+            <option value='ASC'>ASC</option>
+            <option value='DESC'>DESC</option>
+          </select>
+        </RowStack>
+      </SettingSection>
 
-          {this.renderStackRow(
-            'Order by field',
-            <TextInput
-              value={cfg.orderBy}
-              onChange={(e) => this.updateConfig('orderBy', e.target.value)}
-              style={{ width: '100%' }}
-              placeholder='objectid'
-            />
-          )}
+      <SettingSection title='Stile Stato pratica (chip)'>
+        <RowStack label='Border-radius chip (px)'>
+          <input
+            style={inputStyle}
+            type='number'
+            value={String(cfg.statoChipRadius ?? 999)}
+            onChange={(e) => update('statoChipRadius', parseNum((e.target as HTMLInputElement).value, 999))}
+          />
+        </RowStack>
 
-          {this.renderStackRow(
-            'Order direction',
-            <Select
-              value={cfg.orderDir}
-              onChange={(e) => this.updateConfig('orderDir', e.target.value as any)}
-              style={{ width: '100%' }}
-            >
-              <Option value='ASC'>ASC</Option>
-              <Option value='DESC'>DESC</Option>
-            </Select>
-          )}
-        </SettingSection>
+        <RowStack label='Padding orizzontale chip (px)'>
+          <input
+            style={inputStyle}
+            type='number'
+            value={String(cfg.statoChipPadX ?? 10)}
+            onChange={(e) => update('statoChipPadX', parseNum((e.target as HTMLInputElement).value, 10))}
+          />
+        </RowStack>
 
-        {/* Spaziatura e larghezze */}
-        <SettingSection title='Spaziatura e larghezze'>
-          {this.renderStackRow(
-            'Padding sinistro prima colonna (px)',
-            <NumericInput
-              value={cfg.paddingLeftFirstCol}
-              onChange={(v) => this.updateConfig('paddingLeftFirstCol', Number(v))}
-              style={{ width: '100%' }}
-              min={0}
-              step={1}
-            />,
-            'Vale per righe e intestazione.'
-          )}
+        <RowStack label='Padding verticale chip (px)'>
+          <input
+            style={inputStyle}
+            type='number'
+            value={String(cfg.statoChipPadY ?? 4)}
+            onChange={(e) => update('statoChipPadY', parseNum((e.target as HTMLInputElement).value, 4))}
+          />
+        </RowStack>
 
-          {this.renderStackRow(
-            'Larghezza colonna N.pratica (px)',
-            <NumericInput
-              value={cfg.colWPratica}
-              onChange={(v) => this.updateConfig('colWPratica', Number(v))}
-              style={{ width: '100%' }}
-              min={40}
-              step={5}
-            />
-          )}
+        <RowStack label='Spessore bordo chip (px)'>
+          <input
+            style={inputStyle}
+            type='number'
+            value={String(cfg.statoChipBorderW ?? 1)}
+            onChange={(e) => update('statoChipBorderW', parseNum((e.target as HTMLInputElement).value, 1))}
+          />
+        </RowStack>
 
-          {this.renderStackRow(
-            'Larghezza colonna Data (px)',
-            <NumericInput
-              value={cfg.colWData}
-              onChange={(v) => this.updateConfig('colWData', Number(v))}
-              style={{ width: '100%' }}
-              min={60}
-              step={5}
-            />
-          )}
+        {/* ✅ Formato testo */}
+        <SettingRow>
+          <div style={{ width: '100%', fontWeight: 700, marginTop: 6, opacity: 0.85 }}>
+            Formato testo chip
+          </div>
+        </SettingRow>
 
-          {this.renderStackRow(
-            'Larghezza colonna Stato (px)',
-            <NumericInput
-              value={cfg.colWStato}
-              onChange={(v) => this.updateConfig('colWStato', Number(v))}
-              style={{ width: '100%' }}
-              min={60}
-              step={5}
-            />
-          )}
+        <RowStack label='Peso font (font-weight)'>
+          <select style={inputStyle} value={String(cfg.statoChipFontWeight ?? 600)} onChange={(e) => update('statoChipFontWeight', parseNum((e.target as HTMLSelectElement).value, 600))}>
+            <option value='400'>400 (normale)</option>
+            <option value='500'>500</option>
+            <option value='600'>600 (semibold)</option>
+            <option value='700'>700 (bold)</option>
+          </select>
+        </RowStack>
 
-          {this.renderStackRow(
-            'Larghezza colonna Ufficio (px)',
-            <NumericInput
-              value={cfg.colWUfficio}
-              onChange={(v) => this.updateConfig('colWUfficio', Number(v))}
-              style={{ width: '100%' }}
-              min={60}
-              step={5}
-            />
-          )}
+        <RowStack label='Dimensione font (px)'>
+          <input
+            style={inputStyle}
+            type='number'
+            value={String(cfg.statoChipFontSize ?? 12)}
+            onChange={(e) => update('statoChipFontSize', parseNum((e.target as HTMLInputElement).value, 12))}
+          />
+        </RowStack>
 
-          {this.renderStackRow(
-            'Larghezza colonna Azioni (px)',
-            <NumericInput
-              value={cfg.colWAzioni}
-              onChange={(v) => this.updateConfig('colWAzioni', Number(v))}
-              style={{ width: '100%' }}
-              min={80}
-              step={5}
-            />
-          )}
+        <RowStack label='Stile font (italic)'>
+          <select style={inputStyle} value={cfg.statoChipFontStyle || 'normal'} onChange={(e) => update('statoChipFontStyle', (e.target as HTMLSelectElement).value)}>
+            <option value='normal'>Normal</option>
+            <option value='italic'>Italic</option>
+          </select>
+        </RowStack>
 
-          {this.renderStackRow(
-            'Larghezza pulsante (px)',
-            <NumericInput
-              value={cfg.btnWidth}
-              onChange={(v) => this.updateConfig('btnWidth', Number(v))}
-              style={{ width: '100%' }}
-              min={80}
-              step={5}
-            />,
-            'Rimane fissa anche quando il pulsante è disabilitato.'
-          )}
-        </SettingSection>
+        <RowStack label='Trasformazione testo'>
+          <select style={inputStyle} value={cfg.statoChipTextTransform || 'none'} onChange={(e) => update('statoChipTextTransform', (e.target as HTMLSelectElement).value)}>
+            <option value='none'>Nessuna</option>
+            <option value='uppercase'>MAIUSCOLO</option>
+            <option value='capitalize'>Iniziali maiuscole</option>
+          </select>
+        </RowStack>
 
-        {/* Stili */}
-        <SettingSection title='Stili'>
-          {this.renderStackRow(
-            'Zebra rows',
-            <Switch
-              checked={!!cfg.zebra}
-              onChange={(e) => this.updateConfig('zebra', e.target.checked)}
-            />
-          )}
+        <RowStack label='Letter-spacing (px)'>
+          <input
+            style={inputStyle}
+            type='number'
+            value={String(cfg.statoChipLetterSpacing ?? 0)}
+            onChange={(e) => update('statoChipLetterSpacing', parseNum((e.target as HTMLInputElement).value, 0))}
+          />
+        </RowStack>
 
-          {this.renderColorRow('Zebra colore 1', 'zebraColor1', 'Usato sulle righe pari/dispari (se zebra attivo).')}
-          {this.renderColorRow('Zebra colore 2', 'zebraColor2')}
+        <SettingRow>
+          <div style={{ width: '100%', fontWeight: 700, marginTop: 6, opacity: 0.8 }}>
+            Da prendere in carico
+          </div>
+        </SettingRow>
+        <ColorRow label='Sfondo' value={cfg.statoBgDaPrendere || ''} presets={palette} onChange={(v) => update('statoBgDaPrendere', v)} />
+        <ColorRow label='Testo' value={cfg.statoTextDaPrendere || ''} presets={palette} onChange={(v) => update('statoTextDaPrendere', v)} />
+        <ColorRow label='Bordo' value={cfg.statoBorderDaPrendere || ''} presets={palette} onChange={(v) => update('statoBorderDaPrendere', v)} />
 
-          {this.renderColorRow('Hover background', 'hoverBg', 'Colore al passaggio del mouse.')}
-          {this.renderColorRow('Selected background', 'selectedBg')}
+        <SettingRow>
+          <div style={{ width: '100%', fontWeight: 700, marginTop: 6, opacity: 0.8 }}>
+            Presa in carico
+          </div>
+        </SettingRow>
+        <ColorRow label='Sfondo' value={cfg.statoBgPresa || ''} presets={palette} onChange={(v) => update('statoBgPresa', v)} />
+        <ColorRow label='Testo' value={cfg.statoTextPresa || ''} presets={palette} onChange={(v) => update('statoTextPresa', v)} />
+        <ColorRow label='Bordo' value={cfg.statoBorderPresa || ''} presets={palette} onChange={(v) => update('statoBorderPresa', v)} />
 
-          {this.renderColorRow('Selected border color', 'selectedBorderColor')}
-          {this.renderStackRow(
-            'Selected border width (px)',
-            <NumericInput
-              value={cfg.selectedBorderWidth}
-              onChange={(v) => this.updateConfig('selectedBorderWidth', Number(v))}
-              style={{ width: '100%' }}
-              min={0}
-              step={1}
-            />
-          )}
-        </SettingSection>
-      </div>
-    )
-  }
+        <SettingRow>
+          <div style={{ width: '100%', fontWeight: 700, marginTop: 6, opacity: 0.8 }}>
+            Altri valori
+          </div>
+        </SettingRow>
+        <ColorRow label='Sfondo' value={cfg.statoBgAltro || ''} presets={palette} onChange={(v) => update('statoBgAltro', v)} />
+        <ColorRow label='Testo' value={cfg.statoTextAltro || ''} presets={palette} onChange={(v) => update('statoTextAltro', v)} />
+        <ColorRow label='Bordo' value={cfg.statoBorderAltro || ''} presets={palette} onChange={(v) => update('statoBorderAltro', v)} />
+      </SettingSection>
+    </div>
+  )
 }

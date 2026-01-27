@@ -1,25 +1,30 @@
 import { type ImmutableObject, Immutable } from 'jimu-core'
 
 export interface Config {
+  // --- Campi layer
   fieldPratica: string
   fieldDataRilevazione: string
   fieldUfficio: string
   fieldStatoPresa: string
   fieldDataPresa: string
 
+  // --- Valori dominio / logica
   valoreDaPrendere: number
   valorePresa: number
 
+  // --- Etichette
   labelDaPrendere: string
   labelPresa: string
   labelBtnTakeAttivo: string
   labelBtnTakeDisattivo: string
 
+  // --- Query / ordinamento
   whereClause: string
   pageSize: number
   orderByField: string
   orderByDir: 'ASC' | 'DESC'
 
+  // --- Header
   showHeader: boolean
   headerPratica: string
   headerData: string
@@ -28,6 +33,7 @@ export interface Config {
   headerDtPresa: string
   headerAzioni: string
 
+  // --- Layout
   paddingLeftFirstCol: number
   gap: number
   btnWidth: number
@@ -39,6 +45,8 @@ export interface Config {
     dt_presa: number
   }
 
+  // --- Stili righe
+  zebra: boolean
   zebraEvenBg: string
   zebraOddBg: string
   hoverBg: string
@@ -46,18 +54,11 @@ export interface Config {
   selectedBorderColor: string
   selectedBorderWidth: number
 
-  // chip
+  // --- Chip stato
   statoChipRadius: number
   statoChipPadX: number
   statoChipPadY: number
   statoChipBorderW: number
-
-  // ✅ formato testo chip
-  statoChipFontWeight: number
-  statoChipFontSize: number
-  statoChipFontStyle: 'normal' | 'italic'
-  statoChipTextTransform: 'none' | 'uppercase' | 'capitalize'
-  statoChipLetterSpacing: number
 
   statoBgDaPrendere: string
   statoTextDaPrendere: string
@@ -71,6 +72,7 @@ export interface Config {
   statoTextAltro: string
   statoBorderAltro: string
 
+  // --- Messaggi / modal
   emptyMessage: string
   errorNoDs: string
   msgSuccess: string
@@ -100,8 +102,8 @@ export const defaultConfig: IMConfig = Immutable({
 
   whereClause: '1=1',
   pageSize: 50,
-  orderByField: '',
-  orderByDir: 'ASC',
+  orderByField: 'objectid',
+  orderByDir: 'DESC',
 
   showHeader: true,
   headerPratica: 'N. pratica',
@@ -111,12 +113,19 @@ export const defaultConfig: IMConfig = Immutable({
   headerDtPresa: 'Dt. presa',
   headerAzioni: 'Azioni',
 
-  paddingLeftFirstCol: 0,
+  paddingLeftFirstCol: 8,
   gap: 12,
   btnWidth: 160,
 
-  colWidths: { pratica: 140, data: 140, ufficio: 180, stato: 220, dt_presa: 180 },
+  colWidths: {
+    pratica: 140,
+    data: 140,
+    ufficio: 180,
+    stato: 220,
+    dt_presa: 180
+  },
 
+  zebra: true,
   zebraEvenBg: '#ffffff',
   zebraOddBg: '#fbfbfb',
   hoverBg: '#f2f6ff',
@@ -128,13 +137,6 @@ export const defaultConfig: IMConfig = Immutable({
   statoChipPadX: 10,
   statoChipPadY: 4,
   statoChipBorderW: 1,
-
-  // ✅ defaults formato testo
-  statoChipFontWeight: 600,
-  statoChipFontSize: 12,
-  statoChipFontStyle: 'normal',
-  statoChipTextTransform: 'none',
-  statoChipLetterSpacing: 0,
 
   statoBgDaPrendere: '#fff7e6',
   statoTextDaPrendere: '#7a4b00',

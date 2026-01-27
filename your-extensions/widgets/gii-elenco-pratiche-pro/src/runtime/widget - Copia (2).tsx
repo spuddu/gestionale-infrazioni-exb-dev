@@ -7,18 +7,7 @@ import {
   DataSourceStatus
 } from 'jimu-core'
 
-import {
-  Button,
-  Alert,
-  Loading,
-  Modal,
-  ModalHeader,
-  ModalBody,
-  ModalFooter,
-  Icon
-} from 'jimu-ui'
-
-import ResetOutlined from 'jimu-icons/svg/outlined/editor/reset.svg'
+import { Button, Alert, Loading, Modal, ModalHeader, ModalBody, ModalFooter } from 'jimu-ui'
 import type { AllWidgetProps } from 'jimu-core'
 import type { IMConfig } from '../config'
 import { defaultConfig } from '../config'
@@ -33,9 +22,6 @@ interface MsgState {
 
 type TakeResult = { ok: true } | { ok: false; error: string }
 function isTakeError (r: TakeResult): r is { ok: false; error: string } { return r.ok === false }
-
-type SortDir = 'ASC' | 'DESC'
-type SortItem = { field: string, dir: SortDir }
 
 function num (v: any, fallback: number): number {
   const n = Number(v)
@@ -99,41 +85,31 @@ async function presaInCaricoByObjectId (args: {
   }
 }
 
-function compareValues (a: any, b: any): number {
-  const aNull = (a === null || a === undefined || a === '')
-  const bNull = (b === null || b === undefined || b === '')
-  if (aNull && bNull) return 0
-  if (aNull) return 1
-  if (bNull) return -1
+// ✅ Forza updateQueryParams + load quando cambia la query (ExB 1.19)
+function QueryApplier (props: { ds: DataSource, query: any, signature: string, widgetId: string }) {
+  const lastSig = React.useRef<string>('')
 
-  if (typeof a === 'number' && typeof b === 'number') return a - b
+  React.useEffect(() => {
+    const dsAny: any = props.ds
+    if (!dsAny) return
+    if (props.signature === lastSig.current) return
+    lastSig.current = props.signature
 
-  const aStr = String(a)
-  const bStr = String(b)
-  const aDate = Date.parse(aStr)
-  const bDate = Date.parse(bStr)
-  if (!Number.isNaN(aDate) && !Number.isNaN(bDate)) return aDate - bDate
+    let canceled = false
+    ;(async () => {
+      try {
+        dsAny.updateQueryParams?.(props.query, props.widgetId)
+        if (typeof dsAny.load === 'function') await dsAny.load()
+        else if (typeof dsAny.refresh === 'function') dsAny.refresh()
+      } catch {
+        // silenzioso
+      }
+    })()
 
-  return aStr.localeCompare(bStr, 'it', { numeric: true, sensitivity: 'base' })
-}
+    return () => { canceled = true }
+  }, [props.ds, props.signature, props.widgetId])
 
-function sortRecords (recs: DataRecord[], sort: SortItem[]): DataRecord[] {
-  if (!sort || sort.length === 0) return recs
-  const copy = [...recs]
-  copy.sort((ra, rb) => {
-    const da = ra.getData?.() || {}
-    const db = rb.getData?.() || {}
-    for (const s of sort) {
-      const cmp = compareValues(da[s.field], db[s.field])
-      if (cmp !== 0) return (s.dir === 'ASC' ? cmp : -cmp)
-    }
-    return 0
-  })
-  return copy
-}
-
-function sortSig (s: SortItem[]): string {
-  return (s || []).map(x => `${x.field}:${x.dir}`).join('|')
+  return null
 }
 
 export default function Widget (props: Props): React.ReactElement {
@@ -160,66 +136,24 @@ export default function Widget (props: Props): React.ReactElement {
   const [confirmOpen, setConfirmOpen] = React.useState(false)
   const [pendingOid, setPendingOid] = React.useState<number | null>(null)
 
-  // Default sort dal pannello contenuti (single-field)
-  const defaultSort: SortItem[] = React.useMemo(() => {
-    const f = txt(cfg.orderByField || '').trim()
-    if (!f) return []
-    const dir: SortDir = (txt(cfg.orderByDir || 'ASC').toUpperCase() === 'DESC') ? 'DESC' : 'ASC'
-    return [{ field: f, dir }]
-  }, [cfg.orderByField, cfg.orderByDir])
+  // ------- query params
+  const where = txt(cfg.whereClause || '1=1').trim() || '1=1'
+  const pageSize = num(cfg.pageSize, 50)
+  const orderByField = txt(cfg.orderByField || '').trim()
+  const orderByDir = (txt(cfg.orderByDir || 'ASC').toUpperCase() === 'DESC') ? 'DESC' : 'ASC'
 
-  const defaultSortSignature = React.useMemo(() => sortSig(defaultSort), [defaultSort])
-  const [sortState, setSortState] = React.useState<SortItem[]>(defaultSort)
-
-  React.useEffect(() => {
-    setSortState(defaultSort)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [defaultSortSignature])
-
-  const sortStateSignature = React.useMemo(() => sortSig(sortState), [sortState])
-  const isCustomSort = sortStateSignature !== defaultSortSignature
-
-  const toggleSort = (field: string, additive: boolean) => {
-    setSortState((prev) => {
-      const idx = prev.findIndex(s => s.field === field)
-
-      if (!additive) {
-        if (idx === 0 && prev.length === 1) {
-          const nextDir: SortDir = prev[0].dir === 'ASC' ? 'DESC' : 'ASC'
-          return [{ field, dir: nextDir }]
-        }
-        return [{ field, dir: 'ASC' }]
-      }
-
-      if (idx >= 0) {
-        const cur = prev[idx]
-        if (cur.dir === 'ASC') {
-          const next = [...prev]
-          next[idx] = { field, dir: 'DESC' }
-          return next
-        }
-        return prev.filter(s => s.field !== field)
-      }
-
-      return [...prev, { field, dir: 'ASC' }]
-    })
-  }
-
-  const getSortInfo = (field: string): { idx: number, dir?: SortDir } => {
-    const idx = sortState.findIndex(s => s.field === field)
-    if (idx < 0) return { idx: -1 }
-    return { idx, dir: sortState[idx].dir }
-  }
-
-  const dsQuery = React.useMemo(() => {
+  const query = React.useMemo(() => {
     return {
-      where: txt(cfg.whereClause || '1=1').trim() || '1=1',
+      where,
       outFields: ['*'],
-      pageSize: num(cfg.pageSize, 50)
+      pageSize,
+      orderByFields: orderByField ? [`${orderByField} ${orderByDir}`] : []
     } as any
-  }, [cfg.whereClause, cfg.pageSize])
+  }, [where, pageSize, orderByField, orderByDir])
 
-  // layout
+  const querySig = `${where}::${pageSize}::${orderByField}::${orderByDir}`
+
+  // ------- layout
   const showHeader = cfg.showHeader !== false
   const colW = cfg.colWidths || {}
   const wPratica = num(colW.pratica, 140)
@@ -236,7 +170,7 @@ export default function Widget (props: Props): React.ReactElement {
   const minWidth = wPratica + wData + wUfficio + wStato + wDtPresa + wBtn + gap * (colsCount - 1)
   const gridCols = `${wPratica}px ${wData}px ${wUfficio}px ${wStato}px ${wDtPresa}px ${wBtn}px`
 
-  // chip format
+  // ------- chip format
   const chipRadius = num(cfg.statoChipRadius, 999)
   const chipPadX = num(cfg.statoChipPadX, 10)
   const chipPadY = num(cfg.statoChipPadY, 4)
@@ -256,6 +190,8 @@ export default function Widget (props: Props): React.ReactElement {
 
     .topMsg { padding: 8px 12px; }
     .viewport { flex: 1; min-height: 0; overflow: auto; }
+
+    /* no inset a sinistra */
     .content { min-width: ${minWidth}px; padding: 0 !important; margin: 0 !important; }
 
     .headerWrap {
@@ -264,7 +200,7 @@ export default function Widget (props: Props): React.ReactElement {
       z-index: 2;
       background: var(--bs-body-bg, #fff);
       border-bottom: 1px solid rgba(0,0,0,0.08);
-      padding: 6px 0 !important;
+      padding: 12px 0 !important;
       margin: 0 !important;
     }
 
@@ -273,7 +209,6 @@ export default function Widget (props: Props): React.ReactElement {
       grid-template-columns: ${gridCols};
       column-gap: ${gap}px;
       align-items: center;
-      min-height: 32px;
       padding: 0 !important;
       margin: 0 !important;
     }
@@ -316,9 +251,7 @@ export default function Widget (props: Props): React.ReactElement {
     .headerCell {
       font-weight: 600;
       font-size: 0.85rem;
-      color: rgba(0,0,0,0.72);
-      display: flex;
-      align-items: center;
+      color: rgba(0,0,0,0.7);
       padding-left: 0 !important;
       padding-right: 0 !important;
       margin: 0 !important;
@@ -326,83 +259,20 @@ export default function Widget (props: Props): React.ReactElement {
 
     .first { padding-left: ${padFirst}px !important; }
 
-    .hdrBtn {
-      width: 100%;
-      display: inline-flex;
-      align-items: center;
-      justify-content: flex-start;
-      gap: 8px;
-      padding: 0;
-      border: none;
-      background: transparent;
-      cursor: pointer;
-      text-align: left;
-      color: inherit;
-      font: inherit;
-      line-height: 1;
-    }
-    .hdrBtn:hover { color: rgba(0,0,0,0.9); }
-    .hdrBtn:focus { outline: 2px solid rgba(47, 111, 237, 0.35); outline-offset: 2px; border-radius: 6px; }
-
-    .sortBadge {
-      display: inline-flex;
-      align-items: center;
-      gap: 4px;
-      font-size: 12px;
-      opacity: 0.8;
-    }
-    .sortPri {
-      display: inline-flex;
-      align-items: center;
-      justify-content: center;
-      width: 16px;
-      height: 16px;
-      border-radius: 4px;
-      background: rgba(0,0,0,0.07);
-      font-weight: 700;
-    }
-
-    .actionsHdr {
-      width: 100%;
-      display: inline-flex;
-      align-items: center;
-      justify-content: space-between;
-      gap: 8px;
-      white-space: nowrap;
-    }
-
-    /* ✅ Reset con icona + testo, senza aumentare header */
-    .resetBtn {
-      padding: 0 8px !important;
-      height: 28px !important;
-      min-height: 28px !important;
-      display: inline-flex !important;
-      align-items: center !important;
-      justify-content: center !important;
-      line-height: 1 !important;
-      white-space: nowrap !important;
-    }
-    .resetInner {
-      display: inline-flex;
-      align-items: center;
-      gap: 6px;
-      line-height: 1;
-      white-space: nowrap;
-      font-size: 12px;
-      font-weight: 600;
-    }
-
     .chip {
       display: inline-flex;
       align-items: center;
       padding: ${chipPadY}px ${chipPadX}px;
       border-radius: ${chipRadius}px;
       border: ${chipBorderW}px solid rgba(0,0,0,0.12);
+
+      /* ✅ formato testo configurabile */
       font-weight: ${chipFontWeight};
       font-size: ${chipFontSize}px;
       font-style: ${chipFontStyle};
       text-transform: ${chipTextTransform};
       letter-spacing: ${chipLetterSpacing}px;
+
       line-height: 1;
       white-space: nowrap;
     }
@@ -412,6 +282,16 @@ export default function Widget (props: Props): React.ReactElement {
 
     .empty { padding: 14px; color: rgba(0,0,0,0.65); }
   `
+
+  const openConfirmFor = (oid: number, ds: DataSource) => {
+    try {
+      const all = (ds.getRecords?.() ?? []) as DataRecord[]
+      const found = all.find(r => Number(r.getData?.()?.OBJECTID) === oid)
+      if (found) ds.selectRecordById?.(found.getId())
+    } catch {}
+    setPendingOid(oid)
+    setConfirmOpen(true)
+  }
 
   const doTake = async (ds: DataSource, oid: number) => {
     const fieldStato = txt(cfg.fieldStatoPresa || 'presa_in_carico_DIR_AGR')
@@ -462,14 +342,12 @@ export default function Widget (props: Props): React.ReactElement {
   }
 
   return (
-    <DataSourceComponent useDataSource={useData} query={dsQuery} widgetId={props.id}>
+    <DataSourceComponent useDataSource={useData} query={query} widgetId={props.id}>
       {(ds, info) => {
         const status = info?.status ?? ds.getStatus?.() ?? DataSourceStatus.NotReady
         const isLoading = status === DataSourceStatus.Loading
 
-        const recsRaw = (ds.getRecords?.() ?? []) as DataRecord[]
-        const recs = sortRecords(recsRaw, sortState)
-
+        const recs = (ds.getRecords?.() ?? []) as DataRecord[]
         const selected = (ds.getSelectedRecords?.() ?? []) as DataRecord[]
         const selectedOid = selected?.[0]?.getData?.()?.OBJECTID
         const selectedOidNum = selectedOid != null ? Number(selectedOid) : null
@@ -489,43 +367,11 @@ export default function Widget (props: Props): React.ReactElement {
         const btnOn = txt(cfg.labelBtnTakeAttivo || 'Prendi in carico')
         const btnOff = txt(cfg.labelBtnTakeDisattivo || 'Già in carico')
 
-        const Header = (p: { label: string, field?: string, first?: boolean }) => {
-          const clickable = !!p.field
-          if (!clickable) {
-            return <div className={`cell headerCell ${p.first ? 'first' : ''}`}>{p.label}</div>
-          }
-
-          const si = getSortInfo(p.field!)
-          const isSorted = si.idx >= 0
-          const dir = si.dir
-          const pri = si.idx + 1
-
-          const badge = isSorted
-            ? (
-              <span className='sortBadge' title={`Ordinamento #${pri} (${dir})`}>
-                <span className='sortPri'>{pri}</span>
-                <span aria-hidden>{dir === 'ASC' ? '↑' : '↓'}</span>
-              </span>
-              )
-            : <span className='sortBadge' style={{ opacity: 0.35 }} aria-hidden>↕</span>
-
-          return (
-            <div className={`cell headerCell ${p.first ? 'first' : ''}`}>
-              <button
-                type='button'
-                className='hdrBtn'
-                title='Click: ordina per questa colonna. Shift+Click: aggiungi ordinamento multiplo.'
-                onClick={(e) => toggleSort(p.field!, (e as any).shiftKey === true)}
-              >
-                <span>{p.label}</span>
-                {badge}
-              </button>
-            </div>
-          )
-        }
-
         return (
           <div css={styles}>
+            {/* ✅ forza applicazione ordine/filtro quando cambiano */}
+            <QueryApplier ds={ds} query={query} signature={querySig} widgetId={props.id} />
+
             {msg && (
               <div className='topMsg'>
                 <Alert
@@ -544,33 +390,12 @@ export default function Widget (props: Props): React.ReactElement {
                 {showHeader && (
                   <div className='headerWrap'>
                     <div className='gridRow'>
-                      <Header first label={txt(cfg.headerPratica || 'N. pratica')} field={fieldPratica} />
-                      <Header label={txt(cfg.headerData || 'Data rilevazione')} field={fieldDataRil} />
-                      <Header label={txt(cfg.headerUfficio || 'Ufficio')} field={fieldUfficio} />
-                      <Header label={txt(cfg.headerStato || 'Stato pratica')} field={fieldStato} />
-                      <Header label={txt(cfg.headerDtPresa || 'Dt. presa')} field={fieldDtPresa} />
-
-                      <div className='cell headerCell'>
-                        <div className='actionsHdr'>
-                          <span>{txt(cfg.headerAzioni || 'Azioni')}</span>
-
-                          {isCustomSort && (
-                            <Button
-                              size='sm'
-                              type='tertiary'
-                              className='resetBtn'
-                              onClick={() => setSortState(defaultSort)}
-                              title='Ripristina ordinamento di default'
-                              aria-label='Reset ordinamento'
-                            >
-                              <span className='resetInner'>
-                                <Icon icon={ResetOutlined} size={14} />
-                                <span>Reset</span>
-                              </span>
-                            </Button>
-                          )}
-                        </div>
-                      </div>
+                      <div className='cell headerCell first'>{txt(cfg.headerPratica || 'N. pratica')}</div>
+                      <div className='cell headerCell'>{txt(cfg.headerData || 'Data rilevazione')}</div>
+                      <div className='cell headerCell'>{txt(cfg.headerUfficio || 'Ufficio')}</div>
+                      <div className='cell headerCell'>{txt(cfg.headerStato || 'Stato pratica')}</div>
+                      <div className='cell headerCell'>{txt(cfg.headerDtPresa || 'Dt. presa')}</div>
+                      <div className='cell headerCell'>{txt(cfg.headerAzioni || 'Azioni')}</div>
                     </div>
                   </div>
                 )}
@@ -636,9 +461,7 @@ export default function Widget (props: Props): React.ReactElement {
                                   return
                                 }
                                 setMsg(null)
-                                try { ds.selectRecordById?.(r.getId()) } catch {}
-                                setPendingOid(oid)
-                                setConfirmOpen(true)
+                                openConfirmFor(oid, ds)
                               }}
                             >
                               {canTake ? btnOn : btnOff}
