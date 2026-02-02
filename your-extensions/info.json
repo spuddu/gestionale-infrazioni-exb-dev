@@ -1,0 +1,26 @@
+{
+  "created": 1768910842505,
+  "description": "",
+  "id": "0",
+  "modified": 1769176409578,
+  "owner": "spuddu_cbsm_hub",
+  "tags": [],
+  "thumbnail": null,
+  "title": "Gestionale Verbali Dev",
+  "type": "Web Experience",
+  "snippet": "",
+  "typeKeywords": [
+    "EXB Experience",
+    "Ready To Use",
+    "JavaScript",
+    "status: Published",
+    "version:1.19.0",
+    "modified: 1769164530286",
+    "publishVersion:1.19.0"
+  ],
+  "portalUrl": "https://cbsm-hub.maps.arcgis.com",
+  "username": "spuddu_cbsm_hub",
+  "name": "Gestionale Verbali Dev",
+  "isLocalApp": true,
+  "url": null
+}
