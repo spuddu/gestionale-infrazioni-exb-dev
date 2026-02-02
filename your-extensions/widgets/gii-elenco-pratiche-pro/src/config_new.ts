@@ -122,8 +122,8 @@ export const defaultConfig: IMConfig = Immutable({
   fieldPratica: 'objectid',
   fieldDataRilevazione: 'data_rilevazione',
   fieldUfficio: 'ufficio_zona',
-  fieldStatoPresa: 'presa_in_carico_DT',
-  fieldDataPresa: 'dt_presa_in_carico_DT',
+  fieldStatoPresa: 'presa_in_carico_DIR_AGR',
+  fieldDataPresa: 'dt_presa_in_carico_DIR_AGR',
 
   valoreDaPrendere: 1,
   valorePresa: 2,

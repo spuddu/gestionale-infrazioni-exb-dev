@@ -1,7 +1,12 @@
 import { ImmutableObject } from 'jimu-core'
 
 export interface Config {
-  roleSuffix: string
+  /**
+   * Ruolo del widget:
+   * - DT = Direttore Tecnico
+   * - DA = Direttore Amministrativo
+   */
+  roleCode: string
   buttonText: string
 }
 

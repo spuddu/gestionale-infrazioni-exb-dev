@@ -478,8 +478,8 @@ export default function Widget (props: Props): React.ReactElement {
   }
 
   const doTake = async (ds: DataSource, oid: number) => {
-    const fieldStato = txt(cfg.fieldStatoPresa || 'presa_in_carico_DT')
-    const fieldData = txt(cfg.fieldDataPresa || 'dt_presa_in_carico_DT')
+    const fieldStato = txt(cfg.fieldStatoPresa || 'presa_in_carico_DIR_AGR')
+    const fieldData = txt(cfg.fieldDataPresa || 'dt_presa_in_carico_DIR_AGR')
     const valorePresa = num(cfg.valorePresa, 2)
 
     const res = await presaInCaricoByObjectId({ ds, objectId: oid, fieldStato, fieldData, valorePresa })
@@ -501,8 +501,8 @@ export default function Widget (props: Props): React.ReactElement {
   const fieldPratica = txt(cfg.fieldPratica || 'objectid')
   const fieldDataRil = txt(cfg.fieldDataRilevazione || 'data_rilevazione')
   const fieldUfficio = txt(cfg.fieldUfficio || 'ufficio_zona')
-  const fieldStato = txt(cfg.fieldStatoPresa || 'presa_in_carico_DT')
-  const fieldDtPresa = txt(cfg.fieldDataPresa || 'dt_presa_in_carico_DT')
+  const fieldStato = txt(cfg.fieldStatoPresa || 'presa_in_carico_DIR_AGR')
+  const fieldDtPresa = txt(cfg.fieldDataPresa || 'dt_presa_in_carico_DIR_AGR')
 
   const labelDaPrendere = txt(cfg.labelDaPrendere || 'Da prendere in carico')
   const labelPresa = txt(cfg.labelPresa || 'Presa in carico')

@@ -105,12 +105,6 @@ function trySelectRecord (ds: any, record: DataRecord, recordId: string) {
   try { ds.setSelectedRecords?.([record]) } catch {}
 }
 
-function tryClearSelection (ds: any) {
-  try { ds.selectRecordsByIds?.([]) } catch {}
-  try { ds.clearSelection?.() } catch {}
-  try { ds.setSelectedRecords?.([]) } catch {}
-}
-
 async function presaInCaricoByObjectId (args: {
   ds: DataSource
   objectId: number
@@ -167,7 +161,6 @@ export default function Widget (props: Props): React.ReactElement {
   const hasTabs = useDsJs.length > 1
 
   const [activeTab, setActiveTab] = React.useState(0)
-  const dsRefForClear = React.useRef<any>(null)
   React.useEffect(() => {
     if (activeTab >= useDsJs.length) setActiveTab(0)
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -478,8 +471,8 @@ export default function Widget (props: Props): React.ReactElement {
   }
 
   const doTake = async (ds: DataSource, oid: number) => {
-    const fieldStato = txt(cfg.fieldStatoPresa || 'presa_in_carico_DT')
-    const fieldData = txt(cfg.fieldDataPresa || 'dt_presa_in_carico_DT')
+    const fieldStato = txt(cfg.fieldStatoPresa || 'presa_in_carico_DIR_AGR')
+    const fieldData = txt(cfg.fieldDataPresa || 'dt_presa_in_carico_DIR_AGR')
     const valorePresa = num(cfg.valorePresa, 2)
 
     const res = await presaInCaricoByObjectId({ ds, objectId: oid, fieldStato, fieldData, valorePresa })
@@ -501,8 +494,8 @@ export default function Widget (props: Props): React.ReactElement {
   const fieldPratica = txt(cfg.fieldPratica || 'objectid')
   const fieldDataRil = txt(cfg.fieldDataRilevazione || 'data_rilevazione')
   const fieldUfficio = txt(cfg.fieldUfficio || 'ufficio_zona')
-  const fieldStato = txt(cfg.fieldStatoPresa || 'presa_in_carico_DT')
-  const fieldDtPresa = txt(cfg.fieldDataPresa || 'dt_presa_in_carico_DT')
+  const fieldStato = txt(cfg.fieldStatoPresa || 'presa_in_carico_DIR_AGR')
+  const fieldDtPresa = txt(cfg.fieldDataPresa || 'dt_presa_in_carico_DIR_AGR')
 
   const labelDaPrendere = txt(cfg.labelDaPrendere || 'Da prendere in carico')
   const labelPresa = txt(cfg.labelPresa || 'Presa in carico')
@@ -557,19 +550,6 @@ export default function Widget (props: Props): React.ReactElement {
               type='button'
               className={`tabBtn ${i === activeTab ? 'active' : ''}`}
               onClick={() => {
-                // Sgancia la selezione dal data source corrente prima di cambiare tab
-                if (dsRefForClear.current) {
-                  tryClearSelection(dsRefForClear.current)
-                }
-                
-                // Rimuovi la selezione locale per il data source corrente
-                const currentDsId = String(activeUseDsJs?.dataSourceId || 'ds')
-                setLocalSelectedByDs(prev => {
-                  const updated = { ...prev }
-                  delete updated[currentDsId]
-                  return updated
-                })
-                
                 setActiveTab(i)
                 setMsg(null)
               }}
@@ -603,8 +583,6 @@ export default function Widget (props: Props): React.ReactElement {
             widgetId={props.id}
           >
             {(ds: DataSource, info) => {
-              // Salva il riferimento al data source per sganciare la selezione al cambio tab
-              dsRefForClear.current = ds
               const status = info?.status ?? ds.getStatus?.() ?? DataSourceStatus.NotReady
               const isLoading = status === DataSourceStatus.Loading
 
@@ -681,19 +659,8 @@ export default function Widget (props: Props): React.ReactElement {
                           key={rid}
                           className={`rowCard ${even ? 'even' : 'odd'} ${isSel ? 'selected' : ''}`}
                           onClick={() => {
-                            // Se il record è già selezionato, deselezionalo
-                            if (isSel) {
-                              setLocalSelectedByDs(prev => {
-                                const updated = { ...prev }
-                                delete updated[dsId]
-                                return updated
-                              })
-                              tryClearSelection(ds as any)
-                            } else {
-                              // Altrimenti selezionalo
-                              setLocalSelectedByDs(prev => ({ ...prev, [dsId]: rid }))
-                              trySelectRecord(ds as any, r, rid)
-                            }
+                            setLocalSelectedByDs(prev => ({ ...prev, [dsId]: rid }))
+                            trySelectRecord(ds as any, r, rid)
                           }}
                         >
                           <div className='cell first' title={pratica}>{pratica}</div>
