@@ -52,19 +52,18 @@ function ColorControl (props: { label: string, value: string, onChange: (v: stri
           style={{ ...inputStyle, flex: 1 }}
           value={v}
           onChange={(e) => props.onChange((e.target as HTMLInputElement).value)}
-          placeholder='#rrggbb oppure rgba(...)'
+          placeholder='#rrggbb'
         />
         <input
           type='color'
           value={hex}
           onChange={(e) => props.onChange((e.target as HTMLInputElement).value)}
-          title='Pick color'
-          style={{ width: 44, height: 34, padding: 0, border: '1px solid rgba(0,0,0,0.2)', borderRadius: 8 }}
+          title='Selettore colore'
+          style={{ width: 44, height: 34, padding: 0, border: 'none', background: 'transparent' }}
         />
       </div>
-
-      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 8 }}>
-        {PRESET_COLORS.map(c => (
+      <div style={{ display: 'flex', gap: 6, marginTop: 8, flexWrap: 'wrap' }}>
+        {PRESET_COLORS.map((c) => (
           <button
             key={c}
             type='button'
@@ -109,12 +108,27 @@ function FieldSelect (props: { value: string, fields: FieldOpt[], onChange: (v: 
       onChange={(e) => props.onChange((e.target as HTMLSelectElement).value)}
     >
       <option value=''>— seleziona —</option>
-      {fields.map(f => (
+      {fields.map((f) => (
         <option key={f.name} value={f.name}>
-          {f.alias ? `${f.alias} (${f.name})` : f.name}
+          {f.alias} ({f.name})
         </option>
       ))}
     </select>
+  )
+}
+
+function NumInput (props: { value: any, onChange: (n: number) => void, step?: number, min?: number, max?: number }) {
+  const v = parseNum(props.value, 0)
+  return (
+    <input
+      type='number'
+      style={inputStyle}
+      value={String(v)}
+      step={props.step ?? 1}
+      min={props.min}
+      max={props.max}
+      onChange={(e) => props.onChange(parseNum((e.target as HTMLInputElement).value, 0))}
+    />
   )
 }
 
@@ -140,12 +154,37 @@ export default function Setting (props: Props) {
   const dsTypes = Immutable([DataSourceTypes.FeatureLayer]) as any
 
   const onDsChange = (useDataSources: any) => {
-    props.onSettingChange({ id: props.id, useDataSources })
+    // PATCH ATOMICA: un solo onSettingChange.
+    const udsJs: any[] = asJs(useDataSources ?? Immutable([]))
+    const prevTabs: any[] = asJs(cfg.filterTabs ?? Immutable([]))
+    const dsm = DataSourceManager.getInstance()
+
+    const nextTabs = udsJs.map((u) => {
+      const dsId = String(u?.dataSourceId || '')
+      const prev = prevTabs.find(t => String(t?.dataSourceId || '') === dsId)
+      if (prev) return prev
+
+      // label default: ds label o fallback
+      let label = ''
+      try {
+        const ds: any = dsm.getDataSource(dsId)
+        label = String(ds?.getLabel?.() || '')
+      } catch {}
+      label = label && label.trim() ? label.trim() : 'Filtro'
+      return { dataSourceId: dsId, label }
+    })
+
+    const c = cfg.set ? cfg : Immutable(cfg)
+    props.onSettingChange({
+      id: props.id,
+      useDataSources,
+      config: c.set('filterTabs', nextTabs)
+    })
   }
 
   // Legge i campi dal primo datasource selezionato (vale per tutti se hanno schema coerente)
   const useDsImm: any = props.useDataSources ?? Immutable([])
-  const useDsJs: any[] = asJs(useDsImm) || []
+  const useDsJs: any[] = asJs(useDsImm)
   const primaryDsId = String(useDsJs?.[0]?.dataSourceId || '')
 
   const [fields, setFields] = React.useState<FieldOpt[]>([])
@@ -183,42 +222,11 @@ export default function Setting (props: Props) {
     return () => { cancelled = true }
   }, [primaryDsId])
 
-  // --- Filter tabs labels (per dataSourceId)
-  const getTabs = (): any[] => {
-    const t = asJs(cfg.filterTabs) || []
-    return Array.isArray(t) ? t : []
-  }
-
-  const setTabLabel = (dataSourceId: string, label: string) => {
-    const tabs = getTabs()
-    const idx = tabs.findIndex(x => String(x?.dataSourceId || '') === dataSourceId)
-    const next = [...tabs]
-
-    if (!label || !label.trim()) {
-      if (idx >= 0) next.splice(idx, 1)
-    } else {
-      if (idx >= 0) next[idx] = { ...next[idx], dataSourceId, label }
-      else next.push({ dataSourceId, label })
-    }
-
-    update('filterTabs', Immutable(next))
-  }
-
-  // helpers lettura con fallback
-  const getNum = (key: string, fallback: number) => parseNum(cfg?.[key], fallback)
-  const getStr = (key: string, fallback = '') => String(cfg?.[key] ?? fallback)
-
-  const getCol = (k: string, fallback: number) => {
-    const col = cfg?.colWidths?.[k]
-    return parseNum(col, fallback)
-  }
-
   return (
-    <div style={{ padding: 12 }}>
+    <div style={{ width: '100%' }}>
       <SettingSection title='Fonte dati'>
-        <SettingRow>
+        <SettingRow flow='wrap'>
           <div style={{ width: '100%' }}>
-            <div style={{ fontWeight: 700, marginBottom: 6 }}>Layer / View</div>
             <DataSourceSelector
               widgetId={props.id}
               useDataSources={props.useDataSources as any}
@@ -228,275 +236,371 @@ export default function Setting (props: Props) {
               onChange={onDsChange}
             />
             <div style={{ fontSize: 12, opacity: 0.75, marginTop: 6 }}>
-              Se selezioni più datasource, il widget mostra i “Filtri” come schede (tab).
+              Se selezioni più datasource, il widget mostra i filtri come schede (tab).
             </div>
           </div>
         </SettingRow>
-
-        {useDsJs.length > 1 && (
-          <SettingSection title='Etichette Filtri (tab)'>
-            {useDsJs.map((u, i) => {
-              const dsId = String(u?.dataSourceId || '')
-              const defaultLabel = `Filtro ${i + 1}`
-              const tabs = getTabs()
-              const custom = tabs.find(x => String(x?.dataSourceId || '') === dsId)?.label || ''
-              return (
-                <RowStack
-                  key={dsId || i}
-                  label={getStr('','') || `Filtro ${i + 1}`}
-                  help={`Datasource: ${dsId}`}
-                >
-                  <input
-                    style={inputStyle}
-                    value={custom}
-                    onChange={(e) => setTabLabel(dsId, (e.target as HTMLInputElement).value)}
-                    placeholder={`Lascia vuoto per usare “${defaultLabel}”/label vista`}
-                  />
-                </RowStack>
-              )
-            })}
-          </SettingSection>
-        )}
       </SettingSection>
 
-      <SettingSection title='Campi'>
-        <RowStack label='Campo pratica'>
-          <FieldSelect value={getStr('fieldPratica', '')} fields={fields} onChange={(v) => update('fieldPratica', v)} />
+      {useDsJs.length > 1 && (
+        <SettingSection title='Etichette filtri (tab)'>
+          {useDsJs.map((u, i) => {
+            const dsId = String(u?.dataSourceId || '')
+            const tab = (asJs(cfg.filterTabs ?? Immutable([])) as any[]).find(t => String(t?.dataSourceId || '') === dsId) || { dataSourceId: dsId, label: '' }
+            return (
+              <RowStack
+                key={dsId || i}
+                label={`Filtro ${i + 1}`}
+                help={`Datasource: ${dsId}`}
+              >
+                <input
+                  style={inputStyle}
+                  value={String(tab.label || '')}
+                  onChange={(e) => {
+                    const v = (e.target as HTMLInputElement).value
+                    const tabs = (asJs(cfg.filterTabs ?? Immutable([])) as any[]).map(t => ({ ...t }))
+                    const idx = tabs.findIndex(t => String(t?.dataSourceId || '') === dsId)
+                    if (idx >= 0) tabs[idx].label = v
+                    else tabs.push({ dataSourceId: dsId, label: v })
+                    update('filterTabs', tabs)
+                  }}
+                  placeholder='Etichetta tab'
+                />
+              </RowStack>
+            )
+          })}
+        </SettingSection>
+      )}
+
+      <SettingSection title='Campi (mapping layer)'>
+        <RowStack label='N. pratica'>
+          <FieldSelect value={cfg.fieldPratica} fields={fields} onChange={(v) => update('fieldPratica', v)} />
         </RowStack>
 
-        <RowStack label='Campo data rilevazione'>
-          <FieldSelect value={getStr('fieldDataRilevazione', '')} fields={fields} onChange={(v) => update('fieldDataRilevazione', v)} />
+        <RowStack label='Data rilevazione'>
+          <FieldSelect value={cfg.fieldDataRilevazione} fields={fields} onChange={(v) => update('fieldDataRilevazione', v)} />
         </RowStack>
 
-        <RowStack label='Campo ufficio'>
-          <FieldSelect value={getStr('fieldUfficio', '')} fields={fields} onChange={(v) => update('fieldUfficio', v)} />
+        <RowStack label='Ufficio'>
+          <FieldSelect value={cfg.fieldUfficio} fields={fields} onChange={(v) => update('fieldUfficio', v)} />
         </RowStack>
 
-        <RowStack label='Campo stato presa in carico'>
-          <FieldSelect value={getStr('fieldStatoPresa', '')} fields={fields} onChange={(v) => update('fieldStatoPresa', v)} />
+        <SettingRow>
+          <div style={{ width: '100%', fontWeight: 800, marginTop: 8 }}>DT (Direttore Tecnico/Agrario)</div>
+        </SettingRow>
+
+        <RowStack label='presa_in_carico_DT'>
+          <FieldSelect value={cfg.fieldPresaDT} fields={fields} onChange={(v) => update('fieldPresaDT', v)} />
+        </RowStack>
+        <RowStack label='dt_presa_in_carico_DT'>
+          <FieldSelect value={cfg.fieldDtPresaDT} fields={fields} onChange={(v) => update('fieldDtPresaDT', v)} />
+        </RowStack>
+        <RowStack label='stato_DT'>
+          <FieldSelect value={cfg.fieldStatoDT} fields={fields} onChange={(v) => update('fieldStatoDT', v)} />
+        </RowStack>
+        <RowStack label='dt_stato_DT'>
+          <FieldSelect value={cfg.fieldDtStatoDT} fields={fields} onChange={(v) => update('fieldDtStatoDT', v)} />
+        </RowStack>
+        <RowStack label='esito_DT'>
+          <FieldSelect value={cfg.fieldEsitoDT} fields={fields} onChange={(v) => update('fieldEsitoDT', v)} />
+        </RowStack>
+        <RowStack label='dt_esito_DT'>
+          <FieldSelect value={cfg.fieldDtEsitoDT} fields={fields} onChange={(v) => update('fieldDtEsitoDT', v)} />
         </RowStack>
 
-        <RowStack label='Campo data presa in carico'>
-          <FieldSelect value={getStr('fieldDataPresa', '')} fields={fields} onChange={(v) => update('fieldDataPresa', v)} />
+        <SettingRow>
+          <div style={{ width: '100%', fontWeight: 800, marginTop: 8 }}>DA (Direttore Area Amministrativa)</div>
+        </SettingRow>
+
+        <RowStack label='presa_in_carico_DA'>
+          <FieldSelect value={cfg.fieldPresaDA} fields={fields} onChange={(v) => update('fieldPresaDA', v)} />
+        </RowStack>
+        <RowStack label='dt_presa_in_carico_DA'>
+          <FieldSelect value={cfg.fieldDtPresaDA} fields={fields} onChange={(v) => update('fieldDtPresaDA', v)} />
+        </RowStack>
+        <RowStack label='stato_DA'>
+          <FieldSelect value={cfg.fieldStatoDA} fields={fields} onChange={(v) => update('fieldStatoDA', v)} />
+        </RowStack>
+        <RowStack label='dt_stato_DA'>
+          <FieldSelect value={cfg.fieldDtStatoDA} fields={fields} onChange={(v) => update('fieldDtStatoDA', v)} />
+        </RowStack>
+        <RowStack label='esito_DA'>
+          <FieldSelect value={cfg.fieldEsitoDA} fields={fields} onChange={(v) => update('fieldEsitoDA', v)} />
+        </RowStack>
+        <RowStack label='dt_esito_DA'>
+          <FieldSelect value={cfg.fieldDtEsitoDA} fields={fields} onChange={(v) => update('fieldDtEsitoDA', v)} />
         </RowStack>
       </SettingSection>
 
-      <SettingSection title='Query / Ordinamento di default'>
-        <RowStack label='Filtro (WHERE)'>
+      <SettingSection title='Domini e label'>
+        <RowStack label='presa_in_carico: valore "Da prendere in carico"'>
+          <NumInput value={cfg.presaDaPrendereVal} onChange={(n) => update('presaDaPrendereVal', n)} />
+        </RowStack>
+        <RowStack label='presa_in_carico: valore "Presa in carico"'>
+          <NumInput value={cfg.presaPresaVal} onChange={(n) => update('presaPresaVal', n)} />
+        </RowStack>
+        <RowStack label='Label "Da prendere in carico"'>
+          <input style={inputStyle} value={String(cfg.labelPresaDaPrendere || '')} onChange={(e) => update('labelPresaDaPrendere', (e.target as HTMLInputElement).value)} />
+        </RowStack>
+        <RowStack label='Label "Presa in carico"'>
+          <input style={inputStyle} value={String(cfg.labelPresaPresa || '')} onChange={(e) => update('labelPresaPresa', (e.target as HTMLInputElement).value)} />
+        </RowStack>
+
+        <SettingRow>
+          <div style={{ width: '100%', fontWeight: 800, marginTop: 8 }}>Stato (1..5)</div>
+        </SettingRow>
+
+        <RowStack label='Valore stato: Da prendere (1)'>
+          <NumInput value={cfg.statoDaPrendereVal} onChange={(n) => update('statoDaPrendereVal', n)} />
+        </RowStack>
+        <RowStack label='Valore stato: Presa in carico (2)'>
+          <NumInput value={cfg.statoPresaVal} onChange={(n) => update('statoPresaVal', n)} />
+        </RowStack>
+        <RowStack label='Valore stato: Integrazione richiesta (3)'>
+          <NumInput value={cfg.statoIntegrazioneVal} onChange={(n) => update('statoIntegrazioneVal', n)} />
+        </RowStack>
+        <RowStack label='Valore stato: Approvata (4)'>
+          <NumInput value={cfg.statoApprovataVal} onChange={(n) => update('statoApprovataVal', n)} />
+        </RowStack>
+        <RowStack label='Valore stato: Respinta (5)'>
+          <NumInput value={cfg.statoRespintaVal} onChange={(n) => update('statoRespintaVal', n)} />
+        </RowStack>
+
+        <RowStack label='Label stato: Da prendere'>
+          <input style={inputStyle} value={String(cfg.labelStatoDaPrendere || '')} onChange={(e) => update('labelStatoDaPrendere', (e.target as HTMLInputElement).value)} />
+        </RowStack>
+        <RowStack label='Label stato: Presa in carico'>
+          <input style={inputStyle} value={String(cfg.labelStatoPresa || '')} onChange={(e) => update('labelStatoPresa', (e.target as HTMLInputElement).value)} />
+        </RowStack>
+        <RowStack label='Label stato: Integrazione richiesta'>
+          <input style={inputStyle} value={String(cfg.labelStatoIntegrazione || '')} onChange={(e) => update('labelStatoIntegrazione', (e.target as HTMLInputElement).value)} />
+        </RowStack>
+        <RowStack label='Label stato: Approvata'>
+          <input style={inputStyle} value={String(cfg.labelStatoApprovata || '')} onChange={(e) => update('labelStatoApprovata', (e.target as HTMLInputElement).value)} />
+        </RowStack>
+        <RowStack label='Label stato: Respinta'>
+          <input style={inputStyle} value={String(cfg.labelStatoRespinta || '')} onChange={(e) => update('labelStatoRespinta', (e.target as HTMLInputElement).value)} />
+        </RowStack>
+
+        <SettingRow>
+          <div style={{ width: '100%', fontWeight: 800, marginTop: 8 }}>Esito (1..3)</div>
+        </SettingRow>
+
+        <RowStack label='Valore esito: Integrazione richiesta (1)'>
+          <NumInput value={cfg.esitoIntegrazioneVal} onChange={(n) => update('esitoIntegrazioneVal', n)} />
+        </RowStack>
+        <RowStack label='Valore esito: Approvata (2)'>
+          <NumInput value={cfg.esitoApprovataVal} onChange={(n) => update('esitoApprovataVal', n)} />
+        </RowStack>
+        <RowStack label='Valore esito: Respinta (3)'>
+          <NumInput value={cfg.esitoRespintaVal} onChange={(n) => update('esitoRespintaVal', n)} />
+        </RowStack>
+
+        <RowStack label='Label esito: Integrazione richiesta'>
+          <input style={inputStyle} value={String(cfg.labelEsitoIntegrazione || '')} onChange={(e) => update('labelEsitoIntegrazione', (e.target as HTMLInputElement).value)} />
+        </RowStack>
+        <RowStack label='Label esito: Approvata'>
+          <input style={inputStyle} value={String(cfg.labelEsitoApprovata || '')} onChange={(e) => update('labelEsitoApprovata', (e.target as HTMLInputElement).value)} />
+        </RowStack>
+        <RowStack label='Label esito: Respinta'>
+          <input style={inputStyle} value={String(cfg.labelEsitoRespinta || '')} onChange={(e) => update('labelEsitoRespinta', (e.target as HTMLInputElement).value)} />
+        </RowStack>
+      </SettingSection>
+
+      <SettingSection title='Contenuti e intestazioni'>
+        <RowStack label='Where clause'>
           <input
             style={inputStyle}
-            value={getStr('whereClause', '1=1')}
+            value={String(cfg.whereClause || '')}
             onChange={(e) => update('whereClause', (e.target as HTMLInputElement).value)}
+            placeholder='1=1'
           />
         </RowStack>
 
         <RowStack label='Page size'>
-          <input
-            style={inputStyle}
-            type='number'
-            value={String(getNum('pageSize', 200))}
-            onChange={(e) => update('pageSize', parseNum((e.target as HTMLInputElement).value, 200))}
-          />
+          <NumInput value={cfg.pageSize} onChange={(n) => update('pageSize', n)} min={1} step={1} />
         </RowStack>
 
-        <RowStack label='Ordina per campo (default)'>
-          <FieldSelect value={getStr('orderByField', '')} fields={fields} onChange={(v) => update('orderByField', v)} />
+        <RowStack label='Ordina di default per campo'>
+          <FieldSelect value={cfg.orderByField} fields={fields} onChange={(v) => update('orderByField', v)} placeholder='objectid' />
         </RowStack>
 
-        <RowStack label='Direzione (default)'>
-          <select
-            style={inputStyle}
-            value={getStr('orderByDir', 'ASC')}
-            onChange={(e) => update('orderByDir', (e.target as HTMLSelectElement).value)}
-          >
-            <option value='ASC'>ASC</option>
+        <RowStack label='Direzione ordinamento default'>
+          <select style={inputStyle} value={String(cfg.orderByDir || 'DESC')} onChange={(e) => update('orderByDir', (e.target as HTMLSelectElement).value)}>
             <option value='DESC'>DESC</option>
+            <option value='ASC'>ASC</option>
           </select>
         </RowStack>
-      </SettingSection>
 
-      <SettingSection title='Testi'>
-        <RowStack label='Etichetta stato “Da prendere in carico”'>
-          <input style={inputStyle} value={getStr('labelDaPrendere', 'Da prendere in carico')} onChange={(e) => update('labelDaPrendere', (e.target as HTMLInputElement).value)} />
+        <RowStack label='Mostra header colonne'>
+          <select style={inputStyle} value={String(cfg.showHeader !== false)} onChange={(e) => update('showHeader', (e.target as HTMLSelectElement).value === 'true')}>
+            <option value='true'>Sì</option>
+            <option value='false'>No</option>
+          </select>
         </RowStack>
 
-        <RowStack label='Etichetta stato “Presa in carico”'>
-          <input style={inputStyle} value={getStr('labelPresa', 'Presa in carico')} onChange={(e) => update('labelPresa', (e.target as HTMLInputElement).value)} />
+        <RowStack label='Header: N. pratica'>
+          <input style={inputStyle} value={String(cfg.headerPratica || '')} onChange={(e) => update('headerPratica', (e.target as HTMLInputElement).value)} />
         </RowStack>
-
-        <RowStack label='Testo bottone (attivo)'>
-          <input style={inputStyle} value={getStr('labelBtnTakeAttivo', 'Prendi in carico')} onChange={(e) => update('labelBtnTakeAttivo', (e.target as HTMLInputElement).value)} />
+        <RowStack label='Header: Data rilev.'>
+          <input style={inputStyle} value={String(cfg.headerData || '')} onChange={(e) => update('headerData', (e.target as HTMLInputElement).value)} />
         </RowStack>
-
-        <RowStack label='Testo bottone (disattivo)'>
-          <input style={inputStyle} value={getStr('labelBtnTakeDisattivo', 'Già in carico')} onChange={(e) => update('labelBtnTakeDisattivo', (e.target as HTMLInputElement).value)} />
+        <RowStack label='Header: Stato sintetico'>
+          <input style={inputStyle} value={String(cfg.headerStato || '')} onChange={(e) => update('headerStato', (e.target as HTMLInputElement).value)} />
         </RowStack>
-
-        <RowStack label='Messaggio conferma presa in carico'>
-          <input style={inputStyle} value={getStr('confirmMessage', 'Vuoi prendere in carico questa pratica?')} onChange={(e) => update('confirmMessage', (e.target as HTMLInputElement).value)} />
+        <RowStack label='Header: Ufficio'>
+          <input style={inputStyle} value={String(cfg.headerUfficio || '')} onChange={(e) => update('headerUfficio', (e.target as HTMLInputElement).value)} />
         </RowStack>
-
-        <RowStack label='Messaggio successo'>
-          <input style={inputStyle} value={getStr('msgSuccess', 'Presa in carico salvata.')} onChange={(e) => update('msgSuccess', (e.target as HTMLInputElement).value)} />
+        <RowStack label='Header: Ultimo agg.'>
+          <input style={inputStyle} value={String(cfg.headerUltimoAgg || '')} onChange={(e) => update('headerUltimoAgg', (e.target as HTMLInputElement).value)} />
         </RowStack>
-
-        <RowStack label='Prefisso messaggio errore'>
-          <input style={inputStyle} value={getStr('msgErrorPrefix', 'Errore salvataggio: ')} onChange={(e) => update('msgErrorPrefix', (e.target as HTMLInputElement).value)} />
+        <RowStack label='Header: Prossima azione'>
+          <input style={inputStyle} value={String(cfg.headerProssima || '')} onChange={(e) => update('headerProssima', (e.target as HTMLInputElement).value)} />
         </RowStack>
       </SettingSection>
 
-      <SettingSection title='Layout'>
+      <SettingSection title='Layout colonne'>
+        <RowStack label='Gap colonne (px)'>
+          <NumInput value={cfg.gap} onChange={(n) => update('gap', n)} min={0} step={1} />
+        </RowStack>
+        <RowStack label='Padding sinistra prima colonna (px)'>
+          <NumInput value={cfg.paddingLeftFirstCol} onChange={(n) => update('paddingLeftFirstCol', n)} min={0} step={1} />
+        </RowStack>
+
         <SettingRow>
-          <label style={{ display: 'flex', alignItems: 'center', gap: 8, width: '100%' }}>
-            <input type='checkbox' checked={cfg.showHeader !== false} onChange={(e) => update('showHeader', (e.target as HTMLInputElement).checked)} />
-            <span style={{ fontWeight: 700 }}>Mostra intestazioni</span>
-          </label>
+          <div style={{ width: '100%', fontWeight: 800, marginTop: 8 }}>Larghezze colonne (px)</div>
         </SettingRow>
 
-        <RowStack label='Gap colonne (px)'>
-          <input style={inputStyle} type='number' value={String(getNum('gap', 12))} onChange={(e) => update('gap', parseNum((e.target as HTMLInputElement).value, 12))} />
+        <RowStack label='Pratica'>
+          <NumInput value={cfg.colWidths?.pratica} onChange={(n) => updateIn(['colWidths', 'pratica'], n)} min={40} step={1} />
         </RowStack>
-
-        <RowStack label='Padding sinistro prima colonna (px)'>
-          <input style={inputStyle} type='number' value={String(getNum('paddingLeftFirstCol', 0))} onChange={(e) => update('paddingLeftFirstCol', parseNum((e.target as HTMLInputElement).value, 0))} />
+        <RowStack label='Data'>
+          <NumInput value={cfg.colWidths?.data} onChange={(n) => updateIn(['colWidths', 'data'], n)} min={40} step={1} />
         </RowStack>
-
-        <RowStack label='Larghezza bottone (colonna Azioni)'>
-          <input style={inputStyle} type='number' value={String(getNum('btnWidth', 160))} onChange={(e) => update('btnWidth', parseNum((e.target as HTMLInputElement).value, 160))} />
+        <RowStack label='Stato sintetico'>
+          <NumInput value={cfg.colWidths?.stato} onChange={(n) => updateIn(['colWidths', 'stato'], n)} min={60} step={1} />
         </RowStack>
-
-        <SettingSection title='Larghezze colonne (px)'>
-          <RowStack label='N. pratica'>
-            <input style={inputStyle} type='number' value={String(getCol('pratica', 140))} onChange={(e) => updateIn(['colWidths', 'pratica'], parseNum((e.target as HTMLInputElement).value, 140))} />
-          </RowStack>
-          <RowStack label='Data'>
-            <input style={inputStyle} type='number' value={String(getCol('data', 140))} onChange={(e) => updateIn(['colWidths', 'data'], parseNum((e.target as HTMLInputElement).value, 140))} />
-          </RowStack>
-          <RowStack label='Ufficio'>
-            <input style={inputStyle} type='number' value={String(getCol('ufficio', 180))} onChange={(e) => updateIn(['colWidths', 'ufficio'], parseNum((e.target as HTMLInputElement).value, 180))} />
-          </RowStack>
-          <RowStack label='Stato'>
-            <input style={inputStyle} type='number' value={String(getCol('stato', 220))} onChange={(e) => updateIn(['colWidths', 'stato'], parseNum((e.target as HTMLInputElement).value, 220))} />
-          </RowStack>
-          <RowStack label='Dt. presa'>
-            <input style={inputStyle} type='number' value={String(getCol('dt_presa', 180))} onChange={(e) => updateIn(['colWidths', 'dt_presa'], parseNum((e.target as HTMLInputElement).value, 180))} />
-          </RowStack>
-        </SettingSection>
+        <RowStack label='Ufficio'>
+          <NumInput value={cfg.colWidths?.ufficio} onChange={(n) => updateIn(['colWidths', 'ufficio'], n)} min={60} step={1} />
+        </RowStack>
+        <RowStack label='Ultimo agg.'>
+          <NumInput value={cfg.colWidths?.ultimo} onChange={(n) => updateIn(['colWidths', 'ultimo'], n)} min={60} step={1} />
+        </RowStack>
+        <RowStack label='Prossima azione'>
+          <NumInput value={cfg.colWidths?.prossima} onChange={(n) => updateIn(['colWidths', 'prossima'], n)} min={80} step={1} />
+        </RowStack>
       </SettingSection>
 
-      <SettingSection title='Stile righe (lista)'>
-        <RowStack label='Spazio tra record (px)'>
-          <input style={inputStyle} type='number' value={String(getNum('rowGap', 8))} onChange={(e) => update('rowGap', parseNum((e.target as HTMLInputElement).value, 8))} />
+      <SettingSection title='Stile righe'>
+        <RowStack label='Row gap (px)'>
+          <NumInput value={cfg.rowGap} onChange={(n) => update('rowGap', n)} min={0} step={1} />
+        </RowStack>
+        <RowStack label='Padding X (px)'>
+          <NumInput value={cfg.rowPaddingX} onChange={(n) => update('rowPaddingX', n)} min={0} step={1} />
+        </RowStack>
+        <RowStack label='Padding Y (px)'>
+          <NumInput value={cfg.rowPaddingY} onChange={(n) => update('rowPaddingY', n)} min={0} step={1} />
+        </RowStack>
+        <RowStack label='Row min height (px)'>
+          <NumInput value={cfg.rowMinHeight} onChange={(n) => update('rowMinHeight', n)} min={24} step={1} />
+        </RowStack>
+        <RowStack label='Row radius (px)'>
+          <NumInput value={cfg.rowRadius} onChange={(n) => update('rowRadius', n)} min={0} step={1} />
+        </RowStack>
+        <RowStack label='Row border width (px)'>
+          <NumInput value={cfg.rowBorderWidth} onChange={(n) => update('rowBorderWidth', n)} min={0} step={1} />
+        </RowStack>
+        <RowStack label='Row border color'>
+          <input style={inputStyle} value={String(cfg.rowBorderColor || '')} onChange={(e) => update('rowBorderColor', (e.target as HTMLInputElement).value)} placeholder='rgba(...) o #rrggbb' />
         </RowStack>
 
-        <RowStack label='Padding orizzontale riga (px)'>
-          <input style={inputStyle} type='number' value={String(getNum('rowPaddingX', 12))} onChange={(e) => update('rowPaddingX', parseNum((e.target as HTMLInputElement).value, 12))} />
-        </RowStack>
+        <ColorControl label='Zebra: pari (bg)' value={String(cfg.zebraEvenBg || '')} onChange={(v) => update('zebraEvenBg', v)} />
+        <ColorControl label='Zebra: dispari (bg)' value={String(cfg.zebraOddBg || '')} onChange={(v) => update('zebraOddBg', v)} />
+        <ColorControl label='Hover (bg)' value={String(cfg.hoverBg || '')} onChange={(v) => update('hoverBg', v)} />
+        <ColorControl label='Selected (bg)' value={String(cfg.selectedBg || '')} onChange={(v) => update('selectedBg', v)} />
+        <ColorControl label='Selected border color' value={String(cfg.selectedBorderColor || '')} onChange={(v) => update('selectedBorderColor', v)} />
 
-        <RowStack label='Padding verticale riga (px)'>
-          <input style={inputStyle} type='number' value={String(getNum('rowPaddingY', 10))} onChange={(e) => update('rowPaddingY', parseNum((e.target as HTMLInputElement).value, 10))} />
-        </RowStack>
-
-        <RowStack label='Altezza minima riga (px)'>
-          <input style={inputStyle} type='number' value={String(getNum('rowMinHeight', 44))} onChange={(e) => update('rowMinHeight', parseNum((e.target as HTMLInputElement).value, 44))} />
-        </RowStack>
-
-        <RowStack label='Radius riga (px)'>
-          <input style={inputStyle} type='number' value={String(getNum('rowRadius', 12))} onChange={(e) => update('rowRadius', parseNum((e.target as HTMLInputElement).value, 12))} />
-        </RowStack>
-
-        <RowStack label='Border width riga (px)'>
-          <input style={inputStyle} type='number' value={String(getNum('rowBorderWidth', 1))} onChange={(e) => update('rowBorderWidth', parseNum((e.target as HTMLInputElement).value, 1))} />
-        </RowStack>
-
-        <RowStack label='Border color riga (es. rgba o hex)'>
-          <input style={inputStyle} value={getStr('rowBorderColor', 'rgba(0,0,0,0.08)')} onChange={(e) => update('rowBorderColor', (e.target as HTMLInputElement).value)} />
-        </RowStack>
-
-        <ColorControl label='Zebra even background' value={getStr('zebraEvenBg', '#ffffff')} onChange={(v) => update('zebraEvenBg', v)} />
-        <ColorControl label='Zebra odd background' value={getStr('zebraOddBg', '#fbfbfb')} onChange={(v) => update('zebraOddBg', v)} />
-        <ColorControl label='Hover background' value={getStr('hoverBg', '#f2f6ff')} onChange={(v) => update('hoverBg', v)} />
-        <ColorControl label='Selected background' value={getStr('selectedBg', '#eaf2ff')} onChange={(v) => update('selectedBg', v)} />
-        <ColorControl label='Selected border color' value={getStr('selectedBorderColor', '#2f6fed')} onChange={(v) => update('selectedBorderColor', v)} />
         <RowStack label='Selected border width (px)'>
-          <input style={inputStyle} type='number' value={String(getNum('selectedBorderWidth', 2))} onChange={(e) => update('selectedBorderWidth', parseNum((e.target as HTMLInputElement).value, 2))} />
+          <NumInput value={cfg.selectedBorderWidth} onChange={(n) => update('selectedBorderWidth', n)} min={0} step={1} />
         </RowStack>
       </SettingSection>
 
-      <SettingSection title='Chip “Stato pratica” — stile testo e box'>
-        <RowStack label='Font size (px)'>
-          <input style={inputStyle} type='number' value={String(getNum('statoChipFontSize', 12))} onChange={(e) => update('statoChipFontSize', parseNum((e.target as HTMLInputElement).value, 12))} />
+      <SettingSection title='Chip stato sintetico'>
+        <RowStack label='Radius'>
+          <NumInput value={cfg.statoChipRadius} onChange={(n) => update('statoChipRadius', n)} min={0} step={1} />
         </RowStack>
-
+        <RowStack label='Padding X'>
+          <NumInput value={cfg.statoChipPadX} onChange={(n) => update('statoChipPadX', n)} min={0} step={1} />
+        </RowStack>
+        <RowStack label='Padding Y'>
+          <NumInput value={cfg.statoChipPadY} onChange={(n) => update('statoChipPadY', n)} min={0} step={1} />
+        </RowStack>
+        <RowStack label='Border width'>
+          <NumInput value={cfg.statoChipBorderW} onChange={(n) => update('statoChipBorderW', n)} min={0} step={1} />
+        </RowStack>
+        <RowStack label='Font size'>
+          <NumInput value={cfg.statoChipFontSize} onChange={(n) => update('statoChipFontSize', n)} min={8} step={1} />
+        </RowStack>
         <RowStack label='Font weight'>
-          <select style={inputStyle} value={String(getNum('statoChipFontWeight', 600))} onChange={(e) => update('statoChipFontWeight', parseNum((e.target as HTMLSelectElement).value, 600))}>
-            <option value='300'>300</option>
-            <option value='400'>400</option>
-            <option value='500'>500</option>
-            <option value='600'>600</option>
-            <option value='700'>700</option>
-            <option value='800'>800</option>
-          </select>
+          <NumInput value={cfg.statoChipFontWeight} onChange={(n) => update('statoChipFontWeight', n)} min={100} step={50} />
         </RowStack>
-
-        <RowStack label='Font style'>
-          <select style={inputStyle} value={getStr('statoChipFontStyle', 'normal')} onChange={(e) => update('statoChipFontStyle', (e.target as HTMLSelectElement).value)}>
-            <option value='normal'>normal</option>
-            <option value='italic'>italic</option>
-          </select>
-        </RowStack>
-
         <RowStack label='Text transform'>
-          <select style={inputStyle} value={getStr('statoChipTextTransform', 'none')} onChange={(e) => update('statoChipTextTransform', (e.target as HTMLSelectElement).value)}>
+          <select style={inputStyle} value={String(cfg.statoChipTextTransform || 'none')} onChange={(e) => update('statoChipTextTransform', (e.target as HTMLSelectElement).value)}>
             <option value='none'>none</option>
             <option value='uppercase'>uppercase</option>
             <option value='lowercase'>lowercase</option>
             <option value='capitalize'>capitalize</option>
           </select>
         </RowStack>
-
         <RowStack label='Letter spacing (px)'>
-          <input style={inputStyle} type='number' value={String(getNum('statoChipLetterSpacing', 0))} onChange={(e) => update('statoChipLetterSpacing', parseNum((e.target as HTMLInputElement).value, 0))} />
+          <NumInput value={cfg.statoChipLetterSpacing} onChange={(n) => update('statoChipLetterSpacing', n)} step={0.1} />
         </RowStack>
 
-        <RowStack label='Radius (px)'>
-          <input style={inputStyle} type='number' value={String(getNum('statoChipRadius', 999))} onChange={(e) => update('statoChipRadius', parseNum((e.target as HTMLInputElement).value, 999))} />
-        </RowStack>
+        <SettingRow>
+          <div style={{ width: '100%', fontWeight: 800, marginTop: 8 }}>Colori</div>
+        </SettingRow>
 
-        <RowStack label='Padding X (px)'>
-          <input style={inputStyle} type='number' value={String(getNum('statoChipPadX', 10))} onChange={(e) => update('statoChipPadX', parseNum((e.target as HTMLInputElement).value, 10))} />
-        </RowStack>
+        <ColorControl label='Da prendere: bg' value={String(cfg.statoBgDaPrendere || '')} onChange={(v) => update('statoBgDaPrendere', v)} />
+        <ColorControl label='Da prendere: text' value={String(cfg.statoTextDaPrendere || '')} onChange={(v) => update('statoTextDaPrendere', v)} />
+        <ColorControl label='Da prendere: border' value={String(cfg.statoBorderDaPrendere || '')} onChange={(v) => update('statoBorderDaPrendere', v)} />
 
-        <RowStack label='Padding Y (px)'>
-          <input style={inputStyle} type='number' value={String(getNum('statoChipPadY', 4))} onChange={(e) => update('statoChipPadY', parseNum((e.target as HTMLInputElement).value, 4))} />
-        </RowStack>
+        <ColorControl label='Presa in carico: bg' value={String(cfg.statoBgPresa || '')} onChange={(v) => update('statoBgPresa', v)} />
+        <ColorControl label='Presa in carico: text' value={String(cfg.statoTextPresa || '')} onChange={(v) => update('statoTextPresa', v)} />
+        <ColorControl label='Presa in carico: border' value={String(cfg.statoBorderPresa || '')} onChange={(v) => update('statoBorderPresa', v)} />
 
+        <ColorControl label='Altro: bg' value={String(cfg.statoBgAltro || '')} onChange={(v) => update('statoBgAltro', v)} />
+        <ColorControl label='Altro: text' value={String(cfg.statoTextAltro || '')} onChange={(v) => update('statoTextAltro', v)} />
+        <ColorControl label='Altro: border' value={String(cfg.statoBorderAltro || '')} onChange={(v) => update('statoBorderAltro', v)} />
+      </SettingSection>
+
+      <SettingSection title='Maschera (bordo pannello)'>
+        <RowStack label='Outer offset (px)'>
+          <NumInput value={cfg.maskOuterOffset} onChange={(n) => update('maskOuterOffset', n)} min={0} step={1} />
+        </RowStack>
+        <RowStack label='Inner padding (px)'>
+          <NumInput value={cfg.maskInnerPadding} onChange={(n) => update('maskInnerPadding', n)} min={0} step={1} />
+        </RowStack>
         <RowStack label='Border width (px)'>
-          <input style={inputStyle} type='number' value={String(getNum('statoChipBorderW', 1))} onChange={(e) => update('statoChipBorderW', parseNum((e.target as HTMLInputElement).value, 1))} />
+          <NumInput value={cfg.maskBorderWidth} onChange={(n) => update('maskBorderWidth', n)} min={0} step={1} />
+        </RowStack>
+        <RowStack label='Border radius (px)'>
+          <NumInput value={cfg.maskRadius} onChange={(n) => update('maskRadius', n)} min={0} step={1} />
+        </RowStack>
+        <RowStack label='Background'>
+          <input style={inputStyle} value={String(cfg.maskBg || '')} onChange={(e) => update('maskBg', (e.target as HTMLInputElement).value)} placeholder='#rrggbb o rgba(...)' />
+        </RowStack>
+        <RowStack label='Border color'>
+          <input style={inputStyle} value={String(cfg.maskBorderColor || '')} onChange={(e) => update('maskBorderColor', (e.target as HTMLInputElement).value)} placeholder='#rrggbb o rgba(...)' />
         </RowStack>
       </SettingSection>
 
-      <SettingSection title='Chip “Stato pratica” — colori'>
-        <SettingRow>
-          <div style={{ fontWeight: 800, marginBottom: 6 }}>Da prendere in carico</div>
-        </SettingRow>
-        <ColorControl label='Background' value={getStr('statoBgDaPrendere', '#fff7e6')} onChange={(v) => update('statoBgDaPrendere', v)} />
-        <ColorControl label='Text' value={getStr('statoTextDaPrendere', '#7a4b00')} onChange={(v) => update('statoTextDaPrendere', v)} />
-        <ColorControl label='Border' value={getStr('statoBorderDaPrendere', '#ffd18a')} onChange={(v) => update('statoBorderDaPrendere', v)} />
-
-        <SettingRow>
-          <div style={{ fontWeight: 800, marginTop: 10, marginBottom: 6 }}>Presa in carico</div>
-        </SettingRow>
-        <ColorControl label='Background' value={getStr('statoBgPresa', '#eaf7ef')} onChange={(v) => update('statoBgPresa', v)} />
-        <ColorControl label='Text' value={getStr('statoTextPresa', '#1f6b3a')} onChange={(v) => update('statoTextPresa', v)} />
-        <ColorControl label='Border' value={getStr('statoBorderPresa', '#9ad2ae')} onChange={(v) => update('statoBorderPresa', v)} />
-
-        <SettingRow>
-          <div style={{ fontWeight: 800, marginTop: 10, marginBottom: 6 }}>Altro</div>
-        </SettingRow>
-        <ColorControl label='Background' value={getStr('statoBgAltro', '#f2f2f2')} onChange={(v) => update('statoBgAltro', v)} />
-        <ColorControl label='Text' value={getStr('statoTextAltro', '#333333')} onChange={(v) => update('statoTextAltro', v)} />
-        <ColorControl label='Border' value={getStr('statoBorderAltro', '#d0d0d0')} onChange={(v) => update('statoBorderAltro', v)} />
+      <SettingSection title='Messaggi'>
+        <RowStack label='Empty message'>
+          <input style={inputStyle} value={String(cfg.emptyMessage || '')} onChange={(e) => update('emptyMessage', (e.target as HTMLInputElement).value)} />
+        </RowStack>
+        <RowStack label='Errore: no datasource'>
+          <input style={inputStyle} value={String(cfg.errorNoDs || '')} onChange={(e) => update('errorNoDs', (e.target as HTMLInputElement).value)} />
+        </RowStack>
       </SettingSection>
     </div>
   )

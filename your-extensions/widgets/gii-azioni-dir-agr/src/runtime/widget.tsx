@@ -2,7 +2,7 @@
 import { React, jsx, type AllWidgetProps, DataSourceComponent } from 'jimu-core'
 import { Button } from 'jimu-ui'
 import { createPortal } from 'react-dom'
-import type { IMConfig } from '../config'
+import type { IMConfig, TabConfig } from '../config'
 import { defaultConfig } from '../config'
 
 type MsgKind = 'info' | 'ok' | 'err'
@@ -25,6 +25,117 @@ function pickOidFromData (data: any, idFieldName: string) {
   if (idFieldName && data[idFieldName] != null) return data[idFieldName]
   return data.OBJECTID ?? data.ObjectId ?? data.objectid ?? data.objectId ?? null
 }
+
+function norm (v: any): string {
+  return String(v ?? '').trim().toLowerCase()
+}
+
+
+
+function normKey (v: any): string {
+  // lowercase + remove diacritics + replace non-alphanum with spaces
+  return String(v ?? '')
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim()
+    .replace(/\s+/g, ' ')
+}
+
+
+
+function isEmptyValue (v: any): boolean {
+  if (v == null) return true
+  if (typeof v === 'string') return v.trim() === ''
+  if (Array.isArray(v)) return v.length === 0
+  return false
+}
+
+function escRe (s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+}
+
+function hasToken (hay: string, token: string): boolean {
+  const h = normKey(hay)
+  const t = normKey(token)
+  if (!t) return false
+  const re = new RegExp(`(^| )${escRe(t)}( |$)`)
+  return re.test(h)
+}
+
+function findTipoSoggettoFieldName (ds: any): string | null {
+  try {
+    const schema = ds?.getSchema?.()
+    const fields = schema?.fields || {}
+    const names = Object.keys(fields)
+    if (!names.length) return null
+
+    const directCandidates = [
+      'tipo_soggetto', 'TIPO_SOGGETTO',
+      'tipoSoggetto', 'TipoSoggetto',
+      'tipo_sogg', 'TIPO_SOGG',
+      'tipo', 'TIPO'
+    ]
+    for (const c of directCandidates) {
+      if (c && fields[c]) return c
+    }
+
+    // Cerca per alias/label
+    for (const n of names) {
+      const f = fields[n]
+      const alias = norm(f?.alias || f?.label || f?.title || '')
+      const nn = norm(n)
+      if ((nn.includes('tipo') && nn.includes('sogg')) || alias.includes('tipo soggetto') || alias.includes('tipologia soggetto')) return n
+    }
+
+    // Fallback: primo campo che contiene entrambe le parole
+    const loose = names.find(n => {
+      const nn = norm(n)
+      return nn.includes('tipo') && nn.includes('sogg')
+    })
+    return loose || null
+  } catch {
+    return null
+  }
+}
+
+function resolveCodedValueLabel (ds: any, fieldName: string, raw: any): string | null {
+  try {
+    const schema = ds?.getSchema?.()
+    const f = schema?.fields?.[fieldName]
+    const coded = f?.domain?.codedValues
+    if (!coded || !Array.isArray(coded)) return null
+    for (const cv of coded) {
+      const code = cv?.code
+      // confronto "loose" (numero/stringa)
+      if (code == raw) return String(cv?.name ?? '')
+      if (String(code) === String(raw)) return String(cv?.name ?? '')
+    }
+    return null
+  } catch {
+    return null
+  }
+}
+
+function classifyTipoSoggettoRobusto (raw: any, labelFromDomain: any): 'PF' | 'PG' | null {
+  const sLabel = norm(labelFromDomain)
+  const sRaw = norm(raw)
+
+  // Priorità: label del dominio (se presente)
+  const s = sLabel || sRaw
+  if (!s) return null
+
+  if (s.includes('fisica') || s == 'pf' || s.startsWith('pf ')) return 'PF'
+  if (s.includes('giurid') || s == 'pg' || s.startsWith('pg ')) return 'PG'
+
+  // Codici numerici comuni: 1=PF, 2=PG
+  if (sRaw == '1') return 'PF'
+  if (sRaw == '2') return 'PG'
+
+  return null
+}
+
 
 function filterAttrsToLayerFields (attrs: Record<string, any>, layer: any) {
   const fields = (layer?.fields || []) as Array<{ name: string }>
@@ -116,7 +227,33 @@ function SelectionWatcher (props: {
 
   const selected = ds?.getSelectedRecords?.() || []
   const r0 = selected.length ? selected[0] : null
-  const data = r0?.getData ? r0.getData() : null
+  // Nota: in ExB il record selezionato può avere un subset di campi.
+// Per il filtro PF/PG dobbiamo avere SEMPRE la tipologia soggetto: la ricaviamo in modo robusto dallo schema/dominio.
+let data: any = r0?.getData ? r0.getData() : null
+
+const tipoField = findTipoSoggettoFieldName(ds)
+let tipoRaw: any = null
+let tipoLabel: any = null
+let tipoKind: any = null
+try {
+  if (tipoField && r0?.getFieldValue) tipoRaw = r0.getFieldValue(tipoField)
+} catch {}
+
+try {
+  if (tipoField && tipoRaw != null) tipoLabel = resolveCodedValueLabel(ds, tipoField, tipoRaw)
+} catch {}
+
+tipoKind = classifyTipoSoggettoRobusto(tipoRaw, tipoLabel)
+
+if (tipoField) {
+  data = {
+    ...(data || {}),
+    __tipo_soggetto_field: tipoField,
+    __tipo_soggetto_raw: tipoRaw,
+    __tipo_soggetto_label: tipoLabel,
+    __tipo_soggetto_kind: tipoKind
+  }
+}
 
   const idFieldName = ds?.getIdField ? ds.getIdField() : 'OBJECTID'
   const oidRaw = pickOidFromData(data, idFieldName)
@@ -804,17 +941,16 @@ function ActionsPanel (props: {
   }
 
   const panelStyle: React.CSSProperties = {
-    position: 'relative',
-    zIndex: 1001,
-    display: 'flex',
-    flexDirection: 'column',
-    gap: 12,
-    padding: ui.panelPadding,
-    background: ui.panelBg,
-    border: `${ui.panelBorderWidth}px solid ${ui.panelBorderColor}`,
-    borderRadius: ui.panelBorderRadius,
-    boxSizing: 'border-box'
-  }
+  position: 'relative',
+  zIndex: 1001,
+  display: 'flex',
+  flexDirection: 'column',
+  gap: 12,
+  boxSizing: 'border-box',
+  width: '100%',
+  height: '100%',
+  minHeight: 0
+}
 
   return (
     <div>
@@ -1062,8 +1198,495 @@ function ActionsPanel (props: {
   )
 }
 
+
+type TabFields = {
+  anagrafica: string[]
+  violazione: string[]
+  allegati: string[]
+  iterExtra: string[]
+}
+
+function formatDateSafe (v: any): string {
+  if (v == null || v === '') return '—'
+  try {
+    // ArcGIS può restituire epoch ms o ISO
+    const n = Number(v)
+    const d = Number.isFinite(n) && n > 0 ? new Date(n) : new Date(String(v))
+    if (Number.isNaN(d.getTime())) return String(v)
+    // formato IT: gg/mm/aaaa hh:mm
+    const dd = String(d.getDate()).padStart(2, '0')
+    const mm = String(d.getMonth() + 1).padStart(2, '0')
+    const yy = String(d.getFullYear())
+    const hh = String(d.getHours()).padStart(2, '0')
+    const mi = String(d.getMinutes()).padStart(2, '0')
+    return `${dd}/${mm}/${yy} ${hh}:${mi}`
+  } catch {
+    return String(v)
+  }
+}
+
+function normalizeFieldList (arr: any): string[] {
+  if (!arr) return []
+  const js = (arr as any)?.asMutable ? (arr as any).asMutable({ deep: true }) : arr
+  const a = Array.isArray(js) ? js : []
+  return a.map(x => String(x)).filter(Boolean)
+}
+
+function autoPickFields (data: any, kind: string): string[] {
+  if (!data) return []
+  const keys = Object.keys(data).filter(k => !/^objectid$/i.test(k) && !/^globalid$/i.test(k) && !/^shape/i.test(k))
+  const pickBy = (re: RegExp) => keys.filter(k => re.test(k))
+  if (kind === 'ANAGRAFICA') {
+    const a = pickBy(/ditta|denom|ragione|nome|cognome|cf|cod.*fisc|piva|partita|indir|via|cap|comune|prov|telefono|cell|mail|pec/i)
+    return a.slice(0, 16)
+  }
+  if (kind === 'VIOLAZIONE') {
+    const a = pickBy(/viol|infraz|descr|art|norm|tipo|sanz|import|acqua|volume|turno|utenza|contatore/i)
+    return a.slice(0, 16)
+  }
+  if (kind === 'ALLEGATI') {
+    const a = pickBy(/alleg|foto|doc|file|url|link|pdf|jpg|png/i)
+    return a.slice(0, 16)
+  }
+  // ITER: lasciamo vuoto, perché ha già blocchi DT/DA
+  return []
+}
+
+// Migra dai vecchi tabFields alle nuove tab
+function migrateTabs(tabFields: TabFields, tabs: TabConfig[] | undefined): TabConfig[] {
+  let result: TabConfig[] = []
+  
+  // Se ha già tabs, usa quelle
+  if (Array.isArray(tabs) && tabs.length > 0) {
+    result = tabs
+  } else {
+    // Altrimenti migra dai vecchi tabFields
+    result = [
+      {
+        id: 'anagrafica',
+        label: 'Anagrafica',
+        fields: tabFields?.anagrafica || []
+      },
+      {
+        id: 'violazione',
+        label: 'Violazione',
+        fields: tabFields?.violazione || []
+      },
+      {
+        id: 'iter',
+        label: 'Iter',
+        fields: tabFields?.iterExtra || [],
+        isIterTab: true
+      },
+      {
+        id: 'allegati',
+        label: 'Allegati',
+        fields: tabFields?.allegati || []
+      },
+      {
+        id: 'azioni',
+        label: 'Azioni',
+        fields: []
+      }
+    ]
+  }
+  
+  // Rimuovi locked dalla tab azioni se esiste (per retrocompatibilità)
+  return result.map(tab => {
+    if (tab.id === 'azioni') {
+      const { locked, ...rest } = tab
+      return rest
+    }
+    return tab
+  })
+}
+
+function TabButton (props: { active: boolean; label: string; onClick: () => void; disabled?: boolean }) {
+  const bg = props.active ? '#eaf2ff' : 'rgba(0,0,0,0.02)'
+  const bd = props.active ? '#2f6fed' : 'rgba(0,0,0,0.12)'
+  const col = props.active ? '#1d4ed8' : '#111827'
+  return (
+    <button
+      type='button'
+      disabled={!!props.disabled}
+      onClick={props.onClick}
+      style={{
+        padding: '8px 10px',
+        borderRadius: 10,
+        border: `1px solid ${bd}`,
+        background: bg,
+        color: col,
+        fontWeight: 700,
+        fontSize: 12,
+        cursor: props.disabled ? 'not-allowed' : 'pointer',
+        opacity: props.disabled ? 0.55 : 1
+      }}
+    >
+      {props.label}
+    </button>
+  )
+}
+
+function ReadOnlyPanel (props: {
+  title: string
+  ui: any
+  rows: Array<{ label: string; value: any }>
+  emptyText?: string
+}) {
+  const { ui } = props
+  return (
+    <div
+      style={{
+        width: '100%',
+        height: '100%',
+        boxSizing: 'border-box',
+        display: 'flex',
+        flexDirection: 'column',
+        minHeight: 0
+      }}
+    >
+      <div style={{ fontWeight: 800, fontSize: ui.titleFontSize, marginBottom: 10 }}>
+        {props.title}
+      </div>
+
+      {!props.rows.length
+        ? <div style={{ ...msgStyle('info', ui.msgFontSize) }}>{props.emptyText || 'Configura i campi nelle impostazioni.'}</div>
+        : (
+          <div style={{ display: 'grid', gap: 8 }}>
+            {props.rows.map((r, i) => (
+              <DetailRow
+                key={i}
+                label={r.label}
+                value={r.value}
+                labelSize={12}
+                valueSize={13}
+              />
+            ))}
+          </div>
+          )}
+    </div>
+  )
+}
+
+function DetailTabsPanel (props: {
+  active: { key: string; state: SelState } | null
+  roleCode: string
+  buttonText: string
+  buttonColors: ButtonColors
+  ui: any
+  tabFields: TabFields
+  tabs: TabConfig[]
+}) {
+  const { active, ui } = props
+
+  // Migra e normalizza tabs
+  const tabs = React.useMemo(() => {
+    return migrateTabs(props.tabFields, props.tabs)
+  }, [props.tabs, props.tabFields])
+
+  const selectionKey = active?.state?.oid != null ? `${active.key}:${active.state.oid}` : null
+  const ds = active?.state?.ds
+  const data = active?.state?.data || null
+  const oid = active?.state?.oid ?? null
+  const hasSel = oid != null && Number.isFinite(oid)
+
+  const [tab, setTab] = React.useState<string>(tabs[0]?.id || 'anagrafica')
+
+  // RIMOSSO: Non resettare la tab quando cambia selezione
+  // React.useEffect(() => {
+  //   // reset tab quando cambia selezione (UX più prevedibile)
+  //   setTab(tabs[0]?.id || 'anagrafica')
+  // }, [selectionKey, tabs])
+
+  // alias map dai campi layer (se disponibile)
+  const [aliasMap, setAliasMap] = React.useState<Record<string, string>>({})
+  const [aliasesReady, setAliasesReady] = React.useState<boolean>(false)
+
+  React.useEffect(() => {
+    let cancelled = false
+    setAliasesReady(false)
+
+    // 1) Prova subito dallo schema del datasource (di solito è pronto prima del JSAPI layer)
+    try {
+      const schema = ds?.getSchema?.()
+      const fobj = schema?.fields || {}
+      const mapFromSchema: Record<string, string> = {}
+      for (const name of Object.keys(fobj)) {
+        const f = fobj[name]
+        const alias = String(f?.alias || f?.label || f?.title || name)
+        mapFromSchema[name] = alias
+      }
+      if (!cancelled && Object.keys(mapFromSchema).length) {
+        setAliasMap(mapFromSchema)
+        setAliasesReady(true)
+      }
+    } catch {}
+
+    // 2) In parallelo: prova dal layer JSAPI (aggiorna/raffina)
+    const loadAliases = async () => {
+      if (!ds) { if (!cancelled) { setAliasMap({}); setAliasesReady(true) } return }
+      try {
+        const raw =
+          ds?.getLayer?.() ||
+          ds?.getJSAPILayer?.() ||
+          ds?.layer ||
+          ds?.createJSAPILayerByDataSource?.() ||
+          null
+
+        const resolved = await Promise.resolve(raw as any)
+        const layer = unwrapJsapiLayer(resolved)
+        const fields = (layer?.fields || []) as any[]
+        const map: Record<string, string> = {}
+        for (const f of fields) {
+          const name = String(f?.name || '')
+          if (!name) continue
+          map[name] = String(f?.alias || f?.label || f?.title || name)
+        }
+        if (!cancelled) {
+          if (Object.keys(map).length) setAliasMap(map)
+          setAliasesReady(true)
+        }
+      } catch {
+        if (!cancelled) { setAliasesReady(true) }
+      }
+    }
+
+    loadAliases()
+    return () => { cancelled = true }
+  }, [ds])
+
+  const toLabel = React.useCallback((fieldName: string) => {
+    const a = aliasMap?.[fieldName]
+    // Evita il “flash” del nome campo: se gli alias non sono pronti, non mostrare il nome tecnico.
+    if (!aliasesReady) return ''
+    return a ? `${a}` : fieldName
+  }, [aliasMap, aliasesReady])
+
+// --- Condizionamento campi anagrafica per tipo_soggetto (PF/PG)
+  const classifyTipoSoggetto = React.useCallback((raw: any, labelFromDomain?: any): 'PF' | 'PG' | null => {
+    return classifyTipoSoggettoRobusto(raw, labelFromDomain)
+  }, [])
+
+  
+const isPfOnlyField = React.useCallback((fieldName: string) => {
+  const nameKey = normKey(fieldName)
+  const aliasKey = normKey(aliasMap?.[fieldName] || '')
+  const combined = `${nameKey} ${aliasKey}`.trim()
+
+  // Evita falsi positivi tipo "denominazione" (contiene "nome" come substring)
+  const isNome = hasToken(combined, 'nome') || combined.startsWith('nome ')
+  const isCognome = hasToken(combined, 'cognome') || combined.startsWith('cognome ')
+  const isCf =
+    hasToken(combined, 'cf') ||
+    hasToken(combined, 'c f') ||
+    hasToken(combined, 'c f ') ||
+    hasToken(combined, 'codice fiscale') ||
+    (combined.includes('cod') && combined.includes('fisc'))
+
+  return Boolean(isNome || isCognome || isCf)
+}, [aliasMap])
+
+const isPgOnlyField = React.useCallback((fieldName: string) => {
+  const nameKey = normKey(fieldName)
+  const aliasKey = normKey(aliasMap?.[fieldName] || '')
+  const combined = `${nameKey} ${aliasKey}`.trim()
+
+  const isRagSoc =
+    hasToken(combined, 'ragione sociale') ||
+    hasToken(combined, 'denominazione') ||
+    (combined.includes('ragione') && combined.includes('social'))
+
+  const isPiva =
+    hasToken(combined, 'partita iva') ||
+    hasToken(combined, 'p iva') ||
+    hasToken(combined, 'piva') ||
+    (combined.includes('partita') && combined.includes('iva'))
+
+  return Boolean(isRagSoc || isPiva)
+}, [aliasMap])
+
+  const makeRows = React.useCallback((fields: string[], kind: string) => {
+    const rawList = (fields && fields.length) ? fields : autoPickFields(data, kind)
+    const tipoRaw = (data && (data as any).__tipo_soggetto_raw != null) ? (data as any).__tipo_soggetto_raw : ((data && (data as any).tipo_soggetto != null) ? (data as any).tipo_soggetto : null)
+    const tipoLabel = (data && (data as any).__tipo_soggetto_label != null) ? (data as any).__tipo_soggetto_label : null
+    const sogg = (kind === 'ANAGRAFICA') ? classifyTipoSoggetto(tipoRaw, tipoLabel) : null
+    const list = (kind === 'ANAGRAFICA' && sogg)
+      ? rawList.filter(fn => {
+          if (!fn) return false
+          if (sogg === 'PF' && isPgOnlyField(fn)) return false
+          if (sogg === 'PG' && isPfOnlyField(fn)) return false
+          return true
+        })
+      : rawList
+    const rows: Array<{ label: string; value: any }> = []
+    for (const f of list) {
+      if (!f) continue
+      const vv = data ? data[f] : null
+      rows.push({ label: toLabel(f), value: vv })
+    }
+    return rows
+  }, [data, toLabel, classifyTipoSoggetto, isPfOnlyField, isPgOnlyField])
+
+  // Iter: sempre blocchi DT/DA + extra selezionati
+  const presaDT = data ? data.presa_in_carico_DT : null
+  const dtPresaDT = data ? data.dt_presa_in_carico_DT : null
+  const statoDT = data ? data.stato_DT : null
+  const dtStatoDT = data ? data.dt_stato_DT : null
+  const esitoDT = data ? data.esito_DT : null
+  const dtEsitoDT = data ? data.dt_esito_DT : null
+  const noteDT = data ? data.note_DT : null
+
+  const presaDA = data ? data.presa_in_carico_DA : null
+  const dtPresaDA = data ? data.dt_presa_in_carico_DA : null
+  const statoDA = data ? data.stato_DA : null
+  const dtStatoDA = data ? data.dt_stato_DA : null
+  const esitoDA = data ? data.esito_DA : null
+  const dtEsitoDA = data ? data.dt_esito_DA : null
+  const noteDA = data ? data.note_DA : null
+
+  const TabsBar = (
+    <div style={{ 
+      display: 'flex', 
+      flexWrap: 'wrap', 
+      gap: 6, 
+      padding: '6px 12px',
+      alignItems: 'center',
+      borderBottom: '1px solid rgba(0,0,0,0.08)',
+      background: 'var(--bs-body-bg, #fff)',
+      marginTop: -ui.panelPadding,
+      marginLeft: -ui.panelPadding,
+      marginRight: -ui.panelPadding,
+      width: `calc(100% + ${ui.panelPadding * 2}px)`,
+      borderTopLeftRadius: ui.panelBorderRadius,
+      borderTopRightRadius: ui.panelBorderRadius
+    }}>
+      {tabs.map((t) => (
+        <TabButton 
+          key={t.id}
+          active={tab === t.id} 
+          label={t.label} 
+          onClick={() => setTab(t.id)} 
+          disabled={!hasSel} 
+        />
+      ))}
+    </div>
+  )
+
+  const outerStyle: React.CSSProperties = {
+  width: '100%',
+  height: '100%',
+  display: 'flex',
+  flexDirection: 'column',
+  minHeight: 0,
+  boxSizing: 'border-box'
+}
+
+const frameStyle: React.CSSProperties = {
+  width: '100%',
+  height: '100%',
+  flex: '1 1 auto',
+  display: 'flex',
+  flexDirection: 'column',
+  minHeight: 0,
+  boxSizing: 'border-box',
+  background: ui.panelBg,
+  border: `${ui.panelBorderWidth}px solid ${ui.panelBorderColor}`,
+  borderRadius: ui.panelBorderRadius,
+  padding: ui.panelPadding
+}
+
+const tabsStyle: React.CSSProperties = {
+  flex: '0 0 auto'
+}
+
+const contentStyle: React.CSSProperties = {
+  flex: '1 1 auto',
+  minHeight: 0,
+  overflowY: 'auto'
+}
+
+let content: React.ReactNode = null
+
+if (!hasSel) {
+  content = (
+    <div style={{
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'center',
+      height: '100%',
+      minHeight: 200,
+      fontWeight: 700,
+      fontSize: 14,
+      color: 'rgba(0,0,0,0.6)'
+    }}>
+      Selezionare un rapporto nell'elenco
+    </div>
+  )
+} else {
+  const activeTab = tabs.find(t => t.id === tab)
+  
+  if (activeTab?.id === 'azioni') {
+    content = (
+      <ActionsPanel
+        active={active}
+        roleCode={props.roleCode}
+        buttonText={props.buttonText}
+        buttonColors={props.buttonColors}
+        ui={props.ui}
+      />
+    )
+  } else if (activeTab?.isIterTab) {
+    // Tab Iter con campi DT/DA fissi + extra
+    const iterRows: Array<{ label: string; value: any }> = []
+    iterRows.push({ label: 'DT - Presa in carico', value: presaDT })
+    iterRows.push({ label: 'DT - Data presa in carico', value: formatDateSafe(dtPresaDT) })
+    iterRows.push({ label: 'DT - Stato', value: statoDT })
+    iterRows.push({ label: 'DT - Data stato', value: formatDateSafe(dtStatoDT) })
+    iterRows.push({ label: 'DT - Esito', value: esitoDT })
+    iterRows.push({ label: 'DT - Data esito', value: formatDateSafe(dtEsitoDT) })
+    iterRows.push({ label: 'DT - Note', value: noteDT })
+
+    iterRows.push({ label: 'DA - Presa in carico', value: presaDA })
+    iterRows.push({ label: 'DA - Data presa in carico', value: formatDateSafe(dtPresaDA) })
+    iterRows.push({ label: 'DA - Stato', value: statoDA })
+    iterRows.push({ label: 'DA - Data stato', value: formatDateSafe(dtStatoDA) })
+    iterRows.push({ label: 'DA - Esito', value: esitoDA })
+    iterRows.push({ label: 'DA - Data esito', value: formatDateSafe(dtEsitoDA) })
+    iterRows.push({ label: 'DA - Note', value: noteDA })
+
+    // Aggiungi campi extra configurati
+    const iterExtraRows = aliasesReady ? makeRows(activeTab.fields, activeTab.id.toUpperCase()) : []
+    iterExtraRows.forEach(r => iterRows.push(r))
+    
+    content = <ReadOnlyPanel title={activeTab.label} ui={ui} rows={iterRows} />
+  } else if (activeTab) {
+    // Tab normale con campi configurabili
+    const rows = aliasesReady ? makeRows(activeTab.fields, activeTab.id.toUpperCase()) : []
+    content = <ReadOnlyPanel 
+      title={activeTab.label} 
+      ui={ui} 
+      rows={rows} 
+      emptyText={aliasesReady ? undefined : 'Caricamento campi...'} 
+    />
+  }
+}
+
+return (
+  <div style={outerStyle}>
+    <div style={frameStyle}>
+      <div style={tabsStyle}>{TabsBar}</div>
+      <div style={contentStyle}>{content}</div>
+    </div>
+  </div>
+)
+
+}
+
 export default function Widget (props: AllWidgetProps<IMConfig>) {
-  const cfg: any = { ...defaultConfig, ...(props.config as any || {}) }
+  const cfgMutable: any = (props.config && (props.config as any).asMutable)
+    ? (props.config as any).asMutable({ deep: true })
+    : (props.config as any || {})
+  const cfg: any = { ...defaultConfig, ...cfgMutable }
 
   const roleCode = String(cfg.roleCode || 'DT').toUpperCase()
   const buttonText = String(cfg.buttonText || 'Prendi in carico')
@@ -1077,11 +1700,11 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
   }
 
   const ui = {
-    panelBg: String(cfg.panelBg ?? defaultConfig.panelBg),
-    panelBorderColor: String(cfg.panelBorderColor ?? defaultConfig.panelBorderColor),
-    panelBorderWidth: Number.isFinite(Number(cfg.panelBorderWidth)) ? Number(cfg.panelBorderWidth) : defaultConfig.panelBorderWidth,
-    panelBorderRadius: Number.isFinite(Number(cfg.panelBorderRadius)) ? Number(cfg.panelBorderRadius) : defaultConfig.panelBorderRadius,
-    panelPadding: Number.isFinite(Number(cfg.panelPadding)) ? Number(cfg.panelPadding) : defaultConfig.panelPadding,
+    panelBg: String((cfg as any).maskBg ?? cfg.panelBg ?? (defaultConfig as any).maskBg ?? defaultConfig.panelBg),
+    panelBorderColor: String((cfg as any).maskBorderColor ?? cfg.panelBorderColor ?? (defaultConfig as any).maskBorderColor ?? defaultConfig.panelBorderColor),
+    panelBorderWidth: Number.isFinite(Number((cfg as any).maskBorderWidth ?? cfg.panelBorderWidth)) ? Number((cfg as any).maskBorderWidth ?? cfg.panelBorderWidth) : ((defaultConfig as any).maskBorderWidth ?? defaultConfig.panelBorderWidth),
+    panelBorderRadius: Number.isFinite(Number((cfg as any).maskBorderRadius ?? cfg.panelBorderRadius)) ? Number((cfg as any).maskBorderRadius ?? cfg.panelBorderRadius) : ((defaultConfig as any).maskBorderRadius ?? defaultConfig.panelBorderRadius),
+    panelPadding: Number.isFinite(Number((cfg as any).maskInnerPadding ?? cfg.panelPadding)) ? Number((cfg as any).maskInnerPadding ?? cfg.panelPadding) : ((defaultConfig as any).maskInnerPadding ?? defaultConfig.panelPadding),
     dividerColor: String(cfg.dividerColor ?? defaultConfig.dividerColor),
 
     titleFontSize: Number.isFinite(Number(cfg.titleFontSize)) ? Number(cfg.titleFontSize) : defaultConfig.titleFontSize,
@@ -1094,21 +1717,35 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
     reasonsRowBorderColor: String(cfg.reasonsRowBorderColor ?? defaultConfig.reasonsRowBorderColor),
     reasonsRowBorderWidth: Number.isFinite(Number(cfg.reasonsRowBorderWidth)) ? Number(cfg.reasonsRowBorderWidth) : defaultConfig.reasonsRowBorderWidth,
     reasonsRowRadius: Number.isFinite(Number(cfg.reasonsRowRadius)) ? Number(cfg.reasonsRowRadius) : defaultConfig.reasonsRowRadius
+  
   }
 
+  const tabFields: TabFields = {
+    anagrafica: normalizeFieldList((cfg as any).anagraficaFields),
+    violazione: normalizeFieldList((cfg as any).violazioneFields),
+    allegati: normalizeFieldList((cfg as any).allegatiFields),
+    iterExtra: normalizeFieldList((cfg as any).iterExtraFields)
+  }
+
+  // Migra tabs
+  const migratedTabs = migrateTabs(tabFields, cfg.tabs || [])
+
   if (!props.useDataSources || !props.useDataSources.length) {
-    return <div className='p-2'>Configura il data source nelle impostazioni del widget.</div>
+    return <div style={{ padding: Number.isFinite(Number((cfg as any).maskOuterOffset ?? 0)) ? Number((cfg as any).maskOuterOffset) : 0 }}>Configura il data source nelle impostazioni del widget.</div>
   }
 
   const watchFields = [
-    `presa_in_carico_${roleCode}`,
-    `stato_${roleCode}`,
-    `esito_${roleCode}`,
-    `note_${roleCode}`,
-    'presa_in_carico_DA',
-    'stato_DA'
+    // DT
+    'presa_in_carico_DT', 'dt_presa_in_carico_DT',
+    'stato_DT', 'dt_stato_DT',
+    'esito_DT', 'dt_esito_DT',
+    'note_DT',
+    // DA
+    'presa_in_carico_DA', 'dt_presa_in_carico_DA',
+    'stato_DA', 'dt_stato_DA',
+    'esito_DA', 'dt_esito_DA',
+    'note_DA'
   ]
-
   const [selByKey, setSelByKey] = React.useState<Record<string, SelState>>({})
   const [lastActiveKey, setLastActiveKey] = React.useState<string | null>(null)
 
@@ -1135,7 +1772,7 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
   }, [props.useDataSources, selByKey, lastActiveKey])
 
   return (
-    <div className='p-2'>
+    <div style={{ width: '100%', height: '100%', display: 'flex', flexDirection: 'column', minHeight: 0, boxSizing: 'border-box', padding: Number.isFinite(Number((cfg as any).maskOuterOffset ?? 0)) ? Number((cfg as any).maskOuterOffset) : 0 }}>
       {props.useDataSources.map((uds: any, idx: number) => {
         const key = getUdsKey(uds, idx)
         return (
@@ -1150,12 +1787,14 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
         )
       })}
 
-      <ActionsPanel
+      <DetailTabsPanel
         active={active}
         roleCode={roleCode}
         buttonText={buttonText}
         buttonColors={buttonColors}
         ui={ui}
+        tabFields={tabFields}
+        tabs={migratedTabs}
       />
     </div>
   )

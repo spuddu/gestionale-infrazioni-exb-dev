@@ -9,21 +9,20 @@ import {
   Immutable
 } from 'jimu-core'
 
-import { Button, Alert, Loading } from 'jimu-ui'
+import { Button, Loading } from 'jimu-ui'
 import type { AllWidgetProps } from 'jimu-core'
 import type { IMConfig } from '../config'
 import { defaultConfig } from '../config'
 
 type Props = AllWidgetProps<IMConfig>
 
-type MsgKind = 'info' | 'success' | 'error'
-interface MsgState { kind: MsgKind; text: string }
-
 type SortDir = 'ASC' | 'DESC'
 type SortItem = { field: string, dir: SortDir }
 
-type TakeResult = { ok: true } | { ok: false; error: string }
-function isTakeError (r: TakeResult): r is { ok: false; error: string } { return r.ok === false }
+// Campi virtuali (ordinamento su campi calcolati)
+const V_STATO = '__stato_sint__'
+const V_ULTIMO = '__ultimo_agg__'
+const V_PROSSIMA = '__prossima__'
 
 function num (v: any, fallback: number): number {
   const n = Number(v)
@@ -37,41 +36,13 @@ function asJs<T = any> (v: any): T {
   return v?.asMutable ? v.asMutable({ deep: true }) : v
 }
 
-function compareValues (a: any, b: any): number {
-  const aNull = (a === null || a === undefined || a === '')
-  const bNull = (b === null || b === undefined || b === '')
-  if (aNull && bNull) return 0
-  if (aNull) return 1
-  if (bNull) return -1
-
-  if (typeof a === 'number' && typeof b === 'number') return a - b
-
-  const aStr = String(a)
-  const bStr = String(b)
-  const aDate = Date.parse(aStr)
-  const bDate = Date.parse(bStr)
-  if (!Number.isNaN(aDate) && !Number.isNaN(bDate)) return aDate - bDate
-
-  return aStr.localeCompare(bStr, 'it', { numeric: true, sensitivity: 'base' })
-}
-
-function sortRecords (recs: DataRecord[], sort: SortItem[]): DataRecord[] {
-  if (!sort || sort.length === 0) return recs
-  const copy = [...recs]
-  copy.sort((ra, rb) => {
-    const da = ra.getData?.() || {}
-    const db = rb.getData?.() || {}
-    for (const s of sort) {
-      const cmp = compareValues(da[s.field], db[s.field])
-      if (cmp !== 0) return (s.dir === 'ASC' ? cmp : -cmp)
-    }
-    return 0
-  })
-  return copy
-}
-
-function sortSig (s: SortItem[]): string {
-  return (s || []).map(x => `${x.field}:${x.dir}`).join('|')
+function parseToMs (v: any): number | null {
+  if (v === null || v === undefined || v === '') return null
+  if (typeof v === 'number' && Number.isFinite(v)) return v
+  if (v instanceof Date) return Number.isNaN(v.getTime()) ? null : v.getTime()
+  const s = String(v)
+  const t = Date.parse(s)
+  return Number.isNaN(t) ? null : t
 }
 
 function formatDateIt (v: any): string {
@@ -111,133 +82,289 @@ function tryClearSelection (ds: any) {
   try { ds.setSelectedRecords?.([]) } catch {}
 }
 
-async function presaInCaricoByObjectId (args: {
-  ds: DataSource
-  objectId: number
-  fieldStato: string
-  fieldData: string
-  valorePresa: number
-}): Promise<TakeResult> {
-  const { ds, objectId, fieldStato, fieldData, valorePresa } = args
+function compareValues (a: any, b: any): number {
+  const aNull = (a === null || a === undefined || a === '')
+  const bNull = (b === null || b === undefined || b === '')
+  if (aNull && bNull) return 0
+  if (aNull) return 1
+  if (bNull) return -1
 
-  const layer: any =
-    (ds as any).layer ??
-    (ds as any).getLayer?.() ??
-    (ds as any).getOriginDataSource?.()?.getLayer?.()
+  if (typeof a === 'number' && typeof b === 'number') return a - b
 
-  if (!layer || typeof layer.applyEdits !== 'function') {
-    return { ok: false, error: 'Layer/applyEdits non disponibili (view? permessi?).' }
-  }
+  const aStr = String(a)
+  const bStr = String(b)
 
-  const nowIso = new Date().toISOString()
-  const updates = [{
-    attributes: {
-      OBJECTID: objectId,
-      [fieldStato]: valorePresa,
-      [fieldData]: nowIso
-    }
-  }]
+  // date?
+  const aDate = Date.parse(aStr)
+  const bDate = Date.parse(bStr)
+  if (!Number.isNaN(aDate) && !Number.isNaN(bDate)) return aDate - bDate
 
-  try {
-    const res = await layer.applyEdits({ updateFeatures: updates })
-    const upd = res?.updateFeatureResults?.[0]
-    const hasErr = !!upd?.error
-    const hasId = upd?.objectId != null
-    if (!hasErr && hasId) return { ok: true }
-    return { ok: false, error: upd?.error?.message || 'applyEdits non riuscito.' }
-  } catch (e: any) {
-    return { ok: false, error: e?.message || String(e) }
-  }
+  return aStr.localeCompare(bStr, 'it', { numeric: true, sensitivity: 'base' })
 }
 
-export default function Widget (props: Props): React.ReactElement {
-  const base: any = (defaultConfig as any)?.asMutable
-    ? (defaultConfig as any).asMutable({ deep: true })
-    : defaultConfig
+function sortSig (s: SortItem[]): string {
+  return (s || []).map(x => `${x.field}:${x.dir}`).join('|')
+}
 
-  const over: any = (props.config as any)?.asMutable
-    ? (props.config as any).asMutable({ deep: true })
-    : (props.config ?? {})
+export default function Widget (props: Props) {
+  const cfg: any = (props.config ?? defaultConfig) as any
 
-  const cfg: any = { ...base, ...over }
-
-  // IMPORTANT: passiamo a DataSourceComponent sempre l’oggetto IMMUTABLE originale
   const useDsImm: any = props.useDataSources ?? Immutable([])
-  const useDsJs: any[] = asJs(useDsImm) || []
+  const useDsJs: any[] = asJs(useDsImm)
+
+  // Tabs: se hai più data view/DS, le tratto come filtri/tabs
   const hasTabs = useDsJs.length > 1
 
-  const [activeTab, setActiveTab] = React.useState(0)
-  const dsRefForClear = React.useRef<any>(null)
-  React.useEffect(() => {
-    if (activeTab >= useDsJs.length) setActiveTab(0)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [useDsJs.length])
-
-  const activeUseDsImm =
-    (useDsImm?.get ? useDsImm.get(activeTab) : useDsImm?.[activeTab]) ||
-    (useDsImm?.get ? useDsImm.get(0) : useDsImm?.[0])
-
-  const activeUseDsJs = useDsJs[activeTab] || useDsJs[0]
-
-  const [msg, setMsg] = React.useState<MsgState | null>(null)
+  const [activeTab, setActiveTab] = React.useState<number>(0)
   const [localSelectedByDs, setLocalSelectedByDs] = React.useState<Record<string, string>>({})
+  const dsRefForClear = React.useRef<any>(null)
 
-  const dsQuery = React.useMemo(() => {
-    return {
-      where: txt(cfg.whereClause || '1=1').trim() || '1=1',
-      outFields: ['*'],
-      pageSize: num(cfg.pageSize, 200)
-    } as any
-  }, [cfg.whereClause, cfg.pageSize])
-
+  // Sort: array (multi sort con Shift+Click)
   const defaultSort: SortItem[] = React.useMemo(() => {
-    const f = txt(cfg.orderByField || '').trim()
-    if (!f) return []
-    const dir: SortDir = (txt(cfg.orderByDir || 'ASC').toUpperCase() === 'DESC') ? 'DESC' : 'ASC'
-    return [{ field: f, dir }]
+    const f = txt(cfg.orderByField || 'objectid')
+    const d = (txt(cfg.orderByDir || 'DESC').toUpperCase() === 'ASC' ? 'ASC' : 'DESC') as SortDir
+    return [{ field: f, dir: d }]
   }, [cfg.orderByField, cfg.orderByDir])
 
-  const defaultSortSig = React.useMemo(() => sortSig(defaultSort), [defaultSort])
   const [sortState, setSortState] = React.useState<SortItem[]>(defaultSort)
 
+  // Se cambia il sort default da settings, riallineo SOLO se l'utente non ha un custom sort
   React.useEffect(() => {
-    setSortState((prev) => (sortSig(prev) === defaultSortSig ? defaultSort : prev))
+    const isCustom = sortSig(sortState) !== sortSig(defaultSort)
+    if (!isCustom) setSortState(defaultSort)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [defaultSortSig])
+  }, [sortSig(defaultSort)])
 
-  const isCustomSort = sortSig(sortState) !== defaultSortSig
+  const activeUseDsJs = useDsJs[activeTab] || useDsJs[0]
+  // props.useDataSources è un ImmutableArray, ma in TypeScript è tipizzato come array:
+  // usare l'indicizzazione ([]) invece di .get() che non esiste su ImmutableArray<T>.
+  const udsAny = (props.useDataSources as any) as any[] | undefined
+  const activeUseDsImm = udsAny?.[activeTab] ?? udsAny?.[0]
 
-  const toggleSort = (field: string, additive: boolean) => {
-    setSortState((prev) => {
-      const idx = prev.findIndex(s => s.field === field)
+  const whereClause = txt(cfg.whereClause || '1=1')
+  const pageSize = num(cfg.pageSize, 200)
 
-      if (!additive) {
-        if (idx === 0 && prev.length === 1) {
-          const nextDir: SortDir = prev[0].dir === 'ASC' ? 'DESC' : 'ASC'
-          return [{ field, dir: nextDir }]
-        }
-        return [{ field, dir: 'ASC' }]
+  // Query (semplice)
+  const dsQuery: any = React.useMemo(() => ({
+    where: whereClause,
+    pageSize
+  }), [whereClause, pageSize])
+
+  // Campi base
+  const fieldPratica = txt(cfg.fieldPratica || 'objectid')
+  const fieldDataRil = txt(cfg.fieldDataRilevazione || 'data_rilevazione')
+  const fieldUfficio = txt(cfg.fieldUfficio || 'ufficio_zona')
+
+  // Campi DT/DA (per calcolo stato/ultimo/prossima)
+  const fPresaDT = txt(cfg.fieldPresaDT || 'presa_in_carico_DT')
+  const fDtPresaDT = txt(cfg.fieldDtPresaDT || 'dt_presa_in_carico_DT')
+  const fStatoDT = txt(cfg.fieldStatoDT || 'stato_DT')
+  const fDtStatoDT = txt(cfg.fieldDtStatoDT || 'dt_stato_DT')
+  const fEsitoDT = txt(cfg.fieldEsitoDT || 'esito_DT')
+  const fDtEsitoDT = txt(cfg.fieldDtEsitoDT || 'dt_esito_DT')
+
+  const fPresaDA = txt(cfg.fieldPresaDA || 'presa_in_carico_DA')
+  const fDtPresaDA = txt(cfg.fieldDtPresaDA || 'dt_presa_in_carico_DA')
+  const fStatoDA = txt(cfg.fieldStatoDA || 'stato_DA')
+  const fDtStatoDA = txt(cfg.fieldDtStatoDA || 'dt_stato_DA')
+  const fEsitoDA = txt(cfg.fieldEsitoDA || 'esito_DA')
+  const fDtEsitoDA = txt(cfg.fieldDtEsitoDA || 'dt_esito_DA')
+
+  const presaDaPrendere = num(cfg.presaDaPrendereVal, 1)
+  const presaPresa = num(cfg.presaPresaVal, 2)
+
+  const statoDaPrendere = num(cfg.statoDaPrendereVal, 1)
+  const statoPresa = num(cfg.statoPresaVal, 2)
+  const statoIntegrazione = num(cfg.statoIntegrazioneVal, 3)
+  const statoApprovata = num(cfg.statoApprovataVal, 4)
+  const statoRespinta = num(cfg.statoRespintaVal, 5)
+
+  const esitoIntegrazione = num(cfg.esitoIntegrazioneVal, 1)
+  const esitoApprovata = num(cfg.esitoApprovataVal, 2)
+  const esitoRespinta = num(cfg.esitoRespintaVal, 3)
+
+  const labelStato = (v: any): string => {
+    const n = Number(v)
+    if (!Number.isFinite(n)) return txt(v)
+    if (n === statoDaPrendere) return txt(cfg.labelStatoDaPrendere || 'Da prendere')
+    if (n === statoPresa) return txt(cfg.labelStatoPresa || 'Presa in carico')
+    if (n === statoIntegrazione) return txt(cfg.labelStatoIntegrazione || 'Integrazione richiesta')
+    if (n === statoApprovata) return txt(cfg.labelStatoApprovata || 'Approvata')
+    if (n === statoRespinta) return txt(cfg.labelStatoRespinta || 'Respinta')
+    return String(n)
+  }
+
+  const labelEsito = (v: any): string => {
+    const n = Number(v)
+    if (!Number.isFinite(n)) return txt(v)
+    if (n === esitoIntegrazione) return txt(cfg.labelEsitoIntegrazione || 'Integrazione richiesta')
+    if (n === esitoApprovata) return txt(cfg.labelEsitoApprovata || 'Approvata')
+    if (n === esitoRespinta) return txt(cfg.labelEsitoRespinta || 'Respinta')
+    return String(n)
+  }
+
+  const getChipStyle = (statoNum: number | null) => {
+    // sintetico: coloriamo in base a 1/2, altrimenti neutro
+    if (statoNum === statoDaPrendere) {
+      return {
+        background: txt(cfg.statoBgDaPrendere || '#fff7e6'),
+        color: txt(cfg.statoTextDaPrendere || '#7a4b00'),
+        borderColor: txt(cfg.statoBorderDaPrendere || '#ffd18a')
       }
+    }
+    if (statoNum === statoPresa) {
+      return {
+        background: txt(cfg.statoBgPresa || '#eaf7ef'),
+        color: txt(cfg.statoTextPresa || '#1f6b3a'),
+        borderColor: txt(cfg.statoBorderPresa || '#9ad2ae')
+      }
+    }
+    return {
+      background: txt(cfg.statoBgAltro || '#f2f2f2'),
+      color: txt(cfg.statoTextAltro || '#333333'),
+      borderColor: txt(cfg.statoBorderAltro || '#d0d0d0')
+    }
+  }
 
+  const computeSintetico = (d: any): { ruolo: 'DA' | 'DT', label: string, statoForChip: number | null } => {
+    const hasDA = d[fPresaDA] !== null && d[fPresaDA] !== undefined && d[fPresaDA] !== ''
+      || d[fStatoDA] !== null && d[fStatoDA] !== undefined && d[fStatoDA] !== ''
+      || d[fEsitoDA] !== null && d[fEsitoDA] !== undefined && d[fEsitoDA] !== ''
+
+    const ruolo: 'DA' | 'DT' = hasDA ? 'DA' : 'DT'
+
+    const stato = Number(hasDA ? d[fStatoDA] : d[fStatoDT])
+    const esito = Number(hasDA ? d[fEsitoDA] : d[fEsitoDT])
+
+    // Priorità: esito se valorizzato, altrimenti stato, altrimenti presa
+    if (Number.isFinite(esito)) {
+      // chip: se esito=app/resp/integ, usiamo "altro" (3/4/5) ma per colore neutro ok
+      return { ruolo, label: labelEsito(esito), statoForChip: statoNumFromEsito(esito) }
+    }
+    if (Number.isFinite(stato)) {
+      return { ruolo, label: labelStato(stato), statoForChip: stato }
+    }
+
+    const presa = Number(hasDA ? d[fPresaDA] : d[fPresaDT])
+    if (Number.isFinite(presa)) {
+      if (presa === presaDaPrendere) return { ruolo, label: txt(cfg.labelPresaDaPrendere || 'Da prendere in carico'), statoForChip: statoDaPrendere }
+      if (presa === presaPresa) return { ruolo, label: txt(cfg.labelPresaPresa || 'Presa in carico'), statoForChip: statoPresa }
+      return { ruolo, label: String(presa), statoForChip: null }
+    }
+
+    return { ruolo, label: '—', statoForChip: null }
+  }
+
+  // converte esito (1..3) in "stato visuale" per chip (3/4/5)
+  const statoNumFromEsito = (esito: number): number => {
+    if (esito === esitoIntegrazione) return statoIntegrazione
+    if (esito === esitoApprovata) return statoApprovata
+    if (esito === esitoRespinta) return statoRespinta
+    return statoApprovata
+  }
+
+  const computeUltimoAggMs = (d: any): number | null => {
+    const candidates = [
+      parseToMs(d[fDtPresaDT]),
+      parseToMs(d[fDtStatoDT]),
+      parseToMs(d[fDtEsitoDT]),
+      parseToMs(d[fDtPresaDA]),
+      parseToMs(d[fDtStatoDA]),
+      parseToMs(d[fDtEsitoDA])
+    ].filter(v => v !== null) as number[]
+    if (!candidates || candidates.length === 0) return null
+    return Math.max(...candidates)
+  }
+
+  const computeProssima = (d: any, ruolo: 'DA' | 'DT'): string => {
+    const presa = Number(ruolo === 'DA' ? d[fPresaDA] : d[fPresaDT])
+    const stato = Number(ruolo === 'DA' ? d[fStatoDA] : d[fStatoDT])
+    const esito = Number(ruolo === 'DA' ? d[fEsitoDA] : d[fEsitoDT])
+
+    const tag = ruolo
+
+    // 1) presa in carico
+    if (Number.isFinite(presa) && presa === presaDaPrendere) return `Prendere in carico (${tag})`
+
+    // 2) integrazione
+    if (Number.isFinite(stato) && stato === statoIntegrazione) return `Gestire integrazione (${tag})`
+    if (Number.isFinite(esito) && esito === esitoIntegrazione) return `Gestire integrazione (${tag})`
+
+    // 3) respinta
+    if (Number.isFinite(stato) && stato === statoRespinta) return `Verificare respinta (${tag})`
+    if (Number.isFinite(esito) && esito === esitoRespinta) return `Verificare respinta (${tag})`
+
+    // 4) approvata
+    if (Number.isFinite(stato) && stato === statoApprovata) return `Approvata (${tag})`
+    if (Number.isFinite(esito) && esito === esitoApprovata) return `Approvata (${tag})`
+
+    // 5) in carico / da valutare
+    if (Number.isFinite(stato) && stato === statoPresa) return `Valutare esito (${tag})`
+    if (Number.isFinite(presa) && presa === presaPresa) return `Valutare esito (${tag})`
+
+    // fallback
+    return `Verificare stato (${tag})`
+  }
+
+  const getSortValue = (r: DataRecord, field: string): any => {
+    const d = r.getData?.() || {}
+    if (field === V_STATO) {
+      const s = computeSintetico(d)
+      return s.label
+    }
+    if (field === V_ULTIMO) return computeUltimoAggMs(d)
+    if (field === V_PROSSIMA) {
+      const s = computeSintetico(d)
+      return computeProssima(d, s.ruolo)
+    }
+    return d[field]
+  }
+
+  const sortRecords = (recs: DataRecord[], sort: SortItem[]): DataRecord[] => {
+    if (!sort || sort.length === 0) return recs
+    const copy = [...recs]
+    copy.sort((ra, rb) => {
+      for (const s of sort) {
+        const a = getSortValue(ra, s.field)
+        const b = getSortValue(rb, s.field)
+        const cmp = compareValues(a, b)
+        if (cmp !== 0) return (s.dir === 'ASC' ? cmp : -cmp)
+      }
+      return 0
+    })
+    return copy
+  }
+
+  const toggleSort = (field: string, multi: boolean) => {
+    setSortState(prev => {
+      const p = [...prev]
+      const idx = p.findIndex(x => x.field === field)
       if (idx >= 0) {
-        const cur = prev[idx]
-        if (cur.dir === 'ASC') {
-          const next = [...prev]
-          next[idx] = { field, dir: 'DESC' }
-          return next
-        }
-        return prev.filter(s => s.field !== field)
+        const cur = p[idx]
+        const nextDir: SortDir = cur.dir === 'ASC' ? 'DESC' : 'ASC'
+        p[idx] = { field, dir: nextDir }
+        return multi ? p : [p[idx]]
       }
-
-      return [...prev, { field, dir: 'ASC' }]
+      const next: SortItem = { field, dir: 'ASC' }
+      return multi ? [...p, next] : [next]
     })
   }
 
-  const getSortInfo = (field: string): { idx: number, dir?: SortDir } => {
-    const idx = sortState.findIndex(s => s.field === field)
-    if (idx < 0) return { idx: -1 }
-    return { idx, dir: sortState[idx].dir }
-  }
+  const isCustomSort = sortSig(sortState) !== sortSig(defaultSort)
+
+  // layout
+  const gap = num(cfg.gap, 12)
+  const padFirst = num(cfg.paddingLeftFirstCol, 0)
+
+  const wPratica = num(cfg.colWidths?.pratica, 120)
+  const wData = num(cfg.colWidths?.data, 150)
+  const wStato = num(cfg.colWidths?.stato, 220)
+  const wUff = num(cfg.colWidths?.ufficio, 170)
+  const wUlt = num(cfg.colWidths?.ultimo, 170)
+  const wPross = num(cfg.colWidths?.prossima, 240)
+
+  const gridCols = `${wPratica}px ${wData}px ${wStato}px ${wUff}px ${wUlt}px ${wPross}px`
+  const minWidth = wPratica + wData + wStato + wUff + wUlt + wPross + (gap * 5) + 24
 
   const rowGap = num(cfg.rowGap, 8)
   const rowPaddingX = num(cfg.rowPaddingX, 12)
@@ -247,28 +374,14 @@ export default function Widget (props: Props): React.ReactElement {
   const rowBorderWidth = num(cfg.rowBorderWidth, 1)
   const rowBorderColor = txt(cfg.rowBorderColor || 'rgba(0,0,0,0.08)')
 
-  const colW = cfg.colWidths || {}
-  const wPratica = num(colW.pratica, 140)
-  const wData = num(colW.data, 140)
-  const wUfficio = num(colW.ufficio, 180)
-  const wStato = num(colW.stato, 220)
-  const wDtPresa = num(colW.dt_presa, 180)
-  const wBtn = num(cfg.btnWidth, 160)
-
-  const gap = num(cfg.gap, 12)
-  const padFirst = num(cfg.paddingLeftFirstCol, 0)
-
-  const gridCols = `${wPratica}px ${wData}px ${wUfficio}px ${wStato}px ${wDtPresa}px ${wBtn}px`
-  const minWidth = wPratica + wData + wUfficio + wStato + wDtPresa + wBtn + gap * 5
-
   const chipRadius = num(cfg.statoChipRadius, 999)
   const chipPadX = num(cfg.statoChipPadX, 10)
   const chipPadY = num(cfg.statoChipPadY, 4)
   const chipBorderW = num(cfg.statoChipBorderW, 1)
   const chipFontWeight = num(cfg.statoChipFontWeight, 600)
   const chipFontSize = num(cfg.statoChipFontSize, 12)
-  const chipFontStyle = (txt(cfg.statoChipFontStyle || 'normal') === 'italic') ? 'italic' : 'normal'
-  const chipTextTransform = txt(cfg.statoChipTextTransform || 'none')
+  const chipFontStyle = (cfg.statoChipFontStyle === 'italic' ? 'italic' : 'normal') as any
+  const chipTextTransform = (['none', 'uppercase', 'lowercase', 'capitalize'].includes(cfg.statoChipTextTransform) ? cfg.statoChipTextTransform : 'none') as any
   const chipLetterSpacing = num(cfg.statoChipLetterSpacing, 0)
 
   const styles = css`
@@ -277,11 +390,9 @@ export default function Widget (props: Props): React.ReactElement {
     display: flex;
     flex-direction: column;
 
-    .topMsg { padding: 8px 12px; }
-
     .tabBar {
       display: ${hasTabs ? 'flex' : 'none'};
-      gap: 6px;
+      gap: 8px;
       padding: 8px 12px;
       border-bottom: 1px solid rgba(0,0,0,0.08);
       background: var(--bs-body-bg, #fff);
@@ -289,7 +400,8 @@ export default function Widget (props: Props): React.ReactElement {
     .tabBtn {
       border: 1px solid rgba(0,0,0,0.12);
       background: rgba(0,0,0,0.02);
-      padding: 6px 10px;
+      color: #111827;
+      padding: 8px 10px;
       border-radius: 10px;
       cursor: pointer;
       font-weight: 700;
@@ -297,12 +409,13 @@ export default function Widget (props: Props): React.ReactElement {
       white-space: nowrap;
     }
     .tabBtn.active {
-      background: rgba(47, 111, 237, 0.12);
-      border-color: rgba(47, 111, 237, 0.35);
+      background: #eaf2ff;
+      border-color: #2f6fed;
+      color: #1d4ed8;
     }
 
     .viewport { flex: 1; min-height: 0; overflow: auto; }
-    .content { min-width: ${minWidth}px; padding: 10px 12px; }
+    .content { min-width: ${minWidth}px; padding: 0 12px 10px; }
 
     .headerWrap {
       position: sticky;
@@ -310,8 +423,8 @@ export default function Widget (props: Props): React.ReactElement {
       z-index: 2;
       background: var(--bs-body-bg, #fff);
       border-bottom: 1px solid rgba(0,0,0,0.08);
-      padding: 8px 12px;
-      margin: 0 0 10px 0;
+      padding: 6px 12px;
+      margin: 0 0 8px 0;
     }
 
     .gridHeader {
@@ -319,7 +432,7 @@ export default function Widget (props: Props): React.ReactElement {
       grid-template-columns: ${gridCols};
       column-gap: ${gap}px;
       align-items: center;
-      min-height: 32px;
+      min-height: 28px;
     }
 
     .headerCell {
@@ -364,15 +477,6 @@ export default function Widget (props: Props): React.ReactElement {
       border-radius: 4px;
       background: rgba(0,0,0,0.07);
       font-weight: 800;
-    }
-
-    .actionsHdr {
-      width: 100%;
-      display: inline-flex;
-      align-items: center;
-      justify-content: space-between;
-      gap: 8px;
-      white-space: nowrap;
     }
 
     .resetBtn {
@@ -437,97 +541,25 @@ export default function Widget (props: Props): React.ReactElement {
       max-width: 100%;
     }
 
-    .btnCell { display: flex; justify-content: flex-start; }
-    .btnCell .jimu-btn { width: ${wBtn}px; min-width: ${wBtn}px; justify-content: center; }
-
     .empty { padding: 14px; color: rgba(0,0,0,0.65); }
   `
 
-  const getChipStyle = (statoNum: number | null) => {
-    const daPrendere = num(cfg.valoreDaPrendere, 1)
-    const presa = num(cfg.valorePresa, 2)
-
-    if (statoNum === daPrendere) {
-      return {
-        background: txt(cfg.statoBgDaPrendere || '#fff7e6'),
-        color: txt(cfg.statoTextDaPrendere || '#7a4b00'),
-        borderColor: txt(cfg.statoBorderDaPrendere || '#ffd18a')
-      } as React.CSSProperties
-    }
-    if (statoNum === presa) {
-      return {
-        background: txt(cfg.statoBgPresa || '#eaf7ef'),
-        color: txt(cfg.statoTextPresa || '#1f6b3a'),
-        borderColor: txt(cfg.statoBorderPresa || '#9ad2ae')
-      } as React.CSSProperties
-    }
-    return {
-      background: txt(cfg.statoBgAltro || '#f2f2f2'),
-      color: txt(cfg.statoTextAltro || '#333333'),
-      borderColor: txt(cfg.statoBorderAltro || '#d0d0d0')
-    } as React.CSSProperties
+  const tabLabel = (i: number, u: any): string => {
+    const labelFromCfg = (cfg.filterTabs || [])?.find((x: any) => String(x?.dataSourceId || '') === String(u?.dataSourceId || ''))?.label
+    const fromDs = getDsLabel(u, `Filtro ${i + 1}`)
+    return txt(labelFromCfg || fromDs || `Filtro ${i + 1}`)
   }
 
-  const tabLabel = (i: number, useDsJsItem: any) => {
-    const tabs = asJs(cfg.filterTabs) || []
-    const id = String(useDsJsItem?.dataSourceId || '')
-    const found = (tabs || []).find((t: any) => String(t?.dataSourceId || '') === id)
-    const label = found?.label ?? tabs?.[i]?.label
-    if (label && String(label).trim()) return String(label)
-    return getDsLabel(useDsJsItem, `Filtro ${i + 1}`)
-  }
+  const Header = (p: { label: string, field: string, first?: boolean }) => {
+    const idx = sortState.findIndex(x => x.field === p.field)
+    const item = idx >= 0 ? sortState[idx] : null
+    const dir = item?.dir
 
-  const doTake = async (ds: DataSource, oid: number) => {
-    const fieldStato = txt(cfg.fieldStatoPresa || 'presa_in_carico_DT')
-    const fieldData = txt(cfg.fieldDataPresa || 'dt_presa_in_carico_DT')
-    const valorePresa = num(cfg.valorePresa, 2)
-
-    const res = await presaInCaricoByObjectId({ ds, objectId: oid, fieldStato, fieldData, valorePresa })
-
-    if (isTakeError(res)) {
-      const prefix = txt(cfg.msgErrorPrefix || 'Errore salvataggio: ')
-      setMsg({ kind: 'error', text: `${prefix}${res.error}` })
-    } else {
-      setMsg({ kind: 'success', text: txt(cfg.msgSuccess || 'Presa in carico salvata.') })
-    }
-
-    try { (ds as any).refresh?.() } catch {}
-  }
-
-  if (!activeUseDsImm) {
-    return <div css={styles} className='empty'>{txt(cfg.errorNoDs || 'Configura la fonte dati del widget.')}</div>
-  }
-
-  const fieldPratica = txt(cfg.fieldPratica || 'objectid')
-  const fieldDataRil = txt(cfg.fieldDataRilevazione || 'data_rilevazione')
-  const fieldUfficio = txt(cfg.fieldUfficio || 'ufficio_zona')
-  const fieldStato = txt(cfg.fieldStatoPresa || 'presa_in_carico_DT')
-  const fieldDtPresa = txt(cfg.fieldDataPresa || 'dt_presa_in_carico_DT')
-
-  const labelDaPrendere = txt(cfg.labelDaPrendere || 'Da prendere in carico')
-  const labelPresa = txt(cfg.labelPresa || 'Presa in carico')
-
-  const daPrendere = num(cfg.valoreDaPrendere, 1)
-  const presa = num(cfg.valorePresa, 2)
-
-  const btnOn = txt(cfg.labelBtnTakeAttivo || 'Prendi in carico')
-  const btnOff = txt(cfg.labelBtnTakeDisattivo || 'Già in carico')
-
-  const Header = (p: { label: string, field?: string, first?: boolean }) => {
-    if (!p.field) {
-      return <div className={`headerCell ${p.first ? 'first' : ''}`}>{p.label}</div>
-    }
-
-    const si = getSortInfo(p.field)
-    const isSorted = si.idx >= 0
-    const pri = si.idx + 1
-    const dir = si.dir
-
-    const badge = isSorted
+    const badge = item
       ? (
-        <span className='sortBadge' title={`Ordinamento #${pri} (${dir})`}>
-          <span className='sortPri'>{pri}</span>
-          <span aria-hidden>{dir === 'ASC' ? '↑' : '↓'}</span>
+        <span className='sortBadge' aria-hidden>
+          <span className='sortPri'>{idx + 1}</span>
+          <span>{dir === 'ASC' ? '↑' : '↓'}</span>
         </span>
         )
       : <span className='sortBadge' style={{ opacity: 0.35 }} aria-hidden>↕</span>
@@ -537,7 +569,7 @@ export default function Widget (props: Props): React.ReactElement {
         <button
           type='button'
           className='hdrBtn'
-          onClick={(e) => toggleSort(p.field!, (e as any).shiftKey === true)}
+          onClick={(e) => toggleSort(p.field, (e as any).shiftKey === true)}
           title='Click: ordina. Shift+Click: ordinamento multiplo.'
         >
           <span>{p.label}</span>
@@ -547,94 +579,95 @@ export default function Widget (props: Props): React.ReactElement {
     )
   }
 
+  const maskOuterOffset = Number.isFinite(Number(cfg.maskOuterOffset)) ? Number(cfg.maskOuterOffset) : 12
+  const maskInnerPadding = Number.isFinite(Number(cfg.maskInnerPadding)) ? Number(cfg.maskInnerPadding) : 8
+  const maskBg = String(cfg.maskBg ?? '#ffffff')
+  const maskBorderColor = String(cfg.maskBorderColor ?? 'rgba(0,0,0,0.12)')
+  const maskBorderWidth = Number.isFinite(Number(cfg.maskBorderWidth)) ? Number(cfg.maskBorderWidth) : 1
+  const maskRadius = Number.isFinite(Number(cfg.maskRadius)) ? Number(cfg.maskRadius) : 12
+
+  if (!activeUseDsImm) {
+    return <div style={{ padding: 12 }}>{txt(cfg.errorNoDs || 'Configura la fonte dati del widget.')}</div>
+  }
+
   return (
-    <div css={styles}>
-      {hasTabs && (
-        <div className='tabBar'>
-          {useDsJs.map((u, i) => (
-            <button
-              key={u?.dataSourceId || i}
-              type='button'
-              className={`tabBtn ${i === activeTab ? 'active' : ''}`}
-              onClick={() => {
-                // Sgancia la selezione dal data source corrente prima di cambiare tab
-                if (dsRefForClear.current) {
-                  tryClearSelection(dsRefForClear.current)
-                }
-                
-                // Rimuovi la selezione locale per il data source corrente
-                const currentDsId = String(activeUseDsJs?.dataSourceId || 'ds')
-                setLocalSelectedByDs(prev => {
-                  const updated = { ...prev }
-                  delete updated[currentDsId]
-                  return updated
-                })
-                
-                setActiveTab(i)
-                setMsg(null)
-              }}
-              title={getDsLabel(u, `Filtro ${i + 1}`)}
-            >
-              {tabLabel(i, u)}
-            </button>
-          ))}
-        </div>
-      )}
+    <div style={{ width: '100%', height: '100%', boxSizing: 'border-box', padding: maskOuterOffset }}>
+      <div
+        style={{
+          width: '100%',
+          height: '100%',
+          boxSizing: 'border-box',
+          border: `${maskBorderWidth}px solid ${maskBorderColor}`,
+          borderRadius: maskRadius,
+          background: maskBg,
+          padding: maskInnerPadding,
+          overflow: 'hidden'
+        }}
+      >
+        <div css={styles} style={{ width: '100%', height: '100%' }}>
+          {hasTabs && (
+            <div className='tabBar'>
+              {useDsJs.map((u, i) => (
+                <button
+                  key={u?.dataSourceId || i}
+                  type='button'
+                  className={`tabBtn ${i === activeTab ? 'active' : ''}`}
+                  onClick={() => {
+                    // Sgancia la selezione dal data source corrente prima di cambiare tab
+                    if (dsRefForClear.current) {
+                      tryClearSelection(dsRefForClear.current)
+                    }
 
-      {msg && (
-        <div className='topMsg'>
-          <Alert
-            form='basic'
-            type={msg.kind === 'success' ? 'success' : msg.kind === 'error' ? 'error' : 'info'}
-            text={msg.text}
-            withIcon
-            closable
-            onClose={() => setMsg(null)}
-          />
-        </div>
-      )}
+                    // Rimuovi la selezione locale per il data source corrente
+                    const currentDsId = String(activeUseDsJs?.dataSourceId || 'ds')
+                    setLocalSelectedByDs(prev => {
+                      const updated = { ...prev }
+                      delete updated[currentDsId]
+                      return updated
+                    })
 
-      <div className='viewport'>
-        <div className='content'>
-          <DataSourceComponent
-            key={activeUseDsJs?.dataSourceId || activeTab}
-            useDataSource={activeUseDsImm}
-            query={dsQuery}
-            widgetId={props.id}
-          >
-            {(ds: DataSource, info) => {
-              // Salva il riferimento al data source per sganciare la selezione al cambio tab
-              dsRefForClear.current = ds
-              const status = info?.status ?? ds.getStatus?.() ?? DataSourceStatus.NotReady
-              const isLoading = status === DataSourceStatus.Loading
+                    setActiveTab(i)
+                  }}
+                  title={getDsLabel(u, `Filtro ${i + 1}`)}
+                >
+                  {tabLabel(i, u)}
+                </button>
+              ))}
+            </div>
+          )}
 
-              const recsRaw = (ds.getRecords?.() ?? []) as DataRecord[]
-              const recs = sortRecords(recsRaw, sortState)
+          <div className='viewport'>
+            <div className='content'>
+              <DataSourceComponent
+                key={activeUseDsJs?.dataSourceId || activeTab}
+                useDataSource={activeUseDsImm}
+                query={dsQuery}
+                widgetId={props.id}
+              >
+                {(ds: DataSource, info) => {
+                  // Salva riferimento per clear selection su cambio tab
+                  dsRefForClear.current = ds
+                  const status = info?.status ?? ds.getStatus?.() ?? DataSourceStatus.NotReady
+                  const isLoading = status === DataSourceStatus.Loading
 
-              const selected = (ds.getSelectedRecords?.() ?? []) as DataRecord[]
-              const selId = selected?.[0]?.getId?.()
+                  const recsRaw = (ds.getRecords?.() ?? []) as DataRecord[]
+                  const recs = sortRecords(recsRaw, sortState)
 
-              const dsId = String(activeUseDsJs?.dataSourceId || 'ds')
-              const localSel = localSelectedByDs[dsId]
-              const selectedId = (selId && String(selId)) || localSel || ''
+                  const selected = (ds.getSelectedRecords?.() ?? []) as DataRecord[]
+                  const selId = selected?.[0]?.getId?.()
 
-              if (isLoading) return <Loading />
-              if (!recs || recs.length === 0) return <div className='empty'>{txt(cfg.emptyMessage || 'Nessun record trovato.')}</div>
+                  const dsId = String(activeUseDsJs?.dataSourceId || 'ds')
+                  const localSel = localSelectedByDs[dsId]
+                  const selectedId = (selId && String(selId)) || localSel || ''
 
-              return (
-                <>
-                  {cfg.showHeader !== false && (
-                    <div className='headerWrap'>
-                      <div className='gridHeader'>
-                        <Header first label={txt(cfg.headerPratica || 'N. pratica')} field={fieldPratica} />
-                        <Header label={txt(cfg.headerData || 'Data rilevazione')} field={fieldDataRil} />
-                        <Header label={txt(cfg.headerUfficio || 'Ufficio')} field={fieldUfficio} />
-                        <Header label={txt(cfg.headerStato || 'Stato pratica')} field={fieldStato} />
-                        <Header label={txt(cfg.headerDtPresa || 'Dt. presa')} field={fieldDtPresa} />
+                  if (isLoading) return <Loading />
+                  if (!recs || recs.length === 0) return <div className='empty'>{txt(cfg.emptyMessage || 'Nessun record trovato.')}</div>
 
-                        <div className='headerCell'>
-                          <div className='actionsHdr'>
-                            <span>{txt(cfg.headerAzioni || 'Azioni')}</span>
+                  return (
+                    <>
+                      {cfg.showHeader !== false && (
+                        <div className='headerWrap'>
+                          <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 6 }}>
                             {isCustomSort && (
                               <Button
                                 size='sm'
@@ -648,101 +681,80 @@ export default function Widget (props: Props): React.ReactElement {
                               </Button>
                             )}
                           </div>
-                        </div>
-                      </div>
-                    </div>
-                  )}
 
-                  <div className='list'>
-                    {recs.map((r, idx) => {
-                      const d = r.getData?.() || {}
-                      const oid = Number(d.OBJECTID)
-                      const rid = String(r.getId?.() ?? oid)
-
-                      const pratica = txt(d[fieldPratica])
-                      const dataRil = formatDateIt(d[fieldDataRil])
-                      const ufficio = txt(d[fieldUfficio])
-
-                      const statoRaw = d[fieldStato]
-                      const statoNum = Number(statoRaw)
-                      const statoLabel =
-                        statoNum === num(cfg.valoreDaPrendere, 1) ? txt(cfg.labelDaPrendere || 'Da prendere in carico')
-                          : statoNum === num(cfg.valorePresa, 2) ? txt(cfg.labelPresa || 'Presa in carico')
-                            : txt(statoRaw)
-
-                      const dtPresa = formatDateIt(d[fieldDtPresa])
-
-                      const isSel = selectedId && rid === selectedId
-                      const even = idx % 2 === 0
-                      const canTake = Number.isFinite(statoNum) && statoNum === daPrendere
-
-                      return (
-                        <div
-                          key={rid}
-                          className={`rowCard ${even ? 'even' : 'odd'} ${isSel ? 'selected' : ''}`}
-                          onClick={() => {
-                            // Se il record è già selezionato, deselezionalo
-                            if (isSel) {
-                              setLocalSelectedByDs(prev => {
-                                const updated = { ...prev }
-                                delete updated[dsId]
-                                return updated
-                              })
-                              tryClearSelection(ds as any)
-                            } else {
-                              // Altrimenti selezionalo
-                              setLocalSelectedByDs(prev => ({ ...prev, [dsId]: rid }))
-                              trySelectRecord(ds as any, r, rid)
-                            }
-                          }}
-                        >
-                          <div className='cell first' title={pratica}>{pratica}</div>
-                          <div className='cell' title={dataRil}>{dataRil}</div>
-                          <div className='cell' title={ufficio}>{ufficio}</div>
-
-                          <div className='cell' title={statoLabel}>
-                            <span className='chip' style={getChipStyle(Number.isFinite(statoNum) ? statoNum : null)}>
-                              {statoLabel}
-                            </span>
+                          <div className='gridHeader'>
+                            <Header first label={txt(cfg.headerPratica || 'N. pratica')} field={fieldPratica} />
+                            <Header label={txt(cfg.headerData || 'Data rilev.')} field={fieldDataRil} />
+                            <Header label={txt(cfg.headerStato || 'Stato sintetico')} field={V_STATO} />
+                            <Header label={txt(cfg.headerUfficio || 'Ufficio')} field={fieldUfficio} />
+                            <Header label={txt(cfg.headerUltimoAgg || 'Ultimo agg.')} field={V_ULTIMO} />
+                            <Header label={txt(cfg.headerProssima || 'Prossima azione')} field={V_PROSSIMA} />
                           </div>
+                        </div>
+                      )}
 
-                          <div className='cell' title={dtPresa}>{dtPresa}</div>
+                      <div className='list'>
+                        {recs.map((r, idx) => {
+                          const d = r.getData?.() || {}
+                          const oid = Number(d.OBJECTID)
+                          const rid = String(r.getId?.() ?? oid)
 
-                          <div className='cell btnCell'>
-                            <Button
-                              size='sm'
-                              type='primary'
-                              disabled={!canTake}
-                              onClick={async (e) => {
-                                e.stopPropagation()
+                          const pratica = txt(d[fieldPratica])
+                          const dataRil = formatDateIt(d[fieldDataRil])
+                          const ufficio = txt(d[fieldUfficio])
 
-                                if (!Number.isFinite(oid)) {
-                                  setMsg({ kind: 'error', text: 'OBJECTID non valido.' })
-                                  return
+                          const sintetico = computeSintetico(d)
+                          const statoLabel = txt(sintetico.label)
+                          const statoChipNum = sintetico.statoForChip
+
+                          const ultimoMs = computeUltimoAggMs(d)
+                          const ultimo = ultimoMs ? formatDateIt(ultimoMs) : '—'
+
+                          const prossima = computeProssima(d, sintetico.ruolo)
+
+                          const isSel = selectedId && rid === selectedId
+                          const even = idx % 2 === 0
+
+                          return (
+                            <div
+                              key={rid}
+                              className={`rowCard ${even ? 'even' : 'odd'} ${isSel ? 'selected' : ''}`}
+                              onClick={() => {
+                                if (isSel) {
+                                  setLocalSelectedByDs(prev => {
+                                    const updated = { ...prev }
+                                    delete updated[dsId]
+                                    return updated
+                                  })
+                                  tryClearSelection(ds as any)
+                                } else {
+                                  setLocalSelectedByDs(prev => ({ ...prev, [dsId]: rid }))
+                                  trySelectRecord(ds as any, r, rid)
                                 }
-
-                                setMsg(null)
-                                setLocalSelectedByDs(prev => ({ ...prev, [dsId]: rid }))
-                                trySelectRecord(ds as any, r, rid)
-
-                                const confirmText = txt(cfg.confirmMessage || 'Vuoi prendere in carico questa pratica?')
-                                const ok = window.confirm(confirmText)
-                                if (!ok) return
-
-                                await doTake(ds, oid)
                               }}
                             >
-                              {canTake ? btnOn : btnOff}
-                            </Button>
-                          </div>
-                        </div>
-                      )
-                    })}
-                  </div>
-                </>
-              )
-            }}
-          </DataSourceComponent>
+                              <div className='cell first' title={pratica}>{pratica}</div>
+                              <div className='cell' title={dataRil}>{dataRil}</div>
+
+                              <div className='cell' title={statoLabel}>
+                                <span className='chip' style={getChipStyle(Number.isFinite(Number(statoChipNum)) ? Number(statoChipNum) : null)}>
+                                  {statoLabel}
+                                </span>
+                              </div>
+
+                              <div className='cell' title={ufficio}>{ufficio}</div>
+                              <div className='cell' title={ultimo}>{ultimo}</div>
+                              <div className='cell' title={prossima}>{prossima}</div>
+                            </div>
+                          )
+                        })}
+                      </div>
+                    </>
+                  )
+                }}
+              </DataSourceComponent>
+            </div>
+          </div>
         </div>
       </div>
     </div>

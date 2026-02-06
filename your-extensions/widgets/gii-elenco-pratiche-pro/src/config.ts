@@ -7,38 +7,73 @@ export interface FilterTab {
   label: string
 }
 
+/**
+ * Larghezze colonne (px)
+ */
 export interface ColWidths {
   pratica: number
   data: number
   ufficio: number
   stato: number
-  dt_presa: number
+  ultimo: number
+  prossima: number
 }
 
 export interface Config {
   // --- Etichette filtri (tabs) per datasourceId
   filterTabs: FilterTab[]
 
-  // --- Ordinamento default (dalla sezione contenuti)
+  // --- Ordinamento default
   orderByField: string
   orderByDir: SortDir
 
-  // --- Campi layer
+  // --- Campi base
   fieldPratica: string
   fieldDataRilevazione: string
   fieldUfficio: string
-  fieldStatoPresa: string
-  fieldDataPresa: string
 
-  // --- Valori dominio / logica
-  valoreDaPrendere: number
-  valorePresa: number
+  // --- Campi DT (Direttore Tecnico/Agrario)
+  fieldPresaDT: string
+  fieldDtPresaDT: string
+  fieldStatoDT: string
+  fieldDtStatoDT: string
+  fieldEsitoDT: string
+  fieldDtEsitoDT: string
 
-  // --- Testi
-  labelDaPrendere: string
-  labelPresa: string
-  labelBtnTakeAttivo: string
-  labelBtnTakeDisattivo: string
+  // --- Campi DA (Direttore Area Amministrativa)
+  fieldPresaDA: string
+  fieldDtPresaDA: string
+  fieldStatoDA: string
+  fieldDtStatoDA: string
+  fieldEsitoDA: string
+  fieldDtEsitoDA: string
+
+  // --- Domini presa in carico
+  presaDaPrendereVal: number
+  presaPresaVal: number
+  labelPresaDaPrendere: string
+  labelPresaPresa: string
+
+  // --- Domini stato (1..5)
+  statoDaPrendereVal: number
+  statoPresaVal: number
+  statoIntegrazioneVal: number
+  statoApprovataVal: number
+  statoRespintaVal: number
+
+  labelStatoDaPrendere: string
+  labelStatoPresa: string
+  labelStatoIntegrazione: string
+  labelStatoApprovata: string
+  labelStatoRespinta: string
+
+  // --- Domini esito (1..3)
+  esitoIntegrazioneVal: number
+  esitoApprovataVal: number
+  esitoRespintaVal: number
+  labelEsitoIntegrazione: string
+  labelEsitoApprovata: string
+  labelEsitoRespinta: string
 
   // --- Query
   whereClause: string
@@ -50,16 +85,15 @@ export interface Config {
   headerData: string
   headerUfficio: string
   headerStato: string
-  headerDtPresa: string
-  headerAzioni: string
+  headerUltimoAgg: string
+  headerProssima: string
 
   // --- Layout colonne
   paddingLeftFirstCol: number
   gap: number
-  btnWidth: number
   colWidths: ColWidths
 
-  // --- Vista lista (stile List widget)
+  // --- Vista lista
   rowGap: number
   rowPaddingX: number
   rowPaddingY: number
@@ -77,12 +111,6 @@ export interface Config {
   selectedBorderWidth: number
 
   // --- Messaggi
-  msgSuccess: string
-  msgErrorPrefix: string
-  confirmTitle: string
-  confirmMessage: string
-  confirmYes: string
-  confirmNo: string
   emptyMessage: string
   errorNoDs: string
 
@@ -109,6 +137,14 @@ export interface Config {
   statoBgAltro: string
   statoTextAltro: string
   statoBorderAltro: string
+
+  // Aspetto maschera (bordo pannello)
+  maskOuterOffset: number
+  maskInnerPadding: number
+  maskBg: string
+  maskBorderColor: string
+  maskBorderWidth: number
+  maskRadius: number
 }
 
 export type IMConfig = ImmutableObject<Config>
@@ -119,40 +155,74 @@ export const defaultConfig: IMConfig = Immutable({
   orderByField: 'objectid',
   orderByDir: 'DESC',
 
+  // Campi base
   fieldPratica: 'objectid',
   fieldDataRilevazione: 'data_rilevazione',
   fieldUfficio: 'ufficio_zona',
-  fieldStatoPresa: 'presa_in_carico_DT',
-  fieldDataPresa: 'dt_presa_in_carico_DT',
 
-  valoreDaPrendere: 1,
-  valorePresa: 2,
+  // DT
+  fieldPresaDT: 'presa_in_carico_DT',
+  fieldDtPresaDT: 'dt_presa_in_carico_DT',
+  fieldStatoDT: 'stato_DT',
+  fieldDtStatoDT: 'dt_stato_DT',
+  fieldEsitoDT: 'esito_DT',
+  fieldDtEsitoDT: 'dt_esito_DT',
 
-  labelDaPrendere: 'Da prendere in carico',
-  labelPresa: 'Presa in carico',
-  labelBtnTakeAttivo: 'Prendi in carico',
-  labelBtnTakeDisattivo: 'Già in carico',
+  // DA
+  fieldPresaDA: 'presa_in_carico_DA',
+  fieldDtPresaDA: 'dt_presa_in_carico_DA',
+  fieldStatoDA: 'stato_DA',
+  fieldDtStatoDA: 'dt_stato_DA',
+  fieldEsitoDA: 'esito_DA',
+  fieldDtEsitoDA: 'dt_esito_DA',
+
+  // Domini presa
+  presaDaPrendereVal: 1,
+  presaPresaVal: 2,
+  labelPresaDaPrendere: 'Da prendere in carico',
+  labelPresaPresa: 'Presa in carico',
+
+  // Domini stato 1..5
+  statoDaPrendereVal: 1,
+  statoPresaVal: 2,
+  statoIntegrazioneVal: 3,
+  statoApprovataVal: 4,
+  statoRespintaVal: 5,
+
+  labelStatoDaPrendere: 'Da prendere',
+  labelStatoPresa: 'Presa in carico',
+  labelStatoIntegrazione: 'Integrazione richiesta',
+  labelStatoApprovata: 'Approvata',
+  labelStatoRespinta: 'Respinta',
+
+  // Domini esito 1..3
+  esitoIntegrazioneVal: 1,
+  esitoApprovataVal: 2,
+  esitoRespintaVal: 3,
+  labelEsitoIntegrazione: 'Integrazione richiesta',
+  labelEsitoApprovata: 'Approvata',
+  labelEsitoRespinta: 'Respinta',
 
   whereClause: '1=1',
   pageSize: 200,
 
   showHeader: true,
   headerPratica: 'N. pratica',
-  headerData: 'Data rilevazione',
+  headerData: 'Data rilev.',
   headerUfficio: 'Ufficio',
-  headerStato: 'Stato pratica',
-  headerDtPresa: 'Dt. presa',
-  headerAzioni: 'Azioni',
+  headerStato: 'Stato sintetico',
+  headerUltimoAgg: 'Ultimo agg.',
+  headerProssima: 'Prossima azione',
 
   paddingLeftFirstCol: 0,
   gap: 12,
-  btnWidth: 160,
   colWidths: {
-    pratica: 140,
-    data: 140,
-    ufficio: 180,
+    pratica: 120,
+    data: 150,
     stato: 220,
-    dt_presa: 180
+    ufficio: 170,
+    ultimo: 170,
+    prossima: 240
   },
 
   rowGap: 8,
@@ -170,12 +240,6 @@ export const defaultConfig: IMConfig = Immutable({
   selectedBorderColor: '#2f6fed',
   selectedBorderWidth: 2,
 
-  msgSuccess: 'Presa in carico salvata.',
-  msgErrorPrefix: 'Errore salvataggio: ',
-  confirmTitle: 'Conferma',
-  confirmMessage: 'Vuoi prendere in carico questa pratica?',
-  confirmYes: 'Sì',
-  confirmNo: 'No',
   emptyMessage: 'Nessun record trovato (view/filtro/permessi).',
   errorNoDs: 'Configura la fonte dati del widget.',
 
@@ -199,7 +263,15 @@ export const defaultConfig: IMConfig = Immutable({
 
   statoBgAltro: '#f2f2f2',
   statoTextAltro: '#333333',
-  statoBorderAltro: '#d0d0d0'
+  statoBorderAltro: '#d0d0d0',
+
+  // Aspetto maschera (bordo pannello)
+  maskOuterOffset: 12,
+  maskInnerPadding: 8,
+  maskBg: '#ffffff',
+  maskBorderColor: 'rgba(0,0,0,0.12)',
+  maskBorderWidth: 1,
+  maskRadius: 12
 })
 
 export default defaultConfig
