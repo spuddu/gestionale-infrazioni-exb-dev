@@ -6,6 +6,7 @@ export interface TabConfig {
   id: string // univoco (es. 'anagrafica', 'violazione', 'iter', 'allegati', 'azioni')
   label: string // nome visualizzato nella tab
   fields: string[] // campi selezionati per questa tab
+  hideEmpty?: boolean // se true, mostra solo campi valorizzati (non vuoti)
   locked?: boolean // se true, non può essere rimossa o riordinata (opzionale)
   isIterTab?: boolean // se true, mostra i campi DT/DA fissi + i campi extra
 }
@@ -125,11 +126,12 @@ export const defaultConfig: Config = {
 
   // Tab di default
   tabs: [
-    { id: 'anagrafica', label: 'Anagrafica', fields: [] },
-    { id: 'violazione', label: 'Violazione', fields: [] },
-    { id: 'iter', label: 'Iter', fields: [], isIterTab: true },
-    { id: 'allegati', label: 'Allegati', fields: [] },
+        { id: 'anagrafica', label: 'Anagrafica', fields: [], hideEmpty: false },
+    { id: 'violazione', label: 'Violazione', fields: [], hideEmpty: true },
+    { id: 'iter', label: 'Iter', fields: [], isIterTab: true, hideEmpty: false },
+    { id: 'allegati', label: 'Allegati', fields: [], hideEmpty: true },
     { id: 'azioni', label: 'Azioni', fields: [], locked: true }
+
   ],
 
   presets: [],

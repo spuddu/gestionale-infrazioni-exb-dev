@@ -99,6 +99,7 @@ function migrateLegacyFields(cfg: any): TabConfig[] {
     }
     return tab
   })
+.map(tab => ({ ...tab, hideEmpty: (tab as any).hideEmpty ?? (tab.id === 'violazione') }))
 }
 
 function asJs<T = any> (v: any): T {
@@ -373,8 +374,9 @@ function FieldPicker (props: {
   tab: TabConfig
   allFields: FieldOpt[]
   onChange: (fields: string[]) => void
+  onTabPatch: (patch: Partial<TabConfig>) => void
 }) {
-  const { tab, allFields } = props
+  const { tab, allFields, onTabPatch } = props
   const title = tab.label
   const help = tab.isIterTab 
     ? 'In "Iter" i blocchi DT/DA sono sempre visibili. Qui aggiungi campi extra sotto i blocchi.'
@@ -536,7 +538,18 @@ function FieldPicker (props: {
             </div>
           )}
 
-          {/* Selected (order) */}
+          
+          {/* Opzioni tab */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
+            <input
+              type='checkbox'
+              checked={!!tab.hideEmpty}
+              onChange={(e) => onTabPatch({ hideEmpty: (e.target as HTMLInputElement).checked })}
+            />
+            <span style={{ fontSize: 12, fontWeight: 800, color: '#111' }}>Nascondi campi vuoti (solo questa tab)</span>
+          </div>
+
+{/* Selected (order) */}
           <div style={{ marginBottom: 12 }}>
             <div style={{ fontSize: 12, fontWeight: 900, marginBottom: 6, color: '#111' }}>Selezionati (ordine)</div>
             <div style={{ border: '1px solid rgba(0,0,0,0.12)', borderRadius: 10, overflow: 'hidden', background: '#fff' }}>
@@ -731,7 +744,8 @@ function PresetManager (props: {
           <option value=''>— nessun preset —</option>
           {(presets || []).map(p => (
             <option key={p.id} value={p.id}>{p.name}</option>
-          ))}
+          ))
+}
         </select>
       </div>
 
@@ -945,6 +959,7 @@ export default function Setting (props: Props) {
               tab={tab}
               allFields={fields}
               onChange={(fields) => updateTabFields(index, fields)}
+              onTabPatch={(patch) => updateTab(index, patch)}
             />
           )
         })}
@@ -1041,20 +1056,7 @@ export default function Setting (props: Props) {
             </button>
           </div>
         </RowBlock>
-
-        <RowBlock
-          label='Mostra solo campi valorizzati'
-          help='Se attivo, nelle TAB read-only verranno mostrati solo i campi con un valore (non vuoto) nel record selezionato.'
-        >
-          <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13 }}>
-            <input
-              type='checkbox'
-            />
-            <span>Nascondi campi vuoti</span>
-          </label>
-        </RowBlock>
-
-        <RowBlock
+<RowBlock
           label='Gestione preset'
           help='Salva/carica set di campi selezionati per le TAB (utile per ruoli diversi: DIR, RI, ecc.).'
         >

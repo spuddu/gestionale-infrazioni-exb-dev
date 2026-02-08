@@ -1,5 +1,5 @@
 /** @jsx jsx */
-import { React, jsx, type AllWidgetProps, DataSourceComponent } from 'jimu-core'
+import { React, jsx, type AllWidgetProps, DataSourceComponent, DataSourceManager } from 'jimu-core'
 import { Button } from 'jimu-ui'
 import { createPortal } from 'react-dom'
 import type { IMConfig, TabConfig } from '../config'
@@ -18,6 +18,73 @@ type SelState = {
 
 function unwrapJsapiLayer (maybe: any) {
   return (maybe && (maybe.layer || maybe)) || null
+}
+
+// Caricamento moduli ArcGIS JS API (AMD) senza dipendenze extra.
+function loadEsriModule<T = any> (path: string): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const req = (window as any).require
+    if (!req) {
+      reject(new Error('AMD require non disponibile'))
+      return
+    }
+    try {
+      req([path], (mod: T) => resolve(mod), (err: any) => reject(err))
+    } catch (e) {
+      reject(e)
+    }
+  })
+}
+
+// In Experience Builder, una Data View / Output Data Source può non esporre direttamente un FeatureLayer.
+// Questa funzione prova più strade (DS corrente, DS da manager, DS padre) e, se serve, crea un FeatureLayer dal URL.
+async function resolveFeatureLayerForAttachments (ds: any): Promise<any | null> {
+  if (!ds) return null
+
+  const candidates: any[] = []
+  const push = (x: any) => {
+    if (x && !candidates.includes(x)) candidates.push(x)
+  }
+
+  push(ds)
+
+  try {
+    const dm = DataSourceManager.getInstance()
+    const byId = ds?.id ? dm.getDataSource(ds.id) : null
+    push(byId)
+    const belongId = ds?.belongToDataSource
+    if (typeof belongId === 'string' && belongId) {
+      push(dm.getDataSource(belongId))
+    }
+  } catch {
+    // ignore
+  }
+
+  for (const c of candidates) {
+    const cAny: any = c
+    const l = unwrapJsapiLayer(
+      (typeof cAny.getLayer === 'function' ? cAny.getLayer() : null) ??
+      (typeof cAny.getJsApiLayer === 'function' ? cAny.getJsApiLayer() : null) ??
+      (typeof cAny.getJSAPILayer === 'function' ? cAny.getJSAPILayer() : null) ??
+      cAny.layer
+    ) as any
+    if (l && typeof l.queryAttachments === 'function') return l
+  }
+
+  // Fallback: crea un FeatureLayer a partire dal URL del DS (se presente)
+  try {
+    const dsAny: any = ds
+    const url: any = dsAny?.getDataSourceJson?.()?.url ?? dsAny?.dataSourceJson?.url
+    if (!url || typeof url !== 'string') return null
+    const FeatureLayer = await loadEsriModule<any>('esri/layers/FeatureLayer')
+    const fl = new FeatureLayer({ url })
+    if (typeof fl?.load === 'function') await fl.load().catch(() => {})
+    if (fl && typeof fl.queryAttachments === 'function') return fl
+  } catch {
+    // ignore
+  }
+
+  return null
 }
 
 function pickOidFromData (data: any, idFieldName: string) {
@@ -280,8 +347,15 @@ if (tipoField) {
 
 function DetailRow (props: { label: string; value: any; labelSize: number; valueSize: number }) {
   return (
-    <div style={{ display: 'flex', gap: 10, alignItems: 'baseline' }}>
-      <div style={{ width: 180, fontSize: props.labelSize, color: '#6b7280' }}>{props.label}</div>
+    <div style={{ 
+      display: 'grid', 
+      gridTemplateColumns: '200px 1fr', 
+      gap: 12, 
+      alignItems: 'baseline' 
+    }}>
+      <div style={{ fontSize: props.labelSize, color: '#6b7280', textAlign: 'left' }}>
+        {props.label}
+      </div>
       <div style={{ fontSize: props.valueSize, fontWeight: 600, wordBreak: 'break-word' }}>
         {props.value != null && props.value !== '' ? String(props.value) : '—'}
       </div>
@@ -555,6 +629,10 @@ function ActionsPanel (props: {
 }) {
   const { active, roleCode, buttonText, buttonColors, ui } = props
   const role = String(roleCode || 'DT').trim().toUpperCase()
+
+  // scorciatoie (usate spesso nel render)
+  const titleFontSize = ui.titleFontSize
+  const msgFontSize = ui.msgFontSize
 
   const presaField = `presa_in_carico_${role}`
   const dtPresaField = `dt_presa_in_carico_${role}`
@@ -967,16 +1045,16 @@ function ActionsPanel (props: {
 
       <div style={panelStyle}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
-          <div style={{ fontSize: ui.titleFontSize, fontWeight: 700 }}>Dettaglio + Azioni ({role})</div>
-          {msg && <div style={msgStyle(msg.kind, ui.msgFontSize)} title={msg.text}>{msg.text}</div>}
+          <div style={{ fontSize: titleFontSize, fontWeight: 700 }}>Azioni ({role})</div>
+          {msg && <div style={msgStyle(msg.kind, msgFontSize)} title={msg.text}>{msg.text}</div>}
         </div>
 
         <div style={{ display: 'grid', gap: 6 }}>
-          <DetailRow label='N.pratica (OID)' value={oid} labelSize={ui.statusFontSize} valueSize={ui.titleFontSize} />
-          <DetailRow label={presaField} value={presaVal} labelSize={ui.statusFontSize} valueSize={ui.titleFontSize} />
-          <DetailRow label={statoField} value={statoVal} labelSize={ui.statusFontSize} valueSize={ui.titleFontSize} />
-          <DetailRow label={esitoField} value={esitoVal} labelSize={ui.statusFontSize} valueSize={ui.titleFontSize} />
-          <DetailRow label={statoDAField} value={statoDAVal} labelSize={ui.statusFontSize} valueSize={ui.titleFontSize} />
+          <DetailRow label='N.pratica (OID)' value={oid} labelSize={ui.statusFontSize} valueSize={titleFontSize} />
+          <DetailRow label={presaField} value={presaVal} labelSize={ui.statusFontSize} valueSize={titleFontSize} />
+          <DetailRow label={statoField} value={statoVal} labelSize={ui.statusFontSize} valueSize={titleFontSize} />
+          <DetailRow label={esitoField} value={esitoVal} labelSize={ui.statusFontSize} valueSize={titleFontSize} />
+          <DetailRow label={statoDAField} value={statoDAVal} labelSize={ui.statusFontSize} valueSize={titleFontSize} />
         </div>
 
         <div style={{ height: 1, background: ui.dividerColor, margin: '2px 0' }} />
@@ -984,7 +1062,7 @@ function ActionsPanel (props: {
         {/* Etichetta “Azioni” solo quando mostro i tasti azione */}
         {pending === null && (
           <div style={{ display: 'flex', alignItems: 'baseline', gap: 10 }}>
-            <div style={{ fontSize: ui.titleFontSize, fontWeight: 700 }}>Azioni</div>
+            <div style={{ fontSize: titleFontSize, fontWeight: 700 }}>Azioni</div>
           </div>
         )}
 
@@ -1047,7 +1125,7 @@ function ActionsPanel (props: {
             {pending === 'RESPINGI' && (
               <div style={{ display: 'grid', gap: 6 }}>
                 <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
-                  <div style={{ fontSize: ui.titleFontSize, fontWeight: 700 }}>Motivazione</div>
+                  <div style={{ fontSize: titleFontSize, fontWeight: 700 }}>Motivazione</div>
                   <div style={labelReqStyle(true, reasonReqErr)}>(obbligatoria)</div>
                 </div>
 
@@ -1076,7 +1154,7 @@ function ActionsPanel (props: {
             {showNote && (
               <div style={{ display: 'grid', gap: 6 }}>
                 <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
-                  <div style={{ fontSize: ui.titleFontSize, fontWeight: 700 }}>Note</div>
+                  <div style={{ fontSize: titleFontSize, fontWeight: 700 }}>Note</div>
 
                   {pending === 'INTEGRAZIONE' && (
                     <div style={labelReqStyle(true, noteReqErr)}>(obbligatoria)</div>
@@ -1189,7 +1267,7 @@ function ActionsPanel (props: {
         )}
 
         {lockedByTransmit && hasSel && (
-          <div style={{ ...msgStyle('info', ui.msgFontSize), marginTop: 4 }}>
+          <div style={{ ...msgStyle('info', msgFontSize), marginTop: 4 }}>
             Pratica già trasmessa a DA: azioni non disponibili.
           </div>
         )}
@@ -1291,13 +1369,18 @@ function migrateTabs(tabFields: TabFields, tabs: TabConfig[] | undefined): TabCo
     ]
   }
   
-  // Rimuovi locked dalla tab azioni se esiste (per retrocompatibilità)
+  // Normalizza hideEmpty per tab (retrocompatibilità)
   return result.map(tab => {
+    const normalizedHideEmpty =
+      (tab as any).hideEmpty != null
+        ? Boolean((tab as any).hideEmpty)
+        : (tab.id === 'violazione' || tab.id === 'allegati')
+
     if (tab.id === 'azioni') {
-      const { locked, ...rest } = tab
-      return rest
+      const { locked, ...rest } = tab as any
+      return { ...rest, hideEmpty: false } as any
     }
-    return tab
+    return { ...(tab as any), hideEmpty: normalizedHideEmpty } as any
   })
 }
 
@@ -1329,11 +1412,14 @@ function TabButton (props: { active: boolean; label: string; onClick: () => void
 
 function ReadOnlyPanel (props: {
   title: string
-  ui: any
+  ui?: any
   rows: Array<{ label: string; value: any }>
   emptyText?: string
 }) {
-  const { ui } = props
+	  const ui = props.ui ?? {}
+	  const titleFontSize = Number.isFinite(Number(ui.titleFontSize)) ? Number(ui.titleFontSize) : 14
+	  const msgFontSize = Number.isFinite(Number(ui.msgFontSize)) ? Number(ui.msgFontSize) : 12
+	  const statusFontSize = Number.isFinite(Number(ui.statusFontSize)) ? Number(ui.statusFontSize) : 12
   return (
     <div
       style={{
@@ -1345,12 +1431,12 @@ function ReadOnlyPanel (props: {
         minHeight: 0
       }}
     >
-      <div style={{ fontWeight: 800, fontSize: ui.titleFontSize, marginBottom: 10 }}>
+      <div style={{ fontWeight: 800, fontSize: titleFontSize, marginBottom: 10 }}>
         {props.title}
       </div>
 
       {!props.rows.length
-        ? <div style={{ ...msgStyle('info', ui.msgFontSize) }}>{props.emptyText || 'Configura i campi nelle impostazioni.'}</div>
+        ? <div style={{ ...msgStyle('info', msgFontSize) }}>{props.emptyText || 'Configura i campi nelle impostazioni.'}</div>
         : (
           <div style={{ display: 'grid', gap: 8 }}>
             {props.rows.map((r, i) => (
@@ -1391,6 +1477,110 @@ function DetailTabsPanel (props: {
   const hasSel = oid != null && Number.isFinite(oid)
 
   const [tab, setTab] = React.useState<string>(tabs[0]?.id || 'anagrafica')
+
+
+  // Allegati (attachments) — caricati solo quando la tab "Allegati" è attiva
+  const selectedOid = (hasSel && oid != null) ? Number(oid) : null
+  const [attachmentsForOid, setAttachmentsForOid] = React.useState<number | null>(null)
+  const [attachments, setAttachments] = React.useState<Array<{ id: number; name?: string; size?: number; contentType?: string; url?: string }>>([])
+  const [attachmentsLoading, setAttachmentsLoading] = React.useState<boolean>(false)
+  const [attachmentsError, setAttachmentsError] = React.useState<string | null>(null)
+
+  const formatBytes = React.useCallback((n?: number) => {
+    if (n == null || isNaN(Number(n))) return ''
+    const num = Number(n)
+    if (num < 1024) return `${num} B`
+    const kb = num / 1024
+    if (kb < 1024) return `${kb.toFixed(1)} KB`
+    const mb = kb / 1024
+    if (mb < 1024) return `${mb.toFixed(1)} MB`
+    const gb = mb / 1024
+    return `${gb.toFixed(1)} GB`
+  }, [])
+
+  const loadAttachments = React.useCallback(async () => {
+    if (!selectedOid) return
+    try {
+      setAttachmentsLoading(true)
+      setAttachmentsError(null)
+
+      const dsAny: any = ds as any
+      const layer = await resolveFeatureLayerForAttachments(dsAny)
+
+      if (!layer) {
+        setAttachments([])
+        setAttachmentsForOid(selectedOid)
+        setAttachmentsError('Non riesco a risalire al FeatureLayer per leggere gli allegati (datasource/vista non espone il layer JS API).')
+        return
+      }
+
+      const res: any = await layer.queryAttachments({
+        objectIds: [selectedOid],
+        returnMetadata: true,
+        returnUrl: true
+      })
+
+      const pullInfos = (obj: any): any[] => {
+        if (!obj) return []
+        if (Array.isArray(obj)) return obj
+        if (Array.isArray(obj.attachmentInfos)) return obj.attachmentInfos
+        if (Array.isArray(obj.attachments)) return obj.attachments
+        return []
+      }
+
+      let infos: any[] = []
+      if (Array.isArray(res)) {
+        for (const g of res) {
+          if (!g) continue
+          const pid = (g.parentObjectId != null) ? g.parentObjectId : (g.objectId != null ? g.objectId : null)
+          if (pid === selectedOid) {
+            infos = pullInfos(g)
+            break
+          }
+        }
+      } else if (res && typeof res === 'object') {
+        if (Array.isArray(res.attachmentGroups)) {
+          for (const g of res.attachmentGroups) {
+            const pid = (g && g.parentObjectId != null) ? g.parentObjectId : (g && g.objectId != null ? g.objectId : null)
+            if (pid === selectedOid) {
+              infos = pullInfos(g)
+              break
+            }
+          }
+        } else if ((res as any)[selectedOid]) {
+          infos = pullInfos((res as any)[selectedOid])
+        } else if ((res as any)[String(selectedOid)]) {
+          infos = pullInfos((res as any)[String(selectedOid)])
+        } else if ((res as any).attachmentInfos) {
+          infos = pullInfos(res)
+        }
+      }
+
+      const clean = (infos || []).map((a: any) => ({
+        id: Number(a.id),
+        name: a.name,
+        size: a.size,
+        contentType: a.contentType,
+        url: a.url
+      })).filter((a: any) => a && !isNaN(a.id))
+
+      setAttachments(clean)
+      setAttachmentsForOid(selectedOid)
+    } catch (e: any) {
+      setAttachments([])
+      setAttachmentsForOid(selectedOid)
+      setAttachmentsError(e?.message || String(e))
+    } finally {
+      setAttachmentsLoading(false)
+    }
+  }, [ds, selectedOid])
+
+  React.useEffect(() => {
+    if (tab === 'allegati' && selectedOid != null && attachmentsForOid !== selectedOid) {
+      loadAttachments()
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tab, selectedOid, attachmentsForOid])
 
   // RIMOSSO: Non resettare la tab quando cambia selezione
   // React.useEffect(() => {
@@ -1505,7 +1695,7 @@ const isPgOnlyField = React.useCallback((fieldName: string) => {
   return Boolean(isRagSoc || isPiva)
 }, [aliasMap])
 
-  const makeRows = React.useCallback((fields: string[], kind: string) => {
+  const makeRows = React.useCallback((fields: string[], kind: string, hideEmpty: boolean) => {
     const rawList = (fields && fields.length) ? fields : autoPickFields(data, kind)
     const tipoRaw = (data && (data as any).__tipo_soggetto_raw != null) ? (data as any).__tipo_soggetto_raw : ((data && (data as any).tipo_soggetto != null) ? (data as any).tipo_soggetto : null)
     const tipoLabel = (data && (data as any).__tipo_soggetto_label != null) ? (data as any).__tipo_soggetto_label : null
@@ -1521,13 +1711,13 @@ const isPgOnlyField = React.useCallback((fieldName: string) => {
     const rows: Array<{ label: string; value: any }> = []
     for (const f of list) {
       if (!f) continue
-      const vv = data ? data[f] : null
+      const vv = data ? (data as any)[f] : null
+      if (hideEmpty && isEmptyValue(vv)) continue
       rows.push({ label: toLabel(f), value: vv })
     }
     return rows
   }, [data, toLabel, classifyTipoSoggetto, isPfOnlyField, isPgOnlyField])
-
-  // Iter: sempre blocchi DT/DA + extra selezionati
+// Iter: sempre blocchi DT/DA + extra selezionati
   const presaDT = data ? data.presa_in_carico_DT : null
   const dtPresaDT = data ? data.dt_presa_in_carico_DT : null
   const statoDT = data ? data.stato_DT : null
@@ -1548,8 +1738,8 @@ const isPgOnlyField = React.useCallback((fieldName: string) => {
     <div style={{ 
       display: 'flex', 
       flexWrap: 'wrap', 
-      gap: 6, 
-      padding: '6px 12px',
+      gap: 8, 
+      padding: '8px 12px',
       alignItems: 'center',
       borderBottom: '1px solid rgba(0,0,0,0.08)',
       background: 'var(--bs-body-bg, #fff)',
@@ -1655,19 +1845,169 @@ if (!hasSel) {
     iterRows.push({ label: 'DA - Note', value: noteDA })
 
     // Aggiungi campi extra configurati
-    const iterExtraRows = aliasesReady ? makeRows(activeTab.fields, activeTab.id.toUpperCase()) : []
+    const iterExtraRows = aliasesReady ? makeRows(activeTab.fields, activeTab.id.toUpperCase(), Boolean((activeTab as any).hideEmpty)) : []
     iterExtraRows.forEach(r => iterRows.push(r))
     
     content = <ReadOnlyPanel title={activeTab.label} ui={ui} rows={iterRows} />
   } else if (activeTab) {
     // Tab normale con campi configurabili
-    const rows = aliasesReady ? makeRows(activeTab.fields, activeTab.id.toUpperCase()) : []
-    content = <ReadOnlyPanel 
-      title={activeTab.label} 
-      ui={ui} 
-      rows={rows} 
-      emptyText={aliasesReady ? undefined : 'Caricamento campi...'} 
-    />
+    const rows = aliasesReady ? makeRows(activeTab.fields, activeTab.id.toUpperCase(), Boolean((activeTab as any).hideEmpty)) : []
+
+    if (activeTab.id === 'allegati') {
+      // Pannello Allegati: elenco attachments (se presenti) + (opzionale) attributi della tab
+      const dsAny: any = ds as any
+      const layer = unwrapJsapiLayer(
+        (dsAny && (typeof dsAny.getLayer === 'function') ? dsAny.getLayer() : null) ||
+        (dsAny && (typeof dsAny.getJsApiLayer === 'function') ? dsAny.getJsApiLayer() : null) ||
+        (dsAny && dsAny.layer) ||
+        dsAny
+      ) as any
+      const layerUrl = layer && layer.url ? String(layer.url) : ''
+
+      const getOpenUrl = (att: any): string | null => {
+        if (att && att.url) return String(att.url)
+        if (layerUrl && selectedOid != null && att && att.id != null) return `${layerUrl}/${selectedOid}/attachments/${att.id}`
+        return null
+      }
+
+      content = (
+        <div style={{ marginTop: 8 }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
+            <div style={{ fontWeight: 700, fontSize: 13 }}>Allegati</div>
+            <button
+              type="button"
+              onClick={() => loadAttachments()}
+              disabled={!hasSel || attachmentsLoading}
+              onMouseEnter={(e) => {
+                if (!(!hasSel || attachmentsLoading)) {
+                  e.currentTarget.style.background = '#eaf2ff'
+                  e.currentTarget.style.borderColor = '#2f6fed'
+                  e.currentTarget.style.color = '#1d4ed8'
+                }
+              }}
+              onMouseLeave={(e) => {
+                if (!(!hasSel || attachmentsLoading)) {
+                  e.currentTarget.style.background = '#fff'
+                  e.currentTarget.style.borderColor = 'rgba(0,0,0,0.12)'
+                  e.currentTarget.style.color = '#111827'
+                }
+              }}
+              style={{
+                padding: '6px 10px',
+                borderRadius: 10,
+                border: '1px solid rgba(0,0,0,0.12)',
+                background: '#fff',
+                color: '#111827',
+                cursor: (!hasSel || attachmentsLoading) ? 'not-allowed' : 'pointer',
+                fontSize: 12,
+                fontWeight: 600,
+                transition: 'all 0.15s ease'
+              }}
+            >
+              Aggiorna
+            </button>
+          </div>
+
+          {!hasSel && (
+            <div style={{ opacity: 0.75, fontSize: 12 }}>Selezionare un rapporto per vedere gli allegati.</div>
+          )}
+
+          {hasSel && attachmentsLoading && (
+            <div style={{ opacity: 0.75, fontSize: 12 }}>Caricamento allegati…</div>
+          )}
+
+          {hasSel && !attachmentsLoading && attachmentsError && (
+            <div style={{ color: '#b00020', fontSize: 12 }}>{attachmentsError}</div>
+          )}
+
+          {hasSel && !attachmentsLoading && !attachmentsError && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+              {(attachments && attachments.length) ? (
+                attachments.map((a) => {
+                  const url = getOpenUrl(a)
+                  const meta = [a.contentType, formatBytes(a.size)].filter(Boolean).join(' • ')
+                  return (
+                    <div
+                      key={a.id}
+                      style={{
+                        border: '1px solid rgba(0,0,0,0.08)',
+                        borderRadius: 12,
+                        padding: '8px 10px',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'space-between',
+                        gap: 10
+                      }}
+                    >
+                      <div style={{ minWidth: 0 }}>
+                        <div style={{ fontWeight: 600, fontSize: 12, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                          {a.name || `Allegato #${a.id}`}
+                        </div>
+                        {meta ? <div style={{ opacity: 0.7, fontSize: 11 }}>{meta}</div> : null}
+                      </div>
+                      {url ? (
+                        <a
+                          href={url}
+                          target="_blank"
+                          rel="noreferrer"
+                          onMouseEnter={(e) => {
+                            e.currentTarget.style.background = '#eaf2ff'
+                            e.currentTarget.style.borderColor = '#2f6fed'
+                            e.currentTarget.style.color = '#1d4ed8'
+                          }}
+                          onMouseLeave={(e) => {
+                            e.currentTarget.style.background = '#fff'
+                            e.currentTarget.style.borderColor = 'rgba(0,0,0,0.12)'
+                            e.currentTarget.style.color = '#111827'
+                          }}
+                          style={{
+                            padding: '6px 10px',
+                            borderRadius: 10,
+                            border: '1px solid rgba(0,0,0,0.12)',
+                            background: '#fff',
+                            color: '#111827',
+                            textDecoration: 'none',
+                            fontSize: 12,
+                            fontWeight: 600,
+                            whiteSpace: 'nowrap',
+                            transition: 'all 0.15s ease'
+                          }}
+                        >
+                          Apri
+                        </a>
+                      ) : (
+                        <span style={{ opacity: 0.6, fontSize: 12, whiteSpace: 'nowrap' }}>URL non disponibile</span>
+                      )}
+                    </div>
+                  )
+                })
+              ) : (
+                <div style={{ opacity: 0.75, fontSize: 12 }}>Nessun allegato.</div>
+              )}
+            </div>
+          )}
+
+          {rows && rows.length > 0 && (
+            <div style={{ marginTop: 12 }}>
+              <div style={{ fontWeight: 700, fontSize: 13, marginBottom: 6 }}>Attributi</div>
+              <ReadOnlyPanel
+                title={activeTab.label}
+                rows={rows}
+                emptyText={hasSel ? 'Nessun campo configurato per questa tab.' : 'Selezionare un rapporto.'}
+              />
+            </div>
+          )}
+        </div>
+      )
+    } else {
+      content = (
+        <ReadOnlyPanel
+          title={activeTab.label}
+          rows={rows}
+          emptyText={hasSel ? 'Nessun campo configurato per questa tab.' : 'Selezionare un rapporto.'}
+        />
+      )
+    }
   }
 }
 
