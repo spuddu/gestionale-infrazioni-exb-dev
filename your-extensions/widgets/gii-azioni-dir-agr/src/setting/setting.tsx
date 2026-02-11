@@ -364,6 +364,19 @@ function NumberControl (props: { label: string, value: number, min?: number, max
   )
 }
 
+function TextControl (props: { label: string, value: string, onChange: (v: string) => void }) {
+  return (
+    <RowBlock label={props.label}>
+      <input
+        type='text'
+        style={inputStyle}
+        value={props.value}
+        onChange={(e) => props.onChange((e.target as HTMLInputElement).value)}
+      />
+    </RowBlock>
+  )
+}
+
 function normalizeStrArray (v: any): string[] {
   const js = asJs<any>(v)
   const arr = Array.isArray(js) ? js : []
@@ -964,6 +977,16 @@ export default function Setting (props: Props) {
           )
         })}
       </SettingSection>
+      <SettingSection title='Titolo pratica'>
+        <TextControl label='Testo titolo' value={String(cfgJs.detailTitlePrefix ?? defaultConfig.detailTitlePrefix)} onChange={(v) => setCfgPatch({ detailTitlePrefix: v })} />
+        <NumberControl label='Altezza riga (px)' value={parseNum(cfgJs.detailTitleHeight, defaultConfig.detailTitleHeight)} min={0} max={60} step={1} onChange={(v) => setCfgPatch({ detailTitleHeight: v })} />
+        <NumberControl label='Spaziatura inferiore (px)' value={parseNum(cfgJs.detailTitlePaddingBottom, defaultConfig.detailTitlePaddingBottom)} min={0} max={30} step={1} onChange={(v) => setCfgPatch({ detailTitlePaddingBottom: v })} />
+        <NumberControl label='Padding sinistro (px)' value={parseNum(cfgJs.detailTitlePaddingLeft, defaultConfig.detailTitlePaddingLeft)} min={0} max={50} step={1} onChange={(v) => setCfgPatch({ detailTitlePaddingLeft: v })} />
+        <NumberControl label='Dimensione font (px)' value={parseNum(cfgJs.detailTitleFontSize, defaultConfig.detailTitleFontSize)} min={10} max={24} step={1} onChange={(v) => setCfgPatch({ detailTitleFontSize: v })} />
+        <NumberControl label='Peso font' value={parseNum(cfgJs.detailTitleFontWeight, defaultConfig.detailTitleFontWeight)} min={100} max={900} step={100} onChange={(v) => setCfgPatch({ detailTitleFontWeight: v })} />
+        <ColorControl label='Colore testo' value={String(cfgJs.detailTitleColor ?? defaultConfig.detailTitleColor)} onChange={(v) => setCfgPatch({ detailTitleColor: v })} />
+      </SettingSection>
+
       <SettingSection title='Maschera (bordi e spazi)'>
         <NumberControl label='Offset esterno (px)' value={parseNum(cfgJs.maskOuterOffset, defaultConfig.maskOuterOffset)} min={0} max={50} step={1} onChange={(v) => setCfgPatch({ maskOuterOffset: v })} />
         <NumberControl label='Padding interno (px)' value={parseNum(cfgJs.maskInnerPadding, defaultConfig.maskInnerPadding)} min={0} max={50} step={1} onChange={(v) => setCfgPatch({ maskInnerPadding: v, panelPadding: v })} />

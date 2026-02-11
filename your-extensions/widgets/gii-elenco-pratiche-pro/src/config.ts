@@ -8,6 +8,18 @@ export interface FilterTab {
 }
 
 /**
+ * Colonna visualizzata nella lista.
+ * `field` può essere un campo layer o un campo virtuale:
+ *   __stato_sint__  /  __ultimo_agg__  /  __prossima__
+ */
+export interface ColumnDef {
+  id: string
+  label: string
+  field: string
+  width: number
+}
+
+/**
  * Larghezze colonne (px)
  */
 export interface ColWidths {
@@ -22,6 +34,9 @@ export interface ColWidths {
 export interface Config {
   // --- Etichette filtri (tabs) per datasourceId
   filterTabs: FilterTab[]
+
+  // --- Colonne visualizzate (gestione dinamica)
+  columns: ColumnDef[]
 
   // --- Ordinamento default
   orderByField: string
@@ -145,12 +160,31 @@ export interface Config {
   maskBorderColor: string
   maskBorderWidth: number
   maskRadius: number
+
+  // --- Titolo elenco (sopra l'area bianca)
+  listTitleText: string
+  listTitleHeight: number
+  listTitlePaddingBottom: number
+  listTitlePaddingLeft: number
+  listTitleFontSize: number
+  listTitleFontWeight: number
+  listTitleColor: string
 }
 
 export type IMConfig = ImmutableObject<Config>
 
+export const DEFAULT_COLUMNS: ColumnDef[] = [
+  { id: 'col_pratica',   label: 'N. pratica',      field: 'objectid',          width: 120 },
+  { id: 'col_data',      label: 'Data rilev.',      field: 'data_rilevazione',  width: 150 },
+  { id: 'col_stato',     label: 'Stato sintetico',  field: '__stato_sint__',    width: 220 },
+  { id: 'col_ufficio',   label: 'Ufficio',          field: 'ufficio_zona',      width: 170 },
+  { id: 'col_ultimo',    label: 'Ultimo agg.',      field: '__ultimo_agg__',    width: 170 },
+  { id: 'col_prossima',  label: 'Prossima azione',  field: '__prossima__',      width: 240 }
+]
+
 export const defaultConfig: IMConfig = Immutable({
   filterTabs: [],
+  columns: DEFAULT_COLUMNS,
 
   orderByField: 'objectid',
   orderByDir: 'DESC',
@@ -271,7 +305,16 @@ export const defaultConfig: IMConfig = Immutable({
   maskBg: '#ffffff',
   maskBorderColor: 'rgba(0,0,0,0.12)',
   maskBorderWidth: 1,
-  maskRadius: 12
+  maskRadius: 12,
+
+  // Titolo elenco
+  listTitleText: 'Elenco rapporti di rilevazione',
+  listTitleHeight: 28,
+  listTitlePaddingBottom: 10,
+  listTitlePaddingLeft: 0,
+  listTitleFontSize: 14,
+  listTitleFontWeight: 600,
+  listTitleColor: 'rgba(0,0,0,0.85)'
 })
 
 export default defaultConfig

@@ -1,5 +1,8 @@
+/** @jsx jsx */
+/** @jsxFrag React.Fragment */
 import {
   React,
+  jsx,
   css,
   DataSourceComponent,
   DataSourceStatus,
@@ -11,10 +14,26 @@ import {
 
 import { Button, Loading } from 'jimu-ui'
 import type { AllWidgetProps } from 'jimu-core'
-import type { IMConfig } from '../config'
-import { defaultConfig } from '../config'
+import type { IMConfig, ColumnDef } from '../config'
+import { defaultConfig, DEFAULT_COLUMNS } from '../config'
 
 type Props = AllWidgetProps<IMConfig>
+
+function getCodPraticaDisplay(rec: DataRecord): string {
+  const a: any = rec?.getData?.() || {}
+  const oid =
+    a?.OBJECTID ?? a?.ObjectId ?? a?.objectid ?? a?.objectId
+  // 1=TR, 2=TI (se presente). Se non presente, fallback su datasource id.
+  let prefix = 'TR'
+  const op = a?.origine_pratica
+  if (op === 2 || op === '2') prefix = 'TI'
+  else if (op === 1 || op === '1') prefix = 'TR'
+  else {
+    const dsId = String((rec as any)?.dataSource?.id || '').toLowerCase()
+    if (dsId.includes('gii_pratiche') || dsId.includes('schema') || dsId.includes('ti')) prefix = 'TI'
+  }
+  return oid != null ? `${prefix}-${oid}` : `${prefix}-?`
+}
 
 type SortDir = 'ASC' | 'DESC'
 type SortItem = { field: string, dir: SortDir }
@@ -106,18 +125,115 @@ function sortSig (s: SortItem[]): string {
   return (s || []).map(x => `${x.field}:${x.dir}`).join('|')
 }
 
+function migrateColumns (cfg: any): ColumnDef[] {
+  const raw = cfg?.columns
+  const cols: any[] = asJs(raw)
+  if (Array.isArray(cols) && cols.length > 0) {
+    return cols.map((c: any) => ({
+      id: String(c.id || ''),
+      label: String(c.label || ''),
+      field: String(c.field || ''),
+      width: num(c.width, 150)
+    }))
+  }
+  return DEFAULT_COLUMNS.map(c => ({ ...c }))
+}
+
+/**
+ * Componente figlio di DataSourceComponent — raccoglie i record e li segnala al parent.
+ * Usa useEffect con signature stabile per evitare loop infiniti.
+ */
+function RecordTracker (p: {
+  ds: DataSource
+  dsId: string
+  info: any
+  onUpdate: (dsId: string, recs: DataRecord[], ds: DataSource, loading: boolean) => void
+}) {
+  const recs: DataRecord[] = (p.ds?.getRecords?.() ?? []) as DataRecord[]
+  const status = p.info?.status ?? p.ds?.getStatus?.() ?? DataSourceStatus.NotReady
+  const isLoading = status === DataSourceStatus.Loading
+
+  // Signature completa: status + conteggio + JSON di tutti i valori del primo record.
+  // Cattura il lazy-loading dei campi (quando i valori passano da undefined a valorizzati).
+  let dataSig = ''
+  if (recs.length > 0) {
+    try { dataSig = JSON.stringify(recs[0].getData?.() || {}) }
+    catch { dataSig = String(recs.length) }
+  }
+  const sig = `${status}:${recs.length}:${dataSig}`
+
+  const prevSig = React.useRef('')
+  React.useEffect(() => {
+    if (sig !== prevSig.current) {
+      prevSig.current = sig
+      p.onUpdate(p.dsId, recs, p.ds, isLoading)
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sig])
+
+  return null
+}
+
 export default function Widget (props: Props) {
   const cfg: any = (props.config ?? defaultConfig) as any
 
   const useDsImm: any = props.useDataSources ?? Immutable([])
   const useDsJs: any[] = asJs(useDsImm)
 
-  // Tabs: se hai più data view/DS, le tratto come filtri/tabs
-  const hasTabs = useDsJs.length > 1
+  // ── Tab groups: data view con la stessa etichetta vengono fuse nello stesso tab ──
+  const tabGroups = React.useMemo(() => {
+    const filterTabsJs: any[] = asJs(cfg.filterTabs) || []
+    const groups: { label: string; dsIndices: number[] }[] = []
+    const labelMap = new Map<string, number>()
 
+    useDsJs.forEach((u: any, i: number) => {
+      const dsId = String(u?.dataSourceId || '')
+      const entry = filterTabsJs.find((t: any) => String(t?.dataSourceId || '') === dsId)
+      const label = String(entry?.label || getDsLabel(u, `Filtro ${i + 1}`))
+
+      if (labelMap.has(label)) {
+        groups[labelMap.get(label)!].dsIndices.push(i)
+      } else {
+        labelMap.set(label, groups.length)
+        groups.push({ label, dsIndices: [i] })
+      }
+    })
+    return groups
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [useDsJs.length, cfg.filterTabs])
+
+  const hasTabs = tabGroups.length > 1
   const [activeTab, setActiveTab] = React.useState<number>(0)
   const [localSelectedByDs, setLocalSelectedByDs] = React.useState<Record<string, string>>({})
-  const dsRefForClear = React.useRef<any>(null)
+
+  // ── Raccolta record da TUTTI i datasource ──
+  const dsDataRef = React.useRef<Record<string, { recs: DataRecord[], ds: DataSource | null, loading: boolean }>>({})
+  const [dsDataVer, setDsDataVer] = React.useState(0)
+
+  const handleDsUpdate = React.useCallback((dsId: string, recs: DataRecord[], ds: DataSource, loading: boolean) => {
+    dsDataRef.current[dsId] = { recs, ds, loading }
+    setDsDataVer(v => v + 1)
+  }, [])
+
+  // ── Ri-leggi i record dopo un breve ritardo per catturare dati lazy-loaded ──
+  React.useEffect(() => {
+    const timers = [500, 1500, 3000]
+    const ids = timers.map(ms => setTimeout(() => {
+      let changed = false
+      Object.entries(dsDataRef.current).forEach(([dsId, entry]) => {
+        if (entry.ds) {
+          const freshRecs = (entry.ds.getRecords?.() ?? []) as DataRecord[]
+          if (freshRecs.length > 0) {
+            dsDataRef.current[dsId] = { ...entry, recs: freshRecs, loading: false }
+            changed = true
+          }
+        }
+      })
+      if (changed) setDsDataVer(v => v + 1)
+    }, ms))
+    return () => ids.forEach(id => clearTimeout(id))
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [useDsJs.length])
 
   // Sort: array (multi sort con Shift+Click)
   const defaultSort: SortItem[] = React.useMemo(() => {
@@ -135,11 +251,11 @@ export default function Widget (props: Props) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sortSig(defaultSort)])
 
-  const activeUseDsJs = useDsJs[activeTab] || useDsJs[0]
-  // props.useDataSources è un ImmutableArray, ma in TypeScript è tipizzato come array:
-  // usare l'indicizzazione ([]) invece di .get() che non esiste su ImmutableArray<T>.
+  // ── Record fusi per il tab attivo ──
+  const clampedTab = Math.min(activeTab, Math.max(0, tabGroups.length - 1))
+  const activeGroup = tabGroups[clampedTab] || tabGroups[0]
+
   const udsAny = (props.useDataSources as any) as any[] | undefined
-  const activeUseDsImm = udsAny?.[activeTab] ?? udsAny?.[0]
 
   const whereClause = txt(cfg.whereClause || '1=1')
   const pageSize = num(cfg.pageSize, 200)
@@ -352,19 +468,52 @@ export default function Widget (props: Props) {
 
   const isCustomSort = sortSig(sortState) !== sortSig(defaultSort)
 
+  // ── Record fusi e ordinati per il tab attivo ──
+  const mergedRecs = React.useMemo(() => {
+    if (!activeGroup) return [] as DataRecord[]
+    const all: DataRecord[] = []
+    for (const di of activeGroup.dsIndices) {
+      const dsId = String(useDsJs[di]?.dataSourceId || '')
+      const entry = dsDataRef.current[dsId]
+      if (entry?.recs) all.push(...entry.recs)
+    }
+    return sortRecords(all, sortState)
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeGroup, dsDataVer, sortState])
+
+  // Lookup: record → dsId (via WeakMap su identità oggetto, sopravvive al sort)
+  const recDsLookup = React.useMemo(() => {
+    const map = new WeakMap<DataRecord, string>()
+    if (!activeGroup) return map
+    for (const di of activeGroup.dsIndices) {
+      const dsId = String(useDsJs[di]?.dataSourceId || '')
+      const entry = dsDataRef.current[dsId]
+      if (entry?.recs) {
+        for (const r of entry.recs) map.set(r, dsId)
+      }
+    }
+    return map
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeGroup, dsDataVer])
+
+  // Loading: true solo se TUTTI i DS del tab attivo stanno ancora caricando
+  // (non se solo uno manca dall'entry — potrebbe essere che non ha ancora risposto)
+  const anyLoading = activeGroup?.dsIndices.every(di => {
+    const dsId = String(useDsJs[di]?.dataSourceId || '')
+    const entry = dsDataRef.current[dsId]
+    if (!entry) return true // mai aggiornato → stiamo aspettando
+    return entry.loading
+  }) ?? false
+
   // layout
   const gap = num(cfg.gap, 12)
   const padFirst = num(cfg.paddingLeftFirstCol, 0)
 
-  const wPratica = num(cfg.colWidths?.pratica, 120)
-  const wData = num(cfg.colWidths?.data, 150)
-  const wStato = num(cfg.colWidths?.stato, 220)
-  const wUff = num(cfg.colWidths?.ufficio, 170)
-  const wUlt = num(cfg.colWidths?.ultimo, 170)
-  const wPross = num(cfg.colWidths?.prossima, 240)
+  // ── Colonne dinamiche da config ──
+  const columns = migrateColumns(asJs(cfg))
 
-  const gridCols = `${wPratica}px ${wData}px ${wStato}px ${wUff}px ${wUlt}px ${wPross}px`
-  const minWidth = wPratica + wData + wStato + wUff + wUlt + wPross + (gap * 5) + 24
+  const gridCols = columns.map(c => `${c.width}px`).join(' ')
+  const minWidth = columns.reduce((sum, c) => sum + c.width, 0) + (gap * Math.max(0, columns.length - 1)) + 24
 
   const rowGap = num(cfg.rowGap, 8)
   const rowPaddingX = num(cfg.rowPaddingX, 12)
@@ -544,12 +693,6 @@ export default function Widget (props: Props) {
     .empty { padding: 14px; color: rgba(0,0,0,0.65); }
   `
 
-  const tabLabel = (i: number, u: any): string => {
-    const labelFromCfg = (cfg.filterTabs || [])?.find((x: any) => String(x?.dataSourceId || '') === String(u?.dataSourceId || ''))?.label
-    const fromDs = getDsLabel(u, `Filtro ${i + 1}`)
-    return txt(labelFromCfg || fromDs || `Filtro ${i + 1}`)
-  }
-
   const Header = (p: { label: string, field: string, first?: boolean }) => {
     const idx = sortState.findIndex(x => x.field === p.field)
     const item = idx >= 0 ? sortState[idx] : null
@@ -586,16 +729,46 @@ export default function Widget (props: Props) {
   const maskBorderWidth = Number.isFinite(Number(cfg.maskBorderWidth)) ? Number(cfg.maskBorderWidth) : 1
   const maskRadius = Number.isFinite(Number(cfg.maskRadius)) ? Number(cfg.maskRadius) : 12
 
-  if (!activeUseDsImm) {
+  if (!useDsJs.length) {
     return <div style={{ padding: 12 }}>{txt(cfg.errorNoDs || 'Configura la fonte dati del widget.')}</div>
   }
 
+  // Titolo elenco
+  const listTitleText = txt(cfg.listTitleText || 'Elenco rapporti di rilevazione')
+  const listTitleHeight = num(cfg.listTitleHeight, 28)
+  const listTitlePaddingBottom = num(cfg.listTitlePaddingBottom, 10)
+  const listTitlePaddingLeft = num(cfg.listTitlePaddingLeft, 0)
+  const listTitleFontSize = num(cfg.listTitleFontSize, 14)
+  const listTitleFontWeight = num(cfg.listTitleFontWeight, 600)
+  const listTitleColor = txt(cfg.listTitleColor || 'rgba(0,0,0,0.85)')
+
   return (
-    <div style={{ width: '100%', height: '100%', boxSizing: 'border-box', padding: maskOuterOffset }}>
+    <div style={{ width: '100%', height: '100%', boxSizing: 'border-box', padding: maskOuterOffset, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
+      {/* Titolo elenco - sopra l'area bianca */}
+      {listTitleText && (
+        <div style={{
+          height: listTitleHeight,
+          paddingBottom: listTitlePaddingBottom,
+          paddingLeft: listTitlePaddingLeft,
+          display: 'flex',
+          alignItems: 'center',
+          boxSizing: 'border-box',
+          flex: '0 0 auto'
+        }}>
+          <span style={{
+            fontSize: listTitleFontSize,
+            fontWeight: listTitleFontWeight,
+            color: listTitleColor
+          }}>
+            {listTitleText}
+          </span>
+        </div>
+      )}
       <div
         style={{
           width: '100%',
-          height: '100%',
+          flex: '1 1 auto',
+          minHeight: 0,
           boxSizing: 'border-box',
           border: `${maskBorderWidth}px solid ${maskBorderColor}`,
           borderRadius: maskRadius,
@@ -605,154 +778,213 @@ export default function Widget (props: Props) {
         }}
       >
         <div css={styles} style={{ width: '100%', height: '100%' }}>
+
+          {/* ── DataSource loaders per TUTTE le data view (invisibili) ── */}
+          {useDsJs.map((u: any, i: number) => (
+            <DataSourceComponent
+              key={u?.dataSourceId || i}
+              useDataSource={udsAny?.[i]}
+              query={dsQuery}
+              widgetId={props.id}
+            >
+              {(ds: DataSource, info: any) => (
+                <RecordTracker ds={ds} dsId={String(u?.dataSourceId || '')} info={info} onUpdate={handleDsUpdate} />
+              )}
+            </DataSourceComponent>
+          ))}
+
+          {/* ── Tab bar (raggruppati per etichetta) ── */}
           {hasTabs && (
             <div className='tabBar'>
-              {useDsJs.map((u, i) => (
+              {tabGroups.map((g, i) => (
                 <button
-                  key={u?.dataSourceId || i}
+                  key={g.label}
                   type='button'
                   className={`tabBtn ${i === activeTab ? 'active' : ''}`}
                   onClick={() => {
-                    // Sgancia la selezione dal data source corrente prima di cambiare tab
-                    if (dsRefForClear.current) {
-                      tryClearSelection(dsRefForClear.current)
+                    // Clear selezioni per i DS del tab corrente
+                    const curGroup = tabGroups[activeTab]
+                    if (curGroup) {
+                      curGroup.dsIndices.forEach(di => {
+                        const dsId = String(useDsJs[di]?.dataSourceId || '')
+                        const entry = dsDataRef.current[dsId]
+                        if (entry?.ds) tryClearSelection(entry.ds)
+                      })
+                      setLocalSelectedByDs(prev => {
+                        const updated = { ...prev }
+                        curGroup.dsIndices.forEach(di => {
+                          delete updated[String(useDsJs[di]?.dataSourceId || '')]
+                        })
+                        return updated
+                      })
                     }
-
-                    // Rimuovi la selezione locale per il data source corrente
-                    const currentDsId = String(activeUseDsJs?.dataSourceId || 'ds')
-                    setLocalSelectedByDs(prev => {
-                      const updated = { ...prev }
-                      delete updated[currentDsId]
-                      return updated
-                    })
-
                     setActiveTab(i)
                   }}
-                  title={getDsLabel(u, `Filtro ${i + 1}`)}
+                  title={g.label}
                 >
-                  {tabLabel(i, u)}
+                  {g.label}
                 </button>
               ))}
             </div>
           )}
 
+          {/* ── Contenuto: record fusi da tutti i DS del tab attivo ── */}
           <div className='viewport'>
             <div className='content'>
-              <DataSourceComponent
-                key={activeUseDsJs?.dataSourceId || activeTab}
-                useDataSource={activeUseDsImm}
-                query={dsQuery}
-                widgetId={props.id}
-              >
-                {(ds: DataSource, info) => {
-                  // Salva riferimento per clear selection su cambio tab
-                  dsRefForClear.current = ds
-                  const status = info?.status ?? ds.getStatus?.() ?? DataSourceStatus.NotReady
-                  const isLoading = status === DataSourceStatus.Loading
+              {anyLoading && <Loading />}
 
-                  const recsRaw = (ds.getRecords?.() ?? []) as DataRecord[]
-                  const recs = sortRecords(recsRaw, sortState)
+              {!anyLoading && mergedRecs.length === 0 && (
+                <div className='empty'>{txt(cfg.emptyMessage || 'Nessun record trovato.')}</div>
+              )}
 
-                  const selected = (ds.getSelectedRecords?.() ?? []) as DataRecord[]
-                  const selId = selected?.[0]?.getId?.()
-
-                  const dsId = String(activeUseDsJs?.dataSourceId || 'ds')
-                  const localSel = localSelectedByDs[dsId]
-                  const selectedId = (selId && String(selId)) || localSel || ''
-
-                  if (isLoading) return <Loading />
-                  if (!recs || recs.length === 0) return <div className='empty'>{txt(cfg.emptyMessage || 'Nessun record trovato.')}</div>
-
-                  return (
-                    <>
-                      {cfg.showHeader !== false && (
-                        <div className='headerWrap'>
-                          <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 6 }}>
-                            {isCustomSort && (
-                              <Button
-                                size='sm'
-                                type='tertiary'
-                                className='resetBtn'
-                                onClick={() => setSortState(defaultSort)}
-                                title='Ripristina ordinamento di default'
-                                aria-label='Reset ordinamento'
-                              >
-                                Reset
-                              </Button>
-                            )}
-                          </div>
-
-                          <div className='gridHeader'>
-                            <Header first label={txt(cfg.headerPratica || 'N. pratica')} field={fieldPratica} />
-                            <Header label={txt(cfg.headerData || 'Data rilev.')} field={fieldDataRil} />
-                            <Header label={txt(cfg.headerStato || 'Stato sintetico')} field={V_STATO} />
-                            <Header label={txt(cfg.headerUfficio || 'Ufficio')} field={fieldUfficio} />
-                            <Header label={txt(cfg.headerUltimoAgg || 'Ultimo agg.')} field={V_ULTIMO} />
-                            <Header label={txt(cfg.headerProssima || 'Prossima azione')} field={V_PROSSIMA} />
-                          </div>
-                        </div>
-                      )}
-
-                      <div className='list'>
-                        {recs.map((r, idx) => {
-                          const d = r.getData?.() || {}
-                          const oid = Number(d.OBJECTID)
-                          const rid = String(r.getId?.() ?? oid)
-
-                          const pratica = txt(d[fieldPratica])
-                          const dataRil = formatDateIt(d[fieldDataRil])
-                          const ufficio = txt(d[fieldUfficio])
-
-                          const sintetico = computeSintetico(d)
-                          const statoLabel = txt(sintetico.label)
-                          const statoChipNum = sintetico.statoForChip
-
-                          const ultimoMs = computeUltimoAggMs(d)
-                          const ultimo = ultimoMs ? formatDateIt(ultimoMs) : '—'
-
-                          const prossima = computeProssima(d, sintetico.ruolo)
-
-                          const isSel = selectedId && rid === selectedId
-                          const even = idx % 2 === 0
-
-                          return (
-                            <div
-                              key={rid}
-                              className={`rowCard ${even ? 'even' : 'odd'} ${isSel ? 'selected' : ''}`}
-                              onClick={() => {
-                                if (isSel) {
-                                  setLocalSelectedByDs(prev => {
-                                    const updated = { ...prev }
-                                    delete updated[dsId]
-                                    return updated
-                                  })
-                                  tryClearSelection(ds as any)
-                                } else {
-                                  setLocalSelectedByDs(prev => ({ ...prev, [dsId]: rid }))
-                                  trySelectRecord(ds as any, r, rid)
-                                }
-                              }}
-                            >
-                              <div className='cell first' title={pratica}>{pratica}</div>
-                              <div className='cell' title={dataRil}>{dataRil}</div>
-
-                              <div className='cell' title={statoLabel}>
-                                <span className='chip' style={getChipStyle(Number.isFinite(Number(statoChipNum)) ? Number(statoChipNum) : null)}>
-                                  {statoLabel}
-                                </span>
-                              </div>
-
-                              <div className='cell' title={ufficio}>{ufficio}</div>
-                              <div className='cell' title={ultimo}>{ultimo}</div>
-                              <div className='cell' title={prossima}>{prossima}</div>
-                            </div>
-                          )
-                        })}
+              {mergedRecs.length > 0 && (
+                <>
+                  {cfg.showHeader !== false && (
+                    <div className='headerWrap'>
+                      <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 6 }}>
+                        {isCustomSort && (
+                          <Button
+                            size='sm'
+                            type='tertiary'
+                            className='resetBtn'
+                            onClick={() => setSortState(defaultSort)}
+                            title='Ripristina ordinamento di default'
+                            aria-label='Reset ordinamento'
+                          >
+                            Reset
+                          </Button>
+                        )}
                       </div>
-                    </>
-                  )
-                }}
-              </DataSourceComponent>
+
+                      <div className='gridHeader'>
+                        {columns.map((col, ci) => (
+                          <Header key={col.id} first={ci === 0} label={col.label} field={col.field} />
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  <div className='list'>
+                    {mergedRecs.map((r, idx) => {
+                      const d = r.getData?.() || {}
+                      const oid = Number(d.OBJECTID)
+                      const rid = String(r.getId?.() ?? oid)
+                      const recDsId = recDsLookup.get(r) || ''
+
+                      const fp = String(fieldPratica || '').toLowerCase()
+                      const pratica = (fp === 'objectid' || fp === 'oid' || fp === 'object_id')
+                        ? getCodPraticaDisplay(r)
+                        : txt(d[fieldPratica])
+                      const dataRil = formatDateIt(d[fieldDataRil])
+                      const ufficio = txt(d[fieldUfficio])
+
+                      const sintetico = computeSintetico(d)
+                      const statoLabel = txt(sintetico.label)
+                      const statoChipNum = sintetico.statoForChip
+
+                      const ultimoMs = computeUltimoAggMs(d)
+                      const ultimo = ultimoMs ? formatDateIt(ultimoMs) : '—'
+
+                      const prossima = computeProssima(d, sintetico.ruolo)
+
+                      const isSel = (localSelectedByDs[recDsId] === rid)
+                      const even = idx % 2 === 0
+
+                      return (
+                        <div
+                          key={`${recDsId}_${rid}`}
+                          className={`rowCard ${even ? 'even' : 'odd'} ${isSel ? 'selected' : ''}`}
+                          onClick={() => {
+                            if (isSel) {
+                              // Deseleziona su TUTTI i DS
+                              setLocalSelectedByDs({})
+                              Object.keys(dsDataRef.current).forEach(id => {
+                                const e = dsDataRef.current[id]
+                                if (e?.ds) tryClearSelection(e.ds)
+                              })
+                              // Deseleziona anche su tutti i DS parent via DataSourceManager
+                              useDsJs.forEach((u: any) => {
+                                const dsId = String(u?.dataSourceId || '')
+                                try {
+                                  const mainDs = DataSourceManager.getInstance().getDataSource(dsId)
+                                  if (mainDs) tryClearSelection(mainDs)
+                                  // Risali al parent DS
+                                  const parentId = (mainDs as any)?.parentDataSource?.id || (mainDs as any)?.getMainDataSource?.()?.id
+                                  if (parentId) {
+                                    const parentDs = DataSourceManager.getInstance().getDataSource(parentId)
+                                    if (parentDs) tryClearSelection(parentDs)
+                                  }
+                                } catch {}
+                              })
+                            } else {
+                              // Pulisci tutte le selezioni precedenti su tutti i DS
+                              Object.keys(dsDataRef.current).forEach(id => {
+                                const e = dsDataRef.current[id]
+                                if (e?.ds) tryClearSelection(e.ds)
+                              })
+                              // Seleziona questo record sul suo DS nativo
+                              setLocalSelectedByDs({ [recDsId]: rid })
+                              const entry = dsDataRef.current[recDsId]
+                              if (entry?.ds) trySelectRecord(entry.ds, r, rid)
+
+                              // Propaga: forza setSelectedRecords con lo stesso record
+                              // su TUTTI i DS del gruppo (ExB usa l'interfaccia DataRecord)
+                              if (activeGroup) {
+                                activeGroup.dsIndices.forEach(di => {
+                                  const otherId = String(useDsJs[di]?.dataSourceId || '')
+                                  if (otherId === recDsId) return
+                                  const otherEntry = dsDataRef.current[otherId]
+                                  if (otherEntry?.ds) {
+                                    try { (otherEntry.ds as any).setSelectedRecords?.([r]) } catch {}
+                                    try { (otherEntry.ds as any).selectRecordsByIds?.([rid]) } catch {}
+                                  }
+                                  // Anche sul parent DS (il feature layer principale)
+                                  try {
+                                    const mainDs = DataSourceManager.getInstance().getDataSource(otherId)
+                                    const parentDs = (mainDs as any)?.parentDataSource || (mainDs as any)?.getMainDataSource?.()
+                                    if (parentDs) {
+                                      try { parentDs.setSelectedRecords?.([r]) } catch {}
+                                    }
+                                  } catch {}
+                                })
+                              }
+                            }
+                          }}
+                        >
+                          {columns.map((col, ci) => {
+                            const f = col.field
+                            if (f === V_STATO) {
+                              return (
+                                <div key={col.id} className={ci === 0 ? 'cell first' : 'cell'} title={statoLabel}>
+                                  <span className='chip' style={getChipStyle(Number.isFinite(Number(statoChipNum)) ? Number(statoChipNum) : null)}>
+                                    {statoLabel}
+                                  </span>
+                                </div>
+                              )
+                            }
+                            if (f === V_ULTIMO) {
+                              return <div key={col.id} className={ci === 0 ? 'cell first' : 'cell'} title={ultimo}>{ultimo}</div>
+                            }
+                            if (f === V_PROSSIMA) {
+                              return <div key={col.id} className={ci === 0 ? 'cell first' : 'cell'} title={prossima}>{prossima}</div>
+                            }
+                            const fl = f.toLowerCase()
+                            if (fl === 'objectid' || fl === 'oid' || fl === 'object_id') {
+                              return <div key={col.id} className={ci === 0 ? 'cell first' : 'cell'} title={pratica}>{pratica}</div>
+                            }
+                            if (fl.startsWith('data_') || fl.startsWith('dt_')) {
+                              const val = formatDateIt(d[f])
+                              return <div key={col.id} className={ci === 0 ? 'cell first' : 'cell'} title={val}>{val}</div>
+                            }
+                            const val = txt(d[f])
+                            return <div key={col.id} className={ci === 0 ? 'cell first' : 'cell'} title={val}>{val}</div>
+                          })}
+                        </div>
+                      )
+                    })}
+                  </div>
+                </>
+              )}
             </div>
           </div>
         </div>

@@ -1476,6 +1476,16 @@ function DetailTabsPanel (props: {
   const oid = active?.state?.oid ?? null
   const hasSel = oid != null && Number.isFinite(oid)
 
+  // Codice pratica per il titolo
+  const praticaCode = React.useMemo(() => {
+    if (!hasSel || !data) return ''
+    const op = data.origine_pratica ?? data.Origine_pratica ?? data.ORIGINE_PRATICA
+    let prefix = 'TR'
+    if (op === 2 || op === '2' || String(op).toUpperCase() === 'TI') prefix = 'TI'
+    else if (op === 1 || op === '1' || String(op).toUpperCase() === 'TR') prefix = 'TR'
+    return `${prefix}-${oid}`
+  }, [hasSel, data, oid])
+
   const [tab, setTab] = React.useState<string>(tabs[0]?.id || 'anagrafica')
 
 
@@ -2013,6 +2023,26 @@ if (!hasSel) {
 
 return (
   <div style={outerStyle}>
+    {/* Titolo pratica - sopra l'area bianca */}
+    <div style={{
+      height: ui.detailTitleHeight ?? 28,
+      paddingBottom: ui.detailTitlePaddingBottom ?? 10,
+      paddingLeft: ui.detailTitlePaddingLeft ?? 0,
+      display: 'flex',
+      alignItems: 'center',
+      boxSizing: 'border-box',
+      flex: '0 0 auto'
+    }}>
+      <span style={{
+        fontSize: ui.detailTitleFontSize ?? 14,
+        fontWeight: ui.detailTitleFontWeight ?? 600,
+        color: hasSel && praticaCode
+          ? (ui.detailTitleColor ?? 'rgba(0,0,0,0.85)')
+          : 'rgba(0,0,0,0.40)'
+      }}>
+        {String(ui.detailTitlePrefix ?? 'Dettaglio rapporto n.')} {hasSel && praticaCode ? praticaCode : '–'}
+      </span>
+    </div>
     <div style={frameStyle}>
       <div style={tabsStyle}>{TabsBar}</div>
       <div style={contentStyle}>{content}</div>
@@ -2056,8 +2086,15 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
     reasonsZebraEvenBg: String(cfg.reasonsZebraEvenBg ?? defaultConfig.reasonsZebraEvenBg),
     reasonsRowBorderColor: String(cfg.reasonsRowBorderColor ?? defaultConfig.reasonsRowBorderColor),
     reasonsRowBorderWidth: Number.isFinite(Number(cfg.reasonsRowBorderWidth)) ? Number(cfg.reasonsRowBorderWidth) : defaultConfig.reasonsRowBorderWidth,
-    reasonsRowRadius: Number.isFinite(Number(cfg.reasonsRowRadius)) ? Number(cfg.reasonsRowRadius) : defaultConfig.reasonsRowRadius
-  
+    reasonsRowRadius: Number.isFinite(Number(cfg.reasonsRowRadius)) ? Number(cfg.reasonsRowRadius) : defaultConfig.reasonsRowRadius,
+
+    detailTitlePrefix: String(cfg.detailTitlePrefix ?? defaultConfig.detailTitlePrefix),
+    detailTitleHeight: Number.isFinite(Number(cfg.detailTitleHeight)) ? Number(cfg.detailTitleHeight) : defaultConfig.detailTitleHeight,
+    detailTitlePaddingBottom: Number.isFinite(Number(cfg.detailTitlePaddingBottom)) ? Number(cfg.detailTitlePaddingBottom) : defaultConfig.detailTitlePaddingBottom,
+    detailTitlePaddingLeft: Number.isFinite(Number(cfg.detailTitlePaddingLeft)) ? Number(cfg.detailTitlePaddingLeft) : defaultConfig.detailTitlePaddingLeft,
+    detailTitleFontSize: Number.isFinite(Number(cfg.detailTitleFontSize)) ? Number(cfg.detailTitleFontSize) : defaultConfig.detailTitleFontSize,
+    detailTitleFontWeight: Number.isFinite(Number(cfg.detailTitleFontWeight)) ? Number(cfg.detailTitleFontWeight) : defaultConfig.detailTitleFontWeight,
+    detailTitleColor: String(cfg.detailTitleColor ?? defaultConfig.detailTitleColor)
   }
 
   const tabFields: TabFields = {

@@ -57,6 +57,15 @@ export interface Config {
   statusFontSize: number
   msgFontSize: number
 
+  // --- Titolo pratica (sopra il pannello)
+  detailTitlePrefix: string
+  detailTitleHeight: number
+  detailTitlePaddingBottom: number
+  detailTitlePaddingLeft: number
+  detailTitleFontSize: number
+  detailTitleFontWeight: number
+  detailTitleColor: string
+
   // --- Motivazioni respinta
   rejectReasons: string[]
 
@@ -109,6 +118,15 @@ export const defaultConfig: Config = {
   titleFontSize: 14,
   statusFontSize: 13,
   msgFontSize: 15,
+
+  // Titolo pratica
+  detailTitlePrefix: 'Dettaglio rapporto n.',
+  detailTitleHeight: 28,
+  detailTitlePaddingBottom: 10,
+  detailTitlePaddingLeft: 0,
+  detailTitleFontSize: 14,
+  detailTitleFontWeight: 600,
+  detailTitleColor: 'rgba(0,0,0,0.85)',
 
   rejectReasons: [
     'Mancanza requisiti',

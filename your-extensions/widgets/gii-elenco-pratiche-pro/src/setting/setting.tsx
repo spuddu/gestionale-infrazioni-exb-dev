@@ -1,9 +1,11 @@
 /** @jsx jsx */
+/** @jsxFrag React.Fragment */
 import { React, jsx, Immutable, DataSourceTypes, DataSourceManager } from 'jimu-core'
 import type { AllWidgetSettingProps } from 'jimu-for-builder'
 import { DataSourceSelector } from 'jimu-ui/advanced/data-source-selector'
 import { SettingSection, SettingRow } from 'jimu-ui/advanced/setting-components'
-import { IMConfig, defaultConfig } from '../config'
+import { IMConfig, defaultConfig, DEFAULT_COLUMNS } from '../config'
+import type { ColumnDef } from '../config'
 
 type Props = AllWidgetSettingProps<IMConfig>
 
@@ -132,6 +134,114 @@ function NumInput (props: { value: any, onChange: (n: number) => void, step?: nu
   )
 }
 
+// ─── Campi virtuali (calcolati dal runtime) ──────────────────────────
+const VIRTUAL_FIELDS: FieldOpt[] = [
+  { name: '__stato_sint__', alias: '⚙ Stato sintetico (calcolato)', type: 'virtual' },
+  { name: '__ultimo_agg__', alias: '⚙ Ultimo aggiornamento (calcolato)', type: 'virtual' },
+  { name: '__prossima__',   alias: '⚙ Prossima azione (calcolato)', type: 'virtual' }
+]
+
+function migrateColumns (cfgAny: any): ColumnDef[] {
+  const raw = cfgAny?.columns
+  const cols: any[] = asJs(raw)
+  if (Array.isArray(cols) && cols.length > 0) {
+    return cols.map((c: any) => ({
+      id: String(c.id || `col_${Math.random().toString(36).slice(2, 8)}`),
+      label: String(c.label || ''),
+      field: String(c.field || ''),
+      width: parseNum(c.width, 150)
+    }))
+  }
+  const cw: any = asJs(cfgAny?.colWidths) || {}
+  return [
+    { id: 'col_pratica',  label: String(cfgAny?.headerPratica  || 'N. pratica'),     field: String(cfgAny?.fieldPratica         || 'objectid'),         width: parseNum(cw.pratica,  120) },
+    { id: 'col_data',     label: String(cfgAny?.headerData     || 'Data rilev.'),     field: String(cfgAny?.fieldDataRilevazione || 'data_rilevazione'), width: parseNum(cw.data,     150) },
+    { id: 'col_stato',    label: String(cfgAny?.headerStato    || 'Stato sintetico'), field: '__stato_sint__',                                           width: parseNum(cw.stato,    220) },
+    { id: 'col_ufficio',  label: String(cfgAny?.headerUfficio  || 'Ufficio'),         field: String(cfgAny?.fieldUfficio         || 'ufficio_zona'),     width: parseNum(cw.ufficio,  170) },
+    { id: 'col_ultimo',   label: String(cfgAny?.headerUltimoAgg || 'Ultimo agg.'),   field: '__ultimo_agg__',                                           width: parseNum(cw.ultimo,   170) },
+    { id: 'col_prossima', label: String(cfgAny?.headerProssima || 'Prossima azione'), field: '__prossima__',                                             width: parseNum(cw.prossima, 240) }
+  ]
+}
+
+// ─── ColumnManager (card layout per pannello stretto ~280px) ─────────
+function ColumnManager (props: {
+  columns: ColumnDef[]
+  allFields: FieldOpt[]
+  onChange: (cols: ColumnDef[]) => void
+}) {
+  const cols = Array.isArray(props.columns) ? props.columns : []
+  const [dragFrom, setDragFrom] = React.useState<number | null>(null)
+  const [dragOver, setDragOver] = React.useState<number | null>(null)
+
+  const updateCol = (index: number, patch: Partial<ColumnDef>) => {
+    props.onChange(cols.map((c, i) => i === index ? { ...c, ...patch } : c))
+  }
+  const removeCol = (index: number) => props.onChange(cols.filter((_, i) => i !== index))
+  const addCol = () => props.onChange([...cols, { id: `col_${Date.now()}`, label: 'Nuova colonna', field: '', width: 150 }])
+  const move = (from: number, to: number) => {
+    if (from === to || to < 0 || to >= cols.length) return
+    const arr = [...cols]; const [moved] = arr.splice(from, 1); arr.splice(to, 0, moved); props.onChange(arr)
+  }
+
+  const handleDragStart = (i: number) => setDragFrom(i)
+  const handleDragOver = (e: React.DragEvent, i: number) => { e.preventDefault(); setDragOver(i) }
+  const handleDrop = (i: number) => { if (dragFrom !== null && dragFrom !== i) move(dragFrom, i); setDragFrom(null); setDragOver(null) }
+  const handleDragEnd = () => { setDragFrom(null); setDragOver(null) }
+
+  const cardBase: React.CSSProperties = { padding: '10px 12px', borderRadius: 10, border: '1px solid rgba(0,0,0,0.12)', background: '#fff', marginBottom: 10 }
+  const cardHi: React.CSSProperties = { ...cardBase, borderColor: '#2f6fed', background: '#eaf2ff' }
+  const fi: React.CSSProperties = { width: '100%', padding: '6px 8px', borderRadius: 6, border: '1px solid rgba(0,0,0,0.18)', fontSize: 13 }
+  const tl: React.CSSProperties = { fontSize: 10, fontWeight: 700, opacity: 0.6, textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 4 }
+  const ab: React.CSSProperties = { border: '1px solid rgba(0,0,0,0.15)', background: '#f6f7f9', borderRadius: 6, cursor: 'pointer', fontSize: 12, padding: '4px 7px', lineHeight: 1, fontWeight: 700 }
+  const rb: React.CSSProperties = { ...ab, background: '#fee', color: '#d13438', fontSize: 14, padding: '4px 8px' }
+
+  return (
+    <div style={{ width: '100%' }}>
+      {cols.map((col, idx) => (
+        <div
+          key={col.id} draggable
+          onDragStart={() => handleDragStart(idx)} onDragOver={(e) => handleDragOver(e, idx)}
+          onDrop={() => handleDrop(idx)} onDragEnd={handleDragEnd}
+          style={{ ...(dragOver === idx ? cardHi : cardBase), opacity: dragFrom === idx ? 0.45 : 1 }}
+        >
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 8 }}>
+            <span style={{ cursor: 'grab', fontSize: 15, color: 'rgba(0,0,0,0.4)', userSelect: 'none' }} title='Trascina'>☰</span>
+            <span style={{ flex: 1, fontSize: 12, fontWeight: 800, color: '#333' }}>Colonna {idx + 1}</span>
+            <button type='button' style={ab} disabled={idx === 0} onClick={() => move(idx, idx - 1)} title='Su'>▲</button>
+            <button type='button' style={ab} disabled={idx === cols.length - 1} onClick={() => move(idx, idx + 1)} title='Giù'>▼</button>
+            <button type='button' style={rb} onClick={() => removeCol(idx)} title='Rimuovi'>✕</button>
+          </div>
+          <div style={tl}>Intestazione</div>
+          <input type='text' style={fi} value={col.label} onChange={(e) => updateCol(idx, { label: (e.target as HTMLInputElement).value })} placeholder='Intestazione' />
+          <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
+            <div style={{ flex: 1 }}>
+              <div style={tl}>Campo</div>
+              <select style={fi} value={col.field} onChange={(e) => updateCol(idx, { field: (e.target as HTMLSelectElement).value })}>
+                <option value=''>— seleziona —</option>
+                <optgroup label='Calcolati'>
+                  {VIRTUAL_FIELDS.map(f => (<option key={f.name} value={f.name}>{f.alias}</option>))}
+                </optgroup>
+                <optgroup label='Layer'>
+                  {(props.allFields || []).map(f => (<option key={f.name} value={f.name}>{f.alias} ({f.name})</option>))}
+                </optgroup>
+              </select>
+            </div>
+            <div style={{ width: 75 }}>
+              <div style={tl}>Largh. px</div>
+              <input type='number' style={{ ...fi, textAlign: 'center' }} value={col.width} min={40} step={10} onChange={(e) => updateCol(idx, { width: parseNum((e.target as HTMLInputElement).value, 120) })} />
+            </div>
+          </div>
+        </div>
+      ))}
+      <div style={{ display: 'flex', gap: 8, marginTop: 4 }}>
+        <button type='button' style={{ padding: '6px 10px', borderRadius: 10, border: '1px solid #2f6fed', background: '#eaf2ff', color: '#2f6fed', cursor: 'pointer', fontSize: 12, fontWeight: 700, flex: 1, textAlign: 'center' }} onClick={addCol}>+ Aggiungi colonna</button>
+        <button type='button' style={{ padding: '6px 10px', borderRadius: 10, border: '1px solid rgba(0,0,0,0.2)', background: '#f6f7f9', cursor: 'pointer', fontSize: 12, fontWeight: 700, color: '#111' }} onClick={() => props.onChange(DEFAULT_COLUMNS.map(c => ({ ...c })))}>Reset default</button>
+      </div>
+      {!cols.length && <div style={{ fontSize: 12, opacity: 0.65, marginTop: 8 }}>Nessuna colonna. Premi "Reset default".</div>}
+    </div>
+  )
+}
+
 export default function Setting (props: Props) {
   const cfg: any = (props.config ?? defaultConfig) as any
 
@@ -222,6 +332,10 @@ export default function Setting (props: Props) {
     return () => { cancelled = true }
   }, [primaryDsId])
 
+  // ── Colonne: lettura ──
+  const cfgJs: any = asJs(cfg) || {}
+  const columns = migrateColumns(cfgJs)
+
   return (
     <div style={{ width: '100%' }}>
       <SettingSection title='Fonte dati'>
@@ -244,33 +358,97 @@ export default function Setting (props: Props) {
 
       {useDsJs.length > 1 && (
         <SettingSection title='Etichette filtri (tab)'>
-          {useDsJs.map((u, i) => {
-            const dsId = String(u?.dataSourceId || '')
-            const tab = (asJs(cfg.filterTabs ?? Immutable([])) as any[]).find(t => String(t?.dataSourceId || '') === dsId) || { dataSourceId: dsId, label: '' }
-            return (
-              <RowStack
-                key={dsId || i}
-                label={`Filtro ${i + 1}`}
-                help={`Datasource: ${dsId}`}
-              >
-                <input
-                  style={inputStyle}
-                  value={String(tab.label || '')}
-                  onChange={(e) => {
-                    const v = (e.target as HTMLInputElement).value
-                    const tabs = (asJs(cfg.filterTabs ?? Immutable([])) as any[]).map(t => ({ ...t }))
-                    const idx = tabs.findIndex(t => String(t?.dataSourceId || '') === dsId)
-                    if (idx >= 0) tabs[idx].label = v
-                    else tabs.push({ dataSourceId: dsId, label: v })
-                    update('filterTabs', tabs)
-                  }}
-                  placeholder='Etichetta tab'
-                />
-              </RowStack>
-            )
-          })}
+          <SettingRow>
+            <div style={{ width: '100%', fontSize: 12, opacity: 0.75, marginBottom: 8 }}>
+              I datasource con la stessa etichetta vengono fusi nello stesso tab.
+            </div>
+          </SettingRow>
+          {(() => {
+            const tabs = asJs(cfg.filterTabs ?? Immutable([])) as any[]
+            // Raggruppa i DS per label
+            const grouped: { label: string, items: { dsId: string, idx: number }[] }[] = []
+            const labelMap: Record<string, number> = {}
+            useDsJs.forEach((u, i) => {
+              const dsId = String(u?.dataSourceId || '')
+              const tab = tabs.find(t => String(t?.dataSourceId || '') === dsId)
+              const label = String(tab?.label || `Filtro ${i + 1}`)
+              if (labelMap[label] != null) {
+                grouped[labelMap[label]].items.push({ dsId, idx: i })
+              } else {
+                labelMap[label] = grouped.length
+                grouped.push({ label, items: [{ dsId, idx: i }] })
+              }
+            })
+            return grouped.map((g, gi) => (
+              <div key={gi} style={{
+                border: '1px solid rgba(255,255,255,0.15)',
+                borderRadius: 6,
+                padding: '8px 10px',
+                marginBottom: 8,
+                background: 'rgba(255,255,255,0.04)'
+              }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 6 }}>
+                  <span style={{ fontWeight: 600, fontSize: 13, flex: 1 }}>Tab: {g.label}</span>
+                  <span style={{
+                    fontSize: 11,
+                    background: 'rgba(0,120,218,0.15)',
+                    color: '#4db8ff',
+                    borderRadius: 4,
+                    padding: '1px 6px'
+                  }}>{g.items.length} DS</span>
+                </div>
+                {g.items.map((item) => (
+                  <div key={item.dsId} style={{
+                    fontSize: 11,
+                    opacity: 0.7,
+                    padding: '2px 0 2px 8px',
+                    borderLeft: '2px solid rgba(255,255,255,0.12)'
+                  }}>
+                    {item.dsId}
+                  </div>
+                ))}
+                <div style={{ marginTop: 6 }}>
+                  <input
+                    style={inputStyle}
+                    value={g.label}
+                    onChange={(e) => {
+                      const v = (e.target as HTMLInputElement).value
+                      const newTabs = tabs.map(t => ({ ...t }))
+                      g.items.forEach((item) => {
+                        const tidx = newTabs.findIndex(t => String(t?.dataSourceId || '') === item.dsId)
+                        if (tidx >= 0) newTabs[tidx].label = v
+                        else newTabs.push({ dataSourceId: item.dsId, label: v })
+                      })
+                      update('filterTabs', newTabs)
+                    }}
+                    placeholder='Etichetta tab'
+                  />
+                </div>
+              </div>
+            ))
+          })()}
         </SettingSection>
       )}
+
+      {/* ═══════ COLONNE VISUALIZZATE ═══════ */}
+      <SettingSection title='Colonne visualizzate'>
+        <SettingRow>
+          <div style={{ width: '100%' }}>
+            <div style={{ fontSize: 12, opacity: 0.75, marginBottom: 10 }}>
+              Aggiungi, rimuovi e riordina le colonne della tabella.
+              Trascina ☰ oppure usa ▲▼.
+            </div>
+            <ColumnManager
+              columns={columns}
+              allFields={fields}
+              onChange={(newCols) => {
+                console.log('[GII-Elenco] onChange columns →', newCols)
+                update('columns', newCols)
+              }}
+            />
+          </div>
+        </SettingRow>
+      </SettingSection>
 
       <SettingSection title='Campi (mapping layer)'>
         <RowStack label='N. pratica'>
@@ -571,6 +749,28 @@ export default function Setting (props: Props) {
         <ColorControl label='Altro: bg' value={String(cfg.statoBgAltro || '')} onChange={(v) => update('statoBgAltro', v)} />
         <ColorControl label='Altro: text' value={String(cfg.statoTextAltro || '')} onChange={(v) => update('statoTextAltro', v)} />
         <ColorControl label='Altro: border' value={String(cfg.statoBorderAltro || '')} onChange={(v) => update('statoBorderAltro', v)} />
+      </SettingSection>
+
+      <SettingSection title='Titolo elenco'>
+        <RowStack label='Testo titolo'>
+          <input style={inputStyle} value={String(cfg.listTitleText || '')} onChange={(e) => update('listTitleText', (e.target as HTMLInputElement).value)} placeholder='Elenco rapporti di rilevazione' />
+        </RowStack>
+        <RowStack label='Altezza riga (px)'>
+          <NumInput value={cfg.listTitleHeight} onChange={(n) => update('listTitleHeight', n)} min={0} max={60} step={1} />
+        </RowStack>
+        <RowStack label='Spaziatura inferiore (px)'>
+          <NumInput value={cfg.listTitlePaddingBottom} onChange={(n) => update('listTitlePaddingBottom', n)} min={0} max={30} step={1} />
+        </RowStack>
+        <RowStack label='Padding sinistro (px)'>
+          <NumInput value={cfg.listTitlePaddingLeft} onChange={(n) => update('listTitlePaddingLeft', n)} min={0} max={50} step={1} />
+        </RowStack>
+        <RowStack label='Dimensione font (px)'>
+          <NumInput value={cfg.listTitleFontSize} onChange={(n) => update('listTitleFontSize', n)} min={10} max={24} step={1} />
+        </RowStack>
+        <RowStack label='Peso font'>
+          <NumInput value={cfg.listTitleFontWeight} onChange={(n) => update('listTitleFontWeight', n)} min={100} max={900} step={100} />
+        </RowStack>
+        <ColorControl label='Colore testo' value={String(cfg.listTitleColor || 'rgba(0,0,0,0.85)')} onChange={(v) => update('listTitleColor', v)} />
       </SettingSection>
 
       <SettingSection title='Maschera (bordo pannello)'>
