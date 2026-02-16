@@ -66,6 +66,19 @@ export interface Config {
   detailTitleFontWeight: number
   detailTitleColor: string
 
+  // --- Pulsanti editing TI
+  showEditButtons: boolean          // mostra/nasconde i pulsanti modifica
+  editOverlayColor: string          // colore pulsante "Modifica (overlay)"
+  editPageColor: string             // colore pulsante "Modifica (pagina)"
+  editPageId: string                // ID pagina ExB destinazione navigazione
+  // Logica abilitazione: il pulsante è attivo solo se
+  // stato_TI >= editMinStato E stato_TI <= editMaxStato
+  fieldStatoTI: string              // nome campo stato TI (es. stato_TI)
+  fieldPresaTI: string              // nome campo presa in carico TI (es. presa_in_carico_TI)
+  editMinStato: number              // valore minimo stato_TI per consentire editing
+  editMaxStato: number              // valore massimo stato_TI per consentire editing
+  editPresaRequiredVal: number      // valore presa_in_carico_TI richiesto (es. 2 = presa)
+
   // --- Motivazioni respinta
   rejectReasons: string[]
 
@@ -151,6 +164,17 @@ export const defaultConfig: Config = {
     { id: 'azioni', label: 'Azioni', fields: [], locked: true }
 
   ],
+
+  // Editing TI
+  showEditButtons: true,
+  editOverlayColor: '#7c3aed',
+  editPageColor: '#5b21b6',
+  editPageId: 'editing-ti',
+  fieldStatoTI: 'stato_TI',
+  fieldPresaTI: 'presa_in_carico_TI',
+  editMinStato: 2,
+  editMaxStato: 2,
+  editPresaRequiredVal: 2,
 
   presets: [],
   activePresetId: ''

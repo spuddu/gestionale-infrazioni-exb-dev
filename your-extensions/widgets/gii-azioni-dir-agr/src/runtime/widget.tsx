@@ -547,6 +547,357 @@ function ZebraDropdown (props: {
 
 // domini (numeri come da tua nota)
 const PRESA_DA_PRENDERE = 1
+
+// ─────────────────────────── OVERLAY EDITING INLINE ──────────────────────────
+// Versione semplificata dell'overlay di editing che vive dentro il widget Azioni.
+// Per la versione completa (con mappa e tutte le tab) usare il widget gii-editing-ti
+// sulla pagina dedicata.
+
+function filterAttrsForLayer(attrs: Record<string, any>, layer: any): Record<string, any> {
+  const fields = (layer?.fields || []) as Array<{ name: string }>
+  if (!fields.length) return attrs
+  const allow = new Set(fields.map((f: any) => String(f.name)))
+  const out: Record<string, any> = {}
+  for (const k of Object.keys(attrs)) {
+    if (allow.has(k)) out[k] = attrs[k]
+  }
+  return out
+}
+
+async function resolveLayerForEdit(ds: any): Promise<any | null> {
+  if (!ds) return null
+  try {
+    const raw = ds?.getLayer?.() || ds?.getJSAPILayer?.() || ds?.getJsApiLayer?.() || ds?.layer || null
+    const resolved = await Promise.resolve(raw)
+    const layer = (resolved && (resolved.layer || resolved)) || null
+    if (layer && typeof layer.applyEdits === 'function') return layer
+  } catch { }
+  try {
+    const dm = DataSourceManager.getInstance()
+    const cds = ds?.id ? dm.getDataSource(ds.id) : null
+    if (cds) {
+      const raw = cds?.getLayer?.() || cds?.layer || null
+      const resolved = await Promise.resolve(raw)
+      const layer = (resolved && (resolved.layer || resolved)) || null
+      if (layer && typeof layer.applyEdits === 'function') return layer
+    }
+  } catch { }
+  return null
+}
+
+async function refreshDs(ds: any): Promise<void> {
+  if (!ds) return
+  let root = ds
+  try { while (root?.belongToDataSource) root = root.belongToDataSource } catch { }
+  const list: any[] = root ? [root] : []
+  try {
+    const derived = root?.getAllDerivedDataSources?.() || []
+    if (derived?.length) list.push(...derived)
+  } catch { }
+  for (const d of list) {
+    try {
+      const q = d.getCurrentQueryParams?.() || null
+      if (d.clearSourceRecords) d.clearSourceRecords()
+      if (d.addVersion) d.addVersion()
+      if (d.load) { if (q) await d.load(q); else await d.load() }
+    } catch { }
+  }
+}
+
+function InlineEditOverlay(props: {
+  oid: number
+  data: any
+  ds: any
+  idFieldName: string
+  cfg: any   // editConfig
+  ui: any
+  onClose: (saved: boolean) => void
+}) {
+  const { oid, data, ds, idFieldName, cfg, ui, onClose } = props
+
+  // Alias e schema dal DS (caricati una volta sola)
+  const [aliasMap, setAliasMap] = React.useState<Record<string, string>>({})
+  const [layerFields, setLayerFields] = React.useState<Array<{ name: string; type: string; domain?: any }>>([])
+  const [aliasReady, setAliasReady] = React.useState(false)
+
+  React.useEffect(() => {
+    let cancelled = false
+    const load = async () => {
+      // Schema dal DS
+      try {
+        const schema = ds?.getSchema?.()
+        const fobj = schema?.fields || {}
+        const am: Record<string, string> = {}
+        for (const name of Object.keys(fobj)) {
+          const f = fobj[name]
+          am[name] = String(f?.alias || f?.label || f?.title || name)
+        }
+        if (!cancelled && Object.keys(am).length) setAliasMap(am)
+      } catch { }
+      // Layer JSAPI per tipi e domini
+      try {
+        const raw = ds?.getLayer?.() || ds?.getJSAPILayer?.() || ds?.layer || null
+        const resolved = await Promise.resolve(raw)
+        const layer = (resolved && (resolved.layer || resolved)) || null
+        const fields = (layer?.fields || []) as any[]
+        if (fields.length && !cancelled) {
+          const am: Record<string, string> = {}
+          const lf: typeof layerFields = []
+          for (const f of fields) {
+            if (!f?.name) continue
+            am[f.name] = String(f?.alias || f.name)
+            lf.push({ name: f.name, type: f.type || '', domain: f.domain || null })
+          }
+          setAliasMap(am)
+          setLayerFields(lf)
+        }
+      } catch { }
+      if (!cancelled) setAliasReady(true)
+    }
+    load()
+    return () => { cancelled = true }
+  }, [ds])
+
+  // Draft editing
+  const [draft, setDraft] = React.useState<Record<string, any>>({ ...data })
+  const [saving, setSaving] = React.useState(false)
+  const [saveMsg, setSaveMsg] = React.useState<{ kind: 'ok' | 'err'; text: string } | null>(null)
+  const [confirmCancel, setConfirmCancel] = React.useState(false)
+  const [activeTab, setActiveTab] = React.useState<'anagrafica' | 'violazione'>('anagrafica')
+
+  const updateDraft = (field: string, value: any) => setDraft(prev => ({ ...prev, [field]: value }))
+
+  const handleSave = async () => {
+    setSaving(true)
+    setSaveMsg(null)
+    try {
+      const layer = await resolveLayerForEdit(ds)
+      if (!layer?.applyEdits) throw new Error('Layer non raggiungibile.')
+      if (typeof layer.load === 'function') { try { await layer.load() } catch { } }
+
+      const attrs: Record<string, any> = { [idFieldName]: oid }
+      for (const [k, v] of Object.entries(draft)) {
+        if (!k.startsWith('__')) attrs[k] = v
+      }
+      const cleanAttrs = filterAttrsForLayer(attrs, layer)
+      const res = await layer.applyEdits({ updateFeatures: [{ attributes: cleanAttrs }] })
+      const upd = res?.updateFeatureResults?.[0] || res?.updateResults?.[0] || null
+      const err = upd?.error
+      const ok = !err && (upd?.success === true || upd?.objectId != null || upd?.success == null)
+      if (!ok) {
+        const detail = err ? `${err.code ?? ''}: ${err.message ?? ''}` : JSON.stringify(res)
+        throw new Error(detail)
+      }
+      await refreshDs(ds)
+      setSaveMsg({ kind: 'ok', text: 'Salvato.' })
+      setSaving(false)
+      window.setTimeout(() => onClose(true), 1000)
+    } catch (e: any) {
+      setSaving(false)
+      setSaveMsg({ kind: 'err', text: `Errore: ${e?.message || String(e)}` })
+    }
+  }
+
+  // Campi per tab (presi dalla config editConfig o auto-rilevati)
+  const anagraficaFields: string[] = []
+  const violazioneFields: string[] = []
+  // Auto-rilevamento: usa tutti i campi del draft non-sistema
+  const allKeys = Object.keys(data || {}).filter(k =>
+    !k.startsWith('__') &&
+    !/^objectid$/i.test(k) &&
+    !/^globalid$/i.test(k) &&
+    !/^shape/i.test(k) &&
+    !/^stato_/i.test(k) &&
+    !/^esito_/i.test(k) &&
+    !/^presa_in_carico/i.test(k) &&
+    !/^dt_/i.test(k) &&
+    !/^GII_/i.test(k) &&
+    !/^origine_pratica$/i.test(k)
+  )
+  const anagraficaRe = /ditta|denom|ragione|nome|cognome|cf|cod.*fisc|piva|partita|indir|via|cap|comune|prov|telefono|cell|mail|pec|tipologia_sogg|tipo_sogg/i
+  const violazioneRe = /viol|infraz|descr|art|norm|tipo_preliev|sanz|acqua|volume|turno|utenza|contatore|circostanz|fatti|ufficio|settore|area_cod/i
+  for (const k of allKeys) {
+    if (anagraficaRe.test(k)) anagraficaFields.push(k)
+    else if (violazioneRe.test(k)) violazioneFields.push(k)
+  }
+  // residui non classificati → li mettiamo in violazione
+  const classified = new Set([...anagraficaFields, ...violazioneFields])
+  for (const k of allKeys) {
+    if (!classified.has(k)) violazioneFields.push(k)
+  }
+
+  const renderField = (fieldName: string) => {
+    if (!aliasReady) return null
+    const lf = layerFields.find(f => f.name === fieldName)
+    const alias = aliasMap[fieldName] || fieldName
+    const type = lf?.type || 'esriFieldTypeString'
+    const domain = lf?.domain || null
+    const val = draft[fieldName]
+    const isDate = type.toLowerCase().includes('date')
+    const isNum = type.toLowerCase().includes('integer') || type.toLowerCase().includes('double')
+    const hasCoded = domain?.codedValues && Array.isArray(domain.codedValues)
+
+    if (hasCoded) {
+      return (
+        <div key={fieldName} style={{ display: 'grid', gap: 4 }}>
+          <div style={{ fontSize: 12, color: '#6b7280' }}>{alias}</div>
+          <select
+            value={val ?? ''}
+            disabled={saving}
+            onChange={e => updateDraft(fieldName, (e.target as HTMLSelectElement).value === '' ? null : (isNum ? Number((e.target as HTMLSelectElement).value) : (e.target as HTMLSelectElement).value))}
+            style={{ padding: '7px 10px', borderRadius: 8, border: '1px solid rgba(0,0,0,0.20)', fontSize: 13, width: '100%', background: saving ? '#f3f4f6' : '#fff' }}
+          >
+            <option value=''>— seleziona —</option>
+            {domain.codedValues.map((cv: any) => (
+              <option key={String(cv.code)} value={String(cv.code)}>{cv.name}</option>
+            ))}
+          </select>
+        </div>
+      )
+    }
+    if (isDate) {
+      const toInputVal = (v: any) => {
+        if (!v) return ''
+        try {
+          const n = Number(v)
+          const d = Number.isFinite(n) && n > 0 ? new Date(n) : new Date(String(v))
+          if (Number.isNaN(d.getTime())) return ''
+          return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+        } catch { return '' }
+      }
+      return (
+        <div key={fieldName} style={{ display: 'grid', gap: 4 }}>
+          <div style={{ fontSize: 12, color: '#6b7280' }}>{alias}</div>
+          <input type='date' value={toInputVal(val)} disabled={saving}
+            onChange={e => {
+              const d = new Date((e.target as HTMLInputElement).value)
+              updateDraft(fieldName, Number.isNaN(d.getTime()) ? null : d.getTime())
+            }}
+            style={{ padding: '7px 10px', borderRadius: 8, border: '1px solid rgba(0,0,0,0.20)', fontSize: 13, width: '100%', background: saving ? '#f3f4f6' : '#fff' }}
+          />
+        </div>
+      )
+    }
+    const isMultiline = /descr|note|fatti|circostanz/i.test(fieldName)
+    return (
+      <div key={fieldName} style={{ display: 'grid', gap: 4 }}>
+        <div style={{ fontSize: 12, color: '#6b7280' }}>{alias}</div>
+        {isMultiline
+          ? <textarea value={val != null ? String(val) : ''} disabled={saving} rows={3}
+            onChange={e => updateDraft(fieldName, (e.target as HTMLTextAreaElement).value || null)}
+            style={{ padding: '7px 10px', borderRadius: 8, border: '1px solid rgba(0,0,0,0.20)', fontSize: 13, width: '100%', resize: 'vertical', background: saving ? '#f3f4f6' : '#fff', boxSizing: 'border-box' }}
+          />
+          : <input type='text' value={val != null ? String(val) : ''} disabled={saving}
+            onChange={e => updateDraft(fieldName, (e.target as HTMLInputElement).value === '' ? null : (isNum ? Number((e.target as HTMLInputElement).value) : (e.target as HTMLInputElement).value))}
+            style={{ padding: '7px 10px', borderRadius: 8, border: '1px solid rgba(0,0,0,0.20)', fontSize: 13, width: '100%', background: saving ? '#f3f4f6' : '#fff', boxSizing: 'border-box' }}
+          />
+        }
+      </div>
+    )
+  }
+
+  const praticaCode = (() => {
+    const op = data?.origine_pratica ?? data?.Origine_pratica
+    return `${(op === 2 || op === '2') ? 'TI' : 'TR'}-${oid}`
+  })()
+
+  const overlay = (
+    <div style={{ position: 'fixed', inset: 0, zIndex: 99999, background: 'rgba(0,0,0,0.55)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+      <div style={{
+        background: '#fff', borderRadius: 12,
+        width: '88vw', maxWidth: 860,
+        height: '85vh', maxHeight: '85vh',
+        display: 'flex', flexDirection: 'column',
+        overflow: 'hidden', boxShadow: '0 20px 60px rgba(0,0,0,0.3)'
+      }}>
+        {/* Header */}
+        <div style={{ flex: '0 0 auto', padding: '14px 20px', borderBottom: '1px solid #e5e7eb', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
+          <div style={{ fontWeight: 700, fontSize: 15 }}>
+            ✏️ Modifica pratica&nbsp;<span style={{ color: '#2f6fed' }}>{praticaCode}</span>
+          </div>
+          <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+            {saveMsg && (
+              <span style={{ fontSize: 13, color: saveMsg.kind === 'ok' ? '#1a7f37' : '#b42318' }}>
+                {saveMsg.text}
+              </span>
+            )}
+            <button type='button' disabled={saving} onClick={handleSave}
+              style={{ padding: '8px 18px', borderRadius: 8, border: 'none', background: saving ? '#e5e7eb' : '#1a7f37', color: saving ? '#9ca3af' : '#fff', fontWeight: 700, fontSize: 13, cursor: saving ? 'not-allowed' : 'pointer' }}>
+              {saving ? 'Salvataggio…' : '💾 Salva'}
+            </button>
+            <button type='button' disabled={saving} onClick={() => setConfirmCancel(true)}
+              style={{ padding: '8px 18px', borderRadius: 8, border: '1px solid #d13438', background: '#fff', color: '#d13438', fontWeight: 700, fontSize: 13, cursor: saving ? 'not-allowed' : 'pointer' }}>
+              ✕ Annulla
+            </button>
+          </div>
+        </div>
+
+        {/* Tab bar */}
+        <div style={{ flex: '0 0 auto', display: 'flex', gap: 8, padding: '10px 20px', borderBottom: '1px solid #e5e7eb' }}>
+          {(['anagrafica', 'violazione'] as const).map(t => (
+            <button key={t} type='button' disabled={saving} onClick={() => setActiveTab(t)}
+              style={{
+                padding: '8px 14px', borderRadius: 10, border: `1px solid ${activeTab === t ? '#2f6fed' : 'rgba(0,0,0,0.12)'}`,
+                background: activeTab === t ? '#eaf2ff' : 'rgba(0,0,0,0.02)',
+                color: activeTab === t ? '#1d4ed8' : '#111827',
+                fontWeight: 700, fontSize: 12, cursor: saving ? 'not-allowed' : 'pointer'
+              }}>
+              {t.charAt(0).toUpperCase() + t.slice(1)}
+            </button>
+          ))}
+          <div style={{ fontSize: 12, color: '#9ca3af', alignSelf: 'center', marginLeft: 8 }}>
+            Per localizzazione e allegati usa "Modifica (pagina)"
+          </div>
+        </div>
+
+        {/* Contenuto scrollabile */}
+        <div style={{ flex: '1 1 auto', minHeight: 0, overflowY: 'auto', padding: '16px 20px' }}>
+          {!aliasReady
+            ? <div style={{ color: '#6b7280', fontSize: 13 }}>Caricamento schema campi…</div>
+            : (
+              <div style={{ display: 'grid', gap: 14 }}>
+                {activeTab === 'anagrafica' && (
+                  anagraficaFields.length
+                    ? anagraficaFields.map(f => renderField(f))
+                    : <div style={{ color: '#6b7280', fontSize: 13 }}>Nessun campo rilevato automaticamente. Usare la pagina di editing completa.</div>
+                )}
+                {activeTab === 'violazione' && (
+                  violazioneFields.length
+                    ? violazioneFields.map(f => renderField(f))
+                    : <div style={{ color: '#6b7280', fontSize: 13 }}>Nessun campo rilevato automaticamente. Usare la pagina di editing completa.</div>
+                )}
+              </div>
+            )
+          }
+        </div>
+      </div>
+
+      {/* Dialog conferma annulla */}
+      {confirmCancel && (
+        <div style={{ position: 'fixed', inset: 0, zIndex: 100000, background: 'rgba(0,0,0,0.4)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+          <div style={{ background: '#fff', borderRadius: 12, padding: 28, maxWidth: 380, width: '90%', boxShadow: '0 8px 32px rgba(0,0,0,0.25)' }}>
+            <div style={{ fontWeight: 700, fontSize: 16, marginBottom: 10 }}>Annullare le modifiche?</div>
+            <div style={{ fontSize: 13, color: '#4b5563', marginBottom: 20 }}>Le modifiche non salvate andranno perse.</div>
+            <div style={{ display: 'flex', gap: 10 }}>
+              <button type='button' onClick={() => { setConfirmCancel(false); onClose(false) }}
+                style={{ padding: '8px 18px', borderRadius: 8, border: 'none', background: '#d13438', color: '#fff', fontWeight: 700, fontSize: 13, cursor: 'pointer' }}>
+                Sì, annulla
+              </button>
+              <button type='button' onClick={() => setConfirmCancel(false)}
+                style={{ padding: '8px 18px', borderRadius: 8, border: '1px solid rgba(0,0,0,0.15)', background: '#fff', color: '#111827', fontWeight: 600, fontSize: 13, cursor: 'pointer' }}>
+                Torna all'editing
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+
+  return createPortal(overlay, document.body)
+}
+
+
 const PRESA_IN_CARICO = 2
 
 const STATO_DA_PRENDERE = 1
@@ -626,6 +977,17 @@ function ActionsPanel (props: {
     reasonsRowBorderWidth: number
     reasonsRowRadius: number
   }
+  editConfig: {
+    show: boolean
+    overlayColor: string
+    pageColor: string
+    pageId: string
+    fieldStatoTI: string
+    fieldPresaTI: string
+    minStato: number
+    maxStato: number
+    presaRequiredVal: number
+  }
 }) {
   const { active, roleCode, buttonText, buttonColors, ui } = props
   const role = String(roleCode || 'DT').trim().toUpperCase()
@@ -686,6 +1048,69 @@ function ActionsPanel (props: {
   const oid = active?.state?.oid ?? null
   const idFieldNameFromSel = active?.state?.idFieldName || 'OBJECTID'
   const hasSel = oid != null && Number.isFinite(oid)
+
+  // --- Editing TI ---
+  const ec = props.editConfig
+  const [editOverlayOpen, setEditOverlayOpen] = React.useState(false)
+
+  // Determina se il pulsante Modifica è abilitato
+  const statoTIVal = data ? data[ec.fieldStatoTI] : null
+  const presaTIVal = data ? data[ec.fieldPresaTI] : null
+  const statoTINum = statoTIVal != null && String(statoTIVal) !== '' ? Number(statoTIVal) : null
+  const presaTINum = presaTIVal != null && String(presaTIVal) !== '' ? Number(presaTIVal) : null
+
+  const canEdit =
+    hasSel &&
+    !loading &&
+    pending === null &&
+    ec.show &&
+    presaTINum === ec.presaRequiredVal &&
+    statoTINum != null &&
+    statoTINum >= ec.minStato &&
+    statoTINum <= ec.maxStato
+
+  const handleEditOverlay = () => {
+    if (!canEdit) return
+    // Scrive i dati nel canale globale per il widget Editing TI
+    try {
+      (window as any).__giiEdit = {
+        oid,
+        data: { ...data },
+        idFieldName: active?.state?.idFieldName || 'OBJECTID',
+        dsId: active?.state?.ds?.id ?? null,
+        ts: Date.now()
+      }
+    } catch { }
+    setEditOverlayOpen(true)
+  }
+
+  const handleEditPage = () => {
+    if (!canEdit) return
+    try {
+      (window as any).__giiEdit = {
+        oid,
+        data: { ...data },
+        idFieldName: active?.state?.idFieldName || 'OBJECTID',
+        dsId: active?.state?.ds?.id ?? null,
+        ts: Date.now()
+      }
+    } catch { }
+    // Navigazione ExB: usa l'API history/routing di ExB se disponibile,
+    // altrimenti fallback su hash navigation
+    try {
+      const pageId = String(ec.pageId || 'editing-ti').trim()
+      const getAppStore = (window as any).jimuCore?.getAppStore
+      if (getAppStore) {
+        const store = getAppStore()
+        store?.dispatch?.({ type: 'APP_NAVIGATE', uri: pageId })
+        return
+      }
+    } catch { }
+    try {
+      const pageId = String(ec.pageId || 'editing-ti').trim()
+      window.location.hash = `#${pageId}`
+    } catch { }
+  }
 
   const presaVal = data ? data[presaField] : null
   const statoVal = data ? data[statoField] : null
@@ -1115,7 +1540,75 @@ function ActionsPanel (props: {
                 Trasmetti a DA
               </Button>
             )}
+
+            {/* PULSANTI MODIFICA TI — visibili solo se configurati */}
+            {ec.show && (
+              <>
+                <div style={{ width: '100%', height: 1, background: ui.dividerColor, margin: '4px 0' }} />
+                <button
+                  type='button'
+                  disabled={!canEdit}
+                  onClick={handleEditOverlay}
+                  title={canEdit ? 'Apre il pannello di editing nella pagina corrente' : 'Modifica non disponibile: verifica stato e presa in carico TI'}
+                  style={{
+                    padding: '8px 16px',
+                    borderRadius: 8,
+                    border: 'none',
+                    background: canEdit ? ec.overlayColor : '#e5e7eb',
+                    color: canEdit ? '#fff' : '#9ca3af',
+                    fontWeight: 700,
+                    fontSize: 13,
+                    cursor: canEdit ? 'pointer' : 'not-allowed',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 6
+                  }}
+                >
+                  ✏️ Modifica (overlay)
+                </button>
+                <button
+                  type='button'
+                  disabled={!canEdit}
+                  onClick={handleEditPage}
+                  title={canEdit ? `Apre la pagina di editing: ${ec.pageId}` : 'Modifica non disponibile: verifica stato e presa in carico TI'}
+                  style={{
+                    padding: '8px 16px',
+                    borderRadius: 8,
+                    border: `2px solid ${canEdit ? ec.pageColor : '#e5e7eb'}`,
+                    background: '#fff',
+                    color: canEdit ? ec.pageColor : '#9ca3af',
+                    fontWeight: 700,
+                    fontSize: 13,
+                    cursor: canEdit ? 'pointer' : 'not-allowed',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 6
+                  }}
+                >
+                  ↗ Modifica (pagina)
+                </button>
+              </>
+            )}
           </div>
+        )}
+
+        {/* OVERLAY EDITING INLINE (aperto da "Modifica overlay") */}
+        {editOverlayOpen && hasSel && oid != null && data != null && (
+          <InlineEditOverlay
+            oid={oid}
+            data={data}
+            ds={ds}
+            idFieldName={idFieldNameFromSel}
+            cfg={ec}
+            ui={ui}
+            onClose={(saved) => {
+              setEditOverlayOpen(false)
+              if (saved) {
+                setMsg({ kind: 'ok', text: 'Pratica modificata.' })
+                window.setTimeout(() => setMsg(null), 4000)
+              }
+            }}
+          />
         )}
 
         {/* SEZIONE CONFERMA: Conferma + Annulla stanno sempre in fondo */}
@@ -1462,6 +1955,7 @@ function DetailTabsPanel (props: {
   ui: any
   tabFields: TabFields
   tabs: TabConfig[]
+  editConfig: any
 }) {
   const { active, ui } = props
 
@@ -1833,6 +2327,7 @@ if (!hasSel) {
         buttonText={props.buttonText}
         buttonColors={props.buttonColors}
         ui={props.ui}
+        editConfig={props.editConfig}
       />
     )
   } else if (activeTab?.isIterTab) {
@@ -2107,6 +2602,19 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
   // Migra tabs
   const migratedTabs = migrateTabs(tabFields, cfg.tabs || [])
 
+  // --- Editing TI config
+  const editConfig = {
+    show: cfg.showEditButtons !== false,
+    overlayColor: normalizeHexColor(cfg.editOverlayColor, '#7c3aed'),
+    pageColor: normalizeHexColor(cfg.editPageColor, '#5b21b6'),
+    pageId: String(cfg.editPageId || 'editing-ti'),
+    fieldStatoTI: String(cfg.fieldStatoTI || 'stato_TI'),
+    fieldPresaTI: String(cfg.fieldPresaTI || 'presa_in_carico_TI'),
+    minStato: Number.isFinite(Number(cfg.editMinStato)) ? Number(cfg.editMinStato) : 2,
+    maxStato: Number.isFinite(Number(cfg.editMaxStato)) ? Number(cfg.editMaxStato) : 2,
+    presaRequiredVal: Number.isFinite(Number(cfg.editPresaRequiredVal)) ? Number(cfg.editPresaRequiredVal) : 2
+  }
+
   if (!props.useDataSources || !props.useDataSources.length) {
     return <div style={{ padding: Number.isFinite(Number((cfg as any).maskOuterOffset ?? 0)) ? Number((cfg as any).maskOuterOffset) : 0 }}>Configura il data source nelle impostazioni del widget.</div>
   }
@@ -2172,6 +2680,7 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
         ui={ui}
         tabFields={tabFields}
         tabs={migratedTabs}
+        editConfig={editConfig}
       />
     </div>
   )

@@ -3,6 +3,7 @@ import { React, jsx, Immutable, DataSourceTypes, DataSourceManager, type UseData
 import type { AllWidgetSettingProps } from 'jimu-for-builder'
 import { DataSourceSelector } from 'jimu-ui/advanced/data-source-selector'
 import { SettingSection } from 'jimu-ui/advanced/setting-components'
+import { NumericInput, Switch, TextInput } from 'jimu-ui'
 import type { IMConfig, TabConfig } from '../config'
 import { defaultConfig } from '../config'
 
@@ -1129,6 +1130,110 @@ export default function Setting (props: Props) {
               setCfgPatch({ presets: next, activePresetId: nextActive })
             }}
           />
+        </RowBlock>
+
+      </SettingSection>
+
+      {/* ── SEZIONE EDITING TI ─────────────────────────────────────── */}
+      <SettingSection title='Editing TI'>
+
+        <RowBlock label='Mostra pulsanti Modifica'>
+          <Switch
+            checked={cfgJs.showEditButtons !== false}
+            onChange={(_: any, v: boolean) => setCfgPatch({ showEditButtons: v })}
+          />
+        </RowBlock>
+
+        <RowBlock label='Colore pulsante "Modifica (overlay)"'>
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+            <input type='color'
+              value={cfgJs.editOverlayColor || '#7c3aed'}
+              onChange={(e: any) => setCfgPatch({ editOverlayColor: e.target.value })}
+              style={{ width: 36, height: 28, border: 'none', padding: 0, cursor: 'pointer' }}
+            />
+            <TextInput value={cfgJs.editOverlayColor || '#7c3aed'}
+              onChange={(e: any) => setCfgPatch({ editOverlayColor: e.target.value })}
+              style={{ width: 90 }}
+            />
+          </div>
+        </RowBlock>
+
+        <RowBlock label='Colore pulsante "Modifica (pagina)"'>
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+            <input type='color'
+              value={cfgJs.editPageColor || '#5b21b6'}
+              onChange={(e: any) => setCfgPatch({ editPageColor: e.target.value })}
+              style={{ width: 36, height: 28, border: 'none', padding: 0, cursor: 'pointer' }}
+            />
+            <TextInput value={cfgJs.editPageColor || '#5b21b6'}
+              onChange={(e: any) => setCfgPatch({ editPageColor: e.target.value })}
+              style={{ width: 90 }}
+            />
+          </div>
+        </RowBlock>
+
+        <RowBlock label='ID pagina editing (per navigazione)'>
+          <TextInput
+            value={cfgJs.editPageId || 'editing-ti'}
+            onChange={(e: any) => setCfgPatch({ editPageId: e.target.value })}
+            placeholder='editing-ti'
+            style={{ width: '100%' }}
+          />
+          <div style={{ fontSize: 11, color: '#9ca3af', marginTop: 4 }}>
+            Inserisci l'ID della pagina ExB dedicata all'editing completo (con mappa).
+          </div>
+        </RowBlock>
+
+        <RowBlock label='Campo presa in carico TI'>
+          <TextInput
+            value={cfgJs.fieldPresaTI || 'presa_in_carico_TI'}
+            onChange={(e: any) => setCfgPatch({ fieldPresaTI: e.target.value })}
+            placeholder='presa_in_carico_TI'
+            style={{ width: '100%' }}
+          />
+        </RowBlock>
+
+        <RowBlock label='Campo stato TI'>
+          <TextInput
+            value={cfgJs.fieldStatoTI || 'stato_TI'}
+            onChange={(e: any) => setCfgPatch({ fieldStatoTI: e.target.value })}
+            placeholder='stato_TI'
+            style={{ width: '100%' }}
+          />
+        </RowBlock>
+
+        <RowBlock label='Valore presa_in_carico_TI richiesto per editing'>
+          <NumericInput
+            value={cfgJs.editPresaRequiredVal ?? 2}
+            min={0} max={10} step={1}
+            onChange={(v: any) => setCfgPatch({ editPresaRequiredVal: Number(v) })}
+            style={{ width: 70 }}
+          />
+          <div style={{ fontSize: 11, color: '#9ca3af', marginTop: 4 }}>
+            Default 2 = "Presa in carico". Il TI deve aver preso in carico la pratica.
+          </div>
+        </RowBlock>
+
+        <RowBlock label='Valore minimo stato_TI per editing'>
+          <NumericInput
+            value={cfgJs.editMinStato ?? 2}
+            min={0} max={10} step={1}
+            onChange={(v: any) => setCfgPatch({ editMinStato: Number(v) })}
+            style={{ width: 70 }}
+          />
+        </RowBlock>
+
+        <RowBlock label='Valore massimo stato_TI per editing'>
+          <NumericInput
+            value={cfgJs.editMaxStato ?? 2}
+            min={0} max={10} step={1}
+            onChange={(v: any) => setCfgPatch({ editMaxStato: Number(v) })}
+            style={{ width: 70 }}
+          />
+          <div style={{ fontSize: 11, color: '#9ca3af', marginTop: 4 }}>
+            Il pulsante è abilitato solo se stato_TI è compreso tra min e max (inclusi).
+            Es. min=2 max=2 significa "solo quando ancora in lavorazione".
+          </div>
         </RowBlock>
 
       </SettingSection>
