@@ -19,6 +19,16 @@ import { defaultConfig, DEFAULT_COLUMNS } from '../config'
 
 type Props = AllWidgetProps<IMConfig>
 
+// ── loadEsriModule (AMD require) ───────────────────────────────────────────
+function loadEsriModule<T = any>(path: string): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const req = (window as any).require
+    if (!req) { reject(new Error('AMD require non disponibile')); return }
+    try { req([path], (mod: T) => resolve(mod), (err: any) => reject(err)) }
+    catch (e) { reject(e) }
+  })
+}
+
 function getCodPraticaDisplay(rec: DataRecord): string {
   const a: any = rec?.getData?.() || {}
   const oid =
@@ -174,11 +184,219 @@ function RecordTracker (p: {
   return null
 }
 
+// ── URL tabella utenti GII ─────────────────────────────────────────────────
+const GII_UTENTI_URL = 'https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_uteniti/FeatureServer/0'
+const GII_PORTAL    = 'https://cbsm-hub.maps.arcgis.com'
+
+// Mappa codice ruolo numerico → label (dal widget gestione utenti)
+const RUOLO_LABEL: Record<number, string> = {
+  1: 'TR', 2: 'TI', 3: 'RZ', 4: 'RI', 5: 'DT', 6: 'DA'
+}
+
+// Gerarchia priorità per utenti con gruppi multipli (es. admin)
+const RUOLO_PRIORITY: Record<number, number> = {
+  6: 100, // DA  (massima priorità)
+  5: 90,  // DT
+  4: 80,  // RI
+  3: 70,  // RZ
+  2: 60,  // TI
+  1: 10   // TR
+}
+
+interface GiiUserInfo {
+  username: string
+  ruolo: number | null       // codice numerico (1-6)
+  ruoloLabel: string         // 'TR','TI','RZ','RI','DT','DA'
+  area: number | null
+  settore: number | null
+  ufficio: number | null
+  gruppo: string
+  isAdmin: boolean           // org_admin AGOL
+}
+
+// Recupera token dalla sessione ExB (IdentityManager)
+async function getSessionToken(): Promise<string> {
+  try {
+    const esriId = await loadEsriModule<any>('esri/identity/IdentityManager')
+    const creds = esriId.credentials as any[]
+    if (creds?.length) {
+      const cred = creds.find((c: any) => c?.server?.includes('cbsm-hub')) ?? creds[0]
+      if (cred?.token) return cred.token
+    }
+  } catch { }
+  return ''
+}
+
+// Rileva info utente loggato: username + isAdmin da IdentityManager + /sharing/rest/community/self
+async function detectCurrentUser(): Promise<{ username: string; isAdmin: boolean }> {
+  try {
+    const esriId = await loadEsriModule<any>('esri/identity/IdentityManager')
+    const creds = esriId.credentials as any[]
+    const cred = creds?.find?.((c: any) => c?.server?.includes('cbsm-hub')) ?? creds?.[0]
+    const token = cred?.token ?? ''
+    const username = cred?.userId ?? cred?.username ?? ''
+    if (!username || !token) return { username: '', isAdmin: false }
+    // Chiama /community/self per recuperare il ruolo AGOL
+    const res = await fetch(`${GII_PORTAL}/sharing/rest/community/self?f=json&token=${encodeURIComponent(token)}`)
+    const json = await res.json()
+    const isAdmin = json?.role === 'org_admin' || json?.privileges?.includes('portal:admin:viewUsers') || false
+    return { username: String(json?.username || username), isAdmin }
+  } catch {
+    return { username: '', isAdmin: false }
+  }
+}
+
+// Cerca l'utente nella tabella GII_utenti e restituisce il suo profilo
+async function fetchGiiUser(username: string, token: string): Promise<GiiUserInfo | null> {
+  if (!username) return null
+  try {
+    const FeatureLayer = await loadEsriModule<any>('esri/layers/FeatureLayer')
+    const fl = new FeatureLayer({ url: GII_UTENTI_URL })
+    await fl.load().catch(() => { })
+    const res = await fl.queryFeatures({
+      where: `username = '${username.replace(/'/g, "''")}'`,
+      outFields: ['username', 'ruolo', 'area', 'settore', 'ufficio', 'gruppo'],
+      returnGeometry: false,
+    })
+    const features = res?.features ?? []
+    if (!features.length) return null
+    // Se più record (es. admin con più voci), prendi quello con ruolo di priorità massima
+    let best = features[0]
+    for (const f of features) {
+      const rA = Number(best.attributes?.ruolo ?? 0)
+      const rB = Number(f.attributes?.ruolo ?? 0)
+      if ((RUOLO_PRIORITY[rB] ?? 0) > (RUOLO_PRIORITY[rA] ?? 0)) best = f
+    }
+    const a = best.attributes
+    const ruolo = a.ruolo != null ? Number(a.ruolo) : null
+    return {
+      username,
+      ruolo,
+      ruoloLabel: ruolo ? (RUOLO_LABEL[ruolo] ?? '') : '',
+      area: a.area != null ? Number(a.area) : null,
+      settore: a.settore != null ? Number(a.settore) : null,
+      ufficio: a.ufficio != null ? Number(a.ufficio) : null,
+      gruppo: String(a.gruppo ?? ''),
+      isAdmin: false
+    }
+  } catch {
+    return null
+  }
+}
+
+// Determina il campo stato del ruolo corrente
+function getStatoFieldForRuolo(ruoloLabel: string): string {
+  const r = ruoloLabel.toUpperCase()
+  if (r === 'TR') return 'stato_TR'
+  if (r === 'TI') return 'stato_TI'
+  if (r === 'RZ') return 'stato_RZ'
+  if (r === 'RI') return 'stato_RI'
+  if (r === 'DT') return 'stato_DT'
+  if (r === 'DA') return 'stato_DA'
+  return 'stato_DT' // fallback
+}
+
+// Priorità ordinamento: In attesa mia (1,3) prima, poi In lavorazione (2), poi altri
+function getPriorityForStato(statoVal: number | null): number {
+  if (statoVal === 1 || statoVal === 3) return 0  // In attesa mia → in cima
+  if (statoVal === 2) return 1                     // In lavorazione
+  if (statoVal === 4) return 2                     // Trasmesso
+  if (statoVal === 5) return 3                     // Respinto
+  return 4                                          // Non attivo / null
+}
+
 export default function Widget (props: Props) {
   const cfg: any = (props.config ?? defaultConfig) as any
 
   const useDsImm: any = props.useDataSources ?? Immutable([])
   const useDsJs: any[] = asJs(useDsImm)
+
+  // ── Rilevamento ruolo utente loggato ──────────────────────────────────────
+  const [giiUser, setGiiUser] = React.useState<GiiUserInfo | null>(null)
+  const [userLoading, setUserLoading] = React.useState(true)
+
+  React.useEffect(() => {
+    let cancelled = false
+    const load = async () => {
+      setUserLoading(true)
+      try {
+        const { username, isAdmin } = await detectCurrentUser()
+        if (isAdmin) {
+          // Admin: vede tutto, nessun filtro ruolo
+          setGiiUser({
+            username, ruolo: null, ruoloLabel: 'ADMIN',
+            area: null, settore: null, ufficio: null, gruppo: '', isAdmin: true
+          })
+        } else {
+          const token = await getSessionToken()
+          const user = await fetchGiiUser(username, token)
+          if (!cancelled) {
+            setGiiUser(user ? { ...user, isAdmin: false } : {
+              username, ruolo: null, ruoloLabel: '',
+              area: null, settore: null, ufficio: null, gruppo: '', isAdmin: false
+            })
+          }
+        }
+      } catch {
+        if (!cancelled) setGiiUser(null)
+      }
+      if (!cancelled) setUserLoading(false)
+      // Pubblica su canale globale per widget Azioni
+      try {
+        if (giiUser) (window as any).__giiUserRole = giiUser
+      } catch { }
+    }
+    load()
+    return () => { cancelled = true }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  // Pubblica su canale globale ogni volta che giiUser cambia
+  React.useEffect(() => {
+    if (giiUser) {
+      try { (window as any).__giiUserRole = giiUser } catch { }
+    }
+  }, [giiUser])
+
+  // Campo stato del ruolo corrente
+  const statoRuoloField = giiUser?.isAdmin
+    ? null
+    : giiUser?.ruoloLabel
+      ? getStatoFieldForRuolo(giiUser.ruoloLabel)
+      : null
+
+  // ── Tab ruolo: Tutte / In attesa mia / In attesa altri ────────────────────
+  const ROLE_TABS = [
+    { id: 'tutte',        label: 'Tutte le pratiche' },
+    { id: 'attesa_mia',   label: 'In attesa mia' },
+    { id: 'attesa_altri', label: 'In attesa altri' },
+  ]
+  const [activeRoleTab, setActiveRoleTab] = React.useState<string>('tutte')
+
+  // Funzione filtro per tab ruolo
+  const filterByRoleTab = React.useCallback((recs: DataRecord[]): DataRecord[] => {
+    if (!statoRuoloField || activeRoleTab === 'tutte') return recs
+    return recs.filter(r => {
+      const d = r.getData?.() || {}
+      const val = d[statoRuoloField]
+      const n = val != null ? Number(val) : null
+      if (activeRoleTab === 'attesa_mia') return n === 1 || n === 3
+      if (activeRoleTab === 'attesa_altri') return n === 2 || n === 4
+      return true
+    })
+  }, [statoRuoloField, activeRoleTab])
+
+  // Ordinamento priorità ruolo: in attesa mia sempre in cima
+  const sortByRolePriority = React.useCallback((recs: DataRecord[]): DataRecord[] => {
+    if (!statoRuoloField) return recs
+    return [...recs].sort((ra, rb) => {
+      const da = ra.getData?.() || {}
+      const db = rb.getData?.() || {}
+      const pa = getPriorityForStato(da[statoRuoloField] != null ? Number(da[statoRuoloField]) : null)
+      const pb = getPriorityForStato(db[statoRuoloField] != null ? Number(db[statoRuoloField]) : null)
+      return pa - pb
+    })
+  }, [statoRuoloField])
 
   // ── Tab groups: data view con la stessa etichetta vengono fuse nello stesso tab ──
   const tabGroups = React.useMemo(() => {
@@ -477,9 +695,13 @@ export default function Widget (props: Props) {
       const entry = dsDataRef.current[dsId]
       if (entry?.recs) all.push(...entry.recs)
     }
-    return sortRecords(all, sortState)
+    // Applica filtro tab ruolo
+    const filtered = filterByRoleTab(all)
+    // Ordinamento: prima priorità ruolo (in attesa mia in cima), poi sort utente
+    const withPriority = sortByRolePriority(filtered)
+    return sortRecords(withPriority, sortState)
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeGroup, dsDataVer, sortState])
+  }, [activeGroup, dsDataVer, sortState, activeRoleTab, statoRuoloField])
 
   // Lookup: record → dsId (via WeakMap su identità oggetto, sopravvive al sort)
   const recDsLookup = React.useMemo(() => {
@@ -793,7 +1015,66 @@ export default function Widget (props: Props) {
             </DataSourceComponent>
           ))}
 
-          {/* ── Tab bar (raggruppati per etichetta) ── */}
+          {/* ── Tab ruolo: Tutte / In attesa mia / In attesa altri ── */}
+          {!userLoading && statoRuoloField && (
+            <div style={{ display: 'flex', gap: 8, padding: '8px 12px', borderBottom: '1px solid rgba(0,0,0,0.08)', alignItems: 'center', flexWrap: 'wrap' }}>
+              <span style={{ fontSize: 11, color: '#6b7280', marginRight: 4 }}>
+                {giiUser?.isAdmin ? '👤 Admin' : `👤 ${giiUser?.ruoloLabel ?? ''}`}
+              </span>
+              {ROLE_TABS.map(t => (
+                <button
+                  key={t.id}
+                  type='button'
+                  className={`tabBtn ${activeRoleTab === t.id ? 'active' : ''}`}
+                  onClick={() => setActiveRoleTab(t.id)}
+                >
+                  {t.label}
+                  {/* Conteggio record per tab */}
+                  {(() => {
+                    if (!activeGroup) return null
+                    const all: DataRecord[] = []
+                    for (const di of activeGroup.dsIndices) {
+                      const dsId = String(useDsJs[di]?.dataSourceId || '')
+                      const entry = dsDataRef.current[dsId]
+                      if (entry?.recs) all.push(...entry.recs)
+                    }
+                    const count = t.id === 'tutte'
+                      ? all.length
+                      : all.filter(r => {
+                          const d = r.getData?.() || {}
+                          const n = d[statoRuoloField!] != null ? Number(d[statoRuoloField!]) : null
+                          if (t.id === 'attesa_mia') return n === 1 || n === 3
+                          if (t.id === 'attesa_altri') return n === 2 || n === 4
+                          return false
+                        }).length
+                    return count > 0 ? (
+                      <span style={{
+                        marginLeft: 6, background: activeRoleTab === t.id ? '#2f6fed' : 'rgba(0,0,0,0.1)',
+                        color: activeRoleTab === t.id ? '#fff' : '#374151',
+                        borderRadius: 999, padding: '1px 7px', fontSize: 11, fontWeight: 700
+                      }}>{count}</span>
+                    ) : null
+                  })()}
+                </button>
+              ))}
+            </div>
+          )}
+
+          {/* Indicatore admin: vede tutto senza filtri */}
+          {!userLoading && giiUser?.isAdmin && (
+            <div style={{ padding: '6px 12px', fontSize: 11, color: '#6b7280', borderBottom: '1px solid rgba(0,0,0,0.06)', background: '#fafafa' }}>
+              👤 Admin — visualizzazione completa senza filtri ruolo
+            </div>
+          )}
+
+          {/* Indicatore caricamento ruolo */}
+          {userLoading && (
+            <div style={{ padding: '6px 12px', fontSize: 11, color: '#6b7280' }}>
+              Rilevamento ruolo utente…
+            </div>
+          )}
+
+          {/* ── Tab bar datasource (raggruppati per etichetta) — solo se ci sono tab multiple ── */}
           {hasTabs && (
             <div className='tabBar'>
               {tabGroups.map((g, i) => (

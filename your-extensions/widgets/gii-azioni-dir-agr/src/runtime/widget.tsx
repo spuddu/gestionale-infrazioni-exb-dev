@@ -1,4 +1,5 @@
 /** @jsx jsx */
+/** @jsxFrag React.Fragment */
 import { React, jsx, type AllWidgetProps, DataSourceComponent, DataSourceManager } from 'jimu-core'
 import { Button } from 'jimu-ui'
 import { createPortal } from 'react-dom'
@@ -567,7 +568,7 @@ function filterAttrsForLayer(attrs: Record<string, any>, layer: any): Record<str
 async function resolveLayerForEdit(ds: any): Promise<any | null> {
   if (!ds) return null
   try {
-    const raw = ds?.getLayer?.() || ds?.getJSAPILayer?.() || ds?.getJsApiLayer?.() || ds?.layer || null
+    const raw = (ds as any)?.getLayer?.() || (ds as any)?.getJSAPILayer?.() || (ds as any)?.getJsApiLayer?.() || (ds as any)?.layer || null
     const resolved = await Promise.resolve(raw)
     const layer = (resolved && (resolved.layer || resolved)) || null
     if (layer && typeof layer.applyEdits === 'function') return layer
@@ -576,7 +577,7 @@ async function resolveLayerForEdit(ds: any): Promise<any | null> {
     const dm = DataSourceManager.getInstance()
     const cds = ds?.id ? dm.getDataSource(ds.id) : null
     if (cds) {
-      const raw = cds?.getLayer?.() || cds?.layer || null
+      const raw = (cds as any)?.getLayer?.() || (cds as any)?.layer || null
       const resolved = await Promise.resolve(raw)
       const layer = (resolved && (resolved.layer || resolved)) || null
       if (layer && typeof layer.applyEdits === 'function') return layer
@@ -2553,7 +2554,32 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
     : (props.config as any || {})
   const cfg: any = { ...defaultConfig, ...cfgMutable }
 
-  const roleCode = String(cfg.roleCode || 'DT').toUpperCase()
+  // ── Ruolo utente: letto da window.__giiUserRole (scritto dal widget Elenco) ──
+  const [detectedRole, setDetectedRole] = React.useState<string>('')
+
+  React.useEffect(() => {
+    // Prova subito
+    try {
+      const r = (window as any).__giiUserRole?.ruoloLabel
+      if (r && r !== 'ADMIN') setDetectedRole(String(r).toUpperCase())
+    } catch { }
+    // Poi riprova ogni 500ms finché non trova il ruolo (max 10 secondi)
+    let attempts = 0
+    const timer = setInterval(() => {
+      attempts++
+      try {
+        const r = (window as any).__giiUserRole?.ruoloLabel
+        if (r && r !== 'ADMIN') {
+          setDetectedRole(String(r).toUpperCase())
+          clearInterval(timer)
+        }
+      } catch { }
+      if (attempts >= 20) clearInterval(timer)
+    }, 500)
+    return () => clearInterval(timer)
+  }, [])
+
+  const roleCode = detectedRole || String(cfg.roleCode || 'DT').toUpperCase()
   const buttonText = String(cfg.buttonText || 'Prendi in carico')
 
   const buttonColors: ButtonColors = {
