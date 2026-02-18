@@ -296,13 +296,13 @@ function getStatoFieldForRuolo(ruoloLabel: string): string {
   return 'stato_DT' // fallback
 }
 
-// Priorità ordinamento: In attesa mia (1,3) prima, poi In lavorazione (2), poi altri
+// Priorità ordinamento: In attesa mia (0,1,3) prima, poi In lavorazione (2), poi altri
 function getPriorityForStato(statoVal: number | null): number {
-  if (statoVal === 1 || statoVal === 3) return 0  // In attesa mia → in cima
-  if (statoVal === 2) return 1                     // In lavorazione
-  if (statoVal === 4) return 2                     // Trasmesso
-  if (statoVal === 5) return 3                     // Respinto
-  return 4                                          // Non attivo / null
+  if (statoVal === 0 || statoVal === 1 || statoVal === 3) return 0  // In attesa mia → in cima
+  if (statoVal === 2) return 1                                       // In lavorazione
+  if (statoVal === 4) return 2                                       // Trasmesso
+  if (statoVal === 5) return 3                                       // Respinto
+  return 4                                                            // null / altri
 }
 
 export default function Widget (props: Props) {
@@ -380,8 +380,8 @@ export default function Widget (props: Props) {
       const d = r.getData?.() || {}
       const val = d[statoRuoloField]
       const n = val != null ? Number(val) : null
-      if (activeRoleTab === 'attesa_mia') return n === 1 || n === 3
-      if (activeRoleTab === 'attesa_altri') return n === 2 || n === 4
+      if (activeRoleTab === 'attesa_mia') return n === 0 || n === 1 || n === 3  // Non attivo, da prendere, integrazione
+      if (activeRoleTab === 'attesa_altri') return n === 2 || n === 4  // Presa in carico, trasmesso
       return true
     })
   }, [statoRuoloField, activeRoleTab])
@@ -1043,7 +1043,7 @@ export default function Widget (props: Props) {
                       : all.filter(r => {
                           const d = r.getData?.() || {}
                           const n = d[statoRuoloField!] != null ? Number(d[statoRuoloField!]) : null
-                          if (t.id === 'attesa_mia') return n === 1 || n === 3
+                          if (t.id === 'attesa_mia') return n === 0 || n === 1 || n === 3
                           if (t.id === 'attesa_altri') return n === 2 || n === 4
                           return false
                         }).length
@@ -1074,8 +1074,8 @@ export default function Widget (props: Props) {
             </div>
           )}
 
-          {/* ── Tab bar datasource (raggruppati per etichetta) — solo se ci sono tab multiple ── */}
-          {hasTabs && (
+          {/* ── Tab bar datasource (raggruppati per etichetta) — solo se ci sono tab multiple E non ci sono tab ruolo ── */}
+          {hasTabs && !statoRuoloField && (
             <div className='tabBar'>
               {tabGroups.map((g, i) => (
                 <button
