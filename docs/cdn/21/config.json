@@ -4912,16 +4912,48 @@
         "exampleConfigProperty": "test",
         "filterTabs": [
           {
-            "dataSourceId": "dataSource_10-0-dataView_1",
-            "label": "Tutte le pratiche"
+            "dataSourceId": "dataSource_31-0",
+            "label": "Rapporto_di_rilevazione_infrazioni_irrigue"
           },
           {
-            "dataSourceId": "dataSource_10-0-dataView_2",
-            "label": "Da prendere in carico"
+            "dataSourceId": "dataSource_41-0",
+            "label": "Rapporto_di_rilevazione_infrazioni_irrigue"
           },
           {
-            "dataSourceId": "dataSource_10-0-dataView_3",
-            "label": "Prese in carico"
+            "dataSourceId": "dataSource_39-0",
+            "label": "Rapporto_di_rilevazione_infrazioni_irrigue"
+          },
+          {
+            "dataSourceId": "dataSource_38-0",
+            "label": "Rapporto_di_rilevazione_infrazioni_irrigue"
+          },
+          {
+            "dataSourceId": "dataSource_37-0",
+            "label": "Rapporto_di_rilevazione_infrazioni_irrigue"
+          },
+          {
+            "dataSourceId": "dataSource_36-0",
+            "label": "Rapporto_di_rilevazione_infrazioni_irrigue"
+          },
+          {
+            "dataSourceId": "dataSource_35-0",
+            "label": "Rapporto_di_rilevazione_infrazioni_irrigue"
+          },
+          {
+            "dataSourceId": "dataSource_34-0",
+            "label": "Rapporto_di_rilevazione_infrazioni_irrigue"
+          },
+          {
+            "dataSourceId": "dataSource_32-0",
+            "label": "Rapporto_di_rilevazione_infrazioni_irrigue"
+          },
+          {
+            "dataSourceId": "dataSource_40-0",
+            "label": "Rapporto_di_rilevazione_infrazioni_irrigue"
+          },
+          {
+            "dataSourceId": "dataSource_33-0",
+            "label": "Rapporto_di_rilevazione_infrazioni_irrigue"
           }
         ],
         "rowPaddingY": 18,
@@ -4944,22 +4976,59 @@
       "id": "widget_344",
       "useDataSources": [
         {
-          "dataSourceId": "dataSource_10-0-dataView_1",
-          "mainDataSourceId": "dataSource_10-0",
-          "rootDataSourceId": "dataSource_10",
-          "dataViewId": "dataView_1"
+          "dataSourceId": "dataSource_31-0",
+          "mainDataSourceId": "dataSource_31-0",
+          "rootDataSourceId": "dataSource_31"
         },
         {
-          "dataSourceId": "dataSource_10-0-dataView_2",
-          "mainDataSourceId": "dataSource_10-0",
-          "rootDataSourceId": "dataSource_10",
-          "dataViewId": "dataView_2"
+          "dataSourceId": "dataSource_41-0",
+          "mainDataSourceId": "dataSource_41-0",
+          "rootDataSourceId": "dataSource_41"
         },
         {
-          "dataSourceId": "dataSource_10-0-dataView_3",
-          "mainDataSourceId": "dataSource_10-0",
-          "rootDataSourceId": "dataSource_10",
-          "dataViewId": "dataView_3"
+          "dataSourceId": "dataSource_39-0",
+          "mainDataSourceId": "dataSource_39-0",
+          "rootDataSourceId": "dataSource_39"
+        },
+        {
+          "dataSourceId": "dataSource_38-0",
+          "mainDataSourceId": "dataSource_38-0",
+          "rootDataSourceId": "dataSource_38"
+        },
+        {
+          "dataSourceId": "dataSource_37-0",
+          "mainDataSourceId": "dataSource_37-0",
+          "rootDataSourceId": "dataSource_37"
+        },
+        {
+          "dataSourceId": "dataSource_36-0",
+          "mainDataSourceId": "dataSource_36-0",
+          "rootDataSourceId": "dataSource_36"
+        },
+        {
+          "dataSourceId": "dataSource_35-0",
+          "mainDataSourceId": "dataSource_35-0",
+          "rootDataSourceId": "dataSource_35"
+        },
+        {
+          "dataSourceId": "dataSource_34-0",
+          "mainDataSourceId": "dataSource_34-0",
+          "rootDataSourceId": "dataSource_34"
+        },
+        {
+          "dataSourceId": "dataSource_32-0",
+          "mainDataSourceId": "dataSource_32-0",
+          "rootDataSourceId": "dataSource_32"
+        },
+        {
+          "dataSourceId": "dataSource_40-0",
+          "mainDataSourceId": "dataSource_40-0",
+          "rootDataSourceId": "dataSource_40"
+        },
+        {
+          "dataSourceId": "dataSource_33-0",
+          "mainDataSourceId": "dataSource_33-0",
+          "rootDataSourceId": "dataSource_33"
         }
       ],
       "style": {
@@ -5210,22 +5279,59 @@
       "id": "widget_345",
       "useDataSources": [
         {
-          "dataSourceId": "dataSource_10-0-dataView_1",
-          "mainDataSourceId": "dataSource_10-0",
-          "rootDataSourceId": "dataSource_10",
-          "dataViewId": "dataView_1"
+          "dataSourceId": "dataSource_31-0",
+          "mainDataSourceId": "dataSource_31-0",
+          "rootDataSourceId": "dataSource_31"
         },
         {
-          "dataSourceId": "dataSource_10-0-dataView_2",
-          "mainDataSourceId": "dataSource_10-0",
-          "rootDataSourceId": "dataSource_10",
-          "dataViewId": "dataView_2"
+          "dataSourceId": "dataSource_41-0",
+          "mainDataSourceId": "dataSource_41-0",
+          "rootDataSourceId": "dataSource_41"
         },
         {
-          "dataSourceId": "dataSource_10-0-dataView_3",
-          "mainDataSourceId": "dataSource_10-0",
-          "rootDataSourceId": "dataSource_10",
-          "dataViewId": "dataView_3"
+          "dataSourceId": "dataSource_39-0",
+          "mainDataSourceId": "dataSource_39-0",
+          "rootDataSourceId": "dataSource_39"
+        },
+        {
+          "dataSourceId": "dataSource_38-0",
+          "mainDataSourceId": "dataSource_38-0",
+          "rootDataSourceId": "dataSource_38"
+        },
+        {
+          "dataSourceId": "dataSource_37-0",
+          "mainDataSourceId": "dataSource_37-0",
+          "rootDataSourceId": "dataSource_37"
+        },
+        {
+          "dataSourceId": "dataSource_36-0",
+          "mainDataSourceId": "dataSource_36-0",
+          "rootDataSourceId": "dataSource_36"
+        },
+        {
+          "dataSourceId": "dataSource_35-0",
+          "mainDataSourceId": "dataSource_35-0",
+          "rootDataSourceId": "dataSource_35"
+        },
+        {
+          "dataSourceId": "dataSource_34-0",
+          "mainDataSourceId": "dataSource_34-0",
+          "rootDataSourceId": "dataSource_34"
+        },
+        {
+          "dataSourceId": "dataSource_32-0",
+          "mainDataSourceId": "dataSource_32-0",
+          "rootDataSourceId": "dataSource_32"
+        },
+        {
+          "dataSourceId": "dataSource_40-0",
+          "mainDataSourceId": "dataSource_40-0",
+          "rootDataSourceId": "dataSource_40"
+        },
+        {
+          "dataSourceId": "dataSource_33-0",
+          "mainDataSourceId": "dataSource_33-0",
+          "rootDataSourceId": "dataSource_33"
         }
       ],
       "style": {
@@ -10606,7 +10712,7 @@
     "type": "Web Experience",
     "thumbnail": null
   },
-  "timestamp": 1771399798534,
+  "timestamp": 1771430719527,
   "sharedThemeVariables": {
     "header": {},
     "body": {},
@@ -10789,117 +10895,6 @@
       "itemId": "ebb5e0d0d2d649daa2e124bd96514245",
       "portalUrl": "https://cbsm-hub.maps.arcgis.com"
     },
-    "dataSource_13": {
-      "id": "dataSource_13",
-      "type": "FEATURE_SERVICE",
-      "sourceLabel": "GII_PRATICHE_SCHEMA",
-      "itemId": "2ab6215c465440bfb8400d39db01af82",
-      "portalUrl": "https://cbsm-hub.maps.arcgis.com",
-      "url": "https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_PRATICHE_SCHEMA/FeatureServer",
-      "childDataSourceJsons": {
-        "0": {
-          "id": "dataSource_13-0",
-          "type": "FEATURE_LAYER",
-          "sourceLabel": "GII_PRATICHE_SCHEMA",
-          "url": "https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_PRATICHE_SCHEMA/FeatureServer/0",
-          "layerId": "0",
-          "portalUrl": "https://cbsm-hub.maps.arcgis.com",
-          "itemId": "2ab6215c465440bfb8400d39db01af82",
-          "dataViews": {
-            "dataView_1": {
-              "id": "dataView_1",
-              "label": "F_AGR_DIR_TUTTE"
-            },
-            "dataView_2": {
-              "id": "dataView_2",
-              "label": "F_AGR_DIR_DA_PRENDERE",
-              "where": {
-                "logicalOperator": "AND",
-                "parts": [
-                  {
-                    "type": "SINGLE",
-                    "jimuFieldName": "presa_in_carico_DT",
-                    "operator": "NUMBER_OPERATOR_IS",
-                    "valueOptions": {
-                      "isValid": true,
-                      "sourceType": "UNIQUE",
-                      "inputEditor": "SIMPLE_SELECT",
-                      "value": [
-                        {
-                          "value": 1,
-                          "label": "1"
-                        }
-                      ]
-                    },
-                    "displayType": "NONE",
-                    "askForValueOptions": null,
-                    "displayLabel": null,
-                    "caseSensitive": false
-                  }
-                ],
-                "sql": "presa_in_carico_DT = 1",
-                "displaySQL": "(presa_in_carico_DT = 1)"
-              }
-            },
-            "dataView_3": {
-              "id": "dataView_3",
-              "label": "F_AGR_DIR_IN_ATTESA_ESITO",
-              "where": {
-                "logicalOperator": "AND",
-                "parts": [
-                  {
-                    "type": "SINGLE",
-                    "jimuFieldName": "presa_in_carico_DT",
-                    "operator": "NUMBER_OPERATOR_IS",
-                    "valueOptions": {
-                      "isValid": true,
-                      "sourceType": "UNIQUE",
-                      "inputEditor": "SIMPLE_SELECT",
-                      "value": [
-                        {
-                          "value": 1,
-                          "label": "1"
-                        }
-                      ]
-                    },
-                    "displayType": "NONE",
-                    "askForValueOptions": null,
-                    "displayLabel": null,
-                    "caseSensitive": false
-                  },
-                  {
-                    "type": "SINGLE",
-                    "jimuFieldName": "esito_DT",
-                    "operator": "NUMBER_OPERATOR_IS_BLANK",
-                    "valueOptions": {
-                      "isValid": true,
-                      "sourceType": "USER_INPUT",
-                      "inputEditor": "BLANK_SELECTOR",
-                      "value": null
-                    },
-                    "displayType": "NONE",
-                    "askForValueOptions": null,
-                    "displayLabel": null,
-                    "caseSensitive": false
-                  }
-                ],
-                "sql": "(presa_in_carico_DT = 1) AND (esito_DT IS NULL)",
-                "displaySQL": "(presa_in_carico_DT = 1) and (esito_DT IS NULL)"
-              }
-            }
-          }
-        }
-      },
-      "isHidden": false
-    },
-    "dataSource_14": {
-      "id": "dataSource_14",
-      "type": "FEATURE_SERVICE",
-      "sourceLabel": "GII_PRATICHE_TI_view",
-      "itemId": "c460f7b83d1042fc8f9974422b120dcd",
-      "portalUrl": "https://cbsm-hub.maps.arcgis.com",
-      "url": "https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_PRATICHE_TI_view/FeatureServer"
-    },
     "dataSource_16": {
       "id": "dataSource_16",
       "type": "FEATURE_SERVICE",
@@ -10907,6 +10902,94 @@
       "itemId": "71eec3d676014ef1b15b44ab95a248d1",
       "portalUrl": "https://cbsm-hub.maps.arcgis.com",
       "url": "https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_uteniti/FeatureServer"
+    },
+    "dataSource_31": {
+      "id": "dataSource_31",
+      "type": "FEATURE_SERVICE",
+      "sourceLabel": "GII_VIEW_EB_ADMIN",
+      "itemId": "c05409cf4a86471194d6406e9b4d1c65",
+      "portalUrl": "https://cbsm-hub.maps.arcgis.com",
+      "url": "https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_VIEW_EB_BASE/FeatureServer"
+    },
+    "dataSource_32": {
+      "id": "dataSource_32",
+      "type": "FEATURE_SERVICE",
+      "sourceLabel": "GII_VIEW_EB_AMM_ALL",
+      "itemId": "6ffe45dac0e04905ba677e9fcd703238",
+      "portalUrl": "https://cbsm-hub.maps.arcgis.com",
+      "url": "https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_VIEW_EB_AMM_ALL/FeatureServer"
+    },
+    "dataSource_33": {
+      "id": "dataSource_33",
+      "type": "FEATURE_SERVICE",
+      "sourceLabel": "GII_VIEW_EB_TEC_DS",
+      "itemId": "32b0d7b27c154a969eff411826a473af",
+      "portalUrl": "https://cbsm-hub.maps.arcgis.com",
+      "url": "https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_VIEW_EB_TEC_DS/FeatureServer"
+    },
+    "dataSource_34": {
+      "id": "dataSource_34",
+      "type": "FEATURE_SERVICE",
+      "sourceLabel": "GII_VIEW_EB_AGR_D6",
+      "itemId": "f8671e4e6d804735a5a8c0279b7396be",
+      "portalUrl": "https://cbsm-hub.maps.arcgis.com",
+      "url": "https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_VIEW_EB_AGR_D6/FeatureServer"
+    },
+    "dataSource_35": {
+      "id": "dataSource_35",
+      "type": "FEATURE_SERVICE",
+      "sourceLabel": "GII_VIEW_EB_AGR_D5",
+      "itemId": "b3405424a8f841648cca63a429991c03",
+      "portalUrl": "https://cbsm-hub.maps.arcgis.com",
+      "url": "https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_VIEW_EB_AGR_D5/FeatureServer"
+    },
+    "dataSource_36": {
+      "id": "dataSource_36",
+      "type": "FEATURE_SERVICE",
+      "sourceLabel": "GII_VIEW_EB_AGR_D4",
+      "itemId": "c724a0cd50b14743a4595313c2afd39a",
+      "portalUrl": "https://cbsm-hub.maps.arcgis.com",
+      "url": "https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_VIEW_EB_AGR_D4/FeatureServer"
+    },
+    "dataSource_37": {
+      "id": "dataSource_37",
+      "type": "FEATURE_SERVICE",
+      "sourceLabel": "GII_VIEW_EB_AGR_D3",
+      "itemId": "efc0f9aa9d0e4862a87152cd482c2722",
+      "portalUrl": "https://cbsm-hub.maps.arcgis.com",
+      "url": "https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_VIEW_EB_AGR_D3/FeatureServer"
+    },
+    "dataSource_38": {
+      "id": "dataSource_38",
+      "type": "FEATURE_SERVICE",
+      "sourceLabel": "GII_VIEW_EB_AGR_D2",
+      "itemId": "f428036dac9e41458f67c1da32efddd5",
+      "portalUrl": "https://cbsm-hub.maps.arcgis.com",
+      "url": "https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_VIEW_EB_AGR_D2/FeatureServer"
+    },
+    "dataSource_39": {
+      "id": "dataSource_39",
+      "type": "FEATURE_SERVICE",
+      "sourceLabel": "GII_VIEW_EB_AGR_D1",
+      "itemId": "3d0899eb7f684698862c1bc590c19d7f",
+      "portalUrl": "https://cbsm-hub.maps.arcgis.com",
+      "url": "https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_VIEW_EB_AGR_D1/FeatureServer"
+    },
+    "dataSource_40": {
+      "id": "dataSource_40",
+      "type": "FEATURE_SERVICE",
+      "sourceLabel": "GII_VIEW_EB_TEC",
+      "itemId": "8687bad031ef4de6bd3c8151de8f8cc6",
+      "portalUrl": "https://cbsm-hub.maps.arcgis.com",
+      "url": "https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_VIEW_EB_TEC/FeatureServer"
+    },
+    "dataSource_41": {
+      "id": "dataSource_41",
+      "type": "FEATURE_SERVICE",
+      "sourceLabel": "GII_VIEW_EB_AGR",
+      "itemId": "777c4456f6104e779e6a02e5875f67c1",
+      "portalUrl": "https://cbsm-hub.maps.arcgis.com",
+      "url": "https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_VIEW_EB_AGR/FeatureServer"
     }
   },
   "pageStructure": [
@@ -10965,5 +11048,5 @@
       ]
     }
   },
-  "publishTimestamp": 1771399808325
+  "publishTimestamp": 1771430722412
 }
