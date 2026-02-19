@@ -315,8 +315,12 @@ export default function Widget (props: Props) {
   const [giiUser, setGiiUser] = React.useState<GiiUserInfo | null>(null)
   const [userLoading, setUserLoading] = React.useState(true)
 
+  // Ascolta eventi di login/credential change
   React.useEffect(() => {
     let cancelled = false
+    let esriIdModule: any = null
+    let credentialHandle: any = null
+    
     const load = async () => {
       setUserLoading(true)
       try {
@@ -347,7 +351,24 @@ export default function Widget (props: Props) {
       } catch { }
     }
     load()
-    return () => { cancelled = true }
+    
+    // Listener per eventi di credential change (login)
+    loadEsriModule<any>('esri/identity/IdentityManager').then(esriId => {
+      if (cancelled) return
+      esriIdModule = esriId
+      const onCredentialChange = () => {
+        console.log('🔐 Credential change detected, reloading user...')
+        load()
+      }
+      credentialHandle = esriId.on('credential-create', onCredentialChange)
+    }).catch(() => {})
+    
+    return () => { 
+      cancelled = true
+      if (credentialHandle) {
+        try { credentialHandle.remove() } catch {}
+      }
+    }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
@@ -372,50 +393,6 @@ export default function Widget (props: Props) {
     { id: 'attesa_altri', label: 'In attesa altri' },
   ]
   const [activeRoleTab, setActiveRoleTab] = React.useState<string>('tutte')
-
-
-  // ── Filtro datasource per ruolo/settore utente ──
-  const allowedDataSourceIds = React.useMemo(() => {
-    if (!giiUser) return useDsJs.map((u: any) => String(u?.dataSourceId || ''))
-    
-    const { ruolo, area, settore, isAdmin } = giiUser
-    
-    // Admin vede tutto
-    if (isAdmin) return useDsJs.map((u: any) => String(u?.dataSourceId || ''))
-    
-    // RZ (3), TI (2), TR (1)
-    if (ruolo >= 1 && ruolo <= 3) {
-      if (area === 1) {
-        // AGR per settore
-        if (settore === 1) return ['dataSource_39']
-        if (settore === 2) return ['dataSource_38']
-        if (settore === 3) return ['dataSource_37']
-        if (settore === 4) return ['dataSource_36']
-        if (settore === 5) return ['dataSource_35']
-        if (settore === 6) return ['dataSource_34']
-      } else if (area === 2) {
-        // TEC
-        return ['dataSource_33']
-      }
-    }
-    
-    // RI (4), DT (5), DA (6) AGR
-    if (ruolo >= 4 && ruolo <= 6 && area === 1) {
-      return ['dataSource_41']
-    }
-    
-    // RI, DT, DA TEC
-    if (ruolo >= 4 && ruolo <= 6 && area === 2) {
-      return ['dataSource_40']
-    }
-    
-    // Fallback: tutti
-    return useDsJs.map((u: any) => String(u?.dataSourceId || ''))
-  }, [giiUser, useDsJs])
-
-  const filteredUseDsJs = useDsJs.filter((u: any) => 
-    allowedDataSourceIds.includes(String(u?.dataSourceId || ''))
-  )
 
   // Funzione filtro per tab ruolo
   const filterByRoleTab = React.useCallback((recs: DataRecord[]): DataRecord[] => {
@@ -1046,7 +1023,7 @@ export default function Widget (props: Props) {
         <div css={styles} style={{ width: '100%', height: '100%' }}>
 
           {/* ── DataSource loaders per TUTTE le data view (invisibili) ── */}
-          {filteredUseDsJs.map((u: any, i: number) => (
+          {useDsJs.map((u: any, i: number) => (
             <DataSourceComponent
               key={u?.dataSourceId || i}
               useDataSource={udsAny?.[i]}
