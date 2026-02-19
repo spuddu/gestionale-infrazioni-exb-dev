@@ -210,7 +210,7 @@ const RUOLO_PRIORITY: Record<number, number> = {
 //   RUOLO: TR=1,TI=2,RZ=3,RI=4,DT=5,DA=6
 function getAllowedDataSourceIds(user: { ruolo: number|null, area: number|null, settore: number|null, isAdmin: boolean } | null): string[] | null {
   if (!user) return null
-  if (user.isAdmin) return null // admin: nessun filtro, null = vede tutto
+  if (user.isAdmin) return ['dataSource_31'] // admin: vista unica senza filtri (evita duplicati)
 
   const { ruolo, area, settore } = user
 
@@ -351,6 +351,9 @@ export default function Widget (props: Props) {
   const [userLoading, setUserLoading] = React.useState(true)
   // notLogged: true quando non c'è utente autenticato → overlay bloccante
   const [notLogged, setNotLogged] = React.useState(false)
+  // loginVersion: incrementato dopo ogni login confermato.
+  // Cambiare il key dei DataSourceComponent li smonta/rimonta → ExB ri-fetcha con le nuove credenziali.
+  const [loginVersion, setLoginVersion] = React.useState(0)
 
   // Carica profilo utente dalla tabella GII_utenti
   const loadUserProfile = React.useCallback(async (username: string, isAdmin: boolean) => {
@@ -378,6 +381,7 @@ export default function Widget (props: Props) {
       : { username, ruolo: null, ruoloLabel: '', area: null, settore: null, ufficio: null, gruppo: '', isAdmin: false }
     setGiiUser(u)
     setNotLogged(false)
+    setLoginVersion(v => v + 1) // forza remount DataSourceComponent → ri-fetch con credenziali
     try { (window as any).__giiUserRole = u } catch { }
     setUserLoading(false)
     console.log('GII user loaded:', u.username, '| ruolo:', u.ruolo, '| area:', u.area, '| settore:', u.settore)
@@ -555,48 +559,7 @@ export default function Widget (props: Props) {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [useDsJs.length, giiUser?.username])
 
-  // ── Forza re-query dei datasource dopo login ────────────────────────────────
-  // ExB carica i DS anonimamente prima del login (0 record in cache).
-  // Dopo il login dobbiamo forzare una nuova query con le credenziali autenticate.
-  React.useEffect(() => {
-    if (!giiUser?.username || userLoading || notLogged) return
 
-    const forceRequery = async () => {
-      // Breve attesa per dare tempo a ExB di registrare le nuove credenziali
-      await new Promise(r => setTimeout(r, 500))
-
-      const dsIdsToQuery = allowedDsIds === null ? useDsJs.map((u: any) => String(u?.dataSourceId || '')) : (allowedDsIds ?? [])
-
-      for (const dsId of dsIdsToQuery) {
-        try {
-          const ds = DataSourceManager.getInstance().getDataSource(dsId) as any
-          if (!ds) continue
-
-          // Prova i metodi di refresh disponibili in ExB
-          if (typeof ds.query === 'function') {
-            await ds.query({ where: whereClause, pageSize }).catch(() => {})
-          } else if (typeof ds.load === 'function') {
-            await ds.load().catch(() => {})
-          } else if (typeof ds.refresh === 'function') {
-            ds.refresh()
-          }
-
-          // Rileggi i record dopo il refresh
-          await new Promise(r => setTimeout(r, 800))
-          const freshRecs = (ds.getRecords?.() ?? []) as DataRecord[]
-          if (freshRecs.length >= 0) {
-            dsDataRef.current[dsId] = { recs: freshRecs, ds, loading: false }
-          }
-        } catch { }
-      }
-
-      setDsDataVer(v => v + 1)
-      console.log('Re-query forzato post-login completato. DS:', dsIdsToQuery)
-    }
-
-    forceRequery()
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [giiUser?.username])
 
   // Sort: array (multi sort con Shift+Click)
   const defaultSort: SortItem[] = React.useMemo(() => {
@@ -1180,10 +1143,11 @@ export default function Widget (props: Props) {
           )}
 
           {/* ── DataSource loaders: SEMPRE nel DOM (ExB richiede che siano registrati).
+               Il key include loginVersion: al login React smonta/rimonta → ExB ri-fetcha.
                L'overlay bloccante copre i dati finché non c'è login. ── */}
           {useDsJs.map((u: any, i: number) => (
             <DataSourceComponent
-              key={u?.dataSourceId || i}
+              key={`${u?.dataSourceId || i}_v${loginVersion}`}
               useDataSource={udsAny?.[i]}
               query={dsQuery}
               widgetId={props.id}
