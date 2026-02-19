@@ -555,6 +555,49 @@ export default function Widget (props: Props) {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [useDsJs.length, giiUser?.username])
 
+  // ── Forza re-query dei datasource dopo login ────────────────────────────────
+  // ExB carica i DS anonimamente prima del login (0 record in cache).
+  // Dopo il login dobbiamo forzare una nuova query con le credenziali autenticate.
+  React.useEffect(() => {
+    if (!giiUser?.username || userLoading || notLogged) return
+
+    const forceRequery = async () => {
+      // Breve attesa per dare tempo a ExB di registrare le nuove credenziali
+      await new Promise(r => setTimeout(r, 500))
+
+      const dsIdsToQuery = allowedDsIds === null ? useDsJs.map((u: any) => String(u?.dataSourceId || '')) : (allowedDsIds ?? [])
+
+      for (const dsId of dsIdsToQuery) {
+        try {
+          const ds = DataSourceManager.getInstance().getDataSource(dsId) as any
+          if (!ds) continue
+
+          // Prova i metodi di refresh disponibili in ExB
+          if (typeof ds.query === 'function') {
+            await ds.query({ where: whereClause, pageSize }).catch(() => {})
+          } else if (typeof ds.load === 'function') {
+            await ds.load().catch(() => {})
+          } else if (typeof ds.refresh === 'function') {
+            ds.refresh()
+          }
+
+          // Rileggi i record dopo il refresh
+          await new Promise(r => setTimeout(r, 800))
+          const freshRecs = (ds.getRecords?.() ?? []) as DataRecord[]
+          if (freshRecs.length >= 0) {
+            dsDataRef.current[dsId] = { recs: freshRecs, ds, loading: false }
+          }
+        } catch { }
+      }
+
+      setDsDataVer(v => v + 1)
+      console.log('Re-query forzato post-login completato. DS:', dsIdsToQuery)
+    }
+
+    forceRequery()
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [giiUser?.username])
+
   // Sort: array (multi sort con Shift+Click)
   const defaultSort: SortItem[] = React.useMemo(() => {
     const f = txt(cfg.orderByField || 'objectid')
