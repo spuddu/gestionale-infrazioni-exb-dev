@@ -351,9 +351,7 @@ export default function Widget (props: Props) {
   const [userLoading, setUserLoading] = React.useState(true)
   // notLogged: true quando non c'è utente autenticato → overlay bloccante
   const [notLogged, setNotLogged] = React.useState(false)
-  // loginVersion: incrementato dopo ogni login confermato.
-  // Cambiare il key dei DataSourceComponent li smonta/rimonta → ExB ri-fetcha con le nuove credenziali.
-  const [loginVersion, setLoginVersion] = React.useState(0)
+
 
   // Carica profilo utente dalla tabella GII_utenti
   const loadUserProfile = React.useCallback(async (username: string, isAdmin: boolean) => {
@@ -370,7 +368,6 @@ export default function Widget (props: Props) {
       }
       setGiiUser(u)
       setNotLogged(false)
-      setLoginVersion(v => v + 1)
       try { (window as any).__giiUserRole = u } catch { }
       setUserLoading(false)
       return
@@ -382,7 +379,6 @@ export default function Widget (props: Props) {
       : { username, ruolo: null, ruoloLabel: '', area: null, settore: null, ufficio: null, gruppo: '', isAdmin: false }
     setGiiUser(u)
     setNotLogged(false)
-    setLoginVersion(v => v + 1) // forza remount DataSourceComponent → ri-fetch con credenziali
     try { (window as any).__giiUserRole = u } catch { }
     setUserLoading(false)
     console.log('GII user loaded:', u.username, '| ruolo:', u.ruolo, '| area:', u.area, '| settore:', u.settore)
@@ -587,11 +583,13 @@ export default function Widget (props: Props) {
   const whereClause = txt(cfg.whereClause || '1=1')
   const pageSize = num(cfg.pageSize, 200)
 
-  // Query (semplice)
+  // Query: usa "1=0" prima del login (nessun dato senza credenziali).
+  // Quando notLogged/userLoading cambia a false, ExB ri-fetcha con la query reale.
+  const isReady = !notLogged && !userLoading && !!giiUser?.username
   const dsQuery: any = React.useMemo(() => ({
-    where: whereClause,
+    where: isReady ? whereClause : '1=0',
     pageSize
-  }), [whereClause, pageSize])
+  }), [isReady, whereClause, pageSize])
 
   // Campi base
   const fieldPratica = txt(cfg.fieldPratica || 'objectid')
@@ -1144,11 +1142,11 @@ export default function Widget (props: Props) {
           )}
 
           {/* ── DataSource loaders: SEMPRE nel DOM (ExB richiede che siano registrati).
-               Il key include loginVersion: al login React smonta/rimonta → ExB ri-fetcha.
-               L'overlay bloccante copre i dati finché non c'è login. ── */}
+               Query "1=0" prima del login → nessun dato anonimo.
+               Query reale dopo login → ExB ri-fetcha con credenziali. ── */}
           {useDsJs.map((u: any, i: number) => (
             <DataSourceComponent
-              key={`${u?.dataSourceId || i}_v${loginVersion}`}
+              key={u?.dataSourceId || i}
               useDataSource={udsAny?.[i]}
               query={dsQuery}
               widgetId={props.id}
