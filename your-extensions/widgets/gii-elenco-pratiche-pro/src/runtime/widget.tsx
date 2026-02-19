@@ -382,6 +382,8 @@ export default function Widget (props: Props) {
 
   // Carica profilo utente dalla tabella GII_utenti
   const loadUserProfile = React.useCallback(async (username: string, isAdmin: boolean) => {
+    // Reset dsDataRef: pulisce i dati precedenti per forzare ricaricamento fresco
+    dsDataRef.current = {}
     if (isAdmin) {
       const u: GiiUserInfo = {
         username, ruolo: null, ruoloLabel: 'ADMIN',
@@ -402,9 +404,11 @@ export default function Widget (props: Props) {
     try { (window as any).__giiUserRole = u } catch { }
     setUserLoading(false)
     setAuthRequired(false)
+    console.log('👤 GII user loaded:', u, '| allowedDs:', u.ruolo, u.area, u.settore)
   }, [])
 
-  // Avvio: controlla se già loggato, altrimenti forza login
+  // Avvio PASSIVO: controlla se già loggato. NON apre mai dialog automaticamente.
+  // Il login viene avviato solo quando l'utente clicca "Accedi" (forceLogin).
   React.useEffect(() => {
     let cancelled = false
     let credentialHandle: any = null
@@ -415,24 +419,10 @@ export default function Widget (props: Props) {
         const { username, isAdmin } = await detectCurrentUser()
         if (cancelled) return
         if (!username) {
-          // Non ancora loggato → forza login dialog SENZA possibilità di skip
-          const esriId = await loadEsriModule<any>('esri/identity/IdentityManager')
-          try {
-            await esriId.getCredential(`${GII_PORTAL}/sharing/rest`, { prompt: true })
-            if (cancelled) return
-            const { username: u2, isAdmin: a2 } = await detectCurrentUser()
-            if (!u2) {
-              if (!cancelled) { setAuthRequired(true); setUserLoading(false) }
-              return
-            }
-            await loadUserProfile(u2, a2)
-          } catch {
-            if (!cancelled) {
-              setAuthRequired(true)
-              setLoginError('Login necessario per accedere al gestionale.')
-              setUserLoading(false)
-            }
-          }
+          // Non loggato: mostra schermata bloccante, aspetta click "Accedi"
+          setAuthRequired(true)
+          setLoginError('')
+          setUserLoading(false)
         } else {
           await loadUserProfile(username, isAdmin)
         }
@@ -440,7 +430,7 @@ export default function Widget (props: Props) {
         if (!cancelled) { setAuthRequired(true); setUserLoading(false) }
       }
 
-      // Listener per credential change (es. token rinnovato)
+      // Listener per credential change (login avvenuto via forceLogin o ExB)
       try {
         const esriId = await loadEsriModule<any>('esri/identity/IdentityManager')
         if (cancelled) return
@@ -559,12 +549,21 @@ export default function Widget (props: Props) {
   }, [])
 
   // ── Ri-leggi i record dopo un breve ritardo per catturare dati lazy-loaded ──
+  // Dipende da filteredUseDsJs.length: si riattiva dopo il login quando i DS diventano disponibili
   React.useEffect(() => {
-    const timers = [500, 1500, 3000]
+    if (userLoading || authRequired || !giiUser?.username) return
+    // Reset dsDataRef per i DS non più consentiti (cambio utente)
+    const allowedSet = new Set(filteredUseDsJs.map((u: any) => String(u?.dataSourceId || '')))
+    Object.keys(dsDataRef.current).forEach(id => {
+      if (!allowedSet.has(id)) delete dsDataRef.current[id]
+    })
+    const timers = [300, 800, 2000, 4000]
     const ids = timers.map(ms => setTimeout(() => {
       let changed = false
-      Object.entries(dsDataRef.current).forEach(([dsId, entry]) => {
-        if (entry.ds) {
+      filteredUseDsJs.forEach((u: any) => {
+        const dsId = String(u?.dataSourceId || '')
+        const entry = dsDataRef.current[dsId]
+        if (entry?.ds) {
           const freshRecs = (entry.ds.getRecords?.() ?? []) as DataRecord[]
           if (freshRecs.length > 0) {
             dsDataRef.current[dsId] = { ...entry, recs: freshRecs, loading: false }
@@ -576,7 +575,7 @@ export default function Widget (props: Props) {
     }, ms))
     return () => ids.forEach(id => clearTimeout(id))
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [useDsJs.length])
+  }, [filteredUseDsJs.length, giiUser?.username])
 
   // Sort: array (multi sort con Shift+Click)
   const defaultSort: SortItem[] = React.useMemo(() => {
