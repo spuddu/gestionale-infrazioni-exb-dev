@@ -354,8 +354,12 @@ export default function Widget (props: Props) {
 
   // Carica profilo utente dalla tabella GII_utenti
   const loadUserProfile = React.useCallback(async (username: string, isAdmin: boolean) => {
-    // Reset dsDataRef: pulisce i dati precedenti per forzare ricaricamento fresco
-    dsDataRef.current = {}
+    // Reset dsDataRef SOLO se l'utente cambia (non ad ogni credential-create ripetuto)
+    const prevUsername = (window as any).__giiCurrentUsername
+    if (prevUsername !== username) {
+      dsDataRef.current = {}
+      ;(window as any).__giiCurrentUsername = username
+    }
     if (isAdmin) {
       const u: GiiUserInfo = {
         username, ruolo: null, ruoloLabel: 'ADMIN',
@@ -406,14 +410,21 @@ export default function Widget (props: Props) {
       try {
         const esriId = await loadEsriModule<any>('esri/identity/IdentityManager')
         if (cancelled) return
-        credentialHandle = esriId.on('credential-create', async () => {
+        let credDebounce: any = null
+        credentialHandle = esriId.on('credential-create', () => {
           if (cancelled) return
-          console.log('Credential create event: reloading user profile...')
-          const { username, isAdmin } = await detectCurrentUser()
-          if (username) {
-            setNotLogged(false)
-            await loadUserProfile(username, isAdmin)
-          }
+          // Debounce: ExB spara credential-create una volta per ogni DS/token.
+          // Aspettiamo 400ms dall'ultimo evento prima di ricaricare.
+          clearTimeout(credDebounce)
+          credDebounce = setTimeout(async () => {
+            if (cancelled) return
+            console.log('Credential create event: reloading user profile...')
+            const { username, isAdmin } = await detectCurrentUser()
+            if (username) {
+              setNotLogged(false)
+              await loadUserProfile(username, isAdmin)
+            }
+          }, 400)
         })
       } catch { }
     }
