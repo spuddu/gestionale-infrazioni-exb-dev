@@ -349,36 +349,8 @@ export default function Widget (props: Props) {
   // ── Rilevamento ruolo utente loggato ──────────────────────────────────────
   const [giiUser, setGiiUser] = React.useState<GiiUserInfo | null>(null)
   const [userLoading, setUserLoading] = React.useState(true)
-  // authRequired: true = non autenticato, mostra schermata login
-  const [authRequired, setAuthRequired] = React.useState(false)
-  const [loginError, setLoginError] = React.useState('')
-
-  // Forza login tramite IdentityManager.getCredential (blocca se ignorato)
-  const forceLogin = React.useCallback(async () => {
-    setAuthRequired(false)
-    setLoginError('')
-    setUserLoading(true)
-    try {
-      const esriId = await loadEsriModule<any>('esri/identity/IdentityManager')
-      // getCredential apre il dialog di login; lancia se l'utente lo chiude senza login
-      await esriId.getCredential(`${GII_PORTAL}/sharing/rest`, { prompt: true })
-      // Ora dovrebbe essere loggato → ricarichiamo
-      const { username, isAdmin } = await detectCurrentUser()
-      if (!username) {
-        setAuthRequired(true)
-        setLoginError('Accesso non riuscito. Riprova.')
-        setUserLoading(false)
-        return
-      }
-      await loadUserProfile(username, isAdmin)
-    } catch (e: any) {
-      // L'utente ha chiuso il dialog → blocchiamo
-      console.warn('🔒 Login annullato o fallito:', e)
-      setAuthRequired(true)
-      setLoginError('È necessario effettuare il login per accedere al gestionale.')
-      setUserLoading(false)
-    }
-  }, [])
+  // notLogged: true quando non c'è utente autenticato → overlay bloccante
+  const [notLogged, setNotLogged] = React.useState(false)
 
   // Carica profilo utente dalla tabella GII_utenti
   const loadUserProfile = React.useCallback(async (username: string, isAdmin: boolean) => {
@@ -390,9 +362,9 @@ export default function Widget (props: Props) {
         area: null, settore: null, ufficio: null, gruppo: '', isAdmin: true
       }
       setGiiUser(u)
+      setNotLogged(false)
       try { (window as any).__giiUserRole = u } catch { }
       setUserLoading(false)
-      setAuthRequired(false)
       return
     }
     const token = await getSessionToken()
@@ -401,14 +373,14 @@ export default function Widget (props: Props) {
       ? { ...user, isAdmin: false }
       : { username, ruolo: null, ruoloLabel: '', area: null, settore: null, ufficio: null, gruppo: '', isAdmin: false }
     setGiiUser(u)
+    setNotLogged(false)
     try { (window as any).__giiUserRole = u } catch { }
     setUserLoading(false)
-    setAuthRequired(false)
-    console.log('👤 GII user loaded:', u, '| allowedDs:', u.ruolo, u.area, u.settore)
+    console.log('GII user loaded:', u.username, '| ruolo:', u.ruolo, '| area:', u.area, '| settore:', u.settore)
   }, [])
 
-  // Avvio PASSIVO: controlla se già loggato. NON apre mai dialog automaticamente.
-  // Il login viene avviato solo quando l'utente clicca "Accedi" (forceLogin).
+  // Boot passivo: verifica se c'è già un utente loggato.
+  // NON chiama mai getCredential — il login e' gestito dal widget ExB in alto a destra.
   React.useEffect(() => {
     let cancelled = false
     let credentialHandle: any = null
@@ -419,26 +391,29 @@ export default function Widget (props: Props) {
         const { username, isAdmin } = await detectCurrentUser()
         if (cancelled) return
         if (!username) {
-          // Non loggato: mostra schermata bloccante, aspetta click "Accedi"
-          setAuthRequired(true)
-          setLoginError('')
+          // Nessun utente: overlay bloccante. Aspetta che ExB faccia login.
+          setNotLogged(true)
           setUserLoading(false)
         } else {
+          setNotLogged(false)
           await loadUserProfile(username, isAdmin)
         }
       } catch {
-        if (!cancelled) { setAuthRequired(true); setUserLoading(false) }
+        if (!cancelled) { setNotLogged(true); setUserLoading(false) }
       }
 
-      // Listener per credential change (login avvenuto via forceLogin o ExB)
+      // Ascolta evento credential-create: scatta quando ExB completa il login
       try {
         const esriId = await loadEsriModule<any>('esri/identity/IdentityManager')
         if (cancelled) return
         credentialHandle = esriId.on('credential-create', async () => {
           if (cancelled) return
-          console.log('🔐 Credential change detected, reloading user...')
+          console.log('Credential create event: reloading user profile...')
           const { username, isAdmin } = await detectCurrentUser()
-          if (username) await loadUserProfile(username, isAdmin)
+          if (username) {
+            setNotLogged(false)
+            await loadUserProfile(username, isAdmin)
+          }
         })
       } catch { }
     }
@@ -465,13 +440,13 @@ export default function Widget (props: Props) {
     [giiUser?.username, giiUser?.ruolo, giiUser?.area, giiUser?.settore, giiUser?.isAdmin]
   )
 
-  // useDsJs filtrato: solo i datasource consentiti
+  // useDsJs filtrato: solo i datasource consentiti per il ruolo dell'utente
   const filteredUseDsJs: any[] = React.useMemo(() => {
-    if (!giiUser || userLoading || authRequired) return []
+    if (!giiUser || userLoading || notLogged) return useDsJs // non ancora loggato: passa tutti (ma overlay copre)
     if (allowedDsIds === null) return useDsJs // admin: tutti
     return useDsJs.filter((u: any) => allowedDsIds.includes(String(u?.dataSourceId || '')))
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [giiUser, userLoading, authRequired, allowedDsIds, useDsJs.length])
+  }, [giiUser, userLoading, notLogged, allowedDsIds, useDsJs.length])
 
   // Campo stato del ruolo corrente
   const statoRuoloField = giiUser?.isAdmin
@@ -549,21 +524,13 @@ export default function Widget (props: Props) {
   }, [])
 
   // ── Ri-leggi i record dopo un breve ritardo per catturare dati lazy-loaded ──
-  // Dipende da filteredUseDsJs.length: si riattiva dopo il login quando i DS diventano disponibili
+  // Si riattiva quando cambia giiUser (post-login) o il numero di DS
   React.useEffect(() => {
-    if (userLoading || authRequired || !giiUser?.username) return
-    // Reset dsDataRef per i DS non più consentiti (cambio utente)
-    const allowedSet = new Set(filteredUseDsJs.map((u: any) => String(u?.dataSourceId || '')))
-    Object.keys(dsDataRef.current).forEach(id => {
-      if (!allowedSet.has(id)) delete dsDataRef.current[id]
-    })
     const timers = [300, 800, 2000, 4000]
     const ids = timers.map(ms => setTimeout(() => {
       let changed = false
-      filteredUseDsJs.forEach((u: any) => {
-        const dsId = String(u?.dataSourceId || '')
-        const entry = dsDataRef.current[dsId]
-        if (entry?.ds) {
+      Object.entries(dsDataRef.current).forEach(([dsId, entry]) => {
+        if (entry.ds) {
           const freshRecs = (entry.ds.getRecords?.() ?? []) as DataRecord[]
           if (freshRecs.length > 0) {
             dsDataRef.current[dsId] = { ...entry, recs: freshRecs, loading: false }
@@ -575,7 +542,7 @@ export default function Widget (props: Props) {
     }, ms))
     return () => ids.forEach(id => clearTimeout(id))
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [filteredUseDsJs.length, giiUser?.username])
+  }, [useDsJs.length, giiUser?.username])
 
   // Sort: array (multi sort con Shift+Click)
   const defaultSort: SortItem[] = React.useMemo(() => {
@@ -1125,55 +1092,45 @@ export default function Widget (props: Props) {
       >
         <div css={styles} style={{ width: '100%', height: '100%' }}>
 
-          {/* ── Schermata login bloccante ── */}
-          {(authRequired || (userLoading && !giiUser)) && (
+          {/* ── Overlay bloccante: copre i dati finche' non c'e' login ── */}
+          {(notLogged || userLoading) && (
             <div style={{
               position: 'absolute', inset: 0, zIndex: 100,
               background: 'rgba(255,255,255,0.97)',
               display: 'flex', flexDirection: 'column',
               alignItems: 'center', justifyContent: 'center',
               gap: 16, padding: 32, textAlign: 'center',
-              borderRadius: maskRadius
+              borderRadius: maskRadius,
+              pointerEvents: 'all'
             }}>
-              {userLoading && !authRequired
+              {userLoading
                 ? (
                   <>
                     <Loading />
-                    <div style={{ fontSize: 14, color: '#374151' }}>Accesso in corso…</div>
+                    <div style={{ fontSize: 13, color: '#6b7280' }}>Verifica accesso in corso…</div>
                   </>
                 )
                 : (
                   <>
                     <div style={{ fontSize: 32 }}>🔒</div>
-                    <div style={{ fontSize: 16, fontWeight: 700, color: '#111827' }}>
+                    <div style={{ fontSize: 15, fontWeight: 700, color: '#111827' }}>
                       Accesso richiesto
                     </div>
-                    <div style={{ fontSize: 13, color: '#6b7280', maxWidth: 320 }}>
-                      {loginError || 'Devi effettuare il login con le credenziali CBSM per accedere al gestionale infrazioni.'}
+                    <div style={{ fontSize: 13, color: '#6b7280', maxWidth: 300, lineHeight: 1.5 }}>
+                      Utilizza il pulsante di accesso in alto a destra per entrare con le credenziali CBSM.
                     </div>
-                    <button
-                      type='button'
-                      onClick={forceLogin}
-                      style={{
-                        marginTop: 8, padding: '10px 28px',
-                        background: '#2f6fed', color: '#fff',
-                        border: 'none', borderRadius: 8,
-                        fontSize: 14, fontWeight: 700, cursor: 'pointer'
-                      }}
-                    >
-                      Accedi
-                    </button>
                   </>
                 )
               }
             </div>
           )}
 
-          {/* ── DataSource loaders: SOLO dopo autenticazione confermata e solo per i DS consentiti ── */}
-          {!userLoading && !authRequired && giiUser?.username && filteredUseDsJs.map((u: any, i: number) => (
+          {/* ── DataSource loaders: SEMPRE nel DOM (ExB richiede che siano registrati).
+               L'overlay bloccante copre i dati finché non c'è login. ── */}
+          {useDsJs.map((u: any, i: number) => (
             <DataSourceComponent
               key={u?.dataSourceId || i}
-              useDataSource={(props.useDataSources as any)?.[useDsJs.findIndex((x: any) => x?.dataSourceId === u?.dataSourceId)]}
+              useDataSource={udsAny?.[i]}
               query={dsQuery}
               widgetId={props.id}
             >
@@ -1235,8 +1192,8 @@ export default function Widget (props: Props) {
             </div>
           )}
 
-          {/* Indicatore caricamento ruolo */}
-          {userLoading && (
+          {/* Indicatore caricamento ruolo (visibile solo quando loggato ma ancora caricando) */}
+          {userLoading && !notLogged && (
             <div style={{ padding: '6px 12px', fontSize: 11, color: '#6b7280' }}>
               Rilevamento ruolo utente…
             </div>
