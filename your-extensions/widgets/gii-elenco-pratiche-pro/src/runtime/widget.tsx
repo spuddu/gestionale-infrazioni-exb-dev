@@ -370,6 +370,7 @@ export default function Widget (props: Props) {
       }
       setGiiUser(u)
       setNotLogged(false)
+      setLoginVersion(v => v + 1)
       try { (window as any).__giiUserRole = u } catch { }
       setUserLoading(false)
       return
