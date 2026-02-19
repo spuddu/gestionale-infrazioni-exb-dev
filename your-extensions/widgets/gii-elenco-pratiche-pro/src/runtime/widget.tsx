@@ -456,7 +456,13 @@ export default function Widget (props: Props) {
   const filteredUseDsJs: any[] = React.useMemo(() => {
     if (!giiUser || userLoading || notLogged) return useDsJs // non ancora loggato: passa tutti (ma overlay copre)
     if (allowedDsIds === null) return useDsJs // admin: tutti
-    return useDsJs.filter((u: any) => allowedDsIds.includes(String(u?.dataSourceId || '')))
+    return useDsJs.filter((u: any) => {
+      // allowedDsIds contiene i rootDataSourceId (es. "dataSource_39")
+      // mentre useDataSources usa dataSourceId (es. "dataSource_39-0").
+      // Confrontiamo quindi il rootDataSourceId per non filtrare via TUTTI i DS online.
+      const rootId = String(u?.rootDataSourceId || '')
+      return allowedDsIds.includes(rootId)
+    })
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [giiUser, userLoading, notLogged, allowedDsIds, useDsJs.length])
 
