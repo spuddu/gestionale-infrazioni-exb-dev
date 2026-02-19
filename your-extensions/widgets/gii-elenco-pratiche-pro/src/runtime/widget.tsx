@@ -203,6 +203,41 @@ const RUOLO_PRIORITY: Record<number, number> = {
   1: 10   // TR
 }
 
+// ── Mappa ruolo/area/settore → dataSourceId consentito ─────────────────────
+// Codici domini (numerici):
+//   AREA: AMM=1, AGR=2, TEC=3
+//   SETTORE: CR=1,GI=2,D1=3,D2=4,D3=5,D4=6,D5=7,D6=8,CS=9
+//   RUOLO: TR=1,TI=2,RZ=3,RI=4,DT=5,DA=6
+function getAllowedDataSourceIds(user: { ruolo: number|null, area: number|null, settore: number|null, isAdmin: boolean } | null): string[] | null {
+  if (!user) return null
+  if (user.isAdmin) return null // admin: nessun filtro, null = vede tutto
+
+  const { ruolo, area, settore } = user
+
+  // TR(1), TI(2), RZ(3) → vista per settore specifico
+  if (ruolo !== null && ruolo >= 1 && ruolo <= 3) {
+    if (area === 2) { // AGR
+      if (settore === 3) return ['dataSource_39'] // D1
+      if (settore === 4) return ['dataSource_38'] // D2
+      if (settore === 5) return ['dataSource_37'] // D3
+      if (settore === 6) return ['dataSource_36'] // D4
+      if (settore === 7) return ['dataSource_35'] // D5
+      if (settore === 8) return ['dataSource_34'] // D6
+    }
+    if (area === 3) return ['dataSource_33'] // TEC
+  }
+
+  // RI(4), DT(5), DA(6) → vista globale per area
+  if (ruolo !== null && ruolo >= 4 && ruolo <= 6) {
+    if (area === 2) return ['dataSource_41'] // AGR tutti settori
+    if (area === 3) return ['dataSource_40'] // TEC
+    if (area === 1) return ['dataSource_32'] // AMM
+  }
+
+  // Fallback: nessun datasource consentito
+  return []
+}
+
 interface GiiUserInfo {
   username: string
   ruolo: number | null       // codice numerico (1-6)
@@ -314,70 +349,139 @@ export default function Widget (props: Props) {
   // ── Rilevamento ruolo utente loggato ──────────────────────────────────────
   const [giiUser, setGiiUser] = React.useState<GiiUserInfo | null>(null)
   const [userLoading, setUserLoading] = React.useState(true)
+  // authRequired: true = non autenticato, mostra schermata login
+  const [authRequired, setAuthRequired] = React.useState(false)
+  const [loginError, setLoginError] = React.useState('')
 
-  // Ascolta eventi di login/credential change
+  // Forza login tramite IdentityManager.getCredential (blocca se ignorato)
+  const forceLogin = React.useCallback(async () => {
+    setAuthRequired(false)
+    setLoginError('')
+    setUserLoading(true)
+    try {
+      const esriId = await loadEsriModule<any>('esri/identity/IdentityManager')
+      // getCredential apre il dialog di login; lancia se l'utente lo chiude senza login
+      await esriId.getCredential(`${GII_PORTAL}/sharing/rest`, { prompt: true })
+      // Ora dovrebbe essere loggato → ricarichiamo
+      const { username, isAdmin } = await detectCurrentUser()
+      if (!username) {
+        setAuthRequired(true)
+        setLoginError('Accesso non riuscito. Riprova.')
+        setUserLoading(false)
+        return
+      }
+      await loadUserProfile(username, isAdmin)
+    } catch (e: any) {
+      // L'utente ha chiuso il dialog → blocchiamo
+      console.warn('🔒 Login annullato o fallito:', e)
+      setAuthRequired(true)
+      setLoginError('È necessario effettuare il login per accedere al gestionale.')
+      setUserLoading(false)
+    }
+  }, [])
+
+  // Carica profilo utente dalla tabella GII_utenti
+  const loadUserProfile = React.useCallback(async (username: string, isAdmin: boolean) => {
+    if (isAdmin) {
+      const u: GiiUserInfo = {
+        username, ruolo: null, ruoloLabel: 'ADMIN',
+        area: null, settore: null, ufficio: null, gruppo: '', isAdmin: true
+      }
+      setGiiUser(u)
+      try { (window as any).__giiUserRole = u } catch { }
+      setUserLoading(false)
+      setAuthRequired(false)
+      return
+    }
+    const token = await getSessionToken()
+    const user = await fetchGiiUser(username, token)
+    const u = user
+      ? { ...user, isAdmin: false }
+      : { username, ruolo: null, ruoloLabel: '', area: null, settore: null, ufficio: null, gruppo: '', isAdmin: false }
+    setGiiUser(u)
+    try { (window as any).__giiUserRole = u } catch { }
+    setUserLoading(false)
+    setAuthRequired(false)
+  }, [])
+
+  // Avvio: controlla se già loggato, altrimenti forza login
   React.useEffect(() => {
     let cancelled = false
-    let esriIdModule: any = null
     let credentialHandle: any = null
-    
-    const load = async () => {
+
+    const boot = async () => {
       setUserLoading(true)
       try {
         const { username, isAdmin } = await detectCurrentUser()
-        if (isAdmin) {
-          // Admin: vede tutto, nessun filtro ruolo
-          setGiiUser({
-            username, ruolo: null, ruoloLabel: 'ADMIN',
-            area: null, settore: null, ufficio: null, gruppo: '', isAdmin: true
-          })
-        } else {
-          const token = await getSessionToken()
-          const user = await fetchGiiUser(username, token)
-          if (!cancelled) {
-            setGiiUser(user ? { ...user, isAdmin: false } : {
-              username, ruolo: null, ruoloLabel: '',
-              area: null, settore: null, ufficio: null, gruppo: '', isAdmin: false
-            })
+        if (cancelled) return
+        if (!username) {
+          // Non ancora loggato → forza login dialog SENZA possibilità di skip
+          const esriId = await loadEsriModule<any>('esri/identity/IdentityManager')
+          try {
+            await esriId.getCredential(`${GII_PORTAL}/sharing/rest`, { prompt: true })
+            if (cancelled) return
+            const { username: u2, isAdmin: a2 } = await detectCurrentUser()
+            if (!u2) {
+              if (!cancelled) { setAuthRequired(true); setUserLoading(false) }
+              return
+            }
+            await loadUserProfile(u2, a2)
+          } catch {
+            if (!cancelled) {
+              setAuthRequired(true)
+              setLoginError('Login necessario per accedere al gestionale.')
+              setUserLoading(false)
+            }
           }
+        } else {
+          await loadUserProfile(username, isAdmin)
         }
       } catch {
-        if (!cancelled) setGiiUser(null)
+        if (!cancelled) { setAuthRequired(true); setUserLoading(false) }
       }
-      if (!cancelled) setUserLoading(false)
-      // Pubblica su canale globale per widget Azioni
+
+      // Listener per credential change (es. token rinnovato)
       try {
-        if (giiUser) (window as any).__giiUserRole = giiUser
+        const esriId = await loadEsriModule<any>('esri/identity/IdentityManager')
+        if (cancelled) return
+        credentialHandle = esriId.on('credential-create', async () => {
+          if (cancelled) return
+          console.log('🔐 Credential change detected, reloading user...')
+          const { username, isAdmin } = await detectCurrentUser()
+          if (username) await loadUserProfile(username, isAdmin)
+        })
       } catch { }
     }
-    load()
-    
-    // Listener per eventi di credential change (login)
-    loadEsriModule<any>('esri/identity/IdentityManager').then(esriId => {
-      if (cancelled) return
-      esriIdModule = esriId
-      const onCredentialChange = () => {
-        console.log('🔐 Credential change detected, reloading user...')
-        load()
-      }
-      credentialHandle = esriId.on('credential-create', onCredentialChange)
-    }).catch(() => {})
-    
-    return () => { 
+
+    boot()
+    return () => {
       cancelled = true
-      if (credentialHandle) {
-        try { credentialHandle.remove() } catch {}
-      }
+      try { credentialHandle?.remove() } catch { }
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  // Pubblica su canale globale ogni volta che giiUser cambia
+  // Pubblica su canale globale ogni volta che giiUser cambia (per widget Azioni)
   React.useEffect(() => {
     if (giiUser) {
       try { (window as any).__giiUserRole = giiUser } catch { }
     }
   }, [giiUser])
+
+  // DataSource consentiti per l'utente corrente
+  const allowedDsIds: string[] | null = React.useMemo(
+    () => giiUser ? getAllowedDataSourceIds(giiUser) : null,
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [giiUser?.username, giiUser?.ruolo, giiUser?.area, giiUser?.settore, giiUser?.isAdmin]
+  )
+
+  // useDsJs filtrato: solo i datasource consentiti
+  const filteredUseDsJs: any[] = React.useMemo(() => {
+    if (!giiUser || userLoading || authRequired) return []
+    if (allowedDsIds === null) return useDsJs // admin: tutti
+    return useDsJs.filter((u: any) => allowedDsIds.includes(String(u?.dataSourceId || '')))
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [giiUser, userLoading, authRequired, allowedDsIds, useDsJs.length])
 
   // Campo stato del ruolo corrente
   const statoRuoloField = giiUser?.isAdmin
@@ -425,7 +529,7 @@ export default function Widget (props: Props) {
     const groups: { label: string; dsIndices: number[] }[] = []
     const labelMap = new Map<string, number>()
 
-    useDsJs.forEach((u: any, i: number) => {
+    filteredUseDsJs.forEach((u: any, i: number) => {
       const dsId = String(u?.dataSourceId || '')
       const entry = filterTabsJs.find((t: any) => String(t?.dataSourceId || '') === dsId)
       const label = String(entry?.label || getDsLabel(u, `Filtro ${i + 1}`))
@@ -439,7 +543,7 @@ export default function Widget (props: Props) {
     })
     return groups
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [useDsJs.length, cfg.filterTabs])
+  }, [filteredUseDsJs.length, cfg.filterTabs])
 
   const hasTabs = tabGroups.length > 1
   const [activeTab, setActiveTab] = React.useState<number>(0)
@@ -712,7 +816,7 @@ export default function Widget (props: Props) {
     if (!activeGroup) return [] as DataRecord[]
     const all: DataRecord[] = []
     for (const di of activeGroup.dsIndices) {
-      const dsId = String(useDsJs[di]?.dataSourceId || '')
+      const dsId = String(filteredUseDsJs[di]?.dataSourceId || '')
       const entry = dsDataRef.current[dsId]
       if (entry?.recs) all.push(...entry.recs)
     }
@@ -729,7 +833,7 @@ export default function Widget (props: Props) {
     const map = new WeakMap<DataRecord, string>()
     if (!activeGroup) return map
     for (const di of activeGroup.dsIndices) {
-      const dsId = String(useDsJs[di]?.dataSourceId || '')
+      const dsId = String(filteredUseDsJs[di]?.dataSourceId || '')
       const entry = dsDataRef.current[dsId]
       if (entry?.recs) {
         for (const r of entry.recs) map.set(r, dsId)
@@ -742,7 +846,7 @@ export default function Widget (props: Props) {
   // Loading: true solo se TUTTI i DS del tab attivo stanno ancora caricando
   // (non se solo uno manca dall'entry — potrebbe essere che non ha ancora risposto)
   const anyLoading = activeGroup?.dsIndices.every(di => {
-    const dsId = String(useDsJs[di]?.dataSourceId || '')
+    const dsId = String(filteredUseDsJs[di]?.dataSourceId || '')
     const entry = dsDataRef.current[dsId]
     if (!entry) return true // mai aggiornato → stiamo aspettando
     return entry.loading
@@ -1022,11 +1126,55 @@ export default function Widget (props: Props) {
       >
         <div css={styles} style={{ width: '100%', height: '100%' }}>
 
-          {/* ── DataSource loaders per TUTTE le data view (invisibili) ── */}
-          {useDsJs.map((u: any, i: number) => (
+          {/* ── Schermata login bloccante ── */}
+          {(authRequired || (userLoading && !giiUser)) && (
+            <div style={{
+              position: 'absolute', inset: 0, zIndex: 100,
+              background: 'rgba(255,255,255,0.97)',
+              display: 'flex', flexDirection: 'column',
+              alignItems: 'center', justifyContent: 'center',
+              gap: 16, padding: 32, textAlign: 'center',
+              borderRadius: maskRadius
+            }}>
+              {userLoading && !authRequired
+                ? (
+                  <>
+                    <Loading />
+                    <div style={{ fontSize: 14, color: '#374151' }}>Accesso in corso…</div>
+                  </>
+                )
+                : (
+                  <>
+                    <div style={{ fontSize: 32 }}>🔒</div>
+                    <div style={{ fontSize: 16, fontWeight: 700, color: '#111827' }}>
+                      Accesso richiesto
+                    </div>
+                    <div style={{ fontSize: 13, color: '#6b7280', maxWidth: 320 }}>
+                      {loginError || 'Devi effettuare il login con le credenziali CBSM per accedere al gestionale infrazioni.'}
+                    </div>
+                    <button
+                      type='button'
+                      onClick={forceLogin}
+                      style={{
+                        marginTop: 8, padding: '10px 28px',
+                        background: '#2f6fed', color: '#fff',
+                        border: 'none', borderRadius: 8,
+                        fontSize: 14, fontWeight: 700, cursor: 'pointer'
+                      }}
+                    >
+                      Accedi
+                    </button>
+                  </>
+                )
+              }
+            </div>
+          )}
+
+          {/* ── DataSource loaders: SOLO dopo autenticazione confermata e solo per i DS consentiti ── */}
+          {!userLoading && !authRequired && giiUser?.username && filteredUseDsJs.map((u: any, i: number) => (
             <DataSourceComponent
               key={u?.dataSourceId || i}
-              useDataSource={udsAny?.[i]}
+              useDataSource={(props.useDataSources as any)?.[useDsJs.findIndex((x: any) => x?.dataSourceId === u?.dataSourceId)]}
               query={dsQuery}
               widgetId={props.id}
             >
@@ -1055,7 +1203,7 @@ export default function Widget (props: Props) {
                     if (!activeGroup) return null
                     const all: DataRecord[] = []
                     for (const di of activeGroup.dsIndices) {
-                      const dsId = String(useDsJs[di]?.dataSourceId || '')
+                      const dsId = String(filteredUseDsJs[di]?.dataSourceId || '')
                       const entry = dsDataRef.current[dsId]
                       if (entry?.recs) all.push(...entry.recs)
                     }
@@ -1108,14 +1256,14 @@ export default function Widget (props: Props) {
                     const curGroup = tabGroups[activeTab]
                     if (curGroup) {
                       curGroup.dsIndices.forEach(di => {
-                        const dsId = String(useDsJs[di]?.dataSourceId || '')
+                        const dsId = String(filteredUseDsJs[di]?.dataSourceId || '')
                         const entry = dsDataRef.current[dsId]
                         if (entry?.ds) tryClearSelection(entry.ds)
                       })
                       setLocalSelectedByDs(prev => {
                         const updated = { ...prev }
                         curGroup.dsIndices.forEach(di => {
-                          delete updated[String(useDsJs[di]?.dataSourceId || '')]
+                          delete updated[String(filteredUseDsJs[di]?.dataSourceId || '')]
                         })
                         return updated
                       })
@@ -1205,7 +1353,7 @@ export default function Widget (props: Props) {
                                 if (e?.ds) tryClearSelection(e.ds)
                               })
                               // Deseleziona anche su tutti i DS parent via DataSourceManager
-                              useDsJs.forEach((u: any) => {
+                              filteredUseDsJs.forEach((u: any) => {
                                 const dsId = String(u?.dataSourceId || '')
                                 try {
                                   const mainDs = DataSourceManager.getInstance().getDataSource(dsId)
@@ -1233,7 +1381,7 @@ export default function Widget (props: Props) {
                               // su TUTTI i DS del gruppo (ExB usa l'interfaccia DataRecord)
                               if (activeGroup) {
                                 activeGroup.dsIndices.forEach(di => {
-                                  const otherId = String(useDsJs[di]?.dataSourceId || '')
+                                  const otherId = String(filteredUseDsJs[di]?.dataSourceId || '')
                                   if (otherId === recDsId) return
                                   const otherEntry = dsDataRef.current[otherId]
                                   if (otherEntry?.ds) {
