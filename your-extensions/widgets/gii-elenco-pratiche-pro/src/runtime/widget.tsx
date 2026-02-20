@@ -682,20 +682,8 @@ export default function Widget (props: Props) {
   const fieldDataRil = txt(cfg.fieldDataRilevazione || 'data_rilevazione')
   const fieldUfficio = txt(cfg.fieldUfficio || 'ufficio_zona')
 
-  // Campi DT/DA (per calcolo stato/ultimo/prossima)
-  const fPresaDT = txt(cfg.fieldPresaDT || 'presa_in_carico_DT')
-  const fDtPresaDT = txt(cfg.fieldDtPresaDT || 'dt_presa_in_carico_DT')
-  const fStatoDT = txt(cfg.fieldStatoDT || 'stato_DT')
-  const fDtStatoDT = txt(cfg.fieldDtStatoDT || 'dt_stato_DT')
-  const fEsitoDT = txt(cfg.fieldEsitoDT || 'esito_DT')
-  const fDtEsitoDT = txt(cfg.fieldDtEsitoDT || 'dt_esito_DT')
-
-  const fPresaDA = txt(cfg.fieldPresaDA || 'presa_in_carico_DA')
-  const fDtPresaDA = txt(cfg.fieldDtPresaDA || 'dt_presa_in_carico_DA')
-  const fStatoDA = txt(cfg.fieldStatoDA || 'stato_DA')
-  const fDtStatoDA = txt(cfg.fieldDtStatoDA || 'dt_stato_DA')
-  const fEsitoDA = txt(cfg.fieldEsitoDA || 'esito_DA')
-  const fDtEsitoDA = txt(cfg.fieldDtEsitoDA || 'dt_esito_DA')
+  // Nota: i campi DT/DA sono ora acceduti direttamente tramite nome convenzionale
+  // (es. `stato_DT`, `presa_in_carico_DA`, ...) dentro computeSintetico/computeUltimoAggMs.
 
   const presaDaPrendere = num(cfg.presaDaPrendereVal, 1)
   const presaPresa = num(cfg.presaPresaVal, 2)
@@ -730,9 +718,11 @@ export default function Widget (props: Props) {
     return String(n)
   }
 
+  // ── Chip colors — 5 stati workflow ────────────────────────────────────────
+  // statoForChip: 1=DaPrendere, 2=InLavorazione, 3=Integrazione, 4=Approvata, 5=Respinta, null=neutro
   const getChipStyle = (statoNum: number | null) => {
-    // sintetico: coloriamo in base a 1/2, altrimenti neutro
     if (statoNum === statoDaPrendere) {
+      // arancio – in attesa di qualcuno
       return {
         background: txt(cfg.statoBgDaPrendere || '#fff7e6'),
         color: txt(cfg.statoTextDaPrendere || '#7a4b00'),
@@ -740,46 +730,43 @@ export default function Widget (props: Props) {
       }
     }
     if (statoNum === statoPresa) {
+      // verde chiaro – in lavorazione
       return {
         background: txt(cfg.statoBgPresa || '#eaf7ef'),
         color: txt(cfg.statoTextPresa || '#1f6b3a'),
         borderColor: txt(cfg.statoBorderPresa || '#9ad2ae')
       }
     }
+    if (statoNum === statoIntegrazione) {
+      // ambra – integrazione richiesta
+      return {
+        background: txt(cfg.statoBgIntegrazione || '#fffbeb'),
+        color: txt(cfg.statoTextIntegrazione || '#92400e'),
+        borderColor: txt(cfg.statoBorderIntegrazione || '#fbbf24')
+      }
+    }
+    if (statoNum === statoApprovata) {
+      // verde scuro – approvata/chiusa positivamente
+      return {
+        background: txt(cfg.statoBgApprovata || '#dcfce7'),
+        color: txt(cfg.statoTextApprovata || '#14532d'),
+        borderColor: txt(cfg.statoBorderApprovata || '#4ade80')
+      }
+    }
+    if (statoNum === statoRespinta) {
+      // rosso – respinta
+      return {
+        background: txt(cfg.statoBgRespinta || '#fee2e2'),
+        color: txt(cfg.statoTextRespinta || '#7f1d1d'),
+        borderColor: txt(cfg.statoBorderRespinta || '#f87171')
+      }
+    }
+    // neutro – stato sconosciuto / nuova pratica
     return {
       background: txt(cfg.statoBgAltro || '#f2f2f2'),
       color: txt(cfg.statoTextAltro || '#333333'),
       borderColor: txt(cfg.statoBorderAltro || '#d0d0d0')
     }
-  }
-
-  const computeSintetico = (d: any): { ruolo: 'DA' | 'DT', label: string, statoForChip: number | null } => {
-    const hasDA = d[fPresaDA] !== null && d[fPresaDA] !== undefined && d[fPresaDA] !== ''
-      || d[fStatoDA] !== null && d[fStatoDA] !== undefined && d[fStatoDA] !== ''
-      || d[fEsitoDA] !== null && d[fEsitoDA] !== undefined && d[fEsitoDA] !== ''
-
-    const ruolo: 'DA' | 'DT' = hasDA ? 'DA' : 'DT'
-
-    const stato = Number(hasDA ? d[fStatoDA] : d[fStatoDT])
-    const esito = Number(hasDA ? d[fEsitoDA] : d[fEsitoDT])
-
-    // Priorità: esito se valorizzato, altrimenti stato, altrimenti presa
-    if (Number.isFinite(esito)) {
-      // chip: se esito=app/resp/integ, usiamo "altro" (3/4/5) ma per colore neutro ok
-      return { ruolo, label: labelEsito(esito), statoForChip: statoNumFromEsito(esito) }
-    }
-    if (Number.isFinite(stato)) {
-      return { ruolo, label: labelStato(stato), statoForChip: stato }
-    }
-
-    const presa = Number(hasDA ? d[fPresaDA] : d[fPresaDT])
-    if (Number.isFinite(presa)) {
-      if (presa === presaDaPrendere) return { ruolo, label: txt(cfg.labelPresaDaPrendere || 'Da prendere in carico'), statoForChip: statoDaPrendere }
-      if (presa === presaPresa) return { ruolo, label: txt(cfg.labelPresaPresa || 'Presa in carico'), statoForChip: statoPresa }
-      return { ruolo, label: String(presa), statoForChip: null }
-    }
-
-    return { ruolo, label: '—', statoForChip: null }
   }
 
   // converte esito (1..3) in "stato visuale" per chip (3/4/5)
@@ -790,55 +777,179 @@ export default function Widget (props: Props) {
     return statoApprovata
   }
 
+  // Verifica se un ruolo ha dati valorizzati (presa/stato/esito con campo generico)
+  const hasRuoloData = (d: any, role: string): boolean => {
+    const p = d[`presa_in_carico_${role}`]
+    const s = d[`stato_${role}`]
+    const e = d[`esito_${role}`]
+    return (p !== null && p !== undefined && p !== '')
+      || (s !== null && s !== undefined && s !== '')
+      || (e !== null && e !== undefined && e !== '')
+  }
+
+  // ── computeSintetico: workflow-aware su tutti i ruoli ──────────────────────
+  //
+  // Logica:
+  //   - Scansiona i ruoli dal più avanzato (DA) al meno avanzato (TR)
+  //   - Il primo ruolo con dati valorizzati è il "nodo corrente"
+  //   - presa=1 (DA PRENDERE) → la pratica è stata trasmessa ma non ancora presa in carico
+  //     → "Trasmessa a [ruolo]"  chip arancio
+  //   - presa=2 (PRESA) o stato=presa → il ruolo ci sta lavorando
+  //     → "In lavorazione [ruolo]"  chip verde
+  //   - stato/esito espliciti → mostrano l'azione già compiuta
+  //
+  // Pratiche senza nessun campo workflow:
+  //   origine=1 (TR) → implicitamente trasmessa a RZ → "Trasmessa a RZ"  chip arancio
+  //   origine=2 (TI) → TI l'ha creata, non ancora trasmessa → "In lavorazione TI"  chip verde
+
+  const computeSintetico = (d: any): { ruolo: string, label: string, statoForChip: number | null } => {
+    const scanOrder = ['DA', 'DT', 'RI', 'RZ', 'TI', 'TR']
+
+    for (const role of scanOrder) {
+      if (!hasRuoloData(d, role)) continue
+
+      const presaRaw = d[`presa_in_carico_${role}`]
+      const statoRaw = d[`stato_${role}`]
+      const esitoRaw = d[`esito_${role}`]
+
+      const presaNum = presaRaw !== null && presaRaw !== undefined && presaRaw !== '' ? Number(presaRaw) : null
+      const statoNum = statoRaw !== null && statoRaw !== undefined && statoRaw !== '' ? Number(statoRaw) : null
+      const esitoNum = esitoRaw !== null && esitoRaw !== undefined && esitoRaw !== '' ? Number(esitoRaw) : null
+
+      // Esito > stato > presa (in ordine di precedenza)
+
+      if (esitoNum !== null && Number.isFinite(esitoNum)) {
+        return { ruolo: role, label: `${labelEsito(esitoNum)} (${role})`, statoForChip: statoNumFromEsito(esitoNum) }
+      }
+
+      if (statoNum !== null && Number.isFinite(statoNum)) {
+        // stato=1 (da prendere) → trasmessa, in attesa che qualcuno agisca
+        if (statoNum === statoDaPrendere) {
+          return { ruolo: role, label: `Trasmessa a ${role}`, statoForChip: statoDaPrendere }
+        }
+        // stato=2 (presa in carico) → in lavorazione presso quel ruolo
+        if (statoNum === statoPresa) {
+          return { ruolo: role, label: `In lavorazione ${role}`, statoForChip: statoPresa }
+        }
+        // altri stati espliciti (integrazione, approvata, respinta)
+        return { ruolo: role, label: `${labelStato(statoNum)} (${role})`, statoForChip: statoNum }
+      }
+
+      if (presaNum !== null && Number.isFinite(presaNum)) {
+        if (presaNum === presaDaPrendere) {
+          // presa=1: trasmessa al ruolo, non ancora presa in carico
+          return { ruolo: role, label: `Trasmessa a ${role}`, statoForChip: statoDaPrendere }
+        }
+        if (presaNum === presaPresa) {
+          // presa=2: presa in carico, in lavorazione
+          return { ruolo: role, label: `In lavorazione ${role}`, statoForChip: statoPresa }
+        }
+      }
+
+      // Ha dati ma valore non riconosciuto
+      return { ruolo: role, label: `In carico ${role}`, statoForChip: null }
+    }
+
+    // Nessun campo workflow → pratica appena creata
+    const op = d['origine_pratica']
+    const opNum = op !== null && op !== undefined && op !== '' ? Number(op) : null
+    if (opNum === 2) {
+      // TI ha creato la pratica, la sta ancora lavorando prima di trasmetterla a RZ
+      return { ruolo: 'TI', label: 'In lavorazione TI', statoForChip: statoPresa }
+    }
+    // origine=1 (TR) o non valorizzato: implicitamente trasmessa a RZ
+    return { ruolo: 'RZ', label: 'Trasmessa a RZ', statoForChip: statoDaPrendere }
+  }
+
+  // ── computeUltimoAggMs: considera timestamp di TUTTI i ruoli ──────────────
   const computeUltimoAggMs = (d: any): number | null => {
-    const candidates = [
-      parseToMs(d[fDtPresaDT]),
-      parseToMs(d[fDtStatoDT]),
-      parseToMs(d[fDtEsitoDT]),
-      parseToMs(d[fDtPresaDA]),
-      parseToMs(d[fDtStatoDA]),
-      parseToMs(d[fDtEsitoDA])
-    ].filter(v => v !== null) as number[]
-    if (!candidates || candidates.length === 0) return null
+    const roles = ['TR', 'TI', 'RZ', 'RI', 'DT', 'DA']
+    const candidates: number[] = []
+    for (const role of roles) {
+      const p = parseToMs(d[`dt_presa_in_carico_${role}`])
+      const s = parseToMs(d[`dt_stato_${role}`])
+      const e = parseToMs(d[`dt_esito_${role}`])
+      if (p !== null) candidates.push(p)
+      if (s !== null) candidates.push(s)
+      if (e !== null) candidates.push(e)
+    }
+    if (candidates.length === 0) return null
     return Math.max(...candidates)
   }
 
-  const computeProssima = (d: any, ruolo: 'DA' | 'DT'): string => {
-    const presa = Number(ruolo === 'DA' ? d[fPresaDA] : d[fPresaDT])
-    const stato = Number(ruolo === 'DA' ? d[fStatoDA] : d[fStatoDT])
-    const esito = Number(ruolo === 'DA' ? d[fEsitoDA] : d[fEsitoDT])
+  // ── computeProssima: azione attesa sul nodo corrente ──────────────────────
+  //
+  // Riceve il ruolo corrente da computeSintetico e restituisce la prossima azione attesa.
+  // La logica è simmetrica a computeSintetico: stesso nodo, stessi campi.
+  const computeProssima = (d: any, ruolo: string): string => {
+    if (!ruolo) {
+      // Fallback irraggiungibile — computeSintetico ritorna sempre un ruolo valorizzato
+      const op = d['origine_pratica']
+      const opNum = op !== null && op !== undefined && op !== '' ? Number(op) : null
+      return opNum === 2 ? 'Trasmettere a RZ (TI)' : 'Prendere in carico (RZ)'
+    }
 
-    const tag = ruolo
+    const presaRaw = d[`presa_in_carico_${ruolo}`]
+    const statoRaw = d[`stato_${ruolo}`]
+    const esitoRaw = d[`esito_${ruolo}`]
 
-    // 1) presa in carico
-    if (Number.isFinite(presa) && presa === presaDaPrendere) return `Prendere in carico (${tag})`
+    const presaNum = presaRaw !== null && presaRaw !== undefined && presaRaw !== '' ? Number(presaRaw) : null
+    const statoNum = statoRaw !== null && statoRaw !== undefined && statoRaw !== '' ? Number(statoRaw) : null
+    const esitoNum = esitoRaw !== null && esitoRaw !== undefined && esitoRaw !== '' ? Number(esitoRaw) : null
 
-    // 2) integrazione
-    if (Number.isFinite(stato) && stato === statoIntegrazione) return `Gestire integrazione (${tag})`
-    if (Number.isFinite(esito) && esito === esitoIntegrazione) return `Gestire integrazione (${tag})`
+    // Esito già espresso
+    if (esitoNum !== null) {
+      if (esitoNum === esitoApprovata) {
+        // DT approva e trasmette a DA; DA approva = chiusa
+        if (ruolo === 'DT') return 'Trasmettere a DA (DT)'
+        return `Chiusa – approvata (${ruolo})`
+      }
+      if (esitoNum === esitoRespinta)    return `Chiusa – respinta (${ruolo})`
+      if (esitoNum === esitoIntegrazione) return `Attendere integrazione (${ruolo})`
+    }
 
-    // 3) respinta
-    if (Number.isFinite(stato) && stato === statoRespinta) return `Verificare respinta (${tag})`
-    if (Number.isFinite(esito) && esito === esitoRespinta) return `Verificare respinta (${tag})`
+    // Stato esplicito
+    if (statoNum !== null) {
+      if (statoNum === statoDaPrendere)  return `Prendere in carico (${ruolo})`
+      if (statoNum === statoPresa) {
+        // In lavorazione → azione dipende dal ruolo
+        if (ruolo === 'RZ') return 'Approvare o richiedere integrazione (RZ)'
+        if (ruolo === 'TI') return 'Trasmettere a RZ (TI)'
+        if (ruolo === 'RI') return 'Validare e trasmettere a DT (RI)'
+        if (ruolo === 'DT') return 'Esprimere esito (DT)'
+        if (ruolo === 'DA') return 'Esprimere esito finale (DA)'
+        return `Esprimere esito (${ruolo})`
+      }
+      if (statoNum === statoIntegrazione) return `Gestire integrazione (${ruolo})`
+      if (statoNum === statoApprovata) {
+        if (ruolo === 'DT') return 'Trasmettere a DA (DT)'
+        return `Chiusa – approvata (${ruolo})`
+      }
+      if (statoNum === statoRespinta)    return `Chiusa – respinta (${ruolo})`
+    }
 
-    // 4) approvata
-    if (Number.isFinite(stato) && stato === statoApprovata) return `Approvata (${tag})`
-    if (Number.isFinite(esito) && esito === esitoApprovata) return `Approvata (${tag})`
+    // Solo presa in carico
+    if (presaNum !== null) {
+      if (presaNum === presaDaPrendere)  return `Prendere in carico (${ruolo})`
+      if (presaNum === presaPresa) {
+        if (ruolo === 'RZ') return 'Approvare o richiedere integrazione (RZ)'
+        if (ruolo === 'TI') return 'Trasmettere a RZ (TI)'
+        if (ruolo === 'RI') return 'Validare e trasmettere a DT (RI)'
+        if (ruolo === 'DT') return 'Esprimere esito (DT)'
+        if (ruolo === 'DA') return 'Esprimere esito finale (DA)'
+        return `Esprimere esito (${ruolo})`
+      }
+    }
 
-    // 5) in carico / da valutare
-    if (Number.isFinite(stato) && stato === statoPresa) return `Valutare esito (${tag})`
-    if (Number.isFinite(presa) && presa === presaPresa) return `Valutare esito (${tag})`
+    // Nessun campo → pratica appena creata, nessun workflow ancora avviato
+    if (ruolo === 'RZ') return 'Prendere in carico (RZ)'
+    if (ruolo === 'TI') return 'Trasmettere a RZ (TI)'
 
-    // fallback
-    return `Verificare stato (${tag})`
+    return `Verificare stato (${ruolo})`
   }
-
   const getSortValue = (r: DataRecord, field: string): any => {
     const d = r.getData?.() || {}
-    if (field === V_STATO) {
-      const s = computeSintetico(d)
-      return s.label
-    }
+    if (field === V_STATO) return computeSintetico(d).label
     if (field === V_ULTIMO) return computeUltimoAggMs(d)
     if (field === V_PROSSIMA) {
       const s = computeSintetico(d)
