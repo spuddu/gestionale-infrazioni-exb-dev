@@ -989,6 +989,7 @@ function ActionsPanel (props: {
     maxStato: number
     presaRequiredVal: number
   }
+  motherLayerUrl?: string
 }) {
   const { active, roleCode, buttonText, buttonColors, ui } = props
   const role = String(roleCode || 'DT').trim().toUpperCase()
@@ -1121,6 +1122,8 @@ function ActionsPanel (props: {
   const presaNum = (presaVal != null && String(presaVal) !== '') ? Number(presaVal) : null
   const statoNum = (statoVal != null && String(statoVal) !== '') ? Number(statoVal) : null
   const statoDANum = (statoDAVal != null && String(statoDAVal) !== '') ? Number(statoDAVal) : null
+  const origineVal = data ? data['origine_pratica'] : null
+  const origineNum = (origineVal != null && String(origineVal) !== '') ? Number(origineVal) : null
 
   // blocca DT se già trasmesso a DA (DA ha uno stato valorizzato)
   const lockedByTransmit = (role === 'DT') && (statoDANum != null && statoDANum >= 1)
@@ -1160,11 +1163,67 @@ function ActionsPanel (props: {
   const isLocked = pending != null || loading
   const showOverlay = isLocked && hasSel
 
+  // ── computeNodoAttivo: determina quale ruolo deve agire ora sulla pratica ───
+  // Replica la logica di computeSintetico del widget Elenco.
+  // Scansiona i ruoli dal più avanzato (DA) al meno avanzato (TR) e
+  // restituisce il primo con dati valorizzati → quello è il nodo corrente.
+  // Se nessuno ha dati, usa origine_pratica: 1→'RZ', 2→'TI'.
+  const computeNodoAttivo = (d: any): string => {
+    if (!d) return ''
+    const scanOrder = ['DA', 'DT', 'RI', 'RZ', 'TI', 'TR']
+    const hasData = (role: string) => {
+      const p = d[`presa_in_carico_${role}`]
+      const s = d[`stato_${role}`]
+      const e = d[`esito_${role}`]
+      return (p !== null && p !== undefined && p !== '')
+          || (s !== null && s !== undefined && s !== '')
+          || (e !== null && e !== undefined && e !== '')
+    }
+    for (const r of scanOrder) {
+      if (!hasData(r)) continue
+      // Trovato il nodo più avanzato con dati
+      const presaRaw = d[`presa_in_carico_${r}`]
+      const statoRaw = d[`stato_${r}`]
+      const esitoRaw = d[`esito_${r}`]
+      const presaNum = presaRaw !== null && presaRaw !== undefined && presaRaw !== '' ? Number(presaRaw) : null
+      const statoNum = statoRaw !== null && statoRaw !== undefined && statoRaw !== '' ? Number(statoRaw) : null
+      const esitoNum = esitoRaw !== null && esitoRaw !== undefined && esitoRaw !== '' ? Number(esitoRaw) : null
+      // esito → pratica trasmessa al ruolo successivo o chiusa: non è più questo ruolo ad agire
+      // (lascia passare: il successivo nel scanOrder prenderà)
+      if (esitoNum !== null && Number.isFinite(esitoNum)) {
+        // esito presente → questo ruolo ha già agito, il nodo attivo è il SUCCESSORE
+        // (ma non abbiamo un "successore" esplicito — restituiamo questo ruolo
+        //  per sicurezza; canStartTakeInCharge lo bloccherà comunque perché
+        //  esito != null significa che la pratica è già stata processata)
+        return r
+      }
+      // presa=1 (trasmessa, da prendere) o presa=2 (in carico) o stato valorizzato → questo è il nodo
+      if (presaNum !== null || statoNum !== null) return r
+      return r
+    }
+    // Nessun dato: pratica nuova
+    const op = d['origine_pratica']
+    const opNum = op !== null && op !== undefined && op !== '' ? Number(op) : null
+    return opNum === 2 ? 'TI' : 'RZ'
+  }
+
+  // Il ruolo che deve agire ORA sulla pratica selezionata
+  const nodoAttivo = data ? computeNodoAttivo(data) : ''
+  // L'utente loggato può agire solo se è il nodo attivo
+  const isMyTurn = nodoAttivo === role
+
+  // TI non deve poter "prendere in carico" una pratica nata da gestionale (origine=2)
+  // se non ha ancora workflow: quella pratica è già sua. "Prendi in carico" ha senso
+  // per TI SOLO quando RZ gliela rimanda per integrazione (presaNum === PRESA_DA_PRENDERE).
+  const isTiOwningOrigin2 = role === 'TI' && origineNum === 2 && presaNum == null
+
   const canStartTakeInCharge =
     hasSel &&
     !loading &&
     !lockedByTransmit &&
     pending === null &&
+    isMyTurn &&
+    !isTiOwningOrigin2 &&
     (presaNum == null || presaNum === PRESA_DA_PRENDERE) &&
     (statoNum == null || statoNum === STATO_DA_PRENDERE)
 
@@ -1173,6 +1232,7 @@ function ActionsPanel (props: {
     !loading &&
     !lockedByTransmit &&
     pending === null &&
+    isMyTurn &&
     presaNum === PRESA_IN_CARICO &&
     statoNum === STATO_PRESA_IN_CARICO
 
@@ -1182,6 +1242,7 @@ function ActionsPanel (props: {
     !loading &&
     !lockedByTransmit &&
     pending === null &&
+    isMyTurn &&
     (statoNum === STATO_INTEGRAZIONE || statoNum === STATO_APPROVATA || statoNum === STATO_RESPINTA) &&
     (statoDANum == null || statoDANum === 0)
 
@@ -1243,7 +1304,6 @@ function ActionsPanel (props: {
 
   const resolveLayer = async (maybeDs: any) => {
     const root = getRootDs(maybeDs)
-
     const raw =
       root?.getLayer?.() ||
       root?.getJSAPILayer?.() ||
@@ -1254,10 +1314,45 @@ function ActionsPanel (props: {
       maybeDs?.layer ||
       maybeDs?.createJSAPILayerByDataSource?.() ||
       null
-
     const resolved = await Promise.resolve(raw as any)
     const layer = unwrapJsapiLayer(resolved)
     return { root, layer }
+  }
+
+  // Chiama applyEdits/updateFeatures direttamente via REST (fetch).
+  // Bypassa completamente il JS API layer e le sue capability-check.
+  // Richiede: URL del FeatureServer layer + token AGOL + attributi da aggiornare.
+  const applyEditsViaRest = async (layerUrl: string, attrs: Record<string, any>): Promise<void> => {
+    // Prendi il token dall'IdentityManager (già loggato via OAuth)
+    let token = ''
+    try {
+      const esriId = await loadEsriModule<any>('esri/identity/IdentityManager')
+      // serverInfo può essere null se l'URL non è ancora registrato: usiamo getCredential
+      const cred = await esriId.getCredential(layerUrl)
+      token = cred?.token || ''
+    } catch { /* se fallisce procediamo senza token: vedremo l'errore REST */ }
+
+    const featureJson = JSON.stringify({ attributes: attrs })
+    const body = new URLSearchParams({
+      f: 'json',
+      features: `[${featureJson}]`,
+      rollbackOnFailure: 'true',
+      ...(token ? { token } : {})
+    })
+
+    const url = `${layerUrl.replace(/\/$/, '')}/updateFeatures`
+    const resp = await fetch(url, { method: 'POST', body })
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`)
+    const json = await resp.json()
+
+    if (json.error) {
+      throw new Error(`REST error: code=${json.error.code} – ${json.error.message}`)
+    }
+    const upd = json.updateResults?.[0]
+    if (upd && !upd.success) {
+      const e = upd.error
+      throw new Error(e ? `code=${e.code} – ${e.description || e.message}` : JSON.stringify(upd))
+    }
   }
 
   const runApplyEdits = async (attributesIn: Record<string, any>, okText: string) => {
@@ -1269,38 +1364,49 @@ function ActionsPanel (props: {
     setMsg({ kind: 'info', text: 'Aggiorno…' })
 
     try {
-      const { root, layer } = await resolveLayer(ds)
+      const motherUrl = props.motherLayerUrl ? String(props.motherLayerUrl).trim() : ''
+      const root = getRootDs(ds)
 
-      if (!layer?.applyEdits) {
-        throw new Error('Layer non disponibile (applyEdits).')
-      }
-      if (typeof layer.load === 'function') {
-        try { await layer.load() } catch {}
-      }
+      if (motherUrl) {
+        // ── Via REST diretta sul FS madre ─────────────────────────────────────
+        const idFieldName = idFieldNameFromSel || 'OBJECTID'
+        const attrs = { [idFieldName]: oid, ...attributesIn }
+        await applyEditsViaRest(motherUrl, attrs)
+      } else {
+        // ── Fallback: JS API layer (viste con editing abilitato) ──────────────
+        const { layer } = await resolveLayer(ds)
 
-      const idFieldName =
-        (getRootDs(ds)?.getIdField ? getRootDs(ds).getIdField() : null) ||
-        (ds?.getIdField ? ds.getIdField() : null) ||
-        layer.objectIdField ||
-        idFieldNameFromSel ||
-        'OBJECTID'
+        if (!layer?.applyEdits) {
+          throw new Error('Layer non disponibile (applyEdits).')
+        }
+        if (typeof layer.load === 'function') {
+          try { await layer.load() } catch {}
+        }
 
-      const fullAttrs = { [idFieldName]: oid, ...attributesIn }
-      const attrs = filterAttrsToLayerFields(fullAttrs, layer)
+        const idFieldName =
+          (getRootDs(ds)?.getIdField ? getRootDs(ds).getIdField() : null) ||
+          (ds?.getIdField ? ds.getIdField() : null) ||
+          layer.objectIdField ||
+          idFieldNameFromSel ||
+          'OBJECTID'
 
-      const res = await layer.applyEdits({ updateFeatures: [{ attributes: attrs }] })
+        const fullAttrs = { [idFieldName]: oid, ...attributesIn }
+        const attrs = filterAttrsToLayerFields(fullAttrs, layer)
 
-      const upd = res?.updateFeatureResults?.[0] || res?.updateResults?.[0] || null
-      const err = upd?.error
-      const ok =
-        !err &&
-        (upd?.success === true || upd?.objectId != null || upd?.globalId != null || upd?.success == null)
+        const res = await layer.applyEdits({ updateFeatures: [{ attributes: attrs }] })
 
-      if (!ok) {
-        const detail = err
-          ? `code=${err.code ?? ''} name=${err.name ?? ''} message=${err.message ?? ''}`
-          : JSON.stringify(res || upd)
-        throw new Error(detail)
+        const upd = res?.updateFeatureResults?.[0] || res?.updateResults?.[0] || null
+        const err = upd?.error
+        const ok =
+          !err &&
+          (upd?.success === true || upd?.objectId != null || upd?.globalId != null || upd?.success == null)
+
+        if (!ok) {
+          const detail = err
+            ? `code=${err.code ?? ''} name=${err.name ?? ''} message=${err.message ?? ''}`
+            : JSON.stringify(res || upd)
+          throw new Error(detail)
+        }
       }
 
       // se la selezione è cambiata nel frattempo: niente messaggi “appesi”
@@ -1910,10 +2016,10 @@ function ReadOnlyPanel (props: {
   rows: Array<{ label: string; value: any }>
   emptyText?: string
 }) {
-	  const ui = props.ui ?? {}
-	  const titleFontSize = Number.isFinite(Number(ui.titleFontSize)) ? Number(ui.titleFontSize) : 14
-	  const msgFontSize = Number.isFinite(Number(ui.msgFontSize)) ? Number(ui.msgFontSize) : 12
-	  const statusFontSize = Number.isFinite(Number(ui.statusFontSize)) ? Number(ui.statusFontSize) : 12
+    const ui = props.ui ?? {}
+    const titleFontSize = Number.isFinite(Number(ui.titleFontSize)) ? Number(ui.titleFontSize) : 14
+    const msgFontSize = Number.isFinite(Number(ui.msgFontSize)) ? Number(ui.msgFontSize) : 12
+    const statusFontSize = Number.isFinite(Number(ui.statusFontSize)) ? Number(ui.statusFontSize) : 12
   return (
     <div
       style={{
@@ -1957,6 +2063,7 @@ function DetailTabsPanel (props: {
   tabFields: TabFields
   tabs: TabConfig[]
   editConfig: any
+  motherLayerUrl?: string
 }) {
   const { active, ui } = props
 
@@ -2329,6 +2436,7 @@ if (!hasSel) {
         buttonColors={props.buttonColors}
         ui={props.ui}
         editConfig={props.editConfig}
+        motherLayerUrl={props.motherLayerUrl}
       />
     )
   } else if (activeTab?.isIterTab) {
@@ -2707,6 +2815,7 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
         tabFields={tabFields}
         tabs={migratedTabs}
         editConfig={editConfig}
+        motherLayerUrl={String(cfg.motherLayerUrl || '').trim() || undefined}
       />
     </div>
   )
