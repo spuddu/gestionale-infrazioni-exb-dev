@@ -9,6 +9,7 @@ import {
   type DataRecord,
   type DataSource,
   DataSourceManager,
+  SessionManager,
   Immutable
 } from 'jimu-core'
 
@@ -251,27 +252,78 @@ interface GiiUserInfo {
 
 // Recupera token dalla sessione ExB (IdentityManager)
 async function getSessionToken(): Promise<string> {
+  // Preferisci la sessione gestita da ExB (SessionManager) perché è quella "attiva"
+  // e cambia correttamente con Switch account / Sign out.
   try {
-    const esriId = await loadEsriModule<any>('esri/identity/IdentityManager')
-    const creds = esriId.credentials as any[]
-    if (creds?.length) {
-      const cred = creds.find((c: any) => c?.server?.includes('cbsm-hub')) ?? creds[0]
-      if (cred?.token) return cred.token
+    const sm = SessionManager.getInstance()
+    const session: any = sm?.getMainSession?.() || sm?.getSessionByUrl?.(GII_PORTAL)
+    if (session) {
+      const t = (typeof session.token === 'string' && session.token) ? session.token : null
+      if (t) return t
+      if (typeof session.getToken === 'function') {
+        const tok = await session.getToken(`${GII_PORTAL}/sharing/rest`)
+        if (tok) return String(tok)
+      }
     }
   } catch { }
+
+  // Fallback: ArcGIS Maps SDK IdentityManager (può avere più credenziali in memoria)
+  try {
+    const esriId = await loadEsriModule<any>('esri/identity/IdentityManager')
+    const creds = (esriId.credentials as any[]) || []
+    const portalCreds = creds.filter((c: any) => String(c?.server || '').includes('cbsm-hub') || String(c?.server || '').includes('arcgis.com'))
+    const arr = portalCreds.length ? portalCreds : creds
+    if (arr.length) {
+      const best = arr.slice().sort((a: any, b: any) => num(b?.expires, 0) - num(a?.expires, 0))[0] || arr[arr.length - 1]
+      if (best?.token) return best.token
+    }
+  } catch { }
+
   return ''
 }
 
 // Rileva info utente loggato: username + isAdmin da IdentityManager + /sharing/rest/community/self
 async function detectCurrentUser(): Promise<{ username: string; isAdmin: boolean }> {
+  // 1) SessionManager (ExB) → sessione principale, coerente con Switch accounts
+  try {
+    const sm = SessionManager.getInstance()
+    const session: any = sm?.getMainSession?.() || sm?.getSessionByUrl?.(GII_PORTAL)
+    if (session) {
+      const username =
+        (typeof session.username === 'string' && session.username) ? session.username
+          : (typeof session.getUsername === 'function' ? await session.getUsername() : '')
+      if (!username) return { username: '', isAdmin: false }
+
+      try {
+        if (typeof session.getUser === 'function') {
+          const u = await session.getUser()
+          const isAdmin = u?.role === 'org_admin' || (Array.isArray(u?.privileges) && u.privileges.includes('portal:admin:viewUsers')) || false
+          return { username: String(u?.username || username), isAdmin }
+        }
+      } catch { }
+
+      const token = await getSessionToken()
+      if (!token) return { username: String(username), isAdmin: false }
+      const res = await fetch(`${GII_PORTAL}/sharing/rest/community/self?f=json&token=${encodeURIComponent(token)}`)
+      const json = await res.json()
+      const isAdmin = json?.role === 'org_admin' || json?.privileges?.includes('portal:admin:viewUsers') || false
+      return { username: String(json?.username || username), isAdmin }
+    }
+  } catch { }
+
+  // 2) Fallback IdentityManager: scegli la credenziale "più recente" (token con expires maggiore)
   try {
     const esriId = await loadEsriModule<any>('esri/identity/IdentityManager')
-    const creds = esriId.credentials as any[]
-    const cred = creds?.find?.((c: any) => c?.server?.includes('cbsm-hub')) ?? creds?.[0]
+    const creds = (esriId.credentials as any[]) || []
+    const portalCreds = creds.filter((c: any) => String(c?.server || '').includes('cbsm-hub') || String(c?.server || '').includes('arcgis.com'))
+    const arr = portalCreds.length ? portalCreds : creds
+    const cred = arr.length
+      ? (arr.slice().sort((a: any, b: any) => num(b?.expires, 0) - num(a?.expires, 0))[0] || arr[arr.length - 1])
+      : null
     const token = cred?.token ?? ''
     const username = cred?.userId ?? cred?.username ?? ''
     if (!username || !token) return { username: '', isAdmin: false }
-    // Chiama /community/self per recuperare il ruolo AGOL
+
     const res = await fetch(`${GII_PORTAL}/sharing/rest/community/self?f=json&token=${encodeURIComponent(token)}`)
     const json = await res.json()
     const isAdmin = json?.role === 'org_admin' || json?.privileges?.includes('portal:admin:viewUsers') || false
@@ -390,6 +442,7 @@ export default function Widget (props: Props) {
     let cancelled = false
     let credentialHandle: any = null
 
+    let watchTimer: any = null
     const boot = async () => {
       setUserLoading(true)
       try {
@@ -428,11 +481,38 @@ export default function Widget (props: Props) {
           }, 400)
         })
       } catch { }
+      // Watch leggero: se cambia l'utente (Switch account / Sign out), forza il reload dei datasource
+      // senza richiedere DevTools. È economico perché legge solo la sessione corrente.
+      try {
+        watchTimer = setInterval(async () => {
+          if (cancelled) return
+          const cur = await detectCurrentUser()
+          const curUser = cur?.username || ''
+          const prevNow = (window as any).__giiCurrentUsername || ''
+          if (!curUser && prevNow) {
+            // logout
+            dsDataRef.current = {}
+            setGiiUser(null)
+            setNotLogged(true)
+            setUserLoading(false)
+            return
+          }
+          if (curUser && curUser !== prevNow) {
+            // switch utente
+            dsDataRef.current = {}
+            setNotLogged(false)
+            setUserLoading(true)
+            await loadUserProfile(curUser, cur?.isAdmin || false)
+          }
+        }, 1500)
+      } catch { }
+
     }
 
     boot()
     return () => {
       cancelled = true
+      try { if (watchTimer) clearInterval(watchTimer) } catch { }
       try { credentialHandle?.remove() } catch { }
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1152,7 +1232,7 @@ export default function Widget (props: Props) {
                Query reale dopo login → ExB ri-fetcha con credenziali. ── */}
           {useDsJs.map((u: any, i: number) => (
             <DataSourceComponent
-              key={u?.dataSourceId || i}
+              key={`${u?.dataSourceId || i}-${giiUser?.username || 'anon'}`}
               useDataSource={udsAny?.[i]}
               query={dsQuery}
               widgetId={props.id}
