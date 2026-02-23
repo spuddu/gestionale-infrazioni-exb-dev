@@ -1,0 +1,12 @@
+{
+  "name": "gii-homepage",
+  "label": "GII Homepage",
+  "type": "widget",
+  "version": "1.1.0",
+  "exbVersion": "1.19.0",
+  "author": "CBSM",
+  "description": "Homepage GII completamente personalizzabile con logo CBSM integrato.",
+  "dependency": ["jimu-arcgis"],
+  "translatedLocales": ["it"],
+  "defaultSize": { "width": 1200, "height": 700 }
+}

@@ -1,0 +1,12 @@
+{
+  "name": "gii-background",
+  "label": "GII Sfondo",
+  "type": "widget",
+  "version": "1.0.0",
+  "exbVersion": "1.19.0",
+  "author": "CBSM",
+  "description": "Sfondo gradiente con cerchi decorativi, identico alla homepage GII.",
+  "dependency": ["jimu-arcgis"],
+  "translatedLocales": ["it"],
+  "defaultSize": { "width": 1200, "height": 800 }
+}

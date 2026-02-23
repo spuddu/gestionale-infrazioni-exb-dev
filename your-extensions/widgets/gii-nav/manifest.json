@@ -1,0 +1,12 @@
+{
+  "name": "gii-nav",
+  "label": "GII Navigazione",
+  "type": "widget",
+  "version": "1.0.0",
+  "exbVersion": "1.19.0",
+  "author": "CBSM",
+  "description": "Menu di navigazione laterale GII con pulsanti stile card.",
+  "dependency": ["jimu-arcgis"],
+  "translatedLocales": ["it"],
+  "defaultSize": { "width": 180, "height": 600 }
+}

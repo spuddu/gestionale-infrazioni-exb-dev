@@ -264,9 +264,10 @@ function DataSourceSelectionBridge (props: {
   uds: any
   dsKey: string
   watchFields: string[]
+  queryFields: string[]
   onUpdate: (dsKey: string, state: SelState) => void
 }) {
-  const { widgetId, uds, dsKey, watchFields, onUpdate } = props
+  const { widgetId, uds, dsKey, watchFields, queryFields, onUpdate } = props
   return (
     <DataSourceComponent useDataSource={uds} widgetId={widgetId}>
       {(ds: any) => (
@@ -274,6 +275,7 @@ function DataSourceSelectionBridge (props: {
           ds={ds}
           dsKey={dsKey}
           watchFields={watchFields}
+          queryFields={queryFields}
           onUpdate={onUpdate}
         />
       )}
@@ -285,9 +287,10 @@ function SelectionWatcher (props: {
   ds: any
   dsKey: string
   watchFields: string[]
+  queryFields: string[]
   onUpdate: (dsKey: string, state: SelState) => void
 }) {
-  const { ds, dsKey, watchFields, onUpdate } = props
+  const { ds, dsKey, watchFields, queryFields, onUpdate } = props
 
   React.useEffect(() => {
     try { ds?.setListenSelection?.(true) } catch {}
@@ -327,9 +330,65 @@ if (tipoField) {
   const oidRaw = pickOidFromData(data, idFieldName)
   const oid = oidRaw != null ? Number(oidRaw) : null
 
+const [fullData, setFullData] = React.useState<any>(null)
+
+// reset full data when selection changes
+React.useEffect(() => {
+  setFullData(null)
+}, [ds, oid])
+
+const querySig = Array.isArray(queryFields) ? queryFields.join('|') : ''
+const watchSig = Array.isArray(watchFields) ? watchFields.join('|') : ''
+
+// Ensure we have ALL the fields needed by the TAB configuration.
+// Selected records in ExB can contain only a subset of attributes: we re-query by OID when needed.
+React.useEffect(() => {
+  let cancelled = false
+  const load = async () => {
+    if (!ds || oid == null || !Number.isFinite(oid)) return
+
+    const qf = Array.isArray(queryFields) ? queryFields : []
+    const wantsAll = qf.includes('*')
+
+    const outFieldsBase = wantsAll
+      ? ['*']
+      : Array.from(new Set([
+          ...qf,
+          ...(Array.isArray(watchFields) ? watchFields : [])
+        ])).filter(Boolean)
+
+    const outFields = (wantsAll || outFieldsBase.length === 0) ? ['*'] : outFieldsBase
+    const base = data || {}
+    const needsQuery = wantsAll || outFields.some(f => f !== '*' && !Object.prototype.hasOwnProperty.call(base, f))
+    if (!needsQuery) return
+
+    try {
+      const q: any = {
+        where: `${idFieldName}=${Number(oid)}`,
+        outFields,
+        returnGeometry: false,
+        pageSize: 1
+      }
+      const res: any = await (ds?.query ? ds.query(q) : null)
+
+      let rec: any = null
+      if (Array.isArray(res)) rec = res[0]
+      else if (res && Array.isArray(res.records)) rec = res.records[0]
+      else if (res && res.data && Array.isArray(res.data.records)) rec = res.data.records[0]
+
+      const d = rec?.getData ? rec.getData() : (rec?.data || rec?.attributes || null)
+      if (!cancelled && d) setFullData(d)
+    } catch {}
+  }
+  load()
+  return () => { cancelled = true }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+}, [ds, oid, idFieldName, querySig, watchSig])
+
+const mergedData: any = fullData ? { ...(data || {}), ...(fullData || {}) } : data
   const sigParts: string[] = []
   sigParts.push(String(oid ?? ''))
-  for (const f of watchFields) sigParts.push(String(data?.[f] ?? ''))
+  for (const f of watchFields) sigParts.push(String(mergedData?.[f] ?? ''))
   const sig = sigParts.join('|')
 
   React.useEffect(() => {
@@ -337,7 +396,7 @@ if (tipoField) {
       ds,
       oid: (oid != null && Number.isFinite(oid)) ? oid : null,
       idFieldName,
-      data: (oid != null && Number.isFinite(oid)) ? data : null,
+      data: (oid != null && Number.isFinite(oid)) ? mergedData : null,
       sig
     })
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -937,20 +996,17 @@ function normalizeHexColor (maybe: any, fallback: string): string {
   return fallback
 }
 
-function actionButtonStyle (bg: string, disabled: boolean): React.CSSProperties {
+function actionButtonStyle (bg: string, disabled: boolean, ui?: { btnBorderRadius?: number; btnFontSize?: number; btnFontWeight?: number; btnPaddingX?: number; btnPaddingY?: number }): React.CSSProperties {
+  const base: React.CSSProperties = {
+    borderRadius: ui?.btnBorderRadius ?? 8,
+    fontSize: ui?.btnFontSize ?? 13,
+    fontWeight: ui?.btnFontWeight ?? 600,
+    padding: `${ui?.btnPaddingY ?? 8}px ${ui?.btnPaddingX ?? 16}px`
+  }
   if (disabled) {
-    return {
-      backgroundColor: '#e5e7eb',
-      borderColor: '#e5e7eb',
-      color: '#9ca3af',
-      cursor: 'not-allowed'
-    }
+    return { ...base, backgroundColor: '#e5e7eb', borderColor: '#e5e7eb', color: '#9ca3af', cursor: 'not-allowed' }
   }
-  return {
-    backgroundColor: bg,
-    borderColor: bg,
-    color: '#ffffff'
-  }
+  return { ...base, backgroundColor: bg, borderColor: bg, color: '#ffffff' }
 }
 
 type Pending = null | 'TAKE' | 'INTEGRAZIONE' | 'APPROVA' | 'RESPINGI' | 'TRASMETTI'
@@ -977,6 +1033,11 @@ function ActionsPanel (props: {
     reasonsRowBorderColor: string
     reasonsRowBorderWidth: number
     reasonsRowRadius: number
+    btnBorderRadius: number
+    btnFontSize: number
+    btnFontWeight: number
+    btnPaddingX: number
+    btnPaddingY: number
   }
   editConfig: {
     show: boolean
@@ -1605,7 +1666,7 @@ function ActionsPanel (props: {
               type='primary'
               onClick={() => startAction('TAKE')}
               disabled={!canStartTakeInCharge}
-              style={actionButtonStyle(buttonColors.take, !canStartTakeInCharge)}
+              style={actionButtonStyle(buttonColors.take, !canStartTakeInCharge, ui)}
             >
               {buttonText}
             </Button>
@@ -1614,7 +1675,7 @@ function ActionsPanel (props: {
               type='primary'
               onClick={() => startAction('INTEGRAZIONE')}
               disabled={!canStartEsito}
-              style={actionButtonStyle(buttonColors.integrazione, !canStartEsito)}
+              style={actionButtonStyle(buttonColors.integrazione, !canStartEsito, ui)}
             >
               Integrazione
             </Button>
@@ -1623,7 +1684,7 @@ function ActionsPanel (props: {
               type='primary'
               onClick={() => startAction('APPROVA')}
               disabled={!canStartEsito}
-              style={actionButtonStyle(buttonColors.approva, !canStartEsito)}
+              style={actionButtonStyle(buttonColors.approva, !canStartEsito, ui)}
             >
               Approva
             </Button>
@@ -1632,7 +1693,7 @@ function ActionsPanel (props: {
               type='primary'
               onClick={() => startAction('RESPINGI')}
               disabled={!canStartEsito}
-              style={actionButtonStyle(buttonColors.respingi, !canStartEsito)}
+              style={actionButtonStyle(buttonColors.respingi, !canStartEsito, ui)}
             >
               Respingi
             </Button>
@@ -1642,7 +1703,7 @@ function ActionsPanel (props: {
                 type='primary'
                 onClick={() => startAction('TRASMETTI')}
                 disabled={!canStartTrasmetti}
-                style={actionButtonStyle(buttonColors.trasmetti, !canStartTrasmetti)}
+                style={actionButtonStyle(buttonColors.trasmetti, !canStartTrasmetti, ui)}
               >
                 Trasmetti a DA
               </Button>
@@ -1805,7 +1866,7 @@ function ActionsPanel (props: {
                   type='primary'
                   onClick={onConfirmTakeInCharge}
                   disabled={loading}
-                  style={actionButtonStyle(buttonColors.take, !!loading)}
+                  style={actionButtonStyle(buttonColors.take, !!loading, ui)}
                 >
                   {loading ? 'Aggiorno…' : 'Conferma presa in carico'}
                 </Button>
@@ -1816,7 +1877,7 @@ function ActionsPanel (props: {
                   type='primary'
                   onClick={onConfirmIntegrazione}
                   disabled={loading}
-                  style={actionButtonStyle(buttonColors.integrazione, !!loading)}
+                  style={actionButtonStyle(buttonColors.integrazione, !!loading, ui)}
                 >
                   {loading ? 'Aggiorno…' : 'Conferma integrazione'}
                 </Button>
@@ -1827,7 +1888,7 @@ function ActionsPanel (props: {
                   type='primary'
                   onClick={() => onConfirmEsito(ESITO_APPROVATA, 'Approvata')}
                   disabled={loading}
-                  style={actionButtonStyle(buttonColors.approva, !!loading)}
+                  style={actionButtonStyle(buttonColors.approva, !!loading, ui)}
                 >
                   {loading ? 'Aggiorno…' : 'Conferma approvazione'}
                 </Button>
@@ -1838,7 +1899,7 @@ function ActionsPanel (props: {
                   type='primary'
                   onClick={onConfirmRespinta}
                   disabled={loading}
-                  style={actionButtonStyle(buttonColors.respingi, !!loading)}
+                  style={actionButtonStyle(buttonColors.respingi, !!loading, ui)}
                 >
                   {loading ? 'Aggiorno…' : 'Conferma respinta'}
                 </Button>
@@ -1849,7 +1910,7 @@ function ActionsPanel (props: {
                   type='primary'
                   onClick={onConfirmTrasmetti}
                   disabled={loading}
-                  style={actionButtonStyle(buttonColors.trasmetti, !!loading)}
+                  style={actionButtonStyle(buttonColors.trasmetti, !!loading, ui)}
                 >
                   {loading ? 'Aggiorno…' : 'Conferma trasmissione'}
                 </Button>
@@ -1936,7 +1997,17 @@ function migrateTabs(tabFields: TabFields, tabs: TabConfig[] | undefined): TabCo
   
   // Se ha già tabs, usa quelle
   if (Array.isArray(tabs) && tabs.length > 0) {
-    result = tabs
+    // Normalizza fields di ogni tab a plain JS array
+    result = tabs.map((t: any) => {
+      let f: string[] = []
+      if (t.fields) {
+        if (Array.isArray(t.fields)) f = t.fields.map(String).filter(Boolean)
+        else if (typeof t.fields.toArray === 'function') f = t.fields.toArray().map(String).filter(Boolean)
+        else if (typeof t.fields.toJS === 'function') f = t.fields.toJS().map(String).filter(Boolean)
+        else if (typeof t.fields[Symbol.iterator] === 'function') f = Array.from(t.fields as any).map(String).filter(Boolean)
+      }
+      return { ...t, fields: f }
+    })
   } else {
     // Altrimenti migra dai vecchi tabFields
     result = [
@@ -2053,6 +2124,8 @@ function ReadOnlyPanel (props: {
     </div>
   )
 }
+
+
 
 function DetailTabsPanel (props: {
   active: { key: string; state: SelState } | null
@@ -2307,8 +2380,17 @@ const isPgOnlyField = React.useCallback((fieldName: string) => {
   return Boolean(isRagSoc || isPiva)
 }, [aliasMap])
 
-  const makeRows = React.useCallback((fields: string[], kind: string, hideEmpty: boolean) => {
-    const rawList = (fields && fields.length) ? fields : autoPickFields(data, kind)
+  const makeRows = React.useCallback((fields: any, kind: string, hideEmpty: boolean) => {
+    // Normalizza a plain JS array in modo robusto (frozen array, ImmutableList, ecc.)
+    let fieldArr: string[] = []
+    if (fields) {
+      if (Array.isArray(fields)) fieldArr = fields.map(String).filter(Boolean)
+      else if (typeof fields.toArray === 'function') fieldArr = fields.toArray().map(String).filter(Boolean)
+      else if (typeof fields.toJS === 'function') fieldArr = fields.toJS().map(String).filter(Boolean)
+      else if (typeof fields[Symbol.iterator] === 'function') fieldArr = Array.from(fields as any).map(String).filter(Boolean)
+    }
+    // Se nessun campo configurato esplicitamente, usa autoPickFields come default
+    const rawList = fieldArr.length ? fieldArr : autoPickFields(data, kind)
     const tipoRaw = (data && (data as any).__tipo_soggetto_raw != null) ? (data as any).__tipo_soggetto_raw : ((data && (data as any).tipo_soggetto != null) ? (data as any).tipo_soggetto : null)
     const tipoLabel = (data && (data as any).__tipo_soggetto_label != null) ? (data as any).__tipo_soggetto_label : null
     const sogg = (kind === 'ANAGRAFICA') ? classifyTipoSoggetto(tipoRaw, tipoLabel) : null
@@ -2362,13 +2444,12 @@ const isPgOnlyField = React.useCallback((fieldName: string) => {
       borderTopLeftRadius: ui.panelBorderRadius,
       borderTopRightRadius: ui.panelBorderRadius
     }}>
-      {tabs.map((t) => (
+      {hasSel && tabs.map((t) => (
         <TabButton 
           key={t.id}
           active={tab === t.id} 
           label={t.label} 
           onClick={() => setTab(t.id)} 
-          disabled={!hasSel} 
         />
       ))}
     </div>
@@ -2411,17 +2492,8 @@ let content: React.ReactNode = null
 
 if (!hasSel) {
   content = (
-    <div style={{
-      display: 'flex',
-      alignItems: 'center',
-      justifyContent: 'center',
-      height: '100%',
-      minHeight: 200,
-      fontWeight: 700,
-      fontSize: 14,
-      color: 'rgba(0,0,0,0.6)'
-    }}>
-      Selezionare un rapporto nell'elenco
+    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', minHeight: 200, fontWeight: 700, fontSize: 14, color: 'rgba(0,0,0,0.6)' }}>
+      Selezionare un rapporto nell’elenco
     </div>
   )
 } else {
@@ -2635,7 +2707,8 @@ return (
       display: 'flex',
       alignItems: 'center',
       boxSizing: 'border-box',
-      flex: '0 0 auto'
+      flex: '0 0 auto',
+      background: (ui as any).detailTitleBg && (ui as any).detailTitleBg !== 'transparent' ? (ui as any).detailTitleBg : undefined
     }}>
       <span style={{
         fontSize: ui.detailTitleFontSize ?? 14,
@@ -2723,7 +2796,14 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
     detailTitlePaddingLeft: Number.isFinite(Number(cfg.detailTitlePaddingLeft)) ? Number(cfg.detailTitlePaddingLeft) : defaultConfig.detailTitlePaddingLeft,
     detailTitleFontSize: Number.isFinite(Number(cfg.detailTitleFontSize)) ? Number(cfg.detailTitleFontSize) : defaultConfig.detailTitleFontSize,
     detailTitleFontWeight: Number.isFinite(Number(cfg.detailTitleFontWeight)) ? Number(cfg.detailTitleFontWeight) : defaultConfig.detailTitleFontWeight,
-    detailTitleColor: String(cfg.detailTitleColor ?? defaultConfig.detailTitleColor)
+    detailTitleColor: String(cfg.detailTitleColor ?? defaultConfig.detailTitleColor),
+    detailTitleBg: String(cfg.detailTitleBg ?? defaultConfig.detailTitleBg ?? 'transparent'),
+
+    btnBorderRadius: Number.isFinite(Number(cfg.btnBorderRadius)) ? Number(cfg.btnBorderRadius) : defaultConfig.btnBorderRadius ?? 8,
+    btnFontSize: Number.isFinite(Number(cfg.btnFontSize)) ? Number(cfg.btnFontSize) : defaultConfig.btnFontSize ?? 13,
+    btnFontWeight: Number.isFinite(Number(cfg.btnFontWeight)) ? Number(cfg.btnFontWeight) : defaultConfig.btnFontWeight ?? 600,
+    btnPaddingX: Number.isFinite(Number(cfg.btnPaddingX)) ? Number(cfg.btnPaddingX) : defaultConfig.btnPaddingX ?? 16,
+    btnPaddingY: Number.isFinite(Number(cfg.btnPaddingY)) ? Number(cfg.btnPaddingY) : defaultConfig.btnPaddingY ?? 8
   }
 
   const tabFields: TabFields = {
@@ -2749,10 +2829,9 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
     presaRequiredVal: Number.isFinite(Number(cfg.editPresaRequiredVal)) ? Number(cfg.editPresaRequiredVal) : 2
   }
 
-  if (!props.useDataSources || !props.useDataSources.length) {
-    return <div style={{ padding: Number.isFinite(Number((cfg as any).maskOuterOffset ?? 0)) ? Number((cfg as any).maskOuterOffset) : 0 }}>Configura il data source nelle impostazioni del widget.</div>
-  }
 
+  const useDataSources: any[] = (props.useDataSources as any) || []
+  const hasUseDataSources = Array.isArray(useDataSources) && useDataSources.length > 0
   const watchFields = [
     // DT
     'presa_in_carico_DT', 'dt_presa_in_carico_DT',
@@ -2765,6 +2844,32 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
     'esito_DA', 'dt_esito_DA',
     'note_DA'
   ]
+
+const queryFields = React.useMemo(() => {
+  const s = new Set<string>()
+  let needsAll = false
+
+  const tabsJs: any[] =
+    (migratedTabs as any)?.asMutable
+      ? (migratedTabs as any).asMutable({ deep: true })
+      : (Array.isArray(migratedTabs) ? migratedTabs as any[] : [])
+
+  for (const t of tabsJs) {
+    if (!t || t.id === 'azioni') continue
+    const fl = normalizeFieldList(t.fields)
+
+    // Se una tab (esclusa Iter) è vuota => usiamo l'auto-pick: serve avere (quasi) tutti i campi.
+    if (!fl.length && t.id !== 'iter') needsAll = true
+
+    for (const f of fl) s.add(String(f))
+  }
+
+  for (const f of watchFields) s.add(String(f))
+
+  const arr = Array.from(s).filter(Boolean)
+  return needsAll ? ['*'] : arr
+}, [migratedTabs, watchFields.join('|')])
+
   const [selByKey, setSelByKey] = React.useState<Record<string, SelState>>({})
   const [lastActiveKey, setLastActiveKey] = React.useState<string | null>(null)
 
@@ -2777,46 +2882,53 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
     if (state.oid != null) setLastActiveKey(dsKey)
   }, [])
 
-  // “active” = (1) la data view più recentemente selezionata; (2) fallback: prima che ha selezione
+  // "active" = (1) la data view più recentemente selezionata; (2) fallback: prima che ha selezione
   const active = React.useMemo(() => {
     if (lastActiveKey && selByKey[lastActiveKey]?.oid != null) {
       return { key: lastActiveKey, state: selByKey[lastActiveKey] }
     }
-    for (let i = 0; i < props.useDataSources.length; i++) {
-      const key = getUdsKey(props.useDataSources[i], i)
+    for (let i = 0; i < useDataSources.length; i++) {
+      const key = getUdsKey(useDataSources[i], i)
       const st = selByKey[key]
       if (st && st.oid != null) return { key, state: st }
     }
     return null
-  }, [props.useDataSources, selByKey, lastActiveKey])
+  }, [useDataSources, selByKey, lastActiveKey])
 
   return (
     <div style={{ width: '100%', height: '100%', display: 'flex', flexDirection: 'column', minHeight: 0, boxSizing: 'border-box', padding: Number.isFinite(Number((cfg as any).maskOuterOffset ?? 0)) ? Number((cfg as any).maskOuterOffset) : 0 }}>
-      {props.useDataSources.map((uds: any, idx: number) => {
-        const key = getUdsKey(uds, idx)
-        return (
-          <DataSourceSelectionBridge
-            key={key}
-            widgetId={props.id}
-            uds={uds}
-            dsKey={key}
-            watchFields={watchFields}
-            onUpdate={onUpdate}
-          />
-        )
-      })}
+      {!hasUseDataSources ? (
+        <div>Configura il data source nelle impostazioni del widget.</div>
+      ) : (
+        <>
+                {useDataSources.map((uds: any, idx: number) => {
+                  const key = getUdsKey(uds, idx)
+                  return (
+                    <DataSourceSelectionBridge
+                      key={key}
+                      widgetId={props.id}
+                      uds={uds}
+                      dsKey={key}
+                      watchFields={watchFields}
+                      queryFields={queryFields}
+                      onUpdate={onUpdate}
+                    />
+                  )
+                })}
 
-      <DetailTabsPanel
-        active={active}
-        roleCode={roleCode}
-        buttonText={buttonText}
-        buttonColors={buttonColors}
-        ui={ui}
-        tabFields={tabFields}
-        tabs={migratedTabs}
-        editConfig={editConfig}
-        motherLayerUrl={String(cfg.motherLayerUrl || '').trim() || undefined}
-      />
+                <DetailTabsPanel
+                  active={active}
+                  roleCode={roleCode}
+                  buttonText={buttonText}
+                  buttonColors={buttonColors}
+                  ui={ui}
+                  tabFields={tabFields}
+                  tabs={migratedTabs}
+                  editConfig={editConfig}
+                  motherLayerUrl={String(cfg.motherLayerUrl || '').trim() || undefined}
+                />
+        </>
+      )}
     </div>
   )
 }
