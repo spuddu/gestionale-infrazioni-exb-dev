@@ -1,0 +1,20 @@
+{
+  "name": "gii-editing-ti",
+  "label": "GII Editing TI",
+  "type": "widget",
+  "version": "1.0.0",
+  "exbVersion": "1.19.0",
+  "author": "CBSM",
+  "description": "Creazione e modifica pratiche lato TI. Supporta modalità pagina e overlay, geometria condizionale, audit log e trasmissione a RZ.",
+  "dependency": [
+    "jimu-arcgis"
+  ],
+  "translatedLocales": [
+    "it"
+  ],
+  "defaultSize": {
+    "width": 900,
+    "height": 700
+  },
+  "properties": {}
+}
