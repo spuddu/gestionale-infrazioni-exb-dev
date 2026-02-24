@@ -112,6 +112,13 @@ function tryClearSelection (ds: any) {
   try { ds.setSelectedRecords?.([]) } catch {}
 }
 
+function notifySelectionCleared () {
+  try {
+    sessionStorage.removeItem('GII_SELECTED_OID')
+    window.dispatchEvent(new CustomEvent('gii-selection-changed'))
+  } catch {}
+}
+
 function compareValues (a: any, b: any): number {
   const aNull = (a === null || a === undefined || a === '')
   const bNull = (b === null || b === undefined || b === '')
@@ -209,34 +216,138 @@ const RUOLO_PRIORITY: Record<number, number> = {
 //   AREA: AMM=1, AGR=2, TEC=3
 //   SETTORE: CR=1,GI=2,D1=3,D2=4,D3=5,D4=6,D5=7,D6=8,CS=9
 //   RUOLO: TR=1,TI=2,RZ=3,RI=4,DT=5,DA=6
-function getAllowedDataSourceIds(user: { ruolo: number|null, area: number|null, settore: number|null, isAdmin: boolean } | null): string[] | null {
+function getAllowedDataSourceIds(
+  user: { ruolo: number|null, area: number|null, settore: number|null, isAdmin: boolean } | null,
+  useDsList: any[]
+): string[] | null {
   if (!user) return null
-  if (user.isAdmin) return ['dataSource_31'] // admin: vista unica senza filtri (evita duplicati)
 
-  const { ruolo, area, settore } = user
+  // Helper: label (titolo) del datasource, normalizzato
+  const getLabel = (useDs: any): string => {
+    try {
+      const ds = DataSourceManager.getInstance().getDataSource(String(useDs?.dataSourceId || ''))
+      const label = ds?.getLabel?.()
+      return String(label || '')
+    } catch { return '' }
+  }
+  const norm = (s: string) => String(s || '').toUpperCase()
 
-  // TR(1), TI(2), RZ(3) → vista per settore specifico
-  if (ruolo !== null && ruolo >= 1 && ruolo <= 3) {
-    if (area === 2) { // AGR
-      if (settore === 3) return ['dataSource_39'] // D1
-      if (settore === 4) return ['dataSource_38'] // D2
-      if (settore === 5) return ['dataSource_37'] // D3
-      if (settore === 6) return ['dataSource_36'] // D4
-      if (settore === 7) return ['dataSource_35'] // D5
-      if (settore === 8) return ['dataSource_34'] // D6
+  const AREA_CODE: Record<number, string> = { 1:'AMM', 2:'AGR', 3:'TEC' }
+  const SETTORE_CODE: Record<number, string> = { 1:'CR', 2:'GI', 3:'D1', 4:'D2', 5:'D3', 6:'D4', 7:'D5', 8:'D6', 9:'CS' }
+
+  const areaCode = (user.area != null ? AREA_CODE[user.area] : '') || ''
+  const settoreCode = (user.settore != null ? SETTORE_CODE[user.settore] : '') || ''
+  const ruolo = user.ruolo
+
+  const roots = (arr: any[]) => Array.from(new Set(arr.map(u => String(u?.rootDataSourceId || u?.dataSourceId || '')).filter(Boolean)))
+
+  // Admin: preferisci la vista EB_ADMIN (se presente), altrimenti non filtrare
+  if (user.isAdmin) {
+    const adminMatches = useDsList.filter(u => {
+      const L = norm(getLabel(u))
+      return L.includes('GII_VIEW_EB_ADMIN') || L.includes('VIEW_EB_ADMIN') || L.includes('_EB_ADMIN') || L.includes('EB_ADMIN')
+    })
+    const r = roots(adminMatches)
+    return r.length ? r : null
+  }
+
+  const isEB = (L: string) => L.includes('GII_VIEW_EB_') || L.includes('VIEW_EB_') || L.includes('_EB_')
+
+  // Match "strict" (settore per AGR per TR/TI/RZ, e "tutte" per RI/DT/DA)
+  const matchesStrict = useDsList.filter(u => {
+    const L = norm(getLabel(u))
+    if (!isEB(L)) return false
+    if (L.includes('EB_ADMIN')) return false
+    if (areaCode && !L.includes(`EB_${areaCode}`)) return false
+
+    if (ruolo != null && ruolo >= 1 && ruolo <= 3) {
+      if (areaCode === 'AGR') return settoreCode ? L.includes(`_${settoreCode}`) : true
+      return true
     }
-    if (area === 3) return ['dataSource_33'] // TEC
+
+    if (ruolo != null && ruolo >= 4 && ruolo <= 6) {
+      if (areaCode === 'AGR') return (L.includes('TUTTE') || L.includes('TUTTI') || (!L.includes('_D1') && !L.includes('_D2') && !L.includes('_D3') && !L.includes('_D4') && !L.includes('_D5') && !L.includes('_D6')))
+      return true
+    }
+    return true
+  })
+
+  // Loose fallback: qualunque vista EB della stessa area (escluso ADMIN)
+  const matchesLoose = matchesStrict.length ? matchesStrict : useDsList.filter(u => {
+    const L = norm(getLabel(u))
+    if (!isEB(L)) return false
+    if (L.includes('EB_ADMIN')) return false
+    return areaCode ? L.includes(`EB_${areaCode}`) : true
+  })
+
+  return roots(matchesLoose)
+}
+
+// ── Selezione DS “singolo” (evita duplicati e mismatch) ───────────────────
+// Sceglie UNA vista tra quelle collegate, basandosi sul nome servizio nella URL
+// (più stabile del label e degli id interni dataSource_XX).
+function pickBestUseDataSourceId(
+  user: { ruolo: number | null, ruoloLabel?: string, area: number | null, settore: number | null, gruppo?: string, isAdmin: boolean } | null,
+  useDsList: any[]
+): string | null {
+  if (!user || !Array.isArray(useDsList) || useDsList.length === 0) return null
+
+  const up = (s: any) => String(s || '').toUpperCase()
+  const AREA_CODE: Record<number, string> = { 1: 'AMM', 2: 'AGR', 3: 'TEC' }
+  const SETTORE_CODE: Record<number, string> = { 1: 'CR', 2: 'GI', 3: 'D1', 4: 'D2', 5: 'D3', 6: 'D4', 7: 'D5', 8: 'D6', 9: 'CS' }
+
+  const areaCode = (user.area != null ? AREA_CODE[user.area] : '') || ''
+  const settoreCode = (user.settore != null ? SETTORE_CODE[user.settore] : '') || ''
+  const ruolo = user.ruolo
+  const ruoloLabel = up((user as any)?.ruoloLabel)
+  const gruppo = up((user as any)?.gruppo)
+
+  const getServiceName = (useDs: any): string => {
+    try {
+      const ds = DataSourceManager.getInstance().getDataSource(String(useDs?.dataSourceId || ''))
+      const j: any = ds?.getDataSourceJson?.() || (ds as any)?.dataSourceJson
+      const url = String(j?.url || '')
+      const part = url.split('/rest/services/')[1] || ''
+      const name = part.split('/FeatureServer')[0] || ''
+      return up(name)
+    } catch {
+      return ''
+    }
   }
 
-  // RI(4), DT(5), DA(6) → vista globale per area
-  if (ruolo !== null && ruolo >= 4 && ruolo <= 6) {
-    if (area === 2) return ['dataSource_41'] // AGR tutti settori
-    if (area === 3) return ['dataSource_40'] // TEC
-    if (area === 1) return ['dataSource_32'] // AMM
+  const items = useDsList.map(u => ({ dsId: String(u?.dataSourceId || ''), name: getServiceName(u) }))
+  const findBy = (pred: (n: string) => boolean) => {
+    const hit = items.find(x => x.dsId && x.name && pred(x.name))
+    return hit?.dsId || null
   }
 
-  // Fallback: nessun datasource consentito
-  return []
+  // “Admin applicativo”: org_admin oppure ruolo DA/DT/RI oppure gruppo contiene ADMIN.
+  const isAppAdmin = user.isAdmin || ruoloLabel === 'DA' || ruoloLabel === 'DT' || ruoloLabel === 'RI' || gruppo.includes('ADMIN')
+  if (isAppAdmin) {
+    const dsAdmin = findBy(n => n.includes('EB_ADMIN') || n.includes('GII_VIEW_EB_ADMIN') || n.includes('VIEW_EB_ADMIN'))
+    if (dsAdmin) return dsAdmin
+  }
+
+  // area+settore
+  if (areaCode) {
+    if (settoreCode) {
+      const dsAreaSett = findBy(n => n.includes(`EB_${areaCode}_${settoreCode}`) || n.includes(`_${areaCode}_${settoreCode}`))
+      if (dsAreaSett) return dsAreaSett
+    }
+    // viste "TUTTE" per ruoli superiori
+    if (ruolo != null && ruolo >= 4 && ruolo <= 6) {
+      const dsTutte = findBy(n => n.includes(`EB_${areaCode}_TUTTE`) || n.includes(`EB_${areaCode}_TUTTI`))
+      if (dsTutte) return dsTutte
+    }
+    const dsArea = findBy(n => n.includes(`EB_${areaCode}`) || n.includes(`_${areaCode}`))
+    if (dsArea) return dsArea
+  }
+
+  // fallback admin view
+  const dsAdminFallback = findBy(n => n.includes('EB_ADMIN') || n.includes('GII_VIEW_EB_ADMIN') || n.includes('VIEW_EB_ADMIN'))
+  if (dsAdminFallback) return dsAdminFallback
+
+  return items[0]?.dsId || null
 }
 
 interface GiiUserInfo {
@@ -404,6 +515,20 @@ export default function Widget (props: Props) {
   // notLogged: true quando non c'è utente autenticato → overlay bloccante
   const [notLogged, setNotLogged] = React.useState(false)
 
+  // --- Selection bridge boot reset ---
+  // La selezione NON deve persistere tra refresh/riapertura pagina.
+  // Facciamo il reset UNA sola volta per page-load qui nell'Elenco (source of truth),
+  // cosi Azioni non mostra mai il record precedente quando l'Elenco non ha selezione.
+  React.useEffect(() => {
+    try {
+      const w: any = window as any
+      if (w.__giiSelBootCleared) return
+      w.__giiSelBootCleared = true
+    } catch {}
+    notifySelectionCleared()
+  }, [])
+
+
 
   // Carica profilo utente dalla tabella GII_utenti
   const loadUserProfile = React.useCallback(async (username: string, isAdmin: boolean) => {
@@ -527,14 +652,28 @@ export default function Widget (props: Props) {
 
   // DataSource consentiti per l'utente corrente
   const allowedDsIds: string[] | null = React.useMemo(
-    () => giiUser ? getAllowedDataSourceIds(giiUser) : null,
+    () => giiUser ? getAllowedDataSourceIds(giiUser, useDsJs) : null,
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [giiUser?.username, giiUser?.ruolo, giiUser?.area, giiUser?.settore, giiUser?.isAdmin]
+    [giiUser?.username, giiUser?.ruolo, giiUser?.area, giiUser?.settore, giiUser?.isAdmin, useDsJs.length]
+  )
+
+  // DS “migliore” (singolo) per evitare duplicazioni e mismatch tra viste
+  const bestDsId: string | null = React.useMemo(
+    () => giiUser ? pickBestUseDataSourceId(giiUser as any, useDsJs) : null,
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [giiUser?.username, giiUser?.ruolo, giiUser?.area, giiUser?.settore, giiUser?.isAdmin, (giiUser as any)?.gruppo, useDsJs.length]
   )
 
   // useDsJs filtrato: solo i datasource consentiti per il ruolo dell'utente
   const filteredUseDsJs: any[] = React.useMemo(() => {
     if (!giiUser || userLoading || notLogged) return useDsJs // non ancora loggato: passa tutti (ma overlay copre)
+
+    // Se troviamo un DS migliore, usa SOLO quello.
+    if (bestDsId) {
+      const hit = useDsJs.find((u: any) => String(u?.dataSourceId || '') === bestDsId)
+      return hit ? [hit] : useDsJs
+    }
+
     if (allowedDsIds === null) return useDsJs // admin: tutti
     return useDsJs.filter((u: any) => {
       // allowedDsIds contiene i rootDataSourceId (es. "dataSource_39")
@@ -544,7 +683,7 @@ export default function Widget (props: Props) {
       return allowedDsIds.includes(rootId)
     })
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [giiUser, userLoading, notLogged, allowedDsIds, useDsJs.length])
+  }, [giiUser, userLoading, notLogged, bestDsId, allowedDsIds, useDsJs.length])
 
   // Campo stato del ruolo corrente
   const statoRuoloField = giiUser?.isAdmin
@@ -1430,6 +1569,7 @@ export default function Widget (props: Props) {
                         const entry = dsDataRef.current[dsId]
                         if (entry?.ds) tryClearSelection(entry.ds)
                       })
+                      notifySelectionCleared()
                       setLocalSelectedByDs(prev => {
                         const updated = { ...prev }
                         curGroup.dsIndices.forEach(di => {
@@ -1528,7 +1668,6 @@ export default function Widget (props: Props) {
                                 try {
                                   const mainDs = DataSourceManager.getInstance().getDataSource(dsId)
                                   if (mainDs) tryClearSelection(mainDs)
-                                  // Risali al parent DS
                                   const parentId = (mainDs as any)?.parentDataSource?.id || (mainDs as any)?.getMainDataSource?.()?.id
                                   if (parentId) {
                                     const parentDs = DataSourceManager.getInstance().getDataSource(parentId)
@@ -1536,16 +1675,24 @@ export default function Widget (props: Props) {
                                   }
                                 } catch {}
                               })
+                              notifySelectionCleared()
                             } else {
                               // Pulisci tutte le selezioni precedenti su tutti i DS
                               Object.keys(dsDataRef.current).forEach(id => {
                                 const e = dsDataRef.current[id]
                                 if (e?.ds) tryClearSelection(e.ds)
                               })
+                              notifySelectionCleared()
                               // Seleziona questo record sul suo DS nativo
                               setLocalSelectedByDs({ [recDsId]: rid })
                               const entry = dsDataRef.current[recDsId]
                               if (entry?.ds) trySelectRecord(entry.ds, r, rid)
+                              // Notifica azioni del record selezionato
+                              try {
+                                const oidVal = Number(r.getData?.()[entry?.ds?.getIdField?.() || 'OBJECTID'] ?? rid)
+                                sessionStorage.setItem('GII_SELECTED_OID', String(oidVal))
+                                window.dispatchEvent(new CustomEvent('gii-selection-changed'))
+                              } catch {}
 
                               // Propaga: forza setSelectedRecords con lo stesso record
                               // su TUTTI i DS del gruppo (ExB usa l'interfaccia DataRecord)

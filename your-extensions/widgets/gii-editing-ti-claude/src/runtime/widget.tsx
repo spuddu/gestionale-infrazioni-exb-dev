@@ -264,18 +264,28 @@ function DataSourceSelectionBridge (props: {
   uds: any
   dsKey: string
   watchFields: string[]
-  queryFields: string[]
   onUpdate: (dsKey: string, state: SelState) => void
 }) {
-  const { widgetId, uds, dsKey, watchFields, queryFields, onUpdate } = props
+  const { widgetId, uds, dsKey, watchFields, onUpdate } = props
+
+  // onDataSourceCreated: fornisce il DS appena disponibile, prima di qualsiasi selezione
+  const onDsCreated = React.useCallback((ds: any) => {
+    if (!ds) return
+    const idFieldName = ds?.getIdField ? ds.getIdField() : 'OBJECTID'
+    onUpdate(dsKey, { ds, oid: null, idFieldName, data: null, sig: 'ds_ready' })
+  }, [dsKey, onUpdate])
+
   return (
-    <DataSourceComponent useDataSource={uds} widgetId={widgetId}>
+    <DataSourceComponent
+      useDataSource={uds}
+      widgetId={widgetId}
+      onDataSourceCreated={onDsCreated}
+    >
       {(ds: any) => (
         <SelectionWatcher
           ds={ds}
           dsKey={dsKey}
           watchFields={watchFields}
-          queryFields={queryFields}
           onUpdate={onUpdate}
         />
       )}
@@ -287,23 +297,15 @@ function SelectionWatcher (props: {
   ds: any
   dsKey: string
   watchFields: string[]
-  queryFields: string[]
   onUpdate: (dsKey: string, state: SelState) => void
 }) {
-  const { ds, dsKey, watchFields, queryFields, onUpdate } = props
+  const { ds, dsKey, watchFields, onUpdate } = props
 
   React.useEffect(() => {
     try { ds?.setListenSelection?.(true) } catch {}
   }, [ds])
 
-  // Nota ExB: se nel Builder il DS del widget è impostato su "Feature selezionata",
-  // spesso i record arrivano come ds.getRecords() (output DS) e NON come getSelectedRecords().
-  // Per essere robusti, usiamo prima la selezione, poi fallback ai record.
-  let selected = ds?.getSelectedRecords?.() || []
-  if (!selected || selected.length === 0) {
-    const recs = ds?.getRecords?.() || []
-    if (recs && recs.length) selected = recs
-  }
+  const selected = ds?.getSelectedRecords?.() || []
   const r0 = selected.length ? selected[0] : null
   // Nota: in ExB il record selezionato può avere un subset di campi.
 // Per il filtro PF/PG dobbiamo avere SEMPRE la tipologia soggetto: la ricaviamo in modo robusto dallo schema/dominio.
@@ -337,65 +339,9 @@ if (tipoField) {
   const oidRaw = pickOidFromData(data, idFieldName)
   const oid = oidRaw != null ? Number(oidRaw) : null
 
-const [fullData, setFullData] = React.useState<any>(null)
-
-// reset full data when selection changes
-React.useEffect(() => {
-  setFullData(null)
-}, [ds, oid])
-
-const querySig = Array.isArray(queryFields) ? queryFields.join('|') : ''
-const watchSig = Array.isArray(watchFields) ? watchFields.join('|') : ''
-
-// Ensure we have ALL the fields needed by the TAB configuration.
-// Selected records in ExB can contain only a subset of attributes: we re-query by OID when needed.
-React.useEffect(() => {
-  let cancelled = false
-  const load = async () => {
-    if (!ds || oid == null || !Number.isFinite(oid)) return
-
-    const qf = Array.isArray(queryFields) ? queryFields : []
-    const wantsAll = qf.includes('*')
-
-    const outFieldsBase = wantsAll
-      ? ['*']
-      : Array.from(new Set([
-          ...qf,
-          ...(Array.isArray(watchFields) ? watchFields : [])
-        ])).filter(Boolean)
-
-    const outFields = (wantsAll || outFieldsBase.length === 0) ? ['*'] : outFieldsBase
-    const base = data || {}
-    const needsQuery = wantsAll || outFields.some(f => f !== '*' && !Object.prototype.hasOwnProperty.call(base, f))
-    if (!needsQuery) return
-
-    try {
-      const q: any = {
-        where: `${idFieldName}=${Number(oid)}`,
-        outFields,
-        returnGeometry: false,
-        pageSize: 1
-      }
-      const res: any = await (ds?.query ? ds.query(q) : null)
-
-      let rec: any = null
-      if (Array.isArray(res)) rec = res[0]
-      else if (res && Array.isArray(res.records)) rec = res.records[0]
-      else if (res && res.data && Array.isArray(res.data.records)) rec = res.data.records[0]
-
-      const d = rec?.getData ? rec.getData() : (rec?.data || rec?.attributes || null)
-      if (!cancelled && d) setFullData(d)
-    } catch {}
-  }
-  load()
-  return () => { cancelled = true }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-}, [ds, oid, idFieldName, querySig, watchSig])
-
-const mergedData: any = fullData ? { ...(data || {}), ...(fullData || {}) } : data
   const sigParts: string[] = []
   sigParts.push(String(oid ?? ''))
-  for (const f of watchFields) sigParts.push(String(mergedData?.[f] ?? ''))
+  for (const f of watchFields) sigParts.push(String(data?.[f] ?? ''))
   const sig = sigParts.join('|')
 
   React.useEffect(() => {
@@ -403,7 +349,7 @@ const mergedData: any = fullData ? { ...(data || {}), ...(fullData || {}) } : da
       ds,
       oid: (oid != null && Number.isFinite(oid)) ? oid : null,
       idFieldName,
-      data: (oid != null && Number.isFinite(oid)) ? mergedData : null,
+      data: (oid != null && Number.isFinite(oid)) ? data : null,
       sig
     })
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -2004,17 +1950,7 @@ function migrateTabs(tabFields: TabFields, tabs: TabConfig[] | undefined): TabCo
   
   // Se ha già tabs, usa quelle
   if (Array.isArray(tabs) && tabs.length > 0) {
-    // Normalizza fields di ogni tab a plain JS array
-    result = tabs.map((t: any) => {
-      let f: string[] = []
-      if (t.fields) {
-        if (Array.isArray(t.fields)) f = t.fields.map(String).filter(Boolean)
-        else if (typeof t.fields.toArray === 'function') f = t.fields.toArray().map(String).filter(Boolean)
-        else if (typeof t.fields.toJS === 'function') f = t.fields.toJS().map(String).filter(Boolean)
-        else if (typeof t.fields[Symbol.iterator] === 'function') f = Array.from(t.fields as any).map(String).filter(Boolean)
-      }
-      return { ...t, fields: f }
-    })
+    result = tabs
   } else {
     // Altrimenti migra dai vecchi tabFields
     result = [
@@ -2133,9 +2069,462 @@ function ReadOnlyPanel (props: {
 }
 
 
+// ══════════════════════════════════════════════════════════════════════════════
+// NUOVA PRATICA TI — form che segue la struttura del survey XLS
+// Mostrato quando nessun record è selezionato (hasSel=false).
+// ══════════════════════════════════════════════════════════════════════════════
+
+const CHOICES = {
+  tipo_soggetto: [{ v: 'PF', l: 'Persona fisica' }, { v: 'PG', l: 'Persona giuridica' }],
+  ufficio: ['Cagliari','Iglesias','Masainas','Quartucciu','San Gavino Monreale','San Giovanni Suergiu','San Sperate','Senorbì','Serramanna'].map(v=>({v,l:v})),
+  tipo_abuso: [{ v: 'parziale', l: 'Parziale' }, { v: 'totale', l: 'Totale' }],
+  art15_parziale: [{ v: 'Art15.1', l: 'Prima contestazione' }, { v: 'Art15.2', l: 'Recidiva' }],
+  art15_totale:   [{ v: 'Art15.3', l: 'Prima contestazione' }, { v: 'Art15.4', l: 'Recidiva' }],
+  art16_17: [
+    { v: 'Art16', l: 'Art. 16 – Comunicazione di irrigazione tardiva' },
+    { v: 'Art17', l: 'Art. 17 – Comunicazione di variazione o di rinuncia tardiva' },
+  ],
+  art17_tipo: [{ v: 'Art17.1', l: 'Variazione tardiva' }, { v: 'Art17.2', l: 'Rinuncia tardiva' }],
+  presenza: [{ v: 'sì', l: 'Sì' }, { v: 'no', l: 'No' }],
+  norma3: [
+    { v: 'Art8',  l: 'Art. 8 – Violazione servizio reperibilità' },
+    { v: 'Art12', l: 'Art. 12 – Negato accesso ai fondi (al personale consortile)' },
+    { v: 'Art27', l: 'Art. 27 – Spreco d\'acqua/uso negligente risorsa idrica' },
+    { v: 'Art28', l: 'Art. 28 – Violazione prescrizioni del consorzio' },
+    { v: 'Art29', l: 'Art. 29 – Violazione termini restituzione attrezzature' },
+    { v: 'Art30', l: 'Art. 30 – Danneggiamento e/o perdita attrezzature' },
+    { v: 'Art31', l: 'Art. 31 – Mancata segnalazione guasti' },
+    { v: 'Art32', l: 'Art. 32 – Negato accesso ai fondi (al consorziato)' },
+    { v: 'Art33', l: 'Art. 33 – Inosservanza limiti temporali di prelievo' },
+    { v: 'Art34', l: 'Art. 34 – Interferenze' },
+    { v: 'Art35', l: 'Art. 35 – Manomissione reti di dispensa e allaccio aspirazione' },
+    { v: 'Art36', l: 'Art. 36 – Uso attrezzature non autorizzate' },
+    { v: 'Art37', l: 'Art. 37 – Uso sistemi di irrigazione incompatibili' },
+    { v: 'Art39', l: 'Art. 39 – Danni strutture irrigue' },
+  ]
+} as const
+
+// campi v_art* associati alle scelte norma3
+const NORMA3_TO_VFIELD: Record<string, string> = {
+  Art8: 'v_art08', Art12: 'v_art12', Art27: 'v_art27', Art28: 'v_art28',
+  Art29: 'v_art29', Art30: 'v_art30', Art31: 'v_art31', Art32: 'v_art32',
+  Art33: 'v_art33', Art34: 'v_art34', Art35: 'v_art35', Art36: 'v_art36',
+  Art37: 'v_art37', Art39: 'v_art39'
+}
+
+const S: Record<string, React.CSSProperties> = {
+  wrap:   { width: '100%', height: '100%', display: 'flex', flexDirection: 'column', minHeight: 0, overflowY: 'auto', padding: '0 2px' },
+  hdr:    { fontSize: 11, fontWeight: 700, color: '#1d4ed8', textTransform: 'uppercase', letterSpacing: 1, borderBottom: '2px solid #bfdbfe', paddingBottom: 4, marginBottom: 12, marginTop: 20 },
+  lbl:    { fontSize: 12, color: '#6b7280', marginBottom: 4, display: 'block' },
+  inp:    { width: '100%', padding: '7px 10px', borderRadius: 7, border: '1px solid rgba(0,0,0,0.18)', fontSize: 13, boxSizing: 'border-box' as const, background: '#fff' },
+  inpDis: { width: '100%', padding: '7px 10px', borderRadius: 7, border: '1px solid rgba(0,0,0,0.10)', fontSize: 13, boxSizing: 'border-box' as const, background: '#f3f4f6', color: '#6b7280' },
+  sel:    { width: '100%', padding: '7px 10px', borderRadius: 7, border: '1px solid rgba(0,0,0,0.18)', fontSize: 13, boxSizing: 'border-box' as const, background: '#fff', cursor: 'pointer' },
+  row2:   { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 },
+  row3:   { display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 12 },
+  fld:    { marginBottom: 10 },
+  hint:   { fontSize: 11, color: '#9ca3af', marginTop: 3 },
+}
+
+function NpField(p: { label: string; children: React.ReactNode; hint?: string }) {
+  return (
+    <div style={S.fld}>
+      <label style={S.lbl}>{p.label}</label>
+      {p.children}
+      {p.hint && <div style={S.hint}>{p.hint}</div>}
+    </div>
+  )
+}
+
+function NpSel(p: { value: string; onChange: (v: string) => void; options: readonly {v:string;l:string}[]; disabled?: boolean }) {
+  return (
+    <select value={p.value} onChange={e => p.onChange(e.target.value)} style={p.disabled ? S.inpDis : S.sel} disabled={p.disabled}>
+      <option value=''>— seleziona —</option>
+      {p.options.map(o => <option key={o.v} value={o.v}>{o.l}</option>)}
+    </select>
+  )
+}
+
+function NpText(p: { value: string; onChange: (v: string) => void; placeholder?: string; multiline?: boolean; disabled?: boolean }) {
+  const st = p.disabled ? S.inpDis : S.inp
+  if (p.multiline) return (
+    <textarea value={p.value} onChange={e => p.onChange(e.target.value)} placeholder={p.placeholder}
+      rows={3} style={{ ...st, resize: 'vertical' }} disabled={p.disabled}/>
+  )
+  return <input type='text' value={p.value} onChange={e => p.onChange(e.target.value)} placeholder={p.placeholder} style={st} disabled={p.disabled}/>
+}
+
+function NpInt(p: { value: string; onChange: (v: string) => void; disabled?: boolean }) {
+  return <input type='number' value={p.value} onChange={e => p.onChange(e.target.value)} style={p.disabled ? S.inpDis : S.inp} disabled={p.disabled}/>
+}
+
+function NpDate(p: { value: string; onChange: (v: string) => void; withTime?: boolean; disabled?: boolean }) {
+  return <input type={p.withTime ? 'datetime-local' : 'date'} value={p.value} onChange={e => p.onChange(e.target.value)} style={p.disabled ? S.inpDis : S.inp} disabled={p.disabled}/>
+}
+
+type NpDraft = Record<string, string>
+
+function NuovaPraticaForm(p: { ds: any; showDatiGenerali: boolean; onSaved: () => void }) {
+  const { ds } = p
+
+  const [draft, setDraft] = React.useState<NpDraft>({})
+  const [saving, setSaving] = React.useState(false)
+  const [msg, setMsg] = React.useState<{ kind: 'ok'|'err'; text: string } | null>(null)
+
+  const set = (k: string, v: string) => setDraft(prev => ({ ...prev, [k]: v }))
+  const g = (k: string) => draft[k] ?? ''
+
+  // Norma violata 3 — select_multiple come Set
+  const norma3Set = React.useMemo(() => new Set((g('norma_violata3') || '').split(' ').filter(Boolean)), [draft.norma_violata3])
+  const toggleNorma3 = (v: string) => {
+    const s = new Set(norma3Set)
+    if (s.has(v)) s.delete(v); else s.add(v)
+    set('norma_violata3', Array.from(s).join(' '))
+  }
+
+  // Calcoli derived (replica logic survey)
+  const tipoSogg   = g('tipologia_soggetto')
+  const tipoAbuso  = g('tipo_abuso')
+  const norma1516  = g('norma16_17')
+  const art17tipo  = g('art17_tipo')
+  const n3parziale = g('norma15_parziale')
+  const n3totale   = g('norma15_totale')
+
+  // sup_dichiarata_art15/sup_irrigata_art15: relevant = selected(norma15_parziale,'Art15.1') or ...Art15.2 or selected(norma15_totale,...)
+  const showSup15 = (tipoAbuso === 'parziale' && (n3parziale === 'Art15.1' || n3parziale === 'Art15.2')) ||
+                    (tipoAbuso === 'totale'   && (n3totale   === 'Art15.3' || n3totale   === 'Art15.4'))
+
+  const handleSave = async () => {
+    setSaving(true); setMsg(null)
+    try {
+      const layer = await resolveLayerForEdit(ds)
+      if (!layer?.applyEdits) throw new Error('Layer non raggiungibile.')
+      if (typeof layer.load === 'function') { try { await layer.load() } catch {} }
+
+      // Calcola campi derivati
+      const normaV1 = tipoAbuso === 'parziale' ? n3parziale : (tipoAbuso === 'totale' ? n3totale : '')
+      const normaV2 = norma1516 === 'Art16' ? 'Art16' : (norma1516 === 'Art17' && art17tipo ? art17tipo : norma1516)
+      const supDich16_17 = norma1516 === 'Art16' ? (draft.sup_dichiarata_art16 ?? null) : (art17tipo === 'Art17.1' ? (draft.sup_dichiarata_art17_1 ?? null) : (draft.sup_dichiarata_art17_2 ?? null))
+      const supIrr16_17  = norma1516 === 'Art16' || art17tipo === 'Art17.2' ? (draft.sup_irrigata_art16_17_2 ?? null) : (art17tipo === 'Art17.1' ? (draft.sup_irrigata_art17_1 ?? null) : null)
+
+      // Campi v_art* (integer): 1 se selezionato in norma3, null altrimenti
+      const vArtAttrs: Record<string, number | null> = {}
+      for (const [art, field] of Object.entries(NORMA3_TO_VFIELD)) {
+        vArtAttrs[field] = norma3Set.has(art) ? 1 : null
+      }
+
+      // Converti date in timestamp ms
+      const toTs = (v: string) => {
+        if (!v) return null
+        try { const d = new Date(v); return Number.isNaN(d.getTime()) ? null : d.getTime() } catch { return null }
+      }
+      const toInt = (v: string) => { const n = parseInt(v, 10); return Number.isNaN(n) ? null : n }
+
+      // Leggi utente e territorio da window.__giiUserRole
+      const giiRole: any = (window as any).__giiUserRole || {}
+
+      const attrs: Record<string, any> = {
+        // sistema
+        origine_pratica:  2,
+        stato_TI:         1,
+        utente_loggato:   String(giiRole.username || giiRole.userId || ''),
+        area_cod:         String(giiRole.area || ''),
+        settore_cod:      String(giiRole.settore || ''),
+        // dati generali
+        tecnico_rilevatore: g('tecnico_rilevatore') || null,
+        ufficio_zona:       g('ufficio_zona') || null,
+        data_rilevazione:   toTs(g('data_rilevazione')),
+        // trasgressore
+        tipologia_soggetto: tipoSogg || null,
+        nome:               (tipoSogg === 'PF' ? g('nome') : null) || null,
+        cognome:            (tipoSogg === 'PF' ? g('cognome') : null) || null,
+        ragione_sociale:    (tipoSogg === 'PG' ? g('ragione_sociale') : null) || null,
+        codice_fiscale:     (tipoSogg === 'PF' ? g('codice_fiscale') : null) || null,
+        piva:               (tipoSogg === 'PG' ? g('piva') : null) || null,
+        via:                g('via') || null,
+        civico:             g('civico') || null,
+        citta:              g('citta') || null,
+        cap:                g('cap') || null,
+        email:              g('email') || null,
+        pec:                g('pec') || null,
+        telefono:           g('telefono') || null,
+        cellulare:          g('cellulare') || null,
+        // violazione art.15
+        tipo_abuso:         tipoAbuso || null,
+        norma15_parziale:   (tipoAbuso === 'parziale' ? n3parziale : null) || null,
+        norma15_totale:     (tipoAbuso === 'totale'   ? n3totale   : null) || null,
+        norma_violata1:     normaV1 || null,
+        sup_dichiarata_art15: showSup15 ? toInt(g('sup_dichiarata_art15')) : null,
+        sup_irrigata_art15:   showSup15 ? toInt(g('sup_irrigata_art15'))   : null,
+        // violazione art.16/17
+        norma16_17:             norma1516 || null,
+        art17_tipo:             (norma1516 === 'Art17' ? art17tipo : null) || null,
+        norma_violata2:         normaV2 || null,
+        sup_dichiarata_art17_1: norma1516 === 'Art17' && art17tipo === 'Art17.1' ? toInt(g('sup_dichiarata_art17_1')) : null,
+        sup_dichiarata_art16:   norma1516 === 'Art16'  ? toInt(g('sup_dichiarata_art16'))  : null,
+        sup_dichiarata_art17_2: norma1516 === 'Art17' && art17tipo === 'Art17.2' ? toInt(g('sup_dichiarata_art17_2')) : null,
+        sup_irrigata_art16_17_2: (norma1516 === 'Art16' || art17tipo === 'Art17.2') ? toInt(g('sup_irrigata_art16_17_2')) : null,
+        sup_irrigata_art17_1:    art17tipo === 'Art17.1' ? toInt(g('sup_irrigata_art17_1')) : null,
+        sup_dichiarata_art16_17: toInt(supDich16_17 as string),
+        sup_irrigata_art16_17:   toInt(supIrr16_17 as string),
+        // altre violazioni
+        norma_violata3:       g('norma_violata3') || null,
+        ...vArtAttrs,
+        // descrizione
+        descrizione_fatti:    g('descrizione_fatti') || null,
+        circostanze:          g('circostanze') || null,
+        presenza_trasgressore: g('presenza_trasgressore') || null,
+        // localizzazione
+        descrizione_luogo:    g('descrizione_luogo') || null,
+        // fine compilazione
+        data_firma:           toTs(g('data_firma')),
+      }
+
+      // Rimuovi null per pulizia e filtra ai campi del layer
+      const cleanAttrs = filterAttrsForLayer(attrs, layer)
+
+      const res = await layer.applyEdits({ addFeatures: [{ attributes: cleanAttrs }] })
+      const added = res?.addFeatureResults?.[0] || res?.addResults?.[0] || null
+      const err = added?.error
+      const ok = !err && (added?.objectId != null || added?.success === true || added?.success == null)
+      if (!ok) throw new Error(err ? `${err.code ?? ''}: ${err.message ?? ''}` : JSON.stringify(res))
+
+      await refreshDs(ds)
+      setMsg({ kind: 'ok', text: 'Pratica creata.' })
+      setSaving(false)
+      setTimeout(() => { setDraft({}); setMsg(null); p.onSaved() }, 1200)
+    } catch (e: any) {
+      setSaving(false)
+      setMsg({ kind: 'err', text: `Errore: ${e?.message || String(e)}` })
+    }
+  }
+
+  const [npTab, setNpTab] = React.useState('trasgressore')
+  const showDatiGen = p.showDatiGenerali
+
+  const NP_TABS = [
+    { id: 'dati_generali', label: 'Dati generali' },
+    { id: 'trasgressore',  label: 'Trasgressore' },
+    { id: 'violazione',    label: 'Violazione' },
+    { id: 'descrizione',   label: 'Descrizione' },
+    { id: 'localizzazione',label: 'Localizzazione' },
+    { id: 'fine',          label: 'Fine compilazione' },
+  ] as const
+
+  const btnBase: React.CSSProperties = {
+    padding: '7px 16px', borderRadius: 8, border: 'none',
+    fontWeight: 700, fontSize: 13, cursor: saving ? 'not-allowed' : 'pointer'
+  }
+
+  const tabBtn = (id: string, label: string) => (
+    <button key={id} type='button' onClick={() => setNpTab(id)} style={{
+      padding: '6px 14px', borderRadius: 10, border: `1px solid ${npTab === id ? '#2f6fed' : 'rgba(0,0,0,0.12)'}`,
+      background: npTab === id ? '#eaf2ff' : 'rgba(0,0,0,0.02)',
+      color: npTab === id ? '#1d4ed8' : '#374151',
+      fontWeight: 700, fontSize: 12, cursor: 'pointer', whiteSpace: 'nowrap'
+    }}>{label}</button>
+  )
+
+  return (
+    <div style={{ width: '100%', height: '100%', display: 'flex', flexDirection: 'column', minHeight: 0 }}>
+
+      {/* ── Toolbar ── */}
+      <div style={{ flex: '0 0 auto', display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+        flexWrap: 'wrap', gap: 8, padding: '8px 0', borderBottom: '1px solid rgba(0,0,0,0.08)' }}>
+        <span style={{ fontWeight: 700, fontSize: 14 }}>✚ Nuova pratica (TI)</span>
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+          {msg && <span style={{ fontSize: 12, color: msg.kind === 'ok' ? '#1a7f37' : '#b42318' }}>{msg.text}</span>}
+          <button type='button' disabled={saving} onClick={handleSave}
+            style={{ ...btnBase, background: saving ? '#e5e7eb' : '#1a7f37', color: saving ? '#9ca3af' : '#fff' }}>
+            {saving ? 'Salvataggio…' : '💾 Salva'}
+          </button>
+          <button type='button' disabled={saving} onClick={() => setDraft({})}
+            style={{ ...btnBase, background: '#fff', border: '1px solid rgba(0,0,0,0.18)', color: '#374151' }}>
+            ↺ Pulisci
+          </button>
+        </div>
+      </div>
+
+      {/* ── Tab bar ── */}
+      <div style={{ flex: '0 0 auto', display: 'flex', gap: 6, padding: '8px 0', flexWrap: 'wrap',
+        borderBottom: '1px solid rgba(0,0,0,0.08)' }}>
+        {NP_TABS.map(t => tabBtn(t.id, t.label))}
+      </div>
+
+      {/* ── Contenuto tab (scrollabile) ── */}
+      <div style={{ flex: '1 1 auto', minHeight: 0, overflowY: 'auto', padding: '12px 2px' }}>
+
+        {/* DATI GENERALI — read-only, collassabile */}
+        {npTab === 'dati_generali' && (
+          <div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10 }}>
+              <span style={{ fontSize: 13, color: '#6b7280' }}>Questi dati vengono compilati automaticamente.</span>
+
+            </div>
+            {showDatiGen && (
+              <div style={S.row3}>
+                <NpField label='Tecnico istruttore'>
+                  <NpText value={g('tecnico_rilevatore')} onChange={() => {}} disabled/>
+                </NpField>
+                <NpField label='Ufficio di Zona'>
+                  <NpText value={g('ufficio_zona')} onChange={() => {}} disabled/>
+                </NpField>
+                <NpField label='Data rilevazione'>
+                  <NpText value={g('data_rilevazione')} onChange={() => {}} disabled/>
+                </NpField>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* TRASGRESSORE */}
+        {npTab === 'trasgressore' && (
+          <div>
+            <div style={{ ...S.row2, marginBottom: 12 }}>
+              <NpField label='Tipologia soggetto'>
+                <NpSel value={tipoSogg} onChange={v => set('tipologia_soggetto', v)} options={CHOICES.tipo_soggetto} disabled={saving}/>
+              </NpField>
+              <div/>
+            </div>
+            {tipoSogg === 'PF' && (
+              <div style={S.row3}>
+                <NpField label='Nome'><NpText value={g('nome')} onChange={v => set('nome', v)} disabled={saving}/></NpField>
+                <NpField label='Cognome'><NpText value={g('cognome')} onChange={v => set('cognome', v)} disabled={saving}/></NpField>
+                <NpField label='Codice fiscale'><NpText value={g('codice_fiscale')} onChange={v => set('codice_fiscale', v)} disabled={saving}/></NpField>
+              </div>
+            )}
+            {tipoSogg === 'PG' && (
+              <div style={S.row2}>
+                <NpField label='Ragione sociale'><NpText value={g('ragione_sociale')} onChange={v => set('ragione_sociale', v)} disabled={saving}/></NpField>
+                <NpField label='P. IVA'><NpText value={g('piva')} onChange={v => set('piva', v)} disabled={saving}/></NpField>
+              </div>
+            )}
+            <div style={S.row3}>
+              <NpField label='Via'><NpText value={g('via')} onChange={v => set('via', v)} disabled={saving}/></NpField>
+              <NpField label='N. civico'><NpText value={g('civico')} onChange={v => set('civico', v)} disabled={saving}/></NpField>
+              <NpField label='Città'><NpText value={g('citta')} onChange={v => set('citta', v)} disabled={saving}/></NpField>
+            </div>
+            <div style={S.row3}>
+              <NpField label='CAP'><NpText value={g('cap')} onChange={v => set('cap', v)} disabled={saving}/></NpField>
+              <NpField label='Telefono'><NpText value={g('telefono')} onChange={v => set('telefono', v)} disabled={saving}/></NpField>
+              <NpField label='Cellulare'><NpText value={g('cellulare')} onChange={v => set('cellulare', v)} disabled={saving}/></NpField>
+            </div>
+            <div style={S.row2}>
+              <NpField label='E-mail'><NpText value={g('email')} onChange={v => set('email', v)} disabled={saving}/></NpField>
+              <NpField label='PEC'><NpText value={g('pec')} onChange={v => set('pec', v)} disabled={saving}/></NpField>
+            </div>
+          </div>
+        )}
+
+        {/* VIOLAZIONE */}
+        {npTab === 'violazione' && (
+          <div>
+            <div style={S.hdr}>Art. 15 — Prelievo abusivo</div>
+            <div style={S.row2}>
+              <NpField label='Tipo di abuso'>
+                <NpSel value={tipoAbuso} onChange={v => { set('tipo_abuso', v); set('norma15_parziale', ''); set('norma15_totale', '') }}
+                  options={CHOICES.tipo_abuso} disabled={saving}/>
+              </NpField>
+              {tipoAbuso === 'parziale' && (
+                <NpField label='Seleziona violazione'>
+                  <NpSel value={n3parziale} onChange={v => set('norma15_parziale', v)} options={CHOICES.art15_parziale} disabled={saving}/>
+                </NpField>
+              )}
+              {tipoAbuso === 'totale' && (
+                <NpField label='Seleziona violazione'>
+                  <NpSel value={n3totale} onChange={v => set('norma15_totale', v)} options={CHOICES.art15_totale} disabled={saving}/>
+                </NpField>
+              )}
+            </div>
+            {showSup15 && (
+              <div style={S.row2}>
+                <NpField label='Superficie dichiarata (ha)'><NpInt value={g('sup_dichiarata_art15')} onChange={v => set('sup_dichiarata_art15', v)} disabled={saving}/></NpField>
+                <NpField label='Superficie irrigata (ha)'><NpInt value={g('sup_irrigata_art15')} onChange={v => set('sup_irrigata_art15', v)} disabled={saving}/></NpField>
+              </div>
+            )}
+
+            <div style={S.hdr}>Artt. 16 e 17 — Inosservanza termini</div>
+            <NpField label='Tipo di inosservanza'>
+              <NpSel value={norma1516} onChange={v => { set('norma16_17', v); set('art17_tipo', '') }} options={CHOICES.art16_17} disabled={saving}/>
+            </NpField>
+            {norma1516 === 'Art17' && (
+              <NpField label='Seleziona violazione Art. 17'>
+                <NpSel value={art17tipo} onChange={v => set('art17_tipo', v)} options={CHOICES.art17_tipo} disabled={saving}/>
+              </NpField>
+            )}
+            {norma1516 === 'Art16' && (
+              <div style={S.row2}>
+                <NpField label='Superficie dichiarata (ha)'><NpInt value={g('sup_dichiarata_art16')} onChange={v => set('sup_dichiarata_art16', v)} disabled={saving}/></NpField>
+                <NpField label='Superficie irrigata (ha)'><NpInt value={g('sup_irrigata_art16_17_2')} onChange={v => set('sup_irrigata_art16_17_2', v)} disabled={saving}/></NpField>
+              </div>
+            )}
+            {norma1516 === 'Art17' && art17tipo === 'Art17.1' && (
+              <div style={S.row2}>
+                <NpField label='Superficie dichiarata (ha)'><NpInt value={g('sup_dichiarata_art17_1')} onChange={v => set('sup_dichiarata_art17_1', v)} disabled={saving}/></NpField>
+                <NpField label='Superficie variata (ha)'><NpInt value={g('sup_irrigata_art17_1')} onChange={v => set('sup_irrigata_art17_1', v)} disabled={saving}/></NpField>
+              </div>
+            )}
+            {norma1516 === 'Art17' && art17tipo === 'Art17.2' && (
+              <div style={S.row2}>
+                <NpField label='Superficie dichiarata (ha)'><NpInt value={g('sup_dichiarata_art17_2')} onChange={v => set('sup_dichiarata_art17_2', v)} disabled={saving}/></NpField>
+                <NpField label='Superficie irrigata (ha)'><NpInt value={g('sup_irrigata_art16_17_2')} onChange={v => set('sup_irrigata_art16_17_2', v)} disabled={saving}/></NpField>
+              </div>
+            )}
+
+            <div style={S.hdr}>Altre violazioni</div>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6 }}>
+              {CHOICES.norma3.map(o => (
+                <label key={o.v} style={{ display: 'flex', alignItems: 'flex-start', gap: 8, fontSize: 12,
+                  color: '#374151', cursor: saving ? 'not-allowed' : 'pointer', padding: '4px 0' }}>
+                  <input type='checkbox' checked={norma3Set.has(o.v)} onChange={() => !saving && toggleNorma3(o.v)} style={{ marginTop: 2, flexShrink: 0 }}/>
+                  {o.l}
+                </label>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* DESCRIZIONE */}
+        {npTab === 'descrizione' && (
+          <div>
+            <NpField label='Descrizione dettagliata della violazione'>
+              <NpText value={g('descrizione_fatti')} onChange={v => set('descrizione_fatti', v)} multiline disabled={saving}/>
+            </NpField>
+            <NpField label='Circostanze rilevanti'>
+              <NpText value={g('circostanze')} onChange={v => set('circostanze', v)} multiline disabled={saving}/>
+            </NpField>
+            <NpField label='Il trasgressore era presente?'>
+              <NpSel value={g('presenza_trasgressore')} onChange={v => set('presenza_trasgressore', v)} options={CHOICES.presenza} disabled={saving}/>
+            </NpField>
+          </div>
+        )}
+
+        {/* LOCALIZZAZIONE */}
+        {npTab === 'localizzazione' && (
+          <div>
+            <NpField label='Descrizione del luogo' hint='La posizione GPS va rilevata sul campo tramite Survey123.'>
+              <NpText value={g('descrizione_luogo')} onChange={v => set('descrizione_luogo', v)} multiline disabled={saving}/>
+            </NpField>
+          </div>
+        )}
+
+        {/* FINE COMPILAZIONE */}
+        {npTab === 'fine' && (
+          <div>
+            <NpField label='Data e ora di compilazione'>
+              <NpDate value={g('data_firma')} onChange={v => set('data_firma', v)} withTime disabled={saving}/>
+            </NpField>
+          </div>
+        )}
+
+      </div>
+    </div>
+  )
+}
 
 function DetailTabsPanel (props: {
   active: { key: string; state: SelState } | null
+  anyDs: any
+  showDatiGenerali: boolean
   roleCode: string
   buttonText: string
   buttonColors: ButtonColors
@@ -2145,17 +2534,17 @@ function DetailTabsPanel (props: {
   editConfig: any
   motherLayerUrl?: string
 }) {
-  const { active: activeGate, ui } = props
+  const { active, ui } = props
 
   // Migra e normalizza tabs
   const tabs = React.useMemo(() => {
     return migrateTabs(props.tabFields, props.tabs)
   }, [props.tabs, props.tabFields])
 
-  const selectionKey = activeGate?.state?.oid != null ? `${activeGate.key}:${activeGate.state.oid}` : null
-  const ds = activeGate?.state?.ds
-  const data = activeGate?.state?.data || null
-  const oid = activeGate?.state?.oid ?? null
+  const selectionKey = active?.state?.oid != null ? `${active.key}:${active.state.oid}` : null
+  const ds = active?.state?.ds
+  const data = active?.state?.data || null
+  const oid = active?.state?.oid ?? null
   const hasSel = oid != null && Number.isFinite(oid)
 
   // Codice pratica per il titolo
@@ -2387,17 +2776,8 @@ const isPgOnlyField = React.useCallback((fieldName: string) => {
   return Boolean(isRagSoc || isPiva)
 }, [aliasMap])
 
-  const makeRows = React.useCallback((fields: any, kind: string, hideEmpty: boolean) => {
-    // Normalizza a plain JS array in modo robusto (frozen array, ImmutableList, ecc.)
-    let fieldArr: string[] = []
-    if (fields) {
-      if (Array.isArray(fields)) fieldArr = fields.map(String).filter(Boolean)
-      else if (typeof fields.toArray === 'function') fieldArr = fields.toArray().map(String).filter(Boolean)
-      else if (typeof fields.toJS === 'function') fieldArr = fields.toJS().map(String).filter(Boolean)
-      else if (typeof fields[Symbol.iterator] === 'function') fieldArr = Array.from(fields as any).map(String).filter(Boolean)
-    }
-    // Se nessun campo configurato esplicitamente, usa autoPickFields come default
-    const rawList = fieldArr.length ? fieldArr : autoPickFields(data, kind)
+  const makeRows = React.useCallback((fields: string[], kind: string, hideEmpty: boolean) => {
+    const rawList = (fields && fields.length) ? fields : []  // Se nessun campo configurato, mostra lista vuota (usare il setting per configurare)
     const tipoRaw = (data && (data as any).__tipo_soggetto_raw != null) ? (data as any).__tipo_soggetto_raw : ((data && (data as any).tipo_soggetto != null) ? (data as any).tipo_soggetto : null)
     const tipoLabel = (data && (data as any).__tipo_soggetto_label != null) ? (data as any).__tipo_soggetto_label : null
     const sogg = (kind === 'ANAGRAFICA') ? classifyTipoSoggetto(tipoRaw, tipoLabel) : null
@@ -2498,18 +2878,20 @@ const contentStyle: React.CSSProperties = {
 let content: React.ReactNode = null
 
 if (!hasSel) {
-  content = (
-    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', minHeight: 200, fontWeight: 700, fontSize: 14, color: 'rgba(0,0,0,0.6)' }}>
-      Selezionare un rapporto nell’elenco
-    </div>
-  )
+  content = props.anyDs
+    ? <NuovaPraticaForm ds={props.anyDs} showDatiGenerali={props.showDatiGenerali} onSaved={() => {}} />
+    : (
+      <div style={{ display:'flex', alignItems:'center', justifyContent:'center', height:'100%', minHeight:200, fontSize:13, color:'rgba(0,0,0,0.4)' }}>
+        Caricamento datasource…
+      </div>
+    )
 } else {
   const activeTab = tabs.find(t => t.id === tab)
   
   if (activeTab?.id === 'azioni') {
     content = (
       <ActionsPanel
-        active={activeGate}
+        active={active}
         roleCode={props.roleCode}
         buttonText={props.buttonText}
         buttonColors={props.buttonColors}
@@ -2767,6 +3149,7 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
     return () => clearInterval(timer)
   }, [])
 
+  const showDatiGenerali = cfg.showDatiGenerali === true
   const roleCode = detectedRole || String(cfg.roleCode || 'DT').toUpperCase()
   const buttonText = String(cfg.buttonText || 'Prendi in carico')
 
@@ -2804,13 +3187,13 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
     detailTitleFontSize: Number.isFinite(Number(cfg.detailTitleFontSize)) ? Number(cfg.detailTitleFontSize) : defaultConfig.detailTitleFontSize,
     detailTitleFontWeight: Number.isFinite(Number(cfg.detailTitleFontWeight)) ? Number(cfg.detailTitleFontWeight) : defaultConfig.detailTitleFontWeight,
     detailTitleColor: String(cfg.detailTitleColor ?? defaultConfig.detailTitleColor),
-    detailTitleBg: String((cfg as any).detailTitleBg ?? 'transparent'),
+    detailTitleBg: String(cfg.detailTitleBg ?? defaultConfig.detailTitleBg ?? 'transparent'),
 
-    btnBorderRadius: Number.isFinite(Number((cfg as any).btnBorderRadius)) ? Number((cfg as any).btnBorderRadius) : 8,
-    btnFontSize: Number.isFinite(Number((cfg as any).btnFontSize)) ? Number((cfg as any).btnFontSize) : 13,
-    btnFontWeight: Number.isFinite(Number((cfg as any).btnFontWeight)) ? Number((cfg as any).btnFontWeight) : 600,
-    btnPaddingX: Number.isFinite(Number((cfg as any).btnPaddingX)) ? Number((cfg as any).btnPaddingX) : 16,
-    btnPaddingY: Number.isFinite(Number((cfg as any).btnPaddingY)) ? Number((cfg as any).btnPaddingY) : 8
+    btnBorderRadius: Number.isFinite(Number(cfg.btnBorderRadius)) ? Number(cfg.btnBorderRadius) : defaultConfig.btnBorderRadius ?? 8,
+    btnFontSize: Number.isFinite(Number(cfg.btnFontSize)) ? Number(cfg.btnFontSize) : defaultConfig.btnFontSize ?? 13,
+    btnFontWeight: Number.isFinite(Number(cfg.btnFontWeight)) ? Number(cfg.btnFontWeight) : defaultConfig.btnFontWeight ?? 600,
+    btnPaddingX: Number.isFinite(Number(cfg.btnPaddingX)) ? Number(cfg.btnPaddingX) : defaultConfig.btnPaddingX ?? 16,
+    btnPaddingY: Number.isFinite(Number(cfg.btnPaddingY)) ? Number(cfg.btnPaddingY) : defaultConfig.btnPaddingY ?? 8
   }
 
   const tabFields: TabFields = {
@@ -2851,46 +3234,41 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
     'esito_DA', 'dt_esito_DA',
     'note_DA'
   ]
-
-const queryFields = React.useMemo(() => {
-  const s = new Set<string>()
-  let needsAll = false
-
-  const tabsJs: any[] =
-    (migratedTabs as any)?.asMutable
-      ? (migratedTabs as any).asMutable({ deep: true })
-      : (Array.isArray(migratedTabs) ? migratedTabs as any[] : [])
-
-  for (const t of tabsJs) {
-    if (!t || t.id === 'azioni') continue
-    const fl = normalizeFieldList(t.fields)
-
-    // Se una tab (esclusa Iter) è vuota => usiamo l'auto-pick: serve avere (quasi) tutti i campi.
-    if (!fl.length && t.id !== 'iter') needsAll = true
-
-    for (const f of fl) s.add(String(f))
-  }
-
-  for (const f of watchFields) s.add(String(f))
-
-  const arr = Array.from(s).filter(Boolean)
-  return needsAll ? ['*'] : arr
-}, [migratedTabs, watchFields.join('|')])
-
   const [selByKey, setSelByKey] = React.useState<Record<string, SelState>>({})
   const [lastActiveKey, setLastActiveKey] = React.useState<string | null>(null)
 
   const onUpdate = React.useCallback((dsKey: string, state: SelState) => {
     setSelByKey(prev => {
       const old = prev[dsKey]
-      if (old && old.sig === state.sig && old.ds === state.ds && old.idFieldName === state.idFieldName) return prev
+      // Aggiorna sempre se il ds è cambiato; per il resto evita re-render inutili
+      if (old && old.ds === state.ds && old.sig === state.sig && old.idFieldName === state.idFieldName) return prev
       return { ...prev, [dsKey]: state }
     })
     if (state.oid != null) setLastActiveKey(dsKey)
   }, [])
 
-  // "active" = (1) la data view più recentemente selezionata; (2) fallback: prima che ha selezione
-  const active = React.useMemo(() => {
+  // “active” = (1) la data view più recentemente selezionata; (2) fallback: prima che ha selezione
+  // DS disponibile anche senza selezione (per NuovaPraticaForm)
+  // DataSourceSelectionBridge popola selByKey con ds anche senza selezione attiva
+  const anyDs = React.useMemo(() => {
+    // Da selByKey (sempre popolato da DataSourceSelectionBridge)
+    for (const key of Object.keys(selByKey)) {
+      if (selByKey[key]?.ds) return selByKey[key].ds
+    }
+    // Fallback diretto da DataSourceManager
+    if (useDataSources.length > 0) {
+      try {
+        const dsId = useDataSources[0]?.dataSourceId
+        if (dsId) {
+          const ds = DataSourceManager.getInstance().getDataSource(dsId)
+          if (ds) return ds
+        }
+      } catch {}
+    }
+    return null
+  }, [selByKey, useDataSources])
+
+    const active = React.useMemo(() => {
     if (lastActiveKey && selByKey[lastActiveKey]?.oid != null) {
       return { key: lastActiveKey, state: selByKey[lastActiveKey] }
     }
@@ -2901,74 +3279,6 @@ const queryFields = React.useMemo(() => {
     }
     return null
   }, [useDataSources, selByKey, lastActiveKey])
-
-  // --- Selection Gate via sessionStorage ---
-  // Non resetta al mount: il reset "boot" lo fa l'Elenco una sola volta per page-load
-  // tramite window.__giiSelBootCleared, così Azioni non cancella selezioni buone in caso di re-mount.
-  const [selectedOid, setSelectedOid] = React.useState<number | null>(() => {
-    try {
-      const v = sessionStorage.getItem('GII_SELECTED_OID')
-      const n = v != null ? Number(v) : NaN
-      return Number.isFinite(n) ? n : null
-    } catch { return null }
-  })
-
-  React.useEffect(() => {
-    const handler = () => {
-      try {
-        const v = sessionStorage.getItem('GII_SELECTED_OID')
-        const n = v != null ? Number(v) : NaN
-        setSelectedOid(Number.isFinite(n) ? n : null)
-      } catch { setSelectedOid(null) }
-    }
-    handler() // legge subito in caso di mount tardivo (dopo l'evento)
-    window.addEventListener('gii-selection-changed', handler as any)
-    return () => window.removeEventListener('gii-selection-changed', handler as any)
-  }, [])
-
-  const [forcedActive, setForcedActive] = React.useState<{ key: string; state: SelState } | null>(null)
-  const forcedReqRef = React.useRef(0)
-
-  React.useEffect(() => {
-    const req = ++forcedReqRef.current
-    if (selectedOid == null) {
-      setForcedActive(null)
-      return
-    }
-    ;(async () => {
-      for (let i = 0; i < useDataSources.length; i++) {
-        const uds: any = useDataSources[i]
-        const key = getUdsKey(uds, i)
-        const dsId = String(uds?.dataSourceId || '')
-        if (!dsId) continue
-        let dsTry: any = null
-        try { dsTry = DataSourceManager.getInstance().getDataSource(dsId) } catch {}
-        if (!dsTry || !dsTry.query) continue
-        const idFieldName = (dsTry.getIdField?.() || dsTry.getSchema?.()?.idField || 'OBJECTID')
-        try {
-          const where = `${idFieldName}=${selectedOid}`
-          const outFields = (queryFields.includes('*') ? ['*'] : Array.from(new Set([...(queryFields as any), idFieldName])))
-          const res: any = await dsTry.query({ where, outFields, returnGeometry: false } as any)
-          if (req !== forcedReqRef.current) return
-          const recs: any[] = res?.records || []
-          if (!recs.length) continue
-          const r0 = recs[0]
-          const d0 = r0?.getData?.() || {}
-          const oid0 = Number(d0[idFieldName] ?? d0.OBJECTID ?? selectedOid)
-          if (!Number.isFinite(oid0) || oid0 !== selectedOid) continue
-          const st: SelState = { ds: dsTry, oid: selectedOid, idFieldName, data: d0, sig: `${dsId}:${selectedOid}` }
-          setForcedActive({ key, state: st })
-          return
-        } catch {
-          // prova DS successivo
-        }
-      }
-      if (req === forcedReqRef.current) setForcedActive(null)
-    })()
-  }, [selectedOid, useDataSources, queryFields.join('|')])
-
-  const activeGate = forcedActive
-
 
   return (
     <div style={{ width: '100%', height: '100%', display: 'flex', flexDirection: 'column', minHeight: 0, boxSizing: 'border-box', padding: Number.isFinite(Number((cfg as any).maskOuterOffset ?? 0)) ? Number((cfg as any).maskOuterOffset) : 0 }}>
@@ -2985,14 +3295,15 @@ const queryFields = React.useMemo(() => {
                       uds={uds}
                       dsKey={key}
                       watchFields={watchFields}
-                      queryFields={queryFields}
                       onUpdate={onUpdate}
                     />
                   )
                 })}
 
                 <DetailTabsPanel
-                  active={activeGate}
+                  active={active}
+                  anyDs={anyDs}
+                  showDatiGenerali={showDatiGenerali}
                   roleCode={roleCode}
                   buttonText={buttonText}
                   buttonColors={buttonColors}
