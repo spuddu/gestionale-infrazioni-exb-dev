@@ -6,6 +6,9 @@ import { createPortal } from 'react-dom'
 import type { IMConfig, TabConfig } from '../config'
 import { defaultConfig } from '../config'
 
+
+const GII_LOG_MODIFICHE_URL = 'https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_LOG_MODIFICHE/FeatureServer/0'
+
 type MsgKind = 'info' | 'ok' | 'err'
 type Msg = { kind: MsgKind; text: string }
 
@@ -1119,6 +1122,86 @@ function ActionsPanel (props: {
   const idFieldNameFromSel = active?.state?.idFieldName || 'OBJECTID'
   const hasSel = oid != null && Number.isFinite(oid)
 
+
+  const sessionIdRef = React.useRef<string>(`sess-${Date.now()}-${Math.random().toString(16).slice(2)}`)
+
+  const pickAttrCI = (obj: any, keys: string[]): any => {
+    if (!obj) return undefined
+    const map: Record<string, string> = {}
+    try {
+      Object.keys(obj).forEach(k => { map[String(k).toLowerCase()] = k })
+    } catch {}
+    for (const k of keys) {
+      const direct = (obj as any)[k]
+      if (direct !== undefined && direct !== null && direct !== '') return direct
+      const kk = map[String(k).toLowerCase()]
+      if (kk) {
+        const v = (obj as any)[kk]
+        if (v !== undefined && v !== null && v !== '') return v
+      }
+    }
+    return undefined
+  }
+
+  const inferSettoreFromUsername = (u: string): string => {
+    const up = String(u || '').toUpperCase()
+    const m = up.match(/(D[1-6]|DS|CR)/)
+    return m ? m[1] : ''
+  }
+
+  const writeLogPresaInCarico = async (opts: {
+    parentOid: number
+    parentGlobalId?: string
+    ruolo: string
+    area?: string
+    settore?: string
+    campo: string
+    valorePrev?: any
+    valoreNew?: any
+    note?: string
+  }) => {
+    try {
+      const FeatureLayer = await loadEsriModule<any>('esri/layers/FeatureLayer')
+      const logLayer = new FeatureLayer({ url: GII_LOG_MODIFICHE_URL, outFields: ['*'] })
+      if (typeof logLayer.load === 'function') {
+        await logLayer.load()
+      }
+
+      const attrsRaw: Record<string, any> = {
+        parent_globalid: opts.parentGlobalId || '00000000-0000-0000-0000-000000000000',
+        parent_objectid: opts.parentOid,
+        dt_evento: Date.now(),
+        ruolo: opts.ruolo,
+        area: opts.area ?? '',
+        settore: opts.settore ?? '',
+        operazione: 'UPDATE',
+        campo: opts.campo,
+        valore_precedente: opts.valorePrev != null ? String(opts.valorePrev) : '',
+        valore_nuovo: opts.valoreNew != null ? String(opts.valoreNew) : '',
+        session_id: sessionIdRef.current,
+        note: opts.note ?? ''
+      }
+
+      const attrs = filterAttrsToLayerFields(attrsRaw, logLayer)
+
+      const res = await logLayer.applyEdits({ addFeatures: [{ attributes: attrs }] })
+      const add = (res as any)?.addFeatureResults?.[0] || (res as any)?.addResults?.[0] || null
+      const err = add?.error
+      const ok = !err && (add?.success === true || add?.objectId != null || add?.globalId != null || add?.success == null)
+      if (!ok) {
+        const detail = err
+          ? `code=${err.code ?? ''} name=${err.name ?? ''} message=${err.message ?? ''}`
+          : JSON.stringify(res || add)
+        throw new Error(detail)
+      }
+    } catch (e) {
+      // non bloccare mai la presa in carico
+      // eslint-disable-next-line no-console
+      console.warn('[GII_LOG] Errore scrittura log presa in carico:', e)
+    }
+  }
+
+
   // --- Editing TI ---
   const ec = props.editConfig
   const [editOverlayOpen, setEditOverlayOpen] = React.useState(false)
@@ -1503,6 +1586,7 @@ function ActionsPanel (props: {
 
   const onConfirmTakeInCharge = async () => {
     try {
+      const prevPresaVal = presaNum
       await runApplyEdits(
         {
           [presaField]: PRESA_IN_CARICO,
@@ -1512,6 +1596,25 @@ function ActionsPanel (props: {
         },
         'Presa in carico salvata.'
       )
+
+      // Scrittura log (best-effort, non blocca la presa in carico)
+      const parentGid = String(pickAttrCI(data, ['globalid', 'global_id', 'GlobalID', 'GLOBALID', 'parent_globalid']) || '00000000-0000-0000-0000-000000000000')
+      const areaValRaw = pickAttrCI(data, ['area', 'area_cod', 'cod_area'])
+      const settoreValRaw =
+        pickAttrCI(data, ['settore', 'settore_cod', 'cod_settore']) ||
+        inferSettoreFromUsername(String(pickAttrCI(data, ['creator', 'Creator', 'editor', 'Editor']) || ''))
+      void writeLogPresaInCarico({
+        parentOid: oid as number,
+        parentGlobalId: parentGid,
+        ruolo: role,
+        area: areaValRaw != null ? String(areaValRaw) : '',
+        settore: settoreValRaw != null ? String(settoreValRaw) : '',
+        campo: presaField,
+        valorePrev: prevPresaVal,
+        valoreNew: PRESA_IN_CARICO,
+        note: `Presa in carico (${role})`
+      })
+
       setPending(null)
       setConfirmAttempted(false)
     } catch (e: any) {
@@ -2145,17 +2248,17 @@ function DetailTabsPanel (props: {
   editConfig: any
   motherLayerUrl?: string
 }) {
-  const { active: activeGate, ui } = props
+  const { active, ui } = props
 
   // Migra e normalizza tabs
   const tabs = React.useMemo(() => {
     return migrateTabs(props.tabFields, props.tabs)
   }, [props.tabs, props.tabFields])
 
-  const selectionKey = activeGate?.state?.oid != null ? `${activeGate.key}:${activeGate.state.oid}` : null
-  const ds = activeGate?.state?.ds
-  const data = activeGate?.state?.data || null
-  const oid = activeGate?.state?.oid ?? null
+  const selectionKey = active?.state?.oid != null ? `${active.key}:${active.state.oid}` : null
+  const ds = active?.state?.ds
+  const data = active?.state?.data || null
+  const oid = active?.state?.oid ?? null
   const hasSel = oid != null && Number.isFinite(oid)
 
   // Codice pratica per il titolo
@@ -2509,7 +2612,7 @@ if (!hasSel) {
   if (activeTab?.id === 'azioni') {
     content = (
       <ActionsPanel
-        active={activeGate}
+        active={active}
         roleCode={props.roleCode}
         buttonText={props.buttonText}
         buttonColors={props.buttonColors}
@@ -2902,18 +3005,12 @@ const queryFields = React.useMemo(() => {
     return null
   }, [useDataSources, selByKey, lastActiveKey])
 
-  // --- Selection Gate via sessionStorage ---
-  // Non resetta al mount: il reset "boot" lo fa l'Elenco una sola volta per page-load
-  // tramite window.__giiSelBootCleared, così Azioni non cancella selezioni buone in caso di re-mount.
-  const [selectedOid, setSelectedOid] = React.useState<number | null>(() => {
-    try {
-      const v = sessionStorage.getItem('GII_SELECTED_OID')
-      const n = v != null ? Number(v) : NaN
-      return Number.isFinite(n) ? n : null
-    } catch { return null }
-  })
+  // --- Selection Gate via sessionStorage (prevents sticky selection / previous record) ---
+  // Al mount pulisce sempre GII_SELECTED_OID — la selezione non deve persistere tra sessioni
+  const [selectedOid, setSelectedOid] = React.useState<number | null>(null)
 
   React.useEffect(() => {
+    try { sessionStorage.removeItem('GII_SELECTED_OID') } catch {}
     const handler = () => {
       try {
         const v = sessionStorage.getItem('GII_SELECTED_OID')
@@ -2921,7 +3018,6 @@ const queryFields = React.useMemo(() => {
         setSelectedOid(Number.isFinite(n) ? n : null)
       } catch { setSelectedOid(null) }
     }
-    handler() // legge subito in caso di mount tardivo (dopo l'evento)
     window.addEventListener('gii-selection-changed', handler as any)
     return () => window.removeEventListener('gii-selection-changed', handler as any)
   }, [])
@@ -2947,8 +3043,7 @@ const queryFields = React.useMemo(() => {
         const idFieldName = (dsTry.getIdField?.() || dsTry.getSchema?.()?.idField || 'OBJECTID')
         try {
           const where = `${idFieldName}=${selectedOid}`
-          const outFields = (queryFields.includes('*') ? ['*'] : Array.from(new Set([...(queryFields as any), idFieldName])))
-          const res: any = await dsTry.query({ where, outFields, returnGeometry: false } as any)
+          const res: any = await dsTry.query({ where, outFields: queryFields, returnGeometry: false } as any)
           if (req !== forcedReqRef.current) return
           const recs: any[] = res?.records || []
           if (!recs.length) continue
