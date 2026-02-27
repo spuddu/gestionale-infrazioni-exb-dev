@@ -342,7 +342,7 @@ export default function Setting(props: Props) {
         <div style={P.hint}>Seleziona una o più Data View / feature layer.</div>
         <label style={P.lbl}>Ruolo</label>
         <Sel value={(cfgJs.roleCode||'DT').toUpperCase()} onChange={v=>patch({roleCode:v})}
-          options={[{value:'DT',label:'DT – Direttore Tecnico'},{value:'DA',label:'DA – Direttore Amministrativo'}]}/>
+          options={[{value:'DT',label:'DT – Direttore Tecnico'},{value:'DA',label:'DA – Direttore Amministrativo'},{value:'RZ',label:'RZ – Responsabile Zona'}]}/>
         <label style={P.lbl}>Testo pulsante "Prendi in carico"</label>
         <Inp value={cfgJs.buttonText??defaultConfig.buttonText} onChange={v=>patch({buttonText:v})}/>
       </div>}

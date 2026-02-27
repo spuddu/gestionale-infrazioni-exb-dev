@@ -9,6 +9,8 @@ import { defaultConfig } from '../config'
 
 const GII_LOG_MODIFICHE_URL = 'https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_LOG_MODIFICHE/FeatureServer/0'
 
+const GII_UTENTI_URL = 'https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_utenti/FeatureServer/0'
+
 type MsgKind = 'info' | 'ok' | 'err'
 type Msg = { kind: MsgKind; text: string }
 
@@ -1096,6 +1098,13 @@ function ActionsPanel (props: {
   // note / motivazione
   const [noteDraft, setNoteDraft] = React.useState('')
   const [rejectReason, setRejectReason] = React.useState('')
+
+  // ── Assegna TI (solo RZ) ─────────────────────────────────────────────────
+  const [tiOptions, setTiOptions] = React.useState<Array<{ username: string; nome: string; label: string }>>([])
+  const [tiSel, setTiSel] = React.useState<string>('')
+  const [tiLoading, setTiLoading] = React.useState<boolean>(false)
+  const [tiErr, setTiErr] = React.useState<string>('')
+  const tiLoadedRef = React.useRef<boolean>(false)
   const noteOrigRef = React.useRef<string>('')
   const noteRef = React.useRef<HTMLTextAreaElement | null>(null)
 
@@ -1115,6 +1124,38 @@ function ActionsPanel (props: {
   const selectionKey = active?.state?.oid != null ? `${active.key}:${active.state.oid}` : null
   const selectionKeyRef = React.useRef<string | null>(selectionKey)
   React.useEffect(() => { selectionKeyRef.current = selectionKey }, [selectionKey])
+
+  // ── Assegna TI: sincronizza selezione e carica elenco TI ─────────────────
+  React.useEffect(() => {
+    // reset selezione TI al cambio pratica
+    try {
+      const assigned = String(pickAttrCI(active?.state?.data, ['ti_assegnato_username', 'ti_assigned_username', 'ti_assegnato_user']) ?? '').trim()
+      setTiSel(assigned)
+    } catch {
+      setTiSel('')
+    }
+    setTiErr('')
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectionKey])
+
+  React.useEffect(() => {
+    if (role !== 'RZ') return
+    if (tiLoadedRef.current || tiLoading) return
+    setTiLoading(true)
+    void (async () => {
+      try {
+        const list = await loadTiOptions()
+        setTiOptions(list)
+        tiLoadedRef.current = true
+        setTiErr('')
+      } catch (e: any) {
+        const txt = e?.message ? String(e.message) : String(e)
+        setTiErr(txt)
+      } finally {
+        setTiLoading(false)
+      }
+    })()
+  }, [role])
 
   const ds = active?.state?.ds
   const data = active?.state?.data || null
@@ -1148,6 +1189,55 @@ function ActionsPanel (props: {
     const m = up.match(/(D[1-6]|DS|CR)/)
     return m ? m[1] : ''
   }
+  const getCurrentUsernameSafe = async (): Promise<string> => {
+    // 1) prova da contesto globale (header)
+    try {
+      const w: any = window as any
+      const u = w?.__giiUserRole?.username || w?.__giiUserRole?.userName || w?.__giiUserRole?.user || w?.__giiUserRole?.login
+      if (u) return String(u)
+    } catch { /* ignore */ }
+    // 2) fallback IdentityManager
+    try {
+      const esriId = await loadEsriModule<any>('esri/identity/IdentityManager')
+      const cred = (esriId as any)?.credentials?.[0]
+      const uid = cred?.userId || cred?.user || cred?.username
+      return uid ? String(uid) : ''
+    } catch { /* ignore */ }
+    return ''
+  }
+
+  const loadTiOptions = async (): Promise<Array<{ username: string; nome: string; label: string }>> => {
+    const FeatureLayer = await loadEsriModule<any>('esri/layers/FeatureLayer')
+    const usersLayer = new FeatureLayer({ url: GII_UTENTI_URL, outFields: ['*'] })
+    if (typeof usersLayer.load === 'function') {
+      try { await usersLayer.load() } catch { /* ignore */ }
+    }
+    const q = await usersLayer.queryFeatures({ where: '1=1', outFields: ['*'], returnGeometry: false })
+    const feats = (q?.features || []) as any[]
+    const out: Array<{ username: string; nome: string; label: string }> = []
+    for (const f of feats) {
+      const a = f?.attributes || {}
+      const roleRaw = pickAttrCI(a, ['ruoloLabel', 'ruolo_label', 'ruolo', 'role', 'profilo', 'ruolo_cod', 'cod_ruolo', 'role_code'])
+      const roleLab = String(roleRaw ?? '').trim().toUpperCase()
+      // TI: match robusto (TI / Tecnico istruttore)
+      const isTi = roleLab === 'TI' || roleLab.startsWith('TI ') || roleLab.includes(' TI') || roleLab.includes('TECNICO') || roleLab.includes('ISTRUT')
+      if (!isTi) continue
+      const username = String(pickAttrCI(a, ['username', 'user', 'login', 'utente', 'account', 'email', 'user_name']) ?? '').trim()
+      if (!username) continue
+      let nome = String(pickAttrCI(a, ['nome', 'nominativo', 'displayname', 'display_name', 'fullname', 'full_name']) ?? '').trim()
+      if (!nome) {
+        const n = String(pickAttrCI(a, ['nome']) ?? '').trim()
+        const c = String(pickAttrCI(a, ['cognome']) ?? '').trim()
+        const comb = [c, n].filter(Boolean).join(' ')
+        nome = comb
+      }
+      const label = nome ? `${nome} (${username})` : username
+      out.push({ username, nome: nome || username, label })
+    }
+    out.sort((a, b) => a.label.localeCompare(b.label))
+    return out
+  }
+
 
   const writeLogPresaInCarico = async (opts: {
     parentOid: number
@@ -1397,7 +1487,24 @@ function ActionsPanel (props: {
     (statoNum === STATO_INTEGRAZIONE || statoNum === STATO_APPROVATA || statoNum === STATO_RESPINTA) &&
     (statoDANum == null || statoDANum === 0)
 
-  // NOTE: compare solo per integrazione/respinta
+    // ── Assegna TI (solo RZ) ─────────────────────────────────────────────────
+  const tiAssignedUsername = String(pickAttrCI(data, ['ti_assegnato_username', 'ti_assigned_username', 'ti_assegnato_user']) ?? '').trim()
+
+  const canAssignTi =
+    role === 'RZ' &&
+    hasSel &&
+    !loading &&
+    !lockedByTransmit &&
+    pending === null &&
+    isMyTurn &&
+    origineNum === 1 &&
+    presaNum === PRESA_IN_CARICO &&
+    statoNum === STATO_PRESA_IN_CARICO
+
+  const selectedTi = tiOptions.find(o => o.username === tiSel) || null
+  const canConfirmAssignTi = canAssignTi && !!selectedTi
+
+// NOTE: compare solo per integrazione/respinta
   const showNote = pending === 'INTEGRAZIONE' || pending === 'RESPINGI'
   const noteEnabled = showNote && hasSel && !loading && !lockedByTransmit
 
@@ -1623,6 +1730,54 @@ function ActionsPanel (props: {
     }
   }
 
+
+  const onAssignTi = async () => {
+    if (!hasSel) {
+      setMsg({ kind: 'info', text: 'Selezionare una riga.' })
+      return
+    }
+    if (!canAssignTi) return
+    if (!selectedTi) {
+      setMsg({ kind: 'info', text: 'Selezionare un TI.' })
+      return
+    }
+
+    try {
+      const prevTi = String(pickAttrCI(data, ['ti_assegnato_username', 'ti_assigned_username', 'ti_assegnato_user']) ?? '').trim()
+      const assigner = await getCurrentUsernameSafe()
+      await runApplyEdits(
+        {
+          ti_assegnato_username: selectedTi.username,
+          ti_assegnato_nome: selectedTi.nome,
+          dt_assegnazione_ti: Date.now(),
+          ti_assegnato_da: assigner
+        },
+        'TI assegnato.'
+      )
+
+      // Log (best-effort)
+      const parentGid = String(pickAttrCI(data, ['globalid', 'global_id', 'GlobalID', 'GLOBALID', 'parent_globalid']) || '00000000-0000-0000-0000-000000000000')
+      const areaValRaw = pickAttrCI(data, ['area', 'area_cod', 'cod_area'])
+      const settoreValRaw =
+        pickAttrCI(data, ['settore', 'settore_cod', 'cod_settore']) ||
+        inferSettoreFromUsername(String(pickAttrCI(data, ['creator', 'Creator', 'editor', 'Editor']) || ''))
+      void writeLogPresaInCarico({
+        parentOid: oid as number,
+        parentGlobalId: parentGid,
+        ruolo: role,
+        area: areaValRaw != null ? String(areaValRaw) : '',
+        settore: settoreValRaw != null ? String(settoreValRaw) : '',
+        campo: 'ti_assegnato_username',
+        valorePrev: prevTi,
+        valoreNew: selectedTi.username,
+        note: `Assegna TI → ${selectedTi.label}`
+      })
+    } catch (e: any) {
+      const txt = e?.message ? String(e.message) : String(e)
+      setMsg({ kind: 'err', text: `Errore salvataggio: ${txt}` })
+    }
+  }
+
   const onConfirmIntegrazione = async () => {
     setConfirmAttempted(true)
     if (!noteTrim) return
@@ -1771,7 +1926,8 @@ function ActionsPanel (props: {
 
         {/* BOTTONI AZIONE */}
         {pending === null && (
-          <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center' }}>
+          <div style={{ display: 'grid', gap: 10 }}>
+            <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center' }}>
             <Button
               type='primary'
               onClick={() => startAction('TAKE')}
@@ -1781,6 +1937,8 @@ function ActionsPanel (props: {
               {buttonText}
             </Button>
 
+{role !== 'RZ' && (
+
             <Button
               type='primary'
               onClick={() => startAction('INTEGRAZIONE')}
@@ -1789,6 +1947,9 @@ function ActionsPanel (props: {
             >
               Integrazione
             </Button>
+)}
+
+{role !== 'RZ' && (
 
             <Button
               type='primary'
@@ -1798,6 +1959,9 @@ function ActionsPanel (props: {
             >
               Approva
             </Button>
+)}
+
+{role !== 'RZ' && (
 
             <Button
               type='primary'
@@ -1807,6 +1971,7 @@ function ActionsPanel (props: {
             >
               Respingi
             </Button>
+)}
 
             {role === 'DT' && (
               <Button
@@ -1820,7 +1985,7 @@ function ActionsPanel (props: {
             )}
 
             {/* PULSANTI MODIFICA TI — visibili solo se configurati */}
-            {ec.show && (
+            {ec.show && role === 'TI' && (
               <>
                 <div style={{ width: '100%', height: 1, background: ui.dividerColor, margin: '4px 0' }} />
                 <button
@@ -1866,6 +2031,49 @@ function ActionsPanel (props: {
                   ↗ Modifica (pagina)
                 </button>
               </>
+            )}
+          </div>
+
+            {role === 'RZ' && (
+              <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center' }}>
+                <div style={{ minWidth: 260, flex: '1 1 260px' }}>
+                  <select
+                    value={tiSel || ''}
+                    disabled={!canAssignTi || tiLoading}
+                    onChange={(e) => setTiSel(String((e.target as HTMLSelectElement).value || ''))}
+                    style={{
+                      width: '100%',
+                      padding: '8px 10px',
+                      borderRadius: 8,
+                      border: '1px solid rgba(0,0,0,0.20)',
+                      fontSize: ui.statusFontSize,
+                      outline: 'none',
+                      boxSizing: 'border-box',
+                      opacity: (!canAssignTi || tiLoading) ? 0.6 : 1
+                    }}
+                  >
+                    <option value=''>{tiLoading ? 'Carico TI…' : '— seleziona TI —'}</option>
+                    {tiOptions.map(o => (
+                      <option key={o.username} value={o.username}>{o.label}</option>
+                    ))}
+                  </select>
+
+                  {tiErr && (
+                    <div style={{ ...msgStyle('err', ui.statusFontSize), marginTop: 4 }}>
+                      Errore elenco TI: {tiErr}
+                    </div>
+                  )}
+                </div>
+
+                <Button
+                  type='primary'
+                  onClick={onAssignTi}
+                  disabled={!canConfirmAssignTi}
+                  style={actionButtonStyle(buttonColors.take, !canConfirmAssignTi, ui)}
+                >
+                  {tiAssignedUsername ? 'Riassegna TI' : 'Assegna TI'}
+                </Button>
+              </div>
             )}
           </div>
         )}

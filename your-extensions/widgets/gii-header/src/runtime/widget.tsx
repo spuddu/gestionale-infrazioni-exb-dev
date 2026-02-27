@@ -478,18 +478,19 @@ export default function Widget(props: Props) {
       `}</style>
 
       {/* Logo + Titoli */}
-      <div style={{ display:'flex', alignItems:'center', gap:16, ...off('offsetLogo') }}>
+      <div style={{ display:'flex', alignItems:'center', gap:16 }}>
         <div style={{
           width:cfg.logoSize, height:cfg.logoSize, borderRadius:cfg.logoRadius,
           background:logoBg, flexShrink:0, overflow:'hidden',
           display:'flex', alignItems:'center', justifyContent:'center',
           boxShadow:'0 4px 14px rgba(0,0,0,0.3)',
           padding:cfg.logoPadding ?? 4, boxSizing:'border-box',
-          animationName:'pulse-ring', animationDuration:'3s', animationIterationCount:'infinite', animationTimingFunction:'ease-out'
+          animationName:'pulse-ring', animationDuration:'3s', animationIterationCount:'infinite', animationTimingFunction:'ease-out',
+          ...off('offsetLogo')
         }}>
           <img src={cfg.logoUrl} alt='logo' style={{ width:'100%', height:'100%', objectFit:'contain', display:'block' }} />
         </div>
-        <div>
+        <div style={{ ...off('offsetTitoli') }}>
           <div style={{
             fontFamily:cfg.orgNameFont, fontSize:cfg.orgNameSize, fontWeight:cfg.orgNameWeight,
             letterSpacing:cfg.orgNameLetterSpacing, textTransform:'uppercase',

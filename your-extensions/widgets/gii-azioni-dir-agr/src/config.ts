@@ -1,6 +1,6 @@
 import { type ImmutableObject, Immutable } from 'jimu-core'
 
-export type RoleCode = 'DT' | 'DA'
+export type RoleCode = 'DT' | 'DA' | 'RZ'
 
 export interface TabConfig {
   id: string // univoco (es. 'anagrafica', 'violazione', 'iter', 'allegati', 'azioni')
