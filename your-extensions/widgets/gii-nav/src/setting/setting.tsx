@@ -6,17 +6,15 @@ import { defaultConfig, type IMConfig, type NavItem } from '../config'
 
 const P = {
   wrap:    { padding:'0 12px 32px', fontSize:13, background:'#1a1f2e', minHeight:'100%', color:'#e5e7eb' } as React.CSSProperties,
-  sec:     { fontSize:11, fontWeight:700, color:'#93c5fd', textTransform:'uppercase' as const, letterSpacing:1.2, borderBottom:'1px solid rgba(255,255,255,0.10)', paddingBottom:6, marginBottom:14, marginTop:22, cursor:'pointer', display:'flex', justifyContent:'space-between', alignItems:'center' } as React.CSSProperties,
+  sec:     { fontSize:11, fontWeight:700, color:'#93c5fd', textTransform:'uppercase' as const, letterSpacing:1.2, borderBottom:'1px solid rgba(255,255,255,0.10)', paddingBottom:6, marginBottom:14, marginTop:22 } as React.CSSProperties,
   lbl:     { fontSize:11.5, fontWeight:600, color:'#d1d5db', display:'block', marginBottom:4, marginTop:10 } as React.CSSProperties,
   hint:    { fontSize:10.5, color:'#a0aec0', marginTop:3, lineHeight:1.4 } as React.CSSProperties,
   row2:    { display:'grid', gridTemplateColumns:'1fr 1fr', gap:8 } as React.CSSProperties,
   row3:    { display:'grid', gridTemplateColumns:'1fr 1fr 1fr', gap:8 } as React.CSSProperties,
   inp:     { width:'100%', padding:'5px 8px', fontSize:12, border:'1px solid rgba(255,255,255,0.15)', borderRadius:6, outline:'none', boxSizing:'border-box' as const, background:'rgba(255,255,255,0.07)', color:'#e5e7eb' } as React.CSSProperties,
   check:   { display:'flex', alignItems:'center', gap:8, fontSize:12, color:'#d1d5db', cursor:'pointer', marginTop:8 } as React.CSSProperties,
-  cardBox: { border:'1px solid rgba(255,255,255,0.10)', borderRadius:10, padding:'10px 12px', marginBottom:8, background:'rgba(255,255,255,0.04)' } as React.CSSProperties,
 }
 
-// ── Micro-componenti ──────────────────────────────────────────────────────────
 function Inp(p: { value:string|number; onChange:(v:string)=>void; type?:string; placeholder?:string }) {
   return <input type={p.type||'text'} value={p.value} onChange={e=>p.onChange(e.target.value)} placeholder={p.placeholder} style={P.inp}/>
 }
@@ -55,71 +53,28 @@ function Sel(p: { value:string; onChange:(v:string)=>void; options:Array<{value:
     </select>
   )
 }
-function ImgUpload(p: { value:string; onChange:(v:string)=>void }) {
-  const ref = React.useRef<HTMLInputElement|null>(null)
-  return (
-    <div style={{ display:'flex', flexDirection:'column', gap:8 }}>
-      {p.value && (
-        <div style={{ width:64, height:64, borderRadius:10, overflow:'hidden', border:'1px solid rgba(255,255,255,0.15)', background:'#000', display:'flex', alignItems:'center', justifyContent:'center' }}>
-          <img src={p.value} alt='preview' style={{ width:'100%', height:'100%', objectFit:'contain' }}/>
-        </div>
-      )}
-      <div style={{ display:'flex', gap:8, flexWrap:'wrap' as const }}>
-        <button type='button' onClick={()=>ref.current?.click()}
-          style={{ padding:'6px 14px', borderRadius:7, border:'1px solid rgba(147,197,253,0.4)', background:'rgba(59,130,246,0.15)', color:'#93c5fd', fontSize:12, fontWeight:600, cursor:'pointer' }}>
-          📁 Scegli dal PC
-        </button>
-        {p.value && (
-          <button type='button' onClick={()=>p.onChange('')}
-            style={{ padding:'6px 12px', borderRadius:7, border:'1px solid rgba(252,165,165,0.4)', background:'rgba(239,68,68,0.12)', color:'#fca5a5', fontSize:12, fontWeight:600, cursor:'pointer' }}>
-            ✕ Rimuovi
-          </button>
-        )}
-        <input ref={ref} type='file' accept='image/*' style={{ display:'none' }}
-          onChange={e=>{ const f=e.target.files?.[0]; if(!f) return; const r=new FileReader(); r.onload=()=>{ if(typeof r.result==='string') p.onChange(r.result) }; r.readAsDataURL(f); if(ref.current) ref.current.value='' }}/>
-      </div>
-      <div style={P.hint}>PNG, SVG o JPG. Salvato come base64 nella configurazione.</div>
-    </div>
-  )
-}
 
-
-// ── Selezione pagina ExB ──────────────────────────────────────────────────────
 function PageSel(p: { value:string; onChange:(v:string)=>void }) {
   const pages = React.useMemo(() => {
     try {
       const state: any = getAppStore()?.getState?.()
-
-      // In Builder: l'app che stai editando è qui (non l'app del Builder)
       const appConfig = state?.appStateInBuilder?.appConfig ?? state?.appConfig
-
       const rawPages: any = appConfig?.pages ?? {}
       const pagesMap: Record<string, any> =
         rawPages?.asMutable ? rawPages.asMutable({ deep: true }) :
         rawPages?.toJS ? rawPages.toJS() :
         rawPages
-
       const entries = Object.entries(pagesMap)
       if (entries.length === 0) return []
-
       return entries
         .filter(([, pg]: any) => pg?.isVisible !== false)
         .map(([pageId, pg]: [string, any]) => {
           const label = pg?.label || pg?.title || pg?.name || pageId
-
-          // value = quello che conviene salvare per la navigazione (di solito pg.name, cioè lo "slug" in URL)
-          const value =
-            pg?.name ||
-            appConfig?.historyLabels?.page?.[pageId] ||
-            pageId
-
+          const value = pg?.name || appConfig?.historyLabels?.page?.[pageId] || pageId
           return { value: String(value), label: String(label) }
         })
         .sort((a, b) => a.label.localeCompare(b.label, 'it'))
-    } catch (e) {
-      console.warn('GII Homepage: impossibile leggere le pagine', e)
-      return []
-    }
+    } catch { return [] }
   }, [])
 
   if (pages.length === 0) {
@@ -127,29 +82,20 @@ function PageSel(p: { value:string; onChange:(v:string)=>void }) {
       <div>
         <Inp value={p.value} onChange={p.onChange} placeholder='inserisci il nome/ID della pagina'/>
         <div style={{ ...P.hint, color:'#f87171', marginTop:4 }}>
-          ⚠ Impossibile leggere le pagine dell'app. Inserisci manualmente il valore che vedi nell&apos;URL quando apri la pagina (es: .../page/NOME-PAGINA).
+          ⚠ Impossibile leggere le pagine. Inserisci manualmente il valore che vedi nell&apos;URL (es: elenco, nuova…).
         </div>
       </div>
     )
   }
-
   return (
     <div>
-      <select
-        value={p.value}
-        onChange={e=>p.onChange(e.target.value)}
-        style={{ ...P.inp, cursor:'pointer' }}
-      >
+      <select value={p.value} onChange={e=>p.onChange(e.target.value)} style={{ ...P.inp, cursor:'pointer' }}>
         <option value='' style={{ background:'#1a1f2e', color:'#9ca3af' }}>— seleziona una pagina —</option>
         {pages.map(pg=>(
-          <option key={pg.value} value={pg.value} style={{ background:'#1a1f2e', color:'#e5e7eb' }}>
-            {pg.label}
-          </option>
+          <option key={pg.value} value={pg.value} style={{ background:'#1a1f2e', color:'#e5e7eb' }}>{pg.label}</option>
         ))}
       </select>
-
       {p.value && <div style={{ fontSize:10, color:'#a0aec0', marginTop:3 }}>Target: {p.value}</div>}
-      <div style={P.hint}>Scegli la pagina che si apre al click sulla card.</div>
     </div>
   )
 }
@@ -173,6 +119,30 @@ const ROLE_OPTIONS = [
   {value:'RZ',label:'RZ'},{value:'RI',label:'RI'},{value:'DT',label:'DT'},
   {value:'DA',label:'DA'},{value:'ADMIN',label:'ADMIN'}
 ]
+const ICON_OPTIONS = [
+  {value:'home',      label:'🏠 Home'},
+  {value:'elenco',    label:'📋 Elenco'},
+  {value:'nuova',     label:'➕ Nuova'},
+  {value:'mappa',     label:'🗺 Mappa'},
+  {value:'dashboard', label:'📊 Dashboard'},
+  {value:'report',    label:'📄 Report'},
+]
+
+function makeNewItem(order: number): NavItem {
+  return {
+    id: `nav_custom_${Date.now()}`,
+    visible: true,
+    order,
+    label: 'Nuova voce',
+    hashPage: '',
+    colorBg: '#1e3a5f',
+    colorAccent: '#60a5fa',
+    colorBgRest: 'rgba(255,255,255,0.05)',
+    colorBgHover: '#1e3a5fee',
+    roles: ['*'],
+    icon: 'home'
+  }
+}
 
 export default function Setting(props: AllWidgetSettingProps<IMConfig>) {
   const cfg: any = { ...defaultConfig, ...(props.config as any) }
@@ -189,13 +159,24 @@ export default function Setting(props: AllWidgetSettingProps<IMConfig>) {
     ;[next[idx].order,next[t].order]=[next[t].order,next[idx].order]
     set('items',next)
   }
+  const addItem = () => {
+    const maxOrder = items.reduce((m, it) => Math.max(m, it.order), 0)
+    const newItem = makeNewItem(maxOrder + 1)
+    set('items', [...items, newItem])
+    setOpenItem(newItem.id)
+  }
+  const removeItem = (id: string) => {
+    if (!window.confirm('Rimuovere questa voce dal nav?')) return
+    set('items', items.filter(it => it.id !== id))
+    setOpenItem(null)
+  }
 
   const sorted = [...items].sort((a,b)=>a.order-b.order)
 
   return (
     <div style={P.wrap}>
 
-      {/* Layout */}
+      {/* ── Layout ── */}
       <div style={P.sec}>⚙ Layout</div>
       <label style={P.lbl}>Orientamento</label>
       <Sel value={cfg.direction} onChange={v=>set('direction',v)} options={[
@@ -214,19 +195,29 @@ export default function Setting(props: AllWidgetSettingProps<IMConfig>) {
         <div><label style={P.lbl}>Peso</label><Sel value={String(cfg.labelWeight)} onChange={v=>set('labelWeight',Number(v))} options={WEIGHTS}/></div>
       </div>
 
-      {/* Voci */}
+      {/* ── Voci ── */}
       <div style={P.sec}>🔗 Voci di navigazione</div>
+
+      {/* Pulsante aggiungi */}
+      <button type='button' onClick={addItem}
+        style={{ width:'100%', padding:'8px', borderRadius:8, border:'1px dashed rgba(147,197,253,0.4)', background:'rgba(59,130,246,0.08)', color:'#93c5fd', fontSize:12, fontWeight:600, cursor:'pointer', marginBottom:12, display:'flex', alignItems:'center', justifyContent:'center', gap:6 }}>
+        ＋ Aggiungi voce
+      </button>
+
       {sorted.map((item, si) => {
         const ri = items.findIndex(it=>it.id===item.id)
+        const isCustom = item.id.startsWith('nav_custom_')
         const isO = openItem===item.id
         return (
-          <div key={item.id} style={{ ...{border:'1px solid rgba(255,255,255,0.10)',borderRadius:10,padding:'10px 12px',marginBottom:8,background:'rgba(255,255,255,0.04)'}, opacity:item.visible?1:0.55 }}>
+          <div key={item.id} style={{ border:'1px solid rgba(255,255,255,0.10)', borderRadius:10, padding:'10px 12px', marginBottom:8, background:'rgba(255,255,255,0.04)', opacity:item.visible?1:0.55 }}>
+            {/* Header voce */}
             <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',cursor:'pointer',userSelect:'none' as const}}
               onClick={()=>setOpenItem(isO?null:item.id)}>
               <div style={{display:'flex',alignItems:'center',gap:8,minWidth:0}}>
                 <div style={{width:12,height:12,borderRadius:3,background:item.colorBg,flexShrink:0,border:`1px solid ${item.colorAccent}`}}/>
                 <span style={{fontWeight:600,fontSize:12,color:'#e5e7eb',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap' as const}}>{item.label}</span>
                 {!item.visible && <span style={{fontSize:10,color:'#a0aec0',fontStyle:'italic',flexShrink:0}}>(nascosta)</span>}
+                {isCustom && <span style={{fontSize:9,color:'#6b7280',fontStyle:'italic',flexShrink:0}}>custom</span>}
               </div>
               <div style={{display:'flex',alignItems:'center',gap:3,flexShrink:0}}>
                 {si>0 && <button type='button' onClick={e=>{e.stopPropagation();moveItem(ri,-1)}} style={{padding:'1px 5px',fontSize:11,border:'1px solid rgba(255,255,255,0.15)',borderRadius:4,background:'rgba(255,255,255,0.05)',color:'#d1d5db',cursor:'pointer'}}>↑</button>}
@@ -234,19 +225,41 @@ export default function Setting(props: AllWidgetSettingProps<IMConfig>) {
                 <span style={{fontSize:10,color:'#a0aec0',marginLeft:2}}>{isO?'▲':'▼'}</span>
               </div>
             </div>
+
+            {/* Dettaglio (espandibile) */}
             {isO && <div style={{marginTop:10,paddingTop:10,borderTop:'1px solid rgba(255,255,255,0.08)'}}>
               <Check value={item.visible} onChange={v=>setItem(ri,{visible:v})} label='Visibile'/>
-              <label style={P.lbl}>Etichetta</label><Inp value={item.label} onChange={v=>setItem(ri,{label:v})}/>
+
+              <label style={P.lbl}>Etichetta</label>
+              <Inp value={item.label} onChange={v=>setItem(ri,{label:v})}/>
+
+              <label style={P.lbl}>Icona</label>
+              <Sel value={item.icon||'home'} onChange={v=>setItem(ri,{icon:v})} options={ICON_OPTIONS}/>
+
               <label style={P.lbl}>Pagina di destinazione</label>
               <PageSel value={item.hashPage} onChange={v=>setItem(ri,{hashPage:v})}/>
+
               <div style={P.row2}>
-                <div><label style={P.lbl}>Colore sfondo</label><ColInp value={item.colorBg} onChange={v=>setItem(ri,{colorBg:v})}/></div>
+                <div><label style={P.lbl}>Colore sfondo</label><ColInp value={item.colorBg} onChange={v=>{
+                  // Aggiorna colorBg e di conseguenza anche i colori derivati
+                  const hex = /^#[0-9a-fA-F]{6}$/.test(v) ? v : item.colorBg
+                  const r = parseInt(hex.slice(1,3),16), g = parseInt(hex.slice(3,5),16), b = parseInt(hex.slice(5,7),16)
+                  setItem(ri,{
+                    colorBg: v,
+                    colorBgHover: `${hex}ee`,
+                    colorBgRest: `rgba(${r},${g},${b},0.25)`
+                  })
+                }}/></div>
                 <div><label style={P.lbl}>Colore accento</label><ColInp value={item.colorAccent} onChange={v=>setItem(ri,{colorAccent:v})}/></div>
-                </div>
-                <div style={P.row2}>
-                <div><label style={P.lbl}>Sfondo a riposo</label><ColInp value={item.colorBgRest||'rgba(255,255,255,0.04)'} onChange={v=>setItem(ri,{colorBgRest:v})}/></div>
-                <div><label style={P.lbl}>Sfondo hover</label><ColInp value={item.colorBgHover||`${item.colorBg}ee`} onChange={v=>setItem(ri,{colorBgHover:v})}/></div>
               </div>
+              <div style={P.row2}>
+                <div><label style={P.lbl}>Sfondo a riposo</label><ColInp value={item.colorBgRest||'rgba(255,255,255,0.05)'} onChange={v=>setItem(ri,{colorBgRest:v})}/></div>
+                <div><label style={P.lbl}>Sfondo hover/attivo</label><ColInp value={item.colorBgHover||`${item.colorBg}ee`} onChange={v=>setItem(ri,{colorBgHover:v})}/></div>
+              </div>
+              <div style={{ fontSize:10, color:'#6b7280', marginTop:3, lineHeight:1.4 }}>
+                Cambiando <strong style={{color:'#a0aec0'}}>Colore sfondo</strong> i campi sottostanti si aggiornano automaticamente. Puoi poi affinarli manualmente.
+              </div>
+
               <label style={P.lbl}>Ruoli visibili</label>
               <div style={{display:'flex',flexWrap:'wrap' as const,gap:5,marginTop:4}}>
                 {ROLE_OPTIONS.map(ro=>{
@@ -268,14 +281,27 @@ export default function Setting(props: AllWidgetSettingProps<IMConfig>) {
                   )
                 })}
               </div>
+              <div style={{ fontSize:10, color:'#a0aec0', marginTop:4, lineHeight:1.4 }}>
+                Le voci con ruoli limitati sono visibili a runtime solo agli utenti con quel ruolo.
+              </div>
+
+              {/* Rimuovi */}
+              <div style={{marginTop:14,paddingTop:10,borderTop:'1px solid rgba(255,255,255,0.08)',display:'flex',alignItems:'center',gap:8}}>
+                <button type='button' onClick={()=>removeItem(item.id)}
+                  style={{padding:'5px 12px',borderRadius:7,border:'1px solid rgba(252,165,165,0.4)',background:'rgba(239,68,68,0.10)',color:'#fca5a5',fontSize:11,cursor:'pointer',fontWeight:600}}>
+                  🗑 Rimuovi voce
+                </button>
+                {!isCustom && <span style={{fontSize:10,color:'#6b7280'}}>Le voci predefinite si possono ripristinare in fondo.</span>}
+              </div>
             </div>}
           </div>
         )
       })}
 
+      {/* Reset */}
       <div style={{marginTop:24,paddingTop:14,borderTop:'1px solid rgba(255,255,255,0.08)'}}>
         <button type='button'
-          onClick={()=>{if(window.confirm('Ripristinare i valori predefiniti?')) props.onSettingChange({id:props.id,config:defaultConfig as any})}}
+          onClick={()=>{if(window.confirm('Ripristinare i valori predefiniti? Le voci personalizzate saranno perse.')) props.onSettingChange({id:props.id,config:defaultConfig as any})}}
           style={{padding:'6px 14px',borderRadius:7,border:'1px solid rgba(252,165,165,0.4)',background:'rgba(239,68,68,0.10)',color:'#fca5a5',fontSize:12,cursor:'pointer',fontWeight:600}}>
           ↺ Ripristina predefiniti
         </button>

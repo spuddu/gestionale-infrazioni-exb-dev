@@ -65,6 +65,26 @@ function gotoPage(pageToken: string): void {
 }
 
 
+function getCurrentPageToken(): string | null {
+  try {
+    const h = window.location.hash || ''
+    const m1 = h.match(/\/page\/([^/?#]+)/)
+    if (m1?.[1]) return decodeURIComponent(m1[1])
+
+    const href = window.location.href || ''
+    const m2 = href.match(/\/page\/([^/?#]+)/)
+    if (m2?.[1]) return decodeURIComponent(m2[1])
+
+    try {
+      const u = new URL(href)
+      const qp = u.searchParams.get('page')
+      if (qp) return qp
+    } catch { }
+  } catch { }
+  return null
+}
+
+
 function loadEsriModule<T = any>(path: string): Promise<T> {
   return new Promise((res, rej) => {
     const req = (window as any).require
@@ -250,17 +270,21 @@ export default function Widget(props: Props) {
   const afterOutRef = React.useRef<string>(String(cfg.redirectAfterSignOut ?? ''))
   const loginViewRef = React.useRef<'popup'|'redirect'>((cfg.loginView ?? 'popup') as any)
   const signedInClickRef = React.useRef<'signout'|'menu'>((cfg.signedInClick ?? 'signout') as any)
+  const forceReloadRef = React.useRef<boolean>((cfg.forceReloadAfterLogoutLogin ?? true) as any)
 
   React.useEffect(() => { afterInRef.current  = String(cfg.redirectAfterSignIn ?? '') }, [cfg.redirectAfterSignIn])
   React.useEffect(() => { afterOutRef.current = String(cfg.redirectAfterSignOut ?? '') }, [cfg.redirectAfterSignOut])
   React.useEffect(() => { loginViewRef.current = (cfg.loginView ?? 'popup') as any }, [cfg.loginView])
   React.useEffect(() => { signedInClickRef.current = (cfg.signedInClick ?? 'signout') as any }, [cfg.signedInClick])
+  React.useEffect(() => { forceReloadRef.current = (cfg.forceReloadAfterLogoutLogin ?? true) as any }, [cfg.forceReloadAfterLogoutLogin])
 
 
   const [user,     setUser]    = React.useState<GiiUserRole | null>(null)
   const [uLoad,    setULoad]   = React.useState(true)
   const [signingIn,setSigning] = React.useState(false)
   const [menuOpen, setMenuOpen] = React.useState(false)
+  const [urlTick, setUrlTick] = React.useState(0)
+  const guardLockRef = React.useRef(false)
 
   React.useEffect(() => {
     let cancelled = false
@@ -312,11 +336,14 @@ export default function Widget(props: Props) {
             // per resettare i datasource e sbloccare eventuali spinner infiniti.
             try {
               const needs = sessionStorage.getItem(NEEDS_DS_RESET_KEY) === '1'
+              const enabled = !!forceReloadRef.current
               if (needs) {
                 sessionStorage.removeItem(NEEDS_DS_RESET_KEY)
-                setTimeout(() => {
-                  try { window.location.reload() } catch { }
-                }, 120)
+                if (enabled) {
+                  setTimeout(() => {
+                    try { window.location.reload() } catch { }
+                  }, 120)
+                }
               }
             } catch { }
           })
@@ -347,6 +374,60 @@ export default function Widget(props: Props) {
     }
   }, [])
   React.useEffect(() => { if (!user) setMenuOpen(false) }, [user])
+
+  React.useEffect(() => {
+    const onUrl = () => setUrlTick(t => t + 1)
+    window.addEventListener('hashchange', onUrl)
+    window.addEventListener('popstate', onUrl)
+    return () => {
+      window.removeEventListener('hashchange', onUrl)
+      window.removeEventListener('popstate', onUrl)
+    }
+  }, [])
+
+  // Auth-guard: se non autenticato → pagina Accesso; se autenticato e sei su Accesso → pagina Home
+  React.useEffect(() => {
+    if (uLoad) return
+
+    const outTok = String(afterOutRef.current || '').trim()
+    const inTok  = String(afterInRef.current || '').trim()
+    if (!outTok && !inTok) return
+
+    // evita loop ravvicinati
+    if (guardLockRef.current) return
+
+    const currentTok = getCurrentPageToken() || ''
+    const curId = currentTok ? resolvePageId(currentTok) : null
+
+    const outId = outTok ? resolvePageId(outTok) : null
+    const inId  = inTok ? resolvePageId(inTok) : null
+
+    // Se non riesco a risolvere, uso comunque la navigazione best-effort (fallback)
+    const safeGoto = (tok: string) => {
+      try {
+        guardLockRef.current = true
+        setTimeout(() => { guardLockRef.current = false }, 600)
+        gotoPage(tok)
+      } catch { guardLockRef.current = false }
+    }
+
+    // 1) Non autenticato: forza Accesso
+    if (!user) {
+      if (outTok) {
+        if (!curId || !outId || curId !== outId) {
+          safeGoto(outTok)
+        }
+      }
+      return
+    }
+
+    // 2) Autenticato: se sei su Accesso (pagina post-logout), vai alla home operativa
+    if (user && outTok && inTok) {
+      if (outId && curId && curId === outId) {
+        safeGoto(inTok)
+      }
+    }
+  }, [user, uLoad, urlTick])
 
 
 

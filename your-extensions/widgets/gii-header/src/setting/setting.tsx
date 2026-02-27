@@ -261,6 +261,18 @@ export default function Setting(props: AllWidgetSettingProps<IMConfig>) {
         <label style={P.lbl}>Reindirizza dopo essersi disconnessi</label>
         <PageSel value={cfg.redirectAfterSignOut ?? ''} onChange={v=>set('redirectAfterSignOut',v)} includeHidden={true}/>
 
+
+        <div style={{ height:1, background:'rgba(255,255,255,0.08)', margin:'14px 0 10px' }}/>
+        <div style={{ fontSize:10, fontWeight:700, color:'#93c5fd', textTransform:'uppercase' as const, letterSpacing:1, marginBottom:8 }}>Compatibilità</div>
+        <Check
+          value={cfg.forceReloadAfterLogoutLogin ?? true}
+          onChange={v=>set('forceReloadAfterLogoutLogin',v)}
+          label='Forza ricaricamento dopo logout → login (risolve elenco in loading infinito)'
+        />
+        <div style={P.hint}>
+          Se disattivi questa opzione e dopo logout/login l&apos;Elenco “gira a vuoto”, riattivala.
+        </div>
+
         <div style={{ height:1, background:'rgba(255,255,255,0.08)', margin:'14px 0 10px' }}/>
 
         <div style={{ fontSize:10, fontWeight:700, color:'#93c5fd', textTransform:'uppercase' as const, letterSpacing:1, marginBottom:8 }}>Quando si fa clic sul widget</div>

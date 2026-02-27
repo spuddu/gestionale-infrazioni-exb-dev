@@ -39,6 +39,9 @@ export interface Config {
   redirectAfterSignIn: string
   redirectAfterSignOut: string
   signedInClick: 'signout' | 'menu'
+
+  // ── Compatibilità ExB 1.19 ──
+  forceReloadAfterLogoutLogin: boolean
 }
 
 const Z: GroupOffset = { x: 0, y: 0 }
@@ -72,7 +75,8 @@ export const defaultConfig: Config = {
   loginView: 'popup',
   redirectAfterSignIn: '',
   redirectAfterSignOut: '',
-  signedInClick: 'signout'
+  signedInClick: 'signout',
+  forceReloadAfterLogoutLogin: true
 
 }
 
