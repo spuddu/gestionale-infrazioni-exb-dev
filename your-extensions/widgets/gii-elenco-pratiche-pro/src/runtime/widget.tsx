@@ -20,16 +20,6 @@ import { defaultConfig, DEFAULT_COLUMNS } from '../config'
 
 type Props = AllWidgetProps<IMConfig>
 
-// ── loadEsriModule (AMD require) ───────────────────────────────────────────
-function loadEsriModule<T = any>(path: string): Promise<T> {
-  return new Promise((resolve, reject) => {
-    const req = (window as any).require
-    if (!req) { reject(new Error('AMD require non disponibile')); return }
-    try { req([path], (mod: T) => resolve(mod), (err: any) => reject(err)) }
-    catch (e) { reject(e) }
-  })
-}
-
 function getCodPraticaDisplay(rec: DataRecord): string {
   const a: any = rec?.getData?.() || {}
   const oid =
@@ -192,8 +182,6 @@ function RecordTracker (p: {
   return null
 }
 
-// ── URL tabella utenti GII ─────────────────────────────────────────────────
-const GII_UTENTI_URL = 'https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_uteniti/FeatureServer/0'
 const GII_PORTAL    = 'https://cbsm-hub.maps.arcgis.com'
 
 // Mappa codice ruolo numerico → label (dal widget gestione utenti)
@@ -361,125 +349,38 @@ interface GiiUserInfo {
   isAdmin: boolean           // org_admin AGOL
 }
 
-// Recupera token dalla sessione ExB (IdentityManager)
-async function getSessionToken(): Promise<string> {
-  // Preferisci la sessione gestita da ExB (SessionManager) perché è quella "attiva"
-  // e cambia correttamente con Switch account / Sign out.
-  try {
-    const sm = SessionManager.getInstance()
-    const session: any = sm?.getMainSession?.() || sm?.getSessionByUrl?.(GII_PORTAL)
-    if (session) {
-      const t = (typeof session.token === 'string' && session.token) ? session.token : null
-      if (t) return t
-      if (typeof session.getToken === 'function') {
-        const tok = await session.getToken(`${GII_PORTAL}/sharing/rest`)
-        if (tok) return String(tok)
-      }
-    }
-  } catch { }
+// Legge il profilo utente caricato dall'Header (unica fonte).
+function readGiiUserFromHeader(): GiiUserInfo | null {
+  const cached: any = (window as any).__giiUserRole
+  if (!cached?.username) return null
 
-  // Fallback: ArcGIS Maps SDK IdentityManager (può avere più credenziali in memoria)
-  try {
-    const esriId = await loadEsriModule<any>('esri/identity/IdentityManager')
-    const creds = (esriId.credentials as any[]) || []
-    const portalCreds = creds.filter((c: any) => String(c?.server || '').includes('cbsm-hub') || String(c?.server || '').includes('arcgis.com'))
-    const arr = portalCreds.length ? portalCreds : creds
-    if (arr.length) {
-      const best = arr.slice().sort((a: any, b: any) => num(b?.expires, 0) - num(a?.expires, 0))[0] || arr[arr.length - 1]
-      if (best?.token) return best.token
-    }
-  } catch { }
+  const ruolo = cached.ruolo != null ? Number(cached.ruolo) : null
+  const isAdmin = !!cached.isAdmin
+  const ruoloLabel = String(
+    cached.ruoloLabel ||
+    (ruolo != null ? (RUOLO_LABEL[ruolo] ?? '') : (isAdmin ? 'ADMIN' : ''))
+  )
 
-  return ''
-}
-
-// Rileva info utente loggato: username + isAdmin da IdentityManager + /sharing/rest/community/self
-async function detectCurrentUser(): Promise<{ username: string; isAdmin: boolean }> {
-  // 1) SessionManager (ExB) → sessione principale, coerente con Switch accounts
-  try {
-    const sm = SessionManager.getInstance()
-    const session: any = sm?.getMainSession?.() || sm?.getSessionByUrl?.(GII_PORTAL)
-    if (session) {
-      const username =
-        (typeof session.username === 'string' && session.username) ? session.username
-          : (typeof session.getUsername === 'function' ? await session.getUsername() : '')
-      if (!username) return { username: '', isAdmin: false }
-
-      try {
-        if (typeof session.getUser === 'function') {
-          const u = await session.getUser()
-          const isAdmin = u?.role === 'org_admin' || (Array.isArray(u?.privileges) && u.privileges.includes('portal:admin:viewUsers')) || false
-          return { username: String(u?.username || username), isAdmin }
-        }
-      } catch { }
-
-      const token = await getSessionToken()
-      if (!token) return { username: String(username), isAdmin: false }
-      const res = await fetch(`${GII_PORTAL}/sharing/rest/community/self?f=json&token=${encodeURIComponent(token)}`)
-      const json = await res.json()
-      const isAdmin = json?.role === 'org_admin' || json?.privileges?.includes('portal:admin:viewUsers') || false
-      return { username: String(json?.username || username), isAdmin }
-    }
-  } catch { }
-
-  // 2) Fallback IdentityManager: scegli la credenziale "più recente" (token con expires maggiore)
-  try {
-    const esriId = await loadEsriModule<any>('esri/identity/IdentityManager')
-    const creds = (esriId.credentials as any[]) || []
-    const portalCreds = creds.filter((c: any) => String(c?.server || '').includes('cbsm-hub') || String(c?.server || '').includes('arcgis.com'))
-    const arr = portalCreds.length ? portalCreds : creds
-    const cred = arr.length
-      ? (arr.slice().sort((a: any, b: any) => num(b?.expires, 0) - num(a?.expires, 0))[0] || arr[arr.length - 1])
-      : null
-    const token = cred?.token ?? ''
-    const username = cred?.userId ?? cred?.username ?? ''
-    if (!username || !token) return { username: '', isAdmin: false }
-
-    const res = await fetch(`${GII_PORTAL}/sharing/rest/community/self?f=json&token=${encodeURIComponent(token)}`)
-    const json = await res.json()
-    const isAdmin = json?.role === 'org_admin' || json?.privileges?.includes('portal:admin:viewUsers') || false
-    return { username: String(json?.username || username), isAdmin }
-  } catch {
-    return { username: '', isAdmin: false }
+  return {
+    username: String(cached.username),
+    ruolo,
+    ruoloLabel,
+    area: cached.area != null ? Number(cached.area) : null,
+    settore: cached.settore != null ? Number(cached.settore) : null,
+    ufficio: cached.ufficio != null ? Number(cached.ufficio) : null,
+    gruppo: String(cached.gruppo || ''),
+    isAdmin
   }
 }
 
-// Cerca l'utente nella tabella GII_utenti e restituisce il suo profilo
-async function fetchGiiUser(username: string, token: string): Promise<GiiUserInfo | null> {
-  if (!username) return null
+// Verifica rapida: esiste un utente autenticato (senza chiamate di rete)
+function isSignedInNow(): boolean {
   try {
-    const FeatureLayer = await loadEsriModule<any>('esri/layers/FeatureLayer')
-    const fl = new FeatureLayer({ url: GII_UTENTI_URL })
-    await fl.load().catch(() => { })
-    const res = await fl.queryFeatures({
-      where: `username = '${username.replace(/'/g, "''")}'`,
-      outFields: ['username', 'ruolo', 'area', 'settore', 'ufficio', 'gruppo'],
-      returnGeometry: false,
-    })
-    const features = res?.features ?? []
-    if (!features.length) return null
-    // Se più record (es. admin con più voci), prendi quello con ruolo di priorità massima
-    let best = features[0]
-    for (const f of features) {
-      const rA = Number(best.attributes?.ruolo ?? 0)
-      const rB = Number(f.attributes?.ruolo ?? 0)
-      if ((RUOLO_PRIORITY[rB] ?? 0) > (RUOLO_PRIORITY[rA] ?? 0)) best = f
-    }
-    const a = best.attributes
-    const ruolo = a.ruolo != null ? Number(a.ruolo) : null
-    return {
-      username,
-      ruolo,
-      ruoloLabel: ruolo ? (RUOLO_LABEL[ruolo] ?? '') : '',
-      area: a.area != null ? Number(a.area) : null,
-      settore: a.settore != null ? Number(a.settore) : null,
-      ufficio: a.ufficio != null ? Number(a.ufficio) : null,
-      gruppo: String(a.gruppo ?? ''),
-      isAdmin: false
-    }
-  } catch {
-    return null
-  }
+    const sm = SessionManager.getInstance()
+    const session: any = sm?.getMainSession?.() || sm?.getSessionByUrl?.(GII_PORTAL)
+    const u = session?.username || session?.userId || ''
+    return !!u
+  } catch { return false }
 }
 
 // Determina il campo stato del ruolo corrente
@@ -528,129 +429,44 @@ export default function Widget (props: Props) {
     notifySelectionCleared()
   }, [])
 
+// ── Bootstrap contesto utente (solo dall'Header) ─────────────────────────
+React.useEffect(() => {
+  let cancelled = false
 
+  const apply = () => {
+    if (cancelled) return
 
-  // Carica profilo utente dalla tabella GII_utenti
-  const loadUserProfile = React.useCallback(async (username: string, isAdmin: boolean) => {
-    // Reset dsDataRef SOLO se l'utente cambia (non ad ogni credential-create ripetuto)
-    const prevUsername = (window as any).__giiCurrentUsername
-    if (prevUsername !== username) {
-      dsDataRef.current = {}
-      ;(window as any).__giiCurrentUsername = username
-    }
-    if (isAdmin) {
-      const u: GiiUserInfo = {
-        username, ruolo: null, ruoloLabel: 'ADMIN',
-        area: null, settore: null, ufficio: null, gruppo: '', isAdmin: true
-      }
+    const u = readGiiUserFromHeader()
+    if (u) {
       setGiiUser(u)
       setNotLogged(false)
-      try { (window as any).__giiUserRole = u } catch { }
       setUserLoading(false)
       return
     }
-    const token = await getSessionToken()
-    const user = await fetchGiiUser(username, token)
-    const u = user
-      ? { ...user, isAdmin: false }
-      : { username, ruolo: null, ruoloLabel: '', area: null, settore: null, ufficio: null, gruppo: '', isAdmin: false }
-    setGiiUser(u)
-    setNotLogged(false)
-    try { (window as any).__giiUserRole = u } catch { }
-    setUserLoading(false)
-    console.log('GII user loaded:', u.username, '| ruolo:', u.ruolo, '| area:', u.area, '| settore:', u.settore)
-  }, [])
 
-  // Boot passivo: verifica se c'è già un utente loggato.
-  // NON chiama mai getCredential — il login e' gestito dal widget ExB in alto a destra.
-  React.useEffect(() => {
-    let cancelled = false
-    let credentialHandle: any = null
-
-    let watchTimer: any = null
-    const boot = async () => {
+    // Nessun profilo caricato dall'Header:
+    // - se non autenticato → overlay "Accesso richiesto"
+    // - se autenticato → resta in loading finché l'Header non emette gii:userLoaded
+    if (!isSignedInNow()) {
+      setGiiUser(null)
+      setNotLogged(true)
+      setUserLoading(false)
+    } else {
+      setGiiUser(null)
+      setNotLogged(false)
       setUserLoading(true)
-      try {
-        const { username, isAdmin } = await detectCurrentUser()
-        if (cancelled) return
-        if (!username) {
-          // Nessun utente: overlay bloccante. Aspetta che ExB faccia login.
-          setNotLogged(true)
-          setUserLoading(false)
-        } else {
-          setNotLogged(false)
-          await loadUserProfile(username, isAdmin)
-        }
-      } catch {
-        if (!cancelled) { setNotLogged(true); setUserLoading(false) }
-      }
-
-      // Ascolta evento credential-create: scatta quando ExB completa il login
-      try {
-        const esriId = await loadEsriModule<any>('esri/identity/IdentityManager')
-        if (cancelled) return
-        let credDebounce: any = null
-        credentialHandle = esriId.on('credential-create', () => {
-          if (cancelled) return
-          // Debounce: ExB spara credential-create una volta per ogni DS/token.
-          // Aspettiamo 400ms dall'ultimo evento prima di ricaricare.
-          clearTimeout(credDebounce)
-          credDebounce = setTimeout(async () => {
-            if (cancelled) return
-            console.log('Credential create event: reloading user profile...')
-            const { username, isAdmin } = await detectCurrentUser()
-            if (username) {
-              setNotLogged(false)
-              await loadUserProfile(username, isAdmin)
-            }
-          }, 400)
-        })
-      } catch { }
-      // Watch leggero: se cambia l'utente (Switch account / Sign out), forza il reload dei datasource
-      // senza richiedere DevTools. È economico perché legge solo la sessione corrente.
-      try {
-        watchTimer = setInterval(async () => {
-          if (cancelled) return
-          const cur = await detectCurrentUser()
-          const curUser = cur?.username || ''
-          const prevNow = (window as any).__giiCurrentUsername || ''
-          if (!curUser && prevNow) {
-            // logout
-            dsDataRef.current = {}
-            setGiiUser(null)
-            setNotLogged(true)
-            setUserLoading(false)
-            return
-          }
-          if (curUser && curUser !== prevNow) {
-            // switch utente
-            dsDataRef.current = {}
-            setNotLogged(false)
-            setUserLoading(true)
-            await loadUserProfile(curUser, cur?.isAdmin || false)
-          }
-        }, 1500)
-      } catch { }
-
     }
+  }
 
-    boot()
-    return () => {
-      cancelled = true
-      try { if (watchTimer) clearInterval(watchTimer) } catch { }
-      try { credentialHandle?.remove() } catch { }
-    }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
+  apply()
+  window.addEventListener('gii:userLoaded', apply)
+  return () => {
+    cancelled = true
+    window.removeEventListener('gii:userLoaded', apply)
+  }
+}, [])
 
-  // Pubblica su canale globale ogni volta che giiUser cambia (per widget Azioni)
-  React.useEffect(() => {
-    if (giiUser) {
-      try { (window as any).__giiUserRole = giiUser } catch { }
-    }
-  }, [giiUser])
-
-  // DataSource consentiti per l'utente corrente
+// DataSource consentiti per l'utente corrente
   const allowedDsIds: string[] | null = React.useMemo(
     () => giiUser ? getAllowedDataSourceIds(giiUser, useDsJs) : null,
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -753,6 +569,19 @@ export default function Widget (props: Props) {
 
   // ── Raccolta record da TUTTI i datasource ──
   const dsDataRef = React.useRef<Record<string, { recs: DataRecord[], ds: DataSource | null, loading: boolean }>>({})
+const prevUserRef = React.useRef<string>('')
+
+// Se cambia l'utente (switch account / logout) pulisce cache record + selezione locale
+React.useEffect(() => {
+  const cur = giiUser?.username || ''
+  const prev = prevUserRef.current
+  if (cur === prev) return
+  prevUserRef.current = cur
+  dsDataRef.current = {}
+  setLocalSelectedByDs({})
+  notifySelectionCleared()
+}, [giiUser?.username])
+
   const [dsDataVer, setDsDataVer] = React.useState(0)
 
   const handleDsUpdate = React.useCallback((dsId: string, recs: DataRecord[], ds: DataSource, loading: boolean) => {

@@ -7,7 +7,7 @@ import { useState, useEffect } from 'react'
 const { Fragment } = React
 
 const SERVICE_URL =
-  'https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_uteniti/FeatureServer/0'
+  'https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_utenti/FeatureServer/0'
 
 // ── loadEsriModule (AMD require) ───────────────────────────────────────────
 function loadEsriModule<T = any>(path: string): Promise<T> {

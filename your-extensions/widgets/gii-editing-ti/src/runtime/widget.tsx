@@ -3309,25 +3309,16 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
   const [detectedRole, setDetectedRole] = React.useState<string>('')
 
   React.useEffect(() => {
-    // Prova subito
-    try {
-      const r = (window as any).__giiUserRole?.ruoloLabel
-      if (r && r !== 'ADMIN') setDetectedRole(String(r).toUpperCase())
-    } catch { }
-    // Poi riprova ogni 500ms finché non trova il ruolo (max 10 secondi)
-    let attempts = 0
-    const timer = setInterval(() => {
-      attempts++
+    const readRole = () => {
       try {
         const r = (window as any).__giiUserRole?.ruoloLabel
-        if (r && r !== 'ADMIN') {
-          setDetectedRole(String(r).toUpperCase())
-          clearInterval(timer)
-        }
+        // Se __giiUserRole è assente (logout) o ruolo ADMIN: azzera il ruolo rilevato.
+        setDetectedRole(r && r !== 'ADMIN' ? String(r).toUpperCase() : '')
       } catch { }
-      if (attempts >= 20) clearInterval(timer)
-    }, 500)
-    return () => clearInterval(timer)
+    }
+    readRole()
+    window.addEventListener('gii:userLoaded', readRole)
+    return () => window.removeEventListener('gii:userLoaded', readRole)
   }, [])
 
   const showDatiGenerali = cfg.showDatiGenerali === true

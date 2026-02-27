@@ -5,7 +5,6 @@ import type { IMConfig, CardConfig, GroupOffset } from '../config'
 import { defaultConfig } from '../config'
 
 const GII_PORTAL     = 'https://cbsm-hub.maps.arcgis.com'
-const GII_UTENTI_URL = 'https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_uteniti/FeatureServer/0'
 const RUOLO_LABEL: Record<number, string> = { 1:'TR', 2:'TI', 3:'RZ', 4:'RI', 5:'DT', 6:'DA' }
 const RUOLO_FULL:  Record<string, string> = {
   TR:'Tecnico Rilevatore', TI:'Tecnico Istruttore', RZ:'Responsabile di Zona',
@@ -22,60 +21,32 @@ const CARD_ICONS: Record<string, string> = {
 }
 const DEFAULT_ICON = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="16"/><line x1="8" y1="12" x2="16" y2="12"/></svg>`
 
-function loadEsriModule<T = any>(path: string): Promise<T> {
-  return new Promise((res, rej) => {
-    const req = (window as any).require
-    if (!req) { rej(new Error('AMD')); return }
-    try { req([path], (m: T) => res(m), (e: any) => rej(e)) } catch (e) { rej(e) }
-  })
-}
-
-async function getToken(): Promise<string> {
+function isSignedIn(): boolean {
   try {
     const sm = SessionManager.getInstance()
     const session: any = sm?.getMainSession?.() || sm?.getSessionByUrl?.(GII_PORTAL)
-    if (session) {
-      const t = typeof session.token === 'string' ? session.token : null
-      if (t) return t
-      if (typeof session.getToken === 'function') return String(await session.getToken(`${GII_PORTAL}/sharing/rest`) || '')
-    }
-  } catch { }
-  try {
-    const esriId = await loadEsriModule<any>('esri/identity/IdentityManager')
-    const creds: any[] = esriId.credentials || []
-    const best = creds.slice().sort((a: any, b: any) => (b?.expires || 0) - (a?.expires || 0))[0]
-    if (best?.token) return best.token
-  } catch { }
-  return ''
+    const u = session?.username || session?.userId || ''
+    return !!u
+  } catch { return false }
 }
 
 interface UserInfo { username: string; fullName: string; ruoloLabel: string; ruoloFull: string; area: string; isAdmin: boolean }
 
 async function loadUser(): Promise<UserInfo | null> {
-  const cached = (window as any).__giiUserRole
+  const cached: any = (window as any).__giiUserRole
   if (cached?.username) {
-    const rl = cached.ruoloLabel || (RUOLO_LABEL[cached.ruolo] ?? 'ADMIN')
-    return { username: cached.username, fullName: cached.fullName || cached.username, ruoloLabel: rl, ruoloFull: RUOLO_FULL[rl] || rl, area: AREA_LABEL[cached.area] || '', isAdmin: cached.isAdmin || false }
+    const ruoloNum = cached.ruolo != null ? Number(cached.ruolo) : null
+    const rl = String(cached.ruoloLabel || (ruoloNum != null ? (RUOLO_LABEL[ruoloNum] ?? '') : (cached.isAdmin ? 'ADMIN' : '')))
+    return {
+      username: String(cached.username),
+      fullName: String(cached.fullName || cached.full_name || cached.username),
+      ruoloLabel: rl,
+      ruoloFull: RUOLO_FULL[rl] || rl,
+      area: AREA_LABEL[cached.area] || '',
+      isAdmin: !!cached.isAdmin
+    }
   }
-  try {
-    const token = await getToken(); if (!token) return null
-    const res = await fetch(`${GII_PORTAL}/sharing/rest/community/self?f=json&token=${encodeURIComponent(token)}`)
-    const json = await res.json()
-    const username = json?.username || ''; if (!username) return null
-    const fullName = json?.fullName || username
-    const isAdmin  = json?.role === 'org_admin'
-    const FeatureLayer = await loadEsriModule<any>('esri/layers/FeatureLayer')
-    const fl = new FeatureLayer({ url: GII_UTENTI_URL })
-    await fl.load().catch(() => {})
-    const qr = await fl.queryFeatures({ where: `username = '${username.replace(/'/g, "''")}'`, outFields: ['ruolo','area','full_name'], returnGeometry: false })
-    const f = qr?.features?.[0]
-    if (!f && isAdmin) return { username, fullName, ruoloLabel: 'ADMIN', ruoloFull: 'Amministratore', area: '', isAdmin: true }
-    if (!f) return { username, fullName, ruoloLabel: '', ruoloFull: '', area: '', isAdmin: false }
-    const a = f.attributes
-    const rn = a.ruolo != null ? Number(a.ruolo) : null
-    const rl = rn ? (RUOLO_LABEL[rn] ?? '') : (isAdmin ? 'ADMIN' : '')
-    return { username, fullName: String(a.full_name || fullName), ruoloLabel: rl, ruoloFull: RUOLO_FULL[rl] || rl, area: AREA_LABEL[a.area] || '', isAdmin }
-  } catch { return null }
+  return null
 }
 
 
@@ -191,11 +162,36 @@ export default function Widget(props: Props) {
   const [now,   setNow]   = React.useState(new Date())
 
   React.useEffect(() => {
-    loadUser().then(u => { setUser(u); setULoad(false) })
-    const h = () => loadUser().then(u => setUser(u))
-    window.addEventListener('gii:userLoaded', h)
-    return () => window.removeEventListener('gii:userLoaded', h)
-  }, [])
+  let cancelled = false
+
+  const apply = () => {
+    loadUser().then(u => {
+      if (cancelled) return
+      if (u) {
+        setUser(u)
+        setULoad(false)
+        return
+      }
+      // Se non autenticato, chiude il loading e mostra "Accesso non autenticato".
+      // Se autenticato ma l'Header non ha ancora caricato il contesto, resta in loading.
+      if (!isSignedIn()) {
+        setUser(null)
+        setULoad(false)
+      } else {
+        setUser(null)
+        setULoad(true)
+      }
+    })
+  }
+
+  apply()
+  window.addEventListener('gii:userLoaded', apply)
+  return () => {
+    cancelled = true
+    window.removeEventListener('gii:userLoaded', apply)
+  }
+}, [])
+
 
   React.useEffect(() => {
     if (!cfg.showClock) return
