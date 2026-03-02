@@ -2,10 +2,10 @@
   "name": "gii-homepage",
   "label": "GII Homepage",
   "type": "widget",
-  "version": "1.1.6",
+  "version": "1.1.4",
   "exbVersion": "1.19.0",
   "author": "CBSM",
-  "description": "Homepage GII con cards autogenerate dalle pagine (banner rimosso) + orologio configurabile.",
+  "description": "Homepage GII completamente personalizzabile con logo CBSM integrato.",
   "dependency": [
     "jimu-arcgis"
   ],

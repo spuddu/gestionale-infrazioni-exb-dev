@@ -268,7 +268,10 @@ function getAllowedDataSourceIds(
     return areaCode ? L.includes(`EB_${areaCode}`) : true
   })
 
-  return roots(matchesLoose)
+  const ids = roots(matchesLoose)
+  // Se non riusciamo a determinare alcuna vista coerente (label non ancora pronta / nomi non standard),
+  // NON filtriamo: lasciamo che sia la condivisione AGOL a fare da guardia.
+  return ids.length ? ids : null
 }
 
 // ── Selezione DS “singolo” (evita duplicati e mismatch) ───────────────────
@@ -332,10 +335,14 @@ function pickBestUseDataSourceId(
   }
 
   // fallback admin view
-  const dsAdminFallback = findBy(n => n.includes('EB_ADMIN') || n.includes('GII_VIEW_EB_ADMIN') || n.includes('VIEW_EB_ADMIN'))
-  if (dsAdminFallback) return dsAdminFallback
+  if (isAppAdmin) {
+    const dsAdminFallback = findBy(n => n.includes('EB_ADMIN') || n.includes('GII_VIEW_EB_ADMIN') || n.includes('VIEW_EB_ADMIN'))
+    if (dsAdminFallback) return dsAdminFallback
+  }
 
-  return items[0]?.dsId || null
+  // Se non troviamo match affidabili, evitiamo di forzare un singolo DS “a caso”.
+  // Lasciamo al widget la gestione multi-DS (tabs) o i filtri allowedDsIds.
+  return items.length === 1 ? (items[0]?.dsId || null) : null
 }
 
 interface GiiUserInfo {
@@ -416,6 +423,7 @@ export default function Widget (props: Props) {
   // notLogged: true quando non c'è utente autenticato → overlay bloccante
   const [notLogged, setNotLogged] = React.useState(false)
 
+
   // --- Selection bridge boot reset ---
   // La selezione NON deve persistere tra refresh/riapertura pagina.
   // Facciamo il reset UNA sola volta per page-load qui nell'Elenco (source of truth),
@@ -444,9 +452,9 @@ React.useEffect(() => {
       return
     }
 
-    // Nessun profilo caricato dall'Header:
-    // - se non autenticato → overlay "Accesso richiesto"
-    // - se autenticato → resta in loading finché l'Header non emette gii:userLoaded
+    // Nessun profilo dall'Header:
+    // - non autenticato → overlay "Accesso richiesto"
+    // - autenticato ma profilo non ancora pronto → resta in loading
     if (!isSignedInNow()) {
       setGiiUser(null)
       setNotLogged(true)

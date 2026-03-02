@@ -1,13 +1,17 @@
 /** @jsx jsx */
 /** @jsxFrag React.Fragment */
-import { React, jsx, ReactRedux, type IMState, type AllWidgetProps, SessionManager, UrlManager, getAppStore } from 'jimu-core'
+import { React, jsx, type AllWidgetProps, SessionManager, UrlManager, getAppStore } from 'jimu-core'
 import type { IMConfig, CardConfig, GroupOffset } from '../config'
 import { defaultConfig } from '../config'
 
-const GII_PORTAL = 'https://cbsm-hub.maps.arcgis.com'
+const GII_PORTAL     = 'https://cbsm-hub.maps.arcgis.com'
 const RUOLO_LABEL: Record<number, string> = { 1:'TR', 2:'TI', 3:'RZ', 4:'RI', 5:'DT', 6:'DA' }
+const RUOLO_FULL:  Record<string, string> = {
+  TR:'Tecnico Rilevatore', TI:'Tecnico Istruttore', RZ:'Responsabile di Zona',
+  RI:'Responsabile Istruttore', DT:'Direttore Tecnico', DA:'Direttore Amministrativo', ADMIN:'Amministratore'
+}
+const AREA_LABEL: Record<number, string> = { 1:'AMM', 2:'AGR', 3:'TEC' }
 
-// Icone di default (per le card note). Per le altre: “+”
 const CARD_ICONS: Record<string, string> = {
   elenco:    `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="3"/><line x1="3" y1="9" x2="21" y2="9"/><line x1="9" y1="21" x2="9" y2="9"/></svg>`,
   mappa:     `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><polygon points="1 6 1 22 8 18 16 22 23 18 23 2 16 6 8 2 1 6"/><line x1="8" y1="2" x2="8" y2="18"/><line x1="16" y1="6" x2="16" y2="22"/></svg>`,
@@ -45,21 +49,26 @@ function isSignedIn(): boolean {
   } catch { return false }
 }
 
-interface UserInfo { username: string; fullName: string; ruoloLabel: string; isAdmin: boolean }
+interface UserInfo { username: string; fullName: string; ruoloLabel: string; ruoloFull: string; area: string; isAdmin: boolean }
 
 async function loadUser(): Promise<UserInfo | null> {
   const cached: any = (window as any).__giiUserRole
-  if (!cached?.username) return null
-
-  const ruoloNum = cached.ruolo != null ? Number(cached.ruolo) : null
-  const ruoloLabel = String(cached.ruoloLabel || (ruoloNum != null ? (RUOLO_LABEL[ruoloNum] ?? '') : (cached.isAdmin ? 'ADMIN' : '')))
-  return {
-    username: String(cached.username),
-    fullName: String(cached.fullName || cached.full_name || cached.username),
-    ruoloLabel,
-    isAdmin: !!cached.isAdmin
+  if (cached?.username) {
+    const ruoloNum = cached.ruolo != null ? Number(cached.ruolo) : null
+    const rl = String(cached.ruoloLabel || (ruoloNum != null ? (RUOLO_LABEL[ruoloNum] ?? '') : (cached.isAdmin ? 'ADMIN' : '')))
+    return {
+      username: String(cached.username),
+      fullName: String(cached.fullName || cached.full_name || cached.username),
+      ruoloLabel: rl,
+      ruoloFull: RUOLO_FULL[rl] || rl,
+      area: AREA_LABEL[cached.area] || '',
+      isAdmin: !!cached.isAdmin
+    }
   }
+  return null
 }
+
+
 
 /** Applica offset posizione come position:relative */
 function off(o: GroupOffset | undefined): React.CSSProperties {
@@ -95,9 +104,9 @@ function resolvePageId(pageTokenRaw: string): string | null {
     const hist = appConfig?.historyLabels?.page || {}
     for (const [pageId, pg] of Object.entries(pagesMap || {})) {
       if (!pg) continue
-      if ((pg as any).name === tok) return pageId
-      if (hist && (hist as any)[pageId] === tok) return pageId
-      if ((pg as any).label === tok || (pg as any).title === tok) return pageId
+      if (pg.name === tok) return pageId
+      if (hist && hist[pageId] === tok) return pageId
+      if (pg.label === tok || pg.title === tok) return pageId
     }
   } catch { /* ignore */ }
 
@@ -125,7 +134,7 @@ function listVisiblePages(): Array<{ pageId: string; label: string; token: strin
       []
 
     const entries = Object.entries(pagesMap || {})
-      .filter(([, pg]: any) => (pg as any)?.isVisible !== false)
+      .filter(([, pg]: any) => pg?.isVisible !== false)
       .map(([pageId, pg]: [string, any]) => {
         const label = String(pg?.label || pg?.title || pg?.name || pageId)
         const token = String(pg?.name || appConfig?.historyLabels?.page?.[pageId] || pageId)
@@ -181,7 +190,7 @@ function mergeCardsWithPages(existing: CardConfig[], excludedPageIds: string[]):
       colorAccent: accent,
       // coerente con le card di default (sfondo scuro uniforme)
       colorBgRest: '#192e4d',
-      colorBgHover: '',
+      colorBgHover: bg,
       roles: ['*']
     })
 
@@ -210,13 +219,97 @@ function Card(p: { card: CardConfig; cfg: any; idx: number }) {
   const { card, cfg } = p
   const [hov, setHov] = React.useState(false)
   const icon = CARD_ICONS[card.id] || DEFAULT_ICON
-  const baseBg = (card.colorBg && String(card.colorBg).trim()) ? String(card.colorBg).trim() : '#1d4ed8'
-  const hoverBg = (card.colorBgHover && String(card.colorBgHover).trim())
-    ? card.colorBgHover
-    : `linear-gradient(135deg,${baseBg}ee 0%,${baseBg}cc 100%)`
-  const restBg = (card.colorBgRest && String(card.colorBgRest).trim())
-    ? card.colorBgRest
-    : 'rgba(255,255,255,0.05)'
+  const parseColor = (raw: any): { r: number; g: number; b: number; a: number } | null => {
+    const s = String(raw || '').trim()
+    if (!s) return null
+
+    const clamp255 = (n: number) => Math.max(0, Math.min(255, n))
+    const clamp01 = (n: number) => Math.max(0, Math.min(1, n))
+
+    // keywords comuni
+    const low = s.toLowerCase()
+    if (low === 'white') return { r: 255, g: 255, b: 255, a: 1 }
+    if (low === 'black') return { r: 0, g: 0, b: 0, a: 1 }
+
+    // Hex
+    if (/^#[0-9a-fA-F]{3}$/.test(s)) {
+      const r = parseInt(s[1] + s[1], 16)
+      const g = parseInt(s[2] + s[2], 16)
+      const b = parseInt(s[3] + s[3], 16)
+      return { r, g, b, a: 1 }
+    }
+    if (/^#[0-9a-fA-F]{6}$/.test(s)) {
+      const r = parseInt(s.slice(1, 3), 16)
+      const g = parseInt(s.slice(3, 5), 16)
+      const b = parseInt(s.slice(5, 7), 16)
+      return { r, g, b, a: 1 }
+    }
+    if (/^#[0-9a-fA-F]{8}$/.test(s)) {
+      const r = parseInt(s.slice(1, 3), 16)
+      const g = parseInt(s.slice(3, 5), 16)
+      const b = parseInt(s.slice(5, 7), 16)
+      const a = clamp01(parseInt(s.slice(7, 9), 16) / 255)
+      return { r, g, b, a }
+    }
+
+    // rgb/rgba
+    const m = s.match(/^rgba?\(\s*([0-9]{1,3})\s*,\s*([0-9]{1,3})\s*,\s*([0-9]{1,3})(?:\s*,\s*([0-9.]+)\s*)?\)$/i)
+    if (m) {
+      const r = clamp255(Number(m[1]))
+      const g = clamp255(Number(m[2]))
+      const b = clamp255(Number(m[3]))
+      const a = m[4] == null ? 1 : clamp01(Number(m[4]))
+      return { r, g, b, a }
+    }
+
+    return null
+  }
+
+  const toHex6 = (c: { r: number; g: number; b: number }): string => {
+    const h = (n: number) => Math.max(0, Math.min(255, Math.round(n))).toString(16).padStart(2, '0')
+    return (`#${h(c.r)}${h(c.g)}${h(c.b)}`).toLowerCase()
+  }
+
+  const base = parseColor((cfg as any)?.bgGradMid) || parseColor('#0d2444') || { r: 13, g: 36, b: 68, a: 1 }
+
+  // Converte colori con alpha in un solido "flattened" (così il colore visto = quello in config)
+  const normalizeColor = (raw: any, fallback: string): string => {
+    const c = parseColor(raw)
+    if (!c) return fallback
+    if (c.a >= 0.999) return toHex6(c)
+    const r = base.r * (1 - c.a) + c.r * c.a
+    const g = base.g * (1 - c.a) + c.g * c.a
+    const b = base.b * (1 - c.a) + c.b * c.a
+    return toHex6({ r, g, b })
+  }
+
+  const restBg  = normalizeColor(card.colorBgRest, '#192e4d')
+  const hoverBg = normalizeColor((card.colorBgHover || (card as any).colorBg), restBg)
+  const isLightHex = (hex: string): boolean => {
+    const h = String(hex || '').trim()
+    const m = h.match(/^#([0-9a-f]{6})$/i)
+    if (!m) return false
+    const v = m[1]
+    const r = parseInt(v.slice(0, 2), 16) / 255
+    const g = parseInt(v.slice(2, 4), 16) / 255
+    const b = parseInt(v.slice(4, 6), 16) / 255
+    const srgb = (x: number) => (x <= 0.03928 ? x / 12.92 : Math.pow((x + 0.055) / 1.055, 2.4))
+    const L = 0.2126 * srgb(r) + 0.7152 * srgb(g) + 0.0722 * srgb(b)
+    return L > 0.62
+  }
+  const lightRest = isLightHex(restBg)
+  const lightHover = isLightHex(hoverBg)
+
+  const borderIdle = lightRest ? 'rgba(17,24,39,0.12)' : 'rgba(255,255,255,0.10)'
+  const titleColor = hov
+    ? (lightHover ? 'rgba(17,24,39,0.95)' : '#fff')
+    : (lightRest ? 'rgba(17,24,39,0.92)' : 'rgba(255,255,255,0.90)')
+  const descColor = hov
+    ? (lightHover ? 'rgba(17,24,39,0.70)' : 'rgba(255,255,255,0.80)')
+    : (lightRest ? 'rgba(17,24,39,0.60)' : 'rgba(255,255,255,0.50)')
+  const ctaColor = hov ? card.colorAccent : (lightRest ? 'rgba(17,24,39,0.35)' : 'rgba(255,255,255,0.25)')
+  const iconWrapBg = hov ? `${card.colorAccent}33` : (lightRest ? 'rgba(17,24,39,0.06)' : 'rgba(255,255,255,0.08)')
+  const iconWrapColor = hov ? card.colorAccent : (lightRest ? 'rgba(17,24,39,0.70)' : 'rgba(255,255,255,0.70)')
   return (
     <div onMouseEnter={() => setHov(true)} onMouseLeave={() => setHov(false)}
       onClick={() => {
@@ -225,20 +318,20 @@ function Card(p: { card: CardConfig; cfg: any; idx: number }) {
         gotoPage(v)
       }}
       style={{ cursor:'pointer', borderRadius:cfg.cardBorderRadius,
-        border:`1.5px solid ${hov ? card.colorAccent : 'rgba(255,255,255,0.10)'}`,
+        border:`1.5px solid ${hov ? card.colorAccent : borderIdle}`,
         background: hov ? hoverBg : restBg,
-        backdropFilter:'blur(12px)', padding:cfg.cardPadding,
+padding:cfg.cardPadding,
         transition:'all 0.25s cubic-bezier(0.4,0,0.2,1)',
         transform: hov ? 'translateY(-4px)' : 'translateY(0)',
         boxShadow: hov ? `0 20px 40px rgba(0,0,0,0.3),0 0 0 1px ${card.colorAccent}44` : '0 4px 16px rgba(0,0,0,0.15)',
         animationDelay:`${p.idx*80}ms`, animationName:'fadeInUp',
         animationDuration:'0.5s', animationFillMode:'both', animationTimingFunction:'cubic-bezier(0.4,0,0.2,1)' }}>
-      <div style={{ width:48,height:48,borderRadius:12, background:hov?`${card.colorAccent}33`:'rgba(255,255,255,0.08)', display:'flex',alignItems:'center',justifyContent:'center', marginBottom:16,transition:'background 0.25s', color:hov?card.colorAccent:'rgba(255,255,255,0.7)' }}>
+      <div style={{ width:48,height:48,borderRadius:12, background:iconWrapBg, display:'flex',alignItems:'center',justifyContent:'center', marginBottom:16,transition:'background 0.25s', color:iconWrapColor }}>
         <div style={{ width:24,height:24 }} dangerouslySetInnerHTML={{ __html: icon }} />
       </div>
-      <div style={{ fontFamily:cfg.cardLabelFont,fontSize:cfg.cardLabelSize,fontWeight:cfg.cardLabelWeight, color:hov?'#fff':'rgba(255,255,255,0.90)',marginBottom:8,transition:'color 0.2s' }}>{card.label}</div>
-      <div style={{ fontSize:cfg.cardDescSize,lineHeight:1.55, color:hov?'rgba(255,255,255,0.80)':'rgba(255,255,255,0.50)',transition:'color 0.2s' }}>{card.desc}</div>
-      <div style={{ marginTop:20,fontSize:cfg.cardCtaSize,fontWeight:700,letterSpacing:cfg.cardCtaSpacing, textTransform:'uppercase' as const, color:hov?card.colorAccent:'rgba(255,255,255,0.25)', display:'flex',alignItems:'center',gap:6,transition:'color 0.2s' }}>
+      <div style={{ fontFamily:cfg.cardLabelFont,fontSize:cfg.cardLabelSize,fontWeight:cfg.cardLabelWeight, color:titleColor,marginBottom:8,transition:'color 0.2s' }}>{card.label}</div>
+      <div style={{ fontSize:cfg.cardDescSize,lineHeight:1.55, color:descColor,transition:'color 0.2s' }}>{card.desc}</div>
+      <div style={{ marginTop:20,fontSize:cfg.cardCtaSize,fontWeight:700,letterSpacing:cfg.cardCtaSpacing, textTransform:'uppercase' as const, color:ctaColor, display:'flex',alignItems:'center',gap:6,transition:'color 0.2s' }}>
         {cfg.cardCtaText}
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"
           style={{ transform:hov?'translateX(4px)':'translateX(0)',transition:'transform 0.2s' }}>
@@ -257,89 +350,67 @@ export default function Widget(props: Props) {
   const rawCards: CardConfig[] = Array.isArray(cfg.cards) ? cfg.cards.map((c: any) => ({ ...c })) : defaultConfig.cards
   const excludedPageIds: string[] = Array.isArray(cfg.excludedPageIds) ? cfg.excludedPageIds.map((s: any) => String(s)) : []
 
-  // AppConfig (serve a triggerare re-render quando cambiano le pagine/visibilità in Builder)
-  const appConfig = ReactRedux.useSelector((state: IMState) => {
-    const s: any = state as any
-    return s?.appStateInBuilder?.appConfig ?? s?.appConfig
-  })
-
-  // Set di pageId attualmente visibili: se una card punta a una pagina non visibile, la card NON viene mostrata in homepage.
-  const visiblePageIdSet = React.useMemo(() => {
-    const pages = listVisiblePages()
-    return new Set(pages.map(p => p.pageId))
-  }, [appConfig])
-
   // Cards effettive: quelle configurate + quelle autogenerate dalle pagine mancanti.
   const effCards: CardConfig[] = mergeCardsWithPages(rawCards, excludedPageIds)
 
-  const oClock: GroupOffset = cfg.offsetClock || { x:0, y:0 }
-  const oCards: GroupOffset = cfg.offsetCards || { x:0, y:0 }
+  const oClock:  GroupOffset = cfg.offsetClock  || { x:0, y:0 }
+  const oBanner: GroupOffset = cfg.offsetBanner || { x:0, y:0 }
+  const oCards:  GroupOffset = cfg.offsetCards  || { x:0, y:0 }
 
   const [user,  setUser]  = React.useState<UserInfo | null>(null)
   const [uLoad, setULoad] = React.useState(true)
+  const [now,   setNow]   = React.useState(new Date())
 
-  const [now, setNow] = React.useState(new Date())
+  React.useEffect(() => {
+  let cancelled = false
+
+  const apply = () => {
+    loadUser().then(u => {
+      if (cancelled) return
+      if (u) {
+        setUser(u)
+        setULoad(false)
+        return
+      }
+      // Se non autenticato, chiude il loading e mostra "Accesso non autenticato".
+      // Se autenticato ma l'Header non ha ancora caricato il contesto, resta in loading.
+      if (!isSignedIn()) {
+        setUser(null)
+        setULoad(false)
+      } else {
+        setUser(null)
+        setULoad(true)
+      }
+    })
+  }
+
+  apply()
+  window.addEventListener('gii:userLoaded', apply)
+  return () => {
+    cancelled = true
+    window.removeEventListener('gii:userLoaded', apply)
+  }
+}, [])
+
 
   React.useEffect(() => {
     if (!cfg.showClock) return
-    // aggiorna ogni minuto (precisione sufficiente)
     const t = setInterval(() => setNow(new Date()), 60000)
     return () => clearInterval(t)
   }, [cfg.showClock])
 
-  const fmtDate = (d: Date) => d.toLocaleDateString('it-IT', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })
-  const fmtTime = (d: Date) => d.toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' })
-
-  React.useEffect(() => {
-    let cancelled = false
-
-    const apply = () => {
-      loadUser().then(u => {
-        if (cancelled) return
-        if (u) {
-          setUser(u)
-          setULoad(false)
-          return
-        }
-        // Se non autenticato, chiude il loading.
-        // Se autenticato ma l'Header non ha ancora caricato il contesto, resta in loading.
-        if (!isSignedIn()) {
-          setUser(null)
-          setULoad(false)
-        } else {
-          setUser(null)
-          setULoad(true)
-        }
-      })
-    }
-
-    apply()
-    window.addEventListener('gii:userLoaded', apply)
-    return () => {
-      cancelled = true
-      window.removeEventListener('gii:userLoaded', apply)
-    }
-  }, [])
+  const fmtDate = (d: Date) => d.toLocaleDateString('it-IT', { weekday:'long', day:'numeric', month:'long', year:'numeric' })
+  const fmtTime = (d: Date) => d.toLocaleTimeString('it-IT', { hour:'2-digit', minute:'2-digit' })
 
   const isVisible = (c: CardConfig) => {
     if (!c.visible) return false
-
-    // Se la card punta a una pagina non visibile (isVisible=false), la card non deve comparire in homepage.
-    // Però la card resta in config/Setting (così, se la pagina torna visibile, la card riappare).
-    const tok = String(c.hashPage || '').trim()
-    if (tok) {
-      const pid = resolvePageId(tok)
-      if (!pid) return false
-      if (!visiblePageIdSet.has(pid)) return false
-    }
-
     if (c.roles.includes('*')) return true
     if (!user) return false
     if (user.isAdmin) return true
     return c.roles.includes(user.ruoloLabel)
   }
-
   const visibleCards = effCards.slice().sort((a,b) => a.order - b.order).filter(isVisible)
+
 
   return (
     <div style={{ width:'100%',height:'100%',minHeight:500,
@@ -349,6 +420,8 @@ export default function Widget(props: Props) {
         @import url('https://fonts.googleapis.com/css2?family=Crimson+Pro:wght@400;600;700&family=Source+Sans+3:wght@300;400;600;700&display=swap');
         @keyframes fadeInUp { from{opacity:0;transform:translateY(24px)} to{opacity:1;transform:translateY(0)} }
         @keyframes fadeIn   { from{opacity:0} to{opacity:1} }
+        @keyframes spin     { to{transform:rotate(360deg)} }
+        @keyframes pulse-ring { 0%{box-shadow:0 0 0 0 rgba(59,130,246,0.4)} 70%{box-shadow:0 0 0 10px rgba(59,130,246,0)} 100%{box-shadow:0 0 0 0 rgba(59,130,246,0)} }
         @keyframes shimmer { 0%{background-position:-400px 0} 100%{background-position:400px 0} }
       `}</style>
 
@@ -385,47 +458,91 @@ export default function Widget(props: Props) {
 
       <div style={{ position:'relative',zIndex:1,height:'100%',display:'flex',flexDirection:'column',padding:'28px 40px 24px',boxSizing:'border-box' }}>
 
-        {/* ── Sezione + Cards (banner rimosso) ── */}
-        <div style={{ flex:1,display:'flex',flexDirection:'column', ...off(oCards) }}>
+        {/* ── RIGA 2: Banner ←→ Orologio ──
+            alignItems:'center' → orologio centrato verticalmente rispetto all'altezza del banner        */}
+        <div style={{ display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:20,flexShrink:0,
+          animationName:'fadeInUp',animationDuration:'0.5s',animationDelay:'0.1s',animationFillMode:'both' }}>
 
-          {/* Orologio + data */}
+          {/* Gruppo: Banner utente */}
+          <div style={{ ...off(oBanner) }}>
+            {cfg.showUserBanner && (
+              uLoad ? (
+                <div style={{ display:'flex',alignItems:'center',gap:10 }}>
+                  <div style={{ width:16,height:16,borderRadius:'50%',border:'2px solid rgba(147,197,253,0.2)',borderTopColor:'#60a5fa',animationName:'spin',animationDuration:'0.8s',animationIterationCount:'infinite',animationTimingFunction:'linear' }} />
+                  <span style={{ fontSize:12,color:'rgba(147,197,253,0.6)' }}>Caricamento profilo…</span>
+                </div>
+              ) : user ? (
+                <div style={{ display:'inline-flex',alignItems:'center',gap:14,background:cfg.userBannerBg,
+                  backdropFilter:'blur(8px)',border:`1px solid ${cfg.userBannerBorderColor}`,borderRadius:14,padding:'10px 18px' }}>
+                  <div style={{ width:38,height:38,borderRadius:'50%',
+                    background:`linear-gradient(135deg,${cfg.userAvatarBg1},${cfg.userAvatarBg2})`,
+                    display:'flex',alignItems:'center',justifyContent:'center',fontSize:15,fontWeight:700,color:'#fff',flexShrink:0 }}>
+                    {(user.fullName||user.username).charAt(0).toUpperCase()}
+                  </div>
+                  <div>
+                    <div style={{ fontSize:cfg.userNameSize,fontWeight:600,color:cfg.userNameColor }}>
+                      Benvenuto, {user.fullName||user.username}
+                    </div>
+                    <div style={{ fontSize:11.5,color:cfg.userInfoColor,marginTop:2,display:'flex',gap:8,alignItems:'center',flexWrap:'wrap' as const }}>
+                      {user.ruoloLabel && <span style={{ background:cfg.userBadgeBg,border:`1px solid ${cfg.userBadgeColor}44`,borderRadius:6,padding:'1px 8px',fontWeight:600,color:cfg.userBadgeColor }}>{user.ruoloLabel}</span>}
+                      {user.ruoloFull && <span>{user.ruoloFull}</span>}
+                      {user.area && <span>· Area {user.area}</span>}
+                    </div>
+                  </div>
+                </div>
+              ) : (
+                <div style={{ display:'inline-flex',alignItems:'center',gap:10,background:'rgba(251,191,36,0.08)',border:'1px solid rgba(251,191,36,0.25)',borderRadius:10,padding:'9px 16px' }}>
+                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#fbbf24" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+                  <span style={{ fontSize:12.5,color:'rgba(251,191,36,0.9)' }}>Accesso non autenticato</span>
+                </div>
+              )
+            )}
+          </div>
+
+          {/* Gruppo: Orologio — centrato verticalmente nella riga grazie ad alignItems:'center' */}
           {cfg.showClock && (
-            <div style={{ display:'flex', justifyContent:'flex-end', marginBottom: 10, flexShrink:0, ...off(oClock) }}>
-              <div style={{ textAlign:'right' as const }}>
-                <div style={{ fontSize:cfg.clockSize, fontWeight:300, color:cfg.clockColor, letterSpacing:-0.5, fontFamily:cfg.cardLabelFont }}>
-                  {fmtTime(now)}
-                </div>
-                <div style={{ fontSize:cfg.dateSize, color:cfg.dateColor, marginTop:1, textTransform:'capitalize' as const }}>
-                  {fmtDate(now)}
-                </div>
+            <div style={{ textAlign:'right',flexShrink:0, ...off(oClock) }}>
+              <div style={{ fontSize:cfg.clockSize,fontWeight:300,color:cfg.clockColor,letterSpacing:-0.5,fontFamily:cfg.titleFont }}>
+                {fmtTime(now)}
+              </div>
+              <div style={{ fontSize:cfg.dateSize,color:cfg.dateColor,marginTop:1,textTransform:'capitalize' as const }}>
+                {fmtDate(now)}
               </div>
             </div>
           )}
+        </div>
 
+
+        {/* ── RIGA 3: Etichetta + Cards */}
+        <div style={{ flex:1,display:'flex',flexDirection:'column', ...off(oCards) }}>
           <div style={{ fontSize:cfg.sectionLabelSize,fontWeight:700,letterSpacing:cfg.sectionLabelSpacing,
             textTransform:'uppercase' as const,color:cfg.sectionLabelColor,marginBottom:14,flexShrink:0,
-            animationName:'fadeIn',animationDuration:'0.5s',animationDelay:'0.1s',animationFillMode:'both' }}>
+            animationName:'fadeIn',animationDuration:'0.5s',animationDelay:'0.2s',animationFillMode:'both' }}>
             {cfg.sectionLabelText}
           </div>
-
           <div style={{ display:'grid',gridTemplateColumns:`repeat(auto-fit,minmax(${cfg.cardMinWidth}px,1fr))`,gap:cfg.cardsGap,flex:1,alignContent:'start' }}>
             {uLoad
-              ? effCards.filter(c=>c.visible).map((_,i)=>(
+              ? /* Skeleton: mostra tanti placeholder quante sono le card totali configurate,
+                   così la griglia non cambia dimensione al caricamento dell'utente */
+                effCards.filter(c=>c.visible).map((_,i)=>(
                   <div key={i} style={{ borderRadius:cfg.cardBorderRadius, border:'1px solid rgba(255,255,255,0.07)',
                     background:'rgba(255,255,255,0.03)', padding:cfg.cardPadding,
                     animationDelay:`${i*80}ms`, animationName:'fadeInUp',
                     animationDuration:'0.5s', animationFillMode:'both' }}>
+                    {/* Icona placeholder */}
                     <div style={{ width:48,height:48,borderRadius:12,background:'rgba(255,255,255,0.06)',
                       marginBottom:16,
                       backgroundImage:'linear-gradient(90deg,rgba(255,255,255,0) 0%,rgba(255,255,255,0.04) 50%,rgba(255,255,255,0) 100%)',
                       backgroundSize:'400px 100%',
                       animationName:'shimmer',animationDuration:'1.6s',animationIterationCount:'infinite',animationTimingFunction:'linear' }}/>
+                    {/* Titolo placeholder */}
                     <div style={{ height:18,width:'60%',borderRadius:6,background:'rgba(255,255,255,0.06)',
                       marginBottom:10,
                       backgroundImage:'linear-gradient(90deg,rgba(255,255,255,0) 0%,rgba(255,255,255,0.04) 50%,rgba(255,255,255,0) 100%)',
                       backgroundSize:'400px 100%',
                       animationName:'shimmer',animationDuration:'1.6s',animationIterationCount:'infinite',animationTimingFunction:'linear',
                       animationDelay:`${i*80+200}ms` }}/>
+                    {/* Descrizione placeholder */}
                     <div style={{ height:12,width:'85%',borderRadius:4,background:'rgba(255,255,255,0.04)',marginBottom:6,
                       backgroundImage:'linear-gradient(90deg,rgba(255,255,255,0) 0%,rgba(255,255,255,0.03) 50%,rgba(255,255,255,0) 100%)',
                       backgroundSize:'400px 100%',
@@ -436,6 +553,7 @@ export default function Widget(props: Props) {
                       backgroundSize:'400px 100%',
                       animationName:'shimmer',animationDuration:'1.6s',animationIterationCount:'infinite',animationTimingFunction:'linear',
                       animationDelay:`${i*80+350}ms` }}/>
+                    {/* CTA placeholder */}
                     <div style={{ height:10,width:'25%',borderRadius:4,background:'rgba(255,255,255,0.04)',
                       backgroundImage:'linear-gradient(90deg,rgba(255,255,255,0) 0%,rgba(255,255,255,0.03) 50%,rgba(255,255,255,0) 100%)',
                       backgroundSize:'400px 100%',
@@ -450,8 +568,8 @@ export default function Widget(props: Props) {
 
         {/* Footer */}
         {cfg.showFooter && (
-          <div style={{ marginTop:20,flexShrink:0,display:'flex',justifyContent:'space-between',alignItems:'center',paddingTop:14,borderTop:'1px solid rgba(255,255,255,0.05)',animationName:'fadeIn',animationDuration:'0.5s',animationDelay:'0.2s',animationFillMode:'both' }}>
-            <div style={{ fontSize:cfg.footerSize,color:cfg.footerColor }}>{String(cfg.footerLeft || '').replace('{year}',String(now.getFullYear()))}</div>
+          <div style={{ marginTop:20,flexShrink:0,display:'flex',justifyContent:'space-between',alignItems:'center',paddingTop:14,borderTop:'1px solid rgba(255,255,255,0.05)',animationName:'fadeIn',animationDuration:'0.5s',animationDelay:'0.4s',animationFillMode:'both' }}>
+            <div style={{ fontSize:cfg.footerSize,color:cfg.footerColor }}>{cfg.footerLeft.replace('{year}',String(now.getFullYear()))}</div>
             <div style={{ fontSize:cfg.footerSize,color:cfg.footerColor }}>{cfg.footerRight}</div>
           </div>
         )}
