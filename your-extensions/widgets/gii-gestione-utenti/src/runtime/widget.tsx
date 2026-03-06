@@ -116,6 +116,7 @@ const RUOLI = [
   { label: 'RI', value: 4 },
   { label: 'DT', value: 5 },
   { label: 'DA', value: 6 },
+  { label: 'ADMIN', value: 7 },
 ]
 
 const AREE = [
@@ -166,12 +167,13 @@ function getAreePerRuolo(ruolo: number): number[] {
     case 4: return [1, 2, 3]     // RI
     case 5: return [2, 3]        // DT
     case 6: return [1]           // DA
+    case 7: return []            // ADMIN (trasversale) → nessuna area
     default: return []
   }
 }
 
 function getSettoriPerRuoloArea(ruolo: number, area: number): number[] {
-  if (ruolo === 5 || ruolo === 6) return []          // DT, DA → nessun settore
+  if (ruolo === 5 || ruolo === 6 || ruolo === 7) return []          // DT, DA, ADMIN → nessun settore
   if (ruolo === 4) {                                  // RI → settore fisso per area
     if (area === 1) return [1]                        // AMM → CR
     if (area === 2) return [2]                        // AGR → GI
@@ -190,6 +192,7 @@ function getUfficiPerAreaSettore(area: number, settore: number): Ufficio[] {
 
 function calcolaGruppo(ruolo: number, area: number, settore: number): string {
   const r = RUOLI.find(x => x.value === ruolo)?.label ?? ''
+  if (r === 'ADMIN') return ''
   const a = AREE.find(x => x.value === area)?.label ?? ''
   const s = SETTORI.find(x => x.value === settore)?.label ?? ''
   if (a === 'AGR') {
@@ -407,6 +410,12 @@ export default function Widget(props: AllWidgetProps<IMConfig>) {
 
   // ── Cascata ───────────────────────────────────────────────────────────────
   const onRuoloChange = (val: number | null) => {
+    // ADMIN: non assegnare automaticamente area/settore/ufficio né gruppi.
+    // L'utente admin (owner) ha già privilegi nativi e, se serve, può essere messo manualmente nei gruppi AGOL.
+    if (val === 7) {
+      setForm(f => ({ ...f, ruolo: 7, area: null, settore: null, ufficio: null, gruppo: '' }))
+      return
+    }
     const aree = val ? getAreePerRuolo(val) : []
     const areaAuto = aree.length === 1 ? aree[0] : null
     const settori = val && areaAuto ? getSettoriPerRuoloArea(val, areaAuto) : []
@@ -443,16 +452,17 @@ export default function Widget(props: AllWidgetProps<IMConfig>) {
   const onNew = () => { setForm(emptyForm()); setEditing(true) }
 
   const onEdit = (u: UtenteRecord) => {
+    const isAdmin = u.ruolo === 7
     setForm({
       objectid:          u.objectid,
       username:          u.username,
       full_name:         u.full_name,
       ruolo:             u.ruolo,
-      area:              u.area,
-      settore:           u.settore,
-      ufficio:           u.ufficio,
-      gruppo:            u.gruppo,
-      gruppo_precedente: u.gruppo,  // salva il gruppo attuale → PA lo userà per la rimozione
+      area:              isAdmin ? null : u.area,
+      settore:           isAdmin ? null : u.settore,
+      ufficio:           isAdmin ? null : u.ufficio,
+      gruppo:            isAdmin ? ''   : u.gruppo,
+      gruppo_precedente: isAdmin ? ''   : u.gruppo,  // salva il gruppo attuale → PA lo userà per la rimozione
     })
     setEditing(true)
   }
@@ -463,26 +473,35 @@ export default function Widget(props: AllWidgetProps<IMConfig>) {
     if (!form.username.trim())  { showMsg('Username obbligatorio', false); return }
     if (!form.full_name.trim()) { showMsg('Nome completo obbligatorio', false); return }
     if (!form.ruolo)            { showMsg('Ruolo obbligatorio', false); return }
-    if (!form.area)             { showMsg('Area obbligatoria', false); return }
-    const settoriPrevisti = getSettoriPerRuoloArea(form.ruolo, form.area)
-    if (settoriPrevisti.length > 0 && !form.settore) { showMsg('Settore obbligatorio', false); return }
-    if (!form.ufficio)          { showMsg('Ufficio obbligatorio', false); return }
+    // ADMIN: non richiede area/settore/ufficio e non gestisce gruppi (ha privilegi nativi AGOL).
+    if (form.ruolo !== 7) {
+      if (!form.area)             { showMsg('Area obbligatoria', false); return }
+      const settoriPrevisti = getSettoriPerRuoloArea(form.ruolo, form.area)
+      if (settoriPrevisti.length > 0 && !form.settore) { showMsg('Settore obbligatorio', false); return }
+      if (!form.ufficio)          { showMsg('Ufficio obbligatorio', false); return }
+    }
     setSaving(true)
     try {
-      const token = await getAGOLToken(props.config?.clientSecret ?? '')
-      const isUpdate = form.objectid != null
+      // Sanitize: ADMIN è trasversale (mai area/settore/ufficio/gruppo)
+      const formSan = form.ruolo === 7
+        ? { ...form, area: null, settore: null, ufficio: null, gruppo: '', gruppo_precedente: '' }
+        : form
 
-      if (isUpdate && form.gruppo_precedente && form.gruppo_precedente !== form.gruppo) {
+      const token = await getAGOLToken(props.config?.clientSecret ?? '')
+      const isUpdate = formSan.objectid != null
+
+      // Gestione gruppi: solo se esiste un gruppo target (per ADMIN è sempre vuoto).
+      if (isUpdate && formSan.gruppo_precedente && formSan.gruppo_precedente !== formSan.gruppo) {
         // Modifica: rimuovi dal vecchio gruppo e aggiungi al nuovo
-        await removeUserFromGroup(form.username, form.gruppo_precedente, token)
-        await addUserToGroup(form.username, form.gruppo, token)
+        if (formSan.gruppo_precedente) await removeUserFromGroup(formSan.username, formSan.gruppo_precedente, token)
+        if (formSan.gruppo) await addUserToGroup(formSan.username, formSan.gruppo, token)
       } else if (!isUpdate) {
         // Nuovo record: aggiungi al gruppo
-        await addUserToGroup(form.username, form.gruppo, token)
+        if (formSan.gruppo) await addUserToGroup(formSan.username, formSan.gruppo, token)
       }
 
-      await saveUtente(form)
-      showMsg(form.objectid ? 'Utente aggiornato' : 'Utente aggiunto', true)
+      await saveUtente(formSan)
+      showMsg(formSan.objectid ? 'Utente aggiornato' : 'Utente aggiunto', true)
       setEditing(false); setForm(emptyForm()); await load()
     } catch (e: any) { showMsg('Errore: ' + (e?.message ?? e), false) }
     setSaving(false)
@@ -508,7 +527,7 @@ export default function Widget(props: AllWidgetProps<IMConfig>) {
 
   const isAreaAuto     = areeDisp.length === 1
   const isSettoreFisso = !!form.ruolo && (
-    form.ruolo === 5 || form.ruolo === 6 ||
+    form.ruolo === 5 || form.ruolo === 6 || form.ruolo === 7 ||
     form.ruolo === 4 ||
     (form.ruolo === 2 && form.area === 1)
   )
@@ -558,12 +577,15 @@ export default function Widget(props: AllWidgetProps<IMConfig>) {
             </div>
             <div className="ggu-field">
               <div className="ggu-label">Area *</div>
-              <select className="ggu-select" value={form.area ?? ''}
-                disabled={!form.ruolo || isAreaAuto}
-                onChange={e => onAreaChange(e.target.value ? Number(e.target.value) : null)}>
-                <option value="">— seleziona —</option>
-                {areeDisp.map(a => <option key={a.value} value={a.value}>{a.label}</option>)}
-              </select>
+              {form.ruolo === 7
+                ? <input className="ggu-input" disabled value="—" />
+                : <select className="ggu-select" value={form.area ?? ''}
+                    disabled={!form.ruolo || isAreaAuto}
+                    onChange={e => onAreaChange(e.target.value ? Number(e.target.value) : null)}>
+                    <option value="">— seleziona —</option>
+                    {areeDisp.map(a => <option key={a.value} value={a.value}>{a.label}</option>)}
+                  </select>
+              }
             </div>
             <div className="ggu-field">
               <div className="ggu-label">Settore</div>
@@ -579,14 +601,17 @@ export default function Widget(props: AllWidgetProps<IMConfig>) {
             </div>
             <div className="ggu-field">
               <div className="ggu-label">Ufficio *</div>
-              {isUfficioFisso
-                ? <input className="ggu-input" disabled value="Cagliari" />
-                : <select className="ggu-select" value={form.ufficio ?? ''}
-                    disabled={!form.settore || ufficiDisp.length === 0}
-                    onChange={e => onUfficioChange(e.target.value ? Number(e.target.value) : null)}>
-                    <option value="">— seleziona —</option>
-                    {ufficiDisp.map(u => <option key={u.value} value={u.value}>{u.label}</option>)}
-                  </select>
+              {form.ruolo === 7
+                ? <input className="ggu-input" disabled value="—" />
+                : (isUfficioFisso
+                  ? <input className="ggu-input" disabled value="Cagliari" />
+                  : <select className="ggu-select" value={form.ufficio ?? ''}
+                      disabled={!form.settore || ufficiDisp.length === 0}
+                      onChange={e => onUfficioChange(e.target.value ? Number(e.target.value) : null)}>
+                      <option value="">— seleziona —</option>
+                      {ufficiDisp.map(u => <option key={u.value} value={u.value}>{u.label}</option>)}
+                    </select>
+                )
               }
             </div>
             <div className="ggu-field">

@@ -184,9 +184,91 @@ function RecordTracker (p: {
 
 const GII_PORTAL    = 'https://cbsm-hub.maps.arcgis.com'
 
+
+// Best-effort: prova a capire se l'utente è amministratore AGOL (org_admin),
+// anche quando l'Header non valorizza isAdmin.
+function inferIsOrgAdminFromSession (): boolean {
+  try {
+    const sm = SessionManager.getInstance()
+    const session: any = sm?.getMainSession?.() || sm?.getSessionByUrl?.(GII_PORTAL)
+    const role =
+      session?.user?.role ??
+      session?.userInfo?.role ??
+      session?.portalUser?.role ??
+      session?.portal?.user?.role ??
+      session?.portal?.userInfo?.role ??
+      session?.portalSelf?.user?.role ??
+      session?.portalSelf?.user?.userRole ??
+      session?.userRole
+
+    if (role) {
+      const r = String(role).toLowerCase()
+      if (r.includes('admin')) return true
+    }
+
+    const priv =
+      session?.user?.privileges ??
+      session?.userInfo?.privileges ??
+      session?.portalUser?.privileges ??
+      session?.portal?.user?.privileges ??
+      session?.portal?.userInfo?.privileges
+
+    if (Array.isArray(priv)) {
+      const p = priv.map(x => String(x).toLowerCase())
+      if (p.some(x => x.includes('portal:admin') || x.includes('portal:administrator') || x.includes('orgadmin') || x.includes('administrator'))) {
+        return true
+      }
+    }
+
+    if (session?.isAdmin === true) return true
+  } catch {}
+  return false
+}
+
+function computeDsMetaSig (useDsList: any[]): string {
+  try {
+    return (useDsList || []).map((u: any) => {
+      const dsId = String(u?.dataSourceId || '')
+      const ds = DataSourceManager.getInstance().getDataSource(dsId)
+      const label = String(ds?.getLabel?.() || '')
+      const j: any = ds?.getDataSourceJson?.() || (ds as any)?.dataSourceJson
+      const url = String(j?.url || '')
+      return `${dsId}|${label}|${url}`
+    }).join('||')
+  } catch {
+    return ''
+  }
+}
+
+function getServiceKeyFromDataSourceId (dsId: string): string {
+  try {
+    const ds = DataSourceManager.getInstance().getDataSource(dsId)
+    const j: any = ds?.getDataSourceJson?.() || (ds as any)?.dataSourceJson
+    const url = String(j?.url || '')
+    const part = url.split('/rest/services/')[1] || ''
+    const name = (part.split('/FeatureServer')[0] || '').trim()
+    if (name) return name.toUpperCase()
+    const lbl = String(ds?.getLabel?.() || '').trim()
+    return lbl ? lbl.toUpperCase() : dsId
+  } catch {
+    return dsId
+  }
+}
+
+function getRecordUniqKey (rec: DataRecord, dsId: string, svcCache: Map<string, string>): string {
+  const svc = svcCache.get(dsId) || (svcCache.set(dsId, getServiceKeyFromDataSourceId(dsId)), svcCache.get(dsId)!)
+  const d: any = rec?.getData?.() || {}
+  const gid = d?.GlobalID ?? d?.globalid ?? d?.globalId ?? d?.GLOBALID ?? null
+  if (gid !== null && gid !== undefined && String(gid).trim() !== '') return `GID|${String(gid).trim()}`
+  const oid = d?.OBJECTID ?? d?.ObjectId ?? d?.objectid ?? d?.objectId ?? null
+  if (oid !== null && oid !== undefined && String(oid).trim() !== '') return `${svc}|OID|${String(oid).trim()}`
+  const rid = (rec as any)?.getId?.() || (rec as any)?.id || ''
+  return `${svc}|RID|${String(rid)}`
+}
+
 // Mappa codice ruolo numerico → label (dal widget gestione utenti)
 const RUOLO_LABEL: Record<number, string> = {
-  1: 'TR', 2: 'TI', 3: 'RZ', 4: 'RI', 5: 'DT', 6: 'DA'
+  1: 'TR', 2: 'TI', 3: 'RZ', 4: 'RI', 5: 'DT', 6: 'DA', 7: 'ADMIN'
 }
 
 // Gerarchia priorità per utenti con gruppi multipli (es. admin)
@@ -296,7 +378,7 @@ function pickBestUseDataSourceId(
   const getServiceName = (useDs: any): string => {
     try {
       const ds = DataSourceManager.getInstance().getDataSource(String(useDs?.dataSourceId || ''))
-      const j: any = ds?.getDataSourceJson?.() || (ds as any)?.dataSourceJson
+      const j: any = (ds as any)?.getDataSourceJson?.() || (ds as any)?.dataSourceJson
       const url = String(j?.url || '')
       const part = url.split('/rest/services/')[1] || ''
       const name = part.split('/FeatureServer')[0] || ''
@@ -306,6 +388,9 @@ function pickBestUseDataSourceId(
     }
   }
 
+  // Fallback su label del DataSource (utile in preview/prime render quando la URL non è ancora pronta)
+  const getLabelUp = (useDs: any): string => up(getDsLabel(useDs, ''))
+
   const items = useDsList.map(u => ({ dsId: String(u?.dataSourceId || ''), name: getServiceName(u) }))
   const findBy = (pred: (n: string) => boolean) => {
     const hit = items.find(x => x.dsId && x.name && pred(x.name))
@@ -313,10 +398,18 @@ function pickBestUseDataSourceId(
   }
 
   // “Admin applicativo”: org_admin oppure ruolo DA/DT/RI oppure gruppo contiene ADMIN.
-  const isAppAdmin = user.isAdmin || ruoloLabel === 'DA' || ruoloLabel === 'DT' || ruoloLabel === 'RI' || gruppo.includes('ADMIN')
+  const isAppAdmin = user.isAdmin || ruolo === 7 || ruoloLabel === 'ADMIN' || ruoloLabel === 'DA' || ruoloLabel === 'DT' || ruoloLabel === 'RI' || gruppo.includes('ADMIN')
   if (isAppAdmin) {
     const dsAdmin = findBy(n => n.includes('EB_ADMIN') || n.includes('GII_VIEW_EB_ADMIN') || n.includes('VIEW_EB_ADMIN'))
     if (dsAdmin) return dsAdmin
+
+    // Fallback: se il serviceName non è ancora disponibile (preview/prime render),
+    // prova a riconoscere la vista ADMIN dal *label* del DataSource.
+    const hitByLabel = useDsList.find(u => {
+      const L = getLabelUp(u)
+      return L.includes('EB_ADMIN') || L.includes('GII_VIEW_EB_ADMIN') || L.includes('VIEW_EB_ADMIN') || L.includes('_EB_ADMIN')
+    })
+    if (hitByLabel?.dataSourceId) return String(hitByLabel.dataSourceId)
   }
 
   // area+settore
@@ -338,6 +431,12 @@ function pickBestUseDataSourceId(
   if (isAppAdmin) {
     const dsAdminFallback = findBy(n => n.includes('EB_ADMIN') || n.includes('GII_VIEW_EB_ADMIN') || n.includes('VIEW_EB_ADMIN'))
     if (dsAdminFallback) return dsAdminFallback
+
+    const hitByLabel = useDsList.find(u => {
+      const L = getLabelUp(u)
+      return L.includes('EB_ADMIN') || L.includes('GII_VIEW_EB_ADMIN') || L.includes('VIEW_EB_ADMIN') || L.includes('_EB_ADMIN')
+    })
+    if (hitByLabel?.dataSourceId) return String(hitByLabel.dataSourceId)
   }
 
   // Se non troviamo match affidabili, evitiamo di forzare un singolo DS “a caso”.
@@ -362,11 +461,20 @@ function readGiiUserFromHeader(): GiiUserInfo | null {
   if (!cached?.username) return null
 
   const ruolo = cached.ruolo != null ? Number(cached.ruolo) : null
-  const isAdmin = !!cached.isAdmin
-  const ruoloLabel = String(
+  const gruppo = String(cached.gruppo || '')
+  const inferredAdmin = inferIsOrgAdminFromSession()
+  const inferredAppAdmin = gruppo.toUpperCase().includes('ADMIN')
+  const isWorkflowAdmin = (ruolo === 7) || (String(cached.ruoloLabel || '').toUpperCase() === 'ADMIN') || !!cached.isWorkflowAdmin
+  const isAdmin = !!cached.isAdmin || inferredAdmin || inferredAppAdmin || isWorkflowAdmin
+
+  let ruoloLabel = String(
     cached.ruoloLabel ||
     (ruolo != null ? (RUOLO_LABEL[ruolo] ?? '') : (isAdmin ? 'ADMIN' : ''))
   )
+
+  // Non forziamo più 'AMM': il ruolo workflow resta quello reale.
+  // Se è un admin (org_admin o workflow admin) senza ruolo esplicito, mostriamo 'ADMIN'.
+  if ((!ruoloLabel || !ruoloLabel.trim()) && isAdmin) ruoloLabel = 'ADMIN'
 
   return {
     username: String(cached.username),
@@ -375,7 +483,7 @@ function readGiiUserFromHeader(): GiiUserInfo | null {
     area: cached.area != null ? Number(cached.area) : null,
     settore: cached.settore != null ? Number(cached.settore) : null,
     ufficio: cached.ufficio != null ? Number(cached.ufficio) : null,
-    gruppo: String(cached.gruppo || ''),
+    gruppo,
     isAdmin
   }
 }
@@ -422,6 +530,9 @@ export default function Widget (props: Props) {
   const [userLoading, setUserLoading] = React.useState(true)
   // notLogged: true quando non c'è utente autenticato → overlay bloccante
   const [notLogged, setNotLogged] = React.useState(false)
+
+  // Firma metadata datasource (label/url) per ricalcolare bestDsId quando ExB popola i datasource
+  const [dsMetaSig, setDsMetaSig] = React.useState('')
 
 
   // --- Selection bridge boot reset ---
@@ -485,7 +596,7 @@ React.useEffect(() => {
   const bestDsId: string | null = React.useMemo(
     () => giiUser ? pickBestUseDataSourceId(giiUser as any, useDsJs) : null,
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [giiUser?.username, giiUser?.ruolo, giiUser?.area, giiUser?.settore, giiUser?.isAdmin, (giiUser as any)?.gruppo, useDsJs.length]
+    [giiUser?.username, giiUser?.ruolo, giiUser?.area, giiUser?.settore, giiUser?.isAdmin, (giiUser as any)?.gruppo, useDsJs.length, dsMetaSig]
   )
 
   // useDsJs filtrato: solo i datasource consentiti per il ruolo dell'utente
@@ -516,28 +627,115 @@ React.useEffect(() => {
       ? getStatoFieldForRuolo(giiUser.ruoloLabel)
       : null
 
-  // ── Tab ruolo: Tutte / In attesa mia / In attesa altri ────────────────────
+  // ── Tab ruolo: Tutte / In attesa mia / In attesa di altri ────────────────────
   const ROLE_TABS = [
     { id: 'tutte',        label: 'Tutte le pratiche' },
     { id: 'attesa_mia',   label: 'In attesa mia' },
-    { id: 'attesa_altri', label: 'In attesa altri' },
+    { id: 'attesa_altri', label: 'In attesa di altri' },
   ]
   const [activeRoleTab, setActiveRoleTab] = React.useState<string>('tutte')
 
   // Funzione filtro per tab ruolo
+  const passesRoleTab = React.useCallback((r: DataRecord, tabId: string): boolean => {
+    if (!statoRuoloField || tabId === 'tutte') return true
+    const role = String(giiUser?.ruoloLabel || '').toUpperCase()
+
+    const d = r.getData?.() || {}
+    const val = d[statoRuoloField]
+    const n = val != null ? Number(val) : null
+
+    // Default: come prima
+    const isAttesaMiaDefault = (n === 0 || n === 1 || n === 3)
+    const isAttesaAltriDefault = (n === 2 || n === 4)
+
+    // Caso TI: n===2 ("presa in carico") e' *mia* se assegnata al TI loggato.
+    // Fallback robusto: se manca lo username assegnato, prova anche con ti_assegnato_nome.
+    if (role === 'TI' && n === 2) {
+      const tiUser = String(d['ti_assegnato_username'] ?? d['ti_assegnato_user'] ?? d['ti_assegnato'] ?? '').trim()
+      const tiName = String(d['ti_assegnato_nome'] ?? d['ti_assegnato_name'] ?? '').trim()
+
+      const meUser = String(giiUser?.username || '').trim()
+      const meName = String((giiUser as any)?.fullName ?? (giiUser as any)?.nome ?? (giiUser as any)?.displayName ?? '').trim()
+
+      const eq = (a: string, b: string) => !!a && !!b && a.toLowerCase() === b.toLowerCase()
+      const isMine = eq(tiUser, meUser) || eq(tiName, meUser) || (meName ? eq(tiName, meName) : false)
+
+      if (tabId === 'attesa_mia') return isMine
+      if (tabId === 'attesa_altri') return !isMine
+    }
+
+    if (role === 'RZ') {
+      const tiInfo = getTiIstruttoriaInfo(d)
+      if (tiInfo.isInTiIstruttoria) {
+        if (tabId === 'attesa_mia') return false
+        if (tabId === 'attesa_altri') return true
+      }
+    }
+
+    if (tabId === 'attesa_mia') return isAttesaMiaDefault
+    if (tabId === 'attesa_altri') return isAttesaAltriDefault
+    return true
+  }, [statoRuoloField, giiUser?.ruoloLabel, giiUser?.username])
+
+
+
+  const equalsUser = React.useCallback((a: any, b: any): boolean => {
+    const sa = String(a ?? '').trim().toLowerCase()
+    const sb = String(b ?? '').trim().toLowerCase()
+    return !!sa && !!sb && sa == sb
+  }, [])
+
+  const isRecordVisibleForCurrentUser = React.useCallback((r: DataRecord): boolean => {
+    if (giiUser?.isAdmin) return true
+    const role = String(giiUser?.ruoloLabel || '').toUpperCase()
+    if (!role) return true
+
+    const d: any = r.getData?.() || {}
+
+    if (role === 'TI') {
+      const meUser = String(giiUser?.username || '').trim()
+      const meName = String((giiUser as any)?.fullName ?? (giiUser as any)?.nome ?? (giiUser as any)?.displayName ?? '').trim()
+      const opRaw = d['origine_pratica']
+      const opNum = opRaw !== null && opRaw !== undefined && opRaw !== '' ? Number(opRaw) : null
+
+      const tiUser = String(d['ti_assegnato_username'] ?? d['ti_assegnato_user'] ?? d['ti_assegnato'] ?? '').trim()
+      const tiName = String(d['ti_assegnato_nome'] ?? d['ti_assegnato_name'] ?? '').trim()
+      const assignedToMe = equalsUser(tiUser, meUser) || equalsUser(tiName, meUser) || (meName ? equalsUser(tiName, meName) : false)
+
+      const creatorVals = [
+        d['created_user'], d['Creator'], d['creator'], d['username'], d['user_name'],
+        d['utente'], d['utente_ins'], d['created_by'], d['submitter'], d['owner']
+      ]
+      const createdByMe = creatorVals.some(v => equalsUser(v, meUser) || (meName ? equalsUser(v, meName) : false))
+
+      const hasTiWorkflow = hasRuoloData(d, 'TI')
+
+      // Origine TR: i TI non devono vedere la pratica finché RZ non assegna.
+      // E dopo l'assegnazione la vede solo il TI assegnatario.
+      if (opNum === 1) {
+        if (!tiUser && !tiName && !hasTiWorkflow) return false
+        if (tiUser || tiName) return assignedToMe
+        return false
+      }
+
+      // Origine TI: la vede il TI originatore; se poi viene esplicitamente assegnata,
+      // prevale comunque l'assegnazione nominativa.
+      if (opNum === 2) {
+        if (tiUser || tiName) return assignedToMe
+        if (createdByMe) return true
+        return hasTiWorkflow
+      }
+    }
+
+    return true
+  }, [giiUser, equalsUser])
+
   const filterByRoleTab = React.useCallback((recs: DataRecord[]): DataRecord[] => {
     if (!statoRuoloField || activeRoleTab === 'tutte') return recs
-    return recs.filter(r => {
-      const d = r.getData?.() || {}
-      const val = d[statoRuoloField]
-      const n = val != null ? Number(val) : null
-      if (activeRoleTab === 'attesa_mia') return n === 0 || n === 1 || n === 3  // Non attivo, da prendere, integrazione
-      if (activeRoleTab === 'attesa_altri') return n === 2 || n === 4  // Presa in carico, trasmesso
-      return true
-    })
-  }, [statoRuoloField, activeRoleTab])
+    return recs.filter(r => passesRoleTab(r, activeRoleTab))
+  }, [statoRuoloField, activeRoleTab, passesRoleTab])
 
-  // Ordinamento priorità ruolo: in attesa mia sempre in cima
+// Ordinamento priorità ruolo: in attesa mia sempre in cima
   const sortByRolePriority = React.useCallback((recs: DataRecord[]): DataRecord[] => {
     if (!statoRuoloField) return recs
     return [...recs].sort((ra, rb) => {
@@ -578,6 +776,7 @@ React.useEffect(() => {
   // ── Raccolta record da TUTTI i datasource ──
   const dsDataRef = React.useRef<Record<string, { recs: DataRecord[], ds: DataSource | null, loading: boolean }>>({})
 const prevUserRef = React.useRef<string>('')
+  const prevDsMetaSigRef = React.useRef<string>('')
 
 // Se cambia l'utente (switch account / logout) pulisce cache record + selezione locale
 React.useEffect(() => {
@@ -601,6 +800,14 @@ React.useEffect(() => {
   // Si riattiva quando cambia giiUser (post-login) o il numero di DS
   React.useEffect(() => {
     const timers = [300, 800, 2000, 4000]
+    // Aggiorna signature datasource (label/url) per scegliere DS migliore ed evitare duplicati
+    try {
+      const sig0 = computeDsMetaSig(useDsJs)
+      if (sig0 && sig0 !== prevDsMetaSigRef.current) {
+        prevDsMetaSigRef.current = sig0
+        setDsMetaSig(sig0)
+      }
+    } catch {}
     const ids = timers.map(ms => setTimeout(() => {
       let changed = false
       Object.entries(dsDataRef.current).forEach(([dsId, entry]) => {
@@ -612,6 +819,15 @@ React.useEffect(() => {
           }
         }
       })
+      // Aggiorna anche la signature dei datasource (label/url) se cambia nel tempo
+      try {
+        const sig = computeDsMetaSig(useDsJs)
+        if (sig && sig !== prevDsMetaSigRef.current) {
+          prevDsMetaSigRef.current = sig
+          setDsMetaSig(sig)
+        }
+      } catch {}
+
       if (changed) setDsDataVer(v => v + 1)
     }, ms))
     return () => ids.forEach(id => clearTimeout(id))
@@ -763,6 +979,56 @@ React.useEffect(() => {
       || (e !== null && e !== undefined && e !== '')
   }
 
+  const getRoleLastTouchMs = (d: any, role: string): number | null => {
+    const vals = [
+      parseToMs(d[`dt_presa_in_carico_${role}`]),
+      parseToMs(d[`dt_stato_${role}`]),
+      parseToMs(d[`dt_esito_${role}`])
+    ].filter((v): v is number => v !== null)
+    return vals.length ? Math.max(...vals) : null
+  }
+
+  const getTiIstruttoriaInfo = (d: any) => {
+    const tiUser = String(d['ti_assegnato_username'] ?? d['ti_assegnato_user'] ?? d['ti_assegnato'] ?? '').trim()
+    const higherTouched = hasRuoloData(d, 'RI') || hasRuoloData(d, 'DT') || hasRuoloData(d, 'DA')
+
+    const statoTiRaw = d['stato_TI'] ?? d['stato_ti']
+    const presaTiRaw = d['presa_in_carico_TI'] ?? d['presa_in_carico_ti']
+    const esitoTiRaw = d['esito_TI'] ?? d['esito_ti']
+
+    const statoTiNum = statoTiRaw !== null && statoTiRaw !== undefined && statoTiRaw !== '' ? Number(statoTiRaw) : null
+    const presaTiNum = presaTiRaw !== null && presaTiRaw !== undefined && presaTiRaw !== '' ? Number(presaTiRaw) : null
+    const esitoTiNum = esitoTiRaw !== null && esitoTiRaw !== undefined && esitoTiRaw !== '' ? Number(esitoTiRaw) : null
+
+    const tiReturned =
+      (esitoTiNum !== null && Number.isFinite(esitoTiNum)) ||
+      (statoTiNum === statoApprovata) ||
+      (statoTiNum === statoRespinta)
+
+    const tiLastTouchMs = getRoleLastTouchMs(d, 'TI')
+    const rzLastTouchMs = getRoleLastTouchMs(d, 'RZ')
+    const awaitingRetakeByRz =
+      !!tiUser &&
+      tiReturned &&
+      !higherTouched &&
+      tiLastTouchMs !== null &&
+      (rzLastTouchMs === null || rzLastTouchMs <= tiLastTouchMs)
+
+    return {
+      hasAssignedTi: !!tiUser,
+      tiUser,
+      higherTouched,
+      statoTiNum,
+      presaTiNum,
+      esitoTiNum,
+      tiReturned,
+      tiLastTouchMs,
+      rzLastTouchMs,
+      awaitingRetakeByRz,
+      isInTiIstruttoria: !!tiUser && !higherTouched && !tiReturned
+    }
+  }
+
   // ── computeSintetico: workflow-aware su tutti i ruoli ──────────────────────
   //
   // Logica:
@@ -780,6 +1046,34 @@ React.useEffect(() => {
 
   const computeSintetico = (d: any): { ruolo: string, label: string, statoForChip: number | null } => {
     const scanOrder = ['DA', 'DT', 'RI', 'RZ', 'TI', 'TR']
+
+    // Caso speciale: assegnazione RZ -> TI.
+    // Finche' TI non "restituisce" la pratica, lo stato sintetico segue
+    // le voci del file xlsx sul tratto RZ -> TI.
+    const tiInfo = getTiIstruttoriaInfo(d)
+    if (tiInfo.awaitingRetakeByRz) {
+      return { ruolo: 'RZ', label: 'Trasmessa a RZ', statoForChip: statoDaPrendere }
+    }
+    if (tiInfo.hasAssignedTi && tiInfo.isInTiIstruttoria) {
+      if (tiInfo.statoTiNum !== null && Number.isFinite(tiInfo.statoTiNum)) {
+        if (tiInfo.statoTiNum === statoDaPrendere) {
+          return { ruolo: 'TI', label: 'Da prendere in carico TI', statoForChip: statoDaPrendere }
+        }
+        if (tiInfo.statoTiNum === statoPresa) {
+          return { ruolo: 'TI', label: 'Presa in carico TI', statoForChip: statoPresa }
+        }
+        return { ruolo: 'TI', label: 'In carico TI', statoForChip: null }
+      }
+      if (tiInfo.presaTiNum !== null && Number.isFinite(tiInfo.presaTiNum)) {
+        if (tiInfo.presaTiNum === presaDaPrendere) {
+          return { ruolo: 'TI', label: 'Da prendere in carico TI', statoForChip: statoDaPrendere }
+        }
+        if (tiInfo.presaTiNum === presaPresa) {
+          return { ruolo: 'TI', label: 'Presa in carico TI', statoForChip: statoPresa }
+        }
+      }
+      return { ruolo: 'TI', label: 'Trasmessa a TI', statoForChip: statoDaPrendere }
+    }
 
     for (const role of scanOrder) {
       if (!hasRuoloData(d, role)) continue
@@ -805,7 +1099,7 @@ React.useEffect(() => {
         }
         // stato=2 (presa in carico) → in lavorazione presso quel ruolo
         if (statoNum === statoPresa) {
-          return { ruolo: role, label: `In lavorazione ${role}`, statoForChip: statoPresa }
+          return { ruolo: role, label: `Presa in carico ${role}`, statoForChip: statoPresa }
         }
         // altri stati espliciti (integrazione, approvata, respinta)
         return { ruolo: role, label: `${labelStato(statoNum)} (${role})`, statoForChip: statoNum }
@@ -818,7 +1112,7 @@ React.useEffect(() => {
         }
         if (presaNum === presaPresa) {
           // presa=2: presa in carico, in lavorazione
-          return { ruolo: role, label: `In lavorazione ${role}`, statoForChip: statoPresa }
+          return { ruolo: role, label: `Presa in carico ${role}`, statoForChip: statoPresa }
         }
       }
 
@@ -831,10 +1125,10 @@ React.useEffect(() => {
     const opNum = op !== null && op !== undefined && op !== '' ? Number(op) : null
     if (opNum === 2) {
       // TI ha creato la pratica, la sta ancora lavorando prima di trasmetterla a RZ
-      return { ruolo: 'TI', label: 'In lavorazione TI', statoForChip: statoPresa }
+      return { ruolo: 'TI', label: 'Da trasmettere a RZ', statoForChip: statoPresa }
     }
     // origine=1 (TR) o non valorizzato: implicitamente trasmessa a RZ
-    return { ruolo: 'RZ', label: 'Trasmessa a RZ', statoForChip: statoDaPrendere }
+    return { ruolo: 'RZ', label: 'Da prendere in carico RZ', statoForChip: statoDaPrendere }
   }
 
   // ── computeUltimoAggMs: considera timestamp di TUTTI i ruoli ──────────────
@@ -865,6 +1159,12 @@ React.useEffect(() => {
       return opNum === 2 ? 'Trasmettere a RZ (TI)' : 'Prendere in carico (RZ)'
     }
 
+    const opRaw = d['origine_pratica']
+    const opNum = opRaw !== null && opRaw !== undefined && opRaw !== '' ? Number(opRaw) : null
+    const tiInfo = getTiIstruttoriaInfo(d)
+    if (tiInfo.awaitingRetakeByRz) return 'Prendere in carico (RZ)'
+    const hasTiAnyEvidence = tiInfo.hasAssignedTi || hasRuoloData(d, 'TI')
+
     const presaRaw = d[`presa_in_carico_${ruolo}`]
     const statoRaw = d[`stato_${ruolo}`]
     const esitoRaw = d[`esito_${ruolo}`]
@@ -889,9 +1189,12 @@ React.useEffect(() => {
       if (statoNum === statoDaPrendere)  return `Prendere in carico (${ruolo})`
       if (statoNum === statoPresa) {
         // In lavorazione → azione dipende dal ruolo
-        if (ruolo === 'RZ') return 'Approvare o richiedere integrazione (RZ)'
+        if (ruolo === 'RZ') {
+          if ((opNum == null || opNum === 1) && !hasTiAnyEvidence) return 'Assegnare a TI (RZ)'
+          return 'Trasmettere a RI (RZ)'
+        }
         if (ruolo === 'TI') return 'Trasmettere a RZ (TI)'
-        if (ruolo === 'RI') return 'Validare e trasmettere a DT (RI)'
+        if (ruolo === 'RI') return 'Trasmettere a DT (RI)'
         if (ruolo === 'DT') return 'Esprimere esito (DT)'
         if (ruolo === 'DA') return 'Esprimere esito finale (DA)'
         return `Esprimere esito (${ruolo})`
@@ -908,9 +1211,12 @@ React.useEffect(() => {
     if (presaNum !== null) {
       if (presaNum === presaDaPrendere)  return `Prendere in carico (${ruolo})`
       if (presaNum === presaPresa) {
-        if (ruolo === 'RZ') return 'Approvare o richiedere integrazione (RZ)'
+        if (ruolo === 'RZ') {
+          if ((opNum == null || opNum === 1) && !hasTiAnyEvidence) return 'Assegnare a TI (RZ)'
+          return 'Trasmettere a RI (RZ)'
+        }
         if (ruolo === 'TI') return 'Trasmettere a RZ (TI)'
-        if (ruolo === 'RI') return 'Validare e trasmettere a DT (RI)'
+        if (ruolo === 'RI') return 'Trasmettere a DT (RI)'
         if (ruolo === 'DT') return 'Esprimere esito (DT)'
         if (ruolo === 'DA') return 'Esprimere esito finale (DA)'
         return `Esprimere esito (${ruolo})`
@@ -969,19 +1275,27 @@ React.useEffect(() => {
   // ── Record fusi e ordinati per il tab attivo ──
   const mergedRecs = React.useMemo(() => {
     if (!activeGroup) return [] as DataRecord[]
-    const all: DataRecord[] = []
+    const svcCache = new Map<string, string>()
+    const uniq = new Map<string, DataRecord>()
     for (const di of activeGroup.dsIndices) {
       const dsId = String(filteredUseDsJs[di]?.dataSourceId || '')
       const entry = dsDataRef.current[dsId]
-      if (entry?.recs) all.push(...entry.recs)
+      if (entry?.recs) {
+        for (const r of entry.recs) {
+          const k = getRecordUniqKey(r, dsId, svcCache)
+          if (!uniq.has(k)) uniq.set(k, r)
+        }
+      }
     }
+    const allUniq: DataRecord[] = Array.from(uniq.values())
+    const visibleForUser = allUniq.filter(r => isRecordVisibleForCurrentUser(r))
     // Applica filtro tab ruolo
-    const filtered = filterByRoleTab(all)
+    const filtered = filterByRoleTab(visibleForUser)
     // Ordinamento: prima priorità ruolo (in attesa mia in cima), poi sort utente
     const withPriority = sortByRolePriority(filtered)
     return sortRecords(withPriority, sortState)
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeGroup, dsDataVer, sortState, activeRoleTab, statoRuoloField])
+  }, [activeGroup, dsDataVer, sortState, activeRoleTab, statoRuoloField, isRecordVisibleForCurrentUser])
 
   // Lookup: record → dsId (via WeakMap su identità oggetto, sopravvive al sort)
   const recDsLookup = React.useMemo(() => {
@@ -1330,11 +1644,11 @@ React.useEffect(() => {
             </DataSourceComponent>
           ))}
 
-          {/* ── Tab ruolo: Tutte / In attesa mia / In attesa altri ── */}
+          {/* ── Tab ruolo: Tutte / In attesa mia / In attesa di altri ── */}
           {!userLoading && statoRuoloField && (
             <div style={{ display: 'flex', gap: 8, padding: '8px 12px', borderBottom: '1px solid rgba(0,0,0,0.08)', alignItems: 'center', flexWrap: 'wrap' }}>
               <span style={{ fontSize: 11, color: '#6b7280', marginRight: 4 }}>
-                {giiUser?.isAdmin ? '👤 Admin' : `👤 ${giiUser?.ruoloLabel ?? ''}`}
+                {`👤 ${(giiUser?.ruoloLabel ?? '')}`}
               </span>
               {ROLE_TABS.map(t => (
                 <button
@@ -1347,21 +1661,22 @@ React.useEffect(() => {
                   {/* Conteggio record per tab */}
                   {(() => {
                     if (!activeGroup) return null
-                    const all: DataRecord[] = []
+                    const svcCache = new Map<string, string>()
+                    const uniq = new Map<string, DataRecord>()
                     for (const di of activeGroup.dsIndices) {
                       const dsId = String(filteredUseDsJs[di]?.dataSourceId || '')
                       const entry = dsDataRef.current[dsId]
-                      if (entry?.recs) all.push(...entry.recs)
+                      if (entry?.recs) {
+                        for (const r of entry.recs) {
+                          const k = getRecordUniqKey(r, dsId, svcCache)
+                          if (!uniq.has(k)) uniq.set(k, r)
+                        }
+                      }
                     }
+                    const all: DataRecord[] = Array.from(uniq.values())
                     const count = t.id === 'tutte'
                       ? all.length
-                      : all.filter(r => {
-                          const d = r.getData?.() || {}
-                          const n = d[statoRuoloField!] != null ? Number(d[statoRuoloField!]) : null
-                          if (t.id === 'attesa_mia') return n === 0 || n === 1 || n === 3
-                          if (t.id === 'attesa_altri') return n === 2 || n === 4
-                          return false
-                        }).length
+                      : all.filter(r => passesRoleTab(r, t.id)).length
                     return count > 0 ? (
                       <span style={{
                         marginLeft: 6, background: activeRoleTab === t.id ? '#2f6fed' : 'rgba(0,0,0,0.1)',
@@ -1378,7 +1693,7 @@ React.useEffect(() => {
           {/* Indicatore admin: vede tutto senza filtri */}
           {!userLoading && giiUser?.isAdmin && (
             <div style={{ padding: '6px 12px', fontSize: 11, color: '#6b7280', borderBottom: '1px solid rgba(0,0,0,0.06)', background: '#fafafa' }}>
-              👤 Admin — visualizzazione completa senza filtri ruolo
+              👤 AMM — visualizzazione completa senza filtri ruolo
             </div>
           )}
 

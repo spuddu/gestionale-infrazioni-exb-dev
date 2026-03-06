@@ -221,10 +221,10 @@ export default function Setting(props: AllWidgetSettingProps<IMConfig>) {
         <div style={{ fontSize:11, color:'#4b9dd4', lineHeight:1.5, background:'rgba(59,130,246,0.08)', borderRadius:8, padding:'7px 10px', marginBottom:4 }}>
           <strong>Riga:</strong> Logo · Titoli · Banner utente · Login/Esci
         </div>
-        <Nudge label='Logo'         icon='🖼' value={getOffset('offsetLogo')}    onChange={v=>set('offsetLogo',v)}/>
-        <Nudge label='Titoli'       icon='📝' value={getOffset('offsetTitoli')}  onChange={v=>set('offsetTitoli',v)}/>
+        <Nudge label='Logo' icon='🖼' value={getOffset('offsetLogo')} onChange={v=>set('offsetLogo',v)}/>
+        <Nudge label='Testi (ente + titolo)' icon='📝' value={getOffset('offsetTitoli')} onChange={v=>set('offsetTitoli',v)}/>
         <Nudge label='Banner utente' icon='👤' value={getOffset('offsetBanner')} onChange={v=>set('offsetBanner',v)}/>
-        <Nudge label='Login / Esci'  icon='🔐' value={getOffset('offsetLogin')}  onChange={v=>set('offsetLogin',v)}/>
+        <Nudge label='Login / Esci'  icon='🔐' value={getOffset('offsetLogin')} onChange={v=>set('offsetLogin',v)}/>
         <div style={{ marginTop:10 }}>
           <button type='button'
             onClick={()=>['offsetLogo','offsetTitoli','offsetBanner','offsetLogin'].forEach(k=>set(k,{x:0,y:0}))}

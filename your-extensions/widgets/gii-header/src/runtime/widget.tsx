@@ -5,7 +5,7 @@ import { defaultConfig } from '../config'
 
 const GII_PORTAL     = 'https://cbsm-hub.maps.arcgis.com'
 const GII_UTENTI_URL = 'https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_utenti/FeatureServer/0'
-const RUOLO_LABEL: Record<number, string> = { 1:'TR', 2:'TI', 3:'RZ', 4:'RI', 5:'DT', 6:'DA' }
+const RUOLO_LABEL: Record<number, string> = { 1:'TR', 2:'TI', 3:'RZ', 4:'RI', 5:'DT', 6:'DA', 7:'ADMIN' }
 const RUOLO_FULL:  Record<string, string> = {
   TR:'Tecnico Rilevatore', TI:'Tecnico Istruttore', RZ:'Responsabile di Zona',
   RI:'Responsabile Istruttore', DT:'Direttore Tecnico', DA:'Direttore Amministrativo', ADMIN:'Amministratore'
@@ -122,7 +122,12 @@ interface GiiUserRole {
   settore: number | null
   ufficio: number | null
   gruppo: string
+  /** Backward-compat: TRUE se l'utente AGOL è org_admin/owner */
   isAdmin: boolean
+  /** Flag esplicito: admin dell'organizzazione AGOL (org_admin/owner) */
+  isOrgAdmin: boolean
+  /** TRUE se ruolo workflow è ADMIN (ruolo=7 o label=ADMIN) */
+  isWorkflowAdmin: boolean
 }
 
 function toNum(v: any): number | null {
@@ -142,12 +147,27 @@ function makeInitials(name: string): string {
 async function loadUser(): Promise<GiiUserRole | null> {
   const cached = (window as any).__giiUserRole
   if (cached?.username) {
-    const ruolo = toNum(cached.ruolo)
-    const area = toNum(cached.area)
-    const settore = toNum(cached.settore)
-    const ufficio = toNum(cached.ufficio)
-    const isAdmin = !!cached.isAdmin
-    const rl = String(cached.ruoloLabel || (ruolo != null ? (RUOLO_LABEL[ruolo] ?? '') : '') || (isAdmin ? 'ADMIN' : ''))
+    const isOrgAdmin = !!(cached.isOrgAdmin ?? cached.isAdmin)
+    let ruolo = toNum(cached.ruolo)
+
+    // Label ruolo: priorità al valore già in cache, poi mapping da "ruolo" (workflow),
+    // infine fallback ADMIN se l'utente è org_admin/owner AGOL.
+    let rl = String(
+      cached.ruoloLabel ||
+      (ruolo != null ? (RUOLO_LABEL[ruolo] ?? '') : '') ||
+      (isOrgAdmin ? 'ADMIN' : '')
+    )
+
+    // Normalizza il ruolo workflow per ADMIN (7) quando è un fallback (org_admin senza record)
+    if ((ruolo == null || ruolo === 0) && rl === 'ADMIN') ruolo = 7
+
+    const isWorkflowAdmin = (ruolo === 7) || rl === 'ADMIN'
+
+    // ADMIN trasversale: mai area/settore/ufficio (anche se presenti per errore in cache)
+    const area = isWorkflowAdmin ? null : toNum(cached.area)
+    const settore = isWorkflowAdmin ? null : toNum(cached.settore)
+    const ufficio = isWorkflowAdmin ? null : toNum(cached.ufficio)
+
     const fullName = String(cached.fullName || cached.full_name || cached.username)
     const u: GiiUserRole = {
       username: String(cached.username),
@@ -159,7 +179,10 @@ async function loadUser(): Promise<GiiUserRole | null> {
       settore,
       ufficio,
       gruppo: String(cached.gruppo || ''),
-      isAdmin
+      // Backward-compat: "isAdmin" resta uguale a isOrgAdmin (admin dell'ORG AGOL)
+      isAdmin: isOrgAdmin,
+      isOrgAdmin,
+      isWorkflowAdmin
     }
     try { (window as any).__giiUserRole = u } catch { }
     return u
@@ -170,7 +193,13 @@ async function loadUser(): Promise<GiiUserRole | null> {
     const json = await res.json()
     const username = json?.username || ''; if (!username) return null
     const fullName = json?.fullName || username
-    const isAdmin  = json?.role === 'org_admin'
+
+    // Admin dell'ORG AGOL (org_admin/owner): solo flag (non deve forzare il ruolo workflow)
+    const roleStr = String(json?.role || '')
+    const privs: any[] = Array.isArray(json?.privileges) ? (json.privileges as any[]) : []
+    const isOrgAdmin = roleStr === 'org_admin' || roleStr === 'org_owner' || privs.some(p => String(p).startsWith('portal:admin'))
+    const isAdmin = isOrgAdmin // backward-compat
+
     const FeatureLayer = await loadEsriModule<any>('esri/layers/FeatureLayer')
     const fl = new FeatureLayer({ url: GII_UTENTI_URL })
     await fl.load().catch(() => {})
@@ -180,40 +209,60 @@ async function loadUser(): Promise<GiiUserRole | null> {
       returnGeometry: false
     })
     const f = qr?.features?.[0]
-    if (!f && isAdmin) {
-      const u: GiiUserRole = {
-        username, fullName,
-        ruolo: null, ruoloLabel: 'ADMIN', ruoloFull: 'Amministratore',
-        area: null, settore: null, ufficio: null, gruppo: '',
-        isAdmin: true
-      }
-      try { (window as any).__giiUserRole = u } catch { }
-      return u
-    }
+
+    // Fallback robusto: se sei org_admin/owner ma non hai record (o campi incompleti) in GII_utenti
+    // → contesto coerente "ADMIN trasversale" (mai DA)
     if (!f) {
+      if (isOrgAdmin) {
+        const u: GiiUserRole = {
+          username, fullName,
+          ruolo: 7, ruoloLabel: 'ADMIN', ruoloFull: RUOLO_FULL.ADMIN || 'Amministratore',
+          area: null, settore: null, ufficio: null, gruppo: '',
+          isAdmin: true,
+          isOrgAdmin: true,
+          isWorkflowAdmin: true
+        }
+        try { (window as any).__giiUserRole = u } catch { }
+        return u
+      }
+
       const u: GiiUserRole = {
         username, fullName,
-        ruolo: null, ruoloLabel: isAdmin ? 'ADMIN' : '', ruoloFull: isAdmin ? 'Amministratore' : '',
+        ruolo: null, ruoloLabel: '', ruoloFull: '',
         area: null, settore: null, ufficio: null, gruppo: '',
-        isAdmin
+        isAdmin: false,
+        isOrgAdmin: false,
+        isWorkflowAdmin: false
       }
       try { (window as any).__giiUserRole = u } catch { }
       return u
     }
+
     const a = f.attributes
-    const rn = a.ruolo != null ? Number(a.ruolo) : null
-    const rl = rn ? (RUOLO_LABEL[rn] ?? '') : (isAdmin ? 'ADMIN' : '')
+    let rn = toNum(a.ruolo)
+    let rl = rn != null ? (RUOLO_LABEL[rn] ?? '') : ''
+
+    // Se l'utente è org_admin/owner ma il ruolo workflow non è valorizzato/riconosciuto
+    // → usa workflow ADMIN (7) senza trasformarlo in DA
+    if ((!rl || rl === '') && isOrgAdmin) { rn = 7; rl = 'ADMIN' }
+
+    const isWorkflowAdmin = (rn === 7) || rl === 'ADMIN'
+
     const u: GiiUserRole = {
       username,
       fullName: String(a.full_name || fullName),
       ruolo: rn,
       ruoloLabel: rl,
       ruoloFull: RUOLO_FULL[rl] || rl,
-      area: toNum(a.area),
-      settore: toNum(a.settore),
-      ufficio: toNum(a.ufficio),
+      // ADMIN trasversale: mai area/settore/ufficio
+      area: isWorkflowAdmin ? null : toNum(a.area),
+      settore: isWorkflowAdmin ? null : toNum(a.settore),
+      ufficio: isWorkflowAdmin ? null : toNum(a.ufficio),
       gruppo: String(a.gruppo || ''),
-      isAdmin
+      // Backward-compat: "isAdmin" resta uguale a isOrgAdmin (admin dell'ORG AGOL)
+      isAdmin,
+      isOrgAdmin,
+      isWorkflowAdmin
     }
     try { (window as any).__giiUserRole = u } catch { }
     return u
@@ -479,16 +528,17 @@ export default function Widget(props: Props) {
 
       {/* Logo + Titoli */}
       <div style={{ display:'flex', alignItems:'center', gap:16 }}>
-        <div style={{
-          width:cfg.logoSize, height:cfg.logoSize, borderRadius:cfg.logoRadius,
-          background:logoBg, flexShrink:0, overflow:'hidden',
-          display:'flex', alignItems:'center', justifyContent:'center',
-          boxShadow:'0 4px 14px rgba(0,0,0,0.3)',
-          padding:cfg.logoPadding ?? 4, boxSizing:'border-box',
-          animationName:'pulse-ring', animationDuration:'3s', animationIterationCount:'infinite', animationTimingFunction:'ease-out',
-          ...off('offsetLogo')
-        }}>
-          <img src={cfg.logoUrl} alt='logo' style={{ width:'100%', height:'100%', objectFit:'contain', display:'block' }} />
+        <div style={{ ...off('offsetLogo') }}>
+          <div style={{
+            width:cfg.logoSize, height:cfg.logoSize, borderRadius:cfg.logoRadius,
+            background:logoBg, flexShrink:0, overflow:'hidden',
+            display:'flex', alignItems:'center', justifyContent:'center',
+            boxShadow:'0 4px 14px rgba(0,0,0,0.3)',
+            padding:cfg.logoPadding ?? 4, boxSizing:'border-box',
+            animationName:'pulse-ring', animationDuration:'3s', animationIterationCount:'infinite', animationTimingFunction:'ease-out'
+          }}>
+            <img src={cfg.logoUrl} alt='logo' style={{ width:'100%', height:'100%', objectFit:'contain', display:'block' }} />
+          </div>
         </div>
         <div style={{ ...off('offsetTitoli') }}>
           <div style={{
