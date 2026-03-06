@@ -18,6 +18,106 @@ export interface TabFields {
   iterExtra: string[]
 }
 
+export const DETAIL_GENERAL_FIELDS: string[] = [
+  'tecnico_rilevatore',
+  'ufficio_zona',
+  'data_rilevazione'
+]
+
+export const DETAIL_DEFAULT_TAB_FIELDS: TabFields = {
+  anagrafica: [
+    'tipologia_soggetto',
+    'nome',
+    'cognome',
+    'ragione_sociale',
+    'codice_fiscale',
+    'piva',
+    'via',
+    'civico',
+    'citta',
+    'cap',
+    'email',
+    'pec',
+    'telefono',
+    'cellulare'
+  ],
+  violazione: [
+    'tipo_abuso',
+    'norma15_parziale',
+    'norma15_totale',
+    'sup_dichiarata_art15',
+    'sup_irrigata_art15',
+    'norma16_17',
+    'art17_tipo',
+    'sup_dichiarata_art16',
+    'sup_dichiarata_art17_1',
+    'sup_dichiarata_art17_2',
+    'sup_irrigata_art16_17_2',
+    'sup_irrigata_art17_1',
+    'norma_violata3',
+    'descrizione_fatti',
+    'circostanze'
+  ],
+  allegati: [
+    'posizione',
+    'foto_infrazione',
+    'allegati',
+    'data_firma'
+  ],
+  iterExtra: [
+    'stato_TI',
+    'dt_stato_TI'
+  ]
+}
+
+export const DETAIL_NEVER_SHOW_FIELDS: string[] = [
+  'start',
+  'end',
+  'globalid',
+  'GlobalID',
+  'objectid',
+  'ObjectID',
+  'OBJECTID',
+  'origine_pratica',
+  'Origine_pratica',
+  'ORIGINE_PRATICA',
+  'id_ufficio',
+  'ID_UFFICIO',
+  'creationdate',
+  'CreationDate',
+  'created_user',
+  'Creator',
+  'creator',
+  'last_edited_date',
+  'EditDate',
+  'Editor',
+  'editor',
+  'last_edited_user',
+  'utente_loggato',
+  'area_cod',
+  'settore_cod',
+  'req_point',
+  'sup_dichiarata_art16_17',
+  'sup_irrigata_art16_17',
+  'v_art08',
+  'v_art12',
+  'v_art27',
+  'v_art28',
+  'v_art29',
+  'v_art30',
+  'v_art31',
+  'v_art32',
+  'v_art33',
+  'v_art34',
+  'v_art35',
+  'v_art36',
+  'v_art37',
+  'v_art39'
+]
+
+export const DETAIL_DEFAULT_PRESET_ID = 'default'
+export const DETAIL_DEFAULT_PRESET_NAME = 'Default'
+
 export interface FieldPreset {
   id: string
   name: string
@@ -177,12 +277,11 @@ export const defaultConfig: Config = {
 
   // Tab di default
   tabs: [
-        { id: 'anagrafica', label: 'Anagrafica', fields: [], hideEmpty: false },
-    { id: 'violazione', label: 'Violazione', fields: [], hideEmpty: true },
-    { id: 'iter', label: 'Iter', fields: [], isIterTab: true, hideEmpty: false },
-    { id: 'allegati', label: 'Allegati', fields: [], hideEmpty: true },
+    { id: 'anagrafica', label: 'Anagrafica', fields: DETAIL_DEFAULT_TAB_FIELDS.anagrafica, hideEmpty: true },
+    { id: 'violazione', label: 'Violazione', fields: DETAIL_DEFAULT_TAB_FIELDS.violazione, hideEmpty: true },
+    { id: 'iter', label: 'Iter', fields: DETAIL_DEFAULT_TAB_FIELDS.iterExtra, isIterTab: true, hideEmpty: false },
+    { id: 'allegati', label: 'Allegati', fields: DETAIL_DEFAULT_TAB_FIELDS.allegati, hideEmpty: true },
     { id: 'azioni', label: 'Azioni', fields: [], locked: true }
-
   ],
 
   // Editing TI
@@ -196,8 +295,19 @@ export const defaultConfig: Config = {
   editMaxStato: 2,
   editPresaRequiredVal: 2,
 
-  presets: [],
-  activePresetId: ''
+  presets: [
+    {
+      id: DETAIL_DEFAULT_PRESET_ID,
+      name: DETAIL_DEFAULT_PRESET_NAME,
+      tabs: [
+        { id: 'anagrafica', label: 'Anagrafica', fields: DETAIL_DEFAULT_TAB_FIELDS.anagrafica, hideEmpty: true },
+        { id: 'violazione', label: 'Violazione', fields: DETAIL_DEFAULT_TAB_FIELDS.violazione, hideEmpty: true },
+        { id: 'iter', label: 'Iter', fields: DETAIL_DEFAULT_TAB_FIELDS.iterExtra, isIterTab: true, hideEmpty: false },
+        { id: 'allegati', label: 'Allegati', fields: DETAIL_DEFAULT_TAB_FIELDS.allegati, hideEmpty: true }
+      ]
+    }
+  ],
+  activePresetId: DETAIL_DEFAULT_PRESET_ID
 }
 
 export type IMConfig = ImmutableObject<Config>

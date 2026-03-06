@@ -4,7 +4,7 @@ import { React, jsx, type AllWidgetProps, DataSourceComponent, DataSourceManager
 import { Button } from 'jimu-ui'
 import { createPortal } from 'react-dom'
 import type { IMConfig, TabConfig } from '../config'
-import { defaultConfig } from '../config'
+import { defaultConfig, DETAIL_DEFAULT_TAB_FIELDS, DETAIL_NEVER_SHOW_FIELDS, DETAIL_GENERAL_FIELDS } from '../config'
 
 
 const GII_LOG_MODIFICHE_URL = 'https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_LOG_MODIFICHE/FeatureServer/0'
@@ -123,6 +123,23 @@ function isEmptyValue (v: any): boolean {
   if (typeof v === 'string') return v.trim() === ''
   if (Array.isArray(v)) return v.length === 0
   return false
+}
+
+function resolveFieldNameLoose (data: any, aliasMap: Record<string, string>, wanted: string): string {
+  const target = String(wanted || '').trim()
+  if (!target) return ''
+  if (data && Object.prototype.hasOwnProperty.call(data, target)) return target
+  const targetKey = normKey(target)
+  if (data && typeof data === 'object') {
+    for (const k of Object.keys(data)) {
+      if (normKey(k) === targetKey) return k
+    }
+  }
+  for (const k of Object.keys(aliasMap || {})) {
+    const a = aliasMap[k]
+    if (normKey(a) === targetKey || normKey(k) === targetKey) return k
+  }
+  return target
 }
 
 function escRe (s: string): string {
@@ -417,20 +434,41 @@ const mergedData: any = fullData ? { ...(data || {}), ...(fullData || {}) } : da
   return null
 }
 
-function DetailRow (props: { label: string; value: any; labelSize: number; valueSize: number }) {
+function DetailRow (props: { label: string; value: any; labelSize: number; valueSize: number; multiline?: boolean }) {
+  const isEmpty = props.value == null || props.value === ''
+  const text = isEmpty ? '—' : props.value
+  const multiline = !!props.multiline
   return (
     <div style={{ 
       display: 'grid', 
       gridTemplateColumns: '200px 1fr', 
       gap: 12, 
-      alignItems: 'baseline' 
+      alignItems: multiline ? 'start' : 'baseline' 
     }}>
-      <div style={{ fontSize: props.labelSize, color: '#6b7280', textAlign: 'left' }}>
+      <div style={{ fontSize: props.labelSize, color: '#6b7280', textAlign: 'left', paddingTop: multiline ? 4 : 0 }}>
         {props.label}
       </div>
-      <div style={{ fontSize: props.valueSize, fontWeight: 600, wordBreak: 'break-word' }}>
-        {props.value != null && props.value !== '' ? String(props.value) : '—'}
-      </div>
+      {multiline
+        ? (
+          <div style={{
+            fontSize: props.valueSize,
+            whiteSpace: 'pre-wrap',
+            wordBreak: 'break-word',
+            maxHeight: 140,
+            overflowY: 'auto',
+            padding: '8px 10px',
+            border: '1px solid rgba(0,0,0,0.10)',
+            borderRadius: 8,
+            background: 'rgba(0,0,0,0.02)'
+          }}>
+            {text}
+          </div>
+          )
+        : (
+          <div style={{ fontSize: props.valueSize, fontWeight: 600, wordBreak: 'break-word' }}>
+            {text}
+          </div>
+          )}
     </div>
   )
 }
@@ -2335,11 +2373,16 @@ type TabFields = {
 function formatDateSafe (v: any): string {
   if (v == null || v === '') return '—'
   try {
-    // ArcGIS può restituire epoch ms o ISO
-    const n = Number(v)
-    const d = Number.isFinite(n) && n > 0 ? new Date(n) : new Date(String(v))
-    if (Number.isNaN(d.getTime())) return String(v)
-    // formato IT: gg/mm/aaaa hh:mm
+    const s = String(v).trim()
+    const n = Number(s)
+    let d: Date | null = null
+    if (Number.isFinite(n) && n > 0) {
+      const ms = /^\d{10}$/.test(s) ? (n * 1000) : n
+      d = new Date(ms)
+    } else {
+      d = new Date(s)
+    }
+    if (!d || Number.isNaN(d.getTime())) return String(v)
     const dd = String(d.getDate()).padStart(2, '0')
     const mm = String(d.getMonth() + 1).padStart(2, '0')
     const yy = String(d.getFullYear())
@@ -2351,6 +2394,50 @@ function formatDateSafe (v: any): string {
   }
 }
 
+function isLongTextFieldName (fieldName: string): boolean {
+  const k = normKey(fieldName)
+  return k.includes('descrizione fatti') || k.includes('descrizione_fatti') || k.includes('circostanze')
+}
+
+function fieldLooksLikeDate (fieldName: string, fieldLabel: string, fieldType?: string, raw?: any): boolean {
+  const t = String(fieldType || '').toLowerCase()
+  if (t.includes('date')) return true
+  const k = normKey(fieldName)
+  const l = normKey(fieldLabel)
+  if (k.startsWith('dt ') || k.startsWith('data ') || k.includes(' date') || k.includes(' data ') || l.includes('data') || l.includes('date')) return true
+  if (typeof raw === 'number' && raw > 1000000000) return true
+  if (typeof raw === 'string' && /^\d{10,13}$/.test(raw.trim())) return true
+  return false
+}
+
+function fieldLooksLikeSurface (fieldName?: string, fieldLabel?: string): boolean {
+  const n = normKey(fieldName || '')
+  const l = normKey(fieldLabel || '')
+  return n.startsWith('sup ') || n.startsWith('sup_') || n.includes('superficie') || l.includes('superficie')
+}
+
+function formatSurfaceSafe (raw: any): string {
+  if (raw == null || raw === '') return '—'
+  const txt = String(raw).trim()
+  const normalized = txt.replace(/\./g, '').replace(',', '.')
+  const num = typeof raw === 'number' ? raw : Number(normalized)
+  if (Number.isFinite(num)) {
+    const formatted = new Intl.NumberFormat('it-IT', {
+      minimumFractionDigits: Number.isInteger(num) ? 0 : 2,
+      maximumFractionDigits: 2
+    }).format(num)
+    return `${formatted} m²`
+  }
+  return `${txt} m²`
+}
+
+function formatFieldValue (raw: any, fieldName: string, fieldType?: string, fieldLabel?: string): any {
+  if (raw == null || raw === '') return '—'
+  if (fieldLooksLikeDate(fieldName, fieldLabel || '', fieldType, raw)) return formatDateSafe(raw)
+  if (fieldLooksLikeSurface(fieldName, fieldLabel || '')) return formatSurfaceSafe(raw)
+  return raw
+}
+
 function normalizeFieldList (arr: any): string[] {
   if (!arr) return []
   const js = (arr as any)?.asMutable ? (arr as any).asMutable({ deep: true }) : arr
@@ -2360,21 +2447,13 @@ function normalizeFieldList (arr: any): string[] {
 
 function autoPickFields (data: any, kind: string): string[] {
   if (!data) return []
-  const keys = Object.keys(data).filter(k => !/^objectid$/i.test(k) && !/^globalid$/i.test(k) && !/^shape/i.test(k))
-  const pickBy = (re: RegExp) => keys.filter(k => re.test(k))
-  if (kind === 'ANAGRAFICA') {
-    const a = pickBy(/ditta|denom|ragione|nome|cognome|cf|cod.*fisc|piva|partita|indir|via|cap|comune|prov|telefono|cell|mail|pec/i)
-    return a.slice(0, 16)
-  }
-  if (kind === 'VIOLAZIONE') {
-    const a = pickBy(/viol|infraz|descr|art|norm|tipo|sanz|import|acqua|volume|turno|utenza|contatore/i)
-    return a.slice(0, 16)
-  }
-  if (kind === 'ALLEGATI') {
-    const a = pickBy(/alleg|foto|doc|file|url|link|pdf|jpg|png/i)
-    return a.slice(0, 16)
-  }
-  // ITER: lasciamo vuoto, perché ha già blocchi DT/DA
+  const blocked = new Set([...DETAIL_NEVER_SHOW_FIELDS, ...DETAIL_GENERAL_FIELDS].map(x => String(x)))
+  const keys = Object.keys(data).filter(k => !/^objectid$/i.test(k) && !/^globalid$/i.test(k) && !/^shape/i.test(k) && !blocked.has(String(k)))
+  const ordered = (base: string[]) => base.filter(k => keys.includes(k))
+  if (kind === 'ANAGRAFICA') return ordered(DETAIL_DEFAULT_TAB_FIELDS.anagrafica)
+  if (kind === 'VIOLAZIONE') return ordered(DETAIL_DEFAULT_TAB_FIELDS.violazione)
+  if (kind === 'ALLEGATI') return ordered(DETAIL_DEFAULT_TAB_FIELDS.allegati)
+  if (kind === 'ITER') return ordered(DETAIL_DEFAULT_TAB_FIELDS.iterExtra)
   return []
 }
 
@@ -2432,7 +2511,7 @@ function migrateTabs(tabFields: TabFields, tabs: TabConfig[] | undefined): TabCo
     const normalizedHideEmpty =
       (tab as any).hideEmpty != null
         ? Boolean((tab as any).hideEmpty)
-        : (tab.id === 'violazione' || tab.id === 'allegati')
+: (tab.id === 'violazione' || tab.id === 'anagrafica' || tab.id === 'allegati')
 
     if (tab.id === 'azioni') {
       const { locked, ...rest } = tab as any
@@ -2471,7 +2550,7 @@ function TabButton (props: { active: boolean; label: string; onClick: () => void
 function ReadOnlyPanel (props: {
   title: string
   ui?: any
-  rows: Array<{ label: string; value: any }>
+  rows: Array<{ label: string; value: any; fieldName?: string; multiline?: boolean }>
   emptyText?: string
 }) {
     const ui = props.ui ?? {}
@@ -2489,9 +2568,11 @@ function ReadOnlyPanel (props: {
         minHeight: 0
       }}
     >
-      <div style={{ fontWeight: 800, fontSize: titleFontSize, marginBottom: 10 }}>
-        {props.title}
-      </div>
+      {props.title ? (
+        <div style={{ fontWeight: 800, fontSize: titleFontSize, marginBottom: 10 }}>
+          {props.title}
+        </div>
+      ) : null}
 
       {!props.rows.length
         ? <div style={{ ...msgStyle('info', msgFontSize) }}>{props.emptyText || 'Configura i campi nelle impostazioni.'}</div>
@@ -2504,6 +2585,7 @@ function ReadOnlyPanel (props: {
                 value={r.value}
                 labelSize={12}
                 valueSize={13}
+                multiline={!!(r as any).multiline}
               />
             ))}
           </div>
@@ -2667,6 +2749,7 @@ function DetailTabsPanel (props: {
 
   // alias map dai campi layer (se disponibile)
   const [aliasMap, setAliasMap] = React.useState<Record<string, string>>({})
+  const [fieldTypeMap, setFieldTypeMap] = React.useState<Record<string, string>>({})
   const [aliasesReady, setAliasesReady] = React.useState<boolean>(false)
 
   React.useEffect(() => {
@@ -2678,13 +2761,16 @@ function DetailTabsPanel (props: {
       const schema = ds?.getSchema?.()
       const fobj = schema?.fields || {}
       const mapFromSchema: Record<string, string> = {}
+      const typesFromSchema: Record<string, string> = {}
       for (const name of Object.keys(fobj)) {
         const f = fobj[name]
         const alias = String(f?.alias || f?.label || f?.title || name)
         mapFromSchema[name] = alias
+        typesFromSchema[name] = String(f?.type || '')
       }
       if (!cancelled && Object.keys(mapFromSchema).length) {
         setAliasMap(mapFromSchema)
+        setFieldTypeMap(typesFromSchema)
         setAliasesReady(true)
       }
     } catch {}
@@ -2704,13 +2790,16 @@ function DetailTabsPanel (props: {
         const layer = unwrapJsapiLayer(resolved)
         const fields = (layer?.fields || []) as any[]
         const map: Record<string, string> = {}
+        const types: Record<string, string> = {}
         for (const f of fields) {
           const name = String(f?.name || '')
           if (!name) continue
           map[name] = String(f?.alias || f?.label || f?.title || name)
+          types[name] = String(f?.type || '')
         }
         if (!cancelled) {
           if (Object.keys(map).length) setAliasMap(map)
+          if (Object.keys(types).length) setFieldTypeMap(types)
           setAliasesReady(true)
         }
       } catch {
@@ -2786,23 +2875,29 @@ const isPgOnlyField = React.useCallback((fieldName: string) => {
     const tipoRaw = (data && (data as any).__tipo_soggetto_raw != null) ? (data as any).__tipo_soggetto_raw : ((data && (data as any).tipo_soggetto != null) ? (data as any).tipo_soggetto : null)
     const tipoLabel = (data && (data as any).__tipo_soggetto_label != null) ? (data as any).__tipo_soggetto_label : null
     const sogg = (kind === 'ANAGRAFICA') ? classifyTipoSoggetto(tipoRaw, tipoLabel) : null
+    const blocked = new Set(DETAIL_NEVER_SHOW_FIELDS.map(x => String(x)))
+    const isGeneralKind = String(kind || '').toUpperCase() === 'GENERALI'
+    const visibleBase = rawList.filter(fn => !!fn && (isGeneralKind ? true : !blocked.has(String(fn))) && (isGeneralKind ? true : !DETAIL_GENERAL_FIELDS.includes(String(fn))))
     const list = (kind === 'ANAGRAFICA' && sogg)
-      ? rawList.filter(fn => {
+      ? visibleBase.filter(fn => {
           if (!fn) return false
           if (sogg === 'PF' && isPgOnlyField(fn)) return false
           if (sogg === 'PG' && isPfOnlyField(fn)) return false
           return true
         })
-      : rawList
-    const rows: Array<{ label: string; value: any }> = []
+      : visibleBase
+    const rows: Array<{ label: string; value: any; fieldName?: string; multiline?: boolean }> = []
     for (const f of list) {
       if (!f) continue
-      const vv = data ? (data as any)[f] : null
+      const resolved = resolveFieldNameLoose(data, aliasMap, f)
+      const vv = data ? (data as any)[resolved] : null
       if (hideEmpty && isEmptyValue(vv)) continue
-      rows.push({ label: toLabel(f), value: vv })
+      const label = toLabel(resolved || f)
+      const fieldType = fieldTypeMap?.[resolved || f] || ''
+      rows.push({ label, value: formatFieldValue(vv, resolved || f, fieldType, label), multiline: isLongTextFieldName(resolved || f) })
     }
     return rows
-  }, [data, toLabel, classifyTipoSoggetto, isPfOnlyField, isPgOnlyField])
+  }, [data, toLabel, classifyTipoSoggetto, isPfOnlyField, isPgOnlyField, aliasMap, fieldTypeMap])
 // Iter: sempre blocchi DT/DA + extra selezionati
   const presaDT = data ? data.presa_in_carico_DT : null
   const dtPresaDT = data ? data.dt_presa_in_carico_DT : null
@@ -2819,6 +2914,256 @@ const isPgOnlyField = React.useCallback((fieldName: string) => {
   const esitoDA = data ? data.esito_DA : null
   const dtEsitoDA = data ? data.dt_esito_DA : null
   const noteDA = data ? data.note_DA : null
+
+
+
+  const getRawField = React.useCallback((fieldName: string): any => {
+    const resolved = resolveFieldNameLoose(data, aliasMap, fieldName)
+    return data ? (data as any)[resolved] : null
+  }, [data, aliasMap])
+
+  const getFieldLabel = React.useCallback((fieldName: string, raw: any): string => {
+    if (raw == null || raw === '') return '—'
+    const resolved = resolveFieldNameLoose(data, aliasMap, fieldName)
+    const byDomain = ds ? resolveCodedValueLabel(ds, resolved || fieldName, raw) : null
+    if (byDomain) return byDomain
+    return String(raw)
+  }, [data, aliasMap, ds])
+
+  const splitMultiValues = React.useCallback((raw: any): string[] => {
+    if (raw == null || raw === '') return []
+    if (Array.isArray(raw)) return raw.map(x => String(x)).filter(Boolean)
+    return String(raw).split(',').map(s => s.trim()).filter(Boolean)
+  }, [])
+
+  const renderDash = (txt = '—') => <div style={{ fontSize: 13, fontWeight: 600, color: 'rgba(0,0,0,0.55)' }}>{txt}</div>
+
+  const SURVEY_CHOICE_LABELS: Record<string, Record<string, string>> = {
+    norma1: {
+      'Art15.1': 'Art. 15.1 - Prelievo abusivo d’acqua parziale (superamento estensione terreni irrigati rispetto a quelli comunicati)',
+      'Art15.2': 'Art. 15.2 - Recidiva prelievo abusivo d’acqua parziale',
+      'Art15.3': 'Art. 15.3 - Prelievo abusivo d’acqua totale (mancata comunicazione)',
+      'Art15.4': 'Art. 15.4 - Recidiva prelievo abusivo d’acqua totale'
+    },
+    art15_parziale: {
+      'Art15.1': 'Prima contestazione',
+      'Art15.2': 'Recidiva'
+    },
+    art15_totale: {
+      'Art15.3': 'Prima contestazione',
+      'Art15.4': 'Recidiva'
+    },
+    art16_17: {
+      'Art16': 'Art. 16 - Comunicazione di irrigazione tardiva',
+      'Art17': 'Art. 17 - Comunicazione di variazione o di rinuncia tardiva'
+    },
+    art17_tipo: {
+      'Art17.1': 'Variazione tardiva',
+      'Art17.2': 'Rinuncia tardiva'
+    },
+    norma3: {
+      'Art8': 'Art. 8 - Violazione servizio reperibilità',
+      'Art12': 'Art. 12 - Negato accesso ai fondi (al personale consortile)',
+      'Art27': 'Art. 27 - Spreco d’acqua/uso negligente risorsa idrica',
+      'Art28': 'Art. 28 - Violazione prescrizioni del consorzio',
+      'Art29': 'Art. 29 - Violazione termini restituzione attrezzature',
+      'Art30': 'Art. 30 - Danneggiamento e/o perdita attrezzature',
+      'Art31': 'Art. 31 - Mancata segnalazione guasti',
+      'Art32': 'Art. 32 - Negato accesso ai fondi (al consorziato)',
+      'Art33': 'Art. 33 - Inosservanza limiti temporali di prelievo',
+      'Art34': 'Art. 34 - Interferenze',
+      'Art35': 'Art. 35 - Manomissione reti di dispensa e allaccio di apparecchi di aspirazione all’idrante',
+      'Art36': 'Art. 36 - Uso attrezzature non autorizzate',
+      'Art37': 'Art. 37 - Uso sistemi di irrigazione incompatibili',
+      'Art39': 'Art. 39 - Danni strutture irrigue'
+    }
+  }
+
+  const getSurveyChoiceLabel = React.useCallback((listName: string, code: any): string => {
+    const key = String(code ?? '').trim()
+    if (!key) return '—'
+    return SURVEY_CHOICE_LABELS[listName]?.[key] || String(code)
+  }, [])
+
+  const renderSurveyGroup = React.useCallback((title: string, rows: Array<{ label: string; value: any; multiline?: boolean }>, emptyText = '—') => {
+    return (
+      <div style={{ border: '1px solid rgba(0,0,0,0.08)', borderRadius: 10, padding: 10, background: '#fff' }}>
+        <div style={{ fontSize: 12, fontWeight: 800, color: 'rgba(0,0,0,0.78)', marginBottom: 8 }}>{title}</div>
+        {rows.length
+          ? <div style={{ display: 'grid', gap: 8 }}>{rows.map((r, i) => <DetailRow key={i} label={r.label} value={r.value} labelSize={12} valueSize={13} multiline={!!r.multiline} />)}</div>
+          : renderDash(emptyText)}
+      </div>
+    )
+  }, [])
+
+  const renderViolationTextLine = React.useCallback((label: string, value: any) => {
+    const txt = value == null || value === '' ? '—' : value
+    return (
+      <div style={{ fontSize: 13, lineHeight: 1.45, color: '#111827' }}>
+        <span style={{ color: '#6b7280', fontWeight: 400 }}>{label}: </span>
+        <span style={{ fontWeight: 600 }}>{txt}</span>
+      </div>
+    )
+  }, [])
+
+  const renderViolationSurfacesLine = React.useCallback((leftLabel: string, leftValue: any, rightLabel: string, rightValue: any) => {
+    const leftTxt = leftValue == null || leftValue === '' ? '—' : leftValue
+    const rightTxt = rightValue == null || rightValue === '' ? '—' : rightValue
+    return (
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 18, rowGap: 6, fontSize: 13, lineHeight: 1.45, color: '#111827' }}>
+        <div>
+          <span style={{ color: '#6b7280', fontWeight: 400 }}>{leftLabel}: </span>
+          <span style={{ fontWeight: 600 }}>{leftTxt}</span>
+        </div>
+        <div>
+          <span style={{ color: '#6b7280', fontWeight: 400 }}>{rightLabel}: </span>
+          <span style={{ fontWeight: 600 }}>{rightTxt}</span>
+        </div>
+      </div>
+    )
+  }, [])
+
+  const renderViolationGroup = React.useCallback((title: string, body: React.ReactNode) => {
+    return (
+      <div style={{ border: '1px solid rgba(0,0,0,0.08)', borderRadius: 10, padding: 12, background: '#fff' }}>
+        <div style={{ fontSize: 13, fontWeight: 700, color: 'rgba(0,0,0,0.78)', marginBottom: 8 }}>{title}</div>
+        {body}
+      </div>
+    )
+  }, [])
+
+  const violationSurveyContent = React.useMemo(() => {
+    const art15ParzRaw = getRawField('norma15_parziale')
+    const art15TotRaw = getRawField('norma15_totale')
+    const art15Code = !isEmptyValue(art15ParzRaw) ? art15ParzRaw : art15TotRaw
+    const hasArt15 = !isEmptyValue(art15Code) || !isEmptyValue(getRawField('sup_dichiarata_art15')) || !isEmptyValue(getRawField('sup_irrigata_art15'))
+
+    const art15Body = hasArt15
+      ? (() => {
+          const isParziale = !isEmptyValue(art15ParzRaw)
+          const tipoAbuso = isParziale ? 'Parziale' : 'Totale'
+          const tipoViolazione = isParziale
+            ? getSurveyChoiceLabel('art15_parziale', art15ParzRaw)
+            : getSurveyChoiceLabel('art15_totale', art15TotRaw)
+          const supDich = formatFieldValue(getRawField('sup_dichiarata_art15'), 'sup_dichiarata_art15', fieldTypeMap?.sup_dichiarata_art15, 'Superficie dichiarata')
+          const supIrr = formatFieldValue(getRawField('sup_irrigata_art15'), 'sup_irrigata_art15', fieldTypeMap?.sup_irrigata_art15, 'Superficie irrigata')
+          return (
+            <div style={{ display: 'grid', gap: 8 }}>
+              {renderViolationTextLine('Tipo di abuso', tipoAbuso)}
+              {renderViolationTextLine('Occorrenza', tipoViolazione)}
+              {renderViolationSurfacesLine('Superficie dichiarata', supDich, 'Superficie irrigata', supIrr)}
+            </div>
+          )
+        })()
+      : renderDash('—')
+
+    const art16_17Raw = getRawField('norma16_17')
+    const art17TipoRaw = getRawField('art17_tipo')
+    const has16or17 = !isEmptyValue(art16_17Raw) || !isEmptyValue(art17TipoRaw) || !isEmptyValue(getRawField('sup_dichiarata_art16')) || !isEmptyValue(getRawField('sup_dichiarata_art17_1')) || !isEmptyValue(getRawField('sup_dichiarata_art17_2')) || !isEmptyValue(getRawField('sup_irrigata_art16_17_2')) || !isEmptyValue(getRawField('sup_irrigata_art17_1'))
+    const art1617Body = has16or17
+      ? (() => {
+          if (String(art16_17Raw || '') === 'Art16') {
+            const descrFull = getSurveyChoiceLabel('art16_17', art16_17Raw)
+            const descr = String(descrFull).replace(/^Art\.?\s*16\s*-\s*/i, '')
+            return (
+              <div style={{ display: 'grid', gap: 8 }}>
+                <div style={{ fontSize: 13, lineHeight: 1.45, color: '#111827' }}>{descr}</div>
+                {renderViolationSurfacesLine(
+                  'Superficie dichiarata',
+                  formatFieldValue(getRawField('sup_dichiarata_art16'), 'sup_dichiarata_art16', fieldTypeMap?.sup_dichiarata_art16, 'Superficie dichiarata'),
+                  'Superficie irrigata',
+                  formatFieldValue(getRawField('sup_irrigata_art16_17_2'), 'sup_irrigata_art16_17_2', fieldTypeMap?.sup_irrigata_art16_17_2, 'Superficie irrigata')
+                )}
+              </div>
+            )
+          }
+
+          if (String(art16_17Raw || '') === 'Art17' || !isEmptyValue(art17TipoRaw)) {
+            const tipoViolazione = getSurveyChoiceLabel('art17_tipo', art17TipoRaw)
+            const isVar = String(art17TipoRaw || '') === 'Art17.1'
+            return (
+              <div style={{ display: 'grid', gap: 8 }}>
+                {renderViolationTextLine('Tipologia', tipoViolazione)}
+                {isVar
+                  ? renderViolationSurfacesLine(
+                    'Superficie dichiarata',
+                    formatFieldValue(getRawField('sup_dichiarata_art17_1'), 'sup_dichiarata_art17_1', fieldTypeMap?.sup_dichiarata_art17_1, 'Superficie dichiarata'),
+                    'Superficie variata',
+                    formatFieldValue(getRawField('sup_irrigata_art17_1'), 'sup_irrigata_art17_1', fieldTypeMap?.sup_irrigata_art17_1, 'Superficie variata')
+                    )
+                  : renderViolationSurfacesLine(
+                    'Superficie dichiarata',
+                    formatFieldValue(getRawField('sup_dichiarata_art17_2'), 'sup_dichiarata_art17_2', fieldTypeMap?.sup_dichiarata_art17_2, 'Superficie dichiarata'),
+                    'Superficie irrigata',
+                    formatFieldValue(getRawField('sup_irrigata_art16_17_2'), 'sup_irrigata_art16_17_2', fieldTypeMap?.sup_irrigata_art16_17_2, 'Superficie irrigata')
+                    )}
+              </div>
+            )
+          }
+
+          return renderDash('—')
+        })()
+      : renderDash('—')
+
+    const altreCodes = splitMultiValues(getRawField('norma_violata3'))
+    const altreBody = altreCodes.length
+      ? (
+        <div style={{ display: 'grid', gap: 6 }}>
+          {altreCodes.map((code, idx) => {
+            const descrFull = getSurveyChoiceLabel('norma3', code)
+            const descr = String(descrFull).replace(/^Art\.?\s*\d+\s*-\s*/i, '')
+            return <div key={idx} style={{ fontSize: 13, lineHeight: 1.45, color: '#111827' }}>{descr}</div>
+          })}
+        </div>
+        )
+      : renderDash('—')
+
+    const descrFatti = formatFieldValue(getRawField('descrizione_fatti'), 'descrizione_fatti', fieldTypeMap?.descrizione_fatti, 'Descrizione dettagliata dell’infrazione')
+    const circ = formatFieldValue(getRawField('circostanze'), 'circostanze', fieldTypeMap?.circostanze, 'Circostanze rilevanti dell’infrazione')
+    const noteBody = (
+      <div style={{ display: 'grid', gap: 10 }}>
+        <div>
+          <div style={{ fontSize: 12, color: '#6b7280', textAlign: 'left', marginBottom: 4, fontWeight: 400 }}>Descrizione dettagliata della violazione</div>
+          <div style={{
+            fontSize: 13,
+            whiteSpace: 'pre-wrap',
+            wordBreak: 'break-word',
+            padding: '8px 10px',
+            border: '1px solid rgba(0,0,0,0.10)',
+            borderRadius: 8,
+            background: 'rgba(0,0,0,0.02)',
+            minHeight: 44
+          }}>{descrFatti == null || descrFatti === '' ? '—' : descrFatti}</div>
+        </div>
+        <div>
+          <div style={{ fontSize: 12, color: '#6b7280', textAlign: 'left', marginBottom: 4, fontWeight: 400 }}>Circostanze rilevanti dell’infrazione</div>
+          <div style={{
+            fontSize: 13,
+            whiteSpace: 'pre-wrap',
+            wordBreak: 'break-word',
+            padding: '8px 10px',
+            border: '1px solid rgba(0,0,0,0.10)',
+            borderRadius: 8,
+            background: 'rgba(0,0,0,0.02)',
+            minHeight: 44
+          }}>{circ == null || circ === '' ? '—' : circ}</div>
+        </div>
+      </div>
+    )
+
+    return (
+      <div style={{ display: 'grid', gap: 12 }}>
+        {renderViolationGroup('Art. 15 - Prelievo abusivo', art15Body)}
+        {renderViolationGroup('Artt. 16 e 17 - Inosservanza termini presentazione comunicazioni', art1617Body)}
+        {renderViolationGroup('Altre violazioni', altreBody)}
+        {renderViolationGroup('Note', noteBody)}
+      </div>
+    )
+  }, [getRawField, splitMultiValues, fieldTypeMap, getSurveyChoiceLabel, renderViolationGroup, renderViolationSurfacesLine, renderViolationTextLine])
+
+  const generalRows = React.useMemo(() => {
+    return makeRows(DETAIL_GENERAL_FIELDS, 'generali', false)
+  }, [makeRows])
 
   const TabsBar = (
     <div style={{ 
@@ -2953,7 +3298,7 @@ if (!hasSel) {
     const iterExtraRows = aliasesReady ? makeRows(activeTab.fields, activeTab.id.toUpperCase(), Boolean((activeTab as any).hideEmpty)) : []
     iterExtraRows.forEach(r => iterRows.push(r))
 
-    content = <ReadOnlyPanel title={activeTab.label} ui={ui} rows={iterRows} />
+    content = <ReadOnlyPanel title="" ui={ui} rows={iterRows} />
   } else if (activeTab) {
     // Tab normale con campi configurabili
     const rows = aliasesReady ? makeRows(activeTab.fields, activeTab.id.toUpperCase(), Boolean((activeTab as any).hideEmpty)) : []
@@ -3096,7 +3441,7 @@ if (!hasSel) {
             <div style={{ marginTop: 12 }}>
               <div style={{ fontWeight: 700, fontSize: 13, marginBottom: 6 }}>Attributi</div>
               <ReadOnlyPanel
-                title={activeTab.label}
+                title=""
                 rows={rows}
                 emptyText={hasSel ? 'Nessun campo configurato per questa tab.' : 'Selezionare un rapporto.'}
               />
@@ -3105,13 +3450,19 @@ if (!hasSel) {
         </div>
       )
     } else {
-      content = (
-        <ReadOnlyPanel
-          title={activeTab.label}
-          rows={rows}
-          emptyText={hasSel ? 'Nessun campo configurato per questa tab.' : 'Selezionare un rapporto.'}
-        />
-      )
+      content = activeTab.id === 'violazione'
+        ? (
+          <div style={{ marginTop: 8 }}>
+            {violationSurveyContent}
+          </div>
+          )
+        : (
+          <ReadOnlyPanel
+            title=""
+            rows={rows}
+            emptyText={hasSel ? 'Nessun campo configurato per questa tab.' : 'Selezionare un rapporto.'}
+          />
+          )
     }
   }
 }
@@ -3140,6 +3491,19 @@ return (
       </span>
     </div>
     <div style={frameStyle}>
+      {hasSel && (
+        <div style={{ padding: `${Math.max(8, Number(ui.panelPadding ?? 12) - 2)}px ${ui.panelPadding ?? 12}px 0` }}>
+          <div style={{ borderTop: `1px solid ${ui.dividerColor ?? 'rgba(0,0,0,0.08)'}`, paddingTop: 8 }}>
+            <div style={{ fontSize: 12, fontWeight: 700, color: 'rgba(0,0,0,0.72)', marginBottom: 8 }}>Dati generali</div>
+            <ReadOnlyPanel
+              title=""
+              rows={generalRows}
+              emptyText="Dati generali non disponibili."
+            />
+          </div>
+          <div style={{ borderTop: `1px solid ${ui.dividerColor ?? 'rgba(0,0,0,0.08)'}`, marginTop: 10 }} />
+        </div>
+      )}
       <div style={tabsStyle}>{TabsBar}</div>
       <div style={contentStyle}>{content}</div>
     </div>
@@ -3315,6 +3679,7 @@ const queryFields = React.useMemo(() => {
   }
 
   for (const f of watchFields) s.add(String(f))
+  for (const f of DETAIL_GENERAL_FIELDS) s.add(String(f))
 
   const arr = Array.from(s).filter(Boolean)
   return needsAll ? ['*'] : arr

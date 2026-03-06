@@ -3,7 +3,7 @@ import { React, jsx, Immutable, DataSourceTypes, DataSourceManager, type UseData
 import type { AllWidgetSettingProps } from 'jimu-for-builder'
 import { DataSourceSelector } from 'jimu-ui/advanced/data-source-selector'
 import type { IMConfig, TabConfig } from '../config'
-import { defaultConfig } from '../config'
+import { defaultConfig, DETAIL_DEFAULT_TAB_FIELDS, DETAIL_DEFAULT_PRESET_ID, DETAIL_DEFAULT_PRESET_NAME, DETAIL_NEVER_SHOW_FIELDS, DETAIL_GENERAL_FIELDS } from '../config'
 
 type Props = AllWidgetSettingProps<IMConfig>
 type FieldOpt = { name: string; alias: string; type?: string }
@@ -23,6 +23,27 @@ const P = {
 const parseNum = (v:any, fb:number) => { const n=Number(v); return Number.isFinite(n)?n:fb }
 function asJs<T=any>(v:any):T { return v?.asMutable?v.asMutable({deep:true}):v }
 function normalizeStrArray(v:any):string[] { const a=Array.isArray(asJs(v))?asJs(v):[]; return a.map((x:any)=>String(x)).filter(Boolean) }
+
+function normalizeByAvailable(names: string[], availableNames: string[]): string[] {
+  const available = new Set((availableNames || []).map(n => String(n)))
+  const blocked = new Set([...DETAIL_NEVER_SHOW_FIELDS, ...DETAIL_GENERAL_FIELDS].map(n => String(n)))
+  return (names || []).map(String).filter(n => n && available.has(n) && !blocked.has(n))
+}
+
+function buildDefaultTabs(availableNames: string[]): TabConfig[] {
+  return [
+    { id: 'anagrafica', label: 'Anagrafica', fields: normalizeByAvailable(DETAIL_DEFAULT_TAB_FIELDS.anagrafica, availableNames), hideEmpty: true },
+    { id: 'violazione', label: 'Violazione', fields: normalizeByAvailable(DETAIL_DEFAULT_TAB_FIELDS.violazione, availableNames), hideEmpty: true },
+    { id: 'iter', label: 'Iter', fields: normalizeByAvailable(DETAIL_DEFAULT_TAB_FIELDS.iterExtra, availableNames), isIterTab: true, hideEmpty: false },
+    { id: 'allegati', label: 'Allegati', fields: normalizeByAvailable(DETAIL_DEFAULT_TAB_FIELDS.allegati, availableNames), hideEmpty: true },
+    { id: 'azioni', label: 'Azioni', fields: [], locked: true }
+  ]
+}
+
+function buildDefaultPreset(availableNames: string[]) {
+  const tabs = buildDefaultTabs(availableNames).filter(t => t.id !== 'azioni')
+  return { id: DETAIL_DEFAULT_PRESET_ID, name: DETAIL_DEFAULT_PRESET_NAME, tabs }
+}
 
 // ── Micro-componenti ──────────────────────────────────────────────────────────
 function Inp(p: { value:string|number; onChange:(v:string)=>void; placeholder?:string }) {
@@ -274,9 +295,9 @@ function PresetManager(p: { presets:any[]; activePresetId:string; onSetActive:(i
 
 // ── migrateLegacyFields ───────────────────────────────────────────────────────
 function migrateLegacyFields(cfg: any): TabConfig[] {
-  if(Array.isArray(cfg.tabs)&&cfg.tabs.length>0) return cfg.tabs.map((tab:any)=>({...tab,hideEmpty:tab.hideEmpty??(tab.id==='violazione')}))
+  if(Array.isArray(cfg.tabs)&&cfg.tabs.length>0) return cfg.tabs.map((tab:any)=>({...tab,hideEmpty:tab.hideEmpty??(tab.id==='violazione'||tab.id==='anagrafica'||tab.id==='allegati')}))
   return [
-    {id:'anagrafica',label:'Anagrafica',fields:Array.isArray(cfg.anagraficaFields)?cfg.anagraficaFields:[],hideEmpty:false},
+    {id:'anagrafica',label:'Anagrafica',fields:Array.isArray(cfg.anagraficaFields)?cfg.anagraficaFields:[],hideEmpty:true},
     {id:'violazione',label:'Violazione',fields:Array.isArray(cfg.violazioneFields)?cfg.violazioneFields:[],hideEmpty:true},
     {id:'iter',label:'Iter',fields:Array.isArray(cfg.iterExtraFields)?cfg.iterExtraFields:[],isIterTab:true,hideEmpty:false},
     {id:'allegati',label:'Allegati',fields:Array.isArray(cfg.allegatiFields)?cfg.allegatiFields:[],hideEmpty:true},
@@ -317,13 +338,42 @@ export default function Setting(props: Props) {
       try{
         const ds:any=DataSourceManager.getInstance().getDataSource(primaryDsId)
         const fobj=ds?.getSchema?.()?.fields||{}
-        const opts:FieldOpt[]=Object.keys(fobj).map(name=>{const f=fobj[name]||{};return{name,alias:String(f.alias||f.label||f.title||name),type:String(f.type||'')}})
+        const blocked = new Set([...DETAIL_NEVER_SHOW_FIELDS, ...DETAIL_GENERAL_FIELDS].map(n => String(n)))
+        const opts:FieldOpt[]=Object.keys(fobj)
+          .filter(name => !blocked.has(String(name)))
+          .map(name=>{const f=fobj[name]||{};return{name,alias:String(f.alias||f.label||f.title||name),type:String(f.type||'')}})
           .sort((a,b)=>(a.alias||a.name).localeCompare(b.alias||b.name,'it',{sensitivity:'base'}))
         if(!cancelled)setFields(opts)
       }catch{if(!cancelled)setFields([])}
     }
     load();return()=>{cancelled=true}
   },[primaryDsId])
+
+  React.useEffect(() => {
+    if (!primaryDsId || !fields.length) return
+
+    const availableNames = fields.map(f => String(f.name)).filter(Boolean)
+    const defaultTabs = buildDefaultTabs(availableNames)
+    const defaultPreset = buildDefaultPreset(availableNames)
+    const currentTabs = migrateLegacyFields(cfgJs)
+
+    const needsDefaultTabs = currentTabs
+      .filter(t => t.id !== 'azioni')
+      .every(t => !Array.isArray(t.fields) || t.fields.length === 0)
+
+    const presetsJs = Array.isArray(cfgJs.presets) ? cfgJs.presets : []
+    const hasPresets = presetsJs.length > 0
+    const hasActivePreset = Boolean(String(cfgJs.activePresetId || ''))
+
+    if (!needsDefaultTabs && hasPresets && hasActivePreset) return
+
+    const patchObj: Record<string, any> = {}
+    if (needsDefaultTabs) patchObj.tabs = defaultTabs
+    if (!hasPresets) patchObj.presets = [defaultPreset]
+    if (!hasActivePreset) patchObj.activePresetId = DETAIL_DEFAULT_PRESET_ID
+
+    if (Object.keys(patchObj).length) patch(patchObj)
+  }, [primaryDsId, fields.length])
 
   const reasons = normalizeStrArray(cfgJs.rejectReasons??defaultConfig.rejectReasons)
   const tabs = migrateLegacyFields(cfgJs)
