@@ -273,6 +273,91 @@ function PresetManager(p: { presets:any[]; activePresetId:string; onSetActive:(i
 }
 
 // ── migrateLegacyFields ───────────────────────────────────────────────────────
+
+function autoPickFromOptions(allFields: FieldOpt[], kind: 'ANAGRAFICA' | 'VIOLAZIONE' | 'ALLEGATI' | 'ITER'): string[] {
+  const list = Array.isArray(allFields) ? allFields : []
+  const match = (f: FieldOpt, re: RegExp) => {
+    const txt = `${f.name || ''} ${f.alias || ''}`.toLowerCase()
+    return re.test(txt)
+  }
+  const uniq = (arr: string[]) => Array.from(new Set(arr.map(String).filter(Boolean)))
+
+  if (kind === 'ANAGRAFICA') {
+    return uniq(
+      list
+        .filter(f => match(f, /ditta|denom|ragione|nome|cognome|cf|cod.*fisc|piva|partita|indir|via|civico|cap|comune|prov|telefono|cell|mail|pec|tipo.*sogg|tipologia.*sogg/))
+        .map(f => f.name)
+    ).slice(0, 24)
+  }
+
+  if (kind === 'VIOLAZIONE') {
+    return uniq(
+      list
+        .filter(f => match(f, /viol|infraz|descr|art|norm|tipo|sanz|import|acqua|volume|turno|utenza|contatore|circostanz|fatti|ufficio|settore|area|data.*rilev|dt.*rilev/))
+        .map(f => f.name)
+    ).slice(0, 24)
+  }
+
+  if (kind === 'ALLEGATI') {
+    return uniq(
+      list
+        .filter(f => match(f, /alleg|foto|doc|file|url|link|pdf|jpg|jpeg|png/))
+        .map(f => f.name)
+    ).slice(0, 24)
+  }
+
+  return uniq(
+    list
+      .filter(f => match(f, /ti_assegnato|dt_assegnazione_ti|presa_in_carico_(tr|ti|rz|ri)|stato_(tr|ti|rz|ri)|esito_(tr|ti|rz|ri)|note_(tr|ti|rz|ri)|dt_presa_in_carico_(tr|ti|rz|ri)|dt_stato_(tr|ti|rz|ri)|dt_esito_(tr|ti|rz|ri)/))
+      .map(f => f.name)
+  ).slice(0, 24)
+}
+
+function buildDefaultTabsFromFields(allFields: FieldOpt[], baseTabs: TabConfig[]): TabConfig[] {
+  const byId: Record<string, string[]> = {
+    anagrafica: autoPickFromOptions(allFields, 'ANAGRAFICA'),
+    violazione: autoPickFromOptions(allFields, 'VIOLAZIONE'),
+    iter: autoPickFromOptions(allFields, 'ITER'),
+    allegati: autoPickFromOptions(allFields, 'ALLEGATI')
+  }
+  return (Array.isArray(baseTabs) ? baseTabs : []).map((tab: any) => {
+    const current = Array.isArray(tab?.fields) ? tab.fields.map(String).filter(Boolean) : []
+    const fallback = byId[String(tab?.id)] || []
+    const nextFields = current.length ? current : fallback
+    if (String(tab?.id) === 'azioni') return { ...tab, fields: [] } as any
+    return { ...tab, fields: nextFields } as any
+  })
+}
+
+
+function normalizePresetsWithDefaults(presets: any[], defaultTabs: TabConfig[]) {
+  const baseById = new Map((Array.isArray(defaultTabs) ? defaultTabs : []).map((t: any) => [String(t.id), t]))
+  const list = Array.isArray(presets) ? presets : []
+  return list.map((pr: any, idx: number) => {
+    const tabs = Array.isArray(pr?.tabs) ? pr.tabs : []
+    const normalizedTabs = (tabs.length ? tabs : defaultTabs).map((tab: any) => {
+      const base = baseById.get(String(tab?.id)) as any
+      const current = Array.isArray(tab?.fields) ? tab.fields.map(String).filter(Boolean) : []
+      const fallback = Array.isArray(base?.fields) ? base.fields.map(String).filter(Boolean) : []
+      return { ...base, ...tab, fields: current.length ? current : fallback }
+    })
+    return {
+      id: String(pr?.id || `preset_${idx + 1}`),
+      name: String(pr?.name || `Preset ${idx + 1}`),
+      tabs: normalizedTabs
+    }
+  })
+}
+
+function buildDefaultPresets(defaultTabs: TabConfig[]) {
+  const tabs = (Array.isArray(defaultTabs) ? defaultTabs : []).map((t: any) => ({
+    ...t,
+    fields: Array.isArray(t?.fields) ? t.fields.map(String).filter(Boolean) : []
+  }))
+  return [{ id: 'default', name: 'Default', tabs }]
+}
+
+// ── migrateLegacyFields ───────────────────────────────────────────────────────
 function migrateLegacyFields(cfg: any): TabConfig[] {
   if(Array.isArray(cfg.tabs)&&cfg.tabs.length>0) return cfg.tabs.map((tab:any)=>({...tab,hideEmpty:tab.hideEmpty??(tab.id==='violazione')}))
   return [
@@ -291,6 +376,13 @@ export default function Setting(props: Props) {
   const isOpen = (id:string) => openSec===id
 
   const cfgJs: any = { ...defaultConfig, ...asJs(props.config) }
+  const legacyDsJs:any[] = asJs(props.useDataSources??Immutable([])) || []
+  React.useEffect(()=>{
+    if ((legacyDsJs?.length||0) > 0 || (props as any).useDataSourcesEnabled) {
+      props.onSettingChange({ id: props.id, useDataSources: [] as any, useDataSourcesEnabled: false as any })
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
   const baseCfg = props.config || (Immutable(defaultConfig) as any)
 
   const patch = (obj:Record<string,any>) => {
@@ -327,7 +419,27 @@ export default function Setting(props: Props) {
 
   const reasons = normalizeStrArray(cfgJs.rejectReasons??defaultConfig.rejectReasons)
   const tabs = migrateLegacyFields(cfgJs)
-  const updateTab=(i:number,upd:Partial<TabConfig>)=>patch({tabs:tabs.map((t,j)=>j===i?{...t,...upd}:t)})
+  const tabsWithDefaults = React.useMemo(() => buildDefaultTabsFromFields(fields, tabs), [fields, JSON.stringify(tabs)])
+  const presetsJs = Array.isArray(asJs(cfgJs.presets)) ? asJs(cfgJs.presets) : []
+  const effectivePresets = React.useMemo(() => {
+    if (!presetsJs.length) return buildDefaultPresets(tabsWithDefaults)
+    return normalizePresetsWithDefaults(presetsJs, tabsWithDefaults)
+  }, [presetsJs, JSON.stringify(tabsWithDefaults)])
+  const updateTab=(i:number,upd:Partial<TabConfig>)=>patch({tabs:tabsWithDefaults.map((t,j)=>j===i?{...t,...upd}:t)})
+
+  React.useEffect(() => {
+    if (!fields.length) return
+    const needsTabsInit = tabs.some((t:any) => String(t?.id) !== 'azioni' && (!Array.isArray(t?.fields) || t.fields.length === 0))
+    const needsPresetsInit = !presetsJs.length || presetsJs.some((pr:any) => !Array.isArray(pr?.tabs) || pr.tabs.some((t:any) => String(t?.id) !== 'azioni' && (!Array.isArray(t?.fields) || t.fields.length === 0)))
+    if (!needsTabsInit && !needsPresetsInit) return
+    const next: any = {}
+    if (needsTabsInit) next.tabs = tabsWithDefaults
+    if (needsPresetsInit) {
+      next.presets = buildDefaultPresets(tabsWithDefaults)
+      next.activePresetId = String(cfgJs.activePresetId || 'default')
+    }
+    patch(next)
+  }, [fields.length, JSON.stringify(tabsWithDefaults), presetsJs.length, cfgJs.activePresetId])
 
   return (
     <div style={P.wrap}>
@@ -335,11 +447,8 @@ export default function Setting(props: Props) {
       {/* ═══ DATI ═══ */}
       <Acc id='dati' label='📊 Dati' open={isOpen('dati')} onToggle={()=>toggle('dati')}/>
       {isOpen('dati') && <div>
-        <DataSourceSelector widgetId={props.id} types={Immutable([DataSourceTypes.FeatureLayer])}
-          isMultiple useDataSources={props.useDataSources as any}
-          useDataSourcesEnabled={props.useDataSourcesEnabled}
-          onToggleUseDataEnabled={onToggleDs} onChange={onDsChange} mustUseDataSource/>
-        <div style={P.hint}>Seleziona una o più Data View / feature layer.</div>
+        <div style={P.hint}>La vista del record selezionato arriva dinamicamente dal widget Elenco.</div>
+        <div style={{...P.hint, marginTop: 6}}>Questo widget non dichiara più useDataSources per evitare il banner credenziali e i refresh multi-view.</div>
         <label style={P.lbl}>Ruolo</label>
         <Sel value={(cfgJs.roleCode||'DT').toUpperCase()} onChange={v=>patch({roleCode:v})}
           options={[{value:'DT',label:'DT – Direttore Tecnico'},{value:'DA',label:'DA – Direttore Amministrativo'},{value:'RZ',label:'RZ – Responsabile di Zona'}]}/>
@@ -347,7 +456,7 @@ export default function Setting(props: Props) {
         <Inp value={cfgJs.buttonText??defaultConfig.buttonText} onChange={v=>patch({buttonText:v})}/>
       </div>}
 
-      
+
       {/* (Sezione Tab rimossa: le Tab sono nel widget Dettaglio pratiche) */}
 
       {/* ═══ TESTI ═══ */}
@@ -430,6 +539,50 @@ export default function Setting(props: Props) {
         </div>
         <div style={P.hint}>Il pulsante è attivo solo se stato_TI è tra min e max (inclusi) e presa = val. richiesto.</div>
       </div>}
+
+      {/* ═══ CAMPI PER TAB ═══ */}
+      <Acc id='campiTab' label='🗂 Campi per tab' open={isOpen('campiTab')} onToggle={()=>toggle('campiTab')}/>
+      {isOpen('campiTab') && <div>
+        <div style={P.hint}>I campi di default vengono pre-selezionati automaticamente per ogni tab.</div>
+        <TabsManager tabs={tabsWithDefaults} onChange={(next)=>patch({tabs:next})}/>
+        {tabsWithDefaults.filter((t:any)=>String(t.id)!=='azioni').map((tab:any, idx:number)=>(
+          <div key={tab.id} style={{marginTop:10}}>
+            <label style={P.lbl}>{tab.label}</label>
+            <FieldPicker
+              tab={tab}
+              allFields={fields}
+              onChange={(f)=>updateTab(idx,{fields:f})}
+              onTabPatch={(patchTab)=>updateTab(idx,patchTab)}
+            />
+          </div>
+        ))}
+      </div>}
+
+      {/* ═══ PRESET PER CAMPI ═══ */}
+      <Acc id='presetCampi' label='💾 Preset per campi' open={isOpen('presetCampi')} onToggle={()=>toggle('presetCampi')}/>
+      {isOpen('presetCampi') && <div>
+        <div style={P.hint}>È preimpostato il preset <b style={{color:'#d1d5db'}}>Default</b> con i campi di default di ciascuna tab.</div>
+        <PresetManager
+          presets={effectivePresets}
+          activePresetId={String(cfgJs.activePresetId || (effectivePresets[0]?.id || ''))}
+          onSetActive={(id)=>patch({activePresetId:id})}
+          onApply={(pr:any)=>patch({tabs:(Array.isArray(pr?.tabs)?pr.tabs:[]) , activePresetId:String(pr?.id||'')})}
+          onSaveNew={(name:string)=>{
+            const id = `preset_${Date.now()}`
+            const nextPreset = { id, name, tabs: tabsWithDefaults }
+            patch({ presets:[...effectivePresets, nextPreset], activePresetId:id })
+          }}
+          onUpdateActive={(id:string)=>{
+            const next = effectivePresets.map((pr:any)=>String(pr.id)===String(id)?{...pr,tabs:tabsWithDefaults}:pr)
+            patch({ presets:next, activePresetId:id })
+          }}
+          onDelete={(id:string)=>{
+            const next = effectivePresets.filter((pr:any)=>String(pr.id)!==String(id))
+            patch({ presets:next, activePresetId: String(next[0]?.id || '') })
+          }}
+        />
+      </div>}
+
 
     </div>
   )

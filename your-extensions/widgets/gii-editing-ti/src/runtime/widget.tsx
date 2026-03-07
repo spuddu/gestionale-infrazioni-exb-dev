@@ -3299,20 +3299,213 @@ return (
 
 }
 
+
+
+type DynamicSelectionInfo = {
+  oid: number | null
+  layerUrl: string
+  idFieldName: string
+  data?: any | null
+}
+
+function makeRecordProxy (attrs: any, idFieldName: string) {
+  const oid = attrs?.[idFieldName] ?? attrs?.OBJECTID ?? attrs?.ObjectId ?? attrs?.objectid ?? attrs?.objectId ?? null
+  return {
+    getData: () => attrs || {},
+    getId: () => String(oid ?? ''),
+    id: oid
+  }
+}
+
+function getServiceNameFromUrl (url: string): string {
+  try {
+    const part = String(url || '').split('/rest/services/')[1] || ''
+    return (part.split('/FeatureServer')[0] || '').trim()
+  } catch {
+    return ''
+  }
+}
+
+function readDynamicSelection (): DynamicSelectionInfo {
+  try {
+    const w: any = window as any
+    const sel: any = w.__giiSelection || {}
+    const rawOid = sel?.oid ?? sessionStorage.getItem('GII_SELECTED_OID')
+    const oidNum = rawOid != null && rawOid !== '' ? Number(rawOid) : NaN
+    const layerUrl = String(sel?.layerUrl || sessionStorage.getItem('GII_SELECTED_LAYER_URL') || '').trim()
+    const idFieldName = String(sel?.idFieldName || sessionStorage.getItem('GII_SELECTED_IDFIELD') || 'OBJECTID').trim() || 'OBJECTID'
+    return {
+      oid: Number.isFinite(oidNum) ? oidNum : null,
+      layerUrl,
+      idFieldName,
+      data: sel?.data || null
+    }
+  } catch {
+    return { oid: null, layerUrl: '', idFieldName: 'OBJECTID', data: null }
+  }
+}
+
+function writeDynamicSelection (sel: { oid?: number | null, layerUrl?: string, idFieldName?: string, data?: any | null }) {
+  try {
+    const prev: any = (window as any).__giiSelection || {}
+    const next: any = {
+      ...prev,
+      ...sel,
+      ts: Date.now()
+    }
+    ;(window as any).__giiSelection = next
+    if (next.oid != null && Number.isFinite(Number(next.oid))) sessionStorage.setItem('GII_SELECTED_OID', String(Number(next.oid)))
+    else sessionStorage.removeItem('GII_SELECTED_OID')
+    if (next.layerUrl) sessionStorage.setItem('GII_SELECTED_LAYER_URL', String(next.layerUrl))
+    else sessionStorage.removeItem('GII_SELECTED_LAYER_URL')
+    if (next.idFieldName) sessionStorage.setItem('GII_SELECTED_IDFIELD', String(next.idFieldName))
+    else sessionStorage.removeItem('GII_SELECTED_IDFIELD')
+    window.dispatchEvent(new CustomEvent('gii-selection-changed'))
+  } catch {}
+}
+
+async function buildDynamicDsProxy (layerUrl: string, label?: string): Promise<any | null> {
+  const url = String(layerUrl || '').trim()
+  if (!url) return null
+  try {
+    const FeatureLayer = await loadEsriModule<any>('esri/layers/FeatureLayer')
+    const fl = new FeatureLayer({ url, outFields: ['*'] })
+    if (typeof fl?.load === 'function') await fl.load().catch(() => {})
+    const idFieldName = String(fl?.objectIdField || 'OBJECTID')
+    const schemaFields: Record<string, any> = {}
+    ;((fl?.fields || []) as any[]).forEach((f: any) => {
+      if (!f?.name) return
+      schemaFields[String(f.name)] = {
+        alias: String(f.alias || f.name),
+        label: String(f.alias || f.name),
+        title: String(f.alias || f.name),
+        type: String(f.type || ''),
+        domain: f.domain || null
+      }
+    })
+    const proxy: any = {
+      id: `gii-dynamic-${encodeURIComponent(url).slice(-48)}`,
+      layer: fl,
+      async getLayer () { return fl },
+      async getJSAPILayer () { return fl },
+      async getJsApiLayer () { return fl },
+      getDataSourceJson () { return { url } },
+      dataSourceJson: { url },
+      getLabel () { return String(label || getServiceNameFromUrl(url) || 'GII view dinamica') },
+      getIdField () { return idFieldName },
+      getSchema () { return { idField: idFieldName, fields: schemaFields } },
+      async query (q: any) {
+        const qq: any = {
+          where: String(q?.where || '1=1'),
+          outFields: Array.isArray(q?.outFields) && q.outFields.length ? q.outFields : ['*'],
+          returnGeometry: !!q?.returnGeometry
+        }
+        if (Number.isFinite(Number(q?.num))) qq.num = Number(q.num)
+        else if (Number.isFinite(Number(q?.pageSize))) qq.num = Number(q.pageSize)
+        const res: any = await fl.queryFeatures(qq)
+        const feats: any[] = Array.isArray(res?.features) ? res.features : []
+        return { records: feats.map((ft: any) => makeRecordProxy(ft?.attributes || {}, idFieldName)) }
+      },
+      async selectRecordsByIds (ids: any[]) {
+        const oid = Array.isArray(ids) && ids.length ? Number(ids[0]) : null
+        writeDynamicSelection({ oid, layerUrl: url, idFieldName })
+      },
+      async selectRecordById (id: any) {
+        const oid = id != null ? Number(id) : null
+        writeDynamicSelection({ oid, layerUrl: url, idFieldName })
+      },
+      async setSelectedRecordIds (ids: any[]) {
+        const oid = Array.isArray(ids) && ids.length ? Number(ids[0]) : null
+        writeDynamicSelection({ oid, layerUrl: url, idFieldName })
+      },
+      async setSelectedIds (ids: any[]) {
+        const oid = Array.isArray(ids) && ids.length ? Number(ids[0]) : null
+        writeDynamicSelection({ oid, layerUrl: url, idFieldName })
+      },
+      clearSelection () {
+        const cur = readDynamicSelection()
+        if (cur.layerUrl === url) writeDynamicSelection({ oid: null, layerUrl: url, idFieldName, data: null })
+      }
+    }
+    return proxy
+  } catch {
+    return null
+  }
+}
+
+function useDynamicActiveSelection (queryFields: string[], label?: string) {
+  const [active, setActive] = React.useState<{ key: string; state: SelState } | null>(null)
+  const reqRef = React.useRef(0)
+
+  React.useEffect(() => {
+    const refresh = () => {
+      const req = ++reqRef.current
+      const sel = readDynamicSelection()
+      if (sel.oid == null || !sel.layerUrl) {
+        setActive(null)
+        return
+      }
+      ;(async () => {
+        const ds = await buildDynamicDsProxy(sel.layerUrl, label)
+        if (!ds) {
+          if (req === reqRef.current) setActive(null)
+          return
+        }
+        const idFieldName = String(sel.idFieldName || ds.getIdField?.() || 'OBJECTID')
+        let data = sel.data || null
+        try {
+          if (!data || Number(data?.[idFieldName] ?? data?.OBJECTID ?? null) !== Number(sel.oid)) {
+            const res: any = await ds.query({ where: `${idFieldName}=${Number(sel.oid)}`, outFields: queryFields, returnGeometry: false })
+            const rec0: any = res?.records?.[0] || null
+            data = rec0?.getData?.() || null
+          }
+        } catch {
+          data = null
+        }
+        if (req !== reqRef.current) return
+        if (!data) {
+          setActive(null)
+          return
+        }
+        writeDynamicSelection({ oid: Number(sel.oid), layerUrl: sel.layerUrl, idFieldName, data })
+        setActive({
+          key: sel.layerUrl,
+          state: {
+            ds,
+            oid: Number(sel.oid),
+            idFieldName,
+            data,
+            sig: `${sel.layerUrl}:${Number(sel.oid)}:${Date.now()}`
+          }
+        })
+      })().catch(() => {
+        if (req === reqRef.current) setActive(null)
+      })
+    }
+    refresh()
+    const h = () => refresh()
+    window.addEventListener('gii-selection-changed', h as any)
+    window.addEventListener('gii-force-refresh-selection', h as any)
+    return () => {
+      window.removeEventListener('gii-selection-changed', h as any)
+      window.removeEventListener('gii-force-refresh-selection', h as any)
+    }
+  }, [label, queryFields.join('|')])
+
+  return active
+}
+
 export default function Widget (props: AllWidgetProps<IMConfig>) {
   const cfgMutable: any = (props.config && (props.config as any).asMutable)
     ? (props.config as any).asMutable({ deep: true })
     : (props.config as any || {})
   const cfg: any = { ...defaultConfig, ...cfgMutable }
 
-  // ── Ruolo utente: letto da window.__giiUserRole (scritto dal widget Elenco) ──
   const [detectedRole, setDetectedRole] = React.useState<string>('')
-
   React.useEffect(() => {
     const readRole = () => {
       try {
         const r = (window as any).__giiUserRole?.ruoloLabel
-        // Se __giiUserRole è assente (logout) o ruolo ADMIN: azzera il ruolo rilevato.
         setDetectedRole(r && r !== 'ADMIN' ? String(r).toUpperCase() : '')
       } catch { }
     }
@@ -3324,7 +3517,6 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
   const showDatiGenerali = cfg.showDatiGenerali === true
   const roleCode = detectedRole || String(cfg.roleCode || 'DT').toUpperCase()
   const buttonText = String(cfg.buttonText || 'Prendi in carico')
-
   const buttonColors: ButtonColors = {
     take: normalizeHexColor(cfg.takeColor, defaultConfig.takeColor),
     integrazione: normalizeHexColor(cfg.integrazioneColor, defaultConfig.integrazioneColor),
@@ -3340,18 +3532,15 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
     panelBorderRadius: Number.isFinite(Number((cfg as any).maskBorderRadius ?? cfg.panelBorderRadius)) ? Number((cfg as any).maskBorderRadius ?? cfg.panelBorderRadius) : ((defaultConfig as any).maskBorderRadius ?? defaultConfig.panelBorderRadius),
     panelPadding: Number.isFinite(Number((cfg as any).maskInnerPadding ?? cfg.panelPadding)) ? Number((cfg as any).maskInnerPadding ?? cfg.panelPadding) : ((defaultConfig as any).maskInnerPadding ?? defaultConfig.panelPadding),
     dividerColor: String(cfg.dividerColor ?? defaultConfig.dividerColor),
-
     titleFontSize: Number.isFinite(Number(cfg.titleFontSize)) ? Number(cfg.titleFontSize) : defaultConfig.titleFontSize,
     statusFontSize: Number.isFinite(Number(cfg.statusFontSize)) ? Number(cfg.statusFontSize) : defaultConfig.statusFontSize,
     msgFontSize: Number.isFinite(Number(cfg.msgFontSize)) ? Number(cfg.msgFontSize) : defaultConfig.msgFontSize,
-
     rejectReasons: Array.isArray(cfg.rejectReasons) ? cfg.rejectReasons.map((x: any) => String(x)) : defaultConfig.rejectReasons,
     reasonsZebraOddBg: String(cfg.reasonsZebraOddBg ?? defaultConfig.reasonsZebraOddBg),
     reasonsZebraEvenBg: String(cfg.reasonsZebraEvenBg ?? defaultConfig.reasonsZebraEvenBg),
     reasonsRowBorderColor: String(cfg.reasonsRowBorderColor ?? defaultConfig.reasonsRowBorderColor),
     reasonsRowBorderWidth: Number.isFinite(Number(cfg.reasonsRowBorderWidth)) ? Number(cfg.reasonsRowBorderWidth) : defaultConfig.reasonsRowBorderWidth,
     reasonsRowRadius: Number.isFinite(Number(cfg.reasonsRowRadius)) ? Number(cfg.reasonsRowRadius) : defaultConfig.reasonsRowRadius,
-
     detailTitlePrefix: String(cfg.detailTitlePrefix ?? defaultConfig.detailTitlePrefix),
     detailTitleHeight: Number.isFinite(Number(cfg.detailTitleHeight)) ? Number(cfg.detailTitleHeight) : defaultConfig.detailTitleHeight,
     detailTitlePaddingBottom: Number.isFinite(Number(cfg.detailTitlePaddingBottom)) ? Number(cfg.detailTitlePaddingBottom) : defaultConfig.detailTitlePaddingBottom,
@@ -3360,7 +3549,6 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
     detailTitleFontWeight: Number.isFinite(Number(cfg.detailTitleFontWeight)) ? Number(cfg.detailTitleFontWeight) : defaultConfig.detailTitleFontWeight,
     detailTitleColor: String(cfg.detailTitleColor ?? defaultConfig.detailTitleColor),
     detailTitleBg: String(cfg.detailTitleBg ?? defaultConfig.detailTitleBg ?? 'transparent'),
-
     btnBorderRadius: Number.isFinite(Number(cfg.btnBorderRadius)) ? Number(cfg.btnBorderRadius) : defaultConfig.btnBorderRadius ?? 8,
     btnFontSize: Number.isFinite(Number(cfg.btnFontSize)) ? Number(cfg.btnFontSize) : defaultConfig.btnFontSize ?? 13,
     btnFontWeight: Number.isFinite(Number(cfg.btnFontWeight)) ? Number(cfg.btnFontWeight) : defaultConfig.btnFontWeight ?? 600,
@@ -3374,11 +3562,7 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
     allegati: normalizeFieldList((cfg as any).allegatiFields),
     iterExtra: normalizeFieldList((cfg as any).iterExtraFields)
   }
-
-  // Migra tabs
   const migratedTabs = migrateTabs(tabFields, cfg.tabs || [])
-
-  // --- Editing TI config
   const editConfig = {
     show: cfg.showEditButtons !== false,
     overlayColor: normalizeHexColor(cfg.editOverlayColor, '#7c3aed'),
@@ -3391,72 +3575,16 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
     presaRequiredVal: Number.isFinite(Number(cfg.editPresaRequiredVal)) ? Number(cfg.editPresaRequiredVal) : 2
   }
 
-
-  const useDataSources: any[] = (props.useDataSources as any) || []
-  const hasUseDataSources = Array.isArray(useDataSources) && useDataSources.length > 0
   const watchFields = [
-    // DT
-    'presa_in_carico_DT', 'dt_presa_in_carico_DT',
-    'stato_DT', 'dt_stato_DT',
-    'esito_DT', 'dt_esito_DT',
-    'note_DT',
-    // DA
-    'presa_in_carico_DA', 'dt_presa_in_carico_DA',
-    'stato_DA', 'dt_stato_DA',
-    'esito_DA', 'dt_esito_DA',
-    'note_DA'
+    'presa_in_carico_DT', 'dt_presa_in_carico_DT', 'stato_DT', 'dt_stato_DT', 'esito_DT', 'dt_esito_DT', 'note_DT',
+    'presa_in_carico_DA', 'dt_presa_in_carico_DA', 'stato_DA', 'dt_stato_DA', 'esito_DA', 'dt_esito_DA', 'note_DA'
   ]
-  const [selByKey, setSelByKey] = React.useState<Record<string, SelState>>({})
-  const [lastActiveKey, setLastActiveKey] = React.useState<string | null>(null)
 
-  const onUpdate = React.useCallback((dsKey: string, state: SelState) => {
-    setSelByKey(prev => {
-      const old = prev[dsKey]
-      // Aggiorna sempre se il ds è cambiato; per il resto evita re-render inutili
-      if (old && old.ds === state.ds && old.sig === state.sig && old.idFieldName === state.idFieldName) return prev
-      return { ...prev, [dsKey]: state }
-    })
-    if (state.oid != null) setLastActiveKey(dsKey)
-  }, [])
+  const activeGate = useDynamicActiveSelection(['*'], 'GII view dinamica')
 
-  // “active” = (1) la data view più recentemente selezionata; (2) fallback: prima che ha selezione
-  // DS disponibile anche senza selezione (per NuovaPraticaForm)
-  // DataSourceSelectionBridge popola selByKey con ds anche senza selezione attiva
-  const anyDs = React.useMemo(() => {
-    // Da selByKey (sempre popolato da DataSourceSelectionBridge)
-    for (const key of Object.keys(selByKey)) {
-      if (selByKey[key]?.ds) return selByKey[key].ds
-    }
-    // Fallback diretto da DataSourceManager
-    if (useDataSources.length > 0) {
-      try {
-        const dsId = useDataSources[0]?.dataSourceId
-        if (dsId) {
-          const ds = DataSourceManager.getInstance().getDataSource(dsId)
-          if (ds) return ds
-        }
-      } catch {}
-    }
-    return null
-  }, [selByKey, useDataSources])
-
-    const active = React.useMemo(() => {
-    if (lastActiveKey && selByKey[lastActiveKey]?.oid != null) {
-      return { key: lastActiveKey, state: selByKey[lastActiveKey] }
-    }
-    for (let i = 0; i < useDataSources.length; i++) {
-      const key = getUdsKey(useDataSources[i], i)
-      const st = selByKey[key]
-      if (st && st.oid != null) return { key, state: st }
-    }
-    return null
-  }, [useDataSources, selByKey, lastActiveKey])
-
-  // ── Mappa: ascolto click e salvo un punto WGS84 ──
   const mapWidgetId = Array.isArray(cfg.useMapWidgetIds) ? cfg.useMapWidgetIds[0] : null
   const [jimuMapView, setJimuMapView] = React.useState<JimuMapView | null>(null)
   const [clickedPointWgs84, setClickedPointWgs84] = React.useState<any | null>(null)
-
   React.useEffect(() => {
     const view: any = (jimuMapView as any)?.view
     if (!view || typeof view.on !== 'function') return
@@ -3469,66 +3597,62 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
     return () => { try { h?.remove?.() } catch {} }
   }, [jimuMapView])
 
-  const inCreateMode = (cfg.enableCreateWithoutSelection !== false) && !(active?.state?.oid != null)
+  const [createDs, setCreateDs] = React.useState<any | null>(null)
+  React.useEffect(() => {
+    let alive = true
+    const url = String(cfg.motherLayerUrl || '').trim() || String(readDynamicSelection().layerUrl || '').trim()
+    if (!url) {
+      setCreateDs(null)
+      return
+    }
+    ;(async () => {
+      const ds = await buildDynamicDsProxy(url, 'GII layer madre')
+      if (alive) setCreateDs(ds)
+    })().catch(() => { if (alive) setCreateDs(null) })
+    return () => { alive = false }
+  }, [cfg.motherLayerUrl, activeGate?.key])
+
+  const anyDs = activeGate?.state?.ds || createDs
+  const inCreateMode = (cfg.enableCreateWithoutSelection !== false) && !(activeGate?.state?.oid != null)
 
   return (
     <div style={{ width: '100%', height: '100%', display: 'flex', flexDirection: 'column', minHeight: 0, boxSizing: 'border-box', padding: Number.isFinite(Number((cfg as any).maskOuterOffset ?? 0)) ? Number((cfg as any).maskOuterOffset) : 0 }}>
-      {!hasUseDataSources ? (
-        <div>Configura il data source nelle impostazioni del widget.</div>
+      {mapWidgetId && (
+        <div style={{ display: 'none' }}>
+          <JimuMapViewComponent
+            useMapWidgetId={mapWidgetId}
+            onActiveViewChange={(jmv: JimuMapView) => { setJimuMapView(jmv) }}
+          />
+        </div>
+      )}
+
+      {inCreateMode ? (
+        anyDs ? (
+          <NuovaPraticaForm
+            ds={anyDs}
+            cfg={cfg}
+            showDatiGenerali={showDatiGenerali}
+            clickedPointWgs84={clickedPointWgs84}
+            onClearPoint={() => setClickedPointWgs84(null)}
+            onSaved={(newOid: number) => { writeDynamicSelection({ oid: newOid, layerUrl: String(cfg.motherLayerUrl || readDynamicSelection().layerUrl || ''), idFieldName: anyDs?.getIdField?.() || 'OBJECTID' }) }}
+          />
+        ) : (
+          <div style={{ padding: 12 }}>Datasource dinamica non pronta: configura il layer madre oppure seleziona una pratica.</div>
+        )
       ) : (
-        <>
-                {useDataSources.map((uds: any, idx: number) => {
-                  const key = getUdsKey(uds, idx)
-                  return (
-                    <DataSourceSelectionBridge
-                      key={key}
-                      widgetId={props.id}
-                      uds={uds}
-                      dsKey={key}
-                      watchFields={watchFields}
-                      onUpdate={onUpdate}
-                    />
-                  )
-                })}
-
-                {mapWidgetId && (
-                  <div style={{ display: 'none' }}>
-                    <JimuMapViewComponent
-                      useMapWidgetId={mapWidgetId}
-                      onActiveViewChange={(jmv: JimuMapView) => { setJimuMapView(jmv) }}
-                    />
-                  </div>
-                )}
-
-                {inCreateMode ? (
-                  anyDs ? (
-                    <NuovaPraticaForm
-                      ds={anyDs}
-                      cfg={cfg}
-                      showDatiGenerali={showDatiGenerali}
-                      clickedPointWgs84={clickedPointWgs84}
-                      onClearPoint={() => setClickedPointWgs84(null)}
-                      onSaved={(newOid: number) => { /* selezione già impostata */ }}
-                    />
-                  ) : (
-                    <div style={{ padding: 12 }}>Datasource non pronto: attendi il caricamento oppure verifica la configurazione.</div>
-                  )
-                ) : (
-                  <DetailTabsPanel
-                    active={active}
-                    anyDs={anyDs}
-                    showDatiGenerali={showDatiGenerali}
-                    roleCode={roleCode}
-                    buttonText={buttonText}
-                    buttonColors={buttonColors}
-                    ui={ui}
-                    tabFields={tabFields}
-                    tabs={migratedTabs}
-                    editConfig={editConfig}
-                    motherLayerUrl={String(cfg.motherLayerUrl || '').trim() || undefined}
-                  />
-                )}
-        </>
+        <DetailTabsPanel
+          active={activeGate}
+          anyDs={anyDs}
+          showDatiGenerali={showDatiGenerali}
+          roleCode={roleCode}
+          buttonText={buttonText}
+          buttonColors={buttonColors}
+          ui={ui}
+          tabFields={tabFields}
+          tabs={migratedTabs}
+          editConfig={editConfig}
+          motherLayerUrl={String(cfg.motherLayerUrl || '').trim() || undefined}
+        />
       )}
     </div>
   )

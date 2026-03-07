@@ -1,6 +1,6 @@
 /** @jsx jsx */
 /** @jsxFrag React.Fragment */
-import { React, jsx, Immutable, DataSourceTypes, type UseDataSource } from 'jimu-core'
+import { React, jsx, Immutable, DataSourceTypes, DataSourceManager, type UseDataSource } from 'jimu-core'
 import type { AllWidgetSettingProps } from 'jimu-for-builder'
 import { DataSourceSelector } from 'jimu-ui/advanced/data-source-selector'
 import { MapWidgetSelector } from 'jimu-ui/advanced/setting-components'
@@ -8,6 +8,33 @@ import type { IMConfig } from '../config'
 import { defaultConfig } from '../config'
 
 function asJs<T=any>(v:any):T { return v?.asMutable?v.asMutable({deep:true}):v }
+
+
+type FieldOpt = { name: string; alias: string; type?: string }
+
+function toImmutableCfg(base:any, patch:Record<string, any>) {
+  let next = base?.set ? base : Immutable(base || {})
+  Object.entries(patch).forEach(([k, v]) => {
+    const val = Array.isArray(v) ? Immutable(v as any) : v
+    next = next.set(k, val)
+  })
+  return next
+}
+
+function getSchemaSnapshot(dsId: string) {
+  const ds: any = dsId ? DataSourceManager.getInstance().getDataSource(dsId) : null
+  const url = String(ds?.getDataSourceJson?.()?.url || ds?.dataSourceJson?.url || '').trim()
+  let label = String(ds?.getLabel?.() || '').trim()
+  if (!label && url) {
+    try { label = decodeURIComponent(url.split('/').slice(-2, -1)[0] || '') } catch {}
+  }
+  const fobj = ds?.getSchema?.()?.fields || {}
+  const fields: FieldOpt[] = Object.keys(fobj).map(name => {
+    const f = fobj[name] || {}
+    return { name, alias: String(f.alias || f.label || f.title || name), type: String(f.type || '') }
+  }).sort((a, b) => (a.alias || a.name).localeCompare(b.alias || b.name, 'it', { sensitivity: 'base' }))
+  return { url, label, fields }
+}
 
 const P = {
   wrap:  { padding:'0 12px 32px', fontSize:13, background:'#1a1f2e', minHeight:'100%', color:'#e5e7eb' } as React.CSSProperties,
@@ -38,10 +65,35 @@ export default function Setting(props: AllWidgetSettingProps<IMConfig>) {
     props.onSettingChange({ id:props.id, config: base.set ? base.set(key, value) : { ...cfg, [key]:value } as any })
   }
 
-  const onDsChange = (useDataSources: UseDataSource[]) =>
-    props.onSettingChange({ id:props.id, useDataSources: useDataSources as any })
-  const onToggleDs = (enabled: boolean) =>
-    props.onSettingChange({ id:props.id, useDataSourcesEnabled: enabled })
+  const useDsJs:any[] = asJs(props.useDataSources ?? Immutable([])) || []
+  const primaryDsId = String(useDsJs?.[0]?.dataSourceId || '')
+
+  React.useEffect(() => {
+    if (useDsJs.length > 0) {
+      const snap = getSchemaSnapshot(primaryDsId)
+      const nextCfg = toImmutableCfg(props.config || Immutable(defaultConfig) as any, {
+        schemaLayerUrl: snap.url,
+        schemaLayerLabel: snap.label,
+        schemaFields: snap.fields
+      })
+      props.onSettingChange({ id:props.id, useDataSources: Immutable([]) as any, useDataSourcesEnabled:false, config: nextCfg })
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [useDsJs.length, primaryDsId])
+
+  const onDsChange = (useDataSources: UseDataSource[]) => {
+    const useDsJs:any[] = asJs(useDataSources ?? Immutable([])) || []
+    const primaryDsId = String(useDsJs?.[0]?.dataSourceId || '')
+    const snap = getSchemaSnapshot(primaryDsId)
+    const nextCfg = toImmutableCfg(props.config || Immutable(defaultConfig) as any, {
+      schemaLayerUrl: snap.url,
+      schemaLayerLabel: snap.label,
+      schemaFields: snap.fields
+    })
+    props.onSettingChange({ id:props.id, useDataSources: Immutable([]) as any, useDataSourcesEnabled:false, config: nextCfg })
+  }
+  const onToggleDs = (_enabled: boolean) =>
+    props.onSettingChange({ id:props.id, useDataSourcesEnabled: false })
 
   return (
     <div style={P.wrap}>
@@ -49,14 +101,14 @@ export default function Setting(props: AllWidgetSettingProps<IMConfig>) {
       {/* === DATASOURCE === */}
       <Acc id='datasource' label='📊 Datasource' open={isOpen('datasource')} onToggle={()=>toggle('datasource')}/>
       {isOpen('datasource') && <div>
-        <div style={P.hint}>Feature layer delle pratiche TI. Serve per visualizzare i dettagli del record selezionato.</div>
+        <div style={P.hint}>Seleziona il layer solo per acquisire schema e alias. Il widget li salva in config e rimuove le useDataSources legacy dall’istanza.</div>
         <div style={{ marginTop:10 }}>
           <DataSourceSelector
             widgetId={props.id}
             types={Immutable([DataSourceTypes.FeatureLayer])}
             isMultiple={false}
-            useDataSources={props.useDataSources as any}
-            useDataSourcesEnabled={props.useDataSourcesEnabled}
+            useDataSources={Immutable([]) as any}
+            useDataSourcesEnabled={false as any}
             onToggleUseDataEnabled={onToggleDs}
             onChange={onDsChange}
             mustUseDataSource

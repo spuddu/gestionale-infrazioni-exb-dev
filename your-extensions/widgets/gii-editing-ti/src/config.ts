@@ -24,7 +24,18 @@ export interface FieldPreset {
   tabs: TabConfig[]
 }
 
+export interface SchemaFieldOpt {
+  name: string
+  alias: string
+  type?: string
+}
+
 export interface Config {
+  // --- Snapshot schema usato dal setting
+  schemaLayerUrl?: string
+  schemaLayerLabel?: string
+  schemaFields?: SchemaFieldOpt[]
+
   // --- Ruolo
   roleCode: RoleCode
   buttonText: string
@@ -118,6 +129,10 @@ export interface Config {
 }
 
 export const defaultConfig: Config = {
+  schemaLayerUrl: '',
+  schemaLayerLabel: '',
+  schemaFields: [],
+
   roleCode: 'DT',
   buttonText: 'Prendi in carico',
 

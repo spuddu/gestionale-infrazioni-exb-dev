@@ -119,6 +119,115 @@ async function resolveFeatureLayerForAttachments (ds: any): Promise<any | null> 
   return null
 }
 
+
+
+type RuntimeSelection = {
+  oid: number | null
+  layerUrl: string
+  serviceUrl: string
+  idFieldName: string
+  viewName: string
+  data?: any
+}
+
+function readRuntimeSelection (): RuntimeSelection | null {
+  try {
+    const mem = (window as any)?.__giiSelection
+    if (mem && mem.layerUrl && Number.isFinite(Number(mem.oid))) {
+      return {
+        oid: Number(mem.oid),
+        layerUrl: String(mem.layerUrl || '').trim(),
+        serviceUrl: String(mem.serviceUrl || '').trim(),
+        idFieldName: String(mem.idFieldName || 'OBJECTID').trim() || 'OBJECTID',
+        viewName: String(mem.viewName || '').trim(),
+        data: mem.data && typeof mem.data === 'object' ? mem.data : undefined
+      }
+    }
+
+    const oidRaw = sessionStorage.getItem('GII_SELECTED_OID')
+    const layerUrl = String(sessionStorage.getItem('GII_SELECTED_LAYER_URL') || '').trim()
+    const serviceUrl = String(sessionStorage.getItem('GII_SELECTED_SERVICE_URL') || '').trim()
+    const idFieldName = String(sessionStorage.getItem('GII_SELECTED_IDFIELD') || 'OBJECTID').trim() || 'OBJECTID'
+    const viewName = String(sessionStorage.getItem('GII_SELECTED_VIEW_NAME') || '').trim()
+    const dataRaw = sessionStorage.getItem('GII_SELECTED_DATA')
+    let data: any = undefined
+    if (dataRaw) {
+      try { data = JSON.parse(dataRaw) } catch {}
+    }
+    const oid = oidRaw != null ? Number(oidRaw) : NaN
+    if (!layerUrl || !Number.isFinite(oid)) return null
+    return { oid, layerUrl, serviceUrl, idFieldName, viewName, data }
+  } catch {
+    return null
+  }
+}
+
+function makeRuntimeRecord (attrs: any, idFieldName: string, sourceKey: string): any {
+  const id = String(attrs?.[idFieldName] ?? attrs?.OBJECTID ?? attrs?.objectid ?? '')
+  return {
+    getData: () => attrs,
+    getId: () => id,
+    dataSource: { id: sourceKey }
+  }
+}
+
+const runtimeDsProxyPromises: Record<string, Promise<any>> = {}
+
+async function createRuntimeDsProxyFromLayerUrl (layerUrl: string, label?: string): Promise<any> {
+  try {
+    const cached = (window as any)?.__giiRuntimeDsProxyCache?.[layerUrl]
+    if (cached) return cached
+  } catch {}
+  if (runtimeDsProxyPromises[layerUrl]) return runtimeDsProxyPromises[layerUrl]
+
+  runtimeDsProxyPromises[layerUrl] = (async () => {
+    const FeatureLayer = await loadEsriModule<any>('esri/layers/FeatureLayer')
+    const layer = new FeatureLayer({ url: layerUrl, outFields: ['*'] })
+    if (typeof layer.load === 'function') {
+      try { await layer.load() } catch {}
+    }
+    const idFieldName = String(layer?.objectIdField || 'OBJECTID')
+    const schemaFields: Record<string, any> = {}
+    const fields = Array.isArray(layer?.fields) ? layer.fields : []
+    for (const f of fields) {
+      if (!f?.name) continue
+      schemaFields[String(f.name)] = { alias: String(f.alias || f.name), type: String(f.type || '') }
+    }
+    const proxy = {
+      id: `runtime:${layerUrl}`,
+      getIdField: () => idFieldName,
+      getSchema: () => ({ fields: schemaFields, idField: idFieldName }),
+      getLabel: () => String(label || ''),
+      getLayer: () => layer,
+      getJSAPILayer: () => layer,
+      getJsApiLayer: () => layer,
+      layer,
+      getDataSourceJson: () => ({ url: layerUrl }),
+      query: async (q: any) => {
+        const res = await layer.queryFeatures({
+          where: q?.where || '1=1',
+          outFields: (Array.isArray(q?.outFields) && q.outFields.length ? q.outFields : ['*']) as any,
+          returnGeometry: !!q?.returnGeometry
+        })
+        return { records: (res?.features || []).map((f: any) => makeRuntimeRecord(f?.attributes || {}, idFieldName, layerUrl)) }
+      }
+    }
+    try {
+      const w = window as any
+      w.__giiRuntimeDsProxyCache = w.__giiRuntimeDsProxyCache || {}
+      w.__giiRuntimeDsProxyCache[layerUrl] = proxy
+    } catch {}
+    return proxy
+  })()
+
+  try {
+    return await runtimeDsProxyPromises[layerUrl]
+  } catch (e) {
+    try { delete runtimeDsProxyPromises[layerUrl] } catch {}
+    throw e
+  }
+}
+
 function pickOidFromData (data: any, idFieldName: string) {
   if (!data) return null
   if (idFieldName && data[idFieldName] != null) return data[idFieldName]
@@ -1338,6 +1447,7 @@ function ActionsPanel (props: {
         data: { ...data },
         idFieldName: active?.state?.idFieldName || 'OBJECTID',
         dsId: active?.state?.ds?.id ?? null,
+        layerUrl: active?.state?.ds?.getDataSourceJson?.()?.url ?? active?.state?.ds?.dataSourceJson?.url ?? null,
         ts: Date.now()
       }
     } catch { }
@@ -1352,6 +1462,7 @@ function ActionsPanel (props: {
         data: { ...data },
         idFieldName: active?.state?.idFieldName || 'OBJECTID',
         dsId: active?.state?.ds?.id ?? null,
+        layerUrl: active?.state?.ds?.getDataSourceJson?.()?.url ?? active?.state?.ds?.dataSourceJson?.url ?? null,
         ts: Date.now()
       }
     } catch { }
@@ -2375,7 +2486,7 @@ function ActionsPanel (props: {
 
       <div style={panelStyle}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
-          <div style={{ fontSize: titleFontSize, fontWeight: 700 }}>Azioni</div>
+          <div style={{ fontSize: titleFontSize, fontWeight: 700, color: hasSel ? undefined : 'rgba(0,0,0,0.40)' }}>Azioni</div>
           {msg && <div style={msgStyle(msg.kind, msgFontSize)} title={msg.text}>{msg.text}</div>}
         </div>
 {/* BOTTONI AZIONE */}
@@ -3645,8 +3756,8 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
   }
 
 
-  const useDataSources: any[] = (props.useDataSources as any) || []
-  const hasUseDataSources = Array.isArray(useDataSources) && useDataSources.length > 0
+  // Datasource risolta dinamicamente dal widget Elenco: una sola vista effettiva per sessione.
+  // Nessun DataSourceComponent / multi-view dichiarata qui.
   // Campi minimi necessari per:
   // - gating dei pulsanti (presa/stato/esito per ruolo)
   // - computeNodoAttivo (serve vedere quali nodi hanno già dati)
@@ -3655,37 +3766,31 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
     'origine_pratica',
     'ti_assegnato_username', 'ti_assegnato_nome', 'dt_assegnazione_ti', 'ti_assegnato_da',
 
-    // TR
     'presa_in_carico_TR', 'dt_presa_in_carico_TR',
     'stato_TR', 'dt_stato_TR',
     'esito_TR', 'dt_esito_TR',
     'note_TR',
 
-    // TI
     'presa_in_carico_TI', 'dt_presa_in_carico_TI',
     'stato_TI', 'dt_stato_TI',
     'esito_TI', 'dt_esito_TI',
     'note_TI',
 
-    // RZ
     'presa_in_carico_RZ', 'dt_presa_in_carico_RZ',
     'stato_RZ', 'dt_stato_RZ',
     'esito_RZ', 'dt_esito_RZ',
     'note_RZ',
 
-    // RI
     'presa_in_carico_RI', 'dt_presa_in_carico_RI',
     'stato_RI', 'dt_stato_RI',
     'esito_RI', 'dt_esito_RI',
     'note_RI',
 
-    // DT
     'presa_in_carico_DT', 'dt_presa_in_carico_DT',
     'stato_DT', 'dt_stato_DT',
     'esito_DT', 'dt_esito_DT',
     'note_DT',
 
-    // DA
     'presa_in_carico_DA', 'dt_presa_in_carico_DA',
     'stato_DA', 'dt_stato_DA',
     'esito_DA', 'dt_esito_DA',
@@ -3704,63 +3809,23 @@ const queryFields = React.useMemo(() => {
   for (const t of tabsJs) {
     if (!t || t.id === 'azioni') continue
     const fl = normalizeFieldList(t.fields)
-
-    // Se una tab (esclusa Iter) è vuota => usiamo l'auto-pick: serve avere (quasi) tutti i campi.
     if (!fl.length && t.id !== 'iter') needsAll = true
-
     for (const f of fl) s.add(String(f))
   }
 
   for (const f of watchFields) s.add(String(f))
-
   const arr = Array.from(s).filter(Boolean)
   return needsAll ? ['*'] : arr
 }, [migratedTabs, watchFields.join('|')])
 
-  const [selByKey, setSelByKey] = React.useState<Record<string, SelState>>({})
-  const [lastActiveKey, setLastActiveKey] = React.useState<string | null>(null)
-
-  const onUpdate = React.useCallback((dsKey: string, state: SelState) => {
-    setSelByKey(prev => {
-      const old = prev[dsKey]
-      if (old && old.sig === state.sig && old.ds === state.ds && old.idFieldName === state.idFieldName) return prev
-      return { ...prev, [dsKey]: state }
-    })
-    if (state.oid != null) setLastActiveKey(dsKey)
-  }, [])
-
-  // "active" = (1) la data view più recentemente selezionata; (2) fallback: prima che ha selezione
-  const active = React.useMemo(() => {
-    if (lastActiveKey && selByKey[lastActiveKey]?.oid != null) {
-      return { key: lastActiveKey, state: selByKey[lastActiveKey] }
-    }
-    for (let i = 0; i < useDataSources.length; i++) {
-      const key = getUdsKey(useDataSources[i], i)
-      const st = selByKey[key]
-      if (st && st.oid != null) return { key, state: st }
-    }
-    return null
-  }, [useDataSources, selByKey, lastActiveKey])
-
-  // --- Selection Gate via sessionStorage (prevents sticky selection / previous record) ---
-  // Al mount pulisce sempre GII_SELECTED_OID — la selezione non deve persistere tra sessioni
-  const [selectedOid, setSelectedOid] = React.useState<number | null>(null)
-
+  const [selection, setSelection] = React.useState<RuntimeSelection | null>(() => readRuntimeSelection())
   React.useEffect(() => {
-    try { sessionStorage.removeItem('GII_SELECTED_OID') } catch {}
-    const handler = () => {
-      try {
-        const v = sessionStorage.getItem('GII_SELECTED_OID')
-        const n = v != null ? Number(v) : NaN
-        setSelectedOid(Number.isFinite(n) ? n : null)
-      } catch { setSelectedOid(null) }
-    }
+    const handler = () => setSelection(readRuntimeSelection())
+    handler()
     window.addEventListener('gii-selection-changed', handler as any)
     return () => window.removeEventListener('gii-selection-changed', handler as any)
   }, [])
 
-  // Quando il record selezionato viene aggiornato (applyEdits), serve re-interrogare la stessa OID
-  // per aggiornare subito i pulsanti/valori senza richiedere cambio selezione.
   const [selRefreshNonce, setSelRefreshNonce] = React.useState<number>(0)
   React.useEffect(() => {
     const h = () => setSelRefreshNonce(n => n + 1)
@@ -3773,65 +3838,57 @@ const queryFields = React.useMemo(() => {
 
   React.useEffect(() => {
     const req = ++forcedReqRef.current
-    if (selectedOid == null) {
+    if (!selection?.layerUrl || selection.oid == null) {
       setForcedActive(null)
       return
     }
     ;(async () => {
-      for (let i = 0; i < useDataSources.length; i++) {
-        const uds: any = useDataSources[i]
-        const key = getUdsKey(uds, i)
-        const dsId = String(uds?.dataSourceId || '')
-        if (!dsId) continue
-        let dsTry: any = null
-        try { dsTry = DataSourceManager.getInstance().getDataSource(dsId) } catch {}
-        if (!dsTry || !dsTry.query) continue
-        const idFieldName = (dsTry.getIdField?.() || dsTry.getSchema?.()?.idField || 'OBJECTID')
-        try {
-          const where = `${idFieldName}=${selectedOid}`
-          const res: any = await dsTry.query({ where, outFields: queryFields, returnGeometry: false } as any)
-          if (req !== forcedReqRef.current) return
-          const recs: any[] = res?.records || []
-          if (!recs.length) continue
-          const r0 = recs[0]
-          const d0 = r0?.getData?.() || {}
-          const oid0 = Number(d0[idFieldName] ?? d0.OBJECTID ?? selectedOid)
-          if (!Number.isFinite(oid0) || oid0 !== selectedOid) continue
-          const st: SelState = { ds: dsTry, oid: selectedOid, idFieldName, data: d0, sig: `${dsId}:${selectedOid}` }
-          setForcedActive({ key, state: st })
-          return
-        } catch {
-          // prova DS successivo
+      try {
+        const dsTry = await createRuntimeDsProxyFromLayerUrl(selection.layerUrl, selection.viewName)
+        const idFieldName = String(selection.idFieldName || dsTry.getIdField?.() || 'OBJECTID')
+        const baseData = selection.data && typeof selection.data === 'object' ? selection.data : null
+        const baseOid = baseData ? Number(baseData[idFieldName] ?? baseData.OBJECTID ?? selection.oid) : NaN
+        const stateKey = `${selection.layerUrl}:${selection.oid}`
+
+        if (baseData && Number.isFinite(baseOid) && baseOid === selection.oid) {
+          const quickState: SelState = { ds: dsTry, oid: selection.oid, idFieldName, data: baseData, sig: stateKey }
+          setForcedActive({ key: selection.layerUrl, state: quickState })
         }
+
+        const wantsAll = queryFields.includes('*')
+        const needsQuery = !baseData || wantsAll || queryFields.some(f => f && f !== '*' && !Object.prototype.hasOwnProperty.call(baseData, f))
+        if (!needsQuery) return
+
+        const where = `${idFieldName}=${selection.oid}`
+        const res: any = await dsTry.query({ where, outFields: queryFields, returnGeometry: false } as any)
+        if (req !== forcedReqRef.current) return
+        const recs: any[] = res?.records || []
+        if (!recs.length) {
+          setForcedActive(null)
+          return
+        }
+        const r0 = recs[0]
+        const fetched = r0?.getData?.() || {}
+        const d0 = baseData ? { ...(baseData || {}), ...(fetched || {}) } : fetched
+        const oid0 = Number(d0[idFieldName] ?? d0.OBJECTID ?? selection.oid)
+        if (!Number.isFinite(oid0) || oid0 !== selection.oid) {
+          setForcedActive(null)
+          return
+        }
+        const st: SelState = { ds: dsTry, oid: selection.oid, idFieldName, data: d0, sig: stateKey }
+        setForcedActive({ key: selection.layerUrl, state: st })
+      } catch {
+        if (req === forcedReqRef.current) setForcedActive(null)
       }
-      if (req === forcedReqRef.current) setForcedActive(null)
     })()
-  }, [selectedOid, useDataSources, queryFields.join('|'), selRefreshNonce])
+  }, [selection?.layerUrl, selection?.oid, selection?.idFieldName, selection?.viewName, queryFields.join('|'), selRefreshNonce])
 
   const activeGate = forcedActive
 
 
   return (
     <div style={{ width: '100%', height: '100%', display: 'flex', flexDirection: 'column', minHeight: 0, boxSizing: 'border-box', padding: Number.isFinite(Number((cfg as any).maskOuterOffset ?? 0)) ? Number((cfg as any).maskOuterOffset) : 0 }}>
-      {!hasUseDataSources ? (
-        <div>Configura il data source nelle impostazioni del widget.</div>
-      ) : (
-        <>
-                {useDataSources.map((uds: any, idx: number) => {
-                  const key = getUdsKey(uds, idx)
-                  return (
-                    <DataSourceSelectionBridge
-                      key={key}
-                      widgetId={props.id}
-                      uds={uds}
-                      dsKey={key}
-                      watchFields={watchFields}
-                      queryFields={queryFields}
-                      onUpdate={onUpdate}
-                    />
-                  )
-                })}
-
+      <>
 				<ActionsPanel
 				  active={activeGate}
 				  roleCode={roleCode}
@@ -3841,8 +3898,7 @@ const queryFields = React.useMemo(() => {
 				  editConfig={editConfig}
 				  motherLayerUrl={String(cfg.motherLayerUrl || '').trim() || undefined}
 				/>
-        </>
-      )}
+      </>
     </div>
   )
 }

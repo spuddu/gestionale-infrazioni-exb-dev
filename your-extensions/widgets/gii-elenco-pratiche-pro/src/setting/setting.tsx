@@ -211,6 +211,14 @@ export default function Setting(props: Props) {
     load();return ()=>{cancelled=true}
   },[primaryDsId])
 
+  const legacyDsJs:any[] = asJs(props.useDataSources??Immutable([])) || []
+  React.useEffect(()=>{
+    if ((legacyDsJs?.length||0) > 0 || (props as any).useDataSourcesEnabled) {
+      props.onSettingChange({ id: props.id, useDataSources: [] as any, useDataSourcesEnabled: false as any })
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
   const cfgJs:any=cfg
   const columns=(()=>{
     const raw=cfgJs?.columns;const cols:any[]=asJs(raw)
@@ -223,39 +231,12 @@ export default function Setting(props: Props) {
 
       <Acc id='dati' label='📊 Fonte dati' open={isOpen('dati')} onToggle={()=>toggle('dati')}/>
       {isOpen('dati') && <div>
-        <DataSourceSelector widgetId={props.id} useDataSources={props.useDataSources as any}
-          types={dsTypes} isMultiple={true} mustUseDataSource={true} onChange={onDsChange}/>
-        <div style={P.hint}>Più datasource → filtri come schede.</div>
-        {useDsJs.length>1 && <>
-          <div style={P.grp}>Etichette schede</div>
-          {(()=>{
-            const tabs=asJs(cfg.filterTabs??Immutable([]))as any[]
-            const grouped:{label:string;items:{dsId:string}[]}[]=[]
-            const labelMap:Record<string,number>={}
-            useDsJs.forEach(u=>{
-              const dsId=String(u?.dataSourceId||'')
-              const tab=tabs.find(t=>String(t?.dataSourceId||'')===dsId)
-              const label=String(tab?.label||'Filtro')
-              if(labelMap[label]!=null){grouped[labelMap[label]].items.push({dsId})}
-              else{labelMap[label]=grouped.length;grouped.push({label,items:[{dsId}]})}
-            })
-            return grouped.map((g,gi)=>(
-              <div key={gi} style={{marginBottom:8}}>
-                <label style={P.lbl}>Tab: {g.label} <span style={{fontWeight:400,opacity:0.6}}>({g.items.length} DS)</span></label>
-                <input style={P.inp} value={g.label} placeholder='Etichetta'
-                  onChange={e=>{
-                    const v=e.target.value
-                    const newTabs=tabs.map(t=>({...t}))
-                    g.items.forEach(item=>{
-                      const ti=newTabs.findIndex(t=>String(t?.dataSourceId||'')===item.dsId)
-                      if(ti>=0)newTabs[ti].label=v;else newTabs.push({dataSourceId:item.dsId,label:v})
-                    })
-                    update('filterTabs',newTabs)
-                  }}/>
-              </div>
-            ))
-          })()}
-        </>}
+        <div style={{...P.hint, marginTop: 8}}>
+          La datasource del widget è ora risolta automaticamente a runtime in base a ruolo, area e settore dell’utente.
+        </div>
+        <div style={{...P.hint, marginTop: 8}}>
+          Questo pannello non dichiara più Data Views / useDataSources per evitare il banner credenziali di Experience Builder.
+        </div>
       </div>}
 
       <Acc id='colonne' label='📋 Colonne' open={isOpen('colonne')} onToggle={()=>toggle('colonne')}/>

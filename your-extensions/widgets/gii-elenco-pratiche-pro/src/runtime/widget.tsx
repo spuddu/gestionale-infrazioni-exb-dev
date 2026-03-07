@@ -13,7 +13,7 @@ import {
   Immutable
 } from 'jimu-core'
 
-import { Button, Loading } from 'jimu-ui'
+import { Loading } from 'jimu-ui'
 import type { AllWidgetProps } from 'jimu-core'
 import type { IMConfig, ColumnDef } from '../config'
 import { defaultConfig, DEFAULT_COLUMNS } from '../config'
@@ -81,6 +81,8 @@ function formatDateIt (v: any): string {
 }
 
 function getDsLabel (useDs: any, fallback: string): string {
+  const localLabel = String(useDs?.__label || useDs?.label || '').trim()
+  if (localLabel) return localLabel
   try {
     const ds = DataSourceManager.getInstance().getDataSource(useDs?.dataSourceId)
     const label = ds?.getLabel?.()
@@ -105,7 +107,13 @@ function tryClearSelection (ds: any) {
 function notifySelectionCleared () {
   try {
     sessionStorage.removeItem('GII_SELECTED_OID')
-    window.dispatchEvent(new CustomEvent('gii-selection-changed'))
+    sessionStorage.removeItem('GII_SELECTED_LAYER_URL')
+    sessionStorage.removeItem('GII_SELECTED_SERVICE_URL')
+    sessionStorage.removeItem('GII_SELECTED_IDFIELD')
+    sessionStorage.removeItem('GII_SELECTED_VIEW_NAME')
+    sessionStorage.removeItem('GII_SELECTED_DATA')
+    try { delete (window as any).__giiSelection } catch {}
+    window.dispatchEvent(new CustomEvent('gii-selection-changed', { detail: null }))
   } catch {}
 }
 
@@ -183,6 +191,240 @@ function RecordTracker (p: {
 }
 
 const GII_PORTAL    = 'https://cbsm-hub.maps.arcgis.com'
+
+
+type RuntimeDsView = {
+  key: string
+  viewName: string
+  itemId: string
+  serviceUrl: string
+  layerUrl: string
+  roles: string[]
+  areaCode: 'AMM' | 'AGR' | 'TEC' | ''
+  settoreCode: string
+}
+
+const GII_RUNTIME_VIEWS: RuntimeDsView[] = [
+  {
+    key: 'ADMIN',
+    viewName: 'GII_VIEW_EB_ADMIN',
+    itemId: 'c05409cf4a86471194d6406e9b4d1c65',
+    serviceUrl: 'https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_VIEW_EB_BASE/FeatureServer',
+    layerUrl: 'https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_VIEW_EB_BASE/FeatureServer/0',
+    roles: ['ADMIN'],
+    areaCode: '',
+    settoreCode: ''
+  },
+  {
+    key: 'AGR_ALL',
+    viewName: 'GII_VIEW_EB_AGR',
+    itemId: '777c4456f6104e779e6a02e5875f67c1',
+    serviceUrl: 'https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_VIEW_EB_AGR/FeatureServer',
+    layerUrl: 'https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_VIEW_EB_AGR/FeatureServer/0',
+    roles: ['RI', 'DT'],
+    areaCode: 'AGR',
+    settoreCode: ''
+  },
+  {
+    key: 'AGR_D1',
+    viewName: 'GII_VIEW_EB_AGR_D1',
+    itemId: '3d0899eb7f684698862c1bc590c19d7f',
+    serviceUrl: 'https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_VIEW_EB_AGR_D1/FeatureServer',
+    layerUrl: 'https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_VIEW_EB_AGR_D1/FeatureServer/0',
+    roles: ['TI', 'RZ'],
+    areaCode: 'AGR',
+    settoreCode: 'D1'
+  },
+  {
+    key: 'AGR_D2',
+    viewName: 'GII_VIEW_EB_AGR_D2',
+    itemId: 'f428036dac9e41458f67c1da32efddd5',
+    serviceUrl: 'https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_VIEW_EB_AGR_D2/FeatureServer',
+    layerUrl: 'https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_VIEW_EB_AGR_D2/FeatureServer/0',
+    roles: ['TI', 'RZ'],
+    areaCode: 'AGR',
+    settoreCode: 'D2'
+  },
+  {
+    key: 'AGR_D3',
+    viewName: 'GII_VIEW_EB_AGR_D3',
+    itemId: 'efc0f9aa9d0e4862a87152cd482c2722',
+    serviceUrl: 'https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_VIEW_EB_AGR_D3/FeatureServer',
+    layerUrl: 'https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_VIEW_EB_AGR_D3/FeatureServer/0',
+    roles: ['TI', 'RZ'],
+    areaCode: 'AGR',
+    settoreCode: 'D3'
+  },
+  {
+    key: 'AGR_D4',
+    viewName: 'GII_VIEW_EB_AGR_D4',
+    itemId: 'c724a0cd50b14743a4595313c2afd39a',
+    serviceUrl: 'https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_VIEW_EB_AGR_D4/FeatureServer',
+    layerUrl: 'https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_VIEW_EB_AGR_D4/FeatureServer/0',
+    roles: ['TI', 'RZ'],
+    areaCode: 'AGR',
+    settoreCode: 'D4'
+  },
+  {
+    key: 'AGR_D5',
+    viewName: 'GII_VIEW_EB_AGR_D5',
+    itemId: 'b3405424a8f841648cca63a429991c03',
+    serviceUrl: 'https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_VIEW_EB_AGR_D5/FeatureServer',
+    layerUrl: 'https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_VIEW_EB_AGR_D5/FeatureServer/0',
+    roles: ['TI', 'RZ'],
+    areaCode: 'AGR',
+    settoreCode: 'D5'
+  },
+  {
+    key: 'AGR_D6',
+    viewName: 'GII_VIEW_EB_AGR_D6',
+    itemId: 'f8671e4e6d804735a5a8c0279b7396be',
+    serviceUrl: 'https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_VIEW_EB_AGR_D6/FeatureServer',
+    layerUrl: 'https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_VIEW_EB_AGR_D6/FeatureServer/0',
+    roles: ['TI', 'RZ'],
+    areaCode: 'AGR',
+    settoreCode: 'D6'
+  },
+  {
+    key: 'AMM_ALL',
+    viewName: 'GII_VIEW_EB_AMM_ALL',
+    itemId: '6ffe45dac0e04905ba677e9fcd703238',
+    serviceUrl: 'https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_VIEW_EB_AMM_ALL/FeatureServer',
+    layerUrl: 'https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_VIEW_EB_AMM_ALL/FeatureServer/0',
+    roles: ['RI', 'TI', 'DA'],
+    areaCode: 'AMM',
+    settoreCode: ''
+  },
+  {
+    key: 'TEC_ALL',
+    viewName: 'GII_VIEW_EB_TEC',
+    itemId: '8687bad031ef4de6bd3c8151de8f8cc6',
+    serviceUrl: 'https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_VIEW_EB_TEC/FeatureServer',
+    layerUrl: 'https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_VIEW_EB_TEC/FeatureServer/0',
+    roles: ['RI', 'DT'],
+    areaCode: 'TEC',
+    settoreCode: ''
+  },
+  {
+    key: 'TEC_DS',
+    viewName: 'GII_VIEW_EB_TEC_DS',
+    itemId: '32b0d7b27c154a969eff411826a473af',
+    serviceUrl: 'https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_VIEW_EB_TEC_DS/FeatureServer',
+    layerUrl: 'https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_VIEW_EB_TEC_DS/FeatureServer/0',
+    roles: ['TI', 'RZ'],
+    areaCode: 'TEC',
+    settoreCode: 'DS'
+  }
+]
+
+function loadEsriModule<T = any> (path: string): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const req = (window as any).require
+    if (!req) {
+      reject(new Error('AMD require non disponibile'))
+      return
+    }
+    try {
+      req([path], (mod: T) => resolve(mod), (err: any) => reject(err))
+    } catch (e) {
+      reject(e)
+    }
+  })
+}
+
+function normalizeAreaCode (area: number | null | undefined): 'AMM' | 'AGR' | 'TEC' | '' {
+  if (area === 1) return 'AMM'
+  if (area === 2) return 'AGR'
+  if (area === 3) return 'TEC'
+  return ''
+}
+
+function normalizeSettoreCode (settore: number | null | undefined): string {
+  const map: Record<number, string> = { 1: 'CR', 2: 'GI', 3: 'D1', 4: 'D2', 5: 'D3', 6: 'D4', 7: 'D5', 8: 'D6', 9: 'DS' }
+  return settore != null ? (map[Number(settore)] || '') : ''
+}
+
+function pickRuntimeViewForUser (user: GiiUserInfo | null): RuntimeDsView | null {
+  if (!user) return null
+  const role = String(user.ruoloLabel || '').trim().toUpperCase()
+  const areaCode = normalizeAreaCode(user.area)
+  const settoreCode = normalizeSettoreCode(user.settore)
+  if (user.isAdmin || role === 'ADMIN') {
+    return GII_RUNTIME_VIEWS.find(v => v.key === 'ADMIN') || null
+  }
+  const strict = GII_RUNTIME_VIEWS.find(v =>
+    v.roles.includes(role) &&
+    v.areaCode === areaCode &&
+    (v.settoreCode ? v.settoreCode === settoreCode : true)
+  )
+  if (strict) return strict
+  return GII_RUNTIME_VIEWS.find(v => v.roles.includes(role) && v.areaCode === areaCode && !v.settoreCode) || null
+}
+
+function makeRuntimeRecord (attrs: any, idFieldName: string, sourceKey: string): DataRecord {
+  const id = String(attrs?.[idFieldName] ?? attrs?.OBJECTID ?? attrs?.objectid ?? '')
+  return {
+    getData: () => attrs,
+    getId: () => id,
+    dataSource: { id: sourceKey }
+  } as any
+}
+
+async function createRuntimeFeatureLayerProxy (view: RuntimeDsView, recordsRef: { current: DataRecord[] }): Promise<any> {
+  const FeatureLayer = await loadEsriModule<any>('esri/layers/FeatureLayer')
+  const layer = new FeatureLayer({ url: view.layerUrl, outFields: ['*'] })
+  if (typeof layer.load === 'function') {
+    try { await layer.load() } catch {}
+  }
+  const idFieldName = String(layer?.objectIdField || 'OBJECTID')
+  const schemaFields: Record<string, any> = {}
+  const fields = Array.isArray(layer?.fields) ? layer.fields : []
+  for (const f of fields) {
+    if (!f?.name) continue
+    schemaFields[String(f.name)] = { alias: String(f.alias || f.name), type: String(f.type || '') }
+  }
+  const query = async (q: any) => {
+    const res = await layer.queryFeatures({
+      where: q?.where || '1=1',
+      outFields: (Array.isArray(q?.outFields) && q.outFields.length ? q.outFields : ['*']) as any,
+      returnGeometry: !!q?.returnGeometry,
+      num: q?.pageSize || q?.num || undefined
+    })
+    const recs = (res?.features || []).map((f: any) => makeRuntimeRecord(f?.attributes || {}, idFieldName, view.layerUrl))
+    recordsRef.current = recs
+    return { records: recs }
+  }
+  return {
+    id: `runtime:${view.key}`,
+    getIdField: () => idFieldName,
+    getSchema: () => ({ fields: schemaFields, idField: idFieldName }),
+    getLabel: () => view.viewName,
+    getRecords: () => recordsRef.current,
+    getLayer: () => layer,
+    getJSAPILayer: () => layer,
+    getJsApiLayer: () => layer,
+    layer,
+    query,
+    getDataSourceJson: () => ({ url: view.layerUrl })
+  }
+}
+
+function publishRuntimeSelection (p: { oid: number, layerUrl: string, serviceUrl: string, idFieldName: string, viewName: string, data?: any }) {
+  try {
+    sessionStorage.setItem('GII_SELECTED_OID', String(p.oid))
+    sessionStorage.setItem('GII_SELECTED_LAYER_URL', p.layerUrl)
+    sessionStorage.setItem('GII_SELECTED_SERVICE_URL', p.serviceUrl)
+    sessionStorage.setItem('GII_SELECTED_IDFIELD', p.idFieldName)
+    sessionStorage.setItem('GII_SELECTED_VIEW_NAME', p.viewName)
+    if (p.data && typeof p.data === 'object') {
+      try { sessionStorage.setItem('GII_SELECTED_DATA', JSON.stringify(p.data)) } catch {}
+    } else {
+      try { sessionStorage.removeItem('GII_SELECTED_DATA') } catch {}
+    }
+    try { (window as any).__giiSelection = { ...p, ts: Date.now() } } catch {}
+    window.dispatchEvent(new CustomEvent('gii-selection-changed', { detail: { ...p } }))
+  } catch {}
+}
 
 
 // Best-effort: prova a capire se l'utente è amministratore AGOL (org_admin),
@@ -585,42 +827,22 @@ React.useEffect(() => {
   }
 }, [])
 
-// DataSource consentiti per l'utente corrente
-  const allowedDsIds: string[] | null = React.useMemo(
-    () => giiUser ? getAllowedDataSourceIds(giiUser, useDsJs) : null,
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [giiUser?.username, giiUser?.ruolo, giiUser?.area, giiUser?.settore, giiUser?.isAdmin, useDsJs.length]
+// Vista runtime effettiva per la sessione corrente
+  const resolvedView = React.useMemo(
+    () => giiUser ? pickRuntimeViewForUser(giiUser) : null,
+    [giiUser?.username, giiUser?.ruoloLabel, giiUser?.area, giiUser?.settore, giiUser?.isAdmin]
   )
 
-  // DS “migliore” (singolo) per evitare duplicazioni e mismatch tra viste
-  const bestDsId: string | null = React.useMemo(
-    () => giiUser ? pickBestUseDataSourceId(giiUser as any, useDsJs) : null,
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [giiUser?.username, giiUser?.ruolo, giiUser?.area, giiUser?.settore, giiUser?.isAdmin, (giiUser as any)?.gruppo, useDsJs.length, dsMetaSig]
-  )
-
-  // useDsJs filtrato: solo i datasource consentiti per il ruolo dell'utente
   const filteredUseDsJs: any[] = React.useMemo(() => {
-    if (!giiUser || userLoading || notLogged) return useDsJs // non ancora loggato: passa tutti (ma overlay copre)
+    if (!resolvedView) return []
+    return [{
+      dataSourceId: resolvedView.layerUrl,
+      mainDataSourceId: resolvedView.layerUrl,
+      rootDataSourceId: resolvedView.serviceUrl,
+      __label: resolvedView.viewName
+    }]
+  }, [resolvedView?.layerUrl, resolvedView?.serviceUrl, resolvedView?.viewName])
 
-    // Se troviamo un DS migliore, usa SOLO quello.
-    if (bestDsId) {
-      const hit = useDsJs.find((u: any) => String(u?.dataSourceId || '') === bestDsId)
-      return hit ? [hit] : useDsJs
-    }
-
-    if (allowedDsIds === null) return useDsJs // admin: tutti
-    return useDsJs.filter((u: any) => {
-      // allowedDsIds contiene i rootDataSourceId (es. "dataSource_39")
-      // mentre useDataSources usa dataSourceId (es. "dataSource_39-0").
-      // Confrontiamo quindi il rootDataSourceId per non filtrare via TUTTI i DS online.
-      const rootId = String(u?.rootDataSourceId || '')
-      return allowedDsIds.includes(rootId)
-    })
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [giiUser, userLoading, notLogged, bestDsId, allowedDsIds, useDsJs.length])
-
-  // Campo stato del ruolo corrente
   const statoRuoloField = giiUser?.isAdmin
     ? null
     : giiUser?.ruoloLabel
@@ -747,94 +969,78 @@ React.useEffect(() => {
     })
   }, [statoRuoloField])
 
-  // ── Tab groups: data view con la stessa etichetta vengono fuse nello stesso tab ──
+  // ── Un solo tab effettivo per sessione: la vista runtime scelta dal contesto utente ──
   const tabGroups = React.useMemo(() => {
-    const filterTabsJs: any[] = asJs(cfg.filterTabs) || []
-    const groups: { label: string; dsIndices: number[] }[] = []
-    const labelMap = new Map<string, number>()
+    if (!resolvedView) return [] as { label: string; dsIndices: number[] }[]
+    return [{ label: resolvedView.viewName, dsIndices: [0] }]
+  }, [resolvedView?.viewName])
 
-    filteredUseDsJs.forEach((u: any, i: number) => {
-      const dsId = String(u?.dataSourceId || '')
-      const entry = filterTabsJs.find((t: any) => String(t?.dataSourceId || '') === dsId)
-      const label = String(entry?.label || getDsLabel(u, `Filtro ${i + 1}`))
-
-      if (labelMap.has(label)) {
-        groups[labelMap.get(label)!].dsIndices.push(i)
-      } else {
-        labelMap.set(label, groups.length)
-        groups.push({ label, dsIndices: [i] })
-      }
-    })
-    return groups
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [filteredUseDsJs.length, cfg.filterTabs])
-
-  const hasTabs = tabGroups.length > 1
+  const hasTabs = false
   const [activeTab, setActiveTab] = React.useState<number>(0)
+
+  // ── Raccolta record dalla sola vista runtime di sessione ──
   const [localSelectedByDs, setLocalSelectedByDs] = React.useState<Record<string, string>>({})
-
-  // ── Raccolta record da TUTTI i datasource ──
   const dsDataRef = React.useRef<Record<string, { recs: DataRecord[], ds: DataSource | null, loading: boolean }>>({})
-const prevUserRef = React.useRef<string>('')
-  const prevDsMetaSigRef = React.useRef<string>('')
-
-// Se cambia l'utente (switch account / logout) pulisce cache record + selezione locale
-React.useEffect(() => {
-  const cur = giiUser?.username || ''
-  const prev = prevUserRef.current
-  if (cur === prev) return
-  prevUserRef.current = cur
-  dsDataRef.current = {}
-  setLocalSelectedByDs({})
-  notifySelectionCleared()
-}, [giiUser?.username])
-
+  const runtimeRecordsRef = React.useRef<DataRecord[]>([])
+  const prevUserRef = React.useRef<string>('')
   const [dsDataVer, setDsDataVer] = React.useState(0)
 
-  const handleDsUpdate = React.useCallback((dsId: string, recs: DataRecord[], ds: DataSource, loading: boolean) => {
-    dsDataRef.current[dsId] = { recs, ds, loading }
-    setDsDataVer(v => v + 1)
+  React.useEffect(() => {
+    const cur = giiUser?.username || ''
+    const prev = prevUserRef.current
+    if (cur === prev) return
+    prevUserRef.current = cur
+    runtimeRecordsRef.current = []
+    dsDataRef.current = {}
+    setLocalSelectedByDs({})
+    notifySelectionCleared()
+  }, [giiUser?.username])
+
+  const whereClause = txt(cfg.whereClause || '1=1')
+  const pageSize = num(cfg.pageSize, 200)
+  const isReady = !notLogged && !userLoading && !!giiUser?.username
+
+  const [listRefreshNonce, setListRefreshNonce] = React.useState(0)
+  React.useEffect(() => {
+    const h = () => setListRefreshNonce(n => n + 1)
+    window.addEventListener('gii-force-refresh-selection', h as any)
+    return () => window.removeEventListener('gii-force-refresh-selection', h as any)
   }, [])
 
-  // ── Ri-leggi i record dopo un breve ritardo per catturare dati lazy-loaded ──
-  // Si riattiva quando cambia giiUser (post-login) o il numero di DS
   React.useEffect(() => {
-    const timers = [300, 800, 2000, 4000]
-    // Aggiorna signature datasource (label/url) per scegliere DS migliore ed evitare duplicati
-    try {
-      const sig0 = computeDsMetaSig(useDsJs)
-      if (sig0 && sig0 !== prevDsMetaSigRef.current) {
-        prevDsMetaSigRef.current = sig0
-        setDsMetaSig(sig0)
+    let cancelled = false
+    const load = async () => {
+      const key = resolvedView?.layerUrl || '__none__'
+      if (!resolvedView || !isReady) {
+        runtimeRecordsRef.current = []
+        dsDataRef.current[key] = { recs: [], ds: null as any, loading: false }
+        setDsDataVer(v => v + 1)
+        return
       }
-    } catch {}
-    const ids = timers.map(ms => setTimeout(() => {
-      let changed = false
-      Object.entries(dsDataRef.current).forEach(([dsId, entry]) => {
-        if (entry.ds) {
-          const freshRecs = (entry.ds.getRecords?.() ?? []) as DataRecord[]
-          if (freshRecs.length > 0) {
-            dsDataRef.current[dsId] = { ...entry, recs: freshRecs, loading: false }
-            changed = true
-          }
-        }
-      })
-      // Aggiorna anche la signature dei datasource (label/url) se cambia nel tempo
+
+      dsDataRef.current[key] = { recs: [], ds: null as any, loading: true }
+      setDsDataVer(v => v + 1)
+
       try {
-        const sig = computeDsMetaSig(useDsJs)
-        if (sig && sig !== prevDsMetaSigRef.current) {
-          prevDsMetaSigRef.current = sig
-          setDsMetaSig(sig)
-        }
-      } catch {}
-
-      if (changed) setDsDataVer(v => v + 1)
-    }, ms))
-    return () => ids.forEach(id => clearTimeout(id))
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [useDsJs.length, giiUser?.username])
-
-
+        const proxy = await createRuntimeFeatureLayerProxy(resolvedView, runtimeRecordsRef as any)
+        const res: any = await proxy.query({ where: whereClause, outFields: ['*'], returnGeometry: false, pageSize })
+        if (cancelled) return
+        const recs: DataRecord[] = (res?.records || []) as DataRecord[]
+        dsDataRef.current[key] = { recs, ds: proxy, loading: false }
+        try {
+          const w = window as any
+          w.__giiRuntimeDsProxyCache = w.__giiRuntimeDsProxyCache || {}
+          w.__giiRuntimeDsProxyCache[resolvedView.layerUrl] = proxy
+        } catch {}
+      } catch {
+        if (cancelled) return
+        dsDataRef.current[key] = { recs: [], ds: null as any, loading: false }
+      }
+      if (!cancelled) setDsDataVer(v => v + 1)
+    }
+    load()
+    return () => { cancelled = true }
+  }, [resolvedView?.layerUrl, resolvedView?.viewName, isReady, whereClause, pageSize, listRefreshNonce])
 
   // Sort: array (multi sort con Shift+Click)
   const defaultSort: SortItem[] = React.useMemo(() => {
@@ -856,18 +1062,6 @@ React.useEffect(() => {
   const clampedTab = Math.min(activeTab, Math.max(0, tabGroups.length - 1))
   const activeGroup = tabGroups[clampedTab] || tabGroups[0]
 
-  const udsAny = (props.useDataSources as any) as any[] | undefined
-
-  const whereClause = txt(cfg.whereClause || '1=1')
-  const pageSize = num(cfg.pageSize, 200)
-
-  // Query: usa "1=0" prima del login (nessun dato senza credenziali).
-  // Quando notLogged/userLoading cambia a false, ExB ri-fetcha con la query reale.
-  const isReady = !notLogged && !userLoading && !!giiUser?.username
-  const dsQuery: any = React.useMemo(() => ({
-    where: isReady ? whereClause : '1=0',
-    pageSize
-  }), [isReady, whereClause, pageSize])
 
   // Campi base
   const fieldPratica = txt(cfg.fieldPratica || 'objectid')
@@ -1444,14 +1638,32 @@ React.useEffect(() => {
       font-weight: 800;
     }
 
-    .resetBtn {
-      padding: 0 10px !important;
-      height: 28px !important;
-      min-height: 28px !important;
-      line-height: 1 !important;
-      white-space: nowrap !important;
-      font-size: 12px !important;
-      font-weight: 700 !important;
+    .resetSortTabBtn {
+      width: 28px;
+      height: 28px;
+      min-width: 28px;
+      border: 1px solid rgba(0,0,0,0.12);
+      background: rgba(0,0,0,0.06);
+      color: #374151;
+      border-radius: 999px;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 14px;
+      font-weight: 800;
+      line-height: 1;
+      padding: 0;
+      flex: 0 0 auto;
+      transition: background 120ms ease, border-color 120ms ease, color 120ms ease, transform 120ms ease;
+    }
+    .resetSortTabBtn:hover {
+      background: rgba(47,111,237,0.12);
+      border-color: rgba(47,111,237,0.35);
+      color: #1d4ed8;
+    }
+    .resetSortTabBtn:active {
+      transform: scale(0.97);
     }
 
     .first { padding-left: ${padFirst}px; }
@@ -1545,8 +1757,8 @@ React.useEffect(() => {
   const maskBorderWidth = Number.isFinite(Number(cfg.maskBorderWidth)) ? Number(cfg.maskBorderWidth) : 1
   const maskRadius = Number.isFinite(Number(cfg.maskRadius)) ? Number(cfg.maskRadius) : 12
 
-  if (!useDsJs.length) {
-    return <div style={{ padding: 12 }}>{txt(cfg.errorNoDs || 'Configura la fonte dati del widget.')}</div>
+  if (!userLoading && !notLogged && !!giiUser?.username && !resolvedView) {
+    return <div style={{ padding: 12 }}>Nessuna vista AGOL associata a ruolo, area e settore dell’utente.</div>
   }
 
   // Titolo elenco
@@ -1628,21 +1840,6 @@ React.useEffect(() => {
             </div>
           )}
 
-          {/* ── DataSource loaders: SEMPRE nel DOM (ExB richiede che siano registrati).
-               Query "1=0" prima del login → nessun dato anonimo.
-               Query reale dopo login → ExB ri-fetcha con credenziali. ── */}
-          {useDsJs.map((u: any, i: number) => (
-            <DataSourceComponent
-              key={`${u?.dataSourceId || i}-${giiUser?.username || 'anon'}`}
-              useDataSource={udsAny?.[i]}
-              query={dsQuery}
-              widgetId={props.id}
-            >
-              {(ds: DataSource, info: any) => (
-                <RecordTracker ds={ds} dsId={String(u?.dataSourceId || '')} info={info} onUpdate={handleDsUpdate} />
-              )}
-            </DataSourceComponent>
-          ))}
 
           {/* ── Tab ruolo: Tutte / In attesa mia / In attesa di altri ── */}
           {!userLoading && statoRuoloField && (
@@ -1655,7 +1852,29 @@ React.useEffect(() => {
                   key={t.id}
                   type='button'
                   className={`tabBtn ${activeRoleTab === t.id ? 'active' : ''}`}
-                  onClick={() => setActiveRoleTab(t.id)}
+                  onClick={() => {
+                    // Cambio tab ruolo: azzera la selezione globale per evitare che Dettaglio/Azioni
+                    // continuino a mostrare un record selezionato in una tab precedente.
+                    setLocalSelectedByDs({})
+                    Object.keys(dsDataRef.current).forEach(id => {
+                      const e = dsDataRef.current[id]
+                      if (e?.ds) tryClearSelection(e.ds)
+                    })
+                    filteredUseDsJs.forEach((u: any) => {
+                      const dsId = String(u?.dataSourceId || '')
+                      try {
+                        const mainDs = DataSourceManager.getInstance().getDataSource(dsId)
+                        if (mainDs) tryClearSelection(mainDs)
+                        const parentId = (mainDs as any)?.parentDataSource?.id || (mainDs as any)?.getMainDataSource?.()?.id
+                        if (parentId) {
+                          const parentDs = DataSourceManager.getInstance().getDataSource(parentId)
+                          if (parentDs) tryClearSelection(parentDs)
+                        }
+                      } catch {}
+                    })
+                    notifySelectionCleared()
+                    setActiveRoleTab(t.id)
+                  }}
                 >
                   {t.label}
                   {/* Conteggio record per tab */}
@@ -1674,9 +1893,10 @@ React.useEffect(() => {
                       }
                     }
                     const all: DataRecord[] = Array.from(uniq.values())
+                    const visibleForUser = all.filter(r => isRecordVisibleForCurrentUser(r))
                     const count = t.id === 'tutte'
-                      ? all.length
-                      : all.filter(r => passesRoleTab(r, t.id)).length
+                      ? visibleForUser.length
+                      : visibleForUser.filter(r => passesRoleTab(r, t.id)).length
                     return count > 0 ? (
                       <span style={{
                         marginLeft: 6, background: activeRoleTab === t.id ? '#2f6fed' : 'rgba(0,0,0,0.1)',
@@ -1687,6 +1907,17 @@ React.useEffect(() => {
                   })()}
                 </button>
               ))}
+              {isCustomSort && (
+                <button
+                  type='button'
+                  className='resetSortTabBtn'
+                  onClick={() => setSortState(defaultSort)}
+                  title='Ripristina ordinamento predefinito'
+                  aria-label='Ripristina ordinamento predefinito'
+                >
+                  ↺
+                </button>
+              )}
             </div>
           )}
 
@@ -1737,6 +1968,17 @@ React.useEffect(() => {
                   {g.label}
                 </button>
               ))}
+              {isCustomSort && (
+                <button
+                  type='button'
+                  className='resetSortTabBtn'
+                  onClick={() => setSortState(defaultSort)}
+                  title='Ripristina ordinamento predefinito'
+                  aria-label='Ripristina ordinamento predefinito'
+                >
+                  ↺
+                </button>
+              )}
             </div>
           )}
 
@@ -1753,21 +1995,6 @@ React.useEffect(() => {
                 <>
                   {cfg.showHeader !== false && (
                     <div className='headerWrap'>
-                      <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 6 }}>
-                        {isCustomSort && (
-                          <Button
-                            size='sm'
-                            type='tertiary'
-                            className='resetBtn'
-                            onClick={() => setSortState(defaultSort)}
-                            title='Ripristina ordinamento di default'
-                            aria-label='Reset ordinamento'
-                          >
-                            Reset
-                          </Button>
-                        )}
-                      </div>
-
                       <div className='gridHeader'>
                         {columns.map((col, ci) => (
                           <Header key={col.id} first={ci === 0} label={col.label} field={col.field} />
@@ -1841,10 +2068,21 @@ React.useEffect(() => {
                               if (entry?.ds) trySelectRecord(entry.ds, r, rid)
                               // Notifica azioni del record selezionato
                               try {
-                                const oidVal = Number(r.getData?.()[entry?.ds?.getIdField?.() || 'OBJECTID'] ?? rid)
-                                sessionStorage.setItem('GII_SELECTED_OID', String(oidVal))
-                                window.dispatchEvent(new CustomEvent('gii-selection-changed'))
-                              } catch {}
+                                const idFieldName = String(entry?.ds?.getIdField?.() || 'OBJECTID')
+                                const oidVal = Number(r.getData?.()[idFieldName] ?? rid)
+                                if (Number.isFinite(oidVal)) {
+                                  publishRuntimeSelection({
+                                    oid: oidVal,
+                                    layerUrl: resolvedView?.layerUrl || recDsId,
+                                    serviceUrl: resolvedView?.serviceUrl || recDsId,
+                                    idFieldName,
+                                    viewName: resolvedView?.viewName || getDsLabel({ __label: '' }, 'Vista runtime'),
+                                    data: r.getData?.() || {}
+                                  })
+                                } else {
+                                  notifySelectionCleared()
+                                }
+                              } catch { notifySelectionCleared() }
 
                               // Propaga: forza setSelectedRecords con lo stesso record
                               // su TUTTI i DS del gruppo (ExB usa l'interfaccia DataRecord)
