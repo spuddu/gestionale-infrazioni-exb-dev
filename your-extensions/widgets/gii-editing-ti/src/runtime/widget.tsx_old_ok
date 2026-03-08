@@ -1,15 +1,11 @@
 /** @jsx jsx */
 /** @jsxFrag React.Fragment */
-import { React, jsx, type AllWidgetProps, DataSourceComponent, DataSourceManager, UrlManager, getAppStore } from 'jimu-core'
+import { React, jsx, type AllWidgetProps, DataSourceComponent, DataSourceManager } from 'jimu-core'
+import { JimuMapViewComponent, type JimuMapView } from 'jimu-arcgis'
 import { Button } from 'jimu-ui'
 import { createPortal } from 'react-dom'
 import type { IMConfig, TabConfig } from '../config'
 import { defaultConfig } from '../config'
-
-
-const GII_LOG_EVENTI_URL = 'https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_LOG_EVENTI/FeatureServer/0'
-const GII_UTENTI_URL = 'https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_utenti/FeatureServer/0'
-
 
 type MsgKind = 'info' | 'ok' | 'err'
 type Msg = { kind: MsgKind; text: string }
@@ -24,32 +20,6 @@ type SelState = {
 
 function unwrapJsapiLayer (maybe: any) {
   return (maybe && (maybe.layer || maybe)) || null
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// DataSource helpers
-// In ExB, an Output DataSource often exposes `belongToDataSource` as an ID string.
-// We must resolve the real (root) DataSource object to reliably query/refresh.
-function resolveDsObj (dsOrId: any): any {
-  try {
-    if (!dsOrId) return null
-    if (typeof dsOrId === 'string') {
-      return DataSourceManager.getInstance().getDataSource(dsOrId)
-    }
-    return dsOrId
-  } catch {
-    return (typeof dsOrId === 'string') ? null : dsOrId
-  }
-}
-
-function getRootDsObj (dsOrId: any): any {
-  let cur = resolveDsObj(dsOrId)
-  let guard = 0
-  while (cur && (cur as any).belongToDataSource && guard < 10) {
-    cur = resolveDsObj((cur as any).belongToDataSource)
-    guard++
-  }
-  return cur || resolveDsObj(dsOrId)
 }
 
 // Caricamento moduli ArcGIS JS API (AMD) senza dipendenze extra.
@@ -120,113 +90,55 @@ async function resolveFeatureLayerForAttachments (ds: any): Promise<any | null> 
 }
 
 
-
-type RuntimeSelection = {
-  oid: number | null
-  layerUrl: string
-  serviceUrl: string
-  idFieldName: string
-  viewName: string
-  data?: any
+function isFiniteNum (n: any): boolean {
+  return typeof n === 'number' && Number.isFinite(n)
 }
 
-function readRuntimeSelection (): RuntimeSelection | null {
-  try {
-    const mem = (window as any)?.__giiSelection
-    if (mem && mem.layerUrl && Number.isFinite(Number(mem.oid))) {
-      return {
-        oid: Number(mem.oid),
-        layerUrl: String(mem.layerUrl || '').trim(),
-        serviceUrl: String(mem.serviceUrl || '').trim(),
-        idFieldName: String(mem.idFieldName || 'OBJECTID').trim() || 'OBJECTID',
-        viewName: String(mem.viewName || '').trim(),
-        data: mem.data && typeof mem.data === 'object' ? mem.data : undefined
-      }
-    }
+function isValidOfficePoint (lon: any, lat: any): boolean {
+  if (!isFiniteNum(lon) || !isFiniteNum(lat)) return false
+  // evita default 0,0 (non configurato)
+  if (Number(lon) === 0 && Number(lat) === 0) return false
+  // range WGS84
+  if (Number(lon) < -180 || Number(lon) > 180) return false
+  if (Number(lat) < -90 || Number(lat) > 90) return false
+  return true
+}
 
-    const oidRaw = sessionStorage.getItem('GII_SELECTED_OID')
-    const layerUrl = String(sessionStorage.getItem('GII_SELECTED_LAYER_URL') || '').trim()
-    const serviceUrl = String(sessionStorage.getItem('GII_SELECTED_SERVICE_URL') || '').trim()
-    const idFieldName = String(sessionStorage.getItem('GII_SELECTED_IDFIELD') || 'OBJECTID').trim() || 'OBJECTID'
-    const viewName = String(sessionStorage.getItem('GII_SELECTED_VIEW_NAME') || '').trim()
-    const dataRaw = sessionStorage.getItem('GII_SELECTED_DATA')
-    let data: any = undefined
-    if (dataRaw) {
-      try { data = JSON.parse(dataRaw) } catch {}
-    }
-    const oid = oidRaw != null ? Number(oidRaw) : NaN
-    if (!layerUrl || !Number.isFinite(oid)) return null
-    return { oid, layerUrl, serviceUrl, idFieldName, viewName, data }
-  } catch {
-    return null
+function makeWgs84Point (lon: number, lat: number): any {
+  return { x: lon, y: lat, spatialReference: { wkid: 4326 } }
+}
+
+async function toWgs84Point (mapPoint: any): Promise<any | null> {
+  if (!mapPoint) return null
+  const sr = mapPoint?.spatialReference?.wkid
+  if (sr === 4326) {
+    const lon = isFiniteNum(mapPoint.longitude) ? mapPoint.longitude : mapPoint.x
+    const lat = isFiniteNum(mapPoint.latitude) ? mapPoint.latitude : mapPoint.y
+    if (!isFiniteNum(lon) || !isFiniteNum(lat)) return null
+    return makeWgs84Point(Number(lon), Number(lat))
   }
-}
 
-function makeRuntimeRecord (attrs: any, idFieldName: string, sourceKey: string): any {
-  const id = String(attrs?.[idFieldName] ?? attrs?.OBJECTID ?? attrs?.objectid ?? '')
-  return {
-    getData: () => attrs,
-    getId: () => id,
-    dataSource: { id: sourceKey }
-  }
-}
-
-const runtimeDsProxyPromises: Record<string, Promise<any>> = {}
-
-async function createRuntimeDsProxyFromLayerUrl (layerUrl: string, label?: string): Promise<any> {
-  try {
-    const cached = (window as any)?.__giiRuntimeDsProxyCache?.[layerUrl]
-    if (cached) return cached
-  } catch {}
-  if (runtimeDsProxyPromises[layerUrl]) return runtimeDsProxyPromises[layerUrl]
-
-  runtimeDsProxyPromises[layerUrl] = (async () => {
-    const FeatureLayer = await loadEsriModule<any>('esri/layers/FeatureLayer')
-    const layer = new FeatureLayer({ url: layerUrl, outFields: ['*'] })
-    if (typeof layer.load === 'function') {
-      try { await layer.load() } catch {}
-    }
-    const idFieldName = String(layer?.objectIdField || 'OBJECTID')
-    const schemaFields: Record<string, any> = {}
-    const fields = Array.isArray(layer?.fields) ? layer.fields : []
-    for (const f of fields) {
-      if (!f?.name) continue
-      schemaFields[String(f.name)] = { alias: String(f.alias || f.name), type: String(f.type || '') }
-    }
-    const proxy = {
-      id: `runtime:${layerUrl}`,
-      getIdField: () => idFieldName,
-      getSchema: () => ({ fields: schemaFields, idField: idFieldName }),
-      getLabel: () => String(label || ''),
-      getLayer: () => layer,
-      getJSAPILayer: () => layer,
-      getJsApiLayer: () => layer,
-      layer,
-      getDataSourceJson: () => ({ url: layerUrl }),
-      query: async (q: any) => {
-        const res = await layer.queryFeatures({
-          where: q?.where || '1=1',
-          outFields: (Array.isArray(q?.outFields) && q.outFields.length ? q.outFields : ['*']) as any,
-          returnGeometry: !!q?.returnGeometry
-        })
-        return { records: (res?.features || []).map((f: any) => makeRuntimeRecord(f?.attributes || {}, idFieldName, layerUrl)) }
-      }
-    }
+  // WebMercator (3857/102100)
+  if (sr === 3857 || sr === 102100) {
     try {
-      const w = window as any
-      w.__giiRuntimeDsProxyCache = w.__giiRuntimeDsProxyCache || {}
-      w.__giiRuntimeDsProxyCache[layerUrl] = proxy
-    } catch {}
-    return proxy
-  })()
-
-  try {
-    return await runtimeDsProxyPromises[layerUrl]
-  } catch (e) {
-    try { delete runtimeDsProxyPromises[layerUrl] } catch {}
-    throw e
+      const webMercatorUtils = await loadEsriModule<any>('esri/geometry/support/webMercatorUtils')
+      const g = webMercatorUtils?.webMercatorToGeographic?.(mapPoint)
+      if (g) return makeWgs84Point(Number(g.x), Number(g.y))
+    } catch { /* ignore */ }
   }
+
+  // Fallback: projection
+  try {
+    const SpatialReference = await loadEsriModule<any>('esri/geometry/SpatialReference')
+    const projection = await loadEsriModule<any>('esri/geometry/projection')
+    if (projection?.load) await projection.load()
+    const out = projection?.project?.(mapPoint, new SpatialReference({ wkid: 4326 }))
+    if (out) return makeWgs84Point(Number(out.x), Number(out.y))
+  } catch { /* ignore */ }
+
+  return null
 }
+
 
 function pickOidFromData (data: any, idFieldName: string) {
   if (!data) return null
@@ -252,6 +164,29 @@ function normKey (v: any): string {
 }
 
 
+// Survey (XLS) — req_point
+const NORMA3_REQ_POINT = new Set([
+  'Art12','Art27','Art28','Art30','Art31','Art32','Art33','Art34','Art35','Art36','Art37','Art39'
+])
+
+function parseMultiSelect (val: any): string[] {
+  if (!val) return []
+  if (Array.isArray(val)) return val.map(String)
+  // Survey123 salva select_multiple spesso come stringa separata da spazio
+  return String(val).split(/\s+/).filter(Boolean)
+}
+
+function computeReqPoint (attrs: Record<string, any>): 0 | 1 {
+  const p = String(attrs?.norma15_parziale ?? '')
+  const t = String(attrs?.norma15_totale ?? '')
+  if (p === 'Art15.1' || p === 'Art15.2') return 1
+  if (t === 'Art15.3' || t === 'Art15.4') return 1
+
+  const norma3 = parseMultiSelect(attrs?.norma_violata3)
+  if (norma3.some(v => NORMA3_REQ_POINT.has(v))) return 1
+  return 0
+}
+
 
 function isEmptyValue (v: any): boolean {
   if (v == null) return true
@@ -259,17 +194,6 @@ function isEmptyValue (v: any): boolean {
   if (Array.isArray(v)) return v.length === 0
   return false
 }
-
-function toNumOrNull (v: any, zeroIsNull: boolean = true): number | null {
-  if (v == null) return null
-  const s = String(v).trim()
-  if (!s) return null
-  const n = Number(v)
-  if (!Number.isFinite(n)) return null
-  if (zeroIsNull && n === 0) return null
-  return n
-}
-
 
 function escRe (s: string): string {
   return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
@@ -415,18 +339,28 @@ function DataSourceSelectionBridge (props: {
   uds: any
   dsKey: string
   watchFields: string[]
-  queryFields: string[]
   onUpdate: (dsKey: string, state: SelState) => void
 }) {
-  const { widgetId, uds, dsKey, watchFields, queryFields, onUpdate } = props
+  const { widgetId, uds, dsKey, watchFields, onUpdate } = props
+
+  // onDataSourceCreated: fornisce il DS appena disponibile, prima di qualsiasi selezione
+  const onDsCreated = React.useCallback((ds: any) => {
+    if (!ds) return
+    const idFieldName = ds?.getIdField ? ds.getIdField() : 'OBJECTID'
+    onUpdate(dsKey, { ds, oid: null, idFieldName, data: null, sig: 'ds_ready' })
+  }, [dsKey, onUpdate])
+
   return (
-    <DataSourceComponent useDataSource={uds} widgetId={widgetId}>
+    <DataSourceComponent
+      useDataSource={uds}
+      widgetId={widgetId}
+      onDataSourceCreated={onDsCreated}
+    >
       {(ds: any) => (
         <SelectionWatcher
           ds={ds}
           dsKey={dsKey}
           watchFields={watchFields}
-          queryFields={queryFields}
           onUpdate={onUpdate}
         />
       )}
@@ -438,23 +372,15 @@ function SelectionWatcher (props: {
   ds: any
   dsKey: string
   watchFields: string[]
-  queryFields: string[]
   onUpdate: (dsKey: string, state: SelState) => void
 }) {
-  const { ds, dsKey, watchFields, queryFields, onUpdate } = props
+  const { ds, dsKey, watchFields, onUpdate } = props
 
   React.useEffect(() => {
     try { ds?.setListenSelection?.(true) } catch {}
   }, [ds])
 
-  // Nota ExB: se nel Builder il DS del widget è impostato su "Feature selezionata",
-  // spesso i record arrivano come ds.getRecords() (output DS) e NON come getSelectedRecords().
-  // Per essere robusti, usiamo prima la selezione, poi fallback ai record.
-  let selected = ds?.getSelectedRecords?.() || []
-  if (!selected || selected.length === 0) {
-    const recs = ds?.getRecords?.() || []
-    if (recs && recs.length) selected = recs
-  }
+  const selected = ds?.getSelectedRecords?.() || []
   const r0 = selected.length ? selected[0] : null
   // Nota: in ExB il record selezionato può avere un subset di campi.
 // Per il filtro PF/PG dobbiamo avere SEMPRE la tipologia soggetto: la ricaviamo in modo robusto dallo schema/dominio.
@@ -488,91 +414,9 @@ if (tipoField) {
   const oidRaw = pickOidFromData(data, idFieldName)
   const oid = oidRaw != null ? Number(oidRaw) : null
 
-  // Forza re-query quando qualche altra parte dell'app lo richiede
-  // (es. dopo applyEdits sul FS madre). Event payload opzionale: { oid }.
-  const [refreshTick, setRefreshTick] = React.useState(0)
-
-  React.useEffect(() => {
-    const handler = (ev: any) => {
-      try {
-        const targetOid = ev?.detail?.oid
-        if (targetOid == null || Number(targetOid) === Number(oid)) {
-          setRefreshTick(t => t + 1)
-        }
-      } catch {
-        setRefreshTick(t => t + 1)
-      }
-    }
-    window.addEventListener('gii-force-refresh-selection', handler as any)
-    return () => window.removeEventListener('gii-force-refresh-selection', handler as any)
-  }, [oid])
-
-const [fullData, setFullData] = React.useState<any>(null)
-
-// reset full data when selection changes
-React.useEffect(() => {
-  setFullData(null)
-}, [ds, oid])
-
-const querySig = Array.isArray(queryFields) ? queryFields.join('|') : ''
-const watchSig = Array.isArray(watchFields) ? watchFields.join('|') : ''
-
-// Ensure we have ALL the fields needed by the TAB configuration.
-// Selected records in ExB can contain only a subset of attributes: we re-query by OID when needed.
-React.useEffect(() => {
-  let cancelled = false
-  const load = async () => {
-    if (!ds || oid == null || !Number.isFinite(oid)) return
-
-    const qf = Array.isArray(queryFields) ? queryFields : []
-    const wantsAll = qf.includes('*')
-
-    const outFieldsBase = wantsAll
-      ? ['*']
-      : Array.from(new Set([
-          ...qf,
-          ...(Array.isArray(watchFields) ? watchFields : [])
-        ])).filter(Boolean)
-
-    const outFields = (wantsAll || outFieldsBase.length === 0) ? ['*'] : outFieldsBase
-    const base = data || {}
-    const needsQuery = wantsAll || outFields.some(f => {
-      if (f === '*') return false
-      if (!Object.prototype.hasOwnProperty.call(base, f)) return true
-      // In ExB alcuni record includono la chiave ma con valore `undefined` quando il campo non è stato richiesto.
-      return (base as any)[f] === undefined
-    })
-    if (!needsQuery) return
-
-    try {
-      const q: any = {
-        where: `${idFieldName}=${Number(oid)}`,
-        outFields,
-        returnGeometry: false,
-        pageSize: 1
-      }
-      // Preferisci SEMPRE il DS root (FeatureLayer DS). L'Output DS spesso non implementa query correttamente.
-      const qds = getRootDsObj(ds) || ds
-      const res: any = await (qds?.query ? qds.query(q) : null)
-
-      let rec: any = null
-      if (Array.isArray(res)) rec = res[0]
-      else if (res && Array.isArray(res.records)) rec = res.records[0]
-      else if (res && res.data && Array.isArray(res.data.records)) rec = res.data.records[0]
-
-      const d = rec?.getData ? rec.getData() : (rec?.data || rec?.attributes || null)
-      if (!cancelled && d) setFullData(d)
-    } catch {}
-  }
-  load()
-  return () => { cancelled = true }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-}, [ds, oid, idFieldName, querySig, watchSig, refreshTick])
-
-const mergedData: any = fullData ? { ...(data || {}), ...(fullData || {}) } : data
   const sigParts: string[] = []
   sigParts.push(String(oid ?? ''))
-  for (const f of watchFields) sigParts.push(String(mergedData?.[f] ?? ''))
+  for (const f of watchFields) sigParts.push(String(data?.[f] ?? ''))
   const sig = sigParts.join('|')
 
   React.useEffect(() => {
@@ -580,7 +424,7 @@ const mergedData: any = fullData ? { ...(data || {}), ...(fullData || {}) } : da
       ds,
       oid: (oid != null && Number.isFinite(oid)) ? oid : null,
       idFieldName,
-      data: (oid != null && Number.isFinite(oid)) ? mergedData : null,
+      data: (oid != null && Number.isFinite(oid)) ? data : null,
       sig
     })
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -847,6 +691,32 @@ async function refreshDs(ds: any): Promise<void> {
     } catch { }
   }
 }
+
+
+async function trySelectOid (ds: any, oid: number): Promise<void> {
+  if (!ds || oid == null) return
+  const id = Number(oid)
+  const methods: Array<[string, any]> = [
+    ['selectRecordsByIds', [ [id] ]],
+    ['selectRecordById', [ id ]],
+    ['setSelectedRecordIds', [ [id] ]],
+    ['setSelectedIds', [ [id] ]]
+  ]
+  for (const [m, args] of methods) {
+    try {
+      if (typeof (ds as any)[m] === 'function') {
+        await (ds as any)[m](...args)
+        return
+      }
+    } catch { /* ignore */ }
+  }
+  // fallback: SelectionManager (best-effort)
+  try {
+    const sm = (DataSourceManager as any).getInstance?.()?.getSelectionManager?.()
+    if (sm?.selectRecordByIds && ds?.id) sm.selectRecordByIds(ds.id, [id])
+  } catch { /* ignore */ }
+}
+
 
 function InlineEditOverlay(props: {
   oid: number
@@ -1193,7 +1063,7 @@ function actionButtonStyle (bg: string, disabled: boolean, ui?: { btnBorderRadiu
   return { ...base, backgroundColor: bg, borderColor: bg, color: '#ffffff' }
 }
 
-type Pending = null | 'TAKE' | 'ASSEGNA_TI' | 'INTEGRAZIONE' | 'APPROVA' | 'RESPINGI' | 'TRASMETTI' | 'ELIMINA'
+type Pending = null | 'TAKE' | 'INTEGRAZIONE' | 'APPROVA' | 'RESPINGI' | 'TRASMETTI'
 
 function ActionsPanel (props: {
   active: { key: string; state: SelState } | null
@@ -1270,14 +1140,6 @@ function ActionsPanel (props: {
   // note / motivazione
   const [noteDraft, setNoteDraft] = React.useState('')
   const [rejectReason, setRejectReason] = React.useState('')
-
-  // Assegna TI (solo RZ)
-  type TiOpt = { username: string; fullName: string }
-  const [tiOptions, setTiOptions] = React.useState<TiOpt[]>([])
-  const [tiSelected, setTiSelected] = React.useState<string>('')
-  const [tiLoading, setTiLoading] = React.useState(false)
-  const [tiLoadErr, setTiLoadErr] = React.useState<string>('')
-
   const noteOrigRef = React.useRef<string>('')
   const noteRef = React.useRef<HTMLTextAreaElement | null>(null)
 
@@ -1299,331 +1161,84 @@ function ActionsPanel (props: {
   React.useEffect(() => { selectionKeyRef.current = selectionKey }, [selectionKey])
 
   const ds = active?.state?.ds
-
-  // ── Field existence helpers (schema-aware) ────────────────────────────────
-  // Alcune viste / layer non espongono i campi "presa_in_carico_*" (ma espongono "stato_*"),
-  // oppure il campo non esiste proprio nel modello dati.
-  // In questi casi NON dobbiamo:
-  // 1) usarlo per il gating dei pulsanti
-  // 2) impostarlo nel patch ottimistico (altrimenti si accende solo "subito" e poi si spegne al reselect)
-  const schemaFieldsCI = React.useMemo(() => {
-    try {
-      const fields: Record<string, any> = (ds as any)?.getSchema?.()?.fields || {}
-      const ci: Record<string, string> = {}
-      Object.keys(fields || {}).forEach(k => { ci[String(k).toLowerCase()] = k })
-      return ci
-    } catch {
-      return {} as Record<string, string>
-    }
-  }, [ds])
-
-  const hasField = React.useCallback((name: string) => {
-    if (!name) return false
-    const key = String(name).toLowerCase()
-    return !!(schemaFieldsCI && (schemaFieldsCI as any)[key])
-  }, [schemaFieldsCI])
-
-  const realFieldName = React.useCallback((name: string) => {
-    if (!name) return name
-    const key = String(name).toLowerCase()
-    return (schemaFieldsCI as any)?.[key] || name
-  }, [schemaFieldsCI])
-  // Patch ottimistico: dopo applyEdits aggiorniamo subito i valori usati dai pulsanti,
-  // senza dover aspettare refresh DS / cambio selezione.
-  const baseData = active?.state?.data || null
-  const [localData, setLocalData] = React.useState<any | null>(null)
-  React.useEffect(() => { setLocalData(null) }, [selectionKey])
-  const data = localData || baseData
+  const data = active?.state?.data || null
   const oid = active?.state?.oid ?? null
   const idFieldNameFromSel = active?.state?.idFieldName || 'OBJECTID'
   const hasSel = oid != null && Number.isFinite(oid)
 
-
-  const sessionIdRef = React.useRef<string>(`sess-${Date.now()}-${Math.random().toString(16).slice(2)}`)
-
-  const pickAttrCI = (obj: any, keys: string[]): any => {
-    if (!obj) return undefined
-    const map: Record<string, string> = {}
-    try {
-      Object.keys(obj).forEach(k => { map[String(k).toLowerCase()] = k })
-    } catch {}
-    for (const k of keys) {
-      const direct = (obj as any)[k]
-      if (direct !== undefined && direct !== null && direct !== '') return direct
-      const kk = map[String(k).toLowerCase()]
-      if (kk) {
-        const v = (obj as any)[kk]
-        if (v !== undefined && v !== null && v !== '') return v
-      }
-    }
-    return undefined
-  }
-
-  const inferSettoreFromUsername = (u: string): string => {
-    const up = String(u || '').toUpperCase()
-    const m = up.match(/(D[1-6]|DS|CR)/)
-    return m ? m[1] : ''
-  }
-
-  const writeLogPresaInCarico = async (opts: {
-    parentOid: number
-    parentGlobalId?: string
-    ruolo: string
-    area?: string
-    settore?: string
-    campo: string
-    valorePrev?: any
-    valoreNew?: any
-    note?: string
-    tipoEvento?: string
-    fase?: string
-  }) => {
-    try {
-      const FeatureLayer = await loadEsriModule<any>('esri/layers/FeatureLayer')
-      const logLayer = new FeatureLayer({ url: GII_LOG_EVENTI_URL, outFields: ['*'] })
-      if (typeof logLayer.load === 'function') {
-        await logLayer.load()
-      }
-
-      const attrsRaw: Record<string, any> = {
-        parent_globalid: opts.parentGlobalId || '00000000-0000-0000-0000-000000000000',
-        parent_objectid: opts.parentOid,
-        dt_evento: Date.now(),
-        ruolo: opts.ruolo,
-        area: opts.area ?? '',
-        settore: opts.settore ?? '',
-        operazione: 'UPDATE',
-        tipo_evento: opts.tipoEvento ?? '',
-        fase: opts.fase ?? opts.ruolo ?? '',
-        campo: opts.campo,
-        valore_precedente: opts.valorePrev != null ? String(opts.valorePrev) : '',
-        valore_nuovo: opts.valoreNew != null ? String(opts.valoreNew) : '',
-        session_id: sessionIdRef.current,
-        note: opts.note ?? ''
-      }
-
-      const attrs = filterAttrsToLayerFields(attrsRaw, logLayer)
-
-      const res = await logLayer.applyEdits({ addFeatures: [{ attributes: attrs }] })
-      const add = (res as any)?.addFeatureResults?.[0] || (res as any)?.addResults?.[0] || null
-      const err = add?.error
-      const ok = !err && (add?.success === true || add?.objectId != null || add?.globalId != null || add?.success == null)
-      if (!ok) {
-        const detail = err
-          ? `code=${err.code ?? ''} name=${err.name ?? ''} message=${err.message ?? ''}`
-          : JSON.stringify(res || add)
-        throw new Error(detail)
-      }
-    } catch (e) {
-      // non bloccare mai la presa in carico
-      // eslint-disable-next-line no-console
-      console.warn('[GII_LOG_EVENTI] Errore scrittura log evento:', e)
-    }
-  }
-
-
   // --- Editing TI ---
   const ec = props.editConfig
+  const [editOverlayOpen, setEditOverlayOpen] = React.useState(false)
 
   // Determina se il pulsante Modifica è abilitato
-  // Regola corretta TI:
-  // - esiste una selezione
-  // - il record è assegnato al TI corrente (ti_assegnato_username)
-  // - il rapporto è ancora nelle sue disponibilità, cioè non è già stato inoltrato a RZ/step successivi
   const statoTIVal = data ? data[ec.fieldStatoTI] : null
   const presaTIVal = data ? data[ec.fieldPresaTI] : null
-  const statoTINum = toNumOrNull(statoTIVal)
-  const presaTINum = toNumOrNull(presaTIVal)
-  const currentTiUsername = String((window as any).__giiUserRole?.username || (window as any).__giiUser?.username || '').trim().toLowerCase()
-  const assignedTiUsername = String(pickAttrCI(data, ['ti_assegnato_username', 'ti_assegnato_user', 'ti_assegnato']) || '').trim().toLowerCase()
-  const isAssignedToCurrentTi = !!currentTiUsername && !!assignedTiUsername && currentTiUsername === assignedTiUsername
-  // Il rapporto è nelle disponibilità del TI finché:
-  // - è assegnato a lui
-  // - TI non ha chiuso/inoltrato la lavorazione (esito_TI o stato finale)
-  // - non è già passato alle fasi successive (RI/DT/DA)
-  // Nota: non usiamo RZ come discriminante perché durante l'istruttoria TI
-  // il record può continuare ad avere campi RZ valorizzati senza essere ancora
-  // uscito dalle disponibilità del TI corrente.
-  const isMeaningfulAudit = (v: any): boolean => !(v === null || v === undefined || v === '' || v === 0 || v === '0')
-  const inChargeByTi =
-    isMeaningfulAudit(pickAttrCI(data, ['dt_presa_in_carico_TI', 'dt_presa_in_carico_ti', 'DT_PRESA_IN_CARICO_TI'])) ||
-    presaTINum === PRESA_IN_CARICO ||
-    statoTINum === STATO_PRESA_IN_CARICO
-
-  const tiClosedOrForwarded =
-    isMeaningfulAudit(pickAttrCI(data, ['esito_TI', 'esito_ti', 'ESITO_TI'])) ||
-    (statoTINum === STATO_APPROVATA) ||
-    (statoTINum === STATO_RESPINTA) ||
-    (statoTINum != null && statoTINum > STATO_PRESA_IN_CARICO)
+  const statoTINum = statoTIVal != null && String(statoTIVal) !== '' ? Number(statoTIVal) : null
+  const presaTINum = presaTIVal != null && String(presaTIVal) !== '' ? Number(presaTIVal) : null
 
   const canEdit =
     hasSel &&
     !loading &&
     pending === null &&
     ec.show &&
-    isAssignedToCurrentTi &&
-    inChargeByTi &&
-    !tiClosedOrForwarded
+    presaTINum === ec.presaRequiredVal &&
+    statoTINum != null &&
+    statoTINum >= ec.minStato &&
+    statoTINum <= ec.maxStato
 
-  const handleEditPage = () => {
+  const handleEditOverlay = () => {
     if (!canEdit) return
+    // Scrive i dati nel canale globale per il widget Editing TI
     try {
-      const payload = {
+      (window as any).__giiEdit = {
         oid,
         data: { ...data },
         idFieldName: active?.state?.idFieldName || 'OBJECTID',
         dsId: active?.state?.ds?.id ?? null,
-        layerUrl: active?.state?.ds?.getDataSourceJson?.()?.url ?? active?.state?.ds?.dataSourceJson?.url ?? null,
         ts: Date.now()
       }
-      ;(window as any).__giiEdit = payload
-      try { sessionStorage.setItem('GII_EDIT_INTENT', JSON.stringify(payload)) } catch {}
-      try { window.dispatchEvent(new CustomEvent('gii-edit-intent-changed')) } catch {}
     } catch { }
-    const resolvePageId = (pageTokenRaw: string): string => {
-      const tok0 = String(pageTokenRaw || '').trim()
-      const wanted = tok0 || 'page_20'
-      let tok = wanted.replace(/^#+\/?/, '').replace(/^\/+/, '')
-      if (tok.startsWith('page/')) tok = tok.slice(5)
-      try {
-        const state: any = getAppStore?.()?.getState?.()
-        const appConfig: any = state?.appConfig
-        const rawPages: any = appConfig?.pages ?? {}
-        const pagesMap: any = rawPages?.asMutable ? rawPages.asMutable({ deep: true }) : (rawPages?.toJS ? rawPages.toJS() : rawPages)
-        if (pagesMap && pagesMap[tok]) return tok
-        const hist = appConfig?.historyLabels?.page || {}
-        const cand: Array<[string, any]> = Object.entries(pagesMap || {}) as any
-        for (const [pageId, pg] of cand) {
-          const p: any = pg || {}
-          if (p?.name === tok || p?.label === tok || p?.title === tok) return String(pageId)
-          if (hist && (hist as any)[pageId] === tok) return String(pageId)
-        }
-        const low = tok.toLowerCase()
-        const preferredNeedles = [low, 'page_20', 'modifica rapporto']
-        for (const needle of preferredNeedles) {
-          if (!needle) continue
-          for (const [pageId, pg] of cand) {
-            const p: any = pg || {}
-            const vals = [p?.name, p?.label, p?.title, (hist as any)?.[pageId]].filter(Boolean).map((v: any) => String(v).toLowerCase())
-            if (vals.some((v: string) => v === needle || v.includes(needle))) return String(pageId)
-          }
-        }
-      } catch {}
-      return tok
-    }
+    setEditOverlayOpen(true)
+  }
 
+  const handleEditPage = () => {
+    if (!canEdit) return
     try {
-      const pageToken = String(ec.pageId || 'page_20').trim()
-      const pageId = resolvePageId(pageToken)
-      if (pageId) {
-        UrlManager.getInstance().changePage(pageId)
+      (window as any).__giiEdit = {
+        oid,
+        data: { ...data },
+        idFieldName: active?.state?.idFieldName || 'OBJECTID',
+        dsId: active?.state?.ds?.id ?? null,
+        ts: Date.now()
+      }
+    } catch { }
+    // Navigazione ExB: usa l'API history/routing di ExB se disponibile,
+    // altrimenti fallback su hash navigation
+    try {
+      const pageId = String(ec.pageId || 'editing-ti').trim()
+      const getAppStore = (window as any).jimuCore?.getAppStore
+      if (getAppStore) {
+        const store = getAppStore()
+        store?.dispatch?.({ type: 'APP_NAVIGATE', uri: pageId })
         return
       }
     } catch { }
     try {
-      const pageToken = String(ec.pageId || 'page_20').trim()
-      const clean = pageToken.replace(/^#+\/?/, '').replace(/^\/+/, '')
-      const t = clean.startsWith('page/') ? clean.slice(5) : clean
-      window.location.hash = `#/page/${t}`
+      const pageId = String(ec.pageId || 'editing-ti').trim()
+      window.location.hash = `#${pageId}`
     } catch { }
   }
 
-  // Leggi i valori in modo robusto:
-  // - se il campo non esiste nello schema, non usarlo
-  // - se esiste ma arriva con case diversa, risolvi tramite schema CI
-  const presaFieldExists = hasField(presaField)
-  const dtPresaFieldExists = hasField(dtPresaField)
-  const statoFieldExists = hasField(statoField)
+  const presaVal = data ? data[presaField] : null
+  const statoVal = data ? data[statoField] : null
+  const esitoVal = data ? data[esitoField] : null
+  const statoDAVal = data ? data[statoDAField] : null
 
-  const presaVal = (data && presaFieldExists) ? data[realFieldName(presaField)] : null
-  const statoVal = (data && statoFieldExists) ? data[realFieldName(statoField)] : (data ? data[statoField] : null)
-  const esitoVal = data ? data[realFieldName(esitoField)] : null
-  const statoDAVal = data ? data[realFieldName(statoDAField)] : null
-
-  const presaNumRaw = toNumOrNull(presaVal)
-  const statoNum = toNumOrNull(statoVal)
-  // Se il campo presa_in_carico_* non esiste (molto comune per RZ/TI in alcune viste),
-  // interpretiamo "presa" = stato (stato=2 significa presa in carico).
-  const presaNum = presaFieldExists ? presaNumRaw : statoNum
-  const statoDANum = toNumOrNull(statoDAVal)
+  const presaNum = (presaVal != null && String(presaVal) !== '') ? Number(presaVal) : null
+  const statoNum = (statoVal != null && String(statoVal) !== '') ? Number(statoVal) : null
+  const statoDANum = (statoDAVal != null && String(statoDAVal) !== '') ? Number(statoDAVal) : null
   const origineVal = data ? data['origine_pratica'] : null
-  // origine_pratica può arrivare come codice numerico (1/2) oppure come label ("TR"/"TI").
-  let origineNum: number | null = null
-  if (origineVal != null && String(origineVal) !== '') {
-    const n = Number(origineVal)
-    if (Number.isFinite(n)) origineNum = n
-    else {
-      const s = String(origineVal).trim().toUpperCase()
-      if (s === 'TR') origineNum = 1
-      else if (s === 'TI') origineNum = 2
-    }
-  }
-
-  const parseMsAny = (v: any): number | null => {
-    if (v === null || v === undefined || v === '') return null
-    if (typeof v === 'number' && Number.isFinite(v)) return v
-    const n = Number(v)
-    if (Number.isFinite(n) && n > 0) return n
-    const t = Date.parse(String(v))
-    return Number.isFinite(t) ? t : null
-  }
-
-  const getRoleLastTouchMs = (d: any, r: string): number | null => {
-    if (!d) return null
-    const vals = [
-      parseMsAny(pickAttrCI(d, [`dt_presa_in_carico_${r}`, `DT_PRESA_IN_CARICO_${r}`])),
-      parseMsAny(pickAttrCI(d, [`dt_stato_${r}`, `DT_STATO_${r}`])),
-      parseMsAny(pickAttrCI(d, [`dt_esito_${r}`, `DT_ESITO_${r}`]))
-    ].filter((v): v is number => v !== null)
-    return vals.length ? Math.max(...vals) : null
-  }
-
-  const computeAwaitingRetakeByRZ = (d: any): boolean => {
-    if (!d) return false
-    const opVal = pickAttrCI(d, ['origine_pratica', 'ORIGINE_PRATICA'])
-    let opNum: number | null = null
-    if (opVal != null && String(opVal) !== '') {
-      const n = Number(opVal)
-      if (Number.isFinite(n)) opNum = n
-      else {
-        const s = String(opVal).trim().toUpperCase()
-        if (s === 'TR') opNum = 1
-        else if (s === 'TI') opNum = 2
-      }
-    }
-    if (!(opNum == null || opNum === 1)) return false
-
-    const tiUserRaw = pickAttrCI(d, ['ti_assegnato_username', 'ti_assegnato_user', 'ti_assegnato'])
-    const tiNameRaw = pickAttrCI(d, ['ti_assegnato_nome', 'ti_assegnatoName', 'TI_ASSEGNATO_NOME'])
-    const dtAssegnaRaw = pickAttrCI(d, ['dt_assegnazione_ti', 'dt_assegnazione_TI', 'DT_ASSEGNAZIONE_TI'])
-    const hasTiAssignedLocal = !isEmptyValue(tiUserRaw) || !isEmptyValue(tiNameRaw) || !isEmptyValue(dtAssegnaRaw)
-    if (!hasTiAssignedLocal) return false
-
-    const higherTouchedLocal =
-      (toNumOrNull(pickAttrCI(d, ['presa_in_carico_RI', 'PRESA_IN_CARICO_RI'])) != null) ||
-      (toNumOrNull(pickAttrCI(d, ['stato_RI', 'STATO_RI'])) != null) ||
-      (toNumOrNull(pickAttrCI(d, ['esito_RI', 'ESITO_RI'])) != null) ||
-      (toNumOrNull(pickAttrCI(d, ['presa_in_carico_DT', 'PRESA_IN_CARICO_DT'])) != null) ||
-      (toNumOrNull(pickAttrCI(d, ['stato_DT', 'STATO_DT'])) != null) ||
-      (toNumOrNull(pickAttrCI(d, ['esito_DT', 'ESITO_DT'])) != null) ||
-      (toNumOrNull(pickAttrCI(d, ['presa_in_carico_DA', 'PRESA_IN_CARICO_DA'])) != null) ||
-      (toNumOrNull(pickAttrCI(d, ['stato_DA', 'STATO_DA'])) != null) ||
-      (toNumOrNull(pickAttrCI(d, ['esito_DA', 'ESITO_DA'])) != null)
-    if (higherTouchedLocal) return false
-
-    const statoTiLocal = toNumOrNull(pickAttrCI(d, ['stato_TI', 'stato_ti', 'STATO_TI']))
-    const esitoTiLocal = toNumOrNull(pickAttrCI(d, ['esito_TI', 'esito_ti', 'ESITO_TI']))
-    const tiReturnedLocal = (esitoTiLocal != null) || (statoTiLocal === STATO_APPROVATA) || (statoTiLocal === STATO_RESPINTA)
-    if (!tiReturnedLocal) return false
-
-    const tiLast = getRoleLastTouchMs(d, 'TI')
-    const rzLast = getRoleLastTouchMs(d, 'RZ')
-    return tiLast != null && (rzLast == null || rzLast <= tiLast)
-  }
-
-  const awaitingRetakeByRz = data ? computeAwaitingRetakeByRZ(data) : false
-  const effectiveStatoNum = awaitingRetakeByRz && role === 'RZ' ? STATO_DA_PRENDERE : statoNum
-  const effectivePresaNum = awaitingRetakeByRz && role === 'RZ' ? PRESA_DA_PRENDERE : presaNum
+  const origineNum = (origineVal != null && String(origineVal) !== '') ? Number(origineVal) : null
 
   // blocca DT se già trasmesso a DA (DA ha uno stato valorizzato)
   const lockedByTransmit = (role === 'DT') && (statoDANum != null && statoDANum >= 1)
@@ -1638,8 +1253,6 @@ function ActionsPanel (props: {
       noteOrigRef.current = ''
       setNoteDraft('')
       setRejectReason('')
-      setTiSelected('')
-      setTiLoadErr('')
       return
     }
 
@@ -1652,8 +1265,6 @@ function ActionsPanel (props: {
     noteOrigRef.current = v
     setNoteDraft(v)
     setRejectReason('')
-    setTiSelected('')
-    setTiLoadErr('')
 
     window.setTimeout(() => autoResizeNote(noteRef.current), 0)
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1664,65 +1275,6 @@ function ActionsPanel (props: {
     return () => window.clearTimeout(t)
   }, [noteDraft, autoResizeNote])
 
-  // Carica elenco TI da GII_utenti (ruolo=2). Filtra per area/settore se disponibili.
-  const loadTiOptions = React.useCallback(async () => {
-    if (tiLoading) return
-    setTiLoading(true)
-    setTiLoadErr('')
-    try {
-      const FeatureLayer = await loadEsriModule<any>('esri/layers/FeatureLayer')
-      const fl = new FeatureLayer({ url: GII_UTENTI_URL })
-      if (typeof fl?.load === 'function') {
-        try { await fl.load() } catch {}
-      }
-
-      const u: any = (window as any).__giiUserRole || {}
-      const area = (u?.area != null && String(u.area) !== '') ? Number(u.area) : null
-      const settore = (u?.settore != null && String(u.settore) !== '') ? Number(u.settore) : null
-
-      const runQuery = async (where: string): Promise<TiOpt[]> => {
-        const q: any = (typeof fl.createQuery === 'function') ? fl.createQuery() : {}
-        q.where = where
-        q.outFields = ['username', 'full_name', 'area', 'settore']
-        q.returnGeometry = false
-        q.num = 2000
-        const res: any = await fl.queryFeatures(q)
-        const feats: any[] = res?.features || []
-        const opts: TiOpt[] = feats.map((f: any) => {
-          const a: any = f?.attributes || {}
-          const username = String(a.username || '').trim()
-          const fullName = String(a.full_name || a.fullName || a.nome || '').trim()
-          return { username, fullName: (fullName || username) }
-        }).filter(o => !!o.username)
-        opts.sort((a, b) => (a.fullName || a.username).localeCompare((b.fullName || b.username), 'it', { sensitivity: 'base' }))
-        return opts
-      }
-
-      let opts: TiOpt[] = []
-      if (area != null && settore != null) {
-        opts = await runQuery(`ruolo = 2 AND area = ${area} AND settore = ${settore}`).catch(() => [])
-      }
-      if (!opts.length && area != null) {
-        opts = await runQuery(`ruolo = 2 AND area = ${area}`).catch(() => [])
-      }
-      if (!opts.length) {
-        opts = await runQuery('ruolo = 2').catch(() => [])
-      }
-      setTiOptions(opts)
-    } catch (e: any) {
-      setTiLoadErr(e?.message ? String(e.message) : String(e))
-    } finally {
-      setTiLoading(false)
-    }
-  }, [tiLoading])
-
-  React.useEffect(() => {
-    if (pending !== 'ASSEGNA_TI') return
-    if (role !== 'RZ') return
-    void loadTiOptions()
-  }, [pending, role, loadTiOptions])
-
-
   const isLocked = pending != null || loading
   const showOverlay = isLocked && hasSel
 
@@ -1731,78 +1283,42 @@ function ActionsPanel (props: {
   // Scansiona i ruoli dal più avanzato (DA) al meno avanzato (TR) e
   // restituisce il primo con dati valorizzati → quello è il nodo corrente.
   // Se nessuno ha dati, usa origine_pratica: 1→'RZ', 2→'TI'.
-    const computeNodoAttivo = (d: any): string => {
+  const computeNodoAttivo = (d: any): string => {
     if (!d) return ''
-
-    // Helpers: function declarations (hoisted) to avoid TDZ issues.
-    function isMeaningful (v: any): boolean {
-      return v !== null && v !== undefined && v !== '' && v !== 0 && v !== '0'
-    }
-
-    function toNum (v: any): number | null {
-      return toNumOrNull(v)
-    }
-
-    if (computeAwaitingRetakeByRZ(d)) return 'RZ'
-
-    // Caso speciale: assegnazione RZ → TI.
-    // Finché TI non "restituisce" la pratica (esito_TI o stato_TI finale),
-    // consideriamo TI come nodo attivo (così TI può prendere in carico/lavorare).
-    // NB: su alcune Data View possono mancare i campi username; usiamo fallback su nome/data assegnazione.
-    const tiUserRaw = pickAttrCI(d, ['ti_assegnato_username', 'ti_assegnato_user', 'ti_assegnato'])
-    const tiNameRaw = pickAttrCI(d, ['ti_assegnato_nome', 'ti_assegnatoName', 'TI_ASSEGNATO_NOME'])
-    const dtAssegnaRaw = pickAttrCI(d, ['dt_assegnazione_ti', 'dt_assegnazione_TI', 'DT_ASSEGNAZIONE_TI'])
-    const tiAssigned = isMeaningful(tiUserRaw) || isMeaningful(tiNameRaw) || isMeaningful(dtAssegnaRaw)
-    if (tiAssigned) {
-      const higherTouched = ['DA', 'DT', 'RI'].some(r => {
-        const p = d[`presa_in_carico_${r}`]
-        const s = d[`stato_${r}`]
-        const e = d[`esito_${r}`]
-        return isMeaningful(p) || isMeaningful(s) || isMeaningful(e)
-      })
-      const statoTi = toNum(pickAttrCI(d, ['stato_TI', 'stato_ti', 'STATO_TI']))
-      const esitoTi = toNum(pickAttrCI(d, ['esito_TI', 'esito_ti', 'ESITO_TI']))
-      const tiReturnedLocal = (esitoTi != null) || (statoTi === STATO_APPROVATA) || (statoTi === STATO_RESPINTA)
-      if (!higherTouched && !tiReturnedLocal) return 'TI'
-    }
-
     const scanOrder = ['DA', 'DT', 'RI', 'RZ', 'TI', 'TR']
-
     const hasData = (role: string) => {
       const p = d[`presa_in_carico_${role}`]
       const s = d[`stato_${role}`]
       const e = d[`esito_${role}`]
-      return isMeaningful(p) || isMeaningful(s) || isMeaningful(e)
+      return (p !== null && p !== undefined && p !== '')
+          || (s !== null && s !== undefined && s !== '')
+          || (e !== null && e !== undefined && e !== '')
     }
-
     for (const r of scanOrder) {
       if (!hasData(r)) continue
-
-      const presaNum = toNum(d[`presa_in_carico_${r}`])
-      const statoNum = toNum(d[`stato_${r}`])
-      const esitoNum = toNum(d[`esito_${r}`])
-
-      // Se l'esito è valorizzato (non 0) significa che quel ruolo ha già agito.
-      // Il nodo "attivo" è il successivo, ma per gating ci basta non far tornare indietro.
-      if (esitoNum != null) return r
-
-      if (presaNum != null || statoNum != null) return r
-
+      // Trovato il nodo più avanzato con dati
+      const presaRaw = d[`presa_in_carico_${r}`]
+      const statoRaw = d[`stato_${r}`]
+      const esitoRaw = d[`esito_${r}`]
+      const presaNum = presaRaw !== null && presaRaw !== undefined && presaRaw !== '' ? Number(presaRaw) : null
+      const statoNum = statoRaw !== null && statoRaw !== undefined && statoRaw !== '' ? Number(statoRaw) : null
+      const esitoNum = esitoRaw !== null && esitoRaw !== undefined && esitoRaw !== '' ? Number(esitoRaw) : null
+      // esito → pratica trasmessa al ruolo successivo o chiusa: non è più questo ruolo ad agire
+      // (lascia passare: il successivo nel scanOrder prenderà)
+      if (esitoNum !== null && Number.isFinite(esitoNum)) {
+        // esito presente → questo ruolo ha già agito, il nodo attivo è il SUCCESSORE
+        // (ma non abbiamo un "successore" esplicito — restituiamo questo ruolo
+        //  per sicurezza; canStartTakeInCharge lo bloccherà comunque perché
+        //  esito != null significa che la pratica è già stata processata)
+        return r
+      }
+      // presa=1 (trasmessa, da prendere) o presa=2 (in carico) o stato valorizzato → questo è il nodo
+      if (presaNum !== null || statoNum !== null) return r
       return r
     }
-
     // Nessun dato: pratica nuova
     const op = d['origine_pratica']
-    let opNum: number | null = null
-    if (op !== null && op !== undefined && String(op) !== '') {
-      opNum = toNumOrNull(op)
-      if (opNum == null) {
-        const s = String(op).trim().toUpperCase()
-        if (s === 'TR') opNum = 1
-        else if (s === 'TI') opNum = 2
-      }
-    }
-
+    const opNum = op !== null && op !== undefined && op !== '' ? Number(op) : null
     return opNum === 2 ? 'TI' : 'RZ'
   }
 
@@ -1823,35 +1339,8 @@ function ActionsPanel (props: {
     pending === null &&
     isMyTurn &&
     !isTiOwningOrigin2 &&
-    (effectivePresaNum == null || effectivePresaNum === PRESA_DA_PRENDERE) &&
-    (effectiveStatoNum == null || effectiveStatoNum === STATO_DA_PRENDERE)
-
-
-  // TI assignment (RZ → TI): se la pratica è assegnata a TI e TI non l'ha ancora "restituita",
-  // RZ non deve poter esprimere esito/integrazione/approvazione/respinta.
-  // Su alcune Data View i campi di assegnazione possono mancare: quindi consideriamo anche
-  // l'eventuale workflow TI già presente sulla pratica.
-  const tiUserRaw = pickAttrCI(data, ['ti_assegnato_username', 'ti_assegnato_user', 'ti_assegnato'])
-  const tiNameRaw = pickAttrCI(data, ['ti_assegnato_nome', 'ti_assegnatoName', 'TI_ASSEGNATO_NOME'])
-  const dtAssegnaRaw = pickAttrCI(data, ['dt_assegnazione_ti', 'dt_assegnazione_TI', 'DT_ASSEGNAZIONE_TI'])
-  const hasTiAssigned = !isEmptyValue(tiUserRaw) || !isEmptyValue(tiNameRaw) || !isEmptyValue(dtAssegnaRaw)
-  const statoTiNum = toNumOrNull(pickAttrCI(data, ['stato_TI', 'stato_ti', 'STATO_TI']))
-  const presaTiNum = toNumOrNull(pickAttrCI(data, ['presa_in_carico_TI', 'presa_in_carico_ti', 'PRESA_IN_CARICO_TI']))
-  const esitoTiNum = toNumOrNull(pickAttrCI(data, ['esito_TI', 'esito_ti', 'ESITO_TI']))
-  const hasTiWorkflowTouched = (presaTiNum != null) || (statoTiNum != null) || (esitoTiNum != null)
-  const hasHigherWorkflowTouched =
-    (toNumOrNull(pickAttrCI(data, ['presa_in_carico_RI', 'PRESA_IN_CARICO_RI'])) != null) ||
-    (toNumOrNull(pickAttrCI(data, ['stato_RI', 'STATO_RI'])) != null) ||
-    (toNumOrNull(pickAttrCI(data, ['esito_RI', 'ESITO_RI'])) != null) ||
-    (toNumOrNull(pickAttrCI(data, ['presa_in_carico_DT', 'PRESA_IN_CARICO_DT'])) != null) ||
-    (toNumOrNull(pickAttrCI(data, ['stato_DT', 'STATO_DT'])) != null) ||
-    (toNumOrNull(pickAttrCI(data, ['esito_DT', 'ESITO_DT'])) != null) ||
-    (toNumOrNull(pickAttrCI(data, ['presa_in_carico_DA', 'PRESA_IN_CARICO_DA'])) != null) ||
-    (toNumOrNull(pickAttrCI(data, ['stato_DA', 'STATO_DA'])) != null) ||
-    (toNumOrNull(pickAttrCI(data, ['esito_DA', 'ESITO_DA'])) != null)
-  const hasTiAnyEvidence = hasTiAssigned || hasTiWorkflowTouched
-  const tiReturned = (esitoTiNum != null) || (statoTiNum === STATO_APPROVATA) || (statoTiNum === STATO_RESPINTA) || hasHigherWorkflowTouched
-  const lockRZBecauseAssignedToTi = role === 'RZ' && (origineNum == null || origineNum === 1) && hasTiAnyEvidence && !tiReturned && !awaitingRetakeByRz
+    (presaNum == null || presaNum === PRESA_DA_PRENDERE) &&
+    (statoNum == null || statoNum === STATO_DA_PRENDERE)
 
   const canStartEsito =
     hasSel &&
@@ -1859,73 +1348,8 @@ function ActionsPanel (props: {
     !lockedByTransmit &&
     pending === null &&
     isMyTurn &&
-    !lockRZBecauseAssignedToTi &&
-    effectivePresaNum === PRESA_IN_CARICO &&
-    effectiveStatoNum === STATO_PRESA_IN_CARICO
-
-  // Regola RZ: prima di assegnare a TI, può solo "Assegna TI" oppure "Respingi" (con motivazione).
-  // Quindi, FINCHÉ non esiste un TI assegnato, RZ non può fare Integrazione né Approva.
-  const canStartIntegrazione =
-    canStartEsito &&
-    !(role === 'RZ' && (origineNum == null || origineNum === 1) && !hasTiAnyEvidence) &&
-    role !== 'TI'
-
-  const canStartApprova =
-    canStartEsito &&
-    !(role === 'RZ' && (origineNum == null || origineNum === 1) && !hasTiAnyEvidence)
-
-  const canStartRespingi =
-    canStartEsito &&
-    role !== 'TI' &&
-    role !== 'RI'
-
-  // Label dinamiche (inoltro vs approva) — senza cambiare la semantica dati (esito=approvata).
-  const approvaBtnLabel =
-    role === 'TI' ? 'Inoltra a RZ' :
-    role === 'RZ' ? 'Inoltra a RI' :
-    role === 'RI' ? 'Inoltra a DT' :
-    'Approva'
-
-  const approvaDoneLabel =
-    role === 'TI' ? 'Inoltrata a RZ' :
-    role === 'RZ' ? 'Inoltrata a RI' :
-    role === 'RI' ? 'Inoltrata a DT' :
-    'Approvata'
-
-  const approvaConfirmLabel =
-    role === 'TI' ? 'Conferma inoltro a RZ' :
-    role === 'RZ' ? 'Conferma inoltro a RI' :
-    role === 'RI' ? 'Conferma inoltro a DT' :
-    'Conferma approvazione'
-
-  // TI: eliminazione consentita solo per pratiche originate da sé (origine=TI) e mai inoltrate a RZ.
-  const currentUsername = String((window as any).__giiUserRole?.username || (window as any).__giiUser?.username || '').trim()
-  const creatorUsername = String(pickAttrCI(data, ['creator', 'Creator', 'created_user', 'created_by', 'CreatedUser', 'CREATOR']) || '').trim()
-  const isOwner = !!currentUsername && !!creatorUsername && currentUsername.toLowerCase() === creatorUsername.toLowerCase()
-
-  const hasRoleTouched = (r: string): boolean => {
-    const p = toNumOrNull(pickAttrCI(data, [`presa_in_carico_${r}`, `PRESA_IN_CARICO_${r}`]))
-    const s = toNumOrNull(pickAttrCI(data, [`stato_${r}`, `STATO_${r}`]))
-    const e = toNumOrNull(pickAttrCI(data, [`esito_${r}`, `ESITO_${r}`]))
-    return (p != null) || (s != null) || (e != null)
-  }
-
-  const canStartElimina =
-    role === 'TI' &&
-    hasSel &&
-    !loading &&
-    !lockedByTransmit &&
-    pending === null &&
-    isMyTurn &&
-    origineNum === 2 &&
-    !hasTiAssigned &&
-    !hasRoleTouched('RZ') &&
-    !hasRoleTouched('RI') &&
-    !hasRoleTouched('DT') &&
-    !hasRoleTouched('DA') &&
-    (esitoTiNum == null) &&
-    isOwner
-
+    presaNum === PRESA_IN_CARICO &&
+    statoNum === STATO_PRESA_IN_CARICO
 
   const canStartTrasmetti =
     role === 'DT' &&
@@ -1934,22 +1358,8 @@ function ActionsPanel (props: {
     !lockedByTransmit &&
     pending === null &&
     isMyTurn &&
-    (effectiveStatoNum === STATO_INTEGRAZIONE || effectiveStatoNum === STATO_APPROVATA || effectiveStatoNum === STATO_RESPINTA) &&
+    (statoNum === STATO_INTEGRAZIONE || statoNum === STATO_APPROVATA || statoNum === STATO_RESPINTA) &&
     (statoDANum == null || statoDANum === 0)
-
-  // Assegna TI: solo RZ, dopo presa in carico, pratiche da TR.
-  // NOTA: non dipendiamo da computeNodoAttivo perché su alcune Output DS ExB
-  // può arrivare un subset di campi che falsano `isMyTurn` dopo un reselect.
-  const canStartAssegnaTi =
-    role === 'RZ' &&
-    hasSel &&
-    !loading &&
-    !lockedByTransmit &&
-    pending === null &&
-    (origineNum == null || origineNum === 1) &&
-    !hasTiAnyEvidence &&
-    effectivePresaNum === PRESA_IN_CARICO &&
-    effectiveStatoNum === STATO_PRESA_IN_CARICO
 
   // NOTE: compare solo per integrazione/respinta
   const showNote = pending === 'INTEGRAZIONE' || pending === 'RESPINGI'
@@ -1972,8 +1382,6 @@ function ActionsPanel (props: {
   const reasonReqErr = confirmAttempted && reasonInvalid
   const noteReqErr = confirmAttempted && noteInvalid
 
-  const tiReqErr = confirmAttempted && pending === 'ASSEGNA_TI' && !tiSelected
-
   const onAnnulla = () => {
     setPending(null)
     setLoading(false)
@@ -1981,34 +1389,19 @@ function ActionsPanel (props: {
     setConfirmAttempted(false)
     setNoteDraft(noteOrigRef.current)
     setRejectReason('')
-    setTiSelected('')
-    setTiLoadErr('')
   }
 
   const startAction = (p: Pending) => {
     if (!hasSel) return
     if (lockedByTransmit) return
     if (p === 'TAKE' && !canStartTakeInCharge) return
-    if (p === 'ASSEGNA_TI' && !canStartAssegnaTi) return
-    if (p === 'INTEGRAZIONE' && !canStartIntegrazione) return
-    if (p === 'APPROVA' && !canStartApprova) return
-    if (p === 'RESPINGI' && !canStartRespingi) return
+    if (p !== 'TAKE' && p !== 'TRASMETTI' && !canStartEsito) return
     if (p === 'TRASMETTI' && !canStartTrasmetti) return
-    if (p === 'ELIMINA' && !canStartElimina) return
 
     setPending(p)
     setMsg(null)
     setConfirmAttempted(false)
     setRejectReason('')
-    setTiLoadErr('')
-
-    if (p === 'ASSEGNA_TI') {
-      const cur = String(pickAttrCI(data, ['ti_assegnato_username', 'ti_assegnato_user', 'ti_assegnato']) || '')
-      setTiSelected(cur)
-      window.setTimeout(() => { void loadTiOptions() }, 0)
-    } else {
-      setTiSelected('')
-    }
 
     if (p === 'INTEGRAZIONE') {
       window.setTimeout(() => {
@@ -2019,7 +1412,9 @@ function ActionsPanel (props: {
   }
 
   const getRootDs = (maybeDs: any) => {
-    return getRootDsObj(maybeDs) || maybeDs
+    let root = maybeDs
+    try { while (root?.belongToDataSource) root = root.belongToDataSource } catch {}
+    return root || maybeDs
   }
 
   const resolveLayer = async (maybeDs: any) => {
@@ -2072,100 +1467,6 @@ function ActionsPanel (props: {
     if (upd && !upd.success) {
       const e = upd.error
       throw new Error(e ? `code=${e.code} – ${e.description || e.message}` : JSON.stringify(upd))
-    }
-  }
-
-
-  // Chiama deleteFeatures direttamente via REST (fetch).
-  const deleteFeaturesViaRest = async (layerUrl: string, objectId: number): Promise<void> => {
-    let token = ''
-    try {
-      const esriId = await loadEsriModule<any>('esri/identity/IdentityManager')
-      const cred = await esriId.getCredential(layerUrl)
-      token = cred?.token || ''
-    } catch { /* ignore */ }
-
-    const body = new URLSearchParams({
-      f: 'json',
-      objectIds: String(objectId),
-      rollbackOnFailure: 'true',
-      ...(token ? { token } : {})
-    })
-
-    const url = `${layerUrl.replace(/\/$/, '')}/deleteFeatures`
-    const resp = await fetch(url, { method: 'POST', body })
-    if (!resp.ok) throw new Error(`HTTP ${resp.status}`)
-    const json = await resp.json()
-
-    if (json.error) {
-      throw new Error(`REST error: code=${json.error.code} – ${json.error.message}`)
-    }
-    const del = json.deleteResults?.[0]
-    if (del && !del.success) {
-      const e = del.error
-      throw new Error(e ? `code=${e.code} – ${e.description || e.message}` : JSON.stringify(del))
-    }
-  }
-
-  const runDeleteEdits = async (okText: string) => {
-    if (!ds) throw new Error('DataSource non disponibile.')
-    if (!hasSel || oid == null) throw new Error('Selezione non valida.')
-
-    const startKey = selectionKeyRef.current
-    setLoading(true)
-    setMsg({ kind: 'info', text: 'Elimino…' })
-
-    try {
-      const motherUrl = props.motherLayerUrl ? String(props.motherLayerUrl).trim() : ''
-      const root = getRootDs(ds)
-
-      if (motherUrl) {
-        await deleteFeaturesViaRest(motherUrl, oid)
-      } else {
-        const { layer } = await resolveLayer(ds)
-        if (!layer?.applyEdits) throw new Error('Layer non disponibile (applyEdits).')
-        if (typeof layer.load === 'function') {
-          try { await layer.load() } catch {}
-        }
-        const res = await layer.applyEdits({ deleteFeatures: [oid] })
-        const del = res?.deleteFeatureResults?.[0] || res?.deleteResults?.[0] || null
-        const err = del?.error
-        const ok = !err && (del?.success === true || del?.objectId != null || del?.success == null)
-        if (!ok) {
-          const detail = err
-            ? `code=${err.code ?? ''} name=${err.name ?? ''} message=${err.message ?? ''}`
-            : JSON.stringify(res || del)
-          throw new Error(detail)
-        }
-      }
-
-      if (selectionKeyRef.current !== startKey) {
-        setMsg(null)
-        setLoading(false)
-        return
-      }
-
-      setMsg({ kind: 'ok', text: okText })
-
-      // refresh data sources
-      await refreshRootAndDerived(getRootDs(ds))
-      await refreshRootAndDerived(ds)
-
-      // forza refresh selection/lista
-      try {
-        window.dispatchEvent(new CustomEvent('gii-force-refresh-selection', { detail: { oid } }))
-      } catch {
-        try { window.dispatchEvent(new Event('gii-force-refresh-selection')) } catch {}
-      }
-
-      window.setTimeout(() => {
-        if (selectionKeyRef.current === startKey) setMsg(null)
-      }, 4500)
-
-      setLoading(false)
-    } catch (e) {
-      setLoading(false)
-      throw e
     }
   }
 
@@ -2232,23 +1533,9 @@ function ActionsPanel (props: {
 
       setMsg({ kind: 'ok', text: okText })
 
-      // Aggiorna subito la UI con i nuovi valori (es. disabilita "Prendi in carico" e abilita "Assegna TI").
-      try {
-        const cur = (baseData && typeof baseData === 'object') ? baseData : {}
-        setLocalData({ ...cur, ...attributesIn })
-      } catch {}
-
       // refresh root + derived + ds corrente (per sicurezza)
       await refreshRootAndDerived(root)
       await refreshRootAndDerived(ds)
-
-      // Forza il re-fetch del record selezionato (la selezione resta la stessa, quindi senza questo
-      // l'UI può rimanere con i valori "vecchi" fino a cambio selezione / F5).
-      try {
-        window.dispatchEvent(new CustomEvent('gii-force-refresh-selection', { detail: { oid } }))
-      } catch {
-        try { window.dispatchEvent(new Event('gii-force-refresh-selection')) } catch {}
-      }
 
       window.setTimeout(() => {
         if (selectionKeyRef.current === startKey) setMsg(null)
@@ -2263,109 +1550,15 @@ function ActionsPanel (props: {
 
   const onConfirmTakeInCharge = async () => {
     try {
-      const prevPresaVal = presaNum
-      // Costruisci l'update SOLO con i campi che esistono nello schema.
-      // Questo evita patch ottimistici su campi inesistenti che poi "spariscono" al reselect.
-      const upd: Record<string, any> = {}
-      if (presaFieldExists) upd[realFieldName(presaField)] = PRESA_IN_CARICO
-      if (dtPresaFieldExists) upd[realFieldName(dtPresaField)] = Date.now()
-
-      // stato_* è il campo realmente "portante" nel workflow: aggiorniamolo sempre.
-      // Se lo schema non è disponibile, realFieldName() torna il nome originale.
-      upd[realFieldName(statoField)] = STATO_PRESA_IN_CARICO
-      upd[realFieldName(dtStatoField)] = Date.now()
-
-      await runApplyEdits(upd, 'Presa in carico salvata.')
-
-      // Scrittura log (best-effort, non blocca la presa in carico)
-      const parentGid = String(pickAttrCI(data, ['globalid', 'global_id', 'GlobalID', 'GLOBALID', 'parent_globalid']) || '00000000-0000-0000-0000-000000000000')
-      const areaValRaw = pickAttrCI(data, ['area', 'area_cod', 'cod_area'])
-      const settoreValRaw =
-        pickAttrCI(data, ['settore', 'settore_cod', 'cod_settore']) ||
-        inferSettoreFromUsername(String(pickAttrCI(data, ['creator', 'Creator', 'editor', 'Editor']) || ''))
-      void writeLogPresaInCarico({
-        parentOid: oid as number,
-        parentGlobalId: parentGid,
-        ruolo: role,
-        area: areaValRaw != null ? String(areaValRaw) : '',
-        settore: settoreValRaw != null ? String(settoreValRaw) : '',
-        campo: presaFieldExists ? realFieldName(presaField) : realFieldName(statoField),
-        valorePrev: prevPresaVal,
-        valoreNew: PRESA_IN_CARICO,
-        note: `Presa in carico (${role})`,
-        tipoEvento: 'PRESA_IN_CARICO',
-        fase: role
-      })
-
-      setPending(null)
-      setConfirmAttempted(false)
-    } catch (e: any) {
-      const txt = e?.message ? String(e.message) : String(e)
-      setMsg({ kind: 'err', text: `Errore salvataggio: ${txt}` })
-    }
-  }
-
-
-  const onConfirmAssegnaTi = async () => {
-    setConfirmAttempted(true)
-    if (!tiSelected) return
-
-    try {
-      const u: any = (window as any).__giiUserRole || {}
-      const rzUser = String(u?.username || '').trim()
-      const ti = tiOptions.find(o => o.username === tiSelected) || null
-      const tiName = String(ti?.fullName || tiSelected).trim()
-
-      const upd: Record<string, any> = {
-        ti_assegnato_username: tiSelected,
-        ti_assegnato_nome: tiName,
-        dt_assegnazione_ti: Date.now(),
-        ti_assegnato_da: rzUser
-      }
-
-      // opzionale: inizializza la "coda TI" se i campi esistono nel layer
-      try {
-        const schemaFields: Record<string, any> = (ds as any)?.getSchema?.()?.fields || {}
-        const keys = Object.keys(schemaFields || {})
-        const ci: Record<string, string> = {}
-        keys.forEach(k => { ci[String(k).toLowerCase()] = k })
-        const pick = (name: string) => ci[String(name).toLowerCase()] || null
-
-        const fStatoTI = pick('stato_TI')
-        const fDtStatoTI = pick('dt_stato_TI')
-        const fPresaTI = pick('presa_in_carico_TI')
-        const fDtPresaTI = pick('dt_presa_in_carico_TI')
-
-        if (fStatoTI) upd[fStatoTI] = STATO_DA_PRENDERE
-        if (fDtStatoTI) upd[fDtStatoTI] = Date.now()
-        if (fPresaTI) upd[fPresaTI] = PRESA_DA_PRENDERE
-        if (fDtPresaTI) upd[fDtPresaTI] = Date.now()
-      } catch {}
-
-      const prevTi = String(pickAttrCI(data, ['ti_assegnato_username', 'ti_assegnato_user', 'ti_assegnato']) || '')
-
-      await runApplyEdits(upd, `TI assegnato: ${tiName}.`)
-
-      // Scrittura log (best-effort)
-      const parentGid = String(pickAttrCI(data, ['globalid', 'global_id', 'GlobalID', 'GLOBALID', 'parent_globalid']) || '00000000-0000-0000-0000-000000000000')
-      const areaValRaw = pickAttrCI(data, ['area', 'area_cod', 'cod_area'])
-      const settoreValRaw =
-        pickAttrCI(data, ['settore', 'settore_cod', 'cod_settore']) ||
-        inferSettoreFromUsername(String(pickAttrCI(data, ['creator', 'Creator', 'editor', 'Editor']) || ''))
-      void writeLogPresaInCarico({
-        parentOid: oid as number,
-        parentGlobalId: parentGid,
-        ruolo: role,
-        area: areaValRaw != null ? String(areaValRaw) : '',
-        settore: settoreValRaw != null ? String(settoreValRaw) : '',
-        campo: 'ti_assegnato_username',
-        valorePrev: prevTi,
-        valoreNew: tiSelected,
-        note: `Assegna TI: ${tiName} (${tiSelected})`,
-        tipoEvento: 'ASSEGNAZIONE_TI',
-        fase: role
-      })
-
+      await runApplyEdits(
+        {
+          [presaField]: PRESA_IN_CARICO,
+          [dtPresaField]: Date.now(),
+          [statoField]: STATO_PRESA_IN_CARICO,
+          [dtStatoField]: Date.now()
+        },
+        'Presa in carico salvata.'
+      )
       setPending(null)
       setConfirmAttempted(false)
     } catch (e: any) {
@@ -2409,31 +1602,6 @@ function ActionsPanel (props: {
         upd[statoField] = stato
         upd[dtStatoField] = Date.now()
       }
-
-      // TI: il pulsante verde è "Inoltra a RZ" → inizializza la coda RZ (best-effort) se i campi esistono.
-      if (role === 'TI' && esito === ESITO_APPROVATA) {
-        try {
-          const schemaFields: Record<string, any> = (ds as any)?.getSchema?.()?.fields || {}
-          const keys = Object.keys(schemaFields || {})
-          const ci: Record<string, string> = {}
-          keys.forEach(k => { ci[String(k).toLowerCase()] = k })
-          const pick = (name: string) => ci[String(name).toLowerCase()] || null
-
-          const fStatoRZ = pick('stato_RZ')
-          const fDtStatoRZ = pick('dt_stato_RZ')
-          const fPresaRZ = pick('presa_in_carico_RZ')
-          const fDtPresaRZ = pick('dt_presa_in_carico_RZ')
-
-          const curStatoRZ = toNumOrNull(pickAttrCI(data, ['stato_RZ', 'stato_rz', 'STATO_RZ']))
-          const curPresaRZ = toNumOrNull(pickAttrCI(data, ['presa_in_carico_RZ', 'presa_in_carico_rz', 'PRESA_IN_CARICO_RZ']))
-
-          if (fStatoRZ) upd[fStatoRZ] = STATO_DA_PRENDERE
-          if (fDtStatoRZ) upd[fDtStatoRZ] = Date.now()
-          if (fPresaRZ) upd[fPresaRZ] = PRESA_DA_PRENDERE
-          if (fDtPresaRZ) upd[fDtPresaRZ] = Date.now()
-        } catch {}
-      }
-
       await runApplyEdits(upd, `Esito salvato: ${label}.`)
       setPending(null)
       setConfirmAttempted(false)
@@ -2471,17 +1639,6 @@ function ActionsPanel (props: {
     } catch (e: any) {
       const txt = e?.message ? String(e.message) : String(e)
       setMsg({ kind: 'err', text: `Errore salvataggio: ${txt}` })
-    }
-  }
-
-  const onConfirmElimina = async () => {
-    try {
-      await runDeleteEdits('Pratica eliminata.')
-      setPending(null)
-      setConfirmAttempted(false)
-    } catch (e: any) {
-      const txt = e?.message ? String(e.message) : String(e)
-      setMsg({ kind: 'err', text: `Errore eliminazione: ${txt}` })
     }
   }
 
@@ -2535,10 +1692,28 @@ function ActionsPanel (props: {
 
       <div style={panelStyle}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
-          <div style={{ fontSize: titleFontSize, fontWeight: 700 }}>Azioni</div>
+          <div style={{ fontSize: titleFontSize, fontWeight: 700 }}>Azioni ({role})</div>
           {msg && <div style={msgStyle(msg.kind, msgFontSize)} title={msg.text}>{msg.text}</div>}
         </div>
-{/* BOTTONI AZIONE */}
+
+        <div style={{ display: 'grid', gap: 6 }}>
+          <DetailRow label='N.pratica (OID)' value={oid} labelSize={ui.statusFontSize} valueSize={titleFontSize} />
+          <DetailRow label={presaField} value={presaVal} labelSize={ui.statusFontSize} valueSize={titleFontSize} />
+          <DetailRow label={statoField} value={statoVal} labelSize={ui.statusFontSize} valueSize={titleFontSize} />
+          <DetailRow label={esitoField} value={esitoVal} labelSize={ui.statusFontSize} valueSize={titleFontSize} />
+          <DetailRow label={statoDAField} value={statoDAVal} labelSize={ui.statusFontSize} valueSize={titleFontSize} />
+        </div>
+
+        <div style={{ height: 1, background: ui.dividerColor, margin: '2px 0' }} />
+
+        {/* Etichetta “Azioni” solo quando mostro i tasti azione */}
+        {pending === null && (
+          <div style={{ display: 'flex', alignItems: 'baseline', gap: 10 }}>
+            <div style={{ fontSize: titleFontSize, fontWeight: 700 }}>Azioni</div>
+          </div>
+        )}
+
+        {/* BOTTONI AZIONE */}
         {pending === null && (
           <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center' }}>
             <Button
@@ -2550,56 +1725,32 @@ function ActionsPanel (props: {
               {buttonText}
             </Button>
 
-            {role === 'RZ' && (
-              <Button
-                type='primary'
-                onClick={() => startAction('ASSEGNA_TI')}
-                disabled={!canStartAssegnaTi}
-                style={actionButtonStyle(buttonColors.take, !canStartAssegnaTi, ui)}
-              >
-                Assegna TI
-              </Button>
-            )}
-
-            {role !== 'TI' && (
-              <Button
-                type='primary'
-                onClick={() => startAction('INTEGRAZIONE')}
-                disabled={!canStartIntegrazione}
-                style={actionButtonStyle(buttonColors.integrazione, !canStartIntegrazione, ui)}
-              >
-                Integrazione
-              </Button>
-            )}
+            <Button
+              type='primary'
+              onClick={() => startAction('INTEGRAZIONE')}
+              disabled={!canStartEsito}
+              style={actionButtonStyle(buttonColors.integrazione, !canStartEsito, ui)}
+            >
+              Integrazione
+            </Button>
 
             <Button
               type='primary'
               onClick={() => startAction('APPROVA')}
-              disabled={!canStartApprova}
-              style={actionButtonStyle(buttonColors.approva, !canStartApprova, ui)}
+              disabled={!canStartEsito}
+              style={actionButtonStyle(buttonColors.approva, !canStartEsito, ui)}
             >
-              {approvaBtnLabel}
+              Approva
             </Button>
 
-            {role === 'TI' ? (
-              <Button
-                type='primary'
-                onClick={() => startAction('ELIMINA')}
-                disabled={!canStartElimina}
-                style={actionButtonStyle(buttonColors.respingi, !canStartElimina, ui)}
-              >
-                Elimina
-              </Button>
-            ) : (
-              <Button
-                type='primary'
-                onClick={() => startAction('RESPINGI')}
-                disabled={!canStartRespingi}
-                style={actionButtonStyle(buttonColors.respingi, !canStartRespingi, ui)}
-              >
-                Respingi
-              </Button>
-            )}
+            <Button
+              type='primary'
+              onClick={() => startAction('RESPINGI')}
+              disabled={!canStartEsito}
+              style={actionButtonStyle(buttonColors.respingi, !canStartEsito, ui)}
+            >
+              Respingi
+            </Button>
 
             {role === 'DT' && (
               <Button
@@ -2612,31 +1763,74 @@ function ActionsPanel (props: {
               </Button>
             )}
 
-            {/* PULSANTE MODIFICA TI — apertura pagina */}
+            {/* PULSANTI MODIFICA TI — visibili solo se configurati */}
             {ec.show && (
-              <button
-                type='button'
-                disabled={!canEdit}
-                onClick={handleEditPage}
-                title={canEdit ? `Apre la pagina di editing: ${ec.pageId}` : 'Modifica non disponibile: il record deve essere assegnato e già in carico al TI corrente.'}
-                style={{
-                  padding: '8px 16px',
-                  borderRadius: 8,
-                  border: `2px solid ${canEdit ? ec.pageColor : '#e5e7eb'}`,
-                  background: '#fff',
-                  color: canEdit ? ec.pageColor : '#9ca3af',
-                  fontWeight: 700,
-                  fontSize: 13,
-                  cursor: canEdit ? 'pointer' : 'not-allowed',
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: 6
-                }}
-              >
-                Modifica
-              </button>
+              <>
+                <div style={{ width: '100%', height: 1, background: ui.dividerColor, margin: '4px 0' }} />
+                <button
+                  type='button'
+                  disabled={!canEdit}
+                  onClick={handleEditOverlay}
+                  title={canEdit ? 'Apre il pannello di editing nella pagina corrente' : 'Modifica non disponibile: verifica stato e presa in carico TI'}
+                  style={{
+                    padding: '8px 16px',
+                    borderRadius: 8,
+                    border: 'none',
+                    background: canEdit ? ec.overlayColor : '#e5e7eb',
+                    color: canEdit ? '#fff' : '#9ca3af',
+                    fontWeight: 700,
+                    fontSize: 13,
+                    cursor: canEdit ? 'pointer' : 'not-allowed',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 6
+                  }}
+                >
+                  ✏️ Modifica (overlay)
+                </button>
+                <button
+                  type='button'
+                  disabled={!canEdit}
+                  onClick={handleEditPage}
+                  title={canEdit ? `Apre la pagina di editing: ${ec.pageId}` : 'Modifica non disponibile: verifica stato e presa in carico TI'}
+                  style={{
+                    padding: '8px 16px',
+                    borderRadius: 8,
+                    border: `2px solid ${canEdit ? ec.pageColor : '#e5e7eb'}`,
+                    background: '#fff',
+                    color: canEdit ? ec.pageColor : '#9ca3af',
+                    fontWeight: 700,
+                    fontSize: 13,
+                    cursor: canEdit ? 'pointer' : 'not-allowed',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 6
+                  }}
+                >
+                  ↗ Modifica (pagina)
+                </button>
+              </>
             )}
           </div>
+        )}
+
+        {/* OVERLAY EDITING INLINE (aperto da "Modifica overlay") */}
+        {editOverlayOpen && hasSel && oid != null && data != null && (
+          <InlineEditOverlay
+            oid={oid}
+            data={data}
+            ds={ds}
+            idFieldName={idFieldNameFromSel}
+            cfg={ec}
+            ui={ui}
+            onClose={(saved) => {
+              setEditOverlayOpen(false)
+              if (saved) {
+                setMsg({ kind: 'ok', text: 'Pratica modificata.' })
+                window.setTimeout(() => setMsg(null), 4000)
+              }
+            }}
+          />
         )}
 
         {/* SEZIONE CONFERMA: Conferma + Annulla stanno sempre in fondo */}
@@ -2668,60 +1862,6 @@ function ActionsPanel (props: {
                   fontSize={ui.statusFontSize}
                   isError={reasonReqErr}
                 />
-              </div>
-            )}
-
-            {/* ASSEGNA TI (solo RZ) */}
-            {pending === 'ASSEGNA_TI' && role === 'RZ' && (
-              <div style={{ display: 'grid', gap: 6 }}>
-                <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
-                  <div style={{ fontSize: titleFontSize, fontWeight: 700 }}>TI</div>
-                  <div style={labelReqStyle(true, tiReqErr)}>(obbligatoria)</div>
-                </div>
-
-                <select
-                  value={tiSelected}
-                  onChange={(e) => {
-                    setTiSelected(e.target.value)
-                    if (confirmAttempted) setConfirmAttempted(false)
-                  }}
-                  disabled={loading}
-                  style={{
-                    width: '100%',
-                    padding: '8px 10px',
-                    borderRadius: 8,
-                    border: `1px solid ${tiReqErr ? '#d13438' : 'rgba(0,0,0,0.15)'}`,
-                    outline: 'none'
-                  }}
-                >
-                  <option value=''>— Seleziona TI —</option>
-                  {tiOptions.map(o => (
-                    <option key={o.username} value={o.username}>
-                      {(o.fullName || o.username)} ({o.username})
-                    </option>
-                  ))}
-                </select>
-
-                {tiLoading && (
-                  <div style={{ fontSize: 12, opacity: 0.75 }}>Carico elenco TI…</div>
-                )}
-                {!tiLoading && !tiLoadErr && tiOptions.length === 0 && (
-                  <div style={{ fontSize: 12, opacity: 0.75 }}>Nessun TI trovato.</div>
-                )}
-                {!!tiLoadErr && (
-                  <div style={{ fontSize: 12, color: '#d13438' }}>Errore elenco TI: {tiLoadErr}</div>
-                )}
-
-                <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-start' }}>
-                  <Button
-                    type='tertiary'
-                    onClick={() => void loadTiOptions()}
-                    disabled={loading || tiLoading}
-                    style={{ padding: '6px 10px' }}
-                  >
-                    Aggiorna elenco
-                  </Button>
-                </div>
               </div>
             )}
 
@@ -2786,17 +1926,6 @@ function ActionsPanel (props: {
                 </Button>
               )}
 
-              {pending === 'ASSEGNA_TI' && (
-                <Button
-                  type='primary'
-                  onClick={onConfirmAssegnaTi}
-                  disabled={loading || !tiSelected}
-                  style={actionButtonStyle(buttonColors.take, (loading || !tiSelected), ui)}
-                >
-                  {loading ? 'Aggiorno…' : 'Conferma assegnazione TI'}
-                </Button>
-              )}
-
               {pending === 'INTEGRAZIONE' && (
                 <Button
                   type='primary'
@@ -2811,11 +1940,11 @@ function ActionsPanel (props: {
               {pending === 'APPROVA' && (
                 <Button
                   type='primary'
-                  onClick={() => onConfirmEsito(ESITO_APPROVATA, approvaDoneLabel)}
+                  onClick={() => onConfirmEsito(ESITO_APPROVATA, 'Approvata')}
                   disabled={loading}
                   style={actionButtonStyle(buttonColors.approva, !!loading, ui)}
                 >
-                  {loading ? 'Aggiorno…' : approvaConfirmLabel}
+                  {loading ? 'Aggiorno…' : 'Conferma approvazione'}
                 </Button>
               )}
 
@@ -2827,17 +1956,6 @@ function ActionsPanel (props: {
                   style={actionButtonStyle(buttonColors.respingi, !!loading, ui)}
                 >
                   {loading ? 'Aggiorno…' : 'Conferma respinta'}
-                </Button>
-              )}
-
-              {pending === 'ELIMINA' && (
-                <Button
-                  type='primary'
-                  onClick={onConfirmElimina}
-                  disabled={loading}
-                  style={actionButtonStyle(buttonColors.respingi, !!loading, ui)}
-                >
-                  {loading ? 'Elimino…' : 'Conferma eliminazione'}
                 </Button>
               )}
 
@@ -2933,17 +2051,7 @@ function migrateTabs(tabFields: TabFields, tabs: TabConfig[] | undefined): TabCo
   
   // Se ha già tabs, usa quelle
   if (Array.isArray(tabs) && tabs.length > 0) {
-    // Normalizza fields di ogni tab a plain JS array
-    result = tabs.map((t: any) => {
-      let f: string[] = []
-      if (t.fields) {
-        if (Array.isArray(t.fields)) f = t.fields.map(String).filter(Boolean)
-        else if (typeof t.fields.toArray === 'function') f = t.fields.toArray().map(String).filter(Boolean)
-        else if (typeof t.fields.toJS === 'function') f = t.fields.toJS().map(String).filter(Boolean)
-        else if (typeof t.fields[Symbol.iterator] === 'function') f = Array.from(t.fields as any).map(String).filter(Boolean)
-      }
-      return { ...t, fields: f }
-    })
+    result = tabs
   } else {
     // Altrimenti migra dai vecchi tabFields
     result = [
@@ -3062,9 +2170,662 @@ function ReadOnlyPanel (props: {
 }
 
 
+// ══════════════════════════════════════════════════════════════════════════════
+// NUOVA PRATICA TI — form che segue la struttura del survey XLS
+// Mostrato quando nessun record è selezionato (hasSel=false).
+// ══════════════════════════════════════════════════════════════════════════════
+
+const CHOICES = {
+  tipo_soggetto: [{ v: 'PF', l: 'Persona fisica' }, { v: 'PG', l: 'Persona giuridica' }],
+  ufficio: ['Cagliari','Iglesias','Masainas','Quartucciu','San Gavino Monreale','San Giovanni Suergiu','San Sperate','Senorbì','Serramanna'].map(v=>({v,l:v})),
+  tipo_abuso: [{ v: 'parziale', l: 'Parziale' }, { v: 'totale', l: 'Totale' }],
+  art15_parziale: [{ v: 'Art15.1', l: 'Prima contestazione' }, { v: 'Art15.2', l: 'Recidiva' }],
+  art15_totale:   [{ v: 'Art15.3', l: 'Prima contestazione' }, { v: 'Art15.4', l: 'Recidiva' }],
+  art16_17: [
+    { v: 'Art16', l: 'Art. 16 – Comunicazione di irrigazione tardiva' },
+    { v: 'Art17', l: 'Art. 17 – Comunicazione di variazione o di rinuncia tardiva' },
+  ],
+  art17_tipo: [{ v: 'Art17.1', l: 'Variazione tardiva' }, { v: 'Art17.2', l: 'Rinuncia tardiva' }],
+  presenza: [{ v: 'sì', l: 'Sì' }, { v: 'no', l: 'No' }],
+  norma3: [
+    { v: 'Art8',  l: 'Art. 8 – Violazione servizio reperibilità' },
+    { v: 'Art12', l: 'Art. 12 – Negato accesso ai fondi (al personale consortile)' },
+    { v: 'Art27', l: 'Art. 27 – Spreco d\'acqua/uso negligente risorsa idrica' },
+    { v: 'Art28', l: 'Art. 28 – Violazione prescrizioni del consorzio' },
+    { v: 'Art29', l: 'Art. 29 – Violazione termini restituzione attrezzature' },
+    { v: 'Art30', l: 'Art. 30 – Danneggiamento e/o perdita attrezzature' },
+    { v: 'Art31', l: 'Art. 31 – Mancata segnalazione guasti' },
+    { v: 'Art32', l: 'Art. 32 – Negato accesso ai fondi (al consorziato)' },
+    { v: 'Art33', l: 'Art. 33 – Inosservanza limiti temporali di prelievo' },
+    { v: 'Art34', l: 'Art. 34 – Interferenze' },
+    { v: 'Art35', l: 'Art. 35 – Manomissione reti di dispensa e allaccio aspirazione' },
+    { v: 'Art36', l: 'Art. 36 – Uso attrezzature non autorizzate' },
+    { v: 'Art37', l: 'Art. 37 – Uso sistemi di irrigazione incompatibili' },
+    { v: 'Art39', l: 'Art. 39 – Danni strutture irrigue' },
+  ]
+} as const
+
+// campi v_art* associati alle scelte norma3
+const NORMA3_TO_VFIELD: Record<string, string> = {
+  Art8: 'v_art08', Art12: 'v_art12', Art27: 'v_art27', Art28: 'v_art28',
+  Art29: 'v_art29', Art30: 'v_art30', Art31: 'v_art31', Art32: 'v_art32',
+  Art33: 'v_art33', Art34: 'v_art34', Art35: 'v_art35', Art36: 'v_art36',
+  Art37: 'v_art37', Art39: 'v_art39'
+}
+
+const S: Record<string, React.CSSProperties> = {
+  wrap:   { width: '100%', height: '100%', display: 'flex', flexDirection: 'column', minHeight: 0, overflowY: 'auto', padding: '0 2px' },
+  hdr:    { fontSize: 11, fontWeight: 700, color: '#1d4ed8', textTransform: 'uppercase', letterSpacing: 1, borderBottom: '2px solid #bfdbfe', paddingBottom: 4, marginBottom: 12, marginTop: 20 },
+  lbl:    { fontSize: 12, color: '#6b7280', marginBottom: 4, display: 'block' },
+  inp:    { width: '100%', padding: '7px 10px', borderRadius: 7, border: '1px solid rgba(0,0,0,0.18)', fontSize: 13, boxSizing: 'border-box' as const, background: '#fff' },
+  inpDis: { width: '100%', padding: '7px 10px', borderRadius: 7, border: '1px solid rgba(0,0,0,0.10)', fontSize: 13, boxSizing: 'border-box' as const, background: '#f3f4f6', color: '#6b7280' },
+  sel:    { width: '100%', padding: '7px 10px', borderRadius: 7, border: '1px solid rgba(0,0,0,0.18)', fontSize: 13, boxSizing: 'border-box' as const, background: '#fff', cursor: 'pointer' },
+  row2:   { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 },
+  row3:   { display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 12 },
+  fld:    { marginBottom: 10 },
+  hint:   { fontSize: 11, color: '#9ca3af', marginTop: 3 },
+}
+
+function NpField(p: { label: string; children: React.ReactNode; hint?: string }) {
+  return (
+    <div style={S.fld}>
+      <label style={S.lbl}>{p.label}</label>
+      {p.children}
+      {p.hint && <div style={S.hint}>{p.hint}</div>}
+    </div>
+  )
+}
+
+function NpSel(p: { value: string; onChange: (v: string) => void; options: readonly {v:string;l:string}[]; disabled?: boolean }) {
+  return (
+    <select value={p.value} onChange={e => p.onChange(e.target.value)} style={p.disabled ? S.inpDis : S.sel} disabled={p.disabled}>
+      <option value=''>— seleziona —</option>
+      {p.options.map(o => <option key={o.v} value={o.v}>{o.l}</option>)}
+    </select>
+  )
+}
+
+function NpText(p: { value: string; onChange: (v: string) => void; placeholder?: string; multiline?: boolean; disabled?: boolean }) {
+  const st = p.disabled ? S.inpDis : S.inp
+  if (p.multiline) return (
+    <textarea value={p.value} onChange={e => p.onChange(e.target.value)} placeholder={p.placeholder}
+      rows={3} style={{ ...st, resize: 'vertical' }} disabled={p.disabled}/>
+  )
+  return <input type='text' value={p.value} onChange={e => p.onChange(e.target.value)} placeholder={p.placeholder} style={st} disabled={p.disabled}/>
+}
+
+function NpInt(p: { value: string; onChange: (v: string) => void; disabled?: boolean }) {
+  return <input type='number' value={p.value} onChange={e => p.onChange(e.target.value)} style={p.disabled ? S.inpDis : S.inp} disabled={p.disabled}/>
+}
+
+function NpDate(p: { value: string; onChange: (v: string) => void; withTime?: boolean; disabled?: boolean }) {
+  return <input type={p.withTime ? 'datetime-local' : 'date'} value={p.value} onChange={e => p.onChange(e.target.value)} style={p.disabled ? S.inpDis : S.inp} disabled={p.disabled}/>
+}
+
+type NpDraft = Record<string, string>
+
+const LOG_EVENTI_URL = 'https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_LOG_EVENTI/FeatureServer/0'
+const DRAFT_DATE_FIELDS = new Set(['data_rilevazione', 'data_firma'])
+
+function toDraftDate (v: any): string {
+  if (v == null || v === '') return ''
+  try {
+    const d = new Date(v)
+    if (Number.isNaN(d.getTime())) return ''
+    const y = d.getFullYear()
+    const m = String(d.getMonth() + 1).padStart(2, '0')
+    const day = String(d.getDate()).padStart(2, '0')
+    return `${y}-${m}-${day}`
+  } catch {
+    return ''
+  }
+}
+
+function draftFromRecord (rec: any): NpDraft {
+  const out: NpDraft = {}
+  if (!rec || typeof rec !== 'object') return out
+  for (const k of Object.keys(rec)) {
+    const v = rec[k]
+    if (v == null) out[k] = ''
+    else if (DRAFT_DATE_FIELDS.has(k)) out[k] = toDraftDate(v)
+    else out[k] = String(v)
+  }
+  return out
+}
+
+function normalizeLogValue (v: any): string {
+  if (v == null) return ''
+  if (typeof v === 'number') return Number.isFinite(v) ? String(v) : ''
+  if (typeof v === 'boolean') return v ? 'true' : 'false'
+  if (v instanceof Date) return Number.isNaN(v.getTime()) ? '' : String(v.getTime())
+  return String(v).trim()
+}
+
+function buildPraticaCodeFromData (data: any, oid: number | null | undefined): string {
+  if (oid == null || !Number.isFinite(Number(oid))) return ''
+  const op = data?.origine_pratica ?? data?.Origine_pratica ?? data?.ORIGINE_PRATICA
+  let prefix = 'TR'
+  if (op === 2 || op === '2' || String(op || '').toUpperCase() === 'TI') prefix = 'TI'
+  else if (op === 1 || op === '1' || String(op || '').toUpperCase() === 'TR') prefix = 'TR'
+  return `${prefix}-${Number(oid)}`
+}
+
+
+function NuovaPraticaForm (p: {
+  ds: any
+  cfg: any
+  showDatiGenerali: boolean
+  clickedPointWgs84: any | null
+  onClearPoint: () => void
+  onSaved?: (oid: number) => void
+  mode?: 'create' | 'edit'
+  initialData?: any | null
+  editOid?: number | null
+  editIdFieldName?: string
+  titleText?: string
+  saveText?: string
+}) {
+  const { ds, cfg } = p
+  const mode = p.mode === 'edit' ? 'edit' : 'create'
+  const editOid = p.editOid != null ? Number(p.editOid) : null
+  const editIdFieldName = String(p.editIdFieldName || ds?.getIdField?.() || 'OBJECTID')
+
+  const [draft, setDraft] = React.useState<NpDraft>(() => draftFromRecord(p.initialData || {}))
+  const [saving, setSaving] = React.useState(false)
+  const [msg, setMsg] = React.useState<{ kind: 'ok' | 'err'; text: string } | null>(null)
+
+  React.useEffect(() => {
+    setDraft(draftFromRecord(p.initialData || {}))
+    setMsg(null)
+  }, [mode, editOid, p.initialData])
+
+  const set = (k: string, v: any) => setDraft(prev => ({ ...prev, [k]: v }))
+  const g = (k: string) => draft[k] ?? ''
+
+  // Norma violata 3 — select_multiple come Set (stringa separata da spazio)
+  const norma3Set = React.useMemo(() => new Set(String(g('norma_violata3') || '').split(' ').filter(Boolean)), [draft.norma_violata3])
+  const toggleNorma3 = (v: string) => {
+    const s = new Set(norma3Set)
+    if (s.has(v)) s.delete(v); else s.add(v)
+    set('norma_violata3', Array.from(s).join(' '))
+  }
+
+  // Derived
+  const tipoSogg   = g('tipologia_soggetto')
+  const tipoAbuso  = g('tipo_abuso')
+  const norma1516  = g('norma16_17')
+  const art17tipo  = g('art17_tipo')
+  const n3parziale = g('norma15_parziale')
+  const n3totale   = g('norma15_totale')
+
+  const showSup15 = (tipoAbuso === 'parziale' && (n3parziale === 'Art15.1' || n3parziale === 'Art15.2')) ||
+                    (tipoAbuso === 'totale'   && (n3totale   === 'Art15.3' || n3totale   === 'Art15.4'))
+
+  const reqPoint = React.useMemo(() => computeReqPoint({
+    norma15_parziale: n3parziale,
+    norma15_totale: n3totale,
+    norma_violata3: g('norma_violata3')
+  }), [n3parziale, n3totale, draft.norma_violata3])
+
+  const officeLon = Number(cfg.officeLonWgs84 ?? 0)
+  const officeLat = Number(cfg.officeLatWgs84 ?? 0)
+  const hasOffice = isValidOfficePoint(officeLon, officeLat)
+
+  // Mother layer cache
+  const motherRef = React.useRef<any | null>(null)
+  const getLayerForCreate = React.useCallback(async () => {
+    const url = String(cfg.motherLayerUrl || '').trim()
+    if (url) {
+      if (motherRef.current) return motherRef.current
+      const FeatureLayer = await loadEsriModule<any>('esri/layers/FeatureLayer')
+      const fl = new FeatureLayer({ url })
+      if (typeof fl?.load === 'function') { try { await fl.load() } catch {} }
+      motherRef.current = fl
+      return fl
+    }
+    return await resolveLayerForEdit(ds)
+  }, [cfg.motherLayerUrl, ds])
+
+  const toTs = (v: string) => {
+    if (!v) return null
+    try { const d = new Date(v); return Number.isNaN(d.getTime()) ? null : d.getTime() } catch { return null }
+  }
+  const toInt = (v: any) => {
+    const n = typeof v === 'number' ? v : parseInt(String(v), 10)
+    return Number.isNaN(n) ? null : n
+  }
+
+  const logLayerRef = React.useRef<any | null>(null)
+  const getLogLayer = React.useCallback(async () => {
+    if (logLayerRef.current) return logLayerRef.current
+    try {
+      const FeatureLayer = await loadEsriModule<any>('esri/layers/FeatureLayer')
+      const fl = new FeatureLayer({ url: LOG_EVENTI_URL })
+      if (typeof fl?.load === 'function') { try { await fl.load() } catch {} }
+      logLayerRef.current = fl
+      return fl
+    } catch {
+      return null
+    }
+  }, [])
+
+  const writeChangeLog = React.useCallback(async (prevAttrs: Record<string, any>, nextAttrs: Record<string, any>) => {
+    const fieldNames = Array.from(new Set([...Object.keys(prevAttrs || {}), ...Object.keys(nextAttrs || {})]))
+    const changes = fieldNames.filter((k) => normalizeLogValue(prevAttrs?.[k]) !== normalizeLogValue(nextAttrs?.[k]))
+    if (changes.length === 0) return 0
+    const logLayer = await getLogLayer()
+    if (!logLayer?.applyEdits) return 0
+    const giiRole: any = (window as any).__giiUserRole || {}
+    const sessionId = `ti-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`
+    const parentGlobalId = String(p.initialData?.GlobalID || p.initialData?.globalid || p.initialData?.GLOBALID || '')
+    const adds = changes.map((campo) => ({
+      attributes: filterAttrsForLayer({
+        parent_globalid: parentGlobalId || null,
+        parent_objectid: editOid,
+        dt_evento: Date.now(),
+        ruolo: String(giiRole.ruoloLabel || 'TI'),
+        area: String(giiRole.area || ''),
+        settore: String(giiRole.settore || ''),
+        operazione: 'UPDATE',
+        campo,
+        valore_precedente: prevAttrs?.[campo] == null ? '' : String(prevAttrs[campo]),
+        valore_nuovo: nextAttrs?.[campo] == null ? '' : String(nextAttrs[campo]),
+        session_id: sessionId,
+        note: '',
+        tipo_evento: 'MODIFICA_CAMPO',
+        fase: 'TI'
+      }, logLayer)
+    }))
+    try {
+      await logLayer.applyEdits({ addFeatures: adds })
+      return changes.length
+    } catch (e) {
+      console.warn('[GII_LOG_EVENTI] Errore scrittura log modifiche TI:', e)
+      return 0
+    }
+  }, [editOid, getLogLayer, p.initialData])
+
+  const handleSave = async () => {
+    setSaving(true); setMsg(null)
+    try {
+      const layer = mode === 'edit' ? await resolveLayerForEdit(ds) : await getLayerForCreate()
+      if (!layer?.applyEdits) throw new Error('Layer non raggiungibile (applyEdits non disponibile).')
+
+      let geom: any | null = null
+      if (p.clickedPointWgs84) geom = p.clickedPointWgs84
+      else if (mode === 'create' && reqPoint === 0 && hasOffice) geom = makeWgs84Point(officeLon, officeLat)
+
+      if (mode === 'create' && !geom) {
+        if (reqPoint === 1) throw new Error('Localizzazione obbligatoria: fai click in mappa per impostare il punto.')
+        throw new Error('Geometria non impostata: configura le coordinate ufficio nel setting oppure fai click in mappa.')
+      }
+
+      const normaV1 = tipoAbuso === 'parziale' ? n3parziale : (tipoAbuso === 'totale' ? n3totale : '')
+      const normaV2 = norma1516 === 'Art16' ? 'Art16' : (norma1516 === 'Art17' && art17tipo ? art17tipo : norma1516)
+      const supDich16_17 = norma1516 === 'Art16' ? (draft.sup_dichiarata_art16 ?? null) : (art17tipo === 'Art17.1' ? (draft.sup_dichiarata_art17_1 ?? null) : (draft.sup_dichiarata_art17_2 ?? null))
+      const supIrr16_17  = norma1516 === 'Art16' || art17tipo === 'Art17.2' ? (draft.sup_irrigata_art16_17_2 ?? null) : (art17tipo === 'Art17.1' ? (draft.sup_irrigata_art17_1 ?? null) : null)
+
+      const vArtAttrs: Record<string, number | null> = {}
+      for (const [art, field] of Object.entries(NORMA3_TO_VFIELD)) {
+        vArtAttrs[field] = norma3Set.has(art) ? 1 : null
+      }
+
+      const giiRole: any = (window as any).__giiUserRole || {}
+      const attrs: Record<string, any> = {
+        origine_pratica: mode === 'create' ? 2 : (p.initialData?.origine_pratica ?? p.initialData?.Origine_pratica ?? p.initialData?.ORIGINE_PRATICA ?? 2),
+        stato_TI: mode === 'create' ? 1 : (p.initialData?.stato_TI ?? p.initialData?.Stato_TI ?? p.initialData?.STATO_TI ?? null),
+        utente_loggato: String(giiRole.username || giiRole.userId || p.initialData?.utente_loggato || ''),
+        area_cod: String(giiRole.area || p.initialData?.area_cod || ''),
+        settore_cod: String(giiRole.settore || p.initialData?.settore_cod || ''),
+        tecnico_rilevatore: g('tecnico_rilevatore') || null,
+        ufficio_zona: g('ufficio_zona') || null,
+        data_rilevazione: toTs(g('data_rilevazione')),
+        tipologia_soggetto: tipoSogg || null,
+        nome: (tipoSogg === 'PF' ? g('nome') : null) || null,
+        cognome: (tipoSogg === 'PF' ? g('cognome') : null) || null,
+        ragione_sociale: (tipoSogg === 'PG' ? g('ragione_sociale') : null) || null,
+        codice_fiscale: (tipoSogg === 'PF' ? g('codice_fiscale') : null) || null,
+        piva: (tipoSogg === 'PG' ? g('piva') : null) || null,
+        via: g('via') || null,
+        civico: g('civico') || null,
+        citta: g('citta') || null,
+        cap: g('cap') || null,
+        email: g('email') || null,
+        pec: g('pec') || null,
+        telefono: g('telefono') || null,
+        cellulare: g('cellulare') || null,
+        tipo_abuso: tipoAbuso || null,
+        norma15_parziale: (tipoAbuso === 'parziale' ? n3parziale : null) || null,
+        norma15_totale: (tipoAbuso === 'totale' ? n3totale : null) || null,
+        norma_violata1: normaV1 || null,
+        sup_dichiarata_art15: showSup15 ? toInt(g('sup_dichiarata_art15')) : null,
+        sup_irrigata_art15: showSup15 ? toInt(g('sup_irrigata_art15')) : null,
+        norma16_17: norma1516 || null,
+        art17_tipo: (norma1516 === 'Art17' ? art17tipo : null) || null,
+        norma_violata2: normaV2 || null,
+        sup_dichiarata_art17_1: norma1516 === 'Art17' && art17tipo === 'Art17.1' ? toInt(g('sup_dichiarata_art17_1')) : null,
+        sup_dichiarata_art16: norma1516 === 'Art16' ? toInt(g('sup_dichiarata_art16')) : null,
+        sup_dichiarata_art17_2: norma1516 === 'Art17' && art17tipo === 'Art17.2' ? toInt(g('sup_dichiarata_art17_2')) : null,
+        sup_irrigata_art16_17_2: (norma1516 === 'Art16' || art17tipo === 'Art17.2') ? toInt(g('sup_irrigata_art16_17_2')) : null,
+        sup_irrigata_art17_1: art17tipo === 'Art17.1' ? toInt(g('sup_irrigata_art17_1')) : null,
+        sup_dichiarata_art16_17: toInt(supDich16_17 as any),
+        sup_irrigata_art16_17: toInt(supIrr16_17 as any),
+        norma_violata3: g('norma_violata3') || null,
+        ...vArtAttrs,
+        descrizione_fatti: g('descrizione_fatti') || null,
+        circostanze: g('circostanze') || null,
+        presenza_trasgressore: g('presenza_trasgressore') || null,
+        descrizione_luogo: g('descrizione_luogo') || null,
+        data_firma: toTs(g('data_firma')),
+        req_point: reqPoint
+      }
+
+      const cleanAttrs = filterAttrsForLayer(attrs, layer)
+
+      if (mode === 'edit') {
+        if (editOid == null) throw new Error('Nessuna pratica selezionata per la modifica.')
+        const prevAttrs = filterAttrsForLayer(p.initialData || {}, layer)
+        const changedFields = Object.keys(cleanAttrs).filter((k) => normalizeLogValue(prevAttrs?.[k]) !== normalizeLogValue(cleanAttrs[k]))
+        if (changedFields.length === 0 && !geom) {
+          setSaving(false)
+          setMsg({ kind: 'ok', text: 'Nessuna modifica da salvare.' })
+          return
+        }
+        const upd: any = { attributes: { ...cleanAttrs, [editIdFieldName]: editOid } }
+        if (geom) upd.geometry = geom
+        const res = await layer.applyEdits({ updateFeatures: [upd] })
+        const updated = res?.updateFeatureResults?.[0] || res?.updateResults?.[0] || null
+        const err = updated?.error
+        const ok = !err && (updated?.objectId != null || updated?.success === true || updated?.success == null)
+        if (!ok) throw new Error(err ? `${err.code ?? ''}: ${err.message ?? ''}` : JSON.stringify(res))
+
+        await writeChangeLog(prevAttrs, cleanAttrs)
+        await refreshDs(ds)
+        await trySelectOid(ds, editOid)
+        writeDynamicSelection({ oid: editOid, layerUrl: String(layer?.url || readDynamicSelection().layerUrl || ''), idFieldName: editIdFieldName, data: { ...(p.initialData || {}), ...cleanAttrs, [editIdFieldName]: editOid } })
+        setMsg({ kind: 'ok', text: 'Pratica salvata.' })
+        setSaving(false)
+        window.setTimeout(() => setMsg(null), 2500)
+        p.onSaved?.(editOid)
+        return
+      }
+
+      const res = await layer.applyEdits({ addFeatures: [{ attributes: cleanAttrs, geometry: geom }] })
+      const added = res?.addFeatureResults?.[0] || res?.addResults?.[0] || null
+      const err = added?.error
+      const ok = !err && (added?.objectId != null || added?.success === true || added?.success == null)
+      if (!ok) throw new Error(err ? `${err.code ?? ''}: ${err.message ?? ''}` : JSON.stringify(res))
+
+      const newOid = Number(added.objectId)
+      await refreshDs(ds)
+      await trySelectOid(ds, newOid)
+
+      setMsg({ kind: 'ok', text: 'Pratica creata.' })
+      setSaving(false)
+      setTimeout(() => {
+        setDraft({})
+        setMsg(null)
+        p.onClearPoint()
+        p.onSaved?.(newOid)
+      }, 600)
+    } catch (e: any) {
+      setSaving(false)
+      setMsg({ kind: 'err', text: `Errore: ${e?.message || String(e)}` })
+    }
+  }
+
+
+  const [npTab, setNpTab] = React.useState<'anagrafica' | 'violazione' | 'allegati'>('anagrafica')
+  const showDatiGen = p.showDatiGenerali
+
+  const NP_TABS = [
+    { id: 'anagrafica', label: 'Anagrafica' },
+    { id: 'violazione', label: 'Violazione' },
+    { id: 'allegati', label: 'Allegati' }
+  ] as const
+
+  const btnBase: React.CSSProperties = {
+    padding: '7px 16px', borderRadius: 8, border: 'none',
+    fontWeight: 700, fontSize: 13, cursor: saving ? 'not-allowed' : 'pointer'
+  }
+
+  const tabBtn = (id: string, label: string) => (
+    <button key={id} type='button' onClick={() => setNpTab(id as any)} style={{
+      padding: '6px 14px', borderRadius: 10, border: `1px solid ${npTab === id ? '#2f6fed' : 'rgba(0,0,0,0.12)'}`,
+      background: npTab === id ? '#eaf2ff' : 'rgba(0,0,0,0.02)',
+      color: npTab === id ? '#1d4ed8' : '#374151',
+      fontWeight: 700, fontSize: 12, cursor: 'pointer', whiteSpace: 'nowrap'
+    }}>{label}</button>
+  )
+
+  const geomStatus = React.useMemo(() => {
+    if (p.clickedPointWgs84) return { kind: 'ok' as const, text: 'Punto impostato da click in mappa.' }
+    if (reqPoint === 0 && hasOffice) return { kind: 'info' as const, text: 'Nessun click: userò il punto ufficio (default).' }
+    if (reqPoint === 0 && !hasOffice) return { kind: 'err' as const, text: 'Nessun click e punto ufficio non configurato: fai click in mappa o imposta Lon/Lat ufficio nel setting.' }
+    return { kind: 'err' as const, text: 'Localizzazione obbligatoria: fai click in mappa.' }
+  }, [p.clickedPointWgs84, reqPoint, hasOffice])
+
+  return (
+    <div style={{ width: '100%', height: '100%', display: 'flex', flexDirection: 'column', minHeight: 0 }}>
+
+      {/* ── Toolbar ── */}
+      <div style={{ flex: '0 0 auto', display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+        flexWrap: 'wrap', gap: 8, padding: '8px 0', borderBottom: '1px solid rgba(0,0,0,0.08)' }}>
+        <span style={{ fontWeight: 700, fontSize: 14 }}>{p.titleText || (mode === 'edit' ? 'Modifica pratica' : '✚ Nuova pratica (TI)')}</span>
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+          {msg && <span style={{ fontSize: 12, color: msg.kind === 'ok' ? '#1a7f37' : '#b42318' }}>{msg.text}</span>}
+          <button type='button' disabled={saving} onClick={handleSave}
+            style={{ ...btnBase, background: saving ? '#e5e7eb' : '#1a7f37', color: saving ? '#9ca3af' : '#fff' }}>
+            {saving ? 'Salvataggio…' : (p.saveText || '💾 Salva')}
+          </button>
+          <button type='button' disabled={saving} onClick={() => { setDraft({}); p.onClearPoint(); }}
+            style={{ ...btnBase, background: '#fff', border: '1px solid rgba(0,0,0,0.18)', color: '#374151' }}>
+            ↺ Pulisci
+          </button>
+        </div>
+      </div>
+
+      {/* ── Tab bar ── */}
+      <div style={{ flex: '0 0 auto', display: 'flex', gap: 6, padding: '8px 0', flexWrap: 'wrap',
+        borderBottom: '1px solid rgba(0,0,0,0.08)' }}>
+        {NP_TABS.map(t => tabBtn(t.id, t.label))}
+      </div>
+
+      {/* ── Contenuto tab (scrollabile) ── */}
+      <div style={{ flex: '1 1 auto', minHeight: 0, overflowY: 'auto', padding: '12px 2px' }}>
+
+        {/* ANAGRAFICA (Dati generali + Trasgressore) */}
+        {npTab === 'anagrafica' && (
+          <div>
+            {showDatiGen && (
+              <div style={{ marginBottom: 14 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 8 }}>
+                  <span style={{ fontSize: 13, color: '#6b7280' }}>Dati generali (automatici)</span>
+                </div>
+                <div style={S.row3}>
+                  <NpField label='Tecnico istruttore'>
+                    <NpText value={g('tecnico_rilevatore')} onChange={() => {}} disabled/>
+                  </NpField>
+                  <NpField label='Ufficio di Zona'>
+                    <NpText value={g('ufficio_zona')} onChange={() => {}} disabled/>
+                  </NpField>
+                  <NpField label='Data rilevazione'>
+                    <NpText value={g('data_rilevazione')} onChange={() => {}} disabled/>
+                  </NpField>
+                </div>
+              </div>
+            )}
+
+            <div style={{ ...S.hdr, marginTop: 6 }}>Trasgressore</div>
+
+            <div style={{ ...S.row2, marginBottom: 12 }}>
+              <NpField label='Tipologia soggetto'>
+                <NpSel value={tipoSogg} onChange={v => set('tipologia_soggetto', v)} options={CHOICES.tipo_soggetto} disabled={saving}/>
+              </NpField>
+              <div/>
+            </div>
+
+            {tipoSogg === 'PF' && (
+              <div style={S.row3}>
+                <NpField label='Nome'><NpText value={g('nome')} onChange={v => set('nome', v)} disabled={saving}/></NpField>
+                <NpField label='Cognome'><NpText value={g('cognome')} onChange={v => set('cognome', v)} disabled={saving}/></NpField>
+                <NpField label='Codice fiscale'><NpText value={g('codice_fiscale')} onChange={v => set('codice_fiscale', v)} disabled={saving}/></NpField>
+              </div>
+            )}
+            {tipoSogg === 'PG' && (
+              <div style={S.row2}>
+                <NpField label='Ragione sociale'><NpText value={g('ragione_sociale')} onChange={v => set('ragione_sociale', v)} disabled={saving}/></NpField>
+                <NpField label='P. IVA'><NpText value={g('piva')} onChange={v => set('piva', v)} disabled={saving}/></NpField>
+              </div>
+            )}
+
+            <div style={S.row3}>
+              <NpField label='Via'><NpText value={g('via')} onChange={v => set('via', v)} disabled={saving}/></NpField>
+              <NpField label='N. civico'><NpText value={g('civico')} onChange={v => set('civico', v)} disabled={saving}/></NpField>
+              <NpField label='Città'><NpText value={g('citta')} onChange={v => set('citta', v)} disabled={saving}/></NpField>
+            </div>
+            <div style={S.row3}>
+              <NpField label='CAP'><NpText value={g('cap')} onChange={v => set('cap', v)} disabled={saving}/></NpField>
+              <NpField label='Telefono'><NpText value={g('telefono')} onChange={v => set('telefono', v)} disabled={saving}/></NpField>
+              <NpField label='Cellulare'><NpText value={g('cellulare')} onChange={v => set('cellulare', v)} disabled={saving}/></NpField>
+            </div>
+            <div style={S.row2}>
+              <NpField label='E-mail'><NpText value={g('email')} onChange={v => set('email', v)} disabled={saving}/></NpField>
+              <NpField label='PEC'><NpText value={g('pec')} onChange={v => set('pec', v)} disabled={saving}/></NpField>
+            </div>
+          </div>
+        )}
+
+        {/* VIOLAZIONE (include descrizione/localizzazione/fine) */}
+        {npTab === 'violazione' && (
+          <div>
+            <div style={{ padding: 10, borderRadius: 10, border: '1px solid rgba(0,0,0,0.10)', background: 'rgba(0,0,0,0.02)', marginBottom: 12 }}>
+              <div style={{ fontWeight: 800, fontSize: 12, color: '#374151', marginBottom: 6 }}>
+                Localizzazione (req_point = {reqPoint})
+              </div>
+              <div style={{ fontSize: 12, color: geomStatus.kind === 'ok' ? '#1a7f37' : (geomStatus.kind === 'err' ? '#b42318' : '#6b7280') }}>
+                {geomStatus.text}
+              </div>
+              {p.clickedPointWgs84 && (
+                <div style={{ marginTop: 6, display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+                  <span style={{ fontSize: 11, color: '#6b7280' }}>
+                    Lon: {Number(p.clickedPointWgs84.x).toFixed(6)} — Lat: {Number(p.clickedPointWgs84.y).toFixed(6)}
+                  </span>
+                  <button type='button' onClick={p.onClearPoint} style={{
+                    padding: '4px 10px', borderRadius: 10, border: '1px solid rgba(0,0,0,0.14)', background: '#fff',
+                    fontSize: 11, fontWeight: 700, cursor: 'pointer'
+                  }}>Rimuovi punto</button>
+                </div>
+              )}
+            </div>
+
+            <div style={S.hdr}>Art. 15 — Prelievo abusivo</div>
+            <div style={S.row2}>
+              <NpField label='Tipo di abuso'>
+                <NpSel value={tipoAbuso} onChange={v => { set('tipo_abuso', v); set('norma15_parziale', ''); set('norma15_totale', '') }}
+                  options={CHOICES.tipo_abuso} disabled={saving}/>
+              </NpField>
+              {tipoAbuso === 'parziale' && (
+                <NpField label='Seleziona violazione'>
+                  <NpSel value={n3parziale} onChange={v => set('norma15_parziale', v)} options={CHOICES.art15_parziale} disabled={saving}/>
+                </NpField>
+              )}
+              {tipoAbuso === 'totale' && (
+                <NpField label='Seleziona violazione'>
+                  <NpSel value={n3totale} onChange={v => set('norma15_totale', v)} options={CHOICES.art15_totale} disabled={saving}/>
+                </NpField>
+              )}
+            </div>
+            {showSup15 && (
+              <div style={S.row2}>
+                <NpField label='Superficie dichiarata (ha)'><NpInt value={g('sup_dichiarata_art15')} onChange={v => set('sup_dichiarata_art15', v)} disabled={saving}/></NpField>
+                <NpField label='Superficie irrigata (ha)'><NpInt value={g('sup_irrigata_art15')} onChange={v => set('sup_irrigata_art15', v)} disabled={saving}/></NpField>
+              </div>
+            )}
+
+            <div style={S.hdr}>Artt. 16 e 17 — Inosservanza termini</div>
+            <NpField label='Tipo di inosservanza'>
+              <NpSel value={norma1516} onChange={v => { set('norma16_17', v); set('art17_tipo', '') }} options={CHOICES.art16_17} disabled={saving}/>
+            </NpField>
+            {norma1516 === 'Art17' && (
+              <NpField label='Seleziona violazione Art. 17'>
+                <NpSel value={art17tipo} onChange={v => set('art17_tipo', v)} options={CHOICES.art17_tipo} disabled={saving}/>
+              </NpField>
+            )}
+            {norma1516 === 'Art16' && (
+              <div style={S.row2}>
+                <NpField label='Superficie dichiarata (ha)'><NpInt value={g('sup_dichiarata_art16')} onChange={v => set('sup_dichiarata_art16', v)} disabled={saving}/></NpField>
+                <NpField label='Superficie irrigata (ha)'><NpInt value={g('sup_irrigata_art16_17_2')} onChange={v => set('sup_irrigata_art16_17_2', v)} disabled={saving}/></NpField>
+              </div>
+            )}
+            {norma1516 === 'Art17' && art17tipo === 'Art17.1' && (
+              <div style={S.row2}>
+                <NpField label='Superficie dichiarata (ha)'><NpInt value={g('sup_dichiarata_art17_1')} onChange={v => set('sup_dichiarata_art17_1', v)} disabled={saving}/></NpField>
+                <NpField label='Superficie variata (ha)'><NpInt value={g('sup_irrigata_art17_1')} onChange={v => set('sup_irrigata_art17_1', v)} disabled={saving}/></NpField>
+              </div>
+            )}
+            {norma1516 === 'Art17' && art17tipo === 'Art17.2' && (
+              <div style={S.row2}>
+                <NpField label='Superficie dichiarata (ha)'><NpInt value={g('sup_dichiarata_art17_2')} onChange={v => set('sup_dichiarata_art17_2', v)} disabled={saving}/></NpField>
+                <NpField label='Superficie irrigata (ha)'><NpInt value={g('sup_irrigata_art16_17_2')} onChange={v => set('sup_irrigata_art16_17_2', v)} disabled={saving}/></NpField>
+              </div>
+            )}
+
+            <div style={S.hdr}>Altre violazioni</div>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6 }}>
+              {CHOICES.norma3.map(o => (
+                <label key={o.v} style={{ display: 'flex', alignItems: 'flex-start', gap: 8, fontSize: 12,
+                  color: '#374151', cursor: saving ? 'not-allowed' : 'pointer', padding: '4px 0' }}>
+                  <input type='checkbox' checked={norma3Set.has(o.v)} onChange={() => !saving && toggleNorma3(o.v)} style={{ marginTop: 2, flexShrink: 0 }}/>
+                  {o.l}
+                </label>
+              ))}
+            </div>
+
+            <div style={S.hdr}>Descrizione</div>
+            <NpField label='Descrizione dettagliata della violazione'>
+              <NpText value={g('descrizione_fatti')} onChange={v => set('descrizione_fatti', v)} multiline disabled={saving}/>
+            </NpField>
+            <NpField label='Circostanze rilevanti'>
+              <NpText value={g('circostanze')} onChange={v => set('circostanze', v)} multiline disabled={saving}/>
+            </NpField>
+            <NpField label='Il trasgressore era presente?'>
+              <NpSel value={g('presenza_trasgressore')} onChange={v => set('presenza_trasgressore', v)} options={CHOICES.presenza} disabled={saving}/>
+            </NpField>
+
+            <div style={S.hdr}>Descrizione del luogo</div>
+            <NpField label='Descrizione del luogo'>
+              <NpText value={g('descrizione_luogo')} onChange={v => set('descrizione_luogo', v)} multiline disabled={saving}/>
+            </NpField>
+
+            <div style={S.hdr}>Fine compilazione</div>
+            <NpField label='Data e ora di compilazione'>
+              <NpDate value={g('data_firma')} onChange={v => set('data_firma', v)} withTime disabled={saving}/>
+            </NpField>
+          </div>
+        )}
+
+        {/* ALLEGATI (in CREATE: solo placeholder) */}
+        {npTab === 'allegati' && (
+          <div style={{ padding: 12, borderRadius: 10, border: '1px dashed rgba(0,0,0,0.18)', background: 'rgba(0,0,0,0.01)' }}>
+            <div style={{ fontWeight: 800, fontSize: 13, marginBottom: 6 }}>Allegati</div>
+            <div style={{ fontSize: 12, color: '#6b7280', lineHeight: 1.5 }}>
+              Gli allegati si gestiscono <b>dopo il salvataggio</b> della pratica (serve l&apos;OBJECTID).
+              Dopo aver creato la pratica, comparirà nell&apos;Elenco: selezionala e usa la tab <b>Allegati</b> in modalità modifica.
+            </div>
+          </div>
+        )}
+
+      </div>
+    </div>
+  )
+}
+
 
 function DetailTabsPanel (props: {
   active: { key: string; state: SelState } | null
+  anyDs: any
+  showDatiGenerali: boolean
   roleCode: string
   buttonText: string
   buttonColors: ButtonColors
@@ -3083,12 +2844,7 @@ function DetailTabsPanel (props: {
 
   const selectionKey = active?.state?.oid != null ? `${active.key}:${active.state.oid}` : null
   const ds = active?.state?.ds
-  const baseData = active?.state?.data || null
-  // Patch ottimistico: dopo applyEdits aggiorniamo subito i valori usati dai pulsanti,
-  // senza dover aspettare refresh DS / cambio selezione.
-  const [localData, setLocalData] = React.useState<any | null>(null)
-  React.useEffect(() => { setLocalData(null) }, [selectionKey])
-  const data = localData || baseData
+  const data = active?.state?.data || null
   const oid = active?.state?.oid ?? null
   const hasSel = oid != null && Number.isFinite(oid)
 
@@ -3321,17 +3077,8 @@ const isPgOnlyField = React.useCallback((fieldName: string) => {
   return Boolean(isRagSoc || isPiva)
 }, [aliasMap])
 
-  const makeRows = React.useCallback((fields: any, kind: string, hideEmpty: boolean) => {
-    // Normalizza a plain JS array in modo robusto (frozen array, ImmutableList, ecc.)
-    let fieldArr: string[] = []
-    if (fields) {
-      if (Array.isArray(fields)) fieldArr = fields.map(String).filter(Boolean)
-      else if (typeof fields.toArray === 'function') fieldArr = fields.toArray().map(String).filter(Boolean)
-      else if (typeof fields.toJS === 'function') fieldArr = fields.toJS().map(String).filter(Boolean)
-      else if (typeof fields[Symbol.iterator] === 'function') fieldArr = Array.from(fields as any).map(String).filter(Boolean)
-    }
-    // Se nessun campo configurato esplicitamente, usa autoPickFields come default
-    const rawList = fieldArr.length ? fieldArr : autoPickFields(data, kind)
+  const makeRows = React.useCallback((fields: string[], kind: string, hideEmpty: boolean) => {
+    const rawList = (fields && fields.length) ? fields : []  // Se nessun campo configurato, mostra lista vuota (usare il setting per configurare)
     const tipoRaw = (data && (data as any).__tipo_soggetto_raw != null) ? (data as any).__tipo_soggetto_raw : ((data && (data as any).tipo_soggetto != null) ? (data as any).tipo_soggetto : null)
     const tipoLabel = (data && (data as any).__tipo_soggetto_label != null) ? (data as any).__tipo_soggetto_label : null
     const sogg = (kind === 'ANAGRAFICA') ? classifyTipoSoggetto(tipoRaw, tipoLabel) : null
@@ -3432,9 +3179,11 @@ const contentStyle: React.CSSProperties = {
 let content: React.ReactNode = null
 
 if (!hasSel) {
+  // In questo pannello (modalità UPDATE/legacy) una selezione è necessaria.
+  // La creazione senza selezione viene gestita nel runtime principale quando enableCreateWithoutSelection è ON.
   content = (
-    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', minHeight: 200, fontWeight: 700, fontSize: 14, color: 'rgba(0,0,0,0.6)' }}>
-      Selezionare un rapporto nell’elenco
+    <div style={{ display:'flex', alignItems:'center', justifyContent:'center', height:'100%', minHeight:200, fontSize:13, color:'rgba(0,0,0,0.45)' }}>
+      Seleziona una pratica dall&apos;Elenco.
     </div>
   )
 } else {
@@ -3670,20 +3419,288 @@ return (
 
 }
 
+
+
+type DynamicSelectionInfo = {
+  oid: number | null
+  layerUrl: string
+  idFieldName: string
+  data?: any | null
+}
+
+function makeRecordProxy (attrs: any, idFieldName: string) {
+  const oid = attrs?.[idFieldName] ?? attrs?.OBJECTID ?? attrs?.ObjectId ?? attrs?.objectid ?? attrs?.objectId ?? null
+  return {
+    getData: () => attrs || {},
+    getId: () => String(oid ?? ''),
+    id: oid
+  }
+}
+
+function getServiceNameFromUrl (url: string): string {
+  try {
+    const part = String(url || '').split('/rest/services/')[1] || ''
+    return (part.split('/FeatureServer')[0] || '').trim()
+  } catch {
+    return ''
+  }
+}
+
+function readDynamicSelection (): DynamicSelectionInfo {
+  try {
+    const w: any = window as any
+    const sel: any = w.__giiSelection || {}
+    const rawOid = sel?.oid ?? sessionStorage.getItem('GII_SELECTED_OID')
+    const oidNum = rawOid != null && rawOid !== '' ? Number(rawOid) : NaN
+    const layerUrl = String(sel?.layerUrl || sessionStorage.getItem('GII_SELECTED_LAYER_URL') || '').trim()
+    const idFieldName = String(sel?.idFieldName || sessionStorage.getItem('GII_SELECTED_IDFIELD') || 'OBJECTID').trim() || 'OBJECTID'
+    return {
+      oid: Number.isFinite(oidNum) ? oidNum : null,
+      layerUrl,
+      idFieldName,
+      data: sel?.data || null
+    }
+  } catch {
+    return { oid: null, layerUrl: '', idFieldName: 'OBJECTID', data: null }
+  }
+}
+
+function writeDynamicSelection (
+  sel: { oid?: number | null, layerUrl?: string, idFieldName?: string, data?: any | null },
+  opts?: { dispatch?: boolean }
+) {
+  try {
+    const prev: any = (window as any).__giiSelection || {}
+    const next: any = {
+      ...prev,
+      ...sel,
+      ts: Date.now()
+    }
+    ;(window as any).__giiSelection = next
+    if (next.oid != null && Number.isFinite(Number(next.oid))) sessionStorage.setItem('GII_SELECTED_OID', String(Number(next.oid)))
+    else sessionStorage.removeItem('GII_SELECTED_OID')
+    if (next.layerUrl) sessionStorage.setItem('GII_SELECTED_LAYER_URL', String(next.layerUrl))
+    else sessionStorage.removeItem('GII_SELECTED_LAYER_URL')
+    if (next.idFieldName) sessionStorage.setItem('GII_SELECTED_IDFIELD', String(next.idFieldName))
+    else sessionStorage.removeItem('GII_SELECTED_IDFIELD')
+    if (opts?.dispatch !== false) {
+      window.dispatchEvent(new CustomEvent('gii-selection-changed'))
+    }
+  } catch {}
+}
+
+type EditIntentInfo = { oid: number | null, layerUrl: string, idFieldName: string, data: any | null, ts: number }
+
+function readEditIntent (): EditIntentInfo | null {
+  try {
+    const raw = sessionStorage.getItem('GII_EDIT_INTENT')
+    if (!raw) return null
+    const j: any = JSON.parse(raw)
+    const oidNum = j?.oid != null && j?.oid !== '' ? Number(j.oid) : NaN
+    const layerUrl = String(j?.layerUrl || '').trim()
+    const idFieldName = String(j?.idFieldName || 'OBJECTID').trim() || 'OBJECTID'
+    const ts = Number(j?.ts || 0)
+    const ageMs = Math.abs(Date.now() - (Number.isFinite(ts) ? ts : 0))
+    if (!layerUrl || !Number.isFinite(oidNum)) return null
+    // evita che un vecchio intento di modifica resti appiccicato quando si entra da Nav > Nuova pratica
+    if (!Number.isFinite(ts) || ageMs > 15000) return null
+    return { oid: Number(oidNum), layerUrl, idFieldName, data: j?.data || null, ts: Number.isFinite(ts) ? ts : 0 }
+  } catch {
+    return null
+  }
+}
+
+function clearEditIntent () {
+  try { sessionStorage.removeItem('GII_EDIT_INTENT') } catch {}
+}
+
+function buildSchemaOnlyDsProxy (args: { url?: string, label?: string, schemaFields?: Array<{ name?: string, alias?: string, type?: string }> }): any {
+  const url = String(args?.url || '').trim()
+  const label = String(args?.label || getServiceNameFromUrl(url) || 'GII schema locale')
+  const fieldsArr = Array.isArray(args?.schemaFields) ? args.schemaFields : []
+  const schemaFields: Record<string, any> = {}
+  let idFieldName = 'OBJECTID'
+
+  for (const f of fieldsArr) {
+    const name = String((f as any)?.name || '').trim()
+    if (!name) continue
+    const alias = String((f as any)?.alias || name)
+    const type = String((f as any)?.type || '')
+    schemaFields[name] = { alias, label: alias, title: alias, type, domain: null }
+  }
+
+  for (const name of Object.keys(schemaFields)) {
+    const nk = normKey(name)
+    if (nk === 'objectid' || nk === 'objectid_1' || nk === 'objectidfield') {
+      idFieldName = name
+      break
+    }
+  }
+
+  const proxy: any = {
+    id: `gii-schema-${encodeURIComponent(url || label).slice(-48)}`,
+    layer: null,
+    async getLayer () { return null },
+    async getJSAPILayer () { return null },
+    async getJsApiLayer () { return null },
+    getDataSourceJson () { return { url } },
+    dataSourceJson: { url },
+    getLabel () { return label },
+    getIdField () { return idFieldName },
+    getSchema () { return { idField: idFieldName, fields: schemaFields } },
+    async query (_q: any) { return { records: [] } },
+    clearSelection () {}
+  }
+
+  return proxy
+}
+
+async function buildDynamicDsProxy (layerUrl: string, label?: string): Promise<any | null> {
+  const url = String(layerUrl || '').trim()
+  if (!url) return null
+  try {
+    const FeatureLayer = await loadEsriModule<any>('esri/layers/FeatureLayer')
+    const fl = new FeatureLayer({ url, outFields: ['*'] })
+    if (typeof fl?.load === 'function') await fl.load().catch(() => {})
+    const idFieldName = String(fl?.objectIdField || 'OBJECTID')
+    const schemaFields: Record<string, any> = {}
+    ;((fl?.fields || []) as any[]).forEach((f: any) => {
+      if (!f?.name) return
+      schemaFields[String(f.name)] = {
+        alias: String(f.alias || f.name),
+        label: String(f.alias || f.name),
+        title: String(f.alias || f.name),
+        type: String(f.type || ''),
+        domain: f.domain || null
+      }
+    })
+    const proxy: any = {
+      id: `gii-dynamic-${encodeURIComponent(url).slice(-48)}`,
+      layer: fl,
+      async getLayer () { return fl },
+      async getJSAPILayer () { return fl },
+      async getJsApiLayer () { return fl },
+      getDataSourceJson () { return { url } },
+      dataSourceJson: { url },
+      getLabel () { return String(label || getServiceNameFromUrl(url) || 'GII view dinamica') },
+      getIdField () { return idFieldName },
+      getSchema () { return { idField: idFieldName, fields: schemaFields } },
+      async query (q: any) {
+        const qq: any = {
+          where: String(q?.where || '1=1'),
+          outFields: Array.isArray(q?.outFields) && q.outFields.length ? q.outFields : ['*'],
+          returnGeometry: !!q?.returnGeometry
+        }
+        if (Number.isFinite(Number(q?.num))) qq.num = Number(q.num)
+        else if (Number.isFinite(Number(q?.pageSize))) qq.num = Number(q.pageSize)
+        const res: any = await fl.queryFeatures(qq)
+        const feats: any[] = Array.isArray(res?.features) ? res.features : []
+        return { records: feats.map((ft: any) => makeRecordProxy(ft?.attributes || {}, idFieldName)) }
+      },
+      async selectRecordsByIds (ids: any[]) {
+        const oid = Array.isArray(ids) && ids.length ? Number(ids[0]) : null
+        writeDynamicSelection({ oid, layerUrl: url, idFieldName })
+      },
+      async selectRecordById (id: any) {
+        const oid = id != null ? Number(id) : null
+        writeDynamicSelection({ oid, layerUrl: url, idFieldName })
+      },
+      async setSelectedRecordIds (ids: any[]) {
+        const oid = Array.isArray(ids) && ids.length ? Number(ids[0]) : null
+        writeDynamicSelection({ oid, layerUrl: url, idFieldName })
+      },
+      async setSelectedIds (ids: any[]) {
+        const oid = Array.isArray(ids) && ids.length ? Number(ids[0]) : null
+        writeDynamicSelection({ oid, layerUrl: url, idFieldName })
+      },
+      clearSelection () {
+        const cur = readDynamicSelection()
+        if (cur.layerUrl === url) writeDynamicSelection({ oid: null, layerUrl: url, idFieldName, data: null })
+      }
+    }
+    return proxy
+  } catch {
+    return null
+  }
+}
+
+function useDynamicActiveSelection (queryFields: string[], label?: string, enabled: boolean = true) {
+  const [active, setActive] = React.useState<{ key: string; state: SelState } | null>(null)
+  const reqRef = React.useRef(0)
+
+  React.useEffect(() => {
+    if (!enabled) {
+      setActive(null)
+      return
+    }
+    const refresh = () => {
+      const req = ++reqRef.current
+      const sel = readDynamicSelection()
+      if (sel.oid == null || !sel.layerUrl) {
+        setActive(null)
+        return
+      }
+      ;(async () => {
+        const ds = await buildDynamicDsProxy(sel.layerUrl, label)
+        if (!ds) {
+          if (req === reqRef.current) setActive(null)
+          return
+        }
+        const idFieldName = String(sel.idFieldName || ds.getIdField?.() || 'OBJECTID')
+        let data = sel.data || null
+        try {
+          if (!data || Number(data?.[idFieldName] ?? data?.OBJECTID ?? null) !== Number(sel.oid)) {
+            const res: any = await ds.query({ where: `${idFieldName}=${Number(sel.oid)}`, outFields: queryFields, returnGeometry: false })
+            const rec0: any = res?.records?.[0] || null
+            data = rec0?.getData?.() || null
+          }
+        } catch {
+          data = null
+        }
+        if (req !== reqRef.current) return
+        if (!data) {
+          setActive(null)
+          return
+        }
+        writeDynamicSelection({ oid: Number(sel.oid), layerUrl: sel.layerUrl, idFieldName, data }, { dispatch: false })
+        setActive({
+          key: sel.layerUrl,
+          state: {
+            ds,
+            oid: Number(sel.oid),
+            idFieldName,
+            data,
+            sig: `${sel.layerUrl}:${Number(sel.oid)}:${Date.now()}`
+          }
+        })
+      })().catch(() => {
+        if (req === reqRef.current) setActive(null)
+      })
+    }
+    refresh()
+    const h = () => refresh()
+    window.addEventListener('gii-selection-changed', h as any)
+    window.addEventListener('gii-force-refresh-selection', h as any)
+    return () => {
+      window.removeEventListener('gii-selection-changed', h as any)
+      window.removeEventListener('gii-force-refresh-selection', h as any)
+    }
+  }, [enabled, label, queryFields.join('|')])
+
+  return active
+}
+
 export default function Widget (props: AllWidgetProps<IMConfig>) {
   const cfgMutable: any = (props.config && (props.config as any).asMutable)
     ? (props.config as any).asMutable({ deep: true })
     : (props.config as any || {})
   const cfg: any = { ...defaultConfig, ...cfgMutable }
 
-  // ── Ruolo utente: letto da window.__giiUserRole (scritto dal widget Elenco) ──
   const [detectedRole, setDetectedRole] = React.useState<string>('')
-
   React.useEffect(() => {
     const readRole = () => {
       try {
         const r = (window as any).__giiUserRole?.ruoloLabel
-        // Se __giiUserRole è assente (logout) o ruolo ADMIN: azzera il ruolo rilevato.
         setDetectedRole(r && r !== 'ADMIN' ? String(r).toUpperCase() : '')
       } catch { }
     }
@@ -3692,9 +3709,9 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
     return () => window.removeEventListener('gii:userLoaded', readRole)
   }, [])
 
+  const showDatiGenerali = cfg.showDatiGenerali === true
   const roleCode = detectedRole || String(cfg.roleCode || 'DT').toUpperCase()
   const buttonText = String(cfg.buttonText || 'Prendi in carico')
-
   const buttonColors: ButtonColors = {
     take: normalizeHexColor(cfg.takeColor, defaultConfig.takeColor),
     integrazione: normalizeHexColor(cfg.integrazioneColor, defaultConfig.integrazioneColor),
@@ -3710,18 +3727,15 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
     panelBorderRadius: Number.isFinite(Number((cfg as any).maskBorderRadius ?? cfg.panelBorderRadius)) ? Number((cfg as any).maskBorderRadius ?? cfg.panelBorderRadius) : ((defaultConfig as any).maskBorderRadius ?? defaultConfig.panelBorderRadius),
     panelPadding: Number.isFinite(Number((cfg as any).maskInnerPadding ?? cfg.panelPadding)) ? Number((cfg as any).maskInnerPadding ?? cfg.panelPadding) : ((defaultConfig as any).maskInnerPadding ?? defaultConfig.panelPadding),
     dividerColor: String(cfg.dividerColor ?? defaultConfig.dividerColor),
-
     titleFontSize: Number.isFinite(Number(cfg.titleFontSize)) ? Number(cfg.titleFontSize) : defaultConfig.titleFontSize,
     statusFontSize: Number.isFinite(Number(cfg.statusFontSize)) ? Number(cfg.statusFontSize) : defaultConfig.statusFontSize,
     msgFontSize: Number.isFinite(Number(cfg.msgFontSize)) ? Number(cfg.msgFontSize) : defaultConfig.msgFontSize,
-
     rejectReasons: Array.isArray(cfg.rejectReasons) ? cfg.rejectReasons.map((x: any) => String(x)) : defaultConfig.rejectReasons,
     reasonsZebraOddBg: String(cfg.reasonsZebraOddBg ?? defaultConfig.reasonsZebraOddBg),
     reasonsZebraEvenBg: String(cfg.reasonsZebraEvenBg ?? defaultConfig.reasonsZebraEvenBg),
     reasonsRowBorderColor: String(cfg.reasonsRowBorderColor ?? defaultConfig.reasonsRowBorderColor),
     reasonsRowBorderWidth: Number.isFinite(Number(cfg.reasonsRowBorderWidth)) ? Number(cfg.reasonsRowBorderWidth) : defaultConfig.reasonsRowBorderWidth,
     reasonsRowRadius: Number.isFinite(Number(cfg.reasonsRowRadius)) ? Number(cfg.reasonsRowRadius) : defaultConfig.reasonsRowRadius,
-
     detailTitlePrefix: String(cfg.detailTitlePrefix ?? defaultConfig.detailTitlePrefix),
     detailTitleHeight: Number.isFinite(Number(cfg.detailTitleHeight)) ? Number(cfg.detailTitleHeight) : defaultConfig.detailTitleHeight,
     detailTitlePaddingBottom: Number.isFinite(Number(cfg.detailTitlePaddingBottom)) ? Number(cfg.detailTitlePaddingBottom) : defaultConfig.detailTitlePaddingBottom,
@@ -3729,13 +3743,12 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
     detailTitleFontSize: Number.isFinite(Number(cfg.detailTitleFontSize)) ? Number(cfg.detailTitleFontSize) : defaultConfig.detailTitleFontSize,
     detailTitleFontWeight: Number.isFinite(Number(cfg.detailTitleFontWeight)) ? Number(cfg.detailTitleFontWeight) : defaultConfig.detailTitleFontWeight,
     detailTitleColor: String(cfg.detailTitleColor ?? defaultConfig.detailTitleColor),
-    detailTitleBg: String((cfg as any).detailTitleBg ?? 'transparent'),
-
-    btnBorderRadius: Number.isFinite(Number((cfg as any).btnBorderRadius)) ? Number((cfg as any).btnBorderRadius) : 8,
-    btnFontSize: Number.isFinite(Number((cfg as any).btnFontSize)) ? Number((cfg as any).btnFontSize) : 13,
-    btnFontWeight: Number.isFinite(Number((cfg as any).btnFontWeight)) ? Number((cfg as any).btnFontWeight) : 600,
-    btnPaddingX: Number.isFinite(Number((cfg as any).btnPaddingX)) ? Number((cfg as any).btnPaddingX) : 16,
-    btnPaddingY: Number.isFinite(Number((cfg as any).btnPaddingY)) ? Number((cfg as any).btnPaddingY) : 8
+    detailTitleBg: String(cfg.detailTitleBg ?? defaultConfig.detailTitleBg ?? 'transparent'),
+    btnBorderRadius: Number.isFinite(Number(cfg.btnBorderRadius)) ? Number(cfg.btnBorderRadius) : defaultConfig.btnBorderRadius ?? 8,
+    btnFontSize: Number.isFinite(Number(cfg.btnFontSize)) ? Number(cfg.btnFontSize) : defaultConfig.btnFontSize ?? 13,
+    btnFontWeight: Number.isFinite(Number(cfg.btnFontWeight)) ? Number(cfg.btnFontWeight) : defaultConfig.btnFontWeight ?? 600,
+    btnPaddingX: Number.isFinite(Number(cfg.btnPaddingX)) ? Number(cfg.btnPaddingX) : defaultConfig.btnPaddingX ?? 16,
+    btnPaddingY: Number.isFinite(Number(cfg.btnPaddingY)) ? Number(cfg.btnPaddingY) : defaultConfig.btnPaddingY ?? 8
   }
 
   const tabFields: TabFields = {
@@ -3744,16 +3757,12 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
     allegati: normalizeFieldList((cfg as any).allegatiFields),
     iterExtra: normalizeFieldList((cfg as any).iterExtraFields)
   }
-
-  // Migra tabs
   const migratedTabs = migrateTabs(tabFields, cfg.tabs || [])
-
-  // --- Editing TI config
   const editConfig = {
     show: cfg.showEditButtons !== false,
     overlayColor: normalizeHexColor(cfg.editOverlayColor, '#7c3aed'),
     pageColor: normalizeHexColor(cfg.editPageColor, '#5b21b6'),
-    pageId: String(cfg.editPageId || 'page_20'),
+    pageId: String(cfg.editPageId || 'editing-ti'),
     fieldStatoTI: String(cfg.fieldStatoTI || 'stato_TI'),
     fieldPresaTI: String(cfg.fieldPresaTI || 'presa_in_carico_TI'),
     minStato: Number.isFinite(Number(cfg.editMinStato)) ? Number(cfg.editMinStato) : 2,
@@ -3761,150 +3770,81 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
     presaRequiredVal: Number.isFinite(Number(cfg.editPresaRequiredVal)) ? Number(cfg.editPresaRequiredVal) : 2
   }
 
-
-  // Datasource risolta dinamicamente dal widget Elenco: una sola vista effettiva per sessione.
-  // Nessun DataSourceComponent / multi-view dichiarata qui.
-  // Campi minimi necessari per:
-  // - gating dei pulsanti (presa/stato/esito per ruolo)
-  // - computeNodoAttivo (serve vedere quali nodi hanno già dati)
-  // - assegnazione TI (ti_assegnato_*)
   const watchFields = [
-    'origine_pratica',
-    'ti_assegnato_username', 'ti_assegnato_nome', 'dt_assegnazione_ti', 'ti_assegnato_da',
-
-    'presa_in_carico_TR', 'dt_presa_in_carico_TR',
-    'stato_TR', 'dt_stato_TR',
-    'esito_TR', 'dt_esito_TR',
-    'note_TR',
-
-    'presa_in_carico_TI', 'dt_presa_in_carico_TI',
-    'stato_TI', 'dt_stato_TI',
-    'esito_TI', 'dt_esito_TI',
-    'note_TI',
-
-    'presa_in_carico_RZ', 'dt_presa_in_carico_RZ',
-    'stato_RZ', 'dt_stato_RZ',
-    'esito_RZ', 'dt_esito_RZ',
-    'note_RZ',
-
-    'presa_in_carico_RI', 'dt_presa_in_carico_RI',
-    'stato_RI', 'dt_stato_RI',
-    'esito_RI', 'dt_esito_RI',
-    'note_RI',
-
-    'presa_in_carico_DT', 'dt_presa_in_carico_DT',
-    'stato_DT', 'dt_stato_DT',
-    'esito_DT', 'dt_esito_DT',
-    'note_DT',
-
-    'presa_in_carico_DA', 'dt_presa_in_carico_DA',
-    'stato_DA', 'dt_stato_DA',
-    'esito_DA', 'dt_esito_DA',
-    'note_DA'
+    'presa_in_carico_DT', 'dt_presa_in_carico_DT', 'stato_DT', 'dt_stato_DT', 'esito_DT', 'dt_esito_DT', 'note_DT',
+    'presa_in_carico_DA', 'dt_presa_in_carico_DA', 'stato_DA', 'dt_stato_DA', 'esito_DA', 'dt_esito_DA', 'note_DA'
   ]
 
-const queryFields = React.useMemo(() => {
-  const s = new Set<string>()
-  let needsAll = false
+  const [editIntent] = React.useState<EditIntentInfo | null>(() => {
+    const ei = readEditIntent()
+    if (ei) clearEditIntent()
+    return ei
+  })
+  const activeGate = useDynamicActiveSelection(['*'], 'GII view dinamica', !!editIntent)
 
-  const tabsJs: any[] =
-    (migratedTabs as any)?.asMutable
-      ? (migratedTabs as any).asMutable({ deep: true })
-      : (Array.isArray(migratedTabs) ? migratedTabs as any[] : [])
-
-  for (const t of tabsJs) {
-    if (!t || t.id === 'azioni') continue
-    const fl = normalizeFieldList(t.fields)
-    if (!fl.length && t.id !== 'iter') needsAll = true
-    for (const f of fl) s.add(String(f))
-  }
-
-  for (const f of watchFields) s.add(String(f))
-  const arr = Array.from(s).filter(Boolean)
-  return needsAll ? ['*'] : arr
-}, [migratedTabs, watchFields.join('|')])
-
-  const [selection, setSelection] = React.useState<RuntimeSelection | null>(() => readRuntimeSelection())
+  const mapWidgetId = Array.isArray(cfg.useMapWidgetIds) ? cfg.useMapWidgetIds[0] : null
+  const [jimuMapView, setJimuMapView] = React.useState<JimuMapView | null>(null)
+  const [clickedPointWgs84, setClickedPointWgs84] = React.useState<any | null>(null)
   React.useEffect(() => {
-    const handler = () => setSelection(readRuntimeSelection())
-    handler()
-    window.addEventListener('gii-selection-changed', handler as any)
-    return () => window.removeEventListener('gii-selection-changed', handler as any)
-  }, [])
+    const view: any = (jimuMapView as any)?.view
+    if (!view || typeof view.on !== 'function') return
+    const h = view.on('click', (e: any) => {
+      ;(async () => {
+        const pt = await toWgs84Point(e?.mapPoint)
+        if (pt) setClickedPointWgs84(pt)
+      })().catch(() => {})
+    })
+    return () => { try { h?.remove?.() } catch {} }
+  }, [jimuMapView])
 
-  const [selRefreshNonce, setSelRefreshNonce] = React.useState<number>(0)
+  const [createDs, setCreateDs] = React.useState<any | null>(null)
   React.useEffect(() => {
-    const h = () => setSelRefreshNonce(n => n + 1)
-    window.addEventListener('gii-force-refresh-selection', h as any)
-    return () => window.removeEventListener('gii-force-refresh-selection', h as any)
-  }, [])
+    const schemaUrl = String(cfg.schemaLayerUrl || '').trim() || String(cfg.motherLayerUrl || '').trim()
+    const schemaLabel = String(cfg.schemaLayerLabel || 'GII schema locale')
+    const schemaFields = Array.isArray(cfg.schemaFields) ? cfg.schemaFields : []
+    const ds = buildSchemaOnlyDsProxy({ url: schemaUrl, label: schemaLabel, schemaFields })
+    setCreateDs(ds)
+  }, [cfg.schemaLayerUrl, cfg.schemaLayerLabel, cfg.motherLayerUrl, JSON.stringify(cfg.schemaFields || [])])
 
-  const [forcedActive, setForcedActive] = React.useState<{ key: string; state: SelState } | null>(null)
-  const forcedReqRef = React.useRef(0)
-
-  React.useEffect(() => {
-    const req = ++forcedReqRef.current
-    if (!selection?.layerUrl || selection.oid == null) {
-      setForcedActive(null)
-      return
-    }
-    ;(async () => {
-      try {
-        const dsTry = await createRuntimeDsProxyFromLayerUrl(selection.layerUrl, selection.viewName)
-        const idFieldName = String(selection.idFieldName || dsTry.getIdField?.() || 'OBJECTID')
-        const baseData = selection.data && typeof selection.data === 'object' ? selection.data : null
-        const baseOid = baseData ? Number(baseData[idFieldName] ?? baseData.OBJECTID ?? selection.oid) : NaN
-        const stateKey = `${selection.layerUrl}:${selection.oid}`
-
-        if (baseData && Number.isFinite(baseOid) && baseOid === selection.oid) {
-          const quickState: SelState = { ds: dsTry, oid: selection.oid, idFieldName, data: baseData, sig: stateKey }
-          setForcedActive({ key: selection.layerUrl, state: quickState })
-        }
-
-        const wantsAll = queryFields.includes('*')
-        const needsQuery = !baseData || wantsAll || queryFields.some(f => f && f !== '*' && !Object.prototype.hasOwnProperty.call(baseData, f))
-        if (!needsQuery) return
-
-        const where = `${idFieldName}=${selection.oid}`
-        const res: any = await dsTry.query({ where, outFields: queryFields, returnGeometry: false } as any)
-        if (req !== forcedReqRef.current) return
-        const recs: any[] = res?.records || []
-        if (!recs.length) {
-          setForcedActive(null)
-          return
-        }
-        const r0 = recs[0]
-        const fetched = r0?.getData?.() || {}
-        const d0 = baseData ? { ...(baseData || {}), ...(fetched || {}) } : fetched
-        const oid0 = Number(d0[idFieldName] ?? d0.OBJECTID ?? selection.oid)
-        if (!Number.isFinite(oid0) || oid0 !== selection.oid) {
-          setForcedActive(null)
-          return
-        }
-        const st: SelState = { ds: dsTry, oid: selection.oid, idFieldName, data: d0, sig: stateKey }
-        setForcedActive({ key: selection.layerUrl, state: st })
-      } catch {
-        if (req === forcedReqRef.current) setForcedActive(null)
-      }
-    })()
-  }, [selection?.layerUrl, selection?.oid, selection?.idFieldName, selection?.viewName, queryFields.join('|'), selRefreshNonce])
-
-  const activeGate = forcedActive
-
+  const editSelectionMatchesIntent = !!editIntent && !!activeGate?.state && Number(activeGate.state.oid) === Number(editIntent.oid) && String((activeGate.state.ds as any)?.getDataSourceJson?.()?.url || (activeGate.state.ds as any)?.dataSourceJson?.url || (activeGate.state.ds as any)?.layer?.url || '').trim() === String(editIntent.layerUrl || '').trim()
+  const inCreateMode = !editIntent
+  const anyDs = inCreateMode ? createDs : (editSelectionMatchesIntent ? activeGate?.state?.ds : null)
+  const initialEditData = !inCreateMode && editSelectionMatchesIntent ? (activeGate?.state?.data || editIntent?.data || null) : null
+  const editOid = !inCreateMode && editIntent ? Number(editIntent.oid) : null
+  const editIdFieldName = !inCreateMode ? String(editIntent?.idFieldName || activeGate?.state?.idFieldName || anyDs?.getIdField?.() || 'OBJECTID') : undefined
 
   return (
     <div style={{ width: '100%', height: '100%', display: 'flex', flexDirection: 'column', minHeight: 0, boxSizing: 'border-box', padding: Number.isFinite(Number((cfg as any).maskOuterOffset ?? 0)) ? Number((cfg as any).maskOuterOffset) : 0 }}>
-      <>
-        <ActionsPanel
-          active={activeGate}
-          roleCode={roleCode}
-          buttonText={buttonText}
-          buttonColors={buttonColors}
-          ui={ui}
-          editConfig={editConfig}
-          motherLayerUrl={String(cfg.motherLayerUrl || '').trim() || undefined}
+      {mapWidgetId && (
+        <div style={{ display: 'none' }}>
+          <JimuMapViewComponent
+            useMapWidgetId={mapWidgetId}
+            onActiveViewChange={(jmv: JimuMapView) => { setJimuMapView(jmv) }}
+          />
+        </div>
+      )}
+
+      {anyDs ? (
+        <NuovaPraticaForm
+          ds={anyDs}
+          cfg={cfg}
+          showDatiGenerali={showDatiGenerali}
+          clickedPointWgs84={clickedPointWgs84}
+          onClearPoint={() => setClickedPointWgs84(null)}
+          mode={inCreateMode ? 'create' : 'edit'}
+          initialData={initialEditData}
+          editOid={editOid}
+          editIdFieldName={editIdFieldName}
+          titleText={inCreateMode ? '✚ Nuova pratica (TI)' : `Modifica rapporto n. ${buildPraticaCodeFromData(initialEditData, editOid) || '–'}`}
+          saveText={'💾 Salva'}
+          onSaved={(savedOid: number) => {
+            writeDynamicSelection({ oid: savedOid, layerUrl: String((anyDs as any)?.layer?.url || (anyDs as any)?.url || cfg.motherLayerUrl || cfg.schemaLayerUrl || readDynamicSelection().layerUrl || ''), idFieldName: editIdFieldName || anyDs?.getIdField?.() || 'OBJECTID' })
+            clearEditIntent()
+          }}
         />
-      </>
+      ) : (
+        <div style={{ padding: 12 }}>{editIntent ? "Record di modifica non disponibile: torna all'elenco e riapri Modifica." : 'Datasource dinamica non pronta: configura il layer madre, usa il layer schema oppure seleziona una pratica.'}</div>
+      )}
     </div>
   )
 }

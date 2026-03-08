@@ -7,7 +7,7 @@ import type { IMConfig, TabConfig } from '../config'
 import { defaultConfig, DETAIL_DEFAULT_TAB_FIELDS, DETAIL_NEVER_SHOW_FIELDS, DETAIL_GENERAL_FIELDS } from '../config'
 
 
-const GII_LOG_MODIFICHE_URL = 'https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_LOG_MODIFICHE/FeatureServer/0'
+const GII_LOG_EVENTI_URL = 'https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_LOG_EVENTI/FeatureServer/0'
 const GII_UTENTI_URL = 'https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_utenti/FeatureServer/0'
 
 
@@ -1321,10 +1321,12 @@ function ActionsPanel (props: {
     valorePrev?: any
     valoreNew?: any
     note?: string
+    tipoEvento?: string
+    fase?: string
   }) => {
     try {
       const FeatureLayer = await loadEsriModule<any>('esri/layers/FeatureLayer')
-      const logLayer = new FeatureLayer({ url: GII_LOG_MODIFICHE_URL, outFields: ['*'] })
+      const logLayer = new FeatureLayer({ url: GII_LOG_EVENTI_URL, outFields: ['*'] })
       if (typeof logLayer.load === 'function') {
         await logLayer.load()
       }
@@ -1337,6 +1339,8 @@ function ActionsPanel (props: {
         area: opts.area ?? '',
         settore: opts.settore ?? '',
         operazione: 'UPDATE',
+        tipo_evento: opts.tipoEvento ?? '',
+        fase: opts.fase ?? opts.ruolo ?? '',
         campo: opts.campo,
         valore_precedente: opts.valorePrev != null ? String(opts.valorePrev) : '',
         valore_nuovo: opts.valoreNew != null ? String(opts.valoreNew) : '',
@@ -1359,7 +1363,7 @@ function ActionsPanel (props: {
     } catch (e) {
       // non bloccare mai la presa in carico
       // eslint-disable-next-line no-console
-      console.warn('[GII_LOG] Errore scrittura log presa in carico:', e)
+      console.warn('[GII_LOG_EVENTI] Errore scrittura log evento:', e)
     }
   }
 
@@ -1898,7 +1902,9 @@ function ActionsPanel (props: {
         campo: presaField,
         valorePrev: prevPresaVal,
         valoreNew: PRESA_IN_CARICO,
-        note: `Presa in carico (${role})`
+        note: `Presa in carico (${role})`,
+        tipoEvento: 'PRESA_IN_CARICO',
+        fase: role
       })
 
       setPending(null)
@@ -1965,7 +1971,9 @@ function ActionsPanel (props: {
         campo: 'ti_assegnato_username',
         valorePrev: prevTi,
         valoreNew: tiSelected,
-        note: `Assegna TI: ${tiName} (${tiSelected})`
+        note: `Assegna TI: ${tiName} (${tiSelected})`,
+        tipoEvento: 'ASSEGNAZIONE_TI',
+        fase: role
       })
 
       setPending(null)

@@ -207,6 +207,51 @@ function hasToken (hay: string, token: string): boolean {
   return re.test(h)
 }
 
+function normalizeAreaCode (v: any): 'AGR' | 'TEC' | 'AMM' | '' {
+  const s = String(v ?? '').trim().toUpperCase()
+  if (!s) return ''
+  if (s === '2' || s === 'AGR' || s === 'AGRICOLA' || s === 'AGRICOLTURA') return 'AGR'
+  if (s === '3' || s === 'TEC' || s === 'TECNICA' || s === 'TECNICO') return 'TEC'
+  if (s === '1' || s === 'AMM' || s === 'AMMINISTRATIVA' || s === 'AMMINISTRAZIONE') return 'AMM'
+  return ''
+}
+
+function normalizeSettoreCode (area: string, v: any): string {
+  const s = String(v ?? '').trim().toUpperCase()
+  if (!s) return ''
+  if (area === 'AGR') {
+    if (/^[1-6]$/.test(s)) return `D${s}`
+    const m = s.match(/^D?([1-6])$/)
+    if (m) return `D${m[1]}`
+  }
+  if (area === 'TEC') {
+    if (s === 'DS' || s === 'D S') return 'DS'
+  }
+  if (area === 'AMM') {
+    if (s === 'CR' || s === 'C R') return 'CR'
+    if (s === 'ALL' || s === 'TUTTI' || s === 'TUTTE') return 'ALL'
+  }
+  return s
+}
+
+function buildTiCreateViewServiceNames (areaRaw: any, settoreRaw: any): string[] {
+  const area = normalizeAreaCode(areaRaw)
+  const settore = normalizeSettoreCode(area, settoreRaw)
+  if (area === 'AGR' && /^D[1-6]$/.test(settore)) return [`GII_VIEW_EB_AGR_${settore}`]
+  if (area === 'TEC' && settore === 'DS') return ['GII_VIEW_EB_TEC_DS']
+  if (area === 'AMM') {
+    if (settore === 'CR') return ['GII_VIEW_EB_AMM_CR', 'GII_VIEW_EB_AMM_ALL']
+    return ['GII_VIEW_EB_AMM_ALL']
+  }
+  return []
+}
+
+function replaceServiceNameInLayerUrl (layerUrl: string, serviceName: string): string | null {
+  const m = String(layerUrl || '').match(/^(https?:\/\/.+?\/services\/)([^/]+)(\/FeatureServer\/\d+.*)$/i)
+  if (!m) return null
+  return `${m[1]}${serviceName}${m[3]}`
+}
+
 function findTipoSoggettoFieldName (ds: any): string | null {
   try {
     const schema = ds?.getSchema?.()
@@ -780,6 +825,12 @@ function InlineEditOverlay(props: {
   const [activeTab, setActiveTab] = React.useState<'anagrafica' | 'violazione'>('anagrafica')
 
   const updateDraft = (field: string, value: any) => setDraft(prev => ({ ...prev, [field]: value }))
+
+  const handleCancel = () => {
+    setDraft({ ...(data || {}) })
+    setSaveMsg(null)
+    setActiveTab('anagrafica')
+  }
 
   const handleSave = async () => {
     setSaving(true)
@@ -2264,6 +2315,60 @@ function NpDate(p: { value: string; onChange: (v: string) => void; withTime?: bo
 
 type NpDraft = Record<string, string>
 
+const LOG_EVENTI_URL = 'https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_LOG_EVENTI/FeatureServer/0'
+const DRAFT_DATE_FIELDS = new Set(['data_rilevazione', 'data_firma'])
+
+function toDraftDate (v: any): string {
+  if (v == null || v === '') return ''
+  try {
+    const d = new Date(v)
+    if (Number.isNaN(d.getTime())) return ''
+    const y = d.getFullYear()
+    const m = String(d.getMonth() + 1).padStart(2, '0')
+    const day = String(d.getDate()).padStart(2, '0')
+    return `${y}-${m}-${day}`
+  } catch {
+    return ''
+  }
+}
+
+function draftFromRecord (rec: any): NpDraft {
+  const out: NpDraft = {}
+  if (!rec || typeof rec !== 'object') return out
+  for (const k of Object.keys(rec)) {
+    const v = rec[k]
+    if (v == null) out[k] = ''
+    else if (DRAFT_DATE_FIELDS.has(k)) out[k] = toDraftDate(v)
+    else out[k] = String(v)
+  }
+  return out
+}
+
+function normalizeLogValue (v: any): string {
+  if (v == null) return ''
+  if (typeof v === 'number') return Number.isFinite(v) ? String(v) : ''
+  if (typeof v === 'boolean') return v ? 'true' : 'false'
+  if (v instanceof Date) return Number.isNaN(v.getTime()) ? '' : String(v.getTime())
+  return String(v).trim()
+}
+
+function draftsEqual (a: NpDraft, b: NpDraft): boolean {
+  const keys = Array.from(new Set([...(Object.keys(a || {})), ...(Object.keys(b || {}))]))
+  for (const k of keys) {
+    if (normalizeLogValue(a?.[k]) !== normalizeLogValue(b?.[k])) return false
+  }
+  return true
+}
+
+function buildPraticaCodeFromData (data: any, oid: number | null | undefined): string {
+  if (oid == null || !Number.isFinite(Number(oid))) return ''
+  const op = data?.origine_pratica ?? data?.Origine_pratica ?? data?.ORIGINE_PRATICA
+  let prefix = 'TR'
+  if (op === 2 || op === '2' || String(op || '').toUpperCase() === 'TI') prefix = 'TI'
+  else if (op === 1 || op === '1' || String(op || '').toUpperCase() === 'TR') prefix = 'TR'
+  return `${prefix}-${Number(oid)}`
+}
+
 
 function NuovaPraticaForm (p: {
   ds: any
@@ -2271,13 +2376,36 @@ function NuovaPraticaForm (p: {
   showDatiGenerali: boolean
   clickedPointWgs84: any | null
   onClearPoint: () => void
-  onSaved: (newOid: number) => void
+  onSaved?: (oid: number, savedData?: any) => void
+  mode?: 'create' | 'edit'
+  initialData?: any | null
+  editOid?: number | null
+  editIdFieldName?: string
+  titleText?: string
+  saveText?: string
+  onDirtyChange?: (dirty: boolean) => void
 }) {
   const { ds, cfg } = p
+  const mode = p.mode === 'edit' ? 'edit' : 'create'
+  const editOid = p.editOid != null ? Number(p.editOid) : null
+  const editIdFieldName = String(p.editIdFieldName || ds?.getIdField?.() || 'OBJECTID')
 
-  const [draft, setDraft] = React.useState<NpDraft>({})
+  const [draft, setDraft] = React.useState<NpDraft>(() => draftFromRecord(p.initialData || {}))
+  const [baselineDraft, setBaselineDraft] = React.useState<NpDraft>(() => draftFromRecord(p.initialData || {}))
   const [saving, setSaving] = React.useState(false)
   const [msg, setMsg] = React.useState<{ kind: 'ok' | 'err'; text: string } | null>(null)
+
+  React.useEffect(() => {
+    const nextBase = draftFromRecord(p.initialData || {})
+    setDraft(nextBase)
+    setBaselineDraft(nextBase)
+    setMsg(null)
+  }, [mode, editOid, p.initialData])
+
+  const isDirty = React.useMemo(() => !draftsEqual(draft, baselineDraft) || !!p.clickedPointWgs84, [draft, baselineDraft, p.clickedPointWgs84])
+  React.useEffect(() => {
+    p.onDirtyChange?.(isDirty)
+  }, [isDirty, p.onDirtyChange])
 
   const set = (k: string, v: any) => setDraft(prev => ({ ...prev, [k]: v }))
   const g = (k: string) => draft[k] ?? ''
@@ -2311,20 +2439,52 @@ function NuovaPraticaForm (p: {
   const officeLat = Number(cfg.officeLatWgs84 ?? 0)
   const hasOffice = isValidOfficePoint(officeLon, officeLat)
 
-  // Mother layer cache
+  // View editabile TI/RZ per la creazione (mai layer madre)
   const motherRef = React.useRef<any | null>(null)
   const getLayerForCreate = React.useCallback(async () => {
-    const url = String(cfg.motherLayerUrl || '').trim()
-    if (url) {
-      if (motherRef.current) return motherRef.current
-      const FeatureLayer = await loadEsriModule<any>('esri/layers/FeatureLayer')
-      const fl = new FeatureLayer({ url })
-      if (typeof fl?.load === 'function') { try { await fl.load() } catch {} }
-      motherRef.current = fl
-      return fl
+    const schemaUrl = String(cfg.schemaLayerUrl || '').trim()
+    const giiRole: any = (window as any).__giiUserRole || {}
+    const serviceNames = buildTiCreateViewServiceNames(
+      giiRole.areaLabel || giiRole.area || giiRole.area_cod,
+      giiRole.settoreLabel || giiRole.settore || giiRole.settore_cod
+    )
+
+    const candidateUrls = serviceNames
+      .map((name) => replaceServiceNameInLayerUrl(schemaUrl, name))
+      .filter((u): u is string => !!u)
+
+    const FeatureLayer = await loadEsriModule<any>('esri/layers/FeatureLayer')
+    for (const url of candidateUrls) {
+      try {
+        if (motherRef.current && String((motherRef.current as any)?.url || '') === url) return motherRef.current
+        const fl = new FeatureLayer({ url })
+        if (typeof fl?.load === 'function') { try { await fl.load() } catch {} }
+        if (fl && typeof fl.applyEdits === 'function') {
+          motherRef.current = fl
+          return fl
+        }
+      } catch {
+        // prova il candidato successivo
+      }
     }
-    return await resolveLayerForEdit(ds)
-  }, [cfg.motherLayerUrl, ds])
+
+    // fallback sicuro: usa lo schema solo se non e' la BASE ed e' editabile
+    if (schemaUrl && !/\/GII_VIEW_EB_BASE\/FeatureServer\/0$/i.test(schemaUrl)) {
+      try {
+        if (motherRef.current && String((motherRef.current as any)?.url || '') === schemaUrl) return motherRef.current
+        const fl = new FeatureLayer({ url: schemaUrl })
+        if (typeof fl?.load === 'function') { try { await fl.load() } catch {} }
+        if (fl && typeof fl.applyEdits === 'function') {
+          motherRef.current = fl
+          return fl
+        }
+      } catch {
+        // ignore
+      }
+    }
+
+    throw new Error('View editabile TI non risolta per area/settore utente.')
+  }, [cfg.schemaLayerUrl])
 
   const toTs = (v: string) => {
     if (!v) return null
@@ -2335,28 +2495,82 @@ function NuovaPraticaForm (p: {
     return Number.isNaN(n) ? null : n
   }
 
+  const logLayerRef = React.useRef<any | null>(null)
+  const getLogLayer = React.useCallback(async () => {
+    if (logLayerRef.current) return logLayerRef.current
+    try {
+      const FeatureLayer = await loadEsriModule<any>('esri/layers/FeatureLayer')
+      const fl = new FeatureLayer({ url: LOG_EVENTI_URL })
+      if (typeof fl?.load === 'function') { try { await fl.load() } catch {} }
+      logLayerRef.current = fl
+      return fl
+    } catch {
+      return null
+    }
+  }, [])
+
+  const writeChangeLog = React.useCallback(async (prevAttrs: Record<string, any>, nextAttrs: Record<string, any>) => {
+    const fieldNames = Array.from(new Set([...Object.keys(prevAttrs || {}), ...Object.keys(nextAttrs || {})]))
+    const changes = fieldNames.filter((k) => normalizeLogValue(prevAttrs?.[k]) !== normalizeLogValue(nextAttrs?.[k]))
+    if (changes.length === 0) return 0
+    const logLayer = await getLogLayer()
+    if (!logLayer?.applyEdits) return 0
+    const giiRole: any = (window as any).__giiUserRole || {}
+    const sessionId = `ti-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`
+    const parentGlobalId = String(p.initialData?.GlobalID || p.initialData?.globalid || p.initialData?.GLOBALID || '')
+    const adds = changes.map((campo) => ({
+      attributes: filterAttrsForLayer({
+        parent_globalid: parentGlobalId || null,
+        parent_objectid: editOid,
+        dt_evento: Date.now(),
+        ruolo: String(giiRole.ruoloLabel || 'TI'),
+        area: String(giiRole.area || ''),
+        settore: String(giiRole.settore || ''),
+        operazione: 'UPDATE',
+        campo,
+        valore_precedente: prevAttrs?.[campo] == null ? '' : String(prevAttrs[campo]),
+        valore_nuovo: nextAttrs?.[campo] == null ? '' : String(nextAttrs[campo]),
+        session_id: sessionId,
+        note: '',
+        tipo_evento: 'MODIFICA_CAMPO',
+        fase: 'TI'
+      }, logLayer)
+    }))
+    try {
+      await logLayer.applyEdits({ addFeatures: adds })
+      return changes.length
+    } catch (e) {
+      console.warn('[GII_LOG_EVENTI] Errore scrittura log modifiche TI:', e)
+      return 0
+    }
+  }, [editOid, getLogLayer, p.initialData])
+
+  const handleCancel = () => {
+    setDraft({ ...baselineDraft })
+    setMsg(null)
+    setNpTab('anagrafica')
+    p.onClearPoint()
+  }
+
   const handleSave = async () => {
+    if (!isDirty) {
+      setMsg({ kind: 'ok', text: mode === 'edit' ? 'Nessuna modifica da salvare.' : 'Compila almeno un campo prima di salvare.' })
+      return
+    }
     setSaving(true); setMsg(null)
     try {
-      const layer = await getLayerForCreate()
+      const layer = mode === 'edit' ? await resolveLayerForEdit(ds) : await getLayerForCreate()
       if (!layer?.applyEdits) throw new Error('Layer non raggiungibile (applyEdits non disponibile).')
 
-      // Geometria richiesta/di default
       let geom: any | null = null
-      if (p.clickedPointWgs84) {
-        geom = p.clickedPointWgs84
-      } else if (reqPoint === 0) {
-        if (hasOffice) geom = makeWgs84Point(officeLon, officeLat)
-      }
+      if (p.clickedPointWgs84) geom = p.clickedPointWgs84
+      else if (mode === 'create' && reqPoint === 0 && hasOffice) geom = makeWgs84Point(officeLon, officeLat)
 
-      if (!geom) {
-        if (reqPoint === 1) {
-          throw new Error('Localizzazione obbligatoria: fai click in mappa per impostare il punto.')
-        }
+      if (mode === 'create' && !geom) {
+        if (reqPoint === 1) throw new Error('Localizzazione obbligatoria: fai click in mappa per impostare il punto.')
         throw new Error('Geometria non impostata: configura le coordinate ufficio nel setting oppure fai click in mappa.')
       }
 
-      // Calcola campi derivati (coerenti con Survey)
       const normaV1 = tipoAbuso === 'parziale' ? n3parziale : (tipoAbuso === 'totale' ? n3totale : '')
       const normaV2 = norma1516 === 'Art16' ? 'Art16' : (norma1516 === 'Art17' && art17tipo ? art17tipo : norma1516)
       const supDich16_17 = norma1516 === 'Art16' ? (draft.sup_dichiarata_art16 ?? null) : (art17tipo === 'Art17.1' ? (draft.sup_dichiarata_art17_1 ?? null) : (draft.sup_dichiarata_art17_2 ?? null))
@@ -2367,21 +2581,20 @@ function NuovaPraticaForm (p: {
         vArtAttrs[field] = norma3Set.has(art) ? 1 : null
       }
 
-      // Utente e territorio da window.__giiUserRole
       const giiRole: any = (window as any).__giiUserRole || {}
-
+      const roleAreaLabel = normalizeAreaCode(giiRole.areaLabel || giiRole.area || giiRole.area_cod)
+      const roleSettoreLabel = normalizeSettoreCode(roleAreaLabel, giiRole.settoreLabel || giiRole.settore || giiRole.settore_cod)
+      const initialAreaLabel = normalizeAreaCode(p.initialData?.area_cod ?? p.initialData?.['Area (codice)'] ?? p.initialData?.AREA_COD)
+      const initialSettoreLabel = normalizeSettoreCode(initialAreaLabel || roleAreaLabel, p.initialData?.settore_cod ?? p.initialData?.['Settore (codice)'] ?? p.initialData?.SETTORE_COD)
       const attrs: Record<string, any> = {
-        // sistema
-        origine_pratica: 2,
-        stato_TI: 1,
-        utente_loggato: String(giiRole.username || giiRole.userId || ''),
-        area_cod: String(giiRole.area || ''),
-        settore_cod: String(giiRole.settore || ''),
-        // dati generali (auto)
+        origine_pratica: mode === 'create' ? 2 : (p.initialData?.origine_pratica ?? p.initialData?.Origine_pratica ?? p.initialData?.ORIGINE_PRATICA ?? 2),
+        stato_TI: mode === 'create' ? 1 : (p.initialData?.stato_TI ?? p.initialData?.Stato_TI ?? p.initialData?.STATO_TI ?? null),
+        utente_loggato: String(giiRole.username || giiRole.userId || p.initialData?.utente_loggato || ''),
+        area_cod: String((mode === 'create' ? roleAreaLabel : (initialAreaLabel || roleAreaLabel)) || ''),
+        settore_cod: String((mode === 'create' ? roleSettoreLabel : (initialSettoreLabel || roleSettoreLabel)) || ''),
         tecnico_rilevatore: g('tecnico_rilevatore') || null,
         ufficio_zona: g('ufficio_zona') || null,
         data_rilevazione: toTs(g('data_rilevazione')),
-        // trasgressore
         tipologia_soggetto: tipoSogg || null,
         nome: (tipoSogg === 'PF' ? g('nome') : null) || null,
         cognome: (tipoSogg === 'PF' ? g('cognome') : null) || null,
@@ -2396,14 +2609,12 @@ function NuovaPraticaForm (p: {
         pec: g('pec') || null,
         telefono: g('telefono') || null,
         cellulare: g('cellulare') || null,
-        // violazione art.15
         tipo_abuso: tipoAbuso || null,
         norma15_parziale: (tipoAbuso === 'parziale' ? n3parziale : null) || null,
         norma15_totale: (tipoAbuso === 'totale' ? n3totale : null) || null,
         norma_violata1: normaV1 || null,
         sup_dichiarata_art15: showSup15 ? toInt(g('sup_dichiarata_art15')) : null,
         sup_irrigata_art15: showSup15 ? toInt(g('sup_irrigata_art15')) : null,
-        // violazione art.16/17
         norma16_17: norma1516 || null,
         art17_tipo: (norma1516 === 'Art17' ? art17tipo : null) || null,
         norma_violata2: normaV2 || null,
@@ -2414,22 +2625,51 @@ function NuovaPraticaForm (p: {
         sup_irrigata_art17_1: art17tipo === 'Art17.1' ? toInt(g('sup_irrigata_art17_1')) : null,
         sup_dichiarata_art16_17: toInt(supDich16_17 as any),
         sup_irrigata_art16_17: toInt(supIrr16_17 as any),
-        // altre violazioni
         norma_violata3: g('norma_violata3') || null,
         ...vArtAttrs,
-        // descrizione
         descrizione_fatti: g('descrizione_fatti') || null,
         circostanze: g('circostanze') || null,
         presenza_trasgressore: g('presenza_trasgressore') || null,
-        // localizzazione
         descrizione_luogo: g('descrizione_luogo') || null,
-        // fine compilazione
         data_firma: toTs(g('data_firma')),
-        // req_point (utile anche lato feature)
         req_point: reqPoint
       }
 
       const cleanAttrs = filterAttrsForLayer(attrs, layer)
+
+      if (mode === 'edit') {
+        if (editOid == null) throw new Error('Nessuna pratica selezionata per la modifica.')
+        const prevAttrs = filterAttrsForLayer(p.initialData || {}, layer)
+        const changedFields = Object.keys(cleanAttrs).filter((k) => normalizeLogValue(prevAttrs?.[k]) !== normalizeLogValue(cleanAttrs[k]))
+        if (changedFields.length === 0 && !geom) {
+          setSaving(false)
+          setMsg({ kind: 'ok', text: 'Nessuna modifica da salvare.' })
+          return
+        }
+        const upd: any = { attributes: { ...cleanAttrs, [editIdFieldName]: editOid } }
+        if (geom) upd.geometry = geom
+        const res = await layer.applyEdits({ updateFeatures: [upd] })
+        const updated = res?.updateFeatureResults?.[0] || res?.updateResults?.[0] || null
+        const err = updated?.error
+        const ok = !err && (updated?.objectId != null || updated?.success === true || updated?.success == null)
+        if (!ok) throw new Error(err ? `${err.code ?? ''}: ${err.message ?? ''}` : JSON.stringify(res))
+
+        const nextSavedData = { ...(p.initialData || {}), ...cleanAttrs, [editIdFieldName]: editOid }
+        await writeChangeLog(prevAttrs, cleanAttrs)
+        // Non rilanciare refresh/ri-selezioni sulla datasource ExB: possono reintrodurre dati stantii.
+        writeDynamicSelection({ oid: editOid, layerUrl: String(layer?.url || readDynamicSelection().layerUrl || ''), idFieldName: editIdFieldName, data: nextSavedData })
+        const nextIntent: EditIntentInfo = { oid: editOid, layerUrl: String(layer?.url || readDynamicSelection().layerUrl || ''), idFieldName: editIdFieldName, data: nextSavedData, ts: Date.now() }
+        try { ;(window as any).__giiEdit = nextIntent } catch {}
+        writeEditIntent(nextIntent)
+        setBaselineDraft(draftFromRecord(nextSavedData))
+        setDraft(draftFromRecord(nextSavedData))
+        p.onClearPoint()
+        setMsg({ kind: 'ok', text: 'Pratica salvata.' })
+        setSaving(false)
+        window.setTimeout(() => setMsg(null), 2500)
+        p.onSaved?.(editOid, nextSavedData)
+        return
+      }
 
       const res = await layer.applyEdits({ addFeatures: [{ attributes: cleanAttrs, geometry: geom }] })
       const added = res?.addFeatureResults?.[0] || res?.addResults?.[0] || null
@@ -2438,22 +2678,25 @@ function NuovaPraticaForm (p: {
       if (!ok) throw new Error(err ? `${err.code ?? ''}: ${err.message ?? ''}` : JSON.stringify(res))
 
       const newOid = Number(added.objectId)
-      await refreshDs(ds)
-      await trySelectOid(ds, newOid)
 
+      // In create mode NON aggiornare la datasource schema/base e NON provare a selezionare il nuovo OID:
+      // queste due operazioni possono riattivare il banner credenziali quando la pagina usa solo lo schema.
       setMsg({ kind: 'ok', text: 'Pratica creata.' })
       setSaving(false)
       setTimeout(() => {
         setDraft({})
+        setBaselineDraft({})
         setMsg(null)
+        setNpTab('anagrafica')
         p.onClearPoint()
-        p.onSaved(newOid)
+        p.onSaved?.(newOid)
       }, 600)
     } catch (e: any) {
       setSaving(false)
       setMsg({ kind: 'err', text: `Errore: ${e?.message || String(e)}` })
     }
   }
+
 
   const [npTab, setNpTab] = React.useState<'anagrafica' | 'violazione' | 'allegati'>('anagrafica')
   const showDatiGen = p.showDatiGenerali
@@ -2491,16 +2734,28 @@ function NuovaPraticaForm (p: {
       {/* ── Toolbar ── */}
       <div style={{ flex: '0 0 auto', display: 'flex', alignItems: 'center', justifyContent: 'space-between',
         flexWrap: 'wrap', gap: 8, padding: '8px 0', borderBottom: '1px solid rgba(0,0,0,0.08)' }}>
-        <span style={{ fontWeight: 700, fontSize: 14 }}>✚ Nuova pratica (TI)</span>
+        <span style={{ fontWeight: 700, fontSize: 14 }}>{p.titleText || (mode === 'edit' ? 'Modifica rapporto' : 'Nuovo rapporto')}</span>
         <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
           {msg && <span style={{ fontSize: 12, color: msg.kind === 'ok' ? '#1a7f37' : '#b42318' }}>{msg.text}</span>}
-          <button type='button' disabled={saving} onClick={handleSave}
-            style={{ ...btnBase, background: saving ? '#e5e7eb' : '#1a7f37', color: saving ? '#9ca3af' : '#fff' }}>
-            {saving ? 'Salvataggio…' : '💾 Salva'}
+          <button type='button' disabled={saving || !isDirty} onClick={handleSave}
+            style={{
+              ...btnBase,
+              border: '1px solid rgba(0,0,0,0.18)',
+              background: (saving || !isDirty) ? '#e5e7eb' : '#1a7f37',
+              color: (saving || !isDirty) ? '#9ca3af' : '#fff',
+              cursor: (saving || !isDirty) ? 'not-allowed' : 'pointer'
+            }}>
+            {saving ? 'Salvataggio…' : (p.saveText || 'Salva')}
           </button>
-          <button type='button' disabled={saving} onClick={() => { setDraft({}); p.onClearPoint(); }}
-            style={{ ...btnBase, background: '#fff', border: '1px solid rgba(0,0,0,0.18)', color: '#374151' }}>
-            ↺ Pulisci
+          <button type='button' disabled={saving || !isDirty} onClick={handleCancel}
+            style={{
+              ...btnBase,
+              border: '1px solid rgba(0,0,0,0.24)',
+              background: (saving || !isDirty) ? '#e5e7eb' : '#d92d20',
+              color: (saving || !isDirty) ? '#9ca3af' : '#fff',
+              cursor: (saving || !isDirty) ? 'not-allowed' : 'pointer'
+            }}>
+            Annulla
           </button>
         </div>
       </div>
@@ -3345,7 +3600,10 @@ function readDynamicSelection (): DynamicSelectionInfo {
   }
 }
 
-function writeDynamicSelection (sel: { oid?: number | null, layerUrl?: string, idFieldName?: string, data?: any | null }) {
+function writeDynamicSelection (
+  sel: { oid?: number | null, layerUrl?: string, idFieldName?: string, data?: any | null },
+  opts?: { dispatch?: boolean }
+) {
   try {
     const prev: any = (window as any).__giiSelection || {}
     const next: any = {
@@ -3360,8 +3618,121 @@ function writeDynamicSelection (sel: { oid?: number | null, layerUrl?: string, i
     else sessionStorage.removeItem('GII_SELECTED_LAYER_URL')
     if (next.idFieldName) sessionStorage.setItem('GII_SELECTED_IDFIELD', String(next.idFieldName))
     else sessionStorage.removeItem('GII_SELECTED_IDFIELD')
-    window.dispatchEvent(new CustomEvent('gii-selection-changed'))
+    if (opts?.dispatch !== false) {
+      window.dispatchEvent(new CustomEvent('gii-selection-changed'))
+    }
   } catch {}
+}
+
+type EditIntentInfo = { oid: number | null, layerUrl: string, idFieldName: string, data: any | null, ts: number }
+
+function readEditIntent (): EditIntentInfo | null {
+  try {
+    const raw = sessionStorage.getItem('GII_EDIT_INTENT')
+    if (!raw) return null
+    const j: any = JSON.parse(raw)
+    const oidNum = j?.oid != null && j?.oid !== '' ? Number(j.oid) : NaN
+    const layerUrl = String(j?.layerUrl || '').trim()
+    const idFieldName = String(j?.idFieldName || 'OBJECTID').trim() || 'OBJECTID'
+    const ts = Number(j?.ts || 0)
+    const ageMs = Math.abs(Date.now() - (Number.isFinite(ts) ? ts : 0))
+    if (!layerUrl || !Number.isFinite(oidNum)) return null
+    // evita che un vecchio intento di modifica resti appiccicato quando si entra da Nav > Nuova pratica
+    if (!Number.isFinite(ts) || ageMs > 15000) return null
+    return { oid: Number(oidNum), layerUrl, idFieldName, data: j?.data || null, ts: Number.isFinite(ts) ? ts : 0 }
+  } catch {
+    return null
+  }
+}
+
+function clearEditIntent () {
+  try { sessionStorage.removeItem('GII_EDIT_INTENT') } catch {}
+}
+
+function selectionToIntent (): EditIntentInfo | null {
+  try {
+    const sel = readDynamicSelection()
+    const oidNum = sel?.oid != null ? Number(sel.oid) : NaN
+    const layerUrl = String(sel?.layerUrl || '').trim()
+    const idFieldName = String(sel?.idFieldName || 'OBJECTID').trim() || 'OBJECTID'
+    if (!layerUrl || !Number.isFinite(oidNum)) return null
+    return { oid: Number(oidNum), layerUrl, idFieldName, data: sel?.data || null, ts: Date.now() }
+  } catch {
+    return null
+  }
+}
+
+function writeEditIntent (ei: EditIntentInfo | null) {
+  try {
+    if (!ei || ei.oid == null || !ei.layerUrl) {
+      clearEditIntent()
+      return
+    }
+    sessionStorage.setItem('GII_EDIT_INTENT', JSON.stringify({ ...ei, ts: Date.now() }))
+  } catch {}
+}
+
+function findMapHostElement (mapWidgetId?: string | null): HTMLElement | null {
+  if (typeof document === 'undefined') return null
+  const id = String(mapWidgetId || '').trim()
+  const selectors = [
+    id ? `[data-widgetid="${id}"]` : '',
+    id ? `[widgetid="${id}"]` : '',
+    id ? `#${id}` : '',
+    '.jimu-widget-map',
+    '.jimu-widget.jimu-widget-map',
+    '.esri-view-root',
+    '.esri-view',
+    '.esri-view-surface'
+  ].filter(Boolean)
+  for (const sel of selectors) {
+    const el = document.querySelector(sel) as HTMLElement | null
+    if (!el) continue
+    const host = el.closest?.('.jimu-widget-map, .jimu-widget.jimu-widget-map, [data-widgetid], [widgetid]') as HTMLElement | null
+    return host || el
+  }
+  return null
+}
+
+function buildSchemaOnlyDsProxy (args: { url?: string, label?: string, schemaFields?: Array<{ name?: string, alias?: string, type?: string }> }): any {
+  const url = String(args?.url || '').trim()
+  const label = String(args?.label || getServiceNameFromUrl(url) || 'GII schema locale')
+  const fieldsArr = Array.isArray(args?.schemaFields) ? args.schemaFields : []
+  const schemaFields: Record<string, any> = {}
+  let idFieldName = 'OBJECTID'
+
+  for (const f of fieldsArr) {
+    const name = String((f as any)?.name || '').trim()
+    if (!name) continue
+    const alias = String((f as any)?.alias || name)
+    const type = String((f as any)?.type || '')
+    schemaFields[name] = { alias, label: alias, title: alias, type, domain: null }
+  }
+
+  for (const name of Object.keys(schemaFields)) {
+    const nk = normKey(name)
+    if (nk === 'objectid' || nk === 'objectid_1' || nk === 'objectidfield') {
+      idFieldName = name
+      break
+    }
+  }
+
+  const proxy: any = {
+    id: `gii-schema-${encodeURIComponent(url || label).slice(-48)}`,
+    layer: null,
+    async getLayer () { return null },
+    async getJSAPILayer () { return null },
+    async getJsApiLayer () { return null },
+    getDataSourceJson () { return { url } },
+    dataSourceJson: { url },
+    getLabel () { return label },
+    getIdField () { return idFieldName },
+    getSchema () { return { idField: idFieldName, fields: schemaFields } },
+    async query (_q: any) { return { records: [] } },
+    clearSelection () {}
+  }
+
+  return proxy
 }
 
 async function buildDynamicDsProxy (layerUrl: string, label?: string): Promise<any | null> {
@@ -3433,11 +3804,15 @@ async function buildDynamicDsProxy (layerUrl: string, label?: string): Promise<a
   }
 }
 
-function useDynamicActiveSelection (queryFields: string[], label?: string) {
+function useDynamicActiveSelection (queryFields: string[], label?: string, enabled: boolean = true) {
   const [active, setActive] = React.useState<{ key: string; state: SelState } | null>(null)
   const reqRef = React.useRef(0)
 
   React.useEffect(() => {
+    if (!enabled) {
+      setActive(null)
+      return
+    }
     const refresh = () => {
       const req = ++reqRef.current
       const sel = readDynamicSelection()
@@ -3467,7 +3842,7 @@ function useDynamicActiveSelection (queryFields: string[], label?: string) {
           setActive(null)
           return
         }
-        writeDynamicSelection({ oid: Number(sel.oid), layerUrl: sel.layerUrl, idFieldName, data })
+        writeDynamicSelection({ oid: Number(sel.oid), layerUrl: sel.layerUrl, idFieldName, data }, { dispatch: false })
         setActive({
           key: sel.layerUrl,
           state: {
@@ -3490,7 +3865,7 @@ function useDynamicActiveSelection (queryFields: string[], label?: string) {
       window.removeEventListener('gii-selection-changed', h as any)
       window.removeEventListener('gii-force-refresh-selection', h as any)
     }
-  }, [label, queryFields.join('|')])
+  }, [enabled, label, queryFields.join('|')])
 
   return active
 }
@@ -3580,7 +3955,110 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
     'presa_in_carico_DA', 'dt_presa_in_carico_DA', 'stato_DA', 'dt_stato_DA', 'esito_DA', 'dt_esito_DA', 'note_DA'
   ]
 
-  const activeGate = useDynamicActiveSelection(['*'], 'GII view dinamica')
+  const isCreatePage = cfg.enableCreateWithoutSelection === true
+  const [editIntent, setEditIntent] = React.useState<EditIntentInfo | null>(null)
+  const [editDs, setEditDs] = React.useState<any | null>(null)
+  const [editRecordData, setEditRecordData] = React.useState<any | null>(null)
+  const [selectionIntent, setSelectionIntent] = React.useState<EditIntentInfo | null>(null)
+
+  React.useEffect(() => {
+    if (isCreatePage) {
+      setEditIntent(null)
+      setEditDs(null)
+      setEditRecordData(null)
+      return
+    }
+
+    const syncIntent = () => {
+      const fromStorage = readEditIntent()
+      const fromWindow: any = (window as any).__giiEdit || null
+      const fallback = fromWindow && fromWindow.oid != null && fromWindow.layerUrl
+        ? { oid: Number(fromWindow.oid), layerUrl: String(fromWindow.layerUrl), idFieldName: String(fromWindow.idFieldName || 'OBJECTID'), data: fromWindow.data || null, ts: Number(fromWindow.ts || Date.now()) }
+        : null
+      const next = fromStorage || fallback || null
+      if (next) {
+        setEditIntent(next)
+        clearEditIntent()
+      }
+    }
+
+    syncIntent()
+    const onIntent = () => { syncIntent() }
+    window.addEventListener('gii-edit-intent-changed', onIntent as EventListener)
+    window.addEventListener('focus', onIntent as EventListener)
+    window.addEventListener('hashchange', onIntent as EventListener)
+    document.addEventListener('visibilitychange', onIntent as EventListener)
+    return () => {
+      window.removeEventListener('gii-edit-intent-changed', onIntent as EventListener)
+      window.removeEventListener('focus', onIntent as EventListener)
+      window.removeEventListener('hashchange', onIntent as EventListener)
+      document.removeEventListener('visibilitychange', onIntent as EventListener)
+    }
+  }, [isCreatePage])
+
+  React.useEffect(() => {
+    if (isCreatePage) {
+      setSelectionIntent(null)
+      return
+    }
+    const syncSel = () => {
+      setSelectionIntent(selectionToIntent())
+    }
+    syncSel()
+    window.addEventListener('gii-selection-changed', syncSel as EventListener)
+    window.addEventListener('focus', syncSel as EventListener)
+    return () => {
+      window.removeEventListener('gii-selection-changed', syncSel as EventListener)
+      window.removeEventListener('focus', syncSel as EventListener)
+    }
+  }, [isCreatePage])
+
+  const effectiveIntent = !isCreatePage ? (editIntent || selectionIntent) : null
+
+  React.useEffect(() => {
+    let cancelled = false
+    ;(async () => {
+      if (!effectiveIntent || isCreatePage) {
+        setEditDs(null)
+        setEditRecordData(null)
+        return
+      }
+      const dsProxy = await buildDynamicDsProxy(String(effectiveIntent.layerUrl || '').trim(), 'GII view dinamica')
+      if (cancelled) return
+      setEditDs(dsProxy)
+      try {
+        const fl: any = dsProxy?.layer || await dsProxy?.getLayer?.() || null
+        if (fl && typeof fl.queryFeatures === 'function') {
+          const where = `${effectiveIntent.idFieldName} = ${Number(effectiveIntent.oid)}`
+          const res: any = await fl.queryFeatures({ where, outFields: ['*'], returnGeometry: true, num: 1 })
+          const feat = res?.features?.[0] || null
+          if (!cancelled) setEditRecordData(feat?.attributes ? { ...feat.attributes } : (effectiveIntent.data || null))
+        } else if (!cancelled) {
+          setEditRecordData(effectiveIntent.data || null)
+        }
+      } catch {
+        if (!cancelled) setEditRecordData(effectiveIntent.data || null)
+      }
+    })().catch(() => {})
+    return () => { cancelled = true }
+  }, [effectiveIntent?.oid, effectiveIntent?.layerUrl, effectiveIntent?.idFieldName, isCreatePage])
+
+  const activeGate = useDynamicActiveSelection(['*'], 'GII view dinamica', !isCreatePage && !!effectiveIntent)
+  const [intentEditDs, setIntentEditDs] = React.useState<any | null>(null)
+  React.useEffect(() => {
+    let cancelled = false
+    if (!effectiveIntent?.layerUrl) {
+      setIntentEditDs(null)
+      return
+    }
+    ;(async () => {
+      const ds = await buildDynamicDsProxy(String(effectiveIntent.layerUrl), 'GII view dinamica')
+      if (!cancelled) setIntentEditDs(ds)
+    })().catch(() => {
+      if (!cancelled) setIntentEditDs(null)
+    })
+    return () => { cancelled = true }
+  }, [effectiveIntent?.layerUrl])
 
   const mapWidgetId = Array.isArray(cfg.useMapWidgetIds) ? cfg.useMapWidgetIds[0] : null
   const [jimuMapView, setJimuMapView] = React.useState<JimuMapView | null>(null)
@@ -3597,26 +4075,112 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
     return () => { try { h?.remove?.() } catch {} }
   }, [jimuMapView])
 
+  const rootRef = React.useRef<HTMLDivElement | null>(null)
+  const [uiLocked, setUiLocked] = React.useState(false)
+  const [lockMaskRects, setLockMaskRects] = React.useState<Array<React.CSSProperties>>([])
   const [createDs, setCreateDs] = React.useState<any | null>(null)
   React.useEffect(() => {
-    let alive = true
-    const url = String(cfg.motherLayerUrl || '').trim() || String(readDynamicSelection().layerUrl || '').trim()
-    if (!url) {
-      setCreateDs(null)
+    const schemaUrl = String(cfg.schemaLayerUrl || '').trim() || String(cfg.motherLayerUrl || '').trim()
+    const schemaLabel = String(cfg.schemaLayerLabel || 'GII schema locale')
+    const schemaFields = Array.isArray(cfg.schemaFields) ? cfg.schemaFields : []
+    const ds = buildSchemaOnlyDsProxy({ url: schemaUrl, label: schemaLabel, schemaFields })
+    setCreateDs(ds)
+  }, [cfg.schemaLayerUrl, cfg.schemaLayerLabel, cfg.motherLayerUrl, JSON.stringify(cfg.schemaFields || [])])
+
+  React.useEffect(() => {
+    if (!uiLocked) {
+      setLockMaskRects([])
       return
     }
-    ;(async () => {
-      const ds = await buildDynamicDsProxy(url, 'GII layer madre')
-      if (alive) setCreateDs(ds)
-    })().catch(() => { if (alive) setCreateDs(null) })
-    return () => { alive = false }
-  }, [cfg.motherLayerUrl, activeGate?.key])
+    const root = rootRef.current
+    const mapHost = findMapHostElement(mapWidgetId) || (((jimuMapView as any)?.view?.container as HTMLElement | null)?.closest?.('.jimu-widget-map, .jimu-widget.jimu-widget-map, [data-widgetid], [widgetid]') as HTMLElement | null) || ((jimuMapView as any)?.view?.container as HTMLElement | null) || null
+    const prevMapPos = mapHost?.style.position ?? ''
+    const prevMapZ = mapHost?.style.zIndex ?? ''
+    if (mapHost) {
+      if (!mapHost.style.position) mapHost.style.position = 'relative'
+      mapHost.style.zIndex = '1002'
+    }
 
-  const anyDs = activeGate?.state?.ds || createDs
-  const inCreateMode = (cfg.enableCreateWithoutSelection !== false) && !(activeGate?.state?.oid != null)
+    const updateMasks = () => {
+      const vw = window.innerWidth || document.documentElement.clientWidth || 0
+      const vh = window.innerHeight || document.documentElement.clientHeight || 0
+      const rects: Array<{ left: number, top: number, right: number, bottom: number }> = []
+      try {
+        const r = root?.getBoundingClientRect?.()
+        if (r && r.width > 0 && r.height > 0) rects.push({ left: Math.max(0, r.left), top: Math.max(0, r.top), right: Math.min(vw, r.right), bottom: Math.min(vh, r.bottom) })
+      } catch {}
+      try {
+        const m = mapHost?.getBoundingClientRect?.()
+        if (m && m.width > 0 && m.height > 0) rects.push({ left: Math.max(0, m.left), top: Math.max(0, m.top), right: Math.min(vw, m.right), bottom: Math.min(vh, m.bottom) })
+      } catch {}
+
+      if (!rects.length) {
+        setLockMaskRects([{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.42)', pointerEvents: 'none', zIndex: 1000 }])
+        return
+      }
+
+      const left = Math.min(...rects.map(r => r.left))
+      const top = Math.min(...rects.map(r => r.top))
+      const right = Math.max(...rects.map(r => r.right))
+      const bottom = Math.max(...rects.map(r => r.bottom))
+
+      const masks: Array<React.CSSProperties> = []
+      if (top > 0) masks.push({ position: 'fixed', left: 0, top: 0, width: '100vw', height: top, background: 'rgba(0,0,0,0.42)', pointerEvents: 'none', zIndex: 1000 })
+      if (left > 0) masks.push({ position: 'fixed', left: 0, top, width: left, height: Math.max(0, bottom - top), background: 'rgba(0,0,0,0.42)', pointerEvents: 'none', zIndex: 1000 })
+      if (right < vw) masks.push({ position: 'fixed', left: right, top, width: Math.max(0, vw - right), height: Math.max(0, bottom - top), background: 'rgba(0,0,0,0.42)', pointerEvents: 'none', zIndex: 1000 })
+      if (bottom < vh) masks.push({ position: 'fixed', left: 0, top: bottom, width: '100vw', height: Math.max(0, vh - bottom), background: 'rgba(0,0,0,0.42)', pointerEvents: 'none', zIndex: 1000 })
+      setLockMaskRects(masks)
+    }
+
+    const isAllowed = (target: EventTarget | null) => {
+      const el = target as Node | null
+      if (!el) return false
+      if (root?.contains(el)) return true
+      if (mapHost?.contains(el)) return true
+      return false
+    }
+    const stopIfOutside = (ev: Event) => {
+      if (isAllowed(ev.target)) return
+      ev.preventDefault()
+      ev.stopPropagation()
+      const anyEv: any = ev
+      try { anyEv.stopImmediatePropagation?.() } catch {}
+    }
+    const opts: AddEventListenerOptions = { capture: true }
+    updateMasks()
+    window.addEventListener('resize', updateMasks)
+    window.addEventListener('scroll', updateMasks, true)
+    document.addEventListener('pointerdown', stopIfOutside, opts)
+    document.addEventListener('mousedown', stopIfOutside, opts)
+    document.addEventListener('click', stopIfOutside, opts)
+    document.addEventListener('touchstart', stopIfOutside, opts)
+    document.addEventListener('focusin', stopIfOutside, opts)
+    return () => {
+      window.removeEventListener('resize', updateMasks)
+      window.removeEventListener('scroll', updateMasks, true)
+      document.removeEventListener('pointerdown', stopIfOutside, opts)
+      document.removeEventListener('mousedown', stopIfOutside, opts)
+      document.removeEventListener('click', stopIfOutside, opts)
+      document.removeEventListener('touchstart', stopIfOutside, opts)
+      document.removeEventListener('focusin', stopIfOutside, opts)
+      setLockMaskRects([])
+      if (mapHost) {
+        mapHost.style.position = prevMapPos
+        mapHost.style.zIndex = prevMapZ
+      }
+    }
+  }, [uiLocked, mapWidgetId])
+
+  const editSelectionMatchesIntent = !!effectiveIntent && !!activeGate?.state && Number(activeGate.state.oid) === Number(effectiveIntent.oid) && String((activeGate.state.ds as any)?.getDataSourceJson?.()?.url || (activeGate.state.ds as any)?.dataSourceJson?.url || (activeGate.state.ds as any)?.layer?.url || '').trim() === String(effectiveIntent.layerUrl || '').trim()
+  const inCreateMode = isCreatePage
+  const currentEditDs = !inCreateMode ? ((editSelectionMatchesIntent ? activeGate?.state?.ds : null) || intentEditDs || editDs || null) : null
+  const anyDs = inCreateMode ? createDs : currentEditDs
+  const initialEditData = !inCreateMode ? (editRecordData || effectiveIntent?.data || activeGate?.state?.data || null) : null
+  const editOid = !inCreateMode && effectiveIntent ? Number(effectiveIntent.oid) : null
+  const editIdFieldName = !inCreateMode ? String(effectiveIntent?.idFieldName || activeGate?.state?.idFieldName || currentEditDs?.getIdField?.() || 'OBJECTID') : undefined
 
   return (
-    <div style={{ width: '100%', height: '100%', display: 'flex', flexDirection: 'column', minHeight: 0, boxSizing: 'border-box', padding: Number.isFinite(Number((cfg as any).maskOuterOffset ?? 0)) ? Number((cfg as any).maskOuterOffset) : 0 }}>
+    <div ref={rootRef} style={{ width: '100%', height: '100%', display: 'flex', flexDirection: 'column', minHeight: 0, boxSizing: 'border-box', padding: Number.isFinite(Number((cfg as any).maskOuterOffset ?? 0)) ? Number((cfg as any).maskOuterOffset) : 0, position: 'relative', zIndex: uiLocked ? 1001 : 'auto' }}>
       {mapWidgetId && (
         <div style={{ display: 'none' }}>
           <JimuMapViewComponent
@@ -3626,33 +4190,45 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
         </div>
       )}
 
-      {inCreateMode ? (
-        anyDs ? (
-          <NuovaPraticaForm
-            ds={anyDs}
-            cfg={cfg}
-            showDatiGenerali={showDatiGenerali}
-            clickedPointWgs84={clickedPointWgs84}
-            onClearPoint={() => setClickedPointWgs84(null)}
-            onSaved={(newOid: number) => { writeDynamicSelection({ oid: newOid, layerUrl: String(cfg.motherLayerUrl || readDynamicSelection().layerUrl || ''), idFieldName: anyDs?.getIdField?.() || 'OBJECTID' }) }}
-          />
-        ) : (
-          <div style={{ padding: 12 }}>Datasource dinamica non pronta: configura il layer madre oppure seleziona una pratica.</div>
-        )
-      ) : (
-        <DetailTabsPanel
-          active={activeGate}
-          anyDs={anyDs}
+      {anyDs ? (
+        <NuovaPraticaForm
+          ds={anyDs}
+          cfg={cfg}
           showDatiGenerali={showDatiGenerali}
-          roleCode={roleCode}
-          buttonText={buttonText}
-          buttonColors={buttonColors}
-          ui={ui}
-          tabFields={tabFields}
-          tabs={migratedTabs}
-          editConfig={editConfig}
-          motherLayerUrl={String(cfg.motherLayerUrl || '').trim() || undefined}
+          clickedPointWgs84={clickedPointWgs84}
+          onClearPoint={() => setClickedPointWgs84(null)}
+          mode={inCreateMode ? 'create' : 'edit'}
+          initialData={initialEditData}
+          editOid={editOid}
+          editIdFieldName={editIdFieldName}
+          titleText={inCreateMode ? 'Nuovo rapporto' : 'Modifica rapporto'}
+          saveText={'Salva'}
+          onDirtyChange={setUiLocked}
+          onSaved={(savedOid: number, savedData?: any) => {
+            if (inCreateMode) {
+              clearEditIntent()
+              return
+            }
+            const nextLayerUrl = String((anyDs as any)?.layer?.url || (anyDs as any)?.url || effectiveIntent?.layerUrl || readDynamicSelection().layerUrl || '')
+            const nextIdFieldName = editIdFieldName || anyDs?.getIdField?.() || 'OBJECTID'
+            const nextData = savedData || editRecordData || effectiveIntent?.data || activeGate?.state?.data || null
+            const nextIntentObj: EditIntentInfo = { oid: savedOid, layerUrl: nextLayerUrl, idFieldName: nextIdFieldName, data: nextData, ts: Date.now() }
+            setEditRecordData(nextData)
+            setEditIntent(nextIntentObj)
+            setSelectionIntent(nextIntentObj)
+            try { ;(window as any).__giiEdit = nextIntentObj } catch {}
+            writeEditIntent(nextIntentObj)
+            writeDynamicSelection({ oid: savedOid, layerUrl: nextLayerUrl, idFieldName: nextIdFieldName, data: nextData })
+          }}
         />
+      ) : (
+        <div style={{ padding: 12 }}>{!inCreateMode ? "Record di modifica non disponibile: torna all'elenco e riapri Modifica." : 'Datasource dinamica non pronta: configura il layer schema oppure seleziona una pratica.'}</div>
+      )}
+      {uiLocked && typeof document !== 'undefined' && createPortal(
+        <>
+          {lockMaskRects.map((styleObj, idx) => <div key={idx} aria-hidden='true' style={styleObj} />)}
+        </>,
+        document.body
       )}
     </div>
   )
