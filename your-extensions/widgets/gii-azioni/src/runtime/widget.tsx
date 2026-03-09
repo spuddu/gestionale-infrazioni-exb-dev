@@ -121,6 +121,95 @@ async function resolveFeatureLayerForAttachments (ds: any): Promise<any | null> 
 
 
 
+
+
+type SelectedFeatureCacheEntry = {
+  layerUrl: string
+  oid: number
+  idFieldName: string
+  data: any
+  ts: number
+  source: 'edit' | 'list' | 'detail' | 'azioni'
+}
+
+function getSelectedFeatureCacheBucket (): Record<string, SelectedFeatureCacheEntry> {
+  try {
+    const w: any = window as any
+    w.__giiSelectedFeatureCache = w.__giiSelectedFeatureCache || {}
+    return w.__giiSelectedFeatureCache
+  } catch {
+    return {}
+  }
+}
+
+function getSelectedFeatureCacheKey (layerUrl: string, oid: any): string {
+  return `${String(layerUrl || '').trim()}::${Number(oid)}`
+}
+
+function readSelectedFeatureCache (layerUrl: string, oid: any): SelectedFeatureCacheEntry | null {
+  try {
+    const key = getSelectedFeatureCacheKey(layerUrl, oid)
+    const bucket = getSelectedFeatureCacheBucket()
+    const e: any = bucket[key]
+    if (!e || !e.layerUrl || !Number.isFinite(Number(e.oid))) return null
+    return e as SelectedFeatureCacheEntry
+  } catch {
+    return null
+  }
+}
+
+function writeSelectedFeatureCache (
+  layerUrl: string,
+  oid: any,
+  idFieldName: string,
+  data: any,
+  source: 'edit' | 'list' | 'detail' | 'azioni'
+): SelectedFeatureCacheEntry | null {
+  try {
+    const oidNum = Number(oid)
+    const url = String(layerUrl || '').trim()
+    if (!url || !Number.isFinite(oidNum) || !data || typeof data !== 'object') return null
+    const key = getSelectedFeatureCacheKey(url, oidNum)
+    const bucket = getSelectedFeatureCacheBucket()
+    const prev: any = bucket[key]
+    const now = Date.now()
+    const holdMs = 15000
+    let nextData = { ...(data || {}) }
+    let nextSource: 'edit' | 'list' | 'detail' | 'azioni' = source
+    let nextTs = now
+    if (prev && prev.source === 'edit' && source !== 'edit' && (now - Number(prev.ts || 0) < holdMs)) {
+      nextData = { ...(data || {}), ...(prev.data || {}) }
+      nextSource = 'edit'
+      nextTs = Number(prev.ts || now)
+    }
+    const next: SelectedFeatureCacheEntry = {
+      layerUrl: url,
+      oid: oidNum,
+      idFieldName: String(idFieldName || prev?.idFieldName || 'OBJECTID') || 'OBJECTID',
+      data: nextData,
+      ts: nextTs,
+      source: nextSource
+    }
+    bucket[key] = next
+    return next
+  } catch {
+    return null
+  }
+}
+
+function invalidateRuntimeProxyCache (layerUrl?: string | null) {
+  try {
+    const url = String(layerUrl || '').trim()
+    if (!url) {
+      try { delete (window as any).__giiRuntimeDsProxyCache } catch {}
+      return
+    }
+    try {
+      const bucket = (window as any).__giiRuntimeDsProxyCache
+      if (bucket && typeof bucket === 'object') delete bucket[url]
+    } catch {}
+  } catch {}
+}
 type RuntimeSelection = {
   oid: number | null
   layerUrl: string
@@ -134,13 +223,17 @@ function readRuntimeSelection (): RuntimeSelection | null {
   try {
     const mem = (window as any)?.__giiSelection
     if (mem && mem.layerUrl && Number.isFinite(Number(mem.oid))) {
+      const oid = Number(mem.oid)
+      const layerUrl = String(mem.layerUrl || '').trim()
+      const idFieldName = String(mem.idFieldName || 'OBJECTID').trim() || 'OBJECTID'
+      const cache = readSelectedFeatureCache(layerUrl, oid)
       return {
-        oid: Number(mem.oid),
-        layerUrl: String(mem.layerUrl || '').trim(),
+        oid,
+        layerUrl,
         serviceUrl: String(mem.serviceUrl || '').trim(),
-        idFieldName: String(mem.idFieldName || 'OBJECTID').trim() || 'OBJECTID',
+        idFieldName,
         viewName: String(mem.viewName || '').trim(),
-        data: mem.data && typeof mem.data === 'object' ? mem.data : undefined
+        data: cache?.data
       }
     }
 
@@ -149,14 +242,10 @@ function readRuntimeSelection (): RuntimeSelection | null {
     const serviceUrl = String(sessionStorage.getItem('GII_SELECTED_SERVICE_URL') || '').trim()
     const idFieldName = String(sessionStorage.getItem('GII_SELECTED_IDFIELD') || 'OBJECTID').trim() || 'OBJECTID'
     const viewName = String(sessionStorage.getItem('GII_SELECTED_VIEW_NAME') || '').trim()
-    const dataRaw = sessionStorage.getItem('GII_SELECTED_DATA')
-    let data: any = undefined
-    if (dataRaw) {
-      try { data = JSON.parse(dataRaw) } catch {}
-    }
     const oid = oidRaw != null ? Number(oidRaw) : NaN
     if (!layerUrl || !Number.isFinite(oid)) return null
-    return { oid, layerUrl, serviceUrl, idFieldName, viewName, data }
+    const cache = readSelectedFeatureCache(layerUrl, oid)
+    return { oid, layerUrl, serviceUrl, idFieldName, viewName, data: cache?.data }
   } catch {
     return null
   }
@@ -2151,8 +2240,12 @@ function ActionsPanel (props: {
       await refreshRootAndDerived(getRootDs(ds))
       await refreshRootAndDerived(ds)
 
+      try { delete (window as any).__giiRuntimeDsProxyCache } catch {}
+
       // forza refresh selection/lista
       try {
+        invalidateRuntimeProxyCache(active?.state?.ds?.getDataSourceJson?.()?.url || active?.state?.ds?.layer?.url || '')
+        try { delete runtimeDsProxyPromises[String(active?.state?.ds?.getDataSourceJson?.()?.url || active?.state?.ds?.layer?.url || '')] } catch {}
         window.dispatchEvent(new CustomEvent('gii-force-refresh-selection', { detail: { oid } }))
       } catch {
         try { window.dispatchEvent(new Event('gii-force-refresh-selection')) } catch {}
@@ -2242,9 +2335,13 @@ function ActionsPanel (props: {
       await refreshRootAndDerived(root)
       await refreshRootAndDerived(ds)
 
+      try { delete (window as any).__giiRuntimeDsProxyCache } catch {}
+
       // Forza il re-fetch del record selezionato (la selezione resta la stessa, quindi senza questo
       // l'UI può rimanere con i valori "vecchi" fino a cambio selezione / F5).
       try {
+        invalidateRuntimeProxyCache(active?.state?.ds?.getDataSourceJson?.()?.url || active?.state?.ds?.layer?.url || '')
+        try { delete runtimeDsProxyPromises[String(active?.state?.ds?.getDataSourceJson?.()?.url || active?.state?.ds?.layer?.url || '')] } catch {}
         window.dispatchEvent(new CustomEvent('gii-force-refresh-selection', { detail: { oid } }))
       } catch {
         try { window.dispatchEvent(new Event('gii-force-refresh-selection')) } catch {}
@@ -3834,7 +3931,13 @@ const queryFields = React.useMemo(() => {
 
   const [selRefreshNonce, setSelRefreshNonce] = React.useState<number>(0)
   React.useEffect(() => {
-    const h = () => setSelRefreshNonce(n => n + 1)
+    const h = (evt?: any) => {
+      const cur = readRuntimeSelection()
+      const detailLayerUrl = String(evt?.detail?.layerUrl || cur?.layerUrl || '').trim()
+      invalidateRuntimeProxyCache(detailLayerUrl)
+      try { delete runtimeDsProxyPromises[detailLayerUrl] } catch {}
+      setSelRefreshNonce(n => n + 1)
+    }
     window.addEventListener('gii-force-refresh-selection', h as any)
     return () => window.removeEventListener('gii-force-refresh-selection', h as any)
   }, [])
@@ -3852,9 +3955,10 @@ const queryFields = React.useMemo(() => {
       try {
         const dsTry = await createRuntimeDsProxyFromLayerUrl(selection.layerUrl, selection.viewName)
         const idFieldName = String(selection.idFieldName || dsTry.getIdField?.() || 'OBJECTID')
-        const baseData = selection.data && typeof selection.data === 'object' ? selection.data : null
-        const baseOid = baseData ? Number(baseData[idFieldName] ?? baseData.OBJECTID ?? selection.oid) : NaN
         const stateKey = `${selection.layerUrl}:${selection.oid}`
+        const cacheEntry = readSelectedFeatureCache(selection.layerUrl, selection.oid)
+        const baseData = cacheEntry?.data && typeof cacheEntry.data === 'object' ? cacheEntry.data : null
+        const baseOid = baseData ? Number(baseData[idFieldName] ?? baseData.OBJECTID ?? selection.oid) : NaN
 
         if (baseData && Number.isFinite(baseOid) && baseOid === selection.oid) {
           const quickState: SelState = { ds: dsTry, oid: selection.oid, idFieldName, data: baseData, sig: stateKey }
@@ -3862,7 +3966,7 @@ const queryFields = React.useMemo(() => {
         }
 
         const wantsAll = queryFields.includes('*')
-        const needsQuery = !baseData || wantsAll || queryFields.some(f => f && f !== '*' && !Object.prototype.hasOwnProperty.call(baseData, f))
+        const needsQuery = !baseData || wantsAll || queryFields.some(f => f && f !== '*' && !Object.prototype.hasOwnProperty.call(baseData, f)) || selRefreshNonce > 0
         if (!needsQuery) return
 
         const where = `${idFieldName}=${selection.oid}`
@@ -3875,12 +3979,15 @@ const queryFields = React.useMemo(() => {
         }
         const r0 = recs[0]
         const fetched = r0?.getData?.() || {}
-        const d0 = baseData ? { ...(baseData || {}), ...(fetched || {}) } : fetched
+        const cached = readSelectedFeatureCache(selection.layerUrl, selection.oid)
+        const freshEdit = cached && cached.source === 'edit' && (Date.now() - Number(cached.ts || 0) < 15000)
+        const d0 = freshEdit ? { ...(fetched || {}), ...((cached?.data || {}) as any) } : { ...((baseData || {}) as any), ...(fetched || {}) }
         const oid0 = Number(d0[idFieldName] ?? d0.OBJECTID ?? selection.oid)
         if (!Number.isFinite(oid0) || oid0 !== selection.oid) {
           setForcedActive(null)
           return
         }
+        writeSelectedFeatureCache(selection.layerUrl, selection.oid, idFieldName, d0, 'azioni')
         const st: SelState = { ds: dsTry, oid: selection.oid, idFieldName, data: d0, sig: stateKey }
         setForcedActive({ key: selection.layerUrl, state: st })
       } catch {

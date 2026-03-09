@@ -80,6 +80,95 @@ function formatDateIt (v: any): string {
   }).format(d)
 }
 
+
+
+type SelectedFeatureCacheEntry = {
+  layerUrl: string
+  oid: number
+  idFieldName: string
+  data: any
+  ts: number
+  source: 'edit' | 'list' | 'detail' | 'azioni'
+}
+
+function getSelectedFeatureCacheBucket (): Record<string, SelectedFeatureCacheEntry> {
+  try {
+    const w: any = window as any
+    w.__giiSelectedFeatureCache = w.__giiSelectedFeatureCache || {}
+    return w.__giiSelectedFeatureCache
+  } catch {
+    return {}
+  }
+}
+
+function getSelectedFeatureCacheKey (layerUrl: string, oid: any): string {
+  return `${String(layerUrl || '').trim()}::${Number(oid)}`
+}
+
+function readSelectedFeatureCache (layerUrl: string, oid: any): SelectedFeatureCacheEntry | null {
+  try {
+    const key = getSelectedFeatureCacheKey(layerUrl, oid)
+    const bucket = getSelectedFeatureCacheBucket()
+    const e: any = bucket[key]
+    if (!e || !e.layerUrl || !Number.isFinite(Number(e.oid))) return null
+    return e as SelectedFeatureCacheEntry
+  } catch {
+    return null
+  }
+}
+
+function writeSelectedFeatureCache (
+  layerUrl: string,
+  oid: any,
+  idFieldName: string,
+  data: any,
+  source: 'edit' | 'list' | 'detail' | 'azioni'
+): SelectedFeatureCacheEntry | null {
+  try {
+    const oidNum = Number(oid)
+    const url = String(layerUrl || '').trim()
+    if (!url || !Number.isFinite(oidNum) || !data || typeof data !== 'object') return null
+    const key = getSelectedFeatureCacheKey(url, oidNum)
+    const bucket = getSelectedFeatureCacheBucket()
+    const prev: any = bucket[key]
+    const now = Date.now()
+    const holdMs = 15000
+    let nextData = { ...(data || {}) }
+    let nextSource: 'edit' | 'list' | 'detail' | 'azioni' = source
+    let nextTs = now
+    if (prev && prev.source === 'edit' && source !== 'edit' && (now - Number(prev.ts || 0) < holdMs)) {
+      nextData = { ...(data || {}), ...(prev.data || {}) }
+      nextSource = 'edit'
+      nextTs = Number(prev.ts || now)
+    }
+    const next: SelectedFeatureCacheEntry = {
+      layerUrl: url,
+      oid: oidNum,
+      idFieldName: String(idFieldName || prev?.idFieldName || 'OBJECTID') || 'OBJECTID',
+      data: nextData,
+      ts: nextTs,
+      source: nextSource
+    }
+    bucket[key] = next
+    return next
+  } catch {
+    return null
+  }
+}
+
+function invalidateRuntimeProxyCache (layerUrl?: string | null) {
+  try {
+    const url = String(layerUrl || '').trim()
+    if (!url) {
+      try { delete (window as any).__giiRuntimeDsProxyCache } catch {}
+      return
+    }
+    try {
+      const bucket = (window as any).__giiRuntimeDsProxyCache
+      if (bucket && typeof bucket === 'object') delete bucket[url]
+    } catch {}
+  } catch {}
+}
 function getDsLabel (useDs: any, fallback: string): string {
   const localLabel = String(useDs?.__label || useDs?.label || '').trim()
   if (localLabel) return localLabel
@@ -390,7 +479,14 @@ async function createRuntimeFeatureLayerProxy (view: RuntimeDsView, recordsRef: 
       returnGeometry: !!q?.returnGeometry,
       num: q?.pageSize || q?.num || undefined
     })
-    const recs = (res?.features || []).map((f: any) => makeRuntimeRecord(f?.attributes || {}, idFieldName, view.layerUrl))
+    const recs = (res?.features || []).map((f: any) => {
+      const attrs = f?.attributes || {}
+      const oidVal = Number(attrs?.[idFieldName] ?? attrs?.OBJECTID ?? attrs?.objectid)
+      if (Number.isFinite(oidVal)) {
+        try { writeSelectedFeatureCache(view.layerUrl, oidVal, idFieldName, attrs, 'list') } catch {}
+      }
+      return makeRuntimeRecord(attrs, idFieldName, view.layerUrl)
+    })
     recordsRef.current = recs
     return { records: recs }
   }
@@ -416,13 +512,20 @@ function publishRuntimeSelection (p: { oid: number, layerUrl: string, serviceUrl
     sessionStorage.setItem('GII_SELECTED_SERVICE_URL', p.serviceUrl)
     sessionStorage.setItem('GII_SELECTED_IDFIELD', p.idFieldName)
     sessionStorage.setItem('GII_SELECTED_VIEW_NAME', p.viewName)
+    try { sessionStorage.removeItem('GII_SELECTED_DATA') } catch {}
     if (p.data && typeof p.data === 'object') {
-      try { sessionStorage.setItem('GII_SELECTED_DATA', JSON.stringify(p.data)) } catch {}
-    } else {
-      try { sessionStorage.removeItem('GII_SELECTED_DATA') } catch {}
+      try { writeSelectedFeatureCache(p.layerUrl, p.oid, p.idFieldName, p.data, 'list') } catch {}
     }
-    try { (window as any).__giiSelection = { ...p, ts: Date.now() } } catch {}
-    window.dispatchEvent(new CustomEvent('gii-selection-changed', { detail: { ...p } }))
+    const nextSel: any = {
+      oid: p.oid,
+      layerUrl: p.layerUrl,
+      serviceUrl: p.serviceUrl,
+      idFieldName: p.idFieldName,
+      viewName: p.viewName,
+      ts: Date.now()
+    }
+    try { (window as any).__giiSelection = nextSel } catch {}
+    window.dispatchEvent(new CustomEvent('gii-selection-changed', { detail: nextSel }))
   } catch {}
 }
 

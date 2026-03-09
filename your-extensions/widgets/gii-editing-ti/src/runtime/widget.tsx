@@ -90,6 +90,95 @@ async function resolveFeatureLayerForAttachments (ds: any): Promise<any | null> 
 }
 
 
+
+
+type SelectedFeatureCacheEntry = {
+  layerUrl: string
+  oid: number
+  idFieldName: string
+  data: any
+  ts: number
+  source: 'edit' | 'list' | 'detail' | 'azioni'
+}
+
+function getSelectedFeatureCacheBucket (): Record<string, SelectedFeatureCacheEntry> {
+  try {
+    const w: any = window as any
+    w.__giiSelectedFeatureCache = w.__giiSelectedFeatureCache || {}
+    return w.__giiSelectedFeatureCache
+  } catch {
+    return {}
+  }
+}
+
+function getSelectedFeatureCacheKey (layerUrl: string, oid: any): string {
+  return `${String(layerUrl || '').trim()}::${Number(oid)}`
+}
+
+function readSelectedFeatureCache (layerUrl: string, oid: any): SelectedFeatureCacheEntry | null {
+  try {
+    const key = getSelectedFeatureCacheKey(layerUrl, oid)
+    const bucket = getSelectedFeatureCacheBucket()
+    const e: any = bucket[key]
+    if (!e || !e.layerUrl || !Number.isFinite(Number(e.oid))) return null
+    return e as SelectedFeatureCacheEntry
+  } catch {
+    return null
+  }
+}
+
+function writeSelectedFeatureCache (
+  layerUrl: string,
+  oid: any,
+  idFieldName: string,
+  data: any,
+  source: 'edit' | 'list' | 'detail' | 'azioni'
+): SelectedFeatureCacheEntry | null {
+  try {
+    const oidNum = Number(oid)
+    const url = String(layerUrl || '').trim()
+    if (!url || !Number.isFinite(oidNum) || !data || typeof data !== 'object') return null
+    const key = getSelectedFeatureCacheKey(url, oidNum)
+    const bucket = getSelectedFeatureCacheBucket()
+    const prev: any = bucket[key]
+    const now = Date.now()
+    const holdMs = 15000
+    let nextData = { ...(data || {}) }
+    let nextSource: 'edit' | 'list' | 'detail' | 'azioni' = source
+    let nextTs = now
+    if (prev && prev.source === 'edit' && source !== 'edit' && (now - Number(prev.ts || 0) < holdMs)) {
+      nextData = { ...(data || {}), ...(prev.data || {}) }
+      nextSource = 'edit'
+      nextTs = Number(prev.ts || now)
+    }
+    const next: SelectedFeatureCacheEntry = {
+      layerUrl: url,
+      oid: oidNum,
+      idFieldName: String(idFieldName || prev?.idFieldName || 'OBJECTID') || 'OBJECTID',
+      data: nextData,
+      ts: nextTs,
+      source: nextSource
+    }
+    bucket[key] = next
+    return next
+  } catch {
+    return null
+  }
+}
+
+function invalidateRuntimeProxyCache (layerUrl?: string | null) {
+  try {
+    const url = String(layerUrl || '').trim()
+    if (!url) {
+      try { delete (window as any).__giiRuntimeDsProxyCache } catch {}
+      return
+    }
+    try {
+      const bucket = (window as any).__giiRuntimeDsProxyCache
+      if (bucket && typeof bucket === 'object') delete bucket[url]
+    } catch {}
+  } catch {}
+}
 function isFiniteNum (n: any): boolean {
   return typeof n === 'number' && Number.isFinite(n)
 }
@@ -2656,9 +2745,12 @@ function NuovaPraticaForm (p: {
 
         const nextSavedData = { ...(p.initialData || {}), ...cleanAttrs, [editIdFieldName]: editOid }
         await writeChangeLog(prevAttrs, cleanAttrs)
-        // Non rilanciare refresh/ri-selezioni sulla datasource ExB: possono reintrodurre dati stantii.
-        writeDynamicSelection({ oid: editOid, layerUrl: String(layer?.url || readDynamicSelection().layerUrl || ''), idFieldName: editIdFieldName, data: nextSavedData })
-        const nextIntent: EditIntentInfo = { oid: editOid, layerUrl: String(layer?.url || readDynamicSelection().layerUrl || ''), idFieldName: editIdFieldName, data: nextSavedData, ts: Date.now() }
+        const nextLayerUrl = String(layer?.url || readDynamicSelection().layerUrl || '')
+        writeSelectedFeatureCache(nextLayerUrl, editOid, editIdFieldName, nextSavedData, 'edit')
+        invalidateRuntimeProxyCache(nextLayerUrl)
+        writeDynamicSelection({ oid: editOid, layerUrl: nextLayerUrl, idFieldName: editIdFieldName, data: nextSavedData })
+        try { window.dispatchEvent(new CustomEvent('gii-force-refresh-selection', { detail: { oid: editOid, layerUrl: nextLayerUrl } })) } catch {}
+        const nextIntent: EditIntentInfo = { oid: editOid, layerUrl: nextLayerUrl, idFieldName: editIdFieldName, data: nextSavedData, ts: Date.now() }
         try { ;(window as any).__giiEdit = nextIntent } catch {}
         writeEditIntent(nextIntent)
         setBaselineDraft(draftFromRecord(nextSavedData))
@@ -3589,11 +3681,12 @@ function readDynamicSelection (): DynamicSelectionInfo {
     const oidNum = rawOid != null && rawOid !== '' ? Number(rawOid) : NaN
     const layerUrl = String(sel?.layerUrl || sessionStorage.getItem('GII_SELECTED_LAYER_URL') || '').trim()
     const idFieldName = String(sel?.idFieldName || sessionStorage.getItem('GII_SELECTED_IDFIELD') || 'OBJECTID').trim() || 'OBJECTID'
+    const cache = (layerUrl && Number.isFinite(oidNum)) ? readSelectedFeatureCache(layerUrl, oidNum) : null
     return {
       oid: Number.isFinite(oidNum) ? oidNum : null,
       layerUrl,
       idFieldName,
-      data: sel?.data || null
+      data: cache?.data || null
     }
   } catch {
     return { oid: null, layerUrl: '', idFieldName: 'OBJECTID', data: null }
@@ -3608,9 +3701,12 @@ function writeDynamicSelection (
     const prev: any = (window as any).__giiSelection || {}
     const next: any = {
       ...prev,
-      ...sel,
+      oid: sel.oid !== undefined ? sel.oid : prev.oid,
+      layerUrl: sel.layerUrl !== undefined ? sel.layerUrl : prev.layerUrl,
+      idFieldName: sel.idFieldName !== undefined ? sel.idFieldName : prev.idFieldName,
       ts: Date.now()
     }
+    try { delete next.data } catch {}
     ;(window as any).__giiSelection = next
     if (next.oid != null && Number.isFinite(Number(next.oid))) sessionStorage.setItem('GII_SELECTED_OID', String(Number(next.oid)))
     else sessionStorage.removeItem('GII_SELECTED_OID')
@@ -3618,6 +3714,12 @@ function writeDynamicSelection (
     else sessionStorage.removeItem('GII_SELECTED_LAYER_URL')
     if (next.idFieldName) sessionStorage.setItem('GII_SELECTED_IDFIELD', String(next.idFieldName))
     else sessionStorage.removeItem('GII_SELECTED_IDFIELD')
+    if (sel.data && next.layerUrl && next.oid != null && Number.isFinite(Number(next.oid))) {
+      try { writeSelectedFeatureCache(String(next.layerUrl), Number(next.oid), String(next.idFieldName || 'OBJECTID'), sel.data, 'edit') } catch {}
+      try { sessionStorage.setItem('GII_SELECTED_DATA', JSON.stringify(sel.data)) } catch {}
+    } else {
+      try { sessionStorage.removeItem('GII_SELECTED_DATA') } catch {}
+    }
     if (opts?.dispatch !== false) {
       window.dispatchEvent(new CustomEvent('gii-selection-changed'))
     }
@@ -3842,7 +3944,6 @@ function useDynamicActiveSelection (queryFields: string[], label?: string, enabl
           setActive(null)
           return
         }
-        writeDynamicSelection({ oid: Number(sel.oid), layerUrl: sel.layerUrl, idFieldName, data }, { dispatch: false })
         setActive({
           key: sel.layerUrl,
           state: {
@@ -4218,7 +4319,12 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
             setSelectionIntent(nextIntentObj)
             try { ;(window as any).__giiEdit = nextIntentObj } catch {}
             writeEditIntent(nextIntentObj)
+            if (nextData && typeof nextData === 'object') {
+              writeSelectedFeatureCache(nextLayerUrl, savedOid, nextIdFieldName, nextData, 'edit')
+            }
+            invalidateRuntimeProxyCache(nextLayerUrl)
             writeDynamicSelection({ oid: savedOid, layerUrl: nextLayerUrl, idFieldName: nextIdFieldName, data: nextData })
+            try { window.dispatchEvent(new CustomEvent('gii-force-refresh-selection', { detail: { oid: savedOid, layerUrl: nextLayerUrl } })) } catch {}
           }}
         />
       ) : (
