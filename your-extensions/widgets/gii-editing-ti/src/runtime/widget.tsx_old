@@ -523,50 +523,6 @@ function isFiniteNum (n: any): boolean {
   return typeof n === 'number' && Number.isFinite(n)
 }
 
-function coerceFiniteNumber (v: any): number | null {
-  if (typeof v === 'number') return Number.isFinite(v) ? v : null
-  const s = String(v ?? '').trim()
-  if (!s) return null
-  const normalized = s.replace(/\s+/g, '').replace(',', '.')
-  const n = Number(normalized)
-  return Number.isFinite(n) ? n : null
-}
-
-function readConfiguredOfficePoint (cfg: any): { lon: number, lat: number } | null {
-  const pickFirst = (arr: any[]): number | null => {
-    for (const item of arr) {
-      const n = coerceFiniteNumber(item)
-      if (n != null) return n
-    }
-    return null
-  }
-
-  const lon = pickFirst([
-    cfg?.officeLonWgs84,
-    cfg?.officeLon,
-    cfg?.officeLongitude,
-    cfg?.officeLon4326,
-    cfg?.lonUfficio,
-    cfg?.longitudeUfficio,
-    cfg?.xUfficio,
-    cfg?.officeX
-  ])
-  const lat = pickFirst([
-    cfg?.officeLatWgs84,
-    cfg?.officeLat,
-    cfg?.officeLatitude,
-    cfg?.officeLat4326,
-    cfg?.latUfficio,
-    cfg?.latitudeUfficio,
-    cfg?.yUfficio,
-    cfg?.officeY
-  ])
-
-  if (lon == null || lat == null) return null
-  if (!isValidOfficePoint(lon, lat)) return null
-  return { lon, lat }
-}
-
 function isValidOfficePoint (lon: any, lat: any): boolean {
   if (!isFiniteNum(lon) || !isFiniteNum(lat)) return false
   // evita default 0,0 (non configurato)
@@ -3158,71 +3114,56 @@ function NuovaPraticaForm (p: {
     norma_violata3: g('norma_violata3')
   }), [n3parziale, n3totale, draft.norma_violata3])
 
-  const officePoint = React.useMemo(() => readConfiguredOfficePoint(cfg), [
-    cfg.officeLonWgs84,
-    cfg.officeLatWgs84,
-    (cfg as any).officeLon,
-    (cfg as any).officeLat,
-    (cfg as any).officeLongitude,
-    (cfg as any).officeLatitude,
-    (cfg as any).officeLon4326,
-    (cfg as any).officeLat4326,
-    (cfg as any).lonUfficio,
-    (cfg as any).latUfficio,
-    (cfg as any).longitudeUfficio,
-    (cfg as any).latitudeUfficio,
-    (cfg as any).xUfficio,
-    (cfg as any).yUfficio,
-    (cfg as any).officeX,
-    (cfg as any).officeY
-  ])
-  const officeLon = officePoint?.lon ?? 0
-  const officeLat = officePoint?.lat ?? 0
-  const hasOffice = !!officePoint
+  const officeLon = Number(cfg.officeLonWgs84 ?? 0)
+  const officeLat = Number(cfg.officeLatWgs84 ?? 0)
+  const hasOffice = isValidOfficePoint(officeLon, officeLat)
 
   // View editabile TI/RZ per la creazione (mai layer madre)
   const motherRef = React.useRef<any | null>(null)
   const getLayerForCreate = React.useCallback(async () => {
-    const rawSchemaUrl = String(cfg.schemaLayerUrl || '').trim() || String((cfg as any).motherLayerUrl || '').trim()
-    const schemaUrl = ensureLayerIndex(normalizeFeatureLayerUrl(rawSchemaUrl))
-    const schemaIsBase = /\/GII_VIEW_EB_BASE\/FeatureServer\/\d+$/i.test(schemaUrl)
+    const schemaUrl = String(cfg.schemaLayerUrl || '').trim()
     const giiRole: any = (window as any).__giiUserRole || {}
-    const area = giiRole.areaLabel || giiRole.area || giiRole.area_cod
-    const settore = giiRole.settoreLabel || giiRole.settore || giiRole.settore_cod
-    const serviceNames = buildTiCreateViewServiceNames(area, settore)
+    const serviceNames = buildTiCreateViewServiceNames(
+      giiRole.areaLabel || giiRole.area || giiRole.area_cod,
+      giiRole.settoreLabel || giiRole.settore || giiRole.settore_cod
+    )
 
-    const targetUrls = serviceNames.length
-      ? serviceNames
-          .map((name) => replaceServiceNameInLayerUrl(schemaUrl, name))
-          .map((u) => ensureLayerIndex(normalizeFeatureLayerUrl(u || '')))
-          .filter((u): u is string => !!u)
-      : (schemaUrl && !schemaIsBase ? [schemaUrl] : [])
-
-    const uniqueTargetUrls = Array.from(new Set(targetUrls))
-    if (!uniqueTargetUrls.length) {
-      throw new Error('View editabile TI non risolta per area/settore utente.')
-    }
-
-    const currentUrl = ensureLayerIndex(normalizeFeatureLayerUrl(String((motherRef.current as any)?.url || '')), motherRef.current)
-    if (motherRef.current && currentUrl && uniqueTargetUrls.includes(currentUrl) && typeof (motherRef.current as any)?.applyEdits === 'function') {
-      return motherRef.current
-    }
+    const candidateUrls = serviceNames
+      .map((name) => replaceServiceNameInLayerUrl(schemaUrl, name))
+      .filter((u): u is string => !!u)
 
     const FeatureLayer = await loadEsriModule<any>('esri/layers/FeatureLayer')
-    for (const url of uniqueTargetUrls) {
+    for (const url of candidateUrls) {
       try {
-        const fl = new FeatureLayer({ url, outFields: ['*'] })
+        if (motherRef.current && String((motherRef.current as any)?.url || '') === url) return motherRef.current
+        const fl = new FeatureLayer({ url })
+        if (typeof fl?.load === 'function') { try { await fl.load() } catch {} }
         if (fl && typeof fl.applyEdits === 'function') {
           motherRef.current = fl
           return fl
         }
       } catch {
-        // prova il candidato successivo senza forzare load() su layer non autorizzati
+        // prova il candidato successivo
+      }
+    }
+
+    // fallback sicuro: usa lo schema solo se non e' la BASE ed e' editabile
+    if (schemaUrl && !/\/GII_VIEW_EB_BASE\/FeatureServer\/0$/i.test(schemaUrl)) {
+      try {
+        if (motherRef.current && String((motherRef.current as any)?.url || '') === schemaUrl) return motherRef.current
+        const fl = new FeatureLayer({ url: schemaUrl })
+        if (typeof fl?.load === 'function') { try { await fl.load() } catch {} }
+        if (fl && typeof fl.applyEdits === 'function') {
+          motherRef.current = fl
+          return fl
+        }
+      } catch {
+        // ignore
       }
     }
 
     throw new Error('View editabile TI non risolta per area/settore utente.')
-  }, [cfg.schemaLayerUrl, (cfg as any).motherLayerUrl])
+  }, [cfg.schemaLayerUrl])
 
   const toTs = (v: string) => {
     if (!v) return null

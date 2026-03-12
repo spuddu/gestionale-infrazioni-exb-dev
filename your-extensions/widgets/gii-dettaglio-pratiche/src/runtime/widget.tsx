@@ -7,7 +7,7 @@ import type { IMConfig, TabConfig } from '../config'
 import { defaultConfig, DETAIL_DEFAULT_TAB_FIELDS, DETAIL_NEVER_SHOW_FIELDS, DETAIL_GENERAL_FIELDS } from '../config'
 
 
-const GII_LOG_EVENTI_URL = 'https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_LOG_EVENTI/FeatureServer/0'
+const GII_LOG_EVENTI_CICLI_URL = 'https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_LOG_EVENTI_CICLI/FeatureServer/0'
 const GII_UTENTI_URL = 'https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_utenti/FeatureServer/0'
 
 
@@ -1338,6 +1338,7 @@ function ActionsPanel (props: {
   const statoDAField = 'stato_DA'
   const dtStatoDAField = 'dt_stato_DA'
   const presaDAField = 'presa_in_carico_DA'
+  const dtPresaDAField = 'dt_presa_in_carico_DA'
 
   const [loading, setLoading] = React.useState(false)
   const [msg, setMsg] = React.useState<Msg | null>({ kind: 'info', text: 'Selezionare una riga.' })
@@ -1417,60 +1418,186 @@ function ActionsPanel (props: {
     return m ? m[1] : ''
   }
 
-  const writeLogPresaInCarico = async (opts: {
-    parentOid: number
-    parentGlobalId?: string
-    ruolo: string
-    area?: string
-    settore?: string
-    campo: string
-    valorePrev?: any
-    valoreNew?: any
-    note?: string
-    tipoEvento?: string
-    fase?: string
-  }) => {
-    try {
-      const FeatureLayer = await loadEsriModule<any>('esri/layers/FeatureLayer')
-      const logLayer = new FeatureLayer({ url: GII_LOG_EVENTI_URL, outFields: ['*'] })
-      if (typeof logLayer.load === 'function') {
-        await logLayer.load()
-      }
+  const logCycleLayerRef = React.useRef<any | null>(null)
 
-      const attrsRaw: Record<string, any> = {
-        parent_globalid: opts.parentGlobalId || '00000000-0000-0000-0000-000000000000',
-        parent_objectid: opts.parentOid,
-        dt_evento: Date.now(),
-        ruolo: opts.ruolo,
-        area: opts.area ?? '',
-        settore: opts.settore ?? '',
-        operazione: 'UPDATE',
-        tipo_evento: opts.tipoEvento ?? '',
-        fase: opts.fase ?? opts.ruolo ?? '',
-        campo: opts.campo,
-        valore_precedente: opts.valorePrev != null ? String(opts.valorePrev) : '',
-        valore_nuovo: opts.valoreNew != null ? String(opts.valoreNew) : '',
-        session_id: sessionIdRef.current,
-        note: opts.note ?? ''
-      }
+  const normalizeAreaLabel = (v: any): string => {
+    const s = String(v ?? '').trim().toUpperCase()
+    if (!s) return ''
+    if (s === '2' || s === 'AGR' || s === 'AGRICOLA' || s === 'AGRICOLTURA') return 'AGR'
+    if (s === '3' || s === 'TEC' || s === 'TECNICA' || s === 'TECNICO') return 'TEC'
+    if (s === '1' || s === 'AMM' || s === 'AMMINISTRATIVA' || s === 'AMMINISTRAZIONE') return 'AMM'
+    return s
+  }
 
-      const attrs = filterAttrsToLayerFields(attrsRaw, logLayer)
-
-      const res = await logLayer.applyEdits({ addFeatures: [{ attributes: attrs }] })
-      const add = (res as any)?.addFeatureResults?.[0] || (res as any)?.addResults?.[0] || null
-      const err = add?.error
-      const ok = !err && (add?.success === true || add?.objectId != null || add?.globalId != null || add?.success == null)
-      if (!ok) {
-        const detail = err
-          ? `code=${err.code ?? ''} name=${err.name ?? ''} message=${err.message ?? ''}`
-          : JSON.stringify(res || add)
-        throw new Error(detail)
-      }
-    } catch (e) {
-      // non bloccare mai la presa in carico
-      // eslint-disable-next-line no-console
-      console.warn('[GII_LOG_EVENTI] Errore scrittura log evento:', e)
+  const normalizeSettoreLabel = (area: string, v: any): string => {
+    const s = String(v ?? '').trim().toUpperCase()
+    if (!s) return ''
+    if (area === 'AGR') {
+      const m = s.match(/^D?([1-6])$/)
+      if (m) return `D${m[1]}`
     }
+    if (area === 'TEC' && (s === 'DS' || s === 'D S')) return 'DS'
+    if (area === 'AMM' && (s === 'CR' || s === 'C R')) return 'CR'
+    return s
+  }
+
+  const getCycleLogLayer = async () => {
+    if (logCycleLayerRef.current) return logCycleLayerRef.current
+    const FeatureLayer = await loadEsriModule<any>('esri/layers/FeatureLayer')
+    const fl = new FeatureLayer({ url: GII_LOG_EVENTI_CICLI_URL, outFields: ['*'] })
+    if (typeof fl.load === 'function') {
+      try { await fl.load() } catch {}
+    }
+    logCycleLayerRef.current = fl
+    return fl
+  }
+
+  const sqlQuote = (v: any): string => `'${String(v ?? '').replace(/'/g, "''")}'`
+
+  const getCurrentCycleContext = () => {
+    const giiRole: any = (window as any).__giiUserRole || {}
+    const parentGlobalId = String(pickAttrCI(data, ['globalid', 'global_id', 'GlobalID', 'GLOBALID', 'parent_globalid']) || '')
+    const area = normalizeAreaLabel(giiRole.areaLabel || giiRole.area || giiRole.area_cod || pickAttrCI(data, ['area', 'area_cod', 'cod_area']))
+    const settore = normalizeSettoreLabel(
+      area,
+      giiRole.settoreLabel || giiRole.settore || giiRole.settore_cod || pickAttrCI(data, ['settore', 'settore_cod', 'cod_settore']) || inferSettoreFromUsername(String(giiRole.username || pickAttrCI(data, ['creator', 'Creator', 'editor', 'Editor']) || ''))
+    )
+    const username = String(giiRole.username || (window as any).__giiUser?.username || '').trim()
+    return { parentGlobalId, area, settore, username }
+  }
+
+  const buildCycleSummary = (eventoApertura: string, eventoChiusura: string, numCampi: number): string => {
+    const parts = [String(eventoApertura || 'PRESA_IN_CARICO').trim()]
+    if ((numCampi || 0) > 0) parts.push('AGGIORNAMENTO')
+    if (eventoChiusura) parts.push(String(eventoChiusura).trim())
+    const suffix = (numCampi || 0) > 0
+      ? `${numCampi} campi del rapporto aggiornati`
+      : 'nessun campo aggiornato'
+    return `${parts.filter(Boolean).join(' + ')}: ${suffix}`
+  }
+
+  const queryOpenCycle = async (parentGlobalId: string, ruoloCompetente: string) => {
+    if (!parentGlobalId) return null
+    const logLayer = await getCycleLogLayer()
+    if (!logLayer?.queryFeatures) return null
+    const q = logLayer.createQuery ? logLayer.createQuery() : {}
+    q.where = `parent_globalid = ${sqlQuote(parentGlobalId)} AND ruolo_competente = ${sqlQuote(ruoloCompetente)} AND stato_record = 'APERTO'`
+    q.outFields = ['*']
+    q.returnGeometry = false
+    q.num = 1
+    q.orderByFields = ['numero_ciclo_ruolo DESC', 'ObjectId DESC']
+    const res = await logLayer.queryFeatures(q)
+    return res?.features?.[0] || null
+  }
+
+  const getNextCycleNumber = async (parentGlobalId: string, ruoloCompetente: string): Promise<number> => {
+    if (!parentGlobalId) return 1
+    const logLayer = await getCycleLogLayer()
+    if (!logLayer?.queryFeatures) return 1
+    const q = logLayer.createQuery ? logLayer.createQuery() : {}
+    q.where = `parent_globalid = ${sqlQuote(parentGlobalId)} AND ruolo_competente = ${sqlQuote(ruoloCompetente)}`
+    q.outFields = ['numero_ciclo_ruolo']
+    q.returnGeometry = false
+    q.num = 1
+    q.orderByFields = ['numero_ciclo_ruolo DESC', 'ObjectId DESC']
+    try {
+      const res = await logLayer.queryFeatures(q)
+      const lastNum = Number(res?.features?.[0]?.attributes?.numero_ciclo_ruolo || 0)
+      return Number.isFinite(lastNum) && lastNum > 0 ? lastNum + 1 : 1
+    } catch {
+      return 1
+    }
+  }
+
+  const openCycleLog = async (opts: { eventoApertura?: string, fase?: string }) => {
+    try {
+      if (oid == null) return
+      const { parentGlobalId, area, settore, username } = getCurrentCycleContext()
+      if (!parentGlobalId) return
+      const logLayer = await getCycleLogLayer()
+      if (!logLayer?.applyEdits) return
+      const existing = await queryOpenCycle(parentGlobalId, role)
+      if (existing) return
+      const nextNum = await getNextCycleNumber(parentGlobalId, role)
+      const attrsRaw: Record<string, any> = {
+        parent_globalid: parentGlobalId,
+        parent_objectid: oid,
+        numero_ciclo_ruolo: nextNum,
+        ruolo_competente: role,
+        utente_operatore: username,
+        stato_record: 'APERTO',
+        evento_apertura: opts.eventoApertura || 'PRESA_IN_CARICO',
+        dt_apertura: Date.now(),
+        area,
+        settore,
+        fase: opts.fase || role,
+        session_id: sessionIdRef.current,
+        num_campi_modificati: 0,
+        campi_modificati: '',
+        valori_prima_json: '',
+        valori_dopo_json: '',
+        riepilogo_ciclo: ''
+      }
+      const attrs = filterAttrsForLayer(attrsRaw, logLayer)
+      await logLayer.applyEdits({ addFeatures: [{ attributes: attrs }] })
+    } catch (e) {
+      console.warn('[GII_LOG_EVENTI_CICLI] Errore apertura ciclo:', e)
+    }
+  }
+
+  const closeCycleLog = async (opts: { eventoChiusura: string, ruoloDestinatario?: string, noteChiusura?: string, fase?: string }) => {
+    try {
+      if (oid == null) return
+      const { parentGlobalId, area, settore, username } = getCurrentCycleContext()
+      if (!parentGlobalId) return
+      const logLayer = await getCycleLogLayer()
+      if (!logLayer?.applyEdits) return
+      const feature = await queryOpenCycle(parentGlobalId, role)
+      if (!feature?.attributes) return
+      const attrs = feature.attributes || {}
+      const numCampi = Number(attrs.num_campi_modificati || 0)
+      const summary = buildCycleSummary(String(attrs.evento_apertura || 'PRESA_IN_CARICO'), opts.eventoChiusura, numCampi)
+      const updRaw: Record<string, any> = {
+        ObjectId: attrs.ObjectId ?? attrs.objectid,
+        utente_operatore: username || attrs.utente_operatore || '',
+        evento_chiusura: opts.eventoChiusura,
+        dt_chiusura: Date.now(),
+        ruolo_destinatario: opts.ruoloDestinatario || '',
+        note_chiusura: opts.noteChiusura || '',
+        area: area || attrs.area || '',
+        settore: settore || attrs.settore || '',
+        fase: opts.fase || attrs.fase || role,
+        session_id: sessionIdRef.current,
+        riepilogo_ciclo: summary,
+        stato_record: 'CHIUSO'
+      }
+      const upd = filterAttrsForLayer(updRaw, logLayer)
+      await logLayer.applyEdits({ updateFeatures: [{ attributes: upd }] })
+    } catch (e) {
+      console.warn('[GII_LOG_EVENTI_CICLI] Errore chiusura ciclo:', e)
+    }
+  }
+
+  const getSchemaFieldNameCI = (schemaFields: Record<string, any>, name: string): string | null => {
+    const ci: Record<string, string> = {}
+    Object.keys(schemaFields || {}).forEach(k => { ci[String(k).toLowerCase()] = k })
+    return ci[String(name).toLowerCase()] || null
+  }
+
+  const getPrevRoleForIntegration = (): string => {
+    if (role === 'RZ') return 'TI'
+    if (role === 'RI') return 'RZ'
+    if (role === 'DT') return 'RI'
+    if (role === 'DA') return 'DT'
+    return ''
+  }
+
+  const getNextRoleForForward = (): string => {
+    if (role === 'TI') return 'RZ'
+    if (role === 'RZ') return 'RI'
+    if (role === 'RI') return 'DT'
+    if (role === 'DT') return 'DA'
+    return ''
   }
 
 
@@ -1483,16 +1610,27 @@ function ActionsPanel (props: {
   const presaTIVal = data ? data[ec.fieldPresaTI] : null
   const statoTINum = statoTIVal != null && String(statoTIVal) !== '' ? Number(statoTIVal) : null
   const presaTINum = presaTIVal != null && String(presaTIVal) !== '' ? Number(presaTIVal) : null
+  const currentTiUsername = String((window as any).__giiUserRole?.username || (window as any).__giiUser?.username || '').trim().toLowerCase()
+  const assignedTiUsername = String(pickAttrCI(data, ['ti_assegnato_username', 'ti_assegnato_user', 'ti_assegnato']) || '').trim().toLowerCase()
+  const isAssignedToCurrentTi = !!currentTiUsername && !!assignedTiUsername && currentTiUsername === assignedTiUsername
+  const inChargeByTi =
+    presaTINum === PRESA_IN_CARICO ||
+    statoTINum === STATO_PRESA_IN_CARICO
+  const isMeaningfulAudit = (v: any): boolean => !(v === null || v === undefined || v === '' || v === 0 || v === '0')
+  const tiClosedOrForwarded =
+    isMeaningfulAudit(pickAttrCI(data, ['esito_TI', 'esito_ti', 'ESITO_TI'])) ||
+    (statoTINum === STATO_APPROVATA) ||
+    (statoTINum === STATO_RESPINTA) ||
+    (statoTINum != null && statoTINum > STATO_PRESA_IN_CARICO)
 
   const canEdit =
     hasSel &&
     !loading &&
     pending === null &&
     ec.show &&
-    presaTINum === ec.presaRequiredVal &&
-    statoTINum != null &&
-    statoTINum >= ec.minStato &&
-    statoTINum <= ec.maxStato
+    isAssignedToCurrentTi &&
+    inChargeByTi &&
+    !tiClosedOrForwarded
 
   const handleEditOverlay = () => {
     if (!canEdit) return
@@ -1984,7 +2122,6 @@ function ActionsPanel (props: {
 
   const onConfirmTakeInCharge = async () => {
     try {
-      const prevPresaVal = presaNum
       await runApplyEdits(
         {
           [presaField]: PRESA_IN_CARICO,
@@ -1995,25 +2132,7 @@ function ActionsPanel (props: {
         'Presa in carico salvata.'
       )
 
-      // Scrittura log (best-effort, non blocca la presa in carico)
-      const parentGid = String(pickAttrCI(data, ['globalid', 'global_id', 'GlobalID', 'GLOBALID', 'parent_globalid']) || '00000000-0000-0000-0000-000000000000')
-      const areaValRaw = pickAttrCI(data, ['area', 'area_cod', 'cod_area'])
-      const settoreValRaw =
-        pickAttrCI(data, ['settore', 'settore_cod', 'cod_settore']) ||
-        inferSettoreFromUsername(String(pickAttrCI(data, ['creator', 'Creator', 'editor', 'Editor']) || ''))
-      void writeLogPresaInCarico({
-        parentOid: oid as number,
-        parentGlobalId: parentGid,
-        ruolo: role,
-        area: areaValRaw != null ? String(areaValRaw) : '',
-        settore: settoreValRaw != null ? String(settoreValRaw) : '',
-        campo: presaField,
-        valorePrev: prevPresaVal,
-        valoreNew: PRESA_IN_CARICO,
-        note: `Presa in carico (${role})`,
-        tipoEvento: 'PRESA_IN_CARICO',
-        fase: role
-      })
+      void openCycleLog({ eventoApertura: 'PRESA_IN_CARICO', fase: role })
 
       setPending(null)
       setConfirmAttempted(false)
@@ -2053,36 +2172,21 @@ function ActionsPanel (props: {
         const fDtStatoTI = pick('dt_stato_TI')
         const fPresaTI = pick('presa_in_carico_TI')
         const fDtPresaTI = pick('dt_presa_in_carico_TI')
+        const fEsitoTI = pick('esito_TI')
+        const fDtEsitoTI = pick('dt_esito_TI')
 
         if (fStatoTI) upd[fStatoTI] = STATO_DA_PRENDERE
         if (fDtStatoTI) upd[fDtStatoTI] = Date.now()
         if (fPresaTI) upd[fPresaTI] = PRESA_DA_PRENDERE
-        if (fDtPresaTI) upd[fDtPresaTI] = Date.now()
+        if (fDtPresaTI) upd[fDtPresaTI] = null
+        if (fEsitoTI) upd[fEsitoTI] = null
+        if (fDtEsitoTI) upd[fDtEsitoTI] = null
       } catch {}
 
-      const prevTi = String(pickAttrCI(data, ['ti_assegnato_username', 'ti_assegnato_user', 'ti_assegnato']) || '')
 
       await runApplyEdits(upd, `TI assegnato: ${tiName}.`)
 
-      // Scrittura log (best-effort)
-      const parentGid = String(pickAttrCI(data, ['globalid', 'global_id', 'GlobalID', 'GLOBALID', 'parent_globalid']) || '00000000-0000-0000-0000-000000000000')
-      const areaValRaw = pickAttrCI(data, ['area', 'area_cod', 'cod_area'])
-      const settoreValRaw =
-        pickAttrCI(data, ['settore', 'settore_cod', 'cod_settore']) ||
-        inferSettoreFromUsername(String(pickAttrCI(data, ['creator', 'Creator', 'editor', 'Editor']) || ''))
-      void writeLogPresaInCarico({
-        parentOid: oid as number,
-        parentGlobalId: parentGid,
-        ruolo: role,
-        area: areaValRaw != null ? String(areaValRaw) : '',
-        settore: settoreValRaw != null ? String(settoreValRaw) : '',
-        campo: 'ti_assegnato_username',
-        valorePrev: prevTi,
-        valoreNew: tiSelected,
-        note: `Assegna TI: ${tiName} (${tiSelected})`,
-        tipoEvento: 'ASSEGNAZIONE_TI',
-        fase: role
-      })
+      void closeCycleLog({ eventoChiusura: 'ASSEGNAZIONE_A_TI', ruoloDestinatario: 'TI', noteChiusura: `Assegna TI: ${tiName} (${tiSelected})`, fase: role })
 
       setPending(null)
       setConfirmAttempted(false)
@@ -2098,16 +2202,37 @@ function ActionsPanel (props: {
 
     try {
       const stato = mapEsitoToStato(ESITO_INTEGRAZIONE) // => 3
-      await runApplyEdits(
-        {
-          [esitoField]: ESITO_INTEGRAZIONE,
-          [dtEsitoField]: Date.now(),
-          [statoField]: stato ?? STATO_INTEGRAZIONE,
-          [dtStatoField]: Date.now(),
-          [noteField]: noteTrim
-        },
-        'Integrazione richiesta salvata.'
-      )
+      const upd: Record<string, any> = {
+        [esitoField]: ESITO_INTEGRAZIONE,
+        [dtEsitoField]: Date.now(),
+        [statoField]: stato ?? STATO_INTEGRAZIONE,
+        [dtStatoField]: Date.now(),
+        [noteField]: noteTrim
+      }
+
+      const ruoloDest = getPrevRoleForIntegration()
+      if (ruoloDest) {
+        try {
+          const schemaFields: Record<string, any> = (ds as any)?.getSchema?.()?.fields || {}
+          const fStato = getSchemaFieldNameCI(schemaFields, `stato_${ruoloDest}`)
+          const fDtStato = getSchemaFieldNameCI(schemaFields, `dt_stato_${ruoloDest}`)
+          const fPresa = getSchemaFieldNameCI(schemaFields, `presa_in_carico_${ruoloDest}`)
+          const fDtPresa = getSchemaFieldNameCI(schemaFields, `dt_presa_in_carico_${ruoloDest}`)
+          const fEsito = getSchemaFieldNameCI(schemaFields, `esito_${ruoloDest}`)
+          const fDtEsito = getSchemaFieldNameCI(schemaFields, `dt_esito_${ruoloDest}`)
+          if (fStato) upd[fStato] = STATO_DA_PRENDERE
+          if (fDtStato) upd[fDtStato] = Date.now()
+          if (fPresa) upd[fPresa] = PRESA_DA_PRENDERE
+          if (fDtPresa) upd[fDtPresa] = null
+          if (fEsito) upd[fEsito] = null
+          if (fDtEsito) upd[fDtEsito] = null
+        } catch {}
+      }
+
+      await runApplyEdits(upd, 'Integrazione richiesta salvata.')
+      if (ruoloDest) {
+        void closeCycleLog({ eventoChiusura: `INTEGRAZIONE_RICHIESTA_A_${ruoloDest}`, ruoloDestinatario: ruoloDest, noteChiusura: noteTrim, fase: role })
+      }
       setPending(null)
       setConfirmAttempted(false)
     } catch (e: any) {
@@ -2127,7 +2252,31 @@ function ActionsPanel (props: {
         upd[statoField] = stato
         upd[dtStatoField] = Date.now()
       }
+
+      const ruoloDest = esito === ESITO_APPROVATA ? getNextRoleForForward() : ''
+      if (ruoloDest) {
+        try {
+          const schemaFields: Record<string, any> = (ds as any)?.getSchema?.()?.fields || {}
+          const fStato = getSchemaFieldNameCI(schemaFields, `stato_${ruoloDest}`)
+          const fDtStato = getSchemaFieldNameCI(schemaFields, `dt_stato_${ruoloDest}`)
+          const fPresa = getSchemaFieldNameCI(schemaFields, `presa_in_carico_${ruoloDest}`)
+          const fDtPresa = getSchemaFieldNameCI(schemaFields, `dt_presa_in_carico_${ruoloDest}`)
+          const fEsito = getSchemaFieldNameCI(schemaFields, `esito_${ruoloDest}`)
+          const fDtEsito = getSchemaFieldNameCI(schemaFields, `dt_esito_${ruoloDest}`)
+          if (fStato) upd[fStato] = STATO_DA_PRENDERE
+          if (fDtStato) upd[fDtStato] = Date.now()
+          if (fPresa) upd[fPresa] = PRESA_DA_PRENDERE
+          if (fDtPresa) upd[fDtPresa] = null
+          if (fEsito) upd[fEsito] = null
+          if (fDtEsito) upd[fDtEsito] = null
+        } catch {}
+      }
+
       await runApplyEdits(upd, `Esito salvato: ${label}.`)
+      if (esito === ESITO_APPROVATA) {
+        const evento = ruoloDest ? `TRASMISSIONE_A_${ruoloDest}` : 'APPROVAZIONE'
+        void closeCycleLog({ eventoChiusura: evento, ruoloDestinatario: ruoloDest, fase: role })
+      }
       setPending(null)
       setConfirmAttempted(false)
     } catch (e: any) {
@@ -2159,6 +2308,7 @@ function ActionsPanel (props: {
       }
 
       await runApplyEdits(upd, 'Esito salvato: Respinta.')
+      void closeCycleLog({ eventoChiusura: 'RESPINTA', noteChiusura: finalNote, fase: role })
       setPending(null)
       setConfirmAttempted(false)
     } catch (e: any) {
@@ -2173,10 +2323,12 @@ function ActionsPanel (props: {
         {
           [statoDAField]: STATO_DA_PRENDERE,
           [dtStatoDAField]: Date.now(),
-          [presaDAField]: PRESA_DA_PRENDERE
+          [presaDAField]: PRESA_DA_PRENDERE,
+          [dtPresaDAField]: null
         },
         'Trasmesso a DA.'
       )
+      void closeCycleLog({ eventoChiusura: 'TRASMISSIONE_A_DA', ruoloDestinatario: 'DA', fase: role })
       setPending(null)
       setConfirmAttempted(false)
     } catch (e: any) {
@@ -2403,18 +2555,19 @@ function ActionsPanel (props: {
 
             {/* ASSEGNA TI (solo RZ) */}
             {pending === 'ASSEGNA_TI' && role === 'RZ' && (
-              <div style={{ display: 'grid', gap: 6 }}>
+              <div style={{ display: 'grid', gap: 6, justifyItems: 'start' }}>
                 <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
-                  <div style={{ fontSize: titleFontSize, fontWeight: 700 }}>TI</div>
-                  <div style={labelReqStyle(true, tiReqErr)}>(obbligatoria)</div>
+                  <div style={labelReqStyle(true, tiReqErr)}>Scelta obbligatoria</div>
                 </div>
 
                 <select
                   value={tiSelected}
                   onChange={(e) => setTiSelected(e.target.value)}
-                  disabled={loading || tiLoading}
+                  disabled={loading}
                   style={{
-                    width: '100%',
+                    width: 'auto',
+                    minWidth: 280,
+                    maxWidth: '100%',
                     padding: '8px 10px',
                     borderRadius: 8,
                     border: `1px solid ${tiReqErr ? '#d13438' : 'rgba(0,0,0,0.15)'}`,
@@ -2429,26 +2582,12 @@ function ActionsPanel (props: {
                   ))}
                 </select>
 
-                {tiLoading && (
-                  <div style={{ fontSize: 12, opacity: 0.75 }}>Carico elenco TI…</div>
-                )}
                 {!tiLoading && !tiLoadErr && tiOptions.length === 0 && (
                   <div style={{ fontSize: 12, opacity: 0.75 }}>Nessun TI trovato.</div>
                 )}
                 {!!tiLoadErr && (
                   <div style={{ fontSize: 12, color: '#d13438' }}>Errore elenco TI: {tiLoadErr}</div>
                 )}
-
-                <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-start' }}>
-                  <Button
-                    type='tertiary'
-                    onClick={() => void loadTiOptions()}
-                    disabled={loading || tiLoading}
-                    style={{ padding: '6px 10px' }}
-                  >
-                    Aggiorna elenco
-                  </Button>
-                </div>
               </div>
             )}
 
@@ -3160,7 +3299,11 @@ const isPgOnlyField = React.useCallback((fieldName: string) => {
   const splitMultiValues = React.useCallback((raw: any): string[] => {
     if (raw == null || raw === '') return []
     if (Array.isArray(raw)) return raw.map(x => String(x)).filter(Boolean)
-    return String(raw).split(',').map(s => s.trim()).filter(Boolean)
+    const s = String(raw).trim()
+    if (!s) return []
+    const artMatches = s.match(/Art\s*\d+(?:\.\d+)?/gi)
+    if (artMatches && artMatches.length > 1) return artMatches.map(x => x.replace(/\s+/g, '')).filter(Boolean)
+    return s.split(/[;,\n]+/).map(v => v.trim()).filter(Boolean)
   }, [])
 
   const renderDash = (txt = '—') => <div style={{ fontSize: 13, fontWeight: 600, color: 'rgba(0,0,0,0.55)' }}>{txt}</div>
@@ -3338,8 +3481,7 @@ const isPgOnlyField = React.useCallback((fieldName: string) => {
         <div style={{ display: 'grid', gap: 6 }}>
           {altreCodes.map((code, idx) => {
             const descrFull = getSurveyChoiceLabel('norma3', code)
-            const descr = String(descrFull).replace(/^Art\.?\s*\d+\s*-\s*/i, '')
-            return <div key={idx} style={{ fontSize: 13, lineHeight: 1.45, color: '#111827' }}>{descr}</div>
+            return <div key={idx} style={{ fontSize: 13, lineHeight: 1.45, color: '#111827' }}>{descrFull}</div>
           })}
         </div>
         )
@@ -3347,8 +3489,24 @@ const isPgOnlyField = React.useCallback((fieldName: string) => {
 
     const descrFatti = formatFieldValue(getRawField('descrizione_fatti'), 'descrizione_fatti', fieldTypeMap?.descrizione_fatti, 'Descrizione dettagliata dell’infrazione')
     const circ = formatFieldValue(getRawField('circostanze'), 'circostanze', fieldTypeMap?.circostanze, 'Circostanze rilevanti dell’infrazione')
+    const presenzaTrasgressore = formatFieldValue(getRawField('presenza_trasgressore'), 'presenza_trasgressore', fieldTypeMap?.presenza_trasgressore, 'Il trasgressore era presente?')
     const noteBody = (
       <div style={{ display: 'grid', gap: 10 }}>
+        {!isEmptyValue(getRawField('presenza_trasgressore')) && (
+          <div>
+            <div style={{ fontSize: 12, color: '#6b7280', textAlign: 'left', marginBottom: 4, fontWeight: 400 }}>Presenza del trasgressore</div>
+            <div style={{
+              fontSize: 13,
+              whiteSpace: 'pre-wrap',
+              wordBreak: 'break-word',
+              padding: '8px 10px',
+              border: '1px solid rgba(0,0,0,0.10)',
+              borderRadius: 8,
+              background: 'rgba(0,0,0,0.02)',
+              minHeight: 44
+            }}>{presenzaTrasgressore == null || presenzaTrasgressore === '' ? '—' : presenzaTrasgressore}</div>
+          </div>
+        )}
         <div>
           <div style={{ fontSize: 12, color: '#6b7280', textAlign: 'left', marginBottom: 4, fontWeight: 400 }}>Descrizione dettagliata della violazione</div>
           <div style={{
@@ -3551,38 +3709,6 @@ if (!hasSel) {
         <div style={{ marginTop: 8 }}>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
             <div style={{ fontWeight: 700, fontSize: 13 }}>Allegati</div>
-            <button
-              type="button"
-              onClick={() => loadAttachments()}
-              disabled={!hasSel || attachmentsLoading}
-              onMouseEnter={(e) => {
-                if (!(!hasSel || attachmentsLoading)) {
-                  e.currentTarget.style.background = '#eaf2ff'
-                  e.currentTarget.style.borderColor = '#2f6fed'
-                  e.currentTarget.style.color = '#1d4ed8'
-                }
-              }}
-              onMouseLeave={(e) => {
-                if (!(!hasSel || attachmentsLoading)) {
-                  e.currentTarget.style.background = '#fff'
-                  e.currentTarget.style.borderColor = 'rgba(0,0,0,0.12)'
-                  e.currentTarget.style.color = '#111827'
-                }
-              }}
-              style={{
-                padding: '6px 10px',
-                borderRadius: 10,
-                border: '1px solid rgba(0,0,0,0.12)',
-                background: '#fff',
-                color: '#111827',
-                cursor: (!hasSel || attachmentsLoading) ? 'not-allowed' : 'pointer',
-                fontSize: 12,
-                fontWeight: 600,
-                transition: 'all 0.15s ease'
-              }}
-            >
-              Aggiorna
-            </button>
           </div>
 
           {!hasSel && (
