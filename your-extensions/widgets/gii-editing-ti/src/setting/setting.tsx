@@ -21,6 +21,22 @@ function toImmutableCfg(base:any, patch:Record<string, any>) {
   return next
 }
 
+
+function parseCoordInput(raw:any): number {
+  const s = String(raw ?? '').trim()
+  if (!s) return 0
+  const normalized = s.replace(/\s+/g, '').replace(',', '.')
+  const n = Number(normalized)
+  return Number.isFinite(n) ? n : 0
+}
+
+function formatCoordInput(v:any): string {
+  if (v == null) return ''
+  if (typeof v === 'number') return Number.isFinite(v) ? String(v) : ''
+  const s = String(v).trim()
+  return s
+}
+
 function getSchemaSnapshot(dsId: string) {
   const ds: any = dsId ? DataSourceManager.getInstance().getDataSource(dsId) : null
   const url = String(ds?.getDataSourceJson?.()?.url || ds?.dataSourceJson?.url || '').trim()
@@ -173,16 +189,16 @@ export default function Setting(props: AllWidgetSettingProps<IMConfig>) {
         <div style={{ display:'flex', gap: 10, alignItems:'center', flexWrap:'wrap' }}>
           <div style={{ flex:'0 0 auto' }}>
             <div style={{ ...P.hint, marginTop: 0 }}>Lon</div>
-            <input type='number' value={cfg.officeLonWgs84 ?? 0}
-              onChange={e=>set('officeLonWgs84', Number(e.target.value))} style={{...P.inp, width:120}}/>
+            <input type='text' inputMode='decimal' value={formatCoordInput(cfg.officeLonWgs84)}
+              onChange={e=>set('officeLonWgs84', parseCoordInput(e.target.value))} placeholder='es. 9.123456 o 9,123456' style={{...P.inp, width:160}}/>
           </div>
           <div style={{ flex:'0 0 auto' }}>
             <div style={{ ...P.hint, marginTop: 0 }}>Lat</div>
-            <input type='number' value={cfg.officeLatWgs84 ?? 0}
-              onChange={e=>set('officeLatWgs84', Number(e.target.value))} style={{...P.inp, width:120}}/>
+            <input type='text' inputMode='decimal' value={formatCoordInput(cfg.officeLatWgs84)}
+              onChange={e=>set('officeLatWgs84', parseCoordInput(e.target.value))} placeholder='es. 39.123456 o 39,123456' style={{...P.inp, width:160}}/>
           </div>
         </div>
-        <div style={P.hint}>Usate come geometria di default quando la localizzazione non è obbligatoria (req_point=0) e l&apos;utente non clicca in mappa.</div>
+        <div style={P.hint}>Usate come geometria di default quando la localizzazione non è obbligatoria (req_point=0) e l&apos;utente non clicca in mappa. Accetta sia il punto sia la virgola come separatore decimale.</div>
       </div>}
 
 

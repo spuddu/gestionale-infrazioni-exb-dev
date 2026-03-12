@@ -523,50 +523,6 @@ function isFiniteNum (n: any): boolean {
   return typeof n === 'number' && Number.isFinite(n)
 }
 
-function coerceFiniteNumber (v: any): number | null {
-  if (typeof v === 'number') return Number.isFinite(v) ? v : null
-  const s = String(v ?? '').trim()
-  if (!s) return null
-  const normalized = s.replace(/\s+/g, '').replace(',', '.')
-  const n = Number(normalized)
-  return Number.isFinite(n) ? n : null
-}
-
-function readConfiguredOfficePoint (cfg: any): { lon: number, lat: number } | null {
-  const pickFirst = (arr: any[]): number | null => {
-    for (const item of arr) {
-      const n = coerceFiniteNumber(item)
-      if (n != null) return n
-    }
-    return null
-  }
-
-  const lon = pickFirst([
-    cfg?.officeLonWgs84,
-    cfg?.officeLon,
-    cfg?.officeLongitude,
-    cfg?.officeLon4326,
-    cfg?.lonUfficio,
-    cfg?.longitudeUfficio,
-    cfg?.xUfficio,
-    cfg?.officeX
-  ])
-  const lat = pickFirst([
-    cfg?.officeLatWgs84,
-    cfg?.officeLat,
-    cfg?.officeLatitude,
-    cfg?.officeLat4326,
-    cfg?.latUfficio,
-    cfg?.latitudeUfficio,
-    cfg?.yUfficio,
-    cfg?.officeY
-  ])
-
-  if (lon == null || lat == null) return null
-  if (!isValidOfficePoint(lon, lat)) return null
-  return { lon, lat }
-}
-
 function isValidOfficePoint (lon: any, lat: any): boolean {
   if (!isFiniteNum(lon) || !isFiniteNum(lat)) return false
   // evita default 0,0 (non configurato)
@@ -694,8 +650,10 @@ function normalizeSettoreCode (area: string, v: any): string {
   if (!s) return ''
   if (area === 'AGR') {
     if (/^[1-6]$/.test(s)) return `D${s}`
-    const m = s.match(/^D?([1-6])$/)
+    const m = s.match(/^D?\s*([1-6])$/)
     if (m) return `D${m[1]}`
+    const md = s.match(/(?:DISTRETTO|SETTORE|DISTR\.)\s*D?\s*([1-6])/)
+    if (md) return `D${md[1]}`
   }
   if (area === 'TEC') {
     if (s === 'DS' || s === 'D S') return 'DS'
@@ -705,6 +663,94 @@ function normalizeSettoreCode (area: string, v: any): string {
     if (s === 'ALL' || s === 'TUTTI' || s === 'TUTTE') return 'ALL'
   }
   return s
+}
+
+function firstMeaningfulValue (...vals: any[]): any {
+  for (const v of vals) {
+    if (v == null) continue
+    if (typeof v === 'string') {
+      if (v.trim() !== '') return v
+      continue
+    }
+    if (Array.isArray(v)) {
+      if (v.length) return v
+      continue
+    }
+    return v
+  }
+  return undefined
+}
+
+function inferSettoreCodeFromUsername (area: string, usernameRaw: any): string {
+  const u = String(usernameRaw ?? '').trim().toUpperCase()
+  if (!u) return ''
+  if (area === 'AGR') {
+    const m = u.match(/(?:^|[_\-\s])D([1-6])(?:$|[_\-\s])/)
+    if (m) return `D${m[1]}`
+  }
+  if (area === 'TEC') {
+    if (/(?:^|[_\-\s])DS(?:$|[_\-\s])/.test(u)) return 'DS'
+  }
+  if (area === 'AMM') {
+    if (/(?:^|[_\-\s])CR(?:$|[_\-\s])/.test(u)) return 'CR'
+  }
+  return ''
+}
+
+function readGiiUserContext (): { username: string, role: string, area: string, settore: string, areaRaw: any, settoreRaw: any } {
+  const w: any = window as any
+  const roleObj: any = w.__giiUserRole || {}
+  const userObj: any = w.__giiUser || {}
+  const areaObj: any = w.__giiArea || {}
+  const settoreObj: any = w.__giiSettore || w.__giiSector || {}
+
+  const username = String(firstMeaningfulValue(
+    w.__giiUsername,
+    userObj.username, userObj.userName, userObj.userId,
+    roleObj.username, roleObj.userName, roleObj.userId
+  ) || '').trim()
+
+  const role = String(firstMeaningfulValue(
+    w.__giiRuolo, w.__giiRole,
+    userObj.ruoloCod, userObj.ruoloCode, userObj.ruolo,
+    roleObj.ruoloCod, roleObj.ruoloCode, roleObj.ruolo,
+    userObj.ruoloLabel, roleObj.ruoloLabel
+  ) || '').trim()
+
+  const areaRaw = firstMeaningfulValue(
+    w.__giiAreaCode,
+    userObj.area_cod, userObj.areaCode, userObj.area,
+    roleObj.area_cod, roleObj.areaCode, roleObj.area,
+    areaObj.cod, areaObj.code, areaObj.name,
+    w.__giiAreaLabel,
+    userObj.areaLabel, roleObj.areaLabel, areaObj.label,
+    typeof areaObj === 'string' ? areaObj : undefined
+  )
+  const area = normalizeAreaCode(areaRaw)
+
+  const settoreRawPrimary = firstMeaningfulValue(
+    w.__giiSettoreCode, w.__giiSectorCode,
+    userObj.settore_cod, userObj.settoreCode, userObj.settore,
+    roleObj.settore_cod, roleObj.settoreCode, roleObj.settore,
+    settoreObj.cod, settoreObj.code, settoreObj.name,
+    w.__giiSettoreLabel, w.__giiSectorLabel,
+    userObj.settoreLabel, roleObj.settoreLabel, settoreObj.label,
+    typeof settoreObj === 'string' ? settoreObj : undefined
+  )
+  const settoreFromPrimary = normalizeSettoreCode(area, settoreRawPrimary)
+  const settoreFromUsername = inferSettoreCodeFromUsername(area, username)
+  const settore = settoreFromUsername || settoreFromPrimary
+  const settoreRaw = settoreFromUsername || settoreRawPrimary
+
+  return { username, role, area, settore, areaRaw, settoreRaw }
+}
+
+function parseOfficeCoord (v: any): number {
+  if (typeof v === 'number') return Number.isFinite(v) ? v : 0
+  const s = String(v ?? '').trim().replace(',', '.')
+  if (!s) return 0
+  const n = Number(s)
+  return Number.isFinite(n) ? n : 0
 }
 
 function buildTiCreateViewServiceNames (areaRaw: any, settoreRaw: any): string[] {
@@ -3158,71 +3204,51 @@ function NuovaPraticaForm (p: {
     norma_violata3: g('norma_violata3')
   }), [n3parziale, n3totale, draft.norma_violata3])
 
-  const officePoint = React.useMemo(() => readConfiguredOfficePoint(cfg), [
-    cfg.officeLonWgs84,
-    cfg.officeLatWgs84,
-    (cfg as any).officeLon,
-    (cfg as any).officeLat,
-    (cfg as any).officeLongitude,
-    (cfg as any).officeLatitude,
-    (cfg as any).officeLon4326,
-    (cfg as any).officeLat4326,
-    (cfg as any).lonUfficio,
-    (cfg as any).latUfficio,
-    (cfg as any).longitudeUfficio,
-    (cfg as any).latitudeUfficio,
-    (cfg as any).xUfficio,
-    (cfg as any).yUfficio,
-    (cfg as any).officeX,
-    (cfg as any).officeY
-  ])
-  const officeLon = officePoint?.lon ?? 0
-  const officeLat = officePoint?.lat ?? 0
-  const hasOffice = !!officePoint
+  const officeLon = parseOfficeCoord(cfg.officeLonWgs84)
+  const officeLat = parseOfficeCoord(cfg.officeLatWgs84)
+  const hasOffice = isValidOfficePoint(officeLon, officeLat)
 
   // View editabile TI/RZ per la creazione (mai layer madre)
   const motherRef = React.useRef<any | null>(null)
   const getLayerForCreate = React.useCallback(async () => {
-    const rawSchemaUrl = String(cfg.schemaLayerUrl || '').trim() || String((cfg as any).motherLayerUrl || '').trim()
-    const schemaUrl = ensureLayerIndex(normalizeFeatureLayerUrl(rawSchemaUrl))
-    const schemaIsBase = /\/GII_VIEW_EB_BASE\/FeatureServer\/\d+$/i.test(schemaUrl)
-    const giiRole: any = (window as any).__giiUserRole || {}
-    const area = giiRole.areaLabel || giiRole.area || giiRole.area_cod
-    const settore = giiRole.settoreLabel || giiRole.settore || giiRole.settore_cod
-    const serviceNames = buildTiCreateViewServiceNames(area, settore)
+    const schemaUrl = ensureLayerIndex(normalizeFeatureLayerUrl(String(cfg.schemaLayerUrl || '').trim() || String(cfg.motherLayerUrl || '').trim()))
+    const dsUrl = ensureLayerIndex(normalizeFeatureLayerUrl((ds as any)?.getDataSourceJson?.()?.url || (ds as any)?.dataSourceJson?.url || (ds as any)?.layer?.url || (ds as any)?.url || ''))
+    const ctx = readGiiUserContext()
+    const serviceNames = buildTiCreateViewServiceNames(ctx.areaRaw, ctx.settoreRaw)
 
-    const targetUrls = serviceNames.length
-      ? serviceNames
-          .map((name) => replaceServiceNameInLayerUrl(schemaUrl, name))
-          .map((u) => ensureLayerIndex(normalizeFeatureLayerUrl(u || '')))
-          .filter((u): u is string => !!u)
-      : (schemaUrl && !schemaIsBase ? [schemaUrl] : [])
-
-    const uniqueTargetUrls = Array.from(new Set(targetUrls))
-    if (!uniqueTargetUrls.length) {
-      throw new Error('View editabile TI non risolta per area/settore utente.')
+    if (!serviceNames.length) {
+      throw new Error(`View editabile TI non risolta dal contesto utente (utente=${ctx.username || '∅'}; area=${String(ctx.areaRaw ?? '') || '∅'}; settore=${String(ctx.settoreRaw ?? '') || '∅'}).`)
     }
 
-    const currentUrl = ensureLayerIndex(normalizeFeatureLayerUrl(String((motherRef.current as any)?.url || '')), motherRef.current)
-    if (motherRef.current && currentUrl && uniqueTargetUrls.includes(currentUrl) && typeof (motherRef.current as any)?.applyEdits === 'function') {
-      return motherRef.current
+    const baseUrl = dsUrl || schemaUrl
+    if (!baseUrl) throw new Error('URL schema non configurata per la creazione del rapporto.')
+
+    const candidateUrls = serviceNames
+      .map((name) => replaceServiceNameInLayerUrl(baseUrl, name))
+      .filter((u): u is string => !!u)
+      .map((u) => ensureLayerIndex(normalizeFeatureLayerUrl(u)))
+      .filter(Boolean)
+
+    if (!candidateUrls.length) {
+      throw new Error(`Impossibile costruire la view di creazione dal contesto utente (utente=${ctx.username || '∅'}; area=${ctx.area || String(ctx.areaRaw || '')}; settore=${ctx.settore || String(ctx.settoreRaw || '')}).`)
     }
 
     const FeatureLayer = await loadEsriModule<any>('esri/layers/FeatureLayer')
-    for (const url of uniqueTargetUrls) {
+    for (const url of candidateUrls) {
       try {
-        const fl = new FeatureLayer({ url, outFields: ['*'] })
-        if (fl && typeof fl.applyEdits === 'function') {
+        if (motherRef.current && String((motherRef.current as any)?.url || '') === url) return motherRef.current
+        const fl = new FeatureLayer({ url })
+        if (fl && (typeof fl.applyEdits === 'function' || typeof fl.url === 'string')) {
           motherRef.current = fl
           return fl
         }
       } catch {
-        // prova il candidato successivo senza forzare load() su layer non autorizzati
+        // prova il candidato successivo
       }
     }
 
-    throw new Error('View editabile TI non risolta per area/settore utente.')
-  }, [cfg.schemaLayerUrl, (cfg as any).motherLayerUrl])
+    throw new Error(`View editabile TI non disponibile per il contesto utente corrente (${candidateUrls.join(', ')}).`)
+  }, [cfg.schemaLayerUrl, cfg.motherLayerUrl, ds])
 
   const toTs = (v: string) => {
     if (!v) return null
@@ -3417,10 +3443,10 @@ function NuovaPraticaForm (p: {
     if (Object.keys(delta.oldMap).length === 0) return 0
     const logLayer = await getLogLayer()
     if (!logLayer?.applyEdits) return 0
-    const giiRole: any = (window as any).__giiUserRole || {}
-    const area = normalizeAreaCode(giiRole.areaLabel || giiRole.area || giiRole.area_cod)
-    const settore = normalizeSettoreCode(area, giiRole.settoreLabel || giiRole.settore || giiRole.settore_cod)
-    const username = String(giiRole.username || (window as any).__giiUser?.username || '').trim()
+    const giiCtx = readGiiUserContext()
+    const area = giiCtx.area
+    const settore = giiCtx.settore
+    const username = String(giiCtx.username || '').trim()
     const sessionId = `ti-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`
 
     let openFeature = await findOpenTiCycle(parentGlobalId)
@@ -3534,15 +3560,20 @@ function NuovaPraticaForm (p: {
         vArtAttrs[field] = norma3Set.has(art) ? 1 : null
       }
 
-      const giiRole: any = (window as any).__giiUserRole || {}
-      const roleAreaLabel = normalizeAreaCode(giiRole.areaLabel || giiRole.area || giiRole.area_cod)
-      const roleSettoreLabel = normalizeSettoreCode(roleAreaLabel, giiRole.settoreLabel || giiRole.settore || giiRole.settore_cod)
+      const giiCtx = readGiiUserContext()
+      const roleAreaLabel = giiCtx.area
+      const roleSettoreLabel = giiCtx.settore
+      const nowTs = Date.now()
       const initialAreaLabel = normalizeAreaCode(p.initialData?.area_cod ?? p.initialData?.['Area (codice)'] ?? p.initialData?.AREA_COD)
       const initialSettoreLabel = normalizeSettoreCode(initialAreaLabel || roleAreaLabel, p.initialData?.settore_cod ?? p.initialData?.['Settore (codice)'] ?? p.initialData?.SETTORE_COD)
       const attrs: Record<string, any> = {
         origine_pratica: mode === 'create' ? 2 : (p.initialData?.origine_pratica ?? p.initialData?.Origine_pratica ?? p.initialData?.ORIGINE_PRATICA ?? 2),
-        stato_TI: mode === 'create' ? 1 : (p.initialData?.stato_TI ?? p.initialData?.Stato_TI ?? p.initialData?.STATO_TI ?? null),
-        utente_loggato: String(giiRole.username || giiRole.userId || p.initialData?.utente_loggato || ''),
+        stato_TI: mode === 'create' ? STATO_PRESA_IN_CARICO : (p.initialData?.stato_TI ?? p.initialData?.Stato_TI ?? p.initialData?.STATO_TI ?? null),
+        presa_in_carico_TI: mode === 'create' ? PRESA_IN_CARICO : (p.initialData?.presa_in_carico_TI ?? p.initialData?.Presa_in_carico_TI ?? p.initialData?.PRESA_IN_CARICO_TI ?? null),
+        dt_stato_TI: mode === 'create' ? nowTs : (p.initialData?.dt_stato_TI ?? p.initialData?.Dt_stato_TI ?? p.initialData?.DT_STATO_TI ?? null),
+        dt_presa_in_carico_TI: mode === 'create' ? nowTs : (p.initialData?.dt_presa_in_carico_TI ?? p.initialData?.Dt_presa_in_carico_TI ?? p.initialData?.DT_PRESA_IN_CARICO_TI ?? null),
+        ti_assegnato_username: mode === 'create' ? String(giiCtx.username || '') : (p.initialData?.ti_assegnato_username ?? p.initialData?.Ti_assegnato_username ?? p.initialData?.TI_ASSEGNATO_USERNAME ?? null),
+        utente_loggato: String(giiCtx.username || p.initialData?.utente_loggato || ''),
         area_cod: String((mode === 'create' ? roleAreaLabel : (initialAreaLabel || roleAreaLabel)) || ''),
         settore_cod: String((mode === 'create' ? roleSettoreLabel : (initialSettoreLabel || roleSettoreLabel)) || ''),
         tecnico_rilevatore: g('tecnico_rilevatore') || null,
