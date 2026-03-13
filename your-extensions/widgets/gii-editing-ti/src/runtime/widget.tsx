@@ -745,6 +745,133 @@ function readGiiUserContext (): { username: string, role: string, area: string, 
   return { username, role, area, settore, areaRaw, settoreRaw }
 }
 
+function normalizeIntOrNull (v: any): number | null {
+  if (v == null || v === '') return null
+  const n = Number(v)
+  return Number.isFinite(n) ? Math.trunc(n) : null
+}
+
+function shortRoleLabel (roleRaw: any, usernameRaw?: any): string {
+  const role = String(roleRaw ?? '').trim().toUpperCase()
+  if (/(^|[^A-Z])TI([^A-Z]|$)/.test(role)) return 'TI'
+  if (/(^|[^A-Z])TR([^A-Z]|$)/.test(role)) return 'TR'
+  if (/(^|[^A-Z])RZ([^A-Z]|$)/.test(role)) return 'RZ'
+  if (/(^|[^A-Z])RI([^A-Z]|$)/.test(role)) return 'RI'
+  const username = String(usernameRaw ?? '').trim().toUpperCase()
+  if (/(^|[_\-\s])TI([_\-\s]|$)/.test(username)) return 'TI'
+  if (/(^|[_\-\s])TR([_\-\s]|$)/.test(username)) return 'TR'
+  if (/(^|[_\-\s])RZ([_\-\s]|$)/.test(username)) return 'RZ'
+  if (/(^|[_\-\s])RI([_\-\s]|$)/.test(username)) return 'RI'
+  return ''
+}
+
+function getCreateOfficeFallback (area: string, settore: string): { id: number | null, label: string } {
+  if (area === 'AGR' && settore === 'D1') return { id: 2, label: 'Quartucciu (loc. Is Forreddus)' }
+  return { id: null, label: '' }
+}
+
+function pickMostCommonText (values: any[]): string {
+  const counts = new Map<string, number>()
+  for (const v of values || []) {
+    const s = String(v ?? '').trim()
+    if (!s) continue
+    counts.set(s, (counts.get(s) || 0) + 1)
+  }
+  let best = ''
+  let bestCount = 0
+  counts.forEach((count, value) => {
+    if (count > bestCount) {
+      best = value
+      bestCount = count
+    }
+  })
+  return best
+}
+
+function pickMostCommonInt (values: any[]): number | null {
+  const counts = new Map<number, number>()
+  for (const v of values || []) {
+    const n = normalizeIntOrNull(v)
+    if (n == null) continue
+    counts.set(n, (counts.get(n) || 0) + 1)
+  }
+  let best: number | null = null
+  let bestCount = 0
+  counts.forEach((count, value) => {
+    if (count > bestCount) {
+      best = value
+      bestCount = count
+    }
+  })
+  return best
+}
+
+async function resolveCreateSurveyLikeDefaults (layer: any, ctx: { username: string, role: string, area: string, settore: string }): Promise<{ tecnicoRilevatore: string, ufficioZona: string, idUfficio: number | null }> {
+  const w: any = window as any
+  const roleShort = shortRoleLabel(ctx.role, ctx.username)
+  const tecnicoFromRole = roleShort && ctx.settore ? `${roleShort} ${ctx.settore}` : (roleShort || String(ctx.username || '').trim())
+  let tecnicoRilevatore = tecnicoFromRole
+
+  let ufficioZona = String(firstMeaningfulValue(
+    w.__giiUfficioLabel, w.__giiOfficeLabel,
+    w.__giiUser?.ufficio_zona, w.__giiUser?.ufficioZona, w.__giiUser?.ufficio,
+    w.__giiUserRole?.ufficio_zona, w.__giiUserRole?.ufficioZona, w.__giiUserRole?.ufficio
+  ) || '').trim()
+
+  let idUfficio = normalizeIntOrNull(firstMeaningfulValue(
+    w.__giiUfficioId, w.__giiOfficeId,
+    w.__giiUser?.id_ufficio, w.__giiUser?.ufficio_id,
+    w.__giiUserRole?.id_ufficio, w.__giiUserRole?.ufficio_id
+  ))
+
+  try {
+    if (layer?.queryFeatures) {
+      const q = layer.createQuery ? layer.createQuery() : {}
+      q.where = '1=1'
+      q.outFields = ['tecnico_rilevatore', 'ufficio_zona', 'id_ufficio', 'area_cod', 'settore_cod']
+      q.returnGeometry = false
+      q.num = 50
+      const res = await layer.queryFeatures(q)
+      const attrsList = (res?.features || []).map((f: any) => f?.attributes || {})
+      const scoped = attrsList.filter((attrs: any) => {
+        const areaOk = !ctx.area || normalizeAreaCode(attrs?.area_cod) === ctx.area
+        const settoreOk = !ctx.settore || normalizeSettoreCode(ctx.area, attrs?.settore_cod) === ctx.settore
+        return areaOk && settoreOk
+      })
+      const officeTextFromData = pickMostCommonText(scoped.map((attrs: any) => attrs?.ufficio_zona))
+      const officeIdFromData = pickMostCommonInt(scoped.map((attrs: any) => attrs?.id_ufficio))
+      const numericOfficeText = normalizeIntOrNull(ufficioZona)
+      if (!ufficioZona && officeTextFromData) {
+        ufficioZona = officeTextFromData
+      } else if (officeTextFromData && numericOfficeText != null) {
+        if (idUfficio == null) idUfficio = numericOfficeText
+        ufficioZona = officeTextFromData
+      }
+      if (idUfficio == null && officeIdFromData != null) idUfficio = officeIdFromData
+      if (!tecnicoRilevatore) {
+        const tecnicoFromData = pickMostCommonText(scoped.map((attrs: any) => attrs?.tecnico_rilevatore))
+        if (tecnicoFromData) tecnicoRilevatore = tecnicoFromData
+      }
+    }
+  } catch {
+    // fallback sotto
+  }
+
+  const fallback = getCreateOfficeFallback(ctx.area, ctx.settore)
+  const numericOfficeText = normalizeIntOrNull(ufficioZona)
+  if ((!ufficioZona || numericOfficeText != null) && fallback.label) {
+    if (idUfficio == null && numericOfficeText != null) idUfficio = numericOfficeText
+    ufficioZona = fallback.label
+  }
+  if (idUfficio == null && fallback.id != null) idUfficio = fallback.id
+
+  return {
+    tecnicoRilevatore: tecnicoRilevatore || String(ctx.username || '').trim(),
+    ufficioZona,
+    idUfficio
+  }
+}
+
 function parseOfficeCoord (v: any): number {
   if (typeof v === 'number') return Number.isFinite(v) ? v : 0
   const s = String(v ?? '').trim().replace(',', '.')
@@ -2828,13 +2955,13 @@ function NpSel(p: { value: string; onChange: (v: string) => void; options: reado
   )
 }
 
-function NpText(p: { value: string; onChange: (v: string) => void; placeholder?: string; multiline?: boolean; disabled?: boolean }) {
+function NpText(p: { value: string; onChange: (v: string) => void; placeholder?: string; multiline?: boolean; disabled?: boolean; maxLength?: number }) {
   const st = p.disabled ? S.inpDis : S.inp
   if (p.multiline) return (
     <textarea value={p.value} onChange={e => p.onChange(e.target.value)} placeholder={p.placeholder}
-      rows={3} style={{ ...st, resize: 'vertical' }} disabled={p.disabled}/>
+      rows={3} style={{ ...st, resize: 'vertical' }} disabled={p.disabled} maxLength={p.maxLength}/>
   )
-  return <input type='text' value={p.value} onChange={e => p.onChange(e.target.value)} placeholder={p.placeholder} style={st} disabled={p.disabled}/>
+  return <input type='text' value={p.value} onChange={e => p.onChange(e.target.value)} placeholder={p.placeholder} style={st} disabled={p.disabled} maxLength={p.maxLength}/>
 }
 
 function NpInt(p: { value: string; onChange: (v: string) => void; disabled?: boolean }) {
@@ -2927,6 +3054,20 @@ function NuovaPraticaForm (p: {
   const [baselineDraft, setBaselineDraft] = React.useState<NpDraft>(() => draftFromRecord(p.initialData || {}))
   const [saving, setSaving] = React.useState(false)
   const [msg, setMsg] = React.useState<{ kind: 'ok' | 'err'; text: string } | null>(null)
+  const [showCreateSuccessPopup, setShowCreateSuccessPopup] = React.useState(false)
+  const [createSuccessPraticaCode, setCreateSuccessPraticaCode] = React.useState('')
+  const [validationPopup, setValidationPopup] = React.useState<{ title: string; text: string } | null>(null)
+
+  React.useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return
+      if (validationPopup) { setValidationPopup(null); return }
+      if (showCreateSuccessPopup) { setShowCreateSuccessPopup(false); setCreateSuccessPraticaCode(''); return }
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [validationPopup, showCreateSuccessPopup])
+  const createStartedAtRef = React.useRef<number>(Date.now())
   const [attachmentFiles, setAttachmentFiles] = React.useState<File[]>([])
   const [attachmentInputKey, setAttachmentInputKey] = React.useState(0)
   const [attachments, setAttachments] = React.useState<Array<{ id: number; name?: string; size?: number; contentType?: string; url?: string }>>([])
@@ -2942,6 +3083,7 @@ function NuovaPraticaForm (p: {
   const [replaceInputKey, setReplaceInputKey] = React.useState(0)
 
   React.useEffect(() => {
+    if (mode === 'create') createStartedAtRef.current = Date.now()
     const nextBase = draftFromRecord(p.initialData || {})
     setDraft(nextBase)
     setBaselineDraft(nextBase)
@@ -2955,6 +3097,30 @@ function NuovaPraticaForm (p: {
     setAttachmentsError(null)
     setMsg(null)
   }, [mode, editOid, p.initialData])
+
+  React.useEffect(() => {
+    if (mode !== 'create') return
+    const giiCtx = readGiiUserContext()
+    const roleShort = shortRoleLabel(giiCtx.role, giiCtx.username)
+    const officeFallback = getCreateOfficeFallback(giiCtx.area, giiCtx.settore)
+    const today = toDraftDate(Date.now())
+    const withCreateDefaults = (prev: NpDraft): NpDraft => {
+      const next: NpDraft = { ...prev }
+      if (!String(next.tecnico_rilevatore || '').trim()) {
+        const label = roleShort && giiCtx.settore ? `${roleShort} ${giiCtx.settore}` : (roleShort || String(giiCtx.username || '').trim())
+        if (label) next.tecnico_rilevatore = label
+      }
+      if (!String(next.ufficio_zona || '').trim() && officeFallback.label) {
+        next.ufficio_zona = officeFallback.label
+      }
+      if (!String(next.data_rilevazione || '').trim()) {
+        next.data_rilevazione = today
+      }
+      return next
+    }
+    setDraft(prev => withCreateDefaults(prev))
+    setBaselineDraft(prev => withCreateDefaults(prev))
+  }, [mode])
 
   const hasPendingAttachments = attachmentFiles.length > 0
   const hasPendingAttachmentDeletes = pendingDeleteAttachmentIds.length > 0
@@ -3536,6 +3702,28 @@ function NuovaPraticaForm (p: {
       setMsg({ kind: 'ok', text: mode === 'edit' ? 'Nessuna modifica da salvare.' : 'Compila almeno un campo prima di salvare.' })
       return
     }
+
+    const cfRaw = String(g('codice_fiscale') || '').trim()
+    const pivaRaw = String(g('piva') || '').trim()
+    const cfLen = cfRaw.replace(/\s+/g, '').length
+    const pivaLen = pivaRaw.replace(/\s+/g, '').length
+
+    if (tipoSogg === 'PF' && cfRaw && cfLen < 16) {
+      setValidationPopup({
+        title: 'Codice fiscale non valido',
+        text: `Il codice fiscale deve contenere 16 caratteri. Attualmente ne risultano inseriti ${cfLen}.`
+      })
+      return
+    }
+
+    if (tipoSogg === 'PG' && pivaRaw && pivaLen < 11) {
+      setValidationPopup({
+        title: 'Partita IVA non valida',
+        text: `La partita IVA deve contenere 11 caratteri. Attualmente ne risultano inseriti ${pivaLen}.`
+      })
+      return
+    }
+
     setSaving(true); setMsg(null)
     try {
       const layer = mode === 'edit' ? await resolveLayerForEdit(ds) : await getLayerForCreate()
@@ -3564,21 +3752,28 @@ function NuovaPraticaForm (p: {
       const roleAreaLabel = giiCtx.area
       const roleSettoreLabel = giiCtx.settore
       const nowTs = Date.now()
+      const createStartTs = mode === 'create' ? createStartedAtRef.current : null
+      const createSurveyDefaults = mode === 'create' ? await resolveCreateSurveyLikeDefaults(layer, giiCtx) : null
       const initialAreaLabel = normalizeAreaCode(p.initialData?.area_cod ?? p.initialData?.['Area (codice)'] ?? p.initialData?.AREA_COD)
       const initialSettoreLabel = normalizeSettoreCode(initialAreaLabel || roleAreaLabel, p.initialData?.settore_cod ?? p.initialData?.['Settore (codice)'] ?? p.initialData?.SETTORE_COD)
       const attrs: Record<string, any> = {
+        start: mode === 'create' ? (createStartTs || nowTs) : (p.initialData?.start ?? p.initialData?.Start ?? p.initialData?.START ?? null),
+        end: mode === 'create' ? nowTs : (p.initialData?.end ?? p.initialData?.End ?? p.initialData?.END ?? null),
         origine_pratica: mode === 'create' ? 2 : (p.initialData?.origine_pratica ?? p.initialData?.Origine_pratica ?? p.initialData?.ORIGINE_PRATICA ?? 2),
         stato_TI: mode === 'create' ? STATO_PRESA_IN_CARICO : (p.initialData?.stato_TI ?? p.initialData?.Stato_TI ?? p.initialData?.STATO_TI ?? null),
         presa_in_carico_TI: mode === 'create' ? PRESA_IN_CARICO : (p.initialData?.presa_in_carico_TI ?? p.initialData?.Presa_in_carico_TI ?? p.initialData?.PRESA_IN_CARICO_TI ?? null),
         dt_stato_TI: mode === 'create' ? nowTs : (p.initialData?.dt_stato_TI ?? p.initialData?.Dt_stato_TI ?? p.initialData?.DT_STATO_TI ?? null),
         dt_presa_in_carico_TI: mode === 'create' ? nowTs : (p.initialData?.dt_presa_in_carico_TI ?? p.initialData?.Dt_presa_in_carico_TI ?? p.initialData?.DT_PRESA_IN_CARICO_TI ?? null),
         ti_assegnato_username: mode === 'create' ? String(giiCtx.username || '') : (p.initialData?.ti_assegnato_username ?? p.initialData?.Ti_assegnato_username ?? p.initialData?.TI_ASSEGNATO_USERNAME ?? null),
+        dt_assegnazione_ti: mode === 'create' ? nowTs : (p.initialData?.dt_assegnazione_ti ?? p.initialData?.Dt_assegnazione_ti ?? p.initialData?.DT_ASSEGNAZIONE_TI ?? null),
+        ti_assegnato_da: mode === 'create' ? String(giiCtx.username || '') : (p.initialData?.ti_assegnato_da ?? p.initialData?.Ti_assegnato_da ?? p.initialData?.TI_ASSEGNATO_DA ?? null),
         utente_loggato: String(giiCtx.username || p.initialData?.utente_loggato || ''),
         area_cod: String((mode === 'create' ? roleAreaLabel : (initialAreaLabel || roleAreaLabel)) || ''),
         settore_cod: String((mode === 'create' ? roleSettoreLabel : (initialSettoreLabel || roleSettoreLabel)) || ''),
-        tecnico_rilevatore: g('tecnico_rilevatore') || null,
-        ufficio_zona: g('ufficio_zona') || null,
-        data_rilevazione: toTs(g('data_rilevazione')),
+        tecnico_rilevatore: mode === 'create' ? (createSurveyDefaults?.tecnicoRilevatore || g('tecnico_rilevatore') || null) : (g('tecnico_rilevatore') || null),
+        ufficio_zona: mode === 'create' ? (createSurveyDefaults?.ufficioZona || g('ufficio_zona') || null) : (g('ufficio_zona') || null),
+        id_ufficio: mode === 'create' ? (createSurveyDefaults?.idUfficio ?? null) : (normalizeIntOrNull(p.initialData?.id_ufficio ?? p.initialData?.['ID ufficio'] ?? p.initialData?.ID_UFFICIO)),
+        data_rilevazione: mode === 'create' ? (toTs(g('data_rilevazione')) || nowTs) : toTs(g('data_rilevazione')),
         tipologia_soggetto: tipoSogg || null,
         nome: (tipoSogg === 'PF' ? g('nome') : null) || null,
         cognome: (tipoSogg === 'PF' ? g('cognome') : null) || null,
@@ -3679,17 +3874,21 @@ function NuovaPraticaForm (p: {
       if (!ok) throw new Error(err ? `${err.code ?? ''}: ${err.message ?? ''}` : JSON.stringify(res))
 
       const newOid = Number(added.objectId)
+      const newPraticaCode = buildPraticaCodeFromData({ origine_pratica: 2 }, newOid)
 
       // In create mode NON aggiornare la datasource schema/base e NON provare a selezionare il nuovo OID:
       // queste due operazioni possono riattivare il banner credenziali quando la pagina usa solo lo schema.
       setMsg({ kind: 'ok', text: 'Pratica creata.' })
       setSaving(false)
       setTimeout(() => {
+        createStartedAtRef.current = Date.now()
         setDraft({})
         setBaselineDraft({})
         setMsg(null)
         setNpTab('anagrafica')
         p.onClearPoint()
+        setCreateSuccessPraticaCode(newPraticaCode)
+        setShowCreateSuccessPopup(true)
         p.onSaved?.(newOid)
       }, 600)
     } catch (e: any) {
@@ -3729,13 +3928,28 @@ function NuovaPraticaForm (p: {
     return { kind: 'err' as const, text: 'Localizzazione obbligatoria: fai click in mappa.' }
   }, [p.clickedPointWgs84, reqPoint, hasOffice])
 
+  const editPraticaCode = React.useMemo(() => {
+    if (mode !== 'edit') return ''
+    return buildPraticaCodeFromData(p.initialData || {}, editOid)
+  }, [mode, p.initialData, editOid])
+
+  const toolbarTitleInfo = React.useMemo(() => {
+    const baseTitle = String(p.titleText || (mode === 'edit' ? 'Modifica rapporto' : 'Nuovo rapporto'))
+    if (mode !== 'edit' || !editPraticaCode) return { baseTitle, praticaCode: '' }
+    if (baseTitle.includes(editPraticaCode)) return { baseTitle: baseTitle.replace(editPraticaCode, '').trim(), praticaCode: editPraticaCode }
+    return { baseTitle, praticaCode: editPraticaCode }
+  }, [p.titleText, mode, editPraticaCode])
+
   return (
     <div style={{ width: '100%', height: '100%', display: 'flex', flexDirection: 'column', minHeight: 0 }}>
 
       {/* ── Toolbar ── */}
       <div style={{ flex: '0 0 auto', display: 'flex', alignItems: 'center', justifyContent: 'space-between',
         flexWrap: 'wrap', gap: 8, padding: '8px 0', borderBottom: '1px solid rgba(0,0,0,0.08)' }}>
-        <span style={{ fontWeight: 700, fontSize: 14 }}>{p.titleText || (mode === 'edit' ? 'Modifica rapporto' : 'Nuovo rapporto')}</span>
+        <span style={{ fontWeight: 700, fontSize: 14 }}>
+          {toolbarTitleInfo.baseTitle}
+          {toolbarTitleInfo.praticaCode ? <> <span style={{ color: '#0b5fff' }}>{toolbarTitleInfo.praticaCode}</span></> : null}
+        </span>
         <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
           {msg && <span style={{ fontSize: 12, color: msg.kind === 'ok' ? '#1a7f37' : '#b42318' }}>{msg.text}</span>}
           <button type='button' disabled={saving || !isDirty} onClick={handleSave}
@@ -3805,13 +4019,17 @@ function NuovaPraticaForm (p: {
               <div style={S.row3}>
                 <NpField label='Nome'><NpText value={g('nome')} onChange={v => set('nome', v)} disabled={saving}/></NpField>
                 <NpField label='Cognome'><NpText value={g('cognome')} onChange={v => set('cognome', v)} disabled={saving}/></NpField>
-                <NpField label='Codice fiscale'><NpText value={g('codice_fiscale')} onChange={v => set('codice_fiscale', v)} disabled={saving}/></NpField>
+                <NpField label='Codice fiscale' hint='Massimo 16 caratteri'>
+                  <NpText value={g('codice_fiscale')} onChange={v => set('codice_fiscale', v)} disabled={saving} maxLength={16}/>
+                </NpField>
               </div>
             )}
             {tipoSogg === 'PG' && (
               <div style={S.row2}>
                 <NpField label='Ragione sociale'><NpText value={g('ragione_sociale')} onChange={v => set('ragione_sociale', v)} disabled={saving}/></NpField>
-                <NpField label='P. IVA'><NpText value={g('piva')} onChange={v => set('piva', v)} disabled={saving}/></NpField>
+                <NpField label='P. IVA' hint='Massimo 11 caratteri'>
+                  <NpText value={g('piva')} onChange={v => set('piva', v)} disabled={saving} maxLength={11}/>
+                </NpField>
               </div>
             )}
 
@@ -4121,8 +4339,76 @@ function NuovaPraticaForm (p: {
               <button type='button' onClick={cancelAttachmentAction} style={{ ...btnBase, border: '1px solid rgba(0,0,0,0.18)', background: '#d92d20', color: '#fff', cursor: 'pointer' }}>Annulla</button>
             </div>
           </div>
-        </div>,
-        document.body
+        </div>
+      )}
+
+      {validationPopup && (
+        <div
+          style={{ position: 'fixed', inset: 0, zIndex: 2147483646, background: 'rgba(0,0,0,0.52)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16, pointerEvents: 'auto' }}
+          onClick={() => setValidationPopup(null)}
+        >
+          <div
+            role='dialog'
+            aria-modal='true'
+            style={{ width: 'min(92vw, 500px)', background: '#fff', borderRadius: 14, boxShadow: '0 20px 60px rgba(0,0,0,0.28)', border: '1px solid rgba(0,0,0,0.08)', padding: 18, position: 'relative', zIndex: 2147483647 }}
+            onClick={(e) => { e.stopPropagation() }}
+            onMouseDown={(e) => { e.stopPropagation() }}
+          >
+            <div style={{ fontWeight: 800, fontSize: 16, marginBottom: 8 }}>
+              {validationPopup.title}
+            </div>
+            <div style={{ fontSize: 13, color: '#374151', lineHeight: 1.5, marginBottom: 14 }}>
+              {validationPopup.text}
+            </div>
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10 }}>
+              <button
+                type='button'
+                onClick={() => setValidationPopup(null)}
+                style={{ ...btnBase, border: '1px solid rgba(0,0,0,0.18)', background: '#d92d20', color: '#fff', cursor: 'pointer' }}
+              >
+                OK
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showCreateSuccessPopup && (
+        <div
+          style={{ position: 'fixed', inset: 0, zIndex: 2147483646, background: 'rgba(0,0,0,0.52)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16, pointerEvents: 'auto' }}
+          onClick={() => { setShowCreateSuccessPopup(false); setCreateSuccessPraticaCode('') }}
+        >
+          <div
+            role='dialog'
+            aria-modal='true'
+            style={{ width: 'min(92vw, 500px)', background: '#fff', borderRadius: 14, boxShadow: '0 20px 60px rgba(0,0,0,0.28)', border: '1px solid rgba(0,0,0,0.08)', padding: 18, position: 'relative', zIndex: 2147483647 }}
+            onClick={(e) => { e.stopPropagation() }}
+            onMouseDown={(e) => { e.stopPropagation() }}
+          >
+            <div style={{ fontWeight: 800, fontSize: 16, marginBottom: 8 }}>
+              Rapporto inserito correttamente
+            </div>
+            {createSuccessPraticaCode && (
+              <div style={{ fontSize: 14, color: '#111827', fontWeight: 700, marginBottom: 10 }}>
+                Numero pratica assegnato: <span style={{ color: '#0b5fff' }}>{createSuccessPraticaCode}</span>
+              </div>
+            )}
+            <div style={{ fontSize: 13, color: '#374151', lineHeight: 1.5, marginBottom: 14 }}>
+              Il rapporto è stato salvato correttamente nel sistema.<br />
+              La maschera è tornata vuota perché è pronta per un nuovo inserimento.<br />
+              Per vedere il rapporto appena inserito nell’elenco, è necessario fare clic su <b>Aggiorna elenco</b>.
+            </div>
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10 }}>
+              <button
+                type='button'
+                onClick={() => { setShowCreateSuccessPopup(false); setCreateSuccessPraticaCode('') }}
+                style={{ ...btnBase, border: '1px solid rgba(0,0,0,0.18)', background: '#1a7f37', color: '#fff', cursor: 'pointer' }}
+              >
+                OK
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   )
