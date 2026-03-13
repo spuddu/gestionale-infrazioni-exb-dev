@@ -64,23 +64,6 @@ function ensureLayerIndex (url: string, layer?: any): string {
   return url
 }
 
-
-function getGlobalOverlayHost (): HTMLElement | null {
-  try {
-    const topBody = (window as any)?.top?.document?.body
-    if (topBody) return topBody as HTMLElement
-  } catch {}
-  try {
-    if (typeof document !== 'undefined' && document.body) return document.body as HTMLElement
-  } catch {}
-  return null
-}
-
-function getGlobalOverlayDocument (): Document | null {
-  const host = getGlobalOverlayHost()
-  return (host?.ownerDocument || (typeof document !== 'undefined' ? document : null)) as Document | null
-}
-
 // Caricamento moduli ArcGIS JS API (AMD) senza dipendenze extra.
 function loadEsriModule<T = any> (path: string): Promise<T> {
   return new Promise((resolve, reject) => {
@@ -3074,48 +3057,16 @@ function NuovaPraticaForm (p: {
   const [showCreateSuccessPopup, setShowCreateSuccessPopup] = React.useState(false)
   const [createSuccessPraticaCode, setCreateSuccessPraticaCode] = React.useState('')
   const [validationPopup, setValidationPopup] = React.useState<{ title: string; text: string } | null>(null)
-  const validationPopupOkId = React.useMemo(() => `gii-val-ok-${Math.random().toString(36).slice(2)}`, [])
-  const validationPopupBackdropId = React.useMemo(() => `gii-val-backdrop-${Math.random().toString(36).slice(2)}`, [])
-  const successPopupOkId = React.useMemo(() => `gii-success-ok-${Math.random().toString(36).slice(2)}`, [])
-  const successPopupBackdropId = React.useMemo(() => `gii-success-backdrop-${Math.random().toString(36).slice(2)}`, [])
 
   React.useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.key !== 'Escape') return
-      // Se un popup è aperto, blocca Escape per mantenere la modalità
-      if (validationPopup || showCreateSuccessPopup) {
-        e.preventDefault()
-        e.stopPropagation()
-      }
+      if (validationPopup) { setValidationPopup(null); return }
+      if (showCreateSuccessPopup) { setShowCreateSuccessPopup(false); setCreateSuccessPraticaCode(''); return }
     }
-    window.addEventListener('keydown', onKeyDown, true)
-    return () => window.removeEventListener('keydown', onKeyDown, true)
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
   }, [validationPopup, showCreateSuccessPopup])
-
-
-  React.useEffect(() => {
-    if (!validationPopup) return
-    const doc = getGlobalOverlayDocument()
-    if (!doc) return
-    const btn = doc.getElementById(validationPopupOkId)
-    const close = () => setValidationPopup(null)
-    btn?.addEventListener('click', close, true)
-    return () => {
-      btn?.removeEventListener('click', close, true)
-    }
-  }, [validationPopup, validationPopupOkId])
-
-  React.useEffect(() => {
-    if (!showCreateSuccessPopup) return
-    const doc = getGlobalOverlayDocument()
-    if (!doc) return
-    const btn = doc.getElementById(successPopupOkId)
-    const close = () => { setShowCreateSuccessPopup(false); setCreateSuccessPraticaCode('') }
-    btn?.addEventListener('click', close, true)
-    return () => {
-      btn?.removeEventListener('click', close, true)
-    }
-  }, [showCreateSuccessPopup, successPopupOkId])
   const createStartedAtRef = React.useRef<number>(Date.now())
   const [attachmentFiles, setAttachmentFiles] = React.useState<File[]>([])
   const [attachmentInputKey, setAttachmentInputKey] = React.useState(0)
@@ -3923,10 +3874,7 @@ function NuovaPraticaForm (p: {
       if (!ok) throw new Error(err ? `${err.code ?? ''}: ${err.message ?? ''}` : JSON.stringify(res))
 
       const newOid = Number(added.objectId)
-      
-      // Leggi il ruoloLabel dal cw header per il prefisso del codice pratica
-      const cwRoleLabel = String((window as any).__giiUserRole?.ruoloLabel || '').trim() || 'TI'
-      const newPraticaCode = `${cwRoleLabel}-${newOid}`
+      const newPraticaCode = buildPraticaCodeFromData({ origine_pratica: 2 }, newOid)
 
       // In create mode NON aggiornare la datasource schema/base e NON provare a selezionare il nuovo OID:
       // queste due operazioni possono riattivare il banner credenziali quando la pagina usa solo lo schema.
@@ -4367,7 +4315,6 @@ function NuovaPraticaForm (p: {
 
       {attachmentConfirm && createPortal(
         <div
-          data-gii-global-popup-root='1'
           style={{ position: 'fixed', inset: 0, zIndex: 2147483646, background: 'rgba(0,0,0,0.52)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16, pointerEvents: 'auto' }}
           onClick={(e) => { e.preventDefault(); e.stopPropagation() }}
           onMouseDown={(e) => { e.preventDefault(); e.stopPropagation() }}
@@ -4375,8 +4322,6 @@ function NuovaPraticaForm (p: {
           <div
             role='dialog'
             aria-modal='true'
-            data-gii-global-popup-dialog='1'
-            data-gii-global-popup-dialog='1'
             style={{ width: 'min(92vw, 460px)', background: '#fff', borderRadius: 14, boxShadow: '0 20px 60px rgba(0,0,0,0.28)', border: '1px solid rgba(0,0,0,0.08)', padding: 18, position: 'relative', zIndex: 2147483647 }}
             onClick={(e) => { e.preventDefault(); e.stopPropagation() }}
             onMouseDown={(e) => { e.preventDefault(); e.stopPropagation() }}
@@ -4394,93 +4339,76 @@ function NuovaPraticaForm (p: {
               <button type='button' onClick={cancelAttachmentAction} style={{ ...btnBase, border: '1px solid rgba(0,0,0,0.18)', background: '#d92d20', color: '#fff', cursor: 'pointer' }}>Annulla</button>
             </div>
           </div>
-        </div>,
-        getGlobalOverlayHost() || document.body
+        </div>
       )}
 
-      {validationPopup && createPortal(
+      {validationPopup && (
         <div
-          id={validationPopupBackdropId}
-          data-gii-global-popup-root='1'
           style={{ position: 'fixed', inset: 0, zIndex: 2147483646, background: 'rgba(0,0,0,0.52)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16, pointerEvents: 'auto' }}
-          onClick={(e) => { e.preventDefault(); e.stopPropagation() }}
-          onMouseDown={(e) => { e.preventDefault(); e.stopPropagation() }}
+          onClick={() => setValidationPopup(null)}
         >
           <div
             role='dialog'
             aria-modal='true'
-            style={{ width: 'min(92vw, 520px)', background: '#fff', borderRadius: 14, boxShadow: '0 20px 60px rgba(0,0,0,0.28)', border: '1px solid rgba(0,0,0,0.08)', padding: 18, position: 'relative', zIndex: 2147483647 }}
+            style={{ width: 'min(92vw, 500px)', background: '#fff', borderRadius: 14, boxShadow: '0 20px 60px rgba(0,0,0,0.28)', border: '1px solid rgba(0,0,0,0.08)', padding: 18, position: 'relative', zIndex: 2147483647 }}
             onClick={(e) => { e.stopPropagation() }}
             onMouseDown={(e) => { e.stopPropagation() }}
           >
-            <div style={{ fontWeight: 800, fontSize: 16, marginBottom: 8, color: '#dc2626', display: 'flex', alignItems: 'center', gap: 8 }}>
-              <span style={{ fontSize: 20 }}>⚠</span>
+            <div style={{ fontWeight: 800, fontSize: 16, marginBottom: 8 }}>
               {validationPopup.title}
             </div>
-            <div style={{ fontSize: 13, color: '#374151', lineHeight: 1.6, marginBottom: 14, display: 'grid', gap: 10 }}>
-              <div style={{ fontWeight: 500, padding: 10, background: '#fef2f2', border: '1px solid #fecaca', borderRadius: 6, color: '#7f1d1d' }}>
-                {validationPopup.text}
-              </div>
-              <div>Correggi il valore e riprova.</div>
+            <div style={{ fontSize: 13, color: '#374151', lineHeight: 1.5, marginBottom: 14 }}>
+              {validationPopup.text}
             </div>
             <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10 }}>
               <button
-                id={validationPopupOkId}
                 type='button'
                 onClick={() => setValidationPopup(null)}
-                style={{ ...btnBase, border: '1px solid rgba(0,0,0,0.18)', background: '#dc2626', color: '#fff', cursor: 'pointer', pointerEvents: 'auto' }}
+                style={{ ...btnBase, border: '1px solid rgba(0,0,0,0.18)', background: '#d92d20', color: '#fff', cursor: 'pointer' }}
               >
                 OK
               </button>
             </div>
           </div>
-        </div>,
-        getGlobalOverlayHost() || document.body
+        </div>
       )}
 
-      {showCreateSuccessPopup && createPortal(
+      {showCreateSuccessPopup && (
         <div
-          id={successPopupBackdropId}
-          data-gii-global-popup-root='1'
           style={{ position: 'fixed', inset: 0, zIndex: 2147483646, background: 'rgba(0,0,0,0.52)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16, pointerEvents: 'auto' }}
-          onClick={(e) => { e.preventDefault(); e.stopPropagation() }}
-          onMouseDown={(e) => { e.preventDefault(); e.stopPropagation() }}
+          onClick={() => { setShowCreateSuccessPopup(false); setCreateSuccessPraticaCode('') }}
         >
           <div
             role='dialog'
             aria-modal='true'
-            data-gii-global-popup-dialog='1'
-            style={{ width: 'min(92vw, 520px)', background: '#fff', borderRadius: 14, boxShadow: '0 20px 60px rgba(0,0,0,0.28)', border: '1px solid rgba(0,0,0,0.08)', padding: 18, position: 'relative', zIndex: 2147483647 }}
+            style={{ width: 'min(92vw, 500px)', background: '#fff', borderRadius: 14, boxShadow: '0 20px 60px rgba(0,0,0,0.28)', border: '1px solid rgba(0,0,0,0.08)', padding: 18, position: 'relative', zIndex: 2147483647 }}
             onClick={(e) => { e.stopPropagation() }}
             onMouseDown={(e) => { e.stopPropagation() }}
           >
-            <div style={{ fontWeight: 800, fontSize: 16, marginBottom: 8, color: '#1a7f37', display: 'flex', alignItems: 'center', gap: 8 }}>
-              <span style={{ fontSize: 20 }}>✓</span>
+            <div style={{ fontWeight: 800, fontSize: 16, marginBottom: 8 }}>
               Rapporto inserito correttamente
             </div>
-            <div style={{ fontSize: 13, color: '#374151', lineHeight: 1.6, marginBottom: 14, display: 'grid', gap: 10 }}>
-              <div>Il rapporto è stato salvato correttamente nel sistema.</div>
-              {createSuccessPraticaCode && (
-                <div style={{ fontWeight: 600, color: '#1f2937', padding: 10, background: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: 6 }}>
-                  Numero rapporto assegnato: <span style={{ color: '#15803d', fontSize: 14, fontFamily: 'monospace' }}>{createSuccessPraticaCode}</span>
-                </div>
-              )}
-              <div>La maschera è tornata vuota ed è pronta per un nuovo inserimento.</div>
-              <div>Per visualizzare il rapporto appena inserito nell'elenco, è necessario fare clic su <b>Aggiorna elenco</b>.</div>
+            {createSuccessPraticaCode && (
+              <div style={{ fontSize: 14, color: '#111827', fontWeight: 700, marginBottom: 10 }}>
+                Numero pratica assegnato: <span style={{ color: '#0b5fff' }}>{createSuccessPraticaCode}</span>
+              </div>
+            )}
+            <div style={{ fontSize: 13, color: '#374151', lineHeight: 1.5, marginBottom: 14 }}>
+              Il rapporto è stato salvato correttamente nel sistema.<br />
+              La maschera è tornata vuota perché è pronta per un nuovo inserimento.<br />
+              Per vedere il rapporto appena inserito nell’elenco, è necessario fare clic su <b>Aggiorna elenco</b>.
             </div>
             <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10 }}>
               <button
-                id={successPopupOkId}
                 type='button'
                 onClick={() => { setShowCreateSuccessPopup(false); setCreateSuccessPraticaCode('') }}
-                style={{ ...btnBase, border: '1px solid rgba(0,0,0,0.18)', background: '#1a7f37', color: '#fff', cursor: 'pointer', pointerEvents: 'auto' }}
+                style={{ ...btnBase, border: '1px solid rgba(0,0,0,0.18)', background: '#1a7f37', color: '#fff', cursor: 'pointer' }}
               >
                 OK
               </button>
             </div>
           </div>
-        </div>,
-        getGlobalOverlayHost() || document.body
+        </div>
       )}
     </div>
   )
@@ -5673,10 +5601,6 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
       if (!el) return false
       if (root?.contains(el)) return true
       if (mapHost?.contains(el)) return true
-      try {
-        const elem = el as Element
-        if (typeof elem?.closest === 'function' && elem.closest('[data-gii-global-popup-root="1"], [data-gii-global-popup-dialog="1"]')) return true
-      } catch {}
       return false
     }
     const stopIfOutside = (ev: Event) => {
@@ -5687,7 +5611,6 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
       try { anyEv.stopImmediatePropagation?.() } catch {}
     }
     const opts: AddEventListenerOptions = { capture: true }
-    const overlayDoc = getGlobalOverlayDocument() || document
     updateMasks()
     window.addEventListener('resize', updateMasks)
     window.addEventListener('scroll', updateMasks, true)
@@ -5696,13 +5619,6 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
     document.addEventListener('click', stopIfOutside, opts)
     document.addEventListener('touchstart', stopIfOutside, opts)
     document.addEventListener('focusin', stopIfOutside, opts)
-    if (overlayDoc !== document) {
-      overlayDoc.addEventListener('pointerdown', stopIfOutside, opts)
-      overlayDoc.addEventListener('mousedown', stopIfOutside, opts)
-      overlayDoc.addEventListener('click', stopIfOutside, opts)
-      overlayDoc.addEventListener('touchstart', stopIfOutside, opts)
-      overlayDoc.addEventListener('focusin', stopIfOutside, opts)
-    }
     return () => {
       window.removeEventListener('resize', updateMasks)
       window.removeEventListener('scroll', updateMasks, true)
@@ -5711,13 +5627,6 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
       document.removeEventListener('click', stopIfOutside, opts)
       document.removeEventListener('touchstart', stopIfOutside, opts)
       document.removeEventListener('focusin', stopIfOutside, opts)
-      if (overlayDoc !== document) {
-        overlayDoc.removeEventListener('pointerdown', stopIfOutside, opts)
-        overlayDoc.removeEventListener('mousedown', stopIfOutside, opts)
-        overlayDoc.removeEventListener('click', stopIfOutside, opts)
-        overlayDoc.removeEventListener('touchstart', stopIfOutside, opts)
-        overlayDoc.removeEventListener('focusin', stopIfOutside, opts)
-      }
       setLockMaskRects([])
       if (mapHost) {
         mapHost.style.position = prevMapPos

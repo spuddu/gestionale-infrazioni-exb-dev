@@ -64,23 +64,6 @@ function ensureLayerIndex (url: string, layer?: any): string {
   return url
 }
 
-
-function getGlobalOverlayHost (): HTMLElement | null {
-  try {
-    const topBody = (window as any)?.top?.document?.body
-    if (topBody) return topBody as HTMLElement
-  } catch {}
-  try {
-    if (typeof document !== 'undefined' && document.body) return document.body as HTMLElement
-  } catch {}
-  return null
-}
-
-function getGlobalOverlayDocument (): Document | null {
-  const host = getGlobalOverlayHost()
-  return (host?.ownerDocument || (typeof document !== 'undefined' ? document : null)) as Document | null
-}
-
 // Caricamento moduli ArcGIS JS API (AMD) senza dipendenze extra.
 function loadEsriModule<T = any> (path: string): Promise<T> {
   return new Promise((resolve, reject) => {
@@ -95,6 +78,16 @@ function loadEsriModule<T = any> (path: string): Promise<T> {
       reject(e)
     }
   })
+}
+
+// Ottiene il document target per i modal fullscreen (prova top.document con fallback a document.body)
+function getModalPortalTarget (): Element {
+  try {
+    if (typeof window !== 'undefined' && window.top && window.top.document && window.top.document.body) {
+      return window.top.document.body
+    }
+  } catch {}
+  return document.body
 }
 
 // In Experience Builder, una Data View / Output Data Source può non esporre direttamente un FeatureLayer.
@@ -2972,13 +2965,13 @@ function NpSel(p: { value: string; onChange: (v: string) => void; options: reado
   )
 }
 
-function NpText(p: { value: string; onChange: (v: string) => void; placeholder?: string; multiline?: boolean; disabled?: boolean; maxLength?: number }) {
+function NpText(p: { value: string; onChange: (v: string) => void; placeholder?: string; multiline?: boolean; disabled?: boolean }) {
   const st = p.disabled ? S.inpDis : S.inp
   if (p.multiline) return (
     <textarea value={p.value} onChange={e => p.onChange(e.target.value)} placeholder={p.placeholder}
-      rows={3} style={{ ...st, resize: 'vertical' }} disabled={p.disabled} maxLength={p.maxLength}/>
+      rows={3} style={{ ...st, resize: 'vertical' }} disabled={p.disabled}/>
   )
-  return <input type='text' value={p.value} onChange={e => p.onChange(e.target.value)} placeholder={p.placeholder} style={st} disabled={p.disabled} maxLength={p.maxLength}/>
+  return <input type='text' value={p.value} onChange={e => p.onChange(e.target.value)} placeholder={p.placeholder} style={st} disabled={p.disabled}/>
 }
 
 function NpInt(p: { value: string; onChange: (v: string) => void; disabled?: boolean }) {
@@ -3071,51 +3064,6 @@ function NuovaPraticaForm (p: {
   const [baselineDraft, setBaselineDraft] = React.useState<NpDraft>(() => draftFromRecord(p.initialData || {}))
   const [saving, setSaving] = React.useState(false)
   const [msg, setMsg] = React.useState<{ kind: 'ok' | 'err'; text: string } | null>(null)
-  const [showCreateSuccessPopup, setShowCreateSuccessPopup] = React.useState(false)
-  const [createSuccessPraticaCode, setCreateSuccessPraticaCode] = React.useState('')
-  const [validationPopup, setValidationPopup] = React.useState<{ title: string; text: string } | null>(null)
-  const validationPopupOkId = React.useMemo(() => `gii-val-ok-${Math.random().toString(36).slice(2)}`, [])
-  const validationPopupBackdropId = React.useMemo(() => `gii-val-backdrop-${Math.random().toString(36).slice(2)}`, [])
-  const successPopupOkId = React.useMemo(() => `gii-success-ok-${Math.random().toString(36).slice(2)}`, [])
-  const successPopupBackdropId = React.useMemo(() => `gii-success-backdrop-${Math.random().toString(36).slice(2)}`, [])
-
-  React.useEffect(() => {
-    const onKeyDown = (e: KeyboardEvent) => {
-      if (e.key !== 'Escape') return
-      // Se un popup è aperto, blocca Escape per mantenere la modalità
-      if (validationPopup || showCreateSuccessPopup) {
-        e.preventDefault()
-        e.stopPropagation()
-      }
-    }
-    window.addEventListener('keydown', onKeyDown, true)
-    return () => window.removeEventListener('keydown', onKeyDown, true)
-  }, [validationPopup, showCreateSuccessPopup])
-
-
-  React.useEffect(() => {
-    if (!validationPopup) return
-    const doc = getGlobalOverlayDocument()
-    if (!doc) return
-    const btn = doc.getElementById(validationPopupOkId)
-    const close = () => setValidationPopup(null)
-    btn?.addEventListener('click', close, true)
-    return () => {
-      btn?.removeEventListener('click', close, true)
-    }
-  }, [validationPopup, validationPopupOkId])
-
-  React.useEffect(() => {
-    if (!showCreateSuccessPopup) return
-    const doc = getGlobalOverlayDocument()
-    if (!doc) return
-    const btn = doc.getElementById(successPopupOkId)
-    const close = () => { setShowCreateSuccessPopup(false); setCreateSuccessPraticaCode('') }
-    btn?.addEventListener('click', close, true)
-    return () => {
-      btn?.removeEventListener('click', close, true)
-    }
-  }, [showCreateSuccessPopup, successPopupOkId])
   const createStartedAtRef = React.useRef<number>(Date.now())
   const [attachmentFiles, setAttachmentFiles] = React.useState<File[]>([])
   const [attachmentInputKey, setAttachmentInputKey] = React.useState(0)
@@ -3130,6 +3078,8 @@ function NuovaPraticaForm (p: {
   const [replaceTargetAttachment, setReplaceTargetAttachment] = React.useState<{ id: number; name?: string } | null>(null)
   const replaceInputRef = React.useRef<HTMLInputElement | null>(null)
   const [replaceInputKey, setReplaceInputKey] = React.useState(0)
+  const [createSuccessOpen, setCreateSuccessOpen] = React.useState(false)
+  const [newRapportoOid, setNewRapportoOid] = React.useState<number | null>(null)
 
   React.useEffect(() => {
     if (mode === 'create') createStartedAtRef.current = Date.now()
@@ -3145,6 +3095,8 @@ function NuovaPraticaForm (p: {
     setReplaceInputKey(k => k + 1)
     setAttachmentsError(null)
     setMsg(null)
+    setCreateSuccessOpen(false)
+    setNewRapportoOid(null)
   }, [mode, editOid, p.initialData])
 
   React.useEffect(() => {
@@ -3153,22 +3105,23 @@ function NuovaPraticaForm (p: {
     const roleShort = shortRoleLabel(giiCtx.role, giiCtx.username)
     const officeFallback = getCreateOfficeFallback(giiCtx.area, giiCtx.settore)
     const today = toDraftDate(Date.now())
-    const withCreateDefaults = (prev: NpDraft): NpDraft => {
+    setDraft(prev => {
       const next: NpDraft = { ...prev }
+      let changed = false
       if (!String(next.tecnico_rilevatore || '').trim()) {
         const label = roleShort && giiCtx.settore ? `${roleShort} ${giiCtx.settore}` : (roleShort || String(giiCtx.username || '').trim())
-        if (label) next.tecnico_rilevatore = label
+        if (label) { next.tecnico_rilevatore = label; changed = true }
       }
       if (!String(next.ufficio_zona || '').trim() && officeFallback.label) {
         next.ufficio_zona = officeFallback.label
+        changed = true
       }
       if (!String(next.data_rilevazione || '').trim()) {
         next.data_rilevazione = today
+        changed = true
       }
-      return next
-    }
-    setDraft(prev => withCreateDefaults(prev))
-    setBaselineDraft(prev => withCreateDefaults(prev))
+      return changed ? next : prev
+    })
   }, [mode])
 
   const hasPendingAttachments = attachmentFiles.length > 0
@@ -3751,28 +3704,6 @@ function NuovaPraticaForm (p: {
       setMsg({ kind: 'ok', text: mode === 'edit' ? 'Nessuna modifica da salvare.' : 'Compila almeno un campo prima di salvare.' })
       return
     }
-
-    const cfRaw = String(g('codice_fiscale') || '').trim()
-    const pivaRaw = String(g('piva') || '').trim()
-    const cfLen = cfRaw.replace(/\s+/g, '').length
-    const pivaLen = pivaRaw.replace(/\s+/g, '').length
-
-    if (tipoSogg === 'PF' && cfRaw && cfLen < 16) {
-      setValidationPopup({
-        title: 'Codice fiscale non valido',
-        text: `Il codice fiscale deve contenere 16 caratteri. Attualmente ne risultano inseriti ${cfLen}.`
-      })
-      return
-    }
-
-    if (tipoSogg === 'PG' && pivaRaw && pivaLen < 11) {
-      setValidationPopup({
-        title: 'Partita IVA non valida',
-        text: `La partita IVA deve contenere 11 caratteri. Attualmente ne risultano inseriti ${pivaLen}.`
-      })
-      return
-    }
-
     setSaving(true); setMsg(null)
     try {
       const layer = mode === 'edit' ? await resolveLayerForEdit(ds) : await getLayerForCreate()
@@ -3923,10 +3854,6 @@ function NuovaPraticaForm (p: {
       if (!ok) throw new Error(err ? `${err.code ?? ''}: ${err.message ?? ''}` : JSON.stringify(res))
 
       const newOid = Number(added.objectId)
-      
-      // Leggi il ruoloLabel dal cw header per il prefisso del codice pratica
-      const cwRoleLabel = String((window as any).__giiUserRole?.ruoloLabel || '').trim() || 'TI'
-      const newPraticaCode = `${cwRoleLabel}-${newOid}`
 
       // In create mode NON aggiornare la datasource schema/base e NON provare a selezionare il nuovo OID:
       // queste due operazioni possono riattivare il banner credenziali quando la pagina usa solo lo schema.
@@ -3939,9 +3866,9 @@ function NuovaPraticaForm (p: {
         setMsg(null)
         setNpTab('anagrafica')
         p.onClearPoint()
-        setCreateSuccessPraticaCode(newPraticaCode)
-        setShowCreateSuccessPopup(true)
         p.onSaved?.(newOid)
+        setNewRapportoOid(newOid)
+        setCreateSuccessOpen(true)
       }, 600)
     } catch (e: any) {
       setSaving(false)
@@ -3980,28 +3907,13 @@ function NuovaPraticaForm (p: {
     return { kind: 'err' as const, text: 'Localizzazione obbligatoria: fai click in mappa.' }
   }, [p.clickedPointWgs84, reqPoint, hasOffice])
 
-  const editPraticaCode = React.useMemo(() => {
-    if (mode !== 'edit') return ''
-    return buildPraticaCodeFromData(p.initialData || {}, editOid)
-  }, [mode, p.initialData, editOid])
-
-  const toolbarTitleInfo = React.useMemo(() => {
-    const baseTitle = String(p.titleText || (mode === 'edit' ? 'Modifica rapporto' : 'Nuovo rapporto'))
-    if (mode !== 'edit' || !editPraticaCode) return { baseTitle, praticaCode: '' }
-    if (baseTitle.includes(editPraticaCode)) return { baseTitle: baseTitle.replace(editPraticaCode, '').trim(), praticaCode: editPraticaCode }
-    return { baseTitle, praticaCode: editPraticaCode }
-  }, [p.titleText, mode, editPraticaCode])
-
   return (
     <div style={{ width: '100%', height: '100%', display: 'flex', flexDirection: 'column', minHeight: 0 }}>
 
       {/* ── Toolbar ── */}
       <div style={{ flex: '0 0 auto', display: 'flex', alignItems: 'center', justifyContent: 'space-between',
         flexWrap: 'wrap', gap: 8, padding: '8px 0', borderBottom: '1px solid rgba(0,0,0,0.08)' }}>
-        <span style={{ fontWeight: 700, fontSize: 14 }}>
-          {toolbarTitleInfo.baseTitle}
-          {toolbarTitleInfo.praticaCode ? <> <span style={{ color: '#0b5fff' }}>{toolbarTitleInfo.praticaCode}</span></> : null}
-        </span>
+        <span style={{ fontWeight: 700, fontSize: 14 }}>{p.titleText || (mode === 'edit' ? 'Modifica rapporto' : 'Nuovo rapporto')}</span>
         <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
           {msg && <span style={{ fontSize: 12, color: msg.kind === 'ok' ? '#1a7f37' : '#b42318' }}>{msg.text}</span>}
           <button type='button' disabled={saving || !isDirty} onClick={handleSave}
@@ -4071,17 +3983,13 @@ function NuovaPraticaForm (p: {
               <div style={S.row3}>
                 <NpField label='Nome'><NpText value={g('nome')} onChange={v => set('nome', v)} disabled={saving}/></NpField>
                 <NpField label='Cognome'><NpText value={g('cognome')} onChange={v => set('cognome', v)} disabled={saving}/></NpField>
-                <NpField label='Codice fiscale' hint='Massimo 16 caratteri'>
-                  <NpText value={g('codice_fiscale')} onChange={v => set('codice_fiscale', v)} disabled={saving} maxLength={16}/>
-                </NpField>
+                <NpField label='Codice fiscale'><NpText value={g('codice_fiscale')} onChange={v => set('codice_fiscale', v)} disabled={saving}/></NpField>
               </div>
             )}
             {tipoSogg === 'PG' && (
               <div style={S.row2}>
                 <NpField label='Ragione sociale'><NpText value={g('ragione_sociale')} onChange={v => set('ragione_sociale', v)} disabled={saving}/></NpField>
-                <NpField label='P. IVA' hint='Massimo 11 caratteri'>
-                  <NpText value={g('piva')} onChange={v => set('piva', v)} disabled={saving} maxLength={11}/>
-                </NpField>
+                <NpField label='P. IVA'><NpText value={g('piva')} onChange={v => set('piva', v)} disabled={saving}/></NpField>
               </div>
             )}
 
@@ -4367,7 +4275,6 @@ function NuovaPraticaForm (p: {
 
       {attachmentConfirm && createPortal(
         <div
-          data-gii-global-popup-root='1'
           style={{ position: 'fixed', inset: 0, zIndex: 2147483646, background: 'rgba(0,0,0,0.52)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16, pointerEvents: 'auto' }}
           onClick={(e) => { e.preventDefault(); e.stopPropagation() }}
           onMouseDown={(e) => { e.preventDefault(); e.stopPropagation() }}
@@ -4375,8 +4282,6 @@ function NuovaPraticaForm (p: {
           <div
             role='dialog'
             aria-modal='true'
-            data-gii-global-popup-dialog='1'
-            data-gii-global-popup-dialog='1'
             style={{ width: 'min(92vw, 460px)', background: '#fff', borderRadius: 14, boxShadow: '0 20px 60px rgba(0,0,0,0.28)', border: '1px solid rgba(0,0,0,0.08)', padding: 18, position: 'relative', zIndex: 2147483647 }}
             onClick={(e) => { e.preventDefault(); e.stopPropagation() }}
             onMouseDown={(e) => { e.preventDefault(); e.stopPropagation() }}
@@ -4395,14 +4300,12 @@ function NuovaPraticaForm (p: {
             </div>
           </div>
         </div>,
-        getGlobalOverlayHost() || document.body
+        document.body
       )}
 
-      {validationPopup && createPortal(
+      {createSuccessOpen && createPortal(
         <div
-          id={validationPopupBackdropId}
-          data-gii-global-popup-root='1'
-          style={{ position: 'fixed', inset: 0, zIndex: 2147483646, background: 'rgba(0,0,0,0.52)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16, pointerEvents: 'auto' }}
+          style={{ position: 'fixed', top: 0, left: 0, width: '100vw', height: '100vh', zIndex: 2147483646, background: 'rgba(0,0,0,0.52)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16, pointerEvents: 'auto' }}
           onClick={(e) => { e.preventDefault(); e.stopPropagation() }}
           onMouseDown={(e) => { e.preventDefault(); e.stopPropagation() }}
         >
@@ -4410,49 +4313,8 @@ function NuovaPraticaForm (p: {
             role='dialog'
             aria-modal='true'
             style={{ width: 'min(92vw, 520px)', background: '#fff', borderRadius: 14, boxShadow: '0 20px 60px rgba(0,0,0,0.28)', border: '1px solid rgba(0,0,0,0.08)', padding: 18, position: 'relative', zIndex: 2147483647 }}
-            onClick={(e) => { e.stopPropagation() }}
-            onMouseDown={(e) => { e.stopPropagation() }}
-          >
-            <div style={{ fontWeight: 800, fontSize: 16, marginBottom: 8, color: '#dc2626', display: 'flex', alignItems: 'center', gap: 8 }}>
-              <span style={{ fontSize: 20 }}>⚠</span>
-              {validationPopup.title}
-            </div>
-            <div style={{ fontSize: 13, color: '#374151', lineHeight: 1.6, marginBottom: 14, display: 'grid', gap: 10 }}>
-              <div style={{ fontWeight: 500, padding: 10, background: '#fef2f2', border: '1px solid #fecaca', borderRadius: 6, color: '#7f1d1d' }}>
-                {validationPopup.text}
-              </div>
-              <div>Correggi il valore e riprova.</div>
-            </div>
-            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10 }}>
-              <button
-                id={validationPopupOkId}
-                type='button'
-                onClick={() => setValidationPopup(null)}
-                style={{ ...btnBase, border: '1px solid rgba(0,0,0,0.18)', background: '#dc2626', color: '#fff', cursor: 'pointer', pointerEvents: 'auto' }}
-              >
-                OK
-              </button>
-            </div>
-          </div>
-        </div>,
-        getGlobalOverlayHost() || document.body
-      )}
-
-      {showCreateSuccessPopup && createPortal(
-        <div
-          id={successPopupBackdropId}
-          data-gii-global-popup-root='1'
-          style={{ position: 'fixed', inset: 0, zIndex: 2147483646, background: 'rgba(0,0,0,0.52)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16, pointerEvents: 'auto' }}
-          onClick={(e) => { e.preventDefault(); e.stopPropagation() }}
-          onMouseDown={(e) => { e.preventDefault(); e.stopPropagation() }}
-        >
-          <div
-            role='dialog'
-            aria-modal='true'
-            data-gii-global-popup-dialog='1'
-            style={{ width: 'min(92vw, 520px)', background: '#fff', borderRadius: 14, boxShadow: '0 20px 60px rgba(0,0,0,0.28)', border: '1px solid rgba(0,0,0,0.08)', padding: 18, position: 'relative', zIndex: 2147483647 }}
-            onClick={(e) => { e.stopPropagation() }}
-            onMouseDown={(e) => { e.stopPropagation() }}
+            onClick={(e) => { e.preventDefault(); e.stopPropagation() }}
+            onMouseDown={(e) => { e.preventDefault(); e.stopPropagation() }}
           >
             <div style={{ fontWeight: 800, fontSize: 16, marginBottom: 8, color: '#1a7f37', display: 'flex', alignItems: 'center', gap: 8 }}>
               <span style={{ fontSize: 20 }}>✓</span>
@@ -4460,9 +4322,9 @@ function NuovaPraticaForm (p: {
             </div>
             <div style={{ fontSize: 13, color: '#374151', lineHeight: 1.6, marginBottom: 14, display: 'grid', gap: 10 }}>
               <div>Il rapporto è stato salvato correttamente nel sistema.</div>
-              {createSuccessPraticaCode && (
+              {newRapportoOid != null && (
                 <div style={{ fontWeight: 600, color: '#1f2937', padding: 10, background: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: 6 }}>
-                  Numero rapporto assegnato: <span style={{ color: '#15803d', fontSize: 14, fontFamily: 'monospace' }}>{createSuccessPraticaCode}</span>
+                  Numero rapporto assegnato: <span style={{ color: '#15803d', fontSize: 14, fontFamily: 'monospace' }}>{newRapportoOid}</span>
                 </div>
               )}
               <div>La maschera è tornata vuota ed è pronta per un nuovo inserimento.</div>
@@ -4470,17 +4332,16 @@ function NuovaPraticaForm (p: {
             </div>
             <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10 }}>
               <button
-                id={successPopupOkId}
                 type='button'
-                onClick={() => { setShowCreateSuccessPopup(false); setCreateSuccessPraticaCode('') }}
-                style={{ ...btnBase, border: '1px solid rgba(0,0,0,0.18)', background: '#1a7f37', color: '#fff', cursor: 'pointer', pointerEvents: 'auto' }}
+                onClick={() => setCreateSuccessOpen(false)}
+                style={{ ...btnBase, border: '1px solid rgba(0,0,0,0.18)', background: '#1a7f37', color: '#fff', cursor: 'pointer' }}
               >
                 OK
               </button>
             </div>
           </div>
         </div>,
-        getGlobalOverlayHost() || document.body
+        getModalPortalTarget()
       )}
     </div>
   )
@@ -5673,10 +5534,6 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
       if (!el) return false
       if (root?.contains(el)) return true
       if (mapHost?.contains(el)) return true
-      try {
-        const elem = el as Element
-        if (typeof elem?.closest === 'function' && elem.closest('[data-gii-global-popup-root="1"], [data-gii-global-popup-dialog="1"]')) return true
-      } catch {}
       return false
     }
     const stopIfOutside = (ev: Event) => {
@@ -5687,7 +5544,6 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
       try { anyEv.stopImmediatePropagation?.() } catch {}
     }
     const opts: AddEventListenerOptions = { capture: true }
-    const overlayDoc = getGlobalOverlayDocument() || document
     updateMasks()
     window.addEventListener('resize', updateMasks)
     window.addEventListener('scroll', updateMasks, true)
@@ -5696,13 +5552,6 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
     document.addEventListener('click', stopIfOutside, opts)
     document.addEventListener('touchstart', stopIfOutside, opts)
     document.addEventListener('focusin', stopIfOutside, opts)
-    if (overlayDoc !== document) {
-      overlayDoc.addEventListener('pointerdown', stopIfOutside, opts)
-      overlayDoc.addEventListener('mousedown', stopIfOutside, opts)
-      overlayDoc.addEventListener('click', stopIfOutside, opts)
-      overlayDoc.addEventListener('touchstart', stopIfOutside, opts)
-      overlayDoc.addEventListener('focusin', stopIfOutside, opts)
-    }
     return () => {
       window.removeEventListener('resize', updateMasks)
       window.removeEventListener('scroll', updateMasks, true)
@@ -5711,13 +5560,6 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
       document.removeEventListener('click', stopIfOutside, opts)
       document.removeEventListener('touchstart', stopIfOutside, opts)
       document.removeEventListener('focusin', stopIfOutside, opts)
-      if (overlayDoc !== document) {
-        overlayDoc.removeEventListener('pointerdown', stopIfOutside, opts)
-        overlayDoc.removeEventListener('mousedown', stopIfOutside, opts)
-        overlayDoc.removeEventListener('click', stopIfOutside, opts)
-        overlayDoc.removeEventListener('touchstart', stopIfOutside, opts)
-        overlayDoc.removeEventListener('focusin', stopIfOutside, opts)
-      }
       setLockMaskRects([])
       if (mapHost) {
         mapHost.style.position = prevMapPos
