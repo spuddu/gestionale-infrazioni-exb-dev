@@ -140,18 +140,38 @@ export interface Config {
   statoChipTextTransform: 'none' | 'uppercase' | 'lowercase' | 'capitalize'
   statoChipLetterSpacing: number
 
-  // --- Chip stato: colori
-  statoBgDaPrendere: string
-  statoTextDaPrendere: string
-  statoBorderDaPrendere: string
+  // --- Chip stato: colori (8 stati semantici)
+  chipBgGiallo: string       // Da prendere in carico
+  chipTextGiallo: string
+  chipBorderGiallo: string
 
-  statoBgPresa: string
-  statoTextPresa: string
-  statoBorderPresa: string
+  chipBgAzzurro: string      // Preso in carico
+  chipTextAzzurro: string
+  chipBorderAzzurro: string
 
-  statoBgAltro: string
-  statoTextAltro: string
-  statoBorderAltro: string
+  chipBgVerde: string        // Trasmesso a *, Approvato, Verbale trasmesso, Chiusa approvata
+  chipTextVerde: string
+  chipBorderVerde: string
+
+  chipBgArancione: string    // In attesa di istruttoria / integrazioni / approvazione
+  chipTextArancione: string
+  chipBorderArancione: string
+
+  chipBgRosso: string        // Respinto, Eliminato, Chiusa respinta
+  chipTextRosso: string
+  chipBorderRosso: string
+
+  chipBgLilla: string        // Verbale da trasmettere
+  chipTextLilla: string
+  chipBorderLilla: string
+
+  chipBgViola: string        // Verbale notificato
+  chipTextViola: string
+  chipBorderViola: string
+
+  chipBgNeutro: string       // In corso di istruttoria (altri ruoli) / stato non riconosciuto
+  chipTextNeutro: string
+  chipBorderNeutro: string
 
   // Aspetto maschera (bordo pannello)
   maskOuterOffset: number
@@ -179,7 +199,7 @@ export const DEFAULT_COLUMNS: ColumnDef[] = [
   { id: 'col_stato',     label: 'Stato sintetico',  field: '__stato_sint__',    width: 220 },
   { id: 'col_ufficio',   label: 'Ufficio',          field: 'ufficio_zona',      width: 170 },
   { id: 'col_ultimo',    label: 'Ultimo agg.',      field: '__ultimo_agg__',    width: 170 },
-  { id: 'col_prossima',  label: 'Prossima azione',  field: '__prossima__',      width: 240 }
+  { id: 'col_prossima',  label: 'Posizione Rapporto', field: '__prossima__',      width: 240 }
 ]
 
 export const defaultConfig: IMConfig = Immutable({
@@ -287,17 +307,38 @@ export const defaultConfig: IMConfig = Immutable({
   statoChipTextTransform: 'none',
   statoChipLetterSpacing: 0,
 
-  statoBgDaPrendere: '#fff7e6',
-  statoTextDaPrendere: '#7a4b00',
-  statoBorderDaPrendere: '#ffd18a',
+  // Chip stato — palette satura
+  chipBgGiallo: '#feeb22',
+  chipTextGiallo: '#5a4000',
+  chipBorderGiallo: '#c9b800',
 
-  statoBgPresa: '#eaf7ef',
-  statoTextPresa: '#1f6b3a',
-  statoBorderPresa: '#9ad2ae',
+  chipBgAzzurro: '#2f6fed',
+  chipTextAzzurro: '#ffffff',
+  chipBorderAzzurro: '#1d4ed8',
 
-  statoBgAltro: '#f2f2f2',
-  statoTextAltro: '#333333',
-  statoBorderAltro: '#d0d0d0',
+  chipBgVerde: '#009246',
+  chipTextVerde: '#ffffff',
+  chipBorderVerde: '#006b33',
+
+  chipBgArancione: '#ff6400',
+  chipTextArancione: '#ffffff',
+  chipBorderArancione: '#cc5000',
+
+  chipBgRosso: '#dc2626',
+  chipTextRosso: '#ffffff',
+  chipBorderRosso: '#991b1b',
+
+  chipBgLilla: '#faf5ff',
+  chipTextLilla: '#6b21a8',
+  chipBorderLilla: '#d8b4fe',
+
+  chipBgViola: '#ede9fe',
+  chipTextViola: '#4c1d95',
+  chipBorderViola: '#a78bfa',
+
+  chipBgNeutro: '#f2f2f2',
+  chipTextNeutro: '#333333',
+  chipBorderNeutro: '#d0d0d0',
 
   // Aspetto maschera (bordo pannello)
   maskOuterOffset: 12,

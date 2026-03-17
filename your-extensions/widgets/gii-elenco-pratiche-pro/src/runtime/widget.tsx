@@ -1017,6 +1017,14 @@ React.useEffect(() => {
 
     const d: any = r.getData?.() || {}
 
+    // DA e ruoli AMM (RI AMM, TI AMM): vedono solo i Rapporti entrati in fase sanzionatoria.
+    // area=1 → AMM
+    const areaNum = giiUser?.area ?? null
+    const isAmmArea = areaNum === 1
+    if (role === 'DA' || (isAmmArea && (role === 'RI' || role === 'TI'))) {
+      return isInFaseSanzionatoria(d)
+    }
+
     if (role === 'TI') {
       const meUser = String(giiUser?.username || '').trim()
       const meName = String((giiUser as any)?.fullName ?? (giiUser as any)?.nome ?? (giiUser as any)?.displayName ?? '').trim()
@@ -1210,55 +1218,44 @@ React.useEffect(() => {
     return String(n)
   }
 
-  // ── Chip colors — 5 stati workflow ────────────────────────────────────────
-  // statoForChip: 1=DaPrendere, 2=InLavorazione, 3=Integrazione, 4=Approvata, 5=Respinta, null=neutro
+  // ── Chip colors — label-driven, colori da config ─────────────────────────
+  const CHIP_YELLOW  = { background: txt(cfg.chipBgGiallo    || '#feeb22'), color: txt(cfg.chipTextGiallo    || '#5a4000'), borderColor: txt(cfg.chipBorderGiallo    || '#c9b800') }
+  const CHIP_BLUE    = { background: txt(cfg.chipBgAzzurro   || '#2f6fed'), color: txt(cfg.chipTextAzzurro   || '#ffffff'), borderColor: txt(cfg.chipBorderAzzurro   || '#1d4ed8') }
+  const CHIP_GREEN   = { background: txt(cfg.chipBgVerde     || '#009246'), color: txt(cfg.chipTextVerde     || '#ffffff'), borderColor: txt(cfg.chipBorderVerde     || '#006b33') }
+  const CHIP_ORANGE  = { background: txt(cfg.chipBgArancione || '#ff6400'), color: txt(cfg.chipTextArancione || '#ffffff'), borderColor: txt(cfg.chipBorderArancione || '#cc5000') }
+  const CHIP_RED     = { background: txt(cfg.chipBgRosso     || '#dc2626'), color: txt(cfg.chipTextRosso     || '#ffffff'), borderColor: txt(cfg.chipBorderRosso     || '#991b1b') }
+  const CHIP_LILAC   = { background: txt(cfg.chipBgLilla     || '#faf5ff'), color: txt(cfg.chipTextLilla     || '#6b21a8'), borderColor: txt(cfg.chipBorderLilla     || '#d8b4fe') }
+  const CHIP_PURPLE  = { background: txt(cfg.chipBgViola     || '#ede9fe'), color: txt(cfg.chipTextViola     || '#4c1d95'), borderColor: txt(cfg.chipBorderViola     || '#a78bfa') }
+  const CHIP_NEUTRAL = { background: txt(cfg.chipBgNeutro    || '#f2f2f2'), color: txt(cfg.chipTextNeutro    || '#333333'), borderColor: txt(cfg.chipBorderNeutro    || '#d0d0d0') }
+
+  const getChipStyleByLabel = (label: string) => {
+    const l = String(label || '').toLowerCase()
+    if (l.startsWith('da prendere'))            return CHIP_YELLOW
+    if (l.startsWith('preso in carico'))         return CHIP_BLUE
+    if (l.startsWith('trasmesso a'))             return CHIP_GREEN
+    if (l.startsWith('in attesa di'))            return CHIP_ORANGE
+    if (l.startsWith('respint'))                 return CHIP_RED
+    if (l.startsWith('eliminat'))                return CHIP_RED
+    if (l.startsWith('chiusa – respinta') ||
+        l.startsWith('chiusa - respinta'))       return CHIP_RED
+    if (l.startsWith('chiusa – approvata') ||
+        l.startsWith('chiusa - approvata'))      return CHIP_GREEN
+    if (l.startsWith('approvato e trasmesso'))   return CHIP_GREEN
+    if (l.startsWith('verbale notificato'))      return CHIP_PURPLE
+    if (l.startsWith('verbale trasmesso'))       return CHIP_GREEN
+    if (l.startsWith('verbale da trasmettere'))  return CHIP_LILAC
+    if (l.includes('in corso di istruttoria'))   return CHIP_NEUTRAL
+    return CHIP_NEUTRAL
+  }
+
+  // Mantenuta per compatibilità con eventuali usi interni residui
   const getChipStyle = (statoNum: number | null) => {
-    if (statoNum === statoDaPrendere) {
-      // arancio – in attesa di qualcuno
-      return {
-        background: txt(cfg.statoBgDaPrendere || '#fff7e6'),
-        color: txt(cfg.statoTextDaPrendere || '#7a4b00'),
-        borderColor: txt(cfg.statoBorderDaPrendere || '#ffd18a')
-      }
-    }
-    if (statoNum === statoPresa) {
-      // verde chiaro – in lavorazione
-      return {
-        background: txt(cfg.statoBgPresa || '#eaf7ef'),
-        color: txt(cfg.statoTextPresa || '#1f6b3a'),
-        borderColor: txt(cfg.statoBorderPresa || '#9ad2ae')
-      }
-    }
-    if (statoNum === statoIntegrazione) {
-      // ambra – integrazione richiesta
-      return {
-        background: txt(cfg.statoBgIntegrazione || '#fffbeb'),
-        color: txt(cfg.statoTextIntegrazione || '#92400e'),
-        borderColor: txt(cfg.statoBorderIntegrazione || '#fbbf24')
-      }
-    }
-    if (statoNum === statoApprovata) {
-      // verde scuro – approvata/chiusa positivamente
-      return {
-        background: txt(cfg.statoBgApprovata || '#dcfce7'),
-        color: txt(cfg.statoTextApprovata || '#14532d'),
-        borderColor: txt(cfg.statoBorderApprovata || '#4ade80')
-      }
-    }
-    if (statoNum === statoRespinta) {
-      // rosso – respinta
-      return {
-        background: txt(cfg.statoBgRespinta || '#fee2e2'),
-        color: txt(cfg.statoTextRespinta || '#7f1d1d'),
-        borderColor: txt(cfg.statoBorderRespinta || '#f87171')
-      }
-    }
-    // neutro – stato sconosciuto / nuova pratica
-    return {
-      background: txt(cfg.statoBgAltro || '#f2f2f2'),
-      color: txt(cfg.statoTextAltro || '#333333'),
-      borderColor: txt(cfg.statoBorderAltro || '#d0d0d0')
-    }
+    if (statoNum === statoDaPrendere)   return CHIP_YELLOW
+    if (statoNum === statoPresa)        return CHIP_BLUE
+    if (statoNum === statoIntegrazione) return CHIP_ORANGE
+    if (statoNum === statoApprovata)    return CHIP_GREEN
+    if (statoNum === statoRespinta)     return CHIP_RED
+    return CHIP_NEUTRAL
   }
 
   // converte esito (1..3) in "stato visuale" per chip (3/4/5)
@@ -1286,6 +1283,111 @@ React.useEffect(() => {
       parseToMs(d[`dt_esito_${role}`])
     ].filter((v): v is number => v !== null)
     return vals.length ? Math.max(...vals) : null
+  }
+
+  // ── Determina se il Rapporto è entrato in fase sanzionatoria ─────────────
+  // Indicatore: DT ha approvato e rimandato a RI (esito_DT = ESITO_APPROVATA),
+  // oppure il DA ha già ricevuto il verbale.
+  // NB: questo threshold è l'unico rilevabile in modo affidabile nel modello dati
+  // corrente, dove RI_AMM e TI_AMM condividono i campi nominali con RI e TI.
+  const isInFaseSanzionatoria = (d: any): boolean => {
+    const meaningful = (v: any) => v !== null && v !== undefined && v !== '' && v !== 0 && v !== '0'
+    // Fase sanzionatoria = qualsiasi campo AMM valorizzato
+    return meaningful(d['stato_RI_AMM']) || meaningful(d['esito_RI_AMM']) ||
+           meaningful(d['stato_TI_AMM']) || meaningful(d['esito_TI_AMM']) ||
+           meaningful(d['stato_DA'])     || meaningful(d['esito_DA'])
+  }
+
+  // Destinatario di trasmissione positiva per ruolo — dipende dal contesto del record.
+  // RI punta a DT in fase ordinaria, a RI_AMM in seconda fase (dopo approvazione DT).
+  // RI_AMM punta a TI_AMM in prima assegnazione, a DA dopo che TI_AMM ha restituito.
+  const getFwdDest = (role: string, d: any): string => {
+    switch (role) {
+      case 'TI':     return 'RZ'
+      case 'RZ':     return 'RI'
+      case 'DT':     return 'RI'
+      case 'RI': {
+        const esitoDT = d['esito_DT'] ?? d['ESITO_DT']
+        const n = esitoDT !== null && esitoDT !== undefined && esitoDT !== '' ? Number(esitoDT) : null
+        return (n === esitoApprovata) ? 'RI_AMM' : 'DT'
+      }
+      case 'RI_AMM': {
+        const esitoTiAmm = d['esito_TI_AMM'] ?? d['ESITO_TI_AMM']
+        const n = esitoTiAmm !== null && esitoTiAmm !== undefined && esitoTiAmm !== '' ? Number(esitoTiAmm) : null
+        return (n !== null) ? 'DA' : 'TI_AMM'
+      }
+      case 'TI_AMM': return 'RI_AMM'
+      default:       return ''
+    }
+  }
+
+  // Destinatario di richiesta integrazioni per ruolo
+  const getIntegDest = (role: string): string => {
+    switch (role) {
+      case 'RZ':     return 'TI'
+      case 'RI':     return 'TI'
+      case 'DT':     return 'RI'
+      case 'RI_AMM': return 'RI'
+      case 'TI_AMM': return 'RI_AMM'
+      case 'DA':     return 'RI_AMM'
+      default:       return ''
+    }
+  }
+
+  // Calcola lo stato storico di un ruolo specifico su questo record.
+  // Restituisce null se il ruolo non ha ancora dati (non è ancora stato coinvolto).
+  const computeStatoStorico = (d: any, ruolo: string): { label: string, statoForChip: number | null } | null => {
+    if (!hasRuoloData(d, ruolo)) return null
+    const presaRaw = d[`presa_in_carico_${ruolo}`]
+    const statoRaw = d[`stato_${ruolo}`]
+    const esitoRaw = d[`esito_${ruolo}`]
+    const presaNum = presaRaw !== null && presaRaw !== undefined && presaRaw !== '' ? Number(presaRaw) : null
+    const statoNum = statoRaw !== null && statoRaw !== undefined && statoRaw !== '' ? Number(statoRaw) : null
+    const esitoNum = esitoRaw !== null && esitoRaw !== undefined && esitoRaw !== '' ? Number(esitoRaw) : null
+
+    // fwdDest e integDest sono dinamici (dipendono dal record d) — usiamo le helper globali
+    // Per computeStatoStorico non abbiamo d, usiamo una mappa statica di fallback
+    // (il caso RI→RI_AMM vs RI→DT viene gestito a monte in displaySintetico)
+    const fwdDestStorico: Record<string, string> = {
+      TI: 'RZ', RZ: 'RI', DT: 'RI', RI: 'DT',
+      RI_AMM: 'TI_AMM', TI_AMM: 'RI_AMM'
+    }
+    const integDestStorico: Record<string, string> = {
+      RZ: 'TI', RI: 'TI', DT: 'RI',
+      RI_AMM: 'RI', TI_AMM: 'RI_AMM', DA: 'RI_AMM'
+    }
+
+    if (esitoNum !== null && Number.isFinite(esitoNum)) {
+      if (esitoNum === esitoApprovata) {
+        const dest = fwdDestStorico[ruolo]
+        if (dest) return { label: `Trasmesso a ${dest}`, statoForChip: statoApprovata }
+      }
+      if (esitoNum === esitoIntegrazione) {
+        const dest = integDestStorico[ruolo]
+        return { label: dest ? `Integrazioni richieste a ${dest}` : 'Integrazioni richieste', statoForChip: statoIntegrazione }
+      }
+      if (esitoNum === esitoRespinta) {
+        return { label: 'Respinto', statoForChip: statoRespinta }
+      }
+      return { label: `${labelEsito(esitoNum)}`, statoForChip: statoNumFromEsito(esitoNum) }
+    }
+    if (statoNum !== null && Number.isFinite(statoNum)) {
+      if (statoNum === statoDaPrendere)   return { label: `Trasmesso a ${ruolo}`, statoForChip: statoDaPrendere }
+      if (statoNum === statoPresa)        return { label: `Preso in carico ${ruolo}`, statoForChip: statoPresa }
+      if (statoNum === statoApprovata) {
+        const dest = fwdDestStorico[ruolo]
+        if (dest) return { label: `Trasmesso a ${dest}`, statoForChip: statoApprovata }
+        return { label: 'Approvato', statoForChip: statoApprovata }
+      }
+      if (statoNum === statoIntegrazione) return { label: 'In attesa di integrazioni', statoForChip: statoIntegrazione }
+      if (statoNum === statoRespinta)     return { label: 'Respinto', statoForChip: statoRespinta }
+      return { label: `${labelStato(statoNum)}`, statoForChip: statoNum }
+    }
+    if (presaNum !== null && Number.isFinite(presaNum)) {
+      if (presaNum === presaDaPrendere) return { label: `Trasmesso a ${ruolo}`, statoForChip: statoDaPrendere }
+      if (presaNum === presaPresa)      return { label: `Preso in carico ${ruolo}`, statoForChip: statoPresa }
+    }
+    return { label: `In carico ${ruolo}`, statoForChip: null }
   }
 
   const getTiIstruttoriaInfo = (d: any) => {
@@ -1334,25 +1436,24 @@ React.useEffect(() => {
   // Logica:
   //   - Scansiona i ruoli dal più avanzato (DA) al meno avanzato (TR)
   //   - Il primo ruolo con dati valorizzati è il "nodo corrente"
-  //   - presa=1 (DA PRENDERE) → la pratica è stata trasmessa ma non ancora presa in carico
-  //     → "Trasmessa a [ruolo]"  chip arancio
+  //   - presa=1 (DA PRENDERE) → il Rapporto è stato trasmesso ma non ancora preso in carico
+  //     → "Trasmesso a [ruolo]"  chip arancio
   //   - presa=2 (PRESA) o stato=presa → il ruolo ci sta lavorando
-  //     → "In lavorazione [ruolo]"  chip verde
-  //   - stato/esito espliciti → mostrano l'azione già compiuta
+  //     → "Preso in carico [ruolo]"  chip verde
   //
-  // Pratiche senza nessun campo workflow:
-  //   origine=1 (TR) → implicitamente trasmessa a RZ → "Trasmessa a RZ"  chip arancio
-  //   origine=2 (TI) → TI l'ha creata, non ancora trasmessa → "In lavorazione TI"  chip verde
+  // Rapporti senza nessun campo workflow:
+  //   origine=1 (TR) → implicitamente trasmesso a RZ → "Da prendere in carico RZ"  chip arancio
+  //   origine=2 (TI) → TI l'ha creato, non ancora trasmesso → "Da trasmettere a RZ"  chip verde
 
   const computeSintetico = (d: any): { ruolo: string, label: string, statoForChip: number | null } => {
-    const scanOrder = ['DA', 'DT', 'RI', 'RZ', 'TI', 'TR']
+    const scanOrder = ['DA', 'TI_AMM', 'RI_AMM', 'DT', 'RI', 'RZ', 'TI', 'TR']
 
     // Caso speciale: assegnazione RZ -> TI.
     // Finche' TI non "restituisce" la pratica, lo stato sintetico segue
     // le voci del file xlsx sul tratto RZ -> TI.
     const tiInfo = getTiIstruttoriaInfo(d)
     if (tiInfo.awaitingRetakeByRz) {
-      return { ruolo: 'RZ', label: 'Trasmessa a RZ', statoForChip: statoDaPrendere }
+      return { ruolo: 'RZ', label: 'Trasmesso a RZ', statoForChip: statoDaPrendere }
     }
     if (tiInfo.hasAssignedTi && tiInfo.isInTiIstruttoria) {
       if (tiInfo.statoTiNum !== null && Number.isFinite(tiInfo.statoTiNum)) {
@@ -1360,7 +1461,7 @@ React.useEffect(() => {
           return { ruolo: 'TI', label: 'Da prendere in carico TI', statoForChip: statoDaPrendere }
         }
         if (tiInfo.statoTiNum === statoPresa) {
-          return { ruolo: 'TI', label: 'Presa in carico TI', statoForChip: statoPresa }
+          return { ruolo: 'TI', label: 'Preso in carico TI', statoForChip: statoPresa }
         }
         return { ruolo: 'TI', label: 'In carico TI', statoForChip: null }
       }
@@ -1369,11 +1470,13 @@ React.useEffect(() => {
           return { ruolo: 'TI', label: 'Da prendere in carico TI', statoForChip: statoDaPrendere }
         }
         if (tiInfo.presaTiNum === presaPresa) {
-          return { ruolo: 'TI', label: 'Presa in carico TI', statoForChip: statoPresa }
+          return { ruolo: 'TI', label: 'Preso in carico TI', statoForChip: statoPresa }
         }
       }
-      return { ruolo: 'TI', label: 'Trasmessa a TI', statoForChip: statoDaPrendere }
+      return { ruolo: 'TI', label: 'Trasmesso a TI', statoForChip: statoDaPrendere }
     }
+
+    // fwdDest e integDest sono ora funzioni dinamiche (dipendono dal record d)
 
     for (const role of scanOrder) {
       if (!hasRuoloData(d, role)) continue
@@ -1386,33 +1489,63 @@ React.useEffect(() => {
       const statoNum = statoRaw !== null && statoRaw !== undefined && statoRaw !== '' ? Number(statoRaw) : null
       const esitoNum = esitoRaw !== null && esitoRaw !== undefined && esitoRaw !== '' ? Number(esitoRaw) : null
 
-      // Esito > stato > presa (in ordine di precedenza)
-
       if (esitoNum !== null && Number.isFinite(esitoNum)) {
-        return { ruolo: role, label: `${labelEsito(esitoNum)} (${role})`, statoForChip: statoNumFromEsito(esitoNum) }
+        if (esitoNum === esitoApprovata) {
+          const dest = getFwdDest(role, d)
+          if (dest) {
+            if (hasRuoloData(d, dest)) continue
+            return { ruolo: dest, label: `Trasmesso a ${dest}`, statoForChip: statoDaPrendere }
+          }
+        }
+        if (esitoNum === esitoIntegrazione) {
+          const dest = getIntegDest(role)
+          if (dest) {
+            const destEsitoRaw = d[`esito_${dest}`]
+            const destEsitoNum = destEsitoRaw !== null && destEsitoRaw !== undefined && destEsitoRaw !== '' ? Number(destEsitoRaw) : null
+            if (destEsitoNum == null) {
+              if (hasRuoloData(d, dest)) {
+                const destStatoRaw = d[`stato_${dest}`]
+                const destStatoNum = destStatoRaw !== null && destStatoRaw !== undefined && destStatoRaw !== '' ? Number(destStatoRaw) : null
+                if (destStatoNum === statoDaPrendere) return { ruolo: dest, label: `Trasmesso a ${dest}`, statoForChip: statoDaPrendere }
+                if (destStatoNum === statoPresa)      return { ruolo: dest, label: `Preso in carico ${dest}`, statoForChip: statoPresa }
+              }
+              return { ruolo: dest, label: `Trasmesso a ${dest}`, statoForChip: statoDaPrendere }
+            }
+            continue
+          }
+        }
+        return { ruolo: role, label: `${labelEsito(esitoNum)}`, statoForChip: statoNumFromEsito(esitoNum) }
       }
 
       if (statoNum !== null && Number.isFinite(statoNum)) {
-        // stato=1 (da prendere) → trasmessa, in attesa che qualcuno agisca
         if (statoNum === statoDaPrendere) {
-          return { ruolo: role, label: `Trasmessa a ${role}`, statoForChip: statoDaPrendere }
+          return { ruolo: role, label: `Trasmesso a ${role}`, statoForChip: statoDaPrendere }
         }
-        // stato=2 (presa in carico) → in lavorazione presso quel ruolo
         if (statoNum === statoPresa) {
-          return { ruolo: role, label: `Presa in carico ${role}`, statoForChip: statoPresa }
+          return { ruolo: role, label: `Preso in carico ${role}`, statoForChip: statoPresa }
         }
-        // altri stati espliciti (integrazione, approvata, respinta)
-        return { ruolo: role, label: `${labelStato(statoNum)} (${role})`, statoForChip: statoNum }
+        if (statoNum === statoApprovata) {
+          const dest = getFwdDest(role, d)
+          if (dest) {
+            if (hasRuoloData(d, dest)) continue
+            return { ruolo: dest, label: `Trasmesso a ${dest}`, statoForChip: statoDaPrendere }
+          }
+        }
+        if (statoNum === statoIntegrazione) {
+          return { ruolo: role, label: 'In attesa di integrazioni', statoForChip: statoIntegrazione }
+        }
+        if (statoNum === statoRespinta) {
+          return { ruolo: role, label: 'Respinto', statoForChip: statoRespinta }
+        }
+        return { ruolo: role, label: `${labelStato(statoNum)}`, statoForChip: statoNum }
       }
 
       if (presaNum !== null && Number.isFinite(presaNum)) {
         if (presaNum === presaDaPrendere) {
-          // presa=1: trasmessa al ruolo, non ancora presa in carico
-          return { ruolo: role, label: `Trasmessa a ${role}`, statoForChip: statoDaPrendere }
+          return { ruolo: role, label: `Trasmesso a ${role}`, statoForChip: statoDaPrendere }
         }
         if (presaNum === presaPresa) {
-          // presa=2: presa in carico, in lavorazione
-          return { ruolo: role, label: `Presa in carico ${role}`, statoForChip: statoPresa }
+          return { ruolo: role, label: `Preso in carico ${role}`, statoForChip: statoPresa }
         }
       }
 
@@ -1420,14 +1553,14 @@ React.useEffect(() => {
       return { ruolo: role, label: `In carico ${role}`, statoForChip: null }
     }
 
-    // Nessun campo workflow → pratica appena creata
+    // Nessun campo workflow → Rapporto appena creato
     const op = d['origine_pratica']
     const opNum = op !== null && op !== undefined && op !== '' ? Number(op) : null
     if (opNum === 2) {
-      // TI ha creato la pratica, la sta ancora lavorando prima di trasmetterla a RZ
+      // TI ha creato il Rapporto, non ancora trasmesso a RZ
       return { ruolo: 'TI', label: 'Da trasmettere a RZ', statoForChip: statoPresa }
     }
-    // origine=1 (TR) o non valorizzato: implicitamente trasmessa a RZ
+    // origine=1 (TR) o non valorizzato: implicitamente trasmesso a RZ
     return { ruolo: 'RZ', label: 'Da prendere in carico RZ', statoForChip: statoDaPrendere }
   }
 
@@ -1447,87 +1580,67 @@ React.useEffect(() => {
     return Math.max(...candidates)
   }
 
-  // ── computeProssima: azione attesa sul nodo corrente ──────────────────────
-  //
-  // Riceve il ruolo corrente da computeSintetico e restituisce la prossima azione attesa.
-  // La logica è simmetrica a computeSintetico: stesso nodo, stessi campi.
-  const computeProssima = (d: any, ruolo: string): string => {
+  // ── computePosizione: dove si trova il Rapporto ORA ─────────────────────────
+  // Riceve il ruolo sintetico da computeSintetico e restituisce la posizione corrente
+  // del Rapporto nel flusso di lavoro, descritta in terza persona.
+  // Es: "Inoltrato a DT", "Preso in carico da RZ", "Integrazioni richieste da RI"
+  const computePosizione = (d: any, ruolo: string): string => {
     if (!ruolo) {
-      // Fallback irraggiungibile — computeSintetico ritorna sempre un ruolo valorizzato
       const op = d['origine_pratica']
       const opNum = op !== null && op !== undefined && op !== '' ? Number(op) : null
-      return opNum === 2 ? 'Trasmettere a RZ (TI)' : 'Prendere in carico (RZ)'
+      return opNum === 2 ? 'In lavorazione presso TI' : 'Inoltrato a RZ'
     }
 
-    const opRaw = d['origine_pratica']
-    const opNum = opRaw !== null && opRaw !== undefined && opRaw !== '' ? Number(opRaw) : null
     const tiInfo = getTiIstruttoriaInfo(d)
-    if (tiInfo.awaitingRetakeByRz) return 'Prendere in carico (RZ)'
-    const hasTiAnyEvidence = tiInfo.hasAssignedTi || hasRuoloData(d, 'TI')
+    if (tiInfo.awaitingRetakeByRz) return 'Inoltrato a RZ'
+    if (tiInfo.hasAssignedTi && tiInfo.isInTiIstruttoria) {
+      if (tiInfo.statoTiNum === statoDaPrendere) return 'Inoltrato a TI'
+      if (tiInfo.statoTiNum === statoPresa)      return 'In istruttoria presso TI'
+      return 'In istruttoria presso TI'
+    }
 
-    const presaRaw = d[`presa_in_carico_${ruolo}`]
-    const statoRaw = d[`stato_${ruolo}`]
     const esitoRaw = d[`esito_${ruolo}`]
-
-    const presaNum = presaRaw !== null && presaRaw !== undefined && presaRaw !== '' ? Number(presaRaw) : null
-    const statoNum = statoRaw !== null && statoRaw !== undefined && statoRaw !== '' ? Number(statoRaw) : null
+    const statoRaw = d[`stato_${ruolo}`]
+    const presaRaw = d[`presa_in_carico_${ruolo}`]
     const esitoNum = esitoRaw !== null && esitoRaw !== undefined && esitoRaw !== '' ? Number(esitoRaw) : null
+    const statoNum = statoRaw !== null && statoRaw !== undefined && statoRaw !== '' ? Number(statoRaw) : null
+    const presaNum = presaRaw !== null && presaRaw !== undefined && presaRaw !== '' ? Number(presaRaw) : null
 
-    // Esito già espresso
     if (esitoNum !== null) {
       if (esitoNum === esitoApprovata) {
-        // DT approva e trasmette a DA; DA approva = chiusa
-        if (ruolo === 'DT') return 'Trasmettere a DA (DT)'
-        return `Chiusa – approvata (${ruolo})`
+        const dest = getFwdDest(ruolo, d)
+        return dest ? `Inoltrato a ${dest}` : 'Approvato'
       }
-      if (esitoNum === esitoRespinta)    return `Chiusa – respinta (${ruolo})`
-      if (esitoNum === esitoIntegrazione) return `Attendere integrazione (${ruolo})`
+      if (esitoNum === esitoIntegrazione) {
+        const dest = getIntegDest(ruolo)
+        return dest ? `Integrazioni richieste a ${dest}` : 'Integrazioni richieste'
+      }
+      if (esitoNum === esitoRespinta) return `Respinto da ${ruolo}`
     }
 
-    // Stato esplicito
     if (statoNum !== null) {
-      if (statoNum === statoDaPrendere)  return `Prendere in carico (${ruolo})`
-      if (statoNum === statoPresa) {
-        // In lavorazione → azione dipende dal ruolo
-        if (ruolo === 'RZ') {
-          if ((opNum == null || opNum === 1) && !hasTiAnyEvidence) return 'Assegnare a TI (RZ)'
-          return 'Trasmettere a RI (RZ)'
-        }
-        if (ruolo === 'TI') return 'Trasmettere a RZ (TI)'
-        if (ruolo === 'RI') return 'Trasmettere a DT (RI)'
-        if (ruolo === 'DT') return 'Esprimere esito (DT)'
-        if (ruolo === 'DA') return 'Esprimere esito finale (DA)'
-        return `Esprimere esito (${ruolo})`
-      }
-      if (statoNum === statoIntegrazione) return `Gestire integrazione (${ruolo})`
+      if (statoNum === statoDaPrendere)   return `Inoltrato a ${ruolo}`
+      if (statoNum === statoPresa)        return `Preso in carico da ${ruolo}`
       if (statoNum === statoApprovata) {
-        if (ruolo === 'DT') return 'Trasmettere a DA (DT)'
-        return `Chiusa – approvata (${ruolo})`
+        const dest = getFwdDest(ruolo, d)
+        return dest ? `Inoltrato a ${dest}` : 'Approvato'
       }
-      if (statoNum === statoRespinta)    return `Chiusa – respinta (${ruolo})`
+      if (statoNum === statoIntegrazione) {
+        const dest = getIntegDest(ruolo)
+        return dest ? `Integrazioni richieste a ${dest}` : 'Integrazioni richieste'
+      }
+      if (statoNum === statoRespinta) return `Respinto da ${ruolo}`
     }
 
-    // Solo presa in carico
     if (presaNum !== null) {
-      if (presaNum === presaDaPrendere)  return `Prendere in carico (${ruolo})`
-      if (presaNum === presaPresa) {
-        if (ruolo === 'RZ') {
-          if ((opNum == null || opNum === 1) && !hasTiAnyEvidence) return 'Assegnare a TI (RZ)'
-          return 'Trasmettere a RI (RZ)'
-        }
-        if (ruolo === 'TI') return 'Trasmettere a RZ (TI)'
-        if (ruolo === 'RI') return 'Trasmettere a DT (RI)'
-        if (ruolo === 'DT') return 'Esprimere esito (DT)'
-        if (ruolo === 'DA') return 'Esprimere esito finale (DA)'
-        return `Esprimere esito (${ruolo})`
-      }
+      if (presaNum === presaDaPrendere) return `Inoltrato a ${ruolo}`
+      if (presaNum === presaPresa)      return `Preso in carico da ${ruolo}`
     }
 
-    // Nessun campo → pratica appena creata, nessun workflow ancora avviato
-    if (ruolo === 'RZ') return 'Prendere in carico (RZ)'
-    if (ruolo === 'TI') return 'Trasmettere a RZ (TI)'
-
-    return `Verificare stato (${ruolo})`
+    const op = d['origine_pratica']
+    const opNum = op !== null && op !== undefined && op !== '' ? Number(op) : null
+    if (opNum === 2) return 'In lavorazione presso TI'
+    return 'Inoltrato a RZ'
   }
   const getSortValue = (r: DataRecord, field: string): any => {
     const d = r.getData?.() || {}
@@ -1535,7 +1648,7 @@ React.useEffect(() => {
     if (field === V_ULTIMO) return computeUltimoAggMs(d)
     if (field === V_PROSSIMA) {
       const s = computeSintetico(d)
-      return computeProssima(d, s.ruolo)
+      return computePosizione(d, s.ruolo)
     }
     return d[field]
   }
@@ -2175,13 +2288,97 @@ React.useEffect(() => {
                       const ufficio = txt(d[fieldUfficio])
 
                       const sintetico = computeSintetico(d)
-                      const statoLabel = txt(sintetico.label)
-                      const statoChipNum = sintetico.statoForChip
+
+                      // ── Label chip differenziata per ruolo (matrici: "stato per gli altri ruoli") ──
+                      // Ogni ruolo vede la label specifica dalla sua matrice, non quella generica del nodo attivo.
+                      const displaySintetico = (() => {
+                        if (!giiUser || giiUser.isAdmin) return sintetico
+                        const myRole = String(giiUser.ruoloLabel || '').toUpperCase()
+                        if (!myRole) return sintetico
+
+                        // ── Helper: leggi esito numerico di un ruolo ─────────────────────────
+                        const getEsitoNum = (role: string): number | null => {
+                          const v = d[`esito_${role}`] ?? d[`ESITO_${role}`]
+                          if (v == null || v === '') return null
+                          const n = Number(v)
+                          return Number.isFinite(n) ? n : null
+                        }
+
+                        // ── RZ: tutti i casi della Matrice_RZ ────────────────────────────────
+                        if (myRole === 'RZ') {
+                          // Casi 1 e 3: nodo attivo con stato=da_prendere → "Da prendere in carico"
+                          if (sintetico.ruolo === 'RZ' && sintetico.statoForChip === statoDaPrendere) {
+                            return { ...sintetico, label: 'Da prendere in carico' }
+                          }
+                          // Casi 2 e 4: nodo attivo con stato=preso → "Preso in carico"
+                          if (sintetico.ruolo === 'RZ' && sintetico.statoForChip === statoPresa) {
+                            return { ...sintetico, label: 'Preso in carico' }
+                          }
+                          // Casi 2/a e 4/b: TI è il nodo attivo (assegnato da RZ)
+                          if (sintetico.ruolo === 'TI') {
+                            const esitoRZ = getEsitoNum('RZ')
+                            // Caso 4/b: RZ ha richiesto integrazioni a TI
+                            if (esitoRZ === esitoIntegrazione) {
+                              return { ruolo: 'RZ', label: 'In attesa di integrazioni', statoForChip: statoIntegrazione }
+                            }
+                            // Caso 2/a: prima assegnazione a TI (e successive riassegnazioni)
+                            return { ruolo: 'RZ', label: 'In attesa di istruttoria', statoForChip: statoPresa }
+                          }
+                          // Casi 4/a, 4/c e successivi: RZ ha già agito, flusso avanzato
+                          const storico = computeStatoStorico(d, 'RZ')
+                          if (storico) {
+                            // Caso 4/a: RZ ha trasmesso a RI (esito=approvata)
+                            if (storico.statoForChip === statoApprovata) {
+                              return { ruolo: 'RZ', label: 'Trasmesso a RI', statoForChip: statoApprovata }
+                            }
+                            // Caso 4/b storico: In attesa di integrazioni (esito=integrazione)
+                            if (storico.statoForChip === statoIntegrazione) {
+                              return { ruolo: 'RZ', label: 'In attesa di integrazioni', statoForChip: statoIntegrazione }
+                            }
+                            // Casi 2/b e 4/c: Respinto
+                            return { ruolo: 'RZ', ...storico }
+                          }
+                        }
+
+                        // ── Altri ruoli: nodo attivo ─────────────────────────────────────────
+                        if (sintetico.ruolo === myRole) {
+                          // stato=da_prendere → "Da prendere in carico" (vale per tutti i ruoli)
+                          if (sintetico.statoForChip === statoDaPrendere) {
+                            return { ...sintetico, label: 'Da prendere in carico' }
+                          }
+                          return sintetico
+                        }
+
+                        // ── Ruolo già agito storicamente (o in attesa di agire di nuovo) ────────
+                        const storico = computeStatoStorico(d, myRole)
+                        if (storico) {
+                          // stato_[myRole] = STATO_DA_PRENDERE significa che il ruolo deve agire:
+                          // da prospettiva propria è sempre "Da prendere in carico",
+                          // non "Trasmesso a [myRole]" (quella è la label per gli altri).
+                          if (storico.statoForChip === statoDaPrendere) {
+                            return { ruolo: myRole, label: 'Da prendere in carico', statoForChip: statoDaPrendere }
+                          }
+                          return { ruolo: myRole, ...storico }
+                        }
+
+                        // ── Ruolo non ancora raggiunto ───────────────────────────────────────
+                        const isSanz = isInFaseSanzionatoria(d)
+                        return {
+                          ruolo: sintetico.ruolo,
+                          label: isSanz
+                            ? 'Sanzione amministrativa in corso di istruttoria'
+                            : 'Rapporto di rilevazione in corso di istruttoria',
+                          statoForChip: null as number | null
+                        }
+                      })()
+
+                      const statoLabel = txt(displaySintetico.label)
+                      const statoChipNum = displaySintetico.statoForChip
 
                       const ultimoMs = computeUltimoAggMs(d)
                       const ultimo = ultimoMs ? formatDateIt(ultimoMs) : '—'
 
-                      const prossima = computeProssima(d, sintetico.ruolo)
+                      const prossima = computePosizione(d, sintetico.ruolo)
 
                       const isSel = (localSelectedByDs[recDsId] === rid)
                       const even = idx % 2 === 0
@@ -2270,7 +2467,7 @@ React.useEffect(() => {
                             if (f === V_STATO) {
                               return (
                                 <div key={col.id} className={ci === 0 ? 'cell first' : 'cell'} title={statoLabel}>
-                                  <span className='chip' style={getChipStyle(Number.isFinite(Number(statoChipNum)) ? Number(statoChipNum) : null)}>
+                                  <span className='chip' style={getChipStyleByLabel(statoLabel)}>
                                     {statoLabel}
                                   </span>
                                 </div>

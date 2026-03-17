@@ -64,7 +64,7 @@ function Sel(p: { value:string; onChange:(v:string)=>void; options:Array<{value:
 const VIRTUAL_FIELDS: FieldOpt[] = [
   { name:'__stato_sint__', alias:'⚙ Stato sintetico (calcolato)', type:'virtual' },
   { name:'__ultimo_agg__', alias:'⚙ Ultimo aggiornamento (calcolato)', type:'virtual' },
-  { name:'__prossima__',   alias:'⚙ Prossima azione (calcolato)', type:'virtual' },
+  { name:'__prossima__',   alias:'⚙ Posizione Rapporto (calcolato)', type:'virtual' },
 ]
 function FieldSel(p: { value:string; fields:FieldOpt[]; onChange:(v:string)=>void; placeholder?:string; virtual?:boolean }) {
   if(!p.fields.length) return <Inp value={p.value} onChange={p.onChange} placeholder={p.placeholder||'nome campo'}/>
@@ -82,19 +82,6 @@ function Acc(p: { id:string; label:string; open:boolean; onToggle:()=>void }) {
     <div style={P.sec} onClick={p.onToggle}>
       <span>{p.label}</span>
       <span style={{ fontSize:10, color:'#a0aec0' }}>{p.open?'▲':'▼'}</span>
-    </div>
-  )
-}
-
-function StatoColors(p: { label:string; bg:string; onBg:(v:string)=>void; text:string; onText:(v:string)=>void; border:string; onBorder:(v:string)=>void }) {
-  return (
-    <div style={{ marginBottom:10 }}>
-      <div style={{ fontSize:11, fontWeight:600, color:'#d1d5db', marginBottom:5 }}>{p.label}</div>
-      <div style={P.row3}>
-        <div><div style={{ fontSize:10, color:'#a0aec0', marginBottom:3 }}>Sfondo</div><ColInp value={p.bg} onChange={p.onBg}/></div>
-        <div><div style={{ fontSize:10, color:'#a0aec0', marginBottom:3 }}>Testo</div><ColInp value={p.text} onChange={p.onText}/></div>
-        <div><div style={{ fontSize:10, color:'#a0aec0', marginBottom:3 }}>Bordo</div><ColInp value={p.border} onChange={p.onBorder}/></div>
-      </div>
     </div>
   )
 }
@@ -353,6 +340,7 @@ export default function Setting(props: Props) {
 
       <Acc id='chip' label='🔴 Chip stato' open={isOpen('chip')} onToggle={()=>toggle('chip')}/>
       {isOpen('chip') && <div>
+
         <div style={P.grp}>Forma</div>
         <div style={P.row3}>
           <div><label style={P.lbl}>Radius</label><NumInp value={cfg.statoChipRadius} onChange={n=>update('statoChipRadius',n)} min={0}/></div>
@@ -368,23 +356,38 @@ export default function Setting(props: Props) {
           <div>
             <label style={P.lbl}>Transform</label>
             <Sel value={String(cfg.statoChipTextTransform||'none')} onChange={v=>update('statoChipTextTransform',v)}
-              options={[{value:'none',label:'none'},{value:'uppercase',label:'uppercase'},{value:'lowercase',label:'lowercase'},{value:'capitalize',label:'capitalize'}]}/>
+              options={[{value:'none',label:'none'},{value:'uppercase',label:'UPPERCASE'},{value:'lowercase',label:'lowercase'},{value:'capitalize',label:'Capitalize'}]}/>
           </div>
           <div><label style={P.lbl}>Letter spacing</label><NumInp value={cfg.statoChipLetterSpacing} onChange={n=>update('statoChipLetterSpacing',n)} step={0.1}/></div>
         </div>
+
         <div style={P.grp}>Colori</div>
-        <StatoColors label='Da prendere in carico'
-          bg={String(cfg.statoBgDaPrendere||'')} onBg={v=>update('statoBgDaPrendere',v)}
-          text={String(cfg.statoTextDaPrendere||'')} onText={v=>update('statoTextDaPrendere',v)}
-          border={String(cfg.statoBorderDaPrendere||'')} onBorder={v=>update('statoBorderDaPrendere',v)}/>
-        <StatoColors label='Presa in carico'
-          bg={String(cfg.statoBgPresa||'')} onBg={v=>update('statoBgPresa',v)}
-          text={String(cfg.statoTextPresa||'')} onText={v=>update('statoTextPresa',v)}
-          border={String(cfg.statoBorderPresa||'')} onBorder={v=>update('statoBorderPresa',v)}/>
-        <StatoColors label='Altro'
-          bg={String(cfg.statoBgAltro||'')} onBg={v=>update('statoBgAltro',v)}
-          text={String(cfg.statoTextAltro||'')} onText={v=>update('statoTextAltro',v)}
-          border={String(cfg.statoBorderAltro||'')} onBorder={v=>update('statoBorderAltro',v)}/>
+        {([
+          { name:'Giallo — Da prendere in carico',   bg:'chipBgGiallo',    text:'chipTextGiallo',    border:'chipBorderGiallo'    },
+          { name:'Azzurro — Preso in carico',         bg:'chipBgAzzurro',   text:'chipTextAzzurro',   border:'chipBorderAzzurro'   },
+          { name:'Verde — Trasmesso / Approvato',     bg:'chipBgVerde',     text:'chipTextVerde',     border:'chipBorderVerde'     },
+          { name:'Arancione — In attesa di …',        bg:'chipBgArancione', text:'chipTextArancione', border:'chipBorderArancione' },
+          { name:'Rosso — Respinto / Eliminato',      bg:'chipBgRosso',     text:'chipTextRosso',     border:'chipBorderRosso'     },
+          { name:'Lilla — Verbale da trasmettere',    bg:'chipBgLilla',     text:'chipTextLilla',     border:'chipBorderLilla'     },
+          { name:'Viola — Verbale notificato',        bg:'chipBgViola',     text:'chipTextViola',     border:'chipBorderViola'     },
+          { name:'Neutro — In corso di istruttoria',  bg:'chipBgNeutro',    text:'chipTextNeutro',    border:'chipBorderNeutro'    },
+        ] as const).map(({ name, bg, text, border }) => (
+          <div key={bg} style={{ marginBottom:12 }}>
+            <div style={{ fontSize:11, fontWeight:600, color:'#d1d5db', marginBottom:5, display:'flex', alignItems:'center', gap:8 }}>
+              <span style={{
+                display:'inline-block', width:12, height:12, borderRadius:3, flexShrink:0,
+                background: String((cfg as any)[bg] || '#ccc'),
+                border: `1px solid ${String((cfg as any)[border] || '#999')}`
+              }}/>
+              {name}
+            </div>
+            <div style={P.row3}>
+              <div><div style={{ fontSize:10, color:'#a0aec0', marginBottom:3 }}>Sfondo</div><ColInp value={String((cfg as any)[bg]||'')} onChange={v=>update(bg,v)}/></div>
+              <div><div style={{ fontSize:10, color:'#a0aec0', marginBottom:3 }}>Testo</div><ColInp value={String((cfg as any)[text]||'')} onChange={v=>update(text,v)}/></div>
+              <div><div style={{ fontSize:10, color:'#a0aec0', marginBottom:3 }}>Bordo</div><ColInp value={String((cfg as any)[border]||'')} onChange={v=>update(border,v)}/></div>
+            </div>
+          </div>
+        ))}
       </div>}
 
       <Acc id='titolo' label='📝 Titolo elenco' open={isOpen('titolo')} onToggle={()=>toggle('titolo')}/>

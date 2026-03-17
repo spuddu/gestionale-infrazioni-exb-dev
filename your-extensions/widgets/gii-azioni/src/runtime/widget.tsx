@@ -1282,7 +1282,7 @@ function actionButtonStyle (bg: string, disabled: boolean, ui?: { btnBorderRadiu
   return { ...base, backgroundColor: bg, borderColor: bg, color: '#ffffff' }
 }
 
-type Pending = null | 'TAKE' | 'ASSEGNA_TI' | 'INTEGRAZIONE' | 'APPROVA' | 'RESPINGI' | 'TRASMETTI' | 'ELIMINA'
+type Pending = null | 'TAKE' | 'ASSEGNA_TI' | 'INTEGRAZIONE' | 'APPROVA' | 'RESPINGI' | 'TRASMETTI' | 'TRASMETTI_RI_AMM' | 'RIMANDA_DT' | 'ELIMINA'
 
 function ActionsPanel (props: {
   active: { key: string; state: SelState } | null
@@ -1622,19 +1622,34 @@ function ActionsPanel (props: {
   }
 
   const getPrevRoleForIntegration = (): string => {
-    if (role === 'RZ') return 'TI'
-    if (role === 'RI') return 'RZ'
-    if (role === 'DT') return 'RI'
-    if (role === 'DA') return 'DT'
+    if (role === 'RZ')     return 'TI'
+    if (role === 'RI')     return 'TI'
+    if (role === 'DT')     return 'RI'
+    if (role === 'RI_AMM') return 'RI'
+    if (role === 'TI_AMM') return 'RI_AMM'
+    if (role === 'DA')     return 'RI_AMM'
     return ''
   }
 
   const getNextRoleForForward = (): string => {
-    if (role === 'TI') return 'RZ'
-    if (role === 'RZ') return 'RI'
-    if (role === 'RI') return 'DT'
-    if (role === 'DT') return 'DA'
+    if (role === 'TI')     return 'RZ'
+    if (role === 'RZ')     return 'RI'
+    if (role === 'RI')     return 'DT'
+    if (role === 'DT')     return 'RI'      // Matrice_DT caso 2a: approva e trasmette a RI
+    if (role === 'RI_AMM') return 'TI_AMM'
+    if (role === 'TI_AMM') return 'RI_AMM'
     return ''
+  }
+
+  // RI è in "seconda fase" se DT ha già approvato e ritrasmesso a RI.
+  // In questo caso RI non può chiedere integrazioni a TI ma può:
+  // - rimandare a DT (riapertura ciclo DT)
+  // - trasmettere a RI_AMM (avvio fase sanzionatoria)
+  const isRiSecondaFase = (): boolean => {
+    if (role !== 'RI') return false
+    const esitoDT = pickAttrCI(data, ['esito_DT', 'ESITO_DT'])
+    const n = toNumOrNull(esitoDT)
+    return n === ESITO_APPROVATA
   }
 
 
@@ -1835,8 +1850,8 @@ function ActionsPanel (props: {
   const effectiveStatoNum = awaitingRetakeByRz && role === 'RZ' ? STATO_DA_PRENDERE : statoNum
   const effectivePresaNum = awaitingRetakeByRz && role === 'RZ' ? PRESA_DA_PRENDERE : presaNum
 
-  // blocca DT se già trasmesso a DA (DA ha uno stato valorizzato)
-  const lockedByTransmit = (role === 'DT') && (statoDANum != null && statoDANum >= 1)
+  // Matrice_DT: DT trasmette a RI (non a DA). Nessun lock basato su stato_DA.
+  const lockedByTransmit = false
 
   // quando cambio selezione: torno libero (nessuna memoria)
   React.useEffect(() => {
@@ -1976,13 +1991,45 @@ function ActionsPanel (props: {
       if (!higherTouched && !tiReturnedLocal) return 'TI'
     }
 
-    const scanOrder = ['DA', 'DT', 'RI', 'RZ', 'TI', 'TR']
+    const scanOrder = ['DA', 'TI_AMM', 'RI_AMM', 'DT', 'RI', 'RZ', 'TI', 'TR']
 
-    const hasData = (role: string) => {
-      const p = d[`presa_in_carico_${role}`]
-      const s = d[`stato_${role}`]
-      const e = d[`esito_${role}`]
+    const hasData = (r: string) => {
+      const p = d[`presa_in_carico_${r}`]
+      const s = d[`stato_${r}`]
+      const e = d[`esito_${r}`]
       return isMeaningful(p) || isMeaningful(s) || isMeaningful(e)
+    }
+
+    // fwdDest dinamico: RI punta a DT in fase ordinaria, a RI_AMM dopo approvazione DT
+    const getFwdDestLocal = (r: string): string => {
+      switch (r) {
+        case 'TI':     return 'RZ'
+        case 'RZ':     return 'RI'
+        case 'DT':     return 'RI'
+        case 'RI': {
+          const esitoDT = pickAttrCI(d, ['esito_DT', 'ESITO_DT'])
+          return toNum(esitoDT) === ESITO_APPROVATA ? 'RI_AMM' : 'DT'
+        }
+        case 'RI_AMM': {
+          const esitoTiAmm = pickAttrCI(d, ['esito_TI_AMM', 'ESITO_TI_AMM'])
+          return toNum(esitoTiAmm) != null ? 'DA' : 'TI_AMM'
+        }
+        case 'TI_AMM': return 'RI_AMM'
+        default:       return ''
+      }
+    }
+
+    // integDest: destinatario richiesta integrazioni
+    const getIntegDestLocal = (r: string): string => {
+      switch (r) {
+        case 'RZ':     return 'TI'
+        case 'RI':     return 'TI'
+        case 'DT':     return 'RI'
+        case 'RI_AMM': return 'RI'
+        case 'TI_AMM': return 'RI_AMM'
+        case 'DA':     return 'RI_AMM'
+        default:       return ''
+      }
     }
 
     for (const r of scanOrder) {
@@ -1992,9 +2039,24 @@ function ActionsPanel (props: {
       const statoNum = toNum(d[`stato_${r}`])
       const esitoNum = toNum(d[`esito_${r}`])
 
-      // Se l'esito è valorizzato (non 0) significa che quel ruolo ha già agito.
-      // Il nodo "attivo" è il successivo, ma per gating ci basta non far tornare indietro.
-      if (esitoNum != null) return r
+      if (esitoNum != null) {
+        if (esitoNum === ESITO_APPROVATA) {
+          const dest = getFwdDestLocal(r)
+          if (dest) {
+            if (hasData(dest)) continue
+            return dest
+          }
+        }
+        if (esitoNum === ESITO_INTEGRAZIONE) {
+          const dest = getIntegDestLocal(r)
+          if (dest) {
+            const destEsito = toNum(d[`esito_${dest}`])
+            if (destEsito == null) return dest
+            continue
+          }
+        }
+        return r
+      }
 
       if (presaNum != null || statoNum != null) return r
 
@@ -2016,22 +2078,34 @@ function ActionsPanel (props: {
     return opNum === 2 ? 'TI' : 'RZ'
   }
 
-  // Il ruolo che deve agire ORA sulla pratica selezionata
+  // Il ruolo che deve agire ORA sulla pratica selezionata.
+  // Usato solo per display (computeSintetico nell'elenco). NON usato come guardiano dei pulsanti:
+  // la vista dell'utente può non esporre i campi degli altri ruoli, rendendo isMyTurn inaffidabile.
   const nodoAttivo = data ? computeNodoAttivo(data) : ''
-  // L'utente loggato può agire solo se è il nodo attivo
   const isMyTurn = nodoAttivo === role
 
   // TI non deve poter "prendere in carico" una pratica nata da gestionale (origine=2)
-  // se non ha ancora workflow: quella pratica è già sua. "Prendi in carico" ha senso
-  // per TI SOLO quando RZ gliela rimanda per integrazione (presaNum === PRESA_DA_PRENDERE).
+  // se non ha ancora workflow: quella pratica è già sua.
   const isTiOwningOrigin2 = role === 'TI' && origineNum === 2 && presaNum == null
+
+  // ── Guardiani pulsanti: basati SOLO su stato_[myRole] ───────────────────────
+  // La fonte di verità è il valore del campo stato del ruolo corrente nel record.
+  // isMyTurn NON è usato: la vista può non esporre i campi degli altri ruoli.
+
+  const myStatoIsDaPrendere =
+    (effectiveStatoNum === STATO_DA_PRENDERE) ||
+    (effectivePresaNum === PRESA_DA_PRENDERE && (effectiveStatoNum == null || effectiveStatoNum === STATO_DA_PRENDERE))
+
+  const myStatoIsPresaInCarico =
+    (effectiveStatoNum === STATO_PRESA_IN_CARICO) ||
+    (effectivePresaNum === PRESA_IN_CARICO && (effectiveStatoNum == null || effectiveStatoNum === STATO_PRESA_IN_CARICO))
 
   const canStartTakeInCharge =
     hasSel &&
     !loading &&
     !lockedByTransmit &&
     pending === null &&
-    isMyTurn &&
+    (myStatoIsDaPrendere || (effectivePresaNum == null && effectiveStatoNum == null && !isTiOwningOrigin2 && isMyTurn)) &&
     !isTiOwningOrigin2 &&
     (effectivePresaNum == null || effectivePresaNum === PRESA_DA_PRENDERE) &&
     (effectiveStatoNum == null || effectiveStatoNum === STATO_DA_PRENDERE)
@@ -2068,44 +2142,77 @@ function ActionsPanel (props: {
     !loading &&
     !lockedByTransmit &&
     pending === null &&
-    isMyTurn &&
+    myStatoIsPresaInCarico &&
     !lockRZBecauseAssignedToTi &&
     effectivePresaNum === PRESA_IN_CARICO &&
     effectiveStatoNum === STATO_PRESA_IN_CARICO
 
-  // Regola RZ: prima di assegnare a TI, può solo "Assegna TI" oppure "Respingi" (con motivazione).
-  // Quindi, FINCHÉ non esiste un TI assegnato, RZ non può fare Integrazione né Approva.
+  // Regola RZ: prima di assegnare a TI, può solo "Assegna TI" oppure "Respingi".
+  // Regola RI seconda fase: non può chiedere integrazioni a TI, solo trasmetti RI_AMM o rimanda DT.
+  const riSecondaFase = isRiSecondaFase()
+
   const canStartIntegrazione =
     canStartEsito &&
     !(role === 'RZ' && (origineNum == null || origineNum === 1) && !hasTiAnyEvidence) &&
-    role !== 'TI'
+    role !== 'TI' &&
+    !riSecondaFase  // RI seconda fase non può chiedere integrazioni a TI
 
   const canStartApprova =
     canStartEsito &&
-    !(role === 'RZ' && (origineNum == null || origineNum === 1) && !hasTiAnyEvidence)
+    !(role === 'RZ' && (origineNum == null || origineNum === 1) && !hasTiAnyEvidence) &&
+    !riSecondaFase  // RI seconda fase usa i pulsanti specifici, non "Inoltra a DT"
 
   const canStartRespingi =
     canStartEsito &&
     role !== 'TI' &&
     role !== 'RI'
 
-  // Label dinamiche (inoltro vs approva) — senza cambiare la semantica dati (esito=approvata).
+  // RI seconda fase: trasmetti a RI AMM
+  const canStartTrasmmettiRiAmm =
+    role === 'RI' &&
+    riSecondaFase &&
+    hasSel &&
+    !loading &&
+    !lockedByTransmit &&
+    pending === null &&
+    myStatoIsPresaInCarico
+
+  // RI seconda fase: rimanda a DT (riapertura ciclo DT)
+  const canStartRimandaDT =
+    role === 'RI' &&
+    riSecondaFase &&
+    hasSel &&
+    !loading &&
+    !lockedByTransmit &&
+    pending === null &&
+    myStatoIsPresaInCarico
+
+  // Label dinamiche (inoltro vs approva)
   const approvaBtnLabel =
     role === 'TI' ? 'Inoltra a RZ' :
     role === 'RZ' ? 'Inoltra a RI' :
     role === 'RI' ? 'Inoltra a DT' :
+    role === 'DT' ? 'Approva e trasmetti a RI' :
+    role === 'RI_AMM' ? 'Trasmetti a TI AMM' :
+    role === 'TI_AMM' ? 'Trasmetti a RI AMM' :
     'Approva'
 
   const approvaDoneLabel =
     role === 'TI' ? 'Inoltrata a RZ' :
     role === 'RZ' ? 'Inoltrata a RI' :
     role === 'RI' ? 'Inoltrata a DT' :
+    role === 'DT' ? 'Approvata e trasmessa a RI' :
+    role === 'RI_AMM' ? 'Trasmessa a TI AMM' :
+    role === 'TI_AMM' ? 'Trasmessa a RI AMM' :
     'Approvata'
 
   const approvaConfirmLabel =
     role === 'TI' ? 'Conferma inoltro a RZ' :
     role === 'RZ' ? 'Conferma inoltro a RI' :
     role === 'RI' ? 'Conferma inoltro a DT' :
+    role === 'DT' ? 'Conferma approvazione e trasmissione a RI' :
+    role === 'RI_AMM' ? 'Conferma trasmissione a TI AMM' :
+    role === 'TI_AMM' ? 'Conferma trasmissione a RI AMM' :
     'Conferma approvazione'
 
   // TI: eliminazione consentita solo per pratiche originate da sé (origine=TI) e mai inoltrate a RZ.
@@ -2126,7 +2233,7 @@ function ActionsPanel (props: {
     !loading &&
     !lockedByTransmit &&
     pending === null &&
-    isMyTurn &&
+    myStatoIsPresaInCarico &&
     origineNum === 2 &&
     !hasTiAssigned &&
     !hasRoleTouched('RZ') &&
@@ -2137,15 +2244,7 @@ function ActionsPanel (props: {
     isOwner
 
 
-  const canStartTrasmetti =
-    role === 'DT' &&
-    hasSel &&
-    !loading &&
-    !lockedByTransmit &&
-    pending === null &&
-    isMyTurn &&
-    (effectiveStatoNum === STATO_INTEGRAZIONE || effectiveStatoNum === STATO_APPROVATA || effectiveStatoNum === STATO_RESPINTA) &&
-    (statoDANum == null || statoDANum === 0)
+  // Nota: Matrice_DT non prevede "Trasmetti a DA". Il pulsante è stato rimosso.
 
   // Assegna TI: solo RZ, dopo presa in carico, pratiche da TR.
   // NOTA: non dipendiamo da computeNodoAttivo perché su alcune Output DS ExB
@@ -2161,8 +2260,8 @@ function ActionsPanel (props: {
     effectivePresaNum === PRESA_IN_CARICO &&
     effectiveStatoNum === STATO_PRESA_IN_CARICO
 
-  // NOTE: compare solo per integrazione/respinta
-  const showNote = pending === 'INTEGRAZIONE' || pending === 'RESPINGI'
+  // NOTE: compare per integrazione, respinta e — Matrice_TI caso 1/b — anche per eliminazione (obbligatoria)
+  const showNote = pending === 'INTEGRAZIONE' || pending === 'RESPINGI' || pending === 'ELIMINA'
   const noteEnabled = showNote && hasSel && !loading && !lockedByTransmit
 
   const noteTrim = String(noteDraft ?? '').trim()
@@ -2172,7 +2271,8 @@ function ActionsPanel (props: {
   // obblighi:
   const noteIsRequired =
     (pending === 'INTEGRAZIONE') ||
-    (pending === 'RESPINGI' && isAltro)
+    (pending === 'RESPINGI' && isAltro) ||
+    (pending === 'ELIMINA')  // Matrice_TI caso 1/b: note obbligatoria per eliminazione
 
   const reasonIsRequired = pending === 'RESPINGI'
 
@@ -2203,8 +2303,9 @@ function ActionsPanel (props: {
     if (p === 'INTEGRAZIONE' && !canStartIntegrazione) return
     if (p === 'APPROVA' && !canStartApprova) return
     if (p === 'RESPINGI' && !canStartRespingi) return
-    if (p === 'TRASMETTI' && !canStartTrasmetti) return
     if (p === 'ELIMINA' && !canStartElimina) return
+    if (p === 'TRASMETTI_RI_AMM' && !canStartTrasmmettiRiAmm) return
+    if (p === 'RIMANDA_DT' && !canStartRimandaDT) return
 
     setPending(p)
     setMsg(null)
@@ -2680,8 +2781,12 @@ function ActionsPanel (props: {
   }
 
   const onConfirmElimina = async () => {
+    setConfirmAttempted(true)
+    if (!noteTrim) return  // Matrice_TI caso 1/b: nota obbligatoria
+
     try {
       await runDeleteEdits('Pratica eliminata.')
+      void closeCycleLog({ eventoChiusura: 'ELIMINAZIONE', noteChiusura: noteTrim, fase: role })
       setPending(null)
       setConfirmAttempted(false)
     } catch (e: any) {
@@ -2702,6 +2807,72 @@ function ActionsPanel (props: {
         'Trasmesso a DA.'
       )
       void closeCycleLog({ eventoChiusura: 'TRASMISSIONE_A_DA', ruoloDestinatario: 'DA', fase: role })
+      setPending(null)
+      setConfirmAttempted(false)
+    } catch (e: any) {
+      const txt = e?.message ? String(e.message) : String(e)
+      setMsg({ kind: 'err', text: `Errore salvataggio: ${txt}` })
+    }
+  }
+
+  // RI seconda fase → trasmetti a RI AMM (avvio fase sanzionatoria)
+  const onConfirmTrasmmettiRiAmm = async () => {
+    try {
+      const schemaFields: Record<string, any> = (ds as any)?.getSchema?.()?.fields || {}
+      const upd: Record<string, any> = {
+        // Chiudi ciclo RI
+        [esitoField]: ESITO_APPROVATA,
+        [dtEsitoField]: Date.now(),
+        [statoField]: STATO_APPROVATA,
+        [dtStatoField]: Date.now()
+      }
+      // Apri nodo RI_AMM
+      const fStatoRiAmm   = getSchemaFieldNameCI(schemaFields, 'stato_RI_AMM')
+      const fDtStatoRiAmm = getSchemaFieldNameCI(schemaFields, 'dt_stato_RI_AMM')
+      const fEsitoRiAmm   = getSchemaFieldNameCI(schemaFields, 'esito_RI_AMM')
+      const fDtEsito      = getSchemaFieldNameCI(schemaFields, 'dt_esito_RI_AMM')
+      const fDtPresa      = getSchemaFieldNameCI(schemaFields, 'dt_presa_in_carico_RI_AMM')
+      if (fStatoRiAmm)   upd[fStatoRiAmm]   = STATO_DA_PRENDERE
+      if (fDtStatoRiAmm) upd[fDtStatoRiAmm] = Date.now()
+      if (fEsitoRiAmm)   upd[fEsitoRiAmm]   = null
+      if (fDtEsito)      upd[fDtEsito]      = null
+      if (fDtPresa)      upd[fDtPresa]      = null
+      await runApplyEdits(upd, 'Trasmesso a RI AMM.')
+      void closeCycleLog({ eventoChiusura: 'TRASMISSIONE_A_RI_AMM', ruoloDestinatario: 'RI_AMM', fase: role })
+      setPending(null)
+      setConfirmAttempted(false)
+    } catch (e: any) {
+      const txt = e?.message ? String(e.message) : String(e)
+      setMsg({ kind: 'err', text: `Errore salvataggio: ${txt}` })
+    }
+  }
+
+  // RI seconda fase → rimanda a DT (riapertura ciclo DT)
+  const onConfirmRimandaDT = async () => {
+    try {
+      const schemaFields: Record<string, any> = (ds as any)?.getSchema?.()?.fields || {}
+      const upd: Record<string, any> = {
+        // Chiudi ciclo RI come trasmissione positiva
+        [esitoField]: ESITO_APPROVATA,
+        [dtEsitoField]: Date.now(),
+        [statoField]: STATO_APPROVATA,
+        [dtStatoField]: Date.now()
+      }
+      // Riapri nodo DT
+      const fStatoDT        = getSchemaFieldNameCI(schemaFields, 'stato_DT')
+      const fDtStatoDT      = getSchemaFieldNameCI(schemaFields, 'dt_stato_DT')
+      const fEsitoDT        = getSchemaFieldNameCI(schemaFields, 'esito_DT')
+      const fDtEsitoDT      = getSchemaFieldNameCI(schemaFields, 'dt_esito_DT')
+      const fPresaDT        = getSchemaFieldNameCI(schemaFields, 'presa_in_carico_DT')
+      const fDtPresaDT      = getSchemaFieldNameCI(schemaFields, 'dt_presa_in_carico_DT')
+      if (fStatoDT)    upd[fStatoDT]    = STATO_DA_PRENDERE
+      if (fDtStatoDT)  upd[fDtStatoDT]  = Date.now()
+      if (fEsitoDT)    upd[fEsitoDT]    = null
+      if (fDtEsitoDT)  upd[fDtEsitoDT]  = null
+      if (fPresaDT)    upd[fPresaDT]    = PRESA_DA_PRENDERE
+      if (fDtPresaDT)  upd[fDtPresaDT]  = null
+      await runApplyEdits(upd, 'Rimandato a DT.')
+      void closeCycleLog({ eventoChiusura: 'RIMANDA_A_DT', ruoloDestinatario: 'DT', fase: role })
       setPending(null)
       setConfirmAttempted(false)
     } catch (e: any) {
@@ -2752,7 +2923,11 @@ function ActionsPanel (props: {
               ? 'Conferma eliminazione'
               : pending === 'TRASMETTI'
                 ? 'Conferma trasmissione'
-                : 'Conferma azione'
+                : pending === 'TRASMETTI_RI_AMM'
+                  ? 'Conferma trasmissione a RI AMM'
+                  : pending === 'RIMANDA_DT'
+                    ? 'Conferma restituzione a DT'
+                    : 'Conferma azione'
 
   const pendingModal = pending !== null ? createPortal(
     <div style={{ position: 'fixed', inset: 0, zIndex: 250000, background: 'rgba(17,24,39,0.42)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24 }}>
@@ -2852,6 +3027,8 @@ function ActionsPanel (props: {
           {pending === 'RESPINGI' && <button type='button' onClick={onConfirmRespinta} disabled={loading} style={confirmBtnStyle}>{loading ? 'Aggiorno…' : 'Conferma'}</button>}
           {pending === 'ELIMINA' && <button type='button' onClick={onConfirmElimina} disabled={loading} style={confirmBtnStyle}>{loading ? 'Elimino…' : 'Conferma'}</button>}
           {pending === 'TRASMETTI' && <button type='button' onClick={onConfirmTrasmetti} disabled={loading} style={confirmBtnStyle}>{loading ? 'Aggiorno…' : 'Conferma'}</button>}
+          {pending === 'TRASMETTI_RI_AMM' && <button type='button' onClick={onConfirmTrasmmettiRiAmm} disabled={loading} style={confirmBtnStyle}>{loading ? 'Aggiorno…' : 'Conferma'}</button>}
+          {pending === 'RIMANDA_DT' && <button type='button' onClick={onConfirmRimandaDT} disabled={loading} style={confirmBtnStyle}>{loading ? 'Aggiorno…' : 'Conferma'}</button>}
           <button type='button' onClick={onAnnulla} disabled={loading} style={cancelBtnStyle}>Annulla</button>
         </div>
       </div>
@@ -2912,7 +3089,7 @@ function ActionsPanel (props: {
               </Button>
             )}
 
-            {role !== 'TI' && (
+            {role !== 'TI' && !riSecondaFase && (
               <Button
                 type='primary'
                 onClick={() => startAction('INTEGRAZIONE')}
@@ -2923,14 +3100,41 @@ function ActionsPanel (props: {
               </Button>
             )}
 
-            <Button
-              type='primary'
-              onClick={() => startAction('APPROVA')}
-              disabled={!canStartApprova}
-              style={actionButtonStyle(buttonColors.approva, !canStartApprova, ui)}
-            >
-              {approvaBtnLabel}
-            </Button>
+            {/* RI prima fase: Inoltra a DT — RI seconda fase: pulsanti specifici */}
+            {!riSecondaFase && (
+              <Button
+                type='primary'
+                onClick={() => startAction('APPROVA')}
+                disabled={!canStartApprova}
+                style={actionButtonStyle(buttonColors.approva, !canStartApprova, ui)}
+              >
+                {approvaBtnLabel}
+              </Button>
+            )}
+
+            {/* RI seconda fase: Trasmetti a RI AMM */}
+            {riSecondaFase && (
+              <Button
+                type='primary'
+                onClick={() => startAction('TRASMETTI_RI_AMM')}
+                disabled={!canStartTrasmmettiRiAmm}
+                style={actionButtonStyle(buttonColors.approva, !canStartTrasmmettiRiAmm, ui)}
+              >
+                Trasmetti a RI AMM
+              </Button>
+            )}
+
+            {/* RI seconda fase: Rimanda a DT */}
+            {riSecondaFase && (
+              <Button
+                type='primary'
+                onClick={() => startAction('RIMANDA_DT')}
+                disabled={!canStartRimandaDT}
+                style={actionButtonStyle(buttonColors.integrazione, !canStartRimandaDT, ui)}
+              >
+                Rimanda a DT
+              </Button>
+            )}
 
             {role === 'TI' ? (
               <Button
@@ -2952,16 +3156,8 @@ function ActionsPanel (props: {
               </Button>
             )}
 
-            {role === 'DT' && (
-              <Button
-                type='primary'
-                onClick={() => startAction('TRASMETTI')}
-                disabled={!canStartTrasmetti}
-                style={actionButtonStyle(buttonColors.trasmetti, !canStartTrasmetti, ui)}
-              >
-                Trasmetti a DA
-              </Button>
-            )}
+            {/* Matrice_DT: il pulsante "Trasmetti a DA" è stato rimosso.
+                DT approva e trasmette a RI tramite il pulsante "Approva e trasmetti a RI". */}
 
             {/* PULSANTE MODIFICA TI — apertura pagina */}
             {canShowEdit && (
@@ -3929,7 +4125,17 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
     'presa_in_carico_DA', 'dt_presa_in_carico_DA',
     'stato_DA', 'dt_stato_DA',
     'esito_DA', 'dt_esito_DA',
-    'note_DA'
+    'note_DA',
+
+    'dt_presa_in_carico_RI_AMM',
+    'stato_RI_AMM', 'dt_stato_RI_AMM',
+    'esito_RI_AMM', 'dt_esito_RI_AMM',
+    'note_RI_AMM',
+
+    'dt_presa_in_carico_TI_AMM',
+    'stato_TI_AMM', 'dt_stato_TI_AMM',
+    'esito_TI_AMM', 'dt_esito_TI_AMM',
+    'note_TI_AMM'
   ]
 
 const queryFields = React.useMemo(() => {
