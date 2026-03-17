@@ -5734,8 +5734,12 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
   const editOid = !inCreateMode && effectiveIntent ? Number(effectiveIntent.oid) : null
   const editIdFieldName = !inCreateMode ? String(effectiveIntent?.idFieldName || activeGate?.state?.idFieldName || currentEditDs?.getIdField?.() || 'OBJECTID') : undefined
 
+  const modeBg = inCreateMode
+    ? String(cfg.modeBgCreate || defaultConfig.modeBgCreate)
+    : String(cfg.modeBgEdit   || defaultConfig.modeBgEdit)
+
   return (
-    <div ref={rootRef} style={{ width: '100%', height: '100%', display: 'flex', flexDirection: 'column', minHeight: 0, boxSizing: 'border-box', padding: Number.isFinite(Number((cfg as any).maskOuterOffset ?? 0)) ? Number((cfg as any).maskOuterOffset) : 0, position: 'relative', zIndex: uiLocked ? 1001 : 'auto' }}>
+    <div ref={rootRef} style={{ width: '100%', height: '100%', display: 'flex', flexDirection: 'column', minHeight: 0, boxSizing: 'border-box', padding: Number.isFinite(Number((cfg as any).maskOuterOffset ?? 0)) ? Number((cfg as any).maskOuterOffset) : 0, position: 'relative', zIndex: uiLocked ? 1001 : 'auto', background: modeBg, transition: 'background 0.3s' }}>
       {mapWidgetId && (
         <div style={{ display: 'none' }}>
           <JimuMapViewComponent

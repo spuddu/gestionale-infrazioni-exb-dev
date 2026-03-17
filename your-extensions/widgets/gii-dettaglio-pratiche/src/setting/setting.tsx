@@ -377,6 +377,18 @@ export default function Setting(props: Props) {
 
   const reasons = normalizeStrArray(cfgJs.rejectReasons??defaultConfig.rejectReasons)
   const tabs = migrateLegacyFields(cfgJs)
+  const tabsWithDefaults = React.useMemo(() => {
+    if (!fields.length) return tabs
+    const availableNames = fields.map(f => String(f.name)).filter(Boolean)
+    return buildDefaultTabs(availableNames).map((def, i) => {
+      const cur = tabs[i]
+      if (!cur) return def
+      const curFields = Array.isArray(cur.fields) ? cur.fields.map(String).filter(Boolean) : []
+      return curFields.length ? { ...def, ...cur, fields: curFields } : def
+    })
+  }, [fields, JSON.stringify(tabs)])
+  const presetsJs = Array.isArray(asJs(cfgJs.presets)) ? asJs(cfgJs.presets) : []
+  const effectivePresets = presetsJs.length ? presetsJs : [buildDefaultPreset(fields.map(f => String(f.name)).filter(Boolean))]
   const updateTab=(i:number,upd:Partial<TabConfig>)=>patch({tabs:tabs.map((t,j)=>j===i?{...t,...upd}:t)})
 
   return (
@@ -385,8 +397,16 @@ export default function Setting(props: Props) {
       {/* ═══ DATI ═══ */}
       <Acc id='dati' label='📊 Dati' open={isOpen('dati')} onToggle={()=>toggle('dati')}/>
       {isOpen('dati') && <div>
-        <div style={P.hint}>La vista del record selezionato arriva dinamicamente dal widget Elenco.</div>
-        <div style={{...P.hint, marginTop: 6}}>Questo widget non dichiara più useDataSources per evitare il banner credenziali.</div>
+        <div style={P.hint}>Collega la fonte dati per abilitare la selezione dei campi nelle tab.</div>
+        <DataSourceSelector
+          types={Immutable([DataSourceTypes.FeatureLayer])}
+          useDataSources={props.useDataSources}
+          useDataSourcesEnabled={props.useDataSourcesEnabled}
+          onChange={onDsChange}
+          onToggleUseDataEnabled={onToggleDs}
+          widgetId={props.id}
+        />
+        <div style={{...P.hint, marginTop:6}}>Il record selezionato arriva dinamicamente dal widget Elenco. La fonte dati serve solo per caricare lo schema campi nel setting.</div>
       </div>}
 
       {/* ═══ TESTI ═══ */}
@@ -399,12 +419,48 @@ export default function Setting(props: Props) {
         </div>
       </div>}
 
-      
-      {/* (Sezione rimossa) */}
+      {/* ═══ CAMPI PER TAB ═══ */}
+      <Acc id='campiTab' label='🗂 Campi per tab' open={isOpen('campiTab')} onToggle={()=>toggle('campiTab')}/>
+      {isOpen('campiTab') && <div>
+        <div style={P.hint}>I campi di default vengono pre-selezionati automaticamente per ogni tab.</div>
+        <TabsManager tabs={tabs} onChange={(next)=>patch({tabs:next})}/>
+        {tabs.filter((t:any)=>String(t.id)!=='azioni').map((tab:any, idx:number)=>(
+          <div key={tab.id} style={{marginTop:10}}>
+            <label style={P.lbl}>{tab.label}</label>
+            <FieldPicker
+              tab={tab}
+              allFields={fields}
+              onChange={(f)=>updateTab(idx,{fields:f})}
+              onTabPatch={(patchTab)=>updateTab(idx,patchTab)}
+            />
+          </div>
+        ))}
+      </div>}
 
-      {/* (Sezione rimossa) */}
-
-      {/* (Sezione rimossa) */}
+      {/* ═══ PRESET PER CAMPI ═══ */}
+      <Acc id='presetCampi' label='💾 Preset per campi' open={isOpen('presetCampi')} onToggle={()=>toggle('presetCampi')}/>
+      {isOpen('presetCampi') && <div>
+        <div style={P.hint}>È preimpostato il preset <b style={{color:'#d1d5db'}}>Default</b> con i campi di default di ciascuna tab.</div>
+        <PresetManager
+          presets={effectivePresets}
+          activePresetId={String(cfgJs.activePresetId || (effectivePresets[0]?.id || ''))}
+          onSetActive={(id)=>patch({activePresetId:id})}
+          onApply={(pr:any)=>patch({tabs:(Array.isArray(pr?.tabs)?pr.tabs:[]), activePresetId:String(pr?.id||'')})}
+          onSaveNew={(name:string)=>{
+            const id = `preset_${Date.now()}`
+            const nextPreset = { id, name, tabs }
+            patch({ presets:[...effectivePresets, nextPreset], activePresetId:id })
+          }}
+          onUpdateActive={(id:string)=>{
+            const next = effectivePresets.map((pr:any)=>String(pr.id)===String(id)?{...pr,tabs}:pr)
+            patch({ presets:next, activePresetId:id })
+          }}
+          onDelete={(id:string)=>{
+            const next = effectivePresets.filter((pr:any)=>String(pr.id)!==String(id))
+            patch({ presets:next, activePresetId: String(next[0]?.id || '') })
+          }}
+        />
+      </div>}
 
       {/* ═══ RESET ═══ */}
       <div style={{marginTop:28,borderTop:'1px solid rgba(255,255,255,0.10)',paddingTop:16}}>

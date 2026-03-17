@@ -1,32 +1,7 @@
 import { type ImmutableObject, Immutable } from 'jimu-core'
 
-export type RoleCode = 'DT' | 'DA' | 'RZ'
-
-export interface TabConfig {
-  id: string // univoco (es. 'anagrafica', 'violazione', 'iter', 'allegati', 'azioni')
-  label: string // nome visualizzato nella tab
-  fields: string[] // campi selezionati per questa tab
-  hideEmpty?: boolean // se true, mostra solo campi valorizzati (non vuoti)
-  locked?: boolean // se true, non può essere rimossa o riordinata (opzionale)
-  isIterTab?: boolean // se true, mostra i campi DT/DA fissi + i campi extra
-}
-
-export interface TabFields {
-  anagrafica: string[]
-  violazione: string[]
-  allegati: string[]
-  iterExtra: string[]
-}
-
-export interface FieldPreset {
-  id: string
-  name: string
-  tabs: TabConfig[] // invece di campi separati
-}
-
 export interface Config {
-  // --- Ruolo
-  roleCode: RoleCode
+  // --- Testo pulsante
   buttonText: string
 
   // --- Colori pulsanti (hex)
@@ -43,7 +18,7 @@ export interface Config {
   panelBorderRadius: number
   panelPadding: number
 
-  // --- Maschera (come widget Elenco)
+  // --- Maschera
   maskBg: string
   maskBorderColor: string
   maskBorderWidth: number
@@ -65,9 +40,6 @@ export interface Config {
   detailTitleFontSize: number
   detailTitleFontWeight: number
   detailTitleColor: string
-
-
-  // --- Sfondo titolo pratica
   detailTitleBg: string
 
   // --- Stile pulsanti principali
@@ -78,44 +50,26 @@ export interface Config {
   btnPaddingY: number
 
   // --- Pulsanti editing TI
-  showEditButtons: boolean          // mostra/nasconde i pulsanti modifica
-  editOverlayColor: string          // colore pulsante "Modifica (overlay)"
-  editPageColor: string             // colore pulsante "Modifica (pagina)"
-  editPageId: string                // ID pagina ExB destinazione navigazione
-  // Logica abilitazione: il pulsante è attivo solo se
-  // stato_TI >= editMinStato E stato_TI <= editMaxStato
-  fieldStatoTI: string              // nome campo stato TI (es. stato_TI)
-  fieldPresaTI: string              // nome campo presa in carico TI (es. presa_in_carico_TI)
-  editMinStato: number              // valore minimo stato_TI per consentire editing
-  editMaxStato: number              // valore massimo stato_TI per consentire editing
-  editPresaRequiredVal: number      // valore presa_in_carico_TI richiesto (es. 2 = presa)
+  showEditButtons: boolean
+  editOverlayColor: string
+  editPageColor: string
+  editPageId: string
+  fieldStatoTI: string
+  fieldPresaTI: string
+  editMinStato: number
+  editMaxStato: number
+  editPresaRequiredVal: number
 
   // --- Motivazioni respinta
   rejectReasons: string[]
-
-  // --- Zebra list motivazioni (solo setting)
   reasonsZebraOddBg: string
   reasonsZebraEvenBg: string
   reasonsRowBorderColor: string
   reasonsRowBorderWidth: number
   reasonsRowRadius: number
-
-  // --- TAB CONFIGURABILI
-  tabs: TabConfig[]
-
-  // --- Campi legacy (per retrocompatibilità, deprecati)
-  anagraficaFields?: string[]
-  violazioneFields?: string[]
-  allegatiFields?: string[]
-  iterExtraFields?: string[]
-
-  // --- Preset selezione campi per TAB
-  presets: FieldPreset[]
-  activePresetId: string
 }
 
 export const defaultConfig: Config = {
-  roleCode: 'DT',
   buttonText: 'Prendi in carico',
 
   takeColor: '#0078da',
@@ -130,7 +84,6 @@ export const defaultConfig: Config = {
   panelBorderRadius: 10,
   panelPadding: 12,
 
-  // Maschera (come widget Elenco)
   maskBg: '#ffffff',
   maskBorderColor: '#e5e7eb',
   maskBorderWidth: 1,
@@ -143,7 +96,6 @@ export const defaultConfig: Config = {
   statusFontSize: 13,
   msgFontSize: 15,
 
-  // Titolo pratica
   detailTitlePrefix: 'Dettaglio rapporto n.',
   detailTitleHeight: 28,
   detailTitlePaddingBottom: 10,
@@ -151,8 +103,6 @@ export const defaultConfig: Config = {
   detailTitleFontSize: 14,
   detailTitleFontWeight: 600,
   detailTitleColor: 'rgba(0,0,0,0.85)',
-
-
   detailTitleBg: 'transparent',
 
   btnBorderRadius: 8,
@@ -175,17 +125,6 @@ export const defaultConfig: Config = {
   reasonsRowBorderWidth: 1,
   reasonsRowRadius: 8,
 
-  // Tab di default
-  tabs: [
-        { id: 'anagrafica', label: 'Anagrafica', fields: [], hideEmpty: false },
-    { id: 'violazione', label: 'Violazione', fields: [], hideEmpty: true },
-    { id: 'iter', label: 'Iter', fields: [], isIterTab: true, hideEmpty: false },
-    { id: 'allegati', label: 'Allegati', fields: [], hideEmpty: true },
-    { id: 'azioni', label: 'Azioni', fields: [], locked: true }
-
-  ],
-
-  // Editing TI
   showEditButtons: true,
   editOverlayColor: '#7c3aed',
   editPageColor: '#5b21b6',
@@ -195,9 +134,6 @@ export const defaultConfig: Config = {
   editMinStato: 2,
   editMaxStato: 2,
   editPresaRequiredVal: 2,
-
-  presets: [],
-  activePresetId: ''
 }
 
 export type IMConfig = ImmutableObject<Config>

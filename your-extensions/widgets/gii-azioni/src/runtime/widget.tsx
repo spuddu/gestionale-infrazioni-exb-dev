@@ -3,7 +3,7 @@
 import { React, jsx, type AllWidgetProps, DataSourceComponent, DataSourceManager, UrlManager, getAppStore } from 'jimu-core'
 import { Button } from 'jimu-ui'
 import { createPortal } from 'react-dom'
-import type { IMConfig, TabConfig } from '../config'
+import type { IMConfig } from '../config'
 import { defaultConfig } from '../config'
 
 
@@ -1323,7 +1323,6 @@ function ActionsPanel (props: {
     maxStato: number
     presaRequiredVal: number
   }
-  motherLayerUrl?: string
 }) {
   const { active, roleCode, buttonText, buttonColors, ui } = props
   const role = String(roleCode || 'DT').trim().toUpperCase()
@@ -1427,6 +1426,11 @@ function ActionsPanel (props: {
   const oid = active?.state?.oid ?? null
   const idFieldNameFromSel = active?.state?.idFieldName || 'OBJECTID'
   const hasSel = oid != null && Number.isFinite(oid)
+
+  const praticaCode = (() => {
+    const op = data?.origine_pratica ?? data?.Origine_pratica ?? data?.ORIGINE_PRATICA
+    return `${(op === 2 || op === '2' || String(op || '').toUpperCase() === 'TI') ? 'TI' : 'TR'}-${oid}`
+  })()
 
 
   const sessionIdRef = React.useRef<string>(`sess-${Date.now()}-${Math.random().toString(16).slice(2)}`)
@@ -2217,8 +2221,10 @@ function ActionsPanel (props: {
 
   // TI: eliminazione consentita solo per pratiche originate da sé (origine=TI) e mai inoltrate a RZ.
   const currentUsername = String((window as any).__giiUserRole?.username || (window as any).__giiUser?.username || '').trim()
-  const creatorUsername = String(pickAttrCI(data, ['creator', 'Creator', 'created_user', 'created_by', 'CreatedUser', 'CREATOR']) || '').trim()
-  const isOwner = !!currentUsername && !!creatorUsername && currentUsername.toLowerCase() === creatorUsername.toLowerCase()
+  const creatorUsername = String(pickAttrCI(data, ['creator', 'Creator', 'created_user', 'created_by', 'CreatedUser', 'CREATOR', 'utente_ins', 'utente']) || '').trim()
+  // Se il campo creator non è esposto dalla vista, assumiamo ownership:
+  // isRecordVisibleForCurrentUser ha già filtrato i record di TI garantendo visibilità solo sui propri.
+  const isOwner = !creatorUsername || (!!currentUsername && currentUsername.toLowerCase() === creatorUsername.toLowerCase())
 
   const hasRoleTouched = (r: string): boolean => {
     const p = toNumOrNull(pickAttrCI(data, [`presa_in_carico_${r}`, `PRESA_IN_CARICO_${r}`]))
@@ -2233,9 +2239,8 @@ function ActionsPanel (props: {
     !loading &&
     !lockedByTransmit &&
     pending === null &&
-    myStatoIsPresaInCarico &&
+    isMyTurn &&
     origineNum === 2 &&
-    !hasTiAssigned &&
     !hasRoleTouched('RZ') &&
     !hasRoleTouched('RI') &&
     !hasRoleTouched('DT') &&
@@ -2350,139 +2355,6 @@ function ActionsPanel (props: {
     return { root, layer }
   }
 
-  // Chiama applyEdits/updateFeatures direttamente via REST (fetch).
-  // Bypassa completamente il JS API layer e le sue capability-check.
-  // Richiede: URL del FeatureServer layer + token AGOL + attributi da aggiornare.
-  const applyEditsViaRest = async (layerUrl: string, attrs: Record<string, any>): Promise<void> => {
-    // Prendi il token dall'IdentityManager (già loggato via OAuth)
-    let token = ''
-    try {
-      const esriId = await loadEsriModule<any>('esri/identity/IdentityManager')
-      // serverInfo può essere null se l'URL non è ancora registrato: usiamo getCredential
-      const cred = await esriId.getCredential(layerUrl)
-      token = cred?.token || ''
-    } catch { /* se fallisce procediamo senza token: vedremo l'errore REST */ }
-
-    const featureJson = JSON.stringify({ attributes: attrs })
-    const body = new URLSearchParams({
-      f: 'json',
-      features: `[${featureJson}]`,
-      rollbackOnFailure: 'true',
-      ...(token ? { token } : {})
-    })
-
-    const url = `${layerUrl.replace(/\/$/, '')}/updateFeatures`
-    const resp = await fetch(url, { method: 'POST', body })
-    if (!resp.ok) throw new Error(`HTTP ${resp.status}`)
-    const json = await resp.json()
-
-    if (json.error) {
-      throw new Error(`REST error: code=${json.error.code} – ${json.error.message}`)
-    }
-    const upd = json.updateResults?.[0]
-    if (upd && !upd.success) {
-      const e = upd.error
-      throw new Error(e ? `code=${e.code} – ${e.description || e.message}` : JSON.stringify(upd))
-    }
-  }
-
-
-  // Chiama deleteFeatures direttamente via REST (fetch).
-  const deleteFeaturesViaRest = async (layerUrl: string, objectId: number): Promise<void> => {
-    let token = ''
-    try {
-      const esriId = await loadEsriModule<any>('esri/identity/IdentityManager')
-      const cred = await esriId.getCredential(layerUrl)
-      token = cred?.token || ''
-    } catch { /* ignore */ }
-
-    const body = new URLSearchParams({
-      f: 'json',
-      objectIds: String(objectId),
-      rollbackOnFailure: 'true',
-      ...(token ? { token } : {})
-    })
-
-    const url = `${layerUrl.replace(/\/$/, '')}/deleteFeatures`
-    const resp = await fetch(url, { method: 'POST', body })
-    if (!resp.ok) throw new Error(`HTTP ${resp.status}`)
-    const json = await resp.json()
-
-    if (json.error) {
-      throw new Error(`REST error: code=${json.error.code} – ${json.error.message}`)
-    }
-    const del = json.deleteResults?.[0]
-    if (del && !del.success) {
-      const e = del.error
-      throw new Error(e ? `code=${e.code} – ${e.description || e.message}` : JSON.stringify(del))
-    }
-  }
-
-  const runDeleteEdits = async (okText: string) => {
-    if (!ds) throw new Error('DataSource non disponibile.')
-    if (!hasSel || oid == null) throw new Error('Selezione non valida.')
-
-    const startKey = selectionKeyRef.current
-    setLoading(true)
-    setMsg({ kind: 'info', text: 'Elimino…' })
-
-    try {
-      const motherUrl = props.motherLayerUrl ? String(props.motherLayerUrl).trim() : ''
-      const root = getRootDs(ds)
-
-      if (motherUrl) {
-        await deleteFeaturesViaRest(motherUrl, oid)
-      } else {
-        const { layer } = await resolveLayer(ds)
-        if (!layer?.applyEdits) throw new Error('Layer non disponibile (applyEdits).')
-        if (typeof layer.load === 'function') {
-          try { await layer.load() } catch {}
-        }
-        const res = await layer.applyEdits({ deleteFeatures: [oid] })
-        const del = res?.deleteFeatureResults?.[0] || res?.deleteResults?.[0] || null
-        const err = del?.error
-        const ok = !err && (del?.success === true || del?.objectId != null || del?.success == null)
-        if (!ok) {
-          const detail = err
-            ? `code=${err.code ?? ''} name=${err.name ?? ''} message=${err.message ?? ''}`
-            : JSON.stringify(res || del)
-          throw new Error(detail)
-        }
-      }
-
-      if (selectionKeyRef.current !== startKey) {
-        setMsg(null)
-        setLoading(false)
-        return
-      }
-
-      setMsg({ kind: 'ok', text: okText })
-
-      // refresh data sources
-      await refreshRootAndDerived(getRootDs(ds))
-      await refreshRootAndDerived(ds)
-
-      try { delete (window as any).__giiRuntimeDsProxyCache } catch {}
-
-      // forza refresh selection/lista
-      try {
-        invalidateRuntimeProxyCache(active?.state?.ds?.getDataSourceJson?.()?.url || active?.state?.ds?.layer?.url || '')
-        try { delete runtimeDsProxyPromises[String(active?.state?.ds?.getDataSourceJson?.()?.url || active?.state?.ds?.layer?.url || '')] } catch {}
-        window.dispatchEvent(new CustomEvent('gii-force-refresh-selection', { detail: { oid } }))
-      } catch {
-        try { window.dispatchEvent(new Event('gii-force-refresh-selection')) } catch {}
-      }
-
-      window.setTimeout(() => {
-        if (selectionKeyRef.current === startKey) setMsg(null)
-      }, 4500)
-
-      setLoading(false)
-    } catch (e) {
-      setLoading(false)
-      throw e
-    }
-  }
 
   const runApplyEdits = async (attributesIn: Record<string, any>, okText: string) => {
     if (!ds) throw new Error('DataSource non disponibile.')
@@ -2493,49 +2365,41 @@ function ActionsPanel (props: {
     setMsg({ kind: 'info', text: 'Aggiorno…' })
 
     try {
-      const motherUrl = props.motherLayerUrl ? String(props.motherLayerUrl).trim() : ''
       const root = getRootDs(ds)
 
-      if (motherUrl) {
-        // ── Via REST diretta sul FS madre ─────────────────────────────────────
-        const idFieldName = idFieldNameFromSel || 'OBJECTID'
-        const attrs = { [idFieldName]: oid, ...attributesIn }
-        await applyEditsViaRest(motherUrl, attrs)
-      } else {
-        // ── Fallback: JS API layer (viste con editing abilitato) ──────────────
-        const { layer } = await resolveLayer(ds)
+      // ── JS API layer (viste con editing abilitato) ─────────────────────────
+      const { layer } = await resolveLayer(ds)
 
-        if (!layer?.applyEdits) {
-          throw new Error('Layer non disponibile (applyEdits).')
-        }
-        if (typeof layer.load === 'function') {
-          try { await layer.load() } catch {}
-        }
+      if (!layer?.applyEdits) {
+        throw new Error('Layer non disponibile (applyEdits).')
+      }
+      if (typeof layer.load === 'function') {
+        try { await layer.load() } catch {}
+      }
 
-        const idFieldName =
-          (getRootDs(ds)?.getIdField ? getRootDs(ds).getIdField() : null) ||
-          (ds?.getIdField ? ds.getIdField() : null) ||
-          layer.objectIdField ||
-          idFieldNameFromSel ||
-          'OBJECTID'
+      const idFieldName =
+        (getRootDs(ds)?.getIdField ? getRootDs(ds).getIdField() : null) ||
+        (ds?.getIdField ? ds.getIdField() : null) ||
+        layer.objectIdField ||
+        idFieldNameFromSel ||
+        'OBJECTID'
 
-        const fullAttrs = { [idFieldName]: oid, ...attributesIn }
-        const attrs = filterAttrsToLayerFields(fullAttrs, layer)
+      const fullAttrs = { [idFieldName]: oid, ...attributesIn }
+      const attrs = filterAttrsToLayerFields(fullAttrs, layer)
 
-        const res = await layer.applyEdits({ updateFeatures: [{ attributes: attrs }] })
+      const res = await layer.applyEdits({ updateFeatures: [{ attributes: attrs }] })
 
-        const upd = res?.updateFeatureResults?.[0] || res?.updateResults?.[0] || null
-        const err = upd?.error
-        const ok =
-          !err &&
-          (upd?.success === true || upd?.objectId != null || upd?.globalId != null || upd?.success == null)
+      const upd = res?.updateFeatureResults?.[0] || res?.updateResults?.[0] || null
+      const err = upd?.error
+      const ok =
+        !err &&
+        (upd?.success === true || upd?.objectId != null || upd?.globalId != null || upd?.success == null)
 
-        if (!ok) {
-          const detail = err
-            ? `code=${err.code ?? ''} name=${err.name ?? ''} message=${err.message ?? ''}`
-            : JSON.stringify(res || upd)
-          throw new Error(detail)
-        }
+      if (!ok) {
+        const detail = err
+          ? `code=${err.code ?? ''} name=${err.name ?? ''} message=${err.message ?? ''}`
+          : JSON.stringify(res || upd)
+        throw new Error(detail)
       }
 
       // se la selezione è cambiata nel frattempo: niente messaggi “appesi”
@@ -2782,16 +2646,30 @@ function ActionsPanel (props: {
 
   const onConfirmElimina = async () => {
     setConfirmAttempted(true)
-    if (!noteTrim) return  // Matrice_TI caso 1/b: nota obbligatoria
+    if (!noteTrim) return  // nota obbligatoria (Matrice_TI caso 1/b)
 
     try {
-      await runDeleteEdits('Pratica eliminata.')
-      void closeCycleLog({ eventoChiusura: 'ELIMINAZIONE', noteChiusura: noteTrim, fase: role })
+      // Archiviazione logica: GII_arch = 1, nota nel campo note_TI.
+      // Non si esegue delete fisico (le viste non lo supportano).
+      // Il record viene escluso dagli elenchi ordinari tramite filtro su GII_arch.
+      const upd: Record<string, any> = {
+        GII_arch: 1,
+        [noteField]: noteTrim
+      }
+      // Campi opzionali di tracciabilità (scritti solo se presenti nello schema)
+      const schemaFields: Record<string, any> = (ds as any)?.getSchema?.()?.fields || {}
+      const fDt  = getSchemaFieldNameCI(schemaFields, 'dt_archiviazione_TI')
+      const fDa  = getSchemaFieldNameCI(schemaFields, 'archiviato_da')
+      if (fDt) upd[fDt] = Date.now()
+      if (fDa) upd[fDa] = String((window as any).__giiUserRole?.username || '').trim() || undefined
+
+      await runApplyEdits(upd, 'Rapporto archiviato.')
+      try { void closeCycleLog({ eventoChiusura: 'ARCHIVIAZIONE', noteChiusura: noteTrim, fase: role }) } catch {}
       setPending(null)
       setConfirmAttempted(false)
     } catch (e: any) {
       const txt = e?.message ? String(e.message) : String(e)
-      setMsg({ kind: 'err', text: `Errore eliminazione: ${txt}` })
+      setMsg({ kind: 'err', text: `Errore archiviazione: ${txt}` })
     }
   }
 
@@ -2920,7 +2798,7 @@ function ActionsPanel (props: {
           : pending === 'RESPINGI'
             ? 'Conferma respinta'
             : pending === 'ELIMINA'
-              ? 'Conferma eliminazione'
+              ? 'Conferma archiviazione rapporto'
               : pending === 'TRASMETTI'
                 ? 'Conferma trasmissione'
                 : pending === 'TRASMETTI_RI_AMM'
@@ -2929,13 +2807,61 @@ function ActionsPanel (props: {
                     ? 'Conferma restituzione a DT'
                     : 'Conferma azione'
 
+  // ── Colore/icona/testo per ogni tipo di azione ────────────────────────────
+  const pendingTheme: Record<string, { icon: string; color: string; bg: string; border: string; desc: string }> = {
+    TAKE:           { icon: '✓', color: '#1a7f37', bg: '#f0fdf4', border: '#bbf7d0', desc: 'Il rapporto verrà preso in carico.' },
+    ASSEGNA_TI:     { icon: '✓', color: '#1a7f37', bg: '#f0fdf4', border: '#bbf7d0', desc: 'Il rapporto verrà assegnato al TI selezionato.' },
+    APPROVA:        { icon: '✓', color: '#1a7f37', bg: '#f0fdf4', border: '#bbf7d0', desc: `Il rapporto verrà ${approvaDoneLabel.toLowerCase()}.` },
+    TRASMETTI:      { icon: '✓', color: '#1a7f37', bg: '#f0fdf4', border: '#bbf7d0', desc: 'Il rapporto verrà trasmesso a DA.' },
+    TRASMETTI_RI_AMM:{ icon: '✓', color: '#1a7f37', bg: '#f0fdf4', border: '#bbf7d0', desc: 'Il rapporto verrà trasmesso a RI AMM per avviare la fase sanzionatoria.' },
+    INTEGRAZIONE:   { icon: '⚠', color: '#b45309', bg: '#fffbeb', border: '#fde68a', desc: 'Verrà inviata una richiesta di integrazione.' },
+    RIMANDA_DT:     { icon: '⚠', color: '#b45309', bg: '#fffbeb', border: '#fde68a', desc: 'Il rapporto verrà restituito a DT per una nuova valutazione.' },
+    RESPINGI:       { icon: '✕', color: '#dc2626', bg: '#fef2f2', border: '#fecaca', desc: 'Il rapporto verrà respinto.' },
+    ELIMINA:        { icon: '✕', color: '#dc2626', bg: '#fef2f2', border: '#fecaca', desc: 'Il rapporto verrà archiviato e non sarà più visibile nell\'elenco.' },
+  }
+  const theme = pending ? (pendingTheme[pending] ?? { icon: '●', color: '#2f6fed', bg: '#eff6ff', border: '#bfdbfe', desc: '' }) : pendingTheme.TAKE
+
   const pendingModal = pending !== null ? createPortal(
-    <div style={{ position: 'fixed', inset: 0, zIndex: 250000, background: 'rgba(17,24,39,0.42)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24 }}>
-      <div style={{ width: 'min(680px, calc(100vw - 32px))', maxHeight: 'calc(100vh - 48px)', overflowY: 'auto', background: '#fff', borderRadius: 14, boxShadow: '0 24px 48px rgba(0,0,0,0.20)', border: '1px solid rgba(0,0,0,0.08)', padding: 18, display: 'grid', gap: 12, position: 'relative' }}>
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, minHeight: 24 }}>
-          <div style={{ fontSize: 16, fontWeight: 800, color: '#111827' }}>{pendingTitle}</div>
+    <div
+      data-gii-global-popup-root='1'
+      style={{ position: 'fixed', inset: 0, zIndex: 2147483646, background: 'rgba(0,0,0,0.52)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16, pointerEvents: 'auto' }}
+      onClick={(e) => { e.preventDefault(); e.stopPropagation() }}
+      onMouseDown={(e) => { e.preventDefault(); e.stopPropagation() }}
+    >
+      <div
+        role='dialog'
+        aria-modal='true'
+        data-gii-global-popup-dialog='1'
+        style={{ width: 'min(92vw, 520px)', maxHeight: 'calc(100vh - 48px)', overflowY: 'auto', background: '#fff', borderRadius: 14, boxShadow: '0 20px 60px rgba(0,0,0,0.28)', border: '1px solid rgba(0,0,0,0.08)', padding: 18, display: 'grid', gap: 12, position: 'relative', zIndex: 2147483647 }}
+        onClick={(e) => { e.stopPropagation() }}
+        onMouseDown={(e) => { e.stopPropagation() }}
+      >
+        {/* Titolo colorato con icona + numero rapporto */}
+        <div style={{ fontWeight: 800, fontSize: 16, marginBottom: 2, color: theme.color, display: 'flex', alignItems: 'center', gap: 8 }}>
+          <span style={{ fontSize: 20 }}>{theme.icon}</span>
+          <span>{pendingTitle}</span>
         </div>
 
+        {/* Box numero rapporto */}
+        {hasSel && oid != null && (
+          <div style={{ fontWeight: 600, color: '#1f2937', padding: 10, background: theme.bg, border: `1px solid ${theme.border}`, borderRadius: 6, fontSize: 13 }}>
+            Rapporto: <span style={{ color: theme.color, fontSize: 14, fontFamily: 'monospace' }}>{praticaCode}</span>
+          </div>
+        )}
+
+        {/* Descrizione azione */}
+        {theme.desc && (
+          <div style={{ fontSize: 13, color: '#374151', lineHeight: 1.6 }}>{theme.desc}</div>
+        )}
+
+        {/* Errore */}
+        {msg && msg.kind === 'err' && (
+          <div style={{ fontWeight: 500, padding: 10, background: '#fef2f2', border: '1px solid #fecaca', borderRadius: 6, color: '#7f1d1d', fontSize: 13 }}>
+            {msg.text}
+          </div>
+        )}
+
+        {/* Dropdown motivazione respinta */}
         {pending === 'RESPINGI' && (
           <div style={{ display: 'grid', gap: 6 }}>
             <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
@@ -2947,11 +2873,7 @@ function ActionsPanel (props: {
               options={ui.rejectReasons || []}
               placeholder='— seleziona —'
               disabled={loading || !hasSel || lockedByTransmit}
-              onChange={(v) => {
-                const vv = String(v ?? '')
-                setRejectReason(vv)
-                if (confirmAttempted) setConfirmAttempted(false)
-              }}
+              onChange={(v) => { setRejectReason(String(v ?? '')); if (confirmAttempted) setConfirmAttempted(false) }}
               evenBg={ui.reasonsZebraEvenBg}
               oddBg={ui.reasonsZebraOddBg}
               borderColor={ui.reasonsRowBorderColor}
@@ -2963,73 +2885,61 @@ function ActionsPanel (props: {
           </div>
         )}
 
+        {/* Selezione TI */}
         {pending === 'ASSEGNA_TI' && role === 'RZ' && (
-          <div style={{ display: 'grid', gap: 6, justifyItems: 'start' }}>
-            <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
-              <div style={labelReqStyle(true, tiReqErr)}>Scelta obbligatoria</div>
-            </div>
+          <div style={{ display: 'grid', gap: 6 }}>
+            <div style={labelReqStyle(true, tiReqErr)}>Scelta obbligatoria</div>
             <select
               value={tiSelected}
-              onChange={(e) => {
-                setTiSelected(e.target.value)
-                if (confirmAttempted) setConfirmAttempted(false)
-              }}
+              onChange={(e) => { setTiSelected(e.target.value); if (confirmAttempted) setConfirmAttempted(false) }}
               disabled={loading}
-              style={{
-                width: 'auto',
-                minWidth: 280,
-                maxWidth: '100%',
-                padding: '8px 10px',
-                borderRadius: 8,
-                border: `1px solid ${tiReqErr ? '#d13438' : 'rgba(0,0,0,0.15)'}`,
-                outline: 'none'
-              }}
+              style={{ width: 'auto', minWidth: 280, maxWidth: '100%', padding: '8px 10px', borderRadius: 8, border: `1px solid ${tiReqErr ? '#dc2626' : 'rgba(0,0,0,0.15)'}`, outline: 'none' }}
             >
               <option value=''>— Seleziona TI —</option>
               {tiOptions.map(o => (
-                <option key={o.username} value={o.username}>
-                  {(o.fullName || o.username)} ({o.username})
-                </option>
+                <option key={o.username} value={o.username}>{(o.fullName || o.username)} ({o.username})</option>
               ))}
             </select>
             {!tiLoading && !tiLoadErr && tiOptions.length === 0 && <div style={{ fontSize: 12, opacity: 0.75 }}>Nessun TI trovato.</div>}
-            {!!tiLoadErr && <div style={{ fontSize: 12, color: '#d13438' }}>Errore elenco TI: {tiLoadErr}</div>}
+            {!!tiLoadErr && <div style={{ fontSize: 12, color: '#dc2626' }}>Errore elenco TI: {tiLoadErr}</div>}
           </div>
         )}
 
+        {/* Textarea note */}
         {showNote && (
           <div style={{ display: 'grid', gap: 6 }}>
             <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
               <div style={{ fontSize: titleFontSize, fontWeight: 700 }}>Note</div>
-              {pending === 'INTEGRAZIONE' && <div style={labelReqStyle(true, noteReqErr)}>(obbligatoria)</div>}
-              {pending === 'RESPINGI' && noteIsRequired && <div style={labelReqStyle(true, noteReqErr)}>(obbligatoria)</div>}
+              {(pending === 'INTEGRAZIONE' || (pending === 'RESPINGI' && noteIsRequired) || pending === 'ELIMINA') && (
+                <div style={labelReqStyle(true, noteReqErr)}>(obbligatoria)</div>
+              )}
             </div>
             <textarea
               ref={noteRef}
               value={noteDraft}
-              onChange={(e) => {
-                const v = String((e.target as HTMLTextAreaElement).value ?? '')
-                setNoteDraft(v)
-                autoResizeNote(e.target as HTMLTextAreaElement)
-              }}
-              placeholder={pending === 'INTEGRAZIONE' ? 'Scrivi la richiesta di integrazione…' : (noteIsRequired ? 'Specifica il motivo (Altro)…' : 'Nota facoltativa (eventuali dettagli)…')}
-              style={{ width: '100%', minHeight: NOTE_MIN_H, maxHeight: NOTE_MAX_H, overflowY: 'hidden', resize: 'none', padding: '8px 10px', borderRadius: 8, border: noteReqErr ? '1px solid #b42318' : '1px solid rgba(0,0,0,0.20)', fontSize: ui.statusFontSize, outline: 'none', boxSizing: 'border-box' }}
+              onChange={(e) => { const v = String((e.target as HTMLTextAreaElement).value ?? ''); setNoteDraft(v); autoResizeNote(e.target as HTMLTextAreaElement) }}
+              placeholder={pending === 'INTEGRAZIONE' ? 'Scrivi la richiesta di integrazione…' : (noteIsRequired ? 'Specifica il motivo (Altro)…' : 'Nota facoltativa…')}
+              style={{ width: '100%', minHeight: NOTE_MIN_H, maxHeight: NOTE_MAX_H, overflowY: 'hidden', resize: 'none', padding: '8px 10px', borderRadius: 8, border: noteReqErr ? '1px solid #dc2626' : '1px solid rgba(0,0,0,0.20)', fontSize: ui.statusFontSize, outline: 'none', boxSizing: 'border-box' }}
               disabled={!noteEnabled}
             />
           </div>
         )}
 
-        <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center', justifyContent: 'center', marginTop: 4 }}>
-          {pending === 'TAKE' && <button type='button' onClick={onConfirmTakeInCharge} disabled={loading} style={confirmBtnStyle}>{loading ? 'Aggiorno…' : 'Conferma'}</button>}
-          {pending === 'ASSEGNA_TI' && <button type='button' onClick={onConfirmAssegnaTi} disabled={loading || !tiSelected} style={{ ...confirmBtnStyle, opacity: (loading || !tiSelected) ? 0.6 : 1 }}>{loading ? 'Aggiorno…' : 'Conferma'}</button>}
-          {pending === 'INTEGRAZIONE' && <button type='button' onClick={onConfirmIntegrazione} disabled={loading} style={confirmBtnStyle}>{loading ? 'Aggiorno…' : 'Conferma'}</button>}
-          {pending === 'APPROVA' && <button type='button' onClick={() => onConfirmEsito(ESITO_APPROVATA, approvaDoneLabel)} disabled={loading} style={confirmBtnStyle}>{loading ? 'Aggiorno…' : 'Conferma'}</button>}
-          {pending === 'RESPINGI' && <button type='button' onClick={onConfirmRespinta} disabled={loading} style={confirmBtnStyle}>{loading ? 'Aggiorno…' : 'Conferma'}</button>}
-          {pending === 'ELIMINA' && <button type='button' onClick={onConfirmElimina} disabled={loading} style={confirmBtnStyle}>{loading ? 'Elimino…' : 'Conferma'}</button>}
-          {pending === 'TRASMETTI' && <button type='button' onClick={onConfirmTrasmetti} disabled={loading} style={confirmBtnStyle}>{loading ? 'Aggiorno…' : 'Conferma'}</button>}
-          {pending === 'TRASMETTI_RI_AMM' && <button type='button' onClick={onConfirmTrasmmettiRiAmm} disabled={loading} style={confirmBtnStyle}>{loading ? 'Aggiorno…' : 'Conferma'}</button>}
-          {pending === 'RIMANDA_DT' && <button type='button' onClick={onConfirmRimandaDT} disabled={loading} style={confirmBtnStyle}>{loading ? 'Aggiorno…' : 'Conferma'}</button>}
-          <button type='button' onClick={onAnnulla} disabled={loading} style={cancelBtnStyle}>Annulla</button>
+        {/* Bottoni */}
+        <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end', marginTop: 4 }}>
+          <button type='button' onClick={onAnnulla} disabled={loading}
+            style={{ padding: '8px 18px', borderRadius: 8, border: '1px solid rgba(0,0,0,0.18)', background: '#fff', color: '#374151', fontWeight: 600, fontSize: 13, cursor: loading ? 'not-allowed' : 'pointer' }}>
+            Annulla
+          </button>
+          {pending === 'TAKE' && <button type='button' onClick={onConfirmTakeInCharge} disabled={loading} style={{ padding: '8px 18px', borderRadius: 8, border: '1px solid rgba(0,0,0,0.18)', background: theme.color, color: '#fff', fontWeight: 700, fontSize: 13, cursor: loading ? 'not-allowed' : 'pointer' }}>{loading ? 'Aggiorno…' : 'Conferma'}</button>}
+          {pending === 'ASSEGNA_TI' && <button type='button' onClick={onConfirmAssegnaTi} disabled={loading || !tiSelected} style={{ padding: '8px 18px', borderRadius: 8, border: '1px solid rgba(0,0,0,0.18)', background: theme.color, color: '#fff', fontWeight: 700, fontSize: 13, cursor: (loading || !tiSelected) ? 'not-allowed' : 'pointer', opacity: (loading || !tiSelected) ? 0.6 : 1 }}>{loading ? 'Aggiorno…' : 'Conferma'}</button>}
+          {pending === 'INTEGRAZIONE' && <button type='button' onClick={onConfirmIntegrazione} disabled={loading} style={{ padding: '8px 18px', borderRadius: 8, border: '1px solid rgba(0,0,0,0.18)', background: theme.color, color: '#fff', fontWeight: 700, fontSize: 13, cursor: loading ? 'not-allowed' : 'pointer' }}>{loading ? 'Aggiorno…' : 'Conferma'}</button>}
+          {pending === 'APPROVA' && <button type='button' onClick={() => onConfirmEsito(ESITO_APPROVATA, approvaDoneLabel)} disabled={loading} style={{ padding: '8px 18px', borderRadius: 8, border: '1px solid rgba(0,0,0,0.18)', background: theme.color, color: '#fff', fontWeight: 700, fontSize: 13, cursor: loading ? 'not-allowed' : 'pointer' }}>{loading ? 'Aggiorno…' : 'Conferma'}</button>}
+          {pending === 'RESPINGI' && <button type='button' onClick={onConfirmRespinta} disabled={loading} style={{ padding: '8px 18px', borderRadius: 8, border: '1px solid rgba(0,0,0,0.18)', background: theme.color, color: '#fff', fontWeight: 700, fontSize: 13, cursor: loading ? 'not-allowed' : 'pointer' }}>{loading ? 'Aggiorno…' : 'Conferma'}</button>}
+          {pending === 'ELIMINA' && <button type='button' onClick={onConfirmElimina} disabled={loading} style={{ padding: '8px 18px', borderRadius: 8, border: '1px solid rgba(0,0,0,0.18)', background: theme.color, color: '#fff', fontWeight: 700, fontSize: 13, cursor: loading ? 'not-allowed' : 'pointer' }}>{loading ? 'Archivio…' : 'Conferma'}</button>}
+          {pending === 'TRASMETTI' && <button type='button' onClick={onConfirmTrasmetti} disabled={loading} style={{ padding: '8px 18px', borderRadius: 8, border: '1px solid rgba(0,0,0,0.18)', background: theme.color, color: '#fff', fontWeight: 700, fontSize: 13, cursor: loading ? 'not-allowed' : 'pointer' }}>{loading ? 'Aggiorno…' : 'Conferma'}</button>}
+          {pending === 'TRASMETTI_RI_AMM' && <button type='button' onClick={onConfirmTrasmmettiRiAmm} disabled={loading} style={{ padding: '8px 18px', borderRadius: 8, border: '1px solid rgba(0,0,0,0.18)', background: theme.color, color: '#fff', fontWeight: 700, fontSize: 13, cursor: loading ? 'not-allowed' : 'pointer' }}>{loading ? 'Aggiorno…' : 'Conferma'}</button>}
+          {pending === 'RIMANDA_DT' && <button type='button' onClick={onConfirmRimandaDT} disabled={loading} style={{ padding: '8px 18px', borderRadius: 8, border: '1px solid rgba(0,0,0,0.18)', background: theme.color, color: '#fff', fontWeight: 700, fontSize: 13, cursor: loading ? 'not-allowed' : 'pointer' }}>{loading ? 'Aggiorno…' : 'Conferma'}</button>}
         </div>
       </div>
     </div>,
@@ -3199,13 +3109,6 @@ function ActionsPanel (props: {
 }
 
 
-type TabFields = {
-  anagrafica: string[]
-  violazione: string[]
-  allegati: string[]
-  iterExtra: string[]
-}
-
 function formatDateSafe (v: any): string {
   if (v == null || v === '') return '—'
   try {
@@ -3252,69 +3155,6 @@ function autoPickFields (data: any, kind: string): string[] {
   return []
 }
 
-// Migra dai vecchi tabFields alle nuove tab
-function migrateTabs(tabFields: TabFields, tabs: TabConfig[] | undefined): TabConfig[] {
-  let result: TabConfig[] = []
-  
-  // Se ha già tabs, usa quelle
-  if (Array.isArray(tabs) && tabs.length > 0) {
-    // Normalizza fields di ogni tab a plain JS array
-    result = tabs.map((t: any) => {
-      let f: string[] = []
-      if (t.fields) {
-        if (Array.isArray(t.fields)) f = t.fields.map(String).filter(Boolean)
-        else if (typeof t.fields.toArray === 'function') f = t.fields.toArray().map(String).filter(Boolean)
-        else if (typeof t.fields.toJS === 'function') f = t.fields.toJS().map(String).filter(Boolean)
-        else if (typeof t.fields[Symbol.iterator] === 'function') f = Array.from(t.fields as any).map(String).filter(Boolean)
-      }
-      return { ...t, fields: f }
-    })
-  } else {
-    // Altrimenti migra dai vecchi tabFields
-    result = [
-      {
-        id: 'anagrafica',
-        label: 'Anagrafica',
-        fields: tabFields?.anagrafica || []
-      },
-      {
-        id: 'violazione',
-        label: 'Violazione',
-        fields: tabFields?.violazione || []
-      },
-      {
-        id: 'iter',
-        label: 'Iter',
-        fields: tabFields?.iterExtra || [],
-        isIterTab: true
-      },
-      {
-        id: 'allegati',
-        label: 'Allegati',
-        fields: tabFields?.allegati || []
-      },
-      {
-        id: 'azioni',
-        label: 'Azioni',
-        fields: []
-      }
-    ]
-  }
-  
-  // Normalizza hideEmpty per tab (retrocompatibilità)
-  return result.map(tab => {
-    const normalizedHideEmpty =
-      (tab as any).hideEmpty != null
-        ? Boolean((tab as any).hideEmpty)
-        : (tab.id === 'violazione' || tab.id === 'allegati')
-
-    if (tab.id === 'azioni') {
-      const { locked, ...rest } = tab as any
-      return { ...rest, hideEmpty: false } as any
-    }
-    return { ...(tab as any), hideEmpty: normalizedHideEmpty } as any
-  })
-}
 
 function TabButton (props: { active: boolean; label: string; onClick: () => void; disabled?: boolean }) {
   const bg = props.active ? '#eaf2ff' : 'rgba(0,0,0,0.02)'
@@ -3387,614 +3227,6 @@ function ReadOnlyPanel (props: {
 }
 
 
-
-function DetailTabsPanel (props: {
-  active: { key: string; state: SelState } | null
-  roleCode: string
-  buttonText: string
-  buttonColors: ButtonColors
-  ui: any
-  tabFields: TabFields
-  tabs: TabConfig[]
-  editConfig: any
-  motherLayerUrl?: string
-}) {
-  const { active, ui } = props
-
-  // Migra e normalizza tabs
-  const tabs = React.useMemo(() => {
-    return migrateTabs(props.tabFields, props.tabs)
-  }, [props.tabs, props.tabFields])
-
-  const selectionKey = active?.state?.oid != null ? `${active.key}:${active.state.oid}` : null
-  const ds = active?.state?.ds
-  const baseData = active?.state?.data || null
-  // Patch ottimistico: dopo applyEdits aggiorniamo subito i valori usati dai pulsanti,
-  // senza dover aspettare refresh DS / cambio selezione.
-  const [localData, setLocalData] = React.useState<any | null>(null)
-  React.useEffect(() => { setLocalData(null) }, [selectionKey])
-  const data = localData || baseData
-  const oid = active?.state?.oid ?? null
-  const hasSel = oid != null && Number.isFinite(oid)
-
-  // Codice pratica per il titolo
-  const praticaCode = React.useMemo(() => {
-    if (!hasSel || !data) return ''
-    const op = data.origine_pratica ?? data.Origine_pratica ?? data.ORIGINE_PRATICA
-    let prefix = 'TR'
-    if (op === 2 || op === '2' || String(op).toUpperCase() === 'TI') prefix = 'TI'
-    else if (op === 1 || op === '1' || String(op).toUpperCase() === 'TR') prefix = 'TR'
-    return `${prefix}-${oid}`
-  }, [hasSel, data, oid])
-
-  const [tab, setTab] = React.useState<string>(tabs[0]?.id || 'anagrafica')
-
-
-  // Allegati (attachments) — caricati solo quando la tab "Allegati" è attiva
-  const selectedOid = (hasSel && oid != null) ? Number(oid) : null
-  const [attachmentsForOid, setAttachmentsForOid] = React.useState<number | null>(null)
-  const [attachments, setAttachments] = React.useState<Array<{ id: number; name?: string; size?: number; contentType?: string; url?: string }>>([])
-  const [attachmentsLoading, setAttachmentsLoading] = React.useState<boolean>(false)
-  const [attachmentsError, setAttachmentsError] = React.useState<string | null>(null)
-
-  const formatBytes = React.useCallback((n?: number) => {
-    if (n == null || isNaN(Number(n))) return ''
-    const num = Number(n)
-    if (num < 1024) return `${num} B`
-    const kb = num / 1024
-    if (kb < 1024) return `${kb.toFixed(1)} KB`
-    const mb = kb / 1024
-    if (mb < 1024) return `${mb.toFixed(1)} MB`
-    const gb = mb / 1024
-    return `${gb.toFixed(1)} GB`
-  }, [])
-
-  const loadAttachments = React.useCallback(async () => {
-    if (!selectedOid) return
-    try {
-      setAttachmentsLoading(true)
-      setAttachmentsError(null)
-
-      const dsAny: any = ds as any
-      const layer = await resolveFeatureLayerForAttachments(dsAny)
-
-      if (!layer) {
-        setAttachments([])
-        setAttachmentsForOid(selectedOid)
-        setAttachmentsError('Non riesco a risalire al FeatureLayer per leggere gli allegati (datasource/vista non espone il layer JS API).')
-        return
-      }
-
-      const res: any = await layer.queryAttachments({
-        objectIds: [selectedOid],
-        returnMetadata: true,
-        returnUrl: true
-      })
-
-      const pullInfos = (obj: any): any[] => {
-        if (!obj) return []
-        if (Array.isArray(obj)) return obj
-        if (Array.isArray(obj.attachmentInfos)) return obj.attachmentInfos
-        if (Array.isArray(obj.attachments)) return obj.attachments
-        return []
-      }
-
-      let infos: any[] = []
-      if (Array.isArray(res)) {
-        for (const g of res) {
-          if (!g) continue
-          const pid = (g.parentObjectId != null) ? g.parentObjectId : (g.objectId != null ? g.objectId : null)
-          if (pid === selectedOid) {
-            infos = pullInfos(g)
-            break
-          }
-        }
-      } else if (res && typeof res === 'object') {
-        if (Array.isArray(res.attachmentGroups)) {
-          for (const g of res.attachmentGroups) {
-            const pid = (g && g.parentObjectId != null) ? g.parentObjectId : (g && g.objectId != null ? g.objectId : null)
-            if (pid === selectedOid) {
-              infos = pullInfos(g)
-              break
-            }
-          }
-        } else if ((res as any)[selectedOid]) {
-          infos = pullInfos((res as any)[selectedOid])
-        } else if ((res as any)[String(selectedOid)]) {
-          infos = pullInfos((res as any)[String(selectedOid)])
-        } else if ((res as any).attachmentInfos) {
-          infos = pullInfos(res)
-        }
-      }
-
-      const clean = (infos || []).map((a: any) => ({
-        id: Number(a.id),
-        name: a.name,
-        size: a.size,
-        contentType: a.contentType,
-        url: a.url
-      })).filter((a: any) => a && !isNaN(a.id))
-
-      setAttachments(clean)
-      setAttachmentsForOid(selectedOid)
-    } catch (e: any) {
-      setAttachments([])
-      setAttachmentsForOid(selectedOid)
-      setAttachmentsError(e?.message || String(e))
-    } finally {
-      setAttachmentsLoading(false)
-    }
-  }, [ds, selectedOid])
-
-  React.useEffect(() => {
-    if (tab === 'allegati' && selectedOid != null && attachmentsForOid !== selectedOid) {
-      loadAttachments()
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tab, selectedOid, attachmentsForOid])
-
-  // RIMOSSO: Non resettare la tab quando cambia selezione
-  // React.useEffect(() => {
-  //   // reset tab quando cambia selezione (UX più prevedibile)
-  //   setTab(tabs[0]?.id || 'anagrafica')
-  // }, [selectionKey, tabs])
-
-  // alias map dai campi layer (se disponibile)
-  const [aliasMap, setAliasMap] = React.useState<Record<string, string>>({})
-  const [aliasesReady, setAliasesReady] = React.useState<boolean>(false)
-
-  React.useEffect(() => {
-    let cancelled = false
-    setAliasesReady(false)
-
-    // 1) Prova subito dallo schema del datasource (di solito è pronto prima del JSAPI layer)
-    try {
-      const schema = ds?.getSchema?.()
-      const fobj = schema?.fields || {}
-      const mapFromSchema: Record<string, string> = {}
-      for (const name of Object.keys(fobj)) {
-        const f = fobj[name]
-        const alias = String(f?.alias || f?.label || f?.title || name)
-        mapFromSchema[name] = alias
-      }
-      if (!cancelled && Object.keys(mapFromSchema).length) {
-        setAliasMap(mapFromSchema)
-        setAliasesReady(true)
-      }
-    } catch {}
-
-    // 2) In parallelo: prova dal layer JSAPI (aggiorna/raffina)
-    const loadAliases = async () => {
-      if (!ds) { if (!cancelled) { setAliasMap({}); setAliasesReady(true) } return }
-      try {
-        const raw =
-          ds?.getLayer?.() ||
-          ds?.getJSAPILayer?.() ||
-          ds?.layer ||
-          ds?.createJSAPILayerByDataSource?.() ||
-          null
-
-        const resolved = await Promise.resolve(raw as any)
-        const layer = unwrapJsapiLayer(resolved)
-        const fields = (layer?.fields || []) as any[]
-        const map: Record<string, string> = {}
-        for (const f of fields) {
-          const name = String(f?.name || '')
-          if (!name) continue
-          map[name] = String(f?.alias || f?.label || f?.title || name)
-        }
-        if (!cancelled) {
-          if (Object.keys(map).length) setAliasMap(map)
-          setAliasesReady(true)
-        }
-      } catch {
-        if (!cancelled) { setAliasesReady(true) }
-      }
-    }
-
-    loadAliases()
-    return () => { cancelled = true }
-  }, [ds])
-
-  const toLabel = React.useCallback((fieldName: string) => {
-    const a = aliasMap?.[fieldName]
-    // Evita il “flash” del nome campo: se gli alias non sono pronti, non mostrare il nome tecnico.
-    if (!aliasesReady) return ''
-    return a ? `${a}` : fieldName
-  }, [aliasMap, aliasesReady])
-
-// --- Condizionamento campi anagrafica per tipo_soggetto (PF/PG)
-  const classifyTipoSoggetto = React.useCallback((raw: any, labelFromDomain?: any): 'PF' | 'PG' | null => {
-    return classifyTipoSoggettoRobusto(raw, labelFromDomain)
-  }, [])
-
-  
-const isPfOnlyField = React.useCallback((fieldName: string) => {
-  const nameKey = normKey(fieldName)
-  const aliasKey = normKey(aliasMap?.[fieldName] || '')
-  const combined = `${nameKey} ${aliasKey}`.trim()
-
-  // Evita falsi positivi tipo "denominazione" (contiene "nome" come substring)
-  const isNome = hasToken(combined, 'nome') || combined.startsWith('nome ')
-  const isCognome = hasToken(combined, 'cognome') || combined.startsWith('cognome ')
-  const isCf =
-    hasToken(combined, 'cf') ||
-    hasToken(combined, 'c f') ||
-    hasToken(combined, 'c f ') ||
-    hasToken(combined, 'codice fiscale') ||
-    (combined.includes('cod') && combined.includes('fisc'))
-
-  return Boolean(isNome || isCognome || isCf)
-}, [aliasMap])
-
-const isPgOnlyField = React.useCallback((fieldName: string) => {
-  const nameKey = normKey(fieldName)
-  const aliasKey = normKey(aliasMap?.[fieldName] || '')
-  const combined = `${nameKey} ${aliasKey}`.trim()
-
-  const isRagSoc =
-    hasToken(combined, 'ragione sociale') ||
-    hasToken(combined, 'denominazione') ||
-    (combined.includes('ragione') && combined.includes('social'))
-
-  const isPiva =
-    hasToken(combined, 'partita iva') ||
-    hasToken(combined, 'p iva') ||
-    hasToken(combined, 'piva') ||
-    (combined.includes('partita') && combined.includes('iva'))
-
-  return Boolean(isRagSoc || isPiva)
-}, [aliasMap])
-
-  const makeRows = React.useCallback((fields: any, kind: string, hideEmpty: boolean) => {
-    // Normalizza a plain JS array in modo robusto (frozen array, ImmutableList, ecc.)
-    let fieldArr: string[] = []
-    if (fields) {
-      if (Array.isArray(fields)) fieldArr = fields.map(String).filter(Boolean)
-      else if (typeof fields.toArray === 'function') fieldArr = fields.toArray().map(String).filter(Boolean)
-      else if (typeof fields.toJS === 'function') fieldArr = fields.toJS().map(String).filter(Boolean)
-      else if (typeof fields[Symbol.iterator] === 'function') fieldArr = Array.from(fields as any).map(String).filter(Boolean)
-    }
-    // Se nessun campo configurato esplicitamente, usa autoPickFields come default
-    const rawList = fieldArr.length ? fieldArr : autoPickFields(data, kind)
-    const tipoRaw = (data && (data as any).__tipo_soggetto_raw != null) ? (data as any).__tipo_soggetto_raw : ((data && (data as any).tipo_soggetto != null) ? (data as any).tipo_soggetto : null)
-    const tipoLabel = (data && (data as any).__tipo_soggetto_label != null) ? (data as any).__tipo_soggetto_label : null
-    const sogg = (kind === 'ANAGRAFICA') ? classifyTipoSoggetto(tipoRaw, tipoLabel) : null
-    const list = (kind === 'ANAGRAFICA' && sogg)
-      ? rawList.filter(fn => {
-          if (!fn) return false
-          if (sogg === 'PF' && isPgOnlyField(fn)) return false
-          if (sogg === 'PG' && isPfOnlyField(fn)) return false
-          return true
-        })
-      : rawList
-    const rows: Array<{ label: string; value: any }> = []
-    for (const f of list) {
-      if (!f) continue
-      const vv = data ? (data as any)[f] : null
-      if (hideEmpty && isEmptyValue(vv)) continue
-      rows.push({ label: toLabel(f), value: vv })
-    }
-    return rows
-  }, [data, toLabel, classifyTipoSoggetto, isPfOnlyField, isPgOnlyField])
-// Iter: sempre blocchi DT/DA + extra selezionati
-  const presaDT = data ? data.presa_in_carico_DT : null
-  const dtPresaDT = data ? data.dt_presa_in_carico_DT : null
-  const statoDT = data ? data.stato_DT : null
-  const dtStatoDT = data ? data.dt_stato_DT : null
-  const esitoDT = data ? data.esito_DT : null
-  const dtEsitoDT = data ? data.dt_esito_DT : null
-  const noteDT = data ? data.note_DT : null
-
-  const presaDA = data ? data.presa_in_carico_DA : null
-  const dtPresaDA = data ? data.dt_presa_in_carico_DA : null
-  const statoDA = data ? data.stato_DA : null
-  const dtStatoDA = data ? data.dt_stato_DA : null
-  const esitoDA = data ? data.esito_DA : null
-  const dtEsitoDA = data ? data.dt_esito_DA : null
-  const noteDA = data ? data.note_DA : null
-
-  const TabsBar = (
-    <div style={{ 
-      display: 'flex', 
-      flexWrap: 'wrap', 
-      gap: 8, 
-      padding: '8px 12px',
-      alignItems: 'center',
-      borderBottom: '1px solid rgba(0,0,0,0.08)',
-      background: 'var(--bs-body-bg, #fff)',
-      marginTop: -ui.panelPadding,
-      marginLeft: -ui.panelPadding,
-      marginRight: -ui.panelPadding,
-      width: `calc(100% + ${ui.panelPadding * 2}px)`,
-      borderTopLeftRadius: ui.panelBorderRadius,
-      borderTopRightRadius: ui.panelBorderRadius
-    }}>
-      {hasSel && tabs.map((t) => (
-        <TabButton 
-          key={t.id}
-          active={tab === t.id} 
-          label={t.label} 
-          onClick={() => setTab(t.id)} 
-        />
-      ))}
-    </div>
-  )
-
-  const outerStyle: React.CSSProperties = {
-  width: '100%',
-  height: '100%',
-  display: 'flex',
-  flexDirection: 'column',
-  minHeight: 0,
-  boxSizing: 'border-box'
-}
-
-const frameStyle: React.CSSProperties = {
-  width: '100%',
-  height: '100%',
-  flex: '1 1 auto',
-  display: 'flex',
-  flexDirection: 'column',
-  minHeight: 0,
-  boxSizing: 'border-box',
-  background: ui.panelBg,
-  border: `${ui.panelBorderWidth}px solid ${ui.panelBorderColor}`,
-  borderRadius: ui.panelBorderRadius,
-  padding: ui.panelPadding
-}
-
-const tabsStyle: React.CSSProperties = {
-  flex: '0 0 auto'
-}
-
-const contentStyle: React.CSSProperties = {
-  flex: '1 1 auto',
-  minHeight: 0,
-  overflowY: 'auto'
-}
-
-let content: React.ReactNode = null
-
-if (!hasSel) {
-  content = (
-    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', minHeight: 200, fontWeight: 700, fontSize: 14, color: 'rgba(0,0,0,0.6)' }}>
-      Selezionare un rapporto nell’elenco
-    </div>
-  )
-} else {
-  const activeTab = tabs.find(t => t.id === tab)
-  
-  if (activeTab?.id === 'azioni') {
-    content = (
-      <ActionsPanel
-        active={active}
-        roleCode={props.roleCode}
-        buttonText={props.buttonText}
-        buttonColors={props.buttonColors}
-        ui={props.ui}
-        editConfig={props.editConfig}
-        motherLayerUrl={props.motherLayerUrl}
-      />
-    )
-  } else if (activeTab?.isIterTab) {
-    // Tab Iter con campi DT/DA fissi + extra
-    const iterRows: Array<{ label: string; value: any }> = []
-    iterRows.push({ label: 'DT - Presa in carico', value: presaDT })
-    iterRows.push({ label: 'DT - Data presa in carico', value: formatDateSafe(dtPresaDT) })
-    iterRows.push({ label: 'DT - Stato', value: statoDT })
-    iterRows.push({ label: 'DT - Data stato', value: formatDateSafe(dtStatoDT) })
-    iterRows.push({ label: 'DT - Esito', value: esitoDT })
-    iterRows.push({ label: 'DT - Data esito', value: formatDateSafe(dtEsitoDT) })
-    iterRows.push({ label: 'DT - Note', value: noteDT })
-
-    iterRows.push({ label: 'DA - Presa in carico', value: presaDA })
-    iterRows.push({ label: 'DA - Data presa in carico', value: formatDateSafe(dtPresaDA) })
-    iterRows.push({ label: 'DA - Stato', value: statoDA })
-    iterRows.push({ label: 'DA - Data stato', value: formatDateSafe(dtStatoDA) })
-    iterRows.push({ label: 'DA - Esito', value: esitoDA })
-    iterRows.push({ label: 'DA - Data esito', value: formatDateSafe(dtEsitoDA) })
-    iterRows.push({ label: 'DA - Note', value: noteDA })
-
-    // Aggiungi campi extra configurati
-    const iterExtraRows = aliasesReady ? makeRows(activeTab.fields, activeTab.id.toUpperCase(), Boolean((activeTab as any).hideEmpty)) : []
-    iterExtraRows.forEach(r => iterRows.push(r))
-    
-    content = <ReadOnlyPanel title={activeTab.label} ui={ui} rows={iterRows} />
-  } else if (activeTab) {
-    // Tab normale con campi configurabili
-    const rows = aliasesReady ? makeRows(activeTab.fields, activeTab.id.toUpperCase(), Boolean((activeTab as any).hideEmpty)) : []
-
-    if (activeTab.id === 'allegati') {
-      // Pannello Allegati: elenco attachments (se presenti) + (opzionale) attributi della tab
-      const dsAny: any = ds as any
-      const layer = unwrapJsapiLayer(
-        (dsAny && (typeof dsAny.getLayer === 'function') ? dsAny.getLayer() : null) ||
-        (dsAny && (typeof dsAny.getJsApiLayer === 'function') ? dsAny.getJsApiLayer() : null) ||
-        (dsAny && dsAny.layer) ||
-        dsAny
-      ) as any
-      const layerUrl = layer && layer.url ? String(layer.url) : ''
-
-      const getOpenUrl = (att: any): string | null => {
-        if (att && att.url) return String(att.url)
-        if (layerUrl && selectedOid != null && att && att.id != null) return `${layerUrl}/${selectedOid}/attachments/${att.id}`
-        return null
-      }
-
-      content = (
-        <div style={{ marginTop: 8 }}>
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
-            <div style={{ fontWeight: 700, fontSize: 13 }}>Allegati</div>
-            <button
-              type="button"
-              onClick={() => loadAttachments()}
-              disabled={!hasSel || attachmentsLoading}
-              onMouseEnter={(e) => {
-                if (!(!hasSel || attachmentsLoading)) {
-                  e.currentTarget.style.background = '#eaf2ff'
-                  e.currentTarget.style.borderColor = '#2f6fed'
-                  e.currentTarget.style.color = '#1d4ed8'
-                }
-              }}
-              onMouseLeave={(e) => {
-                if (!(!hasSel || attachmentsLoading)) {
-                  e.currentTarget.style.background = '#fff'
-                  e.currentTarget.style.borderColor = 'rgba(0,0,0,0.12)'
-                  e.currentTarget.style.color = '#111827'
-                }
-              }}
-              style={{
-                padding: '6px 10px',
-                borderRadius: 10,
-                border: '1px solid rgba(0,0,0,0.12)',
-                background: '#fff',
-                color: '#111827',
-                cursor: (!hasSel || attachmentsLoading) ? 'not-allowed' : 'pointer',
-                fontSize: 12,
-                fontWeight: 600,
-                transition: 'all 0.15s ease'
-              }}
-            >
-              Aggiorna
-            </button>
-          </div>
-
-          {!hasSel && (
-            <div style={{ opacity: 0.75, fontSize: 12 }}>Selezionare un rapporto per vedere gli allegati.</div>
-          )}
-
-          {hasSel && attachmentsLoading && (
-            <div style={{ opacity: 0.75, fontSize: 12 }}>Caricamento allegati…</div>
-          )}
-
-          {hasSel && !attachmentsLoading && attachmentsError && (
-            <div style={{ color: '#b00020', fontSize: 12 }}>{attachmentsError}</div>
-          )}
-
-          {hasSel && !attachmentsLoading && !attachmentsError && (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-              {(attachments && attachments.length) ? (
-                attachments.map((a) => {
-                  const url = getOpenUrl(a)
-                  const meta = [a.contentType, formatBytes(a.size)].filter(Boolean).join(' • ')
-                  return (
-                    <div
-                      key={a.id}
-                      style={{
-                        border: '1px solid rgba(0,0,0,0.08)',
-                        borderRadius: 12,
-                        padding: '8px 10px',
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'space-between',
-                        gap: 10
-                      }}
-                    >
-                      <div style={{ minWidth: 0 }}>
-                        <div style={{ fontWeight: 600, fontSize: 12, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                          {a.name || `Allegato #${a.id}`}
-                        </div>
-                        {meta ? <div style={{ opacity: 0.7, fontSize: 11 }}>{meta}</div> : null}
-                      </div>
-                      {url ? (
-                        <a
-                          href={url}
-                          target="_blank"
-                          rel="noreferrer"
-                          onMouseEnter={(e) => {
-                            e.currentTarget.style.background = '#eaf2ff'
-                            e.currentTarget.style.borderColor = '#2f6fed'
-                            e.currentTarget.style.color = '#1d4ed8'
-                          }}
-                          onMouseLeave={(e) => {
-                            e.currentTarget.style.background = '#fff'
-                            e.currentTarget.style.borderColor = 'rgba(0,0,0,0.12)'
-                            e.currentTarget.style.color = '#111827'
-                          }}
-                          style={{
-                            padding: '6px 10px',
-                            borderRadius: 10,
-                            border: '1px solid rgba(0,0,0,0.12)',
-                            background: '#fff',
-                            color: '#111827',
-                            textDecoration: 'none',
-                            fontSize: 12,
-                            fontWeight: 600,
-                            whiteSpace: 'nowrap',
-                            transition: 'all 0.15s ease'
-                          }}
-                        >
-                          Apri
-                        </a>
-                      ) : (
-                        <span style={{ opacity: 0.6, fontSize: 12, whiteSpace: 'nowrap' }}>URL non disponibile</span>
-                      )}
-                    </div>
-                  )
-                })
-              ) : (
-                <div style={{ opacity: 0.75, fontSize: 12 }}>Nessun allegato.</div>
-              )}
-            </div>
-          )}
-
-          {rows && rows.length > 0 && (
-            <div style={{ marginTop: 12 }}>
-              <div style={{ fontWeight: 700, fontSize: 13, marginBottom: 6 }}>Attributi</div>
-              <ReadOnlyPanel
-                title={activeTab.label}
-                rows={rows}
-                emptyText={hasSel ? 'Nessun campo configurato per questa tab.' : 'Selezionare un rapporto.'}
-              />
-            </div>
-          )}
-        </div>
-      )
-    } else {
-      content = (
-        <ReadOnlyPanel
-          title={activeTab.label}
-          rows={rows}
-          emptyText={hasSel ? 'Nessun campo configurato per questa tab.' : 'Selezionare un rapporto.'}
-        />
-      )
-    }
-  }
-}
-
-return (
-  <div style={outerStyle}>
-    {/* Titolo pratica - sopra l'area bianca */}
-    <div style={{
-      height: ui.detailTitleHeight ?? 28,
-      paddingBottom: ui.detailTitlePaddingBottom ?? 10,
-      paddingLeft: ui.detailTitlePaddingLeft ?? 0,
-      display: 'flex',
-      alignItems: 'center',
-      boxSizing: 'border-box',
-      flex: '0 0 auto',
-      background: (ui as any).detailTitleBg && (ui as any).detailTitleBg !== 'transparent' ? (ui as any).detailTitleBg : undefined
-    }}>
-      <span style={{
-        fontSize: ui.detailTitleFontSize ?? 14,
-        fontWeight: ui.detailTitleFontWeight ?? 600,
-        color: hasSel && praticaCode
-          ? (ui.detailTitleColor ?? 'rgba(0,0,0,0.85)')
-          : 'rgba(0,0,0,0.40)'
-      }}>
-        {String(ui.detailTitlePrefix ?? 'Dettaglio rapporto n.')} {hasSel && praticaCode ? praticaCode : '–'}
-      </span>
-    </div>
-    <div style={frameStyle}>
-      <div style={tabsStyle}>{TabsBar}</div>
-      <div style={contentStyle}>{content}</div>
-    </div>
-  </div>
-)
-
-}
-
 export default function Widget (props: AllWidgetProps<IMConfig>) {
   const cfgMutable: any = (props.config && (props.config as any).asMutable)
     ? (props.config as any).asMutable({ deep: true })
@@ -4017,7 +3249,7 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
     return () => window.removeEventListener('gii:userLoaded', readRole)
   }, [])
 
-  const roleCode = detectedRole || String(cfg.roleCode || 'DT').toUpperCase()
+  const roleCode = detectedRole
   const buttonText = String(cfg.buttonText || 'Prendi in carico')
 
   const buttonColors: ButtonColors = {
@@ -4063,16 +3295,6 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
     btnPaddingY: Number.isFinite(Number((cfg as any).btnPaddingY)) ? Number((cfg as any).btnPaddingY) : 8
   }
 
-  const tabFields: TabFields = {
-    anagrafica: normalizeFieldList((cfg as any).anagraficaFields),
-    violazione: normalizeFieldList((cfg as any).violazioneFields),
-    allegati: normalizeFieldList((cfg as any).allegatiFields),
-    iterExtra: normalizeFieldList((cfg as any).iterExtraFields)
-  }
-
-  // Migra tabs
-  const migratedTabs = migrateTabs(tabFields, cfg.tabs || [])
-
   // --- Editing TI config
   const editConfig = {
     show: cfg.showEditButtons !== false,
@@ -4107,6 +3329,8 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
     'esito_TI', 'dt_esito_TI',
     'note_TI',
 
+    'GII_arch', 'dt_archiviazione_TI', 'archiviato_da',
+
     'presa_in_carico_RZ', 'dt_presa_in_carico_RZ',
     'stato_RZ', 'dt_stato_RZ',
     'esito_RZ', 'dt_esito_RZ',
@@ -4138,26 +3362,7 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
     'note_TI_AMM'
   ]
 
-const queryFields = React.useMemo(() => {
-  const s = new Set<string>()
-  let needsAll = false
-
-  const tabsJs: any[] =
-    (migratedTabs as any)?.asMutable
-      ? (migratedTabs as any).asMutable({ deep: true })
-      : (Array.isArray(migratedTabs) ? migratedTabs as any[] : [])
-
-  for (const t of tabsJs) {
-    if (!t || t.id === 'azioni') continue
-    const fl = normalizeFieldList(t.fields)
-    if (!fl.length && t.id !== 'iter') needsAll = true
-    for (const f of fl) s.add(String(f))
-  }
-
-  for (const f of watchFields) s.add(String(f))
-  const arr = Array.from(s).filter(Boolean)
-  return needsAll ? ['*'] : arr
-}, [migratedTabs, watchFields.join('|')])
+const queryFields = React.useMemo(() => ['*'], [])
 
   const [selection, setSelection] = React.useState<RuntimeSelection | null>(() => readRuntimeSelection())
   React.useEffect(() => {
@@ -4247,7 +3452,6 @@ const queryFields = React.useMemo(() => {
           buttonColors={buttonColors}
           ui={ui}
           editConfig={editConfig}
-          motherLayerUrl={String(cfg.motherLayerUrl || '').trim() || undefined}
         />
       </>
     </div>

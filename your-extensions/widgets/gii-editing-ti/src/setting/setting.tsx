@@ -164,6 +164,34 @@ export default function Setting(props: AllWidgetSettingProps<IMConfig>) {
           Mostra sezione "Dati generali" nel form nuova pratica
         </label>
         <div style={P.hint}>Se attivo, la tab Dati generali mostra tecnico, ufficio e data (read-only).</div>
+
+        <div style={{marginTop:14, borderTop:'1px solid rgba(255,255,255,0.07)', paddingTop:12}}>
+          <div style={{fontSize:11,fontWeight:700,color:'#93c5fd',marginBottom:8}}>Colore sfondo per modalità</div>
+          <div style={{display:'grid',gap:10}}>
+            <div>
+              <label style={P.lbl}>🟢 Nuovo rapporto</label>
+              <div style={{display:'flex',alignItems:'center',gap:6}}>
+                <input type='color' value={/^#[0-9a-fA-F]{3,8}$/.test(cfg.modeBgCreate||'') ? cfg.modeBgCreate : '#f0fdf4'}
+                  onChange={e=>set('modeBgCreate',e.target.value)}
+                  style={{width:30,height:26,padding:2,border:'1px solid rgba(255,255,255,0.15)',borderRadius:5,cursor:'pointer',background:'transparent',flexShrink:0}}/>
+                <input type='text' value={cfg.modeBgCreate||'#f0fdf4'} onChange={e=>set('modeBgCreate',e.target.value)}
+                  placeholder='#f0fdf4' style={{...P.inp,flex:1,fontSize:11}}/>
+              </div>
+              <div style={P.hint}>Sfondo quando TI sta creando un nuovo rapporto.</div>
+            </div>
+            <div>
+              <label style={P.lbl}>🔵 Modifica rapporto</label>
+              <div style={{display:'flex',alignItems:'center',gap:6}}>
+                <input type='color' value={/^#[0-9a-fA-F]{3,8}$/.test(cfg.modeBgEdit||'') ? cfg.modeBgEdit : '#eff6ff'}
+                  onChange={e=>set('modeBgEdit',e.target.value)}
+                  style={{width:30,height:26,padding:2,border:'1px solid rgba(255,255,255,0.15)',borderRadius:5,cursor:'pointer',background:'transparent',flexShrink:0}}/>
+                <input type='text' value={cfg.modeBgEdit||'#eff6ff'} onChange={e=>set('modeBgEdit',e.target.value)}
+                  placeholder='#eff6ff' style={{...P.inp,flex:1,fontSize:11}}/>
+              </div>
+              <div style={P.hint}>Sfondo quando TI sta modificando un rapporto esistente.</div>
+            </div>
+          </div>
+        </div>
       </div>}
 
 

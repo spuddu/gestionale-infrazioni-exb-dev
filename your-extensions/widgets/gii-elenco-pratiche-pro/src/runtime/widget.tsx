@@ -1017,6 +1017,10 @@ React.useEffect(() => {
 
     const d: any = r.getData?.() || {}
 
+    // Rapporti archiviati (GII_arch = 1) non visibili negli elenchi ordinari
+    const archVal = d['GII_arch'] ?? d['gii_arch'] ?? d['GII_ARCH']
+    if (archVal !== null && archVal !== undefined && archVal !== '' && Number(archVal) === 1) return false
+
     // DA e ruoli AMM (RI AMM, TI AMM): vedono solo i Rapporti entrati in fase sanzionatoria.
     // area=1 → AMM
     const areaNum = giiUser?.area ?? null

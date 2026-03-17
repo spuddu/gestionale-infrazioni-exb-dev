@@ -54,6 +54,10 @@ export interface Config {
   btnPaddingX: number
   btnPaddingY: number
 
+  // --- Colore sfondo per modalità (distingue visivamente nuovo rapporto da modifica)
+  modeBgCreate: string   // sfondo quando il widget è in modalità "Nuovo rapporto"
+  modeBgEdit: string     // sfondo quando il widget è in modalità "Modifica rapporto"
+
   // --- Pannello (sfondo/bordi/spazi)
   panelBg: string
   panelBorderColor: string
@@ -147,6 +151,9 @@ export const defaultConfig: Config = {
   btnFontWeight: 600,
   btnPaddingX: 16,
   btnPaddingY: 8,
+
+  modeBgCreate: '#f0fdf4',   // verde chiaro → nuovo rapporto
+  modeBgEdit:   '#eff6ff',   // azzurro chiaro → modifica
 
   panelBg: '#ffffff',
   panelBorderColor: '#e5e7eb',

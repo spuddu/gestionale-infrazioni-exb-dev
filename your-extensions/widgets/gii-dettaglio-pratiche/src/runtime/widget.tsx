@@ -1199,13 +1199,37 @@ function InlineEditOverlay(props: {
 
       {/* Dialog conferma annulla */}
       {confirmCancel && (
-        <div style={{ position: 'fixed', inset: 0, zIndex: 100000, background: 'rgba(0,0,0,0.4)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-          <div style={{ background: '#fff', borderRadius: 12, padding: 28, maxWidth: 380, width: '90%', boxShadow: '0 8px 32px rgba(0,0,0,0.25)' }}>
-            <div style={{ fontWeight: 700, fontSize: 16, marginBottom: 10 }}>Annullare le modifiche?</div>
-            <div style={{ fontSize: 13, color: '#4b5563', marginBottom: 20 }}>Le modifiche non salvate andranno perse.</div>
-            <div style={{ display: 'flex', gap: 10 }}>
+        <div
+          data-gii-global-popup-root='1'
+          style={{ position: 'fixed', inset: 0, zIndex: 2147483646, background: 'rgba(0,0,0,0.52)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16, pointerEvents: 'auto' }}
+          onClick={(e) => { e.preventDefault(); e.stopPropagation() }}
+          onMouseDown={(e) => { e.preventDefault(); e.stopPropagation() }}
+        >
+          <div
+            role='dialog'
+            aria-modal='true'
+            data-gii-global-popup-dialog='1'
+            style={{ width: 'min(92vw, 520px)', background: '#fff', borderRadius: 14, boxShadow: '0 20px 60px rgba(0,0,0,0.28)', border: '1px solid rgba(0,0,0,0.08)', padding: 18, display: 'grid', gap: 12, position: 'relative', zIndex: 2147483647 }}
+            onClick={(e) => { e.stopPropagation() }}
+            onMouseDown={(e) => { e.stopPropagation() }}
+          >
+            <div style={{ fontWeight: 800, fontSize: 16, color: '#dc2626', display: 'flex', alignItems: 'center', gap: 8 }}>
+              <span style={{ fontSize: 20 }}>⚠</span>
+              Annullare le modifiche?
+              {oid != null && (
+                <span style={{ fontSize: 13, fontWeight: 600, color: '#6b7280', fontFamily: 'monospace', marginLeft: 4 }}>
+                  — {praticaCode}
+                </span>
+              )}
+            </div>
+            <div style={{ fontSize: 13, color: '#374151', lineHeight: 1.6, display: 'grid', gap: 10 }}>
+              <div style={{ fontWeight: 500, padding: 10, background: '#fef2f2', border: '1px solid #fecaca', borderRadius: 6, color: '#7f1d1d' }}>
+                Le modifiche non salvate andranno perse.
+              </div>
+            </div>
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10 }}>
               <button type='button' onClick={() => { setConfirmCancel(false); onClose(false) }}
-                style={{ padding: '8px 18px', borderRadius: 8, border: 'none', background: '#d13438', color: '#fff', fontWeight: 700, fontSize: 13, cursor: 'pointer' }}>
+                style={{ padding: '8px 18px', borderRadius: 8, border: '1px solid rgba(0,0,0,0.18)', background: '#dc2626', color: '#fff', fontWeight: 700, fontSize: 13, cursor: 'pointer' }}>
                 Sì, annulla
               </button>
               <button type='button' onClick={() => setConfirmCancel(false)}
