@@ -79,6 +79,14 @@ export interface Config {
   statusFontSize: number
   msgFontSize: number
 
+  // --- Stile form (label campi e intestazioni sezione)
+  formLabelColor: string
+  formLabelFontSize: number
+  sectionHeaderColor: string
+  sectionHeaderFontSize: number
+  sectionDividerColor: string
+  sectionDividerWidth: number
+
   // --- Titolo pratica
   detailTitlePrefix: string
   detailTitleBg: string
@@ -172,6 +180,13 @@ export const defaultConfig: Config = {
   titleFontSize: 14,
   statusFontSize: 13,
   msgFontSize: 15,
+
+  formLabelColor: '#6b7280',
+  formLabelFontSize: 12,
+  sectionHeaderColor: '#1d4ed8',
+  sectionHeaderFontSize: 11,
+  sectionDividerColor: '#bfdbfe',
+  sectionDividerWidth: 2,
 
   detailTitlePrefix: 'Dettaglio rapporto n.',
   detailTitleBg: 'transparent',

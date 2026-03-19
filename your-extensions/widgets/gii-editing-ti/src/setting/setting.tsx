@@ -204,15 +204,6 @@ export default function Setting(props: AllWidgetSettingProps<IMConfig>) {
         </label>
         <div style={P.hint}>Se attivo, il widget entra in modalità CREATE quando non c&apos;è alcuna selezione nell&apos;Elenco.</div>
 
-        <label style={P.lbl}>Mappa di pagina (per click localizzazione)</label>
-        <div style={{ marginTop: 6 }}>
-          <MapWidgetSelector
-            onSelect={(ids: string[]) => set('useMapWidgetIds', ids)}
-            useMapWidgetIds={cfg.useMapWidgetIds}
-          />
-        </div>
-        <div style={P.hint}>Seleziona il widget Mappa presente nella pagina. Il widget ascolta i click e salva un punto WGS84.</div>
-
         <label style={P.lbl}>Coordinate ufficio (WGS84)</label>
         <div style={{ display:'flex', gap: 10, alignItems:'center', flexWrap:'wrap' }}>
           <div style={{ flex:'0 0 auto' }}>
@@ -233,18 +224,78 @@ export default function Setting(props: AllWidgetSettingProps<IMConfig>) {
       {/* === MAPPA === */}
       <Acc id='mappa' label='🗺 Mappa' open={isOpen('mappa')} onToggle={()=>toggle('mappa')}/>
       {isOpen('mappa') && <div>
-        <label style={P.lbl}>Basemap</label>
-        <select value={cfg.mapBasemap} onChange={e=>set('mapBasemap',e.target.value)} style={P.inp}>
-          {[['osm','OpenStreetMap'],['streets','Streets (ESRI)'],['streets-navigation-vector','Streets Navigation'],
-            ['satellite','Satellite'],['hybrid','Hybrid (satellite + strade)'],['topo-vector','Topografico']
-          ].map(([v,l])=>(
-            <option key={v} value={v} style={{background:'#1a1f2e'}}>{l}</option>
-          ))}
-        </select>
-        <label style={P.lbl}>Zoom iniziale</label>
-        <input type='number' value={cfg.mapZoom} min={6} max={20}
-          onChange={e=>set('mapZoom', Number(e.target.value))} style={{...P.inp, width:80}}/>
+        <label style={P.lbl}>Widget Mappa di pagina</label>
+        <div style={{ marginTop: 6 }}>
+          <MapWidgetSelector
+            onSelect={(ids: string[]) => set('useMapWidgetIds', ids)}
+            useMapWidgetIds={cfg.useMapWidgetIds}
+          />
+        </div>
+        <div style={P.hint}>Seleziona il widget Mappa presente nella pagina (es. la mappa accanto). Il widget ascolta i click per la localizzazione della violazione e mostra un segnaposto nel punto cliccato.</div>
       </div>}
+
+
+      {/* === STILE FORM (label + intestazioni sezione + divisori) === */}
+      <Acc id='stileform' label='🎨 Stile form' open={isOpen('stileform')} onToggle={()=>toggle('stileform')}/>
+      {isOpen('stileform') && <div>
+
+        <div style={{fontSize:11,fontWeight:700,color:'#93c5fd',marginBottom:8}}>Label dei campi</div>
+        <div style={P.hint}>Colore e dimensione delle etichette sopra ogni campo (es. Via, Città, Tecnico istruttore…)</div>
+        <div style={{display:'flex',alignItems:'center',gap:6,marginTop:8}}>
+          <input type='color' value={/^#[0-9a-fA-F]{3,8}$/.test(cfg.formLabelColor||'') ? cfg.formLabelColor : '#6b7280'}
+            onChange={e=>set('formLabelColor',e.target.value)}
+            style={{width:30,height:26,padding:2,border:'1px solid rgba(255,255,255,0.15)',borderRadius:5,cursor:'pointer',background:'transparent',flexShrink:0}}/>
+          <input type='text' value={cfg.formLabelColor||'#6b7280'} onChange={e=>set('formLabelColor',e.target.value)}
+            placeholder='#6b7280' style={{...P.inp,flex:1,fontSize:11}}/>
+        </div>
+        <label style={P.lbl}>Dimensione font (px)</label>
+        <input type='number' value={cfg.formLabelFontSize??12} min={9} max={18}
+          onChange={e=>set('formLabelFontSize', Number(e.target.value))} style={{...P.inp, width:80}}/>
+
+        <div style={{marginTop:16,borderTop:'1px solid rgba(255,255,255,0.07)',paddingTop:12}}>
+          <div style={{fontSize:11,fontWeight:700,color:'#93c5fd',marginBottom:8}}>Intestazioni di sezione</div>
+          <div style={P.hint}>Colore e dimensione dei titoli di gruppo (es. Trasgressore, Art. 15, Descrizione…)</div>
+          <div style={{display:'flex',alignItems:'center',gap:6,marginTop:8}}>
+            <input type='color' value={/^#[0-9a-fA-F]{3,8}$/.test(cfg.sectionHeaderColor||'') ? cfg.sectionHeaderColor : '#1d4ed8'}
+              onChange={e=>set('sectionHeaderColor',e.target.value)}
+              style={{width:30,height:26,padding:2,border:'1px solid rgba(255,255,255,0.15)',borderRadius:5,cursor:'pointer',background:'transparent',flexShrink:0}}/>
+            <input type='text' value={cfg.sectionHeaderColor||'#1d4ed8'} onChange={e=>set('sectionHeaderColor',e.target.value)}
+              placeholder='#1d4ed8' style={{...P.inp,flex:1,fontSize:11}}/>
+          </div>
+          <label style={P.lbl}>Dimensione font (px)</label>
+          <input type='number' value={cfg.sectionHeaderFontSize??11} min={9} max={18}
+            onChange={e=>set('sectionHeaderFontSize', Number(e.target.value))} style={{...P.inp, width:80}}/>
+        </div>
+
+        <div style={{marginTop:16,borderTop:'1px solid rgba(255,255,255,0.07)',paddingTop:12}}>
+          <div style={{fontSize:11,fontWeight:700,color:'#93c5fd',marginBottom:8}}>Divisori tra sezioni</div>
+          <div style={P.hint}>Colore e spessore della linea sotto ogni intestazione (Art. 15, Art. 16-17…)</div>
+          <div style={{display:'flex',alignItems:'center',gap:6,marginTop:8}}>
+            <input type='color' value={/^#[0-9a-fA-F]{3,8}$/.test(cfg.sectionDividerColor||'') ? cfg.sectionDividerColor : '#bfdbfe'}
+              onChange={e=>set('sectionDividerColor',e.target.value)}
+              style={{width:30,height:26,padding:2,border:'1px solid rgba(255,255,255,0.15)',borderRadius:5,cursor:'pointer',background:'transparent',flexShrink:0}}/>
+            <input type='text' value={cfg.sectionDividerColor||'#bfdbfe'} onChange={e=>set('sectionDividerColor',e.target.value)}
+              placeholder='#bfdbfe' style={{...P.inp,flex:1,fontSize:11}}/>
+          </div>
+          <label style={P.lbl}>Spessore (px)</label>
+          <input type='number' value={cfg.sectionDividerWidth??2} min={0} max={6}
+            onChange={e=>set('sectionDividerWidth', Number(e.target.value))} style={{...P.inp, width:80}}/>
+        </div>
+
+        <div style={{marginTop:14,padding:10,borderRadius:8,background:'rgba(255,255,255,0.04)',border:'1px solid rgba(255,255,255,0.08)'}}>
+          <div style={{fontSize:10.5,fontWeight:600,color:'#93c5fd',marginBottom:6}}>Anteprima</div>
+          <div style={{background:'#fff',borderRadius:6,padding:10}}>
+            <div style={{fontSize:cfg.sectionHeaderFontSize??11,fontWeight:700,color:cfg.sectionHeaderColor||'#1d4ed8',textTransform:'uppercase',letterSpacing:1,borderBottom:`${cfg.sectionDividerWidth??2}px solid ${cfg.sectionDividerColor||'#bfdbfe'}`,paddingBottom:4,marginBottom:8}}>
+              Trasgressore
+            </div>
+            <div style={{fontSize:cfg.formLabelFontSize??12,color:cfg.formLabelColor||'#6b7280',marginBottom:4}}>Tipologia soggetto</div>
+            <div style={{padding:'5px 8px',borderRadius:6,border:'1px solid rgba(0,0,0,0.15)',fontSize:12,color:'#9ca3af'}}>— seleziona —</div>
+            <div style={{fontSize:cfg.formLabelFontSize??12,color:cfg.formLabelColor||'#6b7280',marginBottom:4,marginTop:8}}>Via</div>
+            <div style={{padding:'5px 8px',borderRadius:6,border:'1px solid rgba(0,0,0,0.15)',fontSize:12,color:'#374151'}}>Via Roma 1</div>
+          </div>
+        </div>
+      </div>}
+
 
       {/* === RESET === */}
       <div style={{marginTop:28, borderTop:'1px solid rgba(255,255,255,0.10)', paddingTop:16}}>

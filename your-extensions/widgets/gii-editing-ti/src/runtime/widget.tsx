@@ -554,6 +554,37 @@ function makeWgs84Point (lon: number, lat: number): any {
   return { x: lon, y: lat, spatialReference: { wkid: 4326 } }
 }
 
+/** Converte un plain WGS84 {x,y} in un vero esri/geometry/Point nella SR del layer (riproiettando se serve) */
+async function toLayerPoint (wgs84: any, layer: any): Promise<any | null> {
+  if (!wgs84 || !isFiniteNum(wgs84.x) || !isFiniteNum(wgs84.y)) return null
+  try {
+    const Point = await loadEsriModule<any>('esri/geometry/Point')
+    const pt4326 = new Point({ longitude: Number(wgs84.x), latitude: Number(wgs84.y), spatialReference: { wkid: 4326 } })
+
+    // Determina la SR del layer
+    const layerSr = layer?.spatialReference?.wkid || layer?.sourceJSON?.spatialReference?.wkid || 4326
+    if (layerSr === 4326) return pt4326
+
+    // Web Mercator
+    if (layerSr === 3857 || layerSr === 102100) {
+      try {
+        const wmu = await loadEsriModule<any>('esri/geometry/support/webMercatorUtils')
+        return wmu?.geographicToWebMercator?.(pt4326) || pt4326
+      } catch { return pt4326 }
+    }
+
+    // Altro SR: usa projection
+    try {
+      const SpatialReference = await loadEsriModule<any>('esri/geometry/SpatialReference')
+      const projection = await loadEsriModule<any>('esri/geometry/projection')
+      if (projection?.load) await projection.load()
+      return projection?.project?.(pt4326, new SpatialReference({ wkid: layerSr })) || pt4326
+    } catch { return pt4326 }
+  } catch {
+    return wgs84  // fallback al plain object
+  }
+}
+
 async function toWgs84Point (mapPoint: any): Promise<any | null> {
   if (!mapPoint) return null
   const sr = mapPoint?.spatialReference?.wkid
@@ -1141,7 +1172,7 @@ if (tipoField) {
   return null
 }
 
-function DetailRow (props: { label: string; value: any; labelSize: number; valueSize: number }) {
+function DetailRow (props: { label: string; value: any; labelSize: number; valueSize: number; labelColor?: string }) {
   return (
     <div style={{ 
       display: 'grid', 
@@ -1149,7 +1180,7 @@ function DetailRow (props: { label: string; value: any; labelSize: number; value
       gap: 12, 
       alignItems: 'baseline' 
     }}>
-      <div style={{ fontSize: props.labelSize, color: '#6b7280', textAlign: 'left' }}>
+      <div style={{ fontSize: props.labelSize, color: props.labelColor || '#6b7280', textAlign: 'left' }}>
         {props.label}
       </div>
       <div style={{ fontSize: props.valueSize, fontWeight: 600, wordBreak: 'break-word' }}>
@@ -1436,6 +1467,8 @@ function InlineEditOverlay(props: {
   onClose: (saved: boolean) => void
 }) {
   const { oid, data, ds, idFieldName, cfg, ui, onClose } = props
+  const _flColor = String(ui?.formLabelColor || '#6b7280')
+  const _flSize = Number.isFinite(Number(ui?.formLabelFontSize)) ? Number(ui.formLabelFontSize) : 12
 
   // Alias e schema dal DS (caricati una volta sola)
   const [aliasMap, setAliasMap] = React.useState<Record<string, string>>({})
@@ -1568,7 +1601,7 @@ function InlineEditOverlay(props: {
     if (hasCoded) {
       return (
         <div key={fieldName} style={{ display: 'grid', gap: 4 }}>
-          <div style={{ fontSize: 12, color: '#6b7280' }}>{alias}</div>
+          <div style={{ fontSize: _flSize, color: _flColor }}>{alias}</div>
           <select
             value={val ?? ''}
             disabled={saving}
@@ -1595,7 +1628,7 @@ function InlineEditOverlay(props: {
       }
       return (
         <div key={fieldName} style={{ display: 'grid', gap: 4 }}>
-          <div style={{ fontSize: 12, color: '#6b7280' }}>{alias}</div>
+          <div style={{ fontSize: _flSize, color: _flColor }}>{alias}</div>
           <input type='date' value={toInputVal(val)} disabled={saving}
             onChange={e => {
               const d = new Date((e.target as HTMLInputElement).value)
@@ -1609,7 +1642,7 @@ function InlineEditOverlay(props: {
     const isMultiline = /descr|note|fatti|circostanz/i.test(fieldName)
     return (
       <div key={fieldName} style={{ display: 'grid', gap: 4 }}>
-        <div style={{ fontSize: 12, color: '#6b7280' }}>{alias}</div>
+        <div style={{ fontSize: _flSize, color: _flColor }}>{alias}</div>
         {isMultiline
           ? <textarea value={val != null ? String(val) : ''} disabled={saving} rows={3}
             onChange={e => updateDraft(fieldName, (e.target as HTMLTextAreaElement).value || null)}
@@ -2424,11 +2457,11 @@ function ActionsPanel (props: {
         </div>
 
         <div style={{ display: 'grid', gap: 6 }}>
-          <DetailRow label='N.pratica (OID)' value={oid} labelSize={ui.statusFontSize} valueSize={titleFontSize} />
-          <DetailRow label={presaField} value={presaVal} labelSize={ui.statusFontSize} valueSize={titleFontSize} />
-          <DetailRow label={statoField} value={statoVal} labelSize={ui.statusFontSize} valueSize={titleFontSize} />
-          <DetailRow label={esitoField} value={esitoVal} labelSize={ui.statusFontSize} valueSize={titleFontSize} />
-          <DetailRow label={statoDAField} value={statoDAVal} labelSize={ui.statusFontSize} valueSize={titleFontSize} />
+          <DetailRow label='N.pratica (OID)' value={oid} labelSize={ui.statusFontSize} valueSize={titleFontSize} labelColor={(ui as any).formLabelColor} />
+          <DetailRow label={presaField} value={presaVal} labelSize={ui.statusFontSize} valueSize={titleFontSize} labelColor={(ui as any).formLabelColor} />
+          <DetailRow label={statoField} value={statoVal} labelSize={ui.statusFontSize} valueSize={titleFontSize} labelColor={(ui as any).formLabelColor} />
+          <DetailRow label={esitoField} value={esitoVal} labelSize={ui.statusFontSize} valueSize={titleFontSize} labelColor={(ui as any).formLabelColor} />
+          <DetailRow label={statoDAField} value={statoDAVal} labelSize={ui.statusFontSize} valueSize={titleFontSize} labelColor={(ui as any).formLabelColor} />
         </div>
 
         <div style={{ height: 1, background: ui.dividerColor, margin: '2px 0' }} />
@@ -2862,6 +2895,8 @@ function ReadOnlyPanel (props: {
     const titleFontSize = Number.isFinite(Number(ui.titleFontSize)) ? Number(ui.titleFontSize) : 14
     const msgFontSize = Number.isFinite(Number(ui.msgFontSize)) ? Number(ui.msgFontSize) : 12
     const statusFontSize = Number.isFinite(Number(ui.statusFontSize)) ? Number(ui.statusFontSize) : 12
+    const _rlColor = String(ui.formLabelColor || '#6b7280')
+    const _rlSize = Number.isFinite(Number(ui.formLabelFontSize)) ? Number(ui.formLabelFontSize) : 12
   return (
     <div
       style={{
@@ -2886,8 +2921,9 @@ function ReadOnlyPanel (props: {
                 key={i}
                 label={r.label}
                 value={r.value}
-                labelSize={12}
+                labelSize={_rlSize}
                 valueSize={13}
+                labelColor={_rlColor}
               />
             ))}
           </div>
@@ -2940,6 +2976,13 @@ const NORMA3_TO_VFIELD: Record<string, string> = {
   Art37: 'v_art37', Art39: 'v_art39'
 }
 
+const _defaultFormStyle = {
+  labelColor: '#6b7280', labelFontSize: 12,
+  hdrColor: '#1d4ed8', hdrFontSize: 11,
+  divColor: '#bfdbfe', divWidth: 2
+}
+const FormStyleCtx = React.createContext(_defaultFormStyle)
+
 const S: Record<string, React.CSSProperties> = {
   wrap:   { width: '100%', height: '100%', display: 'flex', flexDirection: 'column', minHeight: 0, overflowY: 'auto', padding: '0 2px' },
   hdr:    { fontSize: 11, fontWeight: 700, color: '#1d4ed8', textTransform: 'uppercase', letterSpacing: 1, borderBottom: '2px solid #bfdbfe', paddingBottom: 4, marginBottom: 12, marginTop: 20 },
@@ -2954,9 +2997,10 @@ const S: Record<string, React.CSSProperties> = {
 }
 
 function NpField(p: { label: string; children: React.ReactNode; hint?: string }) {
+  const fs = React.useContext(FormStyleCtx)
   return (
     <div style={S.fld}>
-      <label style={S.lbl}>{p.label}</label>
+      <label style={{ ...S.lbl, color: fs.labelColor, fontSize: fs.labelFontSize }}>{p.label}</label>
       {p.children}
       {p.hint && <div style={S.hint}>{p.hint}</div>}
     </div>
@@ -3051,7 +3095,11 @@ function NuovaPraticaForm (p: {
   cfg: any
   showDatiGenerali: boolean
   clickedPointWgs84: any | null
+  existingGeomWgs84?: any | null
   onClearPoint: () => void
+  onGeomSaved?: (geom: any) => void
+  mapClickEnabled?: boolean
+  onToggleMapClick?: (on: boolean) => void
   onSaved?: (oid: number, savedData?: any) => void
   mode?: 'create' | 'edit'
   initialData?: any | null
@@ -3419,6 +3467,16 @@ function NuovaPraticaForm (p: {
     norma_violata3: g('norma_violata3')
   }), [n3parziale, n3totale, draft.norma_violata3])
 
+  // Quando la violazione cambia e reqPoint passa a 0, cancella il punto cliccato manualmente
+  const prevReqPointRef = React.useRef(reqPoint)
+  React.useEffect(() => {
+    if (prevReqPointRef.current === 1 && reqPoint === 0) {
+      p.onClearPoint()
+      p.onToggleMapClick?.(false)
+    }
+    prevReqPointRef.current = reqPoint
+  }, [reqPoint])
+
   const officeLon = parseOfficeCoord(cfg.officeLonWgs84)
   const officeLat = parseOfficeCoord(cfg.officeLatWgs84)
   const hasOffice = isValidOfficePoint(officeLon, officeLat)
@@ -3778,14 +3836,20 @@ function NuovaPraticaForm (p: {
       const layer = mode === 'edit' ? await resolveLayerForEdit(ds) : await getLayerForCreate()
       if (!layer?.applyEdits) throw new Error('Layer non raggiungibile (applyEdits non disponibile).')
 
-      let geom: any | null = null
-      if (p.clickedPointWgs84) geom = p.clickedPointWgs84
-      else if (mode === 'create' && reqPoint === 0 && hasOffice) geom = makeWgs84Point(officeLon, officeLat)
-
-      if (mode === 'create' && !geom) {
-        if (reqPoint === 1) throw new Error('Localizzazione obbligatoria: fai click in mappa per impostare il punto.')
-        throw new Error('Geometria non impostata: configura le coordinate ufficio nel setting oppure fai click in mappa.')
+      let geomWgs84: any | null = null
+      if (reqPoint === 1 && p.clickedPointWgs84) {
+        geomWgs84 = p.clickedPointWgs84
+      } else if (reqPoint === 0) {
+        // Nessuna localizzazione richiesta: geometria null (non appare in mappa)
+        geomWgs84 = null
       }
+
+      if (mode === 'create' && reqPoint === 1 && !geomWgs84) {
+        throw new Error('Localizzazione obbligatoria: fai click in mappa per impostare il punto.')
+      }
+
+      // Converte il plain WGS84 in un vero esri/geometry/Point nella SR del layer
+      const geom = geomWgs84 ? await toLayerPoint(geomWgs84, layer) : null
 
       const normaV1 = tipoAbuso === 'parziale' ? n3parziale : (tipoAbuso === 'totale' ? n3totale : '')
       const normaV2 = norma1516 === 'Art16' ? 'Art16' : (norma1516 === 'Art17' && art17tipo ? art17tipo : norma1516)
@@ -3870,12 +3934,14 @@ function NuovaPraticaForm (p: {
         const prevAttrs = filterAttrsForLayer(p.initialData || {}, layer)
         const changedFields = Object.keys(cleanAttrs).filter((k) => normalizeLogValue(prevAttrs?.[k]) !== normalizeLogValue(cleanAttrs[k]))
         const hasAttachmentOps = attachmentFiles.length > 0 || pendingDeleteAttachmentIds.length > 0 || Object.keys(pendingReplaceAttachments).length > 0
-        if (changedFields.length === 0 && !geom && !hasAttachmentOps) {
+        // reqPoint=0 e il record ha una geometria esistente (vera o legacy 0,0) → va cancellata
+        const needsGeomClear = reqPoint === 0 && !!p.existingGeomWgs84
+        if (changedFields.length === 0 && !geom && !needsGeomClear && !hasAttachmentOps) {
           setSaving(false)
           setMsg({ kind: 'ok', text: 'Nessuna modifica da salvare.' })
           return
         }
-        if (changedFields.length === 0 && !geom && hasAttachmentOps) {
+        if (changedFields.length === 0 && !geom && !needsGeomClear && hasAttachmentOps) {
           await processAttachmentChanges(editOid, String(layer?.url || currentLayerUrl || ''))
           setBaselineDraft(draftFromRecord(p.initialData || {}))
           setDraft(draftFromRecord(p.initialData || {}))
@@ -3886,7 +3952,12 @@ function NuovaPraticaForm (p: {
           return
         }
         const upd: any = { attributes: { ...cleanAttrs, [editIdFieldName]: editOid } }
-        if (geom) upd.geometry = geom
+        if (geom) {
+          upd.geometry = geom
+        } else if (reqPoint === 0) {
+          // Violazione senza localizzazione: cancella la geometria esistente
+          upd.geometry = null
+        }
         const res = await layer.applyEdits({ updateFeatures: [upd] })
         const updated = res?.updateFeatureResults?.[0] || res?.updateResults?.[0] || null
         const err = updated?.error
@@ -3908,7 +3979,7 @@ function NuovaPraticaForm (p: {
         writeEditIntent(nextIntent)
         setBaselineDraft(draftFromRecord(nextSavedData))
         setDraft(draftFromRecord(nextSavedData))
-        p.onClearPoint()
+        if (p.onGeomSaved) { p.onGeomSaved(reqPoint === 0 ? null : (geomWgs84 || p.existingGeomWgs84 || null)) } else { p.onClearPoint() }
         setMsg({ kind: 'ok', text: 'Pratica salvata.' })
         setSaving(false)
         window.setTimeout(() => setMsg(null), 2500)
@@ -3974,11 +4045,17 @@ function NuovaPraticaForm (p: {
   )
 
   const geomStatus = React.useMemo(() => {
+    if (reqPoint === 0) {
+      if (p.clickedPointWgs84) return { kind: 'ok' as const, text: 'Punto impostato manualmente (facoltativo per questa violazione).' }
+      return { kind: 'info' as const, text: 'Localizzazione non richiesta per questa violazione.' }
+    }
+    // reqPoint === 1
     if (p.clickedPointWgs84) return { kind: 'ok' as const, text: 'Punto impostato da click in mappa.' }
-    if (reqPoint === 0 && hasOffice) return { kind: 'info' as const, text: 'Nessun click: userò il punto ufficio (default).' }
-    if (reqPoint === 0 && !hasOffice) return { kind: 'err' as const, text: 'Nessun click e punto ufficio non configurato: fai click in mappa o imposta Lon/Lat ufficio nel setting.' }
+    if (p.existingGeomWgs84 && (Number(p.existingGeomWgs84.x) !== 0 || Number(p.existingGeomWgs84.y) !== 0)) {
+      return { kind: 'ok' as const, text: 'Punto già presente nel rapporto.' }
+    }
     return { kind: 'err' as const, text: 'Localizzazione obbligatoria: fai click in mappa.' }
-  }, [p.clickedPointWgs84, reqPoint, hasOffice])
+  }, [p.clickedPointWgs84, p.existingGeomWgs84, reqPoint])
 
   const editPraticaCode = React.useMemo(() => {
     if (mode !== 'edit') return ''
@@ -3992,7 +4069,24 @@ function NuovaPraticaForm (p: {
     return { baseTitle, praticaCode: editPraticaCode }
   }, [p.titleText, mode, editPraticaCode])
 
+  const formStyle = React.useMemo(() => ({
+    labelColor: String((cfg as any).formLabelColor || _defaultFormStyle.labelColor),
+    labelFontSize: Number.isFinite(Number((cfg as any).formLabelFontSize)) ? Number((cfg as any).formLabelFontSize) : _defaultFormStyle.labelFontSize,
+    hdrColor: String((cfg as any).sectionHeaderColor || _defaultFormStyle.hdrColor),
+    hdrFontSize: Number.isFinite(Number((cfg as any).sectionHeaderFontSize)) ? Number((cfg as any).sectionHeaderFontSize) : _defaultFormStyle.hdrFontSize,
+    divColor: String((cfg as any).sectionDividerColor || _defaultFormStyle.divColor),
+    divWidth: Number.isFinite(Number((cfg as any).sectionDividerWidth)) ? Number((cfg as any).sectionDividerWidth) : _defaultFormStyle.divWidth
+  }), [cfg])
+
+  const sHdr: React.CSSProperties = React.useMemo(() => ({
+    ...S.hdr,
+    fontSize: formStyle.hdrFontSize,
+    color: formStyle.hdrColor,
+    borderBottom: `${formStyle.divWidth}px solid ${formStyle.divColor}`
+  }), [formStyle])
+
   return (
+  <FormStyleCtx.Provider value={formStyle}>
     <div style={{ width: '100%', height: '100%', display: 'flex', flexDirection: 'column', minHeight: 0 }}>
 
       {/* ── Toolbar ── */}
@@ -4042,7 +4136,7 @@ function NuovaPraticaForm (p: {
             {showDatiGen && (
               <div style={{ marginBottom: 14 }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 8 }}>
-                  <span style={{ fontSize: 13, color: '#6b7280' }}>Dati generali (automatici)</span>
+                  <span style={{ fontSize: formStyle.labelFontSize + 1, color: formStyle.labelColor }}>Dati generali (automatici)</span>
                 </div>
                 <div style={S.row3}>
                   <NpField label='Tecnico istruttore'>
@@ -4058,7 +4152,7 @@ function NuovaPraticaForm (p: {
               </div>
             )}
 
-            <div style={{ ...S.hdr, marginTop: 6 }}>Trasgressore</div>
+            <div style={{ ...sHdr, marginTop: 6 }}>Trasgressore</div>
 
             <div style={{ ...S.row2, marginBottom: 12 }}>
               <NpField label='Tipologia soggetto'>
@@ -4105,27 +4199,57 @@ function NuovaPraticaForm (p: {
         {/* VIOLAZIONE (include descrizione/localizzazione/fine) */}
         {npTab === 'violazione' && (
           <div>
-            <div style={{ padding: 10, borderRadius: 10, border: '1px solid rgba(0,0,0,0.10)', background: 'rgba(0,0,0,0.02)', marginBottom: 12 }}>
+            <div style={{ padding: 10, borderRadius: 10, border: `1px solid ${p.mapClickEnabled ? '#2563eb' : 'rgba(0,0,0,0.10)'}`, background: p.mapClickEnabled ? 'rgba(37,99,235,0.04)' : 'rgba(0,0,0,0.02)', marginBottom: 12, transition: 'all 0.2s' }}>
               <div style={{ fontWeight: 800, fontSize: 12, color: '#374151', marginBottom: 6 }}>
                 Localizzazione (req_point = {reqPoint})
               </div>
               <div style={{ fontSize: 12, color: geomStatus.kind === 'ok' ? '#1a7f37' : (geomStatus.kind === 'err' ? '#b42318' : '#6b7280') }}>
                 {geomStatus.text}
               </div>
-              {p.clickedPointWgs84 && (
-                <div style={{ marginTop: 6, display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
-                  <span style={{ fontSize: 11, color: '#6b7280' }}>
-                    Lon: {Number(p.clickedPointWgs84.x).toFixed(6)} — Lat: {Number(p.clickedPointWgs84.y).toFixed(6)}
-                  </span>
-                  <button type='button' onClick={p.onClearPoint} style={{
-                    padding: '4px 10px', borderRadius: 10, border: '1px solid rgba(0,0,0,0.14)', background: '#fff',
-                    fontSize: 11, fontWeight: 700, cursor: 'pointer'
-                  }}>Rimuovi punto</button>
+              {reqPoint === 1 && (() => {
+                const ep = p.clickedPointWgs84 || p.existingGeomWgs84
+                const isReal = ep && (Number(ep.x) !== 0 || Number(ep.y) !== 0)
+                return isReal ? (
+                  <div style={{ marginTop: 6, display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+                    <span style={{ fontSize: 11, color: '#6b7280' }}>
+                      Lon: {Number(ep.x).toFixed(6)} — Lat: {Number(ep.y).toFixed(6)}
+                    </span>
+                  </div>
+                ) : null
+              })()}
+              {reqPoint === 1 && (
+                <div style={{ marginTop: 8, display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+                  {!p.mapClickEnabled ? (
+                    <>
+                      <button type='button' disabled={saving} onClick={() => p.onToggleMapClick?.(true)} style={{
+                        padding: '5px 12px', borderRadius: 8, border: '1px solid #2563eb', background: '#2563eb', color: '#fff',
+                        fontSize: 11, fontWeight: 700, cursor: saving ? 'not-allowed' : 'pointer', opacity: saving ? 0.5 : 1
+                      }}>
+                        {p.clickedPointWgs84 || (p.existingGeomWgs84 && (Number(p.existingGeomWgs84.x) !== 0 || Number(p.existingGeomWgs84.y) !== 0)) ? '📍 Modifica punto' : '📍 Imposta punto in mappa'}
+                      </button>
+                      {p.clickedPointWgs84 && (
+                        <button type='button' onClick={() => { p.onClearPoint(); p.onToggleMapClick?.(false) }} style={{
+                          padding: '5px 12px', borderRadius: 8, border: '1px solid rgba(0,0,0,0.14)', background: '#fff', color: '#374151',
+                          fontSize: 11, fontWeight: 700, cursor: 'pointer'
+                        }}>{p.existingGeomWgs84 && (Number(p.existingGeomWgs84.x) !== 0 || Number(p.existingGeomWgs84.y) !== 0) ? 'Ripristina posizione originale' : 'Annulla'}</button>
+                      )}
+                    </>
+                  ) : (
+                    <>
+                      <span style={{ fontSize: 12, fontWeight: 700, color: '#2563eb' }}>
+                        ⏳ Clicca sulla mappa per impostare il punto…
+                      </span>
+                      <button type='button' onClick={() => p.onToggleMapClick?.(false)} style={{
+                        padding: '5px 12px', borderRadius: 8, border: '1px solid rgba(0,0,0,0.14)', background: '#fff', color: '#374151',
+                        fontSize: 11, fontWeight: 700, cursor: 'pointer'
+                      }}>Annulla</button>
+                    </>
+                  )}
                 </div>
               )}
             </div>
 
-            <div style={S.hdr}>Art. 15 — Prelievo abusivo</div>
+            <div style={sHdr}>Art. 15 — Prelievo abusivo</div>
             <div style={S.row2}>
               <NpField label='Tipo di abuso'>
                 <NpSel value={tipoAbuso} onChange={v => { set('tipo_abuso', v); set('norma15_parziale', ''); set('norma15_totale', '') }}
@@ -4149,7 +4273,7 @@ function NuovaPraticaForm (p: {
               </div>
             )}
 
-            <div style={S.hdr}>Artt. 16 e 17 — Inosservanza termini</div>
+            <div style={sHdr}>Artt. 16 e 17 — Inosservanza termini</div>
             <NpField label='Tipo di inosservanza'>
               <NpSel value={norma1516} onChange={v => { set('norma16_17', v); set('art17_tipo', '') }} options={CHOICES.art16_17} disabled={saving}/>
             </NpField>
@@ -4177,7 +4301,7 @@ function NuovaPraticaForm (p: {
               </div>
             )}
 
-            <div style={S.hdr}>Altre violazioni</div>
+            <div style={sHdr}>Altre violazioni</div>
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6 }}>
               {CHOICES.norma3.map(o => (
                 <label key={o.v} style={{ display: 'flex', alignItems: 'flex-start', gap: 8, fontSize: 12,
@@ -4193,7 +4317,7 @@ function NuovaPraticaForm (p: {
               </div>
             )}
 
-            <div style={S.hdr}>Descrizione</div>
+            <div style={sHdr}>Descrizione</div>
             <NpField label='Descrizione dettagliata della violazione'>
               <NpText value={g('descrizione_fatti')} onChange={v => set('descrizione_fatti', v)} multiline disabled={saving}/>
             </NpField>
@@ -4204,12 +4328,12 @@ function NuovaPraticaForm (p: {
               <NpSel value={g('presenza_trasgressore')} onChange={v => set('presenza_trasgressore', v)} options={CHOICES.presenza} disabled={saving}/>
             </NpField>
 
-            <div style={S.hdr}>Descrizione del luogo</div>
+            <div style={sHdr}>Descrizione del luogo</div>
             <NpField label='Descrizione del luogo'>
               <NpText value={g('descrizione_luogo')} onChange={v => set('descrizione_luogo', v)} multiline disabled={saving}/>
             </NpField>
 
-            <div style={S.hdr}>Fine compilazione</div>
+            <div style={sHdr}>Fine compilazione</div>
             <NpField label='Data e ora di compilazione'>
               <NpDate value={g('data_firma')} onChange={v => set('data_firma', v)} withTime disabled={saving}/>
             </NpField>
@@ -4221,7 +4345,7 @@ function NuovaPraticaForm (p: {
           mode !== 'edit' || currentOid == null ? (
             <div style={{ padding: 12, borderRadius: 10, border: '1px dashed rgba(0,0,0,0.18)', background: 'rgba(0,0,0,0.01)' }}>
               <div style={{ fontWeight: 800, fontSize: 13, marginBottom: 6 }}>Allegati</div>
-              <div style={{ fontSize: 12, color: '#6b7280', lineHeight: 1.5 }}>
+              <div style={{ fontSize: formStyle.labelFontSize, color: formStyle.labelColor, lineHeight: 1.5 }}>
                 Gli allegati si gestiscono <b>dopo il salvataggio</b> della pratica (serve l&apos;OBJECTID).
                 Dopo aver creato la pratica, comparirà nell&apos;Elenco: selezionala e usa la tab <b>Allegati</b> in modalità modifica.
               </div>
@@ -4376,7 +4500,6 @@ function NuovaPraticaForm (p: {
             role='dialog'
             aria-modal='true'
             data-gii-global-popup-dialog='1'
-            data-gii-global-popup-dialog='1'
             style={{ width: 'min(92vw, 460px)', background: '#fff', borderRadius: 14, boxShadow: '0 20px 60px rgba(0,0,0,0.28)', border: '1px solid rgba(0,0,0,0.08)', padding: 18, position: 'relative', zIndex: 2147483647 }}
             onClick={(e) => { e.preventDefault(); e.stopPropagation() }}
             onMouseDown={(e) => { e.preventDefault(); e.stopPropagation() }}
@@ -4483,6 +4606,7 @@ function NuovaPraticaForm (p: {
         getGlobalOverlayHost() || document.body
       )}
     </div>
+  </FormStyleCtx.Provider>
   )
 }
 
@@ -5464,7 +5588,13 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
     btnFontSize: Number.isFinite(Number(cfg.btnFontSize)) ? Number(cfg.btnFontSize) : defaultConfig.btnFontSize ?? 13,
     btnFontWeight: Number.isFinite(Number(cfg.btnFontWeight)) ? Number(cfg.btnFontWeight) : defaultConfig.btnFontWeight ?? 600,
     btnPaddingX: Number.isFinite(Number(cfg.btnPaddingX)) ? Number(cfg.btnPaddingX) : defaultConfig.btnPaddingX ?? 16,
-    btnPaddingY: Number.isFinite(Number(cfg.btnPaddingY)) ? Number(cfg.btnPaddingY) : defaultConfig.btnPaddingY ?? 8
+    btnPaddingY: Number.isFinite(Number(cfg.btnPaddingY)) ? Number(cfg.btnPaddingY) : defaultConfig.btnPaddingY ?? 8,
+    formLabelColor: String((cfg as any).formLabelColor || defaultConfig.formLabelColor),
+    formLabelFontSize: Number.isFinite(Number((cfg as any).formLabelFontSize)) ? Number((cfg as any).formLabelFontSize) : defaultConfig.formLabelFontSize,
+    sectionHeaderColor: String((cfg as any).sectionHeaderColor || defaultConfig.sectionHeaderColor),
+    sectionHeaderFontSize: Number.isFinite(Number((cfg as any).sectionHeaderFontSize)) ? Number((cfg as any).sectionHeaderFontSize) : defaultConfig.sectionHeaderFontSize,
+    sectionDividerColor: String((cfg as any).sectionDividerColor || defaultConfig.sectionDividerColor),
+    sectionDividerWidth: Number.isFinite(Number((cfg as any).sectionDividerWidth)) ? Number((cfg as any).sectionDividerWidth) : defaultConfig.sectionDividerWidth
   }
 
   const tabFields: TabFields = {
@@ -5599,17 +5729,108 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
   const mapWidgetId = Array.isArray(cfg.useMapWidgetIds) ? cfg.useMapWidgetIds[0] : null
   const [jimuMapView, setJimuMapView] = React.useState<JimuMapView | null>(null)
   const [clickedPointWgs84, setClickedPointWgs84] = React.useState<any | null>(null)
+  const [existingGeomWgs84, setExistingGeomWgs84] = React.useState<any | null>(null)
+  const [mapClickEnabled, setMapClickEnabled] = React.useState(false)
+  const mapClickEnabledRef = React.useRef(false)
+  React.useEffect(() => { mapClickEnabledRef.current = mapClickEnabled }, [mapClickEnabled])
+
+  // Carica la geometria esistente quando si entra in edit mode
+  React.useEffect(() => {
+    if (isCreatePage) { setExistingGeomWgs84(null); return }
+    if (!effectiveIntent?.oid || !effectiveIntent?.layerUrl) { setExistingGeomWgs84(null); return }
+    let cancelled = false
+    ;(async () => {
+      try {
+        const dsProxy = await buildDynamicDsProxy(String(effectiveIntent.layerUrl).trim(), 'GII geom loader')
+        const fl: any = dsProxy?.layer || await dsProxy?.getLayer?.() || null
+        if (!fl || typeof fl.queryFeatures !== 'function') return
+        const where = `${effectiveIntent.idFieldName} = ${Number(effectiveIntent.oid)}`
+        const res: any = await fl.queryFeatures({ where, outFields: ['OBJECTID'], returnGeometry: true, num: 1 })
+        const geom = res?.features?.[0]?.geometry || null
+        if (cancelled) return
+        if (geom) {
+          const wgs = await toWgs84Point(geom)
+          if (!cancelled) setExistingGeomWgs84(wgs)
+        } else {
+          setExistingGeomWgs84(null)
+        }
+      } catch { if (!cancelled) setExistingGeomWgs84(null) }
+    })()
+    return () => { cancelled = true }
+  }, [effectiveIntent?.oid, effectiveIntent?.layerUrl, effectiveIntent?.idFieldName, isCreatePage])
   React.useEffect(() => {
     const view: any = (jimuMapView as any)?.view
     if (!view || typeof view.on !== 'function') return
     const h = view.on('click', (e: any) => {
+      if (!mapClickEnabledRef.current) return  // click sulla mappa ignorato se non abilitato
       ;(async () => {
         const pt = await toWgs84Point(e?.mapPoint)
-        if (pt) setClickedPointWgs84(pt)
+        if (pt) {
+          setClickedPointWgs84(pt)
+          setMapClickEnabled(false)  // disabilita dopo il click
+        }
       })().catch(() => {})
     })
     return () => { try { h?.remove?.() } catch {} }
   }, [jimuMapView])
+
+  // ── Marker visivo sulla mappa per il punto (cliccato o esistente) ──
+  const markerGraphicRef = React.useRef<any>(null)
+  const effectiveMarkerPoint = (() => {
+    const ep = clickedPointWgs84 || existingGeomWgs84
+    if (!ep || !isFiniteNum(ep.x) || !isFiniteNum(ep.y)) return null
+    if (Number(ep.x) === 0 && Number(ep.y) === 0) return null  // (0,0) = nessuna localizzazione reale
+    return ep
+  })()
+  React.useEffect(() => {
+    const view: any = (jimuMapView as any)?.view
+    if (!view) return
+
+    // Rimuovi marker precedente
+    try {
+      if (markerGraphicRef.current && view.graphics) {
+        view.graphics.remove(markerGraphicRef.current)
+        markerGraphicRef.current = null
+      }
+    } catch { /* ignore */ }
+
+    if (!effectiveMarkerPoint || !isFiniteNum(effectiveMarkerPoint.x) || !isFiniteNum(effectiveMarkerPoint.y)) return
+
+    let cancelled = false
+    ;(async () => {
+      try {
+        const [Graphic, Point] = await Promise.all([
+          loadEsriModule<any>('esri/Graphic'),
+          loadEsriModule<any>('esri/geometry/Point')
+        ])
+        if (cancelled) return
+        const pt = new Point({ longitude: Number(effectiveMarkerPoint.x), latitude: Number(effectiveMarkerPoint.y), spatialReference: { wkid: 4326 } })
+        const graphic = new Graphic({
+          geometry: pt,
+          symbol: {
+            type: 'simple-marker',
+            style: 'circle',
+            color: [220, 38, 38, 200],       // rosso semitrasparente
+            size: 14,
+            outline: { color: [255, 255, 255, 255], width: 2.5 }
+          }
+        })
+        if (cancelled) return
+        view.graphics.add(graphic)
+        markerGraphicRef.current = graphic
+      } catch { /* ignore */ }
+    })()
+
+    return () => {
+      cancelled = true
+      try {
+        if (markerGraphicRef.current && view?.graphics) {
+          view.graphics.remove(markerGraphicRef.current)
+          markerGraphicRef.current = null
+        }
+      } catch { /* ignore */ }
+    }
+  }, [jimuMapView, effectiveMarkerPoint])
 
   const rootRef = React.useRef<HTMLDivElement | null>(null)
   const [uiLocked, setUiLocked] = React.useState(false)
@@ -5637,6 +5858,15 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
       mapHost.style.zIndex = '1002'
     }
 
+    // Eleva anche il container ExB del widget così che compete con le mask (position:fixed, z-index:1000)
+    const widgetHost = root?.closest?.('.jimu-widget, [data-widgetid], .widget-renderer, [widgetid]') as HTMLElement | null
+    const prevWidgetHostPos = widgetHost?.style.position ?? ''
+    const prevWidgetHostZ = widgetHost?.style.zIndex ?? ''
+    if (widgetHost) {
+      if (!widgetHost.style.position) widgetHost.style.position = 'relative'
+      widgetHost.style.zIndex = '1001'
+    }
+
     const updateMasks = () => {
       const vw = window.innerWidth || document.documentElement.clientWidth || 0
       const vh = window.innerHeight || document.documentElement.clientHeight || 0
@@ -5644,6 +5874,10 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
       try {
         const r = root?.getBoundingClientRect?.()
         if (r && r.width > 0 && r.height > 0) rects.push({ left: Math.max(0, r.left), top: Math.max(0, r.top), right: Math.min(vw, r.right), bottom: Math.min(vh, r.bottom) })
+      } catch {}
+      try {
+        const wh = widgetHost?.getBoundingClientRect?.()
+        if (wh && wh.width > 0 && wh.height > 0) rects.push({ left: Math.max(0, wh.left), top: Math.max(0, wh.top), right: Math.min(vw, wh.right), bottom: Math.min(vh, wh.bottom) })
       } catch {}
       try {
         const m = mapHost?.getBoundingClientRect?.()
@@ -5672,10 +5906,14 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
       const el = target as Node | null
       if (!el) return false
       if (root?.contains(el)) return true
+      if (widgetHost?.contains(el)) return true
       if (mapHost?.contains(el)) return true
       try {
         const elem = el as Element
-        if (typeof elem?.closest === 'function' && elem.closest('[data-gii-global-popup-root="1"], [data-gii-global-popup-dialog="1"]')) return true
+        if (typeof elem?.closest === 'function') {
+          if (elem.closest('[data-gii-editing-root="1"]')) return true
+          if (elem.closest('[data-gii-global-popup-root="1"], [data-gii-global-popup-dialog="1"]')) return true
+        }
       } catch {}
       return false
     }
@@ -5723,6 +5961,10 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
         mapHost.style.position = prevMapPos
         mapHost.style.zIndex = prevMapZ
       }
+      if (widgetHost) {
+        widgetHost.style.position = prevWidgetHostPos
+        widgetHost.style.zIndex = prevWidgetHostZ
+      }
     }
   }, [uiLocked, mapWidgetId])
 
@@ -5738,8 +5980,86 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
     ? String(cfg.modeBgCreate || defaultConfig.modeBgCreate)
     : String(cfg.modeBgEdit   || defaultConfig.modeBgEdit)
 
+  // ── Viewpoint iniziale della mappa (dal Builder) ──
+  const mapInitialViewpointRef = React.useRef<any>(null)
+  React.useEffect(() => {
+    const view: any = (jimuMapView as any)?.view
+    if (view?.viewpoint && !mapInitialViewpointRef.current) {
+      mapInitialViewpointRef.current = view.viewpoint.clone()
+    }
+  }, [jimuMapView])
+
+  // ── Seleziona/evidenzia la feature corrente sulla mappa ──
+  const mapLayerViewRef = React.useRef<any>(null)
+  const mapHighlightRef = React.useRef<any>(null)
+
+  React.useEffect(() => {
+    const view: any = (jimuMapView as any)?.view
+    if (!view?.map) return
+
+    // Pulisci highlight precedente (il featureEffect resta, nessun flash)
+    try { mapHighlightRef.current?.remove?.() } catch {}
+    mapHighlightRef.current = null
+
+    // Nessuna selezione → ripristina e torna al default
+    if (inCreateMode || editOid == null || !Number.isFinite(editOid)) {
+      try { if (mapLayerViewRef.current) mapLayerViewRef.current.featureEffect = null } catch {}
+      mapLayerViewRef.current = null
+      if (mapInitialViewpointRef.current) {
+        view.goTo(mapInitialViewpointRef.current, { duration: 400 }).catch(() => {})
+      }
+      return
+    }
+
+    let cancelled = false
+    const idField = editIdFieldName || 'OBJECTID'
+
+    ;(async () => {
+      try {
+        const allLayers = view.map.allLayers?.toArray?.() || view.map.allLayers || []
+        const featureLayers = allLayers.filter((l: any) => l?.type === 'feature' && typeof l?.queryFeatures === 'function')
+
+        for (const fl of featureLayers) {
+          if (cancelled) return
+          try {
+            const res = await fl.queryFeatures({ where: `${idField} = ${editOid}`, returnGeometry: true, outFields: [idField] })
+            const feat = res?.features?.[0]
+            if (!feat || cancelled) continue
+
+            // Trovato il layer giusto — se è diverso dal precedente, pulisci il vecchio
+            const lv = await view.whenLayerView(fl)
+            if (cancelled) return
+            if (mapLayerViewRef.current && mapLayerViewRef.current !== lv) {
+              try { mapLayerViewRef.current.featureEffect = null } catch {}
+            }
+            mapLayerViewRef.current = lv
+
+            const g = feat.geometry
+            const gx = g ? (g.x ?? g.longitude ?? 0) : 0
+            const gy = g ? (g.y ?? g.latitude ?? 0) : 0
+            const hasRealGeom = !!g && !(Number(gx) === 0 && Number(gy) === 0)
+
+            if (hasRealGeom) {
+              lv.featureEffect = { filter: { where: `${idField} = ${editOid}` }, excludedEffect: 'opacity(0)' }
+              mapHighlightRef.current = lv.highlight(editOid)
+              view.goTo({ target: g, zoom: Math.max(view.zoom || 15, 15) }, { duration: 600 }).catch(() => {})
+            } else {
+              lv.featureEffect = { filter: { where: '1=0' }, excludedEffect: 'opacity(0)' }
+              if (mapInitialViewpointRef.current) {
+                view.goTo(mapInitialViewpointRef.current, { duration: 400 }).catch(() => {})
+              }
+            }
+            break
+          } catch { /* ignore */ }
+        }
+      } catch { /* ignore */ }
+    })()
+
+    return () => { cancelled = true }
+  }, [jimuMapView, editOid, editIdFieldName, inCreateMode])
+
   return (
-    <div ref={rootRef} style={{ width: '100%', height: '100%', display: 'flex', flexDirection: 'column', minHeight: 0, boxSizing: 'border-box', padding: Number.isFinite(Number((cfg as any).maskOuterOffset ?? 0)) ? Number((cfg as any).maskOuterOffset) : 0, position: 'relative', zIndex: uiLocked ? 1001 : 'auto', background: modeBg, transition: 'background 0.3s' }}>
+    <div ref={rootRef} data-gii-editing-root='1' style={{ width: '100%', height: '100%', display: 'flex', flexDirection: 'column', minHeight: 0, boxSizing: 'border-box', padding: Number.isFinite(Number((cfg as any).maskOuterOffset ?? 0)) ? Number((cfg as any).maskOuterOffset) : 0, position: 'relative', zIndex: uiLocked ? 1001 : 'auto', background: modeBg, transition: 'background 0.3s' }}>
       {mapWidgetId && (
         <div style={{ display: 'none' }}>
           <JimuMapViewComponent
@@ -5755,7 +6075,11 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
           cfg={cfg}
           showDatiGenerali={showDatiGenerali}
           clickedPointWgs84={clickedPointWgs84}
+          existingGeomWgs84={existingGeomWgs84}
           onClearPoint={() => setClickedPointWgs84(null)}
+          onGeomSaved={(geom: any) => { setExistingGeomWgs84(geom); setClickedPointWgs84(null) }}
+          mapClickEnabled={mapClickEnabled}
+          onToggleMapClick={(on: boolean) => setMapClickEnabled(on)}
           mode={inCreateMode ? 'create' : 'edit'}
           initialData={initialEditData}
           editOid={editOid}
