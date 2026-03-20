@@ -3840,12 +3840,16 @@ function NuovaPraticaForm (p: {
       if (reqPoint === 1 && p.clickedPointWgs84) {
         geomWgs84 = p.clickedPointWgs84
       } else if (reqPoint === 0) {
-        // Nessuna localizzazione richiesta: geometria null (non appare in mappa)
-        geomWgs84 = null
+        // Nessuna localizzazione richiesta: resetta a (0,0) — AGOL ignora null su layer Point
+        geomWgs84 = makeWgs84Point(0, 0)
       }
 
-      if (mode === 'create' && reqPoint === 1 && !geomWgs84) {
-        throw new Error('Localizzazione obbligatoria: fai click in mappa per impostare il punto.')
+      // reqPoint=1: blocca il salvataggio se non c'è nessun punto (né cliccato né già salvato nel record)
+      if (reqPoint === 1 && !geomWgs84) {
+        const hasValidExisting = p.existingGeomWgs84 && (Number(p.existingGeomWgs84.x) !== 0 || Number(p.existingGeomWgs84.y) !== 0)
+        if (!hasValidExisting) {
+          throw new Error('Localizzazione obbligatoria: fai click in mappa per impostare il punto.')
+        }
       }
 
       // Converte il plain WGS84 in un vero esri/geometry/Point nella SR del layer
@@ -3934,14 +3938,12 @@ function NuovaPraticaForm (p: {
         const prevAttrs = filterAttrsForLayer(p.initialData || {}, layer)
         const changedFields = Object.keys(cleanAttrs).filter((k) => normalizeLogValue(prevAttrs?.[k]) !== normalizeLogValue(cleanAttrs[k]))
         const hasAttachmentOps = attachmentFiles.length > 0 || pendingDeleteAttachmentIds.length > 0 || Object.keys(pendingReplaceAttachments).length > 0
-        // reqPoint=0 e il record ha una geometria esistente (vera o legacy 0,0) → va cancellata
-        const needsGeomClear = reqPoint === 0 && !!p.existingGeomWgs84
-        if (changedFields.length === 0 && !geom && !needsGeomClear && !hasAttachmentOps) {
+        if (changedFields.length === 0 && !geom && !hasAttachmentOps) {
           setSaving(false)
           setMsg({ kind: 'ok', text: 'Nessuna modifica da salvare.' })
           return
         }
-        if (changedFields.length === 0 && !geom && !needsGeomClear && hasAttachmentOps) {
+        if (changedFields.length === 0 && !geom && hasAttachmentOps) {
           await processAttachmentChanges(editOid, String(layer?.url || currentLayerUrl || ''))
           setBaselineDraft(draftFromRecord(p.initialData || {}))
           setDraft(draftFromRecord(p.initialData || {}))
@@ -3952,12 +3954,7 @@ function NuovaPraticaForm (p: {
           return
         }
         const upd: any = { attributes: { ...cleanAttrs, [editIdFieldName]: editOid } }
-        if (geom) {
-          upd.geometry = geom
-        } else if (reqPoint === 0) {
-          // Violazione senza localizzazione: cancella la geometria esistente
-          upd.geometry = null
-        }
+        if (geom) upd.geometry = geom
         const res = await layer.applyEdits({ updateFeatures: [upd] })
         const updated = res?.updateFeatureResults?.[0] || res?.updateResults?.[0] || null
         const err = updated?.error
@@ -5745,10 +5742,16 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
         const fl: any = dsProxy?.layer || await dsProxy?.getLayer?.() || null
         if (!fl || typeof fl.queryFeatures !== 'function') return
         const where = `${effectiveIntent.idFieldName} = ${Number(effectiveIntent.oid)}`
-        const res: any = await fl.queryFeatures({ where, outFields: ['OBJECTID'], returnGeometry: true, num: 1 })
-        const geom = res?.features?.[0]?.geometry || null
+        const res: any = await fl.queryFeatures({ where, outFields: ['*'], returnGeometry: true, num: 1 })
+        const feat = res?.features?.[0]
+        const geom = feat?.geometry || null
         if (cancelled) return
-        if (geom) {
+
+        // Calcola reqPoint dagli attributi: se 0, non caricare la geometria
+        const attrs = feat?.attributes || {}
+        const rp = computeReqPoint(attrs)
+
+        if (geom && rp === 1) {
           const wgs = await toWgs84Point(geom)
           if (!cancelled) setExistingGeomWgs84(wgs)
         } else {
@@ -5850,7 +5853,8 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
       return
     }
     const root = rootRef.current
-    const mapHost = findMapHostElement(mapWidgetId) || (((jimuMapView as any)?.view?.container as HTMLElement | null)?.closest?.('.jimu-widget-map, .jimu-widget.jimu-widget-map, [data-widgetid], [widgetid]') as HTMLElement | null) || ((jimuMapView as any)?.view?.container as HTMLElement | null) || null
+    const jmvView = (jimuMapView as any)?.view || null
+    const mapHost = findMapHostElement(mapWidgetId) || (jmvView?.container as HTMLElement | null)?.closest?.('.jimu-widget-map, .jimu-widget.jimu-widget-map, [data-widgetid], [widgetid]') as HTMLElement | null || (jmvView?.container as HTMLElement | null) || null
     const prevMapPos = mapHost?.style.position ?? ''
     const prevMapZ = mapHost?.style.zIndex ?? ''
     if (mapHost) {
@@ -5858,7 +5862,6 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
       mapHost.style.zIndex = '1002'
     }
 
-    // Eleva anche il container ExB del widget così che compete con le mask (position:fixed, z-index:1000)
     const widgetHost = root?.closest?.('.jimu-widget, [data-widgetid], .widget-renderer, [widgetid]') as HTMLElement | null
     const prevWidgetHostPos = widgetHost?.style.position ?? ''
     const prevWidgetHostZ = widgetHost?.style.zIndex ?? ''
@@ -5885,77 +5888,38 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
       } catch {}
 
       if (!rects.length) {
-        setLockMaskRects([{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.42)', pointerEvents: 'none', zIndex: 1000 }])
+        setLockMaskRects([])
         return
       }
 
-      const left = Math.min(...rects.map(r => r.left))
-      const top = Math.min(...rects.map(r => r.top))
-      const right = Math.max(...rects.map(r => r.right))
-      const bottom = Math.max(...rects.map(r => r.bottom))
+      const pad = 20
+      const left = Math.max(0, Math.min(...rects.map(r => r.left)) - pad)
+      const top = Math.max(0, Math.min(...rects.map(r => r.top)) - pad)
+      const right = Math.min(vw, Math.max(...rects.map(r => r.right)) + pad)
+      const bottom = Math.min(vh, Math.max(...rects.map(r => r.bottom)) + pad)
 
+      // pointerEvents: 'auto' → le mask bloccano i click direttamente, nessun listener globale su document
       const masks: Array<React.CSSProperties> = []
-      if (top > 0) masks.push({ position: 'fixed', left: 0, top: 0, width: '100vw', height: top, background: 'rgba(0,0,0,0.42)', pointerEvents: 'none', zIndex: 1000 })
-      if (left > 0) masks.push({ position: 'fixed', left: 0, top, width: left, height: Math.max(0, bottom - top), background: 'rgba(0,0,0,0.42)', pointerEvents: 'none', zIndex: 1000 })
-      if (right < vw) masks.push({ position: 'fixed', left: right, top, width: Math.max(0, vw - right), height: Math.max(0, bottom - top), background: 'rgba(0,0,0,0.42)', pointerEvents: 'none', zIndex: 1000 })
-      if (bottom < vh) masks.push({ position: 'fixed', left: 0, top: bottom, width: '100vw', height: Math.max(0, vh - bottom), background: 'rgba(0,0,0,0.42)', pointerEvents: 'none', zIndex: 1000 })
+      if (top > 0) masks.push({ position: 'fixed', left: 0, top: 0, width: '100vw', height: top, background: 'rgba(0,0,0,0.42)', pointerEvents: 'auto', zIndex: 1000 })
+      if (left > 0) masks.push({ position: 'fixed', left: 0, top, width: left, height: Math.max(0, bottom - top), background: 'rgba(0,0,0,0.42)', pointerEvents: 'auto', zIndex: 1000 })
+      if (right < vw) masks.push({ position: 'fixed', left: right, top, width: Math.max(0, vw - right), height: Math.max(0, bottom - top), background: 'rgba(0,0,0,0.42)', pointerEvents: 'auto', zIndex: 1000 })
+      if (bottom < vh) masks.push({ position: 'fixed', left: 0, top: bottom, width: '100vw', height: Math.max(0, vh - bottom), background: 'rgba(0,0,0,0.42)', pointerEvents: 'auto', zIndex: 1000 })
       setLockMaskRects(masks)
     }
 
-    const isAllowed = (target: EventTarget | null) => {
-      const el = target as Node | null
-      if (!el) return false
-      if (root?.contains(el)) return true
-      if (widgetHost?.contains(el)) return true
-      if (mapHost?.contains(el)) return true
-      try {
-        const elem = el as Element
-        if (typeof elem?.closest === 'function') {
-          if (elem.closest('[data-gii-editing-root="1"]')) return true
-          if (elem.closest('[data-gii-global-popup-root="1"], [data-gii-global-popup-dialog="1"]')) return true
-        }
-      } catch {}
-      return false
-    }
-    const stopIfOutside = (ev: Event) => {
-      if (isAllowed(ev.target)) return
-      ev.preventDefault()
-      ev.stopPropagation()
-      const anyEv: any = ev
-      try { anyEv.stopImmediatePropagation?.() } catch {}
-    }
-    const opts: AddEventListenerOptions = { capture: true }
-    const overlayDoc = getGlobalOverlayDocument() || document
     updateMasks()
     window.addEventListener('resize', updateMasks)
     window.addEventListener('scroll', updateMasks, true)
-    document.addEventListener('pointerdown', stopIfOutside, opts)
-    document.addEventListener('mousedown', stopIfOutside, opts)
-    document.addEventListener('click', stopIfOutside, opts)
-    document.addEventListener('touchstart', stopIfOutside, opts)
-    document.addEventListener('focusin', stopIfOutside, opts)
-    if (overlayDoc !== document) {
-      overlayDoc.addEventListener('pointerdown', stopIfOutside, opts)
-      overlayDoc.addEventListener('mousedown', stopIfOutside, opts)
-      overlayDoc.addEventListener('click', stopIfOutside, opts)
-      overlayDoc.addEventListener('touchstart', stopIfOutside, opts)
-      overlayDoc.addEventListener('focusin', stopIfOutside, opts)
-    }
+    // Poll: rileva quando ExB nasconde/mostra la pagina (resize/scroll non scattano)
+    let lastRootWidth = root?.getBoundingClientRect?.()?.width ?? -1
+    const visCheck = setInterval(() => {
+      const w = root?.getBoundingClientRect?.()?.width ?? -1
+      if (w !== lastRootWidth) { lastRootWidth = w; updateMasks() }
+    }, 300)
     return () => {
+      clearInterval(visCheck)
       window.removeEventListener('resize', updateMasks)
       window.removeEventListener('scroll', updateMasks, true)
-      document.removeEventListener('pointerdown', stopIfOutside, opts)
-      document.removeEventListener('mousedown', stopIfOutside, opts)
-      document.removeEventListener('click', stopIfOutside, opts)
-      document.removeEventListener('touchstart', stopIfOutside, opts)
-      document.removeEventListener('focusin', stopIfOutside, opts)
-      if (overlayDoc !== document) {
-        overlayDoc.removeEventListener('pointerdown', stopIfOutside, opts)
-        overlayDoc.removeEventListener('mousedown', stopIfOutside, opts)
-        overlayDoc.removeEventListener('click', stopIfOutside, opts)
-        overlayDoc.removeEventListener('touchstart', stopIfOutside, opts)
-        overlayDoc.removeEventListener('focusin', stopIfOutside, opts)
-      }
       setLockMaskRects([])
       if (mapHost) {
         mapHost.style.position = prevMapPos
@@ -5980,7 +5944,13 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
     ? String(cfg.modeBgCreate || defaultConfig.modeBgCreate)
     : String(cfg.modeBgEdit   || defaultConfig.modeBgEdit)
 
-  // ── Viewpoint iniziale della mappa (dal Builder) ──
+  // reqPoint calcolato dai dati del record corrente (per decidere se mostrare il punto in mappa)
+  const editReqPoint = React.useMemo(() => {
+    if (!initialEditData) return 0
+    return computeReqPoint(initialEditData)
+  }, [initialEditData])
+
+  // Viewpoint iniziale della mappa (dal Builder) — salvato una volta sola
   const mapInitialViewpointRef = React.useRef<any>(null)
   React.useEffect(() => {
     const view: any = (jimuMapView as any)?.view
@@ -5989,28 +5959,28 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
     }
   }, [jimuMapView])
 
-  // ── Seleziona/evidenzia la feature corrente sulla mappa ──
-  const mapLayerViewRef = React.useRef<any>(null)
-  const mapHighlightRef = React.useRef<any>(null)
+  // Ref per il layerView su cui è applicato featureEffect — persiste tra re-render
+  const mapFeatureLayerViewRef = React.useRef<any>(null)
 
+  // ── Mostra solo la feature selezionata sulla mappa + zoom ──
   React.useEffect(() => {
     const view: any = (jimuMapView as any)?.view
     if (!view?.map) return
 
-    // Pulisci highlight precedente (il featureEffect resta, nessun flash)
-    try { mapHighlightRef.current?.remove?.() } catch {}
-    mapHighlightRef.current = null
-
-    // Nessuna selezione → ripristina e torna al default
-    if (inCreateMode || editOid == null || !Number.isFinite(editOid)) {
-      try { if (mapLayerViewRef.current) mapLayerViewRef.current.featureEffect = null } catch {}
-      mapLayerViewRef.current = null
-      if (mapInitialViewpointRef.current) {
-        view.goTo(mapInitialViewpointRef.current, { duration: 400 }).catch(() => {})
+    // Subito: nascondi tutto sul layerView precedente per evitare lampeggio
+    try {
+      if (mapFeatureLayerViewRef.current) {
+        mapFeatureLayerViewRef.current.featureEffect = { filter: { where: '1=0' }, excludedEffect: 'opacity(0)' }
       }
-      return
+    } catch {}
+
+    // Se non serve mostrare un punto, torna subito al viewpoint di default (sincrono, prima delle query)
+    const isEdit = !inCreateMode && editOid != null && Number.isFinite(editOid)
+    if ((!isEdit || editReqPoint === 0) && mapInitialViewpointRef.current) {
+      view.goTo(mapInitialViewpointRef.current, { duration: 400 }).catch(() => {})
     }
 
+    let highlightHandle: any = null
     let cancelled = false
     const idField = editIdFieldName || 'OBJECTID'
 
@@ -6019,44 +5989,57 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
         const allLayers = view.map.allLayers?.toArray?.() || view.map.allLayers || []
         const featureLayers = allLayers.filter((l: any) => l?.type === 'feature' && typeof l?.queryFeatures === 'function')
 
-        for (const fl of featureLayers) {
-          if (cancelled) return
-          try {
-            const res = await fl.queryFeatures({ where: `${idField} = ${editOid}`, returnGeometry: true, outFields: [idField] })
-            const feat = res?.features?.[0]
-            if (!feat || cancelled) continue
-
-            // Trovato il layer giusto — se è diverso dal precedente, pulisci il vecchio
-            const lv = await view.whenLayerView(fl)
+        if (isEdit) {
+          for (const fl of featureLayers) {
             if (cancelled) return
-            if (mapLayerViewRef.current && mapLayerViewRef.current !== lv) {
-              try { mapLayerViewRef.current.featureEffect = null } catch {}
-            }
-            mapLayerViewRef.current = lv
+            try {
+              const res = await fl.queryFeatures({ where: `${idField} = ${editOid}`, returnGeometry: true, outFields: [idField] })
+              const feat = res?.features?.[0]
+              if (!feat || cancelled) continue
 
-            const g = feat.geometry
-            const gx = g ? (g.x ?? g.longitude ?? 0) : 0
-            const gy = g ? (g.y ?? g.latitude ?? 0) : 0
-            const hasRealGeom = !!g && !(Number(gx) === 0 && Number(gy) === 0)
+              const lv = await view.whenLayerView(fl)
+              if (cancelled) return
+              mapFeatureLayerViewRef.current = lv
 
-            if (hasRealGeom) {
-              lv.featureEffect = { filter: { where: `${idField} = ${editOid}` }, excludedEffect: 'opacity(0)' }
-              mapHighlightRef.current = lv.highlight(editOid)
-              view.goTo({ target: g, zoom: Math.max(view.zoom || 15, 15) }, { duration: 600 }).catch(() => {})
-            } else {
-              lv.featureEffect = { filter: { where: '1=0' }, excludedEffect: 'opacity(0)' }
-              if (mapInitialViewpointRef.current) {
-                view.goTo(mapInitialViewpointRef.current, { duration: 400 }).catch(() => {})
+              const g = feat.geometry
+              const gx = g ? (g.x ?? g.longitude ?? 0) : 0
+              const gy = g ? (g.y ?? g.latitude ?? 0) : 0
+              const hasRealGeom = !!g && !(Number(gx) === 0 && Number(gy) === 0)
+
+              if (hasRealGeom && editReqPoint === 1) {
+                lv.featureEffect = { filter: { where: `${idField} = ${editOid}` }, excludedEffect: 'opacity(0)' }
+                highlightHandle = lv.highlight(editOid)
+                view.goTo({ target: g, zoom: Math.max(view.zoom || 15, 15) }, { duration: 600 }).catch(() => {})
+              } else {
+                lv.featureEffect = { filter: { where: '1=0' }, excludedEffect: 'opacity(0)' }
               }
-            }
-            break
-          } catch { /* ignore */ }
+              break
+            } catch { /* ignore */ }
+          }
+        } else {
+          // CREATE / nessuna selezione
+          for (const fl of featureLayers) {
+            if (cancelled) return
+            try {
+              const res = await fl.queryFeatures({ where: 'origine_pratica IS NOT NULL', outFields: ['OBJECTID'], returnGeometry: false, num: 1 })
+              if (!res?.features?.length || cancelled) continue
+              const lv = await view.whenLayerView(fl)
+              if (cancelled) return
+              mapFeatureLayerViewRef.current = lv
+              lv.featureEffect = { filter: { where: '1=0' }, excludedEffect: 'opacity(0)' }
+              break
+            } catch { /* ignore */ }
+          }
         }
       } catch { /* ignore */ }
     })()
 
-    return () => { cancelled = true }
-  }, [jimuMapView, editOid, editIdFieldName, inCreateMode])
+    return () => {
+      cancelled = true
+      try { highlightHandle?.remove?.() } catch {}
+      // NON ripristinare featureEffect nel cleanup — il prossimo render lo sovrascrive subito
+    }
+  }, [jimuMapView, editOid, editIdFieldName, inCreateMode, editReqPoint])
 
   return (
     <div ref={rootRef} data-gii-editing-root='1' style={{ width: '100%', height: '100%', display: 'flex', flexDirection: 'column', minHeight: 0, boxSizing: 'border-box', padding: Number.isFinite(Number((cfg as any).maskOuterOffset ?? 0)) ? Number((cfg as any).maskOuterOffset) : 0, position: 'relative', zIndex: uiLocked ? 1001 : 'auto', background: modeBg, transition: 'background 0.3s' }}>
