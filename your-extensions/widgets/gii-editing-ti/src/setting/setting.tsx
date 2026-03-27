@@ -171,11 +171,11 @@ export default function Setting(props: AllWidgetSettingProps<IMConfig>) {
             <div>
               <label style={P.lbl}>🟢 Nuovo rapporto</label>
               <div style={{display:'flex',alignItems:'center',gap:6}}>
-                <input type='color' value={/^#[0-9a-fA-F]{3,8}$/.test(cfg.modeBgCreate||'') ? cfg.modeBgCreate : '#f0fdf400'}
+                <input type='color' value={/^#[0-9a-fA-F]{3,8}$/.test(cfg.modeBgCreate||'') ? cfg.modeBgCreate : '#f0fdf4'}
                   onChange={e=>set('modeBgCreate',e.target.value)}
                   style={{width:30,height:26,padding:2,border:'1px solid rgba(255,255,255,0.15)',borderRadius:5,cursor:'pointer',background:'transparent',flexShrink:0}}/>
-                <input type='text' value={cfg.modeBgCreate||'#f0fdf400'} onChange={e=>set('modeBgCreate',e.target.value)}
-                  placeholder='#f0fdf400' style={{...P.inp,flex:1,fontSize:11}}/>
+                <input type='text' value={cfg.modeBgCreate||'#f0fdf4'} onChange={e=>set('modeBgCreate',e.target.value)}
+                  placeholder='#f0fdf4' style={{...P.inp,flex:1,fontSize:11}}/>
               </div>
               <div style={P.hint}>Sfondo quando TI sta creando un nuovo rapporto.</div>
             </div>
@@ -232,6 +232,10 @@ export default function Setting(props: AllWidgetSettingProps<IMConfig>) {
           />
         </div>
         <div style={P.hint}>Seleziona il widget Mappa presente nella pagina (es. la mappa accanto). Il widget ascolta i click per la localizzazione della violazione e mostra un segnaposto nel punto cliccato.</div>
+        <label style={{...P.lbl, marginTop: 12}}>Titolo layer rapporti nella mappa</label>
+        <input type='text' value={cfg.mapLayerTitle || ''} onChange={e=>set('mapLayerTitle',e.target.value)}
+          style={{...P.inp, marginTop:4}} placeholder='es. Rapporto di rilevazione infrazioni irrigue_form'/>
+        <div style={P.hint}>Titolo esatto del layer rapporti presente nella mappa. Usato per identificare il layer in modo deterministico (senza scansionare tutti i layer).</div>
       </div>}
 
 

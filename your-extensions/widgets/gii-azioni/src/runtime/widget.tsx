@@ -10,6 +10,53 @@ import { defaultConfig } from '../config'
 const GII_LOG_EVENTI_CICLI_URL = 'https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_LOG_EVENTI_CICLI/FeatureServer/0'
 const GII_UTENTI_URL = 'https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_utenti/FeatureServer/0'
 
+// ── Cache GII_utenti per risolvere utente_destinatario ──────────────────────
+type UtenteCached = { full_name: string; ruolo: number | null; area: number | null; settore: number | null }
+let _utentiCache: Map<string, UtenteCached> | null = null
+let _utentiLoading = false
+
+const RUOLO_NUM: Record<string, number> = { TR:1, TI:2, RZ:3, RI:4, DT:5, DA:6 }
+const AREA_NUM: Record<string, number> = { AMM:1, AGR:2, TEC:3 }
+const SETTORE_NUM: Record<string, number> = { CR:1, GI:2, D1:3, D2:4, D3:5, D4:6, D5:7, D6:8, CS:9 }
+
+/**
+ * Cerca lo username di una persona in GII_utenti per ruolo+area(+settore).
+ * Per TI usare ti_assegnato_username — non questa funzione.
+ */
+function findDestUsername (
+  cache: Map<string, UtenteCached> | null,
+  roleLabel: string,
+  areaLabel: string,
+  settoreLabel: string
+): string {
+  if (!cache) return ''
+  const r = roleLabel.toUpperCase()
+
+  let ruoloCode: number | undefined
+  let areaCode: number | undefined
+  let settoreCode: number | undefined
+
+  if (r === 'RI_AMM')       { ruoloCode = 4; areaCode = 1 }
+  else if (r === 'TI_AMM')  { ruoloCode = 2; areaCode = 1 }
+  else if (r === 'DA')      { ruoloCode = 6; areaCode = 1 }
+  else {
+    ruoloCode = RUOLO_NUM[r]
+    areaCode = AREA_NUM[areaLabel.toUpperCase()] ?? undefined
+    settoreCode = SETTORE_NUM[settoreLabel.toUpperCase()] ?? undefined
+  }
+  if (!ruoloCode) return ''
+
+  const needsSettore = (r === 'TR' || r === 'RZ') && areaCode !== 1
+
+  for (const [username, entry] of cache) {
+    if (entry.ruolo !== ruoloCode) continue
+    if (areaCode != null && entry.area !== areaCode) continue
+    if (needsSettore && settoreCode != null && entry.settore !== settoreCode) continue
+    return username
+  }
+  return ''
+}
+
 
 type MsgKind = 'info' | 'ok' | 'err'
 type Msg = { kind: MsgKind; text: string }
@@ -1251,11 +1298,11 @@ function mapEsitoToStato (esito: number): number | null {
 }
 
 type ButtonColors = {
-  take: string
-  integrazione: string
-  approva: string
-  respingi: string
-  trasmetti: string
+  take: string; takeText: string
+  integrazione: string; integrazioneText: string
+  approva: string; approvaText: string
+  approvaRapporto: string; approvaRapportoText: string
+  respingi: string; respingiText: string
 }
 
 function isValidHexColor (s: string): boolean {
@@ -1269,7 +1316,7 @@ function normalizeHexColor (maybe: any, fallback: string): string {
   return fallback
 }
 
-function actionButtonStyle (bg: string, disabled: boolean, ui?: { btnBorderRadius?: number; btnFontSize?: number; btnFontWeight?: number; btnPaddingX?: number; btnPaddingY?: number }): React.CSSProperties {
+function actionButtonStyle (bg: string, disabled: boolean, ui?: { btnBorderRadius?: number; btnFontSize?: number; btnFontWeight?: number; btnPaddingX?: number; btnPaddingY?: number }, textColor?: string): React.CSSProperties {
   const base: React.CSSProperties = {
     borderRadius: ui?.btnBorderRadius ?? 8,
     fontSize: ui?.btnFontSize ?? 13,
@@ -1279,10 +1326,10 @@ function actionButtonStyle (bg: string, disabled: boolean, ui?: { btnBorderRadiu
   if (disabled) {
     return { ...base, backgroundColor: '#e5e7eb', borderColor: '#e5e7eb', color: '#9ca3af', cursor: 'not-allowed' }
   }
-  return { ...base, backgroundColor: bg, borderColor: bg, color: '#ffffff' }
+  return { ...base, backgroundColor: bg, borderColor: bg, color: textColor || '#ffffff' }
 }
 
-type Pending = null | 'TAKE' | 'ASSEGNA_TI' | 'INTEGRAZIONE' | 'APPROVA' | 'RESPINGI' | 'TRASMETTI' | 'TRASMETTI_RI_AMM' | 'RIMANDA_DT' | 'ELIMINA'
+type Pending = null | 'TAKE' | 'ASSEGNA_TI' | 'ASSEGNA_TI_AMM' | 'INTEGRAZIONE' | 'APPROVA' | 'RESPINGI' | 'TRASMETTI' | 'ELIMINA'
 
 function ActionsPanel (props: {
   active: { key: string; state: SelState } | null
@@ -1343,9 +1390,6 @@ function ActionsPanel (props: {
   const noteField = `note_${role}`
 
   const statoDAField = 'stato_DA'
-  const dtStatoDAField = 'dt_stato_DA'
-  const presaDAField = 'presa_in_carico_DA'
-  const dtPresaDAField = 'dt_presa_in_carico_DA'
 
   const [loading, setLoading] = React.useState(false)
   const [msg, setMsg] = React.useState<Msg | null>({ kind: 'info', text: 'Selezionare una riga.' })
@@ -1366,6 +1410,48 @@ function ActionsPanel (props: {
   const [tiSelected, setTiSelected] = React.useState<string>('')
   const [tiLoading, setTiLoading] = React.useState(false)
   const [tiLoadErr, setTiLoadErr] = React.useState<string>('')
+
+  // Assegna TI_AMM (solo RI_AMM)
+  const [tiAmmOptions, setTiAmmOptions] = React.useState<TiOpt[]>([])
+  const [tiAmmSelected, setTiAmmSelected] = React.useState<string>('')
+  const [tiAmmLoading, setTiAmmLoading] = React.useState(false)
+  const tiAmmLoadingRef = React.useRef(false)
+  const [tiAmmLoadErr, setTiAmmLoadErr] = React.useState<string>('')
+
+  // ── Cache GII_utenti (per risolvere utente_destinatario) ──
+  React.useEffect(() => {
+    if (_utentiCache || _utentiLoading) return
+    _utentiLoading = true
+    ;(async () => {
+      try {
+        const FeatureLayer = await loadEsriModule<any>('esri/layers/FeatureLayer')
+        const fl = new FeatureLayer({ url: GII_UTENTI_URL })
+        if (typeof fl?.load === 'function') await fl.load()
+        const res = await fl.queryFeatures({
+          where: '1=1',
+          outFields: ['username', 'full_name', 'ruolo', 'area', 'settore'],
+          returnGeometry: false
+        })
+        const map = new Map<string, UtenteCached>()
+        for (const f of (res?.features || [])) {
+          const a = f?.attributes
+          if (a?.username) {
+            map.set(String(a.username).trim().toLowerCase(), {
+              full_name: String(a.full_name || ''),
+              ruolo: a.ruolo ?? null,
+              area: a.area ?? null,
+              settore: a.settore ?? null
+            })
+          }
+        }
+        _utentiCache = map
+      } catch (ex) {
+        console.warn('[GII-Azioni] Errore caricamento GII_utenti cache:', ex)
+      } finally {
+        _utentiLoading = false
+      }
+    })()
+  }, [])
 
   const noteOrigRef = React.useRef<string>('')
   const noteRef = React.useRef<HTMLTextAreaElement | null>(null)
@@ -1473,8 +1559,13 @@ function ActionsPanel (props: {
   const normalizeSettoreLabel = (area: string, v: any): string => {
     const s = String(v ?? '').trim().toUpperCase()
     if (!s) return ''
+    // Se è un codice numerico puro, converti tramite dominio AGOL (3=D1, 4=D2, ecc.)
+    const SETTORE_FROM_CODE: Record<number, string> = { 1:'CR', 2:'GI', 3:'D1', 4:'D2', 5:'D3', 6:'D4', 7:'D5', 8:'D6', 9:'CS' }
+    const numVal = parseInt(s, 10)
+    if (String(numVal) === s && SETTORE_FROM_CODE[numVal]) return SETTORE_FROM_CODE[numVal]
+    // Altrimenti normalizza label testuale
     if (area === 'AGR') {
-      const m = s.match(/^D?([1-6])$/)
+      const m = s.match(/^D([1-6])$/)
       if (m) return `D${m[1]}`
     }
     if (area === 'TEC' && (s === 'DS' || s === 'D S')) return 'DS'
@@ -1505,6 +1596,42 @@ function ActionsPanel (props: {
     )
     const username = String(giiRole.username || (window as any).__giiUser?.username || '').trim()
     return { parentGlobalId, area, settore, username }
+  }
+
+  /**
+   * Risolve lo username del destinatario dato il codice ruolo.
+   * TI → ti_assegnato_username, TI_AMM → ti_amm_assegnato_username.
+   * Altri ruoli → lookup in GII_utenti per ruolo+area+settore.
+   */
+  const resolveDestUser = (destRole: string): string => {
+    if (!destRole) return ''
+    const r = destRole.toUpperCase()
+    if (r === 'TI') {
+      return String(pickAttrCI(data, ['ti_assegnato_username', 'ti_assegnato_user', 'ti_assegnato']) || '').trim()
+    }
+    if (r === 'TI_AMM') {
+      return String(pickAttrCI(data, ['ti_amm_assegnato_username']) || '').trim()
+    }
+    const { area, settore } = getCurrentCycleContext()
+    return findDestUsername(_utentiCache, destRole, area, settore)
+  }
+
+  /**
+   * Verifica se il ruolo corrente è stato riattivato per rispondere a una richiesta di integrazione.
+   * Controlla se un ruolo "superiore" ha esito=INTEGRAZIONE nei confronti di questo ruolo.
+   */
+  const isRespondingToIntegration = (): boolean => {
+    if (!data) return false
+    const integSources: Record<string, string[]> = {
+      TI: ['RZ', 'RI'], RI: ['DT', 'RI_AMM', 'DA'], TI_AMM: ['RI_AMM'],
+      RZ: [], DT: [], DA: [], RI_AMM: []
+    }
+    for (const src of (integSources[role] || [])) {
+      const v = pickAttrCI(data, [`esito_${src}`, `ESITO_${src}`])
+      const n = v != null && v !== '' ? Number(v) : null
+      if (n === ESITO_INTEGRAZIONE) return true
+    }
+    return false
   }
 
   const buildCycleSummary = (eventoApertura: string, eventoChiusura: string, numCampi: number): string => {
@@ -1586,7 +1713,7 @@ function ActionsPanel (props: {
     }
   }
 
-  const closeCycleLog = async (opts: { eventoChiusura: string, ruoloDestinatario?: string, noteChiusura?: string, fase?: string }) => {
+  const closeCycleLog = async (opts: { eventoChiusura: string, ruoloDestinatario?: string, utenteDestinatario?: string, noteChiusura?: string, fase?: string }) => {
     try {
       if (oid == null) return
       const { parentGlobalId, area, settore, username } = getCurrentCycleContext()
@@ -1594,7 +1721,42 @@ function ActionsPanel (props: {
       const logLayer = await getCycleLogLayer()
       if (!logLayer?.applyEdits) return
       const feature = await queryOpenCycle(parentGlobalId, role)
-      if (!feature?.attributes) return
+
+      if (!feature?.attributes) {
+        // Nessun ciclo APERTO trovato (es. TI origine=2 che non passa dalla presa in carico).
+        // Creo un record completo direttamente come CHIUSO (apertura + chiusura in un colpo).
+        const nextNum = await getNextCycleNumber(parentGlobalId, role)
+        const now = Date.now()
+        const summary = buildCycleSummary('CREAZIONE', opts.eventoChiusura, 0)
+        const newRaw: Record<string, any> = {
+          parent_globalid: parentGlobalId,
+          parent_objectid: oid,
+          numero_ciclo_ruolo: nextNum,
+          ruolo_competente: role,
+          utente_operatore: username,
+          stato_record: 'CHIUSO',
+          evento_apertura: 'CREAZIONE',
+          dt_apertura: now,
+          evento_chiusura: opts.eventoChiusura,
+          dt_chiusura: now,
+          ruolo_destinatario: opts.ruoloDestinatario || '',
+          utente_destinatario: opts.utenteDestinatario || '',
+          note_chiusura: opts.noteChiusura || '',
+          area,
+          settore,
+          fase: opts.fase || role,
+          session_id: sessionIdRef.current,
+          num_campi_modificati: 0,
+          campi_modificati: '',
+          valori_prima_json: '',
+          valori_dopo_json: '',
+          riepilogo_ciclo: summary
+        }
+        const newAttrs = filterAttrsForLayer(newRaw, logLayer)
+        await logLayer.applyEdits({ addFeatures: [{ attributes: newAttrs }] })
+        return
+      }
+
       const attrs = feature.attributes || {}
       const numCampi = Number(attrs.num_campi_modificati || 0)
       const summary = buildCycleSummary(String(attrs.evento_apertura || 'PRESA_IN_CARICO'), opts.eventoChiusura, numCampi)
@@ -1604,6 +1766,7 @@ function ActionsPanel (props: {
         evento_chiusura: opts.eventoChiusura,
         dt_chiusura: Date.now(),
         ruolo_destinatario: opts.ruoloDestinatario || '',
+        utente_destinatario: opts.utenteDestinatario || '',
         note_chiusura: opts.noteChiusura || '',
         area: area || attrs.area || '',
         settore: settore || attrs.settore || '',
@@ -1639,30 +1802,25 @@ function ActionsPanel (props: {
     if (role === 'TI')     return 'RZ'
     if (role === 'RZ')     return 'RI'
     if (role === 'RI')     return 'DT'
-    if (role === 'DT')     return 'RI'      // Matrice_DT caso 2a: approva e trasmette a RI
-    if (role === 'RI_AMM') return 'TI_AMM'
+    if (role === 'DT')     return 'RI_AMM'   // DT approva e trasmette direttamente a RI_AMM (fase sanzionatoria)
+    if (role === 'RI_AMM') {
+      // RI_AMM: se TI_AMM ha già restituito (esito valorizzato) → trasmette a DA; altrimenti → assegna TI_AMM
+      const esitoTiAmm = pickAttrCI(data, ['esito_TI_AMM', 'ESITO_TI_AMM'])
+      return toNumOrNull(esitoTiAmm) != null ? 'DA' : 'TI_AMM'
+    }
     if (role === 'TI_AMM') return 'RI_AMM'
+    if (role === 'DA')     return 'TI_AMM'   // DA approva e trasmette a TI_AMM per adempimenti (verbale, bollettino, PEC)
     return ''
   }
 
-  // RI è in "seconda fase" se DT ha già approvato e ritrasmesso a RI.
-  // In questo caso RI non può chiedere integrazioni a TI ma può:
-  // - rimandare a DT (riapertura ciclo DT)
-  // - trasmettere a RI_AMM (avvio fase sanzionatoria)
-  const isRiSecondaFase = (): boolean => {
-    if (role !== 'RI') return false
-    const esitoDT = pickAttrCI(data, ['esito_DT', 'ESITO_DT'])
-    const n = toNumOrNull(esitoDT)
-    return n === ESITO_APPROVATA
-  }
 
-
-  // --- Editing pagina (TI/RI) ---
+  // --- Editing pagina (TI/RI/TI_AMM/RI_AMM) ---
   const ec = props.editConfig
-  const canShowEdit = ec.show && (role === 'TI' || role === 'RI')
-  const roleStatoField = role === 'RI' ? 'stato_RI' : ec.fieldStatoTI
-  const rolePresaField = role === 'RI' ? 'presa_in_carico_RI' : ec.fieldPresaTI
-  const roleEsitoField = role === 'RI' ? 'esito_RI' : 'esito_TI'
+  // RI_AMM ha stessi privilegi di RI (solo annotazioni), TI_AMM ha stessi privilegi di TI (può editare)
+  const canShowEdit = ec.show && (role === 'TI' || role === 'RI' || role === 'TI_AMM')
+  const roleStatoField = `stato_${role}`
+  const rolePresaField = `presa_in_carico_${role}`
+  const roleEsitoField = `esito_${role}`
 
   const statoRoleVal = data ? pickAttrCI(data, [roleStatoField, roleStatoField.toUpperCase()]) : null
   const presaRoleVal = data ? pickAttrCI(data, [rolePresaField, rolePresaField.toUpperCase()]) : null
@@ -1670,9 +1828,9 @@ function ActionsPanel (props: {
   const presaRoleNum = toNumOrNull(presaRoleVal)
   const currentTiUsername = String((window as any).__giiUserRole?.username || (window as any).__giiUser?.username || '').trim().toLowerCase()
   const assignedTiUsername = String(pickAttrCI(data, ['ti_assegnato_username', 'ti_assegnato_user', 'ti_assegnato']) || '').trim().toLowerCase()
-  const isOwnedByCurrentRole = role === 'TI'
+  const isOwnedByCurrentRole = (role === 'TI' || role === 'TI_AMM')
     ? (!!currentTiUsername && !!assignedTiUsername && currentTiUsername === assignedTiUsername)
-    : role === 'RI'
+    : (role === 'RI' || role === 'RI_AMM')
 
   const isMeaningfulAudit = (v: any): boolean => !(v === null || v === undefined || v === '' || v === 0 || v === '0')
   const inChargeByRole =
@@ -1951,6 +2109,46 @@ function ActionsPanel (props: {
     void loadTiOptions()
   }, [pending, role, loadTiOptions])
 
+  // ── Carica opzioni TI_AMM (per RI_AMM) ──
+  const loadTiAmmOptions = React.useCallback(async () => {
+    if (tiAmmLoadingRef.current) return
+    tiAmmLoadingRef.current = true
+    setTiAmmLoading(true)
+    setTiAmmLoadErr('')
+    try {
+      const FeatureLayer = await loadEsriModule<any>('esri/layers/FeatureLayer')
+      const fl = new FeatureLayer({ url: GII_UTENTI_URL })
+      if (typeof fl?.load === 'function') { try { await fl.load() } catch {} }
+      const q: any = (typeof fl.createQuery === 'function') ? fl.createQuery() : {}
+      q.where = 'ruolo = 2 AND area = 1'  // TI con area AMM
+      q.outFields = ['username', 'full_name', 'area', 'settore']
+      q.returnGeometry = false
+      q.num = 2000
+      const res: any = await fl.queryFeatures(q)
+      const feats: any[] = res?.features || []
+      const opts: TiOpt[] = feats.map((f: any) => {
+        const a: any = f?.attributes || {}
+        const username = String(a.username || '').trim()
+        const fullName = String(a.full_name || a.fullName || a.nome || '').trim()
+        return { username, fullName: (fullName || username) }
+      }).filter(o => !!o.username)
+      opts.sort((a, b) => (a.fullName || a.username).localeCompare((b.fullName || b.username), 'it', { sensitivity: 'base' }))
+      setTiAmmOptions(opts)
+    } catch (e: any) {
+      setTiAmmLoadErr(e?.message ? String(e.message) : String(e))
+    } finally {
+      tiAmmLoadingRef.current = false
+      setTiAmmLoading(false)
+    }
+  }, [])
+
+  React.useEffect(() => {
+    if (pending !== 'ASSEGNA_TI_AMM') return
+    if (role !== 'RI_AMM') return
+    void loadTiAmmOptions()
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pending, role])
+
 
   const isLocked = pending != null || loading
   const showOverlay = loading && pending === null && hasSel
@@ -2004,21 +2202,19 @@ function ActionsPanel (props: {
       return isMeaningful(p) || isMeaningful(s) || isMeaningful(e)
     }
 
-    // fwdDest dinamico: RI punta a DT in fase ordinaria, a RI_AMM dopo approvazione DT
+    // fwdDest dinamico: DT→RI_AMM diretto, RI_AMM→TI_AMM/DA, DA→TI_AMM
     const getFwdDestLocal = (r: string): string => {
       switch (r) {
         case 'TI':     return 'RZ'
         case 'RZ':     return 'RI'
-        case 'DT':     return 'RI'
-        case 'RI': {
-          const esitoDT = pickAttrCI(d, ['esito_DT', 'ESITO_DT'])
-          return toNum(esitoDT) === ESITO_APPROVATA ? 'RI_AMM' : 'DT'
-        }
+        case 'RI':     return 'DT'
+        case 'DT':     return 'RI_AMM'
         case 'RI_AMM': {
           const esitoTiAmm = pickAttrCI(d, ['esito_TI_AMM', 'ESITO_TI_AMM'])
           return toNum(esitoTiAmm) != null ? 'DA' : 'TI_AMM'
         }
         case 'TI_AMM': return 'RI_AMM'
+        case 'DA':     return 'TI_AMM'
         default:       return ''
       }
     }
@@ -2141,6 +2337,16 @@ function ActionsPanel (props: {
   const tiReturned = (esitoTiNum != null) || (statoTiNum === STATO_APPROVATA) || (statoTiNum === STATO_RESPINTA) || hasHigherWorkflowTouched
   const lockRZBecauseAssignedToTi = role === 'RZ' && (origineNum == null || origineNum === 1) && hasTiAnyEvidence && !tiReturned && !awaitingRetakeByRz
 
+  // TI_AMM già assegnato?
+  const tiAmmUserRaw = pickAttrCI(data, ['ti_amm_assegnato_username'])
+  const hasTiAmmAssigned = !isEmptyValue(tiAmmUserRaw)
+
+  // Lock RI_AMM: dopo assegnazione TI_AMM, finché TI_AMM non ha restituito la pratica
+  const esitoTiAmmNum = toNumOrNull(pickAttrCI(data, ['esito_TI_AMM', 'ESITO_TI_AMM']))
+  const statoTiAmmNum = toNumOrNull(pickAttrCI(data, ['stato_TI_AMM', 'STATO_TI_AMM']))
+  const tiAmmReturned = (esitoTiAmmNum != null) || (statoTiAmmNum === STATO_APPROVATA) || (statoTiAmmNum === STATO_RESPINTA)
+  const lockRiAmmBecauseAssignedToTiAmm = role === 'RI_AMM' && hasTiAmmAssigned && !tiAmmReturned
+
   const canStartEsito =
     hasSel &&
     !loading &&
@@ -2148,74 +2354,59 @@ function ActionsPanel (props: {
     pending === null &&
     myStatoIsPresaInCarico &&
     !lockRZBecauseAssignedToTi &&
+    !lockRiAmmBecauseAssignedToTiAmm &&
     effectivePresaNum === PRESA_IN_CARICO &&
     effectiveStatoNum === STATO_PRESA_IN_CARICO
 
   // Regola RZ: prima di assegnare a TI, può solo "Assegna TI" oppure "Respingi".
-  // Regola RI seconda fase: non può chiedere integrazioni a TI, solo trasmetti RI_AMM o rimanda DT.
-  const riSecondaFase = isRiSecondaFase()
-
   const canStartIntegrazione =
     canStartEsito &&
     !(role === 'RZ' && (origineNum == null || origineNum === 1) && !hasTiAnyEvidence) &&
-    role !== 'TI' &&
-    !riSecondaFase  // RI seconda fase non può chiedere integrazioni a TI
+    role !== 'TI'
 
   const canStartApprova =
     canStartEsito &&
     !(role === 'RZ' && (origineNum == null || origineNum === 1) && !hasTiAnyEvidence) &&
-    !riSecondaFase  // RI seconda fase usa i pulsanti specifici, non "Inoltra a DT"
+    !(role === 'RI_AMM' && !hasTiAmmAssigned)  // RI_AMM: prima deve assegnare TI_AMM
 
   const canStartRespingi =
     canStartEsito &&
     role !== 'TI' &&
-    role !== 'RI'
-
-  // RI seconda fase: trasmetti a RI AMM
-  const canStartTrasmmettiRiAmm =
-    role === 'RI' &&
-    riSecondaFase &&
-    hasSel &&
-    !loading &&
-    !lockedByTransmit &&
-    pending === null &&
-    myStatoIsPresaInCarico
-
-  // RI seconda fase: rimanda a DT (riapertura ciclo DT)
-  const canStartRimandaDT =
-    role === 'RI' &&
-    riSecondaFase &&
-    hasSel &&
-    !loading &&
-    !lockedByTransmit &&
-    pending === null &&
-    myStatoIsPresaInCarico
+    role !== 'RI' &&
+    role !== 'TI_AMM'  // TI_AMM non può respingere
 
   // Label dinamiche (inoltro vs approva)
+  // Destinazione forward risolta (usata anche per le label)
+  const fwdDest = getNextRoleForForward()
+  const fwdDestLabel = fwdDest.replace(/_/g, ' ')
+
   const approvaBtnLabel =
-    role === 'TI' ? 'Inoltra a RZ' :
-    role === 'RZ' ? 'Inoltra a RI' :
-    role === 'RI' ? 'Inoltra a DT' :
-    role === 'DT' ? 'Approva e trasmetti a RI' :
-    role === 'RI_AMM' ? 'Trasmetti a TI AMM' :
+    role === 'TI' ? 'Trasmetti a RZ' :
+    role === 'RZ' ? 'Trasmetti a RI' :
+    role === 'RI' ? 'Trasmetti a DT' :
+    role === 'DT' ? 'Approva Rapporto' :
+    role === 'DA' ? 'Approva Sanzione' :
+    role === 'RI_AMM' ? `Trasmetti a ${fwdDestLabel}` :
     role === 'TI_AMM' ? 'Trasmetti a RI AMM' :
     'Approva'
 
   const approvaDoneLabel =
-    role === 'TI' ? 'Inoltrata a RZ' :
-    role === 'RZ' ? 'Inoltrata a RI' :
-    role === 'RI' ? 'Inoltrata a DT' :
-    role === 'DT' ? 'Approvata e trasmessa a RI' :
-    role === 'RI_AMM' ? 'Trasmessa a TI AMM' :
+    role === 'TI' ? 'Trasmessa a RZ' :
+    role === 'RZ' ? 'Trasmessa a RI' :
+    role === 'RI' ? 'Trasmessa a DT' :
+    role === 'DT' ? 'Trasmessa a RI AMM' :
+    role === 'DA' ? 'Trasmessa a TI AMM' :
+    role === 'RI_AMM' ? `Trasmessa a ${fwdDestLabel}` :
     role === 'TI_AMM' ? 'Trasmessa a RI AMM' :
     'Approvata'
 
   const approvaConfirmLabel =
-    role === 'TI' ? 'Conferma inoltro a RZ' :
-    role === 'RZ' ? 'Conferma inoltro a RI' :
-    role === 'RI' ? 'Conferma inoltro a DT' :
-    role === 'DT' ? 'Conferma approvazione e trasmissione a RI' :
-    role === 'RI_AMM' ? 'Conferma trasmissione a TI AMM' :
+    role === 'TI' ? 'Conferma trasmissione a RZ' :
+    role === 'RZ' ? 'Conferma trasmissione a RI' :
+    role === 'RI' ? 'Conferma trasmissione a DT' :
+    role === 'DT' ? 'Conferma approvazione rapporto' :
+    role === 'DA' ? 'Conferma approvazione sanzione' :
+    role === 'RI_AMM' ? `Conferma trasmissione a ${fwdDestLabel}` :
     role === 'TI_AMM' ? 'Conferma trasmissione a RI AMM' :
     'Conferma approvazione'
 
@@ -2265,6 +2456,17 @@ function ActionsPanel (props: {
     effectivePresaNum === PRESA_IN_CARICO &&
     effectiveStatoNum === STATO_PRESA_IN_CARICO
 
+  // Assegna TI_AMM: solo RI_AMM, dopo presa in carico, se TI_AMM non è ancora assegnato.
+  const canStartAssegnaTiAmm =
+    role === 'RI_AMM' &&
+    hasSel &&
+    !loading &&
+    !lockedByTransmit &&
+    pending === null &&
+    !hasTiAmmAssigned &&
+    effectivePresaNum === PRESA_IN_CARICO &&
+    effectiveStatoNum === STATO_PRESA_IN_CARICO
+
   // NOTE: compare per integrazione, respinta e — Matrice_TI caso 1/b — anche per eliminazione (obbligatoria)
   const showNote = pending === 'INTEGRAZIONE' || pending === 'RESPINGI' || pending === 'ELIMINA'
   const noteEnabled = showNote && hasSel && !loading && !lockedByTransmit
@@ -2288,6 +2490,7 @@ function ActionsPanel (props: {
   const noteReqErr = confirmAttempted && noteInvalid
 
   const tiReqErr = confirmAttempted && pending === 'ASSEGNA_TI' && !tiSelected
+  const tiAmmReqErr = confirmAttempted && pending === 'ASSEGNA_TI_AMM' && !tiAmmSelected
 
   const onAnnulla = () => {
     setPending(null)
@@ -2305,12 +2508,11 @@ function ActionsPanel (props: {
     if (lockedByTransmit) return
     if (p === 'TAKE' && !canStartTakeInCharge) return
     if (p === 'ASSEGNA_TI' && !canStartAssegnaTi) return
+    if (p === 'ASSEGNA_TI_AMM' && !canStartAssegnaTiAmm) return
     if (p === 'INTEGRAZIONE' && !canStartIntegrazione) return
     if (p === 'APPROVA' && !canStartApprova) return
     if (p === 'RESPINGI' && !canStartRespingi) return
     if (p === 'ELIMINA' && !canStartElimina) return
-    if (p === 'TRASMETTI_RI_AMM' && !canStartTrasmmettiRiAmm) return
-    if (p === 'RIMANDA_DT' && !canStartRimandaDT) return
 
     setPending(p)
     setMsg(null)
@@ -2326,7 +2528,17 @@ function ActionsPanel (props: {
       setTiSelected('')
     }
 
+    if (p === 'ASSEGNA_TI_AMM') {
+      const cur = String(pickAttrCI(data, ['ti_amm_assegnato_username']) || '')
+      setTiAmmSelected(cur)
+      setTiAmmLoadErr('')
+      window.setTimeout(() => { void loadTiAmmOptions() }, 0)
+    } else {
+      setTiAmmSelected('')
+    }
+
     if (p === 'INTEGRAZIONE') {
+      setNoteDraft('')  // Pulisci note per nuova richiesta di integrazione
       window.setTimeout(() => {
         try { noteRef.current?.focus?.() } catch {}
         autoResizeNote(noteRef.current)
@@ -2513,7 +2725,58 @@ function ActionsPanel (props: {
 
       await runApplyEdits(upd, `TI assegnato: ${tiName}.`)
 
-      void closeCycleLog({ eventoChiusura: 'ASSEGNAZIONE_A_TI', ruoloDestinatario: 'TI', noteChiusura: `Assegna TI: ${tiName} (${tiSelected})`, fase: role })
+      void closeCycleLog({ eventoChiusura: 'NUOVA_ASSEGNAZIONE', ruoloDestinatario: 'TI', utenteDestinatario: tiSelected, noteChiusura: `Assegna TI: ${tiName} (${tiSelected})`, fase: role })
+
+      setPending(null)
+      setConfirmAttempted(false)
+    } catch (e: any) {
+      const txt = e?.message ? String(e.message) : String(e)
+      setMsg({ kind: 'err', text: `Errore salvataggio: ${txt}` })
+    }
+  }
+
+  const onConfirmAssegnaTiAmm = async () => {
+    setConfirmAttempted(true)
+    if (!tiAmmSelected) return
+
+    try {
+      const u: any = (window as any).__giiUserRole || {}
+      const riAmmUser = String(u?.username || '').trim()
+      const tiAmm = tiAmmOptions.find(o => o.username === tiAmmSelected) || null
+      const tiAmmName = String(tiAmm?.fullName || tiAmmSelected).trim()
+
+      const upd: Record<string, any> = {
+        ti_amm_assegnato_username: tiAmmSelected,
+        ti_amm_assegnato_nome: tiAmmName,
+        ti_amm_assegnato_da: riAmmUser
+      }
+
+      // Inizializza nodo TI_AMM
+      try {
+        const schemaFields: Record<string, any> = (ds as any)?.getSchema?.()?.fields || {}
+        const keys = Object.keys(schemaFields || {})
+        const ci: Record<string, string> = {}
+        keys.forEach(k => { ci[String(k).toLowerCase()] = k })
+        const pick = (name: string) => ci[String(name).toLowerCase()] || null
+
+        const fStato = pick('stato_TI_AMM')
+        const fDtStato = pick('dt_stato_TI_AMM')
+        const fPresa = pick('presa_in_carico_TI_AMM')
+        const fDtPresa = pick('dt_presa_in_carico_TI_AMM')
+        const fEsito = pick('esito_TI_AMM')
+        const fDtEsito = pick('dt_esito_TI_AMM')
+
+        if (fStato) upd[fStato] = STATO_DA_PRENDERE
+        if (fDtStato) upd[fDtStato] = Date.now()
+        if (fPresa) upd[fPresa] = PRESA_DA_PRENDERE
+        if (fDtPresa) upd[fDtPresa] = null
+        if (fEsito) upd[fEsito] = null
+        if (fDtEsito) upd[fDtEsito] = null
+      } catch {}
+
+      await runApplyEdits(upd, `TI AMM assegnato: ${tiAmmName}.`)
+
+      void closeCycleLog({ eventoChiusura: 'NUOVA_ASSEGNAZIONE', ruoloDestinatario: 'TI_AMM', utenteDestinatario: tiAmmSelected, noteChiusura: `Assegna TI AMM: ${tiAmmName} (${tiAmmSelected})`, fase: role })
 
       setPending(null)
       setConfirmAttempted(false)
@@ -2558,7 +2821,7 @@ function ActionsPanel (props: {
 
       await runApplyEdits(upd, 'Integrazione richiesta salvata.')
       if (ruoloDest) {
-        void closeCycleLog({ eventoChiusura: `INTEGRAZIONE_RICHIESTA_A_${ruoloDest}`, ruoloDestinatario: ruoloDest, noteChiusura: noteTrim, fase: role })
+        void closeCycleLog({ eventoChiusura: 'INTEGRAZIONE_RICHIESTA', ruoloDestinatario: ruoloDest, utenteDestinatario: resolveDestUser(ruoloDest), noteChiusura: noteTrim, fase: role })
       }
       setPending(null)
       setConfirmAttempted(false)
@@ -2599,10 +2862,49 @@ function ActionsPanel (props: {
         } catch {}
       }
 
+      // wasIntegResponse: controlla il LOG per sapere se siamo nella catena di un'integrazione.
+      // Cerca l'ultima INTEGRAZIONE_RICHIESTA per questa pratica.
+      // Se esiste e NON è stata richiesta dal ruolo corrente → siamo nella catena → INTEGRAZIONE_TRASMESSA.
+      // Se è stata richiesta dal ruolo corrente → l'integrazione è risolta → ISTRUTTORIA_TRASMESSA.
+      let wasIntegResponse = false
+      if (esito === ESITO_APPROVATA && ruoloDest) {
+        try {
+          const { parentGlobalId } = getCurrentCycleContext()
+          if (parentGlobalId) {
+            const logLayer = await getCycleLogLayer()
+            if (logLayer?.queryFeatures) {
+              const q = logLayer.createQuery ? logLayer.createQuery() : {} as any
+              q.where = `parent_globalid = '${parentGlobalId.replace(/'/g, "''")}' AND stato_record = 'CHIUSO' AND evento_chiusura LIKE 'INTEGRAZIONE_RICHIESTA%'`
+              q.outFields = ['ruolo_competente', 'dt_chiusura']
+              q.orderByFields = ['dt_chiusura DESC']
+              q.returnGeometry = false
+              q.num = 1
+              const logRes = await logLayer.queryFeatures(q)
+              const lastReq = logRes?.features?.[0]?.attributes
+              if (lastReq) {
+                const requester = String(lastReq.ruolo_competente || '').toUpperCase()
+                // Se il richiedente NON è il ruolo corrente → siamo nella catena
+                if (requester !== role) wasIntegResponse = true
+              }
+            }
+          }
+        } catch {}
+      }
+
       await runApplyEdits(upd, `Esito salvato: ${label}.`)
       if (esito === ESITO_APPROVATA) {
-        const evento = ruoloDest ? `TRASMISSIONE_A_${ruoloDest}` : 'APPROVAZIONE'
-        void closeCycleLog({ eventoChiusura: evento, ruoloDestinatario: ruoloDest, fase: role })
+        if (role === 'DA') {
+          // DA approva la sanzione → destinatario è TI_AMM
+          void closeCycleLog({ eventoChiusura: 'SANZIONE_APPROVATA', ruoloDestinatario: 'TI_AMM', utenteDestinatario: resolveDestUser('TI_AMM'), fase: role })
+        } else if (role === 'DT') {
+          // DT approva il rapporto tecnico → destinatario è RI
+          void closeCycleLog({ eventoChiusura: 'RAPPORTO_APPROVATO', ruoloDestinatario: ruoloDest, utenteDestinatario: resolveDestUser(ruoloDest), fase: role })
+        } else {
+          const evento = ruoloDest
+            ? (wasIntegResponse ? 'INTEGRAZIONE_TRASMESSA' : 'ISTRUTTORIA_TRASMESSA')
+            : 'ISTRUTTORIA_TRASMESSA'
+          void closeCycleLog({ eventoChiusura: evento, ruoloDestinatario: ruoloDest, utenteDestinatario: resolveDestUser(ruoloDest), fase: role })
+        }
       }
       setPending(null)
       setConfirmAttempted(false)
@@ -2673,92 +2975,6 @@ function ActionsPanel (props: {
     }
   }
 
-  const onConfirmTrasmetti = async () => {
-    try {
-      await runApplyEdits(
-        {
-          [statoDAField]: STATO_DA_PRENDERE,
-          [dtStatoDAField]: Date.now(),
-          [presaDAField]: PRESA_DA_PRENDERE,
-          [dtPresaDAField]: null
-        },
-        'Trasmesso a DA.'
-      )
-      void closeCycleLog({ eventoChiusura: 'TRASMISSIONE_A_DA', ruoloDestinatario: 'DA', fase: role })
-      setPending(null)
-      setConfirmAttempted(false)
-    } catch (e: any) {
-      const txt = e?.message ? String(e.message) : String(e)
-      setMsg({ kind: 'err', text: `Errore salvataggio: ${txt}` })
-    }
-  }
-
-  // RI seconda fase → trasmetti a RI AMM (avvio fase sanzionatoria)
-  const onConfirmTrasmmettiRiAmm = async () => {
-    try {
-      const schemaFields: Record<string, any> = (ds as any)?.getSchema?.()?.fields || {}
-      const upd: Record<string, any> = {
-        // Chiudi ciclo RI
-        [esitoField]: ESITO_APPROVATA,
-        [dtEsitoField]: Date.now(),
-        [statoField]: STATO_APPROVATA,
-        [dtStatoField]: Date.now()
-      }
-      // Apri nodo RI_AMM
-      const fStatoRiAmm   = getSchemaFieldNameCI(schemaFields, 'stato_RI_AMM')
-      const fDtStatoRiAmm = getSchemaFieldNameCI(schemaFields, 'dt_stato_RI_AMM')
-      const fEsitoRiAmm   = getSchemaFieldNameCI(schemaFields, 'esito_RI_AMM')
-      const fDtEsito      = getSchemaFieldNameCI(schemaFields, 'dt_esito_RI_AMM')
-      const fDtPresa      = getSchemaFieldNameCI(schemaFields, 'dt_presa_in_carico_RI_AMM')
-      if (fStatoRiAmm)   upd[fStatoRiAmm]   = STATO_DA_PRENDERE
-      if (fDtStatoRiAmm) upd[fDtStatoRiAmm] = Date.now()
-      if (fEsitoRiAmm)   upd[fEsitoRiAmm]   = null
-      if (fDtEsito)      upd[fDtEsito]      = null
-      if (fDtPresa)      upd[fDtPresa]      = null
-      await runApplyEdits(upd, 'Trasmesso a RI AMM.')
-      void closeCycleLog({ eventoChiusura: 'TRASMISSIONE_A_RI_AMM', ruoloDestinatario: 'RI_AMM', fase: role })
-      setPending(null)
-      setConfirmAttempted(false)
-    } catch (e: any) {
-      const txt = e?.message ? String(e.message) : String(e)
-      setMsg({ kind: 'err', text: `Errore salvataggio: ${txt}` })
-    }
-  }
-
-  // RI seconda fase → rimanda a DT (riapertura ciclo DT)
-  const onConfirmRimandaDT = async () => {
-    try {
-      const schemaFields: Record<string, any> = (ds as any)?.getSchema?.()?.fields || {}
-      const upd: Record<string, any> = {
-        // Chiudi ciclo RI come trasmissione positiva
-        [esitoField]: ESITO_APPROVATA,
-        [dtEsitoField]: Date.now(),
-        [statoField]: STATO_APPROVATA,
-        [dtStatoField]: Date.now()
-      }
-      // Riapri nodo DT
-      const fStatoDT        = getSchemaFieldNameCI(schemaFields, 'stato_DT')
-      const fDtStatoDT      = getSchemaFieldNameCI(schemaFields, 'dt_stato_DT')
-      const fEsitoDT        = getSchemaFieldNameCI(schemaFields, 'esito_DT')
-      const fDtEsitoDT      = getSchemaFieldNameCI(schemaFields, 'dt_esito_DT')
-      const fPresaDT        = getSchemaFieldNameCI(schemaFields, 'presa_in_carico_DT')
-      const fDtPresaDT      = getSchemaFieldNameCI(schemaFields, 'dt_presa_in_carico_DT')
-      if (fStatoDT)    upd[fStatoDT]    = STATO_DA_PRENDERE
-      if (fDtStatoDT)  upd[fDtStatoDT]  = Date.now()
-      if (fEsitoDT)    upd[fEsitoDT]    = null
-      if (fDtEsitoDT)  upd[fDtEsitoDT]  = null
-      if (fPresaDT)    upd[fPresaDT]    = PRESA_DA_PRENDERE
-      if (fDtPresaDT)  upd[fDtPresaDT]  = null
-      await runApplyEdits(upd, 'Rimandato a DT.')
-      void closeCycleLog({ eventoChiusura: 'RIMANDA_A_DT', ruoloDestinatario: 'DT', fase: role })
-      setPending(null)
-      setConfirmAttempted(false)
-    } catch (e: any) {
-      const txt = e?.message ? String(e.message) : String(e)
-      setMsg({ kind: 'err', text: `Errore salvataggio: ${txt}` })
-    }
-  }
-
   const labelReqStyle = (isRequired: boolean, isError: boolean): React.CSSProperties => {
     if (!isRequired) return { display: 'none' }
     return { fontSize: ui.statusFontSize, color: isError ? '#b42318' : '#6b7280' }
@@ -2791,31 +3007,25 @@ function ActionsPanel (props: {
     ? 'Conferma presa in carico'
     : pending === 'ASSEGNA_TI'
       ? 'Conferma assegnazione TI'
-      : pending === 'INTEGRAZIONE'
-        ? 'Conferma richiesta di integrazione'
-        : pending === 'APPROVA'
-          ? approvaConfirmLabel
-          : pending === 'RESPINGI'
-            ? 'Conferma respinta'
-            : pending === 'ELIMINA'
-              ? 'Conferma archiviazione rapporto'
-              : pending === 'TRASMETTI'
-                ? 'Conferma trasmissione'
-                : pending === 'TRASMETTI_RI_AMM'
-                  ? 'Conferma trasmissione a RI AMM'
-                  : pending === 'RIMANDA_DT'
-                    ? 'Conferma restituzione a DT'
-                    : 'Conferma azione'
+      : pending === 'ASSEGNA_TI_AMM'
+        ? 'Conferma assegnazione TI AMM'
+        : pending === 'INTEGRAZIONE'
+          ? 'Conferma richiesta di integrazione'
+          : pending === 'APPROVA'
+            ? approvaConfirmLabel
+            : pending === 'RESPINGI'
+              ? 'Conferma respinta'
+              : pending === 'ELIMINA'
+                ? 'Conferma archiviazione rapporto'
+                : 'Conferma azione'
 
   // ── Colore/icona/testo per ogni tipo di azione ────────────────────────────
   const pendingTheme: Record<string, { icon: string; color: string; bg: string; border: string; desc: string }> = {
     TAKE:           { icon: '✓', color: '#1a7f37', bg: '#f0fdf4', border: '#bbf7d0', desc: 'Il rapporto verrà preso in carico.' },
     ASSEGNA_TI:     { icon: '✓', color: '#1a7f37', bg: '#f0fdf4', border: '#bbf7d0', desc: 'Il rapporto verrà assegnato al TI selezionato.' },
+    ASSEGNA_TI_AMM: { icon: '✓', color: '#1a7f37', bg: '#f0fdf4', border: '#bbf7d0', desc: 'La pratica verrà assegnata al TI AMM selezionato.' },
     APPROVA:        { icon: '✓', color: '#1a7f37', bg: '#f0fdf4', border: '#bbf7d0', desc: `Il rapporto verrà ${approvaDoneLabel.toLowerCase()}.` },
-    TRASMETTI:      { icon: '✓', color: '#1a7f37', bg: '#f0fdf4', border: '#bbf7d0', desc: 'Il rapporto verrà trasmesso a DA.' },
-    TRASMETTI_RI_AMM:{ icon: '✓', color: '#1a7f37', bg: '#f0fdf4', border: '#bbf7d0', desc: 'Il rapporto verrà trasmesso a RI AMM per avviare la fase sanzionatoria.' },
     INTEGRAZIONE:   { icon: '⚠', color: '#b45309', bg: '#fffbeb', border: '#fde68a', desc: 'Verrà inviata una richiesta di integrazione.' },
-    RIMANDA_DT:     { icon: '⚠', color: '#b45309', bg: '#fffbeb', border: '#fde68a', desc: 'Il rapporto verrà restituito a DT per una nuova valutazione.' },
     RESPINGI:       { icon: '✕', color: '#dc2626', bg: '#fef2f2', border: '#fecaca', desc: 'Il rapporto verrà respinto.' },
     ELIMINA:        { icon: '✕', color: '#dc2626', bg: '#fef2f2', border: '#fecaca', desc: 'Il rapporto verrà archiviato e non sarà più visibile nell\'elenco.' },
   }
@@ -2905,6 +3115,25 @@ function ActionsPanel (props: {
           </div>
         )}
 
+        {pending === 'ASSEGNA_TI_AMM' && role === 'RI_AMM' && (
+          <div style={{ display: 'grid', gap: 6 }}>
+            <div style={labelReqStyle(true, tiAmmReqErr)}>Scelta obbligatoria</div>
+            <select
+              value={tiAmmSelected}
+              onChange={(e) => { setTiAmmSelected(e.target.value); if (confirmAttempted) setConfirmAttempted(false) }}
+              disabled={loading}
+              style={{ width: 'auto', minWidth: 280, maxWidth: '100%', padding: '8px 10px', borderRadius: 8, border: `1px solid ${tiAmmReqErr ? '#dc2626' : 'rgba(0,0,0,0.15)'}`, outline: 'none' }}
+            >
+              <option value=''>— Seleziona TI AMM —</option>
+              {tiAmmOptions.map(o => (
+                <option key={o.username} value={o.username}>{(o.fullName || o.username)} ({o.username})</option>
+              ))}
+            </select>
+            {!tiAmmLoading && !tiAmmLoadErr && tiAmmOptions.length === 0 && <div style={{ fontSize: 12, opacity: 0.75 }}>Nessun TI AMM trovato.</div>}
+            {!!tiAmmLoadErr && <div style={{ fontSize: 12, color: '#dc2626' }}>Errore elenco TI AMM: {tiAmmLoadErr}</div>}
+          </div>
+        )}
+
         {/* Textarea note */}
         {showNote && (
           <div style={{ display: 'grid', gap: 6 }}>
@@ -2933,13 +3162,11 @@ function ActionsPanel (props: {
           </button>
           {pending === 'TAKE' && <button type='button' onClick={onConfirmTakeInCharge} disabled={loading} style={{ padding: '8px 18px', borderRadius: 8, border: '1px solid rgba(0,0,0,0.18)', background: theme.color, color: '#fff', fontWeight: 700, fontSize: 13, cursor: loading ? 'not-allowed' : 'pointer' }}>{loading ? 'Aggiorno…' : 'Conferma'}</button>}
           {pending === 'ASSEGNA_TI' && <button type='button' onClick={onConfirmAssegnaTi} disabled={loading || !tiSelected} style={{ padding: '8px 18px', borderRadius: 8, border: '1px solid rgba(0,0,0,0.18)', background: theme.color, color: '#fff', fontWeight: 700, fontSize: 13, cursor: (loading || !tiSelected) ? 'not-allowed' : 'pointer', opacity: (loading || !tiSelected) ? 0.6 : 1 }}>{loading ? 'Aggiorno…' : 'Conferma'}</button>}
+          {pending === 'ASSEGNA_TI_AMM' && <button type='button' onClick={onConfirmAssegnaTiAmm} disabled={loading || !tiAmmSelected} style={{ padding: '8px 18px', borderRadius: 8, border: '1px solid rgba(0,0,0,0.18)', background: theme.color, color: '#fff', fontWeight: 700, fontSize: 13, cursor: (loading || !tiAmmSelected) ? 'not-allowed' : 'pointer', opacity: (loading || !tiAmmSelected) ? 0.6 : 1 }}>{loading ? 'Aggiorno…' : 'Conferma'}</button>}
           {pending === 'INTEGRAZIONE' && <button type='button' onClick={onConfirmIntegrazione} disabled={loading} style={{ padding: '8px 18px', borderRadius: 8, border: '1px solid rgba(0,0,0,0.18)', background: theme.color, color: '#fff', fontWeight: 700, fontSize: 13, cursor: loading ? 'not-allowed' : 'pointer' }}>{loading ? 'Aggiorno…' : 'Conferma'}</button>}
           {pending === 'APPROVA' && <button type='button' onClick={() => onConfirmEsito(ESITO_APPROVATA, approvaDoneLabel)} disabled={loading} style={{ padding: '8px 18px', borderRadius: 8, border: '1px solid rgba(0,0,0,0.18)', background: theme.color, color: '#fff', fontWeight: 700, fontSize: 13, cursor: loading ? 'not-allowed' : 'pointer' }}>{loading ? 'Aggiorno…' : 'Conferma'}</button>}
           {pending === 'RESPINGI' && <button type='button' onClick={onConfirmRespinta} disabled={loading} style={{ padding: '8px 18px', borderRadius: 8, border: '1px solid rgba(0,0,0,0.18)', background: theme.color, color: '#fff', fontWeight: 700, fontSize: 13, cursor: loading ? 'not-allowed' : 'pointer' }}>{loading ? 'Aggiorno…' : 'Conferma'}</button>}
           {pending === 'ELIMINA' && <button type='button' onClick={onConfirmElimina} disabled={loading} style={{ padding: '8px 18px', borderRadius: 8, border: '1px solid rgba(0,0,0,0.18)', background: theme.color, color: '#fff', fontWeight: 700, fontSize: 13, cursor: loading ? 'not-allowed' : 'pointer' }}>{loading ? 'Archivio…' : 'Conferma'}</button>}
-          {pending === 'TRASMETTI' && <button type='button' onClick={onConfirmTrasmetti} disabled={loading} style={{ padding: '8px 18px', borderRadius: 8, border: '1px solid rgba(0,0,0,0.18)', background: theme.color, color: '#fff', fontWeight: 700, fontSize: 13, cursor: loading ? 'not-allowed' : 'pointer' }}>{loading ? 'Aggiorno…' : 'Conferma'}</button>}
-          {pending === 'TRASMETTI_RI_AMM' && <button type='button' onClick={onConfirmTrasmmettiRiAmm} disabled={loading} style={{ padding: '8px 18px', borderRadius: 8, border: '1px solid rgba(0,0,0,0.18)', background: theme.color, color: '#fff', fontWeight: 700, fontSize: 13, cursor: loading ? 'not-allowed' : 'pointer' }}>{loading ? 'Aggiorno…' : 'Conferma'}</button>}
-          {pending === 'RIMANDA_DT' && <button type='button' onClick={onConfirmRimandaDT} disabled={loading} style={{ padding: '8px 18px', borderRadius: 8, border: '1px solid rgba(0,0,0,0.18)', background: theme.color, color: '#fff', fontWeight: 700, fontSize: 13, cursor: loading ? 'not-allowed' : 'pointer' }}>{loading ? 'Aggiorno…' : 'Conferma'}</button>}
         </div>
       </div>
     </div>,
@@ -2983,7 +3210,7 @@ function ActionsPanel (props: {
               type='primary'
               onClick={() => startAction('TAKE')}
               disabled={!canStartTakeInCharge}
-              style={actionButtonStyle(buttonColors.take, !canStartTakeInCharge, ui)}
+              style={actionButtonStyle(buttonColors.take, !canStartTakeInCharge, ui, buttonColors.takeText)}
             >
               {buttonText}
             </Button>
@@ -2993,65 +3220,53 @@ function ActionsPanel (props: {
                 type='primary'
                 onClick={() => startAction('ASSEGNA_TI')}
                 disabled={!canStartAssegnaTi}
-                style={actionButtonStyle(buttonColors.take, !canStartAssegnaTi, ui)}
+                style={actionButtonStyle(buttonColors.take, !canStartAssegnaTi, ui, buttonColors.takeText)}
               >
                 Assegna TI
               </Button>
             )}
 
-            {role !== 'TI' && !riSecondaFase && (
+            {role === 'RI_AMM' && (
+              <Button
+                type='primary'
+                onClick={() => startAction('ASSEGNA_TI_AMM')}
+                disabled={!canStartAssegnaTiAmm}
+                style={actionButtonStyle(buttonColors.approva, !canStartAssegnaTiAmm, ui, buttonColors.approvaText)}
+              >
+                Assegna TI AMM
+              </Button>
+            )}
+
+            {role !== 'TI' && (
               <Button
                 type='primary'
                 onClick={() => startAction('INTEGRAZIONE')}
                 disabled={!canStartIntegrazione}
-                style={actionButtonStyle(buttonColors.integrazione, !canStartIntegrazione, ui)}
+                style={actionButtonStyle(buttonColors.integrazione, !canStartIntegrazione, ui, buttonColors.integrazioneText)}
               >
                 Integrazione
               </Button>
             )}
 
-            {/* RI prima fase: Inoltra a DT — RI seconda fase: pulsanti specifici */}
-            {!riSecondaFase && (
-              <Button
-                type='primary'
-                onClick={() => startAction('APPROVA')}
-                disabled={!canStartApprova}
-                style={actionButtonStyle(buttonColors.approva, !canStartApprova, ui)}
-              >
-                {approvaBtnLabel}
-              </Button>
-            )}
+            <Button
+              type='primary'
+              onClick={() => startAction('APPROVA')}
+              disabled={!canStartApprova}
+              style={actionButtonStyle(
+                (role === 'DT' || role === 'DA') ? buttonColors.approvaRapporto : buttonColors.approva,
+                !canStartApprova, ui,
+                (role === 'DT' || role === 'DA') ? buttonColors.approvaRapportoText : buttonColors.approvaText
+              )}
+            >
+              {approvaBtnLabel}
+            </Button>
 
-            {/* RI seconda fase: Trasmetti a RI AMM */}
-            {riSecondaFase && (
-              <Button
-                type='primary'
-                onClick={() => startAction('TRASMETTI_RI_AMM')}
-                disabled={!canStartTrasmmettiRiAmm}
-                style={actionButtonStyle(buttonColors.approva, !canStartTrasmmettiRiAmm, ui)}
-              >
-                Trasmetti a RI AMM
-              </Button>
-            )}
-
-            {/* RI seconda fase: Rimanda a DT */}
-            {riSecondaFase && (
-              <Button
-                type='primary'
-                onClick={() => startAction('RIMANDA_DT')}
-                disabled={!canStartRimandaDT}
-                style={actionButtonStyle(buttonColors.integrazione, !canStartRimandaDT, ui)}
-              >
-                Rimanda a DT
-              </Button>
-            )}
-
-            {role === 'TI' ? (
+            {role !== 'RI_AMM' && (role === 'TI' ? (
               <Button
                 type='primary'
                 onClick={() => startAction('ELIMINA')}
                 disabled={!canStartElimina}
-                style={actionButtonStyle(buttonColors.respingi, !canStartElimina, ui)}
+                style={actionButtonStyle(buttonColors.respingi, !canStartElimina, ui, buttonColors.respingiText)}
               >
                 Elimina
               </Button>
@@ -3060,11 +3275,11 @@ function ActionsPanel (props: {
                 type='primary'
                 onClick={() => startAction('RESPINGI')}
                 disabled={!canStartRespingi}
-                style={actionButtonStyle(buttonColors.respingi, !canStartRespingi, ui)}
+                style={actionButtonStyle(buttonColors.respingi, !canStartRespingi, ui, buttonColors.respingiText)}
               >
                 Respingi
               </Button>
-            )}
+            ))}
 
             {/* Matrice_DT: il pulsante "Trasmetti a DA" è stato rimosso.
                 DT approva e trasmette a RI tramite il pulsante "Approva e trasmetti a RI". */}
@@ -3239,9 +3454,15 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
   React.useEffect(() => {
     const readRole = () => {
       try {
-        const r = (window as any).__giiUserRole?.ruoloLabel
-        // Se __giiUserRole è assente (logout) o ruolo ADMIN: azzera il ruolo rilevato.
-        setDetectedRole(r && r !== 'ADMIN' ? String(r).toUpperCase() : '')
+        const info = (window as any).__giiUserRole
+        const r = info?.ruoloLabel
+        if (!r || r === 'ADMIN') { setDetectedRole(''); return }
+        let role = String(r).toUpperCase()
+        // RI con area=AMM(1) → RI_AMM, TI con area=AMM(1) → TI_AMM
+        const area = info?.area != null ? Number(info.area) : null
+        if (role === 'RI' && area === 1) role = 'RI_AMM'
+        if (role === 'TI' && area === 1) role = 'TI_AMM'
+        setDetectedRole(role)
       } catch { }
     }
     readRole()
@@ -3252,12 +3473,18 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
   const roleCode = detectedRole
   const buttonText = String(cfg.buttonText || 'Prendi in carico')
 
+  const dc = defaultConfig as any
   const buttonColors: ButtonColors = {
     take: normalizeHexColor(cfg.takeColor, defaultConfig.takeColor),
+    takeText: normalizeHexColor((cfg as any).takeTextColor, dc.takeTextColor),
     integrazione: normalizeHexColor(cfg.integrazioneColor, defaultConfig.integrazioneColor),
+    integrazioneText: normalizeHexColor((cfg as any).integrazioneTextColor, dc.integrazioneTextColor),
     approva: normalizeHexColor(cfg.approvaColor, defaultConfig.approvaColor),
+    approvaText: normalizeHexColor((cfg as any).approvaTextColor, dc.approvaTextColor),
+    approvaRapporto: normalizeHexColor((cfg as any).approvaRapportoColor, dc.approvaRapportoColor),
+    approvaRapportoText: normalizeHexColor((cfg as any).approvaRapportoTextColor, dc.approvaRapportoTextColor),
     respingi: normalizeHexColor(cfg.respingiColor, defaultConfig.respingiColor),
-    trasmetti: normalizeHexColor(cfg.trasmettiColor, defaultConfig.trasmettiColor)
+    respingiText: normalizeHexColor((cfg as any).respingiTextColor, dc.respingiTextColor)
   }
 
   const ui = {

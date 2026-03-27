@@ -111,8 +111,20 @@ export default function Setting(props: Props) {
       {/* ═══ COLORI PULSANTI ═══ */}
       <Acc id='colori' label='🎨 Colori pulsanti' open={isOpen('colori')} onToggle={()=>toggle('colori')}/>
       {isOpen('colori') && <div>
-        {([['takeColor','Prendi in carico'],['integrazioneColor','Integrazione / Rimanda a DT'],['approvaColor','Approva / Inoltra / Trasmetti'],['respingiColor','Respingi / Archivia'],['trasmettiColor','Trasmetti (DA)']] as const).map(([k,lbl])=>(
-          <div key={k}><label style={P.lbl}>{lbl}</label><ColInp value={String(cfgJs[k]??defaultConfig[k])} onChange={v=>patch({[k]:v})}/></div>
+        {([
+          ['takeColor','takeTextColor','Prendi in carico / Assegna TI'],
+          ['approvaColor','approvaTextColor','Trasmetti a …'],
+          ['approvaRapportoColor','approvaRapportoTextColor','Approva Rapporto / Sanzione'],
+          ['integrazioneColor','integrazioneTextColor','Integrazione / Rimanda a DT'],
+          ['respingiColor','respingiTextColor','Respingi / Elimina']
+        ] as const).map(([bgK,txtK,lbl])=>(
+          <div key={bgK} style={{marginBottom:10}}>
+            <div style={{fontSize:11,fontWeight:600,color:'#d1d5db',marginBottom:4}}>{lbl}</div>
+            <div style={P.row2}>
+              <div><div style={{fontSize:10,color:'#a0aec0',marginBottom:3}}>Sfondo</div><ColInp value={String(cfgJs[bgK]??defaultConfig[bgK])} onChange={v=>patch({[bgK]:v})}/></div>
+              <div><div style={{fontSize:10,color:'#a0aec0',marginBottom:3}}>Testo</div><ColInp value={String(cfgJs[txtK]??defaultConfig[txtK])} onChange={v=>patch({[txtK]:v})}/></div>
+            </div>
+          </div>
         ))}
       </div>}
 

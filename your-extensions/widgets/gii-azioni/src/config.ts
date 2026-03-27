@@ -4,12 +4,17 @@ export interface Config {
   // --- Testo pulsante
   buttonText: string
 
-  // --- Colori pulsanti (hex)
+  // --- Colori pulsanti (hex) — sfondo + testo
   takeColor: string
+  takeTextColor: string
   integrazioneColor: string
+  integrazioneTextColor: string
   approvaColor: string
+  approvaTextColor: string
+  approvaRapportoColor: string
+  approvaRapportoTextColor: string
   respingiColor: string
-  trasmettiColor: string
+  respingiTextColor: string
 
   // --- Pannello (sfondo/bordi/spazi)
   panelBg: string
@@ -72,11 +77,16 @@ export interface Config {
 export const defaultConfig: Config = {
   buttonText: 'Prendi in carico',
 
-  takeColor: '#0078da',
+  takeColor: '#feeb22',
+  takeTextColor: '#000000',
   integrazioneColor: '#e75a05',
-  approvaColor: '#328c54',
+  integrazioneTextColor: '#ffffff',
+  approvaColor: '#2f6fed',
+  approvaTextColor: '#ffffff',
+  approvaRapportoColor: '#009246',
+  approvaRapportoTextColor: '#ffffff',
   respingiColor: '#d13438',
-  trasmettiColor: '#6f42c1',
+  respingiTextColor: '#ffffff',
 
   panelBg: '#ffffff',
   panelBorderColor: '#e5e7eb',

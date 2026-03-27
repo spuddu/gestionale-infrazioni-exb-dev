@@ -19,18 +19,6 @@ export interface ColumnDef {
   width: number
 }
 
-/**
- * Larghezze colonne (px)
- */
-export interface ColWidths {
-  pratica: number
-  data: number
-  ufficio: number
-  stato: number
-  ultimo: number
-  prossima: number
-}
-
 export interface Config {
   // --- Etichette filtri (tabs) per datasourceId
   filterTabs: FilterTab[]
@@ -46,22 +34,6 @@ export interface Config {
   fieldPratica: string
   fieldDataRilevazione: string
   fieldUfficio: string
-
-  // --- Campi DT (Direttore Tecnico/Agrario)
-  fieldPresaDT: string
-  fieldDtPresaDT: string
-  fieldStatoDT: string
-  fieldDtStatoDT: string
-  fieldEsitoDT: string
-  fieldDtEsitoDT: string
-
-  // --- Campi DA (Direttore Area Amministrativa)
-  fieldPresaDA: string
-  fieldDtPresaDA: string
-  fieldStatoDA: string
-  fieldDtStatoDA: string
-  fieldEsitoDA: string
-  fieldDtEsitoDA: string
 
   // --- Domini presa in carico
   presaDaPrendereVal: number
@@ -94,19 +66,12 @@ export interface Config {
   whereClause: string
   pageSize: number
 
-  // --- Header labels
+  // --- Header
   showHeader: boolean
-  headerPratica: string
-  headerData: string
-  headerUfficio: string
-  headerStato: string
-  headerUltimoAgg: string
-  headerProssima: string
 
   // --- Layout colonne
   paddingLeftFirstCol: number
   gap: number
-  colWidths: ColWidths
 
   // --- Vista lista
   rowGap: number
@@ -145,9 +110,13 @@ export interface Config {
   chipTextGiallo: string
   chipBorderGiallo: string
 
-  chipBgAzzurro: string      // Preso in carico
+  chipBgAzzurro: string      // In carico → ora è Trasmesso
   chipTextAzzurro: string
   chipBorderAzzurro: string
+
+  chipBgCeleste: string      // In carico
+  chipTextCeleste: string
+  chipBorderCeleste: string
 
   chipBgVerde: string        // Trasmesso a *, Approvato, Verbale trasmesso, Chiusa approvata
   chipTextVerde: string
@@ -194,12 +163,15 @@ export interface Config {
 export type IMConfig = ImmutableObject<Config>
 
 export const DEFAULT_COLUMNS: ColumnDef[] = [
-  { id: 'col_pratica',   label: 'N. pratica',      field: 'objectid',          width: 120 },
-  { id: 'col_data',      label: 'Data rilev.',      field: 'data_rilevazione',  width: 150 },
-  { id: 'col_stato',     label: 'Stato sintetico',  field: '__stato_sint__',    width: 220 },
-  { id: 'col_ufficio',   label: 'Ufficio',          field: 'ufficio_zona',      width: 170 },
-  { id: 'col_ultimo',    label: 'Ultimo agg.',      field: '__ultimo_agg__',    width: 170 },
-  { id: 'col_prossima',  label: 'Posizione Rapporto', field: '__prossima__',      width: 240 }
+  { id: 'col_pratica',   label: 'N. pratica',        field: 'objectid',          width: 120 },
+  { id: 'col_data',      label: 'Data rilev.',        field: 'data_rilevazione',  width: 150 },
+  { id: 'col_stato',     label: 'Stato sintetico',    field: '__stato_sint__',    width: 220 },
+  { id: 'col_ufficio',   label: 'Ufficio',            field: 'ufficio_zona',      width: 170 },
+  { id: 'col_mittente',  label: 'Mittente',           field: '__mittente__',      width: 200 },
+  { id: 'col_causale',   label: 'Causale',            field: '__causale__',       width: 200 },
+  { id: 'col_data_msg',  label: 'Data messaggio',     field: '__data_msg__',      width: 150 },
+  { id: 'col_ultimo',    label: 'Ultimo agg.',        field: '__ultimo_agg__',    width: 170 },
+  { id: 'col_prossima',  label: 'Destinatario',       field: '__prossima__',      width: 240 }
 ]
 
 export const defaultConfig: IMConfig = Immutable({
@@ -213,22 +185,6 @@ export const defaultConfig: IMConfig = Immutable({
   fieldPratica: 'objectid',
   fieldDataRilevazione: 'data_rilevazione',
   fieldUfficio: 'ufficio_zona',
-
-  // DT
-  fieldPresaDT: 'presa_in_carico_DT',
-  fieldDtPresaDT: 'dt_presa_in_carico_DT',
-  fieldStatoDT: 'stato_DT',
-  fieldDtStatoDT: 'dt_stato_DT',
-  fieldEsitoDT: 'esito_DT',
-  fieldDtEsitoDT: 'dt_esito_DT',
-
-  // DA
-  fieldPresaDA: 'presa_in_carico_DA',
-  fieldDtPresaDA: 'dt_presa_in_carico_DA',
-  fieldStatoDA: 'stato_DA',
-  fieldDtStatoDA: 'dt_stato_DA',
-  fieldEsitoDA: 'esito_DA',
-  fieldDtEsitoDA: 'dt_esito_DA',
 
   // Domini presa
   presaDaPrendereVal: 1,
@@ -261,23 +217,9 @@ export const defaultConfig: IMConfig = Immutable({
   pageSize: 200,
 
   showHeader: true,
-  headerPratica: 'N. pratica',
-  headerData: 'Data rilev.',
-  headerUfficio: 'Ufficio',
-  headerStato: 'Stato sintetico',
-  headerUltimoAgg: 'Ultimo agg.',
-  headerProssima: 'Prossima azione',
 
   paddingLeftFirstCol: 0,
   gap: 12,
-  colWidths: {
-    pratica: 120,
-    data: 150,
-    stato: 220,
-    ufficio: 170,
-    ultimo: 170,
-    prossima: 240
-  },
 
   rowGap: 8,
   rowPaddingX: 12,
@@ -315,6 +257,10 @@ export const defaultConfig: IMConfig = Immutable({
   chipBgAzzurro: '#2f6fed',
   chipTextAzzurro: '#ffffff',
   chipBorderAzzurro: '#1d4ed8',
+
+  chipBgCeleste: '#7dd3fc',
+  chipTextCeleste: '#0c4a6e',
+  chipBorderCeleste: '#38bdf8',
 
   chipBgVerde: '#009246',
   chipTextVerde: '#ffffff',

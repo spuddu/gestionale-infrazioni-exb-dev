@@ -132,6 +132,7 @@ export interface Config {
   // --- Nuova pratica inline + mappa
   enableCreateWithoutSelection: boolean
   useMapWidgetIds: string[]
+  mapLayerTitle: string   // titolo del layer rapporti nella mappa (match deterministico)
   officeLonWgs84: number
   officeLatWgs84: number
 
@@ -234,6 +235,7 @@ export const defaultConfig: Config = {
 
   enableCreateWithoutSelection: true,
   useMapWidgetIds: [],
+  mapLayerTitle: '',
   officeLonWgs84: 0,
   officeLatWgs84: 0,
 

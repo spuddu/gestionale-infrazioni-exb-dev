@@ -64,7 +64,10 @@ function Sel(p: { value:string; onChange:(v:string)=>void; options:Array<{value:
 const VIRTUAL_FIELDS: FieldOpt[] = [
   { name:'__stato_sint__', alias:'⚙ Stato sintetico (calcolato)', type:'virtual' },
   { name:'__ultimo_agg__', alias:'⚙ Ultimo aggiornamento (calcolato)', type:'virtual' },
-  { name:'__prossima__',   alias:'⚙ Posizione Rapporto (calcolato)', type:'virtual' },
+  { name:'__prossima__',   alias:'⚙ Destinatario (calcolato)', type:'virtual' },
+  { name:'__mittente__',   alias:'⚙ Mittente (da LOG)', type:'virtual' },
+  { name:'__causale__',    alias:'⚙ Causale (da LOG)', type:'virtual' },
+  { name:'__data_msg__',   alias:'⚙ Data messaggio (da LOG)', type:'virtual' },
 ]
 function FieldSel(p: { value:string; fields:FieldOpt[]; onChange:(v:string)=>void; placeholder?:string; virtual?:boolean }) {
   if(!p.fields.length) return <Inp value={p.value} onChange={p.onChange} placeholder={p.placeholder||'nome campo'}/>
@@ -245,69 +248,6 @@ export default function Setting(props: Props) {
         <Check value={cfg.showHeader!==false} onChange={v=>update('showHeader',v)} label='Mostra intestazioni colonne'/>
       </div>}
 
-      <Acc id='campi' label='🗂 Mapping campi' open={isOpen('campi')} onToggle={()=>toggle('campi')}/>
-      {isOpen('campi') && <div>
-        <div style={P.grp}>Campi base</div>
-        <label style={P.lbl}>N. pratica</label><FieldSel value={cfg.fieldPratica} fields={fields} onChange={v=>update('fieldPratica',v)}/>
-        <label style={P.lbl}>Data rilevazione</label><FieldSel value={cfg.fieldDataRilevazione} fields={fields} onChange={v=>update('fieldDataRilevazione',v)}/>
-        <label style={P.lbl}>Ufficio</label><FieldSel value={cfg.fieldUfficio} fields={fields} onChange={v=>update('fieldUfficio',v)}/>
-
-        <div style={P.grp}>DT (Direttore Tecnico/Agrario)</div>
-        <div style={P.row2}>
-          <div><label style={P.lbl}>presa_in_carico</label><FieldSel value={cfg.fieldPresaDT} fields={fields} onChange={v=>update('fieldPresaDT',v)}/></div>
-          <div><label style={P.lbl}>dt_presa_in_carico</label><FieldSel value={cfg.fieldDtPresaDT} fields={fields} onChange={v=>update('fieldDtPresaDT',v)}/></div>
-        </div>
-        <div style={P.row2}>
-          <div><label style={P.lbl}>stato</label><FieldSel value={cfg.fieldStatoDT} fields={fields} onChange={v=>update('fieldStatoDT',v)}/></div>
-          <div><label style={P.lbl}>dt_stato</label><FieldSel value={cfg.fieldDtStatoDT} fields={fields} onChange={v=>update('fieldDtStatoDT',v)}/></div>
-        </div>
-        <div style={P.row2}>
-          <div><label style={P.lbl}>esito</label><FieldSel value={cfg.fieldEsitoDT} fields={fields} onChange={v=>update('fieldEsitoDT',v)}/></div>
-          <div><label style={P.lbl}>dt_esito</label><FieldSel value={cfg.fieldDtEsitoDT} fields={fields} onChange={v=>update('fieldDtEsitoDT',v)}/></div>
-        </div>
-
-        <div style={P.grp}>DA (Direttore Area Amministrativa)</div>
-        <div style={P.row2}>
-          <div><label style={P.lbl}>presa_in_carico</label><FieldSel value={cfg.fieldPresaDA} fields={fields} onChange={v=>update('fieldPresaDA',v)}/></div>
-          <div><label style={P.lbl}>dt_presa_in_carico</label><FieldSel value={cfg.fieldDtPresaDA} fields={fields} onChange={v=>update('fieldDtPresaDA',v)}/></div>
-        </div>
-        <div style={P.row2}>
-          <div><label style={P.lbl}>stato</label><FieldSel value={cfg.fieldStatoDA} fields={fields} onChange={v=>update('fieldStatoDA',v)}/></div>
-          <div><label style={P.lbl}>dt_stato</label><FieldSel value={cfg.fieldDtStatoDA} fields={fields} onChange={v=>update('fieldDtStatoDA',v)}/></div>
-        </div>
-        <div style={P.row2}>
-          <div><label style={P.lbl}>esito</label><FieldSel value={cfg.fieldEsitoDA} fields={fields} onChange={v=>update('fieldEsitoDA',v)}/></div>
-          <div><label style={P.lbl}>dt_esito</label><FieldSel value={cfg.fieldDtEsitoDA} fields={fields} onChange={v=>update('fieldDtEsitoDA',v)}/></div>
-        </div>
-      </div>}
-
-      <Acc id='domini' label='🏷 Domini e label' open={isOpen('domini')} onToggle={()=>toggle('domini')}/>
-      {isOpen('domini') && <div>
-        <div style={P.grp}>Presa in carico</div>
-        <div style={P.row2}>
-          <div><label style={P.lbl}>Val. "Da prendere"</label><NumInp value={cfg.presaDaPrendereVal} onChange={n=>update('presaDaPrendereVal',n)}/></div>
-          <div><label style={P.lbl}>Val. "Presa"</label><NumInp value={cfg.presaPresaVal} onChange={n=>update('presaPresaVal',n)}/></div>
-        </div>
-        <div style={P.row2}>
-          <div><label style={P.lbl}>Label "Da prendere"</label><Inp value={cfg.labelPresaDaPrendere||''} onChange={v=>update('labelPresaDaPrendere',v)}/></div>
-          <div><label style={P.lbl}>Label "Presa"</label><Inp value={cfg.labelPresaPresa||''} onChange={v=>update('labelPresaPresa',v)}/></div>
-        </div>
-        <div style={P.grp}>Stato (1..5)</div>
-        {([['statoDaPrendereVal','labelStatoDaPrendere','Da prendere'],['statoPresaVal','labelStatoPresa','Presa in carico'],['statoIntegrazioneVal','labelStatoIntegrazione','Integrazione'],['statoApprovataVal','labelStatoApprovata','Approvata'],['statoRespintaVal','labelStatoRespinta','Respinta']] as const).map(([vk,lk,name])=>(
-          <div key={vk} style={P.row2}>
-            <div><label style={P.lbl}>{name} (val)</label><NumInp value={cfg[vk]} onChange={n=>update(vk,n)}/></div>
-            <div><label style={P.lbl}>Label</label><Inp value={cfg[lk]||''} onChange={v=>update(lk,v)}/></div>
-          </div>
-        ))}
-        <div style={P.grp}>Esito (1..3)</div>
-        {([['esitoIntegrazioneVal','labelEsitoIntegrazione','Integrazione'],['esitoApprovataVal','labelEsitoApprovata','Approvata'],['esitoRespintaVal','labelEsitoRespinta','Respinta']] as const).map(([vk,lk,name])=>(
-          <div key={vk} style={P.row2}>
-            <div><label style={P.lbl}>{name} (val)</label><NumInp value={cfg[vk]} onChange={n=>update(vk,n)}/></div>
-            <div><label style={P.lbl}>Label</label><Inp value={cfg[lk]||''} onChange={v=>update(lk,v)}/></div>
-          </div>
-        ))}
-      </div>}
-
       <Acc id='righe' label='🎨 Stile righe' open={isOpen('righe')} onToggle={()=>toggle('righe')}/>
       {isOpen('righe') && <div>
         <div style={P.row3}>
@@ -364,12 +304,12 @@ export default function Setting(props: Props) {
         <div style={P.grp}>Colori</div>
         {([
           { name:'Giallo — Da prendere in carico',   bg:'chipBgGiallo',    text:'chipTextGiallo',    border:'chipBorderGiallo'    },
-          { name:'Azzurro — Preso in carico',         bg:'chipBgAzzurro',   text:'chipTextAzzurro',   border:'chipBorderAzzurro'   },
-          { name:'Verde — Trasmesso / Approvato',     bg:'chipBgVerde',     text:'chipTextVerde',     border:'chipBorderVerde'     },
+          { name:'Azzurro — Trasmesso',             bg:'chipBgAzzurro',   text:'chipTextAzzurro',   border:'chipBorderAzzurro'   },
+          { name:'Celeste — In carico',              bg:'chipBgCeleste',   text:'chipTextCeleste',   border:'chipBorderCeleste'   },
+          { name:'Verde — Rapporto approvato',       bg:'chipBgVerde',     text:'chipTextVerde',     border:'chipBorderVerde'     },
           { name:'Arancione — In attesa di …',        bg:'chipBgArancione', text:'chipTextArancione', border:'chipBorderArancione' },
           { name:'Rosso — Respinto / Eliminato',      bg:'chipBgRosso',     text:'chipTextRosso',     border:'chipBorderRosso'     },
-          { name:'Lilla — Verbale da trasmettere',    bg:'chipBgLilla',     text:'chipTextLilla',     border:'chipBorderLilla'     },
-          { name:'Viola — Verbale notificato',        bg:'chipBgViola',     text:'chipTextViola',     border:'chipBorderViola'     },
+          { name:'Viola — Sanzione approvata',       bg:'chipBgViola',     text:'chipTextViola',     border:'chipBorderViola'     },
           { name:'Neutro — In corso di istruttoria',  bg:'chipBgNeutro',    text:'chipTextNeutro',    border:'chipBorderNeutro'    },
         ] as const).map(({ name, bg, text, border }) => (
           <div key={bg} style={{ marginBottom:12 }}>

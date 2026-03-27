@@ -375,7 +375,6 @@ export default function Setting(props: Props) {
     if (Object.keys(patchObj).length) patch(patchObj)
   }, [primaryDsId, fields.length])
 
-  const reasons = normalizeStrArray(cfgJs.rejectReasons??defaultConfig.rejectReasons)
   const tabs = migrateLegacyFields(cfgJs)
   const tabsWithDefaults = React.useMemo(() => {
     if (!fields.length) return tabs

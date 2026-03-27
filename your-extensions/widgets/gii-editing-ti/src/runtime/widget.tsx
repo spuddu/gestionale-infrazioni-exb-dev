@@ -3890,7 +3890,7 @@ function NuovaPraticaForm (p: {
         tecnico_rilevatore: mode === 'create' ? (createSurveyDefaults?.tecnicoRilevatore || g('tecnico_rilevatore') || null) : (g('tecnico_rilevatore') || null),
         ufficio_zona: mode === 'create' ? (createSurveyDefaults?.ufficioZona || g('ufficio_zona') || null) : (g('ufficio_zona') || null),
         id_ufficio: mode === 'create' ? (createSurveyDefaults?.idUfficio ?? null) : (normalizeIntOrNull(p.initialData?.id_ufficio ?? p.initialData?.['ID ufficio'] ?? p.initialData?.ID_UFFICIO)),
-        data_rilevazione: mode === 'create' ? (toTs(g('data_rilevazione')) || nowTs) : toTs(g('data_rilevazione')),
+        data_rilevazione: mode === 'create' ? nowTs : toTs(g('data_rilevazione')),
         tipologia_soggetto: tipoSogg || null,
         nome: (tipoSogg === 'PF' ? g('nome') : null) || null,
         cognome: (tipoSogg === 'PF' ? g('cognome') : null) || null,
@@ -5351,6 +5351,19 @@ function findMapHostElement (mapWidgetId?: string | null): HTMLElement | null {
   return null
 }
 
+/** Trova il layer dei rapporti nella mappa in modo deterministico (per titolo, senza query) */
+function findRapportiLayer (view: any): any | null {
+  try {
+    const allLayers = view?.map?.allLayers?.toArray?.() || view?.map?.allLayers || []
+    for (const fl of allLayers) {
+      if (fl?.type !== 'feature') continue
+      const title = String(fl.title || '').toLowerCase()
+      if (title.includes('rapporto') && title.includes('infrazioni')) return fl
+    }
+  } catch {}
+  return null
+}
+
 function buildSchemaOnlyDsProxy (args: { url?: string, label?: string, schemaFields?: Array<{ name?: string, alias?: string, type?: string }> }): any {
   const url = String(args?.url || '').trim()
   const label = String(args?.label || getServiceNameFromUrl(url) || 'GII schema locale')
@@ -5751,11 +5764,20 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
         const attrs = feat?.attributes || {}
         const rp = computeReqPoint(attrs)
 
-        if (geom && rp === 1) {
+        if (rp !== 1) {
+          setExistingGeomWgs84(null)
+        } else if (geom) {
           const wgs = await toWgs84Point(geom)
           if (!cancelled) setExistingGeomWgs84(wgs)
         } else {
-          setExistingGeomWgs84(null)
+          // Fallback: se geometry è null ma gli attributi hanno coordinate
+          const attrLat = Number(attrs.latitude ?? attrs.lat ?? attrs.y ?? 0)
+          const attrLon = Number(attrs.longitude ?? attrs.lon ?? attrs.x ?? 0)
+          if (attrLat !== 0 && attrLon !== 0) {
+            if (!cancelled) setExistingGeomWgs84({ x: attrLon, y: attrLat })
+          } else {
+            setExistingGeomWgs84(null)
+          }
         }
       } catch { if (!cancelled) setExistingGeomWgs84(null) }
     })()
@@ -5844,18 +5866,18 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
       const el = rootRef.current
       const isVisible = !!(el && el.offsetWidth > 0 && el.offsetHeight > 0)
       if (isVisible && !wasVisibleRef.current) {
-        // Transizione da nascosto a visibile = ingresso nella pagina
-        console.log('[GII-MAP] Page became visible, incrementing pageVisitCount')
         setPageVisitCount(c => c + 1)
+        // Reset punti ad ogni ingresso nella pagina
+        setClickedPointWgs84(null)
+        setMapClickEnabled(false)
       }
       wasVisibleRef.current = isVisible
     }
     const id = setInterval(check, 300)
-    check() // check iniziale
+    check()
     return () => clearInterval(id)
   }, [])
-  const [uiLocked, setUiLocked] = React.useState(false)
-  const [lockMaskRects, setLockMaskRects] = React.useState<Array<React.CSSProperties>>([])
+  const [uiLocked] = React.useState(false) // mantenuto solo per il CSS z-index del root, mai attivato
   const [createDs, setCreateDs] = React.useState<any | null>(null)
   React.useEffect(() => {
     const schemaUrl = String(cfg.schemaLayerUrl || '').trim() || String(cfg.motherLayerUrl || '').trim()
@@ -5864,83 +5886,6 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
     const ds = buildSchemaOnlyDsProxy({ url: schemaUrl, label: schemaLabel, schemaFields })
     setCreateDs(ds)
   }, [cfg.schemaLayerUrl, cfg.schemaLayerLabel, cfg.motherLayerUrl, JSON.stringify(cfg.schemaFields || [])])
-
-  React.useEffect(() => {
-    if (!uiLocked) {
-      setLockMaskRects([])
-      return
-    }
-    const root = rootRef.current
-    const jmvView = (jimuMapView as any)?.view || null
-    const mapHost = findMapHostElement(mapWidgetId) || (jmvView?.container as HTMLElement | null)?.closest?.('.jimu-widget-map, .jimu-widget.jimu-widget-map, [data-widgetid], [widgetid]') as HTMLElement | null || (jmvView?.container as HTMLElement | null) || null
-    const prevMapPos = mapHost?.style.position ?? ''
-    const prevMapZ = mapHost?.style.zIndex ?? ''
-    if (mapHost) {
-      if (!mapHost.style.position) mapHost.style.position = 'relative'
-      mapHost.style.zIndex = '1002'
-    }
-
-    const widgetHost = root?.closest?.('.jimu-widget, [data-widgetid], .widget-renderer, [widgetid]') as HTMLElement | null
-    const prevWidgetHostPos = widgetHost?.style.position ?? ''
-    const prevWidgetHostZ = widgetHost?.style.zIndex ?? ''
-    if (widgetHost) {
-      if (!widgetHost.style.position) widgetHost.style.position = 'relative'
-      widgetHost.style.zIndex = '1001'
-    }
-
-    const updateMasks = () => {
-      const vw = window.innerWidth || document.documentElement.clientWidth || 0
-      const vh = window.innerHeight || document.documentElement.clientHeight || 0
-      const rects: Array<{ left: number, top: number, right: number, bottom: number }> = []
-      try {
-        const r = root?.getBoundingClientRect?.()
-        if (r && r.width > 0 && r.height > 0) rects.push({ left: Math.max(0, r.left), top: Math.max(0, r.top), right: Math.min(vw, r.right), bottom: Math.min(vh, r.bottom) })
-      } catch {}
-      try {
-        const wh = widgetHost?.getBoundingClientRect?.()
-        if (wh && wh.width > 0 && wh.height > 0) rects.push({ left: Math.max(0, wh.left), top: Math.max(0, wh.top), right: Math.min(vw, wh.right), bottom: Math.min(vh, wh.bottom) })
-      } catch {}
-      try {
-        const m = mapHost?.getBoundingClientRect?.()
-        if (m && m.width > 0 && m.height > 0) rects.push({ left: Math.max(0, m.left), top: Math.max(0, m.top), right: Math.min(vw, m.right), bottom: Math.min(vh, m.bottom) })
-      } catch {}
-
-      if (!rects.length) {
-        setLockMaskRects([])
-        return
-      }
-
-      const pad = 20
-      const left = Math.max(0, Math.min(...rects.map(r => r.left)) - pad)
-      const top = Math.max(0, Math.min(...rects.map(r => r.top)) - pad)
-      const right = Math.min(vw, Math.max(...rects.map(r => r.right)) + pad)
-      const bottom = Math.min(vh, Math.max(...rects.map(r => r.bottom)) + pad)
-
-      const masks: Array<React.CSSProperties> = []
-      if (top > 0) masks.push({ position: 'fixed', left: 0, top: 0, width: '100vw', height: top, background: 'rgba(0,0,0,0.42)', pointerEvents: 'auto', zIndex: 1000 })
-      if (left > 0) masks.push({ position: 'fixed', left: 0, top, width: left, height: Math.max(0, bottom - top), background: 'rgba(0,0,0,0.42)', pointerEvents: 'auto', zIndex: 1000 })
-      if (right < vw) masks.push({ position: 'fixed', left: right, top, width: Math.max(0, vw - right), height: Math.max(0, bottom - top), background: 'rgba(0,0,0,0.42)', pointerEvents: 'auto', zIndex: 1000 })
-      if (bottom < vh) masks.push({ position: 'fixed', left: 0, top: bottom, width: '100vw', height: Math.max(0, vh - bottom), background: 'rgba(0,0,0,0.42)', pointerEvents: 'auto', zIndex: 1000 })
-      setLockMaskRects(masks)
-    }
-
-    updateMasks()
-    window.addEventListener('resize', updateMasks)
-    window.addEventListener('scroll', updateMasks, true)
-    return () => {
-      window.removeEventListener('resize', updateMasks)
-      window.removeEventListener('scroll', updateMasks, true)
-      setLockMaskRects([])
-      if (mapHost) {
-        mapHost.style.position = prevMapPos
-        mapHost.style.zIndex = prevMapZ
-      }
-      if (widgetHost) {
-        widgetHost.style.position = prevWidgetHostPos
-        widgetHost.style.zIndex = prevWidgetHostZ
-      }
-    }
-  }, [uiLocked, mapWidgetId])
 
   const editSelectionMatchesIntent = !!effectiveIntent && !!activeGate?.state && Number(activeGate.state.oid) === Number(effectiveIntent.oid) && String((activeGate.state.ds as any)?.getDataSourceJson?.()?.url || (activeGate.state.ds as any)?.dataSourceJson?.url || (activeGate.state.ds as any)?.layer?.url || '').trim() === String(effectiveIntent.layerUrl || '').trim()
   const inCreateMode = isCreatePage
@@ -5960,152 +5905,112 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
     return computeReqPoint(initialEditData)
   }, [initialEditData])
 
-  // ── Gestione mappa: featureEffect, highlight, zoom ──
+  // ── Gestione mappa: featureEffect, zoom ──
   const mapFeatureLayerViewRef = React.useRef<any>(null)
-  const mapHighlightRef = React.useRef<any>(null)
-  const mapInitialViewpointRef = React.useRef<any>(null)
+  const mapDefaultViewpointRef = React.useRef<any>(null)
 
   React.useEffect(() => {
     const view: any = (jimuMapView as any)?.view
-    console.log('[GII-MAP] Effect fired. view?', !!view, 'view.map?', !!view?.map, 'inCreateMode?', inCreateMode, 'editOid?', editOid, 'editReqPoint?', editReqPoint, 'pageVisitCount?', pageVisitCount)
-    if (!view?.map) { console.log('[GII-MAP] EXIT: no view.map'); return }
+    if (!view?.map) return
 
-    // Salva il viewpoint iniziale (dal Builder) una volta sola
-    if (!mapInitialViewpointRef.current && view.viewpoint) {
-      mapInitialViewpointRef.current = view.viewpoint.clone()
-      console.log('[GII-MAP] Saved initial viewpoint')
+    // Viewpoint di default: usa quello del Builder (initialViewProperties), fallback a view.viewpoint al primo accesso
+    if (!mapDefaultViewpointRef.current) {
+      const builderVp = view.map.initialViewProperties?.viewpoint
+      mapDefaultViewpointRef.current = builderVp ? builderVp.clone() : (view.viewpoint ? view.viewpoint.clone() : null)
     }
 
-    // Pulisci highlight precedente
-    try { mapHighlightRef.current?.remove?.() } catch {}
-    mapHighlightRef.current = null
-
-    // Anti-lampeggio: nascondi la mappa finché il featureEffect non è applicato
+    // Anti-lampeggio: al primo accesso nascondi il container mappa finché il featureEffect non è applicato
     const mapContainer = view.container as HTMLElement | null
-    const needsBlind = !mapFeatureLayerViewRef.current // primo accesso: nessun ref precedente
+    const needsBlind = !mapFeatureLayerViewRef.current
     if (needsBlind && mapContainer) {
       mapContainer.style.opacity = '0'
       mapContainer.style.transition = 'none'
     }
-    // Se c'è un ref precedente, nascondi subito su quello
+    // Se c'è un layerView precedente, nascondi subito i punti su quello
     try {
       if (mapFeatureLayerViewRef.current) {
         mapFeatureLayerViewRef.current.featureEffect = { filter: { where: '1=0' }, excludedEffect: 'opacity(0)' }
       }
     } catch {}
 
+    // Trova il layer rapporti in modo deterministico (per titolo, nessuna query)
+    const rapportiLayer = findRapportiLayer(view)
     const isEdit = !inCreateMode && editOid != null && Number.isFinite(editOid)
     const idField = editIdFieldName || 'OBJECTID'
     let cancelled = false
+    const showMap = () => { if (needsBlind && mapContainer) mapContainer.style.opacity = '1' }
 
-    // ────────────────────────────────────────
-    // CREATE MODE: nascondi tutti i punti, zoom default
-    // ────────────────────────────────────────
+    // ── CREATE MODE ──
     if (!isEdit) {
-      console.log('[GII-MAP] CREATE MODE. mapInitialViewpoint?', !!mapInitialViewpointRef.current)
-      if (mapInitialViewpointRef.current) {
-        view.goTo(mapInitialViewpointRef.current, { duration: 400 }).catch(() => {})
-        console.log('[GII-MAP] CREATE: goTo default viewpoint')
+      // Zoom al default del Builder
+      if (mapDefaultViewpointRef.current) {
+        view.goTo(mapDefaultViewpointRef.current, { duration: 400 }).catch(() => {})
       }
 
+      if (rapportiLayer) {
+        ;(async () => {
+          try {
+            const lv = await view.whenLayerView(rapportiLayer)
+            if (cancelled) { showMap(); return }
+            lv.featureEffect = { filter: { where: '1=0' }, excludedEffect: 'opacity(0)' }
+            mapFeatureLayerViewRef.current = lv
+          } catch {}
+          showMap()
+        })()
+      } else {
+        showMap()
+      }
+
+      return () => { cancelled = true }
+    }
+
+    // ── EDIT MODE ──
+    // Se reqPoint=0, zoom al default
+    if (editReqPoint === 0 && mapDefaultViewpointRef.current) {
+      view.goTo(mapDefaultViewpointRef.current, { duration: 400 }).catch(() => {})
+    }
+
+    if (rapportiLayer) {
       ;(async () => {
         try {
-          const allLayers = view.map.allLayers?.toArray?.() || view.map.allLayers || []
-          const featureLayers = allLayers.filter((l: any) => l?.type === 'feature' && typeof l?.queryFeatures === 'function')
-          console.log('[GII-MAP] CREATE: found', featureLayers.length, 'FeatureLayers. titles:', featureLayers.map((l: any) => l.title || l.id || 'unknown'))
+          const lv = await view.whenLayerView(rapportiLayer)
+          if (cancelled) { showMap(); return }
+          mapFeatureLayerViewRef.current = lv
 
-          for (const fl of featureLayers) {
-            if (cancelled) return
-            try {
-              console.log('[GII-MAP] CREATE: querying layer', fl.title || fl.id, 'url:', fl.url)
-              const res = await fl.queryFeatures({ where: '1=1', outFields: ['OBJECTID'], returnGeometry: true, num: 1 })
-              const feat = res?.features?.[0]
-              console.log('[GII-MAP] CREATE: query result. feat?', !!feat, 'geometry?', feat?.geometry?.type)
-              if (!feat || cancelled) continue
-              const geomType = String(feat?.geometry?.type || '').toLowerCase()
-              if (geomType !== 'point') { console.log('[GII-MAP] CREATE: skip, not point:', geomType); continue }
+          // Cerca la feature per OID
+          const res = await rapportiLayer.queryFeatures({ where: `${idField} = ${editOid}`, returnGeometry: true, outFields: ['*'] })
+          const feat = res?.features?.[0]
+          if (!feat || cancelled) { lv.featureEffect = { filter: { where: '1=0' }, excludedEffect: 'opacity(0)' }; showMap(); return }
 
-              console.log('[GII-MAP] CREATE: FOUND point layer:', fl.title || fl.id, '→ applying featureEffect 1=0')
-              const lv = await view.whenLayerView(fl)
-              if (cancelled) return
-              lv.featureEffect = { filter: { where: '1=0' }, excludedEffect: 'opacity(0)' }
-              mapFeatureLayerViewRef.current = lv
-              // Rimostro la mappa se era nascosta per anti-lampeggio
-              if (needsBlind && mapContainer) { mapContainer.style.opacity = '1' }
-              console.log('[GII-MAP] CREATE: featureEffect applied. lv.featureEffect:', JSON.stringify(lv.featureEffect))
-              break
-            } catch (e) { console.log('[GII-MAP] CREATE: error on layer', fl.title, e) }
-          }
-        } catch (e) { console.log('[GII-MAP] CREATE: outer error', e) }
-        // Safety: rimostro la mappa anche se non ho trovato il layer punto
-        if (needsBlind && mapContainer) { mapContainer.style.opacity = '1' }
-      })()
+          const g = feat.geometry
+          const gx = g ? (g.x ?? g.longitude ?? 0) : 0
+          const gy = g ? (g.y ?? g.latitude ?? 0) : 0
+          const gValid = !!g && !(Number(gx) === 0 && Number(gy) === 0)
 
-      return () => {
-        console.log('[GII-MAP] CREATE CLEANUP fired')
-        cancelled = true
-        // NON ripristinare featureEffect — il prossimo effetto lo sovrascrive subito (anti-lampeggio)
-      }
-    }
-
-    // ────────────────────────────────────────
-    // EDIT MODE: mostra solo il punto selezionato, zoom su di esso
-    // ────────────────────────────────────────
-    console.log('[GII-MAP] EDIT MODE. editOid:', editOid, 'editReqPoint:', editReqPoint)
-    if (editReqPoint === 0 && mapInitialViewpointRef.current) {
-      view.goTo(mapInitialViewpointRef.current, { duration: 400 }).catch(() => {})
-      console.log('[GII-MAP] EDIT: reqPoint=0, goTo default')
-    }
-
-    ;(async () => {
-      try {
-        const allLayers = view.map.allLayers?.toArray?.() || view.map.allLayers || []
-        const featureLayers = allLayers.filter((l: any) => l?.type === 'feature' && typeof l?.queryFeatures === 'function')
-        console.log('[GII-MAP] EDIT: found', featureLayers.length, 'FeatureLayers')
-
-        for (const fl of featureLayers) {
-          if (cancelled) return
-          try {
-            console.log('[GII-MAP] EDIT: querying layer', fl.title || fl.id, 'for OID', editOid)
-            const res = await fl.queryFeatures({ where: `${idField} = ${editOid}`, returnGeometry: true, outFields: [idField] })
-            const feat = res?.features?.[0]
-            if (!feat || cancelled) { console.log('[GII-MAP] EDIT: OID not found in', fl.title); continue }
-
-            console.log('[GII-MAP] EDIT: FOUND in', fl.title, 'geometry?', !!feat.geometry)
-            const lv = await view.whenLayerView(fl)
-            if (cancelled) return
-            mapFeatureLayerViewRef.current = lv
-
-            const g = feat.geometry
-            const gx = g ? (g.x ?? g.longitude ?? 0) : 0
-            const gy = g ? (g.y ?? g.latitude ?? 0) : 0
-            const hasRealGeom = !!g && !(Number(gx) === 0 && Number(gy) === 0)
-            console.log('[GII-MAP] EDIT: hasRealGeom?', hasRealGeom, 'editReqPoint:', editReqPoint, 'gx:', gx, 'gy:', gy)
-
-            if (hasRealGeom && editReqPoint === 1) {
-              lv.featureEffect = { filter: { where: `${idField} = ${editOid}` }, excludedEffect: 'opacity(0)' }
-              view.goTo({ target: g, zoom: Math.max(view.zoom || 15, 15) }, { duration: 600 }).catch(() => {})
-              console.log('[GII-MAP] EDIT: showing single point + zoom')
-            } else {
-              lv.featureEffect = { filter: { where: '1=0' }, excludedEffect: 'opacity(0)' }
-              console.log('[GII-MAP] EDIT: hiding all points')
+          // Costruisci targetGeom: geometry reale oppure fallback da attributi lat/lon
+          let targetGeom: any = gValid ? g : null
+          if (!targetGeom && feat.attributes) {
+            const attrLat = Number(feat.attributes.latitude ?? feat.attributes.lat ?? feat.attributes.y ?? 0)
+            const attrLon = Number(feat.attributes.longitude ?? feat.attributes.lon ?? feat.attributes.x ?? 0)
+            if (attrLat !== 0 && attrLon !== 0) {
+              targetGeom = { type: 'point', longitude: attrLon, latitude: attrLat, spatialReference: { wkid: 4326 } }
             }
-            if (needsBlind && mapContainer) { mapContainer.style.opacity = '1' }
-            break
-          } catch (e) { console.log('[GII-MAP] EDIT: error on layer', fl.title, e) }
-        }
-      } catch (e) { console.log('[GII-MAP] EDIT: outer error', e) }
-      // Safety: rimostro la mappa anche se non ho trovato il layer
-      if (needsBlind && mapContainer) { mapContainer.style.opacity = '1' }
-    })()
+          }
 
-    return () => {
-      console.log('[GII-MAP] EDIT CLEANUP fired')
-      cancelled = true
-      try { mapHighlightRef.current?.remove?.() } catch {}
-      mapHighlightRef.current = null
-      // NON ripristinare featureEffect — il prossimo effetto lo sovrascrive subito (anti-lampeggio)
+          if (targetGeom && editReqPoint === 1) {
+            lv.featureEffect = { filter: { where: `${idField} = ${editOid}` }, excludedEffect: 'opacity(0)' }
+            view.goTo({ target: targetGeom, zoom: Math.max(view.zoom || 15, 15) }, { duration: 600 }).catch(() => {})
+          } else {
+            lv.featureEffect = { filter: { where: '1=0' }, excludedEffect: 'opacity(0)' }
+          }
+        } catch {}
+        showMap()
+      })()
+    } else {
+      showMap()
     }
+
+    return () => { cancelled = true }
   }, [jimuMapView, editOid, editIdFieldName, inCreateMode, editReqPoint, pageVisitCount])
 
   return (
@@ -6137,7 +6042,7 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
           editLayerUrl={!inCreateMode ? ensureLayerIndex(normalizeFeatureLayerUrl(effectiveIntent?.layerUrl || activeGate?.state?.layerUrl || readDynamicSelection().layerUrl || '')) : ''}
           titleText={inCreateMode ? 'Nuovo rapporto' : 'Modifica rapporto'}
           saveText={'Salva'}
-          onDirtyChange={setUiLocked}
+          onDirtyChange={() => {}}
           onSaved={(savedOid: number, savedData?: any) => {
             if (inCreateMode) {
               clearEditIntent()
@@ -6163,7 +6068,6 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
       ) : (
         <div style={{ padding: 12 }}>{!inCreateMode ? "Record di modifica non disponibile: torna all'elenco e riapri Modifica." : 'Datasource dinamica non pronta: configura il layer schema oppure seleziona una pratica.'}</div>
       )}
-      {lockMaskRects.map((styleObj, idx) => <div key={`mask-${idx}`} aria-hidden='true' style={styleObj} />)}
     </div>
   )
 }

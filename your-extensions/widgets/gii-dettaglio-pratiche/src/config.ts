@@ -1,7 +1,5 @@
 import { type ImmutableObject, Immutable } from 'jimu-core'
 
-export type RoleCode = 'DT' | 'DA' | 'RZ'
-
 export interface TabConfig {
   id: string // univoco (es. 'anagrafica', 'violazione', 'iter', 'allegati', 'azioni')
   label: string // nome visualizzato nella tab
@@ -125,17 +123,6 @@ export interface FieldPreset {
 }
 
 export interface Config {
-  // --- Ruolo
-  roleCode: RoleCode
-  buttonText: string
-
-  // --- Colori pulsanti (hex)
-  takeColor: string
-  integrazioneColor: string
-  approvaColor: string
-  respingiColor: string
-  trasmettiColor: string
-
   // --- Pannello (sfondo/bordi/spazi)
   panelBg: string
   panelBorderColor: string
@@ -170,13 +157,6 @@ export interface Config {
   // --- Sfondo titolo pratica
   detailTitleBg: string
 
-  // --- Stile pulsanti principali
-  btnBorderRadius: number
-  btnFontSize: number
-  btnFontWeight: number
-  btnPaddingX: number
-  btnPaddingY: number
-
   // --- Pulsanti editing TI
   showEditButtons: boolean          // mostra/nasconde i pulsanti modifica
   editOverlayColor: string          // colore pulsante "Modifica (overlay)"
@@ -189,16 +169,6 @@ export interface Config {
   editMinStato: number              // valore minimo stato_TI per consentire editing
   editMaxStato: number              // valore massimo stato_TI per consentire editing
   editPresaRequiredVal: number      // valore presa_in_carico_TI richiesto (es. 2 = presa)
-
-  // --- Motivazioni respinta
-  rejectReasons: string[]
-
-  // --- Zebra list motivazioni (solo setting)
-  reasonsZebraOddBg: string
-  reasonsZebraEvenBg: string
-  reasonsRowBorderColor: string
-  reasonsRowBorderWidth: number
-  reasonsRowRadius: number
 
   // --- TAB CONFIGURABILI
   tabs: TabConfig[]
@@ -215,15 +185,6 @@ export interface Config {
 }
 
 export const defaultConfig: Config = {
-  roleCode: 'DT',
-  buttonText: 'Prendi in carico',
-
-  takeColor: '#0078da',
-  integrazioneColor: '#e75a05',
-  approvaColor: '#328c54',
-  respingiColor: '#d13438',
-  trasmettiColor: '#6f42c1',
-
   panelBg: '#ffffff',
   panelBorderColor: '#e5e7eb',
   panelBorderWidth: 1,
@@ -255,33 +216,12 @@ export const defaultConfig: Config = {
 
   detailTitleBg: 'transparent',
 
-  btnBorderRadius: 8,
-  btnFontSize: 14,
-  btnFontWeight: 600,
-  btnPaddingX: 14,
-  btnPaddingY: 10,
-
-  rejectReasons: [
-    'Mancanza requisiti',
-    'Documentazione incompleta',
-    'Dati incoerenti',
-    'Richiesta non ammissibile',
-    'Altro'
-  ],
-
-  reasonsZebraOddBg: '#ffffff',
-  reasonsZebraEvenBg: '#f6f7f9',
-  reasonsRowBorderColor: 'rgba(0,0,0,0.10)',
-  reasonsRowBorderWidth: 1,
-  reasonsRowRadius: 8,
-
   // Tab di default
   tabs: [
     { id: 'anagrafica', label: 'Anagrafica', fields: DETAIL_DEFAULT_TAB_FIELDS.anagrafica, hideEmpty: true },
     { id: 'violazione', label: 'Violazione', fields: DETAIL_DEFAULT_TAB_FIELDS.violazione, hideEmpty: true },
     { id: 'iter', label: 'Iter', fields: DETAIL_DEFAULT_TAB_FIELDS.iterExtra, isIterTab: true, hideEmpty: false },
-    { id: 'allegati', label: 'Allegati', fields: DETAIL_DEFAULT_TAB_FIELDS.allegati, hideEmpty: true },
-    { id: 'azioni', label: 'Azioni', fields: [], locked: true }
+    { id: 'allegati', label: 'Allegati', fields: DETAIL_DEFAULT_TAB_FIELDS.allegati, hideEmpty: true }
   ],
 
   // Editing TI
