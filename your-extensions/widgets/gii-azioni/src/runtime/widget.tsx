@@ -2862,33 +2862,20 @@ function ActionsPanel (props: {
         } catch {}
       }
 
-      // wasIntegResponse: controlla il LOG per sapere se siamo nella catena di un'integrazione.
-      // Cerca l'ultima INTEGRAZIONE_RICHIESTA per questa pratica.
-      // Se esiste e NON è stata richiesta dal ruolo corrente → siamo nella catena → INTEGRAZIONE_TRASMESSA.
-      // Se è stata richiesta dal ruolo corrente → l'integrazione è risolta → ISTRUTTORIA_TRASMESSA.
+      // wasIntegResponse: verifica se un ruolo (diverso da quello corrente) ha esito=INTEGRAZIONE
+      // pendente nel record. Se sì, la trasmissione è una risposta a integrazioni → INTEGRAZIONE_TRASMESSA.
+      // Altrimenti → ISTRUTTORIA_TRASMESSA. I dati sono già nel record, zero query al LOG.
       let wasIntegResponse = false
       if (esito === ESITO_APPROVATA && ruoloDest) {
-        try {
-          const { parentGlobalId } = getCurrentCycleContext()
-          if (parentGlobalId) {
-            const logLayer = await getCycleLogLayer()
-            if (logLayer?.queryFeatures) {
-              const q = logLayer.createQuery ? logLayer.createQuery() : {} as any
-              q.where = `parent_globalid = '${parentGlobalId.replace(/'/g, "''")}' AND stato_record = 'CHIUSO' AND evento_chiusura LIKE 'INTEGRAZIONE_RICHIESTA%'`
-              q.outFields = ['ruolo_competente', 'dt_chiusura']
-              q.orderByFields = ['dt_chiusura DESC']
-              q.returnGeometry = false
-              q.num = 1
-              const logRes = await logLayer.queryFeatures(q)
-              const lastReq = logRes?.features?.[0]?.attributes
-              if (lastReq) {
-                const requester = String(lastReq.ruolo_competente || '').toUpperCase()
-                // Se il richiedente NON è il ruolo corrente → siamo nella catena
-                if (requester !== role) wasIntegResponse = true
-              }
-            }
+        const allRoles = ['TR', 'TI', 'RZ', 'RI', 'DT', 'DA', 'RI_AMM', 'TI_AMM']
+        for (const r of allRoles) {
+          if (r === role) continue
+          const esitoR = toNumOrNull(pickAttrCI(data, [`esito_${r}`, `ESITO_${r}`]))
+          if (esitoR === ESITO_INTEGRAZIONE) {
+            wasIntegResponse = true
+            break
           }
-        } catch {}
+        }
       }
 
       await runApplyEdits(upd, `Esito salvato: ${label}.`)

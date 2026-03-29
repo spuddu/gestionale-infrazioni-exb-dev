@@ -469,10 +469,13 @@ type UtentiEntry = {
   settore: number | null
 }
 
+const AREA_FROM_CODE: Record<number, string> = { 1:'AMM', 2:'AGR', 3:'TEC' }
+const SETTORE_FROM_CODE: Record<number, string> = { 1:'CR', 2:'GI', 3:'D1', 4:'D2', 5:'D3', 6:'D4', 7:'D5', 8:'D6', 9:'CS' }
+
 /**
- * Formatta una persona (mittente o destinatario) dal LOG nel formato:
+ * Formatta una persona (mittente) dal LOG nel formato:
  *   "RUOLO-SETTORE/AREA - Nome Cognome"
- * Es: "RZ-D1 - Giuseppe Secchi", "DIR-AGR - Pierfrancesco Testa"
+ * Usa area/settore dal LOG (dato storico del mittente).
  */
 function formatPersona (
   ruolo: string, area: string, settore: string,
@@ -482,6 +485,25 @@ function formatPersona (
   const uname = String(username || '').trim().toLowerCase()
   const utente = utentiMap?.get(uname)
   const nome = String(utente?.full_name || '').trim()
+  return nome ? `${prefix} - ${nome}` : prefix
+}
+
+/**
+ * Formatta il destinatario dal LOG.
+ * Usa area/settore dal profilo del destinatario in GII_utenti (non dal LOG,
+ * perché il LOG registra area/settore del mittente, non del destinatario).
+ * Fallback ai valori del LOG se il destinatario non è in cache.
+ */
+function formatPersonaDest (
+  ruoloDest: string, logArea: string, logSettore: string,
+  usernameDest: string, utentiMap: Map<string, UtentiEntry> | null
+): string {
+  const uname = String(usernameDest || '').trim().toLowerCase()
+  const destEntry = utentiMap?.get(uname)
+  const destArea = destEntry ? (AREA_FROM_CODE[destEntry.area ?? 0] || logArea) : logArea
+  const destSettore = destEntry ? (SETTORE_FROM_CODE[destEntry.settore ?? 0] || logSettore) : logSettore
+  const prefix = formatRolePrefix(ruoloDest, destArea, destSettore)
+  const nome = String(destEntry?.full_name || '').trim()
   return nome ? `${prefix} - ${nome}` : prefix
 }
 
@@ -1570,24 +1592,23 @@ React.useEffect(() => {
   }
 
   // Destinatario di trasmissione positiva per ruolo — dipende dal contesto del record.
-  // RI punta a DT in fase ordinaria, a RI_AMM in seconda fase (dopo approvazione DT).
+  // DT approva e trasmette direttamente a RI_AMM (attiva fase sanzionatoria).
   // RI_AMM punta a TI_AMM in prima assegnazione, a DA dopo che TI_AMM ha restituito.
+  // DT approva e trasmette direttamente a RI_AMM (avvia fase sanzionatoria).
+  // DA approva e trasmette a TI_AMM (per verbale/PEC).
   const getFwdDest = (role: string, d: any): string => {
     switch (role) {
       case 'TI':     return 'RZ'
       case 'RZ':     return 'RI'
-      case 'DT':     return 'RI'
-      case 'RI': {
-        const esitoDT = pickField(d, 'esito_DT')
-        const n = esitoDT !== null && esitoDT !== undefined && esitoDT !== '' ? Number(esitoDT) : null
-        return (n === esitoApprovata) ? 'RI_AMM' : 'DT'
-      }
+      case 'RI':     return 'DT'
+      case 'DT':     return 'RI_AMM'
       case 'RI_AMM': {
         const esitoTiAmm = pickField(d, 'esito_TI_AMM')
         const n = esitoTiAmm !== null && esitoTiAmm !== undefined && esitoTiAmm !== '' ? Number(esitoTiAmm) : null
         return (n !== null) ? 'DA' : 'TI_AMM'
       }
       case 'TI_AMM': return 'RI_AMM'
+      case 'DA':     return 'TI_AMM'
       default:       return ''
     }
   }
@@ -1868,7 +1889,7 @@ React.useEffect(() => {
     if (field === V_ULTIMO) return computeUltimoAggMs(d)
     if (field === V_PROSSIMA) {
       const log = getLogForRecord(d)
-      return log?.ruoloDest ? formatPersona(log.ruoloDest, log.area, log.settore, log.utenteDest, utentiMapRef.current) : ''
+      return log?.ruoloDest ? formatPersonaDest(log.ruoloDest, log.area, log.settore, log.utenteDest, utentiMapRef.current) : ''
     }
     if (field === V_MITTENTE) {
       const log = getLogForRecord(d)
@@ -2670,7 +2691,7 @@ React.useEffect(() => {
                       if (_logEntry) {
                         mittenteVal = formatPersona(_logEntry.ruolo, _logEntry.area, _logEntry.settore, _logEntry.utente, utentiMapRef.current)
                         destinatario = _logEntry.ruoloDest
-                          ? formatPersona(_logEntry.ruoloDest, _logEntry.area, _logEntry.settore, _logEntry.utenteDest, utentiMapRef.current)
+                          ? formatPersonaDest(_logEntry.ruoloDest, _logEntry.area, _logEntry.settore, _logEntry.utenteDest, utentiMapRef.current)
                           : '—'
                         causaleVal = formatCausale(_logEntry.evento)
                         dataMsgVal = _logEntry.dt ? formatDateIt(_logEntry.dt) : '—'

@@ -204,6 +204,11 @@ export default function Setting(props: AllWidgetSettingProps<IMConfig>) {
         </label>
         <div style={P.hint}>Se attivo, il widget entra in modalità CREATE quando non c&apos;è alcuna selezione nell&apos;Elenco.</div>
 
+        <label style={P.lbl}>Pagina Modifica (slug)</label>
+        <input type='text' value={cfg.editPageId || ''} onChange={e=>set('editPageId',e.target.value.trim())}
+          style={{...P.inp, marginTop:4}} placeholder='es. Modifica-Rapporto'/>
+        <div style={P.hint}>Slug della pagina ExB di modifica rapporto (come appare nell&apos;URL dopo /page/). Al salvataggio di un nuovo rapporto, l&apos;utente viene reindirizzato qui.</div>
+
         <label style={P.lbl}>Coordinate ufficio (WGS84)</label>
         <div style={{ display:'flex', gap: 10, alignItems:'center', flexWrap:'wrap' }}>
           <div style={{ flex:'0 0 auto' }}>

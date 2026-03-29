@@ -1,6 +1,6 @@
 /** @jsx jsx */
 /** @jsxFrag React.Fragment */
-import { React, jsx, type AllWidgetProps, DataSourceComponent, DataSourceManager } from 'jimu-core'
+import { React, jsx, type AllWidgetProps, DataSourceComponent, DataSourceManager, UrlManager, getAppStore } from 'jimu-core'
 import { JimuMapViewComponent, type JimuMapView } from 'jimu-arcgis'
 import { Button } from 'jimu-ui'
 import { createPortal } from 'react-dom'
@@ -95,6 +95,41 @@ function loadEsriModule<T = any> (path: string): Promise<T> {
       reject(e)
     }
   })
+}
+
+/** Normalizza un token rimuovendo trattini/spazi per confronto fuzzy slug↔label */
+function normPageToken (s: string): string {
+  return s.toLowerCase().replace(/[-_\s]+/g, '')
+}
+
+/** Risolve un page token (slug/name/id/label) al pageId reale ExB — pattern condiviso con gii-nav */
+function resolvePageId (pageTokenRaw: string): string | null {
+  const tok0 = (pageTokenRaw || '').trim()
+  if (!tok0) return null
+  let tok = tok0.replace(/^#+\/?/, '').replace(/^\/+/, '')
+  if (tok.startsWith('page/')) tok = tok.slice(5)
+  try {
+    const state: any = getAppStore()?.getState?.()
+    const appConfig: any = state?.appConfig
+    const rawPages: any = appConfig?.pages ?? {}
+    const pagesMap: Record<string, any> =
+      rawPages?.asMutable ? rawPages.asMutable({ deep: true }) :
+      rawPages?.toJS ? rawPages.toJS() :
+      rawPages
+    if (pagesMap && pagesMap[tok]) return tok
+    const hist = appConfig?.historyLabels?.page || {}
+    const tokNorm = normPageToken(tok)
+    for (const [pageId, pg] of Object.entries(pagesMap || {})) {
+      if (!pg) continue
+      if ((pg as any).name === tok) return pageId
+      if (hist && hist[pageId] === tok) return pageId
+      if ((pg as any).label === tok || (pg as any).title === tok) return pageId
+      // Match normalizzato: slug URL (trattini) ↔ label (spazi)
+      if (normPageToken((pg as any).label || '') === tokNorm) return pageId
+      if (normPageToken((pg as any).title || '') === tokNorm) return pageId
+    }
+  } catch { /* ignore */ }
+  return null
 }
 
 // In Experience Builder, una Data View / Output Data Source può non esporre direttamente un FeatureLayer.
@@ -3121,6 +3156,8 @@ function NuovaPraticaForm (p: {
   const [msg, setMsg] = React.useState<{ kind: 'ok' | 'err'; text: string } | null>(null)
   const [showCreateSuccessPopup, setShowCreateSuccessPopup] = React.useState(false)
   const [createSuccessPraticaCode, setCreateSuccessPraticaCode] = React.useState('')
+  const [createdRecordInfo, setCreatedRecordInfo] = React.useState<{ oid: number; layerUrl: string; data: any } | null>(null)
+  const createdRecordInfoRef = React.useRef<{ oid: number; layerUrl: string; data: any } | null>(null)
   const [validationPopup, setValidationPopup] = React.useState<{ title: string; text: string } | null>(null)
   const validationPopupOkId = React.useMemo(() => `gii-val-ok-${Math.random().toString(36).slice(2)}`, [])
   const validationPopupBackdropId = React.useMemo(() => `gii-val-backdrop-${Math.random().toString(36).slice(2)}`, [])
@@ -3153,17 +3190,62 @@ function NuovaPraticaForm (p: {
     }
   }, [validationPopup, validationPopupOkId])
 
+  const [npTab, setNpTab] = React.useState<'anagrafica' | 'violazione' | 'allegati'>(() => {
+    if (mode !== 'edit') return 'anagrafica'
+    try {
+      const saved = sessionStorage.getItem('GII_EDIT_TAB')
+      if (saved === 'anagrafica' || saved === 'violazione' || saved === 'allegati') {
+        sessionStorage.removeItem('GII_EDIT_TAB')
+        return saved
+      }
+    } catch {}
+    return 'anagrafica'
+  })
+  const skipNpTabSyncRef = React.useRef(false)
+
+  React.useEffect(() => {
+    if (skipNpTabSyncRef.current) { skipNpTabSyncRef.current = false; return }
+    try { sessionStorage.setItem('GII_EDIT_TAB', npTab) } catch {}
+  }, [npTab])
+
+  const navigateToEditAfterCreate = React.useCallback(() => {
+    const info = createdRecordInfoRef.current
+    if (!info) return
+    const ei: EditIntentInfo = { oid: info.oid, layerUrl: info.layerUrl, idFieldName: 'OBJECTID', data: info.data, ts: Date.now() }
+    writeEditIntent(ei)
+    try { ;(window as any).__giiEdit = { ...ei, dsId: null } } catch {}
+    writeDynamicSelection({ oid: info.oid, layerUrl: info.layerUrl, idFieldName: 'OBJECTID', data: info.data })
+    // GII_EDIT_TAB ha già il valore corrente (scritto dal useEffect di sync)
+    // Reset form per quando l'utente torna alla pagina create
+    createdRecordInfoRef.current = null
+    setCreatedRecordInfo(null)
+    setDraft({})
+    setBaselineDraft({})
+    setMsg(null)
+    skipNpTabSyncRef.current = true
+    setNpTab('anagrafica')
+    const pageToken = String(cfg.editPageId || 'editing-ti').trim()
+    const pageId = resolvePageId(pageToken)
+    if (pageId) {
+      UrlManager.getInstance().changePage(pageId)
+      return
+    }
+    // Fallback best-effort
+    const t = pageToken.startsWith('page/') ? pageToken.slice(5) : pageToken
+    window.location.hash = `#/page/${t}`
+  }, [cfg.editPageId])
+
   React.useEffect(() => {
     if (!showCreateSuccessPopup) return
     const doc = getGlobalOverlayDocument()
     if (!doc) return
     const btn = doc.getElementById(successPopupOkId)
-    const close = () => { setShowCreateSuccessPopup(false); setCreateSuccessPraticaCode('') }
+    const close = () => { setShowCreateSuccessPopup(false); setCreateSuccessPraticaCode(''); navigateToEditAfterCreate() }
     btn?.addEventListener('click', close, true)
     return () => {
       btn?.removeEventListener('click', close, true)
     }
-  }, [showCreateSuccessPopup, successPopupOkId])
+  }, [showCreateSuccessPopup, successPopupOkId, navigateToEditAfterCreate])
   const createStartedAtRef = React.useRef<number>(Date.now())
   const [attachmentFiles, setAttachmentFiles] = React.useState<File[]>([])
   const [attachmentInputKey, setAttachmentInputKey] = React.useState(0)
@@ -3267,8 +3349,6 @@ function NuovaPraticaForm (p: {
     setAttachments([])
     setAttachmentsForOid(null)
   }, [mode, currentOid])
-
-  const [npTab, setNpTab] = React.useState<'anagrafica' | 'violazione' | 'allegati'>('anagrafica')
 
   const formatBytesLocal = React.useCallback((n?: number) => {
     if (n == null || isNaN(Number(n))) return ''
@@ -3998,19 +4078,15 @@ function NuovaPraticaForm (p: {
 
       // In create mode NON aggiornare la datasource schema/base e NON provare a selezionare il nuovo OID:
       // queste due operazioni possono riattivare il banner credenziali quando la pagina usa solo lo schema.
+      const createdLayerUrl = ensureLayerIndex(normalizeFeatureLayerUrl(layer?.url || ''))
+      const recordInfo = { oid: newOid, layerUrl: createdLayerUrl, data: { ...cleanAttrs } }
+      setCreatedRecordInfo(recordInfo)
+      createdRecordInfoRef.current = recordInfo
       setMsg({ kind: 'ok', text: 'Pratica creata.' })
       setSaving(false)
-      setTimeout(() => {
-        createStartedAtRef.current = Date.now()
-        setDraft({})
-        setBaselineDraft({})
-        setMsg(null)
-        setNpTab('anagrafica')
-        p.onClearPoint()
-        setCreateSuccessPraticaCode(newPraticaCode)
-        setShowCreateSuccessPopup(true)
-        p.onSaved?.(newOid)
-      }, 600)
+      setCreateSuccessPraticaCode(newPraticaCode)
+      setShowCreateSuccessPopup(true)
+      p.onSaved?.(newOid)
     } catch (e: any) {
       setSaving(false)
       setMsg({ kind: 'err', text: `Errore: ${e?.message || String(e)}` })
@@ -4585,14 +4661,13 @@ function NuovaPraticaForm (p: {
                   Numero rapporto assegnato: <span style={{ color: '#15803d', fontSize: 14, fontFamily: 'monospace' }}>{createSuccessPraticaCode}</span>
                 </div>
               )}
-              <div>La maschera è tornata vuota ed è pronta per un nuovo inserimento.</div>
-              <div>Per visualizzare il rapporto appena inserito nell'elenco, è necessario fare clic su <b>Aggiorna elenco</b>.</div>
+              <div>Clicca <b>OK</b> per aprire il rapporto in modalità modifica.</div>
             </div>
             <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10 }}>
               <button
                 id={successPopupOkId}
                 type='button'
-                onClick={() => { setShowCreateSuccessPopup(false); setCreateSuccessPraticaCode('') }}
+                onClick={() => { setShowCreateSuccessPopup(false); setCreateSuccessPraticaCode(''); navigateToEditAfterCreate() }}
                 style={{ ...btnBase, border: '1px solid rgba(0,0,0,0.18)', background: '#1a7f37', color: '#fff', cursor: 'pointer', pointerEvents: 'auto' }}
               >
                 OK
@@ -6045,7 +6120,7 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
           onDirtyChange={() => {}}
           onSaved={(savedOid: number, savedData?: any) => {
             if (inCreateMode) {
-              clearEditIntent()
+              // L'intent verrà scritto dal popup OK → navigateToEditAfterCreate()
               return
             }
             const nextLayerUrl = ensureLayerIndex(normalizeFeatureLayerUrl((anyDs as any)?.layer?.url || (anyDs as any)?.url || effectiveIntent?.layerUrl || readDynamicSelection().layerUrl || ''), (anyDs as any)?.layer)
