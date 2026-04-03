@@ -741,7 +741,7 @@ function ZebraDropdown (props: {
       bottom: window.innerHeight - rect.top + 6,
       maxHeight: maxHeightRaw
     })
-  }, [])
+  }, [mapInstanceKey])
 
   React.useEffect(() => {
     if (!open) return
@@ -1116,6 +1116,29 @@ function ReadOnlyPanel (props: {
 
 
 
+function normalizeLayerUrlForMatch (raw: any): string {
+  return String(raw || '').trim().replace(/\/+$/, '').toLowerCase()
+}
+
+function findRapportiLayer (view: any, layerUrl?: string): any | null {
+  try {
+    const targetUrl = normalizeLayerUrlForMatch(layerUrl)
+    const allLayers = view?.map?.allLayers?.toArray?.() || view?.map?.allLayers || []
+    if (targetUrl) {
+      for (const fl of allLayers) {
+        if (fl?.type !== 'feature') continue
+        if (normalizeLayerUrlForMatch(fl?.url) === targetUrl) return fl
+      }
+    }
+    for (const fl of allLayers) {
+      if (fl?.type !== 'feature') continue
+      const title = String(fl.title || '').toLowerCase()
+      if (title.includes('rapporto') && title.includes('infrazioni')) return fl
+    }
+  } catch {}
+  return null
+}
+
 function MapTabContent (props: {
   oid: number | null
   layerUrl: string
@@ -1124,15 +1147,23 @@ function MapTabContent (props: {
     basemap: string; centerLon: number; centerLat: number; initZoom: number; pointZoom: number
     markerColor: string; markerSize: number; markerOutlineColor: string; markerOutlineWidth: number
     showZoom: boolean; showAttribution: boolean; showScaleBar: boolean; showCompass: boolean
+    showPopup?: boolean; showHome?: boolean; showFullscreen?: boolean; showLayerList?: boolean
+    webMapItemId?: string; webMapLabel?: string
   }
+  selectionSig?: string
 }) {
+  const wrapperRef = React.useRef<HTMLDivElement>(null)
   const containerRef = React.useRef<HTMLDivElement>(null)
   const viewRef = React.useRef<any>(null)
   const markerRef = React.useRef<any>(null)
+  const targetLayerViewRef = React.useRef<any>(null)
+  const defaultViewpointRef = React.useRef<any>(null)
+  const fullscreenWidgetRef = React.useRef<any>(null)
   const [status, setStatus] = React.useState<'loading' | 'ok' | 'nogeom' | 'error'>('loading')
+  const [viewReadyTick, setViewReadyTick] = React.useState(0)
+  const [mapInstanceKey, setMapInstanceKey] = React.useState(0)
   const mc = props.mapCfg
 
-  // Helper: parse hex color to RGBA array
   const hexToRgba = (hex: string, alpha = 255): number[] => {
     const h = hex.replace('#', '')
     if (h.length === 3) return [parseInt(h[0]+h[0],16), parseInt(h[1]+h[1],16), parseInt(h[2]+h[2],16), alpha]
@@ -1140,22 +1171,24 @@ function MapTabContent (props: {
     return [220, 38, 38, alpha]
   }
 
-  // Init MapView once
   React.useEffect(() => {
     if (!containerRef.current) return
     let cancelled = false
     ;(async () => {
       try {
-        const [MapView, Map] = await Promise.all([
+        const [MapView, Map, WebMap] = await Promise.all([
           loadEsriModule<any>('esri/views/MapView'),
-          loadEsriModule<any>('esri/Map')
+          loadEsriModule<any>('esri/Map'),
+          loadEsriModule<any>('esri/WebMap')
         ])
         if (cancelled || !containerRef.current) return
         const uiComponents: string[] = []
         if (mc.showZoom) uiComponents.push('zoom')
         if (mc.showAttribution) uiComponents.push('attribution')
         if (mc.showCompass) uiComponents.push('compass')
-        const map = new Map({ basemap: mc.basemap || 'topo-vector' })
+        const map = mc.webMapItemId
+          ? new WebMap({ portalItem: { id: String(mc.webMapItemId) } })
+          : new Map({ basemap: mc.basemap || 'topo-vector' })
         const view = new MapView({
           container: containerRef.current,
           map,
@@ -1164,7 +1197,101 @@ function MapTabContent (props: {
           ui: { components: uiComponents }
         })
         await view.when()
+        try { if (mc.basemap && view.map) view.map.basemap = mc.basemap } catch {}
+        try {
+          const builderVp = view.map?.initialViewProperties?.viewpoint
+          defaultViewpointRef.current = builderVp ? builderVp.clone() : (view.viewpoint ? view.viewpoint.clone() : null)
+        } catch {
+          defaultViewpointRef.current = view.viewpoint ? view.viewpoint.clone() : null
+        }
         if (cancelled) { view.destroy(); return }
+        if (mc.showHome) {
+          try {
+            const Home = await loadEsriModule<any>('esri/widgets/Home')
+            const home = new Home({ view })
+            view.ui.add(home, 'top-left')
+          } catch {}
+        }
+        let FullscreenCtor: any = null
+        const recreateFullscreenWidget = () => {
+          try {
+            if (!mc.showFullscreen) return
+            if (!FullscreenCtor) return
+            const current = fullscreenWidgetRef.current
+            if (current) {
+              try { view.ui.remove(current) } catch {}
+              try { current.destroy?.() } catch {}
+              fullscreenWidgetRef.current = null
+            }
+            const fs = new FullscreenCtor({ view, element: wrapperRef.current || containerRef.current })
+            fullscreenWidgetRef.current = fs
+            view.ui.add(fs, 'top-left')
+          } catch {}
+        }
+        if (mc.showFullscreen) {
+          try {
+            FullscreenCtor = await loadEsriModule<any>('esri/widgets/Fullscreen')
+            recreateFullscreenWidget()
+          } catch {}
+        }
+
+        const syncViewAfterFullscreenChange = () => {
+          try {
+            const v = viewRef.current || view
+            if (!v) return
+            const inFs = !!((document as any).fullscreenElement || (document as any).webkitFullscreenElement)
+            const doResize = () => {
+              try { v.container = containerRef.current || v.container } catch {}
+              try { v.resize() } catch {}
+              try { v.requestRender?.() } catch {}
+            }
+            try { window.requestAnimationFrame(doResize) } catch { doResize() }
+            window.setTimeout(doResize, 60)
+            window.setTimeout(doResize, 180)
+            if (!inFs) {
+              window.setTimeout(() => {
+                try { setMapInstanceKey(k => k + 1) } catch {}
+                try { recreateFullscreenWidget() } catch {}
+                try { setViewReadyTick(t => t + 1) } catch {}
+                try {
+                  if (props.hasSel && props.oid != null && targetLayerViewRef.current) {
+                    targetLayerViewRef.current.featureEffect = { filter: { where: `OBJECTID = ${Number(props.oid)}` }, excludedEffect: 'opacity(0)' }
+                  }
+                } catch {}
+              }, 40)
+              window.setTimeout(() => {
+                try { recreateFullscreenWidget() } catch {}
+                try {
+                  if (props.hasSel && props.oid != null && targetLayerViewRef.current) {
+                    targetLayerViewRef.current.featureEffect = { filter: { where: `OBJECTID = ${Number(props.oid)}` }, excludedEffect: 'opacity(0)' }
+                  }
+                } catch {}
+              }, 220)
+            }
+          } catch {}
+        }
+        try {
+          document.addEventListener('fullscreenchange', syncViewAfterFullscreenChange)
+          document.addEventListener('webkitfullscreenchange' as any, syncViewAfterFullscreenChange as any)
+          ;(view as any).__giiFullscreenSync = syncViewAfterFullscreenChange
+        } catch {}
+        if (mc.showLayerList) {
+          try {
+            const [LayerList, Expand] = await Promise.all([
+              loadEsriModule<any>('esri/widgets/LayerList'),
+              loadEsriModule<any>('esri/widgets/Expand')
+            ])
+            const layerList = new LayerList({ view })
+            const expand = new Expand({
+              view,
+              content: layerList,
+              expandIconClass: 'esri-icon-layer-list',
+              mode: 'floating',
+              expanded: false
+            })
+            view.ui.add(expand, 'top-right')
+          } catch {}
+        }
         if (mc.showScaleBar) {
           try {
             const ScaleBar = await loadEsriModule<any>('esri/widgets/ScaleBar')
@@ -1173,24 +1300,67 @@ function MapTabContent (props: {
           } catch {}
         }
         viewRef.current = view
+        setViewReadyTick(t => t + 1)
       } catch {
         if (!cancelled) setStatus('error')
       }
     })()
-    return () => { cancelled = true; if (viewRef.current) { try { viewRef.current.destroy() } catch {} viewRef.current = null } }
+    return () => {
+      cancelled = true
+      try {
+        if (targetLayerViewRef.current) {
+          targetLayerViewRef.current.featureEffect = { filter: { where: '1=1' }, excludedEffect: '' }
+        }
+      } catch {}
+      try {
+        const fsSync = (viewRef.current as any)?.__giiFullscreenSync
+        if (fsSync) {
+          document.removeEventListener('fullscreenchange', fsSync)
+          document.removeEventListener('webkitfullscreenchange' as any, fsSync as any)
+        }
+      } catch {}
+      try {
+        const fs = fullscreenWidgetRef.current
+        if (fs) {
+          try { viewRef.current?.ui?.remove?.(fs) } catch {}
+          try { fs.destroy?.() } catch {}
+          fullscreenWidgetRef.current = null
+        }
+      } catch {}
+      if (viewRef.current) { try { viewRef.current.destroy() } catch {} viewRef.current = null }
+      targetLayerViewRef.current = null
+      defaultViewpointRef.current = null
+    }
   }, [])
 
-  // Zoom to feature geometry on selection change
   React.useEffect(() => {
     const view = viewRef.current
     if (!view) return
-    if (!props.hasSel || props.oid == null || !props.layerUrl) {
-      view.graphics?.removeAll?.()
-      markerRef.current = null
-      setStatus('loading')
-      return
-    }
     let cancelled = false
+
+    const clearMapSelection = async (hideAll = false, resetToDefault = false) => {
+      try { view.graphics?.removeAll?.() } catch {}
+      markerRef.current = null
+      try { view.popup?.close?.() } catch {}
+      try {
+        if (targetLayerViewRef.current) {
+          targetLayerViewRef.current.featureEffect = hideAll
+            ? { filter: { where: '1=0' }, excludedEffect: 'opacity(0)' }
+            : { filter: { where: '1=1' }, excludedEffect: '' }
+        }
+      } catch {}
+      if (!hideAll) targetLayerViewRef.current = null
+      if (resetToDefault) {
+        try { if (defaultViewpointRef.current) await view.goTo(defaultViewpointRef.current, { duration: 400 }) } catch {}
+      }
+    }
+
+    if (!props.hasSel || props.oid == null || !props.layerUrl) {
+      void clearMapSelection(true, false)
+      setStatus('loading')
+      return () => { cancelled = true }
+    }
+
     setStatus('loading')
     ;(async () => {
       try {
@@ -1200,25 +1370,84 @@ function MapTabContent (props: {
           loadEsriModule<any>('esri/symbols/SimpleMarkerSymbol'),
           loadEsriModule<any>('esri/geometry/Point')
         ])
-        const fl = new FeatureLayer({ url: props.layerUrl })
-        if (typeof fl?.load === 'function') await fl.load()
-        const res = await fl.queryFeatures({ where: `OBJECTID=${props.oid}`, outFields: ['OBJECTID'], returnGeometry: true })
-        if (cancelled) return
-        const geom = res?.features?.[0]?.geometry
-        if (!geom) { setStatus('nogeom'); view.graphics?.removeAll?.(); return }
-        let x = geom.longitude ?? geom.x
-        let y = geom.latitude ?? geom.y
-        if (geom.spatialReference?.wkid === 102100 || geom.spatialReference?.wkid === 3857) {
+
+        const oidWhere = `OBJECTID = ${Number(props.oid)}`
+        const rapportiLayer = findRapportiLayer(view, props.layerUrl)
+        let feature: any = null
+
+        if (rapportiLayer) {
           try {
-            const wmu = await loadEsriModule<any>('esri/geometry/support/webMercatorUtils')
-            const g = wmu.webMercatorToGeographic(geom)
-            if (g) { x = g.x; y = g.y }
+            const lv = await view.whenLayerView(rapportiLayer)
+            if (cancelled) return
+            targetLayerViewRef.current = lv
+            try { lv.featureEffect = { filter: { where: '1=0' }, excludedEffect: 'opacity(0)' } } catch {}
+
+            const q = rapportiLayer.createQuery ? rapportiLayer.createQuery() : {}
+            q.where = oidWhere
+            q.outFields = ['*']
+            q.returnGeometry = true
+            const res = await rapportiLayer.queryFeatures(q)
+            feature = res?.features?.[0] || null
           } catch {}
         }
-        if (cancelled) return
-        if (!Number.isFinite(x) || !Number.isFinite(y) || (x === 0 && y === 0)) {
-          setStatus('nogeom'); view.graphics?.removeAll?.(); return
+
+        if (!feature) {
+          const fl = new FeatureLayer({ url: props.layerUrl })
+          if (typeof fl?.load === 'function') await fl.load()
+          const q = fl.createQuery ? fl.createQuery() : {}
+          q.where = oidWhere
+          q.outFields = ['*']
+          q.returnGeometry = true
+          const res = await fl.queryFeatures(q)
+          feature = res?.features?.[0] || null
         }
+
+        if (cancelled) return
+
+        const geom = feature?.geometry
+        const gx = geom ? (geom.x ?? geom.longitude ?? 0) : 0
+        const gy = geom ? (geom.y ?? geom.latitude ?? 0) : 0
+        const gValid = !!geom && !(Number(gx) === 0 && Number(gy) === 0)
+
+        let targetGeom: any = gValid ? geom : null
+        if (!targetGeom && feature?.attributes) {
+          const attrLat = Number(feature.attributes.latitude ?? feature.attributes.lat ?? feature.attributes.y ?? 0)
+          const attrLon = Number(feature.attributes.longitude ?? feature.attributes.lon ?? feature.attributes.x ?? 0)
+          if (attrLat !== 0 && attrLon !== 0) {
+            targetGeom = { type: 'point', longitude: attrLon, latitude: attrLat, spatialReference: { wkid: 4326 } }
+          }
+        }
+
+        if (!targetGeom) {
+          await clearMapSelection(true, true)
+          setStatus('nogeom')
+          return
+        }
+
+        let x = targetGeom.longitude ?? targetGeom.x
+        let y = targetGeom.latitude ?? targetGeom.y
+        if (targetGeom.spatialReference?.wkid === 102100 || targetGeom.spatialReference?.wkid === 3857) {
+          try {
+            const wmu = await loadEsriModule<any>('esri/geometry/support/webMercatorUtils')
+            const g = wmu.webMercatorToGeographic(targetGeom)
+            if (g) { x = g.x; y = g.y; targetGeom = g }
+          } catch {}
+        }
+
+        if (cancelled) return
+
+        if (!Number.isFinite(x) || !Number.isFinite(y) || (x === 0 && y === 0)) {
+          await clearMapSelection(true, true)
+          setStatus('nogeom')
+          return
+        }
+
+        try {
+          if (targetLayerViewRef.current) {
+            targetLayerViewRef.current.featureEffect = { filter: { where: oidWhere }, excludedEffect: 'opacity(0)' }
+          }
+        } catch {}
+
         const pt = new Point({ longitude: x, latitude: y, spatialReference: { wkid: 4326 } })
         const sym = new SimpleMarkerSymbol({
           style: 'circle',
@@ -1226,21 +1455,34 @@ function MapTabContent (props: {
           size: mc.markerSize || 18,
           outline: { color: hexToRgba(mc.markerOutlineColor || '#ffffff', 255), width: mc.markerOutlineWidth || 2.5 }
         })
-        const marker = new Graphic({ geometry: pt, symbol: sym })
+        const marker = new Graphic({ geometry: pt, symbol: sym, attributes: { OBJECTID: props.oid } })
         view.graphics?.removeAll?.()
         view.graphics?.add?.(marker)
         markerRef.current = marker
-        try { await view.goTo({ center: [x, y], zoom: mc.pointZoom || 19 }, { duration: 800 }) } catch {}
-        if (!cancelled) setStatus('ok')
+
+        try { await view.goTo({ target: targetGeom, zoom: mc.pointZoom || 19 }, { duration: 800 }) } catch {}
+        if (mc.showPopup !== false) {
+          try {
+            view.popup?.open?.({
+              location: pt,
+              title: `Rapporto ${String(props.oid ?? '')}`.trim(),
+              content: `OID: ${String(props.oid ?? '')}`
+            })
+          } catch {}
+        } else {
+          try { view.popup?.close?.() } catch {}
+        }
+        setStatus('ok')
       } catch {
         if (!cancelled) setStatus('error')
       }
     })()
+
     return () => { cancelled = true }
-  }, [props.hasSel, props.oid, props.layerUrl])
+  }, [props.hasSel, props.oid, props.layerUrl, props.selectionSig, viewReadyTick, mc.pointZoom, mc.markerColor, mc.markerSize, mc.markerOutlineColor, mc.markerOutlineWidth, mc.showPopup])
 
   return (
-    <div style={{ width: '100%', flex: '1 1 auto', minHeight: 0, position: 'relative', borderRadius: 8, overflow: 'hidden' }}>
+    <div key={mapInstanceKey} ref={wrapperRef} style={{ width: '100%', flex: '1 1 auto', minHeight: 0, position: 'relative', borderRadius: 8, overflow: 'hidden' }}>
       <div ref={containerRef} style={{ width: '100%', height: '100%' }}/>
       {status === 'loading' && props.hasSel && (
         <div style={{ position: 'absolute', top: 8, left: 8, background: 'rgba(255,255,255,0.9)', borderRadius: 6, padding: '4px 10px', fontSize: 11, color: '#374151' }}>
@@ -2107,7 +2349,7 @@ if (!hasSel) {
               Selezionare un rapporto per visualizzare la mappa.
             </div>
           ) : (
-            <MapTabContent oid={selectedOid} layerUrl={mapLayerUrl} hasSel={hasSel} mapCfg={props.mapCfg}/>
+            <MapTabContent oid={selectedOid} layerUrl={mapLayerUrl} hasSel={hasSel} mapCfg={props.mapCfg} selectionSig={active?.state?.sig}/>
           )}
         </div>
       )
@@ -2340,7 +2582,7 @@ const queryFields = React.useMemo(() => {
     }
     ;(async () => {
       try {
-        const stateKey = `${selection.layerUrl}:${selection.oid}`
+        const stateKey = `${selection.layerUrl}:${selection.oid}:${selRefreshNonce}`
         const syncCachedProxy = (() => {
           try { return (window as any)?.__giiRuntimeDsProxyCache?.[selection.layerUrl] || null } catch { return null }
         })()
@@ -2412,7 +2654,13 @@ const queryFields = React.useMemo(() => {
                     showZoom: cfg.mapShowZoom !== false,
                     showAttribution: cfg.mapShowAttribution !== false,
                     showScaleBar: cfg.mapShowScaleBar === true,
-                    showCompass: cfg.mapShowCompass === true
+                    showCompass: cfg.mapShowCompass === true,
+                    showPopup: cfg.mapShowPopup !== false,
+                    showHome: cfg.mapShowHome !== false,
+                    showFullscreen: cfg.mapShowFullscreen !== false,
+                    showLayerList: cfg.mapShowLayerList === true,
+                    webMapItemId: String((cfg as any).mapWebMapItemId || ''),
+                    webMapLabel: String((cfg as any).mapWebMapLabel || '')
                   }}
                 />
         </>

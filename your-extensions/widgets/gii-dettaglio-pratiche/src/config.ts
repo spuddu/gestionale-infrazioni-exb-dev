@@ -183,7 +183,10 @@ export interface Config {
   presets: FieldPreset[]
   activePresetId: string
 
-  // --- Mappa embedded (tab Mappa)
+  // --- Mappa custom (tab Mappa)
+  mapWebMapDataSourceId?: string
+  mapWebMapItemId?: string
+  mapWebMapLabel?: string
   mapBasemap: string
   mapCenterLon: number
   mapCenterLat: number
@@ -197,6 +200,10 @@ export interface Config {
   mapShowAttribution: boolean
   mapShowScaleBar: boolean
   mapShowCompass: boolean
+  mapShowPopup: boolean
+  mapShowHome: boolean
+  mapShowFullscreen: boolean
+  mapShowLayerList: boolean
 }
 
 export const defaultConfig: Config = {
@@ -278,7 +285,11 @@ export const defaultConfig: Config = {
   mapShowZoom: true,
   mapShowAttribution: true,
   mapShowScaleBar: false,
-  mapShowCompass: false
+  mapShowCompass: false,
+  mapShowPopup: true,
+  mapShowHome: true,
+  mapShowFullscreen: true,
+  mapShowLayerList: false
 }
 
 export type IMConfig = ImmutableObject<Config>

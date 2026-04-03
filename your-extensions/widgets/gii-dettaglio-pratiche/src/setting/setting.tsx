@@ -317,7 +317,7 @@ export default function Setting(props: Props) {
   const patch = (obj:Record<string,any>) => {
     let next = baseCfg
     Object.entries(obj).forEach(([k,v])=>{
-      if(['rejectReasons','tabs','anagraficaFields','violazioneFields','allegatiFields','iterExtraFields','presets'].includes(k))
+      if(['rejectReasons','tabs','anagraficaFields','violazioneFields','allegatiFields','iterExtraFields','presets','mapUseDataSources'].includes(k))
         next=next.set(k,Immutable((v||[]) as any) as any)
       else next=next.set(k,v)
     })
@@ -326,6 +326,32 @@ export default function Setting(props: Props) {
 
   const onDsChange = (useDataSources:UseDataSource[]) => props.onSettingChange({id:props.id,useDataSources:useDataSources as any})
   const onToggleDs = (useDataSourcesEnabled:boolean) => props.onSettingChange({id:props.id,useDataSourcesEnabled})
+
+  const onMapDsChange = async (useDataSources: UseDataSource[]) => {
+    const nextUse = Array.isArray(useDataSources) ? useDataSources : []
+    const first: any = nextUse?.[0] || null
+    const nextPatch: Record<string, any> = {
+      mapUseDataSources: nextUse,
+      mapWebMapDataSourceId: String(first?.dataSourceId || '')
+    }
+    try {
+      const dsId = String(first?.dataSourceId || '')
+      if (dsId) {
+        const ds: any = DataSourceManager.getInstance().getDataSource(dsId)
+        const dsJson: any = ds?.getDataSourceJson?.() || ds?.dataSourceJson || {}
+        const itemId = String(dsJson?.itemId || dsJson?.sourceItemId || ds?.itemId || '')
+        const label = String(ds?.getLabel?.() || dsJson?.label || dsJson?.sourceLabel || '')
+        nextPatch.mapWebMapItemId = itemId
+        nextPatch.mapWebMapLabel = label
+      } else {
+        nextPatch.mapWebMapItemId = ''
+        nextPatch.mapWebMapLabel = ''
+      }
+    } catch {
+      // ignore
+    }
+    patch(nextPatch)
+  }
 
   const useDsJs:any[] = asJs(props.useDataSources??Immutable([])) || []
   const primaryDsId = String(useDsJs?.[0]?.dataSourceId||'')
@@ -464,7 +490,21 @@ export default function Setting(props: Props) {
       {/* ═══ MAPPA ═══ */}
       <Acc id='mappa' label='🗺 Mappa' open={isOpen('mappa')} onToggle={()=>toggle('mappa')}/>
       {isOpen('mappa') && <div>
-        <div style={P.hint}>Impostazioni della mappa embedded nella tab Mappa del dettaglio pratiche.</div>
+        <div style={P.hint}>Impostazioni della mappa custom nella tab Mappa del dettaglio pratiche.</div>
+
+        <div style={P.grp}>Web map</div>
+        <div style={P.hint}>Seleziona la web map già portata come origine dati, senza dipendere dai widget Mappa presenti nelle pagine.</div>
+        <DataSourceSelector
+          types={Immutable([DataSourceTypes.WebMap])}
+          useDataSources={Immutable(asJs(cfgJs.mapUseDataSources || [])) as any}
+          useDataSourcesEnabled={true}
+          onChange={onMapDsChange}
+          widgetId={props.id}
+          mustUseDataSource
+        />
+        {!!String(cfgJs.mapWebMapLabel || cfgJs.mapWebMapItemId || '') && (
+          <div style={{...P.hint, marginTop:6}}>Selezionata: <b style={{color:'#d1d5db'}}>{String(cfgJs.mapWebMapLabel || cfgJs.mapWebMapItemId)}</b></div>
+        )}
 
         <div style={P.grp}>Basemap</div>
         <Sel value={String(cfgJs.mapBasemap || 'topo-vector')} onChange={v=>patch({mapBasemap:v})} options={[
@@ -508,6 +548,10 @@ export default function Setting(props: Props) {
         <Check value={cfgJs.mapShowAttribution !== false} onChange={v=>patch({mapShowAttribution:v})} label='Mostra attribuzione (Esri)'/>
         <Check value={cfgJs.mapShowScaleBar === true} onChange={v=>patch({mapShowScaleBar:v})} label='Mostra barra di scala'/>
         <Check value={cfgJs.mapShowCompass === true} onChange={v=>patch({mapShowCompass:v})} label='Mostra bussola'/>
+        <Check value={cfgJs.mapShowPopup !== false} onChange={v=>patch({mapShowPopup:v})} label='Abilita popup sul rapporto selezionato'/>
+        <Check value={cfgJs.mapShowHome !== false} onChange={v=>patch({mapShowHome:v})} label='Mostra Home'/>
+        <Check value={cfgJs.mapShowFullscreen !== false} onChange={v=>patch({mapShowFullscreen:v})} label='Mostra schermo intero'/>
+        <Check value={cfgJs.mapShowLayerList === true} onChange={v=>patch({mapShowLayerList:v})} label='Mostra elenco layer'/>
       </div>}
 
       {/* ═══ RESET ═══ */}
