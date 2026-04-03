@@ -5,6 +5,7 @@ import { Button } from 'jimu-ui'
 import { createPortal } from 'react-dom'
 import type { IMConfig } from '../config'
 import { defaultConfig } from '../config'
+import { RAPPORTO_TEMPLATE } from './rapporto-template'
 
 
 const GII_LOG_EVENTI_CICLI_URL = 'https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_LOG_EVENTI_CICLI/FeatureServer/0'
@@ -1418,6 +1419,9 @@ function ActionsPanel (props: {
   const tiAmmLoadingRef = React.useRef(false)
   const [tiAmmLoadErr, setTiAmmLoadErr] = React.useState<string>('')
 
+  // Popup di diniego (validazione pre-trasmissione)
+  const [denyPopupMessages, setDenyPopupMessages] = React.useState<string[]>([])
+
   // ── Cache GII_utenti (per risolvere utente_destinatario) ──
   React.useEffect(() => {
     if (_utentiCache || _utentiLoading) return
@@ -2514,6 +2518,39 @@ function ActionsPanel (props: {
     if (p === 'RESPINGI' && !canStartRespingi) return
     if (p === 'ELIMINA' && !canStartElimina) return
 
+    // Validazione RI → DT: grado obbligatorio per artt. selezionati, sotto-selezione Art. 15 obbligatoria
+    if (p === 'APPROVA' && role === 'RI') {
+      const msgs: string[] = []
+      const artGradoFields = ['v_art12','v_art27','v_art28','v_art31','v_art32','v_art33','v_art34','v_art35','v_art36','v_art37']
+      const hasArtGrado = artGradoFields.some(f => {
+        const v = pickAttrCI(data, [f, f.toUpperCase()])
+        return v === 1 || v === '1'
+      })
+      if (hasArtGrado) {
+        const gr = pickAttrCI(data, ['grado', 'GRADO'])
+        if (gr == null || gr === '' || gr === 0 || gr === '0') {
+          msgs.push('Impossibile trasmettere: il grado di gravità è obbligatorio per le infrazioni selezionate. Accedere alla maschera di modifica e impostare il grado.')
+        }
+      }
+      const tipoAbuso = String(pickAttrCI(data, ['tipo_abuso', 'TIPO_ABUSO']) || '').toLowerCase()
+      if (tipoAbuso === 'parziale') {
+        const n15p = pickAttrCI(data, ['norma15_parziale', 'NORMA15_PARZIALE'])
+        if (n15p == null || n15p === '') {
+          msgs.push('Impossibile trasmettere: per l\'Art. 15 (parziale) è obbligatorio specificare se si tratta di prima contestazione o recidiva. Accedere alla maschera di modifica e impostare il valore.')
+        }
+      }
+      if (tipoAbuso === 'totale') {
+        const n15t = pickAttrCI(data, ['norma15_totale', 'NORMA15_TOTALE'])
+        if (n15t == null || n15t === '') {
+          msgs.push('Impossibile trasmettere: per l\'Art. 15 (totale) è obbligatorio specificare se si tratta di prima contestazione o recidiva. Accedere alla maschera di modifica e impostare il valore.')
+        }
+      }
+      if (msgs.length > 0) {
+        setDenyPopupMessages(msgs)
+        return
+      }
+    }
+
     setPending(p)
     setMsg(null)
     setConfirmAttempted(false)
@@ -3271,34 +3308,116 @@ function ActionsPanel (props: {
             {/* Matrice_DT: il pulsante "Trasmetti a DA" è stato rimosso.
                 DT approva e trasmette a RI tramite il pulsante "Approva e trasmetti a RI". */}
 
-            {/* PULSANTE MODIFICA TI — apertura pagina */}
-            {canShowEdit && (
-              <button
-                type='button'
-                disabled={!canEdit}
-                onClick={handleEditPage}
-                title={canEdit ? `Apre la pagina di editing: ${ec.pageId}` : 'Modifica non disponibile: il rapporto deve essere già preso in carico dal ruolo corrente.'}
-                style={{
-                  padding: '8px 16px',
-                  borderRadius: 8,
-                  border: `2px solid ${canEdit ? ec.pageColor : '#e5e7eb'}`,
-                  background: '#fff',
-                  color: canEdit ? ec.pageColor : '#9ca3af',
-                  fontWeight: 700,
-                  fontSize: 13,
-                  cursor: canEdit ? 'pointer' : 'not-allowed',
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: 6
-                }}
-              >
-                Modifica
-              </button>
-            )}
+            {/* Spacer per separare azioni (sx) da utilità (dx) */}
+            <div style={{ flex: 1 }}/>
+
+            {/* GRUPPO DESTRO — Modifica, Anteprima, Download */}
+            <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+              {/* PULSANTE MODIFICA TI — apertura pagina */}
+              {canShowEdit && (
+                <button
+                  type='button'
+                  disabled={!canEdit}
+                  onClick={handleEditPage}
+                  title={canEdit ? 'Modifica rapporto' : 'Modifica non disponibile: il rapporto deve essere già preso in carico dal ruolo corrente.'}
+                  style={{
+                    padding: '7px 10px',
+                    borderRadius: 8,
+                    border: `2px solid ${canEdit ? ec.pageColor : '#e5e7eb'}`,
+                    background: '#fff',
+                    color: canEdit ? ec.pageColor : '#9ca3af',
+                    cursor: canEdit ? 'pointer' : 'not-allowed',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center'
+                  }}
+                >
+                  <svg width='18' height='18' viewBox='0 0 24 24' fill='none' stroke='currentColor' strokeWidth='2' strokeLinecap='round' strokeLinejoin='round'><path d='M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7'/><path d='M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z'/></svg>
+                </button>
+              )}
+
+              {/* PULSANTE ANTEPRIMA PDF — tutti i ruoli */}
+              {hasSel && (
+                <button
+                  type='button'
+                  onClick={() => { openRapportoPreview(data, _utentiCache) }}
+                  title='Anteprima rapporto (PDF)'
+                  style={{
+                    padding: '7px 10px',
+                    borderRadius: 8,
+                    border: '2px solid #2563eb',
+                    background: '#fff',
+                    color: '#2563eb',
+                    cursor: 'pointer',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center'
+                  }}
+                >
+                  <svg width='18' height='18' viewBox='0 0 24 24' fill='none' stroke='currentColor' strokeWidth='2' strokeLinecap='round' strokeLinejoin='round'><path d='M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z'/><polyline points='14 2 14 8 20 8'/><path d='M12 18v-6'/><path d='M9 15l3-3 3 3'/></svg>
+                </button>
+              )}
+
+              {/* PULSANTE DOWNLOAD PDF — tutti i ruoli */}
+              {hasSel && (
+                <button
+                  type='button'
+                  onClick={() => { downloadRapportoPdf(data, _utentiCache) }}
+                  title='Scarica rapporto (PDF)'
+                  style={{
+                    padding: '7px 10px',
+                    borderRadius: 8,
+                    border: '2px solid #16a34a',
+                    background: '#fff',
+                    color: '#16a34a',
+                    cursor: 'pointer',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center'
+                  }}
+                >
+                  <svg width='18' height='18' viewBox='0 0 24 24' fill='none' stroke='currentColor' strokeWidth='2' strokeLinecap='round' strokeLinejoin='round'><path d='M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4'/><polyline points='7 10 12 15 17 10'/><line x1='12' y1='15' x2='12' y2='3'/></svg>
+                </button>
+              )}
+            </div>
           </div>
         )}
 
         {pendingModal}
+
+        {denyPopupMessages.length > 0 && createPortal(
+          <div
+            data-gii-global-popup-root='1'
+            style={{ position: 'fixed', inset: 0, zIndex: 2147483646, background: 'rgba(0,0,0,0.52)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16, pointerEvents: 'auto' }}
+            onClick={(e) => { e.preventDefault(); e.stopPropagation() }}
+            onMouseDown={(e) => { e.preventDefault(); e.stopPropagation() }}
+          >
+            <div
+              role='dialog'
+              aria-modal='true'
+              data-gii-global-popup-dialog='1'
+              style={{ width: 'min(92vw, 520px)', maxHeight: 'calc(100vh - 48px)', overflowY: 'auto', background: '#fff', borderRadius: 14, boxShadow: '0 20px 60px rgba(0,0,0,0.28)', border: '1px solid rgba(0,0,0,0.08)', padding: 18, display: 'grid', gap: 12, position: 'relative', zIndex: 2147483647 }}
+              onClick={(e) => { e.stopPropagation() }}
+              onMouseDown={(e) => { e.stopPropagation() }}
+            >
+              <div style={{ fontWeight: 800, fontSize: 16, color: '#b42318', display: 'flex', alignItems: 'center', gap: 8 }}>
+                <span style={{ fontSize: 20 }}>⚠</span>
+                <span>Validazione trasmissione</span>
+              </div>
+              {denyPopupMessages.map((m, i) => (
+                <div key={i} style={{ fontSize: 13, color: '#374151', lineHeight: 1.6, padding: 10, background: '#fef2f2', border: '1px solid #fecaca', borderRadius: 6 }}>
+                  {m}
+                </div>
+              ))}
+              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 4 }}>
+                <button type='button' onClick={() => setDenyPopupMessages([])} style={{ padding: '8px 18px', borderRadius: 8, border: '1px solid rgba(0,0,0,0.18)', background: '#b42318', color: '#fff', fontWeight: 700, fontSize: 13, cursor: 'pointer' }}>
+                  Chiudi
+                </button>
+              </div>
+            </div>
+          </div>,
+          document.body
+        )}
 
         {lockedByTransmit && hasSel && (
           <div style={{ ...msgStyle('info', msgFontSize), marginTop: 4 }}>
@@ -3426,6 +3545,224 @@ function ReadOnlyPanel (props: {
           )}
     </div>
   )
+}
+
+
+// ── Rapporto PDF — sostituzione placeholder nel template ────────────────────
+
+const AREA_LABELS: Record<string, string> = {
+  AGR: 'AGRARIA', TEC: 'TECNICA', AMM: 'AFFARI GENERALI E PROGRAMMAZIONE FINANZIARIA'
+}
+const SETTORE_LABELS: Record<string, string> = {
+  D1: 'DISTRETTO 1 \u2013 SAN SPERATE',
+  D2: 'DISTRETTO 2 \u2013 SERRAMANNA/PIMPISU',
+  D3: 'DISTRETTO 3 \u2013 SAN GAVINO/VILLACIDRO',
+  D4: 'DISTRETTO 4 \u2013 BASSO SULCIS',
+  D5: 'DISTRETTO 5 \u2013 SENORB\u00CC',
+  D6: 'DISTRETTO 6 \u2013 CIXERRI',
+  DS: 'MANUTENZIONE OPERE DI DRENO E DI SCOLO',
+  CR: 'CATASTO, RUOLI E SERVIZI TERRITORIALI'
+}
+
+function findUserFullName (cache: Map<string, UtenteCached> | null, ruoloNum: number, areaNum?: number, settoreNum?: number): string {
+  if (!cache) return ''
+  for (const [, entry] of cache) {
+    if (entry.ruolo !== ruoloNum) continue
+    if (areaNum != null && entry.area !== areaNum) continue
+    if (settoreNum != null && entry.settore !== settoreNum) continue
+    return entry.full_name || ''
+  }
+  return ''
+}
+
+function findFullNameByUsername (cache: Map<string, UtenteCached> | null, username: string): string {
+  if (!cache || !username) return username || ''
+  for (const [k, v] of cache) {
+    if (k.toLowerCase() === String(username).trim().toLowerCase()) return v.full_name || username
+  }
+  return username
+}
+
+function formatDateIt (v: any): string {
+  if (!v) return ''
+  try {
+    const d = new Date(typeof v === 'number' ? v : String(v))
+    if (isNaN(d.getTime())) return String(v)
+    return d.toLocaleDateString('it-IT', { day: '2-digit', month: '2-digit', year: 'numeric' })
+  } catch { return String(v) }
+}
+
+function formatTimeIt (v: any): string {
+  if (!v) return ''
+  try {
+    const d = new Date(typeof v === 'number' ? v : String(v))
+    if (isNaN(d.getTime())) return ''
+    return d.toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' })
+  } catch { return '' }
+}
+
+function esc (s: any): string {
+  return String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
+}
+
+/** Costruisce la mappa dei placeholder → valori dal record e dalla cache utenti */
+function buildPlaceholderMap (data: any, utentiCache: Map<string, UtenteCached> | null): Record<string, string> {
+  const d = data || {}
+  const areaCod = String(d.area_cod || '').toUpperCase()
+  const settoreCod = String(d.settore_cod || '').toUpperCase()
+  const isPF = String(d.tipologia_soggetto || '').toUpperCase() === 'PF'
+  const areaN = AREA_NUM[areaCod] ?? null
+  const settoreN = SETTORE_NUM[settoreCod] ?? null
+
+  // Helper: articolo selezionato?
+  const artChecked = (field: string): boolean => {
+    const v = d[field]
+    return v === 1 || v === '1' || v === true
+  }
+  const art15on = !!(d.norma15_parziale || d.norma15_totale)
+  const art16on = String(d.norma16_17 || '').toLowerCase().includes('art16')
+  const art17on = String(d.norma16_17 || '').toLowerCase().includes('art17') || !!d.art17_tipo
+
+  const xMark = (on: boolean) => on ? 'x' : ''
+  const surfVal = (on: boolean, ...fields: string[]) => {
+    if (!on) return ''
+    for (const f of fields) { const v = d[f]; if (v != null && v !== '' && v !== 0) return String(v) }
+    return ''
+  }
+  const grado = d.grado != null && d.grado !== '' ? String(d.grado) : ''
+  const recidiva = d.recidiva === 1 || d.recidiva === '1'
+
+  const m: Record<string, string> = {
+    // Dati generali
+    cod_pratica: esc(d.cod_pratica || ''),
+    anno: d.data_rilevazione ? String(new Date(d.data_rilevazione).getFullYear()) : '',
+    area_label: AREA_LABELS[areaCod] || areaCod,
+    settore_label: SETTORE_LABELS[settoreCod] || settoreCod,
+    tecnico_rilevatore: esc(d.tecnico_rilevatore || ''),
+    data_rilevazione: formatDateIt(d.data_rilevazione),
+    ora_rilevazione: formatTimeIt(d.data_rilevazione),
+
+    // Articoli (x)
+    x_art08: xMark(artChecked('v_art08')),
+    x_art12: xMark(artChecked('v_art12')),
+    x_art15: xMark(art15on),
+    x_art16: xMark(art16on),
+    x_art17: xMark(art17on),
+    x_art27: xMark(artChecked('v_art27')),
+    x_art28: xMark(artChecked('v_art28')),
+    x_art29: xMark(artChecked('v_art29')),
+    x_art30: xMark(artChecked('v_art30')),
+    x_art31: xMark(artChecked('v_art31')),
+    x_art32: xMark(artChecked('v_art32')),
+    x_art33: xMark(artChecked('v_art33')),
+    x_art34: xMark(artChecked('v_art34')),
+    x_art35: xMark(artChecked('v_art35')),
+    x_art36: xMark(artChecked('v_art36')),
+    x_art37: xMark(artChecked('v_art37')),
+    x_art39: xMark(artChecked('v_art39')),
+
+    // Superfici
+    sup_dich_art15: surfVal(art15on, 'sup_dichiarata_art15'),
+    sup_irr_art15: surfVal(art15on, 'sup_irrigata_art15'),
+    sup_dich_art16: surfVal(art16on, 'sup_dichiarata_art16'),
+    sup_irr_art16: surfVal(art16on, 'sup_irrigata_art16_17_2'),
+    sup_dich_art17: surfVal(art17on, 'sup_dichiarata_art17_1', 'sup_dichiarata_art17_2'),
+    sup_irr_art17: surfVal(art17on, 'sup_irrigata_art17_1', 'sup_irrigata_art16_17_2'),
+
+    // Gravità / Recidiva per ogni articolo selezionato
+    grado_art08: artChecked('v_art08') ? grado : '',
+    grado_art12: artChecked('v_art12') ? grado : '',
+    grado_art15: art15on ? grado : '',
+    grado_art16: art16on ? grado : '',
+    grado_art17: art17on ? grado : '',
+    grado_art27: artChecked('v_art27') ? grado : '',
+    grado_art28: artChecked('v_art28') ? grado : '',
+    grado_art29: artChecked('v_art29') ? grado : '',
+    grado_art30: artChecked('v_art30') ? grado : '',
+    grado_art31: artChecked('v_art31') ? grado : '',
+    grado_art32: artChecked('v_art32') ? grado : '',
+    grado_art33: artChecked('v_art33') ? grado : '',
+    grado_art34: artChecked('v_art34') ? grado : '',
+    grado_art35: artChecked('v_art35') ? grado : '',
+    grado_art36: artChecked('v_art36') ? grado : '',
+    grado_art37: artChecked('v_art37') ? grado : '',
+    grado_art39: artChecked('v_art39') ? grado : '',
+    recidiva_art08: artChecked('v_art08') && recidiva ? 'x' : '',
+    recidiva_art12: artChecked('v_art12') && recidiva ? 'x' : '',
+    recidiva_art15: art15on && recidiva ? 'x' : '',
+    recidiva_art16: art16on && recidiva ? 'x' : '',
+    recidiva_art17: art17on && recidiva ? 'x' : '',
+    recidiva_art27: artChecked('v_art27') && recidiva ? 'x' : '',
+    recidiva_art28: artChecked('v_art28') && recidiva ? 'x' : '',
+    recidiva_art29: artChecked('v_art29') && recidiva ? 'x' : '',
+    recidiva_art30: artChecked('v_art30') && recidiva ? 'x' : '',
+    recidiva_art31: artChecked('v_art31') && recidiva ? 'x' : '',
+    recidiva_art32: artChecked('v_art32') && recidiva ? 'x' : '',
+    recidiva_art33: artChecked('v_art33') && recidiva ? 'x' : '',
+    recidiva_art34: artChecked('v_art34') && recidiva ? 'x' : '',
+    recidiva_art35: artChecked('v_art35') && recidiva ? 'x' : '',
+    recidiva_art36: artChecked('v_art36') && recidiva ? 'x' : '',
+    recidiva_art37: artChecked('v_art37') && recidiva ? 'x' : '',
+    recidiva_art39: artChecked('v_art39') && recidiva ? 'x' : '',
+
+    // Testi
+    descrizione_fatti: esc(d.descrizione_fatti || ''),
+    circostanze: esc(d.circostanze || ''),
+    descrizione_luogo: esc(d.descrizione_luogo || ''),
+
+    // Trasgressore
+    denominazione: isPF ? esc(`${d.nome || ''} ${d.cognome || ''}`.trim()) : esc(d.ragione_sociale || ''),
+    cf_piva_label: isPF ? 'C.F.' : 'P. IVA',
+    cf_piva: isPF ? esc(d.codice_fiscale || '') : esc(d.piva || ''),
+    via: esc(d.via || ''),
+    civico: esc(d.civico || ''),
+    localita: '',
+    citta: esc(d.citta || ''),
+    telefono: esc(d.telefono || d.cellulare || ''),
+    email_pec: esc(d.email || d.pec || ''),
+    presenza_trasgressore: String(d.presenza_trasgressore || '').toLowerCase() === 'si' || String(d.presenza_trasgressore || '').toLowerCase() === 'sì' || String(d.presenza_trasgressore || '') === '1' ? 'S\u00EC' : (String(d.presenza_trasgressore || '').toLowerCase() === 'no' || String(d.presenza_trasgressore || '') === '0' ? 'No' : String(d.presenza_trasgressore || '')),
+
+    // Firme
+    firma_tr: esc(findFullNameByUsername(utentiCache, d.tecnico_rilevatore || d.utente_loggato || d.Creator || '')),
+    firma_ti: esc(d.ti_assegnato_nome || findFullNameByUsername(utentiCache, d.ti_assegnato_username || '') || findFullNameByUsername(utentiCache, d.tecnico_rilevatore || '')),
+    firma_rz: esc(findUserFullName(utentiCache, 3, areaN ?? undefined, settoreN ?? undefined)),
+    firma_ri: esc(findUserFullName(utentiCache, 4, areaN ?? undefined)),
+    firma_dt: esc(findUserFullName(utentiCache, 5, areaN ?? undefined)),
+
+    // Luoghi (strutturati) — per ora vuoti, il campo descrizione_luogo è testo libero
+    comune: '',
+    foglio: '',
+    mappali: '',
+    altro_luogo: '',
+    distretto_irriguo: '',
+    comizio: '',
+    matricola_contatore: '',
+    matricola_tessera: '',
+    importo_rimborso: ''
+  }
+  return m
+}
+
+/** Sostituisce tutti i {{placeholder}} nel template con i valori dalla mappa */
+function fillTemplate (template: string, placeholders: Record<string, string>): string {
+  return template.replace(/\{\{([^}]+)\}\}/g, (_, key) => {
+    return placeholders[key.trim()] ?? ''
+  })
+}
+
+function openRapportoPreview (data: any, utentiCache: Map<string, UtenteCached> | null) {
+  const map = buildPlaceholderMap(data, utentiCache)
+  const html = fillTemplate(RAPPORTO_TEMPLATE, map)
+  const blob = new Blob([html], { type: 'text/html;charset=utf-8' })
+  window.open(URL.createObjectURL(blob), '_blank')
+}
+
+function downloadRapportoPdf (data: any, utentiCache: Map<string, UtenteCached> | null) {
+  const map = buildPlaceholderMap(data, utentiCache)
+  const html = fillTemplate(RAPPORTO_TEMPLATE, map)
+  const htmlWithPrint = html.replace('</body>', '<script>window.onload=function(){window.print()}<\/script></body>')
+  const blob = new Blob([htmlWithPrint], { type: 'text/html;charset=utf-8' })
+  window.open(URL.createObjectURL(blob), '_blank')
 }
 
 

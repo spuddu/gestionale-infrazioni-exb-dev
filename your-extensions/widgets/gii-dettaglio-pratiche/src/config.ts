@@ -182,6 +182,21 @@ export interface Config {
   // --- Preset selezione campi per TAB
   presets: FieldPreset[]
   activePresetId: string
+
+  // --- Mappa embedded (tab Mappa)
+  mapBasemap: string
+  mapCenterLon: number
+  mapCenterLat: number
+  mapInitZoom: number
+  mapPointZoom: number
+  mapMarkerColor: string
+  mapMarkerSize: number
+  mapMarkerOutlineColor: string
+  mapMarkerOutlineWidth: number
+  mapShowZoom: boolean
+  mapShowAttribution: boolean
+  mapShowScaleBar: boolean
+  mapShowCompass: boolean
 }
 
 export const defaultConfig: Config = {
@@ -221,7 +236,8 @@ export const defaultConfig: Config = {
     { id: 'anagrafica', label: 'Anagrafica', fields: DETAIL_DEFAULT_TAB_FIELDS.anagrafica, hideEmpty: true },
     { id: 'violazione', label: 'Violazione', fields: DETAIL_DEFAULT_TAB_FIELDS.violazione, hideEmpty: true },
     { id: 'iter', label: 'Iter', fields: DETAIL_DEFAULT_TAB_FIELDS.iterExtra, isIterTab: true, hideEmpty: false },
-    { id: 'allegati', label: 'Allegati', fields: DETAIL_DEFAULT_TAB_FIELDS.allegati, hideEmpty: true }
+    { id: 'allegati', label: 'Allegati', fields: DETAIL_DEFAULT_TAB_FIELDS.allegati, hideEmpty: true },
+    { id: 'mappa', label: 'Mappa', fields: [], locked: true }
   ],
 
   // Editing TI
@@ -243,11 +259,26 @@ export const defaultConfig: Config = {
         { id: 'anagrafica', label: 'Anagrafica', fields: DETAIL_DEFAULT_TAB_FIELDS.anagrafica, hideEmpty: true },
         { id: 'violazione', label: 'Violazione', fields: DETAIL_DEFAULT_TAB_FIELDS.violazione, hideEmpty: true },
         { id: 'iter', label: 'Iter', fields: DETAIL_DEFAULT_TAB_FIELDS.iterExtra, isIterTab: true, hideEmpty: false },
-        { id: 'allegati', label: 'Allegati', fields: DETAIL_DEFAULT_TAB_FIELDS.allegati, hideEmpty: true }
+        { id: 'allegati', label: 'Allegati', fields: DETAIL_DEFAULT_TAB_FIELDS.allegati, hideEmpty: true },
+        { id: 'mappa', label: 'Mappa', fields: [], locked: true }
       ]
     }
   ],
-  activePresetId: DETAIL_DEFAULT_PRESET_ID
+  activePresetId: DETAIL_DEFAULT_PRESET_ID,
+
+  mapBasemap: 'topo-vector',
+  mapCenterLon: 9.0,
+  mapCenterLat: 39.5,
+  mapInitZoom: 8,
+  mapPointZoom: 19,
+  mapMarkerColor: '#dc2626',
+  mapMarkerSize: 18,
+  mapMarkerOutlineColor: '#ffffff',
+  mapMarkerOutlineWidth: 2.5,
+  mapShowZoom: true,
+  mapShowAttribution: true,
+  mapShowScaleBar: false,
+  mapShowCompass: false
 }
 
 export type IMConfig = ImmutableObject<Config>

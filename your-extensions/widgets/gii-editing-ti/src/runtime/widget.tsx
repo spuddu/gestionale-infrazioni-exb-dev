@@ -5,7 +5,7 @@ import { JimuMapViewComponent, type JimuMapView } from 'jimu-arcgis'
 import { Button } from 'jimu-ui'
 import { createPortal } from 'react-dom'
 import type { IMConfig, TabConfig } from '../config'
-import { defaultConfig } from '../config'
+import { defaultConfig, DEFAULT_FIELD_LAYOUTS } from '../config'
 
 type MsgKind = 'info' | 'ok' | 'err'
 type Msg = { kind: MsgKind; text: string }
@@ -2985,6 +2985,7 @@ const CHOICES = {
   ],
   art17_tipo: [{ v: 'Art17.1', l: 'Variazione tardiva' }, { v: 'Art17.2', l: 'Rinuncia tardiva' }],
   presenza: [{ v: 'sì', l: 'Sì' }, { v: 'no', l: 'No' }],
+  grado: [{ v: '1', l: '1' }, { v: '2', l: '2' }, { v: '3', l: '3' }, { v: '4', l: '4' }],
   norma3: [
     { v: 'Art8',  l: 'Art. 8 - Violazione servizio reperibilità' },
     { v: 'Art12', l: 'Art. 12 - Negato accesso ai fondi (al personale consortile)' },
@@ -3190,11 +3191,11 @@ function NuovaPraticaForm (p: {
     }
   }, [validationPopup, validationPopupOkId])
 
-  const [npTab, setNpTab] = React.useState<'anagrafica' | 'violazione' | 'allegati'>(() => {
+  const [npTab, setNpTab] = React.useState<'anagrafica' | 'violazione' | 'dati_tecnici' | 'allegati'>(() => {
     if (mode !== 'edit') return 'anagrafica'
     try {
       const saved = sessionStorage.getItem('GII_EDIT_TAB')
-      if (saved === 'anagrafica' || saved === 'violazione' || saved === 'allegati') {
+      if (saved === 'anagrafica' || saved === 'violazione' || saved === 'dati_tecnici' || saved === 'allegati') {
         sessionStorage.removeItem('GII_EDIT_TAB')
         return saved
       }
@@ -3215,6 +3216,9 @@ function NuovaPraticaForm (p: {
     writeEditIntent(ei)
     try { ;(window as any).__giiEdit = { ...ei, dsId: null } } catch {}
     writeDynamicSelection({ oid: info.oid, layerUrl: info.layerUrl, idFieldName: 'OBJECTID', data: info.data })
+    // Segnala al widget edit (se già montato) che c'è un nuovo intent
+    try { window.dispatchEvent(new CustomEvent('gii-edit-intent-changed')) } catch {}
+    try { window.dispatchEvent(new CustomEvent('gii-force-refresh-selection', { detail: { oid: info.oid, layerUrl: info.layerUrl } })) } catch {}
     // GII_EDIT_TAB ha già il valore corrente (scritto dal useEffect di sync)
     // Reset form per quando l'utente torna alla pagina create
     createdRecordInfoRef.current = null
@@ -3540,6 +3544,7 @@ function NuovaPraticaForm (p: {
 
   const showSup15 = (tipoAbuso === 'parziale' && (n3parziale === 'Art15.1' || n3parziale === 'Art15.2')) ||
                     (tipoAbuso === 'totale'   && (n3totale   === 'Art15.3' || n3totale   === 'Art15.4'))
+  const hasTipoAbuso15 = tipoAbuso === 'parziale' || tipoAbuso === 'totale'
 
   const reqPoint = React.useMemo(() => computeReqPoint({
     norma15_parziale: n3parziale,
@@ -3911,6 +3916,18 @@ function NuovaPraticaForm (p: {
       return
     }
 
+    if (tipoAbuso === 'parziale') {
+      const dich = Number(g('sup_dichiarata_art15')) || 0
+      const irr = Number(g('sup_irrigata_art15')) || 0
+      if (irr > 0 && irr < dich) {
+        setValidationPopup({
+          title: 'Superficie irrigata non valida',
+          text: 'La superficie irrigata non può essere inferiore a quella dichiarata per l\'Art. 15 (abuso parziale).'
+        })
+        return
+      }
+    }
+
     setSaving(true); setMsg(null)
     try {
       const layer = mode === 'edit' ? await resolveLayerForEdit(ds) : await getLayerForCreate()
@@ -3989,15 +4006,15 @@ function NuovaPraticaForm (p: {
         norma15_parziale: (tipoAbuso === 'parziale' ? n3parziale : null) || null,
         norma15_totale: (tipoAbuso === 'totale' ? n3totale : null) || null,
         norma_violata1: normaV1 || null,
-        sup_dichiarata_art15: showSup15 ? toInt(g('sup_dichiarata_art15')) : null,
-        sup_irrigata_art15: showSup15 ? toInt(g('sup_irrigata_art15')) : null,
+        sup_dichiarata_art15: tipoAbuso === 'totale' ? 0 : (hasTipoAbuso15 ? toInt(g('sup_dichiarata_art15')) : null),
+        sup_irrigata_art15: hasTipoAbuso15 ? toInt(g('sup_irrigata_art15')) : null,
         norma16_17: norma1516 || null,
         art17_tipo: (norma1516 === 'Art17' ? art17tipo : null) || null,
         norma_violata2: normaV2 || null,
         sup_dichiarata_art17_1: norma1516 === 'Art17' && art17tipo === 'Art17.1' ? toInt(g('sup_dichiarata_art17_1')) : null,
         sup_dichiarata_art16: norma1516 === 'Art16' ? toInt(g('sup_dichiarata_art16')) : null,
         sup_dichiarata_art17_2: norma1516 === 'Art17' && art17tipo === 'Art17.2' ? toInt(g('sup_dichiarata_art17_2')) : null,
-        sup_irrigata_art16_17_2: (norma1516 === 'Art16' || art17tipo === 'Art17.2') ? toInt(g('sup_irrigata_art16_17_2')) : null,
+        sup_irrigata_art16_17_2: norma1516 === 'Art16' ? 0 : (art17tipo === 'Art17.2' ? 0 : null),
         sup_irrigata_art17_1: art17tipo === 'Art17.1' ? toInt(g('sup_irrigata_art17_1')) : null,
         sup_dichiarata_art16_17: toInt(supDich16_17 as any),
         sup_irrigata_art16_17: toInt(supIrr16_17 as any),
@@ -4100,6 +4117,7 @@ function NuovaPraticaForm (p: {
   const NP_TABS = [
     { id: 'anagrafica', label: 'Anagrafica' },
     { id: 'violazione', label: 'Violazione' },
+    { id: 'dati_tecnici', label: 'Dati tecnici' },
     { id: 'allegati', label: 'Allegati' }
   ] as const
 
@@ -4158,6 +4176,187 @@ function NuovaPraticaForm (p: {
     borderBottom: `${formStyle.divWidth}px solid ${formStyle.divColor}`
   }), [formStyle])
 
+  // ── Layout engine ──────────────────────────────────────────────────
+  type FldR = { el: React.ReactNode; label: string; hint?: string }
+
+  const renderFieldControl = (name: string): FldR | null => {
+    switch (name) {
+      // Anagrafica — Dati generali
+      case 'tecnico_rilevatore': return showDatiGen ? { label: 'Tecnico istruttore', el: <NpText value={g('tecnico_rilevatore')} onChange={() => {}} disabled/> } : null
+      case 'ufficio_zona': return showDatiGen ? { label: 'Ufficio di Zona', el: <NpText value={g('ufficio_zona')} onChange={() => {}} disabled/> } : null
+      case 'data_rilevazione': return showDatiGen ? { label: 'Data rilevazione', el: <NpText value={g('data_rilevazione')} onChange={() => {}} disabled/> } : null
+      // Anagrafica — Trasgressore
+      case 'tipologia_soggetto': return { label: 'Tipologia soggetto', el: <NpSel value={tipoSogg} onChange={v => set('tipologia_soggetto', v)} options={CHOICES.tipo_soggetto} disabled={saving}/> }
+      case 'nome': return tipoSogg === 'PF' ? { label: 'Nome', el: <NpText value={g('nome')} onChange={v => set('nome', v)} disabled={saving}/> } : null
+      case 'cognome': return tipoSogg === 'PF' ? { label: 'Cognome', el: <NpText value={g('cognome')} onChange={v => set('cognome', v)} disabled={saving}/> } : null
+      case 'codice_fiscale': return tipoSogg === 'PF' ? { label: 'Codice fiscale', hint: 'Massimo 16 caratteri', el: <NpText value={g('codice_fiscale')} onChange={v => set('codice_fiscale', v)} disabled={saving} maxLength={16}/> } : null
+      case 'ragione_sociale': return tipoSogg === 'PG' ? { label: 'Ragione sociale', el: <NpText value={g('ragione_sociale')} onChange={v => set('ragione_sociale', v)} disabled={saving}/> } : null
+      case 'piva': return tipoSogg === 'PG' ? { label: 'P. IVA', hint: 'Massimo 11 caratteri', el: <NpText value={g('piva')} onChange={v => set('piva', v)} disabled={saving} maxLength={11}/> } : null
+      // Anagrafica — Indirizzo
+      case 'via': return { label: 'Via', el: <NpText value={g('via')} onChange={v => set('via', v)} disabled={saving}/> }
+      case 'civico': return { label: 'N. civico', el: <NpText value={g('civico')} onChange={v => set('civico', v)} disabled={saving}/> }
+      case 'citta': return { label: 'Città', el: <NpText value={g('citta')} onChange={v => set('citta', v)} disabled={saving}/> }
+      case 'cap': return { label: 'CAP', el: <NpText value={g('cap')} onChange={v => set('cap', v)} disabled={saving}/> }
+      case 'telefono': return { label: 'Telefono', el: <NpText value={g('telefono')} onChange={v => set('telefono', v)} disabled={saving}/> }
+      case 'cellulare': return { label: 'Cellulare', el: <NpText value={g('cellulare')} onChange={v => set('cellulare', v)} disabled={saving}/> }
+      case 'email': return { label: 'E-mail', el: <NpText value={g('email')} onChange={v => set('email', v)} disabled={saving}/> }
+      case 'pec': return { label: 'PEC', el: <NpText value={g('pec')} onChange={v => set('pec', v)} disabled={saving}/> }
+      // Violazione — Art. 15
+      case 'tipo_abuso': return { label: 'Tipo di abuso', el: <NpSel value={tipoAbuso} onChange={v => { set('tipo_abuso', v); set('norma15_parziale', ''); set('norma15_totale', '') }} options={CHOICES.tipo_abuso} disabled={saving}/> }
+      case 'norma15_sel': {
+        const ur = (window as any).__giiUserRole || {}
+        const isRiAgrTec = Number(ur.ruolo) === 4 && (Number(ur.area) === 2 || Number(ur.area) === 3)
+        const canEdit = isRiAgrTec && hasTipoAbuso15 && !saving
+        if (tipoAbuso === 'parziale') return { label: 'Occorrenza', el: <NpSel value={n3parziale} onChange={v => set('norma15_parziale', v)} options={CHOICES.art15_parziale} disabled={!canEdit}/> }
+        if (tipoAbuso === 'totale') return { label: 'Occorrenza', el: <NpSel value={n3totale} onChange={v => set('norma15_totale', v)} options={CHOICES.art15_totale} disabled={!canEdit}/> }
+        return { label: 'Occorrenza', el: <NpSel value={''} onChange={() => {}} options={[]} disabled/> }
+      }
+      case 'sup_dichiarata_art15': {
+        if (!hasTipoAbuso15) return null
+        const locked = tipoAbuso === 'totale'
+        return { label: 'Superficie dichiarata (ha)', el: <NpText value={locked ? '0' : g('sup_dichiarata_art15')} onChange={v => set('sup_dichiarata_art15', v)} disabled={saving || locked}/> }
+      }
+      case 'sup_irrigata_art15': {
+        if (!hasTipoAbuso15) return null
+        const dichVal = tipoAbuso === 'totale' ? 0 : Number(g('sup_dichiarata_art15')) || 0
+        const irrVal = Number(g('sup_irrigata_art15')) || 0
+        const warn = hasTipoAbuso15 && irrVal > 0 && irrVal < dichVal
+        return { label: 'Superficie irrigata (ha)', hint: warn ? 'La superficie irrigata non può essere inferiore a quella dichiarata' : undefined, el: <NpText value={g('sup_irrigata_art15')} onChange={v => set('sup_irrigata_art15', v)} disabled={saving}/> }
+      }
+      // Violazione — Artt. 16 e 17
+      case 'norma16_17': return { label: 'Tipo di inosservanza', el: <NpSel value={norma1516} onChange={v => { set('norma16_17', v); set('art17_tipo', '') }} options={CHOICES.art16_17} disabled={saving}/> }
+      case 'art17_tipo': return norma1516 === 'Art17' ? { label: 'Seleziona violazione Art. 17', el: <NpSel value={art17tipo} onChange={v => set('art17_tipo', v)} options={CHOICES.art17_tipo} disabled={saving}/> } : null
+      case 'sup_dichiarata_art16': return norma1516 === 'Art16' ? { label: 'Superficie dichiarata (ha)', el: <NpText value={g('sup_dichiarata_art16')} onChange={v => set('sup_dichiarata_art16', v)} disabled={saving}/> } : null
+      case 'sup_irrigata_art16': return norma1516 === 'Art16' ? { label: 'Superficie irrigata (ha)', el: <NpText value={'0'} onChange={() => {}} disabled/> } : null
+      case 'sup_dichiarata_art17_1': return (norma1516 === 'Art17' && art17tipo === 'Art17.1') ? { label: 'Superficie dichiarata (ha)', el: <NpText value={g('sup_dichiarata_art17_1')} onChange={v => set('sup_dichiarata_art17_1', v)} disabled={saving}/> } : null
+      case 'sup_irrigata_art17_1': return (norma1516 === 'Art17' && art17tipo === 'Art17.1') ? { label: 'Superficie variata (ha)', el: <NpText value={g('sup_irrigata_art17_1')} onChange={v => set('sup_irrigata_art17_1', v)} disabled={saving}/> } : null
+      case 'sup_dichiarata_art17_2': return (norma1516 === 'Art17' && art17tipo === 'Art17.2') ? { label: 'Superficie dichiarata (ha)', el: <NpText value={g('sup_dichiarata_art17_2')} onChange={v => set('sup_dichiarata_art17_2', v)} disabled={saving}/> } : null
+      case 'sup_irrigata_art17_2': return (norma1516 === 'Art17' && art17tipo === 'Art17.2') ? { label: 'Superficie irrigata (ha)', el: <NpText value={'0'} onChange={() => {}} disabled/> } : null
+      // Violazione — Grado
+      case 'grado': { const ur = (window as any).__giiUserRole || {}; const en = Number(ur.ruolo) === 4 && (Number(ur.area) === 2 || Number(ur.area) === 3); return { label: 'Grado', el: <NpSel value={g('grado')} onChange={v => set('grado', v)} options={CHOICES.grado} disabled={saving || !en}/> } }
+      // Violazione — Descrizione
+      case 'descrizione_fatti': return { label: 'Descrizione dettagliata della violazione', el: <NpText value={g('descrizione_fatti')} onChange={v => set('descrizione_fatti', v)} multiline disabled={saving}/> }
+      case 'circostanze': return { label: 'Circostanze rilevanti', el: <NpText value={g('circostanze')} onChange={v => set('circostanze', v)} multiline disabled={saving}/> }
+      case 'presenza_trasgressore': return { label: 'Il trasgressore era presente?', el: <NpSel value={g('presenza_trasgressore')} onChange={v => set('presenza_trasgressore', v)} options={CHOICES.presenza} disabled={saving}/> }
+      case 'descrizione_luogo': return { label: 'Descrizione del luogo', el: <NpText value={g('descrizione_luogo')} onChange={v => set('descrizione_luogo', v)} multiline disabled={saving}/> }
+      case 'data_firma': return { label: 'Data e ora di compilazione', el: <NpDate value={g('data_firma')} onChange={v => set('data_firma', v)} withTime disabled={saving}/> }
+      // Dati tecnici
+      case 'distretto': return { label: 'Distretto', el: <NpText value={g('distretto')} onChange={v => set('distretto', v)} disabled={saving}/> }
+      case 'comizio': return { label: 'Comizio', el: <NpText value={g('comizio')} onChange={v => set('comizio', v)} disabled={saving}/> }
+      case 'idrante': return { label: 'Idrante', el: <NpText value={g('idrante')} onChange={v => set('idrante', v)} disabled={saving}/> }
+      case 'matricola_contatore': return { label: 'Matricola contatore', el: <NpText value={g('matricola_contatore')} onChange={v => set('matricola_contatore', v)} disabled={saving}/> }
+      case 'matricola_tessera': return { label: 'Matricola tessera', el: <NpText value={g('matricola_tessera')} onChange={v => set('matricola_tessera', v)} disabled={saving}/> }
+      default: return null
+    }
+  }
+
+  const renderSpecial = (id: string): React.ReactNode => {
+    switch (id) {
+      case '_dati_gen_label':
+        return showDatiGen ? (
+          <div style={{ marginBottom: 2 }}>
+            <span style={{ fontSize: formStyle.labelFontSize + 1, color: formStyle.labelColor }}>Dati generali (automatici)</span>
+          </div>
+        ) : null
+      case '_localizzazione':
+        return (
+          <div style={{ padding: 10, borderRadius: 10, border: `1px solid ${p.mapClickEnabled ? '#2563eb' : 'rgba(0,0,0,0.10)'}`, background: p.mapClickEnabled ? 'rgba(37,99,235,0.04)' : 'rgba(0,0,0,0.02)', marginBottom: 12, transition: 'all 0.2s' }}>
+            <div style={{ fontWeight: 800, fontSize: 12, color: '#374151', marginBottom: 6 }}>Localizzazione (req_point = {reqPoint})</div>
+            <div style={{ fontSize: 12, color: geomStatus.kind === 'ok' ? '#1a7f37' : (geomStatus.kind === 'err' ? '#b42318' : '#6b7280') }}>{geomStatus.text}</div>
+            {reqPoint === 1 && (() => {
+              const ep = p.clickedPointWgs84 || p.existingGeomWgs84
+              const isReal = ep && (Number(ep.x) !== 0 || Number(ep.y) !== 0)
+              return isReal ? (
+                <div style={{ marginTop: 6, display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+                  <span style={{ fontSize: 11, color: '#6b7280' }}>Lon: {Number(ep.x).toFixed(6)} — Lat: {Number(ep.y).toFixed(6)}</span>
+                </div>
+              ) : null
+            })()}
+            {reqPoint === 1 && (
+              <div style={{ marginTop: 8, display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+                {!p.mapClickEnabled ? (
+                  <>
+                    <button type='button' disabled={saving} onClick={() => p.onToggleMapClick?.(true)} style={{
+                      padding: '5px 12px', borderRadius: 8, border: '1px solid #2563eb', background: '#2563eb', color: '#fff',
+                      fontSize: 11, fontWeight: 700, cursor: saving ? 'not-allowed' : 'pointer', opacity: saving ? 0.5 : 1
+                    }}>
+                      {p.clickedPointWgs84 || (p.existingGeomWgs84 && (Number(p.existingGeomWgs84.x) !== 0 || Number(p.existingGeomWgs84.y) !== 0)) ? '📍 Modifica punto' : '📍 Imposta punto in mappa'}
+                    </button>
+                    {p.clickedPointWgs84 && (
+                      <button type='button' onClick={() => { p.onClearPoint(); p.onToggleMapClick?.(false) }} style={{
+                        padding: '5px 12px', borderRadius: 8, border: '1px solid rgba(0,0,0,0.14)', background: '#fff', color: '#374151',
+                        fontSize: 11, fontWeight: 700, cursor: 'pointer'
+                      }}>{p.existingGeomWgs84 && (Number(p.existingGeomWgs84.x) !== 0 || Number(p.existingGeomWgs84.y) !== 0) ? 'Ripristina posizione originale' : 'Annulla'}</button>
+                    )}
+                  </>
+                ) : (
+                  <>
+                    <span style={{ fontSize: 12, fontWeight: 700, color: '#2563eb' }}>⏳ Clicca sulla mappa per impostare il punto…</span>
+                    <button type='button' onClick={() => p.onToggleMapClick?.(false)} style={{
+                      padding: '5px 12px', borderRadius: 8, border: '1px solid rgba(0,0,0,0.14)', background: '#fff', color: '#374151',
+                      fontSize: 11, fontWeight: 700, cursor: 'pointer'
+                    }}>Annulla</button>
+                  </>
+                )}
+              </div>
+            )}
+          </div>
+        )
+      case '_checkboxes_norma3':
+        return (
+          <>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6 }}>
+              {CHOICES.norma3.map(o => (
+                <label key={o.v} style={{ display: 'flex', alignItems: 'flex-start', gap: 8, fontSize: 12,
+                  color: '#374151', cursor: saving ? 'not-allowed' : 'pointer', padding: '4px 0' }}>
+                  <input type='checkbox' checked={norma3Set.has(o.v)} onChange={() => !saving && toggleNorma3(o.v)} style={{ marginTop: 2, flexShrink: 0 }}/>
+                  {o.l}
+                </label>
+              ))}
+            </div>
+            {norma3SelectedLabels.length > 0 && (
+              <div style={{ fontSize: 12, color: '#374151', background: '#f8fafc', border: '1px solid #e5e7eb', borderRadius: 8, padding: '8px 10px' }}>
+                {norma3SelectedLabels.join(' • ')}
+              </div>
+            )}
+          </>
+        )
+      default: return null
+    }
+  }
+
+  const renderLayoutTab = (tabId: string): React.ReactNode => {
+    const cfgLayouts = cfg.fieldLayouts || {}
+    const layout: any[] = (cfgLayouts as any)[tabId] || DEFAULT_FIELD_LAYOUTS[tabId] || []
+    const defaultGap = Number(cfg.fieldGap) || 12
+    return (
+      <div>
+        {layout.map((row: any, ri: number) => {
+          if (row.type === 'header') return <div key={ri} style={sHdr}>{row.label}</div>
+          if (row.type === 'special') {
+            const sp = renderSpecial(row.id)
+            return sp != null ? <React.Fragment key={ri}>{sp}</React.Fragment> : null
+          }
+          const cells: any[] = row.cells || []
+          const results = cells.map((c: any) => c?.field ? renderFieldControl(c.field) : null)
+          const hasField = cells.some((c: any) => c?.field)
+          const anyVisible = results.some((r: any) => r !== null)
+          if (hasField && !anyVisible) return null
+          return (
+            <div key={ri} style={{ display: 'grid', gridTemplateColumns: row.columns || '1fr', gap: row.gap ?? defaultGap }}>
+              {cells.map((cell: any, ci: number) => {
+                if (!cell?.field) return <div key={ci}/>
+                const fld = results[ci]
+                if (!fld) return <div key={ci}/>
+                return <NpField key={ci} label={cell.label || fld.label} hint={fld.hint}>{fld.el}</NpField>
+              })}
+            </div>
+          )
+        })}
+      </div>
+    )
+  }
+
   return (
   <FormStyleCtx.Provider value={formStyle}>
     <div style={{ width: '100%', height: '100%', display: 'flex', flexDirection: 'column', minHeight: 0 }}>
@@ -4203,215 +4402,14 @@ function NuovaPraticaForm (p: {
       {/* ── Contenuto tab (scrollabile) ── */}
       <div style={{ flex: '1 1 auto', minHeight: 0, overflowY: 'auto', padding: '12px 2px' }}>
 
-        {/* ANAGRAFICA (Dati generali + Trasgressore) */}
-        {npTab === 'anagrafica' && (
-          <div>
-            {showDatiGen && (
-              <div style={{ marginBottom: 14 }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 8 }}>
-                  <span style={{ fontSize: formStyle.labelFontSize + 1, color: formStyle.labelColor }}>Dati generali (automatici)</span>
-                </div>
-                <div style={S.row3}>
-                  <NpField label='Tecnico istruttore'>
-                    <NpText value={g('tecnico_rilevatore')} onChange={() => {}} disabled/>
-                  </NpField>
-                  <NpField label='Ufficio di Zona'>
-                    <NpText value={g('ufficio_zona')} onChange={() => {}} disabled/>
-                  </NpField>
-                  <NpField label='Data rilevazione'>
-                    <NpText value={g('data_rilevazione')} onChange={() => {}} disabled/>
-                  </NpField>
-                </div>
-              </div>
-            )}
+        {/* ANAGRAFICA */}
+        {npTab === 'anagrafica' && renderLayoutTab('anagrafica')}
 
-            <div style={{ ...sHdr, marginTop: 6 }}>Trasgressore</div>
+        {/* VIOLAZIONE */}
+        {npTab === 'violazione' && renderLayoutTab('violazione')}
 
-            <div style={{ ...S.row2, marginBottom: 12 }}>
-              <NpField label='Tipologia soggetto'>
-                <NpSel value={tipoSogg} onChange={v => set('tipologia_soggetto', v)} options={CHOICES.tipo_soggetto} disabled={saving}/>
-              </NpField>
-              <div/>
-            </div>
-
-            {tipoSogg === 'PF' && (
-              <div style={S.row3}>
-                <NpField label='Nome'><NpText value={g('nome')} onChange={v => set('nome', v)} disabled={saving}/></NpField>
-                <NpField label='Cognome'><NpText value={g('cognome')} onChange={v => set('cognome', v)} disabled={saving}/></NpField>
-                <NpField label='Codice fiscale' hint='Massimo 16 caratteri'>
-                  <NpText value={g('codice_fiscale')} onChange={v => set('codice_fiscale', v)} disabled={saving} maxLength={16}/>
-                </NpField>
-              </div>
-            )}
-            {tipoSogg === 'PG' && (
-              <div style={S.row2}>
-                <NpField label='Ragione sociale'><NpText value={g('ragione_sociale')} onChange={v => set('ragione_sociale', v)} disabled={saving}/></NpField>
-                <NpField label='P. IVA' hint='Massimo 11 caratteri'>
-                  <NpText value={g('piva')} onChange={v => set('piva', v)} disabled={saving} maxLength={11}/>
-                </NpField>
-              </div>
-            )}
-
-            <div style={S.row3}>
-              <NpField label='Via'><NpText value={g('via')} onChange={v => set('via', v)} disabled={saving}/></NpField>
-              <NpField label='N. civico'><NpText value={g('civico')} onChange={v => set('civico', v)} disabled={saving}/></NpField>
-              <NpField label='Città'><NpText value={g('citta')} onChange={v => set('citta', v)} disabled={saving}/></NpField>
-            </div>
-            <div style={S.row3}>
-              <NpField label='CAP'><NpText value={g('cap')} onChange={v => set('cap', v)} disabled={saving}/></NpField>
-              <NpField label='Telefono'><NpText value={g('telefono')} onChange={v => set('telefono', v)} disabled={saving}/></NpField>
-              <NpField label='Cellulare'><NpText value={g('cellulare')} onChange={v => set('cellulare', v)} disabled={saving}/></NpField>
-            </div>
-            <div style={S.row2}>
-              <NpField label='E-mail'><NpText value={g('email')} onChange={v => set('email', v)} disabled={saving}/></NpField>
-              <NpField label='PEC'><NpText value={g('pec')} onChange={v => set('pec', v)} disabled={saving}/></NpField>
-            </div>
-          </div>
-        )}
-
-        {/* VIOLAZIONE (include descrizione/localizzazione/fine) */}
-        {npTab === 'violazione' && (
-          <div>
-            <div style={{ padding: 10, borderRadius: 10, border: `1px solid ${p.mapClickEnabled ? '#2563eb' : 'rgba(0,0,0,0.10)'}`, background: p.mapClickEnabled ? 'rgba(37,99,235,0.04)' : 'rgba(0,0,0,0.02)', marginBottom: 12, transition: 'all 0.2s' }}>
-              <div style={{ fontWeight: 800, fontSize: 12, color: '#374151', marginBottom: 6 }}>
-                Localizzazione (req_point = {reqPoint})
-              </div>
-              <div style={{ fontSize: 12, color: geomStatus.kind === 'ok' ? '#1a7f37' : (geomStatus.kind === 'err' ? '#b42318' : '#6b7280') }}>
-                {geomStatus.text}
-              </div>
-              {reqPoint === 1 && (() => {
-                const ep = p.clickedPointWgs84 || p.existingGeomWgs84
-                const isReal = ep && (Number(ep.x) !== 0 || Number(ep.y) !== 0)
-                return isReal ? (
-                  <div style={{ marginTop: 6, display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
-                    <span style={{ fontSize: 11, color: '#6b7280' }}>
-                      Lon: {Number(ep.x).toFixed(6)} — Lat: {Number(ep.y).toFixed(6)}
-                    </span>
-                  </div>
-                ) : null
-              })()}
-              {reqPoint === 1 && (
-                <div style={{ marginTop: 8, display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
-                  {!p.mapClickEnabled ? (
-                    <>
-                      <button type='button' disabled={saving} onClick={() => p.onToggleMapClick?.(true)} style={{
-                        padding: '5px 12px', borderRadius: 8, border: '1px solid #2563eb', background: '#2563eb', color: '#fff',
-                        fontSize: 11, fontWeight: 700, cursor: saving ? 'not-allowed' : 'pointer', opacity: saving ? 0.5 : 1
-                      }}>
-                        {p.clickedPointWgs84 || (p.existingGeomWgs84 && (Number(p.existingGeomWgs84.x) !== 0 || Number(p.existingGeomWgs84.y) !== 0)) ? '📍 Modifica punto' : '📍 Imposta punto in mappa'}
-                      </button>
-                      {p.clickedPointWgs84 && (
-                        <button type='button' onClick={() => { p.onClearPoint(); p.onToggleMapClick?.(false) }} style={{
-                          padding: '5px 12px', borderRadius: 8, border: '1px solid rgba(0,0,0,0.14)', background: '#fff', color: '#374151',
-                          fontSize: 11, fontWeight: 700, cursor: 'pointer'
-                        }}>{p.existingGeomWgs84 && (Number(p.existingGeomWgs84.x) !== 0 || Number(p.existingGeomWgs84.y) !== 0) ? 'Ripristina posizione originale' : 'Annulla'}</button>
-                      )}
-                    </>
-                  ) : (
-                    <>
-                      <span style={{ fontSize: 12, fontWeight: 700, color: '#2563eb' }}>
-                        ⏳ Clicca sulla mappa per impostare il punto…
-                      </span>
-                      <button type='button' onClick={() => p.onToggleMapClick?.(false)} style={{
-                        padding: '5px 12px', borderRadius: 8, border: '1px solid rgba(0,0,0,0.14)', background: '#fff', color: '#374151',
-                        fontSize: 11, fontWeight: 700, cursor: 'pointer'
-                      }}>Annulla</button>
-                    </>
-                  )}
-                </div>
-              )}
-            </div>
-
-            <div style={sHdr}>Art. 15 — Prelievo abusivo</div>
-            <div style={S.row2}>
-              <NpField label='Tipo di abuso'>
-                <NpSel value={tipoAbuso} onChange={v => { set('tipo_abuso', v); set('norma15_parziale', ''); set('norma15_totale', '') }}
-                  options={CHOICES.tipo_abuso} disabled={saving}/>
-              </NpField>
-              {tipoAbuso === 'parziale' && (
-                <NpField label='Seleziona violazione'>
-                  <NpSel value={n3parziale} onChange={v => set('norma15_parziale', v)} options={CHOICES.art15_parziale} disabled={saving}/>
-                </NpField>
-              )}
-              {tipoAbuso === 'totale' && (
-                <NpField label='Seleziona violazione'>
-                  <NpSel value={n3totale} onChange={v => set('norma15_totale', v)} options={CHOICES.art15_totale} disabled={saving}/>
-                </NpField>
-              )}
-            </div>
-            {showSup15 && (
-              <div style={S.row2}>
-                <NpField label='Superficie dichiarata (ha)'><NpInt value={g('sup_dichiarata_art15')} onChange={v => set('sup_dichiarata_art15', v)} disabled={saving}/></NpField>
-                <NpField label='Superficie irrigata (ha)'><NpInt value={g('sup_irrigata_art15')} onChange={v => set('sup_irrigata_art15', v)} disabled={saving}/></NpField>
-              </div>
-            )}
-
-            <div style={sHdr}>Artt. 16 e 17 — Inosservanza termini</div>
-            <NpField label='Tipo di inosservanza'>
-              <NpSel value={norma1516} onChange={v => { set('norma16_17', v); set('art17_tipo', '') }} options={CHOICES.art16_17} disabled={saving}/>
-            </NpField>
-            {norma1516 === 'Art17' && (
-              <NpField label='Seleziona violazione Art. 17'>
-                <NpSel value={art17tipo} onChange={v => set('art17_tipo', v)} options={CHOICES.art17_tipo} disabled={saving}/>
-              </NpField>
-            )}
-            {norma1516 === 'Art16' && (
-              <div style={S.row2}>
-                <NpField label='Superficie dichiarata (ha)'><NpInt value={g('sup_dichiarata_art16')} onChange={v => set('sup_dichiarata_art16', v)} disabled={saving}/></NpField>
-                <NpField label='Superficie irrigata (ha)'><NpInt value={g('sup_irrigata_art16_17_2')} onChange={v => set('sup_irrigata_art16_17_2', v)} disabled={saving}/></NpField>
-              </div>
-            )}
-            {norma1516 === 'Art17' && art17tipo === 'Art17.1' && (
-              <div style={S.row2}>
-                <NpField label='Superficie dichiarata (ha)'><NpInt value={g('sup_dichiarata_art17_1')} onChange={v => set('sup_dichiarata_art17_1', v)} disabled={saving}/></NpField>
-                <NpField label='Superficie variata (ha)'><NpInt value={g('sup_irrigata_art17_1')} onChange={v => set('sup_irrigata_art17_1', v)} disabled={saving}/></NpField>
-              </div>
-            )}
-            {norma1516 === 'Art17' && art17tipo === 'Art17.2' && (
-              <div style={S.row2}>
-                <NpField label='Superficie dichiarata (ha)'><NpInt value={g('sup_dichiarata_art17_2')} onChange={v => set('sup_dichiarata_art17_2', v)} disabled={saving}/></NpField>
-                <NpField label='Superficie irrigata (ha)'><NpInt value={g('sup_irrigata_art16_17_2')} onChange={v => set('sup_irrigata_art16_17_2', v)} disabled={saving}/></NpField>
-              </div>
-            )}
-
-            <div style={sHdr}>Altre violazioni</div>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6 }}>
-              {CHOICES.norma3.map(o => (
-                <label key={o.v} style={{ display: 'flex', alignItems: 'flex-start', gap: 8, fontSize: 12,
-                  color: '#374151', cursor: saving ? 'not-allowed' : 'pointer', padding: '4px 0' }}>
-                  <input type='checkbox' checked={norma3Set.has(o.v)} onChange={() => !saving && toggleNorma3(o.v)} style={{ marginTop: 2, flexShrink: 0 }}/>
-                  {o.l}
-                </label>
-              ))}
-            </div>
-            {norma3SelectedLabels.length > 0 && (
-              <div style={{ fontSize: 12, color: '#374151', background: '#f8fafc', border: '1px solid #e5e7eb', borderRadius: 8, padding: '8px 10px' }}>
-                {norma3SelectedLabels.join(' • ')}
-              </div>
-            )}
-
-            <div style={sHdr}>Descrizione</div>
-            <NpField label='Descrizione dettagliata della violazione'>
-              <NpText value={g('descrizione_fatti')} onChange={v => set('descrizione_fatti', v)} multiline disabled={saving}/>
-            </NpField>
-            <NpField label='Circostanze rilevanti'>
-              <NpText value={g('circostanze')} onChange={v => set('circostanze', v)} multiline disabled={saving}/>
-            </NpField>
-            <NpField label='Il trasgressore era presente?'>
-              <NpSel value={g('presenza_trasgressore')} onChange={v => set('presenza_trasgressore', v)} options={CHOICES.presenza} disabled={saving}/>
-            </NpField>
-
-            <div style={sHdr}>Descrizione del luogo</div>
-            <NpField label='Descrizione del luogo'>
-              <NpText value={g('descrizione_luogo')} onChange={v => set('descrizione_luogo', v)} multiline disabled={saving}/>
-            </NpField>
-
-            <div style={sHdr}>Fine compilazione</div>
-            <NpField label='Data e ora di compilazione'>
-              <NpDate value={g('data_firma')} onChange={v => set('data_firma', v)} withTime disabled={saving}/>
-            </NpField>
-          </div>
-        )}
+        {/* DATI TECNICI */}
+        {npTab === 'dati_tecnici' && renderLayoutTab('dati_tecnici')}
 
         {/* ALLEGATI */}
         {npTab === 'allegati' && (

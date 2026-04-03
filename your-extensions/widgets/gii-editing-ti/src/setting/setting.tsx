@@ -5,7 +5,7 @@ import type { AllWidgetSettingProps } from 'jimu-for-builder'
 import { DataSourceSelector } from 'jimu-ui/advanced/data-source-selector'
 import { MapWidgetSelector } from 'jimu-ui/advanced/setting-components'
 import type { IMConfig } from '../config'
-import { defaultConfig } from '../config'
+import { defaultConfig, DEFAULT_FIELD_LAYOUTS } from '../config'
 
 function asJs<T=any>(v:any):T { return v?.asMutable?v.asMutable({deep:true}):v }
 
@@ -79,6 +79,111 @@ export default function Setting(props: AllWidgetSettingProps<IMConfig>) {
   const set = (key:string, value:any) => {
     const base = props.config || Immutable(defaultConfig) as any
     props.onSettingChange({ id:props.id, config: base.set ? base.set(key, value) : { ...cfg, [key]:value } as any })
+  }
+
+  // Layout editor state
+  const LAYOUT_TABS = ['anagrafica', 'violazione', 'dati_tecnici'] as const
+  const [layoutTab, setLayoutTab] = React.useState<string>('anagrafica')
+
+  const FIELD_OPTS: Record<string, {v:string;l:string}[]> = {
+    anagrafica: [
+      {v:'tecnico_rilevatore',l:'Tecnico istruttore'},{v:'ufficio_zona',l:'Ufficio di Zona'},{v:'data_rilevazione',l:'Data rilevazione'},
+      {v:'tipologia_soggetto',l:'Tipologia soggetto'},{v:'nome',l:'Nome'},{v:'cognome',l:'Cognome'},{v:'codice_fiscale',l:'Codice fiscale'},
+      {v:'ragione_sociale',l:'Ragione sociale'},{v:'piva',l:'P. IVA'},
+      {v:'via',l:'Via'},{v:'civico',l:'N. civico'},{v:'citta',l:'Città'},
+      {v:'cap',l:'CAP'},{v:'telefono',l:'Telefono'},{v:'cellulare',l:'Cellulare'},{v:'email',l:'E-mail'},{v:'pec',l:'PEC'}
+    ],
+    violazione: [
+      {v:'tipo_abuso',l:'Tipo di abuso'},{v:'norma15_sel',l:'Occorrenza Art. 15'},
+      {v:'sup_dichiarata_art15',l:'Sup. dichiarata Art.15'},{v:'sup_irrigata_art15',l:'Sup. irrigata Art.15'},
+      {v:'norma16_17',l:'Inosservanza Art. 16-17'},{v:'art17_tipo',l:'Tipo Art.17'},
+      {v:'sup_dichiarata_art16',l:'Sup. dich. Art.16'},{v:'sup_irrigata_art16',l:'Sup. irr. Art.16'},
+      {v:'sup_dichiarata_art17_1',l:'Sup. dich. Art.17.1'},{v:'sup_irrigata_art17_1',l:'Sup. var. Art.17.1'},
+      {v:'sup_dichiarata_art17_2',l:'Sup. dich. Art.17.2'},{v:'sup_irrigata_art17_2',l:'Sup. irr. Art.17.2'},
+      {v:'grado',l:'Grado'},
+      {v:'descrizione_fatti',l:'Descrizione fatti'},{v:'circostanze',l:'Circostanze'},{v:'presenza_trasgressore',l:'Trasgressore presente'},
+      {v:'descrizione_luogo',l:'Descrizione luogo'},{v:'data_firma',l:'Data compilazione'}
+    ],
+    dati_tecnici: [
+      {v:'distretto',l:'Distretto'},{v:'comizio',l:'Comizio'},{v:'idrante',l:'Idrante'},
+      {v:'matricola_contatore',l:'Matricola contatore'},{v:'matricola_tessera',l:'Matricola tessera'}
+    ]
+  }
+  const SPECIAL_OPTS = [
+    {v:'_dati_gen_label',l:'Etichetta dati generali'},{v:'_localizzazione',l:'Pannello localizzazione'},{v:'_checkboxes_norma3',l:'Checkbox altre violazioni'}
+  ]
+
+  const getRows = (tabId: string): any[] => {
+    const layouts = asJs(cfg.fieldLayouts || {})
+    const r = layouts[tabId]
+    return (r && Array.isArray(r) && r.length > 0) ? r : (DEFAULT_FIELD_LAYOUTS[tabId] || [])
+  }
+  const isCustom = (tabId: string): boolean => {
+    const layouts = asJs(cfg.fieldLayouts || {})
+    return !!(layouts[tabId] && Array.isArray(layouts[tabId]) && layouts[tabId].length > 0)
+  }
+  const saveRows = (tabId: string, rows: any[]) => {
+    const cur = asJs(cfg.fieldLayouts || {})
+    set('fieldLayouts', { ...cur, [tabId]: rows })
+  }
+  const resetTab = (tabId: string) => {
+    const cur = asJs(cfg.fieldLayouts || {})
+    const next = { ...cur }; delete next[tabId]
+    set('fieldLayouts', next)
+  }
+  const ensureCustom = (tabId: string): any[] => {
+    if (isCustom(tabId)) return getRows(tabId)
+    const rows = JSON.parse(JSON.stringify(DEFAULT_FIELD_LAYOUTS[tabId] || []))
+    saveRows(tabId, rows)
+    return rows
+  }
+  const updateRow = (tabId: string, idx: number, patch: any) => {
+    const rows = ensureCustom(tabId).slice()
+    rows[idx] = { ...rows[idx], ...patch }
+    saveRows(tabId, rows)
+  }
+  const removeRow = (tabId: string, idx: number) => {
+    const rows = ensureCustom(tabId).slice()
+    rows.splice(idx, 1)
+    saveRows(tabId, rows)
+  }
+  const moveRow = (tabId: string, idx: number, dir: -1|1) => {
+    const rows = ensureCustom(tabId).slice()
+    const ni = idx + dir
+    if (ni < 0 || ni >= rows.length) return
+    ;[rows[idx], rows[ni]] = [rows[ni], rows[idx]]
+    saveRows(tabId, rows)
+  }
+  const addRow = (tabId: string, type: string) => {
+    const rows = ensureCustom(tabId).slice()
+    if (type === 'header') rows.push({ type: 'header', label: 'Nuova sezione' })
+    else if (type === 'special') rows.push({ type: 'special', id: SPECIAL_OPTS[0]?.v || '' })
+    else rows.push({ type: 'fields', columns: '1fr', cells: [{ field: '' }] })
+    saveRows(tabId, rows)
+  }
+  const updateCell = (tabId: string, rowIdx: number, cellIdx: number, field: string) => {
+    const rows = ensureCustom(tabId).slice()
+    const r = { ...rows[rowIdx] }
+    const cells = (r.cells || []).slice()
+    cells[cellIdx] = field ? { field } : {}
+    r.cells = cells; rows[rowIdx] = r
+    saveRows(tabId, rows)
+  }
+  const addCell = (tabId: string, rowIdx: number) => {
+    const rows = ensureCustom(tabId).slice()
+    const r = { ...rows[rowIdx] }
+    const cells = (r.cells || []).slice()
+    cells.push({})
+    r.cells = cells; rows[rowIdx] = r
+    saveRows(tabId, rows)
+  }
+  const removeCell = (tabId: string, rowIdx: number, cellIdx: number) => {
+    const rows = ensureCustom(tabId).slice()
+    const r = { ...rows[rowIdx] }
+    const cells = (r.cells || []).slice()
+    cells.splice(cellIdx, 1)
+    r.cells = cells; rows[rowIdx] = r
+    saveRows(tabId, rows)
   }
 
   const useDsJs:any[] = asJs(props.useDataSources ?? Immutable([])) || []
@@ -303,6 +408,136 @@ export default function Setting(props: AllWidgetSettingProps<IMConfig>) {
             <div style={{padding:'5px 8px',borderRadius:6,border:'1px solid rgba(0,0,0,0.15)',fontSize:12,color:'#374151'}}>Via Roma 1</div>
           </div>
         </div>
+      </div>}
+
+
+      {/* === LAYOUT CAMPI === */}
+      <Acc id='layout' label='📐 Layout campi' open={isOpen('layout')} onToggle={()=>toggle('layout')}/>
+      {isOpen('layout') && <div>
+        <div style={P.hint}>Configura la disposizione dei campi in ogni tab. Ogni riga può essere un&apos;intestazione, un blocco di campi o un elemento speciale.
+          Per le righe campi: <b>columns</b> accetta qualsiasi valore CSS grid-template-columns (es. <code>1fr 1fr</code>, <code>30% 40px 30%</code>, <code>200px 1fr</code>).
+          Le celle vuote (spacer) mantengono il posto nel grid.</div>
+
+        <label style={P.lbl}>Gap tra campi (px)</label>
+        <input type='number' value={cfg.fieldGap??12} min={0} max={40}
+          onChange={e=>set('fieldGap', Number(e.target.value))} style={{...P.inp, width:80}}/>
+
+        <div style={{display:'flex', gap:4, marginTop:14, marginBottom:10}}>
+          {LAYOUT_TABS.map(t => (
+            <button key={t} type='button' onClick={()=>setLayoutTab(t)} style={{
+              padding:'5px 12px', borderRadius:6, border:`1px solid ${layoutTab===t?'#60a5fa':'rgba(255,255,255,0.12)'}`,
+              background: layoutTab===t?'rgba(96,165,250,0.15)':'transparent',
+              color: layoutTab===t?'#93c5fd':'#9ca3af', fontSize:11, fontWeight:700, cursor:'pointer', textTransform:'capitalize'
+            }}>{t.replace(/_/g,' ')}</button>
+          ))}
+        </div>
+
+        <div style={{fontSize:10.5, color: isCustom(layoutTab)?'#86efac':'#a0aec0', marginBottom:8}}>
+          {isCustom(layoutTab) ? '✎ Layout personalizzato' : '○ Layout predefinito (modifica per personalizzare)'}
+        </div>
+
+        {/* Row list */}
+        <div style={{display:'grid', gap:6}}>
+          {getRows(layoutTab).map((row: any, ri: number) => {
+            const rows = getRows(layoutTab)
+            const rowSty: React.CSSProperties = {padding:'8px 10px', borderRadius:8, border:'1px solid rgba(255,255,255,0.10)', background:'rgba(255,255,255,0.03)'}
+            const smBtn = (label: string, onClick: ()=>void, color?: string): any => (
+              <button type='button' onClick={onClick} style={{padding:'2px 6px', borderRadius:4, border:'1px solid rgba(255,255,255,0.12)', background:'transparent', color: color||'#9ca3af', fontSize:10, cursor:'pointer', lineHeight:1}}>{label}</button>
+            )
+
+            return (
+              <div key={ri} style={rowSty}>
+                {/* Row header bar */}
+                <div style={{display:'flex', alignItems:'center', gap:6, marginBottom:6}}>
+                  <span style={{fontSize:10, color:'#6b7280', fontWeight:600, minWidth:20}}>#{ri+1}</span>
+                  <select value={row.type} onChange={e=>{
+                    const t = e.target.value
+                    if (t === 'header') updateRow(layoutTab, ri, {type:'header', label: row.label||'Sezione', cells:undefined, columns:undefined, id:undefined})
+                    else if (t === 'special') updateRow(layoutTab, ri, {type:'special', id: SPECIAL_OPTS[0]?.v||'', label:undefined, cells:undefined, columns:undefined})
+                    else updateRow(layoutTab, ri, {type:'fields', columns: row.columns||'1fr', cells: row.cells||[{}], label:undefined, id:undefined})
+                  }} style={{...P.inp, width:90, fontSize:10, padding:'2px 4px'}}>
+                    <option value='header'>Intestazione</option>
+                    <option value='fields'>Campi</option>
+                    <option value='special'>Speciale</option>
+                  </select>
+                  <div style={{flex:1}}/>
+                  {smBtn('▲', ()=>moveRow(layoutTab, ri, -1))}
+                  {smBtn('▼', ()=>moveRow(layoutTab, ri, 1))}
+                  {smBtn('✕', ()=>removeRow(layoutTab, ri), '#fca5a5')}
+                </div>
+
+                {/* Row body by type */}
+                {row.type === 'header' && (
+                  <input type='text' value={row.label||''} onChange={e=>updateRow(layoutTab, ri, {label:e.target.value})}
+                    placeholder='Titolo sezione' style={{...P.inp, fontSize:11}}/>
+                )}
+
+                {row.type === 'special' && (
+                  <select value={row.id||''} onChange={e=>updateRow(layoutTab, ri, {id:e.target.value})}
+                    style={{...P.inp, fontSize:11}}>
+                    {SPECIAL_OPTS.map(o => <option key={o.v} value={o.v}>{o.l}</option>)}
+                  </select>
+                )}
+
+                {row.type === 'fields' && (
+                  <div>
+                    <div style={{display:'flex', alignItems:'center', gap:6, marginBottom:6}}>
+                      <span style={{fontSize:10, color:'#9ca3af'}}>columns:</span>
+                      <input type='text' value={row.columns||'1fr'} onChange={e=>updateRow(layoutTab, ri, {columns:e.target.value})}
+                        placeholder='1fr 1fr' style={{...P.inp, flex:1, fontSize:10, padding:'3px 6px'}}/>
+                      {row.gap != null && (
+                        <>
+                          <span style={{fontSize:10, color:'#9ca3af'}}>gap:</span>
+                          <input type='number' value={row.gap} min={0} max={40}
+                            onChange={e=>updateRow(layoutTab, ri, {gap: Number(e.target.value)})}
+                            style={{...P.inp, width:42, fontSize:10, padding:'3px 4px'}}/>
+                        </>
+                      )}
+                    </div>
+                    <div style={{display:'grid', gap:4}}>
+                      {(row.cells||[]).map((cell: any, ci: number) => (
+                        <div key={ci} style={{display:'flex', alignItems:'center', gap:4}}>
+                          <span style={{fontSize:9, color:'#6b7280', minWidth:14}}>{ci+1}.</span>
+                          <select value={cell?.field||''} onChange={e=>updateCell(layoutTab, ri, ci, e.target.value)}
+                            style={{...P.inp, flex:1, fontSize:10, padding:'2px 4px', color: cell?.field?'#e5e7eb':'#6b7280'}}>
+                            <option value=''>— spacer —</option>
+                            {(FIELD_OPTS[layoutTab]||[]).map(o => <option key={o.v} value={o.v}>{o.l}</option>)}
+                          </select>
+                          {smBtn('✕', ()=>removeCell(layoutTab, ri, ci), '#fca5a5')}
+                        </div>
+                      ))}
+                    </div>
+                    <button type='button' onClick={()=>addCell(layoutTab, ri)}
+                      style={{marginTop:4, padding:'2px 8px', borderRadius:4, border:'1px dashed rgba(255,255,255,0.15)', background:'transparent', color:'#60a5fa', fontSize:10, cursor:'pointer'}}>
+                      + cella
+                    </button>
+                  </div>
+                )}
+              </div>
+            )
+          })}
+        </div>
+
+        {/* Add row */}
+        <div style={{display:'flex', gap:6, marginTop:10}}>
+          <button type='button' onClick={()=>addRow(layoutTab,'fields')} style={{padding:'4px 10px', borderRadius:5, border:'1px dashed rgba(96,165,250,0.4)', background:'transparent', color:'#60a5fa', fontSize:10.5, cursor:'pointer', fontWeight:600}}>
+            + Riga campi
+          </button>
+          <button type='button' onClick={()=>addRow(layoutTab,'header')} style={{padding:'4px 10px', borderRadius:5, border:'1px dashed rgba(96,165,250,0.4)', background:'transparent', color:'#60a5fa', fontSize:10.5, cursor:'pointer', fontWeight:600}}>
+            + Intestazione
+          </button>
+          <button type='button' onClick={()=>addRow(layoutTab,'special')} style={{padding:'4px 10px', borderRadius:5, border:'1px dashed rgba(96,165,250,0.4)', background:'transparent', color:'#60a5fa', fontSize:10.5, cursor:'pointer', fontWeight:600}}>
+            + Speciale
+          </button>
+        </div>
+
+        {/* Reset */}
+        {isCustom(layoutTab) && (
+          <button type='button' onClick={()=>{if(window.confirm('Ripristinare il layout predefinito per questa tab?')) resetTab(layoutTab)}}
+            style={{marginTop:10, padding:'4px 10px', borderRadius:5, border:'1px solid rgba(252,165,165,0.3)', background:'rgba(239,68,68,0.08)', color:'#fca5a5', fontSize:10.5, cursor:'pointer', fontWeight:600}}>
+            ↺ Ripristina predefiniti per {layoutTab.replace(/_/g,' ')}
+          </button>
+        )}
       </div>}
 
 

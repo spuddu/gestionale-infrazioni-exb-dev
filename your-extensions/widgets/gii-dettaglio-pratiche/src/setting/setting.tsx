@@ -461,6 +461,55 @@ export default function Setting(props: Props) {
         />
       </div>}
 
+      {/* ═══ MAPPA ═══ */}
+      <Acc id='mappa' label='🗺 Mappa' open={isOpen('mappa')} onToggle={()=>toggle('mappa')}/>
+      {isOpen('mappa') && <div>
+        <div style={P.hint}>Impostazioni della mappa embedded nella tab Mappa del dettaglio pratiche.</div>
+
+        <div style={P.grp}>Basemap</div>
+        <Sel value={String(cfgJs.mapBasemap || 'topo-vector')} onChange={v=>patch({mapBasemap:v})} options={[
+          {value:'topo-vector',label:'Topografica'},
+          {value:'streets-vector',label:'Strade'},
+          {value:'satellite',label:'Satellite'},
+          {value:'hybrid',label:'Ibrida (satellite + etichette)'},
+          {value:'dark-gray-vector',label:'Grigio scuro'},
+          {value:'gray-vector',label:'Grigio chiaro'},
+          {value:'osm',label:'OpenStreetMap'},
+          {value:'terrain',label:'Terreno'},
+          {value:'streets-navigation-vector',label:'Navigazione'},
+          {value:'streets-night-vector',label:'Notturna'}
+        ]}/>
+
+        <div style={P.grp}>Vista iniziale</div>
+        <div style={P.hint}>Centro e zoom della mappa quando nessun rapporto è selezionato o il rapporto non ha punto.</div>
+        <div style={P.row3}>
+          <div><label style={P.lbl}>Longitudine</label><Inp value={String(cfgJs.mapCenterLon ?? 9.0)} onChange={v=>patch({mapCenterLon:Number(v)||0})}/></div>
+          <div><label style={P.lbl}>Latitudine</label><Inp value={String(cfgJs.mapCenterLat ?? 39.5)} onChange={v=>patch({mapCenterLat:Number(v)||0})}/></div>
+          <div><label style={P.lbl}>Zoom iniziale</label><NumInp value={parseNum(cfgJs.mapInitZoom,8)} onChange={n=>patch({mapInitZoom:n})} min={1} max={23}/></div>
+        </div>
+
+        <div style={P.grp}>Zoom sul punto</div>
+        <label style={P.lbl}>Livello di zoom</label>
+        <NumInp value={parseNum(cfgJs.mapPointZoom,19)} onChange={n=>patch({mapPointZoom:n})} min={1} max={23}/>
+        <div style={P.hint}>Zoom applicato quando la mappa centra sul punto del rapporto selezionato.</div>
+
+        <div style={P.grp}>Marker</div>
+        <div style={P.row2}>
+          <div><label style={P.lbl}>Colore</label><ColInp value={String(cfgJs.mapMarkerColor || '#dc2626')} onChange={v=>patch({mapMarkerColor:v})}/></div>
+          <div><label style={P.lbl}>Dimensione (px)</label><NumInp value={parseNum(cfgJs.mapMarkerSize,18)} onChange={n=>patch({mapMarkerSize:n})} min={6} max={40}/></div>
+        </div>
+        <div style={P.row2}>
+          <div><label style={P.lbl}>Colore bordo</label><ColInp value={String(cfgJs.mapMarkerOutlineColor || '#ffffff')} onChange={v=>patch({mapMarkerOutlineColor:v})}/></div>
+          <div><label style={P.lbl}>Spessore bordo (px)</label><NumInp value={parseNum(cfgJs.mapMarkerOutlineWidth,2.5)} onChange={n=>patch({mapMarkerOutlineWidth:n})} min={0} max={8} step={0.5}/></div>
+        </div>
+
+        <div style={P.grp}>Controlli mappa</div>
+        <Check value={cfgJs.mapShowZoom !== false} onChange={v=>patch({mapShowZoom:v})} label='Mostra controlli zoom (+/−)'/>
+        <Check value={cfgJs.mapShowAttribution !== false} onChange={v=>patch({mapShowAttribution:v})} label='Mostra attribuzione (Esri)'/>
+        <Check value={cfgJs.mapShowScaleBar === true} onChange={v=>patch({mapShowScaleBar:v})} label='Mostra barra di scala'/>
+        <Check value={cfgJs.mapShowCompass === true} onChange={v=>patch({mapShowCompass:v})} label='Mostra bussola'/>
+      </div>}
+
       {/* ═══ RESET ═══ */}
       <div style={{marginTop:28,borderTop:'1px solid rgba(255,255,255,0.10)',paddingTop:16}}>
         <button type='button'

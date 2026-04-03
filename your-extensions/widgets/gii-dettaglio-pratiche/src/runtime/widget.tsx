@@ -1021,6 +1021,11 @@ function migrateTabs(tabFields: TabFields, tabs: TabConfig[] | undefined): TabCo
     ]
   }
   
+  // Inietta tab Mappa se mancante (migrazione config esistenti)
+  if (!result.some(t => t.id === 'mappa')) {
+    result.push({ id: 'mappa', label: 'Mappa', fields: [], locked: true })
+  }
+
   // Normalizza hideEmpty per tab (retrocompatibilità)
   return result.map(tab => {
     const normalizedHideEmpty =
@@ -1111,12 +1116,159 @@ function ReadOnlyPanel (props: {
 
 
 
+function MapTabContent (props: {
+  oid: number | null
+  layerUrl: string
+  hasSel: boolean
+  mapCfg: {
+    basemap: string; centerLon: number; centerLat: number; initZoom: number; pointZoom: number
+    markerColor: string; markerSize: number; markerOutlineColor: string; markerOutlineWidth: number
+    showZoom: boolean; showAttribution: boolean; showScaleBar: boolean; showCompass: boolean
+  }
+}) {
+  const containerRef = React.useRef<HTMLDivElement>(null)
+  const viewRef = React.useRef<any>(null)
+  const markerRef = React.useRef<any>(null)
+  const [status, setStatus] = React.useState<'loading' | 'ok' | 'nogeom' | 'error'>('loading')
+  const mc = props.mapCfg
+
+  // Helper: parse hex color to RGBA array
+  const hexToRgba = (hex: string, alpha = 255): number[] => {
+    const h = hex.replace('#', '')
+    if (h.length === 3) return [parseInt(h[0]+h[0],16), parseInt(h[1]+h[1],16), parseInt(h[2]+h[2],16), alpha]
+    if (h.length >= 6) return [parseInt(h.slice(0,2),16), parseInt(h.slice(2,4),16), parseInt(h.slice(4,6),16), alpha]
+    return [220, 38, 38, alpha]
+  }
+
+  // Init MapView once
+  React.useEffect(() => {
+    if (!containerRef.current) return
+    let cancelled = false
+    ;(async () => {
+      try {
+        const [MapView, Map] = await Promise.all([
+          loadEsriModule<any>('esri/views/MapView'),
+          loadEsriModule<any>('esri/Map')
+        ])
+        if (cancelled || !containerRef.current) return
+        const uiComponents: string[] = []
+        if (mc.showZoom) uiComponents.push('zoom')
+        if (mc.showAttribution) uiComponents.push('attribution')
+        if (mc.showCompass) uiComponents.push('compass')
+        const map = new Map({ basemap: mc.basemap || 'topo-vector' })
+        const view = new MapView({
+          container: containerRef.current,
+          map,
+          center: [mc.centerLon || 9.0, mc.centerLat || 39.5],
+          zoom: mc.initZoom || 8,
+          ui: { components: uiComponents }
+        })
+        await view.when()
+        if (cancelled) { view.destroy(); return }
+        if (mc.showScaleBar) {
+          try {
+            const ScaleBar = await loadEsriModule<any>('esri/widgets/ScaleBar')
+            const sb = new ScaleBar({ view, unit: 'metric' })
+            view.ui.add(sb, 'bottom-left')
+          } catch {}
+        }
+        viewRef.current = view
+      } catch {
+        if (!cancelled) setStatus('error')
+      }
+    })()
+    return () => { cancelled = true; if (viewRef.current) { try { viewRef.current.destroy() } catch {} viewRef.current = null } }
+  }, [])
+
+  // Zoom to feature geometry on selection change
+  React.useEffect(() => {
+    const view = viewRef.current
+    if (!view) return
+    if (!props.hasSel || props.oid == null || !props.layerUrl) {
+      view.graphics?.removeAll?.()
+      markerRef.current = null
+      setStatus('loading')
+      return
+    }
+    let cancelled = false
+    setStatus('loading')
+    ;(async () => {
+      try {
+        const [FeatureLayer, Graphic, SimpleMarkerSymbol, Point] = await Promise.all([
+          loadEsriModule<any>('esri/layers/FeatureLayer'),
+          loadEsriModule<any>('esri/Graphic'),
+          loadEsriModule<any>('esri/symbols/SimpleMarkerSymbol'),
+          loadEsriModule<any>('esri/geometry/Point')
+        ])
+        const fl = new FeatureLayer({ url: props.layerUrl })
+        if (typeof fl?.load === 'function') await fl.load()
+        const res = await fl.queryFeatures({ where: `OBJECTID=${props.oid}`, outFields: ['OBJECTID'], returnGeometry: true })
+        if (cancelled) return
+        const geom = res?.features?.[0]?.geometry
+        if (!geom) { setStatus('nogeom'); view.graphics?.removeAll?.(); return }
+        let x = geom.longitude ?? geom.x
+        let y = geom.latitude ?? geom.y
+        if (geom.spatialReference?.wkid === 102100 || geom.spatialReference?.wkid === 3857) {
+          try {
+            const wmu = await loadEsriModule<any>('esri/geometry/support/webMercatorUtils')
+            const g = wmu.webMercatorToGeographic(geom)
+            if (g) { x = g.x; y = g.y }
+          } catch {}
+        }
+        if (cancelled) return
+        if (!Number.isFinite(x) || !Number.isFinite(y) || (x === 0 && y === 0)) {
+          setStatus('nogeom'); view.graphics?.removeAll?.(); return
+        }
+        const pt = new Point({ longitude: x, latitude: y, spatialReference: { wkid: 4326 } })
+        const sym = new SimpleMarkerSymbol({
+          style: 'circle',
+          color: hexToRgba(mc.markerColor || '#dc2626', 220),
+          size: mc.markerSize || 18,
+          outline: { color: hexToRgba(mc.markerOutlineColor || '#ffffff', 255), width: mc.markerOutlineWidth || 2.5 }
+        })
+        const marker = new Graphic({ geometry: pt, symbol: sym })
+        view.graphics?.removeAll?.()
+        view.graphics?.add?.(marker)
+        markerRef.current = marker
+        try { await view.goTo({ center: [x, y], zoom: mc.pointZoom || 19 }, { duration: 800 }) } catch {}
+        if (!cancelled) setStatus('ok')
+      } catch {
+        if (!cancelled) setStatus('error')
+      }
+    })()
+    return () => { cancelled = true }
+  }, [props.hasSel, props.oid, props.layerUrl])
+
+  return (
+    <div style={{ width: '100%', flex: '1 1 auto', minHeight: 0, position: 'relative', borderRadius: 8, overflow: 'hidden' }}>
+      <div ref={containerRef} style={{ width: '100%', height: '100%' }}/>
+      {status === 'loading' && props.hasSel && (
+        <div style={{ position: 'absolute', top: 8, left: 8, background: 'rgba(255,255,255,0.9)', borderRadius: 6, padding: '4px 10px', fontSize: 11, color: '#374151' }}>
+          Caricamento posizione…
+        </div>
+      )}
+      {status === 'nogeom' && (
+        <div style={{ position: 'absolute', top: 8, left: 8, background: 'rgba(255,255,255,0.9)', borderRadius: 6, padding: '4px 10px', fontSize: 11, color: '#b45309' }}>
+          Nessun punto impostato per questo rapporto.
+        </div>
+      )}
+      {status === 'error' && (
+        <div style={{ position: 'absolute', top: 8, left: 8, background: 'rgba(255,255,255,0.9)', borderRadius: 6, padding: '4px 10px', fontSize: 11, color: '#b42318' }}>
+          Errore caricamento mappa.
+        </div>
+      )}
+    </div>
+  )
+}
+
+
 function DetailTabsPanel (props: {
   active: { key: string; state: SelState } | null
   ui: any
   tabFields: TabFields
   tabs: TabConfig[]
   editConfig: any
+  mapCfg: any
 }) {
   const { active, ui } = props
 
@@ -1757,6 +1909,11 @@ const contentStyle: React.CSSProperties = {
   overflowY: 'auto'
 }
 
+const isMapTab = tab === 'mappa'
+const activeContentStyle: React.CSSProperties = isMapTab
+  ? { flex: '1 1 auto', minHeight: 0, overflow: 'hidden', display: 'flex', flexDirection: 'column' }
+  : contentStyle
+
 let content: React.ReactNode = null
 
 if (!hasSel) {
@@ -1935,6 +2092,25 @@ if (!hasSel) {
           )}
         </div>
       )
+    } else if (activeTab.id === 'mappa') {
+      const dsAny: any = ds as any
+      const mapLayerUrl = String(
+        dsAny?.getDataSourceJson?.()?.url ??
+        dsAny?.dataSourceJson?.url ??
+        (unwrapJsapiLayer(dsAny?.getLayer?.() || dsAny?.getJsApiLayer?.() || dsAny?.layer || dsAny) as any)?.url ??
+        ''
+      ).trim()
+      content = (
+        <div style={{ flex: '1 1 auto', minHeight: 0, display: 'flex', flexDirection: 'column' }}>
+          {!hasSel ? (
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: 200, opacity: 0.6, fontSize: 12 }}>
+              Selezionare un rapporto per visualizzare la mappa.
+            </div>
+          ) : (
+            <MapTabContent oid={selectedOid} layerUrl={mapLayerUrl} hasSel={hasSel} mapCfg={props.mapCfg}/>
+          )}
+        </div>
+      )
     } else {
       content = activeTab.id === 'violazione'
         ? (
@@ -2004,7 +2180,7 @@ return (
         </div>
       )}
       <div style={tabsStyle}>{TabsBar}</div>
-      <div style={contentStyle}>{content}</div>
+      <div style={activeContentStyle}>{content}</div>
     </div>
   </div>
 )
@@ -2223,6 +2399,21 @@ const queryFields = React.useMemo(() => {
                   tabFields={tabFields}
 				  tabs={detailTabs}
                   editConfig={editConfig}
+                  mapCfg={{
+                    basemap: String(cfg.mapBasemap || 'topo-vector'),
+                    centerLon: Number(cfg.mapCenterLon) || 9.0,
+                    centerLat: Number(cfg.mapCenterLat) || 39.5,
+                    initZoom: Number(cfg.mapInitZoom) || 8,
+                    pointZoom: Number(cfg.mapPointZoom) || 19,
+                    markerColor: String(cfg.mapMarkerColor || '#dc2626'),
+                    markerSize: Number(cfg.mapMarkerSize) || 18,
+                    markerOutlineColor: String(cfg.mapMarkerOutlineColor || '#ffffff'),
+                    markerOutlineWidth: Number(cfg.mapMarkerOutlineWidth) || 2.5,
+                    showZoom: cfg.mapShowZoom !== false,
+                    showAttribution: cfg.mapShowAttribution !== false,
+                    showScaleBar: cfg.mapShowScaleBar === true,
+                    showCompass: cfg.mapShowCompass === true
+                  }}
                 />
         </>
     </div>
