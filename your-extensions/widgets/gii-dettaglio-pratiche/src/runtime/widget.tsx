@@ -12,6 +12,12 @@ import { defaultConfig, DETAIL_DEFAULT_TAB_FIELDS, DETAIL_NEVER_SHOW_FIELDS, DET
 type MsgKind = 'info' | 'ok' | 'err'
 type Msg = { kind: MsgKind; text: string }
 
+const GII_LOG_EVENTI_CICLI_URL = 'https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_LOG_EVENTI_CICLI/FeatureServer/0'
+
+function normGid (v: any): string {
+  return String(v ?? '').trim().replace(/^\{|\}$/g, '').toLowerCase()
+}
+
 type SelState = {
   ds: any
   oid: number | null
@@ -524,7 +530,7 @@ function SelectionWatcher (props: {
   watchFields: string[]
   queryFields: string[]
   onUpdate: (dsKey: string, state: SelState) => void
-}) {
+}): any {
   const { ds, dsKey, watchFields, queryFields, onUpdate } = props
 
   React.useEffect(() => {
@@ -741,7 +747,7 @@ function ZebraDropdown (props: {
       bottom: window.innerHeight - rect.top + 6,
       maxHeight: maxHeightRaw
     })
-  }, [mapInstanceKey])
+  }, [])
 
   React.useEffect(() => {
     if (!open) return
@@ -1504,6 +1510,196 @@ function MapTabContent (props: {
 }
 
 
+type CicloRecord = {
+  numero_ciclo_ruolo: number | null
+  ruolo_competente: string
+  utente_operatore: string
+  stato_record: string
+  evento_apertura: string
+  dt_apertura: number | null
+  evento_chiusura: string
+  dt_chiusura: number | null
+  ruolo_destinatario: string
+  utente_destinatario: string
+  note_chiusura: string
+  area: string
+  settore: string
+  fase: string
+  num_campi_modificati: number | null
+  campi_modificati: string
+  riepilogo_ciclo: string
+}
+
+const EVENTO_LABELS: Record<string, string> = {
+  CREAZIONE: 'Creazione rapporto',
+  ISTRUTTORIA_TRASMESSA: 'Istruttoria trasmessa',
+  INTEGRAZIONE_TRASMESSA: 'Integrazione trasmessa',
+  INTEGRAZIONE: 'Richiesta integrazione',
+  RAPPORTO_APPROVATO: 'Rapporto approvato',
+  SANZIONE_APPROVATA: 'Sanzione approvata',
+  PRESA_IN_CARICO: 'Presa in carico',
+  ASSEGNAZIONE_TI: 'Assegnazione TI',
+  ASSEGNAZIONE_TI_AMM: 'Assegnazione TI AMM',
+  RESPINTA: 'Respinta',
+  ELIMINAZIONE: 'Eliminazione'
+}
+
+function formatEvento (code: string): string {
+  if (!code) return '—'
+  return EVENTO_LABELS[code] || code.replace(/_/g, ' ')
+}
+
+function CicliTimeline (props: { globalId: string; hasSel: boolean }): any {
+  const [cicli, setCicli] = React.useState<CicloRecord[]>([])
+  const [loading, setLoading] = React.useState(false)
+  const [error, setError] = React.useState<string | null>(null)
+
+  React.useEffect(() => {
+    setCicli([]); setError(null)
+    if (!props.hasSel || !props.globalId) return
+    let cancelled = false
+    setLoading(true)
+    ;(async () => {
+      try {
+        const FeatureLayer = await loadEsriModule<any>('esri/layers/FeatureLayer')
+        const fl = new FeatureLayer({ url: GII_LOG_EVENTI_CICLI_URL })
+        if (typeof fl?.load === 'function') await fl.load()
+        const gid = normGid(props.globalId)
+        const res = await fl.queryFeatures({
+          where: `LOWER(parent_globalid) = '${gid}' OR LOWER(parent_globalid) = '{${gid}}'`,
+          outFields: [
+            'numero_ciclo_ruolo', 'ruolo_competente', 'utente_operatore',
+            'stato_record', 'evento_apertura', 'dt_apertura',
+            'evento_chiusura', 'dt_chiusura', 'ruolo_destinatario',
+            'utente_destinatario', 'note_chiusura', 'area', 'settore', 'fase',
+            'num_campi_modificati', 'campi_modificati', 'riepilogo_ciclo'
+          ],
+          orderByFields: ['dt_apertura ASC'],
+          returnGeometry: false
+        })
+        if (cancelled) return
+        const records: CicloRecord[] = (res?.features || []).map((f: any) => {
+          const a = f.attributes || f
+          return {
+            numero_ciclo_ruolo: a.numero_ciclo_ruolo ?? null,
+            ruolo_competente: String(a.ruolo_competente || ''),
+            utente_operatore: String(a.utente_operatore || ''),
+            stato_record: String(a.stato_record || ''),
+            evento_apertura: String(a.evento_apertura || ''),
+            dt_apertura: a.dt_apertura ?? null,
+            evento_chiusura: String(a.evento_chiusura || ''),
+            dt_chiusura: a.dt_chiusura ?? null,
+            ruolo_destinatario: String(a.ruolo_destinatario || ''),
+            utente_destinatario: String(a.utente_destinatario || ''),
+            note_chiusura: String(a.note_chiusura || ''),
+            area: String(a.area || ''),
+            settore: String(a.settore || ''),
+            fase: String(a.fase || ''),
+            num_campi_modificati: a.num_campi_modificati ?? null,
+            campi_modificati: String(a.campi_modificati || ''),
+            riepilogo_ciclo: String(a.riepilogo_ciclo || '')
+          }
+        })
+        if (!cancelled) setCicli(records)
+      } catch (e: any) {
+        if (!cancelled) setError(String(e?.message || 'Errore caricamento cronologia'))
+      } finally {
+        if (!cancelled) setLoading(false)
+      }
+    })()
+    return () => { cancelled = true }
+  }, [props.hasSel, props.globalId])
+
+  if (!props.hasSel) return <div style={{ opacity: 0.6, fontSize: 12, padding: 12 }}>Selezionare un rapporto.</div>
+  if (loading) return <div style={{ opacity: 0.6, fontSize: 12, padding: 12 }}>Caricamento cronologia…</div>
+  if (error) return <div style={{ color: '#b42318', fontSize: 12, padding: 12 }}>{error}</div>
+  if (cicli.length === 0) return <div style={{ opacity: 0.6, fontSize: 12, padding: 12 }}>Nessun evento registrato per questo rapporto.</div>
+
+  const rowSt: React.CSSProperties = { display: 'flex', gap: 8, fontSize: 12, lineHeight: 1.6, padding: '2px 0' }
+  const lblSt: React.CSSProperties = { color: '#6b7280', minWidth: 110, flexShrink: 0, fontWeight: 500 }
+  const valSt: React.CSSProperties = { color: '#1f2937', wordBreak: 'break-word' }
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 12, padding: '8px 0' }}>
+      {cicli.map((c, i) => {
+        const isOpen = c.stato_record === 'APERTO'
+        const borderColor = isOpen ? '#2563eb' : '#d1d5db'
+        const bgColor = isOpen ? 'rgba(37,99,235,0.04)' : '#fafafa'
+        const headerBg = isOpen ? '#eaf2ff' : '#f3f4f6'
+        const statusLabel = isOpen ? 'In corso' : 'Chiuso'
+        const statusColor = isOpen ? '#2563eb' : '#6b7280'
+        const ruoloLabel = c.ruolo_competente + (c.utente_operatore ? ` — ${c.utente_operatore}` : '')
+
+        const campiList = c.campi_modificati ? c.campi_modificati.split(',').map(s => s.trim()).filter(Boolean) : []
+
+        return (
+          <div key={i} style={{ border: `1px solid ${borderColor}`, borderRadius: 10, background: bgColor, overflow: 'hidden' }}>
+            {/* Header */}
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '8px 12px', background: headerBg, borderBottom: `1px solid ${borderColor}` }}>
+              <div style={{ fontWeight: 700, fontSize: 13, color: '#1f2937' }}>
+                Ciclo {i + 1} — {c.ruolo_competente || '?'}
+                {c.area ? <span style={{ color: '#6b7280', fontWeight: 400 }}> ({c.area}{c.settore ? `/${c.settore}` : ''})</span> : null}
+              </div>
+              <span style={{ fontSize: 11, fontWeight: 600, color: statusColor, background: isOpen ? 'rgba(37,99,235,0.10)' : 'rgba(0,0,0,0.05)', padding: '2px 8px', borderRadius: 6 }}>
+                {statusLabel}
+              </span>
+            </div>
+
+            {/* Body */}
+            <div style={{ padding: '8px 12px' }}>
+              {c.utente_operatore && (
+                <div style={rowSt}><span style={lblSt}>Operatore</span><span style={valSt}>{c.utente_operatore}</span></div>
+              )}
+
+              <div style={rowSt}><span style={lblSt}>Apertura</span><span style={valSt}>{formatEvento(c.evento_apertura)} — {formatDateSafe(c.dt_apertura)}</span></div>
+
+              {c.stato_record === 'CHIUSO' && (
+                <div style={rowSt}><span style={lblSt}>Chiusura</span><span style={valSt}>{formatEvento(c.evento_chiusura)} — {formatDateSafe(c.dt_chiusura)}</span></div>
+              )}
+
+              {c.ruolo_destinatario && (
+                <div style={rowSt}><span style={lblSt}>Destinatario</span><span style={valSt}>{c.ruolo_destinatario}{c.utente_destinatario ? ` — ${c.utente_destinatario}` : ''}</span></div>
+              )}
+
+              {c.note_chiusura && (
+                <div style={rowSt}><span style={lblSt}>Note</span><span style={valSt}>{c.note_chiusura}</span></div>
+              )}
+
+              {c.num_campi_modificati != null && c.num_campi_modificati > 0 && (
+                <div style={{ marginTop: 4 }}>
+                  <div style={{ ...rowSt, alignItems: 'flex-start' }}>
+                    <span style={lblSt}>Campi modificati</span>
+                    <span style={{ ...valSt, fontSize: 11 }}>
+                      {c.num_campi_modificati} {c.num_campi_modificati === 1 ? 'campo' : 'campi'}
+                    </span>
+                  </div>
+                  {campiList.length > 0 && (
+                    <div style={{ marginLeft: 118, display: 'flex', flexWrap: 'wrap', gap: 4, marginTop: 2 }}>
+                      {campiList.map((campo, ci) => (
+                        <span key={ci} style={{ fontSize: 10, background: 'rgba(0,0,0,0.06)', color: '#374151', padding: '1px 6px', borderRadius: 4 }}>
+                          {campo}
+                        </span>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {c.riepilogo_ciclo && (
+                <div style={{ ...rowSt, marginTop: 4, alignItems: 'flex-start' }}>
+                  <span style={lblSt}>Riepilogo</span>
+                  <span style={{ ...valSt, fontSize: 11, whiteSpace: 'pre-wrap' }}>{c.riepilogo_ciclo}</span>
+                </div>
+              )}
+            </div>
+          </div>
+        )
+      })}
+    </div>
+  )
+}
+
+
 function DetailTabsPanel (props: {
   active: { key: string; state: SelState } | null
   ui: any
@@ -2094,18 +2290,12 @@ const isPgOnlyField = React.useCallback((fieldName: string) => {
       display: 'flex', 
       flexWrap: 'wrap', 
       gap: 8, 
-      // Allinea la barra tab al padding interno del pannello (stesso asse X dei contenuti).
-      // Evita disallineamenti quando maskInnerPadding/panelPadding è diverso dal default.
       padding: `8px ${ui.panelPadding}px`,
       alignItems: 'center',
-      borderBottom: '1px solid rgba(0,0,0,0.08)',
       background: 'var(--bs-body-bg, #fff)',
-      marginTop: -ui.panelPadding,
       marginLeft: -ui.panelPadding,
       marginRight: -ui.panelPadding,
-      width: `calc(100% + ${ui.panelPadding * 2}px)`,
-      borderTopLeftRadius: ui.panelBorderRadius,
-      borderTopRightRadius: ui.panelBorderRadius
+      width: `calc(100% + ${ui.panelPadding * 2}px)`
     }}>
       {hasSel && tabs.map((t) => (
         <TabButton 
@@ -2168,54 +2358,8 @@ if (!hasSel) {
   const activeTab = tabs.find(t => t.id === tab)
   
   if (activeTab?.isIterTab) {
-    // Tab Iter: campi standard per ruoli (se presenti) + campi extra configurati
-    const iterRows: Array<{ label: string; value: any }> = []
-
-    const pushRole = (code: string, label: string, force = false) => {
-      const presa = data ? (data as any)[`presa_in_carico_${code}`] : null
-      const dtPresa = data ? (data as any)[`dt_presa_in_carico_${code}`] : null
-      const stato = data ? (data as any)[`stato_${code}`] : null
-      const dtStato = data ? (data as any)[`dt_stato_${code}`] : null
-      const esito = data ? (data as any)[`esito_${code}`] : null
-      const dtEsito = data ? (data as any)[`dt_esito_${code}`] : null
-      const note = data ? (data as any)[`note_${code}`] : null
-
-      const hasAny = [presa, dtPresa, stato, dtStato, esito, dtEsito, note].some(
-        v => v !== null && v !== undefined && String(v) !== ''
-      )
-      if (!hasAny && !force) return
-
-      iterRows.push({ label: `${label} - Presa in carico`, value: presa })
-      iterRows.push({ label: `${label} - Data presa in carico`, value: formatDateSafe(dtPresa) })
-      iterRows.push({ label: `${label} - Stato`, value: stato })
-      iterRows.push({ label: `${label} - Data stato`, value: formatDateSafe(dtStato) })
-
-      // Esito/Note: aggiungi solo se il campo esiste o se ha valore
-      if (data && ((`esito_${code}` in (data as any)) || (esito != null && String(esito) !== ''))) {
-        iterRows.push({ label: `${label} - Esito`, value: esito })
-        iterRows.push({ label: `${label} - Data esito`, value: formatDateSafe(dtEsito) })
-      }
-      if (data && ((`note_${code}` in (data as any)) || (note != null && String(note) !== ''))) {
-        iterRows.push({ label: `${label} - Note`, value: note })
-      }
-    }
-
-    const roles: Array<{ code: string; label: string; force?: boolean }> = [
-      { code: 'TR', label: 'TR' },
-      { code: 'TI', label: 'TI' },
-      { code: 'RZ', label: 'RZ' },
-      { code: 'RI', label: 'RI' },
-      { code: 'DT', label: 'DT' },
-      { code: 'DA', label: 'DA', force: true },
-      { code: 'CRST', label: 'CRST' }
-    ]
-    roles.forEach(r => pushRole(r.code, r.label, Boolean(r.force)))
-
-    // Aggiungi campi extra configurati
-    const iterExtraRows = aliasesReady ? makeRows(activeTab.fields, activeTab.id.toUpperCase(), Boolean((activeTab as any).hideEmpty)) : []
-    iterExtraRows.forEach(r => iterRows.push(r))
-
-    content = <ReadOnlyPanel title="" ui={ui} rows={iterRows} />
+    const gid = data?.GlobalID ?? data?.globalid ?? data?.globalId ?? data?.GLOBALID ?? ''
+    content = <CicliTimeline globalId={String(gid)} hasSel={hasSel} />
   } else if (activeTab) {
     // Tab normale con campi configurabili
     const rows = aliasesReady ? makeRows(activeTab.fields, activeTab.id.toUpperCase(), Boolean((activeTab as any).hideEmpty)) : []
@@ -2375,9 +2519,10 @@ return (
   <div style={outerStyle}>
     {/* Titolo pratica - sopra l'area bianca */}
     <div style={{
-      height: ui.detailTitleHeight ?? 28,
+      minHeight: ui.detailTitleHeight ?? 40,
       paddingBottom: ui.detailTitlePaddingBottom ?? 10,
       paddingLeft: ui.detailTitlePaddingLeft ?? 0,
+      paddingRight: ui.detailTitlePaddingRight ?? 0,
       display: 'flex',
       alignItems: 'center',
       justifyContent: 'space-between',
@@ -2408,21 +2553,28 @@ return (
       )}
     </div>
     <div style={frameStyle}>
-      {hasSel && (
-        <div style={{ padding: `${Math.max(8, Number(ui.panelPadding ?? 12) - 2)}px ${ui.panelPadding ?? 12}px 0` }}>
-          <div style={{ borderTop: `1px solid ${ui.dividerColor ?? 'rgba(0,0,0,0.08)'}`, paddingTop: 8 }}>
-            <div style={{ fontSize: 12, fontWeight: 700, color: 'rgba(0,0,0,0.72)', marginBottom: 8 }}>Dati generali</div>
-            <ReadOnlyPanel
-              title=""
-              rows={generalRows}
-              emptyText="Dati generali non disponibili."
-            />
+      {!hasSel ? (
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', minHeight: 200, fontWeight: 700, fontSize: 14, color: 'rgba(0,0,0,0.6)' }}>
+          Selezionare un rapporto nell'elenco
+        </div>
+      ) : (
+        <>
+          <div style={{ padding: `${Math.max(8, Number(ui.panelPadding ?? 12) - 2)}px ${ui.panelPadding ?? 12}px 0` }}>
+            <div style={{ paddingTop: 4 }}>
+              <div style={{ fontSize: 12, fontWeight: 700, color: 'rgba(0,0,0,0.72)', marginBottom: 8 }}>Dati generali</div>
+              <ReadOnlyPanel
+                title=""
+                rows={generalRows}
+                emptyText="Dati generali non disponibili."
+              />
+            </div>
           </div>
           <div style={{ borderTop: `1px solid ${ui.dividerColor ?? 'rgba(0,0,0,0.08)'}`, marginTop: 10 }} />
-        </div>
+          <div style={tabsStyle}>{TabsBar}</div>
+          <div style={{ borderTop: `1px solid ${ui.dividerColor ?? 'rgba(0,0,0,0.08)'}` }} />
+          <div style={activeContentStyle}>{content}</div>
+        </>
       )}
-      <div style={tabsStyle}>{TabsBar}</div>
-      <div style={activeContentStyle}>{content}</div>
     </div>
   </div>
 )
@@ -2452,6 +2604,7 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
     detailTitleHeight: Number.isFinite(Number(cfg.detailTitleHeight)) ? Number(cfg.detailTitleHeight) : defaultConfig.detailTitleHeight,
     detailTitlePaddingBottom: Number.isFinite(Number(cfg.detailTitlePaddingBottom)) ? Number(cfg.detailTitlePaddingBottom) : defaultConfig.detailTitlePaddingBottom,
     detailTitlePaddingLeft: Number.isFinite(Number(cfg.detailTitlePaddingLeft)) ? Number(cfg.detailTitlePaddingLeft) : defaultConfig.detailTitlePaddingLeft,
+    detailTitlePaddingRight: Number.isFinite(Number(cfg.detailTitlePaddingRight)) ? Number(cfg.detailTitlePaddingRight) : (defaultConfig as any).detailTitlePaddingRight ?? 0,
     detailTitleFontSize: Number.isFinite(Number(cfg.detailTitleFontSize)) ? Number(cfg.detailTitleFontSize) : defaultConfig.detailTitleFontSize,
     detailTitleFontWeight: Number.isFinite(Number(cfg.detailTitleFontWeight)) ? Number(cfg.detailTitleFontWeight) : defaultConfig.detailTitleFontWeight,
     detailTitleColor: String(cfg.detailTitleColor ?? defaultConfig.detailTitleColor),

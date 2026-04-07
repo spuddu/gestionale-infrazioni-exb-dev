@@ -50,6 +50,20 @@ export interface Config {
   schemaLayerLabel?: string
   schemaFields?: SchemaFieldOpt[]
 
+  // --- Sorgenti layer / tabelle
+  motherLayerUrl?: string
+  auditTableUrl?: string
+  displayMode?: string
+
+  nsListinoPersonaleUrl?: string
+  nsListinoMezziUrl?: string
+  nsListinoMaterialiUrl?: string
+  nsTablePersonaleUrl?: string
+  nsTableMezziUrl?: string
+  nsTableMaterialiUrl?: string
+  nsParametriUrl?: string
+  nsParametroCode?: string
+
   // --- Ruolo
   roleCode: RoleCode
   buttonText: string
@@ -163,6 +177,19 @@ export const defaultConfig: Config = {
   schemaLayerUrl: '',
   schemaLayerLabel: '',
   schemaFields: [],
+
+  motherLayerUrl: '',
+  auditTableUrl: '',
+  displayMode: 'page',
+
+  nsListinoPersonaleUrl: '',
+  nsListinoMezziUrl: '',
+  nsListinoMaterialiUrl: '',
+  nsTablePersonaleUrl: '',
+  nsTableMezziUrl: '',
+  nsTableMaterialiUrl: '',
+  nsParametriUrl: '',
+  nsParametroCode: 'SPESE_GENERALI_PERC',
 
   roleCode: 'DT',
   buttonText: 'Prendi in carico',

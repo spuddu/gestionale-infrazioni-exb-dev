@@ -248,6 +248,34 @@ export default function Setting(props: AllWidgetSettingProps<IMConfig>) {
         <input type='text' value={cfg.auditTableUrl} onChange={e=>set('auditTableUrl',e.target.value)}
           placeholder='https://services2.arcgis.com/.../FeatureServer/1' style={P.inp}/>
         <div style={P.hint}>Se valorizzato, ogni modifica viene tracciata campo per campo. Se vuoto il log viene saltato.</div>
+
+        <label style={P.lbl}>Listino nota spese — Personale</label>
+        <input type='text' value={cfg.nsListinoPersonaleUrl || ''} onChange={e=>set('nsListinoPersonaleUrl',e.target.value)}
+          placeholder='https://services2.arcgis.com/.../FeatureServer/0' style={P.inp}/>
+        <label style={P.lbl}>Listino nota spese — Mezzi</label>
+        <input type='text' value={cfg.nsListinoMezziUrl || ''} onChange={e=>set('nsListinoMezziUrl',e.target.value)}
+          placeholder='https://services2.arcgis.com/.../FeatureServer/0' style={P.inp}/>
+        <label style={P.lbl}>Listino nota spese — Materiali</label>
+        <input type='text' value={cfg.nsListinoMaterialiUrl || ''} onChange={e=>set('nsListinoMaterialiUrl',e.target.value)}
+          placeholder='https://services2.arcgis.com/.../FeatureServer/0' style={P.inp}/>
+
+        <label style={P.lbl}>Tabella nota spese — Personale</label>
+        <input type='text' value={cfg.nsTablePersonaleUrl || ''} onChange={e=>set('nsTablePersonaleUrl',e.target.value)}
+          placeholder='https://services2.arcgis.com/.../FeatureServer/0' style={P.inp}/>
+        <label style={P.lbl}>Tabella nota spese — Mezzi</label>
+        <input type='text' value={cfg.nsTableMezziUrl || ''} onChange={e=>set('nsTableMezziUrl',e.target.value)}
+          placeholder='https://services2.arcgis.com/.../FeatureServer/0' style={P.inp}/>
+        <label style={P.lbl}>Tabella nota spese — Materiali</label>
+        <input type='text' value={cfg.nsTableMaterialiUrl || ''} onChange={e=>set('nsTableMaterialiUrl',e.target.value)}
+          placeholder='https://services2.arcgis.com/.../FeatureServer/0' style={P.inp}/>
+
+        <label style={P.lbl}>Tabella parametri nota spese</label>
+        <input type='text' value={cfg.nsParametriUrl || ''} onChange={e=>set('nsParametriUrl',e.target.value)}
+          placeholder='https://services2.arcgis.com/.../FeatureServer/0' style={P.inp}/>
+        <label style={P.lbl}>Codice parametro spese generali</label>
+        <input type='text' value={cfg.nsParametroCode || ''} onChange={e=>set('nsParametroCode',e.target.value)}
+          placeholder='SPESE_GENERALI_PERC' style={P.inp}/>
+        <div style={P.hint}>Usato dalla tab Nota spese del cw editing. Il widget TI legge i listini, salva le righe nelle tre tabelle dettaglio e aggiorna subito i totali sul rapporto.</div>
       </div>}
 
       {/* === MODALITA === */}

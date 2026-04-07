@@ -66,10 +66,10 @@ export default function Setting(props: Props) {
   const isOpen = (id:string) => openSec===id
 
   const cfgJs: any = { ...defaultConfig, ...asJs(props.config) }
-  const baseCfg = props.config || (Immutable(defaultConfig) as any)
+  const baseCfg = props.config || ((Immutable as any)(defaultConfig) as any)
 
   React.useEffect(()=>{
-    const dsJs:any[] = asJs(props.useDataSources??Immutable([])) || []
+    const dsJs:any[] = asJs(props.useDataSources??(Immutable as any)([])) || []
     if ((dsJs?.length||0) > 0 || (props as any).useDataSourcesEnabled) {
       props.onSettingChange({ id: props.id, useDataSources: [] as any, useDataSourcesEnabled: false as any })
     }
@@ -79,7 +79,7 @@ export default function Setting(props: Props) {
   const patch = (obj:Record<string,any>) => {
     let next = baseCfg
     Object.entries(obj).forEach(([k,v])=>{
-      if(k === 'rejectReasons') next=next.set(k,Immutable((v||[]) as any) as any)
+      if(k === 'rejectReasons') next=next.set(k,(Immutable as any)((v||[]) as any) as any)
       else next=next.set(k,v)
     })
     props.onSettingChange({id:props.id,config:next})
@@ -194,7 +194,7 @@ export default function Setting(props: Props) {
       {/* ═══ RESET ═══ */}
       <div style={{marginTop:28,borderTop:'1px solid rgba(255,255,255,0.10)',paddingTop:16}}>
         <button type='button'
-          onClick={()=>{if(window.confirm('Ripristinare tutti i valori predefiniti?'))props.onSettingChange({id:props.id,config:Immutable(defaultConfig) as any})}}
+          onClick={()=>{if(window.confirm('Ripristinare tutti i valori predefiniti?'))props.onSettingChange({id:props.id,config:(Immutable as any)(defaultConfig) as any})}}
           style={{padding:'6px 14px',borderRadius:7,border:'1px solid rgba(252,165,165,0.4)',background:'rgba(239,68,68,0.10)',color:'#fca5a5',fontSize:12,cursor:'pointer',fontWeight:600}}>
           ↺ Ripristina predefiniti
         </button>

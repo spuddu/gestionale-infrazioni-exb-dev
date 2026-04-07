@@ -149,6 +149,7 @@ export interface Config {
   detailTitleHeight: number
   detailTitlePaddingBottom: number
   detailTitlePaddingLeft: number
+  detailTitlePaddingRight: number
   detailTitleFontSize: number
   detailTitleFontWeight: number
   detailTitleColor: string
@@ -228,9 +229,10 @@ export const defaultConfig: Config = {
 
   // Titolo pratica
   detailTitlePrefix: 'Dettaglio rapporto n.',
-  detailTitleHeight: 28,
+  detailTitleHeight: 40,
   detailTitlePaddingBottom: 10,
   detailTitlePaddingLeft: 0,
+  detailTitlePaddingRight: 0,
   detailTitleFontSize: 14,
   detailTitleFontWeight: 600,
   detailTitleColor: 'rgba(0,0,0,0.85)',
@@ -294,4 +296,4 @@ export const defaultConfig: Config = {
 
 export type IMConfig = ImmutableObject<Config>
 
-export const defaultIMConfig: IMConfig = Immutable(defaultConfig) as any
+export const defaultIMConfig: IMConfig = (Immutable as any)(defaultConfig) as any

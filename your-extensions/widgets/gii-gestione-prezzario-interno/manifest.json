@@ -1,0 +1,19 @@
+{
+  "name": "gii-gestione-prezzario-interno",
+  "label": "GII - Gestione Prezzario Interno",
+  "type": "widget",
+  "version": "1.0.0",
+  "exbVersion": "1.19.0",
+  "author": "CBSM",
+  "description": "",
+  "dependency": [
+    "jimu-arcgis"
+  ],
+  "translatedLocales": [
+    "it"
+  ],
+  "defaultSize": {
+    "width": 1100,
+    "height": 700
+  }
+}

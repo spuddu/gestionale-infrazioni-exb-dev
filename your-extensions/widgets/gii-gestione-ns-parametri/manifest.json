@@ -1,0 +1,19 @@
+{
+  "name": "gii-gestione-ns-parametri",
+  "label": "GII - Gestione Parametri Nota Spese",
+  "type": "widget",
+  "version": "1.0.0",
+  "exbVersion": "1.19.0",
+  "author": "CBSM",
+  "description": "",
+  "dependency": [
+    "jimu-arcgis"
+  ],
+  "translatedLocales": [
+    "it"
+  ],
+  "defaultSize": {
+    "width": 900,
+    "height": 650
+  }
+}

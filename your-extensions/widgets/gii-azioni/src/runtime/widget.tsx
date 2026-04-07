@@ -577,7 +577,7 @@ function SelectionWatcher (props: {
   watchFields: string[]
   queryFields: string[]
   onUpdate: (dsKey: string, state: SelState) => void
-}) {
+}): React.JSX.Element | null {
   const { ds, dsKey, watchFields, queryFields, onUpdate } = props
 
   React.useEffect(() => {
@@ -2091,13 +2091,13 @@ function ActionsPanel (props: {
 
       let opts: TiOpt[] = []
       if (area != null && settore != null) {
-        opts = await runQuery(`ruolo = 2 AND area = ${area} AND settore = ${settore}`).catch(() => [])
+        opts = await runQuery(`ruolo = 2 AND area = ${area} AND settore = ${settore}`).catch((): TiOpt[] => [])
       }
       if (!opts.length && area != null) {
-        opts = await runQuery(`ruolo = 2 AND area = ${area}`).catch(() => [])
+        opts = await runQuery(`ruolo = 2 AND area = ${area}`).catch((): TiOpt[] => [])
       }
       if (!opts.length) {
-        opts = await runQuery('ruolo = 2').catch(() => [])
+        opts = await runQuery('ruolo = 2').catch((): TiOpt[] => [])
       }
       setTiOptions(opts)
     } catch (e: any) {

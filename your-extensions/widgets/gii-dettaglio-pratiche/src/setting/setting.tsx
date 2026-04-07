@@ -312,13 +312,13 @@ export default function Setting(props: Props) {
   const isOpen = (id:string) => openSec===id
 
   const cfgJs: any = { ...defaultConfig, ...asJs(props.config) }
-  const baseCfg = props.config || (Immutable(defaultConfig) as any)
+  const baseCfg = props.config || ((Immutable as any)(defaultConfig) as any)
 
   const patch = (obj:Record<string,any>) => {
     let next = baseCfg
     Object.entries(obj).forEach(([k,v])=>{
       if(['rejectReasons','tabs','anagraficaFields','violazioneFields','allegatiFields','iterExtraFields','presets','mapUseDataSources'].includes(k))
-        next=next.set(k,Immutable((v||[]) as any) as any)
+        next=next.set(k,(Immutable as any)((v||[]) as any) as any)
       else next=next.set(k,v)
     })
     props.onSettingChange({id:props.id,config:next})
@@ -353,7 +353,7 @@ export default function Setting(props: Props) {
     patch(nextPatch)
   }
 
-  const useDsJs:any[] = asJs(props.useDataSources??Immutable([])) || []
+  const useDsJs:any[] = asJs(props.useDataSources??(Immutable as any)([])) || []
   const primaryDsId = String(useDsJs?.[0]?.dataSourceId||'')
   const [fields, setFields] = React.useState<FieldOpt[]>([])
 
@@ -424,7 +424,7 @@ export default function Setting(props: Props) {
       {isOpen('dati') && <div>
         <div style={P.hint}>Collega la fonte dati per abilitare la selezione dei campi nelle tab.</div>
         <DataSourceSelector
-          types={Immutable([DataSourceTypes.FeatureLayer])}
+          types={(Immutable as any)([DataSourceTypes.FeatureLayer])}
           useDataSources={props.useDataSources}
           useDataSourcesEnabled={props.useDataSourcesEnabled}
           onChange={onDsChange}
@@ -434,14 +434,25 @@ export default function Setting(props: Props) {
         <div style={{...P.hint, marginTop:6}}>Il record selezionato arriva dinamicamente dal widget Elenco. La fonte dati serve solo per caricare lo schema campi nel setting.</div>
       </div>}
 
-      {/* ═══ TESTI ═══ */}
-      <Acc id='testi' label='🔤 Testi' open={isOpen('testi')} onToggle={()=>toggle('testi')}/>
-      {isOpen('testi') && <div>
+      {/* ═══ TITOLO ═══ */}
+      <Acc id='titolo' label='📝 Titolo dettaglio' open={isOpen('titolo')} onToggle={()=>toggle('titolo')}/>
+      {isOpen('titolo') && <div>
+        <label style={P.lbl}>Testo prefisso</label>
+        <Inp value={String(cfgJs.detailTitlePrefix || '')} onChange={v=>patch({detailTitlePrefix:v})} placeholder='Dettaglio rapporto n.'/>
         <div style={P.row3}>
-          <div><label style={P.lbl}>Titolo</label><NumInp value={parseNum(cfgJs.titleFontSize,defaultConfig.titleFontSize)} onChange={n=>patch({titleFontSize:n})} min={10} unit='px'/></div>
-          <div><label style={P.lbl}>Stato</label><NumInp value={parseNum(cfgJs.statusFontSize,defaultConfig.statusFontSize)} onChange={n=>patch({statusFontSize:n})} min={10} unit='px'/></div>
-          <div><label style={P.lbl}>Messaggi</label><NumInp value={parseNum(cfgJs.msgFontSize,defaultConfig.msgFontSize)} onChange={n=>patch({msgFontSize:n})} min={10} unit='px'/></div>
+          <div><label style={P.lbl}>Altezza</label><NumInp value={parseNum(cfgJs.detailTitleHeight, 40)} onChange={n=>patch({detailTitleHeight:n})} min={0} unit='px'/></div>
+          <div><label style={P.lbl}>Font sz</label><NumInp value={parseNum(cfgJs.detailTitleFontSize, 14)} onChange={n=>patch({detailTitleFontSize:n})} min={10} unit='px'/></div>
+          <div><label style={P.lbl}>Font w</label><NumInp value={parseNum(cfgJs.detailTitleFontWeight, 600)} onChange={n=>patch({detailTitleFontWeight:n})} min={100} step={100}/></div>
         </div>
+        <div style={P.row3}>
+          <div><label style={P.lbl}>Pad. bottom</label><NumInp value={parseNum(cfgJs.detailTitlePaddingBottom, 10)} onChange={n=>patch({detailTitlePaddingBottom:n})} min={0} unit='px'/></div>
+          <div><label style={P.lbl}>Pad. left</label><NumInp value={parseNum(cfgJs.detailTitlePaddingLeft, 0)} onChange={n=>patch({detailTitlePaddingLeft:n})} min={0} unit='px'/></div>
+          <div><label style={P.lbl}>Pad. right</label><NumInp value={parseNum(cfgJs.detailTitlePaddingRight, 0)} onChange={n=>patch({detailTitlePaddingRight:n})} min={0} unit='px'/></div>
+        </div>
+        <label style={P.lbl}>Colore testo</label>
+        <ColInp value={String(cfgJs.detailTitleColor || 'rgba(0,0,0,0.85)')} onChange={v=>patch({detailTitleColor:v})}/>
+        <label style={P.lbl}>Sfondo</label>
+        <ColInp value={String(cfgJs.detailTitleBg || 'transparent')} onChange={v=>patch({detailTitleBg:v})}/>
       </div>}
 
       {/* ═══ CAMPI PER TAB ═══ */}
@@ -487,6 +498,23 @@ export default function Setting(props: Props) {
         />
       </div>}
 
+      {/* ═══ MASCHERA ═══ */}
+      <Acc id='maschera' label='🖼 Maschera (bordo pannello)' open={isOpen('maschera')} onToggle={()=>toggle('maschera')}/>
+      {isOpen('maschera') && <div>
+        <div style={P.row2}>
+          <div><label style={P.lbl}>Outer offset</label><NumInp value={parseNum(cfgJs.maskOuterOffset, 0)} onChange={n=>patch({maskOuterOffset:n})} min={0} unit='px'/></div>
+          <div><label style={P.lbl}>Inner padding</label><NumInp value={parseNum(cfgJs.maskInnerPadding ?? cfgJs.panelPadding, 12)} onChange={n=>patch({maskInnerPadding:n})} min={0} unit='px'/></div>
+        </div>
+        <div style={P.row2}>
+          <div><label style={P.lbl}>Border width</label><NumInp value={parseNum(cfgJs.maskBorderWidth ?? cfgJs.panelBorderWidth, 1)} onChange={n=>patch({maskBorderWidth:n})} min={0} unit='px'/></div>
+          <div><label style={P.lbl}>Border radius</label><NumInp value={parseNum(cfgJs.maskBorderRadius ?? cfgJs.panelBorderRadius, 10)} onChange={n=>patch({maskBorderRadius:n})} min={0} unit='px'/></div>
+        </div>
+        <label style={P.lbl}>Background</label>
+        <ColInp value={String(cfgJs.maskBg ?? cfgJs.panelBg ?? '#ffffff')} onChange={v=>patch({maskBg:v})}/>
+        <label style={P.lbl}>Colore bordo</label>
+        <ColInp value={String(cfgJs.maskBorderColor ?? cfgJs.panelBorderColor ?? '#e5e7eb')} onChange={v=>patch({maskBorderColor:v})}/>
+      </div>}
+
       {/* ═══ MAPPA ═══ */}
       <Acc id='mappa' label='🗺 Mappa' open={isOpen('mappa')} onToggle={()=>toggle('mappa')}/>
       {isOpen('mappa') && <div>
@@ -495,8 +523,8 @@ export default function Setting(props: Props) {
         <div style={P.grp}>Web map</div>
         <div style={P.hint}>Seleziona la web map già portata come origine dati, senza dipendere dai widget Mappa presenti nelle pagine.</div>
         <DataSourceSelector
-          types={Immutable([DataSourceTypes.WebMap])}
-          useDataSources={Immutable(asJs(cfgJs.mapUseDataSources || [])) as any}
+          types={(Immutable as any)([DataSourceTypes.WebMap])}
+          useDataSources={(Immutable as any)(asJs(cfgJs.mapUseDataSources || [])) as any}
           useDataSourcesEnabled={true}
           onChange={onMapDsChange}
           widgetId={props.id}
@@ -557,7 +585,7 @@ export default function Setting(props: Props) {
       {/* ═══ RESET ═══ */}
       <div style={{marginTop:28,borderTop:'1px solid rgba(255,255,255,0.10)',paddingTop:16}}>
         <button type='button'
-          onClick={()=>{if(window.confirm('Ripristinare tutti i valori predefiniti?'))props.onSettingChange({id:props.id,config:Immutable(defaultConfig) as any})}}
+          onClick={()=>{if(window.confirm('Ripristinare tutti i valori predefiniti?'))props.onSettingChange({id:props.id,config:(Immutable as any)(defaultConfig) as any})}}
           style={{padding:'6px 14px',borderRadius:7,border:'1px solid rgba(252,165,165,0.4)',background:'rgba(239,68,68,0.10)',color:'#fca5a5',fontSize:12,cursor:'pointer',fontWeight:600}}>
           ↺ Ripristina predefiniti
         </button>

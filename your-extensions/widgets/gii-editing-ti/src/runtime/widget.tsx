@@ -3071,6 +3071,440 @@ function NpDate(p: { value: string; onChange: (v: string) => void; withTime?: bo
 
 type NpDraft = Record<string, string>
 
+
+
+type NsKind = 'personale' | 'mezzi' | 'materiali'
+type NsSummary = {
+  totalePersonale: number
+  totaleMezzi: number
+  totaleMateriali: number
+  percentualeSpeseGenerali: number
+  importoSpeseGenerali: number
+  totaleComplessivo: number
+}
+
+type NsListinoRow = {
+  objectid: number
+  codice_voce: string
+  descrizione: string
+  unita_misura: string
+  costo_unitario: number
+  ordine: number
+  attivo: number | null
+}
+
+type NsManagerProps = {
+  kind: NsKind
+  title: string
+  listinoUrl: string
+  tableUrl: string
+  parentGlobalId: string
+  onChanged?: () => Promise<void> | void
+}
+
+const EMPTY_NS_SUMMARY: NsSummary = {
+  totalePersonale: 0,
+  totaleMezzi: 0,
+  totaleMateriali: 0,
+  percentualeSpeseGenerali: 0,
+  importoSpeseGenerali: 0,
+  totaleComplessivo: 0
+}
+
+const __giiNsLayerCache: Record<string, any> = {}
+
+function nsSafeNum (v: any, fallback = 0): number {
+  const n = Number(v)
+  return Number.isFinite(n) ? n : fallback
+}
+
+function nsRound (v: number, decimals = 2): number {
+  const f = Math.pow(10, decimals)
+  return Math.round((Number(v) + Number.EPSILON) * f) / f
+}
+
+function nsEscapeSqlString (v: string): string {
+  return String(v || '').replace(/'/g, "''")
+}
+
+function nsToDateInputValue (v: any): string {
+  if (v == null || v === '') return ''
+  try {
+    const d = new Date(v)
+    if (Number.isNaN(d.getTime())) return ''
+    const y = d.getFullYear()
+    const m = String(d.getMonth() + 1).padStart(2, '0')
+    const day = String(d.getDate()).padStart(2, '0')
+    return `${y}-${m}-${day}`
+  } catch {
+    return ''
+  }
+}
+
+async function getFeatureLayerByUrl (rawUrl: any): Promise<any> {
+  const url = ensureLayerIndex(normalizeFeatureLayerUrl(rawUrl))
+  if (!url) throw new Error('URL layer/tabella non configurata.')
+  if (__giiNsLayerCache[url]) return __giiNsLayerCache[url]
+  const FeatureLayer = await loadEsriModule<any>('esri/layers/FeatureLayer')
+  const fl = new FeatureLayer({ url })
+  try { if (typeof fl.load === 'function') await fl.load() } catch {}
+  __giiNsLayerCache[url] = fl
+  return fl
+}
+
+async function queryTableAttributes (rawUrl: any, where = '1=1', orderByFields = ''): Promise<any[]> {
+  const fl = await getFeatureLayerByUrl(rawUrl)
+  const q = fl.createQuery ? fl.createQuery() : {}
+  q.where = where || '1=1'
+  q.outFields = ['*']
+  q.returnGeometry = false
+  if (orderByFields) q.orderByFields = [orderByFields]
+  const res = await fl.queryFeatures(q)
+  return (res?.features || []).map((f: any) => f?.attributes || {})
+}
+
+async function saveTableAttributes (rawUrl: any, attrs: Record<string, any>, objectid?: number | null): Promise<void> {
+  const fl = await getFeatureLayerByUrl(rawUrl)
+  const oidField = String(fl?.objectIdField || 'OBJECTID')
+  const attributes = { ...(attrs || {}) }
+  if (objectid != null) attributes[oidField] = Number(objectid)
+  const payload = objectid != null
+    ? { updateFeatures: [{ attributes }] }
+    : { addFeatures: [{ attributes }] }
+  const res = await fl.applyEdits(payload as any)
+  const editResult = objectid != null ? res?.updateFeatureResults?.[0] : res?.addFeatureResults?.[0]
+  if (editResult?.error) throw new Error(editResult.error.message || 'Salvataggio non riuscito.')
+}
+
+async function deleteTableObjectId (rawUrl: any, objectid: number): Promise<void> {
+  const fl = await getFeatureLayerByUrl(rawUrl)
+  const oidField = String(fl?.objectIdField || 'OBJECTID')
+  const Graphic = await loadEsriModule<any>('esri/Graphic')
+  const g = new Graphic({ attributes: { [oidField]: Number(objectid) } })
+  const res = await fl.applyEdits({ deleteFeatures: [g] } as any)
+  const r = res?.deleteFeatureResults?.[0]
+  if (r?.error) throw new Error(r.error.message || 'Eliminazione non riuscita.')
+}
+
+async function loadRecordGlobalIdByOid (rawUrl: any, oidFieldName: string, oid: number): Promise<string> {
+  const fl = await getFeatureLayerByUrl(rawUrl)
+  const q = fl.createQuery ? fl.createQuery() : {}
+  q.where = `${oidFieldName} = ${Number(oid)}`
+  q.outFields = ['GlobalID']
+  q.returnGeometry = false
+  q.num = 1
+  const res = await fl.queryFeatures(q)
+  const attrs = res?.features?.[0]?.attributes || {}
+  return String(pickAttrCI(attrs, ['GlobalID', 'globalid']) || '').trim()
+}
+
+async function getNsPercentuale (rawUrl: any, codice: string): Promise<number> {
+  const code = String(codice || 'SPESE_GENERALI_PERC').trim() || 'SPESE_GENERALI_PERC'
+  const rows = await queryTableAttributes(rawUrl, `codice_parametro = '${nsEscapeSqlString(code)}'`, 'attivo DESC, anno_riferimento DESC, data_validita_da DESC, OBJECTID DESC')
+  const row = rows.find((r: any) => nsSafeNum(r?.attivo, 1) === 1) || rows[0] || null
+  return row ? nsRound(nsSafeNum(row.valore_percentuale, 0), 2) : 0
+}
+
+async function recomputeAndPersistNotaSpeseSummary (opts: {
+  parentLayerUrl: string
+  parentObjectId: number
+  parentIdFieldName: string
+  parentGlobalId: string
+  tablePersonaleUrl: string
+  tableMezziUrl: string
+  tableMaterialiUrl: string
+  parametriUrl: string
+  parametroCode: string
+}): Promise<NsSummary> {
+  const where = `parent_globalid = '${nsEscapeSqlString(opts.parentGlobalId)}'`
+  const [rowsP, rowsM, rowsT, perc] = await Promise.all([
+    queryTableAttributes(opts.tablePersonaleUrl, where, 'ordine ASC, OBJECTID ASC'),
+    queryTableAttributes(opts.tableMezziUrl, where, 'ordine ASC, OBJECTID ASC'),
+    queryTableAttributes(opts.tableMaterialiUrl, where, 'ordine ASC, OBJECTID ASC'),
+    getNsPercentuale(opts.parametriUrl, opts.parametroCode)
+  ])
+  const totalePersonale = nsRound(rowsP.reduce((s: number, r: any) => s + nsSafeNum(r?.importo_riga, 0), 0), 2)
+  const totaleMezzi = nsRound(rowsM.reduce((s: number, r: any) => s + nsSafeNum(r?.importo_riga, 0), 0), 2)
+  const totaleMateriali = nsRound(rowsT.reduce((s: number, r: any) => s + nsSafeNum(r?.importo_riga, 0), 0), 2)
+  const base = nsRound(totalePersonale + totaleMezzi + totaleMateriali, 2)
+  const importoSpeseGenerali = nsRound(base * nsSafeNum(perc, 0) / 100, 2)
+  const totaleComplessivo = nsRound(base + importoSpeseGenerali, 2)
+  const summary: NsSummary = {
+    totalePersonale,
+    totaleMezzi,
+    totaleMateriali,
+    percentualeSpeseGenerali: nsRound(perc, 2),
+    importoSpeseGenerali,
+    totaleComplessivo
+  }
+  const fl = await getFeatureLayerByUrl(opts.parentLayerUrl)
+  const oidField = String(fl?.objectIdField || opts.parentIdFieldName || 'OBJECTID')
+  const attrs: any = {
+    [oidField]: Number(opts.parentObjectId),
+    ns_totale_personale: summary.totalePersonale,
+    ns_totale_mezzi: summary.totaleMezzi,
+    ns_totale_materiali: summary.totaleMateriali,
+    ns_spese_generali_perc: summary.percentualeSpeseGenerali,
+    ns_importo_spese_generali: summary.importoSpeseGenerali,
+    ns_totale_complessivo: summary.totaleComplessivo,
+    ns_ricalcolata_il: Date.now()
+  }
+  const res = await fl.applyEdits({ updateFeatures: [{ attributes: attrs }] } as any)
+  const r = res?.updateFeatureResults?.[0]
+  if (r?.error) throw new Error(r.error.message || 'Aggiornamento totali nota spese non riuscito.')
+  return summary
+}
+
+function NoteSpeseManager (props: NsManagerProps) {
+  const [listino, setListino] = React.useState<NsListinoRow[]>([])
+  const [rows, setRows] = React.useState<any[]>([])
+  const [loading, setLoading] = React.useState(false)
+  const [saving, setSaving] = React.useState(false)
+  const [msg, setMsg] = React.useState<{ ok: boolean; text: string } | null>(null)
+  const [form, setForm] = React.useState<any>({ objectid: null, codice_voce: '', num_unita: '1', ore_per_unita: '', ore_utilizzo: '', quantita: '', note: '' })
+
+  const showMsg = React.useCallback((text: string, ok: boolean) => {
+    setMsg({ text, ok })
+    window.setTimeout(() => setMsg(null), 3500)
+  }, [])
+
+  const selectedVoce = React.useMemo(() => listino.find((r) => String(r.codice_voce) === String(form.codice_voce)), [listino, form.codice_voce])
+  const nextOrdine = React.useMemo(() => rows.reduce((m, r) => Math.max(m, nsSafeNum(r?.ordine, 0)), 0) + 10, [rows])
+
+  const load = React.useCallback(async () => {
+    if (!props.parentGlobalId || !props.tableUrl || !props.listinoUrl) return
+    setLoading(true)
+    try {
+      const [listinoRows, detailRows] = await Promise.all([
+        queryTableAttributes(props.listinoUrl, '1=1', 'ordine ASC, descrizione ASC, OBJECTID ASC'),
+        queryTableAttributes(props.tableUrl, `parent_globalid = '${nsEscapeSqlString(props.parentGlobalId)}'`, 'ordine ASC, OBJECTID ASC')
+      ])
+      setListino(
+        listinoRows
+          .filter((r: any) => nsSafeNum(r?.attivo, 1) !== 0)
+          .map((r: any) => ({
+            objectid: nsSafeNum(pickAttrCI(r, ['OBJECTID', 'objectid']), 0),
+            codice_voce: String(r?.codice_voce || ''),
+            descrizione: String(r?.descrizione || ''),
+            unita_misura: String(r?.unita_misura || ''),
+            costo_unitario: nsRound(nsSafeNum(r?.costo_unitario, 0), 4),
+            ordine: nsSafeNum(r?.ordine, 0),
+            attivo: r?.attivo != null ? nsSafeNum(r.attivo, 0) : null
+          }))
+      )
+      setRows(detailRows)
+    } catch (e: any) {
+      showMsg(e?.message || String(e), false)
+    } finally {
+      setLoading(false)
+    }
+  }, [props.parentGlobalId, props.tableUrl, props.listinoUrl, showMsg])
+
+  React.useEffect(() => { void load() }, [load])
+
+  const resetForm = React.useCallback(() => {
+    setForm({ objectid: null, codice_voce: '', num_unita: '1', ore_per_unita: '', ore_utilizzo: '', quantita: '', note: '' })
+  }, [])
+
+  const onEdit = (row: any) => {
+    setForm({
+      objectid: nsSafeNum(pickAttrCI(row, ['OBJECTID', 'objectid']), 0),
+      codice_voce: String(row?.codice_voce_snapshot || ''),
+      num_unita: String(row?.num_unita ?? '1'),
+      ore_per_unita: String(row?.ore_per_unita ?? ''),
+      ore_utilizzo: String(row?.ore_utilizzo ?? ''),
+      quantita: String(row?.quantita ?? ''),
+      note: String(row?.note || '')
+    })
+  }
+
+  const previewImporto = React.useMemo(() => {
+    const costo = nsSafeNum(selectedVoce?.costo_unitario, 0)
+    if (!selectedVoce) return 0
+    if (props.kind === 'personale') {
+      const oreTotali = nsSafeNum(form.num_unita, 0) * nsSafeNum(form.ore_per_unita, 0)
+      return nsRound(oreTotali * costo, 2)
+    }
+    if (props.kind === 'mezzi') return nsRound(nsSafeNum(form.ore_utilizzo, 0) * costo, 2)
+    return nsRound(nsSafeNum(form.quantita, 0) * costo, 2)
+  }, [selectedVoce, props.kind, form.num_unita, form.ore_per_unita, form.ore_utilizzo, form.quantita])
+
+  const onSave = async () => {
+    if (!props.parentGlobalId) { showMsg('GlobalID pratica non disponibile.', false); return }
+    if (!selectedVoce) { showMsg('Seleziona una voce di listino.', false); return }
+    const baseAttrs: any = {
+      parent_globalid: props.parentGlobalId,
+      codice_voce_snapshot: selectedVoce.codice_voce,
+      descrizione_snapshot: selectedVoce.descrizione,
+      unita_misura_snapshot: selectedVoce.unita_misura,
+      costo_unitario_snapshot: nsRound(selectedVoce.costo_unitario, 4),
+      ordine: form.objectid ? undefined : nextOrdine,
+      note: String(form.note || '').trim()
+    }
+    if (props.kind === 'personale') {
+      const numUnita = Math.max(1, Math.trunc(nsSafeNum(form.num_unita, 1)))
+      const orePerUnita = nsRound(nsSafeNum(form.ore_per_unita, 0), 2)
+      if (orePerUnita <= 0) { showMsg('Indicare le ore per unità.', false); return }
+      const oreTotali = nsRound(numUnita * orePerUnita, 2)
+      baseAttrs.num_unita = numUnita
+      baseAttrs.ore_per_unita = orePerUnita
+      baseAttrs.ore_totali = oreTotali
+      baseAttrs.importo_riga = nsRound(oreTotali * nsSafeNum(selectedVoce.costo_unitario, 0), 2)
+    } else if (props.kind === 'mezzi') {
+      const ore = nsRound(nsSafeNum(form.ore_utilizzo, 0), 2)
+      if (ore <= 0) { showMsg('Indicare le ore di utilizzo.', false); return }
+      baseAttrs.ore_utilizzo = ore
+      baseAttrs.importo_riga = nsRound(ore * nsSafeNum(selectedVoce.costo_unitario, 0), 2)
+    } else {
+      const qty = nsRound(nsSafeNum(form.quantita, 0), 2)
+      if (qty <= 0) { showMsg('Indicare la quantità.', false); return }
+      baseAttrs.quantita = qty
+      baseAttrs.importo_riga = nsRound(qty * nsSafeNum(selectedVoce.costo_unitario, 0), 2)
+    }
+    if (baseAttrs.ordine == null) delete baseAttrs.ordine
+    setSaving(true)
+    try {
+      await saveTableAttributes(props.tableUrl, baseAttrs, form.objectid ? Number(form.objectid) : null)
+      resetForm()
+      await load()
+      if (props.onChanged) await props.onChanged()
+      showMsg(form.objectid ? 'Riga aggiornata.' : 'Riga aggiunta.', true)
+    } catch (e: any) {
+      showMsg(e?.message || String(e), false)
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const onDelete = async (row: any) => {
+    const oid = nsSafeNum(pickAttrCI(row, ['OBJECTID', 'objectid']), 0)
+    if (!oid) return
+    if (!window.confirm(`Eliminare la riga "${String(row?.descrizione_snapshot || '')}"?`)) return
+    setSaving(true)
+    try {
+      await deleteTableObjectId(props.tableUrl, oid)
+      if (form.objectid && Number(form.objectid) === oid) resetForm()
+      await load()
+      if (props.onChanged) await props.onChanged()
+      showMsg('Riga eliminata.', true)
+    } catch (e: any) {
+      showMsg(e?.message || String(e), false)
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const money = (n: any) => nsSafeNum(n, 0).toLocaleString('it-IT', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+  const cost = selectedVoce ? `${money(selectedVoce.costo_unitario)} / ${selectedVoce.unita_misura || 'u.m.'}` : '—'
+
+  return (
+    <div style={{ border: '1px solid #c5d9f1', borderRadius: 8, overflow: 'hidden', background: '#fff' }}>
+      <div style={{ background: '#1F4E79', color: '#fff', padding: '8px 10px', fontSize: 13, fontWeight: 700 }}>{props.title}</div>
+      <div style={{ padding: 10, display: 'grid', gap: 10 }}>
+        {msg && (
+          <div style={{ padding: '7px 10px', borderRadius: 4, fontSize: 12, fontWeight: 700, border: `1px solid ${msg.ok ? '#b8d4b0' : '#f5b8b8'}`, background: msg.ok ? '#e2efda' : '#fce4e4', color: msg.ok ? '#375623' : '#c00' }}>
+            {msg.text}
+          </div>
+        )}
+        <div style={{ display: 'grid', gridTemplateColumns: '2fr 1.2fr 1fr 1fr', gap: 10 }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+            <div style={{ fontSize: 11, fontWeight: 700, color: '#1F4E79' }}>Voce</div>
+            <select value={form.codice_voce || ''} onChange={(e) => setForm((f: any) => ({ ...f, codice_voce: e.target.value }))} style={{ width: '100%', padding: '5px 8px', border: '1px solid #aac4e0', borderRadius: 4, fontSize: 13, boxSizing: 'border-box', background: '#fff' }}>
+              <option value=''>— seleziona —</option>
+              {listino.map((r) => <option key={r.codice_voce} value={r.codice_voce}>{r.descrizione}</option>)}
+            </select>
+          </div>
+          {props.kind === 'personale' && (
+            <>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+                <div style={{ fontSize: 11, fontWeight: 700, color: '#1F4E79' }}>N. unità</div>
+                <input type='number' min='1' step='1' value={form.num_unita || ''} onChange={(e) => setForm((f: any) => ({ ...f, num_unita: e.target.value }))} style={{ width: '100%', padding: '5px 8px', border: '1px solid #aac4e0', borderRadius: 4, fontSize: 13, boxSizing: 'border-box' }} />
+              </div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+                <div style={{ fontSize: 11, fontWeight: 700, color: '#1F4E79' }}>Ore / unità</div>
+                <input type='number' min='0' step='0.01' value={form.ore_per_unita || ''} onChange={(e) => setForm((f: any) => ({ ...f, ore_per_unita: e.target.value }))} style={{ width: '100%', padding: '5px 8px', border: '1px solid #aac4e0', borderRadius: 4, fontSize: 13, boxSizing: 'border-box' }} />
+              </div>
+            </>
+          )}
+          {props.kind === 'mezzi' && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+              <div style={{ fontSize: 11, fontWeight: 700, color: '#1F4E79' }}>Ore utilizzo</div>
+              <input type='number' min='0' step='0.01' value={form.ore_utilizzo || ''} onChange={(e) => setForm((f: any) => ({ ...f, ore_utilizzo: e.target.value }))} style={{ width: '100%', padding: '5px 8px', border: '1px solid #aac4e0', borderRadius: 4, fontSize: 13, boxSizing: 'border-box' }} />
+            </div>
+          )}
+          {props.kind === 'materiali' && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+              <div style={{ fontSize: 11, fontWeight: 700, color: '#1F4E79' }}>Quantità</div>
+              <input type='number' min='0' step='0.01' value={form.quantita || ''} onChange={(e) => setForm((f: any) => ({ ...f, quantita: e.target.value }))} style={{ width: '100%', padding: '5px 8px', border: '1px solid #aac4e0', borderRadius: 4, fontSize: 13, boxSizing: 'border-box' }} />
+            </div>
+          )}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+            <div style={{ fontSize: 11, fontWeight: 700, color: '#1F4E79' }}>Costo unitario</div>
+            <input value={cost} disabled style={{ width: '100%', padding: '5px 8px', border: '1px solid #b8d4b0', borderRadius: 4, fontSize: 13, boxSizing: 'border-box', background: '#e8f0e9', color: '#375623', fontStyle: 'italic' }} />
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+            <div style={{ fontSize: 11, fontWeight: 700, color: '#1F4E79' }}>Importo</div>
+            <input value={money(previewImporto)} disabled style={{ width: '100%', padding: '5px 8px', border: '1px solid #b8d4b0', borderRadius: 4, fontSize: 13, boxSizing: 'border-box', background: '#e8f0e9', color: '#375623', fontStyle: 'italic' }} />
+          </div>
+        </div>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr auto', gap: 10, alignItems: 'end' }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+            <div style={{ fontSize: 11, fontWeight: 700, color: '#1F4E79' }}>Note</div>
+            <input value={form.note || ''} onChange={(e) => setForm((f: any) => ({ ...f, note: e.target.value }))} style={{ width: '100%', padding: '5px 8px', border: '1px solid #aac4e0', borderRadius: 4, fontSize: 13, boxSizing: 'border-box' }} />
+          </div>
+          <div style={{ display: 'flex', gap: 8 }}>
+            <button type='button' onClick={onSave} disabled={saving || loading} style={{ padding: '6px 18px', border: 'none', borderRadius: 4, fontSize: 13, cursor: saving ? 'not-allowed' : 'pointer', fontWeight: 700, background: '#1F4E79', color: '#fff', opacity: saving ? 0.6 : 1 }}>{saving ? 'Salvataggio…' : (form.objectid ? 'Aggiorna' : 'Aggiungi')}</button>
+            {form.objectid ? <button type='button' onClick={resetForm} disabled={saving} style={{ padding: '6px 18px', border: 'none', borderRadius: 4, fontSize: 13, cursor: saving ? 'not-allowed' : 'pointer', fontWeight: 700, background: '#e0e0e0', color: '#333' }}>Annulla</button> : null}
+          </div>
+        </div>
+        <div style={{ border: '1px solid #c5d9f1', borderRadius: 6, overflow: 'auto' }}>
+          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
+            <thead>
+              <tr>
+                <th style={{ background: '#1F4E79', color: '#fff', padding: '7px 8px', textAlign: 'left' }}>Voce</th>
+                <th style={{ background: '#1F4E79', color: '#fff', padding: '7px 8px', textAlign: 'left' }}>U.M.</th>
+                <th style={{ background: '#1F4E79', color: '#fff', padding: '7px 8px', textAlign: 'right' }}>Costo</th>
+                {props.kind === 'personale' ? <th style={{ background: '#1F4E79', color: '#fff', padding: '7px 8px', textAlign: 'right' }}>N.</th> : null}
+                {props.kind === 'personale' ? <th style={{ background: '#1F4E79', color: '#fff', padding: '7px 8px', textAlign: 'right' }}>Ore/u</th> : null}
+                {props.kind === 'personale' ? <th style={{ background: '#1F4E79', color: '#fff', padding: '7px 8px', textAlign: 'right' }}>Ore tot.</th> : null}
+                {props.kind === 'mezzi' ? <th style={{ background: '#1F4E79', color: '#fff', padding: '7px 8px', textAlign: 'right' }}>Ore</th> : null}
+                {props.kind === 'materiali' ? <th style={{ background: '#1F4E79', color: '#fff', padding: '7px 8px', textAlign: 'right' }}>Qtà</th> : null}
+                <th style={{ background: '#1F4E79', color: '#fff', padding: '7px 8px', textAlign: 'right' }}>Importo</th>
+                <th style={{ background: '#1F4E79', color: '#fff', padding: '7px 8px', textAlign: 'left' }}>Note</th>
+                <th style={{ background: '#1F4E79', color: '#fff', padding: '7px 8px', textAlign: 'left' }}></th>
+              </tr>
+            </thead>
+            <tbody>
+              {loading ? (
+                <tr><td colSpan={props.kind === 'personale' ? 9 : 7} style={{ padding: 16, textAlign: 'center', color: '#888', fontStyle: 'italic' }}>Caricamento…</td></tr>
+              ) : rows.length === 0 ? (
+                <tr><td colSpan={props.kind === 'personale' ? 9 : 7} style={{ padding: 16, textAlign: 'center', color: '#888', fontStyle: 'italic' }}>Nessuna riga presente</td></tr>
+              ) : rows.map((r: any, idx: number) => (
+                <tr key={String(pickAttrCI(r, ['OBJECTID', 'objectid']) || idx)}>
+                  <td style={{ padding: '6px 8px', borderBottom: '1px solid #e0eaf4', background: idx % 2 === 0 ? '#f5f9ff' : '#fff' }}>{String(r?.descrizione_snapshot || '')}</td>
+                  <td style={{ padding: '6px 8px', borderBottom: '1px solid #e0eaf4', background: idx % 2 === 0 ? '#f5f9ff' : '#fff' }}>{String(r?.unita_misura_snapshot || '')}</td>
+                  <td style={{ padding: '6px 8px', borderBottom: '1px solid #e0eaf4', textAlign: 'right', background: idx % 2 === 0 ? '#f5f9ff' : '#fff' }}>{money(r?.costo_unitario_snapshot)}</td>
+                  {props.kind === 'personale' ? <td style={{ padding: '6px 8px', borderBottom: '1px solid #e0eaf4', textAlign: 'right', background: idx % 2 === 0 ? '#f5f9ff' : '#fff' }}>{nsSafeNum(r?.num_unita, 0)}</td> : null}
+                  {props.kind === 'personale' ? <td style={{ padding: '6px 8px', borderBottom: '1px solid #e0eaf4', textAlign: 'right', background: idx % 2 === 0 ? '#f5f9ff' : '#fff' }}>{money(r?.ore_per_unita)}</td> : null}
+                  {props.kind === 'personale' ? <td style={{ padding: '6px 8px', borderBottom: '1px solid #e0eaf4', textAlign: 'right', background: idx % 2 === 0 ? '#f5f9ff' : '#fff' }}>{money(r?.ore_totali)}</td> : null}
+                  {props.kind === 'mezzi' ? <td style={{ padding: '6px 8px', borderBottom: '1px solid #e0eaf4', textAlign: 'right', background: idx % 2 === 0 ? '#f5f9ff' : '#fff' }}>{money(r?.ore_utilizzo)}</td> : null}
+                  {props.kind === 'materiali' ? <td style={{ padding: '6px 8px', borderBottom: '1px solid #e0eaf4', textAlign: 'right', background: idx % 2 === 0 ? '#f5f9ff' : '#fff' }}>{money(r?.quantita)}</td> : null}
+                  <td style={{ padding: '6px 8px', borderBottom: '1px solid #e0eaf4', textAlign: 'right', background: idx % 2 === 0 ? '#f5f9ff' : '#fff' }}>{money(r?.importo_riga)}</td>
+                  <td style={{ padding: '6px 8px', borderBottom: '1px solid #e0eaf4', background: idx % 2 === 0 ? '#f5f9ff' : '#fff' }}>{String(r?.note || '')}</td>
+                  <td style={{ padding: '6px 8px', borderBottom: '1px solid #e0eaf4', background: idx % 2 === 0 ? '#f5f9ff' : '#fff', whiteSpace: 'nowrap' }}>
+                    <button type='button' onClick={() => onEdit(r)} style={{ cursor: 'pointer', fontSize: 11, padding: '2px 8px', borderRadius: 3, border: 'none', marginRight: 4, fontWeight: 700, background: '#1B6584', color: '#fff' }}>✎</button>
+                    <button type='button' onClick={() => void onDelete(r)} style={{ cursor: 'pointer', fontSize: 11, padding: '2px 8px', borderRadius: 3, border: 'none', fontWeight: 700, background: '#c00', color: '#fff' }}>✕</button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 const LOG_EVENTI_CICLI_URL = 'https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_LOG_EVENTI_CICLI/FeatureServer/0'
 const DRAFT_DATE_FIELDS = new Set(['data_rilevazione', 'data_firma'])
 
@@ -3191,11 +3625,11 @@ function NuovaPraticaForm (p: {
     }
   }, [validationPopup, validationPopupOkId])
 
-  const [npTab, setNpTab] = React.useState<'anagrafica' | 'violazione' | 'dati_tecnici' | 'allegati'>(() => {
+  const [npTab, setNpTab] = React.useState<'anagrafica' | 'violazione' | 'dati_tecnici' | 'nota_spese' | 'allegati'>(() => {
     if (mode !== 'edit') return 'anagrafica'
     try {
       const saved = sessionStorage.getItem('GII_EDIT_TAB')
-      if (saved === 'anagrafica' || saved === 'violazione' || saved === 'dati_tecnici' || saved === 'allegati') {
+      if (saved === 'anagrafica' || saved === 'violazione' || saved === 'dati_tecnici' || saved === 'nota_spese' || saved === 'allegati') {
         sessionStorage.removeItem('GII_EDIT_TAB')
         return saved
       }
@@ -3342,6 +3776,85 @@ function NuovaPraticaForm (p: {
   const currentLayerUrl = React.useMemo(() => {
     return ensureLayerIndex(normalizeFeatureLayerUrl(p.editLayerUrl) || normalizeFeatureLayerUrl(readDynamicSelection().layerUrl))
   }, [p.editLayerUrl])
+
+const [currentGlobalId, setCurrentGlobalId] = React.useState<string>('')
+const [noteSpeseSummary, setNoteSpeseSummary] = React.useState<NsSummary>(EMPTY_NS_SUMMARY)
+const [noteSpeseBusy, setNoteSpeseBusy] = React.useState(false)
+const [noteSpeseMsg, setNoteSpeseMsg] = React.useState<{ ok: boolean; text: string } | null>(null)
+
+const noteSpeseCfg = React.useMemo(() => ({
+  listinoPersonaleUrl: String(cfg.nsListinoPersonaleUrl || '').trim(),
+  listinoMezziUrl: String(cfg.nsListinoMezziUrl || '').trim(),
+  listinoMaterialiUrl: String(cfg.nsListinoMaterialiUrl || '').trim(),
+  tablePersonaleUrl: String(cfg.nsTablePersonaleUrl || '').trim(),
+  tableMezziUrl: String(cfg.nsTableMezziUrl || '').trim(),
+  tableMaterialiUrl: String(cfg.nsTableMaterialiUrl || '').trim(),
+  parametriUrl: String(cfg.nsParametriUrl || '').trim(),
+  parametroCode: String(cfg.nsParametroCode || 'SPESE_GENERALI_PERC').trim() || 'SPESE_GENERALI_PERC'
+}), [cfg.nsListinoPersonaleUrl, cfg.nsListinoMezziUrl, cfg.nsListinoMaterialiUrl, cfg.nsTablePersonaleUrl, cfg.nsTableMezziUrl, cfg.nsTableMaterialiUrl, cfg.nsParametriUrl, cfg.nsParametroCode])
+
+const noteSpeseMissing = React.useMemo(() => {
+  const missing: string[] = []
+  if (!noteSpeseCfg.listinoPersonaleUrl) missing.push('Listino personale')
+  if (!noteSpeseCfg.listinoMezziUrl) missing.push('Listino mezzi')
+  if (!noteSpeseCfg.listinoMaterialiUrl) missing.push('Listino materiali')
+  if (!noteSpeseCfg.tablePersonaleUrl) missing.push('Tabella nota spese personale')
+  if (!noteSpeseCfg.tableMezziUrl) missing.push('Tabella nota spese mezzi')
+  if (!noteSpeseCfg.tableMaterialiUrl) missing.push('Tabella nota spese materiali')
+  if (!noteSpeseCfg.parametriUrl) missing.push('Tabella parametri')
+  return missing
+}, [noteSpeseCfg])
+
+React.useEffect(() => {
+  let cancelled = false
+  const run = async () => {
+    if (mode !== 'edit' || currentOid == null) { setCurrentGlobalId(''); return }
+    const direct = String(pickAttrCI(p.initialData || {}, ['GlobalID', 'globalid']) || '').trim()
+    if (direct) { if (!cancelled) setCurrentGlobalId(direct); return }
+    const fallbackUrl = currentLayerUrl || String(cfg.schemaLayerUrl || '').trim() || String(cfg.motherLayerUrl || '').trim()
+    if (!fallbackUrl) { if (!cancelled) setCurrentGlobalId(''); return }
+    try {
+      const gid = await loadRecordGlobalIdByOid(fallbackUrl, editIdFieldName, Number(currentOid))
+      if (!cancelled) setCurrentGlobalId(String(gid || '').trim())
+    } catch {
+      if (!cancelled) setCurrentGlobalId('')
+    }
+  }
+  void run()
+  return () => { cancelled = true }
+}, [mode, currentOid, currentLayerUrl, cfg.schemaLayerUrl, cfg.motherLayerUrl, editIdFieldName, p.initialData])
+
+const refreshNotaSpeseSummary = React.useCallback(async () => {
+  if (mode !== 'edit' || currentOid == null || !currentGlobalId || noteSpeseMissing.length > 0) return
+  const parentUrl = currentLayerUrl || String(cfg.schemaLayerUrl || '').trim() || String(cfg.motherLayerUrl || '').trim()
+  if (!parentUrl) return
+  setNoteSpeseBusy(true)
+  try {
+    const summary = await recomputeAndPersistNotaSpeseSummary({
+      parentLayerUrl: parentUrl,
+      parentObjectId: Number(currentOid),
+      parentIdFieldName: editIdFieldName,
+      parentGlobalId: currentGlobalId,
+      tablePersonaleUrl: noteSpeseCfg.tablePersonaleUrl,
+      tableMezziUrl: noteSpeseCfg.tableMezziUrl,
+      tableMaterialiUrl: noteSpeseCfg.tableMaterialiUrl,
+      parametriUrl: noteSpeseCfg.parametriUrl,
+      parametroCode: noteSpeseCfg.parametroCode
+    })
+    setNoteSpeseSummary(summary)
+    setNoteSpeseMsg(null)
+  } catch (e: any) {
+    setNoteSpeseMsg({ ok: false, text: e?.message || String(e) })
+  } finally {
+    setNoteSpeseBusy(false)
+  }
+}, [mode, currentOid, currentGlobalId, noteSpeseMissing.length, currentLayerUrl, cfg.schemaLayerUrl, cfg.motherLayerUrl, editIdFieldName, noteSpeseCfg])
+
+React.useEffect(() => {
+  if (npTab === 'nota_spese' && mode === 'edit' && currentOid != null && currentGlobalId && noteSpeseMissing.length === 0) {
+    void refreshNotaSpeseSummary()
+  }
+}, [npTab, mode, currentOid, currentGlobalId, noteSpeseMissing.length, refreshNotaSpeseSummary])
 
   React.useEffect(() => {
     if (mode !== 'edit' || currentOid == null) {
@@ -4118,6 +4631,7 @@ function NuovaPraticaForm (p: {
     { id: 'anagrafica', label: 'Anagrafica' },
     { id: 'violazione', label: 'Violazione' },
     { id: 'dati_tecnici', label: 'Dati tecnici' },
+    { id: 'nota_spese', label: 'Nota spese' },
     { id: 'allegati', label: 'Allegati' }
   ] as const
 
@@ -4411,8 +4925,62 @@ function NuovaPraticaForm (p: {
         {/* DATI TECNICI */}
         {npTab === 'dati_tecnici' && renderLayoutTab('dati_tecnici')}
 
-        {/* ALLEGATI */}
-        {npTab === 'allegati' && (
+
+{/* NOTA SPESE */}
+{npTab === 'nota_spese' && (
+  mode !== 'edit' || currentOid == null ? (
+    <div style={{ padding: 12, borderRadius: 10, border: '1px dashed rgba(0,0,0,0.18)', background: 'rgba(0,0,0,0.01)' }}>
+      <div style={{ fontWeight: 800, fontSize: 13, marginBottom: 6 }}>Nota spese</div>
+      <div style={{ fontSize: formStyle.labelFontSize, color: formStyle.labelColor, lineHeight: 1.5 }}>
+        La nota spese si gestisce <b>dopo il salvataggio</b> della pratica, quando il rapporto dispone del <b>GlobalID</b> necessario per collegare le righe di personale, mezzi e materiali.
+      </div>
+    </div>
+  ) : noteSpeseMissing.length > 0 ? (
+    <div style={{ padding: 12, borderRadius: 10, border: '1px solid #f5b8b8', background: '#fce4e4', color: '#7a1c1c' }}>
+      <div style={{ fontWeight: 800, fontSize: 13, marginBottom: 6 }}>Nota spese non configurata</div>
+      <div style={{ fontSize: 12, lineHeight: 1.5 }}>Completa nel setting del widget i seguenti URL:</div>
+      <div style={{ marginTop: 8, fontSize: 12 }}>{noteSpeseMissing.join(' • ')}</div>
+    </div>
+  ) : !currentGlobalId ? (
+    <div style={{ padding: 12, borderRadius: 10, border: '1px solid #f5b8b8', background: '#fce4e4', color: '#7a1c1c' }}>
+      <div style={{ fontWeight: 800, fontSize: 13, marginBottom: 6 }}>GlobalID pratica non disponibile</div>
+      <div style={{ fontSize: 12, lineHeight: 1.5 }}>Il widget non riesce a leggere il GlobalID del rapporto selezionato. Verifica che il layer/view usato per l’editing esponga il campo <b>GlobalID</b>.</div>
+    </div>
+  ) : (
+    <div style={{ display: 'grid', gap: 12 }}>
+      {noteSpeseMsg && (
+        <div style={{ padding: '7px 10px', borderRadius: 4, fontSize: 12, fontWeight: 700, border: `1px solid ${noteSpeseMsg.ok ? '#b8d4b0' : '#f5b8b8'}`, background: noteSpeseMsg.ok ? '#e2efda' : '#fce4e4', color: noteSpeseMsg.ok ? '#375623' : '#c00' }}>
+          {noteSpeseMsg.text}
+        </div>
+      )}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, minmax(0, 1fr))', gap: 10 }}>
+        {[
+          ['Personale', noteSpeseSummary.totalePersonale],
+          ['Mezzi', noteSpeseSummary.totaleMezzi],
+          ['Materiali', noteSpeseSummary.totaleMateriali],
+          [`Spese generali (${noteSpeseSummary.percentualeSpeseGenerali.toLocaleString('it-IT', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}%)`, noteSpeseSummary.importoSpeseGenerali],
+          ['Totale complessivo', noteSpeseSummary.totaleComplessivo]
+        ].map(([label, value], idx) => (
+          <div key={idx} style={{ background: '#f5f9ff', border: '1px solid #c5d9f1', borderRadius: 8, padding: '10px 12px' }}>
+            <div style={{ fontSize: 11, fontWeight: 700, color: '#1F4E79', marginBottom: 4 }}>{label as any}</div>
+            <div style={{ fontSize: 18, fontWeight: 800, color: '#16375a' }}>{nsSafeNum(value, 0).toLocaleString('it-IT', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>
+          </div>
+        ))}
+      </div>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+        <div style={{ fontSize: 12, color: '#6b7280' }}>Le righe vengono salvate subito nelle tabelle nota spese. I totali del rapporto si aggiornano in automatico.</div>
+        <button type='button' onClick={() => void refreshNotaSpeseSummary()} disabled={noteSpeseBusy} style={{ padding: '6px 14px', borderRadius: 8, border: '1px solid rgba(0,0,0,0.12)', background: '#fff', color: '#111827', fontWeight: 700, cursor: noteSpeseBusy ? 'not-allowed' : 'pointer', opacity: noteSpeseBusy ? 0.6 : 1 }}>{noteSpeseBusy ? 'Ricalcolo…' : 'Ricalcola totali'}</button>
+      </div>
+      <NoteSpeseManager kind='personale' title='Prestazioni manodopera' listinoUrl={noteSpeseCfg.listinoPersonaleUrl} tableUrl={noteSpeseCfg.tablePersonaleUrl} parentGlobalId={currentGlobalId} onChanged={refreshNotaSpeseSummary} />
+      <NoteSpeseManager kind='mezzi' title='Mezzi e macchinari' listinoUrl={noteSpeseCfg.listinoMezziUrl} tableUrl={noteSpeseCfg.tableMezziUrl} parentGlobalId={currentGlobalId} onChanged={refreshNotaSpeseSummary} />
+      <NoteSpeseManager kind='materiali' title='Materiali' listinoUrl={noteSpeseCfg.listinoMaterialiUrl} tableUrl={noteSpeseCfg.tableMaterialiUrl} parentGlobalId={currentGlobalId} onChanged={refreshNotaSpeseSummary} />
+    </div>
+  )
+)}
+
+{/* ALLEGATI */}
+{npTab === 'allegati' && (
+
           mode !== 'edit' || currentOid == null ? (
             <div style={{ padding: 12, borderRadius: 10, border: '1px dashed rgba(0,0,0,0.18)', background: 'rgba(0,0,0,0.01)' }}>
               <div style={{ fontWeight: 800, fontSize: 13, marginBottom: 6 }}>Allegati</div>
@@ -5909,8 +6477,8 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
             type: 'simple-marker',
             style: 'circle',
             color: [220, 38, 38, 200],       // rosso semitrasparente
-            size: 14,
-            outline: { color: [255, 255, 255, 255], width: 2.5 }
+            size: 10,
+            outline: { color: [255, 255, 255, 255], width: 2.0 }
           }
         })
         if (cancelled) return
