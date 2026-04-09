@@ -106,25 +106,6 @@ function normalizeCategory(v: any): string {
   return s
 }
 
-function decodeHtmlEntities(v: any): string {
-  const s = String(v ?? '')
-  if (!s || s.indexOf('&') < 0) return s
-  try {
-    const el = document.createElement('textarea')
-    el.innerHTML = s
-    return String(el.value || '').replace(/ /g, ' ')
-  } catch {
-    return s
-      .replace(/&quot;/gi, '"')
-      .replace(/&#34;/g, '"')
-      .replace(/&#39;/g, "'")
-      .replace(/&apos;/gi, "'")
-      .replace(/&lt;/gi, '<')
-      .replace(/&gt;/gi, '>')
-      .replace(/&amp;/gi, '&')
-  }
-}
-
 
 const styles = `
 .gvw { font-family: Arial, sans-serif; font-size: 13px; padding: 12px; height: 100%; display:flex; flex-direction:column; gap:10px; box-sizing:border-box; }
@@ -170,34 +151,20 @@ export default function Widget(props: AllWidgetProps<IMConfig>) {
   React.useEffect(() => { const refresh = () => setIsRi(isRiOrAdminUser()); refresh(); window.addEventListener('gii:userLoaded', refresh); return () => window.removeEventListener('gii:userLoaded', refresh) }, [])
   React.useEffect(() => { if (!msg) return; const t = window.setTimeout(() => setMsg(null), 5000); return () => window.clearTimeout(t) }, [msg])
 
-  const loadPrezzari = React.useCallback(async (preferredCode?: string) => {
-    if (!prezzariUrl) { setPrezzari([]); setSelectedCode(''); setRows([]); return }
-    try {
-      const rr = await queryRows(prezzariUrl, '1=1', 'anno_prezzario DESC, OBJECTID DESC')
-      setPrezzari(rr)
-      setSelectedCode((prev) => {
-        const forced = String(preferredCode || '').trim()
-        if (forced && rr.some((r:any) => String(r.codice_prezzario || '') === forced)) return forced
-        if (prev && rr.some((r:any) => String(r.codice_prezzario || '') === prev)) return prev
+  React.useEffect(() => {
+    let cancel = false
+    const run = async () => {
+      if (!prezzariUrl) return
+      try {
+        const rr = await queryRows(prezzariUrl, '1=1', 'anno_prezzario DESC, OBJECTID DESC')
+        if (cancel) return
+        setPrezzari(rr)
         const active = rr.find((r:any) => num(r.stato_prezzario) === 1) || rr[0]
-        return String(active?.codice_prezzario || '')
-      })
-      if (!rr.length) setRows([])
-    } catch {}
-  }, [prezzariUrl])
-
-  React.useEffect(() => {
-    void loadPrezzari()
-  }, [loadPrezzari])
-
-  React.useEffect(() => {
-    const onChanged = (ev: any) => {
-      const preferred = String(ev?.detail?.code || '').trim()
-      void loadPrezzari(preferred)
+        if (active && !selectedCode) setSelectedCode(String(active.codice_prezzario || ''))
+      } catch {}
     }
-    window.addEventListener('gii:prezzariChanged', onChanged)
-    return () => window.removeEventListener('gii:prezzariChanged', onChanged)
-  }, [loadPrezzari])
+    void run(); return () => { cancel = true }
+  }, [prezzariUrl, selectedCode])
 
   const load = React.useCallback(async () => {
     if (!serviceUrl || !selectedCode) { setRows([]); return }
@@ -210,8 +177,8 @@ export default function Widget(props: AllWidgetProps<IMConfig>) {
   }, [serviceUrl, selectedCode])
   React.useEffect(() => { void load() }, [load])
 
-  const filtered = rows.filter((r:any) => !search || `${r.codice_voce} ${decodeHtmlEntities(r.descrizione)} ${r.famiglia}`.toLowerCase().includes(search.toLowerCase()))
-  const onEdit = (r:any) => { setEditing(true); setForm({ objectid:r.objectid, codice_voce:String(r.codice_voce||''), descrizione:decodeHtmlEntities(r.descrizione || ''), categoria_default: normalizeCategory(r.categoria_default || 'MATERIALI') || 'MATERIALI', selezionabile: String(r.selezionabile ?? '1'), attivo: String(r.attivo ?? '1') }) }
+  const filtered = rows.filter((r:any) => !search || `${r.codice_voce} ${r.descrizione} ${r.famiglia}`.toLowerCase().includes(search.toLowerCase()))
+  const onEdit = (r:any) => { setEditing(true); setForm({ objectid:r.objectid, codice_voce:String(r.codice_voce||''), descrizione:String(r.descrizione||''), categoria_default: normalizeCategory(r.categoria_default || 'MATERIALI') || 'MATERIALI', selezionabile: String(r.selezionabile ?? '1'), attivo: String(r.attivo ?? '1') }) }
   const onCancel = () => { setEditing(false); setForm(emptyForm()) }
   const onSave = async () => {
     if (!form.objectid) { setMsg({ text: 'Seleziona una riga da modificare.', ok:false }); return }
@@ -251,7 +218,7 @@ export default function Widget(props: AllWidgetProps<IMConfig>) {
             <tbody>
               {filtered.length === 0 ? <tr><td colSpan={9} style={{ padding:16, textAlign:'center', color:'#6b7280' }}>{loading ? 'Caricamento…' : 'Nessuna voce.'}</td></tr> : filtered.map((r:any) => (
                 <tr key={r.objectid}>
-                  <td><b>{r.codice_voce}</b></td><td>{decodeHtmlEntities(r.descrizione)}</td><td>{r.famiglia}</td><td>{r.unita_misura}</td><td>{money(r.prezzo_unitario, 4)}</td><td>{normalizeCategory(r.categoria_default) || ''}</td><td>{num(r.selezionabile) === 1 ? 'Sì' : 'No'}</td><td>{num(r.attivo) === 1 ? 'Sì' : 'No'}</td>
+                  <td><b>{r.codice_voce}</b></td><td>{r.descrizione}</td><td>{r.famiglia}</td><td>{r.unita_misura}</td><td>{money(r.prezzo_unitario, 4)}</td><td>{normalizeCategory(r.categoria_default) || ''}</td><td>{num(r.selezionabile) === 1 ? 'Sì' : 'No'}</td><td>{num(r.attivo) === 1 ? 'Sì' : 'No'}</td>
                   <td><button className='gvw-btn gvw-save' onClick={() => onEdit(r)}>Modifica</button></td>
                 </tr>
               ))}

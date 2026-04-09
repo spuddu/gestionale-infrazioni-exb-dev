@@ -7,6 +7,13 @@ export interface Config {
   title?: string
   titleColor?: string
   titleFontSize?: number
+  sectionTitleColor?: string
+  sectionTitleFontSize?: number
+  toolbarLabelColor?: string
+  toolbarLabelFontSize?: number
+  leftColumnWidthPct?: number
+  centerColumnWidthPct?: number
+  rightColumnWidthPct?: number
 }
 
 export type IMConfig = ImmutableObject<Config>

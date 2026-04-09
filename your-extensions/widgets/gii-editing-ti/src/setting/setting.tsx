@@ -249,33 +249,25 @@ export default function Setting(props: AllWidgetSettingProps<IMConfig>) {
           placeholder='https://services2.arcgis.com/.../FeatureServer/1' style={P.inp}/>
         <div style={P.hint}>Se valorizzato, ogni modifica viene tracciata campo per campo. Se vuoto il log viene saltato.</div>
 
-        <label style={P.lbl}>Listino nota spese — Personale</label>
-        <input type='text' value={cfg.nsListinoPersonaleUrl || ''} onChange={e=>set('nsListinoPersonaleUrl',e.target.value)}
+        <label style={P.lbl}>Tabella prezzari caricati</label>
+        <input type='text' value={cfg.nsPrezzariUrl || ''} onChange={e=>set('nsPrezzariUrl',e.target.value)}
           placeholder='https://services2.arcgis.com/.../FeatureServer/0' style={P.inp}/>
-        <label style={P.lbl}>Listino nota spese — Mezzi</label>
-        <input type='text' value={cfg.nsListinoMezziUrl || ''} onChange={e=>set('nsListinoMezziUrl',e.target.value)}
+        <label style={P.lbl}>Tabella voci prezzario ufficiale</label>
+        <input type='text' value={cfg.nsPrezzarioVociUrl || ''} onChange={e=>set('nsPrezzarioVociUrl',e.target.value)}
           placeholder='https://services2.arcgis.com/.../FeatureServer/0' style={P.inp}/>
-        <label style={P.lbl}>Listino nota spese — Materiali</label>
-        <input type='text' value={cfg.nsListinoMaterialiUrl || ''} onChange={e=>set('nsListinoMaterialiUrl',e.target.value)}
+        <label style={P.lbl}>Tabella prezzario interno</label>
+        <input type='text' value={cfg.nsPrezzarioInternoUrl || ''} onChange={e=>set('nsPrezzarioInternoUrl',e.target.value)}
           placeholder='https://services2.arcgis.com/.../FeatureServer/0' style={P.inp}/>
-
-        <label style={P.lbl}>Tabella nota spese — Personale</label>
-        <input type='text' value={cfg.nsTablePersonaleUrl || ''} onChange={e=>set('nsTablePersonaleUrl',e.target.value)}
+        <label style={P.lbl}>Tabella dettaglio nota spese</label>
+        <input type='text' value={cfg.nsNotaSpeseDettaglioUrl || ''} onChange={e=>set('nsNotaSpeseDettaglioUrl',e.target.value)}
           placeholder='https://services2.arcgis.com/.../FeatureServer/0' style={P.inp}/>
-        <label style={P.lbl}>Tabella nota spese — Mezzi</label>
-        <input type='text' value={cfg.nsTableMezziUrl || ''} onChange={e=>set('nsTableMezziUrl',e.target.value)}
-          placeholder='https://services2.arcgis.com/.../FeatureServer/0' style={P.inp}/>
-        <label style={P.lbl}>Tabella nota spese — Materiali</label>
-        <input type='text' value={cfg.nsTableMaterialiUrl || ''} onChange={e=>set('nsTableMaterialiUrl',e.target.value)}
-          placeholder='https://services2.arcgis.com/.../FeatureServer/0' style={P.inp}/>
-
         <label style={P.lbl}>Tabella parametri nota spese</label>
         <input type='text' value={cfg.nsParametriUrl || ''} onChange={e=>set('nsParametriUrl',e.target.value)}
           placeholder='https://services2.arcgis.com/.../FeatureServer/0' style={P.inp}/>
         <label style={P.lbl}>Codice parametro spese generali</label>
         <input type='text' value={cfg.nsParametroCode || ''} onChange={e=>set('nsParametroCode',e.target.value)}
           placeholder='SPESE_GENERALI_PERC' style={P.inp}/>
-        <div style={P.hint}>Usato dalla tab Nota spese del cw editing. Il widget TI legge i listini, salva le righe nelle tre tabelle dettaglio e aggiorna subito i totali sul rapporto.</div>
+        <div style={P.hint}>Usato dalla tab Nota spese del cw editing. Il widget TI legge il prezzario ufficiale attivo, le voci interne, salva le righe per categorie regionali e aggiorna subito i totali sul rapporto.</div>
       </div>}
 
       {/* === MODALITA === */}

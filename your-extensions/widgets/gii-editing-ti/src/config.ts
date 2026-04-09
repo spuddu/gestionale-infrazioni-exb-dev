@@ -55,12 +55,10 @@ export interface Config {
   auditTableUrl?: string
   displayMode?: string
 
-  nsListinoPersonaleUrl?: string
-  nsListinoMezziUrl?: string
-  nsListinoMaterialiUrl?: string
-  nsTablePersonaleUrl?: string
-  nsTableMezziUrl?: string
-  nsTableMaterialiUrl?: string
+  nsPrezzariUrl?: string
+  nsPrezzarioVociUrl?: string
+  nsPrezzarioInternoUrl?: string
+  nsNotaSpeseDettaglioUrl?: string
   nsParametriUrl?: string
   nsParametroCode?: string
 
@@ -182,12 +180,10 @@ export const defaultConfig: Config = {
   auditTableUrl: '',
   displayMode: 'page',
 
-  nsListinoPersonaleUrl: '',
-  nsListinoMezziUrl: '',
-  nsListinoMaterialiUrl: '',
-  nsTablePersonaleUrl: '',
-  nsTableMezziUrl: '',
-  nsTableMaterialiUrl: '',
+  nsPrezzariUrl: '',
+  nsPrezzarioVociUrl: '',
+  nsPrezzarioInternoUrl: '',
+  nsNotaSpeseDettaglioUrl: '',
   nsParametriUrl: '',
   nsParametroCode: 'SPESE_GENERALI_PERC',
 

@@ -17,25 +17,77 @@ export default function Setting(props: AllWidgetSettingProps<IMConfig>) {
   const cfg: any = props.config || {}
   const titleColor = String(cfg.titleColor || '#1F4E79')
   const titleFontSize = Number(cfg.titleFontSize || 15)
+  const sectionTitleColor = String(cfg.sectionTitleColor || '#1F4E79')
+  const sectionTitleFontSize = Number(cfg.sectionTitleFontSize || 12.5)
+  const toolbarLabelColor = String(cfg.toolbarLabelColor || '#1F4E79')
+  const toolbarLabelFontSize = Number(cfg.toolbarLabelFontSize || 11.5)
+  const leftColumnWidthPct = Number(cfg.leftColumnWidthPct || 25)
+  const centerColumnWidthPct = Number(cfg.centerColumnWidthPct || 45)
+  const rightColumnWidthPct = Number(cfg.rightColumnWidthPct || 30)
   const set = (k: string, v: any) => props.onSettingChange({ id: props.id, config: (props.config as any)?.set ? (props.config as any).set(k, v) : { ...cfg, [k]: v } as any })
   return (
     <div style={box}>
       <div style={{ fontSize: 13, fontWeight: 700, color: '#93c5fd', marginBottom: 8 }}>Configurazione widget</div>
 
       <div style={section}>
-        <div style={sectionTitle}>Titolo</div>
+        <div style={sectionTitle}>Titolo principale</div>
 
         <label style={lbl}>Titolo</label>
         <input style={inp} value={cfg.title || ''} onChange={(e) => set('title', e.target.value)} />
 
-        <label style={lbl}>Colore titolo</label>
+        <label style={lbl}>Colore titolo principale</label>
         <div style={colorRow}>
-          <input style={colorInp} type='color' value={titleColor} onChange={(e) => set('titleColor', e.target.value)} aria-label='Colore titolo' />
+          <input style={colorInp} type='color' value={titleColor} onChange={(e) => set('titleColor', e.target.value)} aria-label='Colore titolo principale' />
           <input style={inp} value={titleColor} onChange={(e) => set('titleColor', e.target.value)} placeholder='#1F4E79' />
         </div>
 
-        <label style={lbl}>Dimensione titolo (px)</label>
+        <label style={lbl}>Dimensione titolo principale (px)</label>
         <input style={inp} type='number' min={10} max={36} step={1} value={titleFontSize} onChange={(e) => set('titleFontSize', Number(e.target.value || 15))} />
+      </div>
+
+      <div style={section}>
+        <div style={sectionTitle}>Etichette barra superiore</div>
+
+        <label style={lbl}>Colore etichette Prezzario / Cerca</label>
+        <div style={colorRow}>
+          <input style={colorInp} type='color' value={toolbarLabelColor} onChange={(e) => set('toolbarLabelColor', e.target.value)} aria-label='Colore etichette barra superiore' />
+          <input style={inp} value={toolbarLabelColor} onChange={(e) => set('toolbarLabelColor', e.target.value)} placeholder='#1F4E79' />
+        </div>
+
+        <label style={lbl}>Dimensione etichette Prezzario / Cerca (px)</label>
+        <input style={inp} type='number' min={10} max={24} step={0.5} value={toolbarLabelFontSize} onChange={(e) => set('toolbarLabelFontSize', Number(e.target.value || 11.5))} />
+
+        <div style={hint}>Queste impostazioni si applicano solo alle etichette sopra la combo del prezzario e sopra la casella di ricerca.</div>
+      </div>
+
+      <div style={section}>
+        <div style={sectionTitle}>Titoli interni pannelli</div>
+
+        <label style={lbl}>Colore titoli interni pannelli</label>
+        <div style={colorRow}>
+          <input style={colorInp} type='color' value={sectionTitleColor} onChange={(e) => set('sectionTitleColor', e.target.value)} aria-label='Colore titoli interni pannelli' />
+          <input style={inp} value={sectionTitleColor} onChange={(e) => set('sectionTitleColor', e.target.value)} placeholder='#1F4E79' />
+        </div>
+
+        <label style={lbl}>Dimensione titoli interni pannelli (px)</label>
+        <input style={inp} type='number' min={10} max={24} step={0.5} value={sectionTitleFontSize} onChange={(e) => set('sectionTitleFontSize', Number(e.target.value || 12.5))} />
+
+        <div style={hint}>Queste impostazioni si applicano ai titoli dei pannelli e alle etichette del riquadro dettaglio.</div>
+      </div>
+
+      <div style={section}>
+        <div style={sectionTitle}>Larghezza colonne</div>
+
+        <label style={lbl}>Colonna sinistra (%)</label>
+        <input style={inp} type='number' min={10} max={70} step={1} value={leftColumnWidthPct} onChange={(e) => set('leftColumnWidthPct', Number(e.target.value || 25))} />
+
+        <label style={lbl}>Colonna centrale (%)</label>
+        <input style={inp} type='number' min={10} max={70} step={1} value={centerColumnWidthPct} onChange={(e) => set('centerColumnWidthPct', Number(e.target.value || 45))} />
+
+        <label style={lbl}>Colonna destra (%)</label>
+        <input style={inp} type='number' min={10} max={70} step={1} value={rightColumnWidthPct} onChange={(e) => set('rightColumnWidthPct', Number(e.target.value || 30))} />
+
+        <div style={hint}>Le tre larghezze vengono normalizzate automaticamente e si applicano sia alla barra superiore sia ai tre pannelli sottostanti.</div>
       </div>
 
       <div style={section}>

@@ -297,11 +297,20 @@ function parsePipeCsv(text: string): string[][] {
   return text.split(/\r?\n/).filter(Boolean).slice(1).map((line) => line.split('|').map((x) => x.trim()))
 }
 
+function zipBaseName(path: string): string {
+  const norm = String(path || '').replace(/\\/g, '/')
+  const parts = norm.split('/')
+  return String(parts[parts.length - 1] || '').trim()
+}
+
 async function parseOfficialZip(file: File): Promise<{ articoli: ArtRow[]; analisi: AnalisiRow[] }> {
   const entries = await unzipEntries(file)
-  const artEntry = entries.find((e) => /anagrafica/i.test(e.name))
-  const anaEntry = entries.find((e) => /analisi/i.test(e.name))
+  const artEntry = entries.find((e) => /anagrafica_articoli_prezzario\.csv$/i.test(zipBaseName(e.name)))
+    || entries.find((e) => /anagrafica/i.test(zipBaseName(e.name)))
+  const anaEntry = entries.find((e) => /analisi_prezzario\.csv$/i.test(zipBaseName(e.name)))
+    || entries.find((e) => /analisi/i.test(zipBaseName(e.name)))
   if (!artEntry || !anaEntry) throw new Error('Nel pacchetto non trovo i due CSV attesi (anagrafica e analisi).')
+  if (zipBaseName(artEntry.name) === zipBaseName(anaEntry.name)) throw new Error('Il CSV analisi non è stato individuato correttamente nello ZIP.')
   const artRows = parsePipeCsv(decodeBytes(artEntry.data))
   const anaRows = parsePipeCsv(decodeBytes(anaEntry.data))
 
@@ -364,20 +373,42 @@ async function addOneByOne(fl: any, attrsList: any[], startIndex: number, total:
     if (onProgress) onProgress(startIndex + i + 1, total)
   }
 }
-async function addInChunks(urlRaw: string, attrsList: any[], label: string, onProgress?: (done: number, total: number) => void): Promise<void> {
+async function addInChunks(urlRaw: string, attrsList: any[], label: string, onProgress?: (done: number, total: number) => void, preferredChunkSize = 250): Promise<void> {
   if (!attrsList.length) return
   const fl = await getLayer(urlRaw)
-  for (let i = 0; i < attrsList.length; i += 250) {
-    const rawSlice = attrsList.slice(i, i + 250)
-    const slice = rawSlice.map((attrs) => ({ attributes: prepareAttrsForLayer(fl, attrs) }))
-    const res = await fl.applyEdits({ addFeatures: slice } as any)
-    const bad = (res?.addFeatureResults || []).find((x: any) => x?.error)
-    if (bad?.error) {
-      await addOneByOne(fl, rawSlice, i, attrsList.length, label, onProgress)
-    } else if (onProgress) {
-      onProgress(Math.min(i + slice.length, attrsList.length), attrsList.length)
+  const total = attrsList.length
+  const tryRange = async (start: number, endExclusive: number, chunkSize: number): Promise<void> => {
+    for (let i = start; i < endExclusive; i += chunkSize) {
+      const rawSlice = attrsList.slice(i, Math.min(i + chunkSize, endExclusive))
+      const slice = rawSlice.map((attrs) => ({ attributes: prepareAttrsForLayer(fl, attrs) }))
+      try {
+        const res = await fl.applyEdits({ addFeatures: slice } as any)
+        const bad = (res?.addFeatureResults || []).find((x: any) => x?.error)
+        if (bad?.error) {
+          if (rawSlice.length === 1) {
+            await addOneByOne(fl, rawSlice, i, total, label, onProgress)
+          } else {
+            const smaller = Math.max(1, Math.floor(chunkSize / 2))
+            await tryRange(i, i + rawSlice.length, smaller)
+          }
+        } else if (onProgress) {
+          onProgress(Math.min(i + rawSlice.length, total), total)
+        }
+      } catch (e: any) {
+        const msg = String(e?.message || e || '')
+        if (/failed to fetch/i.test(msg) || /network/i.test(msg)) {
+          if (rawSlice.length === 1) {
+            throw new Error(`${label} riga ${i + 1}${getRowKey(rawSlice[0]) ? ` (${getRowKey(rawSlice[0])})` : ''}: ${msg || 'Failed to fetch'}`)
+          }
+          const smaller = Math.max(1, Math.floor(chunkSize / 2))
+          await tryRange(i, i + rawSlice.length, smaller)
+        } else {
+          throw e
+        }
+      }
     }
   }
+  await tryRange(0, total, Math.max(1, preferredChunkSize))
 }
 
 async function cleanupPrezzarioByCode(prezzariUrl: string, vociUrl: string, analisiUrl: string, code: string): Promise<{ voci: number; analisi: number; meta: number }> {
@@ -490,7 +521,7 @@ export default function Widget(props: AllWidgetProps<IMConfig>) {
         prezzo_unitario: r.prezzo_unitario,
         importo: r.importo,
         attivo: r.attivo
-      })), 'Analisi prezzario', (done, total) => setProgress(`Import analisi ${done}/${total}…`))
+      })), 'Analisi prezzario', (done, total) => setProgress(`Import analisi ${done}/${total}…`), 100)
 
       setProgress('Registrazione metadati…')
       await applyAttrs(prezzariUrl, {
