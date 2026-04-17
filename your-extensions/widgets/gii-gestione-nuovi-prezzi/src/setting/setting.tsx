@@ -41,17 +41,14 @@ export default function Setting(props: AllWidgetSettingProps<IMConfig>) {
       <div style={section}>
         <div style={sectionTitle}>Tabelle</div>
 
-        <label style={lbl}>URL tabella analisi prezzario interno</label>
+        <label style={lbl}>URL tabella nuovi prezzi</label>
         <input style={inp} value={cfg.serviceUrl || ''} onChange={(e) => set('serviceUrl', e.target.value)} placeholder='https://services2.arcgis.com/.../FeatureServer/0' />
 
-        <label style={lbl}>URL tabella prezzario interno</label>
-        <input style={inp} value={cfg.parentTableUrl || ''} onChange={(e) => set('parentTableUrl', e.target.value)} placeholder='https://services2.arcgis.com/.../FeatureServer/0' />
-
-        <label style={lbl}>URL tabella prezzario regionale (voci ufficiali)</label>
-        <input style={inp} value={cfg.regionalTableUrl || ''} onChange={(e) => set('regionalTableUrl', e.target.value)} placeholder='https://services2.arcgis.com/.../FeatureServer/0' />
+        <label style={lbl}>URL tabella analisi nuovi prezzi</label>
+        <input style={inp} value={cfg.detailTableUrl || ''} onChange={(e) => set('detailTableUrl', e.target.value)} placeholder='https://services2.arcgis.com/.../FeatureServer/0' />
       </div>
 
-      <div style={hint}>Questo widget ora gestisce il workflow principale del prezzario interno: creazione voce ELEMENTARE o ANALIZZATA, generazione automatica del codice CBSMxx_..., scelta righe da REGIONE o INTERNO e ricalcolo del prezzo finale.</div>
+      <div style={hint}>Questo widget mostra il catalogo dei Nuovi Prezzi e consente di modificare la testata, attivare/disattivare ed eliminare un prezzo solo se non è usato in altre analisi.</div>
     </div>
   )
 }

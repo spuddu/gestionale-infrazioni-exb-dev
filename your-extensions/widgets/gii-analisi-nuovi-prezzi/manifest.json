@@ -1,0 +1,19 @@
+{
+  "name": "gii-analisi-nuovi-prezzi",
+  "label": "GII - Analisi Nuovi Prezzi",
+  "type": "widget",
+  "version": "1.0.0",
+  "exbVersion": "1.19.0",
+  "author": "CBSM",
+  "description": "Creazione e manutenzione dei Nuovi Prezzi con analisi editabile.",
+  "dependency": [
+    "jimu-arcgis"
+  ],
+  "translatedLocales": [
+    "it"
+  ],
+  "defaultSize": {
+    "width": 1100,
+    "height": 700
+  }
+}

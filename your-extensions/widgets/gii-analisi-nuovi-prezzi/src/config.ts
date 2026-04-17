@@ -4,6 +4,8 @@ export interface Config {
   serviceUrl?: string
   parentTableUrl?: string
   regionalTableUrl?: string
+  internalTableUrl?: string
+  generalDataUrl?: string
   title?: string
   titleColor?: string
   titleFontSize?: number

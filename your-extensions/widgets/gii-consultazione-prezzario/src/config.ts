@@ -1,9 +1,12 @@
 import { type ImmutableObject } from 'jimu-core'
 
 export interface Config {
-  serviceUrl?: string
-  prezzariUrl?: string
-  analisiUrl?: string
+  regionaleArticoliUrl?: string
+  regionaleAnalisiUrl?: string
+  internoArticoliUrl?: string
+  internoAnalisiUrl?: string
+  nuoviPrezziUrl?: string
+  nuoviPrezziAnalisiUrl?: string
   title?: string
   titleColor?: string
   titleFontSize?: number

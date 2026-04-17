@@ -18,6 +18,7 @@ export default function Setting(props: AllWidgetSettingProps<IMConfig>) {
   const titleColor = String(cfg.titleColor || '#1F4E79')
   const titleFontSize = Number(cfg.titleFontSize || 15)
   const set = (k: string, v: any) => props.onSettingChange({ id: props.id, config: (props.config as any)?.set ? (props.config as any).set(k, v) : { ...cfg, [k]: v } as any })
+
   return (
     <div style={box}>
       <div style={{ fontSize: 13, fontWeight: 700, color: '#93c5fd', marginBottom: 8 }}>Configurazione widget</div>
@@ -41,17 +42,23 @@ export default function Setting(props: AllWidgetSettingProps<IMConfig>) {
       <div style={section}>
         <div style={sectionTitle}>Tabelle</div>
 
-        <label style={lbl}>URL tabella analisi prezzario interno</label>
-        <input style={inp} value={cfg.serviceUrl || ''} onChange={(e) => set('serviceUrl', e.target.value)} placeholder='https://services2.arcgis.com/.../FeatureServer/0' />
+        <label style={lbl}>URL tabella import prezzari</label>
+        <input style={inp} value={cfg.importUrl || ''} onChange={(e) => set('importUrl', e.target.value)} placeholder='https://services2.arcgis.com/.../FeatureServer/0' />
 
-        <label style={lbl}>URL tabella prezzario interno</label>
-        <input style={inp} value={cfg.parentTableUrl || ''} onChange={(e) => set('parentTableUrl', e.target.value)} placeholder='https://services2.arcgis.com/.../FeatureServer/0' />
+        <label style={lbl}>URL articoli prezzario regionale</label>
+        <input style={inp} value={cfg.regionaleArticoliUrl || ''} onChange={(e) => set('regionaleArticoliUrl', e.target.value)} placeholder='https://services2.arcgis.com/.../FeatureServer/1' />
 
-        <label style={lbl}>URL tabella prezzario regionale (voci ufficiali)</label>
-        <input style={inp} value={cfg.regionalTableUrl || ''} onChange={(e) => set('regionalTableUrl', e.target.value)} placeholder='https://services2.arcgis.com/.../FeatureServer/0' />
+        <label style={lbl}>URL analisi prezzario regionale</label>
+        <input style={inp} value={cfg.regionaleAnalisiUrl || ''} onChange={(e) => set('regionaleAnalisiUrl', e.target.value)} placeholder='https://services2.arcgis.com/.../FeatureServer/2' />
+
+        <label style={lbl}>URL articoli prezzario interno</label>
+        <input style={inp} value={cfg.internoArticoliUrl || ''} onChange={(e) => set('internoArticoliUrl', e.target.value)} placeholder='https://services2.arcgis.com/.../FeatureServer/3' />
+
+        <label style={lbl}>URL analisi prezzario interno</label>
+        <input style={inp} value={cfg.internoAnalisiUrl || ''} onChange={(e) => set('internoAnalisiUrl', e.target.value)} placeholder='https://services2.arcgis.com/.../FeatureServer/4' />
       </div>
 
-      <div style={hint}>Questo widget ora gestisce il workflow principale del prezzario interno: creazione voce ELEMENTARE o ANALIZZATA, generazione automatica del codice CBSMxx_..., scelta righe da REGIONE o INTERNO e ricalcolo del prezzo finale.</div>
+      <div style={hint}>Il widget carica i prezzari nelle nuove tabelle definitive. Per il regionale usa lo ZIP CSV ufficiale; per l'interno usa un file PriMus esportato in XPWE (*.xpwe) oppure XML (*.xml).</div>
     </div>
   )
 }

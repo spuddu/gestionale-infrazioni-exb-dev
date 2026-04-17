@@ -41,17 +41,23 @@ export default function Setting(props: AllWidgetSettingProps<IMConfig>) {
       <div style={section}>
         <div style={sectionTitle}>Tabelle</div>
 
-        <label style={lbl}>URL tabella analisi prezzario interno</label>
+        <label style={lbl}>URL tabella analisi nuovi prezzi</label>
         <input style={inp} value={cfg.serviceUrl || ''} onChange={(e) => set('serviceUrl', e.target.value)} placeholder='https://services2.arcgis.com/.../FeatureServer/0' />
 
-        <label style={lbl}>URL tabella prezzario interno</label>
+        <label style={lbl}>URL tabella nuovi prezzi</label>
         <input style={inp} value={cfg.parentTableUrl || ''} onChange={(e) => set('parentTableUrl', e.target.value)} placeholder='https://services2.arcgis.com/.../FeatureServer/0' />
 
-        <label style={lbl}>URL tabella prezzario regionale (voci ufficiali)</label>
+        <label style={lbl}>URL tabella articoli prezzario regionale</label>
         <input style={inp} value={cfg.regionalTableUrl || ''} onChange={(e) => set('regionalTableUrl', e.target.value)} placeholder='https://services2.arcgis.com/.../FeatureServer/0' />
+
+        <label style={lbl}>URL tabella articoli prezzario interno</label>
+        <input style={inp} value={cfg.internalTableUrl || ''} onChange={(e) => set('internalTableUrl', e.target.value)} placeholder='https://services2.arcgis.com/.../FeatureServer/0' />
+
+        <label style={lbl}>URL tabella dati generali</label>
+        <input style={inp} value={cfg.generalDataUrl || ''} onChange={(e) => set('generalDataUrl', e.target.value)} placeholder='https://services2.arcgis.com/.../FeatureServer/0' />
       </div>
 
-      <div style={hint}>Questo widget ora gestisce il workflow principale del prezzario interno: creazione voce ELEMENTARE o ANALIZZATA, generazione automatica del codice CBSMxx_..., scelta righe da REGIONE o INTERNO e ricalcolo del prezzo finale.</div>
+      <div style={hint}>Questo widget gestisce l’intero workflow dei Nuovi Prezzi: creazione ELEMENTARE o ANALIZZATA, generazione automatica del codice NPxx_..., composizione con sorgenti REGIONALE / INTERNO / NUOVO PREZZO, ricalcolo del prezzo finale e lettura di UM / Super Capitoli / Capitoli / Sub Capitoli da GII_DATI_GENERALI.</div>
     </div>
   )
 }

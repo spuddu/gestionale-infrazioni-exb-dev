@@ -63,6 +63,9 @@ export default function Setting(props: AllWidgetSettingProps<IMConfig>) {
 
         <label style={lbl}>URL tabella prezzario interno</label>
         <input style={inp} value={cfg.serviceUrl || ''} onChange={(e) => set('serviceUrl', e.target.value)} placeholder='https://services2.arcgis.com/.../FeatureServer/0' />
+
+        <label style={lbl}>URL tabella analisi prezzario interno</label>
+        <input style={inp} value={cfg.detailTableUrl || ''} onChange={(e) => set('detailTableUrl', e.target.value)} placeholder='https://services2.arcgis.com/.../FeatureServer/0' />
       </div>
 
 

@@ -93,17 +93,26 @@ export default function Setting(props: AllWidgetSettingProps<IMConfig>) {
       <div style={section}>
         <div style={sectionTitle}>Tabelle</div>
 
-        <label style={lbl}>URL tabella voci prezzario</label>
-        <input style={inp} value={cfg.serviceUrl || ''} onChange={(e) => set('serviceUrl', e.target.value)} placeholder='https://services2.arcgis.com/.../FeatureServer/0' />
+        <label style={lbl}>URL articoli prezzario regionale</label>
+        <input style={inp} value={cfg.regionaleArticoliUrl || ''} onChange={(e) => set('regionaleArticoliUrl', e.target.value)} placeholder='https://services2.arcgis.com/.../FeatureServer/0' />
 
-        <label style={lbl}>URL tabella prezzari caricati</label>
-        <input style={inp} value={cfg.prezzariUrl || ''} onChange={(e) => set('prezzariUrl', e.target.value)} placeholder='https://services2.arcgis.com/.../FeatureServer/0' />
+        <label style={lbl}>URL analisi prezzario regionale</label>
+        <input style={inp} value={cfg.regionaleAnalisiUrl || ''} onChange={(e) => set('regionaleAnalisiUrl', e.target.value)} placeholder='https://services2.arcgis.com/.../FeatureServer/0' />
 
-        <label style={lbl}>URL tabella analisi prezzario (facoltativo)</label>
-        <input style={inp} value={cfg.analisiUrl || ''} onChange={(e) => set('analisiUrl', e.target.value)} placeholder='https://services2.arcgis.com/.../FeatureServer/0' />
+        <label style={lbl}>URL articoli prezzario interno</label>
+        <input style={inp} value={cfg.internoArticoliUrl || ''} onChange={(e) => set('internoArticoliUrl', e.target.value)} placeholder='https://services2.arcgis.com/.../FeatureServer/0' />
+
+        <label style={lbl}>URL analisi prezzario interno</label>
+        <input style={inp} value={cfg.internoAnalisiUrl || ''} onChange={(e) => set('internoAnalisiUrl', e.target.value)} placeholder='https://services2.arcgis.com/.../FeatureServer/0' />
+
+        <label style={lbl}>URL tabella nuovi prezzi</label>
+        <input style={inp} value={cfg.nuoviPrezziUrl || ''} onChange={(e) => set('nuoviPrezziUrl', e.target.value)} placeholder='https://services2.arcgis.com/.../FeatureServer/0' />
+
+        <label style={lbl}>URL tabella analisi nuovi prezzi</label>
+        <input style={inp} value={cfg.nuoviPrezziAnalisiUrl || ''} onChange={(e) => set('nuoviPrezziAnalisiUrl', e.target.value)} placeholder='https://services2.arcgis.com/.../FeatureServer/0' />
       </div>
 
-      <div style={hint}>Widget di sola consultazione con albero Capitolo / Sottocapitolo, elenco voci e scheda dettaglio. Se configuri anche la tabella analisi mostra pure gli elementi collegati alla voce selezionata.</div>
+      <div style={hint}>Widget di sola consultazione con albero Capitolo / Sottocapitolo, elenco voci e scheda dettaglio. La combo del prezzario mostra automaticamente le sorgenti che hanno almeno l'URL articoli configurato.</div>
     </div>
   )
 }

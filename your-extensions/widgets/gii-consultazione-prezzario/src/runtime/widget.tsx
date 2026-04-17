@@ -6,13 +6,19 @@ import type { IMConfig } from '../config'
 const { Fragment } = React
 const LIST_STEP = 250
 
+type SourceCode = 'REGIONALE' | 'INTERNO' | 'NUOVI_PREZZI'
+type SourceKind = 'UFFICIALE' | 'NP'
+
 type PrezzarioRow = {
   objectid: number
-  codice_prezzario: string
+  codice_prezzario: SourceCode
   titolo_prezzario?: string
   anno_prezzario?: number
   stato_prezzario?: number
   data_import?: any
+  articoliUrl: string
+  analisiUrl?: string
+  kind: SourceKind
 }
 
 type VoceRow = {
@@ -28,6 +34,8 @@ type VoceRow = {
   categoria_default?: string
   selezionabile?: number
   attivo?: number
+  anno_riferimento?: number
+  modalita_prezzo?: string
 }
 
 type AnalisiRow = {
@@ -90,6 +98,8 @@ const FAMIGLIA_LABELS: Record<string, string> = {
 }
 
 const FAMIGLIA_ORDER = ['AT', 'PR', 'MA', 'MT', 'RU', 'HR', 'SL', 'PF']
+const ORIGINE_LABELS: Record<string, string> = { '1': 'REGIONALE', '2': 'INTERNO', '3': 'NUOVO PREZZO' }
+const MODALITA_LABELS: Record<string, string> = { '1': 'ELEMENTARE', '2': 'ANALIZZATA' }
 
 function loadEsriModule<T = any>(path: string): Promise<T> {
   return new Promise((resolve, reject) => {
@@ -144,7 +154,6 @@ function htmlDecode(v: any): string {
     .replace(/&amp;/g, '&')
 }
 function trimText(v: any): string { return htmlDecode(v).replace(/\s+/g, ' ').trim() }
-
 function shortenMiddle(v: any, head = 96, tail = 28): string {
   const s = trimText(v)
   if (!s) return ''
@@ -189,23 +198,6 @@ function voceKey(r: Partial<VoceRow> | null | undefined): string {
   return `cod:${String((r as any).codice_prezzario || '')}::${String((r as any).codice_voce || '')}`
 }
 
-function mapVoceRow(r: any): VoceRow {
-  return {
-    objectid: Number(r.objectid || r.OBJECTID || 0),
-    codice_prezzario: String(r.codice_prezzario || ''),
-    codice_voce: String(r.codice_voce || ''),
-    famiglia: trimText(r.famiglia),
-    capitolo: trimText(r.capitolo),
-    sottocapitolo: trimText(r.sottocapitolo),
-    descrizione: htmlDecode(r.descrizione),
-    unita_misura: trimText(r.unita_misura),
-    prezzo_unitario: num(r.prezzo_unitario),
-    categoria_default: normalizeCategory(r.categoria_default),
-    selezionabile: num(r.selezionabile),
-    attivo: num(r.attivo)
-  }
-}
-
 async function queryAllRows(urlRaw: any, where = '1=1', orderBy?: string, outFields?: string[]): Promise<any[]> {
   const fl = await getLayer(urlRaw)
   const oidField = String(fl?.objectIdField || 'OBJECTID')
@@ -224,7 +216,7 @@ async function queryAllRows(urlRaw: any, where = '1=1', orderBy?: string, outFie
     q.where = where
     q.outFields = requestedFields
     q.returnGeometry = false
-    if (orderBy) q.orderByFields = [orderBy]
+    if (orderBy) q.orderByFields = String(orderBy).split(',').map((x) => x.trim()).filter(Boolean)
     const res = await fl.queryFeatures(q)
     return (res?.features || []).map((f: any) => ({ ...f.attributes, objectid: Number(f.attributes?.[oidField] || f.attributes?.OBJECTID || f.attributes?.objectid || 0) }))
   }
@@ -265,18 +257,62 @@ async function queryAllRows(urlRaw: any, where = '1=1', orderBy?: string, outFie
   return out
 }
 
-async function queryPrezzari(prezzariUrl: string): Promise<PrezzarioRow[]> {
-  const rows = await queryAllRows(prezzariUrl, '1=1', 'anno_prezzario DESC, OBJECTID DESC', [
-    'codice_prezzario', 'titolo_prezzario', 'anno_prezzario', 'stato_prezzario', 'data_import'
-  ])
-  return rows.map((r: any) => ({
-    objectid: Number(r.objectid || 0),
-    codice_prezzario: String(r.codice_prezzario || ''),
-    titolo_prezzario: trimText(r.titolo_prezzario),
-    anno_prezzario: num(r.anno_prezzario),
-    stato_prezzario: num(r.stato_prezzario),
-    data_import: r.data_import
-  })).filter((r) => !!r.codice_prezzario)
+function buildSources(cfg: any): PrezzarioRow[] {
+  const out: PrezzarioRow[] = []
+  const regUrl = normalizeUrl(cfg.regionaleArticoliUrl)
+  if (regUrl) out.push({ objectid: 1, codice_prezzario: 'REGIONALE', titolo_prezzario: 'Prezzario regionale', stato_prezzario: 1, articoliUrl: regUrl, analisiUrl: normalizeUrl(cfg.regionaleAnalisiUrl), kind: 'UFFICIALE' })
+  const intUrl = normalizeUrl(cfg.internoArticoliUrl)
+  if (intUrl) out.push({ objectid: 2, codice_prezzario: 'INTERNO', titolo_prezzario: 'Prezzario interno', stato_prezzario: 1, articoliUrl: intUrl, analisiUrl: normalizeUrl(cfg.internoAnalisiUrl), kind: 'UFFICIALE' })
+  const npUrl = normalizeUrl(cfg.nuoviPrezziUrl)
+  if (npUrl) out.push({ objectid: 3, codice_prezzario: 'NUOVI_PREZZI', titolo_prezzario: 'Nuovi prezzi', stato_prezzario: 1, articoliUrl: npUrl, analisiUrl: normalizeUrl(cfg.nuoviPrezziAnalisiUrl), kind: 'NP' })
+  return out
+}
+
+function getArticleFields(source: PrezzarioRow) {
+  if (source.kind === 'NP') return { code: 'codice_np', year: 'anno_listino', um: 'um', price: 'prezzo', mode: 'modalita_prezzo' }
+  return { code: 'codice_articolo', year: 'anno_prezzario', um: 'um', price: 'prezzo', mode: '' }
+}
+
+function buildBaseWhere(source: PrezzarioRow): string {
+  return source.kind === 'NP' ? 'attivo = 1' : '1=1'
+}
+
+
+async function queryDescriptionsByCode(vociUrl: string, codeField: string, codes: string[]): Promise<Record<string, string>> {
+  if (!vociUrl || !codeField || !codes.length) return {}
+  const uniq = Array.from(new Set(codes.map((c) => String(c || '').trim()).filter(Boolean)))
+  if (!uniq.length) return {}
+  const out: Record<string, string> = {}
+  for (let i = 0; i < uniq.length; i += 100) {
+    const chunk = uniq.slice(i, i + 100)
+    const inList = chunk.map((c) => `'${esc(c)}'`).join(',')
+    const rows = await queryAllRows(vociUrl, `${codeField} IN (${inList})`, `${codeField} ASC`, [codeField, 'descrizione'])
+    rows.forEach((r: any) => {
+      const code = String(r[codeField] || '').trim()
+      if (code) out[code] = htmlDecode(r.descrizione) || ''
+    })
+  }
+  return out
+}
+
+function mapVoceRow(source: PrezzarioRow, r: any): VoceRow {
+  const af = getArticleFields(source)
+  return {
+    objectid: Number(r.objectid || r.OBJECTID || 0),
+    codice_prezzario: source.codice_prezzario,
+    codice_voce: String(r[af.code] || ''),
+    famiglia: trimText(r.famiglia),
+    capitolo: trimText(r.capitolo),
+    sottocapitolo: trimText(r.sottocapitolo),
+    descrizione: htmlDecode(r.descrizione),
+    unita_misura: trimText(r[af.um]),
+    prezzo_unitario: num(r[af.price]),
+    categoria_default: source.kind === 'NP' ? (MODALITA_LABELS[String(r[af.mode] || '')] || '') : normalizeCategory(r.categoria_default),
+    selezionabile: 1,
+    attivo: num(r.attivo || 1),
+    anno_riferimento: num(r[af.year]),
+    modalita_prezzo: af.mode ? String(r[af.mode] || '') : ''
+  }
 }
 
 function aggregateSummary(rows: Array<{ famiglia?: any, capitolo?: any, sottocapitolo?: any, count?: any }>): SummaryRow[] {
@@ -294,11 +330,10 @@ function aggregateSummary(rows: Array<{ famiglia?: any, capitolo?: any, sottocap
   return Array.from(map.values())
 }
 
-async function querySummary(serviceUrl: string, codicePrezzario: string): Promise<SummaryRow[]> {
-  const fl = await getLayer(serviceUrl)
+async function querySummary(source: PrezzarioRow): Promise<SummaryRow[]> {
+  const fl = await getLayer(source.articoliUrl)
   const oidField = String(fl?.objectIdField || 'OBJECTID')
-  const where = `codice_prezzario = '${esc(codicePrezzario)}'`
-
+  const where = buildBaseWhere(source)
   try {
     const q = fl.createQuery ? fl.createQuery() : {}
     q.where = where
@@ -306,22 +341,12 @@ async function querySummary(serviceUrl: string, codicePrezzario: string): Promis
     q.returnGeometry = false
     q.groupByFieldsForStatistics = ['famiglia', 'capitolo', 'sottocapitolo']
     q.orderByFields = ['famiglia ASC', 'capitolo ASC', 'sottocapitolo ASC']
-    q.outStatistics = [{
-      statisticType: 'count',
-      onStatisticField: oidField,
-      outStatisticFieldName: 'row_count'
-    }]
+    q.outStatistics = [{ statisticType: 'count', onStatisticField: oidField, outStatisticFieldName: 'row_count' }]
     const res = await fl.queryFeatures(q)
-    const grouped = (res?.features || []).map((f: any) => ({
-      famiglia: f?.attributes?.famiglia,
-      capitolo: f?.attributes?.capitolo,
-      sottocapitolo: f?.attributes?.sottocapitolo,
-      count: Number(f?.attributes?.row_count || 0)
-    }))
+    const grouped = (res?.features || []).map((f: any) => ({ famiglia: f?.attributes?.famiglia, capitolo: f?.attributes?.capitolo, sottocapitolo: f?.attributes?.sottocapitolo, count: Number(f?.attributes?.row_count || 0) }))
     if (grouped.length) return aggregateSummary(grouped)
   } catch {}
-
-  const rows = await queryAllRows(serviceUrl, where, 'famiglia ASC, capitolo ASC, sottocapitolo ASC', ['famiglia', 'capitolo', 'sottocapitolo'])
+  const rows = await queryAllRows(source.articoliUrl, where, 'famiglia ASC, capitolo ASC, sottocapitolo ASC', ['famiglia', 'capitolo', 'sottocapitolo'])
   return aggregateSummary(rows.map((r: any) => ({ famiglia: r.famiglia, capitolo: r.capitolo, sottocapitolo: r.sottocapitolo, count: 1 })))
 }
 
@@ -342,16 +367,9 @@ function buildHierarchy(summary: SummaryRow[]): FamigliaNode[] {
     const children: CapitoloNode[] = Array.from(capMap.entries()).map(([capitolo, subMap]) => ({
       capitolo,
       count: Array.from(subMap.values()).reduce((a, b) => a + b, 0),
-      children: Array.from(subMap.entries())
-        .map(([sottocapitolo, count]) => ({ sottocapitolo, count }))
-        .sort((a, b) => (a.sottocapitolo || '').localeCompare((b.sottocapitolo || ''), 'it', { sensitivity: 'base' }))
+      children: Array.from(subMap.entries()).map(([sottocapitolo, count]) => ({ sottocapitolo, count })).sort((a, b) => (a.sottocapitolo || '').localeCompare((b.sottocapitolo || ''), 'it', { sensitivity: 'base' }))
     })).sort((a, b) => (a.capitolo || '').localeCompare((b.capitolo || ''), 'it', { sensitivity: 'base' }))
-    return {
-      famiglia,
-      label: famigliaLabel(famiglia),
-      count: children.reduce((s, c) => s + c.count, 0),
-      children
-    }
+    return { famiglia, label: famigliaLabel(famiglia), count: children.reduce((s, c) => s + c.count, 0), children }
   }).sort((a, b) => {
     const rank = famigliaSortRank(a.famiglia) - famigliaSortRank(b.famiglia)
     if (rank !== 0) return rank
@@ -359,37 +377,46 @@ function buildHierarchy(summary: SummaryRow[]): FamigliaNode[] {
   })
 }
 
-function buildSearchWhere(search: string): string {
+function buildSearchWhere(source: PrezzarioRow, search: string): string {
   const phrase = safeUpper(trimText(search).replace(/\s+/g, ' '))
   if (!phrase) return ''
-  const fields = ['codice_voce', 'descrizione', 'famiglia', 'capitolo', 'sottocapitolo', 'unita_misura', 'categoria_default']
+  const af = getArticleFields(source)
+  const fields = [af.code, 'descrizione', 'famiglia', 'capitolo', 'sottocapitolo', af.um].filter(Boolean)
   const e = esc(phrase)
   return '(' + fields.map((f) => `UPPER(${f}) LIKE '%${e}%'`).join(' OR ') + ')'
 }
 
-function buildVociWhere(codicePrezzario: string, famiglia: string, capitolo: string, sottocapitolo: string, search: string): string {
-  const parts = [`codice_prezzario = '${esc(codicePrezzario)}'`]
+function buildVociWhere(source: PrezzarioRow, famiglia: string, capitolo: string, sottocapitolo: string, search: string): string {
+  const parts = [buildBaseWhere(source)]
   const fam = trimText(famiglia)
   const cap = trimText(capitolo)
   const sub = trimText(sottocapitolo)
   if (fam) parts.push(`famiglia = '${esc(fam)}'`)
   if (cap) parts.push(`capitolo = '${esc(cap)}'`)
   if (sub) parts.push(`sottocapitolo = '${esc(sub)}'`)
-  const searchWhere = buildSearchWhere(search)
+  const searchWhere = buildSearchWhere(source, search)
   if (searchWhere) parts.push(searchWhere)
   return parts.join(' AND ')
 }
 
-async function queryVociPage(serviceUrl: string, codicePrezzario: string, famiglia: string, capitolo: string, sottocapitolo: string, search: string, offset: number, limit: number, orderBy: string): Promise<VociPageResult> {
-  const fl = await getLayer(serviceUrl)
-  const oidField = String(fl?.objectIdField || 'OBJECTID')
-  const where = buildVociWhere(codicePrezzario, famiglia, capitolo, sottocapitolo, search)
-  const outFields = [
-    oidField,
-    'codice_prezzario', 'codice_voce', 'famiglia', 'capitolo', 'sottocapitolo', 'descrizione',
-    'unita_misura', 'prezzo_unitario', 'categoria_default', 'selezionabile', 'attivo'
-  ]
+function buildOrderBy(source: PrezzarioRow, sortField: SortField, sortDir: SortDir): string {
+  const af = getArticleFields(source)
+  const dir = sortDir === 'DESC' ? 'DESC' : 'ASC'
+  switch (sortField) {
+    case 'descrizione': return `descrizione ${dir}, ${af.code} ASC`
+    case 'unita_misura': return `${af.um} ${dir}, ${af.code} ASC`
+    case 'prezzo_unitario': return `${af.price} ${dir}, ${af.code} ASC`
+    case 'codice_voce':
+    default: return `${af.code} ${dir}`
+  }
+}
 
+async function queryVociPage(source: PrezzarioRow, famiglia: string, capitolo: string, sottocapitolo: string, search: string, offset: number, limit: number, sortField: SortField, sortDir: SortDir): Promise<VociPageResult> {
+  const fl = await getLayer(source.articoliUrl)
+  const oidField = String(fl?.objectIdField || 'OBJECTID')
+  const af = getArticleFields(source)
+  const where = buildVociWhere(source, famiglia, capitolo, sottocapitolo, search)
+  const outFields = [oidField, af.code, 'famiglia', 'capitolo', 'sottocapitolo', 'descrizione', af.um, af.price, 'attivo', af.year].concat(af.mode ? [af.mode] : [])
   let total = 0
   try {
     if (typeof fl.queryFeatureCount === 'function') {
@@ -399,97 +426,105 @@ async function queryVociPage(serviceUrl: string, codicePrezzario: string, famigl
       total = Number(await fl.queryFeatureCount(qCount) || 0)
     }
   } catch {}
-
   const q = fl.createQuery ? fl.createQuery() : {}
   q.where = where
   q.outFields = outFields
   q.returnGeometry = false
-  q.orderByFields = String(orderBy || 'famiglia ASC, capitolo ASC, sottocapitolo ASC, codice_voce ASC').split(',').map((x) => x.trim()).filter(Boolean)
+  q.orderByFields = buildOrderBy(source, sortField, sortDir).split(',').map((x) => x.trim()).filter(Boolean)
   ;(q as any).start = Math.max(0, offset)
   ;(q as any).num = Math.max(1, limit)
-
   let rows: VoceRow[] = []
   try {
     const res = await fl.queryFeatures(q)
-    rows = (res?.features || []).map((f: any) => mapVoceRow({ ...f.attributes, objectid: Number(f.attributes?.[oidField] || f.attributes?.OBJECTID || f.attributes?.objectid || 0) })).filter((r: VoceRow) => !!r.codice_voce)
+    rows = (res?.features || []).map((f: any) => mapVoceRow(source, { ...f.attributes, objectid: Number(f.attributes?.[oidField] || f.attributes?.OBJECTID || f.attributes?.objectid || 0) })).filter((r: VoceRow) => !!r.codice_voce)
     if (!total && rows.length) total = offset + rows.length
   } catch {
-    const fallbackRows = await queryAllRows(serviceUrl, where, orderBy || 'famiglia ASC, capitolo ASC, sottocapitolo ASC, codice_voce ASC', outFields)
+    const fallbackRows = await queryAllRows(source.articoliUrl, where, buildOrderBy(source, sortField, sortDir), outFields)
     total = fallbackRows.length
-    rows = fallbackRows.slice(offset, offset + limit).map((r: any) => mapVoceRow(r)).filter((r: VoceRow) => !!r.codice_voce)
+    rows = fallbackRows.slice(offset, offset + limit).map((r: any) => mapVoceRow(source, r)).filter((r: VoceRow) => !!r.codice_voce)
   }
-
   return { rows, total }
 }
 
-function candidateAnalysisWhere(code: string, prezzario: string): string[] {
-  const c = esc(code)
-  const p = esc(prezzario)
-  return [
-    `codice_prezzario = '${p}' AND codice_voce = '${c}'`,
-    `codice_prezzario = '${p}' AND codice_analisi = '${c}'`,
-    `codice_voce = '${c}'`,
-    `codice_analisi = '${c}'`
-  ]
-}
-
-async function queryElementDescriptions(vociUrl: string, codicePrezzario: string, codes: string[]): Promise<Record<string, string>> {
-  if (!vociUrl || !codes.length) return {}
-  const uniq = Array.from(new Set(codes.map((c) => String(c || '').trim()).filter(Boolean)))
-  if (!uniq.length) return {}
-  const out: Record<string, string> = {}
-  for (let i = 0; i < uniq.length; i += 100) {
-    const chunk = uniq.slice(i, i + 100)
-    const inList = chunk.map((c) => `'${esc(c)}'`).join(',')
-    const where = `codice_prezzario = '${esc(codicePrezzario)}' AND codice_voce IN (${inList})`
-    const rows = await queryAllRows(vociUrl, where, 'codice_voce ASC', ['codice_voce', 'descrizione'])
-    rows.forEach((r: any) => {
-      const code = String(r.codice_voce || '').trim()
-      if (code) out[code] = htmlDecode(r.descrizione)
-    })
-  }
-  return out
-}
-
-async function queryAnalisi(analisiUrl: string, voce: VoceRow | null, vociUrl?: string): Promise<AnalisiRow[]> {
-  if (!analisiUrl || !voce?.codice_voce) return []
-  const fl = await getLayer(analisiUrl)
+async function queryAnalisi(source: PrezzarioRow, voce: VoceRow | null): Promise<AnalisiRow[]> {
+  if (!source.analisiUrl || !voce?.codice_voce) return []
+  const fl = await getLayer(source.analisiUrl)
   const fields = new Set(((fl?.fields || []) as any[]).map((f: any) => String(f?.name || '')))
-  const wheres = candidateAnalysisWhere(voce.codice_voce, voce.codice_prezzario).filter((w) => {
-    if (w.includes('codice_prezzario') && !fields.has('codice_prezzario')) return false
-    if (w.includes('codice_voce') && !fields.has('codice_voce')) return false
-    if (w.includes('codice_analisi') && !fields.has('codice_analisi')) return false
-    return true
-  })
-  const requestedFields = [
-    'codice_prezzario', 'codice_voce', 'codice_analisi', 'codice_elemento', 'descrizione_elemento',
-    'categoria_costo', 'quantita', 'prezzo_unitario', 'importo', 'attivo'
-  ].filter((f) => fields.has(f))
-  for (const where of wheres) {
-    const rows = await queryAllRows(analisiUrl, where, 'OBJECTID ASC', requestedFields)
-    if (rows.length) {
-      let descByCode: Record<string, string> = {}
-      const needsDescLookup = !!vociUrl && (!fields.has('descrizione_elemento') || rows.some((r: any) => !String(r.descrizione_elemento || '').trim()))
-      if (needsDescLookup) {
-        const codes = rows.map((r: any) => String(r.codice_elemento || '').trim()).filter(Boolean)
-        try { descByCode = await queryElementDescriptions(String(vociUrl || ''), voce.codice_prezzario, codes) } catch {}
-      }
-      return rows.map((r: any) => ({
-        objectid: Number(r.objectid || 0),
-        codice_prezzario: String(r.codice_prezzario || ''),
-        codice_voce: String(r.codice_voce || ''),
-        codice_analisi: String(r.codice_analisi || ''),
-        codice_elemento: String(r.codice_elemento || ''),
-        descrizione_elemento: htmlDecode(r.descrizione_elemento) || descByCode[String(r.codice_elemento || '').trim()] || '',
-        categoria_costo: normalizeCategory(r.categoria_costo),
-        quantita: num(r.quantita),
-        prezzo_unitario: num(r.prezzo_unitario),
-        importo: num(r.importo),
-        attivo: num(r.attivo)
-      }))
-    }
+
+  if (source.kind === 'NP') {
+    const where = fields.has('objectid_np_parent') ? `objectid_np_parent = ${num(voce.objectid)}` : `codice_np_parent = '${esc(voce.codice_voce)}'`
+    const requested = ['objectid_np_parent', 'codice_np_parent', 'ordine_riga', 'origine_riga', 'codice_sorgente', 'descrizione_snapshot', 'quantita', 'prezzo_unitario', 'importo', 'attivo']
+    const orderBy = fields.has('ordine_riga') ? 'ordine_riga ASC, OBJECTID ASC' : 'OBJECTID ASC'
+    const rows = await queryAllRows(source.analisiUrl, where, orderBy, requested.filter((f) => fields.has(f)))
+    return rows.map((r: any) => ({
+      objectid: Number(r.objectid || 0),
+      codice_prezzario: source.codice_prezzario,
+      codice_voce: String(r.codice_np_parent || voce.codice_voce || ''),
+      codice_analisi: String(r.codice_np_parent || voce.codice_voce || ''),
+      codice_elemento: String(r.codice_sorgente || ''),
+      descrizione_elemento: htmlDecode(r.descrizione_snapshot) || '',
+      categoria_costo: ORIGINE_LABELS[String(r.origine_riga || '')] || '',
+      quantita: num(r.quantita),
+      prezzo_unitario: num(r.prezzo_unitario),
+      importo: num(r.importo),
+      attivo: num(r.attivo || 1)
+    }))
   }
-  return []
+
+  const candidateWheres = [
+    fields.has('codice_articolo_parent') ? `codice_articolo_parent = '${esc(voce.codice_voce)}'` : '',
+    fields.has('codice_voce_parent') ? `codice_voce_parent = '${esc(voce.codice_voce)}'` : '',
+    fields.has('codice_voce') ? `codice_voce = '${esc(voce.codice_voce)}'` : '',
+    fields.has('codice_analisi') ? `codice_analisi = '${esc(voce.codice_voce)}'` : ''
+  ].filter(Boolean)
+
+  const requested = [
+    'codice_articolo_parent', 'codice_voce_parent', 'codice_voce', 'codice_analisi',
+    'ordine_riga', 'categoria', 'categoria_costo', 'codice_elemento', 'codice_sorgente',
+    'descrizione_elemento', 'descrizione_snapshot', 'quantita', 'prezzo_unitario', 'importo', 'attivo'
+  ].filter((f) => fields.has(f))
+  const orderBy = fields.has('ordine_riga') ? 'ordine_riga ASC, OBJECTID ASC' : 'OBJECTID ASC'
+
+  let rows: any[] = []
+  for (const where of candidateWheres) {
+    rows = await queryAllRows(source.analisiUrl, where, orderBy, requested)
+    if (rows.length) break
+  }
+  if (!rows.length) return []
+
+  let descByCode: Record<string, string> = {}
+  const needLookup = rows.some((r: any) => !String(r.descrizione_elemento || r.descrizione_snapshot || '').trim())
+  if (needLookup && source.articoliUrl) {
+    try {
+      const af = getArticleFields(source)
+      const codes = rows.map((r: any) => String(r.codice_elemento || r.codice_sorgente || '').trim()).filter(Boolean)
+      descByCode = await queryDescriptionsByCode(source.articoliUrl, af.code, codes)
+    } catch {}
+  }
+
+  return rows.map((r: any) => ({
+    objectid: Number(r.objectid || 0),
+    codice_prezzario: source.codice_prezzario,
+    codice_voce: voce.codice_voce,
+    codice_analisi: String(r.codice_analisi || r.codice_articolo_parent || r.codice_voce_parent || r.codice_voce || voce.codice_voce || ''),
+    codice_elemento: String(r.codice_elemento || r.codice_sorgente || ''),
+    descrizione_elemento: htmlDecode(r.descrizione_elemento || r.descrizione_snapshot) || descByCode[String(r.codice_elemento || r.codice_sorgente || '').trim()] || '',
+    categoria_costo: normalizeCategory(r.categoria || r.categoria_costo),
+    quantita: num(r.quantita),
+    prezzo_unitario: num(r.prezzo_unitario),
+    importo: num(r.importo),
+    attivo: num(r.attivo || 1)
+  }))
+}
+
+function nextSort(currentField: SortField, currentDir: SortDir, field: SortField): { field: SortField, dir: SortDir } {
+  if (currentField !== field) return { field, dir: 'ASC' }
+  return { field, dir: currentDir === 'ASC' ? 'DESC' : 'ASC' }
+}
+
+function sortIndicator(currentField: SortField, currentDir: SortDir, field: SortField): string {
+  if (currentField !== field) return '↕'
+  return currentDir === 'ASC' ? '▲' : '▼'
 }
 
 function normalizeColumnPercents(leftRaw: any, centerRaw: any, rightRaw: any): [number, number, number] {
@@ -518,30 +553,6 @@ function uniqueSorted(items: Array<{ key: string, label: string, count: number }
 }
 
 
-function buildOrderBy(sortField: SortField, sortDir: SortDir): string {
-  const dir = sortDir === 'DESC' ? 'DESC' : 'ASC'
-  switch (sortField) {
-    case 'descrizione':
-      return `descrizione ${dir}, codice_voce ASC`
-    case 'unita_misura':
-      return `unita_misura ${dir}, codice_voce ASC`
-    case 'prezzo_unitario':
-      return `prezzo_unitario ${dir}, codice_voce ASC`
-    case 'codice_voce':
-    default:
-      return `codice_voce ${dir}`
-  }
-}
-
-function nextSort(currentField: SortField, currentDir: SortDir, field: Exclude<SortField, 'DEFAULT'>): { field: SortField, dir: SortDir } {
-  if (currentField !== field) return { field, dir: 'ASC' }
-  return { field, dir: currentDir === 'ASC' ? 'DESC' : 'ASC' }
-}
-
-function sortIndicator(currentField: SortField, currentDir: SortDir, field: Exclude<SortField, 'DEFAULT'>): string {
-  if (currentField !== field) return '↕'
-  return currentDir === 'ASC' ? '▲' : '▼'
-}
 
 const styles = `
 .gcp { font-family: Arial, sans-serif; font-size: 13px; padding: 12px; height: 100%; display:flex; flex-direction:column; gap:10px; box-sizing:border-box; }
@@ -567,10 +578,10 @@ const styles = `
 .gcp-panel-head { padding:10px 12px; background:#f5f9ff; border-bottom:1px solid #dbe7f4; font-weight:700; color:#1F4E79; border-top-left-radius:8px; border-top-right-radius:8px; }
 .gcp-panel-body { border-bottom-left-radius:8px; border-bottom-right-radius:8px; }
 .gcp-col-resizer { position:relative; width:100%; min-width:0; cursor:col-resize; user-select:none; touch-action:none; }
-.gcp-col-resizer::before { content:''; position:absolute; top:0; bottom:0; left:50%; transform:translateX(-50%); width:2px; background:#c5d9f1; border-radius:999px; }
-.gcp-col-resizer:hover::before, .gcp-col-resizer.dragging::before { background:#3d77c9; }
-.gcp-col-resizer::after { content:''; position:absolute; top:50%; left:50%; transform:translate(-50%, -50%); width:8px; height:56px; border-radius:999px; background:rgba(61,119,201,0.08); }
-.gcp-col-resizer:hover::after, .gcp-col-resizer.dragging::after { background:rgba(61,119,201,0.18); }
+.gcp-col-resizer::before { content:''; position:absolute; top:0; bottom:0; left:50%; transform:translateX(-50%); width:2px; background:#3d77c9; border-radius:999px; }
+.gcp-col-resizer:hover::before, .gcp-col-resizer.dragging::before { background:#c5d9f1; }
+.gcp-col-resizer::after { content:''; position:absolute; top:50%; left:50%; transform:translate(-50%, -50%); width:8px; height:56px; border-radius:999px; background:rgba(61,119,201,0.18); }
+.gcp-col-resizer:hover::after, .gcp-col-resizer.dragging::after { background:rgba(61,119,201,0.08); }
 .gcp-panel-head-row { display:flex; align-items:center; justify-content:space-between; gap:8px; }
 .gcp-panel-head-actions { display:flex; align-items:center; gap:6px; }
 .gcp-reset-btn { width:28px; height:28px; border:1px solid #aac4e0; background:#fff; color:#8aa4bf; border-radius:999px; cursor:default; font-size:15px; line-height:1; display:inline-flex; align-items:center; justify-content:center; opacity:0.75; }
@@ -629,6 +640,10 @@ const styles = `
 .gcp-cols-reset-btn.active { background:#1F4E79; color:#fff; border-color:#1F4E79; cursor:pointer; opacity:1; }
 .gcp-cols-reset-btn.active:hover { background:#295f92; border-color:#295f92; }
 .gcp-cols-reset-btn:disabled { pointer-events:none; }
+.gcp-nav-home-btn { width:28px; height:28px; border:1px solid #aac4e0; background:#fff; color:#8aa4bf; border-radius:999px; cursor:default; font-size:15px; line-height:1; display:inline-flex; align-items:center; justify-content:center; opacity:0.75; flex:0 0 auto; }
+.gcp-nav-home-btn.active { background:#1F4E79; color:#fff; border-color:#1F4E79; cursor:pointer; opacity:1; }
+.gcp-nav-home-btn.active:hover { background:#295f92; border-color:#295f92; }
+.gcp-nav-home-btn:disabled { pointer-events:none; }
 .gcp-path { padding:6px 0 2px; font-size:11px; color:#516273; }
 .gcp-list-inline { display:flex; flex-direction:column; gap:4px; }
 @media (max-width: 1380px) { .gcp-toolbar { grid-template-columns: minmax(0, var(--gcp-left-col, 25%)) var(--gcp-split-col, 12px) minmax(0, var(--gcp-center-col, 45%)) var(--gcp-split-col, 12px) minmax(0, var(--gcp-right-col, 30%)); } .gcp-layout { grid-template-columns: minmax(0, var(--gcp-left-col, 25%)) var(--gcp-split-col, 12px) minmax(0, var(--gcp-center-col, 45%)) var(--gcp-split-col, 12px) minmax(0, var(--gcp-right-col, 30%)); } }
@@ -637,9 +652,7 @@ const styles = `
 
 export default function Widget(props: AllWidgetProps<IMConfig>) {
   const cfg: any = props.config || {}
-  const serviceUrl = String(cfg.serviceUrl || '').trim()
-  const prezzariUrl = String(cfg.prezzariUrl || '').trim()
-  const analisiUrl = String(cfg.analisiUrl || '').trim()
+  const sources = React.useMemo(() => buildSources(cfg), [cfg.regionaleArticoliUrl, cfg.regionaleAnalisiUrl, cfg.internoArticoliUrl, cfg.internoAnalisiUrl, cfg.nuoviPrezziUrl, cfg.nuoviPrezziAnalisiUrl])
   const title = String(cfg.title || 'GII - Consultazione Prezzario')
   const titleColor = String(cfg.titleColor || '#1F4E79')
   const titleFontSize = Number(cfg.titleFontSize || 15)
@@ -694,6 +707,7 @@ export default function Widget(props: AllWidgetProps<IMConfig>) {
   const listReqRef = React.useRef(0)
   const summaryReqRef = React.useRef(0)
   const rowsRef = React.useRef<VoceRow[]>([])
+  const didInitDefaultSourceRef = React.useRef(false)
 
   React.useEffect(() => {
     if (!msg) return
@@ -751,24 +765,24 @@ export default function Widget(props: AllWidgetProps<IMConfig>) {
   }, [columnPercents])
 
   React.useEffect(() => {
-    let cancel = false
-    const run = async () => {
-      if (!prezzariUrl) return
-      setLoadingPrezzari(true)
-      try {
-        const rr = await queryPrezzari(prezzariUrl)
-        if (cancel) return
-        setPrezzari(rr)
-        const active = rr.find((r) => num(r.stato_prezzario) === 1) || rr[0]
-        if (active && !selectedCode) setSelectedCode(active.codice_prezzario)
-      } catch (e: any) {
-        if (!cancel) setMsg({ text: 'Errore caricamento prezzari: ' + (e?.message ?? e), ok: false })
+    setLoadingPrezzari(true)
+    try {
+      setPrezzari(sources)
+      const active = sources.find((r) => num(r.stato_prezzario) === 1) || sources[0]
+      const selectedExists = !!selectedCode && sources.some((s) => s.codice_prezzario === selectedCode)
+      if (!didInitDefaultSourceRef.current && !selectedCode) {
+        if (active) setSelectedCode(active.codice_prezzario)
+        didInitDefaultSourceRef.current = true
+      } else if (selectedCode && !selectedExists) {
+        setSelectedCode(active ? active.codice_prezzario : '')
+      } else if (!active && !selectedCode) {
+        setSelectedCode('')
       }
-      if (!cancel) setLoadingPrezzari(false)
+    } catch (e: any) {
+      setMsg({ text: 'Errore caricamento prezzari: ' + (e?.message ?? e), ok: false })
     }
-    void run()
-    return () => { cancel = true }
-  }, [prezzariUrl, selectedCode])
+    setLoadingPrezzari(false)
+  }, [sources, selectedCode])
 
   React.useEffect(() => {
     setSelectedFamiglia('')
@@ -786,10 +800,11 @@ export default function Widget(props: AllWidgetProps<IMConfig>) {
     let cancel = false
     const reqId = ++summaryReqRef.current
     const run = async () => {
-      if (!serviceUrl || !selectedCode) { setSummaryRows([]); return }
+      const source = sources.find((s) => s.codice_prezzario === selectedCode) || null
+      if (!source) { setSummaryRows([]); return }
       setLoadingSummary(true)
       try {
-        const rr = await querySummary(serviceUrl, selectedCode)
+        const rr = await querySummary(source)
         if (cancel || summaryReqRef.current !== reqId) return
         setSummaryRows(rr)
       } catch (e: any) {
@@ -802,7 +817,7 @@ export default function Widget(props: AllWidgetProps<IMConfig>) {
     }
     void run()
     return () => { cancel = true }
-  }, [serviceUrl, selectedCode])
+  }, [sources, selectedCode])
 
   const hierarchy = React.useMemo(() => buildHierarchy(summaryRows), [summaryRows])
   const treeTotal = React.useMemo(() => summaryRows.reduce((sum, r) => sum + num(r.count), 0), [summaryRows])
@@ -833,17 +848,21 @@ export default function Widget(props: AllWidgetProps<IMConfig>) {
     return uniqueSorted(rows)
   }, [hierarchy, selectedFamiglia, selectedCapitolo])
 
-  const currentOrderBy = React.useMemo(() => buildOrderBy(sortField, sortDir), [sortField, sortDir])
+  const currentOrderBy = React.useMemo(() => {
+    const source = sources.find((s) => s.codice_prezzario === selectedCode) || null
+    return source ? buildOrderBy(source, sortField, sortDir) : ''
+  }, [sources, selectedCode, sortField, sortDir])
 
   const loadListPage = React.useCallback(async (append: boolean) => {
-    if (!serviceUrl || !selectedCode) { setRows([]); setListTotal(0); return }
+    const source = sources.find((s) => s.codice_prezzario === selectedCode) || null
+    if (!source) { setRows([]); setListTotal(0); return }
     const reqId = ++listReqRef.current
     if (append) setLoadingMore(true)
     else setLoadingRows(true)
 
     const offset = append ? rowsRef.current.length : 0
     try {
-      const res = await queryVociPage(serviceUrl, selectedCode, selectedFamiglia, selectedCapitolo, selectedSottocapitolo, search, offset, LIST_STEP, currentOrderBy)
+      const res = await queryVociPage(source, selectedFamiglia, selectedCapitolo, selectedSottocapitolo, search, offset, LIST_STEP, sortField, sortDir)
       if (listReqRef.current !== reqId) return
       setRows((prev) => append ? [...prev, ...res.rows] : res.rows)
       setListTotal(res.total)
@@ -858,19 +877,20 @@ export default function Widget(props: AllWidgetProps<IMConfig>) {
         setLoadingMore(false)
       }
     }
-  }, [serviceUrl, selectedCode, selectedFamiglia, selectedCapitolo, selectedSottocapitolo, search, currentOrderBy])
+  }, [sources, selectedCode, selectedFamiglia, selectedCapitolo, selectedSottocapitolo, search, sortField, sortDir])
 
   React.useEffect(() => {
     void loadListPage(false)
-  }, [serviceUrl, selectedCode, selectedFamiglia, selectedCapitolo, selectedSottocapitolo, search, currentOrderBy])
+  }, [sources, selectedCode, selectedFamiglia, selectedCapitolo, selectedSottocapitolo, search, currentOrderBy, sortField, sortDir])
 
   React.useEffect(() => {
     let cancel = false
     const run = async () => {
-      if (!analisiUrl || !selectedRow) { setAnalisiRows([]); return }
+      const source = sources.find((s) => s.codice_prezzario === selectedCode) || null
+      if (!source?.analisiUrl || !selectedRow) { setAnalisiRows([]); return }
       setLoadingAnalisi(true)
       try {
-        const rr = await queryAnalisi(analisiUrl, selectedRow, serviceUrl)
+        const rr = await queryAnalisi(source, selectedRow)
         if (!cancel) setAnalisiRows(rr)
       } catch {
         if (!cancel) setAnalisiRows([])
@@ -879,7 +899,7 @@ export default function Widget(props: AllWidgetProps<IMConfig>) {
     }
     void run()
     return () => { cancel = true }
-  }, [analisiUrl, selectedRow?.codice_voce, selectedRow?.codice_prezzario])
+  }, [sources, selectedCode, selectedRow?.codice_voce, selectedRow?.codice_prezzario])
 
   React.useEffect(() => {
     if (!rows.length) { setSelectedRow(null); return }
@@ -888,11 +908,21 @@ export default function Widget(props: AllWidgetProps<IMConfig>) {
 
   const selectedPrezzario = prezzari.find((p) => p.codice_prezzario === selectedCode) || null
   const hasMoreRows = rows.length < listTotal
+  const hasLevelSelection = !!selectedFamiglia || !!selectedCapitolo || !!selectedSottocapitolo || levelMode !== 'STRUTTURA'
 
   const clearSelection = React.useCallback(() => {
     setSelectedFamiglia('')
     setSelectedCapitolo('')
     setSelectedSottocapitolo('')
+  }, [])
+
+  const resetLivelli = React.useCallback(() => {
+    setLevelMode('STRUTTURA')
+    setSelectedFamiglia('')
+    setSelectedCapitolo('')
+    setSelectedSottocapitolo('')
+    setExpandedFamilies({})
+    setExpandedCapitoli({})
   }, [])
 
   const familyToggleKey = (famiglia: string) => `fam:${famiglia}`
@@ -970,7 +1000,24 @@ export default function Widget(props: AllWidgetProps<IMConfig>) {
   }, [selectedFamiglia, selectedCapitolo, selectedSottocapitolo])
 
 
-  const applySort = React.useCallback((field: Exclude<SortField, 'DEFAULT'>) => {
+  const resetConsultatore = React.useCallback(() => {
+    setSelectedCode('')
+    setSearch('')
+    setLevelMode('STRUTTURA')
+    setSortField('codice_voce')
+    setSortDir('ASC')
+    setSelectedFamiglia('')
+    setSelectedCapitolo('')
+    setSelectedSottocapitolo('')
+    setExpandedFamilies({})
+    setExpandedCapitoli({})
+    setRows([])
+    setListTotal(0)
+    setSelectedRow(null)
+    setAnalisiRows([])
+  }, [])
+
+  const applySort = React.useCallback((field: SortField) => {
     const next = nextSort(sortField, sortDir, field)
     setSortField(next.field)
     setSortDir(next.dir)
@@ -1032,16 +1079,16 @@ export default function Widget(props: AllWidgetProps<IMConfig>) {
       <style>{styles}</style>
       <div className='gcp' style={layoutVars}>
         <div className='gcp-title' style={{ color: titleColor, fontSize: titleFontSize }}>{title}</div>
-        {(!serviceUrl || !prezzariUrl) ? <div className='gcp-msg gcp-msg-err'>Configura gli URL delle tabelle nel setting del widget.</div> : null}
+        {!sources.length ? <div className='gcp-msg gcp-msg-err'>Configura gli URL delle tabelle nel setting del widget.</div> : null}
         {msg && <div className={`gcp-msg ${msg.ok ? 'gcp-msg-ok' : 'gcp-msg-err'}`}>{msg.text}</div>}
 
         <div className='gcp-toolbar'>
           <div className='gcp-field gcp-grid-left'>
             <div className='gcp-label' style={labelStyle}>Prezzario</div>
-            <select className='gcp-select' value={selectedCode} onChange={(e) => setSelectedCode(e.target.value)}>
+            <select className='gcp-select' value={selectedCode} onChange={(e) => { const v = e.target.value; if (!v) resetConsultatore(); else setSelectedCode(v) }}>
               <option value=''>— seleziona —</option>
               {prezzari.map((p) => (
-                <option key={p.objectid} value={p.codice_prezzario}>{`${p.codice_prezzario}${num(p.stato_prezzario) === 1 ? ' (attivo)' : ''}`}</option>
+                <option key={p.objectid} value={p.codice_prezzario}>{p.titolo_prezzario || p.codice_prezzario}</option>
               ))}
             </select>
           </div>
@@ -1101,7 +1148,30 @@ export default function Widget(props: AllWidgetProps<IMConfig>) {
 
         <div className='gcp-layout' ref={gridRef}>
           <div className='gcp-panel gcp-grid-left'>
-            <div className='gcp-panel-head' style={panelHeadStyle}>Navigazione livelli</div>
+            <div className='gcp-panel-head' style={panelHeadStyle}>
+              <div className='gcp-panel-head-row'>
+                <span>Navigazione livelli</span>
+                <div className='gcp-panel-head-actions'>
+                  <button
+                    type='button'
+                    className={`gcp-nav-home-btn ${hasLevelSelection ? 'active' : ''}`}
+                    onClick={resetLivelli}
+                    disabled={!hasLevelSelection}
+                    title='Reimposta navigazione livelli'
+                    aria-label='Reimposta navigazione livelli'
+                  >
+                    <svg viewBox="0 0 64 64" width="18" height="18" aria-hidden="true" style={{ display: 'block' }}>
+                      <circle cx="12.5" cy="17" r="4.8" fill="currentColor" opacity="0.9" />
+                      <circle cx="12.5" cy="32" r="4.8" fill="currentColor" opacity="0.9" />
+                      <circle cx="12.5" cy="47" r="4.8" fill="currentColor" opacity="0.9" />
+                      <rect x="22" y="12" width="34" height="10" rx="5" fill="currentColor" opacity="0.95" />
+                      <rect x="22" y="27" width="34" height="10" rx="5" fill="currentColor" opacity="0.95" />
+                      <rect x="22" y="42" width="34" height="10" rx="5" fill="currentColor" opacity="0.95" />
+                    </svg>
+                  </button>
+                </div>
+              </div>
+            </div>
             <div className='gcp-panel-body gcp-panel-body-pad'>
               <div className='gcp-field' style={{ marginBottom: 8 }}>
                 <select className='gcp-select' value={levelMode} onChange={(e) => setLevelMode(e.target.value as LevelMode)}>
@@ -1247,14 +1317,14 @@ export default function Widget(props: AllWidgetProps<IMConfig>) {
 
                   <div className='gcp-kv'>
                     <div style={kvLabelStyle}>Prezzario</div><div>{selectedPrezzario?.titolo_prezzario || selectedCode}</div>
-                    <div style={kvLabelStyle}>Anno</div><div>{selectedPrezzario?.anno_prezzario || ''}</div>
+                    <div style={kvLabelStyle}>Anno</div><div>{selectedRow?.anno_riferimento || selectedPrezzario?.anno_prezzario || ''}</div>
                     <div style={kvLabelStyle}>Super capitolo</div><div>{famigliaLabel(selectedRow.famiglia)}</div>
                     <div style={kvLabelStyle}>Capitolo</div><div>{selectedRow.capitolo || '—'}</div>
                     <div style={kvLabelStyle}>Sottocapitolo</div><div>{selectedRow.sottocapitolo || '—'}</div>
                     <div style={kvLabelStyle}>Unità misura</div><div>{selectedRow.unita_misura || '—'}</div>
                     <div style={kvLabelStyle}>Prezzo</div><div><span className='gcp-muted' style={{ marginRight: 6 }}>{priceUnitLabel(selectedRow.unita_misura)}</span>{money(selectedRow.prezzo_unitario, 4)}</div>
                     <div style={kvLabelStyle}>Stato</div><div>{num(selectedRow.attivo) === 1 ? 'Attivo' : 'Disattivo'}</div>
-                    <div style={kvLabelStyle}>Importato il</div><div>{fmtDate(selectedPrezzario?.data_import) || '—'}</div>
+                    <div style={kvLabelStyle}>Ultimo import</div><div>{fmtDate(selectedPrezzario?.data_import) || '—'}</div>
                   </div>
 
                   <div>
@@ -1262,7 +1332,7 @@ export default function Widget(props: AllWidgetProps<IMConfig>) {
                     <div className='gcp-desc'>{selectedRow.descrizione || '—'}</div>
                   </div>
 
-                  {analisiUrl ? (
+                  {selectedPrezzario?.analisiUrl ? (
                     <div>
                       <div className='gcp-label' style={{ ...panelHeadStyle, marginBottom: 6 }}>Analisi collegata {loadingAnalisi ? '(caricamento...)' : analisiRows.length ? `(${analisiRows.length} ${analisiRows.length === 1 ? 'articolo' : 'articoli'})` : ''}</div>
                       {!analisiRows.length ? (
