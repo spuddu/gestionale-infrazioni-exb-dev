@@ -5,6 +5,7 @@ import type { IMConfig } from '../config'
 
 const { Fragment } = React
 const LIST_STEP = 250
+const DATI_GENERALI_URL = 'https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_DATI_GENERALI/FeatureServer/0'
 
 type SourceCode = 'REGIONALE' | 'INTERNO' | 'NUOVI_PREZZI'
 type SourceKind = 'UFFICIALE' | 'NP'
@@ -80,6 +81,11 @@ type FamigliaNode = {
 type VociPageResult = {
   rows: VoceRow[]
   total: number
+}
+
+type DatiGeneraliMaps = {
+  capitoli: Record<string, string>
+  sottocapitoli: Record<string, string>
 }
 
 type LevelMode = 'STRUTTURA' | 'SUPER' | 'CAPITOLI' | 'SUB'
@@ -198,6 +204,52 @@ function voceKey(r: Partial<VoceRow> | null | undefined): string {
   return `cod:${String((r as any).codice_prezzario || '')}::${String((r as any).codice_voce || '')}`
 }
 
+function normalizeCodePart(v: any): string {
+  const s = trimText(v)
+  if (!s) return ''
+  if (/^\d+$/.test(s)) return s.padStart(4, '0')
+  return s.toUpperCase()
+}
+
+function parseNuovoPrezzoCode(codiceVoce: any): { famiglia: string, supercapitolo: string, capitolo: string, sottocapitolo: string } {
+  const s = trimText(codiceVoce)
+  const m = s.match(/^[A-Z]{2}\d{2}_([A-Z]{2})\.(\d{4})\.(\d{4})\.(\d{4})$/i)
+  if (!m) return { famiglia: '', supercapitolo: '', capitolo: '', sottocapitolo: '' }
+  return { famiglia: normalizeCodePart(m[1]), supercapitolo: normalizeCodePart(m[2]), capitolo: normalizeCodePart(m[3]), sottocapitolo: normalizeCodePart(m[4]) }
+}
+
+function capKey(famiglia: any, supercapitolo: any, capitolo: any): string {
+  return [normalizeCodePart(famiglia), normalizeCodePart(supercapitolo), normalizeCodePart(capitolo)].join('|')
+}
+
+function subKey(famiglia: any, supercapitolo: any, capitolo: any, sottocapitolo: any): string {
+  return [normalizeCodePart(famiglia), normalizeCodePart(supercapitolo), normalizeCodePart(capitolo), normalizeCodePart(sottocapitolo)].join('|')
+}
+
+async function queryDatiGeneraliMaps(): Promise<DatiGeneraliMaps> {
+  const rows = await queryAllRows(DATI_GENERALI_URL, 'tipo_record IN (4,5)', 'codice_famiglia ASC, numero_capitolo ASC, numero_subcapitolo ASC', ['tipo_record', 'codice_famiglia', 'numero_supercapitolo', 'numero_capitolo', 'numero_subcapitolo', 'descrizione_item'])
+  const capitoli: Record<string, string> = {}
+  const sottocapitoli: Record<string, string> = {}
+  rows.forEach((r: any) => {
+    const tipo = Number(r.tipo_record || 0)
+    const famiglia = normalizeCodePart(r.codice_famiglia)
+    const supercapitolo = normalizeCodePart(r.numero_supercapitolo)
+    const capitolo = normalizeCodePart(r.numero_capitolo)
+    const sottocapitolo = normalizeCodePart(r.numero_subcapitolo)
+    const descr = trimText(r.descrizione_item)
+    if (!famiglia || !descr) return
+    if (tipo === 4 && capitolo) {
+      capitoli[capKey(famiglia, supercapitolo, capitolo)] = descr
+      if (!capitoli[capKey(famiglia, '', capitolo)]) capitoli[capKey(famiglia, '', capitolo)] = descr
+    }
+    if (tipo === 5 && capitolo && sottocapitolo) {
+      sottocapitoli[subKey(famiglia, supercapitolo, capitolo, sottocapitolo)] = descr
+      if (!sottocapitoli[subKey(famiglia, '', capitolo, sottocapitolo)]) sottocapitoli[subKey(famiglia, '', capitolo, sottocapitolo)] = descr
+    }
+  })
+  return { capitoli, sottocapitoli }
+}
+
 async function queryAllRows(urlRaw: any, where = '1=1', orderBy?: string, outFields?: string[]): Promise<any[]> {
   const fl = await getLayer(urlRaw)
   const oidField = String(fl?.objectIdField || 'OBJECTID')
@@ -274,7 +326,7 @@ function getArticleFields(source: PrezzarioRow) {
 }
 
 function buildBaseWhere(source: PrezzarioRow): string {
-  return source.kind === 'NP' ? 'attivo = 1' : '1=1'
+  return '1=1'
 }
 
 
@@ -309,7 +361,7 @@ function mapVoceRow(source: PrezzarioRow, r: any): VoceRow {
     prezzo_unitario: num(r[af.price]),
     categoria_default: source.kind === 'NP' ? (MODALITA_LABELS[String(r[af.mode] || '')] || '') : normalizeCategory(r.categoria_default),
     selezionabile: 1,
-    attivo: num(r.attivo || 1),
+    attivo: (r.attivo == null || r.attivo === '') ? 1 : num(r.attivo),
     anno_riferimento: num(r[af.year]),
     modalita_prezzo: af.mode ? String(r[af.mode] || '') : ''
   }
@@ -467,7 +519,7 @@ async function queryAnalisi(source: PrezzarioRow, voce: VoceRow | null): Promise
       quantita: num(r.quantita),
       prezzo_unitario: num(r.prezzo_unitario),
       importo: num(r.importo),
-      attivo: num(r.attivo || 1)
+      attivo: (r.attivo == null || r.attivo === '') ? 1 : num(r.attivo)
     }))
   }
 
@@ -513,7 +565,7 @@ async function queryAnalisi(source: PrezzarioRow, voce: VoceRow | null): Promise
     quantita: num(r.quantita),
     prezzo_unitario: num(r.prezzo_unitario),
     importo: num(r.importo),
-    attivo: num(r.attivo || 1)
+    attivo: (r.attivo == null || r.attivo === '') ? 1 : num(r.attivo)
   }))
 }
 
@@ -617,6 +669,10 @@ const styles = `
 .gcp-list-table tbody tr.sel td { background:#dfeefe; }
 .gcp-list-row { cursor:pointer; }
 .gcp-desc-short { display:block; white-space:nowrap; overflow:hidden; text-overflow:clip; line-height:1.25; }
+.gcp-row-inactive td { color:#c00000; }
+.gcp-row-inactive td .gcp-muted { color:#c00000 !important; opacity:0.95; }
+.gcp-inactive-flag { display:inline-block; margin-top:3px; font-size:11px; font-weight:700; color:#c00000; }
+.gcp-status-inactive { color:#c00000; font-weight:700; }
 .gcp-list-more { display:flex; justify-content:center; padding:10px; border-top:1px solid #e6eef7; background:#fbfdff; }
 .gcp-list-more button { border:1px solid #aac4e0; background:#fff; color:#1F4E79; padding:8px 14px; border-radius:6px; cursor:pointer; font-weight:700; }
 .gcp-empty { padding:16px; color:#6b7280; text-align:center; }
@@ -703,6 +759,7 @@ export default function Widget(props: AllWidgetProps<IMConfig>) {
   const [search, setSearch] = React.useState('')
   const [selectedRow, setSelectedRow] = React.useState<VoceRow | null>(null)
   const [analisiRows, setAnalisiRows] = React.useState<AnalisiRow[]>([])
+  const [dgMaps, setDgMaps] = React.useState<DatiGeneraliMaps>({ capitoli: {}, sottocapitoli: {} })
 
   const listReqRef = React.useRef(0)
   const summaryReqRef = React.useRef(0)
@@ -798,6 +855,21 @@ export default function Widget(props: AllWidgetProps<IMConfig>) {
 
   React.useEffect(() => {
     let cancel = false
+    const run = async () => {
+      if (selectedCode !== 'NUOVI_PREZZI') { setDgMaps({ capitoli: {}, sottocapitoli: {} }); return }
+      try {
+        const maps = await queryDatiGeneraliMaps()
+        if (!cancel) setDgMaps(maps)
+      } catch {
+        if (!cancel) setDgMaps({ capitoli: {}, sottocapitoli: {} })
+      }
+    }
+    void run()
+    return () => { cancel = true }
+  }, [selectedCode])
+
+  React.useEffect(() => {
+    let cancel = false
     const reqId = ++summaryReqRef.current
     const run = async () => {
       const source = sources.find((s) => s.codice_prezzario === selectedCode) || null
@@ -822,6 +894,25 @@ export default function Widget(props: AllWidgetProps<IMConfig>) {
   const hierarchy = React.useMemo(() => buildHierarchy(summaryRows), [summaryRows])
   const treeTotal = React.useMemo(() => summaryRows.reduce((sum, r) => sum + num(r.count), 0), [summaryRows])
 
+  const formatCapitoloLabel = React.useCallback((famiglia: any, capitolo: any, codiceVoce?: any) => {
+    const fam = normalizeCodePart(famiglia)
+    const cap = normalizeCodePart(capitolo)
+    if (!fam || !cap || selectedCode !== 'NUOVI_PREZZI') return trimText(capitolo) || '<nessuna>'
+    const parsed = parseNuovoPrezzoCode(codiceVoce)
+    const label = dgMaps.capitoli[capKey(fam, parsed.supercapitolo, cap)] || dgMaps.capitoli[capKey(fam, '', cap)]
+    return label || (trimText(capitolo) || '<nessuna>')
+  }, [dgMaps, selectedCode])
+
+  const formatSottocapitoloLabel = React.useCallback((famiglia: any, capitolo: any, sottocapitolo: any, codiceVoce?: any) => {
+    const fam = normalizeCodePart(famiglia)
+    const cap = normalizeCodePart(capitolo)
+    const sub = normalizeCodePart(sottocapitolo)
+    if (!fam || !cap || !sub || selectedCode !== 'NUOVI_PREZZI') return trimText(sottocapitolo) || '<nessuna>'
+    const parsed = parseNuovoPrezzoCode(codiceVoce)
+    const label = dgMaps.sottocapitoli[subKey(fam, parsed.supercapitolo, cap, sub)] || dgMaps.sottocapitoli[subKey(fam, '', cap, sub)]
+    return label || (trimText(sottocapitolo) || '<nessuna>')
+  }, [dgMaps, selectedCode])
+
   const superItems = React.useMemo(() => {
     return hierarchy
       .map((f) => ({ key: f.famiglia, label: f.label, count: f.count }))
@@ -833,20 +924,20 @@ export default function Widget(props: AllWidgetProps<IMConfig>) {
   }, [hierarchy])
   const capitoliItems = React.useMemo(() => {
     const rows = selectedFamiglia
-      ? hierarchy.filter((f) => f.famiglia === selectedFamiglia).flatMap((f) => f.children.map((c) => ({ key: c.capitolo, label: c.capitolo || '<nessuna>', count: c.count })))
-      : hierarchy.flatMap((f) => f.children.map((c) => ({ key: c.capitolo, label: c.capitolo || '<nessuna>', count: c.count })))
+      ? hierarchy.filter((f) => f.famiglia === selectedFamiglia).flatMap((f) => f.children.map((c) => ({ key: c.capitolo, label: formatCapitoloLabel(f.famiglia, c.capitolo), count: c.count })))
+      : hierarchy.flatMap((f) => f.children.map((c) => ({ key: c.capitolo, label: formatCapitoloLabel(f.famiglia, c.capitolo), count: c.count })))
     return uniqueSorted(rows)
-  }, [hierarchy, selectedFamiglia])
+  }, [hierarchy, selectedFamiglia, formatCapitoloLabel])
   const subItems = React.useMemo(() => {
     const rows = hierarchy.flatMap((f) => {
       if (selectedFamiglia && f.famiglia !== selectedFamiglia) return []
       return f.children.flatMap((c) => {
         if (selectedCapitolo && c.capitolo !== selectedCapitolo) return []
-        return c.children.map((s) => ({ key: s.sottocapitolo, label: s.sottocapitolo || '<nessuna>', count: s.count }))
+        return c.children.map((s) => ({ key: s.sottocapitolo, label: formatSottocapitoloLabel(f.famiglia, c.capitolo, s.sottocapitolo), count: s.count }))
       })
     })
     return uniqueSorted(rows)
-  }, [hierarchy, selectedFamiglia, selectedCapitolo])
+  }, [hierarchy, selectedFamiglia, selectedCapitolo, formatSottocapitoloLabel])
 
   const currentOrderBy = React.useMemo(() => {
     const source = sources.find((s) => s.codice_prezzario === selectedCode) || null
@@ -884,6 +975,15 @@ export default function Widget(props: AllWidgetProps<IMConfig>) {
   }, [sources, selectedCode, selectedFamiglia, selectedCapitolo, selectedSottocapitolo, search, currentOrderBy, sortField, sortDir])
 
   React.useEffect(() => {
+    const onNpUpdated = () => {
+      if (selectedCode !== 'NUOVI_PREZZI') return
+      void loadListPage(false)
+    }
+    window.addEventListener('gii:np-updated', onNpUpdated as EventListener)
+    return () => { window.removeEventListener('gii:np-updated', onNpUpdated as EventListener) }
+  }, [selectedCode, loadListPage])
+
+  React.useEffect(() => {
     let cancel = false
     const run = async () => {
       const source = sources.find((s) => s.codice_prezzario === selectedCode) || null
@@ -903,7 +1003,10 @@ export default function Widget(props: AllWidgetProps<IMConfig>) {
 
   React.useEffect(() => {
     if (!rows.length) { setSelectedRow(null); return }
-    if (!selectedRow || !rows.some((r) => voceKey(r) === voceKey(selectedRow))) setSelectedRow(rows[0])
+    if (!selectedRow) { setSelectedRow(rows[0]); return }
+    const match = rows.find((r) => voceKey(r) === voceKey(selectedRow))
+    if (!match) { setSelectedRow(rows[0]); return }
+    if (match !== selectedRow) setSelectedRow(match)
   }, [rows, selectedRow])
 
   const selectedPrezzario = prezzari.find((p) => p.codice_prezzario === selectedCode) || null
@@ -1033,10 +1136,10 @@ export default function Widget(props: AllWidgetProps<IMConfig>) {
   const selectionPath = React.useMemo(() => {
     const parts = [] as string[]
     if (selectedFamiglia) parts.push(famigliaLabel(selectedFamiglia))
-    if (selectedCapitolo) parts.push(selectedCapitolo || '<nessuna>')
-    if (selectedSottocapitolo) parts.push(selectedSottocapitolo || '<nessuna>')
+    if (selectedCapitolo) parts.push(formatCapitoloLabel(selectedFamiglia, selectedCapitolo))
+    if (selectedSottocapitolo) parts.push(formatSottocapitoloLabel(selectedFamiglia, selectedCapitolo, selectedSottocapitolo))
     return parts.join(' › ')
-  }, [selectedFamiglia, selectedCapitolo, selectedSottocapitolo])
+  }, [selectedFamiglia, selectedCapitolo, selectedSottocapitolo, formatCapitoloLabel, formatSottocapitoloLabel])
 
   const renderFlatList = (items: Array<{ key: string, label: string, count: number }>, type: LevelMode) => (
     <div className='gcp-list-inline'>
@@ -1213,7 +1316,7 @@ export default function Widget(props: AllWidgetProps<IMConfig>) {
                                 <div key={`${fam.famiglia}__${cap.capitolo || '<nessuna>'}`}>
                                   <div className='gcp-tree-row cap'>
                                     <button className={`gcp-tree-btn ${capActive ? 'active' : ''}`} onClick={() => selectCapitoloNode(fam.famiglia, cap.capitolo)}>
-                                      <span>{cap.capitolo || '<nessuna>'}</span>
+                                      <span>{formatCapitoloLabel(fam.famiglia, cap.capitolo)}</span>
                                       <span className={`gcp-chip ${capActive ? 'active' : ''}`}>{cap.count.toLocaleString('it-IT')}</span>
                                     </button>
                                     <button className='gcp-tree-toggle' onClick={() => toggleCapitoloNode(fam.famiglia, cap.capitolo)} aria-label='Espandi/collassa capitolo'>{capExpanded ? '−' : '+'}</button>
@@ -1224,7 +1327,7 @@ export default function Widget(props: AllWidgetProps<IMConfig>) {
                                         const subActive = selectedFamiglia === fam.famiglia && selectedCapitolo === cap.capitolo && selectedSottocapitolo === sub.sottocapitolo
                                         return (
                                           <button key={`${fam.famiglia}__${cap.capitolo}__${sub.sottocapitolo || '<nessuna>'}`} className={`gcp-tree-btn ${subActive ? 'active' : ''}`} onClick={() => selectSottocapitoloNode(fam.famiglia, cap.capitolo, sub.sottocapitolo)}>
-                                            <span>{sub.sottocapitolo || '<nessuna>'}</span>
+                                            <span>{formatSottocapitoloLabel(fam.famiglia, cap.capitolo, sub.sottocapitolo)}</span>
                                             <span className={`gcp-chip ${subActive ? 'active' : ''}`}>{sub.count.toLocaleString('it-IT')}</span>
                                           </button>
                                         )
@@ -1274,9 +1377,11 @@ export default function Widget(props: AllWidgetProps<IMConfig>) {
                 <tbody>
                   {rows.length === 0 ? (
                     <tr><td colSpan={4} className='gcp-empty'>{loadingRows ? 'Caricamento…' : 'Nessuna voce.'}</td></tr>
-                  ) : rows.map((r) => (
-                    <tr key={voceKey(r)} className={`gcp-list-row ${voceKey(selectedRow) === voceKey(r) ? 'sel' : ''}`} onClick={() => setSelectedRow(r)}>
-                      <td><b>{r.codice_voce}</b><div className='gcp-muted'>{famigliaLabel(r.famiglia)}</div></td>
+                  ) : rows.map((r) => {
+                    const isInactive = selectedPrezzario?.codice_prezzario === 'NUOVI_PREZZI' && num(r.attivo) !== 1
+                    return (
+                    <tr key={voceKey(r)} className={`gcp-list-row ${voceKey(selectedRow) === voceKey(r) ? 'sel' : ''} ${isInactive ? 'gcp-row-inactive' : ''}`} onClick={() => setSelectedRow(r)}>
+                      <td><b>{r.codice_voce}</b><div className='gcp-muted'>{famigliaLabel(r.famiglia)}</div>{selectedCode === 'NUOVI_PREZZI' ? <div className='gcp-muted'>{formatCapitoloLabel(r.famiglia, r.capitolo, r.codice_voce)} · {formatSottocapitoloLabel(r.famiglia, r.capitolo, r.sottocapitolo, r.codice_voce)}</div> : null}</td>
                       <td title={r.descrizione || ''}><span className='gcp-desc-short'>{shortenMiddle(r.descrizione, 108, 34)}</span></td>
                       <td>{r.unita_misura || ''}</td>
                       <td style={{ whiteSpace: 'nowrap' }}>
@@ -1286,7 +1391,7 @@ export default function Widget(props: AllWidgetProps<IMConfig>) {
                         </div>
                       </td>
                     </tr>
-                  ))}
+                  )})}
                 </tbody>
               </table>
               {hasMoreRows ? (
@@ -1319,8 +1424,8 @@ export default function Widget(props: AllWidgetProps<IMConfig>) {
                     <div style={kvLabelStyle}>Prezzario</div><div>{selectedPrezzario?.titolo_prezzario || selectedCode}</div>
                     <div style={kvLabelStyle}>Anno</div><div>{selectedRow?.anno_riferimento || selectedPrezzario?.anno_prezzario || ''}</div>
                     <div style={kvLabelStyle}>Super capitolo</div><div>{famigliaLabel(selectedRow.famiglia)}</div>
-                    <div style={kvLabelStyle}>Capitolo</div><div>{selectedRow.capitolo || '—'}</div>
-                    <div style={kvLabelStyle}>Sottocapitolo</div><div>{selectedRow.sottocapitolo || '—'}</div>
+                    <div style={kvLabelStyle}>Capitolo</div><div>{formatCapitoloLabel(selectedRow.famiglia, selectedRow.capitolo, selectedRow.codice_voce)}</div>
+                    <div style={kvLabelStyle}>Sottocapitolo</div><div>{formatSottocapitoloLabel(selectedRow.famiglia, selectedRow.capitolo, selectedRow.sottocapitolo, selectedRow.codice_voce)}</div>
                     <div style={kvLabelStyle}>Unità misura</div><div>{selectedRow.unita_misura || '—'}</div>
                     <div style={kvLabelStyle}>Prezzo</div><div><span className='gcp-muted' style={{ marginRight: 6 }}>{priceUnitLabel(selectedRow.unita_misura)}</span>{money(selectedRow.prezzo_unitario, 4)}</div>
                     <div style={kvLabelStyle}>Stato</div><div>{num(selectedRow.attivo) === 1 ? 'Attivo' : 'Disattivo'}</div>

@@ -58,7 +58,7 @@ export default function Setting(props: AllWidgetSettingProps<IMConfig>) {
         <input style={inp} value={cfg.internoAnalisiUrl || ''} onChange={(e) => set('internoAnalisiUrl', e.target.value)} placeholder='https://services2.arcgis.com/.../FeatureServer/4' />
       </div>
 
-      <div style={hint}>Il widget carica i prezzari nelle nuove tabelle definitive. Per il regionale usa lo ZIP CSV ufficiale; per l'interno usa un file PriMus esportato in XPWE (*.xpwe) oppure XML (*.xml).</div>
+      <div style={hint}>Il widget carica i prezzari nelle nuove tabelle definitive. Al momento l'import automatico è attivo per il prezzario regionale da ZIP CSV ufficiale; la gestione degli import interni è predisposta per gli step successivi.</div>
     </div>
   )
 }

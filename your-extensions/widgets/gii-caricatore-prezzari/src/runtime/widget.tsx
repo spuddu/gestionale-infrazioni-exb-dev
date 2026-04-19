@@ -421,122 +421,6 @@ async function parseOfficialRegionalZip(file: File): Promise<{ articoli: ParsedA
   return { articoli, analisi, artFile: zipBaseName(artEntry.name), anaFile: zipBaseName(anaEntry.name) }
 }
 
-
-function splitArticleCodeParts(codeRaw: any): { famiglia: string; capitolo: string; sottocapitolo: string; progressivo_articolo: string } {
-  const code = trimText(codeRaw).toUpperCase()
-  let m = code.match(/_(AT|PR|RU|SL|PF)\.(\d{4})\.(\d{4})\.(\d{4})$/)
-  if (!m) m = code.match(/^(AT|PR|RU|SL|PF)\.(\d{4})\.(\d{4})\.(\d{4})$/)
-  return {
-    famiglia: m?.[1] || '',
-    capitolo: m?.[2] || '',
-    sottocapitolo: m?.[3] || '',
-    progressivo_articolo: m?.[4] || ''
-  }
-}
-
-function parseDecimalLoose(v: any): number {
-  const s = trimText(v)
-  if (!s) return 0
-  const normalized = s.replace(/\s/g, '').replace(/\./g, '').replace(',', '.')
-  const n = Number(normalized)
-  return Number.isFinite(n) ? n : 0
-}
-
-function childText(el: Element | null | undefined, tag: string): string {
-  if (!el) return ''
-  const node = Array.from(el.children || []).find((c: any) => String(c.tagName || '').toLowerCase() === tag.toLowerCase()) as Element | undefined
-  return trimText(node?.textContent || '')
-}
-
-async function parsePrimusInternalFile(file: File): Promise<{ articoli: ParsedArticolo[]; analisi: ParsedAnalisi[]; artFile: string; anaFile: string }> {
-  const ext = trimText((file.name.split('.').pop() || '')).toLowerCase()
-  if (ext === 'dcf') {
-    throw new Error('Il formato .dcf non è leggibile direttamente dal widget. Da PriMus/PriMus-DCF esporta il prezzario con "Salva con nome" in formato XPWE (*.xpwe) oppure XML (*.xml), quindi carica quel file.')
-  }
-  if (ext !== 'xml' && ext !== 'xpwe') {
-    throw new Error('Per il prezzario interno carica un file PriMus in formato XPWE (*.xpwe) oppure XML (*.xml).')
-  }
-  const xmlText = await file.text()
-  const parser = new DOMParser()
-  const doc = parser.parseFromString(xmlText, 'application/xml')
-  const parserErr = doc.getElementsByTagName('parsererror')?.[0]
-  if (parserErr) throw new Error('Il file XML/XPWE non è valido o non è leggibile.')
-
-  const epContainer = doc.getElementsByTagName('PweElencoPrezzi')?.[0] || doc.getElementsByTagName('pweelencoprezzi')?.[0]
-  if (!epContainer) throw new Error('Nel file non trovo il nodo PweElencoPrezzi tipico dei documenti PriMus.')
-
-  const epItems = Array.from(epContainer.getElementsByTagName('EPItem'))
-  if (!epItems.length) throw new Error('Nel file non trovo articoli EPItem da importare.')
-
-  const articoli: ParsedArticolo[] = []
-  const idMap = new Map<string, ParsedArticolo & { _id: string }>()
-
-  epItems.forEach((ep) => {
-    const id = trimText(ep.getAttribute('ID') || '')
-    const codice = childText(ep, 'Tariffa')
-    const descrizione = childText(ep, 'DesEstesa') || childText(ep, 'DesRidotta') || childText(ep, 'DesBreve') || childText(ep, 'Articolo')
-    const um = childText(ep, 'UnMisura')
-    const prezzo = round(parseDecimalLoose(childText(ep, 'Prezzo1')), 4)
-    if (!codice || !descrizione) return
-    const parts = splitArticleCodeParts(codice)
-    const art: ParsedArticolo & { _id: string } = {
-      _id: id,
-      codice_articolo: codice,
-      descrizione,
-      um,
-      prezzo,
-      famiglia: parts.famiglia,
-      capitolo: parts.capitolo,
-      sottocapitolo: parts.sottocapitolo,
-      progressivo_articolo: parts.progressivo_articolo,
-      note: '',
-      attivo: '1'
-    }
-    articoli.push(art)
-    if (id) idMap.set(id, art)
-  })
-
-  const analisi: ParsedAnalisi[] = []
-  let ordine = 1
-  epItems.forEach((ep) => {
-    const codiceParent = childText(ep, 'Tariffa')
-    if (!codiceParent) return
-    const pweAnalisi = Array.from(ep.children || []).find((c: any) => String(c.tagName || '').toLowerCase() === 'pweepanalisi') as Element | undefined
-    if (!pweAnalisi) return
-    const pweEpar = Array.from(pweAnalisi.children || []).find((c: any) => String(c.tagName || '').toLowerCase() === 'pweepar') as Element | undefined
-    if (!pweEpar) return
-    const eparItems = Array.from(pweEpar.getElementsByTagName('EPARItem'))
-    eparItems.forEach((ri) => {
-      const tipo = childText(ri, 'Tipo')
-      const qt = parseDecimalLoose(childText(ri, 'Qt'))
-      const prezzoTxt = childText(ri, 'Prezzo')
-      const idEp = childText(ri, 'IDEP')
-      const ref = idMap.get(idEp)
-      const prezzo = round(parseDecimalLoose(prezzoTxt) || round(num((ref as any)?.prezzo || 0), 4), 4)
-      const descrizione = childText(ri, 'Descrizione') || trimText((ref as any)?.descrizione || '')
-      const codiceElemento = trimText((ref as any)?.codice_articolo || '')
-      const um = childText(ri, 'Misura') || trimText((ref as any)?.um || '')
-      const hasRealContent = !!codiceElemento || !!descrizione || qt !== 0 || prezzo !== 0
-      if (!hasRealContent) return
-      if (tipo === '0' && qt === 0 && prezzo === 0 && !codiceElemento) return
-      analisi.push({
-        codice_articolo_parent: codiceParent,
-        ordine_riga: ordine++,
-        categoria: normalizeCategory(inferCategory(trimText((ref as any)?.famiglia || ''), codiceElemento, descrizione)),
-        codice_elemento: codiceElemento,
-        descrizione_elemento: descrizione,
-        um,
-        quantita: qt,
-        prezzo_unitario: prezzo,
-        importo: round(qt * prezzo, 4),
-        note: ''
-      })
-    })
-  })
-
-  return { articoli: articoli.map(({ _id, ...rest }: any) => rest), analisi, artFile: String(file.name || ''), anaFile: String(file.name || '') }
-}
-
 function urlsByType(cfg: any, typeCode: string): { articoliUrl: string; analisiUrl: string } {
   if (String(typeCode) === '2') {
     return { articoliUrl: String(cfg.internoArticoliUrl || '').trim(), analisiUrl: String(cfg.internoAnalisiUrl || '').trim() }
@@ -568,13 +452,23 @@ const styles = `
 .gpw { font-family: Arial, sans-serif; font-size: 13px; padding: 12px; height: 100%; display:flex; flex-direction:column; gap:10px; box-sizing:border-box; }
 .gpw-title { font-size:15px; font-weight:700; color:#1F4E79; border-bottom:2px solid #1F4E79; padding-bottom:6px; }
 .gpw-card { background:#f5f9ff; border:1px solid #c5d9f1; border-radius:6px; padding:12px; }
-.gpw-grid { display:grid; grid-template-columns:1fr 170px 120px 1.3fr; gap:10px; }
+.gpw-grid { display:grid; grid-template-columns:minmax(280px,1.35fr) 170px 120px minmax(260px,1.2fr); gap:10px; }
 .gpw-field { display:flex; flex-direction:column; gap:3px; }
 .gpw-label { font-size:11px; font-weight:700; color:#1F4E79; }
-.gpw-input, .gpw-select { width:100%; padding:6px 8px; border:1px solid #aac4e0; border-radius:4px; font-size:13px; box-sizing:border-box; background:#fff; }
+.gpw-input, .gpw-select { width:100%; height:38px; min-height:38px; padding:7px 10px; border:1px solid #aac4e0; border-radius:4px; font-size:13px; box-sizing:border-box; background:#fff; }
+.gpw-input:focus, .gpw-select:focus { outline:none; border-color:#1F4E79; box-shadow:0 0 0 3px rgba(31,78,121,0.12); }
+.gpw-file-row { display:grid; grid-template-columns:auto 1fr; gap:8px; align-items:center; }
+.gpw-file-display { position:relative; display:flex; align-items:center; height:38px; min-height:38px; padding:0 34px 0 10px; border:1px solid #aac4e0; border-radius:4px; background:#fff; color:#111827; box-sizing:border-box; overflow:hidden; }
+.gpw-file-display-empty { color:#6b7280; }
+.gpw-file-name { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.gpw-file-clear { position:absolute; right:8px; top:50%; transform:translateY(-50%); width:22px; height:22px; border:none; border-radius:999px; background:transparent; color:#6b7280; cursor:pointer; font-size:15px; line-height:22px; padding:0; }
+.gpw-file-clear:hover { background:#eef4fb; color:#1F4E79; }
+.gpw-file-picker-btn { height:38px; min-height:38px; padding:0 14px; border:1px solid #1F4E79; border-radius:4px; background:#fff; color:#1F4E79; font-size:13px; font-weight:700; cursor:pointer; white-space:nowrap; }
+.gpw-file-picker-btn:hover { background:#eef4fb; }
+.gpw-file-native { display:none; }
 .gpw-btns { display:flex; gap:8px; flex-wrap:wrap; }
 .gpw-btns-inline { display:flex; gap:10px; align-items:center; flex-wrap:wrap; }
-.gpw-btn { padding:6px 16px; border:none; border-radius:4px; font-size:13px; cursor:pointer; font-weight:700; }
+.gpw-btn { min-height:38px; padding:7px 16px; border:none; border-radius:4px; font-size:13px; cursor:pointer; font-weight:700; }
 .gpw-primary { background:#1F4E79; color:#fff; }
 .gpw-secondary { background:#375623; color:#fff; }
 .gpw-warning { background:#b45f06; color:#fff; }
@@ -603,6 +497,7 @@ export default function Widget(props: AllWidgetProps<IMConfig>) {
   const [isRi, setIsRi] = React.useState<boolean>(isRiOrAdminUser())
   const [typeCode, setTypeCode] = React.useState('1')
   const [file, setFile] = React.useState<File | null>(null)
+  const fileInputRef = React.useRef<HTMLInputElement | null>(null)
   const [anno, setAnno] = React.useState('')
   const [descrizione, setDescrizione] = React.useState('')
   const [activateAfterImport, setActivateAfterImport] = React.useState(true)
@@ -640,31 +535,37 @@ export default function Widget(props: AllWidgetProps<IMConfig>) {
     if (!descrizione.trim()) {
       if (typeCode === '1' && year) setDescrizione(`Prezzario regionale ${year}`)
       else if (typeCode === '1') setDescrizione('Prezzario regionale')
-      else if (typeCode === '2' && year) setDescrizione(`Prezzario interno ${year}`)
-      else if (typeCode === '2') setDescrizione('Prezzario interno')
     }
   }, [anno, descrizione, typeCode])
 
+  const openFileDialog = React.useCallback(() => {
+    fileInputRef.current?.click()
+  }, [])
+
+  const clearSelectedFile = React.useCallback(() => {
+    setFile(null)
+    if (fileInputRef.current) fileInputRef.current.value = ''
+  }, [])
+
   React.useEffect(() => {
-    if (!descrizione.trim() && anno.trim()) {
-      if (typeCode === '1') setDescrizione(`Prezzario regionale ${anno.trim()}`)
-      if (typeCode === '2') setDescrizione(`Prezzario interno ${anno.trim()}`)
-    }
+    if (typeCode === '1' && !descrizione.trim() && anno.trim()) setDescrizione(`Prezzario regionale ${anno.trim()}`)
   }, [typeCode, anno, descrizione])
 
   const onImport = async () => {
     if (!importUrl) { setMsg({ text: 'Configura l\'URL della tabella import prezzari.', ok: false }); return }
     const year = Number(anno)
     const desc = trimText(descrizione)
-    if (!file) { setMsg({ text: typeCode === '1' ? 'Seleziona il file ZIP del prezzario regionale.' : 'Seleziona il file PriMus del prezzario interno.', ok: false }); return }
+    if (!file) { setMsg({ text: 'Seleziona un file zip da importare.', ok: false }); return }
     if (!year || year < 2000 || year > 2100) { setMsg({ text: 'Anno non valido.', ok: false }); return }
     if (!desc) { setMsg({ text: 'Indica una descrizione.', ok: false }); return }
+    if (typeCode !== '1') { setMsg({ text: 'L\'import del prezzario interno non è ancora disponibile in questo widget.', ok: false }); return }
+
     const { articoliUrl, analisiUrl } = urlsByType(cfg, typeCode)
-    if (!articoliUrl || !analisiUrl) { setMsg({ text: `Configura gli URL delle tabelle del prezzario ${typeCode === '1' ? 'regionale' : 'interno'}.`, ok: false }); return }
+    if (!articoliUrl || !analisiUrl) { setMsg({ text: 'Configura gli URL delle tabelle del prezzario regionale.', ok: false }); return }
 
     let createdImportId = 0
     setSaving(true)
-    setProgress(typeCode === '1' ? 'Lettura ZIP regionale…' : 'Lettura file PriMus…')
+    setProgress('Lettura zip…')
     try {
       const allRows = importUrl ? await queryRows(importUrl, '1=1', 'anno_prezzario DESC, OBJECTID DESC') : []
       const sameYear = (allRows as ImportRow[]).filter((r) => trimText(r.tipo_prezzario) === typeCode && num(r.anno_prezzario) === year)
@@ -674,9 +575,7 @@ export default function Widget(props: AllWidgetProps<IMConfig>) {
         for (const row of sameYear) await cleanupImportRow(importUrl, row, cfg)
       }
 
-      const parsed = typeCode === '1'
-        ? await parseOfficialRegionalZip(file)
-        : await parsePrimusInternalFile(file)
+      const parsed = await parseOfficialRegionalZip(file)
       setProgress('Registrazione import…')
       createdImportId = await addFeatureAndReturnObjectId(importUrl, {
         tipo_prezzario: typeCode,
@@ -702,7 +601,7 @@ export default function Widget(props: AllWidgetProps<IMConfig>) {
       const refreshed = await queryRows(importUrl, '1=1', 'anno_prezzario DESC, OBJECTID DESC') as ImportRow[]
       if (activateAfterImport) await setOnlyOneActiveForType(importUrl, refreshed, typeCode, createdImportId)
       await load()
-      setMsg({ text: `Import ${importTypeLabel(typeCode)} completato: ${parsed.articoli.length} articoli e ${parsed.analisi.length} righe di analisi.`, ok: true })
+      setMsg({ text: `Import completato: ${parsed.articoli.length} articoli e ${parsed.analisi.length} righe di analisi.`, ok: true })
       setFile(null)
       setProgress('')
     } catch (e: any) {
@@ -769,8 +668,15 @@ export default function Widget(props: AllWidgetProps<IMConfig>) {
         <div className='gpw-card'>
           <div className='gpw-grid'>
             <div className='gpw-field'>
-              <div className='gpw-label'>{typeCode === '1' ? 'File ZIP regionale' : 'File PriMus interno'}</div>
-              <input className='gpw-input' type='file' accept={typeCode === '1' ? '.zip' : '.xml,.xpwe,.dcf'} onChange={(e) => applyFileDefaults(((e.target as HTMLInputElement).files || [])[0] || null)} />
+              <div className='gpw-label'>File zip</div>
+              <div className='gpw-file-row'>
+                <button type='button' className='gpw-file-picker-btn' onClick={openFileDialog}>Scegli file</button>
+                <div className={`gpw-file-display ${file ? '' : 'gpw-file-display-empty'}`} title={file?.name || 'Nessun file selezionato'}>
+                  <span className='gpw-file-name'>{file?.name || 'Nessun file selezionato'}</span>
+                  {file ? <button type='button' className='gpw-file-clear' aria-label='Rimuovi file selezionato' onClick={clearSelectedFile}>×</button> : null}
+                </div>
+                <input ref={fileInputRef} className='gpw-file-native' type='file' accept='.zip' onChange={(e) => applyFileDefaults(((e.target as HTMLInputElement).files || [])[0] || null)} />
+              </div>
             </div>
             <div className='gpw-field'>
               <div className='gpw-label'>Tipo prezzario</div>
@@ -790,15 +696,7 @@ export default function Widget(props: AllWidgetProps<IMConfig>) {
           </div>
 
           <div style={{ marginTop: 10, padding: '8px 10px', background: '#fff8e1', border: '1px solid #f3d48b', borderRadius: 4, color: '#6b4e00', fontSize: 12, lineHeight: 1.5 }}>
-            {typeCode === '1' ? (
-              <>
-                <b>Istruzioni regionale:</b> carica lo <b>ZIP originale</b> contenente i due CSV ufficiali <b>SAR24_anagrafica_articoli_prezzario.csv</b> e <b>SAR24_analisi_prezzario.csv</b>.
-              </>
-            ) : (
-              <>
-                <b>Istruzioni interno:</b> da PriMus / PriMus-DCF esporta il prezzario con <b>Salva con nome</b> in formato <b>XPWE (*.xpwe)</b> oppure <b>XML (*.xml)</b>, poi carica quel file qui. Il formato <b>.dcf</b> non viene letto direttamente dal widget.
-              </>
-            )}
+            <b>Istruzioni:</b> per il <b>prezzario regionale</b> carica lo <b>ZIP originale</b> contenente i due CSV ufficiali <b>SAR24_anagrafica_articoli_prezzario.csv</b> e <b>SAR24_analisi_prezzario.csv</b>.
           </div>
 
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, marginTop: 10, flexWrap: 'wrap' }}>
