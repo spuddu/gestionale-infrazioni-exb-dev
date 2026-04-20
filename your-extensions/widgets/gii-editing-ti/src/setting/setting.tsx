@@ -1,6 +1,6 @@
 /** @jsx jsx */
 /** @jsxFrag React.Fragment */
-import { React, jsx, Immutable, DataSourceTypes, DataSourceManager, type UseDataSource } from 'jimu-core'
+import { React, jsx, DataSourceTypes, DataSourceManager, type UseDataSource } from 'jimu-core'
 import type { AllWidgetSettingProps } from 'jimu-for-builder'
 import { DataSourceSelector } from 'jimu-ui/advanced/data-source-selector'
 import { MapWidgetSelector } from 'jimu-ui/advanced/setting-components'
@@ -13,10 +13,10 @@ function asJs<T=any>(v:any):T { return v?.asMutable?v.asMutable({deep:true}):v }
 type FieldOpt = { name: string; alias: string; type?: string }
 
 function toImmutableCfg(base:any, patch:Record<string, any>) {
-  let next = base?.set ? base : Immutable(base || {})
+  let next = base?.set ? base : { ...(base || {}) }
   Object.entries(patch).forEach(([k, v]) => {
-    const val = Array.isArray(v) ? Immutable(v as any) : v
-    next = next.set(k, val)
+    const val = Array.isArray(v) ? [...(v as any)] : v
+    next = next?.set ? next.set(k, val) : { ...next, [k]: val }
   })
   return next
 }
@@ -77,7 +77,7 @@ export default function Setting(props: AllWidgetSettingProps<IMConfig>) {
   const isOpen = (id:string) => openSec===id
 
   const set = (key:string, value:any) => {
-    const base = props.config || Immutable(defaultConfig) as any
+    const base = props.config || defaultConfig as any
     props.onSettingChange({ id:props.id, config: base.set ? base.set(key, value) : { ...cfg, [key]:value } as any })
   }
 
@@ -186,32 +186,32 @@ export default function Setting(props: AllWidgetSettingProps<IMConfig>) {
     saveRows(tabId, rows)
   }
 
-  const useDsJs:any[] = asJs(props.useDataSources ?? Immutable([])) || []
+  const useDsJs:any[] = asJs(props.useDataSources ?? ([] as any)) || []
   const primaryDsId = String(useDsJs?.[0]?.dataSourceId || '')
 
   React.useEffect(() => {
     if (useDsJs.length > 0) {
       const snap = getSchemaSnapshot(primaryDsId)
-      const nextCfg = toImmutableCfg(props.config || Immutable(defaultConfig) as any, {
+      const nextCfg = toImmutableCfg(props.config || defaultConfig as any, {
         schemaLayerUrl: snap.url,
         schemaLayerLabel: snap.label,
         schemaFields: snap.fields
       })
-      props.onSettingChange({ id:props.id, useDataSources: Immutable([]) as any, useDataSourcesEnabled:false, config: nextCfg })
+      props.onSettingChange({ id:props.id, useDataSources: [] as any, useDataSourcesEnabled:false, config: nextCfg })
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [useDsJs.length, primaryDsId])
 
   const onDsChange = (useDataSources: UseDataSource[]) => {
-    const useDsJs:any[] = asJs(useDataSources ?? Immutable([])) || []
+    const useDsJs:any[] = asJs(useDataSources ?? ([] as any)) || []
     const primaryDsId = String(useDsJs?.[0]?.dataSourceId || '')
     const snap = getSchemaSnapshot(primaryDsId)
-    const nextCfg = toImmutableCfg(props.config || Immutable(defaultConfig) as any, {
+    const nextCfg = toImmutableCfg(props.config || defaultConfig as any, {
       schemaLayerUrl: snap.url,
       schemaLayerLabel: snap.label,
       schemaFields: snap.fields
     })
-    props.onSettingChange({ id:props.id, useDataSources: Immutable([]) as any, useDataSourcesEnabled:false, config: nextCfg })
+    props.onSettingChange({ id:props.id, useDataSources: [] as any, useDataSourcesEnabled:false, config: nextCfg })
   }
   const onToggleDs = (_enabled: boolean) =>
     props.onSettingChange({ id:props.id, useDataSourcesEnabled: false })
@@ -226,9 +226,9 @@ export default function Setting(props: AllWidgetSettingProps<IMConfig>) {
         <div style={{ marginTop:10 }}>
           <DataSourceSelector
             widgetId={props.id}
-            types={Immutable([DataSourceTypes.FeatureLayer])}
+            types={[DataSourceTypes.FeatureLayer] as any}
             isMultiple={false}
-            useDataSources={Immutable([]) as any}
+            useDataSources={[] as any}
             useDataSourcesEnabled={false as any}
             onToggleUseDataEnabled={onToggleDs}
             onChange={onDsChange}
@@ -249,14 +249,17 @@ export default function Setting(props: AllWidgetSettingProps<IMConfig>) {
           placeholder='https://services2.arcgis.com/.../FeatureServer/1' style={P.inp}/>
         <div style={P.hint}>Se valorizzato, ogni modifica viene tracciata campo per campo. Se vuoto il log viene saltato.</div>
 
-        <label style={P.lbl}>Tabella prezzari caricati</label>
-        <input type='text' value={cfg.nsPrezzariUrl || ''} onChange={e=>set('nsPrezzariUrl',e.target.value)}
+        <label style={P.lbl}>Tabella import prezzari</label>
+        <input type='text' value={cfg.nsImportPrezzariUrl || ''} onChange={e=>set('nsImportPrezzariUrl',e.target.value)}
           placeholder='https://services2.arcgis.com/.../FeatureServer/0' style={P.inp}/>
-        <label style={P.lbl}>Tabella voci prezzario ufficiale</label>
-        <input type='text' value={cfg.nsPrezzarioVociUrl || ''} onChange={e=>set('nsPrezzarioVociUrl',e.target.value)}
+        <label style={P.lbl}>Tabella articoli prezzario regionale</label>
+        <input type='text' value={cfg.nsPrezzarioRegionaleArticoliUrl || ''} onChange={e=>set('nsPrezzarioRegionaleArticoliUrl',e.target.value)}
           placeholder='https://services2.arcgis.com/.../FeatureServer/0' style={P.inp}/>
-        <label style={P.lbl}>Tabella prezzario interno</label>
-        <input type='text' value={cfg.nsPrezzarioInternoUrl || ''} onChange={e=>set('nsPrezzarioInternoUrl',e.target.value)}
+        <label style={P.lbl}>Tabella articoli prezzario interno</label>
+        <input type='text' value={cfg.nsPrezzarioInternoArticoliUrl || ''} onChange={e=>set('nsPrezzarioInternoArticoliUrl',e.target.value)}
+          placeholder='https://services2.arcgis.com/.../FeatureServer/0' style={P.inp}/>
+        <label style={P.lbl}>Tabella Nuovi Prezzi</label>
+        <input type='text' value={cfg.nsNuoviPrezziUrl || ''} onChange={e=>set('nsNuoviPrezziUrl',e.target.value)}
           placeholder='https://services2.arcgis.com/.../FeatureServer/0' style={P.inp}/>
         <label style={P.lbl}>Tabella dettaglio nota spese</label>
         <input type='text' value={cfg.nsNotaSpeseDettaglioUrl || ''} onChange={e=>set('nsNotaSpeseDettaglioUrl',e.target.value)}
@@ -267,7 +270,7 @@ export default function Setting(props: AllWidgetSettingProps<IMConfig>) {
         <label style={P.lbl}>Codice parametro spese generali</label>
         <input type='text' value={cfg.nsParametroCode || ''} onChange={e=>set('nsParametroCode',e.target.value)}
           placeholder='SPESE_GENERALI_PERC' style={P.inp}/>
-        <div style={P.hint}>Usato dalla tab Nota spese del cw editing. Il widget TI legge il prezzario ufficiale attivo, le voci interne, salva le righe per categorie regionali e aggiorna subito i totali sul rapporto.</div>
+        <div style={P.hint}>Usato dalla tab Nota spese del cw editing. Il widget TI legge gli articoli da prezzario regionale, prezzario interno o Nuovi Prezzi, salva gli snapshot in GII_NOTA_SPESE_DETTAGLIO e aggiorna subito i totali sul rapporto.</div>
       </div>}
 
       {/* === MODALITA === */}
@@ -564,7 +567,7 @@ export default function Setting(props: AllWidgetSettingProps<IMConfig>) {
       {/* === RESET === */}
       <div style={{marginTop:28, borderTop:'1px solid rgba(255,255,255,0.10)', paddingTop:16}}>
         <button type='button'
-          onClick={()=>{ if(window.confirm('Ripristinare i valori predefiniti?')) props.onSettingChange({id:props.id, config:Immutable(defaultConfig) as any}) }}
+          onClick={()=>{ if(window.confirm('Ripristinare i valori predefiniti?')) props.onSettingChange({id:props.id, config:defaultConfig as any}) }}
           style={{padding:'6px 14px', borderRadius:7, border:'1px solid rgba(252,165,165,0.4)', background:'rgba(239,68,68,0.10)', color:'#fca5a5', fontSize:12, cursor:'pointer', fontWeight:600}}>
           ↺ Ripristina predefiniti
         </button>

@@ -1,4 +1,4 @@
-import { type ImmutableObject, Immutable } from 'jimu-core'
+import { type ImmutableObject } from 'jimu-core'
 
 export type RoleCode = 'DT' | 'DA'
 
@@ -55,9 +55,10 @@ export interface Config {
   auditTableUrl?: string
   displayMode?: string
 
-  nsPrezzariUrl?: string
-  nsPrezzarioVociUrl?: string
-  nsPrezzarioInternoUrl?: string
+  nsImportPrezzariUrl?: string
+  nsPrezzarioRegionaleArticoliUrl?: string
+  nsPrezzarioInternoArticoliUrl?: string
+  nsNuoviPrezziUrl?: string
   nsNotaSpeseDettaglioUrl?: string
   nsParametriUrl?: string
   nsParametroCode?: string
@@ -180,9 +181,10 @@ export const defaultConfig: Config = {
   auditTableUrl: '',
   displayMode: 'page',
 
-  nsPrezzariUrl: '',
-  nsPrezzarioVociUrl: '',
-  nsPrezzarioInternoUrl: '',
+  nsImportPrezzariUrl: '',
+  nsPrezzarioRegionaleArticoliUrl: '',
+  nsPrezzarioInternoArticoliUrl: '',
+  nsNuoviPrezziUrl: '',
   nsNotaSpeseDettaglioUrl: '',
   nsParametriUrl: '',
   nsParametroCode: 'SPESE_GENERALI_PERC',
@@ -335,4 +337,4 @@ export const DEFAULT_FIELD_LAYOUTS: Record<string, LayoutRow[]> = {
 
 export type IMConfig = ImmutableObject<Config>
 
-export const defaultIMConfig: IMConfig = Immutable(defaultConfig) as any
+export const defaultIMConfig: IMConfig = defaultConfig as any

@@ -1147,7 +1147,7 @@ function SelectionWatcher (props: {
   dsKey: string
   watchFields: string[]
   onUpdate: (dsKey: string, state: SelState) => void
-}) {
+}): any {
   const { ds, dsKey, watchFields, onUpdate } = props
 
   React.useEffect(() => {
@@ -3077,16 +3077,20 @@ type NpDraft = Record<string, string>
 type NsCategory = 'MANODOPERA' | 'NOLO' | 'TRASPORTO' | 'MATERIALI'
 type NsSummary = {
   totaleManodopera: number
+  totalePersonale: number
   totaleNoli: number
   totaleTrasporti: number
+  totaleMezzi: number
   totaleMateriali: number
   percentualeSpeseGenerali: number
   importoSpeseGenerali: number
   totaleComplessivo: number
 }
 
+type NsSource = 'REGIONE' | 'INTERNO' | 'NUOVI PREZZI'
+
 type NsVoceRow = {
-  source: 'REGIONE' | 'INTERNO'
+  source: NsSource
   key: string
   codice_voce: string
   descrizione: string
@@ -3099,7 +3103,7 @@ type NsVoceRow = {
 type NsDetailRow = {
   objectid: number
   categoria_costo: NsCategory
-  origine_voce_snapshot: 'REGIONE' | 'INTERNO'
+  origine_voce_snapshot: NsSource
   codice_voce_snapshot: string
   descrizione_snapshot: string
   unita_misura_snapshot: string
@@ -3114,12 +3118,14 @@ type NsDetailRow = {
 type NsManagerProps = {
   category: NsCategory
   title: string
-  officialVoicesUrl: string
-  internalVoicesUrl: string
+  regionaleArticoliUrl: string
+  internoArticoliUrl: string
+  nuoviPrezziUrl: string
   detailTableUrl: string
   parentGlobalId: string
   activePrezzarioCode?: string
   onChanged?: () => Promise<void> | void
+  onDirtyChange?: (dirty: boolean) => void
 }
 
 const NS_CATEGORIES: readonly NsCategory[] = ['MANODOPERA', 'NOLO', 'TRASPORTO', 'MATERIALI'] as const
@@ -3130,10 +3136,31 @@ const NS_CATEGORY_LABELS: Record<NsCategory, string> = {
   MATERIALI: 'Materiali'
 }
 
+const NS_SOURCES: readonly NsSource[] = ['REGIONE', 'INTERNO', 'NUOVI PREZZI'] as const
+const NS_SOURCE_LABELS: Record<NsSource, string> = {
+  REGIONE: 'Prezzario regionale',
+  INTERNO: 'Prezzario interno',
+  'NUOVI PREZZI': 'Nuovi prezzi'
+}
+
+function nsNormalizeSource (v: any): NsSource {
+  const s = String(v || '').trim().toUpperCase().replace(/_/g, ' ')
+  if (s === 'INTERNO') return 'INTERNO'
+  if (s === 'NUOVI PREZZI') return 'NUOVI PREZZI'
+  return 'REGIONE'
+}
+
+function nsMaybeNormalizeSource (v: any): NsSource | null {
+  const s = String(v || '').trim()
+  return s ? nsNormalizeSource(s) : null
+}
+
 const EMPTY_NS_SUMMARY: NsSummary = {
   totaleManodopera: 0,
+  totalePersonale: 0,
   totaleNoli: 0,
   totaleTrasporti: 0,
+  totaleMezzi: 0,
   totaleMateriali: 0,
   percentualeSpeseGenerali: 0,
   importoSpeseGenerali: 0,
@@ -3263,65 +3290,99 @@ async function getActivePrezzario (rawUrl: any): Promise<{ codice: string; anno:
 }
 
 function nsInferCategoryFromOfficialRow (r: any): NsCategory | null {
-  const explicit = nsNormalizeCategory(r?.categoria_default)
+  const explicit = nsNormalizeCategory(r?.categoria_default || r?.categoria_costo)
   if (explicit) return explicit
-  const family = String(r?.famiglia || '').trim().toUpperCase()
-  const code = String(r?.codice_voce || r?.codice_articolo || '').trim().toUpperCase()
-  const descr = String(r?.descrizione || '').trim().toUpperCase()
+  const familyRaw = String(r?.codice_famiglia || r?.famiglia || r?.supercapitolo || '').trim().toUpperCase()
+  const code = String(r?.codice_np || r?.codice_voce || r?.codice_articolo || r?.codice_prezzo || r?.codice_item || r?.tariffa || r?.articolo || '').trim().toUpperCase()
+  const descr = String(r?.descrizione || r?.descrizione_voce || r?.descrizione_item || r?.descrizione_articolo || r?.descrizione_estesa || r?.declaratoria || '').trim().toUpperCase()
+  const family = familyRaw
+    .replace(/ATTREZZATURE.*TRASPORTI?/g, 'AT')
+    .replace(/PRODOTTI\s+FINITI/g, 'PF')
+    .replace(/SEMILAVORATI/g, 'SL')
+    .replace(/RISORSE\s+UMANE/g, 'RU')
+    .replace(/MATERIALI.*/g, 'PR')
   const token = family || code
   if (token.startsWith('RU')) return 'MANODOPERA'
   if (token.startsWith('AT')) return /TRASPORT/.test(descr) ? 'TRASPORTO' : 'NOLO'
-  if (token.startsWith('PR') || token.startsWith('SL')) return 'MATERIALI'
+  if (token.startsWith('PR') || token.startsWith('SL') || token.startsWith('PF')) return 'MATERIALI'
+  if (/MANODOP/.test(descr)) return 'MANODOPERA'
+  if (/TRASPORT/.test(descr)) return 'TRASPORTO'
+  if (/NOLO|NOLI|MEZZI|MACCHINARI/.test(descr)) return 'NOLO'
+  if (/MATERIA|MATERIALI|PRODOTTI|SEMILAVORATI/.test(descr)) return 'MATERIALI'
   return null
 }
 
-async function loadVoicesForCategory (opts: { officialVoicesUrl: string; internalVoicesUrl: string; activePrezzarioCode?: string; category: NsCategory }): Promise<NsVoceRow[]> {
-  const out: NsVoceRow[] = []
-  if (opts.officialVoicesUrl && opts.activePrezzarioCode) {
-    const where = `codice_prezzario = '${nsEscapeSqlString(opts.activePrezzarioCode)}'`
-    const rows = await queryTableAttributes(opts.officialVoicesUrl, where, 'descrizione ASC, OBJECTID ASC')
-    rows.forEach((r: any, idx: number) => {
-      const category = nsInferCategoryFromOfficialRow(r)
-      const selectable = r?.selezionabile == null ? 1 : nsSafeNum(r?.selezionabile, 0)
-      const active = r?.attivo == null ? 1 : nsSafeNum(r?.attivo, 0)
-      if (category !== opts.category || selectable !== 1 || active !== 1) return
-      const codice = String(r?.codice_voce || r?.codice_articolo || '').trim()
-      const descrizione = String(r?.descrizione || '').trim()
-      if (!codice || !descrizione) return
-      out.push({
-        source: 'REGIONE',
-        key: `REGIONE::${codice}`,
-        codice_voce: codice,
-        descrizione,
-        unita_misura: String(r?.unita_misura || '').trim(),
-        prezzo_unitario: nsRound(nsSafeNum(r?.prezzo_unitario ?? r?.prezzo_finale, 0), 4),
-        anno_prezzario: Math.trunc(nsSafeNum(r?.anno_prezzario, 0)) || undefined,
-        categoria_default: category
-      })
-    })
+function nsRowActive (r: any): boolean {
+  return r?.attivo == null ? true : nsSafeNum(r?.attivo, 0) === 1
+}
+
+function nsRowCode (r: any): string {
+  return String(r?.codice_np || r?.codice_voce || r?.codice_articolo || r?.codice_prezzo || r?.codice_item || r?.tariffa || r?.articolo || r?.codice || '').trim()
+}
+
+function nsRowDescr (r: any): string {
+  return String(r?.descrizione || r?.descrizione_voce || r?.descrizione_item || r?.descrizione_articolo || r?.descrizione_estesa || r?.declaratoria || r?.voce || '').trim()
+}
+
+function nsRowUm (r: any): string {
+  return String(r?.unita_misura || r?.um || r?.unita_di_misura || '').trim()
+}
+
+function nsRowPrice (r: any): number {
+  return nsRound(nsSafeNum(r?.prezzo_unitario ?? r?.prezzo_finale ?? r?.prezzo ?? r?.costo_unitario ?? r?.importo_unitario, 0), 4)
+}
+
+function nsRowAnno (r: any): number | undefined {
+  const n = Math.trunc(nsSafeNum(r?.anno_prezzario ?? r?.anno, 0))
+  return n > 0 ? n : undefined
+}
+
+function nsBuildVoceRow (source: NsSource, r: any, category: NsCategory): NsVoceRow | null {
+  if (!nsRowActive(r)) return null
+  const codice = nsRowCode(r)
+  const descrizione = nsRowDescr(r)
+  if (!codice || !descrizione) return null
+  return {
+    source,
+    key: `${source}::${codice}`,
+    codice_voce: codice,
+    descrizione,
+    unita_misura: nsRowUm(r),
+    prezzo_unitario: nsRowPrice(r),
+    anno_prezzario: nsRowAnno(r),
+    categoria_default: category
   }
-  if (opts.internalVoicesUrl) {
-    const rows = await queryTableAttributes(opts.internalVoicesUrl, '1=1', 'descrizione ASC, OBJECTID ASC')
-    rows.forEach((r: any) => {
-      const category = nsNormalizeCategory(r?.categoria_default)
-      const active = r?.attivo == null ? 1 : nsSafeNum(r?.attivo, 0)
-      if (category !== opts.category || active !== 1) return
-      const codice = String(r?.codice_voce || r?.codice_interno || '').trim()
-      const descrizione = String(r?.descrizione || '').trim()
-      if (!codice || !descrizione) return
-      out.push({
-        source: 'INTERNO',
-        key: `INTERNO::${codice}`,
-        codice_voce: codice,
-        descrizione,
-        unita_misura: String(r?.unita_misura || '').trim(),
-        prezzo_unitario: nsRound(nsSafeNum(r?.prezzo_unitario, 0), 4),
-        anno_prezzario: Math.trunc(nsSafeNum(r?.anno_prezzario, 0)) || undefined,
-        categoria_default: category
-      })
-    })
+}
+
+async function loadVoicesForCategory (opts: { source: NsSource; regionaleArticoliUrl: string; internoArticoliUrl: string; nuoviPrezziUrl: string; activePrezzarioCode?: string; category: NsCategory }): Promise<NsVoceRow[]> {
+  const source = opts.source
+  let rawUrl = ''
+  if (source === 'REGIONE') rawUrl = opts.regionaleArticoliUrl
+  else if (source === 'INTERNO') rawUrl = opts.internoArticoliUrl
+  else rawUrl = opts.nuoviPrezziUrl
+  if (!rawUrl) return []
+
+  let where = '1=1'
+  if (source === 'REGIONE' && opts.activePrezzarioCode) {
+    where = `codice_prezzario = '${nsEscapeSqlString(opts.activePrezzarioCode)}'`
   }
-  return out.sort((a, b) => a.descrizione.localeCompare(b.descrizione, 'it'))
+  const rows = await queryTableAttributes(rawUrl, where, 'OBJECTID ASC')
+  const strict: NsVoceRow[] = []
+  const loose: NsVoceRow[] = []
+  rows.forEach((r: any) => {
+    const selectable = r?.selezionabile == null ? 1 : nsSafeNum(r?.selezionabile, 0)
+    if (source === 'REGIONE' && selectable !== 1) return
+    const row = nsBuildVoceRow(source, r, opts.category)
+    if (!row) return
+    loose.push(row)
+    const inferredCategory = nsInferCategoryFromOfficialRow(r)
+    if (!inferredCategory || inferredCategory === opts.category) strict.push(row)
+  })
+  const out = strict.length > 0 ? strict : loose
+  return out.sort((a, b) => {
+    const byDesc = a.descrizione.localeCompare(b.descrizione, 'it')
+    return byDesc !== 0 ? byDesc : a.codice_voce.localeCompare(b.codice_voce, 'it')
+  })
 }
 
 async function queryNotaSpeseRows (detailUrl: string, parentGlobalId: string, category?: NsCategory): Promise<NsDetailRow[]> {
@@ -3331,7 +3392,7 @@ async function queryNotaSpeseRows (detailUrl: string, parentGlobalId: string, ca
   return rows.map((r: any) => ({
     objectid: nsSafeNum(pickAttrCI(r, ['OBJECTID', 'objectid']), 0),
     categoria_costo: (nsNormalizeCategory(r?.categoria_costo) || category || 'MATERIALI') as NsCategory,
-    origine_voce_snapshot: String(r?.origine_voce_snapshot || 'REGIONE').toUpperCase() === 'INTERNO' ? 'INTERNO' : 'REGIONE',
+    origine_voce_snapshot: nsNormalizeSource(r?.origine_voce_snapshot || 'REGIONE'),
     codice_voce_snapshot: String(r?.codice_voce_snapshot || '').trim(),
     descrizione_snapshot: String(r?.descrizione_snapshot || '').trim(),
     unita_misura_snapshot: String(r?.unita_misura_snapshot || '').trim(),
@@ -3365,8 +3426,10 @@ async function recomputeAndPersistNotaSpeseSummary (opts: {
   const totaleComplessivo = nsRound(base + importoSpeseGenerali, 2)
   const summary: NsSummary = {
     totaleManodopera,
+    totalePersonale: totaleManodopera,
     totaleNoli,
     totaleTrasporti,
+    totaleMezzi: nsRound(totaleNoli + totaleTrasporti, 2),
     totaleMateriali,
     percentualeSpeseGenerali: nsRound(perc, 2),
     importoSpeseGenerali,
@@ -3400,19 +3463,29 @@ function NoteSpeseManager (props: NsManagerProps) {
   const [loading, setLoading] = React.useState(false)
   const [saving, setSaving] = React.useState(false)
   const [msg, setMsg] = React.useState<{ ok: boolean; text: string } | null>(null)
-  const [form, setForm] = React.useState<any>({ objectid: null, sourceKey: '', quantita: '', note: '' })
+  const [form, setForm] = React.useState<any>({ objectid: null, source: '', sourceKey: '', sourceQuery: '', quantita: '', note: '' })
+  const [voiceOpen, setVoiceOpen] = React.useState(false)
+
+  const formDirty = React.useMemo(() => {
+    return !!String(form.source || '').trim() || !!String(form.sourceQuery || '').trim() || !!String(form.sourceKey || '').trim() || !!String(form.quantita || '').trim() || !!String(form.note || '').trim()
+  }, [form.source, form.sourceQuery, form.sourceKey, form.quantita, form.note])
 
   const load = React.useCallback(async () => {
     if (!props.parentGlobalId || !props.detailTableUrl) return
     setLoading(true)
     try {
+      const selectedSource = nsMaybeNormalizeSource(form.source)
       const [voc, rr] = await Promise.all([
-        loadVoicesForCategory({
-          officialVoicesUrl: props.officialVoicesUrl,
-          internalVoicesUrl: props.internalVoicesUrl,
-          activePrezzarioCode: props.activePrezzarioCode,
-          category: props.category
-        }),
+        selectedSource
+          ? loadVoicesForCategory({
+            source: selectedSource,
+            regionaleArticoliUrl: props.regionaleArticoliUrl,
+            internoArticoliUrl: props.internoArticoliUrl,
+            nuoviPrezziUrl: props.nuoviPrezziUrl,
+            activePrezzarioCode: props.activePrezzarioCode,
+            category: props.category
+          })
+          : Promise.resolve([]),
         queryNotaSpeseRows(props.detailTableUrl, props.parentGlobalId, props.category)
       ])
       setVoices(voc)
@@ -3422,29 +3495,68 @@ function NoteSpeseManager (props: NsManagerProps) {
     } finally {
       setLoading(false)
     }
-  }, [props.parentGlobalId, props.detailTableUrl, props.category, props.officialVoicesUrl, props.internalVoicesUrl, props.activePrezzarioCode])
+  }, [props.parentGlobalId, props.detailTableUrl, props.category, props.regionaleArticoliUrl, props.internoArticoliUrl, props.nuoviPrezziUrl, props.activePrezzarioCode, form.source])
 
   React.useEffect(() => { void load() }, [load])
   React.useEffect(() => { if (!msg) return; const t = window.setTimeout(() => setMsg(null), 5000); return () => window.clearTimeout(t) }, [msg])
+  React.useEffect(() => { props.onDirtyChange?.(formDirty) }, [formDirty, props])
+  React.useEffect(() => {
+    setForm((f: any) => {
+      const src = nsMaybeNormalizeSource(f.source)
+      if (!src) {
+        if (!f.sourceKey && !f.sourceQuery) return f
+        return { ...f, sourceKey: '', sourceQuery: '' }
+      }
+      if (!f.sourceKey) return f
+      return String(f.sourceKey).startsWith(`${src}::`) ? f : { ...f, sourceKey: '', sourceQuery: '' }
+    })
+  }, [form.source])
+
+  const voiceOptions = React.useMemo(() => voices.map(v => ({
+    key: v.key,
+    label: `${v.codice_voce} — ${v.descrizione}`,
+    codice: v.codice_voce,
+    descrizione: v.descrizione,
+    searchText: `${v.codice_voce} ${v.descrizione}`.toLowerCase(),
+    meta: `${money(v.prezzo_unitario)} / ${v.unita_misura || 'u.m.'}`
+  })), [voices])
+  const filteredVoiceOptions = React.useMemo(() => {
+    const q = String(form.sourceQuery || '').trim().toLowerCase()
+    if (q.length < 2) return []
+    const tokens = q.split(/\s+/).filter(Boolean)
+    return voiceOptions.filter((opt) => tokens.every(t => opt.searchText.includes(t))).slice(0, 50)
+  }, [voiceOptions, form.sourceQuery])
+  const voiceLabelToKey = React.useMemo(() => {
+    const map: Record<string, string> = {}
+    voiceOptions.forEach(opt => { map[opt.label] = opt.key })
+    return map
+  }, [voiceOptions])
 
   const selectedVoce = React.useMemo(() => voices.find(v => v.key === form.sourceKey) || null, [voices, form.sourceKey])
+  React.useEffect(() => {
+    if (!selectedVoce) return
+    const label = `${selectedVoce.codice_voce} — ${selectedVoce.descrizione}`
+    setForm((f: any) => (f.sourceQuery === label ? f : { ...f, sourceQuery: label }))
+  }, [selectedVoce])
   const nextOrdine = React.useMemo(() => rows.reduce((m, r) => Math.max(m, Math.trunc(nsSafeNum(r.ordine, 0))), 0) + 10, [rows])
   const previewImporto = React.useMemo(() => {
     if (!selectedVoce) return 0
-    return nsRound(nsSafeNum(form.quantita, 0) * nsSafeNum(selectedVoce.prezzo_unitario, 0), 2)
+    return nsRound(nsSafeNum(String(form.quantita || '').replace(',', '.'), 0) * nsSafeNum(selectedVoce.prezzo_unitario, 0), 2)
   }, [selectedVoce, form.quantita])
 
-  const resetForm = React.useCallback(() => setForm({ objectid: null, sourceKey: '', quantita: '', note: '' }), [])
+  const resetForm = React.useCallback(() => { setVoiceOpen(false); setForm({ objectid: null, source: '', sourceKey: '', sourceQuery: '', quantita: '', note: '' }) }, [])
 
   const onEdit = (row: NsDetailRow) => {
-    const key = `${row.origine_voce_snapshot}::${row.codice_voce_snapshot}`
-    setForm({ objectid: row.objectid, sourceKey: key, quantita: String(row.quantita ?? ''), note: String(row.note || '') })
+    const source = nsNormalizeSource(row.origine_voce_snapshot)
+    const key = `${source}::${row.codice_voce_snapshot}`
+    setVoiceOpen(false)
+    setForm({ objectid: row.objectid, source, sourceKey: key, sourceQuery: `${row.codice_voce_snapshot} — ${row.descrizione_snapshot}`, quantita: String(row.quantita ?? ''), note: String(row.note || '') })
   }
 
   const onSave = async () => {
     if (!props.parentGlobalId) { setMsg({ ok: false, text: 'GlobalID pratica non disponibile.' }); return }
     if (!selectedVoce) { setMsg({ ok: false, text: 'Seleziona una voce di prezzo.' }); return }
-    const qty = nsRound(nsSafeNum(form.quantita, 0), 4)
+    const qty = nsRound(nsSafeNum(String(form.quantita || '').replace(',', '.'), 0), 4)
     if (qty <= 0) { setMsg({ ok: false, text: 'Indicare la quantità.' }); return }
     const attrs: any = {
       parent_globalid: props.parentGlobalId,
@@ -3464,6 +3576,7 @@ function NoteSpeseManager (props: NsManagerProps) {
     setSaving(true)
     try {
       await saveTableAttributes(props.detailTableUrl, attrs, form.objectid ? Number(form.objectid) : null)
+      props.onDirtyChange?.(false)
       resetForm()
       await load()
       if (props.onChanged) await props.onChanged()
@@ -3481,7 +3594,10 @@ function NoteSpeseManager (props: NsManagerProps) {
     setSaving(true)
     try {
       await deleteTableObjectId(props.detailTableUrl, row.objectid)
-      if (form.objectid && Number(form.objectid) === row.objectid) resetForm()
+      if (form.objectid && Number(form.objectid) === row.objectid) {
+        props.onDirtyChange?.(false)
+        resetForm()
+      }
       await load()
       if (props.onChanged) await props.onChanged()
       setMsg({ ok: true, text: 'Riga eliminata.' })
@@ -3502,17 +3618,58 @@ function NoteSpeseManager (props: NsManagerProps) {
         {msg && (
           <div style={{ padding: '7px 10px', borderRadius: 4, fontSize: 12, fontWeight: 700, border: `1px solid ${msg.ok ? '#b8d4b0' : '#f5b8b8'}`, background: msg.ok ? '#e2efda' : '#fce4e4', color: msg.ok ? '#375623' : '#c00' }}>{msg.text}</div>
         )}
-        <div style={{ display: 'grid', gridTemplateColumns: '2fr 0.9fr 1fr auto', gap: 10, alignItems: 'end' }}>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 2fr 0.9fr 1fr auto', gap: 10, alignItems: 'end' }}>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
-            <div style={{ fontSize: 11, fontWeight: 700, color: '#1F4E79' }}>Voce</div>
-            <select value={form.sourceKey || ''} onChange={(e) => setForm((f: any) => ({ ...f, sourceKey: e.target.value }))} style={{ width: '100%', padding: '5px 8px', border: '1px solid #aac4e0', borderRadius: 4, fontSize: 13, boxSizing: 'border-box', background: '#fff' }}>
-              <option value=''>— seleziona —</option>
-              {voices.map((r) => <option key={r.key} value={r.key}>{`${r.source === 'REGIONE' ? '[REG]' : '[INT]'} ${r.codice_voce} — ${r.descrizione}`}</option>)}
+            <div style={{ fontSize: 11, fontWeight: 700, color: '#1F4E79' }}>Origine voce</div>
+            <select value={form.source || ''} onChange={(e) => { const v = e.target.value; setVoiceOpen(!!v); setForm((f: any) => ({ ...f, source: v, sourceKey: '', sourceQuery: '' })) }} style={{ width: '100%', padding: '5px 8px', border: '1px solid #aac4e0', borderRadius: 4, fontSize: 13, boxSizing: 'border-box', background: '#fff' }}>
+              <option value=''>- Seleziona -</option>
+              {NS_SOURCES.map(src => <option key={src} value={src}>{NS_SOURCE_LABELS[src]}</option>)}
             </select>
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 3, position: 'relative' }}>
+            <div style={{ fontSize: 11, fontWeight: 700, color: '#1F4E79' }}>Voce</div>
+            <input
+              value={form.sourceQuery || ''}
+              disabled={!form.source}
+              placeholder={form.source ? 'Inizia a digitare…' : '- Seleziona -'}
+              onFocus={() => { if (form.source) setVoiceOpen(true) }}
+              onBlur={() => { window.setTimeout(() => setVoiceOpen(false), 150) }}
+              onChange={(e) => {
+                const value = e.target.value
+                const exactKey = voiceLabelToKey[value] || ''
+                setVoiceOpen(!!form.source)
+                setForm((f: any) => ({ ...f, sourceQuery: value, sourceKey: exactKey }))
+              }}
+              style={{ width: '100%', padding: '5px 8px', border: '1px solid #aac4e0', borderRadius: 4, fontSize: 13, boxSizing: 'border-box', background: form.source ? '#fff' : '#f3f6fa' }}
+            />
+            {form.source && voiceOpen && (
+              <div style={{ position: 'absolute', top: '100%', left: 0, right: 0, marginTop: 2, maxHeight: 220, overflowY: 'auto', border: '1px solid #aac4e0', borderRadius: 4, background: '#fff', boxShadow: '0 4px 12px rgba(0,0,0,0.12)', zIndex: 30 }}>
+                {String(form.sourceQuery || '').trim().length < 2 ? (
+                  <div style={{ padding: '6px 8px', fontSize: 12, color: '#666' }}>Digita almeno 2 caratteri.</div>
+                ) : filteredVoiceOptions.length > 0 ? filteredVoiceOptions.map((opt) => (
+                  <div
+                    key={opt.key}
+                    onMouseDown={(e) => {
+                      e.preventDefault()
+                      setForm((f: any) => ({ ...f, sourceQuery: opt.label, sourceKey: opt.key }))
+                      setVoiceOpen(false)
+                    }}
+                    style={{ padding: '6px 8px', fontSize: 13, cursor: 'pointer', borderBottom: '1px solid #eef3f8' }}
+                    title={opt.label}
+                  >
+                    <div style={{ fontWeight: 700, color: '#1F1F1F', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{opt.codice}</div>
+                    <div style={{ fontSize: 12, color: '#444', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{opt.descrizione}</div>
+                    <div style={{ fontSize: 11, color: '#1F4E79' }}>{opt.meta}</div>
+                  </div>
+                )) : (
+                  <div style={{ padding: '6px 8px', fontSize: 12, color: '#666' }}>Nessuna voce trovata.</div>
+                )}
+              </div>
+            )}
           </div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
             <div style={{ fontSize: 11, fontWeight: 700, color: '#1F4E79' }}>Quantità</div>
-            <input type='number' min='0' step='0.0001' value={form.quantita || ''} onChange={(e) => setForm((f: any) => ({ ...f, quantita: e.target.value }))} style={{ width: '100%', padding: '5px 8px', border: '1px solid #aac4e0', borderRadius: 4, fontSize: 13, boxSizing: 'border-box' }} />
+            <input type='text' inputMode='decimal' value={form.quantita || ''} onChange={(e) => setForm((f: any) => ({ ...f, quantita: e.target.value.replace(',', '.') }))} style={{ width: '100%', padding: '5px 8px', border: '1px solid #aac4e0', borderRadius: 4, fontSize: 13, boxSizing: 'border-box' }} />
           </div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
             <div style={{ fontSize: 11, fontWeight: 700, color: '#1F4E79' }}>Prezzo unitario</div>
@@ -3551,12 +3708,12 @@ function NoteSpeseManager (props: NsManagerProps) {
                 <tr><td colSpan={7} style={{ padding: 16, textAlign: 'center', color: '#6b7280' }}>{loading ? 'Caricamento…' : 'Nessuna riga.'}</td></tr>
               ) : rows.map((r, idx) => (
                 <tr key={r.objectid || idx}>
-                  <td style={{ padding: '6px 8px', borderBottom: '1px solid #e0eaf4', background: idx % 2 === 0 ? '#f5f9ff' : '#fff' }}>{r.origine_voce_snapshot === 'INTERNO' ? 'INT' : 'REG'}</td>
+                  <td style={{ padding: '6px 8px', borderBottom: '1px solid #e0eaf4', background: idx % 2 === 0 ? '#f5f9ff' : '#fff' }}>{r.origine_voce_snapshot === 'INTERNO' ? 'INT' : (r.origine_voce_snapshot === 'NUOVI PREZZI' ? 'NP' : 'REG')}</td>
                   <td style={{ padding: '6px 8px', borderBottom: '1px solid #e0eaf4', background: idx % 2 === 0 ? '#f5f9ff' : '#fff' }}><b>{r.codice_voce_snapshot}</b> — {r.descrizione_snapshot}</td>
                   <td style={{ padding: '6px 8px', borderBottom: '1px solid #e0eaf4', background: idx % 2 === 0 ? '#f5f9ff' : '#fff' }}>{nsSafeNum(r.quantita, 0).toLocaleString('it-IT', { minimumFractionDigits: 0, maximumFractionDigits: 4 })} {r.unita_misura_snapshot || ''}</td>
                   <td style={{ padding: '6px 8px', borderBottom: '1px solid #e0eaf4', background: idx % 2 === 0 ? '#f5f9ff' : '#fff' }}>{money(r.prezzo_unitario_snapshot)}</td>
                   <td style={{ padding: '6px 8px', borderBottom: '1px solid #e0eaf4', background: idx % 2 === 0 ? '#f5f9ff' : '#fff' }}>{money(r.importo_riga)}</td>
-                  <td style={{ padding: '6px 8px', borderBottom: '1px solid #e0eaf4', background: idx % 2 === 0 ? '#f5f9ff' : '#fff' }}>{r.note}</td>
+                  <td style={{ padding: '6px 8px', borderBottom: '1px solid #e0eaf4', background: idx % 2 === 0 ? '#f5f9ff' : '#fff' }}>{r.note || ''}</td>
                   <td style={{ padding: '6px 8px', borderBottom: '1px solid #e0eaf4', background: idx % 2 === 0 ? '#f5f9ff' : '#fff', whiteSpace: 'nowrap' }}>
                     <button type='button' onClick={() => onEdit(r)} style={{ cursor: 'pointer', fontSize: 11, padding: '2px 8px', borderRadius: 3, border: 'none', marginRight: 4, fontWeight: 700, background: '#1B6584', color: '#fff' }}>✎</button>
                     <button type='button' onClick={() => void onDelete(r)} style={{ cursor: 'pointer', fontSize: 11, padding: '2px 8px', borderRadius: 3, border: 'none', fontWeight: 700, background: '#c00', color: '#fff' }}>✕</button>
@@ -3656,6 +3813,7 @@ function NuovaPraticaForm (p: {
   const [saving, setSaving] = React.useState(false)
   const [msg, setMsg] = React.useState<{ kind: 'ok' | 'err'; text: string } | null>(null)
   const [showCreateSuccessPopup, setShowCreateSuccessPopup] = React.useState(false)
+  const [noteSpeseDraftDirty, setNoteSpeseDraftDirty] = React.useState(false)
   const [createSuccessPraticaCode, setCreateSuccessPraticaCode] = React.useState('')
   const [createdRecordInfo, setCreatedRecordInfo] = React.useState<{ oid: number; layerUrl: string; data: any } | null>(null)
   const createdRecordInfoRef = React.useRef<{ oid: number; layerUrl: string; data: any } | null>(null)
@@ -3808,7 +3966,7 @@ function NuovaPraticaForm (p: {
   const hasPendingAttachments = attachmentFiles.length > 0
   const hasPendingAttachmentDeletes = pendingDeleteAttachmentIds.length > 0
   const hasPendingAttachmentReplacements = Object.keys(pendingReplaceAttachments).length > 0
-  const isDirty = React.useMemo(() => !draftsEqual(draft, baselineDraft) || !!p.clickedPointWgs84 || hasPendingAttachments || hasPendingAttachmentDeletes || hasPendingAttachmentReplacements, [draft, baselineDraft, p.clickedPointWgs84, hasPendingAttachments, hasPendingAttachmentDeletes, hasPendingAttachmentReplacements])
+  const isDirty = React.useMemo(() => !draftsEqual(draft, baselineDraft) || !!p.clickedPointWgs84 || hasPendingAttachments || hasPendingAttachmentDeletes || hasPendingAttachmentReplacements || noteSpeseDraftDirty, [draft, baselineDraft, p.clickedPointWgs84, hasPendingAttachments, hasPendingAttachmentDeletes, hasPendingAttachmentReplacements, noteSpeseDraftDirty])
   React.useEffect(() => {
     p.onDirtyChange?.(isDirty)
   }, [isDirty, p.onDirtyChange])
@@ -3850,19 +4008,21 @@ const [noteSpeseMsg, setNoteSpeseMsg] = React.useState<{ ok: boolean; text: stri
 const [activePrezzario, setActivePrezzario] = React.useState<{ codice: string; anno: number; descrizione: string } | null>(null)
 
 const noteSpeseCfg = React.useMemo(() => ({
-  prezzariUrl: String(cfg.nsPrezzariUrl || '').trim(),
-  prezzarioVociUrl: String(cfg.nsPrezzarioVociUrl || '').trim(),
-  prezzarioInternoUrl: String(cfg.nsPrezzarioInternoUrl || '').trim(),
+  importPrezzariUrl: String((cfg as any).nsImportPrezzariUrl || (cfg as any).nsPrezzariUrl || '').trim(),
+  regionaleArticoliUrl: String((cfg as any).nsPrezzarioRegionaleArticoliUrl || (cfg as any).nsPrezzarioVociUrl || '').trim(),
+  internoArticoliUrl: String((cfg as any).nsPrezzarioInternoArticoliUrl || (cfg as any).nsPrezzarioInternoUrl || '').trim(),
+  nuoviPrezziUrl: String((cfg as any).nsNuoviPrezziUrl || '').trim(),
   detailUrl: String(cfg.nsNotaSpeseDettaglioUrl || '').trim(),
   parametriUrl: String(cfg.nsParametriUrl || '').trim(),
   parametroCode: String(cfg.nsParametroCode || 'SPESE_GENERALI_PERC').trim() || 'SPESE_GENERALI_PERC'
-}), [cfg.nsPrezzariUrl, cfg.nsPrezzarioVociUrl, cfg.nsPrezzarioInternoUrl, cfg.nsNotaSpeseDettaglioUrl, cfg.nsParametriUrl, cfg.nsParametroCode])
+}), [(cfg as any).nsImportPrezzariUrl, (cfg as any).nsPrezzariUrl, (cfg as any).nsPrezzarioRegionaleArticoliUrl, (cfg as any).nsPrezzarioVociUrl, (cfg as any).nsPrezzarioInternoArticoliUrl, (cfg as any).nsPrezzarioInternoUrl, (cfg as any).nsNuoviPrezziUrl, cfg.nsNotaSpeseDettaglioUrl, cfg.nsParametriUrl, cfg.nsParametroCode])
 
 const noteSpeseMissing = React.useMemo(() => {
   const missing: string[] = []
-  if (!noteSpeseCfg.prezzariUrl) missing.push('Tabella prezzari caricati')
-  if (!noteSpeseCfg.prezzarioVociUrl) missing.push('Tabella voci prezzario')
-  if (!noteSpeseCfg.prezzarioInternoUrl) missing.push('Tabella prezzario interno')
+  if (!noteSpeseCfg.importPrezzariUrl) missing.push('Tabella import prezzari')
+  if (!noteSpeseCfg.regionaleArticoliUrl) missing.push('Tabella articoli prezzario regionale')
+  if (!noteSpeseCfg.internoArticoliUrl) missing.push('Tabella articoli prezzario interno')
+  if (!noteSpeseCfg.nuoviPrezziUrl) missing.push('Tabella Nuovi Prezzi')
   if (!noteSpeseCfg.detailUrl) missing.push('Tabella dettaglio nota spese')
   if (!noteSpeseCfg.parametriUrl) missing.push('Tabella parametri')
   return missing
@@ -3891,9 +4051,9 @@ React.useEffect(() => {
 React.useEffect(() => {
   let cancelled = false
   const run = async () => {
-    if (!noteSpeseCfg.prezzariUrl) { if (!cancelled) setActivePrezzario(null); return }
+    if (!noteSpeseCfg.importPrezzariUrl) { if (!cancelled) setActivePrezzario(null); return }
     try {
-      const row = await getActivePrezzario(noteSpeseCfg.prezzariUrl)
+      const row = await getActivePrezzario(noteSpeseCfg.importPrezzariUrl)
       if (!cancelled) setActivePrezzario(row)
     } catch {
       if (!cancelled) setActivePrezzario(null)
@@ -3901,7 +4061,7 @@ React.useEffect(() => {
   }
   void run()
   return () => { cancelled = true }
-}, [noteSpeseCfg.prezzariUrl])
+}, [noteSpeseCfg.importPrezzariUrl])
 
 const refreshNotaSpeseSummary = React.useCallback(async () => {
   if (mode !== 'edit' || currentOid == null || !currentGlobalId || noteSpeseMissing.length > 0) return
@@ -5049,9 +5209,10 @@ React.useEffect(() => {
         <div style={{ fontSize: 12, color: '#6b7280' }}>Le righe vengono salvate subito nelle tabelle nota spese. I totali del rapporto si aggiornano in automatico.</div>
         <button type='button' onClick={() => void refreshNotaSpeseSummary()} disabled={noteSpeseBusy} style={{ padding: '6px 14px', borderRadius: 8, border: '1px solid rgba(0,0,0,0.12)', background: '#fff', color: '#111827', fontWeight: 700, cursor: noteSpeseBusy ? 'not-allowed' : 'pointer', opacity: noteSpeseBusy ? 0.6 : 1 }}>{noteSpeseBusy ? 'Ricalcolo…' : 'Ricalcola totali'}</button>
       </div>
-      <NoteSpeseManager kind='personale' title='Prestazioni manodopera' listinoUrl={noteSpeseCfg.listinoPersonaleUrl} tableUrl={noteSpeseCfg.tablePersonaleUrl} parentGlobalId={currentGlobalId} onChanged={refreshNotaSpeseSummary} />
-      <NoteSpeseManager kind='mezzi' title='Mezzi e macchinari' listinoUrl={noteSpeseCfg.listinoMezziUrl} tableUrl={noteSpeseCfg.tableMezziUrl} parentGlobalId={currentGlobalId} onChanged={refreshNotaSpeseSummary} />
-      <NoteSpeseManager kind='materiali' title='Materiali' listinoUrl={noteSpeseCfg.listinoMaterialiUrl} tableUrl={noteSpeseCfg.tableMaterialiUrl} parentGlobalId={currentGlobalId} onChanged={refreshNotaSpeseSummary} />
+      <NoteSpeseManager category='MANODOPERA' title='Prestazioni manodopera' regionaleArticoliUrl={noteSpeseCfg.regionaleArticoliUrl} internoArticoliUrl={noteSpeseCfg.internoArticoliUrl} nuoviPrezziUrl={noteSpeseCfg.nuoviPrezziUrl} detailTableUrl={noteSpeseCfg.detailUrl} parentGlobalId={currentGlobalId} activePrezzarioCode={activePrezzario?.codice} onChanged={refreshNotaSpeseSummary} onDirtyChange={setNoteSpeseDraftDirty} />
+      <NoteSpeseManager category='NOLO' title='Mezzi e macchinari' regionaleArticoliUrl={noteSpeseCfg.regionaleArticoliUrl} internoArticoliUrl={noteSpeseCfg.internoArticoliUrl} nuoviPrezziUrl={noteSpeseCfg.nuoviPrezziUrl} detailTableUrl={noteSpeseCfg.detailUrl} parentGlobalId={currentGlobalId} activePrezzarioCode={activePrezzario?.codice} onChanged={refreshNotaSpeseSummary} onDirtyChange={setNoteSpeseDraftDirty} />
+      <NoteSpeseManager category='MATERIALI' title='Materiali' regionaleArticoliUrl={noteSpeseCfg.regionaleArticoliUrl} internoArticoliUrl={noteSpeseCfg.internoArticoliUrl} nuoviPrezziUrl={noteSpeseCfg.nuoviPrezziUrl} detailTableUrl={noteSpeseCfg.detailUrl} parentGlobalId={currentGlobalId} activePrezzarioCode={activePrezzario?.codice} onChanged={refreshNotaSpeseSummary} onDirtyChange={setNoteSpeseDraftDirty} />
+      <NoteSpeseManager category='TRASPORTO' title='Trasporti' regionaleArticoliUrl={noteSpeseCfg.regionaleArticoliUrl} internoArticoliUrl={noteSpeseCfg.internoArticoliUrl} nuoviPrezziUrl={noteSpeseCfg.nuoviPrezziUrl} detailTableUrl={noteSpeseCfg.detailUrl} parentGlobalId={currentGlobalId} activePrezzarioCode={activePrezzario?.codice} onChanged={refreshNotaSpeseSummary} onDirtyChange={setNoteSpeseDraftDirty} />
     </div>
   )
 )}
@@ -6109,15 +6270,15 @@ function buildSchemaOnlyDsProxy (args: { url?: string, label?: string, schemaFie
   const proxy: any = {
     id: `gii-schema-${encodeURIComponent(url || label).slice(-48)}`,
     layer: null,
-    async getLayer () { return null },
-    async getJSAPILayer () { return null },
-    async getJsApiLayer () { return null },
+    async getLayer (): Promise<any> { return null },
+    async getJSAPILayer (): Promise<any> { return null },
+    async getJsApiLayer (): Promise<any> { return null },
     getDataSourceJson () { return { url } },
     dataSourceJson: { url },
     getLabel () { return label },
     getIdField () { return idFieldName },
     getSchema () { return { idField: idFieldName, fields: schemaFields } },
-    async query (_q: any) { return { records: [] } },
+    async query (_q: any): Promise<{ records: any[] }> { return { records: [] as any[] } },
     clearSelection () {}
   }
 

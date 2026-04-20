@@ -1605,16 +1605,16 @@ ${r.codice_riferimento} — ${r.descrizione}`,
                     <input className='gap-input gap-readonly' value={lineForm.prezzo_unitario || ''} readOnly />
                   </div>
                   <div className='gap-field'>
+                    <div className='gap-label'>Importo</div>
+                    <input className='gap-input gap-readonly' value={money(lineImportoPreview, 4)} readOnly />
+                  </div>
+                  <div className='gap-field'>
                     <div className='gap-label'>UM</div>
                     <input className='gap-input gap-readonly' value={lineForm.unita_misura || ''} readOnly />
                   </div>
                   <div className='gap-field'>
                     <div className='gap-label'>Quantità</div>
                     <input className='gap-input' inputMode='decimal' value={lineForm.quantita || ''} onChange={(e) => setLineForm((f: any) => ({ ...f, quantita: e.target.value }))} />
-                  </div>
-                  <div className='gap-field'>
-                    <div className='gap-label'>Importo</div>
-                    <input className='gap-input gap-readonly' value={money(lineImportoPreview, 4)} readOnly />
                   </div>
 
                   {(String(lineForm.codice_riferimento || '').trim() || String(lineForm.descrizione || '').trim()) ? (
