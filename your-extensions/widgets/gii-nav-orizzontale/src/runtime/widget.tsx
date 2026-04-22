@@ -81,16 +81,91 @@ function resolvePageId(pageTokenRaw: string): string | null {
   return null
 }
 
-function gotoPage(pageToken: string): void {
+
+
+function readCurrentSection (): string {
+  try {
+    const fromStorage = String(
+      window.sessionStorage.getItem('GII_EDIT_TAB') ||
+      window.sessionStorage.getItem('GII_REQUESTED_EDIT_SECTION') ||
+      window.sessionStorage.getItem('GII_NAV_SECTION') ||
+      ''
+    ).trim()
+    if (fromStorage) return fromStorage
+  } catch {
+    // ignore
+  }
+  try {
+    const url = new URL(window.location.href)
+    return String(url.searchParams.get('section') || url.searchParams.get('giiSection') || '').trim()
+  } catch {
+    return ''
+  }
+}
+
+function applyOptionalSectionToUrl (section?: string): void {
+  try {
+    const url = new URL(window.location.href)
+    if (section && String(section).trim()) {
+      url.searchParams.set('section', String(section).trim())
+    } else {
+      url.searchParams.delete('section')
+      url.searchParams.delete('giiSection')
+    }
+    window.history.replaceState(window.history.state, '', url.toString())
+  } catch {
+    // ignore
+  }
+}
+
+function persistAndBroadcastSection(section?: string): void {
+  try {
+    const normalized = String(section || '').trim()
+    if (normalized) {
+      window.sessionStorage.setItem('GII_NAV_SECTION', normalized)
+    } else {
+      window.sessionStorage.removeItem('GII_NAV_SECTION')
+    }
+    window.dispatchEvent(new CustomEvent('gii:edit-section-change', { detail: { section: normalized || '' } }))
+  } catch {
+    // ignore
+  }
+}
+
+function getCurrentPageId (): string | null {
+  try {
+    const state: any = getAppStore()?.getState?.()
+    return String(state?.appRuntimeInfo?.currentPageId || '').trim() || null
+  } catch {
+    return null
+  }
+}
+
+function gotoPage(pageToken: string, section?: string): void {
   const pageId = resolvePageId(pageToken)
+  const currentPageId = getCurrentPageId()
+  persistAndBroadcastSection(section)
   if (pageId) {
+    if (currentPageId && currentPageId === pageId) {
+      applyOptionalSectionToUrl(section)
+      window.setTimeout(() => persistAndBroadcastSection(section), 0)
+      window.setTimeout(() => persistAndBroadcastSection(section), 80)
+      return
+    }
     UrlManager.getInstance().changePage(pageId)
+    window.setTimeout(() => applyOptionalSectionToUrl(section), 30)
+    window.setTimeout(() => persistAndBroadcastSection(section), 80)
+    window.setTimeout(() => persistAndBroadcastSection(section), 250)
     return
   }
   const clean = (pageToken || '').trim().replace(/^#+\/?/, '').replace(/^\/+/, '')
   const t = clean.startsWith('page/') ? clean.slice(5) : clean
   window.location.hash = `#/page/${t}`
+  window.setTimeout(() => applyOptionalSectionToUrl(section), 30)
+  window.setTimeout(() => persistAndBroadcastSection(section), 80)
+  window.setTimeout(() => persistAndBroadcastSection(section), 250)
 }
+
 
 const NAV_ICONS: Record<string, string> = {
   home:      `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>`,
@@ -102,18 +177,20 @@ const NAV_ICONS: Record<string, string> = {
 }
 const NAV_DEFAULT_ICON = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/></svg>`
 
-function NavButton (p: { item: NavItem, cfg: any, idx: number, currentPageId: string | null }) {
-  const { item, cfg, currentPageId } = p
+function NavButton (p: { item: NavItem, cfg: any, idx: number, currentPageId: string | null, currentSection: string }) {
+  const { item, cfg, currentPageId, currentSection } = p
   const [hov, setHov] = React.useState(false)
   const itemPageId = item.hashPage ? resolvePageId(item.hashPage) : null
-  const isActive = !!currentPageId && !!itemPageId && currentPageId === itemPageId
+  const itemSection = String(item.section || '').trim()
+  const currentSectionNorm = String(currentSection || '').trim()
+  const isActive = !!currentPageId && !!itemPageId && currentPageId === itemPageId && (!itemSection || itemSection === currentSectionNorm)
   const hot = hov || isActive
 
   return (
     <div
       onMouseEnter={() => setHov(true)}
       onMouseLeave={() => setHov(false)}
-      onClick={() => { if (item.hashPage) gotoPage(item.hashPage) }}
+      onClick={() => { if (item.hashPage) gotoPage(item.hashPage, item.section) }}
       style={{
         cursor: 'pointer',
         width: cfg.itemWidth,
@@ -177,17 +254,33 @@ export default function Widget (props: Props) {
   }
 
   const [currentPageId, setCurrentPageId] = React.useState<string | null>(() => readCurrentPageId())
+  const [currentSection, setCurrentSection] = React.useState<string>(() => readCurrentSection())
   const [user, setUser] = React.useState<UserInfo | null>(null)
   const [uLoad, setULoad] = React.useState(true)
 
   React.useEffect(() => {
-    const upd = () => setCurrentPageId(readCurrentPageId())
+    const upd = () => {
+      setCurrentPageId(readCurrentPageId())
+      setCurrentSection(readCurrentSection())
+    }
+    const onSectionChange = (evt: any) => {
+      const next = String(evt?.detail?.section || readCurrentSection() || '').trim()
+      if (next) setCurrentSection(next)
+      setCurrentPageId(readCurrentPageId())
+    }
+    const onFocus = () => upd()
     upd()
     window.addEventListener('hashchange', upd)
     window.addEventListener('popstate', upd)
+    window.addEventListener('gii:edit-section-change', onSectionChange as EventListener)
+    window.addEventListener('focus', onFocus)
+    document.addEventListener('visibilitychange', onFocus)
     return () => {
       window.removeEventListener('hashchange', upd)
       window.removeEventListener('popstate', upd)
+      window.removeEventListener('gii:edit-section-change', onSectionChange as EventListener)
+      window.removeEventListener('focus', onFocus)
+      document.removeEventListener('visibilitychange', onFocus)
     }
   }, [])
 
@@ -245,7 +338,7 @@ export default function Widget (props: Props) {
       overflowY: 'hidden'
     }}>
       {visibleItems.map((item, i) => (
-        <NavButton key={item.id} item={item} cfg={cfg} idx={i} currentPageId={currentPageId} />
+        <NavButton key={item.id} item={item} cfg={cfg} idx={i} currentPageId={currentPageId} currentSection={currentSection} />
       ))}
     </div>
   )

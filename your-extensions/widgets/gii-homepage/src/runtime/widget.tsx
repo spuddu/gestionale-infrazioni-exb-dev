@@ -222,6 +222,7 @@ function Card(p: { card: CardConfig; cfg: any; idx: number }) {
       onClick={() => {
         const v = (card.hashPage || '').trim()
         if (!v) return
+        try { sessionStorage.setItem('GII_FROM_HOME', '1') } catch { /* ignore */ }
         gotoPage(v)
       }}
       style={{ cursor:'pointer', borderRadius:cfg.cardBorderRadius,

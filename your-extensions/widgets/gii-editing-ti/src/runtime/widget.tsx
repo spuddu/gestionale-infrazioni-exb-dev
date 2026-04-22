@@ -65,6 +65,53 @@ function ensureLayerIndex (url: string, layer?: any): string {
 }
 
 
+
+function getRequestedEditSection (): 'anagrafica' | 'violazione' | 'dati_tecnici' | 'nota_spese' | 'allegati' | null {
+  const normalize = (raw: any): string => String(raw || '').trim().toLowerCase().replace(/_/g, '-').replace(/\s+/g, '-')
+  const parseFrom = (raw: string): string => {
+    const text = String(raw || '')
+    if (!text) return ''
+    const qPos = text.indexOf('?')
+    if (qPos < 0) return ''
+    const query = text.slice(qPos + 1)
+    const hashPos = query.indexOf('#')
+    const clean = hashPos >= 0 ? query.slice(0, hashPos) : query
+    try {
+      return new URLSearchParams(clean).get('section') || ''
+    } catch {
+      return ''
+    }
+  }
+  const mapSection = (raw: any): 'anagrafica' | 'violazione' | 'dati_tecnici' | 'nota_spese' | 'allegati' | null => {
+    switch (normalize(raw)) {
+      case 'anagrafica': return 'anagrafica'
+      case 'violazione': return 'violazione'
+      case 'dati-tecnici':
+      case 'luoghi':
+      case 'luoghi-e-dati-tecnici':
+      case 'luoghi-dati-tecnici':
+      case 'localizzazione-e-dati-tecnici':
+        return 'dati_tecnici'
+      case 'nota-spese': return 'nota_spese'
+      case 'allegati': return 'allegati'
+      default: return null
+    }
+  }
+  try {
+    const fromUrl = mapSection(parseFrom(window.location.search || '') || parseFrom(window.location.hash || '') || parseFrom(window.location.href || ''))
+    if (fromUrl) return fromUrl
+  } catch {}
+  try {
+    const fromNav = mapSection(window.sessionStorage.getItem('GII_NAV_SECTION'))
+    if (fromNav) return fromNav
+  } catch {}
+  try {
+    const fromRequested = mapSection(window.sessionStorage.getItem('GII_REQUESTED_EDIT_SECTION'))
+    if (fromRequested) return fromRequested
+  } catch {}
+  return null
+}
+
 function getGlobalOverlayHost (): HTMLElement | null {
   try {
     const topBody = (window as any)?.top?.document?.body
@@ -4114,22 +4161,65 @@ function NuovaPraticaForm (p: {
   }, [validationPopup, validationPopupOkId])
 
   const [npTab, setNpTab] = React.useState<'anagrafica' | 'violazione' | 'dati_tecnici' | 'nota_spese' | 'allegati'>(() => {
+    const requested = getRequestedEditSection()
+    if (requested) return requested
     if (mode !== 'edit') return 'anagrafica'
     try {
       const saved = sessionStorage.getItem('GII_EDIT_TAB')
       if (saved === 'anagrafica' || saved === 'violazione' || saved === 'dati_tecnici' || saved === 'nota_spese' || saved === 'allegati') {
-        sessionStorage.removeItem('GII_EDIT_TAB')
         return saved
       }
     } catch {}
     return 'anagrafica'
   })
+  const [isExternalNavMode, setIsExternalNavMode] = React.useState<boolean>(() => !!getRequestedEditSection())
   const skipNpTabSyncRef = React.useRef(false)
 
   React.useEffect(() => {
     if (skipNpTabSyncRef.current) { skipNpTabSyncRef.current = false; return }
     try { sessionStorage.setItem('GII_EDIT_TAB', npTab) } catch {}
   }, [npTab])
+
+  React.useEffect(() => {
+    const applyRequestedSection = (forcedSection?: any) => {
+      const requested = (() => {
+        const raw = String(forcedSection || '').trim()
+        if (raw) {
+          const normalized = raw.toLowerCase().replace(/_/g, '-').replace(/\s+/g, '-')
+          switch (normalized) {
+            case 'anagrafica': return 'anagrafica' as const
+            case 'violazione': return 'violazione' as const
+            case 'dati-tecnici':
+            case 'luoghi':
+            case 'luoghi-e-dati-tecnici':
+            case 'luoghi-dati-tecnici':
+            case 'localizzazione-e-dati-tecnici':
+              return 'dati_tecnici' as const
+            case 'nota-spese': return 'nota_spese' as const
+            case 'allegati': return 'allegati' as const
+            default: return null
+          }
+        }
+        return getRequestedEditSection()
+      })()
+      if (!requested) return
+      try { sessionStorage.setItem('GII_REQUESTED_EDIT_SECTION', requested) } catch {}
+      try { sessionStorage.setItem('GII_EDIT_TAB', requested) } catch {}
+      setIsExternalNavMode(true)
+      setNpTab((prev) => (prev === requested ? prev : requested))
+    }
+    const onExternalSectionChange = (evt: any) => applyRequestedSection(evt?.detail?.section)
+    applyRequestedSection()
+    window.addEventListener('hashchange', applyRequestedSection)
+    window.addEventListener('popstate', applyRequestedSection)
+    window.addEventListener('gii:edit-section-change', onExternalSectionChange as EventListener)
+    return () => {
+      window.removeEventListener('hashchange', applyRequestedSection)
+      window.removeEventListener('popstate', applyRequestedSection)
+      window.removeEventListener('gii:edit-section-change', onExternalSectionChange as EventListener)
+    }
+  }, [])
+
 
   const navigateToEditAfterCreate = React.useCallback(() => {
     const info = createdRecordInfoRef.current
@@ -5193,7 +5283,7 @@ React.useEffect(() => {
   const NP_TABS = [
     { id: 'anagrafica', label: 'Anagrafica' },
     { id: 'violazione', label: 'Violazione' },
-    { id: 'dati_tecnici', label: 'Dati tecnici' },
+    { id: 'dati_tecnici', label: 'Luoghi e dati tecnici' },
     { id: 'nota_spese', label: 'Nota spese' },
     { id: 'allegati', label: 'Allegati' }
   ] as const
@@ -5204,7 +5294,7 @@ React.useEffect(() => {
   }
 
   const tabBtn = (id: string, label: string) => (
-    <button key={id} type='button' onClick={() => setNpTab(id as any)} style={{
+    <button key={id} type='button' onClick={() => { setIsExternalNavMode(false); setNpTab(id as any) }} style={{
       padding: '6px 14px', borderRadius: 10, border: `1px solid ${npTab === id ? '#2f6fed' : 'rgba(0,0,0,0.12)'}`,
       background: npTab === id ? '#eaf2ff' : 'rgba(0,0,0,0.02)',
       color: npTab === id ? '#1d4ed8' : '#374151',
@@ -5471,10 +5561,12 @@ React.useEffect(() => {
       </div>
 
       {/* ── Tab bar ── */}
+      {!isExternalNavMode && (
       <div style={{ flex: '0 0 auto', display: 'flex', gap: 6, padding: '8px 0', flexWrap: 'wrap',
         borderBottom: '1px solid rgba(0,0,0,0.08)' }}>
         {NP_TABS.map(t => tabBtn(t.id, t.label))}
       </div>
+      )}
 
       {/* ── Contenuto tab (scrollabile) ── */}
       <div style={{ flex: '1 1 auto', minHeight: 0, overflowY: 'auto', padding: '12px 2px' }}>

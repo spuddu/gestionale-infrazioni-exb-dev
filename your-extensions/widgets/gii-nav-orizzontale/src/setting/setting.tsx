@@ -135,6 +135,7 @@ function makeNewItem (order: number): NavItem {
     order,
     label: 'Nuova voce',
     hashPage: '',
+    section: '',
     colorBg: '#1e3a5f',
     colorAccent: '#60a5fa',
     colorBgRest: 'rgba(255,255,255,0.05)',
@@ -230,6 +231,9 @@ export default function Setting (props: AllWidgetSettingProps<IMConfig>) {
               <Sel value={item.icon || 'home'} onChange={v => setItem(ri, { icon:v })} options={ICON_OPTIONS} />
               <label style={P.lbl}>Pagina di destinazione</label>
               <PageSel value={item.hashPage} onChange={v => setItem(ri, { hashPage:v })} />
+              <label style={P.lbl}>Sezione (opzionale)</label>
+              <Inp value={item.section || ''} onChange={v => setItem(ri, { section:v })} placeholder='es. anagrafica, violazione, luogo' />
+              <div style={P.hint}>Se vuota, la voce naviga solo alla pagina e la sezione viene ignorata.</div>
               <div style={P.row2}>
                 <div><label style={P.lbl}>Colore sfondo</label><ColInp value={item.colorBg} onChange={v => {
                   const hex = /^#[0-9a-fA-F]{6}$/.test(v) ? v : item.colorBg

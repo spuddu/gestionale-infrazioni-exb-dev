@@ -1,6 +1,6 @@
 /** @jsx jsx */
 /** @jsxFrag React.Fragment */
-import { React, jsx, type AllWidgetProps, SessionManager, UrlManager, getAppStore } from 'jimu-core'
+import { React, jsx, ReactRedux, type IMState, type AllWidgetProps, SessionManager, UrlManager, getAppStore } from 'jimu-core'
 import type { IMConfig, NavItem } from '../config'
 import { defaultConfig } from '../config'
 
@@ -105,8 +105,8 @@ const NAV_ICONS: Record<string, string> = {
 const NAV_DEFAULT_ICON = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/></svg>`
 
 // ── NavButton ─────────────────────────────────────────────────────────────────
-function NavButton(p: { item: NavItem; cfg: any; idx: number; currentPageId: string | null }) {
-  const { item, cfg, currentPageId } = p
+function NavButton(p: { item: NavItem; cfg: any; idx: number; currentPageId: string | null; animate: boolean }) {
+  const { item, cfg, currentPageId, animate } = p
   const [hov, setHov] = React.useState(false)
   const itemPageId = item.hashPage ? resolvePageId(item.hashPage) : null
   const isActive = !!currentPageId && !!itemPageId && currentPageId === itemPageId
@@ -127,11 +127,12 @@ function NavButton(p: { item: NavItem; cfg: any; idx: number; currentPageId: str
         padding: cfg.itemPadding,
         display: 'flex', flexDirection: 'row', alignItems: 'center', gap: 10,
         transition: 'all 0.25s cubic-bezier(0.4,0,0.2,1)',
-        transform: hov ? 'translateY(-2px)' : 'translateY(0)',
         boxShadow: hov ? `0 20px 40px rgba(0,0,0,0.3),0 0 0 1px ${item.colorAccent}44` : '0 4px 16px rgba(0,0,0,0.15)',
-        animationName: 'fadeInUp', animationDuration: '0.5s',
-        animationDelay: `${p.idx * 80}ms`, animationFillMode: 'both',
-        animationTimingFunction: 'cubic-bezier(0.4,0,0.2,1)'
+        ...(animate ? {
+          animationName: 'fadeInUp', animationDuration: '0.5s',
+          animationDelay: `${p.idx * 80}ms`, animationFillMode: 'both',
+          animationTimingFunction: 'cubic-bezier(0.4,0,0.2,1)'
+        } : {})
       }}>
       <div style={{
         width: 28, height: 28, borderRadius: 7, flexShrink: 0,
@@ -161,33 +162,34 @@ export default function Widget(props: Props) {
   const cfg: any = { ...defaultConfig, ...(props.config as any) }
   const items: NavItem[] = Array.isArray(cfg.items) ? cfg.items : defaultConfig.items
 
-  // Pagina corrente (per evidenziare il pulsante attivo come stato hover)
-  const readCurrentPageId = (): string | null => {
+  // Pagina corrente dallo store Redux di ExB (reagisce a UrlManager.changePage)
+  const currentPageId = ReactRedux.useSelector((state: IMState) => {
+    const s: any = state
+    return (s?.appRuntimeInfo?.currentPageId as string) ?? null
+  })
+
+  // ── Animazione cascata: solo se si arriva dalla Home ──
+  // ExB tiene in vita i widget di pagine non correnti. Più istanze di
+  // gii-nav reagiscono allo stesso cambio currentPageId. Solo l'istanza
+  // VISIBILE (offsetParent !== null) deve consumare il flag.
+  // useLayoutEffect esegue prima del paint → zero flash.
+  const containerRef = React.useRef<HTMLDivElement>(null)
+  const [animate, setAnimate] = React.useState(false)
+
+  React.useLayoutEffect(() => {
+    if (!currentPageId) return
+
+    // Solo l'istanza visibile processa il flag
+    const el = containerRef.current
+    if (!el || el.offsetParent === null) return
+
+    let fromHome = false
     try {
-      const st: any = getAppStore()?.getState?.()
-      const rid = st?.appRuntimeInfo?.currentPageId
-      if (rid) return rid
+      const v = sessionStorage.getItem('GII_FROM_HOME')
+      if (v) { sessionStorage.removeItem('GII_FROM_HOME'); fromHome = true }
     } catch { /* ignore */ }
-
-    const h = window.location.hash || ''
-    const m = h.match(/#\/page\/([^/?#]+)/)
-    const tok = m ? decodeURIComponent(m[1]) : ''
-    if (!tok) return null
-    return resolvePageId(tok) || tok
-  }
-
-  const [currentPageId, setCurrentPageId] = React.useState<string | null>(() => readCurrentPageId())
-
-  React.useEffect(() => {
-    const upd = () => setCurrentPageId(readCurrentPageId())
-    upd()
-    window.addEventListener('hashchange', upd)
-    window.addEventListener('popstate', upd)
-    return () => {
-      window.removeEventListener('hashchange', upd)
-      window.removeEventListener('popstate', upd)
-    }
-  }, [])
+    setAnimate(fromHome)
+  }, [currentPageId])
 
   const [user,  setUser]  = React.useState<UserInfo | null>(null)
   const [uLoad, setULoad] = React.useState(true)
@@ -234,7 +236,7 @@ export default function Widget(props: Props) {
   const visibleItems = [...items].sort((a, b) => a.order - b.order).filter(isVisible)
 
   return (
-    <div style={{
+    <div ref={containerRef} style={{
       width: '100%', height: '100%',
       display: 'flex',
       flexDirection: cfg.direction === 'horizontal' ? 'row' : 'column',
@@ -246,7 +248,7 @@ export default function Widget(props: Props) {
         @keyframes fadeInUp { from{opacity:0;transform:translateY(12px)} to{opacity:1;transform:translateY(0)} }
       `}</style>
       {visibleItems.map((item, i) => (
-        <NavButton key={item.id} item={item} cfg={cfg} idx={i} currentPageId={currentPageId}/>
+        <NavButton key={item.id} item={item} cfg={cfg} idx={i} currentPageId={currentPageId} animate={animate}/>
       ))}
     </div>
   )
