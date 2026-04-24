@@ -113,6 +113,7 @@ export interface Config {
   sectionHeaderFontSize: number
   sectionDividerColor: string
   sectionDividerWidth: number
+  formFieldFontSize: number
 
   // --- Titolo pratica
   detailTitlePrefix: string
@@ -231,6 +232,7 @@ export const defaultConfig: Config = {
   sectionHeaderFontSize: 11,
   sectionDividerColor: '#bfdbfe',
   sectionDividerWidth: 2,
+  formFieldFontSize: 13,
 
   detailTitlePrefix: 'Dettaglio rapporto n.',
   detailTitleBg: 'transparent',
@@ -291,20 +293,24 @@ export const defaultConfig: Config = {
 
 export const DEFAULT_FIELD_LAYOUTS: Record<string, LayoutRow[]> = {
   anagrafica: [
-    { type: 'special', id: '_dati_gen_label' },
-    { type: 'fields', columns: '1fr 1fr 1fr', cells: [
-      { field: 'tecnico_rilevatore' }, { field: 'ufficio_zona' }, { field: 'data_rilevazione' }
-    ]},
     { type: 'header', label: 'Trasgressore' },
-    { type: 'fields', columns: '1fr 1fr', cells: [{ field: 'tipologia_soggetto' }, {}] },
+    { type: 'fields', columns: '1fr 1fr', cells: [{ field: 'tipologia_soggetto' }, { field: 'qualifica_fondo' }] },
     { type: 'fields', columns: '1fr 1fr 1fr', cells: [{ field: 'nome' }, { field: 'cognome' }, { field: 'codice_fiscale' }] },
-    { type: 'fields', columns: '1fr 1fr', cells: [{ field: 'ragione_sociale' }, { field: 'piva' }] },
-    { type: 'fields', columns: '1fr 1fr 1fr', cells: [{ field: 'via' }, { field: 'civico' }, { field: 'citta' }] },
-    { type: 'fields', columns: '1fr 1fr 1fr', cells: [{ field: 'cap' }, { field: 'telefono' }, { field: 'cellulare' }] },
-    { type: 'fields', columns: '1fr 1fr', cells: [{ field: 'email' }, { field: 'pec' }] }
+    { type: 'fields', columns: '2fr 1fr', cells: [{ field: 'ragione_sociale' }, { field: 'piva' }] },
+    { type: 'header', label: 'Indirizzo / Sede legale' },
+    { type: 'fields', columns: '4fr 1fr 2fr 1fr', cells: [{ field: 'via' }, { field: 'civico' }, { field: 'citta' }, { field: 'cap' }] },
+    { type: 'fields', columns: '1fr 1fr 1fr 1fr', cells: [{ field: 'telefono' }, { field: 'cellulare' }, { field: 'email' }, { field: 'pec' }] },
+    { type: 'header', label: 'Domicilio per le notifiche' },
+    { type: 'fields', columns: '1fr 2fr', cells: [{ field: 'dom_notifica_uguale' }, {}] },
+    { type: 'fields', columns: '4fr 1fr 2fr 1fr', cells: [{ field: 'dom_notifica_via' }, { field: 'dom_notifica_civico' }, { field: 'dom_notifica_citta' }, { field: 'dom_notifica_cap' }] },
+    { type: 'special', id: '_header_rappresentante_legale' },
+    { type: 'fields', columns: '1fr 1fr 1fr', cells: [{ field: 'rl_nome' }, { field: 'rl_cognome' }, { field: 'rl_cf' }] },
+    { type: 'fields', columns: '2fr 1fr', cells: [{ field: 'rl_carica' }, { field: 'rl_dom_notifica' }] },
+    { type: 'fields', columns: '4fr 1fr 2fr 1fr', cells: [{ field: 'rl_dom_via' }, { field: 'rl_dom_civico' }, { field: 'rl_dom_citta' }, { field: 'rl_dom_cap' }] },
+    { type: 'header', label: 'Note' },
+    { type: 'fields', columns: '1fr', cells: [{ field: 'note_anagrafica' }] }
   ],
   violazione: [
-    { type: 'special', id: '_localizzazione' },
     { type: 'header', label: 'Art. 15 — Prelievo abusivo' },
     { type: 'fields', columns: '1fr', cells: [{ field: 'tipo_abuso' }] },
     { type: 'fields', columns: '1fr 1fr', cells: [{ field: 'sup_dichiarata_art15' }, { field: 'sup_irrigata_art15' }] },
@@ -321,13 +327,12 @@ export const DEFAULT_FIELD_LAYOUTS: Record<string, LayoutRow[]> = {
     { type: 'header', label: 'Descrizione' },
     { type: 'fields', columns: '1fr', cells: [{ field: 'descrizione_fatti' }] },
     { type: 'fields', columns: '1fr', cells: [{ field: 'circostanze' }] },
-    { type: 'fields', columns: '1fr', cells: [{ field: 'presenza_trasgressore' }] },
-    { type: 'header', label: 'Descrizione del luogo' },
-    { type: 'fields', columns: '1fr', cells: [{ field: 'descrizione_luogo' }] },
-    { type: 'header', label: 'Fine compilazione' },
-    { type: 'fields', columns: '1fr', cells: [{ field: 'data_firma' }] }
+    { type: 'fields', columns: '1fr', cells: [{ field: 'presenza_trasgressore' }] }
   ],
   dati_tecnici: [
+    { type: 'special', id: '_localizzazione' },
+    { type: 'header', label: 'Descrizione del luogo' },
+    { type: 'fields', columns: '1fr', cells: [{ field: 'descrizione_luogo' }] },
     { type: 'header', label: 'Dati tecnici' },
     { type: 'fields', columns: '1fr 1fr', cells: [{ field: 'distretto' }, { field: 'comizio' }] },
     { type: 'fields', columns: '1fr 1fr', cells: [{ field: 'idrante' }, { field: 'matricola_contatore' }] },

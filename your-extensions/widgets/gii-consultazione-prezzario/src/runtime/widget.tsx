@@ -671,6 +671,7 @@ const styles = `
 .gcp-desc-short { display:block; white-space:nowrap; overflow:hidden; text-overflow:clip; line-height:1.25; }
 .gcp-row-inactive td { color:#c00000; }
 .gcp-row-inactive td .gcp-muted { color:#c00000 !important; opacity:0.95; }
+.gcp-row-incart td { background:#e2efda !important; }
 .gcp-inactive-flag { display:inline-block; margin-top:3px; font-size:11px; font-weight:700; color:#c00000; }
 .gcp-status-inactive { color:#c00000; font-weight:700; }
 .gcp-list-more { display:flex; justify-content:center; padding:10px; border-top:1px solid #e6eef7; background:#fbfdff; }
@@ -760,6 +761,19 @@ export default function Widget(props: AllWidgetProps<IMConfig>) {
   const [selectedRow, setSelectedRow] = React.useState<VoceRow | null>(null)
   const [analisiRows, setAnalisiRows] = React.useState<AnalisiRow[]>([])
   const [dgMaps, setDgMaps] = React.useState<DatiGeneraliMaps>({ capitoli: {}, sottocapitoli: {} })
+  const [cartSig, setCartSig] = React.useState(0)
+
+  React.useEffect(() => {
+    const onCartChange = () => setCartSig((n) => n + 1)
+    window.addEventListener('gii-ns-cart-change', onCartChange)
+    return () => window.removeEventListener('gii-ns-cart-change', onCartChange)
+  }, [])
+
+  const cartCodes: Set<string> = React.useMemo(() => {
+    void cartSig
+    const codes = (window as any).__giiNsCartCodes
+    return codes instanceof Set ? codes : new Set<string>()
+  }, [cartSig])
 
   const listReqRef = React.useRef(0)
   const summaryReqRef = React.useRef(0)
@@ -1003,15 +1017,29 @@ export default function Widget(props: AllWidgetProps<IMConfig>) {
 
   React.useEffect(() => {
     if (!rows.length) { setSelectedRow(null); return }
-    if (!selectedRow) { setSelectedRow(rows[0]); return }
+    if (!selectedRow) return
     const match = rows.find((r) => voceKey(r) === voceKey(selectedRow))
-    if (!match) { setSelectedRow(rows[0]); return }
+    if (!match) { setSelectedRow(null); return }
     if (match !== selectedRow) setSelectedRow(match)
   }, [rows, selectedRow])
 
   const selectedPrezzario = prezzari.find((p) => p.codice_prezzario === selectedCode) || null
   const hasMoreRows = rows.length < listTotal
   const hasLevelSelection = !!selectedFamiglia || !!selectedCapitolo || !!selectedSottocapitolo || levelMode !== 'STRUTTURA'
+
+  React.useEffect(() => {
+    ;(window as any).__giiPrezzarioSelectedRow = selectedRow && selectedPrezzario ? {
+      codice_prezzario: selectedPrezzario.codice_prezzario,
+      codice_voce: selectedRow.codice_voce,
+      famiglia: selectedRow.famiglia || '',
+      descrizione: selectedRow.descrizione || '',
+      unita_misura: selectedRow.unita_misura || '',
+      prezzo_unitario: num(selectedRow.prezzo_unitario),
+      anno_riferimento: num(selectedRow.anno_riferimento || selectedPrezzario.anno_prezzario),
+      attivo: num(selectedRow.attivo)
+    } : null
+    return () => { ;(window as any).__giiPrezzarioSelectedRow = null }
+  }, [selectedRow, selectedPrezzario])
 
   const clearSelection = React.useCallback(() => {
     setSelectedFamiglia('')
@@ -1379,8 +1407,9 @@ export default function Widget(props: AllWidgetProps<IMConfig>) {
                     <tr><td colSpan={4} className='gcp-empty'>{loadingRows ? 'Caricamento…' : 'Nessuna voce.'}</td></tr>
                   ) : rows.map((r) => {
                     const isInactive = selectedPrezzario?.codice_prezzario === 'NUOVI_PREZZI' && num(r.attivo) !== 1
+                    const isInCart = cartCodes.has(r.codice_voce)
                     return (
-                    <tr key={voceKey(r)} className={`gcp-list-row ${voceKey(selectedRow) === voceKey(r) ? 'sel' : ''} ${isInactive ? 'gcp-row-inactive' : ''}`} onClick={() => setSelectedRow(r)}>
+                    <tr key={voceKey(r)} className={`gcp-list-row ${voceKey(selectedRow) === voceKey(r) ? 'sel' : ''} ${isInactive ? 'gcp-row-inactive' : ''} ${isInCart ? 'gcp-row-incart' : ''}`} onClick={() => setSelectedRow(r)}>
                       <td><b>{r.codice_voce}</b><div className='gcp-muted'>{famigliaLabel(r.famiglia)}</div>{selectedCode === 'NUOVI_PREZZI' ? <div className='gcp-muted'>{formatCapitoloLabel(r.famiglia, r.capitolo, r.codice_voce)} · {formatSottocapitoloLabel(r.famiglia, r.capitolo, r.sottocapitolo, r.codice_voce)}</div> : null}</td>
                       <td title={r.descrizione || ''}><span className='gcp-desc-short'>{shortenMiddle(r.descrizione, 108, 34)}</span></td>
                       <td>{r.unita_misura || ''}</td>

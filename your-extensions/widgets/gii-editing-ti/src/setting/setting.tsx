@@ -87,11 +87,15 @@ export default function Setting(props: AllWidgetSettingProps<IMConfig>) {
 
   const FIELD_OPTS: Record<string, {v:string;l:string}[]> = {
     anagrafica: [
-      {v:'tecnico_rilevatore',l:'Tecnico istruttore'},{v:'ufficio_zona',l:'Ufficio di Zona'},{v:'data_rilevazione',l:'Data rilevazione'},
-      {v:'tipologia_soggetto',l:'Tipologia soggetto'},{v:'nome',l:'Nome'},{v:'cognome',l:'Cognome'},{v:'codice_fiscale',l:'Codice fiscale'},
+      {v:'tipologia_soggetto',l:'Tipologia soggetto'},{v:'qualifica_fondo',l:'Qualifica rispetto al fondo'},
+      {v:'nome',l:'Nome'},{v:'cognome',l:'Cognome'},{v:'codice_fiscale',l:'Codice fiscale'},
       {v:'ragione_sociale',l:'Ragione sociale'},{v:'piva',l:'P. IVA'},
-      {v:'via',l:'Via'},{v:'civico',l:'N. civico'},{v:'citta',l:'Città'},
-      {v:'cap',l:'CAP'},{v:'telefono',l:'Telefono'},{v:'cellulare',l:'Cellulare'},{v:'email',l:'E-mail'},{v:'pec',l:'PEC'}
+      {v:'via',l:'Via'},{v:'civico',l:'N. civico'},{v:'citta',l:'Città'},{v:'cap',l:'CAP'},
+      {v:'telefono',l:'Telefono'},{v:'cellulare',l:'Cellulare'},{v:'email',l:'E-mail'},{v:'pec',l:'PEC'},
+      {v:'dom_notifica_uguale',l:'Coincide con residenza'},{v:'dom_notifica_via',l:'Dom. Via'},{v:'dom_notifica_civico',l:'Dom. Civico'},{v:'dom_notifica_citta',l:'Dom. Città'},{v:'dom_notifica_cap',l:'Dom. CAP'},
+      {v:'rl_nome',l:'RL Nome'},{v:'rl_cognome',l:'RL Cognome'},{v:'rl_cf',l:'RL Codice fiscale'},{v:'rl_carica',l:'RL Carica'},
+      {v:'rl_dom_notifica',l:'RL Dom. notifiche'},{v:'rl_dom_via',l:'RL Dom. Via'},{v:'rl_dom_civico',l:'RL Dom. Civico'},{v:'rl_dom_citta',l:'RL Dom. Città'},{v:'rl_dom_cap',l:'RL Dom. CAP'},
+      {v:'note_anagrafica',l:'Note anagrafica'}
     ],
     violazione: [
       {v:'tipo_abuso',l:'Tipo di abuso'},{v:'norma15_sel',l:'Occorrenza Art. 15'},
@@ -101,16 +105,16 @@ export default function Setting(props: AllWidgetSettingProps<IMConfig>) {
       {v:'sup_dichiarata_art17_1',l:'Sup. dich. Art.17.1'},{v:'sup_irrigata_art17_1',l:'Sup. var. Art.17.1'},
       {v:'sup_dichiarata_art17_2',l:'Sup. dich. Art.17.2'},{v:'sup_irrigata_art17_2',l:'Sup. irr. Art.17.2'},
       {v:'grado',l:'Grado'},
-      {v:'descrizione_fatti',l:'Descrizione fatti'},{v:'circostanze',l:'Circostanze'},{v:'presenza_trasgressore',l:'Trasgressore presente'},
-      {v:'descrizione_luogo',l:'Descrizione luogo'},{v:'data_firma',l:'Data compilazione'}
+      {v:'descrizione_fatti',l:'Descrizione fatti'},{v:'circostanze',l:'Circostanze'},{v:'presenza_trasgressore',l:'Trasgressore presente'}
     ],
     dati_tecnici: [
+      {v:'descrizione_luogo',l:'Descrizione luogo'},
       {v:'distretto',l:'Distretto'},{v:'comizio',l:'Comizio'},{v:'idrante',l:'Idrante'},
       {v:'matricola_contatore',l:'Matricola contatore'},{v:'matricola_tessera',l:'Matricola tessera'}
     ]
   }
   const SPECIAL_OPTS = [
-    {v:'_dati_gen_label',l:'Etichetta dati generali'},{v:'_localizzazione',l:'Pannello localizzazione'},{v:'_checkboxes_norma3',l:'Checkbox altre violazioni'}
+    {v:'_dati_gen_label',l:'Etichetta dati generali'},{v:'_localizzazione',l:'Pannello localizzazione'},{v:'_checkboxes_norma3',l:'Checkbox altre violazioni'},{v:'_header_rappresentante_legale',l:'Header rappresentante legale (PG)'}
   ]
 
   const getRows = (tabId: string): any[] => {
@@ -165,7 +169,7 @@ export default function Setting(props: AllWidgetSettingProps<IMConfig>) {
     const rows = ensureCustom(tabId).slice()
     const r = { ...rows[rowIdx] }
     const cells = (r.cells || []).slice()
-    cells[cellIdx] = field ? { field } : {}
+    cells[cellIdx] = field ? { ...(cells[cellIdx] || {}), field } : {}
     r.cells = cells; rows[rowIdx] = r
     saveRows(tabId, rows)
   }
@@ -173,16 +177,52 @@ export default function Setting(props: AllWidgetSettingProps<IMConfig>) {
     const rows = ensureCustom(tabId).slice()
     const r = { ...rows[rowIdx] }
     const cells = (r.cells || []).slice()
+    const widths = colsToWidths(r.columns, cells.length)
     cells.push({})
-    r.cells = cells; rows[rowIdx] = r
+    widths.push(25)
+    r.cells = cells; r.columns = widthsToColumns(widths); rows[rowIdx] = r
     saveRows(tabId, rows)
   }
   const removeCell = (tabId: string, rowIdx: number, cellIdx: number) => {
     const rows = ensureCustom(tabId).slice()
     const r = { ...rows[rowIdx] }
     const cells = (r.cells || []).slice()
+    const widths = colsToWidths(r.columns, cells.length)
     cells.splice(cellIdx, 1)
-    r.cells = cells; rows[rowIdx] = r
+    widths.splice(cellIdx, 1)
+    r.cells = cells; r.columns = widthsToColumns(widths.length ? widths : [100]); rows[rowIdx] = r
+    saveRows(tabId, rows)
+  }
+
+  /** Parse columns string to array of percentage widths.
+   *  Handles: '25% 10% 30%', '4fr 1fr 2fr', '1fr 1fr', etc. */
+  const colsToWidths = (columns: string | undefined, cellCount: number): number[] => {
+    const parts = (columns || '1fr').trim().split(/\s+/)
+    // Detect format
+    const isPct = parts.some(p => p.endsWith('%'))
+    if (isPct) {
+      return Array.from({ length: cellCount }, (_, i) => {
+        const p = parts[i] || parts[parts.length - 1] || '25%'
+        const m = p.match(/^([\d.]+)%$/)
+        return m ? Math.round(parseFloat(m[1])) : 25
+      })
+    }
+    // Convert fr to approximate percentages
+    const frVals = parts.map(p => { const m = p.match(/^(\d+)fr$/); return m ? parseInt(m[1], 10) : 1 })
+    const totalFr = frVals.reduce((a, b) => a + b, 0) || 1
+    return Array.from({ length: cellCount }, (_, i) => {
+      const fr = frVals[i] || frVals[frVals.length - 1] || 1
+      return Math.max(1, Math.round(fr / totalFr * 100))
+    })
+  }
+  const widthsToColumns = (widths: number[]): string => widths.map(w => `${Math.max(1, w)}%`).join(' ')
+  const updateCellWidth = (tabId: string, rowIdx: number, cellIdx: number, width: number) => {
+    const rows = ensureCustom(tabId).slice()
+    const r = { ...rows[rowIdx] }
+    const cells = r.cells || []
+    const widths = colsToWidths(r.columns, cells.length)
+    widths[cellIdx] = Math.max(1, Math.min(100, width))
+    r.columns = widthsToColumns(widths); rows[rowIdx] = r
     saveRows(tabId, rows)
   }
 
@@ -390,6 +430,14 @@ export default function Setting(props: AllWidgetSettingProps<IMConfig>) {
           onChange={e=>set('formLabelFontSize', Number(e.target.value))} style={{...P.inp, width:80}}/>
 
         <div style={{marginTop:16,borderTop:'1px solid rgba(255,255,255,0.07)',paddingTop:12}}>
+          <div style={{fontSize:11,fontWeight:700,color:'#93c5fd',marginBottom:8}}>Campi (input, select, textarea)</div>
+          <div style={P.hint}>Dimensione del testo nei campi di input del form.</div>
+          <label style={P.lbl}>Dimensione font (px)</label>
+          <input type='number' value={cfg.formFieldFontSize??13} min={9} max={18}
+            onChange={e=>set('formFieldFontSize', Number(e.target.value))} style={{...P.inp, width:80}}/>
+        </div>
+
+        <div style={{marginTop:16,borderTop:'1px solid rgba(255,255,255,0.07)',paddingTop:12}}>
           <div style={{fontSize:11,fontWeight:700,color:'#93c5fd',marginBottom:8}}>Intestazioni di sezione</div>
           <div style={P.hint}>Colore e dimensione dei titoli di gruppo (es. Trasgressore, Art. 15, Descrizione…)</div>
           <div style={{display:'flex',alignItems:'center',gap:6,marginTop:8}}>
@@ -502,23 +550,24 @@ export default function Setting(props: AllWidgetSettingProps<IMConfig>) {
                   </select>
                 )}
 
-                {row.type === 'fields' && (
+                {row.type === 'fields' && (() => {
+                  const cells: any[] = row.cells || []
+                  const widths = colsToWidths(row.columns, cells.length)
+                  const fieldLabel = (fv: string) => (FIELD_OPTS[layoutTab] || []).find(o => o.v === fv)?.l || fv || 'spacer'
+                  return (
                   <div>
-                    <div style={{display:'flex', alignItems:'center', gap:6, marginBottom:6}}>
-                      <span style={{fontSize:10, color:'#9ca3af'}}>columns:</span>
-                      <input type='text' value={row.columns||'1fr'} onChange={e=>updateRow(layoutTab, ri, {columns:e.target.value})}
-                        placeholder='1fr 1fr' style={{...P.inp, flex:1, fontSize:10, padding:'3px 6px'}}/>
-                      {row.gap != null && (
-                        <>
-                          <span style={{fontSize:10, color:'#9ca3af'}}>gap:</span>
-                          <input type='number' value={row.gap} min={0} max={40}
-                            onChange={e=>updateRow(layoutTab, ri, {gap: Number(e.target.value)})}
-                            style={{...P.inp, width:42, fontSize:10, padding:'3px 4px'}}/>
-                        </>
-                      )}
+                    {/* Visual proportional bar */}
+                    <div style={{display:'flex', gap:1, marginBottom:8, borderRadius:4, overflow:'hidden', height:22}}>
+                      {cells.map((_c: any, ci: number) => {
+                        const fld = cells[ci]?.field
+                        return <div key={ci} style={{width:`${widths[ci]}%`, flexShrink:0, background: fld ? 'rgba(96,165,250,0.25)' : 'rgba(255,255,255,0.06)', display:'flex', alignItems:'center', justifyContent:'center', fontSize:8, color: fld ? '#93c5fd' : '#6b7280', overflow:'hidden', whiteSpace:'nowrap', padding:'0 2px', borderRight:'1px solid rgba(0,0,0,0.3)'}}>
+                          {fld ? fieldLabel(fld).substring(0, 8) : '·'} <span style={{opacity:0.5, marginLeft:2}}>{widths[ci]}%</span>
+                        </div>
+                      })}
                     </div>
+                    {/* Cell editors */}
                     <div style={{display:'grid', gap:4}}>
-                      {(row.cells||[]).map((cell: any, ci: number) => (
+                      {cells.map((cell: any, ci: number) => (
                         <div key={ci} style={{display:'flex', alignItems:'center', gap:4}}>
                           <span style={{fontSize:9, color:'#6b7280', minWidth:14}}>{ci+1}.</span>
                           <select value={cell?.field||''} onChange={e=>updateCell(layoutTab, ri, ci, e.target.value)}
@@ -526,6 +575,9 @@ export default function Setting(props: AllWidgetSettingProps<IMConfig>) {
                             <option value=''>— spacer —</option>
                             {(FIELD_OPTS[layoutTab]||[]).map(o => <option key={o.v} value={o.v}>{o.l}</option>)}
                           </select>
+                          <input type='number' min={1} max={100} step={1} value={widths[ci]} onChange={e=>updateCellWidth(layoutTab, ri, ci, Number(e.target.value))}
+                            style={{...P.inp, width:48, fontSize:10, padding:'2px 4px', textAlign:'center'}} title={`${widths[ci]}%`}/>
+                          <span style={{fontSize:9, color:'#9ca3af'}}>%</span>
                           {smBtn('✕', ()=>removeCell(layoutTab, ri, ci), '#fca5a5')}
                         </div>
                       ))}
@@ -535,7 +587,8 @@ export default function Setting(props: AllWidgetSettingProps<IMConfig>) {
                       + cella
                     </button>
                   </div>
-                )}
+                  )
+                })()}
               </div>
             )
           })}

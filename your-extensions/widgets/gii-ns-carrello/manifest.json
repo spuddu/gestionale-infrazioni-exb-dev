@@ -1,0 +1,17 @@
+{
+  "name": "gii-ns-carrello",
+  "label": "GII — Nota Spese Carrello",
+  "type": "widget",
+  "version": "1.0.0",
+  "exbVersion": "1.19.0",
+  "author": "CBSM",
+  "description": "Barra carrello per la selezione voci prezzario nella nota spese",
+  "copyright": "",
+  "license": "",
+  "properties": {},
+  "translatedLocales": ["it"],
+  "defaultSize": {
+    "width": 800,
+    "height": 260
+  }
+}
