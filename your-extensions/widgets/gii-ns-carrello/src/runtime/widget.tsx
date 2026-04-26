@@ -60,16 +60,16 @@ function resolvePageId (slug: string): string {
 const BAR_STYLE = `
 .gnc-bar { display:flex; flex-direction:column; font-family:Avenir,Segoe UI,sans-serif; font-size:13px; }
 .gnc-header { display:flex; align-items:center; justify-content:flex-end; gap:10px; padding:10px 14px; flex-wrap:wrap; }
-.gnc-badge { display:inline-flex; align-items:center; gap:5px; padding:5px 14px; border-radius:999px; font-size:13px; font-weight:700; background:#1F4E79; color:#fff; }
-.gnc-btn { padding:7px 18px; border:none; border-radius:6px; font-size:13px; font-weight:700; cursor:pointer; white-space:nowrap; }
+.gnc-badge { display:inline-flex; align-items:center; gap:5px; padding:7px 18px; border:2px solid #1F4E79; border-radius:999px; font-size:13px; font-weight:700; background:#1F4E79; color:#fff; box-sizing:border-box; }
+.gnc-btn { padding:7px 18px; border:2px solid transparent; border-radius:6px; font-size:13px; font-weight:700; cursor:pointer; white-space:nowrap; box-sizing:border-box; }
 .gnc-btn:disabled { opacity:0.5; cursor:not-allowed; }
-.gnc-btn-add { background:#1F4E79; color:#fff; }
-.gnc-btn-add:hover:not(:disabled) { background:#295f92; }
-.gnc-btn-clear { background:#b45309; color:#fff; }
-.gnc-btn-clear:hover:not(:disabled) { background:#92400e; }
-.gnc-btn-clear:disabled { background:#d1d5db; }
-.gnc-btn-confirm { background:#328c54; color:#fff; }
-.gnc-btn-confirm:hover:not(:disabled) { background:#28753f; }
+.gnc-btn-add { background:#1F4E79; color:#fff; border-color:#1F4E79; }
+.gnc-btn-add:hover:not(:disabled) { background:#295f92; border-color:#295f92; }
+.gnc-btn-clear { background:#b45309; color:#fff; border-color:#b45309; }
+.gnc-btn-clear:hover:not(:disabled) { background:#92400e; border-color:#92400e; }
+.gnc-btn-clear:disabled { background:#d1d5db; border-color:#d1d5db; }
+.gnc-btn-confirm { background:#328c54; color:#fff; border-color:#328c54; }
+.gnc-btn-confirm:hover:not(:disabled) { background:#28753f; border-color:#28753f; }
 .gnc-btn-cancel { background:#fff; color:#1F4E79; border:2px solid #1F4E79; }
 .gnc-btn-cancel:hover:not(:disabled) { background:#e8f0fe; }
 .gnc-btn-remove { background:#c00; color:#fff; padding:2px 7px; border:none; border-radius:3px; font-size:11px; font-weight:700; cursor:pointer; }

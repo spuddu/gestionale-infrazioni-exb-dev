@@ -183,7 +183,12 @@ function NavButton (p: { item: NavItem, cfg: any, idx: number, currentPageId: st
   const itemPageId = item.hashPage ? resolvePageId(item.hashPage) : null
   const itemSection = String(item.section || '').trim()
   const currentSectionNorm = String(currentSection || '').trim()
-  const isActive = !!currentPageId && !!itemPageId && currentPageId === itemPageId && (!itemSection || itemSection === currentSectionNorm)
+  const isActive = (() => {
+    if (!currentPageId || !itemPageId) return false
+    if (currentPageId === itemPageId) return !itemSection || itemSection === currentSectionNorm
+    if (itemSection && itemSection === currentSectionNorm && document.querySelector('[data-gii-editing-root]')) return true
+    return false
+  })()
   const hot = hov || isActive
 
   return (

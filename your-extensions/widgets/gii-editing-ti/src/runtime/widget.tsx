@@ -3904,12 +3904,13 @@ function NuovaPraticaForm (p: {
     } catch {}
     return 'anagrafica'
   })
-  const [isExternalNavMode, setIsExternalNavMode] = React.useState<boolean>(() => !!getRequestedEditSection())
+  const [isExternalNavMode, setIsExternalNavMode] = React.useState<boolean>(true)
   const skipNpTabSyncRef = React.useRef(false)
 
   React.useEffect(() => {
     if (skipNpTabSyncRef.current) { skipNpTabSyncRef.current = false; return }
     try { sessionStorage.setItem('GII_EDIT_TAB', npTab) } catch {}
+    try { window.dispatchEvent(new CustomEvent('gii:edit-section-change', { detail: { section: npTab } })) } catch {}
   }, [npTab])
 
   React.useEffect(() => {
@@ -5470,14 +5471,6 @@ React.useEffect(() => {
         </div>
       </div>
 
-      {/* ── Tab bar ── */}
-      {!isExternalNavMode && (
-      <div style={{ flex: '0 0 auto', display: 'flex', gap: 6, padding: '8px 0', flexWrap: 'wrap',
-        borderBottom: '1px solid rgba(0,0,0,0.08)' }}>
-        {NP_TABS.map(t => tabBtn(t.id, t.label))}
-      </div>
-      )}
-
       {/* ── Contenuto tab (scrollabile) ── */}
       <div style={{ flex: '1 1 auto', minHeight: 0, overflowY: 'auto', padding: '12px 2px' }}>
 
@@ -5534,12 +5527,9 @@ React.useEffect(() => {
           </div>
         ))}
       </div>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
-        <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
-          <button type='button' onClick={() => { try { const pg = resolvePageId('browser-nota-spese'); if (pg) { try { const curPage = getAppStore()?.getState()?.appRuntimeInfo?.currentPageId || ''; sessionStorage.setItem('GII_NS_RETURN_PAGE', curPage) } catch {} UrlManager.getInstance().changePage(pg) } else { setNoteSpeseMsg({ ok: false, text: 'Pagina "browser-nota-spese" non trovata. Configura una pagina ExB con il widget consultazione prezzario e il widget gii-ns-carrello.' }) } } catch (e: any) { setNoteSpeseMsg({ ok: false, text: e?.message || String(e) }) } }} disabled={noteSpeseBusy || noteSpeseDraftDirty} style={{ padding: '6px 14px', borderRadius: 8, border: 'none', background: '#1F4E79', color: '#fff', fontWeight: 700, fontSize: 12, cursor: (noteSpeseBusy || noteSpeseDraftDirty) ? 'not-allowed' : 'pointer', opacity: (noteSpeseBusy || noteSpeseDraftDirty) ? 0.5 : 1 }}>Sfoglia prezzario</button>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+          <button type='button' onClick={() => { try { const pg = resolvePageId('browser-nota-spese'); if (pg) { try { const curPage = getAppStore()?.getState()?.appRuntimeInfo?.currentPageId || ''; sessionStorage.setItem('GII_NS_RETURN_PAGE', curPage) } catch {} UrlManager.getInstance().changePage(pg) } else { setNoteSpeseMsg({ ok: false, text: 'Pagina "browser-nota-spese" non trovata. Configura una pagina ExB con il widget consultazione prezzario e il widget gii-ns-carrello.' }) } } catch (e: any) { setNoteSpeseMsg({ ok: false, text: e?.message || String(e) }) } }} disabled={noteSpeseBusy || noteSpeseDraftDirty} style={{ padding: '10px 24px', borderRadius: 8, border: '2px solid #1F4E79', background: '#1F4E79', color: '#fff', fontWeight: 800, fontSize: 14, cursor: (noteSpeseBusy || noteSpeseDraftDirty) ? 'not-allowed' : 'pointer', opacity: (noteSpeseBusy || noteSpeseDraftDirty) ? 0.5 : 1, letterSpacing: '0.3px' }}>📋 Sfoglia prezzario</button>
           {noteSpeseDraftDirty && <span style={{ fontSize: 11, color: '#856404' }}>Salva le modifiche prima di sfogliare il prezzario.</span>}
-        </div>
-        <button type='button' onClick={() => void refreshNotaSpeseSummary()} disabled={noteSpeseBusy} style={{ padding: '6px 14px', borderRadius: 8, border: '1px solid rgba(0,0,0,0.12)', background: '#fff', color: '#111827', fontWeight: 700, cursor: noteSpeseBusy ? 'not-allowed' : 'pointer', opacity: noteSpeseBusy ? 0.6 : 1 }}>{noteSpeseBusy ? 'Ricalcolo…' : 'Ricalcola totali'}</button>
       </div>
       <NoteSpeseManager category='AT' title='Attrezzature e trasporti' rows={noteSpeseRowsDraft['AT']} onRowsChange={(nextRows) => setNoteSpeseRowsDraft((prev) => ({ ...prev, AT: nextRows.map(nsCloneRow) }))} onDirtyChange={(dirty) => setNoteSpeseFormDirtyByCategory((prev) => ({ ...prev, AT: dirty }))} resetKey={noteSpeseManagerResetKey} />
       <NoteSpeseManager category='PR' title='Materiali da costruzione' rows={noteSpeseRowsDraft['PR']} onRowsChange={(nextRows) => setNoteSpeseRowsDraft((prev) => ({ ...prev, PR: nextRows.map(nsCloneRow) }))} onDirtyChange={(dirty) => setNoteSpeseFormDirtyByCategory((prev) => ({ ...prev, PR: dirty }))} resetKey={noteSpeseManagerResetKey} />
