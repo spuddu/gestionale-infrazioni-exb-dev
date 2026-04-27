@@ -459,8 +459,8 @@ export default function Setting(props: AllWidgetSettingProps<IMConfig>) {
     props.onSettingChange({ id:props.id, config:{ ...cfg, ...patch } as any })
 
   const set = (key:string, value:any) => setCfg({ [key]: value })
-  const setCard = (idx:number, patch:Partial<CardConfig>) =>
-    set('cards', cards.map((c,i)=>i===idx?{...c,...patch}:c))
+  const setCard = (cardId:string, patch:Partial<CardConfig>) =>
+    set('cards', cards.map(c=>c.id===cardId?{...c,...patch}:c))
   const setCardsOrderFromSorted = (sorted: CardConfig[]) => {
     // Assicura un ordine coerente: 0..n-1 sulla lista ordinata
     const orderById = new Map<string, number>()
@@ -499,8 +499,8 @@ export default function Setting(props: AllWidgetSettingProps<IMConfig>) {
     setOpenCard(newCard.id)
   }
 
-  const removeCard = (idx:number) => {
-    const card = cards[idx]
+  const removeCard = (cardId:string) => {
+    const card = cards.find(c=>c.id===cardId)
     if (!card) return
     if (!window.confirm('Rimuovere questa card?')) return
 
@@ -512,7 +512,7 @@ export default function Setting(props: AllWidgetSettingProps<IMConfig>) {
       : excludedPageIds
 
     setCfg({
-      cards: cards.filter((_, i) => i !== idx),
+      cards: cards.filter(c => c.id !== cardId),
       excludedPageIds: nextExcluded
     })
     setOpenCard(null)
@@ -737,7 +737,6 @@ export default function Setting(props: AllWidgetSettingProps<IMConfig>) {
         </button>
 
         {sortedCards.map((card,si)=>{
-          const ri=cards.findIndex(c=>c.id===card.id)
           const isCustom=card.id.startsWith('card_custom_') || card.id.startsWith('card_page_')
           const isO=openCard===card.id
           return (
@@ -808,13 +807,13 @@ export default function Setting(props: AllWidgetSettingProps<IMConfig>) {
 
               {/* Body */}
               {isO && <div style={{ marginTop:10,paddingTop:10,borderTop:'1px solid rgba(255,255,255,0.08)' }}>
-                <Check value={card.visible} onChange={v=>setCard(ri,{visible:v})} label='Visibile'/>
-                <label style={P.lbl}>Etichetta</label><Inp value={card.label} onChange={v=>setCard(ri,{label:v})}/>
+                <Check value={card.visible} onChange={v=>setCard(card.id,{visible:v})} label='Visibile'/>
+                <label style={P.lbl}>Etichetta</label><Inp value={card.label} onChange={v=>setCard(card.id,{label:v})}/>
                 <label style={P.lbl}>Descrizione</label>
-                <textarea value={card.desc} onChange={e=>setCard(ri,{desc:e.target.value})} rows={2} style={{ ...P.inp,resize:'vertical',fontFamily:'inherit' }}/>
+                <textarea value={card.desc} onChange={e=>setCard(card.id,{desc:e.target.value})} rows={2} style={{ ...P.inp,resize:'vertical',fontFamily:'inherit' }}/>
 
                 <label style={P.lbl}>Pagina di destinazione</label>
-                <PageSel value={card.hashPage} onChange={v=>setCard(ri,{hashPage:v})} options={pageOptions}/>
+                <PageSel value={card.hashPage} onChange={v=>setCard(card.id,{hashPage:v})} options={pageOptions}/>
 
                 {(() => {
                   const pid = resolvePageId(card.hashPage)
@@ -825,12 +824,12 @@ export default function Setting(props: AllWidgetSettingProps<IMConfig>) {
                 })()}
 
                 <div style={P.row2}>
-                  <div><label style={P.lbl}>Colore sezione</label><ColInp value={card.colorBg} onChange={v=>setCard(ri,{colorBg:v})}/><div style={P.hint}>Usato per l’hover automatico (se “Sfondo hover” è vuoto).</div></div>
-                  <div><label style={P.lbl}>Colore accento</label><ColInp value={card.colorAccent} onChange={v=>setCard(ri,{colorAccent:v})}/></div>
+                  <div><label style={P.lbl}>Colore sezione</label><ColInp value={card.colorBg} onChange={v=>setCard(card.id,{colorBg:v})}/><div style={P.hint}>Usato per l’hover automatico (se “Sfondo hover” è vuoto).</div></div>
+                  <div><label style={P.lbl}>Colore accento</label><ColInp value={card.colorAccent} onChange={v=>setCard(card.id,{colorAccent:v})}/></div>
                 </div>
                 <div style={P.row2}>
-                  <div><label style={P.lbl}>Sfondo a riposo</label><ColInp value={card.colorBgRest||'rgba(255,255,255,0.05)'} onChange={v=>setCard(ri,{colorBgRest:v})}/></div>
-                  <div><label style={P.lbl}>Sfondo hover</label><ColInp value={String(card.colorBgHover||'')} onChange={v=>setCard(ri,{colorBgHover:v})}/><div style={P.hint}>Vuoto = automatico (derivato dal “Colore sezione”).</div></div>
+                  <div><label style={P.lbl}>Sfondo a riposo</label><ColInp value={card.colorBgRest||'rgba(255,255,255,0.05)'} onChange={v=>setCard(card.id,{colorBgRest:v})}/></div>
+                  <div><label style={P.lbl}>Sfondo hover</label><ColInp value={String(card.colorBgHover||'')} onChange={v=>setCard(card.id,{colorBgHover:v})}/><div style={P.hint}>Vuoto = automatico (derivato dal “Colore sezione”).</div></div>
                 </div>
 
                 <label style={P.lbl}>Ruoli visibili</label>
@@ -847,7 +846,7 @@ export default function Setting(props: AllWidgetSettingProps<IMConfig>) {
                           let next=[...card.roles]
                           if(isAll){next=checked?[]:['*']}
                           else{if(next.includes('*'))next=[];if(checked)next=next.filter(r=>r!==ro.value);else next=[...next,ro.value]}
-                          setCard(ri,{roles:next})
+                          setCard(card.id,{roles:next})
                         }}/>
                         {ro.label}
                       </label>
@@ -857,7 +856,7 @@ export default function Setting(props: AllWidgetSettingProps<IMConfig>) {
 
                 {/* Rimuovi — solo per card personalizzate */}
                 {isCustom && (
-                  <button type='button' onClick={()=>removeCard(ri)}
+                  <button type='button' onClick={()=>removeCard(card.id)}
                     style={{ marginTop:14,padding:'5px 12px',borderRadius:6,border:'1px solid rgba(252,165,165,0.4)',background:'rgba(239,68,68,0.10)',color:'#fca5a5',fontSize:11,cursor:'pointer',fontWeight:600 }}>
                     🗑 Rimuovi questa card
                   </button>

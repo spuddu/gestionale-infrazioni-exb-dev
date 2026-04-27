@@ -1870,6 +1870,10 @@ function ActionsPanel (props: {
       ;(window as any).__giiEdit = payload
       try { sessionStorage.setItem('GII_EDIT_INTENT', JSON.stringify(payload)) } catch {}
       try { window.dispatchEvent(new CustomEvent('gii-edit-intent-changed')) } catch {}
+      try { sessionStorage.setItem('GII_EDIT_TAB', 'anagrafica') } catch {}
+      try { sessionStorage.removeItem('GII_NAV_SECTION') } catch {}
+      try { sessionStorage.removeItem('GII_REQUESTED_EDIT_SECTION') } catch {}
+      try { window.dispatchEvent(new CustomEvent('gii:edit-section-change', { detail: { section: 'anagrafica' } })) } catch {}
     } catch { }
     const resolvePageId = (pageTokenRaw: string): string => {
       const tok0 = String(pageTokenRaw || '').trim()

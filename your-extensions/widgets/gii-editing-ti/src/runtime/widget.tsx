@@ -103,11 +103,11 @@ function getRequestedEditSection (): 'anagrafica' | 'violazione' | 'dati_tecnici
   } catch {}
   try {
     const fromNav = mapSection(window.sessionStorage.getItem('GII_NAV_SECTION'))
-    if (fromNav) return fromNav
+    if (fromNav) { try { window.sessionStorage.removeItem('GII_NAV_SECTION') } catch {} return fromNav }
   } catch {}
   try {
     const fromRequested = mapSection(window.sessionStorage.getItem('GII_REQUESTED_EDIT_SECTION'))
-    if (fromRequested) return fromRequested
+    if (fromRequested) { try { window.sessionStorage.removeItem('GII_REQUESTED_EDIT_SECTION') } catch {} return fromRequested }
   } catch {}
   return null
 }
@@ -3760,6 +3760,8 @@ function draftFromRecord (rec: any): NpDraft {
     else if (DRAFT_DATE_FIELDS.has(k)) out[k] = toDraftDate(v)
     else out[k] = String(v)
   }
+  if (out.dom_notifica_uguale == null || out.dom_notifica_uguale === '') out.dom_notifica_uguale = '1'
+  if (out.rl_dom_notifica == null || out.rl_dom_notifica === '') out.rl_dom_notifica = '0'
   return out
 }
 
@@ -3895,22 +3897,25 @@ function NuovaPraticaForm (p: {
   const [npTab, setNpTab] = React.useState<'anagrafica' | 'violazione' | 'dati_tecnici' | 'nota_spese' | 'allegati'>(() => {
     const requested = getRequestedEditSection()
     if (requested) return requested
-    if (mode !== 'edit') return 'anagrafica'
-    try {
-      const saved = sessionStorage.getItem('GII_EDIT_TAB')
-      if (saved === 'anagrafica' || saved === 'violazione' || saved === 'dati_tecnici' || saved === 'nota_spese' || saved === 'allegati') {
-        return saved
-      }
-    } catch {}
     return 'anagrafica'
   })
   const [isExternalNavMode, setIsExternalNavMode] = React.useState<boolean>(true)
   const skipNpTabSyncRef = React.useRef(false)
 
   React.useEffect(() => {
+    setNpTab('anagrafica')
+  }, [mode, editOid])
+
+  const npTabSyncElRef = React.useRef<HTMLDivElement | null>(null)
+
+  React.useEffect(() => {
     if (skipNpTabSyncRef.current) { skipNpTabSyncRef.current = false; return }
     try { sessionStorage.setItem('GII_EDIT_TAB', npTab) } catch {}
-    try { window.dispatchEvent(new CustomEvent('gii:edit-section-change', { detail: { section: npTab } })) } catch {}
+    const el = npTabSyncElRef.current?.closest?.('[data-gii-editing-root]') as HTMLElement | null
+    const isVisible = !!(el && el.offsetWidth > 0 && el.offsetHeight > 0)
+    if (isVisible) {
+      try { window.dispatchEvent(new CustomEvent('gii:edit-section-change', { detail: { section: npTab } })) } catch {}
+    }
   }, [npTab])
 
   React.useEffect(() => {
@@ -3942,13 +3947,13 @@ function NuovaPraticaForm (p: {
       setNpTab((prev) => (prev === requested ? prev : requested))
     }
     const onExternalSectionChange = (evt: any) => applyRequestedSection(evt?.detail?.section)
-    applyRequestedSection()
-    window.addEventListener('hashchange', applyRequestedSection)
-    window.addEventListener('popstate', applyRequestedSection)
+    const onUrlChange = () => applyRequestedSection()
+    window.addEventListener('hashchange', onUrlChange)
+    window.addEventListener('popstate', onUrlChange)
     window.addEventListener('gii:edit-section-change', onExternalSectionChange as EventListener)
     return () => {
-      window.removeEventListener('hashchange', applyRequestedSection)
-      window.removeEventListener('popstate', applyRequestedSection)
+      window.removeEventListener('hashchange', onUrlChange)
+      window.removeEventListener('popstate', onUrlChange)
       window.removeEventListener('gii:edit-section-change', onExternalSectionChange as EventListener)
     }
   }, [])
@@ -5261,10 +5266,10 @@ React.useEffect(() => {
       case 'qualifica_fondo': return { label: 'Qualifica rispetto al fondo', el: <NpSel value={g('qualifica_fondo')} onChange={v => set('qualifica_fondo', v)} options={domainOpts('qualifica_fondo', CHOICES.qualifica_fondo)} disabled={saving}/> }
       // Anagrafica — Domicilio notifiche
       case 'dom_notifica_uguale': return { label: 'Coincide con residenza/sede legale', el: <NpSel value={g('dom_notifica_uguale')} onChange={v => set('dom_notifica_uguale', v)} options={domainOpts('dom_notifica_uguale', CHOICES.si_no)} disabled={saving}/> }
-      case 'dom_notifica_via': { const locked = String(g('dom_notifica_uguale')) === '1'; return { label: 'Via', el: <NpText value={g('dom_notifica_via')} onChange={v => set('dom_notifica_via', v)} disabled={saving || locked}/> } }
-      case 'dom_notifica_civico': { const locked = String(g('dom_notifica_uguale')) === '1'; return { label: 'N. civico', el: <NpText value={g('dom_notifica_civico')} onChange={v => set('dom_notifica_civico', v)} disabled={saving || locked}/> } }
-      case 'dom_notifica_citta': { const locked = String(g('dom_notifica_uguale')) === '1'; return { label: 'Città', el: <NpText value={g('dom_notifica_citta')} onChange={v => set('dom_notifica_citta', v)} disabled={saving || locked}/> } }
-      case 'dom_notifica_cap': { const locked = String(g('dom_notifica_uguale')) === '1'; return { label: 'CAP', el: <NpText value={g('dom_notifica_cap')} onChange={v => set('dom_notifica_cap', v)} disabled={saving || locked}/> } }
+      case 'dom_notifica_via': return String(g('dom_notifica_uguale')) !== '1' ? { label: 'Via', el: <NpText value={g('dom_notifica_via')} onChange={v => set('dom_notifica_via', v)} disabled={saving}/> } : null
+      case 'dom_notifica_civico': return String(g('dom_notifica_uguale')) !== '1' ? { label: 'N. civico', el: <NpText value={g('dom_notifica_civico')} onChange={v => set('dom_notifica_civico', v)} disabled={saving}/> } : null
+      case 'dom_notifica_citta': return String(g('dom_notifica_uguale')) !== '1' ? { label: 'Città', el: <NpText value={g('dom_notifica_citta')} onChange={v => set('dom_notifica_citta', v)} disabled={saving}/> } : null
+      case 'dom_notifica_cap': return String(g('dom_notifica_uguale')) !== '1' ? { label: 'CAP', el: <NpText value={g('dom_notifica_cap')} onChange={v => set('dom_notifica_cap', v)} disabled={saving}/> } : null
       // Anagrafica — Rappresentante legale (PG only)
       case 'rl_nome': return tipoSogg === 'PG' ? { label: 'Nome', el: <NpText value={g('rl_nome')} onChange={v => set('rl_nome', v)} disabled={saving}/> } : null
       case 'rl_cognome': return tipoSogg === 'PG' ? { label: 'Cognome', el: <NpText value={g('rl_cognome')} onChange={v => set('rl_cognome', v)} disabled={saving}/> } : null
@@ -5437,7 +5442,7 @@ React.useEffect(() => {
 
   return (
   <FormStyleCtx.Provider value={formStyle}>
-    <div style={{ width: '100%', height: '100%', display: 'flex', flexDirection: 'column', minHeight: 0 }}>
+    <div ref={npTabSyncElRef} style={{ width: '100%', height: '100%', display: 'flex', flexDirection: 'column', minHeight: 0 }}>
 
       {/* ── Toolbar ── */}
       <div style={{ flex: '0 0 auto', display: 'flex', alignItems: 'center', justifyContent: 'space-between',
@@ -7139,6 +7144,10 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
   React.useEffect(() => {
     const view: any = (jimuMapView as any)?.view
     if (!view?.map) return
+
+    // Se il widget è nascosto (altra pagina ExB), non toccare la mappa
+    const el = rootRef.current
+    if (!el || (el.offsetWidth === 0 && el.offsetHeight === 0)) return
 
     // Viewpoint di default: usa quello del Builder (initialViewProperties), fallback a view.viewpoint al primo accesso
     if (!mapDefaultViewpointRef.current) {
