@@ -1,9 +1,9 @@
 /** @jsx jsx */
 /** @jsxFrag React.Fragment */
 import { React, jsx, css, type AllWidgetProps } from 'jimu-core'
-import { Button, Loading } from 'jimu-ui'
+import { Loading } from 'jimu-ui'
 import { type IMConfig, defaultConfig } from '../config'
-import { RAPPORTO_WEB_TEMPLATE } from './rapporto-template-web'
+import { buildRapportoPdf } from './rapporto-pdf-builder'
 
 // ── URL GII_utenti ──
 const GII_UTENTI_URL = 'https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_utenti/FeatureServer/0'
@@ -44,7 +44,6 @@ let _utentiLoading = false
 async function ensureUtentiCache (): Promise<Map<string, UtenteCached> | null> {
   if (_utentiCache) return _utentiCache
   if (_utentiLoading) {
-    // Attendi che il caricamento in corso finisca
     for (let i = 0; i < 50; i++) {
       await new Promise(r => setTimeout(r, 100))
       if (_utentiCache) return _utentiCache
@@ -83,7 +82,7 @@ async function ensureUtentiCache (): Promise<Map<string, UtenteCached> | null> {
   }
 }
 
-// ── Helper funzioni (identiche a gii-azioni) ──
+// ── Helper funzioni ──
 function findUserFullName (cache: Map<string, UtenteCached> | null, ruoloNum: number, areaNum?: number, settoreNum?: number): string {
   if (!cache) return ''
   for (const [, entry] of cache) {
@@ -125,7 +124,7 @@ function esc (s: any): string {
   return String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
 }
 
-// ── Costruzione mappa placeholder (identica a gii-azioni) ──
+// ── Costruzione mappa placeholder ──
 function buildPlaceholderMap (data: any, utentiCache: Map<string, UtenteCached> | null): Record<string, string> {
   const d = data || {}
   const areaCod = String(d.area_cod || '').toUpperCase()
@@ -143,18 +142,35 @@ function buildPlaceholderMap (data: any, utentiCache: Map<string, UtenteCached> 
   const art17on = String(d.norma16_17 || '').toLowerCase().includes('art17') || !!d.art17_tipo
 
   const xMark = (on: boolean) => on ? 'x' : ''
+  const fmtNum = (v: any): string => {
+    if (v == null || v === '') return ''
+    const n = Number(v)
+    if (isNaN(n)) return String(v)
+    return n.toLocaleString('it-IT', { maximumFractionDigits: 2 })
+  }
   const surfVal = (on: boolean, ...fields: string[]) => {
     if (!on) return ''
-    for (const f of fields) { const v = d[f]; if (v != null && v !== '' && v !== 0) return String(v) }
+    for (const f of fields) { const v = d[f]; if (v != null && v !== '' && v !== 0) return fmtNum(v) }
     return ''
   }
   const grado = d.grado != null && d.grado !== '' ? String(d.grado) : ''
   const recidiva = d.recidiva === 1 || d.recidiva === '1'
+  const occorrenza = (on: boolean): string => {
+    if (!on) return ''
+    return recidiva ? 'Recidiva' : 'Prima contestazione'
+  }
+
+  // Codice pratica (calcolato: TR/TI + OBJECTID)
+  const origPratica = d.origine_pratica ?? d.Origine_pratica
+  const praticaPrefix = (origPratica === 2 || origPratica === '2') ? 'TI' : 'TR'
+  const oidVal = d.OBJECTID ?? d.objectid ?? ''
+  const codPratica = oidVal ? `${praticaPrefix}-${oidVal}` : ''
 
   const m: Record<string, string> = {
     // Dati generali
-    cod_pratica: esc(d.cod_pratica || ''),
+    cod_pratica: codPratica,
     anno: d.data_rilevazione ? String(new Date(d.data_rilevazione).getFullYear()) : '',
+    area_cod: areaCod,
     area_label: AREA_LABELS[areaCod] || areaCod,
     settore_label: SETTORE_LABELS[settoreCod] || settoreCod,
     tecnico_rilevatore: esc(d.tecnico_rilevatore || ''),
@@ -236,39 +252,42 @@ function buildPlaceholderMap (data: any, utentiCache: Map<string, UtenteCached> 
     grado_art39: artChecked('v_art39') ? grado : '',
 
     // Recidiva
-    recidiva_art08: artChecked('v_art08') && recidiva ? 'x' : '',
-    recidiva_art12: artChecked('v_art12') && recidiva ? 'x' : '',
-    recidiva_art15: art15on && recidiva ? 'x' : '',
-    recidiva_art16: art16on && recidiva ? 'x' : '',
-    recidiva_art17: art17on && recidiva ? 'x' : '',
-    recidiva_art27: artChecked('v_art27') && recidiva ? 'x' : '',
-    recidiva_art28: artChecked('v_art28') && recidiva ? 'x' : '',
-    recidiva_art29: artChecked('v_art29') && recidiva ? 'x' : '',
-    recidiva_art30: artChecked('v_art30') && recidiva ? 'x' : '',
-    recidiva_art31: artChecked('v_art31') && recidiva ? 'x' : '',
-    recidiva_art32: artChecked('v_art32') && recidiva ? 'x' : '',
-    recidiva_art33: artChecked('v_art33') && recidiva ? 'x' : '',
-    recidiva_art34: artChecked('v_art34') && recidiva ? 'x' : '',
-    recidiva_art35: artChecked('v_art35') && recidiva ? 'x' : '',
-    recidiva_art36: artChecked('v_art36') && recidiva ? 'x' : '',
-    recidiva_art37: artChecked('v_art37') && recidiva ? 'x' : '',
-    recidiva_art39: artChecked('v_art39') && recidiva ? 'x' : '',
+    recidiva_art08: occorrenza(artChecked('v_art08')),
+    recidiva_art12: occorrenza(artChecked('v_art12')),
+    recidiva_art15: occorrenza(art15on),
+    recidiva_art16: occorrenza(art16on),
+    recidiva_art17: occorrenza(art17on),
+    recidiva_art27: occorrenza(artChecked('v_art27')),
+    recidiva_art28: occorrenza(artChecked('v_art28')),
+    recidiva_art29: occorrenza(artChecked('v_art29')),
+    recidiva_art30: occorrenza(artChecked('v_art30')),
+    recidiva_art31: occorrenza(artChecked('v_art31')),
+    recidiva_art32: occorrenza(artChecked('v_art32')),
+    recidiva_art33: occorrenza(artChecked('v_art33')),
+    recidiva_art34: occorrenza(artChecked('v_art34')),
+    recidiva_art35: occorrenza(artChecked('v_art35')),
+    recidiva_art36: occorrenza(artChecked('v_art36')),
+    recidiva_art37: occorrenza(artChecked('v_art37')),
+    recidiva_art39: occorrenza(artChecked('v_art39')),
 
     // Testi
     descrizione_fatti: esc(d.descrizione_fatti || ''),
     circostanze: esc(d.circostanze || ''),
     descrizione_luogo: esc(d.descrizione_luogo || ''),
 
-    // Trasgressore
+    // Trasgressore (PF/PG)
+    tipo_soggetto: isPF ? 'PF' : 'PG',
     denominazione: isPF ? esc(`${d.nome || ''} ${d.cognome || ''}`.trim()) : esc(d.ragione_sociale || ''),
-    cf_piva_label: isPF ? 'C.F.' : 'P. IVA',
     cf_piva: isPF ? esc(d.codice_fiscale || '') : esc(d.piva || ''),
     via: esc(d.via || ''),
     civico: esc(d.civico || ''),
-    localita: '',
+    cap: esc(d.cap || ''),
+    localita: esc(d.localita || ''),
     citta: esc(d.citta || ''),
-    telefono: esc(d.telefono || d.cellulare || ''),
-    email_pec: esc(d.email || d.pec || ''),
+    telefono: esc(d.telefono || ''),
+    cellulare: esc(d.cellulare || ''),
+    email: esc(d.email || ''),
+    pec: esc(d.pec || ''),
     presenza_trasgressore: String(d.presenza_trasgressore || '').toLowerCase() === 'si' || String(d.presenza_trasgressore || '').toLowerCase() === 'sì' || String(d.presenza_trasgressore || '') === '1' ? 'S\u00EC' : (String(d.presenza_trasgressore || '').toLowerCase() === 'no' || String(d.presenza_trasgressore || '') === '0' ? 'No' : String(d.presenza_trasgressore || '')),
 
     // Firme
@@ -288,30 +307,15 @@ function buildPlaceholderMap (data: any, utentiCache: Map<string, UtenteCached> 
     comizio: esc(d.comizio || ''),
     matricola_contatore: esc(d.matricola_contatore || ''),
     matricola_tessera: esc(d.matricola_tessera || ''),
-    importo_rimborso: esc(d.importo_rimborso || '')
+    importo_rimborso: fmtNum(d.importo_rimborso)
   }
   return m
-}
-
-/** Sostituisce tutti i {{placeholder}} nel template con i valori dalla mappa */
-function fillTemplate (template: string, placeholders: Record<string, string>): string {
-  return template.replace(/\{\{([^}]+)\}\}/g, (_, key) => {
-    return placeholders[key.trim()] ?? ''
-  })
 }
 
 // ── Stili widget ──
 const containerCss = css`
   display: flex; flex-direction: column; width: 100%; height: 100%;
   background: #e8e8e8; overflow: hidden;
-`
-const toolbarCss = css`
-  display: flex; align-items: center; gap: 8px;
-  padding: 6px 12px; background: #fff; border-bottom: 1px solid #ccc;
-  flex-shrink: 0; min-height: 40px;
-  .toolbar-title {
-    font-weight: 600; font-size: 14px; color: #005B8C; margin-right: auto;
-  }
 `
 const iframeCss = css`
   flex: 1; border: none; width: 100%; background: #e8e8e8;
@@ -359,20 +363,22 @@ async function fetchFullRecord (layerUrl: string, oid: number): Promise<any> {
 
 // ── Componente widget ──
 export default function Widget (_props: AllWidgetProps<IMConfig>): any {
-  const [html, setHtml] = React.useState<string | null>(null)
+  const [pdfUrl, setPdfUrl] = React.useState<string | null>(null)
   const [loading, setLoading] = React.useState(false)
   const [error, setError] = React.useState<string | null>(null)
   const [selKey, setSelKey] = React.useState<string>('')
 
-  // Polling selezione (stesso pattern degli altri widget)
+  // Cleanup blob URL al cambio
+  React.useEffect(() => {
+    return () => { if (pdfUrl) URL.revokeObjectURL(pdfUrl) }
+  }, [pdfUrl])
+
+  // Polling selezione
   React.useEffect(() => {
     const check = () => {
       const s = readSelection()
       const key = `${s.oid || ''}_${s.layerUrl || ''}`
-      setSelKey(prev => {
-        if (prev !== key) return key
-        return prev
-      })
+      setSelKey(prev => prev !== key ? key : prev)
     }
     check()
     const iv = setInterval(check, 800)
@@ -381,11 +387,11 @@ export default function Widget (_props: AllWidgetProps<IMConfig>): any {
     return () => { clearInterval(iv); window.removeEventListener('gii-force-refresh-selection', onSel) }
   }, [])
 
-  // Carica dati e genera HTML quando cambia la selezione
+  // Carica dati e genera PDF quando cambia la selezione
   React.useEffect(() => {
     const sel = readSelection()
     if (!sel.oid || !sel.layerUrl) {
-      setHtml(null)
+      setPdfUrl(null)
       setError(null)
       return
     }
@@ -396,7 +402,6 @@ export default function Widget (_props: AllWidgetProps<IMConfig>): any {
 
     ;(async () => {
       try {
-        // Carica dati completi e cache utenti in parallelo
         const [data, utenti] = await Promise.all([
           fetchFullRecord(sel.layerUrl!, sel.oid!),
           ensureUtentiCache()
@@ -405,27 +410,19 @@ export default function Widget (_props: AllWidgetProps<IMConfig>): any {
         if (!data) { setError('Record non trovato.'); setLoading(false); return }
 
         const map = buildPlaceholderMap(data, utenti)
-        const filled = fillTemplate(RAPPORTO_WEB_TEMPLATE, map)
+        const bytes = await buildRapportoPdf(map)
+        if (cancelled) return
 
-        // Inietta CSS per layout side-by-side nel preview
-        const previewCss = `
-          <style>
-            @media screen {
-              html { height: 100%; }
-              body {
-                display: flex; gap: 16px; padding: 16px;
-                background: #e8e8e8; justify-content: center;
-                align-items: flex-start; min-height: 100%;
-              }
-              .page {
-                box-shadow: 0 1px 8px rgba(0,0,0,0.18);
-                border-radius: 2px; flex-shrink: 0;
-              }
-            }
-          </style>
-        `
-        const finalHtml = filled.replace('</head>', previewCss + '</head>')
-        setHtml(finalHtml)
+        // Nome file nel fragment URL per il viewer nativo
+        const cp = map.cod_pratica || 'rapporto'
+        const fileName = `rapporto_${cp.replace(/[^a-zA-Z0-9_-]/g, '_')}.pdf`
+
+        const blob = new Blob([bytes as any], { type: 'application/pdf' })
+        const url = URL.createObjectURL(blob)
+        setPdfUrl(prev => {
+          if (prev) URL.revokeObjectURL(prev)
+          return url + '#' + fileName
+        })
       } catch (ex: any) {
         if (!cancelled) setError('Errore: ' + (ex?.message || String(ex)))
       } finally {
@@ -436,51 +433,14 @@ export default function Widget (_props: AllWidgetProps<IMConfig>): any {
     return () => { cancelled = true }
   }, [selKey])
 
-  // Stampa
-  const handlePrint = React.useCallback(() => {
-    if (!html) return
-    const printHtml = html.replace('</body>', '<script>window.onload=function(){window.print()}<\\/script></body>')
-    const blob = new Blob([printHtml], { type: 'text/html;charset=utf-8' })
-    window.open(URL.createObjectURL(blob), '_blank')
-  }, [html])
-
-  // Download HTML
-  const handleDownload = React.useCallback(() => {
-    if (!html) return
-    const blob = new Blob([html], { type: 'text/html;charset=utf-8' })
-    const a = document.createElement('a')
-    a.href = URL.createObjectURL(blob)
-    a.download = 'rapporto-tecnico.html'
-    a.click()
-    setTimeout(() => URL.revokeObjectURL(a.href), 1000)
-  }, [html])
-
   const sel = readSelection()
   const hasSelection = !!(sel.oid && sel.layerUrl)
 
   return (
     <div css={containerCss}>
-      {/* Toolbar */}
-      <div css={toolbarCss}>
-        <span className='toolbar-title'>Anteprima Rapporto</span>
-        {html && (
-          <>
-            <Button size='sm' type='primary' onClick={handlePrint}
-              title='Apre in nuova finestra con dialogo di stampa'>
-              Stampa / PDF
-            </Button>
-            <Button size='sm' type='default' onClick={handleDownload}
-              title='Scarica il file HTML del rapporto'>
-              Scarica HTML
-            </Button>
-          </>
-        )}
-      </div>
-
-      {/* Contenuto */}
       {loading && (
         <div css={emptyMsgCss}>
-          <Loading type='SECONDARY' />
+          <Loading type={'SECONDARY' as any} />
         </div>
       )}
 
@@ -492,12 +452,11 @@ export default function Widget (_props: AllWidgetProps<IMConfig>): any {
         <div css={emptyMsgCss}>Seleziona un rapporto dall&apos;elenco per visualizzare l&apos;anteprima.</div>
       )}
 
-      {!loading && !error && html && (
+      {!loading && !error && pdfUrl && (
         <iframe
           css={iframeCss}
-          srcDoc={html}
-          sandbox='allow-same-origin'
-          title='Anteprima rapporto tecnico'
+          src={pdfUrl}
+          title='Anteprima rapporto tecnico PDF'
         />
       )}
     </div>
