@@ -5258,50 +5258,6 @@ React.useEffect(() => {
     borderBottom: `${formStyle.divWidth}px solid ${formStyle.divColor}`
   }), [formStyle])
 
-  const safePx = React.useCallback((value: any, fallback = 0, min = 0, max = 80): number => {
-    const n = Number(value)
-    if (!Number.isFinite(n)) return fallback
-    return Math.max(min, Math.min(max, n))
-  }, [])
-
-  const anteprimaPadding = React.useMemo(() => {
-    const outer = safePx((cfg as any).maskOuterOffset, 0, 0, 80)
-    return {
-      top: safePx((cfg as any).anteprimaPdfPaddingTop, 0, 0, 80),
-      x: safePx((cfg as any).anteprimaPdfPaddingX, 0, 0, 80),
-      bottom: safePx((cfg as any).anteprimaPdfPaddingBottom, 0, 0, 80),
-      bottomRadius: safePx((cfg as any).anteprimaPdfBottomRadius, 10, 0, 40),
-      outer
-    }
-  }, [cfg, safePx])
-
-  const tabContentStyle: React.CSSProperties = React.useMemo(() => {
-    const base: React.CSSProperties = {
-      flex: '1 1 auto',
-      minHeight: 0
-    }
-
-    if (npTab !== 'anteprima') {
-      return {
-        ...base,
-        overflowY: 'auto',
-        padding: '12px 2px'
-      }
-    }
-
-    return {
-      ...base,
-      overflow: 'hidden',
-      padding: 0,
-      marginTop: anteprimaPadding.top,
-      marginLeft: anteprimaPadding.x - anteprimaPadding.outer,
-      marginRight: anteprimaPadding.x - anteprimaPadding.outer,
-      marginBottom: anteprimaPadding.bottom - anteprimaPadding.outer,
-      borderBottomLeftRadius: anteprimaPadding.bottomRadius,
-      borderBottomRightRadius: anteprimaPadding.bottomRadius
-    }
-  }, [npTab, anteprimaPadding])
-
   // ── Layout engine ──────────────────────────────────────────────────
   type FldR = { el: React.ReactNode; label: string; hint?: string }
 
@@ -5542,7 +5498,7 @@ React.useEffect(() => {
       </div>
 
       {/* ── Contenuto tab (scrollabile) ── */}
-      <div style={tabContentStyle}>
+      <div style={{ flex: '1 1 auto', minHeight: 0, overflowY: npTab === 'anteprima' ? 'hidden' : 'auto', padding: npTab === 'anteprima' ? 0 : '12px 2px' }}>
 
         {/* ANAGRAFICA */}
         {npTab === 'anagrafica' && renderLayoutTab('anagrafica')}
@@ -7454,7 +7410,7 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
 
       <div style={{ flex: '1 1 auto', display: 'flex', flexDirection: 'row', minHeight: 0 }}>
         {/* Form */}
-        <div style={{ flex: showEmbeddedMap ? '0 0 50%' : '1 1 100%', minHeight: 0, overflow: formTab === 'anteprima' ? 'visible' : 'hidden', display: 'flex', flexDirection: 'column', transition: 'flex 0.25s' }}>
+        <div style={{ flex: showEmbeddedMap ? '0 0 50%' : '1 1 100%', minHeight: 0, overflow: 'hidden', display: 'flex', flexDirection: 'column', transition: 'flex 0.25s' }}>
           {anyDs ? (
             <NuovaPraticaForm
               ds={anyDs}

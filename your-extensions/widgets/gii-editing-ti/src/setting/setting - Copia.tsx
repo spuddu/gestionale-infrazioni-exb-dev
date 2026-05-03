@@ -423,32 +423,6 @@ export default function Setting(props: AllWidgetSettingProps<IMConfig>) {
       </div>}
 
 
-      {/* === ANTEPRIMA PDF === */}
-      <Acc id='anteprimapdf' label='📄 Anteprima PDF' open={isOpen('anteprimapdf')} onToggle={()=>toggle('anteprimapdf')}/>
-      {isOpen('anteprimapdf') && <div>
-        <div style={P.hint}>Regola solo la distanza della finestra del viewer PDF nella scheda Anteprima. La barra superiore del widget resta invariata.</div>
-
-        <label style={P.lbl}>Padding superiore viewer (px)</label>
-        <input type='number' value={cfg.anteprimaPdfPaddingTop ?? 0} min={0} max={80}
-          onChange={e=>set('anteprimaPdfPaddingTop', Number(e.target.value))} style={{...P.inp, width:90}}/>
-        <div style={P.hint}>Distanza tra la barra del widget e il viewer PDF.</div>
-
-        <label style={P.lbl}>Padding laterale viewer (px)</label>
-        <input type='number' value={cfg.anteprimaPdfPaddingX ?? 0} min={0} max={80}
-          onChange={e=>set('anteprimaPdfPaddingX', Number(e.target.value))} style={{...P.inp, width:90}}/>
-        <div style={P.hint}>0 = viewer a filo in larghezza; usa lo stesso valore del padding esterno per ripristinare lo spazio laterale.</div>
-
-        <label style={P.lbl}>Padding inferiore viewer (px)</label>
-        <input type='number' value={cfg.anteprimaPdfPaddingBottom ?? 0} min={0} max={80}
-          onChange={e=>set('anteprimaPdfPaddingBottom', Number(e.target.value))} style={{...P.inp, width:90}}/>
-        <div style={P.hint}>0 = viewer abbassato fino al bordo inferiore; usa lo stesso valore del padding esterno per ripristinare lo spazio in basso.</div>
-
-        <label style={P.lbl}>Raggio angoli inferiori viewer (px)</label>
-        <input type='number' value={cfg.anteprimaPdfBottomRadius ?? 10} min={0} max={40}
-          onChange={e=>set('anteprimaPdfBottomRadius', Number(e.target.value))} style={{...P.inp, width:90}}/>
-        <div style={P.hint}>0 = nessun arrotondamento; valori tipici 8–12 px.</div>
-      </div>}
-
       {/* === STILE FORM (label + intestazioni sezione + divisori) === */}
       <Acc id='stileform' label='🎨 Stile form' open={isOpen('stileform')} onToggle={()=>toggle('stileform')}/>
       {isOpen('stileform') && <div>

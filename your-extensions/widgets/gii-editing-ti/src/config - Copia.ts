@@ -115,12 +115,6 @@ export interface Config {
   sectionDividerWidth: number
   formFieldFontSize: number
 
-  // --- Anteprima PDF
-  anteprimaPdfPaddingTop: number
-  anteprimaPdfPaddingX: number
-  anteprimaPdfPaddingBottom: number
-  anteprimaPdfBottomRadius: number
-
   // --- Titolo pratica
   detailTitlePrefix: string
   detailTitleBg: string
@@ -241,11 +235,6 @@ export const defaultConfig: Config = {
   sectionDividerColor: '#bfdbfe',
   sectionDividerWidth: 2,
   formFieldFontSize: 13,
-
-  anteprimaPdfPaddingTop: 0,
-  anteprimaPdfPaddingX: 0,
-  anteprimaPdfPaddingBottom: 0,
-  anteprimaPdfBottomRadius: 10,
 
   detailTitlePrefix: 'Dettaglio rapporto n.',
   detailTitleBg: 'transparent',
