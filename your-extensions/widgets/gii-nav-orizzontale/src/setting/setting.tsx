@@ -103,6 +103,69 @@ function PageSel (p: { value: string, onChange: (v: string) => void }) {
   )
 }
 
+function SectionSel (p: { value: string, onChange: (v: string) => void }) {
+  const sections = React.useMemo(() => {
+    try {
+      const state: any = getAppStore()?.getState?.()
+      const appConfig = state?.appStateInBuilder?.appConfig ?? state?.appConfig
+      const raw: any = appConfig?.sections ?? {}
+      const map: Record<string, any> =
+        raw?.asMutable ? raw.asMutable({ deep: true }) :
+        raw?.toJS ? raw.toJS() :
+        raw
+      return Object.entries(map).map(([id, s]: [string, any]) => ({
+        value: id,
+        label: `${s?.label || id} (${(s?.views || []).length} viste)`
+      })).sort((a, b) => a.value.localeCompare(b.value))
+    } catch { return [] }
+  }, [])
+  return (
+    <select value={p.value} onChange={e => p.onChange(e.target.value)} style={{ ...P.inp, cursor:'pointer' }}>
+      <option value='' style={{ background:'#1a1f2e', color:'#9ca3af' }}>— nessuna (navigazione pagine) —</option>
+      {sections.map(s => (
+        <option key={s.value} value={s.value} style={{ background:'#1a1f2e', color:'#e5e7eb' }}>{s.label}</option>
+      ))}
+    </select>
+  )
+}
+
+function ViewSel (p: { value: string, onChange: (v: string) => void, sectionId: string }) {
+  const views = React.useMemo(() => {
+    if (!p.sectionId) return []
+    try {
+      const state: any = getAppStore()?.getState?.()
+      const appConfig = state?.appStateInBuilder?.appConfig ?? state?.appConfig
+      const rawSections: any = appConfig?.sections ?? {}
+      const sectionsMap: Record<string, any> =
+        rawSections?.asMutable ? rawSections.asMutable({ deep: true }) :
+        rawSections?.toJS ? rawSections.toJS() :
+        rawSections
+      const sec = sectionsMap[p.sectionId]
+      if (!sec?.views?.length) return []
+      const rawViews: any = appConfig?.views ?? {}
+      const viewsMap: Record<string, any> =
+        rawViews?.asMutable ? rawViews.asMutable({ deep: true }) :
+        rawViews?.toJS ? rawViews.toJS() :
+        rawViews
+      return (sec.views as string[]).map((vid: string) => ({
+        value: vid,
+        label: viewsMap[vid]?.label || vid
+      }))
+    } catch { return [] }
+  }, [p.sectionId])
+
+  if (!p.sectionId) return <div style={P.hint}>Configura prima la sezione a livello widget.</div>
+  if (views.length === 0) return <div style={{ ...P.hint, color:'#f87171' }}>Nessuna vista trovata nella sezione.</div>
+  return (
+    <select value={p.value} onChange={e => p.onChange(e.target.value)} style={{ ...P.inp, cursor:'pointer' }}>
+      <option value='' style={{ background:'#1a1f2e', color:'#9ca3af' }}>— nessuna —</option>
+      {views.map(v => (
+        <option key={v.value} value={v.value} style={{ background:'#1a1f2e', color:'#e5e7eb' }}>{v.label} ({v.value})</option>
+      ))}
+    </select>
+  )
+}
+
 const FONTS = [
   { value:"'Crimson Pro', Georgia, serif", label:'Crimson Pro (serif)' },
   { value:"'Source Sans 3', 'Segoe UI', sans-serif", label:'Source Sans 3 (sans)' },
@@ -136,6 +199,8 @@ function makeNewItem (order: number): NavItem {
     label: 'Nuova voce',
     hashPage: '',
     section: '',
+    viewId: '',
+    collapseSidebar: false,
     colorBg: '#1e3a5f',
     colorAccent: '#60a5fa',
     colorBgRest: 'rgba(255,255,255,0.05)',
@@ -198,6 +263,18 @@ export default function Setting (props: AllWidgetSettingProps<IMConfig>) {
       </div>
 
       <div style={P.sec}>🔗 Voci di navigazione</div>
+
+      <label style={P.lbl}>Sezione target (per navigazione a viste)</label>
+      <SectionSel value={cfg.sectionId || ''} onChange={v => set('sectionId', v)} />
+      <div style={P.hint}>Se configurata, i pulsanti con Vista impostata switcheranno la vista nella sezione invece di navigare tra pagine.</div>
+
+      {cfg.sectionId && <>
+        <label style={P.lbl}>ID Barra laterale (per collapse/expand)</label>
+        <Inp value={cfg.sidebarWidgetId || ''} onChange={v => set('sidebarWidgetId', v)} placeholder='es. widget_1357' />
+        <div style={P.hint}>L'ID del widget Barra laterale che contiene la Sezione. Se configurato, i pulsanti con "Nascondi pannello" attivo chiuderanno il pannello laterale.</div>
+      </>}
+
+      <div style={{ marginTop: 14 }} />
       <button type='button' onClick={addItem}
         style={{ width:'100%', padding:'8px', borderRadius:8, border:'1px dashed rgba(147,197,253,0.4)', background:'rgba(59,130,246,0.08)', color:'#93c5fd', fontSize:12, fontWeight:600, cursor:'pointer', marginBottom:12, display:'flex', alignItems:'center', justifyContent:'center', gap:6 }}>
         ＋ Aggiungi voce
@@ -231,9 +308,18 @@ export default function Setting (props: AllWidgetSettingProps<IMConfig>) {
               <Sel value={item.icon || 'home'} onChange={v => setItem(ri, { icon:v })} options={ICON_OPTIONS} />
               <label style={P.lbl}>Pagina di destinazione</label>
               <PageSel value={item.hashPage} onChange={v => setItem(ri, { hashPage:v })} />
-              <label style={P.lbl}>Sezione (opzionale)</label>
+              <label style={P.lbl}>Sezione (tab editing)</label>
               <Inp value={item.section || ''} onChange={v => setItem(ri, { section:v })} placeholder='es. anagrafica, violazione, luogo' />
-              <div style={P.hint}>Se vuota, la voce naviga solo alla pagina e la sezione viene ignorata.</div>
+              <div style={P.hint}>Se vuota, la voce naviga solo alla pagina/vista e il tab editing viene ignorato.</div>
+              {cfg.sectionId && <>
+                <label style={P.lbl}>Vista nella sezione</label>
+                <ViewSel value={item.viewId || ''} onChange={v => setItem(ri, { viewId:v })} sectionId={cfg.sectionId} />
+                <div style={P.hint}>Se impostata, il pulsante switcha la vista nella sezione invece di navigare a una pagina.</div>
+                {cfg.sidebarWidgetId && <label style={{ ...P.lbl, display: 'flex', alignItems: 'center', gap: 8, marginTop: 8, cursor: 'pointer' }}>
+                  <input type='checkbox' checked={!!item.collapseSidebar} onChange={e => setItem(ri, { collapseSidebar: e.target.checked })} />
+                  Mostra pannello laterale
+                </label>}
+              </>}
               <div style={P.row2}>
                 <div><label style={P.lbl}>Colore sfondo</label><ColInp value={item.colorBg} onChange={v => {
                   const hex = /^#[0-9a-fA-F]{6}$/.test(v) ? v : item.colorBg

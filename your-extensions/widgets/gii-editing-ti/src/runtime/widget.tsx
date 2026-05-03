@@ -6,6 +6,7 @@ import { Button } from 'jimu-ui'
 import { createPortal } from 'react-dom'
 import type { IMConfig, TabConfig } from '../config'
 import { defaultConfig, DEFAULT_FIELD_LAYOUTS } from '../config'
+import AnteprimaPanel from './anteprima-panel'
 
 type MsgKind = 'info' | 'ok' | 'err'
 type Msg = { kind: MsgKind; text: string }
@@ -66,7 +67,7 @@ function ensureLayerIndex (url: string, layer?: any): string {
 
 
 
-function getRequestedEditSection (): 'anagrafica' | 'violazione' | 'dati_tecnici' | 'nota_spese' | 'allegati' | null {
+function getRequestedEditSection (opts?: { skipUrl?: boolean }): 'anagrafica' | 'violazione' | 'dati_tecnici' | 'nota_spese' | 'allegati' | 'anteprima' | null {
   const normalize = (raw: any): string => String(raw || '').trim().toLowerCase().replace(/_/g, '-').replace(/\s+/g, '-')
   const parseFrom = (raw: string): string => {
     const text = String(raw || '')
@@ -82,7 +83,7 @@ function getRequestedEditSection (): 'anagrafica' | 'violazione' | 'dati_tecnici
       return ''
     }
   }
-  const mapSection = (raw: any): 'anagrafica' | 'violazione' | 'dati_tecnici' | 'nota_spese' | 'allegati' | null => {
+  const mapSection = (raw: any): 'anagrafica' | 'violazione' | 'dati_tecnici' | 'nota_spese' | 'allegati' | 'anteprima' | null => {
     switch (normalize(raw)) {
       case 'anagrafica': return 'anagrafica'
       case 'violazione': return 'violazione'
@@ -94,13 +95,25 @@ function getRequestedEditSection (): 'anagrafica' | 'violazione' | 'dati_tecnici
         return 'dati_tecnici'
       case 'nota-spese': return 'nota_spese'
       case 'allegati': return 'allegati'
+      case 'anteprima': return 'anteprima'
       default: return null
     }
   }
-  try {
-    const fromUrl = mapSection(parseFrom(window.location.search || '') || parseFrom(window.location.hash || '') || parseFrom(window.location.href || ''))
-    if (fromUrl) return fromUrl
-  } catch {}
+  if (!opts?.skipUrl) {
+    try {
+      const fromUrl = mapSection(parseFrom(window.location.search || '') || parseFrom(window.location.hash || '') || parseFrom(window.location.href || ''))
+      if (fromUrl) {
+        try {
+          const url = new URL(window.location.href)
+          if (url.searchParams.has('section')) {
+            url.searchParams.delete('section')
+            window.history.replaceState(null, '', url.toString())
+          }
+        } catch {}
+        return fromUrl
+      }
+    } catch {}
+  }
   try {
     const fromNav = mapSection(window.sessionStorage.getItem('GII_NAV_SECTION'))
     if (fromNav) { try { window.sessionStorage.removeItem('GII_NAV_SECTION') } catch {} return fromNav }
@@ -3810,6 +3823,7 @@ function NuovaPraticaForm (p: {
   titleText?: string
   saveText?: string
   onDirtyChange?: (dirty: boolean) => void
+  onTabChange?: (tab: string) => void
 }) {
   const { ds, cfg } = p
   const mode = p.mode === 'edit' ? 'edit' : 'create'
@@ -3894,17 +3908,28 @@ function NuovaPraticaForm (p: {
     }
   }, [validationPopup, validationPopupOkId])
 
-  const [npTab, setNpTab] = React.useState<'anagrafica' | 'violazione' | 'dati_tecnici' | 'nota_spese' | 'allegati'>(() => {
-    const requested = getRequestedEditSection()
-    if (requested) return requested
-    return 'anagrafica'
-  })
+  const [npTab, setNpTab] = React.useState<'anagrafica' | 'violazione' | 'dati_tecnici' | 'nota_spese' | 'allegati' | 'anteprima'>('anagrafica')
   const [isExternalNavMode, setIsExternalNavMode] = React.useState<boolean>(true)
   const skipNpTabSyncRef = React.useRef(false)
+  const tabResetFirstRef = React.useRef(true)
+
+  // Pulisci la sezione persistita al mount per evitare che il reload riapra l'ultimo tab
+  React.useEffect(() => {
+    try { window.sessionStorage.removeItem('GII_NAV_SECTION') } catch {}
+    try { window.sessionStorage.removeItem('GII_REQUESTED_EDIT_SECTION') } catch {}
+  }, [])
 
   React.useEffect(() => {
-    setNpTab('anagrafica')
+    if (tabResetFirstRef.current) {
+      tabResetFirstRef.current = false
+      return
+    }
+    const requested = getRequestedEditSection()
+    setNpTab(requested || 'anagrafica')
   }, [mode, editOid])
+
+  // Notifica il parent del cambio tab
+  React.useEffect(() => { p.onTabChange?.(npTab) }, [npTab])
 
   const npTabSyncElRef = React.useRef<HTMLDivElement | null>(null)
 
@@ -3935,6 +3960,7 @@ function NuovaPraticaForm (p: {
               return 'dati_tecnici' as const
             case 'nota-spese': return 'nota_spese' as const
             case 'allegati': return 'allegati' as const
+            case 'anteprima': return 'anteprima' as const
             default: return null
           }
         }
@@ -3969,7 +3995,6 @@ function NuovaPraticaForm (p: {
     // Segnala al widget edit (se già montato) che c'è un nuovo intent
     try { window.dispatchEvent(new CustomEvent('gii-edit-intent-changed')) } catch {}
     try { window.dispatchEvent(new CustomEvent('gii-force-refresh-selection', { detail: { oid: info.oid, layerUrl: info.layerUrl } })) } catch {}
-    // GII_EDIT_TAB ha già il valore corrente (scritto dal useEffect di sync)
     // Reset form per quando l'utente torna alla pagina create
     createdRecordInfoRef.current = null
     setCreatedRecordInfo(null)
@@ -3978,15 +4003,11 @@ function NuovaPraticaForm (p: {
     setMsg(null)
     skipNpTabSyncRef.current = true
     setNpTab('anagrafica')
-    const pageToken = String(cfg.editPageId || 'editing-ti').trim()
-    const pageId = resolvePageId(pageToken)
+    const pageToken = String(cfg.editPageId || 'page_32').trim()
+    const pageId = resolvePageId(pageToken) || resolvePageId('Modifica Rapporto')
     if (pageId) {
       UrlManager.getInstance().changePage(pageId)
-      return
     }
-    // Fallback best-effort
-    const t = pageToken.startsWith('page/') ? pageToken.slice(5) : pageToken
-    window.location.hash = `#/page/${t}`
   }, [cfg.editPageId])
 
   React.useEffect(() => {
@@ -5477,7 +5498,7 @@ React.useEffect(() => {
       </div>
 
       {/* ── Contenuto tab (scrollabile) ── */}
-      <div style={{ flex: '1 1 auto', minHeight: 0, overflowY: 'auto', padding: '12px 2px' }}>
+      <div style={{ flex: '1 1 auto', minHeight: 0, overflowY: npTab === 'anteprima' ? 'hidden' : 'auto', padding: npTab === 'anteprima' ? 0 : '12px 2px' }}>
 
         {/* ANAGRAFICA */}
         {npTab === 'anagrafica' && renderLayoutTab('anagrafica')}
@@ -5716,6 +5737,11 @@ React.useEffect(() => {
             </div>
           )
         )}
+
+{/* ANTEPRIMA */}
+{npTab === 'anteprima' && (
+  <AnteprimaPanel data={draft} mode={mode} />
+)}
 
       </div>
 
@@ -6583,6 +6609,108 @@ function findMapHostElement (mapWidgetId?: string | null): HTMLElement | null {
   return null
 }
 
+/* ─────────────────────────────────────────────────────────────
+   EmbeddedMapPanel — ArcGIS MapView integrato direttamente
+   Crea un MapView + WebMap via AMD senza dipendere dal widget mappa ExB.
+   Include i widget standard: Zoom, Home, Locate, Compass,
+   BasemapToggle, ScaleBar, Fullscreen, DistanceMeasurement2D,
+   AreaMeasurement2D, LayerList, Expand.
+   ───────────────────────────────────────────────────────────── */
+async function addMapTools (view: any): Promise<void> {
+  try {
+    const [Home, Locate, Compass, BasemapToggle, ScaleBar, Fullscreen,
+           DistanceMeasurement2D, AreaMeasurement2D, LayerList, Expand
+    ] = await Promise.all([
+      loadEsriModule<any>('esri/widgets/Home'),
+      loadEsriModule<any>('esri/widgets/Locate'),
+      loadEsriModule<any>('esri/widgets/Compass'),
+      loadEsriModule<any>('esri/widgets/BasemapToggle'),
+      loadEsriModule<any>('esri/widgets/ScaleBar'),
+      loadEsriModule<any>('esri/widgets/Fullscreen'),
+      loadEsriModule<any>('esri/widgets/DistanceMeasurement2D'),
+      loadEsriModule<any>('esri/widgets/AreaMeasurement2D'),
+      loadEsriModule<any>('esri/widgets/LayerList'),
+      loadEsriModule<any>('esri/widgets/Expand')
+    ])
+
+    // Top-left: Home, Locate, Compass (Zoom è di default)
+    view.ui.add(new Home({ view }), 'top-left')
+    view.ui.add(new Locate({ view }), 'top-left')
+    view.ui.add(new Compass({ view }), 'top-left')
+
+    // Top-right: LayerList, BasemapToggle (in Expand)
+    const layerList = new LayerList({ view })
+    view.ui.add(new Expand({ view, content: layerList, expandTooltip: 'Layer', collapseTooltip: 'Chiudi layer' }), 'top-right')
+    view.ui.add(new Expand({ view, content: new BasemapToggle({ view }), expandTooltip: 'Basemap', collapseTooltip: 'Chiudi basemap' }), 'top-right')
+
+    // Bottom-left: ScaleBar
+    view.ui.add(new ScaleBar({ view, unit: 'metric' }), 'bottom-left')
+
+    // Bottom-right: Fullscreen, misure (in Expand)
+    view.ui.add(new Fullscreen({ view }), 'bottom-right')
+
+    const distWidget = new DistanceMeasurement2D({ view })
+    view.ui.add(new Expand({ view, content: distWidget, expandTooltip: 'Misura distanza', collapseTooltip: 'Chiudi misura distanza' }), 'bottom-right')
+
+    const areaWidget = new AreaMeasurement2D({ view })
+    view.ui.add(new Expand({ view, content: areaWidget, expandTooltip: 'Misura area', collapseTooltip: 'Chiudi misura area' }), 'bottom-right')
+  } catch (err) {
+    console.error('[EmbeddedMapPanel] addMapTools error:', err)
+  }
+}
+
+function EmbeddedMapPanel (p: {
+  portalItemId: string
+  portalUrl: string
+  onViewReady: (view: any) => void
+  visible: boolean
+  style?: any
+}) {
+  const containerRef = React.useRef<HTMLDivElement>(null)
+  const viewRef = React.useRef<any>(null)
+  const readyFired = React.useRef(false)
+
+  React.useEffect(() => {
+    if (!p.portalItemId || !containerRef.current) return
+    let destroyed = false
+    ;(async () => {
+      try {
+        const [MapView, WebMap, esriConfig] = await Promise.all([
+          loadEsriModule<any>('esri/views/MapView'),
+          loadEsriModule<any>('esri/WebMap'),
+          loadEsriModule<any>('esri/config')
+        ])
+        if (destroyed) return
+        if (p.portalUrl) esriConfig.portalUrl = p.portalUrl
+        const webmap = new WebMap({ portalItem: { id: p.portalItemId } })
+        const view = new MapView({ container: containerRef.current, map: webmap })
+        viewRef.current = view
+        await view.when()
+        if (destroyed) return
+        await addMapTools(view)
+        if (!readyFired.current) { readyFired.current = true; p.onViewReady(view) }
+      } catch (err) {
+        console.error('[EmbeddedMapPanel] init error:', err)
+      }
+    })()
+    return () => {
+      destroyed = true
+      try { viewRef.current?.destroy?.() } catch {}
+      viewRef.current = null
+      readyFired.current = false
+    }
+  }, [p.portalItemId, p.portalUrl])
+
+  // Resize quando diventa visibile (la mappa potrebbe non sapere le dimensioni corrette)
+  React.useEffect(() => {
+    if (!p.visible || !viewRef.current) return
+    const t = setTimeout(() => { try { viewRef.current?.resize?.() } catch {} }, 150)
+    return () => clearTimeout(t)
+  }, [p.visible])
+
+  return <div ref={containerRef} style={{ width: '100%', height: '100%', minHeight: 200, ...(p.style || {}) }} />
+}
+
 /** Trova il layer dei rapporti nella mappa in modo deterministico (per titolo, senza query) */
 function findRapportiLayer (view: any): any | null {
   try {
@@ -6969,7 +7097,9 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
   }, [effectiveIntent?.layerUrl])
 
   const mapWidgetId = Array.isArray(cfg.useMapWidgetIds) ? cfg.useMapWidgetIds[0] : null
-  const [jimuMapView, setJimuMapView] = React.useState<JimuMapView | null>(null)
+  const useEmbeddedMap = !!String(cfg.embeddedMapPortalItem || '').trim()
+  const [mapView, setMapView] = React.useState<any>(null)
+  const [formTab, setFormTab] = React.useState<string>('anagrafica')
   const [clickedPointWgs84, setClickedPointWgs84] = React.useState<any | null>(null)
   const [existingGeomWgs84, setExistingGeomWgs84] = React.useState<any | null>(null)
   const [mapClickEnabled, setMapClickEnabled] = React.useState(false)
@@ -7016,7 +7146,7 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
     return () => { cancelled = true }
   }, [effectiveIntent?.oid, effectiveIntent?.layerUrl, effectiveIntent?.idFieldName, isCreatePage])
   React.useEffect(() => {
-    const view: any = (jimuMapView as any)?.view
+    const view: any = mapView
     if (!view || typeof view.on !== 'function') return
     const h = view.on('click', (e: any) => {
       if (!mapClickEnabledRef.current) return  // click sulla mappa ignorato se non abilitato
@@ -7029,7 +7159,7 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
       })().catch(() => {})
     })
     return () => { try { h?.remove?.() } catch {} }
-  }, [jimuMapView])
+  }, [mapView])
 
   // ── Marker visivo sulla mappa per il punto (cliccato o esistente) ──
   const markerGraphicRef = React.useRef<any>(null)
@@ -7040,7 +7170,7 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
     return ep
   })()
   React.useEffect(() => {
-    const view: any = (jimuMapView as any)?.view
+    const view: any = mapView
     if (!view) return
 
     // Rimuovi marker precedente
@@ -7087,7 +7217,7 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
         }
       } catch { /* ignore */ }
     }
-  }, [jimuMapView, effectiveMarkerPoint])
+  }, [mapView, effectiveMarkerPoint])
 
   const rootRef = React.useRef<HTMLDivElement | null>(null)
   // Contatore che si incrementa ogni volta che il widget diventa visibile (= ingresso nella pagina ExB)
@@ -7102,6 +7232,21 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
         // Reset punti ad ogni ingresso nella pagina
         setClickedPointWgs84(null)
         setMapClickEnabled(false)
+        // Re-sync edit intent da sessionStorage (per il caso in cui l'evento viene perso perché il widget non era montato)
+        if (!isCreatePage) {
+          const fromStorage = readEditIntent()
+          if (fromStorage) {
+            setEditIntent(fromStorage)
+            clearEditIntent()
+          }
+        }
+        // Re-dispatch tab corrente per aggiornare lo stato attivo del nav orizzontale
+        try {
+          const currentTab = sessionStorage.getItem('GII_EDIT_TAB')
+          if (currentTab) {
+            window.dispatchEvent(new CustomEvent('gii:edit-section-change', { detail: { section: currentTab } }))
+          }
+        } catch {}
       }
       wasVisibleRef.current = isVisible
     }
@@ -7142,7 +7287,7 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
   const mapDefaultViewpointRef = React.useRef<any>(null)
 
   React.useEffect(() => {
-    const view: any = (jimuMapView as any)?.view
+    const view: any = mapView
     if (!view?.map) return
 
     // Se il widget è nascosto (altra pagina ExB), non toccare la mappa
@@ -7247,63 +7392,84 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
     }
 
     return () => { cancelled = true }
-  }, [jimuMapView, editOid, editIdFieldName, inCreateMode, editReqPoint, pageVisitCount])
+  }, [mapView, editOid, editIdFieldName, inCreateMode, editReqPoint, pageVisitCount])
+
+  const showEmbeddedMap = useEmbeddedMap && formTab === 'dati_tecnici'
 
   return (
     <div ref={rootRef} data-gii-editing-root='1' style={{ width: '100%', height: '100%', display: 'flex', flexDirection: 'column', minHeight: 0, boxSizing: 'border-box', padding: Number.isFinite(Number((cfg as any).maskOuterOffset ?? 0)) ? Number((cfg as any).maskOuterOffset) : 0, position: 'relative', zIndex: uiLocked ? 1001 : 'auto', background: modeBg, transition: 'background 0.3s' }}>
-      {mapWidgetId && (
+      {/* Mappa esterna ExB (fallback legacy) — nascosta, solo per agganciare la view */}
+      {!useEmbeddedMap && mapWidgetId && (
         <div style={{ display: 'none' }}>
           <JimuMapViewComponent
             useMapWidgetId={mapWidgetId}
-            onActiveViewChange={(jmv: JimuMapView) => { setJimuMapView(jmv) }}
+            onActiveViewChange={(jmv: JimuMapView) => { setMapView(jmv?.view || null) }}
           />
         </div>
       )}
 
-      {anyDs ? (
-        <NuovaPraticaForm
-          ds={anyDs}
-          cfg={cfg}
-          showDatiGenerali={showDatiGenerali}
-          clickedPointWgs84={clickedPointWgs84}
-          existingGeomWgs84={existingGeomWgs84}
-          onClearPoint={() => setClickedPointWgs84(null)}
-          onGeomSaved={(geom: any) => { setExistingGeomWgs84(geom); setClickedPointWgs84(null) }}
-          mapClickEnabled={mapClickEnabled}
-          onToggleMapClick={(on: boolean) => setMapClickEnabled(on)}
-          mode={inCreateMode ? 'create' : 'edit'}
-          initialData={initialEditData}
-          editOid={editOid}
-          editIdFieldName={editIdFieldName}
-          editLayerUrl={!inCreateMode ? ensureLayerIndex(normalizeFeatureLayerUrl(effectiveIntent?.layerUrl || activeGate?.state?.layerUrl || readDynamicSelection().layerUrl || '')) : ''}
-          titleText={inCreateMode ? 'Nuovo rapporto' : 'Modifica rapporto'}
-          saveText={'Salva'}
-          onDirtyChange={() => {}}
-          onSaved={(savedOid: number, savedData?: any) => {
-            if (inCreateMode) {
-              // L'intent verrà scritto dal popup OK → navigateToEditAfterCreate()
-              return
-            }
-            const nextLayerUrl = ensureLayerIndex(normalizeFeatureLayerUrl((anyDs as any)?.layer?.url || (anyDs as any)?.url || effectiveIntent?.layerUrl || readDynamicSelection().layerUrl || ''), (anyDs as any)?.layer)
-            const nextIdFieldName = editIdFieldName || anyDs?.getIdField?.() || 'OBJECTID'
-            const nextData = savedData || editRecordData || effectiveIntent?.data || activeGate?.state?.data || null
-            const nextIntentObj: EditIntentInfo = { oid: savedOid, layerUrl: nextLayerUrl, idFieldName: nextIdFieldName, data: nextData, ts: Date.now() }
-            setEditRecordData(nextData)
-            setEditIntent(nextIntentObj)
-            setSelectionIntent(nextIntentObj)
-            try { ;(window as any).__giiEdit = nextIntentObj } catch {}
-            writeEditIntent(nextIntentObj)
-            if (nextData && typeof nextData === 'object') {
-              writeSelectedFeatureCache(nextLayerUrl, savedOid, nextIdFieldName, nextData, 'edit')
-            }
-            invalidateRuntimeProxyCache(nextLayerUrl)
-            writeDynamicSelection({ oid: savedOid, layerUrl: nextLayerUrl, idFieldName: nextIdFieldName, data: nextData })
-            try { window.dispatchEvent(new CustomEvent('gii-force-refresh-selection', { detail: { oid: savedOid, layerUrl: nextLayerUrl } })) } catch {}
-          }}
-        />
-      ) : (
-        <div style={{ padding: 12 }}>{!inCreateMode ? "Record di modifica non disponibile: torna all'elenco e riapri Modifica." : 'Datasource dinamica non pronta: configura il layer schema oppure seleziona una pratica.'}</div>
-      )}
+      <div style={{ flex: '1 1 auto', display: 'flex', flexDirection: 'row', minHeight: 0 }}>
+        {/* Form */}
+        <div style={{ flex: showEmbeddedMap ? '0 0 50%' : '1 1 100%', minHeight: 0, overflow: 'hidden', display: 'flex', flexDirection: 'column', transition: 'flex 0.25s' }}>
+          {anyDs ? (
+            <NuovaPraticaForm
+              ds={anyDs}
+              cfg={cfg}
+              showDatiGenerali={showDatiGenerali}
+              clickedPointWgs84={clickedPointWgs84}
+              existingGeomWgs84={existingGeomWgs84}
+              onClearPoint={() => setClickedPointWgs84(null)}
+              onGeomSaved={(geom: any) => { setExistingGeomWgs84(geom); setClickedPointWgs84(null) }}
+              mapClickEnabled={mapClickEnabled}
+              onToggleMapClick={(on: boolean) => setMapClickEnabled(on)}
+              mode={inCreateMode ? 'create' : 'edit'}
+              initialData={initialEditData}
+              editOid={editOid}
+              editIdFieldName={editIdFieldName}
+              editLayerUrl={!inCreateMode ? ensureLayerIndex(normalizeFeatureLayerUrl(effectiveIntent?.layerUrl || activeGate?.state?.layerUrl || readDynamicSelection().layerUrl || '')) : ''}
+              titleText={inCreateMode ? 'Nuovo rapporto' : 'Modifica rapporto'}
+              saveText={'Salva'}
+              onDirtyChange={() => {}}
+              onTabChange={(tab: string) => setFormTab(tab)}
+              onSaved={(savedOid: number, savedData?: any) => {
+                if (inCreateMode) {
+                  setClickedPointWgs84(null)
+                  return
+                }
+                const nextLayerUrl = ensureLayerIndex(normalizeFeatureLayerUrl((anyDs as any)?.layer?.url || (anyDs as any)?.url || effectiveIntent?.layerUrl || readDynamicSelection().layerUrl || ''), (anyDs as any)?.layer)
+                const nextIdFieldName = editIdFieldName || anyDs?.getIdField?.() || 'OBJECTID'
+                const nextData = savedData || editRecordData || effectiveIntent?.data || activeGate?.state?.data || null
+                const nextIntentObj: EditIntentInfo = { oid: savedOid, layerUrl: nextLayerUrl, idFieldName: nextIdFieldName, data: nextData, ts: Date.now() }
+                setEditRecordData(nextData)
+                setEditIntent(nextIntentObj)
+                setSelectionIntent(nextIntentObj)
+                try { ;(window as any).__giiEdit = nextIntentObj } catch {}
+                writeEditIntent(nextIntentObj)
+                if (nextData && typeof nextData === 'object') {
+                  writeSelectedFeatureCache(nextLayerUrl, savedOid, nextIdFieldName, nextData, 'edit')
+                }
+                invalidateRuntimeProxyCache(nextLayerUrl)
+                writeDynamicSelection({ oid: savedOid, layerUrl: nextLayerUrl, idFieldName: nextIdFieldName, data: nextData })
+                try { window.dispatchEvent(new CustomEvent('gii-force-refresh-selection', { detail: { oid: savedOid, layerUrl: nextLayerUrl } })) } catch {}
+              }}
+            />
+          ) : (
+            <div style={{ padding: 12 }}>{!inCreateMode ? "Record di modifica non disponibile: torna all'elenco e riapri Modifica." : 'Datasource dinamica non pronta: configura il layer schema oppure seleziona una pratica.'}</div>
+          )}
+        </div>
+
+        {/* Mappa embedded — sempre montata (per preservare view), visibile solo in dati_tecnici */}
+        {useEmbeddedMap && (
+          <div style={{ flex: '0 0 50%', display: showEmbeddedMap ? 'flex' : 'none', minHeight: 0 }}>
+            <EmbeddedMapPanel
+              portalItemId={String(cfg.embeddedMapPortalItem || '').trim()}
+              portalUrl={String(cfg.embeddedMapPortalUrl || 'https://cbsm-hub.maps.arcgis.com').trim()}
+              onViewReady={(view: any) => setMapView(view)}
+              visible={showEmbeddedMap}
+            />
+          </div>
+        )}
+      </div>
     </div>
   )
 }

@@ -141,6 +141,46 @@ function getCurrentPageId (): string | null {
   }
 }
 
+function getCurrentSectionViewId (sectionId: string): string | null {
+  if (!sectionId) return null
+  try {
+    const state: any = getAppStore()?.getState?.()
+    const navInfos = state?.appRuntimeInfo?.sectionNavInfos
+    if (navInfos) {
+      const raw = navInfos.asMutable ? navInfos.asMutable({ deep: true }) : navInfos
+      if (raw[sectionId]?.currentViewId) return raw[sectionId].currentViewId
+    }
+    const sections = state?.appConfig?.sections
+    const sec = sections?.asMutable ? sections.asMutable({ deep: true }) : sections
+    const s = sec?.[sectionId]
+    if (s?.views?.length > 0) return s.views[0]
+  } catch {}
+  return null
+}
+
+function switchSectionView (sectionId: string, viewId: string): void {
+  if (!sectionId || !viewId) return
+  try {
+    getAppStore().dispatch({
+      type: 'SECTION_NAV_INFO_CHANGED',
+      sectionId,
+      navInfo: { currentViewId: viewId, previousViewId: getCurrentSectionViewId(sectionId) || '', progress: 1 }
+    })
+  } catch {}
+}
+
+function setSidebarCollapse (sidebarWidgetId: string, collapse: boolean): void {
+  if (!sidebarWidgetId) return
+  try {
+    getAppStore().dispatch({
+      type: 'WIDGET_STATE_PROP_CHANGE',
+      widgetId: sidebarWidgetId,
+      propKey: 'collapse',
+      value: collapse
+    })
+  } catch {}
+}
+
 function gotoPage(pageToken: string, section?: string): void {
   const pageId = resolvePageId(pageToken)
   const currentPageId = getCurrentPageId()
@@ -177,13 +217,23 @@ const NAV_ICONS: Record<string, string> = {
 }
 const NAV_DEFAULT_ICON = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/></svg>`
 
-function NavButton (p: { item: NavItem, cfg: any, idx: number, currentPageId: string | null, currentSection: string }) {
-  const { item, cfg, currentPageId, currentSection } = p
+function NavButton (p: { item: NavItem, cfg: any, idx: number, currentPageId: string | null, currentSection: string, currentViewId: string | null, onSectionChange: (s: string) => void, onViewChange: (v: string) => void }) {
+  const { item, cfg, currentPageId, currentSection, currentViewId } = p
   const [hov, setHov] = React.useState(false)
   const itemPageId = item.hashPage ? resolvePageId(item.hashPage) : null
   const itemSection = String(item.section || '').trim()
   const currentSectionNorm = String(currentSection || '').trim()
+  const sectionId = String(cfg.sectionId || '').trim()
+  const itemViewId = String(item.viewId || '').trim()
   const isActive = (() => {
+    if (itemViewId && sectionId) {
+      if (currentViewId !== itemViewId) return false
+      if (!itemSection) return true
+      return itemSection === currentSectionNorm
+    }
+    if (sectionId && !itemViewId && itemSection) {
+      return itemSection === currentSectionNorm
+    }
     if (!currentPageId || !itemPageId) return false
     if (currentPageId === itemPageId) return !itemSection || itemSection === currentSectionNorm
     if (itemSection && itemSection === currentSectionNorm && document.querySelector('[data-gii-editing-root]')) return true
@@ -191,11 +241,28 @@ function NavButton (p: { item: NavItem, cfg: any, idx: number, currentPageId: st
   })()
   const hot = hov || isActive
 
+  const handleClick = () => {
+    if (sectionId && (itemViewId || itemSection)) {
+      if (itemViewId) {
+        switchSectionView(sectionId, itemViewId)
+        p.onViewChange(itemViewId)
+      }
+      const sbId = String(cfg.sidebarWidgetId || '').trim()
+      if (sbId) setSidebarCollapse(sbId, !!item.collapseSidebar)
+      if (itemSection) {
+        p.onSectionChange(itemSection)
+        persistAndBroadcastSection(itemSection)
+      }
+      return
+    }
+    if (item.hashPage) gotoPage(item.hashPage, item.section)
+  }
+
   return (
     <div
       onMouseEnter={() => setHov(true)}
       onMouseLeave={() => setHov(false)}
-      onClick={() => { if (item.hashPage) gotoPage(item.hashPage, item.section) }}
+      onClick={handleClick}
       style={{
         cursor: 'pointer',
         width: cfg.itemWidth,
@@ -260,6 +327,10 @@ export default function Widget (props: Props) {
 
   const [currentPageId, setCurrentPageId] = React.useState<string | null>(() => readCurrentPageId())
   const [currentSection, setCurrentSection] = React.useState<string>(() => readCurrentSection())
+  const [currentViewId, setCurrentViewId] = React.useState<string | null>(() => {
+    const sid = String(cfg.sectionId || '').trim()
+    return sid ? getCurrentSectionViewId(sid) : null
+  })
   const [user, setUser] = React.useState<UserInfo | null>(null)
   const [uLoad, setULoad] = React.useState(true)
 
@@ -267,6 +338,8 @@ export default function Widget (props: Props) {
     const upd = () => {
       setCurrentPageId(readCurrentPageId())
       setCurrentSection(readCurrentSection())
+      const sid = String(cfg.sectionId || '').trim()
+      if (sid) setCurrentViewId(getCurrentSectionViewId(sid))
     }
     const onSectionChange = (evt: any) => {
       const next = String(evt?.detail?.section || readCurrentSection() || '').trim()
@@ -280,12 +353,24 @@ export default function Widget (props: Props) {
     window.addEventListener('gii:edit-section-change', onSectionChange as EventListener)
     window.addEventListener('focus', onFocus)
     document.addEventListener('visibilitychange', onFocus)
+    let unsubStore: (() => void) | null = null
+    const sid = String(cfg.sectionId || '').trim()
+    if (sid) {
+      try {
+        let prevViewId = getCurrentSectionViewId(sid)
+        unsubStore = getAppStore().subscribe(() => {
+          const next = getCurrentSectionViewId(sid)
+          if (next !== prevViewId) { prevViewId = next; setCurrentViewId(next) }
+        })
+      } catch {}
+    }
     return () => {
       window.removeEventListener('hashchange', upd)
       window.removeEventListener('popstate', upd)
       window.removeEventListener('gii:edit-section-change', onSectionChange as EventListener)
       window.removeEventListener('focus', onFocus)
       document.removeEventListener('visibilitychange', onFocus)
+      if (unsubStore) unsubStore()
     }
   }, [])
 
@@ -343,7 +428,7 @@ export default function Widget (props: Props) {
       overflowY: 'hidden'
     }}>
       {visibleItems.map((item, i) => (
-        <NavButton key={item.id} item={item} cfg={cfg} idx={i} currentPageId={currentPageId} currentSection={currentSection} />
+        <NavButton key={item.id} item={item} cfg={cfg} idx={i} currentPageId={currentPageId} currentSection={currentSection} currentViewId={currentViewId} onSectionChange={setCurrentSection} onViewChange={setCurrentViewId} />
       ))}
     </div>
   )

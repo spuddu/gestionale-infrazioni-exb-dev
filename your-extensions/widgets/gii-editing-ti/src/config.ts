@@ -160,6 +160,8 @@ export interface Config {
   // --- Nuova pratica inline + mappa
   enableCreateWithoutSelection: boolean
   useMapWidgetIds: string[]
+  embeddedMapPortalItem: string
+  embeddedMapPortalUrl: string
   mapLayerTitle: string   // titolo del layer rapporti nella mappa (match deterministico)
   officeLonWgs84: number
   officeLatWgs84: number
@@ -268,7 +270,7 @@ export const defaultConfig: Config = {
   showEditButtons: true,
   editOverlayColor: '#7c3aed',
   editPageColor: '#5b21b6',
-  editPageId: 'editing-ti',
+  editPageId: 'page_32',
   fieldStatoTI: 'stato_TI',
   fieldPresaTI: 'presa_in_carico_TI',
   editMinStato: 2,
@@ -280,6 +282,8 @@ export const defaultConfig: Config = {
 
   enableCreateWithoutSelection: true,
   useMapWidgetIds: [],
+  embeddedMapPortalItem: '',
+  embeddedMapPortalUrl: 'https://cbsm-hub.maps.arcgis.com',
   mapLayerTitle: '',
   officeLonWgs84: 0,
   officeLatWgs84: 0,

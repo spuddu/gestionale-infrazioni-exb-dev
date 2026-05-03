@@ -409,6 +409,17 @@ export default function Setting(props: AllWidgetSettingProps<IMConfig>) {
         <input type='text' value={cfg.mapLayerTitle || ''} onChange={e=>set('mapLayerTitle',e.target.value)}
           style={{...P.inp, marginTop:4}} placeholder='es. Rapporto di rilevazione infrazioni irrigue_form'/>
         <div style={P.hint}>Titolo esatto del layer rapporti presente nella mappa. Usato per identificare il layer in modo deterministico (senza scansionare tutti i layer).</div>
+
+        <div style={{fontSize:11,fontWeight:700,color:'#93c5fd',marginTop:16,marginBottom:8}}>Mappa integrata (embedded)</div>
+        <div style={P.hint}>Se configurata, la mappa viene caricata direttamente dentro il widget nel tab "Luoghi e dati tecnici" senza dipendere da un widget mappa esterno. Lascia vuoto per usare il widget mappa di pagina selezionato sopra.</div>
+        <label style={{...P.lbl, marginTop: 8}}>Portal Item ID della WebMap</label>
+        <input type='text' value={cfg.embeddedMapPortalItem || ''} onChange={e=>set('embeddedMapPortalItem',e.target.value)}
+          style={{...P.inp, marginTop:4}} placeholder='es. ebb5e0d0d2d649daa2e124bd96514245'/>
+        <div style={P.hint}>L'ID della WebMap AGOL da caricare. Lo trovi nell'URL della WebMap su AGOL (dopo /home/item.html?id=).</div>
+        <label style={{...P.lbl, marginTop: 8}}>Portal URL</label>
+        <input type='text' value={cfg.embeddedMapPortalUrl || 'https://cbsm-hub.maps.arcgis.com'} onChange={e=>set('embeddedMapPortalUrl',e.target.value)}
+          style={{...P.inp, marginTop:4}} placeholder='https://cbsm-hub.maps.arcgis.com'/>
+        <div style={P.hint}>L'URL del portale ArcGIS Online. Per CBSM è https://cbsm-hub.maps.arcgis.com</div>
       </div>}
 
 

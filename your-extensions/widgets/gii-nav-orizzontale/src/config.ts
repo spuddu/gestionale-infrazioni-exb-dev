@@ -7,6 +7,8 @@ export interface NavItem {
   label: string
   hashPage: string
   section?: string
+  viewId?: string
+  collapseSidebar?: boolean
   colorBg: string
   colorAccent: string
   colorBgRest: string
@@ -16,6 +18,8 @@ export interface NavItem {
 }
 
 export interface Config {
+  sectionId: string
+  sidebarWidgetId: string
   gap: number
   itemBorderRadius: number
   itemPaddingX: number
@@ -31,6 +35,8 @@ export interface Config {
 }
 
 export const defaultConfig: Config = {
+  sectionId: '',
+  sidebarWidgetId: '',
   gap: 8,
   itemBorderRadius: 8,
   itemPaddingX: 14,
