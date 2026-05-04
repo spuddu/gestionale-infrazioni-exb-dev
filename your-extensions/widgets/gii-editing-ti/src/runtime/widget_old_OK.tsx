@@ -141,182 +141,6 @@ function getGlobalOverlayDocument (): Document | null {
   return (host?.ownerDocument || (typeof document !== 'undefined' ? document : null)) as Document | null
 }
 
-
-type GiiLockRect = {
-  key: string
-  left: number
-  top: number
-  width: number
-  height: number
-}
-
-function findGiiWidgetElement (doc: Document, widgetId: string): HTMLElement | null {
-  const id = String(widgetId || '').trim()
-  if (!id) return null
-  const selectors = [
-    `[data-widgetid="${id}"]`,
-    `[data-widget-id="${id}"]`,
-    `[widgetid="${id}"]`,
-    `[id="${id}"]`,
-    `#${id}`
-  ]
-  for (const sel of selectors) {
-    try {
-      const el = doc.querySelector(sel) as HTMLElement | null
-      if (el) return el
-    } catch {}
-  }
-  return null
-}
-
-function getVisibleLockRect (el: HTMLElement, key: string, viewW: number, viewH: number, win: Window): GiiLockRect | null {
-  try {
-    if (!el || !el.isConnected) return null
-    const st = win.getComputedStyle?.(el)
-    if (st && (st.display === 'none' || st.visibility === 'hidden' || st.opacity === '0')) return null
-    const r = el.getBoundingClientRect()
-    const left = Math.max(0, Math.floor(r.left))
-    const top = Math.max(0, Math.floor(r.top))
-    const right = Math.min(viewW, Math.ceil(r.right))
-    const bottom = Math.min(viewH, Math.ceil(r.bottom))
-    const width = Math.max(0, right - left)
-    const height = Math.max(0, bottom - top)
-    if (width < 2 || height < 2) return null
-    return { key, left, top, width, height }
-  } catch {
-    return null
-  }
-}
-
-function DirtyNavigationLockOverlay (props: { active: boolean; targetRef: React.RefObject<HTMLElement | null> }) {
-  const { active, targetRef } = props
-  const [rects, setRects] = React.useState<GiiLockRect[]>([])
-
-  const computeRects = React.useCallback(() => {
-    if (!active) { setRects([]); return }
-    const host = getGlobalOverlayHost()
-    if (!host) { setRects([]); return }
-    const doc = host.ownerDocument || document
-    const win = doc.defaultView || window
-    const viewW = Math.max(0, win.innerWidth || doc.documentElement?.clientWidth || 0)
-    const viewH = Math.max(0, win.innerHeight || doc.documentElement?.clientHeight || 0)
-
-    // La maschera non dipende più da un'area libera calcolata a pixel.
-    // Oscura solo gli elementi che devono essere bloccati:
-    // - header GII;
-    // - navigazione sinistra principale delle pagine Nuovo/Modifica rapporto.
-    // Il pulsante della barra laterale resta libero perché non oscuriamo il widget sidebar,
-    // ma solo il widget gii-nav contenuto nel suo primo pannello.
-    const idsToMask = [
-      'widget_840',  // GII Header
-      'widget_1319', // GII Navigazione - Nuovo Rapporto
-      'widget_1371'  // GII Navigazione - Modifica Rapporto
-    ]
-
-    const next: GiiLockRect[] = []
-    for (const id of idsToMask) {
-      const el = findGiiWidgetElement(doc, id)
-      const rect = el ? getVisibleLockRect(el, id, viewW, viewH, win) : null
-      if (rect) next.push(rect)
-    }
-
-    // Fallback prudente: se per qualche motivo gli id ExB non sono reperibili,
-    // blocca almeno la fascia alta e la parte sinistra fino all'inizio del widget editing.
-    if (next.length === 0 && targetRef.current) {
-      try {
-        const r = targetRef.current.getBoundingClientRect()
-        const headerH = Math.max(0, Math.floor(r.top))
-        const leftW = Math.max(0, Math.floor(r.left))
-        if (headerH > 0) next.push({ key: 'fallback-header', left: 0, top: 0, width: viewW, height: headerH })
-        if (leftW > 0) next.push({ key: 'fallback-left', left: 0, top: headerH, width: leftW, height: Math.max(0, viewH - headerH) })
-      } catch {}
-    }
-
-    setRects(next)
-  }, [active, targetRef])
-
-  React.useEffect(() => {
-    if (!active) { setRects([]); return }
-    const host = getGlobalOverlayHost()
-    const doc = host?.ownerDocument || document
-    const win = doc.defaultView || window
-    let raf = 0
-    const schedule = () => {
-      try { if (raf) win.cancelAnimationFrame(raf) } catch {}
-      try { raf = win.requestAnimationFrame(computeRects) } catch { computeRects() }
-    }
-
-    schedule()
-
-    let ro: ResizeObserver | null = null
-    try {
-      if (typeof ResizeObserver !== 'undefined') {
-        ro = new ResizeObserver(schedule)
-        const observed = new Set<Element>()
-        for (const id of ['widget_840', 'widget_1319', 'widget_1371']) {
-          const el = findGiiWidgetElement(doc, id)
-          if (el && !observed.has(el)) {
-            observed.add(el)
-            ro.observe(el)
-          }
-        }
-        if (targetRef.current && !observed.has(targetRef.current)) ro.observe(targetRef.current)
-      }
-    } catch { ro = null }
-
-    win.addEventListener('resize', schedule, true)
-    win.addEventListener('scroll', schedule, true)
-    const id = win.setInterval(schedule, 300)
-
-    return () => {
-      try { if (raf) win.cancelAnimationFrame(raf) } catch {}
-      try { ro?.disconnect() } catch {}
-      try { win.removeEventListener('resize', schedule, true) } catch {}
-      try { win.removeEventListener('scroll', schedule, true) } catch {}
-      try { win.clearInterval(id) } catch {}
-    }
-  }, [active, computeRects, targetRef])
-
-
-  if (!active || rects.length === 0) return null
-
-  const host = getGlobalOverlayHost()
-  if (!host) return null
-
-  const stop = (e: any) => {
-    try { e.preventDefault() } catch {}
-    try { e.stopPropagation() } catch {}
-  }
-  const maskBase: React.CSSProperties = {
-    position: 'fixed',
-    zIndex: 2147483000,
-    background: 'rgba(0,0,0,0.52)',
-    pointerEvents: 'auto',
-    touchAction: 'none'
-  }
-  const mask = (rect: GiiLockRect) => (
-    <div
-      key={rect.key}
-      data-gii-dirty-lock-mask='1'
-      aria-hidden='true'
-      style={{ ...maskBase, left: rect.left, top: rect.top, width: rect.width, height: rect.height }}
-      onPointerDown={stop}
-      onMouseDown={stop}
-      onClick={stop}
-      onDoubleClick={stop}
-      onWheel={stop}
-      onTouchStart={stop}
-    />
-  )
-
-  return createPortal(
-    <>
-      {rects.map(mask)}
-    </>,
-    host
-  )
-}
-
 // Caricamento moduli ArcGIS JS API (AMD) senza dipendenze extra.
 function loadEsriModule<T = any> (path: string): Promise<T> {
   return new Promise((resolve, reject) => {
@@ -4024,7 +3848,6 @@ function NuovaPraticaForm (p: {
   const [createdRecordInfo, setCreatedRecordInfo] = React.useState<{ oid: number; layerUrl: string; data: any } | null>(null)
   const createdRecordInfoRef = React.useRef<{ oid: number; layerUrl: string; data: any } | null>(null)
   const [validationPopup, setValidationPopup] = React.useState<{ title: string; text: string } | null>(null)
-  const [cancelUnsavedPopupOpen, setCancelUnsavedPopupOpen] = React.useState(false)
   const validationPopupOkId = React.useMemo(() => `gii-val-ok-${Math.random().toString(36).slice(2)}`, [])
   const validationPopupBackdropId = React.useMemo(() => `gii-val-backdrop-${Math.random().toString(36).slice(2)}`, [])
   const successPopupOkId = React.useMemo(() => `gii-success-ok-${Math.random().toString(36).slice(2)}`, [])
@@ -4063,14 +3886,14 @@ function NuovaPraticaForm (p: {
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.key !== 'Escape') return
       // Se un popup è aperto, blocca Escape per mantenere la modalità
-      if (validationPopup || showCreateSuccessPopup || cancelUnsavedPopupOpen) {
+      if (validationPopup || showCreateSuccessPopup) {
         e.preventDefault()
         e.stopPropagation()
       }
     }
     window.addEventListener('keydown', onKeyDown, true)
     return () => window.removeEventListener('keydown', onKeyDown, true)
-  }, [validationPopup, showCreateSuccessPopup, cancelUnsavedPopupOpen])
+  }, [validationPopup, showCreateSuccessPopup])
 
 
   React.useEffect(() => {
@@ -5061,7 +4884,7 @@ React.useEffect(() => {
     setReplaceInputKey(k => k + 1)
   }, [])
 
-  const performCancel = () => {
+  const handleCancel = () => {
     setDraft({ ...baselineDraft })
     setNoteSpeseRowsDraft(nsCloneRowsByCategory(noteSpeseRowsBaseline))
     setNoteSpeseSummary(nsComputeSummaryFromRows(nsRowsByCategoryToFlat(noteSpeseRowsBaseline), noteSpesePercent))
@@ -5078,11 +4901,6 @@ React.useEffect(() => {
     setAttachmentsError(null)
     setMsg(null)
     p.onClearPoint()
-  }
-
-  const handleCancel = () => {
-    if (!isDirty || saving) return
-    setCancelUnsavedPopupOpen(true)
   }
 
   const handleSave = async () => {
@@ -5970,52 +5788,6 @@ React.useEffect(() => {
 )}
 
       </div>
-
-      {cancelUnsavedPopupOpen && createPortal(
-        <div
-          data-gii-global-popup-root='1'
-          style={{ position: 'fixed', inset: 0, zIndex: 2147483646, background: 'rgba(0,0,0,0.52)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16, pointerEvents: 'auto' }}
-          onClick={(e) => { e.preventDefault(); e.stopPropagation() }}
-          onMouseDown={(e) => { e.preventDefault(); e.stopPropagation() }}
-        >
-          <div
-            role='dialog'
-            aria-modal='true'
-            data-gii-global-popup-dialog='1'
-            style={{ width: 'min(92vw, 520px)', background: '#fff', borderRadius: 14, boxShadow: '0 20px 60px rgba(0,0,0,0.28)', border: '1px solid rgba(0,0,0,0.08)', padding: 18, position: 'relative', zIndex: 2147483647 }}
-            onClick={(e) => { e.stopPropagation() }}
-            onMouseDown={(e) => { e.stopPropagation() }}
-          >
-            <div style={{ fontWeight: 800, fontSize: 16, marginBottom: 8, color: '#d92d20', display: 'flex', alignItems: 'center', gap: 8 }}>
-              <span style={{ fontSize: 20 }}>⚠</span>
-              Annullare le modifiche?
-            </div>
-            <div style={{ fontSize: 13, color: '#374151', lineHeight: 1.6, marginBottom: 14, display: 'grid', gap: 10 }}>
-              <div style={{ fontWeight: 500, padding: 10, background: '#fff7ed', border: '1px solid #fed7aa', borderRadius: 6, color: '#7c2d12' }}>
-                Tutte le modifiche non salvate andranno perse.
-              </div>
-              <div>Confermi di voler annullare?</div>
-            </div>
-            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10 }}>
-              <button
-                type='button'
-                onClick={() => { setCancelUnsavedPopupOpen(false); performCancel() }}
-                style={{ ...btnBase, border: '1px solid rgba(0,0,0,0.18)', background: '#d92d20', color: '#fff', cursor: 'pointer', pointerEvents: 'auto' }}
-              >
-                Sì, annulla
-              </button>
-              <button
-                type='button'
-                onClick={() => setCancelUnsavedPopupOpen(false)}
-                style={{ ...btnBase, border: '1px solid rgba(0,0,0,0.18)', background: '#fff', color: '#111827', cursor: 'pointer', pointerEvents: 'auto' }}
-              >
-                No, resta in modifica
-              </button>
-            </div>
-          </div>
-        </div>,
-        getGlobalOverlayHost() || document.body
-      )}
 
       {attachmentConfirm && createPortal(
         <div
@@ -7526,8 +7298,7 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
     check()
     return () => clearInterval(id)
   }, [])
-  const [formDirty, setFormDirty] = React.useState(false)
-  const uiLocked = formDirty
+  const [uiLocked] = React.useState(false) // mantenuto solo per il CSS z-index del root, mai attivato
   const [createDs, setCreateDs] = React.useState<any | null>(null)
   React.useEffect(() => {
     const schemaUrl = String(cfg.schemaLayerUrl || '').trim() || String(cfg.motherLayerUrl || '').trim()
@@ -7702,7 +7473,7 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
               editLayerUrl={!inCreateMode ? ensureLayerIndex(normalizeFeatureLayerUrl(effectiveIntent?.layerUrl || activeGate?.state?.layerUrl || readDynamicSelection().layerUrl || '')) : ''}
               titleText={inCreateMode ? 'Nuovo rapporto' : 'Modifica rapporto'}
               saveText={'Salva'}
-              onDirtyChange={(dirty: boolean) => setFormDirty(dirty)}
+              onDirtyChange={() => {}}
               onTabChange={(tab: string) => setFormTab(tab)}
               onSaved={(savedOid: number, savedData?: any) => {
                 if (inCreateMode) {
@@ -7743,7 +7514,6 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
           </div>
         )}
       </div>
-      <DirtyNavigationLockOverlay active={formDirty} targetRef={rootRef} />
     </div>
   )
 }

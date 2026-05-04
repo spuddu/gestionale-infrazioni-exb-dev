@@ -181,6 +181,348 @@ function setSidebarCollapse (sidebarWidgetId: string, collapse: boolean): void {
   } catch {}
 }
 
+
+function toPlainObject<T = any> (value: any): T {
+  try {
+    if (value?.asMutable) return value.asMutable({ deep: true }) as T
+    if (value?.toJS) return value.toJS() as T
+  } catch {}
+  return value as T
+}
+
+function getRuntimeAppConfig (): any {
+  try {
+    const state: any = getAppStore()?.getState?.()
+    return state?.appConfig || state?.appStateInBuilder?.appConfig || null
+  } catch {
+    return null
+  }
+}
+
+function getAppConfigWidget (widgetId: string): any {
+  if (!widgetId) return null
+  try {
+    const appConfig: any = getRuntimeAppConfig()
+    const widgets = toPlainObject<Record<string, any>>(appConfig?.widgets || {})
+    return widgets?.[widgetId] || null
+  } catch {
+    return null
+  }
+}
+
+function getAppConfigLayout (layoutId: string): any {
+  if (!layoutId) return null
+  try {
+    const appConfig: any = getRuntimeAppConfig()
+    const layouts = toPlainObject<Record<string, any>>(appConfig?.layouts || {})
+    return layouts?.[layoutId] || null
+  } catch {
+    return null
+  }
+}
+
+function getWidgetRootElement (widgetId: string): HTMLElement | null {
+  if (!widgetId || typeof document === 'undefined') return null
+  const safeId = (() => {
+    try { return (window as any).CSS?.escape ? (window as any).CSS.escape(widgetId) : widgetId } catch { return widgetId }
+  })()
+  const selectors = [
+    `#${safeId}`,
+    `[id="${widgetId}"]`,
+    `[data-widgetid="${widgetId}"]`,
+    `[data-widget-id="${widgetId}"]`,
+    `[widgetid="${widgetId}"]`,
+    `[id$="${widgetId}"]`,
+    `[id*="${widgetId}"]`
+  ]
+  for (const sel of selectors) {
+    try {
+      const el = document.querySelector(sel) as HTMLElement | null
+      if (el) return el
+    } catch {}
+  }
+  return null
+}
+
+function getLayoutIdForSize (layouts: any): string {
+  const normalized = toPlainObject<any>(layouts || {})
+  for (const size of ['LARGE', 'MEDIUM', 'SMALL']) {
+    const id = normalized?.[size]
+    if (id) return String(id)
+  }
+  const first = Object.values(normalized || {})[0]
+  return first ? String(first) : ''
+}
+
+function getSidebarPanelWidgetIds (sidebarWidgetId: string): { first: string[], second: string[] } {
+  const out = { first: [] as string[], second: [] as string[] }
+  const sidebar = getAppConfigWidget(sidebarWidgetId)
+  const firstLayoutId = getLayoutIdForSize(sidebar?.layouts?.FIRST)
+  const secondLayoutId = getLayoutIdForSize(sidebar?.layouts?.SECOND)
+  const readIds = (layoutId: string): string[] => {
+    const layout = getAppConfigLayout(layoutId)
+    const content = toPlainObject<Record<string, any>>(layout?.content || {})
+    const order = Array.isArray(layout?.order) ? layout.order : Object.keys(content || {})
+    const ids: string[] = []
+    order.forEach((key: string) => {
+      const c = content?.[key]
+      if (c?.type === 'WIDGET' && c?.widgetId) ids.push(String(c.widgetId))
+    })
+    return ids
+  }
+  out.first = readIds(firstLayoutId)
+  out.second = readIds(secondLayoutId)
+  return out
+}
+
+function getVisibleRectForWidgetIds (ids: string[]): DOMRect | null {
+  for (const id of ids) {
+    const el = getWidgetRootElement(id)
+    const rect = el?.getBoundingClientRect?.()
+    if (rect && rect.width > 20 && rect.height > 20) return rect
+  }
+  return null
+}
+
+function getSidebarCollapseSide (sidebarWidgetId: string): 'FIRST' | 'SECOND' {
+  const side = String(getAppConfigWidget(sidebarWidgetId)?.config?.collapseSide || 'FIRST').toUpperCase()
+  return side === 'SECOND' ? 'SECOND' : 'FIRST'
+}
+
+function getSidebarDefaultSize (sidebarWidgetId: string): string {
+  const cfgSize = getAppConfigWidget(sidebarWidgetId)?.config?.size
+  return String(cfgSize || '50%').trim() || '50%'
+}
+
+function computeDefaultPanelWidthPx (total: number, defaultSize: string): number | null {
+  const def = String(defaultSize || '').trim().toLowerCase()
+  if (def.endsWith('%')) {
+    const pct = Number(def.replace('%', ''))
+    if (Number.isFinite(pct) && pct > 0 && pct < 100) return total * pct / 100
+  }
+  if (def.endsWith('px')) {
+    const px = Number(def.replace('px', ''))
+    if (Number.isFinite(px) && px > 0) return px
+  }
+  const px = Number(def)
+  if (Number.isFinite(px) && px > 0) return px
+  return null
+}
+
+type SidebarMetric = { root: DOMRect, first: DOMRect, second: DOMRect, boundaryX: number, sizedWidth: number }
+
+function readSidebarMetric (sidebarWidgetId: string): SidebarMetric | null {
+  const root = getWidgetRootElement(sidebarWidgetId)
+  const rootRect = root?.getBoundingClientRect?.()
+  if (!rootRect || rootRect.width <= 40 || rootRect.height <= 40) return null
+
+  const panels = getSidebarPanelWidgetIds(sidebarWidgetId)
+  const firstRect = getVisibleRectForWidgetIds(panels.first)
+  const secondRect = getVisibleRectForWidgetIds(panels.second)
+  if (!firstRect || !secondRect) return null
+
+  const leftPanel = firstRect.left <= secondRect.left ? firstRect : secondRect
+  const rightPanel = firstRect.left <= secondRect.left ? secondRect : firstRect
+  const boundaryX = (leftPanel.right + rightPanel.left) / 2
+  const side = getSidebarCollapseSide(sidebarWidgetId)
+  const sizedWidth = side === 'SECOND' ? secondRect.width : firstRect.width
+  return { root: rootRect, first: firstRect, second: secondRect, boundaryX, sizedWidth }
+}
+
+const sidebarBaselineById: Record<string, { rootWidth: number, sizedWidth: number }> = {}
+
+function resetSidebarBaseline (sidebarWidgetId: string): void {
+  try { delete sidebarBaselineById[sidebarWidgetId] } catch {}
+}
+
+function setSidebarBaselineToCurrent (sidebarWidgetId: string): void {
+  const metric = readSidebarMetric(sidebarWidgetId)
+  if (!metric) return
+  sidebarBaselineById[sidebarWidgetId] = { rootWidth: metric.root.width, sizedWidth: metric.sizedWidth }
+}
+
+function isSidebarSizeChangedFromBaseline (sidebarWidgetId: string): boolean {
+  if (!sidebarWidgetId) return false
+  const metric = readSidebarMetric(sidebarWidgetId)
+  if (!metric) return false
+  const baseline = sidebarBaselineById[sidebarWidgetId]
+  if (!baseline || Math.abs(baseline.rootWidth - metric.root.width) > 4) {
+    setSidebarBaselineToCurrent(sidebarWidgetId)
+    return false
+  }
+  return Math.abs(metric.sizedWidth - baseline.sizedWidth) > 1
+}
+
+function navItemShowsSidebar (item: NavItem | null): boolean {
+  if (!item) return false
+  // Nel setting del nav l'opzione "Mostra pannello laterale" è salvata su collapseSidebar.
+  // Non uso eventuali vecchi campi showSidebar rimasti in config per evitare che il
+  // pulsante compaia su schede non abilitate dal setting corrente.
+  return (item as any).collapseSidebar === true
+}
+
+function isNavItemActive (item: NavItem, cfg: any, currentPageId: string | null, currentSection: string, currentViewId: string | null): boolean {
+  const itemPageId = item.hashPage ? resolvePageId(item.hashPage) : null
+  const itemSection = String(item.section || '').trim()
+  const currentSectionNorm = String(currentSection || '').trim()
+  const sectionId = String(cfg.sectionId || '').trim()
+  const itemViewId = String(item.viewId || '').trim()
+  if (itemViewId && sectionId) {
+    if (currentViewId !== itemViewId) return false
+    if (!itemSection) return true
+    return itemSection === currentSectionNorm
+  }
+  if (sectionId && !itemViewId && itemSection) return itemSection === currentSectionNorm
+  if (!currentPageId || !itemPageId) return false
+  if (currentPageId === itemPageId) return !itemSection || itemSection === currentSectionNorm
+  if (itemSection && itemSection === currentSectionNorm && document.querySelector('[data-gii-editing-root]')) return true
+  return false
+}
+
+function getSidebarResetTargetX (sidebarWidgetId: string): number | null {
+  const metric = readSidebarMetric(sidebarWidgetId)
+  if (!metric) return null
+  const defaultWidth = computeDefaultPanelWidthPx(metric.root.width, getSidebarDefaultSize(sidebarWidgetId))
+  if (defaultWidth == null) return null
+  const side = getSidebarCollapseSide(sidebarWidgetId)
+  return side === 'SECOND'
+    ? metric.root.right - defaultWidth
+    : metric.root.left + defaultWidth
+}
+
+function findResizeHandleAt (sidebarWidgetId: string, x: number, y: number): HTMLElement | null {
+  const root = getWidgetRootElement(sidebarWidgetId)
+  if (!root) return null
+  const xs = [x, x - 2, x + 2, x - 5, x + 5]
+  const ys = [y, y - 20, y + 20]
+  const candidates: HTMLElement[] = []
+  for (const cx of xs) {
+    for (const cy of ys) {
+      try {
+        const el = document.elementFromPoint(cx, cy) as HTMLElement | null
+        let cur: HTMLElement | null = el
+        while (cur && cur !== document.body) {
+          if (root.contains(cur)) candidates.push(cur)
+          if (cur === root) break
+          cur = cur.parentElement as HTMLElement | null
+        }
+      } catch {}
+    }
+  }
+
+  const scored = candidates.map(el => {
+    let score = 0
+    try {
+      const st = window.getComputedStyle(el)
+      const cursor = String(st?.cursor || '').toLowerCase()
+      if (cursor.includes('resize') || cursor.includes('col-resize') || cursor.includes('ew-resize')) score += 100
+      const cls = String((el as any).className || '').toLowerCase()
+      const id = String(el.id || '').toLowerCase()
+      if (cls.includes('divider') || cls.includes('resize') || cls.includes('splitter') || cls.includes('drag')) score += 40
+      if (id.includes('divider') || id.includes('resize') || id.includes('splitter') || id.includes('drag')) score += 40
+      const r = el.getBoundingClientRect()
+      if (r.width > 0 && r.width <= 24 && r.height > 40) score += 25
+      score -= Math.abs(((r.left + r.right) / 2) - x)
+    } catch {}
+    return { el, score }
+  }).sort((a, b) => b.score - a.score)
+
+  return scored[0]?.el || root
+}
+
+function dispatchMouseLikeEvent (target: EventTarget, type: string, x: number, y: number): void {
+  const common: any = { bubbles: true, cancelable: true, clientX: x, clientY: y, screenX: x, screenY: y, button: 0, buttons: type === 'mouseup' || type === 'pointerup' ? 0 : 1 }
+  try {
+    if (type.startsWith('pointer') && typeof (window as any).PointerEvent !== 'undefined') {
+      target.dispatchEvent(new (window as any).PointerEvent(type, { ...common, pointerId: 1, pointerType: 'mouse', isPrimary: true }))
+      return
+    }
+  } catch {}
+  try { target.dispatchEvent(new MouseEvent(type.replace(/^pointer/, 'mouse'), common)) } catch {}
+}
+
+function resetSidebarSize (sidebarWidgetId: string): void {
+  if (!sidebarWidgetId) return
+  const metric = readSidebarMetric(sidebarWidgetId)
+  const targetX = getSidebarResetTargetX(sidebarWidgetId)
+  if (!metric || targetX == null) return
+
+  const startX = metric.boundaryX
+  if (Math.abs(startX - targetX) <= 1) {
+    setSidebarBaselineToCurrent(sidebarWidgetId)
+    return
+  }
+
+  const y = Math.max(metric.root.top + 30, Math.min(metric.root.bottom - 30, metric.root.top + metric.root.height / 2))
+  const handle = findResizeHandleAt(sidebarWidgetId, startX, y)
+  const moveTarget: EventTarget = document
+
+  try {
+    handle?.focus?.()
+  } catch {}
+
+  // Uso il ridimensionatore nativo di Experience Builder tramite eventi di drag,
+  // senza scrivere width/flex/min/max sui pannelli: così non resta nulla congelato.
+  dispatchMouseLikeEvent(handle || document, 'pointerdown', startX, y)
+  dispatchMouseLikeEvent(handle || document, 'mousedown', startX, y)
+  const steps = 6
+  for (let i = 1; i <= steps; i++) {
+    const x = startX + ((targetX - startX) * i / steps)
+    dispatchMouseLikeEvent(moveTarget, 'pointermove', x, y)
+    dispatchMouseLikeEvent(moveTarget, 'mousemove', x, y)
+  }
+  dispatchMouseLikeEvent(moveTarget, 'pointerup', targetX, y)
+  dispatchMouseLikeEvent(moveTarget, 'mouseup', targetX, y)
+  try { window.dispatchEvent(new Event('resize')) } catch {}
+
+  window.setTimeout(() => {
+    const after = readSidebarMetric(sidebarWidgetId)
+    const finalTargetX = getSidebarResetTargetX(sidebarWidgetId)
+    if (after && finalTargetX != null && Math.abs(after.boundaryX - finalTargetX) <= 4) {
+      setSidebarBaselineToCurrent(sidebarWidgetId)
+    }
+  }, 160)
+}
+
+function SidebarResetButton (p: { visible: boolean, onClick: () => void }) {
+  const [hov, setHov] = React.useState(false)
+  if (!p.visible) return null
+  return (
+    <button
+      type='button'
+      title='Ripristina larghezze pannelli'
+      aria-label='Ripristina larghezze pannelli'
+      onClick={p.onClick}
+      onMouseEnter={() => setHov(true)}
+      onMouseLeave={() => setHov(false)}
+      style={{
+        width: 34,
+        height: 34,
+        minWidth: 34,
+        minHeight: 34,
+        borderRadius: 999,
+        border: `1px solid ${hov ? '#93c5fd' : 'rgba(147,197,253,0.65)'}`,
+        background: hov ? 'rgba(253, 106, 0, 0.65)' : 'rgba(13,33,63,0.92)',
+        color: '#fff',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        padding: 0,
+        marginLeft: 8,
+        cursor: 'pointer',
+        fontSize: 18,
+        fontWeight: 800,
+        lineHeight: 1,
+        boxShadow: hov ? '0 0 0 2px rgba(147,197,253,0.18)' : '0 4px 14px rgba(0,0,0,0.18)',
+        transition: 'all 0.18s ease',
+        flexShrink: 0
+      }}
+    >
+      ↔
+    </button>
+  )
+}
+
 function gotoPage(pageToken: string, section?: string): void {
   const pageId = resolvePageId(pageToken)
   const currentPageId = getCurrentPageId()
@@ -220,25 +562,10 @@ const NAV_DEFAULT_ICON = `<svg viewBox="0 0 24 24" fill="none" stroke="currentCo
 function NavButton (p: { item: NavItem, cfg: any, idx: number, currentPageId: string | null, currentSection: string, currentViewId: string | null, onSectionChange: (s: string) => void, onViewChange: (v: string) => void }) {
   const { item, cfg, currentPageId, currentSection, currentViewId } = p
   const [hov, setHov] = React.useState(false)
-  const itemPageId = item.hashPage ? resolvePageId(item.hashPage) : null
-  const itemSection = String(item.section || '').trim()
-  const currentSectionNorm = String(currentSection || '').trim()
   const sectionId = String(cfg.sectionId || '').trim()
+  const itemSection = String(item.section || '').trim()
   const itemViewId = String(item.viewId || '').trim()
-  const isActive = (() => {
-    if (itemViewId && sectionId) {
-      if (currentViewId !== itemViewId) return false
-      if (!itemSection) return true
-      return itemSection === currentSectionNorm
-    }
-    if (sectionId && !itemViewId && itemSection) {
-      return itemSection === currentSectionNorm
-    }
-    if (!currentPageId || !itemPageId) return false
-    if (currentPageId === itemPageId) return !itemSection || itemSection === currentSectionNorm
-    if (itemSection && itemSection === currentSectionNorm && document.querySelector('[data-gii-editing-root]')) return true
-    return false
-  })()
+  const isActive = isNavItemActive(item, cfg, currentPageId, currentSection, currentViewId)
   const hot = hov || isActive
 
   const handleClick = () => {
@@ -333,6 +660,7 @@ export default function Widget (props: Props) {
   })
   const [user, setUser] = React.useState<UserInfo | null>(null)
   const [uLoad, setULoad] = React.useState(true)
+  const [sidebarSizeChanged, setSidebarSizeChanged] = React.useState(false)
 
   React.useEffect(() => {
     const upd = () => {
@@ -413,6 +741,56 @@ export default function Widget (props: Props) {
   }
 
   const visibleItems = [...items].sort((a, b) => a.order - b.order).filter(isVisible)
+  const activeItem = visibleItems.find(item => isNavItemActive(item, cfg, currentPageId, currentSection, currentViewId)) || null
+  const activeSidebarItem = activeItem || visibleItems.find(item => {
+    const itemSection = String(item.section || '').trim()
+    return navItemShowsSidebar(item) && !!itemSection && itemSection === String(currentSection || '').trim()
+  }) || null
+  const sidebarWidgetId = String(cfg.sidebarWidgetId || '').trim()
+  const shouldHandleSidebarReset = !!sidebarWidgetId && navItemShowsSidebar(activeSidebarItem)
+
+  React.useEffect(() => {
+    if (!shouldHandleSidebarReset) {
+      setSidebarSizeChanged(false)
+      resetSidebarBaseline(sidebarWidgetId)
+      return
+    }
+
+    // Appena entro in una scheda con pannello laterale, considero la misura corrente
+    // come posizione iniziale. Il pulsante resta spento a riposo e compare solo dopo
+    // uno spostamento reale, anche minimo, del divisore.
+    setSidebarBaselineToCurrent(sidebarWidgetId)
+    setSidebarSizeChanged(false)
+
+    const update = () => setSidebarSizeChanged(isSidebarSizeChangedFromBaseline(sidebarWidgetId))
+    const delayedUpdate = () => window.setTimeout(update, 0)
+
+    let unsubStore: (() => void) | null = null
+    try { unsubStore = getAppStore().subscribe(update) } catch {}
+
+    const timer = window.setInterval(update, 80)
+    let ro: ResizeObserver | null = null
+    try {
+      const root = getWidgetRootElement(sidebarWidgetId)
+      if (root && typeof ResizeObserver !== 'undefined') {
+        ro = new ResizeObserver(update)
+        ro.observe(root)
+        const panels = getSidebarPanelWidgetIds(sidebarWidgetId)
+        ;[...panels.first, ...panels.second].forEach(id => {
+          const el = getWidgetRootElement(id)
+          if (el) ro?.observe(el)
+        })
+      }
+    } catch {}
+
+    window.addEventListener('resize', delayedUpdate)
+    return () => {
+      window.clearInterval(timer)
+      window.removeEventListener('resize', delayedUpdate)
+      try { ro?.disconnect() } catch {}
+      if (unsubStore) unsubStore()
+    }
+  }, [sidebarWidgetId, shouldHandleSidebarReset, activeSidebarItem?.id, currentPageId, currentSection, currentViewId])
 
   return (
     <div style={{
@@ -430,6 +808,16 @@ export default function Widget (props: Props) {
       {visibleItems.map((item, i) => (
         <NavButton key={item.id} item={item} cfg={cfg} idx={i} currentPageId={currentPageId} currentSection={currentSection} currentViewId={currentViewId} onSectionChange={setCurrentSection} onViewChange={setCurrentViewId} />
       ))}
+      <div style={{ flex: '1 1 auto', minWidth: 8 }} />
+      <SidebarResetButton
+        visible={shouldHandleSidebarReset && sidebarSizeChanged}
+        onClick={() => {
+          resetSidebarSize(sidebarWidgetId)
+          window.setTimeout(() => {
+            setSidebarSizeChanged(isSidebarSizeChangedFromBaseline(sidebarWidgetId))
+          }, 220)
+        }}
+      />
     </div>
   )
 }
