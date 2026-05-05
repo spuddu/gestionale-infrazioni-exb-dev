@@ -1137,7 +1137,8 @@ function getLayerIdFromUrlForMatch (raw: any): string {
 
 function findRapportiLayers (view: any, opts?: { layerUrl?: string; mapLayerUrl?: string; mapLayerId?: string; mapLayerLayerId?: string; mapLayerTitle?: string }): any[] {
   try {
-    const allLayers = view?.map?.allLayers?.toArray?.() || view?.map?.allLayers || []
+    const sourceMap = view?.map || view
+    const allLayers = sourceMap?.allLayers?.toArray?.() || sourceMap?.allLayers || []
     const featureLayers = (allLayers || []).filter((fl: any) => fl?.type === 'feature')
     const targetUrls = [opts?.mapLayerUrl, opts?.layerUrl].map(normalizeLayerUrlForMatch).filter(Boolean)
     const targetId = String(opts?.mapLayerId || '').trim()
@@ -1195,6 +1196,36 @@ function getPointQueryOutFields (layer: any): string[] {
   return out.length ? out : [oidField]
 }
 
+function getRapportoWhereFromOid (oid: any): string {
+  const n = Number(oid)
+  return Number.isFinite(n) ? `OBJECTID = ${n}` : '1=0'
+}
+
+function getLayerBaseDefinitionExpression (layer: any): string {
+  try {
+    const key = '__giiBaseDefinitionExpression'
+    if (!Object.prototype.hasOwnProperty.call(layer, key)) layer[key] = String(layer?.definitionExpression || '').trim()
+    return String(layer[key] || '').trim()
+  } catch {}
+  return ''
+}
+
+function applyRapportiLayerDefinitionFilter (layers: any[], where: string) {
+  ;(layers || []).forEach((layer: any) => {
+    try {
+      if (!layer) return
+      const baseWhere = getLayerBaseDefinitionExpression(layer)
+      layer.definitionExpression = baseWhere ? `(${baseWhere}) AND (${where})` : where
+    } catch {}
+  })
+}
+
+function applyRapportiLayerViewEffect (layerViews: any[], where: string) {
+  ;(layerViews || []).forEach((lv: any) => {
+    try { lv.featureEffect = { filter: { where }, excludedEffect: 'opacity(0)' } } catch {}
+  })
+}
+
 function MapTabContent (props: {
   oid: number | null
   layerUrl: string
@@ -1221,6 +1252,8 @@ function MapTabContent (props: {
   const [viewReadyTick, setViewReadyTick] = React.useState(0)
   const [mapInstanceKey, setMapInstanceKey] = React.useState(0)
   const mc = props.mapCfg
+  const latestFilterWhereRef = React.useRef<string>('1=0')
+  latestFilterWhereRef.current = props.hasSel && props.oid != null ? getRapportoWhereFromOid(props.oid) : '1=0'
 
   const hexToRgba = (hex: string, alpha = 255): number[] => {
     const h = hex.replace('#', '')
@@ -1247,6 +1280,17 @@ function MapTabContent (props: {
         const map = mc.webMapItemId
           ? new WebMap({ portalItem: { id: String(mc.webMapItemId) } })
           : new Map({ basemap: mc.basemap || 'topo-vector' })
+        try { if (typeof map?.load === 'function') await map.load() } catch {}
+        try {
+          const initialLayers = findRapportiLayers(map, {
+            layerUrl: props.layerUrl,
+            mapLayerUrl: mc.mapLayerUrl,
+            mapLayerId: mc.mapLayerId,
+            mapLayerLayerId: mc.mapLayerLayerId,
+            mapLayerTitle: mc.mapLayerTitle
+          })
+          applyRapportiLayerDefinitionFilter(initialLayers, latestFilterWhereRef.current)
+        } catch {}
         const view = new MapView({
           container: containerRef.current,
           map,
@@ -1312,16 +1356,16 @@ function MapTabContent (props: {
                 try { recreateFullscreenWidget() } catch {}
                 try { setViewReadyTick(t => t + 1) } catch {}
                 try {
-                  if (props.hasSel && props.oid != null && targetLayerViewRefs.current.length) {
-                    targetLayerViewRefs.current.forEach((lv: any) => { try { lv.featureEffect = { filter: { where: `OBJECTID = ${Number(props.oid)}` }, excludedEffect: 'opacity(0)' } } catch {} })
+                  if (targetLayerViewRefs.current.length) {
+                    applyRapportiLayerViewEffect(targetLayerViewRefs.current, latestFilterWhereRef.current)
                   }
                 } catch {}
               }, 40)
               window.setTimeout(() => {
                 try { recreateFullscreenWidget() } catch {}
                 try {
-                  if (props.hasSel && props.oid != null && targetLayerViewRefs.current.length) {
-                    targetLayerViewRefs.current.forEach((lv: any) => { try { lv.featureEffect = { filter: { where: `OBJECTID = ${Number(props.oid)}` }, excludedEffect: 'opacity(0)' } } catch {} })
+                  if (targetLayerViewRefs.current.length) {
+                    applyRapportiLayerViewEffect(targetLayerViewRefs.current, latestFilterWhereRef.current)
                   }
                 } catch {}
               }, 220)
@@ -1401,11 +1445,21 @@ function MapTabContent (props: {
       try { view.graphics?.removeAll?.() } catch {}
       markerRef.current = null
       try { view.popup?.close?.() } catch {}
+      const where = hideAll ? '1=0' : '1=1'
+      try {
+        const rapportiLayers = findRapportiLayers(view, {
+          layerUrl: props.layerUrl,
+          mapLayerUrl: mc.mapLayerUrl,
+          mapLayerId: mc.mapLayerId,
+          mapLayerLayerId: mc.mapLayerLayerId,
+          mapLayerTitle: mc.mapLayerTitle
+        })
+        applyRapportiLayerDefinitionFilter(rapportiLayers, where)
+      } catch {}
       try {
         if (targetLayerViewRefs.current.length) {
-          targetLayerViewRefs.current.forEach((lv: any) => { try { lv.featureEffect = hideAll
-            ? { filter: { where: '1=0' }, excludedEffect: 'opacity(0)' }
-            : { filter: { where: '1=1' }, excludedEffect: '' } } catch {} })
+          if (hideAll) applyRapportiLayerViewEffect(targetLayerViewRefs.current, '1=0')
+          else targetLayerViewRefs.current.forEach((lv: any) => { try { lv.featureEffect = { filter: { where: '1=1' }, excludedEffect: '' } } catch {} })
         }
       } catch {}
       if (!hideAll) targetLayerViewRefs.current = []
@@ -1430,7 +1484,7 @@ function MapTabContent (props: {
           loadEsriModule<any>('esri/geometry/Point')
         ])
 
-        const oidWhere = `OBJECTID = ${Number(props.oid)}`
+        const oidWhere = getRapportoWhereFromOid(props.oid)
         const rapportiLayers = findRapportiLayers(view, {
           layerUrl: props.layerUrl,
           mapLayerUrl: mc.mapLayerUrl,
@@ -1438,6 +1492,8 @@ function MapTabContent (props: {
           mapLayerLayerId: mc.mapLayerLayerId,
           mapLayerTitle: mc.mapLayerTitle
         })
+        applyRapportiLayerDefinitionFilter(rapportiLayers, oidWhere)
+        applyRapportiLayerViewEffect(targetLayerViewRefs.current, oidWhere)
         let feature: any = null
 
         if (rapportiLayers.length) {
@@ -1451,7 +1507,10 @@ function MapTabContent (props: {
                 if (lv) targetLayerViewCacheRef.current[key] = lv
               }
               if (cancelled) return
-              if (lv && nextLayerViews.indexOf(lv) < 0) nextLayerViews.push(lv)
+              if (lv && nextLayerViews.indexOf(lv) < 0) {
+                nextLayerViews.push(lv)
+                try { lv.featureEffect = { filter: { where: oidWhere }, excludedEffect: 'opacity(0)' } } catch {}
+              }
             } catch {}
           }
           targetLayerViewRefs.current = nextLayerViews
@@ -1520,7 +1579,7 @@ function MapTabContent (props: {
 
         try {
           if (targetLayerViewRefs.current.length) {
-            targetLayerViewRefs.current.forEach((lv: any) => { try { lv.featureEffect = { filter: { where: oidWhere }, excludedEffect: 'opacity(0)' } } catch {} })
+            applyRapportiLayerViewEffect(targetLayerViewRefs.current, oidWhere)
           }
         } catch {}
 
