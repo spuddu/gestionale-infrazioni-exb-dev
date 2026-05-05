@@ -210,6 +210,9 @@ export interface Config {
   mapShowHome: boolean
   mapShowFullscreen: boolean
   mapShowLayerList: boolean
+
+  // --- Nota spese
+  nsNotaSpeseDettaglioUrl?: string
 }
 
 export const defaultConfig: Config = {
@@ -250,6 +253,7 @@ export const defaultConfig: Config = {
     { id: 'anagrafica', label: 'Anagrafica', fields: DETAIL_DEFAULT_TAB_FIELDS.anagrafica, hideEmpty: true },
     { id: 'violazione', label: 'Violazione', fields: DETAIL_DEFAULT_TAB_FIELDS.violazione, hideEmpty: true },
     { id: 'iter', label: 'Iter', fields: DETAIL_DEFAULT_TAB_FIELDS.iterExtra, isIterTab: true, hideEmpty: false },
+    { id: 'nota_spese', label: 'Nota spese', fields: [], locked: true, hideEmpty: false },
     { id: 'allegati', label: 'Allegati', fields: DETAIL_DEFAULT_TAB_FIELDS.allegati, hideEmpty: true },
     { id: 'mappa', label: 'Mappa', fields: [], locked: true }
   ],
@@ -273,6 +277,7 @@ export const defaultConfig: Config = {
         { id: 'anagrafica', label: 'Anagrafica', fields: DETAIL_DEFAULT_TAB_FIELDS.anagrafica, hideEmpty: true },
         { id: 'violazione', label: 'Violazione', fields: DETAIL_DEFAULT_TAB_FIELDS.violazione, hideEmpty: true },
         { id: 'iter', label: 'Iter', fields: DETAIL_DEFAULT_TAB_FIELDS.iterExtra, isIterTab: true, hideEmpty: false },
+        { id: 'nota_spese', label: 'Nota spese', fields: [], locked: true, hideEmpty: false },
         { id: 'allegati', label: 'Allegati', fields: DETAIL_DEFAULT_TAB_FIELDS.allegati, hideEmpty: true },
         { id: 'mappa', label: 'Mappa', fields: [], locked: true }
       ]
@@ -285,6 +290,8 @@ export const defaultConfig: Config = {
   mapLayerUrl: '',
   mapLayerId: '',
   mapLayerLayerId: '',
+
+  nsNotaSpeseDettaglioUrl: '',
 
   mapBasemap: 'topo-vector',
   mapCenterLon: 9.0,

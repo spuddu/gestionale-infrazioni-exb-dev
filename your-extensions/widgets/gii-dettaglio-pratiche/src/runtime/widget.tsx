@@ -1015,6 +1015,13 @@ function migrateTabs(tabFields: TabFields, tabs: TabConfig[] | undefined): TabCo
         isIterTab: true
       },
       {
+        id: 'nota_spese',
+        label: 'Nota spese',
+        fields: [],
+        locked: true,
+        hideEmpty: false
+      },
+      {
         id: 'allegati',
         label: 'Allegati',
         fields: tabFields?.allegati || []
@@ -1027,6 +1034,13 @@ function migrateTabs(tabFields: TabFields, tabs: TabConfig[] | undefined): TabCo
     ]
   }
   
+  // Inietta tab Nota spese se mancante (migrazione config esistenti)
+  if (!result.some(t => t.id === 'nota_spese')) {
+    const idxAllegati = result.findIndex(t => t.id === 'allegati')
+    const insertAt = idxAllegati >= 0 ? idxAllegati : result.length
+    result.splice(insertAt, 0, { id: 'nota_spese', label: 'Nota spese', fields: [], locked: true, hideEmpty: false })
+  }
+
   // Inietta tab Mappa se mancante (migrazione config esistenti)
   if (!result.some(t => t.id === 'mappa')) {
     result.push({ id: 'mappa', label: 'Mappa', fields: [], locked: true })
@@ -1042,6 +1056,9 @@ function migrateTabs(tabFields: TabFields, tabs: TabConfig[] | undefined): TabCo
     if (tab.id === 'azioni') {
       const { locked, ...rest } = tab as any
       return { ...rest, hideEmpty: false } as any
+    }
+    if (tab.id === 'nota_spese') {
+      return { ...(tab as any), fields: [], locked: true, hideEmpty: false } as any
     }
     return { ...(tab as any), hideEmpty: normalizedHideEmpty } as any
   })
@@ -1829,6 +1846,408 @@ function CicliTimeline (props: { globalId: string; hasSel: boolean }): any {
 }
 
 
+type NsdCategory = 'AT' | 'PR' | 'RU' | 'SL' | 'PF'
+type NsdSource = 'REGIONE' | 'INTERNO' | 'NUOVI PREZZI'
+type NsdDetailRow = {
+  objectid: number
+  categoria_costo: NsdCategory
+  origine_voce_snapshot: NsdSource
+  codice_voce_snapshot: string
+  descrizione_snapshot: string
+  unita_misura_snapshot: string
+  prezzo_unitario_snapshot: number
+  quantita: number
+  importo_riga: number
+  anno_prezzario_snapshot?: number | null
+  ordine: number
+  note: string
+}
+type NsdSummary = {
+  totaleAT: number
+  totalePR: number
+  totaleRU: number
+  totaleSL: number
+  totalePF: number
+  percentualeSpeseGenerali: number
+  importoSpeseGenerali: number
+  totaleComplessivo: number
+}
+
+const NSD_CATEGORIES: readonly NsdCategory[] = ['AT', 'PR', 'RU', 'SL', 'PF'] as const
+const NSD_CATEGORY_LABELS: Record<NsdCategory, string> = {
+  AT: 'Attrezzature e trasporti',
+  PR: 'Materiali da costruzione',
+  RU: 'Risorse umane',
+  SL: 'Semilavorati',
+  PF: 'Prodotti finiti'
+}
+const NSD_PARENT_SUMMARY_FIELDS = [
+  'GlobalID', 'globalid',
+  'ns_totale_attrezzature_trasporti',
+  'ns_totale_materiali_costruzione',
+  'ns_totale_manodopera',
+  'ns_totale_semilavorati',
+  'ns_totale_prodotti_finiti',
+  'ns_spese_generali_perc',
+  'ns_importo_spese_generali',
+  'ns_totale_complessivo',
+  'ns_ricalcolata_il'
+]
+const __giiNsdLayerCache: Record<string, any> = {}
+
+function nsdSafeNum (v: any, fallback = 0): number {
+  const n = Number(v)
+  return Number.isFinite(n) ? n : fallback
+}
+
+function nsdRound (v: number, decimals = 2): number {
+  const f = Math.pow(10, decimals)
+  return Math.round((Number(v) + Number.EPSILON) * f) / f
+}
+
+function nsdMoney (v: any): string {
+  return nsdSafeNum(v, 0).toLocaleString('it-IT', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+}
+
+function nsdQty (v: any): string {
+  return nsdSafeNum(v, 0).toLocaleString('it-IT', { minimumFractionDigits: 0, maximumFractionDigits: 4 })
+}
+
+function nsdEscapeSqlString (v: string): string {
+  return String(v || '').replace(/'/g, "''")
+}
+
+function nsdNormalizeUrl (raw: any): string {
+  const s = String(raw || '').trim()
+  if (!s) return ''
+  try {
+    const u = new URL(s)
+    if (!/^https?:$/i.test(u.protocol)) return ''
+    u.search = ''
+    u.hash = ''
+    return u.toString().replace(/\/+$/, '')
+  } catch {
+    return s.replace(/[?#].*$/, '').replace(/\/+$/, '')
+  }
+}
+
+function nsdEnsureLayerIndex (url: string): string {
+  if (!url) return ''
+  if (/\/\d+$/.test(url)) return url
+  if (/\/(FeatureServer|MapServer)$/i.test(url)) return `${url}/0`
+  return url
+}
+
+function nsdPickAttrCI (obj: any, names: string[]): any {
+  if (!obj || typeof obj !== 'object') return undefined
+  for (const n of names) {
+    if (Object.prototype.hasOwnProperty.call(obj, n)) return obj[n]
+  }
+  const lower = new Map<string, string>()
+  Object.keys(obj).forEach(k => lower.set(k.toLowerCase(), k))
+  for (const n of names) {
+    const k = lower.get(String(n).toLowerCase())
+    if (k) return obj[k]
+  }
+  return undefined
+}
+
+function nsdNormalizeCategory (v: any): NsdCategory | null {
+  const s = String(v || '').trim().toUpperCase()
+  if (s === 'AT') return 'AT'
+  if (s === 'PR') return 'PR'
+  if (s === 'RU') return 'RU'
+  if (s === 'SL') return 'SL'
+  if (s === 'PF') return 'PF'
+  return null
+}
+
+function nsdNormalizeSource (v: any): NsdSource {
+  const s = String(v || '').trim().toUpperCase().replace(/_/g, ' ')
+  if (s === 'INTERNO') return 'INTERNO'
+  if (s === 'NUOVI PREZZI') return 'NUOVI PREZZI'
+  return 'REGIONE'
+}
+
+function nsdSourceShort (source: NsdSource): string {
+  if (source === 'INTERNO') return 'INT'
+  if (source === 'NUOVI PREZZI') return 'NP'
+  return 'REG'
+}
+
+function nsdReadParentSummary (data: any): NsdSummary {
+  return {
+    totaleAT: nsdSafeNum(nsdPickAttrCI(data, ['ns_totale_attrezzature_trasporti']), 0),
+    totalePR: nsdSafeNum(nsdPickAttrCI(data, ['ns_totale_materiali_costruzione']), 0),
+    totaleRU: nsdSafeNum(nsdPickAttrCI(data, ['ns_totale_manodopera']), 0),
+    totaleSL: nsdSafeNum(nsdPickAttrCI(data, ['ns_totale_semilavorati']), 0),
+    totalePF: nsdSafeNum(nsdPickAttrCI(data, ['ns_totale_prodotti_finiti']), 0),
+    percentualeSpeseGenerali: nsdSafeNum(nsdPickAttrCI(data, ['ns_spese_generali_perc']), 0),
+    importoSpeseGenerali: nsdSafeNum(nsdPickAttrCI(data, ['ns_importo_spese_generali']), 0),
+    totaleComplessivo: nsdSafeNum(nsdPickAttrCI(data, ['ns_totale_complessivo']), 0)
+  }
+}
+
+function nsdSummaryHasValues (summary: NsdSummary): boolean {
+  return [
+    summary.totaleAT,
+    summary.totalePR,
+    summary.totaleRU,
+    summary.totaleSL,
+    summary.totalePF,
+    summary.importoSpeseGenerali,
+    summary.totaleComplessivo,
+    summary.percentualeSpeseGenerali
+  ].some(v => Number.isFinite(Number(v)) && Number(v) !== 0)
+}
+
+function nsdComputeSummaryFromRows (rows: NsdDetailRow[], perc: number): NsdSummary {
+  const sumBy = (cat: NsdCategory) => nsdRound((rows || []).filter(r => r.categoria_costo === cat).reduce((s, r) => s + nsdSafeNum(r.importo_riga, 0), 0), 2)
+  const totaleAT = sumBy('AT')
+  const totalePR = sumBy('PR')
+  const totaleRU = sumBy('RU')
+  const totaleSL = sumBy('SL')
+  const totalePF = sumBy('PF')
+  const base = nsdRound(totaleAT + totalePR + totaleRU + totaleSL + totalePF, 2)
+  const percentualeSpeseGenerali = nsdRound(nsdSafeNum(perc, 0), 2)
+  const importoSpeseGenerali = nsdRound(base * percentualeSpeseGenerali / 100, 2)
+  const totaleComplessivo = nsdRound(base + importoSpeseGenerali, 2)
+  return { totaleAT, totalePR, totaleRU, totaleSL, totalePF, percentualeSpeseGenerali, importoSpeseGenerali, totaleComplessivo }
+}
+
+function nsdMergeSummary (parent: NsdSummary, computed: NsdSummary): NsdSummary {
+  if (nsdSummaryHasValues(parent)) {
+    return {
+      totaleAT: parent.totaleAT || computed.totaleAT,
+      totalePR: parent.totalePR || computed.totalePR,
+      totaleRU: parent.totaleRU || computed.totaleRU,
+      totaleSL: parent.totaleSL || computed.totaleSL,
+      totalePF: parent.totalePF || computed.totalePF,
+      percentualeSpeseGenerali: parent.percentualeSpeseGenerali || computed.percentualeSpeseGenerali,
+      importoSpeseGenerali: parent.importoSpeseGenerali || computed.importoSpeseGenerali,
+      totaleComplessivo: parent.totaleComplessivo || computed.totaleComplessivo
+    }
+  }
+  return computed
+}
+
+async function nsdGetFeatureLayerByUrl (rawUrl: any): Promise<any> {
+  const url = nsdEnsureLayerIndex(nsdNormalizeUrl(rawUrl))
+  if (!url) throw new Error('URL tabella dettaglio nota spese non configurata.')
+  if (__giiNsdLayerCache[url]) return __giiNsdLayerCache[url]
+  const FeatureLayer = await loadEsriModule<any>('esri/layers/FeatureLayer')
+  const fl = new FeatureLayer({ url })
+  try { if (typeof fl?.load === 'function') await fl.load() } catch {}
+  __giiNsdLayerCache[url] = fl
+  return fl
+}
+
+async function nsdQueryRows (detailUrl: string, parentGlobalId: string): Promise<NsdDetailRow[]> {
+  const fl = await nsdGetFeatureLayerByUrl(detailUrl)
+  const gid = normGid(parentGlobalId)
+  if (!gid) return []
+  const q = fl.createQuery ? fl.createQuery() : {}
+  q.where = `LOWER(parent_globalid) = '${nsdEscapeSqlString(gid)}' OR LOWER(parent_globalid) = '{${nsdEscapeSqlString(gid)}}'`
+  const requestedFields = [
+    String(fl?.objectIdField || 'OBJECTID'), 'OBJECTID', 'categoria_costo', 'origine_voce_snapshot', 'codice_voce_snapshot',
+    'descrizione_snapshot', 'unita_misura_snapshot', 'prezzo_unitario_snapshot',
+    'costo_unitario_snapshot', 'quantita', 'importo_riga', 'anno_prezzario_snapshot',
+    'ordine', 'note'
+  ]
+  const realByLower = new Map<string, string>()
+  ;(Array.isArray(fl?.fields) ? fl.fields : []).forEach((f: any) => {
+    const name = String(f?.name || '').trim()
+    if (name) realByLower.set(name.toLowerCase(), name)
+  })
+  const outFields = requestedFields
+    .map(name => realByLower.size ? realByLower.get(String(name).toLowerCase()) : name)
+    .filter((name, idx, arr): name is string => !!name && arr.indexOf(name) === idx)
+  q.outFields = outFields.length ? outFields : ['*']
+  q.returnGeometry = false
+  const orderFields = [realByLower.get('categoria_costo'), realByLower.get('ordine'), realByLower.get(String(fl?.objectIdField || 'OBJECTID').toLowerCase()) || realByLower.get('objectid')]
+    .filter(Boolean)
+    .map((name: any) => `${name} ASC`)
+  if (orderFields.length) q.orderByFields = orderFields
+  const res = await fl.queryFeatures(q)
+  return (res?.features || []).map((f: any) => {
+    const r = f?.attributes || {}
+    return {
+      objectid: nsdSafeNum(nsdPickAttrCI(r, ['OBJECTID', 'objectid']), 0),
+      categoria_costo: (nsdNormalizeCategory(r?.categoria_costo) || 'PR') as NsdCategory,
+      origine_voce_snapshot: nsdNormalizeSource(r?.origine_voce_snapshot || 'REGIONE'),
+      codice_voce_snapshot: String(r?.codice_voce_snapshot || '').trim(),
+      descrizione_snapshot: String(r?.descrizione_snapshot || '').trim(),
+      unita_misura_snapshot: String(r?.unita_misura_snapshot || '').trim(),
+      prezzo_unitario_snapshot: nsdRound(nsdSafeNum(r?.prezzo_unitario_snapshot ?? r?.costo_unitario_snapshot, 0), 4),
+      quantita: nsdRound(nsdSafeNum(r?.quantita, 0), 4),
+      importo_riga: nsdRound(nsdSafeNum(r?.importo_riga, 0), 2),
+      anno_prezzario_snapshot: r?.anno_prezzario_snapshot != null ? Math.trunc(nsdSafeNum(r?.anno_prezzario_snapshot, 0)) : null,
+      ordine: Math.trunc(nsdSafeNum(r?.ordine, 0)),
+      note: String(r?.note || '').trim()
+    }
+  }).sort((a: NsdDetailRow, b: NsdDetailRow) => {
+    const ca = NSD_CATEGORIES.indexOf(a.categoria_costo)
+    const cb = NSD_CATEGORIES.indexOf(b.categoria_costo)
+    if (ca !== cb) return ca - cb
+    if (a.ordine !== b.ordine) return a.ordine - b.ordine
+    return a.objectid - b.objectid
+  })
+}
+
+function NotaSpeseDetailPanel (props: { data: any; detailUrl: string; hasSel: boolean }) {
+  const parentGlobalId = String(nsdPickAttrCI(props.data, ['GlobalID', 'globalid']) || '').trim()
+  const [rows, setRows] = React.useState<NsdDetailRow[]>([])
+  const [loadedKey, setLoadedKey] = React.useState<string>('')
+  const [loading, setLoading] = React.useState(false)
+  const [error, setError] = React.useState<string | null>(null)
+
+  React.useEffect(() => {
+    setRows([])
+    setLoadedKey('')
+    setError(null)
+  }, [parentGlobalId, props.detailUrl])
+
+  React.useEffect(() => {
+    if (!props.hasSel || !parentGlobalId || !props.detailUrl) return
+    const key = `${props.detailUrl}|${parentGlobalId}`
+    if (loadedKey === key) return
+    let cancelled = false
+    setLoading(true)
+    setError(null)
+    ;(async () => {
+      try {
+        const next = await nsdQueryRows(props.detailUrl, parentGlobalId)
+        if (cancelled) return
+        setRows(next)
+        setLoadedKey(key)
+      } catch (e: any) {
+        if (cancelled) return
+        setRows([])
+        setLoadedKey(key)
+        setError(e?.message || String(e))
+      } finally {
+        if (!cancelled) setLoading(false)
+      }
+    })()
+    return () => { cancelled = true }
+  }, [props.hasSel, parentGlobalId, props.detailUrl, loadedKey])
+
+  const parentSummary = React.useMemo(() => nsdReadParentSummary(props.data || {}), [props.data])
+  const computedSummary = React.useMemo(() => nsdComputeSummaryFromRows(rows, parentSummary.percentualeSpeseGenerali), [rows, parentSummary.percentualeSpeseGenerali])
+  const summary = React.useMemo(() => nsdMergeSummary(parentSummary, computedSummary), [parentSummary, computedSummary])
+  const rowsByCategory = React.useMemo(() => {
+    const out: Record<NsdCategory, NsdDetailRow[]> = { AT: [], PR: [], RU: [], SL: [], PF: [] }
+    rows.forEach(row => { out[row.categoria_costo].push(row) })
+    return out
+  }, [rows])
+  const lastCalc = nsdPickAttrCI(props.data, ['ns_ricalcolata_il'])
+
+  const card = (label: string, value: number, strong = false) => (
+    <div
+      style={{
+        display: 'grid',
+        gridTemplateColumns: 'minmax(0, 1fr) auto',
+        alignItems: 'center',
+        gap: 10,
+        background: strong ? '#1F4E79' : '#f5f9ff',
+        border: '1px solid #c5d9f1',
+        borderRadius: 8,
+        padding: '9px 12px'
+      }}
+    >
+      <div style={{ fontSize: 12, fontWeight: 800, color: strong ? 'rgba(255,255,255,0.86)' : '#1F4E79', lineHeight: 1.25 }}>{label}</div>
+      <div style={{ fontSize: 15, fontWeight: 900, color: strong ? '#fff' : '#16375a', whiteSpace: 'nowrap', textAlign: 'right' }}>€ {nsdMoney(value)}</div>
+    </div>
+  )
+
+  const renderRows = (cat: NsdCategory) => {
+    const catRows = rowsByCategory[cat] || []
+    if (!catRows.length) return <div style={{ fontSize: 12, color: '#6b7280', padding: '8px 2px' }}>Nessuna voce.</div>
+    return (
+      <div style={{ overflowX: 'auto', marginTop: 8 }}>
+        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
+          <thead>
+            <tr style={{ background: 'rgba(0,0,0,0.04)' }}>
+              {['Origine', 'Codice', 'Descrizione', 'U.M.', 'Q.tà', 'Prezzo unit.', 'Importo'].map(h => (
+                <th key={h} style={{ textAlign: h === 'Descrizione' ? 'left' : 'right', padding: '6px 8px', borderBottom: '1px solid rgba(0,0,0,0.10)', color: '#374151', whiteSpace: 'nowrap' }}>{h}</th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {catRows.map((row, idx) => (
+              <React.Fragment key={`${row.objectid}-${idx}`}>
+                <tr>
+                  <td style={{ padding: '7px 8px', borderBottom: '1px solid rgba(0,0,0,0.07)', textAlign: 'right', whiteSpace: 'nowrap' }}>{nsdSourceShort(row.origine_voce_snapshot)}{row.anno_prezzario_snapshot ? ` ${row.anno_prezzario_snapshot}` : ''}</td>
+                  <td style={{ padding: '7px 8px', borderBottom: '1px solid rgba(0,0,0,0.07)', textAlign: 'right', whiteSpace: 'nowrap', fontWeight: 700 }}>{row.codice_voce_snapshot || '—'}</td>
+                  <td style={{ padding: '7px 8px', borderBottom: '1px solid rgba(0,0,0,0.07)', textAlign: 'left', minWidth: 220 }}>{row.descrizione_snapshot || '—'}</td>
+                  <td style={{ padding: '7px 8px', borderBottom: '1px solid rgba(0,0,0,0.07)', textAlign: 'right', whiteSpace: 'nowrap' }}>{row.unita_misura_snapshot || '—'}</td>
+                  <td style={{ padding: '7px 8px', borderBottom: '1px solid rgba(0,0,0,0.07)', textAlign: 'right', whiteSpace: 'nowrap' }}>{nsdQty(row.quantita)}</td>
+                  <td style={{ padding: '7px 8px', borderBottom: '1px solid rgba(0,0,0,0.07)', textAlign: 'right', whiteSpace: 'nowrap' }}>€ {nsdMoney(row.prezzo_unitario_snapshot)}</td>
+                  <td style={{ padding: '7px 8px', borderBottom: '1px solid rgba(0,0,0,0.07)', textAlign: 'right', whiteSpace: 'nowrap', fontWeight: 800 }}>€ {nsdMoney(row.importo_riga)}</td>
+                </tr>
+                {row.note && (
+                  <tr>
+                    <td colSpan={7} style={{ padding: '4px 8px 8px', borderBottom: '1px solid rgba(0,0,0,0.07)', color: '#6b7280', fontSize: 11 }}><b>Note:</b> {row.note}</td>
+                  </tr>
+                )}
+              </React.Fragment>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    )
+  }
+
+  if (!props.hasSel) return <div style={{ opacity: 0.75, fontSize: 12 }}>Selezionare un rapporto per vedere la nota spese.</div>
+  if (!parentGlobalId) {
+    return (
+      <div style={{ padding: 12, borderRadius: 10, border: '1px solid #f5b8b8', background: '#fce4e4', color: '#7a1c1c' }}>
+        <div style={{ fontWeight: 800, fontSize: 13, marginBottom: 6 }}>GlobalID pratica non disponibile</div>
+        <div style={{ fontSize: 12, lineHeight: 1.5 }}>Il widget non riesce a leggere il GlobalID del rapporto selezionato. Verifica che la vista usata dall’elenco esponga il campo GlobalID.</div>
+      </div>
+    )
+  }
+
+  return (
+    <div style={{ display: 'grid', gap: 12, paddingTop: 8 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr)', gap: 6 }}>
+        {card('Attrezzature/Trasporti', summary.totaleAT)}
+        {card('Materiali da costruzione', summary.totalePR)}
+        {card('Risorse umane', summary.totaleRU)}
+        {card('Semilavorati', summary.totaleSL)}
+        {card('Prodotti finiti', summary.totalePF)}
+        {card(`Spese generali (${nsdMoney(summary.percentualeSpeseGenerali)}%)`, summary.importoSpeseGenerali)}
+        {card('Totale nota spese', summary.totaleComplessivo, true)}
+      </div>
+
+      {lastCalc ? <div style={{ fontSize: 11, color: '#6b7280' }}>Ultimo ricalcolo: {formatDateSafe(lastCalc)}</div> : null}
+
+
+      {props.detailUrl && loading && <div style={{ opacity: 0.75, fontSize: 12 }}>Caricamento dettaglio nota spese…</div>}
+      {props.detailUrl && !loading && error && <div style={{ color: '#b00020', fontSize: 12 }}>{error}</div>}
+      {props.detailUrl && !loading && !error && rows.length === 0 && (
+        <div style={{ opacity: 0.75, fontSize: 12 }}>Nessuna voce di nota spese collegata al rapporto.</div>
+      )}
+      {props.detailUrl && !loading && !error && rows.length > 0 && (
+        <div style={{ display: 'grid', gap: 8 }}>
+          {NSD_CATEGORIES.map(cat => {
+            const total = rowsByCategory[cat].reduce((s, r) => s + nsdSafeNum(r.importo_riga, 0), 0)
+            return (
+              <details key={cat} open={rowsByCategory[cat].length > 0} style={{ border: '1px solid rgba(0,0,0,0.08)', borderRadius: 10, padding: 10, background: '#fff' }}>
+                <summary style={{ cursor: 'pointer', fontSize: 13, fontWeight: 800, color: '#111827' }}>
+                  {NSD_CATEGORY_LABELS[cat]} <span style={{ color: '#6b7280', fontWeight: 700 }}>({rowsByCategory[cat].length} voci · € {nsdMoney(total)})</span>
+                </summary>
+                {renderRows(cat)}
+              </details>
+            )
+          })}
+        </div>
+      )}
+    </div>
+  )
+}
+
+
 function DetailTabsPanel (props: {
   active: { key: string; state: SelState } | null
   ui: any
@@ -1836,6 +2255,7 @@ function DetailTabsPanel (props: {
   tabs: TabConfig[]
   editConfig: any
   mapCfg: any
+  notaSpeseCfg: { detailUrl: string }
 }) {
   const { active, ui } = props
 
@@ -2607,6 +3027,8 @@ if (!hasSel) {
           )}
         </div>
       )
+    } else if (activeTab.id === 'nota_spese') {
+      content = <NotaSpeseDetailPanel data={data} detailUrl={String(props.notaSpeseCfg?.detailUrl || '')} hasSel={hasSel} />
     } else if (activeTab.id === 'mappa') {
       const dsAny: any = ds as any
       const mapLayerUrl = String(
@@ -2819,7 +3241,7 @@ const queryFields = React.useMemo(() => {
       : (Array.isArray(migratedTabs) ? migratedTabs as any[] : [])
 
   for (const t of tabsJs) {
-    if (!t || t.id === 'azioni') continue
+    if (!t || t.id === 'azioni' || t.id === 'nota_spese' || t.id === 'mappa') continue
     const fl = normalizeFieldList(t.fields)
     if (!fl.length && t.id !== 'iter') needsAll = true
     for (const f of fl) s.add(String(f))
@@ -2827,6 +3249,7 @@ const queryFields = React.useMemo(() => {
 
   for (const f of watchFields) s.add(String(f))
   for (const f of DETAIL_GENERAL_FIELDS) s.add(String(f))
+  for (const f of NSD_PARENT_SUMMARY_FIELDS) s.add(String(f))
 
   const arr = Array.from(s).filter(Boolean)
   return needsAll ? ['*'] : arr
@@ -2923,6 +3346,9 @@ const queryFields = React.useMemo(() => {
                   tabFields={tabFields}
 				  tabs={detailTabs}
                   editConfig={editConfig}
+                  notaSpeseCfg={{
+                    detailUrl: String((cfg as any).nsNotaSpeseDettaglioUrl || '')
+                  }}
                   mapCfg={{
                     basemap: String(cfg.mapBasemap || 'topo-vector'),
                     centerLon: Number(cfg.mapCenterLon) || 9.0,

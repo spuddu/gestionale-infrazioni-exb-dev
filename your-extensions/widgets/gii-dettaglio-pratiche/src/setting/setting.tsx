@@ -35,6 +35,7 @@ function buildDefaultTabs(availableNames: string[]): TabConfig[] {
     { id: 'anagrafica', label: 'Anagrafica', fields: normalizeByAvailable(DETAIL_DEFAULT_TAB_FIELDS.anagrafica, availableNames), hideEmpty: true },
     { id: 'violazione', label: 'Violazione', fields: normalizeByAvailable(DETAIL_DEFAULT_TAB_FIELDS.violazione, availableNames), hideEmpty: true },
     { id: 'iter', label: 'Iter', fields: normalizeByAvailable(DETAIL_DEFAULT_TAB_FIELDS.iterExtra, availableNames), isIterTab: true, hideEmpty: false },
+    { id: 'nota_spese', label: 'Nota spese', fields: [], locked: true, hideEmpty: false },
     { id: 'allegati', label: 'Allegati', fields: normalizeByAvailable(DETAIL_DEFAULT_TAB_FIELDS.allegati, availableNames), hideEmpty: true },
     { id: 'azioni', label: 'Azioni', fields: [], locked: true }
   ]
@@ -43,6 +44,16 @@ function buildDefaultTabs(availableNames: string[]): TabConfig[] {
 function buildDefaultPreset(availableNames: string[]) {
   const tabs = buildDefaultTabs(availableNames).filter(t => t.id !== 'azioni')
   return { id: DETAIL_DEFAULT_PRESET_ID, name: DETAIL_DEFAULT_PRESET_NAME, tabs }
+}
+
+function ensureNotaSpeseTabForSetting(tabs: TabConfig[]): TabConfig[] {
+  const list = Array.isArray(tabs) ? [...tabs] : []
+  if (!list.some(t => String(t?.id || '') === 'nota_spese')) {
+    const idxAllegati = list.findIndex(t => String(t?.id || '') === 'allegati')
+    const insertAt = idxAllegati >= 0 ? idxAllegati : list.length
+    list.splice(insertAt, 0, { id: 'nota_spese', label: 'Nota spese', fields: [], locked: true, hideEmpty: false })
+  }
+  return list
 }
 
 // ── Micro-componenti ──────────────────────────────────────────────────────────
@@ -481,11 +492,12 @@ function PresetManager(p: { presets:any[]; activePresetId:string; onSetActive:(i
 
 // ── migrateLegacyFields ───────────────────────────────────────────────────────
 function migrateLegacyFields(cfg: any): TabConfig[] {
-  if(Array.isArray(cfg.tabs)&&cfg.tabs.length>0) return cfg.tabs.map((tab:any)=>({...tab,hideEmpty:tab.hideEmpty??(tab.id==='violazione'||tab.id==='anagrafica'||tab.id==='allegati')}))
+  if(Array.isArray(cfg.tabs)&&cfg.tabs.length>0) return ensureNotaSpeseTabForSetting(cfg.tabs.map((tab:any)=>({...tab,hideEmpty:tab.id==='nota_spese'?false:(tab.hideEmpty??(tab.id==='violazione'||tab.id==='anagrafica'||tab.id==='allegati'))})))
   return [
     {id:'anagrafica',label:'Anagrafica',fields:Array.isArray(cfg.anagraficaFields)?cfg.anagraficaFields:[],hideEmpty:true},
     {id:'violazione',label:'Violazione',fields:Array.isArray(cfg.violazioneFields)?cfg.violazioneFields:[],hideEmpty:true},
     {id:'iter',label:'Iter',fields:Array.isArray(cfg.iterExtraFields)?cfg.iterExtraFields:[],isIterTab:true,hideEmpty:false},
+    {id:'nota_spese',label:'Nota spese',fields:[],locked:true,hideEmpty:false},
     {id:'allegati',label:'Allegati',fields:Array.isArray(cfg.allegatiFields)?cfg.allegatiFields:[],hideEmpty:true},
     {id:'azioni',label:'Azioni',fields:[]},
   ]
@@ -768,6 +780,15 @@ export default function Setting(props: Props) {
         <ColInp value={String(cfgJs.maskBg ?? cfgJs.panelBg ?? '#ffffff')} onChange={v=>patch({maskBg:v})}/>
         <label style={P.lbl}>Colore bordo</label>
         <ColInp value={String(cfgJs.maskBorderColor ?? cfgJs.panelBorderColor ?? '#e5e7eb')} onChange={v=>patch({maskBorderColor:v})}/>
+      </div>}
+
+      {/* ═══ NOTA SPESE ═══ */}
+      <Acc id='notaSpese' label='💶 Nota spese' open={isOpen('notaSpese')} onToggle={()=>toggle('notaSpese')}/>
+      {isOpen('notaSpese') && <div>
+        <div style={P.hint}>Configurazione della scheda Nota spese in sola consultazione. I riepiloghi sono letti dai campi già salvati sul rapporto; il dettaglio voci viene caricato dalla tabella solo quando si apre la scheda.</div>
+        <label style={P.lbl}>Tabella dettaglio nota spese</label>
+        <Inp value={String(cfgJs.nsNotaSpeseDettaglioUrl || '')} onChange={v=>patch({nsNotaSpeseDettaglioUrl:v})} placeholder='https://.../FeatureServer/0'/>
+        <div style={P.hint}>Inserire la URL della tabella GII_NOTA_SPESE_DETTAGLIO. Può restare vuota se si vogliono mostrare solo i totali già presenti sul rapporto.</div>
       </div>}
 
       {/* ═══ MAPPA ═══ */}
