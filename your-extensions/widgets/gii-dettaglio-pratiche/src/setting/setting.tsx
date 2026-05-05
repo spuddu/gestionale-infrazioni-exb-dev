@@ -1,5 +1,5 @@
 /** @jsx jsx */
-import { React, jsx, Immutable, DataSourceTypes, DataSourceManager, type UseDataSource } from 'jimu-core'
+import { React, jsx, Immutable, DataSourceTypes, DataSourceManager, getAppStore, type UseDataSource } from 'jimu-core'
 import type { AllWidgetSettingProps } from 'jimu-for-builder'
 import { DataSourceSelector } from 'jimu-ui/advanced/data-source-selector'
 import type { IMConfig, TabConfig } from '../config'
@@ -82,6 +82,192 @@ function Sel(p: { value:string; onChange:(v:string)=>void; options:Array<{value:
       {p.options.map(o=><option key={o.value} value={o.value} style={{ background:'#1a1f2e', color:'#e5e7eb' }}>{o.label}</option>)}
     </select>
   )
+}
+
+
+type MapLayerOpt = { key: string; title: string; url: string; id: string; layerId: string; geometryType: string }
+
+function normalizeFeatureLayerUrlForSetting (raw: any): string {
+  const str = String(raw || '').trim()
+  if (!str) return ''
+  try {
+    const u = new URL(str)
+    u.search = ''
+    u.hash = ''
+    return u.toString().replace(/\/$/, '')
+  } catch {
+    return str.replace(/[?#].*$/, '').replace(/\/$/, '')
+  }
+}
+
+function getLayerIdFromUrlForSetting (raw: any): string {
+  const m = String(raw || '').match(/\/(?:FeatureServer|MapServer)\/(\d+)(?:[/?#]|$)/i)
+  return m?.[1] || ''
+}
+
+function loadEsriModule<T = any> (path: string): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const req = (window as any).require
+    if (!req) return reject(new Error('AMD require non disponibile'))
+    try { req([path], (mod: T) => resolve(mod), (err: any) => reject(err)) } catch (e) { reject(e) }
+  })
+}
+
+function isFeatureLayerJsonForSetting (layer: any): boolean {
+  const layerType = String(layer?.layerType || layer?.type || '').toLowerCase()
+  const url = String(layer?.url || '').toLowerCase()
+  return layerType.includes('feature') || /\/featureserver(?:\/\d+)?(?:[/?#]|$)/i.test(url)
+}
+
+function uniqueMapLayerOptions (items: MapLayerOpt[]): MapLayerOpt[] {
+  const seen = new Set<string>()
+  const out: MapLayerOpt[] = []
+  for (const item of items || []) {
+    const key = [item.id, normalizeFeatureLayerUrlForSetting(item.url), item.layerId, item.title].join('|').toLowerCase()
+    if (seen.has(key)) continue
+    seen.add(key)
+    out.push(item)
+  }
+  return out.sort((a, b) => (a.title || '').localeCompare(b.title || '', 'it', { sensitivity: 'base' }))
+}
+
+function collectFeatureLayersFromWebMapJson (webmapJson: any): MapLayerOpt[] {
+  const out: MapLayerOpt[] = []
+  const visit = (layer: any, path: string[] = []) => {
+    if (!layer) return
+    const children = [
+      ...(Array.isArray(layer?.layers) ? layer.layers : []),
+      ...(Array.isArray(layer?.featureCollection?.layers) ? layer.featureCollection.layers : [])
+    ]
+    if (isFeatureLayerJsonForSetting(layer)) {
+      const rawTitle = String(layer?.title || layer?.name || layer?.layerDefinition?.name || `Layer ${out.length + 1}`).trim()
+      const title = [...path, rawTitle].filter(Boolean).join(' / ') || `Layer ${out.length + 1}`
+      const url = normalizeFeatureLayerUrlForSetting(layer?.url || layer?.layerDefinition?.source?.url || '')
+      const id = String(layer?.id || layer?.itemId || '').trim()
+      const layerId = String(layer?.layerId ?? layer?.sourceLayerId ?? getLayerIdFromUrlForSetting(url) ?? '').trim()
+      const geometryType = String(layer?.geometryType || layer?.layerDefinition?.geometryType || '').trim()
+      const key = `${id || `json_${out.length}`}|${url || title}|${layerId}`
+      out.push({ key, title, url, id, layerId, geometryType })
+    }
+    children.forEach((child: any) => visit(child, layer?.title ? [...path, String(layer.title)] : path))
+  }
+  ;[
+    ...(Array.isArray(webmapJson?.operationalLayers) ? webmapJson.operationalLayers : []),
+    ...(Array.isArray(webmapJson?.baseMap?.baseMapLayers) ? webmapJson.baseMap.baseMapLayers : [])
+  ].forEach((layer: any) => visit(layer, []))
+  return uniqueMapLayerOptions(out)
+}
+
+function collectFeatureLayerOptionFromDsJson (dsJson: any, fallbackId = ''): MapLayerOpt | null {
+  const ds = asJs(dsJson || {})
+  const type = String(ds?.type || ds?.jimuChildId || '').toLowerCase()
+  const url = normalizeFeatureLayerUrlForSetting(ds?.url || ds?.sourceUrl || ds?.itemData?.url || '')
+  const layerId = String(ds?.layerId ?? ds?.sourceLayerId ?? getLayerIdFromUrlForSetting(url) ?? '').trim()
+  const looksFeature = type.includes('feature') || /\/featureserver(?:\/\d+)?(?:[/?#]|$)/i.test(url)
+  if (!looksFeature && !url) return null
+  const title = String(ds?.sourceLabel || ds?.label || ds?.title || ds?.name || ds?.itemId || fallbackId || `Layer ${layerId || ''}`).trim() || `Layer ${layerId || ''}`
+  const id = String(ds?.id || fallbackId || '').trim()
+  const geometryType = String(ds?.geometryType || ds?.schema?.geometryType || '').trim()
+  const key = `${id || `ds_${title}`}|${url || title}|${layerId}`
+  return { key, title, url, id, layerId, geometryType }
+}
+
+function collectFeatureLayersFromDataSourceManager (webMapDataSourceId: string): MapLayerOpt[] {
+  const out: MapLayerOpt[] = []
+  const seen: any[] = []
+  const pushDs = (dsAny: any, fallbackId = '') => {
+    if (!dsAny || seen.indexOf(dsAny) >= 0) return
+    seen.push(dsAny)
+    try {
+      const json = asJs(dsAny?.getDataSourceJson?.() || dsAny?.dataSourceJson || dsAny?.sourceJson || dsAny || {})
+      const opt = collectFeatureLayerOptionFromDsJson(json, fallbackId || String(dsAny?.id || dsAny?.dataSourceId || ''))
+      if (opt) out.push(opt)
+    } catch {}
+    const childCandidates: any[] = []
+    try {
+      const children = dsAny?.getChildDataSources?.()
+      if (Array.isArray(children)) childCandidates.push(...children)
+      else if (children && typeof children === 'object') childCandidates.push(...Object.values(asJs(children)))
+    } catch {}
+    try {
+      const children = dsAny?.childDataSources
+      if (Array.isArray(children)) childCandidates.push(...children)
+      else if (children && typeof children === 'object') childCandidates.push(...Object.values(asJs(children)))
+    } catch {}
+    try {
+      const children = dsAny?.dataSources
+      if (Array.isArray(children)) childCandidates.push(...children)
+      else if (children && typeof children === 'object') childCandidates.push(...Object.values(asJs(children)))
+    } catch {}
+    childCandidates.forEach((child: any, idx: number) => pushDs(child, `${fallbackId || webMapDataSourceId}_child_${idx}`))
+  }
+  try {
+    const dsm: any = DataSourceManager.getInstance()
+    const root = webMapDataSourceId ? dsm.getDataSource(webMapDataSourceId) : null
+    pushDs(root, webMapDataSourceId)
+    const all: any = dsm.getDataSources?.() || dsm.dataSources || dsm._dataSources
+    const values: any[] = Array.isArray(all) ? all : (all && typeof all === 'object' ? Object.values(asJs(all)) : [])
+    values.forEach((dsAny: any, idx: number) => {
+      let json: any = {}
+      try { json = asJs(dsAny?.getDataSourceJson?.() || dsAny?.dataSourceJson || dsAny || {}) } catch {}
+      const parentId = String(json?.parentDataSourceId || json?.rootDataSourceId || dsAny?.parentDataSourceId || '').trim()
+      const id = String(json?.id || dsAny?.id || dsAny?.dataSourceId || '').trim()
+      if (!webMapDataSourceId || parentId === webMapDataSourceId || id.indexOf(`${webMapDataSourceId}-`) === 0 || id.indexOf(`${webMapDataSourceId}_`) === 0) {
+        pushDs(dsAny, id || `manager_${idx}`)
+      }
+    })
+  } catch {}
+  return uniqueMapLayerOptions(out)
+}
+
+function collectFeatureLayersFromAppConfigDataSources (appConfig: any, webMapDataSourceId: string): MapLayerOpt[] {
+  const out: MapLayerOpt[] = []
+  try {
+    const dataSources: any = asJs(appConfig?.dataSources || {})
+    Object.entries(dataSources || {}).forEach(([id, raw]: [string, any]) => {
+      const ds = asJs(raw || {})
+      const parentId = String(ds?.parentDataSourceId || ds?.rootDataSourceId || '').trim()
+      if (webMapDataSourceId && parentId && parentId !== webMapDataSourceId) return
+      const opt = collectFeatureLayerOptionFromDsJson({ ...ds, id: ds?.id || id }, id)
+      if (opt) out.push(opt)
+    })
+  } catch {}
+  return uniqueMapLayerOptions(out)
+}
+
+function getBuilderAppConfigForSetting (): any {
+  try {
+    const state: any = getAppStore()?.getState?.()
+    const candidates = [
+      state?.appStateInBuilder?.appConfig,
+      state?.appStateInBuilder?.appConfig?.asMutable ? state.appStateInBuilder.appConfig.asMutable({ deep: true }) : null,
+      state?.appConfig
+    ]
+    for (const c of candidates) {
+      const js = asJs(c)
+      if (js?.widgets || js?.dataSources) return js
+    }
+  } catch {}
+  return {}
+}
+
+async function readWebMapFeatureLayers (portalItemId: string, portalUrl?: string): Promise<MapLayerOpt[]> {
+  const itemId = String(portalItemId || '').trim()
+  if (!itemId) return []
+  const cleanPortalUrl = String(portalUrl || 'https://cbsm-hub.maps.arcgis.com').trim().replace(/\/$/, '') || 'https://cbsm-hub.maps.arcgis.com'
+  try {
+    const [PortalItem, Portal] = await Promise.all([
+      loadEsriModule<any>('esri/portal/PortalItem'),
+      loadEsriModule<any>('esri/portal/Portal')
+    ])
+    const portal = new Portal({ url: cleanPortalUrl })
+    const item = new PortalItem({ id: itemId, portal })
+    if (typeof item.load === 'function') await item.load()
+    const data = await item.fetchData('json')
+    const opts = collectFeatureLayersFromWebMapJson(data)
+    if (opts.length) return opts
+  } catch {}
+  return []
 }
 function Acc(p: { id:string; label:string; open:boolean; onToggle:()=>void }) {
   return (
@@ -332,7 +518,11 @@ export default function Setting(props: Props) {
     const first: any = nextUse?.[0] || null
     const nextPatch: Record<string, any> = {
       mapUseDataSources: nextUse,
-      mapWebMapDataSourceId: String(first?.dataSourceId || '')
+      mapWebMapDataSourceId: String(first?.dataSourceId || ''),
+      mapLayerTitle: '',
+      mapLayerUrl: '',
+      mapLayerId: '',
+      mapLayerLayerId: ''
     }
     try {
       const dsId = String(first?.dataSourceId || '')
@@ -356,6 +546,11 @@ export default function Setting(props: Props) {
   const useDsJs:any[] = asJs(props.useDataSources??(Immutable as any)([])) || []
   const primaryDsId = String(useDsJs?.[0]?.dataSourceId||'')
   const [fields, setFields] = React.useState<FieldOpt[]>([])
+  const [mapLayerOptions, setMapLayerOptions] = React.useState<MapLayerOpt[]>([])
+  const [mapLayerLoading, setMapLayerLoading] = React.useState(false)
+  const [mapLayerError, setMapLayerError] = React.useState('')
+  const [mapLayerMenuOpen, setMapLayerMenuOpen] = React.useState(false)
+  const mapLayerMenuRef = React.useRef<HTMLDivElement | null>(null)
 
   React.useEffect(()=>{
     let cancelled=false
@@ -415,6 +610,66 @@ export default function Setting(props: Props) {
   const presetsJs = Array.isArray(asJs(cfgJs.presets)) ? asJs(cfgJs.presets) : []
   const effectivePresets = presetsJs.length ? presetsJs : [buildDefaultPreset(fields.map(f => String(f.name)).filter(Boolean))]
   const updateTab=(i:number,upd:Partial<TabConfig>)=>patch({tabs:tabs.map((t,j)=>j===i?{...t,...upd}:t)})
+
+  const mapDsId = String(cfgJs.mapWebMapDataSourceId || '')
+  const selectedMapLayerKey = mapLayerOptions.find(o => {
+    const cfgId = String(cfgJs.mapLayerId || '').trim()
+    const cfgUrl = normalizeFeatureLayerUrlForSetting(cfgJs.mapLayerUrl || '')
+    const cfgTitle = String(cfgJs.mapLayerTitle || '').trim().toLowerCase()
+    return (!!cfgId && o.id === cfgId) || (!!cfgUrl && o.url === cfgUrl) || (!!cfgTitle && o.title.toLowerCase() === cfgTitle)
+  })?.key || ''
+  const selectedMapLayerOpt = mapLayerOptions.find(o => o.key === selectedMapLayerKey) || null
+
+  React.useEffect(() => {
+    if (!mapLayerMenuOpen) return
+    const onDown = (ev: MouseEvent) => {
+      const el = mapLayerMenuRef.current
+      if (el && !el.contains(ev.target as Node)) setMapLayerMenuOpen(false)
+    }
+    document.addEventListener('mousedown', onDown, true)
+    return () => document.removeEventListener('mousedown', onDown, true)
+  }, [mapLayerMenuOpen])
+
+  React.useEffect(() => {
+    let cancelled = false
+    const appConfig = getBuilderAppConfigForSetting()
+    const fromManager = collectFeatureLayersFromDataSourceManager(mapDsId)
+    if (fromManager.length) {
+      setMapLayerOptions(fromManager)
+      setMapLayerError('')
+      setMapLayerLoading(false)
+      return
+    }
+    const fromAppConfig = collectFeatureLayersFromAppConfigDataSources(appConfig, mapDsId)
+    if (fromAppConfig.length) {
+      setMapLayerOptions(fromAppConfig)
+      setMapLayerError('')
+      setMapLayerLoading(false)
+      return
+    }
+    const itemId = String(cfgJs.mapWebMapItemId || '').trim()
+    if (!itemId) {
+      setMapLayerOptions([])
+      setMapLayerError('')
+      setMapLayerLoading(false)
+      return
+    }
+    setMapLayerLoading(true)
+    setMapLayerError('')
+    readWebMapFeatureLayers(itemId, String((cfgJs as any).mapWebMapPortalUrl || 'https://cbsm-hub.maps.arcgis.com'))
+      .then((opts) => {
+        if (cancelled) return
+        setMapLayerOptions(opts)
+        setMapLayerError('')
+      })
+      .catch((e) => {
+        if (cancelled) return
+        setMapLayerOptions([])
+        setMapLayerError(e?.message || String(e || 'Errore caricamento layer'))
+      })
+      .finally(() => { if (!cancelled) setMapLayerLoading(false) })
+    return () => { cancelled = true }
+  }, [mapDsId, String(cfgJs.mapWebMapItemId || '')])
 
   return (
     <div style={P.wrap}>
@@ -533,6 +788,47 @@ export default function Setting(props: Props) {
         {!!String(cfgJs.mapWebMapLabel || cfgJs.mapWebMapItemId || '') && (
           <div style={{...P.hint, marginTop:6}}>Selezionata: <b style={{color:'#d1d5db'}}>{String(cfgJs.mapWebMapLabel || cfgJs.mapWebMapItemId)}</b></div>
         )}
+
+        <label style={{...P.lbl, marginTop:12}}>Layer rapporti da filtrare nella mappa</label>
+        <div ref={mapLayerMenuRef} style={{ position:'relative', marginTop:4 }}>
+          <button
+            type='button'
+            onClick={() => setMapLayerMenuOpen(v => !v)}
+            style={{ ...P.inp, textAlign:'left', cursor:'pointer', minHeight:30, display:'flex', alignItems:'center', justifyContent:'space-between', gap:8 }}
+          >
+            <span style={{ overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>
+              {mapLayerLoading
+                ? 'Caricamento layer…'
+                : selectedMapLayerOpt?.title || cfgJs.mapLayerTitle || (cfgJs.mapWebMapItemId ? '— seleziona layer —' : '— seleziona prima la WebMap —')}
+            </span>
+            <span style={{ fontSize:10, opacity:0.8 }}>{mapLayerMenuOpen ? '▲' : '▼'}</span>
+          </button>
+          {mapLayerMenuOpen && <div style={{
+            position:'absolute', zIndex:999999, left:0, right:0, top:'calc(100% + 4px)', maxHeight:240, overflowY:'auto',
+            background:'#111827', color:'#e5e7eb', border:'1px solid rgba(147,197,253,0.45)', borderRadius:6, boxShadow:'0 10px 24px rgba(0,0,0,0.35)', padding:4
+          }}>
+            <button type='button'
+              onClick={() => { patch({ mapLayerTitle: '', mapLayerUrl: '', mapLayerId: '', mapLayerLayerId: '' }); setMapLayerMenuOpen(false) }}
+              style={{...P.inp, border:'0', borderRadius:4, background:'transparent', color:'#cbd5e1', cursor:'pointer', textAlign:'left', padding:'7px 8px'}}>
+              — nessuna selezione / fallback automatico —
+            </button>
+            {!cfgJs.mapWebMapItemId && <div style={{...P.hint, padding:'7px 8px'}}>Seleziona prima la WebMap.</div>}
+            {cfgJs.mapWebMapItemId && mapLayerLoading && <div style={{...P.hint, padding:'7px 8px'}}>Caricamento layer…</div>}
+            {cfgJs.mapWebMapItemId && !mapLayerLoading && mapLayerOptions.length === 0 && <div style={{...P.hint, padding:'7px 8px'}}>Nessun Feature Layer trovato.</div>}
+            {mapLayerOptions.map(o => {
+              const info = [o.geometryType ? o.geometryType.replace('esriGeometry', '') : '', o.url ? 'URL' : ''].filter(Boolean).join(' · ')
+              const active = o.key === selectedMapLayerKey
+              return <button key={o.key} type='button'
+                onClick={() => { patch({ mapLayerTitle: o.title, mapLayerUrl: o.url, mapLayerId: o.id, mapLayerLayerId: o.layerId }); setMapLayerMenuOpen(false) }}
+                style={{ width:'100%', border:'0', borderRadius:4, background: active ? 'rgba(59,130,246,0.28)' : 'transparent', color:'#e5e7eb', cursor:'pointer', textAlign:'left', padding:'7px 8px', fontSize:12 }}>
+                <div style={{ fontWeight: active ? 700 : 500 }}>{o.title}</div>
+                {info && <div style={{ fontSize:10.5, color:'#a0aec0', marginTop:2 }}>{info}</div>}
+              </button>
+            })}
+          </div>}
+        </div>
+        {mapLayerError && <div style={{...P.hint, color:'#fca5a5'}}>{mapLayerError}</div>}
+        {(cfgJs.mapLayerTitle || cfgJs.mapLayerUrl || cfgJs.mapLayerId) && <div style={{...P.hint, marginTop:6}}>Selezione attuale: {cfgJs.mapLayerTitle || '—'}{cfgJs.mapLayerUrl ? ` · ${cfgJs.mapLayerUrl}` : ''}</div>}
 
         <div style={P.grp}>Basemap</div>
         <Sel value={String(cfgJs.mapBasemap || 'topo-vector')} onChange={v=>patch({mapBasemap:v})} options={[

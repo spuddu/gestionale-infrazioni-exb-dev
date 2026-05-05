@@ -1,6 +1,6 @@
 /** @jsx jsx */
 /** @jsxFrag React.Fragment */
-import { React, jsx, DataSourceTypes, DataSourceManager, type UseDataSource } from 'jimu-core'
+import { React, jsx, DataSourceTypes, DataSourceManager, getAppStore, type UseDataSource } from 'jimu-core'
 import type { AllWidgetSettingProps } from 'jimu-for-builder'
 import { DataSourceSelector } from 'jimu-ui/advanced/data-source-selector'
 import { MapWidgetSelector } from 'jimu-ui/advanced/setting-components'
@@ -52,6 +52,190 @@ function getSchemaSnapshot(dsId: string) {
   return { url, label, fields }
 }
 
+
+type MapLayerOpt = {
+  key: string
+  title: string
+  url: string
+  id: string
+  layerId: string
+}
+
+function normalizeLayerUrlForConfig(raw: any): string {
+  const s = String(raw || '').trim()
+  if (!s) return ''
+  try {
+    const u = new URL(s)
+    if (!/^https?:$/i.test(u.protocol)) return ''
+    u.search = ''
+    u.hash = ''
+    return u.toString().replace(/\/+$/, '')
+  } catch {
+    return s.replace(/[?#].*$/, '').replace(/\/+$/, '')
+  }
+}
+
+function readLayerIdFromUrl(raw: any): string {
+  const m = String(raw || '').trim().match(/\/(\d+)\/?(?:[?#].*)?$/)
+  return m ? m[1] : ''
+}
+
+function firstText(...vals: any[]): string {
+  for (const v of vals) {
+    const s = String(v ?? '').trim()
+    if (s) return s
+  }
+  return ''
+}
+
+function arrayFromUnknown(v: any): any[] {
+  const x = asJs(v)
+  if (!x) return []
+  if (Array.isArray(x)) return x
+  if (typeof x === 'object') return Object.values(x)
+  return []
+}
+
+function looksLikeFeatureLayer(dsJson: any, url: string): boolean {
+  const t = String(dsJson?.type || dsJson?.dataSourceType || '').toLowerCase()
+  if (t.includes('feature_layer') || t.includes('featurelayer')) return true
+  return /\/(feature|map)server\/(\d+)\/?$/i.test(String(url || ''))
+}
+
+function mapLayerOptionFromDataSource(dsId: string, rawDsJson: any): MapLayerOpt | null {
+  const dsJson: any = asJs(rawDsJson || {})
+  const url = normalizeLayerUrlForConfig(firstText(dsJson?.url, dsJson?.sourceUrl, dsJson?.itemUrl, dsJson?.dataSourceJson?.url))
+  if (!looksLikeFeatureLayer(dsJson, url)) return null
+  const layerId = firstText(dsJson?.layerId, dsJson?.layerIdInWebMap, dsJson?.mapServiceLayerId, dsJson?.sourceLayerId, dsJson?.dataSourceJson?.layerId, readLayerIdFromUrl(url))
+  const title = firstText(dsJson?.sourceLabel, dsJson?.label, dsJson?.title, dsJson?.name, dsJson?.layerDefinition?.name, dsJson?.dataSourceJson?.label, dsJson?.dataSourceJson?.sourceLabel, dsId)
+  const id = firstText(dsJson?.jimuChildId, dsJson?.id, dsJson?.dataSourceId, dsId)
+  return {
+    key: `${id}|${url}|${layerId}`,
+    title,
+    url,
+    id,
+    layerId
+  }
+}
+
+function pushMapLayerOption(out: MapLayerOpt[], opt: MapLayerOpt | null) {
+  if (!opt) return
+  const sig = `${String(opt.id || '').toLowerCase()}|${String(opt.url || '').toLowerCase()}|${String(opt.layerId || '').toLowerCase()}|${String(opt.title || '').toLowerCase()}`
+  if (out.some(o => `${String(o.id || '').toLowerCase()}|${String(o.url || '').toLowerCase()}|${String(o.layerId || '').toLowerCase()}|${String(o.title || '').toLowerCase()}` === sig)) return
+  out.push(opt)
+}
+
+function collectDataSourceManagerLayerOptions(rootDsIds: string[]): MapLayerOpt[] {
+  const out: MapLayerOpt[] = []
+  const dsm = DataSourceManager.getInstance()
+  const visit = (ds: any) => {
+    if (!ds) return
+    const dsJson = ds?.getDataSourceJson?.() || ds?.dataSourceJson || {}
+    const dsId = firstText(ds?.id, dsJson?.id, dsJson?.dataSourceId)
+    pushMapLayerOption(out, mapLayerOptionFromDataSource(dsId, dsJson))
+    const children = [
+      ...arrayFromUnknown(ds?.getDataSources?.()),
+      ...arrayFromUnknown(ds?.getChildDataSources?.()),
+      ...arrayFromUnknown(ds?.getAllChildDataSources?.()),
+      ...arrayFromUnknown(ds?.dataSources)
+    ]
+    children.forEach(visit)
+  }
+  rootDsIds.forEach(id => visit(dsm.getDataSource(id)))
+  return out
+}
+
+function collectPageMapLayerOptions(mapWidgetIds: any): MapLayerOpt[] {
+  const ids = Array.isArray(mapWidgetIds) ? mapWidgetIds.map(String).filter(Boolean) : []
+  const appConfig: any = asJs(getAppStore()?.getState?.()?.appStateInBuilder?.appConfig || {})
+  const dataSources: any = asJs(appConfig?.dataSources || {})
+  const out: MapLayerOpt[] = []
+  const rootDsIds: string[] = []
+
+  ids.forEach(widgetId => {
+    const widget: any = asJs(appConfig?.widgets?.[widgetId] || {})
+    const useDs = [
+      ...arrayFromUnknown(widget?.useDataSources),
+      ...arrayFromUnknown(widget?.config?.useDataSources),
+      ...arrayFromUnknown(widget?.config?.dataSources)
+    ]
+    useDs.forEach((u: any) => {
+      const dsId = typeof u === 'string' ? u : firstText(u?.dataSourceId, u?.mainDataSourceId, u?.id)
+      if (dsId && !rootDsIds.includes(dsId)) rootDsIds.push(dsId)
+    })
+
+    const mapLayers = [
+      ...arrayFromUnknown(widget?.config?.layers),
+      ...arrayFromUnknown(widget?.config?.webMapLayers),
+      ...arrayFromUnknown(widget?.config?.operationalLayers)
+    ]
+    mapLayers.forEach((l: any) => {
+      const dsId = firstText(l?.dataSourceId, l?.jimuLayerId, l?.id)
+      if (dsId && dataSources?.[dsId]) pushMapLayerOption(out, mapLayerOptionFromDataSource(dsId, dataSources[dsId]))
+      else {
+        const url = normalizeLayerUrlForConfig(firstText(l?.url, l?.layerUrl))
+        if (looksLikeFeatureLayer(l, url)) {
+          pushMapLayerOption(out, {
+            key: `${firstText(l?.id, dsId)}|${url}|${firstText(l?.layerId, readLayerIdFromUrl(url))}`,
+            title: firstText(l?.title, l?.name, l?.label, dsId),
+            url,
+            id: firstText(l?.id, dsId),
+            layerId: firstText(l?.layerId, readLayerIdFromUrl(url))
+          })
+        }
+      }
+    })
+  })
+
+  collectDataSourceManagerLayerOptions(rootDsIds).forEach(o => pushMapLayerOption(out, o))
+
+  const relatedIds = new Set<string>()
+  const markRelated = (rootId: string) => {
+    const root: any = asJs(dataSources?.[rootId] || {})
+    const webMapLayers = [
+      ...arrayFromUnknown(root?.itemData?.operationalLayers),
+      ...arrayFromUnknown(root?.portalItemData?.operationalLayers),
+      ...arrayFromUnknown(root?.map?.operationalLayers),
+      ...arrayFromUnknown(root?.operationalLayers)
+    ]
+    webMapLayers.forEach((l: any) => {
+      const url = normalizeLayerUrlForConfig(firstText(l?.url, l?.layerUrl))
+      if (!looksLikeFeatureLayer(l, url)) return
+      const layerId = firstText(l?.layerId, l?.layerDefinition?.layerId, readLayerIdFromUrl(url))
+      const id = firstText(l?.id, l?.itemId, l?.layerId)
+      pushMapLayerOption(out, {
+        key: `${id}|${url}|${layerId}`,
+        title: firstText(l?.title, l?.name, l?.label, id),
+        url,
+        id,
+        layerId
+      })
+    })
+    ;[...arrayFromUnknown(root?.dataSources), ...arrayFromUnknown(root?.childDataSources), ...arrayFromUnknown(root?.originDataSources)].forEach((v: any) => {
+      const id = typeof v === 'string' ? v : firstText(v?.id, v?.dataSourceId)
+      if (id) relatedIds.add(id)
+      if (id && dataSources?.[id]) pushMapLayerOption(out, mapLayerOptionFromDataSource(id, dataSources[id]))
+      else pushMapLayerOption(out, mapLayerOptionFromDataSource(id, v))
+    })
+    Object.entries(dataSources || {}).forEach(([dsId, raw]) => {
+      const ds: any = asJs(raw || {})
+      const parent = firstText(ds?.rootDataSourceId, ds?.parentDataSourceId, ds?.belongToDataSourceId, ds?.webMapDataSourceId, ds?.mainDataSourceId)
+      const byId = String(dsId).startsWith(`${rootId}-`) || String(dsId).startsWith(`${rootId}_`)
+      if (parent === rootId || byId) relatedIds.add(dsId)
+    })
+  }
+  rootDsIds.forEach(markRelated)
+  relatedIds.forEach(dsId => pushMapLayerOption(out, mapLayerOptionFromDataSource(dsId, dataSources?.[dsId])))
+
+  return out.sort((a, b) => (a.title || a.id).localeCompare(b.title || b.id, 'it', { sensitivity: 'base' }))
+}
+
+function formatMapLayerOption(opt: MapLayerOpt): string {
+  const parts = [opt.title]
+  if (opt.layerId) parts.push(`layer ${opt.layerId}`)
+  return parts.filter(Boolean).join(' — ')
+}
+
 const P = {
   wrap:  { padding:'0 12px 32px', fontSize:13, background:'#1a1f2e', minHeight:'100%', color:'#e5e7eb' } as React.CSSProperties,
   sec:   { fontSize:11, fontWeight:700, color:'#93c5fd', textTransform:'uppercase' as const, letterSpacing:1.2, borderBottom:'1px solid rgba(255,255,255,0.10)', paddingBottom:6, marginBottom:14, marginTop:22, cursor:'pointer', display:'flex', justifyContent:'space-between', alignItems:'center' } as React.CSSProperties,
@@ -79,6 +263,11 @@ export default function Setting(props: AllWidgetSettingProps<IMConfig>) {
   const set = (key:string, value:any) => {
     const base = props.config || defaultConfig as any
     props.onSettingChange({ id:props.id, config: base.set ? base.set(key, value) : { ...cfg, [key]:value } as any })
+  }
+
+  const setMany = (patch: Record<string, any>) => {
+    const base = props.config || defaultConfig as any
+    props.onSettingChange({ id: props.id, config: toImmutableCfg(base, patch) })
   }
 
   // Layout editor state
@@ -228,6 +417,20 @@ export default function Setting(props: AllWidgetSettingProps<IMConfig>) {
 
   const useDsJs:any[] = asJs(props.useDataSources ?? ([] as any)) || []
   const primaryDsId = String(useDsJs?.[0]?.dataSourceId || '')
+  const mapLayerOptions = React.useMemo(() => collectPageMapLayerOptions(cfg.useMapWidgetIds), [JSON.stringify(cfg.useMapWidgetIds || [])])
+  const selectedMapLayerKey = React.useMemo(() => {
+    const curUrl = normalizeLayerUrlForConfig(cfg.mapLayerUrl || '')
+    const curId = String(cfg.mapLayerId || '')
+    const curLayerId = String(cfg.mapLayerLayerId || '')
+    const curTitle = String(cfg.mapLayerTitle || '')
+    const found = mapLayerOptions.find(o =>
+      (curId && o.id === curId) ||
+      (curUrl && normalizeLayerUrlForConfig(o.url) === curUrl) ||
+      (curLayerId && String(o.layerId) === curLayerId) ||
+      (curTitle && o.title === curTitle)
+    )
+    return found?.key || ''
+  }, [mapLayerOptions, cfg.mapLayerId, cfg.mapLayerUrl, cfg.mapLayerLayerId, cfg.mapLayerTitle])
 
   React.useEffect(() => {
     if (useDsJs.length > 0) {
@@ -397,25 +600,42 @@ export default function Setting(props: AllWidgetSettingProps<IMConfig>) {
       {/* === MAPPA === */}
       <Acc id='mappa' label='🗺 Mappa' open={isOpen('mappa')} onToggle={()=>toggle('mappa')}/>
       {isOpen('mappa') && <div>
+        <div style={{fontSize:11,fontWeight:700,color:'#93c5fd',marginTop:4,marginBottom:8}}>Mappa di pagina</div>
         <label style={P.lbl}>Widget Mappa di pagina</label>
         <div style={{ marginTop: 6 }}>
           <MapWidgetSelector
-            onSelect={(ids: string[]) => set('useMapWidgetIds', ids)}
+            onSelect={(ids: string[]) => setMany({ useMapWidgetIds: ids })}
             useMapWidgetIds={cfg.useMapWidgetIds}
           />
         </div>
-        <div style={P.hint}>Seleziona il widget Mappa presente nella pagina (es. la mappa accanto). Il widget ascolta i click per la localizzazione della violazione e mostra un segnaposto nel punto cliccato.</div>
-        <label style={{...P.lbl, marginTop: 12}}>Titolo layer rapporti nella mappa</label>
-        <input type='text' value={cfg.mapLayerTitle || ''} onChange={e=>set('mapLayerTitle',e.target.value)}
-          style={{...P.inp, marginTop:4}} placeholder='es. Rapporto di rilevazione infrazioni irrigue_form'/>
-        <div style={P.hint}>Titolo esatto del layer rapporti presente nella mappa. Usato per identificare il layer in modo deterministico (senza scansionare tutti i layer).</div>
+        <div style={P.hint}>Seleziona il widget Mappa presente nella pagina. Il widget editing usa questa mappa per la localizzazione della violazione e per filtrare i punti dei rapporti.</div>
 
-        <div style={{fontSize:11,fontWeight:700,color:'#93c5fd',marginTop:16,marginBottom:8}}>Mappa integrata (embedded)</div>
-        <div style={P.hint}>Se configurata, la mappa viene caricata direttamente dentro il widget nel tab "Luoghi e dati tecnici" senza dipendere da un widget mappa esterno. Lascia vuoto per usare il widget mappa di pagina selezionato sopra.</div>
-        <label style={{...P.lbl, marginTop: 8}}>Portal Item ID della WebMap</label>
+        <label style={{...P.lbl, marginTop: 12}}>Layer rapporti da filtrare nella mappa di pagina</label>
+        <select
+          value={selectedMapLayerKey}
+          onChange={e => {
+            const opt = mapLayerOptions.find(o => o.key === e.target.value)
+            setMany({
+              mapLayerTitle: opt?.title || '',
+              mapLayerUrl: opt?.url || '',
+              mapLayerId: opt?.id || '',
+              mapLayerLayerId: opt?.layerId || ''
+            })
+          }}
+          disabled={!Array.isArray(cfg.useMapWidgetIds) || cfg.useMapWidgetIds.length === 0 || mapLayerOptions.length === 0}
+          style={{...P.inp, marginTop:4, background:'#1a1f2e', color:'#e5e7eb', colorScheme:'dark'}}
+        >
+          <option value='' style={{background:'#1a1f2e', color:'#e5e7eb'}}>{mapLayerOptions.length > 0 ? '— seleziona layer —' : '— nessun Feature Layer trovato —'}</option>
+          {mapLayerOptions.map(opt => <option key={opt.key} value={opt.key} style={{background:'#1a1f2e', color:'#e5e7eb'}}>{formatMapLayerOption(opt)}</option>)}
+        </select>
+        <div style={P.hint}>La lista viene letta dalla WebMap collegata al widget mappa selezionato. La selezione valorizza titolo, URL, ID layer e layerId usati dal runtime per un matching robusto.</div>
+
+        <div style={{fontSize:11,fontWeight:700,color:'#93c5fd',marginTop:16,marginBottom:8}}>Mappa integrata nel widget (opzionale / alternativa)</div>
+        <div style={P.hint}>Se configurata, la mappa viene caricata direttamente dentro il widget nel tab "Luoghi e dati tecnici" senza dipendere da un widget mappa esterno. Può restare vuota se si usa il widget mappa di pagina selezionato sopra.</div>
+        <label style={{...P.lbl, marginTop: 8}}>Portal Item ID della WebMap integrata</label>
         <input type='text' value={cfg.embeddedMapPortalItem || ''} onChange={e=>set('embeddedMapPortalItem',e.target.value)}
           style={{...P.inp, marginTop:4}} placeholder='es. ebb5e0d0d2d649daa2e124bd96514245'/>
-        <div style={P.hint}>L'ID della WebMap AGOL da caricare. Lo trovi nell'URL della WebMap su AGOL (dopo /home/item.html?id=).</div>
+        <div style={P.hint}>L'ID della WebMap AGOL da caricare nella mappa integrata. Non viene usato per popolare la combo del layer della mappa di pagina.</div>
         <label style={{...P.lbl, marginTop: 8}}>Portal URL</label>
         <input type='text' value={cfg.embeddedMapPortalUrl || 'https://cbsm-hub.maps.arcgis.com'} onChange={e=>set('embeddedMapPortalUrl',e.target.value)}
           style={{...P.inp, marginTop:4}} placeholder='https://cbsm-hub.maps.arcgis.com'/>

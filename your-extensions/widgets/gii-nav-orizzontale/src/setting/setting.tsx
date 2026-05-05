@@ -262,6 +262,35 @@ export default function Setting (props: AllWidgetSettingProps<IMConfig>) {
         <div><label style={P.lbl}>Peso etichetta</label><Sel value={String(cfg.labelWeight)} onChange={v => set('labelWeight', Number(v))} options={WEIGHTS} /></div>
       </div>
 
+      <div style={P.sec}>🎨 Colori tab</div>
+      <Check value={!!cfg.tabUseCustomColors} onChange={v => set('tabUseCustomColors', v)} label='Usa colori globali per tutte le tab' />
+      <div style={{ opacity: cfg.tabUseCustomColors ? 1 : 0.55 }}>
+        <div style={P.row2}>
+          <div><label style={P.lbl}>Bordo normale</label><ColInp value={cfg.tabBorderColorRest || 'rgba(255,255,255,0.10)'} onChange={v => set('tabBorderColorRest', v)} /></div>
+          <div><label style={P.lbl}>Bordo hover/attivo</label><ColInp value={cfg.tabBorderColorActive || '#3d77c9'} onChange={v => set('tabBorderColorActive', v)} /></div>
+        </div>
+        <div style={P.row2}>
+          <div><label style={P.lbl}>Sfondo normale</label><ColInp value={cfg.tabBgColorRest || 'rgba(255,255,255,0.05)'} onChange={v => set('tabBgColorRest', v)} /></div>
+          <div><label style={P.lbl}>Sfondo hover/attivo</label><ColInp value={cfg.tabBgColorHover || '#1d3557'} onChange={v => set('tabBgColorHover', v)} /></div>
+        </div>
+        <div style={P.row2}>
+          <div><label style={P.lbl}>Testo normale</label><ColInp value={cfg.tabTextColorRest || 'rgba(255,255,255,0.92)'} onChange={v => set('tabTextColorRest', v)} /></div>
+          <div><label style={P.lbl}>Testo hover/attivo</label><ColInp value={cfg.tabTextColorActive || '#ffffff'} onChange={v => set('tabTextColorActive', v)} /></div>
+        </div>
+        <div style={P.hint}>Se disattivato, restano validi i colori configurati sulle singole voci di navigazione.</div>
+      </div>
+
+      <div style={P.sec}>↔ Colori SidebarResetButton</div>
+      <Check value={!!cfg.sidebarResetUseCustomColors} onChange={v => set('sidebarResetUseCustomColors', v)} label='Usa colori personalizzati per il pulsante reset sidebar' />
+      <div style={{ opacity: cfg.sidebarResetUseCustomColors ? 1 : 0.55 }}>
+        <div style={P.row3}>
+          <div><label style={P.lbl}>Bordo</label><ColInp value={cfg.sidebarResetBorderColor || '#3d77c9'} onChange={v => set('sidebarResetBorderColor', v)} /></div>
+          <div><label style={P.lbl}>Sfondo normale</label><ColInp value={cfg.sidebarResetBgColorRest || 'rgba(255,255,255,0.05)'} onChange={v => set('sidebarResetBgColorRest', v)} /></div>
+          <div><label style={P.lbl}>Sfondo hover</label><ColInp value={cfg.sidebarResetBgColorHover || '#1d3557'} onChange={v => set('sidebarResetBgColorHover', v)} /></div>
+        </div>
+        <div style={P.hint}>Se disattivato, il pulsante reset eredita i colori della tab attiva.</div>
+      </div>
+
       <div style={P.sec}>🔗 Voci di navigazione</div>
 
       <label style={P.lbl}>Sezione target (per navigazione a viste)</label>

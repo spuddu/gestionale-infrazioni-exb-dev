@@ -5018,9 +5018,7 @@ React.useEffect(() => {
       }, logLayer)
       try {
         await logLayer.applyEdits({ addFeatures: [{ attributes: addAttrs }] })
-      } catch (e) {
-        console.warn('[GII_LOG_EVENTI_CICLI] Errore creazione ciclo TI:', e)
-      }
+      } catch {}
       openFeature = await findOpenTiCycle(parentGlobalId)
     }
 
@@ -5044,8 +5042,7 @@ React.useEffect(() => {
     try {
       await logLayer.applyEdits({ updateFeatures: [{ attributes: updAttrs }] })
       return num
-    } catch (e) {
-      console.warn('[GII_LOG_EVENTI_CICLI] Errore aggiornamento ciclo TI:', e)
+    } catch {
       return 0
     }
   }, [buildDeltaMaps, editOid, findOpenTiCycle, getLogLayer, getNextTiCycleNumber, mergeCycleMaps, p.initialData, parseJsonObject])
@@ -6926,9 +6923,7 @@ async function addMapTools (view: any): Promise<void> {
 
     const areaWidget = new AreaMeasurement2D({ view })
     view.ui.add(new Expand({ view, content: areaWidget, expandTooltip: 'Misura area', collapseTooltip: 'Chiudi misura area' }), 'bottom-right')
-  } catch (err) {
-    console.error('[EmbeddedMapPanel] addMapTools error:', err)
-  }
+  } catch {}
 }
 
 function EmbeddedMapPanel (p: {
@@ -6961,9 +6956,7 @@ function EmbeddedMapPanel (p: {
         if (destroyed) return
         await addMapTools(view)
         if (!readyFired.current) { readyFired.current = true; p.onViewReady(view) }
-      } catch (err) {
-        console.error('[EmbeddedMapPanel] init error:', err)
-      }
+      } catch {}
     })()
     return () => {
       destroyed = true
@@ -6983,17 +6976,100 @@ function EmbeddedMapPanel (p: {
   return <div ref={containerRef} style={{ width: '100%', height: '100%', minHeight: 200, ...(p.style || {}) }} />
 }
 
-/** Trova il layer dei rapporti nella mappa in modo deterministico (per titolo, senza query) */
-function findRapportiLayer (view: any): any | null {
+function normalizeLayerTitleForMatch (raw: any): string {
+  return String(raw || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/[\s_-]+/g, '')
+    .replace(/[^a-z0-9]/g, '')
+}
+
+function getTrailingLayerIdFromUrl (raw: any): string {
+  const m = String(raw || '').trim().match(/\/(\d+)\/?(?:[?#].*)?$/)
+  return m ? m[1] : ''
+}
+
+function normalizeMapLayerUrlForMatch (raw: any, layer?: any): string {
+  const url = ensureLayerIndex(normalizeFeatureLayerUrl(raw), layer)
+  return String(url || '').replace(/\/+$/, '').toLowerCase()
+}
+
+function stripLayerIndexForMatch (url: string): string {
+  return String(url || '').replace(/\/\d+$/, '')
+}
+
+function getLayerRestIdCandidates (layer: any): string[] {
+  const vals = [layer?.layerId, layer?.layerIndex, layer?.sourceJSON?.layerId, layer?.sourceJSON?.layerIndex, getTrailingLayerIdFromUrl(layer?.url)]
+  return Array.from(new Set(vals.map(v => String(v ?? '').trim()).filter(Boolean)))
+}
+
+function getLayerIdCandidates (layer: any): string[] {
+  const vals = [layer?.id, layer?.uid, layer?.sourceJSON?.id, layer?.sourceJSON?.layerId, layer?.sourceJSON?.jimuChildId]
+  return Array.from(new Set(vals.map(v => String(v ?? '').trim()).filter(Boolean)))
+}
+
+function collectFeatureLayersFromView (view: any): any[] {
   try {
-    const allLayers = view?.map?.allLayers?.toArray?.() || view?.map?.allLayers || []
-    for (const fl of allLayers) {
-      if (fl?.type !== 'feature') continue
-      const title = String(fl.title || '').toLowerCase()
-      if (title.includes('rapporto') && title.includes('infrazioni')) return fl
-    }
-  } catch {}
-  return null
+    const raw = view?.map?.allLayers?.toArray?.() || view?.map?.allLayers || []
+    const arr = Array.isArray(raw) ? raw : (raw?.toArray?.() || [])
+    return arr.filter((fl: any) => fl?.type === 'feature')
+  } catch {
+    return []
+  }
+}
+
+function matchesLayerByConfiguredIds (layer: any, cfg: any): boolean {
+  const configuredId = String(cfg?.mapLayerId || '').trim()
+  const configuredLayerId = String(cfg?.mapLayerLayerId || '').trim()
+  const configuredUrl = normalizeMapLayerUrlForMatch(cfg?.mapLayerUrl || '')
+  const layerUrl = normalizeMapLayerUrlForMatch(layer?.url || '', layer)
+  const layerIds = getLayerIdCandidates(layer)
+  const restIds = getLayerRestIdCandidates(layer)
+
+  if (configuredId && layerIds.includes(configuredId)) return true
+  if (configuredLayerId && restIds.includes(configuredLayerId)) return true
+  if (configuredUrl && layerUrl && configuredUrl === layerUrl) return true
+
+  if (configuredUrl && layerUrl) {
+    const sameService = stripLayerIndexForMatch(configuredUrl) === stripLayerIndexForMatch(layerUrl)
+    const configuredUrlLayerId = getTrailingLayerIdFromUrl(configuredUrl)
+    if (sameService && configuredUrlLayerId && restIds.includes(configuredUrlLayerId)) return true
+    if (sameService && configuredLayerId && restIds.includes(configuredLayerId)) return true
+  }
+
+  return false
+}
+
+function matchesLayerByConfiguredTitle (layer: any, cfg: any): boolean {
+  const configuredTitle = normalizeLayerTitleForMatch(cfg?.mapLayerTitle || '')
+  if (!configuredTitle) return false
+  const title = normalizeLayerTitleForMatch(layer?.title || layer?.sourceJSON?.title || layer?.sourceJSON?.name || '')
+  return !!title && title === configuredTitle
+}
+
+function matchesLegacyRapportiLayer (layer: any): boolean {
+  const title = normalizeLayerTitleForMatch(layer?.title || layer?.sourceJSON?.title || layer?.sourceJSON?.name || '')
+  return title.includes('rapporto') && title.includes('infrazioni')
+}
+
+function findRapportiLayers (view: any, cfg: any): any[] {
+  const layers = collectFeatureLayersFromView(view)
+  const byIds = layers.filter(layer => matchesLayerByConfiguredIds(layer, cfg))
+  if (byIds.length > 0) return byIds
+
+  const byTitle = layers.filter(layer => matchesLayerByConfiguredTitle(layer, cfg))
+  if (byTitle.length > 0) return byTitle
+
+  return layers.filter(matchesLegacyRapportiLayer)
+}
+
+function getMapLayerRuntimeKey (layer: any): string {
+  const url = normalizeMapLayerUrlForMatch(layer?.url || '', layer)
+  const ids = getLayerIdCandidates(layer).join(',')
+  const restIds = getLayerRestIdCandidates(layer).join(',')
+  const title = normalizeLayerTitleForMatch(layer?.title || layer?.sourceJSON?.title || layer?.sourceJSON?.name || '')
+  return `${ids}|${restIds}|${url}|${title}`
 }
 
 function buildSchemaOnlyDsProxy (args: { url?: string, label?: string, schemaFields?: Array<{ name?: string, alias?: string, type?: string }> }): any {
@@ -7556,7 +7632,8 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
   }, [initialEditData])
 
   // ── Gestione mappa: featureEffect, zoom ──
-  const mapFeatureLayerViewRef = React.useRef<any>(null)
+  const mapFeatureLayerViewsRef = React.useRef<any[]>([])
+  const mapFeatureLayerViewsKeyRef = React.useRef<string>('')
   const mapDefaultViewpointRef = React.useRef<any>(null)
 
   React.useEffect(() => {
@@ -7575,22 +7652,45 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
 
     // Anti-lampeggio: al primo accesso nascondi il container mappa finché il featureEffect non è applicato
     const mapContainer = view.container as HTMLElement | null
-    const needsBlind = !mapFeatureLayerViewRef.current
+    const needsBlind = !mapFeatureLayerViewsRef.current.length
     if (needsBlind && mapContainer) {
       mapContainer.style.opacity = '0'
       mapContainer.style.transition = 'none'
     }
     // Se c'è un layerView precedente, nascondi subito i punti su quello
     try {
-      if (mapFeatureLayerViewRef.current) {
-        mapFeatureLayerViewRef.current.featureEffect = { filter: { where: '1=0' }, excludedEffect: 'opacity(0)' }
-      }
+      mapFeatureLayerViewsRef.current.forEach((lv: any) => {
+        lv.featureEffect = { filter: { where: '1=0' }, excludedEffect: 'opacity(0)' }
+      })
     } catch {}
 
-    // Trova il layer rapporti in modo deterministico (per titolo, nessuna query)
-    const rapportiLayer = findRapportiLayer(view)
+    // Trova tutti i layer rapporti compatibili, dando priorità ai valori configurati nel setting.
+    const rapportiLayers = findRapportiLayers(view, cfg)
+    const rapportiLayersKey = rapportiLayers.map(getMapLayerRuntimeKey).join('||')
     const isEdit = !inCreateMode && editOid != null && Number.isFinite(editOid)
     const idField = editIdFieldName || 'OBJECTID'
+    const resolveRapportiLayerViews = async (): Promise<any[]> => {
+      if (mapFeatureLayerViewsKeyRef.current === rapportiLayersKey && mapFeatureLayerViewsRef.current.length > 0) {
+        return mapFeatureLayerViewsRef.current
+      }
+      const settled = await Promise.all(rapportiLayers.map(async layer => {
+        try { return await view.whenLayerView(layer) } catch { return null }
+      }))
+      const layerViews = settled.filter(Boolean)
+      mapFeatureLayerViewsRef.current = layerViews
+      mapFeatureLayerViewsKeyRef.current = rapportiLayersKey
+      return layerViews
+    }
+    const queryRapportoFeature = async (): Promise<any | null> => {
+      const layer = rapportiLayers.find((l: any) => typeof l?.queryFeatures === 'function')
+      if (!layer) return null
+      try {
+        const res = await layer.queryFeatures({ where: `${idField} = ${editOid}`, returnGeometry: true, outFields: [idField], num: 1 })
+        return res?.features?.[0] || null
+      } catch {
+        return null
+      }
+    }
     let cancelled = false
     const showMap = () => { if (needsBlind && mapContainer) mapContainer.style.opacity = '1' }
 
@@ -7601,14 +7701,11 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
         view.goTo(mapDefaultViewpointRef.current, { duration: 400 }).catch(() => {})
       }
 
-      if (rapportiLayer) {
+      if (rapportiLayers.length > 0) {
         ;(async () => {
-          try {
-            const lv = await view.whenLayerView(rapportiLayer)
-            if (cancelled) { showMap(); return }
-            lv.featureEffect = { filter: { where: '1=0' }, excludedEffect: 'opacity(0)' }
-            mapFeatureLayerViewRef.current = lv
-          } catch {}
+          const layerViews = await resolveRapportiLayerViews()
+          if (cancelled) { showMap(); return }
+          layerViews.forEach((lv: any) => { lv.featureEffect = { filter: { where: '1=0' }, excludedEffect: 'opacity(0)' } })
           showMap()
         })()
       } else {
@@ -7624,38 +7721,40 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
       view.goTo(mapDefaultViewpointRef.current, { duration: 400 }).catch(() => {})
     }
 
-    if (rapportiLayer) {
+    if (rapportiLayers.length > 0) {
       ;(async () => {
         try {
-          const lv = await view.whenLayerView(rapportiLayer)
+          const layerViews = await resolveRapportiLayerViews()
           if (cancelled) { showMap(); return }
-          mapFeatureLayerViewRef.current = lv
 
-          // Cerca la feature per OID
-          const res = await rapportiLayer.queryFeatures({ where: `${idField} = ${editOid}`, returnGeometry: true, outFields: ['*'] })
-          const feat = res?.features?.[0]
-          if (!feat || cancelled) { lv.featureEffect = { filter: { where: '1=0' }, excludedEffect: 'opacity(0)' }; showMap(); return }
+          // Una sola query sul primo layer compatibile: evita tentativi multipli e outFields pesanti.
+          const feat = await queryRapportoFeature()
+          if (!feat || cancelled) {
+            layerViews.forEach((lv: any) => { lv.featureEffect = { filter: { where: '1=0' }, excludedEffect: 'opacity(0)' } })
+            showMap()
+            return
+          }
 
           const g = feat.geometry
           const gx = g ? (g.x ?? g.longitude ?? 0) : 0
           const gy = g ? (g.y ?? g.latitude ?? 0) : 0
           const gValid = !!g && !(Number(gx) === 0 && Number(gy) === 0)
 
-          // Costruisci targetGeom: geometry reale oppure fallback da attributi lat/lon
+          // Costruisci targetGeom: geometry reale oppure fallback da dati già caricati del record.
           let targetGeom: any = gValid ? g : null
-          if (!targetGeom && feat.attributes) {
-            const attrLat = Number(feat.attributes.latitude ?? feat.attributes.lat ?? feat.attributes.y ?? 0)
-            const attrLon = Number(feat.attributes.longitude ?? feat.attributes.lon ?? feat.attributes.x ?? 0)
+          if (!targetGeom && initialEditData) {
+            const attrLat = Number((initialEditData as any).latitude ?? (initialEditData as any).lat ?? (initialEditData as any).y ?? 0)
+            const attrLon = Number((initialEditData as any).longitude ?? (initialEditData as any).lon ?? (initialEditData as any).x ?? 0)
             if (attrLat !== 0 && attrLon !== 0) {
               targetGeom = { type: 'point', longitude: attrLon, latitude: attrLat, spatialReference: { wkid: 4326 } }
             }
           }
 
           if (targetGeom && editReqPoint === 1) {
-            lv.featureEffect = { filter: { where: `${idField} = ${editOid}` }, excludedEffect: 'opacity(0)' }
+            layerViews.forEach((lv: any) => { lv.featureEffect = { filter: { where: `${idField} = ${editOid}` }, excludedEffect: 'opacity(0)' } })
             view.goTo({ target: targetGeom, zoom: Math.max(view.zoom || 15, 15) }, { duration: 600 }).catch(() => {})
           } else {
-            lv.featureEffect = { filter: { where: '1=0' }, excludedEffect: 'opacity(0)' }
+            layerViews.forEach((lv: any) => { lv.featureEffect = { filter: { where: '1=0' }, excludedEffect: 'opacity(0)' } })
           }
         } catch {}
         showMap()
@@ -7665,7 +7764,7 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
     }
 
     return () => { cancelled = true }
-  }, [mapView, editOid, editIdFieldName, inCreateMode, editReqPoint, pageVisitCount])
+  }, [mapView, editOid, editIdFieldName, inCreateMode, editReqPoint, pageVisitCount, cfg.mapLayerId, cfg.mapLayerUrl, cfg.mapLayerLayerId, cfg.mapLayerTitle])
 
   const showEmbeddedMap = useEmbeddedMap && formTab === 'dati_tecnici'
 

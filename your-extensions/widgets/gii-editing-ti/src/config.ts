@@ -168,7 +168,10 @@ export interface Config {
   useMapWidgetIds: string[]
   embeddedMapPortalItem: string
   embeddedMapPortalUrl: string
-  mapLayerTitle: string   // titolo del layer rapporti nella mappa (match deterministico)
+  mapLayerTitle: string   // titolo del layer rapporti nella mappa (fallback)
+  mapLayerUrl: string
+  mapLayerId: string
+  mapLayerLayerId: string
   officeLonWgs84: number
   officeLatWgs84: number
 
@@ -296,6 +299,9 @@ export const defaultConfig: Config = {
   embeddedMapPortalItem: '',
   embeddedMapPortalUrl: 'https://cbsm-hub.maps.arcgis.com',
   mapLayerTitle: '',
+  mapLayerUrl: '',
+  mapLayerId: '',
+  mapLayerLayerId: '',
   officeLonWgs84: 0,
   officeLatWgs84: 0,
 

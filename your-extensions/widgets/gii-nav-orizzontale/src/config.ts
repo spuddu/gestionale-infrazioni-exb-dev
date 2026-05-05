@@ -31,6 +31,17 @@ export interface Config {
   labelSize: number
   labelWeight: number
   labelFont: string
+  tabUseCustomColors: boolean
+  tabBorderColorRest: string
+  tabBorderColorActive: string
+  tabBgColorRest: string
+  tabBgColorHover: string
+  tabTextColorRest: string
+  tabTextColorActive: string
+  sidebarResetUseCustomColors: boolean
+  sidebarResetBorderColor: string
+  sidebarResetBgColorRest: string
+  sidebarResetBgColorHover: string
   items: NavItem[]
 }
 
@@ -48,6 +59,17 @@ export const defaultConfig: Config = {
   labelSize: 14,
   labelWeight: 500,
   labelFont: "'Trebuchet MS', sans-serif",
+  tabUseCustomColors: false,
+  tabBorderColorRest: 'rgba(255,255,255,0.10)',
+  tabBorderColorActive: '#3d77c9',
+  tabBgColorRest: 'rgba(255,255,255,0.05)',
+  tabBgColorHover: '#1d3557',
+  tabTextColorRest: 'rgba(255,255,255,0.92)',
+  tabTextColorActive: '#ffffff',
+  sidebarResetUseCustomColors: false,
+  sidebarResetBorderColor: '#3d77c9',
+  sidebarResetBgColorRest: 'rgba(255,255,255,0.05)',
+  sidebarResetBgColorHover: '#1d3557',
   items: [
     { id:'nav_prezzari',      visible:true, order:1, label:'Prezzari',      hashPage:'Gestione Prezzari', section:'',           colorBg:'#1d4f82', colorAccent:'#3d77c9', colorBgRest:'#1d4f82', colorBgHover:'#2563a7', roles:['RI','DT','DA','ADMIN'], icon:'home'      },
     { id:'nav_voci_uff',      visible:true, order:2, label:'Voci ufficiali',hashPage:'Gestione Voci Prezzario', section:'',   colorBg:'rgba(255,255,255,0.05)', colorAccent:'#3d77c9', colorBgRest:'rgba(255,255,255,0.05)', colorBgHover:'#1d3557', roles:['RI','DT','DA','ADMIN'], icon:'elenco'    },

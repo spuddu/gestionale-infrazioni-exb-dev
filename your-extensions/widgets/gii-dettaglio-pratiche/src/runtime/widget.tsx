@@ -1123,26 +1123,76 @@ function ReadOnlyPanel (props: {
 
 
 function normalizeLayerUrlForMatch (raw: any): string {
-  return String(raw || '').trim().replace(/\/+$/, '').toLowerCase()
+  return String(raw || '').trim().replace(/[?#].*$/, '').replace(/\/+$/, '').toLowerCase()
 }
 
-function findRapportiLayer (view: any, layerUrl?: string): any | null {
+function normalizeLayerTitleForMatch (raw: any): string {
+  return String(raw || '').trim().toLowerCase().replace(/[\s_\-]+/g, ' ')
+}
+
+function getLayerIdFromUrlForMatch (raw: any): string {
+  const m = String(raw || '').match(/\/(?:FeatureServer|MapServer)\/(\d+)(?:[/?#]|$)/i)
+  return m?.[1] || ''
+}
+
+function findRapportiLayers (view: any, opts?: { layerUrl?: string; mapLayerUrl?: string; mapLayerId?: string; mapLayerLayerId?: string; mapLayerTitle?: string }): any[] {
   try {
-    const targetUrl = normalizeLayerUrlForMatch(layerUrl)
     const allLayers = view?.map?.allLayers?.toArray?.() || view?.map?.allLayers || []
-    if (targetUrl) {
-      for (const fl of allLayers) {
-        if (fl?.type !== 'feature') continue
-        if (normalizeLayerUrlForMatch(fl?.url) === targetUrl) return fl
+    const featureLayers = (allLayers || []).filter((fl: any) => fl?.type === 'feature')
+    const targetUrls = [opts?.mapLayerUrl, opts?.layerUrl].map(normalizeLayerUrlForMatch).filter(Boolean)
+    const targetId = String(opts?.mapLayerId || '').trim()
+    const targetLayerId = String(opts?.mapLayerLayerId || '').trim()
+    const targetTitle = normalizeLayerTitleForMatch(opts?.mapLayerTitle)
+    const matches: any[] = []
+    const push = (fl: any) => { if (fl && matches.indexOf(fl) < 0) matches.push(fl) }
+
+    if (targetId || targetUrls.length || targetLayerId || targetTitle) {
+      for (const fl of featureLayers) {
+        const flId = String(fl?.id || '').trim()
+        const flUrl = normalizeLayerUrlForMatch(fl?.url)
+        const flLayerId = String(fl?.layerId ?? fl?.sourceLayer?.id ?? fl?.sourceLayerId ?? getLayerIdFromUrlForMatch(fl?.url) ?? '').trim()
+        const flTitle = normalizeLayerTitleForMatch(fl?.title || fl?.portalItem?.title || fl?.sourceJSON?.title || fl?.sourceJSON?.name)
+        if (targetId && flId === targetId) push(fl)
+        else if (targetUrls.length && targetUrls.includes(flUrl)) push(fl)
+        else if (targetLayerId && flLayerId === targetLayerId && (targetUrls.length === 0 || targetUrls.includes(flUrl))) push(fl)
+        else if (targetTitle && flTitle === targetTitle) push(fl)
       }
+      if (matches.length) return matches
     }
-    for (const fl of allLayers) {
-      if (fl?.type !== 'feature') continue
-      const title = String(fl.title || '').toLowerCase()
-      if (title.includes('rapporto') && title.includes('infrazioni')) return fl
+
+    for (const fl of featureLayers) {
+      const title = normalizeLayerTitleForMatch(fl?.title || fl?.portalItem?.title || fl?.sourceJSON?.title || fl?.sourceJSON?.name)
+      if (title.includes('rapporto') && title.includes('infrazioni')) push(fl)
     }
+    return matches
   } catch {}
-  return null
+  return []
+}
+
+function getMapLayerRuntimeKey (layer: any): string {
+  const id = String(layer?.id || '').trim()
+  const url = normalizeLayerUrlForMatch(layer?.url)
+  const layerId = String(layer?.layerId ?? layer?.sourceLayer?.id ?? layer?.sourceLayerId ?? getLayerIdFromUrlForMatch(layer?.url) ?? '').trim()
+  const title = normalizeLayerTitleForMatch(layer?.title || layer?.portalItem?.title || layer?.sourceJSON?.title || layer?.sourceJSON?.name)
+  return `${id}|${layerId}|${url}|${title}`
+}
+
+function getPointQueryOutFields (layer: any): string[] {
+  const oidField = String(layer?.objectIdField || 'OBJECTID')
+  const wanted = [oidField, 'OBJECTID', 'latitude', 'lat', 'y', 'longitude', 'lon', 'x']
+  const fields = Array.isArray(layer?.fields) ? layer.fields : []
+  if (!fields.length) return [oidField]
+  const byLower = new Map<string, string>()
+  fields.forEach((f: any) => {
+    const name = String(f?.name || '').trim()
+    if (name) byLower.set(name.toLowerCase(), name)
+  })
+  const out: string[] = []
+  wanted.forEach(name => {
+    const real = byLower.get(String(name).toLowerCase())
+    if (real && out.indexOf(real) < 0) out.push(real)
+  })
+  return out.length ? out : [oidField]
 }
 
 function MapTabContent (props: {
@@ -1155,6 +1205,7 @@ function MapTabContent (props: {
     showZoom: boolean; showAttribution: boolean; showScaleBar: boolean; showCompass: boolean
     showPopup?: boolean; showHome?: boolean; showFullscreen?: boolean; showLayerList?: boolean
     webMapItemId?: string; webMapLabel?: string
+    mapLayerTitle?: string; mapLayerUrl?: string; mapLayerId?: string; mapLayerLayerId?: string
   }
   selectionSig?: string
 }) {
@@ -1162,7 +1213,8 @@ function MapTabContent (props: {
   const containerRef = React.useRef<HTMLDivElement>(null)
   const viewRef = React.useRef<any>(null)
   const markerRef = React.useRef<any>(null)
-  const targetLayerViewRef = React.useRef<any>(null)
+  const targetLayerViewRefs = React.useRef<any[]>([])
+  const targetLayerViewCacheRef = React.useRef<Record<string, any>>({})
   const defaultViewpointRef = React.useRef<any>(null)
   const fullscreenWidgetRef = React.useRef<any>(null)
   const [status, setStatus] = React.useState<'loading' | 'ok' | 'nogeom' | 'error'>('loading')
@@ -1260,16 +1312,16 @@ function MapTabContent (props: {
                 try { recreateFullscreenWidget() } catch {}
                 try { setViewReadyTick(t => t + 1) } catch {}
                 try {
-                  if (props.hasSel && props.oid != null && targetLayerViewRef.current) {
-                    targetLayerViewRef.current.featureEffect = { filter: { where: `OBJECTID = ${Number(props.oid)}` }, excludedEffect: 'opacity(0)' }
+                  if (props.hasSel && props.oid != null && targetLayerViewRefs.current.length) {
+                    targetLayerViewRefs.current.forEach((lv: any) => { try { lv.featureEffect = { filter: { where: `OBJECTID = ${Number(props.oid)}` }, excludedEffect: 'opacity(0)' } } catch {} })
                   }
                 } catch {}
               }, 40)
               window.setTimeout(() => {
                 try { recreateFullscreenWidget() } catch {}
                 try {
-                  if (props.hasSel && props.oid != null && targetLayerViewRef.current) {
-                    targetLayerViewRef.current.featureEffect = { filter: { where: `OBJECTID = ${Number(props.oid)}` }, excludedEffect: 'opacity(0)' }
+                  if (props.hasSel && props.oid != null && targetLayerViewRefs.current.length) {
+                    targetLayerViewRefs.current.forEach((lv: any) => { try { lv.featureEffect = { filter: { where: `OBJECTID = ${Number(props.oid)}` }, excludedEffect: 'opacity(0)' } } catch {} })
                   }
                 } catch {}
               }, 220)
@@ -1314,8 +1366,8 @@ function MapTabContent (props: {
     return () => {
       cancelled = true
       try {
-        if (targetLayerViewRef.current) {
-          targetLayerViewRef.current.featureEffect = { filter: { where: '1=1' }, excludedEffect: '' }
+        if (targetLayerViewRefs.current.length) {
+          targetLayerViewRefs.current.forEach((lv: any) => { try { lv.featureEffect = { filter: { where: '1=1' }, excludedEffect: '' } } catch {} })
         }
       } catch {}
       try {
@@ -1334,7 +1386,8 @@ function MapTabContent (props: {
         }
       } catch {}
       if (viewRef.current) { try { viewRef.current.destroy() } catch {} viewRef.current = null }
-      targetLayerViewRef.current = null
+      targetLayerViewRefs.current = []
+      targetLayerViewCacheRef.current = {}
       defaultViewpointRef.current = null
     }
   }, [])
@@ -1349,13 +1402,13 @@ function MapTabContent (props: {
       markerRef.current = null
       try { view.popup?.close?.() } catch {}
       try {
-        if (targetLayerViewRef.current) {
-          targetLayerViewRef.current.featureEffect = hideAll
+        if (targetLayerViewRefs.current.length) {
+          targetLayerViewRefs.current.forEach((lv: any) => { try { lv.featureEffect = hideAll
             ? { filter: { where: '1=0' }, excludedEffect: 'opacity(0)' }
-            : { filter: { where: '1=1' }, excludedEffect: '' }
+            : { filter: { where: '1=1' }, excludedEffect: '' } } catch {} })
         }
       } catch {}
-      if (!hideAll) targetLayerViewRef.current = null
+      if (!hideAll) targetLayerViewRefs.current = []
       if (resetToDefault) {
         try { if (defaultViewpointRef.current) await view.goTo(defaultViewpointRef.current, { duration: 400 }) } catch {}
       }
@@ -1378,21 +1431,38 @@ function MapTabContent (props: {
         ])
 
         const oidWhere = `OBJECTID = ${Number(props.oid)}`
-        const rapportiLayer = findRapportiLayer(view, props.layerUrl)
+        const rapportiLayers = findRapportiLayers(view, {
+          layerUrl: props.layerUrl,
+          mapLayerUrl: mc.mapLayerUrl,
+          mapLayerId: mc.mapLayerId,
+          mapLayerLayerId: mc.mapLayerLayerId,
+          mapLayerTitle: mc.mapLayerTitle
+        })
         let feature: any = null
 
-        if (rapportiLayer) {
-          try {
-            const lv = await view.whenLayerView(rapportiLayer)
-            if (cancelled) return
-            targetLayerViewRef.current = lv
-            try { lv.featureEffect = { filter: { where: '1=0' }, excludedEffect: 'opacity(0)' } } catch {}
+        if (rapportiLayers.length) {
+          const nextLayerViews: any[] = []
+          for (const lyr of rapportiLayers) {
+            try {
+              const key = getMapLayerRuntimeKey(lyr)
+              let lv = targetLayerViewCacheRef.current[key]
+              if (!lv) {
+                lv = await view.whenLayerView(lyr)
+                if (lv) targetLayerViewCacheRef.current[key] = lv
+              }
+              if (cancelled) return
+              if (lv && nextLayerViews.indexOf(lv) < 0) nextLayerViews.push(lv)
+            } catch {}
+          }
+          targetLayerViewRefs.current = nextLayerViews
 
-            const q = rapportiLayer.createQuery ? rapportiLayer.createQuery() : {}
+          const queryLayer = rapportiLayers[0]
+          try {
+            const q = queryLayer.createQuery ? queryLayer.createQuery() : {}
             q.where = oidWhere
-            q.outFields = ['*']
+            q.outFields = getPointQueryOutFields(queryLayer)
             q.returnGeometry = true
-            const res = await rapportiLayer.queryFeatures(q)
+            const res = await queryLayer.queryFeatures(q)
             feature = res?.features?.[0] || null
           } catch {}
         }
@@ -1402,7 +1472,7 @@ function MapTabContent (props: {
           if (typeof fl?.load === 'function') await fl.load()
           const q = fl.createQuery ? fl.createQuery() : {}
           q.where = oidWhere
-          q.outFields = ['*']
+          q.outFields = getPointQueryOutFields(fl)
           q.returnGeometry = true
           const res = await fl.queryFeatures(q)
           feature = res?.features?.[0] || null
@@ -1449,8 +1519,8 @@ function MapTabContent (props: {
         }
 
         try {
-          if (targetLayerViewRef.current) {
-            targetLayerViewRef.current.featureEffect = { filter: { where: oidWhere }, excludedEffect: 'opacity(0)' }
+          if (targetLayerViewRefs.current.length) {
+            targetLayerViewRefs.current.forEach((lv: any) => { try { lv.featureEffect = { filter: { where: oidWhere }, excludedEffect: 'opacity(0)' } } catch {} })
           }
         } catch {}
 
@@ -1485,7 +1555,7 @@ function MapTabContent (props: {
     })()
 
     return () => { cancelled = true }
-  }, [props.hasSel, props.oid, props.layerUrl, props.selectionSig, viewReadyTick, mc.pointZoom, mc.markerColor, mc.markerSize, mc.markerOutlineColor, mc.markerOutlineWidth, mc.showPopup])
+  }, [props.hasSel, props.oid, props.layerUrl, props.selectionSig, viewReadyTick, mc.pointZoom, mc.markerColor, mc.markerSize, mc.markerOutlineColor, mc.markerOutlineWidth, mc.showPopup, mc.mapLayerTitle, mc.mapLayerUrl, mc.mapLayerId, mc.mapLayerLayerId])
 
   return (
     <div key={mapInstanceKey} ref={wrapperRef} style={{ width: '100%', flex: '1 1 auto', minHeight: 0, position: 'relative', borderRadius: 8, overflow: 'hidden' }}>
@@ -2813,7 +2883,11 @@ const queryFields = React.useMemo(() => {
                     showFullscreen: cfg.mapShowFullscreen !== false,
                     showLayerList: cfg.mapShowLayerList === true,
                     webMapItemId: String((cfg as any).mapWebMapItemId || ''),
-                    webMapLabel: String((cfg as any).mapWebMapLabel || '')
+                    webMapLabel: String((cfg as any).mapWebMapLabel || ''),
+                    mapLayerTitle: String((cfg as any).mapLayerTitle || ''),
+                    mapLayerUrl: String((cfg as any).mapLayerUrl || ''),
+                    mapLayerId: String((cfg as any).mapLayerId || ''),
+                    mapLayerLayerId: String((cfg as any).mapLayerLayerId || '')
                   }}
                 />
         </>

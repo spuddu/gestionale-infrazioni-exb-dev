@@ -511,6 +511,26 @@ function formatPersonaDest (
 let _utentiMapCache: Map<string, UtentiEntry> | null = null
 let _utentiMapLoading = false
 
+// Cache dei FeatureLayer caricati: evita di ricreare/caricare lo stesso layer
+// a ogni refresh dell'elenco o delle colonne virtuali.
+const _loadedFeatureLayerCache: Record<string, Promise<any>> = {}
+
+async function getLoadedFeatureLayer (url: string, outFields?: string[]): Promise<any> {
+  const key = String(url || '').trim()
+  if (!key) throw new Error('FeatureLayer URL non valorizzato')
+  if (!_loadedFeatureLayerCache[key]) {
+    _loadedFeatureLayerCache[key] = (async () => {
+      const FL = await loadEsriModule<any>('esri/layers/FeatureLayer')
+      const layer = new FL({ url: key, outFields: (outFields && outFields.length ? outFields : ['*']) as any })
+      if (typeof layer.load === 'function') {
+        try { await layer.load() } catch {}
+      }
+      return layer
+    })()
+  }
+  return _loadedFeatureLayerCache[key]
+}
+
 /**
  * Formatta il prefisso ruolo nel formato standard.
  * Es: "RZ-D1", "RI-AGR", "DIR-TEC", "DIR-AMM", "TI-D1", "TI-AMM"
@@ -602,11 +622,7 @@ function makeRuntimeRecord (attrs: any, idFieldName: string, sourceKey: string):
 }
 
 async function createRuntimeFeatureLayerProxy (view: RuntimeDsView, recordsRef: { current: DataRecord[] }): Promise<any> {
-  const FeatureLayer = await loadEsriModule<any>('esri/layers/FeatureLayer')
-  const layer = new FeatureLayer({ url: view.layerUrl, outFields: ['*'] })
-  if (typeof layer.load === 'function') {
-    try { await layer.load() } catch {}
-  }
+  const layer = await getLoadedFeatureLayer(view.layerUrl, ['*'])
   const idFieldName = String(layer?.objectIdField || 'OBJECTID')
   const schemaFields: Record<string, any> = {}
   const fields = Array.isArray(layer?.fields) ? layer.fields : []
@@ -1327,9 +1343,7 @@ React.useEffect(() => {
     _utentiMapLoading = true
     ;(async () => {
       try {
-        const FL = await loadEsriModule<any>('esri/layers/FeatureLayer')
-        const layer = new FL({ url: UTENTI_TABLE_URL })
-        if (typeof layer.load === 'function') await layer.load()
+        const layer = await getLoadedFeatureLayer(UTENTI_TABLE_URL)
         const res = await layer.queryFeatures({
           where: '1=1',
           outFields: ['username', 'full_name', 'ruolo', 'area', 'settore'],
@@ -1391,15 +1405,15 @@ React.useEffect(() => {
     let cancelled = false
     ;(async () => {
       try {
-        const FL = await loadEsriModule<any>('esri/layers/FeatureLayer')
-        const layer = new FL({ url: LOG_TABLE_URL })
-        if (typeof layer.load === 'function') await layer.load()
+        const layer = await getLoadedFeatureLayer(LOG_TABLE_URL)
 
         const map = new Map<string, LogEntry>()
+        const chunks: string[][] = []
         // Chunk in gruppi da 50 GlobalID per evitare limiti URL
-        for (let i = 0; i < gids.length; i += 50) {
-          if (cancelled) return
-          const chunk = gids.slice(i, i + 50)
+        for (let i = 0; i < gids.length; i += 50) chunks.push(gids.slice(i, i + 50))
+
+        const results = await Promise.all(chunks.map(async chunk => {
+          if (cancelled) return [] as any[]
           const inClause = chunk.map(g => `'${g.replace(/'/g, "''")}'`).join(',')
           const res = await layer.queryFeatures({
             where: `parent_globalid IN (${inClause}) AND stato_record = 'CHIUSO'`,
@@ -1407,7 +1421,12 @@ React.useEffect(() => {
             orderByFields: ['dt_chiusura DESC'],
             returnGeometry: false
           })
-          for (const f of (res?.features || [])) {
+          return (res?.features || []) as any[]
+        }))
+
+        if (cancelled) return
+        for (const features of results) {
+          for (const f of features) {
             const a = f?.attributes
             const pgid = normGid(a?.parent_globalid)
             // Primo per ogni parent_globalid (ordinato DESC = più recente)

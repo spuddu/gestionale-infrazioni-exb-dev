@@ -188,6 +188,11 @@ export interface Config {
   mapWebMapDataSourceId?: string
   mapWebMapItemId?: string
   mapWebMapLabel?: string
+  mapUseDataSources?: any[]
+  mapLayerTitle?: string
+  mapLayerUrl?: string
+  mapLayerId?: string
+  mapLayerLayerId?: string
   mapBasemap: string
   mapCenterLon: number
   mapCenterLat: number
@@ -274,6 +279,12 @@ export const defaultConfig: Config = {
     }
   ],
   activePresetId: DETAIL_DEFAULT_PRESET_ID,
+
+  mapUseDataSources: [],
+  mapLayerTitle: '',
+  mapLayerUrl: '',
+  mapLayerId: '',
+  mapLayerLayerId: '',
 
   mapBasemap: 'topo-vector',
   mapCenterLon: 9.0,

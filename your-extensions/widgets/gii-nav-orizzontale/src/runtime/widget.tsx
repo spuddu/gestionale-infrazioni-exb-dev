@@ -484,8 +484,20 @@ function resetSidebarSize (sidebarWidgetId: string): void {
   }, 160)
 }
 
-function SidebarResetButton (p: { visible: boolean, onClick: () => void }) {
+function softColor (color: string, fallback = 'rgba(147,197,253,0.18)'): string {
+  const c = String(color || '').trim()
+  if (/^#[0-9a-fA-F]{6}$/.test(c)) return `${c}2e`
+  if (/^#[0-9a-fA-F]{8}$/.test(c)) return c
+  if (/^rgba?\(/.test(c)) return c
+  return fallback
+}
+
+function SidebarResetButton (p: { visible: boolean, onClick: () => void, item?: NavItem | null, cfg?: any }) {
   const [hov, setHov] = React.useState(false)
+  const useCustomColors = !!p.cfg?.sidebarResetUseCustomColors
+  const borderColor = useCustomColors ? (p.cfg?.sidebarResetBorderColor || p.item?.colorAccent || '#93c5fd') : (p.item?.colorAccent || '#93c5fd')
+  const bgRest = useCustomColors ? (p.cfg?.sidebarResetBgColorRest || p.item?.colorBgRest || 'rgba(255,255,255,0.05)') : (p.item?.colorBgRest || 'rgba(255,255,255,0.05)')
+  const bgHover = useCustomColors ? (p.cfg?.sidebarResetBgColorHover || p.item?.colorBgHover || p.item?.colorBg || 'rgba(37,99,167,1)') : (p.item?.colorBgHover || p.item?.colorBg || 'rgba(37,99,167,1)')
   if (!p.visible) return null
   return (
     <button
@@ -501,8 +513,8 @@ function SidebarResetButton (p: { visible: boolean, onClick: () => void }) {
         minWidth: 34,
         minHeight: 34,
         borderRadius: 999,
-        border: `1px solid ${hov ? '#93c5fd' : 'rgba(147,197,253,0.65)'}`,
-        background: hov ? 'rgba(253, 106, 0, 0.65)' : 'rgba(13,33,63,0.92)',
+        border: `1px solid ${borderColor}`,
+        background: hov ? bgHover : bgRest,
         color: '#fff',
         display: 'flex',
         alignItems: 'center',
@@ -513,7 +525,7 @@ function SidebarResetButton (p: { visible: boolean, onClick: () => void }) {
         fontSize: 18,
         fontWeight: 800,
         lineHeight: 1,
-        boxShadow: hov ? '0 0 0 2px rgba(147,197,253,0.18)' : '0 4px 14px rgba(0,0,0,0.18)',
+        boxShadow: hov ? `0 0 0 2px ${softColor(borderColor)}` : '0 4px 14px rgba(0,0,0,0.18)',
         transition: 'all 0.18s ease',
         flexShrink: 0
       }}
@@ -565,6 +577,7 @@ function NavButton (p: { item: NavItem, cfg: any, idx: number, currentPageId: st
   const sectionId = String(cfg.sectionId || '').trim()
   const itemSection = String(item.section || '').trim()
   const itemViewId = String(item.viewId || '').trim()
+  const useTabColors = !!cfg.tabUseCustomColors
   const isActive = isNavItemActive(item, cfg, currentPageId, currentSection, currentViewId)
   const hot = hov || isActive
 
@@ -598,8 +611,8 @@ function NavButton (p: { item: NavItem, cfg: any, idx: number, currentPageId: st
         height: cfg.itemHeight,
         minHeight: cfg.itemHeight,
         borderRadius: cfg.itemBorderRadius,
-        border: `1px solid ${hot ? item.colorAccent : 'rgba(255,255,255,0.10)'}`,
-        background: hot ? (item.colorBgHover || item.colorBg || 'rgba(37,99,167,1)') : (item.colorBgRest || 'rgba(255,255,255,0.05)'),
+        border: `1px solid ${hot ? (useTabColors ? (cfg.tabBorderColorActive || item.colorAccent) : item.colorAccent) : (useTabColors ? (cfg.tabBorderColorRest || 'rgba(255,255,255,0.10)') : 'rgba(255,255,255,0.10)')}`,
+        background: hot ? (useTabColors ? (cfg.tabBgColorHover || item.colorBgHover || item.colorBg || 'rgba(37,99,167,1)') : (item.colorBgHover || item.colorBg || 'rgba(37,99,167,1)')) : (useTabColors ? (cfg.tabBgColorRest || item.colorBgRest || 'rgba(255,255,255,0.05)') : (item.colorBgRest || 'rgba(255,255,255,0.05)')),
         padding: `${cfg.itemPaddingY}px ${cfg.itemPaddingX}px`,
         display: 'flex',
         flexDirection: 'row',
@@ -610,7 +623,7 @@ function NavButton (p: { item: NavItem, cfg: any, idx: number, currentPageId: st
         whiteSpace: 'nowrap',
         overflow: 'hidden',
         transition: 'all 0.2s ease',
-        boxShadow: hot ? `0 0 0 1px ${item.colorAccent}22 inset` : 'none',
+        boxShadow: hot ? `0 0 0 1px ${softColor(useTabColors ? (cfg.tabBorderColorActive || item.colorAccent) : item.colorAccent)} inset` : 'none',
         transform: hov && !isActive ? 'translateY(-1px)' : 'none'
       }}
     >
@@ -618,7 +631,7 @@ function NavButton (p: { item: NavItem, cfg: any, idx: number, currentPageId: st
         fontFamily: cfg.labelFont,
         fontSize: cfg.labelSize,
         fontWeight: cfg.labelWeight,
-        color: hot ? '#ffffff' : 'rgba(255,255,255,0.92)',
+        color: hot ? (useTabColors ? (cfg.tabTextColorActive || '#ffffff') : '#ffffff') : (useTabColors ? (cfg.tabTextColorRest || 'rgba(255,255,255,0.92)') : 'rgba(255,255,255,0.92)'),
         lineHeight: 1.1,
         textAlign: 'center',
         overflow: 'hidden',
@@ -811,6 +824,8 @@ export default function Widget (props: Props) {
       <div style={{ flex: '1 1 auto', minWidth: 8 }} />
       <SidebarResetButton
         visible={shouldHandleSidebarReset && sidebarSizeChanged}
+        item={activeSidebarItem}
+        cfg={cfg}
         onClick={() => {
           resetSidebarSize(sidebarWidgetId)
           window.setTimeout(() => {
