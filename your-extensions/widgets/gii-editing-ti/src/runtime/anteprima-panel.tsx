@@ -2,7 +2,7 @@
 /** @jsxFrag React.Fragment */
 import { React, jsx, css } from 'jimu-core'
 import { Loading } from 'jimu-ui'
-import { buildRapportoPdf } from './rapporto-pdf-builder'
+import { buildRapportoPdf } from '../../../_shared/gii-anteprime/rapporto/rapporto-pdf-builder'
 
 const GII_UTENTI_URL = 'https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_utenti/FeatureServer/0'
 type UtenteCached = { full_name: string; ruolo: number | null; area: number | null; settore: number | null }

@@ -5,7 +5,7 @@ import { Button } from 'jimu-ui'
 import { createPortal } from 'react-dom'
 import type { IMConfig } from '../config'
 import { defaultConfig } from '../config'
-import { RAPPORTO_TEMPLATE } from './rapporto-template'
+import { buildRapportoPdf } from '../../../_shared/gii-anteprime/rapporto/rapporto-pdf-builder'
 
 
 const GII_LOG_EVENTI_CICLI_URL = 'https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_LOG_EVENTI_CICLI/FeatureServer/0'
@@ -1422,6 +1422,15 @@ function ActionsPanel (props: {
   // Popup di diniego (validazione pre-trasmissione)
   const [denyPopupMessages, setDenyPopupMessages] = React.useState<string[]>([])
 
+  const [previewOpen, setPreviewOpen] = React.useState(false)
+  const [previewLoading, setPreviewLoading] = React.useState(false)
+  const [previewError, setPreviewError] = React.useState<string | null>(null)
+  const [previewUrl, setPreviewUrl] = React.useState<string | null>(null)
+
+  React.useEffect(() => {
+    return () => { revokeRapportoPdfUrl(previewUrl) }
+  }, [previewUrl])
+
   // ── Cache GII_utenti (per risolvere utente_destinatario) ──
   React.useEffect(() => {
     if (_utentiCache || _utentiLoading) return
@@ -1521,6 +1530,45 @@ function ActionsPanel (props: {
     const op = data?.origine_pratica ?? data?.Origine_pratica ?? data?.ORIGINE_PRATICA
     return `${(op === 2 || op === '2' || String(op || '').toUpperCase() === 'TI') ? 'TI' : 'TR'}-${oid}`
   })()
+
+  const closeRapportoPreview = React.useCallback(() => {
+    setPreviewOpen(false)
+    setPreviewError(null)
+    setPreviewLoading(false)
+  }, [])
+
+  const handleRapportoPreview = React.useCallback(() => {
+    if (!data) return
+    setPreviewOpen(true)
+    setPreviewLoading(true)
+    setPreviewError(null)
+    ;(async () => {
+      try {
+        const { blob, fileName } = await buildRapportoPdfBlob(data, _utentiCache)
+        const url = makeRapportoPdfUrl(blob, fileName)
+        setPreviewUrl(prev => {
+          revokeRapportoPdfUrl(prev)
+          return url
+        })
+      } catch (ex: any) {
+        setPreviewError('Errore generazione anteprima: ' + (ex?.message || String(ex)))
+      } finally {
+        setPreviewLoading(false)
+      }
+    })()
+  }, [data])
+
+  const handleRapportoDownload = React.useCallback(() => {
+    if (!data) return
+    ;(async () => {
+      try {
+        const { blob, fileName } = await buildRapportoPdfBlob(data, _utentiCache)
+        downloadBlobFile(blob, fileName)
+      } catch (ex: any) {
+        setMsg({ kind: 'err', text: 'Errore download rapporto: ' + (ex?.message || String(ex)) })
+      }
+    })()
+  }, [data])
 
 
   const sessionIdRef = React.useRef<string>(`sess-${Date.now()}-${Math.random().toString(16).slice(2)}`)
@@ -3201,6 +3249,69 @@ function ActionsPanel (props: {
     document.body
   ) : null
 
+  const reportPreviewModal = previewOpen ? createPortal(
+    <div
+      data-gii-global-popup-root='1'
+      style={{ position: 'fixed', inset: 0, zIndex: 2147483646, background: 'rgba(0,0,0,0.58)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 8, pointerEvents: 'auto' }}
+      onClick={(e) => { e.preventDefault(); e.stopPropagation() }}
+      onMouseDown={(e) => { e.preventDefault(); e.stopPropagation() }}
+    >
+      <div
+        role='dialog'
+        aria-modal='true'
+        data-gii-global-popup-dialog='1'
+        style={{ width: 'min(98vw, 1600px)', height: 'min(96vh, 1100px)', background: '#fff', borderRadius: 14, boxShadow: '0 20px 70px rgba(0,0,0,0.32)', border: '1px solid rgba(0,0,0,0.10)', display: 'flex', flexDirection: 'column', overflow: 'hidden', position: 'relative', zIndex: 2147483647 }}
+        onClick={(e) => { e.stopPropagation() }}
+        onMouseDown={(e) => { e.stopPropagation() }}
+      >
+        <div style={{ flex: '0 0 auto', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, padding: '10px 12px', borderBottom: '1px solid rgba(0,0,0,0.10)', background: '#f8fafc' }}>
+          <div style={{ display: 'flex', alignItems: 'baseline', gap: 10, minWidth: 0 }}>
+            <div style={{ fontWeight: 800, fontSize: 15, color: '#1f2937' }}>Anteprima rapporto</div>
+            {hasSel && oid != null && <div style={{ fontSize: 12, color: '#6b7280', fontFamily: 'monospace' }}>{praticaCode}</div>}
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <button
+              type='button'
+              onClick={handleRapportoDownload}
+              disabled={previewLoading || !data}
+              style={{ padding: '7px 12px', borderRadius: 8, border: '1px solid #16a34a', background: '#fff', color: '#16a34a', fontWeight: 700, fontSize: 12, cursor: (previewLoading || !data) ? 'not-allowed' : 'pointer', opacity: (previewLoading || !data) ? 0.55 : 1 }}
+            >
+              Scarica PDF
+            </button>
+            <button
+              type='button'
+              onClick={closeRapportoPreview}
+              style={{ padding: '7px 12px', borderRadius: 8, border: '1px solid rgba(0,0,0,0.18)', background: '#fff', color: '#374151', fontWeight: 700, fontSize: 12, cursor: 'pointer' }}
+            >
+              Chiudi
+            </button>
+          </div>
+        </div>
+        <div style={{ flex: '1 1 auto', minHeight: 0, display: 'flex', background: '#e8e8e8' }}>
+          {previewLoading && (
+            <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#6b7280', fontSize: 14 }}>
+              Generazione anteprima…
+            </div>
+          )}
+          {!previewLoading && previewError && (
+            <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#b42318', fontSize: 14, padding: 20, textAlign: 'center' }}>
+              {previewError}
+            </div>
+          )}
+          {!previewLoading && !previewError && previewUrl && (
+            <iframe src={previewUrl} title='Anteprima rapporto tecnico PDF' style={{ flex: 1, border: 'none', width: '100%', height: '100%', background: '#e8e8e8' }} />
+          )}
+          {!previewLoading && !previewError && !previewUrl && (
+            <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#6b7280', fontSize: 14 }}>
+              Nessun dato disponibile per l&apos;anteprima.
+            </div>
+          )}
+        </div>
+      </div>
+    </div>,
+    document.body
+  ) : null
+
   const panelStyle: React.CSSProperties = {
   position: 'relative',
   zIndex: 1001,
@@ -3344,7 +3455,7 @@ function ActionsPanel (props: {
               {hasSel && (
                 <button
                   type='button'
-                  onClick={() => { openRapportoPreview(data, _utentiCache) }}
+                  onClick={handleRapportoPreview}
                   title='Anteprima rapporto (PDF)'
                   style={{
                     padding: '7px 10px',
@@ -3366,7 +3477,7 @@ function ActionsPanel (props: {
               {hasSel && (
                 <button
                   type='button'
-                  onClick={() => { downloadRapportoPdf(data, _utentiCache) }}
+                  onClick={handleRapportoDownload}
                   title='Scarica rapporto (PDF)'
                   style={{
                     padding: '7px 10px',
@@ -3388,6 +3499,7 @@ function ActionsPanel (props: {
         )}
 
         {pendingModal}
+        {reportPreviewModal}
 
         {denyPopupMessages.length > 0 && createPortal(
           <div
@@ -3609,7 +3721,16 @@ function esc (s: any): string {
   return String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
 }
 
-/** Costruisce la mappa dei placeholder → valori dal record e dalla cache utenti */
+function fmtNum (v: any): string {
+  if (v == null || v === '') return ''
+  const n = Number(v)
+  if (Number.isNaN(n)) return String(v)
+  return n.toLocaleString('it-IT', { maximumFractionDigits: 2 })
+}
+
+/** Costruisce la mappa dei placeholder → valori dal record e dalla cache utenti.
+ * Allineata alla scheda Anteprima del CW editing.
+ */
 function buildPlaceholderMap (data: any, utentiCache: Map<string, UtenteCached> | null): Record<string, string> {
   const d = data || {}
   const areaCod = String(d.area_cod || '').toUpperCase()
@@ -3617,156 +3738,110 @@ function buildPlaceholderMap (data: any, utentiCache: Map<string, UtenteCached> 
   const isPF = String(d.tipologia_soggetto || '').toUpperCase() === 'PF'
   const areaN = AREA_NUM[areaCod] ?? null
   const settoreN = SETTORE_NUM[settoreCod] ?? null
-
-  // Helper: articolo selezionato?
-  const artChecked = (field: string): boolean => {
-    const v = d[field]
-    return v === 1 || v === '1' || v === true
-  }
+  const artChecked = (field: string): boolean => { const v = d[field]; return v === 1 || v === '1' || v === true }
   const art15on = !!(d.norma15_parziale || d.norma15_totale)
   const art16on = String(d.norma16_17 || '').toLowerCase().includes('art16')
   const art17on = String(d.norma16_17 || '').toLowerCase().includes('art17') || !!d.art17_tipo
-
   const xMark = (on: boolean) => on ? 'x' : ''
-  const surfVal = (on: boolean, ...fields: string[]) => {
-    if (!on) return ''
-    for (const f of fields) { const v = d[f]; if (v != null && v !== '' && v !== 0) return String(v) }
-    return ''
-  }
+  const surfVal = (on: boolean, ...fields: string[]) => { if (!on) return ''; for (const f of fields) { const v = d[f]; if (v != null && v !== '' && v !== 0) return fmtNum(v) } return '' }
   const grado = d.grado != null && d.grado !== '' ? String(d.grado) : ''
   const recidiva = d.recidiva === 1 || d.recidiva === '1'
+  const occorrenza = (on: boolean): string => { if (!on) return ''; return recidiva ? 'Recidiva' : 'Prima contestazione' }
+  const origPratica = d.origine_pratica ?? d.Origine_pratica
+  const praticaPrefix = (origPratica === 2 || origPratica === '2') ? 'TI' : 'TR'
+  const oidVal = d.OBJECTID ?? d.objectid ?? ''
+  const codPratica = oidVal ? `${praticaPrefix}-${oidVal}` : ''
 
-  const m: Record<string, string> = {
-    // Dati generali
-    cod_pratica: esc(d.cod_pratica || ''),
-    anno: d.data_rilevazione ? String(new Date(d.data_rilevazione).getFullYear()) : '',
-    area_label: AREA_LABELS[areaCod] || areaCod,
-    settore_label: SETTORE_LABELS[settoreCod] || settoreCod,
-    tecnico_rilevatore: esc(d.tecnico_rilevatore || ''),
-    data_rilevazione: formatDateIt(d.data_rilevazione),
-    ora_rilevazione: formatTimeIt(d.data_rilevazione),
-
-    // Articoli (x)
-    x_art08: xMark(artChecked('v_art08')),
-    x_art12: xMark(artChecked('v_art12')),
-    x_art15: xMark(art15on),
-    x_art16: xMark(art16on),
-    x_art17: xMark(art17on),
-    x_art27: xMark(artChecked('v_art27')),
-    x_art28: xMark(artChecked('v_art28')),
-    x_art29: xMark(artChecked('v_art29')),
-    x_art30: xMark(artChecked('v_art30')),
-    x_art31: xMark(artChecked('v_art31')),
-    x_art32: xMark(artChecked('v_art32')),
-    x_art33: xMark(artChecked('v_art33')),
-    x_art34: xMark(artChecked('v_art34')),
-    x_art35: xMark(artChecked('v_art35')),
-    x_art36: xMark(artChecked('v_art36')),
-    x_art37: xMark(artChecked('v_art37')),
-    x_art39: xMark(artChecked('v_art39')),
-
-    // Superfici
-    sup_dich_art15: surfVal(art15on, 'sup_dichiarata_art15'),
-    sup_irr_art15: surfVal(art15on, 'sup_irrigata_art15'),
-    sup_dich_art16: surfVal(art16on, 'sup_dichiarata_art16'),
-    sup_irr_art16: surfVal(art16on, 'sup_irrigata_art16_17_2'),
-    sup_dich_art17: surfVal(art17on, 'sup_dichiarata_art17_1', 'sup_dichiarata_art17_2'),
-    sup_irr_art17: surfVal(art17on, 'sup_irrigata_art17_1', 'sup_irrigata_art16_17_2'),
-
-    // Gravità / Recidiva per ogni articolo selezionato
-    grado_art08: artChecked('v_art08') ? grado : '',
-    grado_art12: artChecked('v_art12') ? grado : '',
-    grado_art15: art15on ? grado : '',
-    grado_art16: art16on ? grado : '',
-    grado_art17: art17on ? grado : '',
-    grado_art27: artChecked('v_art27') ? grado : '',
-    grado_art28: artChecked('v_art28') ? grado : '',
-    grado_art29: artChecked('v_art29') ? grado : '',
-    grado_art30: artChecked('v_art30') ? grado : '',
-    grado_art31: artChecked('v_art31') ? grado : '',
-    grado_art32: artChecked('v_art32') ? grado : '',
-    grado_art33: artChecked('v_art33') ? grado : '',
-    grado_art34: artChecked('v_art34') ? grado : '',
-    grado_art35: artChecked('v_art35') ? grado : '',
-    grado_art36: artChecked('v_art36') ? grado : '',
-    grado_art37: artChecked('v_art37') ? grado : '',
-    grado_art39: artChecked('v_art39') ? grado : '',
-    recidiva_art08: artChecked('v_art08') && recidiva ? 'x' : '',
-    recidiva_art12: artChecked('v_art12') && recidiva ? 'x' : '',
-    recidiva_art15: art15on && recidiva ? 'x' : '',
-    recidiva_art16: art16on && recidiva ? 'x' : '',
-    recidiva_art17: art17on && recidiva ? 'x' : '',
-    recidiva_art27: artChecked('v_art27') && recidiva ? 'x' : '',
-    recidiva_art28: artChecked('v_art28') && recidiva ? 'x' : '',
-    recidiva_art29: artChecked('v_art29') && recidiva ? 'x' : '',
-    recidiva_art30: artChecked('v_art30') && recidiva ? 'x' : '',
-    recidiva_art31: artChecked('v_art31') && recidiva ? 'x' : '',
-    recidiva_art32: artChecked('v_art32') && recidiva ? 'x' : '',
-    recidiva_art33: artChecked('v_art33') && recidiva ? 'x' : '',
-    recidiva_art34: artChecked('v_art34') && recidiva ? 'x' : '',
-    recidiva_art35: artChecked('v_art35') && recidiva ? 'x' : '',
-    recidiva_art36: artChecked('v_art36') && recidiva ? 'x' : '',
-    recidiva_art37: artChecked('v_art37') && recidiva ? 'x' : '',
-    recidiva_art39: artChecked('v_art39') && recidiva ? 'x' : '',
-
-    // Testi
-    descrizione_fatti: esc(d.descrizione_fatti || ''),
-    circostanze: esc(d.circostanze || ''),
-    descrizione_luogo: esc(d.descrizione_luogo || ''),
-
-    // Trasgressore
+  return {
+    cod_pratica: codPratica, anno: d.data_rilevazione ? String(new Date(d.data_rilevazione).getFullYear()) : '', area_cod: areaCod,
+    area_label: AREA_LABELS[areaCod] || areaCod, settore_label: SETTORE_LABELS[settoreCod] || settoreCod,
+    tecnico_rilevatore: esc(d.tecnico_rilevatore || ''), data_rilevazione: formatDateIt(d.data_rilevazione), ora_rilevazione: formatTimeIt(d.data_rilevazione),
+    x_art08: xMark(artChecked('v_art08')), x_art12: xMark(artChecked('v_art12')), x_art15: xMark(art15on), x_art16: xMark(art16on), x_art17: xMark(art17on),
+    x_art27: xMark(artChecked('v_art27')), x_art28: xMark(artChecked('v_art28')), x_art29: xMark(artChecked('v_art29')), x_art30: xMark(artChecked('v_art30')),
+    x_art31: xMark(artChecked('v_art31')), x_art32: xMark(artChecked('v_art32')), x_art33: xMark(artChecked('v_art33')), x_art34: xMark(artChecked('v_art34')),
+    x_art35: xMark(artChecked('v_art35')), x_art36: xMark(artChecked('v_art36')), x_art37: xMark(artChecked('v_art37')), x_art39: xMark(artChecked('v_art39')),
+    sup_dich_art08: surfVal(artChecked('v_art08'), 'sup_dichiarata_art08'), sup_irr_art08: surfVal(artChecked('v_art08'), 'sup_irrigata_art08'),
+    sup_dich_art12: surfVal(artChecked('v_art12'), 'sup_dichiarata_art12'), sup_irr_art12: surfVal(artChecked('v_art12'), 'sup_irrigata_art12'),
+    sup_dich_art15: surfVal(art15on, 'sup_dichiarata_art15'), sup_irr_art15: surfVal(art15on, 'sup_irrigata_art15'),
+    sup_dich_art16: surfVal(art16on, 'sup_dichiarata_art16'), sup_irr_art16: surfVal(art16on, 'sup_irrigata_art16_17_2'),
+    sup_dich_art17: surfVal(art17on, 'sup_dichiarata_art17_1', 'sup_dichiarata_art17_2'), sup_irr_art17: surfVal(art17on, 'sup_irrigata_art17_1', 'sup_irrigata_art16_17_2'),
+    sup_dich_art27: surfVal(artChecked('v_art27'), 'sup_dichiarata_art27'), sup_irr_art27: surfVal(artChecked('v_art27'), 'sup_irrigata_art27'),
+    sup_dich_art28: surfVal(artChecked('v_art28'), 'sup_dichiarata_art28'), sup_irr_art28: surfVal(artChecked('v_art28'), 'sup_irrigata_art28'),
+    sup_dich_art29: surfVal(artChecked('v_art29'), 'sup_dichiarata_art29'), sup_irr_art29: surfVal(artChecked('v_art29'), 'sup_irrigata_art29'),
+    sup_dich_art30: surfVal(artChecked('v_art30'), 'sup_dichiarata_art30'), sup_irr_art30: surfVal(artChecked('v_art30'), 'sup_irrigata_art30'),
+    sup_dich_art31: surfVal(artChecked('v_art31'), 'sup_dichiarata_art31'), sup_irr_art31: surfVal(artChecked('v_art31'), 'sup_irrigata_art31'),
+    sup_dich_art32: surfVal(artChecked('v_art32'), 'sup_dichiarata_art32'), sup_irr_art32: surfVal(artChecked('v_art32'), 'sup_irrigata_art32'),
+    sup_dich_art33: surfVal(artChecked('v_art33'), 'sup_dichiarata_art33'), sup_irr_art33: surfVal(artChecked('v_art33'), 'sup_irrigata_art33'),
+    sup_dich_art34: surfVal(artChecked('v_art34'), 'sup_dichiarata_art34'), sup_irr_art34: surfVal(artChecked('v_art34'), 'sup_irrigata_art34'),
+    sup_dich_art35: surfVal(artChecked('v_art35'), 'sup_dichiarata_art35'), sup_irr_art35: surfVal(artChecked('v_art35'), 'sup_irrigata_art35'),
+    sup_dich_art36: surfVal(artChecked('v_art36'), 'sup_dichiarata_art36'), sup_irr_art36: surfVal(artChecked('v_art36'), 'sup_irrigata_art36'),
+    sup_dich_art37: surfVal(artChecked('v_art37'), 'sup_dichiarata_art37'), sup_irr_art37: surfVal(artChecked('v_art37'), 'sup_irrigata_art37'),
+    sup_dich_art39: surfVal(artChecked('v_art39'), 'sup_dichiarata_art39'), sup_irr_art39: surfVal(artChecked('v_art39'), 'sup_irrigata_art39'),
+    grado_art08: artChecked('v_art08') ? grado : '', grado_art12: artChecked('v_art12') ? grado : '', grado_art15: art15on ? grado : '',
+    grado_art16: art16on ? grado : '', grado_art17: art17on ? grado : '', grado_art27: artChecked('v_art27') ? grado : '',
+    grado_art28: artChecked('v_art28') ? grado : '', grado_art29: artChecked('v_art29') ? grado : '', grado_art30: artChecked('v_art30') ? grado : '',
+    grado_art31: artChecked('v_art31') ? grado : '', grado_art32: artChecked('v_art32') ? grado : '', grado_art33: artChecked('v_art33') ? grado : '',
+    grado_art34: artChecked('v_art34') ? grado : '', grado_art35: artChecked('v_art35') ? grado : '', grado_art36: artChecked('v_art36') ? grado : '',
+    grado_art37: artChecked('v_art37') ? grado : '', grado_art39: artChecked('v_art39') ? grado : '',
+    recidiva_art08: occorrenza(artChecked('v_art08')), recidiva_art12: occorrenza(artChecked('v_art12')),
+    recidiva_art15: occorrenza(art15on), recidiva_art16: occorrenza(art16on), recidiva_art17: occorrenza(art17on),
+    recidiva_art27: occorrenza(artChecked('v_art27')), recidiva_art28: occorrenza(artChecked('v_art28')),
+    recidiva_art29: occorrenza(artChecked('v_art29')), recidiva_art30: occorrenza(artChecked('v_art30')),
+    recidiva_art31: occorrenza(artChecked('v_art31')), recidiva_art32: occorrenza(artChecked('v_art32')),
+    recidiva_art33: occorrenza(artChecked('v_art33')), recidiva_art34: occorrenza(artChecked('v_art34')),
+    recidiva_art35: occorrenza(artChecked('v_art35')), recidiva_art36: occorrenza(artChecked('v_art36')),
+    recidiva_art37: occorrenza(artChecked('v_art37')), recidiva_art39: occorrenza(artChecked('v_art39')),
+    descrizione_fatti: esc(d.descrizione_fatti || ''), circostanze: esc(d.circostanze || ''), descrizione_luogo: esc(d.descrizione_luogo || ''),
+    tipo_soggetto: isPF ? 'PF' : 'PG',
     denominazione: isPF ? esc(`${d.nome || ''} ${d.cognome || ''}`.trim()) : esc(d.ragione_sociale || ''),
-    cf_piva_label: isPF ? 'C.F.' : 'P. IVA',
     cf_piva: isPF ? esc(d.codice_fiscale || '') : esc(d.piva || ''),
-    via: esc(d.via || ''),
-    civico: esc(d.civico || ''),
-    localita: '',
-    citta: esc(d.citta || ''),
-    telefono: esc(d.telefono || d.cellulare || ''),
-    email_pec: esc(d.email || d.pec || ''),
+    via: esc(d.via || ''), civico: esc(d.civico || ''), cap: esc(d.cap || ''), localita: esc(d.localita || ''), citta: esc(d.citta || ''),
+    telefono: esc(d.telefono || ''), cellulare: esc(d.cellulare || ''), email: esc(d.email || ''), pec: esc(d.pec || ''),
     presenza_trasgressore: String(d.presenza_trasgressore || '').toLowerCase() === 'si' || String(d.presenza_trasgressore || '').toLowerCase() === 'sì' || String(d.presenza_trasgressore || '') === '1' ? 'S\u00EC' : (String(d.presenza_trasgressore || '').toLowerCase() === 'no' || String(d.presenza_trasgressore || '') === '0' ? 'No' : String(d.presenza_trasgressore || '')),
-
-    // Firme
     firma_tr: esc(findFullNameByUsername(utentiCache, d.tecnico_rilevatore || d.utente_loggato || d.Creator || '')),
     firma_ti: esc(d.ti_assegnato_nome || findFullNameByUsername(utentiCache, d.ti_assegnato_username || '') || findFullNameByUsername(utentiCache, d.tecnico_rilevatore || '')),
     firma_rz: esc(findUserFullName(utentiCache, 3, areaN ?? undefined, settoreN ?? undefined)),
     firma_ri: esc(findUserFullName(utentiCache, 4, areaN ?? undefined)),
     firma_dt: esc(findUserFullName(utentiCache, 5, areaN ?? undefined)),
-
-    // Luoghi (strutturati) — per ora vuoti, il campo descrizione_luogo è testo libero
-    comune: '',
-    foglio: '',
-    mappali: '',
-    altro_luogo: '',
-    distretto_irriguo: '',
-    comizio: '',
-    matricola_contatore: '',
-    matricola_tessera: '',
-    importo_rimborso: ''
+    idrante: esc(d.idrante || ''), comune: '', foglio: '', mappali: '', altro_luogo: '',
+    distretto_irriguo: esc(d.distretto_irriguo || ''), comizio: esc(d.comizio || ''),
+    matricola_contatore: esc(d.matricola_contatore || ''), matricola_tessera: esc(d.matricola_tessera || ''),
+    importo_rimborso: fmtNum(d.importo_rimborso)
   }
-  return m
 }
 
-/** Sostituisce tutti i {{placeholder}} nel template con i valori dalla mappa */
-function fillTemplate (template: string, placeholders: Record<string, string>): string {
-  return template.replace(/\{\{([^}]+)\}\}/g, (_, key) => {
-    return placeholders[key.trim()] ?? ''
-  })
+function rapportoPdfFileName (map: Record<string, string>): string {
+  const cp = String(map.cod_pratica || 'rapporto').replace(/[^a-zA-Z0-9_-]/g, '_')
+  return `rapporto_${cp || 'rapporto'}.pdf`
 }
 
-function openRapportoPreview (data: any, utentiCache: Map<string, UtenteCached> | null) {
+async function buildRapportoPdfBlob (data: any, utentiCache: Map<string, UtenteCached> | null): Promise<{ blob: Blob; fileName: string }> {
   const map = buildPlaceholderMap(data, utentiCache)
-  const html = fillTemplate(RAPPORTO_TEMPLATE, map)
-  const blob = new Blob([html], { type: 'text/html;charset=utf-8' })
-  window.open(URL.createObjectURL(blob), '_blank')
+  const bytes = await buildRapportoPdf(map)
+  const fileName = rapportoPdfFileName(map)
+  const blob = new Blob([bytes as any], { type: 'application/pdf' })
+  return { blob, fileName }
 }
 
-function downloadRapportoPdf (data: any, utentiCache: Map<string, UtenteCached> | null) {
-  const map = buildPlaceholderMap(data, utentiCache)
-  const html = fillTemplate(RAPPORTO_TEMPLATE, map)
-  const htmlWithPrint = html.replace('</body>', '<script>window.onload=function(){window.print()}<\/script></body>')
-  const blob = new Blob([htmlWithPrint], { type: 'text/html;charset=utf-8' })
-  window.open(URL.createObjectURL(blob), '_blank')
+function makeRapportoPdfUrl (blob: Blob, fileName: string): string {
+  return `${URL.createObjectURL(blob)}#${fileName}`
+}
+
+function revokeRapportoPdfUrl (url?: string | null): void {
+  if (!url) return
+  try { URL.revokeObjectURL(String(url).split('#')[0]) } catch {}
+}
+
+function downloadBlobFile (blob: Blob, fileName: string): void {
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = fileName
+  a.rel = 'noopener noreferrer'
+  document.body.appendChild(a)
+  a.click()
+  a.remove()
+  window.setTimeout(() => { try { URL.revokeObjectURL(url) } catch {} }, 1500)
 }
 
 

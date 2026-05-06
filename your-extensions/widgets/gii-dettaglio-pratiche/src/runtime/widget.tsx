@@ -229,11 +229,14 @@ function readRuntimeSelection (): RuntimeSelection | null {
   }
 }
 
-function makeRuntimeRecord (attrs: any, idFieldName: string, sourceKey: string): any {
+function makeRuntimeRecord (attrs: any, idFieldName: string, sourceKey: string, geometry?: any): any {
   const id = String(attrs?.[idFieldName] ?? attrs?.OBJECTID ?? attrs?.objectid ?? '')
   return {
     getData: () => attrs,
     getId: () => id,
+    getGeometry: () => geometry || null,
+    geometry: geometry || null,
+    feature: geometry ? { attributes: attrs, geometry } : undefined,
     dataSource: { id: sourceKey }
   }
 }
@@ -293,7 +296,7 @@ async function createRuntimeDsProxyFromLayerUrl (layerUrl: string, label?: strin
           outFields: (Array.isArray(q?.outFields) && q.outFields.length ? q.outFields : ['*']) as any,
           returnGeometry: !!q?.returnGeometry
         })
-        return { records: (res?.features || []).map((f: any) => makeRuntimeRecord(f?.attributes || {}, idFieldName, layerUrl)) }
+        return { records: (res?.features || []).map((f: any) => makeRuntimeRecord(f?.attributes || {}, idFieldName, layerUrl, f?.geometry)) }
       }
     }
     try {
@@ -549,6 +552,7 @@ function SelectionWatcher (props: {
   // Nota: in ExB il record selezionato può avere un subset di campi.
 // Per il filtro PF/PG dobbiamo avere SEMPRE la tipologia soggetto: la ricaviamo in modo robusto dallo schema/dominio.
 let data: any = r0?.getData ? r0.getData() : null
+data = withRecordGeometry(data, r0)
 
 const tipoField = findTipoSoggettoFieldName(ds)
 let tipoRaw: any = null
@@ -607,14 +611,14 @@ React.useEffect(() => {
 
     const outFields = (wantsAll || outFieldsBase.length === 0) ? ['*'] : outFieldsBase
     const base = data || {}
-    const needsQuery = wantsAll || outFields.some(f => f !== '*' && !Object.prototype.hasOwnProperty.call(base, f))
+    const needsQuery = wantsAll || outFields.some(f => f !== '*' && !Object.prototype.hasOwnProperty.call(base, f)) || !hasUsableDataGeometry(base)
     if (!needsQuery) return
 
     try {
       const q: any = {
         where: `${idFieldName}=${Number(oid)}`,
         outFields,
-        returnGeometry: false,
+        returnGeometry: true,
         pageSize: 1
       }
       const res: any = await (ds?.query ? ds.query(q) : null)
@@ -624,7 +628,8 @@ React.useEffect(() => {
       else if (res && Array.isArray(res.records)) rec = res.records[0]
       else if (res && res.data && Array.isArray(res.data.records)) rec = res.data.records[0]
 
-      const d = rec?.getData ? rec.getData() : (rec?.data || rec?.attributes || null)
+      const attrs = rec?.getData ? rec.getData() : (rec?.data || rec?.attributes || null)
+      const d = withRecordGeometry(attrs, rec)
       if (!cancelled && d) setFullData(d)
     } catch {}
   }
@@ -660,14 +665,16 @@ function DetailRow (props: { label: string; value: any; labelSize: number; value
   return (
     <div style={{
       display: 'grid',
-      gridTemplateColumns: 'minmax(150px, 220px) minmax(0, 1fr)',
-      gap: 12,
+      gridTemplateColumns: 'repeat(auto-fit, minmax(190px, 1fr))',
+      columnGap: 12,
+      rowGap: 3,
       alignItems: multiline ? 'start' : 'center',
       padding: '7px 0',
       borderBottom: '1px solid rgba(0,0,0,0.07)',
-      boxSizing: 'border-box'
+      boxSizing: 'border-box',
+      minWidth: 0
     }}>
-      <div style={{ fontSize: props.labelSize, color: '#6b7280', textAlign: 'left', paddingTop: multiline ? 3 : 0, fontWeight: 700, lineHeight: 1.25 }}>
+      <div style={{ fontSize: props.labelSize, color: '#6b7280', textAlign: 'left', paddingTop: multiline ? 3 : 0, fontWeight: 700, lineHeight: 1.25, minWidth: 0, overflowWrap: 'anywhere' }}>
         {props.label}
       </div>
       {multiline
@@ -680,13 +687,14 @@ function DetailRow (props: { label: string; value: any; labelSize: number; value
             overflowY: 'auto',
             color: '#1f2937',
             fontWeight: 600,
-            lineHeight: 1.45
+            lineHeight: 1.45,
+            minWidth: 0
           }}>
             {text}
           </div>
           )
         : (
-          <div style={{ fontSize: props.valueSize, fontWeight: 600, wordBreak: 'break-word', color: '#1f2937' }}>
+          <div style={{ fontSize: props.valueSize, fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', color: '#1f2937', minWidth: 0 }} title={String(text)}>
             {text}
           </div>
           )}
@@ -712,7 +720,7 @@ function DetailSectionCard (props: {
         <div style={{ fontWeight: 800, fontSize: 13, color: '#1f2937', lineHeight: 1.25 }}>{props.title}</div>
         {props.right ? <div style={{ flexShrink: 0 }}>{props.right}</div> : null}
       </div>
-      <div style={{ padding: bodyPadding }}>{props.children}</div>
+      <div style={{ padding: bodyPadding, overflowX: 'auto' }}>{props.children}</div>
     </div>
   )
 }
@@ -912,9 +920,20 @@ function normalizeHexColor (maybe: any, fallback: string): string {
 type TabFields = {
   anagrafica: string[]
   violazione: string[]
+  luoghiDati?: string[]
   allegati: string[]
   iterExtra: string[]
 }
+
+const LUOGHI_DATI_TAB_ID = 'luoghi_dati'
+const DETAIL_LUOGHI_DATI_FIELDS = [
+  'distretto',
+  'comizio',
+  'idrante',
+  'descrizione_luogo',
+  'matricola_contatore',
+  'matricola_tessera'
+]
 
 function formatDateSafe (v: any): string {
   if (v == null || v === '') return '—'
@@ -984,6 +1003,96 @@ function formatFieldValue (raw: any, fieldName: string, fieldType?: string, fiel
   return raw
 }
 
+function isUsablePointGeometry (geom: any): boolean {
+  if (!geom) return false
+  const x = geom.longitude ?? geom.x
+  const y = geom.latitude ?? geom.y
+  if (x == null || y == null) return false
+  const nx = Number(x)
+  const ny = Number(y)
+  if (!Number.isFinite(nx) || !Number.isFinite(ny)) return false
+  return !(nx === 0 && ny === 0)
+}
+
+function isSamePointGeometry (a: any, b: any): boolean {
+  if (!isUsablePointGeometry(a) || !isUsablePointGeometry(b)) return false
+  const ax = Number(a.longitude ?? a.x)
+  const ay = Number(a.latitude ?? a.y)
+  const bx = Number(b.longitude ?? b.x)
+  const by = Number(b.latitude ?? b.y)
+  return Math.abs(ax - bx) < 0.0000001 && Math.abs(ay - by) < 0.0000001
+}
+
+function extractRecordGeometry (rec: any): any {
+  try {
+    const candidates = [
+      rec?.feature?.geometry,
+      rec?._feature?.geometry,
+      rec?.geometry,
+      rec?.getGeometry?.()
+    ]
+    return candidates.find(isUsablePointGeometry) || null
+  } catch {
+    return null
+  }
+}
+
+function withRecordGeometry (attrs: any, rec: any): any {
+  const geom = extractRecordGeometry(rec)
+  if (!geom) return attrs
+  return { ...(attrs || {}), __geometry: geom }
+}
+
+function getUsableDataGeometry (data: any): any {
+  try {
+    const candidates = [data?.__geometry, data?.geometry]
+    return candidates.find(isUsablePointGeometry) || null
+  } catch {
+    return null
+  }
+}
+
+function hasUsableDataGeometry (data: any): boolean {
+  return !!getUsableDataGeometry(data)
+}
+
+function mergeSelectionDataKeepingRealGeometry (baseData: any, fetchedData: any, preferBaseAttrs: boolean): any {
+  const merged = preferBaseAttrs
+    ? { ...((fetchedData || {}) as any), ...((baseData || {}) as any) }
+    : { ...((baseData || {}) as any), ...((fetchedData || {}) as any) }
+  const geom = getUsableDataGeometry(fetchedData) || getUsableDataGeometry(baseData)
+  if (geom) {
+    merged.__geometry = geom
+  } else {
+    try { delete merged.__geometry } catch {}
+    if (!isUsablePointGeometry(merged.geometry)) {
+      try { delete merged.geometry } catch {}
+    }
+  }
+  return merged
+}
+
+function formatCoordNumber (v: any): string {
+  const n = Number(v)
+  if (!Number.isFinite(n)) return ''
+  return new Intl.NumberFormat('it-IT', { maximumFractionDigits: 6 }).format(n)
+}
+
+function formatPointGeometryCoordinates (geom: any): string {
+  if (!isUsablePointGeometry(geom)) return ''
+  const x = geom.longitude ?? geom.x
+  const y = geom.latitude ?? geom.y
+  const fx = formatCoordNumber(x)
+  const fy = formatCoordNumber(y)
+  if (!fx || !fy) return ''
+  if (geom.longitude != null || geom.latitude != null) return `Lat. ${fy} — Long. ${fx}`
+  return `X ${fx} — Y ${fy}`
+}
+
+function formatPointCoordinates (data: any): string {
+  return formatPointGeometryCoordinates(getUsableDataGeometry(data))
+}
+
 function normalizeFieldList (arr: any): string[] {
   if (!arr) return []
   const js = (arr as any)?.asMutable ? (arr as any).asMutable({ deep: true }) : arr
@@ -998,6 +1107,7 @@ function autoPickFields (data: any, kind: string): string[] {
   const ordered = (base: string[]) => base.filter(k => keys.includes(k))
   if (kind === 'ANAGRAFICA') return ordered(DETAIL_DEFAULT_TAB_FIELDS.anagrafica)
   if (kind === 'VIOLAZIONE') return ordered(DETAIL_DEFAULT_TAB_FIELDS.violazione)
+  if (kind === 'LUOGHI_DATI') return ordered(DETAIL_LUOGHI_DATI_FIELDS)
   if (kind === 'ALLEGATI') return ordered(DETAIL_DEFAULT_TAB_FIELDS.allegati)
   if (kind === 'ITER') return ordered(DETAIL_DEFAULT_TAB_FIELDS.iterExtra)
   return []
@@ -1006,20 +1116,28 @@ function autoPickFields (data: any, kind: string): string[] {
 // Migra dai vecchi tabFields alle nuove tab
 function migrateTabs(tabFields: TabFields, tabs: TabConfig[] | undefined): TabConfig[] {
   let result: TabConfig[] = []
-  
+
+  const normalizeTab = (t: any): any => {
+    let f: string[] = []
+    if (t?.fields) {
+      if (Array.isArray(t.fields)) f = t.fields.map(String).filter(Boolean)
+      else if (typeof t.fields.toArray === 'function') f = t.fields.toArray().map(String).filter(Boolean)
+      else if (typeof t.fields.toJS === 'function') f = t.fields.toJS().map(String).filter(Boolean)
+      else if (typeof t.fields[Symbol.iterator] === 'function') f = Array.from(t.fields as any).map(String).filter(Boolean)
+    }
+
+    const rawId = String(t?.id || '').trim()
+    const nk = normKey(rawId || t?.label || '')
+    const id = (rawId === 'luoghi' || rawId === 'luoghi-dati' || rawId === 'luoghi_dati' || nk === 'luoghi dati')
+      ? LUOGHI_DATI_TAB_ID
+      : rawId
+
+    return { ...t, id, fields: f }
+  }
+
   // Se ha già tabs, usa quelle
   if (Array.isArray(tabs) && tabs.length > 0) {
-    // Normalizza fields di ogni tab a plain JS array
-    result = tabs.map((t: any) => {
-      let f: string[] = []
-      if (t.fields) {
-        if (Array.isArray(t.fields)) f = t.fields.map(String).filter(Boolean)
-        else if (typeof t.fields.toArray === 'function') f = t.fields.toArray().map(String).filter(Boolean)
-        else if (typeof t.fields.toJS === 'function') f = t.fields.toJS().map(String).filter(Boolean)
-        else if (typeof t.fields[Symbol.iterator] === 'function') f = Array.from(t.fields as any).map(String).filter(Boolean)
-      }
-      return { ...t, fields: f }
-    })
+    result = tabs.map(normalizeTab)
   } else {
     // Altrimenti migra dai vecchi tabFields
     result = [
@@ -1034,10 +1152,11 @@ function migrateTabs(tabFields: TabFields, tabs: TabConfig[] | undefined): TabCo
         fields: tabFields?.violazione || []
       },
       {
-        id: 'iter',
-        label: 'Iter',
-        fields: tabFields?.iterExtra || [],
-        isIterTab: true
+        id: LUOGHI_DATI_TAB_ID,
+        label: 'Luoghi e dati',
+        fields: tabFields?.luoghiDati?.length ? tabFields.luoghiDati : DETAIL_LUOGHI_DATI_FIELDS,
+        locked: true,
+        hideEmpty: false
       },
       {
         id: 'nota_spese',
@@ -1052,13 +1171,30 @@ function migrateTabs(tabFields: TabFields, tabs: TabConfig[] | undefined): TabCo
         fields: tabFields?.allegati || []
       },
       {
-        id: 'azioni',
-        label: 'Azioni',
-        fields: []
+        id: 'iter',
+        label: 'Iter',
+        fields: tabFields?.iterExtra || [],
+        isIterTab: true
       }
     ]
   }
-  
+
+  // Il widget dettaglio non deve esporre una tab Azioni: le azioni sono gestite dal CW gii-azioni.
+  result = result.filter(t => t && t.id !== 'azioni')
+
+  // Inietta tab Luoghi e dati se mancante (migrazione config esistenti)
+  if (!result.some(t => t.id === LUOGHI_DATI_TAB_ID)) {
+    const idxViolazione = result.findIndex(t => t.id === 'violazione')
+    const insertAt = idxViolazione >= 0 ? idxViolazione + 1 : Math.min(2, result.length)
+    result.splice(insertAt, 0, {
+      id: LUOGHI_DATI_TAB_ID,
+      label: 'Luoghi e dati',
+      fields: tabFields?.luoghiDati?.length ? tabFields.luoghiDati : DETAIL_LUOGHI_DATI_FIELDS,
+      locked: true,
+      hideEmpty: false
+    } as any)
+  }
+
   // Inietta tab Nota spese se mancante (migrazione config esistenti)
   if (!result.some(t => t.id === 'nota_spese')) {
     const idxAllegati = result.findIndex(t => t.id === 'allegati')
@@ -1071,19 +1207,35 @@ function migrateTabs(tabFields: TabFields, tabs: TabConfig[] | undefined): TabCo
     result.push({ id: 'mappa', label: 'Mappa', fields: [], locked: true })
   }
 
+  // Ordine logico delle tab di dettaglio. Iter resta sempre in ultima posizione.
+  const preferredBeforeIter = ['anagrafica', 'violazione', LUOGHI_DATI_TAB_ID, 'nota_spese', 'allegati', 'mappa']
+  const ordered: TabConfig[] = []
+  for (const id of preferredBeforeIter) {
+    const found = result.find(t => t.id === id)
+    if (found) ordered.push(found)
+  }
+  for (const t of result) {
+    const id = String(t?.id || '')
+    if (t && id !== 'iter' && !preferredBeforeIter.includes(id) && !ordered.some(x => x.id === t.id)) ordered.push(t)
+  }
+  const iterTab = result.find(t => t.id === 'iter')
+  if (iterTab) ordered.push(iterTab)
+  result = ordered
+
   // Normalizza hideEmpty per tab (retrocompatibilità)
   return result.map(tab => {
     const normalizedHideEmpty =
       (tab as any).hideEmpty != null
         ? Boolean((tab as any).hideEmpty)
-: (tab.id === 'violazione' || tab.id === 'anagrafica' || tab.id === 'allegati')
+        : (tab.id === 'violazione' || tab.id === 'anagrafica' || tab.id === 'allegati')
 
-    if (tab.id === 'azioni') {
-      const { locked, ...rest } = tab as any
-      return { ...rest, hideEmpty: false } as any
-    }
     if (tab.id === 'nota_spese') {
       return { ...(tab as any), fields: [], locked: true, hideEmpty: false } as any
+    }
+    if (tab.id === LUOGHI_DATI_TAB_ID) {
+      const fields = normalizeFieldList((tab as any).fields)
+      const mergedFields = Array.from(new Set([...(fields || []), ...DETAIL_LUOGHI_DATI_FIELDS]))
+      return { ...(tab as any), label: 'Luoghi e dati', fields: mergedFields, locked: true, hideEmpty: false } as any
     }
     return { ...(tab as any), hideEmpty: normalizedHideEmpty } as any
   })
@@ -1145,7 +1297,6 @@ function ReadOnlyPanel (props: {
     <div
       style={{
         width: '100%',
-        height: '100%',
         boxSizing: 'border-box',
         display: 'flex',
         flexDirection: 'column',
@@ -1819,7 +1970,7 @@ function CicliTimeline (props: { globalId: string; hasSel: boolean; sortDir: 'as
   }
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 12, padding: '8px 0' }}>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 12, padding: '0 0 8px 0' }}>
       {cicli.map((c, i) => {
         const isOpen = c.stato_record === 'APERTO'
         const borderColor = isOpen ? '#2563eb' : '#d1d5db'
@@ -2268,7 +2419,7 @@ function NotaSpeseDetailPanel (props: { data: any; detailUrl: string; hasSel: bo
   }
 
   return (
-    <div style={{ display: 'grid', gap: 12, paddingTop: 8 }}>
+    <div style={{ display: 'grid', gap: 12, paddingTop: 0 }}>
       <DetailSectionCard title="Riepilogo nota spese">
         <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr)', gap: 0 }}>
           {card('Attrezzature/Trasporti', summary.totaleAT)}
@@ -2346,6 +2497,10 @@ function DetailTabsPanel (props: {
 
   const [tab, setTab] = React.useState<string>(tabs[0]?.id || 'anagrafica')
   const [iterSortDir, setIterSortDir] = React.useState<'asc' | 'desc' | null>(null)
+
+  React.useEffect(() => {
+    if (tabs.length && !tabs.some(t => t.id === tab)) setTab(tabs[0]?.id || 'anagrafica')
+  }, [tabs, tab])
 
 
   // Allegati (attachments) — caricati solo quando la tab "Allegati" è attiva
@@ -2632,6 +2787,17 @@ const isPgOnlyField = React.useCallback((fieldName: string) => {
     return data ? (data as any)[resolved] : null
   }, [data, aliasMap])
 
+  const getRawFieldWithName = React.useCallback((fieldNames: string[]): { fieldName: string; value: any } => {
+    for (const fieldName of fieldNames) {
+      const resolved = resolveFieldNameLoose(data, aliasMap, fieldName)
+      const value = data ? (data as any)[resolved] : null
+      if (!isEmptyValue(value)) return { fieldName: resolved || fieldName, value }
+    }
+    const fallback = fieldNames[0] || ''
+    const resolved = resolveFieldNameLoose(data, aliasMap, fallback)
+    return { fieldName: resolved || fallback, value: data ? (data as any)[resolved] : null }
+  }, [data, aliasMap])
+
   const getFieldLabel = React.useCallback((fieldName: string, raw: any): string => {
     if (raw == null || raw === '') return '—'
     const resolved = resolveFieldNameLoose(data, aliasMap, fieldName)
@@ -2823,12 +2989,22 @@ const isPgOnlyField = React.useCallback((fieldName: string) => {
 
     const descrFatti = formatFieldValue(getRawField('descrizione_fatti'), 'descrizione_fatti', fieldTypeMap?.descrizione_fatti, 'Descrizione dettagliata dell’infrazione')
     const circ = formatFieldValue(getRawField('circostanze'), 'circostanze', fieldTypeMap?.circostanze, 'Circostanze rilevanti dell’infrazione')
-    const presenzaTrasgressore = formatFieldValue(getRawField('presenza_trasgressore'), 'presenza_trasgressore', fieldTypeMap?.presenza_trasgressore, 'Il trasgressore era presente?')
+    const presenzaInfo = getRawFieldWithName([
+      'presenza_trasgressore',
+      'trasgressore_presente',
+      'presente_trasgressore',
+      'presenza_del_trasgressore',
+      'il_trasgressore_era_presente',
+      'trasgressore_era_presente'
+    ])
+    const presenzaTrasgressore = !isEmptyValue(presenzaInfo.value)
+      ? getFieldLabel(presenzaInfo.fieldName, presenzaInfo.value)
+      : '—'
     const detailsBody = (
       <div style={{ display: 'grid', gap: 0 }}>
-        {renderViolationTextLine('Presenza del trasgressore', presenzaTrasgressore)}
         <DetailRow label='Descrizione dettagliata della violazione' value={descrFatti} labelSize={12} valueSize={13} multiline />
         <DetailRow label='Circostanze rilevanti dell’infrazione' value={circ} labelSize={12} valueSize={13} multiline />
+        {renderViolationTextLine('Il trasgressore era presente?', presenzaTrasgressore)}
       </div>
     )
 
@@ -2840,11 +3016,132 @@ const isPgOnlyField = React.useCallback((fieldName: string) => {
         {renderViolationGroup('Dettagli della violazione', detailsBody)}
       </div>
     )
-  }, [getRawField, splitMultiValues, fieldTypeMap, getSurveyChoiceLabel, renderViolationGroup, renderViolationSurfacesLine, renderViolationTextLine])
+  }, [getRawField, getRawFieldWithName, getFieldLabel, splitMultiValues, fieldTypeMap, getSurveyChoiceLabel, renderViolationGroup, renderViolationSurfacesLine, renderViolationTextLine])
 
   const generalRows = React.useMemo(() => {
     return makeRows(DETAIL_GENERAL_FIELDS, 'generali', false)
   }, [makeRows])
+
+  const [selectedPointGeometryState, setSelectedPointGeometryState] = React.useState<{ oid: number | null, geometry: any | null } | null>(null)
+  const selectedPointGeometry = React.useMemo(() => {
+    const oid = Number(selectedOid)
+    if (!selectedPointGeometryState || !Number.isFinite(oid) || selectedPointGeometryState.oid !== oid) return null
+    return selectedPointGeometryState.geometry
+  }, [selectedPointGeometryState, selectedOid])
+
+  React.useEffect(() => {
+    let cancelled = false
+    const oid = Number(selectedOid)
+
+    if (!hasSel || selectedOid == null || !Number.isFinite(oid)) {
+      setSelectedPointGeometryState(prev => prev == null ? prev : null)
+      return () => { cancelled = true }
+    }
+
+    const existingGeom = getUsableDataGeometry(data)
+    if (existingGeom) {
+      setSelectedPointGeometryState(prev => {
+        if (prev?.oid === oid && isSamePointGeometry(prev.geometry, existingGeom)) return prev
+        return { oid, geometry: existingGeom }
+      })
+      return () => { cancelled = true }
+    }
+
+    setSelectedPointGeometryState(prev => {
+      if (prev?.oid === oid && isUsablePointGeometry(prev.geometry)) return prev
+      if (prev?.oid === oid && prev.geometry == null) return prev
+      return { oid, geometry: null }
+    })
+
+    const loadPointGeometry = async () => {
+      try {
+        const layer = await resolveFeatureLayerForAttachments(ds as any)
+        if (cancelled || !layer || typeof layer.queryFeatures !== 'function') return
+
+        try { if (typeof layer.load === 'function') await layer.load() } catch {}
+
+        const oidField = String(layer?.objectIdField || active?.state?.idFieldName || ds?.getIdField?.() || 'OBJECTID')
+        const q = layer.createQuery ? layer.createQuery() : {}
+        q.where = `${oidField} = ${oid}`
+        q.outFields = [oidField]
+        q.returnGeometry = true
+        q.num = 1
+        q.pageSize = 1
+
+        const res = await layer.queryFeatures(q)
+        if (cancelled) return
+
+        let geom = res?.features?.[0]?.geometry || null
+        if (geom && (geom?.spatialReference?.wkid === 102100 || geom?.spatialReference?.wkid === 3857)) {
+          try {
+            const wmu = await loadEsriModule<any>('esri/geometry/support/webMercatorUtils')
+            const g = wmu.webMercatorToGeographic(geom)
+            if (g) geom = g
+          } catch {}
+        }
+
+        setSelectedPointGeometryState(prev => {
+          if (!isUsablePointGeometry(geom)) return prev?.oid === oid ? prev : { oid, geometry: null }
+          if (prev?.oid === oid && isSamePointGeometry(prev.geometry, geom)) return prev
+          return { oid, geometry: geom }
+        })
+      } catch {
+        if (!cancelled) {
+          setSelectedPointGeometryState(prev => prev?.oid === oid ? prev : { oid, geometry: null })
+        }
+      }
+    }
+
+    void loadPointGeometry()
+    return () => { cancelled = true }
+  }, [ds, hasSel, selectedOid, active?.state?.idFieldName, data])
+
+  const luoghiDatiRows = React.useMemo(() => {
+    const pick = (candidates: string[]) => {
+      for (const c of candidates) {
+        const resolved = resolveFieldNameLoose(data, aliasMap, c)
+        if (resolved && data && Object.prototype.hasOwnProperty.call(data, resolved)) {
+          const value = (data as any)[resolved]
+          if (!isEmptyValue(value)) return { fieldName: resolved, value }
+        }
+      }
+      for (const c of candidates) {
+        const resolved = resolveFieldNameLoose(data, aliasMap, c)
+        if (resolved && data && Object.prototype.hasOwnProperty.call(data, resolved)) {
+          return { fieldName: resolved, value: (data as any)[resolved] }
+        }
+      }
+      return { fieldName: candidates[0] || '', value: null }
+    }
+
+    const rows = [
+      { label: 'Descrizione del luogo', candidates: ['descrizione_luogo', 'descrizione_del_luogo', 'descr_luogo', 'luogo_descrizione', 'descrizione_ubicazione'], multiline: true },
+      { label: 'Distretto', candidates: ['distretto', 'distretto_irriguo'], multiline: false },
+      { label: 'Comizio', candidates: ['comizio'], multiline: false },
+      { label: 'Idrante', candidates: ['idrante', 'idrante_numero'], multiline: false },
+      { label: 'Matricola contatore', candidates: ['matricola_contatore', 'contatore_matricola'], multiline: false },
+      { label: 'Matricola tessera', candidates: ['matricola_tessera', 'tessera_matricola'], multiline: false }
+    ].map(item => {
+      const picked = pick(item.candidates)
+      const fieldType = fieldTypeMap?.[picked.fieldName] || ''
+      return {
+        label: item.label,
+        fieldName: picked.fieldName,
+        value: formatFieldValue(picked.value, picked.fieldName, fieldType, item.label),
+        multiline: Boolean(item.multiline)
+      }
+    })
+
+    const coords = formatPointGeometryCoordinates(selectedPointGeometry) || formatPointCoordinates(data) || '—'
+    rows.unshift({
+      label: 'Coordinate',
+      fieldName: '__geometry',
+      value: coords,
+      multiline: false
+    })
+
+    return rows
+  }, [data, aliasMap, fieldTypeMap, selectedPointGeometry])
 
   const TabsBar = (
     <div style={{ 
@@ -2860,7 +3157,7 @@ const isPgOnlyField = React.useCallback((fieldName: string) => {
     }}>
       {hasSel && tabs.map((t) => {
         const isIterTab = Boolean((t as any).isIterTab)
-        const iterSortIndicator = isIterTab && iterSortDir ? (iterSortDir === 'desc' ? '↓' : '↑') : ''
+        const iterSortIndicator = isIterTab && tab === t.id && iterSortDir ? (iterSortDir === 'desc' ? '↓' : '↑') : ''
         return (
           <TabButton 
             key={t.id}
@@ -2899,7 +3196,7 @@ const frameStyle: React.CSSProperties = {
   background: ui.panelBg,
   border: `${ui.panelBorderWidth}px solid ${ui.panelBorderColor}`,
   borderRadius: ui.panelBorderRadius,
-  padding: ui.panelPadding
+  padding: `0 ${ui.panelPadding}px ${ui.panelPadding}px ${ui.panelPadding}px`
 }
 
 const tabsStyle: React.CSSProperties = {
@@ -2935,7 +3232,15 @@ if (!hasSel) {
     // Tab normale con campi configurabili
     const rows = aliasesReady ? makeRows(activeTab.fields, activeTab.id.toUpperCase(), Boolean((activeTab as any).hideEmpty)) : []
 
-    if (activeTab.id === 'allegati') {
+    if (activeTab.id === LUOGHI_DATI_TAB_ID) {
+      content = (
+        <ReadOnlyPanel
+          title="Luoghi e dati"
+          rows={luoghiDatiRows}
+          emptyText={hasSel ? 'Dati luogo non disponibili.' : 'Selezionare un rapporto.'}
+        />
+      )
+    } else if (activeTab.id === 'allegati') {
       // Pannello Allegati: elenco attachments (se presenti) + (opzionale) attributi della tab
       const dsAny: any = ds as any
       const layer = unwrapJsapiLayer(
@@ -2953,7 +3258,7 @@ if (!hasSel) {
       }
 
       content = (
-        <div style={{ marginTop: 8 }}>
+        <div style={{ marginTop: 0 }}>
           {!hasSel && (
             <div style={{ opacity: 0.75, fontSize: 12 }}>Selezionare un rapporto per vedere gli allegati.</div>
           )}
@@ -3060,7 +3365,7 @@ if (!hasSel) {
     } else {
       content = activeTab.id === 'violazione'
         ? (
-          <div style={{ marginTop: 8 }}>
+          <div style={{ marginTop: 0 }}>
             {violationSurveyContent}
           </div>
           )
@@ -3119,18 +3424,14 @@ return (
         </div>
       ) : (
         <>
-          <div style={{ padding: `${Math.max(8, Number(ui.panelPadding ?? 12) - 2)}px ${ui.panelPadding ?? 12}px 0` }}>
-            <div style={{ paddingTop: 4 }}>
-              <ReadOnlyPanel
-                title="Dati generali"
-                rows={generalRows}
-                emptyText="Dati generali non disponibili."
-              />
-            </div>
+          <div style={{ padding: '10px 0 0' }}>
+            <ReadOnlyPanel
+              title="Dati generali"
+              rows={generalRows}
+              emptyText="Dati generali non disponibili."
+            />
           </div>
-          <div style={{ borderTop: `1px solid ${ui.dividerColor ?? 'rgba(0,0,0,0.08)'}`, marginTop: 10 }} />
           <div style={tabsStyle}>{TabsBar}</div>
-          <div style={{ borderTop: `1px solid ${ui.dividerColor ?? 'rgba(0,0,0,0.08)'}` }} />
           <div style={activeContentStyle}>{content}</div>
         </>
       )}
@@ -3173,6 +3474,7 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
   const tabFields: TabFields = {
     anagrafica: normalizeFieldList((cfg as any).anagraficaFields),
     violazione: normalizeFieldList((cfg as any).violazioneFields),
+    luoghiDati: normalizeFieldList((cfg as any).luoghiDatiFields),
     allegati: normalizeFieldList((cfg as any).allegatiFields),
     iterExtra: normalizeFieldList((cfg as any).iterExtraFields)
   }
@@ -3306,17 +3608,17 @@ const queryFields = React.useMemo(() => {
 
         if (baseData && Number.isFinite(baseOid) && baseOid === selection.oid) {
           const quickDs = syncCachedProxy || createRuntimeDsStubFromData(selection.layerUrl, selection.viewName, idFieldName, baseData)
-          const quickState: SelState = { ds: quickDs, oid: selection.oid, idFieldName, data: baseData, sig: stateKey }
+          const quickState: SelState = { ds: quickDs, oid: selection.oid, idFieldName, data: mergeSelectionDataKeepingRealGeometry(baseData, null, false), sig: stateKey }
           setForcedActive({ key: selection.layerUrl, state: quickState })
         }
 
         const dsTry = syncCachedProxy || await createRuntimeDsProxyFromLayerUrl(selection.layerUrl, selection.viewName)
         const wantsAll = queryFields.includes('*')
-        const needsQuery = !baseData || wantsAll || queryFields.some(f => f && f !== '*' && !Object.prototype.hasOwnProperty.call(baseData, f)) || selRefreshNonce > 0
+        const needsQuery = !baseData || wantsAll || queryFields.some(f => f && f !== '*' && !Object.prototype.hasOwnProperty.call(baseData, f)) || !hasUsableDataGeometry(baseData) || selRefreshNonce > 0
         if (!needsQuery) return
 
         const where = `${idFieldName}=${selection.oid}`
-        const res: any = await dsTry.query({ where, outFields: queryFields, returnGeometry: false } as any)
+        const res: any = await dsTry.query({ where, outFields: queryFields, returnGeometry: true } as any)
         if (req !== forcedReqRef.current) return
         const recs: any[] = res?.records || []
         if (!recs.length) {
@@ -3324,10 +3626,10 @@ const queryFields = React.useMemo(() => {
           return
         }
         const r0 = recs[0]
-        const fetched = r0?.getData?.() || {}
+        const fetched = withRecordGeometry(r0?.getData?.() || {}, r0)
         const cached = readSelectedFeatureCache(selection.layerUrl, selection.oid)
         const freshEdit = cached && cached.source === 'edit' && (Date.now() - Number(cached.ts || 0) < 15000)
-        const d0 = freshEdit ? { ...(fetched || {}), ...((cached?.data || {}) as any) } : { ...((baseData || {}) as any), ...(fetched || {}) }
+        const d0 = mergeSelectionDataKeepingRealGeometry(baseData || cached?.data || null, fetched, !!freshEdit)
         const oid0 = Number(d0[idFieldName] ?? d0.OBJECTID ?? selection.oid)
         if (!Number.isFinite(oid0) || oid0 !== selection.oid) {
           setForcedActive(null)
