@@ -658,13 +658,16 @@ function DetailRow (props: { label: string; value: any; labelSize: number; value
   const text = isEmpty ? '—' : props.value
   const multiline = !!props.multiline
   return (
-    <div style={{ 
-      display: 'grid', 
-      gridTemplateColumns: '200px 1fr', 
-      gap: 12, 
-      alignItems: multiline ? 'start' : 'baseline' 
+    <div style={{
+      display: 'grid',
+      gridTemplateColumns: 'minmax(150px, 220px) minmax(0, 1fr)',
+      gap: 12,
+      alignItems: multiline ? 'start' : 'center',
+      padding: '7px 0',
+      borderBottom: '1px solid rgba(0,0,0,0.07)',
+      boxSizing: 'border-box'
     }}>
-      <div style={{ fontSize: props.labelSize, color: '#6b7280', textAlign: 'left', paddingTop: multiline ? 4 : 0 }}>
+      <div style={{ fontSize: props.labelSize, color: '#6b7280', textAlign: 'left', paddingTop: multiline ? 3 : 0, fontWeight: 700, lineHeight: 1.25 }}>
         {props.label}
       </div>
       {multiline
@@ -675,19 +678,41 @@ function DetailRow (props: { label: string; value: any; labelSize: number; value
             wordBreak: 'break-word',
             maxHeight: 140,
             overflowY: 'auto',
-            padding: '8px 10px',
-            border: '1px solid rgba(0,0,0,0.10)',
-            borderRadius: 8,
-            background: 'rgba(0,0,0,0.02)'
+            color: '#1f2937',
+            fontWeight: 600,
+            lineHeight: 1.45
           }}>
             {text}
           </div>
           )
         : (
-          <div style={{ fontSize: props.valueSize, fontWeight: 600, wordBreak: 'break-word' }}>
+          <div style={{ fontSize: props.valueSize, fontWeight: 600, wordBreak: 'break-word', color: '#1f2937' }}>
             {text}
           </div>
           )}
+    </div>
+  )
+}
+
+function DetailSectionCard (props: {
+  key?: any
+  title: string
+  children?: React.ReactNode
+  right?: React.ReactNode
+  borderColor?: string
+  headerBg?: string
+  bodyPadding?: number | string
+}) {
+  const borderColor = props.borderColor || '#c5d9f1'
+  const headerBg = props.headerBg || '#eaf2ff'
+  const bodyPadding = props.bodyPadding ?? 12
+  return (
+    <div style={{ border: `1px solid ${borderColor}`, borderRadius: 10, background: '#fff', overflow: 'hidden' }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, padding: '8px 12px', background: headerBg, borderBottom: `1px solid ${borderColor}` }}>
+        <div style={{ fontWeight: 800, fontSize: 13, color: '#1f2937', lineHeight: 1.25 }}>{props.title}</div>
+        {props.right ? <div style={{ flexShrink: 0 }}>{props.right}</div> : null}
+      </div>
+      <div style={{ padding: bodyPadding }}>{props.children}</div>
     </div>
   )
 }
@@ -1097,9 +1122,25 @@ function ReadOnlyPanel (props: {
   emptyText?: string
 }) {
     const ui = props.ui ?? {}
-    const titleFontSize = Number.isFinite(Number(ui.titleFontSize)) ? Number(ui.titleFontSize) : 14
     const msgFontSize = Number.isFinite(Number(ui.msgFontSize)) ? Number(ui.msgFontSize) : 12
-    const statusFontSize = Number.isFinite(Number(ui.statusFontSize)) ? Number(ui.statusFontSize) : 12
+
+  const body = !props.rows.length
+    ? <div style={{ ...msgStyle('info', msgFontSize) }}>{props.emptyText || 'Configura i campi nelle impostazioni.'}</div>
+    : (
+      <div style={{ display: 'grid', gap: 0 }}>
+        {props.rows.map((r, i) => (
+          <DetailRow
+            key={i}
+            label={r.label}
+            value={r.value}
+            labelSize={12}
+            valueSize={13}
+            multiline={!!(r as any).multiline}
+          />
+        ))}
+      </div>
+      )
+
   return (
     <div
       style={{
@@ -1111,28 +1152,9 @@ function ReadOnlyPanel (props: {
         minHeight: 0
       }}
     >
-      {props.title ? (
-        <div style={{ fontWeight: 800, fontSize: titleFontSize, marginBottom: 10 }}>
-          {props.title}
-        </div>
-      ) : null}
-
-      {!props.rows.length
-        ? <div style={{ ...msgStyle('info', msgFontSize) }}>{props.emptyText || 'Configura i campi nelle impostazioni.'}</div>
-        : (
-          <div style={{ display: 'grid', gap: 8 }}>
-            {props.rows.map((r, i) => (
-              <DetailRow
-                key={i}
-                label={r.label}
-                value={r.value}
-                labelSize={12}
-                valueSize={13}
-                multiline={!!(r as any).multiline}
-              />
-            ))}
-          </div>
-          )}
+      {props.title
+        ? <DetailSectionCard title={props.title}>{body}</DetailSectionCard>
+        : body}
     </div>
   )
 }
@@ -1690,12 +1712,24 @@ const EVENTO_LABELS: Record<string, string> = {
   ELIMINAZIONE: 'Eliminazione'
 }
 
-function formatEvento (code: string): string {
-  if (!code) return '—'
-  return EVENTO_LABELS[code] || code.replace(/_/g, ' ')
+function formatEventoFallback (code: string): string {
+  const text = String(code || '')
+    .replace(/[_-]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .toLocaleLowerCase('it-IT')
+
+  if (!text) return '—'
+
+  return text.charAt(0).toLocaleUpperCase('it-IT') + text.slice(1)
 }
 
-function CicliTimeline (props: { globalId: string; hasSel: boolean }): any {
+function formatEvento (code: string): string {
+  if (!code) return '—'
+  return EVENTO_LABELS[code] || formatEventoFallback(code)
+}
+
+function CicliTimeline (props: { globalId: string; hasSel: boolean; sortDir: 'asc' | 'desc' }): any {
   const [cicli, setCicli] = React.useState<CicloRecord[]>([])
   const [loading, setLoading] = React.useState(false)
   const [error, setError] = React.useState<string | null>(null)
@@ -1720,7 +1754,7 @@ function CicliTimeline (props: { globalId: string; hasSel: boolean }): any {
             'utente_destinatario', 'note_chiusura', 'area', 'settore', 'fase',
             'num_campi_modificati', 'campi_modificati', 'riepilogo_ciclo'
           ],
-          orderByFields: ['dt_apertura ASC'],
+          orderByFields: [props.sortDir === 'asc' ? 'dt_apertura ASC' : 'dt_apertura DESC'],
           returnGeometry: false
         })
         if (cancelled) return
@@ -1754,27 +1788,47 @@ function CicliTimeline (props: { globalId: string; hasSel: boolean }): any {
       }
     })()
     return () => { cancelled = true }
-  }, [props.hasSel, props.globalId])
+  }, [props.hasSel, props.globalId, props.sortDir])
 
   if (!props.hasSel) return <div style={{ opacity: 0.6, fontSize: 12, padding: 12 }}>Selezionare un rapporto.</div>
   if (loading) return <div style={{ opacity: 0.6, fontSize: 12, padding: 12 }}>Caricamento cronologia…</div>
   if (error) return <div style={{ color: '#b42318', fontSize: 12, padding: 12 }}>{error}</div>
   if (cicli.length === 0) return <div style={{ opacity: 0.6, fontSize: 12, padding: 12 }}>Nessun evento registrato per questo rapporto.</div>
 
-  const rowSt: React.CSSProperties = { display: 'flex', gap: 8, fontSize: 12, lineHeight: 1.6, padding: '2px 0' }
-  const lblSt: React.CSSProperties = { color: '#6b7280', minWidth: 110, flexShrink: 0, fontWeight: 500 }
-  const valSt: React.CSSProperties = { color: '#1f2937', wordBreak: 'break-word' }
+  const rowSt: React.CSSProperties = {
+    display: 'grid',
+    gridTemplateColumns: 'minmax(150px, 220px) minmax(0, 1fr)',
+    gap: 12,
+    alignItems: 'center',
+    padding: '7px 0',
+    borderBottom: '1px solid rgba(0,0,0,0.07)',
+    boxSizing: 'border-box'
+  }
+  const lblSt: React.CSSProperties = {
+    fontSize: 12,
+    color: '#6b7280',
+    textAlign: 'left',
+    fontWeight: 700,
+    lineHeight: 1.25
+  }
+  const valSt: React.CSSProperties = {
+    fontSize: 13,
+    fontWeight: 600,
+    wordBreak: 'break-word',
+    color: '#1f2937'
+  }
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 12, padding: '8px 0' }}>
       {cicli.map((c, i) => {
         const isOpen = c.stato_record === 'APERTO'
         const borderColor = isOpen ? '#2563eb' : '#d1d5db'
-        const bgColor = isOpen ? 'rgba(37,99,235,0.04)' : '#fafafa'
+        const bgColor = '#fff'
         const headerBg = isOpen ? '#eaf2ff' : '#f3f4f6'
         const statusLabel = isOpen ? 'In corso' : 'Chiuso'
         const statusColor = isOpen ? '#2563eb' : '#6b7280'
         const ruoloLabel = c.ruolo_competente + (c.utente_operatore ? ` — ${c.utente_operatore}` : '')
+        const cycleLabelNumber = props.sortDir === 'asc' ? (i + 1) : (cicli.length - i)
 
         const campiList = c.campi_modificati ? c.campi_modificati.split(',').map(s => s.trim()).filter(Boolean) : []
 
@@ -1783,7 +1837,7 @@ function CicliTimeline (props: { globalId: string; hasSel: boolean }): any {
             {/* Header */}
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '8px 12px', background: headerBg, borderBottom: `1px solid ${borderColor}` }}>
               <div style={{ fontWeight: 700, fontSize: 13, color: '#1f2937' }}>
-                Ciclo {i + 1} — {c.ruolo_competente || '?'}
+                Ciclo {cycleLabelNumber} — {c.ruolo_competente || '?'}
                 {c.area ? <span style={{ color: '#6b7280', fontWeight: 400 }}> ({c.area}{c.settore ? `/${c.settore}` : ''})</span> : null}
               </div>
               <span style={{ fontSize: 11, fontWeight: 600, color: statusColor, background: isOpen ? 'rgba(37,99,235,0.10)' : 'rgba(0,0,0,0.05)', padding: '2px 8px', borderRadius: 6 }}>
@@ -1812,20 +1866,23 @@ function CicliTimeline (props: { globalId: string; hasSel: boolean }): any {
               )}
 
               {c.num_campi_modificati != null && c.num_campi_modificati > 0 && (
-                <div style={{ marginTop: 4 }}>
-                  <div style={{ ...rowSt, alignItems: 'flex-start' }}>
+                <div style={{ padding: '7px 0', borderBottom: '1px solid rgba(0,0,0,0.07)' }}>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'minmax(150px, 220px) minmax(0, 1fr)', gap: 12, alignItems: 'flex-start' }}>
                     <span style={lblSt}>Campi modificati</span>
                     <span style={{ ...valSt, fontSize: 11 }}>
                       {c.num_campi_modificati} {c.num_campi_modificati === 1 ? 'campo' : 'campi'}
                     </span>
                   </div>
                   {campiList.length > 0 && (
-                    <div style={{ marginLeft: 118, display: 'flex', flexWrap: 'wrap', gap: 4, marginTop: 2 }}>
-                      {campiList.map((campo, ci) => (
-                        <span key={ci} style={{ fontSize: 10, background: 'rgba(0,0,0,0.06)', color: '#374151', padding: '1px 6px', borderRadius: 4 }}>
-                          {campo}
-                        </span>
-                      ))}
+                    <div style={{ display: 'grid', gridTemplateColumns: 'minmax(150px, 220px) minmax(0, 1fr)', gap: 12, marginTop: 6 }}>
+                      <span />
+                      <div style={{ border: '1px solid rgba(209,213,219,0.95)', borderRadius: 8, padding: '6px 8px', background: '#fff', display: 'flex', flexWrap: 'wrap', gap: '4px 12px' }}>
+                        {campiList.map((campo, ci) => (
+                          <span key={ci} style={{ fontSize: 11, color: '#374151', lineHeight: 1.35 }}>
+                            {campo}
+                          </span>
+                        ))}
+                      </div>
                     </div>
                   )}
                 </div>
@@ -2146,17 +2203,19 @@ function NotaSpeseDetailPanel (props: { data: any; detailUrl: string; hasSel: bo
     <div
       style={{
         display: 'grid',
-        gridTemplateColumns: 'minmax(0, 1fr) auto',
+        gridTemplateColumns: 'minmax(0, 1fr) 132px',
         alignItems: 'center',
-        gap: 10,
-        background: strong ? '#1F4E79' : '#f5f9ff',
-        border: '1px solid #c5d9f1',
-        borderRadius: 8,
-        padding: '9px 12px'
+        gap: 12,
+        width: '100%',
+        boxSizing: 'border-box',
+        background: strong ? '#1F4E79' : 'transparent',
+        borderRadius: strong ? 8 : 0,
+        padding: strong ? '11px 14px' : '7px 14px',
+        borderBottom: strong ? 'none' : '1px solid rgba(0,0,0,0.07)'
       }}
     >
-      <div style={{ fontSize: 12, fontWeight: 800, color: strong ? 'rgba(255,255,255,0.86)' : '#1F4E79', lineHeight: 1.25 }}>{label}</div>
-      <div style={{ fontSize: 15, fontWeight: 900, color: strong ? '#fff' : '#16375a', whiteSpace: 'nowrap', textAlign: 'right' }}>€ {nsdMoney(value)}</div>
+      <div style={{ fontSize: 12, fontWeight: strong ? 800 : 700, color: strong ? 'rgba(255,255,255,0.86)' : '#6b7280', lineHeight: 1.25 }}>{label}</div>
+      <div style={{ fontSize: strong ? 15 : 13, fontWeight: strong ? 900 : 700, color: strong ? '#fff' : '#1f2937', whiteSpace: 'nowrap', textAlign: 'right' }}>€ {nsdMoney(value)}</div>
     </div>
   )
 
@@ -2210,18 +2269,18 @@ function NotaSpeseDetailPanel (props: { data: any; detailUrl: string; hasSel: bo
 
   return (
     <div style={{ display: 'grid', gap: 12, paddingTop: 8 }}>
-      <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr)', gap: 6 }}>
-        {card('Attrezzature/Trasporti', summary.totaleAT)}
-        {card('Materiali da costruzione', summary.totalePR)}
-        {card('Risorse umane', summary.totaleRU)}
-        {card('Semilavorati', summary.totaleSL)}
-        {card('Prodotti finiti', summary.totalePF)}
-        {card(`Spese generali (${nsdMoney(summary.percentualeSpeseGenerali)}%)`, summary.importoSpeseGenerali)}
-        {card('Totale nota spese', summary.totaleComplessivo, true)}
-      </div>
-
-      {lastCalc ? <div style={{ fontSize: 11, color: '#6b7280' }}>Ultimo ricalcolo: {formatDateSafe(lastCalc)}</div> : null}
-
+      <DetailSectionCard title="Riepilogo nota spese">
+        <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr)', gap: 0 }}>
+          {card('Attrezzature/Trasporti', summary.totaleAT)}
+          {card('Materiali da costruzione', summary.totalePR)}
+          {card('Risorse umane', summary.totaleRU)}
+          {card('Semilavorati', summary.totaleSL)}
+          {card('Prodotti finiti', summary.totalePF)}
+          {card(`Spese generali (${nsdMoney(summary.percentualeSpeseGenerali)}%)`, summary.importoSpeseGenerali)}
+          {card('Totale nota spese', summary.totaleComplessivo, true)}
+        </div>
+        {lastCalc ? <div style={{ fontSize: 11, color: '#6b7280', marginTop: 8 }}>Ultimo ricalcolo: {formatDateSafe(lastCalc)}</div> : null}
+      </DetailSectionCard>
 
       {props.detailUrl && loading && <div style={{ opacity: 0.75, fontSize: 12 }}>Caricamento dettaglio nota spese…</div>}
       {props.detailUrl && !loading && error && <div style={{ color: '#b00020', fontSize: 12 }}>{error}</div>}
@@ -2233,11 +2292,11 @@ function NotaSpeseDetailPanel (props: { data: any; detailUrl: string; hasSel: bo
           {NSD_CATEGORIES.map(cat => {
             const total = rowsByCategory[cat].reduce((s, r) => s + nsdSafeNum(r.importo_riga, 0), 0)
             return (
-              <details key={cat} open={rowsByCategory[cat].length > 0} style={{ border: '1px solid rgba(0,0,0,0.08)', borderRadius: 10, padding: 10, background: '#fff' }}>
-                <summary style={{ cursor: 'pointer', fontSize: 13, fontWeight: 800, color: '#111827' }}>
+              <details key={cat} open={rowsByCategory[cat].length > 0} style={{ border: '1px solid #c5d9f1', borderRadius: 10, background: '#fff', overflow: 'hidden' }}>
+                <summary style={{ cursor: 'pointer', fontSize: 13, fontWeight: 800, color: '#1f2937', padding: '8px 12px', background: '#eaf2ff', borderBottom: '1px solid #c5d9f1' }}>
                   {NSD_CATEGORY_LABELS[cat]} <span style={{ color: '#6b7280', fontWeight: 700 }}>({rowsByCategory[cat].length} voci · € {nsdMoney(total)})</span>
                 </summary>
-                {renderRows(cat)}
+                <div style={{ padding: 10 }}>{renderRows(cat)}</div>
               </details>
             )
           })}
@@ -2286,6 +2345,7 @@ function DetailTabsPanel (props: {
   }, [hasSel, data, oid])
 
   const [tab, setTab] = React.useState<string>(tabs[0]?.id || 'anagrafica')
+  const [iterSortDir, setIterSortDir] = React.useState<'asc' | 'desc' | null>(null)
 
 
   // Allegati (attachments) — caricati solo quando la tab "Allegati" è attiva
@@ -2590,7 +2650,14 @@ const isPgOnlyField = React.useCallback((fieldName: string) => {
     return s.split(/[;,\n]+/).map(v => v.trim()).filter(Boolean)
   }, [])
 
-  const renderDash = (txt = '—') => <div style={{ fontSize: 13, fontWeight: 600, color: 'rgba(0,0,0,0.55)' }}>{txt}</div>
+  const renderDash = (txt = '—') => (
+    <div style={{
+      fontSize: 13,
+      fontWeight: 600,
+      color: '#6b7280',
+      padding: '7px 0'
+    }}>{txt}</div>
+  )
 
   const SURVEY_CHOICE_LABELS: Record<string, Record<string, string>> = {
     norma1: {
@@ -2641,49 +2708,32 @@ const isPgOnlyField = React.useCallback((fieldName: string) => {
 
   const renderSurveyGroup = React.useCallback((title: string, rows: Array<{ label: string; value: any; multiline?: boolean }>, emptyText = '—') => {
     return (
-      <div style={{ border: '1px solid rgba(0,0,0,0.08)', borderRadius: 10, padding: 10, background: '#fff' }}>
-        <div style={{ fontSize: 12, fontWeight: 800, color: 'rgba(0,0,0,0.78)', marginBottom: 8 }}>{title}</div>
+      <DetailSectionCard title={title} bodyPadding={10}>
         {rows.length
-          ? <div style={{ display: 'grid', gap: 8 }}>{rows.map((r, i) => <DetailRow key={i} label={r.label} value={r.value} labelSize={12} valueSize={13} multiline={!!r.multiline} />)}</div>
+          ? <div style={{ display: 'grid', gap: 0 }}>{rows.map((r, i) => <DetailRow key={i} label={r.label} value={r.value} labelSize={12} valueSize={13} multiline={!!r.multiline} />)}</div>
           : renderDash(emptyText)}
-      </div>
+      </DetailSectionCard>
     )
   }, [])
 
   const renderViolationTextLine = React.useCallback((label: string, value: any) => {
     const txt = value == null || value === '' ? '—' : value
-    return (
-      <div style={{ fontSize: 13, lineHeight: 1.45, color: '#111827' }}>
-        <span style={{ color: '#6b7280', fontWeight: 400 }}>{label}: </span>
-        <span style={{ fontWeight: 600 }}>{txt}</span>
-      </div>
-    )
+    return <DetailRow label={label} value={txt} labelSize={12} valueSize={13} multiline={false} />
   }, [])
 
   const renderViolationSurfacesLine = React.useCallback((leftLabel: string, leftValue: any, rightLabel: string, rightValue: any) => {
     const leftTxt = leftValue == null || leftValue === '' ? '—' : leftValue
     const rightTxt = rightValue == null || rightValue === '' ? '—' : rightValue
     return (
-      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 18, rowGap: 6, fontSize: 13, lineHeight: 1.45, color: '#111827' }}>
-        <div>
-          <span style={{ color: '#6b7280', fontWeight: 400 }}>{leftLabel}: </span>
-          <span style={{ fontWeight: 600 }}>{leftTxt}</span>
-        </div>
-        <div>
-          <span style={{ color: '#6b7280', fontWeight: 400 }}>{rightLabel}: </span>
-          <span style={{ fontWeight: 600 }}>{rightTxt}</span>
-        </div>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: 8 }}>
+        <DetailRow label={leftLabel} value={leftTxt} labelSize={12} valueSize={13} multiline={false} />
+        <DetailRow label={rightLabel} value={rightTxt} labelSize={12} valueSize={13} multiline={false} />
       </div>
     )
   }, [])
 
   const renderViolationGroup = React.useCallback((title: string, body: React.ReactNode) => {
-    return (
-      <div style={{ border: '1px solid rgba(0,0,0,0.08)', borderRadius: 10, padding: 12, background: '#fff' }}>
-        <div style={{ fontSize: 13, fontWeight: 700, color: 'rgba(0,0,0,0.78)', marginBottom: 8 }}>{title}</div>
-        {body}
-      </div>
-    )
+    return <DetailSectionCard title={title}>{body}</DetailSectionCard>
   }, [])
 
   const violationSurveyContent = React.useMemo(() => {
@@ -2721,7 +2771,7 @@ const isPgOnlyField = React.useCallback((fieldName: string) => {
             const descr = String(descrFull).replace(/^Art\.?\s*16\s*-\s*/i, '')
             return (
               <div style={{ display: 'grid', gap: 8 }}>
-                <div style={{ fontSize: 13, lineHeight: 1.45, color: '#111827' }}>{descr}</div>
+                {renderViolationTextLine('Descrizione', descr)}
                 {renderViolationSurfacesLine(
                   'Superficie dichiarata',
                   formatFieldValue(getRawField('sup_dichiarata_art16'), 'sup_dichiarata_art16', fieldTypeMap?.sup_dichiarata_art16, 'Superficie dichiarata'),
@@ -2765,7 +2815,7 @@ const isPgOnlyField = React.useCallback((fieldName: string) => {
         <div style={{ display: 'grid', gap: 6 }}>
           {altreCodes.map((code, idx) => {
             const descrFull = getSurveyChoiceLabel('norma3', code)
-            return <div key={idx} style={{ fontSize: 13, lineHeight: 1.45, color: '#111827' }}>{descrFull}</div>
+            return <DetailRow key={idx} label={`Violazione ${idx + 1}`} value={descrFull} labelSize={12} valueSize={13} multiline={false} />
           })}
         </div>
         )
@@ -2774,49 +2824,11 @@ const isPgOnlyField = React.useCallback((fieldName: string) => {
     const descrFatti = formatFieldValue(getRawField('descrizione_fatti'), 'descrizione_fatti', fieldTypeMap?.descrizione_fatti, 'Descrizione dettagliata dell’infrazione')
     const circ = formatFieldValue(getRawField('circostanze'), 'circostanze', fieldTypeMap?.circostanze, 'Circostanze rilevanti dell’infrazione')
     const presenzaTrasgressore = formatFieldValue(getRawField('presenza_trasgressore'), 'presenza_trasgressore', fieldTypeMap?.presenza_trasgressore, 'Il trasgressore era presente?')
-    const noteBody = (
-      <div style={{ display: 'grid', gap: 10 }}>
-        {!isEmptyValue(getRawField('presenza_trasgressore')) && (
-          <div>
-            <div style={{ fontSize: 12, color: '#6b7280', textAlign: 'left', marginBottom: 4, fontWeight: 400 }}>Presenza del trasgressore</div>
-            <div style={{
-              fontSize: 13,
-              whiteSpace: 'pre-wrap',
-              wordBreak: 'break-word',
-              padding: '8px 10px',
-              border: '1px solid rgba(0,0,0,0.10)',
-              borderRadius: 8,
-              background: 'rgba(0,0,0,0.02)',
-              minHeight: 44
-            }}>{presenzaTrasgressore == null || presenzaTrasgressore === '' ? '—' : presenzaTrasgressore}</div>
-          </div>
-        )}
-        <div>
-          <div style={{ fontSize: 12, color: '#6b7280', textAlign: 'left', marginBottom: 4, fontWeight: 400 }}>Descrizione dettagliata della violazione</div>
-          <div style={{
-            fontSize: 13,
-            whiteSpace: 'pre-wrap',
-            wordBreak: 'break-word',
-            padding: '8px 10px',
-            border: '1px solid rgba(0,0,0,0.10)',
-            borderRadius: 8,
-            background: 'rgba(0,0,0,0.02)',
-            minHeight: 44
-          }}>{descrFatti == null || descrFatti === '' ? '—' : descrFatti}</div>
-        </div>
-        <div>
-          <div style={{ fontSize: 12, color: '#6b7280', textAlign: 'left', marginBottom: 4, fontWeight: 400 }}>Circostanze rilevanti dell’infrazione</div>
-          <div style={{
-            fontSize: 13,
-            whiteSpace: 'pre-wrap',
-            wordBreak: 'break-word',
-            padding: '8px 10px',
-            border: '1px solid rgba(0,0,0,0.10)',
-            borderRadius: 8,
-            background: 'rgba(0,0,0,0.02)',
-            minHeight: 44
-          }}>{circ == null || circ === '' ? '—' : circ}</div>
-        </div>
+    const detailsBody = (
+      <div style={{ display: 'grid', gap: 0 }}>
+        {renderViolationTextLine('Presenza del trasgressore', presenzaTrasgressore)}
+        <DetailRow label='Descrizione dettagliata della violazione' value={descrFatti} labelSize={12} valueSize={13} multiline />
+        <DetailRow label='Circostanze rilevanti dell’infrazione' value={circ} labelSize={12} valueSize={13} multiline />
       </div>
     )
 
@@ -2825,7 +2837,7 @@ const isPgOnlyField = React.useCallback((fieldName: string) => {
         {renderViolationGroup('Art. 15 - Prelievo abusivo', art15Body)}
         {renderViolationGroup('Artt. 16 e 17 - Inosservanza termini presentazione comunicazioni', art1617Body)}
         {renderViolationGroup('Altre violazioni', altreBody)}
-        {renderViolationGroup('Note', noteBody)}
+        {renderViolationGroup('Dettagli della violazione', detailsBody)}
       </div>
     )
   }, [getRawField, splitMultiValues, fieldTypeMap, getSurveyChoiceLabel, renderViolationGroup, renderViolationSurfacesLine, renderViolationTextLine])
@@ -2846,14 +2858,24 @@ const isPgOnlyField = React.useCallback((fieldName: string) => {
       marginRight: -ui.panelPadding,
       width: `calc(100% + ${ui.panelPadding * 2}px)`
     }}>
-      {hasSel && tabs.map((t) => (
-        <TabButton 
-          key={t.id}
-          active={tab === t.id} 
-          label={t.label} 
-          onClick={() => setTab(t.id)} 
-        />
-      ))}
+      {hasSel && tabs.map((t) => {
+        const isIterTab = Boolean((t as any).isIterTab)
+        const iterSortIndicator = isIterTab && iterSortDir ? (iterSortDir === 'desc' ? '↓' : '↑') : ''
+        return (
+          <TabButton 
+            key={t.id}
+            active={tab === t.id} 
+            label={iterSortIndicator ? `${t.label} ${iterSortIndicator}` : t.label} 
+            onClick={() => {
+              if (isIterTab) {
+                if (tab === t.id) setIterSortDir(prev => prev === 'desc' ? 'asc' : 'desc')
+                else setIterSortDir(prev => prev || 'desc')
+              }
+              setTab(t.id)
+            }} 
+          />
+        )
+      })}
     </div>
   )
 
@@ -2908,7 +2930,7 @@ if (!hasSel) {
   
   if (activeTab?.isIterTab) {
     const gid = data?.GlobalID ?? data?.globalid ?? data?.globalId ?? data?.GLOBALID ?? ''
-    content = <CicliTimeline globalId={String(gid)} hasSel={hasSel} />
+    content = <CicliTimeline globalId={String(gid)} hasSel={hasSel} sortDir={iterSortDir || 'desc'} />
   } else if (activeTab) {
     // Tab normale con campi configurabili
     const rows = aliasesReady ? makeRows(activeTab.fields, activeTab.id.toUpperCase(), Boolean((activeTab as any).hideEmpty)) : []
@@ -2932,10 +2954,6 @@ if (!hasSel) {
 
       content = (
         <div style={{ marginTop: 8 }}>
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
-            <div style={{ fontWeight: 700, fontSize: 13 }}>Allegati</div>
-          </div>
-
           {!hasSel && (
             <div style={{ opacity: 0.75, fontSize: 12 }}>Selezionare un rapporto per vedere gli allegati.</div>
           )}
@@ -2951,62 +2969,54 @@ if (!hasSel) {
           {hasSel && !attachmentsLoading && !attachmentsError && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
               {(attachments && attachments.length) ? (
-                attachments.map((a) => {
+                attachments.map((a, idx) => {
                   const url = getOpenUrl(a)
-                  const meta = [a.contentType, formatBytes(a.size)].filter(Boolean).join(' • ')
                   return (
-                    <div
-                      key={a.id}
-                      style={{
-                        border: '1px solid rgba(0,0,0,0.08)',
-                        borderRadius: 12,
-                        padding: '8px 10px',
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'space-between',
-                        gap: 10
-                      }}
-                    >
-                      <div style={{ minWidth: 0 }}>
-                        <div style={{ fontWeight: 600, fontSize: 12, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                          {a.name || `Allegato #${a.id}`}
+                    <DetailSectionCard key={a.id} title={`Allegato ${idx + 1}`} bodyPadding={10}>
+                      <div style={{ display: 'grid', gap: 8 }}>
+                        <DetailRow label="Nome file" value={a.name || `Allegato #${a.id}`} labelSize={12} valueSize={13} multiline={false} />
+                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 8 }}>
+                          <DetailRow label="Tipo" value={a.contentType || '—'} labelSize={12} valueSize={13} multiline={false} />
+                          <DetailRow label="Dimensione" value={formatBytes(a.size) || '—'} labelSize={12} valueSize={13} multiline={false} />
                         </div>
-                        {meta ? <div style={{ opacity: 0.7, fontSize: 11 }}>{meta}</div> : null}
+                        {url ? (
+                          <div>
+                            <a
+                              href={url}
+                              target="_blank"
+                              rel="noreferrer"
+                              onMouseEnter={(e) => {
+                                e.currentTarget.style.background = '#eaf2ff'
+                                e.currentTarget.style.borderColor = '#2f6fed'
+                                e.currentTarget.style.color = '#1d4ed8'
+                              }}
+                              onMouseLeave={(e) => {
+                                e.currentTarget.style.background = '#fff'
+                                e.currentTarget.style.borderColor = 'rgba(0,0,0,0.12)'
+                                e.currentTarget.style.color = '#111827'
+                              }}
+                              style={{
+                                display: 'inline-flex',
+                                padding: '6px 10px',
+                                borderRadius: 10,
+                                border: '1px solid rgba(0,0,0,0.12)',
+                                background: '#fff',
+                                color: '#111827',
+                                textDecoration: 'none',
+                                fontSize: 12,
+                                fontWeight: 700,
+                                whiteSpace: 'nowrap',
+                                transition: 'all 0.15s ease'
+                              }}
+                            >
+                              Apri allegato
+                            </a>
+                          </div>
+                        ) : (
+                          <div style={{ opacity: 0.6, fontSize: 12 }}>URL non disponibile</div>
+                        )}
                       </div>
-                      {url ? (
-                        <a
-                          href={url}
-                          target="_blank"
-                          rel="noreferrer"
-                          onMouseEnter={(e) => {
-                            e.currentTarget.style.background = '#eaf2ff'
-                            e.currentTarget.style.borderColor = '#2f6fed'
-                            e.currentTarget.style.color = '#1d4ed8'
-                          }}
-                          onMouseLeave={(e) => {
-                            e.currentTarget.style.background = '#fff'
-                            e.currentTarget.style.borderColor = 'rgba(0,0,0,0.12)'
-                            e.currentTarget.style.color = '#111827'
-                          }}
-                          style={{
-                            padding: '6px 10px',
-                            borderRadius: 10,
-                            border: '1px solid rgba(0,0,0,0.12)',
-                            background: '#fff',
-                            color: '#111827',
-                            textDecoration: 'none',
-                            fontSize: 12,
-                            fontWeight: 600,
-                            whiteSpace: 'nowrap',
-                            transition: 'all 0.15s ease'
-                          }}
-                        >
-                          Apri
-                        </a>
-                      ) : (
-                        <span style={{ opacity: 0.6, fontSize: 12, whiteSpace: 'nowrap' }}>URL non disponibile</span>
-                      )}
-                    </div>
+                    </DetailSectionCard>
                   )
                 })
               ) : (
@@ -3017,9 +3027,8 @@ if (!hasSel) {
 
           {rows && rows.length > 0 && (
             <div style={{ marginTop: 12 }}>
-              <div style={{ fontWeight: 700, fontSize: 13, marginBottom: 6 }}>Attributi</div>
               <ReadOnlyPanel
-                title=""
+                title="Attributi"
                 rows={rows}
                 emptyText={hasSel ? 'Nessun campo configurato per questa tab.' : 'Selezionare un rapporto.'}
               />
@@ -3057,7 +3066,7 @@ if (!hasSel) {
           )
         : (
           <ReadOnlyPanel
-            title=""
+            title={activeTab.id === 'anagrafica' ? 'Trasgressore' : String(activeTab.label || '')}
             rows={rows}
             emptyText={hasSel ? 'Nessun campo configurato per questa tab.' : 'Selezionare un rapporto.'}
           />
@@ -3112,9 +3121,8 @@ return (
         <>
           <div style={{ padding: `${Math.max(8, Number(ui.panelPadding ?? 12) - 2)}px ${ui.panelPadding ?? 12}px 0` }}>
             <div style={{ paddingTop: 4 }}>
-              <div style={{ fontSize: 12, fontWeight: 700, color: 'rgba(0,0,0,0.72)', marginBottom: 8 }}>Dati generali</div>
               <ReadOnlyPanel
-                title=""
+                title="Dati generali"
                 rows={generalRows}
                 emptyText="Dati generali non disponibili."
               />
