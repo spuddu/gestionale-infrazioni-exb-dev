@@ -6,6 +6,7 @@ import { createPortal } from 'react-dom'
 import type { IMConfig } from '../config'
 import { defaultConfig } from '../config'
 import { buildRapportoPdf } from '../../../_shared/gii-anteprime/rapporto/rapporto-pdf-builder'
+import RapportoPdfViewer from '../../../_shared/gii-anteprime/rapporto/rapporto-pdf-viewer'
 
 
 const GII_LOG_EVENTI_CICLI_URL = 'https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_LOG_EVENTI_CICLI/FeatureServer/0'
@@ -1426,6 +1427,7 @@ function ActionsPanel (props: {
   const [previewLoading, setPreviewLoading] = React.useState(false)
   const [previewError, setPreviewError] = React.useState<string | null>(null)
   const [previewUrl, setPreviewUrl] = React.useState<string | null>(null)
+  const [previewFileName, setPreviewFileName] = React.useState<string>('rapporto.pdf')
 
   React.useEffect(() => {
     return () => { revokeRapportoPdfUrl(previewUrl) }
@@ -1546,6 +1548,7 @@ function ActionsPanel (props: {
       try {
         const { blob, fileName } = await buildRapportoPdfBlob(data, _utentiCache)
         const url = makeRapportoPdfUrl(blob, fileName)
+        setPreviewFileName(fileName)
         setPreviewUrl(prev => {
           revokeRapportoPdfUrl(prev)
           return url
@@ -3252,7 +3255,7 @@ function ActionsPanel (props: {
   const reportPreviewModal = previewOpen ? createPortal(
     <div
       data-gii-global-popup-root='1'
-      style={{ position: 'fixed', inset: 0, zIndex: 2147483646, background: 'rgba(0,0,0,0.58)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 8, pointerEvents: 'auto' }}
+      style={{ position: 'fixed', inset: 0, zIndex: 2147483646, background: 'rgba(0,0,0,0.58)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 14, pointerEvents: 'auto' }}
       onClick={(e) => { e.preventDefault(); e.stopPropagation() }}
       onMouseDown={(e) => { e.preventDefault(); e.stopPropagation() }}
     >
@@ -3260,53 +3263,21 @@ function ActionsPanel (props: {
         role='dialog'
         aria-modal='true'
         data-gii-global-popup-dialog='1'
-        style={{ width: 'min(98vw, 1600px)', height: 'min(96vh, 1100px)', background: '#fff', borderRadius: 14, boxShadow: '0 20px 70px rgba(0,0,0,0.32)', border: '1px solid rgba(0,0,0,0.10)', display: 'flex', flexDirection: 'column', overflow: 'hidden', position: 'relative', zIndex: 2147483647 }}
+        style={{ width: 'calc(100vw - 28px)', height: 'calc(100vh - 28px)', maxWidth: 1920, maxHeight: 1200, borderRadius: 14, boxShadow: '0 20px 70px rgba(0,0,0,0.32)', overflow: 'hidden', position: 'relative', zIndex: 2147483647 }}
         onClick={(e) => { e.stopPropagation() }}
         onMouseDown={(e) => { e.stopPropagation() }}
       >
-        <div style={{ flex: '0 0 auto', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, padding: '10px 12px', borderBottom: '1px solid rgba(0,0,0,0.10)', background: '#f8fafc' }}>
-          <div style={{ display: 'flex', alignItems: 'baseline', gap: 10, minWidth: 0 }}>
-            <div style={{ fontWeight: 800, fontSize: 15, color: '#1f2937' }}>Anteprima rapporto</div>
-            {hasSel && oid != null && <div style={{ fontSize: 12, color: '#6b7280', fontFamily: 'monospace' }}>{praticaCode}</div>}
-          </div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            <button
-              type='button'
-              onClick={handleRapportoDownload}
-              disabled={previewLoading || !data}
-              style={{ padding: '7px 12px', borderRadius: 8, border: '1px solid #16a34a', background: '#fff', color: '#16a34a', fontWeight: 700, fontSize: 12, cursor: (previewLoading || !data) ? 'not-allowed' : 'pointer', opacity: (previewLoading || !data) ? 0.55 : 1 }}
-            >
-              Scarica PDF
-            </button>
-            <button
-              type='button'
-              onClick={closeRapportoPreview}
-              style={{ padding: '7px 12px', borderRadius: 8, border: '1px solid rgba(0,0,0,0.18)', background: '#fff', color: '#374151', fontWeight: 700, fontSize: 12, cursor: 'pointer' }}
-            >
-              Chiudi
-            </button>
-          </div>
-        </div>
-        <div style={{ flex: '1 1 auto', minHeight: 0, display: 'flex', background: '#e8e8e8' }}>
-          {previewLoading && (
-            <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#6b7280', fontSize: 14 }}>
-              Generazione anteprima…
-            </div>
-          )}
-          {!previewLoading && previewError && (
-            <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#b42318', fontSize: 14, padding: 20, textAlign: 'center' }}>
-              {previewError}
-            </div>
-          )}
-          {!previewLoading && !previewError && previewUrl && (
-            <iframe src={previewUrl} title='Anteprima rapporto tecnico PDF' style={{ flex: 1, border: 'none', width: '100%', height: '100%', background: '#e8e8e8' }} />
-          )}
-          {!previewLoading && !previewError && !previewUrl && (
-            <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#6b7280', fontSize: 14 }}>
-              Nessun dato disponibile per l&apos;anteprima.
-            </div>
-          )}
-        </div>
+        <RapportoPdfViewer
+          url={previewUrl}
+          fileName={previewFileName}
+          title='Anteprima rapporto'
+          subtitle={hasSel && oid != null ? `${praticaCode} • ${previewFileName}` : previewFileName}
+          loading={previewLoading}
+          error={previewError}
+          emptyText='Nessun dato disponibile per l&apos;anteprima.'
+          onDownload={handleRapportoDownload}
+          onClose={closeRapportoPreview}
+        />
       </div>
     </div>,
     document.body

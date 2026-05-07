@@ -1,8 +1,8 @@
 /** @jsx jsx */
 /** @jsxFrag React.Fragment */
 import { React, jsx, css } from 'jimu-core'
-import { Loading } from 'jimu-ui'
 import { buildRapportoPdf } from '../../../_shared/gii-anteprime/rapporto/rapporto-pdf-builder'
+import RapportoPdfViewer from '../../../_shared/gii-anteprime/rapporto/rapporto-pdf-viewer'
 
 const GII_UTENTI_URL = 'https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_utenti/FeatureServer/0'
 type UtenteCached = { full_name: string; ruolo: number | null; area: number | null; settore: number | null }
@@ -169,45 +169,87 @@ function buildPlaceholderMap (data: any, utentiCache: Map<string, UtenteCached> 
   }
 }
 
-const containerCss = css`display: flex; flex-direction: column; width: 100%; height: 100%; background: #e8e8e8; overflow: hidden;`
-const iframeCss = css`flex: 1; border: none; width: 100%; background: #e8e8e8;`
-const emptyMsgCss = css`flex: 1; display: flex; align-items: center; justify-content: center; color: #888; font-size: 14px; padding: 20px; text-align: center;`
+const containerCss = css`display: flex; flex-direction: column; width: 100%; height: 100%; background: #282828; overflow: hidden;`
 
 export default function AnteprimaPanel (p: { data: Record<string, any>; mode: 'create' | 'edit' }): any {
   const [pdfUrl, setPdfUrl] = React.useState<string | null>(null)
+  const [pdfFileName, setPdfFileName] = React.useState<string>('rapporto.pdf')
   const [loading, setLoading] = React.useState(false)
   const [error, setError] = React.useState<string | null>(null)
   const [utenti, setUtenti] = React.useState<Map<string, UtenteCached> | null>(null)
+  const [utentiReady, setUtentiReady] = React.useState(false)
 
-  React.useEffect(() => { let c = false; ensureUtentiCache().then(cache => { if (!c) setUtenti(cache) }); return () => { c = true } }, [])
+  const dataSignature = React.useMemo(() => {
+    try { return JSON.stringify(p.data || {}) } catch { return String(p.data || '') }
+  }, [p.data])
+
+  React.useEffect(() => {
+    let cancelled = false
+    setUtentiReady(false)
+    ensureUtentiCache()
+      .then(cache => {
+        if (cancelled) return
+        setUtenti(cache)
+        setUtentiReady(true)
+      })
+      .catch(() => {
+        if (cancelled) return
+        setUtenti(null)
+        setUtentiReady(true)
+      })
+    return () => { cancelled = true }
+  }, [])
+
   React.useEffect(() => { return () => { if (pdfUrl) URL.revokeObjectURL(pdfUrl) } }, [pdfUrl])
 
   React.useEffect(() => {
-    if (!p.data || Object.keys(p.data).length === 0) { setPdfUrl(null); return }
+    if (!p.data || Object.keys(p.data).length === 0) {
+      setPdfUrl(null)
+      setPdfFileName('rapporto.pdf')
+      setLoading(false)
+      return
+    }
+
+    // Evita la doppia generazione in CW editing:
+    // prima attendo il completamento della cache GII_utenti, poi genero il PDF una sola volta.
+    if (!utentiReady) {
+      setLoading(true)
+      setError(null)
+      return
+    }
+
     let cancelled = false
+    const dataSnapshot = { ...(p.data || {}) }
+
     setLoading(true); setError(null)
     ;(async () => {
       try {
-        const map = buildPlaceholderMap(p.data, utenti)
+        const map = buildPlaceholderMap(dataSnapshot, utenti)
         const bytes = await buildRapportoPdf(map)
         if (cancelled) return
         const cp = map.cod_pratica || 'rapporto'
         const fileName = `rapporto_${cp.replace(/[^a-zA-Z0-9_-]/g, '_')}.pdf`
         const blob = new Blob([bytes as any], { type: 'application/pdf' })
         const url = URL.createObjectURL(blob)
-        setPdfUrl(prev => { if (prev) URL.revokeObjectURL(prev); return url + '#' + fileName })
+        setPdfFileName(fileName)
+        setPdfUrl(prev => { if (prev) URL.revokeObjectURL(prev); return url })
       } catch (ex: any) { if (!cancelled) setError('Errore: ' + (ex?.message || String(ex))) }
       finally { if (!cancelled) setLoading(false) }
     })()
     return () => { cancelled = true }
-  }, [p.data, p.mode, utenti])
+  }, [dataSignature, p.mode, utenti, utentiReady])
 
   return (
     <div css={containerCss}>
-      {loading && (<div css={emptyMsgCss}><Loading type={'SECONDARY' as any} /></div>)}
-      {!loading && error && (<div css={emptyMsgCss}>{error}</div>)}
-      {!loading && !error && !pdfUrl && (<div css={emptyMsgCss}>Nessun dato disponibile per l&apos;anteprima.</div>)}
-      {!loading && !error && pdfUrl && (<iframe css={iframeCss} src={pdfUrl} title='Anteprima rapporto tecnico PDF' />)}
+      <RapportoPdfViewer
+        url={pdfUrl}
+        fileName={pdfFileName}
+        title='Anteprima rapporto'
+        subtitle={pdfFileName}
+        loading={loading}
+        error={error}
+        emptyText='Nessun dato disponibile per l&apos;anteprima.'
+      />
     </div>
   )
 }

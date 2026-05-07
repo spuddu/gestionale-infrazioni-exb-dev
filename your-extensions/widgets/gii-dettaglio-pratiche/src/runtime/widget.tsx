@@ -1208,7 +1208,7 @@ function migrateTabs(tabFields: TabFields, tabs: TabConfig[] | undefined): TabCo
   }
 
   // Ordine logico delle tab di dettaglio. Iter resta sempre in ultima posizione.
-  const preferredBeforeIter = ['anagrafica', 'violazione', LUOGHI_DATI_TAB_ID, 'nota_spese', 'allegati', 'mappa']
+  const preferredBeforeIter = ['anagrafica', 'violazione', LUOGHI_DATI_TAB_ID, 'mappa', 'nota_spese', 'allegati']
   const ordered: TabConfig[] = []
   for (const id of preferredBeforeIter) {
     const found = result.find(t => t.id === id)
