@@ -4217,11 +4217,7 @@ function NuovaPraticaForm (p: {
   const [previewAttachment, setPreviewAttachment] = React.useState<{ id: number; name?: string; contentType?: string } | null>(null)
   const [previewBlobUrl, setPreviewBlobUrl] = React.useState<string | null>(null)
   const [previewLoading, setPreviewLoading] = React.useState(false)
-  const [previewImageRotation, setPreviewImageRotation] = React.useState(0)
-  const [previewImageZoom, setPreviewImageZoom] = React.useState(100)
-  const [previewImageZoomInput, setPreviewImageZoomInput] = React.useState('100')
   const prevBlobRef = React.useRef<string | null>(null)
-  const previewViewerRef = React.useRef<HTMLDivElement | null>(null)
 
   React.useEffect(() => {
     if (mode === 'create') createStartedAtRef.current = Date.now()
@@ -4301,118 +4297,6 @@ function NuovaPraticaForm (p: {
   const currentLayerUrl = React.useMemo(() => {
     return ensureLayerIndex(normalizeFeatureLayerUrl(p.editLayerUrl) || normalizeFeatureLayerUrl(readDynamicSelection().layerUrl))
   }, [p.editLayerUrl])
-
-  React.useEffect(() => {
-    setPreviewImageRotation(0)
-    setPreviewImageZoom(100)
-    setPreviewImageZoomInput('100')
-  }, [previewAttachment?.id])
-
-  const clampPreviewImageZoom = React.useCallback((value: number) => {
-    if (!Number.isFinite(value)) return 100
-    return Math.max(25, Math.min(400, Math.round(value)))
-  }, [])
-
-  const changePreviewImageZoom = React.useCallback((delta: number) => {
-    setPreviewImageZoom((value) => clampPreviewImageZoom(value + delta))
-  }, [clampPreviewImageZoom])
-
-  React.useEffect(() => {
-    setPreviewImageZoomInput(String(previewImageZoom))
-  }, [previewImageZoom])
-
-  const commitPreviewImageZoomInput = React.useCallback(() => {
-    const raw = String(previewImageZoomInput || '').trim().replace(',', '.')
-    if (!raw) {
-      setPreviewImageZoomInput(String(previewImageZoom))
-      return
-    }
-    const next = clampPreviewImageZoom(Number(raw))
-    setPreviewImageZoom(next)
-    setPreviewImageZoomInput(String(next))
-  }, [clampPreviewImageZoom, previewImageZoom, previewImageZoomInput])
-
-  const downloadPreviewAttachment = React.useCallback(() => {
-    if (!previewBlobUrl || !previewAttachment) return
-    const link = document.createElement('a')
-    link.href = previewBlobUrl
-    link.download = String(previewAttachment.name || `allegato-${previewAttachment.id}`)
-    document.body.appendChild(link)
-    link.click()
-    document.body.removeChild(link)
-  }, [previewAttachment, previewBlobUrl])
-
-  const printPreviewAttachment = React.useCallback(() => {
-    if (!previewBlobUrl) return
-    const ct = String(previewAttachment?.contentType || '').toLowerCase()
-    const frame = document.createElement('iframe')
-    frame.style.position = 'fixed'
-    frame.style.right = '0'
-    frame.style.bottom = '0'
-    frame.style.width = '1px'
-    frame.style.height = '1px'
-    frame.style.opacity = '0'
-    frame.style.border = '0'
-    frame.style.pointerEvents = 'none'
-
-    const cleanup = () => {
-      window.setTimeout(() => {
-        try { frame.parentNode?.removeChild(frame) } catch {}
-      }, 1000)
-    }
-
-    const triggerPrint = () => {
-      window.setTimeout(() => {
-        try {
-          const win = frame.contentWindow
-          if (!win) { cleanup(); return }
-          try { win.focus() } catch {}
-          try { win.addEventListener?.('afterprint', cleanup, { once: true } as any) } catch {}
-          win.print()
-          window.setTimeout(cleanup, 5000)
-        } catch {
-          cleanup()
-        }
-      }, 350)
-    }
-
-    document.body.appendChild(frame)
-
-    if (ct.startsWith('image/')) {
-      try {
-        const doc = frame.contentDocument || frame.contentWindow?.document
-        if (!doc) { frame.src = previewBlobUrl; frame.onload = triggerPrint; return }
-        doc.open()
-        doc.write(`<!doctype html><html><head><title>Stampa allegato</title><style>@page{margin:12mm}html,body{margin:0;width:100%;height:100%;}body{display:flex;align-items:center;justify-content:center;background:#fff;}img{max-width:100%;max-height:100vh;object-fit:contain;}</style></head><body><img src="${previewBlobUrl}" onload="setTimeout(function(){window.focus();window.print();},250)" /></body></html>`)
-        doc.close()
-        window.setTimeout(cleanup, 6000)
-      } catch {
-        frame.src = previewBlobUrl
-        frame.onload = triggerPrint
-      }
-      return
-    }
-
-    frame.onload = triggerPrint
-    frame.src = previewBlobUrl
-  }, [previewAttachment, previewBlobUrl])
-
-  const togglePreviewFullscreen = React.useCallback(async () => {
-    try {
-      const el = previewViewerRef.current
-      if (!el) return
-      const docAny = document as any
-      const currentFs = document.fullscreenElement || docAny.webkitFullscreenElement || docAny.msFullscreenElement
-      if (currentFs === el) {
-        if (document.exitFullscreen) await document.exitFullscreen()
-        else if (docAny.webkitExitFullscreen) await docAny.webkitExitFullscreen()
-        else if (docAny.msExitFullscreen) await docAny.msExitFullscreen()
-        return
-      }
-      const req = (el as any).requestFullscreen || (el as any).webkitRequestFullscreen || (el as any).msRequestFullscreen
-      if (req) await req.call(el)
-    } catch {}
-  }, [])
 
   // Effect anteprima allegato (richiede currentOid e currentLayerUrl)
   React.useEffect(() => {
@@ -5576,15 +5460,6 @@ React.useEffect(() => {
       minHeight: 0
     }
 
-    if (npTab === 'allegati') {
-      return {
-        ...base,
-        overflow: 'hidden',
-        padding: '12px 2px',
-        boxSizing: 'border-box'
-      }
-    }
-
     if (npTab !== 'anteprima') {
       return {
         ...base,
@@ -5926,9 +5801,9 @@ React.useEffect(() => {
               </div>
             </div>
           ) : (
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, alignItems: 'stretch', height: '100%', minHeight: 0 }}>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, alignItems: 'start' }}>
             {/* Colonna sinistra: lista allegati */}
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 10, minHeight: 0, overflow: 'hidden' }}>
+            <div style={{ display: 'grid', gap: 10 }}>
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, flexWrap: 'wrap' }}>
                 <div style={{ fontWeight: 800, fontSize: 13 }}>Allegati</div>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
@@ -5981,7 +5856,7 @@ React.useEffect(() => {
               {attachmentsLoading ? (
                 <div style={{ opacity: 0.75, fontSize: 12 }}>Caricamento allegati…</div>
               ) : attachments.length > 0 ? (
-                <div style={{ display: 'grid', gap: 8, minHeight: 0, overflowY: 'auto', paddingRight: 4 }}>
+                <div style={{ display: 'grid', gap: 8 }}>
                   {attachments.map(a => (
                     <div key={a.id} onClick={() => setPreviewAttachment(previewAttachment?.id === a.id ? null : { id: a.id, name: a.name, contentType: a.contentType })} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, border: `1px solid ${previewAttachment?.id === a.id ? '#2563eb' : 'rgba(0,0,0,0.08)'}`, borderRadius: 10, padding: '8px 10px', background: previewAttachment?.id === a.id ? '#eff6ff' : '#fff', cursor: 'pointer', transition: 'all 0.15s' }}>
                       <div style={{ minWidth: 0 }}>
@@ -5991,6 +5866,29 @@ React.useEffect(() => {
                       </div>
                       {Number(a?.id) > 0 ? (
                         <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+                          <button
+                            type='button'
+                            onClick={(e) => {
+                              e.preventDefault()
+                              e.stopPropagation()
+                              void openAttachmentInNewTab(a, Number(currentOid), currentLayerUrl).catch((err: any) => {
+                                setAttachmentsError(err?.message || String(err))
+                              })
+                            }}
+                            style={{
+                              fontSize: 12,
+                              fontWeight: 700,
+                              color: '#1d4ed8',
+                              whiteSpace: 'nowrap',
+                              background: '#fff',
+                              border: '1px solid rgba(29,78,216,0.18)',
+                              borderRadius: 8,
+                              padding: '6px 10px',
+                              cursor: 'pointer'
+                            }}
+                          >
+                            Apri
+                          </button>
                           <button
                             type='button'
                             disabled={attachmentsUploading}
@@ -6039,174 +5937,21 @@ React.useEffect(() => {
               )}
             </div>
             {/* Colonna destra: anteprima */}
-            <div ref={previewViewerRef} style={{ border: '1px solid rgba(255,255,255,0.12)', borderRadius: 10, padding: 12, background: '#000', height: '100%', minHeight: 0, boxSizing: 'border-box', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: previewAttachment ? 'flex-start' : 'center' }}>
+            <div style={{ border: '1px solid rgba(0,0,0,0.08)', borderRadius: 10, padding: 12, background: '#fafbfc', minHeight: 200, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: previewAttachment ? 'flex-start' : 'center' }}>
               {!previewAttachment ? (
-                <div style={{ fontSize: 12, color: 'rgba(255,255,255,0.64)', textAlign: 'center' }}>Seleziona un allegato per visualizzare l&apos;anteprima</div>
+                <div style={{ fontSize: 12, color: '#9ca3af', textAlign: 'center' }}>Seleziona un allegato per visualizzare l&apos;anteprima</div>
               ) : previewLoading ? (
-                <div style={{ fontSize: 12, color: 'rgba(255,255,255,0.82)' }}>Caricamento anteprima…</div>
+                <div style={{ fontSize: 12, color: '#6b7280' }}>Caricamento anteprima…</div>
               ) : previewBlobUrl ? (() => {
                 const ct = String(previewAttachment.contentType || '').toLowerCase()
-                if (ct.startsWith('image/')) return (
-                  <div style={{ width: '100%', flex: '1 1 auto', minHeight: 0, display: 'flex', flexDirection: 'column', gap: 10 }}>
-                    <div style={{ flex: '0 0 auto', fontSize: 11, color: 'rgba(255,255,255,0.70)', textAlign: 'center', wordBreak: 'break-word' }}>
-                      {previewAttachment.name || `Allegato #${previewAttachment.id}`}
-                      {previewAttachment.contentType ? ` • ${previewAttachment.contentType}` : ''}
-                    </div>
-                    <div
-                      onWheel={(e) => {
-                        e.preventDefault()
-                        e.stopPropagation()
-                        changePreviewImageZoom(e.deltaY < 0 ? 10 : -10)
-                      }}
-                      style={{ width: '100%', flex: '1 1 auto', minHeight: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden', borderRadius: 6, background: '#000' }}
-                      title='Usa la rotellina del mouse per aumentare o diminuire lo zoom'
-                    >
-                      <img
-                        src={previewBlobUrl}
-                        alt={previewAttachment.name || ''}
-                        draggable={false}
-                        style={{ maxWidth: '100%', maxHeight: '100%', width: 'auto', height: 'auto', borderRadius: 6, objectFit: 'contain', transform: `rotate(${previewImageRotation}deg) scale(${(previewImageZoom / 100) * (previewImageRotation % 180 === 0 ? 1 : 0.84)})`, transformOrigin: 'center center', transition: 'transform 0.15s ease', userSelect: 'none' }}
-                      />
-                    </div>
-                    <div style={{ flex: '0 0 auto', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 10, flexWrap: 'wrap', marginTop: 'auto', padding: '8px 12px', borderRadius: 8, background: '#2f2f2f', color: '#fff' }}>
-                      <button
-                        type='button'
-                        onClick={() => setPreviewImageRotation((v) => (v - 90 + 360) % 360)}
-                        style={{ width: 32, height: 28, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontSize: 15, fontWeight: 800, color: '#fff', background: '#3b3b3b', border: '1px solid rgba(255,255,255,0.14)', borderRadius: 8, cursor: 'pointer' }}
-                        title='Ruota in senso antiorario'
-                      >
-                        ↺
-                      </button>
-                      <button
-                        type='button'
-                        onClick={() => setPreviewImageRotation((v) => (v + 90) % 360)}
-                        style={{ width: 32, height: 28, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontSize: 15, fontWeight: 800, color: '#fff', background: '#3b3b3b', border: '1px solid rgba(255,255,255,0.14)', borderRadius: 8, cursor: 'pointer' }}
-                        title='Ruota in senso orario'
-                      >
-                        ↻
-                      </button>
-                      <span style={{ fontSize: 12, fontWeight: 800, color: '#fff' }}>Zoom</span>
-                      <input
-                        type='text'
-                        inputMode='numeric'
-                        value={previewImageZoomInput}
-                        onChange={(e) => setPreviewImageZoomInput(e.currentTarget.value.replace(/[^0-9]/g, ''))}
-                        onBlur={commitPreviewImageZoomInput}
-                        onKeyDown={(e) => {
-                          if (e.key === 'Enter') {
-                            e.preventDefault()
-                            commitPreviewImageZoomInput()
-                          } else if (e.key === 'Escape') {
-                            setPreviewImageZoomInput(String(previewImageZoom))
-                          }
-                        }}
-                        style={{ width: 68, height: 28, padding: '0 6px', textAlign: 'right', fontSize: 12, fontWeight: 800, color: '#fff', background: '#3b3b3b', border: '1px solid rgba(255,255,255,0.14)', borderRadius: 8, boxSizing: 'border-box' }}
-                        aria-label='Valore zoom immagine'
-                        title='Inserisci manualmente il livello di zoom e premi Invio'
-                      />
-                      <span style={{ fontSize: 12, fontWeight: 800, color: '#fff' }}>%</span>
-                      <button
-                        type='button'
-                        onClick={() => changePreviewImageZoom(-10)}
-                        style={{ width: 28, height: 28, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontSize: 16, fontWeight: 800, color: '#fff', background: '#3b3b3b', border: '1px solid rgba(255,255,255,0.14)', borderRadius: 8, cursor: 'pointer' }}
-                        title='Riduci zoom'
-                      >
-                        −
-                      </button>
-                      <input
-                        type='range'
-                        min={25}
-                        max={400}
-                        step={5}
-                        value={previewImageZoom}
-                        onChange={(e) => setPreviewImageZoom(clampPreviewImageZoom(Number(e.currentTarget.value)))}
-                        style={{ width: 180, maxWidth: '42vw' }}
-                        aria-label='Zoom immagine'
-                      />
-                      <button
-                        type='button'
-                        onClick={() => changePreviewImageZoom(10)}
-                        style={{ width: 28, height: 28, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontSize: 16, fontWeight: 800, color: '#fff', background: '#3b3b3b', border: '1px solid rgba(255,255,255,0.14)', borderRadius: 8, cursor: 'pointer' }}
-                        title='Aumenta zoom'
-                      >
-                        +
-                      </button>
-                      <button
-                        type='button'
-                        onClick={() => setPreviewImageZoom(100)}
-                        style={{ height: 28, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontSize: 12, fontWeight: 800, color: '#fff', background: '#3b3b3b', border: '1px solid rgba(255,255,255,0.14)', borderRadius: 8, padding: '0 10px', cursor: 'pointer' }}
-                        title='Adatta alla vista'
-                      >
-                        Adatta
-                      </button>
-                      <button
-                        type='button'
-                        onClick={downloadPreviewAttachment}
-                        style={{ height: 28, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontSize: 12, fontWeight: 800, color: '#fff', background: '#3b3b3b', border: '1px solid rgba(255,255,255,0.14)', borderRadius: 8, padding: '0 10px', cursor: 'pointer' }}
-                        title='Scarica allegato'
-                      >
-                        Scarica
-                      </button>
-                      <button
-                        type='button'
-                        onClick={printPreviewAttachment}
-                        style={{ height: 28, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontSize: 12, fontWeight: 800, color: '#fff', background: '#3b3b3b', border: '1px solid rgba(255,255,255,0.14)', borderRadius: 8, padding: '0 10px', cursor: 'pointer' }}
-                        title='Stampa allegato'
-                      >
-                        Stampa
-                      </button>
-                      <button
-                        type='button'
-                        onClick={() => { void togglePreviewFullscreen() }}
-                        style={{ height: 28, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontSize: 12, fontWeight: 800, color: '#fff', background: '#3b3b3b', border: '1px solid rgba(255,255,255,0.14)', borderRadius: 8, padding: '0 10px', cursor: 'pointer' }}
-                        title='Schermo intero'
-                      >
-                        Fullscreen
-                      </button>
-                    </div>
-                  </div>
-                )
-                if (ct === 'application/pdf') return (
-                  <div style={{ width: '100%', flex: '1 1 auto', minHeight: 0, display: 'flex', flexDirection: 'column', gap: 10 }}>
-                    <div style={{ flex: '0 0 auto', fontSize: 11, color: 'rgba(255,255,255,0.70)', textAlign: 'center', wordBreak: 'break-word' }}>
-                      {previewAttachment.name || `Allegato #${previewAttachment.id}`}
-                      {previewAttachment.contentType ? ` • ${previewAttachment.contentType}` : ''}
-                    </div>
-                    <iframe src={previewBlobUrl} title={previewAttachment.name || 'PDF'} style={{ width: '100%', flex: '1 1 auto', minHeight: 0, height: '100%', border: 'none', borderRadius: 6 }}/>
-                    <div style={{ flex: '0 0 auto', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 10, flexWrap: 'wrap', marginTop: 'auto', padding: '8px 12px', borderRadius: 8, background: '#2f2f2f', color: '#fff' }}>
-                      <button
-                        type='button'
-                        onClick={downloadPreviewAttachment}
-                        style={{ height: 28, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontSize: 12, fontWeight: 800, color: '#fff', background: '#3b3b3b', border: '1px solid rgba(255,255,255,0.14)', borderRadius: 8, padding: '0 10px', cursor: 'pointer' }}
-                        title='Scarica allegato'
-                      >
-                        Scarica
-                      </button>
-                      <button
-                        type='button'
-                        onClick={printPreviewAttachment}
-                        style={{ height: 28, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontSize: 12, fontWeight: 800, color: '#fff', background: '#3b3b3b', border: '1px solid rgba(255,255,255,0.14)', borderRadius: 8, padding: '0 10px', cursor: 'pointer' }}
-                        title='Stampa allegato'
-                      >
-                        Stampa
-                      </button>
-                      <button
-                        type='button'
-                        onClick={() => { void togglePreviewFullscreen() }}
-                        style={{ height: 28, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontSize: 12, fontWeight: 800, color: '#fff', background: '#3b3b3b', border: '1px solid rgba(255,255,255,0.14)', borderRadius: 8, padding: '0 10px', cursor: 'pointer' }}
-                        title='Schermo intero'
-                      >
-                        Fullscreen
-                      </button>
-                    </div>
-                  </div>
-                )
-                return <div style={{ fontSize: 12, color: 'rgba(255,255,255,0.64)' }}>Anteprima non disponibile per questo tipo di file.</div>
+                if (ct.startsWith('image/')) return <img src={previewBlobUrl} alt={previewAttachment.name || ''} style={{ maxWidth: '100%', maxHeight: '70vh', borderRadius: 6, objectFit: 'contain' }}/>
+                if (ct === 'application/pdf') return <iframe src={previewBlobUrl} title={previewAttachment.name || 'PDF'} style={{ width: '100%', height: '70vh', border: 'none', borderRadius: 6 }}/>
+                return <div style={{ fontSize: 12, color: '#9ca3af' }}>Anteprima non disponibile per questo tipo di file.</div>
               })() : (
-                <div style={{ fontSize: 12, color: 'rgba(255,255,255,0.64)' }}>Anteprima non disponibile per questo tipo di file.</div>
+                <div style={{ fontSize: 12, color: '#9ca3af' }}>Anteprima non disponibile per questo tipo di file.</div>
               )}
-              {previewAttachment && !['application/pdf'].includes(String(previewAttachment.contentType || '').toLowerCase()) && !String(previewAttachment.contentType || '').toLowerCase().startsWith('image/') && (
-                <div style={{ marginTop: 8, fontSize: 11, color: 'rgba(255,255,255,0.70)', textAlign: 'center', wordBreak: 'break-word' }}>
+              {previewAttachment && (
+                <div style={{ marginTop: 8, fontSize: 11, color: '#6b7280', textAlign: 'center', wordBreak: 'break-word' }}>
                   {previewAttachment.name || `Allegato #${previewAttachment.id}`}
                   {previewAttachment.contentType ? ` • ${previewAttachment.contentType}` : ''}
                 </div>
@@ -7133,104 +6878,6 @@ function findMapHostElement (mapWidgetId?: string | null): HTMLElement | null {
   return null
 }
 
-/* ─────────────────────────────────────────────────────────────
-   EmbeddedMapPanel — ArcGIS MapView integrato direttamente
-   Crea un MapView + WebMap via AMD senza dipendere dal widget mappa ExB.
-   Include i widget standard: Zoom, Home, Locate, Compass,
-   BasemapToggle, ScaleBar, Fullscreen, DistanceMeasurement2D,
-   AreaMeasurement2D, LayerList, Expand.
-   ───────────────────────────────────────────────────────────── */
-async function addMapTools (view: any): Promise<void> {
-  try {
-    const [Home, Locate, Compass, BasemapToggle, ScaleBar, Fullscreen,
-           DistanceMeasurement2D, AreaMeasurement2D, LayerList, Expand
-    ] = await Promise.all([
-      loadEsriModule<any>('esri/widgets/Home'),
-      loadEsriModule<any>('esri/widgets/Locate'),
-      loadEsriModule<any>('esri/widgets/Compass'),
-      loadEsriModule<any>('esri/widgets/BasemapToggle'),
-      loadEsriModule<any>('esri/widgets/ScaleBar'),
-      loadEsriModule<any>('esri/widgets/Fullscreen'),
-      loadEsriModule<any>('esri/widgets/DistanceMeasurement2D'),
-      loadEsriModule<any>('esri/widgets/AreaMeasurement2D'),
-      loadEsriModule<any>('esri/widgets/LayerList'),
-      loadEsriModule<any>('esri/widgets/Expand')
-    ])
-
-    // Top-left: Home, Locate, Compass (Zoom è di default)
-    view.ui.add(new Home({ view }), 'top-left')
-    view.ui.add(new Locate({ view }), 'top-left')
-    view.ui.add(new Compass({ view }), 'top-left')
-
-    // Top-right: LayerList, BasemapToggle (in Expand)
-    const layerList = new LayerList({ view })
-    view.ui.add(new Expand({ view, content: layerList, expandTooltip: 'Layer', collapseTooltip: 'Chiudi layer' }), 'top-right')
-    view.ui.add(new Expand({ view, content: new BasemapToggle({ view }), expandTooltip: 'Basemap', collapseTooltip: 'Chiudi basemap' }), 'top-right')
-
-    // Bottom-left: ScaleBar
-    view.ui.add(new ScaleBar({ view, unit: 'metric' }), 'bottom-left')
-
-    // Bottom-right: Fullscreen, misure (in Expand)
-    view.ui.add(new Fullscreen({ view }), 'bottom-right')
-
-    const distWidget = new DistanceMeasurement2D({ view })
-    view.ui.add(new Expand({ view, content: distWidget, expandTooltip: 'Misura distanza', collapseTooltip: 'Chiudi misura distanza' }), 'bottom-right')
-
-    const areaWidget = new AreaMeasurement2D({ view })
-    view.ui.add(new Expand({ view, content: areaWidget, expandTooltip: 'Misura area', collapseTooltip: 'Chiudi misura area' }), 'bottom-right')
-  } catch {}
-}
-
-function EmbeddedMapPanel (p: {
-  portalItemId: string
-  portalUrl: string
-  onViewReady: (view: any) => void
-  visible: boolean
-  style?: any
-}) {
-  const containerRef = React.useRef<HTMLDivElement>(null)
-  const viewRef = React.useRef<any>(null)
-  const readyFired = React.useRef(false)
-
-  React.useEffect(() => {
-    if (!p.portalItemId || !containerRef.current) return
-    let destroyed = false
-    ;(async () => {
-      try {
-        const [MapView, WebMap, esriConfig] = await Promise.all([
-          loadEsriModule<any>('esri/views/MapView'),
-          loadEsriModule<any>('esri/WebMap'),
-          loadEsriModule<any>('esri/config')
-        ])
-        if (destroyed) return
-        if (p.portalUrl) esriConfig.portalUrl = p.portalUrl
-        const webmap = new WebMap({ portalItem: { id: p.portalItemId } })
-        const view = new MapView({ container: containerRef.current, map: webmap })
-        viewRef.current = view
-        await view.when()
-        if (destroyed) return
-        await addMapTools(view)
-        if (!readyFired.current) { readyFired.current = true; p.onViewReady(view) }
-      } catch {}
-    })()
-    return () => {
-      destroyed = true
-      try { viewRef.current?.destroy?.() } catch {}
-      viewRef.current = null
-      readyFired.current = false
-    }
-  }, [p.portalItemId, p.portalUrl])
-
-  // Resize quando diventa visibile (la mappa potrebbe non sapere le dimensioni corrette)
-  React.useEffect(() => {
-    if (!p.visible || !viewRef.current) return
-    const t = setTimeout(() => { try { viewRef.current?.resize?.() } catch {} }, 150)
-    return () => clearTimeout(t)
-  }, [p.visible])
-
-  return <div ref={containerRef} style={{ width: '100%', height: '100%', minHeight: 200, ...(p.style || {}) }} />
-}
-
 function normalizeLayerTitleForMatch (raw: any): string {
   return String(raw || '')
     .normalize('NFD')
@@ -7700,7 +7347,6 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
   }, [effectiveIntent?.layerUrl])
 
   const mapWidgetId = Array.isArray(cfg.useMapWidgetIds) ? cfg.useMapWidgetIds[0] : null
-  const useEmbeddedMap = !!String(cfg.embeddedMapPortalItem || '').trim()
   const [mapView, setMapView] = React.useState<any>(null)
   const [formTab, setFormTab] = React.useState<string>('anagrafica')
   const [clickedPointWgs84, setClickedPointWgs84] = React.useState<any | null>(null)
@@ -8021,12 +7667,10 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
     return () => { cancelled = true }
   }, [mapView, editOid, editIdFieldName, inCreateMode, editReqPoint, pageVisitCount, cfg.mapLayerId, cfg.mapLayerUrl, cfg.mapLayerLayerId, cfg.mapLayerTitle])
 
-  const showEmbeddedMap = useEmbeddedMap && formTab === 'dati_tecnici'
-
   return (
     <div ref={rootRef} data-gii-editing-root='1' style={{ width: '100%', height: '100%', display: 'flex', flexDirection: 'column', minHeight: 0, boxSizing: 'border-box', padding: Number.isFinite(Number((cfg as any).maskOuterOffset ?? 0)) ? Number((cfg as any).maskOuterOffset) : 0, position: 'relative', zIndex: uiLocked ? 1001 : 'auto', background: modeBg, transition: 'background 0.3s' }}>
       {/* Mappa esterna ExB (fallback legacy) — nascosta, solo per agganciare la view */}
-      {!useEmbeddedMap && mapWidgetId && (
+      {mapWidgetId && (
         <div style={{ display: 'none' }}>
           <JimuMapViewComponent
             useMapWidgetId={mapWidgetId}
@@ -8037,7 +7681,7 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
 
       <div style={{ flex: '1 1 auto', display: 'flex', flexDirection: 'row', minHeight: 0 }}>
         {/* Form */}
-        <div style={{ flex: showEmbeddedMap ? '0 0 50%' : '1 1 100%', minHeight: 0, overflow: formTab === 'anteprima' ? 'visible' : 'hidden', display: 'flex', flexDirection: 'column', transition: 'flex 0.25s' }}>
+        <div style={{ flex: '1 1 100%', minHeight: 0, overflow: formTab === 'anteprima' ? 'visible' : 'hidden', display: 'flex', flexDirection: 'column', transition: 'flex 0.25s' }}>
           {anyDs ? (
             <NuovaPraticaForm
               ds={anyDs}
@@ -8085,17 +7729,6 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
           )}
         </div>
 
-        {/* Mappa embedded — sempre montata (per preservare view), visibile solo in dati_tecnici */}
-        {useEmbeddedMap && (
-          <div style={{ flex: '0 0 50%', display: showEmbeddedMap ? 'flex' : 'none', minHeight: 0 }}>
-            <EmbeddedMapPanel
-              portalItemId={String(cfg.embeddedMapPortalItem || '').trim()}
-              portalUrl={String(cfg.embeddedMapPortalUrl || 'https://cbsm-hub.maps.arcgis.com').trim()}
-              onViewReady={(view: any) => setMapView(view)}
-              visible={showEmbeddedMap}
-            />
-          </div>
-        )}
       </div>
       <DirtyNavigationLockOverlay active={formDirty} targetRef={rootRef} />
     </div>

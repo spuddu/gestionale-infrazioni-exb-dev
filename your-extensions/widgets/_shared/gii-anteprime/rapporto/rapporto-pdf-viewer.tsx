@@ -551,6 +551,7 @@ export default function RapportoPdfViewer (props: Props): any {
         minHeight: 0,
         display: 'flex',
         flexDirection: 'column',
+        position: 'relative',
         boxSizing: 'border-box',
         borderRadius: 12,
         overflow: 'hidden',
@@ -560,6 +561,12 @@ export default function RapportoPdfViewer (props: Props): any {
         ...(props.style || {})
       }}
     >
+      {(props.title || props.subtitle) && (
+        <div style={{ flex: '0 0 auto', width: '100%', boxSizing: 'border-box', padding: props.subtitle ? '6px 14px 7px' : '7px 14px', background: '#282828', borderBottom: '1px solid rgba(255,255,255,0.12)', color: '#fff', textAlign: 'center', lineHeight: 1.2 }}>
+          {props.title && <div style={{ fontSize: 12, fontWeight: 800, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{props.title}</div>}
+          {props.subtitle && <div style={{ marginTop: 2, fontSize: 10, color: 'rgba(255,255,255,0.78)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{props.subtitle}</div>}
+        </div>
+      )}
       <div style={{ flex: '1 1 0', width: '100%', maxWidth: '100%', minWidth: 0, minHeight: 0, display: 'flex', background: '#282828', overflow: 'hidden', boxSizing: 'border-box' }}>
         {showToolbar && pageCount > 1 && (
           <div style={{ flex: '0 0 124px', width: 124, maxWidth: 124, minWidth: 124, minHeight: 0, overflowY: 'auto', overflowX: 'hidden', padding: 10, boxSizing: 'border-box', borderRight: '1px solid rgba(255,255,255,0.12)', background: '#1f1f1f' }}>
@@ -586,12 +593,6 @@ export default function RapportoPdfViewer (props: Props): any {
           style={{ flex: '1 1 0', width: 0, maxWidth: '100%', minWidth: 0, minHeight: 0, position: 'relative', background: '#282828', overflow: 'auto', padding: 12, cursor: isPanning ? 'grabbing' : 'grab', userSelect: 'none', touchAction: 'none', boxSizing: 'border-box', overscrollBehavior: 'contain' as any }}
           title='Trascina per spostarti; scorri per cambiare pagina; usa Shift + rotellina per lo zoom'
         >
-          {(props.title || props.subtitle) && (
-            <div style={{ position: 'sticky', top: 0, zIndex: 3, pointerEvents: 'none', padding: '0 8px 8px', textAlign: 'center', color: '#fff' }}>
-              {props.title && <div style={{ display: 'inline-block', maxWidth: '100%', padding: '4px 10px', borderRadius: 999, background: 'rgba(0,0,0,0.42)', fontSize: 12, fontWeight: 800, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{props.title}</div>}
-              {props.subtitle && <div style={{ marginTop: 3, fontSize: 10, color: 'rgba(255,255,255,0.72)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{props.subtitle}</div>}
-            </div>
-          )}
           {effectiveLoading && <div style={{ color: 'rgba(255,255,255,0.76)', fontSize: 14 }}>Generazione anteprima…</div>}
           {!effectiveLoading && effectiveError && <div style={{ color: '#fca5a5', fontSize: 14, padding: 20, textAlign: 'center' }}>{effectiveError}</div>}
           {!effectiveLoading && !effectiveError && !url && <div style={{ color: 'rgba(255,255,255,0.64)', fontSize: 14, padding: 20, textAlign: 'center' }}>{props.emptyText || 'Nessun dato disponibile per l\'anteprima.'}</div>}
@@ -627,10 +628,22 @@ export default function RapportoPdfViewer (props: Props): any {
           <button
             type='button'
             onClick={() => setTwoPageView(v => !v)}
-            style={{ ...btnStyle, background: twoPageView ? '#1d4ed8' : '#3b3b3b' }}
+            style={{ ...btnStyle, width: 34, minWidth: 34, padding: 0 }}
             title={twoPageView ? 'Passa alla vista a pagina singola' : 'Passa alla vista a pagine affiancate'}
+            aria-label={twoPageView ? 'Passa alla vista a pagina singola' : 'Passa alla vista a pagine affiancate'}
           >
-            {twoPageView ? 'Pagina singola' : 'Pagine affiancate'}
+            {twoPageView ? (
+              <svg width='18' height='18' viewBox='0 0 24 24' aria-hidden='true' focusable='false'>
+                <rect x='7' y='4' width='10' height='16' rx='1.4' fill='none' stroke='currentColor' strokeWidth='1.8' />
+                <path d='M10 7h4M10 10h4M10 13h4M10 16h3' fill='none' stroke='currentColor' strokeWidth='1.5' strokeLinecap='round' />
+              </svg>
+            ) : (
+              <svg width='18' height='18' viewBox='0 0 24 24' aria-hidden='true' focusable='false'>
+                <rect x='4' y='5' width='7' height='14' rx='1.2' fill='none' stroke='currentColor' strokeWidth='1.8' />
+                <rect x='13' y='5' width='7' height='14' rx='1.2' fill='none' stroke='currentColor' strokeWidth='1.8' />
+                <path d='M6.5 8h2M6.5 11h2M6.5 14h2M15.5 8h2M15.5 11h2M15.5 14h2' fill='none' stroke='currentColor' strokeWidth='1.35' strokeLinecap='round' />
+              </svg>
+            )}
           </button>
 
           <span style={{ width: 1, height: 22, background: 'rgba(255,255,255,0.18)' }} />

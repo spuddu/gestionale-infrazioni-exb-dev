@@ -630,16 +630,6 @@ export default function Setting(props: AllWidgetSettingProps<IMConfig>) {
         </select>
         <div style={P.hint}>La lista viene letta dalla WebMap collegata al widget mappa selezionato. La selezione valorizza titolo, URL, ID layer e layerId usati dal runtime per un matching robusto.</div>
 
-        <div style={{fontSize:11,fontWeight:700,color:'#93c5fd',marginTop:16,marginBottom:8}}>Mappa integrata nel widget (opzionale / alternativa)</div>
-        <div style={P.hint}>Se configurata, la mappa viene caricata direttamente dentro il widget nel tab "Luoghi e dati tecnici" senza dipendere da un widget mappa esterno. Può restare vuota se si usa il widget mappa di pagina selezionato sopra.</div>
-        <label style={{...P.lbl, marginTop: 8}}>Portal Item ID della WebMap integrata</label>
-        <input type='text' value={cfg.embeddedMapPortalItem || ''} onChange={e=>set('embeddedMapPortalItem',e.target.value)}
-          style={{...P.inp, marginTop:4}} placeholder='es. ebb5e0d0d2d649daa2e124bd96514245'/>
-        <div style={P.hint}>L'ID della WebMap AGOL da caricare nella mappa integrata. Non viene usato per popolare la combo del layer della mappa di pagina.</div>
-        <label style={{...P.lbl, marginTop: 8}}>Portal URL</label>
-        <input type='text' value={cfg.embeddedMapPortalUrl || 'https://cbsm-hub.maps.arcgis.com'} onChange={e=>set('embeddedMapPortalUrl',e.target.value)}
-          style={{...P.inp, marginTop:4}} placeholder='https://cbsm-hub.maps.arcgis.com'/>
-        <div style={P.hint}>L'URL del portale ArcGIS Online. Per CBSM è https://cbsm-hub.maps.arcgis.com</div>
       </div>}
 
 

@@ -166,8 +166,6 @@ export interface Config {
   // --- Nuova pratica inline + mappa
   enableCreateWithoutSelection: boolean
   useMapWidgetIds: string[]
-  embeddedMapPortalItem: string
-  embeddedMapPortalUrl: string
   mapLayerTitle: string   // titolo del layer rapporti nella mappa (fallback)
   mapLayerUrl: string
   mapLayerId: string
@@ -296,8 +294,6 @@ export const defaultConfig: Config = {
 
   enableCreateWithoutSelection: true,
   useMapWidgetIds: [],
-  embeddedMapPortalItem: '',
-  embeddedMapPortalUrl: 'https://cbsm-hub.maps.arcgis.com',
   mapLayerTitle: '',
   mapLayerUrl: '',
   mapLayerId: '',
