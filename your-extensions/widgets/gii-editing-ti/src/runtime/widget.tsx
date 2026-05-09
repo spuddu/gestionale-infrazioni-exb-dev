@@ -3879,8 +3879,8 @@ function NoteSpeseManager (props: NsManagerProps) {
                 <th style={thS}>Orig.</th>
                 <th style={thS}>Voce</th>
                 <th style={thS}>Q.tà</th>
-                <th style={thS}>Prezzo (€)</th>
-                <th style={thS}>Importo (€)</th>
+                <th style={{ ...thS, textAlign: 'right' }}>Prezzo (€)</th>
+                <th style={{ ...thS, textAlign: 'right' }}>Importo (€)</th>
                 <th style={thS}>Azioni</th>
               </tr>
             </thead>
@@ -3894,8 +3894,8 @@ function NoteSpeseManager (props: NsManagerProps) {
                   <td style={tdS(idx)}><div style={{ whiteSpace: 'pre-line', lineHeight: 1.1 }}>{`${nsSourceShort(nsNormalizeSource(r.origine_voce_snapshot))}${r.anno_prezzario_snapshot ? `\n${r.anno_prezzario_snapshot}` : ''}`}</div></td>
                   <td style={{ ...tdS(idx), overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={`${r.codice_voce_snapshot} — ${r.descrizione_snapshot}`}><b>{r.codice_voce_snapshot}</b> — {r.descrizione_snapshot}</td>
                   <td style={{ ...tdS(idx), ...(noQty ? { background: '#fff3cd', fontWeight: 700, color: '#856404' } : {}) }}>{noQty ? '—' : `${nsSafeNum(r.quantita, 0).toLocaleString('it-IT', { minimumFractionDigits: 0, maximumFractionDigits: 4 })} ${r.unita_misura_snapshot || ''}`}</td>
-                  <td style={tdS(idx)}>{money(r.prezzo_unitario_snapshot)}</td>
-                  <td style={tdS(idx)}>{money(r.importo_riga)}</td>
+                  <td style={{ ...tdS(idx), textAlign: 'right' }}>{money(r.prezzo_unitario_snapshot)}</td>
+                  <td style={{ ...tdS(idx), textAlign: 'right' }}>{money(r.importo_riga)}</td>
                   <td style={{ ...tdS(idx), whiteSpace: 'nowrap' }}>
                     <button type='button' onClick={() => startEdit(idx)} style={{ cursor: 'pointer', fontSize: 11, padding: '2px 8px', borderRadius: 3, border: 'none', marginRight: 4, fontWeight: 700, background: '#1B6584', color: '#fff' }}>✎</button>
                     <button type='button' onClick={() => onDelete(idx)} style={{ cursor: 'pointer', fontSize: 11, padding: '2px 8px', borderRadius: 3, border: 'none', fontWeight: 700, background: '#c00', color: '#fff' }}>✕</button>
