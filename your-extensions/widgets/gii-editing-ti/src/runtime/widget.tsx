@@ -5463,24 +5463,34 @@ React.useEffect(() => {
       minHeight: 0
     }
 
-    if (npTab !== 'anteprima') {
+    if (npTab === 'anteprima') {
       return {
         ...base,
-        overflowY: 'auto',
-        padding: '12px 2px'
+        overflow: 'hidden',
+        padding: 0,
+        marginTop: anteprimaPadding.top,
+        marginLeft: anteprimaPadding.x - anteprimaPadding.outer,
+        marginRight: anteprimaPadding.x - anteprimaPadding.outer,
+        marginBottom: anteprimaPadding.bottom - anteprimaPadding.outer,
+        borderBottomLeftRadius: anteprimaPadding.bottomRadius,
+        borderBottomRightRadius: anteprimaPadding.bottomRadius
+      }
+    }
+
+    if (npTab === 'allegati') {
+      return {
+        ...base,
+        overflow: 'hidden',
+        padding: '12px 2px',
+        display: 'flex',
+        flexDirection: 'column' as const
       }
     }
 
     return {
       ...base,
-      overflow: 'hidden',
-      padding: 0,
-      marginTop: anteprimaPadding.top,
-      marginLeft: anteprimaPadding.x - anteprimaPadding.outer,
-      marginRight: anteprimaPadding.x - anteprimaPadding.outer,
-      marginBottom: anteprimaPadding.bottom - anteprimaPadding.outer,
-      borderBottomLeftRadius: anteprimaPadding.bottomRadius,
-      borderBottomRightRadius: anteprimaPadding.bottomRadius
+      overflowY: 'auto',
+      padding: '12px 2px'
     }
   }, [npTab, anteprimaPadding])
 
@@ -5804,9 +5814,9 @@ React.useEffect(() => {
               </div>
             </div>
           ) : (
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, alignItems: 'start' }}>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, flex: '1 1 auto', minHeight: 0 }}>
             {/* Colonna sinistra: lista allegati */}
-            <div style={{ display: 'grid', gap: 10 }}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 10, overflowY: 'auto', minHeight: 0 }}>
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, flexWrap: 'wrap' }}>
                 <div style={{ fontWeight: 800, fontSize: 13 }}>Allegati</div>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
@@ -5940,21 +5950,21 @@ React.useEffect(() => {
               )}
             </div>
             {/* Colonna destra: anteprima */}
-            <div style={{ border: '1px solid rgba(0,0,0,0.08)', borderRadius: 10, padding: 12, background: '#fafbfc', minHeight: 200, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: previewAttachment ? 'flex-start' : 'center' }}>
+            <div style={{ border: '1px solid rgba(255,255,255,0.08)', borderRadius: 10, padding: 12, background: '#282828', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: previewAttachment ? 'flex-start' : 'center', overflow: 'hidden', minHeight: 0 }}>
               {!previewAttachment ? (
-                <div style={{ fontSize: 12, color: '#9ca3af', textAlign: 'center' }}>Seleziona un allegato per visualizzare l&apos;anteprima</div>
+                <div style={{ fontSize: 12, color: 'rgba(255,255,255,0.45)', textAlign: 'center' }}>Seleziona un allegato per visualizzare l&apos;anteprima</div>
               ) : previewLoading ? (
-                <div style={{ fontSize: 12, color: '#6b7280' }}>Caricamento anteprima…</div>
+                <div style={{ fontSize: 12, color: 'rgba(255,255,255,0.55)' }}>Caricamento anteprima…</div>
               ) : previewBlobUrl ? (() => {
                 const ct = String(previewAttachment.contentType || '').toLowerCase()
-                if (ct.startsWith('image/')) return <img src={previewBlobUrl} alt={previewAttachment.name || ''} style={{ maxWidth: '100%', maxHeight: '70vh', borderRadius: 6, objectFit: 'contain' }}/>
-                if (ct === 'application/pdf') return <iframe src={previewBlobUrl} title={previewAttachment.name || 'PDF'} style={{ width: '100%', height: '70vh', border: 'none', borderRadius: 6 }}/>
-                return <div style={{ fontSize: 12, color: '#9ca3af' }}>Anteprima non disponibile per questo tipo di file.</div>
+                if (ct.startsWith('image/')) return <img src={previewBlobUrl} alt={previewAttachment.name || ''} style={{ maxWidth: '100%', maxHeight: '100%', borderRadius: 6, objectFit: 'contain', flex: '1 1 auto', minHeight: 0 }}/>
+                if (ct === 'application/pdf') return <iframe src={previewBlobUrl} title={previewAttachment.name || 'PDF'} style={{ width: '100%', flex: '1 1 auto', minHeight: 0, border: 'none', borderRadius: 6 }}/>
+                return <div style={{ fontSize: 12, color: 'rgba(255,255,255,0.45)' }}>Anteprima non disponibile per questo tipo di file.</div>
               })() : (
-                <div style={{ fontSize: 12, color: '#9ca3af' }}>Anteprima non disponibile per questo tipo di file.</div>
+                <div style={{ fontSize: 12, color: 'rgba(255,255,255,0.45)' }}>Anteprima non disponibile per questo tipo di file.</div>
               )}
               {previewAttachment && (
-                <div style={{ marginTop: 8, fontSize: 11, color: '#6b7280', textAlign: 'center', wordBreak: 'break-word' }}>
+                <div style={{ marginTop: 8, fontSize: 11, color: 'rgba(255,255,255,0.78)', textAlign: 'center', wordBreak: 'break-word' }}>
                   {previewAttachment.name || `Allegato #${previewAttachment.id}`}
                   {previewAttachment.contentType ? ` • ${previewAttachment.contentType}` : ''}
                 </div>
