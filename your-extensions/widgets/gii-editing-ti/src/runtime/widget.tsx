@@ -1654,10 +1654,12 @@ const PRESA_DA_PRENDERE = 1
 function filterAttrsForLayer(attrs: Record<string, any>, layer: any): Record<string, any> {
   const fields = (layer?.fields || []) as Array<{ name: string }>
   if (!fields.length) return attrs
-  const allow = new Set(fields.map((f: any) => String(f.name)))
+  const nameMap = new Map<string, string>()
+  for (const f of fields) nameMap.set(String(f.name).toLowerCase(), String(f.name))
   const out: Record<string, any> = {}
   for (const k of Object.keys(attrs)) {
-    if (allow.has(k)) out[k] = attrs[k]
+    const realName = nameMap.get(k.toLowerCase())
+    if (realName) out[realName] = attrs[k]
   }
   return out
 }
@@ -3840,7 +3842,7 @@ function NoteSpeseManager (props: NsManagerProps) {
     <div style={{ border: '1px solid #c5d9f1', borderRadius: 8, overflow: 'hidden', background: '#fff' }}>
       <div style={{ background: '#1F4E79', color: '#fff', padding: '8px 10px', fontSize: 13, fontWeight: 700, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <span>{props.title}</span>
-        <span style={{ fontSize: 12, opacity: 0.9 }}>{money(categoryTotal)}</span>
+        <span style={{ fontSize: 12, opacity: 0.9 }}>{money(categoryTotal)} €</span>
       </div>
       <div style={{ padding: 10, display: 'grid', gap: 8 }}>
         {msg && (
@@ -3877,8 +3879,8 @@ function NoteSpeseManager (props: NsManagerProps) {
                 <th style={thS}>Orig.</th>
                 <th style={thS}>Voce</th>
                 <th style={thS}>Q.tà</th>
-                <th style={thS}>Prezzo</th>
-                <th style={thS}>Importo</th>
+                <th style={thS}>Prezzo (€)</th>
+                <th style={thS}>Importo (€)</th>
                 <th style={thS}>Azioni</th>
               </tr>
             </thead>
@@ -3944,10 +3946,11 @@ function draftFromRecord (rec: any): NpDraft {
   const out: NpDraft = {}
   if (!rec || typeof rec !== 'object') return out
   for (const k of Object.keys(rec)) {
+    const lk = k.toLowerCase()
     const v = rec[k]
-    if (v == null) out[k] = ''
-    else if (DRAFT_DATE_FIELDS.has(k)) out[k] = toDraftDate(v)
-    else out[k] = String(v)
+    if (v == null) out[lk] = ''
+    else if (DRAFT_DATE_FIELDS.has(lk)) out[lk] = toDraftDate(v)
+    else out[lk] = String(v)
   }
   if (out.dom_notifica_uguale == null || out.dom_notifica_uguale === '') out.dom_notifica_uguale = '1'
   if (out.rl_dom_notifica == null || out.rl_dom_notifica === '') out.rl_dom_notifica = '0'
@@ -5772,7 +5775,7 @@ React.useEffect(() => {
         ] as [string, number][]).map(([label, value], idx) => (
           <div key={idx} style={{ background: idx === 6 ? '#1F4E79' : '#f5f9ff', border: '1px solid #c5d9f1', borderRadius: 6, padding: '6px 8px' }}>
             <div style={{ fontSize: 10, fontWeight: 700, color: idx === 6 ? 'rgba(255,255,255,0.8)' : '#1F4E79', marginBottom: 2, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{label}</div>
-            <div style={{ fontSize: 14, fontWeight: 800, color: idx === 6 ? '#fff' : '#16375a' }}>{nsSafeNum(value, 0).toLocaleString('it-IT', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>
+            <div style={{ fontSize: 14, fontWeight: 800, color: idx === 6 ? '#fff' : '#16375a' }}>{nsSafeNum(value, 0).toLocaleString('it-IT', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €</div>
           </div>
         ))}
       </div>

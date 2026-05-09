@@ -165,7 +165,7 @@ function buildPlaceholderMap (data: any, utentiCache: Map<string, UtenteCached> 
     idrante: esc(d.idrante || ''), comune: '', foglio: '', mappali: '', altro_luogo: '',
     distretto_irriguo: esc(d.distretto_irriguo || ''), comizio: esc(d.comizio || ''),
     matricola_contatore: esc(d.matricola_contatore || ''), matricola_tessera: esc(d.matricola_tessera || ''),
-    importo_rimborso: fmtNum(d.importo_rimborso)
+    importo_rimborso: fmtNum(d.ns_totale_complessivo) ? fmtNum(d.ns_totale_complessivo) + ' €' : ''
   }
 }
 

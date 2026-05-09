@@ -227,7 +227,7 @@ export async function buildRapportoPdf (m: Record<string, string>): Promise<Uint
   }
 
   // ── Importo (top=791.99) ──
-  txt(p1, v('importo_rimborso'), fR, 8.5, 160, bY(792, 8.5), BLACK, 140)
+  txt(p1, v('importo_rimborso'), fR, 8.5, 165, bY(792, 8.5), BLACK, 140)
 
   // ════════════════════════════════════════════════════════════
   //  PAGINA 2
