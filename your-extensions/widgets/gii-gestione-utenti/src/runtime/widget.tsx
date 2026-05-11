@@ -349,7 +349,7 @@ function exportCSV(utenti: UtenteRecord[]): void {
 // ── CSS ────────────────────────────────────────────────────────────────────
 const styles = `
   .ggu { font-family: Arial, sans-serif; font-size: 13px; padding: 12px; height: 100%; display: flex; flex-direction: column; gap: 10px; box-sizing: border-box; }
-  .ggu-title { font-size: 15px; font-weight: bold; color: #1F4E79; border-bottom: 2px solid #1F4E79; padding-bottom: 6px; margin: 0; }
+  .ggu-title { font-size: 15px; font-weight: bold; color: #93c5fd; border-bottom: 2px solid #93c5fd; padding-bottom: 6px; margin: 0; }
   .ggu-form { background: #f5f9ff; border: 1px solid #c5d9f1; border-radius: 6px; padding: 14px; display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
   .ggu-field { display: flex; flex-direction: column; gap: 3px; }
   .ggu-label { font-size: 11px; font-weight: bold; color: #1F4E79; }
