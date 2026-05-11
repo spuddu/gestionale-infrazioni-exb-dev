@@ -4093,7 +4093,7 @@ function NuovaPraticaForm (p: {
     }
   }, [validationPopup, validationPopupOkId])
 
-  const [npTab, setNpTab] = React.useState<'dati_generali' | 'trasgressore' | 'violazione' | 'dati_tecnici' | 'nota_spese' | 'allegati' | 'anteprima'>('dati_generali')
+  const [npTab, setNpTab] = React.useState<'dati_generali' | 'trasgressore' | 'violazione' | 'dati_tecnici' | 'nota_spese' | 'allegati' | 'anteprima'>('trasgressore')
   const [isExternalNavMode, setIsExternalNavMode] = React.useState<boolean>(true)
   const skipNpTabSyncRef = React.useRef(false)
   const tabResetFirstRef = React.useRef(true)
@@ -4110,7 +4110,7 @@ function NuovaPraticaForm (p: {
       return
     }
     const requested = getRequestedEditSection()
-    setNpTab(requested || 'dati_generali')
+    setNpTab(requested || 'trasgressore')
   }, [mode, editOid])
 
   // Notifica il parent del cambio tab
@@ -4124,7 +4124,7 @@ function NuovaPraticaForm (p: {
     const el = npTabSyncElRef.current?.closest?.('[data-gii-editing-root]') as HTMLElement | null
     const isVisible = !!(el && el.offsetWidth > 0 && el.offsetHeight > 0)
     if (isVisible) {
-      try { window.dispatchEvent(new CustomEvent('gii:edit-section-change', { detail: { section: npTab } })) } catch {}
+      try { window.dispatchEvent(new CustomEvent('gii:edit-section-change', { detail: { section: npTab.replace(/_/g, '-') } })) } catch {}
     }
   }, [npTab])
 
@@ -4188,7 +4188,7 @@ function NuovaPraticaForm (p: {
     setBaselineDraft({})
     setMsg(null)
     skipNpTabSyncRef.current = true
-    setNpTab('dati_generali')
+    setNpTab('trasgressore')
     const pageToken = String(cfg.editPageId || 'page_32').trim()
     const pageId = resolvePageId(pageToken) || resolvePageId('Modifica Rapporto')
     if (pageId) {
@@ -5505,16 +5505,29 @@ React.useEffect(() => {
   // ── Layout engine ──────────────────────────────────────────────────
   type FldR = { el: React.ReactNode; label: string; hint?: string }
 
+  const AREA_LABELS: Record<string, string> = { AGR: 'AGRARIA', TEC: 'TECNICA', AMM: 'AFFARI GENERALI E PROGRAMMAZIONE FINANZIARIA' }
+  const SETTORE_LABELS: Record<string, string> = {
+    D1: 'DISTRETTO 1 \u2013 SAN SPERATE', D2: 'DISTRETTO 2 \u2013 SERRAMANNA/PIMPISU', D3: 'DISTRETTO 3 \u2013 SAN GAVINO/VILLACIDRO',
+    D4: 'DISTRETTO 4 \u2013 BASSO SULCIS', D5: 'DISTRETTO 5 \u2013 SENORB\u00CC', D6: 'DISTRETTO 6 \u2013 CIXERRI',
+    DS: 'MANUTENZIONE OPERE DI DRENO E DI SCOLO', CR: 'CATASTO, RUOLI E SERVIZI TERRITORIALI'
+  }
+  const fmtDateDMY = (v: any): string => {
+    if (!v) return ''
+    const d = new Date(typeof v === 'number' ? v : String(v))
+    if (isNaN(d.getTime())) return String(v)
+    return d.toLocaleDateString('it-IT', { day: '2-digit', month: '2-digit', year: 'numeric' })
+  }
+
   const renderFieldControl = (name: string): FldR | null => {
     switch (name) {
       // Dati generali (read-only)
-      case 'area_cod': return { label: 'Area', el: <NpText value={g('area_cod')} onChange={() => {}} disabled/> }
-      case 'settore_cod': return { label: 'Settore', el: <NpText value={g('settore_cod')} onChange={() => {}} disabled/> }
+      case 'area_cod': return { label: 'Area', el: <NpText value={AREA_LABELS[g('area_cod')] || g('area_cod')} onChange={() => {}} disabled/> }
+      case 'settore_cod': return { label: 'Settore', el: <NpText value={SETTORE_LABELS[g('settore_cod')] || g('settore_cod')} onChange={() => {}} disabled/> }
       case 'tecnico_rilevatore': return { label: 'Tecnico rilevatore', el: <NpText value={g('tecnico_rilevatore')} onChange={() => {}} disabled/> }
       case 'ufficio_zona': return { label: 'Ufficio di zona', el: <NpText value={g('ufficio_zona')} onChange={() => {}} disabled/> }
-      case 'data_rilevazione': return { label: 'Data rilevazione', el: <NpText value={g('data_rilevazione')} onChange={() => {}} disabled/> }
+      case 'data_rilevazione': return { label: 'Data rilevazione', el: <NpText value={fmtDateDMY(g('data_rilevazione'))} onChange={() => {}} disabled/> }
       case 'ti_assegnato_nome': return { label: 'Tecnico istruttore', el: <NpText value={g('ti_assegnato_nome')} onChange={() => {}} disabled/> }
-      case 'data_firma': return { label: 'Data compilazione', el: <NpText value={g('data_firma')} onChange={() => {}} disabled/> }
+      case 'data_firma': return { label: 'Data compilazione', el: <NpText value={fmtDateDMY(g('data_firma'))} onChange={() => {}} disabled/> }
       // Anagrafica — Trasgressore
       case 'tipologia_soggetto': return { label: 'Tipologia soggetto', el: <NpSel value={tipoSogg} onChange={v => set('tipologia_soggetto', v)} options={CHOICES.tipo_soggetto} disabled={saving}/> }
       case 'nome': return tipoSogg === 'PF' ? { label: 'Nome', el: <NpText value={g('nome')} onChange={v => set('nome', v)} disabled={saving}/> } : null

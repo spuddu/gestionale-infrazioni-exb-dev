@@ -251,9 +251,15 @@ export async function buildNotaSpesePdf(data: NotaSpeseData): Promise<Uint8Array
   const nsTitle = data.cod_pratica
     ? 'NOTA SPESE ALLEGATA AL RAPPORTO TECNICO DI RILEVAZIONE N. ' + data.cod_pratica
     : 'NOTA SPESE ALLEGATA AL RAPPORTO TECNICO DI RILEVAZIONE'
-  centered(pg, nsTitle, fontB, 10, ML, PW - MR, PH - TEXT_TITLE_TOP, CLR_BLUE)
+  const titleW = fontB.widthOfTextAtSize(nsTitle, 10)
+  if (titleW <= TW) {
+    centered(pg, nsTitle, fontB, 10, ML, PW - MR, PH - TEXT_TITLE_TOP, CLR_BLUE)
+  } else {
+    centered(pg, 'NOTA SPESE ALLEGATA AL RAPPORTO TECNICO DI RILEVAZIONE', fontB, 10, ML, PW - MR, PH - TEXT_TITLE_TOP, CLR_BLUE)
+    centered(pg, 'N. ' + (data.cod_pratica || ''), fontB, 10, ML, PW - MR, PH - TEXT_TITLE_TOP - 14, CLR_BLUE)
+  }
 
-  let top = TABLE_START_TOP
+  let top = (titleW <= TW) ? TABLE_START_TOP : TABLE_START_TOP + 14
 
   function newPage(): void {
     pg = doc.addPage([PW, PH])
@@ -293,10 +299,12 @@ export async function buildNotaSpesePdf(data: NotaSpeseData): Promise<Uint8Array
     for (let ri = 0; ri < catRows.length; ri++) {
       const row = catRows[ri]
 
-      // Word-wrap descrizione per altezza riga dinamica
+      // Word-wrap codice e descrizione per altezza riga dinamica
+      const codLines = wrapText(row.codice_voce_snapshot, fontR, 7.5, CW_CODICE - 6)
       const descLines = wrapText(row.descrizione_snapshot, fontR, 7.5, CW_DESC - 6)
+      const codH = codLines.length * DESC_LH + DESC_PAD * 2
       const descH = descLines.length * DESC_LH + DESC_PAD * 2
-      const rowH = Math.max(ROW_H, descH)
+      const rowH = Math.max(ROW_H, codH, descH)
 
       ensureSpace(rowH + ROW_H)
       if (top <= 36 + 1) {
@@ -313,11 +321,17 @@ export async function buildNotaSpesePdf(data: NotaSpeseData): Promise<Uint8Array
 
       // Colonne a valore singolo: centrate verticalmente nella riga
       const textY = centeredY(top, rowH, 7.5)
-      txt(pg, truncate(row.codice_voce_snapshot, 14), fontR, 7.5, CX_CODICE + 3, textY, CLR_BLACK, CW_CODICE - 6)
       centered(pg, row.unita_misura_snapshot || '', fontR, 7.5, CX_UM, CX_UM + CW_UM, textY, CLR_BLACK)
       rightAligned(pg, formatQty(row.quantita), fontR, 7.5, CX_QTA, CW_QTA, textY, CLR_BLACK)
       rightAligned(pg, money(row.prezzo_unitario_snapshot), fontR, 7.5, CX_PU, CW_PU, textY, CLR_BLACK)
       rightAligned(pg, money(row.importo_riga), fontR, 7.5, CX_IMP, CW_IMP, textY, CLR_BLACK)
+
+      // Codice: multi-riga, allineato in alto con padding
+      let cY = PH - top - DESC_PAD - 7.5 * 0.75
+      for (const line of codLines) {
+        txt(pg, line, fontR, 7.5, CX_CODICE + 3, cY, CLR_BLACK, CW_CODICE - 6)
+        cY -= DESC_LH
+      }
 
       // Descrizione: multi-riga, allineata in alto con padding
       let dY = PH - top - DESC_PAD - 7.5 * 0.75
