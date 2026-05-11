@@ -147,23 +147,23 @@ const C = {
 
 // Top di ogni riga articolo (dalla posizione del numero articolo)
 const ROWS: Array<{ art: string; top: number }> = [
-  { art: '08', top: 372.68 },
-  { art: '12', top: 393.68 },
-  { art: '15', top: 414.56 },
-  { art: '16', top: 442.63 },
-  { art: '17', top: 477.80 },
-  { art: '27', top: 505.76 },
-  { art: '28', top: 526.76 },
-  { art: '29', top: 547.64 },
-  { art: '30', top: 568.64 },
-  { art: '31', top: 589.64 },
-  { art: '32', top: 610.52 },
-  { art: '33', top: 631.52 },
-  { art: '34', top: 652.40 },
-  { art: '35', top: 680.47 },
-  { art: '36', top: 708.56 },
-  { art: '37', top: 729.44 },
-  { art: '39', top: 750.44 }
+  { art: '08', top: 350.96 },
+  { art: '12', top: 371.84 },
+  { art: '15', top: 392.84 },
+  { art: '16', top: 420.92 },
+  { art: '17', top: 455.96 },
+  { art: '27', top: 484.04 },
+  { art: '28', top: 505.04 },
+  { art: '29', top: 525.92 },
+  { art: '30', top: 546.92 },
+  { art: '31', top: 567.80 },
+  { art: '32', top: 588.80 },
+  { art: '33', top: 609.80 },
+  { art: '34', top: 630.68 },
+  { art: '35', top: 658.75 },
+  { art: '36', top: 686.84 },
+  { art: '37', top: 707.72 },
+  { art: '39', top: 728.72 }
 ]
 
 // ══════════════════════════════════════════════════════════════
@@ -187,24 +187,22 @@ export async function buildRapportoPdf (m: Record<string, string>): Promise<Uint
   //  PAGINA 1
   // ════════════════════════════════════════════════════════════
 
-  // ── Titolo centrato (sopra la linea a top=176.64) ──
+  // ── Area / Settore centrati (sopra la linea a top=176.64) ──
+  const areaL = v('area_label')
+  const settL = v('settore_label')
+  if (areaL) centered(p1, `AREA ${areaL}`, fB, 9, 62.3, 532.6, bY(148, 9), BLUE)
+  if (settL) centered(p1, `SETTORE ${settL}`, fB, 9, 62.3, 532.6, bY(162, 9), BLUE)
+
+  // ── Titolo centrato (sotto la linea) ──
   const titolo = codP
     ? `RAPPORTO TECNICO DI RILEVAZIONE N. ${codP}`
     : 'RAPPORTO TECNICO DI RILEVAZIONE'
-  centered(p1, titolo, fB, 12, 62.3, 532.6, bY(155, 12), BLUE)
-
-  // ── Area / Settore / Anno centrati (sotto la linea) ──
-  const areaL = v('area_label')
-  const settL = v('settore_label')
-  const annoL = v('anno')
-  if (areaL) centered(p1, `AREA ${areaL}`, fB, 9, 62.3, 532.6, bY(190, 9), BLUE)
-  if (settL) centered(p1, `SETTORE ${settL}`, fB, 9, 62.3, 532.6, bY(205, 9), BLUE)
-  if (annoL) centered(p1, `ANNO: ${annoL}`, fB, 9, 62.3, 532.6, bY(220, 9), BLUE)
+  centered(p1, titolo, fB, 12, 62.3, 532.6, bY(190, 12), BLUE)
 
   // ── Il sottoscritto / il giorno / alle ore ──
-  txt(p1, v('tecnico_rilevatore'), fR, 9, 132, bY(258.47, 9), BLACK, 200)
-  txt(p1, v('data_rilevazione'), fR, 9, 376, bY(258.47, 9), BLACK, 56)
-  txt(p1, v('ora_rilevazione'), fR, 9, 469, bY(258.47, 9), BLACK, 66)
+  txt(p1, v('tecnico_rilevatore'), fR, 9, 132, bY(237.71, 9), BLACK, 200)
+  txt(p1, v('data_rilevazione'), fR, 9, 376, bY(237.71, 9), BLACK, 56)
+  txt(p1, v('ora_rilevazione'), fR, 9, 469, bY(237.71, 9), BLACK, 66)
 
   // ── Tabella infrazioni ──
   const artSz = 8
@@ -226,8 +224,8 @@ export async function buildRapportoPdf (m: Record<string, string>): Promise<Uint
     }
   }
 
-  // ── Importo (top=791.99) ──
-  txt(p1, v('importo_rimborso'), fR, 8.5, 165, bY(792, 8.5), BLACK, 140)
+  // ── Importo (top=770.27) ──
+  txt(p1, v('importo_rimborso'), fR, 8.5, 165, bY(770.27, 8.5), BLACK, 140)
 
   // ════════════════════════════════════════════════════════════
   //  PAGINA 2
@@ -306,6 +304,10 @@ export async function buildRapportoPdf (m: Record<string, string>): Promise<Uint
     txt(p2, "Il Direttore dell'Area Tecnica:", fB, fSz, 65.4, bY(777.35, fSz), BLACK)
   }
   txt(p2, v('firma_dt'), fR, fSz, 193, bY(777.72, fSz), BLACK, 338)
+
+  // ── Data compilazione (fondo pagina) ──
+  const dc = v('data_compilazione')
+  if (dc) txt(p2, 'Cagliari, ' + dc, fR, 8, 65.4, bY(800, 8), BLACK)
 
   return await doc.save()
 }

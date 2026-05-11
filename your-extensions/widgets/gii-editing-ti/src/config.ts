@@ -12,7 +12,7 @@ export interface TabConfig {
 }
 
 export interface TabFields {
-  anagrafica: string[]
+  trasgressore: string[]
   violazione: string[]
   allegati: string[]
   iterExtra: string[]
@@ -154,7 +154,7 @@ export interface Config {
   tabs: TabConfig[]
 
   // --- Campi legacy (retrocompatibilità)
-  anagraficaFields?: string[]
+  trasgressoreFields?: string[]
   violazioneFields?: string[]
   allegatiFields?: string[]
   iterExtraFields?: string[]
@@ -272,7 +272,8 @@ export const defaultConfig: Config = {
   reasonsRowRadius: 8,
 
   tabs: [
-    { id: 'anagrafica', label: 'Anagrafica', fields: [], hideEmpty: false },
+    { id: 'dati_generali', label: 'Dati generali', fields: [], hideEmpty: false },
+    { id: 'trasgressore', label: 'Trasgressore', fields: [], hideEmpty: false },
     { id: 'violazione', label: 'Violazione', fields: [], hideEmpty: true },
     { id: 'iter', label: 'Iter', fields: [], isIterTab: true, hideEmpty: false },
     { id: 'allegati', label: 'Allegati', fields: [], hideEmpty: true },
@@ -309,7 +310,12 @@ export const defaultConfig: Config = {
 }
 
 export const DEFAULT_FIELD_LAYOUTS: Record<string, LayoutRow[]> = {
-  anagrafica: [
+  dati_generali: [
+    { type: 'fields', columns: '1fr 1fr 1fr', cells: [{ field: 'area_cod', label: 'Area' }, { field: 'settore_cod', label: 'Settore' }, { field: 'ufficio_zona', label: 'Ufficio di zona' }] },
+    { type: 'fields', columns: '1fr 1fr', cells: [{ field: 'tecnico_rilevatore', label: 'Tecnico rilevatore' }, { field: 'data_rilevazione', label: 'Data rilevazione' }] },
+    { type: 'fields', columns: '1fr 1fr', cells: [{ field: 'ti_assegnato_nome', label: 'Tecnico istruttore' }, { field: 'data_firma', label: 'Data compilazione' }] }
+  ],
+  trasgressore: [
     { type: 'header', label: 'Trasgressore' },
     { type: 'fields', columns: '1fr 1fr', cells: [{ field: 'tipologia_soggetto' }, { field: 'qualifica_fondo' }] },
     { type: 'fields', columns: '1fr 1fr 1fr', cells: [{ field: 'nome' }, { field: 'cognome' }, { field: 'codice_fiscale' }] },

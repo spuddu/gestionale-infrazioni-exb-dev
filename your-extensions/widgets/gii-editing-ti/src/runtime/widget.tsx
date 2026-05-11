@@ -67,7 +67,7 @@ function ensureLayerIndex (url: string, layer?: any): string {
 
 
 
-function getRequestedEditSection (opts?: { skipUrl?: boolean }): 'anagrafica' | 'violazione' | 'dati_tecnici' | 'nota_spese' | 'allegati' | 'anteprima' | null {
+function getRequestedEditSection (opts?: { skipUrl?: boolean }): 'dati_generali' | 'trasgressore' | 'violazione' | 'dati_tecnici' | 'nota_spese' | 'allegati' | 'anteprima' | null {
   const normalize = (raw: any): string => String(raw || '').trim().toLowerCase().replace(/_/g, '-').replace(/\s+/g, '-')
   const parseFrom = (raw: string): string => {
     const text = String(raw || '')
@@ -83,9 +83,10 @@ function getRequestedEditSection (opts?: { skipUrl?: boolean }): 'anagrafica' | 
       return ''
     }
   }
-  const mapSection = (raw: any): 'anagrafica' | 'violazione' | 'dati_tecnici' | 'nota_spese' | 'allegati' | 'anteprima' | null => {
+  const mapSection = (raw: any): 'dati_generali' | 'trasgressore' | 'violazione' | 'dati_tecnici' | 'nota_spese' | 'allegati' | 'anteprima' | null => {
     switch (normalize(raw)) {
-      case 'anagrafica': return 'anagrafica'
+      case 'dati-generali': return 'dati_generali'
+      case 'trasgressore': return 'trasgressore'
       case 'violazione': return 'violazione'
       case 'dati-tecnici':
       case 'luoghi':
@@ -1791,14 +1792,14 @@ function InlineEditOverlay(props: {
   const [saving, setSaving] = React.useState(false)
   const [saveMsg, setSaveMsg] = React.useState<{ kind: 'ok' | 'err'; text: string } | null>(null)
   const [confirmCancel, setConfirmCancel] = React.useState(false)
-  const [activeTab, setActiveTab] = React.useState<'anagrafica' | 'violazione'>('anagrafica')
+  const [activeTab, setActiveTab] = React.useState<'trasgressore' | 'violazione'>('trasgressore')
 
   const updateDraft = (field: string, value: any) => setDraft(prev => ({ ...prev, [field]: value }))
 
   const handleCancel = () => {
     setDraft({ ...(data || {}) })
     setSaveMsg(null)
-    setActiveTab('anagrafica')
+    setActiveTab('trasgressore')
   }
 
   const handleSave = async () => {
@@ -1833,7 +1834,7 @@ function InlineEditOverlay(props: {
   }
 
   // Campi per tab (presi dalla config editConfig o auto-rilevati)
-  const anagraficaFields: string[] = []
+  const trasgressoreFields: string[] = []
   const violazioneFields: string[] = []
   // Auto-rilevamento: usa tutti i campi del draft non-sistema
   const allKeys = Object.keys(data || {}).filter(k =>
@@ -1848,14 +1849,14 @@ function InlineEditOverlay(props: {
     !/^GII_/i.test(k) &&
     !/^origine_pratica$/i.test(k)
   )
-  const anagraficaRe = /ditta|denom|ragione|nome|cognome|cf|cod.*fisc|piva|partita|indir|via|cap|comune|prov|telefono|cell|mail|pec|tipologia_sogg|tipo_sogg/i
+  const trasgressoreRe = /ditta|denom|ragione|nome|cognome|cf|cod.*fisc|piva|partita|indir|via|cap|comune|prov|telefono|cell|mail|pec|tipologia_sogg|tipo_sogg/i
   const violazioneRe = /viol|infraz|descr|art|norm|tipo_preliev|sanz|acqua|volume|turno|utenza|contatore|circostanz|fatti|ufficio|settore|area_cod/i
   for (const k of allKeys) {
-    if (anagraficaRe.test(k)) anagraficaFields.push(k)
+    if (trasgressoreRe.test(k)) trasgressoreFields.push(k)
     else if (violazioneRe.test(k)) violazioneFields.push(k)
   }
   // residui non classificati → li mettiamo in violazione
-  const classified = new Set([...anagraficaFields, ...violazioneFields])
+  const classified = new Set([...trasgressoreFields, ...violazioneFields])
   for (const k of allKeys) {
     if (!classified.has(k)) violazioneFields.push(k)
   }
@@ -1968,7 +1969,7 @@ function InlineEditOverlay(props: {
 
         {/* Tab bar */}
         <div style={{ flex: '0 0 auto', display: 'flex', gap: 8, padding: '10px 20px', borderBottom: '1px solid #e5e7eb' }}>
-          {(['anagrafica', 'violazione'] as const).map(t => (
+          {(['trasgressore', 'violazione'] as const).map(t => (
             <button key={t} type='button' disabled={saving} onClick={() => setActiveTab(t)}
               style={{
                 padding: '8px 14px', borderRadius: 10, border: `1px solid ${activeTab === t ? '#2f6fed' : 'rgba(0,0,0,0.12)'}`,
@@ -1990,9 +1991,9 @@ function InlineEditOverlay(props: {
             ? <div style={{ color: '#6b7280', fontSize: 13 }}>Caricamento schema campi…</div>
             : (
               <div style={{ display: 'grid', gap: 14 }}>
-                {activeTab === 'anagrafica' && (
-                  anagraficaFields.length
-                    ? anagraficaFields.map(f => renderField(f))
+                {activeTab === 'trasgressore' && (
+                  trasgressoreFields.length
+                    ? trasgressoreFields.map(f => renderField(f))
                     : <div style={{ color: '#6b7280', fontSize: 13 }}>Nessun campo rilevato automaticamente. Usare la pagina di editing completa.</div>
                 )}
                 {activeTab === 'violazione' && (
@@ -3026,7 +3027,7 @@ function ActionsPanel (props: {
 
 
 type TabFields = {
-  anagrafica: string[]
+  trasgressore: string[]
   violazione: string[]
   allegati: string[]
   iterExtra: string[]
@@ -3089,9 +3090,9 @@ function migrateTabs(tabFields: TabFields, tabs: TabConfig[] | undefined): TabCo
     // Altrimenti migra dai vecchi tabFields
     result = [
       {
-        id: 'anagrafica',
-        label: 'Anagrafica',
-        fields: tabFields?.anagrafica || []
+        id: 'trasgressore',
+        label: 'Trasgressore',
+        fields: tabFields?.trasgressore || []
       },
       {
         id: 'violazione',
@@ -3118,6 +3119,10 @@ function migrateTabs(tabFields: TabFields, tabs: TabConfig[] | undefined): TabCo
   }
   
   // Normalizza hideEmpty per tab (retrocompatibilità)
+  // Inietta dati_generali come primo tab se mancante
+  if (!result.find(t => t.id === 'dati_generali')) {
+    result = [{ id: 'dati_generali', label: 'Dati generali', fields: ['area_cod', 'settore_cod', 'ufficio_zona', 'tecnico_rilevatore', 'data_rilevazione', 'ti_assegnato_nome', 'data_firma'], hideEmpty: false }, ...result]
+  }
   return result.map(tab => {
     const normalizedHideEmpty =
       (tab as any).hideEmpty != null
@@ -4088,7 +4093,7 @@ function NuovaPraticaForm (p: {
     }
   }, [validationPopup, validationPopupOkId])
 
-  const [npTab, setNpTab] = React.useState<'anagrafica' | 'violazione' | 'dati_tecnici' | 'nota_spese' | 'allegati' | 'anteprima'>('anagrafica')
+  const [npTab, setNpTab] = React.useState<'dati_generali' | 'trasgressore' | 'violazione' | 'dati_tecnici' | 'nota_spese' | 'allegati' | 'anteprima'>('dati_generali')
   const [isExternalNavMode, setIsExternalNavMode] = React.useState<boolean>(true)
   const skipNpTabSyncRef = React.useRef(false)
   const tabResetFirstRef = React.useRef(true)
@@ -4105,7 +4110,7 @@ function NuovaPraticaForm (p: {
       return
     }
     const requested = getRequestedEditSection()
-    setNpTab(requested || 'anagrafica')
+    setNpTab(requested || 'dati_generali')
   }, [mode, editOid])
 
   // Notifica il parent del cambio tab
@@ -4130,7 +4135,8 @@ function NuovaPraticaForm (p: {
         if (raw) {
           const normalized = raw.toLowerCase().replace(/_/g, '-').replace(/\s+/g, '-')
           switch (normalized) {
-            case 'anagrafica': return 'anagrafica' as const
+            case 'dati-generali': return 'dati_generali' as const
+            case 'trasgressore': return 'trasgressore' as const
             case 'violazione': return 'violazione' as const
             case 'dati-tecnici':
             case 'luoghi':
@@ -4182,7 +4188,7 @@ function NuovaPraticaForm (p: {
     setBaselineDraft({})
     setMsg(null)
     skipNpTabSyncRef.current = true
-    setNpTab('anagrafica')
+    setNpTab('dati_generali')
     const pageToken = String(cfg.editPageId || 'page_32').trim()
     const pageId = resolvePageId(pageToken) || resolvePageId('Modifica Rapporto')
     if (pageId) {
@@ -5175,6 +5181,7 @@ React.useEffect(() => {
         dt_stato_TI: mode === 'create' ? nowTs : (p.initialData?.dt_stato_TI ?? p.initialData?.Dt_stato_TI ?? p.initialData?.DT_STATO_TI ?? null),
         dt_presa_in_carico_TI: mode === 'create' ? nowTs : (p.initialData?.dt_presa_in_carico_TI ?? p.initialData?.Dt_presa_in_carico_TI ?? p.initialData?.DT_PRESA_IN_CARICO_TI ?? null),
         ti_assegnato_username: mode === 'create' ? String(giiCtx.username || '') : (p.initialData?.ti_assegnato_username ?? p.initialData?.Ti_assegnato_username ?? p.initialData?.TI_ASSEGNATO_USERNAME ?? null),
+        ti_assegnato_nome: mode === 'create' ? String((window as any).__giiUserRole?.full_name || giiCtx.username || '') : (p.initialData?.ti_assegnato_nome ?? p.initialData?.Ti_assegnato_nome ?? p.initialData?.TI_ASSEGNATO_NOME ?? null),
         dt_assegnazione_ti: mode === 'create' ? nowTs : (p.initialData?.dt_assegnazione_ti ?? p.initialData?.Dt_assegnazione_ti ?? p.initialData?.DT_ASSEGNAZIONE_TI ?? null),
         ti_assegnato_da: mode === 'create' ? String(giiCtx.username || '') : (p.initialData?.ti_assegnato_da ?? p.initialData?.Ti_assegnato_da ?? p.initialData?.TI_ASSEGNATO_DA ?? null),
         utente_loggato: String(giiCtx.username || p.initialData?.utente_loggato || ''),
@@ -5220,7 +5227,7 @@ React.useEffect(() => {
         circostanze: g('circostanze') || null,
         presenza_trasgressore: g('presenza_trasgressore') || null,
         descrizione_luogo: g('descrizione_luogo') || null,
-        data_firma: toTs(g('data_firma')),
+        data_firma: mode === 'create' ? nowTs : toTs(g('data_firma')),
         req_point: reqPoint,
         // Anagrafica — nuovi campi
         qualifica_fondo: toInt(g('qualifica_fondo')),
@@ -5377,7 +5384,8 @@ React.useEffect(() => {
   const showDatiGen = p.showDatiGenerali
 
   const NP_TABS = [
-    { id: 'anagrafica', label: 'Anagrafica' },
+    { id: 'dati_generali', label: 'Dati generali' },
+    { id: 'trasgressore', label: 'Trasgressore' },
     { id: 'violazione', label: 'Violazione' },
     { id: 'dati_tecnici', label: 'Luoghi e dati tecnici' },
     { id: 'nota_spese', label: 'Nota spese' },
@@ -5499,10 +5507,14 @@ React.useEffect(() => {
 
   const renderFieldControl = (name: string): FldR | null => {
     switch (name) {
-      // Anagrafica — Dati generali
-      case 'tecnico_rilevatore': return showDatiGen ? { label: 'Tecnico istruttore', el: <NpText value={g('tecnico_rilevatore')} onChange={() => {}} disabled/> } : null
-      case 'ufficio_zona': return showDatiGen ? { label: 'Ufficio di Zona', el: <NpText value={g('ufficio_zona')} onChange={() => {}} disabled/> } : null
-      case 'data_rilevazione': return showDatiGen ? { label: 'Data rilevazione', el: <NpText value={g('data_rilevazione')} onChange={() => {}} disabled/> } : null
+      // Dati generali (read-only)
+      case 'area_cod': return { label: 'Area', el: <NpText value={g('area_cod')} onChange={() => {}} disabled/> }
+      case 'settore_cod': return { label: 'Settore', el: <NpText value={g('settore_cod')} onChange={() => {}} disabled/> }
+      case 'tecnico_rilevatore': return { label: 'Tecnico rilevatore', el: <NpText value={g('tecnico_rilevatore')} onChange={() => {}} disabled/> }
+      case 'ufficio_zona': return { label: 'Ufficio di zona', el: <NpText value={g('ufficio_zona')} onChange={() => {}} disabled/> }
+      case 'data_rilevazione': return { label: 'Data rilevazione', el: <NpText value={g('data_rilevazione')} onChange={() => {}} disabled/> }
+      case 'ti_assegnato_nome': return { label: 'Tecnico istruttore', el: <NpText value={g('ti_assegnato_nome')} onChange={() => {}} disabled/> }
+      case 'data_firma': return { label: 'Data compilazione', el: <NpText value={g('data_firma')} onChange={() => {}} disabled/> }
       // Anagrafica — Trasgressore
       case 'tipologia_soggetto': return { label: 'Tipologia soggetto', el: <NpSel value={tipoSogg} onChange={v => set('tipologia_soggetto', v)} options={CHOICES.tipo_soggetto} disabled={saving}/> }
       case 'nome': return tipoSogg === 'PF' ? { label: 'Nome', el: <NpText value={g('nome')} onChange={v => set('nome', v)} disabled={saving}/> } : null
@@ -5577,7 +5589,6 @@ React.useEffect(() => {
       case 'circostanze': return { label: 'Circostanze rilevanti', el: <NpText value={g('circostanze')} onChange={v => set('circostanze', v)} multiline disabled={saving}/> }
       case 'presenza_trasgressore': return { label: 'Il trasgressore era presente?', el: <NpSel value={g('presenza_trasgressore')} onChange={v => set('presenza_trasgressore', v)} options={CHOICES.presenza} disabled={saving}/> }
       case 'descrizione_luogo': return { label: 'Descrizione del luogo', el: <NpText value={g('descrizione_luogo')} onChange={v => set('descrizione_luogo', v)} multiline disabled={saving}/> }
-      case 'data_firma': return { label: 'Data e ora di compilazione', el: <NpDate value={g('data_firma')} onChange={v => set('data_firma', v)} withTime disabled={saving}/> }
       // Dati tecnici
       case 'distretto': return { label: 'Distretto', el: <NpText value={g('distretto')} onChange={v => set('distretto', v)} disabled={saving}/> }
       case 'comizio': return { label: 'Comizio', el: <NpText value={g('comizio')} onChange={v => set('comizio', v)} disabled={saving}/> }
@@ -5736,8 +5747,11 @@ React.useEffect(() => {
       {/* ── Contenuto tab (scrollabile) ── */}
       <div style={tabContentStyle}>
 
+        {/* DATI GENERALI */}
+        {npTab === 'dati_generali' && renderLayoutTab('dati_generali')}
+
         {/* ANAGRAFICA */}
-        {npTab === 'anagrafica' && renderLayoutTab('anagrafica')}
+        {npTab === 'trasgressore' && renderLayoutTab('trasgressore')}
 
         {/* VIOLAZIONE */}
         {npTab === 'violazione' && renderLayoutTab('violazione')}
@@ -5976,7 +5990,7 @@ React.useEffect(() => {
 
 {/* ANTEPRIMA */}
 {npTab === 'anteprima' && (
-  <AnteprimaPanel data={draft} mode={mode} />
+  <AnteprimaPanel data={draft} mode={mode} nsRows={noteSpeseRowsDraft} nsSummary={noteSpeseSummary} />
 )}
 
       </div>
@@ -6184,7 +6198,7 @@ function DetailTabsPanel (props: {
     return `${prefix}-${oid}`
   }, [hasSel, data, oid])
 
-  const [tab, setTab] = React.useState<string>(tabs[0]?.id || 'anagrafica')
+  const [tab, setTab] = React.useState<string>(tabs[0]?.id || 'trasgressore')
 
 
   // Allegati (attachments) — caricati solo quando la tab "Allegati" è attiva
@@ -6270,7 +6284,7 @@ function DetailTabsPanel (props: {
   // RIMOSSO: Non resettare la tab quando cambia selezione
   // React.useEffect(() => {
   //   // reset tab quando cambia selezione (UX più prevedibile)
-  //   setTab(tabs[0]?.id || 'anagrafica')
+  //   setTab(tabs[0]?.id || 'trasgressore')
   // }, [selectionKey, tabs])
 
   // alias map dai campi layer (se disponibile)
@@ -6337,7 +6351,7 @@ function DetailTabsPanel (props: {
     return a ? `${a}` : fieldName
   }, [aliasMap, aliasesReady])
 
-// --- Condizionamento campi anagrafica per tipo_soggetto (PF/PG)
+// --- Condizionamento campi trasgressore per tipo_soggetto (PF/PG)
   const classifyTipoSoggetto = React.useCallback((raw: any, labelFromDomain?: any): 'PF' | 'PG' | null => {
     return classifyTipoSoggettoRobusto(raw, labelFromDomain)
   }, [])
@@ -7231,7 +7245,7 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
   }
 
   const tabFields: TabFields = {
-    anagrafica: normalizeFieldList((cfg as any).anagraficaFields),
+    trasgressore: normalizeFieldList((cfg as any).trasgressoreFields),
     violazione: normalizeFieldList((cfg as any).violazioneFields),
     allegati: normalizeFieldList((cfg as any).allegatiFields),
     iterExtra: normalizeFieldList((cfg as any).iterExtraFields)
@@ -7361,7 +7375,7 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
 
   const mapWidgetId = Array.isArray(cfg.useMapWidgetIds) ? cfg.useMapWidgetIds[0] : null
   const [mapView, setMapView] = React.useState<any>(null)
-  const [formTab, setFormTab] = React.useState<string>('anagrafica')
+  const [formTab, setFormTab] = React.useState<string>('trasgressore')
   const [clickedPointWgs84, setClickedPointWgs84] = React.useState<any | null>(null)
   const [existingGeomWgs84, setExistingGeomWgs84] = React.useState<any | null>(null)
   const [mapClickEnabled, setMapClickEnabled] = React.useState(false)

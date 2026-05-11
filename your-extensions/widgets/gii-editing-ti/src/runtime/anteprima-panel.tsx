@@ -2,6 +2,8 @@
 /** @jsxFrag React.Fragment */
 import { React, jsx, css } from 'jimu-core'
 import { buildRapportoPdf } from '../../../_shared/gii-anteprime/rapporto/rapporto-pdf-builder'
+import { buildNotaSpesePdf, type NotaSpeseData } from '../../../_shared/gii-anteprime/rapporto/notaspese-pdf-builder'
+import { PDFDocument } from 'pdf-lib'
 import RapportoPdfViewer from '../../../_shared/gii-anteprime/rapporto/rapporto-pdf-viewer'
 
 const GII_UTENTI_URL = 'https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_utenti/FeatureServer/0'
@@ -165,13 +167,18 @@ function buildPlaceholderMap (data: any, utentiCache: Map<string, UtenteCached> 
     idrante: esc(d.idrante || ''), comune: '', foglio: '', mappali: '', altro_luogo: '',
     distretto_irriguo: esc(d.distretto_irriguo || ''), comizio: esc(d.comizio || ''),
     matricola_contatore: esc(d.matricola_contatore || ''), matricola_tessera: esc(d.matricola_tessera || ''),
-    importo_rimborso: fmtNum(d.ns_totale_complessivo) ? fmtNum(d.ns_totale_complessivo) + ' €' : ''
+    importo_rimborso: fmtNum(d.ns_totale_complessivo) ? fmtNum(d.ns_totale_complessivo) + ' €' : '',
+    data_compilazione: formatDateIt(d.data_firma)
   }
 }
 
 const containerCss = css`display: flex; flex-direction: column; width: 100%; height: 100%; background: #282828; overflow: hidden;`
 
-export default function AnteprimaPanel (p: { data: Record<string, any>; mode: 'create' | 'edit' }): any {
+type NsCat = 'AT' | 'PR' | 'RU' | 'SL' | 'PF'
+type NsSummaryP = { totaleAT: number; totalePR: number; totaleRU: number; totaleSL: number; totalePF: number; percentualeSpeseGenerali: number; importoSpeseGenerali: number; totaleComplessivo: number }
+type NsRowP = { objectid: number; categoria_costo: NsCat; origine_voce_snapshot: string; codice_voce_snapshot: string; descrizione_snapshot: string; unita_misura_snapshot: string; prezzo_unitario_snapshot: number; quantita: number; importo_riga: number; anno_prezzario_snapshot?: number | null; ordine: number; note: string }
+
+export default function AnteprimaPanel (p: { data: Record<string, any>; mode: 'create' | 'edit'; nsRows?: Record<NsCat, NsRowP[]>; nsSummary?: NsSummaryP }): any {
   const [pdfUrl, setPdfUrl] = React.useState<string | null>(null)
   const [pdfFileName, setPdfFileName] = React.useState<string>('rapporto.pdf')
   const [loading, setLoading] = React.useState(false)
@@ -182,6 +189,10 @@ export default function AnteprimaPanel (p: { data: Record<string, any>; mode: 'c
   const dataSignature = React.useMemo(() => {
     try { return JSON.stringify(p.data || {}) } catch { return String(p.data || '') }
   }, [p.data])
+
+  const nsSignature = React.useMemo(() => {
+    try { return JSON.stringify({ r: p.nsRows || {}, s: p.nsSummary || {} }) } catch { return '' }
+  }, [p.nsRows, p.nsSummary])
 
   React.useEffect(() => {
     let cancelled = false
@@ -225,11 +236,36 @@ export default function AnteprimaPanel (p: { data: Record<string, any>; mode: 'c
     ;(async () => {
       try {
         const map = buildPlaceholderMap(dataSnapshot, utenti)
-        const bytes = await buildRapportoPdf(map)
+        const rapportoBytes = await buildRapportoPdf(map)
         if (cancelled) return
+
+        // Se ci sono righe nota spese, genera e accoda al rapporto
+        let finalBytes: Uint8Array = rapportoBytes
+        const hasNs = p.nsRows && Object.values(p.nsRows).some(arr => arr && arr.length > 0)
+        if (hasNs && p.nsSummary) {
+          const nsData: NotaSpeseData = {
+            cod_pratica: map.cod_pratica || '',
+            area_label: map.area_label || '',
+            settore_label: map.settore_label || '',
+            rows: p.nsRows as any,
+            summary: p.nsSummary,
+            luogo_data: 'Cagliari, ' + (formatDateIt(dataSnapshot.data_firma) || new Date().toLocaleDateString('it-IT', { day: '2-digit', month: '2-digit', year: 'numeric' })),
+            firma_nome: map.firma_ti || ''
+          }
+          const nsBytes = await buildNotaSpesePdf(nsData)
+          const merged = await PDFDocument.create()
+          const rapDoc = await PDFDocument.load(rapportoBytes)
+          const nsDoc = await PDFDocument.load(nsBytes)
+          const rapPages = await merged.copyPages(rapDoc, rapDoc.getPageIndices())
+          rapPages.forEach(pg => merged.addPage(pg))
+          const nsPages = await merged.copyPages(nsDoc, nsDoc.getPageIndices())
+          nsPages.forEach(pg => merged.addPage(pg))
+          finalBytes = await merged.save()
+        }
+
         const cp = map.cod_pratica || 'rapporto'
         const fileName = `rapporto_${cp.replace(/[^a-zA-Z0-9_-]/g, '_')}.pdf`
-        const blob = new Blob([bytes as any], { type: 'application/pdf' })
+        const blob = new Blob([finalBytes as any], { type: 'application/pdf' })
         const url = URL.createObjectURL(blob)
         setPdfFileName(fileName)
         setPdfUrl(prev => { if (prev) URL.revokeObjectURL(prev); return url })
@@ -237,7 +273,7 @@ export default function AnteprimaPanel (p: { data: Record<string, any>; mode: 'c
       finally { if (!cancelled) setLoading(false) }
     })()
     return () => { cancelled = true }
-  }, [dataSignature, p.mode, utenti, utentiReady])
+  }, [dataSignature, p.mode, utenti, utentiReady, nsSignature])
 
   return (
     <div css={containerCss}>
