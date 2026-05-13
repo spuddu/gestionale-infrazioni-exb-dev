@@ -6,6 +6,8 @@ import { createPortal } from 'react-dom'
 import type { IMConfig } from '../config'
 import { defaultConfig } from '../config'
 import { buildRapportoPdf } from '../../../_shared/gii-anteprime/rapporto/rapporto-pdf-builder'
+import { buildNotaSpesePdf, type NotaSpeseData } from '../../../_shared/gii-anteprime/rapporto/notaspese-pdf-builder'
+import { PDFDocument } from 'pdf-lib'
 import RapportoPdfViewer from '../../../_shared/gii-anteprime/rapporto/rapporto-pdf-viewer'
 
 
@@ -1372,6 +1374,7 @@ function ActionsPanel (props: {
     maxStato: number
     presaRequiredVal: number
   }
+  nsConfig: { detailUrl: string; parametriUrl: string; parametroCode: string }
 }) {
   const { active, roleCode, buttonText, buttonColors, ui } = props
   const role = String(roleCode || 'DT').trim().toUpperCase()
@@ -1546,7 +1549,7 @@ function ActionsPanel (props: {
     setPreviewError(null)
     ;(async () => {
       try {
-        const { blob, fileName } = await buildRapportoPdfBlob(data, _utentiCache)
+        const { blob, fileName } = await buildRapportoPdfBlob(data, _utentiCache, props.nsConfig)
         const url = makeRapportoPdfUrl(blob, fileName)
         setPreviewFileName(fileName)
         setPreviewUrl(prev => {
@@ -1565,7 +1568,7 @@ function ActionsPanel (props: {
     if (!data) return
     ;(async () => {
       try {
-        const { blob, fileName } = await buildRapportoPdfBlob(data, _utentiCache)
+        const { blob, fileName } = await buildRapportoPdfBlob(data, _utentiCache, props.nsConfig)
         downloadBlobFile(blob, fileName)
       } catch (ex: any) {
         setMsg({ kind: 'err', text: 'Errore download rapporto: ' + (ex?.message || String(ex)) })
@@ -3790,7 +3793,8 @@ function buildPlaceholderMap (data: any, utentiCache: Map<string, UtenteCached> 
     idrante: esc(d.idrante || ''), comune: '', foglio: '', mappali: '', altro_luogo: '',
     distretto_irriguo: esc(d.distretto_irriguo || ''), comizio: esc(d.comizio || ''),
     matricola_contatore: esc(d.matricola_contatore || ''), matricola_tessera: esc(d.matricola_tessera || ''),
-    importo_rimborso: fmtNum(d.ns_totale_complessivo) ? fmtNum(d.ns_totale_complessivo) + ' €' : ''
+    importo_rimborso: fmtNum(d.ns_totale_complessivo) ? fmtNum(d.ns_totale_complessivo) + ' €' : '',
+    data_compilazione: formatDateIt(d.data_firma)
   }
 }
 
@@ -3799,11 +3803,100 @@ function rapportoPdfFileName (map: Record<string, string>): string {
   return `rapporto_${cp || 'rapporto'}.pdf`
 }
 
-async function buildRapportoPdfBlob (data: any, utentiCache: Map<string, UtenteCached> | null): Promise<{ blob: Blob; fileName: string }> {
+async function buildRapportoPdfBlob (
+  data: any, utentiCache: Map<string, UtenteCached> | null,
+  nsConfig?: { detailUrl: string; parametriUrl: string; parametroCode: string }
+): Promise<{ blob: Blob; fileName: string }> {
   const map = buildPlaceholderMap(data, utentiCache)
-  const bytes = await buildRapportoPdf(map)
+  const rapportoBytes = await buildRapportoPdf(map)
   const fileName = rapportoPdfFileName(map)
-  const blob = new Blob([bytes as any], { type: 'application/pdf' })
+
+  let finalBytes: Uint8Array = rapportoBytes
+
+  // Se le URL NS sono configurate, query le righe e genera la nota spese
+  const detailUrl = nsConfig?.detailUrl?.trim()
+  const parametriUrl = nsConfig?.parametriUrl?.trim()
+  if (detailUrl && data) {
+    try {
+      const parentGlobalId = String(data.GlobalID || data.globalid || data.GLOBALID || data.global_id || '').trim()
+      if (parentGlobalId) {
+        const FeatureLayer = await loadEsriModule<any>('esri/layers/FeatureLayer')
+
+        // Query righe dettaglio e percentuale in parallelo
+        const detailPromise = (async () => {
+          const fl = new FeatureLayer({ url: detailUrl })
+          if (typeof fl.load === 'function') await fl.load()
+          const res = await fl.queryFeatures({ where: `parent_globalid = '${parentGlobalId}'`, outFields: ['*'], returnGeometry: false })
+          return (res?.features || []).map((f: any) => f.attributes || {})
+        })()
+
+        const percPromise = (async () => {
+          if (!parametriUrl) return 0
+          try {
+            const pCode = nsConfig?.parametroCode || 'SPESE_GENERALI_PERC'
+            const pfl = new FeatureLayer({ url: parametriUrl })
+            if (typeof pfl.load === 'function') await pfl.load()
+            const pRes = await pfl.queryFeatures({ where: `codice_parametro = '${pCode}'`, outFields: ['valore_num'], returnGeometry: false })
+            const pVal = pRes?.features?.[0]?.attributes?.valore_num
+            return (pVal != null) ? (Number(pVal) || 0) : 0
+          } catch { return 0 }
+        })()
+
+        const [rawRows, percSG] = await Promise.all([detailPromise, percPromise])
+
+        if (rawRows.length > 0) {
+          const cats: string[] = ['AT', 'PR', 'RU', 'SL', 'PF']
+          const rowsByCat: Record<string, any[]> = { AT: [], PR: [], RU: [], SL: [], PF: [] }
+          for (const r of rawRows) {
+            const cat = String(r.categoria_costo || '').toUpperCase() as string
+            if (cats.includes(cat)) {
+              rowsByCat[cat].push({
+                codice_voce_snapshot: String(r.codice_voce_snapshot || ''),
+                descrizione_snapshot: String(r.descrizione_snapshot || ''),
+                unita_misura_snapshot: String(r.unita_misura_snapshot || ''),
+                prezzo_unitario_snapshot: Number(r.prezzo_unitario_snapshot || 0),
+                quantita: Number(r.quantita || 0),
+                importo_riga: Number(r.importo_riga || 0)
+              } as any)
+            }
+          }
+
+          const hasRows = Object.values(rowsByCat).some(arr => arr.length > 0)
+          if (hasRows) {
+            const sumCat = (cat: string) => rowsByCat[cat].reduce((s, r) => s + (r.importo_riga || 0), 0)
+            const totAT = sumCat('AT'), totPR = sumCat('PR'), totRU = sumCat('RU'), totSL = sumCat('SL'), totPF = sumCat('PF')
+            const subtot = totAT + totPR + totRU + totSL + totPF
+            const importoSG = Math.round(subtot * percSG) / 100
+            const totComp = subtot + importoSG
+
+            const nsData: NotaSpeseData = {
+              cod_pratica: map.cod_pratica || '',
+              area_label: map.area_label || '',
+              settore_label: map.settore_label || '',
+              rows: rowsByCat,
+              summary: {
+                totaleAT: totAT, totalePR: totPR, totaleRU: totRU, totaleSL: totSL, totalePF: totPF,
+                percentualeSpeseGenerali: percSG, importoSpeseGenerali: importoSG, totaleComplessivo: totComp
+              },
+              luogo_data: 'Cagliari, ' + (formatDateIt(data.data_firma) || new Date().toLocaleDateString('it-IT', { day: '2-digit', month: '2-digit', year: 'numeric' })),
+              firma_nome: map.firma_ti || ''
+            }
+            const nsBytes = await buildNotaSpesePdf(nsData)
+            const merged = await PDFDocument.create()
+            const rapDoc = await PDFDocument.load(rapportoBytes)
+            const nsDoc = await PDFDocument.load(nsBytes)
+            const rapPages = await merged.copyPages(rapDoc, rapDoc.getPageIndices())
+            rapPages.forEach(pg => merged.addPage(pg))
+            const nsPages = await merged.copyPages(nsDoc, nsDoc.getPageIndices())
+            nsPages.forEach(pg => merged.addPage(pg))
+            finalBytes = await merged.save()
+          }
+        }
+      }
+    } catch {}
+  }
+
+  const blob = new Blob([finalBytes as any], { type: 'application/pdf' })
   return { blob, fileName }
 }
 
@@ -4066,6 +4159,11 @@ const queryFields = React.useMemo(() => ['*'], [])
           buttonColors={buttonColors}
           ui={ui}
           editConfig={editConfig}
+          nsConfig={{
+            detailUrl: String(cfg.nsNotaSpeseDettaglioUrl || ''),
+            parametriUrl: String(cfg.nsParametriUrl || ''),
+            parametroCode: String(cfg.nsParametroCode || 'SPESE_GENERALI_PERC')
+          }}
         />
       </>
     </div>

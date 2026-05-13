@@ -72,6 +72,11 @@ export interface Config {
   reasonsRowBorderColor: string
   reasonsRowBorderWidth: number
   reasonsRowRadius: number
+
+  // --- Nota spese (URL feature layer)
+  nsNotaSpeseDettaglioUrl: string
+  nsParametriUrl: string
+  nsParametroCode: string
 }
 
 export const defaultConfig: Config = {
@@ -144,6 +149,10 @@ export const defaultConfig: Config = {
   editMinStato: 2,
   editMaxStato: 2,
   editPresaRequiredVal: 2,
+
+  nsNotaSpeseDettaglioUrl: '',
+  nsParametriUrl: '',
+  nsParametroCode: 'SPESE_GENERALI_PERC',
 }
 
 export type IMConfig = ImmutableObject<Config>

@@ -191,6 +191,17 @@ export default function Setting(props: Props) {
         <div style={P.hint}>Il pulsante Modifica è attivo solo se stato_TI è tra min e max (inclusi) e presa = val. richiesto.</div>
       </div>}
 
+      {/* ═══ NOTA SPESE ═══ */}
+      <Acc id='notaspese' label='📄 Nota Spese' open={isOpen('notaspese')} onToggle={()=>toggle('notaspese')}/>
+      {isOpen('notaspese') && <div>
+        <label style={P.lbl}>URL Feature Layer Dettaglio Nota Spese</label>
+        <Inp value={cfgJs.nsNotaSpeseDettaglioUrl??''} onChange={v=>patch({nsNotaSpeseDettaglioUrl:v})} placeholder='https://services2.arcgis.com/...'/>
+        <label style={P.lbl}>URL Feature Layer Parametri</label>
+        <Inp value={cfgJs.nsParametriUrl??''} onChange={v=>patch({nsParametriUrl:v})} placeholder='https://services2.arcgis.com/...'/>
+        <label style={P.lbl}>Codice parametro spese generali</label>
+        <Inp value={cfgJs.nsParametroCode??'SPESE_GENERALI_PERC'} onChange={v=>patch({nsParametroCode:v})} placeholder='SPESE_GENERALI_PERC'/>
+      </div>}
+
       {/* ═══ RESET ═══ */}
       <div style={{marginTop:28,borderTop:'1px solid rgba(255,255,255,0.10)',paddingTop:16}}>
         <button type='button'

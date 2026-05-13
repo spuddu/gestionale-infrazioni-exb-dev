@@ -1,0 +1,12 @@
+{
+  "name": "gii-dashboard",
+  "label": "GII Cruscotto operativo",
+  "type": "widget",
+  "version": "1.0.0",
+  "exbVersion": "1.19.0",
+  "author": "CBSM",
+  "description": "Cruscotto operativo per la sintesi delle pratiche e delle attività di competenza.",
+  "dependency": ["jimu-arcgis"],
+  "translatedLocales": ["it"],
+  "defaultSize": { "width": 1200, "height": 720 }
+}

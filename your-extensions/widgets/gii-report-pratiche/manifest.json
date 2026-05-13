@@ -1,0 +1,12 @@
+{
+  "name": "gii-report-pratiche",
+  "label": "GII Report pratiche",
+  "type": "widget",
+  "version": "1.0.0",
+  "exbVersion": "1.19.0",
+  "author": "CBSM",
+  "description": "Report consultabile ed esportabile delle pratiche di competenza.",
+  "dependency": ["jimu-arcgis"],
+  "translatedLocales": ["it"],
+  "defaultSize": { "width": 1200, "height": 720 }
+}
