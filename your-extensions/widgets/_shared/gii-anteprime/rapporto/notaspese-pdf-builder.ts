@@ -86,11 +86,11 @@ const PAGE_BOTTOM = 60
 
 // Colonne tabella
 const CW_CODICE = 72
-const CW_DESC   = 199
+const CW_DESC   = 238
 const CW_UM     = 38
-const CW_QTA    = 48
-const CW_PU     = 77
-const CW_IMP    = 77
+const CW_QTA    = 35
+const CW_PU     = 64
+const CW_IMP    = 64
 
 const CX_CODICE = ML
 const CX_DESC   = CX_CODICE + CW_CODICE
@@ -407,8 +407,8 @@ export async function buildNotaSpesePdf(data: NotaSpeseData): Promise<Uint8Array
     centered(p, 'Descrizione', fb, 7.5, CX_DESC, CX_DESC + CW_DESC, ty, CLR_BLACK)
     centered(p, 'U.M.', fb, 7.5, CX_UM, CX_UM + CW_UM, ty, CLR_BLACK)
     centered(p, 'Q.t\u00E0', fb, 7.5, CX_QTA, CX_QTA + CW_QTA, ty, CLR_BLACK)
-    centered(p, 'Prezzo unit. (\u20AC)', fb, 7.5, CX_PU, CX_PU + CW_PU, ty, CLR_BLACK)
-    centered(p, 'Importo (\u20AC)', fb, 7.5, CX_IMP, CX_IMP + CW_IMP, ty, CLR_BLACK)
+    centered(p, 'Prezzo unit.', fb, 7.5, CX_PU, CX_PU + CW_PU, ty, CLR_BLACK)
+    centered(p, 'Importo', fb, 7.5, CX_IMP, CX_IMP + CW_IMP, ty, CLR_BLACK)
   }
 
   function drawColumnVerticals(p: PDFPage, yBottom: number, h: number): void {

@@ -6,11 +6,45 @@ import { defaultConfig } from '../config'
 const GII_PORTAL     = 'https://cbsm-hub.maps.arcgis.com'
 const GII_UTENTI_URL = 'https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_utenti/FeatureServer/0'
 const RUOLO_LABEL: Record<number, string> = { 1:'TR', 2:'TI', 3:'RZ', 4:'RI', 5:'DT', 6:'DA', 7:'ADMIN' }
+const RUOLO_NUM: Record<string, number> = { TR:1, TI:2, RZ:3, RI:4, DT:5, DA:6, ADMIN:7 }
 const RUOLO_FULL:  Record<string, string> = {
   TR:'Tecnico Rilevatore', TI:'Tecnico Istruttore', RZ:'Responsabile di Zona',
-  RI:'Responsabile Istruttore', DT:'Direttore Tecnico', DA:'Direttore Amministrativo', ADMIN:'Amministratore'
+  RI:'Responsabile Istruttoria', DT:'Direttore Tecnico', DA:'Direttore Amministrativo', ADMIN:'Amministratore'
 }
 const AREA_LABEL: Record<number, string> = { 1:'AMM', 2:'AGR', 3:'TEC' }
+const AREA_NUM: Record<string, number> = { AMM:1, AGR:2, TEC:3 }
+const AREA_FULL: Record<string, string> = { AMM:'Amministrativa', AGR:'Agraria', TEC:'Tecnica' }
+const SETTORE_LABEL: Record<number, string> = { 1:'CR', 2:'GI', 3:'D1', 4:'D2', 5:'D3', 6:'D4', 7:'D5', 8:'D6', 9:'DS' }
+const SETTORE_NUM: Record<string, number> = { CR:1, GI:2, D1:3, D2:4, D3:5, D4:6, D5:7, D6:8, DS:9 }
+const SETTORE_FULL: Record<string, string> = {
+  CR:'Catasto, Ruoli e Servizi Territoriali',
+  GI:'Gestione irrigua',
+  D1:"Distretto 1 (Quartu Sant'Elena/Villaputzu/Muravera – San Sperate)",
+  D2:'Distretto 2 (Serramanna/Pimpisu)',
+  D3:'Distretto 3 (San Gavino - Villacidro)',
+  D4:'Distretto 4 (Basso Sulcis)',
+  D5:'Distretto 5 (Senorbì)',
+  D6:'Distretto 6 (Cixerri)',
+  DS:'Manutenzione opere di dreno e di scolo'
+}
+
+const UFFICIO_LABEL: Record<number, string> = {
+  1:'Cagliari',
+  2:'Quartucciu (loc. Is Forreddus)',
+  3:'Muravera',
+  4:'Villaputzu',
+  5:'San Sperate',
+  6:'Serramanna (loc. Pimpisu)',
+  7:'San Gavino Monreale',
+  8:'Villacidro',
+  9:'San Giovanni Suergiu (loc. Sa Carabia)',
+  10:'Masainas',
+  11:'Senorbì',
+  12:'Iglesias (loc. Sa Stoia)',
+  13:'Siliqua',
+  14:'Villasor',
+  15:'San Giovanni Suergiu (loc. Is Samis)'
+}
 
 
 function resolvePageId(pageTokenRaw: string): string | null {
@@ -116,10 +150,17 @@ interface GiiUserRole {
   username: string
   fullName: string
   ruolo: number | null
+  /** Codice ruolo testuale ufficiale (TR/TI/RZ/RI/DT/DA/ADMIN). */
+  ruoloCod: string
+  /** Backward-compat: coincide con ruoloCod. */
   ruoloLabel: string
   ruoloFull: string
   area: number | null
+  /** Codice area testuale ufficiale (AMM/AGR/TEC). */
+  areaCod: string
   settore: number | null
+  /** Codice settore testuale ufficiale (CR/GI/D1..D6/DS). */
+  settoreCod: string
   ufficio: number | null
   gruppo: string
   /** Backward-compat: TRUE se l'utente AGOL è org_admin/owner */
@@ -135,6 +176,74 @@ function toNum(v: any): number | null {
   return Number.isFinite(n) ? n : null
 }
 
+function normCode(v: any): string {
+  return String(v ?? '').trim().toUpperCase()
+}
+
+function resolveCodeAndNum(rawCode: any, rawNum: any, codeByNum: Record<number, string>, numByCode: Record<string, number>): { code: string; num: number | null } {
+  const code0 = normCode(rawCode)
+  if (code0 && numByCode[code0] != null) return { code: code0, num: numByCode[code0] }
+
+  const num0 = toNum(rawNum)
+  if (num0 != null && codeByNum[num0]) return { code: codeByNum[num0], num: num0 }
+
+  return { code: code0 || '', num: num0 }
+}
+
+function getAreaLabel(user: GiiUserRole | null): string {
+  if (!user) return ''
+  const code = normCode(user.areaCod || (user.area != null ? AREA_LABEL[user.area] : ''))
+  return AREA_FULL[code] || code
+}
+
+function getSettoreLabel(user: GiiUserRole | null, compact = false): string {
+  if (!user) return ''
+  const code = normCode(user.settoreCod || (user.settore != null ? SETTORE_LABEL[user.settore] : ''))
+  if (compact && /^D[1-6]$/.test(code)) return `Distretto ${code.slice(1)}`
+  return SETTORE_FULL[code] || code
+}
+
+function getUfficioLabel(user: GiiUserRole | null): string {
+  if (!user || user.ufficio == null) return ''
+  return UFFICIO_LABEL[user.ufficio] || String(user.ufficio)
+}
+
+function getOrganizationalHierarchy(user: GiiUserRole | null, compact = false): string[] {
+  if (!user || user.isWorkflowAdmin) return []
+
+  const role = normCode(user.ruoloCod || user.ruoloLabel || (user.ruolo != null ? RUOLO_LABEL[user.ruolo] : ''))
+  const area = getAreaLabel(user)
+  const settore = getSettoreLabel(user, compact)
+
+  // Sintesi per menu account:
+  // - RI, DT e DA si leggono a livello di Area.
+  // - TI e RZ si leggono a livello di Settore.
+  // - Ufficio non viene mostrato nella sintesi account per evitare una gerarchia troppo lunga.
+  if (['RI', 'DT', 'DA'].includes(role)) {
+    return area ? [`Area ${area}`] : []
+  }
+
+  if (['TI', 'RZ', 'TR'].includes(role)) {
+    return settore ? [`Settore ${settore}`] : []
+  }
+
+  return area ? [`Area ${area}`] : []
+}
+
+function getOrganizationalContext(user: GiiUserRole | null, compact = true): string[] {
+  if (!user || user.isWorkflowAdmin) return []
+
+  const area = getAreaLabel(user)
+  const settore = getSettoreLabel(user, compact)
+  const ufficio = getUfficioLabel(user)
+
+  const parts: string[] = []
+  if (area) parts.push(`Area ${area}`)
+  if (settore) parts.push(`Settore ${settore}`)
+  if (ufficio) parts.push(`Ufficio ${ufficio}`)
+  return parts
+}
+
 function makeInitials(name: string): string {
   const s = String(name || '').trim()
   if (!s) return '?'
@@ -148,24 +257,24 @@ async function loadUser(): Promise<GiiUserRole | null> {
   const cached = (window as any).__giiUserRole
   if (cached?.username) {
     const isOrgAdmin = !!(cached.isOrgAdmin ?? cached.isAdmin)
-    let ruolo = toNum(cached.ruolo)
 
-    // Label ruolo: priorità al valore già in cache, poi mapping da "ruolo" (workflow),
-    // infine fallback ADMIN se l'utente è org_admin/owner AGOL.
-    let rl = String(
-      cached.ruoloLabel ||
-      (ruolo != null ? (RUOLO_LABEL[ruolo] ?? '') : '') ||
-      (isOrgAdmin ? 'ADMIN' : '')
-    )
+    const roleResolved = resolveCodeAndNum(cached.ruolo_cod ?? cached.ruoloCod ?? cached.ruoloLabel, cached.ruolo, RUOLO_LABEL, RUOLO_NUM)
+    let ruolo = roleResolved.num
+    let ruoloCod = roleResolved.code || (isOrgAdmin ? 'ADMIN' : '')
 
     // Normalizza il ruolo workflow per ADMIN (7) quando è un fallback (org_admin senza record)
-    if ((ruolo == null || ruolo === 0) && rl === 'ADMIN') ruolo = 7
+    if ((ruolo == null || ruolo === 0) && ruoloCod === 'ADMIN') ruolo = 7
 
-    const isWorkflowAdmin = (ruolo === 7) || rl === 'ADMIN'
+    const isWorkflowAdmin = (ruolo === 7) || ruoloCod === 'ADMIN'
+
+    const areaResolved = resolveCodeAndNum(cached.area_cod ?? cached.areaCod, cached.area, AREA_LABEL, AREA_NUM)
+    const settoreResolved = resolveCodeAndNum(cached.settore_cod ?? cached.settoreCod, cached.settore, SETTORE_LABEL, SETTORE_NUM)
 
     // ADMIN trasversale: mai area/settore/ufficio (anche se presenti per errore in cache)
-    const area = isWorkflowAdmin ? null : toNum(cached.area)
-    const settore = isWorkflowAdmin ? null : toNum(cached.settore)
+    const area = isWorkflowAdmin ? null : areaResolved.num
+    const areaCod = isWorkflowAdmin ? '' : areaResolved.code
+    const settore = isWorkflowAdmin ? null : settoreResolved.num
+    const settoreCod = isWorkflowAdmin ? '' : settoreResolved.code
     const ufficio = isWorkflowAdmin ? null : toNum(cached.ufficio)
 
     const fullName = String(cached.fullName || cached.full_name || cached.username)
@@ -173,10 +282,13 @@ async function loadUser(): Promise<GiiUserRole | null> {
       username: String(cached.username),
       fullName,
       ruolo,
-      ruoloLabel: rl,
-      ruoloFull: RUOLO_FULL[rl] || rl,
+      ruoloCod,
+      ruoloLabel: ruoloCod,
+      ruoloFull: RUOLO_FULL[ruoloCod] || ruoloCod,
       area,
+      areaCod,
       settore,
+      settoreCod,
       ufficio,
       gruppo: String(cached.gruppo || ''),
       // Backward-compat: "isAdmin" resta uguale a isOrgAdmin (admin dell'ORG AGOL)
@@ -205,7 +317,7 @@ async function loadUser(): Promise<GiiUserRole | null> {
     await fl.load().catch(() => {})
     const qr = await fl.queryFeatures({
       where: `username = '${username.replace(/'/g,"''")}'`,
-      outFields: ['ruolo','area','settore','ufficio','gruppo','full_name'],
+      outFields: ['ruolo','ruolo_cod','area','area_cod','settore','settore_cod','ufficio','gruppo','full_name'],
       returnGeometry: false
     })
     const f = qr?.features?.[0]
@@ -216,8 +328,8 @@ async function loadUser(): Promise<GiiUserRole | null> {
       if (isOrgAdmin) {
         const u: GiiUserRole = {
           username, fullName,
-          ruolo: 7, ruoloLabel: 'ADMIN', ruoloFull: RUOLO_FULL.ADMIN || 'Amministratore',
-          area: null, settore: null, ufficio: null, gruppo: '',
+          ruolo: 7, ruoloCod: 'ADMIN', ruoloLabel: 'ADMIN', ruoloFull: RUOLO_FULL.ADMIN || 'Amministratore',
+          area: null, areaCod: '', settore: null, settoreCod: '', ufficio: null, gruppo: '',
           isAdmin: true,
           isOrgAdmin: true,
           isWorkflowAdmin: true
@@ -228,8 +340,8 @@ async function loadUser(): Promise<GiiUserRole | null> {
 
       const u: GiiUserRole = {
         username, fullName,
-        ruolo: null, ruoloLabel: '', ruoloFull: '',
-        area: null, settore: null, ufficio: null, gruppo: '',
+        ruolo: null, ruoloCod: '', ruoloLabel: '', ruoloFull: '',
+        area: null, areaCod: '', settore: null, settoreCod: '', ufficio: null, gruppo: '',
         isAdmin: false,
         isOrgAdmin: false,
         isWorkflowAdmin: false
@@ -239,24 +351,30 @@ async function loadUser(): Promise<GiiUserRole | null> {
     }
 
     const a = f.attributes
-    let rn = toNum(a.ruolo)
-    let rl = rn != null ? (RUOLO_LABEL[rn] ?? '') : ''
+    const roleResolved = resolveCodeAndNum(a.ruolo_cod, a.ruolo, RUOLO_LABEL, RUOLO_NUM)
+    let rn = roleResolved.num
+    let ruoloCod = roleResolved.code
 
     // Se l'utente è org_admin/owner ma il ruolo workflow non è valorizzato/riconosciuto
     // → usa workflow ADMIN (7) senza trasformarlo in DA
-    if ((!rl || rl === '') && isOrgAdmin) { rn = 7; rl = 'ADMIN' }
+    if ((!ruoloCod || ruoloCod === '') && isOrgAdmin) { rn = 7; ruoloCod = 'ADMIN' }
 
-    const isWorkflowAdmin = (rn === 7) || rl === 'ADMIN'
+    const isWorkflowAdmin = (rn === 7) || ruoloCod === 'ADMIN'
+    const areaResolved = resolveCodeAndNum(a.area_cod, a.area, AREA_LABEL, AREA_NUM)
+    const settoreResolved = resolveCodeAndNum(a.settore_cod, a.settore, SETTORE_LABEL, SETTORE_NUM)
 
     const u: GiiUserRole = {
       username,
       fullName: String(a.full_name || fullName),
       ruolo: rn,
-      ruoloLabel: rl,
-      ruoloFull: RUOLO_FULL[rl] || rl,
+      ruoloCod,
+      ruoloLabel: ruoloCod,
+      ruoloFull: RUOLO_FULL[ruoloCod] || ruoloCod,
       // ADMIN trasversale: mai area/settore/ufficio
-      area: isWorkflowAdmin ? null : toNum(a.area),
-      settore: isWorkflowAdmin ? null : toNum(a.settore),
+      area: isWorkflowAdmin ? null : areaResolved.num,
+      areaCod: isWorkflowAdmin ? '' : areaResolved.code,
+      settore: isWorkflowAdmin ? null : settoreResolved.num,
+      settoreCod: isWorkflowAdmin ? '' : settoreResolved.code,
       ufficio: isWorkflowAdmin ? null : toNum(a.ufficio),
       gruppo: String(a.gruppo || ''),
       // Backward-compat: "isAdmin" resta uguale a isOrgAdmin (admin dell'ORG AGOL)
@@ -502,6 +620,10 @@ export default function Widget(props: Props) {
     return (o.x || o.y) ? { position:'relative', left:o.x, top:o.y } : {}
   }
 
+  const orgContextParts = React.useMemo(() => getOrganizationalContext(user, true), [user])
+  const accountHierarchyParts = React.useMemo(() => getOrganizationalHierarchy(user, false), [user])
+  const orgContextText = orgContextParts.join(' · ')
+  const accountHierarchy = accountHierarchyParts.join(' · ')
 
   return (
     <div style={{
@@ -550,6 +672,21 @@ export default function Widget(props: Props) {
             fontFamily:cfg.titleFont, fontSize:cfg.titleSize, fontWeight:cfg.titleWeight,
             color:cfg.titleColor, letterSpacing:cfg.titleLetterSpacing ?? -0.5, lineHeight:1.1
           }}>{cfg.title}</div>
+          {orgContextText && (
+            <div title={orgContextText} style={{
+              marginTop:2,
+              fontFamily:cfg.titleFont,
+              fontSize:Math.max(10, Number(cfg.titleSize || 18) * 0.48),
+              fontWeight:500,
+              color:'rgba(226,232,240,0.78)',
+              letterSpacing:0.1,
+              lineHeight:1,
+              whiteSpace:'nowrap',
+              overflow:'hidden',
+              textOverflow:'ellipsis',
+              maxWidth:520
+            }}>{orgContextText}</div>
+          )}
         </div>
       </div>
 
@@ -570,15 +707,16 @@ export default function Widget(props: Props) {
                 display:'flex',alignItems:'center',justifyContent:'center',fontSize:15,fontWeight:700,color:'#fff',flexShrink:0 }}>
                 {(user.fullName||user.username).charAt(0).toUpperCase()}
               </div>
-              <div style={{ minWidth:0 }}>
-                <div style={{ fontSize:cfg.userNameSize,fontWeight:600,color:cfg.userNameColor,whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis' }}>
+              <div style={{ minWidth:0, maxWidth:'100%' }}>
+                <div style={{ fontSize:cfg.userNameSize,fontWeight:600,color:cfg.userNameColor,whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis',minWidth:0 }}>
                   Benvenuto, {user.fullName||user.username}
                 </div>
-                <div style={{ fontSize:11.5,color:cfg.userInfoColor,marginTop:2,display:'flex',gap:8,alignItems:'center',flexWrap:'wrap' as const }}>
-                  {user.ruoloLabel && <span style={{ background:cfg.userBadgeBg,border:`1px solid ${cfg.userBadgeColor}44`,borderRadius:6,padding:'1px 8px',fontWeight:600,color:cfg.userBadgeColor }}>{user.ruoloLabel}</span>}
-                  {user.ruoloFull && <span>{user.ruoloFull}</span>}
-                  {user.area != null && <span>· Area {AREA_LABEL[user.area] || ''}</span>}
-                </div>
+                {(user.ruoloLabel || user.ruoloFull) && (
+                  <div title={[user.ruoloLabel, user.ruoloFull].filter(Boolean).join(' · ')} style={{ fontSize:11.5,color:cfg.userInfoColor,marginTop:2,whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis',display:'flex',alignItems:'center',gap:7,minWidth:0 }}>
+                    {user.ruoloLabel && <span style={{ background:cfg.userBadgeBg,border:`1px solid ${cfg.userBadgeColor}44`,borderRadius:6,padding:'1px 8px',fontSize:11.5,fontWeight:600,color:cfg.userBadgeColor,flex:'0 0 auto' }}>{user.ruoloLabel}</span>}
+                    {user.ruoloFull && <span style={{ fontWeight:600,color:cfg.userInfoColor,overflow:'hidden',textOverflow:'ellipsis',flex:'1 1 auto',minWidth:0 }}>{user.ruoloFull}</span>}
+                  </div>
+                )}
               </div>
             </div>
           ) : (
@@ -618,8 +756,8 @@ export default function Widget(props: Props) {
                     <div style={{ fontSize:12.5, fontWeight:700, color:'#e5e7eb', marginBottom:2, whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis' }}>
                       {user.fullName || user.username}
                     </div>
-                    <div style={{ fontSize:11.5, color:'rgba(147,197,253,0.75)', marginBottom:10 }}>
-                      {user.ruoloLabel ? `${user.ruoloLabel}${user.area!=null ? ` · Area ${AREA_LABEL[user.area] || ''}` : ''}` : ''}
+                    <div style={{ fontSize:11.5, color:'rgba(147,197,253,0.75)', marginBottom:10, lineHeight:1.35 }}>
+                      {[user.ruoloLabel, user.ruoloFull, accountHierarchy].filter(Boolean).join(' · ')}
                     </div>
 
                     <button type='button' disabled={signingIn}
