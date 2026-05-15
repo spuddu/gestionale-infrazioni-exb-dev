@@ -6,7 +6,7 @@ import { defaultConfig } from '../config'
 
 const GII_PORTAL = 'https://cbsm-hub.maps.arcgis.com'
 const RUOLO_LABEL: Record<number, string> = { 1:'TR', 2:'TI', 3:'RZ', 4:'RI', 5:'DT', 6:'DA', 7:'ADMIN' }
-const ROLE_CODES = new Set(['TR', 'TI', 'RZ', 'RI', 'DT', 'DA', 'ADMIN'])
+const ROLE_CODES = new Set(['TR', 'TI', 'RZ', 'RI', 'DT', 'DA', 'RI_AMM', 'TI_AMM', 'ADMIN'])
 const AREA_CODES = new Set(['AMM', 'AGR', 'TEC'])
 const SETTORE_CODES = new Set(['CR', 'GI', 'D1', 'D2', 'D3', 'D4', 'D5', 'D6', 'DS'])
 const AREA_FROM_NUM: Record<number, string> = { 1:'AMM', 2:'AGR', 3:'TEC' }
@@ -390,7 +390,15 @@ export default function Widget(props: Props) {
     if (c.roles.includes('*')) return true
     if (!user) return false
     if (user.isAdmin) return true
-    return c.roles.includes(user.ruoloCod)
+
+    const effectiveRole =
+      user.ruoloCod === 'RI_AMM' || (user.areaCod === 'AMM' && user.ruoloCod === 'RI') ? 'RI_AMM' :
+      user.ruoloCod === 'TI_AMM' || (user.areaCod === 'AMM' && user.ruoloCod === 'TI') ? 'TI_AMM' :
+      user.ruoloCod
+
+    // RI_AMM e TI_AMM sono profili distinti dai rispettivi RI/TI tecnici.
+    // Una card assegnata solo a TI non deve comparire anche per TI_AMM, e viceversa.
+    return c.roles.some(role => role === effectiveRole)
   }
 
   const visibleCards = effCards.slice().sort((a,b) => a.order - b.order).filter(isVisible)

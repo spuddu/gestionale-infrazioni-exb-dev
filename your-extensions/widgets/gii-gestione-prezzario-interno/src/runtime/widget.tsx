@@ -27,8 +27,10 @@ function normalizeUrl(raw: any): string {
 function isRiOrAdminUser(): boolean {
   const u: any = (window as any).__giiUserRole || {}
   const ruoloNum = Number(u?.ruolo)
+  const ruoloCode = String(u?.ruolo_cod || u?.ruoloCod || u?.roleCode || '').trim().toUpperCase()
   const ruoloLabel = String(u?.ruoloLabel || u?.ruolo || '').trim().toUpperCase()
-  return ruoloNum === 4 || ruoloNum === 7 || /(^|[^A-Z])RI([^A-Z]|$)/.test(ruoloLabel) || /(^|[^A-Z])ADMIN([^A-Z]|$)/.test(ruoloLabel)
+  const roleText = `${ruoloCode} ${ruoloLabel}`.trim()
+  return ruoloNum === 4 || ruoloNum === 7 || /(^|[^A-Z])RI(_AMM)?([^A-Z]|$)/.test(roleText) || /(^|[^A-Z])ADMIN([^A-Z]|$)/.test(roleText)
 }
 const LAYER_CACHE: Record<string, any> = {}
 async function getLayer(urlRaw: any): Promise<any> {

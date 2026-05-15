@@ -2,8 +2,7 @@ import { type ImmutableObject } from 'jimu-core'
 
 export interface Config {
   serviceUrl?: string
-  parentTableUrl?: string
-  regionalTableUrl?: string
+  detailTableUrl?: string
   title?: string
   titleColor?: string
   titleFontSize?: number

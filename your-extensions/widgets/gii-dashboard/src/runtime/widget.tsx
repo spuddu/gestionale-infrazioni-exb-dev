@@ -22,8 +22,11 @@ type GiiUserInfo = {
   displayName?: string
   ruolo: number | null
   ruoloLabel: string
+  ruoloCod: string
   area: number | null
+  areaCod: 'AMM' | 'AGR' | 'TEC' | ''
   settore: number | null
+  settoreCod: string
   gruppo?: string
   isAdmin: boolean
   isWorkflowAdmin?: boolean
@@ -41,7 +44,7 @@ type Metric = {
 
 const RUOLO_LABEL: Record<number, string> = { 1: 'TR', 2: 'TI', 3: 'RZ', 4: 'RI', 5: 'DT', 6: 'DA', 7: 'ADMIN' }
 const AREA_FROM_CODE: Record<number, string> = { 1: 'AMM', 2: 'AGR', 3: 'TEC' }
-const SETTORE_FROM_CODE: Record<number, string> = { 1: 'CR', 2: 'GI', 3: 'D1', 4: 'D2', 5: 'D3', 6: 'D4', 7: 'D5', 8: 'D6', 9: 'CS' }
+const SETTORE_FROM_CODE: Record<number, string> = { 1: 'CR', 2: 'GI', 3: 'D1', 4: 'D2', 5: 'D3', 6: 'D4', 7: 'D5', 8: 'D6', 9: 'DS' }
 
 const GII_RUNTIME_VIEWS: RuntimeDsView[] = [
   {
@@ -130,7 +133,7 @@ const GII_RUNTIME_VIEWS: RuntimeDsView[] = [
     itemId: '6ffe45dac0e04905ba677e9fcd703238',
     serviceUrl: 'https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_VIEW_EB_AMM_ALL/FeatureServer',
     layerUrl: 'https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_VIEW_EB_AMM_ALL/FeatureServer/0',
-    roles: ['RI', 'TI', 'DA'],
+    roles: ['RI', 'TI', 'DA', 'RI_AMM', 'TI_AMM'],
     areaCode: 'AMM',
     settoreCode: ''
   },
@@ -164,34 +167,57 @@ function loadEsriModule<T = any> (path: string): Promise<T> {
   })
 }
 
-function normalizeAreaCode (area: number | null | undefined): 'AMM' | 'AGR' | 'TEC' | '' {
+function cleanCode (v: any): string {
+  return String(v ?? '').trim().toUpperCase()
+}
+
+function normalizeRuoloCode (ruoloCod: any, ruolo: number | null | undefined, isAdmin?: boolean): string {
+  const raw = cleanCode(ruoloCod)
+  if (raw) {
+    if (/^\d+$/.test(raw)) return RUOLO_LABEL[Number(raw)] || raw
+    return raw
+  }
+  if (ruolo != null && Number.isFinite(Number(ruolo))) return RUOLO_LABEL[Number(ruolo)] || ''
+  return isAdmin ? 'ADMIN' : ''
+}
+
+function normalizeAreaCode (areaCod: any, area?: number | null | undefined): 'AMM' | 'AGR' | 'TEC' | '' {
+  const raw = cleanCode(areaCod)
+  if (raw === 'AMM' || raw === 'AGR' || raw === 'TEC') return raw
+  if (/^\d+$/.test(raw)) return normalizeAreaCode('', Number(raw))
   if (area === 1) return 'AMM'
   if (area === 2) return 'AGR'
   if (area === 3) return 'TEC'
   return ''
 }
 
-function normalizeSettoreCode (settore: number | null | undefined): string {
+function normalizeSettoreCode (settoreCod: any, settore?: number | null | undefined): string {
+  const raw = cleanCode(settoreCod)
+  if (raw) {
+    if (raw === 'CS') return 'DS'
+    if (/^\d+$/.test(raw)) return SETTORE_FROM_CODE[Number(raw)] || raw
+    return raw
+  }
   if (settore == null) return ''
-  return SETTORE_FROM_CODE[settore] || String(settore || '')
+  return SETTORE_FROM_CODE[Number(settore)] || String(settore || '')
 }
 
-function getEffectiveRole (ruoloLabel: string, area: number | null | undefined): string {
-  const r = String(ruoloLabel || '').trim().toUpperCase()
-  if (r === 'RI' && area === 1) return 'RI_AMM'
-  if (r === 'TI' && area === 1) return 'TI_AMM'
+function getEffectiveRole (ruoloLabel: string, areaCode: 'AMM' | 'AGR' | 'TEC' | ''): string {
+  const r = cleanCode(ruoloLabel)
+  if (r === 'RI' && areaCode === 'AMM') return 'RI_AMM'
+  if (r === 'TI' && areaCode === 'AMM') return 'TI_AMM'
   return r
 }
 
 function pickRuntimeViewForUser (user: GiiUserInfo | null): RuntimeDsView | null {
   if (!user) return null
-  const role = String(user.ruoloLabel || '').trim().toUpperCase()
-  const areaCode = normalizeAreaCode(user.area)
-  const settoreCode = normalizeSettoreCode(user.settore)
+  const role = cleanCode(user.ruoloCod || user.ruoloLabel)
+  const areaCode = user.areaCod || normalizeAreaCode('', user.area)
+  const settoreCode = user.settoreCod || normalizeSettoreCode('', user.settore)
   if (user.isAdmin || user.isWorkflowAdmin || role === 'ADMIN') {
     return GII_RUNTIME_VIEWS.find(v => v.key === 'ADMIN') || null
   }
-  const effective = getEffectiveRole(role, user.area)
+  const effective = getEffectiveRole(role, areaCode)
   const strict = GII_RUNTIME_VIEWS.find(v =>
     v.roles.includes(effective) &&
     v.areaCode === areaCode &&
@@ -204,9 +230,14 @@ function pickRuntimeViewForUser (user: GiiUserInfo | null): RuntimeDsView | null
 function readGiiUser (): GiiUserInfo | null {
   const cached: any = (window as any).__giiUserRole
   if (!cached?.username) return null
-  const ruolo = cached.ruolo != null ? Number(cached.ruolo) : null
-  const isAdmin = !!cached.isAdmin || !!cached.isWorkflowAdmin || ruolo === 7 || String(cached.ruoloLabel || '').toUpperCase() === 'ADMIN'
-  const ruoloLabel = String(cached.ruoloLabel || (ruolo != null ? (RUOLO_LABEL[ruolo] || '') : (isAdmin ? 'ADMIN' : ''))).toUpperCase()
+  const ruolo = cached.ruolo != null && cached.ruolo !== '' ? Number(cached.ruolo) : null
+  const isAdminRaw = !!cached.isAdmin || !!cached.isWorkflowAdmin || ruolo === 7 || cleanCode(cached.ruoloCod || cached.ruolo_cod || cached.ruoloLabel) === 'ADMIN'
+  const ruoloCod = normalizeRuoloCode(cached.ruoloCod ?? cached.ruolo_cod ?? cached.ruoloLabel, ruolo, isAdminRaw)
+  const isAdmin = isAdminRaw || ruoloCod === 'ADMIN'
+  const area = cached.area != null && cached.area !== '' ? Number(cached.area) : null
+  const settore = cached.settore != null && cached.settore !== '' ? Number(cached.settore) : null
+  const areaCod = normalizeAreaCode(cached.areaCod ?? cached.area_cod, area)
+  const settoreCod = normalizeSettoreCode(cached.settoreCod ?? cached.settore_cod, settore)
   return {
     username: String(cached.username || '').trim(),
     fullName: String(cached.fullName || cached.full_name || cached.nome || cached.displayName || cached.username || '').trim(),
@@ -214,9 +245,12 @@ function readGiiUser (): GiiUserInfo | null {
     nome: String(cached.nome || '').trim(),
     displayName: String(cached.displayName || '').trim(),
     ruolo,
-    ruoloLabel,
-    area: cached.area != null ? Number(cached.area) : null,
-    settore: cached.settore != null ? Number(cached.settore) : null,
+    ruoloLabel: ruoloCod,
+    ruoloCod,
+    area,
+    areaCod,
+    settore,
+    settoreCod,
     gruppo: String(cached.gruppo || ''),
     isAdmin,
     isWorkflowAdmin: !!cached.isWorkflowAdmin
@@ -305,14 +339,13 @@ function isRecordVisibleForCurrentUser (d: any, user: GiiUserInfo | null): boole
   if (!user) return false
   if (user.isAdmin || user.isWorkflowAdmin) return true
 
-  const role = getEffectiveRole(user.ruoloLabel || '', user.area)
+  const role = getEffectiveRole(user.ruoloCod || user.ruoloLabel || '', user.areaCod)
   if (!role) return true
 
   const archVal = d['GII_arch'] ?? d['gii_arch'] ?? d['GII_ARCH']
   if (archVal !== null && archVal !== undefined && archVal !== '' && Number(archVal) === 1) return false
 
-  const areaNum = user.area ?? null
-  const isAmmArea = areaNum === 1
+  const isAmmArea = user.areaCod === 'AMM'
   if (role === 'DA' || role === 'RI_AMM' || role === 'TI_AMM' || (isAmmArea && (role === 'RI' || role === 'TI'))) {
     if (!isInFaseSanzionatoria(d)) return false
     if (role === 'TI_AMM') {
@@ -354,7 +387,7 @@ function isRecordVisibleForCurrentUser (d: any, user: GiiUserInfo | null): boole
 
 function isAttesaMia (d: any, user: GiiUserInfo | null): boolean {
   if (!user || user.isAdmin || user.isWorkflowAdmin) return false
-  const role = getEffectiveRole(user.ruoloLabel || '', user.area)
+  const role = getEffectiveRole(user.ruoloCod || user.ruoloLabel || '', user.areaCod)
   const statoField = getStatoFieldForRuolo(role)
   const val = d[statoField]
   const n = val != null && val !== '' ? Number(val) : null
@@ -377,7 +410,7 @@ function isAttesaMia (d: any, user: GiiUserInfo | null): boolean {
 
 function isAttesaAltri (d: any, user: GiiUserInfo | null): boolean {
   if (!user || user.isAdmin || user.isWorkflowAdmin) return false
-  const role = getEffectiveRole(user.ruoloLabel || '', user.area)
+  const role = getEffectiveRole(user.ruoloCod || user.ruoloLabel || '', user.areaCod)
   const statoField = getStatoFieldForRuolo(role)
   const val = d[statoField]
   const n = val != null && val !== '' ? Number(val) : null
@@ -478,8 +511,8 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
     }
   }, [])
 
-  const view = React.useMemo(() => pickRuntimeViewForUser(user), [user?.username, user?.ruoloLabel, user?.area, user?.settore, user?.isAdmin, user?.isWorkflowAdmin])
-  const effectiveRole = getEffectiveRole(user?.ruoloLabel || '', user?.area)
+  const view = React.useMemo(() => pickRuntimeViewForUser(user), [user?.username, user?.ruoloCod, user?.areaCod, user?.settoreCod, user?.ruoloLabel, user?.area, user?.settore, user?.isAdmin, user?.isWorkflowAdmin])
+  const effectiveRole = getEffectiveRole(user?.ruoloCod || user?.ruoloLabel || '', user?.areaCod || '')
 
   React.useEffect(() => {
     let cancelled = false
@@ -511,7 +544,7 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
     }
     run()
     return () => { cancelled = true }
-  }, [view?.layerUrl, user?.username, user?.ruoloLabel, user?.area, user?.settore, user?.isAdmin, cfg.whereClause, cfg.pageSize, nonce])
+  }, [view?.layerUrl, user?.username, user?.ruoloCod, user?.areaCod, user?.settoreCod, user?.ruoloLabel, user?.area, user?.settore, user?.isAdmin, cfg.whereClause, cfg.pageSize, nonce])
 
   const staleMs = Math.max(1, Number(cfg.staleDays || 15)) * 24 * 60 * 60 * 1000
   const now = Date.now()
@@ -547,7 +580,7 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
       map.set(k, (map.get(k) || 0) + 1)
     }
     return Array.from(map.entries()).sort((a, b) => b[1] - a[1])
-  }, [records, user?.username, user?.ruoloLabel, user?.area])
+  }, [records, user?.username, user?.ruoloCod, user?.areaCod, user?.ruoloLabel, user?.area])
 
   const recent = React.useMemo(() => {
     return [...records]
@@ -566,7 +599,7 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
   ]
 
   const userLabel = user?.username
-    ? `${user.fullName || user.username} · ${effectiveRole || user.ruoloLabel || '?'}${normalizeAreaCode(user.area) ? ` · ${normalizeAreaCode(user.area)}` : ''}${normalizeSettoreCode(user.settore) ? ` · ${normalizeSettoreCode(user.settore)}` : ''}`
+    ? `${user.fullName || user.username} · ${effectiveRole || user.ruoloCod || user.ruoloLabel || '?'}${user.areaCod ? ` · ${user.areaCod}` : ''}${user.settoreCod ? ` · ${user.settoreCod}` : ''}`
     : 'Accesso in caricamento…'
 
   return (

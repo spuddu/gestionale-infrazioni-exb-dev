@@ -152,18 +152,27 @@ interface GiiUserRole {
   ruolo: number | null
   /** Codice ruolo testuale ufficiale (TR/TI/RZ/RI/DT/DA/ADMIN). */
   ruoloCod: string
+  /** Alias snake_case per compatibilità con vecchi widget. */
+  ruolo_cod?: string
   /** Backward-compat: coincide con ruoloCod. */
   ruoloLabel: string
   ruoloFull: string
+  /** Profilo operativo sintetico per i ruoli amministrativi: TI_AMM / RI_AMM. */
+  profiloCod: string
+  profiloLabel: string
   area: number | null
   /** Codice area testuale ufficiale (AMM/AGR/TEC). */
   areaCod: string
+  /** Alias snake_case per compatibilità con vecchi widget. */
+  area_cod?: string
   settore: number | null
   /** Codice settore testuale ufficiale (CR/GI/D1..D6/DS). */
   settoreCod: string
+  /** Alias snake_case per compatibilità con vecchi widget. */
+  settore_cod?: string
   ufficio: number | null
   gruppo: string
-  /** Backward-compat: TRUE se l'utente AGOL è org_admin/owner */
+  /** Backward-compat GII: TRUE se il ruolo workflow è ADMIN. */
   isAdmin: boolean
   /** Flag esplicito: admin dell'organizzazione AGOL (org_admin/owner) */
   isOrgAdmin: boolean
@@ -177,7 +186,18 @@ function toNum(v: any): number | null {
 }
 
 function normCode(v: any): string {
-  return String(v ?? '').trim().toUpperCase()
+  const code = String(v ?? '').trim().toUpperCase()
+  // Vecchia codifica errata del settore n. 9: CS va trattato come DS, mai come CR.
+  if (code === 'CS') return 'DS'
+  return code
+}
+
+function getProfiloCod(ruoloCod: string, areaCod: string): string {
+  const role = normCode(ruoloCod)
+  const area = normCode(areaCod)
+  if (role === 'TI' && area === 'AMM') return 'TI_AMM'
+  if (role === 'RI' && area === 'AMM') return 'RI_AMM'
+  return role
 }
 
 function resolveCodeAndNum(rawCode: any, rawNum: any, codeByNum: Record<number, string>, numByCode: Record<string, number>): { code: string; num: number | null } {
@@ -278,21 +298,27 @@ async function loadUser(): Promise<GiiUserRole | null> {
     const ufficio = isWorkflowAdmin ? null : toNum(cached.ufficio)
 
     const fullName = String(cached.fullName || cached.full_name || cached.username)
+    const profiloCod = getProfiloCod(ruoloCod, areaCod)
     const u: GiiUserRole = {
       username: String(cached.username),
       fullName,
       ruolo,
       ruoloCod,
+      ruolo_cod: ruoloCod,
       ruoloLabel: ruoloCod,
       ruoloFull: RUOLO_FULL[ruoloCod] || ruoloCod,
+      profiloCod,
+      profiloLabel: profiloCod,
       area,
       areaCod,
+      area_cod: areaCod,
       settore,
       settoreCod,
+      settore_cod: settoreCod,
       ufficio,
       gruppo: String(cached.gruppo || ''),
-      // Backward-compat: "isAdmin" resta uguale a isOrgAdmin (admin dell'ORG AGOL)
-      isAdmin: isOrgAdmin,
+      // Backward-compat GII: i vecchi widget che leggono isAdmin devono intendere ADMIN workflow.
+      isAdmin: isWorkflowAdmin,
       isOrgAdmin,
       isWorkflowAdmin
     }
@@ -310,8 +336,6 @@ async function loadUser(): Promise<GiiUserRole | null> {
     const roleStr = String(json?.role || '')
     const privs: any[] = Array.isArray(json?.privileges) ? (json.privileges as any[]) : []
     const isOrgAdmin = roleStr === 'org_admin' || roleStr === 'org_owner' || privs.some(p => String(p).startsWith('portal:admin'))
-    const isAdmin = isOrgAdmin // backward-compat
-
     const FeatureLayer = await loadEsriModule<any>('esri/layers/FeatureLayer')
     const fl = new FeatureLayer({ url: GII_UTENTI_URL })
     await fl.load().catch(() => {})
@@ -328,8 +352,9 @@ async function loadUser(): Promise<GiiUserRole | null> {
       if (isOrgAdmin) {
         const u: GiiUserRole = {
           username, fullName,
-          ruolo: 7, ruoloCod: 'ADMIN', ruoloLabel: 'ADMIN', ruoloFull: RUOLO_FULL.ADMIN || 'Amministratore',
-          area: null, areaCod: '', settore: null, settoreCod: '', ufficio: null, gruppo: '',
+          ruolo: 7, ruoloCod: 'ADMIN', ruolo_cod: 'ADMIN', ruoloLabel: 'ADMIN', ruoloFull: RUOLO_FULL.ADMIN || 'Amministratore',
+          profiloCod: 'ADMIN', profiloLabel: 'ADMIN',
+          area: null, areaCod: '', area_cod: '', settore: null, settoreCod: '', settore_cod: '', ufficio: null, gruppo: '',
           isAdmin: true,
           isOrgAdmin: true,
           isWorkflowAdmin: true
@@ -340,8 +365,9 @@ async function loadUser(): Promise<GiiUserRole | null> {
 
       const u: GiiUserRole = {
         username, fullName,
-        ruolo: null, ruoloCod: '', ruoloLabel: '', ruoloFull: '',
-        area: null, areaCod: '', settore: null, settoreCod: '', ufficio: null, gruppo: '',
+        ruolo: null, ruoloCod: '', ruolo_cod: '', ruoloLabel: '', ruoloFull: '',
+        profiloCod: '', profiloLabel: '',
+        area: null, areaCod: '', area_cod: '', settore: null, settoreCod: '', settore_cod: '', ufficio: null, gruppo: '',
         isAdmin: false,
         isOrgAdmin: false,
         isWorkflowAdmin: false
@@ -363,22 +389,33 @@ async function loadUser(): Promise<GiiUserRole | null> {
     const areaResolved = resolveCodeAndNum(a.area_cod, a.area, AREA_LABEL, AREA_NUM)
     const settoreResolved = resolveCodeAndNum(a.settore_cod, a.settore, SETTORE_LABEL, SETTORE_NUM)
 
+    const area = isWorkflowAdmin ? null : areaResolved.num
+    const areaCod = isWorkflowAdmin ? '' : areaResolved.code
+    const settore = isWorkflowAdmin ? null : settoreResolved.num
+    const settoreCod = isWorkflowAdmin ? '' : settoreResolved.code
+    const profiloCod = getProfiloCod(ruoloCod, areaCod)
+
     const u: GiiUserRole = {
       username,
       fullName: String(a.full_name || fullName),
       ruolo: rn,
       ruoloCod,
+      ruolo_cod: ruoloCod,
       ruoloLabel: ruoloCod,
       ruoloFull: RUOLO_FULL[ruoloCod] || ruoloCod,
+      profiloCod,
+      profiloLabel: profiloCod,
       // ADMIN trasversale: mai area/settore/ufficio
-      area: isWorkflowAdmin ? null : areaResolved.num,
-      areaCod: isWorkflowAdmin ? '' : areaResolved.code,
-      settore: isWorkflowAdmin ? null : settoreResolved.num,
-      settoreCod: isWorkflowAdmin ? '' : settoreResolved.code,
+      area,
+      areaCod,
+      area_cod: areaCod,
+      settore,
+      settoreCod,
+      settore_cod: settoreCod,
       ufficio: isWorkflowAdmin ? null : toNum(a.ufficio),
       gruppo: String(a.gruppo || ''),
-      // Backward-compat: "isAdmin" resta uguale a isOrgAdmin (admin dell'ORG AGOL)
-      isAdmin,
+      // Backward-compat GII: i vecchi widget che leggono isAdmin devono intendere ADMIN workflow.
+      isAdmin: isWorkflowAdmin,
       isOrgAdmin,
       isWorkflowAdmin
     }

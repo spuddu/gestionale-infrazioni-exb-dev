@@ -75,10 +75,10 @@ function toNumberOrNull (value: any): number | null {
 const GII_RUNTIME_VIEWS: RuntimeDsView[] = [
   {
     key: 'ADMIN',
-    viewName: 'GII_VIEW_EB_AMM_ALL',
-    itemId: '6ffe45dac0e04905ba677e9fcd703238',
-    serviceUrl: 'https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_VIEW_EB_AMM_ALL/FeatureServer',
-    layerUrl: 'https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_VIEW_EB_AMM_ALL/FeatureServer/0',
+    viewName: 'GII_VIEW_EB_ADMIN',
+    itemId: 'c05409cf4a86471194d6406e9b4d1c65',
+    serviceUrl: 'https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_VIEW_EB_BASE/FeatureServer',
+    layerUrl: 'https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_VIEW_EB_BASE/FeatureServer/0',
     roles: ['ADMIN'],
     areaCode: '',
     settoreCode: ''
@@ -159,7 +159,7 @@ const GII_RUNTIME_VIEWS: RuntimeDsView[] = [
     itemId: '6ffe45dac0e04905ba677e9fcd703238',
     serviceUrl: 'https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_VIEW_EB_AMM_ALL/FeatureServer',
     layerUrl: 'https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_VIEW_EB_AMM_ALL/FeatureServer/0',
-    roles: ['RI', 'TI', 'DA'],
+    roles: ['RI', 'TI', 'DA', 'RI_AMM', 'TI_AMM'],
     areaCode: 'AMM',
     settoreCode: ''
   },

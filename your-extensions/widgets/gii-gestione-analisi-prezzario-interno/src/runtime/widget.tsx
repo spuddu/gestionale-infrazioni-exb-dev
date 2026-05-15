@@ -12,7 +12,6 @@ function loadEsriModule<T = any>(path: string): Promise<T> {
     try { req([path], (mod: T) => resolve(mod), (err: any) => reject(err)) } catch (e) { reject(e) }
   })
 }
-
 function normalizeUrl(raw: any): string {
   const s = String(raw || '').trim()
   if (!s) return ''
@@ -25,14 +24,13 @@ function normalizeUrl(raw: any): string {
     return out
   } catch { return '' }
 }
-
 function isRiOrAdminUser(): boolean {
   const u: any = (window as any).__giiUserRole || {}
   const ruoloNum = Number(u?.ruolo)
-  const ruoloLabel = String(u?.ruoloLabel || u?.ruolo || '').trim().toUpperCase()
-  return ruoloNum === 4 || ruoloNum === 7 || /(^|[^A-Z])RI([^A-Z]|$)/.test(ruoloLabel) || /(^|[^A-Z])ADMIN([^A-Z]|$)/.test(ruoloLabel)
+  const ruoloCode = String(u?.ruolo_cod || u?.ruoloCod || u?.roleCode || '').trim().toUpperCase()
+  const ruoloLabel = String(u?.ruoloLabel || u?.roleLabel || u?.ruolo || '').trim().toUpperCase()
+  return ruoloNum === 4 || ruoloNum === 7 || ruoloCode === 'RI' || ruoloCode === 'RI_AMM' || ruoloCode === 'ADMIN' || /(^|[^A-Z])RI([^A-Z]|$)/.test(ruoloLabel) || /(^|[^A-Z])RI_AMM([^A-Z]|$)/.test(ruoloLabel) || /(^|[^A-Z])ADMIN([^A-Z]|$)/.test(ruoloLabel)
 }
-
 const LAYER_CACHE: Record<string, any> = {}
 async function getLayer(urlRaw: any): Promise<any> {
   const url = normalizeUrl(urlRaw)
@@ -44,7 +42,6 @@ async function getLayer(urlRaw: any): Promise<any> {
   LAYER_CACHE[url] = fl
   return fl
 }
-
 function num(v: any): number { const n = Number(v); return Number.isFinite(n) ? n : 0 }
 function round(v: number, d = 2): number { const f = Math.pow(10, d); return Math.round((Number(v) + Number.EPSILON) * f) / f }
 function esc(v: string): string { return String(v || '').replace(/'/g, "''") }
@@ -56,39 +53,13 @@ function upper(v: any): string { return String(v || '').trim().toUpperCase() }
 const MODALITA: Record<number, string> = { 1: 'ELEMENTARE', 2: 'ANALIZZATA' }
 const FAMIGLIE_NUM: Record<number, string> = { 1: 'AT', 2: 'PR', 3: 'RU', 4: 'SL', 5: 'PF' }
 const FAMILY_CODES = ['AT', 'PR', 'RU', 'SL', 'PF'] as const
-const FAMILY_DESCRIPTIONS: Record<string, string> = {
-  AT: 'Attrezzature e trasporti',
-  PR: 'Materiali da costruzione',
-  RU: 'Risorse umane',
-  SL: 'Semilavorati',
-  PF: 'Prodotti finiti'
-}
-const ORIGINI: Record<number, string> = { 1: 'REGIONE', 2: 'INTERNO' }
+const FAMILY_DESCRIPTIONS: Record<string, string> = { AT: 'Attrezzature e trasporti', PR: 'Materiali da costruzione', RU: 'Risorse umane', SL: 'Semilavorati', PF: 'Prodotti finiti' }
 const CATEGORY_OPTIONS = ['MANODOPERA', 'NOLO', 'TRASPORTO', 'MATERIALI'] as const
-
-function normalizeModality(v: any): number {
-  const s = upper(v)
-  if (s === 'ELEMENTARE') return 1
-  if (s === 'ANALIZZATA') return 2
-  return num(v) === 2 ? 2 : 1
-}
+function normalizeModality(v: any): number { const s = upper(v); if (s === 'ANALIZZATA') return 2; return num(v) === 2 ? 2 : 1 }
 function modalityLabel(v: any): string { return MODALITA[normalizeModality(v)] || 'ELEMENTARE' }
-function normalizeFamily(v: any): string {
-  const s = upper(v)
-  if ((FAMILY_CODES as readonly string[]).includes(s)) return s
-  const n = Math.trunc(num(v))
-  return FAMIGLIE_NUM[n] || 'AT'
-}
+function normalizeFamily(v: any): string { const s = upper(v); if ((FAMILY_CODES as readonly string[]).includes(s)) return s; const n = Math.trunc(num(v)); return FAMIGLIE_NUM[n] || 'AT' }
 function familyLabel(v: any): string { return normalizeFamily(v) || 'AT' }
 function familyDisplay(v: any): string { const code = familyLabel(v); return `${FAMILY_DESCRIPTIONS[code] || code} (${code})` }
-function familyOptionLabel(v: any): string { const code = familyLabel(v); return FAMILY_DESCRIPTIONS[code] || code }
-function normalizeOrigin(v: any): number {
-  const s = upper(v)
-  if (s === 'REGIONE') return 1
-  if (s === 'INTERNO') return 2
-  return num(v) === 2 ? 2 : 1
-}
-function originLabel(v: any): string { return ORIGINI[normalizeOrigin(v)] || 'REGIONE' }
 function normalizeCategory(v: any): string {
   const s = upper(v)
   if (s === 'NOLI') return 'NOLO'
@@ -97,49 +68,7 @@ function normalizeCategory(v: any): string {
   if (CATEGORY_OPTIONS.includes(s as any)) return s
   return 'MATERIALI'
 }
-function deriveCategoryFromFamilyCode(family: any): string {
-  const label = familyLabel(family)
-  if (label === 'RU') return 'MANODOPERA'
-  if (label === 'AT') return 'NOLO'
-  return 'MATERIALI'
-}
-function buildCode(year: any, family: any, chapter: any, subchapter: any, progressive: any): string {
-  const yy = String(asYear(year)).slice(-2)
-  return `CBSM${yy}_${familyLabel(family)}.${pad4(chapter)}.${pad4(subchapter)}.${pad4(progressive)}`
-}
-function parseProgressivoFromCode(code: any): string {
-  const m = String(code || '').trim().match(/\.(\d{4})$/)
-  return m?.[1] || ''
-}
-
-function nextCode4(values: string[]): string {
-  let maxVal = 0
-  values.forEach((v) => {
-    const n = num(pad4(v))
-    if (n > maxVal) maxVal = n
-  })
-  return pad4(maxVal + 1)
-}
-function uniqueSortedCodes(values: any[]): string[] {
-  return Array.from(new Set((values || []).map((v) => pad4(v)).filter(Boolean))).sort()
-}
-function getAttr(obj: any, candidates: string[]): any {
-  const keys = Object.keys(obj || {})
-  for (const c of candidates) {
-    const key = keys.find((k) => k.toLowerCase() === c.toLowerCase())
-    if (key) return obj[key]
-  }
-  return undefined
-}
-function pickField(fields: any[], candidates: string[]): string {
-  const names = (fields || []).map((f: any) => String(f?.name || ''))
-  for (const c of candidates) {
-    const hit = names.find((n) => n.toLowerCase() === c.toLowerCase())
-    if (hit) return hit
-  }
-  return ''
-}
-async function queryRows(urlRaw: any, where = '1=1', orderBy = 'OBJECTID DESC'): Promise<any[]> {
+async function queryRows(urlRaw: any, where = '1=1', orderBy = 'codice_voce ASC, OBJECTID ASC'): Promise<any[]> {
   const fl = await getLayer(urlRaw)
   const q = fl.createQuery ? fl.createQuery() : {}
   q.where = where
@@ -149,804 +78,281 @@ async function queryRows(urlRaw: any, where = '1=1', orderBy = 'OBJECTID DESC'):
   const res = await fl.queryFeatures(q)
   return (res?.features || []).map((f: any) => ({ ...f.attributes, objectid: Number(f.attributes?.OBJECTID || f.attributes?.objectid || 0) }))
 }
-async function queryOptions(urlRaw: any, search: string, excludeCode?: string): Promise<any[]> {
-  const fl = await getLayer(urlRaw)
-  const codeField = pickField(fl?.fields || [], ['codice_voce', 'codice_interno', 'tariffa', 'codice', 'articolo', 'codice_articolo'])
-  const descField = pickField(fl?.fields || [], ['descrizione', 'descrizione_elemento'])
-  const umField = pickField(fl?.fields || [], ['unita_misura', 'um', 'u_m'])
-  const priceField = pickField(fl?.fields || [], ['prezzo_unitario', 'prezzo'])
-  const categoryField = pickField(fl?.fields || [], ['categoria_default', 'categoria'])
-  const familyField = pickField(fl?.fields || [], ['famiglia'])
-  const activeField = pickField(fl?.fields || [], ['attivo'])
-  const term = upper(search)
-  if (!codeField && !descField) return []
-  const likes: string[] = []
-  if (term.length >= 2) {
-    if (codeField) likes.push(`UPPER(${codeField}) LIKE '%${esc(term)}%'`)
-    if (descField) likes.push(`UPPER(${descField}) LIKE '%${esc(term)}%'`)
-  }
-  const clauses: string[] = []
-  if (likes.length) clauses.push(`(${likes.join(' OR ')})`)
-  if (excludeCode && codeField) clauses.push(`UPPER(${codeField}) <> '${esc(upper(excludeCode))}'`)
-  if (activeField) clauses.push(`(${activeField} IS NULL OR ${activeField} = 1)`)
-  const q = fl.createQuery ? fl.createQuery() : {}
-  q.where = clauses.length ? clauses.join(' AND ') : '1=1'
-  q.outFields = ['*']
-  q.returnGeometry = false
-  q.num = 50
-  if (codeField) q.orderByFields = [`${codeField} ASC`]
-  const res = await fl.queryFeatures(q)
-  return (res?.features || []).map((f: any) => {
-    const a = f.attributes || {}
-    const code = String(getAttr(a, [codeField]) || '')
-    const desc = String(getAttr(a, [descField]) || '')
-    const um = String(getAttr(a, [umField]) || '')
-    const price = round(num(getAttr(a, [priceField])), 4)
-    const category = normalizeCategory(getAttr(a, [categoryField]) || deriveCategoryFromFamilyCode(getAttr(a, [familyField]) || ''))
-    return {
-      objectid: Number(a?.OBJECTID || a?.objectid || 0),
-      code,
-      description: desc,
-      unita_misura: um,
-      prezzo_unitario: price,
-      categoria_costo: category,
-      raw: a
-    }
-  }).filter((r: any) => !!r.code || !!r.description)
-}
-async function applyAttrs(urlRaw: any, attrs: any, objectid?: number | null): Promise<number> {
+async function applyAttrs(urlRaw: any, attrs: any, objectid?: number | null): Promise<void> {
   const fl = await getLayer(urlRaw)
   const oidField = String(fl?.objectIdField || 'OBJECTID')
   const fieldNames = new Set(((fl?.fields || []) as any[]).map((f: any) => String(f?.name || '')))
   const out: any = {}
   Object.keys(attrs || {}).forEach((k) => { if (fieldNames.has(k)) out[k] = attrs[k] })
   if (objectid != null) out[oidField] = Number(objectid)
-  const payload = objectid != null ? { updateFeatures: [{ attributes: out }] } : { addFeatures: [{ attributes: out }] }
+  const payload = { updateFeatures: [{ attributes: out }] }
   const res = await fl.applyEdits(payload as any)
-  const r = objectid != null ? res?.updateFeatureResults?.[0] : res?.addFeatureResults?.[0]
+  const r = res?.updateFeatureResults?.[0]
   if (r?.error) throw new Error(r.error.message || 'Salvataggio non riuscito.')
-  return Number(r?.objectId || objectid || 0)
 }
 async function deleteObjectIds(urlRaw: any, objectIds: number[]): Promise<void> {
   if (!objectIds.length) return
   const fl = await getLayer(urlRaw)
   const oidField = String(fl?.objectIdField || 'OBJECTID')
   const Graphic = await loadEsriModule<any>('esri/Graphic')
-  for (let i = 0; i < objectIds.length; i += 200) {
-    const chunk = objectIds.slice(i, i + 200)
-    const dels = chunk.map((id) => new Graphic({ attributes: { [oidField]: id } }))
-    const res = await fl.applyEdits({ deleteFeatures: dels } as any)
-    const bad = (res?.deleteFeatureResults || []).find((r: any) => r?.error)
-    if (bad?.error) throw new Error(bad.error.message || 'Eliminazione non riuscita.')
-  }
-}
-async function recomputeParentPrice(parentUrl: string, detailUrl: string, parentCode: string): Promise<number> {
-  const rows = await queryRows(detailUrl, `codice_voce_parent = '${esc(parentCode)}'`, 'ordine ASC, OBJECTID ASC')
-  const total = round(rows.reduce((s: any, r: any) => s + num(r.importo), 0), 4)
-  const parent = (await queryRows(parentUrl, `codice_voce = '${esc(parentCode)}'`, 'OBJECTID DESC'))[0]
-  if (parent?.objectid) await applyAttrs(parentUrl, { prezzo_unitario: total }, Number(parent.objectid))
-  return total
-}
-function nextProgressiveFromRows(rows: any[], year: any, family: any, chapter: any, subchapter: any, excludeObjectId?: number): string {
-  const y = asYear(year)
-  const fam = familyLabel(family)
-  const cap = pad4(chapter)
-  const sub = pad4(subchapter)
-  let maxProg = 0
-  rows.forEach((r: any) => {
-    if (excludeObjectId && Number(r.objectid) === Number(excludeObjectId)) return
-    if (asYear(r.anno_listino) !== y) return
-    if (familyLabel(r.famiglia) !== fam) return
-    if (pad4(r.capitolo) !== cap) return
-    if (pad4(r.sottocapitolo) !== sub) return
-    const prog = num(r.progressivo_voce || parseProgressivoFromCode(r.codice_voce))
-    if (prog > maxProg) maxProg = prog
-  })
-  return pad4(maxProg + 1)
+  const dels = objectIds.map((id) => new Graphic({ attributes: { [oidField]: id } }))
+  const res = await fl.applyEdits({ deleteFeatures: dels } as any)
+  const bad = (res?.deleteFeatureResults || []).find((r: any) => r?.error)
+  if (bad?.error) throw new Error(bad.error.message || 'Eliminazione non riuscita.')
 }
 
-async function countInternalReferences(detailUrl: string, sourceObjectId: number, excludeParentCode?: string): Promise<number> {
+async function countInternalReferences(detailUrl: string, sourceObjectId: number): Promise<number> {
   if (!detailUrl || !sourceObjectId) return 0
-  const clauses = [`origine_riga = 2`, `objectid_sorgente = ${Math.trunc(num(sourceObjectId))}`]
-  if (excludeParentCode) clauses.push(`codice_voce_parent <> '${esc(excludeParentCode)}'`)
-  const rows = await queryRows(detailUrl, clauses.join(' AND '), 'OBJECTID ASC')
+  const rows = await queryRows(detailUrl, `origine_riga = 2 AND objectid_sorgente = ${Math.trunc(num(sourceObjectId))}`, 'OBJECTID ASC')
   return rows.length
 }
 
 const styles = `
-.gap { font-family: Arial, sans-serif; font-size: 13px; padding: 12px; height: 100%; display:flex; flex-direction:column; gap:10px; box-sizing:border-box; }
-.gap-title { font-size:15px; font-weight:700; color:#1F4E79; border-bottom:2px solid #1F4E79; padding-bottom:6px; }
-.gap-toolbar, .gap-subtoolbar { display:flex; gap:10px; flex-wrap:wrap; align-items:end; }
-.gap-panel { background:#f5f9ff; border:1px solid #c5d9f1; border-radius:6px; padding:12px; }
-.gap-form-grid { display:grid; grid-template-columns: 0.9fr 0.9fr 0.8fr 0.8fr 0.8fr 1.4fr; gap:10px; align-items:end; }
-.gap-row-grid { display:grid; grid-template-columns: 0.85fr 1.2fr 1.6fr 0.75fr 0.75fr 0.75fr 0.7fr auto; gap:10px; align-items:end; }
-.gap-field { display:flex; flex-direction:column; gap:3px; min-width:0; }
-.gap-label { font-size:11px; font-weight:700; color:#1F4E79; }
-.gap-input, .gap-select, .gap-textarea { width:100%; padding:6px 8px; border:1px solid #aac4e0; border-radius:4px; font-size:13px; box-sizing:border-box; background:#fff; }
-.gap-textarea { min-height:64px; resize:vertical; }
-.gap-readonly { background:#eef4fb; color:#3f4d5a; }
-.gap-btn { padding:6px 14px; border:none; border-radius:4px; font-size:13px; cursor:pointer; font-weight:700; }
-.gap-btn:disabled { opacity:0.55; cursor:not-allowed; }
-.gap-primary { background:#1F4E79; color:#fff; }
-.gap-success { background:#375623; color:#fff; }
-.gap-neutral { background:#e0e0e0; color:#333; }
-.gap-danger { background:#c00000; color:#fff; }
-.gap-lookup { max-height:180px; overflow:auto; border:1px solid #c5d9f1; border-radius:6px; background:#fff; }
-.gap-lookup-item { padding:8px 10px; border-bottom:1px solid #e0eaf4; cursor:pointer; }
-.gap-lookup-item:hover { background:#eef4fb; }
-.gap-table-wrap { flex:1; min-height:0; overflow:auto; border:1px solid #c5d9f1; border-radius:6px; }
-.gap-table { width:100%; border-collapse:collapse; font-size:12px; }
-.gap-table th { background:#1F4E79; color:#fff; padding:7px 8px; text-align:left; position:sticky; top:0; z-index:1; white-space:nowrap; }
-.gap-table td { padding:6px 8px; border-bottom:1px solid #e0eaf4; vertical-align:top; }
-.gap-table tbody tr:nth-child(odd) td { background:#f5f9ff; }
-.gap-table tbody tr:nth-child(even) td { background:#fff; }
-.gap-msg { padding:7px 12px; border-radius:4px; font-size:12px; font-weight:700; }
-.gap-ok { background:#e2efda; color:#375623; border:1px solid #b8d4b0; }
-.gap-err { background:#fce4e4; color:#c00; border:1px solid #f5b8b8; }
-.gap-muted { color:#6b7280; }
-.gap-kpi { white-space:nowrap; font-weight:700; color:#1F4E79; }
+.giw { font-family: Arial, sans-serif; font-size: 13px; padding: 12px; height: 100%; display:flex; flex-direction:column; gap:10px; box-sizing:border-box; }
+.giw-title { font-size:15px; font-weight:700; color:#1F4E79; border-bottom:2px solid #1F4E79; padding-bottom:6px; }
+.giw-toolbar { display:flex; gap:10px; align-items:end; flex-wrap:wrap; }
+.giw-panel { background:#f5f9ff; border:1px solid #c5d9f1; border-radius:6px; padding:12px; }
+.giw-form { display:grid; grid-template-columns:1.5fr 0.7fr 0.9fr 0.9fr 0.9fr 0.8fr; gap:10px; align-items:end; }
+.giw-field { display:flex; flex-direction:column; gap:3px; }
+.giw-label { font-size:11px; font-weight:700; color:#1F4E79; }
+.giw-input, .giw-select, .giw-textarea { width:100%; padding:6px 8px; border:1px solid #aac4e0; border-radius:4px; font-size:13px; box-sizing:border-box; background:#fff; }
+.giw-textarea { min-height:60px; resize:vertical; }
+.giw-readonly { background:#eef4fb; color:#3f4d5a; }
+.giw-btn { padding:6px 14px; border:none; border-radius:4px; font-size:13px; cursor:pointer; font-weight:700; }
+.giw-btn:disabled { opacity:0.55; cursor:not-allowed; }
+.giw-save { background:#1F4E79; color:#fff; } .giw-cancel { background:#e0e0e0; color:#333; } .giw-danger { background:#c00000; color:#fff; }
+.giw-table-wrap { flex:1; min-height:0; overflow:auto; border:1px solid #c5d9f1; border-radius:6px; }
+.giw-table { width:100%; border-collapse:collapse; font-size:12px; }
+.giw-table th { background:#1F4E79; color:#fff; padding:7px 8px; text-align:left; position:sticky; top:0; z-index:1; white-space:nowrap; }
+.giw-table td { padding:6px 8px; border-bottom:1px solid #e0eaf4; vertical-align:top; }
+.giw-table tbody tr:nth-child(odd) td { background:#f5f9ff; } .giw-table tbody tr:nth-child(even) td { background:#fff; }
+.giw-msg { padding:7px 12px; border-radius:4px; font-size:12px; font-weight:700; } .giw-ok { background:#e2efda; color:#375623; border:1px solid #b8d4b0; } .giw-err { background:#fce4e4; color:#c00; border:1px solid #f5b8b8; }
+.giw-muted { color:#6b7280; }
 `
 
-function emptyParentForm() {
-  const y = new Date().getFullYear()
-  return {
-    objectid: undefined,
-    codice_voce: '',
-    descrizione: '',
-    unita_misura: '',
-    prezzo_unitario: '',
-    categoria_default: 'MATERIALI',
-    attivo: '1',
-    note: '',
-    modalita_voce: 1,
-    anno_listino: y,
-    famiglia: 'AT',
-    capitolo: '0001',
-    sottocapitolo: '0001',
-    progressivo_voce: '0001'
-  } as any
-}
-function emptyLineForm(parentCode = '') {
-  return {
-    objectid: undefined,
-    codice_voce_parent: parentCode,
-    origine_riga: 1,
-    objectid_sorgente: '',
-    categoria_costo: 'MATERIALI',
-    codice_riferimento: '',
-    descrizione: '',
-    unita_misura: '',
-    quantita: '',
-    prezzo_unitario: '',
-    importo: '',
-    ordine: '',
-    note: '',
-    lookupSearch: ''
-  } as any
+function emptyForm() {
+  return { objectid: undefined, codice_voce: '', descrizione: '', unita_misura: '', prezzo_unitario: '', categoria_default: 'MATERIALI', attivo: '1', note: '', modalita_voce: 1, anno_listino: new Date().getFullYear(), famiglia: 'AT', capitolo: '0001', sottocapitolo: '0001', progressivo_voce: '0001' } as any
 }
 
 export default function Widget(props: AllWidgetProps<IMConfig>) {
   const cfg: any = props.config || {}
   const serviceUrl = String(cfg.serviceUrl || '').trim()
-  const parentTableUrl = String(cfg.parentTableUrl || '').trim()
-  const regionalTableUrl = String(cfg.regionalTableUrl || '').trim()
-  const title = String(cfg.title || 'GII - Gestione Analisi Prezzario Interno')
+  const detailTableUrl = String(cfg.detailTableUrl || '').trim()
+  const title = String(cfg.title || 'GII - Gestione Prezzario Interno')
   const titleColor = String(cfg.titleColor || '#1F4E79')
   const titleFontSize = Number(cfg.titleFontSize || 15)
-
-  const [parents, setParents] = React.useState<any[]>([])
-  const [selectedParent, setSelectedParent] = React.useState('')
   const [rows, setRows] = React.useState<any[]>([])
-  const [parentForm, setParentForm] = React.useState<any>(emptyParentForm())
-  const [parentEditing, setParentEditing] = React.useState(false)
-  const [lineForm, setLineForm] = React.useState<any>(emptyLineForm())
-  const [lineEditing, setLineEditing] = React.useState(false)
-  const [lookupRows, setLookupRows] = React.useState<any[]>([])
-  const [lookupLoading, setLookupLoading] = React.useState(false)
+  const [filterText, setFilterText] = React.useState('')
+  const [form, setForm] = React.useState<any>(emptyForm())
+  const [editing, setEditing] = React.useState(false)
   const [loading, setLoading] = React.useState(false)
   const [saving, setSaving] = React.useState(false)
   const [msg, setMsg] = React.useState<{ text: string, ok: boolean } | null>(null)
   const [isRi, setIsRi] = React.useState(isRiOrAdminUser())
 
-  const chapterOptions = React.useMemo(() => uniqueSortedCodes(parents.filter((p: any) => normalizeFamily(p.famiglia) === normalizeFamily(parentForm.famiglia)).map((p: any) => p.capitolo)), [parents, parentForm.famiglia])
-  const subchapterOptions = React.useMemo(() => uniqueSortedCodes(parents.filter((p: any) => normalizeFamily(p.famiglia) === normalizeFamily(parentForm.famiglia) && pad4(p.capitolo) === pad4(parentForm.capitolo)).map((p: any) => p.sottocapitolo)), [parents, parentForm.famiglia, parentForm.capitolo])
+  React.useEffect(() => { const refresh = () => setIsRi(isRiOrAdminUser()); refresh(); window.addEventListener('gii:userLoaded', refresh); return () => window.removeEventListener('gii:userLoaded', refresh) }, [])
+  React.useEffect(() => { if (!msg) return; const t = window.setTimeout(() => setMsg(null), 6000); return () => window.clearTimeout(t) }, [msg])
 
-  React.useEffect(() => {
-    const refresh = () => setIsRi(isRiOrAdminUser())
-    refresh()
-    window.addEventListener('gii:userLoaded', refresh)
-    return () => window.removeEventListener('gii:userLoaded', refresh)
-  }, [])
-
-  React.useEffect(() => {
-    if (!msg) return
-    const t = window.setTimeout(() => setMsg(null), 6000)
-    return () => window.clearTimeout(t)
-  }, [msg])
-
-  const loadParents = React.useCallback(async () => {
-    if (!parentTableUrl) { setParents([]); return }
-    const rr = await queryRows(parentTableUrl, '1=1', 'codice_voce ASC, OBJECTID ASC')
-    setParents(rr)
-    if (selectedParent && !rr.some((r: any) => String(r.codice_voce || '') === String(selectedParent))) setSelectedParent('')
-  }, [parentTableUrl, selectedParent])
-
-  const loadLines = React.useCallback(async () => {
-    if (!serviceUrl || !selectedParent) { setRows([]); return }
-    const rr = await queryRows(serviceUrl, `codice_voce_parent = '${esc(selectedParent)}'`, 'ordine ASC, OBJECTID ASC')
-    setRows(rr)
-  }, [serviceUrl, selectedParent])
-
-  React.useEffect(() => {
-    let cancel = false
-    const run = async () => {
-      try { await loadParents() } catch (e: any) { if (!cancel) setMsg({ text: 'Errore caricamento voci: ' + (e?.message ?? e), ok: false }) }
+  const load = React.useCallback(async () => {
+    if (!serviceUrl) { setRows([]); return }
+    setLoading(true)
+    try {
+      const term = upper(filterText)
+      const where = term ? `(UPPER(codice_voce) LIKE '%${esc(term)}%' OR UPPER(descrizione) LIKE '%${esc(term)}%')` : '1=1'
+      setRows(await queryRows(serviceUrl, where, 'codice_voce ASC, OBJECTID ASC'))
+    } catch (e: any) {
+      setMsg({ text: 'Errore caricamento: ' + (e?.message ?? e), ok: false })
     }
-    void run()
-    return () => { cancel = true }
-  }, [loadParents])
+    setLoading(false)
+  }, [serviceUrl, filterText])
+  React.useEffect(() => { void load() }, [load])
 
-  React.useEffect(() => {
-    let cancel = false
-    const run = async () => {
-      setLoading(true)
-      try { await loadLines() } catch (e: any) { if (!cancel) setMsg({ text: 'Errore caricamento righe: ' + (e?.message ?? e), ok: false }) }
-      if (!cancel) setLoading(false)
-    }
-    void run()
-    return () => { cancel = true }
-  }, [loadLines])
-
-  const selectedParentRow = React.useMemo(() => parents.find((p: any) => String(p.codice_voce || '') === String(selectedParent || '')) || null, [parents, selectedParent])
-  const selectedParentMode = normalizeModality(selectedParentRow?.modalita_voce)
-  const selectedParentLabel = selectedParentRow ? `${selectedParentRow.codice_voce} — ${selectedParentRow.descrizione}` : ''
-
-  React.useEffect(() => {
-    if (!parentEditing) return
-    if (parentForm.objectid != null) return
-    const next = nextProgressiveFromRows(parents, parentForm.anno_listino, parentForm.famiglia, parentForm.capitolo, parentForm.sottocapitolo)
-    setParentForm((f: any) => ({
-      ...f,
-      progressivo_voce: next,
-      codice_voce: buildCode(f.anno_listino, f.famiglia, f.capitolo, f.sottocapitolo, next)
-    }))
-  }, [parents, parentEditing, parentForm.objectid, parentForm.anno_listino, parentForm.famiglia, parentForm.capitolo, parentForm.sottocapitolo])
-
-  React.useEffect(() => {
-    if (!lineEditing) { setLookupRows([]); return }
-    const origin = normalizeOrigin(lineForm.origine_riga)
-    const sourceUrl = origin === 1 ? regionalTableUrl : parentTableUrl
-    const search = String(lineForm.lookupSearch || '').trim()
-    if (!sourceUrl || search.length < 2) { setLookupRows([]); return }
-    let cancel = false
-    const t = window.setTimeout(() => {
-      void (async () => {
-        setLookupLoading(true)
-        try {
-          const rr = await queryOptions(sourceUrl, search, origin === 2 ? selectedParent : '')
-          if (!cancel) setLookupRows(rr)
-        } catch (e: any) {
-          if (!cancel) setMsg({ text: 'Errore ricerca voci sorgente: ' + (e?.message ?? e), ok: false })
-        }
-        if (!cancel) setLookupLoading(false)
-      })()
-    }, 250)
-    return () => { cancel = true; window.clearTimeout(t) }
-  }, [lineEditing, lineForm.lookupSearch, lineForm.origine_riga, regionalTableUrl, parentTableUrl, selectedParent])
-
-  const refreshAll = React.useCallback(async () => {
-    await loadParents()
-    await loadLines()
-  }, [loadParents, loadLines])
-
-  const onNewParent = () => {
-    setParentEditing(true)
-    setLineEditing(false)
-    setLookupRows([])
-    const f = emptyParentForm()
-    const baseChapters = uniqueSortedCodes(parents.filter((p: any) => normalizeFamily(p.famiglia) === normalizeFamily(f.famiglia)).map((p: any) => p.capitolo))
-    f.capitolo = nextCode4(baseChapters)
-    f.sottocapitolo = '0001'
-    const next = nextProgressiveFromRows(parents, f.anno_listino, f.famiglia, f.capitolo, f.sottocapitolo)
-    f.progressivo_voce = next
-    f.codice_voce = buildCode(f.anno_listino, f.famiglia, f.capitolo, f.sottocapitolo, next)
-    setParentForm(f)
-  }
-  const onEditParent = () => {
-    if (!selectedParentRow) return
-    setParentEditing(true)
-    setLineEditing(false)
-    setLookupRows([])
-    setParentForm({
-      objectid: selectedParentRow.objectid,
-      codice_voce: String(selectedParentRow.codice_voce || ''),
-      descrizione: String(selectedParentRow.descrizione || ''),
-      unita_misura: String(selectedParentRow.unita_misura || ''),
-      prezzo_unitario: String(selectedParentRow.prezzo_unitario ?? ''),
-      categoria_default: normalizeCategory(selectedParentRow.categoria_default),
-      attivo: String(num(selectedParentRow.attivo) === 0 ? '0' : '1'),
-      note: String(selectedParentRow.note || ''),
-      modalita_voce: normalizeModality(selectedParentRow.modalita_voce),
-      anno_listino: asYear(selectedParentRow.anno_listino),
-      famiglia: normalizeFamily(selectedParentRow.famiglia),
-      capitolo: pad4(selectedParentRow.capitolo),
-      sottocapitolo: pad4(selectedParentRow.sottocapitolo),
-      progressivo_voce: pad4(selectedParentRow.progressivo_voce || parseProgressivoFromCode(selectedParentRow.codice_voce)),
+  const onEdit = (r: any) => {
+    setEditing(true)
+    setForm({
+      objectid: r.objectid,
+      codice_voce: String(r.codice_voce || ''),
+      descrizione: String(r.descrizione || ''),
+      unita_misura: String(r.unita_misura || ''),
+      prezzo_unitario: String(r.prezzo_unitario ?? ''),
+      categoria_default: normalizeCategory(r.categoria_default),
+      attivo: String(num(r.attivo) === 0 ? '0' : '1'),
+      note: String(r.note || ''),
+      modalita_voce: normalizeModality(r.modalita_voce),
+      anno_listino: asYear(r.anno_listino),
+      famiglia: normalizeFamily(r.famiglia),
+      capitolo: pad4(r.capitolo),
+      sottocapitolo: pad4(r.sottocapitolo),
+      progressivo_voce: pad4(r.progressivo_voce)
     })
   }
-  const onCancelParent = () => {
-    setParentEditing(false)
-    setParentForm(emptyParentForm())
-  }
-  const onSaveParent = async () => {
-    const mode = normalizeModality(parentForm.modalita_voce)
-    const year = asYear(parentForm.anno_listino)
-    const famiglia = normalizeFamily(parentForm.famiglia)
-    const capitolo = pad4(parentForm.capitolo)
-    const sottocapitolo = pad4(parentForm.sottocapitolo)
-    const progressivo = parentForm.objectid != null ? pad4(parentForm.progressivo_voce || parseProgressivoFromCode(parentForm.codice_voce)) : nextProgressiveFromRows(parents, year, famiglia, capitolo, sottocapitolo)
-    const code = buildCode(year, famiglia, capitolo, sottocapitolo, progressivo)
-    if (!String(parentForm.descrizione || '').trim()) { setMsg({ text: 'Compila la descrizione della voce.', ok: false }); return }
-    if (!String(parentForm.unita_misura || '').trim()) { setMsg({ text: 'Compila l’unità di misura.', ok: false }); return }
-    if (mode === 1 && String(parentForm.prezzo_unitario || '').trim() === '') { setMsg({ text: 'Per la voce elementare devi indicare il prezzo manuale.', ok: false }); return }
-    if (mode === 1 && parentForm.objectid != null && rows.length > 0) { setMsg({ text: 'Non puoi impostare ELEMENTARE una voce che ha già righe di analisi.', ok: false }); return }
+  const onCancel = () => { setEditing(false); setForm(emptyForm()) }
+  const onSave = async () => {
+    if (!String(form.descrizione || '').trim()) { setMsg({ text: 'Compila la descrizione.', ok: false }); return }
+    if (!String(form.unita_misura || '').trim()) { setMsg({ text: 'Compila l’unità di misura.', ok: false }); return }
+    if (normalizeModality(form.modalita_voce) === 1 && String(form.prezzo_unitario || '').trim() === '') { setMsg({ text: 'Per una voce elementare il prezzo non può essere vuoto.', ok: false }); return }
     setSaving(true)
     try {
-      const oid = await applyAttrs(parentTableUrl, {
-        codice_voce: code,
-        descrizione: String(parentForm.descrizione || '').trim(),
-        unita_misura: String(parentForm.unita_misura || '').trim(),
-        prezzo_unitario: mode === 1 ? round(num(parentForm.prezzo_unitario), 4) : round(num(parentForm.prezzo_unitario), 4),
-        categoria_default: normalizeCategory(parentForm.categoria_default),
-        attivo: parentForm.objectid != null ? (String(parentForm.attivo) === '0' ? 0 : 1) : 1,
-        note: String(parentForm.note || '').trim(),
-        modalita_voce: mode,
-        anno_listino: year,
-        famiglia,
-        capitolo,
-        sottocapitolo,
-        progressivo_voce: progressivo
-      }, parentForm.objectid != null ? Number(parentForm.objectid) : null)
-      if (parentForm.objectid != null && String(selectedParent || '').trim() && selectedParent !== code) {
-        const childRows = await queryRows(serviceUrl, `codice_voce_parent = '${esc(selectedParent)}'`, 'OBJECTID ASC')
-        for (const r of childRows) {
-          await applyAttrs(serviceUrl, { codice_voce_parent: code }, Number(r.objectid))
-        }
-      }
-      setSelectedParent(code)
-      setParentEditing(false)
-      setParentForm(emptyParentForm())
-      await refreshAll()
-      if (mode === 2) {
-        const total = await recomputeParentPrice(parentTableUrl, serviceUrl, code)
-        setMsg({ text: parentForm.objectid != null ? `Testata aggiornata. Prezzo ricalcolato: ${money(total, 4)}` : `Voce analizzata creata: ${code}`, ok: true })
-      } else {
-        setMsg({ text: parentForm.objectid != null ? `Voce elementare aggiornata: ${code}` : `Voce elementare creata: ${code}`, ok: true })
-      }
+      await applyAttrs(serviceUrl, {
+        descrizione: String(form.descrizione || '').trim(),
+        unita_misura: String(form.unita_misura || '').trim(),
+        prezzo_unitario: String(form.prezzo_unitario || '').trim() === '' ? null : round(num(form.prezzo_unitario), 4),
+        categoria_default: normalizeCategory(form.categoria_default),
+        attivo: String(form.attivo) === '1' ? 1 : 0,
+        note: String(form.note || '').trim()
+      }, Number(form.objectid))
+      setMsg({ text: 'Voce aggiornata.', ok: true })
+      onCancel()
+      await load()
     } catch (e: any) {
-      setMsg({ text: 'Errore salvataggio testata: ' + (e?.message ?? e), ok: false })
+      setMsg({ text: 'Errore: ' + (e?.message ?? e), ok: false })
     }
     setSaving(false)
   }
-
-  const onDeleteParent = async () => {
-    if (!selectedParentRow) return
+  const onDelete = async (r: any) => {
     setSaving(true)
     try {
-      const refs = await countInternalReferences(serviceUrl, Number(selectedParentRow.objectid), String(selectedParentRow.codice_voce || ''))
+      if (!detailTableUrl) {
+        setMsg({ text: 'Configura anche l’URL della tabella analisi per poter verificare se la voce è già utilizzata.', ok: false })
+        return
+      }
+      const refs = await countInternalReferences(detailTableUrl, Number(r.objectid))
       if (refs > 0) {
         setMsg({ text: 'Non puoi eliminare questa voce perché è utilizzata in una o più analisi del prezzario interno.', ok: false })
         return
       }
-      if (!window.confirm(`Eliminare la voce interna "${selectedParentLabel}" e tutte le sue righe di analisi?`)) return
-      const childIds = rows.map((r: any) => Number(r.objectid)).filter(Boolean)
-      if (childIds.length) await deleteObjectIds(serviceUrl, childIds)
-      await deleteObjectIds(parentTableUrl, [Number(selectedParentRow.objectid)])
-      setSelectedParent('')
-      setRows([])
-      setLineEditing(false)
-      setParentEditing(false)
-      await loadParents()
-      setMsg({ text: 'Voce interna eliminata.', ok: true })
+      if (!window.confirm(`Eliminare la voce interna "${r.codice_voce} — ${r.descrizione}"?`)) return
+      await deleteObjectIds(serviceUrl, [Number(r.objectid)])
+      await load()
+      setMsg({ text: 'Voce eliminata.', ok: true })
     } catch (e: any) {
-      setMsg({ text: 'Errore eliminazione voce: ' + (e?.message ?? e), ok: false })
+      setMsg({ text: 'Errore: ' + (e?.message ?? e), ok: false })
     } finally {
       setSaving(false)
     }
   }
 
-  const onNewLine = () => {
-    if (!selectedParentRow) return
-    if (normalizeModality(selectedParentRow.modalita_voce) !== 2) {
-      setMsg({ text: 'Le righe di analisi sono consentite solo per voci ANALIZZATE.', ok: false })
-      return
-    }
-    setParentEditing(false)
-    setLineEditing(true)
-    setLookupRows([])
-    setLineForm(emptyLineForm(selectedParent))
-  }
-  const onPickLookup = (r: any) => {
-    setLineForm((f: any) => ({
-      ...f,
-      objectid_sorgente: String(r.objectid || ''),
-      codice_riferimento: String(r.code || ''),
-      descrizione: String(r.description || ''),
-      unita_misura: String(r.unita_misura || ''),
-      prezzo_unitario: String(r.prezzo_unitario ?? ''),
-      categoria_costo: normalizeCategory(r.categoria_costo),
-      lookupSearch: String(r.code || '')
-    }))
-    setLookupRows([])
-  }
-  const onEditLine = (r: any) => {
-    setParentEditing(false)
-    setLineEditing(true)
-    setLookupRows([])
-    setLineForm({
-      objectid: r.objectid,
-      codice_voce_parent: String(r.codice_voce_parent || selectedParent),
-      origine_riga: normalizeOrigin(r.origine_riga),
-      objectid_sorgente: String(r.objectid_sorgente || ''),
-      categoria_costo: normalizeCategory(r.categoria_costo),
-      codice_riferimento: String(r.codice_riferimento || ''),
-      descrizione: String(r.descrizione || ''),
-      unita_misura: String(r.unita_misura || ''),
-      quantita: String(r.quantita ?? ''),
-      prezzo_unitario: String(r.prezzo_unitario ?? ''),
-      importo: String(r.importo ?? ''),
-      ordine: String(r.ordine ?? ''),
-      note: String(r.note || ''),
-      lookupSearch: String(r.codice_riferimento || '')
-    })
-  }
-  const onCancelLine = () => {
-    setLineEditing(false)
-    setLookupRows([])
-    setLineForm(emptyLineForm(selectedParent))
-  }
-  const onSaveLine = async () => {
-    if (!selectedParentRow) { setMsg({ text: 'Seleziona prima una voce interna.', ok: false }); return }
-    if (normalizeModality(selectedParentRow.modalita_voce) !== 2) { setMsg({ text: 'Le righe sono ammesse solo per voci ANALIZZATE.', ok: false }); return }
-    if (!String(lineForm.codice_riferimento || '').trim()) { setMsg({ text: 'Seleziona una voce sorgente da REGIONE o INTERNO.', ok: false }); return }
-    if (!String(lineForm.descrizione || '').trim()) { setMsg({ text: 'Compila la descrizione della riga.', ok: false }); return }
-    const q = round(num(lineForm.quantita), 4)
-    if (!q) { setMsg({ text: 'La quantità deve essere maggiore di zero.', ok: false }); return }
-    const pu = round(num(lineForm.prezzo_unitario), 4)
-    const imp = round(q * pu, 4)
-    setSaving(true)
-    try {
-      await applyAttrs(serviceUrl, {
-        codice_voce_parent: selectedParent,
-        origine_riga: normalizeOrigin(lineForm.origine_riga),
-        objectid_sorgente: lineForm.objectid_sorgente === '' ? null : Math.trunc(num(lineForm.objectid_sorgente)),
-        categoria_costo: normalizeCategory(lineForm.categoria_costo),
-        codice_riferimento: String(lineForm.codice_riferimento || '').trim(),
-        descrizione: String(lineForm.descrizione || '').trim(),
-        unita_misura: String(lineForm.unita_misura || '').trim(),
-        quantita: q,
-        prezzo_unitario: pu,
-        importo: imp,
-        ordine: lineForm.ordine === '' ? null : Math.trunc(num(lineForm.ordine)),
-        note: String(lineForm.note || '').trim()
-      }, lineForm.objectid != null ? Number(lineForm.objectid) : null)
-      const total = await recomputeParentPrice(parentTableUrl, serviceUrl, selectedParent)
-      setLineEditing(false)
-      setLineForm(emptyLineForm(selectedParent))
-      await loadLines()
-      await loadParents()
-      setMsg({ text: `Riga analisi salvata. Prezzo voce ricalcolato: ${money(total, 4)}`, ok: true })
-    } catch (e: any) {
-      setMsg({ text: 'Errore salvataggio riga: ' + (e?.message ?? e), ok: false })
-    }
-    setSaving(false)
-  }
-  const onDeleteLine = async (r: any) => {
-    if (!window.confirm(`Eliminare la riga "${r.codice_riferimento} — ${r.descrizione}"?`)) return
-    setSaving(true)
-    try {
-      await deleteObjectIds(serviceUrl, [Number(r.objectid)])
-      const total = await recomputeParentPrice(parentTableUrl, serviceUrl, selectedParent)
-      await loadLines()
-      await loadParents()
-      setMsg({ text: `Riga eliminata. Prezzo voce ricalcolato: ${money(total, 4)}`, ok: true })
-    } catch (e: any) {
-      setMsg({ text: 'Errore eliminazione riga: ' + (e?.message ?? e), ok: false })
-    }
-    setSaving(false)
-  }
-
-  const parentCodePreview = React.useMemo(() => {
-    if (!parentEditing) return ''
-    const prog = parentForm.objectid != null ? pad4(parentForm.progressivo_voce || parseProgressivoFromCode(parentForm.codice_voce)) : nextProgressiveFromRows(parents, parentForm.anno_listino, parentForm.famiglia, parentForm.capitolo, parentForm.sottocapitolo)
-    return buildCode(parentForm.anno_listino, parentForm.famiglia, parentForm.capitolo, parentForm.sottocapitolo, prog)
-  }, [parentEditing, parentForm.objectid, parentForm.codice_voce, parentForm.anno_listino, parentForm.famiglia, parentForm.capitolo, parentForm.sottocapitolo, parentForm.progressivo_voce, parents])
-
-  const lineImportoPreview = React.useMemo(() => round(num(lineForm.quantita) * num(lineForm.prezzo_unitario), 4), [lineForm.quantita, lineForm.prezzo_unitario])
-
-  if (!isRi) {
-    return <div style={{ padding: 12, fontFamily: 'Arial, sans-serif', color: '#7a1c1c', background: '#fce4e4', border: '1px solid #f5b8b8', borderRadius: 6 }}>Widget riservato al Responsabile Istruttore (RI) o all'Amministratore (ADMIN).</div>
-  }
+  if (!isRi) return <div style={{ padding: 12, fontFamily: 'Arial, sans-serif', color: '#7a1c1c', background: '#fce4e4', border: '1px solid #f5b8b8', borderRadius: 6 }}>Widget riservato al Responsabile Istruttore (RI) o all'Amministratore (ADMIN).</div>
 
   return (
     <Fragment>
       <style>{styles}</style>
-      <div className='gap'>
-        <div className='gap-title' style={{ color: titleColor, fontSize: titleFontSize }}>{title}</div>
+      <div className='giw'>
+        <div className='giw-title' style={{ color: titleColor, fontSize: titleFontSize }}>{title}</div>
+        {!serviceUrl ? <div className='giw-msg giw-err'>Configura l'URL della tabella nel setting del widget.</div> : null}
+        {msg && <div className={`giw-msg ${msg.ok ? 'giw-ok' : 'giw-err'}`}>{msg.text}</div>}
 
-        {(!serviceUrl || !parentTableUrl) ? <div className='gap-msg gap-err'>Configura gli URL di tabella nel setting del widget.</div> : null}
-        {msg && <div className={`gap-msg ${msg.ok ? 'gap-ok' : 'gap-err'}`}>{msg.text}</div>}
-
-        <div className='gap-toolbar'>
-          <div className='gap-field' style={{ minWidth: 420, flex: '1 1 420px' }}>
-            <div className='gap-label'>Voce interna</div>
-            <select className='gap-select' value={selectedParent} onChange={(e) => setSelectedParent(e.target.value)}>
-              <option value=''>— seleziona —</option>
-              {parents.map((p: any) => <option key={p.objectid} value={String(p.codice_voce || '')}>{`${p.codice_voce} — ${p.descrizione}`}</option>)}
-            </select>
+        <div className='giw-toolbar'>
+          <div className='giw-field' style={{ minWidth: 320, flex: '1 1 320px' }}>
+            <div className='giw-label'>Filtro codice / descrizione</div>
+            <input className='giw-input' value={filterText} onChange={(e) => setFilterText(e.target.value)} placeholder='cerca voce interna...' />
           </div>
-          <div><button className='gap-btn gap-success' onClick={onNewParent}>+ Nuova voce</button></div>
-          <div><button className='gap-btn gap-primary' onClick={onEditParent} disabled={!selectedParentRow}>Modifica testata</button></div>
-          <div><button className='gap-btn gap-danger' onClick={() => void onDeleteParent()} disabled={!selectedParentRow || saving}>Elimina voce</button></div>
-          {selectedParentRow ? <div className='gap-kpi'>{modalityLabel(selectedParentRow.modalita_voce)} · {money(selectedParentRow.prezzo_unitario, 4)}</div> : null}
+          <div className='giw-muted' style={{ alignSelf: 'center' }}>La creazione delle nuove voci va fatta dal widget <b>GII - Gestione Analisi Prezzario Interno</b>.</div>
         </div>
 
-        {parentEditing && (
-          <div className='gap-panel'>
-            <div style={{ fontWeight: 700, color: '#1F4E79', marginBottom: 10 }}>{parentForm.objectid != null ? 'Modifica testata voce interna' : 'Nuova voce interna'}</div>
-            <div className='gap-form-grid'>
-              <div className='gap-field'>
-                <div className='gap-label'>Modalità</div>
-                <select className='gap-select' value={String(normalizeModality(parentForm.modalita_voce))} onChange={(e) => setParentForm((f: any) => ({ ...f, modalita_voce: Number(e.target.value) }))}>
-                  <option value='1'>ELEMENTARE</option>
-                  <option value='2'>ANALIZZATA</option>
-                </select>
+        {editing && (
+          <div className='giw-panel'>
+            <div style={{ fontWeight: 700, color: '#1F4E79', marginBottom: 10 }}>Modifica testata voce interna</div>
+            <div className='giw-form'>
+              <div className='giw-field'>
+                <div className='giw-label'>Codice voce</div>
+                <input className='giw-input giw-readonly' value={form.codice_voce || ''} readOnly />
               </div>
-              <div className='gap-field'>
-                <div className='gap-label'>Anno listino</div>
-                <input className='gap-input' type='number' step='1' value={parentForm.anno_listino || ''} onChange={(e) => setParentForm((f: any) => ({ ...f, anno_listino: e.target.value }))} disabled={parentForm.objectid != null} />
+              <div className='giw-field'>
+                <div className='giw-label'>Modalità</div>
+                <input className='giw-input giw-readonly' value={modalityLabel(form.modalita_voce)} readOnly />
               </div>
-              <div className='gap-field'>
-                <div className='gap-label'>Famiglia</div>
-                <select className='gap-select' value={String(normalizeFamily(parentForm.famiglia))} onChange={(e) => setParentForm((f: any) => {
-                  const famiglia = upper(e.target.value)
-                  const chapters = uniqueSortedCodes(parents.filter((p: any) => normalizeFamily(p.famiglia) === famiglia).map((p: any) => p.capitolo))
-                  const capitolo = nextCode4(chapters)
-                  return { ...f, famiglia, capitolo, sottocapitolo: '0001', categoria_default: deriveCategoryFromFamilyCode(famiglia) }
-                })} disabled={parentForm.objectid != null}>
-                  <option value='AT'>{familyOptionLabel('AT')}</option>
-                  <option value='PR'>{familyOptionLabel('PR')}</option>
-                  <option value='RU'>{familyOptionLabel('RU')}</option>
-                  <option value='SL'>{familyOptionLabel('SL')}</option>
-                  <option value='PF'>{familyOptionLabel('PF')}</option>
-                </select>
+              <div className='giw-field'>
+                <div className='giw-label'>Anno</div>
+                <input className='giw-input giw-readonly' value={String(form.anno_listino || '')} readOnly />
               </div>
-              <div className='gap-field'>
-                <div className='gap-label'>Capitolo</div>
-                {parentForm.objectid != null ? (
-                  <input className='gap-input gap-readonly' value={parentForm.capitolo || ''} readOnly />
-                ) : (
-                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 110px', gap: 6 }}>
-                    <select className='gap-select' value={chapterOptions.includes(pad4(parentForm.capitolo)) ? pad4(parentForm.capitolo) : '__new__'} onChange={(e) => {
-                      const v = e.target.value
-                      if (v === '__new__') {
-                        const capitolo = nextCode4(chapterOptions)
-                        setParentForm((f: any) => ({ ...f, capitolo, sottocapitolo: '0001' }))
-                      } else {
-                        const subs = uniqueSortedCodes(parents.filter((p: any) => normalizeFamily(p.famiglia) === normalizeFamily(parentForm.famiglia) && pad4(p.capitolo) === pad4(v)).map((p: any) => p.sottocapitolo))
-                        setParentForm((f: any) => ({ ...f, capitolo: pad4(v), sottocapitolo: subs[0] || '0001' }))
-                      }
-                    }}>
-                      {chapterOptions.map((c) => <option key={c} value={c}>{c}</option>)}
-                      <option value='__new__'>Nuovo capitolo…</option>
-                    </select>
-                    <input className={`gap-input ${chapterOptions.includes(pad4(parentForm.capitolo)) ? 'gap-readonly' : ''}`} value={parentForm.capitolo || ''} onChange={(e) => setParentForm((f: any) => ({ ...f, capitolo: pad4(e.target.value), sottocapitolo: '0001' }))} readOnly={chapterOptions.includes(pad4(parentForm.capitolo))} />
-                  </div>
-                )}
+              <div className='giw-field'>
+                <div className='giw-label'>Famiglia</div>
+                <input className='giw-input giw-readonly' value={familyDisplay(form.famiglia)} readOnly />
               </div>
-              <div className='gap-field'>
-                <div className='gap-label'>Sottocapitolo</div>
-                {parentForm.objectid != null ? (
-                  <input className='gap-input gap-readonly' value={parentForm.sottocapitolo || ''} readOnly />
-                ) : (
-                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 130px', gap: 6 }}>
-                    <select className='gap-select' value={subchapterOptions.includes(pad4(parentForm.sottocapitolo)) ? pad4(parentForm.sottocapitolo) : '__new__'} onChange={(e) => {
-                      const v = e.target.value
-                      if (v === '__new__') {
-                        setParentForm((f: any) => ({ ...f, sottocapitolo: nextCode4(subchapterOptions) }))
-                      } else {
-                        setParentForm((f: any) => ({ ...f, sottocapitolo: pad4(v) }))
-                      }
-                    }}>
-                      {subchapterOptions.map((c) => <option key={c} value={c}>{c}</option>)}
-                      <option value='__new__'>Nuovo sottocapitolo…</option>
-                    </select>
-                    <input className={`gap-input ${subchapterOptions.includes(pad4(parentForm.sottocapitolo)) ? 'gap-readonly' : ''}`} value={parentForm.sottocapitolo || ''} onChange={(e) => setParentForm((f: any) => ({ ...f, sottocapitolo: pad4(e.target.value) }))} readOnly={subchapterOptions.includes(pad4(parentForm.sottocapitolo))} />
-                  </div>
-                )}
+              <div className='giw-field'>
+                <div className='giw-label'>Capitolo</div>
+                <input className='giw-input giw-readonly' value={form.capitolo || ''} readOnly />
               </div>
-              <div className='gap-field'>
-                <div className='gap-label'>Codice voce</div>
-                <input className='gap-input gap-readonly' value={parentCodePreview} readOnly />
+              <div className='giw-field'>
+                <div className='giw-label'>Sottocapitolo</div>
+                <input className='giw-input giw-readonly' value={form.sottocapitolo || ''} readOnly />
               </div>
 
-              <div className='gap-field' style={{ gridColumn: '1 / span 3' }}>
-                <div className='gap-muted'>La famiglia è mostrata con descrizione estesa. Per capitolo e sottocapitolo puoi scegliere un codice già esistente oppure crearne uno nuovo.</div>
+              <div className='giw-field' style={{ gridColumn: '1 / span 2' }}>
+                <div className='giw-label'>Descrizione</div>
+                <input className='giw-input' value={form.descrizione || ''} onChange={(e) => setForm((f: any) => ({ ...f, descrizione: e.target.value }))} />
               </div>
-
-              <div className='gap-field' style={{ gridColumn: '1 / span 3' }}>
-                <div className='gap-label'>Descrizione</div>
-                <input className='gap-input' value={parentForm.descrizione || ''} onChange={(e) => setParentForm((f: any) => ({ ...f, descrizione: e.target.value }))} />
+              <div className='giw-field'>
+                <div className='giw-label'>UM</div>
+                <input className='giw-input' value={form.unita_misura || ''} onChange={(e) => setForm((f: any) => ({ ...f, unita_misura: e.target.value }))} />
               </div>
-              <div className='gap-field'>
-                <div className='gap-label'>UM</div>
-                <input className='gap-input' value={parentForm.unita_misura || ''} onChange={(e) => setParentForm((f: any) => ({ ...f, unita_misura: e.target.value }))} />
+              <div className='giw-field'>
+                <div className='giw-label'>Prezzo unitario</div>
+                <input className={`giw-input ${normalizeModality(form.modalita_voce) === 2 ? 'giw-readonly' : ''}`} type='number' step='0.0001' value={form.prezzo_unitario || ''} readOnly={normalizeModality(form.modalita_voce) === 2} onChange={(e) => setForm((f: any) => ({ ...f, prezzo_unitario: e.target.value }))} />
               </div>
-              <div className='gap-field'>
-                <div className='gap-label'>Categoria default</div>
-                <select className='gap-select' value={normalizeCategory(parentForm.categoria_default)} onChange={(e) => setParentForm((f: any) => ({ ...f, categoria_default: e.target.value }))}>
+              <div className='giw-field'>
+                <div className='giw-label'>Categoria</div>
+                <select className='giw-select' value={normalizeCategory(form.categoria_default)} onChange={(e) => setForm((f: any) => ({ ...f, categoria_default: e.target.value }))}>
                   {CATEGORY_OPTIONS.map((c) => <option key={c} value={c}>{c}</option>)}
                 </select>
               </div>
-              <div className='gap-field'>
-                <div className='gap-label'>Prezzo unitario</div>
-                <input className={`gap-input ${normalizeModality(parentForm.modalita_voce) === 2 ? 'gap-readonly' : ''}`} type='number' step='0.0001' value={parentForm.prezzo_unitario || ''} onChange={(e) => setParentForm((f: any) => ({ ...f, prezzo_unitario: e.target.value }))} readOnly={normalizeModality(parentForm.modalita_voce) === 2} />
+              <div className='giw-field'>
+                <div className='giw-label'>Attivo</div>
+                <select className='giw-select' value={String(form.attivo ?? '1')} onChange={(e) => setForm((f: any) => ({ ...f, attivo: e.target.value }))}>
+                  <option value='1'>Sì</option>
+                  <option value='0'>No</option>
+                </select>
               </div>
-              <div className='gap-field' style={{ gridColumn: '1 / -1' }}>
-                <div className='gap-label'>Note</div>
-                <textarea className='gap-textarea' value={parentForm.note || ''} onChange={(e) => setParentForm((f: any) => ({ ...f, note: e.target.value }))} />
+              <div className='giw-field' style={{ gridColumn: '1 / -1' }}>
+                <div className='giw-label'>Note</div>
+                <textarea className='giw-textarea' value={form.note || ''} onChange={(e) => setForm((f: any) => ({ ...f, note: e.target.value }))} />
               </div>
             </div>
             <div style={{ display: 'flex', gap: 8, marginTop: 10 }}>
-              <button className='gap-btn gap-primary' disabled={saving} onClick={() => void onSaveParent()}>{parentForm.objectid != null ? 'Aggiorna testata' : 'Crea voce'}</button>
-              <button className='gap-btn gap-neutral' disabled={saving} onClick={onCancelParent}>Annulla</button>
-              <div className='gap-muted' style={{ alignSelf: 'center' }}>Le nuove voci vengono create come attive. L’eventuale disattivazione si gestisce dal catalogo del prezzario interno.</div>
-              {normalizeModality(parentForm.modalita_voce) === 2 ? <div className='gap-muted' style={{ alignSelf: 'center' }}>Per le voci ANALIZZATE il prezzo sarà ricalcolato dalle righe.</div> : null}
+              <button className='giw-btn giw-save' disabled={saving} onClick={() => void onSave()}>Aggiorna</button>
+              <button className='giw-btn giw-cancel' disabled={saving} onClick={onCancel}>Annulla</button>
             </div>
           </div>
         )}
 
-        {selectedParentRow && !parentEditing && (
-          <div className='gap-panel'>
-            <div className='gap-subtoolbar'>
-              <div style={{ fontWeight: 700, color: '#1F4E79' }}>{selectedParentLabel}</div>
-              <div className='gap-kpi'>Famiglia {familyDisplay(selectedParentRow.famiglia)} · {modalityLabel(selectedParentRow.modalita_voce)} · UM {selectedParentRow.unita_misura || '—'} · Prezzo {money(selectedParentRow.prezzo_unitario, 4)}</div>
-            </div>
-          </div>
-        )}
-
-        {selectedParentRow && !parentEditing && selectedParentMode === 1 && (
-          <div className='gap-panel'>
-            <div className='gap-muted'>Questa voce è <b>ELEMENTARE</b>. Le righe di analisi non sono abilitate.</div>
-          </div>
-        )}
-
-        {selectedParentRow && !parentEditing && selectedParentMode === 2 && (
-          <Fragment>
-            <div className='gap-subtoolbar'>
-              <div><button className='gap-btn gap-success' onClick={onNewLine}>+ Nuova riga</button></div>
-              <div className='gap-kpi'>{rows.length} righe di analisi</div>
-            </div>
-
-            {lineEditing && (
-              <div className='gap-panel'>
-                <div style={{ fontWeight: 700, color: '#1F4E79', marginBottom: 10 }}>{lineForm.objectid != null ? 'Modifica riga di analisi' : 'Nuova riga di analisi'}</div>
-                <div className='gap-row-grid'>
-                  <div className='gap-field'>
-                    <div className='gap-label'>Origine</div>
-                    <select className='gap-select' value={String(normalizeOrigin(lineForm.origine_riga))} onChange={(e) => setLineForm((f: any) => ({ ...f, origine_riga: Number(e.target.value), lookupSearch: '', objectid_sorgente: '', codice_riferimento: '', descrizione: '', unita_misura: '', prezzo_unitario: '', categoria_costo: 'MATERIALI' }))}>
-                      <option value='1'>REGIONE</option>
-                      <option value='2'>INTERNO</option>
-                    </select>
-                  </div>
-                  <div className='gap-field'>
-                    <div className='gap-label'>Cerca voce sorgente</div>
-                    <input className='gap-input' value={lineForm.lookupSearch || ''} onChange={(e) => setLineForm((f: any) => ({ ...f, lookupSearch: e.target.value }))} placeholder={normalizeOrigin(lineForm.origine_riga) === 1 ? 'es. DN 200' : 'codice o descrizione'} />
-                  </div>
-                  <div className='gap-field'>
-                    <div className='gap-label'>Voce selezionata</div>
-                    <input className='gap-input gap-readonly' value={lineForm.codice_riferimento || ''} readOnly />
-                  </div>
-                  <div className='gap-field'>
-                    <div className='gap-label'>Categoria</div>
-                    <select className='gap-select' value={normalizeCategory(lineForm.categoria_costo)} onChange={(e) => setLineForm((f: any) => ({ ...f, categoria_costo: e.target.value }))}>
-                      {CATEGORY_OPTIONS.map((c) => <option key={c} value={c}>{c}</option>)}
-                    </select>
-                  </div>
-                  <div className='gap-field'>
-                    <div className='gap-label'>Quantità</div>
-                    <input className='gap-input' type='number' step='0.0001' value={lineForm.quantita || ''} onChange={(e) => setLineForm((f: any) => ({ ...f, quantita: e.target.value }))} />
-                  </div>
-                  <div className='gap-field'>
-                    <div className='gap-label'>Prezzo unit.</div>
-                    <input className='gap-input gap-readonly' value={lineForm.prezzo_unitario || ''} readOnly />
-                  </div>
-                  <div className='gap-field'>
-                    <div className='gap-label'>Importo</div>
-                    <input className='gap-input gap-readonly' value={money(lineImportoPreview, 4)} readOnly />
-                  </div>
-                  <div style={{ display: 'flex', gap: 8 }}>
-                    <button className='gap-btn gap-primary' disabled={saving} onClick={() => void onSaveLine()}>{lineForm.objectid != null ? 'Aggiorna' : 'Aggiungi'}</button>
-                    <button className='gap-btn gap-neutral' disabled={saving} onClick={onCancelLine}>Annulla</button>
-                  </div>
-
-                  <div className='gap-field' style={{ gridColumn: '1 / span 3' }}>
-                    <div className='gap-label'>Descrizione snapshot</div>
-                    <input className='gap-input gap-readonly' value={lineForm.descrizione || ''} readOnly />
-                  </div>
-                  <div className='gap-field'>
-                    <div className='gap-label'>UM</div>
-                    <input className='gap-input gap-readonly' value={lineForm.unita_misura || ''} readOnly />
-                  </div>
-                  <div className='gap-field'>
-                    <div className='gap-label'>Ordine</div>
-                    <input className='gap-input' type='number' step='1' value={lineForm.ordine || ''} onChange={(e) => setLineForm((f: any) => ({ ...f, ordine: e.target.value }))} />
-                  </div>
-                  <div className='gap-field' style={{ gridColumn: '1 / -1' }}>
-                    <div className='gap-label'>Note</div>
-                    <textarea className='gap-textarea' value={lineForm.note || ''} onChange={(e) => setLineForm((f: any) => ({ ...f, note: e.target.value }))} />
-                  </div>
-                </div>
-
-                <div style={{ marginTop: 10 }}>
-                  {lookupLoading ? <div className='gap-muted'>Ricerca in corso…</div> : null}
-                  {!lookupLoading && String(lineForm.lookupSearch || '').trim().length > 0 && String(lineForm.lookupSearch || '').trim().length < 2 ? <div className='gap-muted'>Digita almeno 2 caratteri per cercare.</div> : null}
-                  {!!lookupRows.length && (
-                    <div className='gap-lookup'>
-                      {lookupRows.map((r: any) => (
-                        <div key={`${r.objectid}-${r.code}`} className='gap-lookup-item' onClick={() => onPickLookup(r)}>
-                          <div><b>{r.code}</b> — {r.description}</div>
-                          <div className='gap-muted'>{r.unita_misura || '—'} · {money(r.prezzo_unitario, 4)} · {r.categoria_costo}</div>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                  {!lookupLoading && String(lineForm.lookupSearch || '').trim().length >= 2 && !lookupRows.length ? <div className='gap-muted'>Nessun risultato trovato.</div> : null}
-                </div>
-              </div>
-            )}
-
-            {!lineEditing && (
-              <div className='gap-table-wrap'>
-                <table className='gap-table'>
-                  <thead>
-                    <tr>
-                      <th>Origine</th>
-                      <th>Categoria</th>
-                      <th>Codice</th>
-                      <th>Descrizione</th>
-                      <th>UM</th>
-                      <th>Q.tà</th>
-                      <th>Prezzo (€)</th>
-                      <th>Importo</th>
-                      <th>Azioni</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {rows.length === 0 ? (
-                      <tr><td colSpan={9} style={{ padding: 16, textAlign: 'center', color: '#6b7280' }}>{loading ? 'Caricamento…' : 'Nessuna riga di analisi.'}</td></tr>
-                    ) : rows.map((r: any) => (
-                      <tr key={r.objectid}>
-                        <td>{originLabel(r.origine_riga)}</td>
-                        <td>{normalizeCategory(r.categoria_costo)}</td>
-                        <td><b>{r.codice_riferimento}</b></td>
-                        <td>{r.descrizione}</td>
-                        <td>{r.unita_misura}</td>
-                        <td>{money(r.quantita, 4)}</td>
-                        <td>{money(r.prezzo_unitario, 4)}</td>
-                        <td>{money(r.importo, 4)}</td>
-                        <td style={{ whiteSpace: 'nowrap' }}><div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-                          <button className='gap-btn gap-primary' onClick={() => onEditLine(r)}>Modifica</button>
-                          <button className='gap-btn gap-danger' onClick={() => void onDeleteLine(r)}>Elimina</button>
-                        </div></td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
-          </Fragment>
-        )}
+        <div className='giw-table-wrap'>
+          <table className='giw-table'>
+            <thead>
+              <tr>
+                <th>Codice</th>
+                <th>Modalità</th>
+                <th>Fam.</th>
+                <th>Descrizione</th>
+                <th>UM</th>
+                <th>Prezzo</th>
+                <th>Categoria</th>
+                <th>Attivo</th>
+                <th>Azioni</th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.length === 0 ? (
+                <tr><td colSpan={9} style={{ padding: 16, textAlign: 'center', color: '#6b7280' }}>{loading ? 'Caricamento…' : 'Nessuna voce interna.'}</td></tr>
+              ) : rows.map((r: any) => (
+                <tr key={r.objectid}>
+                  <td><b>{r.codice_voce}</b></td>
+                  <td>{modalityLabel(r.modalita_voce)}</td>
+                  <td>{familyDisplay(r.famiglia)}</td>
+                  <td>{r.descrizione}</td>
+                  <td>{r.unita_misura}</td>
+                  <td>{money(r.prezzo_unitario, 4)}</td>
+                  <td>{normalizeCategory(r.categoria_default)}</td>
+                  <td>{num(r.attivo) === 1 ? 'Sì' : 'No'}</td>
+                  <td style={{ whiteSpace: 'nowrap' }}>
+                    <button className='giw-btn giw-save' onClick={() => onEdit(r)}>Modifica</button>
+                    <button className='giw-btn giw-danger' onClick={() => void onDelete(r)}>Elimina</button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       </div>
     </Fragment>
   )

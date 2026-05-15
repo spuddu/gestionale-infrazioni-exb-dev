@@ -29,8 +29,10 @@ function normalizeUrl(raw: any): string {
 function isRiOrAdminUser(): boolean {
   const u: any = (window as any).__giiUserRole || {}
   const ruoloNum = Number(u?.ruolo)
-  const ruoloLabel = String(u?.ruoloLabel || u?.ruolo || '').trim().toUpperCase()
-  return ruoloNum === 4 || ruoloNum === 7 || /(^|[^A-Z])RI([^A-Z]|$)/.test(ruoloLabel) || /(^|[^A-Z])ADMIN([^A-Z]|$)/.test(ruoloLabel)
+  const ruoloCod = String(u?.ruolo_cod || u?.ruoloCod || u?.roleCode || '').trim().toUpperCase()
+  const ruoloLabel = String(u?.ruoloLabel || u?.roleLabel || u?.ruolo || '').trim().toUpperCase()
+  const roleToken = ruoloCod || ruoloLabel
+  return ruoloNum === 4 || ruoloNum === 7 || roleToken === 'RI' || roleToken === 'RI_AMM' || roleToken === 'ADMIN' || /(^|[^A-Z])RI([^A-Z]|$)/.test(roleToken) || /(^|[^A-Z])ADMIN([^A-Z]|$)/.test(roleToken)
 }
 
 const LAYER_CACHE: Record<string, any> = {}

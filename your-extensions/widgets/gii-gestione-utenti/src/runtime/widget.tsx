@@ -217,9 +217,16 @@ function codeOf(list: Array<{ value: number; code: string }>, value: number | nu
   return list.find(x => x.value === value)?.code ?? null
 }
 
-function valueOf(list: Array<{ value: number; code: string }>, code: any): number | null {
-  const c = String(code ?? '').trim().toUpperCase()
+function normalizeSettoreCod(value: any): string | null {
+  const c = String(value ?? '').trim().toUpperCase()
   if (!c) return null
+  return c === 'CS' ? 'DS' : c
+}
+
+function valueOf(list: Array<{ value: number; code: string }>, code: any): number | null {
+  const c0 = String(code ?? '').trim().toUpperCase()
+  if (!c0) return null
+  const c = list === SETTORI ? (normalizeSettoreCod(c0) ?? c0) : c0
   return list.find(x => x.code === c)?.value ?? null
 }
 
@@ -310,8 +317,9 @@ async function fetchUtenti(): Promise<UtenteRecord[]> {
       ufficio:     a.ufficio != null ? Number(a.ufficio) : null,
       ruolo_cod:   textOrNull(a.ruolo_cod)   ?? codeOf(RUOLI,   a.ruolo),
       area_cod:    textOrNull(a.area_cod)    ?? codeOf(AREE,    a.area),
-      settore_cod: textOrNull(a.settore_cod) ?? codeOf(SETTORI, a.settore),
+      settore_cod: normalizeSettoreCod(a.settore_cod) ?? codeOf(SETTORI, a.settore),
       gruppo:      a.gruppo  ?? '',
+      gruppo_precedente: a.gruppo_precedente ?? '',
     }
   })
 }

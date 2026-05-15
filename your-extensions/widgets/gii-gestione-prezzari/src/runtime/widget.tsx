@@ -26,11 +26,69 @@ function normalizeUrl(raw: any): string {
   } catch { return '' }
 }
 
-function isRiOrAdminUser(): boolean {
+function cleanCode(v: any): string {
+  return String(v ?? '').trim().toUpperCase()
+}
+
+function normalizeRoleCode(u: any): string {
+  const direct = cleanCode(u?.ruoloCod ?? u?.ruolo_cod ?? u?.roleCod ?? u?.role_code)
+  if (direct) return direct
+
+  const label = cleanCode(u?.ruoloLabel ?? u?.roleLabel ?? u?.ruolo_nome ?? u?.ruolo)
+  if (/^ADMIN$/.test(label) || /(^|[^A-Z])ADMIN([^A-Z]|$)/.test(label)) return 'ADMIN'
+  if (/^RI$/.test(label) || /(^|[^A-Z])RI([^A-Z]|$)/.test(label)) return 'RI'
+  if (/^TR$/.test(label)) return 'TR'
+  if (/^TI$/.test(label)) return 'TI'
+  if (/^RZ$/.test(label)) return 'RZ'
+  if (/^DT$/.test(label)) return 'DT'
+  if (/^DA$/.test(label)) return 'DA'
+
+  const n = Number(u?.ruolo)
+  if (n === 1) return 'TR'
+  if (n === 2) return 'TI'
+  if (n === 3) return 'RZ'
+  if (n === 4) return 'RI'
+  if (n === 5) return 'DT'
+  if (n === 6) return 'DA'
+  if (n === 7) return 'ADMIN'
+  return ''
+}
+
+function normalizeAreaCode(u: any): string {
+  const direct = cleanCode(u?.areaCod ?? u?.area_cod ?? u?.areaCode)
+  if (direct) return direct
+  const n = Number(u?.area)
+  if (n === 1) return 'AMM'
+  if (n === 2) return 'AGR'
+  if (n === 3) return 'TEC'
+  return cleanCode(u?.areaLabel ?? u?.area)
+}
+
+function normalizeSettoreCode(u: any): string {
+  const direct = cleanCode(u?.settoreCod ?? u?.settore_cod ?? u?.settoreCode)
+  if (direct === 'CS') return 'DS'
+  if (direct) return direct
+  const n = Number(u?.settore)
+  if (n === 1) return 'CR'
+  if (n === 2) return 'GI'
+  if (n >= 3 && n <= 8) return `D${n - 2}`
+  if (n === 9) return 'DS'
+  const label = cleanCode(u?.settoreLabel ?? u?.settore)
+  return label === 'CS' ? 'DS' : label
+}
+
+function getCurrentUserContext(): { ruoloCod: string, areaCod: string, settoreCod: string } {
   const u: any = (window as any).__giiUserRole || {}
-  const ruoloNum = Number(u?.ruolo)
-  const ruoloLabel = String(u?.ruoloLabel || u?.ruolo || '').trim().toUpperCase()
-  return ruoloNum === 4 || ruoloNum === 7 || /(^|[^A-Z])RI([^A-Z]|$)/.test(ruoloLabel) || /(^|[^A-Z])ADMIN([^A-Z]|$)/.test(ruoloLabel)
+  return {
+    ruoloCod: normalizeRoleCode(u),
+    areaCod: normalizeAreaCode(u),
+    settoreCod: normalizeSettoreCode(u)
+  }
+}
+
+function isRiOrAdminUser(): boolean {
+  const ctx = getCurrentUserContext()
+  return ctx.ruoloCod === 'RI' || ctx.ruoloCod === 'RI_AMM' || ctx.ruoloCod === 'ADMIN'
 }
 
 const LAYER_CACHE: Record<string, any> = {}

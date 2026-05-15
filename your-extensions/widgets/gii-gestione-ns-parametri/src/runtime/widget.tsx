@@ -144,11 +144,73 @@ function exportCsv(rows: any[], title: string) {
   URL.revokeObjectURL(url)
 }
 
-function isRiOrAdminUser(): boolean {
+const ROLE_CODE_BY_NUM: Record<number, string> = { 1: 'TR', 2: 'TI', 3: 'RZ', 4: 'RI', 5: 'DT', 6: 'DA', 7: 'ADMIN' }
+const AREA_CODE_BY_NUM: Record<number, string> = { 1: 'AMM', 2: 'AGR', 3: 'TEC' }
+const SETTORE_CODE_BY_NUM: Record<number, string> = { 1: 'CR', 2: 'GI', 3: 'D1', 4: 'D2', 5: 'D3', 6: 'D4', 7: 'D5', 8: 'D6', 9: 'DS' }
+
+function cleanCode(v: any): string {
+  return String(v ?? '').trim().toUpperCase()
+}
+
+function normalizeRoleCode(...values: any[]): string {
+  for (const value of values) {
+    const s = cleanCode(value)
+    if (!s) continue
+    const n = Number(s)
+    if (Number.isFinite(n) && ROLE_CODE_BY_NUM[n]) return ROLE_CODE_BY_NUM[n]
+    if (['TR', 'TI', 'RZ', 'RI', 'DT', 'DA', 'ADMIN'].includes(s)) return s
+    if (/(^|[^A-Z])ADMIN([^A-Z]|$)/.test(s) || s.includes('AMMINISTRATORE')) return 'ADMIN'
+    if (/(^|[^A-Z])RI([^A-Z]|$)/.test(s) || s.includes('RESPONSABILE ISTRUTTORIA')) return 'RI'
+    if (/(^|[^A-Z])RZ([^A-Z]|$)/.test(s) || s.includes('RESPONSABILE DI ZONA')) return 'RZ'
+    if (/(^|[^A-Z])TI([^A-Z]|$)/.test(s) || s.includes('TECNICO ISTRUTTORE')) return 'TI'
+    if (/(^|[^A-Z])TR([^A-Z]|$)/.test(s) || s.includes('TECNICO RILEVATORE')) return 'TR'
+    if (/(^|[^A-Z])DT([^A-Z]|$)/.test(s) || s.includes('DIRETTORE TECNICO')) return 'DT'
+    if (/(^|[^A-Z])DA([^A-Z]|$)/.test(s) || s.includes('DIRETTORE AMMINISTRATIVO')) return 'DA'
+  }
+  return ''
+}
+
+function normalizeAreaCode(...values: any[]): string {
+  for (const value of values) {
+    const s = cleanCode(value)
+    if (!s) continue
+    const n = Number(s)
+    if (Number.isFinite(n) && AREA_CODE_BY_NUM[n]) return AREA_CODE_BY_NUM[n]
+    if (['AMM', 'AGR', 'TEC'].includes(s)) return s
+    if (s.includes('AMMINISTR')) return 'AMM'
+    if (s.includes('AGRAR')) return 'AGR'
+    if (s.includes('TECNIC')) return 'TEC'
+  }
+  return ''
+}
+
+function normalizeSettoreCode(...values: any[]): string {
+  for (const value of values) {
+    const s0 = cleanCode(value)
+    if (!s0) continue
+    const s = s0 === 'CS' ? 'DS' : s0
+    const n = Number(s)
+    if (Number.isFinite(n) && SETTORE_CODE_BY_NUM[n]) return SETTORE_CODE_BY_NUM[n]
+    if (['CR', 'GI', 'D1', 'D2', 'D3', 'D4', 'D5', 'D6', 'DS'].includes(s)) return s
+    if (s.includes('DRENO') || s.includes('SCOLO')) return 'DS'
+    if (s.includes('CATASTO') || s.includes('RUOLI')) return 'CR'
+    if (s.includes('GESTIONE IRRIGUA')) return 'GI'
+  }
+  return ''
+}
+
+function getCurrentGiiContext(): { ruoloCod: string, areaCod: string, settoreCod: string } {
   const u: any = (window as any).__giiUserRole || {}
-  const ruoloNum = Number(u?.ruolo)
-  const ruoloLabel = String(u?.ruoloLabel || u?.ruolo || '').trim().toUpperCase()
-  return ruoloNum === 4 || ruoloNum === 7 || /(^|[^A-Z])RI([^A-Z]|$)/.test(ruoloLabel) || /(^|[^A-Z])ADMIN([^A-Z]|$)/.test(ruoloLabel)
+  return {
+    ruoloCod: normalizeRoleCode(u?.ruoloCod, u?.ruolo_cod, u?.roleCod, u?.role_code, u?.ruolo, u?.ruoloLabel, u?.role),
+    areaCod: normalizeAreaCode(u?.areaCod, u?.area_cod, u?.areaCode, u?.area, u?.areaLabel),
+    settoreCod: normalizeSettoreCode(u?.settoreCod, u?.settore_cod, u?.sectorCod, u?.settore, u?.settoreLabel)
+  }
+}
+
+function isRiOrAdminUser(): boolean {
+  const { ruoloCod } = getCurrentGiiContext()
+  return ruoloCod === 'RI' || ruoloCod === 'ADMIN'
 }
 
 export default function Widget(props: AllWidgetProps<IMConfig>) {

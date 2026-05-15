@@ -338,12 +338,13 @@ type RuntimeDsView = {
 const GII_RUNTIME_VIEWS: RuntimeDsView[] = [
   {
     key: 'ADMIN',
-    // Per ADMIN usiamo la vista AMM_ALL perché è configurata come vista completa senza limitazioni.
-    // La vecchia/base view non esiste più e GII_VIEW_EB_ADMIN può non restituire record in alcune configurazioni.
-    viewName: 'GII_VIEW_EB_AMM_ALL',
-    itemId: '6ffe45dac0e04905ba677e9fcd703238',
-    serviceUrl: 'https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_VIEW_EB_AMM_ALL/FeatureServer',
-    layerUrl: 'https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_VIEW_EB_AMM_ALL/FeatureServer/0',
+    // ADMIN usa l'item/vista dedicata GII_VIEW_EB_ADMIN.
+    // Nota: l'endpoint REST storico dell'item espone ancora il servizio con nome GII_VIEW_EB_BASE.
+    // Non è la vista AMM_ALL e non va sostituito con GII_VIEW_EB_AMM_ALL.
+    viewName: 'GII_VIEW_EB_ADMIN',
+    itemId: 'c05409cf4a86471194d6406e9b4d1c65',
+    serviceUrl: 'https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_VIEW_EB_BASE/FeatureServer',
+    layerUrl: 'https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_VIEW_EB_BASE/FeatureServer/0',
     roles: ['ADMIN'],
     areaCode: '',
     settoreCode: ''

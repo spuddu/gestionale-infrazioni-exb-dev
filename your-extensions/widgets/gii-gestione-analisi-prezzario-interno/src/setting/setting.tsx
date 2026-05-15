@@ -30,28 +30,47 @@ export default function Setting(props: AllWidgetSettingProps<IMConfig>) {
 
         <label style={lbl}>Colore titolo</label>
         <div style={colorRow}>
-          <input style={colorInp} type='color' value={titleColor} onChange={(e) => set('titleColor', e.target.value)} aria-label='Colore titolo' />
-          <input style={inp} value={titleColor} onChange={(e) => set('titleColor', e.target.value)} placeholder='#1F4E79' />
+          <input
+            style={colorInp}
+            type='color'
+            value={titleColor}
+            onChange={(e) => set('titleColor', e.target.value)}
+            aria-label='Colore titolo'
+          />
+          <input
+            style={inp}
+            value={titleColor}
+            onChange={(e) => set('titleColor', e.target.value)}
+            placeholder='#1F4E79'
+          />
         </div>
 
         <label style={lbl}>Dimensione titolo (px)</label>
-        <input style={inp} type='number' min={10} max={36} step={1} value={titleFontSize} onChange={(e) => set('titleFontSize', Number(e.target.value || 15))} />
+        <input
+          style={inp}
+          type='number'
+          min={10}
+          max={36}
+          step={1}
+          value={titleFontSize}
+          onChange={(e) => set('titleFontSize', Number(e.target.value || 15))}
+        />
       </div>
+
 
       <div style={section}>
         <div style={sectionTitle}>Tabelle</div>
 
-        <label style={lbl}>URL tabella analisi prezzario interno</label>
+        <label style={lbl}>URL tabella prezzario interno</label>
         <input style={inp} value={cfg.serviceUrl || ''} onChange={(e) => set('serviceUrl', e.target.value)} placeholder='https://services2.arcgis.com/.../FeatureServer/0' />
 
-        <label style={lbl}>URL tabella prezzario interno</label>
-        <input style={inp} value={cfg.parentTableUrl || ''} onChange={(e) => set('parentTableUrl', e.target.value)} placeholder='https://services2.arcgis.com/.../FeatureServer/0' />
-
-        <label style={lbl}>URL tabella prezzario regionale (voci ufficiali)</label>
-        <input style={inp} value={cfg.regionalTableUrl || ''} onChange={(e) => set('regionalTableUrl', e.target.value)} placeholder='https://services2.arcgis.com/.../FeatureServer/0' />
+        <label style={lbl}>URL tabella analisi prezzario interno</label>
+        <input style={inp} value={cfg.detailTableUrl || ''} onChange={(e) => set('detailTableUrl', e.target.value)} placeholder='https://services2.arcgis.com/.../FeatureServer/0' />
       </div>
 
-      <div style={hint}>Questo widget ora gestisce il workflow principale del prezzario interno: creazione voce ELEMENTARE o ANALIZZATA, generazione automatica del codice CBSMxx_..., scelta righe da REGIONE o INTERNO e ricalcolo del prezzo finale.</div>
+
+      <div style={hint}>Qui il RI gestisce le voci interne del Consorzio, da usare solo quando il prezzario regionale non contiene la voce necessaria.</div>
+
     </div>
   )
 }

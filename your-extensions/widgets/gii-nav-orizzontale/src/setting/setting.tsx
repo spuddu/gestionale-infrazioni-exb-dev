@@ -9,8 +9,8 @@ const P = {
   sec: { fontSize:11, fontWeight:700, color:'#93c5fd', textTransform:'uppercase' as const, letterSpacing:1.2, borderBottom:'1px solid rgba(255,255,255,0.10)', paddingBottom:6, marginBottom:14, marginTop:22 } as React.CSSProperties,
   lbl: { fontSize:11.5, fontWeight:600, color:'#d1d5db', display:'block', marginBottom:4, marginTop:10 } as React.CSSProperties,
   hint: { fontSize:10.5, color:'#a0aec0', marginTop:3, lineHeight:1.4 } as React.CSSProperties,
-  row2: { display:'grid', gridTemplateColumns:'1fr 1fr', gap:8 } as React.CSSProperties,
-  row3: { display:'grid', gridTemplateColumns:'1fr 1fr 1fr', gap:8 } as React.CSSProperties,
+  row2: { display:'grid', gridTemplateColumns:'repeat(2, minmax(0, 1fr))', gap:8, minWidth:0 } as React.CSSProperties,
+  row3: { display:'grid', gridTemplateColumns:'repeat(3, minmax(0, 1fr))', gap:6, minWidth:0 } as React.CSSProperties,
   inp: { width:'100%', padding:'5px 8px', fontSize:12, border:'1px solid rgba(255,255,255,0.15)', borderRadius:6, outline:'none', boxSizing:'border-box' as const, background:'rgba(255,255,255,0.07)', color:'#e5e7eb' } as React.CSSProperties,
   check: { display:'flex', alignItems:'center', gap:8, fontSize:12, color:'#d1d5db', cursor:'pointer', marginTop:8 } as React.CSSProperties
 }
@@ -20,10 +20,10 @@ function Inp (p: { value: string | number, onChange: (v: string) => void, type?:
 }
 function NumInp (p: { value: number, onChange: (v: number) => void, min?: number, max?: number, step?: number, unit?: string }) {
   return (
-    <div style={{ display:'flex', alignItems:'center', gap:5 }}>
+    <div style={{ display:'flex', alignItems:'center', gap:3, minWidth:0, width:'100%' }}>
       <input type='number' value={p.value} min={p.min} max={p.max} step={p.step || 1}
-        onChange={e => p.onChange(Number(e.target.value))} style={{ ...P.inp, width:72 }} />
-      {p.unit && <span style={{ fontSize:11, color:'#a0aec0', flexShrink:0 }}>{p.unit}</span>}
+        onChange={e => p.onChange(Number(e.target.value))} style={{ ...P.inp, width:52, minWidth:0, padding:'5px 4px', textAlign:'center' }} />
+      {p.unit && <span style={{ fontSize:10, color:'#a0aec0', flexShrink:0 }}>{p.unit}</span>}
     </div>
   )
 }
@@ -179,8 +179,9 @@ const FONTS = [
 const WEIGHTS = [300, 400, 500, 600, 700, 800, 900].map(w => ({ value:String(w), label:String(w) }))
 const ROLE_OPTIONS = [
   { value:'*', label:'Tutti' }, { value:'TR', label:'TR' }, { value:'TI', label:'TI' },
-  { value:'RZ', label:'RZ' }, { value:'RI', label:'RI' }, { value:'DT', label:'DT' },
-  { value:'DA', label:'DA' }, { value:'ADMIN', label:'ADMIN' }
+  { value:'TI_AMM', label:'TI_AMM' }, { value:'RZ', label:'RZ' }, { value:'RI', label:'RI' },
+  { value:'RI_AMM', label:'RI_AMM' }, { value:'DT', label:'DT' }, { value:'DA', label:'DA' },
+  { value:'ADMIN', label:'ADMIN' }
 ]
 const ICON_OPTIONS = [
   { value:'home', label:'🏠 Home' },

@@ -6,12 +6,12 @@ import { defaultConfig, type IMConfig, type CardConfig, type GroupOffset } from 
 
 // ── Stili base (panel scuro) ──────────────────────────────────────────────────
 const P = {
-  wrap:    { padding:'0 12px 32px', fontSize:13, background:'#1a1f2e', minHeight:'100%', color:'#e5e7eb' } as React.CSSProperties,
+  wrap:    { padding:'0 12px 32px', fontSize:13, background:'#1a1f2e', minHeight:'100%', color:'#e5e7eb', boxSizing:'border-box' as const } as React.CSSProperties,
   sec:     { fontSize:11, fontWeight:700, color:'#93c5fd', textTransform:'uppercase' as const, letterSpacing:1.2, borderBottom:'1px solid rgba(255,255,255,0.10)', paddingBottom:6, marginBottom:14, marginTop:22, cursor:'pointer', display:'flex', justifyContent:'space-between', alignItems:'center' } as React.CSSProperties,
   lbl:     { fontSize:11.5, fontWeight:600, color:'#d1d5db', display:'block', marginBottom:4, marginTop:10 } as React.CSSProperties,
   hint:    { fontSize:10.5, color:'#a0aec0', marginTop:3, lineHeight:1.4 } as React.CSSProperties,
-  row2:    { display:'grid', gridTemplateColumns:'1fr 1fr', gap:8 } as React.CSSProperties,
-  row3:    { display:'grid', gridTemplateColumns:'1fr 1fr 1fr', gap:8 } as React.CSSProperties,
+  row2:    { display:'grid', gridTemplateColumns:'minmax(0,1fr) minmax(0,1fr)', gap:8, alignItems:'start' } as React.CSSProperties,
+  row3:    { display:'grid', gridTemplateColumns:'minmax(0,1fr) minmax(0,1fr) minmax(0,1fr)', gap:7, alignItems:'start' } as React.CSSProperties,
   inp:     { width:'100%', padding:'5px 8px', fontSize:12, border:'1px solid rgba(255,255,255,0.15)', borderRadius:6, outline:'none', boxSizing:'border-box' as const, background:'rgba(255,255,255,0.07)', color:'#e5e7eb' } as React.CSSProperties,
   check:   { display:'flex', alignItems:'center', gap:8, fontSize:12, color:'#d1d5db', cursor:'pointer', marginTop:8 } as React.CSSProperties,
   cardBox: { border:'1px solid rgba(255,255,255,0.10)', borderRadius:10, padding:'10px 12px', marginBottom:8, background:'rgba(255,255,255,0.04)' } as React.CSSProperties,
@@ -23,9 +23,9 @@ function Inp(p: { value:string|number; onChange:(v:string)=>void; type?:string; 
 }
 function NumInp(p: { value:number; onChange:(v:number)=>void; min?:number; max?:number; step?:number; unit?:string }) {
   return (
-    <div style={{ display:'flex', alignItems:'center', gap:5 }}>
+    <div style={{ display:'flex', alignItems:'center', gap:4, minWidth:0 }}>
       <input type='number' value={p.value} min={p.min} max={p.max} step={p.step||1}
-        onChange={e=>p.onChange(Number(e.target.value))} style={{ ...P.inp, width:68 }}/>
+        onChange={e=>p.onChange(Number(e.target.value))} style={{ ...P.inp, width:58, padding:'5px 6px' }}/>
       {p.unit && <span style={{ fontSize:11, color:'#a0aec0', flexShrink:0 }}>{p.unit}</span>}
     </div>
   )
@@ -125,8 +125,8 @@ function ColInp(p: { value:string; onChange:(v:string)=>void }) {
   }
 
   return (
-    <div style={{ display:'flex', flexDirection:'column', gap:6 }}>
-      <div style={{ display:'flex', alignItems:'center', gap:7 }}>
+    <div style={{ display:'flex', flexDirection:'column', gap:6, minWidth:0 }}>
+      <div style={{ display:'flex', alignItems:'center', gap:7, minWidth:0 }}>
         {/* Swatch unico: anteprima reale (supporta alpha) + click per aprire il picker RGB */}
         <div
           title='Clicca per scegliere il colore'
@@ -161,12 +161,12 @@ function ColInp(p: { value:string; onChange:(v:string)=>void }) {
           value={p.value}
           onChange={e=>p.onChange(e.target.value)}
           placeholder='#rrggbb oppure rgba(r,g,b,a)'
-          style={{ ...P.inp, flex:1, fontSize:11 }}
+          style={{ ...P.inp, flex:'1 1 auto', minWidth:0, fontSize:10.5, padding:'5px 6px' }}
         />
       </div>
 
       {/* Slider trasparenza */}
-      <div style={{ display:'flex', alignItems:'center', gap:8 }}>
+      <div style={{ display:'flex', alignItems:'center', gap:7, minWidth:0 }}>
         <span style={{ fontSize:10, color:'#a0aec0', width:16, textAlign:'center' as const }}>α</span>
         <input
           type='range'
@@ -175,7 +175,7 @@ function ColInp(p: { value:string; onChange:(v:string)=>void }) {
           step={1}
           value={aPct}
           onChange={e=>onAlpha(Number(e.target.value))}
-          style={{ flex:1 }}
+          style={{ flex:'1 1 auto', minWidth:0 }}
         />
         <span style={{ fontSize:10, color:'#a0aec0', width:34, textAlign:'right' as const }}>{aPct}%</span>
       </div>
@@ -195,6 +195,25 @@ function Sel(p: { value:string; onChange:(v:string)=>void; options:Array<{value:
     <select value={p.value} onChange={e=>p.onChange(e.target.value)} style={{ ...P.inp, cursor:'pointer' }}>
       {p.options.map(o=><option key={o.value} value={o.value} style={{ background:'#1a1f2e', color:'#e5e7eb' }}>{o.label}</option>)}
     </select>
+  )
+}
+
+function ColorNumRow(p: {
+  colorLabel: string; colorValue: string; onColorChange: (v:string)=>void
+  numLabel: string; numValue: number; onNumChange: (v:number)=>void
+  min?: number; max?: number; step?: number; unit?: string
+}) {
+  return (
+    <div style={{ display:'grid', gridTemplateColumns:'minmax(0,1fr) 88px', gap:8, alignItems:'start', marginTop:2 }}>
+      <div style={{ minWidth:0 }}>
+        <label style={P.lbl}>{p.colorLabel}</label>
+        <ColInp value={p.colorValue} onChange={p.onColorChange}/>
+      </div>
+      <div style={{ minWidth:0 }}>
+        <label style={P.lbl}>{p.numLabel}</label>
+        <NumInp value={p.numValue} onChange={p.onNumChange} min={p.min} max={p.max} step={p.step} unit={p.unit}/>
+      </div>
+    </div>
   )
 }
 // ── Selezione pagina ExB ──────────────────────────────────────────────────────
@@ -355,52 +374,55 @@ function Nudge(p: { label:string; icon:string; value:GroupOffset; onChange:(v:Gr
 
   const Btn = (bp: { onClick:()=>void; children:React.ReactNode; title?:string }) => (
     <button type='button' onClick={bp.onClick} title={bp.title}
-      style={{ width:24, height:24, borderRadius:5, border:'1px solid rgba(255,255,255,0.15)', background:'rgba(255,255,255,0.07)', color:'#d1d5db', fontSize:13, cursor:'pointer', display:'flex', alignItems:'center', justifyContent:'center', flexShrink:0 }}>
+      style={{ width:22, height:22, borderRadius:5, border:'1px solid rgba(255,255,255,0.15)', background:'rgba(255,255,255,0.07)', color:'#d1d5db', fontSize:12, cursor:'pointer', display:'flex', alignItems:'center', justifyContent:'center', flexShrink:0 }}>
       {bp.children}
     </button>
   )
 
   return (
-    <div style={{ background:'rgba(255,255,255,0.04)', borderRadius:8, padding:'8px 10px', marginTop:8, display:'flex', alignItems:'center', gap:10 }}>
+    <div style={{ background:'rgba(255,255,255,0.04)', borderRadius:8, padding:'8px', marginTop:8, display:'grid', gridTemplateColumns:'minmax(0,1fr)', gap:7, width:'100%', maxWidth:'100%', boxSizing:'border-box' }}>
 
-      {/* Icona + label — colonna sinistra */}
-      <div style={{ flexShrink:0, width:90 }}>
-        <div style={{ fontSize:14, marginBottom:2 }}>{p.icon}</div>
-        <div style={{ fontSize:10, fontWeight:700, color: moved ? '#93c5fd' : '#a0aec0', lineHeight:1.3, wordBreak:'break-word' as const }}>
-          {p.label}
+      {/* Riga titolo compatta */}
+      <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', gap:8, minWidth:0 }}>
+        <div style={{ display:'flex', alignItems:'center', gap:7, minWidth:0 }}>
+          <span style={{ fontSize:14, flexShrink:0 }}>{p.icon}</span>
+          <span style={{ fontSize:10, fontWeight:700, color: moved ? '#93c5fd' : '#a0aec0', lineHeight:1.25, minWidth:0, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' as const }}>
+            {p.label}
+          </span>
         </div>
         {moved && (
-          <div style={{ fontSize:9, color:'#a0aec0', marginTop:2 }}>
+          <span style={{ fontSize:9, color:'#a0aec0', flexShrink:0 }}>
             {x!==0?`X${x>0?'+':''}${x}`:''}
             {x!==0&&y!==0?' ':''}
             {y!==0?`Y${y>0?'+':''}${y}`:''}
-          </div>
+          </span>
         )}
       </div>
 
-      {/* Croce frecce */}
-      <div style={{ display:'grid', gridTemplateColumns:'24px 24px 24px', gridTemplateRows:'24px 24px 24px', gap:3, flexShrink:0 }}>
-        <div/><Btn onClick={()=>mv(0,-STEP)} title='Su'>↑</Btn><div/>
-        <Btn onClick={()=>mv(-STEP,0)} title='Sinistra'>←</Btn>
-        <button type='button' onClick={reset} title='Azzera'
-          style={{ width:24, height:24, borderRadius:5, border:'1px solid rgba(255,255,255,0.10)', background:'transparent', color: moved?'#f87171':'#6b7280', fontSize:11, cursor:'pointer', display:'flex', alignItems:'center', justifyContent:'center' }}>
-          ↺
-        </button>
-        <Btn onClick={()=>mv(STEP,0)} title='Destra'>→</Btn>
-        <div/><Btn onClick={()=>mv(0,STEP)} title='Giù'>↓</Btn><div/>
-      </div>
-
-      {/* Campi X/Y */}
-      <div style={{ display:'flex', flexDirection:'column', gap:4, flexShrink:0 }}>
-        <div style={{ display:'flex', alignItems:'center', gap:4 }}>
-          <span style={{ fontSize:10, color:'#a0aec0', width:10 }}>X</span>
-          <input type='number' value={x} step={1} onChange={e=>p.onChange({ x:Number(e.target.value), y })}
-            style={{ ...P.inp, width:52, padding:'2px 5px', fontSize:11 }}/>
+      {/* Comandi: frecce a sinistra, campi X/Y dentro la larghezza disponibile */}
+      <div style={{ display:'grid', gridTemplateColumns:'70px minmax(0,1fr)', gap:8, alignItems:'center', width:'100%', maxWidth:'100%', minWidth:0 }}>
+        <div style={{ display:'grid', gridTemplateColumns:'22px 22px 22px', gridTemplateRows:'22px 22px 22px', gap:2, flexShrink:0 }}>
+          <div/><Btn onClick={()=>mv(0,-STEP)} title='Su'>↑</Btn><div/>
+          <Btn onClick={()=>mv(-STEP,0)} title='Sinistra'>←</Btn>
+          <button type='button' onClick={reset} title='Azzera'
+            style={{ width:22, height:22, borderRadius:5, border:'1px solid rgba(255,255,255,0.10)', background:'transparent', color: moved?'#f87171':'#6b7280', fontSize:10, cursor:'pointer', display:'flex', alignItems:'center', justifyContent:'center' }}>
+            ↺
+          </button>
+          <Btn onClick={()=>mv(STEP,0)} title='Destra'>→</Btn>
+          <div/><Btn onClick={()=>mv(0,STEP)} title='Giù'>↓</Btn><div/>
         </div>
-        <div style={{ display:'flex', alignItems:'center', gap:4 }}>
-          <span style={{ fontSize:10, color:'#a0aec0', width:10 }}>Y</span>
-          <input type='number' value={y} step={1} onChange={e=>p.onChange({ x, y:Number(e.target.value) })}
-            style={{ ...P.inp, width:52, padding:'2px 5px', fontSize:11 }}/>
+
+        <div style={{ display:'grid', gridTemplateColumns:'minmax(0,1fr) minmax(0,1fr)', gap:6, minWidth:0 }}>
+          <div style={{ minWidth:0 }}>
+            <label style={{ fontSize:10, color:'#a0aec0', display:'block', marginBottom:2 }}>X</label>
+            <input type='number' value={x} step={1} onChange={e=>p.onChange({ x:Number(e.target.value), y })}
+              style={{ ...P.inp, width:'100%', minWidth:0, padding:'3px 5px', fontSize:11 }}/>
+          </div>
+          <div style={{ minWidth:0 }}>
+            <label style={{ fontSize:10, color:'#a0aec0', display:'block', marginBottom:2 }}>Y</label>
+            <input type='number' value={y} step={1} onChange={e=>p.onChange({ x, y:Number(e.target.value) })}
+              style={{ ...P.inp, width:'100%', minWidth:0, padding:'3px 5px', fontSize:11 }}/>
+          </div>
         </div>
       </div>
     </div>
@@ -425,7 +447,8 @@ const WEIGHTS = [300,400,500,600,700,800,900].map(w=>({
 const ROLE_OPTIONS = [
   {value:'*',label:'Tutti'},{value:'TR',label:'TR'},{value:'TI',label:'TI'},
   {value:'RZ',label:'RZ'},{value:'RI',label:'RI'},{value:'DT',label:'DT'},
-  {value:'DA',label:'DA'},{value:'ADMIN',label:'ADMIN'}
+  {value:'DA',label:'DA'},{value:'RI_AMM',label:'RI_AMM'},
+  {value:'TI_AMM',label:'TI_AMM'},{value:'ADMIN',label:'ADMIN'}
 ]
 
 let _newCardCounter = 0
@@ -674,24 +697,38 @@ export default function Setting(props: AllWidgetSettingProps<IMConfig>) {
       {openSec==='clock' && <div>
         <Check value={cfg.showClock??true} onChange={v=>set('showClock',v)} label='Mostra orologio e data'/>
         {(cfg.showClock??true) && <>
-          <div style={P.row2}>
-            <div><label style={P.lbl}>Colore ora</label><ColInp value={cfg.clockColor??'#ffffff'} onChange={v=>set('clockColor',v)}/></div>
-            <div><label style={P.lbl}>Dim. ora</label><NumInp value={cfg.clockSize??22} onChange={v=>set('clockSize',v)} min={12} max={48} unit='px'/></div>
-          </div>
-          <div style={P.row2}>
-            <div><label style={P.lbl}>Colore data</label><ColInp value={cfg.dateColor??'rgba(147,197,253,0.7)'} onChange={v=>set('dateColor',v)}/></div>
-            <div><label style={P.lbl}>Dim. data</label><NumInp value={cfg.dateSize??11.5} onChange={v=>set('dateSize',v)} min={9} max={22} unit='px'/></div>
-          </div>
+          <ColorNumRow
+            colorLabel='Colore ora'
+            colorValue={cfg.clockColor??'#ffffff'}
+            onColorChange={v=>set('clockColor',v)}
+            numLabel='Dim. ora'
+            numValue={cfg.clockSize??22}
+            onNumChange={v=>set('clockSize',v)}
+            min={12}
+            max={48}
+            unit='px'
+          />
+          <ColorNumRow
+            colorLabel='Colore data'
+            colorValue={cfg.dateColor??'rgba(147,197,253,0.7)'}
+            onColorChange={v=>set('dateColor',v)}
+            numLabel='Dim. data'
+            numValue={cfg.dateSize??11.5}
+            onNumChange={v=>set('dateSize',v)}
+            min={9}
+            max={22}
+            unit='px'
+          />
         </>}
       </div>}
 
 <Acc id='seclabel' label='🏷 Etichetta sezione'/>
       {openSec==='seclabel' && <div>
         <label style={P.lbl}>Testo</label><Inp value={cfg.sectionLabelText} onChange={v=>set('sectionLabelText',v)}/>
-        <div style={P.row3}>
-          <div><label style={P.lbl}>Colore</label><ColInp value={cfg.sectionLabelColor} onChange={v=>set('sectionLabelColor',v)}/></div>
-          <div><label style={P.lbl}>Dim.</label><NumInp value={cfg.sectionLabelSize} onChange={v=>set('sectionLabelSize',v)} min={8} max={20} unit='px'/></div>
-          <div><label style={P.lbl}>Spaziatura</label><NumInp value={cfg.sectionLabelSpacing} onChange={v=>set('sectionLabelSpacing',v)} min={0} max={10} step={0.5} unit='px'/></div>
+        <label style={P.lbl}>Colore</label><ColInp value={cfg.sectionLabelColor} onChange={v=>set('sectionLabelColor',v)}/>
+        <div style={P.row2}>
+          <div style={{ minWidth:0 }}><label style={P.lbl}>Dim.</label><NumInp value={cfg.sectionLabelSize} onChange={v=>set('sectionLabelSize',v)} min={8} max={20} unit='px'/></div>
+          <div style={{ minWidth:0 }}><label style={P.lbl}>Spaziatura</label><NumInp value={cfg.sectionLabelSpacing} onChange={v=>set('sectionLabelSpacing',v)} min={0} max={10} step={0.5} unit='px'/></div>
         </div>
       </div>}
 
@@ -823,14 +860,19 @@ export default function Setting(props: AllWidgetSettingProps<IMConfig>) {
                   return null
                 })()}
 
-                <div style={P.row2}>
-                  <div><label style={P.lbl}>Colore sezione</label><ColInp value={card.colorBg} onChange={v=>setCard(card.id,{colorBg:v})}/><div style={P.hint}>Usato per l’hover automatico (se “Sfondo hover” è vuoto).</div></div>
-                  <div><label style={P.lbl}>Colore accento</label><ColInp value={card.colorAccent} onChange={v=>setCard(card.id,{colorAccent:v})}/></div>
-                </div>
-                <div style={P.row2}>
-                  <div><label style={P.lbl}>Sfondo a riposo</label><ColInp value={card.colorBgRest||'rgba(255,255,255,0.05)'} onChange={v=>setCard(card.id,{colorBgRest:v})}/></div>
-                  <div><label style={P.lbl}>Sfondo hover</label><ColInp value={String(card.colorBgHover||'')} onChange={v=>setCard(card.id,{colorBgHover:v})}/><div style={P.hint}>Vuoto = automatico (derivato dal “Colore sezione”).</div></div>
-                </div>
+                <label style={P.lbl}>Colore sezione</label>
+                <ColInp value={card.colorBg} onChange={v=>setCard(card.id,{colorBg:v})}/>
+                <div style={P.hint}>Usato per l’hover automatico se “Sfondo hover” è vuoto.</div>
+
+                <label style={P.lbl}>Colore accento</label>
+                <ColInp value={card.colorAccent} onChange={v=>setCard(card.id,{colorAccent:v})}/>
+
+                <label style={P.lbl}>Sfondo a riposo</label>
+                <ColInp value={card.colorBgRest||'rgba(255,255,255,0.05)'} onChange={v=>setCard(card.id,{colorBgRest:v})}/>
+
+                <label style={P.lbl}>Sfondo hover</label>
+                <ColInp value={String(card.colorBgHover||'')} onChange={v=>setCard(card.id,{colorBgHover:v})}/>
+                <div style={P.hint}>Vuoto = automatico, derivato dal “Colore sezione”.</div>
 
                 <label style={P.lbl}>Ruoli visibili</label>
                 <div style={{ display:'flex',flexWrap:'wrap' as const,gap:5,marginTop:4 }}>
@@ -874,10 +916,17 @@ export default function Setting(props: AllWidgetSettingProps<IMConfig>) {
         {cfg.showFooter && <>
           <label style={P.lbl}>Testo sinistro</label><Inp value={cfg.footerLeft} onChange={v=>set('footerLeft',v)} placeholder="usa {year} per l'anno"/>
           <label style={P.lbl}>Testo destro</label><Inp value={cfg.footerRight} onChange={v=>set('footerRight',v)}/>
-          <div style={P.row2}>
-            <div><label style={P.lbl}>Colore</label><ColInp value={cfg.footerColor} onChange={v=>set('footerColor',v)}/></div>
-            <div><label style={P.lbl}>Dimensione</label><NumInp value={cfg.footerSize} onChange={v=>set('footerSize',v)} min={8} max={16} unit='px'/></div>
-          </div>
+          <ColorNumRow
+            colorLabel='Colore'
+            colorValue={cfg.footerColor}
+            onColorChange={v=>set('footerColor',v)}
+            numLabel='Dimensione'
+            numValue={cfg.footerSize}
+            onNumChange={v=>set('footerSize',v)}
+            min={8}
+            max={16}
+            unit='px'
+          />
         </>}
       </div>}
 

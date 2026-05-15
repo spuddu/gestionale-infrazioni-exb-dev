@@ -10,7 +10,7 @@ const P = {
   lbl:     { fontSize:11.5, fontWeight:600, color:'#d1d5db', display:'block', marginBottom:4, marginTop:10 } as React.CSSProperties,
   hint:    { fontSize:10.5, color:'#a0aec0', marginTop:3, lineHeight:1.4 } as React.CSSProperties,
   row2:    { display:'grid', gridTemplateColumns:'1fr 1fr', gap:8 } as React.CSSProperties,
-  row3:    { display:'grid', gridTemplateColumns:'1fr 1fr 1fr', gap:8 } as React.CSSProperties,
+  row3:    { display:'grid', gridTemplateColumns:'repeat(3, minmax(0, 1fr))', gap:6 } as React.CSSProperties,
   inp:     { width:'100%', padding:'5px 8px', fontSize:12, border:'1px solid rgba(255,255,255,0.15)', borderRadius:6, outline:'none', boxSizing:'border-box' as const, background:'rgba(255,255,255,0.07)', color:'#e5e7eb' } as React.CSSProperties,
   check:   { display:'flex', alignItems:'center', gap:8, fontSize:12, color:'#d1d5db', cursor:'pointer', marginTop:8 } as React.CSSProperties,
 }
@@ -18,12 +18,13 @@ const P = {
 function Inp(p: { value:string|number; onChange:(v:string)=>void; type?:string; placeholder?:string }) {
   return <input type={p.type||'text'} value={p.value} onChange={e=>p.onChange(e.target.value)} placeholder={p.placeholder} style={P.inp}/>
 }
-function NumInp(p: { value:number; onChange:(v:number)=>void; min?:number; max?:number; step?:number; unit?:string }) {
+function NumInp(p: { value:number; onChange:(v:number)=>void; min?:number; max?:number; step?:number; unit?:string; compact?:boolean }) {
+  const inputWidth = p.compact ? 42 : 68
   return (
-    <div style={{ display:'flex', alignItems:'center', gap:5 }}>
+    <div style={{ display:'flex', alignItems:'center', gap:p.compact?3:5, width:'100%', minWidth:0 }}>
       <input type='number' value={p.value} min={p.min} max={p.max} step={p.step||1}
-        onChange={e=>p.onChange(Number(e.target.value))} style={{ ...P.inp, width:68 }}/>
-      {p.unit && <span style={{ fontSize:11, color:'#a0aec0', flexShrink:0 }}>{p.unit}</span>}
+        onChange={e=>p.onChange(Number(e.target.value))} style={{ ...P.inp, width:inputWidth, minWidth:0, padding:p.compact?'5px 4px':'5px 8px', textAlign:p.compact?'center':'left' }}/>
+      {p.unit && <span style={{ fontSize:10.5, color:'#a0aec0', flexShrink:0 }}>{p.unit}</span>}
     </div>
   )
 }
@@ -116,7 +117,8 @@ const WEIGHTS = [300,400,500,600,700,800,900].map(w=>({
 }))
 const ROLE_OPTIONS = [
   {value:'*',label:'Tutti'},{value:'TR',label:'TR'},{value:'TI',label:'TI'},
-  {value:'RZ',label:'RZ'},{value:'RI',label:'RI'},{value:'DT',label:'DT'},
+  {value:'TI_AMM',label:'TI_AMM'},{value:'RZ',label:'RZ'},{value:'RI',label:'RI'},
+  {value:'RI_AMM',label:'RI_AMM'},{value:'DT',label:'DT'},
   {value:'DA',label:'DA'},{value:'ADMIN',label:'ADMIN'}
 ]
 const ICON_OPTIONS = [
@@ -184,9 +186,9 @@ export default function Setting(props: AllWidgetSettingProps<IMConfig>) {
         {value:'horizontal',label:'Orizzontale (toolbar)'}
       ]}/>
       <div style={P.row3}>
-        <div><label style={P.lbl}>Gap</label><NumInp value={cfg.gap} onChange={v=>set('gap',v)} min={0} max={24} unit='px'/></div>
-        <div><label style={P.lbl}>Bordi arrot.</label><NumInp value={cfg.itemBorderRadius} onChange={v=>set('itemBorderRadius',v)} min={0} max={30} unit='px'/></div>
-        <div><label style={P.lbl}>Padding</label><NumInp value={cfg.itemPadding} onChange={v=>set('itemPadding',v)} min={4} max={30} unit='px'/></div>
+        <div style={{minWidth:0}}><label style={P.lbl}>Gap</label><NumInp value={cfg.gap} onChange={v=>set('gap',v)} min={0} max={24} unit='px' compact/></div>
+        <div style={{minWidth:0}}><label style={P.lbl}>Bordi arrot.</label><NumInp value={cfg.itemBorderRadius} onChange={v=>set('itemBorderRadius',v)} min={0} max={30} unit='px' compact/></div>
+        <div style={{minWidth:0}}><label style={P.lbl}>Padding</label><NumInp value={cfg.itemPadding} onChange={v=>set('itemPadding',v)} min={4} max={30} unit='px' compact/></div>
       </div>
       <label style={P.lbl}>Font etichette</label>
       <Sel value={cfg.labelFont} onChange={v=>set('labelFont',v)} options={FONTS}/>

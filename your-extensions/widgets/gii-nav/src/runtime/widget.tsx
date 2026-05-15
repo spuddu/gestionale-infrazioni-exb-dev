@@ -9,10 +9,12 @@ const GII_PORTAL     = 'https://cbsm-hub.maps.arcgis.com'
 const RUOLO_LABEL: Record<number, string> = { 1:'TR', 2:'TI', 3:'RZ', 4:'RI', 5:'DT', 6:'DA', 7:'ADMIN' }
 const RUOLO_FULL:  Record<string, string> = {
   TR:'Tecnico Rilevatore', TI:'Tecnico Istruttore', RZ:'Responsabile di Zona',
-  RI:'Responsabile Istruttoria', DT:'Direttore Tecnico', DA:'Direttore Amministrativo', ADMIN:'Amministratore'
+  RI:'Responsabile Istruttoria', TI_AMM:'Tecnico Istruttore Amministrativo',
+  RI_AMM:'Responsabile Istruttoria Amministrativa', DT:'Direttore Tecnico',
+  DA:'Direttore Amministrativo', ADMIN:'Amministratore'
 }
 const AREA_LABEL: Record<number, string> = { 1:'AMM', 2:'AGR', 3:'TEC' }
-const RUOLI_VALIDI = new Set(['TR', 'TI', 'RZ', 'RI', 'DT', 'DA', 'ADMIN'])
+const RUOLI_VALIDI = new Set(['TR', 'TI', 'TI_AMM', 'RZ', 'RI', 'RI_AMM', 'DT', 'DA', 'ADMIN'])
 const AREE_VALIDE = new Set(['AMM', 'AGR', 'TEC'])
 
 function normCode(value: any): string {
@@ -40,6 +42,14 @@ function normalizeAreaCode(value: any, numericFallback: any): string {
   return ''
 }
 
+function resolveWorkflowRole(ruoloLabel: string, area: string): string {
+  const role = normCode(ruoloLabel)
+  const areaCode = normCode(area)
+  if (role === 'TI_AMM' || (role === 'TI' && areaCode === 'AMM')) return 'TI_AMM'
+  if (role === 'RI_AMM' || (role === 'RI' && areaCode === 'AMM')) return 'RI_AMM'
+  return role
+}
+
 function normalizeSectorCode(value: any, numericFallback: any): string {
   const directRaw = normCode(value)
   const direct = directRaw === 'CS' ? 'DS' : directRaw
@@ -64,8 +74,9 @@ interface UserInfo { username: string; fullName: string; ruoloLabel: string; ruo
 async function loadUser(): Promise<UserInfo | null> {
   const cached: any = (window as any).__giiUserRole
   if (cached?.username) {
-    const ruoloLabel = normalizeRoleCode(cached.ruoloCod ?? cached.ruolo_cod ?? cached.ruoloLabel, cached.ruolo, cached.isAdmin)
+    const rawRole = normalizeRoleCode(cached.ruoloCod ?? cached.ruolo_cod ?? cached.ruoloLabel, cached.ruolo, cached.isAdmin)
     const area = normalizeAreaCode(cached.areaCod ?? cached.area_cod ?? cached.areaLabel, cached.area)
+    const ruoloLabel = resolveWorkflowRole(rawRole, area)
     const settore = normalizeSectorCode(cached.settoreCod ?? cached.settore_cod ?? cached.settoreLabel, cached.settore)
     const isAdmin = cached.isAdmin === true || ruoloLabel === 'ADMIN'
 

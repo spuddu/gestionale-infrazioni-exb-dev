@@ -16,6 +16,8 @@ const P = {
   hint:  { fontSize:10.5, color:'#a0aec0', marginTop:3, lineHeight:1.4 } as React.CSSProperties,
   row2:  { display:'grid', gridTemplateColumns:'1fr 1fr', gap:8 } as React.CSSProperties,
   row3:  { display:'grid', gridTemplateColumns:'1fr 1fr 1fr', gap:6 } as React.CSSProperties,
+  titleRow3: { display:'grid', gridTemplateColumns:'repeat(3, minmax(0, 1fr))', gap:4, alignItems:'end' } as React.CSSProperties,
+  compactCell: { minWidth:0, overflow:'hidden' } as React.CSSProperties,
   inp:   { width:'100%', padding:'5px 8px', fontSize:12, border:'1px solid rgba(255,255,255,0.15)', borderRadius:6, outline:'none', boxSizing:'border-box' as const, background:'rgba(255,255,255,0.07)', color:'#e5e7eb' } as React.CSSProperties,
   grp:   { fontSize:11, fontWeight:700, color:'#93c5fd', marginTop:14, marginBottom:6, paddingBottom:4, borderBottom:'1px solid rgba(255,255,255,0.07)' } as React.CSSProperties,
 }
@@ -60,23 +62,23 @@ function ensureNotaSpeseTabForSetting(tabs: TabConfig[]): TabConfig[] {
 function Inp(p: { value:string|number; onChange:(v:string)=>void; placeholder?:string }) {
   return <input type='text' value={p.value} onChange={e=>p.onChange(e.target.value)} placeholder={p.placeholder} style={P.inp}/>
 }
-function NumInp(p: { value:number; onChange:(v:number)=>void; min?:number; max?:number; step?:number; unit?:string }) {
+function NumInp(p: { value:number; onChange:(v:number)=>void; min?:number; max?:number; step?:number; unit?:string; compact?:boolean }) {
   return (
-    <div style={{ display:'flex', alignItems:'center', gap:5 }}>
+    <div style={{ display:'flex', alignItems:'center', gap:p.compact ? 3 : 5, minWidth:0, maxWidth:'100%' }}>
       <input type='number' value={p.value} min={p.min} max={p.max} step={p.step||1}
-        onChange={e=>p.onChange(Number(e.target.value))} style={{ ...P.inp, width:68 }}/>
-      {p.unit && <span style={{ fontSize:11, color:'#a0aec0', flexShrink:0 }}>{p.unit}</span>}
+        onChange={e=>p.onChange(Number(e.target.value))} style={{ ...P.inp, width:p.compact ? 48 : 68, minWidth:0, padding:p.compact ? '5px 5px' : P.inp.padding }}/>
+      {p.unit && <span style={{ fontSize:p.compact ? 10 : 11, color:'#a0aec0', flexShrink:0 }}>{p.unit}</span>}
     </div>
   )
 }
 function ColInp(p: { value:string; onChange:(v:string)=>void }) {
   const hexVal = /^#[0-9a-fA-F]{3,8}$/.test(p.value) ? p.value : '#000000'
   return (
-    <div style={{ display:'flex', alignItems:'center', gap:6 }}>
+    <div style={{ display:'flex', alignItems:'center', gap:6, minWidth:0, maxWidth:'100%' }}>
       <input type='color' value={hexVal} onChange={e=>p.onChange(e.target.value)}
         style={{ width:30, height:26, padding:2, border:'1px solid rgba(255,255,255,0.15)', borderRadius:5, cursor:'pointer', background:'transparent', flexShrink:0 }}/>
       <input type='text' value={p.value} onChange={e=>p.onChange(e.target.value)}
-        placeholder='#rrggbb o rgba(...)' style={{ ...P.inp, flex:1, fontSize:11 }}/>
+        placeholder='#rrggbb o rgba(...)' style={{ ...P.inp, flex:1, minWidth:0, fontSize:11 }}/>
     </div>
   )
 }
@@ -706,15 +708,15 @@ export default function Setting(props: Props) {
       {isOpen('titolo') && <div>
         <label style={P.lbl}>Testo prefisso</label>
         <Inp value={String(cfgJs.detailTitlePrefix || '')} onChange={v=>patch({detailTitlePrefix:v})} placeholder='Dettaglio rapporto n.'/>
-        <div style={P.row3}>
-          <div><label style={P.lbl}>Altezza</label><NumInp value={parseNum(cfgJs.detailTitleHeight, 40)} onChange={n=>patch({detailTitleHeight:n})} min={0} unit='px'/></div>
-          <div><label style={P.lbl}>Font sz</label><NumInp value={parseNum(cfgJs.detailTitleFontSize, 14)} onChange={n=>patch({detailTitleFontSize:n})} min={10} unit='px'/></div>
-          <div><label style={P.lbl}>Font w</label><NumInp value={parseNum(cfgJs.detailTitleFontWeight, 600)} onChange={n=>patch({detailTitleFontWeight:n})} min={100} step={100}/></div>
+        <div style={P.titleRow3}>
+          <div style={P.compactCell}><label style={P.lbl}>Altezza</label><NumInp compact value={parseNum(cfgJs.detailTitleHeight, 40)} onChange={n=>patch({detailTitleHeight:n})} min={0} unit='px'/></div>
+          <div style={P.compactCell}><label style={P.lbl}>Font sz</label><NumInp compact value={parseNum(cfgJs.detailTitleFontSize, 14)} onChange={n=>patch({detailTitleFontSize:n})} min={10} unit='px'/></div>
+          <div style={P.compactCell}><label style={P.lbl}>Font w</label><NumInp compact value={parseNum(cfgJs.detailTitleFontWeight, 600)} onChange={n=>patch({detailTitleFontWeight:n})} min={100} step={100}/></div>
         </div>
-        <div style={P.row3}>
-          <div><label style={P.lbl}>Pad. bottom</label><NumInp value={parseNum(cfgJs.detailTitlePaddingBottom, 10)} onChange={n=>patch({detailTitlePaddingBottom:n})} min={0} unit='px'/></div>
-          <div><label style={P.lbl}>Pad. left</label><NumInp value={parseNum(cfgJs.detailTitlePaddingLeft, 0)} onChange={n=>patch({detailTitlePaddingLeft:n})} min={0} unit='px'/></div>
-          <div><label style={P.lbl}>Pad. right</label><NumInp value={parseNum(cfgJs.detailTitlePaddingRight, 0)} onChange={n=>patch({detailTitlePaddingRight:n})} min={0} unit='px'/></div>
+        <div style={P.titleRow3}>
+          <div style={P.compactCell}><label style={P.lbl}>Pad. bottom</label><NumInp compact value={parseNum(cfgJs.detailTitlePaddingBottom, 10)} onChange={n=>patch({detailTitlePaddingBottom:n})} min={0} unit='px'/></div>
+          <div style={P.compactCell}><label style={P.lbl}>Pad. left</label><NumInp compact value={parseNum(cfgJs.detailTitlePaddingLeft, 0)} onChange={n=>patch({detailTitlePaddingLeft:n})} min={0} unit='px'/></div>
+          <div style={P.compactCell}><label style={P.lbl}>Pad. right</label><NumInp compact value={parseNum(cfgJs.detailTitlePaddingRight, 0)} onChange={n=>patch({detailTitlePaddingRight:n})} min={0} unit='px'/></div>
         </div>
         <label style={P.lbl}>Colore testo</label>
         <ColInp value={String(cfgJs.detailTitleColor || 'rgba(0,0,0,0.85)')} onChange={v=>patch({detailTitleColor:v})}/>

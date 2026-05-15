@@ -3117,7 +3117,7 @@ function autoPickFields (data: any, kind: string): string[] {
   if (!data) return []
   const keys = Object.keys(data).filter(k => !/^objectid$/i.test(k) && !/^globalid$/i.test(k) && !/^shape/i.test(k))
   const pickBy = (re: RegExp) => keys.filter(k => re.test(k))
-  if (kind === 'ANAGRAFICA') {
+  if (kind === 'TRASGRESSORE') {
     const a = pickBy(/ditta|denom|ragione|nome|cognome|cf|cod.*fisc|piva|partita|indir|via|cap|comune|prov|telefono|cell|mail|pec/i)
     return a.slice(0, 16)
   }
@@ -3139,7 +3139,14 @@ function migrateTabs(tabFields: TabFields, tabs: TabConfig[] | undefined): TabCo
   
   // Se ha già tabs, usa quelle
   if (Array.isArray(tabs) && tabs.length > 0) {
-    result = tabs
+    result = tabs.map((tab: any) => {
+      const id = String(tab?.id || '').trim().toLowerCase()
+      if (id === 'anagrafica') {
+        const label = String(tab?.label || '').trim()
+        return { ...tab, id: 'trasgressore', label: !label || label.toLowerCase() === 'anagrafica' ? 'Trasgressore' : tab.label }
+      }
+      return tab
+    })
   } else {
     // Altrimenti migra dai vecchi tabFields
     result = [
@@ -5817,7 +5824,7 @@ React.useEffect(() => {
         {/* DATI GENERALI */}
         {npTab === 'dati_generali' && renderLayoutTab('dati_generali')}
 
-        {/* ANAGRAFICA */}
+        {/* TRASGRESSORE */}
         {npTab === 'trasgressore' && renderLayoutTab('trasgressore')}
 
         {/* VIOLAZIONE */}
@@ -6465,8 +6472,8 @@ const isPgOnlyField = React.useCallback((fieldName: string) => {
     const rawList = (fields && fields.length) ? fields : []  // Se nessun campo configurato, mostra lista vuota (usare il setting per configurare)
     const tipoRaw = (data && (data as any).__tipo_soggetto_raw != null) ? (data as any).__tipo_soggetto_raw : ((data && (data as any).tipo_soggetto != null) ? (data as any).tipo_soggetto : null)
     const tipoLabel = (data && (data as any).__tipo_soggetto_label != null) ? (data as any).__tipo_soggetto_label : null
-    const sogg = (kind === 'ANAGRAFICA') ? classifyTipoSoggetto(tipoRaw, tipoLabel) : null
-    const list = (kind === 'ANAGRAFICA' && sogg)
+    const sogg = (kind === 'TRASGRESSORE') ? classifyTipoSoggetto(tipoRaw, tipoLabel) : null
+    const list = (kind === 'TRASGRESSORE' && sogg)
       ? rawList.filter(fn => {
           if (!fn) return false
           if (sogg === 'PF' && isPgOnlyField(fn)) return false
