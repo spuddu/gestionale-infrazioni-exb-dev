@@ -28,6 +28,83 @@ function b64ToBytes (b64: string): Uint8Array {
   return out
 }
 
+function firstMeaningfulValue (...vals: any[]): any {
+  for (const value of vals) {
+    if (value == null) continue
+    if (typeof value === 'string') {
+      if (value.trim() !== '') return value
+      continue
+    }
+    return value
+  }
+  return undefined
+}
+
+const AREA_LABELS: Record<string, string> = {
+  AMM: 'AMMINISTRATIVA',
+  AGR: 'AGRARIA',
+  TEC: 'TECNICA'
+}
+
+const SETTORE_LABELS: Record<string, string> = {
+  CR: 'CATASTO, RUOLI E SERVIZI TERRITORIALI',
+  GI: 'GESTIONE IRRIGUA',
+  D1: "DISTRETTO 1 – QUARTU SANT'ELENA/VILLAPUTZU/MURAVERA – SAN SPERATE",
+  D2: 'DISTRETTO 2 – SERRAMANNA/PIMPISU',
+  D3: 'DISTRETTO 3 – SAN GAVINO - VILLACIDRO',
+  D4: 'DISTRETTO 4 – BASSO SULCIS',
+  D5: 'DISTRETTO 5 – SENORBÌ',
+  D6: 'DISTRETTO 6 – CIXERRI',
+  DS: 'MANUTENZIONE OPERE DI DRENO E DI SCOLO'
+}
+
+function normalizeAreaCode (value: any): 'AMM' | 'AGR' | 'TEC' | '' {
+  const s = String(value ?? '').trim().toUpperCase()
+  if (!s) return ''
+  if (s === '1' || s === 'AMM' || s === 'AMMINISTRATIVA' || s === 'AMMINISTRAZIONE' || s.includes('AFFARI GENERALI')) return 'AMM'
+  if (s === '2' || s === 'AGR' || s === 'AGRARIA' || s === 'AGRICOLA' || s === 'AGRICOLTURA') return 'AGR'
+  if (s === '3' || s === 'TEC' || s === 'TECNICA' || s === 'TECNICO') return 'TEC'
+  return ''
+}
+
+function normalizeSettoreCode (areaCode: string, value: any): string {
+  const s = String(value ?? '').trim().toUpperCase()
+  if (!s) return ''
+  if (s === 'CS') return 'DS'
+  if (s === '1') return areaCode === 'AGR' ? 'D1' : 'CR'
+  if (s === '2') return areaCode === 'AGR' ? 'D2' : 'GI'
+  if (s === '3') return 'D1'
+  if (s === '4') return 'D2'
+  if (s === '5') return 'D3'
+  if (s === '6') return 'D4'
+  if (s === '7') return 'D5'
+  if (s === '8') return 'D6'
+  if (s === '9') return 'DS'
+  const distretto = s.match(/^D\s*([1-6])$/)
+  if (distretto) return `D${distretto[1]}`
+  if (s === 'DS' || s === 'D S' || s.includes('DRENO') || s.includes('SCOLO')) return 'DS'
+  if (s === 'CR' || s === 'C R' || s.includes('CATASTO')) return 'CR'
+  if (s === 'GI' || s === 'G I' || s.includes('GESTIONE IRRIGUA')) return 'GI'
+  return s
+}
+
+function resolveAreaLabel (areaCode: string, labelValue: any): string {
+  const label = String(labelValue ?? '').trim()
+  const labelCode = normalizeAreaCode(label)
+  if (areaCode && (!label || labelCode === areaCode)) return AREA_LABELS[areaCode] || areaCode
+  if (labelCode) return AREA_LABELS[labelCode] || labelCode
+  return label
+}
+
+function resolveSettoreLabel (areaCode: string, settoreCode: string, labelValue: any): string {
+  const label = String(labelValue ?? '').trim()
+  const labelCode = normalizeSettoreCode(areaCode, label)
+  const code = settoreCode || labelCode
+  if (code && (!label || labelCode === code)) return SETTORE_LABELS[code] || code
+  if (labelCode === 'DS' && /\bCS\b/i.test(label)) return SETTORE_LABELS.DS
+  return label
+}
+
 /** Pulisce legature Unicode e caratteri invisibili */
 function cleanText (s: string): string {
   return s
@@ -188,8 +265,10 @@ export async function buildRapportoPdf (m: Record<string, string>): Promise<Uint
   // ════════════════════════════════════════════════════════════
 
   // ── Area / Settore centrati (sopra la linea a top=176.64) ──
-  const areaL = v('area_label')
-  const settL = v('settore_label')
+  const areaCod = normalizeAreaCode(firstMeaningfulValue(m.area_cod, m.area, m.area_label))
+  const settoreCod = normalizeSettoreCode(areaCod, firstMeaningfulValue(m.settore_cod, m.settore, m.settore_label))
+  const areaL = resolveAreaLabel(areaCod, v('area_label'))
+  const settL = resolveSettoreLabel(areaCod, settoreCod, v('settore_label'))
   if (areaL) centered(p1, `AREA ${areaL}`, fB, 9, 62.3, 532.6, bY(148, 9), BLUE)
   if (settL) centered(p1, `SETTORE ${settL}`, fB, 9, 62.3, 532.6, bY(162, 9), BLUE)
 
@@ -299,7 +378,7 @@ export async function buildRapportoPdf (m: Record<string, string>): Promise<Uint
   txt(p2, v('firma_ri'), fR, fSz, 193, bY(756.72, fSz), BLACK, 338)
 
   // 5a firma — template ha "Agraria", se TEC copro e riscrivo
-  if (v('area_cod') === 'TEC') {
+  if (areaCod === 'TEC') {
     p2.drawRectangle({ x: 63.5, y: bY(789, 1), width: 125, height: 13, color: LABEL_BG })
     txt(p2, "Il Direttore dell'Area Tecnica:", fB, fSz, 65.4, bY(777.35, fSz), BLACK)
   }

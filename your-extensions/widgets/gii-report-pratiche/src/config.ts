@@ -18,7 +18,7 @@ export interface Config {
 
 export const defaultConfig: Config = {
   title: 'Report pratiche',
-  subtitle: 'Elenco consultabile ed esportabile delle pratiche di competenza.',
+  subtitle: 'Quadro di sintesi delle fasi procedimentali delle pratiche di competenza.',
   whereClause: '1=1',
   pageSize: 2000,
   staleDays: 15,

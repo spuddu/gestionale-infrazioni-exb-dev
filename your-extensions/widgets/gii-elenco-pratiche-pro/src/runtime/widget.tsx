@@ -338,10 +338,12 @@ type RuntimeDsView = {
 const GII_RUNTIME_VIEWS: RuntimeDsView[] = [
   {
     key: 'ADMIN',
-    viewName: 'GII_VIEW_EB_ADMIN',
-    itemId: 'c05409cf4a86471194d6406e9b4d1c65',
-    serviceUrl: 'https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_VIEW_EB_BASE/FeatureServer',
-    layerUrl: 'https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_VIEW_EB_BASE/FeatureServer/0',
+    // Per ADMIN usiamo la vista AMM_ALL perché è configurata come vista completa senza limitazioni.
+    // La vecchia/base view non esiste più e GII_VIEW_EB_ADMIN può non restituire record in alcune configurazioni.
+    viewName: 'GII_VIEW_EB_AMM_ALL',
+    itemId: '6ffe45dac0e04905ba677e9fcd703238',
+    serviceUrl: 'https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_VIEW_EB_AMM_ALL/FeatureServer',
+    layerUrl: 'https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_VIEW_EB_AMM_ALL/FeatureServer/0',
     roles: ['ADMIN'],
     areaCode: '',
     settoreCode: ''
@@ -465,12 +467,54 @@ type LogEntry = {
 type UtentiEntry = {
   full_name: string
   ruolo: number | null
+  ruoloCod: string
   area: number | null
+  areaCod: string
   settore: number | null
+  settoreCod: string
 }
 
 const AREA_FROM_CODE: Record<number, string> = { 1:'AMM', 2:'AGR', 3:'TEC' }
-const SETTORE_FROM_CODE: Record<number, string> = { 1:'CR', 2:'GI', 3:'D1', 4:'D2', 5:'D3', 6:'D4', 7:'D5', 8:'D6', 9:'CS' }
+const SETTORE_FROM_CODE: Record<number, string> = { 1:'CR', 2:'GI', 3:'D1', 4:'D2', 5:'D3', 6:'D4', 7:'D5', 8:'D6', 9:'DS' }
+const AREA_LABELS: Record<string, string> = { AMM: 'Amministrativa', AGR: 'Agraria', TEC: 'Tecnica' }
+const SETTORE_LABELS: Record<string, string> = {
+  CR: 'Catasto, Ruoli e Servizi Territoriali',
+  GI: 'Gestione irrigua',
+  D1: 'Distretto 1 – San Sperate',
+  D2: 'Distretto 2 – Serramanna/Pimpisu',
+  D3: 'Distretto 3 – San Gavino/Villacidro',
+  D4: 'Distretto 4 – Basso Sulcis',
+  D5: 'Distretto 5 – Senorbì',
+  D6: 'Distretto 6 – Cixerri',
+  DS: 'Manutenzione opere di dreno e di scolo'
+}
+
+const AREA_FROM_TEXT_CODE: Record<string, 'AMM' | 'AGR' | 'TEC'> = { AMM: 'AMM', AGR: 'AGR', TEC: 'TEC' }
+const SETTORE_TEXT_CODES = new Set(['CR', 'GI', 'D1', 'D2', 'D3', 'D4', 'D5', 'D6', 'DS'])
+
+function normalizeTextCode (v: any): string {
+  return String(v ?? '').trim().toUpperCase()
+}
+
+function resolveAreaCode (area: number | null | undefined, areaCod?: any): 'AMM' | 'AGR' | 'TEC' | '' {
+  const code = normalizeTextCode(areaCod)
+  if (code && AREA_FROM_TEXT_CODE[code]) return AREA_FROM_TEXT_CODE[code]
+  return normalizeAreaCode(area)
+}
+
+function resolveSettoreCode (settore: number | null | undefined, settoreCod?: any): string {
+  const code = normalizeTextCode(settoreCod)
+  if (code === 'CS') return 'DS'
+  if (code && SETTORE_TEXT_CODES.has(code)) return code
+  return normalizeSettoreCode(settore)
+}
+
+function resolveRoleCode (ruolo: number | null | undefined, ruoloCod?: any, ruoloLabel?: any, isAdmin?: boolean): string {
+  const code = normalizeTextCode(ruoloCod || ruoloLabel)
+  if (code) return code
+  if (ruolo != null && RUOLO_LABEL[Number(ruolo)]) return RUOLO_LABEL[Number(ruolo)]
+  return isAdmin ? 'ADMIN' : ''
+}
 
 /**
  * Formatta una persona (mittente) dal LOG nel formato:
@@ -500,8 +544,8 @@ function formatPersonaDest (
 ): string {
   const uname = String(usernameDest || '').trim().toLowerCase()
   const destEntry = utentiMap?.get(uname)
-  const destArea = destEntry ? (AREA_FROM_CODE[destEntry.area ?? 0] || logArea) : logArea
-  const destSettore = destEntry ? (SETTORE_FROM_CODE[destEntry.settore ?? 0] || logSettore) : logSettore
+  const destArea = destEntry ? (destEntry.areaCod || AREA_FROM_CODE[destEntry.area ?? 0] || logArea) : logArea
+  const destSettore = destEntry ? (destEntry.settoreCod || SETTORE_FROM_CODE[destEntry.settore ?? 0] || logSettore) : logSettore
   const prefix = formatRolePrefix(ruoloDest, destArea, destSettore)
   const nome = String(destEntry?.full_name || '').trim()
   return nome ? `${prefix} - ${nome}` : prefix
@@ -595,11 +639,122 @@ function normalizeSettoreCode (settore: number | null | undefined): string {
   return settore != null ? (map[Number(settore)] || '') : ''
 }
 
+function normalizeSearchText (v: any): string {
+  return String(v ?? '')
+    .trim()
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+}
+
+function getFirstValue (d: any, names: string[]): any {
+  for (const name of names) {
+    const v = pickField(d, name)
+    if (v !== null && v !== undefined && v !== '') return v
+  }
+  return ''
+}
+
+function getAreaCodeFromRecord (d: any, fallbackArea?: any): 'AMM' | 'AGR' | 'TEC' | '' {
+  const raw = getFirstValue(d, ['area_cod', 'Area_cod', 'AREA_COD', 'area', 'Area'])
+  const code = normalizeTextCode(raw || fallbackArea)
+  if (AREA_FROM_TEXT_CODE[code]) return AREA_FROM_TEXT_CODE[code]
+  const n = Number(raw || fallbackArea)
+  return Number.isFinite(n) ? normalizeAreaCode(n) : ''
+}
+
+function getAreaDisplayFromRecord (d: any, fallbackArea?: any): string {
+  const code = getAreaCodeFromRecord(d, fallbackArea)
+  return AREA_LABELS[code] || code || '—'
+}
+
+function getSettoreCodeFromRecord (d: any, fallbackSettore?: any): string {
+  const raw = getFirstValue(d, ['settore_cod', 'Settore_cod', 'SETTORE_COD', 'settore', 'Settore', 'id_settore'])
+  const text = normalizeTextCode(raw || fallbackSettore)
+  if (text === 'CS') return 'DS'
+  if (SETTORE_TEXT_CODES.has(text)) return text
+  const n = Number(raw || fallbackSettore)
+  return Number.isFinite(n) ? normalizeSettoreCode(n) : ''
+}
+
+function getSettoreDisplayFromRecord (d: any, fallbackSettore?: any): string {
+  const code = getSettoreCodeFromRecord(d, fallbackSettore)
+  return SETTORE_LABELS[code] || code || '—'
+}
+
+function getDateOnlyMsFromInput (value: string, endOfDay = false): number | null {
+  if (!value) return null
+  const t = Date.parse(`${value}T${endOfDay ? '23:59:59' : '00:00:00'}`)
+  return Number.isNaN(t) ? null : t
+}
+
+function pickReportDateMs (d: any, configuredField?: string): number | null {
+  const candidates = [
+    configuredField,
+    'data_rilevazione', 'dt_rilevazione', 'data_rapporto', 'dt_rapporto',
+    'CreationDate', 'creationDate', 'creationdate', 'CREATIONDATE'
+  ].filter(Boolean) as string[]
+  for (const name of candidates) {
+    const ms = parseToMs(pickField(d, name))
+    if (ms !== null) return ms
+  }
+  return null
+}
+
+function pickTecnicoIstruttore (d: any): string {
+  return String(getFirstValue(d, [
+    'ti_assegnato_nome', 'ti_assegnato_name', 'tecnico_istruttore', 'Tecnico_istruttore',
+    'istruttore', 'Istruttore', 'ti_assegnato_username', 'ti_assegnato_user', 'ti_assegnato'
+  ]) || '')
+}
+
+function pickTecnicoRilevatore (d: any): string {
+  return String(getFirstValue(d, [
+    'tecnico_rilevatore', 'Tecnico_rilevatore', 'TECNICO_RILEVATORE',
+    'tr_nome', 'TR_nome', 'tecnico_rilevatore_nome', 'nome_tecnico_rilevatore',
+    'utente_loggato', 'created_user', 'Creator', 'creator'
+  ]) || '')
+}
+
+function pickPraticaSearchText (r: DataRecord, fieldPratica: string): string {
+  const d = r.getData?.() || {}
+  const parts = [
+    getCodPraticaDisplay(r),
+    pickField(d, fieldPratica),
+    pickField(d, 'OBJECTID'),
+    pickField(d, 'objectid'),
+    pickField(d, 'objectId'),
+    pickField(d, 'numero_rapporto'),
+    pickField(d, 'num_rapporto')
+  ]
+  return normalizeSearchText(parts.filter(v => v !== null && v !== undefined && v !== '').join(' '))
+}
+
+function pickTextSearchExtra (d: any, fallbackArea?: any, fallbackSettore?: any): string {
+  const parts = [
+    pickTecnicoRilevatore(d),
+    pickTecnicoIstruttore(d),
+    getAreaDisplayFromRecord(d, fallbackArea),
+    getSettoreDisplayFromRecord(d, fallbackSettore),
+    getAreaCodeFromRecord(d, fallbackArea),
+    getSettoreCodeFromRecord(d, fallbackSettore),
+    pickField(d, 'ufficio_zona')
+  ]
+  return normalizeSearchText(parts.filter(Boolean).join(' '))
+}
+
+function pickComparableDisplayValue (d: any, field: string, fallbackArea?: any, fallbackSettore?: any): any {
+  const f = String(field || '').toLowerCase()
+  if (f === 'area' || f === 'area_cod') return getAreaDisplayFromRecord(d, fallbackArea)
+  if (f === 'settore' || f === 'settore_cod' || f === 'id_settore') return getSettoreDisplayFromRecord(d, fallbackSettore)
+  return pickField(d, field)
+}
+
 function pickRuntimeViewForUser (user: GiiUserInfo | null): RuntimeDsView | null {
   if (!user) return null
-  const role = String(user.ruoloLabel || '').trim().toUpperCase()
-  const areaCode = normalizeAreaCode(user.area)
-  const settoreCode = normalizeSettoreCode(user.settore)
+  const role = resolveRoleCode(user.ruolo, user.ruoloCod, user.ruoloLabel, user.isAdmin)
+  const areaCode = resolveAreaCode(user.area, user.areaCod)
+  const settoreCode = resolveSettoreCode(user.settore, user.settoreCod)
   if (user.isAdmin || role === 'ADMIN') {
     return GII_RUNTIME_VIEWS.find(v => v.key === 'ADMIN') || null
   }
@@ -787,10 +942,10 @@ const RUOLO_PRIORITY: Record<number, number> = {
 // ── Mappa ruolo/area/settore → dataSourceId consentito ─────────────────────
 // Codici domini (numerici):
 //   AREA: AMM=1, AGR=2, TEC=3
-//   SETTORE: CR=1,GI=2,D1=3,D2=4,D3=5,D4=6,D5=7,D6=8,CS=9
+//   SETTORE: CR=1,GI=2,D1=3,D2=4,D3=5,D4=6,D5=7,D6=8,DS=9
 //   RUOLO: TR=1,TI=2,RZ=3,RI=4,DT=5,DA=6
 function getAllowedDataSourceIds(
-  user: { ruolo: number|null, area: number|null, settore: number|null, isAdmin: boolean } | null,
+  user: { ruolo: number|null, ruoloCod?: string, ruoloLabel?: string, area: number|null, areaCod?: string, settore: number|null, settoreCod?: string, isAdmin: boolean } | null,
   useDsList: any[]
 ): string[] | null {
   if (!user) return null
@@ -806,10 +961,10 @@ function getAllowedDataSourceIds(
   const norm = (s: string) => String(s || '').toUpperCase()
 
   const AREA_CODE: Record<number, string> = { 1:'AMM', 2:'AGR', 3:'TEC' }
-  const SETTORE_CODE: Record<number, string> = { 1:'CR', 2:'GI', 3:'D1', 4:'D2', 5:'D3', 6:'D4', 7:'D5', 8:'D6', 9:'CS' }
+  const SETTORE_CODE: Record<number, string> = { 1:'CR', 2:'GI', 3:'D1', 4:'D2', 5:'D3', 6:'D4', 7:'D5', 8:'D6', 9:'DS' }
 
-  const areaCode = (user.area != null ? AREA_CODE[user.area] : '') || ''
-  const settoreCode = (user.settore != null ? SETTORE_CODE[user.settore] : '') || ''
+  const areaCode = resolveAreaCode(user.area, (user as any).areaCod) || ((user.area != null ? AREA_CODE[user.area] : '') || '')
+  const settoreCode = resolveSettoreCode(user.settore, (user as any).settoreCod) || ((user.settore != null ? SETTORE_CODE[user.settore] : '') || '')
   const ruolo = user.ruolo
 
   const roots = (arr: any[]) => Array.from(new Set(arr.map(u => String(u?.rootDataSourceId || u?.dataSourceId || '')).filter(Boolean)))
@@ -863,19 +1018,19 @@ function getAllowedDataSourceIds(
 // Sceglie UNA vista tra quelle collegate, basandosi sul nome servizio nella URL
 // (più stabile del label e degli id interni dataSource_XX).
 function pickBestUseDataSourceId(
-  user: { ruolo: number | null, ruoloLabel?: string, area: number | null, settore: number | null, gruppo?: string, isAdmin: boolean } | null,
+  user: { ruolo: number | null, ruoloCod?: string, ruoloLabel?: string, area: number | null, areaCod?: string, settore: number | null, settoreCod?: string, gruppo?: string, isAdmin: boolean } | null,
   useDsList: any[]
 ): string | null {
   if (!user || !Array.isArray(useDsList) || useDsList.length === 0) return null
 
   const up = (s: any) => String(s || '').toUpperCase()
   const AREA_CODE: Record<number, string> = { 1: 'AMM', 2: 'AGR', 3: 'TEC' }
-  const SETTORE_CODE: Record<number, string> = { 1: 'CR', 2: 'GI', 3: 'D1', 4: 'D2', 5: 'D3', 6: 'D4', 7: 'D5', 8: 'D6', 9: 'CS' }
+  const SETTORE_CODE: Record<number, string> = { 1: 'CR', 2: 'GI', 3: 'D1', 4: 'D2', 5: 'D3', 6: 'D4', 7: 'D5', 8: 'D6', 9: 'DS' }
 
-  const areaCode = (user.area != null ? AREA_CODE[user.area] : '') || ''
-  const settoreCode = (user.settore != null ? SETTORE_CODE[user.settore] : '') || ''
+  const areaCode = resolveAreaCode(user.area, (user as any).areaCod) || ((user.area != null ? AREA_CODE[user.area] : '') || '')
+  const settoreCode = resolveSettoreCode(user.settore, (user as any).settoreCod) || ((user.settore != null ? SETTORE_CODE[user.settore] : '') || '')
   const ruolo = user.ruolo
-  const ruoloLabel = up((user as any)?.ruoloLabel)
+  const ruoloLabel = up((user as any)?.ruoloCod || (user as any)?.ruoloLabel)
   const gruppo = up((user as any)?.gruppo)
 
   const getServiceName = (useDs: any): string => {
@@ -949,13 +1104,16 @@ function pickBestUseDataSourceId(
 
 interface GiiUserInfo {
   username: string
-  ruolo: number | null       // codice numerico (1-6)
-  ruoloLabel: string         // 'TR','TI','RZ','RI','DT','DA'
-  area: number | null
-  settore: number | null
+  ruolo: number | null       // codice numerico legacy (1-7)
+  ruoloCod: string           // codice testuale ufficiale: TR/TI/RZ/RI/DT/DA/ADMIN
+  ruoloLabel: string         // compatibilità: coincide col codice ruolo
+  area: number | null        // codice numerico legacy
+  areaCod: 'AMM' | 'AGR' | 'TEC' | ''
+  settore: number | null     // codice numerico legacy
+  settoreCod: string
   ufficio: number | null
   gruppo: string
-  isAdmin: boolean           // org_admin AGOL
+  isAdmin: boolean           // org_admin AGOL o admin workflow
 }
 
 // Legge il profilo utente caricato dall'Header (unica fonte).
@@ -970,10 +1128,12 @@ function readGiiUserFromHeader(): GiiUserInfo | null {
   const isWorkflowAdmin = (ruolo === 7) || (String(cached.ruoloLabel || '').toUpperCase() === 'ADMIN') || !!cached.isWorkflowAdmin
   const isAdmin = !!cached.isAdmin || inferredAdmin || inferredAppAdmin || isWorkflowAdmin
 
-  let ruoloLabel = String(
-    cached.ruoloLabel ||
-    (ruolo != null ? (RUOLO_LABEL[ruolo] ?? '') : (isAdmin ? 'ADMIN' : ''))
-  )
+  const area = cached.area != null ? Number(cached.area) : null
+  const settore = cached.settore != null ? Number(cached.settore) : null
+  const areaCod = resolveAreaCode(area, cached.areaCod ?? cached.area_cod)
+  const settoreCod = resolveSettoreCode(settore, cached.settoreCod ?? cached.settore_cod)
+  const ruoloCod = resolveRoleCode(ruolo, cached.ruoloCod ?? cached.ruolo_cod, cached.ruoloLabel, isAdmin)
+  let ruoloLabel = ruoloCod || String(cached.ruoloLabel || '')
 
   // Non forziamo più 'AMM': il ruolo workflow resta quello reale.
   // Se è un admin (org_admin o workflow admin) senza ruolo esplicito, mostriamo 'ADMIN'.
@@ -982,9 +1142,12 @@ function readGiiUserFromHeader(): GiiUserInfo | null {
   return {
     username: String(cached.username),
     ruolo,
+    ruoloCod: ruoloCod || ruoloLabel,
     ruoloLabel,
-    area: cached.area != null ? Number(cached.area) : null,
-    settore: cached.settore != null ? Number(cached.settore) : null,
+    area,
+    areaCod,
+    settore,
+    settoreCod,
     ufficio: cached.ufficio != null ? Number(cached.ufficio) : null,
     gruppo,
     isAdmin
@@ -1346,7 +1509,7 @@ React.useEffect(() => {
         const layer = await getLoadedFeatureLayer(UTENTI_TABLE_URL)
         const res = await layer.queryFeatures({
           where: '1=1',
-          outFields: ['username', 'full_name', 'ruolo', 'area', 'settore'],
+          outFields: ['username', 'full_name', 'ruolo', 'ruolo_cod', 'area', 'area_cod', 'settore', 'settore_cod'],
           returnGeometry: false
         })
         const map = new Map<string, UtentiEntry>()
@@ -1356,8 +1519,11 @@ React.useEffect(() => {
             map.set(String(a.username).trim().toLowerCase(), {
               full_name: String(a.full_name || ''),
               ruolo: a.ruolo ?? null,
+              ruoloCod: resolveRoleCode(a.ruolo ?? null, a.ruolo_cod),
               area: a.area ?? null,
-              settore: a.settore ?? null
+              areaCod: resolveAreaCode(a.area ?? null, a.area_cod),
+              settore: a.settore ?? null,
+              settoreCod: resolveSettoreCode(a.settore ?? null, a.settore_cod)
             })
           }
         }
@@ -1468,7 +1634,7 @@ React.useEffect(() => {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [logVer])
 
-  // Sort: array (multi sort con Shift+Click)
+  // Sort: array (ordinamento multiplo con clic sulle intestazioni)
   const defaultSort: SortItem[] = React.useMemo(() => {
     const f = txt(cfg.orderByField || 'objectid')
     const d = (txt(cfg.orderByDir || 'DESC').toUpperCase() === 'ASC' ? 'ASC' : 'DESC') as SortDir
@@ -1476,6 +1642,14 @@ React.useEffect(() => {
   }, [cfg.orderByField, cfg.orderByDir])
 
   const [sortState, setSortState] = React.useState<SortItem[]>(defaultSort)
+
+  // ── Filtri integrati nell'elenco ─────────────────────────────────────────────
+  const [searchFilter, setSearchFilter] = React.useState('')
+  const [areaFilter, setAreaFilter] = React.useState('tutte')
+  const [settoreFilter, setSettoreFilter] = React.useState('tutte')
+  const [fromDateFilter, setFromDateFilter] = React.useState('')
+  const [toDateFilter, setToDateFilter] = React.useState('')
+  const [statoFilter, setStatoFilter] = React.useState('tutte')
 
   // Se cambia il sort default da settings, riallineo SOLO se l'utente non ha un custom sort
   React.useEffect(() => {
@@ -1930,8 +2104,10 @@ React.useEffect(() => {
     const copy = [...recs]
     copy.sort((ra, rb) => {
       for (const s of sort) {
-        const a = getSortValue(ra, s.field)
-        const b = getSortValue(rb, s.field)
+        const da = ra.getData?.() || {}
+        const db = rb.getData?.() || {}
+        const a = pickComparableDisplayValue(da, s.field, giiUser?.areaCod || giiUser?.area, giiUser?.settoreCod || giiUser?.settore) ?? getSortValue(ra, s.field)
+        const b = pickComparableDisplayValue(db, s.field, giiUser?.areaCod || giiUser?.area, giiUser?.settoreCod || giiUser?.settore) ?? getSortValue(rb, s.field)
         const cmp = compareValues(a, b)
         if (cmp !== 0) return (s.dir === 'ASC' ? cmp : -cmp)
       }
@@ -1940,25 +2116,92 @@ React.useEffect(() => {
     return copy
   }
 
-  const toggleSort = (field: string, multi: boolean) => {
+  const passesIntegratedFilters = React.useCallback((r: DataRecord): boolean => {
+    const d = r.getData?.() || {}
+    const q = normalizeSearchText(searchFilter)
+    const areaCode = getAreaCodeFromRecord(d, giiUser?.areaCod || giiUser?.area)
+    const settoreCode = getSettoreCodeFromRecord(d, giiUser?.settoreCod || giiUser?.settore)
+    const dateMs = pickReportDateMs(d, fieldDataRil)
+    const fromMs = getDateOnlyMsFromInput(fromDateFilter)
+    const toMs = getDateOnlyMsFromInput(toDateFilter, true)
+    const statoLabel = computeSintetico(d).label
+
+    if (q) {
+      const searchText = `${pickPraticaSearchText(r, fieldPratica)} ${pickTextSearchExtra(d, giiUser?.areaCod || giiUser?.area, giiUser?.settoreCod || giiUser?.settore)}`
+      if (!searchText.includes(q)) return false
+    }
+    if (areaFilter !== 'tutte' && areaCode !== areaFilter) return false
+    if (settoreFilter !== 'tutte' && settoreCode !== settoreFilter) return false
+    if (fromMs !== null && (dateMs === null || dateMs < fromMs)) return false
+    if (toMs !== null && (dateMs === null || dateMs > toMs)) return false
+    if (statoFilter !== 'tutte' && statoLabel !== statoFilter) return false
+    return true
+  }, [searchFilter, areaFilter, settoreFilter, fromDateFilter, toDateFilter, statoFilter, giiUser?.areaCod, giiUser?.area, giiUser?.settoreCod, giiUser?.settore, fieldPratica, fieldDataRil])
+
+  const toggleSort = (field: string) => {
     setSortState(prev => {
       const p = [...prev]
       const idx = p.findIndex(x => x.field === field)
+
+      // Ordinamento multiplo sempre attivo, come nel CW utenti:
+      // 1° clic = crescente, 2° clic = decrescente, 3° clic = rimuove la colonna dal sort.
       if (idx >= 0) {
         const cur = p[idx]
-        const nextDir: SortDir = cur.dir === 'ASC' ? 'DESC' : 'ASC'
-        p[idx] = { field, dir: nextDir }
-        return multi ? p : [p[idx]]
+        if (cur.dir === 'ASC') {
+          p[idx] = { field, dir: 'DESC' }
+          return p
+        }
+        p.splice(idx, 1)
+        return p.length ? p : defaultSort
       }
-      const next: SortItem = { field, dir: 'ASC' }
-      return multi ? [...p, next] : [next]
+
+      return [...p, { field, dir: 'ASC' }]
     })
   }
 
   const isCustomSort = sortSig(sortState) !== sortSig(defaultSort)
 
-  // ── Record fusi e ordinati per il tab attivo ──
-  const mergedRecs = React.useMemo(() => {
+  const resetIntegratedFilters = React.useCallback(() => {
+    setSearchFilter('')
+    setAreaFilter('tutte')
+    setSettoreFilter('tutte')
+    setFromDateFilter('')
+    setToDateFilter('')
+    setStatoFilter('tutte')
+  }, [])
+
+  const hasIntegratedFilters = !!(
+    searchFilter.trim() ||
+    areaFilter !== 'tutte' ||
+    settoreFilter !== 'tutte' ||
+    fromDateFilter ||
+    toDateFilter ||
+    statoFilter !== 'tutte'
+  )
+
+  const clearAllSelections = React.useCallback(() => {
+    setLocalSelectedByDs({})
+    Object.keys(dsDataRef.current).forEach(id => {
+      const e = dsDataRef.current[id]
+      if (e?.ds) tryClearSelection(e.ds)
+    })
+    filteredUseDsJs.forEach((u: any) => {
+      const dsId = String(u?.dataSourceId || '')
+      try {
+        const mainDs = DataSourceManager.getInstance().getDataSource(dsId)
+        if (mainDs) tryClearSelection(mainDs)
+        const parentId = (mainDs as any)?.parentDataSource?.id || (mainDs as any)?.getMainDataSource?.()?.id
+        if (parentId) {
+          const parentDs = DataSourceManager.getInstance().getDataSource(parentId)
+          if (parentDs) tryClearSelection(parentDs)
+        }
+      } catch {}
+    })
+    notifySelectionCleared()
+  }, [filteredUseDsJs])
+
+  // ── Record fusi per il tab attivo, prima dei filtri integrati ─────────────
+  const roleTabRecs = React.useMemo(() => {
     if (!activeGroup) return [] as DataRecord[]
     const svcCache = new Map<string, string>()
     const uniq = new Map<string, DataRecord>()
@@ -1974,13 +2217,58 @@ React.useEffect(() => {
     }
     const allUniq: DataRecord[] = Array.from(uniq.values())
     const visibleForUser = allUniq.filter(r => isRecordVisibleForCurrentUser(r))
-    // Applica filtro tab ruolo
-    const filtered = filterByRoleTab(visibleForUser)
-    // Ordinamento: prima priorità ruolo (in attesa mia in cima), poi sort utente
-    const withPriority = sortByRolePriority(filtered)
+    return filterByRoleTab(visibleForUser)
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeGroup, dsDataVer, activeRoleTab, statoRuoloField, isRecordVisibleForCurrentUser, logVer])
+
+  const filteredRecs = React.useMemo(() => {
+    return roleTabRecs.filter(r => passesIntegratedFilters(r))
+  }, [roleTabRecs, passesIntegratedFilters])
+
+  const areeDisponibili = React.useMemo(() => {
+    const map = new Map<string, string>()
+    for (const r of roleTabRecs) {
+      const d = r.getData?.() || {}
+      const code = getAreaCodeFromRecord(d, giiUser?.areaCod || giiUser?.area)
+      if (code) map.set(code, AREA_LABELS[code] || code)
+    }
+    const order = ['AMM', 'AGR', 'TEC']
+    return Array.from(map.entries()).sort((a, b) => {
+      const ia = order.indexOf(a[0])
+      const ib = order.indexOf(b[0])
+      if (ia >= 0 && ib >= 0) return ia - ib
+      if (ia >= 0) return -1
+      if (ib >= 0) return 1
+      return a[1].localeCompare(b[1], 'it')
+    })
+  }, [roleTabRecs, giiUser?.areaCod, giiUser?.area])
+
+  const settoriDisponibili = React.useMemo(() => {
+    const map = new Map<string, string>()
+    for (const r of roleTabRecs) {
+      const d = r.getData?.() || {}
+      const code = getSettoreCodeFromRecord(d, giiUser?.settoreCod || giiUser?.settore)
+      if (code) map.set(code, SETTORE_LABELS[code] || code)
+    }
+    return Array.from(map.entries()).sort((a, b) => a[1].localeCompare(b[1], 'it', { numeric: true, sensitivity: 'base' }))
+  }, [roleTabRecs, giiUser?.settoreCod, giiUser?.settore])
+
+  const statiDisponibili = React.useMemo(() => {
+    const set = new Set<string>()
+    for (const r of roleTabRecs) {
+      const d = r.getData?.() || {}
+      const lbl = computeSintetico(d).label
+      if (lbl) set.add(lbl)
+    }
+    return Array.from(set).sort((a, b) => a.localeCompare(b, 'it', { numeric: true, sensitivity: 'base' }))
+  }, [roleTabRecs])
+
+  // ── Record fusi, filtrati e ordinati per il tab attivo ──────────────────────
+  const mergedRecs = React.useMemo(() => {
+    const withPriority = sortByRolePriority(filteredRecs)
     return sortRecords(withPriority, sortState)
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeGroup, dsDataVer, sortState, activeRoleTab, statoRuoloField, isRecordVisibleForCurrentUser, logVer])
+  }, [filteredRecs, sortState, sortByRolePriority, logVer])
 
   // Lookup: record → dsId (via WeakMap su identità oggetto, sopravvive al sort)
   const recDsLookup = React.useMemo(() => {
@@ -1996,6 +2284,16 @@ React.useEffect(() => {
     return map
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeGroup, dsDataVer])
+
+  React.useEffect(() => {
+    const selectedPairs = Object.entries(localSelectedByDs || {})
+    if (!selectedPairs.length) return
+    const stillVisible = selectedPairs.some(([dsId, rid]) =>
+      mergedRecs.some(r => (recDsLookup.get(r) || '') === dsId && String(r.getId?.() ?? '') === String(rid))
+    )
+    if (!stillVisible) clearAllSelections()
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mergedRecs, recDsLookup])
 
   const ultimoIngressoCodaMs = React.useMemo(() => {
     let best: number | null = null
@@ -2077,6 +2375,60 @@ React.useEffect(() => {
       color: #1d4ed8;
     }
 
+    .integratedFilters {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+      gap: 10px;
+      align-items: end;
+      padding: 10px 12px;
+      border-bottom: 1px solid rgba(0,0,0,0.08);
+      background: rgba(0,0,0,0.015);
+    }
+    .filterLabel {
+      display: block;
+      margin-bottom: 5px;
+      font-size: 10.5px;
+      font-weight: 800;
+      line-height: 1;
+      color: rgba(0,0,0,0.56);
+      text-transform: uppercase;
+      letter-spacing: 0.6px;
+    }
+    .filterInput, .filterSelect {
+      width: 100%;
+      height: 34px;
+      border: 1px solid rgba(0,0,0,0.14);
+      border-radius: 10px;
+      background: #fff;
+      color: #111827;
+      padding: 0 10px;
+      font-size: 12px;
+      outline: none;
+      box-sizing: border-box;
+    }
+    .filterInput:focus, .filterSelect:focus {
+      border-color: rgba(47,111,237,0.75);
+      box-shadow: 0 0 0 2px rgba(47,111,237,0.12);
+    }
+    .clearFiltersBtn {
+      width: 100%;
+      height: 34px;
+      border: 1px solid rgba(0,0,0,0.14);
+      border-radius: 10px;
+      background: ${hasIntegratedFilters ? '#fff' : 'rgba(0,0,0,0.03)'};
+      color: ${hasIntegratedFilters ? '#111827' : 'rgba(0,0,0,0.38)'};
+      font-size: 12px;
+      font-weight: 800;
+      cursor: ${hasIntegratedFilters ? 'pointer' : 'not-allowed'};
+    }
+    .filtersSummary {
+      padding: 4px 12px 8px;
+      border-bottom: 1px solid rgba(0,0,0,0.06);
+      font-size: 11px;
+      color: rgba(0,0,0,0.56);
+      background: rgba(0,0,0,0.015);
+    }
+
     .viewport { flex: 1; min-height: 0; overflow: auto; }
     .content { min-width: ${minWidth}px; padding: 0 12px 10px; }
 
@@ -2127,9 +2479,17 @@ React.useEffect(() => {
     .sortBadge {
       display: inline-flex;
       align-items: center;
-      gap: 4px;
+      gap: 3px;
       font-size: 12px;
-      opacity: 0.85;
+      opacity: 0.9;
+      flex: 0 0 auto;
+    }
+    .sortTri {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 10px;
+      line-height: 1;
     }
     .sortPri {
       display: inline-flex;
@@ -2233,19 +2593,19 @@ React.useEffect(() => {
     const badge = item
       ? (
         <span className='sortBadge' aria-hidden>
+          <span className='sortTri'>{dir === 'ASC' ? '▲' : '▼'}</span>
           <span className='sortPri'>{idx + 1}</span>
-          <span>{dir === 'ASC' ? '↑' : '↓'}</span>
         </span>
         )
-      : <span className='sortBadge' style={{ opacity: 0.35 }} aria-hidden>↕</span>
+      : null
 
     return (
       <div className={`headerCell ${p.first ? 'first' : ''}`}>
         <button
           type='button'
           className='hdrBtn'
-          onClick={(e) => toggleSort(p.field, (e as any).shiftKey === true)}
-          title='Click: ordina. Shift+Click: ordinamento multiplo.'
+          onClick={() => toggleSort(p.field)}
+          title='Click: ordina in modalità multipla. Terzo clic: rimuove ordinamento.'
         >
           <span>{p.label}</span>
           {badge}
@@ -2383,6 +2743,97 @@ React.useEffect(() => {
           )}
 
 
+          {/* Filtri integrati: sostituiscono il vecchio CW ricerca-e-filtri */}
+          {!userLoading && !notLogged && (
+            <>
+              <div className='integratedFilters'>
+                <div>
+                  <label className='filterLabel'>Cerca</label>
+                  <input
+                    className='filterInput'
+                    value={searchFilter}
+                    onChange={(e: any) => setSearchFilter(e?.target?.value || '')}
+                    placeholder='Cerca n. rapporto…'
+                  />
+                </div>
+                <div>
+                  <label className='filterLabel'>Area</label>
+                  <select
+                    className='filterSelect'
+                    value={areaFilter}
+                    onChange={(e: any) => setAreaFilter(e?.target?.value || 'tutte')}
+                  >
+                    <option value='tutte'>Tutte</option>
+                    {areeDisponibili.map(([code, label]) => (
+                      <option key={code} value={code}>{label}</option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className='filterLabel'>Settore/Ufficio</label>
+                  <select
+                    className='filterSelect'
+                    value={settoreFilter}
+                    onChange={(e: any) => setSettoreFilter(e?.target?.value || 'tutte')}
+                  >
+                    <option value='tutte'>Tutti</option>
+                    {settoriDisponibili.map(([code, label]) => (
+                      <option key={code} value={code}>{label}</option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className='filterLabel'>Dal</label>
+                  <input
+                    className='filterInput'
+                    type='date'
+                    value={fromDateFilter}
+                    onChange={(e: any) => setFromDateFilter(e?.target?.value || '')}
+                  />
+                </div>
+                <div>
+                  <label className='filterLabel'>Al</label>
+                  <input
+                    className='filterInput'
+                    type='date'
+                    value={toDateFilter}
+                    onChange={(e: any) => setToDateFilter(e?.target?.value || '')}
+                  />
+                </div>
+                <div>
+                  <label className='filterLabel'>Stato</label>
+                  <select
+                    className='filterSelect'
+                    value={statoFilter}
+                    onChange={(e: any) => setStatoFilter(e?.target?.value || 'tutte')}
+                  >
+                    <option value='tutte'>Tutti</option>
+                    {statiDisponibili.map(label => (
+                      <option key={label} value={label}>{label}</option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className='filterLabel'>&nbsp;</label>
+                  <button
+                    type='button'
+                    className='clearFiltersBtn'
+                    disabled={!hasIntegratedFilters}
+                    onClick={() => {
+                      if (!hasIntegratedFilters) return
+                      resetIntegratedFilters()
+                    }}
+                  >
+                    Pulisci filtri
+                  </button>
+                </div>
+              </div>
+              <div className='filtersSummary'>
+                Mostrate {mergedRecs.length} pratiche su {roleTabRecs.length} della scheda corrente.
+              </div>
+            </>
+          )}
+
           {/* ── Tab ruolo: Tutte / In attesa mia / In attesa di altri ── */}
           {!userLoading && statoRuoloField && (
             <div style={{ display: 'flex', gap: 8, padding: '8px 12px', borderBottom: '1px solid rgba(0,0,0,0.08)', alignItems: 'center', flexWrap: 'nowrap' }}>
@@ -2485,9 +2936,11 @@ React.useEffect(() => {
           {/* Indicatore admin: vede tutto senza filtri */}
           {!userLoading && giiUser?.isAdmin && (
             <div style={{ padding: '6px 12px', fontSize: 11, color: '#6b7280', borderBottom: '1px solid rgba(0,0,0,0.06)', background: '#fafafa' }}>
-              👤 AMM — visualizzazione completa senza filtri ruolo
+              👤 ADMIN — visualizzazione completa senza filtri ruolo
             </div>
           )}
+
+
 
           {/* Indicatore caricamento ruolo (visibile solo quando loggato ma ancora caricando) */}
           {userLoading && !notLogged && (
@@ -2724,9 +3177,9 @@ React.useEffect(() => {
                         const creatorLc = creator.toLowerCase()
                         const creatorEntry = utentiMapRef.current?.get(creatorLc)
                         if (creatorEntry) {
-                          const aLbl = ({ 1:'AMM', 2:'AGR', 3:'TEC' } as Record<number, string>)[creatorEntry.area ?? 0] || ''
-                          const sLbl = ({ 1:'CR', 2:'GI', 3:'D1', 4:'D2', 5:'D3', 6:'D4', 7:'D5', 8:'D6', 9:'CS' } as Record<number, string>)[creatorEntry.settore ?? 0] || ''
-                          const rLbl = ({ 1:'TR', 2:'TI', 3:'RZ', 4:'RI', 5:'DT', 6:'DA' } as Record<number, string>)[creatorEntry.ruolo ?? 0] || ''
+                          const aLbl = creatorEntry.areaCod || ({ 1:'AMM', 2:'AGR', 3:'TEC' } as Record<number, string>)[creatorEntry.area ?? 0] || ''
+                          const sLbl = creatorEntry.settoreCod || ({ 1:'CR', 2:'GI', 3:'D1', 4:'D2', 5:'D3', 6:'D4', 7:'D5', 8:'D6', 9:'DS' } as Record<number, string>)[creatorEntry.settore ?? 0] || ''
+                          const rLbl = creatorEntry.ruoloCod || ({ 1:'TR', 2:'TI', 3:'RZ', 4:'RI', 5:'DT', 6:'DA', 7:'ADMIN' } as Record<number, string>)[creatorEntry.ruolo ?? 0] || ''
                           mittenteVal = formatPersona(rLbl, aLbl, sLbl, creator, utentiMapRef.current)
                         } else {
                           mittenteVal = creator || '—'
@@ -2738,8 +3191,8 @@ React.useEffect(() => {
                         const opRaw = d.origine_pratica ?? d.ORIGINE_PRATICA
                         const opN = opRaw != null && opRaw !== '' ? Number(opRaw) : null
                         if (opN === 1 && creatorEntry && creatorEntry.area != null) {
-                          const aLbl = ({ 1:'AMM', 2:'AGR', 3:'TEC' } as Record<number, string>)[creatorEntry.area ?? 0] || ''
-                          const sLbl = ({ 1:'CR', 2:'GI', 3:'D1', 4:'D2', 5:'D3', 6:'D4', 7:'D5', 8:'D6', 9:'CS' } as Record<number, string>)[creatorEntry.settore ?? 0] || ''
+                          const aLbl = creatorEntry.areaCod || ({ 1:'AMM', 2:'AGR', 3:'TEC' } as Record<number, string>)[creatorEntry.area ?? 0] || ''
+                          const sLbl = creatorEntry.settoreCod || ({ 1:'CR', 2:'GI', 3:'D1', 4:'D2', 5:'D3', 6:'D4', 7:'D5', 8:'D6', 9:'DS' } as Record<number, string>)[creatorEntry.settore ?? 0] || ''
                           let rzUsername = ''
                           if (utentiMapRef.current) {
                             for (const [uname, ue] of utentiMapRef.current) {

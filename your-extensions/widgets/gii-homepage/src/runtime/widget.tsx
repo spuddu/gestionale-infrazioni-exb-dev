@@ -5,7 +5,12 @@ import type { IMConfig, CardConfig, GroupOffset } from '../config'
 import { defaultConfig } from '../config'
 
 const GII_PORTAL = 'https://cbsm-hub.maps.arcgis.com'
-const RUOLO_LABEL: Record<number, string> = { 1:'TR', 2:'TI', 3:'RZ', 4:'RI', 5:'DT', 6:'DA' }
+const RUOLO_LABEL: Record<number, string> = { 1:'TR', 2:'TI', 3:'RZ', 4:'RI', 5:'DT', 6:'DA', 7:'ADMIN' }
+const ROLE_CODES = new Set(['TR', 'TI', 'RZ', 'RI', 'DT', 'DA', 'ADMIN'])
+const AREA_CODES = new Set(['AMM', 'AGR', 'TEC'])
+const SETTORE_CODES = new Set(['CR', 'GI', 'D1', 'D2', 'D3', 'D4', 'D5', 'D6', 'DS'])
+const AREA_FROM_NUM: Record<number, string> = { 1:'AMM', 2:'AGR', 3:'TEC' }
+const SETTORE_FROM_NUM: Record<number, string> = { 1:'CR', 2:'GI', 3:'D1', 4:'D2', 5:'D3', 6:'D4', 7:'D5', 8:'D6', 9:'DS' }
 
 // Icone di default (per le card note). Per le altre: “+”
 const CARD_ICONS: Record<string, string> = {
@@ -45,19 +50,67 @@ function isSignedIn(): boolean {
   } catch { return false }
 }
 
-interface UserInfo { username: string; fullName: string; ruoloLabel: string; isAdmin: boolean }
+interface UserInfo {
+  username: string
+  fullName: string
+  ruoloLabel: string
+  ruoloCod: string
+  areaCod: string
+  settoreCod: string
+  isAdmin: boolean
+}
+
+function cleanCode(value: any): string {
+  return String(value ?? '').trim().toUpperCase()
+}
+
+function normalizeRoleCode(value: any, numericFallback?: any): string {
+  const direct = cleanCode(value)
+  if (ROLE_CODES.has(direct)) return direct
+
+  const n = numericFallback != null && numericFallback !== '' ? Number(numericFallback) : Number(value)
+  if (Number.isFinite(n) && RUOLO_LABEL[n]) return RUOLO_LABEL[n]
+
+  return ''
+}
+
+function normalizeAreaCode(value: any, numericFallback?: any): string {
+  const direct = cleanCode(value)
+  if (AREA_CODES.has(direct)) return direct
+
+  const n = numericFallback != null && numericFallback !== '' ? Number(numericFallback) : Number(value)
+  if (Number.isFinite(n) && AREA_FROM_NUM[n]) return AREA_FROM_NUM[n]
+
+  return ''
+}
+
+function normalizeSettoreCode(value: any, numericFallback?: any): string {
+  const direct = cleanCode(value)
+  const fixed = direct === 'CS' ? 'DS' : direct
+  if (SETTORE_CODES.has(fixed)) return fixed
+
+  const n = numericFallback != null && numericFallback !== '' ? Number(numericFallback) : Number(value)
+  if (Number.isFinite(n) && SETTORE_FROM_NUM[n]) return SETTORE_FROM_NUM[n]
+
+  return ''
+}
 
 async function loadUser(): Promise<UserInfo | null> {
   const cached: any = (window as any).__giiUserRole
   if (!cached?.username) return null
 
-  const ruoloNum = cached.ruolo != null ? Number(cached.ruolo) : null
-  const ruoloLabel = String(cached.ruoloLabel || (ruoloNum != null ? (RUOLO_LABEL[ruoloNum] ?? '') : (cached.isAdmin ? 'ADMIN' : '')))
+  const ruoloCod = normalizeRoleCode(cached.ruoloCod ?? cached.ruolo_cod ?? cached.ruoloLabel, cached.ruolo) || (cached.isAdmin ? 'ADMIN' : '')
+  const areaCod = normalizeAreaCode(cached.areaCod ?? cached.area_cod ?? cached.areaLabel, cached.area)
+  const settoreCod = normalizeSettoreCode(cached.settoreCod ?? cached.settore_cod ?? cached.settoreLabel, cached.settore)
+
   return {
     username: String(cached.username),
     fullName: String(cached.fullName || cached.full_name || cached.username),
-    ruoloLabel,
-    isAdmin: !!cached.isAdmin
+    ruoloLabel: ruoloCod,
+    ruoloCod,
+    areaCod,
+    settoreCod,
+    isAdmin: ruoloCod === 'ADMIN' || !!cached.isAdmin
   }
 }
 
@@ -337,7 +390,7 @@ export default function Widget(props: Props) {
     if (c.roles.includes('*')) return true
     if (!user) return false
     if (user.isAdmin) return true
-    return c.roles.includes(user.ruoloLabel)
+    return c.roles.includes(user.ruoloCod)
   }
 
   const visibleCards = effCards.slice().sort((a,b) => a.order - b.order).filter(isVisible)

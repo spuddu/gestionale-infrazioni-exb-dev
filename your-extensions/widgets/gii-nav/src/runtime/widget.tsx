@@ -6,12 +6,49 @@ import { defaultConfig } from '../config'
 
 
 const GII_PORTAL     = 'https://cbsm-hub.maps.arcgis.com'
-const RUOLO_LABEL: Record<number, string> = { 1:'TR', 2:'TI', 3:'RZ', 4:'RI', 5:'DT', 6:'DA' }
+const RUOLO_LABEL: Record<number, string> = { 1:'TR', 2:'TI', 3:'RZ', 4:'RI', 5:'DT', 6:'DA', 7:'ADMIN' }
 const RUOLO_FULL:  Record<string, string> = {
   TR:'Tecnico Rilevatore', TI:'Tecnico Istruttore', RZ:'Responsabile di Zona',
-  RI:'Responsabile Istruttore', DT:'Direttore Tecnico', DA:'Direttore Amministrativo', ADMIN:'Amministratore'
+  RI:'Responsabile Istruttoria', DT:'Direttore Tecnico', DA:'Direttore Amministrativo', ADMIN:'Amministratore'
 }
 const AREA_LABEL: Record<number, string> = { 1:'AMM', 2:'AGR', 3:'TEC' }
+const RUOLI_VALIDI = new Set(['TR', 'TI', 'RZ', 'RI', 'DT', 'DA', 'ADMIN'])
+const AREE_VALIDE = new Set(['AMM', 'AGR', 'TEC'])
+
+function normCode(value: any): string {
+  return String(value ?? '').trim().toUpperCase()
+}
+
+function normalizeRoleCode(value: any, numericFallback: any, isAdmin?: boolean): string {
+  const direct = normCode(value)
+  if (RUOLI_VALIDI.has(direct)) return direct
+
+  const legacy = numericFallback != null && numericFallback !== '' ? Number(numericFallback) : NaN
+  if (Number.isFinite(legacy) && RUOLO_LABEL[legacy]) return RUOLO_LABEL[legacy]
+
+  if (isAdmin) return 'ADMIN'
+  return ''
+}
+
+function normalizeAreaCode(value: any, numericFallback: any): string {
+  const direct = normCode(value)
+  if (AREE_VALIDE.has(direct)) return direct
+
+  const legacy = numericFallback != null && numericFallback !== '' ? Number(numericFallback) : NaN
+  if (Number.isFinite(legacy) && AREA_LABEL[legacy]) return AREA_LABEL[legacy]
+
+  return ''
+}
+
+function normalizeSectorCode(value: any, numericFallback: any): string {
+  const directRaw = normCode(value)
+  const direct = directRaw === 'CS' ? 'DS' : directRaw
+  if (direct) return direct
+
+  const legacy = numericFallback != null && numericFallback !== '' ? Number(numericFallback) : NaN
+  const legacyMap: Record<number, string> = { 1:'CR', 2:'GI', 3:'D1', 4:'D2', 5:'D3', 6:'D4', 7:'D5', 8:'D6', 9:'DS' }
+  return Number.isFinite(legacy) ? (legacyMap[legacy] || '') : ''
+}
 
 function isSignedIn(): boolean {
   try {
@@ -22,20 +59,24 @@ function isSignedIn(): boolean {
   } catch { return false }
 }
 
-interface UserInfo { username: string; fullName: string; ruoloLabel: string; ruoloFull: string; area: string; isAdmin: boolean }
+interface UserInfo { username: string; fullName: string; ruoloLabel: string; ruoloFull: string; area: string; settore: string; isAdmin: boolean }
 
 async function loadUser(): Promise<UserInfo | null> {
   const cached: any = (window as any).__giiUserRole
   if (cached?.username) {
-    const ruoloNum = cached.ruolo != null ? Number(cached.ruolo) : null
-    const rl = String(cached.ruoloLabel || (ruoloNum != null ? (RUOLO_LABEL[ruoloNum] ?? '') : (cached.isAdmin ? 'ADMIN' : '')))
+    const ruoloLabel = normalizeRoleCode(cached.ruoloCod ?? cached.ruolo_cod ?? cached.ruoloLabel, cached.ruolo, cached.isAdmin)
+    const area = normalizeAreaCode(cached.areaCod ?? cached.area_cod ?? cached.areaLabel, cached.area)
+    const settore = normalizeSectorCode(cached.settoreCod ?? cached.settore_cod ?? cached.settoreLabel, cached.settore)
+    const isAdmin = cached.isAdmin === true || ruoloLabel === 'ADMIN'
+
     return {
       username: String(cached.username),
       fullName: String(cached.fullName || cached.full_name || cached.username),
-      ruoloLabel: rl,
-      ruoloFull: RUOLO_FULL[rl] || rl,
-      area: AREA_LABEL[cached.area] || '',
-      isAdmin: !!cached.isAdmin
+      ruoloLabel,
+      ruoloFull: RUOLO_FULL[ruoloLabel] || ruoloLabel,
+      area,
+      settore,
+      isAdmin
     }
   }
   return null

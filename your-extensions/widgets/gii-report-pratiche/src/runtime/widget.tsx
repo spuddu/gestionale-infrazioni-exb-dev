@@ -21,9 +21,12 @@ type GiiUserInfo = {
   nome?: string
   displayName?: string
   ruolo: number | null
+  ruoloCod: string
   ruoloLabel: string
   area: number | null
+  areaCod: 'AMM' | 'AGR' | 'TEC' | ''
   settore: number | null
+  settoreCod: string
   gruppo?: string
   isAdmin: boolean
   isWorkflowAdmin?: boolean
@@ -31,8 +34,11 @@ type GiiUserInfo = {
 
 type ReportRecord = Record<string, any>
 type SituationFilter = 'tutte' | 'da_gestire' | 'attesa_altri' | 'ferme' | 'sanzionatoria'
-type SortKey = 'lastUpdate' | 'id' | 'violazione' | 'reportDate' | 'rilevatore' | 'istruttore' | 'trasgressore' | 'cfPiva' | 'area' | 'settore' | 'fase' | 'stato' | 'giorniFermo'
+type SortKey = 'lastUpdate' | 'id' | 'reportDate' | 'rilevatore' | 'istruttore' | 'area' | 'settore' | 'faseProcedimentale' | 'ruoloCorrente' | 'giorniFermo'
 type SortDir = 'asc' | 'desc'
+type SortRule = { key: SortKey; dir: SortDir }
+
+const DEFAULT_SORT_RULES: SortRule[] = [{ key: 'lastUpdate', dir: 'desc' }]
 
 const RUOLO_LABEL: Record<number, string> = { 1: 'TR', 2: 'TI', 3: 'RZ', 4: 'RI', 5: 'DT', 6: 'DA', 7: 'ADMIN' }
 const AREA_FROM_CODE: Record<number, string> = { 1: 'AMM', 2: 'AGR', 3: 'TEC' }
@@ -60,13 +66,19 @@ function pickField (d: any, name: string): any {
   return undefined
 }
 
+function toNumberOrNull (value: any): number | null {
+  if (value === null || value === undefined || value === '') return null
+  const n = Number(value)
+  return Number.isFinite(n) ? n : null
+}
+
 const GII_RUNTIME_VIEWS: RuntimeDsView[] = [
   {
     key: 'ADMIN',
-    viewName: 'GII_VIEW_EB_ADMIN',
-    itemId: 'c05409cf4a86471194d6406e9b4d1c65',
-    serviceUrl: 'https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_VIEW_EB_BASE/FeatureServer',
-    layerUrl: 'https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_VIEW_EB_BASE/FeatureServer/0',
+    viewName: 'GII_VIEW_EB_AMM_ALL',
+    itemId: '6ffe45dac0e04905ba677e9fcd703238',
+    serviceUrl: 'https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_VIEW_EB_AMM_ALL/FeatureServer',
+    layerUrl: 'https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_VIEW_EB_AMM_ALL/FeatureServer/0',
     roles: ['ADMIN'],
     areaCode: '',
     settoreCode: ''
@@ -181,34 +193,50 @@ function loadEsriModule<T = any> (path: string): Promise<T> {
   })
 }
 
-function normalizeAreaCode (area: number | null | undefined): 'AMM' | 'AGR' | 'TEC' | '' {
-  if (area === 1) return 'AMM'
-  if (area === 2) return 'AGR'
-  if (area === 3) return 'TEC'
+function normalizeRoleCode (ruolo: any): string {
+  const raw = String(ruolo ?? '').trim().toUpperCase()
+  if (!raw) return ''
+  const n = Number(raw)
+  if (Number.isFinite(n) && RUOLO_LABEL[n]) return RUOLO_LABEL[n]
+  return raw
+}
+
+function normalizeAreaCode (area: any): 'AMM' | 'AGR' | 'TEC' | '' {
+  const raw = String(area ?? '').trim().toUpperCase()
+  if (!raw) return ''
+  if (raw === '1') return 'AMM'
+  if (raw === '2') return 'AGR'
+  if (raw === '3') return 'TEC'
+  if (raw === 'AMM' || raw === 'AGR' || raw === 'TEC') return raw
   return ''
 }
 
-function normalizeSettoreCode (settore: number | null | undefined): string {
-  if (settore == null) return ''
-  return SETTORE_FROM_CODE[settore] || String(settore || '')
+function normalizeSettoreCode (settore: any): string {
+  const raw = String(settore ?? '').trim().toUpperCase()
+  if (!raw) return ''
+  if (raw === 'CS') return 'DS'
+  const n = Number(raw)
+  if (Number.isFinite(n) && SETTORE_FROM_CODE[n]) return SETTORE_FROM_CODE[n]
+  return raw
 }
 
-function getEffectiveRole (ruoloLabel: string, area: number | null | undefined): string {
-  const r = String(ruoloLabel || '').trim().toUpperCase()
-  if (r === 'RI' && area === 1) return 'RI_AMM'
-  if (r === 'TI' && area === 1) return 'TI_AMM'
+function getEffectiveRole (ruoloLabel: string, area: any, areaCod?: any): string {
+  const r = normalizeRoleCode(ruoloLabel)
+  const a = normalizeAreaCode(areaCod || area)
+  if (r === 'RI' && a === 'AMM') return 'RI_AMM'
+  if (r === 'TI' && a === 'AMM') return 'TI_AMM'
   return r
 }
 
 function pickRuntimeViewForUser (user: GiiUserInfo | null): RuntimeDsView | null {
   if (!user) return null
-  const role = String(user.ruoloLabel || '').trim().toUpperCase()
-  const areaCode = normalizeAreaCode(user.area)
-  const settoreCode = normalizeSettoreCode(user.settore)
+  const role = normalizeRoleCode(user.ruoloCod || user.ruoloLabel)
+  const areaCode = normalizeAreaCode(user.areaCod || user.area)
+  const settoreCode = normalizeSettoreCode(user.settoreCod || user.settore)
   if (user.isAdmin || user.isWorkflowAdmin || role === 'ADMIN') {
     return GII_RUNTIME_VIEWS.find(v => v.key === 'ADMIN') || null
   }
-  const effective = getEffectiveRole(role, user.area)
+  const effective = getEffectiveRole(role, user.area, user.areaCod)
   const strict = GII_RUNTIME_VIEWS.find(v =>
     v.roles.includes(effective) &&
     v.areaCode === areaCode &&
@@ -221,9 +249,12 @@ function pickRuntimeViewForUser (user: GiiUserInfo | null): RuntimeDsView | null
 function readGiiUser (): GiiUserInfo | null {
   const cached: any = (window as any).__giiUserRole
   if (!cached?.username) return null
-  const ruolo = cached.ruolo != null ? Number(cached.ruolo) : null
-  const isAdmin = !!cached.isAdmin || !!cached.isWorkflowAdmin || ruolo === 7 || String(cached.ruoloLabel || '').toUpperCase() === 'ADMIN'
-  const ruoloLabel = String(cached.ruoloLabel || (ruolo != null ? (RUOLO_LABEL[ruolo] || '') : (isAdmin ? 'ADMIN' : ''))).toUpperCase()
+  const ruolo = toNumberOrNull(cached.ruolo)
+  const ruoloCod = normalizeRoleCode(cached.ruoloCod ?? cached.ruolo_cod ?? cached.ruoloLabel ?? cached.ruolo)
+  const areaCod = normalizeAreaCode(cached.areaCod ?? cached.area_cod ?? cached.area)
+  const settoreCod = normalizeSettoreCode(cached.settoreCod ?? cached.settore_cod ?? cached.settore)
+  const isAdmin = !!cached.isAdmin || !!cached.isWorkflowAdmin || ruoloCod === 'ADMIN' || ruolo === 7
+  const ruoloLabel = ruoloCod || (ruolo != null ? (RUOLO_LABEL[ruolo] || '') : (isAdmin ? 'ADMIN' : ''))
   return {
     username: String(cached.username || '').trim(),
     fullName: String(cached.fullName || cached.full_name || cached.nome || cached.displayName || cached.username || '').trim(),
@@ -231,9 +262,12 @@ function readGiiUser (): GiiUserInfo | null {
     nome: String(cached.nome || '').trim(),
     displayName: String(cached.displayName || '').trim(),
     ruolo,
+    ruoloCod: ruoloLabel,
     ruoloLabel,
-    area: cached.area != null ? Number(cached.area) : null,
-    settore: cached.settore != null ? Number(cached.settore) : null,
+    area: toNumberOrNull(cached.area),
+    areaCod,
+    settore: toNumberOrNull(cached.settore),
+    settoreCod,
     gruppo: String(cached.gruppo || ''),
     isAdmin,
     isWorkflowAdmin: !!cached.isWorkflowAdmin
@@ -331,14 +365,14 @@ function isRecordVisibleForCurrentUser (d: any, user: GiiUserInfo | null): boole
   if (!user) return false
   if (user.isAdmin || user.isWorkflowAdmin) return true
 
-  const role = getEffectiveRole(user.ruoloLabel || '', user.area)
+  const role = getEffectiveRole(user.ruoloLabel || '', user.area, user.areaCod)
   if (!role) return true
 
   const archVal = d['GII_arch'] ?? d['gii_arch'] ?? d['GII_ARCH']
   if (archVal !== null && archVal !== undefined && archVal !== '' && Number(archVal) === 1) return false
 
-  const areaNum = user.area ?? null
-  const isAmmArea = areaNum === 1
+  const areaCode = normalizeAreaCode(user.areaCod || user.area)
+  const isAmmArea = areaCode === 'AMM'
   if (role === 'DA' || role === 'RI_AMM' || role === 'TI_AMM' || (isAmmArea && (role === 'RI' || role === 'TI'))) {
     if (!isInFaseSanzionatoria(d)) return false
     if (role === 'TI_AMM') {
@@ -380,7 +414,7 @@ function isRecordVisibleForCurrentUser (d: any, user: GiiUserInfo | null): boole
 
 function isAttesaMia (d: any, user: GiiUserInfo | null): boolean {
   if (!user || user.isAdmin || user.isWorkflowAdmin) return false
-  const role = getEffectiveRole(user.ruoloLabel || '', user.area)
+  const role = getEffectiveRole(user.ruoloLabel || '', user.area, user.areaCod)
   const statoField = getStatoFieldForRuolo(role)
   const val = d[statoField]
   const n = val != null && val !== '' ? Number(val) : null
@@ -403,7 +437,7 @@ function isAttesaMia (d: any, user: GiiUserInfo | null): boolean {
 
 function isAttesaAltri (d: any, user: GiiUserInfo | null): boolean {
   if (!user || user.isAdmin || user.isWorkflowAdmin) return false
-  const role = getEffectiveRole(user.ruoloLabel || '', user.area)
+  const role = getEffectiveRole(user.ruoloLabel || '', user.area, user.areaCod)
   const statoField = getStatoFieldForRuolo(role)
   const val = d[statoField]
   const n = val != null && val !== '' ? Number(val) : null
@@ -568,16 +602,64 @@ function getActiveRole (d: any): string {
   return computeSintetico(d).ruolo
 }
 
+function roleNumValue (d: any, role: string, field: 'stato' | 'esito' | 'presa_in_carico'): number | null {
+  const v = pickField(d, `${field}_${role}`)
+  if (v === null || v === undefined || v === '') return null
+  const n = Number(v)
+  return Number.isFinite(n) ? n : null
+}
+
+function isRoleApproved (d: any, role: string): boolean {
+  return roleNumValue(d, role, 'esito') === 2 || roleNumValue(d, role, 'stato') === 4
+}
+
+function getRoleApprovalMs (d: any, role: string): number | null {
+  return parseToMs(pickField(d, `dt_esito_${role}`)) || parseToMs(pickField(d, `dt_stato_${role}`)) || getRoleLastTouchMs(d, role)
+}
+
+function isSanzioneTrasmessa (d: any): boolean {
+  if (!isRoleApproved(d, 'DA')) return false
+  const daApprovalMs = getRoleApprovalMs(d, 'DA')
+  if (daApprovalMs === null) return false
+  const tiAmmEsito = roleNumValue(d, 'TI_AMM', 'esito')
+  const tiAmmStato = roleNumValue(d, 'TI_AMM', 'stato')
+  if (tiAmmEsito !== 2 && tiAmmStato !== 4) return false
+  const tiAmmLastMs = getRoleLastTouchMs(d, 'TI_AMM')
+  return tiAmmLastMs !== null && tiAmmLastMs > daApprovalMs
+}
+
+function getRuoloPressoCuiSiTrova (d: any): string {
+  if (isRoleApproved(d, 'DA')) return 'TI_AMM'
+  return getActiveRole(d)
+}
+
+function faseProcedimentaleLabel (d: any): string {
+  if (isSanzioneTrasmessa(d)) return 'Sanzione notificata'
+  if (isRoleApproved(d, 'DA')) return 'Fase sanzionatoria'
+  if (isRoleApproved(d, 'DT')) return 'Istruttoria amministrativa'
+  const ruolo = getRuoloPressoCuiSiTrova(d)
+  if (ruolo === 'DT' || hasRuoloData(d, 'DT')) return 'Approvazione tecnica'
+  return 'Istruttoria tecnica'
+}
+
+function ruoloPressoLabel (d: any): string {
+  const r = String(getRuoloPressoCuiSiTrova(d) || '').toUpperCase()
+  if (r === 'TR') return 'Tecnico rilevatore'
+  if (r === 'TI') return 'Tecnico istruttore'
+  if (r === 'RZ') return 'Responsabile di zona'
+  if (r === 'RI') return 'Responsabile istruttoria'
+  if (r === 'DT') return 'Direttore tecnico'
+  if (r === 'RI_AMM') return 'Responsabile istruttoria amministrativa'
+  if (r === 'TI_AMM') return 'Tecnico istruttore amministrativo'
+  if (r === 'DA') return 'Direttore amministrativo'
+  return 'Non determinato'
+}
+
 function faseLabel (role: string): string {
   const r = String(role || '').toUpperCase()
-  if (r === 'TR') return 'Rilevazione'
-  if (r === 'TI') return 'Istruttoria tecnica'
-  if (r === 'RZ') return 'Responsabile di zona'
-  if (r === 'RI') return 'Istruttoria d’area'
-  if (r === 'DT') return 'Direzione tecnica'
-  if (r === 'RI_AMM') return 'Istruttoria amministrativa'
-  if (r === 'TI_AMM') return 'Supporto amministrativo'
-  if (r === 'DA') return 'Direzione amministrativa'
+  if (r === 'TR' || r === 'TI' || r === 'RZ' || r === 'RI') return 'Istruttoria tecnica'
+  if (r === 'DT') return 'Approvazione tecnica'
+  if (r === 'RI_AMM' || r === 'TI_AMM' || r === 'DA') return 'Istruttoria amministrativa'
   return 'Non determinata'
 }
 
@@ -751,29 +833,23 @@ function getDataRapportoMs (d: any): number | null {
     getCreatedMs(d)
 }
 
-function getAreaDisplay (d: any, fallbackArea?: number | null): string {
+function getAreaCodeFromRecord (d: any, fallbackArea?: any): 'AMM' | 'AGR' | 'TEC' | '' {
   const raw = getFirst(d, ['area_cod', 'Area_cod', 'AREA_COD', 'area', 'Area'], '')
-  let code = String(raw || '').trim().toUpperCase()
-  if (!code && fallbackArea != null) code = normalizeAreaCode(fallbackArea)
-  if (code === '1') code = 'AMM'
-  if (code === '2') code = 'AGR'
-  if (code === '3') code = 'TEC'
+  return normalizeAreaCode(raw || fallbackArea)
+}
+
+function getAreaDisplay (d: any, fallbackArea?: any): string {
+  const code = getAreaCodeFromRecord(d, fallbackArea)
   return AREA_LABELS[code] || code || '—'
 }
 
-function getSettoreCodeFromRecord (d: any, fallbackSettore?: number | null): string {
+function getSettoreCodeFromRecord (d: any, fallbackSettore?: any): string {
   const raw = getFirst(d, ['settore_cod', 'Settore_cod', 'SETTORE_COD', 'settore', 'Settore', 'id_settore'], '')
-  if (raw) {
-    const n = Number(raw)
-    if (Number.isFinite(n) && SETTORE_FROM_CODE[n]) return SETTORE_FROM_CODE[n]
-    return String(raw).trim().toUpperCase()
-  }
-  if (fallbackSettore != null) return normalizeSettoreCode(fallbackSettore)
-  return ''
+  return normalizeSettoreCode(raw || fallbackSettore)
 }
 
 function getSettoreDisplay (d: any, user?: GiiUserInfo | null): string {
-  const code = getSettoreCodeFromRecord(d, user?.settore)
+  const code = getSettoreCodeFromRecord(d, user?.settoreCod || user?.settore)
   return SETTORE_LABELS[code] || code || '—'
 }
 
@@ -797,18 +873,14 @@ function getRecordSearchText (d: any, user: GiiUserInfo | null): string {
   })
   parts.push(
     getNumeroRapporto(d),
-    getViolazione(d),
     getObjectId(d),
-    getComune(d),
     getTecnicoRilevatore(d),
     getIstruttore(d),
-    getTrasgressore(d),
-    getCfPiva(d),
     formatDate(getDataRapportoMs(d)),
-    getAreaDisplay(d, user?.area),
+    getAreaDisplay(d, user?.areaCod),
     getSettoreDisplay(d, user),
-    faseLabel(getActiveRole(d)),
-    getStatusForRecord(d, user)
+    faseProcedimentaleLabel(d),
+    ruoloPressoLabel(d)
   )
   return normalizeText(parts.join(' '))
 }
@@ -926,14 +998,16 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
   const [lastLoad, setLastLoad] = React.useState<number | null>(null)
   const [nonce, setNonce] = React.useState(0)
   const [search, setSearch] = React.useState('')
+  const [areaFilter, setAreaFilter] = React.useState('tutte')
   const [settoreFilter, setSettoreFilter] = React.useState('tutte')
   const [fromDate, setFromDate] = React.useState('')
   const [toDate, setToDate] = React.useState('')
-  const [statoFilter, setStatoFilter] = React.useState('tutte')
   const [situationFilter, setSituationFilter] = React.useState<SituationFilter>('tutte')
   const [faseFilter, setFaseFilter] = React.useState('tutte')
-  const [sortKey, setSortKey] = React.useState<SortKey>('lastUpdate')
-  const [sortDir, setSortDir] = React.useState<SortDir>('desc')
+  const [ruoloFilter, setRuoloFilter] = React.useState('tutte')
+  const [sortRules, setSortRules] = React.useState<SortRule[]>(DEFAULT_SORT_RULES)
+  const [selectedRowId, setSelectedRowId] = React.useState('')
+  const [hoveredRowId, setHoveredRowId] = React.useState('')
   const [page, setPage] = React.useState(1)
 
   React.useEffect(() => {
@@ -949,8 +1023,8 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
     }
   }, [])
 
-  const view = React.useMemo(() => pickRuntimeViewForUser(user), [user?.username, user?.ruoloLabel, user?.area, user?.settore, user?.isAdmin, user?.isWorkflowAdmin])
-  const effectiveRole = getEffectiveRole(user?.ruoloLabel || '', user?.area)
+  const view = React.useMemo(() => pickRuntimeViewForUser(user), [user?.username, user?.ruoloLabel, user?.areaCod, user?.settoreCod, user?.isAdmin, user?.isWorkflowAdmin])
+  const effectiveRole = getEffectiveRole(user?.ruoloLabel || '', user?.area, user?.areaCod)
 
   React.useEffect(() => {
     let cancelled = false
@@ -982,7 +1056,7 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
     }
     run()
     return () => { cancelled = true }
-  }, [view?.layerUrl, user?.username, user?.ruoloLabel, user?.area, user?.settore, user?.isAdmin, cfg.whereClause, cfg.pageSize, nonce])
+  }, [view?.layerUrl, user?.username, user?.ruoloLabel, user?.areaCod, user?.settoreCod, user?.isAdmin, cfg.whereClause, cfg.pageSize, nonce])
 
   const staleMs = Math.max(1, Number(cfg.staleDays || 15)) * 24 * 60 * 60 * 1000
   const now = Date.now()
@@ -994,75 +1068,118 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
 
     const out = records.filter(r => {
       const last = getLastTouchMs(r)
-      const phase = getActiveRole(r)
-      const status = getStatusForRecord(r, user)
+      const phase = faseProcedimentaleLabel(r)
+      const ruoloCorrente = getRuoloPressoCuiSiTrova(r)
       const isStale = last !== null && (now - last) > staleMs
 
       if (q && !getRecordSearchText(r, user).includes(q)) return false
-      if (settoreFilter !== 'tutte' && getSettoreCodeFromRecord(r, user?.settore) !== settoreFilter) return false
+      if (areaFilter !== 'tutte' && getAreaCodeFromRecord(r, user?.areaCod) !== areaFilter) return false
+      if (settoreFilter !== 'tutte' && getSettoreCodeFromRecord(r, user?.settoreCod) !== settoreFilter) return false
       if (fromMs !== null && (last === null || last < fromMs)) return false
       if (toMs !== null && (last === null || last > toMs)) return false
       if (faseFilter !== 'tutte' && phase !== faseFilter) return false
-      if (statoFilter !== 'tutte' && status !== statoFilter) return false
+      if (ruoloFilter !== 'tutte' && ruoloCorrente !== ruoloFilter) return false
       if (situationFilter === 'da_gestire' && !isAttesaMia(r, user)) return false
       if (situationFilter === 'attesa_altri' && !isAttesaAltri(r, user)) return false
       if (situationFilter === 'ferme' && !isStale) return false
-      if (situationFilter === 'sanzionatoria' && !isInFaseSanzionatoria(r)) return false
+      if (situationFilter === 'sanzionatoria' && phase !== 'Fase sanzionatoria' && phase !== 'Sanzione notificata') return false
       return true
     })
 
-    const dir = sortDir === 'asc' ? 1 : -1
+    const getSortValue = (row: ReportRecord, key: SortKey): any => {
+      if (key === 'lastUpdate') return getLastTouchMs(row) || 0
+      if (key === 'id') return getNumeroRapporto(row)
+      if (key === 'reportDate') return getDataRapportoMs(row) || 0
+      if (key === 'rilevatore') return getTecnicoRilevatore(row)
+      if (key === 'istruttore') return getIstruttore(row)
+      if (key === 'area') return getAreaDisplay(row, user?.areaCod)
+      if (key === 'settore') return getSettoreDisplay(row, user)
+      if (key === 'faseProcedimentale') return faseProcedimentaleLabel(row)
+      if (key === 'ruoloCorrente') return ruoloPressoLabel(row)
+      if (key === 'giorniFermo') return Number(getGiorniFermo(row, now)) || 0
+      return ''
+    }
+
+    const rules = sortRules.length ? sortRules : DEFAULT_SORT_RULES
     out.sort((a, b) => {
-      let av: any
-      let bv: any
-      if (sortKey === 'lastUpdate') { av = getLastTouchMs(a) || 0; bv = getLastTouchMs(b) || 0 }
-      if (sortKey === 'id') { av = getNumeroRapporto(a); bv = getNumeroRapporto(b) }
-      if (sortKey === 'violazione') { av = getViolazione(a); bv = getViolazione(b) }
-      if (sortKey === 'reportDate') { av = getDataRapportoMs(a) || 0; bv = getDataRapportoMs(b) || 0 }
-      if (sortKey === 'rilevatore') { av = getTecnicoRilevatore(a); bv = getTecnicoRilevatore(b) }
-      if (sortKey === 'istruttore') { av = getIstruttore(a); bv = getIstruttore(b) }
-      if (sortKey === 'trasgressore') { av = getTrasgressore(a); bv = getTrasgressore(b) }
-      if (sortKey === 'cfPiva') { av = getCfPiva(a); bv = getCfPiva(b) }
-      if (sortKey === 'area') { av = getAreaDisplay(a, user?.area); bv = getAreaDisplay(b, user?.area) }
-      if (sortKey === 'settore') { av = getSettoreDisplay(a, user); bv = getSettoreDisplay(b, user) }
-      if (sortKey === 'fase') { av = faseLabel(getActiveRole(a)); bv = faseLabel(getActiveRole(b)) }
-      if (sortKey === 'stato') { av = getStatusForRecord(a, user); bv = getStatusForRecord(b, user) }
-      if (sortKey === 'giorniFermo') { av = Number(getGiorniFermo(a, now)) || 0; bv = Number(getGiorniFermo(b, now)) || 0 }
-      if (typeof av === 'string' || typeof bv === 'string') return String(av || '').localeCompare(String(bv || ''), 'it', { numeric: true, sensitivity: 'base' }) * dir
-      return ((av || 0) - (bv || 0)) * dir
+      for (const rule of rules) {
+        const dir = rule.dir === 'asc' ? 1 : -1
+        const av = getSortValue(a, rule.key)
+        const bv = getSortValue(b, rule.key)
+        const cmp = (typeof av === 'string' || typeof bv === 'string')
+          ? String(av || '').localeCompare(String(bv || ''), 'it', { numeric: true, sensitivity: 'base' })
+          : ((av || 0) - (bv || 0))
+        if (cmp !== 0) return cmp * dir
+      }
+      return getNumeroRapporto(a).localeCompare(getNumeroRapporto(b), 'it', { numeric: true, sensitivity: 'base' })
     })
 
     return out
-  }, [records, search, settoreFilter, fromDate, toDate, statoFilter, situationFilter, faseFilter, sortKey, sortDir, user?.username, user?.ruoloLabel, user?.area, user?.settore, cfg.staleDays])
+  }, [records, search, areaFilter, settoreFilter, fromDate, toDate, situationFilter, faseFilter, ruoloFilter, sortRules, user?.username, user?.ruoloLabel, user?.areaCod, user?.settoreCod, cfg.staleDays])
 
   const tableRows = Math.max(5, Number(cfg.tableRows || 25))
   const pageCount = Math.max(1, Math.ceil(filtered.length / tableRows))
   const safePage = Math.min(page, pageCount)
   const pageRows = filtered.slice((safePage - 1) * tableRows, safePage * tableRows)
 
-  React.useEffect(() => { setPage(1) }, [search, settoreFilter, fromDate, toDate, statoFilter, situationFilter, faseFilter, sortKey, sortDir])
+  React.useEffect(() => {
+    if (!selectedRowId) return
+    if (!filtered.some(r => getObjectId(r) === selectedRowId)) setSelectedRowId('')
+  }, [filtered, selectedRowId])
+
+  React.useEffect(() => { setPage(1) }, [search, areaFilter, settoreFilter, fromDate, toDate, situationFilter, faseFilter, ruoloFilter, sortRules])
 
   const fasiDisponibili = React.useMemo(() => {
     const set = new Set<string>()
-    for (const r of records) set.add(getActiveRole(r))
-    return Array.from(set).filter(Boolean).sort((a, b) => faseLabel(a).localeCompare(faseLabel(b), 'it'))
+    for (const r of records) set.add(faseProcedimentaleLabel(r))
+    const order = ['Istruttoria tecnica', 'Approvazione tecnica', 'Istruttoria amministrativa', 'Fase sanzionatoria', 'Sanzione notificata']
+    return Array.from(set).filter(Boolean).sort((a, b) => {
+      const ia = order.indexOf(a)
+      const ib = order.indexOf(b)
+      if (ia >= 0 && ib >= 0) return ia - ib
+      if (ia >= 0) return -1
+      if (ib >= 0) return 1
+      return a.localeCompare(b, 'it')
+    })
   }, [records])
 
-  const statiDisponibili = React.useMemo(() => {
-    const set = new Set<string>()
-    for (const r of records) set.add(getStatusForRecord(r, user))
-    return Array.from(set).filter(Boolean).sort((a, b) => a.localeCompare(b, 'it'))
-  }, [records, user?.username, user?.ruoloLabel, user?.area])
+  const ruoliDisponibili = React.useMemo(() => {
+    const map = new Map<string, string>()
+    for (const r of records) {
+      const code = getRuoloPressoCuiSiTrova(r)
+      if (!code) continue
+      map.set(code, ruoloPressoLabel(r))
+    }
+    return Array.from(map.entries()).sort((a, b) => a[1].localeCompare(b[1], 'it'))
+  }, [records])
+
+  const areeDisponibili = React.useMemo(() => {
+    const map = new Map<string, string>()
+    for (const r of records) {
+      const code = getAreaCodeFromRecord(r, user?.areaCod)
+      if (!code) continue
+      map.set(code, getAreaDisplay(r, user?.areaCod))
+    }
+    const order = ['AMM', 'AGR', 'TEC']
+    return Array.from(map.entries()).sort((a, b) => {
+      const ia = order.indexOf(a[0])
+      const ib = order.indexOf(b[0])
+      if (ia >= 0 && ib >= 0) return ia - ib
+      if (ia >= 0) return -1
+      if (ib >= 0) return 1
+      return a[1].localeCompare(b[1], 'it')
+    })
+  }, [records, user?.areaCod])
 
   const settoriDisponibili = React.useMemo(() => {
     const map = new Map<string, string>()
     for (const r of records) {
-      const code = getSettoreCodeFromRecord(r, user?.settore)
+      const code = getSettoreCodeFromRecord(r, user?.settoreCod)
       if (!code) continue
       map.set(code, getSettoreDisplay(r, user))
     }
     return Array.from(map.entries()).sort((a, b) => a[1].localeCompare(b[1], 'it', { numeric: true, sensitivity: 'base' }))
-  }, [records, user?.settore, user?.area])
+  }, [records, user?.settoreCod, user?.areaCod])
 
   const attesaMia = records.filter(r => isAttesaMia(r, user)).length
   const attesaAltri = records.filter(r => isAttesaAltri(r, user)).length
@@ -1072,52 +1189,71 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
   }).length
 
   const userLabel = user?.username
-    ? `${user.fullName || user.username} · ${effectiveRole || user.ruoloLabel || '?'}${normalizeAreaCode(user.area) ? ` · ${normalizeAreaCode(user.area)}` : ''}${normalizeSettoreCode(user.settore) ? ` · ${normalizeSettoreCode(user.settore)}` : ''}`
+    ? `${user.fullName || user.username} · ${effectiveRole || user.ruoloLabel || '?'}${normalizeAreaCode(user.areaCod || user.area) ? ` · ${normalizeAreaCode(user.areaCod || user.area)}` : ''}${normalizeSettoreCode(user.settoreCod || user.settore) ? ` · ${normalizeSettoreCode(user.settoreCod || user.settore)}` : ''}`
     : 'Accesso in caricamento…'
 
   const clearFilters = () => {
     setSearch('')
+    setAreaFilter('tutte')
     setSettoreFilter('tutte')
     setFromDate('')
     setToDate('')
-    setStatoFilter('tutte')
     setSituationFilter('tutte')
     setFaseFilter('tutte')
-    setSortKey('lastUpdate')
-    setSortDir('desc')
+    setRuoloFilter('tutte')
+    setSortRules(DEFAULT_SORT_RULES)
+    setSelectedRowId('')
     setPage(1)
+  }
+
+  const isDefaultSort = sortRules.length === 1 && sortRules[0].key === 'lastUpdate' && sortRules[0].dir === 'desc'
+
+  const handleSortHeaderClick = (key: SortKey) => {
+    setSortRules(current => {
+      const hasOnlyDefault = current.length === 1 && current[0].key === 'lastUpdate' && current[0].dir === 'desc'
+      const base = current.length ? current : DEFAULT_SORT_RULES
+      const effectiveBase = hasOnlyDefault && key !== 'lastUpdate' ? [] : base
+      const index = effectiveBase.findIndex(rule => rule.key === key)
+
+      if (index >= 0) {
+        const activeRule = effectiveBase[index]
+
+        if (activeRule.dir === 'asc') {
+          const next = [...effectiveBase]
+          next[index] = { ...activeRule, dir: 'desc' }
+          return next
+        }
+
+        const next = effectiveBase.filter((_, i) => i !== index)
+        return next.length ? next : DEFAULT_SORT_RULES
+      }
+
+      return [...effectiveBase, { key, dir: 'asc' }]
+    })
   }
 
   const exportCsv = () => {
     const headers = [
       'N. rapporto',
-      'Violazione',
+      'Data rilevazione',
       'Tecnico rilevatore',
       'Tecnico istruttore',
-      'Trasgressore',
-      'C.F./P.IVA',
-      'Data rapporto',
       'Area',
-      'Settore',
-      'Comune',
+      'Settore/Ufficio',
+      'Fase procedimentale',
       'Competenza attuale',
-      'Stato',
       'Ultimo aggiornamento',
-      'Giorni fermo'
+      'Giorni di fermo'
     ]
     const rows = filtered.map(r => [
       getNumeroRapporto(r),
-      getViolazione(r),
+      formatDate(getDataRapportoMs(r)),
       getTecnicoRilevatore(r),
       getIstruttore(r),
-      getTrasgressore(r),
-      getCfPiva(r),
-      formatDate(getDataRapportoMs(r)),
-      getAreaDisplay(r, user?.area),
+      getAreaDisplay(r, user?.areaCod),
       getSettoreDisplay(r, user),
-      getComune(r),
-      faseLabel(getActiveRole(r)),
-      getStatusForRecord(r, user),
+      faseProcedimentaleLabel(r),
+      ruoloPressoLabel(r),
       formatDateTime(getLastTouchMs(r)),
       getGiorniFermo(r, now)
     ])
@@ -1133,23 +1269,44 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
     URL.revokeObjectURL(url)
   }
 
-  const th = (label: string, key?: SortKey) => (
-    <th style={{ padding: '10px 8px', color: cfg.mutedColor, fontSize: 11, textTransform: 'uppercase', letterSpacing: 0.6, borderBottom: `1px solid ${cfg.cardBorder}`, cursor: key ? 'pointer' : 'default', whiteSpace: 'nowrap' }} onClick={() => {
-      if (!key) return
-      if (sortKey === key) setSortDir(sortDir === 'asc' ? 'desc' : 'asc')
-      else { setSortKey(key); setSortDir(key === 'lastUpdate' ? 'desc' : 'asc') }
-    }}>{label}{key && sortKey === key ? (sortDir === 'asc' ? ' ↑' : ' ↓') : ''}</th>
-  )
+  const th = (label: string, key?: SortKey, align: 'left' | 'center' | 'right' = 'left') => {
+    const activeIndex = key ? sortRules.findIndex(rule => rule.key === key) : -1
+    const activeRule = activeIndex >= 0 ? sortRules[activeIndex] : null
+    const justify = align === 'center' ? 'center' : align === 'right' ? 'flex-end' : 'flex-start'
+    return (
+      <th
+        style={{ padding: '9px 7px', color: activeRule ? cfg.textColor : cfg.mutedColor, fontSize: 10.5, textTransform: 'uppercase', letterSpacing: 0.5, borderBottom: `1px solid ${cfg.cardBorder}`, cursor: key ? 'pointer' : 'default', whiteSpace: 'normal', lineHeight: 1.15, verticalAlign: 'bottom', textAlign: align, userSelect: 'none' }}
+        onClick={() => { if (key) handleSortHeaderClick(key) }}
+        title={key ? 'Ordina / aggiungi all’ordinamento multiplo' : undefined}
+      >
+        <span style={{ display: 'inline-flex', alignItems: 'center', justifyContent: justify, gap: 4, width: '100%', minWidth: 0 }}>
+          <span style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis' }}>{label}</span>
+          {activeRule && (
+            <span aria-hidden='true' style={{ display: 'inline-flex', alignItems: 'center', gap: 2, flexShrink: 0, color: cfg.accentColor, fontSize: 10, fontWeight: 900, lineHeight: 1 }}>
+              <span style={{ display: 'inline-block', transform: activeRule.dir === 'asc' ? 'translateY(-1px)' : 'translateY(1px)' }}>{activeRule.dir === 'asc' ? '▲' : '▼'}</span>
+              <span style={{ minWidth: 12, height: 12, borderRadius: 999, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', padding: '0 3px', fontSize: 8.5, fontWeight: 900, background: cfg.accentColor, color: '#111827' }}>{activeIndex + 1}</span>
+            </span>
+          )}
+        </span>
+      </th>
+    )
+  }
 
   return (
     <div style={{ width: '100%', height: '100%', overflow: 'hidden', color: cfg.textColor, boxSizing: 'border-box', padding: 16 }}>
       <div style={{ height: '100%', background: cfg.panelBg, border: `1px solid ${cfg.cardBorder}`, borderRadius: 22, padding: 16, boxShadow: '0 18px 60px rgba(0,0,0,0.22)', boxSizing: 'border-box', display: 'flex', flexDirection: 'column', minHeight: 0 }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, marginBottom: 10, flexShrink: 0, flexWrap: 'wrap' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap', minWidth: 0 }}>
-            <div style={{ color: cfg.mutedColor, fontSize: 13, fontWeight: 700, whiteSpace: 'nowrap' }}>Elenco consultabile ed esportabile delle pratiche di competenza.</div>
+            <div style={{ color: cfg.mutedColor, fontSize: 13, fontWeight: 700, whiteSpace: 'nowrap' }}>Quadro di sintesi delle fasi procedimentali delle pratiche di competenza.</div>
             {lastLoad && <div style={{ color: cfg.mutedColor, fontSize: 12, whiteSpace: 'nowrap' }}>Ultimo aggiornamento: {new Date(lastLoad).toLocaleString('it-IT')}</div>}
           </div>
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', justifyContent: 'flex-end', flexShrink: 0 }}>
+            <button
+              onClick={() => setSortRules(DEFAULT_SORT_RULES)}
+              disabled={isDefaultSort}
+              title='Ripristina ordinamento predefinito'
+              style={{ width: 36, height: 36, border: `1px solid ${cfg.cardBorder}`, background: isDefaultSort ? 'rgba(255,255,255,0.04)' : 'rgba(255,255,255,0.08)', color: isDefaultSort ? cfg.mutedColor : cfg.textColor, borderRadius: 8, padding: 0, fontSize: 17, fontWeight: 900, lineHeight: '34px', textAlign: 'center', cursor: isDefaultSort ? 'not-allowed' : 'pointer' }}
+            >↺</button>
             <button onClick={() => setNonce(n => n + 1)} style={{ border: `1px solid ${cfg.cardBorder}`, background: 'rgba(255,255,255,0.08)', color: cfg.textColor, borderRadius: 12, padding: '8px 12px', fontWeight: 700, cursor: 'pointer' }}>Aggiorna</button>
             <button onClick={exportCsv} disabled={filtered.length === 0} style={{ border: `1px solid ${cfg.cardBorder}`, background: filtered.length ? cfg.accentColor : 'rgba(255,255,255,0.08)', color: filtered.length ? '#111827' : cfg.mutedColor, borderRadius: 12, padding: '8px 12px', fontWeight: 800, cursor: filtered.length ? 'pointer' : 'not-allowed' }}>Esporta CSV</button>
           </div>
@@ -1162,7 +1319,14 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: 10, alignItems: 'end' }}>
             <div>
               <FieldLabel cfg={cfg}>Cerca</FieldLabel>
-              <Input value={search} onChange={setSearch} placeholder='Cerca in tutti i campi…' cfg={cfg} />
+              <Input value={search} onChange={setSearch} placeholder='Cerca n. rapporto…' cfg={cfg} />
+            </div>
+            <div>
+              <FieldLabel cfg={cfg}>Area</FieldLabel>
+              <Select value={areaFilter} onChange={setAreaFilter} cfg={cfg}>
+                <option value='tutte'>Tutte</option>
+                {areeDisponibili.map(([code, label]) => <option key={code} value={code}>{label}</option>)}
+              </Select>
             </div>
             <div>
               <FieldLabel cfg={cfg}>Settore/Ufficio</FieldLabel>
@@ -1180,13 +1344,6 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
               <Input value={toDate} onChange={setToDate} type='date' cfg={cfg} />
             </div>
             <div>
-              <FieldLabel cfg={cfg}>Stato</FieldLabel>
-              <Select value={statoFilter} onChange={setStatoFilter} cfg={cfg}>
-                <option value='tutte'>Tutti</option>
-                {statiDisponibili.map(s => <option key={s} value={s}>{s}</option>)}
-              </Select>
-            </div>
-            <div>
               <FieldLabel cfg={cfg}>Situazione</FieldLabel>
               <Select value={situationFilter} onChange={v => setSituationFilter(v as SituationFilter)} cfg={cfg}>
                 <option value='tutte'>Tutte</option>
@@ -1197,10 +1354,17 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
               </Select>
             </div>
             <div>
-              <FieldLabel cfg={cfg}>Competenza attuale</FieldLabel>
+              <FieldLabel cfg={cfg}>Fase procedimentale</FieldLabel>
               <Select value={faseFilter} onChange={setFaseFilter} cfg={cfg}>
                 <option value='tutte'>Tutte</option>
-                {fasiDisponibili.map(f => <option key={f} value={f}>{faseLabel(f)}</option>)}
+                {fasiDisponibili.map(f => <option key={f} value={f}>{f}</option>)}
+              </Select>
+            </div>
+            <div>
+              <FieldLabel cfg={cfg}>Competenza attuale</FieldLabel>
+              <Select value={ruoloFilter} onChange={setRuoloFilter} cfg={cfg}>
+                <option value='tutte'>Tutti</option>
+                {ruoliDisponibili.map(([code, label]) => <option key={code} value={code}>{label}</option>)}
               </Select>
             </div>
             <div>
@@ -1212,52 +1376,76 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
 
         <section style={{ background: cfg.cardBg, border: `1px solid ${cfg.cardBorder}`, borderRadius: 18, padding: 12, flex: '1 1 auto', minHeight: 0, display: 'flex', flexDirection: 'column' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, marginBottom: 8, flexShrink: 0 }}>
-            <h3 style={{ margin: 0, fontSize: 15, color: cfg.textColor }}>Elenco pratiche</h3>
+            <h3 style={{ margin: 0, fontSize: 15, color: cfg.textColor }}>Sintesi procedimentale</h3>
             <div style={{ color: cfg.mutedColor, fontSize: 12 }}>Pagina {safePage} di {pageCount}</div>
           </div>
           <div style={{ overflow: 'auto', flex: '1 1 auto', minHeight: 0 }}>
-            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
+            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12, tableLayout: 'fixed' }}>
+              <colgroup>
+                <col style={{ width: '6%' }} />
+                <col style={{ width: '8%' }} />
+                <col style={{ width: '10%' }} />
+                <col style={{ width: '10%' }} />
+                <col style={{ width: '7%' }} />
+                <col style={{ width: '15%' }} />
+                <col style={{ width: '14%' }} />
+                <col style={{ width: '13%' }} />
+                <col style={{ width: '11%' }} />
+                <col style={{ width: '6%' }} />
+              </colgroup>
               <thead style={{ position: 'sticky', top: 0, zIndex: 1, background: cfg.cardBg }}>
                 <tr style={{ textAlign: 'left' }}>
                   {th('N. rapporto', 'id')}
-                  {th('Violazione', 'violazione')}
+                  {th('Data rilevazione', 'reportDate')}
                   {th('Tecnico rilevatore', 'rilevatore')}
                   {th('Tecnico istruttore', 'istruttore')}
-                  {th('Trasgressore', 'trasgressore')}
-                  {th('C.F./P.IVA', 'cfPiva')}
-                  {th('Data rapporto', 'reportDate')}
                   {th('Area', 'area')}
                   {th('Settore/Ufficio', 'settore')}
-                  {th('Competenza attuale', 'fase')}
-                  {th('Stato', 'stato')}
+                  {th('Fase procedimentale', 'faseProcedimentale')}
+                  {th('Competenza attuale', 'ruoloCorrente')}
                   {th('Ultimo aggiornamento', 'lastUpdate')}
-                  {th('Giorni fermo', 'giorniFermo')}
+                  {th('Giorni di fermo', 'giorniFermo', 'center')}
                 </tr>
               </thead>
               <tbody>
                 {pageRows.map((r, i) => {
                   const oid = getObjectId(r)
                   const last = getLastTouchMs(r)
+                  const selected = selectedRowId === oid
+                  const hovered = hoveredRowId === oid
+                  const rowBg = selected ? 'rgba(139,92,246,0.20)' : hovered ? 'rgba(255,255,255,0.09)' : 'transparent'
                   return (
-                    <tr key={`${oid}-${i}`} style={{ borderBottom: `1px solid rgba(255,255,255,0.07)` }}>
-                      <td style={{ padding: '9px 8px', color: cfg.textColor, fontWeight: 800, whiteSpace: 'nowrap' }}>{getNumeroRapporto(r)}</td>
-                      <td style={{ padding: '9px 8px', color: cfg.mutedColor, minWidth: 170 }}>{getViolazione(r)}</td>
-                      <td style={{ padding: '9px 8px', color: cfg.mutedColor, minWidth: 150 }}>{getTecnicoRilevatore(r)}</td>
-                      <td style={{ padding: '9px 8px', color: cfg.mutedColor, minWidth: 150 }}>{getIstruttore(r)}</td>
-                      <td style={{ padding: '9px 8px', color: cfg.mutedColor, minWidth: 180 }}>{getTrasgressore(r)}</td>
-                      <td style={{ padding: '9px 8px', color: cfg.mutedColor, minWidth: 120, whiteSpace: 'nowrap' }}>{getCfPiva(r)}</td>
-                      <td style={{ padding: '9px 8px', color: cfg.mutedColor, whiteSpace: 'nowrap' }}>{formatDate(getDataRapportoMs(r))}</td>
-                      <td style={{ padding: '9px 8px', color: cfg.mutedColor, whiteSpace: 'nowrap' }}>{getAreaDisplay(r, user?.area)}</td>
-                      <td style={{ padding: '9px 8px', color: cfg.mutedColor, minWidth: 170 }}>{getSettoreDisplay(r, user)}</td>
-                      <td style={{ padding: '9px 8px', color: cfg.mutedColor, minWidth: 145 }}>{faseLabel(getActiveRole(r))}</td>
-                      <td style={{ padding: '9px 8px', color: cfg.mutedColor, minWidth: 165 }}>{getStatusForRecord(r, user)}</td>
-                      <td style={{ padding: '9px 8px', color: cfg.mutedColor, whiteSpace: 'nowrap' }}>{formatDateTime(last)}</td>
-                      <td style={{ padding: '9px 8px', color: cfg.mutedColor, textAlign: 'right', whiteSpace: 'nowrap' }}>{getGiorniFermo(r, now)}</td>
+                    <tr
+                      key={`${oid}-${i}`}
+                      tabIndex={0}
+                      role='button'
+                      aria-selected={selected}
+                      onClick={() => setSelectedRowId(current => current === oid ? '' : oid)}
+                      onMouseEnter={() => setHoveredRowId(oid)}
+                      onMouseLeave={() => setHoveredRowId(current => current === oid ? '' : current)}
+                      onKeyDown={e => {
+                        if (e.key === 'Enter' || e.key === ' ') {
+                          e.preventDefault()
+                          setSelectedRowId(current => current === oid ? '' : oid)
+                        }
+                      }}
+                      style={{ borderBottom: `1px solid rgba(255,255,255,0.07)`, background: rowBg, boxShadow: selected ? `inset 3px 0 0 ${cfg.accentColor}` : 'none', cursor: 'pointer', outline: 'none', transition: 'background 120ms ease, box-shadow 120ms ease' }}
+                    >
+                      <td title={getNumeroRapporto(r)} style={{ padding: '8px 7px', color: cfg.textColor, fontWeight: 800, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{getNumeroRapporto(r)}</td>
+                      <td style={{ padding: '8px 7px', color: cfg.mutedColor, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{formatDate(getDataRapportoMs(r))}</td>
+                      <td title={getTecnicoRilevatore(r)} style={{ padding: '8px 7px', color: cfg.mutedColor, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{getTecnicoRilevatore(r)}</td>
+                      <td title={getIstruttore(r)} style={{ padding: '8px 7px', color: cfg.mutedColor, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{getIstruttore(r)}</td>
+                      <td title={getAreaDisplay(r, user?.areaCod)} style={{ padding: '8px 7px', color: cfg.mutedColor, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{getAreaDisplay(r, user?.areaCod)}</td>
+                      <td title={getSettoreDisplay(r, user)} style={{ padding: '8px 7px', color: cfg.mutedColor, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{getSettoreDisplay(r, user)}</td>
+                      <td title={faseProcedimentaleLabel(r)} style={{ padding: '8px 7px', color: cfg.mutedColor, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{faseProcedimentaleLabel(r)}</td>
+                      <td title={ruoloPressoLabel(r)} style={{ padding: '8px 7px', color: cfg.mutedColor, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{ruoloPressoLabel(r)}</td>
+                      <td style={{ padding: '8px 7px', color: cfg.mutedColor, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{formatDateTime(last)}</td>
+                      <td style={{ padding: '8px 7px', color: cfg.mutedColor, textAlign: 'center', whiteSpace: 'nowrap' }}>{getGiorniFermo(r, now)}</td>
                     </tr>
                   )
                 })}
                 {pageRows.length === 0 && (
-                  <tr><td colSpan={13} style={{ padding: 14, color: cfg.mutedColor }}>Nessuna pratica corrisponde ai filtri impostati.</td></tr>
+                  <tr><td colSpan={10} style={{ padding: 14, color: cfg.mutedColor }}>Nessuna pratica corrisponde ai filtri impostati.</td></tr>
                 )}
               </tbody>
             </table>

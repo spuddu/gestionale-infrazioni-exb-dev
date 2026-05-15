@@ -66,6 +66,10 @@ export interface NotaSpeseData {
   cod_pratica: string
   area_label: string
   settore_label: string
+  area_cod?: string | number | null
+  settore_cod?: string | number | null
+  area?: string | number | null
+  settore?: string | number | null
   rows: Record<NsCategory, NsDetailRow[]>
   summary: NsSummary
   luogo_data: string
@@ -129,6 +133,83 @@ function b64ToBytes(b64: string): Uint8Array {
   const arr = new Uint8Array(bin.length)
   for (let i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i)
   return arr
+}
+
+function firstMeaningfulValue(...vals: any[]): any {
+  for (const value of vals) {
+    if (value == null) continue
+    if (typeof value === 'string') {
+      if (value.trim() !== '') return value
+      continue
+    }
+    return value
+  }
+  return undefined
+}
+
+const AREA_LABELS: Record<string, string> = {
+  AMM: 'AMMINISTRATIVA',
+  AGR: 'AGRARIA',
+  TEC: 'TECNICA'
+}
+
+const SETTORE_LABELS: Record<string, string> = {
+  CR: 'CATASTO, RUOLI E SERVIZI TERRITORIALI',
+  GI: 'GESTIONE IRRIGUA',
+  D1: "DISTRETTO 1 – QUARTU SANT'ELENA/VILLAPUTZU/MURAVERA – SAN SPERATE",
+  D2: 'DISTRETTO 2 – SERRAMANNA/PIMPISU',
+  D3: 'DISTRETTO 3 – SAN GAVINO - VILLACIDRO',
+  D4: 'DISTRETTO 4 – BASSO SULCIS',
+  D5: 'DISTRETTO 5 – SENORBÌ',
+  D6: 'DISTRETTO 6 – CIXERRI',
+  DS: 'MANUTENZIONE OPERE DI DRENO E DI SCOLO'
+}
+
+function normalizeAreaCode(value: any): 'AMM' | 'AGR' | 'TEC' | '' {
+  const s = String(value ?? '').trim().toUpperCase()
+  if (!s) return ''
+  if (s === '1' || s === 'AMM' || s === 'AMMINISTRATIVA' || s === 'AMMINISTRAZIONE' || s.includes('AFFARI GENERALI')) return 'AMM'
+  if (s === '2' || s === 'AGR' || s === 'AGRARIA' || s === 'AGRICOLA' || s === 'AGRICOLTURA') return 'AGR'
+  if (s === '3' || s === 'TEC' || s === 'TECNICA' || s === 'TECNICO') return 'TEC'
+  return ''
+}
+
+function normalizeSettoreCode(areaCode: string, value: any): string {
+  const s = String(value ?? '').trim().toUpperCase()
+  if (!s) return ''
+  if (s === 'CS') return 'DS'
+  if (s === '1') return areaCode === 'AGR' ? 'D1' : 'CR'
+  if (s === '2') return areaCode === 'AGR' ? 'D2' : 'GI'
+  if (s === '3') return 'D1'
+  if (s === '4') return 'D2'
+  if (s === '5') return 'D3'
+  if (s === '6') return 'D4'
+  if (s === '7') return 'D5'
+  if (s === '8') return 'D6'
+  if (s === '9') return 'DS'
+  const distretto = s.match(/^D\s*([1-6])$/)
+  if (distretto) return `D${distretto[1]}`
+  if (s === 'DS' || s === 'D S' || s.includes('DRENO') || s.includes('SCOLO')) return 'DS'
+  if (s === 'CR' || s === 'C R' || s.includes('CATASTO')) return 'CR'
+  if (s === 'GI' || s === 'G I' || s.includes('GESTIONE IRRIGUA')) return 'GI'
+  return s
+}
+
+function resolveAreaLabel(areaCode: string, labelValue: any): string {
+  const label = String(labelValue ?? '').trim()
+  const labelCode = normalizeAreaCode(label)
+  if (areaCode && (!label || labelCode === areaCode)) return AREA_LABELS[areaCode] || areaCode
+  if (labelCode) return AREA_LABELS[labelCode] || labelCode
+  return label
+}
+
+function resolveSettoreLabel(areaCode: string, settoreCode: string, labelValue: any): string {
+  const label = String(labelValue ?? '').trim()
+  const labelCode = normalizeSettoreCode(areaCode, label)
+  const code = settoreCode || labelCode
+  if (code && (!label || labelCode === code)) return SETTORE_LABELS[code] || code
+  if (labelCode === 'DS' && /\bCS\b/i.test(label)) return SETTORE_LABELS.DS
+  return label
 }
 
 function cleanText(s: string): string {
@@ -246,8 +327,12 @@ export async function buildNotaSpesePdf(data: NotaSpeseData): Promise<Uint8Array
   let pg = doc.getPage(0)
 
   // Intestazione
-  if (data.area_label) centered(pg, 'AREA ' + data.area_label, fontR, 9, ML, PW - MR, PH - TEXT_AREA_TOP, CLR_BLUE)
-  if (data.settore_label) centered(pg, 'SETTORE ' + data.settore_label, fontR, 9, ML, PW - MR, PH - TEXT_SETT_TOP, CLR_BLUE)
+  const areaCod = normalizeAreaCode(firstMeaningfulValue(data.area_cod, data.area, data.area_label))
+  const settoreCod = normalizeSettoreCode(areaCod, firstMeaningfulValue(data.settore_cod, data.settore, data.settore_label))
+  const areaLabel = resolveAreaLabel(areaCod, data.area_label)
+  const settoreLabel = resolveSettoreLabel(areaCod, settoreCod, data.settore_label)
+  if (areaLabel) centered(pg, 'AREA ' + areaLabel, fontR, 9, ML, PW - MR, PH - TEXT_AREA_TOP, CLR_BLUE)
+  if (settoreLabel) centered(pg, 'SETTORE ' + settoreLabel, fontR, 9, ML, PW - MR, PH - TEXT_SETT_TOP, CLR_BLUE)
   const nsTitle = data.cod_pratica
     ? 'NOTA SPESE ALLEGATA AL RAPPORTO TECNICO DI RILEVAZIONE N. ' + data.cod_pratica
     : 'NOTA SPESE ALLEGATA AL RAPPORTO TECNICO DI RILEVAZIONE'

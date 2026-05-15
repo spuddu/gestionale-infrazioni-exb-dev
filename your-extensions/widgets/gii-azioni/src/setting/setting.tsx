@@ -93,7 +93,7 @@ export default function Setting(props: Props) {
       {/* ═══ DATI ═══ */}
       <Acc id='dati' label='📊 Dati' open={isOpen('dati')} onToggle={()=>toggle('dati')}/>
       {isOpen('dati') && <div>
-        <div style={P.hint}>Il ruolo viene letto automaticamente da window.__giiUserRole (scritto dal widget Header).</div>
+        <div style={P.hint}>Il ruolo viene letto automaticamente da window.__giiUserRole, dando priorità a ruoloCod/areaCod/settoreCod pubblicati dal widget Header.</div>
         <label style={P.lbl}>Testo pulsante "Prendi in carico"</label>
         <Inp value={cfgJs.buttonText??defaultConfig.buttonText} onChange={v=>patch({buttonText:v})}/>
       </div>}

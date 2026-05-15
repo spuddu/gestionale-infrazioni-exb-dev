@@ -271,11 +271,11 @@ export default function Setting(props: AllWidgetSettingProps<IMConfig>) {
   }
 
   // Layout editor state
-  const LAYOUT_TABS = ['anagrafica', 'violazione', 'dati_tecnici'] as const
-  const [layoutTab, setLayoutTab] = React.useState<string>('anagrafica')
+  const LAYOUT_TABS = ['trasgressore', 'violazione', 'dati_tecnici'] as const
+  const [layoutTab, setLayoutTab] = React.useState<string>('trasgressore')
 
   const FIELD_OPTS: Record<string, {v:string;l:string}[]> = {
-    anagrafica: [
+    trasgressore: [
       {v:'tipologia_soggetto',l:'Tipologia soggetto'},{v:'qualifica_fondo',l:'Qualifica rispetto al fondo'},
       {v:'nome',l:'Nome'},{v:'cognome',l:'Cognome'},{v:'codice_fiscale',l:'Codice fiscale'},
       {v:'ragione_sociale',l:'Ragione sociale'},{v:'piva',l:'P. IVA'},
@@ -284,7 +284,7 @@ export default function Setting(props: AllWidgetSettingProps<IMConfig>) {
       {v:'dom_notifica_uguale',l:'Coincide con residenza'},{v:'dom_notifica_via',l:'Dom. Via'},{v:'dom_notifica_civico',l:'Dom. Civico'},{v:'dom_notifica_citta',l:'Dom. Città'},{v:'dom_notifica_cap',l:'Dom. CAP'},
       {v:'rl_nome',l:'RL Nome'},{v:'rl_cognome',l:'RL Cognome'},{v:'rl_cf',l:'RL Codice fiscale'},{v:'rl_carica',l:'RL Carica'},
       {v:'rl_dom_notifica',l:'RL Dom. notifiche'},{v:'rl_dom_via',l:'RL Dom. Via'},{v:'rl_dom_civico',l:'RL Dom. Civico'},{v:'rl_dom_citta',l:'RL Dom. Città'},{v:'rl_dom_cap',l:'RL Dom. CAP'},
-      {v:'note_anagrafica',l:'Note anagrafica'}
+      {v:'note_anagrafica',l:'Note trasgressore'}
     ],
     violazione: [
       {v:'tipo_abuso',l:'Tipo di abuso'},{v:'norma15_sel',l:'Occorrenza Art. 15'},

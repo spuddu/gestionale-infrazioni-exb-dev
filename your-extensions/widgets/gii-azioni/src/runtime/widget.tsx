@@ -15,13 +15,59 @@ const GII_LOG_EVENTI_CICLI_URL = 'https://services2.arcgis.com/vH5RykSdaAwiEGOJ/
 const GII_UTENTI_URL = 'https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_utenti/FeatureServer/0'
 
 // ── Cache GII_utenti per risolvere utente_destinatario ──────────────────────
-type UtenteCached = { full_name: string; ruolo: number | null; area: number | null; settore: number | null }
+type UtenteCached = {
+  full_name: string
+  ruolo: number | null
+  area: number | null
+  settore: number | null
+  ruoloCod: string
+  areaCod: string
+  settoreCod: string
+}
 let _utentiCache: Map<string, UtenteCached> | null = null
 let _utentiLoading = false
 
-const RUOLO_NUM: Record<string, number> = { TR:1, TI:2, RZ:3, RI:4, DT:5, DA:6 }
+const RUOLO_NUM: Record<string, number> = { TR:1, TI:2, RZ:3, RI:4, DT:5, DA:6, ADMIN:7 }
 const AREA_NUM: Record<string, number> = { AMM:1, AGR:2, TEC:3 }
-const SETTORE_NUM: Record<string, number> = { CR:1, GI:2, D1:3, D2:4, D3:5, D4:6, D5:7, D6:8, CS:9 }
+const SETTORE_NUM: Record<string, number> = { CR:1, GI:2, D1:3, D2:4, D3:5, D4:6, D5:7, D6:8, DS:9 }
+const RUOLO_COD_FROM_NUM: Record<number, string> = { 1:'TR', 2:'TI', 3:'RZ', 4:'RI', 5:'DT', 6:'DA', 7:'ADMIN' }
+const AREA_COD_FROM_NUM: Record<number, string> = { 1:'AMM', 2:'AGR', 3:'TEC' }
+const SETTORE_COD_FROM_NUM: Record<number, string> = { 1:'CR', 2:'GI', 3:'D1', 4:'D2', 5:'D3', 6:'D4', 7:'D5', 8:'D6', 9:'DS' }
+
+function normalizeRuoloCod (v: any): string {
+  const s = String(v ?? '').trim().toUpperCase().replace(/[\s-]+/g, '_')
+  if (!s) return ''
+  const n = Number(s)
+  if (Number.isFinite(n) && RUOLO_COD_FROM_NUM[n]) return RUOLO_COD_FROM_NUM[n]
+  if (s === 'RI_AMM') return 'RI'
+  if (s === 'TI_AMM') return 'TI'
+  return RUOLO_NUM[s] != null ? s : s
+}
+
+function normalizeAreaCod (v: any): string {
+  const s = String(v ?? '').trim().toUpperCase()
+  if (!s) return ''
+  const n = Number(s)
+  if (Number.isFinite(n) && AREA_COD_FROM_NUM[n]) return AREA_COD_FROM_NUM[n]
+  if (s === 'AGRARIA' || s === 'AGRICOLA' || s === 'AGRICOLTURA') return 'AGR'
+  if (s === 'TECNICA' || s === 'TECNICO') return 'TEC'
+  if (s === 'AMMINISTRATIVA' || s === 'AMMINISTRAZIONE') return 'AMM'
+  return AREA_NUM[s] != null ? s : s
+}
+
+function normalizeSettoreCod (v: any): string {
+  const s = String(v ?? '').trim().toUpperCase().replace(/\s+/g, '')
+  if (!s) return ''
+  const n = Number(s)
+  if (Number.isFinite(n) && SETTORE_COD_FROM_NUM[n]) return SETTORE_COD_FROM_NUM[n]
+  if (s === 'CS') return 'DS'
+  const distretto = s.match(/DISTRETTO([1-6])/)
+  if (distretto) return `D${distretto[1]}`
+  if (s.includes('DRENO') || s.includes('SCOLO')) return 'DS'
+  if (s.includes('CATASTO') || s.includes('RUOLI')) return 'CR'
+  if (s.includes('GESTIONEIRRIGUA')) return 'GI'
+  return SETTORE_NUM[s] != null ? s : s
+}
 
 /**
  * Cerca lo username di una persona in GII_utenti per ruolo+area(+settore).
@@ -34,28 +80,34 @@ function findDestUsername (
   settoreLabel: string
 ): string {
   if (!cache) return ''
-  const r = roleLabel.toUpperCase()
+  const rRaw = String(roleLabel || '').trim().toUpperCase()
 
-  let ruoloCode: number | undefined
-  let areaCode: number | undefined
-  let settoreCode: number | undefined
+  let ruoloCod = normalizeRuoloCod(rRaw)
+  let areaCod = normalizeAreaCod(areaLabel)
+  let settoreCod = normalizeSettoreCod(settoreLabel)
 
-  if (r === 'RI_AMM')       { ruoloCode = 4; areaCode = 1 }
-  else if (r === 'TI_AMM')  { ruoloCode = 2; areaCode = 1 }
-  else if (r === 'DA')      { ruoloCode = 6; areaCode = 1 }
-  else {
-    ruoloCode = RUOLO_NUM[r]
-    areaCode = AREA_NUM[areaLabel.toUpperCase()] ?? undefined
-    settoreCode = SETTORE_NUM[settoreLabel.toUpperCase()] ?? undefined
-  }
-  if (!ruoloCode) return ''
+  if (rRaw === 'RI_AMM')       { ruoloCod = 'RI'; areaCod = 'AMM'; settoreCod = '' }
+  else if (rRaw === 'TI_AMM')  { ruoloCod = 'TI'; areaCod = 'AMM'; settoreCod = '' }
+  else if (rRaw === 'DA')      { ruoloCod = 'DA'; areaCod = 'AMM'; settoreCod = '' }
 
-  const needsSettore = (r === 'TR' || r === 'RZ') && areaCode !== 1
+  const ruoloCode = RUOLO_NUM[ruoloCod]
+  const areaCode = areaCod ? AREA_NUM[areaCod] : undefined
+  const settoreCode = settoreCod ? SETTORE_NUM[settoreCod] : undefined
+  if (!ruoloCod && !ruoloCode) return ''
+
+  const needsSettore = (ruoloCod === 'TR' || ruoloCod === 'RZ') && areaCod !== 'AMM'
 
   for (const [username, entry] of cache) {
-    if (entry.ruolo !== ruoloCode) continue
-    if (areaCode != null && entry.area !== areaCode) continue
-    if (needsSettore && settoreCode != null && entry.settore !== settoreCode) continue
+    const entryRuoloCod = normalizeRuoloCod(entry.ruoloCod || entry.ruolo)
+    const entryAreaCod = normalizeAreaCod(entry.areaCod || entry.area)
+    const entrySettoreCod = normalizeSettoreCod(entry.settoreCod || entry.settore)
+
+    if (ruoloCod && entryRuoloCod !== ruoloCod) continue
+    if (!ruoloCod && ruoloCode != null && entry.ruolo !== ruoloCode) continue
+    if (areaCod && entryAreaCod !== areaCod) continue
+    if (!areaCod && areaCode != null && entry.area !== areaCode) continue
+    if (needsSettore && settoreCod && entrySettoreCod !== settoreCod) continue
+    if (needsSettore && !settoreCod && settoreCode != null && entry.settore !== settoreCode) continue
     return username
   }
   return ''
@@ -1447,7 +1499,7 @@ function ActionsPanel (props: {
         if (typeof fl?.load === 'function') await fl.load()
         const res = await fl.queryFeatures({
           where: '1=1',
-          outFields: ['username', 'full_name', 'ruolo', 'area', 'settore'],
+          outFields: ['username', 'full_name', 'ruolo', 'area', 'settore', 'ruolo_cod', 'area_cod', 'settore_cod'],
           returnGeometry: false
         })
         const map = new Map<string, UtenteCached>()
@@ -1458,7 +1510,10 @@ function ActionsPanel (props: {
               full_name: String(a.full_name || ''),
               ruolo: a.ruolo ?? null,
               area: a.area ?? null,
-              settore: a.settore ?? null
+              settore: a.settore ?? null,
+              ruoloCod: normalizeRuoloCod(a.ruolo_cod || a.ruolo),
+              areaCod: normalizeAreaCod(a.area_cod || a.area),
+              settoreCod: normalizeSettoreCod(a.settore_cod || a.settore)
             })
           }
         }
@@ -1543,7 +1598,7 @@ function ActionsPanel (props: {
   }, [])
 
   const handleRapportoPreview = React.useCallback(() => {
-    if (!data) return
+    if (!hasSel || !data) return
     setPreviewOpen(true)
     setPreviewLoading(true)
     setPreviewError(null)
@@ -1562,10 +1617,10 @@ function ActionsPanel (props: {
         setPreviewLoading(false)
       }
     })()
-  }, [data])
+  }, [data, hasSel])
 
   const handleRapportoDownload = React.useCallback(() => {
-    if (!data) return
+    if (!hasSel || !data) return
     ;(async () => {
       try {
         const { blob, fileName } = await buildRapportoPdfBlob(data, _utentiCache, props.nsConfig)
@@ -1574,7 +1629,7 @@ function ActionsPanel (props: {
         setMsg({ kind: 'err', text: 'Errore download rapporto: ' + (ex?.message || String(ex)) })
       }
     })()
-  }, [data])
+  }, [data, hasSel])
 
 
   const sessionIdRef = React.useRef<string>(`sess-${Date.now()}-${Math.random().toString(16).slice(2)}`)
@@ -1608,27 +1663,11 @@ function ActionsPanel (props: {
   const normalizeAreaLabel = (v: any): string => {
     const s = String(v ?? '').trim().toUpperCase()
     if (!s) return ''
-    if (s === '2' || s === 'AGR' || s === 'AGRICOLA' || s === 'AGRICOLTURA') return 'AGR'
-    if (s === '3' || s === 'TEC' || s === 'TECNICA' || s === 'TECNICO') return 'TEC'
-    if (s === '1' || s === 'AMM' || s === 'AMMINISTRATIVA' || s === 'AMMINISTRAZIONE') return 'AMM'
-    return s
+    return normalizeAreaCod(s)
   }
 
   const normalizeSettoreLabel = (area: string, v: any): string => {
-    const s = String(v ?? '').trim().toUpperCase()
-    if (!s) return ''
-    // Se è un codice numerico puro, converti tramite dominio AGOL (3=D1, 4=D2, ecc.)
-    const SETTORE_FROM_CODE: Record<number, string> = { 1:'CR', 2:'GI', 3:'D1', 4:'D2', 5:'D3', 6:'D4', 7:'D5', 8:'D6', 9:'CS' }
-    const numVal = parseInt(s, 10)
-    if (String(numVal) === s && SETTORE_FROM_CODE[numVal]) return SETTORE_FROM_CODE[numVal]
-    // Altrimenti normalizza label testuale
-    if (area === 'AGR') {
-      const m = s.match(/^D([1-6])$/)
-      if (m) return `D${m[1]}`
-    }
-    if (area === 'TEC' && (s === 'DS' || s === 'D S')) return 'DS'
-    if (area === 'AMM' && (s === 'CR' || s === 'C R')) return 'CR'
-    return s
+    return normalizeSettoreCod(v)
   }
 
   const getCycleLogLayer = async () => {
@@ -1647,10 +1686,10 @@ function ActionsPanel (props: {
   const getCurrentCycleContext = () => {
     const giiRole: any = (window as any).__giiUserRole || {}
     const parentGlobalId = String(pickAttrCI(data, ['globalid', 'global_id', 'GlobalID', 'GLOBALID', 'parent_globalid']) || '')
-    const area = normalizeAreaLabel(giiRole.areaLabel || giiRole.area || giiRole.area_cod || pickAttrCI(data, ['area', 'area_cod', 'cod_area']))
+    const area = normalizeAreaLabel(giiRole.areaCod || giiRole.area_cod || giiRole.areaLabel || giiRole.area || pickAttrCI(data, ['area_cod', 'area', 'cod_area']))
     const settore = normalizeSettoreLabel(
       area,
-      giiRole.settoreLabel || giiRole.settore || giiRole.settore_cod || pickAttrCI(data, ['settore', 'settore_cod', 'cod_settore']) || inferSettoreFromUsername(String(giiRole.username || pickAttrCI(data, ['creator', 'Creator', 'editor', 'Editor']) || ''))
+      giiRole.settoreCod || giiRole.settore_cod || giiRole.settoreLabel || giiRole.settore || pickAttrCI(data, ['settore_cod', 'settore', 'cod_settore']) || inferSettoreFromUsername(String(giiRole.username || pickAttrCI(data, ['creator', 'Creator', 'editor', 'Editor']) || ''))
     )
     const username = String(giiRole.username || (window as any).__giiUser?.username || '').trim()
     return { parentGlobalId, area, settore, username }
@@ -1910,6 +1949,12 @@ function ActionsPanel (props: {
     inChargeByRole &&
     !roleClosedOrForwarded
 
+  const canUseRapportoPdf =
+    hasSel &&
+    !!data &&
+    !loading &&
+    pending === null
+
   const handleEditPage = () => {
     if (!canEdit) return
     try {
@@ -2126,13 +2171,28 @@ function ActionsPanel (props: {
       }
 
       const u: any = (window as any).__giiUserRole || {}
-      const area = (u?.area != null && String(u.area) !== '') ? Number(u.area) : null
-      const settore = (u?.settore != null && String(u.settore) !== '') ? Number(u.settore) : null
+      const areaCod = normalizeAreaLabel(u?.areaCod || u?.area_cod || u?.areaLabel || u?.area)
+      const settoreCod = normalizeSettoreLabel(areaCod, u?.settoreCod || u?.settore_cod || u?.settoreLabel || u?.settore)
+      const area = areaCod ? AREA_NUM[areaCod] : null
+      const settore = settoreCod ? SETTORE_NUM[settoreCod] : null
+
+      const codNumWhere = (codField: string, cod: string, numField: string, num: number | null | undefined): string => {
+        const parts: string[] = []
+        if (cod) {
+          parts.push(`${codField} = ${sqlQuote(cod)}`)
+          if (codField === 'settore_cod' && cod === 'DS') parts.push(`${codField} = ${sqlQuote('CS')}`)
+        }
+        if (num != null) parts.push(`${numField} = ${num}`)
+        return parts.length ? `(${parts.join(' OR ')})` : '1=1'
+      }
+      const tiRoleWhere = codNumWhere('ruolo_cod', 'TI', 'ruolo', RUOLO_NUM.TI)
+      const areaWhere = codNumWhere('area_cod', areaCod, 'area', area)
+      const settoreWhere = codNumWhere('settore_cod', settoreCod, 'settore', settore)
 
       const runQuery = async (where: string): Promise<TiOpt[]> => {
         const q: any = (typeof fl.createQuery === 'function') ? fl.createQuery() : {}
         q.where = where
-        q.outFields = ['username', 'full_name', 'area', 'settore']
+        q.outFields = ['username', 'full_name', 'area', 'settore', 'ruolo_cod', 'area_cod', 'settore_cod']
         q.returnGeometry = false
         q.num = 2000
         const res: any = await fl.queryFeatures(q)
@@ -2148,14 +2208,14 @@ function ActionsPanel (props: {
       }
 
       let opts: TiOpt[] = []
-      if (area != null && settore != null) {
-        opts = await runQuery(`ruolo = 2 AND area = ${area} AND settore = ${settore}`).catch((): TiOpt[] => [])
+      if (areaCod && settoreCod) {
+        opts = await runQuery(`${tiRoleWhere} AND ${areaWhere} AND ${settoreWhere}`).catch((): TiOpt[] => [])
       }
-      if (!opts.length && area != null) {
-        opts = await runQuery(`ruolo = 2 AND area = ${area}`).catch((): TiOpt[] => [])
+      if (!opts.length && areaCod) {
+        opts = await runQuery(`${tiRoleWhere} AND ${areaWhere}`).catch((): TiOpt[] => [])
       }
       if (!opts.length) {
-        opts = await runQuery('ruolo = 2').catch((): TiOpt[] => [])
+        opts = await runQuery(tiRoleWhere).catch((): TiOpt[] => [])
       }
       setTiOptions(opts)
     } catch (e: any) {
@@ -2182,8 +2242,8 @@ function ActionsPanel (props: {
       const fl = new FeatureLayer({ url: GII_UTENTI_URL })
       if (typeof fl?.load === 'function') { try { await fl.load() } catch {} }
       const q: any = (typeof fl.createQuery === 'function') ? fl.createQuery() : {}
-      q.where = 'ruolo = 2 AND area = 1'  // TI con area AMM
-      q.outFields = ['username', 'full_name', 'area', 'settore']
+      q.where = `(ruolo_cod = ${sqlQuote('TI')} OR ruolo = ${RUOLO_NUM.TI}) AND (area_cod = ${sqlQuote('AMM')} OR area = ${AREA_NUM.AMM})`  // TI con area AMM
+      q.outFields = ['username', 'full_name', 'area', 'settore', 'ruolo_cod', 'area_cod', 'settore_cod']
       q.returnGeometry = false
       q.num = 2000
       const res: any = await fl.queryFeatures(q)
@@ -3428,59 +3488,57 @@ function ActionsPanel (props: {
                 </button>
               )}
 
-              {/* PULSANTE ANTEPRIMA PDF — tutti i ruoli */}
-              {hasSel && (
-                <button
-                  type='button'
-                  onClick={handleRapportoPreview}
-                  title='Anteprima rapporto (PDF)'
-                  style={{
-                    width: ((ui?.btnPaddingY ?? 8) * 2) + (ui?.btnFontSize ?? 14) + 10,
-                    height: ((ui?.btnPaddingY ?? 8) * 2) + (ui?.btnFontSize ?? 14) + 10,
-                    padding: 0,
-                    boxSizing: 'border-box',
-                    borderRadius: 8,
-                    border: '2px solid #2563eb',
-                    background: '#fff',
-                    color: '#2563eb',
-                    cursor: 'pointer',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center'
-                  }}
-                >
-                  <svg width='24' height='24' viewBox='0 0 18 18' fill='none' stroke='currentColor' strokeWidth='1.5' strokeLinecap='round' strokeLinejoin='round' aria-hidden='true' focusable='false'>
-                    <path d='M16.5,8.9V3.1c0-.9-.7-1.7-1.7-1.7H3.2c-.9,0-1.7.7-1.7,1.7v11.6c0,.9.7,1.7,1.7,1.7h5.8'/>
-                    <path d='M10.8,12.2l3.7,3.7c.5.5,1.1.7,1.6.2.5-.6.3-1-.3-1.5l-3.7-3.7'/>
-                    <circle cx='9' cy='8.9' r='3.7'/>
-                  </svg>
-                </button>
-              )}
+              {/* PULSANTE ANTEPRIMA PDF — sempre visibile, disabilitato senza selezione */}
+              <button
+                type='button'
+                disabled={!canUseRapportoPdf}
+                onClick={handleRapportoPreview}
+                title={canUseRapportoPdf ? 'Anteprima rapporto (PDF)' : 'Anteprima non disponibile: selezionare un rapporto.'}
+                style={{
+                  width: ((ui?.btnPaddingY ?? 8) * 2) + (ui?.btnFontSize ?? 14) + 10,
+                  height: ((ui?.btnPaddingY ?? 8) * 2) + (ui?.btnFontSize ?? 14) + 10,
+                  padding: 0,
+                  boxSizing: 'border-box',
+                  borderRadius: 8,
+                  border: `2px solid ${canUseRapportoPdf ? '#2563eb' : '#e5e7eb'}`,
+                  background: '#fff',
+                  color: canUseRapportoPdf ? '#2563eb' : '#9ca3af',
+                  cursor: canUseRapportoPdf ? 'pointer' : 'not-allowed',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center'
+                }}
+              >
+                <svg width='24' height='24' viewBox='0 0 18 18' fill='none' stroke='currentColor' strokeWidth='1.5' strokeLinecap='round' strokeLinejoin='round' aria-hidden='true' focusable='false'>
+                  <path d='M16.5,8.9V3.1c0-.9-.7-1.7-1.7-1.7H3.2c-.9,0-1.7.7-1.7,1.7v11.6c0,.9.7,1.7,1.7,1.7h5.8'/>
+                  <path d='M10.8,12.2l3.7,3.7c.5.5,1.1.7,1.6.2.5-.6.3-1-.3-1.5l-3.7-3.7'/>
+                  <circle cx='9' cy='8.9' r='3.7'/>
+                </svg>
+              </button>
 
-              {/* PULSANTE DOWNLOAD PDF — tutti i ruoli */}
-              {hasSel && (
-                <button
-                  type='button'
-                  onClick={handleRapportoDownload}
-                  title='Scarica rapporto (PDF)'
-                  style={{
-                    width: ((ui?.btnPaddingY ?? 8) * 2) + (ui?.btnFontSize ?? 14) + 10,
-                    height: ((ui?.btnPaddingY ?? 8) * 2) + (ui?.btnFontSize ?? 14) + 10,
-                    padding: 0,
-                    boxSizing: 'border-box',
-                    borderRadius: 8,
-                    border: '2px solid #16a34a',
-                    background: '#fff',
-                    color: '#16a34a',
-                    cursor: 'pointer',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center'
-                  }}
-                >
-                  <svg width='24' height='24' viewBox='0 0 24 24' fill='none' stroke='currentColor' strokeWidth='2' strokeLinecap='round' strokeLinejoin='round'><path d='M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4'/><polyline points='7 10 12 15 17 10'/><line x1='12' y1='15' x2='12' y2='3'/></svg>
-                </button>
-              )}
+              {/* PULSANTE DOWNLOAD PDF — sempre visibile, disabilitato senza selezione */}
+              <button
+                type='button'
+                disabled={!canUseRapportoPdf}
+                onClick={handleRapportoDownload}
+                title={canUseRapportoPdf ? 'Scarica rapporto (PDF)' : 'Download non disponibile: selezionare un rapporto.'}
+                style={{
+                  width: ((ui?.btnPaddingY ?? 8) * 2) + (ui?.btnFontSize ?? 14) + 10,
+                  height: ((ui?.btnPaddingY ?? 8) * 2) + (ui?.btnFontSize ?? 14) + 10,
+                  padding: 0,
+                  boxSizing: 'border-box',
+                  borderRadius: 8,
+                  border: `2px solid ${canUseRapportoPdf ? '#16a34a' : '#e5e7eb'}`,
+                  background: '#fff',
+                  color: canUseRapportoPdf ? '#16a34a' : '#9ca3af',
+                  cursor: canUseRapportoPdf ? 'pointer' : 'not-allowed',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center'
+                }}
+              >
+                <svg width='24' height='24' viewBox='0 0 24 24' fill='none' stroke='currentColor' strokeWidth='2' strokeLinecap='round' strokeLinejoin='round'><path d='M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4'/><polyline points='7 10 12 15 17 10'/><line x1='12' y1='15' x2='12' y2='3'/></svg>
+              </button>
             </div>
           </div>
         )}
@@ -3669,10 +3727,16 @@ const SETTORE_LABELS: Record<string, string> = {
 
 function findUserFullName (cache: Map<string, UtenteCached> | null, ruoloNum: number, areaNum?: number, settoreNum?: number): string {
   if (!cache) return ''
+  const ruoloCod = RUOLO_COD_FROM_NUM[ruoloNum] || ''
+  const areaCod = areaNum != null ? AREA_COD_FROM_NUM[areaNum] : ''
+  const settoreCod = settoreNum != null ? SETTORE_COD_FROM_NUM[settoreNum] : ''
   for (const [, entry] of cache) {
-    if (entry.ruolo !== ruoloNum) continue
-    if (areaNum != null && entry.area !== areaNum) continue
-    if (settoreNum != null && entry.settore !== settoreNum) continue
+    if (ruoloCod && normalizeRuoloCod(entry.ruoloCod || entry.ruolo) !== ruoloCod) continue
+    if (!ruoloCod && entry.ruolo !== ruoloNum) continue
+    if (areaCod && normalizeAreaCod(entry.areaCod || entry.area) !== areaCod) continue
+    if (!areaCod && areaNum != null && entry.area !== areaNum) continue
+    if (settoreCod && normalizeSettoreCod(entry.settoreCod || entry.settore) !== settoreCod) continue
+    if (!settoreCod && settoreNum != null && entry.settore !== settoreNum) continue
     return entry.full_name || ''
   }
   return ''
@@ -3720,8 +3784,8 @@ function fmtNum (v: any): string {
  */
 function buildPlaceholderMap (data: any, utentiCache: Map<string, UtenteCached> | null): Record<string, string> {
   const d = data || {}
-  const areaCod = String(d.area_cod || '').toUpperCase()
-  const settoreCod = String(d.settore_cod || '').toUpperCase()
+  const areaCod = normalizeAreaCod(d.area_cod || d.area)
+  const settoreCod = normalizeSettoreCod(d.settore_cod || d.settore)
   const isPF = String(d.tipologia_soggetto || '').toUpperCase() === 'PF'
   const areaN = AREA_NUM[areaCod] ?? null
   const settoreN = SETTORE_NUM[settoreCod] ?? null
@@ -3928,20 +3992,19 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
     : (props.config as any || {})
   const cfg: any = { ...defaultConfig, ...cfgMutable }
 
-  // ── Ruolo utente: letto da window.__giiUserRole (scritto dal widget Elenco) ──
+  // ── Ruolo utente: letto da window.__giiUserRole (scritto dal widget Header) ──
   const [detectedRole, setDetectedRole] = React.useState<string>('')
 
   React.useEffect(() => {
     const readRole = () => {
       try {
-        const info = (window as any).__giiUserRole
-        const r = info?.ruoloLabel
-        if (!r || r === 'ADMIN') { setDetectedRole(''); return }
-        let role = String(r).toUpperCase()
-        // RI con area=AMM(1) → RI_AMM, TI con area=AMM(1) → TI_AMM
-        const area = info?.area != null ? Number(info.area) : null
-        if (role === 'RI' && area === 1) role = 'RI_AMM'
-        if (role === 'TI' && area === 1) role = 'TI_AMM'
+        const info = (window as any).__giiUserRole || {}
+        let role = normalizeRuoloCod(info?.ruoloCod || info?.ruolo_cod || info?.ruoloLabel || info?.ruolo)
+        if (!role || role === 'ADMIN') { setDetectedRole(''); return }
+        // RI con area=AMM → RI_AMM, TI con area=AMM → TI_AMM
+        const areaCod = normalizeAreaCod(info?.areaCod || info?.area_cod || info?.areaLabel || info?.area)
+        if (role === 'RI' && areaCod === 'AMM') role = 'RI_AMM'
+        if (role === 'TI' && areaCod === 'AMM') role = 'TI_AMM'
         setDetectedRole(role)
       } catch { }
     }

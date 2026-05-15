@@ -14,6 +14,57 @@ type Msg = { kind: MsgKind; text: string }
 
 const GII_LOG_EVENTI_CICLI_URL = 'https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_LOG_EVENTI_CICLI/FeatureServer/0'
 
+const RUOLO_NUM: Record<string, number> = { TR: 1, TI: 2, RZ: 3, RI: 4, DT: 5, DA: 6, ADMIN: 7 }
+const AREA_NUM: Record<string, number> = { AMM: 1, AGR: 2, TEC: 3 }
+const SETTORE_NUM: Record<string, number> = { CR: 1, GI: 2, D1: 3, D2: 4, D3: 5, D4: 6, D5: 7, D6: 8, DS: 9 }
+const RUOLO_COD_FROM_NUM: Record<number, string> = { 1: 'TR', 2: 'TI', 3: 'RZ', 4: 'RI', 5: 'DT', 6: 'DA', 7: 'ADMIN' }
+const AREA_COD_FROM_NUM: Record<number, string> = { 1: 'AMM', 2: 'AGR', 3: 'TEC' }
+const SETTORE_COD_FROM_NUM: Record<number, string> = { 1: 'CR', 2: 'GI', 3: 'D1', 4: 'D2', 5: 'D3', 6: 'D4', 7: 'D5', 8: 'D6', 9: 'DS' }
+
+function normalizeRuoloCod (v: any): string {
+  const s = String(v ?? '').trim().toUpperCase().replace(/[\s-]+/g, '_')
+  if (!s) return ''
+  const n = Number(s)
+  if (Number.isFinite(n) && RUOLO_COD_FROM_NUM[n]) return RUOLO_COD_FROM_NUM[n]
+  if (s === 'RI_AMM') return 'RI'
+  if (s === 'TI_AMM') return 'TI'
+  return RUOLO_NUM[s] != null ? s : s
+}
+
+function normalizeAreaCod (v: any): string {
+  const s = String(v ?? '').trim().toUpperCase()
+  if (!s) return ''
+  const n = Number(s)
+  if (Number.isFinite(n) && AREA_COD_FROM_NUM[n]) return AREA_COD_FROM_NUM[n]
+  if (s === 'AGRARIA' || s === 'AGRICOLA' || s === 'AGRICOLTURA') return 'AGR'
+  if (s === 'TECNICA' || s === 'TECNICO') return 'TEC'
+  if (s === 'AMMINISTRATIVA' || s === 'AMMINISTRAZIONE') return 'AMM'
+  return AREA_NUM[s] != null ? s : s
+}
+
+function normalizeSettoreCod (v: any): string {
+  const s = String(v ?? '').trim().toUpperCase().replace(/\s+/g, '')
+  if (!s) return ''
+  const n = Number(s)
+  if (Number.isFinite(n) && SETTORE_COD_FROM_NUM[n]) return SETTORE_COD_FROM_NUM[n]
+  if (s === 'CS') return 'DS'
+  const distretto = s.match(/DISTRETTO([1-6])/)
+  if (distretto) return `D${distretto[1]}`
+  if (s.includes('DRENO') || s.includes('SCOLO')) return 'DS'
+  if (s.includes('CATASTO') || s.includes('RUOLI')) return 'CR'
+  if (s.includes('GESTIONEIRRIGUA')) return 'GI'
+  return SETTORE_NUM[s] != null ? s : s
+}
+
+function normalizeLogFieldNameSet (fields: any[]): Set<string> {
+  return new Set((fields || []).map((f: any) => String(f?.name || '').trim()).filter(Boolean))
+}
+
+function pickLogOutFields (available: Set<string>, wanted: string[]): string[] {
+  const out = wanted.filter(f => available.has(f))
+  return out.length ? out : ['*']
+}
+
 function normGid (v: any): string {
   return String(v ?? '').trim().replace(/^\{|\}$/g, '').toLowerCase()
 }
@@ -1880,6 +1931,21 @@ function formatEvento (code: string): string {
   return EVENTO_LABELS[code] || formatEventoFallback(code)
 }
 
+function formatRuoloIter (raw: any): string {
+  const code = normalizeRuoloCod(raw)
+  return code || String(raw || '')
+}
+
+function formatAreaIter (raw: any): string {
+  const code = normalizeAreaCod(raw)
+  return code || String(raw || '')
+}
+
+function formatSettoreIter (raw: any): string {
+  const code = normalizeSettoreCod(raw)
+  return code || String(raw || '')
+}
+
 function CicliTimeline (props: { globalId: string; hasSel: boolean; sortDir: 'asc' | 'desc' }): any {
   const [cicli, setCicli] = React.useState<CicloRecord[]>([])
   const [loading, setLoading] = React.useState(false)
@@ -1896,15 +1962,18 @@ function CicliTimeline (props: { globalId: string; hasSel: boolean; sortDir: 'as
         const fl = new FeatureLayer({ url: GII_LOG_EVENTI_CICLI_URL })
         if (typeof fl?.load === 'function') await fl.load()
         const gid = normGid(props.globalId)
+        const availableFields = normalizeLogFieldNameSet(fl?.fields || [])
+        const outFields = pickLogOutFields(availableFields, [
+          'numero_ciclo_ruolo', 'ruolo_competente', 'utente_operatore',
+          'stato_record', 'evento_apertura', 'dt_apertura',
+          'evento_chiusura', 'dt_chiusura', 'ruolo_destinatario',
+          'utente_destinatario', 'note_chiusura',
+          'area_cod', 'settore_cod', 'area', 'settore', 'fase',
+          'num_campi_modificati', 'campi_modificati', 'riepilogo_ciclo'
+        ])
         const res = await fl.queryFeatures({
           where: `LOWER(parent_globalid) = '${gid}' OR LOWER(parent_globalid) = '{${gid}}'`,
-          outFields: [
-            'numero_ciclo_ruolo', 'ruolo_competente', 'utente_operatore',
-            'stato_record', 'evento_apertura', 'dt_apertura',
-            'evento_chiusura', 'dt_chiusura', 'ruolo_destinatario',
-            'utente_destinatario', 'note_chiusura', 'area', 'settore', 'fase',
-            'num_campi_modificati', 'campi_modificati', 'riepilogo_ciclo'
-          ],
+          outFields,
           orderByFields: [props.sortDir === 'asc' ? 'dt_apertura ASC' : 'dt_apertura DESC'],
           returnGeometry: false
         })
@@ -1913,18 +1982,18 @@ function CicliTimeline (props: { globalId: string; hasSel: boolean; sortDir: 'as
           const a = f.attributes || f
           return {
             numero_ciclo_ruolo: a.numero_ciclo_ruolo ?? null,
-            ruolo_competente: String(a.ruolo_competente || ''),
+            ruolo_competente: formatRuoloIter(a.ruolo_competente),
             utente_operatore: String(a.utente_operatore || ''),
             stato_record: String(a.stato_record || ''),
             evento_apertura: String(a.evento_apertura || ''),
             dt_apertura: a.dt_apertura ?? null,
             evento_chiusura: String(a.evento_chiusura || ''),
             dt_chiusura: a.dt_chiusura ?? null,
-            ruolo_destinatario: String(a.ruolo_destinatario || ''),
+            ruolo_destinatario: formatRuoloIter(a.ruolo_destinatario),
             utente_destinatario: String(a.utente_destinatario || ''),
             note_chiusura: String(a.note_chiusura || ''),
-            area: String(a.area || ''),
-            settore: String(a.settore || ''),
+            area: formatAreaIter(a.area_cod || a.area),
+            settore: formatSettoreIter(a.settore_cod || a.settore),
             fase: String(a.fase || ''),
             num_campi_modificati: a.num_campi_modificati ?? null,
             campi_modificati: String(a.campi_modificati || ''),
@@ -3538,7 +3607,11 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
     'presa_in_carico_DA', 'dt_presa_in_carico_DA',
     'stato_DA', 'dt_stato_DA',
     'esito_DA', 'dt_esito_DA',
-    'note_DA'
+    'note_DA',
+
+    // Campi codificati testuali introdotti nella migrazione; restano nascosti
+    // nel dettaglio, ma vengono letti per mantenere cache/selezione coerenti.
+    'area_cod', 'settore_cod'
   ]
 
 const queryFields = React.useMemo(() => {

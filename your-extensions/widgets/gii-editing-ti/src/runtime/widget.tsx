@@ -126,6 +126,29 @@ function getRequestedEditSection (opts?: { skipUrl?: boolean }): 'dati_generali'
   return null
 }
 
+const VALID_EDIT_SECTIONS = new Set(['dati_generali', 'trasgressore', 'violazione', 'dati_tecnici', 'nota_spese', 'allegati', 'anteprima'])
+function isValidEditSection (raw: any): boolean {
+  return VALID_EDIT_SECTIONS.has(String(raw || '').trim())
+}
+
+function resetInvalidEditSectionStorage (fallback: string = 'trasgressore'): string {
+  const next = isValidEditSection(fallback) ? fallback : 'trasgressore'
+  try {
+    const current = window.sessionStorage.getItem('GII_EDIT_TAB')
+    if (!isValidEditSection(current)) window.sessionStorage.setItem('GII_EDIT_TAB', next)
+  } catch {}
+  return next
+}
+
+function getStoredValidEditSection (): string | null {
+  try {
+    const current = window.sessionStorage.getItem('GII_EDIT_TAB')
+    return isValidEditSection(current) ? String(current) : null
+  } catch {
+    return null
+  }
+}
+
 function getGlobalOverlayHost (): HTMLElement | null {
   try {
     const topBody = (window as any)?.top?.document?.body
@@ -956,18 +979,32 @@ function hasToken (hay: string, token: string): boolean {
   return re.test(h)
 }
 
+function normalizeRoleCode (v: any): 'TR' | 'TI' | 'RZ' | 'RI' | 'DT' | 'DA' | 'ADMIN' | '' {
+  const s = String(v ?? '').trim().toUpperCase()
+  if (!s) return ''
+  if (s === '1' || s === 'TR' || s.includes('TECNICO RILEVATORE')) return 'TR'
+  if (s === '2' || s === 'TI' || s.includes('TECNICO ISTRUTTORE')) return 'TI'
+  if (s === '3' || s === 'RZ' || s.includes('RESPONSABILE DI ZONA')) return 'RZ'
+  if (s === '4' || s === 'RI' || s.includes('RESPONSABILE ISTRUTTORIA')) return 'RI'
+  if (s === '5' || s === 'DT' || s.includes('DIRETTORE TECNICO')) return 'DT'
+  if (s === '6' || s === 'DA' || s.includes('DIRETTORE AMMINISTRATIVO')) return 'DA'
+  if (s === '7' || s === 'ADMIN' || s.includes('AMMINISTRATORE')) return 'ADMIN'
+  return ''
+}
+
 function normalizeAreaCode (v: any): 'AGR' | 'TEC' | 'AMM' | '' {
   const s = String(v ?? '').trim().toUpperCase()
   if (!s) return ''
-  if (s === '2' || s === 'AGR' || s === 'AGRICOLA' || s === 'AGRICOLTURA') return 'AGR'
+  if (s === '2' || s === 'AGR' || s === 'AGRARIA' || s === 'AGRICOLA' || s === 'AGRICOLTURA') return 'AGR'
   if (s === '3' || s === 'TEC' || s === 'TECNICA' || s === 'TECNICO') return 'TEC'
-  if (s === '1' || s === 'AMM' || s === 'AMMINISTRATIVA' || s === 'AMMINISTRAZIONE') return 'AMM'
+  if (s === '1' || s === 'AMM' || s === 'AMMINISTRATIVA' || s === 'AMMINISTRAZIONE' || s.includes('AFFARI GENERALI')) return 'AMM'
   return ''
 }
 
 function normalizeSettoreCode (area: string, v: any): string {
   const s = String(v ?? '').trim().toUpperCase()
   if (!s) return ''
+  if (s === 'CS') return 'DS'
   if (area === 'AGR') {
     if (/^[1-6]$/.test(s)) return `D${s}`
     const m = s.match(/^D?\s*([1-6])$/)
@@ -976,12 +1013,13 @@ function normalizeSettoreCode (area: string, v: any): string {
     if (md) return `D${md[1]}`
   }
   if (area === 'TEC') {
-    if (s === 'DS' || s === 'D S') return 'DS'
+    if (s === 'DS' || s === 'D S' || s.includes('DRENO')) return 'DS'
   }
   if (area === 'AMM') {
-    if (s === 'CR' || s === 'C R') return 'CR'
+    if (s === 'CR' || s === 'C R' || s.includes('CATASTO')) return 'CR'
     if (s === 'ALL' || s === 'TUTTI' || s === 'TUTTE') return 'ALL'
   }
+  if (s === 'GI' || s.includes('GESTIONE IRRIGUA')) return 'GI'
   return s
 }
 
@@ -1030,39 +1068,51 @@ function readGiiUserContext (): { username: string, role: string, area: string, 
     roleObj.username, roleObj.userName, roleObj.userId
   ) || '').trim()
 
-  const role = String(firstMeaningfulValue(
+  const roleRaw = firstMeaningfulValue(
+    roleObj.ruoloCod, roleObj.ruolo_cod, roleObj.ruoloCode,
+    userObj.ruoloCod, userObj.ruolo_cod, userObj.ruoloCode,
+    w.__giiRuoloCod, w.__giiRoleCode,
+    roleObj.ruolo, userObj.ruolo,
     w.__giiRuolo, w.__giiRole,
-    userObj.ruoloCod, userObj.ruoloCode, userObj.ruolo,
-    roleObj.ruoloCod, roleObj.ruoloCode, roleObj.ruolo,
-    userObj.ruoloLabel, roleObj.ruoloLabel
-  ) || '').trim()
+    roleObj.ruoloLabel, userObj.ruoloLabel
+  )
+  const role = normalizeRoleCode(roleRaw) || String(roleRaw || '').trim()
 
   const areaRaw = firstMeaningfulValue(
-    w.__giiAreaCode,
-    userObj.area_cod, userObj.areaCode, userObj.area,
-    roleObj.area_cod, roleObj.areaCode, roleObj.area,
+    roleObj.areaCod, roleObj.area_cod, roleObj.areaCode,
+    userObj.areaCod, userObj.area_cod, userObj.areaCode,
+    w.__giiAreaCod, w.__giiAreaCode,
+    roleObj.area, userObj.area,
     areaObj.cod, areaObj.code, areaObj.name,
     w.__giiAreaLabel,
-    userObj.areaLabel, roleObj.areaLabel, areaObj.label,
+    roleObj.areaLabel, userObj.areaLabel, areaObj.label,
     typeof areaObj === 'string' ? areaObj : undefined
   )
   const area = normalizeAreaCode(areaRaw)
 
   const settoreRawPrimary = firstMeaningfulValue(
-    w.__giiSettoreCode, w.__giiSectorCode,
-    userObj.settore_cod, userObj.settoreCode, userObj.settore,
-    roleObj.settore_cod, roleObj.settoreCode, roleObj.settore,
+    roleObj.settoreCod, roleObj.settore_cod, roleObj.settoreCode,
+    userObj.settoreCod, userObj.settore_cod, userObj.settoreCode,
+    w.__giiSettoreCod, w.__giiSettoreCode, w.__giiSectorCode,
+    roleObj.settore, userObj.settore,
     settoreObj.cod, settoreObj.code, settoreObj.name,
     w.__giiSettoreLabel, w.__giiSectorLabel,
-    userObj.settoreLabel, roleObj.settoreLabel, settoreObj.label,
+    roleObj.settoreLabel, userObj.settoreLabel, settoreObj.label,
     typeof settoreObj === 'string' ? settoreObj : undefined
   )
   const settoreFromPrimary = normalizeSettoreCode(area, settoreRawPrimary)
   const settoreFromUsername = inferSettoreCodeFromUsername(area, username)
-  const settore = settoreFromUsername || settoreFromPrimary
-  const settoreRaw = settoreFromUsername || settoreRawPrimary
+  const settore = settoreFromPrimary || settoreFromUsername
+  const settoreRaw = settoreFromPrimary || settoreRawPrimary || settoreFromUsername
 
   return { username, role, area, settore, areaRaw, settoreRaw }
+}
+
+function isCurrentRiAgrTec (): boolean {
+  const ur: any = (window as any).__giiUserRole || {}
+  const role = normalizeRoleCode(firstMeaningfulValue(ur.ruoloCod, ur.ruolo_cod, ur.ruoloCode, ur.ruolo, ur.ruoloLabel))
+  const area = normalizeAreaCode(firstMeaningfulValue(ur.areaCod, ur.area_cod, ur.areaCode, ur.area, ur.areaLabel))
+  return role === 'RI' && (area === 'AGR' || area === 'TEC')
 }
 
 function normalizeIntOrNull (v: any): number | null {
@@ -1072,11 +1122,15 @@ function normalizeIntOrNull (v: any): number | null {
 }
 
 function shortRoleLabel (roleRaw: any, usernameRaw?: any): string {
+  const normalizedRole = normalizeRoleCode(roleRaw)
+  if (normalizedRole) return normalizedRole === 'ADMIN' ? '' : normalizedRole
   const role = String(roleRaw ?? '').trim().toUpperCase()
   if (/(^|[^A-Z])TI([^A-Z]|$)/.test(role)) return 'TI'
   if (/(^|[^A-Z])TR([^A-Z]|$)/.test(role)) return 'TR'
   if (/(^|[^A-Z])RZ([^A-Z]|$)/.test(role)) return 'RZ'
   if (/(^|[^A-Z])RI([^A-Z]|$)/.test(role)) return 'RI'
+  if (/(^|[^A-Z])DT([^A-Z]|$)/.test(role)) return 'DT'
+  if (/(^|[^A-Z])DA([^A-Z]|$)/.test(role)) return 'DA'
   const username = String(usernameRaw ?? '').trim().toUpperCase()
   if (/(^|[_\-\s])TI([_\-\s]|$)/.test(username)) return 'TI'
   if (/(^|[_\-\s])TR([_\-\s]|$)/.test(username)) return 'TR'
@@ -4102,6 +4156,7 @@ function NuovaPraticaForm (p: {
   React.useEffect(() => {
     try { window.sessionStorage.removeItem('GII_NAV_SECTION') } catch {}
     try { window.sessionStorage.removeItem('GII_REQUESTED_EDIT_SECTION') } catch {}
+    resetInvalidEditSectionStorage('trasgressore')
   }, [])
 
   React.useEffect(() => {
@@ -5229,7 +5284,7 @@ React.useEffect(() => {
         descrizione_luogo: g('descrizione_luogo') || null,
         data_firma: mode === 'create' ? nowTs : toTs(g('data_firma')),
         req_point: reqPoint,
-        // Anagrafica — nuovi campi
+        // Trasgressore — nuovi campi
         qualifica_fondo: toInt(g('qualifica_fondo')),
         dom_notifica_uguale: toInt(g('dom_notifica_uguale')),
         dom_notifica_via: g('dom_notifica_via') || null,
@@ -5358,8 +5413,9 @@ React.useEffect(() => {
 
       const newOid = Number(added.objectId)
       
-      // Leggi il ruoloLabel dal cw header per il prefisso del codice pratica
-      const cwRoleLabel = String((window as any).__giiUserRole?.ruoloLabel || '').trim() || 'TI'
+      // Leggi il codice ruolo dal cw header per il prefisso del codice pratica, con fallback sul vecchio ruoloLabel
+      const ctxForCode = readGiiUserContext()
+      const cwRoleLabel = shortRoleLabel(ctxForCode.role, ctxForCode.username) || 'TI'
       const newPraticaCode = `${cwRoleLabel}-${newOid}`
 
       // In create mode NON aggiornare la datasource schema/base e NON provare a selezionare il nuovo OID:
@@ -5509,7 +5565,7 @@ React.useEffect(() => {
   const SETTORE_LABELS: Record<string, string> = {
     D1: 'DISTRETTO 1 \u2013 SAN SPERATE', D2: 'DISTRETTO 2 \u2013 SERRAMANNA/PIMPISU', D3: 'DISTRETTO 3 \u2013 SAN GAVINO/VILLACIDRO',
     D4: 'DISTRETTO 4 \u2013 BASSO SULCIS', D5: 'DISTRETTO 5 \u2013 SENORB\u00CC', D6: 'DISTRETTO 6 \u2013 CIXERRI',
-    DS: 'MANUTENZIONE OPERE DI DRENO E DI SCOLO', CR: 'CATASTO, RUOLI E SERVIZI TERRITORIALI'
+    DS: 'MANUTENZIONE OPERE DI DRENO E DI SCOLO', CR: 'CATASTO, RUOLI E SERVIZI TERRITORIALI', GI: 'GESTIONE IRRIGUA'
   }
   const fmtDateDMY = (v: any): string => {
     if (!v) return ''
@@ -5521,21 +5577,21 @@ React.useEffect(() => {
   const renderFieldControl = (name: string): FldR | null => {
     switch (name) {
       // Dati generali (read-only)
-      case 'area_cod': return { label: 'Area', el: <NpText value={AREA_LABELS[g('area_cod')] || g('area_cod')} onChange={() => {}} disabled/> }
-      case 'settore_cod': return { label: 'Settore', el: <NpText value={SETTORE_LABELS[g('settore_cod')] || g('settore_cod')} onChange={() => {}} disabled/> }
+      case 'area_cod': { const areaCode = normalizeAreaCode(g('area_cod') || g('area')); return { label: 'Area', el: <NpText value={AREA_LABELS[areaCode] || areaCode || g('area_cod')} onChange={() => {}} disabled/> } }
+      case 'settore_cod': { const areaCode = normalizeAreaCode(g('area_cod') || g('area')); const settoreCode = normalizeSettoreCode(areaCode, g('settore_cod') || g('settore')); return { label: 'Settore', el: <NpText value={SETTORE_LABELS[settoreCode] || settoreCode || g('settore_cod')} onChange={() => {}} disabled/> } }
       case 'tecnico_rilevatore': return { label: 'Tecnico rilevatore', el: <NpText value={g('tecnico_rilevatore')} onChange={() => {}} disabled/> }
       case 'ufficio_zona': return { label: 'Ufficio di zona', el: <NpText value={g('ufficio_zona')} onChange={() => {}} disabled/> }
       case 'data_rilevazione': return { label: 'Data rilevazione', el: <NpText value={fmtDateDMY(g('data_rilevazione'))} onChange={() => {}} disabled/> }
       case 'ti_assegnato_nome': return { label: 'Tecnico istruttore', el: <NpText value={g('ti_assegnato_nome')} onChange={() => {}} disabled/> }
       case 'data_firma': return { label: 'Data compilazione', el: <NpText value={fmtDateDMY(g('data_firma'))} onChange={() => {}} disabled/> }
-      // Anagrafica — Trasgressore
+      // Trasgressore — dati principali
       case 'tipologia_soggetto': return { label: 'Tipologia soggetto', el: <NpSel value={tipoSogg} onChange={v => set('tipologia_soggetto', v)} options={CHOICES.tipo_soggetto} disabled={saving}/> }
       case 'nome': return tipoSogg === 'PF' ? { label: 'Nome', el: <NpText value={g('nome')} onChange={v => set('nome', v)} disabled={saving}/> } : null
       case 'cognome': return tipoSogg === 'PF' ? { label: 'Cognome', el: <NpText value={g('cognome')} onChange={v => set('cognome', v)} disabled={saving}/> } : null
       case 'codice_fiscale': return tipoSogg === 'PF' ? { label: 'Codice fiscale', hint: 'Massimo 16 caratteri', el: <NpText value={g('codice_fiscale')} onChange={v => set('codice_fiscale', v)} disabled={saving} maxLength={16}/> } : null
       case 'ragione_sociale': return tipoSogg === 'PG' ? { label: 'Ragione sociale', el: <NpText value={g('ragione_sociale')} onChange={v => set('ragione_sociale', v)} disabled={saving}/> } : null
       case 'piva': return tipoSogg === 'PG' ? { label: 'P. IVA', hint: 'Massimo 11 caratteri', el: <NpText value={g('piva')} onChange={v => set('piva', v)} disabled={saving} maxLength={11}/> } : null
-      // Anagrafica — Indirizzo
+      // Trasgressore — indirizzo
       case 'via': return { label: 'Via', el: <NpText value={g('via')} onChange={v => set('via', v)} disabled={saving}/> }
       case 'civico': return { label: 'N. civico', el: <NpText value={g('civico')} onChange={v => set('civico', v)} disabled={saving}/> }
       case 'citta': return { label: 'Città', el: <NpText value={g('citta')} onChange={v => set('citta', v)} disabled={saving}/> }
@@ -5544,15 +5600,15 @@ React.useEffect(() => {
       case 'cellulare': return { label: 'Cellulare', el: <NpText value={g('cellulare')} onChange={v => set('cellulare', v)} disabled={saving}/> }
       case 'email': return { label: 'E-mail', el: <NpText value={g('email')} onChange={v => set('email', v)} disabled={saving}/> }
       case 'pec': return { label: 'PEC', el: <NpText value={g('pec')} onChange={v => set('pec', v)} disabled={saving}/> }
-      // Anagrafica — Qualifica
+      // Trasgressore — qualifica
       case 'qualifica_fondo': return { label: 'Qualifica rispetto al fondo', el: <NpSel value={g('qualifica_fondo')} onChange={v => set('qualifica_fondo', v)} options={domainOpts('qualifica_fondo', CHOICES.qualifica_fondo)} disabled={saving}/> }
-      // Anagrafica — Domicilio notifiche
+      // Trasgressore — domicilio notifiche
       case 'dom_notifica_uguale': return { label: 'Coincide con residenza/sede legale', el: <NpSel value={g('dom_notifica_uguale')} onChange={v => set('dom_notifica_uguale', v)} options={domainOpts('dom_notifica_uguale', CHOICES.si_no)} disabled={saving}/> }
       case 'dom_notifica_via': return String(g('dom_notifica_uguale')) !== '1' ? { label: 'Via', el: <NpText value={g('dom_notifica_via')} onChange={v => set('dom_notifica_via', v)} disabled={saving}/> } : null
       case 'dom_notifica_civico': return String(g('dom_notifica_uguale')) !== '1' ? { label: 'N. civico', el: <NpText value={g('dom_notifica_civico')} onChange={v => set('dom_notifica_civico', v)} disabled={saving}/> } : null
       case 'dom_notifica_citta': return String(g('dom_notifica_uguale')) !== '1' ? { label: 'Città', el: <NpText value={g('dom_notifica_citta')} onChange={v => set('dom_notifica_citta', v)} disabled={saving}/> } : null
       case 'dom_notifica_cap': return String(g('dom_notifica_uguale')) !== '1' ? { label: 'CAP', el: <NpText value={g('dom_notifica_cap')} onChange={v => set('dom_notifica_cap', v)} disabled={saving}/> } : null
-      // Anagrafica — Rappresentante legale (PG only)
+      // Trasgressore — rappresentante legale (PG only)
       case 'rl_nome': return tipoSogg === 'PG' ? { label: 'Nome', el: <NpText value={g('rl_nome')} onChange={v => set('rl_nome', v)} disabled={saving}/> } : null
       case 'rl_cognome': return tipoSogg === 'PG' ? { label: 'Cognome', el: <NpText value={g('rl_cognome')} onChange={v => set('rl_cognome', v)} disabled={saving}/> } : null
       case 'rl_cf': return tipoSogg === 'PG' ? { label: 'Codice fiscale', hint: 'Massimo 16 caratteri', el: <NpText value={g('rl_cf')} onChange={v => set('rl_cf', v)} disabled={saving} maxLength={16}/> } : null
@@ -5562,14 +5618,12 @@ React.useEffect(() => {
       case 'rl_dom_civico': return (tipoSogg === 'PG' && String(g('rl_dom_notifica')) === '1') ? { label: 'N. civico', el: <NpText value={g('rl_dom_civico')} onChange={v => set('rl_dom_civico', v)} disabled={saving}/> } : null
       case 'rl_dom_citta': return (tipoSogg === 'PG' && String(g('rl_dom_notifica')) === '1') ? { label: 'Città', el: <NpText value={g('rl_dom_citta')} onChange={v => set('rl_dom_citta', v)} disabled={saving}/> } : null
       case 'rl_dom_cap': return (tipoSogg === 'PG' && String(g('rl_dom_notifica')) === '1') ? { label: 'CAP', el: <NpText value={g('rl_dom_cap')} onChange={v => set('rl_dom_cap', v)} disabled={saving}/> } : null
-      // Anagrafica — Note
-      case 'note_anagrafica': return { label: 'Note anagrafica', el: <NpText value={g('note_anagrafica')} onChange={v => set('note_anagrafica', v)} multiline disabled={saving}/> }
+      // Trasgressore — note
+      case 'note_anagrafica': return { label: 'Note trasgressore', el: <NpText value={g('note_anagrafica')} onChange={v => set('note_anagrafica', v)} multiline disabled={saving}/> }
       // Violazione — Art. 15
       case 'tipo_abuso': return { label: 'Tipo di abuso', el: <NpSel value={tipoAbuso} onChange={v => { set('tipo_abuso', v); set('norma15_parziale', ''); set('norma15_totale', '') }} options={CHOICES.tipo_abuso} disabled={saving}/> }
       case 'norma15_sel': {
-        const ur = (window as any).__giiUserRole || {}
-        const isRiAgrTec = Number(ur.ruolo) === 4 && (Number(ur.area) === 2 || Number(ur.area) === 3)
-        const canEdit = isRiAgrTec && hasTipoAbuso15 && !saving
+        const canEdit = isCurrentRiAgrTec() && hasTipoAbuso15 && !saving
         if (tipoAbuso === 'parziale') return { label: 'Occorrenza', el: <NpSel value={n3parziale} onChange={v => set('norma15_parziale', v)} options={CHOICES.art15_parziale} disabled={!canEdit}/> }
         if (tipoAbuso === 'totale') return { label: 'Occorrenza', el: <NpSel value={n3totale} onChange={v => set('norma15_totale', v)} options={CHOICES.art15_totale} disabled={!canEdit}/> }
         return { label: 'Occorrenza', el: <NpSel value={''} onChange={() => {}} options={[]} disabled/> }
@@ -5596,7 +5650,7 @@ React.useEffect(() => {
       case 'sup_dichiarata_art17_2': return (norma1516 === 'Art17' && art17tipo === 'Art17.2') ? { label: 'Superficie dichiarata (ha)', el: <NpText value={g('sup_dichiarata_art17_2')} onChange={v => set('sup_dichiarata_art17_2', v)} disabled={saving}/> } : null
       case 'sup_irrigata_art17_2': return (norma1516 === 'Art17' && art17tipo === 'Art17.2') ? { label: 'Superficie irrigata (ha)', el: <NpText value={'0'} onChange={() => {}} disabled/> } : null
       // Violazione — Grado
-      case 'grado': { const ur = (window as any).__giiUserRole || {}; const en = Number(ur.ruolo) === 4 && (Number(ur.area) === 2 || Number(ur.area) === 3); return { label: 'Grado', el: <NpSel value={g('grado')} onChange={v => set('grado', v)} options={CHOICES.grado} disabled={saving || !en}/> } }
+      case 'grado': { const en = isCurrentRiAgrTec(); return { label: 'Grado', el: <NpSel value={g('grado')} onChange={v => set('grado', v)} options={CHOICES.grado} disabled={saving || !en}/> } }
       // Violazione — Descrizione
       case 'descrizione_fatti': return { label: 'Descrizione dettagliata della violazione', el: <NpText value={g('descrizione_fatti')} onChange={v => set('descrizione_fatti', v)} multiline disabled={saving}/> }
       case 'circostanze': return { label: 'Circostanze rilevanti', el: <NpText value={g('circostanze')} onChange={v => set('circostanze', v)} multiline disabled={saving}/> }
@@ -7200,7 +7254,8 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
   React.useEffect(() => {
     const readRole = () => {
       try {
-        const r = (window as any).__giiUserRole?.ruoloLabel
+        const ur: any = (window as any).__giiUserRole || {}
+        const r = normalizeRoleCode(firstMeaningfulValue(ur.ruoloCod, ur.ruolo_cod, ur.ruoloCode, ur.ruolo, ur.ruoloLabel)) || String(ur.ruoloLabel || '').trim().toUpperCase()
         setDetectedRole(r && r !== 'ADMIN' ? String(r).toUpperCase() : '')
       } catch { }
     }
@@ -7531,10 +7586,8 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
         }
         // Re-dispatch tab corrente per aggiornare lo stato attivo del nav orizzontale
         try {
-          const currentTab = sessionStorage.getItem('GII_EDIT_TAB')
-          if (currentTab) {
-            window.dispatchEvent(new CustomEvent('gii:edit-section-change', { detail: { section: currentTab } }))
-          }
+          const currentTab = getStoredValidEditSection() || resetInvalidEditSectionStorage('trasgressore')
+          window.dispatchEvent(new CustomEvent('gii:edit-section-change', { detail: { section: currentTab } }))
         } catch {}
       }
       wasVisibleRef.current = isVisible

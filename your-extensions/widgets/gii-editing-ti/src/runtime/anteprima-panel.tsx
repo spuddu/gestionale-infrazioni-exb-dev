@@ -7,10 +7,18 @@ import { PDFDocument } from 'pdf-lib'
 import RapportoPdfViewer from '../../../_shared/gii-anteprime/rapporto/rapporto-pdf-viewer'
 
 const GII_UTENTI_URL = 'https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_utenti/FeatureServer/0'
-type UtenteCached = { full_name: string; ruolo: number | null; area: number | null; settore: number | null }
+type UtenteCached = {
+  full_name: string
+  ruolo: number | null
+  area: number | null
+  settore: number | null
+  ruolo_cod: string
+  area_cod: string
+  settore_cod: string
+}
 
 const AREA_NUM: Record<string, number> = { AMM: 1, AGR: 2, TEC: 3 }
-const SETTORE_NUM: Record<string, number> = { CR: 1, GI: 2, D1: 3, D2: 4, D3: 5, D4: 6, D5: 7, D6: 8, CS: 9 }
+const SETTORE_NUM: Record<string, number> = { CR: 1, GI: 2, D1: 3, D2: 4, D3: 5, D4: 6, D5: 7, D6: 8, DS: 9, CS: 9 }
 const AREA_LABELS: Record<string, string> = {
   AGR: 'AGRARIA', TEC: 'TECNICA', AMM: 'AFFARI GENERALI E PROGRAMMAZIONE FINANZIARIA'
 }
@@ -22,7 +30,62 @@ const SETTORE_LABELS: Record<string, string> = {
   D5: 'DISTRETTO 5 \u2013 SENORB\u00CC',
   D6: 'DISTRETTO 6 \u2013 CIXERRI',
   DS: 'MANUTENZIONE OPERE DI DRENO E DI SCOLO',
-  CR: 'CATASTO, RUOLI E SERVIZI TERRITORIALI'
+  CR: 'CATASTO, RUOLI E SERVIZI TERRITORIALI',
+  GI: 'GESTIONE IRRIGUA'
+}
+
+function firstMeaningfulValue (...vals: any[]): any {
+  for (const v of vals) {
+    if (v == null) continue
+    if (typeof v === 'string') {
+      if (v.trim() !== '') return v
+      continue
+    }
+    return v
+  }
+  return undefined
+}
+
+function normalizeRoleCode (v: any): 'TR' | 'TI' | 'RZ' | 'RI' | 'DT' | 'DA' | 'ADMIN' | '' {
+  const s = String(v ?? '').trim().toUpperCase()
+  if (!s) return ''
+  if (s === '1' || s === 'TR' || s.includes('TECNICO RILEVATORE')) return 'TR'
+  if (s === '2' || s === 'TI' || s.includes('TECNICO ISTRUTTORE')) return 'TI'
+  if (s === '3' || s === 'RZ' || s.includes('RESPONSABILE DI ZONA')) return 'RZ'
+  if (s === '4' || s === 'RI' || s.includes('RESPONSABILE ISTRUTTORIA')) return 'RI'
+  if (s === '5' || s === 'DT' || s.includes('DIRETTORE TECNICO')) return 'DT'
+  if (s === '6' || s === 'DA' || s.includes('DIRETTORE AMMINISTRATIVO')) return 'DA'
+  if (s === '7' || s === 'ADMIN' || s.includes('AMMINISTRATORE')) return 'ADMIN'
+  return ''
+}
+
+function normalizeAreaCode (v: any): 'AGR' | 'TEC' | 'AMM' | '' {
+  const s = String(v ?? '').trim().toUpperCase()
+  if (!s) return ''
+  if (s === '1' || s === 'AMM' || s === 'AMMINISTRATIVA' || s === 'AMMINISTRAZIONE' || s.includes('AFFARI GENERALI')) return 'AMM'
+  if (s === '2' || s === 'AGR' || s === 'AGRARIA' || s === 'AGRICOLA' || s === 'AGRICOLTURA') return 'AGR'
+  if (s === '3' || s === 'TEC' || s === 'TECNICA' || s === 'TECNICO') return 'TEC'
+  return ''
+}
+
+function normalizeSettoreCode (area: string, v: any): string {
+  const s = String(v ?? '').trim().toUpperCase()
+  if (!s) return ''
+  if (s === 'CS') return 'DS'
+  if (s === '1') return area === 'AGR' ? 'D1' : 'CR'
+  if (s === '2') return area === 'AGR' ? 'D2' : 'GI'
+  if (s === '3') return 'D1'
+  if (s === '4') return 'D2'
+  if (s === '5') return 'D3'
+  if (s === '6') return 'D4'
+  if (s === '7') return 'D5'
+  if (s === '8') return 'D6'
+  if (s === '9') return 'DS'
+  if (/^D\s*([1-6])$/.test(s)) return `D${s.match(/^D\s*([1-6])$/)?.[1] || ''}`
+  if (s === 'DS' || s === 'D S' || s.includes('DRENO')) return 'DS'
+  if (s === 'CR' || s === 'C R' || s.includes('CATASTO')) return 'CR'
+  if (s === 'GI' || s.includes('GESTIONE IRRIGUA')) return 'GI'
+  return s
 }
 
 function loadEsriModule<T = any> (path: string): Promise<T> {
@@ -50,13 +113,22 @@ async function ensureUtentiCache (): Promise<Map<string, UtenteCached> | null> {
     const FeatureLayer = await loadEsriModule<any>('esri/layers/FeatureLayer')
     const fl = new FeatureLayer({ url: GII_UTENTI_URL })
     if (typeof fl.load === 'function') await fl.load()
-    const res = await fl.queryFeatures({ where: '1=1', outFields: ['username', 'full_name', 'ruolo', 'area', 'settore'], returnGeometry: false })
+    const res = await fl.queryFeatures({ where: '1=1', outFields: ['username', 'full_name', 'ruolo', 'area', 'settore', 'ruolo_cod', 'area_cod', 'settore_cod'], returnGeometry: false })
     const map = new Map<string, UtenteCached>()
     for (const f of (res.features || [])) {
       const a = f.attributes || {}
       const uname = String(a.username || '').trim()
       if (!uname) continue
-      map.set(uname, { full_name: a.full_name || uname, ruolo: a.ruolo != null ? Number(a.ruolo) : null, area: a.area != null ? Number(a.area) : null, settore: a.settore != null ? Number(a.settore) : null })
+      const areaCod = normalizeAreaCode(firstMeaningfulValue(a.area_cod, a.area))
+      map.set(uname, {
+        full_name: a.full_name || uname,
+        ruolo: a.ruolo != null ? Number(a.ruolo) : null,
+        area: a.area != null ? Number(a.area) : null,
+        settore: a.settore != null ? Number(a.settore) : null,
+        ruolo_cod: normalizeRoleCode(firstMeaningfulValue(a.ruolo_cod, a.ruolo)),
+        area_cod: areaCod,
+        settore_cod: normalizeSettoreCode(areaCod, firstMeaningfulValue(a.settore_cod, a.settore))
+      })
     }
     _utentiCache = map
     return map
@@ -66,10 +138,19 @@ async function ensureUtentiCache (): Promise<Map<string, UtenteCached> | null> {
 
 function findUserFullName (cache: Map<string, UtenteCached> | null, ruoloNum: number, areaNum?: number, settoreNum?: number): string {
   if (!cache) return ''
+  const targetRole = normalizeRoleCode(ruoloNum)
+  const targetArea = areaNum != null ? normalizeAreaCode(areaNum) : ''
+  const targetSettore = settoreNum != null ? normalizeSettoreCode(targetArea, settoreNum) : ''
   for (const [, entry] of cache) {
-    if (entry.ruolo !== ruoloNum) continue
-    if (areaNum != null && entry.area !== areaNum) continue
-    if (settoreNum != null && entry.settore !== settoreNum) continue
+    const entryRole = entry.ruolo_cod || normalizeRoleCode(entry.ruolo)
+    const entryArea = entry.area_cod || normalizeAreaCode(entry.area)
+    const entrySettore = entry.settore_cod || normalizeSettoreCode(entryArea, entry.settore)
+    if (targetRole && entryRole !== targetRole) continue
+    if (!targetRole && entry.ruolo !== ruoloNum) continue
+    if (targetArea && entryArea !== targetArea) continue
+    if (!targetArea && areaNum != null && entry.area !== areaNum) continue
+    if (targetSettore && entrySettore !== targetSettore) continue
+    if (!targetSettore && settoreNum != null && entry.settore !== settoreNum) continue
     return entry.full_name || ''
   }
   return ''
@@ -94,8 +175,8 @@ function fmtNum (v: any): string { if (v == null || v === '') return ''; const n
 
 function buildPlaceholderMap (data: any, utentiCache: Map<string, UtenteCached> | null): Record<string, string> {
   const d = data || {}
-  const areaCod = String(d.area_cod || '').toUpperCase()
-  const settoreCod = String(d.settore_cod || '').toUpperCase()
+  const areaCod = normalizeAreaCode(firstMeaningfulValue(d.area_cod, d.area))
+  const settoreCod = normalizeSettoreCode(areaCod, firstMeaningfulValue(d.settore_cod, d.settore))
   const isPF = String(d.tipologia_soggetto || '').toUpperCase() === 'PF'
   const areaN = AREA_NUM[areaCod] ?? null
   const settoreN = SETTORE_NUM[settoreCod] ?? null
