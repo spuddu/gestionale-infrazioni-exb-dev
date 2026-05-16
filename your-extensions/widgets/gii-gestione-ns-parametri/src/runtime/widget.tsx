@@ -208,9 +208,57 @@ function getCurrentGiiContext(): { ruoloCod: string, areaCod: string, settoreCod
   }
 }
 
+function normalizeGiiAccessCode(v: any): string {
+  return String(v ?? '').trim().toUpperCase().replace(/-/g, '_')
+}
+
+function getGiiOperationalProfileCode(): string {
+  const u: any = (window as any).__giiUserRole || {}
+
+  const direct = normalizeGiiAccessCode(u?.profiloCod ?? u?.profilo_cod ?? u?.profileCode ?? u?.profile_code)
+  if (direct) return direct
+
+  const role = normalizeGiiAccessCode(u?.ruoloCod ?? u?.ruolo_cod ?? u?.roleCod ?? u?.roleCode ?? u?.role_code)
+  const area = normalizeGiiAccessCode(u?.areaCod ?? u?.area_cod ?? u?.areaCode ?? u?.area_code)
+  if (role === 'TI' && area === 'AMM') return 'TI_AMM'
+  if (role === 'RI' && area === 'AMM') return 'RI_AMM'
+  if (role) return role
+
+  const roleNum = Number(u?.ruolo)
+  const areaNum = Number(u?.area)
+  if (roleNum === 7) return 'ADMIN'
+  if (roleNum === 4 && areaNum === 1) return 'RI_AMM'
+  if (roleNum === 2 && areaNum === 1) return 'TI_AMM'
+  if (roleNum === 1) return 'TR'
+  if (roleNum === 2) return 'TI'
+  if (roleNum === 3) return 'RZ'
+  if (roleNum === 4) return 'RI'
+  if (roleNum === 5) return 'DT'
+  if (roleNum === 6) return 'DA'
+
+  const label = normalizeGiiAccessCode([
+    u?.profiloLabel,
+    u?.ruoloLabel,
+    u?.roleLabel,
+    u?.ruolo_nome,
+    u?.ruolo
+  ].filter(Boolean).join(' '))
+  if (!label) return ''
+  if (/ADMIN|AMMINISTRATORE/.test(label)) return 'ADMIN'
+  if (/RI_AMM|RESPONSABILE.*ISTRUTTORIA.*AMMINISTRATIV/.test(label)) return 'RI_AMM'
+  if (/TI_AMM|TECNICO.*ISTRUTTOR.*AMMINISTRATIV/.test(label)) return 'TI_AMM'
+  if (/^RI$|(^|[^A-Z])RI([^A-Z]|$)|RESPONSABILE.*ISTRUTTORIA/.test(label)) return 'RI'
+  if (/^TI$|(^|[^A-Z])TI([^A-Z]|$)|TECNICO.*ISTRUTTOR/.test(label)) return 'TI'
+  if (/^TR$|(^|[^A-Z])TR([^A-Z]|$)|TECNICO.*RILEVATORE/.test(label)) return 'TR'
+  if (/^RZ$|(^|[^A-Z])RZ([^A-Z]|$)|RESPONSABILE.*ZONA/.test(label)) return 'RZ'
+  if (/^DT$|(^|[^A-Z])DT([^A-Z]|$)|DIRETTORE.*TECNICO/.test(label)) return 'DT'
+  if (/^DA$|(^|[^A-Z])DA([^A-Z]|$)|DIRETTORE.*AMMINISTRATIVO/.test(label)) return 'DA'
+  return ''
+}
+
 function isRiOrAdminUser(): boolean {
-  const { ruoloCod } = getCurrentGiiContext()
-  return ruoloCod === 'RI' || ruoloCod === 'ADMIN'
+  const profiloCod = getGiiOperationalProfileCode()
+  return profiloCod === 'RI' || profiloCod === 'ADMIN'
 }
 
 export default function Widget(props: AllWidgetProps<IMConfig>) {

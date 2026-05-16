@@ -52,8 +52,98 @@ const SETTORE_LABELS: Record<string, string> = {
   D5: 'Distretto 5 – Senorbì',
   D6: 'Distretto 6 – Cixerri',
   DS: 'Manutenzione opere di dreno e di scolo',
-  CR: 'Catasto, ruoli e servizi territoriali',
+  CR: 'Catasto, Ruoli e Servizi Territoriali',
   GI: 'Gestione irrigua'
+}
+
+type DomainLabelGroup = 'area' | 'settore' | 'ruolo'
+type DomainLabelMaps = Record<DomainLabelGroup, Record<string, string>>
+
+const EMPTY_DOMAIN_LABELS: DomainLabelMaps = { area: {}, settore: {}, ruolo: {} }
+const SETTORE_TEXT_CODES = new Set(['CR', 'GI', 'D1', 'D2', 'D3', 'D4', 'D5', 'D6', 'DS'])
+
+function normalizeTextCode (v: any): string {
+  return String(v ?? '').trim().toUpperCase()
+}
+
+function cloneEmptyDomainLabels (): DomainLabelMaps {
+  return { area: {}, settore: {}, ruolo: {} }
+}
+
+function getDomainGroupFromFieldName (fieldName: string): DomainLabelGroup | null {
+  const f = String(fieldName || '').trim().toLowerCase()
+  if (f === 'area' || f === 'area_cod' || f === 'areacod') return 'area'
+  if (f === 'settore' || f === 'settore_cod' || f === 'settorecod' || f === 'id_settore') return 'settore'
+  if (f === 'ruolo' || f === 'ruolo_cod' || f === 'ruolocod') return 'ruolo'
+  return null
+}
+
+function normalizeDomainLookupKey (group: DomainLabelGroup, value: any): string {
+  const text = normalizeTextCode(value)
+  if (!text) return ''
+  if (group === 'area') {
+    const area = normalizeAreaCode(text)
+    return area || text
+  }
+  if (group === 'settore') {
+    if (text === 'CS') return 'DS'
+    if (SETTORE_TEXT_CODES.has(text)) return text
+    const n = Number(value)
+    return Number.isFinite(n) ? normalizeSettoreCode(n) : text
+  }
+  if (group === 'ruolo') {
+    if (text === 'RI AMM' || text === 'RI-AMM') return 'RI_AMM'
+    if (text === 'TI AMM' || text === 'TI-AMM') return 'TI_AMM'
+    const n = Number(value)
+    return Number.isFinite(n) && RUOLO_LABEL[n] ? RUOLO_LABEL[n] : text
+  }
+  return text
+}
+
+function buildDomainLabelMapsFromFields (fields: any[]): DomainLabelMaps {
+  const maps = cloneEmptyDomainLabels()
+  for (const f of (Array.isArray(fields) ? fields : [])) {
+    const group = getDomainGroupFromFieldName(String(f?.name || ''))
+    const codedValues = f?.domain?.codedValues
+    if (!group || !Array.isArray(codedValues)) continue
+    for (const cv of codedValues) {
+      const label = String(cv?.name ?? '').trim()
+      if (!label) continue
+      const normalizedKey = normalizeDomainLookupKey(group, cv?.code)
+      const rawKey = normalizeTextCode(cv?.code)
+      if (normalizedKey) maps[group][normalizedKey] = label
+      if (rawKey) maps[group][rawKey] = label
+    }
+  }
+  return maps
+}
+
+async function loadDomainLabelMaps (layerUrl: string): Promise<DomainLabelMaps> {
+  const FeatureLayer = await loadEsriModule<any>('esri/layers/FeatureLayer')
+  const layer = new FeatureLayer({ url: layerUrl, outFields: ['*'] })
+  if (typeof layer.load === 'function') {
+    try { await layer.load() } catch {}
+  }
+  return buildDomainLabelMapsFromFields(Array.isArray(layer?.fields) ? layer.fields : [])
+}
+
+function getDomainLabel (domainLabels: DomainLabelMaps | null | undefined, group: DomainLabelGroup, code: any): string | null {
+  const key = normalizeDomainLookupKey(group, code)
+  if (!key) return null
+  const direct = domainLabels?.[group]?.[key]
+  if (direct) return direct
+  const raw = normalizeTextCode(code)
+  return raw ? (domainLabels?.[group]?.[raw] || null) : null
+}
+
+function getAreaLabelFromCode (code: any, domainLabels?: DomainLabelMaps | null): string {
+  const key = normalizeDomainLookupKey('area', code)
+  return getDomainLabel(domainLabels, 'area', code) || AREA_LABELS[key] || key || '—'
+}
+
+function getSettoreLabelFromCode (code: any, domainLabels?: DomainLabelMaps | null): string {
+  const key = normalizeDomainLookupKey('settore', code)
+  return getDomainLabel(domainLabels, 'settore', code) || SETTORE_LABELS[key] || key || '—'
 }
 
 function pickField (d: any, name: string): any {
@@ -377,10 +467,11 @@ function isRecordVisibleForCurrentUser (d: any, user: GiiUserInfo | null): boole
     if (!isInFaseSanzionatoria(d)) return false
     if (role === 'TI_AMM') {
       const meUser = String(user.username || '').trim()
-      const tiAmmUser = String(d['ti_amm_assegnato_username'] ?? '').trim()
-      const tiAmmName = String(d['ti_amm_assegnato_nome'] ?? '').trim()
+      const meName = String(user.fullName ?? user.nome ?? user.displayName ?? '').trim()
+      const tiAmmUser = String(d['ti_amm_assegnato_username'] ?? d['ti_amm_assegnato_user'] ?? d['ti_amm_assegnato'] ?? '').trim()
+      const tiAmmName = String(d['ti_amm_assegnato_nome'] ?? d['ti_amm_assegnato_name'] ?? '').trim()
       if (!tiAmmUser && !tiAmmName) return false
-      return equalsUser(tiAmmUser, meUser) || equalsUser(tiAmmName, meUser)
+      return equalsUser(tiAmmUser, meUser) || equalsUser(tiAmmName, meUser) || (meName ? equalsUser(tiAmmName, meName) : false)
     }
     return true
   }
@@ -412,6 +503,14 @@ function isRecordVisibleForCurrentUser (d: any, user: GiiUserInfo | null): boole
   return true
 }
 
+function isWaitingForTiAmmAfterRiAmm (d: any): boolean {
+  const riAmmLast = getRoleLastTouchMs(d, 'RI_AMM')
+  const tiAmmLast = getRoleLastTouchMs(d, 'TI_AMM')
+  return hasRuoloData(d, 'TI_AMM') && (
+    tiAmmLast === null || riAmmLast === null || tiAmmLast > riAmmLast
+  )
+}
+
 function isAttesaMia (d: any, user: GiiUserInfo | null): boolean {
   if (!user || user.isAdmin || user.isWorkflowAdmin) return false
   const role = getEffectiveRole(user.ruoloLabel || '', user.area, user.areaCod)
@@ -423,14 +522,15 @@ function isAttesaMia (d: any, user: GiiUserInfo | null): boolean {
     const meUser = String(user.username || '').trim()
     const meName = String(user.fullName ?? user.nome ?? user.displayName ?? '').trim()
     const tiUser = role === 'TI_AMM'
-      ? String(d['ti_amm_assegnato_username'] ?? '').trim()
+      ? String(d['ti_amm_assegnato_username'] ?? d['ti_amm_assegnato_user'] ?? d['ti_amm_assegnato'] ?? '').trim()
       : String(pickField(d, 'ti_assegnato_username') ?? pickField(d, 'ti_assegnato_user') ?? pickField(d, 'ti_assegnato') ?? '').trim()
     const tiName = role === 'TI_AMM'
-      ? String(d['ti_amm_assegnato_nome'] ?? '').trim()
+      ? String(d['ti_amm_assegnato_nome'] ?? d['ti_amm_assegnato_name'] ?? '').trim()
       : String(d['ti_assegnato_nome'] ?? d['ti_assegnato_name'] ?? '').trim()
     return equalsUser(tiUser, meUser) || equalsUser(tiName, meUser) || (meName ? equalsUser(tiName, meName) : false)
   }
 
+  if (role === 'RI_AMM' && n === 2) return !isWaitingForTiAmmAfterRiAmm(d)
   if (role === 'RZ' && getTiIstruttoriaInfo(d).isInTiIstruttoria) return false
   return n === 0 || n === 1 || n === 3
 }
@@ -443,6 +543,7 @@ function isAttesaAltri (d: any, user: GiiUserInfo | null): boolean {
   const n = val != null && val !== '' ? Number(val) : null
   if (role === 'RZ' && getTiIstruttoriaInfo(d).isInTiIstruttoria) return true
   if ((role === 'TI' || role === 'TI_AMM') && n === 2) return !isAttesaMia(d, user)
+  if (role === 'RI_AMM' && n === 2) return isWaitingForTiAmmAfterRiAmm(d)
   return n === 2 || n === 4
 }
 
@@ -838,9 +939,9 @@ function getAreaCodeFromRecord (d: any, fallbackArea?: any): 'AMM' | 'AGR' | 'TE
   return normalizeAreaCode(raw || fallbackArea)
 }
 
-function getAreaDisplay (d: any, fallbackArea?: any): string {
+function getAreaDisplay (d: any, fallbackArea?: any, domainLabels?: DomainLabelMaps | null): string {
   const code = getAreaCodeFromRecord(d, fallbackArea)
-  return AREA_LABELS[code] || code || '—'
+  return getAreaLabelFromCode(code, domainLabels)
 }
 
 function getSettoreCodeFromRecord (d: any, fallbackSettore?: any): string {
@@ -848,9 +949,9 @@ function getSettoreCodeFromRecord (d: any, fallbackSettore?: any): string {
   return normalizeSettoreCode(raw || fallbackSettore)
 }
 
-function getSettoreDisplay (d: any, user?: GiiUserInfo | null): string {
+function getSettoreDisplay (d: any, user?: GiiUserInfo | null, domainLabels?: DomainLabelMaps | null): string {
   const code = getSettoreCodeFromRecord(d, user?.settoreCod || user?.settore)
-  return SETTORE_LABELS[code] || code || '—'
+  return getSettoreLabelFromCode(code, domainLabels)
 }
 
 function getGiorniFermo (d: any, now: number): string {
@@ -860,7 +961,7 @@ function getGiorniFermo (d: any, now: number): string {
   return String(days)
 }
 
-function getRecordSearchText (d: any, user: GiiUserInfo | null): string {
+function getRecordSearchText (d: any, user: GiiUserInfo | null, domainLabels?: DomainLabelMaps | null): string {
   const parts: any[] = []
   Object.keys(d || {}).forEach(k => {
     const v = d[k]
@@ -877,8 +978,8 @@ function getRecordSearchText (d: any, user: GiiUserInfo | null): string {
     getTecnicoRilevatore(d),
     getIstruttore(d),
     formatDate(getDataRapportoMs(d)),
-    getAreaDisplay(d, user?.areaCod),
-    getSettoreDisplay(d, user),
+    getAreaDisplay(d, user?.areaCod, domainLabels),
+    getSettoreDisplay(d, user, domainLabels),
     faseProcedimentaleLabel(d),
     ruoloPressoLabel(d)
   )
@@ -1009,6 +1110,7 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
   const [selectedRowId, setSelectedRowId] = React.useState('')
   const [hoveredRowId, setHoveredRowId] = React.useState('')
   const [page, setPage] = React.useState(1)
+  const [domainLabels, setDomainLabels] = React.useState<DomainLabelMaps>(EMPTY_DOMAIN_LABELS)
 
   React.useEffect(() => {
     const hUser = () => setUser(readGiiUser())
@@ -1025,6 +1127,27 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
 
   const view = React.useMemo(() => pickRuntimeViewForUser(user), [user?.username, user?.ruoloLabel, user?.areaCod, user?.settoreCod, user?.isAdmin, user?.isWorkflowAdmin])
   const effectiveRole = getEffectiveRole(user?.ruoloLabel || '', user?.area, user?.areaCod)
+
+  // Domini ufficiali AGOL del layer/vista runtime: fonte primaria per label Area/Settore.
+  // I record continuano a determinare quali opzioni mostrare; i domini determinano come chiamarle.
+  React.useEffect(() => {
+    let cancelled = false
+    const layerUrl = String(view?.layerUrl || '').trim()
+    if (!layerUrl) {
+      setDomainLabels(EMPTY_DOMAIN_LABELS)
+      return () => { cancelled = true }
+    }
+    ;(async () => {
+      try {
+        const labels = await loadDomainLabelMaps(layerUrl)
+        if (!cancelled) setDomainLabels(labels)
+      } catch (ex) {
+        console.warn('[GII-Report] Domini AGOL non disponibili, uso fallback locale:', ex)
+        if (!cancelled) setDomainLabels(EMPTY_DOMAIN_LABELS)
+      }
+    })()
+    return () => { cancelled = true }
+  }, [view?.layerUrl])
 
   React.useEffect(() => {
     let cancelled = false
@@ -1072,7 +1195,7 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
       const ruoloCorrente = getRuoloPressoCuiSiTrova(r)
       const isStale = last !== null && (now - last) > staleMs
 
-      if (q && !getRecordSearchText(r, user).includes(q)) return false
+      if (q && !getRecordSearchText(r, user, domainLabels).includes(q)) return false
       if (areaFilter !== 'tutte' && getAreaCodeFromRecord(r, user?.areaCod) !== areaFilter) return false
       if (settoreFilter !== 'tutte' && getSettoreCodeFromRecord(r, user?.settoreCod) !== settoreFilter) return false
       if (fromMs !== null && (last === null || last < fromMs)) return false
@@ -1092,8 +1215,8 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
       if (key === 'reportDate') return getDataRapportoMs(row) || 0
       if (key === 'rilevatore') return getTecnicoRilevatore(row)
       if (key === 'istruttore') return getIstruttore(row)
-      if (key === 'area') return getAreaDisplay(row, user?.areaCod)
-      if (key === 'settore') return getSettoreDisplay(row, user)
+      if (key === 'area') return getAreaDisplay(row, user?.areaCod, domainLabels)
+      if (key === 'settore') return getSettoreDisplay(row, user, domainLabels)
       if (key === 'faseProcedimentale') return faseProcedimentaleLabel(row)
       if (key === 'ruoloCorrente') return ruoloPressoLabel(row)
       if (key === 'giorniFermo') return Number(getGiorniFermo(row, now)) || 0
@@ -1115,7 +1238,7 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
     })
 
     return out
-  }, [records, search, areaFilter, settoreFilter, fromDate, toDate, situationFilter, faseFilter, ruoloFilter, sortRules, user?.username, user?.ruoloLabel, user?.areaCod, user?.settoreCod, cfg.staleDays])
+  }, [records, search, areaFilter, settoreFilter, fromDate, toDate, situationFilter, faseFilter, ruoloFilter, sortRules, user?.username, user?.ruoloLabel, user?.areaCod, user?.settoreCod, cfg.staleDays, domainLabels])
 
   const tableRows = Math.max(5, Number(cfg.tableRows || 25))
   const pageCount = Math.max(1, Math.ceil(filtered.length / tableRows))
@@ -1156,9 +1279,11 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
   const areeDisponibili = React.useMemo(() => {
     const map = new Map<string, string>()
     for (const r of records) {
+      const settoreCode = getSettoreCodeFromRecord(r, user?.settoreCod)
+      if (settoreFilter !== 'tutte' && settoreCode !== settoreFilter) continue
       const code = getAreaCodeFromRecord(r, user?.areaCod)
       if (!code) continue
-      map.set(code, getAreaDisplay(r, user?.areaCod))
+      map.set(code, getAreaDisplay(r, user?.areaCod, domainLabels))
     }
     const order = ['AMM', 'AGR', 'TEC']
     return Array.from(map.entries()).sort((a, b) => {
@@ -1169,17 +1294,34 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
       if (ib >= 0) return 1
       return a[1].localeCompare(b[1], 'it')
     })
-  }, [records, user?.areaCod])
+  }, [records, settoreFilter, user?.areaCod, user?.settoreCod, domainLabels])
 
   const settoriDisponibili = React.useMemo(() => {
     const map = new Map<string, string>()
     for (const r of records) {
+      const areaCode = getAreaCodeFromRecord(r, user?.areaCod)
+      if (areaFilter !== 'tutte' && areaCode !== areaFilter) continue
       const code = getSettoreCodeFromRecord(r, user?.settoreCod)
       if (!code) continue
-      map.set(code, getSettoreDisplay(r, user))
+      map.set(code, getSettoreDisplay(r, user, domainLabels))
     }
     return Array.from(map.entries()).sort((a, b) => a[1].localeCompare(b[1], 'it', { numeric: true, sensitivity: 'base' }))
-  }, [records, user?.settoreCod, user?.areaCod])
+  }, [records, areaFilter, user?.settoreCod, user?.areaCod, domainLabels])
+
+  React.useEffect(() => {
+    if (areaFilter === 'tutte' || areeDisponibili.length === 0) return
+    if (!areeDisponibili.some(([code]) => code === areaFilter)) setAreaFilter('tutte')
+  }, [areaFilter, areeDisponibili])
+
+  React.useEffect(() => {
+    if (settoreFilter === 'tutte' || areaFilter !== 'tutte' || areeDisponibili.length !== 1) return
+    setAreaFilter(areeDisponibili[0][0])
+  }, [settoreFilter, areaFilter, areeDisponibili])
+
+  React.useEffect(() => {
+    if (settoreFilter === 'tutte' || settoriDisponibili.length === 0) return
+    if (!settoriDisponibili.some(([code]) => code === settoreFilter)) setSettoreFilter('tutte')
+  }, [settoreFilter, settoriDisponibili])
 
   const attesaMia = records.filter(r => isAttesaMia(r, user)).length
   const attesaAltri = records.filter(r => isAttesaAltri(r, user)).length
@@ -1218,6 +1360,14 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
       if (index >= 0) {
         const activeRule = effectiveBase[index]
 
+        // L'ordinamento predefinito è già "Ultimo aggiornamento ▼".
+        // Se l'utente clicca per prima cosa quella intestazione, deve vedere
+        // un cambio reale: passiamo a "Ultimo aggiornamento ▲" invece di
+        // rimuovere la regola e tornare visivamente allo stesso ordinamento.
+        if (hasOnlyDefault && key === 'lastUpdate' && activeRule.dir === 'desc') {
+          return [{ key: 'lastUpdate', dir: 'asc' }]
+        }
+
         if (activeRule.dir === 'asc') {
           const next = [...effectiveBase]
           next[index] = { ...activeRule, dir: 'desc' }
@@ -1239,7 +1389,7 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
       'Tecnico rilevatore',
       'Tecnico istruttore',
       'Area',
-      'Settore/Ufficio',
+      'Settore',
       'Fase procedimentale',
       'Competenza attuale',
       'Ultimo aggiornamento',
@@ -1250,8 +1400,8 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
       formatDate(getDataRapportoMs(r)),
       getTecnicoRilevatore(r),
       getIstruttore(r),
-      getAreaDisplay(r, user?.areaCod),
-      getSettoreDisplay(r, user),
+      getAreaDisplay(r, user?.areaCod, domainLabels),
+      getSettoreDisplay(r, user, domainLabels),
       faseProcedimentaleLabel(r),
       ruoloPressoLabel(r),
       formatDateTime(getLastTouchMs(r)),
@@ -1301,12 +1451,6 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
             {lastLoad && <div style={{ color: cfg.mutedColor, fontSize: 12, whiteSpace: 'nowrap' }}>Ultimo aggiornamento: {new Date(lastLoad).toLocaleString('it-IT')}</div>}
           </div>
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', justifyContent: 'flex-end', flexShrink: 0 }}>
-            <button
-              onClick={() => setSortRules(DEFAULT_SORT_RULES)}
-              disabled={isDefaultSort}
-              title='Ripristina ordinamento predefinito'
-              style={{ width: 36, height: 36, border: `1px solid ${cfg.cardBorder}`, background: isDefaultSort ? 'rgba(255,255,255,0.04)' : 'rgba(255,255,255,0.08)', color: isDefaultSort ? cfg.mutedColor : cfg.textColor, borderRadius: 8, padding: 0, fontSize: 17, fontWeight: 900, lineHeight: '34px', textAlign: 'center', cursor: isDefaultSort ? 'not-allowed' : 'pointer' }}
-            >↺</button>
             <button onClick={() => setNonce(n => n + 1)} style={{ border: `1px solid ${cfg.cardBorder}`, background: 'rgba(255,255,255,0.08)', color: cfg.textColor, borderRadius: 12, padding: '8px 12px', fontWeight: 700, cursor: 'pointer' }}>Aggiorna</button>
             <button onClick={exportCsv} disabled={filtered.length === 0} style={{ border: `1px solid ${cfg.cardBorder}`, background: filtered.length ? cfg.accentColor : 'rgba(255,255,255,0.08)', color: filtered.length ? '#111827' : cfg.mutedColor, borderRadius: 12, padding: '8px 12px', fontWeight: 800, cursor: filtered.length ? 'pointer' : 'not-allowed' }}>Esporta CSV</button>
           </div>
@@ -1329,7 +1473,7 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
               </Select>
             </div>
             <div>
-              <FieldLabel cfg={cfg}>Settore/Ufficio</FieldLabel>
+              <FieldLabel cfg={cfg}>Settore</FieldLabel>
               <Select value={settoreFilter} onChange={setSettoreFilter} cfg={cfg}>
                 <option value='tutte'>Tutti</option>
                 {settoriDisponibili.map(([code, label]) => <option key={code} value={code}>{label}</option>)}
@@ -1377,10 +1521,18 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
         <section style={{ background: cfg.cardBg, border: `1px solid ${cfg.cardBorder}`, borderRadius: 18, padding: 12, flex: '1 1 auto', minHeight: 0, display: 'flex', flexDirection: 'column' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, marginBottom: 8, flexShrink: 0 }}>
             <h3 style={{ margin: 0, fontSize: 15, color: cfg.textColor }}>Sintesi procedimentale</h3>
-            <div style={{ color: cfg.mutedColor, fontSize: 12 }}>Pagina {safePage} di {pageCount}</div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexShrink: 0 }}>
+              <div style={{ color: cfg.mutedColor, fontSize: 12 }}>Pagina {safePage} di {pageCount}</div>
+              <button
+                onClick={() => setSortRules(DEFAULT_SORT_RULES)}
+                disabled={isDefaultSort}
+                title='Ripristina ordinamento predefinito'
+                style={{ width: 36, height: 36, border: `1px solid ${isDefaultSort ? cfg.cardBorder : cfg.accentColor}`, background: isDefaultSort ? 'rgba(255,255,255,0.04)' : cfg.accentColor, color: isDefaultSort ? cfg.mutedColor : '#111827', borderRadius: 8, padding: 0, fontSize: 17, fontWeight: 900, lineHeight: '34px', textAlign: 'center', cursor: isDefaultSort ? 'not-allowed' : 'pointer', boxShadow: isDefaultSort ? 'none' : '0 0 0 2px rgba(254,235,34,0.18)' }}
+              >↺</button>
+            </div>
           </div>
-          <div style={{ overflow: 'auto', flex: '1 1 auto', minHeight: 0 }}>
-            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12, tableLayout: 'fixed' }}>
+          <div style={{ flex: '1 1 auto', minHeight: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12, tableLayout: 'fixed', flexShrink: 0 }}>
               <colgroup>
                 <col style={{ width: '6%' }} />
                 <col style={{ width: '8%' }} />
@@ -1393,20 +1545,35 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
                 <col style={{ width: '11%' }} />
                 <col style={{ width: '6%' }} />
               </colgroup>
-              <thead style={{ position: 'sticky', top: 0, zIndex: 1, background: cfg.cardBg }}>
+              <thead style={{ background: cfg.cardBg }}>
                 <tr style={{ textAlign: 'left' }}>
                   {th('N. rapporto', 'id')}
                   {th('Data rilevazione', 'reportDate')}
                   {th('Tecnico rilevatore', 'rilevatore')}
                   {th('Tecnico istruttore', 'istruttore')}
                   {th('Area', 'area')}
-                  {th('Settore/Ufficio', 'settore')}
+                  {th('Settore', 'settore')}
                   {th('Fase procedimentale', 'faseProcedimentale')}
                   {th('Competenza attuale', 'ruoloCorrente')}
                   {th('Ultimo aggiornamento', 'lastUpdate')}
                   {th('Giorni di fermo', 'giorniFermo', 'center')}
                 </tr>
               </thead>
+            </table>
+            <div style={{ overflowY: 'auto', overflowX: 'hidden', flex: '1 1 auto', minHeight: 0 }}>
+              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12, tableLayout: 'fixed' }}>
+              <colgroup>
+                <col style={{ width: '6%' }} />
+                <col style={{ width: '8%' }} />
+                <col style={{ width: '10%' }} />
+                <col style={{ width: '10%' }} />
+                <col style={{ width: '7%' }} />
+                <col style={{ width: '15%' }} />
+                <col style={{ width: '14%' }} />
+                <col style={{ width: '13%' }} />
+                <col style={{ width: '11%' }} />
+                <col style={{ width: '6%' }} />
+              </colgroup>
               <tbody>
                 {pageRows.map((r, i) => {
                   const oid = getObjectId(r)
@@ -1435,8 +1602,8 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
                       <td style={{ padding: '8px 7px', color: cfg.mutedColor, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{formatDate(getDataRapportoMs(r))}</td>
                       <td title={getTecnicoRilevatore(r)} style={{ padding: '8px 7px', color: cfg.mutedColor, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{getTecnicoRilevatore(r)}</td>
                       <td title={getIstruttore(r)} style={{ padding: '8px 7px', color: cfg.mutedColor, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{getIstruttore(r)}</td>
-                      <td title={getAreaDisplay(r, user?.areaCod)} style={{ padding: '8px 7px', color: cfg.mutedColor, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{getAreaDisplay(r, user?.areaCod)}</td>
-                      <td title={getSettoreDisplay(r, user)} style={{ padding: '8px 7px', color: cfg.mutedColor, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{getSettoreDisplay(r, user)}</td>
+                      <td title={getAreaDisplay(r, user?.areaCod, domainLabels)} style={{ padding: '8px 7px', color: cfg.mutedColor, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{getAreaDisplay(r, user?.areaCod, domainLabels)}</td>
+                      <td title={getSettoreDisplay(r, user, domainLabels)} style={{ padding: '8px 7px', color: cfg.mutedColor, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{getSettoreDisplay(r, user, domainLabels)}</td>
                       <td title={faseProcedimentaleLabel(r)} style={{ padding: '8px 7px', color: cfg.mutedColor, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{faseProcedimentaleLabel(r)}</td>
                       <td title={ruoloPressoLabel(r)} style={{ padding: '8px 7px', color: cfg.mutedColor, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{ruoloPressoLabel(r)}</td>
                       <td style={{ padding: '8px 7px', color: cfg.mutedColor, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{formatDateTime(last)}</td>
@@ -1448,8 +1615,10 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
                   <tr><td colSpan={10} style={{ padding: 14, color: cfg.mutedColor }}>Nessuna pratica corrisponde ai filtri impostati.</td></tr>
                 )}
               </tbody>
-            </table>
+              </table>
+            </div>
           </div>
+
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10, marginTop: 10, flexWrap: 'wrap', flexShrink: 0 }}>
             <div style={{ color: cfg.mutedColor, fontSize: 12 }}>Mostrate {pageRows.length} pratiche su {filtered.length} risultati.</div>
             <div style={{ display: 'flex', gap: 8 }}>

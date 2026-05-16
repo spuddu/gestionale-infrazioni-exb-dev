@@ -10,7 +10,7 @@ const RUOLO_LABEL: Record<number, string> = { 1:'TR', 2:'TI', 3:'RZ', 4:'RI', 5:
 const RUOLO_FULL:  Record<string, string> = {
   TR:'Tecnico Rilevatore', TI:'Tecnico Istruttore', RZ:'Responsabile di Zona',
   RI:'Responsabile Istruttoria', TI_AMM:'Tecnico Istruttore Amministrativo',
-  RI_AMM:'Responsabile Istruttoria Amministrativa', DT:'Direttore Tecnico',
+  RI_AMM:'Responsabile Istruttoria Amministrativo', DT:'Direttore Tecnico',
   DA:'Direttore Amministrativo', ADMIN:'Amministratore'
 }
 const AREA_LABEL: Record<number, string> = { 1:'AMM', 2:'AGR', 3:'TEC' }
@@ -74,17 +74,22 @@ interface UserInfo { username: string; fullName: string; ruoloLabel: string; ruo
 async function loadUser(): Promise<UserInfo | null> {
   const cached: any = (window as any).__giiUserRole
   if (cached?.username) {
-    const rawRole = normalizeRoleCode(cached.ruoloCod ?? cached.ruolo_cod ?? cached.ruoloLabel, cached.ruolo, cached.isAdmin)
     const area = normalizeAreaCode(cached.areaCod ?? cached.area_cod ?? cached.areaLabel, cached.area)
+    const rawRole = normalizeRoleCode(
+      cached.profiloCod ?? cached.profilo_cod ?? cached.ruoloCod ?? cached.ruolo_cod ?? cached.ruoloLabel,
+      cached.ruolo,
+      cached.isAdmin
+    )
     const ruoloLabel = resolveWorkflowRole(rawRole, area)
     const settore = normalizeSectorCode(cached.settoreCod ?? cached.settore_cod ?? cached.settoreLabel, cached.settore)
     const isAdmin = cached.isAdmin === true || ruoloLabel === 'ADMIN'
+    const profiloLabel = String(cached.profiloLabel || cached.profilo_label || '').trim()
 
     return {
       username: String(cached.username),
       fullName: String(cached.fullName || cached.full_name || cached.username),
       ruoloLabel,
-      ruoloFull: RUOLO_FULL[ruoloLabel] || ruoloLabel,
+      ruoloFull: profiloLabel || RUOLO_FULL[ruoloLabel] || ruoloLabel,
       area,
       settore,
       isAdmin

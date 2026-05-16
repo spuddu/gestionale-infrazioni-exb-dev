@@ -88,11 +88,23 @@ function normalizeSettoreCode (areaCode: string, value: any): string {
   return s
 }
 
+function isRawAreaCodeLabel (label: string): boolean {
+  const s = String(label ?? '').trim().toUpperCase()
+  return s === 'AMM' || s === 'AGR' || s === 'TEC' || s === '1' || s === '2' || s === '3'
+}
+
+function isRawSettoreCodeLabel (label: string): boolean {
+  const s = String(label ?? '').trim().toUpperCase().replace(/\s+/g, '')
+  return s === 'CR' || s === 'GI' || s === 'DS' || s === 'CS' || /^D[1-6]$/.test(s) || /^[1-9]$/.test(s)
+}
+
 function resolveAreaLabel (areaCode: string, labelValue: any): string {
   const label = String(labelValue ?? '').trim()
   const labelCode = normalizeAreaCode(label)
+  // Se il chiamante passa una label già risolta da dominio AGOL, preservala.
+  if (areaCode && label && labelCode === areaCode && !isRawAreaCodeLabel(label)) return label
   if (areaCode && (!label || labelCode === areaCode)) return AREA_LABELS[areaCode] || areaCode
-  if (labelCode) return AREA_LABELS[labelCode] || labelCode
+  if (labelCode) return isRawAreaCodeLabel(label) ? (AREA_LABELS[labelCode] || labelCode) : label
   return label
 }
 
@@ -100,6 +112,8 @@ function resolveSettoreLabel (areaCode: string, settoreCode: string, labelValue:
   const label = String(labelValue ?? '').trim()
   const labelCode = normalizeSettoreCode(areaCode, label)
   const code = settoreCode || labelCode
+  // Se il chiamante passa una label già risolta da dominio AGOL, preservala.
+  if (code && label && labelCode === code && !isRawSettoreCodeLabel(label)) return label
   if (code && (!label || labelCode === code)) return SETTORE_LABELS[code] || code
   if (labelCode === 'DS' && /\bCS\b/i.test(label)) return SETTORE_LABELS.DS
   return label

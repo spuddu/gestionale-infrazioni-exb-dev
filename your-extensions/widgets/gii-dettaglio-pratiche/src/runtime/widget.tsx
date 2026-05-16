@@ -481,6 +481,33 @@ function resolveCodedValueLabel (ds: any, fieldName: string, raw: any): string |
   }
 }
 
+function resolveCodedValueLabelFromFields (fields: any[], fieldName: string, raw: any): string | null {
+  try {
+    if (raw == null || raw === '') return null
+    const target = String(fieldName || '').trim().toLowerCase()
+    if (!target) return null
+    const field = (fields || []).find((f: any) => String(f?.name || '').trim().toLowerCase() === target)
+    const coded = field?.domain?.codedValues
+    if (!coded || !Array.isArray(coded)) return null
+    for (const cv of coded) {
+      const code = cv?.code
+      if (code == raw) return String(cv?.name ?? '')
+      if (String(code) === String(raw)) return String(cv?.name ?? '')
+    }
+    return null
+  } catch {
+    return null
+  }
+}
+
+function resolveCodedValueLabelFromFieldNames (fields: any[], fieldNames: string[], raw: any): string | null {
+  for (const fieldName of fieldNames || []) {
+    const label = resolveCodedValueLabelFromFields(fields, fieldName, raw)
+    if (label) return label
+  }
+  return null
+}
+
 function classifyTipoSoggettoRobusto (raw: any, labelFromDomain: any): 'PF' | 'PG' | null {
   const sLabel = norm(labelFromDomain)
   const sRaw = norm(raw)
@@ -1183,7 +1210,11 @@ function migrateTabs(tabFields: TabFields, tabs: TabConfig[] | undefined): TabCo
       ? LUOGHI_DATI_TAB_ID
       : rawId
 
-    return { ...t, id, fields: f }
+    const label = (id === 'anagrafica' && String(t?.label || '').trim().toLowerCase() === 'anagrafica')
+      ? 'Trasgressore'
+      : t?.label
+
+    return { ...t, id, label, fields: f }
   }
 
   // Se ha già tabs, usa quelle
@@ -1194,7 +1225,7 @@ function migrateTabs(tabFields: TabFields, tabs: TabConfig[] | undefined): TabCo
     result = [
       {
         id: 'anagrafica',
-        label: 'Anagrafica',
+        label: 'Trasgressore',
         fields: tabFields?.anagrafica || []
       },
       {
@@ -1288,6 +1319,15 @@ function migrateTabs(tabFields: TabFields, tabs: TabConfig[] | undefined): TabCo
       const mergedFields = Array.from(new Set([...(fields || []), ...DETAIL_LUOGHI_DATI_FIELDS]))
       return { ...(tab as any), label: 'Luoghi e dati', fields: mergedFields, locked: true, hideEmpty: false } as any
     }
+    if (tab.id === 'anagrafica') {
+      const rawLabel = String((tab as any).label || '').trim()
+      return {
+        ...(tab as any),
+        label: !rawLabel || rawLabel.toLowerCase() === 'anagrafica' ? 'Trasgressore' : rawLabel,
+        hideEmpty: normalizedHideEmpty
+      } as any
+    }
+
     return { ...(tab as any), hideEmpty: normalizedHideEmpty } as any
   })
 }
@@ -1962,7 +2002,8 @@ function CicliTimeline (props: { globalId: string; hasSel: boolean; sortDir: 'as
         const fl = new FeatureLayer({ url: GII_LOG_EVENTI_CICLI_URL })
         if (typeof fl?.load === 'function') await fl.load()
         const gid = normGid(props.globalId)
-        const availableFields = normalizeLogFieldNameSet(fl?.fields || [])
+        const logFields = fl?.fields || []
+        const availableFields = normalizeLogFieldNameSet(logFields)
         const outFields = pickLogOutFields(availableFields, [
           'numero_ciclo_ruolo', 'ruolo_competente', 'utente_operatore',
           'stato_record', 'evento_apertura', 'dt_apertura',
@@ -1980,20 +2021,24 @@ function CicliTimeline (props: { globalId: string; hasSel: boolean; sortDir: 'as
         if (cancelled) return
         const records: CicloRecord[] = (res?.features || []).map((f: any) => {
           const a = f.attributes || f
+          const ruoloCompetenteRaw = a.ruolo_competente
+          const ruoloDestinatarioRaw = a.ruolo_destinatario
+          const areaRaw = a.area_cod || a.area
+          const settoreRaw = a.settore_cod || a.settore
           return {
             numero_ciclo_ruolo: a.numero_ciclo_ruolo ?? null,
-            ruolo_competente: formatRuoloIter(a.ruolo_competente),
+            ruolo_competente: resolveCodedValueLabelFromFieldNames(logFields, ['ruolo_competente', 'ruolo_cod', 'ruolo'], ruoloCompetenteRaw) || formatRuoloIter(ruoloCompetenteRaw),
             utente_operatore: String(a.utente_operatore || ''),
             stato_record: String(a.stato_record || ''),
             evento_apertura: String(a.evento_apertura || ''),
             dt_apertura: a.dt_apertura ?? null,
             evento_chiusura: String(a.evento_chiusura || ''),
             dt_chiusura: a.dt_chiusura ?? null,
-            ruolo_destinatario: formatRuoloIter(a.ruolo_destinatario),
+            ruolo_destinatario: resolveCodedValueLabelFromFieldNames(logFields, ['ruolo_destinatario', 'ruolo_cod', 'ruolo'], ruoloDestinatarioRaw) || formatRuoloIter(ruoloDestinatarioRaw),
             utente_destinatario: String(a.utente_destinatario || ''),
             note_chiusura: String(a.note_chiusura || ''),
-            area: formatAreaIter(a.area_cod || a.area),
-            settore: formatSettoreIter(a.settore_cod || a.settore),
+            area: resolveCodedValueLabelFromFieldNames(logFields, ['area_cod', 'area'], areaRaw) || formatAreaIter(areaRaw),
+            settore: resolveCodedValueLabelFromFieldNames(logFields, ['settore_cod', 'settore'], settoreRaw) || formatSettoreIter(settoreRaw),
             fase: String(a.fase || ''),
             num_campi_modificati: a.num_campi_modificati ?? null,
             campi_modificati: String(a.campi_modificati || ''),
@@ -3226,7 +3271,7 @@ const isPgOnlyField = React.useCallback((fieldName: string) => {
     }}>
       {hasSel && tabs.map((t) => {
         const isIterTab = Boolean((t as any).isIterTab)
-        const iterSortIndicator = isIterTab && tab === t.id && iterSortDir ? (iterSortDir === 'desc' ? '↓' : '↑') : ''
+        const iterSortIndicator = isIterTab && tab === t.id && iterSortDir ? (iterSortDir === 'desc' ? '▼' : '▲') : ''
         return (
           <TabButton 
             key={t.id}

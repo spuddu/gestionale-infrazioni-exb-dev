@@ -2,7 +2,8 @@
 /** @jsxFrag React.Fragment */
 import { React, jsx, type AllWidgetProps } from 'jimu-core'
 import type { IMConfig } from '../config'
-import { useState, useEffect, useMemo } from 'react'
+import { useState, useEffect, useMemo, useRef } from 'react'
+import { createPortal } from 'react-dom'
 
 const { Fragment } = React
 
@@ -55,6 +56,13 @@ const GROUP_MAP: Record<string, string> = {
 const AGOL_PORTAL = 'https://cbsm-hub.maps.arcgis.com'
 const CLIENT_ID   = '1t9qSylui7Nt4Hca'
 
+const MSG_UTENTE_AGOL_VALIDO =
+  `Utente AGOL valido richiesto.
+` +
+  `Inserire lo username di un utente AGOL già presente e validato nell'organizzazione cbsm-hub.
+` +
+  `Se l'utente non esiste ancora, crearlo o invitarlo prima su ArcGIS Online, quindi riprovare.`
+
 // Ottieni token dalla sessione ExB tramite esriId
 async function getAGOLToken(clientSecret: string): Promise<string> {
   try {
@@ -84,28 +92,157 @@ async function getAGOLToken(clientSecret: string): Promise<string> {
   }
 }
 
+async function ensureAgolUserExists(username: string, token: string): Promise<void> {
+  const cleanUsername = String(username || '').trim()
+  if (!cleanUsername) throw new Error('Username AGOL obbligatorio')
+  if (!token) throw new Error('Token AGOL non disponibile: impossibile verificare lo username')
+
+  const body = new URLSearchParams({ f: 'json', token })
+  const res = await fetch(`${AGOL_PORTAL}/sharing/rest/community/users/${encodeURIComponent(cleanUsername)}`, {
+    method: 'POST', body,
+  })
+  const json = await res.json()
+
+  if (!res.ok || json?.error || !json?.username) {
+    throw new Error(MSG_UTENTE_AGOL_VALIDO)
+  }
+}
+
+function friendlyAgolGroupErrorMessage(action: 'add' | 'remove', json: any, username: string, gruppo: string): string {
+  const cleanUsername = String(username || '').trim()
+  const cleanGroup = String(gruppo || '').trim()
+  const actionLabel = action === 'add' ? 'aggiungere' : 'rimuovere'
+  const groupActionLabel = action === 'add' ? 'aggiunto al' : 'rimosso dal'
+  const details = [
+    ...(Array.isArray(json?.notAddedDetails) ? json.notAddedDetails : []),
+    ...(Array.isArray(json?.notRemovedDetails) ? json.notRemovedDetails : []),
+    ...(Array.isArray(json?.errors) ? json.errors : []),
+  ]
+  const detailError = details.find((d: any) => d?.error || d?.message)?.error ?? details.find((d: any) => d?.message)
+  const err = json?.error ?? detailError ?? null
+  const code = String(err?.messageCode ?? err?.code ?? '').trim()
+  const message = String(err?.message ?? '').trim()
+
+  if (code === 'COM_1206' || /Public users cannot be added/i.test(message)) {
+    return (
+      `Impossibile ${actionLabel} l'utente AGOL "${cleanUsername}" al gruppo ${cleanGroup}.\n\n` +
+      MSG_UTENTE_AGOL_VALIDO
+    )
+  }
+
+  if (code === 'COM_1211' || /does not exist or is inaccessible/i.test(message)) {
+    return (
+      `Impossibile ${actionLabel} l'utente AGOL "${cleanUsername}" al gruppo ${cleanGroup}.\n\n` +
+      MSG_UTENTE_AGOL_VALIDO
+    )
+  }
+
+  if (code === '498' || code === '499' || /token/i.test(message)) {
+    return (
+      `Impossibile ${actionLabel} l'utente AGOL "${cleanUsername}" al gruppo ${cleanGroup}.\n\n` +
+      `La sessione/token AGOL non è più valida. Esci e rientra nel gestionale, poi riprova.`
+    )
+  }
+
+  if (message) {
+    return (
+      `Impossibile ${actionLabel} l'utente AGOL "${cleanUsername}" al gruppo ${cleanGroup}.\n\n` +
+      `L'operazione su ArcGIS Online non è andata a buon fine. ` +
+      MSG_UTENTE_AGOL_VALIDO
+    )
+  }
+
+  return (
+    `Impossibile ${actionLabel} l'utente AGOL "${cleanUsername}" al gruppo ${cleanGroup}.\n\n` +
+    `L'utente non è stato ${groupActionLabel} gruppo. ` +
+    MSG_UTENTE_AGOL_VALIDO
+  )
+}
+
+function formatAgolError(action: 'add' | 'remove', json: any, username: string, gruppo: string): Error {
+  return new Error(friendlyAgolGroupErrorMessage(action, json, username, gruppo))
+}
+
+function agolUserEquals(item: any, username: string): boolean {
+  const wanted = String(username || '').trim().toLowerCase()
+  if (!wanted) return false
+  if (typeof item === 'string') return item.trim().toLowerCase() === wanted
+  const itemUser = String(item?.username ?? item?.user ?? item?.userName ?? item?.name ?? '').trim().toLowerCase()
+  return itemUser === wanted
+}
+
+function userWasNotProcessed(value: any, username: string): boolean {
+  return Array.isArray(value) && value.some((item: any) => agolUserEquals(item, username))
+}
+
+async function isUserInGroup(username: string, groupId: string, token: string): Promise<boolean> {
+  let start = 1
+  for (let i = 0; i < 20; i++) {
+    const body = new URLSearchParams({ f: 'json', token, start: String(start), num: '100' })
+    const res = await fetch(`${AGOL_PORTAL}/sharing/rest/community/groups/${groupId}/users`, {
+      method: 'POST', body,
+    })
+    const json = await res.json()
+    if (!res.ok || json?.error) return false
+
+    const users = [
+      ...(Array.isArray(json?.admins) ? json.admins : []),
+      ...(Array.isArray(json?.users) ? json.users : []),
+    ]
+    if (users.some((u: any) => agolUserEquals(u, username))) return true
+
+    const nextStart = Number(json?.nextStart ?? -1)
+    if (!Number.isFinite(nextStart) || nextStart <= 0 || nextStart === start) break
+    start = nextStart
+  }
+  return false
+}
+
 // Aggiungi utente a un gruppo AGOL
 async function addUserToGroup(username: string, gruppo: string, token: string): Promise<void> {
   const groupId = GROUP_MAP[gruppo]
-  if (!groupId) return  // gruppo non mappato, ignora
-  const body = new URLSearchParams({ users: username, f: 'json', token })
+  if (!groupId) throw new Error(`Gruppo non mappato: ${gruppo}`)
+  if (!token) throw new Error('Token AGOL non disponibile: impossibile aggiungere utente al gruppo')
+  await ensureAgolUserExists(username, token)
+
+  const body = new URLSearchParams({ users: String(username || '').trim(), f: 'json', token })
   const res = await fetch(`${AGOL_PORTAL}/sharing/rest/community/groups/${groupId}/addUsers`, {
     method: 'POST', body,
   })
   const json = await res.json()
-  if (json.errors?.length) throw new Error(`addUsers: ${json.errors[0].message}`)
+
+  if (!res.ok || json?.error || json?.errors?.length) {
+    throw formatAgolError('add', json, username, gruppo)
+  }
+
+  if (userWasNotProcessed(json?.notAdded, username)) {
+    const alreadyInGroup = await isUserInGroup(username, groupId, token)
+    if (alreadyInGroup) return
+    throw formatAgolError('add', json, username, gruppo)
+  }
 }
 
 // Rimuovi utente da un gruppo AGOL
 async function removeUserFromGroup(username: string, gruppo: string, token: string): Promise<void> {
   const groupId = GROUP_MAP[gruppo]
-  if (!groupId) return
-  const body = new URLSearchParams({ users: username, f: 'json', token })
+  if (!groupId) throw new Error(`Gruppo non mappato: ${gruppo}`)
+  if (!token) throw new Error('Token AGOL non disponibile: impossibile rimuovere utente dal gruppo')
+
+  const body = new URLSearchParams({ users: String(username || '').trim(), f: 'json', token })
   const res = await fetch(`${AGOL_PORTAL}/sharing/rest/community/groups/${groupId}/removeUsers`, {
     method: 'POST', body,
   })
   const json = await res.json()
-  if (json.errors?.length) throw new Error(`removeUsers: ${json.errors[0].message}`)
+
+  if (!res.ok || json?.error || json?.errors?.length) {
+    throw formatAgolError('remove', json, username, gruppo)
+  }
+
+  if (userWasNotProcessed(json?.notRemoved, username)) {
+    const stillInGroup = await isUserInGroup(username, groupId, token)
+    if (!stillInGroup) return
+    throw formatAgolError('remove', json, username, gruppo)
+  }
 }
 
 // ── Domini legacy numerici + codici testuali ───────────────────────────────
@@ -235,6 +372,124 @@ function textOrNull(value: string | null | undefined): string | null {
   return v ? v : null
 }
 
+type DomainLabelMap = Record<string, Record<string, string>>
+type GguLockRect = { key: string; left: number; top: number; width: number; height: number }
+
+function getGlobalOverlayHost(): HTMLElement | null {
+  try {
+    const topBody = (window as any)?.top?.document?.body
+    if (topBody) return topBody as HTMLElement
+  } catch {}
+  try {
+    if (typeof document !== 'undefined' && document.body) return document.body as HTMLElement
+  } catch {}
+  return null
+}
+
+function findGguWidgetElement(doc: Document, widgetId: string): HTMLElement | null {
+  const id = String(widgetId || '').trim()
+  if (!id) return null
+  const selectors = [
+    `[data-widgetid="${id}"]`,
+    `[data-widget-id="${id}"]`,
+    `[widgetid="${id}"]`,
+    `[id="${id}"]`,
+    `#${id}`
+  ]
+  for (const sel of selectors) {
+    try {
+      const el = doc.querySelector(sel) as HTMLElement | null
+      if (el) return el
+    } catch {}
+  }
+  return null
+}
+
+function getVisibleGguLockRect(el: HTMLElement, key: string, viewW: number, viewH: number, win: Window): GguLockRect | null {
+  try {
+    if (!el || !el.isConnected) return null
+    const st = win.getComputedStyle?.(el)
+    if (st && (st.display === 'none' || st.visibility === 'hidden' || st.opacity === '0')) return null
+    const r = el.getBoundingClientRect()
+    const left = Math.max(0, Math.floor(r.left))
+    const top = Math.max(0, Math.floor(r.top))
+    const right = Math.min(viewW, Math.ceil(r.right))
+    const bottom = Math.min(viewH, Math.ceil(r.bottom))
+    const width = Math.max(0, right - left)
+    const height = Math.max(0, bottom - top)
+    if (width < 2 || height < 2) return null
+    return { key, left, top, width, height }
+  } catch {
+    return null
+  }
+}
+
+function buildDomainLabelMap(fields: any[] | undefined): DomainLabelMap {
+  const out: DomainLabelMap = {}
+  for (const f of fields || []) {
+    const fieldName = String(f?.name || '').trim()
+    const codedValues = f?.domain?.codedValues
+    if (!fieldName || !Array.isArray(codedValues)) continue
+    const map: Record<string, string> = {}
+    for (const cv of codedValues) {
+      const codeRaw = cv?.code
+      if (codeRaw === null || codeRaw === undefined || codeRaw === '') continue
+      const label = String(cv?.name ?? cv?.label ?? cv?.description ?? codeRaw).trim()
+      const rawKey = String(codeRaw).trim()
+      if (rawKey) map[rawKey] = label
+      const normKey = normalizeSettoreCod(codeRaw) ?? String(codeRaw).trim().toUpperCase()
+      if (normKey) map[normKey] = label
+    }
+    out[fieldName] = map
+  }
+  return out
+}
+
+function getDomainLabel(domainMap: DomainLabelMap | null | undefined, fieldName: string, code: any): string {
+  const map = domainMap?.[fieldName]
+  if (!map) return ''
+  const rawKey = String(code ?? '').trim()
+  const normKey = normalizeSettoreCod(code) ?? String(code ?? '').trim().toUpperCase()
+  return String(map[rawKey] || map[normKey] || '').trim()
+}
+
+function getDomainLabelFromCandidates(domainMap: DomainLabelMap | null | undefined, textField: string, textCode: any, legacyField: string, legacyValue: any): string {
+  return getDomainLabel(domainMap, textField, textCode) || getDomainLabel(domainMap, legacyField, legacyValue)
+}
+
+function fallbackItemLabel(list: Array<{ label: string; value: number; desc?: string }>, val: number | null | undefined): string {
+  if (val == null) return ''
+  const item = list.find(x => x.value === val)
+  return item?.desc || item?.label || ''
+}
+
+function labelForDomainItem(
+  list: Array<{ label: string; code: string; value: number; desc?: string }>,
+  val: number | null | undefined,
+  domainMap: DomainLabelMap | null | undefined,
+  textField: string,
+  legacyField: string
+): string {
+  if (val == null) return ''
+  const item = list.find(x => x.value === val)
+  if (!item) return ''
+  return getDomainLabelFromCandidates(domainMap, textField, item.code, legacyField, item.value) || item.desc || item.label
+}
+
+function optionLabelForDomainItem(
+  item: { label: string; code: string; value: number; desc?: string },
+  domainMap: DomainLabelMap | null | undefined,
+  textField: string,
+  legacyField: string
+): string {
+  const label = getDomainLabelFromCandidates(domainMap, textField, item.code, legacyField, item.value) || item.desc || item.label
+  return label === item.label ? item.label : `${item.label} – ${label}`
+}
+
+function dash(value: string): string {
+  return String(value || '').trim() || '—'
+}
+
 // ── Tipi ───────────────────────────────────────────────────────────────────
 interface UtenteForm {
   objectid?: number
@@ -351,30 +606,49 @@ async function saveUtente(form: UtenteForm): Promise<void> {
   }
 }
 
-async function deleteUtente(objectid: number): Promise<void> {
-  const fl = await getFL()
-  const queryRes = await fl.queryFeatures({
-    objectIds: [objectid],
-    outFields: ['OBJECTID'],
-    returnGeometry: false,
+function friendlyDeleteErrorMessage(error: any): string {
+  const message = String(error?.description ?? error?.message ?? error ?? '').trim()
+  if (/does not support deleting features/i.test(message) || /support deleting/i.test(message)) {
+    return (
+      `Eliminazione non completata.\n\n` +
+      `Il record non è stato eliminato dalla tabella GII_utenti perché il servizio AGOL ha rifiutato l'operazione di cancellazione. ` +
+      `Verificare che la cancellazione sia abilitata sul layer e riprovare.`
+    )
+  }
+  return message || 'Eliminazione non completata.'
+}
+
+async function deleteUtente(objectid: number, token: string): Promise<void> {
+  if (!objectid) throw new Error('OBJECTID utente non valido')
+  if (!token) throw new Error('Token AGOL non disponibile: impossibile eliminare il record utente')
+
+  // Uso diretto dell'operazione REST deleteFeatures: evita che il client FeatureLayer
+  // blocchi preventivamente la cancellazione in base alle capabilities lette nello schema.
+  const body = new URLSearchParams({
+    f: 'json',
+    token,
+    objectIds: String(objectid),
   })
-  const feature = queryRes.features?.[0]
-  if (!feature) throw new Error('Feature non trovata')
-  const res = await fl.applyEdits({ deleteFeatures: [feature] })
-  if (res.deleteFeatureResults?.[0]?.error)
-    throw new Error(res.deleteFeatureResults[0].error.description)
+  const res = await fetch(`${SERVICE_URL}/deleteFeatures`, { method: 'POST', body })
+  const json = await res.json()
+
+  if (!res.ok || json?.error) {
+    throw new Error(friendlyDeleteErrorMessage(json?.error ?? json))
+  }
+
+  const del = Array.isArray(json?.deleteResults) ? json.deleteResults[0] : null
+  if (!del || del.success !== true) {
+    throw new Error(friendlyDeleteErrorMessage(del?.error ?? json))
+  }
 }
 
 // ── Export CSV ────────────────────────────────────────────────────────────
-function exportCSV(utenti: UtenteRecord[]): void {
-  const labelOf = (list: Array<{ label: string; value: number }>, val: number | null) =>
-    val != null ? (list.find(x => x.value === val)?.label ?? '') : ''
-
+function exportCSV(utenti: UtenteRecord[], domainLabels?: DomainLabelMap): void {
   const rows = utenti.map(u => {
-    const area    = u.area_cod    ?? labelOf(AREE,    u.area)
-    const settore = u.settore_cod ?? labelOf(SETTORI, u.settore)
-    const ufficio = labelOf(UFFICI,  u.ufficio)
-    const ruolo   = u.ruolo_cod   ?? labelOf(RUOLI,   u.ruolo)
+    const area    = u.area_cod    ?? codeOf(AREE, u.area) ?? labelForDomainItem(AREE, u.area, domainLabels, 'area_cod', 'area')
+    const settore = u.settore_cod ?? codeOf(SETTORI, u.settore) ?? labelForDomainItem(SETTORI, u.settore, domainLabels, 'settore_cod', 'settore')
+    const ufficio = labelForUfficio(u.ufficio, domainLabels)
+    const ruolo   = u.ruolo_cod   ?? codeOf(RUOLI, u.ruolo) ?? labelForDomainItem(RUOLI, u.ruolo, domainLabels, 'ruolo_cod', 'ruolo')
     // id_ufficio: valore numerico (codice ufficio)
     const id_uff  = u.ufficio ?? ''
     const gruppo  = u.gruppo ?? ''
@@ -396,19 +670,22 @@ function exportCSV(utenti: UtenteRecord[]): void {
   URL.revokeObjectURL(url)
 }
 
-function sortValue(u: UtenteRecord, field: SortField): string {
-  const labelOf = (list: Array<{ label: string; value: number }>, val: number | null) =>
-    val != null ? (list.find(x => x.value === val)?.label ?? '') : ''
+function sortValue(u: UtenteRecord, field: SortField, domainLabels?: DomainLabelMap): string {
   switch (field) {
     case 'username': return u.username ?? ''
     case 'full_name': return u.full_name ?? ''
-    case 'ruolo': return u.ruolo_cod ?? labelOf(RUOLI, u.ruolo)
-    case 'area': return u.area_cod ?? labelOf(AREE, u.area)
-    case 'settore': return u.settore_cod ?? labelOf(SETTORI, u.settore)
-    case 'ufficio': return labelOf(UFFICI, u.ufficio)
+    case 'ruolo': return labelForDomainItem(RUOLI, u.ruolo, domainLabels, 'ruolo_cod', 'ruolo') || u.ruolo_cod || ''
+    case 'area': return labelForDomainItem(AREE, u.area, domainLabels, 'area_cod', 'area') || u.area_cod || ''
+    case 'settore': return labelForDomainItem(SETTORI, u.settore, domainLabels, 'settore_cod', 'settore') || u.settore_cod || ''
+    case 'ufficio': return labelForUfficio(u.ufficio, domainLabels)
     case 'gruppo': return u.gruppo ?? ''
     default: return ''
   }
+}
+
+function labelForUfficio(val: number | null | undefined, domainMap?: DomainLabelMap | null): string {
+  if (val == null) return ''
+  return getDomainLabel(domainMap, 'ufficio', val) || fallbackItemLabel(UFFICI, val)
 }
 
 function compareText(a: string, b: string): number {
@@ -460,6 +737,21 @@ const styles = `
   .ggu-msg { padding: 7px 12px; border-radius: 4px; font-size: 12px; font-weight: bold; }
   .ggu-msg-ok { background: #e2efda; color: #375623; border: 1px solid #b8d4b0; }
   .ggu-msg-err { background: #fce4e4; color: #c00; border: 1px solid #f5b8b8; }
+  .ggu-modal-backdrop { position: fixed; inset: 0; z-index: 2147483647; background: rgba(15, 23, 42, 0.72); display: flex; align-items: center; justify-content: center; padding: 24px; box-sizing: border-box; pointer-events: auto; }
+  .ggu-modal { width: min(560px, 100%); background: #fff; border-radius: 10px; border: 1px solid #f5b8b8; box-shadow: 0 18px 48px rgba(15, 23, 42, 0.55); overflow: hidden; pointer-events: auto; }
+  .ggu-modal-head { background: #c00; color: #fff; font-weight: 700; font-size: 14px; padding: 12px 16px; }
+  .ggu-modal-body { color: #2b2b2b; font-size: 13px; line-height: 1.45; padding: 16px; white-space: pre-line; }
+  .ggu-modal-actions { display: flex; justify-content: flex-end; gap: 8px; padding: 0 16px 16px 16px; }
+  .ggu-modal-close { background: #1F4E79; color: #fff; border: none; border-radius: 5px; padding: 7px 18px; font-size: 13px; font-weight: 700; cursor: pointer; }
+  .ggu-modal-close:hover { background: #16375a; }
+  .ggu-modal-cancel { background: #e0e0e0; color: #333; border: none; border-radius: 5px; padding: 7px 18px; font-size: 13px; font-weight: 700; cursor: pointer; }
+  .ggu-modal-cancel:hover { background: #ccc; }
+  .ggu-modal-danger { background: #c00; color: #fff; border: none; border-radius: 5px; padding: 7px 18px; font-size: 13px; font-weight: 700; cursor: pointer; }
+  .ggu-modal-danger:hover { background: #a00000; }
+  .ggu-edit-lock-zone { position: fixed; z-index: 2147483000; background: rgba(0, 0, 0, 0.52); pointer-events: auto; touch-action: none; }
+  .ggu.ggu-editing-global-lock { position: relative; }
+  .ggu.ggu-editing-global-lock::before { content: ''; position: absolute; inset: 0; z-index: 5; background: rgba(15, 23, 42, 0.22); border-radius: 8px; pointer-events: auto; }
+  .ggu.ggu-editing-global-lock .ggu-form { position: relative; z-index: 10; pointer-events: auto; }
   .ggu-gruppo { font-family: monospace; font-size: 11px; background: #e2efda; padding: 2px 6px; border-radius: 3px; color: #375623; white-space: nowrap; }
   .ggu-empty { text-align: center; color: #888; padding: 20px; font-style: italic; }
 `
@@ -472,14 +764,160 @@ export default function Widget(props: AllWidgetProps<IMConfig>) {
   const [loading, setLoading] = useState(false)
   const [saving, setSaving]   = useState(false)
   const [msg, setMsg]         = useState<{ text: string; ok: boolean } | null>(null)
+  const [errorPopup, setErrorPopup] = useState<string | null>(null)
+  const [deleteConfirm, setDeleteConfirm] = useState<UtenteRecord | null>(null)
+  const popupCloseRef = useRef<HTMLButtonElement | null>(null)
+  const confirmCancelRef = useRef<HTMLButtonElement | null>(null)
+  const rootRef = useRef<HTMLDivElement | null>(null)
+  const [editLockRects, setEditLockRects] = useState<GguLockRect[]>([])
   const [selectedObjectId, setSelectedObjectId] = useState<number | null>(null)
   const [sortRules, setSortRules] = useState<SortRule[]>([])
+  const [domainLabels, setDomainLabels] = useState<DomainLabelMap>({})
 
   useEffect(() => { load() }, [])
+
+  useEffect(() => {
+    if (!editing) {
+      setEditLockRects([])
+      return
+    }
+
+    const host = getGlobalOverlayHost()
+    const doc = host?.ownerDocument || document
+    const win = doc.defaultView || window
+
+    const computeRects = () => {
+      const viewW = Math.max(0, win.innerWidth || doc.documentElement?.clientWidth || 0)
+      const viewH = Math.max(0, win.innerHeight || doc.documentElement?.clientHeight || 0)
+
+      // Stessa impostazione del cw editing:
+      // blocco gli elementi di navigazione veri e propri, non il widget sidebar.
+      // Così il pulsante della barra laterale resta libero.
+      const idsToMask = [
+        'widget_840', // GII Header
+        'widget_963'  // GII Navigazione - Gestione Utenti
+      ]
+
+      const next: GguLockRect[] = []
+      for (const id of idsToMask) {
+        const el = findGguWidgetElement(doc, id)
+        const rect = el ? getVisibleGguLockRect(el, id, viewW, viewH, win) : null
+        if (rect) next.push(rect)
+      }
+
+      // Fallback prudente: se gli id ExB non sono reperibili,
+      // blocca almeno header e fascia sinistra fino al widget utenti.
+      if (next.length === 0 && rootRef.current) {
+        try {
+          const r = rootRef.current.getBoundingClientRect()
+          const headerH = Math.max(0, Math.floor(r.top))
+          const leftW = Math.max(0, Math.floor(r.left))
+          if (headerH > 0) next.push({ key: 'fallback-header', left: 0, top: 0, width: viewW, height: headerH })
+          if (leftW > 0) next.push({ key: 'fallback-left', left: 0, top: headerH, width: leftW, height: Math.max(0, viewH - headerH) })
+        } catch {}
+      }
+
+      setEditLockRects(next)
+    }
+
+    let raf = 0
+    const schedule = () => {
+      try { if (raf) win.cancelAnimationFrame(raf) } catch {}
+      try { raf = win.requestAnimationFrame(computeRects) } catch { computeRects() }
+    }
+
+    schedule()
+
+    let ro: ResizeObserver | null = null
+    try {
+      if (typeof ResizeObserver !== 'undefined') {
+        ro = new ResizeObserver(schedule)
+        const observed = new Set<Element>()
+        for (const id of ['widget_840', 'widget_963']) {
+          const el = findGguWidgetElement(doc, id)
+          if (el && !observed.has(el)) {
+            observed.add(el)
+            ro.observe(el)
+          }
+        }
+        if (rootRef.current && !observed.has(rootRef.current)) ro.observe(rootRef.current)
+      }
+    } catch { ro = null }
+
+    const blockEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        event.preventDefault()
+        event.stopPropagation()
+        if (typeof (event as any).stopImmediatePropagation === 'function') {
+          ;(event as any).stopImmediatePropagation()
+        }
+      }
+    }
+
+    win.addEventListener('resize', schedule, true)
+    win.addEventListener('scroll', schedule, true)
+    document.addEventListener('keydown', blockEscape, true)
+    const intervalId = win.setInterval(schedule, 300)
+
+    return () => {
+      try { if (raf) win.cancelAnimationFrame(raf) } catch {}
+      try { ro?.disconnect() } catch {}
+      try { win.removeEventListener('resize', schedule, true) } catch {}
+      try { win.removeEventListener('scroll', schedule, true) } catch {}
+      try { document.removeEventListener('keydown', blockEscape, true) } catch {}
+      try { win.clearInterval(intervalId) } catch {}
+      setEditLockRects([])
+    }
+  }, [editing])
+
+  useEffect(() => {
+    if (!errorPopup && !deleteConfirm) return
+
+    const previousActive = document.activeElement as HTMLElement | null
+    const previousOverflow = document.body.style.overflow
+    document.body.style.overflow = 'hidden'
+
+    window.setTimeout(() => {
+      if (deleteConfirm) confirmCancelRef.current?.focus()
+      else popupCloseRef.current?.focus()
+    }, 0)
+
+    const blockEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        event.preventDefault()
+        event.stopPropagation()
+      }
+    }
+
+    document.addEventListener('keydown', blockEscape, true)
+    return () => {
+      document.removeEventListener('keydown', blockEscape, true)
+      document.body.style.overflow = previousOverflow
+      previousActive?.focus?.()
+    }
+  }, [errorPopup, deleteConfirm])
+
+  const handlePopupKeyDown = (event: any) => {
+    if (event.key === 'Escape') {
+      event.preventDefault()
+      event.stopPropagation()
+      return
+    }
+    if (event.key === 'Tab') {
+      event.preventDefault()
+      if (deleteConfirm) confirmCancelRef.current?.focus()
+      else popupCloseRef.current?.focus()
+    }
+  }
+
+  const closeErrorPopup = () => setErrorPopup(null)
+  const closeDeleteConfirm = () => setDeleteConfirm(null)
 
   const load = async () => {
     setLoading(true)
     try {
+      const fl = await getFL()
+      setDomainLabels(buildDomainLabelMap(fl.fields))
       const rows = await fetchUtenti()
       setUtenti(rows)
       setSelectedObjectId(sel => rows.some(r => r.objectid === sel) ? sel : null)
@@ -489,6 +927,14 @@ export default function Widget(props: AllWidgetProps<IMConfig>) {
   }
 
   const showMsg = (text: string, ok: boolean) => {
+    if (!ok) {
+      setMsg(null)
+      setDeleteConfirm(null)
+      setErrorPopup(text)
+      return
+    }
+    setErrorPopup(null)
+    setDeleteConfirm(null)
     setMsg({ text, ok })
     setTimeout(() => setMsg(null), 4000)
   }
@@ -498,13 +944,13 @@ export default function Widget(props: AllWidgetProps<IMConfig>) {
     const arr = [...utenti]
     arr.sort((a, b) => {
       for (const rule of sortRules) {
-        const cmp = compareText(sortValue(a, rule.field), sortValue(b, rule.field))
+        const cmp = compareText(sortValue(a, rule.field, domainLabels), sortValue(b, rule.field, domainLabels))
         if (cmp !== 0) return rule.dir === 'asc' ? cmp : -cmp
       }
       return a.objectid - b.objectid
     })
     return arr
-  }, [utenti, sortRules])
+  }, [utenti, sortRules, domainLabels])
 
   const toggleSort = (field: SortField) => {
     setSortRules(prev => {
@@ -600,7 +1046,7 @@ export default function Widget(props: AllWidgetProps<IMConfig>) {
   const onCancel = () => { setForm(emptyForm()); setEditing(false) }
 
   const onSave = async () => {
-    if (!form.username.trim())  { showMsg('Username obbligatorio', false); return }
+    if (!form.username.trim())  { showMsg('Username AGOL obbligatorio', false); return }
     if (!form.full_name.trim()) { showMsg('Nome completo obbligatorio', false); return }
     if (!form.ruolo)            { showMsg('Ruolo obbligatorio', false); return }
     // ADMIN: non richiede area/settore/ufficio e non gestisce gruppi (ha privilegi nativi AGOL).
@@ -614,18 +1060,21 @@ export default function Widget(props: AllWidgetProps<IMConfig>) {
     try {
       // Sanitize: ADMIN è trasversale (mai area/settore/ufficio/gruppo)
       const formSan = form.ruolo === 7
-        ? { ...form, area: null, settore: null, ufficio: null, ruolo_cod: 'ADMIN', area_cod: null, settore_cod: null, gruppo: '', gruppo_precedente: '' }
-        : form
+        ? { ...form, username: form.username.trim(), area: null, settore: null, ufficio: null, ruolo_cod: 'ADMIN', area_cod: null, settore_cod: null, gruppo: '', gruppo_precedente: '' }
+        : { ...form, username: form.username.trim() }
 
       const token = await getAGOLToken(props.config?.clientSecret ?? '')
       const isUpdate = formSan.objectid != null
 
       // Gestione gruppi: solo se esiste un gruppo target (per ADMIN è sempre vuoto).
-      if (isUpdate && formSan.gruppo_precedente && formSan.gruppo_precedente !== formSan.gruppo) {
-        // Modifica: rimuovi dal vecchio gruppo e aggiungi al nuovo
-        if (formSan.gruppo_precedente) await removeUserFromGroup(formSan.username, formSan.gruppo_precedente, token)
+      // In modifica riallinea sempre il gruppo target: se l'utente risulta già membro,
+      // addUsers viene trattato come operazione idempotente; se non è membro, viene aggiunto.
+      if (isUpdate) {
+        if (formSan.gruppo_precedente && formSan.gruppo_precedente !== formSan.gruppo) {
+          await removeUserFromGroup(formSan.username, formSan.gruppo_precedente, token)
+        }
         if (formSan.gruppo) await addUserToGroup(formSan.username, formSan.gruppo, token)
-      } else if (!isUpdate) {
+      } else {
         // Nuovo record: aggiungi al gruppo
         if (formSan.gruppo) await addUserToGroup(formSan.username, formSan.gruppo, token)
       }
@@ -638,12 +1087,18 @@ export default function Widget(props: AllWidgetProps<IMConfig>) {
   }
 
   const onDelete = async (u: UtenteRecord) => {
-    if (!window.confirm(`Eliminare l'utente "${u.username}"?`)) return
+    setDeleteConfirm(u)
+  }
+
+  const confirmDeleteUtente = async () => {
+    const u = deleteConfirm
+    if (!u) return
+    setDeleteConfirm(null)
     setSaving(true)
     try {
       const token = await getAGOLToken(props.config?.clientSecret ?? '')
       if (u.gruppo) await removeUserFromGroup(u.username, u.gruppo, token)
-      await deleteUtente(u.objectid)
+      await deleteUtente(u.objectid, token)
       setSelectedObjectId(sel => sel === u.objectid ? null : sel)
       showMsg('Utente eliminato', true)
       await load()
@@ -667,13 +1122,93 @@ export default function Widget(props: AllWidgetProps<IMConfig>) {
     (form.ruolo === 2 && form.area === 1)
   )
 
-  const labelOf = (list: Array<{ label: string; value: number }>, val: number | null) =>
-    val != null ? (list.find(x => x.value === val)?.label ?? '') : ''
+  const labelRuolo = (val: number | null | undefined) => labelForDomainItem(RUOLI, val, domainLabels, 'ruolo_cod', 'ruolo')
+  const labelArea = (val: number | null | undefined) => labelForDomainItem(AREE, val, domainLabels, 'area_cod', 'area')
+  const labelSettore = (val: number | null | undefined) => labelForDomainItem(SETTORI, val, domainLabels, 'settore_cod', 'settore')
+  const labelUfficio = (val: number | null | undefined) => labelForUfficio(val, domainLabels)
+
+  const errorPopupPortal = errorPopup && typeof document !== 'undefined'
+    ? createPortal(
+      <div
+        className="ggu-modal-backdrop"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="ggu-error-title"
+        onClick={(event) => { event.preventDefault(); event.stopPropagation() }}
+        onMouseDown={(event) => { event.preventDefault(); event.stopPropagation() }}
+        onWheel={(event) => { event.preventDefault(); event.stopPropagation() }}
+        onTouchMove={(event) => { event.preventDefault(); event.stopPropagation() }}
+        onKeyDown={handlePopupKeyDown}
+        tabIndex={-1}
+      >
+        <div className="ggu-modal" onClick={(event) => event.stopPropagation()} onMouseDown={(event) => event.stopPropagation()}>
+          <div className="ggu-modal-head" id="ggu-error-title">Operazione non completata</div>
+          <div className="ggu-modal-body">{errorPopup.replace(/^Errore:\s*/i, '')}</div>
+          <div className="ggu-modal-actions">
+            <button ref={popupCloseRef} className="ggu-modal-close" onClick={closeErrorPopup}>Ho capito</button>
+          </div>
+        </div>
+      </div>,
+      document.body
+    )
+    : null
+
+  const editLockPortal = editing && !errorPopup && !deleteConfirm && editLockRects.length > 0 && typeof document !== 'undefined'
+    ? createPortal(
+      <Fragment>
+        {editLockRects.map(rect => (
+          <div
+            key={rect.key}
+            className="ggu-edit-lock-zone"
+            aria-hidden="true"
+            style={{ left: rect.left, top: rect.top, width: rect.width, height: rect.height }}
+            onPointerDown={(event) => { event.preventDefault(); event.stopPropagation() }}
+            onMouseDown={(event) => { event.preventDefault(); event.stopPropagation() }}
+            onClick={(event) => { event.preventDefault(); event.stopPropagation() }}
+            onDoubleClick={(event) => { event.preventDefault(); event.stopPropagation() }}
+            onWheel={(event) => { event.preventDefault(); event.stopPropagation() }}
+            onTouchStart={(event) => { event.preventDefault(); event.stopPropagation() }}
+          />
+        ))}
+      </Fragment>,
+      getGlobalOverlayHost() || document.body
+    )
+    : null
+
+  const deleteConfirmPortal = deleteConfirm && typeof document !== 'undefined'
+    ? createPortal(
+      <div
+        className="ggu-modal-backdrop"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="ggu-delete-title"
+        onClick={(event) => { event.preventDefault(); event.stopPropagation() }}
+        onMouseDown={(event) => { event.preventDefault(); event.stopPropagation() }}
+        onWheel={(event) => { event.preventDefault(); event.stopPropagation() }}
+        onTouchMove={(event) => { event.preventDefault(); event.stopPropagation() }}
+        onKeyDown={handlePopupKeyDown}
+        tabIndex={-1}
+      >
+        <div className="ggu-modal" onClick={(event) => event.stopPropagation()} onMouseDown={(event) => event.stopPropagation()}>
+          <div className="ggu-modal-head" id="ggu-delete-title">Conferma eliminazione</div>
+          <div className="ggu-modal-body">{`Eliminare il profilo utente "${deleteConfirm.username}" dal gestionale?\n\nVerrà eliminato solo il record selezionato dalla tabella GII_utenti e l'utente sarà rimosso solo dal gruppo AGOL associato a questo profilo, se presente. Eventuali altri profili dello stesso username resteranno invariati.`}</div>
+          <div className="ggu-modal-actions">
+            <button ref={confirmCancelRef} className="ggu-modal-cancel" onClick={closeDeleteConfirm}>Annulla</button>
+            <button className="ggu-modal-danger" onClick={confirmDeleteUtente}>Elimina</button>
+          </div>
+        </div>
+      </div>,
+      document.body
+    )
+    : null
 
   return (
     <Fragment>
       <style>{styles}</style>
-      <div className="ggu">
+      {editLockPortal}
+      {errorPopupPortal}
+      {deleteConfirmPortal}
+      <div ref={rootRef} className={`ggu ${editing ? 'ggu-editing-global-lock' : ''}`}>
         <div className="ggu-title">GII – Gestione Utenti</div>
 
         {msg && <div className={`ggu-msg ${msg.ok ? 'ggu-msg-ok' : 'ggu-msg-err'}`}>{msg.text}</div>}
@@ -681,7 +1216,7 @@ export default function Widget(props: AllWidgetProps<IMConfig>) {
         {!editing && (
           <div className="ggu-toolbar">
             <button className="ggu-btn ggu-btn-new" onClick={onNew}>+ Nuovo utente</button>
-            <button className="ggu-btn ggu-btn-export" onClick={() => exportCSV(sortedUtenti)}
+            <button className="ggu-btn ggu-btn-export" onClick={() => exportCSV(sortedUtenti, domainLabels)}
               disabled={utenti.length === 0}>⬇ Esporta utenti.csv</button>
             <button className="ggu-btn ggu-btn-reset-sort" onClick={resetSort}
               disabled={sortRules.length === 0} title="Reset ordinamento" aria-label="Reset ordinamento">↺</button>
@@ -691,9 +1226,11 @@ export default function Widget(props: AllWidgetProps<IMConfig>) {
         {editing && (
           <div className="ggu-form">
             <div className="ggu-field">
-              <div className="ggu-label">Username *</div>
+              <div className="ggu-label">Username AGOL *</div>
               <input className="ggu-input" value={form.username}
-                onChange={e => setForm(f => ({ ...f, username: e.target.value }))} />
+                placeholder="username AGOL valido"
+                title="Inserire lo username di un utente AGOL già presente e validato nell\'organizzazione cbsm-hub"
+                onChange={e => setForm(f => ({ ...f, username: e.target.value.trim() }))} />
             </div>
             <div className="ggu-field">
               <div className="ggu-label">Nome completo *</div>
@@ -705,7 +1242,7 @@ export default function Widget(props: AllWidgetProps<IMConfig>) {
               <select className="ggu-select" value={form.ruolo ?? ''}
                 onChange={e => onRuoloChange(e.target.value ? Number(e.target.value) : null)}>
                 <option value="">— seleziona —</option>
-                {RUOLI.map(r => <option key={r.value} value={r.value}>{r.label}</option>)}
+                {RUOLI.map(r => <option key={r.value} value={r.value}>{optionLabelForDomainItem(r, domainLabels, 'ruolo_cod', 'ruolo')}</option>)}
               </select>
             </div>
             <div className="ggu-field">
@@ -716,19 +1253,19 @@ export default function Widget(props: AllWidgetProps<IMConfig>) {
                     disabled={!form.ruolo || isAreaAuto}
                     onChange={e => onAreaChange(e.target.value ? Number(e.target.value) : null)}>
                     <option value="">— seleziona —</option>
-                    {areeDisp.map(a => <option key={a.value} value={a.value}>{a.label}</option>)}
+                    {areeDisp.map(a => <option key={a.value} value={a.value}>{optionLabelForDomainItem(a, domainLabels, 'area_cod', 'area')}</option>)}
                   </select>
               }
             </div>
             <div className="ggu-field">
               <div className="ggu-label">Settore</div>
               {isSettoreFisso
-                ? <input className="ggu-input" disabled value={labelOf(SETTORI, form.settore) || '—'} />
+                ? <input className="ggu-input" disabled value={dash(labelSettore(form.settore))} />
                 : <select className="ggu-select" value={form.settore ?? ''}
                     disabled={!form.area || settoriDisp.length === 0}
                     onChange={e => onSettoreChange(e.target.value ? Number(e.target.value) : null)}>
                     <option value="">— seleziona —</option>
-                    {settoriDisp.map(s => <option key={s.value} value={s.value}>{s.label}</option>)}
+                    {settoriDisp.map(s => <option key={s.value} value={s.value}>{optionLabelForDomainItem(s, domainLabels, 'settore_cod', 'settore')}</option>)}
                   </select>
               }
             </div>
@@ -737,12 +1274,12 @@ export default function Widget(props: AllWidgetProps<IMConfig>) {
               {form.ruolo === 7
                 ? <input className="ggu-input" disabled value="—" />
                 : (isUfficioFisso
-                  ? <input className="ggu-input" disabled value={labelOf(UFFICI, form.ufficio) || 'Cagliari'} />
+                  ? <input className="ggu-input" disabled value={labelUfficio(form.ufficio) || 'Cagliari'} />
                   : <select className="ggu-select" value={form.ufficio ?? ''}
                       disabled={!form.settore || ufficiDisp.length === 0}
                       onChange={e => onUfficioChange(e.target.value ? Number(e.target.value) : null)}>
                       <option value="">— seleziona —</option>
-                      {ufficiDisp.map(u => <option key={u.value} value={u.value}>{u.label}</option>)}
+                      {ufficiDisp.map(u => <option key={u.value} value={u.value}>{labelUfficio(u.value) || u.label}</option>)}
                     </select>
                 )
               }
@@ -787,11 +1324,11 @@ export default function Widget(props: AllWidgetProps<IMConfig>) {
                       onDoubleClick={() => onEdit(u)}>
                       <td>{u.username}</td>
                       <td>{u.full_name}</td>
-                      <td>{labelOf(RUOLI, u.ruolo)}</td>
-                      <td>{labelOf(AREE, u.area)}</td>
-                      <td>{labelOf(SETTORI, u.settore)}</td>
-                      <td>{labelOf(UFFICI, u.ufficio)}</td>
-                      <td><span className="ggu-gruppo">{u.gruppo}</span></td>
+                      <td>{dash(labelRuolo(u.ruolo))}</td>
+                      <td>{dash(labelArea(u.area))}</td>
+                      <td>{dash(labelSettore(u.settore))}</td>
+                      <td>{dash(labelUfficio(u.ufficio))}</td>
+                      <td><span className="ggu-gruppo">{dash(u.gruppo)}</span></td>
                       <td>
                         <button className="ggu-act ggu-act-edit" onClick={(e) => { e.stopPropagation(); onEdit(u) }}>✎</button>
                         <button className="ggu-act ggu-act-del" onClick={(e) => { e.stopPropagation(); onDelete(u) }}>✕</button>

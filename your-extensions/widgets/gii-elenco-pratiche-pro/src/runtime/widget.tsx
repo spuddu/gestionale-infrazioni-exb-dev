@@ -425,7 +425,7 @@ const GII_RUNTIME_VIEWS: RuntimeDsView[] = [
     itemId: '6ffe45dac0e04905ba677e9fcd703238',
     serviceUrl: 'https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_VIEW_EB_AMM_ALL/FeatureServer',
     layerUrl: 'https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_VIEW_EB_AMM_ALL/FeatureServer/0',
-    roles: ['RI', 'TI', 'DA'],
+    roles: ['RI', 'TI', 'DA', 'RI_AMM', 'TI_AMM'],
     areaCode: 'AMM',
     settoreCode: ''
   },
@@ -493,8 +493,98 @@ const SETTORE_LABELS: Record<string, string> = {
 const AREA_FROM_TEXT_CODE: Record<string, 'AMM' | 'AGR' | 'TEC'> = { AMM: 'AMM', AGR: 'AGR', TEC: 'TEC' }
 const SETTORE_TEXT_CODES = new Set(['CR', 'GI', 'D1', 'D2', 'D3', 'D4', 'D5', 'D6', 'DS'])
 
+type DomainLabelGroup = 'area' | 'settore' | 'ruolo'
+type DomainLabelMaps = Record<DomainLabelGroup, Record<string, string>>
+
+const EMPTY_DOMAIN_LABELS: DomainLabelMaps = { area: {}, settore: {}, ruolo: {} }
+
 function normalizeTextCode (v: any): string {
   return String(v ?? '').trim().toUpperCase()
+}
+
+function cloneEmptyDomainLabels (): DomainLabelMaps {
+  return { area: {}, settore: {}, ruolo: {} }
+}
+
+function getDomainGroupFromFieldName (fieldName: string): DomainLabelGroup | null {
+  const f = String(fieldName || '').trim().toLowerCase()
+  if (f === 'area' || f === 'area_cod' || f === 'areacod') return 'area'
+  if (f === 'settore' || f === 'settore_cod' || f === 'settorecod' || f === 'id_settore') return 'settore'
+  if (f === 'ruolo' || f === 'ruolo_cod' || f === 'ruolocod') return 'ruolo'
+  return null
+}
+
+function normalizeDomainLookupKey (group: DomainLabelGroup, value: any): string {
+  const text = normalizeTextCode(value)
+  if (!text) return ''
+  if (group === 'area') {
+    if (AREA_FROM_TEXT_CODE[text]) return AREA_FROM_TEXT_CODE[text]
+    const n = Number(value)
+    return Number.isFinite(n) ? normalizeAreaCode(n) : text
+  }
+  if (group === 'settore') {
+    if (text === 'CS') return 'DS'
+    if (SETTORE_TEXT_CODES.has(text)) return text
+    const n = Number(value)
+    return Number.isFinite(n) ? normalizeSettoreCode(n) : text
+  }
+  if (group === 'ruolo') {
+    if (text === 'RI AMM' || text === 'RI-AMM') return 'RI_AMM'
+    if (text === 'TI AMM' || text === 'TI-AMM') return 'TI_AMM'
+    const n = Number(value)
+    return Number.isFinite(n) && RUOLO_LABEL[n] ? RUOLO_LABEL[n] : text
+  }
+  return text
+}
+
+function buildDomainLabelMapsFromFields (fields: any[]): DomainLabelMaps {
+  const maps = cloneEmptyDomainLabels()
+  for (const f of (Array.isArray(fields) ? fields : [])) {
+    const group = getDomainGroupFromFieldName(String(f?.name || ''))
+    const codedValues = f?.domain?.codedValues
+    if (!group || !Array.isArray(codedValues)) continue
+    for (const cv of codedValues) {
+      const label = String(cv?.name ?? '').trim()
+      if (!label) continue
+      const normalizedKey = normalizeDomainLookupKey(group, cv?.code)
+      const rawKey = normalizeTextCode(cv?.code)
+      if (normalizedKey) maps[group][normalizedKey] = label
+      if (rawKey) maps[group][rawKey] = label
+    }
+  }
+  return maps
+}
+
+async function loadDomainLabelMaps (layerUrl: string): Promise<DomainLabelMaps> {
+  const layer = await getLoadedFeatureLayer(layerUrl, ['*'])
+  return buildDomainLabelMapsFromFields(Array.isArray(layer?.fields) ? layer.fields : [])
+}
+
+function getDomainLabel (domainLabels: DomainLabelMaps | null | undefined, group: DomainLabelGroup, code: any): string | null {
+  const key = normalizeDomainLookupKey(group, code)
+  if (!key) return null
+  const direct = domainLabels?.[group]?.[key]
+  if (direct) return direct
+  const raw = normalizeTextCode(code)
+  return raw ? (domainLabels?.[group]?.[raw] || null) : null
+}
+
+function fallbackAreaLabel (code: any): string {
+  const key = normalizeDomainLookupKey('area', code)
+  return AREA_LABELS[key] || key || '—'
+}
+
+function fallbackSettoreLabel (code: any): string {
+  const key = normalizeDomainLookupKey('settore', code)
+  return SETTORE_LABELS[key] || key || '—'
+}
+
+function getAreaLabelFromCode (code: any, domainLabels?: DomainLabelMaps | null): string {
+  return getDomainLabel(domainLabels, 'area', code) || fallbackAreaLabel(code)
+}
+
+function getSettoreLabelFromCode (code: any, domainLabels?: DomainLabelMaps | null): string {
+  return getDomainLabel(domainLabels, 'settore', code) || fallbackSettoreLabel(code)
 }
 
 function resolveAreaCode (area: number | null | undefined, areaCod?: any): 'AMM' | 'AGR' | 'TEC' | '' {
@@ -664,9 +754,9 @@ function getAreaCodeFromRecord (d: any, fallbackArea?: any): 'AMM' | 'AGR' | 'TE
   return Number.isFinite(n) ? normalizeAreaCode(n) : ''
 }
 
-function getAreaDisplayFromRecord (d: any, fallbackArea?: any): string {
+function getAreaDisplayFromRecord (d: any, fallbackArea?: any, domainLabels?: DomainLabelMaps | null): string {
   const code = getAreaCodeFromRecord(d, fallbackArea)
-  return AREA_LABELS[code] || code || '—'
+  return getAreaLabelFromCode(code, domainLabels)
 }
 
 function getSettoreCodeFromRecord (d: any, fallbackSettore?: any): string {
@@ -678,9 +768,9 @@ function getSettoreCodeFromRecord (d: any, fallbackSettore?: any): string {
   return Number.isFinite(n) ? normalizeSettoreCode(n) : ''
 }
 
-function getSettoreDisplayFromRecord (d: any, fallbackSettore?: any): string {
+function getSettoreDisplayFromRecord (d: any, fallbackSettore?: any, domainLabels?: DomainLabelMaps | null): string {
   const code = getSettoreCodeFromRecord(d, fallbackSettore)
-  return SETTORE_LABELS[code] || code || '—'
+  return getSettoreLabelFromCode(code, domainLabels)
 }
 
 function getDateOnlyMsFromInput (value: string, endOfDay = false): number | null {
@@ -731,12 +821,12 @@ function pickPraticaSearchText (r: DataRecord, fieldPratica: string): string {
   return normalizeSearchText(parts.filter(v => v !== null && v !== undefined && v !== '').join(' '))
 }
 
-function pickTextSearchExtra (d: any, fallbackArea?: any, fallbackSettore?: any): string {
+function pickTextSearchExtra (d: any, fallbackArea?: any, fallbackSettore?: any, domainLabels?: DomainLabelMaps | null): string {
   const parts = [
     pickTecnicoRilevatore(d),
     pickTecnicoIstruttore(d),
-    getAreaDisplayFromRecord(d, fallbackArea),
-    getSettoreDisplayFromRecord(d, fallbackSettore),
+    getAreaDisplayFromRecord(d, fallbackArea, domainLabels),
+    getSettoreDisplayFromRecord(d, fallbackSettore, domainLabels),
     getAreaCodeFromRecord(d, fallbackArea),
     getSettoreCodeFromRecord(d, fallbackSettore),
     pickField(d, 'ufficio_zona')
@@ -744,10 +834,10 @@ function pickTextSearchExtra (d: any, fallbackArea?: any, fallbackSettore?: any)
   return normalizeSearchText(parts.filter(Boolean).join(' '))
 }
 
-function pickComparableDisplayValue (d: any, field: string, fallbackArea?: any, fallbackSettore?: any): any {
+function pickComparableDisplayValue (d: any, field: string, fallbackArea?: any, fallbackSettore?: any, domainLabels?: DomainLabelMaps | null): any {
   const f = String(field || '').toLowerCase()
-  if (f === 'area' || f === 'area_cod') return getAreaDisplayFromRecord(d, fallbackArea)
-  if (f === 'settore' || f === 'settore_cod' || f === 'id_settore') return getSettoreDisplayFromRecord(d, fallbackSettore)
+  if (f === 'area' || f === 'area_cod') return getAreaDisplayFromRecord(d, fallbackArea, domainLabels)
+  if (f === 'settore' || f === 'settore_cod' || f === 'id_settore') return getSettoreDisplayFromRecord(d, fallbackSettore, domainLabels)
   return pickField(d, field)
 }
 
@@ -1199,6 +1289,7 @@ export default function Widget (props: Props) {
   const [userLoading, setUserLoading] = React.useState(true)
   // notLogged: true quando non c'è utente autenticato → overlay bloccante
   const [notLogged, setNotLogged] = React.useState(false)
+  const [domainLabels, setDomainLabels] = React.useState<DomainLabelMaps>(EMPTY_DOMAIN_LABELS)
 
   // Firma metadata datasource (label/url) per ricalcolare bestDsId quando ExB popola i datasource
   const [dsMetaSig, setDsMetaSig] = React.useState('')
@@ -1270,6 +1361,27 @@ React.useEffect(() => {
     }]
   }, [resolvedView?.layerUrl, resolvedView?.serviceUrl, resolvedView?.viewName])
 
+  // Domini ufficiali AGOL del layer/vista runtime: fonte primaria per label Area/Settore.
+  // I record continuano a determinare quali opzioni mostrare; i domini determinano come chiamarle.
+  React.useEffect(() => {
+    let cancelled = false
+    const layerUrl = String(resolvedView?.layerUrl || '').trim()
+    if (!layerUrl) {
+      setDomainLabels(EMPTY_DOMAIN_LABELS)
+      return () => { cancelled = true }
+    }
+    ;(async () => {
+      try {
+        const labels = await loadDomainLabelMaps(layerUrl)
+        if (!cancelled) setDomainLabels(labels)
+      } catch (ex) {
+        console.warn('[GII-Elenco] Domini AGOL non disponibili, uso fallback locale:', ex)
+        if (!cancelled) setDomainLabels(EMPTY_DOMAIN_LABELS)
+      }
+    })()
+    return () => { cancelled = true }
+  }, [resolvedView?.layerUrl])
+
   const statoRuoloField = giiUser?.isAdmin
     ? null
     : giiUser?.ruoloLabel
@@ -1297,10 +1409,15 @@ React.useEffect(() => {
     const isAttesaMiaDefault = (n === 0 || n === 1 || n === 3)
     const isAttesaAltriDefault = (n === 2 || n === 4)
 
-    // Caso TI/TI_AMM: n===2 ("presa in carico") e' *mia* se assegnata al TI loggato.
+    // Caso TI/TI_AMM: n===2 ("presa in carico") e' *mia* se assegnata al tecnico loggato.
+    // Per TI_AMM vanno usati i campi amministrativi, non i vecchi ti_assegnato_* della fase tecnica.
     if ((role === 'TI' || role === 'TI_AMM') && n === 2) {
-      const tiUser = String(d['ti_assegnato_username'] ?? d['ti_assegnato_user'] ?? d['ti_assegnato'] ?? '').trim()
-      const tiName = String(d['ti_assegnato_nome'] ?? d['ti_assegnato_name'] ?? '').trim()
+      const tiUser = role === 'TI_AMM'
+        ? String(d['ti_amm_assegnato_username'] ?? d['ti_amm_assegnato_user'] ?? d['ti_amm_assegnato'] ?? '').trim()
+        : String(d['ti_assegnato_username'] ?? d['ti_assegnato_user'] ?? d['ti_assegnato'] ?? '').trim()
+      const tiName = role === 'TI_AMM'
+        ? String(d['ti_amm_assegnato_nome'] ?? d['ti_amm_assegnato_name'] ?? '').trim()
+        : String(d['ti_assegnato_nome'] ?? d['ti_assegnato_name'] ?? '').trim()
 
       const meUser = String(giiUser?.username || '').trim()
       const meName = String((giiUser as any)?.fullName ?? (giiUser as any)?.nome ?? (giiUser as any)?.displayName ?? '').trim()
@@ -1310,6 +1427,36 @@ React.useEffect(() => {
 
       if (tabId === 'attesa_mia') return isMine
       if (tabId === 'attesa_altri') return !isMine
+    }
+
+    // Caso RI_AMM: e' distinto dal vecchio RI tecnico e usa stato_RI_AMM.
+    // Se e' in carico a RI_AMM (n===2) resta "In attesa mia" finché non risulta
+    // un passaggio successivo a TI_AMM piu' recente.
+    if (role === 'RI_AMM' && n === 2) {
+      const hasRoleData = (roleName: string): boolean => {
+        const p = d[`presa_in_carico_${roleName}`]
+        const s = d[`stato_${roleName}`]
+        const e = d[`esito_${roleName}`]
+        return (p !== null && p !== undefined && p !== '') ||
+          (s !== null && s !== undefined && s !== '') ||
+          (e !== null && e !== undefined && e !== '')
+      }
+      const lastTouch = (roleName: string): number | null => {
+        const vals = [
+          parseToMs(d[`dt_presa_in_carico_${roleName}`]),
+          parseToMs(d[`dt_stato_${roleName}`]),
+          parseToMs(d[`dt_esito_${roleName}`])
+        ].filter((v): v is number => v !== null)
+        return vals.length ? Math.max(...vals) : null
+      }
+      const riAmmLast = lastTouch('RI_AMM')
+      const tiAmmLast = lastTouch('TI_AMM')
+      const waitingForTiAmm = hasRoleData('TI_AMM') && (
+        tiAmmLast === null || riAmmLast === null || tiAmmLast > riAmmLast
+      )
+
+      if (tabId === 'attesa_mia') return !waitingForTiAmm
+      if (tabId === 'attesa_altri') return waitingForTiAmm
     }
 
     if (role === 'RZ') {
@@ -2107,8 +2254,8 @@ React.useEffect(() => {
       for (const s of sort) {
         const da = ra.getData?.() || {}
         const db = rb.getData?.() || {}
-        const a = pickComparableDisplayValue(da, s.field, giiUser?.areaCod || giiUser?.area, giiUser?.settoreCod || giiUser?.settore) ?? getSortValue(ra, s.field)
-        const b = pickComparableDisplayValue(db, s.field, giiUser?.areaCod || giiUser?.area, giiUser?.settoreCod || giiUser?.settore) ?? getSortValue(rb, s.field)
+        const a = pickComparableDisplayValue(da, s.field, giiUser?.areaCod || giiUser?.area, giiUser?.settoreCod || giiUser?.settore, domainLabels) ?? getSortValue(ra, s.field)
+        const b = pickComparableDisplayValue(db, s.field, giiUser?.areaCod || giiUser?.area, giiUser?.settoreCod || giiUser?.settore, domainLabels) ?? getSortValue(rb, s.field)
         const cmp = compareValues(a, b)
         if (cmp !== 0) return (s.dir === 'ASC' ? cmp : -cmp)
       }
@@ -2128,7 +2275,7 @@ React.useEffect(() => {
     const statoLabel = computeSintetico(d).label
 
     if (q) {
-      const searchText = `${pickPraticaSearchText(r, fieldPratica)} ${pickTextSearchExtra(d, giiUser?.areaCod || giiUser?.area, giiUser?.settoreCod || giiUser?.settore)}`
+      const searchText = `${pickPraticaSearchText(r, fieldPratica)} ${pickTextSearchExtra(d, giiUser?.areaCod || giiUser?.area, giiUser?.settoreCod || giiUser?.settore, domainLabels)}`
       if (!searchText.includes(q)) return false
     }
     if (areaFilter !== 'tutte' && areaCode !== areaFilter) return false
@@ -2137,7 +2284,7 @@ React.useEffect(() => {
     if (toMs !== null && (dateMs === null || dateMs > toMs)) return false
     if (statoFilter !== 'tutte' && statoLabel !== statoFilter) return false
     return true
-  }, [searchFilter, areaFilter, settoreFilter, fromDateFilter, toDateFilter, statoFilter, giiUser?.areaCod, giiUser?.area, giiUser?.settoreCod, giiUser?.settore, fieldPratica, fieldDataRil])
+  }, [searchFilter, areaFilter, settoreFilter, fromDateFilter, toDateFilter, statoFilter, giiUser?.areaCod, giiUser?.area, giiUser?.settoreCod, giiUser?.settore, fieldPratica, fieldDataRil, domainLabels])
 
   const toggleSort = (field: string) => {
     setSortState(prev => {
@@ -2230,8 +2377,10 @@ React.useEffect(() => {
     const map = new Map<string, string>()
     for (const r of roleTabRecs) {
       const d = r.getData?.() || {}
+      const settoreCode = getSettoreCodeFromRecord(d, giiUser?.settoreCod || giiUser?.settore)
+      if (settoreFilter !== 'tutte' && settoreCode !== settoreFilter) continue
       const code = getAreaCodeFromRecord(d, giiUser?.areaCod || giiUser?.area)
-      if (code) map.set(code, AREA_LABELS[code] || code)
+      if (code) map.set(code, getAreaLabelFromCode(code, domainLabels))
     }
     const order = ['AMM', 'AGR', 'TEC']
     return Array.from(map.entries()).sort((a, b) => {
@@ -2242,17 +2391,34 @@ React.useEffect(() => {
       if (ib >= 0) return 1
       return a[1].localeCompare(b[1], 'it')
     })
-  }, [roleTabRecs, giiUser?.areaCod, giiUser?.area])
+  }, [roleTabRecs, settoreFilter, giiUser?.areaCod, giiUser?.area, giiUser?.settoreCod, giiUser?.settore, domainLabels])
 
   const settoriDisponibili = React.useMemo(() => {
     const map = new Map<string, string>()
     for (const r of roleTabRecs) {
       const d = r.getData?.() || {}
+      const areaCode = getAreaCodeFromRecord(d, giiUser?.areaCod || giiUser?.area)
+      if (areaFilter !== 'tutte' && areaCode !== areaFilter) continue
       const code = getSettoreCodeFromRecord(d, giiUser?.settoreCod || giiUser?.settore)
-      if (code) map.set(code, SETTORE_LABELS[code] || code)
+      if (code) map.set(code, getSettoreLabelFromCode(code, domainLabels))
     }
     return Array.from(map.entries()).sort((a, b) => a[1].localeCompare(b[1], 'it', { numeric: true, sensitivity: 'base' }))
-  }, [roleTabRecs, giiUser?.settoreCod, giiUser?.settore])
+  }, [roleTabRecs, areaFilter, giiUser?.areaCod, giiUser?.area, giiUser?.settoreCod, giiUser?.settore, domainLabels])
+
+  React.useEffect(() => {
+    if (areaFilter === 'tutte' || areeDisponibili.length === 0) return
+    if (!areeDisponibili.some(([code]) => code === areaFilter)) setAreaFilter('tutte')
+  }, [areaFilter, areeDisponibili])
+
+  React.useEffect(() => {
+    if (settoreFilter === 'tutte' || areaFilter !== 'tutte' || areeDisponibili.length !== 1) return
+    setAreaFilter(areeDisponibili[0][0])
+  }, [settoreFilter, areaFilter, areeDisponibili])
+
+  React.useEffect(() => {
+    if (settoreFilter === 'tutte' || settoriDisponibili.length === 0) return
+    if (!settoriDisponibili.some(([code]) => code === settoreFilter)) setSettoreFilter('tutte')
+  }, [settoreFilter, settoriDisponibili])
 
   const statiDisponibili = React.useMemo(() => {
     const set = new Set<string>()
@@ -2269,7 +2435,7 @@ React.useEffect(() => {
     const withPriority = sortByRolePriority(filteredRecs)
     return sortRecords(withPriority, sortState)
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [filteredRecs, sortState, sortByRolePriority, logVer])
+  }, [filteredRecs, sortState, sortByRolePriority, logVer, domainLabels])
 
   // Lookup: record → dsId (via WeakMap su identità oggetto, sopravvive al sort)
   const recDsLookup = React.useMemo(() => {
@@ -2762,7 +2928,10 @@ React.useEffect(() => {
                   <select
                     className='filterSelect'
                     value={areaFilter}
-                    onChange={(e: any) => setAreaFilter(e?.target?.value || 'tutte')}
+                    onChange={(e: any) => {
+                      setAreaFilter(e?.target?.value || 'tutte')
+                      setSettoreFilter('tutte')
+                    }}
                   >
                     <option value='tutte'>Tutte</option>
                     {areeDisponibili.map(([code, label]) => (
@@ -2771,7 +2940,7 @@ React.useEffect(() => {
                   </select>
                 </div>
                 <div>
-                  <label className='filterLabel'>Settore/Ufficio</label>
+                  <label className='filterLabel'>Settore</label>
                   <select
                     className='filterSelect'
                     value={settoreFilter}
@@ -3319,6 +3488,14 @@ React.useEffect(() => {
                             const fl = f.toLowerCase()
                             if (fl === 'objectid' || fl === 'oid' || fl === 'object_id') {
                               return <div key={col.id} className={ci === 0 ? 'cell first' : 'cell'} title={pratica}>{pratica}</div>
+                            }
+                            if (fl === 'area' || fl === 'area_cod') {
+                              const val = getAreaDisplayFromRecord(d, giiUser?.areaCod || giiUser?.area, domainLabels)
+                              return <div key={col.id} className={ci === 0 ? 'cell first' : 'cell'} title={val}>{val}</div>
+                            }
+                            if (fl === 'settore' || fl === 'settore_cod' || fl === 'id_settore') {
+                              const val = getSettoreDisplayFromRecord(d, giiUser?.settoreCod || giiUser?.settore, domainLabels)
+                              return <div key={col.id} className={ci === 0 ? 'cell first' : 'cell'} title={val}>{val}</div>
                             }
                             if (fl.startsWith('data_') || fl.startsWith('dt_')) {
                               const val = formatDateIt(d[f])

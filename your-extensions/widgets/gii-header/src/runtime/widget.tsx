@@ -11,6 +11,11 @@ const RUOLO_FULL:  Record<string, string> = {
   TR:'Tecnico Rilevatore', TI:'Tecnico Istruttore', RZ:'Responsabile di Zona',
   RI:'Responsabile Istruttoria', DT:'Direttore Tecnico', DA:'Direttore Amministrativo', ADMIN:'Amministratore'
 }
+const PROFILO_FULL: Record<string, string> = {
+  ...RUOLO_FULL,
+  TI_AMM: 'Tecnico istruttore amministrativo',
+  RI_AMM: 'Responsabile istruttoria amministrativo'
+}
 const AREA_LABEL: Record<number, string> = { 1:'AMM', 2:'AGR', 3:'TEC' }
 const AREA_NUM: Record<string, number> = { AMM:1, AGR:2, TEC:3 }
 const AREA_FULL: Record<string, string> = { AMM:'Amministrativa', AGR:'Agraria', TEC:'Tecnica' }
@@ -165,12 +170,18 @@ interface GiiUserRole {
   areaCod: string
   /** Alias snake_case per compatibilità con vecchi widget. */
   area_cod?: string
+  /** Etichetta area risolta preferibilmente da dominio AGOL. */
+  areaFull?: string
   settore: number | null
   /** Codice settore testuale ufficiale (CR/GI/D1..D6/DS). */
   settoreCod: string
   /** Alias snake_case per compatibilità con vecchi widget. */
   settore_cod?: string
+  /** Etichetta settore risolta preferibilmente da dominio AGOL. */
+  settoreFull?: string
   ufficio: number | null
+  /** Etichetta ufficio risolta preferibilmente da dominio AGOL, con fallback locale. */
+  ufficioLabel?: string
   gruppo: string
   /** Backward-compat GII: TRUE se il ruolo workflow è ADMIN. */
   isAdmin: boolean
@@ -210,22 +221,63 @@ function resolveCodeAndNum(rawCode: any, rawNum: any, codeByNum: Record<number, 
   return { code: code0 || '', num: num0 }
 }
 
+type DomainLabelMap = Record<string, Record<string, string>>
+
+function buildDomainLabelMap(fields: any[] | undefined): DomainLabelMap {
+  const out: DomainLabelMap = {}
+  for (const f of fields || []) {
+    const fieldName = String(f?.name || '').trim()
+    const codedValues = f?.domain?.codedValues
+    if (!fieldName || !Array.isArray(codedValues)) continue
+    const map: Record<string, string> = {}
+    for (const cv of codedValues) {
+      const codeRaw = cv?.code
+      if (codeRaw === null || codeRaw === undefined || codeRaw === '') continue
+      const label = String(cv?.name ?? cv?.label ?? cv?.description ?? codeRaw).trim()
+      const rawKey = String(codeRaw).trim()
+      if (rawKey) map[rawKey] = label
+      const normKey = normCode(codeRaw)
+      if (normKey) map[normKey] = label
+    }
+    out[fieldName] = map
+  }
+  return out
+}
+
+function getDomainLabel(domainMap: DomainLabelMap | null | undefined, fieldName: string, code: any): string {
+  const map = domainMap?.[fieldName]
+  if (!map) return ''
+  const rawKey = String(code ?? '').trim()
+  const normKey = normCode(code)
+  return String(map[rawKey] || map[normKey] || '').trim()
+}
+
+function getDomainLabelFromCandidates(domainMap: DomainLabelMap | null | undefined, textField: string, textCode: any, legacyField: string, legacyNum: any): string {
+  return getDomainLabel(domainMap, textField, textCode) || getDomainLabel(domainMap, legacyField, legacyNum)
+}
+
+function getProfiloLabel(profiloCod: string, ruoloFull: string, ruoloCod: string): string {
+  const profilo = normCode(profiloCod)
+  return PROFILO_FULL[profilo] || ruoloFull || RUOLO_FULL[normCode(ruoloCod)] || profilo
+}
+
 function getAreaLabel(user: GiiUserRole | null): string {
   if (!user) return ''
   const code = normCode(user.areaCod || (user.area != null ? AREA_LABEL[user.area] : ''))
-  return AREA_FULL[code] || code
+  return String(user.areaFull || AREA_FULL[code] || code || '').trim()
 }
 
 function getSettoreLabel(user: GiiUserRole | null, compact = false): string {
   if (!user) return ''
   const code = normCode(user.settoreCod || (user.settore != null ? SETTORE_LABEL[user.settore] : ''))
+  if (user.settoreFull) return String(user.settoreFull).trim()
   if (compact && /^D[1-6]$/.test(code)) return `Distretto ${code.slice(1)}`
   return SETTORE_FULL[code] || code
 }
 
 function getUfficioLabel(user: GiiUserRole | null): string {
   if (!user || user.ufficio == null) return ''
-  return UFFICIO_LABEL[user.ufficio] || String(user.ufficio)
+  return String(user.ufficioLabel || UFFICIO_LABEL[user.ufficio] || user.ufficio).trim()
 }
 
 function getOrganizationalHierarchy(user: GiiUserRole | null, compact = false): string[] {
@@ -260,7 +312,7 @@ function getOrganizationalContext(user: GiiUserRole | null, compact = true): str
   const parts: string[] = []
   if (area) parts.push(`Area ${area}`)
   if (settore) parts.push(`Settore ${settore}`)
-  if (ufficio) parts.push(`Ufficio ${ufficio}`)
+  if (ufficio) parts.push(`Ufficio di ${ufficio}`)
   return parts
 }
 
@@ -299,6 +351,7 @@ async function loadUser(): Promise<GiiUserRole | null> {
 
     const fullName = String(cached.fullName || cached.full_name || cached.username)
     const profiloCod = getProfiloCod(ruoloCod, areaCod)
+    const ruoloFull = String(cached.ruoloFull || RUOLO_FULL[ruoloCod] || ruoloCod || '')
     const u: GiiUserRole = {
       username: String(cached.username),
       fullName,
@@ -306,16 +359,19 @@ async function loadUser(): Promise<GiiUserRole | null> {
       ruoloCod,
       ruolo_cod: ruoloCod,
       ruoloLabel: ruoloCod,
-      ruoloFull: RUOLO_FULL[ruoloCod] || ruoloCod,
+      ruoloFull,
       profiloCod,
-      profiloLabel: profiloCod,
+      profiloLabel: String(cached.profiloLabel || getProfiloLabel(profiloCod, ruoloFull, ruoloCod)),
       area,
       areaCod,
       area_cod: areaCod,
+      areaFull: String(cached.areaFull || cached.area_full || (areaCod ? AREA_FULL[areaCod] || areaCod : '')),
       settore,
       settoreCod,
       settore_cod: settoreCod,
+      settoreFull: String(cached.settoreFull || cached.settore_full || (settoreCod ? SETTORE_FULL[settoreCod] || settoreCod : '')),
       ufficio,
+      ufficioLabel: String(cached.ufficioLabel || cached.ufficio_label || (ufficio != null ? UFFICIO_LABEL[ufficio] || ufficio : '')),
       gruppo: String(cached.gruppo || ''),
       // Backward-compat GII: i vecchi widget che leggono isAdmin devono intendere ADMIN workflow.
       isAdmin: isWorkflowAdmin,
@@ -339,6 +395,7 @@ async function loadUser(): Promise<GiiUserRole | null> {
     const FeatureLayer = await loadEsriModule<any>('esri/layers/FeatureLayer')
     const fl = new FeatureLayer({ url: GII_UTENTI_URL })
     await fl.load().catch(() => {})
+    const domainLabels = buildDomainLabelMap((fl as any)?.fields || [])
     const qr = await fl.queryFeatures({
       where: `username = '${username.replace(/'/g,"''")}'`,
       outFields: ['ruolo','ruolo_cod','area','area_cod','settore','settore_cod','ufficio','gruppo','full_name'],
@@ -350,11 +407,12 @@ async function loadUser(): Promise<GiiUserRole | null> {
     // → contesto coerente "ADMIN trasversale" (mai DA)
     if (!f) {
       if (isOrgAdmin) {
+        const ruoloFull = getDomainLabelFromCandidates(domainLabels, 'ruolo_cod', 'ADMIN', 'ruolo', 7) || RUOLO_FULL.ADMIN || 'Amministratore'
         const u: GiiUserRole = {
           username, fullName,
-          ruolo: 7, ruoloCod: 'ADMIN', ruolo_cod: 'ADMIN', ruoloLabel: 'ADMIN', ruoloFull: RUOLO_FULL.ADMIN || 'Amministratore',
-          profiloCod: 'ADMIN', profiloLabel: 'ADMIN',
-          area: null, areaCod: '', area_cod: '', settore: null, settoreCod: '', settore_cod: '', ufficio: null, gruppo: '',
+          ruolo: 7, ruoloCod: 'ADMIN', ruolo_cod: 'ADMIN', ruoloLabel: 'ADMIN', ruoloFull,
+          profiloCod: 'ADMIN', profiloLabel: getProfiloLabel('ADMIN', ruoloFull, 'ADMIN'),
+          area: null, areaCod: '', area_cod: '', areaFull: '', settore: null, settoreCod: '', settore_cod: '', settoreFull: '', ufficio: null, ufficioLabel: '', gruppo: '',
           isAdmin: true,
           isOrgAdmin: true,
           isWorkflowAdmin: true
@@ -367,7 +425,7 @@ async function loadUser(): Promise<GiiUserRole | null> {
         username, fullName,
         ruolo: null, ruoloCod: '', ruolo_cod: '', ruoloLabel: '', ruoloFull: '',
         profiloCod: '', profiloLabel: '',
-        area: null, areaCod: '', area_cod: '', settore: null, settoreCod: '', settore_cod: '', ufficio: null, gruppo: '',
+        area: null, areaCod: '', area_cod: '', areaFull: '', settore: null, settoreCod: '', settore_cod: '', settoreFull: '', ufficio: null, ufficioLabel: '', gruppo: '',
         isAdmin: false,
         isOrgAdmin: false,
         isWorkflowAdmin: false
@@ -393,7 +451,13 @@ async function loadUser(): Promise<GiiUserRole | null> {
     const areaCod = isWorkflowAdmin ? '' : areaResolved.code
     const settore = isWorkflowAdmin ? null : settoreResolved.num
     const settoreCod = isWorkflowAdmin ? '' : settoreResolved.code
+    const ufficio = isWorkflowAdmin ? null : toNum(a.ufficio)
+    const ruoloFull = getDomainLabelFromCandidates(domainLabels, 'ruolo_cod', ruoloCod, 'ruolo', rn) || RUOLO_FULL[ruoloCod] || ruoloCod
+    const areaFull = isWorkflowAdmin ? '' : (getDomainLabelFromCandidates(domainLabels, 'area_cod', areaCod, 'area', area) || AREA_FULL[areaCod] || areaCod)
+    const settoreFull = isWorkflowAdmin ? '' : (getDomainLabelFromCandidates(domainLabels, 'settore_cod', settoreCod, 'settore', settore) || SETTORE_FULL[settoreCod] || settoreCod)
+    const ufficioLabel = isWorkflowAdmin ? '' : (getDomainLabel(domainLabels, 'ufficio', ufficio) || getDomainLabel(domainLabels, 'id_ufficio', ufficio) || (ufficio != null ? UFFICIO_LABEL[ufficio] || String(ufficio) : ''))
     const profiloCod = getProfiloCod(ruoloCod, areaCod)
+    const profiloLabel = getProfiloLabel(profiloCod, ruoloFull, ruoloCod)
 
     const u: GiiUserRole = {
       username,
@@ -402,17 +466,20 @@ async function loadUser(): Promise<GiiUserRole | null> {
       ruoloCod,
       ruolo_cod: ruoloCod,
       ruoloLabel: ruoloCod,
-      ruoloFull: RUOLO_FULL[ruoloCod] || ruoloCod,
+      ruoloFull,
       profiloCod,
-      profiloLabel: profiloCod,
+      profiloLabel,
       // ADMIN trasversale: mai area/settore/ufficio
       area,
       areaCod,
       area_cod: areaCod,
+      areaFull,
       settore,
       settoreCod,
       settore_cod: settoreCod,
-      ufficio: isWorkflowAdmin ? null : toNum(a.ufficio),
+      settoreFull,
+      ufficio,
+      ufficioLabel,
       gruppo: String(a.gruppo || ''),
       // Backward-compat GII: i vecchi widget che leggono isAdmin devono intendere ADMIN workflow.
       isAdmin: isWorkflowAdmin,
@@ -661,6 +728,8 @@ export default function Widget(props: Props) {
   const accountHierarchyParts = React.useMemo(() => getOrganizationalHierarchy(user, false), [user])
   const orgContextText = orgContextParts.join(' · ')
   const accountHierarchy = accountHierarchyParts.join(' · ')
+  const displayRoleCode = user?.profiloCod || user?.ruoloLabel || ''
+  const displayRoleLabel = user?.profiloLabel || user?.ruoloFull || ''
 
   return (
     <div style={{
@@ -717,11 +786,11 @@ export default function Widget(props: Props) {
               fontWeight:500,
               color:'rgba(226,232,240,0.78)',
               letterSpacing:0.1,
-              lineHeight:1,
-              whiteSpace:'nowrap',
-              overflow:'hidden',
-              textOverflow:'ellipsis',
-              maxWidth:520
+              lineHeight:1.15,
+              whiteSpace:'normal',
+              overflow:'visible',
+              textOverflow:'clip',
+              maxWidth:'min(760px, 54vw)'
             }}>{orgContextText}</div>
           )}
         </div>
@@ -748,10 +817,10 @@ export default function Widget(props: Props) {
                 <div style={{ fontSize:cfg.userNameSize,fontWeight:600,color:cfg.userNameColor,whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis',minWidth:0 }}>
                   Benvenuto, {user.fullName||user.username}
                 </div>
-                {(user.ruoloLabel || user.ruoloFull) && (
-                  <div title={[user.ruoloLabel, user.ruoloFull].filter(Boolean).join(' · ')} style={{ fontSize:11.5,color:cfg.userInfoColor,marginTop:2,whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis',display:'flex',alignItems:'center',gap:7,minWidth:0 }}>
-                    {user.ruoloLabel && <span style={{ background:cfg.userBadgeBg,border:`1px solid ${cfg.userBadgeColor}44`,borderRadius:6,padding:'1px 8px',fontSize:11.5,fontWeight:600,color:cfg.userBadgeColor,flex:'0 0 auto' }}>{user.ruoloLabel}</span>}
-                    {user.ruoloFull && <span style={{ fontWeight:600,color:cfg.userInfoColor,overflow:'hidden',textOverflow:'ellipsis',flex:'1 1 auto',minWidth:0 }}>{user.ruoloFull}</span>}
+                {(displayRoleCode || displayRoleLabel) && (
+                  <div title={[displayRoleCode, displayRoleLabel].filter(Boolean).join(' · ')} style={{ fontSize:11.5,color:cfg.userInfoColor,marginTop:2,whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis',display:'flex',alignItems:'center',gap:7,minWidth:0 }}>
+                    {displayRoleCode && <span style={{ background:cfg.userBadgeBg,border:`1px solid ${cfg.userBadgeColor}44`,borderRadius:6,padding:'1px 8px',fontSize:11.5,fontWeight:600,color:cfg.userBadgeColor,flex:'0 0 auto' }}>{displayRoleCode}</span>}
+                    {displayRoleLabel && <span style={{ fontWeight:600,color:cfg.userInfoColor,overflow:'hidden',textOverflow:'ellipsis',flex:'1 1 auto',minWidth:0 }}>{displayRoleLabel}</span>}
                   </div>
                 )}
               </div>
@@ -794,7 +863,7 @@ export default function Widget(props: Props) {
                       {user.fullName || user.username}
                     </div>
                     <div style={{ fontSize:11.5, color:'rgba(147,197,253,0.75)', marginBottom:10, lineHeight:1.35 }}>
-                      {[user.ruoloLabel, user.ruoloFull, accountHierarchy].filter(Boolean).join(' · ')}
+                      {[displayRoleCode, displayRoleLabel, accountHierarchy].filter(Boolean).join(' · ')}
                     </div>
 
                     <button type='button' disabled={signingIn}

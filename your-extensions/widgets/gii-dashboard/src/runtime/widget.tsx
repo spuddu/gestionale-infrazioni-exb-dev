@@ -23,10 +23,16 @@ type GiiUserInfo = {
   ruolo: number | null
   ruoloLabel: string
   ruoloCod: string
+  ruoloFull?: string
+  profiloCod?: string
+  profiloLabel?: string
   area: number | null
   areaCod: 'AMM' | 'AGR' | 'TEC' | ''
+  areaFull?: string
   settore: number | null
   settoreCod: string
+  settoreFull?: string
+  ufficioLabel?: string
   gruppo?: string
   isAdmin: boolean
   isWorkflowAdmin?: boolean
@@ -41,6 +47,12 @@ type Metric = {
   hint: string
   icon: string
 }
+
+type RecentSortKey = 'numeroRapporto' | 'comune' | 'fase' | 'lastUpdate'
+type SortDir = 'asc' | 'desc'
+type RecentSortRule = { key: RecentSortKey; dir: SortDir }
+
+const DEFAULT_RECENT_SORT_RULES: RecentSortRule[] = [{ key: 'lastUpdate', dir: 'desc' }]
 
 const RUOLO_LABEL: Record<number, string> = { 1: 'TR', 2: 'TI', 3: 'RZ', 4: 'RI', 5: 'DT', 6: 'DA', 7: 'ADMIN' }
 const AREA_FROM_CODE: Record<number, string> = { 1: 'AMM', 2: 'AGR', 3: 'TEC' }
@@ -247,10 +259,16 @@ function readGiiUser (): GiiUserInfo | null {
     ruolo,
     ruoloLabel: ruoloCod,
     ruoloCod,
+    ruoloFull: String(cached.ruoloFull || cached.ruolo_full || '').trim(),
+    profiloCod: String(cached.profiloCod || cached.profilo_cod || '').trim(),
+    profiloLabel: String(cached.profiloLabel || cached.profilo_label || '').trim(),
     area,
     areaCod,
+    areaFull: String(cached.areaFull || cached.area_full || '').trim(),
     settore,
     settoreCod,
+    settoreFull: String(cached.settoreFull || cached.settore_full || '').trim(),
+    ufficioLabel: String(cached.ufficioLabel || cached.ufficio_label || '').trim(),
     gruppo: String(cached.gruppo || ''),
     isAdmin,
     isWorkflowAdmin: !!cached.isWorkflowAdmin
@@ -350,10 +368,11 @@ function isRecordVisibleForCurrentUser (d: any, user: GiiUserInfo | null): boole
     if (!isInFaseSanzionatoria(d)) return false
     if (role === 'TI_AMM') {
       const meUser = String(user.username || '').trim()
-      const tiAmmUser = String(d['ti_amm_assegnato_username'] ?? '').trim()
-      const tiAmmName = String(d['ti_amm_assegnato_nome'] ?? '').trim()
+      const meName = String(user.fullName ?? user.nome ?? user.displayName ?? '').trim()
+      const tiAmmUser = String(d['ti_amm_assegnato_username'] ?? d['ti_amm_assegnato_user'] ?? d['ti_amm_assegnato'] ?? '').trim()
+      const tiAmmName = String(d['ti_amm_assegnato_nome'] ?? d['ti_amm_assegnato_name'] ?? '').trim()
       if (!tiAmmUser && !tiAmmName) return false
-      return equalsUser(tiAmmUser, meUser) || equalsUser(tiAmmName, meUser)
+      return equalsUser(tiAmmUser, meUser) || equalsUser(tiAmmName, meUser) || (meName ? equalsUser(tiAmmName, meName) : false)
     }
     return true
   }
@@ -385,6 +404,14 @@ function isRecordVisibleForCurrentUser (d: any, user: GiiUserInfo | null): boole
   return true
 }
 
+function isWaitingForTiAmmAfterRiAmm (d: any): boolean {
+  const riAmmLast = getRoleLastTouchMs(d, 'RI_AMM')
+  const tiAmmLast = getRoleLastTouchMs(d, 'TI_AMM')
+  return hasRuoloData(d, 'TI_AMM') && (
+    tiAmmLast === null || riAmmLast === null || tiAmmLast > riAmmLast
+  )
+}
+
 function isAttesaMia (d: any, user: GiiUserInfo | null): boolean {
   if (!user || user.isAdmin || user.isWorkflowAdmin) return false
   const role = getEffectiveRole(user.ruoloCod || user.ruoloLabel || '', user.areaCod)
@@ -396,14 +423,15 @@ function isAttesaMia (d: any, user: GiiUserInfo | null): boolean {
     const meUser = String(user.username || '').trim()
     const meName = String(user.fullName ?? user.nome ?? user.displayName ?? '').trim()
     const tiUser = role === 'TI_AMM'
-      ? String(d['ti_amm_assegnato_username'] ?? '').trim()
+      ? String(d['ti_amm_assegnato_username'] ?? d['ti_amm_assegnato_user'] ?? d['ti_amm_assegnato'] ?? '').trim()
       : String(d['ti_assegnato_username'] ?? d['ti_assegnato_user'] ?? d['ti_assegnato'] ?? '').trim()
     const tiName = role === 'TI_AMM'
-      ? String(d['ti_amm_assegnato_nome'] ?? '').trim()
+      ? String(d['ti_amm_assegnato_nome'] ?? d['ti_amm_assegnato_name'] ?? '').trim()
       : String(d['ti_assegnato_nome'] ?? d['ti_assegnato_name'] ?? '').trim()
     return equalsUser(tiUser, meUser) || equalsUser(tiName, meUser) || (meName ? equalsUser(tiName, meName) : false)
   }
 
+  if (role === 'RI_AMM' && n === 2) return !isWaitingForTiAmmAfterRiAmm(d)
   if (role === 'RZ' && getTiIstruttoriaInfo(d).isInTiIstruttoria) return false
   return n === 0 || n === 1 || n === 3
 }
@@ -416,6 +444,7 @@ function isAttesaAltri (d: any, user: GiiUserInfo | null): boolean {
   const n = val != null && val !== '' ? Number(val) : null
   if (role === 'RZ' && getTiIstruttoriaInfo(d).isInTiIstruttoria) return true
   if ((role === 'TI' || role === 'TI_AMM') && n === 2) return !isAttesaMia(d, user)
+  if (role === 'RI_AMM' && n === 2) return isWaitingForTiAmmAfterRiAmm(d)
   return n === 2 || n === 4
 }
 
@@ -423,6 +452,62 @@ function getActiveRole (d: any): string {
   const roles = ['DA', 'TI_AMM', 'RI_AMM', 'DT', 'RI', 'RZ', 'TI', 'TR']
   for (const r of roles) if (hasRuoloData(d, r)) return r
   return 'N/D'
+}
+
+function faseLabel (role: string): string {
+  const r = String(role || '').trim().toUpperCase()
+  if (r === 'TR' || r === 'TI' || r === 'RZ' || r === 'RI') return 'Istruttoria tecnica'
+  if (r === 'DT') return 'Approvazione tecnica'
+  if (r === 'RI_AMM' || r === 'TI_AMM' || r === 'DA') return 'Istruttoria amministrativa'
+  return 'Non determinata'
+}
+
+function ruoloOperativoLabel (role: string): string {
+  const r = String(role || '').trim().toUpperCase()
+  if (r === 'TR') return 'Tecnico rilevatore'
+  if (r === 'TI') return 'Tecnico istruttore'
+  if (r === 'RZ') return 'Responsabile di zona'
+  if (r === 'RI') return 'Responsabile istruttoria'
+  if (r === 'DT') return 'Direttore tecnico'
+  if (r === 'TI_AMM') return 'Tecnico istruttore amministrativo'
+  if (r === 'RI_AMM') return 'Responsabile istruttoria amministrativo'
+  if (r === 'DA') return 'Direttore amministrativo'
+  if (r === 'ADMIN') return 'Amministratore'
+  return 'Non determinato'
+}
+
+function getFirst (d: any, names: string[], fallback = '—'): string {
+  for (const n of names) {
+    const v = d[n]
+    if (v !== null && v !== undefined && String(v).trim() !== '') return String(v).trim()
+  }
+  return fallback
+}
+
+function getObjectId (d: any): string {
+  return getFirst(d, ['OBJECTID', 'objectid', 'ObjectId', 'objectId', 'FID'], '—')
+}
+
+function getNumeroRapporto (d: any): string {
+  const stored = getFirst(d, [
+    'cod_pratica', 'Cod_pratica', 'COD_PRATICA',
+    'numero_rapporto', 'Numero_rapporto', 'NUMERO_RAPPORTO',
+    'num_rapporto', 'Num_rapporto', 'NUM_RAPPORTO',
+    'n_rapporto', 'N_rapporto', 'N_RAPPORTO'
+  ], '')
+  if (stored) return stored
+  const oid = getObjectId(d)
+  if (!oid || oid === '—') return '—'
+  const opRaw = d['origine_pratica'] ?? d['Origine_pratica'] ?? d['ORIGINE_PRATICA']
+  const op = String(opRaw ?? '').trim().toUpperCase()
+  let prefix = 'TR'
+  if (op === '2' || op === 'TI') prefix = 'TI'
+  else if (op === '1' || op === 'TR') prefix = 'TR'
+  return `${prefix}-${oid}`
+}
+
+function getComune (d: any): string {
+  return getFirst(d, ['comune', 'Comune', 'COMUNE'], '—')
 }
 
 function statoLabel (v: any): string {
@@ -497,6 +582,10 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
   const [error, setError] = React.useState<string>('')
   const [lastLoad, setLastLoad] = React.useState<number | null>(null)
   const [nonce, setNonce] = React.useState(0)
+  const [hoveredRecentRowId, setHoveredRecentRowId] = React.useState('')
+  const [selectedRecentRowId, setSelectedRecentRowId] = React.useState('')
+  const [recentPage, setRecentPage] = React.useState(1)
+  const [recentSortRules, setRecentSortRules] = React.useState<RecentSortRule[]>(DEFAULT_RECENT_SORT_RULES)
 
   React.useEffect(() => {
     const hUser = () => setUser(readGiiUser())
@@ -562,10 +651,19 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
     return n === 0 || n === 1
   }).length
 
+  const byFase = React.useMemo(() => {
+    const map = new Map<string, number>()
+    for (const r of records) {
+      const k = faseLabel(getActiveRole(r))
+      map.set(k, (map.get(k) || 0) + 1)
+    }
+    return Array.from(map.entries()).sort((a, b) => b[1] - a[1]).slice(0, 8)
+  }, [records])
+
   const byRole = React.useMemo(() => {
     const map = new Map<string, number>()
     for (const r of records) {
-      const k = getActiveRole(r)
+      const k = ruoloOperativoLabel(getActiveRole(r))
       map.set(k, (map.get(k) || 0) + 1)
     }
     return Array.from(map.entries()).sort((a, b) => b[1] - a[1]).slice(0, 8)
@@ -583,11 +681,107 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
   }, [records, user?.username, user?.ruoloCod, user?.areaCod, user?.ruoloLabel, user?.area])
 
   const recent = React.useMemo(() => {
-    return [...records]
+    const recentBase = [...records]
       .map(r => ({ r, t: getLastTouchMs(r) || 0 }))
       .sort((a, b) => b.t - a.t)
-      .slice(0, 8)
-  }, [records])
+
+    const getSortValue = (row: { r: DashRecord; t: number }, key: RecentSortKey): any => {
+      if (key === 'numeroRapporto') return getNumeroRapporto(row.r)
+      if (key === 'comune') return getComune(row.r)
+      if (key === 'fase') return faseLabel(getActiveRole(row.r))
+      if (key === 'lastUpdate') return row.t || 0
+      return ''
+    }
+
+    const rules = recentSortRules.length ? recentSortRules : DEFAULT_RECENT_SORT_RULES
+    return recentBase.sort((a, b) => {
+      for (const rule of rules) {
+        const dir = rule.dir === 'asc' ? 1 : -1
+        const av = getSortValue(a, rule.key)
+        const bv = getSortValue(b, rule.key)
+        const cmp = (typeof av === 'string' || typeof bv === 'string')
+          ? String(av || '').localeCompare(String(bv || ''), 'it', { numeric: true, sensitivity: 'base' })
+          : ((av || 0) - (bv || 0))
+        if (cmp !== 0) return cmp * dir
+      }
+      return (b.t || 0) - (a.t || 0)
+    })
+  }, [records, recentSortRules])
+
+  React.useEffect(() => {
+    if (!selectedRecentRowId) return
+    if (!recent.some(({ r }) => getObjectId(r) === selectedRecentRowId)) setSelectedRecentRowId('')
+  }, [recent, selectedRecentRowId])
+
+  React.useEffect(() => {
+    setRecentPage(1)
+  }, [records.length, recentSortRules])
+
+  const recentRowsPerPage = Math.max(1, Number((cfg as any).tableRows || 25))
+  const recentPageCount = Math.max(1, Math.ceil(recent.length / recentRowsPerPage))
+  const safeRecentPage = Math.min(Math.max(1, recentPage), recentPageCount)
+  const recentPageRows = recent.slice((safeRecentPage - 1) * recentRowsPerPage, safeRecentPage * recentRowsPerPage)
+
+  React.useEffect(() => {
+    if (recentPage !== safeRecentPage) setRecentPage(safeRecentPage)
+  }, [recentPage, safeRecentPage])
+
+  const isDefaultRecentSort = recentSortRules.length === 1 && recentSortRules[0].key === 'lastUpdate' && recentSortRules[0].dir === 'desc'
+
+  const handleRecentSortHeaderClick = (key: RecentSortKey) => {
+    setRecentSortRules(current => {
+      const hasOnlyDefault = current.length === 1 && current[0].key === 'lastUpdate' && current[0].dir === 'desc'
+      const base = current.length ? current : DEFAULT_RECENT_SORT_RULES
+      const effectiveBase = hasOnlyDefault && key !== 'lastUpdate' ? [] : base
+      const index = effectiveBase.findIndex(rule => rule.key === key)
+
+      if (index >= 0) {
+        const activeRule = effectiveBase[index]
+
+        // L'ordinamento predefinito è già "Ultimo aggiornamento ▼".
+        // Se l'utente clicca per prima cosa quella intestazione, deve comunque vedere
+        // un cambio reale: passiamo quindi ad "Ultimo aggiornamento ▲" invece di
+        // rimuovere la regola e tornare visivamente allo stesso ordinamento.
+        if (hasOnlyDefault && key === 'lastUpdate' && activeRule.dir === 'desc') {
+          return [{ key: 'lastUpdate', dir: 'asc' }]
+        }
+
+        if (activeRule.dir === 'asc') {
+          const next = [...effectiveBase]
+          next[index] = { ...activeRule, dir: 'desc' }
+          return next
+        }
+
+        const next = effectiveBase.filter((_, i) => i !== index)
+        return next.length ? next : DEFAULT_RECENT_SORT_RULES
+      }
+
+      return [...effectiveBase, { key, dir: 'asc' }]
+    })
+  }
+
+  const recentTh = (label: string, key: RecentSortKey, align: 'left' | 'center' | 'right' = 'left') => {
+    const activeIndex = recentSortRules.findIndex(rule => rule.key === key)
+    const activeRule = activeIndex >= 0 ? recentSortRules[activeIndex] : null
+    const justify = align === 'center' ? 'center' : align === 'right' ? 'flex-end' : 'flex-start'
+    return (
+      <th
+        style={{ padding: '9px 7px', color: activeRule ? cfg.textColor : cfg.mutedColor, fontSize: 10.5, textTransform: 'uppercase', letterSpacing: 0.5, borderBottom: `1px solid ${cfg.cardBorder}`, cursor: 'pointer', whiteSpace: 'normal', lineHeight: 1.15, verticalAlign: 'bottom', textAlign: align, userSelect: 'none' }}
+        onClick={() => handleRecentSortHeaderClick(key)}
+        title='Ordina / aggiungi all’ordinamento multiplo'
+      >
+        <span style={{ display: 'inline-flex', alignItems: 'center', justifyContent: justify, gap: 4, width: '100%', minWidth: 0 }}>
+          <span style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis' }}>{label}</span>
+          {activeRule && (
+            <span aria-hidden='true' style={{ display: 'inline-flex', alignItems: 'center', gap: 2, flexShrink: 0, color: cfg.accentColor, fontSize: 10, fontWeight: 900, lineHeight: 1 }}>
+              <span style={{ display: 'inline-block', transform: activeRule.dir === 'asc' ? 'translateY(-1px)' : 'translateY(1px)' }}>{activeRule.dir === 'asc' ? '▲' : '▼'}</span>
+              <span style={{ minWidth: 12, height: 12, borderRadius: 999, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', padding: '0 3px', fontSize: 8.5, fontWeight: 900, background: cfg.accentColor, color: '#111827' }}>{activeIndex + 1}</span>
+            </span>
+          )}
+        </span>
+      </th>
+    )
+  }
 
   const metrics: Metric[] = [
     { id: 'tot', label: 'Pratiche di competenza', value: records.length, hint: 'Totale delle pratiche incluse nel quadro operativo.', icon: '📁' },
@@ -598,41 +792,29 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
     { id: 'sanz', label: 'Fase sanzionatoria', value: sanz, hint: 'Pratiche trasmesse o avviate alla fase amministrativa.', icon: '⚖️' }
   ]
 
-  const userLabel = user?.username
-    ? `${user.fullName || user.username} · ${effectiveRole || user.ruoloCod || user.ruoloLabel || '?'}${user.areaCod ? ` · ${user.areaCod}` : ''}${user.settoreCod ? ` · ${user.settoreCod}` : ''}`
-    : 'Accesso in caricamento…'
-
   return (
-    <div style={{ width: '100%', height: '100%', overflow: 'auto', color: cfg.textColor, boxSizing: 'border-box', padding: 20 }}>
+    <div style={{ width: '100%', height: '100%', overflow: 'hidden', color: cfg.textColor, boxSizing: 'border-box', padding: 16 }}>
       <div style={{
-        minHeight: '100%',
+        height: '100%',
+        minHeight: 0,
+        display: 'flex',
+        flexDirection: 'column',
+        overflow: 'hidden',
         background: cfg.panelBg,
         border: `1px solid ${cfg.cardBorder}`,
         borderRadius: 22,
-        padding: 22,
+        padding: 16,
         boxShadow: '0 18px 60px rgba(0,0,0,0.22)'
       }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 16, marginBottom: 18 }}>
-          <div>
-            <div style={{ color: cfg.accentColor, fontSize: 13, fontWeight: 800, textTransform: 'uppercase', letterSpacing: 1.1 }}>Quadro di sintesi</div>
-            <h2 style={{ margin: '4px 0 6px', fontSize: 28, lineHeight: 1.1, color: cfg.textColor }}>{cfg.title}</h2>
-            <div style={{ color: cfg.mutedColor, fontSize: 13 }}>{cfg.subtitle}</div>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, marginBottom: 10, flexShrink: 0, flexWrap: 'wrap' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap', minWidth: 0 }}>
+            <div style={{ color: cfg.mutedColor, fontSize: 13, fontWeight: 700, whiteSpace: 'nowrap' }}>{cfg.subtitle || 'Quadro sintetico delle pratiche di competenza.'}</div>
+            {lastLoad && <div style={{ color: cfg.mutedColor, fontSize: 12, whiteSpace: 'nowrap' }}>Ultimo aggiornamento: {new Date(lastLoad).toLocaleString('it-IT')}</div>}
+            {cfg.showTechnicalInfo && view && <div style={{ color: cfg.mutedColor, fontSize: 12, whiteSpace: 'nowrap' }}>Ambito dati: {view.viewName}</div>}
           </div>
-          <button onClick={() => setNonce(n => n + 1)} style={{
-            border: `1px solid ${cfg.cardBorder}`,
-            background: 'rgba(255,255,255,0.08)',
-            color: cfg.textColor,
-            borderRadius: 12,
-            padding: '9px 13px',
-            fontWeight: 700,
-            cursor: 'pointer'
-          }}>Aggiorna</button>
-        </div>
-
-        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 18 }}>
-          <span style={{ padding: '6px 10px', borderRadius: 999, background: 'rgba(255,255,255,0.08)', color: cfg.mutedColor, fontSize: 12 }}>{userLabel}</span>
-          {cfg.showTechnicalInfo && view && <span style={{ padding: '6px 10px', borderRadius: 999, background: 'rgba(255,255,255,0.08)', color: cfg.mutedColor, fontSize: 12 }}>Ambito dati: {view.viewName}</span>}
-          {lastLoad && <span style={{ padding: '6px 10px', borderRadius: 999, background: 'rgba(255,255,255,0.08)', color: cfg.mutedColor, fontSize: 12 }}>Ultimo aggiornamento: {new Date(lastLoad).toLocaleString('it-IT')}</span>}
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', justifyContent: 'flex-end', flexShrink: 0 }}>
+            <button onClick={() => setNonce(n => n + 1)} style={{ border: `1px solid ${cfg.cardBorder}`, background: 'rgba(255,255,255,0.08)', color: cfg.textColor, borderRadius: 12, padding: '8px 12px', fontWeight: 700, cursor: 'pointer' }}>Aggiorna</button>
+          </div>
         </div>
 
         {loading && <div style={{ padding: 14, marginBottom: 16, borderRadius: 14, background: 'rgba(255,255,255,0.08)', color: cfg.mutedColor }}>Caricamento dashboard…</div>}
@@ -642,9 +824,15 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
           {metrics.map(m => <MetricCard key={m.id} m={m} cfg={cfg} />)}
         </div>
 
-        <div style={{ display: 'grid', gridTemplateColumns: 'minmax(280px, 1fr) minmax(280px, 1fr)', gap: 14, marginBottom: 14 }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: 14, marginBottom: 14 }}>
           <section style={{ background: cfg.cardBg, border: `1px solid ${cfg.cardBorder}`, borderRadius: 18, padding: 18 }}>
             <h3 style={{ margin: '0 0 14px', fontSize: 16, color: cfg.textColor }}>Pratiche per fase di lavorazione</h3>
+            {byFase.length === 0 && <div style={{ color: cfg.mutedColor, fontSize: 13 }}>Nessun dato disponibile.</div>}
+            {byFase.map(([label, value]) => <BarRow key={label} label={label} value={value} total={records.length} accent={cfg.accentColor} muted={cfg.mutedColor} />)}
+          </section>
+
+          <section style={{ background: cfg.cardBg, border: `1px solid ${cfg.cardBorder}`, borderRadius: 18, padding: 18 }}>
+            <h3 style={{ margin: '0 0 14px', fontSize: 16, color: cfg.textColor }}>Pratiche per ruolo competente</h3>
             {byRole.length === 0 && <div style={{ color: cfg.mutedColor, fontSize: 13 }}>Nessun dato disponibile.</div>}
             {byRole.map(([label, value]) => <BarRow key={label} label={label} value={value} total={records.length} accent={cfg.accentColor} muted={cfg.mutedColor} />)}
           </section>
@@ -657,36 +845,90 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
           </section>
         </div>
 
-        <section style={{ background: cfg.cardBg, border: `1px solid ${cfg.cardBorder}`, borderRadius: 18, padding: 18 }}>
-          <h3 style={{ margin: '0 0 12px', fontSize: 16, color: cfg.textColor }}>Pratiche aggiornate di recente</h3>
-          <div style={{ overflowX: 'auto' }}>
-            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
-              <thead>
-                <tr style={{ color: cfg.mutedColor, textAlign: 'left', borderBottom: `1px solid ${cfg.cardBorder}` }}>
-                  <th style={{ padding: '8px 6px' }}>ID</th>
-                  <th style={{ padding: '8px 6px' }}>Comune</th>
-                  <th style={{ padding: '8px 6px' }}>Fase</th>
-                  <th style={{ padding: '8px 6px' }}>Ultimo aggiornamento</th>
+        <section style={{ background: cfg.cardBg, border: `1px solid ${cfg.cardBorder}`, borderRadius: 18, padding: 12, flex: '1 1 0', minHeight: 0, display: 'flex', flexDirection: 'column' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, marginBottom: 8, flexShrink: 0 }}>
+            <h3 style={{ margin: 0, fontSize: 15, color: cfg.textColor }}>Pratiche aggiornate di recente</h3>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexShrink: 0 }}>
+              <div style={{ color: cfg.mutedColor, fontSize: 12 }}>Pagina {safeRecentPage} di {recentPageCount}</div>
+              <button
+                onClick={() => setRecentSortRules(DEFAULT_RECENT_SORT_RULES)}
+                disabled={isDefaultRecentSort}
+                title='Ripristina ordinamento predefinito'
+                style={{ width: 36, height: 36, border: `1px solid ${isDefaultRecentSort ? cfg.cardBorder : cfg.accentColor}`, background: isDefaultRecentSort ? 'rgba(255,255,255,0.04)' : cfg.accentColor, color: isDefaultRecentSort ? cfg.mutedColor : '#111827', borderRadius: 8, padding: 0, fontSize: 17, fontWeight: 900, lineHeight: '34px', textAlign: 'center', cursor: isDefaultRecentSort ? 'not-allowed' : 'pointer', boxShadow: isDefaultRecentSort ? 'none' : '0 0 0 2px rgba(254,235,34,0.18)' }}
+              >↺</button>
+            </div>
+          </div>
+          <div style={{ flex: '1 1 auto', minHeight: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12, tableLayout: 'fixed', flexShrink: 0 }}>
+              <colgroup>
+                <col style={{ width: '18%' }} />
+                <col style={{ width: '24%' }} />
+                <col style={{ width: '34%' }} />
+                <col style={{ width: '24%' }} />
+              </colgroup>
+              <thead style={{ background: cfg.cardBg }}>
+                <tr style={{ textAlign: 'left' }}>
+                  {recentTh('N. rapporto', 'numeroRapporto')}
+                  {recentTh('Comune', 'comune')}
+                  {recentTh('Fase', 'fase')}
+                  {recentTh('Ultimo aggiornamento', 'lastUpdate')}
                 </tr>
               </thead>
-              <tbody>
-                {recent.map(({ r, t }, i) => {
-                  const id = r['OBJECTID'] ?? r['objectid'] ?? r['ObjectId'] ?? '—'
-                  const comune = r['comune'] ?? r['Comune'] ?? r['COMUNE'] ?? '—'
-                  return (
-                    <tr key={`${id}-${i}`} style={{ borderBottom: `1px solid rgba(255,255,255,0.07)` }}>
-                      <td style={{ padding: '8px 6px', color: cfg.textColor, fontWeight: 700 }}>{id}</td>
-                      <td style={{ padding: '8px 6px', color: cfg.mutedColor }}>{String(comune)}</td>
-                      <td style={{ padding: '8px 6px', color: cfg.mutedColor }}>{getActiveRole(r)}</td>
-                      <td style={{ padding: '8px 6px', color: cfg.mutedColor }}>{t ? new Date(t).toLocaleString('it-IT') : '—'}</td>
-                    </tr>
-                  )
-                })}
-                {recent.length === 0 && (
-                  <tr><td colSpan={4} style={{ padding: 12, color: cfg.mutedColor }}>Nessuna pratica disponibile.</td></tr>
-                )}
-              </tbody>
             </table>
+            <div style={{ overflowY: 'auto', overflowX: 'hidden', flex: '1 1 auto', minHeight: 0 }}>
+              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12, tableLayout: 'fixed' }}>
+                <colgroup>
+                  <col style={{ width: '18%' }} />
+                  <col style={{ width: '24%' }} />
+                  <col style={{ width: '34%' }} />
+                  <col style={{ width: '24%' }} />
+                </colgroup>
+                <tbody>
+                  {recentPageRows.map(({ r, t }, i) => {
+                    const rapporto = getNumeroRapporto(r)
+                    const comune = getComune(r)
+                    const oid = getObjectId(r)
+                    const rowId = `${oid}-${(safeRecentPage - 1) * recentRowsPerPage + i}`
+                    const selected = selectedRecentRowId === oid
+                    const hovered = hoveredRecentRowId === oid
+                    const rowBg = selected ? 'rgba(254,254,42,0.18)' : hovered ? 'rgba(255,255,255,0.09)' : 'transparent'
+                    return (
+                      <tr
+                        key={rowId}
+                        tabIndex={0}
+                        role='button'
+                        aria-selected={selected}
+                        onClick={() => setSelectedRecentRowId(current => current === oid ? '' : oid)}
+                        onMouseEnter={() => setHoveredRecentRowId(oid)}
+                        onMouseLeave={() => setHoveredRecentRowId(current => current === oid ? '' : current)}
+                        onKeyDown={e => {
+                          if (e.key === 'Enter' || e.key === ' ') {
+                            e.preventDefault()
+                            setSelectedRecentRowId(current => current === oid ? '' : oid)
+                          }
+                        }}
+                        style={{ borderBottom: `1px solid rgba(255,255,255,0.07)`, background: rowBg, boxShadow: selected ? `inset 3px 0 0 ${cfg.accentColor}` : 'none', cursor: 'pointer', outline: 'none', transition: 'background 120ms ease, box-shadow 120ms ease' }}
+                      >
+                        <td title={rapporto} style={{ padding: '8px 7px', color: cfg.textColor, fontWeight: 800, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{rapporto}</td>
+                        <td title={String(comune)} style={{ padding: '8px 7px', color: cfg.mutedColor, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{String(comune)}</td>
+                        <td title={faseLabel(getActiveRole(r))} style={{ padding: '8px 7px', color: cfg.mutedColor, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{faseLabel(getActiveRole(r))}</td>
+                        <td title={t ? new Date(t).toLocaleString('it-IT') : '—'} style={{ padding: '8px 7px', color: cfg.mutedColor, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{t ? new Date(t).toLocaleString('it-IT') : '—'}</td>
+                      </tr>
+                    )
+                  })}
+                  {recentPageRows.length === 0 && (
+                    <tr><td colSpan={4} style={{ padding: 14, color: cfg.mutedColor }}>Nessuna pratica disponibile.</td></tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10, marginTop: 10, flexWrap: 'wrap', flexShrink: 0 }}>
+            <div style={{ color: cfg.mutedColor, fontSize: 12 }}>Mostrate {recentPageRows.length} pratiche su {recent.length} risultati.</div>
+            <div style={{ display: 'flex', gap: 8 }}>
+              <button disabled={safeRecentPage <= 1} onClick={() => setRecentPage(p => Math.max(1, p - 1))} style={{ border: `1px solid ${cfg.cardBorder}`, background: 'rgba(255,255,255,0.08)', color: safeRecentPage <= 1 ? cfg.mutedColor : cfg.textColor, borderRadius: 10, padding: '7px 10px', fontWeight: 700, cursor: safeRecentPage <= 1 ? 'not-allowed' : 'pointer' }}>Indietro</button>
+              <button disabled={safeRecentPage >= recentPageCount} onClick={() => setRecentPage(p => Math.min(recentPageCount, p + 1))} style={{ border: `1px solid ${cfg.cardBorder}`, background: 'rgba(255,255,255,0.08)', color: safeRecentPage >= recentPageCount ? cfg.mutedColor : cfg.textColor, borderRadius: 10, padding: '7px 10px', fontWeight: 700, cursor: safeRecentPage >= recentPageCount ? 'not-allowed' : 'pointer' }}>Avanti</button>
+            </div>
           </div>
         </section>
       </div>

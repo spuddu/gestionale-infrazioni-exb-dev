@@ -34,7 +34,7 @@ function normalizeByAvailable(names: string[], availableNames: string[]): string
 
 function buildDefaultTabs(availableNames: string[]): TabConfig[] {
   return [
-    { id: 'anagrafica', label: 'Anagrafica', fields: normalizeByAvailable(DETAIL_DEFAULT_TAB_FIELDS.anagrafica, availableNames), hideEmpty: true },
+    { id: 'anagrafica', label: 'Trasgressore', fields: normalizeByAvailable(DETAIL_DEFAULT_TAB_FIELDS.anagrafica, availableNames), hideEmpty: true },
     { id: 'violazione', label: 'Violazione', fields: normalizeByAvailable(DETAIL_DEFAULT_TAB_FIELDS.violazione, availableNames), hideEmpty: true },
     { id: 'iter', label: 'Iter', fields: normalizeByAvailable(DETAIL_DEFAULT_TAB_FIELDS.iterExtra, availableNames), isIterTab: true, hideEmpty: false },
     { id: 'nota_spese', label: 'Nota spese', fields: [], locked: true, hideEmpty: false },
@@ -496,7 +496,7 @@ function PresetManager(p: { presets:any[]; activePresetId:string; onSetActive:(i
 function migrateLegacyFields(cfg: any): TabConfig[] {
   if(Array.isArray(cfg.tabs)&&cfg.tabs.length>0) return ensureNotaSpeseTabForSetting(cfg.tabs.map((tab:any)=>({...tab,hideEmpty:tab.id==='nota_spese'?false:(tab.hideEmpty??(tab.id==='violazione'||tab.id==='anagrafica'||tab.id==='allegati'))})))
   return [
-    {id:'anagrafica',label:'Anagrafica',fields:Array.isArray(cfg.anagraficaFields)?cfg.anagraficaFields:[],hideEmpty:true},
+    {id:'anagrafica',label:'Trasgressore',fields:Array.isArray(cfg.anagraficaFields)?cfg.anagraficaFields:[],hideEmpty:true},
     {id:'violazione',label:'Violazione',fields:Array.isArray(cfg.violazioneFields)?cfg.violazioneFields:[],hideEmpty:true},
     {id:'iter',label:'Iter',fields:Array.isArray(cfg.iterExtraFields)?cfg.iterExtraFields:[],isIterTab:true,hideEmpty:false},
     {id:'nota_spese',label:'Nota spese',fields:[],locked:true,hideEmpty:false},

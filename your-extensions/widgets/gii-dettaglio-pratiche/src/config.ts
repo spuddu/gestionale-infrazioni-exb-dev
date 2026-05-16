@@ -1,7 +1,7 @@
 import { type ImmutableObject, Immutable } from 'jimu-core'
 
 export interface TabConfig {
-  id: string // univoco (es. 'anagrafica', 'violazione', 'iter', 'allegati', 'azioni')
+  id: string // univoco (es. 'trasgressore', 'violazione', 'iter', 'allegati', 'azioni')
   label: string // nome visualizzato nella tab
   fields: string[] // campi selezionati per questa tab
   hideEmpty?: boolean // se true, mostra solo campi valorizzati (non vuoti)
@@ -250,7 +250,7 @@ export const defaultConfig: Config = {
 
   // Tab di default
   tabs: [
-    { id: 'anagrafica', label: 'Anagrafica', fields: DETAIL_DEFAULT_TAB_FIELDS.anagrafica, hideEmpty: true },
+    { id: 'anagrafica', label: 'Trasgressore', fields: DETAIL_DEFAULT_TAB_FIELDS.anagrafica, hideEmpty: true },
     { id: 'violazione', label: 'Violazione', fields: DETAIL_DEFAULT_TAB_FIELDS.violazione, hideEmpty: true },
     { id: 'iter', label: 'Iter', fields: DETAIL_DEFAULT_TAB_FIELDS.iterExtra, isIterTab: true, hideEmpty: false },
     { id: 'nota_spese', label: 'Nota spese', fields: [], locked: true, hideEmpty: false },
@@ -274,7 +274,7 @@ export const defaultConfig: Config = {
       id: DETAIL_DEFAULT_PRESET_ID,
       name: DETAIL_DEFAULT_PRESET_NAME,
       tabs: [
-        { id: 'anagrafica', label: 'Anagrafica', fields: DETAIL_DEFAULT_TAB_FIELDS.anagrafica, hideEmpty: true },
+        { id: 'anagrafica', label: 'Trasgressore', fields: DETAIL_DEFAULT_TAB_FIELDS.anagrafica, hideEmpty: true },
         { id: 'violazione', label: 'Violazione', fields: DETAIL_DEFAULT_TAB_FIELDS.violazione, hideEmpty: true },
         { id: 'iter', label: 'Iter', fields: DETAIL_DEFAULT_TAB_FIELDS.iterExtra, isIterTab: true, hideEmpty: false },
         { id: 'nota_spese', label: 'Nota spese', fields: [], locked: true, hideEmpty: false },

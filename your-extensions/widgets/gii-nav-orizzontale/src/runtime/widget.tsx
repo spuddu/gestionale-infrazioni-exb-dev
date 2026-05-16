@@ -8,7 +8,7 @@ const GII_PORTAL = 'https://cbsm-hub.maps.arcgis.com'
 const RUOLO_LABEL: Record<number, string> = { 1:'TR', 2:'TI', 3:'RZ', 4:'RI', 5:'DT', 6:'DA', 7:'ADMIN' }
 const RUOLO_FULL: Record<string, string> = {
   TR:'Tecnico Rilevatore', TI:'Tecnico Istruttore', RZ:'Responsabile di Zona',
-  RI:'Responsabile Istruttoria', RI_AMM:'Responsabile Istruttoria Amministrativa',
+  RI:'Responsabile Istruttoria', RI_AMM:'Responsabile Istruttoria Amministrativo',
   TI_AMM:'Tecnico Istruttore Amministrativo', DT:'Direttore Tecnico', DA:'Direttore Amministrativo', ADMIN:'Amministratore'
 }
 const AREA_LABEL: Record<number, string> = { 1:'AMM', 2:'AGR', 3:'TEC' }
@@ -77,8 +77,12 @@ interface UserInfo {
 async function loadUser(): Promise<UserInfo | null> {
   const cached: any = (window as any).__giiUserRole
   if (cached?.username) {
-    const baseRuoloLabel = normalizeRoleCode(cached.ruoloCod ?? cached.ruolo_cod ?? cached.ruoloLabel, cached.ruolo, cached.isAdmin)
     const area = normalizeAreaCode(cached.areaCod ?? cached.area_cod ?? cached.areaLabel, cached.area)
+    const baseRuoloLabel = normalizeRoleCode(
+      cached.profiloCod ?? cached.profilo_cod ?? cached.ruoloCod ?? cached.ruolo_cod ?? cached.ruoloLabel,
+      cached.ruolo,
+      cached.isAdmin
+    )
     const ruoloLabel = baseRuoloLabel === 'TI' && area === 'AMM'
       ? 'TI_AMM'
       : baseRuoloLabel === 'RI' && area === 'AMM'
@@ -86,12 +90,13 @@ async function loadUser(): Promise<UserInfo | null> {
         : baseRuoloLabel
     const settore = normalizeSectorCode(cached.settoreCod ?? cached.settore_cod ?? cached.settoreLabel, cached.settore)
     const isAdmin = cached.isAdmin === true || ruoloLabel === 'ADMIN'
+    const profiloLabel = String(cached.profiloLabel || cached.profilo_label || '').trim()
 
     return {
       username: String(cached.username),
       fullName: String(cached.fullName || cached.full_name || cached.username),
       ruoloLabel,
-      ruoloFull: RUOLO_FULL[ruoloLabel] || ruoloLabel,
+      ruoloFull: profiloLabel || RUOLO_FULL[ruoloLabel] || ruoloLabel,
       area,
       settore,
       isAdmin

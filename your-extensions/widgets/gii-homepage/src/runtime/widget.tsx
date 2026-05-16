@@ -99,8 +99,15 @@ async function loadUser(): Promise<UserInfo | null> {
   const cached: any = (window as any).__giiUserRole
   if (!cached?.username) return null
 
-  const ruoloCod = normalizeRoleCode(cached.ruoloCod ?? cached.ruolo_cod ?? cached.ruoloLabel, cached.ruolo) || (cached.isAdmin ? 'ADMIN' : '')
   const areaCod = normalizeAreaCode(cached.areaCod ?? cached.area_cod ?? cached.areaLabel, cached.area)
+  const baseRuoloCod = normalizeRoleCode(
+    cached.profiloCod ?? cached.profilo_cod ?? cached.ruoloCod ?? cached.ruolo_cod ?? cached.ruoloLabel,
+    cached.ruolo
+  ) || (cached.isAdmin ? 'ADMIN' : '')
+  const ruoloCod =
+    baseRuoloCod === 'RI_AMM' || (areaCod === 'AMM' && baseRuoloCod === 'RI') ? 'RI_AMM' :
+    baseRuoloCod === 'TI_AMM' || (areaCod === 'AMM' && baseRuoloCod === 'TI') ? 'TI_AMM' :
+    baseRuoloCod
   const settoreCod = normalizeSettoreCode(cached.settoreCod ?? cached.settore_cod ?? cached.settoreLabel, cached.settore)
 
   return {
