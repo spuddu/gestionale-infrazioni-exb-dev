@@ -1400,7 +1400,7 @@ function actionButtonStyle (bg: string, disabled: boolean, ui?: { btnBorderRadiu
   return { ...base, backgroundColor: bg, borderColor: bg, color: textColor || '#ffffff' }
 }
 
-type Pending = null | 'TAKE' | 'ASSEGNA_TI' | 'ASSEGNA_TI_AMM' | 'INTEGRAZIONE' | 'APPROVA' | 'RESPINGI' | 'TRASMETTI' | 'ELIMINA'
+type Pending = null | 'TAKE' | 'ASSEGNA_TI' | 'ASSEGNA_TI_AMM' | 'RESTITUISCI_TI_AMM' | 'INTEGRAZIONE' | 'INTEGRAZIONE_TI_AMM' | 'INTEGRAZIONE_TECNICA' | 'APPROVA' | 'RESPINGI' | 'TRASMETTI' | 'ELIMINA'
 
 function ActionsPanel (props: {
   active: { key: string; state: SelState } | null
@@ -1445,6 +1445,12 @@ function ActionsPanel (props: {
 }) {
   const { active, roleCode, buttonText, buttonColors, ui } = props
   const role = String(roleCode || 'DT').trim().toUpperCase()
+  const hasDedicatedPresaField = React.useCallback((r: string) => {
+    const rr = String(r || '').trim().toUpperCase()
+    // DT e DA non usano più i campi ridondanti presa_in_carico_DT/DA:
+    // la presa in carico è rappresentata da stato_* e dt_presa_in_carico_*.
+    return rr !== 'DT' && rr !== 'DA'
+  }, [])
 
   // scorciatoie (usate spesso nel render)
   const titleFontSize = ui.titleFontSize
@@ -1564,11 +1570,9 @@ function ActionsPanel (props: {
   const ds = active?.state?.ds
 
   // ── Field existence helpers (schema-aware) ────────────────────────────────
-  // Alcune viste / layer non espongono i campi "presa_in_carico_*" (ma espongono "stato_*"),
-  // oppure il campo non esiste proprio nel modello dati.
-  // In questi casi NON dobbiamo:
-  // 1) usarlo per il gating dei pulsanti
-  // 2) impostarlo nel patch ottimistico (altrimenti si accende solo "subito" e poi si spegne al reselect)
+  // La fonte primaria della presa in carico è stato_*; dt_presa_in_carico_* registra la data.
+  // I vecchi campi presa_in_carico_DT/DA sono ridondanti e vengono ignorati anche se ancora presenti nello schema.
+  // Per eventuali altri ruoli, usiamo presa_in_carico_* solo se il campo esiste davvero.
   const schemaFieldsCI = React.useMemo(() => {
     try {
       const fields: Record<string, any> = (ds as any)?.getSchema?.()?.fields || {}
@@ -1724,6 +1728,16 @@ function ActionsPanel (props: {
     if (r === 'TI_AMM') {
       return String(pickAttrCI(data, ['ti_amm_assegnato_username']) || '').trim()
     }
+
+    // Caso speciale: RI_AMM che chiede integrazione tecnica.
+    // Il destinatario non è il RI dell'Area Amministrativa, ma il RI
+    // dell'area tecnica di provenienza della pratica (AGR/TEC).
+    if (role === 'RI_AMM' && r === 'RI') {
+      const areaPratica = normalizeAreaLabel(pickAttrCI(data, ['area_cod', 'area', 'cod_area']))
+      const settorePratica = normalizeSettoreLabel(areaPratica, pickAttrCI(data, ['settore_cod', 'settore', 'cod_settore']))
+      return findDestUsername(_utentiCache, destRole, areaPratica, settorePratica)
+    }
+
     const { area, settore } = getCurrentCycleContext()
     return findDestUsername(_utentiCache, destRole, area, settore)
   }
@@ -1735,7 +1749,10 @@ function ActionsPanel (props: {
   const isRespondingToIntegration = (): boolean => {
     if (!data) return false
     const integSources: Record<string, string[]> = {
-      TI: ['RZ', 'RI'], RI: ['DT', 'RI_AMM', 'DA'], TI_AMM: ['RI_AMM'],
+      TI: ['RZ', 'RI'], RI: ['DT'], TI_AMM: ['RI_AMM'],
+      // RI_AMM -> RI è una integrazione tecnica speciale: il RI non risponde
+      // direttamente a RI_AMM, ma deve ritrasmettere a DT. Per questo RI_AMM
+      // non va considerato qui come requester diretto del RI.
       RZ: [], DT: [], DA: [], RI_AMM: []
     }
     for (const src of (integSources[role] || [])) {
@@ -1900,11 +1917,103 @@ function ActionsPanel (props: {
     return ci[String(name).toLowerCase()] || null
   }
 
-  const getPrevRoleForIntegration = (): string => {
+  const getPracticeAreaForRouting = (): string => {
+    return normalizeAreaLabel(pickAttrCI(data, ['area_cod', 'area', 'cod_area']) || getCurrentCycleContext().area)
+  }
+
+  const getPracticeSettoreForRouting = (): string => {
+    const areaPratica = getPracticeAreaForRouting()
+    return normalizeSettoreLabel(areaPratica, pickAttrCI(data, ['settore_cod', 'settore', 'cod_settore']) || getCurrentCycleContext().settore)
+  }
+
+  const makeGiiRoleTag = (r: string, opts?: { area?: string, settore?: string }): string => {
+    const rr = String(r || '').trim().toUpperCase()
+    const area = normalizeAreaLabel(opts?.area || '')
+    const settore = normalizeSettoreCod(opts?.settore || '')
+
+    if (rr === 'RI_AMM') return 'RI-AMM'
+    if (rr === 'TI_AMM') return 'TI-AMM'
+    if (rr === 'DA') return 'DIR-AMM'
+    if (rr === 'DT') return area ? `DIR-${area}` : 'DIR'
+    if (rr === 'RI') return area ? `RI-${area}` : 'RI'
+    if (rr === 'RZ') return settore ? `RZ-${settore}` : 'RZ'
+    if (rr === 'TI') return settore ? `TI-${settore}` : 'TI'
+    if (rr === 'TR') return settore ? `TR-${settore}` : 'TR'
+    return rr
+  }
+
+  const makeGiiActorLabel = (r: string, username: string, opts?: { area?: string, settore?: string }): string => {
+    const tag = makeGiiRoleTag(r, opts)
+    const user = String(username || '').trim()
+    const label = user ? `${tag} - ${user}` : tag
+    // I campi GII_da/GII_a sono stringhe brevi; evitiamo errori su username lunghi.
+    return label.length > 30 ? label.slice(0, 30) : label
+  }
+
+  const getRoutingMetaForRole = (r: string, opts?: { technicalIntegration?: boolean }) => {
+    const rr = String(r || '').trim().toUpperCase()
+    const ctx = getCurrentCycleContext()
+    const areaPratica = getPracticeAreaForRouting()
+    const settorePratica = getPracticeSettoreForRouting()
+
+    if (rr === 'RI_AMM' || rr === 'TI_AMM' || rr === 'DA') {
+      return { area: 'AMM', settore: '' }
+    }
+
+    // Caso importante: integrazione tecnica chiesta da RI_AMM.
+    // Il destinatario è il RI dell'area tecnica di provenienza della pratica,
+    // non l'RI dell'Area Amministrativa.
+    if (opts?.technicalIntegration && rr === 'RI') {
+      return { area: areaPratica || ctx.area, settore: settorePratica || ctx.settore }
+    }
+
+    if (rr === 'DT') {
+      return { area: areaPratica || ctx.area, settore: settorePratica || ctx.settore }
+    }
+
+    return { area: ctx.area || areaPratica, settore: ctx.settore || settorePratica }
+  }
+
+  const addGiiRoutingFields = (
+    upd: Record<string, any>,
+    ruoloDest: string,
+    mode: 'TRASMISSIONE' | 'INTEGRAZIONE',
+    opts?: { technicalIntegration?: boolean, destUsername?: string }
+  ) => {
+    try {
+      const schemaFields: Record<string, any> = (ds as any)?.getSchema?.()?.fields || {}
+      const fDa = getSchemaFieldNameCI(schemaFields, 'GII_da')
+      const fA = getSchemaFieldNameCI(schemaFields, 'GII_a')
+      const fDt = getSchemaFieldNameCI(schemaFields, 'GII_dt')
+      const fTrasm = getSchemaFieldNameCI(schemaFields, 'GII_trasm')
+      const fRim = getSchemaFieldNameCI(schemaFields, 'GII_rim')
+      const fArch = getSchemaFieldNameCI(schemaFields, 'GII_arch')
+
+      const ctx = getCurrentCycleContext()
+      const destMeta = getRoutingMetaForRole(ruoloDest, opts)
+      const mittente = makeGiiActorLabel(role, ctx.username, { area: ctx.area, settore: ctx.settore })
+      const destinatario = makeGiiActorLabel(ruoloDest, opts?.destUsername || resolveDestUser(ruoloDest), destMeta)
+
+      if (fDa) upd[fDa] = mittente
+      if (fA) upd[fA] = destinatario
+      if (fDt) upd[fDt] = Date.now()
+      if (fTrasm) upd[fTrasm] = mode === 'TRASMISSIONE' ? 1 : 0
+      if (fRim) upd[fRim] = mode === 'INTEGRAZIONE' ? 1 : 0
+      if (fArch) upd[fArch] = 0
+    } catch {}
+  }
+
+  const getPrevRoleForIntegration = (target?: 'TI_AMM' | 'TECNICA'): string => {
     if (role === 'RZ')     return 'TI'
     if (role === 'RI')     return 'TI'
     if (role === 'DT')     return 'RI'
-    if (role === 'RI_AMM') return 'RI'
+    if (role === 'RI_AMM') {
+      // RI_AMM ha due percorsi distinti di richiesta integrazione:
+      // - amministrativa verso il TI_AMM assegnato;
+      // - tecnica verso il RI dell'area di provenienza (AGR/TEC).
+      if (target === 'TI_AMM') return 'TI_AMM'
+      return 'RI'
+    }
     if (role === 'TI_AMM') return 'RI_AMM'
     if (role === 'DA')     return 'RI_AMM'
     return ''
@@ -1922,6 +2031,34 @@ function ActionsPanel (props: {
     }
     if (role === 'TI_AMM') return 'RI_AMM'
     if (role === 'DA')     return 'TI_AMM'   // DA approva e trasmette a TI_AMM per adempimenti (verbale, bollettino, PEC)
+    return ''
+  }
+
+  /**
+   * Se il ruolo corrente sta rispondendo a una richiesta di integrazione,
+   * deve ritrasmettere direttamente al ruolo che l'ha richiesta, non al normale
+   * destinatario della catena ordinaria.
+   * Esempi:
+   * - RI_AMM chiede integrazione a RI → RI risponde direttamente a RI_AMM
+   * - DT chiede integrazione a RI → RI risponde direttamente a DT
+   * - RI chiede integrazione a TI → TI risponde direttamente a RI
+   */
+  const getIntegrationRequesterForCurrentRole = (): string => {
+    if (!data) return ''
+    const requesterByResponder: Record<string, string[]> = {
+      TI: ['RI', 'RZ'],
+      // Caso speciale: RI_AMM -> RI è integrazione tecnica.
+      // Il RI, dopo l'integrazione, NON deve tornare direttamente a RI_AMM:
+      // deve ritrasmettere a DT, che poi approverà e rimanderà a RI_AMM.
+      // Per questo qui il requester diretto del RI resta solo DT.
+      RI: ['DT'],
+      RI_AMM: ['DA', 'TI_AMM']
+    }
+    const candidates = requesterByResponder[role] || []
+    for (const requester of candidates) {
+      const esitoReq = toNumOrNull(pickAttrCI(data, [`esito_${requester}`, `ESITO_${requester}`]))
+      if (esitoReq === ESITO_INTEGRAZIONE) return requester
+    }
     return ''
   }
 
@@ -2040,7 +2177,7 @@ function ActionsPanel (props: {
   // Leggi i valori in modo robusto:
   // - se il campo non esiste nello schema, non usarlo
   // - se esiste ma arriva con case diversa, risolvi tramite schema CI
-  const presaFieldExists = hasField(presaField)
+  const presaFieldExists = hasDedicatedPresaField(role) && hasField(presaField)
   const dtPresaFieldExists = hasField(dtPresaField)
   const statoFieldExists = hasField(statoField)
 
@@ -2112,10 +2249,8 @@ function ActionsPanel (props: {
       (toNumOrNull(pickAttrCI(d, ['presa_in_carico_RI', 'PRESA_IN_CARICO_RI'])) != null) ||
       (toNumOrNull(pickAttrCI(d, ['stato_RI', 'STATO_RI'])) != null) ||
       (toNumOrNull(pickAttrCI(d, ['esito_RI', 'ESITO_RI'])) != null) ||
-      (toNumOrNull(pickAttrCI(d, ['presa_in_carico_DT', 'PRESA_IN_CARICO_DT'])) != null) ||
       (toNumOrNull(pickAttrCI(d, ['stato_DT', 'STATO_DT'])) != null) ||
       (toNumOrNull(pickAttrCI(d, ['esito_DT', 'ESITO_DT'])) != null) ||
-      (toNumOrNull(pickAttrCI(d, ['presa_in_carico_DA', 'PRESA_IN_CARICO_DA'])) != null) ||
       (toNumOrNull(pickAttrCI(d, ['stato_DA', 'STATO_DA'])) != null) ||
       (toNumOrNull(pickAttrCI(d, ['esito_DA', 'ESITO_DA'])) != null)
     if (higherTouchedLocal) return false
@@ -2319,7 +2454,7 @@ function ActionsPanel (props: {
     const tiAssigned = isMeaningful(tiUserRaw) || isMeaningful(tiNameRaw) || isMeaningful(dtAssegnaRaw)
     if (tiAssigned) {
       const higherTouched = ['DA', 'DT', 'RI'].some(r => {
-        const p = d[`presa_in_carico_${r}`]
+        const p = hasDedicatedPresaField(r) ? d[`presa_in_carico_${r}`] : null
         const s = d[`stato_${r}`]
         const e = d[`esito_${r}`]
         return isMeaningful(p) || isMeaningful(s) || isMeaningful(e)
@@ -2333,7 +2468,7 @@ function ActionsPanel (props: {
     const scanOrder = ['DA', 'TI_AMM', 'RI_AMM', 'DT', 'RI', 'RZ', 'TI', 'TR']
 
     const hasData = (r: string) => {
-      const p = d[`presa_in_carico_${r}`]
+      const p = hasDedicatedPresaField(r) ? d[`presa_in_carico_${r}`] : null
       const s = d[`stato_${r}`]
       const e = d[`esito_${r}`]
       return isMeaningful(p) || isMeaningful(s) || isMeaningful(e)
@@ -2372,7 +2507,7 @@ function ActionsPanel (props: {
     for (const r of scanOrder) {
       if (!hasData(r)) continue
 
-      const presaNum = toNum(d[`presa_in_carico_${r}`])
+      const presaNum = hasDedicatedPresaField(r) ? toNum(d[`presa_in_carico_${r}`]) : null
       const statoNum = toNum(d[`stato_${r}`])
       const esitoNum = toNum(d[`esito_${r}`])
 
@@ -2464,10 +2599,8 @@ function ActionsPanel (props: {
     (toNumOrNull(pickAttrCI(data, ['presa_in_carico_RI', 'PRESA_IN_CARICO_RI'])) != null) ||
     (toNumOrNull(pickAttrCI(data, ['stato_RI', 'STATO_RI'])) != null) ||
     (toNumOrNull(pickAttrCI(data, ['esito_RI', 'ESITO_RI'])) != null) ||
-    (toNumOrNull(pickAttrCI(data, ['presa_in_carico_DT', 'PRESA_IN_CARICO_DT'])) != null) ||
     (toNumOrNull(pickAttrCI(data, ['stato_DT', 'STATO_DT'])) != null) ||
     (toNumOrNull(pickAttrCI(data, ['esito_DT', 'ESITO_DT'])) != null) ||
-    (toNumOrNull(pickAttrCI(data, ['presa_in_carico_DA', 'PRESA_IN_CARICO_DA'])) != null) ||
     (toNumOrNull(pickAttrCI(data, ['stato_DA', 'STATO_DA'])) != null) ||
     (toNumOrNull(pickAttrCI(data, ['esito_DA', 'ESITO_DA'])) != null)
   const hasTiAnyEvidence = hasTiAssigned || hasTiWorkflowTouched
@@ -2478,11 +2611,37 @@ function ActionsPanel (props: {
   const tiAmmUserRaw = pickAttrCI(data, ['ti_amm_assegnato_username'])
   const hasTiAmmAssigned = !isEmptyValue(tiAmmUserRaw)
 
-  // Lock RI_AMM: dopo assegnazione TI_AMM, finché TI_AMM non ha restituito la pratica
+  // Nodo TI_AMM: distinguere assegnazione STORICA da assegnazione APERTA.
+  // Dopo una richiesta integrazione RI_AMM→RI→DT→RI_AMM può rimanere valorizzato
+  // ti_amm_assegnato_username dal ciclo precedente; se stato_TI_AMM è 0/null non deve
+  // bloccare RI_AMM né impedire una nuova assegnazione.
   const esitoTiAmmNum = toNumOrNull(pickAttrCI(data, ['esito_TI_AMM', 'ESITO_TI_AMM']))
   const statoTiAmmNum = toNumOrNull(pickAttrCI(data, ['stato_TI_AMM', 'STATO_TI_AMM']))
+  const tiAmmAssignmentOpen = hasTiAmmAssigned && (
+    statoTiAmmNum === STATO_DA_PRENDERE ||
+    statoTiAmmNum === STATO_PRESA_IN_CARICO ||
+    statoTiAmmNum === STATO_INTEGRAZIONE
+  )
   const tiAmmReturned = (esitoTiAmmNum != null) || (statoTiAmmNum === STATO_APPROVATA) || (statoTiAmmNum === STATO_RESPINTA)
-  const lockRiAmmBecauseAssignedToTiAmm = role === 'RI_AMM' && hasTiAmmAssigned && !tiAmmReturned
+
+  // Caso specifico RI_AMM: rientro da integrazione tecnica.
+  // Dopo il giro RI_AMM → RI_AGR/TEC → DT_AGR/TEC → RI_AMM, il rientro
+  // verso il TI_AMM originario è una restituzione/trasmissione (blu).
+  // Dopo una normale trasmissione TI_AMM → RI_AMM, invece, RI_AMM deve poter
+  // chiedere una vera integrazione amministrativa al TI_AMM (arancio).
+  // Per distinguere i due casi usiamo il mittente tecnico del routing GII_da.
+  const giiDaRaw = String(pickAttrCI(data, ['GII_da', 'gii_da', 'Da', 'DA']) || '').trim()
+  const giiDaNorm = giiDaRaw.toUpperCase().replace(/\s+/g, ' ')
+  const isRientroTecnicoDaDt = role === 'RI_AMM' && hasTiAmmAssigned && (
+    /(^|[^A-Z0-9])(DT|DIR)[-_ ]?(AGR|TEC)([^A-Z0-9]|$)/.test(giiDaNorm) ||
+    /(^|[^A-Z0-9])TEST_DT_(AGR|TEC)([^A-Z0-9]|$)/.test(giiDaNorm) ||
+    /(^|[^A-Z0-9])DT_(AGR|TEC)([^A-Z0-9]|$)/.test(giiDaNorm) ||
+    // fallback prudente: se il mittente è un DT generico è comunque un direttore tecnico,
+    // mentre il direttore amministrativo è DA e non deve entrare in questa regola.
+    /(^|[^A-Z0-9])DT([^A-Z0-9]|$)/.test(giiDaNorm)
+  )
+
+  const lockRiAmmBecauseAssignedToTiAmm = role === 'RI_AMM' && tiAmmAssignmentOpen && !tiAmmReturned && !isRientroTecnicoDaDt
 
   const canStartEsito =
     hasSel &&
@@ -2498,8 +2657,28 @@ function ActionsPanel (props: {
   // Regola RZ: prima di assegnare a TI, può solo "Assegna TI" oppure "Respingi".
   const canStartIntegrazione =
     canStartEsito &&
+    role !== 'RI_AMM' &&
     !(role === 'RZ' && (origineNum == null || origineNum === 1) && !hasTiAnyEvidence) &&
     role !== 'TI'
+
+  // RI_AMM → TI_AMM: distinguiamo due casi:
+  // - trasmissione ordinaria TI_AMM → RI_AMM: RI_AMM può chiedere Integrazione TI AMM (arancio);
+  // - rientro tecnico DT_AGR/TEC → RI_AMM: RI_AMM deve Restituire a TI AMM (blu).
+  const canStartRestituisciTiAmm =
+    canStartEsito &&
+    role === 'RI_AMM' &&
+    hasTiAmmAssigned &&
+    isRientroTecnicoDaDt
+
+  const canStartIntegrazioneTiAmm =
+    canStartEsito &&
+    role === 'RI_AMM' &&
+    hasTiAmmAssigned &&
+    !isRientroTecnicoDaDt
+
+  const canStartIntegrazioneTecnica =
+    canStartEsito &&
+    role === 'RI_AMM'
 
   const canStartApprova =
     canStartEsito &&
@@ -2593,7 +2772,9 @@ function ActionsPanel (props: {
     effectivePresaNum === PRESA_IN_CARICO &&
     effectiveStatoNum === STATO_PRESA_IN_CARICO
 
-  // Assegna TI_AMM: solo RI_AMM, dopo presa in carico, se TI_AMM non è ancora assegnato.
+  // Assegna TI_AMM: solo RI_AMM, dopo presa in carico, e solo se NON esiste già
+  // un TI_AMM originario assegnato. Se ti_amm_assegnato_username è valorizzato,
+  // il pulsante corretto è “Restituisci a TI AMM”, non una nuova assegnazione.
   const canStartAssegnaTiAmm =
     role === 'RI_AMM' &&
     hasSel &&
@@ -2605,7 +2786,7 @@ function ActionsPanel (props: {
     effectiveStatoNum === STATO_PRESA_IN_CARICO
 
   // NOTE: compare per integrazione, respinta e — Matrice_TI caso 1/b — anche per eliminazione (obbligatoria)
-  const showNote = pending === 'INTEGRAZIONE' || pending === 'RESPINGI' || pending === 'ELIMINA'
+  const showNote = pending === 'INTEGRAZIONE' || pending === 'INTEGRAZIONE_TI_AMM' || pending === 'INTEGRAZIONE_TECNICA' || pending === 'RESPINGI' || pending === 'ELIMINA'
   const noteEnabled = showNote && hasSel && !loading && !lockedByTransmit
 
   const noteTrim = String(noteDraft ?? '').trim()
@@ -2615,6 +2796,8 @@ function ActionsPanel (props: {
   // obblighi:
   const noteIsRequired =
     (pending === 'INTEGRAZIONE') ||
+    (pending === 'INTEGRAZIONE_TI_AMM') ||
+    (pending === 'INTEGRAZIONE_TECNICA') ||
     (pending === 'RESPINGI' && isAltro) ||
     (pending === 'ELIMINA')  // Matrice_TI caso 1/b: note obbligatoria per eliminazione
 
@@ -2646,7 +2829,10 @@ function ActionsPanel (props: {
     if (p === 'TAKE' && !canStartTakeInCharge) return
     if (p === 'ASSEGNA_TI' && !canStartAssegnaTi) return
     if (p === 'ASSEGNA_TI_AMM' && !canStartAssegnaTiAmm) return
+    if (p === 'RESTITUISCI_TI_AMM' && !canStartRestituisciTiAmm) return
     if (p === 'INTEGRAZIONE' && !canStartIntegrazione) return
+    if (p === 'INTEGRAZIONE_TI_AMM' && !canStartIntegrazioneTiAmm) return
+    if (p === 'INTEGRAZIONE_TECNICA' && !canStartIntegrazioneTecnica) return
     if (p === 'APPROVA' && !canStartApprova) return
     if (p === 'RESPINGI' && !canStartRespingi) return
     if (p === 'ELIMINA' && !canStartElimina) return
@@ -2707,7 +2893,7 @@ function ActionsPanel (props: {
       setTiAmmSelected('')
     }
 
-    if (p === 'INTEGRAZIONE') {
+    if (p === 'INTEGRAZIONE' || p === 'INTEGRAZIONE_TI_AMM' || p === 'INTEGRAZIONE_TECNICA') {
       setNoteDraft('')  // Pulisci note per nuova richiesta di integrazione
       window.setTimeout(() => {
         try { noteRef.current?.focus?.() } catch {}
@@ -2915,6 +3101,8 @@ function ActionsPanel (props: {
       } catch {}
 
 
+      addGiiRoutingFields(upd, 'TI', 'TRASMISSIONE', { destUsername: tiSelected })
+
       await runApplyEdits(upd, `TI assegnato: ${tiName}.`)
 
       void closeCycleLog({ eventoChiusura: 'NUOVA_ASSEGNAZIONE', ruoloDestinatario: 'TI', utenteDestinatario: tiSelected, noteChiusura: `Assegna TI: ${tiName} (${tiSelected})`, fase: role })
@@ -2951,6 +3139,8 @@ function ActionsPanel (props: {
         keys.forEach(k => { ci[String(k).toLowerCase()] = k })
         const pick = (name: string) => ci[String(name).toLowerCase()] || null
 
+        const now = Date.now()
+
         const fStato = pick('stato_TI_AMM')
         const fDtStato = pick('dt_stato_TI_AMM')
         const fPresa = pick('presa_in_carico_TI_AMM')
@@ -2959,17 +3149,74 @@ function ActionsPanel (props: {
         const fDtEsito = pick('dt_esito_TI_AMM')
 
         if (fStato) upd[fStato] = STATO_DA_PRENDERE
-        if (fDtStato) upd[fDtStato] = Date.now()
+        if (fDtStato) upd[fDtStato] = now
         if (fPresa) upd[fPresa] = PRESA_DA_PRENDERE
         if (fDtPresa) upd[fDtPresa] = null
         if (fEsito) upd[fEsito] = null
         if (fDtEsito) upd[fDtEsito] = null
+
+        // Chiusura pulita del nodo RI_AMM dopo assegnazione al TI_AMM.
+        // Se RI_AMM proveniva da un precedente giro di integrazione tecnica,
+        // può avere ancora esito_RI_AMM = 1; lasciarlo valorizzato fa comparire
+        // l'elenco come "Integrazione richiesta" anche dopo una normale assegnazione.
+        const fStatoRiAmm = pick('stato_RI_AMM')
+        const fDtStatoRiAmm = pick('dt_stato_RI_AMM')
+        const fEsitoRiAmm = pick('esito_RI_AMM')
+        const fDtEsitoRiAmm = pick('dt_esito_RI_AMM')
+        if (fStatoRiAmm) upd[fStatoRiAmm] = STATO_APPROVATA // dominio stato: 4 = Trasmesso
+        if (fDtStatoRiAmm) upd[fDtStatoRiAmm] = now
+        if (fEsitoRiAmm) upd[fEsitoRiAmm] = null
+        if (fDtEsitoRiAmm) upd[fDtEsitoRiAmm] = null
       } catch {}
+
+      addGiiRoutingFields(upd, 'TI_AMM', 'TRASMISSIONE', { destUsername: tiAmmSelected })
 
       await runApplyEdits(upd, `TI AMM assegnato: ${tiAmmName}.`)
 
       void closeCycleLog({ eventoChiusura: 'NUOVA_ASSEGNAZIONE', ruoloDestinatario: 'TI_AMM', utenteDestinatario: tiAmmSelected, noteChiusura: `Assegna TI AMM: ${tiAmmName} (${tiAmmSelected})`, fase: role })
 
+      setPending(null)
+      setConfirmAttempted(false)
+    } catch (e: any) {
+      const txt = e?.message ? String(e.message) : String(e)
+      setMsg({ kind: 'err', text: `Errore salvataggio: ${txt}` })
+    }
+  }
+
+  const onConfirmRestituisciTiAmm = async () => {
+    setConfirmAttempted(true)
+
+    try {
+      const now = Date.now()
+      const upd: Record<string, any> = {}
+      const schemaFields: Record<string, any> = (ds as any)?.getSchema?.()?.fields || {}
+
+      // Chiude il ciclo RI_AMM come trasmissione/restituzione, non come integrazione.
+      const fStatoRiAmm = getSchemaFieldNameCI(schemaFields, 'stato_RI_AMM')
+      const fDtStatoRiAmm = getSchemaFieldNameCI(schemaFields, 'dt_stato_RI_AMM')
+      const fEsitoRiAmm = getSchemaFieldNameCI(schemaFields, 'esito_RI_AMM')
+      const fDtEsitoRiAmm = getSchemaFieldNameCI(schemaFields, 'dt_esito_RI_AMM')
+      if (fStatoRiAmm) upd[fStatoRiAmm] = STATO_APPROVATA
+      if (fDtStatoRiAmm) upd[fDtStatoRiAmm] = now
+      if (fEsitoRiAmm) upd[fEsitoRiAmm] = null
+      if (fDtEsitoRiAmm) upd[fDtEsitoRiAmm] = null
+
+      // Riapre il TI_AMM originario come destinatario operativo.
+      const fStatoTiAmm = getSchemaFieldNameCI(schemaFields, 'stato_TI_AMM')
+      const fDtStatoTiAmm = getSchemaFieldNameCI(schemaFields, 'dt_stato_TI_AMM')
+      const fDtPresaTiAmm = getSchemaFieldNameCI(schemaFields, 'dt_presa_in_carico_TI_AMM')
+      const fEsitoTiAmm = getSchemaFieldNameCI(schemaFields, 'esito_TI_AMM')
+      const fDtEsitoTiAmm = getSchemaFieldNameCI(schemaFields, 'dt_esito_TI_AMM')
+      if (fStatoTiAmm) upd[fStatoTiAmm] = STATO_DA_PRENDERE
+      if (fDtStatoTiAmm) upd[fDtStatoTiAmm] = now
+      if (fDtPresaTiAmm) upd[fDtPresaTiAmm] = null
+      if (fEsitoTiAmm) upd[fEsitoTiAmm] = null
+      if (fDtEsitoTiAmm) upd[fDtEsitoTiAmm] = null
+
+      addGiiRoutingFields(upd, 'TI_AMM', 'TRASMISSIONE', { destUsername: String(tiAmmUserRaw || '') })
+
+      await runApplyEdits(upd, 'Pratica restituita al TI AMM.')
+      void closeCycleLog({ eventoChiusura: 'RESTITUZIONE_A_TI_AMM', ruoloDestinatario: 'TI_AMM', utenteDestinatario: String(tiAmmUserRaw || resolveDestUser('TI_AMM')), noteChiusura: 'Restituzione a TI AMM dopo rientro da integrazione tecnica.', fase: role })
       setPending(null)
       setConfirmAttempted(false)
     } catch (e: any) {
@@ -2992,13 +3239,17 @@ function ActionsPanel (props: {
         [noteField]: noteTrim
       }
 
-      const ruoloDest = getPrevRoleForIntegration()
+      const ruoloDest = getPrevRoleForIntegration(
+        pending === 'INTEGRAZIONE_TI_AMM' ? 'TI_AMM' :
+        pending === 'INTEGRAZIONE_TECNICA' ? 'TECNICA' :
+        undefined
+      )
       if (ruoloDest) {
         try {
           const schemaFields: Record<string, any> = (ds as any)?.getSchema?.()?.fields || {}
           const fStato = getSchemaFieldNameCI(schemaFields, `stato_${ruoloDest}`)
           const fDtStato = getSchemaFieldNameCI(schemaFields, `dt_stato_${ruoloDest}`)
-          const fPresa = getSchemaFieldNameCI(schemaFields, `presa_in_carico_${ruoloDest}`)
+          const fPresa = hasDedicatedPresaField(ruoloDest) ? getSchemaFieldNameCI(schemaFields, `presa_in_carico_${ruoloDest}`) : null
           const fDtPresa = getSchemaFieldNameCI(schemaFields, `dt_presa_in_carico_${ruoloDest}`)
           const fEsito = getSchemaFieldNameCI(schemaFields, `esito_${ruoloDest}`)
           const fDtEsito = getSchemaFieldNameCI(schemaFields, `dt_esito_${ruoloDest}`)
@@ -3009,6 +3260,10 @@ function ActionsPanel (props: {
           if (fEsito) upd[fEsito] = null
           if (fDtEsito) upd[fDtEsito] = null
         } catch {}
+      }
+
+      if (ruoloDest) {
+        addGiiRoutingFields(upd, ruoloDest, 'INTEGRAZIONE', { technicalIntegration: pending === 'INTEGRAZIONE_TECNICA' })
       }
 
       await runApplyEdits(upd, 'Integrazione richiesta salvata.')
@@ -3035,13 +3290,14 @@ function ActionsPanel (props: {
         upd[dtStatoField] = Date.now()
       }
 
-      const ruoloDest = esito === ESITO_APPROVATA ? getNextRoleForForward() : ''
+      const integRequester = esito === ESITO_APPROVATA ? getIntegrationRequesterForCurrentRole() : ''
+      const ruoloDest = esito === ESITO_APPROVATA ? (integRequester || getNextRoleForForward()) : ''
       if (ruoloDest) {
         try {
           const schemaFields: Record<string, any> = (ds as any)?.getSchema?.()?.fields || {}
           const fStato = getSchemaFieldNameCI(schemaFields, `stato_${ruoloDest}`)
           const fDtStato = getSchemaFieldNameCI(schemaFields, `dt_stato_${ruoloDest}`)
-          const fPresa = getSchemaFieldNameCI(schemaFields, `presa_in_carico_${ruoloDest}`)
+          const fPresa = hasDedicatedPresaField(ruoloDest) ? getSchemaFieldNameCI(schemaFields, `presa_in_carico_${ruoloDest}`) : null
           const fDtPresa = getSchemaFieldNameCI(schemaFields, `dt_presa_in_carico_${ruoloDest}`)
           const fEsito = getSchemaFieldNameCI(schemaFields, `esito_${ruoloDest}`)
           const fDtEsito = getSchemaFieldNameCI(schemaFields, `dt_esito_${ruoloDest}`)
@@ -3051,24 +3307,34 @@ function ActionsPanel (props: {
           if (fDtPresa) upd[fDtPresa] = null
           if (fEsito) upd[fEsito] = null
           if (fDtEsito) upd[fDtEsito] = null
+
+          // Se il DT rimanda la pratica a RI_AMM dopo una nuova approvazione tecnica,
+          // chiudiamo solo il nodo operativo TI_AMM, ma NON cancelliamo
+          // ti_amm_assegnato_*: quei campi identificano il TI_AMM originario a cui RI_AMM
+          // dovrà restituire la pratica dopo il rientro tecnico.
+          if (role === 'DT' && ruoloDest === 'RI_AMM') {
+            const fStatoTiAmm = getSchemaFieldNameCI(schemaFields, 'stato_TI_AMM')
+            const fDtStatoTiAmm = getSchemaFieldNameCI(schemaFields, 'dt_stato_TI_AMM')
+            const fDtPresaTiAmm = getSchemaFieldNameCI(schemaFields, 'dt_presa_in_carico_TI_AMM')
+            const fEsitoTiAmm = getSchemaFieldNameCI(schemaFields, 'esito_TI_AMM')
+            const fDtEsitoTiAmm = getSchemaFieldNameCI(schemaFields, 'dt_esito_TI_AMM')
+            if (fStatoTiAmm) upd[fStatoTiAmm] = 0
+            if (fDtStatoTiAmm) upd[fDtStatoTiAmm] = null
+            if (fDtPresaTiAmm) upd[fDtPresaTiAmm] = null
+            if (fEsitoTiAmm) upd[fEsitoTiAmm] = null
+            if (fDtEsitoTiAmm) upd[fDtEsitoTiAmm] = null
+          }
         } catch {}
       }
 
-      // wasIntegResponse: verifica se un ruolo (diverso da quello corrente) ha esito=INTEGRAZIONE
-      // pendente nel record. Se sì, la trasmissione è una risposta a integrazioni → INTEGRAZIONE_TRASMESSA.
-      // Altrimenti → ISTRUTTORIA_TRASMESSA. I dati sono già nel record, zero query al LOG.
-      let wasIntegResponse = false
-      if (esito === ESITO_APPROVATA && ruoloDest) {
-        const allRoles = ['TR', 'TI', 'RZ', 'RI', 'DT', 'DA', 'RI_AMM', 'TI_AMM']
-        for (const r of allRoles) {
-          if (r === role) continue
-          const esitoR = toNumOrNull(pickAttrCI(data, [`esito_${r}`, `ESITO_${r}`]))
-          if (esitoR === ESITO_INTEGRAZIONE) {
-            wasIntegResponse = true
-            break
-          }
-        }
+      if (ruoloDest) {
+        addGiiRoutingFields(upd, ruoloDest, 'TRASMISSIONE')
       }
+
+      // La risposta a integrazione è solo quella diretta al ruolo che ha chiesto
+      // l'integrazione. Non usare una scansione globale degli esiti=1, perché dopo
+      // molti avanti/indietro possono rimanere stati storici non pertinenti.
+      const wasIntegResponse = Boolean(integRequester)
 
       await runApplyEdits(upd, `Esito salvato: ${label}.`)
       if (esito === ESITO_APPROVATA) {
@@ -3188,8 +3454,10 @@ function ActionsPanel (props: {
       ? 'Conferma assegnazione TI'
       : pending === 'ASSEGNA_TI_AMM'
         ? 'Conferma assegnazione TI AMM'
-        : pending === 'INTEGRAZIONE'
-          ? 'Conferma richiesta di integrazione'
+        : pending === 'RESTITUISCI_TI_AMM'
+          ? 'Conferma restituzione a TI AMM'
+          : (pending === 'INTEGRAZIONE' || pending === 'INTEGRAZIONE_TI_AMM' || pending === 'INTEGRAZIONE_TECNICA')
+          ? (pending === 'INTEGRAZIONE_TI_AMM' ? 'Conferma integrazione a TI AMM' : pending === 'INTEGRAZIONE_TECNICA' ? 'Conferma integrazione tecnica' : 'Conferma richiesta di integrazione')
           : pending === 'APPROVA'
             ? approvaConfirmLabel
             : pending === 'RESPINGI'
@@ -3203,8 +3471,11 @@ function ActionsPanel (props: {
     TAKE:           { icon: '✓', color: '#1a7f37', bg: '#f0fdf4', border: '#bbf7d0', desc: 'Il rapporto verrà preso in carico.' },
     ASSEGNA_TI:     { icon: '✓', color: '#1a7f37', bg: '#f0fdf4', border: '#bbf7d0', desc: 'Il rapporto verrà assegnato al TI selezionato.' },
     ASSEGNA_TI_AMM: { icon: '✓', color: '#1a7f37', bg: '#f0fdf4', border: '#bbf7d0', desc: 'La pratica verrà assegnata al TI AMM selezionato.' },
+    RESTITUISCI_TI_AMM: { icon: '→', color: '#2563eb', bg: '#eff6ff', border: '#bfdbfe', desc: 'La pratica verrà restituita al TI AMM già assegnato.' },
     APPROVA:        { icon: '✓', color: '#1a7f37', bg: '#f0fdf4', border: '#bbf7d0', desc: `Il rapporto verrà ${approvaDoneLabel.toLowerCase()}.` },
     INTEGRAZIONE:   { icon: '⚠', color: '#b45309', bg: '#fffbeb', border: '#fde68a', desc: 'Verrà inviata una richiesta di integrazione.' },
+    INTEGRAZIONE_TI_AMM: { icon: '⚠', color: '#b45309', bg: '#fffbeb', border: '#fde68a', desc: 'La richiesta di integrazione verrà inviata al TI AMM assegnato.' },
+    INTEGRAZIONE_TECNICA: { icon: '⚠', color: '#b45309', bg: '#fffbeb', border: '#fde68a', desc: 'La richiesta di integrazione tecnica verrà inviata al RI dell\'area di provenienza.' },
     RESPINGI:       { icon: '✕', color: '#dc2626', bg: '#fef2f2', border: '#fecaca', desc: 'Il rapporto verrà respinto.' },
     ELIMINA:        { icon: '✕', color: '#dc2626', bg: '#fef2f2', border: '#fecaca', desc: 'Il rapporto verrà archiviato e non sarà più visibile nell\'elenco.' },
   }
@@ -3326,7 +3597,7 @@ function ActionsPanel (props: {
               ref={noteRef}
               value={noteDraft}
               onChange={(e) => { const v = String((e.target as HTMLTextAreaElement).value ?? ''); setNoteDraft(v); autoResizeNote(e.target as HTMLTextAreaElement) }}
-              placeholder={pending === 'INTEGRAZIONE' ? 'Scrivi la richiesta di integrazione…' : (noteIsRequired ? 'Specifica il motivo (Altro)…' : 'Nota facoltativa…')}
+              placeholder={(pending === 'INTEGRAZIONE' || pending === 'INTEGRAZIONE_TI_AMM' || pending === 'INTEGRAZIONE_TECNICA') ? 'Scrivi la richiesta di integrazione…' : (noteIsRequired ? 'Specifica il motivo (Altro)…' : 'Nota facoltativa…')}
               style={{ width: '100%', minHeight: NOTE_MIN_H, maxHeight: NOTE_MAX_H, overflowY: 'hidden', resize: 'none', padding: '8px 10px', borderRadius: 8, border: noteReqErr ? '1px solid #dc2626' : '1px solid rgba(0,0,0,0.20)', fontSize: ui.statusFontSize, outline: 'none', boxSizing: 'border-box' }}
               disabled={!noteEnabled}
             />
@@ -3342,7 +3613,8 @@ function ActionsPanel (props: {
           {pending === 'TAKE' && <button type='button' onClick={onConfirmTakeInCharge} disabled={loading} style={{ padding: '8px 18px', borderRadius: 8, border: '1px solid rgba(0,0,0,0.18)', background: theme.color, color: '#fff', fontWeight: 700, fontSize: 13, cursor: loading ? 'not-allowed' : 'pointer' }}>{loading ? 'Aggiorno…' : 'Conferma'}</button>}
           {pending === 'ASSEGNA_TI' && <button type='button' onClick={onConfirmAssegnaTi} disabled={loading || !tiSelected} style={{ padding: '8px 18px', borderRadius: 8, border: '1px solid rgba(0,0,0,0.18)', background: theme.color, color: '#fff', fontWeight: 700, fontSize: 13, cursor: (loading || !tiSelected) ? 'not-allowed' : 'pointer', opacity: (loading || !tiSelected) ? 0.6 : 1 }}>{loading ? 'Aggiorno…' : 'Conferma'}</button>}
           {pending === 'ASSEGNA_TI_AMM' && <button type='button' onClick={onConfirmAssegnaTiAmm} disabled={loading || !tiAmmSelected} style={{ padding: '8px 18px', borderRadius: 8, border: '1px solid rgba(0,0,0,0.18)', background: theme.color, color: '#fff', fontWeight: 700, fontSize: 13, cursor: (loading || !tiAmmSelected) ? 'not-allowed' : 'pointer', opacity: (loading || !tiAmmSelected) ? 0.6 : 1 }}>{loading ? 'Aggiorno…' : 'Conferma'}</button>}
-          {pending === 'INTEGRAZIONE' && <button type='button' onClick={onConfirmIntegrazione} disabled={loading} style={{ padding: '8px 18px', borderRadius: 8, border: '1px solid rgba(0,0,0,0.18)', background: theme.color, color: '#fff', fontWeight: 700, fontSize: 13, cursor: loading ? 'not-allowed' : 'pointer' }}>{loading ? 'Aggiorno…' : 'Conferma'}</button>}
+          {pending === 'RESTITUISCI_TI_AMM' && <button type='button' onClick={onConfirmRestituisciTiAmm} disabled={loading} style={{ padding: '8px 18px', borderRadius: 8, border: '1px solid rgba(0,0,0,0.18)', background: theme.color, color: '#fff', fontWeight: 700, fontSize: 13, cursor: loading ? 'not-allowed' : 'pointer' }}>{loading ? 'Aggiorno…' : 'Conferma'}</button>}
+          {(pending === 'INTEGRAZIONE' || pending === 'INTEGRAZIONE_TI_AMM' || pending === 'INTEGRAZIONE_TECNICA') && <button type='button' onClick={onConfirmIntegrazione} disabled={loading} style={{ padding: '8px 18px', borderRadius: 8, border: '1px solid rgba(0,0,0,0.18)', background: theme.color, color: '#fff', fontWeight: 700, fontSize: 13, cursor: loading ? 'not-allowed' : 'pointer' }}>{loading ? 'Aggiorno…' : 'Conferma'}</button>}
           {pending === 'APPROVA' && <button type='button' onClick={() => onConfirmEsito(ESITO_APPROVATA, approvaDoneLabel)} disabled={loading} style={{ padding: '8px 18px', borderRadius: 8, border: '1px solid rgba(0,0,0,0.18)', background: theme.color, color: '#fff', fontWeight: 700, fontSize: 13, cursor: loading ? 'not-allowed' : 'pointer' }}>{loading ? 'Aggiorno…' : 'Conferma'}</button>}
           {pending === 'RESPINGI' && <button type='button' onClick={onConfirmRespinta} disabled={loading} style={{ padding: '8px 18px', borderRadius: 8, border: '1px solid rgba(0,0,0,0.18)', background: theme.color, color: '#fff', fontWeight: 700, fontSize: 13, cursor: loading ? 'not-allowed' : 'pointer' }}>{loading ? 'Aggiorno…' : 'Conferma'}</button>}
           {pending === 'ELIMINA' && <button type='button' onClick={onConfirmElimina} disabled={loading} style={{ padding: '8px 18px', borderRadius: 8, border: '1px solid rgba(0,0,0,0.18)', background: theme.color, color: '#fff', fontWeight: 700, fontSize: 13, cursor: loading ? 'not-allowed' : 'pointer' }}>{loading ? 'Archivio…' : 'Conferma'}</button>}
@@ -3436,7 +3708,7 @@ function ActionsPanel (props: {
               </Button>
             )}
 
-            {role === 'RI_AMM' && (
+            {role === 'RI_AMM' && !hasTiAmmAssigned && (
               <Button
                 type='primary'
                 onClick={() => startAction('ASSEGNA_TI_AMM')}
@@ -3447,7 +3719,40 @@ function ActionsPanel (props: {
               </Button>
             )}
 
-            {role !== 'TI' && (
+            {role === 'RI_AMM' && hasTiAmmAssigned && isRientroTecnicoDaDt && (
+              <Button
+                type='primary'
+                onClick={() => startAction('RESTITUISCI_TI_AMM')}
+                disabled={!canStartRestituisciTiAmm}
+                style={actionButtonStyle(buttonColors.approva, !canStartRestituisciTiAmm, ui, buttonColors.approvaText)}
+              >
+                Restituisci a TI AMM
+              </Button>
+            )}
+
+            {role === 'RI_AMM' && hasTiAmmAssigned && !isRientroTecnicoDaDt && (
+              <Button
+                type='primary'
+                onClick={() => startAction('INTEGRAZIONE_TI_AMM')}
+                disabled={!canStartIntegrazioneTiAmm}
+                style={actionButtonStyle(buttonColors.integrazione, !canStartIntegrazioneTiAmm, ui, buttonColors.integrazioneText)}
+              >
+                Integrazione TI AMM
+              </Button>
+            )}
+
+            {role === 'RI_AMM' && (
+              <Button
+                type='primary'
+                onClick={() => startAction('INTEGRAZIONE_TECNICA')}
+                disabled={!canStartIntegrazioneTecnica}
+                style={actionButtonStyle(buttonColors.integrazione, !canStartIntegrazioneTecnica, ui, buttonColors.integrazioneText)}
+              >
+                Integrazione tecnica
+              </Button>
+            )}
+
+            {role !== 'TI' && role !== 'RI_AMM' && (
               <Button
                 type='primary'
                 onClick={() => startAction('INTEGRAZIONE')}
@@ -4148,12 +4453,12 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
     'esito_RI', 'dt_esito_RI',
     'note_RI',
 
-    'presa_in_carico_DT', 'dt_presa_in_carico_DT',
+    'dt_presa_in_carico_DT',
     'stato_DT', 'dt_stato_DT',
     'esito_DT', 'dt_esito_DT',
     'note_DT',
 
-    'presa_in_carico_DA', 'dt_presa_in_carico_DA',
+    'dt_presa_in_carico_DA',
     'stato_DA', 'dt_stato_DA',
     'esito_DA', 'dt_esito_DA',
     'note_DA',

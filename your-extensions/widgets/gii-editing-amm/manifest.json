@@ -1,0 +1,12 @@
+{
+  "name": "gii-editing-amm",
+  "label": "GII Editing AMM",
+  "type": "widget",
+  "version": "1.0.0",
+  "exbVersion": "1.19.0",
+  "author": "CBSM",
+  "description": "Editing amministrativo delle pratiche GII per TI_AMM/RI_AMM/DA. Lavora solo su pratica esistente selezionata.",
+  "dependency": ["jimu-arcgis"],
+  "translatedLocales": ["it"],
+  "defaultSize": { "width": 1100, "height": 720 }
+}

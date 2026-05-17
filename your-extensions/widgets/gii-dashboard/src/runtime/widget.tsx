@@ -294,17 +294,16 @@ function equalsUser (a: any, b: any): boolean {
   return !!sa && !!sb && sa === sb
 }
 
+function meaningful (v: any): boolean {
+  return v !== null && v !== undefined && v !== '' && v !== 0 && v !== '0'
+}
+
 function hasRuoloData (d: any, role: string): boolean {
+  // stato_* = 0 significa "Non attivo": non deve far risultare il ruolo come nodo corrente.
   const p = d[`presa_in_carico_${role}`]
   const s = d[`stato_${role}`]
   const e = d[`esito_${role}`]
-  return (p !== null && p !== undefined && p !== '') ||
-    (s !== null && s !== undefined && s !== '') ||
-    (e !== null && e !== undefined && e !== '')
-}
-
-function meaningful (v: any): boolean {
-  return v !== null && v !== undefined && v !== '' && v !== 0 && v !== '0'
+  return meaningful(p) || meaningful(s) || meaningful(e)
 }
 
 function isInFaseSanzionatoria (d: any): boolean {
@@ -419,6 +418,10 @@ function isAttesaMia (d: any, user: GiiUserInfo | null): boolean {
   const val = d[statoField]
   const n = val != null && val !== '' ? Number(val) : null
 
+  // DT/DA: dopo la presa in carico (n===2) la pratica e' ancora da gestire dal ruolo corrente.
+  // Deve poter approvare, richiedere integrazioni o respingere: non va conteggiata come "attesa altri".
+  if ((role === 'DT' || role === 'DA') && n === 2) return true
+
   if ((role === 'TI' || role === 'TI_AMM') && n === 2) {
     const meUser = String(user.username || '').trim()
     const meName = String(user.fullName ?? user.nome ?? user.displayName ?? '').trim()
@@ -443,6 +446,7 @@ function isAttesaAltri (d: any, user: GiiUserInfo | null): boolean {
   const val = d[statoField]
   const n = val != null && val !== '' ? Number(val) : null
   if (role === 'RZ' && getTiIstruttoriaInfo(d).isInTiIstruttoria) return true
+  if ((role === 'DT' || role === 'DA') && n === 2) return false
   if ((role === 'TI' || role === 'TI_AMM') && n === 2) return !isAttesaMia(d, user)
   if (role === 'RI_AMM' && n === 2) return isWaitingForTiAmmAfterRiAmm(d)
   return n === 2 || n === 4

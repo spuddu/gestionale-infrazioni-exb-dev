@@ -2877,8 +2877,7 @@ const isPgOnlyField = React.useCallback((fieldName: string) => {
     }
     return rows
   }, [data, toLabel, classifyTipoSoggetto, isPfOnlyField, isPgOnlyField, aliasMap, fieldTypeMap])
-// Iter: sempre blocchi DT/DA + extra selezionati
-  const presaDT = data ? data.presa_in_carico_DT : null
+// Iter: blocchi DT/DA basati su stato/esito e date; i vecchi campi presa_in_carico_DT/DA sono deprecati.
   const dtPresaDT = data ? data.dt_presa_in_carico_DT : null
   const statoDT = data ? data.stato_DT : null
   const dtStatoDT = data ? data.dt_stato_DT : null
@@ -2886,7 +2885,6 @@ const isPgOnlyField = React.useCallback((fieldName: string) => {
   const dtEsitoDT = data ? data.dt_esito_DT : null
   const noteDT = data ? data.note_DT : null
 
-  const presaDA = data ? data.presa_in_carico_DA : null
   const dtPresaDA = data ? data.dt_presa_in_carico_DA : null
   const statoDA = data ? data.stato_DA : null
   const dtStatoDA = data ? data.dt_stato_DA : null
@@ -3644,12 +3642,12 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
     'esito_RI', 'dt_esito_RI',
     'note_RI',
 
-    'presa_in_carico_DT', 'dt_presa_in_carico_DT',
+    'dt_presa_in_carico_DT',
     'stato_DT', 'dt_stato_DT',
     'esito_DT', 'dt_esito_DT',
     'note_DT',
 
-    'presa_in_carico_DA', 'dt_presa_in_carico_DA',
+    'dt_presa_in_carico_DA',
     'stato_DA', 'dt_stato_DA',
     'esito_DA', 'dt_esito_DA',
     'note_DA',

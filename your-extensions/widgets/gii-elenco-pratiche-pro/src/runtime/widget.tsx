@@ -1417,6 +1417,14 @@ React.useEffect(() => {
     const isAttesaMiaDefault = (n === 0 || n === 1 || n === 3)
     const isAttesaAltriDefault = (n === 2 || n === 4)
 
+    // Caso DT/DA: n===2 ("presa in carico") resta nella mia coda operativa.
+    // Dopo la presa in carico il Direttore deve ancora esprimere l'esito
+    // (approvazione, richiesta integrazione o respingimento), quindi non e' "in attesa di altri".
+    if ((role === 'DT' || role === 'DA') && n === 2) {
+      if (tabId === 'attesa_mia') return true
+      if (tabId === 'attesa_altri') return false
+    }
+
     // Caso TI/TI_AMM: n===2 ("presa in carico") e' *mia* se assegnata al tecnico loggato.
     // Per TI_AMM vanno usati i campi amministrativi, non i vecchi ti_assegnato_* della fase tecnica.
     if ((role === 'TI' || role === 'TI_AMM') && n === 2) {
@@ -1835,8 +1843,8 @@ React.useEffect(() => {
   const fieldDataRil = txt(cfg.fieldDataRilevazione || 'data_rilevazione')
   const fieldUfficio = txt(cfg.fieldUfficio || 'ufficio_zona')
 
-  // Nota: i campi DT/DA sono ora acceduti direttamente tramite nome convenzionale
-  // (es. `stato_DT`, `presa_in_carico_DA`, ...) dentro computeSintetico/computeUltimoAggMs.
+  // Nota: per DT/DA la presa in carico è derivata da stato_* e dt_presa_in_carico_*.
+  // I vecchi campi presa_in_carico_DT/DA non sono più usati.
 
   const presaDaPrendere = num(cfg.presaDaPrendereVal, 1)
   const presaPresa = num(cfg.presaPresaVal, 2)
@@ -1919,14 +1927,22 @@ React.useEffect(() => {
     return statoApprovata
   }
 
-  // Verifica se un ruolo ha dati valorizzati (presa/stato/esito con campo generico)
+  // Verifica se un ruolo ha dati workflow realmente attivi.
+  // Attenzione: nei campi stato_* il valore 0 significa "Non attivo" e non deve
+  // far considerare quel ruolo come nodo corrente. Questo era il motivo per cui,
+  // dopo la presa in carico di RI_AMM, un vecchio stato_TI_AMM = 0 veniva comunque
+  // letto come presenza del nodo TI_AMM e mostrava "In attesa di istruttoria".
+  const hasWorkflowValue = (v: any): boolean => {
+    if (v === null || v === undefined || v === '') return false
+    if (v === 0 || v === '0') return false
+    return true
+  }
+
   const hasRuoloData = (d: any, role: string): boolean => {
     const p = d[`presa_in_carico_${role}`]
     const s = d[`stato_${role}`]
     const e = d[`esito_${role}`]
-    return (p !== null && p !== undefined && p !== '')
-      || (s !== null && s !== undefined && s !== '')
-      || (e !== null && e !== undefined && e !== '')
+    return hasWorkflowValue(p) || hasWorkflowValue(s) || hasWorkflowValue(e)
   }
 
   const getRoleLastTouchMs = (d: any, role: string): number | null => {

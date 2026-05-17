@@ -2183,6 +2183,12 @@ function ActionsPanel (props: {
 }) {
   const { active, roleCode, buttonText, buttonColors, ui } = props
   const role = String(roleCode || 'DT').trim().toUpperCase()
+  const hasDedicatedPresaField = React.useCallback((r: string) => {
+    const rr = String(r || '').trim().toUpperCase()
+    // I campi presa_in_carico_DT/DA sono ridondanti/deprecati:
+    // per DT e DA la presa in carico si governa con stato_* e dt_presa_in_carico_*.
+    return rr !== 'DT' && rr !== 'DA'
+  }, [])
 
   // scorciatoie (usate spesso nel render)
   const titleFontSize = ui.titleFontSize
@@ -2201,7 +2207,6 @@ function ActionsPanel (props: {
 
   const statoDAField = 'stato_DA'
   const dtStatoDAField = 'dt_stato_DA'
-  const presaDAField = 'presa_in_carico_DA'
   const dtPresaDAField = 'dt_presa_in_carico_DA'
 
   const [loading, setLoading] = React.useState(false)
@@ -2316,13 +2321,19 @@ function ActionsPanel (props: {
     } catch { }
   }
 
-  const presaVal = data ? data[presaField] : null
   const statoVal = data ? data[statoField] : null
   const esitoVal = data ? data[esitoField] : null
   const statoDAVal = data ? data[statoDAField] : null
+  const hasCurrentDedicatedPresaField = Boolean(
+    hasDedicatedPresaField(role) &&
+    data &&
+    Object.prototype.hasOwnProperty.call(data, presaField)
+  )
+  const presaVal = hasCurrentDedicatedPresaField && data ? data[presaField] : null
 
-  const presaNum = (presaVal != null && String(presaVal) !== '') ? Number(presaVal) : null
   const statoNum = (statoVal != null && String(statoVal) !== '') ? Number(statoVal) : null
+  const presaNumRaw = (presaVal != null && String(presaVal) !== '') ? Number(presaVal) : null
+  const presaNum = hasCurrentDedicatedPresaField ? presaNumRaw : statoNum
   const statoDANum = (statoDAVal != null && String(statoDAVal) !== '') ? Number(statoDAVal) : null
   const origineVal = data ? data['origine_pratica'] : null
   const origineNum = (origineVal != null && String(origineVal) !== '') ? Number(origineVal) : null
@@ -2374,7 +2385,7 @@ function ActionsPanel (props: {
     if (!d) return ''
     const scanOrder = ['DA', 'DT', 'RI', 'RZ', 'TI', 'TR']
     const hasData = (role: string) => {
-      const p = d[`presa_in_carico_${role}`]
+      const p = hasDedicatedPresaField(role) ? d[`presa_in_carico_${role}`] : null
       const s = d[`stato_${role}`]
       const e = d[`esito_${role}`]
       return (p !== null && p !== undefined && p !== '')
@@ -2384,7 +2395,7 @@ function ActionsPanel (props: {
     for (const r of scanOrder) {
       if (!hasData(r)) continue
       // Trovato il nodo più avanzato con dati
-      const presaRaw = d[`presa_in_carico_${r}`]
+      const presaRaw = hasDedicatedPresaField(r) ? d[`presa_in_carico_${r}`] : null
       const statoRaw = d[`stato_${r}`]
       const esitoRaw = d[`esito_${r}`]
       const presaNum = presaRaw !== null && presaRaw !== undefined && presaRaw !== '' ? Number(presaRaw) : null
@@ -2637,15 +2648,13 @@ function ActionsPanel (props: {
 
   const onConfirmTakeInCharge = async () => {
     try {
-      await runApplyEdits(
-        {
-          [presaField]: PRESA_IN_CARICO,
-          [dtPresaField]: Date.now(),
-          [statoField]: STATO_PRESA_IN_CARICO,
-          [dtStatoField]: Date.now()
-        },
-        'Presa in carico salvata.'
-      )
+      const upd: Record<string, any> = {
+        [dtPresaField]: Date.now(),
+        [statoField]: STATO_PRESA_IN_CARICO,
+        [dtStatoField]: Date.now()
+      }
+      if (hasCurrentDedicatedPresaField) upd[presaField] = PRESA_IN_CARICO
+      await runApplyEdits(upd, 'Presa in carico salvata.')
       setPending(null)
       setConfirmAttempted(false)
     } catch (e: any) {
@@ -2735,7 +2744,6 @@ function ActionsPanel (props: {
         {
           [statoDAField]: STATO_DA_PRENDERE,
           [dtStatoDAField]: Date.now(),
-          [presaDAField]: PRESA_DA_PRENDERE,
           [dtPresaDAField]: null
         },
         'Trasmesso a DA.'
@@ -2786,7 +2794,7 @@ function ActionsPanel (props: {
 
         <div style={{ display: 'grid', gap: 6 }}>
           <DetailRow label='N.pratica (OID)' value={oid} labelSize={ui.statusFontSize} valueSize={titleFontSize} labelColor={(ui as any).formLabelColor} />
-          <DetailRow label={presaField} value={presaVal} labelSize={ui.statusFontSize} valueSize={titleFontSize} labelColor={(ui as any).formLabelColor} />
+          {hasCurrentDedicatedPresaField && <DetailRow label={presaField} value={presaVal} labelSize={ui.statusFontSize} valueSize={titleFontSize} labelColor={(ui as any).formLabelColor} />}
           <DetailRow label={statoField} value={statoVal} labelSize={ui.statusFontSize} valueSize={titleFontSize} labelColor={(ui as any).formLabelColor} />
           <DetailRow label={esitoField} value={esitoVal} labelSize={ui.statusFontSize} valueSize={titleFontSize} labelColor={(ui as any).formLabelColor} />
           <DetailRow label={statoDAField} value={statoDAVal} labelSize={ui.statusFontSize} valueSize={titleFontSize} labelColor={(ui as any).formLabelColor} />
@@ -6573,7 +6581,6 @@ const isPgOnlyField = React.useCallback((fieldName: string) => {
     return rows
   }, [data, toLabel, classifyTipoSoggetto, isPfOnlyField, isPgOnlyField])
 // Iter: sempre blocchi DT/DA + extra selezionati
-  const presaDT = data ? data.presa_in_carico_DT : null
   const dtPresaDT = data ? data.dt_presa_in_carico_DT : null
   const statoDT = data ? data.stato_DT : null
   const dtStatoDT = data ? data.dt_stato_DT : null
@@ -6581,7 +6588,6 @@ const isPgOnlyField = React.useCallback((fieldName: string) => {
   const dtEsitoDT = data ? data.dt_esito_DT : null
   const noteDT = data ? data.note_DT : null
 
-  const presaDA = data ? data.presa_in_carico_DA : null
   const dtPresaDA = data ? data.dt_presa_in_carico_DA : null
   const statoDA = data ? data.stato_DA : null
   const dtStatoDA = data ? data.dt_stato_DA : null
@@ -6677,7 +6683,6 @@ if (!hasSel) {
   } else if (activeTab?.isIterTab) {
     // Tab Iter con campi DT/DA fissi + extra
     const iterRows: Array<{ label: string; value: any }> = []
-    iterRows.push({ label: 'DT - Presa in carico', value: presaDT })
     iterRows.push({ label: 'DT - Data presa in carico', value: formatDateSafe(dtPresaDT) })
     iterRows.push({ label: 'DT - Stato', value: statoDT })
     iterRows.push({ label: 'DT - Data stato', value: formatDateSafe(dtStatoDT) })
@@ -6685,7 +6690,6 @@ if (!hasSel) {
     iterRows.push({ label: 'DT - Data esito', value: formatDateSafe(dtEsitoDT) })
     iterRows.push({ label: 'DT - Note', value: noteDT })
 
-    iterRows.push({ label: 'DA - Presa in carico', value: presaDA })
     iterRows.push({ label: 'DA - Data presa in carico', value: formatDateSafe(dtPresaDA) })
     iterRows.push({ label: 'DA - Stato', value: statoDA })
     iterRows.push({ label: 'DA - Data stato', value: formatDateSafe(dtStatoDA) })
@@ -7411,8 +7415,8 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
   }
 
   const watchFields = [
-    'presa_in_carico_DT', 'dt_presa_in_carico_DT', 'stato_DT', 'dt_stato_DT', 'esito_DT', 'dt_esito_DT', 'note_DT',
-    'presa_in_carico_DA', 'dt_presa_in_carico_DA', 'stato_DA', 'dt_stato_DA', 'esito_DA', 'dt_esito_DA', 'note_DA'
+    'dt_presa_in_carico_DT', 'stato_DT', 'dt_stato_DT', 'esito_DT', 'dt_esito_DT', 'note_DT',
+    'dt_presa_in_carico_DA', 'stato_DA', 'dt_stato_DA', 'esito_DA', 'dt_esito_DA', 'note_DA'
   ]
 
   const isCreatePage = cfg.enableCreateWithoutSelection === true

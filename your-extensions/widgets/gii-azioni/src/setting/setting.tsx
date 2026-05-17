@@ -168,16 +168,19 @@ export default function Setting(props: Props) {
         <ColInp value={String(cfgJs.dividerColor??defaultConfig.dividerColor)} onChange={v=>patch({dividerColor:v})}/>
       </div>}
 
-      {/* ═══ EDITING TI ═══ */}
-      <Acc id='editing' label='✏️ Editing TI' open={isOpen('editing')} onToggle={()=>toggle('editing')}/>
+      {/* ═══ EDITING ═══ */}
+      <Acc id='editing' label='✏️ Editing' open={isOpen('editing')} onToggle={()=>toggle('editing')}/>
       {isOpen('editing') && <div>
         <Check value={cfgJs.showEditButtons!==false} onChange={v=>patch({showEditButtons:v})} label='Mostra pulsanti Modifica'/>
         <div style={P.row2}>
           <div><label style={P.lbl}>Colore overlay</label><ColInp value={String(cfgJs.editOverlayColor??defaultConfig.editOverlayColor)} onChange={v=>patch({editOverlayColor:v})}/></div>
           <div><label style={P.lbl}>Colore pagina</label><ColInp value={String(cfgJs.editPageColor??defaultConfig.editPageColor)} onChange={v=>patch({editPageColor:v})}/></div>
         </div>
-        <label style={P.lbl}>Pagina editing (ID ExB)</label>
-        <Inp value={cfgJs.editPageId??defaultConfig.editPageId} onChange={v=>patch({editPageId:v})} placeholder='editing-ti'/>
+        <label style={P.lbl}>Pagina modifica tecnica (ID ExB)</label>
+        <Inp value={cfgJs.editPageId??defaultConfig.editPageId} onChange={v=>patch({editPageId:v})} placeholder='page_45 o Modifica Rapporto'/>
+        <label style={P.lbl}>Pagina modifica amministrativa TI_AMM (ID ExB)</label>
+        <Inp value={cfgJs.editAmmPageId??defaultConfig.editAmmPageId} onChange={v=>patch({editAmmPageId:v})} placeholder='page_48 o Verbale'/>
+        <div style={P.hint}>Default: page_48 / Verbale. Se il campo viene svuotato, il TI_AMM non viene inviato alla pagina tecnica.</div>
         <div style={P.grp}>Campi e condizioni</div>
         <div style={P.row2}>
           <div><label style={P.lbl}>Campo stato TI</label><Inp value={cfgJs.fieldStatoTI??defaultConfig.fieldStatoTI} onChange={v=>patch({fieldStatoTI:v})}/></div>
@@ -188,7 +191,7 @@ export default function Setting(props: Props) {
           <div><label style={P.lbl}>Stato min</label><NumInp value={parseNum(cfgJs.editMinStato,defaultConfig.editMinStato)} onChange={n=>patch({editMinStato:n})} min={0}/></div>
           <div><label style={P.lbl}>Stato max</label><NumInp value={parseNum(cfgJs.editMaxStato,defaultConfig.editMaxStato)} onChange={n=>patch({editMaxStato:n})} min={0}/></div>
         </div>
-        <div style={P.hint}>Il pulsante Modifica è attivo solo se stato_TI è tra min e max (inclusi) e presa = val. richiesto.</div>
+        <div style={P.hint}>Per TI/TI_AMM il pulsante Modifica richiede assegnazione al profilo corrente, presa in carico e nodo non ancora chiuso/trasmesso.</div>
       </div>}
 
       {/* ═══ NOTA SPESE ═══ */}

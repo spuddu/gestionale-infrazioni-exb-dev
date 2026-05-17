@@ -59,6 +59,7 @@ export interface Config {
   editOverlayColor: string
   editPageColor: string
   editPageId: string
+  editAmmPageId: string
   fieldStatoTI: string
   fieldPresaTI: string
   editMinStato: number
@@ -143,7 +144,8 @@ export const defaultConfig: Config = {
   showEditButtons: true,
   editOverlayColor: '#7c3aed',
   editPageColor: '#5b21b6',
-  editPageId: 'editing-ti',
+  editPageId: 'page_45',
+  editAmmPageId: 'page_48',
   fieldStatoTI: 'stato_TI',
   fieldPresaTI: 'presa_in_carico_TI',
   editMinStato: 2,
