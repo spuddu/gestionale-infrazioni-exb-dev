@@ -1,6 +1,8 @@
 /** @jsx jsx */
 /** @jsxFrag React.Fragment */
 import { React, jsx, type AllWidgetProps, DataSourceComponent } from 'jimu-core'
+import RapportoPdfViewer from '../../../_shared/gii-anteprime/rapporto/rapporto-pdf-viewer'
+import { buildVerbalePdf } from '../../../_shared/gii-anteprime/verbale/verbale-pdf-builder'
 import type { IMConfig, SummaryFieldConfig } from '../config'
 import { defaultConfig } from '../config'
 
@@ -93,6 +95,13 @@ const MONEY_FIELDS = new Set([
   'sanzione_spese_notifica',
   'pagamento_importo_totale'
 ])
+
+const PAYMENT_COMMON_FIELDS = ['pagamento_modalita', 'pagamento_importo_totale', 'pagamento_scadenza', 'pagamento_stato']
+const PAYMENT_NOTE_FIELDS = ['pagamento_note']
+const PAGOPA_FIELDS = ['pagopa_iuv', 'pagopa_codice_avviso']
+const BONIFICO_FIELDS = ['bonifico_conto_cod', 'bonifico_iban_snapshot', 'bonifico_intestatario_snapshot', 'bonifico_causale', 'bonifico_cro_trn', 'bonifico_data_accredito']
+
+type PaymentMode = '' | 'PAGOPA' | 'BONIFICO' | 'MISTO' | 'ALTRO'
 
 function asJs<T = any> (v: any): T {
   return v?.asMutable ? v.asMutable({ deep: true }) : v
@@ -370,6 +379,37 @@ function domainLabel (field: LayerFieldInfo | null, raw: any): string {
   return found ? found.name : String(raw)
 }
 
+function normalizeToken (v: any): string {
+  return String(v ?? '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toUpperCase()
+    .replace(/[^A-Z0-9]/g, '')
+}
+
+function normalizePaymentModeCandidate (v: any): PaymentMode {
+  const t = normalizeToken(v)
+  if (!t) return ''
+  if (t.includes('PAGOPA') || t.includes('PAGOAP')) return 'PAGOPA'
+  if (t.includes('BONIFICO')) return 'BONIFICO'
+  if (t.includes('MISTO') || t.includes('ENTRAMBI')) return 'MISTO'
+  if (t.includes('ALTRO')) return 'ALTRO'
+  return ''
+}
+
+function getPaymentMode (draft: Record<string, any>, fields: LayerFieldInfo[]): PaymentMode {
+  const lf = getFieldInfo(fields, 'pagamento_modalita')
+  const raw = pickAttrCI(draft, [lf?.name || 'pagamento_modalita', 'pagamento_modalita'])
+  const fromRaw = normalizePaymentModeCandidate(raw)
+  if (fromRaw) return fromRaw
+  if (lf?.domain?.codedValues) {
+    const label = domainLabel(lf, raw)
+    const fromLabel = normalizePaymentModeCandidate(label)
+    if (fromLabel) return fromLabel
+  }
+  return ''
+}
+
 function parseNumberInput (v: any): number | null {
   const s = String(v ?? '').trim().replace(/\./g, '').replace(',', '.')
   if (!s) return null
@@ -631,6 +671,139 @@ function buildViolationRows (data: any, fields: LayerFieldInfo[]): ViolationRow[
   return rows
 }
 
+
+function pdfFieldValue (data: any, fields: LayerFieldInfo[], name: string, opts?: { money?: boolean }): string {
+  const raw = pickAttrCI(data, [name])
+  if (raw == null || raw === '') return ''
+  if (opts?.money) {
+    const n = typeof raw === 'number' ? raw : parseNumberInput(raw)
+    return n != null ? formatEuroText(n) : String(raw)
+  }
+  const lf = getFieldInfo(fields, name)
+  if (lf?.domain?.codedValues) {
+    const label = domainLabel(lf, raw)
+    return label === '—' ? '' : label
+  }
+  if (looksLikeDateField(name)) {
+    const d = formatDateValue(raw)
+    return d === '—' ? '' : d
+  }
+  const v = formatValue(raw)
+  return v === '—' ? '' : v
+}
+
+function joinParts (...parts: string[]): string {
+  return parts.map(p => String(p || '').trim()).filter(Boolean).join(' ')
+}
+
+function buildVerbaleViolationsText (data: any, fields: LayerFieldInfo[]): string {
+  const rows = buildViolationRows(data || {}, fields || [])
+  if (!rows.length) return ''
+  return rows.map(row => {
+    const det = row.details.map(d => `${d.label}: ${d.value}`).join('; ')
+    return det ? `${row.label} — ${det}` : row.label
+  }).join('\n')
+}
+
+function buildVerbalePdfMap (data: any, fields: LayerFieldInfo[], profile: { username: string, fullName: string }): Record<string, string> {
+  const d = data || {}
+  const oid = pickAttrCI(d, ['OBJECTID', 'objectid', 'ObjectId', 'FID'])
+  const pratica = joinParts(String(pickAttrCI(d, ['cod_pratica', 'codice_rapporto', 'n_rapporto', 'numero_rapporto']) || ''), oid != null && String(oid) ? `(OBJECTID ${oid})` : '')
+  const isPg = String(pickAttrCI(d, ['tipologia_soggetto']) || '').toUpperCase().includes('GIUR') || !!String(pickAttrCI(d, ['ragione_sociale']) || '').trim()
+  const trasgressore = isPg
+    ? String(pickAttrCI(d, ['ragione_sociale']) || '').trim()
+    : joinParts(String(pickAttrCI(d, ['nome']) || ''), String(pickAttrCI(d, ['cognome']) || ''))
+  const cfPiva = isPg ? String(pickAttrCI(d, ['piva']) || '').trim() : String(pickAttrCI(d, ['codice_fiscale']) || '').trim()
+  const indirizzo = joinParts(String(pickAttrCI(d, ['via']) || ''), String(pickAttrCI(d, ['civico']) || ''))
+  const comuneCap = joinParts(String(pickAttrCI(d, ['citta', 'comune']) || ''), String(pickAttrCI(d, ['cap']) || ''))
+  const contatti = [String(pickAttrCI(d, ['email']) || '').trim(), String(pickAttrCI(d, ['telefono']) || '').trim(), String(pickAttrCI(d, ['cellulare']) || '').trim()].filter(Boolean).join(' / ')
+  const area = pdfFieldValue(d, fields, 'area_cod') || String(pickAttrCI(d, ['area_label', 'area']) || '')
+  const settore = pdfFieldValue(d, fields, 'settore_cod') || String(pickAttrCI(d, ['settore_label', 'settore']) || '')
+  return {
+    objectid: oid != null ? String(oid) : '',
+    pratica,
+    n_rapporto: String(pickAttrCI(d, ['n_rapporto', 'numero_rapporto', 'codice_rapporto', 'cod_pratica']) || ''),
+    data_rilevazione: pdfFieldValue(d, fields, 'data_rilevazione'),
+    area,
+    settore,
+    ufficio_zona: pdfFieldValue(d, fields, 'ufficio_zona'),
+    tecnico_rilevatore: String(pickAttrCI(d, ['tecnico_rilevatore']) || ''),
+    ti_amm: String(pickAttrCI(d, ['ti_amm_assegnato_nome', 'ti_amm_assegnato_username']) || ''),
+    trasgressore,
+    cf_piva: cfPiva,
+    indirizzo,
+    comune_cap: comuneCap,
+    pec: String(pickAttrCI(d, ['pec']) || ''),
+    contatti,
+    violazioni: buildVerbaleViolationsText(d, fields),
+    descrizione_fatti: String(pickAttrCI(d, ['descrizione_fatti']) || ''),
+    numero_verbale: String(pickAttrCI(d, ['numero_verbale']) || ''),
+    data_verbale: pdfFieldValue(d, fields, 'data_verbale'),
+    protocollo_verbale: String(pickAttrCI(d, ['protocollo_verbale_numero']) || ''),
+    protocollo_verbale_data: pdfFieldValue(d, fields, 'protocollo_verbale_data'),
+    notifica_tipo: pdfFieldValue(d, fields, 'notifica_tipo'),
+    notifica_data: pdfFieldValue(d, fields, 'notifica_data'),
+    notifica_esito: pdfFieldValue(d, fields, 'notifica_esito'),
+    notifica_estremi: String(pickAttrCI(d, ['notifica_estremi']) || ''),
+    sanzione_importo_base: pdfFieldValue(d, fields, 'sanzione_importo_base', { money: true }),
+    sanzione_importo_ridotta: pdfFieldValue(d, fields, 'sanzione_importo_ridotta', { money: true }),
+    risarcimento_danni_importo: pdfFieldValue(d, fields, 'risarcimento_danni_importo', { money: true }),
+    sanzione_spese_notifica: pdfFieldValue(d, fields, 'sanzione_spese_notifica', { money: true }),
+    pagamento_importo_totale: pdfFieldValue(d, fields, 'pagamento_importo_totale', { money: true }),
+    pagamento_scadenza: pdfFieldValue(d, fields, 'pagamento_scadenza'),
+    pagamento_modalita: pdfFieldValue(d, fields, 'pagamento_modalita'),
+    pagamento_stato: pdfFieldValue(d, fields, 'pagamento_stato'),
+    pagamento_note: String(pickAttrCI(d, ['pagamento_note']) || ''),
+    pagopa_iuv: String(pickAttrCI(d, ['pagopa_iuv']) || ''),
+    pagopa_codice_avviso: String(pickAttrCI(d, ['pagopa_codice_avviso']) || ''),
+    bonifico_iban: String(pickAttrCI(d, ['bonifico_iban_snapshot']) || ''),
+    bonifico_intestatario: String(pickAttrCI(d, ['bonifico_intestatario_snapshot']) || ''),
+    bonifico_causale: String(pickAttrCI(d, ['bonifico_causale']) || ''),
+    bonifico_cro_trn: String(pickAttrCI(d, ['bonifico_cro_trn']) || ''),
+    bonifico_data_accredito: pdfFieldValue(d, fields, 'bonifico_data_accredito'),
+    sanzione_dettaglio_calcolo: String(pickAttrCI(d, ['sanzione_dettaglio_calcolo']) || ''),
+    sanzione_calcolata_il: pdfFieldValue(d, fields, 'sanzione_calcolata_il'),
+    sanzione_calcolata_da: String(pickAttrCI(d, ['sanzione_calcolata_da']) || ''),
+    istruttoria_amm_chiusa_il: pdfFieldValue(d, fields, 'istruttoria_amm_chiusa_il'),
+    istruttoria_amm_chiusa_da: String(pickAttrCI(d, ['istruttoria_amm_chiusa_da']) || ''),
+    data_generazione: new Date().toLocaleDateString('it-IT'),
+    generato_da: profile.fullName || profile.username || ''
+  }
+}
+
+function verbalePdfFileName (map: Record<string, string>): string {
+  const base = String(map.numero_verbale || map.n_rapporto || map.objectid || 'verbale').replace(/[^a-zA-Z0-9_-]/g, '_')
+  return `verbale_${base || 'verbale'}.pdf`
+}
+
+async function buildVerbalePdfBlob (data: any, fields: LayerFieldInfo[], profile: { username: string, fullName: string }): Promise<{ blob: Blob, fileName: string }> {
+  const map = buildVerbalePdfMap(data, fields, profile)
+  const bytes = await buildVerbalePdf(map)
+  const fileName = verbalePdfFileName(map)
+  return { blob: new Blob([bytes as any], { type: 'application/pdf' }), fileName }
+}
+
+function makePdfUrl (blob: Blob, fileName: string): string {
+  return `${URL.createObjectURL(blob)}#${fileName}`
+}
+
+function revokePdfUrl (url?: string | null): void {
+  if (!url) return
+  try { URL.revokeObjectURL(String(url).split('#')[0]) } catch {}
+}
+
+function downloadBlobFile (blob: Blob, fileName: string): void {
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = fileName
+  a.rel = 'noopener noreferrer'
+  document.body.appendChild(a)
+  a.click()
+  a.remove()
+  window.setTimeout(() => { try { URL.revokeObjectURL(url) } catch {} }, 1500)
+}
+
 function ViolationsSection (props: { data: any, layerFields: LayerFieldInfo[] }) {
   const rows = buildViolationRows(props.data || {}, props.layerFields || [])
   const descrizione = firstViolationValue(props.data || {}, props.layerFields || [], ['descrizione_fatti'])
@@ -804,7 +977,7 @@ function FieldEditor (props: {
 
   let control: React.ReactNode = null
   if (field.kind === 'textarea') {
-    control = <TextArea value={raw ?? ''} disabled={readonly} onChange={v => onChange(real, v || null)} />
+    control = <TextArea value={raw ?? ''} disabled={readonly} placeholder={field.placeholder} onChange={v => onChange(real, v || null)} />
   } else if (field.kind === 'date' || field.kind === 'readonly-date') {
     control = <input type='date' value={dateInputValue(raw)} disabled={readonly} onChange={e => onChange(real, fromDateInputValue(e.target.value))} style={inputStyle(readonly)} />
   } else if (field.kind === 'number') {
@@ -817,7 +990,7 @@ function FieldEditor (props: {
       </select>
     )
   } else {
-    control = <TextInput value={raw ?? ''} disabled={readonly} onChange={v => onChange(real, v || null)} />
+    control = <TextInput value={raw ?? ''} disabled={readonly} placeholder={field.placeholder} onChange={v => onChange(real, v || null)} />
   }
 
   return (
@@ -835,9 +1008,11 @@ function AdminFormSection (props: {
   fields: LayerFieldInfo[]
   canEdit: boolean
   onChange: (name: string, value: any) => void
+  fieldNames?: string[]
   children?: React.ReactNode
 }) {
-  const items = ADMIN_FIELDS.filter(f => f.group === props.group)
+  const wanted = Array.isArray(props.fieldNames) && props.fieldNames.length ? new Set(props.fieldNames.map(String)) : null
+  const items = ADMIN_FIELDS.filter(f => f.group === props.group && (!wanted || wanted.has(f.name)))
   return (
     <Section title={props.title}>
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: 12 }}>
@@ -846,6 +1021,23 @@ function AdminFormSection (props: {
       {props.children}
     </Section>
   )
+}
+
+function PaymentModeInfo (props: { mode: PaymentMode }) {
+  const { mode } = props
+  if (!mode) {
+    return <div style={{ marginTop: 12 }}><InfoBox kind='warn'>Selezionare la modalità di pagamento per visualizzare i campi specifici.</InfoBox></div>
+  }
+  if (mode === 'PAGOPA') {
+    return <div style={{ marginTop: 12 }}><InfoBox>Modalità selezionata: pagoPA. Sono visibili solo i campi IUV e codice avviso.</InfoBox></div>
+  }
+  if (mode === 'BONIFICO') {
+    return <div style={{ marginTop: 12 }}><InfoBox>Modalità selezionata: bonifico. Sono visibili solo i campi bancari.</InfoBox></div>
+  }
+  if (mode === 'MISTO') {
+    return <div style={{ marginTop: 12 }}><InfoBox>Modalità selezionata: misto. Sono visibili sia i campi pagoPA sia i campi bonifico.</InfoBox></div>
+  }
+  return <div style={{ marginTop: 12 }}><InfoBox>Modalità selezionata: altro. È visibile il campo note pagamento.</InfoBox></div>
 }
 
 function changedAttrs (fields: LayerFieldInfo[], initial: Record<string, any>, draft: Record<string, any>): Record<string, any> {
@@ -877,6 +1069,15 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
   const [initialDraft, setInitialDraft] = React.useState<Record<string, any>>({})
   const [saving, setSaving] = React.useState(false)
   const [dialog, setDialog] = React.useState<{ kind: 'ok' | 'err' | 'warn', title: string, text: string } | null>(null)
+  const [verbalePreviewOpen, setVerbalePreviewOpen] = React.useState(false)
+  const [verbalePreviewLoading, setVerbalePreviewLoading] = React.useState(false)
+  const [verbalePreviewError, setVerbalePreviewError] = React.useState<string | null>(null)
+  const [verbalePreviewUrl, setVerbalePreviewUrl] = React.useState<string | null>(null)
+  const [verbalePreviewFileName, setVerbalePreviewFileName] = React.useState('verbale.pdf')
+
+  React.useEffect(() => {
+    return () => { revokePdfUrl(verbalePreviewUrl) }
+  }, [verbalePreviewUrl])
 
   React.useEffect(() => {
     const sync = () => {
@@ -918,6 +1119,10 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
   const title = buildPracticeTitle(cfg, data || {}, oid)
   const hasDsForSave = !!configuredDs
   const canEdit = roleAllowed && ['TI_AMM', 'ADMIN'].includes(String(profile.role || '').toUpperCase()) && hasDsForSave
+  const paymentMode = getPaymentMode(draft || data || {}, layerFields)
+  const paymentFieldNames = paymentMode === 'ALTRO' ? [...PAYMENT_COMMON_FIELDS, ...PAYMENT_NOTE_FIELDS] : PAYMENT_COMMON_FIELDS
+  const showPagopaFields = paymentMode === 'PAGOPA' || paymentMode === 'MISTO'
+  const showBonificoFields = paymentMode === 'BONIFICO' || paymentMode === 'MISTO'
 
   React.useEffect(() => {
     let cancelled = false
@@ -968,6 +1173,48 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
       istruttoria_amm_chiusa_da: profile.fullName || profile.username || ''
     }))
   }
+
+  const handleVerbaleDownload = React.useCallback(() => {
+    const source = draft || data
+    if (!hasSelection || !source) return
+    ;(async () => {
+      try {
+        const { blob, fileName } = await buildVerbalePdfBlob(source, layerFields, profile)
+        downloadBlobFile(blob, fileName)
+      } catch (e: any) {
+        setDialog({ kind: 'err', title: 'Errore PDF verbale', text: e?.message || String(e) })
+      }
+    })()
+  }, [data, draft, hasSelection, layerFields, profile])
+
+  const handleVerbalePreview = React.useCallback(() => {
+    const source = draft || data
+    if (!hasSelection || !source) return
+    setVerbalePreviewOpen(true)
+    setVerbalePreviewLoading(true)
+    setVerbalePreviewError(null)
+    ;(async () => {
+      try {
+        const { blob, fileName } = await buildVerbalePdfBlob(source, layerFields, profile)
+        const url = makePdfUrl(blob, fileName)
+        setVerbalePreviewFileName(fileName)
+        setVerbalePreviewUrl(prev => {
+          revokePdfUrl(prev)
+          return url
+        })
+      } catch (e: any) {
+        setVerbalePreviewError(e?.message || String(e))
+      } finally {
+        setVerbalePreviewLoading(false)
+      }
+    })()
+  }, [data, draft, hasSelection, layerFields, profile])
+
+  const closeVerbalePreview = React.useCallback(() => {
+    setVerbalePreviewOpen(false)
+    setVerbalePreviewLoading(false)
+    setVerbalePreviewError(null)
+  }, [])
 
   const handleSave = async () => {
     if (!hasSelection || oid == null || !Number.isFinite(Number(oid))) {
@@ -1043,6 +1290,23 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
       })}
 
       {dialog && <BlockingDialog kind={dialog.kind} title={dialog.title} text={dialog.text} onClose={() => setDialog(null)} />}
+      {verbalePreviewOpen && (
+        <div style={{ position: 'fixed', inset: 0, zIndex: 2147483000, background: 'rgba(0,0,0,0.58)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 14 }}>
+          <div role='dialog' aria-modal='true' style={{ width: 'calc(100vw - 28px)', height: 'calc(100vh - 28px)', maxWidth: 1920, maxHeight: 1200, borderRadius: 14, boxShadow: '0 20px 70px rgba(0,0,0,0.32)', overflow: 'hidden' }}>
+            <RapportoPdfViewer
+              url={verbalePreviewUrl}
+              fileName={verbalePreviewFileName}
+              title='Anteprima verbale'
+              subtitle={verbalePreviewFileName}
+              loading={verbalePreviewLoading}
+              error={verbalePreviewError}
+              emptyText='Nessun dato disponibile per l&apos;anteprima del verbale.'
+              onDownload={handleVerbaleDownload}
+              onClose={closeVerbalePreview}
+            />
+          </div>
+        </div>
+      )}
 
       <div style={{ maxWidth: 1320, margin: '0 auto', display: 'grid', gap: 12 }}>
         <div style={{
@@ -1152,14 +1416,23 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
                 <button type='button' disabled={!canEdit} onClick={fillCalculatedMeta} style={secondaryButtonStyle(!canEdit)}>Calcola totale e dettaglio</button>
               </div>
             </AdminFormSection>
-            <AdminFormSection title='Pagamento' group='pagamento' draft={draft} fields={layerFields} canEdit={canEdit} onChange={onFieldChange} />
-            <AdminFormSection title='Bonifico bancario' group='bonifico' draft={draft} fields={layerFields} canEdit={canEdit} onChange={onFieldChange} />
+            <AdminFormSection title='Pagamento' group='pagamento' draft={draft} fields={layerFields} canEdit={canEdit} onChange={onFieldChange} fieldNames={paymentFieldNames}>
+              <PaymentModeInfo mode={paymentMode} />
+            </AdminFormSection>
+            {showPagopaFields && (
+              <AdminFormSection title='pagoPA' group='pagamento' draft={draft} fields={layerFields} canEdit={canEdit} onChange={onFieldChange} fieldNames={PAGOPA_FIELDS} />
+            )}
+            {showBonificoFields && (
+              <AdminFormSection title='Bonifico bancario' group='bonifico' draft={draft} fields={layerFields} canEdit={canEdit} onChange={onFieldChange} fieldNames={BONIFICO_FIELDS} />
+            )}
             <AdminFormSection title='Chiusura istruttoria amministrativa' group='chiusura' draft={draft} fields={layerFields} canEdit={canEdit} onChange={onFieldChange}>
               <div style={{ marginTop: 12, display: 'grid', gap: 10 }}>
                 <InfoBox>
                   Il pulsante compila solo i campi di chiusura amministrativa. Non aggiorna stati, esiti o workflow: quelli restano gestiti da gii-azioni.
                 </InfoBox>
-                <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+                <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, flexWrap: 'wrap' }}>
+                  <button type='button' disabled={!hasSelection || verbalePreviewLoading} onClick={handleVerbalePreview} style={secondaryButtonStyle(!hasSelection || verbalePreviewLoading)}>Anteprima verbale PDF</button>
+                  <button type='button' disabled={!hasSelection || verbalePreviewLoading} onClick={handleVerbaleDownload} style={secondaryButtonStyle(!hasSelection || verbalePreviewLoading)}>Scarica verbale PDF</button>
                   <button type='button' disabled={!canEdit} onClick={fillCloseMeta} style={secondaryButtonStyle(!canEdit)}>Compila chiusura istruttoria</button>
                 </div>
               </div>
