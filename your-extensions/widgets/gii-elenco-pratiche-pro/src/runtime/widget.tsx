@@ -886,10 +886,18 @@ async function createRuntimeFeatureLayerProxy (view: RuntimeDsView, recordsRef: 
     const recs = (res?.features || []).map((f: any) => {
       const attrs = f?.attributes || {}
       const oidVal = Number(attrs?.[idFieldName] ?? attrs?.OBJECTID ?? attrs?.objectid)
+      let recordAttrs = attrs
       if (Number.isFinite(oidVal)) {
-        try { writeSelectedFeatureCache(view.layerUrl, oidVal, idFieldName, attrs, 'list') } catch {}
+        try {
+          const cached = writeSelectedFeatureCache(view.layerUrl, oidVal, idFieldName, attrs, 'list')
+          // Se un cw operativo ha appena salvato il record, ArcGIS puo' restituire
+          // per pochi istanti attributi ancora vecchi. In quel caso usiamo la cache
+          // ottimistica prodotta dall'azione, cosi' chip/stato elenco si aggiornano
+          // subito e non restano su "Da prendere in carico" dopo la presa.
+          if (cached?.data && cached.source === 'edit') recordAttrs = cached.data
+        } catch {}
       }
-      return makeRuntimeRecord(attrs, idFieldName, view.layerUrl)
+      return makeRuntimeRecord(recordAttrs, idFieldName, view.layerUrl)
     })
     recordsRef.current = recs
     return { records: recs }
@@ -1599,8 +1607,19 @@ React.useEffect(() => {
   const [lastListRefreshAt, setLastListRefreshAt] = React.useState<number | null>(null)
   React.useEffect(() => {
     const h = () => setListRefreshNonce(n => n + 1)
+    const hSelectionCleared = (evt?: any) => {
+      const source = String(evt?.detail?.source || '')
+      // Dopo un'azione procedimentale il cw azioni azzera la selezione; l'elenco
+      // deve ricaricare i record, altrimenti puo' restare visualizzato lo snapshot
+      // precedente del rapporto appena preso in carico/trasmesso/ecc.
+      if (source === 'azioni-post-applyedits') setListRefreshNonce(n => n + 1)
+    }
     window.addEventListener('gii-force-refresh-selection', h as any)
-    return () => window.removeEventListener('gii-force-refresh-selection', h as any)
+    window.addEventListener('gii-selection-cleared', hSelectionCleared as any)
+    return () => {
+      window.removeEventListener('gii-force-refresh-selection', h as any)
+      window.removeEventListener('gii-selection-cleared', hSelectionCleared as any)
+    }
   }, [])
 
   React.useEffect(() => {
@@ -2288,22 +2307,34 @@ React.useEffect(() => {
 
   const toggleSort = (field: string) => {
     setSortState(prev => {
-      const p = [...prev]
-      const idx = p.findIndex(x => x.field === field)
+      const hasOnlyDefault = sortSig(prev) === sortSig(defaultSort)
+      const defaultField = defaultSort[0]?.field
+      const defaultDir = defaultSort[0]?.dir
 
-      // Ordinamento multiplo sempre attivo, come nel CW utenti:
+      // Se l'elenco è ancora sull'ordinamento predefinito e l'utente clicca
+      // un'altra intestazione, il default non deve restare come primo criterio:
+      // la colonna cliccata diventa il nuovo criterio principale.
+      const base = hasOnlyDefault && field !== defaultField ? [] : [...prev]
+      const idx = base.findIndex(x => x.field === field)
+
+      // Ordinamento multiplo:
       // 1° clic = crescente, 2° clic = decrescente, 3° clic = rimuove la colonna dal sort.
+      // Caso speciale: se il default è già sulla stessa colonna in DESC, il primo
+      // clic deve produrre un cambio visibile passando ad ASC, non tornare al default.
       if (idx >= 0) {
-        const cur = p[idx]
-        if (cur.dir === 'ASC') {
-          p[idx] = { field, dir: 'DESC' }
-          return p
+        const cur = base[idx]
+        if (hasOnlyDefault && field === defaultField && defaultDir === 'DESC' && cur.dir === 'DESC') {
+          return [{ field, dir: 'ASC' }]
         }
-        p.splice(idx, 1)
-        return p.length ? p : defaultSort
+        if (cur.dir === 'ASC') {
+          base[idx] = { field, dir: 'DESC' }
+          return base
+        }
+        base.splice(idx, 1)
+        return base.length ? base : defaultSort
       }
 
-      return [...p, { field, dir: 'ASC' }]
+      return [...base, { field, dir: 'ASC' }]
     })
   }
 

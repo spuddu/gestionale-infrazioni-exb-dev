@@ -3333,11 +3333,33 @@ const NORMA3_TO_VFIELD: Record<string, string> = {
   Art37: 'v_art37', Art39: 'v_art39'
 }
 
+const RI_GRADO_TRIGGER_NORMA3 = new Set([
+  'Art12', 'Art27', 'Art28', 'Art31', 'Art32',
+  'Art33', 'Art34', 'Art35', 'Art36', 'Art37'
+])
+
+function isSelectedFlag (v: any): boolean {
+  if (v === 1 || v === true) return true
+  const s = String(v ?? '').trim().toLowerCase()
+  return s === '1' || s === 'true' || s === 'sì' || s === 'si' || s === 'yes'
+}
+
+function hasRiGradoTriggerViolation (attrs: Record<string, any>): boolean {
+  const selected = new Set(parseMultiSelect(attrs?.norma_violata3))
+  for (const art of RI_GRADO_TRIGGER_NORMA3) {
+    if (selected.has(art)) return true
+    const field = NORMA3_TO_VFIELD[art]
+    if (field && isSelectedFlag(attrs?.[field])) return true
+  }
+  return false
+}
+
 const _defaultFormStyle = {
   labelColor: '#6b7280', labelFontSize: 12,
   hdrColor: '#1d4ed8', hdrFontSize: 11,
   divColor: '#bfdbfe', divWidth: 2,
-  fieldFontSize: 13
+  fieldFontSize: 13,
+  norma3FontSize: 12
 }
 const FormStyleCtx = React.createContext(_defaultFormStyle)
 
@@ -3436,6 +3458,7 @@ type NsManagerProps = {
   onRowsChange: (rows: NsDetailRow[]) => void
   onDirtyChange?: (dirty: boolean) => void
   resetKey?: number
+  readonly?: boolean
 }
 
 const NS_CATEGORIES: readonly NsCategory[] = ['AT', 'PR', 'RU', 'SL', 'PF'] as const
@@ -3864,6 +3887,7 @@ function NoteSpeseManager (props: NsManagerProps) {
   const categoryTotal = React.useMemo(() => nsRound(rows.reduce((s, r) => s + nsSafeNum(r.importo_riga, 0), 0), 2), [rows])
 
   const startEdit = (idx: number) => {
+    if (props.readonly) return
     setEditIdx(idx)
     setEditQty(String(rows[idx]?.quantita ?? ''))
   }
@@ -3871,6 +3895,7 @@ function NoteSpeseManager (props: NsManagerProps) {
   const cancelEdit = () => { setEditIdx(null); setEditQty('') }
 
   const saveEdit = () => {
+    if (props.readonly) return
     if (editIdx == null || editIdx < 0 || editIdx >= rows.length) return
     const qty = nsRound(nsSafeNum(String(editQty).replace(',', '.'), 0), 4)
     const nextRows = rows.map((r, i) => {
@@ -3886,12 +3911,14 @@ function NoteSpeseManager (props: NsManagerProps) {
   }
 
   const onDelete = (idx: number) => {
+    if (props.readonly) return
     const row = rows[idx]
     if (!row) return
     setConfirmDeleteIdx(idx)
   }
 
   const doDelete = () => {
+    if (props.readonly) { setConfirmDeleteIdx(null); return }
     const idx = confirmDeleteIdx
     setConfirmDeleteIdx(null)
     if (idx == null || idx < 0 || idx >= rows.length) return
@@ -3914,7 +3941,7 @@ function NoteSpeseManager (props: NsManagerProps) {
         {msg && (
           <div style={{ padding: '7px 10px', borderRadius: 4, fontSize: 12, fontWeight: 700, border: `1px solid ${msg.ok ? '#b8d4b0' : '#f5b8b8'}`, background: msg.ok ? '#e2efda' : '#fce4e4', color: msg.ok ? '#375623' : '#c00' }}>{msg.text}</div>
         )}
-        {editIdx != null && editIdx >= 0 && editIdx < rows.length && (
+        {!props.readonly && editIdx != null && editIdx >= 0 && editIdx < rows.length && (
           <div style={{ padding: 8, border: '1px solid #aac4e0', borderRadius: 6, background: '#f5f9ff', display: 'grid', gap: 6 }}>
             <div style={{ fontSize: 12, color: '#1F4E79', fontWeight: 700 }}>Modifica quantità — {rows[editIdx].codice_voce_snapshot}</div>
             <div style={{ fontSize: 12, color: '#444' }}>{rows[editIdx].descrizione_snapshot}</div>
@@ -3963,8 +3990,12 @@ function NoteSpeseManager (props: NsManagerProps) {
                   <td style={{ ...tdS(idx), textAlign: 'right' }}>{money(r.prezzo_unitario_snapshot)}</td>
                   <td style={{ ...tdS(idx), textAlign: 'right' }}>{money(r.importo_riga)}</td>
                   <td style={{ ...tdS(idx), whiteSpace: 'nowrap' }}>
-                    <button type='button' onClick={() => startEdit(idx)} style={{ cursor: 'pointer', fontSize: 11, padding: '2px 8px', borderRadius: 3, border: 'none', marginRight: 4, fontWeight: 700, background: '#1B6584', color: '#fff' }}>✎</button>
-                    <button type='button' onClick={() => onDelete(idx)} style={{ cursor: 'pointer', fontSize: 11, padding: '2px 8px', borderRadius: 3, border: 'none', fontWeight: 700, background: '#c00', color: '#fff' }}>✕</button>
+                    {!props.readonly ? (
+                      <>
+                        <button type='button' onClick={() => startEdit(idx)} style={{ cursor: 'pointer', fontSize: 11, padding: '2px 8px', borderRadius: 3, border: 'none', marginRight: 4, fontWeight: 700, background: '#1B6584', color: '#fff' }}>✎</button>
+                        <button type='button' onClick={() => onDelete(idx)} style={{ cursor: 'pointer', fontSize: 11, padding: '2px 8px', borderRadius: 3, border: 'none', fontWeight: 700, background: '#c00', color: '#fff' }}>✕</button>
+                      </>
+                    ) : <span style={{ color: '#9ca3af' }}>—</span>}
                   </td>
                 </tr>
               )})}
@@ -4074,6 +4105,14 @@ function NuovaPraticaForm (p: {
   const mode = p.mode === 'edit' ? 'edit' : 'create'
   const editOid = p.editOid != null ? Number(p.editOid) : null
   const editIdFieldName = String(p.editIdFieldName || ds?.getIdField?.() || 'OBJECTID')
+  const isRiAgrTecLimitedEdit = mode === 'edit' && isCurrentRiAgrTec()
+  const riAgrTecEditableUiFields = React.useMemo(() => new Set(['grado', 'norma15_sel']), [])
+  const riAgrTecEditableDraftFields = React.useMemo(() => new Set(['grado', 'norma15_parziale', 'norma15_totale']), [])
+  const riAgrTecEditableSaveFields = React.useMemo(() => new Set(['grado', 'norma15_parziale', 'norma15_totale', 'norma_violata1', 'req_point']), [])
+  const canEditFieldForCurrentProfile = React.useCallback((fieldName: string): boolean => {
+    if (!isRiAgrTecLimitedEdit) return true
+    return riAgrTecEditableUiFields.has(fieldName)
+  }, [isRiAgrTecLimitedEdit, riAgrTecEditableUiFields])
 
   const [draft, setDraft] = React.useState<NpDraft>(() => draftFromRecord(p.initialData || {}))
   const [baselineDraft, setBaselineDraft] = React.useState<NpDraft>(() => draftFromRecord(p.initialData || {}))
@@ -4334,12 +4373,19 @@ function NuovaPraticaForm (p: {
   const hasPendingAttachments = attachmentFiles.length > 0
   const hasPendingAttachmentDeletes = pendingDeleteAttachmentIds.length > 0
   const hasPendingAttachmentReplacements = Object.keys(pendingReplaceAttachments).length > 0
-  const isDirty = React.useMemo(() => !draftsEqual(draft, baselineDraft) || !!p.clickedPointWgs84 || hasPendingAttachments || hasPendingAttachmentDeletes || hasPendingAttachmentReplacements || noteSpeseDraftDirty, [draft, baselineDraft, p.clickedPointWgs84, hasPendingAttachments, hasPendingAttachmentDeletes, hasPendingAttachmentReplacements, noteSpeseDraftDirty])
+  const isDirty = React.useMemo(() => {
+    const draftDirty = !draftsEqual(draft, baselineDraft)
+    if (isRiAgrTecLimitedEdit) return draftDirty
+    return draftDirty || !!p.clickedPointWgs84 || hasPendingAttachments || hasPendingAttachmentDeletes || hasPendingAttachmentReplacements || noteSpeseDraftDirty
+  }, [draft, baselineDraft, isRiAgrTecLimitedEdit, p.clickedPointWgs84, hasPendingAttachments, hasPendingAttachmentDeletes, hasPendingAttachmentReplacements, noteSpeseDraftDirty])
   React.useEffect(() => {
     p.onDirtyChange?.(isDirty)
   }, [isDirty, p.onDirtyChange])
 
-  const set = (k: string, v: any) => setDraft(prev => ({ ...prev, [k]: v }))
+  const set = (k: string, v: any) => {
+    if (isRiAgrTecLimitedEdit && !riAgrTecEditableDraftFields.has(k)) return
+    setDraft(prev => ({ ...prev, [k]: v }))
+  }
   const g = (k: string) => draft[k] ?? ''
   const getOidFromAny = React.useCallback((obj: any): number | null => {
     if (!obj || typeof obj !== 'object') return null
@@ -4810,6 +4856,8 @@ React.useEffect(() => {
     norma_violata3: g('norma_violata3')
   }), [n3parziale, n3totale, draft.norma_violata3])
 
+  const riGradoTriggerViolations = React.useMemo(() => hasRiGradoTriggerViolation(draft), [draft])
+
   // Quando la violazione cambia e reqPoint passa a 0, cancella il punto cliccato manualmente
   const prevReqPointRef = React.useRef(reqPoint)
   React.useEffect(() => {
@@ -5214,7 +5262,7 @@ React.useEffect(() => {
       }
 
       // Converte il plain WGS84 in un vero esri/geometry/Point nella SR del layer
-      const geom = geomWgs84 ? await toLayerPoint(geomWgs84, layer) : null
+      const geom = isRiAgrTecLimitedEdit ? null : (geomWgs84 ? await toLayerPoint(geomWgs84, layer) : null)
 
       const normaV1 = tipoAbuso === 'parziale' ? n3parziale : (tipoAbuso === 'totale' ? n3totale : '')
       const normaV2 = norma1516 === 'Art16' ? 'Art16' : (norma1516 === 'Art17' && art17tipo ? art17tipo : norma1516)
@@ -5318,14 +5366,19 @@ React.useEffect(() => {
         matricola_tessera: g('matricola_tessera') || null
       }
 
-      const cleanAttrs = filterAttrsForLayer(attrs, layer)
+      const cleanAttrsAll = filterAttrsForLayer(attrs, layer)
+      const riAgrTecEffectiveSaveFields = new Set(riAgrTecEditableSaveFields)
+      if (!riGradoTriggerViolations) riAgrTecEffectiveSaveFields.delete('grado')
+      const cleanAttrs = (mode === 'edit' && isRiAgrTecLimitedEdit)
+        ? Object.fromEntries(Object.entries(cleanAttrsAll).filter(([k]) => riAgrTecEffectiveSaveFields.has(k)))
+        : cleanAttrsAll
 
       if (mode === 'edit') {
         if (editOid == null) throw new Error('Nessuna pratica selezionata per la modifica.')
         const prevAttrs = filterAttrsForLayer(p.initialData || {}, layer)
         const changedFields = Object.keys(cleanAttrs).filter((k) => normalizeLogValue(prevAttrs?.[k]) !== normalizeLogValue(cleanAttrs[k]))
-        const hasAttachmentOps = attachmentFiles.length > 0 || pendingDeleteAttachmentIds.length > 0 || Object.keys(pendingReplaceAttachments).length > 0
-        const hasNoteSpeseOps = noteSpeseDraftDirty
+        const hasAttachmentOps = !isRiAgrTecLimitedEdit && (attachmentFiles.length > 0 || pendingDeleteAttachmentIds.length > 0 || Object.keys(pendingReplaceAttachments).length > 0)
+        const hasNoteSpeseOps = !isRiAgrTecLimitedEdit && noteSpeseDraftDirty
         if (changedFields.length === 0 && !geom && !hasAttachmentOps && !hasNoteSpeseOps) {
           setSaving(false)
           setMsg({ kind: 'ok', text: 'Nessuna modifica da salvare.' })
@@ -5501,7 +5554,8 @@ React.useEffect(() => {
     hdrFontSize: Number.isFinite(Number((cfg as any).sectionHeaderFontSize)) ? Number((cfg as any).sectionHeaderFontSize) : _defaultFormStyle.hdrFontSize,
     divColor: String((cfg as any).sectionDividerColor || _defaultFormStyle.divColor),
     divWidth: Number.isFinite(Number((cfg as any).sectionDividerWidth)) ? Number((cfg as any).sectionDividerWidth) : _defaultFormStyle.divWidth,
-    fieldFontSize: Number.isFinite(Number((cfg as any).formFieldFontSize)) ? Number((cfg as any).formFieldFontSize) : _defaultFormStyle.fieldFontSize
+    fieldFontSize: Number.isFinite(Number((cfg as any).formFieldFontSize)) ? Number((cfg as any).formFieldFontSize) : _defaultFormStyle.fieldFontSize,
+    norma3FontSize: Number.isFinite(Number((cfg as any).norma3FontSize)) ? Number((cfg as any).norma3FontSize) : _defaultFormStyle.norma3FontSize
   }), [cfg])
 
   const sHdr: React.CSSProperties = React.useMemo(() => ({
@@ -5657,7 +5711,13 @@ React.useEffect(() => {
       case 'sup_dichiarata_art17_2': return (norma1516 === 'Art17' && art17tipo === 'Art17.2') ? { label: 'Superficie dichiarata (ha)', el: <NpText value={g('sup_dichiarata_art17_2')} onChange={v => set('sup_dichiarata_art17_2', v)} disabled={saving}/> } : null
       case 'sup_irrigata_art17_2': return (norma1516 === 'Art17' && art17tipo === 'Art17.2') ? { label: 'Superficie irrigata (ha)', el: <NpText value={'0'} onChange={() => {}} disabled/> } : null
       // Violazione — Grado
-      case 'grado': { const en = isCurrentRiAgrTec(); return { label: 'Grado', el: <NpSel value={g('grado')} onChange={v => set('grado', v)} options={CHOICES.grado} disabled={saving || !en}/> } }
+      case 'grado': {
+        const en = isCurrentRiAgrTec() && riGradoTriggerViolations
+        const hint = isCurrentRiAgrTec() && !riGradoTriggerViolations
+          ? 'Il grado è modificabile solo se il TI ha selezionato almeno una violazione tra gli artt. 12, 27, 28, 31, 32, 33, 34, 35, 36 e 37.'
+          : undefined
+        return { label: 'Grado', hint, el: <NpSel value={g('grado')} onChange={v => set('grado', v)} options={CHOICES.grado} disabled={saving || !en}/> }
+      }
       // Violazione — Descrizione
       case 'descrizione_fatti': return { label: 'Descrizione dettagliata della violazione', el: <NpText value={g('descrizione_fatti')} onChange={v => set('descrizione_fatti', v)} multiline disabled={saving}/> }
       case 'circostanze': return { label: 'Circostanze rilevanti', el: <NpText value={g('circostanze')} onChange={v => set('circostanze', v)} multiline disabled={saving}/> }
@@ -5699,25 +5759,25 @@ React.useEffect(() => {
               <div style={{ marginTop: 8, display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
                 {!p.mapClickEnabled ? (
                   <>
-                    <button type='button' disabled={saving} onClick={() => p.onToggleMapClick?.(true)} style={{
+                    <button type='button' disabled={saving || isRiAgrTecLimitedEdit} onClick={() => p.onToggleMapClick?.(true)} style={{
                       padding: '5px 12px', borderRadius: 8, border: '1px solid #2563eb', background: '#2563eb', color: '#fff',
-                      fontSize: 11, fontWeight: 700, cursor: saving ? 'not-allowed' : 'pointer', opacity: saving ? 0.5 : 1
+                      fontSize: 11, fontWeight: 700, cursor: (saving || isRiAgrTecLimitedEdit) ? 'not-allowed' : 'pointer', opacity: (saving || isRiAgrTecLimitedEdit) ? 0.5 : 1
                     }}>
                       {p.clickedPointWgs84 || (p.existingGeomWgs84 && (Number(p.existingGeomWgs84.x) !== 0 || Number(p.existingGeomWgs84.y) !== 0)) ? '📍 Modifica punto' : '📍 Imposta punto in mappa'}
                     </button>
                     {p.clickedPointWgs84 && (
-                      <button type='button' onClick={() => { p.onClearPoint(); p.onToggleMapClick?.(false) }} style={{
+                      <button type='button' disabled={isRiAgrTecLimitedEdit} onClick={() => { if (isRiAgrTecLimitedEdit) return; p.onClearPoint(); p.onToggleMapClick?.(false) }} style={{
                         padding: '5px 12px', borderRadius: 8, border: '1px solid rgba(0,0,0,0.14)', background: '#fff', color: '#374151',
-                        fontSize: 11, fontWeight: 700, cursor: 'pointer'
+                        fontSize: 11, fontWeight: 700, cursor: isRiAgrTecLimitedEdit ? 'not-allowed' : 'pointer', opacity: isRiAgrTecLimitedEdit ? 0.5 : 1
                       }}>{p.existingGeomWgs84 && (Number(p.existingGeomWgs84.x) !== 0 || Number(p.existingGeomWgs84.y) !== 0) ? 'Ripristina posizione originale' : 'Annulla'}</button>
                     )}
                   </>
                 ) : (
                   <>
                     <span style={{ fontSize: 12, fontWeight: 700, color: '#2563eb' }}>⏳ Clicca sulla mappa per impostare il punto…</span>
-                    <button type='button' onClick={() => p.onToggleMapClick?.(false)} style={{
+                    <button type='button' disabled={isRiAgrTecLimitedEdit} onClick={() => { if (isRiAgrTecLimitedEdit) return; p.onToggleMapClick?.(false) }} style={{
                       padding: '5px 12px', borderRadius: 8, border: '1px solid rgba(0,0,0,0.14)', background: '#fff', color: '#374151',
-                      fontSize: 11, fontWeight: 700, cursor: 'pointer'
+                      fontSize: 11, fontWeight: 700, cursor: isRiAgrTecLimitedEdit ? 'not-allowed' : 'pointer', opacity: isRiAgrTecLimitedEdit ? 0.5 : 1
                     }}>Annulla</button>
                   </>
                 )}
@@ -5730,15 +5790,15 @@ React.useEffect(() => {
           <>
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6 }}>
               {CHOICES.norma3.map(o => (
-                <label key={o.v} style={{ display: 'flex', alignItems: 'flex-start', gap: 8, fontSize: 12,
-                  color: '#374151', cursor: saving ? 'not-allowed' : 'pointer', padding: '4px 0' }}>
-                  <input type='checkbox' checked={norma3Set.has(o.v)} onChange={() => !saving && toggleNorma3(o.v)} style={{ marginTop: 2, flexShrink: 0 }}/>
+                <label key={o.v} style={{ display: 'flex', alignItems: 'flex-start', gap: 8, fontSize: formStyle.norma3FontSize,
+                  color: '#374151', cursor: (saving || isRiAgrTecLimitedEdit) ? 'not-allowed' : 'pointer', padding: '4px 0', opacity: isRiAgrTecLimitedEdit ? 0.72 : 1 }}>
+                  <input type='checkbox' checked={norma3Set.has(o.v)} disabled={saving || isRiAgrTecLimitedEdit} onChange={() => !(saving || isRiAgrTecLimitedEdit) && toggleNorma3(o.v)} style={{ marginTop: 2, flexShrink: 0 }}/>
                   {o.l}
                 </label>
               ))}
             </div>
             {norma3SelectedLabels.length > 0 && (
-              <div style={{ fontSize: 12, color: '#374151', background: '#f8fafc', border: '1px solid #e5e7eb', borderRadius: 8, padding: '8px 10px' }}>
+              <div style={{ fontSize: formStyle.norma3FontSize, color: '#374151', background: '#f8fafc', border: '1px solid #e5e7eb', borderRadius: 8, padding: '8px 10px' }}>
                 {norma3SelectedLabels.join(' • ')}
               </div>
             )}
@@ -5748,6 +5808,14 @@ React.useEffect(() => {
         return tipoSogg === 'PG' ? <div style={sHdr}>Rappresentante legale</div> : null
       default: return null
     }
+  }
+
+  const renderRiAgrTecProtectedControl = (fieldName: string, node: React.ReactNode): React.ReactNode => {
+    if (canEditFieldForCurrentProfile(fieldName)) return node
+    if (React.isValidElement(node)) {
+      return React.cloneElement(node as React.ReactElement<any>, { disabled: true })
+    }
+    return <div style={{ pointerEvents: 'none', opacity: 0.72 }}>{node}</div>
   }
 
   const renderLayoutTab = (tabId: string): React.ReactNode => {
@@ -5773,7 +5841,7 @@ React.useEffect(() => {
                 if (!cell?.field) return <div key={ci}/>
                 const fld = results[ci]
                 if (!fld) return <div key={ci}/>
-                return <NpField key={ci} label={cell.label || fld.label} hint={fld.hint}>{fld.el}</NpField>
+                return <NpField key={ci} label={cell.label || fld.label} hint={fld.hint}>{renderRiAgrTecProtectedControl(String(cell.field), fld.el)}</NpField>
               })}
             </div>
           )
@@ -5878,14 +5946,14 @@ React.useEffect(() => {
         ))}
       </div>
       <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
-<button type='button' onClick={() => { try { const pg = resolvePageId('browser-nota-spese'); if (pg) { try { const curPage = getAppStore()?.getState()?.appRuntimeInfo?.currentPageId || ''; sessionStorage.setItem('GII_NS_RETURN_PAGE', curPage) } catch {} UrlManager.getInstance().changePage(pg) } else { setNoteSpeseMsg({ ok: false, text: 'Pagina "browser-nota-spese" non trovata. Configura una pagina ExB con il widget consultazione prezzario e il widget gii-ns-carrello.' }) } } catch (e: any) { setNoteSpeseMsg({ ok: false, text: e?.message || String(e) }) } }} disabled={noteSpeseBusy || noteSpeseDraftDirty} style={{ padding: '10px 24px', borderRadius: 8, border: '1px solid #1ed9dc', background: '#0f7375', color: '#fff', fontWeight: 800, fontSize: 14, cursor: (noteSpeseBusy || noteSpeseDraftDirty) ? 'not-allowed' : 'pointer', opacity: (noteSpeseBusy || noteSpeseDraftDirty) ? 0.5 : 1, letterSpacing: '0.3px' }}>📋 Sfoglia prezzario</button>
+<button type='button' onClick={() => { if (isRiAgrTecLimitedEdit) return; try { const pg = resolvePageId('browser-nota-spese'); if (pg) { try { const curPage = getAppStore()?.getState()?.appRuntimeInfo?.currentPageId || ''; sessionStorage.setItem('GII_NS_RETURN_PAGE', curPage) } catch {} UrlManager.getInstance().changePage(pg) } else { setNoteSpeseMsg({ ok: false, text: 'Pagina "browser-nota-spese" non trovata. Configura una pagina ExB con il widget consultazione prezzario e il widget gii-ns-carrello.' }) } } catch (e: any) { setNoteSpeseMsg({ ok: false, text: e?.message || String(e) }) } }} disabled={isRiAgrTecLimitedEdit || noteSpeseBusy || noteSpeseDraftDirty} style={{ padding: '10px 24px', borderRadius: 8, border: '1px solid #1ed9dc', background: '#0f7375', color: '#fff', fontWeight: 800, fontSize: 14, cursor: (isRiAgrTecLimitedEdit || noteSpeseBusy || noteSpeseDraftDirty) ? 'not-allowed' : 'pointer', opacity: (isRiAgrTecLimitedEdit || noteSpeseBusy || noteSpeseDraftDirty) ? 0.5 : 1, letterSpacing: '0.3px' }}>📋 Sfoglia prezzario</button>
           {noteSpeseDraftDirty && <span style={{ fontSize: 11, color: '#856404' }}>Salva le modifiche prima di sfogliare il prezzario.</span>}
       </div>
-      <NoteSpeseManager category='AT' title='Attrezzature e trasporti' rows={noteSpeseRowsDraft['AT']} onRowsChange={(nextRows) => setNoteSpeseRowsDraft((prev) => ({ ...prev, AT: nextRows.map(nsCloneRow) }))} onDirtyChange={(dirty) => setNoteSpeseFormDirtyByCategory((prev) => ({ ...prev, AT: dirty }))} resetKey={noteSpeseManagerResetKey} />
-      <NoteSpeseManager category='PR' title='Materiali da costruzione' rows={noteSpeseRowsDraft['PR']} onRowsChange={(nextRows) => setNoteSpeseRowsDraft((prev) => ({ ...prev, PR: nextRows.map(nsCloneRow) }))} onDirtyChange={(dirty) => setNoteSpeseFormDirtyByCategory((prev) => ({ ...prev, PR: dirty }))} resetKey={noteSpeseManagerResetKey} />
-      <NoteSpeseManager category='RU' title='Risorse umane' rows={noteSpeseRowsDraft['RU']} onRowsChange={(nextRows) => setNoteSpeseRowsDraft((prev) => ({ ...prev, RU: nextRows.map(nsCloneRow) }))} onDirtyChange={(dirty) => setNoteSpeseFormDirtyByCategory((prev) => ({ ...prev, RU: dirty }))} resetKey={noteSpeseManagerResetKey} />
-      <NoteSpeseManager category='SL' title='Semilavorati' rows={noteSpeseRowsDraft['SL']} onRowsChange={(nextRows) => setNoteSpeseRowsDraft((prev) => ({ ...prev, SL: nextRows.map(nsCloneRow) }))} onDirtyChange={(dirty) => setNoteSpeseFormDirtyByCategory((prev) => ({ ...prev, SL: dirty }))} resetKey={noteSpeseManagerResetKey} />
-      <NoteSpeseManager category='PF' title='Prodotti finiti' rows={noteSpeseRowsDraft['PF']} onRowsChange={(nextRows) => setNoteSpeseRowsDraft((prev) => ({ ...prev, PF: nextRows.map(nsCloneRow) }))} onDirtyChange={(dirty) => setNoteSpeseFormDirtyByCategory((prev) => ({ ...prev, PF: dirty }))} resetKey={noteSpeseManagerResetKey} />
+      <NoteSpeseManager category='AT' title='Attrezzature e trasporti' rows={noteSpeseRowsDraft['AT']} onRowsChange={(nextRows) => { if (isRiAgrTecLimitedEdit) return; setNoteSpeseRowsDraft((prev) => ({ ...prev, AT: nextRows.map(nsCloneRow) })) }} onDirtyChange={(dirty) => { if (isRiAgrTecLimitedEdit) return; setNoteSpeseFormDirtyByCategory((prev) => ({ ...prev, AT: dirty })) }} resetKey={noteSpeseManagerResetKey} readonly={isRiAgrTecLimitedEdit} />
+      <NoteSpeseManager category='PR' title='Materiali da costruzione' rows={noteSpeseRowsDraft['PR']} onRowsChange={(nextRows) => { if (isRiAgrTecLimitedEdit) return; setNoteSpeseRowsDraft((prev) => ({ ...prev, PR: nextRows.map(nsCloneRow) })) }} onDirtyChange={(dirty) => { if (isRiAgrTecLimitedEdit) return; setNoteSpeseFormDirtyByCategory((prev) => ({ ...prev, PR: dirty })) }} resetKey={noteSpeseManagerResetKey} readonly={isRiAgrTecLimitedEdit} />
+      <NoteSpeseManager category='RU' title='Risorse umane' rows={noteSpeseRowsDraft['RU']} onRowsChange={(nextRows) => { if (isRiAgrTecLimitedEdit) return; setNoteSpeseRowsDraft((prev) => ({ ...prev, RU: nextRows.map(nsCloneRow) })) }} onDirtyChange={(dirty) => { if (isRiAgrTecLimitedEdit) return; setNoteSpeseFormDirtyByCategory((prev) => ({ ...prev, RU: dirty })) }} resetKey={noteSpeseManagerResetKey} readonly={isRiAgrTecLimitedEdit} />
+      <NoteSpeseManager category='SL' title='Semilavorati' rows={noteSpeseRowsDraft['SL']} onRowsChange={(nextRows) => { if (isRiAgrTecLimitedEdit) return; setNoteSpeseRowsDraft((prev) => ({ ...prev, SL: nextRows.map(nsCloneRow) })) }} onDirtyChange={(dirty) => { if (isRiAgrTecLimitedEdit) return; setNoteSpeseFormDirtyByCategory((prev) => ({ ...prev, SL: dirty })) }} resetKey={noteSpeseManagerResetKey} readonly={isRiAgrTecLimitedEdit} />
+      <NoteSpeseManager category='PF' title='Prodotti finiti' rows={noteSpeseRowsDraft['PF']} onRowsChange={(nextRows) => { if (isRiAgrTecLimitedEdit) return; setNoteSpeseRowsDraft((prev) => ({ ...prev, PF: nextRows.map(nsCloneRow) })) }} onDirtyChange={(dirty) => { if (isRiAgrTecLimitedEdit) return; setNoteSpeseFormDirtyByCategory((prev) => ({ ...prev, PF: dirty })) }} resetKey={noteSpeseManagerResetKey} readonly={isRiAgrTecLimitedEdit} />
     </div>
   )
 )}
@@ -5911,7 +5979,7 @@ React.useEffect(() => {
                   <label style={{
                     minHeight: 36, height: 36, boxSizing: 'border-box',
                     padding: '0 14px', borderRadius: 10, border: '1px solid rgba(0,0,0,0.12)', background: '#fff', color: '#111827',
-                    fontSize: 12, fontWeight: 600, cursor: attachmentsUploading ? 'not-allowed' : 'pointer',
+                    fontSize: 12, fontWeight: 600, cursor: (attachmentsUploading || isRiAgrTecLimitedEdit) ? 'not-allowed' : 'pointer', opacity: isRiAgrTecLimitedEdit ? 0.55 : 1,
                     display: 'inline-flex', alignItems: 'center', justifyContent: 'center', lineHeight: 1, whiteSpace: 'nowrap'
                   }}>
                     Scegli file
@@ -5920,8 +5988,9 @@ React.useEffect(() => {
                       type='file'
                       multiple
                       style={{ display: 'none' }}
-                      disabled={attachmentsUploading}
+                      disabled={attachmentsUploading || isRiAgrTecLimitedEdit}
                       onChange={(e) => {
+                        if (isRiAgrTecLimitedEdit) return
                         setAttachmentsError(null)
                         const files = Array.from((e.target as HTMLInputElement).files || [])
                         setAttachmentFiles(files)
@@ -5936,6 +6005,7 @@ React.useEffect(() => {
                     style={{ display: 'none' }}
                     onChange={(e) => {
                       const file = Array.from((e.target as HTMLInputElement).files || [])[0]
+                      if (isRiAgrTecLimitedEdit) return
                       if (file && replaceTargetAttachment) {
                         setAttachmentConfirm({ type: 'replace', attachment: { id: replaceTargetAttachment.id, name: replaceTargetAttachment.name }, file })
                       }
@@ -5992,8 +6062,8 @@ React.useEffect(() => {
                           </button>
                           <button
                             type='button'
-                            disabled={attachmentsUploading}
-                            onClick={() => openReplacePicker({ id: Number(a.id), name: a.name })}
+                            disabled={attachmentsUploading || isRiAgrTecLimitedEdit}
+                            onClick={() => { if (isRiAgrTecLimitedEdit) return; openReplacePicker({ id: Number(a.id), name: a.name }) }}
                             style={{
                               fontSize: 12,
                               fontWeight: 700,
@@ -6003,16 +6073,16 @@ React.useEffect(() => {
                               border: '1px solid rgba(29,78,216,0.18)',
                               borderRadius: 8,
                               padding: '6px 10px',
-                              cursor: attachmentsUploading ? 'not-allowed' : 'pointer',
-                              opacity: attachmentsUploading ? 0.6 : 1
+                              cursor: (attachmentsUploading || isRiAgrTecLimitedEdit) ? 'not-allowed' : 'pointer',
+                              opacity: (attachmentsUploading || isRiAgrTecLimitedEdit) ? 0.6 : 1
                             }}
                           >
                             Sostituisci
                           </button>
                           <button
                             type='button'
-                            disabled={attachmentsUploading}
-                            onClick={() => setAttachmentConfirm({ type: 'delete', attachment: { id: Number(a.id), name: a.name } })}
+                            disabled={attachmentsUploading || isRiAgrTecLimitedEdit}
+                            onClick={() => { if (isRiAgrTecLimitedEdit) return; setAttachmentConfirm({ type: 'delete', attachment: { id: Number(a.id), name: a.name } }) }}
                             style={{
                               fontSize: 12,
                               fontWeight: 700,
@@ -6022,8 +6092,8 @@ React.useEffect(() => {
                               border: '1px solid rgba(217,45,32,0.24)',
                               borderRadius: 8,
                               padding: '6px 10px',
-                              cursor: attachmentsUploading ? 'not-allowed' : 'pointer',
-                              opacity: attachmentsUploading ? 0.6 : 1
+                              cursor: (attachmentsUploading || isRiAgrTecLimitedEdit) ? 'not-allowed' : 'pointer',
+                              opacity: (attachmentsUploading || isRiAgrTecLimitedEdit) ? 0.6 : 1
                             }}
                           >
                             Elimina
@@ -7316,7 +7386,9 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
     sectionHeaderColor: String((cfg as any).sectionHeaderColor || defaultConfig.sectionHeaderColor),
     sectionHeaderFontSize: Number.isFinite(Number((cfg as any).sectionHeaderFontSize)) ? Number((cfg as any).sectionHeaderFontSize) : defaultConfig.sectionHeaderFontSize,
     sectionDividerColor: String((cfg as any).sectionDividerColor || defaultConfig.sectionDividerColor),
-    sectionDividerWidth: Number.isFinite(Number((cfg as any).sectionDividerWidth)) ? Number((cfg as any).sectionDividerWidth) : defaultConfig.sectionDividerWidth
+    sectionDividerWidth: Number.isFinite(Number((cfg as any).sectionDividerWidth)) ? Number((cfg as any).sectionDividerWidth) : defaultConfig.sectionDividerWidth,
+    formFieldFontSize: Number.isFinite(Number((cfg as any).formFieldFontSize)) ? Number((cfg as any).formFieldFontSize) : defaultConfig.formFieldFontSize,
+    norma3FontSize: Number.isFinite(Number((cfg as any).norma3FontSize)) ? Number((cfg as any).norma3FontSize) : defaultConfig.norma3FontSize
   }
 
   const tabFields: TabFields = {

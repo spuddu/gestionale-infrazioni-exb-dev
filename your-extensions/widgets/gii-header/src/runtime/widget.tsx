@@ -755,7 +755,7 @@ export default function Widget(props: Props) {
       `}</style>
 
       {/* Logo + Titoli */}
-      <div style={{ display:'flex', alignItems:'center', gap:16 }}>
+      <div style={{ display:'flex', alignItems:'center', gap:16, flex:'1 1 auto', minWidth:0, overflow:'hidden' }}>
         <div style={{ ...off('offsetLogo') }}>
           <div style={{
             width:cfg.logoSize, height:cfg.logoSize, borderRadius:cfg.logoRadius,
@@ -768,7 +768,7 @@ export default function Widget(props: Props) {
             <img src={cfg.logoUrl} alt='logo' style={{ width:'100%', height:'100%', objectFit:'contain', display:'block' }} />
           </div>
         </div>
-        <div style={{ ...off('offsetTitoli') }}>
+        <div style={{ ...off('offsetTitoli'), flex:'1 1 auto', minWidth:0, overflow:'hidden' }}>
           <div style={{
             fontFamily:cfg.orgNameFont, fontSize:cfg.orgNameSize, fontWeight:cfg.orgNameWeight,
             letterSpacing:cfg.orgNameLetterSpacing, textTransform:'uppercase',
@@ -787,10 +787,10 @@ export default function Widget(props: Props) {
               color:'rgba(226,232,240,0.78)',
               letterSpacing:0.1,
               lineHeight:1.15,
-              whiteSpace:'normal',
-              overflow:'visible',
-              textOverflow:'clip',
-              maxWidth:'min(760px, 54vw)'
+              whiteSpace:'nowrap',
+              overflow:'hidden',
+              textOverflow:'ellipsis',
+              maxWidth:'100%'
             }}>{orgContextText}</div>
           )}
         </div>

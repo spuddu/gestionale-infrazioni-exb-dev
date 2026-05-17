@@ -114,6 +114,7 @@ export interface Config {
   sectionDividerColor: string
   sectionDividerWidth: number
   formFieldFontSize: number
+  norma3FontSize: number
 
   // --- Anteprima PDF
   anteprimaPdfPaddingTop: number
@@ -242,6 +243,7 @@ export const defaultConfig: Config = {
   sectionDividerColor: '#bfdbfe',
   sectionDividerWidth: 2,
   formFieldFontSize: 13,
+  norma3FontSize: 12,
 
   anteprimaPdfPaddingTop: 0,
   anteprimaPdfPaddingX: 0,

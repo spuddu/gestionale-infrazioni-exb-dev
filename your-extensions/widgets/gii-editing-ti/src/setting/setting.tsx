@@ -685,6 +685,14 @@ export default function Setting(props: AllWidgetSettingProps<IMConfig>) {
         </div>
 
         <div style={{marginTop:16,borderTop:'1px solid rgba(255,255,255,0.07)',paddingTop:12}}>
+          <div style={{fontSize:11,fontWeight:700,color:'#93c5fd',marginBottom:8}}>Altre violazioni</div>
+          <div style={P.hint}>Dimensione del testo delle checkbox degli articoli nella sezione “Altre violazioni” (Art. 8, Art. 12, Art. 27… Art. 39).</div>
+          <label style={P.lbl}>Dimensione font articoli (px)</label>
+          <input type='number' value={(cfg as any).norma3FontSize??12} min={9} max={18}
+            onChange={e=>set('norma3FontSize', Number(e.target.value))} style={{...P.inp, width:80}}/>
+        </div>
+
+        <div style={{marginTop:16,borderTop:'1px solid rgba(255,255,255,0.07)',paddingTop:12}}>
           <div style={{fontSize:11,fontWeight:700,color:'#93c5fd',marginBottom:8}}>Intestazioni di sezione</div>
           <div style={P.hint}>Colore e dimensione dei titoli di gruppo (es. Trasgressore, Art. 15, Descrizione…)</div>
           <div style={{display:'flex',alignItems:'center',gap:6,marginTop:8}}>
@@ -724,6 +732,9 @@ export default function Setting(props: AllWidgetSettingProps<IMConfig>) {
             <div style={{padding:'5px 8px',borderRadius:6,border:'1px solid rgba(0,0,0,0.15)',fontSize:12,color:'#9ca3af'}}>— seleziona —</div>
             <div style={{fontSize:cfg.formLabelFontSize??12,color:cfg.formLabelColor||'#6b7280',marginBottom:4,marginTop:8}}>Via</div>
             <div style={{padding:'5px 8px',borderRadius:6,border:'1px solid rgba(0,0,0,0.15)',fontSize:12,color:'#374151'}}>Via Roma 1</div>
+            <label style={{display:'flex',alignItems:'flex-start',gap:6,fontSize:(cfg as any).norma3FontSize??12,color:'#374151',marginTop:10}}>
+              <input type='checkbox' checked readOnly style={{marginTop:2}}/> Art. 27 – Spreco d'acqua/uso negligente risorsa idrica
+            </label>
           </div>
         </div>
       </div>}

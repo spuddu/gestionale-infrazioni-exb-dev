@@ -322,6 +322,21 @@ type RuntimeSelection = {
   data?: any
 }
 
+
+function clearRuntimeSelection (reason = 'azioni'): void {
+  try {
+    sessionStorage.removeItem('GII_SELECTED_OID')
+    sessionStorage.removeItem('GII_SELECTED_LAYER_URL')
+    sessionStorage.removeItem('GII_SELECTED_SERVICE_URL')
+    sessionStorage.removeItem('GII_SELECTED_IDFIELD')
+    sessionStorage.removeItem('GII_SELECTED_VIEW_NAME')
+    sessionStorage.removeItem('GII_SELECTED_DATA')
+    try { delete (window as any).__giiSelection } catch {}
+    window.dispatchEvent(new CustomEvent('gii-selection-changed', { detail: null }))
+    window.dispatchEvent(new CustomEvent('gii-selection-cleared', { detail: { source: reason, ts: Date.now() } }))
+  } catch {}
+}
+
 function readRuntimeSelection (): RuntimeSelection | null {
   try {
     const mem = (window as any)?.__giiSelection
@@ -2778,10 +2793,35 @@ function ActionsPanel (props: {
 
       setMsg({ kind: 'ok', text: okText })
 
-      // Aggiorna subito la UI con i nuovi valori (es. disabilita "Prendi in carico" e abilita "Assegna TI").
+      // Aggiorna subito la UI e la cache globale della selezione con i valori appena salvati.
+      // Senza questa propagazione il refresh può rileggere per qualche istante il record vecchio
+      // e lasciare visibile un pulsante ormai superato, es. "Prendi in carico" dopo la presa.
+      let optimisticData: any = null
       try {
         const cur = (baseData && typeof baseData === 'object') ? baseData : {}
-        setLocalData({ ...cur, ...attributesIn })
+        optimisticData = { ...cur, ...attributesIn, ...attrs }
+        setLocalData(optimisticData)
+      } catch {}
+
+      try {
+        const layerUrlForCache = String(
+          active?.state?.ds?.getDataSourceJson?.()?.url ||
+          active?.state?.ds?.dataSourceJson?.url ||
+          active?.state?.ds?.layer?.url ||
+          layer?.url ||
+          active?.key ||
+          ''
+        ).trim()
+        if (layerUrlForCache && optimisticData) {
+          writeSelectedFeatureCache(layerUrlForCache, oid, idFieldName, optimisticData, 'edit')
+          const w: any = window as any
+          if (w.__giiSelection && Number(w.__giiSelection.oid) === Number(oid)) {
+            const selUrl = String(w.__giiSelection.layerUrl || '').trim()
+            if (!selUrl || selUrl === layerUrlForCache) {
+              w.__giiSelection = { ...w.__giiSelection, data: optimisticData }
+            }
+          }
+        }
       } catch {}
 
       // refresh root + derived + ds corrente (per sicurezza)
@@ -2790,15 +2830,12 @@ function ActionsPanel (props: {
 
       try { delete (window as any).__giiRuntimeDsProxyCache } catch {}
 
-      // Forza il re-fetch del record selezionato (la selezione resta la stessa, quindi senza questo
-      // l'UI può rimanere con i valori "vecchi" fino a cambio selezione / F5).
-      try {
-        invalidateRuntimeProxyCache(active?.state?.ds?.getDataSourceJson?.()?.url || active?.state?.ds?.layer?.url || '')
-        try { delete runtimeDsProxyPromises[String(active?.state?.ds?.getDataSourceJson?.()?.url || active?.state?.ds?.layer?.url || '')] } catch {}
-        window.dispatchEvent(new CustomEvent('gii-force-refresh-selection', { detail: { oid } }))
-      } catch {
-        try { window.dispatchEvent(new Event('gii-force-refresh-selection')) } catch {}
-      }
+      // L'azione modifica lo stato procedimentale del record: se il rapporto esce dall'elenco
+      // corrente, il cw azioni non deve restare appeso alla vecchia selezione.
+      // Dopo il refresh azzeriamo quindi la selezione globale: elenco e azioni tornano coerenti
+      // sullo stato "nessuna selezione" invece di lasciare attivo il pulsante precedente.
+      clearRuntimeSelection('azioni-post-applyedits')
+      setLocalData(null)
 
       window.setTimeout(() => {
         if (selectionKeyRef.current === startKey) setMsg(null)
