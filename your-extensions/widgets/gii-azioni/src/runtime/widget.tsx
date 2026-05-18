@@ -1844,6 +1844,12 @@ function ActionsPanel (props: {
     }
   }
 
+  const notifyWorkflowLogChanged = () => {
+    // Mantenuta solo come compatibilità interna: il refresh operativo viene
+    // eseguito una sola volta dai chiamanti, dopo applyEdits sul record e dopo
+    // scrittura del LOG eventi/cicli.
+  }
+
   const closeCycleLog = async (opts: { eventoChiusura: string, ruoloDestinatario?: string, utenteDestinatario?: string, noteChiusura?: string, fase?: string }) => {
     try {
       if (oid == null) return
@@ -1885,6 +1891,7 @@ function ActionsPanel (props: {
         }
         const newAttrs = filterAttrsForLayer(newRaw, logLayer)
         await logLayer.applyEdits({ addFeatures: [{ attributes: newAttrs }] })
+        notifyWorkflowLogChanged()
         return
       }
 
@@ -1908,6 +1915,7 @@ function ActionsPanel (props: {
       }
       const upd = filterAttrsForLayer(updRaw, logLayer)
       await logLayer.applyEdits({ updateFeatures: [{ attributes: upd }] })
+      notifyWorkflowLogChanged()
     } catch (e) {
       console.warn('[GII_LOG_EVENTI_CICLI] Errore chiusura ciclo:', e)
     }
@@ -2926,7 +2934,38 @@ function ActionsPanel (props: {
   }
 
 
-  const runApplyEdits = async (attributesIn: Record<string, any>, okText: string) => {
+  type RunApplyEditsOptions = {
+    deferRefresh?: boolean
+  }
+
+  const refreshAfterWorkflowSave = async (reason = 'azioni-post-applyedits') => {
+    const root = getRootDs(ds)
+    await refreshRootAndDerived(root)
+    await refreshRootAndDerived(ds)
+
+    try { delete (window as any).__giiRuntimeDsProxyCache } catch {}
+
+    try {
+      window.dispatchEvent(new CustomEvent('gii-force-refresh-selection', {
+        detail: { source: reason, oid, ts: Date.now() }
+      }))
+    } catch {}
+
+    clearRuntimeSelection(reason)
+    setLocalData(null)
+  }
+
+  const saveWithWorkflowLog = async (
+    attributesIn: Record<string, any>,
+    okText: string,
+    logOpts: { eventoChiusura: string, ruoloDestinatario?: string, utenteDestinatario?: string, noteChiusura?: string, fase?: string }
+  ) => {
+    await runApplyEdits(attributesIn, okText, { deferRefresh: true })
+    await closeCycleLog(logOpts)
+    await refreshAfterWorkflowSave('azioni-post-log')
+  }
+
+  const runApplyEdits = async (attributesIn: Record<string, any>, okText: string, options?: RunApplyEditsOptions) => {
     if (!ds) throw new Error('DataSource non disponibile.')
     if (!hasSel || oid == null) throw new Error('Selezione non valida.')
 
@@ -3012,18 +3051,13 @@ function ActionsPanel (props: {
         }
       } catch {}
 
-      // refresh root + derived + ds corrente (per sicurezza)
-      await refreshRootAndDerived(root)
-      await refreshRootAndDerived(ds)
-
-      try { delete (window as any).__giiRuntimeDsProxyCache } catch {}
-
-      // L'azione modifica lo stato procedimentale del record: se il rapporto esce dall'elenco
-      // corrente, il cw azioni non deve restare appeso alla vecchia selezione.
-      // Dopo il refresh azzeriamo quindi la selezione globale: elenco e azioni tornano coerenti
-      // sullo stato "nessuna selezione" invece di lasciare attivo il pulsante precedente.
-      clearRuntimeSelection('azioni-post-applyedits')
-      setLocalData(null)
+      if (!options?.deferRefresh) {
+        // L'azione modifica lo stato procedimentale del record: se il rapporto esce
+        // dall'elenco corrente, il cw azioni non deve restare appeso alla vecchia
+        // selezione. Per le azioni che scrivono anche il LOG eventi/cicli, questo
+        // refresh viene differito e fatto una sola volta dopo la scrittura del LOG.
+        await refreshAfterWorkflowSave('azioni-post-applyedits')
+      }
 
       window.setTimeout(() => {
         if (selectionKeyRef.current === startKey) setMsg(null)
@@ -3105,9 +3139,7 @@ function ActionsPanel (props: {
 
       addGiiRoutingFields(upd, 'TI', 'TRASMISSIONE', { destUsername: tiSelected })
 
-      await runApplyEdits(upd, `TI assegnato: ${tiName}.`)
-
-      void closeCycleLog({ eventoChiusura: 'NUOVA_ASSEGNAZIONE', ruoloDestinatario: 'TI', utenteDestinatario: tiSelected, noteChiusura: `Assegna TI: ${tiName} (${tiSelected})`, fase: role })
+      await saveWithWorkflowLog(upd, `TI assegnato: ${tiName}.`, { eventoChiusura: 'NUOVA_ASSEGNAZIONE', ruoloDestinatario: 'TI', utenteDestinatario: tiSelected, noteChiusura: `Assegna TI: ${tiName} (${tiSelected})`, fase: role })
 
       setPending(null)
       setConfirmAttempted(false)
@@ -3173,9 +3205,7 @@ function ActionsPanel (props: {
 
       addGiiRoutingFields(upd, 'TI_AMM', 'TRASMISSIONE', { destUsername: tiAmmSelected })
 
-      await runApplyEdits(upd, `TI AMM assegnato: ${tiAmmName}.`)
-
-      void closeCycleLog({ eventoChiusura: 'NUOVA_ASSEGNAZIONE', ruoloDestinatario: 'TI_AMM', utenteDestinatario: tiAmmSelected, noteChiusura: `Assegna TI AMM: ${tiAmmName} (${tiAmmSelected})`, fase: role })
+      await saveWithWorkflowLog(upd, `TI AMM assegnato: ${tiAmmName}.`, { eventoChiusura: 'NUOVA_ASSEGNAZIONE', ruoloDestinatario: 'TI_AMM', utenteDestinatario: tiAmmSelected, noteChiusura: `Assegna TI AMM: ${tiAmmName} (${tiAmmSelected})`, fase: role })
 
       setPending(null)
       setConfirmAttempted(false)
@@ -3217,8 +3247,7 @@ function ActionsPanel (props: {
 
       addGiiRoutingFields(upd, 'TI_AMM', 'TRASMISSIONE', { destUsername: String(tiAmmUserRaw || '') })
 
-      await runApplyEdits(upd, 'Pratica restituita al TI AMM.')
-      void closeCycleLog({ eventoChiusura: 'RESTITUZIONE_A_TI_AMM', ruoloDestinatario: 'TI_AMM', utenteDestinatario: String(tiAmmUserRaw || resolveDestUser('TI_AMM')), noteChiusura: 'Restituzione a TI AMM dopo rientro da integrazione tecnica.', fase: role })
+      await saveWithWorkflowLog(upd, 'Pratica restituita al TI AMM.', { eventoChiusura: 'RESTITUZIONE_A_TI_AMM', ruoloDestinatario: 'TI_AMM', utenteDestinatario: String(tiAmmUserRaw || resolveDestUser('TI_AMM')), noteChiusura: 'Restituzione a TI AMM dopo rientro da integrazione tecnica.', fase: role })
       setPending(null)
       setConfirmAttempted(false)
     } catch (e: any) {
@@ -3268,9 +3297,10 @@ function ActionsPanel (props: {
         addGiiRoutingFields(upd, ruoloDest, 'INTEGRAZIONE', { technicalIntegration: pending === 'INTEGRAZIONE_TECNICA' })
       }
 
-      await runApplyEdits(upd, 'Integrazione richiesta salvata.')
       if (ruoloDest) {
-        void closeCycleLog({ eventoChiusura: 'INTEGRAZIONE_RICHIESTA', ruoloDestinatario: ruoloDest, utenteDestinatario: resolveDestUser(ruoloDest), noteChiusura: noteTrim, fase: role })
+        await saveWithWorkflowLog(upd, 'Integrazione richiesta salvata.', { eventoChiusura: 'INTEGRAZIONE_RICHIESTA', ruoloDestinatario: ruoloDest, utenteDestinatario: resolveDestUser(ruoloDest), noteChiusura: noteTrim, fase: role })
+      } else {
+        await runApplyEdits(upd, 'Integrazione richiesta salvata.')
       }
       setPending(null)
       setConfirmAttempted(false)
@@ -3338,20 +3368,27 @@ function ActionsPanel (props: {
       // molti avanti/indietro possono rimanere stati storici non pertinenti.
       const wasIntegResponse = Boolean(integRequester)
 
-      await runApplyEdits(upd, `Esito salvato: ${label}.`)
-      if (esito === ESITO_APPROVATA) {
-        if (role === 'DA') {
-          // DA approva la sanzione → destinatario è TI_AMM
-          void closeCycleLog({ eventoChiusura: 'SANZIONE_APPROVATA', ruoloDestinatario: 'TI_AMM', utenteDestinatario: resolveDestUser('TI_AMM'), fase: role })
-        } else if (role === 'DT') {
-          // DT approva il rapporto tecnico → destinatario è RI
-          void closeCycleLog({ eventoChiusura: 'RAPPORTO_APPROVATO', ruoloDestinatario: ruoloDest, utenteDestinatario: resolveDestUser(ruoloDest), fase: role })
-        } else {
-          const evento = ruoloDest
-            ? (wasIntegResponse ? 'INTEGRAZIONE_TRASMESSA' : 'ISTRUTTORIA_TRASMESSA')
-            : 'ISTRUTTORIA_TRASMESSA'
-          void closeCycleLog({ eventoChiusura: evento, ruoloDestinatario: ruoloDest, utenteDestinatario: resolveDestUser(ruoloDest), fase: role })
-        }
+      const logOpts = esito === ESITO_APPROVATA
+        ? (role === 'DA'
+            // DA approva la sanzione → destinatario è TI_AMM
+            ? { eventoChiusura: 'SANZIONE_APPROVATA', ruoloDestinatario: 'TI_AMM', utenteDestinatario: resolveDestUser('TI_AMM'), fase: role }
+            : role === 'DT'
+              // DT approva il rapporto tecnico → destinatario è RI
+              ? { eventoChiusura: 'RAPPORTO_APPROVATO', ruoloDestinatario: ruoloDest, utenteDestinatario: resolveDestUser(ruoloDest), fase: role }
+              : {
+                  eventoChiusura: ruoloDest
+                    ? (wasIntegResponse ? 'INTEGRAZIONE_TRASMESSA' : 'ISTRUTTORIA_TRASMESSA')
+                    : 'ISTRUTTORIA_TRASMESSA',
+                  ruoloDestinatario: ruoloDest,
+                  utenteDestinatario: resolveDestUser(ruoloDest),
+                  fase: role
+                })
+        : null
+
+      if (logOpts) {
+        await saveWithWorkflowLog(upd, `Esito salvato: ${label}.`, logOpts)
+      } else {
+        await runApplyEdits(upd, `Esito salvato: ${label}.`)
       }
       setPending(null)
       setConfirmAttempted(false)
@@ -3383,8 +3420,7 @@ function ActionsPanel (props: {
         upd[dtStatoField] = Date.now()
       }
 
-      await runApplyEdits(upd, 'Esito salvato: Respinta.')
-      void closeCycleLog({ eventoChiusura: 'RESPINTA', noteChiusura: finalNote, fase: role })
+      await saveWithWorkflowLog(upd, 'Esito salvato: Respinta.', { eventoChiusura: 'RESPINTA', noteChiusura: finalNote, fase: role })
       setPending(null)
       setConfirmAttempted(false)
     } catch (e: any) {
@@ -3412,8 +3448,7 @@ function ActionsPanel (props: {
       if (fDt) upd[fDt] = Date.now()
       if (fDa) upd[fDa] = String((window as any).__giiUserRole?.username || '').trim() || undefined
 
-      await runApplyEdits(upd, 'Rapporto archiviato.')
-      try { void closeCycleLog({ eventoChiusura: 'ARCHIVIAZIONE', noteChiusura: noteTrim, fase: role }) } catch {}
+      await saveWithWorkflowLog(upd, 'Rapporto archiviato.', { eventoChiusura: 'ARCHIVIAZIONE', noteChiusura: noteTrim, fase: role })
       setPending(null)
       setConfirmAttempted(false)
     } catch (e: any) {

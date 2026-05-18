@@ -278,6 +278,35 @@ export default function Setting(props: Props) {
         </div>
       </div>}
 
+      <Acc id='badgeOggetto' label='▌ Badge oggetto' open={isOpen('badgeOggetto')} onToggle={()=>toggle('badgeOggetto')}/>
+      {isOpen('badgeOggetto') && <div>
+        <Check value={cfg.oggettoBadgeEnabled !== false} onChange={v=>update('oggettoBadgeEnabled',v)} label='Mostra badge colorato in testa alla riga'/>
+        <div style={P.row3}>
+          <div><label style={P.lbl}>Larghezza</label><NumInp value={cfg.oggettoBadgeWidth} onChange={n=>update('oggettoBadgeWidth',n)} min={0} unit='px'/></div>
+          <div><label style={P.lbl}>Rientro testo</label><NumInp value={cfg.oggettoBadgeContentOffset} onChange={n=>update('oggettoBadgeContentOffset',n)} min={0} unit='px'/></div>
+          <div><label style={P.lbl}>Opacità</label><NumInp value={cfg.oggettoBadgeOpacity} onChange={n=>update('oggettoBadgeOpacity',n)} min={0} max={1} step={0.05}/></div>
+        </div>
+        <div style={P.hint}>Il rientro testo viene applicato anche all’intestazione della prima colonna, così celle e header restano allineati.</div>
+        <div style={P.grp}>Colori per oggetto</div>
+        {([
+          { name:'Nuova rilevazione', field:'oggettoBadgeColorNuovaRilevazione' },
+          { name:'Assegnazione istruttoria', field:'oggettoBadgeColorAssegnazione' },
+          { name:'Trasmissione istruttoria', field:'oggettoBadgeColorTrasmissione' },
+          { name:'Richiesta / trasmissione integrazione', field:'oggettoBadgeColorIntegrazione' },
+          { name:'Approvazione / notifica', field:'oggettoBadgeColorApprovazione' },
+          { name:'Respingimento', field:'oggettoBadgeColorRespingimento' },
+          { name:'Neutro / non classificato', field:'oggettoBadgeColorNeutro' }
+        ] as const).map(({ name, field }) => (
+          <div key={field} style={{ marginBottom:10 }}>
+            <div style={{ fontSize:11, fontWeight:600, color:'#d1d5db', marginBottom:5, display:'flex', alignItems:'center', gap:8 }}>
+              <span style={{ display:'inline-block', width:16, height:12, borderRadius:3, background:String((cfg as any)[field] || '#d0d0d0'), border:'1px solid rgba(255,255,255,0.25)' }}/>
+              {name}
+            </div>
+            <ColInp value={String((cfg as any)[field] || '')} onChange={v=>update(field,v)}/>
+          </div>
+        ))}
+      </div>}
+
       <Acc id='chip' label='🔴 Chip stato' open={isOpen('chip')} onToggle={()=>toggle('chip')}/>
       {isOpen('chip') && <div>
 

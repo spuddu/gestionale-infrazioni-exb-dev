@@ -1,4 +1,4 @@
-import { type ImmutableObject, Immutable } from 'jimu-core'
+import { type ImmutableObject } from 'jimu-core'
 
 export type SortDir = 'ASC' | 'DESC'
 
@@ -90,6 +90,19 @@ export interface Config {
   selectedBorderColor: string
   selectedBorderWidth: number
 
+  // --- Badge oggetto (barra in testa alla riga)
+  oggettoBadgeEnabled: boolean
+  oggettoBadgeWidth: number
+  oggettoBadgeContentOffset: number
+  oggettoBadgeOpacity: number
+  oggettoBadgeColorNuovaRilevazione: string
+  oggettoBadgeColorAssegnazione: string
+  oggettoBadgeColorTrasmissione: string
+  oggettoBadgeColorIntegrazione: string
+  oggettoBadgeColorApprovazione: string
+  oggettoBadgeColorRespingimento: string
+  oggettoBadgeColorNeutro: string
+
   // --- Messaggi
   emptyMessage: string
   errorNoDs: string
@@ -163,18 +176,17 @@ export interface Config {
 export type IMConfig = ImmutableObject<Config>
 
 export const DEFAULT_COLUMNS: ColumnDef[] = [
-  { id: 'col_pratica',   label: 'N. pratica',        field: 'objectid',          width: 120 },
-  { id: 'col_data',      label: 'Data rilev.',        field: 'data_rilevazione',  width: 150 },
-  { id: 'col_stato',     label: 'Stato sintetico',    field: '__stato_sint__',    width: 220 },
-  { id: 'col_ufficio',   label: 'Ufficio',            field: 'ufficio_zona',      width: 170 },
-  { id: 'col_mittente',  label: 'Mittente',           field: '__mittente__',      width: 200 },
-  { id: 'col_causale',   label: 'Causale',            field: '__causale__',       width: 200 },
-  { id: 'col_data_msg',  label: 'Data messaggio',     field: '__data_msg__',      width: 150 },
-  { id: 'col_ultimo',    label: 'Ultimo agg.',        field: '__ultimo_agg__',    width: 170 },
-  { id: 'col_prossima',  label: 'Destinatario',       field: '__prossima__',      width: 240 }
+  { id: 'col_pratica',   label: 'N. rapporto',       field: 'objectid',          width: 110 },
+  { id: 'col_data',      label: 'Data rilevazione',  field: 'data_rilevazione',  width: 120 },
+  { id: 'col_stato',     label: 'Stato',             field: '__stato_sint__',    width: 170 },
+  { id: 'col_causale',   label: 'Oggetto',           field: '__causale__',       width: 210 },
+  { id: 'col_mittente',  label: 'Da',                field: '__mittente__',      width: 210 },
+  { id: 'col_prossima',  label: 'A',                 field: '__prossima__',      width: 210 },
+  { id: 'col_ufficio',   label: 'Ufficio',           field: 'ufficio_zona',      width: 170 },
+  { id: 'col_data_msg',  label: 'Ultimo agg.',       field: '__data_msg__',      width: 150 }
 ]
 
-export const defaultConfig: IMConfig = Immutable({
+export const defaultConfig: IMConfig = {
   filterTabs: [],
   columns: DEFAULT_COLUMNS,
 
@@ -235,6 +247,19 @@ export const defaultConfig: IMConfig = Immutable({
   selectedBg: '#eaf2ff',
   selectedBorderColor: '#2f6fed',
   selectedBorderWidth: 2,
+
+  // Badge oggetto (barra in testa alla riga)
+  oggettoBadgeEnabled: true,
+  oggettoBadgeWidth: 8,
+  oggettoBadgeContentOffset: 10,
+  oggettoBadgeOpacity: 1,
+  oggettoBadgeColorNuovaRilevazione: '#7dd3fc',
+  oggettoBadgeColorAssegnazione: '#2f6fed',
+  oggettoBadgeColorTrasmissione: '#8b5cf6',
+  oggettoBadgeColorIntegrazione: '#ff6400',
+  oggettoBadgeColorApprovazione: '#009246',
+  oggettoBadgeColorRespingimento: '#dc2626',
+  oggettoBadgeColorNeutro: '#d0d0d0',
 
   emptyMessage: 'Nessun record trovato (view/filtro/permessi).',
   errorNoDs: 'Configura la fonte dati del widget.',
@@ -302,6 +327,6 @@ export const defaultConfig: IMConfig = Immutable({
   listTitleFontSize: 14,
   listTitleFontWeight: 600,
   listTitleColor: 'rgba(0,0,0,0.85)'
-})
+} as unknown as IMConfig
 
 export default defaultConfig
