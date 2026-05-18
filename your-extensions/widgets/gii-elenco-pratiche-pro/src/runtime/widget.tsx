@@ -1369,6 +1369,133 @@ React.useEffect(() => {
     }]
   }, [resolvedView?.layerUrl, resolvedView?.serviceUrl, resolvedView?.viewName])
 
+
+  /**
+   * Integrazioni richieste dal ruolo corrente verso un altro ruolo.
+   *
+   * Regola generale elenco:
+   * - se un ruolo riceve una richiesta di integrazione, lo stato operativo resta
+   *   quello corrente del suo nodo: "Da prendere in carico" oppure "In carico";
+   * - solo il ruolo che ha inoltrato una richiesta ad altri deve leggere
+   *   "In attesa di integrazioni" finché il destinatario non risponde.
+   */
+  const getIntegrationWaitInfoForRole = React.useCallback((d: any, roleInput: string): {
+    waiting: boolean
+    destRole: string
+    destUsername: string
+    destName: string
+  } => {
+    const toNumOrNull = (v: any): number | null => {
+      if (v === null || v === undefined || v === '') return null
+      const n = Number(v)
+      return Number.isFinite(n) ? n : null
+    }
+
+    const normalizeRoleToken = (v: any): string => {
+      const raw = String(v ?? '').trim().toUpperCase()
+      if (!raw) return ''
+      const x = raw.replace(/_/g, '-').replace(/\s+/g, '-')
+      if (x.startsWith('RI-AMM')) return 'RI_AMM'
+      if (x.startsWith('TI-AMM')) return 'TI_AMM'
+      if (x.startsWith('RZ')) return 'RZ'
+      if (x.startsWith('RI')) return 'RI'
+      if (x.startsWith('TI')) return 'TI'
+      if (x.startsWith('DT')) return 'DT'
+      if (x.startsWith('DA')) return 'DA'
+      if (x.startsWith('TR')) return 'TR'
+      return raw.replace(/-/g, '_')
+    }
+
+    const getIntegDestLocal = (role: string): string => {
+      switch (role) {
+        case 'RZ':     return 'TI'
+        case 'RI':     return 'TI'
+        case 'DT':     return 'RI'
+        case 'RI_AMM': return 'RI'
+        case 'TI_AMM': return 'RI_AMM'
+        case 'DA':     return 'RI_AMM'
+        default:       return ''
+      }
+    }
+
+    const role = normalizeRoleToken(roleInput)
+    const destRole = getIntegDestLocal(role)
+    if (!role || !destRole) return { waiting: false, destRole: '', destUsername: '', destName: '' }
+
+    const esitoIntegrazioneVal = num(cfg.esitoIntegrazioneVal, 1)
+    const statoDaPrendereVal = num(cfg.statoDaPrendereVal, 1)
+    const statoPresaVal = num(cfg.statoPresaVal, 2)
+    const presaDaPrendereVal = num(cfg.presaDaPrendereVal, 1)
+    const presaPresaVal = num(cfg.presaPresaVal, 2)
+
+    const giiRimNum = toNumOrNull(pickField(d, 'GII_rim'))
+    const giiDaRole = normalizeRoleToken(pickField(d, 'GII_da'))
+    const giiARole = normalizeRoleToken(pickField(d, 'GII_a'))
+    const routingSaysRoleToDest = giiRimNum === 1 && giiDaRole === role && giiARole === destRole
+
+    const roleEsitoNum = toNumOrNull(pickField(d, `esito_${role}`))
+    if (roleEsitoNum !== esitoIntegrazioneVal && !routingSaysRoleToDest) {
+      return { waiting: false, destRole: '', destUsername: '', destName: '' }
+    }
+
+    const roleEsitoMs = parseToMs(pickField(d, `dt_esito_${role}`))
+    const roleStatoNum = toNumOrNull(pickField(d, `stato_${role}`))
+    const rolePresaNum = toNumOrNull(pickField(d, `presa_in_carico_${role}`))
+    const roleStateMs = Math.max(
+      parseToMs(pickField(d, `dt_stato_${role}`)) ?? -Infinity,
+      parseToMs(pickField(d, `dt_presa_in_carico_${role}`)) ?? -Infinity
+    )
+    const roleHasCurrentOperativeState =
+      roleStatoNum === statoDaPrendereVal ||
+      roleStatoNum === statoPresaVal ||
+      rolePresaNum === presaDaPrendereVal ||
+      rolePresaNum === presaPresaVal
+
+    // Se il ruolo e' stato riattivato dopo il suo esito di integrazione,
+    // significa che ora deve agire lui: non e' piu' in attesa di altri.
+    if (!routingSaysRoleToDest && roleHasCurrentOperativeState && roleEsitoMs !== null && roleStateMs !== -Infinity && roleStateMs > roleEsitoMs) {
+      return { waiting: false, destRole: '', destUsername: '', destName: '' }
+    }
+
+    const destStatoNum = toNumOrNull(pickField(d, `stato_${destRole}`))
+    const destPresaNum = toNumOrNull(pickField(d, `presa_in_carico_${destRole}`))
+    const destEsitoNum = toNumOrNull(pickField(d, `esito_${destRole}`))
+    const destEsitoMs = parseToMs(pickField(d, `dt_esito_${destRole}`))
+    const destOpen =
+      destStatoNum === statoDaPrendereVal ||
+      destStatoNum === statoPresaVal ||
+      destPresaNum === presaDaPrendereVal ||
+      destPresaNum === presaPresaVal
+
+    // Se il destinatario ha risposto dopo la richiesta, il ruolo non aspetta piu'.
+    const destRespondedAfterRole =
+      destEsitoNum !== null &&
+      roleEsitoMs !== null &&
+      destEsitoMs !== null &&
+      destEsitoMs > roleEsitoMs
+
+    if (destRespondedAfterRole) {
+      return { waiting: false, destRole: '', destUsername: '', destName: '' }
+    }
+
+    if (!routingSaysRoleToDest && !destOpen) {
+      return { waiting: false, destRole: '', destUsername: '', destName: '' }
+    }
+
+    const destUsername = destRole === 'TI'
+      ? String(pickField(d, 'ti_assegnato_username') ?? pickField(d, 'ti_assegnato_user') ?? pickField(d, 'ti_assegnato') ?? '').trim()
+      : destRole === 'TI_AMM'
+        ? String(pickField(d, 'ti_amm_assegnato_username') ?? pickField(d, 'ti_amm_assegnato_user') ?? pickField(d, 'ti_amm_assegnato') ?? '').trim()
+        : ''
+    const destName = destRole === 'TI'
+      ? String(pickField(d, 'ti_assegnato_nome') ?? pickField(d, 'ti_assegnato_name') ?? '').trim()
+      : destRole === 'TI_AMM'
+        ? String(pickField(d, 'ti_amm_assegnato_nome') ?? pickField(d, 'ti_amm_assegnato_name') ?? '').trim()
+        : ''
+
+    return { waiting: true, destRole, destUsername, destName }
+  }, [cfg.esitoIntegrazioneVal, cfg.statoDaPrendereVal, cfg.statoPresaVal, cfg.presaDaPrendereVal, cfg.presaPresaVal])
+
   // Domini ufficiali AGOL del layer/vista runtime: fonte primaria per label Area/Settore.
   // I record continuano a determinare quali opzioni mostrare; i domini determinano come chiamarle.
   React.useEffect(() => {
@@ -1417,10 +1544,17 @@ React.useEffect(() => {
     const isAttesaMiaDefault = (n === 0 || n === 1 || n === 3)
     const isAttesaAltriDefault = (n === 2 || n === 4)
 
-    // Caso DT/DA: n===2 ("presa in carico") resta nella mia coda operativa.
-    // Dopo la presa in carico il Direttore deve ancora esprimere l'esito
-    // (approvazione, richiesta integrazione o respingimento), quindi non e' "in attesa di altri".
-    if ((role === 'DT' || role === 'DA') && n === 2) {
+    // Se il ruolo corrente ha chiesto integrazioni a un altro ruolo, la pratica
+    // e' in attesa di altri. Vale per tutti i ruoli, non solo per RI tecnico.
+    const waitingIntegration = getIntegrationWaitInfoForRole(d, role)
+    if (waitingIntegration.waiting) {
+      if (tabId === 'attesa_mia') return false
+      if (tabId === 'attesa_altri') return true
+    }
+
+    // Stato operativo corrente: se il ruolo ha preso in carico, resta nella sua
+    // coda operativa. Per TI/TI_AMM sotto verifichiamo anche l'assegnatario.
+    if (n === 2 && role !== 'TI' && role !== 'TI_AMM') {
       if (tabId === 'attesa_mia') return true
       if (tabId === 'attesa_altri') return false
     }
@@ -1486,7 +1620,7 @@ React.useEffect(() => {
     if (tabId === 'attesa_mia') return isAttesaMiaDefault
     if (tabId === 'attesa_altri') return isAttesaAltriDefault
     return true
-  }, [statoRuoloField, giiUser?.ruoloLabel, giiUser?.area, giiUser?.username])
+  }, [statoRuoloField, giiUser?.ruoloLabel, giiUser?.area, giiUser?.username, getIntegrationWaitInfoForRole])
 
 
 
@@ -2012,6 +2146,19 @@ React.useEffect(() => {
     const presaNum = presaRaw !== null && presaRaw !== undefined && presaRaw !== '' ? Number(presaRaw) : null
     const statoNum = statoRaw !== null && statoRaw !== undefined && statoRaw !== '' ? Number(statoRaw) : null
     const esitoNum = esitoRaw !== null && esitoRaw !== undefined && esitoRaw !== '' ? Number(esitoRaw) : null
+    const esitoMs = parseToMs(d[`dt_esito_${ruolo}`])
+    const statoMs = Math.max(
+      parseToMs(d[`dt_stato_${ruolo}`]) ?? -Infinity,
+      parseToMs(d[`dt_presa_in_carico_${ruolo}`]) ?? -Infinity
+    )
+    const currentOperativeStateIsNewer =
+      (statoNum === statoDaPrendere || statoNum === statoPresa || presaNum === presaDaPrendere || presaNum === presaPresa) &&
+      (esitoMs === null || (statoMs !== -Infinity && statoMs > esitoMs))
+
+    if (currentOperativeStateIsNewer) {
+      if (statoNum === statoDaPrendere || presaNum === presaDaPrendere) return { label: 'Trasmesso', statoForChip: statoDaPrendere }
+      if (statoNum === statoPresa || presaNum === presaPresa) return { label: 'In carico', statoForChip: statoPresa }
+    }
 
     if (esitoNum !== null && Number.isFinite(esitoNum)) {
       if (esitoNum === esitoApprovata) {
@@ -2021,8 +2168,7 @@ React.useEffect(() => {
         if (dest) return { label: 'Trasmesso', statoForChip: statoApprovata }
       }
       if (esitoNum === esitoIntegrazione) {
-        const dest = getIntegDest(ruolo)
-        return { label: 'Integrazioni richieste', statoForChip: statoIntegrazione }
+        return { label: 'In attesa di integrazioni', statoForChip: statoIntegrazione }
       }
       if (esitoNum === esitoRespinta) {
         return { label: 'Respinto', statoForChip: statoRespinta }
@@ -2155,6 +2301,19 @@ React.useEffect(() => {
       const presaNum = presaRaw !== null && presaRaw !== undefined && presaRaw !== '' ? Number(presaRaw) : null
       const statoNum = statoRaw !== null && statoRaw !== undefined && statoRaw !== '' ? Number(statoRaw) : null
       const esitoNum = esitoRaw !== null && esitoRaw !== undefined && esitoRaw !== '' ? Number(esitoRaw) : null
+      const esitoMs = parseToMs(d[`dt_esito_${role}`])
+      const statoMs = Math.max(
+        parseToMs(d[`dt_stato_${role}`]) ?? -Infinity,
+        parseToMs(d[`dt_presa_in_carico_${role}`]) ?? -Infinity
+      )
+      const currentOperativeStateIsNewer =
+        (statoNum === statoDaPrendere || statoNum === statoPresa || presaNum === presaDaPrendere || presaNum === presaPresa) &&
+        (esitoMs === null || (statoMs !== -Infinity && statoMs > esitoMs))
+
+      if (currentOperativeStateIsNewer) {
+        if (statoNum === statoDaPrendere || presaNum === presaDaPrendere) return { ruolo: role, label: 'Trasmesso', statoForChip: statoDaPrendere }
+        if (statoNum === statoPresa || presaNum === presaPresa) return { ruolo: role, label: 'In carico', statoForChip: statoPresa }
+      }
 
       if (esitoNum !== null && Number.isFinite(esitoNum)) {
         if (esitoNum === esitoApprovata) {
@@ -2261,9 +2420,20 @@ React.useEffect(() => {
 
   const getSortValue = (r: DataRecord, field: string): any => {
     const d = r.getData?.() || {}
-    if (field === V_STATO) return computeSintetico(d).label
+    if (field === V_STATO) {
+      const myRole = getEffectiveRole(giiUser?.ruoloLabel || '', giiUser?.area)
+      if (getIntegrationWaitInfoForRole(d, myRole).waiting) return 'In attesa di integrazioni'
+      return computeSintetico(d).label
+    }
     if (field === V_ULTIMO) return computeUltimoAggMs(d)
     if (field === V_PROSSIMA) {
+      const myRole = getEffectiveRole(giiUser?.ruoloLabel || '', giiUser?.area)
+      const waitingIntegration = getIntegrationWaitInfoForRole(d, myRole)
+      if (waitingIntegration.waiting) {
+        const areaCode = getAreaCodeFromRecord(d, giiUser?.areaCod || giiUser?.area)
+        const settoreCode = getSettoreCodeFromRecord(d, giiUser?.settoreCod || giiUser?.settore)
+        return formatPersonaDest(waitingIntegration.destRole, areaCode, settoreCode, waitingIntegration.destUsername, utentiMapRef.current)
+      }
       const log = getLogForRecord(d)
       return log?.ruoloDest ? formatPersonaDest(log.ruoloDest, log.area, log.settore, log.utenteDest, utentiMapRef.current) : ''
     }
@@ -3333,6 +3503,12 @@ React.useEffect(() => {
                           }
                         }
 
+                        // ── Integrazione richiesta dal ruolo corrente verso altri ───────────
+                        const waitingIntegrationForRole = getIntegrationWaitInfoForRole(d, myRole)
+                        if (waitingIntegrationForRole.waiting) {
+                          return { ruolo: myRole, label: 'In attesa di integrazioni', statoForChip: statoIntegrazione }
+                        }
+
                         // ── Altri ruoli: nodo attivo ─────────────────────────────────────────
                         if (sintetico.ruolo === myRole) {
                           // stato=da_prendere → "Da prendere in carico" (vale per tutti i ruoli)
@@ -3422,6 +3598,15 @@ React.useEffect(() => {
                         } else {
                           destinatario = '—'
                         }
+                      }
+
+                      const myRoleForDest = getEffectiveRole(giiUser?.ruoloLabel || '', giiUser?.area)
+                      const waitingIntegrationForDest = getIntegrationWaitInfoForRole(d, myRoleForDest)
+                      if (waitingIntegrationForDest.waiting) {
+                        const areaCode = getAreaCodeFromRecord(d, giiUser?.areaCod || giiUser?.area)
+                        const settoreCode = getSettoreCodeFromRecord(d, giiUser?.settoreCod || giiUser?.settore)
+                        destinatario = formatPersonaDest(waitingIntegrationForDest.destRole, areaCode, settoreCode, waitingIntegrationForDest.destUsername, utentiMapRef.current)
+                        causaleVal = 'INTEGRAZIONE RICHIESTA'
                       }
 
                       const isSel = (localSelectedByDs[recDsId] === rid)

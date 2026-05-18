@@ -908,7 +908,9 @@ function ZebraDropdown (props: {
           width: pos.width,
           top: pos.openUp ? 'auto' : pos.top,
           bottom: pos.openUp ? pos.bottom : 'auto',
-          zIndex: 260000,
+          // Il menu è renderizzato su document.body: deve stare sopra al popup globale
+          // di conferma, che usa z-index molto alti per bloccare l'interfaccia.
+          zIndex: 2147483647,
           border: rowBorder,
           borderRadius: Math.max(0, Number(props.radius) || 0),
           overflow: 'hidden',

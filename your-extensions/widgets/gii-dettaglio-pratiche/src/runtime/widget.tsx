@@ -372,6 +372,20 @@ function pickOidFromData (data: any, idFieldName: string) {
   return data.OBJECTID ?? data.ObjectId ?? data.objectid ?? data.objectId ?? null
 }
 
+function pickAttrCI (obj: any, names: string[]): any {
+  if (!obj || typeof obj !== 'object') return undefined
+  for (const n of names || []) {
+    if (Object.prototype.hasOwnProperty.call(obj, n)) return obj[n]
+  }
+  const lower = new Map<string, string>()
+  Object.keys(obj).forEach(k => lower.set(String(k).toLowerCase(), k))
+  for (const n of names || []) {
+    const k = lower.get(String(n).toLowerCase())
+    if (k) return obj[k]
+  }
+  return undefined
+}
+
 function norm (v: any): string {
   return String(v ?? '').trim().toLowerCase()
 }
@@ -1986,7 +2000,100 @@ function formatSettoreIter (raw: any): string {
   return code || String(raw || '')
 }
 
-function CicliTimeline (props: { globalId: string; hasSel: boolean; sortDir: 'asc' | 'desc' }): any {
+function normalizeOriginePraticaCod (raw: any): 'TR' | 'TI' | '' {
+  const s = String(raw ?? '').trim().toUpperCase()
+  if (!s) return ''
+  if (s === '1' || s === 'TR' || s.includes('TECNICO RILEVATORE')) return 'TR'
+  if (s === '2' || s === 'TI' || s.includes('TECNICO ISTRUTTORE')) return 'TI'
+  return ''
+}
+
+function parseModifiedFieldNames (raw: any): string[] {
+  return String(raw || '')
+    .split(/[;,|\n]+/g)
+    .map(s => s.trim())
+    .filter(Boolean)
+}
+
+function getFieldAliasForIter (fieldName: string, aliasMap?: Record<string, string>): string {
+  const raw = String(fieldName || '').trim()
+  if (!raw) return ''
+  const aliases = aliasMap || {}
+  if (aliases[raw]) return String(aliases[raw] || raw)
+  const rawKey = normKey(raw)
+  for (const name of Object.keys(aliases)) {
+    if (normKey(name) === rawKey) return String(aliases[name] || name)
+  }
+  return raw
+}
+
+function firstNonEmptyAttr (data: any, names: string[]): any {
+  for (const name of names || []) {
+    const v = pickAttrCI(data, [name])
+    if (!isEmptyValue(v)) return v
+  }
+  return null
+}
+
+function buildSyntheticCreationCycle (data: any, loggedCicli: CicloRecord[]): CicloRecord | null {
+  if (!data) return null
+  const hasCreation = (loggedCicli || []).some(c => String(c?.evento_apertura || '').trim().toUpperCase() === 'CREAZIONE')
+  if (hasCreation) return null
+
+  const origin = normalizeOriginePraticaCod(pickAttrCI(data, ['origine_pratica', 'Origine_pratica', 'ORIGINE_PRATICA']))
+  if (!origin) return null
+
+  const hasLogged = (loggedCicli || []).length > 0
+  const isOpenTiCreation = origin === 'TI' && !hasLogged
+  const dt = firstNonEmptyAttr(data, origin === 'TI'
+    ? ['dt_presa_in_carico_TI', 'dt_stato_TI', 'data_firma', 'data_rilevazione', 'CreationDate', 'creationdate', 'created_date', 'start', 'end']
+    : ['data_rilevazione', 'CreationDate', 'creationdate', 'created_date', 'start', 'end', 'data_firma']
+  )
+  const user = firstNonEmptyAttr(data, origin === 'TI'
+    ? ['ti_assegnato_nome', 'ti_assegnato_username', 'utente_loggato', 'created_user', 'Creator', 'creator']
+    : ['tecnico_rilevatore', 'utente_loggato', 'created_user', 'Creator', 'creator']
+  )
+  const areaRaw = firstNonEmptyAttr(data, ['area_cod', 'area', 'cod_area'])
+  const settoreRaw = firstNonEmptyAttr(data, ['settore_cod', 'settore', 'cod_settore'])
+
+  return {
+    numero_ciclo_ruolo: 1,
+    ruolo_competente: origin,
+    utente_operatore: String(user || ''),
+    stato_record: isOpenTiCreation ? 'APERTO' : 'CHIUSO',
+    evento_apertura: 'CREAZIONE',
+    dt_apertura: dt ?? null,
+    evento_chiusura: isOpenTiCreation ? '' : 'ISTRUTTORIA_TRASMESSA',
+    dt_chiusura: isOpenTiCreation ? null : (dt ?? null),
+    ruolo_destinatario: isOpenTiCreation ? '' : 'RZ',
+    utente_destinatario: '',
+    note_chiusura: '',
+    area: formatAreaIter(areaRaw),
+    settore: formatSettoreIter(settoreRaw),
+    fase: origin,
+    num_campi_modificati: 0,
+    campi_modificati: '',
+    riepilogo_ciclo: 'CREAZIONE: nessun campo aggiornato'
+  }
+}
+
+function getCycleSortTime (c: CicloRecord): number {
+  const n = Number(c?.dt_apertura ?? c?.dt_chiusura ?? 0)
+  return Number.isFinite(n) && n > 0 ? n : 0
+}
+
+function sortCicliForDisplay (items: CicloRecord[], sortDir: 'asc' | 'desc'): CicloRecord[] {
+  const withIndex = (items || []).map((c, idx) => ({ c, idx }))
+  withIndex.sort((a, b) => {
+    const ta = getCycleSortTime(a.c)
+    const tb = getCycleSortTime(b.c)
+    if (ta !== tb) return sortDir === 'asc' ? ta - tb : tb - ta
+    return sortDir === 'asc' ? a.idx - b.idx : b.idx - a.idx
+  })
+  return withIndex.map(x => x.c)
+}
+
+function CicliTimeline (props: { globalId: string; hasSel: boolean; sortDir: 'asc' | 'desc'; data?: any; aliasMap?: Record<string, string> }): any {
   const [cicli, setCicli] = React.useState<CicloRecord[]>([])
   const [loading, setLoading] = React.useState(false)
   const [error, setError] = React.useState<string | null>(null)
@@ -2055,10 +2162,15 @@ function CicliTimeline (props: { globalId: string; hasSel: boolean; sortDir: 'as
     return () => { cancelled = true }
   }, [props.hasSel, props.globalId, props.sortDir])
 
+  const displayCicli = React.useMemo(() => {
+    const synthetic = buildSyntheticCreationCycle(props.data, cicli)
+    return sortCicliForDisplay(synthetic ? [...cicli, synthetic] : cicli, props.sortDir)
+  }, [cicli, props.data, props.sortDir])
+
   if (!props.hasSel) return <div style={{ opacity: 0.6, fontSize: 12, padding: 12 }}>Selezionare un rapporto.</div>
   if (loading) return <div style={{ opacity: 0.6, fontSize: 12, padding: 12 }}>Caricamento cronologia…</div>
   if (error) return <div style={{ color: '#b42318', fontSize: 12, padding: 12 }}>{error}</div>
-  if (cicli.length === 0) return <div style={{ opacity: 0.6, fontSize: 12, padding: 12 }}>Nessun evento registrato per questo rapporto.</div>
+  if (displayCicli.length === 0) return <div style={{ opacity: 0.6, fontSize: 12, padding: 12 }}>Nessun evento registrato per questo rapporto.</div>
 
   const rowSt: React.CSSProperties = {
     display: 'grid',
@@ -2085,7 +2197,7 @@ function CicliTimeline (props: { globalId: string; hasSel: boolean; sortDir: 'as
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 12, padding: '0 0 8px 0' }}>
-      {cicli.map((c, i) => {
+      {displayCicli.map((c, i) => {
         const isOpen = c.stato_record === 'APERTO'
         const borderColor = isOpen ? '#2563eb' : '#d1d5db'
         const bgColor = '#fff'
@@ -2093,9 +2205,11 @@ function CicliTimeline (props: { globalId: string; hasSel: boolean; sortDir: 'as
         const statusLabel = isOpen ? 'In corso' : 'Chiuso'
         const statusColor = isOpen ? '#2563eb' : '#6b7280'
         const ruoloLabel = c.ruolo_competente + (c.utente_operatore ? ` — ${c.utente_operatore}` : '')
-        const cycleLabelNumber = props.sortDir === 'asc' ? (i + 1) : (cicli.length - i)
+        const cycleLabelNumber = props.sortDir === 'asc' ? (i + 1) : (displayCicli.length - i)
 
-        const campiList = c.campi_modificati ? c.campi_modificati.split(',').map(s => s.trim()).filter(Boolean) : []
+        const campiList = parseModifiedFieldNames(c.campi_modificati)
+          .map(campo => getFieldAliasForIter(campo, props.aliasMap))
+          .filter(Boolean)
 
         return (
           <div key={i} style={{ border: `1px solid ${borderColor}`, borderRadius: 10, background: bgColor, overflow: 'hidden' }}>
@@ -3339,7 +3453,7 @@ if (!hasSel) {
   
   if (activeTab?.isIterTab) {
     const gid = data?.GlobalID ?? data?.globalid ?? data?.globalId ?? data?.GLOBALID ?? ''
-    content = <CicliTimeline globalId={String(gid)} hasSel={hasSel} sortDir={iterSortDir || 'desc'} />
+    content = <CicliTimeline globalId={String(gid)} hasSel={hasSel} sortDir={iterSortDir || 'desc'} data={data} aliasMap={aliasMap} />
   } else if (activeTab) {
     // Tab normale con campi configurabili
     const rows = aliasesReady ? makeRows(activeTab.fields, activeTab.id.toUpperCase(), Boolean((activeTab as any).hideEmpty)) : []
@@ -3620,6 +3734,8 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
   // Nessun DataSourceComponent / multi-view dichiarata qui.
   const watchFields = [
     'origine_pratica',
+    'CreationDate', 'creationdate', 'created_date', 'created_user', 'Creator', 'creator',
+    'start', 'end', 'data_firma',
     'ti_assegnato_username', 'ti_assegnato_nome', 'dt_assegnazione_ti', 'ti_assegnato_da',
 
     'presa_in_carico_TR', 'dt_presa_in_carico_TR',
