@@ -3149,7 +3149,7 @@ const isPgOnlyField = React.useCallback((fieldName: string) => {
         <div style={{ fontSize: 12, fontWeight: 700, color: '#374151', whiteSpace: 'nowrap' }}>{parsed.artLabel}</div>
         <div style={{ fontSize: 13, color: '#111827', lineHeight: 1.35 }}>{parsed.description}</div>
         {hasGrado
-          ? <div style={{ fontSize: 12, fontWeight: 700, color: '#374151', whiteSpace: 'nowrap', textAlign: 'right' }}>Grado: {grado}</div>
+          ? <div style={{ fontSize: 12, fontWeight: 700, color: '#374151', whiteSpace: 'nowrap', textAlign: 'right' }}>Gravità: {grado}</div>
           : null}
       </div>
     )
@@ -3236,7 +3236,7 @@ const isPgOnlyField = React.useCallback((fieldName: string) => {
             const isVar = String(art17TipoRaw || '') === 'Art17.1'
             return (
               <div style={{ display: 'grid', gap: 8 }}>
-                {renderViolationTextLine('Tipologia', tipoViolazione)}
+                {renderViolationTextLine('Tipo comunicazione', tipoViolazione)}
                 {isVar
                   ? renderViolationSurfacesLine(
                     'Superficie dichiarata',
@@ -3824,7 +3824,12 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
 
     // Campi codificati testuali introdotti nella migrazione; restano nascosti
     // nel dettaglio, ma vengono letti per mantenere cache/selezione coerenti.
-    'area_cod', 'settore_cod'
+    'area_cod', 'settore_cod',
+
+    // Campi tecnici usati dal rendering dedicato della scheda Violazione.
+    // Non vengono mostrati come righe grezze, ma devono essere sempre disponibili
+    // anche quando il record selezionato contiene solo un subset di attributi.
+    'gradi_violazioni', 'occorrenza'
   ]
 
 const queryFields = React.useMemo(() => {

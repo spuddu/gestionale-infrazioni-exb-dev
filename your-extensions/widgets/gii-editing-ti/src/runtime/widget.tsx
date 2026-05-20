@@ -3411,12 +3411,12 @@ const _defaultFormStyle = {
   fieldBorderColor: '#bfcede', fieldBorderWidth: 1, fieldBorderRadius: 7, fieldBg: '#f8fbff',
   fieldDisabledBg: '#e7eef7', fieldDisabledColor: '#64748b',
   sectionGap: 10,
-  cardBg: '#f8fbff', cardBorderColor: '#c6d7ea', cardBorderWidth: 1, cardBorderRadius: 12, cardShadow: '0 8px 22px rgba(15, 23, 42, 0.08)',
+  cardBg: '#f8fbff', cardBorderColor: '#c6d7ea', cardBorderWidth: 1, cardBorderRadius: 8, cardShadow: '0 8px 22px rgba(15, 23, 42, 0.08)',
   cardHeaderBg: 'linear-gradient(90deg, #0d3b66, #155e9d)', cardHeaderColor: '#ffffff', cardHeaderFontSize: 11,
   cardHeaderFontWeight: 800, cardHeaderPaddingX: 10, cardHeaderPaddingY: 7, cardBodyPadding: 10,
   norma3FontSize: 12, norma3GradeColumnWidth: 142, norma3RowGap: 0,
-  violazioneLeftPercent: 58, violazioneMinLeftPx: 600, violazioneMinRightPx: 320, violazioneSplitterWidth: 14, violazioneSplitterColor: '#94a3b8',
-  violazioneDescrizioneRows: 4, violazioneCircostanzeRows: 3
+  violazioneLeftPercent: 58, violazioneMinLeftPx: 520, violazioneMinRightPx: 360, violazioneSplitterWidth: 14, violazioneSplitterColor: '#94a3b8',
+  violazioneDescrizioneRows: 5, violazioneCircostanzeRows: 4
 }
 const FormStyleCtx = React.createContext(_defaultFormStyle)
 
@@ -3437,7 +3437,6 @@ function fieldBaseStyle(fs: any, disabled?: boolean): React.CSSProperties {
   const h = Math.max(24, Number(fs.fieldHeight) || 32)
   return {
     width: '100%',
-    display: 'block',
     height: h,
     minHeight: h,
     padding: `0 ${Number(fs.fieldPaddingX) || 0}px`,
@@ -3479,13 +3478,16 @@ function NpSel(p: { value: string; onChange: (v: string) => void; options: reado
   )
 }
 
-function NpText(p: { value: string; onChange: (v: string) => void; placeholder?: string; multiline?: boolean; disabled?: boolean; maxLength?: number }) {
+function NpText(p: { value: string; onChange: (v: string) => void; placeholder?: string; multiline?: boolean; disabled?: boolean; maxLength?: number; minRows?: number }) {
   const fs = React.useContext(FormStyleCtx)
   const st = fieldBaseStyle(fs, p.disabled)
-  if (p.multiline) return (
-    <textarea value={p.value} onChange={e => p.onChange(e.target.value)} placeholder={p.placeholder}
-      rows={3} style={{ ...st, height: 'auto', minHeight: Math.max(82, (Number(fs.fieldHeight) || 32) * 2.45), lineHeight: 1.32, paddingTop: 6, paddingBottom: 6, resize: 'vertical' }} disabled={p.disabled} maxLength={p.maxLength}/>
-  )
+  if (p.multiline) {
+    const rows = p.minRows != null ? Math.max(3, Number(p.minRows) || 3) : 3
+    return (
+      <textarea value={p.value} onChange={e => p.onChange(e.target.value)} placeholder={p.placeholder}
+        rows={rows} style={{ ...st, height: 'auto', minHeight: (Number(fs.fieldHeight) || 32) * rows, lineHeight: 1.35, paddingTop: 6, paddingBottom: 6, resize: 'vertical' }} disabled={p.disabled} maxLength={p.maxLength}/>
+    )
+  }
   return <input type='text' value={p.value} onChange={e => p.onChange(e.target.value)} placeholder={p.placeholder} style={st} disabled={p.disabled} maxLength={p.maxLength}/>
 }
 
@@ -3956,6 +3958,7 @@ async function recomputeAndPersistNotaSpeseSummary (opts: {
 }
 
 function NoteSpeseManager (props: NsManagerProps) {
+  const formStyle = React.useContext(FormStyleCtx)
   const rows = React.useMemo(() => (props.rows || []).map(nsCloneRow), [props.rows])
   const [msg, setMsg] = React.useState<{ ok: boolean; text: string } | null>(null)
   const [editIdx, setEditIdx] = React.useState<number | null>(null)
@@ -3967,6 +3970,7 @@ function NoteSpeseManager (props: NsManagerProps) {
 
   const money = (n: any) => nsSafeNum(n, 0).toLocaleString('it-IT', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
   const categoryTotal = React.useMemo(() => nsRound(rows.reduce((s, r) => s + nsSafeNum(r.importo_riga, 0), 0), 2), [rows])
+  const cardRadius = Math.max(0, Number(formStyle.cardBorderRadius) || 0)
 
   const startEdit = (idx: number) => {
     if (props.readonly) return
@@ -4010,21 +4014,21 @@ function NoteSpeseManager (props: NsManagerProps) {
     setMsg({ ok: true, text: 'Riga rimossa dalla bozza.' })
   }
 
-  const thS: React.CSSProperties = { background: '#1F4E79', color: '#fff', padding: '7px 8px', textAlign: 'left', position: 'sticky', top: 0, zIndex: 1, fontSize: 12, whiteSpace: 'nowrap' }
+  const thS: React.CSSProperties = { background: '#eef5fc', color: formStyle.hdrColor, padding: '7px 8px', textAlign: 'left', position: 'sticky', top: 0, zIndex: 1, fontSize: 12, whiteSpace: 'nowrap', borderBottom: '1px solid #c5d9f1' }
   const tdS = (idx: number): React.CSSProperties => ({ padding: '6px 8px', borderBottom: '1px solid #e0eaf4', background: idx % 2 === 0 ? '#f5f9ff' : '#fff', fontSize: 12 })
 
   return (
-    <div style={{ border: '1px solid #c5d9f1', borderRadius: 8, overflow: 'hidden', background: '#f8fbff' }}>
-      <div style={{ background: '#1F4E79', color: '#fff', padding: '8px 10px', fontSize: 13, fontWeight: 700, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+    <div style={{ border: '1px solid #b9d1ea', borderRadius: cardRadius, overflow: 'hidden', background: '#fff' }}>
+      <div style={{ background: formStyle.cardHeaderBg, color: formStyle.cardHeaderColor, padding: '8px 10px', fontSize: 13, fontWeight: 700, display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderTopLeftRadius: cardRadius, borderTopRightRadius: cardRadius }}>
         <span>{props.title}</span>
         <span style={{ fontSize: 12, opacity: 0.9 }}>{money(categoryTotal)} €</span>
       </div>
-      <div style={{ padding: 10, display: 'grid', gap: 8 }}>
+      <div style={{ padding: 0, display: 'grid', gap: 0 }}>
         {msg && (
-          <div style={{ padding: '7px 10px', borderRadius: 4, fontSize: 12, fontWeight: 700, border: `1px solid ${msg.ok ? '#b8d4b0' : '#f5b8b8'}`, background: msg.ok ? '#e2efda' : '#fce4e4', color: msg.ok ? '#375623' : '#c00' }}>{msg.text}</div>
+          <div style={{ margin: '8px 10px', padding: '7px 10px', borderRadius: 4, fontSize: 12, fontWeight: 700, border: `1px solid ${msg.ok ? '#b8d4b0' : '#f5b8b8'}`, background: msg.ok ? '#e2efda' : '#fce4e4', color: msg.ok ? '#375623' : '#c00' }}>{msg.text}</div>
         )}
         {!props.readonly && editIdx != null && editIdx >= 0 && editIdx < rows.length && (
-          <div style={{ padding: 8, border: '1px solid #aac4e0', borderRadius: 6, background: '#f5f9ff', display: 'grid', gap: 6 }}>
+          <div style={{ margin: '8px 10px', padding: 8, border: '1px solid #aac4e0', borderRadius: 6, background: '#f5f9ff', display: 'grid', gap: 6 }}>
             <div style={{ fontSize: 12, color: '#1F4E79', fontWeight: 700 }}>Modifica quantità — {rows[editIdx].codice_voce_snapshot}</div>
             <div style={{ fontSize: 12, color: '#444' }}>{rows[editIdx].descrizione_snapshot}</div>
             <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
@@ -4039,7 +4043,7 @@ function NoteSpeseManager (props: NsManagerProps) {
             </div>
           </div>
         )}
-        <div style={{ border: '1px solid #c5d9f1', borderRadius: 6, minHeight: 60, overflow: 'auto' }}>
+        <div style={{ border: 'none', borderRadius: 0, minHeight: 60, overflow: 'auto' }}>
           <table style={{ width: '100%', borderCollapse: 'collapse', tableLayout: 'fixed' }}>
             <colgroup>
               <col style={{ width: 52 }} />
@@ -4231,13 +4235,32 @@ function NuovaPraticaForm (p: {
   const violazioneColumnsDirty = Math.abs(violazioneColumnPercents[0] - defaultViolazioneColumnPercents[0]) > 0.05
     || Math.abs(violazioneColumnPercents[1] - defaultViolazioneColumnPercents[1]) > 0.05
 
+  const defaultTrasgressoreColumnPercents = React.useMemo<[number, number]>(() => {
+    const raw = Number((cfg as any).trasgressoreLayoutLeftPercent ?? (cfg as any).violazioneLayoutLeftPercent)
+    const left = Math.max(35, Math.min(85, Number.isFinite(raw) ? raw : 65))
+    return [left, 100 - left]
+  }, [cfg])
+  const [trasgressoreColumnPercents, setTrasgressoreColumnPercents] = React.useState<[number, number]>(defaultTrasgressoreColumnPercents)
+  const [draggingTrasgressoreSplitter, setDraggingTrasgressoreSplitter] = React.useState(false)
+  const trasgressoreGridRef = React.useRef<HTMLDivElement | null>(null)
+  const trasgressoreColumnsDirty = Math.abs(trasgressoreColumnPercents[0] - defaultTrasgressoreColumnPercents[0]) > 0.05
+    || Math.abs(trasgressoreColumnPercents[1] - defaultTrasgressoreColumnPercents[1]) > 0.05
+
   React.useEffect(() => {
     setViolazioneColumnPercents(defaultViolazioneColumnPercents)
   }, [defaultViolazioneColumnPercents])
 
+  React.useEffect(() => {
+    setTrasgressoreColumnPercents(defaultTrasgressoreColumnPercents)
+  }, [defaultTrasgressoreColumnPercents])
+
   const resetViolazioneColumns = React.useCallback(() => {
     setViolazioneColumnPercents(defaultViolazioneColumnPercents)
   }, [defaultViolazioneColumnPercents])
+
+  const resetTrasgressoreColumns = React.useCallback(() => {
+    setTrasgressoreColumnPercents(defaultTrasgressoreColumnPercents)
+  }, [defaultTrasgressoreColumnPercents])
 
   const startViolazioneResize = React.useCallback((evt: React.MouseEvent<HTMLDivElement>) => {
     evt.preventDefault()
@@ -4248,14 +4271,12 @@ function NuovaPraticaForm (p: {
     const startCols = [...violazioneColumnPercents] as [number, number]
     const splitterW = Math.max(6, Math.min(40, Number((cfg as any).violazioneSplitterWidth) || 14))
     const hostWidth = Math.max(host.getBoundingClientRect().width - splitterW, 300)
-    const minLeftPx = Math.max(260, Math.min(900, Number((cfg as any).violazioneLayoutMinLeftPx) || 600))
-    const minRightPx = Math.max(220, Math.min(800, Number((cfg as any).violazioneLayoutMinRightPx) || 320))
     const clamp = (v: number, mn: number, mx: number) => Math.min(mx, Math.max(mn, v))
     const round2 = (v: number) => Math.round(v * 100) / 100
     const onMove = (moveEvt: MouseEvent) => {
       const startLeftPx = (startCols[0] / 100) * hostWidth
-      const nextLeftPx = clamp(startLeftPx + (moveEvt.clientX - startX), minLeftPx, Math.max(minLeftPx, hostWidth - minRightPx))
-      const nextLeft = clamp((nextLeftPx / hostWidth) * 100, 5, 95)
+      const nextLeftPx = startLeftPx + (moveEvt.clientX - startX)
+      const nextLeft = clamp((nextLeftPx / hostWidth) * 100, 0, 100)
       const nextRight = 100 - nextLeft
       setViolazioneColumnPercents([round2(nextLeft), round2(nextRight)])
     }
@@ -4272,6 +4293,38 @@ function NuovaPraticaForm (p: {
     window.addEventListener('mousemove', onMove)
     window.addEventListener('mouseup', onUp)
   }, [violazioneColumnPercents, cfg])
+
+  const startTrasgressoreResize = React.useCallback((evt: React.MouseEvent<HTMLDivElement>) => {
+    evt.preventDefault()
+    evt.stopPropagation()
+    const host = trasgressoreGridRef.current
+    if (!host) return
+    const startX = evt.clientX
+    const startCols = [...trasgressoreColumnPercents] as [number, number]
+    const splitterW = Math.max(6, Math.min(40, Number((cfg as any).violazioneSplitterWidth) || 14))
+    const hostWidth = Math.max(host.getBoundingClientRect().width - splitterW, 300)
+    const clamp = (v: number, mn: number, mx: number) => Math.min(mx, Math.max(mn, v))
+    const round2 = (v: number) => Math.round(v * 100) / 100
+    const onMove = (moveEvt: MouseEvent) => {
+      const startLeftPx = (startCols[0] / 100) * hostWidth
+      const nextLeftPx = startLeftPx + (moveEvt.clientX - startX)
+      const nextLeft = clamp((nextLeftPx / hostWidth) * 100, 0, 100)
+      const nextRight = 100 - nextLeft
+      setTrasgressoreColumnPercents([round2(nextLeft), round2(nextRight)])
+    }
+    const onUp = () => {
+      setDraggingTrasgressoreSplitter(false)
+      document.body.style.removeProperty('cursor')
+      document.body.style.removeProperty('user-select')
+      window.removeEventListener('mousemove', onMove)
+      window.removeEventListener('mouseup', onUp)
+    }
+    setDraggingTrasgressoreSplitter(true)
+    document.body.style.cursor = 'col-resize'
+    document.body.style.userSelect = 'none'
+    window.addEventListener('mousemove', onMove)
+    window.addEventListener('mouseup', onUp)
+  }, [trasgressoreColumnPercents, cfg])
 
   React.useEffect(() => {
     return () => {
@@ -5890,25 +5943,25 @@ React.useEffect(() => {
       case 'sup_dichiarata_art15': {
         if (!hasTipoAbuso15) return null
         const locked = tipoAbuso === 'totale'
-        return { label: 'Sup. dichiarata (ha)', el: <NpText value={locked ? '0' : g('sup_dichiarata_art15')} onChange={v => set('sup_dichiarata_art15', v)} disabled={saving || locked}/> }
+        return { label: 'Superficie dichiarata (ha)', el: <NpText value={locked ? '0' : g('sup_dichiarata_art15')} onChange={v => set('sup_dichiarata_art15', v)} disabled={saving || locked}/> }
       }
       case 'sup_irrigata_art15': {
         if (!hasTipoAbuso15) return null
         const dichVal = tipoAbuso === 'totale' ? 0 : Number(g('sup_dichiarata_art15')) || 0
         const irrVal = Number(g('sup_irrigata_art15')) || 0
         const warn = hasTipoAbuso15 && irrVal > 0 && irrVal < dichVal
-        return { label: 'Sup. irrigata (ha)', hint: warn ? 'La superficie irrigata non può essere inferiore a quella dichiarata' : undefined, el: <NpText value={g('sup_irrigata_art15')} onChange={v => set('sup_irrigata_art15', v)} disabled={saving}/> }
+        return { label: 'Superficie irrigata (ha)', hint: warn ? 'La superficie irrigata non può essere inferiore a quella dichiarata' : undefined, el: <NpText value={g('sup_irrigata_art15')} onChange={v => set('sup_irrigata_art15', v)} disabled={saving}/> }
       }
       // Violazione — Artt. 16 e 17
       case 'norma16_17': return { label: 'Tipo di inosservanza', el: <NpSel value={norma1516} onChange={v => { set('norma16_17', v); set('art17_tipo', '') }} options={CHOICES.art16_17} disabled={saving}/> }
-      case 'art17_tipo': return norma1516 === 'Art17' ? { label: 'Tipo comunicazione', el: <NpSel value={art17tipo} onChange={v => set('art17_tipo', v)} options={CHOICES.art17_tipo} disabled={saving}/> } : null
-      case 'sup_dichiarata_art16': return norma1516 === 'Art16' ? { label: 'Sup. dichiarata (ha)', el: <NpText value={g('sup_dichiarata_art16')} onChange={v => set('sup_dichiarata_art16', v)} disabled={saving}/> } : null
-      case 'sup_irrigata_art16': return norma1516 === 'Art16' ? { label: 'Sup. irrigata (ha)', el: <NpText value={'0'} onChange={() => {}} disabled/> } : null
-      case 'sup_dichiarata_art17_1': return (norma1516 === 'Art17' && art17tipo === 'Art17.1') ? { label: 'Sup. dichiarata (ha)', el: <NpText value={g('sup_dichiarata_art17_1')} onChange={v => set('sup_dichiarata_art17_1', v)} disabled={saving}/> } : null
-      case 'sup_irrigata_art17_1': return (norma1516 === 'Art17' && art17tipo === 'Art17.1') ? { label: 'Sup. variata (ha)', el: <NpText value={g('sup_irrigata_art17_1')} onChange={v => set('sup_irrigata_art17_1', v)} disabled={saving}/> } : null
-      case 'sup_dichiarata_art17_2': return (norma1516 === 'Art17' && art17tipo === 'Art17.2') ? { label: 'Sup. dichiarata (ha)', el: <NpText value={g('sup_dichiarata_art17_2')} onChange={v => set('sup_dichiarata_art17_2', v)} disabled={saving}/> } : null
-      case 'sup_irrigata_art17_2': return (norma1516 === 'Art17' && art17tipo === 'Art17.2') ? { label: 'Sup. irrigata (ha)', el: <NpText value={'0'} onChange={() => {}} disabled/> } : null
-      // Violazione — Grado
+      case 'art17_tipo': return norma1516 === 'Art17' ? { label: 'Seleziona violazione Art. 17', el: <NpSel value={art17tipo} onChange={v => set('art17_tipo', v)} options={CHOICES.art17_tipo} disabled={saving}/> } : null
+      case 'sup_dichiarata_art16': return norma1516 === 'Art16' ? { label: 'Superficie dichiarata (ha)', el: <NpText value={g('sup_dichiarata_art16')} onChange={v => set('sup_dichiarata_art16', v)} disabled={saving}/> } : null
+      case 'sup_irrigata_art16': return norma1516 === 'Art16' ? { label: 'Superficie irrigata (ha)', el: <NpText value={'0'} onChange={() => {}} disabled/> } : null
+      case 'sup_dichiarata_art17_1': return (norma1516 === 'Art17' && art17tipo === 'Art17.1') ? { label: 'Superficie dichiarata (ha)', el: <NpText value={g('sup_dichiarata_art17_1')} onChange={v => set('sup_dichiarata_art17_1', v)} disabled={saving}/> } : null
+      case 'sup_irrigata_art17_1': return (norma1516 === 'Art17' && art17tipo === 'Art17.1') ? { label: 'Superficie variata (ha)', el: <NpText value={g('sup_irrigata_art17_1')} onChange={v => set('sup_irrigata_art17_1', v)} disabled={saving}/> } : null
+      case 'sup_dichiarata_art17_2': return (norma1516 === 'Art17' && art17tipo === 'Art17.2') ? { label: 'Superficie dichiarata (ha)', el: <NpText value={g('sup_dichiarata_art17_2')} onChange={v => set('sup_dichiarata_art17_2', v)} disabled={saving}/> } : null
+      case 'sup_irrigata_art17_2': return (norma1516 === 'Art17' && art17tipo === 'Art17.2') ? { label: 'Superficie irrigata (ha)', el: <NpText value={'0'} onChange={() => {}} disabled/> } : null
+      // Violazione — Gravità
       case 'grado': {
         const en = isCurrentRiAgrTec() && riGradoTriggerViolations
         const el = !riGradoTriggerViolations
@@ -5923,7 +5976,7 @@ React.useEffect(() => {
               ))}
             </div>
           )
-        return { label: 'Gradi di gravità', el }
+        return { label: 'Gravità', el }
       }
       // Violazione — Descrizione
       case 'descrizione_fatti': return { label: 'Descrizione dettagliata della violazione', el: <NpText value={g('descrizione_fatti')} onChange={v => set('descrizione_fatti', v)} multiline disabled={saving}/> }
@@ -5958,6 +6011,8 @@ React.useEffect(() => {
   const editCardHeaderStyle: React.CSSProperties = {
     background: formStyle.cardHeaderBg,
     color: formStyle.cardHeaderColor,
+    borderTopLeftRadius: formStyle.cardBorderRadius,
+    borderTopRightRadius: formStyle.cardBorderRadius,
     padding: `${formStyle.cardHeaderPaddingY}px ${formStyle.cardHeaderPaddingX}px`,
     fontSize: formStyle.cardHeaderFontSize,
     fontWeight: formStyle.cardHeaderFontWeight as any,
@@ -5972,7 +6027,7 @@ React.useEffect(() => {
   const editPanelStyle: React.CSSProperties = {
     background: '#f8fafc',
     border: '1px solid #e5e7eb',
-    borderRadius: 10,
+    borderRadius: formStyle.cardBorderRadius,
     padding: 10,
     minWidth: 0
   }
@@ -6004,7 +6059,7 @@ React.useEffect(() => {
         ) : null
       case '_localizzazione':
         return (
-          <div style={{ padding: 10, borderRadius: 10, border: `1px solid ${p.mapClickEnabled ? '#2563eb' : 'rgba(0,0,0,0.10)'}`, background: p.mapClickEnabled ? 'rgba(37,99,235,0.04)' : 'rgba(0,0,0,0.02)', marginBottom: 12, transition: 'all 0.2s' }}>
+          <div style={{ padding: 10, borderRadius: 8, border: `1px solid ${p.mapClickEnabled ? '#2563eb' : 'rgba(0,0,0,0.10)'}`, background: p.mapClickEnabled ? 'rgba(37,99,235,0.04)' : 'rgba(0,0,0,0.02)', marginBottom: 12, transition: 'all 0.2s' }}>
             <div style={{ fontWeight: 800, fontSize: 12, color: '#374151', marginBottom: 6 }}>Localizzazione (req_point = {reqPoint})</div>
             <div style={{ fontSize: 12, color: geomStatus.kind === 'ok' ? '#1a7f37' : (geomStatus.kind === 'err' ? '#b42318' : '#6b7280') }}>{geomStatus.text}</div>
             {reqPoint === 1 && (() => {
@@ -6046,6 +6101,181 @@ React.useEffect(() => {
             )}
           </div>
         )
+      case '_trasgressore_due_colonne': {
+        const defaultGap = Number(cfg.fieldGap) || 12
+        const noteFieldName = 'note_anagrafica'
+        const layout: any[] = ((cfg.fieldLayouts || {}) as any).trasgressore || DEFAULT_FIELD_LAYOUTS.trasgressore || []
+
+        const renderLayoutRowContent = (row: any, key: React.Key): React.ReactNode => {
+          if (row.type === 'special') {
+            const sp = renderSpecial(row.id)
+            return sp != null ? <React.Fragment key={key}>{sp}</React.Fragment> : null
+          }
+          const cells: any[] = (row.cells || []).map((cell: any) => String(cell?.field || '') === noteFieldName ? {} : cell)
+          const results = cells.map((c: any) => c?.field ? renderFieldControl(c.field) : null)
+          const hasField = cells.some((c: any) => c?.field)
+          const anyVisible = results.some((r: any) => r !== null)
+          if (hasField && !anyVisible) return null
+          return (
+            <div key={key} style={{ display: 'grid', gridTemplateColumns: row.columns || '1fr', gap: row.gap ?? defaultGap }}>
+              {cells.map((cell: any, ci: number) => {
+                if (!cell?.field) return <div key={ci}/>
+                const fld = results[ci]
+                if (!fld) return <div key={ci}/>
+                return <NpField key={ci} label={cell.label || fld.label} hint={fld.hint}>{renderRiAgrTecProtectedControl(String(cell.field), fld.el)}</NpField>
+              })}
+            </div>
+          )
+        }
+
+        const sections: Array<{ title: string; rows: any[] }> = []
+        let current: { title: string; rows: any[] } = { title: 'Trasgressore', rows: [] }
+        const pushCurrent = () => {
+          if (current.rows.length) sections.push(current)
+          current = { title: '', rows: [] }
+        }
+
+        layout.forEach((row: any) => {
+          if (row.type === 'header') {
+            const title = String(row.label || '').trim()
+            if (title.toLowerCase().startsWith('note')) {
+              pushCurrent()
+              current = { title: '', rows: [] }
+              return
+            }
+            pushCurrent()
+            current = { title: title || 'Trasgressore', rows: [] }
+            return
+          }
+          if (row.type === 'special' && row.id === '_header_rappresentante_legale') {
+            if (tipoSogg === 'PG') {
+              pushCurrent()
+              current = { title: 'Rappresentante legale', rows: [] }
+            }
+            return
+          }
+          if (row.type === 'fields' && (row.cells || []).some((cell: any) => String(cell?.field || '') === noteFieldName)) {
+            const remainingCells = (row.cells || []).filter((cell: any) => String(cell?.field || '') !== noteFieldName)
+            if (!remainingCells.some((cell: any) => cell?.field)) return
+            if (!current.title) current.title = 'Trasgressore'
+            current.rows.push({ ...row, cells: remainingCells })
+            return
+          }
+          if (!current.title) current.title = 'Trasgressore'
+          current.rows.push(row)
+        })
+        pushCurrent()
+
+        const leftColumn = (
+          <div style={{ display: 'grid', gap: formStyle.sectionGap, minWidth: 0 }}>
+            {sections.map((section, si) => {
+              const nodes = section.rows.map((row, ri) => renderLayoutRowContent(row, `${si}-${ri}`)).filter(Boolean)
+              if (!nodes.length) return null
+              return renderEditCard(section.title || 'Trasgressore', <div style={{ display: 'grid', gap: defaultGap }}>{nodes}</div>)
+            })}
+          </div>
+        )
+
+        const noteFld = renderFieldControl(noteFieldName)
+        const noteBody = noteFld ? (
+          <NpField label={noteFld.label} hint={noteFld.hint}>
+            {renderRiAgrTecProtectedControl(noteFieldName,
+              <NpText
+                value={g(noteFieldName)}
+                onChange={v => set(noteFieldName, v)}
+                multiline
+                minRows={10}
+                disabled={saving}
+              />
+            )}
+          </NpField>
+        ) : (
+          <div style={{ color: '#64748b', fontSize: 12 }}>Campo note non disponibile.</div>
+        )
+
+        const rightColumn = (
+          <section style={{ ...editCardStyle, height: '100%', display: 'flex', flexDirection: 'column', minWidth: 0 }}>
+            <div style={editCardHeaderStyle}><span>Note</span></div>
+            <div style={{ ...editCardBodyStyle, flex: '1 1 auto', minHeight: 0 }}>{noteBody}</div>
+          </section>
+        )
+
+        const splitterStyle: React.CSSProperties = {
+          position: 'relative',
+          minWidth: formStyle.violazioneSplitterWidth,
+          width: formStyle.violazioneSplitterWidth,
+          cursor: 'col-resize',
+          userSelect: 'none',
+          touchAction: 'none'
+        }
+        const splitterLineStyle: React.CSSProperties = {
+          position: 'absolute',
+          top: 0,
+          bottom: 0,
+          left: '50%',
+          transform: 'translateX(-50%)',
+          width: 1,
+          borderRadius: 999,
+          background: draggingTrasgressoreSplitter ? '#c5d9f1' : formStyle.violazioneSplitterColor
+        }
+        const resetBtnStyle: React.CSSProperties = {
+          position: 'absolute',
+          top: 6,
+          left: '50%',
+          transform: 'translateX(-50%)',
+          width: 28,
+          height: 28,
+          borderRadius: 999,
+          border: `1px solid ${trasgressoreColumnsDirty ? '#1F4E79' : '#aac4e0'}`,
+          background: trasgressoreColumnsDirty ? '#1F4E79' : '#fff',
+          color: trasgressoreColumnsDirty ? '#fff' : '#8aa4bf',
+          cursor: trasgressoreColumnsDirty ? 'pointer' : 'default',
+          display: 'inline-flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          fontSize: 15,
+          lineHeight: 1,
+          padding: 0,
+          opacity: trasgressoreColumnsDirty ? 1 : 0.75,
+          zIndex: 2
+        }
+        return (
+          <div
+            ref={trasgressoreGridRef}
+            style={{
+              display: 'grid',
+              gridTemplateColumns: `minmax(0, ${trasgressoreColumnPercents[0].toFixed(2)}%) ${formStyle.violazioneSplitterWidth}px minmax(0, 1fr)`,
+              gap: 0,
+              alignItems: 'stretch',
+              columnGap: 0
+            }}
+          >
+            <div style={{ minWidth: 0, paddingRight: 6 }}>{leftColumn}</div>
+            <div
+              style={splitterStyle}
+              onMouseDown={startTrasgressoreResize}
+              title='Ridimensiona colonne della scheda Trasgressore'
+            >
+              <div style={splitterLineStyle} />
+              <button
+                type='button'
+                style={resetBtnStyle}
+                onMouseDown={e => { e.stopPropagation() }}
+                onClick={e => {
+                  e.preventDefault()
+                  e.stopPropagation()
+                  if (trasgressoreColumnsDirty) resetTrasgressoreColumns()
+                }}
+                disabled={!trasgressoreColumnsDirty}
+                title='Ripristina larghezza colonne'
+                aria-label='Ripristina larghezza colonne'
+              >↔</button>
+            </div>
+            <div style={{ minWidth: 0, paddingLeft: 6 }}>{rightColumn}</div>
+          </div>
+        )
+      }
+
       case '_violazione_due_colonne': {
         const fieldNode = (fieldName: string, label?: string) => {
           const fld = renderFieldControl(fieldName)
@@ -6130,7 +6360,7 @@ React.useEffect(() => {
                 paddingTop: 6,
                 paddingBottom: 6,
                 resize: 'vertical',
-                minHeight: rows * Math.max(20, Math.round((Number(formStyle.fieldHeight) || 32) * 0.84)),
+                minHeight: rows * Math.max(20, Number(formStyle.fieldHeight) || 32),
                 lineHeight: 1.3
               }}
               disabled={!enabled}
@@ -6141,10 +6371,10 @@ React.useEffect(() => {
         const emptyGradeCell = <span style={{ color: '#94a3b8', fontSize: 12 }}>—</span>
         const renderNorma3Rows = () => {
           return (
-            <div style={{ border: '1px solid #e5e7eb', borderRadius: 10, overflow: 'hidden', background: '#f8fbff', display: 'grid', gap: formStyle.norma3RowGap }}>
+            <div style={{ border: '1px solid #e5e7eb', borderRadius: 8, overflow: 'hidden', background: '#f8fbff', display: 'grid', gap: formStyle.norma3RowGap }}>
               <div style={{ display: 'grid', gridTemplateColumns: `minmax(360px, 1fr) ${formStyle.norma3GradeColumnWidth}px`, gap: 0, background: '#f8fafc', borderBottom: '1px solid #e5e7eb' }}>
                 <div style={{ ...editMutedHeaderStyle, marginBottom: 0, padding: '6px 8px' }}>Violazione</div>
-                <div style={{ ...editMutedHeaderStyle, marginBottom: 0, padding: '6px 8px', borderLeft: '1px solid #e5e7eb' }}>Grado</div>
+                <div style={{ ...editMutedHeaderStyle, marginBottom: 0, padding: '6px 8px', borderLeft: '1px solid #e5e7eb' }}>Gravità</div>
               </div>
               {CHOICES.norma3.map(o => {
                 const art = normalizeArtCode(o.v)
@@ -6202,7 +6432,7 @@ React.useEffect(() => {
         const leftColumn = (
           <div style={{ display: 'grid', gap: formStyle.sectionGap, minWidth: 0 }}>
             {renderEditCard('Art. 15 — Prelievo abusivo',
-              <div style={{ display: 'grid', gridTemplateColumns: 'minmax(150px, 190px) minmax(110px, 130px) minmax(110px, 130px) minmax(145px, 180px)', gap: 8, alignItems: 'start' }}>
+              <div style={{ display: 'grid', gridTemplateColumns: 'minmax(170px, 220px) minmax(120px, 145px) minmax(120px, 145px) minmax(160px, 200px)', gap: 8, alignItems: 'start' }}>
                 {selectField('tipo_abuso', 'Tipo di abuso', tipoAbuso, v => { set('tipo_abuso', v); set('norma15_parziale', ''); set('norma15_totale', '') }, CHOICES.tipo_abuso)}
                 {surfaceTextField('sup_dichiarata_art15', 'Sup. dichiarata (ha)', g('sup_dichiarata_art15'), v => set('sup_dichiarata_art15', v), art15SupEnabled, art15SupDichLocked ? '0' : undefined)}
                 {surfaceTextField('sup_irrigata_art15', 'Sup. irrigata (ha)', g('sup_irrigata_art15'), v => set('sup_irrigata_art15', v), art15SupEnabled)}
@@ -6212,7 +6442,7 @@ React.useEffect(() => {
 
             {renderEditCard('Artt. 16 e 17 — Inosservanza termini',
               <div style={{ display: 'grid', gap: 8 }}>
-                <div style={{ display: 'grid', gridTemplateColumns: 'minmax(220px, 1fr) minmax(130px, 170px) minmax(105px, 130px) minmax(105px, 130px)', gap: 8, alignItems: 'start' }}>
+                <div style={{ display: 'grid', gridTemplateColumns: 'minmax(290px, 1fr) minmax(155px, 195px) minmax(120px, 145px) minmax(120px, 145px)', gap: 8, alignItems: 'start' }}>
                   <div style={{ gridColumn: '1 / span 2' }}>
                     <div style={{ ...S.lbl, color: formStyle.labelColor, fontSize: formStyle.labelFontSize, visibility: 'hidden' }}>Violazione</div>
                     {choiceBox('Art16', 'Art. 16 - Comunicazione di irrigazione tardiva')}
@@ -6220,7 +6450,7 @@ React.useEffect(() => {
                   {surfaceTextField('sup_dichiarata_art16', 'Sup. dichiarata (ha)', g('sup_dichiarata_art16'), v => set('sup_dichiarata_art16', v), art16Selected)}
                   {surfaceTextField('sup_irrigata_art16', 'Sup. irrigata (ha)', '0', () => {}, art16Selected, '0')}
                 </div>
-                <div style={{ display: 'grid', gridTemplateColumns: 'minmax(220px, 1fr) minmax(130px, 170px) minmax(105px, 130px) minmax(105px, 130px)', gap: 8, alignItems: 'start' }}>
+                <div style={{ display: 'grid', gridTemplateColumns: 'minmax(290px, 1fr) minmax(155px, 195px) minmax(120px, 145px) minmax(120px, 145px)', gap: 8, alignItems: 'start' }}>
                   <div>
                     <div style={{ ...S.lbl, color: formStyle.labelColor, fontSize: formStyle.labelFontSize, visibility: 'hidden' }}>Violazione</div>
                     {choiceBox('Art17', 'Art. 17 - Variazione o rinuncia tardiva')}
@@ -6241,8 +6471,8 @@ React.useEffect(() => {
             <div style={editCardHeaderStyle}><span>Descrizione e circostanze</span></div>
             <div style={{ ...editCardBodyStyle, flex: '1 1 auto', display: 'grid', gridTemplateRows: 'auto auto auto 1fr', gap: 7, alignContent: 'start' }}>
               {textAreaField('descrizione_fatti', 'Descrizione dettagliata della violazione', formStyle.violazioneDescrizioneRows)}
-              {textAreaField('circostanze', 'Circostanze rilevanti', formStyle.violazioneCircostanzeRows)}
-              {fieldGrid('minmax(220px, 320px)', ['presenza_trasgressore'], 7)}
+              {textAreaField('circostanze', 'Circostanze rilevanti', formStyle.violazioneDescrizioneRows)}
+              {fieldGrid(`${formStyle.norma3GradeColumnWidth}px`, ['presenza_trasgressore'], 7)}
               <div />
             </div>
           </section>
@@ -6262,20 +6492,9 @@ React.useEffect(() => {
           bottom: 0,
           left: '50%',
           transform: 'translateX(-50%)',
-          width: 2,
+          width: 1,
           borderRadius: 999,
           background: draggingViolazioneSplitter ? '#c5d9f1' : formStyle.violazioneSplitterColor
-        }
-        const splitterHandleStyle: React.CSSProperties = {
-          position: 'absolute',
-          top: '50%',
-          left: '50%',
-          transform: 'translate(-50%, -50%)',
-          width: 8,
-          height: 56,
-          borderRadius: 999,
-          background: draggingViolazioneSplitter ? 'rgba(61,119,201,0.08)' : 'rgba(61,119,201,0.18)',
-          pointerEvents: 'none'
         }
         const resetBtnStyle: React.CSSProperties = {
           position: 'absolute',
@@ -6304,7 +6523,7 @@ React.useEffect(() => {
             ref={violazioneGridRef}
             style={{
               display: 'grid',
-              gridTemplateColumns: `minmax(${formStyle.violazioneMinLeftPx}px, ${violazioneColumnPercents[0].toFixed(2)}%) ${formStyle.violazioneSplitterWidth}px minmax(${formStyle.violazioneMinRightPx}px, 1fr)`,
+              gridTemplateColumns: `minmax(0, ${violazioneColumnPercents[0].toFixed(2)}%) ${formStyle.violazioneSplitterWidth}px minmax(0, 1fr)`,
               gap: 0,
               alignItems: 'stretch',
               columnGap: 0
@@ -6317,7 +6536,6 @@ React.useEffect(() => {
               title='Ridimensiona colonne della scheda Violazione'
             >
               <div style={splitterLineStyle} />
-              <div style={splitterHandleStyle} />
               <button
                 type='button'
                 style={resetBtnStyle}
@@ -6330,7 +6548,7 @@ React.useEffect(() => {
                 disabled={!violazioneColumnsDirty}
                 title='Ripristina larghezza colonne'
                 aria-label='Ripristina larghezza colonne'
-              >↺</button>
+              >↔</button>
             </div>
             <div style={{ minWidth: 0, paddingLeft: 6 }}>{rightColumn}</div>
           </div>
@@ -6358,6 +6576,7 @@ React.useEffect(() => {
   }
 
   const renderLayoutTab = (tabId: string): React.ReactNode => {
+    if (tabId === 'trasgressore') return renderSpecial('_trasgressore_due_colonne')
     if (tabId === 'violazione') return renderSpecial('_violazione_due_colonne')
     const cfgLayouts = cfg.fieldLayouts || {}
     const layout: any[] = (cfgLayouts as any)[tabId] || DEFAULT_FIELD_LAYOUTS[tabId] || []
@@ -6453,6 +6672,23 @@ React.useEffect(() => {
         </span>
         <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
           {msg && <span style={{ fontSize: formStyle.msgFontSize, color: msg.kind === 'ok' ? '#1a7f37' : '#b42318' }}>{msg.text}</span>}
+          {npTab === 'nota_spese' && mode === 'edit' && currentOid != null && noteSpeseMissing.length === 0 && currentGlobalId && (
+            <button
+              type='button'
+              onClick={() => { if (isRiAgrTecLimitedEdit) return; try { const pg = resolvePageId('browser-nota-spese'); if (pg) { try { const curPage = getAppStore()?.getState()?.appRuntimeInfo?.currentPageId || ''; sessionStorage.setItem('GII_NS_RETURN_PAGE', curPage) } catch {} UrlManager.getInstance().changePage(pg) } else { setNoteSpeseMsg({ ok: false, text: 'Pagina "browser-nota-spese" non trovata. Configura una pagina ExB con il widget consultazione prezzario e il widget gii-ns-carrello.' }) } } catch (e: any) { setNoteSpeseMsg({ ok: false, text: e?.message || String(e) }) } }}
+              disabled={isRiAgrTecLimitedEdit || noteSpeseBusy || noteSpeseDraftDirty}
+              style={{
+                ...btnBase,
+                marginRight: 12,
+                border: '1px solid rgba(15,115,117,0.75)',
+                background: (isRiAgrTecLimitedEdit || noteSpeseBusy || noteSpeseDraftDirty) ? '#e5e7eb' : '#0f7375',
+                color: (isRiAgrTecLimitedEdit || noteSpeseBusy || noteSpeseDraftDirty) ? '#9ca3af' : '#fff',
+                cursor: (isRiAgrTecLimitedEdit || noteSpeseBusy || noteSpeseDraftDirty) ? 'not-allowed' : 'pointer',
+                opacity: (isRiAgrTecLimitedEdit || noteSpeseBusy || noteSpeseDraftDirty) ? 0.75 : 1,
+                whiteSpace: 'nowrap'
+              }}
+            >📋 Sfoglia prezzario</button>
+          )}
           <button type='button' disabled={saving || !isDirty} onClick={handleSave}
             style={{
               ...btnBase,
@@ -6495,55 +6731,59 @@ React.useEffect(() => {
 {/* NOTA SPESE */}
 {npTab === 'nota_spese' && (
   mode !== 'edit' || currentOid == null ? (
-    <div style={{ padding: 12, borderRadius: 10, border: '1px dashed rgba(0,0,0,0.18)', background: 'rgba(0,0,0,0.01)' }}>
-      <div style={{ fontWeight: 800, fontSize: 13, marginBottom: 6 }}>Nota spese</div>
+    renderEditCard('Nota spese', (
       <div style={{ fontSize: formStyle.labelFontSize, color: formStyle.labelColor, lineHeight: 1.5 }}>
         La nota spese si gestisce <b>dopo il salvataggio</b> della pratica, quando il rapporto dispone del <b>GlobalID</b> necessario per collegare le righe di personale, mezzi e materiali.
       </div>
-    </div>
+    ))
   ) : noteSpeseMissing.length > 0 ? (
-    <div style={{ padding: 12, borderRadius: 10, border: '1px solid #f5b8b8', background: '#fce4e4', color: '#7a1c1c' }}>
-      <div style={{ fontWeight: 800, fontSize: 13, marginBottom: 6 }}>Nota spese non configurata</div>
-      <div style={{ fontSize: 12, lineHeight: 1.5 }}>Completa nel setting del widget i seguenti URL:</div>
-      <div style={{ marginTop: 8, fontSize: 12 }}>{noteSpeseMissing.join(' • ')}</div>
-    </div>
+    renderEditCard('Nota spese non configurata', (
+      <div style={{ padding: 12, borderRadius: 10, border: '1px solid #f5b8b8', background: '#fce4e4', color: '#7a1c1c' }}>
+        <div style={{ fontSize: 12, lineHeight: 1.5 }}>Completa nel setting del widget i seguenti URL:</div>
+        <div style={{ marginTop: 8, fontSize: 12 }}>{noteSpeseMissing.join(' • ')}</div>
+      </div>
+    ))
   ) : !currentGlobalId ? (
-    <div style={{ padding: 12, borderRadius: 10, border: '1px solid #f5b8b8', background: '#fce4e4', color: '#7a1c1c' }}>
-      <div style={{ fontWeight: 800, fontSize: 13, marginBottom: 6 }}>GlobalID pratica non disponibile</div>
-      <div style={{ fontSize: 12, lineHeight: 1.5 }}>Il widget non riesce a leggere il GlobalID del rapporto selezionato. Verifica che il layer/view usato per l’editing esponga il campo <b>GlobalID</b>.</div>
-    </div>
+    renderEditCard('GlobalID pratica non disponibile', (
+      <div style={{ padding: 12, borderRadius: 10, border: '1px solid #f5b8b8', background: '#fce4e4', color: '#7a1c1c' }}>
+        <div style={{ fontSize: 12, lineHeight: 1.5 }}>Il widget non riesce a leggere il GlobalID del rapporto selezionato. Verifica che il layer/view usato per l’editing esponga il campo <b>GlobalID</b>.</div>
+      </div>
+    ))
   ) : (
-    <div style={{ display: 'grid', gap: 12 }}>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
       {noteSpeseMsg && (
         <div style={{ padding: '7px 10px', borderRadius: 4, fontSize: 12, fontWeight: 700, border: `1px solid ${noteSpeseMsg.ok ? '#b8d4b0' : '#f5b8b8'}`, background: noteSpeseMsg.ok ? '#e2efda' : '#fce4e4', color: noteSpeseMsg.ok ? '#375623' : '#c00' }}>
           {noteSpeseMsg.text}
         </div>
       )}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, minmax(0, 1fr))', gap: 6 }}>
-        {([
-          ['Attrezz./Trasp.', noteSpeseSummary.totaleAT],
-          ['Mat. costruz.', noteSpeseSummary.totalePR],
-          ['Risorse umane', noteSpeseSummary.totaleRU],
-          ['Semilavorati', noteSpeseSummary.totaleSL],
-          ['Prod. finiti', noteSpeseSummary.totalePF],
-          [`Spese gen. (${noteSpeseSummary.percentualeSpeseGenerali.toLocaleString('it-IT', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}%)`, noteSpeseSummary.importoSpeseGenerali],
-          ['Totale', noteSpeseSummary.totaleComplessivo]
-        ] as [string, number][]).map(([label, value], idx) => (
-          <div key={idx} style={{ background: idx === 6 ? '#1F4E79' : '#f5f9ff', border: '1px solid #c5d9f1', borderRadius: 6, padding: '6px 8px' }}>
-            <div style={{ fontSize: 10, fontWeight: 700, color: idx === 6 ? 'rgba(255,255,255,0.8)' : '#1F4E79', marginBottom: 2, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{label}</div>
-            <div style={{ fontSize: 14, fontWeight: 800, color: idx === 6 ? '#fff' : '#16375a' }}>{nsSafeNum(value, 0).toLocaleString('it-IT', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €</div>
+      <div style={{ border: '1px solid #c5d9f1', borderRadius: 8, background: '#fff', padding: 10 }}>
+        <div style={{ display: 'grid', gap: 8 }}>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, minmax(0, 1fr))', gap: 6 }}>
+            {([
+              ['Attrezz./Trasp.', noteSpeseSummary.totaleAT],
+              ['Mat. costruz.', noteSpeseSummary.totalePR],
+              ['Risorse umane', noteSpeseSummary.totaleRU],
+              ['Semilavorati', noteSpeseSummary.totaleSL],
+              ['Prod. finiti', noteSpeseSummary.totalePF],
+              [`Spese gen. (${noteSpeseSummary.percentualeSpeseGenerali.toLocaleString('it-IT', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}%)`, noteSpeseSummary.importoSpeseGenerali],
+              ['Totale', noteSpeseSummary.totaleComplessivo]
+            ] as [string, number][]).map(([label, value], idx) => (
+              <div key={idx} style={{ background: idx === 6 ? formStyle.cardHeaderBg : '#f5f9ff', border: '1px solid #c5d9f1', borderRadius: formStyle.cardBorderRadius, padding: '6px 8px' }}>
+                <div style={{ fontSize: 10, fontWeight: 700, color: idx === 6 ? 'rgba(255,255,255,0.86)' : formStyle.hdrColor, marginBottom: 2, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{label}</div>
+                <div style={{ fontSize: 14, fontWeight: 800, color: idx === 6 ? formStyle.cardHeaderColor : '#16375a' }}>{nsSafeNum(value, 0).toLocaleString('it-IT', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €</div>
+              </div>
+            ))}
           </div>
-        ))}
-      </div>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
-<button type='button' onClick={() => { if (isRiAgrTecLimitedEdit) return; try { const pg = resolvePageId('browser-nota-spese'); if (pg) { try { const curPage = getAppStore()?.getState()?.appRuntimeInfo?.currentPageId || ''; sessionStorage.setItem('GII_NS_RETURN_PAGE', curPage) } catch {} UrlManager.getInstance().changePage(pg) } else { setNoteSpeseMsg({ ok: false, text: 'Pagina "browser-nota-spese" non trovata. Configura una pagina ExB con il widget consultazione prezzario e il widget gii-ns-carrello.' }) } } catch (e: any) { setNoteSpeseMsg({ ok: false, text: e?.message || String(e) }) } }} disabled={isRiAgrTecLimitedEdit || noteSpeseBusy || noteSpeseDraftDirty} style={{ padding: '10px 24px', borderRadius: 8, border: '1px solid #1ed9dc', background: '#0f7375', color: '#fff', fontWeight: 800, fontSize: 14, cursor: (isRiAgrTecLimitedEdit || noteSpeseBusy || noteSpeseDraftDirty) ? 'not-allowed' : 'pointer', opacity: (isRiAgrTecLimitedEdit || noteSpeseBusy || noteSpeseDraftDirty) ? 0.5 : 1, letterSpacing: '0.3px' }}>📋 Sfoglia prezzario</button>
           {noteSpeseDraftDirty && <span style={{ fontSize: 11, color: '#856404' }}>Salva le modifiche prima di sfogliare il prezzario.</span>}
+        </div>
       </div>
-      <NoteSpeseManager category='AT' title='Attrezzature e trasporti' rows={noteSpeseRowsDraft['AT']} onRowsChange={(nextRows) => { if (isRiAgrTecLimitedEdit) return; setNoteSpeseRowsDraft((prev) => ({ ...prev, AT: nextRows.map(nsCloneRow) })) }} onDirtyChange={(dirty) => { if (isRiAgrTecLimitedEdit) return; setNoteSpeseFormDirtyByCategory((prev) => ({ ...prev, AT: dirty })) }} resetKey={noteSpeseManagerResetKey} readonly={isRiAgrTecLimitedEdit} />
-      <NoteSpeseManager category='PR' title='Materiali da costruzione' rows={noteSpeseRowsDraft['PR']} onRowsChange={(nextRows) => { if (isRiAgrTecLimitedEdit) return; setNoteSpeseRowsDraft((prev) => ({ ...prev, PR: nextRows.map(nsCloneRow) })) }} onDirtyChange={(dirty) => { if (isRiAgrTecLimitedEdit) return; setNoteSpeseFormDirtyByCategory((prev) => ({ ...prev, PR: dirty })) }} resetKey={noteSpeseManagerResetKey} readonly={isRiAgrTecLimitedEdit} />
-      <NoteSpeseManager category='RU' title='Risorse umane' rows={noteSpeseRowsDraft['RU']} onRowsChange={(nextRows) => { if (isRiAgrTecLimitedEdit) return; setNoteSpeseRowsDraft((prev) => ({ ...prev, RU: nextRows.map(nsCloneRow) })) }} onDirtyChange={(dirty) => { if (isRiAgrTecLimitedEdit) return; setNoteSpeseFormDirtyByCategory((prev) => ({ ...prev, RU: dirty })) }} resetKey={noteSpeseManagerResetKey} readonly={isRiAgrTecLimitedEdit} />
-      <NoteSpeseManager category='SL' title='Semilavorati' rows={noteSpeseRowsDraft['SL']} onRowsChange={(nextRows) => { if (isRiAgrTecLimitedEdit) return; setNoteSpeseRowsDraft((prev) => ({ ...prev, SL: nextRows.map(nsCloneRow) })) }} onDirtyChange={(dirty) => { if (isRiAgrTecLimitedEdit) return; setNoteSpeseFormDirtyByCategory((prev) => ({ ...prev, SL: dirty })) }} resetKey={noteSpeseManagerResetKey} readonly={isRiAgrTecLimitedEdit} />
-      <NoteSpeseManager category='PF' title='Prodotti finiti' rows={noteSpeseRowsDraft['PF']} onRowsChange={(nextRows) => { if (isRiAgrTecLimitedEdit) return; setNoteSpeseRowsDraft((prev) => ({ ...prev, PF: nextRows.map(nsCloneRow) })) }} onDirtyChange={(dirty) => { if (isRiAgrTecLimitedEdit) return; setNoteSpeseFormDirtyByCategory((prev) => ({ ...prev, PF: dirty })) }} resetKey={noteSpeseManagerResetKey} readonly={isRiAgrTecLimitedEdit} />
+      <div style={{ display: 'grid', gap: 8 }}>
+        <NoteSpeseManager category='AT' title='Attrezzature e trasporti' rows={noteSpeseRowsDraft['AT']} onRowsChange={(nextRows) => { if (isRiAgrTecLimitedEdit) return; setNoteSpeseRowsDraft((prev) => ({ ...prev, AT: nextRows.map(nsCloneRow) })) }} onDirtyChange={(dirty) => { if (isRiAgrTecLimitedEdit) return; setNoteSpeseFormDirtyByCategory((prev) => ({ ...prev, AT: dirty })) }} resetKey={noteSpeseManagerResetKey} readonly={isRiAgrTecLimitedEdit} />
+        <NoteSpeseManager category='PR' title='Materiali da costruzione' rows={noteSpeseRowsDraft['PR']} onRowsChange={(nextRows) => { if (isRiAgrTecLimitedEdit) return; setNoteSpeseRowsDraft((prev) => ({ ...prev, PR: nextRows.map(nsCloneRow) })) }} onDirtyChange={(dirty) => { if (isRiAgrTecLimitedEdit) return; setNoteSpeseFormDirtyByCategory((prev) => ({ ...prev, PR: dirty })) }} resetKey={noteSpeseManagerResetKey} readonly={isRiAgrTecLimitedEdit} />
+        <NoteSpeseManager category='RU' title='Risorse umane' rows={noteSpeseRowsDraft['RU']} onRowsChange={(nextRows) => { if (isRiAgrTecLimitedEdit) return; setNoteSpeseRowsDraft((prev) => ({ ...prev, RU: nextRows.map(nsCloneRow) })) }} onDirtyChange={(dirty) => { if (isRiAgrTecLimitedEdit) return; setNoteSpeseFormDirtyByCategory((prev) => ({ ...prev, RU: dirty })) }} resetKey={noteSpeseManagerResetKey} readonly={isRiAgrTecLimitedEdit} />
+        <NoteSpeseManager category='SL' title='Semilavorati' rows={noteSpeseRowsDraft['SL']} onRowsChange={(nextRows) => { if (isRiAgrTecLimitedEdit) return; setNoteSpeseRowsDraft((prev) => ({ ...prev, SL: nextRows.map(nsCloneRow) })) }} onDirtyChange={(dirty) => { if (isRiAgrTecLimitedEdit) return; setNoteSpeseFormDirtyByCategory((prev) => ({ ...prev, SL: dirty })) }} resetKey={noteSpeseManagerResetKey} readonly={isRiAgrTecLimitedEdit} />
+        <NoteSpeseManager category='PF' title='Prodotti finiti' rows={noteSpeseRowsDraft['PF']} onRowsChange={(nextRows) => { if (isRiAgrTecLimitedEdit) return; setNoteSpeseRowsDraft((prev) => ({ ...prev, PF: nextRows.map(nsCloneRow) })) }} onDirtyChange={(dirty) => { if (isRiAgrTecLimitedEdit) return; setNoteSpeseFormDirtyByCategory((prev) => ({ ...prev, PF: dirty })) }} resetKey={noteSpeseManagerResetKey} readonly={isRiAgrTecLimitedEdit} />
+      </div>
     </div>
   )
 )}

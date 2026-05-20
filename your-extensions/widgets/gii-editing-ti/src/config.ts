@@ -289,7 +289,7 @@ export const defaultConfig: Config = {
   formCardBg: '#f8fbff',
   formCardBorderColor: '#c6d7ea',
   formCardBorderWidth: 1,
-  formCardBorderRadius: 12,
+  formCardBorderRadius: 8,
   formCardShadow: '0 8px 22px rgba(15, 23, 42, 0.08)',
   formCardHeaderBg: 'linear-gradient(90deg, #0d3b66, #155e9d)',
   formCardHeaderColor: '#ffffff',
@@ -305,8 +305,8 @@ export const defaultConfig: Config = {
   norma3FontSize: 12,
   norma3GradeColumnWidth: 142,
   norma3RowGap: 0,
-  violazioneDescrizioneRows: 4,
-  violazioneCircostanzeRows: 3,
+  violazioneDescrizioneRows: 5,
+  violazioneCircostanzeRows: 4,
 
   anteprimaPdfPaddingTop: 0,
   anteprimaPdfPaddingX: 0,
@@ -374,8 +374,8 @@ export const defaultConfig: Config = {
   fieldGap: 12,
 
   violazioneLayoutLeftPercent: 58,
-  violazioneLayoutMinLeftPx: 600,
-  violazioneLayoutMinRightPx: 320,
+  violazioneLayoutMinLeftPx: 520,
+  violazioneLayoutMinRightPx: 360,
   violazioneSplitterWidth: 14,
   violazioneSplitterColor: '#94a3b8'
 }
@@ -405,7 +405,23 @@ export const DEFAULT_FIELD_LAYOUTS: Record<string, LayoutRow[]> = {
     { type: 'fields', columns: '1fr', cells: [{ field: 'note_anagrafica' }] }
   ],
   violazione: [
-    { type: 'special', id: '_violazione_due_colonne' }
+    { type: 'header', label: 'Art. 15 — Prelievo abusivo' },
+    { type: 'fields', columns: '1fr', cells: [{ field: 'tipo_abuso' }] },
+    { type: 'fields', columns: '1fr 1fr', cells: [{ field: 'sup_dichiarata_art15' }, { field: 'sup_irrigata_art15' }] },
+    { type: 'header', label: 'Artt. 16 e 17 — Inosservanza termini' },
+    { type: 'fields', columns: '1fr', cells: [{ field: 'norma16_17' }] },
+    { type: 'fields', columns: '1fr', cells: [{ field: 'art17_tipo' }] },
+    { type: 'fields', columns: '1fr 1fr', cells: [{ field: 'sup_dichiarata_art16' }, { field: 'sup_irrigata_art16' }] },
+    { type: 'fields', columns: '1fr 1fr', cells: [{ field: 'sup_dichiarata_art17_1' }, { field: 'sup_irrigata_art17_1' }] },
+    { type: 'fields', columns: '1fr 1fr', cells: [{ field: 'sup_dichiarata_art17_2' }, { field: 'sup_irrigata_art17_2' }] },
+    { type: 'header', label: 'Altre violazioni' },
+    { type: 'special', id: '_checkboxes_norma3' },
+    { type: 'header', label: 'Valutazione (Sezione riservata al Responsabile Istruttore)' },
+    { type: 'fields', columns: '1fr 1fr', cells: [{ field: 'grado' }, { field: 'norma15_sel' }] },
+    { type: 'header', label: 'Descrizione' },
+    { type: 'fields', columns: '1fr', cells: [{ field: 'descrizione_fatti' }] },
+    { type: 'fields', columns: '1fr', cells: [{ field: 'circostanze' }] },
+    { type: 'fields', columns: '1fr', cells: [{ field: 'presenza_trasgressore' }] }
   ],
   dati_tecnici: [
     { type: 'special', id: '_localizzazione' },

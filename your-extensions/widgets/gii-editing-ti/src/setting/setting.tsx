@@ -54,13 +54,13 @@ const P = {
   wrap: { padding:'0 12px 34px', fontSize:13, background:'#111827', minHeight:'100%', color:'#e5e7eb', overflowY:'auto' as const, overflowX:'hidden' as const, boxSizing:'border-box' as const, maxWidth:'100%' } as React.CSSProperties,
   sec: { fontSize:12, fontWeight:800, color:'#bfdbfe', textTransform:'uppercase' as const, letterSpacing:0.9, borderBottom:'1px solid rgba(255,255,255,0.14)', padding:'10px 0 8px', margin:'18px 0 12px', cursor:'pointer', display:'flex', justifyContent:'space-between', alignItems:'center' } as React.CSSProperties,
   box: { border:'1px solid rgba(255,255,255,0.10)', background:'rgba(255,255,255,0.045)', borderRadius:10, padding:10, marginBottom:12, boxSizing:'border-box' as const, maxWidth:'100%' } as React.CSSProperties,
-  grid2: { display:'grid', gridTemplateColumns:'repeat(auto-fit, minmax(150px, 1fr))', gap:8, minWidth:0, maxWidth:'100%' } as React.CSSProperties,
-  grid3: { display:'grid', gridTemplateColumns:'repeat(auto-fit, minmax(135px, 1fr))', gap:8, minWidth:0, maxWidth:'100%' } as React.CSSProperties,
+  grid2: { display:'grid', gridTemplateColumns:'repeat(2, minmax(0, 1fr))', gap:8, minWidth:0 } as React.CSSProperties,
+  grid3: { display:'grid', gridTemplateColumns:'repeat(2, minmax(0, 1fr))', gap:8, minWidth:0 } as React.CSSProperties,
   lbl: { fontSize:12, fontWeight:700, color:'#d1d5db', display:'block', marginBottom:5, marginTop:10, overflowWrap:'anywhere' as const, lineHeight:1.25 } as React.CSSProperties,
   hint: { fontSize:11.5, color:'#9ca3af', marginTop:4, lineHeight:1.45 } as React.CSSProperties,
   inp: { width:'100%', maxWidth:'100%', height:31, padding:'4px 8px', fontSize:12, border:'1px solid rgba(255,255,255,0.17)', borderRadius:7, outline:'none', boxSizing:'border-box' as const, background:'rgba(255,255,255,0.075)', color:'#e5e7eb', minWidth:0 } as React.CSSProperties,
   mini: { width:'100%', maxWidth:'100%', height:28, padding:'3px 7px', fontSize:11.5, border:'1px solid rgba(255,255,255,0.15)', borderRadius:6, background:'rgba(255,255,255,0.07)', color:'#e5e7eb', boxSizing:'border-box' as const, minWidth:0 } as React.CSSProperties,
-  chk: { display:'flex', alignItems:'flex-start', gap:8, fontSize:12.5, color:'#d1d5db', cursor:'pointer', marginTop:10, flexWrap:'wrap', minWidth:0 } as React.CSSProperties,
+  chk: { display:'flex', alignItems:'center', gap:8, fontSize:12.5, color:'#d1d5db', cursor:'pointer', marginTop:10 } as React.CSSProperties,
   btn: { padding:'5px 10px', borderRadius:7, border:'1px solid rgba(96,165,250,0.38)', background:'rgba(96,165,250,0.10)', color:'#93c5fd', fontSize:12, cursor:'pointer', fontWeight:700 } as React.CSSProperties,
   dangerBtn: { padding:'5px 10px', borderRadius:7, border:'1px solid rgba(252,165,165,0.38)', background:'rgba(239,68,68,0.08)', color:'#fca5a5', fontSize:12, cursor:'pointer', fontWeight:700 } as React.CSSProperties,
 }
@@ -89,6 +89,7 @@ const MODERN_PALETTE = {
   formFieldDisabledColor: '#64748b',
   formCardBg: '#f8fbff',
   formCardBorderColor: '#c6d7ea',
+  formCardBorderRadius: 8,
   formCardShadow: '0 8px 22px rgba(15, 23, 42, 0.08)',
   formCardHeaderBg: 'linear-gradient(90deg, #0d3b66, #155e9d)',
   formCardHeaderColor: '#ffffff',
@@ -128,16 +129,25 @@ export default function Setting(props: AllWidgetSettingProps<IMConfig>) {
       {p.hint && <div style={P.hint}>{p.hint}</div>}
     </div>
   )
-  const Color = (p:{ k:string; label:string; fallback:string; hint?:string; allowText?:boolean }) => (
-    <div>
-      <label style={P.lbl}>{p.label}</label>
-      <div style={{display:'flex',alignItems:'center',gap:7}}>
-        <input type='color' value={colorValue(cfg[p.k], p.fallback)} onChange={e => set(p.k, e.target.value)} style={{width:34,height:30,padding:2,border:'1px solid rgba(255,255,255,0.18)',borderRadius:6,background:'transparent',flexShrink:0}}/>
-        <input type='text' value={cfg[p.k] ?? ''} onChange={e => set(p.k, e.target.value)} placeholder={p.fallback} style={{...P.inp, flex:1, minWidth:0}}/>
+  const Color = (p:{ k:string; label:string; fallback:string; hint?:string; allowText?:boolean }) => {
+    const pickerValue = colorValue(cfg[p.k], p.fallback)
+    return (
+      <div>
+        <label style={P.lbl}>{p.label}</label>
+        <div style={{display:'flex',alignItems:'center',gap:7}}>
+          <input
+            key={`${p.k}-${pickerValue}`}
+            type='color'
+            defaultValue={pickerValue}
+            onBlur={e => set(p.k, e.currentTarget.value)}
+            style={{width:34,height:30,padding:2,border:'1px solid rgba(255,255,255,0.18)',borderRadius:6,background:'transparent',flexShrink:0}}
+          />
+          <input type='text' value={cfg[p.k] ?? ''} onChange={e => set(p.k, e.target.value)} placeholder={p.fallback} style={{...P.inp, flex:1, minWidth:0}}/>
+        </div>
+        {p.hint && <div style={P.hint}>{p.hint}</div>}
       </div>
-      {p.hint && <div style={P.hint}>{p.hint}</div>}
-    </div>
-  )
+    )
+  }
   const Toggle = (p:{ k:string; label:string; hint?:string }) => (
     <label style={P.chk}><input type='checkbox' checked={!!cfg[p.k]} onChange={e => set(p.k, e.target.checked)}/><span>{p.label}</span>{p.hint && <span style={{...P.hint,marginTop:0}}>{p.hint}</span>}</label>
   )
@@ -259,15 +269,15 @@ export default function Setting(props: AllWidgetSettingProps<IMConfig>) {
         {getRows(tabId).map((row:any, ri:number) => {
           const cells:any[] = row.cells || []
           const widths = colsToWidths(row.columns, cells.length || 1)
-          return <div key={ri} style={{border:'1px solid rgba(255,255,255,0.12)',borderRadius:9,padding:10,background:'rgba(255,255,255,0.035)',minWidth:0,maxWidth:'100%',boxSizing:'border-box'}}>
-            <div style={{display:'flex',alignItems:'center',gap:6,marginBottom:8,flexWrap:'wrap',minWidth:0}}>
+          return <div key={ri} style={{border:'1px solid rgba(255,255,255,0.12)',borderRadius:9,padding:10,background:'rgba(255,255,255,0.035)'}}>
+            <div style={{display:'flex',alignItems:'center',gap:6,marginBottom:8}}>
               <span style={{fontSize:11,color:'#9ca3af',fontWeight:800,minWidth:24}}>#{ri+1}</span>
               <select value={row.type} onChange={e => {
                 const t=e.target.value
                 if (t==='header') updateRow(tabId, ri, {type:'header', label:row.label||'Sezione', cells:undefined, columns:undefined, id:undefined})
                 else if (t==='special') updateRow(tabId, ri, {type:'special', id:SPECIAL_OPTS[0].v, label:undefined, cells:undefined, columns:undefined})
                 else updateRow(tabId, ri, {type:'fields', columns:row.columns||'1fr', cells:row.cells||[{}], label:undefined, id:undefined})
-              }} style={{...P.mini, width:120, maxWidth:'100%', flex:'0 1 150px'}}>
+              }} style={{...P.mini, width:120}}>
                 <option value='header'>Intestazione</option><option value='fields'>Campi</option><option value='special'>Speciale</option>
               </select>
               <div style={{flex:1}}/>
@@ -278,15 +288,13 @@ export default function Setting(props: AllWidgetSettingProps<IMConfig>) {
             {row.type === 'header' && <input type='text' value={row.label||''} onChange={e=>updateRow(tabId,ri,{label:e.target.value})} placeholder='Titolo sezione' style={P.inp}/>} 
             {row.type === 'special' && <select value={row.id||''} onChange={e=>updateRow(tabId,ri,{id:e.target.value})} style={P.inp}>{SPECIAL_OPTS.map(o=><option key={o.v} value={o.v}>{o.l}</option>)}</select>}
             {row.type === 'fields' && <div style={{display:'grid',gap:7}}>
-              {cells.map((cell:any, ci:number) => <div key={ci} style={{display:'grid',gridTemplateColumns:'minmax(0, 1fr)',gap:6,alignItems:'center',border:'1px solid rgba(255,255,255,0.08)',borderRadius:8,padding:7,minWidth:0,maxWidth:'100%',boxSizing:'border-box'}}>
+              {cells.map((cell:any, ci:number) => <div key={ci} style={{display:'grid',gridTemplateColumns:'1.1fr 0.9fr 70px 34px',gap:6,alignItems:'center'}}>
                 <select value={cell?.field||''} onChange={e=>updateCell(tabId,ri,ci,e.target.value)} style={P.mini}>
                   <option value=''>— spazio vuoto —</option>{(FIELD_OPTS[tabId]||[]).map(o=><option key={o.v} value={o.v}>{o.l}</option>)}
                 </select>
                 <input type='text' value={cell?.label||''} onChange={e=>updateCellLabel(tabId,ri,ci,e.target.value)} placeholder='Etichetta personalizzata' style={P.mini}/>
-                <div style={{display:'grid',gridTemplateColumns:'minmax(0, 1fr) auto',gap:6,alignItems:'center',minWidth:0}}>
-                  <input type='number' min={1} max={100} value={widths[ci]||100} onChange={e=>updateCellWidth(tabId,ri,ci,Number(e.target.value))} title='Larghezza cella (%)' style={{...P.mini,textAlign:'center'}}/>
-                  <button type='button' style={{...P.dangerBtn,width:34,height:28,padding:0}} onClick={()=>removeCell(tabId,ri,ci)}>✕</button>
-                </div>
+                <input type='number' min={1} max={100} value={widths[ci]||100} onChange={e=>updateCellWidth(tabId,ri,ci,Number(e.target.value))} style={{...P.mini,textAlign:'center'}}/>
+                <button type='button' style={P.dangerBtn} onClick={()=>removeCell(tabId,ri,ci)}>✕</button>
               </div>)}
               <button type='button' style={{...P.btn,width:'fit-content'}} onClick={()=>addCell(tabId,ri)}>+ Cella</button>
             </div>}
@@ -395,8 +403,9 @@ export default function Setting(props: AllWidgetSettingProps<IMConfig>) {
       </SectionBox>
       <SectionBox title='Card / gruppi sezione'>
         <div style={P.grid2}><Color k='formCardBg' label='Sfondo card' fallback='#f8fbff'/><Color k='formCardBorderColor' label='Bordo card' fallback='#c6d7ea'/></div>
-        <div style={P.grid3}><Num k='formCardBorderWidth' label='Spessore bordo' min={0} max={8}/><Num k='formCardBorderRadius' label='Arrotondamento' min={0} max={40}/><Num k='formSectionGap' label='Spazio tra card' min={0} max={40}/></div>
+        <div style={P.grid3}><Num k='formCardBorderWidth' label='Spessore bordo' min={0} max={8}/><Num k='formCardBorderRadius' label='Arrotondamento card / righe blu' min={0} max={40}/><Num k='formSectionGap' label='Spazio tra card' min={0} max={40}/></div>
         <Text k='formCardShadow' label='Ombra card CSS' placeholder='0 1px 3px rgba(15, 23, 42, 0.08)'/>
+        <div style={P.hint}>Lo stesso valore arrotonda sia il contenitore della card sia la riga blu di intestazione.</div>
       </SectionBox>
       <SectionBox title='Intestazioni card'>
         <Text k='formCardHeaderBg' label='Sfondo intestazione card' placeholder='linear-gradient(90deg, #0d3b66, #155e9d)'/>
@@ -419,7 +428,7 @@ export default function Setting(props: AllWidgetSettingProps<IMConfig>) {
           <div style={P.grid3}><Num k='violazioneLayoutLeftPercent' label='Larghezza iniziale gruppo sinistro (%)' min={30} max={80}/><Num k='violazioneLayoutMinLeftPx' label='Min gruppo sinistro (px)' min={260} max={900}/><Num k='violazioneLayoutMinRightPx' label='Min gruppo destro (px)' min={220} max={800}/></div>
           <div style={P.grid2}><Num k='violazioneSplitterWidth' label='Larghezza separatore (px)' min={6} max={40}/><Color k='violazioneSplitterColor' label='Colore separatore' fallback='#94a3b8'/></div>
           <div style={P.grid2}><Num k='violazioneDescrizioneRows' label='Righe descrizione dettagliata' min={2} max={12}/><Num k='violazioneCircostanzeRows' label='Righe circostanze rilevanti' min={2} max={12}/></div>
-          <button type='button' style={P.dangerBtn} onClick={() => setMany({ violazioneLayoutLeftPercent:58, violazioneLayoutMinLeftPx:600, violazioneLayoutMinRightPx:320, violazioneSplitterWidth:14, violazioneSplitterColor:'#94a3b8', violazioneDescrizioneRows:4, violazioneCircostanzeRows:3 })}>↺ Reset scheda Violazione</button>
+          <button type='button' style={P.dangerBtn} onClick={() => setMany({ violazioneLayoutLeftPercent:58, violazioneLayoutMinLeftPx:520, violazioneLayoutMinRightPx:360, violazioneSplitterWidth:14, violazioneSplitterColor:'#94a3b8', violazioneDescrizioneRows:5, violazioneCircostanzeRows:4 })}>↺ Reset scheda Violazione</button>
         </SectionBox>
       </> : <>
         <SectionBox title={`Scheda ${layoutTab.replace(/_/g,' ')}`} hint='Qui puoi modificare colonne, larghezze, ordine dei campi e etichette visualizzate. La scheda Violazione ha un layout speciale dedicato nella relativa tab.'>

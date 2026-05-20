@@ -139,6 +139,11 @@ function resolvePageId(pageTokenRaw: string): string | null {
 
 
 
+
+function normalizeSectionId (raw: any): string {
+  return String(raw || '').trim().toLowerCase().replace(/_/g, '-').replace(/\s+/g, '-')
+}
+
 function readCurrentSection (): string {
   try {
     const fromStorage = String(
@@ -147,13 +152,13 @@ function readCurrentSection (): string {
       window.sessionStorage.getItem('GII_NAV_SECTION') ||
       ''
     ).trim()
-    if (fromStorage) return fromStorage
+    if (fromStorage) return normalizeSectionId(fromStorage)
   } catch {
     // ignore
   }
   try {
     const url = new URL(window.location.href)
-    return String(url.searchParams.get('section') || url.searchParams.get('giiSection') || '').trim()
+    return normalizeSectionId(url.searchParams.get('section') || url.searchParams.get('giiSection') || '')
   } catch {
     return ''
   }
@@ -419,8 +424,8 @@ function navItemShowsSidebar (item: NavItem | null): boolean {
 
 function isNavItemActive (item: NavItem, cfg: any, currentPageId: string | null, currentSection: string, currentViewId: string | null): boolean {
   const itemPageId = item.hashPage ? resolvePageId(item.hashPage) : null
-  const itemSection = String(item.section || '').trim()
-  const currentSectionNorm = String(currentSection || '').trim()
+  const itemSection = normalizeSectionId(item.section)
+  const currentSectionNorm = normalizeSectionId(currentSection)
   const sectionId = String(cfg.sectionId || '').trim()
   const itemViewId = String(item.viewId || '').trim()
   if (itemViewId && sectionId) {
@@ -812,8 +817,8 @@ export default function Widget (props: Props) {
   const visibleItems = [...items].sort((a, b) => a.order - b.order).filter(isVisible)
   const activeItem = visibleItems.find(item => isNavItemActive(item, cfg, currentPageId, currentSection, currentViewId)) || null
   const activeSidebarItem = activeItem || visibleItems.find(item => {
-    const itemSection = String(item.section || '').trim()
-    return navItemShowsSidebar(item) && !!itemSection && itemSection === String(currentSection || '').trim()
+    const itemSection = normalizeSectionId(item.section)
+    return navItemShowsSidebar(item) && !!itemSection && itemSection === normalizeSectionId(currentSection)
   }) || null
   const sidebarWidgetId = String(cfg.sidebarWidgetId || '').trim()
   const shouldHandleSidebarReset = !!sidebarWidgetId && navItemShowsSidebar(activeSidebarItem)

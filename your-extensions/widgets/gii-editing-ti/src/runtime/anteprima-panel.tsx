@@ -198,6 +198,13 @@ function occorrenzaArt15ForRapporto (raw: any, on: boolean): string {
   return ''
 }
 
+function art15AttivoForRapporto (data: any): boolean {
+  const d = data || {}
+  const tipoAbuso = String(firstMeaningfulValue(d.tipo_abuso, d.TIPO_ABUSO) ?? '').trim().toLowerCase()
+  if (tipoAbuso === 'parziale' || tipoAbuso === 'totale') return true
+  return !!firstMeaningfulValue(d.norma15_parziale, d.NORMA15_PARZIALE, d.norma15_totale, d.NORMA15_TOTALE)
+}
+
 function buildPlaceholderMap (data: any, utentiCache: Map<string, UtenteCached> | null): Record<string, string> {
   const d = data || {}
   const areaCod = normalizeAreaCode(firstMeaningfulValue(d.area_cod, d.area))
@@ -206,7 +213,7 @@ function buildPlaceholderMap (data: any, utentiCache: Map<string, UtenteCached> 
   const areaN = AREA_NUM[areaCod] ?? null
   const settoreN = SETTORE_NUM[settoreCod] ?? null
   const artChecked = (field: string): boolean => { const v = d[field]; return v === 1 || v === '1' || v === true }
-  const art15on = !!(d.norma15_parziale || d.norma15_totale)
+  const art15on = art15AttivoForRapporto(d)
   const art16on = String(d.norma16_17 || '').toLowerCase().includes('art16')
   const art17on = String(d.norma16_17 || '').toLowerCase().includes('art17') || !!d.art17_tipo
   const xMark = (on: boolean) => on ? 'x' : ''
@@ -250,7 +257,7 @@ function buildPlaceholderMap (data: any, utentiCache: Map<string, UtenteCached> 
     grado_art34: artChecked('v_art34') ? gradoViolazioneForRapporto(gradiViolazioni, '34') : '', grado_art35: artChecked('v_art35') ? gradoViolazioneForRapporto(gradiViolazioni, '35') : '', grado_art36: artChecked('v_art36') ? gradoViolazioneForRapporto(gradiViolazioni, '36') : '',
     grado_art37: artChecked('v_art37') ? gradoViolazioneForRapporto(gradiViolazioni, '37') : '', grado_art39: '',
     recidiva_art08: '', recidiva_art12: '',
-    recidiva_art15: occorrenzaArt15, recidiva_art16: '', recidiva_art17: '',
+    occorrenza_art15: occorrenzaArt15, recidiva_art15: occorrenzaArt15, recidiva_art16: '', recidiva_art17: '',
     recidiva_art27: '', recidiva_art28: '',
     recidiva_art29: '', recidiva_art30: '',
     recidiva_art31: '', recidiva_art32: '',

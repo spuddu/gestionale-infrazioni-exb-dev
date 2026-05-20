@@ -298,10 +298,6 @@ export async function buildRapportoPdf (m: Record<string, string>): Promise<Uint
   txt(p1, v('ora_rilevazione'), fR, 9, 469, bY(237.71, 9), BLACK, 66)
 
   // ── Tabella infrazioni ──
-  // Sottovoce della colonna OCCORRENZA: il template base non la contiene.
-  centered(p1, 'Prima contestazione', fR, 7.0, C.occ0, C.occ1, bY(326.4, 7.0), BLUE)
-  centered(p1, 'o Recidiva', fR, 7.2, C.occ0, C.occ1, bY(334.6, 7.2), BLUE)
-
   const artSz = 8
   for (const row of ROWS) {
     const y = bY(row.top, artSz)

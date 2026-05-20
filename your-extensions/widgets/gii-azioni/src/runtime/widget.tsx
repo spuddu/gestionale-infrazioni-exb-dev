@@ -3311,9 +3311,11 @@ function ActionsPanel (props: {
       }
 
       if (ruoloDest) {
-        await saveWithWorkflowLog(upd, 'Integrazione richiesta salvata.', { eventoChiusura: 'INTEGRAZIONE_RICHIESTA', ruoloDestinatario: ruoloDest, utenteDestinatario: resolveDestUser(ruoloDest), noteChiusura: noteTrim, fase: role })
+        const successMsg = pending === 'INTEGRAZIONE' ? 'Pratica rimandata per integrazione.' : 'Integrazione richiesta salvata.'
+        await saveWithWorkflowLog(upd, successMsg, { eventoChiusura: 'INTEGRAZIONE_RICHIESTA', ruoloDestinatario: ruoloDest, utenteDestinatario: resolveDestUser(ruoloDest), noteChiusura: noteTrim, fase: role })
       } else {
-        await runApplyEdits(upd, 'Integrazione richiesta salvata.')
+        const successMsg = pending === 'INTEGRAZIONE' ? 'Pratica rimandata per integrazione.' : 'Integrazione richiesta salvata.'
+        await runApplyEdits(upd, successMsg)
       }
       setPending(null)
       setConfirmAttempted(false)
@@ -3507,7 +3509,7 @@ function ActionsPanel (props: {
         : pending === 'RESTITUISCI_TI_AMM'
           ? 'Conferma restituzione a TI AMM'
           : (pending === 'INTEGRAZIONE' || pending === 'INTEGRAZIONE_TI_AMM' || pending === 'INTEGRAZIONE_TECNICA')
-          ? (pending === 'INTEGRAZIONE_TI_AMM' ? 'Conferma integrazione a TI AMM' : pending === 'INTEGRAZIONE_TECNICA' ? 'Conferma integrazione tecnica' : 'Conferma richiesta di integrazione')
+          ? (pending === 'INTEGRAZIONE_TI_AMM' ? 'Conferma integrazione a TI AMM' : pending === 'INTEGRAZIONE_TECNICA' ? 'Conferma integrazione tecnica' : 'Rimanda per integrazione')
           : pending === 'APPROVA'
             ? approvaConfirmLabel
             : pending === 'RESPINGI'
@@ -3523,7 +3525,7 @@ function ActionsPanel (props: {
     ASSEGNA_TI_AMM: { icon: '✓', color: '#1a7f37', bg: '#f0fdf4', border: '#bbf7d0', desc: 'La pratica verrà assegnata al TI AMM selezionato.' },
     RESTITUISCI_TI_AMM: { icon: '→', color: '#2563eb', bg: '#eff6ff', border: '#bfdbfe', desc: 'La pratica verrà restituita al TI AMM già assegnato.' },
     APPROVA:        { icon: '✓', color: '#1a7f37', bg: '#f0fdf4', border: '#bbf7d0', desc: `Il rapporto verrà ${approvaDoneLabel.toLowerCase()}.` },
-    INTEGRAZIONE:   { icon: '⚠', color: '#b45309', bg: '#fffbeb', border: '#fde68a', desc: 'Verrà inviata una richiesta di integrazione.' },
+    INTEGRAZIONE:   { icon: '⚠', color: '#b45309', bg: '#fffbeb', border: '#fde68a', desc: 'Confermi di voler rimandare la pratica per richiesta di integrazione?' },
     INTEGRAZIONE_TI_AMM: { icon: '⚠', color: '#b45309', bg: '#fffbeb', border: '#fde68a', desc: 'La richiesta di integrazione verrà inviata al TI AMM assegnato.' },
     INTEGRAZIONE_TECNICA: { icon: '⚠', color: '#b45309', bg: '#fffbeb', border: '#fde68a', desc: 'La richiesta di integrazione tecnica verrà inviata al RI dell\'area di provenienza.' },
     RESPINGI:       { icon: '✕', color: '#dc2626', bg: '#fef2f2', border: '#fecaca', desc: 'Il rapporto verrà respinto.' },
@@ -3809,7 +3811,7 @@ function ActionsPanel (props: {
                 disabled={!canStartIntegrazione}
                 style={actionButtonStyle(buttonColors.integrazione, !canStartIntegrazione, ui, buttonColors.integrazioneText)}
               >
-                Integrazione
+                Rimanda
               </Button>
             )}
 
@@ -4196,6 +4198,33 @@ function occorrenzaArt15ForRapporto (raw: any, on: boolean): string {
   return ''
 }
 
+function pickRapportoAttrCI (obj: any, keys: string[]): any {
+  if (!obj) return undefined
+  const map: Record<string, string> = {}
+  try {
+    Object.keys(obj).forEach(k => { map[String(k).toLowerCase()] = k })
+  } catch {}
+  for (const k of keys) {
+    const direct = (obj as any)[k]
+    if (direct !== undefined && direct !== null && direct !== '') return direct
+    const realKey = map[String(k).toLowerCase()]
+    if (realKey) {
+      const v = (obj as any)[realKey]
+      if (v !== undefined && v !== null && v !== '') return v
+    }
+  }
+  return undefined
+}
+
+function art15AttivoForRapporto (data: any): boolean {
+  const d = data || {}
+  const tipoAbuso = String(pickRapportoAttrCI(d, ['tipo_abuso', 'TIPO_ABUSO']) ?? '').trim().toLowerCase()
+  if (tipoAbuso === 'parziale' || tipoAbuso === 'totale') return true
+  const norma15Parziale = pickRapportoAttrCI(d, ['norma15_parziale', 'NORMA15_PARZIALE'])
+  const norma15Totale = pickRapportoAttrCI(d, ['norma15_totale', 'NORMA15_TOTALE'])
+  return String(norma15Parziale ?? '').trim() !== '' || String(norma15Totale ?? '').trim() !== ''
+}
+
 /** Costruisce la mappa dei placeholder → valori dal record e dalla cache utenti.
  * Allineata alla scheda Anteprima del CW editing.
  */
@@ -4207,7 +4236,7 @@ function buildPlaceholderMap (data: any, utentiCache: Map<string, UtenteCached> 
   const areaN = AREA_NUM[areaCod] ?? null
   const settoreN = SETTORE_NUM[settoreCod] ?? null
   const artChecked = (field: string): boolean => { const v = d[field]; return v === 1 || v === '1' || v === true }
-  const art15on = !!(d.norma15_parziale || d.norma15_totale)
+  const art15on = art15AttivoForRapporto(d)
   const art16on = String(d.norma16_17 || '').toLowerCase().includes('art16')
   const art17on = String(d.norma16_17 || '').toLowerCase().includes('art17') || !!d.art17_tipo
   const xMark = (on: boolean) => on ? 'x' : ''
@@ -4251,7 +4280,7 @@ function buildPlaceholderMap (data: any, utentiCache: Map<string, UtenteCached> 
     grado_art34: artChecked('v_art34') ? gradoViolazioneForRapporto(gradiViolazioni, '34') : '', grado_art35: artChecked('v_art35') ? gradoViolazioneForRapporto(gradiViolazioni, '35') : '', grado_art36: artChecked('v_art36') ? gradoViolazioneForRapporto(gradiViolazioni, '36') : '',
     grado_art37: artChecked('v_art37') ? gradoViolazioneForRapporto(gradiViolazioni, '37') : '', grado_art39: '',
     recidiva_art08: '', recidiva_art12: '',
-    recidiva_art15: occorrenzaArt15, recidiva_art16: '', recidiva_art17: '',
+    occorrenza_art15: occorrenzaArt15, recidiva_art15: occorrenzaArt15, recidiva_art16: '', recidiva_art17: '',
     recidiva_art27: '', recidiva_art28: '',
     recidiva_art29: '', recidiva_art30: '',
     recidiva_art31: '', recidiva_art32: '',
