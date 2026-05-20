@@ -1,16 +1,16 @@
 /** @jsx jsx */
 /** @jsxFrag React.Fragment */
-import { React, jsx, DataSourceTypes, DataSourceManager, getAppStore, type UseDataSource } from 'jimu-core'
+import { React, jsx, DataSourceTypes, DataSourceManager, type UseDataSource } from 'jimu-core'
 import type { AllWidgetSettingProps } from 'jimu-for-builder'
 import { DataSourceSelector } from 'jimu-ui/advanced/data-source-selector'
 import { MapWidgetSelector } from 'jimu-ui/advanced/setting-components'
 import type { IMConfig } from '../config'
 import { defaultConfig, DEFAULT_FIELD_LAYOUTS } from '../config'
 
-function asJs<T=any>(v:any):T { return v?.asMutable?v.asMutable({deep:true}):v }
-
-
 type FieldOpt = { name: string; alias: string; type?: string }
+type Opt = { v: string; l: string }
+
+function asJs<T=any>(v:any):T { return v?.asMutable ? v.asMutable({ deep: true }) : v }
 
 function toImmutableCfg(base:any, patch:Record<string, any>) {
   let next = base?.set ? base : { ...(base || {}) }
@@ -20,7 +20,6 @@ function toImmutableCfg(base:any, patch:Record<string, any>) {
   })
   return next
 }
-
 
 function parseCoordInput(raw:any): number {
   const s = String(raw ?? '').trim()
@@ -33,8 +32,7 @@ function parseCoordInput(raw:any): number {
 function formatCoordInput(v:any): string {
   if (v == null) return ''
   if (typeof v === 'number') return Number.isFinite(v) ? String(v) : ''
-  const s = String(v).trim()
-  return s
+  return String(v).trim()
 }
 
 function getSchemaSnapshot(dsId: string) {
@@ -52,258 +50,123 @@ function getSchemaSnapshot(dsId: string) {
   return { url, label, fields }
 }
 
-
-type MapLayerOpt = {
-  key: string
-  title: string
-  url: string
-  id: string
-  layerId: string
-}
-
-function normalizeLayerUrlForConfig(raw: any): string {
-  const s = String(raw || '').trim()
-  if (!s) return ''
-  try {
-    const u = new URL(s)
-    if (!/^https?:$/i.test(u.protocol)) return ''
-    u.search = ''
-    u.hash = ''
-    return u.toString().replace(/\/+$/, '')
-  } catch {
-    return s.replace(/[?#].*$/, '').replace(/\/+$/, '')
-  }
-}
-
-function readLayerIdFromUrl(raw: any): string {
-  const m = String(raw || '').trim().match(/\/(\d+)\/?(?:[?#].*)?$/)
-  return m ? m[1] : ''
-}
-
-function firstText(...vals: any[]): string {
-  for (const v of vals) {
-    const s = String(v ?? '').trim()
-    if (s) return s
-  }
-  return ''
-}
-
-function arrayFromUnknown(v: any): any[] {
-  const x = asJs(v)
-  if (!x) return []
-  if (Array.isArray(x)) return x
-  if (typeof x === 'object') return Object.values(x)
-  return []
-}
-
-function looksLikeFeatureLayer(dsJson: any, url: string): boolean {
-  const t = String(dsJson?.type || dsJson?.dataSourceType || '').toLowerCase()
-  if (t.includes('feature_layer') || t.includes('featurelayer')) return true
-  return /\/(feature|map)server\/(\d+)\/?$/i.test(String(url || ''))
-}
-
-function mapLayerOptionFromDataSource(dsId: string, rawDsJson: any): MapLayerOpt | null {
-  const dsJson: any = asJs(rawDsJson || {})
-  const url = normalizeLayerUrlForConfig(firstText(dsJson?.url, dsJson?.sourceUrl, dsJson?.itemUrl, dsJson?.dataSourceJson?.url))
-  if (!looksLikeFeatureLayer(dsJson, url)) return null
-  const layerId = firstText(dsJson?.layerId, dsJson?.layerIdInWebMap, dsJson?.mapServiceLayerId, dsJson?.sourceLayerId, dsJson?.dataSourceJson?.layerId, readLayerIdFromUrl(url))
-  const title = firstText(dsJson?.sourceLabel, dsJson?.label, dsJson?.title, dsJson?.name, dsJson?.layerDefinition?.name, dsJson?.dataSourceJson?.label, dsJson?.dataSourceJson?.sourceLabel, dsId)
-  const id = firstText(dsJson?.jimuChildId, dsJson?.id, dsJson?.dataSourceId, dsId)
-  return {
-    key: `${id}|${url}|${layerId}`,
-    title,
-    url,
-    id,
-    layerId
-  }
-}
-
-function pushMapLayerOption(out: MapLayerOpt[], opt: MapLayerOpt | null) {
-  if (!opt) return
-  const sig = `${String(opt.id || '').toLowerCase()}|${String(opt.url || '').toLowerCase()}|${String(opt.layerId || '').toLowerCase()}|${String(opt.title || '').toLowerCase()}`
-  if (out.some(o => `${String(o.id || '').toLowerCase()}|${String(o.url || '').toLowerCase()}|${String(o.layerId || '').toLowerCase()}|${String(o.title || '').toLowerCase()}` === sig)) return
-  out.push(opt)
-}
-
-function collectDataSourceManagerLayerOptions(rootDsIds: string[]): MapLayerOpt[] {
-  const out: MapLayerOpt[] = []
-  const dsm = DataSourceManager.getInstance()
-  const visit = (ds: any) => {
-    if (!ds) return
-    const dsJson = ds?.getDataSourceJson?.() || ds?.dataSourceJson || {}
-    const dsId = firstText(ds?.id, dsJson?.id, dsJson?.dataSourceId)
-    pushMapLayerOption(out, mapLayerOptionFromDataSource(dsId, dsJson))
-    const children = [
-      ...arrayFromUnknown(ds?.getDataSources?.()),
-      ...arrayFromUnknown(ds?.getChildDataSources?.()),
-      ...arrayFromUnknown(ds?.getAllChildDataSources?.()),
-      ...arrayFromUnknown(ds?.dataSources)
-    ]
-    children.forEach(visit)
-  }
-  rootDsIds.forEach(id => visit(dsm.getDataSource(id)))
-  return out
-}
-
-function collectPageMapLayerOptions(mapWidgetIds: any): MapLayerOpt[] {
-  const ids = Array.isArray(mapWidgetIds) ? mapWidgetIds.map(String).filter(Boolean) : []
-  const appConfig: any = asJs(getAppStore()?.getState?.()?.appStateInBuilder?.appConfig || {})
-  const dataSources: any = asJs(appConfig?.dataSources || {})
-  const out: MapLayerOpt[] = []
-  const rootDsIds: string[] = []
-
-  ids.forEach(widgetId => {
-    const widget: any = asJs(appConfig?.widgets?.[widgetId] || {})
-    const useDs = [
-      ...arrayFromUnknown(widget?.useDataSources),
-      ...arrayFromUnknown(widget?.config?.useDataSources),
-      ...arrayFromUnknown(widget?.config?.dataSources)
-    ]
-    useDs.forEach((u: any) => {
-      const dsId = typeof u === 'string' ? u : firstText(u?.dataSourceId, u?.mainDataSourceId, u?.id)
-      if (dsId && !rootDsIds.includes(dsId)) rootDsIds.push(dsId)
-    })
-
-    const mapLayers = [
-      ...arrayFromUnknown(widget?.config?.layers),
-      ...arrayFromUnknown(widget?.config?.webMapLayers),
-      ...arrayFromUnknown(widget?.config?.operationalLayers)
-    ]
-    mapLayers.forEach((l: any) => {
-      const dsId = firstText(l?.dataSourceId, l?.jimuLayerId, l?.id)
-      if (dsId && dataSources?.[dsId]) pushMapLayerOption(out, mapLayerOptionFromDataSource(dsId, dataSources[dsId]))
-      else {
-        const url = normalizeLayerUrlForConfig(firstText(l?.url, l?.layerUrl))
-        if (looksLikeFeatureLayer(l, url)) {
-          pushMapLayerOption(out, {
-            key: `${firstText(l?.id, dsId)}|${url}|${firstText(l?.layerId, readLayerIdFromUrl(url))}`,
-            title: firstText(l?.title, l?.name, l?.label, dsId),
-            url,
-            id: firstText(l?.id, dsId),
-            layerId: firstText(l?.layerId, readLayerIdFromUrl(url))
-          })
-        }
-      }
-    })
-  })
-
-  collectDataSourceManagerLayerOptions(rootDsIds).forEach(o => pushMapLayerOption(out, o))
-
-  const relatedIds = new Set<string>()
-  const markRelated = (rootId: string) => {
-    const root: any = asJs(dataSources?.[rootId] || {})
-    const webMapLayers = [
-      ...arrayFromUnknown(root?.itemData?.operationalLayers),
-      ...arrayFromUnknown(root?.portalItemData?.operationalLayers),
-      ...arrayFromUnknown(root?.map?.operationalLayers),
-      ...arrayFromUnknown(root?.operationalLayers)
-    ]
-    webMapLayers.forEach((l: any) => {
-      const url = normalizeLayerUrlForConfig(firstText(l?.url, l?.layerUrl))
-      if (!looksLikeFeatureLayer(l, url)) return
-      const layerId = firstText(l?.layerId, l?.layerDefinition?.layerId, readLayerIdFromUrl(url))
-      const id = firstText(l?.id, l?.itemId, l?.layerId)
-      pushMapLayerOption(out, {
-        key: `${id}|${url}|${layerId}`,
-        title: firstText(l?.title, l?.name, l?.label, id),
-        url,
-        id,
-        layerId
-      })
-    })
-    ;[...arrayFromUnknown(root?.dataSources), ...arrayFromUnknown(root?.childDataSources), ...arrayFromUnknown(root?.originDataSources)].forEach((v: any) => {
-      const id = typeof v === 'string' ? v : firstText(v?.id, v?.dataSourceId)
-      if (id) relatedIds.add(id)
-      if (id && dataSources?.[id]) pushMapLayerOption(out, mapLayerOptionFromDataSource(id, dataSources[id]))
-      else pushMapLayerOption(out, mapLayerOptionFromDataSource(id, v))
-    })
-    Object.entries(dataSources || {}).forEach(([dsId, raw]) => {
-      const ds: any = asJs(raw || {})
-      const parent = firstText(ds?.rootDataSourceId, ds?.parentDataSourceId, ds?.belongToDataSourceId, ds?.webMapDataSourceId, ds?.mainDataSourceId)
-      const byId = String(dsId).startsWith(`${rootId}-`) || String(dsId).startsWith(`${rootId}_`)
-      if (parent === rootId || byId) relatedIds.add(dsId)
-    })
-  }
-  rootDsIds.forEach(markRelated)
-  relatedIds.forEach(dsId => pushMapLayerOption(out, mapLayerOptionFromDataSource(dsId, dataSources?.[dsId])))
-
-  return out.sort((a, b) => (a.title || a.id).localeCompare(b.title || b.id, 'it', { sensitivity: 'base' }))
-}
-
-function formatMapLayerOption(opt: MapLayerOpt): string {
-  const parts = [opt.title]
-  if (opt.layerId) parts.push(`layer ${opt.layerId}`)
-  return parts.filter(Boolean).join(' — ')
-}
-
 const P = {
-  wrap:  { padding:'0 12px 32px', fontSize:13, background:'#1a1f2e', minHeight:'100%', color:'#e5e7eb' } as React.CSSProperties,
-  sec:   { fontSize:11, fontWeight:700, color:'#93c5fd', textTransform:'uppercase' as const, letterSpacing:1.2, borderBottom:'1px solid rgba(255,255,255,0.10)', paddingBottom:6, marginBottom:14, marginTop:22, cursor:'pointer', display:'flex', justifyContent:'space-between', alignItems:'center' } as React.CSSProperties,
-  lbl:   { fontSize:11.5, fontWeight:600, color:'#d1d5db', display:'block', marginBottom:4, marginTop:10 } as React.CSSProperties,
-  hint:  { fontSize:10.5, color:'#a0aec0', marginTop:3, lineHeight:1.5 } as React.CSSProperties,
-  inp:   { width:'100%', padding:'5px 8px', fontSize:12, border:'1px solid rgba(255,255,255,0.15)', borderRadius:6, outline:'none', boxSizing:'border-box' as const, background:'rgba(255,255,255,0.07)', color:'#e5e7eb' } as React.CSSProperties,
-  chk:   { display:'flex', alignItems:'center', gap:8, fontSize:12, color:'#d1d5db', cursor:'pointer', marginTop:10 } as React.CSSProperties,
+  wrap: { padding:'0 12px 34px', fontSize:13, background:'#111827', minHeight:'100%', color:'#e5e7eb', overflowY:'auto' as const, overflowX:'hidden' as const, boxSizing:'border-box' as const, maxWidth:'100%' } as React.CSSProperties,
+  sec: { fontSize:12, fontWeight:800, color:'#bfdbfe', textTransform:'uppercase' as const, letterSpacing:0.9, borderBottom:'1px solid rgba(255,255,255,0.14)', padding:'10px 0 8px', margin:'18px 0 12px', cursor:'pointer', display:'flex', justifyContent:'space-between', alignItems:'center' } as React.CSSProperties,
+  box: { border:'1px solid rgba(255,255,255,0.10)', background:'rgba(255,255,255,0.045)', borderRadius:10, padding:10, marginBottom:12, boxSizing:'border-box' as const, maxWidth:'100%' } as React.CSSProperties,
+  grid2: { display:'grid', gridTemplateColumns:'repeat(auto-fit, minmax(150px, 1fr))', gap:8, minWidth:0, maxWidth:'100%' } as React.CSSProperties,
+  grid3: { display:'grid', gridTemplateColumns:'repeat(auto-fit, minmax(135px, 1fr))', gap:8, minWidth:0, maxWidth:'100%' } as React.CSSProperties,
+  lbl: { fontSize:12, fontWeight:700, color:'#d1d5db', display:'block', marginBottom:5, marginTop:10, overflowWrap:'anywhere' as const, lineHeight:1.25 } as React.CSSProperties,
+  hint: { fontSize:11.5, color:'#9ca3af', marginTop:4, lineHeight:1.45 } as React.CSSProperties,
+  inp: { width:'100%', maxWidth:'100%', height:31, padding:'4px 8px', fontSize:12, border:'1px solid rgba(255,255,255,0.17)', borderRadius:7, outline:'none', boxSizing:'border-box' as const, background:'rgba(255,255,255,0.075)', color:'#e5e7eb', minWidth:0 } as React.CSSProperties,
+  mini: { width:'100%', maxWidth:'100%', height:28, padding:'3px 7px', fontSize:11.5, border:'1px solid rgba(255,255,255,0.15)', borderRadius:6, background:'rgba(255,255,255,0.07)', color:'#e5e7eb', boxSizing:'border-box' as const, minWidth:0 } as React.CSSProperties,
+  chk: { display:'flex', alignItems:'flex-start', gap:8, fontSize:12.5, color:'#d1d5db', cursor:'pointer', marginTop:10, flexWrap:'wrap', minWidth:0 } as React.CSSProperties,
+  btn: { padding:'5px 10px', borderRadius:7, border:'1px solid rgba(96,165,250,0.38)', background:'rgba(96,165,250,0.10)', color:'#93c5fd', fontSize:12, cursor:'pointer', fontWeight:700 } as React.CSSProperties,
+  dangerBtn: { padding:'5px 10px', borderRadius:7, border:'1px solid rgba(252,165,165,0.38)', background:'rgba(239,68,68,0.08)', color:'#fca5a5', fontSize:12, cursor:'pointer', fontWeight:700 } as React.CSSProperties,
 }
 
 function Acc(p: { id:string; label:string; open:boolean; onToggle:()=>void }) {
-  return (
-    <div style={P.sec} onClick={p.onToggle}>
-      <span>{p.label}</span>
-      <span style={{ fontSize:10, color:'#a0aec0' }}>{p.open?'▲':'▼'}</span>
-    </div>
-  )
+  return <div style={P.sec} onClick={p.onToggle}><span>{p.label}</span><span style={{ fontSize:11, color:'#9ca3af' }}>{p.open ? '▲' : '▼'}</span></div>
+}
+
+function SectionBox(p: { title?: string; hint?: string; children: React.ReactNode }) {
+  return <div style={P.box}>{p.title && <div style={{fontSize:12,fontWeight:800,color:'#93c5fd',marginBottom:6}}>{p.title}</div>}{p.hint && <div style={{...P.hint,marginTop:0,marginBottom:8}}>{p.hint}</div>}{p.children}</div>
+}
+
+const colorValue = (v:any, fallback:string) => /^#[0-9a-fA-F]{3,8}$/.test(String(v || '')) ? String(v) : fallback
+
+const MODERN_PALETTE = {
+  modeBgCreate: '#ecfdf5',
+  modeBgEdit: '#edf5ff',
+  maskBg: '#eef4fb',
+  maskBorderColor: '#cbd8e6',
+  dividerColor: '#cbd8e6',
+  formLabelColor: '#334155',
+  formFieldBg: '#f8fbff',
+  formFieldColor: '#0f172a',
+  formFieldBorderColor: '#bfcede',
+  formFieldDisabledBg: '#e7eef7',
+  formFieldDisabledColor: '#64748b',
+  formCardBg: '#f8fbff',
+  formCardBorderColor: '#c6d7ea',
+  formCardShadow: '0 8px 22px rgba(15, 23, 42, 0.08)',
+  formCardHeaderBg: 'linear-gradient(90deg, #0d3b66, #155e9d)',
+  formCardHeaderColor: '#ffffff',
+  sectionHeaderColor: '#0f4c81',
+  sectionDividerColor: '#93c5fd',
+  violazioneSplitterColor: '#94a3b8'
 }
 
 export default function Setting(props: AllWidgetSettingProps<IMConfig>) {
   const cfg: any = { ...defaultConfig, ...asJs(props.config) }
   const [openSec, setOpenSec] = React.useState<string>('datasource')
-  const toggle = (id:string) => setOpenSec(s => s===id ? '' : id)
-  const isOpen = (id:string) => openSec===id
+  const [layoutTab, setLayoutTab] = React.useState<string>('violazione')
+  const toggle = (id:string) => setOpenSec(s => s === id ? '' : id)
+  const isOpen = (id:string) => openSec === id
 
   const set = (key:string, value:any) => {
     const base = props.config || defaultConfig as any
-    props.onSettingChange({ id:props.id, config: base.set ? base.set(key, value) : { ...cfg, [key]:value } as any })
+    props.onSettingChange({ id: props.id, config: base?.set ? base.set(key, value) : { ...cfg, [key]: value } as any })
   }
-
   const setMany = (patch: Record<string, any>) => {
     const base = props.config || defaultConfig as any
     props.onSettingChange({ id: props.id, config: toImmutableCfg(base, patch) })
   }
 
-  // Layout editor state
-  const LAYOUT_TABS = ['trasgressore', 'violazione', 'dati_tecnici'] as const
-  const [layoutTab, setLayoutTab] = React.useState<string>('trasgressore')
+  const Num = (p:{ k:string; label:string; min?:number; max?:number; step?:number; width?:number; hint?:string }) => (
+    <div>
+      <label style={P.lbl}>{p.label}</label>
+      <input type='number' min={p.min} max={p.max} step={p.step ?? 1} value={cfg[p.k] ?? (defaultConfig as any)[p.k] ?? 0}
+        onChange={e => set(p.k, Number(e.target.value))} style={{...P.inp, width:p.width || '100%'}}/>
+      {p.hint && <div style={P.hint}>{p.hint}</div>}
+    </div>
+  )
+  const Text = (p:{ k:string; label:string; placeholder?:string; hint?:string }) => (
+    <div>
+      <label style={P.lbl}>{p.label}</label>
+      <input type='text' value={cfg[p.k] ?? ''} placeholder={p.placeholder || ''} onChange={e => set(p.k, e.target.value)} style={P.inp}/>
+      {p.hint && <div style={P.hint}>{p.hint}</div>}
+    </div>
+  )
+  const Color = (p:{ k:string; label:string; fallback:string; hint?:string; allowText?:boolean }) => (
+    <div>
+      <label style={P.lbl}>{p.label}</label>
+      <div style={{display:'flex',alignItems:'center',gap:7}}>
+        <input type='color' value={colorValue(cfg[p.k], p.fallback)} onChange={e => set(p.k, e.target.value)} style={{width:34,height:30,padding:2,border:'1px solid rgba(255,255,255,0.18)',borderRadius:6,background:'transparent',flexShrink:0}}/>
+        <input type='text' value={cfg[p.k] ?? ''} onChange={e => set(p.k, e.target.value)} placeholder={p.fallback} style={{...P.inp, flex:1, minWidth:0}}/>
+      </div>
+      {p.hint && <div style={P.hint}>{p.hint}</div>}
+    </div>
+  )
+  const Toggle = (p:{ k:string; label:string; hint?:string }) => (
+    <label style={P.chk}><input type='checkbox' checked={!!cfg[p.k]} onChange={e => set(p.k, e.target.checked)}/><span>{p.label}</span>{p.hint && <span style={{...P.hint,marginTop:0}}>{p.hint}</span>}</label>
+  )
 
-  const FIELD_OPTS: Record<string, {v:string;l:string}[]> = {
+  const FIELD_OPTS: Record<string, Opt[]> = {
+    dati_generali: [
+      {v:'area_cod',l:'Area'}, {v:'settore_cod',l:'Settore'}, {v:'ufficio_zona',l:'Ufficio di zona'},
+      {v:'tecnico_rilevatore',l:'Tecnico rilevatore'}, {v:'data_rilevazione',l:'Data rilevazione'}, {v:'ti_assegnato_nome',l:'Tecnico istruttore'}, {v:'data_firma',l:'Data compilazione'}
+    ],
     trasgressore: [
-      {v:'tipologia_soggetto',l:'Tipologia soggetto'},{v:'qualifica_fondo',l:'Qualifica rispetto al fondo'},
-      {v:'nome',l:'Nome'},{v:'cognome',l:'Cognome'},{v:'codice_fiscale',l:'Codice fiscale'},
-      {v:'ragione_sociale',l:'Ragione sociale'},{v:'piva',l:'P. IVA'},
-      {v:'via',l:'Via'},{v:'civico',l:'N. civico'},{v:'citta',l:'Città'},{v:'cap',l:'CAP'},
-      {v:'telefono',l:'Telefono'},{v:'cellulare',l:'Cellulare'},{v:'email',l:'E-mail'},{v:'pec',l:'PEC'},
-      {v:'dom_notifica_uguale',l:'Coincide con residenza'},{v:'dom_notifica_via',l:'Dom. Via'},{v:'dom_notifica_civico',l:'Dom. Civico'},{v:'dom_notifica_citta',l:'Dom. Città'},{v:'dom_notifica_cap',l:'Dom. CAP'},
-      {v:'rl_nome',l:'RL Nome'},{v:'rl_cognome',l:'RL Cognome'},{v:'rl_cf',l:'RL Codice fiscale'},{v:'rl_carica',l:'RL Carica'},
-      {v:'rl_dom_notifica',l:'RL Dom. notifiche'},{v:'rl_dom_via',l:'RL Dom. Via'},{v:'rl_dom_civico',l:'RL Dom. Civico'},{v:'rl_dom_citta',l:'RL Dom. Città'},{v:'rl_dom_cap',l:'RL Dom. CAP'},
+      {v:'tipologia_soggetto',l:'Tipologia soggetto'}, {v:'qualifica_fondo',l:'Qualifica fondo'},
+      {v:'nome',l:'Nome'}, {v:'cognome',l:'Cognome'}, {v:'codice_fiscale',l:'Codice fiscale'},
+      {v:'ragione_sociale',l:'Ragione sociale'}, {v:'piva',l:'P. IVA'},
+      {v:'via',l:'Via'}, {v:'civico',l:'N. civico'}, {v:'citta',l:'Città'}, {v:'cap',l:'CAP'},
+      {v:'telefono',l:'Telefono'}, {v:'cellulare',l:'Cellulare'}, {v:'email',l:'E-mail'}, {v:'pec',l:'PEC'},
+      {v:'dom_notifica_uguale',l:'Domicilio coincide'}, {v:'dom_notifica_via',l:'Dom. via'}, {v:'dom_notifica_civico',l:'Dom. civico'}, {v:'dom_notifica_citta',l:'Dom. città'}, {v:'dom_notifica_cap',l:'Dom. CAP'},
+      {v:'rl_nome',l:'RL nome'}, {v:'rl_cognome',l:'RL cognome'}, {v:'rl_cf',l:'RL CF'}, {v:'rl_carica',l:'RL carica'},
+      {v:'rl_dom_notifica',l:'RL domicilio notifiche'}, {v:'rl_dom_via',l:'RL dom. via'}, {v:'rl_dom_civico',l:'RL dom. civico'}, {v:'rl_dom_citta',l:'RL dom. città'}, {v:'rl_dom_cap',l:'RL dom. CAP'},
       {v:'note_anagrafica',l:'Note trasgressore'}
     ],
-    violazione: [
-      {v:'tipo_abuso',l:'Tipo di abuso'},{v:'norma15_sel',l:'Occorrenza Art. 15'},
-      {v:'sup_dichiarata_art15',l:'Sup. dichiarata Art.15'},{v:'sup_irrigata_art15',l:'Sup. irrigata Art.15'},
-      {v:'norma16_17',l:'Inosservanza Art. 16-17'},{v:'art17_tipo',l:'Tipo Art.17'},
-      {v:'sup_dichiarata_art16',l:'Sup. dich. Art.16'},{v:'sup_irrigata_art16',l:'Sup. irr. Art.16'},
-      {v:'sup_dichiarata_art17_1',l:'Sup. dich. Art.17.1'},{v:'sup_irrigata_art17_1',l:'Sup. var. Art.17.1'},
-      {v:'sup_dichiarata_art17_2',l:'Sup. dich. Art.17.2'},{v:'sup_irrigata_art17_2',l:'Sup. irr. Art.17.2'},
-      {v:'grado',l:'Grado'},
-      {v:'descrizione_fatti',l:'Descrizione fatti'},{v:'circostanze',l:'Circostanze'},{v:'presenza_trasgressore',l:'Trasgressore presente'}
-    ],
     dati_tecnici: [
-      {v:'descrizione_luogo',l:'Descrizione luogo'},
-      {v:'distretto',l:'Distretto'},{v:'comizio',l:'Comizio'},{v:'idrante',l:'Idrante'},
-      {v:'matricola_contatore',l:'Matricola contatore'},{v:'matricola_tessera',l:'Matricola tessera'}
+      {v:'descrizione_luogo',l:'Descrizione luogo'}, {v:'distretto',l:'Distretto'}, {v:'comizio',l:'Comizio'}, {v:'idrante',l:'Idrante'},
+      {v:'matricola_contatore',l:'Matricola contatore'}, {v:'matricola_tessera',l:'Matricola tessera'}
     ]
   }
-  const SPECIAL_OPTS = [
-    {v:'_dati_gen_label',l:'Etichetta dati generali'},{v:'_localizzazione',l:'Pannello localizzazione'},{v:'_checkboxes_norma3',l:'Checkbox altre violazioni'},{v:'_header_rappresentante_legale',l:'Header rappresentante legale (PG)'}
+  const SPECIAL_OPTS: Opt[] = [
+    {v:'_dati_gen_label',l:'Etichetta dati generali'},
+    {v:'_localizzazione',l:'Pannello localizzazione'},
+    {v:'_header_rappresentante_legale',l:'Header rappresentante legale (PG)'}
   ]
 
   const getRows = (tabId: string): any[] => {
@@ -331,559 +194,257 @@ export default function Setting(props: AllWidgetSettingProps<IMConfig>) {
     return rows
   }
   const updateRow = (tabId: string, idx: number, patch: any) => {
-    const rows = ensureCustom(tabId).slice()
-    rows[idx] = { ...rows[idx], ...patch }
-    saveRows(tabId, rows)
-  }
-  const removeRow = (tabId: string, idx: number) => {
-    const rows = ensureCustom(tabId).slice()
-    rows.splice(idx, 1)
-    saveRows(tabId, rows)
-  }
-  const moveRow = (tabId: string, idx: number, dir: -1|1) => {
-    const rows = ensureCustom(tabId).slice()
-    const ni = idx + dir
-    if (ni < 0 || ni >= rows.length) return
-    ;[rows[idx], rows[ni]] = [rows[ni], rows[idx]]
-    saveRows(tabId, rows)
+    const rows = ensureCustom(tabId).slice(); rows[idx] = { ...rows[idx], ...patch }; saveRows(tabId, rows)
   }
   const addRow = (tabId: string, type: string) => {
     const rows = ensureCustom(tabId).slice()
-    if (type === 'header') rows.push({ type: 'header', label: 'Nuova sezione' })
-    else if (type === 'special') rows.push({ type: 'special', id: SPECIAL_OPTS[0]?.v || '' })
-    else rows.push({ type: 'fields', columns: '1fr', cells: [{ field: '' }] })
+    if (type === 'header') rows.push({ type:'header', label:'Nuova sezione' })
+    else if (type === 'special') rows.push({ type:'special', id: SPECIAL_OPTS[0].v })
+    else rows.push({ type:'fields', columns:'1fr', cells:[{}] })
     saveRows(tabId, rows)
   }
-  const updateCell = (tabId: string, rowIdx: number, cellIdx: number, field: string) => {
-    const rows = ensureCustom(tabId).slice()
-    const r = { ...rows[rowIdx] }
-    const cells = (r.cells || []).slice()
-    cells[cellIdx] = field ? { ...(cells[cellIdx] || {}), field } : {}
-    r.cells = cells; rows[rowIdx] = r
-    saveRows(tabId, rows)
+  const removeRow = (tabId: string, idx: number) => { const rows = ensureCustom(tabId).slice(); rows.splice(idx, 1); saveRows(tabId, rows) }
+  const moveRow = (tabId: string, idx: number, dir: -1|1) => {
+    const rows = ensureCustom(tabId).slice(); const ni = idx + dir
+    if (ni < 0 || ni >= rows.length) return
+    ;[rows[idx], rows[ni]] = [rows[ni], rows[idx]]; saveRows(tabId, rows)
   }
-  const addCell = (tabId: string, rowIdx: number) => {
-    const rows = ensureCustom(tabId).slice()
-    const r = { ...rows[rowIdx] }
-    const cells = (r.cells || []).slice()
-    const widths = colsToWidths(r.columns, cells.length)
-    cells.push({})
-    widths.push(25)
-    r.cells = cells; r.columns = widthsToColumns(widths); rows[rowIdx] = r
-    saveRows(tabId, rows)
-  }
-  const removeCell = (tabId: string, rowIdx: number, cellIdx: number) => {
-    const rows = ensureCustom(tabId).slice()
-    const r = { ...rows[rowIdx] }
-    const cells = (r.cells || []).slice()
-    const widths = colsToWidths(r.columns, cells.length)
-    cells.splice(cellIdx, 1)
-    widths.splice(cellIdx, 1)
-    r.cells = cells; r.columns = widthsToColumns(widths.length ? widths : [100]); rows[rowIdx] = r
-    saveRows(tabId, rows)
-  }
-
-  /** Parse columns string to array of percentage widths.
-   *  Handles: '25% 10% 30%', '4fr 1fr 2fr', '1fr 1fr', etc. */
   const colsToWidths = (columns: string | undefined, cellCount: number): number[] => {
     const parts = (columns || '1fr').trim().split(/\s+/)
-    // Detect format
     const isPct = parts.some(p => p.endsWith('%'))
-    if (isPct) {
-      return Array.from({ length: cellCount }, (_, i) => {
-        const p = parts[i] || parts[parts.length - 1] || '25%'
-        const m = p.match(/^([\d.]+)%$/)
-        return m ? Math.round(parseFloat(m[1])) : 25
-      })
-    }
-    // Convert fr to approximate percentages
-    const frVals = parts.map(p => { const m = p.match(/^(\d+)fr$/); return m ? parseInt(m[1], 10) : 1 })
-    const totalFr = frVals.reduce((a, b) => a + b, 0) || 1
-    return Array.from({ length: cellCount }, (_, i) => {
-      const fr = frVals[i] || frVals[frVals.length - 1] || 1
-      return Math.max(1, Math.round(fr / totalFr * 100))
-    })
+    if (isPct) return Array.from({length:cellCount}, (_, i) => { const m=(parts[i]||parts[parts.length-1]||'100%').match(/^([\d.]+)%$/); return m ? Math.round(parseFloat(m[1])) : 25 })
+    const frVals = parts.map(p => { const m=p.match(/^(\d+)fr$/); return m ? parseInt(m[1], 10) : 1 })
+    const total = frVals.reduce((a,b)=>a+b,0)||1
+    return Array.from({length:cellCount}, (_, i) => Math.max(1, Math.round((frVals[i] || frVals[frVals.length-1] || 1) / total * 100)))
   }
-  const widthsToColumns = (widths: number[]): string => widths.map(w => `${Math.max(1, w)}%`).join(' ')
+  const widthsToColumns = (widths: number[]): string => widths.map(w => `${Math.max(1, Math.min(100, w))}%`).join(' ')
+  const updateCell = (tabId: string, rowIdx: number, cellIdx: number, field: string) => {
+    const rows = ensureCustom(tabId).slice(); const r={...rows[rowIdx]}; const cells=(r.cells||[]).slice(); cells[cellIdx]=field?{...(cells[cellIdx]||{}), field}:{label:cells[cellIdx]?.label}; r.cells=cells; rows[rowIdx]=r; saveRows(tabId, rows)
+  }
+  const updateCellLabel = (tabId: string, rowIdx: number, cellIdx: number, label: string) => {
+    const rows = ensureCustom(tabId).slice(); const r={...rows[rowIdx]}; const cells=(r.cells||[]).slice(); cells[cellIdx]={...(cells[cellIdx]||{}), label}; r.cells=cells; rows[rowIdx]=r; saveRows(tabId, rows)
+  }
+  const addCell = (tabId: string, rowIdx: number) => {
+    const rows=ensureCustom(tabId).slice(); const r={...rows[rowIdx]}; const cells=(r.cells||[]).slice(); const widths=colsToWidths(r.columns,cells.length); cells.push({}); widths.push(25); r.cells=cells; r.columns=widthsToColumns(widths); rows[rowIdx]=r; saveRows(tabId, rows)
+  }
+  const removeCell = (tabId: string, rowIdx: number, cellIdx: number) => {
+    const rows=ensureCustom(tabId).slice(); const r={...rows[rowIdx]}; const cells=(r.cells||[]).slice(); const widths=colsToWidths(r.columns,cells.length); cells.splice(cellIdx,1); widths.splice(cellIdx,1); r.cells=cells; r.columns=widthsToColumns(widths.length?widths:[100]); rows[rowIdx]=r; saveRows(tabId, rows)
+  }
   const updateCellWidth = (tabId: string, rowIdx: number, cellIdx: number, width: number) => {
-    const rows = ensureCustom(tabId).slice()
-    const r = { ...rows[rowIdx] }
-    const cells = r.cells || []
-    const widths = colsToWidths(r.columns, cells.length)
-    widths[cellIdx] = Math.max(1, Math.min(100, width))
-    r.columns = widthsToColumns(widths); rows[rowIdx] = r
-    saveRows(tabId, rows)
+    const rows=ensureCustom(tabId).slice(); const r={...rows[rowIdx]}; const cells=r.cells||[]; const widths=colsToWidths(r.columns,cells.length); widths[cellIdx]=Math.max(1, Math.min(100, width)); r.columns=widthsToColumns(widths); rows[rowIdx]=r; saveRows(tabId, rows)
   }
 
   const useDsJs:any[] = asJs(props.useDataSources ?? ([] as any)) || []
   const primaryDsId = String(useDsJs?.[0]?.dataSourceId || '')
-  const mapLayerOptions = React.useMemo(() => collectPageMapLayerOptions(cfg.useMapWidgetIds), [JSON.stringify(cfg.useMapWidgetIds || [])])
-  const selectedMapLayerKey = React.useMemo(() => {
-    const curUrl = normalizeLayerUrlForConfig(cfg.mapLayerUrl || '')
-    const curId = String(cfg.mapLayerId || '')
-    const curLayerId = String(cfg.mapLayerLayerId || '')
-    const curTitle = String(cfg.mapLayerTitle || '')
-    const found = mapLayerOptions.find(o =>
-      (curId && o.id === curId) ||
-      (curUrl && normalizeLayerUrlForConfig(o.url) === curUrl) ||
-      (curLayerId && String(o.layerId) === curLayerId) ||
-      (curTitle && o.title === curTitle)
-    )
-    return found?.key || ''
-  }, [mapLayerOptions, cfg.mapLayerId, cfg.mapLayerUrl, cfg.mapLayerLayerId, cfg.mapLayerTitle])
-
   React.useEffect(() => {
     if (useDsJs.length > 0) {
       const snap = getSchemaSnapshot(primaryDsId)
-      const nextCfg = toImmutableCfg(props.config || defaultConfig as any, {
-        schemaLayerUrl: snap.url,
-        schemaLayerLabel: snap.label,
-        schemaFields: snap.fields
-      })
+      const nextCfg = toImmutableCfg(props.config || defaultConfig as any, { schemaLayerUrl: snap.url, schemaLayerLabel: snap.label, schemaFields: snap.fields })
       props.onSettingChange({ id:props.id, useDataSources: [] as any, useDataSourcesEnabled:false, config: nextCfg })
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [useDsJs.length, primaryDsId])
-
   const onDsChange = (useDataSources: UseDataSource[]) => {
-    const useDsJs:any[] = asJs(useDataSources ?? ([] as any)) || []
-    const primaryDsId = String(useDsJs?.[0]?.dataSourceId || '')
-    const snap = getSchemaSnapshot(primaryDsId)
-    const nextCfg = toImmutableCfg(props.config || defaultConfig as any, {
-      schemaLayerUrl: snap.url,
-      schemaLayerLabel: snap.label,
-      schemaFields: snap.fields
-    })
+    const dsArr:any[] = asJs(useDataSources ?? ([] as any)) || []
+    const dsId = String(dsArr?.[0]?.dataSourceId || '')
+    const snap = getSchemaSnapshot(dsId)
+    const nextCfg = toImmutableCfg(props.config || defaultConfig as any, { schemaLayerUrl: snap.url, schemaLayerLabel: snap.label, schemaFields: snap.fields })
     props.onSettingChange({ id:props.id, useDataSources: [] as any, useDataSourcesEnabled:false, config: nextCfg })
   }
-  const onToggleDs = (_enabled: boolean) =>
-    props.onSettingChange({ id:props.id, useDataSourcesEnabled: false })
 
-  return (
-    <div style={P.wrap}>
-
-      {/* === DATASOURCE === */}
-      <Acc id='datasource' label='📊 Datasource' open={isOpen('datasource')} onToggle={()=>toggle('datasource')}/>
-      {isOpen('datasource') && <div>
-        <div style={P.hint}>Seleziona il layer solo per acquisire schema e alias. Il widget li salva in config e rimuove le useDataSources legacy dall’istanza.</div>
-        <div style={{ marginTop:10 }}>
-          <DataSourceSelector
-            widgetId={props.id}
-            types={[DataSourceTypes.FeatureLayer] as any}
-            isMultiple={false}
-            useDataSources={[] as any}
-            useDataSourcesEnabled={false as any}
-            onToggleUseDataEnabled={onToggleDs}
-            onChange={onDsChange}
-            mustUseDataSource
-          />
-        </div>
-      </div>}
-
-      {/* === URL LAYER === */}
-      <Acc id='sorgenti' label='🔗 URL Layer' open={isOpen('sorgenti')} onToggle={()=>toggle('sorgenti')}/>
-      {isOpen('sorgenti') && <div>
-        <label style={P.lbl}>URL Feature Layer madre <span style={{color:'#f87171'}}>*</span></label>
-        <input type='text' value={cfg.motherLayerUrl} onChange={e=>set('motherLayerUrl',e.target.value)}
-          placeholder='https://services2.arcgis.com/.../FeatureServer/0' style={P.inp}/>
-        <div style={P.hint}>URL diretto al layer. Usato per addFeatures (nuova pratica) e updateFeatures (modifica).</div>
-        <label style={P.lbl}>URL Tabella Audit Log <span style={{color:'#a0aec0'}}>(opzionale)</span></label>
-        <input type='text' value={cfg.auditTableUrl} onChange={e=>set('auditTableUrl',e.target.value)}
-          placeholder='https://services2.arcgis.com/.../FeatureServer/1' style={P.inp}/>
-        <div style={P.hint}>Se valorizzato, ogni modifica viene tracciata campo per campo. Se vuoto il log viene saltato.</div>
-
-        <label style={P.lbl}>Tabella import prezzari</label>
-        <input type='text' value={cfg.nsImportPrezzariUrl || ''} onChange={e=>set('nsImportPrezzariUrl',e.target.value)}
-          placeholder='https://services2.arcgis.com/.../FeatureServer/0' style={P.inp}/>
-        <label style={P.lbl}>Tabella articoli prezzario regionale</label>
-        <input type='text' value={cfg.nsPrezzarioRegionaleArticoliUrl || ''} onChange={e=>set('nsPrezzarioRegionaleArticoliUrl',e.target.value)}
-          placeholder='https://services2.arcgis.com/.../FeatureServer/0' style={P.inp}/>
-        <label style={P.lbl}>Tabella articoli prezzario interno</label>
-        <input type='text' value={cfg.nsPrezzarioInternoArticoliUrl || ''} onChange={e=>set('nsPrezzarioInternoArticoliUrl',e.target.value)}
-          placeholder='https://services2.arcgis.com/.../FeatureServer/0' style={P.inp}/>
-        <label style={P.lbl}>Tabella Nuovi Prezzi</label>
-        <input type='text' value={cfg.nsNuoviPrezziUrl || ''} onChange={e=>set('nsNuoviPrezziUrl',e.target.value)}
-          placeholder='https://services2.arcgis.com/.../FeatureServer/0' style={P.inp}/>
-        <label style={P.lbl}>Tabella dettaglio nota spese</label>
-        <input type='text' value={cfg.nsNotaSpeseDettaglioUrl || ''} onChange={e=>set('nsNotaSpeseDettaglioUrl',e.target.value)}
-          placeholder='https://services2.arcgis.com/.../FeatureServer/0' style={P.inp}/>
-        <label style={P.lbl}>Tabella parametri nota spese</label>
-        <input type='text' value={cfg.nsParametriUrl || ''} onChange={e=>set('nsParametriUrl',e.target.value)}
-          placeholder='https://services2.arcgis.com/.../FeatureServer/0' style={P.inp}/>
-        <label style={P.lbl}>Codice parametro spese generali</label>
-        <input type='text' value={cfg.nsParametroCode || ''} onChange={e=>set('nsParametroCode',e.target.value)}
-          placeholder='SPESE_GENERALI_PERC' style={P.inp}/>
-        <div style={P.hint}>Usato dalla tab Nota spese del cw editing. Il widget TI legge gli articoli da prezzario regionale, prezzario interno o Nuovi Prezzi, salva gli snapshot in GII_NOTA_SPESE_DETTAGLIO e aggiorna subito i totali sul rapporto.</div>
-      </div>}
-
-      {/* === MODALITA === */}
-      <Acc id='modalita' label='⚙ Modalità' open={isOpen('modalita')} onToggle={()=>toggle('modalita')}/>
-      {isOpen('modalita') && <div>
-        <label style={P.lbl}>Modalità di visualizzazione</label>
-        <select value={cfg.displayMode} onChange={e=>set('displayMode',e.target.value)} style={P.inp}>
-          <option value='page' style={{background:'#1a1f2e'}}>Pagina intera</option>
-          <option value='overlay' style={{background:'#1a1f2e'}}>Overlay modal</option>
-        </select>
-        {cfg.displayMode==='page' && <>
-          <label style={P.lbl}>Hash pagina di ritorno (tasto Annulla)</label>
-          <input type='text' value={cfg.closePageHash} onChange={e=>set('closePageHash',e.target.value)}
-            placeholder='elenco-pratiche' style={P.inp}/>
-          <div style={P.hint}>L'utente viene reindirizzato a <code style={{color:'#93c5fd'}}>#{cfg.closePageHash}</code> quando clicca Annulla.</div>
-        </>}
-        <label style={P.chk}>
-          <input type='checkbox' checked={!!cfg.showDatiGenerali} onChange={e=>set('showDatiGenerali', e.target.checked)}/>
-          Mostra sezione "Dati generali" nel form nuova pratica
-        </label>
-        <div style={P.hint}>Se attivo, la tab Dati generali mostra tecnico, ufficio e data (read-only).</div>
-
-        <div style={{marginTop:14, borderTop:'1px solid rgba(255,255,255,0.07)', paddingTop:12}}>
-          <div style={{fontSize:11,fontWeight:700,color:'#93c5fd',marginBottom:8}}>Colore sfondo per modalità</div>
-          <div style={{display:'grid',gap:10}}>
-            <div>
-              <label style={P.lbl}>🟢 Nuovo rapporto</label>
-              <div style={{display:'flex',alignItems:'center',gap:6}}>
-                <input type='color' value={/^#[0-9a-fA-F]{3,8}$/.test(cfg.modeBgCreate||'') ? cfg.modeBgCreate : '#f0fdf4'}
-                  onChange={e=>set('modeBgCreate',e.target.value)}
-                  style={{width:30,height:26,padding:2,border:'1px solid rgba(255,255,255,0.15)',borderRadius:5,cursor:'pointer',background:'transparent',flexShrink:0}}/>
-                <input type='text' value={cfg.modeBgCreate||'#f0fdf4'} onChange={e=>set('modeBgCreate',e.target.value)}
-                  placeholder='#f0fdf4' style={{...P.inp,flex:1,fontSize:11}}/>
-              </div>
-              <div style={P.hint}>Sfondo quando TI sta creando un nuovo rapporto.</div>
+  const renderGenericLayoutEditor = (tabId: string) => (
+    <div>
+      <div style={{...P.hint, marginBottom:8}}>Modifica righe, colonne, larghezze e etichette visualizzate della scheda selezionata.</div>
+      <div style={{display:'grid', gap:8}}>
+        {getRows(tabId).map((row:any, ri:number) => {
+          const cells:any[] = row.cells || []
+          const widths = colsToWidths(row.columns, cells.length || 1)
+          return <div key={ri} style={{border:'1px solid rgba(255,255,255,0.12)',borderRadius:9,padding:10,background:'rgba(255,255,255,0.035)',minWidth:0,maxWidth:'100%',boxSizing:'border-box'}}>
+            <div style={{display:'flex',alignItems:'center',gap:6,marginBottom:8,flexWrap:'wrap',minWidth:0}}>
+              <span style={{fontSize:11,color:'#9ca3af',fontWeight:800,minWidth:24}}>#{ri+1}</span>
+              <select value={row.type} onChange={e => {
+                const t=e.target.value
+                if (t==='header') updateRow(tabId, ri, {type:'header', label:row.label||'Sezione', cells:undefined, columns:undefined, id:undefined})
+                else if (t==='special') updateRow(tabId, ri, {type:'special', id:SPECIAL_OPTS[0].v, label:undefined, cells:undefined, columns:undefined})
+                else updateRow(tabId, ri, {type:'fields', columns:row.columns||'1fr', cells:row.cells||[{}], label:undefined, id:undefined})
+              }} style={{...P.mini, width:120, maxWidth:'100%', flex:'0 1 150px'}}>
+                <option value='header'>Intestazione</option><option value='fields'>Campi</option><option value='special'>Speciale</option>
+              </select>
+              <div style={{flex:1}}/>
+              <button type='button' style={P.btn} onClick={()=>moveRow(tabId, ri, -1)}>▲</button>
+              <button type='button' style={P.btn} onClick={()=>moveRow(tabId, ri, 1)}>▼</button>
+              <button type='button' style={P.dangerBtn} onClick={()=>removeRow(tabId, ri)}>✕</button>
             </div>
-            <div>
-              <label style={P.lbl}>🔵 Modifica rapporto</label>
-              <div style={{display:'flex',alignItems:'center',gap:6}}>
-                <input type='color' value={/^#[0-9a-fA-F]{3,8}$/.test(cfg.modeBgEdit||'') ? cfg.modeBgEdit : '#eff6ff'}
-                  onChange={e=>set('modeBgEdit',e.target.value)}
-                  style={{width:30,height:26,padding:2,border:'1px solid rgba(255,255,255,0.15)',borderRadius:5,cursor:'pointer',background:'transparent',flexShrink:0}}/>
-                <input type='text' value={cfg.modeBgEdit||'#eff6ff'} onChange={e=>set('modeBgEdit',e.target.value)}
-                  placeholder='#eff6ff' style={{...P.inp,flex:1,fontSize:11}}/>
-              </div>
-              <div style={P.hint}>Sfondo quando TI sta modificando un rapporto esistente.</div>
-            </div>
-          </div>
-        </div>
-      </div>}
-
-
-      {/* === NUOVA PRATICA === */}
-      <Acc id='nuova' label='🆕 Nuova pratica (inline)' open={isOpen('nuova')} onToggle={()=>toggle('nuova')}/>
-      {isOpen('nuova') && <div>
-        <label style={P.chk}>
-          <input type='checkbox' checked={cfg.enableCreateWithoutSelection !== false} onChange={e=>set('enableCreateWithoutSelection', e.target.checked)}/>
-          Abilita creazione senza selezione (pagina "Nuova pratica")
-        </label>
-        <div style={P.hint}>Se attivo, il widget entra in modalità CREATE quando non c&apos;è alcuna selezione nell&apos;Elenco.</div>
-
-        <label style={P.lbl}>Pagina Modifica (slug)</label>
-        <input type='text' value={cfg.editPageId || ''} onChange={e=>set('editPageId',e.target.value.trim())}
-          style={{...P.inp, marginTop:4}} placeholder='es. Modifica-Rapporto'/>
-        <div style={P.hint}>Slug della pagina ExB di modifica rapporto (come appare nell&apos;URL dopo /page/). Al salvataggio di un nuovo rapporto, l&apos;utente viene reindirizzato qui.</div>
-
-        <label style={P.lbl}>Coordinate ufficio (WGS84)</label>
-        <div style={{ display:'flex', gap: 10, alignItems:'center', flexWrap:'wrap' }}>
-          <div style={{ flex:'0 0 auto' }}>
-            <div style={{ ...P.hint, marginTop: 0 }}>Lon</div>
-            <input type='text' inputMode='decimal' value={formatCoordInput(cfg.officeLonWgs84)}
-              onChange={e=>set('officeLonWgs84', parseCoordInput(e.target.value))} placeholder='es. 9.123456 o 9,123456' style={{...P.inp, width:160}}/>
-          </div>
-          <div style={{ flex:'0 0 auto' }}>
-            <div style={{ ...P.hint, marginTop: 0 }}>Lat</div>
-            <input type='text' inputMode='decimal' value={formatCoordInput(cfg.officeLatWgs84)}
-              onChange={e=>set('officeLatWgs84', parseCoordInput(e.target.value))} placeholder='es. 39.123456 o 39,123456' style={{...P.inp, width:160}}/>
-          </div>
-        </div>
-        <div style={P.hint}>Usate come geometria di default quando la localizzazione non è obbligatoria (req_point=0) e l&apos;utente non clicca in mappa. Accetta sia il punto sia la virgola come separatore decimale.</div>
-      </div>}
-
-
-      {/* === MAPPA === */}
-      <Acc id='mappa' label='🗺 Mappa' open={isOpen('mappa')} onToggle={()=>toggle('mappa')}/>
-      {isOpen('mappa') && <div>
-        <div style={{fontSize:11,fontWeight:700,color:'#93c5fd',marginTop:4,marginBottom:8}}>Mappa di pagina</div>
-        <label style={P.lbl}>Widget Mappa di pagina</label>
-        <div style={{ marginTop: 6 }}>
-          <MapWidgetSelector
-            onSelect={(ids: string[]) => setMany({ useMapWidgetIds: ids })}
-            useMapWidgetIds={cfg.useMapWidgetIds}
-          />
-        </div>
-        <div style={P.hint}>Seleziona il widget Mappa presente nella pagina. Il widget editing usa questa mappa per la localizzazione della violazione e per filtrare i punti dei rapporti.</div>
-
-        <label style={{...P.lbl, marginTop: 12}}>Layer rapporti da filtrare nella mappa di pagina</label>
-        <select
-          value={selectedMapLayerKey}
-          onChange={e => {
-            const opt = mapLayerOptions.find(o => o.key === e.target.value)
-            setMany({
-              mapLayerTitle: opt?.title || '',
-              mapLayerUrl: opt?.url || '',
-              mapLayerId: opt?.id || '',
-              mapLayerLayerId: opt?.layerId || ''
-            })
-          }}
-          disabled={!Array.isArray(cfg.useMapWidgetIds) || cfg.useMapWidgetIds.length === 0 || mapLayerOptions.length === 0}
-          style={{...P.inp, marginTop:4, background:'#1a1f2e', color:'#e5e7eb', colorScheme:'dark'}}
-        >
-          <option value='' style={{background:'#1a1f2e', color:'#e5e7eb'}}>{mapLayerOptions.length > 0 ? '— seleziona layer —' : '— nessun Feature Layer trovato —'}</option>
-          {mapLayerOptions.map(opt => <option key={opt.key} value={opt.key} style={{background:'#1a1f2e', color:'#e5e7eb'}}>{formatMapLayerOption(opt)}</option>)}
-        </select>
-        <div style={P.hint}>La lista viene letta dalla WebMap collegata al widget mappa selezionato. La selezione valorizza titolo, URL, ID layer e layerId usati dal runtime per un matching robusto.</div>
-
-      </div>}
-
-
-      {/* === ANTEPRIMA PDF === */}
-      <Acc id='anteprimapdf' label='📄 Anteprima PDF' open={isOpen('anteprimapdf')} onToggle={()=>toggle('anteprimapdf')}/>
-      {isOpen('anteprimapdf') && <div>
-        <div style={P.hint}>Regola solo la distanza della finestra del viewer PDF nella scheda Anteprima. La barra superiore del widget resta invariata.</div>
-
-        <label style={P.lbl}>Padding superiore viewer (px)</label>
-        <input type='number' value={cfg.anteprimaPdfPaddingTop ?? 0} min={0} max={80}
-          onChange={e=>set('anteprimaPdfPaddingTop', Number(e.target.value))} style={{...P.inp, width:90}}/>
-        <div style={P.hint}>Distanza tra la barra del widget e il viewer PDF.</div>
-
-        <label style={P.lbl}>Padding laterale viewer (px)</label>
-        <input type='number' value={cfg.anteprimaPdfPaddingX ?? 0} min={0} max={80}
-          onChange={e=>set('anteprimaPdfPaddingX', Number(e.target.value))} style={{...P.inp, width:90}}/>
-        <div style={P.hint}>0 = viewer a filo in larghezza; usa lo stesso valore del padding esterno per ripristinare lo spazio laterale.</div>
-
-        <label style={P.lbl}>Padding inferiore viewer (px)</label>
-        <input type='number' value={cfg.anteprimaPdfPaddingBottom ?? 0} min={0} max={80}
-          onChange={e=>set('anteprimaPdfPaddingBottom', Number(e.target.value))} style={{...P.inp, width:90}}/>
-        <div style={P.hint}>0 = viewer abbassato fino al bordo inferiore; usa lo stesso valore del padding esterno per ripristinare lo spazio in basso.</div>
-
-        <label style={P.lbl}>Raggio angoli inferiori viewer (px)</label>
-        <input type='number' value={cfg.anteprimaPdfBottomRadius ?? 10} min={0} max={40}
-          onChange={e=>set('anteprimaPdfBottomRadius', Number(e.target.value))} style={{...P.inp, width:90}}/>
-        <div style={P.hint}>0 = nessun arrotondamento; valori tipici 8–12 px.</div>
-      </div>}
-
-      {/* === STILE FORM (label + intestazioni sezione + divisori) === */}
-      <Acc id='stileform' label='🎨 Stile form' open={isOpen('stileform')} onToggle={()=>toggle('stileform')}/>
-      {isOpen('stileform') && <div>
-
-        <div style={{fontSize:11,fontWeight:700,color:'#93c5fd',marginBottom:8}}>Label dei campi</div>
-        <div style={P.hint}>Colore e dimensione delle etichette sopra ogni campo (es. Via, Città, Tecnico istruttore…)</div>
-        <div style={{display:'flex',alignItems:'center',gap:6,marginTop:8}}>
-          <input type='color' value={/^#[0-9a-fA-F]{3,8}$/.test(cfg.formLabelColor||'') ? cfg.formLabelColor : '#6b7280'}
-            onChange={e=>set('formLabelColor',e.target.value)}
-            style={{width:30,height:26,padding:2,border:'1px solid rgba(255,255,255,0.15)',borderRadius:5,cursor:'pointer',background:'transparent',flexShrink:0}}/>
-          <input type='text' value={cfg.formLabelColor||'#6b7280'} onChange={e=>set('formLabelColor',e.target.value)}
-            placeholder='#6b7280' style={{...P.inp,flex:1,fontSize:11}}/>
-        </div>
-        <label style={P.lbl}>Dimensione font (px)</label>
-        <input type='number' value={cfg.formLabelFontSize??12} min={9} max={18}
-          onChange={e=>set('formLabelFontSize', Number(e.target.value))} style={{...P.inp, width:80}}/>
-
-        <div style={{marginTop:16,borderTop:'1px solid rgba(255,255,255,0.07)',paddingTop:12}}>
-          <div style={{fontSize:11,fontWeight:700,color:'#93c5fd',marginBottom:8}}>Campi (input, select, textarea)</div>
-          <div style={P.hint}>Dimensione del testo nei campi di input del form.</div>
-          <label style={P.lbl}>Dimensione font (px)</label>
-          <input type='number' value={cfg.formFieldFontSize??13} min={9} max={18}
-            onChange={e=>set('formFieldFontSize', Number(e.target.value))} style={{...P.inp, width:80}}/>
-        </div>
-
-        <div style={{marginTop:16,borderTop:'1px solid rgba(255,255,255,0.07)',paddingTop:12}}>
-          <div style={{fontSize:11,fontWeight:700,color:'#93c5fd',marginBottom:8}}>Altre violazioni</div>
-          <div style={P.hint}>Dimensione del testo delle checkbox degli articoli nella sezione “Altre violazioni” (Art. 8, Art. 12, Art. 27… Art. 39).</div>
-          <label style={P.lbl}>Dimensione font articoli (px)</label>
-          <input type='number' value={(cfg as any).norma3FontSize??12} min={9} max={18}
-            onChange={e=>set('norma3FontSize', Number(e.target.value))} style={{...P.inp, width:80}}/>
-        </div>
-
-        <div style={{marginTop:16,borderTop:'1px solid rgba(255,255,255,0.07)',paddingTop:12}}>
-          <div style={{fontSize:11,fontWeight:700,color:'#93c5fd',marginBottom:8}}>Intestazioni di sezione</div>
-          <div style={P.hint}>Colore e dimensione dei titoli di gruppo (es. Trasgressore, Art. 15, Descrizione…)</div>
-          <div style={{display:'flex',alignItems:'center',gap:6,marginTop:8}}>
-            <input type='color' value={/^#[0-9a-fA-F]{3,8}$/.test(cfg.sectionHeaderColor||'') ? cfg.sectionHeaderColor : '#1d4ed8'}
-              onChange={e=>set('sectionHeaderColor',e.target.value)}
-              style={{width:30,height:26,padding:2,border:'1px solid rgba(255,255,255,0.15)',borderRadius:5,cursor:'pointer',background:'transparent',flexShrink:0}}/>
-            <input type='text' value={cfg.sectionHeaderColor||'#1d4ed8'} onChange={e=>set('sectionHeaderColor',e.target.value)}
-              placeholder='#1d4ed8' style={{...P.inp,flex:1,fontSize:11}}/>
-          </div>
-          <label style={P.lbl}>Dimensione font (px)</label>
-          <input type='number' value={cfg.sectionHeaderFontSize??11} min={9} max={18}
-            onChange={e=>set('sectionHeaderFontSize', Number(e.target.value))} style={{...P.inp, width:80}}/>
-        </div>
-
-        <div style={{marginTop:16,borderTop:'1px solid rgba(255,255,255,0.07)',paddingTop:12}}>
-          <div style={{fontSize:11,fontWeight:700,color:'#93c5fd',marginBottom:8}}>Divisori tra sezioni</div>
-          <div style={P.hint}>Colore e spessore della linea sotto ogni intestazione (Art. 15, Art. 16-17…)</div>
-          <div style={{display:'flex',alignItems:'center',gap:6,marginTop:8}}>
-            <input type='color' value={/^#[0-9a-fA-F]{3,8}$/.test(cfg.sectionDividerColor||'') ? cfg.sectionDividerColor : '#bfdbfe'}
-              onChange={e=>set('sectionDividerColor',e.target.value)}
-              style={{width:30,height:26,padding:2,border:'1px solid rgba(255,255,255,0.15)',borderRadius:5,cursor:'pointer',background:'transparent',flexShrink:0}}/>
-            <input type='text' value={cfg.sectionDividerColor||'#bfdbfe'} onChange={e=>set('sectionDividerColor',e.target.value)}
-              placeholder='#bfdbfe' style={{...P.inp,flex:1,fontSize:11}}/>
-          </div>
-          <label style={P.lbl}>Spessore (px)</label>
-          <input type='number' value={cfg.sectionDividerWidth??2} min={0} max={6}
-            onChange={e=>set('sectionDividerWidth', Number(e.target.value))} style={{...P.inp, width:80}}/>
-        </div>
-
-        <div style={{marginTop:14,padding:10,borderRadius:8,background:'rgba(255,255,255,0.04)',border:'1px solid rgba(255,255,255,0.08)'}}>
-          <div style={{fontSize:10.5,fontWeight:600,color:'#93c5fd',marginBottom:6}}>Anteprima</div>
-          <div style={{background:'#fff',borderRadius:6,padding:10}}>
-            <div style={{fontSize:cfg.sectionHeaderFontSize??11,fontWeight:700,color:cfg.sectionHeaderColor||'#1d4ed8',textTransform:'uppercase',letterSpacing:1,borderBottom:`${cfg.sectionDividerWidth??2}px solid ${cfg.sectionDividerColor||'#bfdbfe'}`,paddingBottom:4,marginBottom:8}}>
-              Trasgressore
-            </div>
-            <div style={{fontSize:cfg.formLabelFontSize??12,color:cfg.formLabelColor||'#6b7280',marginBottom:4}}>Tipologia soggetto</div>
-            <div style={{padding:'5px 8px',borderRadius:6,border:'1px solid rgba(0,0,0,0.15)',fontSize:12,color:'#9ca3af'}}>— seleziona —</div>
-            <div style={{fontSize:cfg.formLabelFontSize??12,color:cfg.formLabelColor||'#6b7280',marginBottom:4,marginTop:8}}>Via</div>
-            <div style={{padding:'5px 8px',borderRadius:6,border:'1px solid rgba(0,0,0,0.15)',fontSize:12,color:'#374151'}}>Via Roma 1</div>
-            <label style={{display:'flex',alignItems:'flex-start',gap:6,fontSize:(cfg as any).norma3FontSize??12,color:'#374151',marginTop:10}}>
-              <input type='checkbox' checked readOnly style={{marginTop:2}}/> Art. 27 – Spreco d'acqua/uso negligente risorsa idrica
-            </label>
-          </div>
-        </div>
-      </div>}
-
-
-      {/* === LAYOUT CAMPI === */}
-      <Acc id='layout' label='📐 Layout campi' open={isOpen('layout')} onToggle={()=>toggle('layout')}/>
-      {isOpen('layout') && <div>
-        <div style={P.hint}>Configura la disposizione dei campi in ogni tab. Ogni riga può essere un&apos;intestazione, un blocco di campi o un elemento speciale.
-          Per le righe campi: <b>columns</b> accetta qualsiasi valore CSS grid-template-columns (es. <code>1fr 1fr</code>, <code>30% 40px 30%</code>, <code>200px 1fr</code>).
-          Le celle vuote (spacer) mantengono il posto nel grid.</div>
-
-        <label style={P.lbl}>Gap tra campi (px)</label>
-        <input type='number' value={cfg.fieldGap??12} min={0} max={40}
-          onChange={e=>set('fieldGap', Number(e.target.value))} style={{...P.inp, width:80}}/>
-
-        <div style={{display:'flex', gap:4, marginTop:14, marginBottom:10}}>
-          {LAYOUT_TABS.map(t => (
-            <button key={t} type='button' onClick={()=>setLayoutTab(t)} style={{
-              padding:'5px 12px', borderRadius:6, border:`1px solid ${layoutTab===t?'#60a5fa':'rgba(255,255,255,0.12)'}`,
-              background: layoutTab===t?'rgba(96,165,250,0.15)':'transparent',
-              color: layoutTab===t?'#93c5fd':'#9ca3af', fontSize:11, fontWeight:700, cursor:'pointer', textTransform:'capitalize'
-            }}>{t.replace(/_/g,' ')}</button>
-          ))}
-        </div>
-
-        <div style={{fontSize:10.5, color: isCustom(layoutTab)?'#86efac':'#a0aec0', marginBottom:8}}>
-          {isCustom(layoutTab) ? '✎ Layout personalizzato' : '○ Layout predefinito (modifica per personalizzare)'}
-        </div>
-
-        {/* Row list */}
-        <div style={{display:'grid', gap:6}}>
-          {getRows(layoutTab).map((row: any, ri: number) => {
-            const rows = getRows(layoutTab)
-            const rowSty: React.CSSProperties = {padding:'8px 10px', borderRadius:8, border:'1px solid rgba(255,255,255,0.10)', background:'rgba(255,255,255,0.03)'}
-            const smBtn = (label: string, onClick: ()=>void, color?: string): any => (
-              <button type='button' onClick={onClick} style={{padding:'2px 6px', borderRadius:4, border:'1px solid rgba(255,255,255,0.12)', background:'transparent', color: color||'#9ca3af', fontSize:10, cursor:'pointer', lineHeight:1}}>{label}</button>
-            )
-
-            return (
-              <div key={ri} style={rowSty}>
-                {/* Row header bar */}
-                <div style={{display:'flex', alignItems:'center', gap:6, marginBottom:6}}>
-                  <span style={{fontSize:10, color:'#6b7280', fontWeight:600, minWidth:20}}>#{ri+1}</span>
-                  <select value={row.type} onChange={e=>{
-                    const t = e.target.value
-                    if (t === 'header') updateRow(layoutTab, ri, {type:'header', label: row.label||'Sezione', cells:undefined, columns:undefined, id:undefined})
-                    else if (t === 'special') updateRow(layoutTab, ri, {type:'special', id: SPECIAL_OPTS[0]?.v||'', label:undefined, cells:undefined, columns:undefined})
-                    else updateRow(layoutTab, ri, {type:'fields', columns: row.columns||'1fr', cells: row.cells||[{}], label:undefined, id:undefined})
-                  }} style={{...P.inp, width:90, fontSize:10, padding:'2px 4px'}}>
-                    <option value='header'>Intestazione</option>
-                    <option value='fields'>Campi</option>
-                    <option value='special'>Speciale</option>
-                  </select>
-                  <div style={{flex:1}}/>
-                  {smBtn('▲', ()=>moveRow(layoutTab, ri, -1))}
-                  {smBtn('▼', ()=>moveRow(layoutTab, ri, 1))}
-                  {smBtn('✕', ()=>removeRow(layoutTab, ri), '#fca5a5')}
+            {row.type === 'header' && <input type='text' value={row.label||''} onChange={e=>updateRow(tabId,ri,{label:e.target.value})} placeholder='Titolo sezione' style={P.inp}/>} 
+            {row.type === 'special' && <select value={row.id||''} onChange={e=>updateRow(tabId,ri,{id:e.target.value})} style={P.inp}>{SPECIAL_OPTS.map(o=><option key={o.v} value={o.v}>{o.l}</option>)}</select>}
+            {row.type === 'fields' && <div style={{display:'grid',gap:7}}>
+              {cells.map((cell:any, ci:number) => <div key={ci} style={{display:'grid',gridTemplateColumns:'minmax(0, 1fr)',gap:6,alignItems:'center',border:'1px solid rgba(255,255,255,0.08)',borderRadius:8,padding:7,minWidth:0,maxWidth:'100%',boxSizing:'border-box'}}>
+                <select value={cell?.field||''} onChange={e=>updateCell(tabId,ri,ci,e.target.value)} style={P.mini}>
+                  <option value=''>— spazio vuoto —</option>{(FIELD_OPTS[tabId]||[]).map(o=><option key={o.v} value={o.v}>{o.l}</option>)}
+                </select>
+                <input type='text' value={cell?.label||''} onChange={e=>updateCellLabel(tabId,ri,ci,e.target.value)} placeholder='Etichetta personalizzata' style={P.mini}/>
+                <div style={{display:'grid',gridTemplateColumns:'minmax(0, 1fr) auto',gap:6,alignItems:'center',minWidth:0}}>
+                  <input type='number' min={1} max={100} value={widths[ci]||100} onChange={e=>updateCellWidth(tabId,ri,ci,Number(e.target.value))} title='Larghezza cella (%)' style={{...P.mini,textAlign:'center'}}/>
+                  <button type='button' style={{...P.dangerBtn,width:34,height:28,padding:0}} onClick={()=>removeCell(tabId,ri,ci)}>✕</button>
                 </div>
-
-                {/* Row body by type */}
-                {row.type === 'header' && (
-                  <input type='text' value={row.label||''} onChange={e=>updateRow(layoutTab, ri, {label:e.target.value})}
-                    placeholder='Titolo sezione' style={{...P.inp, fontSize:11}}/>
-                )}
-
-                {row.type === 'special' && (
-                  <select value={row.id||''} onChange={e=>updateRow(layoutTab, ri, {id:e.target.value})}
-                    style={{...P.inp, fontSize:11}}>
-                    {SPECIAL_OPTS.map(o => <option key={o.v} value={o.v}>{o.l}</option>)}
-                  </select>
-                )}
-
-                {row.type === 'fields' && (() => {
-                  const cells: any[] = row.cells || []
-                  const widths = colsToWidths(row.columns, cells.length)
-                  const fieldLabel = (fv: string) => (FIELD_OPTS[layoutTab] || []).find(o => o.v === fv)?.l || fv || 'spacer'
-                  return (
-                  <div>
-                    {/* Visual proportional bar */}
-                    <div style={{display:'flex', gap:1, marginBottom:8, borderRadius:4, overflow:'hidden', height:22}}>
-                      {cells.map((_c: any, ci: number) => {
-                        const fld = cells[ci]?.field
-                        return <div key={ci} style={{width:`${widths[ci]}%`, flexShrink:0, background: fld ? 'rgba(96,165,250,0.25)' : 'rgba(255,255,255,0.06)', display:'flex', alignItems:'center', justifyContent:'center', fontSize:8, color: fld ? '#93c5fd' : '#6b7280', overflow:'hidden', whiteSpace:'nowrap', padding:'0 2px', borderRight:'1px solid rgba(0,0,0,0.3)'}}>
-                          {fld ? fieldLabel(fld).substring(0, 8) : '·'} <span style={{opacity:0.5, marginLeft:2}}>{widths[ci]}%</span>
-                        </div>
-                      })}
-                    </div>
-                    {/* Cell editors */}
-                    <div style={{display:'grid', gap:4}}>
-                      {cells.map((cell: any, ci: number) => (
-                        <div key={ci} style={{display:'flex', alignItems:'center', gap:4}}>
-                          <span style={{fontSize:9, color:'#6b7280', minWidth:14}}>{ci+1}.</span>
-                          <select value={cell?.field||''} onChange={e=>updateCell(layoutTab, ri, ci, e.target.value)}
-                            style={{...P.inp, flex:1, fontSize:10, padding:'2px 4px', color: cell?.field?'#e5e7eb':'#6b7280'}}>
-                            <option value=''>— spacer —</option>
-                            {(FIELD_OPTS[layoutTab]||[]).map(o => <option key={o.v} value={o.v}>{o.l}</option>)}
-                          </select>
-                          <input type='number' min={1} max={100} step={1} value={widths[ci]} onChange={e=>updateCellWidth(layoutTab, ri, ci, Number(e.target.value))}
-                            style={{...P.inp, width:48, fontSize:10, padding:'2px 4px', textAlign:'center'}} title={`${widths[ci]}%`}/>
-                          <span style={{fontSize:9, color:'#9ca3af'}}>%</span>
-                          {smBtn('✕', ()=>removeCell(layoutTab, ri, ci), '#fca5a5')}
-                        </div>
-                      ))}
-                    </div>
-                    <button type='button' onClick={()=>addCell(layoutTab, ri)}
-                      style={{marginTop:4, padding:'2px 8px', borderRadius:4, border:'1px dashed rgba(255,255,255,0.15)', background:'transparent', color:'#60a5fa', fontSize:10, cursor:'pointer'}}>
-                      + cella
-                    </button>
-                  </div>
-                  )
-                })()}
-              </div>
-            )
-          })}
-        </div>
-
-        {/* Add row */}
-        <div style={{display:'flex', gap:6, marginTop:10}}>
-          <button type='button' onClick={()=>addRow(layoutTab,'fields')} style={{padding:'4px 10px', borderRadius:5, border:'1px dashed rgba(96,165,250,0.4)', background:'transparent', color:'#60a5fa', fontSize:10.5, cursor:'pointer', fontWeight:600}}>
-            + Riga campi
-          </button>
-          <button type='button' onClick={()=>addRow(layoutTab,'header')} style={{padding:'4px 10px', borderRadius:5, border:'1px dashed rgba(96,165,250,0.4)', background:'transparent', color:'#60a5fa', fontSize:10.5, cursor:'pointer', fontWeight:600}}>
-            + Intestazione
-          </button>
-          <button type='button' onClick={()=>addRow(layoutTab,'special')} style={{padding:'4px 10px', borderRadius:5, border:'1px dashed rgba(96,165,250,0.4)', background:'transparent', color:'#60a5fa', fontSize:10.5, cursor:'pointer', fontWeight:600}}>
-            + Speciale
-          </button>
-        </div>
-
-        {/* Reset */}
-        {isCustom(layoutTab) && (
-          <button type='button' onClick={()=>{if(window.confirm('Ripristinare il layout predefinito per questa tab?')) resetTab(layoutTab)}}
-            style={{marginTop:10, padding:'4px 10px', borderRadius:5, border:'1px solid rgba(252,165,165,0.3)', background:'rgba(239,68,68,0.08)', color:'#fca5a5', fontSize:10.5, cursor:'pointer', fontWeight:600}}>
-            ↺ Ripristina predefiniti per {layoutTab.replace(/_/g,' ')}
-          </button>
-        )}
-      </div>}
-
-
-      {/* === RESET === */}
-      <div style={{marginTop:28, borderTop:'1px solid rgba(255,255,255,0.10)', paddingTop:16}}>
-        <button type='button'
-          onClick={()=>{ if(window.confirm('Ripristinare i valori predefiniti?')) props.onSettingChange({id:props.id, config:defaultConfig as any}) }}
-          style={{padding:'6px 14px', borderRadius:7, border:'1px solid rgba(252,165,165,0.4)', background:'rgba(239,68,68,0.10)', color:'#fca5a5', fontSize:12, cursor:'pointer', fontWeight:600}}>
-          ↺ Ripristina predefiniti
-        </button>
+              </div>)}
+              <button type='button' style={{...P.btn,width:'fit-content'}} onClick={()=>addCell(tabId,ri)}>+ Cella</button>
+            </div>}
+          </div>
+        })}
       </div>
-
+      <div style={{display:'flex',gap:8,marginTop:10,flexWrap:'wrap'}}>
+        <button type='button' style={P.btn} onClick={()=>addRow(tabId,'fields')}>+ Riga campi</button>
+        <button type='button' style={P.btn} onClick={()=>addRow(tabId,'header')}>+ Intestazione</button>
+        <button type='button' style={P.btn} onClick={()=>addRow(tabId,'special')}>+ Speciale</button>
+        {isCustom(tabId) && <button type='button' style={P.dangerBtn} onClick={()=>{ if(window.confirm('Ripristinare il layout predefinito della scheda?')) resetTab(tabId) }}>↺ Ripristina scheda</button>}
+      </div>
     </div>
   )
+
+  return <div style={P.wrap}>
+    <Acc id='datasource' label='1. Datasource e schema' open={isOpen('datasource')} onToggle={()=>toggle('datasource')}/>
+    {isOpen('datasource') && <SectionBox hint='Seleziona il layer solo per acquisire schema e alias. Le useDataSources legacy vengono rimosse dall’istanza.'>
+      <DataSourceSelector widgetId={props.id} types={[DataSourceTypes.FeatureLayer] as any} isMultiple={false} useDataSources={[] as any} useDataSourcesEnabled={false as any} onToggleUseDataEnabled={() => props.onSettingChange({ id:props.id, useDataSourcesEnabled:false })} onChange={onDsChange} mustUseDataSource />
+      <div style={{...P.hint,marginTop:10}}>Schema salvato: <b>{cfg.schemaLayerLabel || '—'}</b></div>
+    </SectionBox>}
+
+    <Acc id='sorgenti' label='2. Layer, tabelle e pagine' open={isOpen('sorgenti')} onToggle={()=>toggle('sorgenti')}/>
+    {isOpen('sorgenti') && <>
+      <SectionBox title='Feature layer e tabelle'>
+        <Text k='motherLayerUrl' label='URL Feature Layer madre' placeholder='https://services2.arcgis.com/.../FeatureServer/0'/>
+        <Text k='auditTableUrl' label='URL Tabella Audit Log'/>
+        <Text k='nsImportPrezzariUrl' label='Tabella import prezzari'/>
+        <Text k='nsPrezzarioRegionaleArticoliUrl' label='Tabella articoli prezzario regionale'/>
+        <Text k='nsPrezzarioInternoArticoliUrl' label='Tabella articoli prezzario interno'/>
+        <Text k='nsNuoviPrezziUrl' label='Tabella Nuovi Prezzi'/>
+        <Text k='nsNotaSpeseDettaglioUrl' label='Tabella dettaglio nota spese'/>
+        <Text k='nsParametriUrl' label='Tabella parametri nota spese'/>
+        <Text k='nsParametroCode' label='Codice parametro spese generali' placeholder='SPESE_GENERALI_PERC'/>
+      </SectionBox>
+      <SectionBox title='Modalità e pagine'>
+        <label style={P.lbl}>Modalità di visualizzazione</label>
+        <select value={cfg.displayMode || 'page'} onChange={e=>set('displayMode', e.target.value)} style={P.inp}><option value='page'>Pagina intera</option><option value='overlay'>Overlay modal</option></select>
+        <Toggle k='showDatiGenerali' label='Mostra sezione Dati generali nel form nuova pratica'/>
+        <Toggle k='enableCreateWithoutSelection' label='Abilita creazione senza selezione'/>
+        <Text k='editPageId' label='Pagina Modifica / slug'/>
+        <div style={P.grid2}><Num k='officeLonWgs84' label='Lon ufficio WGS84' step={0.000001}/><Num k='officeLatWgs84' label='Lat ufficio WGS84' step={0.000001}/></div>
+        <div style={P.hint}>Puoi usare punto o virgola inserendo manualmente il valore nel JSON; qui il numero viene salvato normalizzato.</div>
+      </SectionBox>
+      <SectionBox title='Mappa di pagina'>
+        <MapWidgetSelector onSelect={(ids:string[]) => setMany({ useMapWidgetIds: ids })} useMapWidgetIds={asJs(cfg.useMapWidgetIds || [])}/>
+        <Text k='mapLayerTitle' label='Titolo layer rapporti nella mappa'/>
+        <Text k='mapLayerUrl' label='URL layer rapporti nella mappa'/>
+        <div style={P.grid2}><Text k='mapLayerId' label='ID layer nella WebMap'/><Text k='mapLayerLayerId' label='LayerId numerico'/></div>
+      </SectionBox>
+    </>}
+
+    <Acc id='aspetto' label='3. Aspetto generale del widget' open={isOpen('aspetto')} onToggle={()=>toggle('aspetto')}/>
+    {isOpen('aspetto') && <>
+      <SectionBox title='Sfondo modalità'>
+        <div style={P.grid2}><Color k='modeBgCreate' label='Sfondo nuovo rapporto' fallback='#ecfdf5'/><Color k='modeBgEdit' label='Sfondo modifica rapporto' fallback='#edf5ff'/></div>
+        <button
+          type='button'
+          style={{
+            width: '100%',
+            marginTop: 10,
+            padding: '9px 12px',
+            borderRadius: 9,
+            border: '1px solid rgba(147,197,253,0.55)',
+            background: 'linear-gradient(180deg, rgba(37,99,235,0.95), rgba(29,78,216,0.95))',
+            color: '#ffffff',
+            fontSize: 12.5,
+            fontWeight: 800,
+            cursor: 'pointer',
+            textAlign: 'center',
+            boxShadow: '0 6px 14px rgba(37,99,235,0.22)',
+            boxSizing: 'border-box'
+          }}
+          onClick={() => setMany(MODERN_PALETTE)}
+          title='Applica subito la palette moderna ai colori principali del widget'
+        >
+          Applica palette moderna
+        </button>
+        <div style={{...P.hint, textAlign:'center'}}>Pulsante: imposta fondo azzurro-grigio, card leggere e campi appena velati.</div>
+      </SectionBox>
+      <SectionBox title='Maschera / contenitore'>
+        <div style={P.grid2}><Color k='maskBg' label='Sfondo maschera' fallback='#eef4fb'/><Color k='maskBorderColor' label='Colore bordo' fallback='#cbd8e6'/></div>
+        <div style={P.grid3}><Num k='maskBorderWidth' label='Spessore bordo' min={0} max={8}/><Num k='maskBorderRadius' label='Arrotondamento' min={0} max={40}/><Num k='maskInnerPadding' label='Padding interno' min={0} max={40}/></div>
+        <Num k='maskOuterOffset' label='Offset esterno' min={0} max={80}/>
+      </SectionBox>
+      <SectionBox title='Barra superiore e messaggi'>
+        <div style={P.grid2}>
+          <Num k='titleFontSize' label='Dimensione titolo barra' min={9} max={28}/>
+          <Num k='msgFontSize' label='Dimensione messaggi' min={9} max={24}/>
+        </div>
+        <div style={P.hint}>Queste impostazioni regolano il titolo della maschera e i messaggi accanto ai pulsanti Salva/Annulla.</div>
+      </SectionBox>
+    </>}
+
+    <Acc id='formstyle' label='4. Stile form, campi e card' open={isOpen('formstyle')} onToggle={()=>toggle('formstyle')}/>
+    {isOpen('formstyle') && <>
+      <SectionBox title='Etichette campo'>
+        <div style={P.grid2}><Color k='formLabelColor' label='Colore etichette' fallback='#334155'/><Num k='formLabelFontSize' label='Dimensione testo' min={8} max={24}/></div>
+        <div style={P.grid2}><Num k='formLabelFontWeight' label='Peso testo' min={300} max={900} step={100}/><Num k='formLabelMarginBottom' label='Distanza da campo' min={0} max={20}/></div>
+      </SectionBox>
+      <SectionBox title='Campi input / combo / textarea'>
+        <div style={P.grid2}><Color k='formFieldBg' label='Sfondo campo' fallback='#f8fbff'/><Color k='formFieldColor' label='Colore testo' fallback='#0f172a'/></div>
+        <div style={P.grid2}><Color k='formFieldBorderColor' label='Colore bordo' fallback='#bfcede'/><Color k='formFieldDisabledBg' label='Sfondo campo bloccato' fallback='#e7eef7'/></div>
+        <div style={P.grid3}><Num k='formFieldFontSize' label='Dimensione testo' min={8} max={24}/><Num k='formFieldHeight' label='Altezza campo' min={24} max={60}/><Num k='formFieldPaddingX' label='Padding orizzontale' min={0} max={30}/></div>
+        <div style={P.grid3}><Num k='formFieldBorderWidth' label='Spessore bordo' min={0} max={8}/><Num k='formFieldBorderRadius' label='Arrotondamento' min={0} max={30}/><Color k='formFieldDisabledColor' label='Testo campo bloccato' fallback='#334155'/></div>
+      </SectionBox>
+      <SectionBox title='Card / gruppi sezione'>
+        <div style={P.grid2}><Color k='formCardBg' label='Sfondo card' fallback='#f8fbff'/><Color k='formCardBorderColor' label='Bordo card' fallback='#c6d7ea'/></div>
+        <div style={P.grid3}><Num k='formCardBorderWidth' label='Spessore bordo' min={0} max={8}/><Num k='formCardBorderRadius' label='Arrotondamento' min={0} max={40}/><Num k='formSectionGap' label='Spazio tra card' min={0} max={40}/></div>
+        <Text k='formCardShadow' label='Ombra card CSS' placeholder='0 1px 3px rgba(15, 23, 42, 0.08)'/>
+      </SectionBox>
+      <SectionBox title='Intestazioni card'>
+        <Text k='formCardHeaderBg' label='Sfondo intestazione card' placeholder='linear-gradient(90deg, #0d3b66, #155e9d)'/>
+        <div style={P.grid2}><Color k='formCardHeaderColor' label='Colore testo intestazione' fallback='#ffffff'/><Num k='formCardHeaderFontSize' label='Dimensione testo' min={8} max={24}/></div>
+        <div style={P.grid3}><Num k='formCardHeaderFontWeight' label='Peso testo' min={300} max={900} step={100}/><Num k='formCardHeaderPaddingX' label='Padding X' min={0} max={30}/><Num k='formCardHeaderPaddingY' label='Padding Y' min={0} max={24}/></div>
+        <Num k='formCardBodyPadding' label='Padding corpo card' min={0} max={30}/>
+      </SectionBox>
+      <SectionBox title='Altre violazioni'>
+        <div style={P.grid3}><Num k='norma3FontSize' label='Dimensione testo articoli' min={8} max={24}/><Num k='norma3GradeColumnWidth' label='Larghezza colonna grado' min={80} max={260}/><Num k='norma3RowGap' label='Distanza righe' min={0} max={20}/></div>
+      </SectionBox>
+    </>}
+
+    <Acc id='layout' label='5. Layout campi e colonne per sezione' open={isOpen('layout')} onToggle={()=>toggle('layout')}/>
+    {isOpen('layout') && <div>
+      <div style={{display:'flex', gap:6, flexWrap:'wrap', marginBottom:12}}>
+        {(['dati_generali','trasgressore','violazione','dati_tecnici'] as const).map(t => <button key={t} type='button' onClick={()=>setLayoutTab(t)} style={{...P.btn, borderColor:layoutTab===t?'#60a5fa':'rgba(96,165,250,0.25)', background:layoutTab===t?'rgba(96,165,250,0.20)':'rgba(96,165,250,0.08)'}}>{t.replace(/_/g,' ')}</button>)}
+      </div>
+      {layoutTab === 'violazione' ? <>
+        <SectionBox title='Scheda Violazione — gruppi reali del form' hint='Queste impostazioni regolano la scheda Violazione così come viene renderizzata: gruppo sinistro “Violazioni e valutazione RI” e gruppo destro “Descrizione e circostanze”.'>
+          <div style={P.grid3}><Num k='violazioneLayoutLeftPercent' label='Larghezza iniziale gruppo sinistro (%)' min={30} max={80}/><Num k='violazioneLayoutMinLeftPx' label='Min gruppo sinistro (px)' min={260} max={900}/><Num k='violazioneLayoutMinRightPx' label='Min gruppo destro (px)' min={220} max={800}/></div>
+          <div style={P.grid2}><Num k='violazioneSplitterWidth' label='Larghezza separatore (px)' min={6} max={40}/><Color k='violazioneSplitterColor' label='Colore separatore' fallback='#94a3b8'/></div>
+          <div style={P.grid2}><Num k='violazioneDescrizioneRows' label='Righe descrizione dettagliata' min={2} max={12}/><Num k='violazioneCircostanzeRows' label='Righe circostanze rilevanti' min={2} max={12}/></div>
+          <button type='button' style={P.dangerBtn} onClick={() => setMany({ violazioneLayoutLeftPercent:58, violazioneLayoutMinLeftPx:600, violazioneLayoutMinRightPx:320, violazioneSplitterWidth:14, violazioneSplitterColor:'#94a3b8', violazioneDescrizioneRows:4, violazioneCircostanzeRows:3 })}>↺ Reset scheda Violazione</button>
+        </SectionBox>
+      </> : <>
+        <SectionBox title={`Scheda ${layoutTab.replace(/_/g,' ')}`} hint='Qui puoi modificare colonne, larghezze, ordine dei campi e etichette visualizzate. La scheda Violazione ha un layout speciale dedicato nella relativa tab.'>
+          <Num k='fieldGap' label='Gap generale tra campi (px)' min={0} max={40}/>
+          {renderGenericLayoutEditor(layoutTab)}
+        </SectionBox>
+      </>}
+    </div>}
+
+    <Acc id='anteprima' label='6. Anteprima PDF e titolo pratica' open={isOpen('anteprima')} onToggle={()=>toggle('anteprima')}/>
+    {isOpen('anteprima') && <>
+      <SectionBox title='Viewer PDF'>
+        <div style={P.grid2}><Num k='anteprimaPdfPaddingTop' label='Padding superiore' min={0} max={80}/><Num k='anteprimaPdfPaddingX' label='Padding laterale' min={0} max={80}/></div>
+        <div style={P.grid2}><Num k='anteprimaPdfPaddingBottom' label='Padding inferiore' min={0} max={80}/><Num k='anteprimaPdfBottomRadius' label='Raggio angoli inferiori' min={0} max={40}/></div>
+      </SectionBox>
+      <SectionBox title='Titolo pratica'>
+        <Text k='detailTitlePrefix' label='Prefisso titolo'/>
+        <div style={P.grid2}><Color k='detailTitleColor' label='Colore testo' fallback='#0f172a'/><Text k='detailTitleBg' label='Sfondo titolo'/></div>
+        <div style={P.grid3}><Num k='detailTitleFontSize' label='Font' min={9} max={28}/><Num k='detailTitleFontWeight' label='Peso' min={300} max={900} step={100}/><Num k='detailTitleHeight' label='Altezza' min={0} max={80}/></div>
+        <div style={P.grid2}><Num k='detailTitlePaddingBottom' label='Padding basso' min={0} max={40}/><Num k='detailTitlePaddingLeft' label='Padding sinistro' min={0} max={60}/></div>
+      </SectionBox>
+    </>}
+
+    <div style={{marginTop:26, borderTop:'1px solid rgba(255,255,255,0.12)', paddingTop:16}}>
+      <button type='button' onClick={()=>{ if(window.confirm('Ripristinare TUTTE le impostazioni predefinite del widget?')) props.onSettingChange({ id:props.id, config:defaultConfig as any }) }} style={P.dangerBtn}>↺ Ripristina tutti i predefiniti</button>
+    </div>
+  </div>
 }

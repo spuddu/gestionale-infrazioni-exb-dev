@@ -69,6 +69,23 @@ const VIRTUAL_FIELDS: FieldOpt[] = [
   { name:'__causale__',    alias:'⚙ Causale (da LOG)', type:'virtual' },
   { name:'__data_msg__',   alias:'⚙ Data messaggio (da LOG)', type:'virtual' },
 ]
+
+const BADGE_OGGETTO_KEYS = [
+  'oggettoBadgeEnabled',
+  'oggettoBadgeWidth',
+  'oggettoBadgeContentOffset',
+  'oggettoBadgeOpacity',
+  'oggettoBadgeColorNuovaRilevazione',
+  'oggettoBadgeColorAssegnazione',
+  'oggettoBadgeColorTrasmissione',
+  'oggettoBadgeColorIntegrazione',
+  'oggettoBadgeColorApprovazione',
+  'oggettoBadgeColorApprovazioneTecnica',
+  'oggettoBadgeColorApprovazioneAmministrativa',
+  'oggettoBadgeColorNotifica',
+  'oggettoBadgeColorRespingimento',
+  'oggettoBadgeColorNeutro'
+] as const
 function FieldSel(p: { value:string; fields:FieldOpt[]; onChange:(v:string)=>void; placeholder?:string; virtual?:boolean }) {
   if(!p.fields.length) return <Inp value={p.value} onChange={p.onChange} placeholder={p.placeholder||'nome campo'}/>
   return (
@@ -160,8 +177,23 @@ export default function Setting(props: Props) {
   const toggle = (id:string) => setOpenSec(s=>s===id?'':id)
   const isOpen = (id:string) => openSec===id
 
+  const toConfig = (patch: Record<string, any>) => {
+    // Materializza l'oggetto di config prima di riscriverlo.
+    // In alcuni casi ExB non serializza le nuove chiavi se si fa solo .set()
+    // su una config storica che non le conteneva ancora.
+    const current = asJs<Record<string, any>>(cfgImm) || {}
+    return Immutable({ ...current, ...patch }) as any
+  }
+
   const update = (key:string, value:any) => {
-    props.onSettingChange({ id:props.id, config:cfgImm.set?cfgImm.set(key,value):Immutable(cfgImm).set(key,value) })
+    props.onSettingChange({ id:props.id, config:toConfig({ [key]: value }) })
+  }
+
+  const updateBadgeOggetto = (key:string, value:any) => {
+    const patch: Record<string, any> = {}
+    BADGE_OGGETTO_KEYS.forEach(k => { patch[k] = (cfg as any)[k] })
+    patch[key] = value
+    props.onSettingChange({ id:props.id, config:toConfig(patch) })
   }
 
   const dsTypes = Immutable([DataSourceTypes.FeatureLayer]) as any
@@ -206,6 +238,16 @@ export default function Setting(props: Props) {
     if ((legacyDsJs?.length||0) > 0 || (props as any).useDataSourcesEnabled) {
       props.onSettingChange({ id: props.id, useDataSources: [] as any, useDataSourcesEnabled: false as any })
     }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  React.useEffect(() => {
+    const raw = asJs<Record<string, any>>(cfgImm) || {}
+    const missing = BADGE_OGGETTO_KEYS.filter(k => raw[k] === undefined)
+    if (!missing.length) return
+    const patch: Record<string, any> = {}
+    BADGE_OGGETTO_KEYS.forEach(k => { patch[k] = (cfg as any)[k] })
+    props.onSettingChange({ id: props.id, config: toConfig(patch) })
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
@@ -280,11 +322,11 @@ export default function Setting(props: Props) {
 
       <Acc id='badgeOggetto' label='▌ Badge oggetto' open={isOpen('badgeOggetto')} onToggle={()=>toggle('badgeOggetto')}/>
       {isOpen('badgeOggetto') && <div>
-        <Check value={cfg.oggettoBadgeEnabled !== false} onChange={v=>update('oggettoBadgeEnabled',v)} label='Mostra badge colorato in testa alla riga'/>
+        <Check value={cfg.oggettoBadgeEnabled !== false} onChange={v=>updateBadgeOggetto('oggettoBadgeEnabled',v)} label='Mostra badge colorato in testa alla riga'/>
         <div style={P.row3}>
-          <div><label style={P.lbl}>Larghezza</label><NumInp value={cfg.oggettoBadgeWidth} onChange={n=>update('oggettoBadgeWidth',n)} min={0} unit='px'/></div>
-          <div><label style={P.lbl}>Rientro testo</label><NumInp value={cfg.oggettoBadgeContentOffset} onChange={n=>update('oggettoBadgeContentOffset',n)} min={0} unit='px'/></div>
-          <div><label style={P.lbl}>Opacità</label><NumInp value={cfg.oggettoBadgeOpacity} onChange={n=>update('oggettoBadgeOpacity',n)} min={0} max={1} step={0.05}/></div>
+          <div><label style={P.lbl}>Larghezza</label><NumInp value={cfg.oggettoBadgeWidth} onChange={n=>updateBadgeOggetto('oggettoBadgeWidth',n)} min={0} unit='px'/></div>
+          <div><label style={P.lbl}>Rientro testo</label><NumInp value={cfg.oggettoBadgeContentOffset} onChange={n=>updateBadgeOggetto('oggettoBadgeContentOffset',n)} min={0} unit='px'/></div>
+          <div><label style={P.lbl}>Opacità</label><NumInp value={cfg.oggettoBadgeOpacity} onChange={n=>updateBadgeOggetto('oggettoBadgeOpacity',n)} min={0} max={1} step={0.05}/></div>
         </div>
         <div style={P.hint}>Il rientro testo viene applicato anche all’intestazione della prima colonna, così celle e header restano allineati.</div>
         <div style={P.grp}>Colori per oggetto</div>
@@ -293,7 +335,9 @@ export default function Setting(props: Props) {
           { name:'Assegnazione istruttoria', field:'oggettoBadgeColorAssegnazione' },
           { name:'Trasmissione istruttoria', field:'oggettoBadgeColorTrasmissione' },
           { name:'Richiesta / trasmissione integrazione', field:'oggettoBadgeColorIntegrazione' },
-          { name:'Approvazione / notifica', field:'oggettoBadgeColorApprovazione' },
+          { name:'Approvazione istruttoria tecnica', field:'oggettoBadgeColorApprovazioneTecnica' },
+          { name:'Approvazione sanzione / istruttoria amministrativa', field:'oggettoBadgeColorApprovazioneAmministrativa' },
+          { name:'Notifica / chiusura procedimento sanzionatorio', field:'oggettoBadgeColorNotifica' },
           { name:'Respingimento', field:'oggettoBadgeColorRespingimento' },
           { name:'Neutro / non classificato', field:'oggettoBadgeColorNeutro' }
         ] as const).map(({ name, field }) => (
@@ -302,7 +346,7 @@ export default function Setting(props: Props) {
               <span style={{ display:'inline-block', width:16, height:12, borderRadius:3, background:String((cfg as any)[field] || '#d0d0d0'), border:'1px solid rgba(255,255,255,0.25)' }}/>
               {name}
             </div>
-            <ColInp value={String((cfg as any)[field] || '')} onChange={v=>update(field,v)}/>
+            <ColInp value={String((cfg as any)[field] || '')} onChange={v=>updateBadgeOggetto(field,v)}/>
           </div>
         ))}
       </div>}

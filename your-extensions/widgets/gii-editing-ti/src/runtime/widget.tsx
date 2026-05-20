@@ -1934,7 +1934,7 @@ function InlineEditOverlay(props: {
             value={val ?? ''}
             disabled={saving}
             onChange={e => updateDraft(fieldName, (e.target as HTMLSelectElement).value === '' ? null : (isNum ? Number((e.target as HTMLSelectElement).value) : (e.target as HTMLSelectElement).value))}
-            style={{ padding: '7px 10px', borderRadius: 8, border: '1px solid rgba(0,0,0,0.20)', fontSize: 13, width: '100%', background: saving ? '#f3f4f6' : '#fff' }}
+            style={{ height: 36, minHeight: 36, padding: '0 10px', lineHeight: '36px', verticalAlign: 'middle', borderRadius: 8, border: '1px solid rgba(0,0,0,0.20)', fontSize: 13, width: '100%', boxSizing: 'border-box', background: saving ? '#f3f4f6' : '#fff' }}
           >
             <option value=''>— seleziona —</option>
             {domain.codedValues.map((cv: any) => (
@@ -1993,7 +1993,7 @@ function InlineEditOverlay(props: {
   const overlay = (
     <div style={{ position: 'fixed', inset: 0, zIndex: 99999, background: 'rgba(0,0,0,0.55)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
       <div style={{
-        background: '#fff', borderRadius: 12,
+        background: '#f8fbff', borderRadius: 12,
         width: '88vw', maxWidth: 860,
         height: '85vh', maxHeight: '85vh',
         display: 'flex', flexDirection: 'column',
@@ -2015,7 +2015,7 @@ function InlineEditOverlay(props: {
               {saving ? 'Salvataggio…' : '💾 Salva'}
             </button>
             <button type='button' disabled={saving} onClick={() => setConfirmCancel(true)}
-              style={{ padding: '8px 18px', borderRadius: 8, border: '1px solid #d13438', background: '#fff', color: '#d13438', fontWeight: 700, fontSize: 13, cursor: saving ? 'not-allowed' : 'pointer' }}>
+              style={{ padding: '8px 18px', borderRadius: 8, border: '1px solid #d13438', background: '#f8fbff', color: '#d13438', fontWeight: 700, fontSize: 13, cursor: saving ? 'not-allowed' : 'pointer' }}>
               ✕ Annulla
             </button>
           </div>
@@ -2042,18 +2042,18 @@ function InlineEditOverlay(props: {
         {/* Contenuto scrollabile */}
         <div style={{ flex: '1 1 auto', minHeight: 0, overflowY: 'auto', padding: '16px 20px' }}>
           {!aliasReady
-            ? <div style={{ color: '#6b7280', fontSize: 13 }}>Caricamento schema campi…</div>
+            ? <div style={{ color: '#64748b', fontSize: 13 }}>Caricamento schema campi…</div>
             : (
               <div style={{ display: 'grid', gap: 14 }}>
                 {activeTab === 'trasgressore' && (
                   trasgressoreFields.length
                     ? trasgressoreFields.map(f => renderField(f))
-                    : <div style={{ color: '#6b7280', fontSize: 13 }}>Nessun campo rilevato automaticamente. Usare la pagina di editing completa.</div>
+                    : <div style={{ color: '#64748b', fontSize: 13 }}>Nessun campo rilevato automaticamente. Usare la pagina di editing completa.</div>
                 )}
                 {activeTab === 'violazione' && (
                   violazioneFields.length
                     ? violazioneFields.map(f => renderField(f))
-                    : <div style={{ color: '#6b7280', fontSize: 13 }}>Nessun campo rilevato automaticamente. Usare la pagina di editing completa.</div>
+                    : <div style={{ color: '#64748b', fontSize: 13 }}>Nessun campo rilevato automaticamente. Usare la pagina di editing completa.</div>
                 )}
               </div>
             )
@@ -2064,7 +2064,7 @@ function InlineEditOverlay(props: {
       {/* Dialog conferma annulla */}
       {confirmCancel && (
         <div style={{ position: 'fixed', inset: 0, zIndex: 100000, background: 'rgba(0,0,0,0.4)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-          <div style={{ background: '#fff', borderRadius: 12, padding: 28, maxWidth: 380, width: '90%', boxShadow: '0 8px 32px rgba(0,0,0,0.25)' }}>
+          <div style={{ background: '#f8fbff', borderRadius: 12, padding: 28, maxWidth: 380, width: '90%', boxShadow: '0 8px 32px rgba(0,0,0,0.25)' }}>
             <div style={{ fontWeight: 700, fontSize: 16, marginBottom: 10 }}>Annullare le modifiche?</div>
             <div style={{ fontSize: 13, color: '#4b5563', marginBottom: 20 }}>Le modifiche non salvate andranno perse.</div>
             <div style={{ display: 'flex', gap: 10 }}>
@@ -2073,7 +2073,7 @@ function InlineEditOverlay(props: {
                 Sì, annulla
               </button>
               <button type='button' onClick={() => setConfirmCancel(false)}
-                style={{ padding: '8px 18px', borderRadius: 8, border: '1px solid rgba(0,0,0,0.15)', background: '#fff', color: '#111827', fontWeight: 600, fontSize: 13, cursor: 'pointer' }}>
+                style={{ padding: '8px 18px', borderRadius: 8, border: '1px solid rgba(0,0,0,0.15)', background: '#f8fbff', color: '#111827', fontWeight: 600, fontSize: 13, cursor: 'pointer' }}>
                 Torna all'editing
               </button>
             </div>
@@ -2893,7 +2893,7 @@ function ActionsPanel (props: {
                     padding: '8px 16px',
                     borderRadius: 8,
                     border: `2px solid ${canEdit ? ec.pageColor : '#e5e7eb'}`,
-                    background: '#fff',
+                    background: '#f8fbff',
                     color: canEdit ? ec.pageColor : '#9ca3af',
                     fontWeight: 700,
                     fontSize: 13,
@@ -2931,7 +2931,7 @@ function ActionsPanel (props: {
 
         {/* SEZIONE CONFERMA: Conferma + Annulla stanno sempre in fondo */}
         {pending !== null && (
-          <div style={{ display: 'grid', gap: 10 }}>
+          <div style={{ display: 'grid', gap: 8 }}>
             {/* Motivazione (solo respinta) */}
             {pending === 'RESPINGI' && (
               <div style={{ display: 'grid', gap: 6 }}>
@@ -3291,6 +3291,7 @@ const CHOICES = {
   tipo_abuso: [{ v: 'parziale', l: 'Parziale' }, { v: 'totale', l: 'Totale' }],
   art15_parziale: [{ v: 'Art15.1', l: 'Prima contestazione' }, { v: 'Art15.2', l: 'Recidiva' }],
   art15_totale:   [{ v: 'Art15.3', l: 'Prima contestazione' }, { v: 'Art15.4', l: 'Recidiva' }],
+  occorrenza: [{ v: '1', l: 'Prima contestazione' }, { v: '2', l: 'Recidiva' }],
   art16_17: [
     { v: 'Art16', l: 'Art. 16 – Comunicazione di irrigazione tardiva' },
     { v: 'Art17', l: 'Art. 17 – Comunicazione di variazione o di rinuncia tardiva' },
@@ -3341,10 +3342,48 @@ const NORMA3_TO_VFIELD: Record<string, string> = {
   Art37: 'v_art37', Art39: 'v_art39'
 }
 
-const RI_GRADO_TRIGGER_NORMA3 = new Set([
-  'Art12', 'Art27', 'Art28', 'Art31', 'Art32',
-  'Art33', 'Art34', 'Art35', 'Art36', 'Art37'
-])
+const RI_GRADO_ART_CODES = ['12', '27', '28', '31', '32', '33', '34', '35', '36', '37'] as const
+function normalizeArtCode (raw: any): string {
+  const s = String(raw ?? '').trim().replace(/^art\.?\s*/i, '').replace(/^0+/, '')
+  return s
+}
+
+function parseGradiViolazioni (raw: any): Record<string, string> {
+  const out: Record<string, string> = {}
+  const text = String(raw ?? '').trim()
+  if (!text) return out
+  for (const part of text.split(';')) {
+    const m = part.trim().match(/^Art?\.?\s*(\d{1,2})\s*[-:=]\s*([1-4])$/i) || part.trim().match(/^(\d{1,2})\s*[-:=]\s*([1-4])$/)
+    if (!m) continue
+    const art = normalizeArtCode(m[1])
+    const grado = String(m[2])
+    if (RI_GRADO_ART_CODES.includes(art as any)) out[art] = grado
+  }
+  return out
+}
+
+function buildGradiViolazioni (map: Record<string, string>, selectedArts: string[]): string {
+  return selectedArts
+    .map(art => {
+      const code = normalizeArtCode(art)
+      const grado = String(map[code] ?? '').trim()
+      return /^[1-4]$/.test(grado) ? `${code}-${grado}` : ''
+    })
+    .filter(Boolean)
+    .join(';')
+}
+
+function getRiGradoSelectedArts (attrs: Record<string, any>): string[] {
+  const selected = new Set(parseMultiSelect(attrs?.norma_violata3))
+  const out: string[] = []
+  for (const artCode of RI_GRADO_ART_CODES) {
+    const art = `Art${artCode}`
+    if (selected.has(art)) { out.push(artCode); continue }
+    const field = NORMA3_TO_VFIELD[art]
+    if (field && isSelectedFlag(attrs?.[field])) out.push(artCode)
+  }
+  return out
+}
 
 function isSelectedFlag (v: any): boolean {
   if (v === 1 || v === true) return true
@@ -3353,42 +3392,71 @@ function isSelectedFlag (v: any): boolean {
 }
 
 function hasRiGradoTriggerViolation (attrs: Record<string, any>): boolean {
-  const selected = new Set(parseMultiSelect(attrs?.norma_violata3))
-  for (const art of RI_GRADO_TRIGGER_NORMA3) {
-    if (selected.has(art)) return true
-    const field = NORMA3_TO_VFIELD[art]
-    if (field && isSelectedFlag(attrs?.[field])) return true
-  }
-  return false
+  return getRiGradoSelectedArts(attrs).length > 0
+}
+
+function modernColor (value: any, modernFallback: string, legacyValues: string[] = []): string {
+  const raw = String(value ?? '').trim()
+  const normalized = raw.toLowerCase().replace(/\s+/g, '')
+  const legacy = legacyValues.map(v => String(v).trim().toLowerCase().replace(/\s+/g, ''))
+  if (!raw || legacy.includes(normalized)) return modernFallback
+  return raw
 }
 
 const _defaultFormStyle = {
-  labelColor: '#6b7280', labelFontSize: 12,
-  hdrColor: '#1d4ed8', hdrFontSize: 11,
-  divColor: '#bfdbfe', divWidth: 2,
-  fieldFontSize: 13,
-  norma3FontSize: 12
+  labelColor: '#334155', labelFontSize: 12, labelFontWeight: 600, labelMarginBottom: 3,
+  hdrColor: '#0f4c81', hdrFontSize: 11,
+  divColor: '#93c5fd', divWidth: 2,
+  fieldColor: '#0f172a', fieldFontSize: 13, fieldHeight: 32, fieldPaddingX: 9,
+  fieldBorderColor: '#bfcede', fieldBorderWidth: 1, fieldBorderRadius: 7, fieldBg: '#f8fbff',
+  fieldDisabledBg: '#e7eef7', fieldDisabledColor: '#64748b',
+  sectionGap: 10,
+  cardBg: '#f8fbff', cardBorderColor: '#c6d7ea', cardBorderWidth: 1, cardBorderRadius: 12, cardShadow: '0 8px 22px rgba(15, 23, 42, 0.08)',
+  cardHeaderBg: 'linear-gradient(90deg, #0d3b66, #155e9d)', cardHeaderColor: '#ffffff', cardHeaderFontSize: 11,
+  cardHeaderFontWeight: 800, cardHeaderPaddingX: 10, cardHeaderPaddingY: 7, cardBodyPadding: 10,
+  norma3FontSize: 12, norma3GradeColumnWidth: 142, norma3RowGap: 0,
+  violazioneLeftPercent: 58, violazioneMinLeftPx: 600, violazioneMinRightPx: 320, violazioneSplitterWidth: 14, violazioneSplitterColor: '#94a3b8',
+  violazioneDescrizioneRows: 4, violazioneCircostanzeRows: 3
 }
 const FormStyleCtx = React.createContext(_defaultFormStyle)
 
 const S: Record<string, React.CSSProperties> = {
   wrap:   { width: '100%', height: '100%', display: 'flex', flexDirection: 'column', minHeight: 0, overflowY: 'auto', padding: '0 2px' },
-  hdr:    { fontSize: 11, fontWeight: 700, color: '#1d4ed8', textTransform: 'uppercase', letterSpacing: 1, borderBottom: '2px solid #bfdbfe', paddingBottom: 4, marginBottom: 12, marginTop: 20 },
-  lbl:    { fontSize: 12, color: '#6b7280', marginBottom: 4, display: 'block' },
-  inp:    { width: '100%', padding: '7px 10px', borderRadius: 7, border: '1px solid rgba(0,0,0,0.18)', fontSize: 13, boxSizing: 'border-box' as const, background: '#fff' },
-  inpDis: { width: '100%', padding: '7px 10px', borderRadius: 7, border: '1px solid rgba(0,0,0,0.10)', fontSize: 13, boxSizing: 'border-box' as const, background: '#f3f4f6', color: '#6b7280' },
-  sel:    { width: '100%', padding: '7px 10px', borderRadius: 7, border: '1px solid rgba(0,0,0,0.18)', fontSize: 13, boxSizing: 'border-box' as const, background: '#fff', cursor: 'pointer' },
-  row2:   { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 },
-  row3:   { display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 12 },
-  fld:    { marginBottom: 10 },
+  hdr:    { fontSize: 11, fontWeight: 700, color: '#0f4c81', textTransform: 'uppercase', letterSpacing: 1, borderBottom: '2px solid #93c5fd', paddingBottom: 4, marginBottom: 12, marginTop: 20 },
+  lbl:    { fontSize: 12, color: '#334155', marginBottom: 3, display: 'block' },
+  inp:    { width: '100%', padding: '5px 9px', borderRadius: 7, border: '1px solid rgba(0,0,0,0.18)', fontSize: 13, boxSizing: 'border-box' as const, background: '#f8fbff' },
+  inpDis: { width: '100%', padding: '5px 9px', borderRadius: 7, border: '1px solid rgba(0,0,0,0.10)', fontSize: 13, boxSizing: 'border-box' as const, background: '#e7eef7', color: '#64748b' },
+  sel:    { width: '100%', height: 32, minHeight: 32, padding: '0 9px', lineHeight: '32px', borderRadius: 7, border: '1px solid rgba(0,0,0,0.18)', fontSize: 13, boxSizing: 'border-box' as const, background: '#f8fbff', cursor: 'pointer', verticalAlign: 'middle' },
+  row2:   { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 },
+  row3:   { display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 10 },
+  fld:    { marginBottom: 6 },
   hint:   { fontSize: 11, color: '#9ca3af', marginTop: 3 },
+}
+
+function fieldBaseStyle(fs: any, disabled?: boolean): React.CSSProperties {
+  const h = Math.max(24, Number(fs.fieldHeight) || 32)
+  return {
+    width: '100%',
+    display: 'block',
+    height: h,
+    minHeight: h,
+    padding: `0 ${Number(fs.fieldPaddingX) || 0}px`,
+    borderRadius: Number(fs.fieldBorderRadius) || 0,
+    border: `${Number(fs.fieldBorderWidth) || 0}px solid ${String(fs.fieldBorderColor || 'transparent')}`,
+    fontSize: Number(fs.fieldFontSize) || 13,
+    lineHeight: `${h}px`,
+    boxSizing: 'border-box' as const,
+    background: disabled ? String(fs.fieldDisabledBg || '#f3f4f6') : String(fs.fieldBg || '#fff'),
+    color: disabled ? String(fs.fieldDisabledColor || '#6b7280') : String(fs.fieldColor || '#111827'),
+    verticalAlign: 'middle'
+  }
 }
 
 function NpField(p: { label: string; children: React.ReactNode; hint?: string }) {
   const fs = React.useContext(FormStyleCtx)
   return (
     <div style={S.fld}>
-      <label style={{ ...S.lbl, color: fs.labelColor, fontSize: fs.labelFontSize }}>{p.label}</label>
+      <label style={{ ...S.lbl, color: fs.labelColor, fontSize: fs.labelFontSize, fontWeight: fs.labelFontWeight as any, marginBottom: fs.labelMarginBottom }}>{p.label}</label>
       {p.children}
       {p.hint && <div style={S.hint}>{p.hint}</div>}
     </div>
@@ -3397,8 +3465,14 @@ function NpField(p: { label: string; children: React.ReactNode; hint?: string })
 
 function NpSel(p: { value: string; onChange: (v: string) => void; options: readonly {v:string;l:string}[]; disabled?: boolean }) {
   const fs = React.useContext(FormStyleCtx)
+  const st = fieldBaseStyle(fs, p.disabled)
   return (
-    <select value={p.value} onChange={e => p.onChange(e.target.value)} style={{ ...(p.disabled ? S.inpDis : S.sel), fontSize: fs.fieldFontSize }} disabled={p.disabled}>
+    <select
+      value={p.value}
+      onChange={e => p.onChange(e.target.value)}
+      style={{ ...st, paddingTop: 0, paddingBottom: 0, cursor: p.disabled ? 'not-allowed' : 'pointer' }}
+      disabled={p.disabled}
+    >
       <option value=''>— seleziona —</option>
       {p.options.map(o => <option key={o.v} value={o.v}>{o.l}</option>)}
     </select>
@@ -3407,22 +3481,22 @@ function NpSel(p: { value: string; onChange: (v: string) => void; options: reado
 
 function NpText(p: { value: string; onChange: (v: string) => void; placeholder?: string; multiline?: boolean; disabled?: boolean; maxLength?: number }) {
   const fs = React.useContext(FormStyleCtx)
-  const st = { ...(p.disabled ? S.inpDis : S.inp), fontSize: fs.fieldFontSize }
+  const st = fieldBaseStyle(fs, p.disabled)
   if (p.multiline) return (
     <textarea value={p.value} onChange={e => p.onChange(e.target.value)} placeholder={p.placeholder}
-      rows={3} style={{ ...st, resize: 'vertical' }} disabled={p.disabled} maxLength={p.maxLength}/>
+      rows={3} style={{ ...st, height: 'auto', minHeight: Math.max(82, (Number(fs.fieldHeight) || 32) * 2.45), lineHeight: 1.32, paddingTop: 6, paddingBottom: 6, resize: 'vertical' }} disabled={p.disabled} maxLength={p.maxLength}/>
   )
   return <input type='text' value={p.value} onChange={e => p.onChange(e.target.value)} placeholder={p.placeholder} style={st} disabled={p.disabled} maxLength={p.maxLength}/>
 }
 
 function NpInt(p: { value: string; onChange: (v: string) => void; disabled?: boolean }) {
   const fs = React.useContext(FormStyleCtx)
-  return <input type='number' value={p.value} onChange={e => p.onChange(e.target.value)} style={{ ...(p.disabled ? S.inpDis : S.inp), fontSize: fs.fieldFontSize }} disabled={p.disabled}/>
+  return <input type='number' value={p.value} onChange={e => p.onChange(e.target.value)} style={fieldBaseStyle(fs, p.disabled)} disabled={p.disabled}/>
 }
 
 function NpDate(p: { value: string; onChange: (v: string) => void; withTime?: boolean; disabled?: boolean }) {
   const fs = React.useContext(FormStyleCtx)
-  return <input type={p.withTime ? 'datetime-local' : 'date'} value={p.value} onChange={e => p.onChange(e.target.value)} style={{ ...(p.disabled ? S.inpDis : S.inp), fontSize: fs.fieldFontSize }} disabled={p.disabled}/>
+  return <input type={p.withTime ? 'datetime-local' : 'date'} value={p.value} onChange={e => p.onChange(e.target.value)} style={fieldBaseStyle(fs, p.disabled)} disabled={p.disabled}/>
 }
 
 type NpDraft = Record<string, string>
@@ -3940,7 +4014,7 @@ function NoteSpeseManager (props: NsManagerProps) {
   const tdS = (idx: number): React.CSSProperties => ({ padding: '6px 8px', borderBottom: '1px solid #e0eaf4', background: idx % 2 === 0 ? '#f5f9ff' : '#fff', fontSize: 12 })
 
   return (
-    <div style={{ border: '1px solid #c5d9f1', borderRadius: 8, overflow: 'hidden', background: '#fff' }}>
+    <div style={{ border: '1px solid #c5d9f1', borderRadius: 8, overflow: 'hidden', background: '#f8fbff' }}>
       <div style={{ background: '#1F4E79', color: '#fff', padding: '8px 10px', fontSize: 13, fontWeight: 700, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <span>{props.title}</span>
         <span style={{ fontSize: 12, opacity: 0.9 }}>{money(categoryTotal)} €</span>
@@ -3955,10 +4029,10 @@ function NoteSpeseManager (props: NsManagerProps) {
             <div style={{ fontSize: 12, color: '#444' }}>{rows[editIdx].descrizione_snapshot}</div>
             <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
               <input type='text' inputMode='decimal' value={editQty} onChange={(e) => setEditQty(e.target.value.replace(',', '.'))} onKeyDown={(e) => { if (e.key === 'Enter') saveEdit(); if (e.key === 'Escape') cancelEdit() }} style={{ width: 100, padding: '5px 8px', border: '1px solid #aac4e0', borderRadius: 4, fontSize: 13 }} autoFocus />
-              <span style={{ fontSize: 12, color: '#6b7280' }}>{rows[editIdx].unita_misura_snapshot || 'u.m.'}</span>
-              <span style={{ fontSize: 12, color: '#6b7280' }}>×</span>
+              <span style={{ fontSize: 12, color: '#64748b' }}>{rows[editIdx].unita_misura_snapshot || 'u.m.'}</span>
+              <span style={{ fontSize: 12, color: '#64748b' }}>×</span>
               <span style={{ fontSize: 12, color: '#375623', fontWeight: 700 }}>{money(rows[editIdx].prezzo_unitario_snapshot)}</span>
-              <span style={{ fontSize: 12, color: '#6b7280' }}>=</span>
+              <span style={{ fontSize: 12, color: '#64748b' }}>=</span>
               <span style={{ fontSize: 12, color: '#1F4E79', fontWeight: 700 }}>{money(nsRound(nsSafeNum(String(editQty).replace(',', '.'), 0) * nsSafeNum(rows[editIdx].prezzo_unitario_snapshot, 0), 2))}</span>
               <button type='button' onClick={saveEdit} style={{ padding: '4px 14px', border: 'none', borderRadius: 4, fontSize: 12, fontWeight: 700, background: '#1F4E79', color: '#fff', cursor: 'pointer' }}>Aggiorna</button>
               <button type='button' onClick={cancelEdit} style={{ padding: '4px 14px', border: 'none', borderRadius: 4, fontSize: 12, fontWeight: 700, background: '#e0e0e0', color: '#333', cursor: 'pointer' }}>Annulla</button>
@@ -3987,7 +4061,7 @@ function NoteSpeseManager (props: NsManagerProps) {
             </thead>
             <tbody>
               {rows.length === 0 ? (
-                <tr><td colSpan={6} style={{ padding: 16, textAlign: 'center', color: '#6b7280', fontSize: 12 }}>Nessuna riga.</td></tr>
+                <tr><td colSpan={6} style={{ padding: 16, textAlign: 'center', color: '#64748b', fontSize: 12 }}>Nessuna riga.</td></tr>
               ) : rows.map((r, idx) => {
                 const noQty = nsSafeNum(r.quantita, 0) <= 0
                 return (
@@ -4013,12 +4087,12 @@ function NoteSpeseManager (props: NsManagerProps) {
       </div>
       {confirmDeleteIdx != null && confirmDeleteIdx >= 0 && confirmDeleteIdx < rows.length && createPortal(
         <div style={{ position: 'fixed', inset: 0, zIndex: 100000, background: 'rgba(0,0,0,0.4)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-          <div style={{ background: '#fff', borderRadius: 12, padding: 28, maxWidth: 420, width: '90%', boxShadow: '0 8px 32px rgba(0,0,0,0.25)' }}>
+          <div style={{ background: '#f8fbff', borderRadius: 12, padding: 28, maxWidth: 420, width: '90%', boxShadow: '0 8px 32px rgba(0,0,0,0.25)' }}>
             <div style={{ fontWeight: 700, fontSize: 16, marginBottom: 10 }}>Eliminare la riga?</div>
             <div style={{ fontSize: 13, color: '#4b5563', marginBottom: 20 }}>{rows[confirmDeleteIdx].codice_voce_snapshot} — {rows[confirmDeleteIdx].descrizione_snapshot}</div>
             <div style={{ display: 'flex', gap: 10 }}>
               <button type='button' onClick={doDelete} style={{ padding: '8px 18px', borderRadius: 8, border: 'none', background: '#d13438', color: '#fff', fontWeight: 700, fontSize: 13, cursor: 'pointer' }}>Sì, elimina</button>
-              <button type='button' onClick={() => setConfirmDeleteIdx(null)} style={{ padding: '8px 18px', borderRadius: 8, border: '1px solid rgba(0,0,0,0.15)', background: '#fff', color: '#111827', fontWeight: 600, fontSize: 13, cursor: 'pointer' }}>Annulla</button>
+              <button type='button' onClick={() => setConfirmDeleteIdx(null)} style={{ padding: '8px 18px', borderRadius: 8, border: '1px solid rgba(0,0,0,0.15)', background: '#f8fbff', color: '#111827', fontWeight: 600, fontSize: 13, cursor: 'pointer' }}>Annulla</button>
             </div>
           </div>
         </div>,
@@ -4114,9 +4188,9 @@ function NuovaPraticaForm (p: {
   const editOid = p.editOid != null ? Number(p.editOid) : null
   const editIdFieldName = String(p.editIdFieldName || ds?.getIdField?.() || 'OBJECTID')
   const isRiAgrTecLimitedEdit = mode === 'edit' && isCurrentRiAgrTec()
-  const riAgrTecEditableUiFields = React.useMemo(() => new Set(['grado', 'norma15_sel']), [])
-  const riAgrTecEditableDraftFields = React.useMemo(() => new Set(['grado', 'norma15_parziale', 'norma15_totale']), [])
-  const riAgrTecEditableSaveFields = React.useMemo(() => new Set(['grado', 'norma15_parziale', 'norma15_totale', 'norma_violata1', 'req_point']), [])
+  const riAgrTecEditableUiFields = React.useMemo(() => new Set(['grado', 'norma15_sel', 'occorrenza']), [])
+  const riAgrTecEditableDraftFields = React.useMemo(() => new Set(['gradi_violazioni', 'occorrenza']), [])
+  const riAgrTecEditableSaveFields = React.useMemo(() => new Set(['gradi_violazioni', 'occorrenza']), [])
   const canEditFieldForCurrentProfile = React.useCallback((fieldName: string): boolean => {
     if (!isRiAgrTecLimitedEdit) return true
     return riAgrTecEditableUiFields.has(fieldName)
@@ -4145,6 +4219,66 @@ function NuovaPraticaForm (p: {
   const validationPopupBackdropId = React.useMemo(() => `gii-val-backdrop-${Math.random().toString(36).slice(2)}`, [])
   const successPopupOkId = React.useMemo(() => `gii-success-ok-${Math.random().toString(36).slice(2)}`, [])
   const successPopupBackdropId = React.useMemo(() => `gii-success-backdrop-${Math.random().toString(36).slice(2)}`, [])
+
+  const defaultViolazioneColumnPercents = React.useMemo<[number, number]>(() => {
+    const raw = Number((cfg as any).violazioneLayoutLeftPercent)
+    const left = Math.max(30, Math.min(80, Number.isFinite(raw) ? raw : 58))
+    return [left, 100 - left]
+  }, [cfg])
+  const [violazioneColumnPercents, setViolazioneColumnPercents] = React.useState<[number, number]>(defaultViolazioneColumnPercents)
+  const [draggingViolazioneSplitter, setDraggingViolazioneSplitter] = React.useState(false)
+  const violazioneGridRef = React.useRef<HTMLDivElement | null>(null)
+  const violazioneColumnsDirty = Math.abs(violazioneColumnPercents[0] - defaultViolazioneColumnPercents[0]) > 0.05
+    || Math.abs(violazioneColumnPercents[1] - defaultViolazioneColumnPercents[1]) > 0.05
+
+  React.useEffect(() => {
+    setViolazioneColumnPercents(defaultViolazioneColumnPercents)
+  }, [defaultViolazioneColumnPercents])
+
+  const resetViolazioneColumns = React.useCallback(() => {
+    setViolazioneColumnPercents(defaultViolazioneColumnPercents)
+  }, [defaultViolazioneColumnPercents])
+
+  const startViolazioneResize = React.useCallback((evt: React.MouseEvent<HTMLDivElement>) => {
+    evt.preventDefault()
+    evt.stopPropagation()
+    const host = violazioneGridRef.current
+    if (!host) return
+    const startX = evt.clientX
+    const startCols = [...violazioneColumnPercents] as [number, number]
+    const splitterW = Math.max(6, Math.min(40, Number((cfg as any).violazioneSplitterWidth) || 14))
+    const hostWidth = Math.max(host.getBoundingClientRect().width - splitterW, 300)
+    const minLeftPx = Math.max(260, Math.min(900, Number((cfg as any).violazioneLayoutMinLeftPx) || 600))
+    const minRightPx = Math.max(220, Math.min(800, Number((cfg as any).violazioneLayoutMinRightPx) || 320))
+    const clamp = (v: number, mn: number, mx: number) => Math.min(mx, Math.max(mn, v))
+    const round2 = (v: number) => Math.round(v * 100) / 100
+    const onMove = (moveEvt: MouseEvent) => {
+      const startLeftPx = (startCols[0] / 100) * hostWidth
+      const nextLeftPx = clamp(startLeftPx + (moveEvt.clientX - startX), minLeftPx, Math.max(minLeftPx, hostWidth - minRightPx))
+      const nextLeft = clamp((nextLeftPx / hostWidth) * 100, 5, 95)
+      const nextRight = 100 - nextLeft
+      setViolazioneColumnPercents([round2(nextLeft), round2(nextRight)])
+    }
+    const onUp = () => {
+      setDraggingViolazioneSplitter(false)
+      document.body.style.removeProperty('cursor')
+      document.body.style.removeProperty('user-select')
+      window.removeEventListener('mousemove', onMove)
+      window.removeEventListener('mouseup', onUp)
+    }
+    setDraggingViolazioneSplitter(true)
+    document.body.style.cursor = 'col-resize'
+    document.body.style.userSelect = 'none'
+    window.addEventListener('mousemove', onMove)
+    window.addEventListener('mouseup', onUp)
+  }, [violazioneColumnPercents, cfg])
+
+  React.useEffect(() => {
+    return () => {
+      document.body.style.removeProperty('cursor')
+      document.body.style.removeProperty('user-select')
+    }
+  }, [])
 
   // Layer fields con domini (caricati una volta)
   const [npLayerFields, setNpLayerFields] = React.useState<Array<{ name: string; type: string; domain?: any }>>([])
@@ -4391,7 +4525,7 @@ function NuovaPraticaForm (p: {
   }, [isDirty, p.onDirtyChange])
 
   const set = (k: string, v: any) => {
-    if (isRiAgrTecLimitedEdit && !riAgrTecEditableDraftFields.has(k)) return
+    if (isRiAgrTecLimitedEdit && !riAgrTecEditableDraftFields.has(k.toLowerCase())) return
     setDraft(prev => ({ ...prev, [k]: v }))
   }
   const g = (k: string) => draft[k] ?? ''
@@ -4864,7 +4998,16 @@ React.useEffect(() => {
     norma_violata3: g('norma_violata3')
   }), [n3parziale, n3totale, draft.norma_violata3])
 
-  const riGradoTriggerViolations = React.useMemo(() => hasRiGradoTriggerViolation(draft), [draft])
+  const riGradoSelectedArts = React.useMemo(() => getRiGradoSelectedArts(draft), [draft])
+  const riGradiViolazioniMap = React.useMemo(() => parseGradiViolazioni(g('gradi_violazioni')), [draft.gradi_violazioni])
+  const riGradoTriggerViolations = riGradoSelectedArts.length > 0
+  const setRiGradoForArt = React.useCallback((art: string, grado: string) => {
+    const next = parseGradiViolazioni(draft.gradi_violazioni)
+    const artCode = normalizeArtCode(art)
+    if (/^[1-4]$/.test(String(grado || '').trim())) next[artCode] = String(grado).trim()
+    else delete next[artCode]
+    set('gradi_violazioni', buildGradiViolazioni(next, riGradoSelectedArts))
+  }, [draft.gradi_violazioni, riGradoSelectedArts])
 
   // Quando la violazione cambia e reqPoint passa a 0, cancella il punto cliccato manualmente
   const prevReqPointRef = React.useRef(reqPoint)
@@ -5364,8 +5507,9 @@ React.useEffect(() => {
         rl_dom_citta: (tipoSogg === 'PG' && String(g('rl_dom_notifica')) === '1' ? g('rl_dom_citta') : null) || null,
         rl_dom_cap: (tipoSogg === 'PG' && String(g('rl_dom_notifica')) === '1' ? g('rl_dom_cap') : null) || null,
         note_anagrafica: g('note_anagrafica') || null,
-        // Violazione — grado (era mancante)
-        grado: toInt(g('grado')),
+        // Valutazione RI: gradi puntuali per articolo e occorrenza Art. 15
+        gradi_violazioni: g('gradi_violazioni') || null,
+        occorrenza: toInt(g('occorrenza')),
         // Dati tecnici (erano mancanti)
         distretto: g('distretto') || null,
         comizio: toInt(g('comizio')),
@@ -5375,10 +5519,11 @@ React.useEffect(() => {
       }
 
       const cleanAttrsAll = filterAttrsForLayer(attrs, layer)
-      const riAgrTecEffectiveSaveFields = new Set(riAgrTecEditableSaveFields)
-      if (!riGradoTriggerViolations) riAgrTecEffectiveSaveFields.delete('grado')
+      const riAgrTecEffectiveSaveFields = new Set(Array.from(riAgrTecEditableSaveFields).map(k => String(k).toLowerCase()))
+      if (!riGradoTriggerViolations) riAgrTecEffectiveSaveFields.delete('gradi_violazioni')
+      if (!hasTipoAbuso15) riAgrTecEffectiveSaveFields.delete('occorrenza')
       const cleanAttrs = (mode === 'edit' && isRiAgrTecLimitedEdit)
-        ? Object.fromEntries(Object.entries(cleanAttrsAll).filter(([k]) => riAgrTecEffectiveSaveFields.has(k)))
+        ? Object.fromEntries(Object.entries(cleanAttrsAll).filter(([k]) => riAgrTecEffectiveSaveFields.has(String(k).toLowerCase())))
         : cleanAttrsAll
 
       if (mode === 'edit') {
@@ -5555,16 +5700,63 @@ React.useEffect(() => {
     return { baseTitle, praticaCode: editPraticaCode }
   }, [p.titleText, mode, editPraticaCode])
 
+  const numCfg = React.useCallback((key: string, fallback: number, min?: number, max?: number): number => {
+    const n = Number((cfg as any)[key])
+    const v = Number.isFinite(n) ? n : fallback
+    return Math.max(min ?? -Infinity, Math.min(max ?? Infinity, v))
+  }, [cfg])
+
+
   const formStyle = React.useMemo(() => ({
-    labelColor: String((cfg as any).formLabelColor || _defaultFormStyle.labelColor),
-    labelFontSize: Number.isFinite(Number((cfg as any).formLabelFontSize)) ? Number((cfg as any).formLabelFontSize) : _defaultFormStyle.labelFontSize,
-    hdrColor: String((cfg as any).sectionHeaderColor || _defaultFormStyle.hdrColor),
-    hdrFontSize: Number.isFinite(Number((cfg as any).sectionHeaderFontSize)) ? Number((cfg as any).sectionHeaderFontSize) : _defaultFormStyle.hdrFontSize,
-    divColor: String((cfg as any).sectionDividerColor || _defaultFormStyle.divColor),
-    divWidth: Number.isFinite(Number((cfg as any).sectionDividerWidth)) ? Number((cfg as any).sectionDividerWidth) : _defaultFormStyle.divWidth,
-    fieldFontSize: Number.isFinite(Number((cfg as any).formFieldFontSize)) ? Number((cfg as any).formFieldFontSize) : _defaultFormStyle.fieldFontSize,
-    norma3FontSize: Number.isFinite(Number((cfg as any).norma3FontSize)) ? Number((cfg as any).norma3FontSize) : _defaultFormStyle.norma3FontSize
-  }), [cfg])
+    maskBg: modernColor((cfg as any).maskBg, '#eef4fb', ['#ffffff']),
+    maskBorderColor: modernColor((cfg as any).maskBorderColor, '#cbd8e6', ['#e5e7eb']),
+    maskBorderWidth: numCfg('maskBorderWidth', 1, 0, 8),
+    maskBorderRadius: numCfg('maskBorderRadius', 10, 0, 40),
+    maskInnerPadding: numCfg('maskInnerPadding', 12, 0, 40),
+    labelColor: modernColor((cfg as any).formLabelColor, _defaultFormStyle.labelColor, ['#6b7280']),
+    labelFontSize: numCfg('formLabelFontSize', _defaultFormStyle.labelFontSize, 8, 24),
+    labelFontWeight: numCfg('formLabelFontWeight', _defaultFormStyle.labelFontWeight, 300, 900),
+    labelMarginBottom: numCfg('formLabelMarginBottom', _defaultFormStyle.labelMarginBottom, 0, 20),
+    hdrColor: modernColor((cfg as any).sectionHeaderColor, _defaultFormStyle.hdrColor, ['#1d4ed8']),
+    hdrFontSize: numCfg('sectionHeaderFontSize', _defaultFormStyle.hdrFontSize, 8, 24),
+    divColor: modernColor((cfg as any).sectionDividerColor, _defaultFormStyle.divColor, ['#bfdbfe']),
+    divWidth: numCfg('sectionDividerWidth', _defaultFormStyle.divWidth, 0, 10),
+    fieldColor: modernColor((cfg as any).formFieldColor, _defaultFormStyle.fieldColor, ['#111827']),
+    fieldFontSize: numCfg('formFieldFontSize', _defaultFormStyle.fieldFontSize, 8, 24),
+    fieldHeight: numCfg('formFieldHeight', _defaultFormStyle.fieldHeight, 24, 60),
+    fieldPaddingX: numCfg('formFieldPaddingX', _defaultFormStyle.fieldPaddingX, 0, 30),
+    fieldBorderColor: modernColor((cfg as any).formFieldBorderColor, _defaultFormStyle.fieldBorderColor, ['rgba(0,0,0,0.18)', '#d1d5db']),
+    fieldBorderWidth: numCfg('formFieldBorderWidth', _defaultFormStyle.fieldBorderWidth, 0, 8),
+    fieldBorderRadius: numCfg('formFieldBorderRadius', _defaultFormStyle.fieldBorderRadius, 0, 30),
+    fieldBg: modernColor((cfg as any).formFieldBg, _defaultFormStyle.fieldBg, ['#ffffff']),
+    fieldDisabledBg: modernColor((cfg as any).formFieldDisabledBg, _defaultFormStyle.fieldDisabledBg, ['#f3f4f6']),
+    fieldDisabledColor: modernColor((cfg as any).formFieldDisabledColor, _defaultFormStyle.fieldDisabledColor, ['#6b7280']),
+    sectionGap: numCfg('formSectionGap', _defaultFormStyle.sectionGap, 0, 40),
+    cardBg: modernColor((cfg as any).formCardBg, _defaultFormStyle.cardBg, ['#ffffff']),
+    cardBorderColor: modernColor((cfg as any).formCardBorderColor, _defaultFormStyle.cardBorderColor, ['#dbeafe']),
+    cardBorderWidth: numCfg('formCardBorderWidth', _defaultFormStyle.cardBorderWidth, 0, 8),
+    cardBorderRadius: numCfg('formCardBorderRadius', _defaultFormStyle.cardBorderRadius, 0, 40),
+    cardShadow: modernColor((cfg as any).formCardShadow, _defaultFormStyle.cardShadow, ['0 1px 3px rgba(15, 23, 42, 0.08)']),
+    cardHeaderBg: modernColor((cfg as any).formCardHeaderBg, _defaultFormStyle.cardHeaderBg, ['linear-gradient(90deg, #0f4c81, #2563eb)']),
+    cardHeaderColor: String((cfg as any).formCardHeaderColor || _defaultFormStyle.cardHeaderColor),
+    cardHeaderFontSize: numCfg('formCardHeaderFontSize', _defaultFormStyle.cardHeaderFontSize, 8, 24),
+    cardHeaderFontWeight: numCfg('formCardHeaderFontWeight', _defaultFormStyle.cardHeaderFontWeight, 300, 900),
+    cardHeaderPaddingX: numCfg('formCardHeaderPaddingX', _defaultFormStyle.cardHeaderPaddingX, 0, 30),
+    cardHeaderPaddingY: numCfg('formCardHeaderPaddingY', _defaultFormStyle.cardHeaderPaddingY, 0, 24),
+    cardBodyPadding: numCfg('formCardBodyPadding', _defaultFormStyle.cardBodyPadding, 0, 30),
+    norma3FontSize: numCfg('norma3FontSize', _defaultFormStyle.norma3FontSize, 8, 24),
+    norma3GradeColumnWidth: numCfg('norma3GradeColumnWidth', _defaultFormStyle.norma3GradeColumnWidth, 80, 260),
+    norma3RowGap: numCfg('norma3RowGap', _defaultFormStyle.norma3RowGap, 0, 20),
+    violazioneLeftPercent: numCfg('violazioneLayoutLeftPercent', _defaultFormStyle.violazioneLeftPercent, 30, 80),
+    violazioneMinLeftPx: numCfg('violazioneLayoutMinLeftPx', _defaultFormStyle.violazioneMinLeftPx, 260, 900),
+    violazioneMinRightPx: numCfg('violazioneLayoutMinRightPx', _defaultFormStyle.violazioneMinRightPx, 220, 800),
+    violazioneSplitterWidth: numCfg('violazioneSplitterWidth', _defaultFormStyle.violazioneSplitterWidth, 6, 40),
+    violazioneSplitterColor: modernColor((cfg as any).violazioneSplitterColor, _defaultFormStyle.violazioneSplitterColor, ['#3d77c9']),
+    violazioneDescrizioneRows: numCfg('violazioneDescrizioneRows', _defaultFormStyle.violazioneDescrizioneRows, 2, 12),
+    violazioneCircostanzeRows: numCfg('violazioneCircostanzeRows', _defaultFormStyle.violazioneCircostanzeRows, 2, 12),
+    titleFontSize: numCfg('titleFontSize', 14, 9, 28),
+    msgFontSize: numCfg('msgFontSize', 12, 9, 24)
+  }), [cfg, numCfg])
 
   const sHdr: React.CSSProperties = React.useMemo(() => ({
     ...S.hdr,
@@ -5693,38 +5885,45 @@ React.useEffect(() => {
       case 'tipo_abuso': return { label: 'Tipo di abuso', el: <NpSel value={tipoAbuso} onChange={v => { set('tipo_abuso', v); set('norma15_parziale', ''); set('norma15_totale', '') }} options={CHOICES.tipo_abuso} disabled={saving}/> }
       case 'norma15_sel': {
         const canEdit = isCurrentRiAgrTec() && hasTipoAbuso15 && !saving
-        if (tipoAbuso === 'parziale') return { label: 'Occorrenza', el: <NpSel value={n3parziale} onChange={v => set('norma15_parziale', v)} options={CHOICES.art15_parziale} disabled={!canEdit}/> }
-        if (tipoAbuso === 'totale') return { label: 'Occorrenza', el: <NpSel value={n3totale} onChange={v => set('norma15_totale', v)} options={CHOICES.art15_totale} disabled={!canEdit}/> }
-        return { label: 'Occorrenza', el: <NpSel value={''} onChange={() => {}} options={[]} disabled/> }
+        return { label: 'Occorrenza', el: <NpSel value={g('occorrenza')} onChange={v => set('occorrenza', v)} options={CHOICES.occorrenza} disabled={!canEdit}/> }
       }
       case 'sup_dichiarata_art15': {
         if (!hasTipoAbuso15) return null
         const locked = tipoAbuso === 'totale'
-        return { label: 'Superficie dichiarata (ha)', el: <NpText value={locked ? '0' : g('sup_dichiarata_art15')} onChange={v => set('sup_dichiarata_art15', v)} disabled={saving || locked}/> }
+        return { label: 'Sup. dichiarata (ha)', el: <NpText value={locked ? '0' : g('sup_dichiarata_art15')} onChange={v => set('sup_dichiarata_art15', v)} disabled={saving || locked}/> }
       }
       case 'sup_irrigata_art15': {
         if (!hasTipoAbuso15) return null
         const dichVal = tipoAbuso === 'totale' ? 0 : Number(g('sup_dichiarata_art15')) || 0
         const irrVal = Number(g('sup_irrigata_art15')) || 0
         const warn = hasTipoAbuso15 && irrVal > 0 && irrVal < dichVal
-        return { label: 'Superficie irrigata (ha)', hint: warn ? 'La superficie irrigata non può essere inferiore a quella dichiarata' : undefined, el: <NpText value={g('sup_irrigata_art15')} onChange={v => set('sup_irrigata_art15', v)} disabled={saving}/> }
+        return { label: 'Sup. irrigata (ha)', hint: warn ? 'La superficie irrigata non può essere inferiore a quella dichiarata' : undefined, el: <NpText value={g('sup_irrigata_art15')} onChange={v => set('sup_irrigata_art15', v)} disabled={saving}/> }
       }
       // Violazione — Artt. 16 e 17
       case 'norma16_17': return { label: 'Tipo di inosservanza', el: <NpSel value={norma1516} onChange={v => { set('norma16_17', v); set('art17_tipo', '') }} options={CHOICES.art16_17} disabled={saving}/> }
-      case 'art17_tipo': return norma1516 === 'Art17' ? { label: 'Seleziona violazione Art. 17', el: <NpSel value={art17tipo} onChange={v => set('art17_tipo', v)} options={CHOICES.art17_tipo} disabled={saving}/> } : null
-      case 'sup_dichiarata_art16': return norma1516 === 'Art16' ? { label: 'Superficie dichiarata (ha)', el: <NpText value={g('sup_dichiarata_art16')} onChange={v => set('sup_dichiarata_art16', v)} disabled={saving}/> } : null
-      case 'sup_irrigata_art16': return norma1516 === 'Art16' ? { label: 'Superficie irrigata (ha)', el: <NpText value={'0'} onChange={() => {}} disabled/> } : null
-      case 'sup_dichiarata_art17_1': return (norma1516 === 'Art17' && art17tipo === 'Art17.1') ? { label: 'Superficie dichiarata (ha)', el: <NpText value={g('sup_dichiarata_art17_1')} onChange={v => set('sup_dichiarata_art17_1', v)} disabled={saving}/> } : null
-      case 'sup_irrigata_art17_1': return (norma1516 === 'Art17' && art17tipo === 'Art17.1') ? { label: 'Superficie variata (ha)', el: <NpText value={g('sup_irrigata_art17_1')} onChange={v => set('sup_irrigata_art17_1', v)} disabled={saving}/> } : null
-      case 'sup_dichiarata_art17_2': return (norma1516 === 'Art17' && art17tipo === 'Art17.2') ? { label: 'Superficie dichiarata (ha)', el: <NpText value={g('sup_dichiarata_art17_2')} onChange={v => set('sup_dichiarata_art17_2', v)} disabled={saving}/> } : null
-      case 'sup_irrigata_art17_2': return (norma1516 === 'Art17' && art17tipo === 'Art17.2') ? { label: 'Superficie irrigata (ha)', el: <NpText value={'0'} onChange={() => {}} disabled/> } : null
+      case 'art17_tipo': return norma1516 === 'Art17' ? { label: 'Tipo comunicazione', el: <NpSel value={art17tipo} onChange={v => set('art17_tipo', v)} options={CHOICES.art17_tipo} disabled={saving}/> } : null
+      case 'sup_dichiarata_art16': return norma1516 === 'Art16' ? { label: 'Sup. dichiarata (ha)', el: <NpText value={g('sup_dichiarata_art16')} onChange={v => set('sup_dichiarata_art16', v)} disabled={saving}/> } : null
+      case 'sup_irrigata_art16': return norma1516 === 'Art16' ? { label: 'Sup. irrigata (ha)', el: <NpText value={'0'} onChange={() => {}} disabled/> } : null
+      case 'sup_dichiarata_art17_1': return (norma1516 === 'Art17' && art17tipo === 'Art17.1') ? { label: 'Sup. dichiarata (ha)', el: <NpText value={g('sup_dichiarata_art17_1')} onChange={v => set('sup_dichiarata_art17_1', v)} disabled={saving}/> } : null
+      case 'sup_irrigata_art17_1': return (norma1516 === 'Art17' && art17tipo === 'Art17.1') ? { label: 'Sup. variata (ha)', el: <NpText value={g('sup_irrigata_art17_1')} onChange={v => set('sup_irrigata_art17_1', v)} disabled={saving}/> } : null
+      case 'sup_dichiarata_art17_2': return (norma1516 === 'Art17' && art17tipo === 'Art17.2') ? { label: 'Sup. dichiarata (ha)', el: <NpText value={g('sup_dichiarata_art17_2')} onChange={v => set('sup_dichiarata_art17_2', v)} disabled={saving}/> } : null
+      case 'sup_irrigata_art17_2': return (norma1516 === 'Art17' && art17tipo === 'Art17.2') ? { label: 'Sup. irrigata (ha)', el: <NpText value={'0'} onChange={() => {}} disabled/> } : null
       // Violazione — Grado
       case 'grado': {
         const en = isCurrentRiAgrTec() && riGradoTriggerViolations
-        const hint = isCurrentRiAgrTec() && !riGradoTriggerViolations
-          ? 'Il grado è modificabile solo se il TI ha selezionato almeno una violazione tra gli artt. 12, 27, 28, 31, 32, 33, 34, 35, 36 e 37.'
-          : undefined
-        return { label: 'Grado', hint, el: <NpSel value={g('grado')} onChange={v => set('grado', v)} options={CHOICES.grado} disabled={saving || !en}/> }
+        const el = !riGradoTriggerViolations
+          ? <NpSel value={''} onChange={() => {}} options={CHOICES.grado} disabled/>
+          : (
+            <div style={{ display: 'grid', gap: 8 }}>
+              {riGradoSelectedArts.map(art => (
+                <div key={art} style={{ display: 'grid', gridTemplateColumns: '90px 1fr', gap: 8, alignItems: 'center' }}>
+                  <div style={{ fontSize: 12, fontWeight: 700, color: '#374151' }}>Art. {art}</div>
+                  <NpSel value={riGradiViolazioniMap[art] || ''} onChange={v => setRiGradoForArt(art, v)} options={CHOICES.grado} disabled={saving || !en}/>
+                </div>
+              ))}
+            </div>
+          )
+        return { label: 'Gradi di gravità', el }
       }
       // Violazione — Descrizione
       case 'descrizione_fatti': return { label: 'Descrizione dettagliata della violazione', el: <NpText value={g('descrizione_fatti')} onChange={v => set('descrizione_fatti', v)} multiline disabled={saving}/> }
@@ -5740,6 +5939,60 @@ React.useEffect(() => {
       default: return null
     }
   }
+
+  const renderRiAgrTecProtectedControl = (fieldName: string, node: React.ReactNode): React.ReactNode => {
+    if (canEditFieldForCurrentProfile(fieldName)) return node
+    if (React.isValidElement(node)) {
+      return React.cloneElement(node as React.ReactElement<any>, { disabled: true })
+    }
+    return <div style={{ pointerEvents: 'none', opacity: 0.72 }}>{node}</div>
+  }
+
+  const editCardStyle: React.CSSProperties = {
+    background: formStyle.cardBg,
+    border: `${formStyle.cardBorderWidth}px solid ${formStyle.cardBorderColor}`,
+    borderRadius: formStyle.cardBorderRadius,
+    overflow: 'hidden',
+    boxShadow: formStyle.cardShadow || 'none'
+  }
+  const editCardHeaderStyle: React.CSSProperties = {
+    background: formStyle.cardHeaderBg,
+    color: formStyle.cardHeaderColor,
+    padding: `${formStyle.cardHeaderPaddingY}px ${formStyle.cardHeaderPaddingX}px`,
+    fontSize: formStyle.cardHeaderFontSize,
+    fontWeight: formStyle.cardHeaderFontWeight as any,
+    letterSpacing: 0.25,
+    textTransform: 'uppercase',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 12
+  }
+  const editCardBodyStyle: React.CSSProperties = { padding: formStyle.cardBodyPadding }
+  const editPanelStyle: React.CSSProperties = {
+    background: '#f8fafc',
+    border: '1px solid #e5e7eb',
+    borderRadius: 10,
+    padding: 10,
+    minWidth: 0
+  }
+  const editMutedHeaderStyle: React.CSSProperties = {
+    color: '#475569',
+    fontSize: 11,
+    fontWeight: 800,
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+    marginBottom: 8
+  }
+  const renderEditCard = (title: string, body: React.ReactNode, right?: React.ReactNode) => (
+    <section style={editCardStyle}>
+      <div style={editCardHeaderStyle}>
+        <span>{title}</span>
+        {right}
+      </div>
+      <div style={editCardBodyStyle}>{body}</div>
+    </section>
+  )
 
   const renderSpecial = (id: string): React.ReactNode => {
     switch (id) {
@@ -5759,7 +6012,7 @@ React.useEffect(() => {
               const isReal = ep && (Number(ep.x) !== 0 || Number(ep.y) !== 0)
               return isReal ? (
                 <div style={{ marginTop: 6, display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
-                  <span style={{ fontSize: 11, color: '#6b7280' }}>Lon: {Number(ep.x).toFixed(6)} — Lat: {Number(ep.y).toFixed(6)}</span>
+                  <span style={{ fontSize: 11, color: '#64748b' }}>Lon: {Number(ep.x).toFixed(6)} — Lat: {Number(ep.y).toFixed(6)}</span>
                 </div>
               ) : null
             })()}
@@ -5775,7 +6028,7 @@ React.useEffect(() => {
                     </button>
                     {p.clickedPointWgs84 && (
                       <button type='button' disabled={isRiAgrTecLimitedEdit} onClick={() => { if (isRiAgrTecLimitedEdit) return; p.onClearPoint(); p.onToggleMapClick?.(false) }} style={{
-                        padding: '5px 12px', borderRadius: 8, border: '1px solid rgba(0,0,0,0.14)', background: '#fff', color: '#374151',
+                        padding: '5px 12px', borderRadius: 8, border: '1px solid rgba(0,0,0,0.14)', background: '#f8fbff', color: '#374151',
                         fontSize: 11, fontWeight: 700, cursor: isRiAgrTecLimitedEdit ? 'not-allowed' : 'pointer', opacity: isRiAgrTecLimitedEdit ? 0.5 : 1
                       }}>{p.existingGeomWgs84 && (Number(p.existingGeomWgs84.x) !== 0 || Number(p.existingGeomWgs84.y) !== 0) ? 'Ripristina posizione originale' : 'Annulla'}</button>
                     )}
@@ -5784,7 +6037,7 @@ React.useEffect(() => {
                   <>
                     <span style={{ fontSize: 12, fontWeight: 700, color: '#2563eb' }}>⏳ Clicca sulla mappa per impostare il punto…</span>
                     <button type='button' disabled={isRiAgrTecLimitedEdit} onClick={() => { if (isRiAgrTecLimitedEdit) return; p.onToggleMapClick?.(false) }} style={{
-                      padding: '5px 12px', borderRadius: 8, border: '1px solid rgba(0,0,0,0.14)', background: '#fff', color: '#374151',
+                      padding: '5px 12px', borderRadius: 8, border: '1px solid rgba(0,0,0,0.14)', background: '#f8fbff', color: '#374151',
                       fontSize: 11, fontWeight: 700, cursor: isRiAgrTecLimitedEdit ? 'not-allowed' : 'pointer', opacity: isRiAgrTecLimitedEdit ? 0.5 : 1
                     }}>Annulla</button>
                   </>
@@ -5793,10 +6046,301 @@ React.useEffect(() => {
             )}
           </div>
         )
+      case '_violazione_due_colonne': {
+        const fieldNode = (fieldName: string, label?: string) => {
+          const fld = renderFieldControl(fieldName)
+          if (!fld) return null
+          const protectedFieldName = fieldName === 'norma15_sel' ? 'occorrenza' : (fieldName === 'grado' ? 'gradi_violazioni' : fieldName)
+          return (
+            <NpField key={fieldName} label={label || fld.label} hint={fld.hint}>
+              {renderRiAgrTecProtectedControl(protectedFieldName, fld.el)}
+            </NpField>
+          )
+        }
+        const fieldGrid = (columns: string, fields: Array<string | { field: string; label?: string }>, gap = 10) => {
+          const nodes = fields.map((item) => {
+            const fieldName = typeof item === 'string' ? item : item.field
+            const label = typeof item === 'string' ? undefined : item.label
+            return fieldNode(fieldName, label)
+          }).filter(Boolean)
+          if (!nodes.length) return null
+          return <div style={{ display: 'grid', gridTemplateColumns: columns, gap }}>{nodes}</div>
+        }
+        const canEditRegularField = (fieldName: string, enabled = true) => enabled && !saving && !isRiAgrTecLimitedEdit && canEditFieldForCurrentProfile(fieldName)
+        const surfaceTextField = (fieldName: string, label: string, value: string, onChange: (v: string) => void, enabled: boolean, lockedValue?: string) => (
+          <NpField label={label}>
+            <NpText
+              value={lockedValue != null ? lockedValue : value}
+              onChange={onChange}
+              disabled={!canEditRegularField(fieldName, enabled) || lockedValue != null}
+            />
+          </NpField>
+        )
+        const selectField = (fieldName: string, label: string, value: string, onChange: (v: string) => void, options: readonly {v:string;l:string}[], enabled = true) => (
+          <NpField label={label}>
+            <NpSel value={value} onChange={onChange} options={options} disabled={!canEditRegularField(fieldName, enabled)}/>
+          </NpField>
+        )
+        const compactChoiceStyle = (active: boolean, disabled: boolean): React.CSSProperties => ({
+          display: 'flex',
+          alignItems: 'center',
+          gap: 8,
+          minHeight: 30,
+          padding: '5px 8px',
+          border: 'none',
+          background: 'transparent',
+          borderRadius: 0,
+          color: disabled ? '#94a3b8' : '#334155',
+          fontSize: formStyle.norma3FontSize,
+          fontWeight: 400,
+          cursor: disabled ? 'not-allowed' : 'pointer',
+          boxSizing: 'border-box',
+          lineHeight: 1.3
+        })
+        const choiceBox = (value: 'Art16' | 'Art17', title: string) => {
+          const active = norma1516 === value
+          const disabled = saving || isRiAgrTecLimitedEdit || !canEditFieldForCurrentProfile('norma16_17')
+          return (
+            <label style={compactChoiceStyle(active, disabled)}>
+              <input
+                type='checkbox'
+                checked={active}
+                disabled={disabled}
+                onChange={() => {
+                  if (disabled) return
+                  set('norma16_17', active ? '' : value)
+                  if (value !== 'Art17') set('art17_tipo', '')
+                }}
+                style={{ margin: 0, flexShrink: 0 }}
+              />
+              <span>{title}</span>
+            </label>
+          )
+        }
+        const textAreaField = (fieldName: string, label: string, rows: number) => {
+          const enabled = canEditRegularField(fieldName, true)
+          const node = (
+            <textarea
+              value={g(fieldName)}
+              onChange={e => set(fieldName, e.target.value)}
+              rows={rows}
+              style={{
+                ...fieldBaseStyle(formStyle, !enabled),
+                height: 'auto',
+                paddingTop: 6,
+                paddingBottom: 6,
+                resize: 'vertical',
+                minHeight: rows * Math.max(20, Math.round((Number(formStyle.fieldHeight) || 32) * 0.84)),
+                lineHeight: 1.3
+              }}
+              disabled={!enabled}
+            />
+          )
+          return <NpField label={label}>{node}</NpField>
+        }
+        const emptyGradeCell = <span style={{ color: '#94a3b8', fontSize: 12 }}>—</span>
+        const renderNorma3Rows = () => {
+          return (
+            <div style={{ border: '1px solid #e5e7eb', borderRadius: 10, overflow: 'hidden', background: '#f8fbff', display: 'grid', gap: formStyle.norma3RowGap }}>
+              <div style={{ display: 'grid', gridTemplateColumns: `minmax(360px, 1fr) ${formStyle.norma3GradeColumnWidth}px`, gap: 0, background: '#f8fafc', borderBottom: '1px solid #e5e7eb' }}>
+                <div style={{ ...editMutedHeaderStyle, marginBottom: 0, padding: '6px 8px' }}>Violazione</div>
+                <div style={{ ...editMutedHeaderStyle, marginBottom: 0, padding: '6px 8px', borderLeft: '1px solid #e5e7eb' }}>Grado</div>
+              </div>
+              {CHOICES.norma3.map(o => {
+                const art = normalizeArtCode(o.v)
+                const selected = norma3Set.has(o.v)
+                const hasGrade = RI_GRADO_ART_CODES.includes(art as any)
+                const canEditGrade = isCurrentRiAgrTec() && selected && hasGrade && !saving
+                const gradeNode = selected && hasGrade
+                  ? <NpSel value={riGradiViolazioniMap[art] || ''} onChange={v => setRiGradoForArt(art, v)} options={CHOICES.grado} disabled={!canEditGrade}/>
+                  : emptyGradeCell
+                return (
+                  <div key={o.v} style={{
+                    display: 'grid',
+                    gridTemplateColumns: `minmax(360px, 1fr) ${formStyle.norma3GradeColumnWidth}px`,
+                    minHeight: 30,
+                    borderBottom: '1px solid #edf2f7',
+                    background: selected ? '#f8fbff' : '#fff'
+                  }}>
+                    <label style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 8,
+                      fontSize: formStyle.norma3FontSize,
+                      color: '#334155',
+                      cursor: (saving || isRiAgrTecLimitedEdit) ? 'not-allowed' : 'pointer',
+                      padding: '5px 8px',
+                      opacity: isRiAgrTecLimitedEdit ? 0.72 : 1,
+                      lineHeight: 1.3
+                    }}>
+                      <input type='checkbox' checked={selected} disabled={saving || isRiAgrTecLimitedEdit} onChange={() => !(saving || isRiAgrTecLimitedEdit) && toggleNorma3(o.v)} style={{ margin: 0, flexShrink: 0 }}/>
+                      <span>{o.l}</span>
+                    </label>
+                    <div style={{ borderLeft: '1px solid #e5e7eb', padding: '3px 6px', display: 'flex', alignItems: 'center' }}>
+                      {gradeNode}
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+          )
+        }
+
+        const art15SupEnabled = hasTipoAbuso15
+        const art15SupDichLocked = tipoAbuso === 'totale'
+        const art16Selected = norma1516 === 'Art16'
+        const art17Selected = norma1516 === 'Art17'
+        const art17VarSelected = art17Selected && art17tipo === 'Art17.1'
+        const art17RinSelected = art17Selected && art17tipo === 'Art17.2'
+        const art17SecondLabel = art17VarSelected ? 'Sup. variata (ha)' : 'Sup. irrigata (ha)'
+        const art17DichField = art17VarSelected ? 'sup_dichiarata_art17_1' : 'sup_dichiarata_art17_2'
+        const art17SecondField = art17VarSelected ? 'sup_irrigata_art17_1' : 'sup_irrigata_art17_2'
+        const art17DichValue = art17VarSelected ? g('sup_dichiarata_art17_1') : (art17RinSelected ? g('sup_dichiarata_art17_2') : '')
+        const art17SecondValue = art17VarSelected ? g('sup_irrigata_art17_1') : (art17RinSelected ? '0' : '')
+        const art17SurfaceEnabled = art17Selected && !!art17tipo
+
+        const leftColumn = (
+          <div style={{ display: 'grid', gap: formStyle.sectionGap, minWidth: 0 }}>
+            {renderEditCard('Art. 15 — Prelievo abusivo',
+              <div style={{ display: 'grid', gridTemplateColumns: 'minmax(150px, 190px) minmax(110px, 130px) minmax(110px, 130px) minmax(145px, 180px)', gap: 8, alignItems: 'start' }}>
+                {selectField('tipo_abuso', 'Tipo di abuso', tipoAbuso, v => { set('tipo_abuso', v); set('norma15_parziale', ''); set('norma15_totale', '') }, CHOICES.tipo_abuso)}
+                {surfaceTextField('sup_dichiarata_art15', 'Sup. dichiarata (ha)', g('sup_dichiarata_art15'), v => set('sup_dichiarata_art15', v), art15SupEnabled, art15SupDichLocked ? '0' : undefined)}
+                {surfaceTextField('sup_irrigata_art15', 'Sup. irrigata (ha)', g('sup_irrigata_art15'), v => set('sup_irrigata_art15', v), art15SupEnabled)}
+                {fieldNode('norma15_sel', 'Occorrenza')}
+              </div>
+            )}
+
+            {renderEditCard('Artt. 16 e 17 — Inosservanza termini',
+              <div style={{ display: 'grid', gap: 8 }}>
+                <div style={{ display: 'grid', gridTemplateColumns: 'minmax(220px, 1fr) minmax(130px, 170px) minmax(105px, 130px) minmax(105px, 130px)', gap: 8, alignItems: 'start' }}>
+                  <div style={{ gridColumn: '1 / span 2' }}>
+                    <div style={{ ...S.lbl, color: formStyle.labelColor, fontSize: formStyle.labelFontSize, visibility: 'hidden' }}>Violazione</div>
+                    {choiceBox('Art16', 'Art. 16 - Comunicazione di irrigazione tardiva')}
+                  </div>
+                  {surfaceTextField('sup_dichiarata_art16', 'Sup. dichiarata (ha)', g('sup_dichiarata_art16'), v => set('sup_dichiarata_art16', v), art16Selected)}
+                  {surfaceTextField('sup_irrigata_art16', 'Sup. irrigata (ha)', '0', () => {}, art16Selected, '0')}
+                </div>
+                <div style={{ display: 'grid', gridTemplateColumns: 'minmax(220px, 1fr) minmax(130px, 170px) minmax(105px, 130px) minmax(105px, 130px)', gap: 8, alignItems: 'start' }}>
+                  <div>
+                    <div style={{ ...S.lbl, color: formStyle.labelColor, fontSize: formStyle.labelFontSize, visibility: 'hidden' }}>Violazione</div>
+                    {choiceBox('Art17', 'Art. 17 - Variazione o rinuncia tardiva')}
+                  </div>
+                  {selectField('art17_tipo', 'Tipo comunicazione', art17tipo, v => set('art17_tipo', v), CHOICES.art17_tipo, art17Selected)}
+                  {surfaceTextField(art17DichField, 'Sup. dichiarata (ha)', art17DichValue, v => set(art17DichField, v), art17SurfaceEnabled)}
+                  {surfaceTextField(art17SecondField, art17SecondLabel, art17SecondValue, v => set(art17SecondField, v), art17SurfaceEnabled, art17RinSelected ? '0' : undefined)}
+                </div>
+              </div>
+            )}
+
+            {renderEditCard('Altre violazioni', renderNorma3Rows())}
+          </div>
+        )
+
+        const rightColumn = (
+          <section style={{ ...editCardStyle, height: '100%', display: 'flex', flexDirection: 'column', minWidth: 0 }}>
+            <div style={editCardHeaderStyle}><span>Descrizione e circostanze</span></div>
+            <div style={{ ...editCardBodyStyle, flex: '1 1 auto', display: 'grid', gridTemplateRows: 'auto auto auto 1fr', gap: 7, alignContent: 'start' }}>
+              {textAreaField('descrizione_fatti', 'Descrizione dettagliata della violazione', formStyle.violazioneDescrizioneRows)}
+              {textAreaField('circostanze', 'Circostanze rilevanti', formStyle.violazioneCircostanzeRows)}
+              {fieldGrid('minmax(220px, 320px)', ['presenza_trasgressore'], 7)}
+              <div />
+            </div>
+          </section>
+        )
+
+        const splitterStyle: React.CSSProperties = {
+          position: 'relative',
+          minWidth: formStyle.violazioneSplitterWidth,
+          width: formStyle.violazioneSplitterWidth,
+          cursor: 'col-resize',
+          userSelect: 'none',
+          touchAction: 'none'
+        }
+        const splitterLineStyle: React.CSSProperties = {
+          position: 'absolute',
+          top: 0,
+          bottom: 0,
+          left: '50%',
+          transform: 'translateX(-50%)',
+          width: 2,
+          borderRadius: 999,
+          background: draggingViolazioneSplitter ? '#c5d9f1' : formStyle.violazioneSplitterColor
+        }
+        const splitterHandleStyle: React.CSSProperties = {
+          position: 'absolute',
+          top: '50%',
+          left: '50%',
+          transform: 'translate(-50%, -50%)',
+          width: 8,
+          height: 56,
+          borderRadius: 999,
+          background: draggingViolazioneSplitter ? 'rgba(61,119,201,0.08)' : 'rgba(61,119,201,0.18)',
+          pointerEvents: 'none'
+        }
+        const resetBtnStyle: React.CSSProperties = {
+          position: 'absolute',
+          top: 6,
+          left: '50%',
+          transform: 'translateX(-50%)',
+          width: 28,
+          height: 28,
+          borderRadius: 999,
+          border: `1px solid ${violazioneColumnsDirty ? '#1F4E79' : '#aac4e0'}`,
+          background: violazioneColumnsDirty ? '#1F4E79' : '#fff',
+          color: violazioneColumnsDirty ? '#fff' : '#8aa4bf',
+          cursor: violazioneColumnsDirty ? 'pointer' : 'default',
+          display: 'inline-flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          fontSize: 15,
+          lineHeight: 1,
+          padding: 0,
+          opacity: violazioneColumnsDirty ? 1 : 0.75,
+          zIndex: 2
+        }
+
+        return (
+          <div
+            ref={violazioneGridRef}
+            style={{
+              display: 'grid',
+              gridTemplateColumns: `minmax(${formStyle.violazioneMinLeftPx}px, ${violazioneColumnPercents[0].toFixed(2)}%) ${formStyle.violazioneSplitterWidth}px minmax(${formStyle.violazioneMinRightPx}px, 1fr)`,
+              gap: 0,
+              alignItems: 'stretch',
+              columnGap: 0
+            }}
+          >
+            <div style={{ minWidth: 0, paddingRight: 6 }}>{leftColumn}</div>
+            <div
+              style={splitterStyle}
+              onMouseDown={startViolazioneResize}
+              title='Ridimensiona colonne della scheda Violazione'
+            >
+              <div style={splitterLineStyle} />
+              <div style={splitterHandleStyle} />
+              <button
+                type='button'
+                style={resetBtnStyle}
+                onMouseDown={e => { e.stopPropagation() }}
+                onClick={e => {
+                  e.preventDefault()
+                  e.stopPropagation()
+                  if (violazioneColumnsDirty) resetViolazioneColumns()
+                }}
+                disabled={!violazioneColumnsDirty}
+                title='Ripristina larghezza colonne'
+                aria-label='Ripristina larghezza colonne'
+              >↺</button>
+            </div>
+            <div style={{ minWidth: 0, paddingLeft: 6 }}>{rightColumn}</div>
+          </div>
+        )
+      }
+
       case '_checkboxes_norma3':
         return (
           <>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6 }}>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr', gap: 6 }}>
               {CHOICES.norma3.map(o => (
                 <label key={o.v} style={{ display: 'flex', alignItems: 'flex-start', gap: 8, fontSize: formStyle.norma3FontSize,
                   color: '#374151', cursor: (saving || isRiAgrTecLimitedEdit) ? 'not-allowed' : 'pointer', padding: '4px 0', opacity: isRiAgrTecLimitedEdit ? 0.72 : 1 }}>
@@ -5805,11 +6349,6 @@ React.useEffect(() => {
                 </label>
               ))}
             </div>
-            {norma3SelectedLabels.length > 0 && (
-              <div style={{ fontSize: formStyle.norma3FontSize, color: '#374151', background: '#f8fafc', border: '1px solid #e5e7eb', borderRadius: 8, padding: '8px 10px' }}>
-                {norma3SelectedLabels.join(' • ')}
-              </div>
-            )}
           </>
         )
       case '_header_rappresentante_legale':
@@ -5818,41 +6357,72 @@ React.useEffect(() => {
     }
   }
 
-  const renderRiAgrTecProtectedControl = (fieldName: string, node: React.ReactNode): React.ReactNode => {
-    if (canEditFieldForCurrentProfile(fieldName)) return node
-    if (React.isValidElement(node)) {
-      return React.cloneElement(node as React.ReactElement<any>, { disabled: true })
-    }
-    return <div style={{ pointerEvents: 'none', opacity: 0.72 }}>{node}</div>
-  }
-
   const renderLayoutTab = (tabId: string): React.ReactNode => {
+    if (tabId === 'violazione') return renderSpecial('_violazione_due_colonne')
     const cfgLayouts = cfg.fieldLayouts || {}
     const layout: any[] = (cfgLayouts as any)[tabId] || DEFAULT_FIELD_LAYOUTS[tabId] || []
     const defaultGap = Number(cfg.fieldGap) || 12
+    const fallbackTitle = NP_TABS.find(t => t.id === tabId)?.label || 'Sezione'
+
+    const renderLayoutRowContent = (row: any, key: React.Key): React.ReactNode => {
+      if (row.type === 'special') {
+        const sp = renderSpecial(row.id)
+        return sp != null ? <React.Fragment key={key}>{sp}</React.Fragment> : null
+      }
+      const cells: any[] = row.cells || []
+      const results = cells.map((c: any) => c?.field ? renderFieldControl(c.field) : null)
+      const hasField = cells.some((c: any) => c?.field)
+      const anyVisible = results.some((r: any) => r !== null)
+      if (hasField && !anyVisible) return null
+      return (
+        <div key={key} style={{ display: 'grid', gridTemplateColumns: row.columns || '1fr', gap: row.gap ?? defaultGap }}>
+          {cells.map((cell: any, ci: number) => {
+            if (!cell?.field) return <div key={ci}/>
+            const fld = results[ci]
+            if (!fld) return <div key={ci}/>
+            return <NpField key={ci} label={cell.label || fld.label} hint={fld.hint}>{renderRiAgrTecProtectedControl(String(cell.field), fld.el)}</NpField>
+          })}
+        </div>
+      )
+    }
+
+    const sections: Array<{ title: string; rows: any[] }> = []
+    let current: { title: string; rows: any[] } = { title: fallbackTitle, rows: [] }
+    const pushCurrent = () => {
+      if (current.rows.length) sections.push(current)
+      current = { title: '', rows: [] }
+    }
+
+    layout.forEach((row: any) => {
+      if (row.type === 'header') {
+        pushCurrent()
+        current = { title: String(row.label || fallbackTitle), rows: [] }
+        return
+      }
+      if (row.type === 'special' && row.id === '_header_rappresentante_legale') {
+        if (tipoSogg === 'PG') {
+          pushCurrent()
+          current = { title: 'Rappresentante legale', rows: [] }
+        }
+        return
+      }
+      if (row.type === 'special' && row.id === '_localizzazione') {
+        pushCurrent()
+        sections.push({ title: 'Localizzazione', rows: [row] })
+        current = { title: '', rows: [] }
+        return
+      }
+      if (!current.title) current.title = fallbackTitle
+      current.rows.push(row)
+    })
+    pushCurrent()
+
     return (
-      <div>
-        {layout.map((row: any, ri: number) => {
-          if (row.type === 'header') return <div key={ri} style={sHdr}>{row.label}</div>
-          if (row.type === 'special') {
-            const sp = renderSpecial(row.id)
-            return sp != null ? <React.Fragment key={ri}>{sp}</React.Fragment> : null
-          }
-          const cells: any[] = row.cells || []
-          const results = cells.map((c: any) => c?.field ? renderFieldControl(c.field) : null)
-          const hasField = cells.some((c: any) => c?.field)
-          const anyVisible = results.some((r: any) => r !== null)
-          if (hasField && !anyVisible) return null
-          return (
-            <div key={ri} style={{ display: 'grid', gridTemplateColumns: row.columns || '1fr', gap: row.gap ?? defaultGap }}>
-              {cells.map((cell: any, ci: number) => {
-                if (!cell?.field) return <div key={ci}/>
-                const fld = results[ci]
-                if (!fld) return <div key={ci}/>
-                return <NpField key={ci} label={cell.label || fld.label} hint={fld.hint}>{renderRiAgrTecProtectedControl(String(cell.field), fld.el)}</NpField>
-              })}
-            </div>
-          )
+      <div style={{ display: 'grid', gap: 14 }}>
+        {sections.map((section, si) => {
+          const nodes = section.rows.map((row, ri) => renderLayoutRowContent(row, `${si}-${ri}`)).filter(Boolean)
+          if (!nodes.length) return null
+          return renderEditCard(section.title || fallbackTitle, <div style={{ display: 'grid', gap: defaultGap }}>{nodes}</div>)
         })}
       </div>
     )
@@ -5860,17 +6430,29 @@ React.useEffect(() => {
 
   return (
   <FormStyleCtx.Provider value={formStyle}>
-    <div ref={npTabSyncElRef} style={{ width: '100%', height: '100%', display: 'flex', flexDirection: 'column', minHeight: 0 }}>
+    <div ref={npTabSyncElRef} style={{
+      width: '100%',
+      height: '100%',
+      display: 'flex',
+      flexDirection: 'column',
+      minHeight: 0,
+      boxSizing: 'border-box',
+      background: formStyle.maskBg,
+      border: `${formStyle.maskBorderWidth}px solid ${formStyle.maskBorderColor}`,
+      borderRadius: formStyle.maskBorderRadius,
+      padding: formStyle.maskInnerPadding,
+      overflow: 'hidden'
+    }}>
 
       {/* ── Toolbar ── */}
       <div style={{ flex: '0 0 auto', display: 'flex', alignItems: 'center', justifyContent: 'space-between',
         flexWrap: 'wrap', gap: 8, padding: '8px 0', borderBottom: '1px solid rgba(0,0,0,0.08)' }}>
-        <span style={{ fontWeight: 700, fontSize: 14 }}>
+        <span style={{ fontWeight: 700, fontSize: formStyle.titleFontSize }}>
           {toolbarTitleInfo.baseTitle}
           {toolbarTitleInfo.praticaCode ? <> <span style={{ color: '#0b5fff' }}>{toolbarTitleInfo.praticaCode}</span></> : null}
         </span>
         <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-          {msg && <span style={{ fontSize: 12, color: msg.kind === 'ok' ? '#1a7f37' : '#b42318' }}>{msg.text}</span>}
+          {msg && <span style={{ fontSize: formStyle.msgFontSize, color: msg.kind === 'ok' ? '#1a7f37' : '#b42318' }}>{msg.text}</span>}
           <button type='button' disabled={saving || !isDirty} onClick={handleSave}
             style={{
               ...btnBase,
@@ -5986,7 +6568,7 @@ React.useEffect(() => {
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
                   <label style={{
                     minHeight: 36, height: 36, boxSizing: 'border-box',
-                    padding: '0 14px', borderRadius: 10, border: '1px solid rgba(0,0,0,0.12)', background: '#fff', color: '#111827',
+                    padding: '0 14px', borderRadius: 10, border: '1px solid rgba(0,0,0,0.12)', background: '#f8fbff', color: '#111827',
                     fontSize: 12, fontWeight: 600, cursor: (attachmentsUploading || isRiAgrTecLimitedEdit) ? 'not-allowed' : 'pointer', opacity: isRiAgrTecLimitedEdit ? 0.55 : 1,
                     display: 'inline-flex', alignItems: 'center', justifyContent: 'center', lineHeight: 1, whiteSpace: 'nowrap'
                   }}>
@@ -6040,7 +6622,7 @@ React.useEffect(() => {
                     <div key={a.id} onClick={() => setPreviewAttachment(previewAttachment?.id === a.id ? null : { id: a.id, name: a.name, contentType: a.contentType })} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, border: `1px solid ${previewAttachment?.id === a.id ? '#2563eb' : 'rgba(0,0,0,0.08)'}`, borderRadius: 10, padding: '8px 10px', background: previewAttachment?.id === a.id ? '#eff6ff' : '#fff', cursor: 'pointer', transition: 'all 0.15s' }}>
                       <div style={{ minWidth: 0 }}>
                         <div style={{ fontWeight: 600, fontSize: 12, color: '#111827', wordBreak: 'break-word' }}>{a.name || `Allegato #${a.id}`}</div>
-                        <div style={{ fontSize: 11, color: '#6b7280' }}>{formatBytesLocal(a.size)}{a.contentType ? ` • ${a.contentType}` : ''}</div>
+                        <div style={{ fontSize: 11, color: '#64748b' }}>{formatBytesLocal(a.size)}{a.contentType ? ` • ${a.contentType}` : ''}</div>
 
                       </div>
                       {Number(a?.id) > 0 ? (
@@ -6059,7 +6641,7 @@ React.useEffect(() => {
                               fontWeight: 700,
                               color: '#1d4ed8',
                               whiteSpace: 'nowrap',
-                              background: '#fff',
+                              background: '#f8fbff',
                               border: '1px solid rgba(29,78,216,0.18)',
                               borderRadius: 8,
                               padding: '6px 10px',
@@ -6077,7 +6659,7 @@ React.useEffect(() => {
                               fontWeight: 700,
                               color: '#1d4ed8',
                               whiteSpace: 'nowrap',
-                              background: '#fff',
+                              background: '#f8fbff',
                               border: '1px solid rgba(29,78,216,0.18)',
                               borderRadius: 8,
                               padding: '6px 10px',
@@ -6096,7 +6678,7 @@ React.useEffect(() => {
                               fontWeight: 700,
                               color: '#d92d20',
                               whiteSpace: 'nowrap',
-                              background: '#fff',
+                              background: '#f8fbff',
                               border: '1px solid rgba(217,45,32,0.24)',
                               borderRadius: 8,
                               padding: '6px 10px',
@@ -6158,7 +6740,7 @@ React.useEffect(() => {
             role='dialog'
             aria-modal='true'
             data-gii-global-popup-dialog='1'
-            style={{ width: 'min(92vw, 520px)', background: '#fff', borderRadius: 14, boxShadow: '0 20px 60px rgba(0,0,0,0.28)', border: '1px solid rgba(0,0,0,0.08)', padding: 18, position: 'relative', zIndex: 2147483647 }}
+            style={{ width: 'min(92vw, 520px)', background: '#f8fbff', borderRadius: 14, boxShadow: '0 20px 60px rgba(0,0,0,0.28)', border: '1px solid rgba(0,0,0,0.08)', padding: 18, position: 'relative', zIndex: 2147483647 }}
             onClick={(e) => { e.stopPropagation() }}
             onMouseDown={(e) => { e.stopPropagation() }}
           >
@@ -6183,7 +6765,7 @@ React.useEffect(() => {
               <button
                 type='button'
                 onClick={() => setCancelUnsavedPopupOpen(false)}
-                style={{ ...btnBase, border: '1px solid rgba(0,0,0,0.18)', background: '#fff', color: '#111827', cursor: 'pointer', pointerEvents: 'auto' }}
+                style={{ ...btnBase, border: '1px solid rgba(0,0,0,0.18)', background: '#f8fbff', color: '#111827', cursor: 'pointer', pointerEvents: 'auto' }}
               >
                 No, resta in modifica
               </button>
@@ -6204,7 +6786,7 @@ React.useEffect(() => {
             role='dialog'
             aria-modal='true'
             data-gii-global-popup-dialog='1'
-            style={{ width: 'min(92vw, 460px)', background: '#fff', borderRadius: 14, boxShadow: '0 20px 60px rgba(0,0,0,0.28)', border: '1px solid rgba(0,0,0,0.08)', padding: 18, position: 'relative', zIndex: 2147483647 }}
+            style={{ width: 'min(92vw, 460px)', background: '#f8fbff', borderRadius: 14, boxShadow: '0 20px 60px rgba(0,0,0,0.28)', border: '1px solid rgba(0,0,0,0.08)', padding: 18, position: 'relative', zIndex: 2147483647 }}
             onClick={(e) => { e.preventDefault(); e.stopPropagation() }}
             onMouseDown={(e) => { e.preventDefault(); e.stopPropagation() }}
           >
@@ -6236,7 +6818,7 @@ React.useEffect(() => {
           <div
             role='dialog'
             aria-modal='true'
-            style={{ width: 'min(92vw, 520px)', background: '#fff', borderRadius: 14, boxShadow: '0 20px 60px rgba(0,0,0,0.28)', border: '1px solid rgba(0,0,0,0.08)', padding: 18, position: 'relative', zIndex: 2147483647 }}
+            style={{ width: 'min(92vw, 520px)', background: '#f8fbff', borderRadius: 14, boxShadow: '0 20px 60px rgba(0,0,0,0.28)', border: '1px solid rgba(0,0,0,0.08)', padding: 18, position: 'relative', zIndex: 2147483647 }}
             onClick={(e) => { e.stopPropagation() }}
             onMouseDown={(e) => { e.stopPropagation() }}
           >
@@ -6277,7 +6859,7 @@ React.useEffect(() => {
             role='dialog'
             aria-modal='true'
             data-gii-global-popup-dialog='1'
-            style={{ width: 'min(92vw, 520px)', background: '#fff', borderRadius: 14, boxShadow: '0 20px 60px rgba(0,0,0,0.28)', border: '1px solid rgba(0,0,0,0.08)', padding: 18, position: 'relative', zIndex: 2147483647 }}
+            style={{ width: 'min(92vw, 520px)', background: '#f8fbff', borderRadius: 14, boxShadow: '0 20px 60px rgba(0,0,0,0.28)', border: '1px solid rgba(0,0,0,0.08)', padding: 18, position: 'relative', zIndex: 2147483647 }}
             onClick={(e) => { e.stopPropagation() }}
             onMouseDown={(e) => { e.stopPropagation() }}
           >
@@ -6728,7 +7310,7 @@ if (!hasSel) {
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10, gap: 10, flexWrap: 'wrap' }}>
             <div style={{ fontWeight: 700, fontSize: 13 }}>Allegati</div>
             <div style={{ display: 'flex', alignItems: 'stretch', gap: 8, flexWrap: 'wrap' }}>
-              <label style={{ padding: '6px 10px', borderRadius: 10, border: '1px solid rgba(0,0,0,0.12)', background: '#fff', color: '#111827', fontSize: 12, fontWeight: 600, cursor: !hasSel || attachmentsUploading ? 'not-allowed' : 'pointer' }}>
+              <label style={{ padding: '6px 10px', borderRadius: 10, border: '1px solid rgba(0,0,0,0.12)', background: '#f8fbff', color: '#111827', fontSize: 12, fontWeight: 600, cursor: !hasSel || attachmentsUploading ? 'not-allowed' : 'pointer' }}>
                 Scegli file
                 <input
                   type='file'
@@ -6824,7 +7406,7 @@ if (!hasSel) {
                             padding: '6px 10px',
                             borderRadius: 10,
                             border: '1px solid rgba(0,0,0,0.12)',
-                            background: '#fff',
+                            background: '#f8fbff',
                             color: '#111827',
                             textDecoration: 'none',
                             fontSize: 12,
@@ -7357,12 +7939,12 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
   }
 
   const ui = {
-    panelBg: String((cfg as any).maskBg ?? cfg.panelBg ?? (defaultConfig as any).maskBg ?? defaultConfig.panelBg),
-    panelBorderColor: String((cfg as any).maskBorderColor ?? cfg.panelBorderColor ?? (defaultConfig as any).maskBorderColor ?? defaultConfig.panelBorderColor),
+    panelBg: modernColor((cfg as any).maskBg ?? cfg.panelBg, String((defaultConfig as any).maskBg ?? defaultConfig.panelBg), ['#ffffff']),
+    panelBorderColor: modernColor((cfg as any).maskBorderColor ?? cfg.panelBorderColor, String((defaultConfig as any).maskBorderColor ?? defaultConfig.panelBorderColor), ['#e5e7eb']),
     panelBorderWidth: Number.isFinite(Number((cfg as any).maskBorderWidth ?? cfg.panelBorderWidth)) ? Number((cfg as any).maskBorderWidth ?? cfg.panelBorderWidth) : ((defaultConfig as any).maskBorderWidth ?? defaultConfig.panelBorderWidth),
     panelBorderRadius: Number.isFinite(Number((cfg as any).maskBorderRadius ?? cfg.panelBorderRadius)) ? Number((cfg as any).maskBorderRadius ?? cfg.panelBorderRadius) : ((defaultConfig as any).maskBorderRadius ?? defaultConfig.panelBorderRadius),
     panelPadding: Number.isFinite(Number((cfg as any).maskInnerPadding ?? cfg.panelPadding)) ? Number((cfg as any).maskInnerPadding ?? cfg.panelPadding) : ((defaultConfig as any).maskInnerPadding ?? defaultConfig.panelPadding),
-    dividerColor: String(cfg.dividerColor ?? defaultConfig.dividerColor),
+    dividerColor: modernColor(cfg.dividerColor, String(defaultConfig.dividerColor), ['#e5e7eb']),
     titleFontSize: Number.isFinite(Number(cfg.titleFontSize)) ? Number(cfg.titleFontSize) : defaultConfig.titleFontSize,
     statusFontSize: Number.isFinite(Number(cfg.statusFontSize)) ? Number(cfg.statusFontSize) : defaultConfig.statusFontSize,
     msgFontSize: Number.isFinite(Number(cfg.msgFontSize)) ? Number(cfg.msgFontSize) : defaultConfig.msgFontSize,
@@ -7385,11 +7967,11 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
     btnFontWeight: Number.isFinite(Number(cfg.btnFontWeight)) ? Number(cfg.btnFontWeight) : defaultConfig.btnFontWeight ?? 600,
     btnPaddingX: Number.isFinite(Number(cfg.btnPaddingX)) ? Number(cfg.btnPaddingX) : defaultConfig.btnPaddingX ?? 16,
     btnPaddingY: Number.isFinite(Number(cfg.btnPaddingY)) ? Number(cfg.btnPaddingY) : defaultConfig.btnPaddingY ?? 8,
-    formLabelColor: String((cfg as any).formLabelColor || defaultConfig.formLabelColor),
+    formLabelColor: modernColor((cfg as any).formLabelColor, String(defaultConfig.formLabelColor), ['#6b7280']),
     formLabelFontSize: Number.isFinite(Number((cfg as any).formLabelFontSize)) ? Number((cfg as any).formLabelFontSize) : defaultConfig.formLabelFontSize,
-    sectionHeaderColor: String((cfg as any).sectionHeaderColor || defaultConfig.sectionHeaderColor),
+    sectionHeaderColor: modernColor((cfg as any).sectionHeaderColor, String(defaultConfig.sectionHeaderColor), ['#1d4ed8']),
     sectionHeaderFontSize: Number.isFinite(Number((cfg as any).sectionHeaderFontSize)) ? Number((cfg as any).sectionHeaderFontSize) : defaultConfig.sectionHeaderFontSize,
-    sectionDividerColor: String((cfg as any).sectionDividerColor || defaultConfig.sectionDividerColor),
+    sectionDividerColor: modernColor((cfg as any).sectionDividerColor, String(defaultConfig.sectionDividerColor), ['#bfdbfe']),
     sectionDividerWidth: Number.isFinite(Number((cfg as any).sectionDividerWidth)) ? Number((cfg as any).sectionDividerWidth) : defaultConfig.sectionDividerWidth,
     formFieldFontSize: Number.isFinite(Number((cfg as any).formFieldFontSize)) ? Number((cfg as any).formFieldFontSize) : defaultConfig.formFieldFontSize,
     norma3FontSize: Number.isFinite(Number((cfg as any).norma3FontSize)) ? Number((cfg as any).norma3FontSize) : defaultConfig.norma3FontSize

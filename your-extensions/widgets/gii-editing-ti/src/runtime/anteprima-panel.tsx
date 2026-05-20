@@ -173,6 +173,31 @@ function formatTimeIt (v: any): string {
 function esc (s: any): string { return String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;') }
 function fmtNum (v: any): string { if (v == null || v === '') return ''; const n = Number(v); if (isNaN(n)) return String(v); return n.toLocaleString('it-IT', { maximumFractionDigits: 2 }) }
 
+function parseGradiViolazioniForRapporto (raw: any): Record<string, string> {
+  const out: Record<string, string> = {}
+  const text = String(raw ?? '').trim()
+  if (!text) return out
+  for (const part of text.split(';')) {
+    const m = part.trim().match(/^Art?\.?\s*(\d{1,2})\s*[-:=]\s*([1-4])$/i) || part.trim().match(/^(\d{1,2})\s*[-:=]\s*([1-4])$/)
+    if (!m) continue
+    const art = String(m[1]).replace(/^0+/, '')
+    out[art] = String(m[2])
+  }
+  return out
+}
+
+function gradoViolazioneForRapporto (map: Record<string, string>, art: string): string {
+  return map[String(art).replace(/^0+/, '')] || ''
+}
+
+function occorrenzaArt15ForRapporto (raw: any, on: boolean): string {
+  if (!on) return ''
+  const v = String(raw ?? '').trim()
+  if (v === '1') return 'Prima contestazione'
+  if (v === '2') return 'Recidiva'
+  return ''
+}
+
 function buildPlaceholderMap (data: any, utentiCache: Map<string, UtenteCached> | null): Record<string, string> {
   const d = data || {}
   const areaCod = normalizeAreaCode(firstMeaningfulValue(d.area_cod, d.area))
@@ -186,9 +211,8 @@ function buildPlaceholderMap (data: any, utentiCache: Map<string, UtenteCached> 
   const art17on = String(d.norma16_17 || '').toLowerCase().includes('art17') || !!d.art17_tipo
   const xMark = (on: boolean) => on ? 'x' : ''
   const surfVal = (on: boolean, ...fields: string[]) => { if (!on) return ''; for (const f of fields) { const v = d[f]; if (v != null && v !== '' && v !== 0) return fmtNum(v) } return '' }
-  const grado = d.grado != null && d.grado !== '' ? String(d.grado) : ''
-  const recidiva = d.recidiva === 1 || d.recidiva === '1'
-  const occorrenza = (on: boolean): string => { if (!on) return ''; return recidiva ? 'Recidiva' : 'Prima contestazione' }
+  const gradiViolazioni = parseGradiViolazioniForRapporto(d.gradi_violazioni)
+  const occorrenzaArt15 = occorrenzaArt15ForRapporto(d.occorrenza, art15on)
   const origPratica = d.origine_pratica ?? d.Origine_pratica
   const praticaPrefix = (origPratica === 2 || origPratica === '2') ? 'TI' : 'TR'
   const oidVal = d.OBJECTID ?? d.objectid ?? ''
@@ -219,20 +243,20 @@ function buildPlaceholderMap (data: any, utentiCache: Map<string, UtenteCached> 
     sup_dich_art36: surfVal(artChecked('v_art36'), 'sup_dichiarata_art36'), sup_irr_art36: surfVal(artChecked('v_art36'), 'sup_irrigata_art36'),
     sup_dich_art37: surfVal(artChecked('v_art37'), 'sup_dichiarata_art37'), sup_irr_art37: surfVal(artChecked('v_art37'), 'sup_irrigata_art37'),
     sup_dich_art39: surfVal(artChecked('v_art39'), 'sup_dichiarata_art39'), sup_irr_art39: surfVal(artChecked('v_art39'), 'sup_irrigata_art39'),
-    grado_art08: artChecked('v_art08') ? grado : '', grado_art12: artChecked('v_art12') ? grado : '', grado_art15: art15on ? grado : '',
-    grado_art16: art16on ? grado : '', grado_art17: art17on ? grado : '', grado_art27: artChecked('v_art27') ? grado : '',
-    grado_art28: artChecked('v_art28') ? grado : '', grado_art29: artChecked('v_art29') ? grado : '', grado_art30: artChecked('v_art30') ? grado : '',
-    grado_art31: artChecked('v_art31') ? grado : '', grado_art32: artChecked('v_art32') ? grado : '', grado_art33: artChecked('v_art33') ? grado : '',
-    grado_art34: artChecked('v_art34') ? grado : '', grado_art35: artChecked('v_art35') ? grado : '', grado_art36: artChecked('v_art36') ? grado : '',
-    grado_art37: artChecked('v_art37') ? grado : '', grado_art39: artChecked('v_art39') ? grado : '',
-    recidiva_art08: occorrenza(artChecked('v_art08')), recidiva_art12: occorrenza(artChecked('v_art12')),
-    recidiva_art15: occorrenza(art15on), recidiva_art16: occorrenza(art16on), recidiva_art17: occorrenza(art17on),
-    recidiva_art27: occorrenza(artChecked('v_art27')), recidiva_art28: occorrenza(artChecked('v_art28')),
-    recidiva_art29: occorrenza(artChecked('v_art29')), recidiva_art30: occorrenza(artChecked('v_art30')),
-    recidiva_art31: occorrenza(artChecked('v_art31')), recidiva_art32: occorrenza(artChecked('v_art32')),
-    recidiva_art33: occorrenza(artChecked('v_art33')), recidiva_art34: occorrenza(artChecked('v_art34')),
-    recidiva_art35: occorrenza(artChecked('v_art35')), recidiva_art36: occorrenza(artChecked('v_art36')),
-    recidiva_art37: occorrenza(artChecked('v_art37')), recidiva_art39: occorrenza(artChecked('v_art39')),
+    grado_art08: '', grado_art12: artChecked('v_art12') ? gradoViolazioneForRapporto(gradiViolazioni, '12') : '', grado_art15: '',
+    grado_art16: '', grado_art17: '', grado_art27: artChecked('v_art27') ? gradoViolazioneForRapporto(gradiViolazioni, '27') : '',
+    grado_art28: artChecked('v_art28') ? gradoViolazioneForRapporto(gradiViolazioni, '28') : '', grado_art29: '', grado_art30: '',
+    grado_art31: artChecked('v_art31') ? gradoViolazioneForRapporto(gradiViolazioni, '31') : '', grado_art32: artChecked('v_art32') ? gradoViolazioneForRapporto(gradiViolazioni, '32') : '', grado_art33: artChecked('v_art33') ? gradoViolazioneForRapporto(gradiViolazioni, '33') : '',
+    grado_art34: artChecked('v_art34') ? gradoViolazioneForRapporto(gradiViolazioni, '34') : '', grado_art35: artChecked('v_art35') ? gradoViolazioneForRapporto(gradiViolazioni, '35') : '', grado_art36: artChecked('v_art36') ? gradoViolazioneForRapporto(gradiViolazioni, '36') : '',
+    grado_art37: artChecked('v_art37') ? gradoViolazioneForRapporto(gradiViolazioni, '37') : '', grado_art39: '',
+    recidiva_art08: '', recidiva_art12: '',
+    recidiva_art15: occorrenzaArt15, recidiva_art16: '', recidiva_art17: '',
+    recidiva_art27: '', recidiva_art28: '',
+    recidiva_art29: '', recidiva_art30: '',
+    recidiva_art31: '', recidiva_art32: '',
+    recidiva_art33: '', recidiva_art34: '',
+    recidiva_art35: '', recidiva_art36: '',
+    recidiva_art37: '', recidiva_art39: '',
     descrizione_fatti: esc(d.descrizione_fatti || ''), circostanze: esc(d.circostanze || ''), descrizione_luogo: esc(d.descrizione_luogo || ''),
     tipo_soggetto: isPF ? 'PF' : 'PG',
     denominazione: isPF ? esc(`${d.nome || ''} ${d.cognome || ''}`.trim()) : esc(d.ragione_sociale || ''),

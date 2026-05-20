@@ -444,15 +444,19 @@ function migrateColumns (cfg: any): ColumnDef[] {
     }
   }
 
-  // Ordine operativo: identificativi essenziali, chip Stato subito visibile,
-  // poi la trasmissione in stile e-mail (Oggetto / Da / A).
+  const fieldUfficio = String(cfg?.fieldUfficio || 'ufficio_zona')
+
+  // Ordine operativo: prima identificazione/origine del rapporto, poi lettura
+  // operativa per il ruolo corrente. Le colonne procedimentali sono raggruppate
+  // visivamente nell'header: stato istruttoria + mittente + destinatario + ultimo agg.
   const out: ColumnDef[] = [
     take({ id: 'col_pratica', label: 'N. rapporto', field: 'objectid', width: 110 }, findPratica()),
-    take({ id: 'col_data', label: 'Data rilevazione', field: 'data_rilevazione', width: 120 }),
-    take({ id: 'col_stato', label: 'Stato', field: V_STATO, width: 170 }),
-    take({ id: 'col_causale', label: 'Oggetto', field: V_CAUSALE, width: 210 }),
-    take({ id: 'col_mittente', label: 'Da', field: V_MITTENTE, width: 210 }),
-    take({ id: 'col_prossima', label: 'A', field: V_PROSSIMA, width: 210 })
+    take({ id: 'col_data', label: 'Data rilevazione', field: 'data_rilevazione', width: 140 }),
+    take({ id: 'col_ufficio', label: 'Ufficio origine', field: fieldUfficio, width: 190 }),
+    take({ id: 'col_stato', label: 'Il mio stato', field: V_STATO, width: 170 }),
+    take({ id: 'col_causale', label: 'Stato istruttoria', field: V_CAUSALE, width: 250 }),
+    take({ id: 'col_mittente', label: 'Mittente', field: V_MITTENTE, width: 210 }),
+    take({ id: 'col_prossima', label: 'Destinatario', field: V_PROSSIMA, width: 210 })
   ]
 
   // Mantieni eventuali altre colonne configurate, ma dopo quelle operative.
@@ -465,7 +469,12 @@ function migrateColumns (cfg: any): ColumnDef[] {
   }
 
   const dataMsg = findByField(V_DATA_MSG)
-  if (dataMsg) out.push({ ...dataMsg, label: 'Ultimo agg.', width: num(dataMsg.width, 150) })
+  out.push({
+    id: String(dataMsg?.id || 'col_data_msg'),
+    label: 'Ultimo agg.',
+    field: V_DATA_MSG,
+    width: num(dataMsg?.width, 150)
+  })
 
   return out
 }
@@ -2081,7 +2090,10 @@ React.useEffect(() => {
     const color = (() => {
       if (!oggettoBadgeEnabled || !o || o === '—') return 'transparent'
       if (o.includes('RESPINTA')) return txt(cfg.oggettoBadgeColorRespingimento || CHIP_RED.background)
-      if (o.includes('APPROVATA') || o.includes('NOTIFICATA')) return txt(cfg.oggettoBadgeColorApprovazione || CHIP_GREEN.background)
+      if (o.includes('NOTIFIC')) return txt(cfg.oggettoBadgeColorNotifica || cfg.oggettoBadgeColorApprovazione || CHIP_GREEN.background)
+      if (o.includes('ISTRUTTORIA TECNICA APPROVATA')) return txt(cfg.oggettoBadgeColorApprovazioneTecnica || cfg.oggettoBadgeColorApprovazione || CHIP_GREEN.background)
+      if (o.includes('SANZIONE APPROVATA') || o.includes('ISTRUTTORIA AMMINISTRATIVA APPROVATA')) return txt(cfg.oggettoBadgeColorApprovazioneAmministrativa || cfg.oggettoBadgeColorApprovazione || CHIP_GREEN.background)
+      if (o.includes('APPROVATA')) return txt(cfg.oggettoBadgeColorApprovazioneAmministrativa || cfg.oggettoBadgeColorApprovazione || CHIP_GREEN.background)
       if (o.includes('INTEGRAZIONE')) return txt(cfg.oggettoBadgeColorIntegrazione || CHIP_ORANGE.background)
       if (o === 'ASSEGNAZIONE ISTRUTTORIA') return txt(cfg.oggettoBadgeColorAssegnazione || CHIP_BLUE.background)
       if (o === 'TRASMISSIONE ISTRUTTORIA') return txt(cfg.oggettoBadgeColorTrasmissione || CHIP_PURPLE.background)
@@ -2904,6 +2916,13 @@ React.useEffect(() => {
 
   const gridCols = columns.map(c => `${c.width}px`).join(' ')
   const minWidth = columns.reduce((sum, c) => sum + c.width, 0) + (gap * Math.max(0, columns.length - 1)) + 24
+  const procGroupFields = new Set([V_CAUSALE, V_MITTENTE, V_PROSSIMA, V_DATA_MSG])
+  const procGroupIndexes = columns
+    .map((c, i) => procGroupFields.has(String(c.field || '').toLowerCase()) ? i : -1)
+    .filter(i => i >= 0)
+  const procGroupStart = procGroupIndexes.length ? Math.min(...procGroupIndexes) : -1
+  const procGroupEnd = procGroupIndexes.length ? Math.max(...procGroupIndexes) : -1
+  const procGroupSpan = procGroupStart >= 0 ? (procGroupEnd - procGroupStart + 1) : 0
 
   const rowGap = num(cfg.rowGap, 8)
   const rowPaddingX = num(cfg.rowPaddingX, 12)
@@ -3021,8 +3040,75 @@ React.useEffect(() => {
       z-index: 2;
       background: var(--bs-body-bg, #fff);
       border-bottom: 1px solid rgba(0,0,0,0.08);
-      padding: 6px 12px;
+      padding: 6px 0;
       margin: 0 0 8px 0;
+    }
+
+    .gridGroupHeader {
+      display: grid;
+      grid-template-columns: ${gridCols};
+      column-gap: ${gap}px;
+      align-items: end;
+      min-height: 26px;
+      padding: 2px ${rowPaddingX + rowBorderWidth}px 4px ${rowPaddingX + rowBorderWidth}px;
+      box-sizing: border-box;
+    }
+
+    .groupHeaderCell {
+      position: relative;
+      min-width: 0;
+      height: 22px;
+      display: flex;
+      align-items: flex-start;
+      justify-content: center;
+      color: rgba(17,24,39,0.68);
+      font-size: 10px;
+      font-weight: 800;
+      line-height: 1;
+      text-transform: uppercase;
+      letter-spacing: 0.035em;
+      text-align: center;
+      white-space: nowrap;
+      overflow: visible;
+      text-overflow: ellipsis;
+      --group-left-extra: 14px;
+      --group-right-shrink: 22px;
+    }
+
+    .groupHeaderCell::before {
+      content: '';
+      position: absolute;
+      left: calc(-1 * var(--group-left-extra));
+      right: var(--group-right-shrink);
+      top: 11px;
+      border-top: 1px solid rgba(15, 23, 42, 0.20);
+    }
+
+    .groupHeaderCell::after {
+      content: '';
+      position: absolute;
+      left: calc(-1 * var(--group-left-extra));
+      right: var(--group-right-shrink);
+      top: 11px;
+      height: 12px;
+      border-left: 1px solid rgba(15, 23, 42, 0.20);
+      border-right: 1px solid rgba(15, 23, 42, 0.20);
+      pointer-events: none;
+    }
+
+    .groupHeaderLabel {
+      position: relative;
+      z-index: 1;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      max-width: calc(100% - 16px);
+      padding: 0 8px;
+      background: var(--bs-body-bg, #fff);
+      color: rgba(17,24,39,0.68);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
     }
 
     .gridHeader {
@@ -3031,7 +3117,7 @@ React.useEffect(() => {
       column-gap: ${gap}px;
       align-items: center;
       min-height: 28px;
-      padding-left: 10px;
+      padding: 0 ${rowPaddingX + rowBorderWidth}px;
       box-sizing: border-box;
     }
 
@@ -3602,6 +3688,16 @@ React.useEffect(() => {
                 <>
                   {cfg.showHeader !== false && (
                     <div className='headerWrap'>
+                      {procGroupSpan > 0 && (
+                        <div className='gridGroupHeader'>
+                          <div
+                            className='groupHeaderCell'
+                            style={{ gridColumn: `${procGroupStart + 1} / span ${procGroupSpan}` }}
+                          >
+                            <span className='groupHeaderLabel'>Stato e trasmissione del procedimento</span>
+                          </div>
+                        </div>
+                      )}
                       <div className='gridHeader'>
                         {columns.map((col, ci) => (
                           <Header key={col.id} first={ci === 0} label={col.label} field={col.field} />

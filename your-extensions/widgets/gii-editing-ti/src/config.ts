@@ -106,15 +106,43 @@ export interface Config {
   statusFontSize: number
   msgFontSize: number
 
-  // --- Stile form (label campi e intestazioni sezione)
+  // --- Stile form (etichette, campi, card/sezioni)
   formLabelColor: string
   formLabelFontSize: number
+  formLabelFontWeight: number
+  formLabelMarginBottom: number
+  formFieldColor: string
+  formFieldFontSize: number
+  formFieldHeight: number
+  formFieldPaddingX: number
+  formFieldBorderColor: string
+  formFieldBorderWidth: number
+  formFieldBorderRadius: number
+  formFieldBg: string
+  formFieldDisabledBg: string
+  formFieldDisabledColor: string
+  formSectionGap: number
+  formCardBg: string
+  formCardBorderColor: string
+  formCardBorderWidth: number
+  formCardBorderRadius: number
+  formCardShadow: string
+  formCardHeaderBg: string
+  formCardHeaderColor: string
+  formCardHeaderFontSize: number
+  formCardHeaderFontWeight: number
+  formCardHeaderPaddingX: number
+  formCardHeaderPaddingY: number
+  formCardBodyPadding: number
   sectionHeaderColor: string
   sectionHeaderFontSize: number
   sectionDividerColor: string
   sectionDividerWidth: number
-  formFieldFontSize: number
   norma3FontSize: number
+  norma3GradeColumnWidth: number
+  norma3RowGap: number
+  violazioneDescrizioneRows: number
+  violazioneCircostanzeRows: number
 
   // --- Anteprima PDF
   anteprimaPdfPaddingTop: number
@@ -181,6 +209,13 @@ export interface Config {
   // --- Layout campi (posizione e dimensione per tab)
   fieldLayouts: Record<string, LayoutRow[]>
   fieldGap: number
+
+  // --- Scheda Violazione (layout speciale)
+  violazioneLayoutLeftPercent: number
+  violazioneLayoutMinLeftPx: number
+  violazioneLayoutMinRightPx: number
+  violazioneSplitterWidth: number
+  violazioneSplitterColor: string
 }
 
 export const defaultConfig: Config = {
@@ -215,35 +250,63 @@ export const defaultConfig: Config = {
   btnPaddingX: 16,
   btnPaddingY: 8,
 
-  modeBgCreate: '#f0fdf4',   // verde chiaro → nuovo rapporto
-  modeBgEdit:   '#eff6ff',   // azzurro chiaro → modifica
+  modeBgCreate: '#ecfdf5',   // verde chiaro → nuovo rapporto
+  modeBgEdit:   '#edf5ff',   // azzurro chiaro → modifica
 
-  panelBg: '#ffffff',
-  panelBorderColor: '#e5e7eb',
+  panelBg: '#eef4fb',
+  panelBorderColor: '#cbd8e6',
   panelBorderWidth: 1,
   panelBorderRadius: 10,
   panelPadding: 12,
 
-  maskBg: '#ffffff',
-  maskBorderColor: '#e5e7eb',
+  maskBg: '#eef4fb',
+  maskBorderColor: '#cbd8e6',
   maskBorderWidth: 1,
   maskBorderRadius: 10,
   maskInnerPadding: 12,
   maskOuterOffset: 12,
-  dividerColor: '#e5e7eb',
+  dividerColor: '#cbd8e6',
 
   titleFontSize: 14,
   statusFontSize: 13,
   msgFontSize: 15,
 
-  formLabelColor: '#6b7280',
+  formLabelColor: '#334155',
   formLabelFontSize: 12,
-  sectionHeaderColor: '#1d4ed8',
-  sectionHeaderFontSize: 11,
-  sectionDividerColor: '#bfdbfe',
-  sectionDividerWidth: 2,
+  formLabelFontWeight: 600,
+  formLabelMarginBottom: 3,
+  formFieldColor: '#0f172a',
   formFieldFontSize: 13,
+  formFieldHeight: 32,
+  formFieldPaddingX: 9,
+  formFieldBorderColor: '#bfcede',
+  formFieldBorderWidth: 1,
+  formFieldBorderRadius: 7,
+  formFieldBg: '#f8fbff',
+  formFieldDisabledBg: '#e7eef7',
+  formFieldDisabledColor: '#64748b',
+  formSectionGap: 10,
+  formCardBg: '#f8fbff',
+  formCardBorderColor: '#c6d7ea',
+  formCardBorderWidth: 1,
+  formCardBorderRadius: 12,
+  formCardShadow: '0 8px 22px rgba(15, 23, 42, 0.08)',
+  formCardHeaderBg: 'linear-gradient(90deg, #0d3b66, #155e9d)',
+  formCardHeaderColor: '#ffffff',
+  formCardHeaderFontSize: 11,
+  formCardHeaderFontWeight: 800,
+  formCardHeaderPaddingX: 10,
+  formCardHeaderPaddingY: 7,
+  formCardBodyPadding: 10,
+  sectionHeaderColor: '#0f4c81',
+  sectionHeaderFontSize: 11,
+  sectionDividerColor: '#93c5fd',
+  sectionDividerWidth: 2,
   norma3FontSize: 12,
+  norma3GradeColumnWidth: 142,
+  norma3RowGap: 0,
+  violazioneDescrizioneRows: 4,
+  violazioneCircostanzeRows: 3,
 
   anteprimaPdfPaddingTop: 0,
   anteprimaPdfPaddingX: 0,
@@ -257,7 +320,7 @@ export const defaultConfig: Config = {
   detailTitlePaddingLeft: 0,
   detailTitleFontSize: 14,
   detailTitleFontWeight: 600,
-  detailTitleColor: 'rgba(0,0,0,0.85)',
+  detailTitleColor: '#0f172a',
 
   rejectReasons: [
     'Mancanza requisiti',
@@ -308,7 +371,13 @@ export const defaultConfig: Config = {
   activePresetId: '',
 
   fieldLayouts: {},
-  fieldGap: 12
+  fieldGap: 12,
+
+  violazioneLayoutLeftPercent: 58,
+  violazioneLayoutMinLeftPx: 600,
+  violazioneLayoutMinRightPx: 320,
+  violazioneSplitterWidth: 14,
+  violazioneSplitterColor: '#94a3b8'
 }
 
 export const DEFAULT_FIELD_LAYOUTS: Record<string, LayoutRow[]> = {
@@ -336,23 +405,7 @@ export const DEFAULT_FIELD_LAYOUTS: Record<string, LayoutRow[]> = {
     { type: 'fields', columns: '1fr', cells: [{ field: 'note_anagrafica' }] }
   ],
   violazione: [
-    { type: 'header', label: 'Art. 15 — Prelievo abusivo' },
-    { type: 'fields', columns: '1fr', cells: [{ field: 'tipo_abuso' }] },
-    { type: 'fields', columns: '1fr 1fr', cells: [{ field: 'sup_dichiarata_art15' }, { field: 'sup_irrigata_art15' }] },
-    { type: 'header', label: 'Artt. 16 e 17 — Inosservanza termini' },
-    { type: 'fields', columns: '1fr', cells: [{ field: 'norma16_17' }] },
-    { type: 'fields', columns: '1fr', cells: [{ field: 'art17_tipo' }] },
-    { type: 'fields', columns: '1fr 1fr', cells: [{ field: 'sup_dichiarata_art16' }, { field: 'sup_irrigata_art16' }] },
-    { type: 'fields', columns: '1fr 1fr', cells: [{ field: 'sup_dichiarata_art17_1' }, { field: 'sup_irrigata_art17_1' }] },
-    { type: 'fields', columns: '1fr 1fr', cells: [{ field: 'sup_dichiarata_art17_2' }, { field: 'sup_irrigata_art17_2' }] },
-    { type: 'header', label: 'Altre violazioni' },
-    { type: 'special', id: '_checkboxes_norma3' },
-    { type: 'header', label: 'Valutazione (Sezione riservata al Responsabile Istruttore)' },
-    { type: 'fields', columns: '1fr 1fr', cells: [{ field: 'grado' }, { field: 'norma15_sel' }] },
-    { type: 'header', label: 'Descrizione' },
-    { type: 'fields', columns: '1fr', cells: [{ field: 'descrizione_fatti' }] },
-    { type: 'fields', columns: '1fr', cells: [{ field: 'circostanze' }] },
-    { type: 'fields', columns: '1fr', cells: [{ field: 'presenza_trasgressore' }] }
+    { type: 'special', id: '_violazione_due_colonne' }
   ],
   dati_tecnici: [
     { type: 'special', id: '_localizzazione' },

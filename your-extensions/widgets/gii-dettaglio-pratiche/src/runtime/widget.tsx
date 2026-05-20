@@ -3098,6 +3098,63 @@ const isPgOnlyField = React.useCallback((fieldName: string) => {
     return SURVEY_CHOICE_LABELS[listName]?.[key] || String(code)
   }, [])
 
+  const parseGradiViolazioni = React.useCallback((raw: any): Record<string, string> => {
+    const out: Record<string, string> = {}
+    const txt = String(raw ?? '').trim()
+    if (!txt) return out
+    txt.split(/[;\n,]+/).forEach(part => {
+      const item = String(part || '').trim()
+      if (!item) return
+      const m = item.match(/(?:art\.?\s*)?(\d{1,2})(?:\.\d+)?\s*[-:=]\s*([1-4])/i)
+      if (!m) return
+      out[String(Number(m[1]))] = m[2]
+    })
+    return out
+  }, [])
+
+  const gradiViolazioniByArt = React.useMemo(() => {
+    return parseGradiViolazioni(getRawField('gradi_violazioni'))
+  }, [getRawField, parseGradiViolazioni])
+
+  const articoliConGrado = React.useMemo(() => new Set(['12', '27', '28', '31', '32', '33', '34', '35', '36', '37']), [])
+
+  const getArticleNumber = React.useCallback((code: any): string => {
+    const m = String(code ?? '').match(/(\d{1,2})(?:\.\d+)?/)
+    return m ? String(Number(m[1])) : ''
+  }, [])
+
+  const splitViolationLabel = React.useCallback((code: any, fullLabel: string): { artLabel: string; description: string } => {
+    const txt = String(fullLabel || '').trim()
+    const m = txt.match(/^(Art\.?\s*\d+(?:\.\d+)?)\s*[-–—]\s*(.*)$/i)
+    if (m) return { artLabel: m[1].replace(/^Art\.?/i, 'Art.'), description: m[2] || '—' }
+    const artNum = getArticleNumber(code)
+    return { artLabel: artNum ? `Art. ${artNum}` : 'Art.', description: txt || '—' }
+  }, [getArticleNumber])
+
+  const renderAltraViolazioneLine = React.useCallback((code: any, idx: number) => {
+    const descrFull = getSurveyChoiceLabel('norma3', code)
+    const artNum = getArticleNumber(code)
+    const parsed = splitViolationLabel(code, descrFull)
+    const hasGrado = !!artNum && articoliConGrado.has(artNum)
+    const grado = hasGrado ? (gradiViolazioniByArt[artNum] || '—') : ''
+    return (
+      <div key={`${String(code)}-${idx}`} style={{
+        display: 'grid',
+        gridTemplateColumns: hasGrado ? 'minmax(76px, auto) 1fr minmax(78px, auto)' : 'minmax(76px, auto) 1fr',
+        gap: 10,
+        alignItems: 'start',
+        padding: '7px 0',
+        borderBottom: '1px solid rgba(17, 24, 39, 0.06)'
+      }}>
+        <div style={{ fontSize: 12, fontWeight: 700, color: '#374151', whiteSpace: 'nowrap' }}>{parsed.artLabel}</div>
+        <div style={{ fontSize: 13, color: '#111827', lineHeight: 1.35 }}>{parsed.description}</div>
+        {hasGrado
+          ? <div style={{ fontSize: 12, fontWeight: 700, color: '#374151', whiteSpace: 'nowrap', textAlign: 'right' }}>Grado: {grado}</div>
+          : null}
+      </div>
+    )
+  }, [articoliConGrado, getArticleNumber, getSurveyChoiceLabel, gradiViolazioniByArt, splitViolationLabel])
+
   const renderSurveyGroup = React.useCallback((title: string, rows: Array<{ label: string; value: any; multiline?: boolean }>, emptyText = '—') => {
     return (
       <DetailSectionCard title={title} bodyPadding={10}>
@@ -3132,21 +3189,21 @@ const isPgOnlyField = React.useCallback((fieldName: string) => {
     const art15ParzRaw = getRawField('norma15_parziale')
     const art15TotRaw = getRawField('norma15_totale')
     const art15Code = !isEmptyValue(art15ParzRaw) ? art15ParzRaw : art15TotRaw
-    const hasArt15 = !isEmptyValue(art15Code) || !isEmptyValue(getRawField('sup_dichiarata_art15')) || !isEmptyValue(getRawField('sup_irrigata_art15'))
+    const occorrenzaInfo = getRawFieldWithName(['occorrenza'])
+    const hasArt15 = !isEmptyValue(art15Code) || !isEmptyValue(occorrenzaInfo.value) || !isEmptyValue(getRawField('sup_dichiarata_art15')) || !isEmptyValue(getRawField('sup_irrigata_art15'))
 
     const art15Body = hasArt15
       ? (() => {
           const isParziale = !isEmptyValue(art15ParzRaw)
           const tipoAbuso = isParziale ? 'Parziale' : 'Totale'
-          const tipoViolazione = isParziale
-            ? getSurveyChoiceLabel('art15_parziale', art15ParzRaw)
-            : getSurveyChoiceLabel('art15_totale', art15TotRaw)
+          const occorrenza = !isEmptyValue(occorrenzaInfo.value)
+            ? (String(occorrenzaInfo.value) === '1' ? 'Prima contestazione' : (String(occorrenzaInfo.value) === '2' ? 'Recidiva' : getFieldLabel(occorrenzaInfo.fieldName, occorrenzaInfo.value)))
+            : '—'
           const supDich = formatFieldValue(getRawField('sup_dichiarata_art15'), 'sup_dichiarata_art15', fieldTypeMap?.sup_dichiarata_art15, 'Superficie dichiarata')
           const supIrr = formatFieldValue(getRawField('sup_irrigata_art15'), 'sup_irrigata_art15', fieldTypeMap?.sup_irrigata_art15, 'Superficie irrigata')
           return (
             <div style={{ display: 'grid', gap: 8 }}>
-              {renderViolationTextLine('Tipo di abuso', tipoAbuso)}
-              {renderViolationTextLine('Occorrenza', tipoViolazione)}
+              {renderViolationSurfacesLine('Tipo di abuso', tipoAbuso, 'Occorrenza', occorrenza)}
               {renderViolationSurfacesLine('Superficie dichiarata', supDich, 'Superficie irrigata', supIrr)}
             </div>
           )
@@ -3204,11 +3261,8 @@ const isPgOnlyField = React.useCallback((fieldName: string) => {
     const altreCodes = splitMultiValues(getRawField('norma_violata3'))
     const altreBody = altreCodes.length
       ? (
-        <div style={{ display: 'grid', gap: 6 }}>
-          {altreCodes.map((code, idx) => {
-            const descrFull = getSurveyChoiceLabel('norma3', code)
-            return <DetailRow key={idx} label={`Violazione ${idx + 1}`} value={descrFull} labelSize={12} valueSize={13} multiline={false} />
-          })}
+        <div style={{ display: 'grid', gap: 0 }}>
+          {altreCodes.map((code, idx) => renderAltraViolazioneLine(code, idx))}
         </div>
         )
       : renderDash('—')
@@ -3242,7 +3296,7 @@ const isPgOnlyField = React.useCallback((fieldName: string) => {
         {renderViolationGroup('Dettagli della violazione', detailsBody)}
       </div>
     )
-  }, [getRawField, getRawFieldWithName, getFieldLabel, splitMultiValues, fieldTypeMap, getSurveyChoiceLabel, renderViolationGroup, renderViolationSurfacesLine, renderViolationTextLine])
+  }, [getRawField, getRawFieldWithName, getFieldLabel, splitMultiValues, fieldTypeMap, getSurveyChoiceLabel, renderAltraViolazioneLine, renderViolationGroup, renderViolationSurfacesLine, renderViolationTextLine])
 
   const generalRows = React.useMemo(() => {
     return makeRows(DETAIL_GENERAL_FIELDS, 'generali', false)

@@ -369,6 +369,21 @@ function readRuntimeSelection (): RuntimeSelection | null {
   }
 }
 
+function isRuntimeSelectionFromEditSave (sel: RuntimeSelection | null): boolean {
+  try {
+    if (!sel?.layerUrl || sel.oid == null || !Number.isFinite(Number(sel.oid))) return false
+    const cache = readSelectedFeatureCache(sel.layerUrl, sel.oid)
+    return cache?.source === 'edit'
+  } catch {
+    return false
+  }
+}
+
+function readRuntimeSelectionForActions (): RuntimeSelection | null {
+  const sel = readRuntimeSelection()
+  return isRuntimeSelectionFromEditSave(sel) ? null : sel
+}
+
 function makeRuntimeRecord (attrs: any, idFieldName: string, sourceKey: string): any {
   const id = String(attrs?.[idFieldName] ?? attrs?.OBJECTID ?? attrs?.objectid ?? '')
   return {
@@ -2847,31 +2862,29 @@ function ActionsPanel (props: {
     if (p === 'RESPINGI' && !canStartRespingi) return
     if (p === 'ELIMINA' && !canStartElimina) return
 
-    // Validazione RI → DT: grado obbligatorio per artt. selezionati, sotto-selezione Art. 15 obbligatoria
+    // Validazione RI → DT: grado obbligatorio per ciascun articolo interessato, occorrenza obbligatoria solo per Art. 15
     if (p === 'APPROVA' && role === 'RI') {
       const msgs: string[] = []
-      const artGradoFields = ['v_art12','v_art27','v_art28','v_art31','v_art32','v_art33','v_art34','v_art35','v_art36','v_art37']
-      const hasArtGrado = artGradoFields.some(f => {
-        const v = pickAttrCI(data, [f, f.toUpperCase()])
-        return v === 1 || v === '1'
-      })
-      if (hasArtGrado) {
-        const gr = pickAttrCI(data, ['grado', 'GRADO'])
-        if (gr == null || gr === '' || gr === 0 || gr === '0') {
-          msgs.push('Impossibile trasmettere: il grado di gravità è obbligatorio per le infrazioni selezionate. Accedere alla maschera di modifica e impostare il grado.')
-        }
+      const artGradoMap: Array<[string, string]> = [
+        ['12', 'v_art12'], ['27', 'v_art27'], ['28', 'v_art28'], ['31', 'v_art31'], ['32', 'v_art32'],
+        ['33', 'v_art33'], ['34', 'v_art34'], ['35', 'v_art35'], ['36', 'v_art36'], ['37', 'v_art37']
+      ]
+      const gradi = parseGradiViolazioniForRapporto(pickAttrCI(data, ['gradi_violazioni', 'GRADI_VIOLAZIONI']))
+      const norma3Selected = new Set(String(pickAttrCI(data, ['norma_violata3', 'NORMA_VIOLATA3']) || '').split(/\s+/).filter(Boolean))
+      const missingGradi: string[] = []
+      for (const [art, field] of artGradoMap) {
+        const v = pickAttrCI(data, [field, field.toUpperCase()])
+        const selected = v === 1 || v === '1' || v === true || norma3Selected.has(`Art${art}`)
+        if (selected && !/^[1-4]$/.test(String(gradi[art] || ''))) missingGradi.push(`Art. ${art}`)
+      }
+      if (missingGradi.length > 0) {
+        msgs.push(`Impossibile trasmettere: il grado di gravità è obbligatorio per ${missingGradi.join(', ')}. Accedere alla maschera di modifica e impostare i gradi.`)
       }
       const tipoAbuso = String(pickAttrCI(data, ['tipo_abuso', 'TIPO_ABUSO']) || '').toLowerCase()
-      if (tipoAbuso === 'parziale') {
-        const n15p = pickAttrCI(data, ['norma15_parziale', 'NORMA15_PARZIALE'])
-        if (n15p == null || n15p === '') {
-          msgs.push('Impossibile trasmettere: per l\'Art. 15 (parziale) è obbligatorio specificare se si tratta di prima contestazione o recidiva. Accedere alla maschera di modifica e impostare il valore.')
-        }
-      }
-      if (tipoAbuso === 'totale') {
-        const n15t = pickAttrCI(data, ['norma15_totale', 'NORMA15_TOTALE'])
-        if (n15t == null || n15t === '') {
-          msgs.push('Impossibile trasmettere: per l\'Art. 15 (totale) è obbligatorio specificare se si tratta di prima contestazione o recidiva. Accedere alla maschera di modifica e impostare il valore.')
+      if (tipoAbuso === 'parziale' || tipoAbuso === 'totale') {
+        const occ = pickAttrCI(data, ['occorrenza', 'OCCORRENZA'])
+        if (String(occ ?? '').trim() !== '1' && String(occ ?? '').trim() !== '2') {
+          msgs.push("Impossibile trasmettere: per l'Art. 15 è obbligatorio specificare l'occorrenza. Accedere alla maschera di modifica e impostare il valore.")
         }
       }
       if (msgs.length > 0) {
@@ -4158,6 +4171,31 @@ function fmtNum (v: any): string {
   return n.toLocaleString('it-IT', { maximumFractionDigits: 2 })
 }
 
+function parseGradiViolazioniForRapporto (raw: any): Record<string, string> {
+  const out: Record<string, string> = {}
+  const text = String(raw ?? '').trim()
+  if (!text) return out
+  for (const part of text.split(';')) {
+    const m = part.trim().match(/^Art?\.?\s*(\d{1,2})\s*[-:=]\s*([1-4])$/i) || part.trim().match(/^(\d{1,2})\s*[-:=]\s*([1-4])$/)
+    if (!m) continue
+    const art = String(m[1]).replace(/^0+/, '')
+    out[art] = String(m[2])
+  }
+  return out
+}
+
+function gradoViolazioneForRapporto (map: Record<string, string>, art: string): string {
+  return map[String(art).replace(/^0+/, '')] || ''
+}
+
+function occorrenzaArt15ForRapporto (raw: any, on: boolean): string {
+  if (!on) return ''
+  const v = String(raw ?? '').trim()
+  if (v === '1') return 'Prima contestazione'
+  if (v === '2') return 'Recidiva'
+  return ''
+}
+
 /** Costruisce la mappa dei placeholder → valori dal record e dalla cache utenti.
  * Allineata alla scheda Anteprima del CW editing.
  */
@@ -4174,9 +4212,8 @@ function buildPlaceholderMap (data: any, utentiCache: Map<string, UtenteCached> 
   const art17on = String(d.norma16_17 || '').toLowerCase().includes('art17') || !!d.art17_tipo
   const xMark = (on: boolean) => on ? 'x' : ''
   const surfVal = (on: boolean, ...fields: string[]) => { if (!on) return ''; for (const f of fields) { const v = d[f]; if (v != null && v !== '' && v !== 0) return fmtNum(v) } return '' }
-  const grado = d.grado != null && d.grado !== '' ? String(d.grado) : ''
-  const recidiva = d.recidiva === 1 || d.recidiva === '1'
-  const occorrenza = (on: boolean): string => { if (!on) return ''; return recidiva ? 'Recidiva' : 'Prima contestazione' }
+  const gradiViolazioni = parseGradiViolazioniForRapporto(d.gradi_violazioni)
+  const occorrenzaArt15 = occorrenzaArt15ForRapporto(d.occorrenza, art15on)
   const origPratica = d.origine_pratica ?? d.Origine_pratica
   const praticaPrefix = (origPratica === 2 || origPratica === '2') ? 'TI' : 'TR'
   const oidVal = d.OBJECTID ?? d.objectid ?? ''
@@ -4207,20 +4244,20 @@ function buildPlaceholderMap (data: any, utentiCache: Map<string, UtenteCached> 
     sup_dich_art36: surfVal(artChecked('v_art36'), 'sup_dichiarata_art36'), sup_irr_art36: surfVal(artChecked('v_art36'), 'sup_irrigata_art36'),
     sup_dich_art37: surfVal(artChecked('v_art37'), 'sup_dichiarata_art37'), sup_irr_art37: surfVal(artChecked('v_art37'), 'sup_irrigata_art37'),
     sup_dich_art39: surfVal(artChecked('v_art39'), 'sup_dichiarata_art39'), sup_irr_art39: surfVal(artChecked('v_art39'), 'sup_irrigata_art39'),
-    grado_art08: artChecked('v_art08') ? grado : '', grado_art12: artChecked('v_art12') ? grado : '', grado_art15: art15on ? grado : '',
-    grado_art16: art16on ? grado : '', grado_art17: art17on ? grado : '', grado_art27: artChecked('v_art27') ? grado : '',
-    grado_art28: artChecked('v_art28') ? grado : '', grado_art29: artChecked('v_art29') ? grado : '', grado_art30: artChecked('v_art30') ? grado : '',
-    grado_art31: artChecked('v_art31') ? grado : '', grado_art32: artChecked('v_art32') ? grado : '', grado_art33: artChecked('v_art33') ? grado : '',
-    grado_art34: artChecked('v_art34') ? grado : '', grado_art35: artChecked('v_art35') ? grado : '', grado_art36: artChecked('v_art36') ? grado : '',
-    grado_art37: artChecked('v_art37') ? grado : '', grado_art39: artChecked('v_art39') ? grado : '',
-    recidiva_art08: occorrenza(artChecked('v_art08')), recidiva_art12: occorrenza(artChecked('v_art12')),
-    recidiva_art15: occorrenza(art15on), recidiva_art16: occorrenza(art16on), recidiva_art17: occorrenza(art17on),
-    recidiva_art27: occorrenza(artChecked('v_art27')), recidiva_art28: occorrenza(artChecked('v_art28')),
-    recidiva_art29: occorrenza(artChecked('v_art29')), recidiva_art30: occorrenza(artChecked('v_art30')),
-    recidiva_art31: occorrenza(artChecked('v_art31')), recidiva_art32: occorrenza(artChecked('v_art32')),
-    recidiva_art33: occorrenza(artChecked('v_art33')), recidiva_art34: occorrenza(artChecked('v_art34')),
-    recidiva_art35: occorrenza(artChecked('v_art35')), recidiva_art36: occorrenza(artChecked('v_art36')),
-    recidiva_art37: occorrenza(artChecked('v_art37')), recidiva_art39: occorrenza(artChecked('v_art39')),
+    grado_art08: '', grado_art12: artChecked('v_art12') ? gradoViolazioneForRapporto(gradiViolazioni, '12') : '', grado_art15: '',
+    grado_art16: '', grado_art17: '', grado_art27: artChecked('v_art27') ? gradoViolazioneForRapporto(gradiViolazioni, '27') : '',
+    grado_art28: artChecked('v_art28') ? gradoViolazioneForRapporto(gradiViolazioni, '28') : '', grado_art29: '', grado_art30: '',
+    grado_art31: artChecked('v_art31') ? gradoViolazioneForRapporto(gradiViolazioni, '31') : '', grado_art32: artChecked('v_art32') ? gradoViolazioneForRapporto(gradiViolazioni, '32') : '', grado_art33: artChecked('v_art33') ? gradoViolazioneForRapporto(gradiViolazioni, '33') : '',
+    grado_art34: artChecked('v_art34') ? gradoViolazioneForRapporto(gradiViolazioni, '34') : '', grado_art35: artChecked('v_art35') ? gradoViolazioneForRapporto(gradiViolazioni, '35') : '', grado_art36: artChecked('v_art36') ? gradoViolazioneForRapporto(gradiViolazioni, '36') : '',
+    grado_art37: artChecked('v_art37') ? gradoViolazioneForRapporto(gradiViolazioni, '37') : '', grado_art39: '',
+    recidiva_art08: '', recidiva_art12: '',
+    recidiva_art15: occorrenzaArt15, recidiva_art16: '', recidiva_art17: '',
+    recidiva_art27: '', recidiva_art28: '',
+    recidiva_art29: '', recidiva_art30: '',
+    recidiva_art31: '', recidiva_art32: '',
+    recidiva_art33: '', recidiva_art34: '',
+    recidiva_art35: '', recidiva_art36: '',
+    recidiva_art37: '', recidiva_art39: '',
     descrizione_fatti: esc(d.descrizione_fatti || ''), circostanze: esc(d.circostanze || ''), descrizione_luogo: esc(d.descrizione_luogo || ''),
     tipo_soggetto: isPF ? 'PF' : 'PG',
     denominazione: isPF ? esc(`${d.nome || ''} ${d.cognome || ''}`.trim()) : esc(d.ragione_sociale || ''),
@@ -4513,9 +4550,24 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
 
 const queryFields = React.useMemo(() => ['*'], [])
 
-  const [selection, setSelection] = React.useState<RuntimeSelection | null>(() => readRuntimeSelection())
+  const [selection, setSelection] = React.useState<RuntimeSelection | null>(() => readRuntimeSelectionForActions())
   React.useEffect(() => {
-    const handler = () => setSelection(readRuntimeSelection())
+    const handler = (evt?: any) => {
+      const cur = readRuntimeSelection()
+      const detail = evt?.detail
+      const explicitListSelection = !!detail && detail.oid != null && !!String(detail.layerUrl || '').trim()
+
+      // Se la selezione residua proviene dal salvataggio del cw editing, non è più
+      // una selezione valida per il pannello azioni. La riabilitiamo solo dopo un
+      // nuovo clic esplicito su una riga dell'elenco, che arriva con detail completo.
+      if (!explicitListSelection && isRuntimeSelectionFromEditSave(cur)) {
+        clearRuntimeSelection('azioni-edit-save-stale-selection')
+        setSelection(null)
+        return
+      }
+
+      setSelection(cur)
+    }
     handler()
     window.addEventListener('gii-selection-changed', handler as any)
     return () => window.removeEventListener('gii-selection-changed', handler as any)
@@ -4525,6 +4577,13 @@ const queryFields = React.useMemo(() => ['*'], [])
   React.useEffect(() => {
     const h = (evt?: any) => {
       const cur = readRuntimeSelection()
+      const source = String(evt?.detail?.source || '').trim()
+      if (!source && isRuntimeSelectionFromEditSave(cur)) {
+        clearRuntimeSelection('azioni-edit-save-stale-selection')
+        setSelection(null)
+        return
+      }
+
       const detailLayerUrl = String(evt?.detail?.layerUrl || cur?.layerUrl || '').trim()
       invalidateRuntimeProxyCache(detailLayerUrl)
       try { delete runtimeDsProxyPromises[detailLayerUrl] } catch {}

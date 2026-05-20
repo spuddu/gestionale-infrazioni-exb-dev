@@ -99,7 +99,10 @@ export interface Config {
   oggettoBadgeColorAssegnazione: string
   oggettoBadgeColorTrasmissione: string
   oggettoBadgeColorIntegrazione: string
-  oggettoBadgeColorApprovazione: string
+  oggettoBadgeColorApprovazione: string // legacy: vecchia categoria accorpata, mantenuta solo come fallback
+  oggettoBadgeColorApprovazioneTecnica: string
+  oggettoBadgeColorApprovazioneAmministrativa: string
+  oggettoBadgeColorNotifica: string
   oggettoBadgeColorRespingimento: string
   oggettoBadgeColorNeutro: string
 
@@ -176,14 +179,14 @@ export interface Config {
 export type IMConfig = ImmutableObject<Config>
 
 export const DEFAULT_COLUMNS: ColumnDef[] = [
-  { id: 'col_pratica',   label: 'N. rapporto',       field: 'objectid',          width: 110 },
-  { id: 'col_data',      label: 'Data rilevazione',  field: 'data_rilevazione',  width: 120 },
-  { id: 'col_stato',     label: 'Stato',             field: '__stato_sint__',    width: 170 },
-  { id: 'col_causale',   label: 'Oggetto',           field: '__causale__',       width: 210 },
-  { id: 'col_mittente',  label: 'Da',                field: '__mittente__',      width: 210 },
-  { id: 'col_prossima',  label: 'A',                 field: '__prossima__',      width: 210 },
-  { id: 'col_ufficio',   label: 'Ufficio',           field: 'ufficio_zona',      width: 170 },
-  { id: 'col_data_msg',  label: 'Ultimo agg.',       field: '__data_msg__',      width: 150 }
+  { id: 'col_pratica',   label: 'N. rapporto',        field: 'objectid',          width: 110 },
+  { id: 'col_data',      label: 'Data rilevazione',   field: 'data_rilevazione',  width: 140 },
+  { id: 'col_ufficio',   label: 'Ufficio origine',    field: 'ufficio_zona',      width: 190 },
+  { id: 'col_stato',     label: 'Il mio stato',       field: '__stato_sint__',    width: 170 },
+  { id: 'col_causale',   label: 'Stato istruttoria',  field: '__causale__',       width: 250 },
+  { id: 'col_mittente',  label: 'Mittente',           field: '__mittente__',      width: 210 },
+  { id: 'col_prossima',  label: 'Destinatario',       field: '__prossima__',      width: 210 },
+  { id: 'col_data_msg',  label: 'Ultimo agg.',        field: '__data_msg__',      width: 150 }
 ]
 
 export const defaultConfig: IMConfig = {
@@ -258,6 +261,9 @@ export const defaultConfig: IMConfig = {
   oggettoBadgeColorTrasmissione: '#8b5cf6',
   oggettoBadgeColorIntegrazione: '#ff6400',
   oggettoBadgeColorApprovazione: '#009246',
+  oggettoBadgeColorApprovazioneTecnica: '#009246',
+  oggettoBadgeColorApprovazioneAmministrativa: '#16a34a',
+  oggettoBadgeColorNotifica: '#0f766e',
   oggettoBadgeColorRespingimento: '#dc2626',
   oggettoBadgeColorNeutro: '#d0d0d0',
 
