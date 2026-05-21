@@ -73,6 +73,14 @@ function SectionBox(p: { title?: string; hint?: string; children: React.ReactNod
   return <div style={P.box}>{p.title && <div style={{fontSize:12,fontWeight:800,color:'#93c5fd',marginBottom:6}}>{p.title}</div>}{p.hint && <div style={{...P.hint,marginTop:0,marginBottom:8}}>{p.hint}</div>}{p.children}</div>
 }
 
+const selectDarkStyle = (base: React.CSSProperties): React.CSSProperties => ({
+  ...base,
+  background: '#1f2937',
+  backgroundColor: '#1f2937',
+  color: '#f9fafb',
+  colorScheme: 'dark' as any
+})
+
 const colorValue = (v:any, fallback:string) => /^#[0-9a-fA-F]{3,8}$/.test(String(v || '')) ? String(v) : fallback
 
 const MODERN_PALETTE = {
@@ -269,32 +277,38 @@ export default function Setting(props: AllWidgetSettingProps<IMConfig>) {
         {getRows(tabId).map((row:any, ri:number) => {
           const cells:any[] = row.cells || []
           const widths = colsToWidths(row.columns, cells.length || 1)
-          return <div key={ri} style={{border:'1px solid rgba(255,255,255,0.12)',borderRadius:9,padding:10,background:'rgba(255,255,255,0.035)'}}>
-            <div style={{display:'flex',alignItems:'center',gap:6,marginBottom:8}}>
-              <span style={{fontSize:11,color:'#9ca3af',fontWeight:800,minWidth:24}}>#{ri+1}</span>
+          return <div key={ri} style={{border:'1px solid rgba(255,255,255,0.12)',borderRadius:9,padding:10,background:'rgba(255,255,255,0.035)', boxSizing:'border-box', maxWidth:'100%', overflow:'hidden'}}>
+            <div style={{display:'flex',alignItems:'center',gap:6,marginBottom:8,flexWrap:'wrap'}}>
+              <span style={{fontSize:11,color:'#9ca3af',fontWeight:800,minWidth:24,flexShrink:0}}>#{ri+1}</span>
               <select value={row.type} onChange={e => {
                 const t=e.target.value
                 if (t==='header') updateRow(tabId, ri, {type:'header', label:row.label||'Sezione', cells:undefined, columns:undefined, id:undefined})
                 else if (t==='special') updateRow(tabId, ri, {type:'special', id:SPECIAL_OPTS[0].v, label:undefined, cells:undefined, columns:undefined})
                 else updateRow(tabId, ri, {type:'fields', columns:row.columns||'1fr', cells:row.cells||[{}], label:undefined, id:undefined})
-              }} style={{...P.mini, width:120}}>
+              }} style={selectDarkStyle({...P.mini, width:'100%', maxWidth:150, flex:'1 1 140px'})}>
                 <option value='header'>Intestazione</option><option value='fields'>Campi</option><option value='special'>Speciale</option>
               </select>
-              <div style={{flex:1}}/>
-              <button type='button' style={P.btn} onClick={()=>moveRow(tabId, ri, -1)}>▲</button>
-              <button type='button' style={P.btn} onClick={()=>moveRow(tabId, ri, 1)}>▼</button>
-              <button type='button' style={P.dangerBtn} onClick={()=>removeRow(tabId, ri)}>✕</button>
+              <div style={{display:'flex',gap:6,flexWrap:'wrap',marginLeft:'auto'}}>
+                <button type='button' style={P.btn} onClick={()=>moveRow(tabId, ri, -1)}>▲</button>
+                <button type='button' style={P.btn} onClick={()=>moveRow(tabId, ri, 1)}>▼</button>
+                <button type='button' style={P.dangerBtn} onClick={()=>removeRow(tabId, ri)}>✕</button>
+              </div>
             </div>
             {row.type === 'header' && <input type='text' value={row.label||''} onChange={e=>updateRow(tabId,ri,{label:e.target.value})} placeholder='Titolo sezione' style={P.inp}/>} 
-            {row.type === 'special' && <select value={row.id||''} onChange={e=>updateRow(tabId,ri,{id:e.target.value})} style={P.inp}>{SPECIAL_OPTS.map(o=><option key={o.v} value={o.v}>{o.l}</option>)}</select>}
-            {row.type === 'fields' && <div style={{display:'grid',gap:7}}>
-              {cells.map((cell:any, ci:number) => <div key={ci} style={{display:'grid',gridTemplateColumns:'1.1fr 0.9fr 70px 34px',gap:6,alignItems:'center'}}>
-                <select value={cell?.field||''} onChange={e=>updateCell(tabId,ri,ci,e.target.value)} style={P.mini}>
+            {row.type === 'special' && <select value={row.id||''} onChange={e=>updateRow(tabId,ri,{id:e.target.value})} style={selectDarkStyle(P.inp)}>{SPECIAL_OPTS.map(o=><option key={o.v} value={o.v}>{o.l}</option>)}</select>}
+            {row.type === 'fields' && <div style={{display:'grid',gap:8,maxWidth:'100%', minWidth:0}}>
+              {cells.map((cell:any, ci:number) => <div key={ci} style={{display:'grid',gap:6,padding:8,border:'1px solid rgba(255,255,255,0.08)',borderRadius:8,background:'rgba(255,255,255,0.02)', boxSizing:'border-box', maxWidth:'100%', minWidth:0}}>
+                <select value={cell?.field||''} onChange={e=>updateCell(tabId,ri,ci,e.target.value)} style={selectDarkStyle(P.mini)}>
                   <option value=''>— spazio vuoto —</option>{(FIELD_OPTS[tabId]||[]).map(o=><option key={o.v} value={o.v}>{o.l}</option>)}
                 </select>
                 <input type='text' value={cell?.label||''} onChange={e=>updateCellLabel(tabId,ri,ci,e.target.value)} placeholder='Etichetta personalizzata' style={P.mini}/>
-                <input type='number' min={1} max={100} value={widths[ci]||100} onChange={e=>updateCellWidth(tabId,ri,ci,Number(e.target.value))} style={{...P.mini,textAlign:'center'}}/>
-                <button type='button' style={P.dangerBtn} onClick={()=>removeCell(tabId,ri,ci)}>✕</button>
+                <div style={{display:'grid',gridTemplateColumns:'minmax(0, 1fr) auto',gap:6,alignItems:'center',minWidth:0}}>
+                  <div style={{display:'grid',gridTemplateColumns:'auto minmax(0, 1fr)',gap:6,alignItems:'center',minWidth:0}}>
+                    <span style={{fontSize:11.5,color:'#cbd5e1',whiteSpace:'nowrap'}}>Larghezza %</span>
+                    <input type='number' min={1} max={100} value={widths[ci]||100} onChange={e=>updateCellWidth(tabId,ri,ci,Number(e.target.value))} style={{...P.mini,textAlign:'center'}}/>
+                  </div>
+                  <button type='button' style={P.dangerBtn} onClick={()=>removeCell(tabId,ri,ci)}>✕</button>
+                </div>
               </div>)}
               <button type='button' style={{...P.btn,width:'fit-content'}} onClick={()=>addCell(tabId,ri)}>+ Cella</button>
             </div>}
@@ -321,7 +335,6 @@ export default function Setting(props: AllWidgetSettingProps<IMConfig>) {
     {isOpen('sorgenti') && <>
       <SectionBox title='Feature layer e tabelle'>
         <Text k='motherLayerUrl' label='URL Feature Layer madre' placeholder='https://services2.arcgis.com/.../FeatureServer/0'/>
-        <Text k='auditTableUrl' label='URL Tabella Audit Log'/>
         <Text k='nsImportPrezzariUrl' label='Tabella import prezzari'/>
         <Text k='nsPrezzarioRegionaleArticoliUrl' label='Tabella articoli prezzario regionale'/>
         <Text k='nsPrezzarioInternoArticoliUrl' label='Tabella articoli prezzario interno'/>
@@ -331,8 +344,6 @@ export default function Setting(props: AllWidgetSettingProps<IMConfig>) {
         <Text k='nsParametroCode' label='Codice parametro spese generali' placeholder='SPESE_GENERALI_PERC'/>
       </SectionBox>
       <SectionBox title='Modalità e pagine'>
-        <label style={P.lbl}>Modalità di visualizzazione</label>
-        <select value={cfg.displayMode || 'page'} onChange={e=>set('displayMode', e.target.value)} style={P.inp}><option value='page'>Pagina intera</option><option value='overlay'>Overlay modal</option></select>
         <Toggle k='showDatiGenerali' label='Mostra sezione Dati generali nel form nuova pratica'/>
         <Toggle k='enableCreateWithoutSelection' label='Abilita creazione senza selezione'/>
         <Text k='editPageId' label='Pagina Modifica / slug'/>
@@ -414,7 +425,7 @@ export default function Setting(props: AllWidgetSettingProps<IMConfig>) {
         <Num k='formCardBodyPadding' label='Padding corpo card' min={0} max={30}/>
       </SectionBox>
       <SectionBox title='Altre violazioni'>
-        <div style={P.grid3}><Num k='norma3FontSize' label='Dimensione testo articoli' min={8} max={24}/><Num k='norma3GradeColumnWidth' label='Larghezza colonna grado' min={80} max={260}/><Num k='norma3RowGap' label='Distanza righe' min={0} max={20}/></div>
+        <div style={P.grid3}><Num k='norma3FontSize' label='Dimensione testo articoli' min={8} max={24}/><Num k='norma3GradeColumnWidth' label='Larghezza colonna Gravità' min={80} max={260}/><Num k='norma3RowGap' label='Distanza righe' min={0} max={20}/></div>
       </SectionBox>
     </>}
 

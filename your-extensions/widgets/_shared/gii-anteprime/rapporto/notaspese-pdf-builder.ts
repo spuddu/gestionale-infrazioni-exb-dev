@@ -491,26 +491,31 @@ export async function buildNotaSpesePdf(data: NotaSpeseData): Promise<Uint8Array
   top += 20
   rightAligned(pg, data.firma_nome || '', fontB, 9, ML, TW, centeredY(top, 14, 9), CLR_BLACK, 0)
 
-  // Numerazione autonoma dell'allegato Nota spese
-  const pages = doc.getPages()
-  const totalPages = pages.length
-  for (let i = 0; i < totalPages; i++) {
-    rightAligned(
-      pages[i],
-      `Allegato - Nota spese - Pag. ${i + 1} di ${totalPages}`,
-      fontR,
-      7,
-      ML,
-      TW,
-      24,
-      CLR_BLUE,
-      0
-    )
-  }
+  drawIndependentPageNumbers()
 
   return doc.save()
 
   /* ---- Funzioni interne ---- */
+
+  function drawIndependentPageNumbers(): void {
+    const pages = doc.getPages()
+    const totalPages = pages.length
+    const footerY = PH - 818 - 7 * 0.75
+
+    pages.forEach((page, index) => {
+      rightAligned(
+        page,
+        `Allegato - Nota spese - Pag. ${index + 1} di ${totalPages}`,
+        fontR,
+        7,
+        ML,
+        TW,
+        footerY,
+        CLR_BLUE,
+        0
+      )
+    })
+  }
 
   function drawColumnHeaders(p: PDFPage, fb: PDFFont, t: number): void {
     const y0 = PH - t - COL_HDR_H

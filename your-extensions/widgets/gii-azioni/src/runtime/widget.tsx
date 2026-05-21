@@ -2878,7 +2878,7 @@ function ActionsPanel (props: {
         if (selected && !/^[1-4]$/.test(String(gradi[art] || ''))) missingGradi.push(`Art. ${art}`)
       }
       if (missingGradi.length > 0) {
-        msgs.push(`Impossibile trasmettere: il grado di gravità è obbligatorio per ${missingGradi.join(', ')}. Accedere alla maschera di modifica e impostare i gradi.`)
+        msgs.push(`Impossibile trasmettere: il grado di gravità è obbligatorio per ${missingGradi.join(', ')}. Accedere alla maschera di modifica e impostare i gradi di gravità.`)
       }
       const tipoAbuso = String(pickAttrCI(data, ['tipo_abuso', 'TIPO_ABUSO']) || '').toLowerCase()
       if (tipoAbuso === 'parziale' || tipoAbuso === 'totale') {
@@ -4300,14 +4300,7 @@ function buildPlaceholderMap (data: any, utentiCache: Map<string, UtenteCached> 
     grado_art31: artChecked('v_art31') ? gradoViolazioneForRapporto(gradiViolazioni, '31') : '', grado_art32: artChecked('v_art32') ? gradoViolazioneForRapporto(gradiViolazioni, '32') : '', grado_art33: artChecked('v_art33') ? gradoViolazioneForRapporto(gradiViolazioni, '33') : '',
     grado_art34: artChecked('v_art34') ? gradoViolazioneForRapporto(gradiViolazioni, '34') : '', grado_art35: artChecked('v_art35') ? gradoViolazioneForRapporto(gradiViolazioni, '35') : '', grado_art36: artChecked('v_art36') ? gradoViolazioneForRapporto(gradiViolazioni, '36') : '',
     grado_art37: artChecked('v_art37') ? gradoViolazioneForRapporto(gradiViolazioni, '37') : '', grado_art39: '',
-    recidiva_art08: '', recidiva_art12: '',
-    occorrenza_art15: occorrenzaArt15, recidiva_art15: occorrenzaArt15, recidiva_art16: '', recidiva_art17: '',
-    recidiva_art27: '', recidiva_art28: '',
-    recidiva_art29: '', recidiva_art30: '',
-    recidiva_art31: '', recidiva_art32: '',
-    recidiva_art33: '', recidiva_art34: '',
-    recidiva_art35: '', recidiva_art36: '',
-    recidiva_art37: '', recidiva_art39: '',
+    occorrenza_art15: occorrenzaArt15,
     descrizione_fatti: esc(d.descrizione_fatti || ''), circostanze: esc(d.circostanze || ''), descrizione_luogo: esc(d.descrizione_luogo || ''),
     tipo_soggetto: isPF ? 'PF' : 'PG',
     denominazione: isPF ? esc(`${d.nome || ''} ${d.cognome || ''}`.trim()) : esc(d.ragione_sociale || ''),

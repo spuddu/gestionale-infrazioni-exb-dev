@@ -3429,7 +3429,7 @@ const S: Record<string, React.CSSProperties> = {
   sel:    { width: '100%', height: 32, minHeight: 32, padding: '0 9px', lineHeight: '32px', borderRadius: 7, border: '1px solid rgba(0,0,0,0.18)', fontSize: 13, boxSizing: 'border-box' as const, background: '#f8fbff', cursor: 'pointer', verticalAlign: 'middle' },
   row2:   { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 },
   row3:   { display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 10 },
-  fld:    { marginBottom: 6 },
+  fld:    { marginBottom: 6, minWidth: 0, maxWidth: '100%' },
   hint:   { fontSize: 11, color: '#9ca3af', marginTop: 3 },
 }
 
@@ -6049,6 +6049,33 @@ React.useEffect(() => {
     </section>
   )
 
+  const fitGridColumns = (columns?: string): string => {
+    const raw = String(columns || '1fr').trim()
+    if (!raw) return '1fr'
+    if (/^(repeat|minmax|fit-content|calc)\(/i.test(raw)) return raw
+
+    const parts = raw.split(/\s+/).filter(Boolean)
+    if (!parts.length) return '1fr'
+
+    const pct = parts.map(part => {
+      const m = part.match(/^([0-9]+(?:\.[0-9]+)?)%$/)
+      return m ? Number(m[1]) : NaN
+    })
+    if (pct.every(Number.isFinite)) {
+      return pct.map(v => `minmax(0, ${Math.max(1, v)}fr)`).join(' ')
+    }
+
+    const fr = parts.map(part => {
+      const m = part.match(/^([0-9]+(?:\.[0-9]+)?)fr$/)
+      return m ? Number(m[1]) : NaN
+    })
+    if (fr.every(Number.isFinite)) {
+      return fr.map(v => `minmax(0, ${Math.max(0.01, v)}fr)`).join(' ')
+    }
+
+    return raw
+  }
+
   const renderSpecial = (id: string): React.ReactNode => {
     switch (id) {
       case '_dati_gen_label':
@@ -6117,7 +6144,7 @@ React.useEffect(() => {
           const anyVisible = results.some((r: any) => r !== null)
           if (hasField && !anyVisible) return null
           return (
-            <div key={key} style={{ display: 'grid', gridTemplateColumns: row.columns || '1fr', gap: row.gap ?? defaultGap }}>
+            <div key={key} style={{ display: 'grid', gridTemplateColumns: fitGridColumns(row.columns), gap: row.gap ?? defaultGap, minWidth: 0, maxWidth: '100%' }}>
               {cells.map((cell: any, ci: number) => {
                 if (!cell?.field) return <div key={ci}/>
                 const fld = results[ci]
@@ -6594,7 +6621,7 @@ React.useEffect(() => {
       const anyVisible = results.some((r: any) => r !== null)
       if (hasField && !anyVisible) return null
       return (
-        <div key={key} style={{ display: 'grid', gridTemplateColumns: row.columns || '1fr', gap: row.gap ?? defaultGap }}>
+        <div key={key} style={{ display: 'grid', gridTemplateColumns: fitGridColumns(row.columns), gap: row.gap ?? defaultGap, minWidth: 0, maxWidth: '100%' }}>
           {cells.map((cell: any, ci: number) => {
             if (!cell?.field) return <div key={ci}/>
             const fld = results[ci]

@@ -612,10 +612,56 @@ function addViolationDetail (details: Array<{ label: string, value: string }>, l
   if (v && v !== '—') details.push({ label, value: v })
 }
 
-function addCommonViolationDetails (data: any, fields: LayerFieldInfo[], details: Array<{ label: string, value: string }>) {
-  addViolationDetail(details, 'Grado', firstViolationValue(data, fields, ['grado']))
-  const recidiva = pickAttrCI(data, ['recidiva'])
-  if (isMeaningfulValue(recidiva)) addViolationDetail(details, 'Occorrenza', isCheckedValue(recidiva) ? 'Recidiva' : 'Prima contestazione')
+const ARTICLES_WITH_GRAVITA = new Set(['12', '27', '28', '31', '32', '33', '34', '35', '36', '37'])
+
+function normalizeArticleNumber (raw: any): string {
+  const m = String(raw ?? '').match(/(\d{1,2})(?:\.\d+)?/)
+  return m ? String(Number(m[1])) : ''
+}
+
+function parseGradiViolazioniField (raw: any): Record<string, string> {
+  const out: Record<string, string> = {}
+  const txt = String(raw ?? '').trim()
+  if (!txt) return out
+
+  txt.split(/[;\n,]+/).forEach(part => {
+    const item = String(part || '').trim()
+    if (!item) return
+    const m = item.match(/(?:art\.?\s*)?(\d{1,2})(?:\.\d+)?\s*[-:=]\s*([1-4])/i)
+    if (!m) return
+    const article = normalizeArticleNumber(m[1])
+    if (ARTICLES_WITH_GRAVITA.has(article)) out[article] = m[2]
+  })
+
+  return out
+}
+
+function formatOccorrenzaValue (raw: any, fields: LayerFieldInfo[]): string {
+  if (!isMeaningfulValue(raw)) return ''
+
+  const lf = getFieldInfo(fields, 'occorrenza')
+  if (lf?.domain?.codedValues) {
+    const label = domainLabel(lf, raw)
+    if (label && label !== '—') return label
+  }
+
+  const value = String(raw).trim()
+  if (value === '1') return 'Prima contestazione'
+  if (value === '2') return 'Recidiva'
+  return formatValue(raw)
+}
+
+function addCommonViolationDetails (data: any, fields: LayerFieldInfo[], details: Array<{ label: string, value: string }>, articleNumber: any) {
+  const article = normalizeArticleNumber(articleNumber)
+
+  if (ARTICLES_WITH_GRAVITA.has(article)) {
+    const gradi = parseGradiViolazioniField(pickAttrCI(data, ['gradi_violazioni']))
+    addViolationDetail(details, 'Gravità', gradi[article] || '')
+  }
+
+  if (article === '15') {
+    addViolationDetail(details, 'Occorrenza', formatOccorrenzaValue(pickAttrCI(data, ['occorrenza']), fields))
+  }
 }
 
 function buildViolationRows (data: any, fields: LayerFieldInfo[]): ViolationRow[] {
@@ -631,7 +677,7 @@ function buildViolationRows (data: any, fields: LayerFieldInfo[]): ViolationRow[
     addViolationDetail(details, 'Violazione totale', norma15Totale)
     addViolationDetail(details, 'Superficie dichiarata', firstViolationValue(d, fields, ['sup_dichiarata_art15']))
     addViolationDetail(details, 'Superficie irrigata', firstViolationValue(d, fields, ['sup_irrigata_art15']))
-    addCommonViolationDetails(d, fields, details)
+    addCommonViolationDetails(d, fields, details, '15')
     rows.push({ key: 'art15', label: 'Art. 15', details })
   }
 
@@ -643,7 +689,7 @@ function buildViolationRows (data: any, fields: LayerFieldInfo[]): ViolationRow[
     addViolationDetail(details, 'Tipo inosservanza', norma1617Label)
     addViolationDetail(details, 'Superficie dichiarata', firstViolationValue(d, fields, ['sup_dichiarata_art16', 'sup_dichiarata_art16_17']))
     addViolationDetail(details, 'Superficie irrigata', firstViolationValue(d, fields, ['sup_irrigata_art16_17_2', 'sup_irrigata_art16_17']))
-    addCommonViolationDetails(d, fields, details)
+    addCommonViolationDetails(d, fields, details, '16')
     rows.push({ key: 'art16', label: 'Art. 16', details })
   }
 
@@ -655,7 +701,7 @@ function buildViolationRows (data: any, fields: LayerFieldInfo[]): ViolationRow[
     addViolationDetail(details, 'Tipo violazione', art17Tipo)
     addViolationDetail(details, 'Superficie dichiarata', firstViolationValue(d, fields, ['sup_dichiarata_art17_1', 'sup_dichiarata_art17_2', 'sup_dichiarata_art16_17']))
     addViolationDetail(details, 'Superficie variata/irrigata', firstViolationValue(d, fields, ['sup_irrigata_art17_1', 'sup_irrigata_art16_17_2', 'sup_irrigata_art16_17']))
-    addCommonViolationDetails(d, fields, details)
+    addCommonViolationDetails(d, fields, details, '17')
     rows.push({ key: 'art17', label: 'Art. 17', details })
   }
 
@@ -664,7 +710,7 @@ function buildViolationRows (data: any, fields: LayerFieldInfo[]): ViolationRow[
     const details: Array<{ label: string, value: string }> = []
     addViolationDetail(details, 'Superficie dichiarata', firstViolationValue(d, fields, art.supDich || []))
     addViolationDetail(details, 'Superficie irrigata', firstViolationValue(d, fields, art.supIrr || []))
-    addCommonViolationDetails(d, fields, details)
+    addCommonViolationDetails(d, fields, details, art.label)
     rows.push({ key: art.field, label: art.label, details })
   }
 
