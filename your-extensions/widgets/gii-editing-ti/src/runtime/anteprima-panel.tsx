@@ -164,11 +164,21 @@ function findFullNameByUsername (cache: Map<string, UtenteCached> | null, userna
 
 function formatDateIt (v: any): string {
   if (!v) return ''
-  try { const d = new Date(typeof v === 'number' ? v : String(v)); if (isNaN(d.getTime())) return String(v); return d.toLocaleDateString('it-IT', { day: '2-digit', month: '2-digit', year: 'numeric' }) } catch { return String(v) }
+  try {
+    const raw = (typeof v === 'string' && /^\d{10,13}$/.test(v.trim())) ? Number(v) : v
+    const d = new Date(typeof raw === 'number' ? raw : String(raw))
+    if (isNaN(d.getTime())) return String(v)
+    return d.toLocaleDateString('it-IT', { day: '2-digit', month: '2-digit', year: 'numeric' })
+  } catch { return String(v) }
 }
 function formatTimeIt (v: any): string {
   if (!v) return ''
-  try { const d = new Date(typeof v === 'number' ? v : String(v)); if (isNaN(d.getTime())) return ''; return d.toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' }) } catch { return '' }
+  try {
+    const raw = (typeof v === 'string' && /^\d{10,13}$/.test(v.trim())) ? Number(v) : v
+    const d = new Date(typeof raw === 'number' ? raw : String(raw))
+    if (isNaN(d.getTime())) return ''
+    return d.toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' })
+  } catch { return '' }
 }
 function esc (s: any): string { return String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;') }
 function fmtNum (v: any): string { if (v == null || v === '') return ''; const n = Number(v); if (isNaN(n)) return String(v); return n.toLocaleString('it-IT', { maximumFractionDigits: 2 }) }
@@ -225,6 +235,15 @@ function buildPlaceholderMap (data: any, utentiCache: Map<string, UtenteCached> 
   const oidVal = d.OBJECTID ?? d.objectid ?? ''
   const codPratica = oidVal ? `${praticaPrefix}-${oidVal}` : ''
 
+  const dateFrom = (...fields: string[]): string => formatDateIt(firstMeaningfulValue(
+    ...fields.map(f => (d[f] ?? d[f.toUpperCase()] ?? d[f.toLowerCase()]))
+  ))
+  const nomeTR = findFullNameByUsername(utentiCache, d.tecnico_rilevatore || d.utente_loggato || d.Creator || '')
+  const nomeTI = d.ti_assegnato_nome || findFullNameByUsername(utentiCache, d.ti_assegnato_username || '') || findFullNameByUsername(utentiCache, d.tecnico_rilevatore || '')
+  const nomeRZ = findUserFullName(utentiCache, 3, areaN ?? undefined, settoreN ?? undefined)
+  const nomeRI = findUserFullName(utentiCache, 4, areaN ?? undefined)
+  const nomeDT = findUserFullName(utentiCache, 5, areaN ?? undefined)
+
   return {
     cod_pratica: codPratica, anno: d.data_rilevazione ? String(new Date(d.data_rilevazione).getFullYear()) : '', area_cod: areaCod,
     area_label: AREA_LABELS[areaCod] || areaCod, settore_label: SETTORE_LABELS[settoreCod] || settoreCod,
@@ -271,11 +290,26 @@ function buildPlaceholderMap (data: any, utentiCache: Map<string, UtenteCached> 
     via: esc(d.via || ''), civico: esc(d.civico || ''), cap: esc(d.cap || ''), localita: esc(d.localita || ''), citta: esc(d.citta || ''),
     telefono: esc(d.telefono || ''), cellulare: esc(d.cellulare || ''), email: esc(d.email || ''), pec: esc(d.pec || ''),
     presenza_trasgressore: String(d.presenza_trasgressore || '').toLowerCase() === 'si' || String(d.presenza_trasgressore || '').toLowerCase() === 'sì' || String(d.presenza_trasgressore || '') === '1' ? 'S\u00EC' : (String(d.presenza_trasgressore || '').toLowerCase() === 'no' || String(d.presenza_trasgressore || '') === '0' ? 'No' : String(d.presenza_trasgressore || '')),
-    firma_tr: esc(findFullNameByUsername(utentiCache, d.tecnico_rilevatore || d.utente_loggato || d.Creator || '')),
-    firma_ti: esc(d.ti_assegnato_nome || findFullNameByUsername(utentiCache, d.ti_assegnato_username || '') || findFullNameByUsername(utentiCache, d.tecnico_rilevatore || '')),
-    firma_rz: esc(findUserFullName(utentiCache, 3, areaN ?? undefined, settoreN ?? undefined)),
-    firma_ri: esc(findUserFullName(utentiCache, 4, areaN ?? undefined)),
-    firma_dt: esc(findUserFullName(utentiCache, 5, areaN ?? undefined)),
+    firma_tr: esc(nomeTR),
+    firma_ti: esc(nomeTI),
+    firma_rz: esc(nomeRZ),
+    firma_ri: esc(nomeRI),
+    firma_dt: esc(nomeDT),
+    iter_rilevazione_nome: esc(nomeTR),
+    iter_rilevazione_presa: '',
+    iter_rilevazione_data: formatDateIt(d.data_rilevazione),
+    iter_compilazione_nome: esc(nomeTI),
+    iter_compilazione_presa: dateFrom('dt_presa_in_carico_TI', 'dt_stato_TI', 'dt_assegnazione_ti'),
+    iter_compilazione_data: dateFrom('dt_esito_TI'),
+    iter_verifica_nome: esc(nomeRZ),
+    iter_verifica_presa: dateFrom('dt_presa_in_carico_RZ', 'dt_stato_RZ'),
+    iter_verifica_data: dateFrom('dt_esito_RZ'),
+    iter_supervisione_nome: esc(nomeRI),
+    iter_supervisione_presa: dateFrom('dt_presa_in_carico_RI', 'dt_stato_RI'),
+    iter_supervisione_data: dateFrom('dt_esito_RI'),
+    iter_approvazione_nome: esc(nomeDT),
+    iter_approvazione_presa: dateFrom('dt_presa_in_carico_DT', 'dt_stato_DT'),
+    iter_approvazione_data: dateFrom('dt_esito_DT'),
     idrante: esc(d.idrante || ''), comune: '', foglio: '', mappali: '', altro_luogo: '',
     distretto_irriguo: esc(d.distretto_irriguo || ''), comizio: esc(d.comizio || ''),
     matricola_contatore: esc(d.matricola_contatore || ''), matricola_tessera: esc(d.matricola_tessera || ''),

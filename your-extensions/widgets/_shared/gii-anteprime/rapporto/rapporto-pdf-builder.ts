@@ -154,6 +154,15 @@ function txt (
   pg.drawText(s, { x, y, size: sz, font, color })
 }
 
+function rightTxt (
+  pg: PDFPage, s: string, font: PDFFont, size: number,
+  xRight: number, y: number, color = BLACK
+): void {
+  if (!s) return
+  const tw = font.widthOfTextAtSize(s, size)
+  pg.drawText(s, { x: xRight - tw, y, size, font, color })
+}
+
 /** Word-wrap: spezza testo in righe, restituisce righe + flag ultima del paragrafo */
 function wrapLines (
   s: string, font: PDFFont, size: number, width: number
@@ -226,35 +235,35 @@ function textArea (
   }
 }
 
-// ── Colonne tabella infrazioni (bordi verticali dal template v3) ──
-//    62.3 | 84.6 | 303.0 | 324.2 | 373.9 | 423.6 | 466.1 | 532.6
+// ── Colonne tabella infrazioni (bordi verticali dal template v5) ──
+//    43.20 | 70.56 | 304.92 | 337.68 | 386.76 | 436.92 | 479.40 | 552.60
 const C = {
-  chk0: 62.3,  chk1: 84.6,
-  dic0: 324.2, dic1: 373.9,
-  irr0: 373.9, irr1: 423.6,
-  gra0: 423.6, gra1: 466.1,
-  occ0: 466.1, occ1: 532.6
+  chk0: 43.20, chk1: 70.56,
+  dic0: 337.68, dic1: 386.76,
+  irr0: 387.24, irr1: 436.44,
+  gra0: 436.92, gra1: 478.92,
+  occ0: 479.40, occ1: 552.60
 }
 
-// Top di ogni riga articolo (dalla posizione del numero articolo)
+// Top di ogni riga articolo (dalla posizione del numero articolo — template v5)
 const ROWS: Array<{ art: string; top: number }> = [
-  { art: '08', top: 350.96 },
-  { art: '12', top: 371.84 },
-  { art: '15', top: 392.84 },
-  { art: '16', top: 420.92 },
-  { art: '17', top: 455.96 },
-  { art: '27', top: 484.04 },
-  { art: '28', top: 505.04 },
-  { art: '29', top: 525.92 },
-  { art: '30', top: 546.92 },
-  { art: '31', top: 567.80 },
-  { art: '32', top: 588.80 },
-  { art: '33', top: 609.80 },
-  { art: '34', top: 630.68 },
-  { art: '35', top: 658.75 },
-  { art: '36', top: 686.84 },
-  { art: '37', top: 707.72 },
-  { art: '39', top: 728.72 }
+  { art: '08', top: 349.88 },
+  { art: '12', top: 370.76 },
+  { art: '15', top: 391.76 },
+  { art: '16', top: 419.84 },
+  { art: '17', top: 454.88 },
+  { art: '27', top: 482.96 },
+  { art: '28', top: 503.84 },
+  { art: '29', top: 524.84 },
+  { art: '30', top: 545.84 },
+  { art: '31', top: 566.72 },
+  { art: '32', top: 587.72 },
+  { art: '33', top: 608.60 },
+  { art: '34', top: 629.60 },
+  { art: '35', top: 657.68 },
+  { art: '36', top: 685.64 },
+  { art: '37', top: 706.64 },
+  { art: '39', top: 727.64 }
 ]
 
 // ══════════════════════════════════════════════════════════════
@@ -292,16 +301,16 @@ export async function buildRapportoPdf (m: Record<string, string>): Promise<Uint
     : 'RAPPORTO TECNICO DI RILEVAZIONE'
   centered(p1, titolo, fB, 12, 62.3, 532.6, bY(190, 12), BLUE)
 
+  // ── Numerazione autonoma del rapporto ──
+  rightTxt(p1, 'Pag. 1 di 2', fR, 7, 532.6, bY(818, 7), BLUE)
+  rightTxt(p2, 'Pag. 2 di 2', fR, 7, 532.6, bY(818, 7), BLUE)
+
   // ── Il sottoscritto / il giorno / alle ore ──
   txt(p1, v('tecnico_rilevatore'), fR, 9, 132, bY(237.71, 9), BLACK, 200)
-  txt(p1, v('data_rilevazione'), fR, 9, 376, bY(237.71, 9), BLACK, 56)
-  txt(p1, v('ora_rilevazione'), fR, 9, 469, bY(237.71, 9), BLACK, 66)
+  txt(p1, v('data_rilevazione'), fR, 9, 388, bY(237.71, 9), BLACK, 47)
+  txt(p1, v('ora_rilevazione'), fR, 9, 480, bY(237.71, 9), BLACK, 71)
 
   // ── Tabella infrazioni ──
-  // Sottovoce della colonna OCCORRENZA: il template base non la contiene.
-  centered(p1, 'Prima contestazione', fR, 7.0, C.occ0, C.occ1, bY(326.4, 7.0), BLUE)
-  centered(p1, 'o Recidiva', fR, 7.2, C.occ0, C.occ1, bY(334.6, 7.2), BLUE)
-
   const artSz = 8
   for (const row of ROWS) {
     const y = bY(row.top, artSz)
@@ -321,8 +330,8 @@ export async function buildRapportoPdf (m: Record<string, string>): Promise<Uint
     }
   }
 
-  // ── Importo (top=770.27) ──
-  txt(p1, v('importo_rimborso'), fR, 8.5, 165, bY(770.27, 8.5), BLACK, 140)
+  // ── Importo (top=769.19) ──
+  txt(p1, v('importo_rimborso'), fR, 8.5, 165, bY(769.19, 8.5), BLACK, 132)
 
   // ════════════════════════════════════════════════════════════
   //  PAGINA 2
@@ -331,24 +340,24 @@ export async function buildRapportoPdf (m: Record<string, string>): Promise<Uint
   const taLh = 10.5
   const taW  = 460
 
-  // ── Descrizione dettagliata (area da top≈113 a top≈220) ──
-  textArea(p2, v('descrizione_fatti'), fR, taSz, 67, 118, taW, 99, taLh)
+  // ── Descrizione dettagliata (area da top=120 a top≈213) ──
+  textArea(p2, v('descrizione_fatti'), fR, taSz, 67, 120, taW, 93, taLh)
 
-  // ── Altre circostanze (area da top≈241 a top≈339) ──
-  textArea(p2, v('circostanze'), fR, taSz, 67, 238, taW, 99, taLh)
+  // ── Altre circostanze (area da top=239 a top≈332) ──
+  textArea(p2, v('circostanze'), fR, taSz, 67, 239, taW, 93, taLh)
 
-  // ── Descrizione dei luoghi (area da top≈360 a top≈457) ──
-  textArea(p2, v('descrizione_luogo'), fR, taSz, 67, 360, taW, 99, taLh)
+  // ── Descrizione dei luoghi (area da top=357 a top≈450) ──
+  textArea(p2, v('descrizione_luogo'), fR, taSz, 67, 357, taW, 93, taLh)
 
-  // ── Distretto / Comizio / Idrante (top=457.19) ──
-  const dsz = 8.5
-  txt(p2, v('distretto_irriguo'), fR, dsz, 157, bY(457.19, dsz), BLACK, 180)
-  txt(p2, v('comizio'), fR, dsz, 392, bY(457.19, dsz), BLACK, 45)
-  txt(p2, v('idrante'), fR, dsz, 486, bY(457.19, dsz), BLACK, 45)
+  // ── Distretto / Comizio / Idrante (template v5) ──
+  const dsz = 8.2
+  txt(p2, v('distretto_irriguo'), fR, dsz, 126, bY(457.19, dsz), BLACK, 208)
+  txt(p2, v('comizio'), fR, dsz, 395, bY(457.19, dsz), BLACK, 62)
+  txt(p2, v('idrante'), fR, dsz, 511, bY(457.19, dsz), BLACK, 40)
 
-  // ── Matricole (top=478.19) ──
-  txt(p2, v('matricola_contatore'), fR, dsz, 157, bY(478.19, dsz), BLACK, 145)
-  txt(p2, v('matricola_tessera'), fR, dsz, 392, bY(478.19, dsz), BLACK, 138)
+  // ── Matricole (nuovo template) ──
+  txt(p2, v('matricola_contatore'), fR, dsz, 126, bY(478.19, dsz), BLACK, 168)
+  txt(p2, v('matricola_tessera'), fR, dsz, 396, bY(478.19, dsz), BLACK, 150)
 
   // ── DATI DEL TRASGRESSORE — PF vs PG ──
   const isPG = v('tipo_soggetto') === 'PG'
@@ -356,55 +365,53 @@ export async function buildRapportoPdf (m: Record<string, string>): Promise<Uint
 
   if (isPG) {
     // Copro "Nome e Cognome:" e riscrivo "Ragione Sociale:"
-    p2.drawRectangle({ x: 63.5, y: bY(554, 1), width: 82, height: 13, color: LABEL_BG })
-    txt(p2, 'Ragione Sociale:', fR, dsz, 65.4, bY(544.07, dsz), BLUE)
+    p2.drawRectangle({ x: 42.72, y: PH - 558.12, width: 86.28, height: 17.04, color: LABEL_BG })
+    txt(p2, 'Ragione Sociale:', fR, dsz, 45.36, bY(544.07, dsz), BLUE)
     // Copro "C.F.:" e riscrivo "P.IVA:"
-    p2.drawRectangle({ x: 354, y: bY(554, 1), width: 30, height: 13, color: LABEL_BG })
-    txt(p2, 'P.IVA:', fR, dsz, 355.68, bY(544.07, dsz), BLUE)
+    p2.drawRectangle({ x: 341.16, y: PH - 558.12, width: 50.88, height: 17.04, color: LABEL_BG })
+    txt(p2, 'P.IVA:', fR, dsz, 344, bY(544.07, dsz), BLUE)
     // Copro "Residenza" e riscrivo "Sede legale" in BLU
-    p2.drawRectangle({ x: 240, y: bY(576, 1), width: 115, height: 13, color: WHITE })
-    centered(p2, 'Sede legale', fB, 9.5, 62.3, 532.6, bY(565.32, 9.5), BLUE)
+    p2.drawRectangle({ x: 240, y: PH - 579.0, width: 115, height: 13, color: WHITE })
+    centered(p2, 'Sede legale', fB, 9.0, 62.3, 532.6, bY(565.32, 9.0), BLUE)
   }
 
-  // Valore denominazione (top=544.44, valore da x≈150)
-  txt(p2, v('denominazione'), fR, dsz, 150, bY(544.44, dsz), BLACK, 200)
-  // Valore CF/PIVA (top=544.44, valore da x≈391)
-  txt(p2, v('cf_piva'), fR, dsz, 392, bY(544.44, dsz), BLACK, 138)
+  // Valore denominazione / CF-PIVA
+  txt(p2, v('denominazione'), fR, dsz, 132, bY(544.44, dsz), BLACK, 205)
+  txt(p2, v('cf_piva'), fR, dsz, 396, bY(544.44, dsz), BLACK, 150)
 
-  // ── Via / N. / Comune / CAP (top=585.95) ──
-  txt(p2, v('via'), fR, dsz, 115, bY(585.95, dsz), BLACK, 110)
-  txt(p2, v('civico'), fR, dsz, 250, bY(585.95, dsz), BLACK, 32)
-  txt(p2, v('citta'), fR, dsz, 328, bY(585.95, dsz), BLACK, 123)
-  txt(p2, v('cap'), fR, dsz, 486, bY(585.95, dsz), BLACK, 45)
+  // ── Via / N. / Comune / CAP ──
+  txt(p2, v('via'), fR, dsz, 95, bY(585.95, dsz), BLACK, 128)
+  txt(p2, v('civico'), fR, dsz, 253, bY(585.95, dsz), BLACK, 28)
+  txt(p2, v('citta'), fR, dsz, 341, bY(585.95, dsz), BLACK, 130)
+  txt(p2, v('cap'), fR, dsz, 511, bY(585.95, dsz), BLACK, 38)
 
-  // Località (top=606.83)
-  txt(p2, v('localita'), fR, dsz, 115, bY(606.83, dsz), BLACK, 415)
-  // Telefono / Cellulare / e-mail / PEC (top=627.83)
-  txt(p2, v('telefono'), fR, dsz, 115, bY(627.83, dsz), BLACK, 60)
-  txt(p2, v('cellulare'), fR, dsz, 229, bY(627.83, dsz), BLACK, 60)
-  txt(p2, v('email'), fR, dsz, 328, bY(627.83, dsz), BLACK, 82)
-  txt(p2, v('pec'), fR, dsz, 441, bY(627.83, dsz), BLACK, 90)
+  // Località
+  txt(p2, v('localita'), fR, dsz, 95, bY(606.83, dsz), BLACK, 455)
+  // Telefono / Cellulare / e-mail / PEC
+  txt(p2, v('telefono'), fR, dsz, 95, bY(627.83, dsz), BLACK, 64)
+  txt(p2, v('cellulare'), fR, dsz, 232, bY(627.83, dsz), BLACK, 56)
+  txt(p2, v('email'), fR, dsz, 341, bY(627.83, dsz), BLACK, 84)
+  txt(p2, v('pec'), fR, dsz, 462, bY(627.83, dsz), BLACK, 86)
 
-  // Trasgressore presente? (top=648.83)
-  txt(p2, v('presenza_trasgressore'), fR, dsz, 193, bY(648.83, dsz), BLACK, 95)
+  // Trasgressore presente?
+  txt(p2, v('presenza_trasgressore'), fR, dsz, 181, bY(648.83, dsz), BLACK, 95)
 
-  // ── FIRMATO ──
-  const fSz = 8.5
-  txt(p2, v('firma_tr'), fR, fSz, 193, bY(693.96, fSz), BLACK, 338)
-  txt(p2, v('firma_ti'), fR, fSz, 193, bY(714.84, fSz), BLACK, 338)
-  txt(p2, v('firma_rz'), fR, fSz, 193, bY(735.84, fSz), BLACK, 338)
-  txt(p2, v('firma_ri'), fR, fSz, 193, bY(756.72, fSz), BLACK, 338)
-
-  // 5a firma — template ha "Agraria", se TEC copro e riscrivo
-  if (areaCod === 'TEC') {
-    p2.drawRectangle({ x: 63.5, y: bY(789, 1), width: 125, height: 13, color: LABEL_BG })
-    txt(p2, "Il Direttore dell'Area Tecnica:", fB, fSz, 65.4, bY(777.35, fSz), BLACK)
+  // ── ITER DELL'ISTRUTTORIA TECNICA ──
+  // Colonne iter (template v5): Fase 42.72–99.00 | Nominativo 99.48–226.56 | Ruolo 227.04–325.80 | Presa 326.28–375.36 | Esito 375.84–502.92 | Data 503.40–552.60
+  const iterSz = 7.2
+  const iterRows: Array<{ top: number; nome: string; presa: string; data: string }> = [
+    { top: 706.44, nome: v('iter_rilevazione_nome') || v('firma_tr'), presa: v('iter_rilevazione_presa'), data: v('iter_rilevazione_data') || v('data_rilevazione') },
+    { top: 723.96, nome: v('iter_compilazione_nome') || v('firma_ti'), presa: v('iter_compilazione_presa'), data: v('iter_compilazione_data') },
+    { top: 741.48, nome: v('iter_verifica_nome') || v('firma_rz'), presa: v('iter_verifica_presa'), data: v('iter_verifica_data') },
+    { top: 758.88, nome: v('iter_supervisione_nome') || v('firma_ri'), presa: v('iter_supervisione_presa'), data: v('iter_supervisione_data') },
+    { top: 776.40, nome: v('iter_approvazione_nome') || v('firma_dt'), presa: v('iter_approvazione_presa'), data: v('iter_approvazione_data') }
+  ]
+  for (const row of iterRows) {
+    const y = bY(row.top, iterSz)
+    txt(p2, row.nome, fR, iterSz, 102, y, BLACK, 122)
+    centered(p2, row.presa, fR, iterSz, 326.28, 375.36, y, BLACK)
+    centered(p2, row.data, fR, iterSz, 503.40, 552.60, y, BLACK)
   }
-  txt(p2, v('firma_dt'), fR, fSz, 193, bY(777.72, fSz), BLACK, 338)
-
-  // ── Data compilazione (fondo pagina) ──
-  const dc = v('data_compilazione')
-  if (dc) txt(p2, 'Cagliari, ' + dc, fR, 8, 65.4, bY(800, 8), BLACK)
 
   return await doc.save()
 }
