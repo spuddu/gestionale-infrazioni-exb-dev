@@ -42,13 +42,19 @@ type AdminField = {
   name: string
   label: string
   kind: AdminFieldKind
-  group: 'verbale' | 'notifica' | 'sanzione' | 'pagamento' | 'bonifico' | 'chiusura'
+  group: 'atto' | 'verbale' | 'notifica' | 'sanzione' | 'attrezzature' | 'pagamento' | 'bonifico' | 'chiusura'
   placeholder?: string
   full?: boolean
   readonly?: boolean
 }
 
 const ADMIN_FIELDS: AdminField[] = [
+  { group: 'atto', name: 'tipo_atto_amm', label: 'Tipo atto amministrativo', kind: 'domain' },
+  { group: 'atto', name: 'protocollo_istanza_numero', label: 'Protocollo istanza', kind: 'text' },
+  { group: 'atto', name: 'protocollo_istanza_data', label: 'Data istanza', kind: 'date' },
+  { group: 'atto', name: 'oggetto_atto_amm', label: 'Oggetto atto amministrativo', kind: 'text', full: true },
+  { group: 'atto', name: 'note_atto_amm', label: 'Note atto amministrativo', kind: 'textarea', full: true },
+
   { group: 'verbale', name: 'numero_verbale', label: 'Numero verbale', kind: 'text' },
   { group: 'verbale', name: 'data_verbale', label: 'Data verbale', kind: 'date' },
 
@@ -66,6 +72,13 @@ const ADMIN_FIELDS: AdminField[] = [
   { group: 'sanzione', name: 'sanzione_dettaglio_calcolo', label: 'Dettaglio calcolo sanzione', kind: 'textarea', full: true },
   { group: 'sanzione', name: 'sanzione_calcolata_il', label: 'Sanzione calcolata il', kind: 'readonly-date', readonly: true },
   { group: 'sanzione', name: 'sanzione_calcolata_da', label: 'Sanzione calcolata da', kind: 'readonly-text', readonly: true },
+
+  { group: 'attrezzature', name: 'attrezzature_cauzione_presente', label: 'Cauzione presente', kind: 'domain' },
+  { group: 'attrezzature', name: 'attrezzature_rimborso_importo', label: 'Rimborso attrezzature', kind: 'number' },
+  { group: 'attrezzature', name: 'attrezzature_cauzione_decurtata', label: 'Cauzione decurtata', kind: 'number' },
+  { group: 'attrezzature', name: 'attrezzature_importo_netto', label: 'Importo netto attrezzature', kind: 'number' },
+  { group: 'attrezzature', name: 'attrezzature_rimborso_dettaglio', label: 'Dettaglio rimborso attrezzature', kind: 'textarea', full: true, placeholder: 'Indicare attrezzature, quantità e importi.' },
+  { group: 'attrezzature', name: 'attrezzature_note', label: 'Note rimborso attrezzature', kind: 'textarea', full: true },
 
   { group: 'pagamento', name: 'pagamento_modalita', label: 'Modalità pagamento', kind: 'domain' },
   { group: 'pagamento', name: 'pagamento_importo_totale', label: 'Importo totale da pagare', kind: 'number' },
@@ -93,6 +106,9 @@ const MONEY_FIELDS = new Set([
   'sanzione_importo_ridotta',
   'risarcimento_danni_importo',
   'sanzione_spese_notifica',
+  'attrezzature_rimborso_importo',
+  'attrezzature_cauzione_decurtata',
+  'attrezzature_importo_netto',
   'pagamento_importo_totale'
 ])
 
@@ -316,9 +332,10 @@ function buildBaseCalculation (draft: Record<string, any>, profile: { username: 
   const ridotta = readMoneyFromDraft(draft, 'sanzione_importo_ridotta')
   const danni = readMoneyFromDraft(draft, 'risarcimento_danni_importo') ?? 0
   const spese = readMoneyFromDraft(draft, 'sanzione_spese_notifica') ?? 0
+  const attrezzatureNetto = readMoneyFromDraft(draft, 'attrezzature_importo_netto') ?? 0
   const sanzioneUsata = ridotta ?? base ?? 0
   const criterio = ridotta != null ? 'Importo sanzione ridotta' : base != null ? 'Importo sanzione base' : 'Nessun importo sanzione valorizzato'
-  const totale = sanzioneUsata + danni + spese
+  const totale = sanzioneUsata + danni + attrezzatureNetto + spese
   const now = Date.now()
   const user = String(profile.fullName || profile.username || '').trim()
   const when = new Date(now).toLocaleString('it-IT')
@@ -329,6 +346,7 @@ function buildBaseCalculation (draft: Record<string, any>, profile: { username: 
     `Importo sanzione ridotta: ${ridotta != null ? formatEuroText(ridotta) : '—'}`,
     `Criterio applicato: ${criterio}`,
     `Risarcimento danni: ${formatEuroText(danni)}`,
+    `Rimborso netto attrezzature: ${formatEuroText(attrezzatureNetto)}`,
     `Spese di notifica: ${formatEuroText(spese)}`,
     `Totale da pagare: ${formatEuroText(totale)}`,
     '',
@@ -341,6 +359,14 @@ function buildBaseCalculation (draft: Record<string, any>, profile: { username: 
     sanzione_calcolata_da: user,
     sanzione_dettaglio_calcolo: dettaglio
   }
+}
+
+
+function buildAttrezzatureNetto (draft: Record<string, any>): Record<string, any> {
+  const lordo = readMoneyFromDraft(draft, 'attrezzature_rimborso_importo') ?? 0
+  const cauzione = readMoneyFromDraft(draft, 'attrezzature_cauzione_decurtata') ?? 0
+  const netto = Math.max(0, lordo - cauzione)
+  return { attrezzature_importo_netto: netto }
 }
 
 function looksLikeDateField (name: string): boolean {
@@ -1164,7 +1190,7 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
   const roleAllowed = isAllowedAdminRole(profile.role)
   const title = buildPracticeTitle(cfg, data || {}, oid)
   const hasDsForSave = !!configuredDs
-  const canEdit = roleAllowed && ['TI_AMM', 'ADMIN'].includes(String(profile.role || '').toUpperCase()) && hasDsForSave
+  const canEdit = roleAllowed && ['TI_AMM', 'RI_AMM', 'ADMIN'].includes(String(profile.role || '').toUpperCase()) && hasDsForSave
   const paymentMode = getPaymentMode(draft || data || {}, layerFields)
   const paymentFieldNames = paymentMode === 'ALTRO' ? [...PAYMENT_COMMON_FIELDS, ...PAYMENT_NOTE_FIELDS] : PAYMENT_COMMON_FIELDS
   const showPagopaFields = paymentMode === 'PAGOPA' || paymentMode === 'MISTO'
@@ -1209,6 +1235,14 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
       ...next
     }))
     setDialog({ kind: 'ok', title: 'Calcolo aggiornato', text: 'Totale da pagare e dettaglio calcolo sono stati aggiornati. Ricordati di salvare i dati amministrativi.' })
+  }
+
+  const fillAttrezzatureNetto = () => {
+    const next = buildAttrezzatureNetto(draft || {})
+    setDraft(prev => ({
+      ...(prev || {}),
+      ...next
+    }))
   }
 
   const fillCloseMeta = () => {
@@ -1451,15 +1485,21 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
 
             {hasDsForSave && roleAllowed && !canEdit && (
               <InfoBox kind='info'>
-                Scheda in sola lettura per il profilo corrente. La compilazione è abilitata per TI_AMM e ADMIN.
+                Scheda in sola lettura per il profilo corrente. La compilazione è abilitata per TI_AMM, RI_AMM e ADMIN.
               </InfoBox>
             )}
 
+            <AdminFormSection title='Atto amministrativo' group='atto' draft={draft} fields={layerFields} canEdit={canEdit} onChange={onFieldChange} />
             <AdminFormSection title='Dati verbale' group='verbale' draft={draft} fields={layerFields} canEdit={canEdit} onChange={onFieldChange} />
             <AdminFormSection title='Protocollo e notifica' group='notifica' draft={draft} fields={layerFields} canEdit={canEdit} onChange={onFieldChange} />
-            <AdminFormSection title='Sanzione' group='sanzione' draft={draft} fields={layerFields} canEdit={canEdit} onChange={onFieldChange}>
+            <AdminFormSection title='Sanzione e risarcimento danni' group='sanzione' draft={draft} fields={layerFields} canEdit={canEdit} onChange={onFieldChange}>
               <div style={{ marginTop: 12, display: 'flex', justifyContent: 'flex-end' }}>
                 <button type='button' disabled={!canEdit} onClick={fillCalculatedMeta} style={secondaryButtonStyle(!canEdit)}>Calcola totale e dettaglio</button>
+              </div>
+            </AdminFormSection>
+            <AdminFormSection title='Rimborso attrezzature' group='attrezzature' draft={draft} fields={layerFields} canEdit={canEdit} onChange={onFieldChange}>
+              <div style={{ marginTop: 12, display: 'flex', justifyContent: 'flex-end' }}>
+                <button type='button' disabled={!canEdit} onClick={fillAttrezzatureNetto} style={secondaryButtonStyle(!canEdit)}>Calcola importo netto</button>
               </div>
             </AdminFormSection>
             <AdminFormSection title='Pagamento' group='pagamento' draft={draft} fields={layerFields} canEdit={canEdit} onChange={onFieldChange} fieldNames={paymentFieldNames}>
@@ -1490,15 +1530,6 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
               <button type='button' disabled={!isDirty || saving || !canEdit} onClick={handleSave} style={primaryButtonStyle(!isDirty || saving || !canEdit)}>{saving ? 'Salvataggio…' : 'Salva dati amministrativi'}</button>
             </div>
 
-            {cfg.showPlaceholderSections !== false && (
-              <Section title='Funzioni predisposte per patch successive'>
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: 10 }}>
-                  <InfoBox>Il calcolo base aggiorna il totale da pagare sommando sanzione, risarcimento danni e spese. Il calcolo normativo per articolo sarà collegato dopo la definizione della tabella parametri.</InfoBox>
-                  <InfoBox>Il PDF del verbale sarà collegato al futuro builder in <strong>_shared/gii-anteprime/verbale</strong>.</InfoBox>
-                  <InfoBox>Gli allegati amministrativi saranno gestiti in una patch dedicata.</InfoBox>
-                </div>
-              </Section>
-            )}
           </>
         )}
       </div>

@@ -36,7 +36,6 @@ export interface Config {
 
   showRoleBox: boolean
   showWorkflowBox: boolean
-  showPlaceholderSections: boolean
 }
 
 export const defaultSummaryFields: SummaryFieldConfig[] = [
@@ -81,7 +80,6 @@ export const defaultConfig: Config = {
 
   showRoleBox: true,
   showWorkflowBox: true,
-  showPlaceholderSections: true
 }
 
 export type IMConfig = ImmutableObject<Config>

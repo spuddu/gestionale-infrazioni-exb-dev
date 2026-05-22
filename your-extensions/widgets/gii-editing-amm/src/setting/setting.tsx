@@ -189,7 +189,6 @@ export default function Setting (props: Props) {
       {isOpen('opzioni') && <div>
         <Check value={cfgJs.showRoleBox !== false} onChange={v => patch({ showRoleBox: v })} label='Mostra profilo operativo' />
         <Check value={cfgJs.showWorkflowBox !== false} onChange={v => patch({ showWorkflowBox: v })} label='Mostra stato workflow amministrativo' />
-        <Check value={cfgJs.showPlaceholderSections !== false} onChange={v => patch({ showPlaceholderSections: v })} label='Mostra sezioni predisposte' />
       </div>}
 
       <div style={{ marginTop: 24, paddingTop: 14, borderTop: '1px solid rgba(255,255,255,0.08)' }}>

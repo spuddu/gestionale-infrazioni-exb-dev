@@ -1452,6 +1452,7 @@ function ActionsPanel (props: {
     overlayColor: string
     pageColor: string
     pageId: string
+    ammPageId: string
     fieldStatoTI: string
     fieldPresaTI: string
     minStato: number
@@ -2088,10 +2089,10 @@ function ActionsPanel (props: {
   }
 
 
-  // --- Editing pagina (TI/RI/TI_AMM/RI_AMM) ---
+  // --- Editing pagina (tecnico: TI/RI; amministrativo: TI_AMM/RI_AMM) ---
   const ec = props.editConfig
-  // RI_AMM ha stessi privilegi di RI (solo annotazioni), TI_AMM ha stessi privilegi di TI (può editare)
-  const canShowEdit = ec.show && (role === 'TI' || role === 'RI' || role === 'TI_AMM')
+  const isAmmEditRole = role === 'TI_AMM' || role === 'RI_AMM'
+  const canShowEdit = ec.show && (role === 'TI' || role === 'RI' || isAmmEditRole)
   const roleStatoField = `stato_${role}`
   const rolePresaField = `presa_in_carico_${role}`
   const roleEsitoField = `esito_${role}`
@@ -2101,7 +2102,9 @@ function ActionsPanel (props: {
   const statoRoleNum = toNumOrNull(statoRoleVal)
   const presaRoleNum = toNumOrNull(presaRoleVal)
   const currentTiUsername = String((window as any).__giiUserRole?.username || (window as any).__giiUser?.username || '').trim().toLowerCase()
-  const assignedTiUsername = String(pickAttrCI(data, ['ti_assegnato_username', 'ti_assegnato_user', 'ti_assegnato']) || '').trim().toLowerCase()
+  const assignedTiUsername = role === 'TI_AMM'
+    ? String(pickAttrCI(data, ['ti_amm_assegnato_username', 'ti_amm_assegnato_user', 'ti_amm_assegnato']) || '').trim().toLowerCase()
+    : String(pickAttrCI(data, ['ti_assegnato_username', 'ti_assegnato_user', 'ti_assegnato']) || '').trim().toLowerCase()
   const isOwnedByCurrentRole = (role === 'TI' || role === 'TI_AMM')
     ? (!!currentTiUsername && !!assignedTiUsername && currentTiUsername === assignedTiUsername)
     : (role === 'RI' || role === 'RI_AMM')
@@ -2126,6 +2129,12 @@ function ActionsPanel (props: {
     inChargeByRole &&
     !roleClosedOrForwarded
 
+  const editButtonTitle = canEdit
+    ? (isAmmEditRole ? 'Apri scheda verbale' : 'Modifica rapporto')
+    : (isAmmEditRole
+      ? 'Modifica verbale non disponibile: la pratica deve essere già presa in carico dal ruolo corrente.'
+      : 'Modifica non disponibile: il rapporto deve essere già preso in carico dal ruolo corrente.')
+
   const canUseRapportoPdf =
     hasSel &&
     !!data &&
@@ -2146,10 +2155,14 @@ function ActionsPanel (props: {
       ;(window as any).__giiEdit = payload
       try { sessionStorage.setItem('GII_EDIT_INTENT', JSON.stringify(payload)) } catch {}
       try { window.dispatchEvent(new CustomEvent('gii-edit-intent-changed')) } catch {}
-      try { sessionStorage.setItem('GII_EDIT_TAB', 'anagrafica') } catch {}
       try { sessionStorage.removeItem('GII_NAV_SECTION') } catch {}
       try { sessionStorage.removeItem('GII_REQUESTED_EDIT_SECTION') } catch {}
-      try { window.dispatchEvent(new CustomEvent('gii:edit-section-change', { detail: { section: 'anagrafica' } })) } catch {}
+      if (!isAmmEditRole) {
+        try { sessionStorage.setItem('GII_EDIT_TAB', 'anagrafica') } catch {}
+        try { window.dispatchEvent(new CustomEvent('gii:edit-section-change', { detail: { section: 'anagrafica' } })) } catch {}
+      } else {
+        try { sessionStorage.removeItem('GII_EDIT_TAB') } catch {}
+      }
     } catch { }
     const resolvePageId = (pageTokenRaw: string): string => {
       const tok0 = String(pageTokenRaw || '').trim()
@@ -2170,7 +2183,9 @@ function ActionsPanel (props: {
           if (hist && (hist as any)[pageId] === tok) return String(pageId)
         }
         const low = tok.toLowerCase()
-        const preferredNeedles = [low, 'page_20', 'modifica rapporto']
+        const preferredNeedles = isAmmEditRole
+          ? [low, 'page_48', 'verbale']
+          : [low, 'page_45', 'page_20', 'modifica rapporto']
         for (const needle of preferredNeedles) {
           if (!needle) continue
           for (const [pageId, pg] of cand) {
@@ -2184,7 +2199,7 @@ function ActionsPanel (props: {
     }
 
     try {
-      const pageToken = String(ec.pageId || 'page_20').trim()
+      const pageToken = String(isAmmEditRole ? (ec.ammPageId || 'page_48') : (ec.pageId || 'page_45')).trim()
       const pageId = resolvePageId(pageToken)
       if (pageId) {
         UrlManager.getInstance().changePage(pageId)
@@ -2192,7 +2207,7 @@ function ActionsPanel (props: {
       }
     } catch { }
     try {
-      const pageToken = String(ec.pageId || 'page_20').trim()
+      const pageToken = String(isAmmEditRole ? (ec.ammPageId || 'page_48') : (ec.pageId || 'page_45')).trim()
       const clean = pageToken.replace(/^#+\/?/, '').replace(/^\/+/, '')
       const t = clean.startsWith('page/') ? clean.slice(5) : clean
       window.location.hash = `#/page/${t}`
@@ -3856,13 +3871,13 @@ function ActionsPanel (props: {
 
             {/* GRUPPO DESTRO — Modifica, Anteprima, Download */}
             <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
-              {/* PULSANTE MODIFICA TI — apertura pagina */}
+              {/* PULSANTE MODIFICA — rapporto tecnico o verbale amministrativo */}
               {canShowEdit && (
                 <button
                   type='button'
                   disabled={!canEdit}
                   onClick={handleEditPage}
-                  title={canEdit ? 'Modifica rapporto' : 'Modifica non disponibile: il rapporto deve essere già preso in carico dal ruolo corrente.'}
+                  title={editButtonTitle}
                   style={{
                     width: ((ui?.btnPaddingY ?? 8) * 2) + (ui?.btnFontSize ?? 14) + 10,
                     height: ((ui?.btnPaddingY ?? 8) * 2) + (ui?.btnFontSize ?? 14) + 10,
@@ -4560,7 +4575,8 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
     show: cfg.showEditButtons !== false,
     overlayColor: normalizeHexColor(cfg.editOverlayColor, '#7c3aed'),
     pageColor: normalizeHexColor(cfg.editPageColor, '#5b21b6'),
-    pageId: String(cfg.editPageId || 'page_20'),
+    pageId: String(cfg.editPageId || 'page_45'),
+    ammPageId: String((cfg as any).editAmmPageId || 'page_48'),
     fieldStatoTI: String(cfg.fieldStatoTI || 'stato_TI'),
     fieldPresaTI: String(cfg.fieldPresaTI || 'presa_in_carico_TI'),
     minStato: Number.isFinite(Number(cfg.editMinStato)) ? Number(cfg.editMinStato) : 2,

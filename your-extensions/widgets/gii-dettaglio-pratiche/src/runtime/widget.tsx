@@ -2008,6 +2008,26 @@ function normalizeOriginePraticaCod (raw: any): 'TR' | 'TI' | '' {
   return ''
 }
 
+const ITER_TECHNICAL_MODIFIED_FIELDS = new Set([
+  'GII_rim',
+  'GII_trasm',
+  'GII_da',
+  'GII_a',
+  'GII_dt',
+  'GII_arch'
+].map(normKey))
+
+const ITER_TECHNICAL_MODIFIED_ALIASES = new Set([
+  'Rim.',
+  'Trasm.'
+].map(normKey))
+
+function isTechnicalIterModifiedField (raw: any, alias?: any): boolean {
+  const rawKey = normKey(raw)
+  const aliasKey = normKey(alias)
+  return ITER_TECHNICAL_MODIFIED_FIELDS.has(rawKey) || ITER_TECHNICAL_MODIFIED_ALIASES.has(rawKey) || ITER_TECHNICAL_MODIFIED_ALIASES.has(aliasKey)
+}
+
 function parseModifiedFieldNames (raw: any): string[] {
   return String(raw || '')
     .split(/[;,|\n]+/g)
@@ -2208,8 +2228,9 @@ function CicliTimeline (props: { globalId: string; hasSel: boolean; sortDir: 'as
         const cycleLabelNumber = props.sortDir === 'asc' ? (i + 1) : (displayCicli.length - i)
 
         const campiList = parseModifiedFieldNames(c.campi_modificati)
-          .map(campo => getFieldAliasForIter(campo, props.aliasMap))
-          .filter(Boolean)
+          .map(campo => ({ raw: campo, alias: getFieldAliasForIter(campo, props.aliasMap) }))
+          .filter(item => Boolean(item.alias) && !isTechnicalIterModifiedField(item.raw, item.alias))
+          .map(item => item.alias)
 
         return (
           <div key={i} style={{ border: `1px solid ${borderColor}`, borderRadius: 10, background: bgColor, overflow: 'hidden' }}>
@@ -2244,26 +2265,24 @@ function CicliTimeline (props: { globalId: string; hasSel: boolean; sortDir: 'as
                 <div style={rowSt}><span style={lblSt}>Note</span><span style={valSt}>{c.note_chiusura}</span></div>
               )}
 
-              {c.num_campi_modificati != null && c.num_campi_modificati > 0 && (
+              {campiList.length > 0 && (
                 <div style={{ padding: '7px 0', borderBottom: '1px solid rgba(0,0,0,0.07)' }}>
                   <div style={{ display: 'grid', gridTemplateColumns: 'minmax(150px, 220px) minmax(0, 1fr)', gap: 12, alignItems: 'flex-start' }}>
                     <span style={lblSt}>Campi modificati</span>
                     <span style={{ ...valSt, fontSize: 11 }}>
-                      {c.num_campi_modificati} {c.num_campi_modificati === 1 ? 'campo' : 'campi'}
+                      {campiList.length} {campiList.length === 1 ? 'campo' : 'campi'}
                     </span>
                   </div>
-                  {campiList.length > 0 && (
-                    <div style={{ display: 'grid', gridTemplateColumns: 'minmax(150px, 220px) minmax(0, 1fr)', gap: 12, marginTop: 6 }}>
-                      <span />
-                      <div style={{ border: '1px solid rgba(209,213,219,0.95)', borderRadius: 8, padding: '6px 8px', background: '#fff', display: 'flex', flexWrap: 'wrap', gap: '4px 12px' }}>
-                        {campiList.map((campo, ci) => (
-                          <span key={ci} style={{ fontSize: 11, color: '#374151', lineHeight: 1.35 }}>
-                            {campo}
-                          </span>
-                        ))}
-                      </div>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'minmax(150px, 220px) minmax(0, 1fr)', gap: 12, marginTop: 6 }}>
+                    <span />
+                    <div style={{ border: '1px solid rgba(209,213,219,0.95)', borderRadius: 8, padding: '6px 8px', background: '#fff', display: 'flex', flexWrap: 'wrap', gap: '4px 12px' }}>
+                      {campiList.map((campo, ci) => (
+                        <span key={ci} style={{ fontSize: 11, color: '#374151', lineHeight: 1.35 }}>
+                          {campo}
+                        </span>
+                      ))}
                     </div>
-                  )}
+                  </div>
                 </div>
               )}
 
@@ -3607,16 +3626,6 @@ if (!hasSel) {
               ) : (
                 <div style={{ opacity: 0.75, fontSize: 12 }}>Nessun allegato.</div>
               )}
-            </div>
-          )}
-
-          {rows && rows.length > 0 && (
-            <div style={{ marginTop: 12 }}>
-              <ReadOnlyPanel
-                title="Attributi"
-                rows={rows}
-                emptyText={hasSel ? 'Nessun campo configurato per questa tab.' : 'Selezionare un rapporto.'}
-              />
             </div>
           )}
         </div>
