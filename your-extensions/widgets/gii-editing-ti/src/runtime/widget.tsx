@@ -4582,6 +4582,7 @@ function NuovaPraticaForm (p: {
     setDraft(prev => ({ ...prev, [k]: v }))
   }
   const g = (k: string) => draft[k] ?? ''
+  const isSystemAdmin = normalizeRoleCode(readGiiUserContext().role) === 'ADMIN'
   const getOidFromAny = React.useCallback((obj: any): number | null => {
     if (!obj || typeof obj !== 'object') return null
     const candidates = [
@@ -5855,20 +5856,12 @@ React.useEffect(() => {
       }
     }
 
-    if (npTab === 'allegati') {
-      return {
-        ...base,
-        overflow: 'hidden',
-        padding: '12px 2px',
-        display: 'flex',
-        flexDirection: 'column' as const
-      }
-    }
-
     return {
       ...base,
-      overflowY: 'auto',
-      padding: '12px 2px'
+      overflow: 'hidden',
+      padding: '12px 2px 2px 2px',
+      display: 'flex',
+      flexDirection: 'column' as const
     }
   }, [npTab, anteprimaPadding])
 
@@ -6039,14 +6032,28 @@ React.useEffect(() => {
     letterSpacing: 0.5,
     marginBottom: 8
   }
-  const renderEditCard = (title: string, body: React.ReactNode, right?: React.ReactNode) => (
-    <section style={editCardStyle}>
+  const renderEditCard = (
+    title: string,
+    body: React.ReactNode,
+    right?: React.ReactNode,
+    cardStyle?: React.CSSProperties,
+    bodyStyle?: React.CSSProperties
+  ) => (
+    <section style={{ ...editCardStyle, ...cardStyle }}>
       <div style={editCardHeaderStyle}>
         <span>{title}</span>
         {right}
       </div>
-      <div style={editCardBodyStyle}>{body}</div>
+      <div style={{ ...editCardBodyStyle, ...bodyStyle }}>{body}</div>
     </section>
+  )
+
+  const renderFullHeightEditCard = (title: string, body: React.ReactNode, right?: React.ReactNode) => renderEditCard(
+    title,
+    body,
+    right,
+    { height: '100%', minHeight: 0, display: 'flex', flexDirection: 'column' },
+    { flex: '1 1 auto', minHeight: 0, overflow: 'auto' }
   )
 
   const fitGridColumns = (columns?: string): string => {
@@ -6087,7 +6094,7 @@ React.useEffect(() => {
       case '_localizzazione':
         return (
           <div style={{ padding: 10, borderRadius: 8, border: `1px solid ${p.mapClickEnabled ? '#2563eb' : 'rgba(0,0,0,0.10)'}`, background: p.mapClickEnabled ? 'rgba(37,99,235,0.04)' : 'rgba(0,0,0,0.02)', marginBottom: 12, transition: 'all 0.2s' }}>
-            <div style={{ fontWeight: 800, fontSize: 12, color: '#374151', marginBottom: 6 }}>Localizzazione (req_point = {reqPoint})</div>
+            <div style={{ fontWeight: 800, fontSize: 12, color: '#374151', marginBottom: 6 }}>Localizzazione{isSystemAdmin ? ` (req_point = ${reqPoint})` : ''}</div>
             <div style={{ fontSize: 12, color: geomStatus.kind === 'ok' ? '#1a7f37' : (geomStatus.kind === 'err' ? '#b42318' : '#6b7280') }}>{geomStatus.text}</div>
             {reqPoint === 1 && (() => {
               const ep = p.clickedPointWgs84 || p.existingGeomWgs84
@@ -6193,13 +6200,18 @@ React.useEffect(() => {
         })
         pushCurrent()
 
+        const trasgressoreSectionNodes = sections.map((section, si) => {
+          const nodes = section.rows.map((row, ri) => renderLayoutRowContent(row, `${si}-${ri}`)).filter(Boolean)
+          if (!nodes.length) return null
+          return renderEditCard(section.title || 'Trasgressore', <div style={{ display: 'grid', gap: defaultGap }}>{nodes}</div>)
+        }).filter(Boolean)
+        const trasgressoreGridRows = trasgressoreSectionNodes.length > 1
+          ? `${Array(Math.max(0, trasgressoreSectionNodes.length - 1)).fill('auto').join(' ')} minmax(0, 1fr)`
+          : 'minmax(0, 1fr)'
+
         const leftColumn = (
-          <div style={{ display: 'grid', gap: formStyle.sectionGap, minWidth: 0 }}>
-            {sections.map((section, si) => {
-              const nodes = section.rows.map((row, ri) => renderLayoutRowContent(row, `${si}-${ri}`)).filter(Boolean)
-              if (!nodes.length) return null
-              return renderEditCard(section.title || 'Trasgressore', <div style={{ display: 'grid', gap: defaultGap }}>{nodes}</div>)
-            })}
+          <div style={{ display: 'grid', gap: formStyle.sectionGap, minWidth: 0, height: '100%', minHeight: 0, gridTemplateRows: trasgressoreGridRows }}>
+            {trasgressoreSectionNodes}
           </div>
         )
 
@@ -6274,10 +6286,13 @@ React.useEffect(() => {
               gridTemplateColumns: `minmax(0, ${trasgressoreColumnPercents[0].toFixed(2)}%) ${formStyle.violazioneSplitterWidth}px minmax(0, 1fr)`,
               gap: 0,
               alignItems: 'stretch',
-              columnGap: 0
+              columnGap: 0,
+              height: '100%',
+              minHeight: 0,
+              flex: '1 1 auto'
             }}
           >
-            <div style={{ minWidth: 0, paddingRight: 6 }}>{leftColumn}</div>
+            <div style={{ minWidth: 0, minHeight: 0, height: '100%', paddingRight: 6, overflowY: 'auto' }}>{leftColumn}</div>
             <div
               style={splitterStyle}
               onMouseDown={startTrasgressoreResize}
@@ -6298,7 +6313,7 @@ React.useEffect(() => {
                 aria-label='Ripristina larghezza colonne'
               >↔</button>
             </div>
-            <div style={{ minWidth: 0, paddingLeft: 6 }}>{rightColumn}</div>
+            <div style={{ minWidth: 0, minHeight: 0, height: '100%', paddingLeft: 6, overflowY: 'auto' }}>{rightColumn}</div>
           </div>
         )
       }
@@ -6457,7 +6472,7 @@ React.useEffect(() => {
         const art17SurfaceEnabled = art17Selected && !!art17tipo
 
         const leftColumn = (
-          <div style={{ display: 'grid', gap: formStyle.sectionGap, minWidth: 0 }}>
+          <div style={{ display: 'grid', gap: formStyle.sectionGap, minWidth: 0, height: '100%', minHeight: 0, gridTemplateRows: 'auto auto minmax(0, 1fr)' }}>
             {renderEditCard('Art. 15 — Prelievo abusivo',
               <div style={{ display: 'grid', gridTemplateColumns: 'minmax(170px, 220px) minmax(120px, 145px) minmax(120px, 145px) minmax(160px, 200px)', gap: 8, alignItems: 'start' }}>
                 {selectField('tipo_abuso', 'Tipo di abuso', tipoAbuso, v => { set('tipo_abuso', v); set('norma15_parziale', ''); set('norma15_totale', '') }, CHOICES.tipo_abuso)}
@@ -6553,10 +6568,13 @@ React.useEffect(() => {
               gridTemplateColumns: `minmax(0, ${violazioneColumnPercents[0].toFixed(2)}%) ${formStyle.violazioneSplitterWidth}px minmax(0, 1fr)`,
               gap: 0,
               alignItems: 'stretch',
-              columnGap: 0
+              columnGap: 0,
+              height: '100%',
+              minHeight: 0,
+              flex: '1 1 auto'
             }}
           >
-            <div style={{ minWidth: 0, paddingRight: 6 }}>{leftColumn}</div>
+            <div style={{ minWidth: 0, minHeight: 0, height: '100%', paddingRight: 6, overflowY: 'auto' }}>{leftColumn}</div>
             <div
               style={splitterStyle}
               onMouseDown={startViolazioneResize}
@@ -6577,7 +6595,7 @@ React.useEffect(() => {
                 aria-label='Ripristina larghezza colonne'
               >↔</button>
             </div>
-            <div style={{ minWidth: 0, paddingLeft: 6 }}>{rightColumn}</div>
+            <div style={{ minWidth: 0, minHeight: 0, height: '100%', paddingLeft: 6, overflowY: 'auto' }}>{rightColumn}</div>
           </div>
         )
       }
@@ -6663,12 +6681,31 @@ React.useEffect(() => {
     })
     pushCurrent()
 
+    const renderedSections = sections.map((section, si) => {
+      const nodes = section.rows.map((row, ri) => renderLayoutRowContent(row, `${si}-${ri}`)).filter(Boolean)
+      if (!nodes.length) return null
+      return { key: `${tabId}-${si}`, title: section.title || fallbackTitle, nodes }
+    }).filter(Boolean) as Array<{ key: string; title: string; nodes: React.ReactNode[] }>
+
+    const gridRows = renderedSections.length > 1
+      ? `${Array(Math.max(0, renderedSections.length - 1)).fill('auto').join(' ')} minmax(0, 1fr)`
+      : 'minmax(0, 1fr)'
+
     return (
-      <div style={{ display: 'grid', gap: 14 }}>
-        {sections.map((section, si) => {
-          const nodes = section.rows.map((row, ri) => renderLayoutRowContent(row, `${si}-${ri}`)).filter(Boolean)
-          if (!nodes.length) return null
-          return renderEditCard(section.title || fallbackTitle, <div style={{ display: 'grid', gap: defaultGap }}>{nodes}</div>)
+      <div style={{ display: 'grid', gap: 14, height: '100%', minHeight: 0, gridTemplateRows: gridRows }}>
+        {renderedSections.map((section, idx) => {
+          const isLast = idx === renderedSections.length - 1
+          return (
+            <React.Fragment key={section.key}>
+              {renderEditCard(
+                section.title,
+                <div style={{ display: 'grid', gap: defaultGap }}>{section.nodes}</div>,
+                undefined,
+                isLast ? { height: '100%', minHeight: 0, display: 'flex', flexDirection: 'column' } : undefined,
+                isLast ? { flex: '1 1 auto', minHeight: 0, overflow: 'auto' } : undefined
+              )}
+            </React.Fragment>
+          )
         })}
       </div>
     )
@@ -6758,26 +6795,26 @@ React.useEffect(() => {
 {/* NOTA SPESE */}
 {npTab === 'nota_spese' && (
   mode !== 'edit' || currentOid == null ? (
-    renderEditCard('Nota spese', (
+    renderFullHeightEditCard('Nota spese', (
       <div style={{ fontSize: formStyle.labelFontSize, color: formStyle.labelColor, lineHeight: 1.5 }}>
-        La nota spese si gestisce <b>dopo il salvataggio</b> della pratica, quando il rapporto dispone del <b>GlobalID</b> necessario per collegare le righe di personale, mezzi e materiali.
+        Sarà possibile aggiungere la nota spese <b>solo dopo il primo salvataggio</b> del rapporto.
       </div>
     ))
   ) : noteSpeseMissing.length > 0 ? (
-    renderEditCard('Nota spese non configurata', (
+    renderFullHeightEditCard('Nota spese non configurata', (
       <div style={{ padding: 12, borderRadius: 10, border: '1px solid #f5b8b8', background: '#fce4e4', color: '#7a1c1c' }}>
         <div style={{ fontSize: 12, lineHeight: 1.5 }}>Completa nel setting del widget i seguenti URL:</div>
         <div style={{ marginTop: 8, fontSize: 12 }}>{noteSpeseMissing.join(' • ')}</div>
       </div>
     ))
   ) : !currentGlobalId ? (
-    renderEditCard('GlobalID pratica non disponibile', (
+    renderFullHeightEditCard('GlobalID pratica non disponibile', (
       <div style={{ padding: 12, borderRadius: 10, border: '1px solid #f5b8b8', background: '#fce4e4', color: '#7a1c1c' }}>
         <div style={{ fontSize: 12, lineHeight: 1.5 }}>Il widget non riesce a leggere il GlobalID del rapporto selezionato. Verifica che il layer/view usato per l’editing esponga il campo <b>GlobalID</b>.</div>
       </div>
     ))
   ) : (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 10, height: '100%', minHeight: 0, overflowY: 'auto' }}>
       {noteSpeseMsg && (
         <div style={{ padding: '7px 10px', borderRadius: 4, fontSize: 12, fontWeight: 700, border: `1px solid ${noteSpeseMsg.ok ? '#b8d4b0' : '#f5b8b8'}`, background: noteSpeseMsg.ok ? '#e2efda' : '#fce4e4', color: noteSpeseMsg.ok ? '#375623' : '#c00' }}>
           {noteSpeseMsg.text}
@@ -6819,19 +6856,21 @@ React.useEffect(() => {
 {npTab === 'allegati' && (
 
           mode !== 'edit' || currentOid == null ? (
-            <div style={{ padding: 12, borderRadius: 10, border: '1px dashed rgba(0,0,0,0.18)', background: 'rgba(0,0,0,0.01)' }}>
-              <div style={{ fontWeight: 800, fontSize: 13, marginBottom: 6 }}>Allegati</div>
+            renderFullHeightEditCard('Allegati', (
               <div style={{ fontSize: formStyle.labelFontSize, color: formStyle.labelColor, lineHeight: 1.5 }}>
-                Gli allegati si gestiscono <b>dopo il salvataggio</b> della pratica (serve l&apos;OBJECTID).
-                Dopo aver creato la pratica, comparirà nell&apos;Elenco: selezionala e usa la tab <b>Allegati</b> in modalità modifica.
+                Sarà possibile aggiungere gli allegati <b>solo dopo il primo salvataggio</b> del rapporto.
               </div>
-            </div>
+            ))
           ) : (
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, flex: '1 1 auto', minHeight: 0 }}>
+            <div style={{ display: 'flex', flexDirection: 'column', flex: '1 1 auto', height: '100%', minHeight: 0, border: '1px solid #c5d9f1', borderRadius: formStyle.cardBorderRadius, background: '#fff', overflow: 'hidden' }}>
+              <div style={{ padding: '8px 12px', background: formStyle.cardHeaderBg, color: formStyle.cardHeaderColor, fontWeight: 800, fontSize: formStyle.cardHeaderFontSize }}>
+                Allegati
+              </div>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, flex: '1 1 auto', height: '100%', minHeight: 0, padding: 12 }}>
             {/* Colonna sinistra: lista allegati */}
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 10, overflowY: 'auto', minHeight: 0 }}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 10, overflowY: 'auto', height: '100%', minHeight: 0 }}>
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, flexWrap: 'wrap' }}>
-                <div style={{ fontWeight: 800, fontSize: 13 }}>Allegati</div>
+                <div style={{ fontWeight: 800, fontSize: 13 }}>Elenco allegati</div>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
                   <label style={{
                     minHeight: 36, height: 36, boxSizing: 'border-box',
@@ -6965,7 +7004,7 @@ React.useEffect(() => {
               )}
             </div>
             {/* Colonna destra: anteprima */}
-            <div style={{ border: '1px solid rgba(255,255,255,0.08)', borderRadius: 10, padding: 12, background: '#282828', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: previewAttachment ? 'flex-start' : 'center', overflow: 'hidden', minHeight: 0 }}>
+            <div style={{ border: '1px solid rgba(255,255,255,0.08)', borderRadius: 10, padding: 12, background: '#282828', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: previewAttachment ? 'flex-start' : 'center', overflow: 'hidden', height: '100%', minHeight: 0 }}>
               {!previewAttachment ? (
                 <div style={{ fontSize: 12, color: 'rgba(255,255,255,0.45)', textAlign: 'center' }}>Seleziona un allegato per visualizzare l&apos;anteprima</div>
               ) : previewLoading ? (
@@ -6985,13 +7024,16 @@ React.useEffect(() => {
                 </div>
               )}
             </div>
+              </div>
             </div>
           )
         )}
 
 {/* ANTEPRIMA */}
 {npTab === 'anteprima' && (
-  <AnteprimaPanel data={draft} mode={mode} nsRows={noteSpeseRowsDraft} nsSummary={noteSpeseSummary} />
+  <div style={{ width: '100%', height: '100%', minHeight: 0, borderRadius: formStyle.cardBorderRadius, overflow: 'hidden' }}>
+    <AnteprimaPanel data={draft} mode={mode} nsRows={noteSpeseRowsDraft} nsSummary={noteSpeseSummary} />
+  </div>
 )}
 
       </div>

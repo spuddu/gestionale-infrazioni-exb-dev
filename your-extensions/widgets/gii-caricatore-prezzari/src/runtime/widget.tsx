@@ -500,7 +500,7 @@ const styles = `
 .gpw-card { background:#f5f9ff; border:1px solid #c5d9f1; border-radius:6px; padding:12px; }
 .gpw-grid { display:grid; grid-template-columns:minmax(280px,1.35fr) 170px 120px minmax(260px,1.2fr); gap:10px; }
 .gpw-field { display:flex; flex-direction:column; gap:3px; }
-.gpw-label { font-size:11px; font-weight:700; color:#1F4E79; }
+.gpw-label { font-size:var(--gpw-toolbar-label-font-size, 11px); font-weight:700; color:var(--gpw-toolbar-label-color, #1F4E79); }
 .gpw-input, .gpw-select { width:100%; height:38px; min-height:38px; padding:7px 10px; border:1px solid #aac4e0; border-radius:4px; font-size:13px; box-sizing:border-box; background:#fff; }
 .gpw-input:focus, .gpw-select:focus { outline:none; border-color:#1F4E79; box-shadow:0 0 0 3px rgba(31,78,121,0.12); }
 .gpw-file-row { display:grid; grid-template-columns:auto 1fr; gap:8px; align-items:center; }
@@ -536,6 +536,10 @@ export default function Widget(props: AllWidgetProps<IMConfig>) {
   const title = String(cfg.title || 'GII - Caricatore Prezzari')
   const titleColor = String(cfg.titleColor || '#1F4E79')
   const titleFontSize = Number(cfg.titleFontSize || 15)
+  const sectionTitleColor = String(cfg.sectionTitleColor || '#1F4E79')
+  const sectionTitleFontSize = Number(cfg.sectionTitleFontSize || 12.5)
+  const toolbarLabelColor = String(cfg.toolbarLabelColor || '#1F4E79')
+  const toolbarLabelFontSize = Number(cfg.toolbarLabelFontSize || 11.5)
   const [rows, setRows] = React.useState<ImportRow[]>([])
   const [loading, setLoading] = React.useState(false)
   const [saving, setSaving] = React.useState(false)
@@ -706,7 +710,7 @@ export default function Widget(props: AllWidgetProps<IMConfig>) {
   return (
     <Fragment>
       <style>{styles}</style>
-      <div className='gpw'>
+      <div className='gpw' style={{ '--gpw-toolbar-label-color': toolbarLabelColor, '--gpw-toolbar-label-font-size': `${toolbarLabelFontSize}px`, '--gpw-section-title-color': sectionTitleColor, '--gpw-section-title-font-size': `${sectionTitleFontSize}px` } as React.CSSProperties}>
         <div className='gpw-title' style={{ color: titleColor, fontSize: titleFontSize }}>{title}</div>
         {(!importUrl || !cfg.regionaleArticoliUrl || !cfg.regionaleAnalisiUrl) ? <div className='gpw-msg gpw-msg-err'>Configura almeno la tabella import e le due tabelle del prezzario regionale nel setting del widget.</div> : null}
         {msg && <div className={`gpw-msg ${msg.ok ? 'gpw-msg-ok' : 'gpw-msg-err'}`}>{msg.text}</div>}
@@ -751,7 +755,7 @@ export default function Widget(props: AllWidgetProps<IMConfig>) {
               <button className='gpw-btn gpw-primary' disabled={saving || !file} onClick={onImport}>{saving ? 'Import in corso…' : 'Importa prezzario'}</button>
             </div>
           </div>
-          {progress ? <div style={{ marginTop: 8, fontSize: 12, color: '#1F4E79', fontWeight: 700 }}>{progress}</div> : null}
+          {progress ? <div style={{ marginTop: 8, fontSize: sectionTitleFontSize, color: sectionTitleColor, fontWeight: 700 }}>{progress}</div> : null}
         </div>
 
         <div className='gpw-table-wrap'>

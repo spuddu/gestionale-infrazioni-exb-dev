@@ -149,7 +149,7 @@ const styles = `
 .gnp-panel { background:#f5f9ff; border:1px solid #c5d9f1; border-radius:6px; padding:12px; }
 .gnp-form { display:grid; grid-template-columns: 1.7fr 0.7fr 0.95fr 1.1fr 0.8fr 0.8fr; gap:10px; align-items:end; }
 .gnp-field { display:flex; flex-direction:column; gap:3px; }
-.gnp-label { font-size:11px; font-weight:700; color:#1F4E79; }
+.gnp-label { font-size:var(--gnp-toolbar-label-font-size, 11px); font-weight:700; color:var(--gnp-toolbar-label-color, #1F4E79); }
 .gnp-input, .gnp-select, .gnp-textarea { width:100%; padding:6px 8px; border:1px solid #aac4e0; border-radius:4px; font-size:13px; box-sizing:border-box; background:#fff; }
 .gnp-textarea { min-height:60px; resize:vertical; }
 .gnp-readonly { background:#eef4fb; color:#3f4d5a; }
@@ -191,6 +191,10 @@ export default function Widget(props: AllWidgetProps<IMConfig>) {
   const title = String(cfg.title || 'GII - Gestione Nuovi Prezzi')
   const titleColor = String(cfg.titleColor || '#1F4E79')
   const titleFontSize = Number(cfg.titleFontSize || 15)
+  const sectionTitleColor = String(cfg.sectionTitleColor || '#1F4E79')
+  const sectionTitleFontSize = Number(cfg.sectionTitleFontSize || 12.5)
+  const toolbarLabelColor = String(cfg.toolbarLabelColor || '#1F4E79')
+  const toolbarLabelFontSize = Number(cfg.toolbarLabelFontSize || 11.5)
 
   const [rows, setRows] = React.useState<any[]>([])
   const [filterText, setFilterText] = React.useState('')
@@ -283,7 +287,7 @@ export default function Widget(props: AllWidgetProps<IMConfig>) {
   return (
     <Fragment>
       <style>{styles}</style>
-      <div className='gnp'>
+      <div className='gnp' style={{ '--gnp-toolbar-label-color': toolbarLabelColor, '--gnp-toolbar-label-font-size': `${toolbarLabelFontSize}px`, '--gnp-section-title-color': sectionTitleColor, '--gnp-section-title-font-size': `${sectionTitleFontSize}px` } as React.CSSProperties}>
         <div className='gnp-title' style={{ color: titleColor, fontSize: titleFontSize }}>{title}</div>
         {!serviceUrl ? <div className='gnp-msg gnp-err'>Configura l'URL della tabella nel setting del widget.</div> : null}
         {msg && <div className={`gnp-msg ${msg.ok ? 'gnp-ok' : 'gnp-err'}`}>{msg.text}</div>}
@@ -293,12 +297,11 @@ export default function Widget(props: AllWidgetProps<IMConfig>) {
             <div className='gnp-label'>Filtro codice / descrizione</div>
             <input className='gnp-input' value={filterText} onChange={(e) => setFilterText(e.target.value)} placeholder='cerca nuovo prezzo...' />
           </div>
-          <div className='gnp-muted' style={{ alignSelf: 'center' }}>La creazione dei nuovi prezzi va fatta dal widget <b>GII - Analisi Nuovi Prezzi</b>.</div>
         </div>
 
         {editing && (
           <div className='gnp-panel'>
-            <div style={{ fontWeight: 700, color: '#1F4E79', marginBottom: 10 }}>Modifica testata Nuovo Prezzo</div>
+            <div style={{ fontWeight: 700, color: sectionTitleColor, fontSize: sectionTitleFontSize, marginBottom: 10 }}>Modifica testata Nuovo Prezzo</div>
             <div className='gnp-form'>
               <div className='gnp-field'>
                 <div className='gnp-label'>Codice</div>

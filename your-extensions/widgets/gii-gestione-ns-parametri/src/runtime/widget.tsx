@@ -10,7 +10,7 @@ const styles = `
   .gns-title { font-size: 15px; font-weight: bold; color: #1F4E79; border-bottom: 2px solid #1F4E79; padding-bottom: 6px; margin: 0; }
   .gns-form { background: #f5f9ff; border: 1px solid #c5d9f1; border-radius: 6px; padding: 14px; display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
   .gns-field { display: flex; flex-direction: column; gap: 3px; }
-  .gns-label { font-size: 11px; font-weight: bold; color: #1F4E79; }
+  .gns-label { font-size: var(--gns-toolbar-label-font-size, 11px); font-weight: bold; color: var(--gns-toolbar-label-color, #1F4E79); }
   .gns-input, .gns-select { width: 100%; padding: 5px 8px; border: 1px solid #aac4e0; border-radius: 4px; font-size: 13px; box-sizing: border-box; background: #fff; }
   .gns-input:focus, .gns-select:focus { outline: none; border-color: #1F4E79; }
   .gns-btns { display: flex; gap: 8px; grid-column: 1 / -1; padding-top: 4px; }
@@ -268,6 +268,10 @@ export default function Widget(props: AllWidgetProps<IMConfig>) {
   const title = String(cfg.title || TITLE_DEFAULT)
   const titleColor = String(cfg.titleColor || '#1F4E79')
   const titleFontSize = Number(cfg.titleFontSize || 15)
+  const sectionTitleColor = String(cfg.sectionTitleColor || '#1F4E79')
+  const sectionTitleFontSize = Number(cfg.sectionTitleFontSize || 12.5)
+  const toolbarLabelColor = String(cfg.toolbarLabelColor || '#1F4E79')
+  const toolbarLabelFontSize = Number(cfg.toolbarLabelFontSize || 11.5)
   const [rows, setRows] = React.useState<any[]>([])
   const [form, setForm] = React.useState<any>(emptyForm())
   const [editing, setEditing] = React.useState(false)
@@ -336,7 +340,7 @@ export default function Widget(props: AllWidgetProps<IMConfig>) {
   return (
     <Fragment>
       <style>{styles}</style>
-      <div className="gns">
+      <div className="gns" style={{ '--gns-toolbar-label-color': toolbarLabelColor, '--gns-toolbar-label-font-size': `${toolbarLabelFontSize}px`, '--gns-section-title-color': sectionTitleColor, '--gns-section-title-font-size': `${sectionTitleFontSize}px` } as React.CSSProperties}>
         <div className="gns-title" style={{ color: titleColor, fontSize: titleFontSize }}>{title}</div>
         {!serviceUrl ? <div className="gns-msg gns-msg-err">Configura l'URL della tabella nel setting del widget.</div> : null}
         {msg && <div className={`gns-msg ${msg.ok ? 'gns-msg-ok' : 'gns-msg-err'}`}>{msg.text}</div>}

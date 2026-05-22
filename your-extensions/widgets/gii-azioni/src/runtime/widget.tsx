@@ -4341,6 +4341,22 @@ function rapportoPdfFileName (map: Record<string, string>): string {
   return `rapporto_${cp || 'rapporto'}.pdf`
 }
 
+function normalizeArcgisLayerUrl (raw?: string | null): string {
+  const url = String(raw || '').trim()
+  if (!url) return ''
+
+  const match = url.match(/^([^?#]*)([?#].*)?$/)
+  const base = String(match?.[1] || '').replace(/\/+$/, '')
+  const suffix = String(match?.[2] || '')
+
+  // Le configurazioni possono arrivare dal service root (.../FeatureServer).
+  // Per le query via FeatureLayer serve invece la URL del layer/table (.../FeatureServer/0).
+  if (/\/(FeatureServer|MapServer)$/i.test(base)) return `${base}/0${suffix}`
+
+  return `${base}${suffix}`
+}
+
+
 async function buildRapportoPdfBlob (
   data: any, utentiCache: Map<string, UtenteCached> | null,
   nsConfig?: { detailUrl: string; parametriUrl: string; parametroCode: string }
@@ -4352,8 +4368,8 @@ async function buildRapportoPdfBlob (
   let finalBytes: Uint8Array = rapportoBytes
 
   // Se le URL NS sono configurate, query le righe e genera la nota spese
-  const detailUrl = nsConfig?.detailUrl?.trim()
-  const parametriUrl = nsConfig?.parametriUrl?.trim()
+  const detailUrl = normalizeArcgisLayerUrl(nsConfig?.detailUrl)
+  const parametriUrl = normalizeArcgisLayerUrl(nsConfig?.parametriUrl)
   if (detailUrl && data) {
     try {
       const parentGlobalId = String(data.GlobalID || data.globalid || data.GLOBALID || data.global_id || '').trim()
