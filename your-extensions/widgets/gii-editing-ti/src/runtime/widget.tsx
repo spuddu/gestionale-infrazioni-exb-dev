@@ -5858,10 +5858,10 @@ React.useEffect(() => {
 
     return {
       ...base,
-      overflow: 'hidden',
-      padding: '12px 2px 2px 2px',
-      display: 'flex',
-      flexDirection: 'column' as const
+      overflowY: 'auto',
+      overflowX: 'hidden',
+      scrollbarGutter: 'stable',
+      padding: '12px 2px 2px 2px'
     }
   }, [npTab, anteprimaPadding])
 
@@ -6210,7 +6210,7 @@ React.useEffect(() => {
           : 'minmax(0, 1fr)'
 
         const leftColumn = (
-          <div style={{ display: 'grid', gap: formStyle.sectionGap, minWidth: 0, height: '100%', minHeight: 0, gridTemplateRows: trasgressoreGridRows }}>
+          <div style={{ display: 'grid', gap: formStyle.sectionGap, minWidth: 0, minHeight: '100%', gridTemplateRows: trasgressoreGridRows }}>
             {trasgressoreSectionNodes}
           </div>
         )
@@ -6233,7 +6233,7 @@ React.useEffect(() => {
         )
 
         const rightColumn = (
-          <section style={{ ...editCardStyle, height: '100%', display: 'flex', flexDirection: 'column', minWidth: 0 }}>
+          <section style={{ ...editCardStyle, minHeight: '100%', display: 'flex', flexDirection: 'column', minWidth: 0 }}>
             <div style={editCardHeaderStyle}><span>Note</span></div>
             <div style={{ ...editCardBodyStyle, flex: '1 1 auto', minHeight: 0 }}>{noteBody}</div>
           </section>
@@ -6287,12 +6287,10 @@ React.useEffect(() => {
               gap: 0,
               alignItems: 'stretch',
               columnGap: 0,
-              height: '100%',
-              minHeight: 0,
-              flex: '1 1 auto'
+              minHeight: '100%'
             }}
           >
-            <div style={{ minWidth: 0, minHeight: 0, height: '100%', paddingRight: 6, overflowY: 'auto' }}>{leftColumn}</div>
+            <div style={{ minWidth: 0, minHeight: '100%', paddingRight: 6 }}>{leftColumn}</div>
             <div
               style={splitterStyle}
               onMouseDown={startTrasgressoreResize}
@@ -6313,7 +6311,7 @@ React.useEffect(() => {
                 aria-label='Ripristina larghezza colonne'
               >↔</button>
             </div>
-            <div style={{ minWidth: 0, minHeight: 0, height: '100%', paddingLeft: 6, overflowY: 'auto' }}>{rightColumn}</div>
+            <div style={{ minWidth: 0, minHeight: '100%', paddingLeft: 6 }}>{rightColumn}</div>
           </div>
         )
       }
@@ -6472,7 +6470,7 @@ React.useEffect(() => {
         const art17SurfaceEnabled = art17Selected && !!art17tipo
 
         const leftColumn = (
-          <div style={{ display: 'grid', gap: formStyle.sectionGap, minWidth: 0, height: '100%', minHeight: 0, gridTemplateRows: 'auto auto minmax(0, 1fr)' }}>
+          <div style={{ display: 'grid', gap: formStyle.sectionGap, minWidth: 0, minHeight: '100%', gridTemplateRows: 'auto auto minmax(0, 1fr)' }}>
             {renderEditCard('Art. 15 — Prelievo abusivo',
               <div style={{ display: 'grid', gridTemplateColumns: 'minmax(170px, 220px) minmax(120px, 145px) minmax(120px, 145px) minmax(160px, 200px)', gap: 8, alignItems: 'start' }}>
                 {selectField('tipo_abuso', 'Tipo di abuso', tipoAbuso, v => { set('tipo_abuso', v); set('norma15_parziale', ''); set('norma15_totale', '') }, CHOICES.tipo_abuso)}
@@ -6509,7 +6507,7 @@ React.useEffect(() => {
         )
 
         const rightColumn = (
-          <section style={{ ...editCardStyle, height: '100%', display: 'flex', flexDirection: 'column', minWidth: 0 }}>
+          <section style={{ ...editCardStyle, minHeight: '100%', display: 'flex', flexDirection: 'column', minWidth: 0 }}>
             <div style={editCardHeaderStyle}><span>Descrizione e circostanze</span></div>
             <div style={{ ...editCardBodyStyle, flex: '1 1 auto', display: 'grid', gridTemplateRows: 'auto auto auto 1fr', gap: 7, alignContent: 'start' }}>
               {textAreaField('descrizione_fatti', 'Descrizione dettagliata della violazione', formStyle.violazioneDescrizioneRows)}
@@ -6569,12 +6567,10 @@ React.useEffect(() => {
               gap: 0,
               alignItems: 'stretch',
               columnGap: 0,
-              height: '100%',
-              minHeight: 0,
-              flex: '1 1 auto'
+              minHeight: '100%'
             }}
           >
-            <div style={{ minWidth: 0, minHeight: 0, height: '100%', paddingRight: 6, overflowY: 'auto' }}>{leftColumn}</div>
+            <div style={{ minWidth: 0, minHeight: '100%', paddingRight: 6 }}>{leftColumn}</div>
             <div
               style={splitterStyle}
               onMouseDown={startViolazioneResize}
@@ -6595,7 +6591,7 @@ React.useEffect(() => {
                 aria-label='Ripristina larghezza colonne'
               >↔</button>
             </div>
-            <div style={{ minWidth: 0, minHeight: 0, height: '100%', paddingLeft: 6, overflowY: 'auto' }}>{rightColumn}</div>
+            <div style={{ minWidth: 0, minHeight: '100%', paddingLeft: 6 }}>{rightColumn}</div>
           </div>
         )
       }
@@ -6692,7 +6688,7 @@ React.useEffect(() => {
       : 'minmax(0, 1fr)'
 
     return (
-      <div style={{ display: 'grid', gap: 14, height: '100%', minHeight: 0, gridTemplateRows: gridRows }}>
+      <div style={{ display: 'grid', gap: 14, minHeight: '100%', gridTemplateRows: gridRows }}>
         {renderedSections.map((section, idx) => {
           const isLast = idx === renderedSections.length - 1
           return (
@@ -6701,8 +6697,8 @@ React.useEffect(() => {
                 section.title,
                 <div style={{ display: 'grid', gap: defaultGap }}>{section.nodes}</div>,
                 undefined,
-                isLast ? { height: '100%', minHeight: 0, display: 'flex', flexDirection: 'column' } : undefined,
-                isLast ? { flex: '1 1 auto', minHeight: 0, overflow: 'auto' } : undefined
+                isLast ? { minHeight: '100%', display: 'flex', flexDirection: 'column' } : undefined,
+                isLast ? { flex: '1 1 auto', minHeight: 0 } : undefined
               )}
             </React.Fragment>
           )
@@ -6814,7 +6810,7 @@ React.useEffect(() => {
       </div>
     ))
   ) : (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 10, height: '100%', minHeight: 0, overflowY: 'auto' }}>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 10, minHeight: '100%' }}>
       {noteSpeseMsg && (
         <div style={{ padding: '7px 10px', borderRadius: 4, fontSize: 12, fontWeight: 700, border: `1px solid ${noteSpeseMsg.ok ? '#b8d4b0' : '#f5b8b8'}`, background: noteSpeseMsg.ok ? '#e2efda' : '#fce4e4', color: noteSpeseMsg.ok ? '#375623' : '#c00' }}>
           {noteSpeseMsg.text}
@@ -6862,13 +6858,13 @@ React.useEffect(() => {
               </div>
             ))
           ) : (
-            <div style={{ display: 'flex', flexDirection: 'column', flex: '1 1 auto', height: '100%', minHeight: 0, border: '1px solid #c5d9f1', borderRadius: formStyle.cardBorderRadius, background: '#fff', overflow: 'hidden' }}>
+            <div style={{ display: 'flex', flexDirection: 'column', minHeight: '100%', border: '1px solid #c5d9f1', borderRadius: formStyle.cardBorderRadius, background: '#fff', overflow: 'hidden' }}>
               <div style={{ padding: '8px 12px', background: formStyle.cardHeaderBg, color: formStyle.cardHeaderColor, fontWeight: 800, fontSize: formStyle.cardHeaderFontSize }}>
                 Allegati
               </div>
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, flex: '1 1 auto', height: '100%', minHeight: 0, padding: 12 }}>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, flex: '1 1 auto', minHeight: 0, padding: 12 }}>
             {/* Colonna sinistra: lista allegati */}
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 10, overflowY: 'auto', height: '100%', minHeight: 0 }}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 10, minHeight: 0 }}>
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, flexWrap: 'wrap' }}>
                 <div style={{ fontWeight: 800, fontSize: 13 }}>Elenco allegati</div>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
@@ -7004,7 +7000,7 @@ React.useEffect(() => {
               )}
             </div>
             {/* Colonna destra: anteprima */}
-            <div style={{ border: '1px solid rgba(255,255,255,0.08)', borderRadius: 10, padding: 12, background: '#282828', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: previewAttachment ? 'flex-start' : 'center', overflow: 'hidden', height: '100%', minHeight: 0 }}>
+            <div style={{ border: '1px solid rgba(255,255,255,0.08)', borderRadius: 10, padding: 12, background: '#282828', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: previewAttachment ? 'flex-start' : 'center', overflow: 'hidden', minHeight: 0 }}>
               {!previewAttachment ? (
                 <div style={{ fontSize: 12, color: 'rgba(255,255,255,0.45)', textAlign: 'center' }}>Seleziona un allegato per visualizzare l&apos;anteprima</div>
               ) : previewLoading ? (

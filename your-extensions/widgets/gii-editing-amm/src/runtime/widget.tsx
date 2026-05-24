@@ -2,7 +2,7 @@
 /** @jsxFrag React.Fragment */
 import { React, jsx, type AllWidgetProps, DataSourceComponent } from 'jimu-core'
 import RapportoPdfViewer from '../../../_shared/gii-anteprime/rapporto/rapporto-pdf-viewer'
-import { buildVerbalePdf } from '../../../_shared/gii-anteprime/verbale/verbale-pdf-builder'
+import { buildVerbalePdf, getVerbalePdfFilePrefix } from '../../../_shared/gii-anteprime/verbale/verbale-pdf-builder'
 import type { IMConfig, SummaryFieldConfig } from '../config'
 import { defaultConfig } from '../config'
 
@@ -340,11 +340,12 @@ function buildBaseCalculation (draft: Record<string, any>, profile: { username: 
   const user = String(profile.fullName || profile.username || '').trim()
   const when = new Date(now).toLocaleString('it-IT')
   const dettaglio = [
-    'Calcolo automatico base (non normativo).',
+    'Riepilogo importi inseriti nella scheda amministrativa.',
     '',
     `Importo sanzione base: ${base != null ? formatEuroText(base) : '—'}`,
     `Importo sanzione ridotta: ${ridotta != null ? formatEuroText(ridotta) : '—'}`,
-    `Criterio applicato: ${criterio}`,
+    `Criterio di totale: ${criterio}`,
+    'Nota: la determinazione normativa degli importi deve essere demandata ai parametri sanzioni gestiti dall\'Area Amministrativa.',
     `Risarcimento danni: ${formatEuroText(danni)}`,
     `Rimborso netto attrezzature: ${formatEuroText(attrezzatureNetto)}`,
     `Spese di notifica: ${formatEuroText(spese)}`,
@@ -791,6 +792,8 @@ function buildVerbalePdfMap (data: any, fields: LayerFieldInfo[], profile: { use
   const contatti = [String(pickAttrCI(d, ['email']) || '').trim(), String(pickAttrCI(d, ['telefono']) || '').trim(), String(pickAttrCI(d, ['cellulare']) || '').trim()].filter(Boolean).join(' / ')
   const area = pdfFieldValue(d, fields, 'area_cod') || String(pickAttrCI(d, ['area_label', 'area']) || '')
   const settore = pdfFieldValue(d, fields, 'settore_cod') || String(pickAttrCI(d, ['settore_label', 'settore']) || '')
+  const rawTipoAtto = String(pickAttrCI(d, ['tipo_atto_amm']) || '').trim()
+  const tipoAttoLabel = pdfFieldValue(d, fields, 'tipo_atto_amm') || rawTipoAtto
   return {
     objectid: oid != null ? String(oid) : '',
     pratica,
@@ -809,6 +812,12 @@ function buildVerbalePdfMap (data: any, fields: LayerFieldInfo[], profile: { use
     contatti,
     violazioni: buildVerbaleViolationsText(d, fields),
     descrizione_fatti: String(pickAttrCI(d, ['descrizione_fatti']) || ''),
+    tipo_atto_amm: rawTipoAtto,
+    tipo_atto_amm_label: tipoAttoLabel,
+    protocollo_istanza_numero: String(pickAttrCI(d, ['protocollo_istanza_numero']) || ''),
+    protocollo_istanza_data: pdfFieldValue(d, fields, 'protocollo_istanza_data'),
+    oggetto_atto_amm: String(pickAttrCI(d, ['oggetto_atto_amm']) || ''),
+    note_atto_amm: String(pickAttrCI(d, ['note_atto_amm']) || ''),
     numero_verbale: String(pickAttrCI(d, ['numero_verbale']) || ''),
     data_verbale: pdfFieldValue(d, fields, 'data_verbale'),
     protocollo_verbale: String(pickAttrCI(d, ['protocollo_verbale_numero']) || ''),
@@ -821,6 +830,12 @@ function buildVerbalePdfMap (data: any, fields: LayerFieldInfo[], profile: { use
     sanzione_importo_ridotta: pdfFieldValue(d, fields, 'sanzione_importo_ridotta', { money: true }),
     risarcimento_danni_importo: pdfFieldValue(d, fields, 'risarcimento_danni_importo', { money: true }),
     sanzione_spese_notifica: pdfFieldValue(d, fields, 'sanzione_spese_notifica', { money: true }),
+    attrezzature_cauzione_presente: pdfFieldValue(d, fields, 'attrezzature_cauzione_presente'),
+    attrezzature_rimborso_importo: pdfFieldValue(d, fields, 'attrezzature_rimborso_importo', { money: true }),
+    attrezzature_cauzione_decurtata: pdfFieldValue(d, fields, 'attrezzature_cauzione_decurtata', { money: true }),
+    attrezzature_importo_netto: pdfFieldValue(d, fields, 'attrezzature_importo_netto', { money: true }),
+    attrezzature_rimborso_dettaglio: String(pickAttrCI(d, ['attrezzature_rimborso_dettaglio']) || ''),
+    attrezzature_note: String(pickAttrCI(d, ['attrezzature_note']) || ''),
     pagamento_importo_totale: pdfFieldValue(d, fields, 'pagamento_importo_totale', { money: true }),
     pagamento_scadenza: pdfFieldValue(d, fields, 'pagamento_scadenza'),
     pagamento_modalita: pdfFieldValue(d, fields, 'pagamento_modalita'),
@@ -836,16 +851,26 @@ function buildVerbalePdfMap (data: any, fields: LayerFieldInfo[], profile: { use
     sanzione_dettaglio_calcolo: String(pickAttrCI(d, ['sanzione_dettaglio_calcolo']) || ''),
     sanzione_calcolata_il: pdfFieldValue(d, fields, 'sanzione_calcolata_il'),
     sanzione_calcolata_da: String(pickAttrCI(d, ['sanzione_calcolata_da']) || ''),
+    verbale_pdf_generato_il: pdfFieldValue(d, fields, 'verbale_pdf_generato_il'),
+    verbale_pdf_generato_da: String(pickAttrCI(d, ['verbale_pdf_generato_da']) || ''),
     istruttoria_amm_chiusa_il: pdfFieldValue(d, fields, 'istruttoria_amm_chiusa_il'),
     istruttoria_amm_chiusa_da: String(pickAttrCI(d, ['istruttoria_amm_chiusa_da']) || ''),
-    data_generazione: new Date().toLocaleDateString('it-IT'),
+    data_generazione: new Date().toLocaleString('it-IT'),
     generato_da: profile.fullName || profile.username || ''
   }
 }
 
 function verbalePdfFileName (map: Record<string, string>): string {
-  const base = String(map.numero_verbale || map.n_rapporto || map.objectid || 'verbale').replace(/[^a-zA-Z0-9_-]/g, '_')
-  return `verbale_${base || 'verbale'}.pdf`
+  const prefix = getVerbalePdfFilePrefix(map) || 'verbale'
+  const base = String(map.numero_verbale || map.n_rapporto || map.objectid || prefix).replace(/[^a-zA-Z0-9_-]/g, '_')
+  return `${prefix}_${base || prefix}.pdf`
+}
+
+function buildVerbalePdfGenerationMeta (profile: { username: string, fullName: string }): Record<string, any> {
+  return {
+    verbale_pdf_generato_il: Date.now(),
+    verbale_pdf_generato_da: String(profile.fullName || profile.username || '').trim()
+  }
 }
 
 async function buildVerbalePdfBlob (data: any, fields: LayerFieldInfo[], profile: { username: string, fullName: string }): Promise<{ blob: Blob, fileName: string }> {
@@ -1234,7 +1259,7 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
       ...(prev || {}),
       ...next
     }))
-    setDialog({ kind: 'ok', title: 'Calcolo aggiornato', text: 'Totale da pagare e dettaglio calcolo sono stati aggiornati. Ricordati di salvare i dati amministrativi.' })
+    setDialog({ kind: 'ok', title: 'Totale aggiornato', text: 'Totale da pagare e dettaglio importi sono stati aggiornati. Ricordati di salvare i dati amministrativi.' })
   }
 
   const fillAttrezzatureNetto = () => {
@@ -1255,17 +1280,23 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
   }
 
   const handleVerbaleDownload = React.useCallback(() => {
-    const source = draft || data
-    if (!hasSelection || !source) return
+    const base = draft || data
+    if (!hasSelection || !base) return
+    const stamp = buildVerbalePdfGenerationMeta(profile)
+    const source = { ...base, ...stamp }
+    if (canEdit) {
+      setDraft(prev => ({ ...(prev || {}), ...stamp }))
+    }
     ;(async () => {
       try {
         const { blob, fileName } = await buildVerbalePdfBlob(source, layerFields, profile)
         downloadBlobFile(blob, fileName)
+        setDialog({ kind: 'ok', title: 'Verbale PDF generato', text: canEdit ? 'Il PDF è stato scaricato e i metadati di generazione sono stati compilati. Ricordati di salvare i dati amministrativi.' : 'Il PDF è stato scaricato.' })
       } catch (e: any) {
         setDialog({ kind: 'err', title: 'Errore PDF verbale', text: e?.message || String(e) })
       }
     })()
-  }, [data, draft, hasSelection, layerFields, profile])
+  }, [canEdit, data, draft, hasSelection, layerFields, profile])
 
   const handleVerbalePreview = React.useCallback(() => {
     const source = draft || data
@@ -1493,8 +1524,13 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
             <AdminFormSection title='Dati verbale' group='verbale' draft={draft} fields={layerFields} canEdit={canEdit} onChange={onFieldChange} />
             <AdminFormSection title='Protocollo e notifica' group='notifica' draft={draft} fields={layerFields} canEdit={canEdit} onChange={onFieldChange} />
             <AdminFormSection title='Sanzione e risarcimento danni' group='sanzione' draft={draft} fields={layerFields} canEdit={canEdit} onChange={onFieldChange}>
+              <div style={{ marginTop: 12 }}>
+                <InfoBox>
+                  Gli importi della sanzione restano dati amministrativi modificabili. In una fase successiva potranno essere alimentati da una tabella parametri sanzioni gestita da RI_AMM, così da evitare importi fissi cablati nel codice.
+                </InfoBox>
+              </div>
               <div style={{ marginTop: 12, display: 'flex', justifyContent: 'flex-end' }}>
-                <button type='button' disabled={!canEdit} onClick={fillCalculatedMeta} style={secondaryButtonStyle(!canEdit)}>Calcola totale e dettaglio</button>
+                <button type='button' disabled={!canEdit} onClick={fillCalculatedMeta} style={secondaryButtonStyle(!canEdit)}>Aggiorna totale e dettaglio importi</button>
               </div>
             </AdminFormSection>
             <AdminFormSection title='Rimborso attrezzature' group='attrezzature' draft={draft} fields={layerFields} canEdit={canEdit} onChange={onFieldChange}>

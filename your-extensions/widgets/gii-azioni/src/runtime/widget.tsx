@@ -1749,7 +1749,7 @@ function ActionsPanel (props: {
 
     // Caso speciale: RI_AMM che chiede integrazione tecnica.
     // Il destinatario non è il RI dell'Area Amministrativa, ma il RI
-    // dell'area tecnica di provenienza della pratica (AGR/TEC).
+    // dell'area tecnica di provenienza della pratica (AGR o TEC).
     if (role === 'RI_AMM' && r === 'RI') {
       const areaPratica = normalizeAreaLabel(pickAttrCI(data, ['area_cod', 'area', 'cod_area']))
       const settorePratica = normalizeSettoreLabel(areaPratica, pickAttrCI(data, ['settore_cod', 'settore', 'cod_settore']))
@@ -2036,7 +2036,7 @@ function ActionsPanel (props: {
     if (role === 'RI_AMM') {
       // RI_AMM ha due percorsi distinti di richiesta integrazione:
       // - amministrativa verso il TI_AMM assegnato;
-      // - tecnica verso il RI dell'area di provenienza (AGR/TEC).
+      // - tecnica verso il RI dell'area di provenienza (AGR o TEC).
       if (target === 'TI_AMM') return 'TI_AMM'
       return 'RI'
     }
@@ -2665,7 +2665,7 @@ function ActionsPanel (props: {
   const tiAmmReturned = (esitoTiAmmNum != null) || (statoTiAmmNum === STATO_APPROVATA) || (statoTiAmmNum === STATO_RESPINTA)
 
   // Caso specifico RI_AMM: rientro da integrazione tecnica.
-  // Dopo il giro RI_AMM → RI_AGR/TEC → DT_AGR/TEC → RI_AMM, il rientro
+  // Dopo il giro RI_AMM → RI_AGR o RI_TEC → DT_AGR o DT_TEC → RI_AMM, il rientro
   // verso il TI_AMM originario è una restituzione/trasmissione (blu).
   // Dopo una normale trasmissione TI_AMM → RI_AMM, invece, RI_AMM deve poter
   // chiedere una vera integrazione amministrativa al TI_AMM (arancio).
@@ -2703,7 +2703,7 @@ function ActionsPanel (props: {
 
   // RI_AMM → TI_AMM: distinguiamo due casi:
   // - trasmissione ordinaria TI_AMM → RI_AMM: RI_AMM può chiedere Integrazione TI AMM (arancio);
-  // - rientro tecnico DT_AGR/TEC → RI_AMM: RI_AMM deve Restituire a TI AMM (blu).
+  // - rientro tecnico DT_AGR o DT_TEC → RI_AMM: RI_AMM deve Restituire a TI AMM (blu).
   const canStartRestituisciTiAmm =
     canStartEsito &&
     role === 'RI_AMM' &&
@@ -2765,6 +2765,32 @@ function ActionsPanel (props: {
     role === 'RI_AMM' ? `Conferma trasmissione a ${fwdDestLabel}` :
     role === 'TI_AMM' ? 'Conferma trasmissione a RI AMM' :
     'Conferma approvazione'
+
+  const getRiTecnicoTargetLabel = (): string => {
+    const areaPratica = normalizeAreaLabel(pickAttrCI(data, ['area_cod', 'area', 'cod_area']))
+    if (areaPratica === 'AGR') return 'RI AGR'
+    if (areaPratica === 'TEC') return 'RI TEC'
+    return 'RI'
+  }
+
+  const formatRimandoRoleLabel = (destRole: string): string => {
+    const dest = String(destRole || '').trim().toUpperCase()
+    if (!dest) return ''
+    if (role === 'RI_AMM' && dest === 'RI') return getRiTecnicoTargetLabel()
+    return dest.replace(/_/g, ' ')
+  }
+
+  const rimandoGenericDest = getPrevRoleForIntegration()
+  const rimandoGenericTargetLabel = formatRimandoRoleLabel(rimandoGenericDest)
+  const rimandoGenericButtonLabel = rimandoGenericTargetLabel ? `Rimanda a ${rimandoGenericTargetLabel}` : 'Rimanda'
+  const rimandoTiAmmButtonLabel = 'Rimanda a TI AMM'
+  const rimandoTecnicaTargetLabel = getRiTecnicoTargetLabel()
+  const rimandoTecnicaButtonLabel = `Rimanda a ${rimandoTecnicaTargetLabel}`
+  const pendingRimandoTargetLabel = pending === 'INTEGRAZIONE_TI_AMM'
+    ? 'TI AMM'
+    : pending === 'INTEGRAZIONE_TECNICA'
+      ? rimandoTecnicaTargetLabel
+      : rimandoGenericTargetLabel
 
   // TI: eliminazione consentita solo per pratiche originate da sé (origine=TI) e mai inoltrate a RZ.
   const currentUsername = String((window as any).__giiUserRole?.username || (window as any).__giiUser?.username || '').trim()
@@ -3524,7 +3550,7 @@ function ActionsPanel (props: {
         : pending === 'RESTITUISCI_TI_AMM'
           ? 'Conferma restituzione a TI AMM'
           : (pending === 'INTEGRAZIONE' || pending === 'INTEGRAZIONE_TI_AMM' || pending === 'INTEGRAZIONE_TECNICA')
-          ? (pending === 'INTEGRAZIONE_TI_AMM' ? 'Conferma integrazione a TI AMM' : pending === 'INTEGRAZIONE_TECNICA' ? 'Conferma integrazione tecnica' : 'Rimanda per integrazione')
+          ? (pendingRimandoTargetLabel ? `Conferma rimando a ${pendingRimandoTargetLabel}` : 'Conferma rimando')
           : pending === 'APPROVA'
             ? approvaConfirmLabel
             : pending === 'RESPINGI'
@@ -3540,9 +3566,9 @@ function ActionsPanel (props: {
     ASSEGNA_TI_AMM: { icon: '✓', color: '#1a7f37', bg: '#f0fdf4', border: '#bbf7d0', desc: 'La pratica verrà assegnata al TI AMM selezionato.' },
     RESTITUISCI_TI_AMM: { icon: '→', color: '#2563eb', bg: '#eff6ff', border: '#bfdbfe', desc: 'La pratica verrà restituita al TI AMM già assegnato.' },
     APPROVA:        { icon: '✓', color: '#1a7f37', bg: '#f0fdf4', border: '#bbf7d0', desc: `Il rapporto verrà ${approvaDoneLabel.toLowerCase()}.` },
-    INTEGRAZIONE:   { icon: '⚠', color: '#b45309', bg: '#fffbeb', border: '#fde68a', desc: 'Confermi di voler rimandare la pratica per richiesta di integrazione?' },
-    INTEGRAZIONE_TI_AMM: { icon: '⚠', color: '#b45309', bg: '#fffbeb', border: '#fde68a', desc: 'La richiesta di integrazione verrà inviata al TI AMM assegnato.' },
-    INTEGRAZIONE_TECNICA: { icon: '⚠', color: '#b45309', bg: '#fffbeb', border: '#fde68a', desc: 'La richiesta di integrazione tecnica verrà inviata al RI dell\'area di provenienza.' },
+    INTEGRAZIONE:   { icon: '⚠', color: '#b45309', bg: '#fffbeb', border: '#fde68a', desc: rimandoGenericTargetLabel ? `La pratica verrà rimandata a ${rimandoGenericTargetLabel}.` : 'Confermi di voler rimandare la pratica?' },
+    INTEGRAZIONE_TI_AMM: { icon: '⚠', color: '#b45309', bg: '#fffbeb', border: '#fde68a', desc: 'La pratica verrà rimandata al TI AMM assegnato.' },
+    INTEGRAZIONE_TECNICA: { icon: '⚠', color: '#b45309', bg: '#fffbeb', border: '#fde68a', desc: 'La pratica verrà rimandata al RI dell\'area tecnica di provenienza.' },
     RESPINGI:       { icon: '✕', color: '#dc2626', bg: '#fef2f2', border: '#fecaca', desc: 'Il rapporto verrà respinto.' },
     ELIMINA:        { icon: '✕', color: '#dc2626', bg: '#fef2f2', border: '#fecaca', desc: 'Il rapporto verrà archiviato e non sarà più visibile nell\'elenco.' },
   }
@@ -3804,7 +3830,7 @@ function ActionsPanel (props: {
                 disabled={!canStartIntegrazioneTiAmm}
                 style={actionButtonStyle(buttonColors.integrazione, !canStartIntegrazioneTiAmm, ui, buttonColors.integrazioneText)}
               >
-                Integrazione TI AMM
+                {rimandoTiAmmButtonLabel}
               </Button>
             )}
 
@@ -3815,7 +3841,7 @@ function ActionsPanel (props: {
                 disabled={!canStartIntegrazioneTecnica}
                 style={actionButtonStyle(buttonColors.integrazione, !canStartIntegrazioneTecnica, ui, buttonColors.integrazioneText)}
               >
-                Integrazione tecnica
+                {rimandoTecnicaButtonLabel}
               </Button>
             )}
 
@@ -3826,7 +3852,7 @@ function ActionsPanel (props: {
                 disabled={!canStartIntegrazione}
                 style={actionButtonStyle(buttonColors.integrazione, !canStartIntegrazione, ui, buttonColors.integrazioneText)}
               >
-                Rimanda
+                {rimandoGenericButtonLabel}
               </Button>
             )}
 
