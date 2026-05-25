@@ -1417,7 +1417,7 @@ function actionButtonStyle (bg: string, disabled: boolean, ui?: { btnBorderRadiu
   return { ...base, backgroundColor: bg, borderColor: bg, color: textColor || '#ffffff' }
 }
 
-type Pending = null | 'TAKE' | 'ASSEGNA_TI' | 'ASSEGNA_TI_AMM' | 'RESTITUISCI_TI_AMM' | 'INTEGRAZIONE' | 'INTEGRAZIONE_TI_AMM' | 'INTEGRAZIONE_TECNICA' | 'APPROVA' | 'RESPINGI' | 'TRASMETTI' | 'ELIMINA'
+type Pending = null | 'TAKE' | 'ASSEGNA_TI' | 'ASSEGNA_TI_AMM' | 'INVIA_TI_AMM' | 'RESTITUISCI_TI_AMM' | 'INTEGRAZIONE' | 'INTEGRAZIONE_TI_AMM' | 'INTEGRAZIONE_TECNICA' | 'APPROVA' | 'RESPINGI' | 'TRASMETTI' | 'ELIMINA'
 
 function ActionsPanel (props: {
   active: { key: string; state: SelState } | null
@@ -1492,6 +1492,7 @@ function ActionsPanel (props: {
 
   // lock procedura: solo quando parte un’azione (pending) o quando salvo (loading)
   const [pending, setPending] = React.useState<Pending>(null)
+  const [actionsMenuOpen, setActionsMenuOpen] = React.useState(false)
 
   // validazioni “soft”: si attivano solo dopo tentativo di conferma
   const [confirmAttempted, setConfirmAttempted] = React.useState(false)
@@ -2317,6 +2318,7 @@ function ActionsPanel (props: {
     if (!selectionKey) {
       setMsg({ kind: 'info', text: 'Selezionare una riga.' })
       setPending(null)
+      setActionsMenuOpen(false)
       setLoading(false)
       setConfirmAttempted(false)
       noteOrigRef.current = ''
@@ -2329,6 +2331,7 @@ function ActionsPanel (props: {
 
     setMsg(null)
     setPending(null)
+    setActionsMenuOpen(false)
     setLoading(false)
     setConfirmAttempted(false)
 
@@ -2612,11 +2615,17 @@ function ActionsPanel (props: {
     (effectiveStatoNum === STATO_PRESA_IN_CARICO) ||
     (effectivePresaNum === PRESA_IN_CARICO && (effectiveStatoNum == null || effectiveStatoNum === STATO_PRESA_IN_CARICO))
 
+  // Quando il popup "Gestisci istruttoria" è aperto, `pending` rappresenta
+  // l'azione selezionata nella combo. Non deve quindi disabilitare la lista
+  // delle azioni disponibili. Fuori dal popup, invece, pending deve bloccare
+  // l'avvio di nuove azioni parallele.
+  const canChooseWorkflowAction = pending === null || actionsMenuOpen
+
   const canStartTakeInCharge =
     hasSel &&
     !loading &&
     !lockedByTransmit &&
-    pending === null &&
+    canChooseWorkflowAction &&
     (myStatoIsDaPrendere || (effectivePresaNum == null && effectiveStatoNum == null && !isTiOwningOrigin2 && isMyTurn)) &&
     !isTiOwningOrigin2 &&
     (effectivePresaNum == null || effectivePresaNum === PRESA_DA_PRENDERE) &&
@@ -2672,22 +2681,45 @@ function ActionsPanel (props: {
   // Per distinguere i due casi usiamo il mittente tecnico del routing GII_da.
   const giiDaRaw = String(pickAttrCI(data, ['GII_da', 'gii_da', 'Da', 'DA']) || '').trim()
   const giiDaNorm = giiDaRaw.toUpperCase().replace(/\s+/g, ' ')
-  const isRientroTecnicoDaDt = role === 'RI_AMM' && hasTiAmmAssigned && (
+  const riAmmSenderIsTecnico = role === 'RI_AMM' && (
     /(^|[^A-Z0-9])(DT|DIR)[-_ ]?(AGR|TEC)([^A-Z0-9]|$)/.test(giiDaNorm) ||
     /(^|[^A-Z0-9])TEST_DT_(AGR|TEC)([^A-Z0-9]|$)/.test(giiDaNorm) ||
     /(^|[^A-Z0-9])DT_(AGR|TEC)([^A-Z0-9]|$)/.test(giiDaNorm) ||
     // fallback prudente: se il mittente è un DT generico è comunque un direttore tecnico,
     // mentre il direttore amministrativo è DA e non deve entrare in questa regola.
-    /(^|[^A-Z0-9])DT([^A-Z0-9]|$)/.test(giiDaNorm)
+    /(^|[^A-Z0-9])DT([^A-Z0-9]|$)/.test(giiDaNorm) ||
+    /(^|[^A-Z0-9])DIR([^A-Z0-9]|$)/.test(giiDaNorm)
   )
 
-  const lockRiAmmBecauseAssignedToTiAmm = role === 'RI_AMM' && tiAmmAssignmentOpen && !tiAmmReturned && !isRientroTecnicoDaDt
+  const statoRiAmmNum = toNumOrNull(pickAttrCI(data, ['stato_RI_AMM', 'STATO_RI_AMM']))
+  const esitoRiAmmNum = toNumOrNull(pickAttrCI(data, ['esito_RI_AMM', 'ESITO_RI_AMM']))
+
+  // RI_AMM: un rientro da DT/DIR tecnico non significa automaticamente
+  // “restituisci al TI_AMM”. È un rientro tecnico solo se RI_AMM aveva
+  // effettivamente aperto un rimando tecnico nel ciclo amministrativo.
+  const riAmmHaChiestoIntegrazioneTecnica =
+    role === 'RI_AMM' && (esitoRiAmmNum === ESITO_INTEGRAZIONE || statoRiAmmNum === STATO_INTEGRAZIONE)
+
+  const isRientroTecnicoDaDt =
+    role === 'RI_AMM' &&
+    hasTiAmmAssigned &&
+    riAmmSenderIsTecnico &&
+    riAmmHaChiestoIntegrazioneTecnica
+
+  // Se RI_AMM riceve per la prima volta da DT/DIR tecnico, o riceve il
+  // rientro da una propria integrazione tecnica, non va bloccato solo perché
+  // esiste uno storico TI_AMM. Quello storico non è la causa procedurale attuale.
+  const lockRiAmmBecauseAssignedToTiAmm =
+    role === 'RI_AMM' &&
+    tiAmmAssignmentOpen &&
+    !tiAmmReturned &&
+    !riAmmSenderIsTecnico
 
   const canStartEsito =
     hasSel &&
     !loading &&
     !lockedByTransmit &&
-    pending === null &&
+    canChooseWorkflowAction &&
     myStatoIsPresaInCarico &&
     !lockRZBecauseAssignedToTi &&
     !lockRiAmmBecauseAssignedToTiAmm &&
@@ -2701,20 +2733,36 @@ function ActionsPanel (props: {
     !(role === 'RZ' && (origineNum == null || origineNum === 1) && !hasTiAnyEvidence) &&
     role !== 'TI'
 
-  // RI_AMM → TI_AMM: distinguiamo due casi:
-  // - trasmissione ordinaria TI_AMM → RI_AMM: RI_AMM può chiedere Integrazione TI AMM (arancio);
-  // - rientro tecnico DT_AGR o DT_TEC → RI_AMM: RI_AMM deve Restituire a TI AMM (blu).
-  const canStartRestituisciTiAmm =
+  const currentIntegrationRequester = getIntegrationRequesterForCurrentRole()
+
+  // RI_AMM → TI_AMM: la destinazione verso TI_AMM ha tre significati distinti.
+  // - prima ricezione tecnica: Assegna al TI_AMM;
+  // - rientro da integrazione tecnica già richiesta da RI_AMM: Invia al TI_AMM;
+  // - controllo dell'istruttoria del TI_AMM: Rimanda al TI_AMM con motivazione.
+  const riAmmShouldAssignTiAmm =
+    role === 'RI_AMM' &&
+    (
+      !hasTiAmmAssigned ||
+      (riAmmSenderIsTecnico && !riAmmHaChiestoIntegrazioneTecnica)
+    )
+
+  const canStartInviaTiAmm =
     canStartEsito &&
     role === 'RI_AMM' &&
     hasTiAmmAssigned &&
     isRientroTecnicoDaDt
 
+  // Compatibilità interna: il vecchio pending RESTITUISCI_TI_AMM non viene più
+  // proposto all'utente, ma resta gestito per evitare rotture se qualche stato
+  // precedente lo avesse ancora in memoria durante hot reload.
+  const canStartRestituisciTiAmm = canStartInviaTiAmm
+
   const canStartIntegrazioneTiAmm =
     canStartEsito &&
     role === 'RI_AMM' &&
     hasTiAmmAssigned &&
-    !isRientroTecnicoDaDt
+    !riAmmSenderIsTecnico &&
+    currentIntegrationRequester !== 'TI_AMM'
 
   const canStartIntegrazioneTecnica =
     canStartEsito &&
@@ -2723,7 +2771,7 @@ function ActionsPanel (props: {
   const canStartApprova =
     canStartEsito &&
     !(role === 'RZ' && (origineNum == null || origineNum === 1) && !hasTiAnyEvidence) &&
-    !(role === 'RI_AMM' && !hasTiAmmAssigned)  // RI_AMM: prima deve assegnare TI_AMM
+    !(role === 'RI_AMM' && !currentIntegrationRequester && esitoTiAmmNum !== ESITO_APPROVATA)
 
   const canStartRespingi =
     canStartEsito &&
@@ -2734,7 +2782,28 @@ function ActionsPanel (props: {
   // Label dinamiche (inoltro vs approva)
   // Destinazione forward risolta (usata anche per le label)
   const fwdDest = getNextRoleForForward()
-  const fwdDestLabel = fwdDest.replace(/_/g, ' ')
+
+  const getRoleLabelForMenu = (destRole: string, opts?: { technicalIntegration?: boolean }): string => {
+    const dest = String(destRole || '').trim().toUpperCase()
+    if (!dest) return ''
+    if (dest === 'RI_AMM') return 'RI AMM'
+    if (dest === 'TI_AMM') return 'TI AMM'
+    if (dest === 'DA') return 'DA'
+
+    const meta = getRoutingMetaForRole(dest, opts)
+    const areaLabel = normalizeAreaLabel(meta.area || getPracticeAreaForRouting())
+
+    if (dest === 'RI') return areaLabel ? `RI ${areaLabel}` : 'RI'
+    if (dest === 'TI') return areaLabel ? `TI ${areaLabel}` : 'TI'
+    if (dest === 'DT') return areaLabel ? `DT ${areaLabel}` : 'DT'
+    if (dest === 'RZ') return 'RZ'
+    return dest.replace(/_/g, ' ')
+  }
+
+  const fwdDestLabel = getRoleLabelForMenu(fwdDest)
+  const currentIntegrationRequesterLabel = currentIntegrationRequester
+    ? getRoleLabelForMenu(currentIntegrationRequester)
+    : ''
 
   const approvaBtnLabel =
     role === 'TI' ? 'Trasmetti a RZ' :
@@ -2746,24 +2815,26 @@ function ActionsPanel (props: {
     role === 'TI_AMM' ? 'Trasmetti a RI AMM' :
     'Approva'
 
-  const approvaDoneLabel =
-    role === 'TI' ? 'Trasmessa a RZ' :
-    role === 'RZ' ? 'Trasmessa a RI' :
-    role === 'RI' ? 'Trasmessa a DT' :
+  const approvaDoneLabel = currentIntegrationRequesterLabel
+    ? `Risposta inviata al ${currentIntegrationRequesterLabel}`
+    : role === 'TI' ? 'Trasmessa a RZ' :
+    role === 'RZ' ? `Trasmessa a ${getRoleLabelForMenu('RI')}` :
+    role === 'RI' ? `Trasmessa a ${getRoleLabelForMenu('DT')}` :
     role === 'DT' ? 'Trasmessa a RI AMM' :
     role === 'DA' ? 'Trasmessa a TI AMM' :
     role === 'RI_AMM' ? `Trasmessa a ${fwdDestLabel}` :
     role === 'TI_AMM' ? 'Trasmessa a RI AMM' :
     'Approvata'
 
-  const approvaConfirmLabel =
-    role === 'TI' ? 'Conferma trasmissione a RZ' :
-    role === 'RZ' ? 'Conferma trasmissione a RI' :
-    role === 'RI' ? 'Conferma trasmissione a DT' :
+  const approvaConfirmLabel = currentIntegrationRequesterLabel
+    ? `Conferma risposta al ${currentIntegrationRequesterLabel}`
+    : role === 'TI' ? 'Conferma trasmissione al RZ' :
+    role === 'RZ' ? `Conferma trasmissione al ${getRoleLabelForMenu('RI')}` :
+    role === 'RI' ? `Conferma trasmissione al ${getRoleLabelForMenu('DT')}` :
     role === 'DT' ? 'Conferma approvazione rapporto' :
     role === 'DA' ? 'Conferma approvazione sanzione' :
-    role === 'RI_AMM' ? `Conferma trasmissione a ${fwdDestLabel}` :
-    role === 'TI_AMM' ? 'Conferma trasmissione a RI AMM' :
+    role === 'RI_AMM' ? `Conferma trasmissione al ${fwdDestLabel}` :
+    role === 'TI_AMM' ? 'Conferma trasmissione al RI AMM' :
     'Conferma approvazione'
 
   const getRiTecnicoTargetLabel = (): string => {
@@ -2777,15 +2848,15 @@ function ActionsPanel (props: {
     const dest = String(destRole || '').trim().toUpperCase()
     if (!dest) return ''
     if (role === 'RI_AMM' && dest === 'RI') return getRiTecnicoTargetLabel()
-    return dest.replace(/_/g, ' ')
+    return getRoleLabelForMenu(dest)
   }
 
   const rimandoGenericDest = getPrevRoleForIntegration()
   const rimandoGenericTargetLabel = formatRimandoRoleLabel(rimandoGenericDest)
-  const rimandoGenericButtonLabel = rimandoGenericTargetLabel ? `Rimanda a ${rimandoGenericTargetLabel}` : 'Rimanda'
-  const rimandoTiAmmButtonLabel = 'Rimanda a TI AMM'
+  const rimandoGenericButtonLabel = rimandoGenericTargetLabel ? `Rimanda al ${rimandoGenericTargetLabel}` : 'Rimanda'
+  const rimandoTiAmmButtonLabel = 'Rimanda al TI AMM'
   const rimandoTecnicaTargetLabel = getRiTecnicoTargetLabel()
-  const rimandoTecnicaButtonLabel = `Rimanda a ${rimandoTecnicaTargetLabel}`
+  const rimandoTecnicaButtonLabel = `Rimanda al ${rimandoTecnicaTargetLabel}`
   const pendingRimandoTargetLabel = pending === 'INTEGRAZIONE_TI_AMM'
     ? 'TI AMM'
     : pending === 'INTEGRAZIONE_TECNICA'
@@ -2811,7 +2882,7 @@ function ActionsPanel (props: {
     hasSel &&
     !loading &&
     !lockedByTransmit &&
-    pending === null &&
+    canChooseWorkflowAction &&
     isMyTurn &&
     origineNum === 2 &&
     !hasRoleTouched('RZ') &&
@@ -2832,24 +2903,175 @@ function ActionsPanel (props: {
     hasSel &&
     !loading &&
     !lockedByTransmit &&
-    pending === null &&
+    canChooseWorkflowAction &&
     (origineNum == null || origineNum === 1) &&
     !hasTiAnyEvidence &&
     effectivePresaNum === PRESA_IN_CARICO &&
     effectiveStatoNum === STATO_PRESA_IN_CARICO
 
-  // Assegna TI_AMM: solo RI_AMM, dopo presa in carico, e solo se NON esiste già
-  // un TI_AMM originario assegnato. Se ti_amm_assegnato_username è valorizzato,
-  // il pulsante corretto è “Restituisci a TI AMM”, non una nuova assegnazione.
+  // Assegna TI_AMM: solo RI_AMM, dopo presa in carico.
+  // Non dipende più dalla sola presenza storica di ti_amm_assegnato_username:
+  // se la pratica arriva ora da DT/DIR tecnico per la prima fase amministrativa,
+  // RI_AMM deve poter assegnare anche se nel record esiste uno storico TI_AMM.
   const canStartAssegnaTiAmm =
     role === 'RI_AMM' &&
     hasSel &&
     !loading &&
     !lockedByTransmit &&
-    pending === null &&
-    !hasTiAmmAssigned &&
+    canChooseWorkflowAction &&
+    riAmmShouldAssignTiAmm &&
     effectivePresaNum === PRESA_IN_CARICO &&
     effectiveStatoNum === STATO_PRESA_IN_CARICO
+
+  type WorkflowMenuItem = {
+    key: Exclude<Pending, null | 'TAKE'>
+    label: string
+    desc: string
+    enabled: boolean
+    visible: boolean
+    color: string
+    textColor: string
+  }
+
+  type WorkflowMenuSection = {
+    title: string
+    items: WorkflowMenuItem[]
+  }
+
+  const approvaMenuLabel = currentIntegrationRequesterLabel
+    ? `Rispondi al ${currentIntegrationRequesterLabel}`
+    : role === 'TI' ? `Trasmetti al ${getRoleLabelForMenu('RZ')}` :
+    role === 'RZ' ? `Trasmetti al ${getRoleLabelForMenu('RI')}` :
+    role === 'RI' ? `Trasmetti al ${getRoleLabelForMenu('DT')}` :
+    role === 'DT' ? 'Approva rapporto' :
+    role === 'DA' ? 'Approva sanzione' :
+    role === 'RI_AMM' ? `Trasmetti al ${fwdDestLabel}` :
+    role === 'TI_AMM' ? 'Trasmetti al RI AMM' :
+    approvaBtnLabel
+
+  const approvaMenuDesc = currentIntegrationRequesterLabel
+    ? `Invia la risposta al ${currentIntegrationRequesterLabel}.`
+    : role === 'DT' ? 'Approva il rapporto tecnico.' :
+    role === 'DA' ? 'Approva la fase sanzionatoria.' :
+    fwdDestLabel ? `Invia la pratica al ${fwdDestLabel}.` :
+    'Avanza la pratica al passaggio successivo.'
+
+  const rimandoTecnicaMenuDesc = rimandoTecnicaTargetLabel === 'RI AGR'
+    ? 'Rimando all’istruttoria agraria.'
+    : rimandoTecnicaTargetLabel === 'RI TEC'
+      ? 'Rimando all’istruttoria tecnica.'
+      : 'Rimando all’istruttoria tecnica.'
+
+  // RI_AMM non deve vedere contemporaneamente una trasmissione e una restituzione
+  // verso lo stesso TI_AMM: per l'utente sarebbero due scelte indistinguibili.
+  const hideRiAmmForwardToTiAmm = role === 'RI_AMM' && fwdDestLabel === 'TI AMM'
+
+  const workflowMenuSections: WorkflowMenuSection[] = hasSel ? [
+    {
+      title: 'Avanzamento',
+      items: [
+        {
+          key: 'ASSEGNA_TI',
+          label: `Assegna al ${getRoleLabelForMenu('TI')}`,
+          desc: 'Assegna la pratica al tecnico istruttore.',
+          enabled: canStartAssegnaTi,
+          visible: role === 'RZ',
+          color: buttonColors.take,
+          textColor: buttonColors.takeText
+        },
+        {
+          key: 'ASSEGNA_TI_AMM',
+          label: 'Assegna al TI AMM',
+          desc: 'Assegna la pratica al tecnico amministrativo.',
+          enabled: canStartAssegnaTiAmm,
+          visible: role === 'RI_AMM' && riAmmShouldAssignTiAmm,
+          color: buttonColors.approva,
+          textColor: buttonColors.approvaText
+        },
+        {
+          key: 'INVIA_TI_AMM',
+          label: 'Invia al TI AMM',
+          desc: 'Invia la pratica al tecnico amministrativo già assegnato.',
+          enabled: canStartInviaTiAmm,
+          visible: role === 'RI_AMM' && isRientroTecnicoDaDt,
+          color: buttonColors.approva,
+          textColor: buttonColors.approvaText
+        },
+        {
+          key: 'APPROVA',
+          label: approvaMenuLabel,
+          desc: approvaMenuDesc,
+          enabled: canStartApprova,
+          visible: !hideRiAmmForwardToTiAmm,
+          color: (role === 'DT' || role === 'DA') ? buttonColors.approvaRapporto : buttonColors.approva,
+          textColor: (role === 'DT' || role === 'DA') ? buttonColors.approvaRapportoText : buttonColors.approvaText
+        }
+      ].filter(i => i.visible)
+    },
+    {
+      title: 'Rimandi',
+      items: [
+        {
+          key: 'INTEGRAZIONE_TI_AMM',
+          label: rimandoTiAmmButtonLabel,
+          desc: 'Rimando all’istruttoria amministrativa.',
+          enabled: canStartIntegrazioneTiAmm,
+          visible: role === 'RI_AMM' && hasTiAmmAssigned && !isRientroTecnicoDaDt,
+          color: buttonColors.integrazione,
+          textColor: buttonColors.integrazioneText
+        },
+        {
+          key: 'INTEGRAZIONE_TECNICA',
+          label: rimandoTecnicaButtonLabel,
+          desc: rimandoTecnicaMenuDesc,
+          enabled: canStartIntegrazioneTecnica,
+          visible: role === 'RI_AMM',
+          color: buttonColors.integrazione,
+          textColor: buttonColors.integrazioneText
+        },
+        {
+          key: 'INTEGRAZIONE',
+          label: rimandoGenericButtonLabel,
+          desc: rimandoGenericTargetLabel ? `Rimando al ${rimandoGenericTargetLabel}.` : 'Rimando per integrazione.',
+          enabled: canStartIntegrazione,
+          visible: role !== 'TI' && role !== 'RI_AMM',
+          color: buttonColors.integrazione,
+          textColor: buttonColors.integrazioneText
+        }
+      ].filter(i => i.visible)
+    },
+    {
+      title: 'Esito negativo',
+      items: [
+        {
+          key: 'ELIMINA',
+          label: 'Elimina',
+          desc: 'Archivia il rapporto.',
+          enabled: canStartElimina,
+          visible: role === 'TI',
+          color: buttonColors.respingi,
+          textColor: buttonColors.respingiText
+        },
+        {
+          key: 'RESPINGI',
+          label: 'Respingi',
+          desc: 'Respinge il rapporto.',
+          enabled: canStartRespingi,
+          visible: role !== 'RI_AMM' && role !== 'TI',
+          color: buttonColors.respingi,
+          textColor: buttonColors.respingiText
+        }
+      ].filter(i => i.visible)
+    }
+  ].filter(s => s.items.length > 0) : []
+
+  const workflowMenuEnabledSections: WorkflowMenuSection[] = workflowMenuSections
+    .map(section => ({ ...section, items: section.items.filter(item => item.enabled) }))
+    .filter(section => section.items.length > 0)
+  const workflowMenuEnabledItems = workflowMenuEnabledSections.flatMap(section => section.items)
+  const hasVisibleWorkflowMenuActions = workflowMenuSections.some(section => section.items.length > 0)
+  const hasEnabledWorkflowMenuActions = workflowMenuEnabledItems.length > 0
+  const showTakeDirect = canStartTakeInCharge || !hasSel || !hasVisibleWorkflowMenuActions
 
   // NOTE: compare per integrazione, respinta e — Matrice_TI caso 1/b — anche per eliminazione (obbligatoria)
   const showNote = pending === 'INTEGRAZIONE' || pending === 'INTEGRAZIONE_TI_AMM' || pending === 'INTEGRAZIONE_TECNICA' || pending === 'RESPINGI' || pending === 'ELIMINA'
@@ -2880,6 +3102,7 @@ function ActionsPanel (props: {
 
   const onAnnulla = () => {
     setPending(null)
+    setActionsMenuOpen(false)
     setLoading(false)
     setMsg(null)
     setConfirmAttempted(false)
@@ -2889,12 +3112,13 @@ function ActionsPanel (props: {
     setTiLoadErr('')
   }
 
-  const startAction = (p: Pending) => {
+  const startAction = (p: Pending, opts?: { keepActionsMenuOpen?: boolean }) => {
     if (!hasSel) return
     if (lockedByTransmit) return
     if (p === 'TAKE' && !canStartTakeInCharge) return
     if (p === 'ASSEGNA_TI' && !canStartAssegnaTi) return
     if (p === 'ASSEGNA_TI_AMM' && !canStartAssegnaTiAmm) return
+    if (p === 'INVIA_TI_AMM' && !canStartInviaTiAmm) return
     if (p === 'RESTITUISCI_TI_AMM' && !canStartRestituisciTiAmm) return
     if (p === 'INTEGRAZIONE' && !canStartIntegrazione) return
     if (p === 'INTEGRAZIONE_TI_AMM' && !canStartIntegrazioneTiAmm) return
@@ -2934,6 +3158,7 @@ function ActionsPanel (props: {
       }
     }
 
+    if (!opts?.keepActionsMenuOpen) setActionsMenuOpen(false)
     setPending(p)
     setMsg(null)
     setConfirmAttempted(false)
@@ -2941,16 +3166,18 @@ function ActionsPanel (props: {
     setTiLoadErr('')
 
     if (p === 'ASSEGNA_TI') {
-      const cur = String(pickAttrCI(data, ['ti_assegnato_username', 'ti_assegnato_user', 'ti_assegnato']) || '')
-      setTiSelected(cur)
+      // La scelta del TI deve essere esplicita: non preselezioniamo l'eventuale
+      // valore storico già presente sul record.
+      setTiSelected('')
       window.setTimeout(() => { void loadTiOptions() }, 0)
     } else {
       setTiSelected('')
     }
 
     if (p === 'ASSEGNA_TI_AMM') {
-      const cur = String(pickAttrCI(data, ['ti_amm_assegnato_username']) || '')
-      setTiAmmSelected(cur)
+      // La scelta del TI AMM deve essere esplicita: non preselezioniamo l'eventuale
+      // valore storico già presente sul record.
+      setTiAmmSelected('')
       setTiAmmLoadErr('')
       window.setTimeout(() => { void loadTiAmmOptions() }, 0)
     } else {
@@ -3301,7 +3528,10 @@ function ActionsPanel (props: {
 
       addGiiRoutingFields(upd, 'TI_AMM', 'TRASMISSIONE', { destUsername: String(tiAmmUserRaw || '') })
 
-      await saveWithWorkflowLog(upd, 'Pratica restituita al TI AMM.', { eventoChiusura: 'RESTITUZIONE_A_TI_AMM', ruoloDestinatario: 'TI_AMM', utenteDestinatario: String(tiAmmUserRaw || resolveDestUser('TI_AMM')), noteChiusura: 'Restituzione a TI AMM dopo rientro da integrazione tecnica.', fase: role })
+      const noteInvioTiAmm = isRientroTecnicoDaDt
+        ? 'Invio al TI AMM dopo rientro da integrazione tecnica.'
+        : 'Invio al TI AMM.'
+      await saveWithWorkflowLog(upd, 'Pratica inviata al TI AMM.', { eventoChiusura: 'INVIO_A_TI_AMM', ruoloDestinatario: 'TI_AMM', utenteDestinatario: String(tiAmmUserRaw || resolveDestUser('TI_AMM')), noteChiusura: noteInvioTiAmm, fase: role })
       setPending(null)
       setConfirmAttempted(false)
     } catch (e: any) {
@@ -3544,13 +3774,13 @@ function ActionsPanel (props: {
   const pendingTitle = pending === 'TAKE'
     ? 'Conferma presa in carico'
     : pending === 'ASSEGNA_TI'
-      ? 'Conferma assegnazione TI'
+      ? 'Conferma assegnazione al TI'
       : pending === 'ASSEGNA_TI_AMM'
-        ? 'Conferma assegnazione TI AMM'
+        ? 'Conferma assegnazione al TI AMM'
         : pending === 'RESTITUISCI_TI_AMM'
-          ? 'Conferma restituzione a TI AMM'
+          ? 'Conferma restituzione al TI AMM'
           : (pending === 'INTEGRAZIONE' || pending === 'INTEGRAZIONE_TI_AMM' || pending === 'INTEGRAZIONE_TECNICA')
-          ? (pendingRimandoTargetLabel ? `Conferma rimando a ${pendingRimandoTargetLabel}` : 'Conferma rimando')
+          ? (pendingRimandoTargetLabel ? `Conferma rimando al ${pendingRimandoTargetLabel}` : 'Conferma rimando')
           : pending === 'APPROVA'
             ? approvaConfirmLabel
             : pending === 'RESPINGI'
@@ -3560,21 +3790,276 @@ function ActionsPanel (props: {
                 : 'Conferma azione'
 
   // ── Colore/icona/testo per ogni tipo di azione ────────────────────────────
-  const pendingTheme: Record<string, { icon: string; color: string; bg: string; border: string; desc: string }> = {
-    TAKE:           { icon: '✓', color: '#1a7f37', bg: '#f0fdf4', border: '#bbf7d0', desc: 'Il rapporto verrà preso in carico.' },
-    ASSEGNA_TI:     { icon: '✓', color: '#1a7f37', bg: '#f0fdf4', border: '#bbf7d0', desc: 'Il rapporto verrà assegnato al TI selezionato.' },
-    ASSEGNA_TI_AMM: { icon: '✓', color: '#1a7f37', bg: '#f0fdf4', border: '#bbf7d0', desc: 'La pratica verrà assegnata al TI AMM selezionato.' },
-    RESTITUISCI_TI_AMM: { icon: '→', color: '#2563eb', bg: '#eff6ff', border: '#bfdbfe', desc: 'La pratica verrà restituita al TI AMM già assegnato.' },
-    APPROVA:        { icon: '✓', color: '#1a7f37', bg: '#f0fdf4', border: '#bbf7d0', desc: `Il rapporto verrà ${approvaDoneLabel.toLowerCase()}.` },
-    INTEGRAZIONE:   { icon: '⚠', color: '#b45309', bg: '#fffbeb', border: '#fde68a', desc: rimandoGenericTargetLabel ? `La pratica verrà rimandata a ${rimandoGenericTargetLabel}.` : 'Confermi di voler rimandare la pratica?' },
-    INTEGRAZIONE_TI_AMM: { icon: '⚠', color: '#b45309', bg: '#fffbeb', border: '#fde68a', desc: 'La pratica verrà rimandata al TI AMM assegnato.' },
-    INTEGRAZIONE_TECNICA: { icon: '⚠', color: '#b45309', bg: '#fffbeb', border: '#fde68a', desc: 'La pratica verrà rimandata al RI dell\'area tecnica di provenienza.' },
-    RESPINGI:       { icon: '✕', color: '#dc2626', bg: '#fef2f2', border: '#fecaca', desc: 'Il rapporto verrà respinto.' },
-    ELIMINA:        { icon: '✕', color: '#dc2626', bg: '#fef2f2', border: '#fecaca', desc: 'Il rapporto verrà archiviato e non sarà più visibile nell\'elenco.' },
+  type PendingTheme = { icon: string; color: string; bg: string; border: string; desc: string; buttonBg: string; buttonBorder: string }
+  const pendingTheme: Record<string, PendingTheme> = {
+    TAKE:           { icon: '✓', color: '#2563eb', bg: '#eff6ff', border: '#bfdbfe', buttonBg: '#2563eb', buttonBorder: '#1d4ed8', desc: 'Il rapporto verrà preso in carico.' },
+    ASSEGNA_TI:     { icon: '✓', color: '#2563eb', bg: '#eff6ff', border: '#bfdbfe', buttonBg: '#2563eb', buttonBorder: '#1d4ed8', desc: 'Il rapporto verrà assegnato al TI selezionato.' },
+    ASSEGNA_TI_AMM: { icon: '✓', color: '#2563eb', bg: '#eff6ff', border: '#bfdbfe', buttonBg: '#2563eb', buttonBorder: '#1d4ed8', desc: 'La pratica verrà assegnata al TI AMM selezionato.' },
+    INVIA_TI_AMM: { icon: '✓', color: '#2563eb', bg: '#eff6ff', border: '#bfdbfe', buttonBg: '#2563eb', buttonBorder: '#1d4ed8', desc: 'La pratica verrà inviata al TI AMM già assegnato.' },
+    RESTITUISCI_TI_AMM: { icon: '✓', color: '#2563eb', bg: '#eff6ff', border: '#bfdbfe', buttonBg: '#2563eb', buttonBorder: '#1d4ed8', desc: 'La pratica verrà inviata al TI AMM già assegnato.' },
+    APPROVA:        { icon: '✓', color: '#2563eb', bg: '#eff6ff', border: '#bfdbfe', buttonBg: '#2563eb', buttonBorder: '#1d4ed8', desc: `Il rapporto verrà ${approvaDoneLabel.toLowerCase()}.` },
+    INTEGRAZIONE:   { icon: '↩', color: '#b45309', bg: '#fffbeb', border: '#fde68a', buttonBg: '#d97706', buttonBorder: '#b45309', desc: rimandoGenericTargetLabel ? `La pratica verrà rimandata al ${rimandoGenericTargetLabel}.` : 'Confermi di voler rimandare la pratica?' },
+    INTEGRAZIONE_TI_AMM: { icon: '↩', color: '#b45309', bg: '#fffbeb', border: '#fde68a', buttonBg: '#d97706', buttonBorder: '#b45309', desc: 'La pratica verrà rimandata al TI AMM assegnato.' },
+    INTEGRAZIONE_TECNICA: { icon: '↩', color: '#b45309', bg: '#fffbeb', border: '#fde68a', buttonBg: '#d97706', buttonBorder: '#b45309', desc: `La pratica verrà rimandata al ${rimandoTecnicaTargetLabel}.` },
+    RESPINGI:       { icon: '✕', color: '#b42318', bg: '#fef2f2', border: '#fecaca', buttonBg: '#dc2626', buttonBorder: '#b42318', desc: 'Il rapporto verrà respinto.' },
+    ELIMINA:        { icon: '✕', color: '#b42318', bg: '#fef2f2', border: '#fecaca', buttonBg: '#dc2626', buttonBorder: '#b42318', desc: 'Il rapporto verrà archiviato e non sarà più visibile nell\'elenco.' },
   }
-  const theme = pending ? (pendingTheme[pending] ?? { icon: '●', color: '#2f6fed', bg: '#eff6ff', border: '#bfdbfe', desc: '' }) : pendingTheme.TAKE
+  const theme = pending ? (pendingTheme[pending] ?? { icon: '●', color: '#2f6fed', bg: '#eff6ff', border: '#bfdbfe', buttonBg: '#2563eb', buttonBorder: '#1d4ed8', desc: '' }) : pendingTheme.TAKE
 
-  const pendingModal = pending !== null ? createPortal(
+  const selectedWorkflowMenuItem = pending ? (workflowMenuEnabledItems.find(item => item.key === pending) || null) : null
+  const actionMenuTheme = pending ? theme : pendingTheme.TAKE
+  const selectedWorkflowMenuKey = selectedWorkflowMenuItem?.key || ''
+  const isWorkflowRimandoPending = pending === 'INTEGRAZIONE' || pending === 'INTEGRAZIONE_TI_AMM' || pending === 'INTEGRAZIONE_TECNICA'
+  const workflowNoteLabel = isWorkflowRimandoPending ? 'Motivazione del rimando' : 'Note'
+  const workflowNotePlaceholder = isWorkflowRimandoPending
+    ? 'Indicare la motivazione del rimando…'
+    : (noteIsRequired ? 'Specifica il motivo…' : 'Nota facoltativa…')
+
+  const closeWorkflowMenu = () => {
+    setActionsMenuOpen(false)
+    setPending(null)
+    setLoading(false)
+    setMsg(null)
+    setConfirmAttempted(false)
+    setNoteDraft(noteOrigRef.current)
+    setRejectReason('')
+    setTiSelected('')
+    setTiAmmSelected('')
+    setTiLoadErr('')
+    setTiAmmLoadErr('')
+  }
+
+  const openWorkflowMenu = () => {
+    setActionsMenuOpen(true)
+    setPending(null)
+    setMsg(null)
+    setConfirmAttempted(false)
+    setNoteDraft(noteOrigRef.current)
+    setRejectReason('')
+    setTiSelected('')
+    setTiAmmSelected('')
+    setTiLoadErr('')
+    setTiAmmLoadErr('')
+  }
+
+  const canConfirmWorkflowAction = (() => {
+    if (!pending || loading || !selectedWorkflowMenuItem) return false
+    if (pending === 'ASSEGNA_TI') return !!tiSelected
+    if (pending === 'ASSEGNA_TI_AMM') return !!tiAmmSelected
+    if (pending === 'INTEGRAZIONE' || pending === 'INTEGRAZIONE_TI_AMM' || pending === 'INTEGRAZIONE_TECNICA') return !!noteTrim
+    if (pending === 'RESPINGI') return !!reasonTrim && (!isAltro || !!noteTrim)
+    if (pending === 'ELIMINA') return !!noteTrim
+    return true
+  })()
+
+  const confirmWorkflowAction = async () => {
+    setConfirmAttempted(true)
+    if (!canConfirmWorkflowAction || !pending) return
+
+    if (pending === 'ASSEGNA_TI') await onConfirmAssegnaTi()
+    else if (pending === 'ASSEGNA_TI_AMM') await onConfirmAssegnaTiAmm()
+    else if (pending === 'INVIA_TI_AMM' || pending === 'RESTITUISCI_TI_AMM') await onConfirmRestituisciTiAmm()
+    else if (pending === 'INTEGRAZIONE' || pending === 'INTEGRAZIONE_TI_AMM' || pending === 'INTEGRAZIONE_TECNICA') await onConfirmIntegrazione()
+    else if (pending === 'APPROVA') await onConfirmEsito(ESITO_APPROVATA, approvaDoneLabel)
+    else if (pending === 'RESPINGI') await onConfirmRespinta()
+    else if (pending === 'ELIMINA') await onConfirmElimina()
+
+    setActionsMenuOpen(false)
+  }
+
+  const actionMenuModal = actionsMenuOpen ? createPortal(
+    <div
+      data-gii-global-popup-root='1'
+      style={{ position: 'fixed', inset: 0, zIndex: 2147483645, background: 'rgba(0,0,0,0.48)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16, pointerEvents: 'auto' }}
+      onClick={(e) => { e.preventDefault(); e.stopPropagation() }}
+      onMouseDown={(e) => { e.preventDefault(); e.stopPropagation() }}
+    >
+      <div
+        role='dialog'
+        aria-modal='true'
+        data-gii-global-popup-dialog='1'
+        style={{ width: 'min(92vw, 560px)', maxHeight: 'calc(100vh - 48px)', overflowY: 'auto', background: '#fff', borderRadius: 14, boxShadow: '0 20px 60px rgba(0,0,0,0.28)', border: '1px solid rgba(0,0,0,0.08)', padding: 18, display: 'grid', gap: 14, position: 'relative', zIndex: 2147483646 }}
+        onClick={(e) => { e.stopPropagation() }}
+        onMouseDown={(e) => { e.stopPropagation() }}
+      >
+        <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12, background: actionMenuTheme.bg, border: `1px solid ${actionMenuTheme.border}`, borderRadius: 10, padding: '10px 12px' }}>
+          <div>
+            <div style={{ fontWeight: 800, fontSize: 16, color: actionMenuTheme.color, display: 'flex', alignItems: 'center', gap: 8 }}>
+              <span style={{ fontSize: 20 }}>{pending ? actionMenuTheme.icon : '✓'}</span>
+              <span>Gestisci istruttoria</span>
+            </div>
+            {hasSel && oid != null && (
+              <div style={{ marginTop: 5, fontSize: 13, color: '#4b5563' }}>
+                Rapporto: <span style={{ fontWeight: 700, fontFamily: 'monospace', color: actionMenuTheme.color }}>{praticaCode}</span>
+              </div>
+            )}
+          </div>
+          <button
+            type='button'
+            onClick={closeWorkflowMenu}
+            style={{ border: `1px solid ${actionMenuTheme.border}`, background: '#fff', color: '#374151', borderRadius: 8, padding: '6px 10px', fontWeight: 700, cursor: 'pointer' }}
+            aria-label='Chiudi'
+          >
+            ×
+          </button>
+        </div>
+
+        {workflowMenuEnabledItems.length > 0 ? (
+          <React.Fragment>
+            <div style={{ display: 'grid', gap: 6 }}>
+              <div style={{ fontSize: titleFontSize, fontWeight: 700 }}>Azione</div>
+              <select
+                value={selectedWorkflowMenuKey}
+                onChange={(e) => {
+                  const raw = String(e.target.value || '')
+                  if (!raw) {
+                    setPending(null)
+                    setMsg(null)
+                    setConfirmAttempted(false)
+                    setNoteDraft(noteOrigRef.current)
+                    setRejectReason('')
+                    setTiSelected('')
+                    setTiAmmSelected('')
+                    setTiLoadErr('')
+                    setTiAmmLoadErr('')
+                    return
+                  }
+                  const key = raw as Exclude<Pending, null | 'TAKE'>
+                  const item = workflowMenuEnabledItems.find(i => i.key === key)
+                  if (item) startAction(item.key, { keepActionsMenuOpen: true })
+                }}
+                disabled={loading}
+                style={{ width: '100%', padding: '9px 10px', borderRadius: 8, border: '1px solid rgba(0,0,0,0.18)', outline: 'none', fontSize: 13, background: '#fff' }}
+              >
+                <option value=''>— Seleziona —</option>
+                {workflowMenuEnabledSections.map(section => (
+                  <optgroup key={section.title} label={section.title}>
+                    {section.items.map(item => (
+                      <option key={item.key} value={item.key}>{item.label}</option>
+                    ))}
+                  </optgroup>
+                ))}
+              </select>
+            </div>
+
+            {selectedWorkflowMenuItem?.desc && (
+              <div style={{ fontSize: 13, color: '#374151', lineHeight: 1.55, padding: 10, background: actionMenuTheme.bg, border: `1px solid ${actionMenuTheme.border}`, borderRadius: 8 }}>
+                {selectedWorkflowMenuItem.desc}
+              </div>
+            )}
+
+            {msg && msg.kind === 'err' && (
+              <div style={{ fontWeight: 500, padding: 10, background: '#fef2f2', border: '1px solid #fecaca', borderRadius: 6, color: '#7f1d1d', fontSize: 13 }}>
+                {msg.text}
+              </div>
+            )}
+
+            {pending === 'RESPINGI' && (
+              <div style={{ display: 'grid', gap: 6 }}>
+                <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
+                  <div style={{ fontSize: titleFontSize, fontWeight: 700 }}>Motivazione</div>
+                  <div style={labelReqStyle(true, reasonReqErr)}>(obbligatoria)</div>
+                </div>
+                <ZebraDropdown
+                  value={rejectReason}
+                  options={ui.rejectReasons || []}
+                  placeholder='— seleziona —'
+                  disabled={loading || !hasSel || lockedByTransmit}
+                  onChange={(v) => { setRejectReason(String(v ?? '')); if (confirmAttempted) setConfirmAttempted(false) }}
+                  evenBg={ui.reasonsZebraEvenBg}
+                  oddBg={ui.reasonsZebraOddBg}
+                  borderColor={ui.reasonsRowBorderColor}
+                  borderWidth={ui.reasonsRowBorderWidth}
+                  radius={ui.reasonsRowRadius}
+                  fontSize={ui.statusFontSize}
+                  isError={reasonReqErr}
+                />
+              </div>
+            )}
+
+            {pending === 'ASSEGNA_TI' && role === 'RZ' && (
+              <div style={{ display: 'grid', gap: 6 }}>
+                <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
+                  <div style={{ fontSize: titleFontSize, fontWeight: 700 }}>Tecnico istruttore</div>
+                  <div style={labelReqStyle(true, tiReqErr)}>Scelta obbligatoria</div>
+                </div>
+                <select
+                  value={tiSelected}
+                  onChange={(e) => { setTiSelected(e.target.value); if (confirmAttempted) setConfirmAttempted(false) }}
+                  disabled={loading}
+                  style={{ width: '100%', padding: '8px 10px', borderRadius: 8, border: `1px solid ${tiReqErr ? '#dc2626' : 'rgba(0,0,0,0.15)'}`, outline: 'none' }}
+                >
+                  <option value=''>— Seleziona TI —</option>
+                  {tiOptions.map(o => (
+                    <option key={o.username} value={o.username}>{(o.fullName || o.username)} ({o.username})</option>
+                  ))}
+                </select>
+                {!tiLoading && !tiLoadErr && tiOptions.length === 0 && <div style={{ fontSize: 12, opacity: 0.75 }}>Nessun TI trovato.</div>}
+                {!!tiLoadErr && <div style={{ fontSize: 12, color: '#dc2626' }}>Errore elenco TI: {tiLoadErr}</div>}
+              </div>
+            )}
+
+            {pending === 'ASSEGNA_TI_AMM' && role === 'RI_AMM' && (
+              <div style={{ display: 'grid', gap: 6 }}>
+                <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
+                  <div style={{ fontSize: titleFontSize, fontWeight: 700 }}>Tecnico amministrativo</div>
+                  <div style={labelReqStyle(true, tiAmmReqErr)}>Scelta obbligatoria</div>
+                </div>
+                <select
+                  value={tiAmmSelected}
+                  onChange={(e) => { setTiAmmSelected(e.target.value); if (confirmAttempted) setConfirmAttempted(false) }}
+                  disabled={loading}
+                  style={{ width: '100%', padding: '8px 10px', borderRadius: 8, border: `1px solid ${tiAmmReqErr ? '#dc2626' : 'rgba(0,0,0,0.15)'}`, outline: 'none' }}
+                >
+                  <option value=''>— Seleziona TI AMM —</option>
+                  {tiAmmOptions.map(o => (
+                    <option key={o.username} value={o.username}>{(o.fullName || o.username)} ({o.username})</option>
+                  ))}
+                </select>
+                {!tiAmmLoading && !tiAmmLoadErr && tiAmmOptions.length === 0 && <div style={{ fontSize: 12, opacity: 0.75 }}>Nessun TI AMM trovato.</div>}
+                {!!tiAmmLoadErr && <div style={{ fontSize: 12, color: '#dc2626' }}>Errore elenco TI AMM: {tiAmmLoadErr}</div>}
+              </div>
+            )}
+
+            {showNote && (
+              <div style={{ display: 'grid', gap: 6 }}>
+                <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
+                  <div style={{ fontSize: titleFontSize, fontWeight: 700 }}>{workflowNoteLabel}</div>
+                  {noteIsRequired && <div style={labelReqStyle(true, noteReqErr)}>(obbligatoria)</div>}
+                </div>
+                <textarea
+                  ref={noteRef}
+                  value={noteDraft}
+                  onChange={(e) => { const v = String((e.target as HTMLTextAreaElement).value ?? ''); setNoteDraft(v); autoResizeNote(e.target as HTMLTextAreaElement); if (confirmAttempted) setConfirmAttempted(false) }}
+                  placeholder={workflowNotePlaceholder}
+                  style={{ width: '100%', minHeight: NOTE_MIN_H, maxHeight: NOTE_MAX_H, overflowY: 'hidden', resize: 'none', padding: '8px 10px', borderRadius: 8, border: noteReqErr ? '1px solid #dc2626' : '1px solid rgba(0,0,0,0.20)', fontSize: ui.statusFontSize, outline: 'none', boxSizing: 'border-box' }}
+                  disabled={!noteEnabled}
+                />
+              </div>
+            )}
+
+            <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end', marginTop: 4 }}>
+              <button type='button' onClick={closeWorkflowMenu} disabled={loading}
+                style={{ padding: '8px 18px', borderRadius: 8, border: '1px solid rgba(0,0,0,0.18)', background: '#fff', color: '#374151', fontWeight: 600, fontSize: 13, cursor: loading ? 'not-allowed' : 'pointer' }}>
+                Annulla
+              </button>
+              <button type='button' onClick={() => { void confirmWorkflowAction() }} disabled={!canConfirmWorkflowAction}
+                style={{ padding: '8px 18px', borderRadius: 8, border: `1px solid ${actionMenuTheme.buttonBorder}`, background: actionMenuTheme.buttonBg, color: '#fff', fontWeight: 700, fontSize: 13, cursor: canConfirmWorkflowAction ? 'pointer' : 'not-allowed', opacity: canConfirmWorkflowAction ? 1 : 0.6 }}>
+                {loading ? 'Aggiorno…' : 'Conferma'}
+              </button>
+            </div>
+          </React.Fragment>
+        ) : (
+          <div style={{ fontSize: 13, color: '#6b7280', background: '#f9fafb', border: '1px solid #e5e7eb', borderRadius: 8, padding: 10 }}>
+            Nessuna azione disponibile per lo stato corrente della pratica.
+          </div>
+        )}
+      </div>
+    </div>,
+    document.body
+  ) : null
+
+  const pendingModal = pending !== null && !actionsMenuOpen ? createPortal(
     <div
       data-gii-global-popup-root='1'
       style={{ position: 'fixed', inset: 0, zIndex: 2147483646, background: 'rgba(0,0,0,0.52)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16, pointerEvents: 'auto' }}
@@ -3589,8 +4074,8 @@ function ActionsPanel (props: {
         onClick={(e) => { e.stopPropagation() }}
         onMouseDown={(e) => { e.stopPropagation() }}
       >
-        {/* Titolo colorato con icona + numero rapporto */}
-        <div style={{ fontWeight: 800, fontSize: 16, marginBottom: 2, color: theme.color, display: 'flex', alignItems: 'center', gap: 8 }}>
+        {/* Titolo colorato con icona + banda chiara */}
+        <div style={{ fontWeight: 800, fontSize: 16, marginBottom: 2, color: theme.color, display: 'flex', alignItems: 'center', gap: 8, background: theme.bg, border: `1px solid ${theme.border}`, borderRadius: 8, padding: '10px 12px' }}>
           <span style={{ fontSize: 20 }}>{theme.icon}</span>
           <span>{pendingTitle}</span>
         </div>
@@ -3703,14 +4188,14 @@ function ActionsPanel (props: {
             style={{ padding: '8px 18px', borderRadius: 8, border: '1px solid rgba(0,0,0,0.18)', background: '#fff', color: '#374151', fontWeight: 600, fontSize: 13, cursor: loading ? 'not-allowed' : 'pointer' }}>
             Annulla
           </button>
-          {pending === 'TAKE' && <button type='button' onClick={onConfirmTakeInCharge} disabled={loading} style={{ padding: '8px 18px', borderRadius: 8, border: '1px solid rgba(0,0,0,0.18)', background: theme.color, color: '#fff', fontWeight: 700, fontSize: 13, cursor: loading ? 'not-allowed' : 'pointer' }}>{loading ? 'Aggiorno…' : 'Conferma'}</button>}
-          {pending === 'ASSEGNA_TI' && <button type='button' onClick={onConfirmAssegnaTi} disabled={loading || !tiSelected} style={{ padding: '8px 18px', borderRadius: 8, border: '1px solid rgba(0,0,0,0.18)', background: theme.color, color: '#fff', fontWeight: 700, fontSize: 13, cursor: (loading || !tiSelected) ? 'not-allowed' : 'pointer', opacity: (loading || !tiSelected) ? 0.6 : 1 }}>{loading ? 'Aggiorno…' : 'Conferma'}</button>}
-          {pending === 'ASSEGNA_TI_AMM' && <button type='button' onClick={onConfirmAssegnaTiAmm} disabled={loading || !tiAmmSelected} style={{ padding: '8px 18px', borderRadius: 8, border: '1px solid rgba(0,0,0,0.18)', background: theme.color, color: '#fff', fontWeight: 700, fontSize: 13, cursor: (loading || !tiAmmSelected) ? 'not-allowed' : 'pointer', opacity: (loading || !tiAmmSelected) ? 0.6 : 1 }}>{loading ? 'Aggiorno…' : 'Conferma'}</button>}
-          {pending === 'RESTITUISCI_TI_AMM' && <button type='button' onClick={onConfirmRestituisciTiAmm} disabled={loading} style={{ padding: '8px 18px', borderRadius: 8, border: '1px solid rgba(0,0,0,0.18)', background: theme.color, color: '#fff', fontWeight: 700, fontSize: 13, cursor: loading ? 'not-allowed' : 'pointer' }}>{loading ? 'Aggiorno…' : 'Conferma'}</button>}
-          {(pending === 'INTEGRAZIONE' || pending === 'INTEGRAZIONE_TI_AMM' || pending === 'INTEGRAZIONE_TECNICA') && <button type='button' onClick={onConfirmIntegrazione} disabled={loading} style={{ padding: '8px 18px', borderRadius: 8, border: '1px solid rgba(0,0,0,0.18)', background: theme.color, color: '#fff', fontWeight: 700, fontSize: 13, cursor: loading ? 'not-allowed' : 'pointer' }}>{loading ? 'Aggiorno…' : 'Conferma'}</button>}
-          {pending === 'APPROVA' && <button type='button' onClick={() => onConfirmEsito(ESITO_APPROVATA, approvaDoneLabel)} disabled={loading} style={{ padding: '8px 18px', borderRadius: 8, border: '1px solid rgba(0,0,0,0.18)', background: theme.color, color: '#fff', fontWeight: 700, fontSize: 13, cursor: loading ? 'not-allowed' : 'pointer' }}>{loading ? 'Aggiorno…' : 'Conferma'}</button>}
-          {pending === 'RESPINGI' && <button type='button' onClick={onConfirmRespinta} disabled={loading} style={{ padding: '8px 18px', borderRadius: 8, border: '1px solid rgba(0,0,0,0.18)', background: theme.color, color: '#fff', fontWeight: 700, fontSize: 13, cursor: loading ? 'not-allowed' : 'pointer' }}>{loading ? 'Aggiorno…' : 'Conferma'}</button>}
-          {pending === 'ELIMINA' && <button type='button' onClick={onConfirmElimina} disabled={loading} style={{ padding: '8px 18px', borderRadius: 8, border: '1px solid rgba(0,0,0,0.18)', background: theme.color, color: '#fff', fontWeight: 700, fontSize: 13, cursor: loading ? 'not-allowed' : 'pointer' }}>{loading ? 'Archivio…' : 'Conferma'}</button>}
+          {pending === 'TAKE' && <button type='button' onClick={onConfirmTakeInCharge} disabled={loading} style={{ padding: '8px 18px', borderRadius: 8, border: `1px solid ${theme.buttonBorder}`, background: theme.buttonBg, color: '#fff', fontWeight: 700, fontSize: 13, cursor: loading ? 'not-allowed' : 'pointer' }}>{loading ? 'Aggiorno…' : 'Conferma'}</button>}
+          {pending === 'ASSEGNA_TI' && <button type='button' onClick={onConfirmAssegnaTi} disabled={loading || !tiSelected} style={{ padding: '8px 18px', borderRadius: 8, border: `1px solid ${theme.buttonBorder}`, background: theme.buttonBg, color: '#fff', fontWeight: 700, fontSize: 13, cursor: (loading || !tiSelected) ? 'not-allowed' : 'pointer', opacity: (loading || !tiSelected) ? 0.6 : 1 }}>{loading ? 'Aggiorno…' : 'Conferma'}</button>}
+          {pending === 'ASSEGNA_TI_AMM' && <button type='button' onClick={onConfirmAssegnaTiAmm} disabled={loading || !tiAmmSelected} style={{ padding: '8px 18px', borderRadius: 8, border: `1px solid ${theme.buttonBorder}`, background: theme.buttonBg, color: '#fff', fontWeight: 700, fontSize: 13, cursor: (loading || !tiAmmSelected) ? 'not-allowed' : 'pointer', opacity: (loading || !tiAmmSelected) ? 0.6 : 1 }}>{loading ? 'Aggiorno…' : 'Conferma'}</button>}
+          {(pending === 'INVIA_TI_AMM' || pending === 'RESTITUISCI_TI_AMM') && <button type='button' onClick={onConfirmRestituisciTiAmm} disabled={loading} style={{ padding: '8px 18px', borderRadius: 8, border: `1px solid ${theme.buttonBorder}`, background: theme.buttonBg, color: '#fff', fontWeight: 700, fontSize: 13, cursor: loading ? 'not-allowed' : 'pointer' }}>{loading ? 'Aggiorno…' : 'Conferma'}</button>}
+          {(pending === 'INTEGRAZIONE' || pending === 'INTEGRAZIONE_TI_AMM' || pending === 'INTEGRAZIONE_TECNICA') && <button type='button' onClick={onConfirmIntegrazione} disabled={loading} style={{ padding: '8px 18px', borderRadius: 8, border: `1px solid ${theme.buttonBorder}`, background: theme.buttonBg, color: '#fff', fontWeight: 700, fontSize: 13, cursor: loading ? 'not-allowed' : 'pointer' }}>{loading ? 'Aggiorno…' : 'Conferma'}</button>}
+          {pending === 'APPROVA' && <button type='button' onClick={() => onConfirmEsito(ESITO_APPROVATA, approvaDoneLabel)} disabled={loading} style={{ padding: '8px 18px', borderRadius: 8, border: `1px solid ${theme.buttonBorder}`, background: theme.buttonBg, color: '#fff', fontWeight: 700, fontSize: 13, cursor: loading ? 'not-allowed' : 'pointer' }}>{loading ? 'Aggiorno…' : 'Conferma'}</button>}
+          {pending === 'RESPINGI' && <button type='button' onClick={onConfirmRespinta} disabled={loading} style={{ padding: '8px 18px', borderRadius: 8, border: `1px solid ${theme.buttonBorder}`, background: theme.buttonBg, color: '#fff', fontWeight: 700, fontSize: 13, cursor: loading ? 'not-allowed' : 'pointer' }}>{loading ? 'Aggiorno…' : 'Conferma'}</button>}
+          {pending === 'ELIMINA' && <button type='button' onClick={onConfirmElimina} disabled={loading} style={{ padding: '8px 18px', borderRadius: 8, border: `1px solid ${theme.buttonBorder}`, background: theme.buttonBg, color: '#fff', fontWeight: 700, fontSize: 13, cursor: loading ? 'not-allowed' : 'pointer' }}>{loading ? 'Archivio…' : 'Conferma'}</button>}
         </div>
       </div>
     </div>,
@@ -3781,113 +4266,25 @@ function ActionsPanel (props: {
 {/* BOTTONI AZIONE */}
         {pending === null && (
           <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center' }}>
-            <Button
-              type='primary'
-              onClick={() => startAction('TAKE')}
-              disabled={!canStartTakeInCharge}
-              style={actionButtonStyle(buttonColors.take, !canStartTakeInCharge, ui, buttonColors.takeText)}
-            >
-              {buttonText}
-            </Button>
-
-            {role === 'RZ' && (
+            {showTakeDirect ? (
               <Button
                 type='primary'
-                onClick={() => startAction('ASSEGNA_TI')}
-                disabled={!canStartAssegnaTi}
-                style={actionButtonStyle(buttonColors.take, !canStartAssegnaTi, ui, buttonColors.takeText)}
+                onClick={() => startAction('TAKE')}
+                disabled={!canStartTakeInCharge}
+                style={actionButtonStyle(buttonColors.take, !canStartTakeInCharge, ui, buttonColors.takeText)}
               >
-                Assegna TI
-              </Button>
-            )}
-
-            {role === 'RI_AMM' && !hasTiAmmAssigned && (
-              <Button
-                type='primary'
-                onClick={() => startAction('ASSEGNA_TI_AMM')}
-                disabled={!canStartAssegnaTiAmm}
-                style={actionButtonStyle(buttonColors.approva, !canStartAssegnaTiAmm, ui, buttonColors.approvaText)}
-              >
-                Assegna TI AMM
-              </Button>
-            )}
-
-            {role === 'RI_AMM' && hasTiAmmAssigned && isRientroTecnicoDaDt && (
-              <Button
-                type='primary'
-                onClick={() => startAction('RESTITUISCI_TI_AMM')}
-                disabled={!canStartRestituisciTiAmm}
-                style={actionButtonStyle(buttonColors.approva, !canStartRestituisciTiAmm, ui, buttonColors.approvaText)}
-              >
-                Restituisci a TI AMM
-              </Button>
-            )}
-
-            {role === 'RI_AMM' && hasTiAmmAssigned && !isRientroTecnicoDaDt && (
-              <Button
-                type='primary'
-                onClick={() => startAction('INTEGRAZIONE_TI_AMM')}
-                disabled={!canStartIntegrazioneTiAmm}
-                style={actionButtonStyle(buttonColors.integrazione, !canStartIntegrazioneTiAmm, ui, buttonColors.integrazioneText)}
-              >
-                {rimandoTiAmmButtonLabel}
-              </Button>
-            )}
-
-            {role === 'RI_AMM' && (
-              <Button
-                type='primary'
-                onClick={() => startAction('INTEGRAZIONE_TECNICA')}
-                disabled={!canStartIntegrazioneTecnica}
-                style={actionButtonStyle(buttonColors.integrazione, !canStartIntegrazioneTecnica, ui, buttonColors.integrazioneText)}
-              >
-                {rimandoTecnicaButtonLabel}
-              </Button>
-            )}
-
-            {role !== 'TI' && role !== 'RI_AMM' && (
-              <Button
-                type='primary'
-                onClick={() => startAction('INTEGRAZIONE')}
-                disabled={!canStartIntegrazione}
-                style={actionButtonStyle(buttonColors.integrazione, !canStartIntegrazione, ui, buttonColors.integrazioneText)}
-              >
-                {rimandoGenericButtonLabel}
-              </Button>
-            )}
-
-            <Button
-              type='primary'
-              onClick={() => startAction('APPROVA')}
-              disabled={!canStartApprova}
-              style={actionButtonStyle(
-                (role === 'DT' || role === 'DA') ? buttonColors.approvaRapporto : buttonColors.approva,
-                !canStartApprova, ui,
-                (role === 'DT' || role === 'DA') ? buttonColors.approvaRapportoText : buttonColors.approvaText
-              )}
-            >
-              {approvaBtnLabel}
-            </Button>
-
-            {role !== 'RI_AMM' && (role === 'TI' ? (
-              <Button
-                type='primary'
-                onClick={() => startAction('ELIMINA')}
-                disabled={!canStartElimina}
-                style={actionButtonStyle(buttonColors.respingi, !canStartElimina, ui, buttonColors.respingiText)}
-              >
-                Elimina
+                {buttonText}
               </Button>
             ) : (
               <Button
                 type='primary'
-                onClick={() => startAction('RESPINGI')}
-                disabled={!canStartRespingi}
-                style={actionButtonStyle(buttonColors.respingi, !canStartRespingi, ui, buttonColors.respingiText)}
+                onClick={openWorkflowMenu}
+                disabled={!hasEnabledWorkflowMenuActions}
+                style={actionButtonStyle(buttonColors.approva, !hasEnabledWorkflowMenuActions, ui, buttonColors.approvaText)}
               >
-                Respingi
+                Gestisci istruttoria
               </Button>
-            ))}
+            )}
 
             {/* Matrice_DT: il pulsante "Trasmetti a DA" è stato rimosso.
                 DT approva e trasmette a RI tramite il pulsante "Approva e trasmetti a RI". */}
@@ -3978,6 +4375,7 @@ function ActionsPanel (props: {
           </div>
         )}
 
+        {actionMenuModal}
         {pendingModal}
         {reportPreviewModal}
 

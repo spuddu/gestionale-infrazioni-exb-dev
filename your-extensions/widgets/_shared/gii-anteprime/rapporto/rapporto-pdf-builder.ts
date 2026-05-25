@@ -306,9 +306,9 @@ export async function buildRapportoPdf (m: Record<string, string>): Promise<Uint
   rightTxt(p2, 'Pag. 2 di 2', fR, 7, 532.6, bY(818, 7), BLUE)
 
   // ── Il sottoscritto / il giorno / alle ore ──
-  txt(p1, v('tecnico_rilevatore'), fR, 9, 132, bY(237.71, 9), BLACK, 200)
-  txt(p1, v('data_rilevazione'), fR, 9, 388, bY(237.71, 9), BLACK, 47)
-  txt(p1, v('ora_rilevazione'), fR, 9, 480, bY(237.71, 9), BLACK, 71)
+  txt(p1, v('tecnico_rilevatore'), fR, 9, 113, bY(237.71, 9), BLACK, 200)
+  txt(p1, v('data_rilevazione'), fR, 9, 389, bY(237.71, 9), BLACK, 47)
+  txt(p1, v('ora_rilevazione'), fR, 9, 486, bY(237.71, 9), BLACK, 71)
 
   // ── Tabella infrazioni ──
   const artSz = 8
@@ -338,16 +338,16 @@ export async function buildRapportoPdf (m: Record<string, string>): Promise<Uint
   // ════════════════════════════════════════════════════════════
   const taSz = 8
   const taLh = 10.5
-  const taW  = 460
+  const taW  = 497
 
   // ── Descrizione dettagliata (area da top=113 a top≈206) ──
-  textArea(p2, v('descrizione_fatti'), fR, taSz, 67, 115, taW, 90, taLh)
+  textArea(p2, v('descrizione_fatti'), fR, taSz, 48, 115, taW, 90, taLh)
 
   // ── Altre circostanze (area da top=231 a top≈324) ──
-  textArea(p2, v('circostanze'), fR, taSz, 67, 234, taW, 90, taLh)
+  textArea(p2, v('circostanze'), fR, taSz, 48, 234, taW, 90, taLh)
 
   // ── Descrizione dei luoghi (area da top=350 a top≈443) ──
-  textArea(p2, v('descrizione_luogo'), fR, taSz, 67, 352, taW, 90, taLh)
+  textArea(p2, v('descrizione_luogo'), fR, taSz, 48, 352, taW, 90, taLh)
 
   // ── Distretto / Comizio / Idrante (template v6) ──
   const dsz = 8.2
@@ -382,7 +382,7 @@ export async function buildRapportoPdf (m: Record<string, string>): Promise<Uint
   // ── Via / N. / Comune / CAP ──
   txt(p2, v('via'), fR, dsz, 95, bY(578.87, dsz), BLACK, 128)
   txt(p2, v('civico'), fR, dsz, 253, bY(578.87, dsz), BLACK, 28)
-  txt(p2, v('citta'), fR, dsz, 341, bY(578.87, dsz), BLACK, 130)
+  txt(p2, v('citta'), fR, dsz, 336, bY(578.87, dsz), BLACK, 130)
   txt(p2, v('cap'), fR, dsz, 511, bY(578.87, dsz), BLACK, 38)
 
   // Località
