@@ -36,6 +36,11 @@ export interface Config {
 
   showRoleBox: boolean
   showWorkflowBox: boolean
+
+  // Tabelle consultive per parametri sanzionatori e riferimenti regolamentari.
+  parametriSanzioniUrl: string
+  regolamentoArticoliUrl: string
+  regolamentoRaccordiUrl: string
 }
 
 export const defaultSummaryFields: SummaryFieldConfig[] = [
@@ -80,6 +85,10 @@ export const defaultConfig: Config = {
 
   showRoleBox: true,
   showWorkflowBox: true,
+
+  parametriSanzioniUrl: '',
+  regolamentoArticoliUrl: '',
+  regolamentoRaccordiUrl: '',
 }
 
 export type IMConfig = ImmutableObject<Config>

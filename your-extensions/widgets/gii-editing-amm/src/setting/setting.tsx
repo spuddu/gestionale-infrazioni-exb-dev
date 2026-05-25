@@ -131,6 +131,18 @@ export default function Setting (props: Props) {
         </div>
       </div>}
 
+
+      <Acc id='sanzioni' label='⚖️ Parametri sanzionatori' open={isOpen('sanzioni')} onToggle={() => toggle('sanzioni')} />
+      {isOpen('sanzioni') && <div>
+        <div style={P.hint}>URL delle tabelle AGOL usate solo in consultazione. Non modificano workflow, salvataggi o gii-header.</div>
+        <label style={P.lbl}>GII_PARAMETRI_SANZIONI</label>
+        <Inp value={cfgJs.parametriSanzioniUrl || ''} onChange={v => patch({ parametriSanzioniUrl: v })} placeholder='https://.../FeatureServer/0' />
+        <label style={P.lbl}>GII_REGOLAMENTO_ARTICOLI</label>
+        <Inp value={cfgJs.regolamentoArticoliUrl || ''} onChange={v => patch({ regolamentoArticoliUrl: v })} placeholder='https://.../FeatureServer/0' />
+        <label style={P.lbl}>GII_REGOLAMENTO_RACCORDI</label>
+        <Inp value={cfgJs.regolamentoRaccordiUrl || ''} onChange={v => patch({ regolamentoRaccordiUrl: v })} placeholder='https://.../FeatureServer/0' />
+      </div>}
+
       <Acc id='testi' label='📝 Testi' open={isOpen('testi')} onToggle={() => toggle('testi')} />
       {isOpen('testi') && <div>
         <label style={P.lbl}>Titolo</label>
