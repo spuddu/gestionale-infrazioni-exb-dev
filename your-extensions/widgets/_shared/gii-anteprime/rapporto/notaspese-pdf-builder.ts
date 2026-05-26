@@ -489,7 +489,7 @@ export async function buildNotaSpesePdf(data: NotaSpeseData): Promise<Uint8Array
   const tcBoxW = CW_PU + CW_IMP + 80
   const tcBoxX = PW - MR - tcBoxW
   const tcBoxY = PH - top - tcBoxH
-  strokeRect(pg, tcBoxX, tcBoxY, tcBoxW, tcBoxH, CLR_BLACK, 1.2)
+  pg.drawRectangle({ x: tcBoxX, y: tcBoxY, width: tcBoxW, height: tcBoxH, color: CLR_ALT_ROW, borderColor: CLR_BORDER, borderWidth: 0.5 })
   txt(pg, 'TOTALE COMPLESSIVO', fontB, 10, tcBoxX + 6, centeredY(top, tcBoxH, 10), CLR_BLACK)
   rightAligned(pg, money(data.summary.totaleComplessivo), fontB, 10, CX_IMP, CW_IMP, centeredY(top, tcBoxH, 10), CLR_BLACK)
   top += tcBoxH + 30

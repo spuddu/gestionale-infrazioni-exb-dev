@@ -590,10 +590,9 @@ function softColor (color: string, fallback = 'rgba(147,197,253,0.18)'): string 
 
 function SidebarResetButton (p: { visible: boolean, onClick: () => void, item?: NavItem | null, cfg?: any }) {
   const [hov, setHov] = React.useState(false)
-  const useCustomColors = !!p.cfg?.sidebarResetUseCustomColors
-  const borderColor = useCustomColors ? (p.cfg?.sidebarResetBorderColor || p.item?.colorAccent || '#93c5fd') : (p.item?.colorAccent || '#93c5fd')
-  const bgRest = useCustomColors ? (p.cfg?.sidebarResetBgColorRest || p.item?.colorBgRest || 'rgba(255,255,255,0.05)') : (p.item?.colorBgRest || 'rgba(255,255,255,0.05)')
-  const bgHover = useCustomColors ? (p.cfg?.sidebarResetBgColorHover || p.item?.colorBgHover || p.item?.colorBg || 'rgba(37,99,167,1)') : (p.item?.colorBgHover || p.item?.colorBg || 'rgba(37,99,167,1)')
+  const borderColor = '#ffd700'
+  const bgRest = '#ffd700'
+  const bgHover = '#ffd700'
   if (!p.visible) return null
   return (
     <button
@@ -611,7 +610,7 @@ function SidebarResetButton (p: { visible: boolean, onClick: () => void, item?: 
         borderRadius: 999,
         border: `1px solid ${borderColor}`,
         background: hov ? bgHover : bgRest,
-        color: '#fff',
+        color: '#000',
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'center',
@@ -860,15 +859,32 @@ export default function Widget (props: Props) {
     document.addEventListener('visibilitychange', onFocus)
     let unsubStore: (() => void) | null = null
     const sid = String(cfg.sectionId || '').trim()
-    if (sid) {
-      try {
-        let prevViewId = getCurrentSectionViewId(sid)
-        unsubStore = getAppStore().subscribe(() => {
-          const next = getCurrentSectionViewId(sid)
-          if (next !== prevViewId) { prevViewId = next; setCurrentViewId(next) }
-        })
-      } catch {}
-    }
+    try {
+      let prevPageId = readCurrentPageId()
+      let prevSection = readCurrentSection()
+      let prevViewId = sid ? getCurrentSectionViewId(sid) : null
+      unsubStore = getAppStore().subscribe(() => {
+        const nextPageId = readCurrentPageId()
+        if (nextPageId !== prevPageId) {
+          prevPageId = nextPageId
+          setCurrentPageId(nextPageId)
+        }
+
+        const nextSection = readCurrentSection()
+        if (nextSection !== prevSection) {
+          prevSection = nextSection
+          setCurrentSection(nextSection)
+        }
+
+        if (sid) {
+          const nextViewId = getCurrentSectionViewId(sid)
+          if (nextViewId !== prevViewId) {
+            prevViewId = nextViewId
+            setCurrentViewId(nextViewId)
+          }
+        }
+      })
+    } catch {}
     return () => {
       window.removeEventListener('hashchange', upd)
       window.removeEventListener('popstate', upd)

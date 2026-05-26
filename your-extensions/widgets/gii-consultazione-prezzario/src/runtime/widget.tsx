@@ -694,8 +694,8 @@ const styles = `
 .gcp-toolbar-meta-inner { display:flex; align-items:center; justify-content:flex-end; gap:8px; width:100%; min-width:0; }
 .gcp-toolbar-counter { display:block; width:100%; max-width:none; margin-left:0; color:#8fa7c0; text-align:right; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; font-size:11.5px; line-height:1.2; font-weight:600; }
 .gcp-cols-reset-btn { width:28px; height:28px; border:1px solid #aac4e0; background:#fff; color:#8aa4bf; border-radius:999px; cursor:default; font-size:15px; line-height:1; display:inline-flex; align-items:center; justify-content:center; opacity:0.75; flex:0 0 auto; }
-.gcp-cols-reset-btn.active { background:#1F4E79; color:#fff; border-color:#1F4E79; cursor:pointer; opacity:1; }
-.gcp-cols-reset-btn.active:hover { background:#295f92; border-color:#295f92; }
+.gcp-cols-reset-btn.active { background:#ffd700; color:#000; border-color:#ffd700; cursor:pointer; opacity:1; }
+.gcp-cols-reset-btn.active:hover { background:#ffd700; border-color:#ffd700; }
 .gcp-cols-reset-btn:disabled { pointer-events:none; }
 .gcp-nav-home-btn { width:28px; height:28px; border:1px solid #aac4e0; background:#fff; color:#8aa4bf; border-radius:999px; cursor:default; font-size:15px; line-height:1; display:inline-flex; align-items:center; justify-content:center; opacity:0.75; flex:0 0 auto; }
 .gcp-nav-home-btn.active { background:#1F4E79; color:#fff; border-color:#1F4E79; cursor:pointer; opacity:1; }

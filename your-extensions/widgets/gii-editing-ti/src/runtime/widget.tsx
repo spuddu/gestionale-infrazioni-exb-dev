@@ -3451,11 +3451,26 @@ function fieldBaseStyle(fs: any, disabled?: boolean): React.CSSProperties {
   }
 }
 
-function NpField(p: { label: string; children: React.ReactNode; hint?: string }) {
+function renderSurfaceUnitLabel(label: React.ReactNode): React.ReactNode {
+  if (typeof label !== 'string') return label
+  const normalized = label.replace(/\(ha\.aa\.ca\)/g, '(ha.a.ca)')
+  const unit = '(ha.a.ca)'
+  const idx = normalized.indexOf(unit)
+  if (idx < 0) return normalized
+  const main = normalized.slice(0, idx).trimEnd()
+  return (
+    <span style={{ display: 'inline-flex', alignItems: 'baseline', whiteSpace: 'nowrap', lineHeight: 1.15 }}>
+      <span>{main}</span>
+      <span style={{ fontSize: '0.72em', fontWeight: 'inherit', marginLeft: 3, lineHeight: 1 }}>{unit}</span>
+    </span>
+  )
+}
+
+function NpField(p: { label: React.ReactNode; children: React.ReactNode; hint?: string }) {
   const fs = React.useContext(FormStyleCtx)
   return (
     <div style={S.fld}>
-      <label style={{ ...S.lbl, color: fs.labelColor, fontSize: fs.labelFontSize, fontWeight: fs.labelFontWeight as any, marginBottom: fs.labelMarginBottom }}>{p.label}</label>
+      <label style={{ ...S.lbl, color: fs.labelColor, fontSize: fs.labelFontSize, fontWeight: fs.labelFontWeight as any, marginBottom: fs.labelMarginBottom }}>{renderSurfaceUnitLabel(p.label)}</label>
       {p.children}
       {p.hint && <div style={S.hint}>{p.hint}</div>}
     </div>
@@ -3489,6 +3504,47 @@ function NpText(p: { value: string; onChange: (v: string) => void; placeholder?:
     )
   }
   return <input type='text' value={p.value} onChange={e => p.onChange(e.target.value)} placeholder={p.placeholder} style={st} disabled={p.disabled} maxLength={p.maxLength}/>
+}
+
+
+function parseSurfaceCentiareText(v: any): string {
+  const digits = String(v ?? '').replace(/\D/g, '')
+  if (!digits) return ''
+  const n = parseInt(digits, 10)
+  return Number.isNaN(n) ? '' : String(n)
+}
+
+function surfaceToCentiareNumber(v: any): number {
+  const raw = parseSurfaceCentiareText(v)
+  if (!raw) return 0
+  const n = parseInt(raw, 10)
+  return Number.isNaN(n) ? 0 : n
+}
+
+function formatSurfaceHaAaCa(v: any): string {
+  const raw = parseSurfaceCentiareText(v)
+  if (!raw) return ''
+  const total = parseInt(raw, 10)
+  if (Number.isNaN(total)) return ''
+  const ha = Math.floor(total / 10000)
+  const aa = Math.floor((total % 10000) / 100)
+  const ca = total % 100
+  return `${ha}.${String(aa).padStart(2, '0')}.${String(ca).padStart(2, '0')}`
+}
+
+function NpSurfaceText(p: { value: string; onChange: (v: string) => void; disabled?: boolean }) {
+  const fs = React.useContext(FormStyleCtx)
+  const st = fieldBaseStyle(fs, p.disabled)
+  return (
+    <input
+      type='text'
+      inputMode='numeric'
+      value={formatSurfaceHaAaCa(p.value)}
+      onChange={e => p.onChange(parseSurfaceCentiareText(e.target.value))}
+      style={{ ...st, textAlign: 'right' }}
+      disabled={p.disabled}
+    />
+  )
 }
 
 function NpInt(p: { value: string; onChange: (v: string) => void; disabled?: boolean }) {
@@ -5276,6 +5332,12 @@ React.useEffect(() => {
     const n = typeof v === 'number' ? v : parseInt(String(v), 10)
     return Number.isNaN(n) ? null : n
   }
+  const toSurfaceInt = (v: any) => {
+    const raw = parseSurfaceCentiareText(v)
+    if (!raw) return null
+    const n = parseInt(raw, 10)
+    return Number.isNaN(n) ? null : n
+  }
 
   const logLayerRef = React.useRef<any | null>(null)
   const getLogLayer = React.useCallback(async () => {
@@ -5583,8 +5645,8 @@ React.useEffect(() => {
     }
 
     if (tipoAbuso === 'parziale') {
-      const dich = Number(g('sup_dichiarata_art15')) || 0
-      const irr = Number(g('sup_irrigata_art15')) || 0
+      const dich = surfaceToCentiareNumber(g('sup_dichiarata_art15'))
+      const irr = surfaceToCentiareNumber(g('sup_irrigata_art15'))
       if (irr > 0 && irr < dich) {
         setValidationPopup({
           title: 'Superficie irrigata non valida',
@@ -5673,18 +5735,18 @@ React.useEffect(() => {
         norma15_parziale: (tipoAbuso === 'parziale' ? n3parziale : null) || null,
         norma15_totale: (tipoAbuso === 'totale' ? n3totale : null) || null,
         norma_violata1: normaV1 || null,
-        sup_dichiarata_art15: tipoAbuso === 'totale' ? 0 : (hasTipoAbuso15 ? toInt(g('sup_dichiarata_art15')) : null),
-        sup_irrigata_art15: hasTipoAbuso15 ? toInt(g('sup_irrigata_art15')) : null,
+        sup_dichiarata_art15: tipoAbuso === 'totale' ? 0 : (hasTipoAbuso15 ? toSurfaceInt(g('sup_dichiarata_art15')) : null),
+        sup_irrigata_art15: hasTipoAbuso15 ? toSurfaceInt(g('sup_irrigata_art15')) : null,
         norma16_17: norma1516 || null,
         art17_tipo: (norma1516 === 'Art17' ? art17tipo : null) || null,
         norma_violata2: normaV2 || null,
-        sup_dichiarata_art17_1: norma1516 === 'Art17' && art17tipo === 'Art17.1' ? toInt(g('sup_dichiarata_art17_1')) : null,
-        sup_dichiarata_art16: norma1516 === 'Art16' ? toInt(g('sup_dichiarata_art16')) : null,
-        sup_dichiarata_art17_2: norma1516 === 'Art17' && art17tipo === 'Art17.2' ? toInt(g('sup_dichiarata_art17_2')) : null,
+        sup_dichiarata_art17_1: norma1516 === 'Art17' && art17tipo === 'Art17.1' ? toSurfaceInt(g('sup_dichiarata_art17_1')) : null,
+        sup_dichiarata_art16: norma1516 === 'Art16' ? toSurfaceInt(g('sup_dichiarata_art16')) : null,
+        sup_dichiarata_art17_2: norma1516 === 'Art17' && art17tipo === 'Art17.2' ? toSurfaceInt(g('sup_dichiarata_art17_2')) : null,
         sup_irrigata_art16_17_2: norma1516 === 'Art16' ? 0 : (art17tipo === 'Art17.2' ? 0 : null),
-        sup_irrigata_art17_1: art17tipo === 'Art17.1' ? toInt(g('sup_irrigata_art17_1')) : null,
-        sup_dichiarata_art16_17: toInt(supDich16_17 as any),
-        sup_irrigata_art16_17: toInt(supIrr16_17 as any),
+        sup_irrigata_art17_1: art17tipo === 'Art17.1' ? toSurfaceInt(g('sup_irrigata_art17_1')) : null,
+        sup_dichiarata_art16_17: toSurfaceInt(supDich16_17 as any),
+        sup_irrigata_art16_17: toSurfaceInt(supIrr16_17 as any),
         norma_violata3: g('norma_violata3') || null,
         ...vArtAttrs,
         descrizione_fatti: g('descrizione_fatti') || null,
@@ -6137,24 +6199,24 @@ React.useEffect(() => {
       case 'sup_dichiarata_art15': {
         if (!hasTipoAbuso15) return null
         const locked = tipoAbuso === 'totale'
-        return { label: 'Superficie dichiarata (ha)', el: <NpText value={locked ? '0' : g('sup_dichiarata_art15')} onChange={v => set('sup_dichiarata_art15', v)} disabled={saving || locked}/> }
+        return { label: 'Superficie dichiarata (ha.a.ca)', el: <NpSurfaceText value={locked ? '0' : g('sup_dichiarata_art15')} onChange={v => set('sup_dichiarata_art15', v)} disabled={saving || locked}/> }
       }
       case 'sup_irrigata_art15': {
         if (!hasTipoAbuso15) return null
-        const dichVal = tipoAbuso === 'totale' ? 0 : Number(g('sup_dichiarata_art15')) || 0
-        const irrVal = Number(g('sup_irrigata_art15')) || 0
+        const dichVal = tipoAbuso === 'totale' ? 0 : surfaceToCentiareNumber(g('sup_dichiarata_art15'))
+        const irrVal = surfaceToCentiareNumber(g('sup_irrigata_art15'))
         const warn = hasTipoAbuso15 && irrVal > 0 && irrVal < dichVal
-        return { label: 'Superficie irrigata (ha)', hint: warn ? 'La superficie irrigata non può essere inferiore a quella dichiarata' : undefined, el: <NpText value={g('sup_irrigata_art15')} onChange={v => set('sup_irrigata_art15', v)} disabled={saving}/> }
+        return { label: 'Superficie irrigata (ha.a.ca)', hint: warn ? 'La superficie irrigata non può essere inferiore a quella dichiarata' : undefined, el: <NpSurfaceText value={g('sup_irrigata_art15')} onChange={v => set('sup_irrigata_art15', v)} disabled={saving}/> }
       }
       // Violazione — Artt. 16 e 17
       case 'norma16_17': return { label: 'Tipo di inosservanza', el: <NpSel value={norma1516} onChange={v => { set('norma16_17', v); set('art17_tipo', '') }} options={CHOICES.art16_17} disabled={saving}/> }
       case 'art17_tipo': return norma1516 === 'Art17' ? { label: 'Seleziona violazione Art. 17', el: <NpSel value={art17tipo} onChange={v => set('art17_tipo', v)} options={CHOICES.art17_tipo} disabled={saving}/> } : null
-      case 'sup_dichiarata_art16': return norma1516 === 'Art16' ? { label: 'Superficie dichiarata (ha)', el: <NpText value={g('sup_dichiarata_art16')} onChange={v => set('sup_dichiarata_art16', v)} disabled={saving}/> } : null
-      case 'sup_irrigata_art16': return norma1516 === 'Art16' ? { label: 'Superficie irrigata (ha)', el: <NpText value={'0'} onChange={() => {}} disabled/> } : null
-      case 'sup_dichiarata_art17_1': return (norma1516 === 'Art17' && art17tipo === 'Art17.1') ? { label: 'Superficie dichiarata (ha)', el: <NpText value={g('sup_dichiarata_art17_1')} onChange={v => set('sup_dichiarata_art17_1', v)} disabled={saving}/> } : null
-      case 'sup_irrigata_art17_1': return (norma1516 === 'Art17' && art17tipo === 'Art17.1') ? { label: 'Superficie variata (ha)', el: <NpText value={g('sup_irrigata_art17_1')} onChange={v => set('sup_irrigata_art17_1', v)} disabled={saving}/> } : null
-      case 'sup_dichiarata_art17_2': return (norma1516 === 'Art17' && art17tipo === 'Art17.2') ? { label: 'Superficie dichiarata (ha)', el: <NpText value={g('sup_dichiarata_art17_2')} onChange={v => set('sup_dichiarata_art17_2', v)} disabled={saving}/> } : null
-      case 'sup_irrigata_art17_2': return (norma1516 === 'Art17' && art17tipo === 'Art17.2') ? { label: 'Superficie irrigata (ha)', el: <NpText value={'0'} onChange={() => {}} disabled/> } : null
+      case 'sup_dichiarata_art16': return norma1516 === 'Art16' ? { label: 'Superficie dichiarata (ha.a.ca)', el: <NpSurfaceText value={g('sup_dichiarata_art16')} onChange={v => set('sup_dichiarata_art16', v)} disabled={saving}/> } : null
+      case 'sup_irrigata_art16': return norma1516 === 'Art16' ? { label: 'Superficie irrigata (ha.a.ca)', el: <NpSurfaceText value={'0'} onChange={() => {}} disabled/> } : null
+      case 'sup_dichiarata_art17_1': return (norma1516 === 'Art17' && art17tipo === 'Art17.1') ? { label: 'Superficie dichiarata (ha.a.ca)', el: <NpSurfaceText value={g('sup_dichiarata_art17_1')} onChange={v => set('sup_dichiarata_art17_1', v)} disabled={saving}/> } : null
+      case 'sup_irrigata_art17_1': return (norma1516 === 'Art17' && art17tipo === 'Art17.1') ? { label: 'Superficie variata (ha.a.ca)', el: <NpSurfaceText value={g('sup_irrigata_art17_1')} onChange={v => set('sup_irrigata_art17_1', v)} disabled={saving}/> } : null
+      case 'sup_dichiarata_art17_2': return (norma1516 === 'Art17' && art17tipo === 'Art17.2') ? { label: 'Superficie dichiarata (ha.a.ca)', el: <NpSurfaceText value={g('sup_dichiarata_art17_2')} onChange={v => set('sup_dichiarata_art17_2', v)} disabled={saving}/> } : null
+      case 'sup_irrigata_art17_2': return (norma1516 === 'Art17' && art17tipo === 'Art17.2') ? { label: 'Superficie irrigata (ha.a.ca)', el: <NpSurfaceText value={'0'} onChange={() => {}} disabled/> } : null
       // Violazione — Gravità
       case 'grado': {
         const en = isCurrentRiAgrTec() && riGradoTriggerViolations
@@ -6466,9 +6528,9 @@ React.useEffect(() => {
           width: 28,
           height: 28,
           borderRadius: 999,
-          border: `1px solid ${trasgressoreColumnsDirty ? '#1F4E79' : '#aac4e0'}`,
-          background: trasgressoreColumnsDirty ? '#1F4E79' : '#fff',
-          color: trasgressoreColumnsDirty ? '#fff' : '#8aa4bf',
+          border: `1px solid ${trasgressoreColumnsDirty ? '#ffd700' : '#aac4e0'}`,
+          background: trasgressoreColumnsDirty ? '#ffd700' : '#fff',
+          color: trasgressoreColumnsDirty ? '#000' : '#8aa4bf',
           cursor: trasgressoreColumnsDirty ? 'pointer' : 'default',
           display: 'inline-flex',
           alignItems: 'center',
@@ -6540,7 +6602,7 @@ React.useEffect(() => {
         const canEditRegularField = (fieldName: string, enabled = true) => enabled && !saving && !isRiAgrTecLimitedEdit && canEditFieldForCurrentProfile(fieldName)
         const surfaceTextField = (fieldName: string, label: string, value: string, onChange: (v: string) => void, enabled: boolean, lockedValue?: string) => (
           <NpField label={label}>
-            <NpText
+            <NpSurfaceText
               value={lockedValue != null ? lockedValue : value}
               onChange={onChange}
               disabled={!canEditRegularField(fieldName, enabled) || lockedValue != null}
@@ -6663,41 +6725,47 @@ React.useEffect(() => {
         const art17Selected = norma1516 === 'Art17'
         const art17VarSelected = art17Selected && art17tipo === 'Art17.1'
         const art17RinSelected = art17Selected && art17tipo === 'Art17.2'
-        const art17SecondLabel = art17VarSelected ? 'Sup. variata (ha)' : 'Sup. irrigata (ha)'
+        const art17SecondLabel = art17VarSelected ? 'Sup. variata (ha.a.ca)' : 'Sup. irrigata (ha.a.ca)'
         const art17DichField = art17VarSelected ? 'sup_dichiarata_art17_1' : 'sup_dichiarata_art17_2'
         const art17SecondField = art17VarSelected ? 'sup_irrigata_art17_1' : 'sup_irrigata_art17_2'
         const art17DichValue = art17VarSelected ? g('sup_dichiarata_art17_1') : (art17RinSelected ? g('sup_dichiarata_art17_2') : '')
         const art17SecondValue = art17VarSelected ? g('sup_irrigata_art17_1') : (art17RinSelected ? '0' : '')
         const art17SurfaceEnabled = art17Selected && !!art17tipo
 
+        const narrowSurfaceCol = 'minmax(145px, 155px)'
+        const wideSurfaceCol = 'minmax(135px, 150px)'
+        const termsGridColumns = `minmax(270px, 1fr) ${narrowSurfaceCol} ${narrowSurfaceCol} ${wideSurfaceCol}`
+
         const leftColumn = (
           <div style={{ display: 'grid', gap: formStyle.sectionGap, minWidth: 0, minHeight: '100%', gridTemplateRows: 'auto auto minmax(0, 1fr)' }}>
             {renderEditCard('Art. 15 — Prelievo abusivo',
-              <div style={{ display: 'grid', gridTemplateColumns: 'minmax(170px, 220px) minmax(120px, 145px) minmax(120px, 145px) minmax(160px, 200px)', gap: 8, alignItems: 'start' }}>
-                {selectField('tipo_abuso', 'Tipo di abuso', tipoAbuso, v => { set('tipo_abuso', v); set('norma15_parziale', ''); set('norma15_totale', '') }, CHOICES.tipo_abuso)}
-                {surfaceTextField('sup_dichiarata_art15', 'Sup. dichiarata (ha)', g('sup_dichiarata_art15'), v => set('sup_dichiarata_art15', v), art15SupEnabled, art15SupDichLocked ? '0' : undefined)}
-                {surfaceTextField('sup_irrigata_art15', 'Sup. irrigata (ha)', g('sup_irrigata_art15'), v => set('sup_irrigata_art15', v), art15SupEnabled)}
+              <div style={{ display: 'grid', gridTemplateColumns: termsGridColumns, gap: 10, alignItems: 'start' }}>
+                <div style={{ width: 155, maxWidth: '100%' }}>
+                  {selectField('tipo_abuso', 'Tipo di abuso', tipoAbuso, v => { set('tipo_abuso', v); set('norma15_parziale', ''); set('norma15_totale', '') }, CHOICES.tipo_abuso)}
+                </div>
                 {fieldNode('norma15_sel', 'Occorrenza')}
+                {surfaceTextField('sup_dichiarata_art15', 'Sup. dichiarata (ha.a.ca)', g('sup_dichiarata_art15'), v => set('sup_dichiarata_art15', v), art15SupEnabled, art15SupDichLocked ? '0' : undefined)}
+                {surfaceTextField('sup_irrigata_art15', 'Sup. irrigata (ha.a.ca)', g('sup_irrigata_art15'), v => set('sup_irrigata_art15', v), art15SupEnabled)}
               </div>
             )}
 
             {renderEditCard('Artt. 16 e 17 — Inosservanza termini',
               <div style={{ display: 'grid', gap: 8 }}>
-                <div style={{ display: 'grid', gridTemplateColumns: 'minmax(290px, 1fr) minmax(155px, 195px) minmax(120px, 145px) minmax(120px, 145px)', gap: 8, alignItems: 'start' }}>
+                <div style={{ display: 'grid', gridTemplateColumns: termsGridColumns, gap: 10, alignItems: 'start' }}>
                   <div style={{ gridColumn: '1 / span 2' }}>
                     <div style={{ ...S.lbl, color: formStyle.labelColor, fontSize: formStyle.labelFontSize, visibility: 'hidden' }}>Violazione</div>
                     {choiceBox('Art16', 'Art. 16 - Comunicazione di irrigazione tardiva')}
                   </div>
-                  {surfaceTextField('sup_dichiarata_art16', 'Sup. dichiarata (ha)', g('sup_dichiarata_art16'), v => set('sup_dichiarata_art16', v), art16Selected)}
-                  {surfaceTextField('sup_irrigata_art16', 'Sup. irrigata (ha)', '0', () => {}, art16Selected, '0')}
+                  {surfaceTextField('sup_dichiarata_art16', 'Sup. dichiarata (ha.a.ca)', g('sup_dichiarata_art16'), v => set('sup_dichiarata_art16', v), art16Selected)}
+                  {surfaceTextField('sup_irrigata_art16', 'Sup. irrigata (ha.a.ca)', '0', () => {}, art16Selected, '0')}
                 </div>
-                <div style={{ display: 'grid', gridTemplateColumns: 'minmax(290px, 1fr) minmax(155px, 195px) minmax(120px, 145px) minmax(120px, 145px)', gap: 8, alignItems: 'start' }}>
+                <div style={{ display: 'grid', gridTemplateColumns: termsGridColumns, gap: 10, alignItems: 'start' }}>
                   <div>
                     <div style={{ ...S.lbl, color: formStyle.labelColor, fontSize: formStyle.labelFontSize, visibility: 'hidden' }}>Violazione</div>
                     {choiceBox('Art17', 'Art. 17 - Variazione o rinuncia tardiva')}
                   </div>
                   {selectField('art17_tipo', 'Tipo comunicazione', art17tipo, v => set('art17_tipo', v), CHOICES.art17_tipo, art17Selected)}
-                  {surfaceTextField(art17DichField, 'Sup. dichiarata (ha)', art17DichValue, v => set(art17DichField, v), art17SurfaceEnabled)}
+                  {surfaceTextField(art17DichField, 'Sup. dichiarata (ha.a.ca)', art17DichValue, v => set(art17DichField, v), art17SurfaceEnabled)}
                   {surfaceTextField(art17SecondField, art17SecondLabel, art17SecondValue, v => set(art17SecondField, v), art17SurfaceEnabled, art17RinSelected ? '0' : undefined)}
                 </div>
               </div>
@@ -6745,9 +6813,9 @@ React.useEffect(() => {
           width: 28,
           height: 28,
           borderRadius: 999,
-          border: `1px solid ${violazioneColumnsDirty ? '#1F4E79' : '#aac4e0'}`,
-          background: violazioneColumnsDirty ? '#1F4E79' : '#fff',
-          color: violazioneColumnsDirty ? '#fff' : '#8aa4bf',
+          border: `1px solid ${violazioneColumnsDirty ? '#ffd700' : '#aac4e0'}`,
+          background: violazioneColumnsDirty ? '#ffd700' : '#fff',
+          color: violazioneColumnsDirty ? '#000' : '#8aa4bf',
           cursor: violazioneColumnsDirty ? 'pointer' : 'default',
           display: 'inline-flex',
           alignItems: 'center',
