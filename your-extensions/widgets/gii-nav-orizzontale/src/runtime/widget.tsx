@@ -164,6 +164,41 @@ function readCurrentSection (): string {
   }
 }
 
+type SectionCounts = Record<string, number>
+type SectionBadgeDetails = Record<string, { total: number; done: number; warning?: number }>
+
+function readSectionCounts (): SectionCounts {
+  try {
+    const raw = (window as any).__giiEditSectionCounts || {}
+    const out: SectionCounts = {}
+    Object.entries(raw).forEach(([key, value]) => {
+      const k = normalizeSectionId(key)
+      const n = Number(value)
+      if (k && Number.isFinite(n) && n > 0) out[k] = Math.trunc(n)
+    })
+    return out
+  } catch {
+    return {}
+  }
+}
+
+function readSectionBadgeDetails (): SectionBadgeDetails {
+  try {
+    const raw = (window as any).__giiEditSectionBadgeDetails || {}
+    const out: SectionBadgeDetails = {}
+    Object.entries(raw).forEach(([key, value]: [string, any]) => {
+      const k = normalizeSectionId(key)
+      const total = Math.max(0, Math.trunc(Number(value?.total || 0)))
+      const done = Math.max(0, Math.trunc(Number(value?.done || 0)))
+      const warning = Math.max(0, Math.trunc(Number(value?.warning || value?.warn || value?.alert || 0)))
+      if (k && (total > 0 || warning > 0)) out[k] = { total, done: Math.min(done, total), warning }
+    })
+    return out
+  } catch {
+    return {}
+  }
+}
+
 function applyOptionalSectionToUrl (section?: string): void {
   try {
     const url = new URL(window.location.href)
@@ -632,8 +667,8 @@ const NAV_ICONS: Record<string, string> = {
 }
 const NAV_DEFAULT_ICON = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/></svg>`
 
-function NavButton (p: { item: NavItem, cfg: any, idx: number, currentPageId: string | null, currentSection: string, currentViewId: string | null, onSectionChange: (s: string) => void, onViewChange: (v: string) => void }) {
-  const { item, cfg, currentPageId, currentSection, currentViewId } = p
+function NavButton (p: { item: NavItem, cfg: any, idx: number, currentPageId: string | null, currentSection: string, currentViewId: string | null, sectionCounts: SectionCounts, sectionBadgeDetails: SectionBadgeDetails, onSectionChange: (s: string) => void, onViewChange: (v: string) => void }) {
+  const { item, cfg, currentPageId, currentSection, currentViewId, sectionCounts, sectionBadgeDetails } = p
   const [hov, setHov] = React.useState(false)
   const sectionId = String(cfg.sectionId || '').trim()
   const itemSection = String(item.section || '').trim()
@@ -641,6 +676,10 @@ function NavButton (p: { item: NavItem, cfg: any, idx: number, currentPageId: st
   const useTabColors = !!cfg.tabUseCustomColors
   const isActive = isNavItemActive(item, cfg, currentPageId, currentSection, currentViewId)
   const hot = hov || isActive
+  const itemSectionForCount = normalizeSectionId(item.section)
+  const itemCount = itemSectionForCount ? Number(sectionCounts[itemSectionForCount] || 0) : 0
+  const itemBadgeDetail = itemSectionForCount ? sectionBadgeDetails[itemSectionForCount] : undefined
+  const itemWarningCount = Math.max(0, Math.trunc(Number(itemBadgeDetail?.warning || 0)))
 
   const handleClick = () => {
     if (sectionId && (itemViewId || itemSection)) {
@@ -700,6 +739,45 @@ function NavButton (p: { item: NavItem, cfg: any, idx: number, currentPageId: st
       }}>
         {item.label}
       </span>
+      {itemCount > 0 && (
+        <span style={{
+          marginLeft: 6,
+          minWidth: 18,
+          height: 18,
+          padding: '0 5px',
+          borderRadius: 999,
+          display: 'inline-flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          boxSizing: 'border-box',
+          fontSize: 11,
+          fontWeight: 800,
+          lineHeight: 1,
+          color: hot ? (useTabColors ? (cfg.tabBgColorHover || '#1d3557') : (item.colorBgHover || '#1d3557')) : '#1d4ed8',
+          background: hot ? '#ffffff' : '#dbeafe',
+          border: hot ? '1px solid rgba(255,255,255,0.85)' : '1px solid #93c5fd',
+          flex: '0 0 auto'
+        }} title='Numero elementi'>{itemCount}</span>
+      )}
+      {itemWarningCount > 0 && (
+        <span style={{
+          marginLeft: itemCount > 0 ? 3 : 6,
+          width: 18,
+          height: 18,
+          borderRadius: 999,
+          display: 'inline-flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          boxSizing: 'border-box',
+          fontSize: 12,
+          fontWeight: 900,
+          lineHeight: 1,
+          color: hot ? '#92400e' : '#b45309',
+          background: hot ? '#fff7ed' : '#fef3c7',
+          border: hot ? '1px solid #fed7aa' : '1px solid #f59e0b',
+          flex: '0 0 auto'
+        }} title={`Note spese incomplete: ${itemWarningCount}`}>!</span>
+      )}
     </div>
   )
 }
@@ -732,6 +810,8 @@ export default function Widget (props: Props) {
     const sid = String(cfg.sectionId || '').trim()
     return sid ? getCurrentSectionViewId(sid) : null
   })
+  const [sectionCounts, setSectionCounts] = React.useState<SectionCounts>(() => readSectionCounts())
+  const [sectionBadgeDetails, setSectionBadgeDetails] = React.useState<SectionBadgeDetails>(() => readSectionBadgeDetails())
   const [user, setUser] = React.useState<UserInfo | null>(null)
   const [uLoad, setULoad] = React.useState(true)
   const [sidebarSizeChanged, setSidebarSizeChanged] = React.useState(false)
@@ -749,10 +829,33 @@ export default function Widget (props: Props) {
       setCurrentPageId(readCurrentPageId())
     }
     const onFocus = () => upd()
+    const onCountsChange = (evt: any) => {
+      const raw = evt?.detail?.counts || (window as any).__giiEditSectionCounts || {}
+      const out: SectionCounts = {}
+      Object.entries(raw).forEach(([key, value]) => {
+        const k = normalizeSectionId(key)
+        const n = Number(value)
+        if (k && Number.isFinite(n) && n > 0) out[k] = Math.trunc(n)
+      })
+      setSectionCounts(out)
+      const rawDetails = evt?.detail?.badgeDetails || (window as any).__giiEditSectionBadgeDetails || {}
+      const details: SectionBadgeDetails = {}
+      Object.entries(rawDetails).forEach(([key, value]: [string, any]) => {
+        const k = normalizeSectionId(key)
+        const total = Math.max(0, Math.trunc(Number(value?.total || 0)))
+        const done = Math.max(0, Math.trunc(Number(value?.done || 0)))
+        const warning = Math.max(0, Math.trunc(Number(value?.warning || value?.warn || value?.alert || 0)))
+        if (k && (total > 0 || warning > 0)) details[k] = { total, done: Math.min(done, total), warning }
+      })
+      setSectionBadgeDetails(details)
+    }
     upd()
+    setSectionCounts(readSectionCounts())
+    setSectionBadgeDetails(readSectionBadgeDetails())
     window.addEventListener('hashchange', upd)
     window.addEventListener('popstate', upd)
     window.addEventListener('gii:edit-section-change', onSectionChange as EventListener)
+    window.addEventListener('gii:edit-section-counts', onCountsChange as EventListener)
     window.addEventListener('focus', onFocus)
     document.addEventListener('visibilitychange', onFocus)
     let unsubStore: (() => void) | null = null
@@ -770,6 +873,7 @@ export default function Widget (props: Props) {
       window.removeEventListener('hashchange', upd)
       window.removeEventListener('popstate', upd)
       window.removeEventListener('gii:edit-section-change', onSectionChange as EventListener)
+      window.removeEventListener('gii:edit-section-counts', onCountsChange as EventListener)
       window.removeEventListener('focus', onFocus)
       document.removeEventListener('visibilitychange', onFocus)
       if (unsubStore) unsubStore()
@@ -880,7 +984,7 @@ export default function Widget (props: Props) {
       overflowY: 'hidden'
     }}>
       {visibleItems.map((item, i) => (
-        <NavButton key={item.id} item={item} cfg={cfg} idx={i} currentPageId={currentPageId} currentSection={currentSection} currentViewId={currentViewId} onSectionChange={setCurrentSection} onViewChange={setCurrentViewId} />
+        <NavButton key={item.id} item={item} cfg={cfg} idx={i} currentPageId={currentPageId} currentSection={currentSection} currentViewId={currentViewId} sectionCounts={sectionCounts} sectionBadgeDetails={sectionBadgeDetails} onSectionChange={setCurrentSection} onViewChange={setCurrentViewId} />
       ))}
       <div style={{ flex: '1 1 auto', minWidth: 8 }} />
       <SidebarResetButton

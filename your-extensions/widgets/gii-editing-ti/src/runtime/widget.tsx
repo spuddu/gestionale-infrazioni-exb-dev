@@ -3533,6 +3533,7 @@ type NsDetailRow = {
   anno_prezzario_snapshot?: number | null
   ordine: number
   note: string
+  codice_casistica?: string | null
 }
 
 type NsManagerProps = {
@@ -3611,7 +3612,8 @@ function nsCloneRow (row: NsDetailRow): NsDetailRow {
     importo_riga: nsRound(nsSafeNum(row.importo_riga, 0), 2),
     anno_prezzario_snapshot: row.anno_prezzario_snapshot != null ? Math.trunc(nsSafeNum(row.anno_prezzario_snapshot, 0)) : null,
     ordine: Math.trunc(nsSafeNum(row.ordine, 0)),
-    note: String(row.note || '').trim()
+    note: String(row.note || '').trim(),
+    codice_casistica: String(row.codice_casistica || '').trim() || null
   }
 }
 
@@ -3665,7 +3667,8 @@ function nsRowSignature (row: NsDetailRow): string {
     quantita: nsRound(nsSafeNum(row.quantita, 0), 4),
     importo_riga: nsRound(nsSafeNum(row.importo_riga, 0), 2),
     anno_prezzario_snapshot: row.anno_prezzario_snapshot != null ? Math.trunc(nsSafeNum(row.anno_prezzario_snapshot, 0)) : null,
-    ordine: Math.trunc(nsSafeNum(row.ordine, 0))
+    ordine: Math.trunc(nsSafeNum(row.ordine, 0)),
+    codice_casistica: String(row.codice_casistica || '').trim()
   })
 }
 
@@ -3702,6 +3705,110 @@ function nsComputeSummaryFromRows (rows: NsDetailRow[], perc: number): NsSummary
     importoSpeseGenerali,
     totaleComplessivo
   }
+}
+
+
+type NsCasisticaOption = { codice: string; art: number; label: string }
+
+const NS_CASISTICHE_BY_ART: NsCasisticaOption[] = [
+  { codice: 'C100_REPERIBILITA', art: 8, label: 'Art. 8 - Reperibilità' },
+  { codice: 'C101_SPRECO_ACQUA', art: 27, label: 'Art. 27 - Spreco / uso negligente acqua' },
+  { codice: 'C104_ATTREZZATURE_DANNEGGIATE', art: 30, label: 'Art. 30 - Attrezzature danneggiate o perse' },
+  { codice: 'C113_DANNI_STRUTTURE_IRRIGUE', art: 39, label: 'Art. 39 - Danni strutture irrigue' }
+]
+
+function hasArtSelected (attrs: Record<string, any>, art: number): boolean {
+  const code = `Art${art}`
+  const multi = new Set(parseMultiSelect(attrs?.norma_violata3))
+  if (multi.has(code)) return true
+  const field = NORMA3_TO_VFIELD[code]
+  return !!field && isSelectedFlag(attrs?.[field])
+}
+
+function getNotaSpeseCasistiche (attrs: Record<string, any>): NsCasisticaOption[] {
+  return NS_CASISTICHE_BY_ART.filter(opt => hasArtSelected(attrs, opt.art)).sort((a, b) => a.art - b.art)
+}
+
+function getNotaSpeseCasisticaByArtCode (artCode: string): NsCasisticaOption | null {
+  const art = Number(String(artCode || '').replace(/[^0-9]/g, ''))
+  if (!Number.isFinite(art) || art <= 0) return null
+  return NS_CASISTICHE_BY_ART.find(opt => opt.art === art) || null
+}
+
+function hasNotaSpeseRowsForCasistica (rowsByCategory: Record<NsCategory, NsDetailRow[]> | null | undefined, codice: string): boolean {
+  const code = String(codice || '').trim()
+  if (!code) return false
+  return nsRowsByCategoryToFlat(rowsByCategory || EMPTY_NS_ROWS_BY_CATEGORY).some(row => String(row.codice_casistica || '').trim() === code)
+}
+
+function getNotaSpeseTotalForCasistica (rowsByCategory: Record<NsCategory, NsDetailRow[]> | null | undefined, codice: string, perc: number): number {
+  const code = String(codice || '').trim()
+  if (!code) return 0
+  const filtered = filterRowsByCasistica(rowsByCategory || EMPTY_NS_ROWS_BY_CATEGORY, code)
+  return nsComputeSummaryFromRows(nsRowsByCategoryToFlat(filtered), perc).totaleComplessivo
+}
+
+function getNotaSpeseFlatRowsForCasistica (rowsByCategory: Record<NsCategory, NsDetailRow[]> | null | undefined, codice: string): NsDetailRow[] {
+  const code = String(codice || '').trim()
+  if (!code) return []
+  const filtered = filterRowsByCasistica(rowsByCategory || EMPTY_NS_ROWS_BY_CATEGORY, code)
+  return nsRowsByCategoryToFlat(filtered)
+}
+
+function hasNotaSpeseIncompleteRowsForCasistica (rowsByCategory: Record<NsCategory, NsDetailRow[]> | null | undefined, codice: string): boolean {
+  return getNotaSpeseFlatRowsForCasistica(rowsByCategory, codice).some(row => nsSafeNum(row.quantita, 0) <= 0)
+}
+
+function countNotaSpeseIncompleteRowsForCasistica (rowsByCategory: Record<NsCategory, NsDetailRow[]> | null | undefined, codice: string): number {
+  return getNotaSpeseFlatRowsForCasistica(rowsByCategory, codice).filter(row => nsSafeNum(row.quantita, 0) <= 0).length
+}
+
+function isNotaSpeseCompiledForCasistica (rowsByCategory: Record<NsCategory, NsDetailRow[]> | null | undefined, codice: string, perc: number): boolean {
+  return getNotaSpeseTotalForCasistica(rowsByCategory, codice, perc) > 0.004 && !hasNotaSpeseIncompleteRowsForCasistica(rowsByCategory, codice)
+}
+
+function getNotaSpeseCasisticheWithExistingRows (attrs: Record<string, any>, rowsByCategory: Record<NsCategory, NsDetailRow[]> | null | undefined): NsCasisticaOption[] {
+  const byCode = new Map<string, NsCasisticaOption>()
+  getNotaSpeseCasistiche(attrs).forEach(opt => byCode.set(opt.codice, opt))
+  NS_CASISTICHE_BY_ART.forEach(opt => {
+    if (hasNotaSpeseRowsForCasistica(rowsByCategory, opt.codice)) byCode.set(opt.codice, opt)
+  })
+  return Array.from(byCode.values()).sort((a, b) => a.art - b.art)
+}
+
+function getSelectedViolazioniCount (attrs: Record<string, any>): number {
+  const seen = new Set<string>()
+  const add = (code: string) => { if (code) seen.add(code) }
+  if (String(attrs?.norma15_parziale || '').trim()) add('Art15')
+  if (String(attrs?.norma15_totale || '').trim()) add('Art15')
+  if (String(attrs?.norma16_17 || '').trim()) add(String(attrs?.norma16_17).trim())
+  parseMultiSelect(attrs?.norma_violata3).forEach(add)
+  Object.entries(NORMA3_TO_VFIELD).forEach(([code, field]) => {
+    if (isSelectedFlag((attrs as any)?.[field])) add(code)
+  })
+  return seen.size
+}
+
+function filterRowsByCasistica (src: Record<NsCategory, NsDetailRow[]>, codice: string): Record<NsCategory, NsDetailRow[]> {
+  const out = nsCloneRowsByCategory(EMPTY_NS_ROWS_BY_CATEGORY)
+  const code = String(codice || '').trim()
+  NS_CATEGORIES.forEach((cat) => {
+    out[cat] = (src?.[cat] || []).filter(r => String(r.codice_casistica || '').trim() === code).map(nsCloneRow)
+  })
+  return out
+}
+
+function mergeCategoryRowsForCasistica (src: Record<NsCategory, NsDetailRow[]>, cat: NsCategory, codice: string, rows: NsDetailRow[]): Record<NsCategory, NsDetailRow[]> {
+  const code = String(codice || '').trim()
+  const out = nsCloneRowsByCategory(src)
+  const unchanged = (out[cat] || []).filter(r => String(r.codice_casistica || '').trim() !== code).map(nsCloneRow)
+  const updated = (rows || []).map(r => nsCloneRow({ ...r, categoria_costo: cat, codice_casistica: code }))
+  out[cat] = [...unchanged, ...updated].sort((a, b) => {
+    const ao = Math.trunc(nsSafeNum(a.ordine, 0))
+    const bo = Math.trunc(nsSafeNum(b.ordine, 0))
+    return ao !== bo ? ao - bo : Math.trunc(nsSafeNum(a.objectid, 0)) - Math.trunc(nsSafeNum(b.objectid, 0))
+  })
+  return out
 }
 
 const __giiNsLayerCache: Record<string, any> = {}
@@ -3850,7 +3957,8 @@ async function queryNotaSpeseRows (detailUrl: string, parentGlobalId: string, ca
     importo_riga: nsRound(nsSafeNum(r?.importo_riga, 0), 2),
     anno_prezzario_snapshot: r?.anno_prezzario_snapshot != null ? Math.trunc(nsSafeNum(r?.anno_prezzario_snapshot, 0)) : null,
     ordine: Math.trunc(nsSafeNum(r?.ordine, 0)),
-    note: String(r?.note || '').trim()
+    note: String(r?.note || '').trim(),
+    codice_casistica: String(r?.codice_casistica || '').trim() || null
   }))
 }
 
@@ -3874,6 +3982,7 @@ async function syncNotaSpeseDraftToTable (detailUrl: string, parentGlobalId: str
     put('importo_riga', nsRound(nsSafeNum(row.importo_riga, 0), 2))
     put('anno_prezzario_snapshot', row.anno_prezzario_snapshot != null ? Math.trunc(nsSafeNum(row.anno_prezzario_snapshot, 0)) : null)
     put('ordine', Math.trunc(nsSafeNum(row.ordine, 0)))
+    put('codice_casistica', String(row.codice_casistica || '').trim() || null)
     return attrs
   }
   const baseline = nsRowsByCategoryToFlat(baselineRowsByCategory)
@@ -4654,6 +4763,7 @@ const [activePrezzario, setActivePrezzario] = React.useState<{ codice: string; a
 const [noteSpesePercent, setNoteSpesePercent] = React.useState<number>(0)
 const [noteSpeseRowsBaseline, setNoteSpeseRowsBaseline] = React.useState<Record<NsCategory, NsDetailRow[]>>(nsCloneRowsByCategory(EMPTY_NS_ROWS_BY_CATEGORY))
 const [noteSpeseRowsDraft, setNoteSpeseRowsDraft] = React.useState<Record<NsCategory, NsDetailRow[]>>(nsCloneRowsByCategory(EMPTY_NS_ROWS_BY_CATEGORY))
+const [activeNotaSpeseCasistica, setActiveNotaSpeseCasistica] = React.useState<string>('')
 
 const noteSpeseCfg = React.useMemo(() => ({
   importPrezzariUrl: String((cfg as any).nsImportPrezzariUrl || (cfg as any).nsPrezzariUrl || '').trim(),
@@ -4726,6 +4836,9 @@ const loadNotaSpeseDraft = React.useCallback(async () => {
     try { raw = sessionStorage.getItem(GII_NS_CART_KEY) } catch {}
     if (raw) {
       try { sessionStorage.removeItem(GII_NS_CART_KEY) } catch {}
+      if (!activeNotaSpeseCasistica) {
+        setNoteSpeseMsg({ ok: false, text: 'Le voci del prezzario non sono state aggiunte: seleziona prima una nota spese collegata a una violazione.' })
+      } else {
       let cartItems: any[] = []
       try { cartItems = JSON.parse(raw) } catch { cartItems = [] }
       if (Array.isArray(cartItems) && cartItems.length > 0) {
@@ -4752,7 +4865,8 @@ const loadNotaSpeseDraft = React.useCallback(async () => {
             importo_riga: 0,
             anno_prezzario_snapshot: nsSafeNum(item.anno_riferimento, 0) > 0 ? Math.trunc(nsSafeNum(item.anno_riferimento, 0)) : null,
             ordine: maxOrdine,
-            note: ''
+            note: '',
+            codice_casistica: activeNotaSpeseCasistica
           })
           existingCodes.add(item.codice_voce)
           added++
@@ -4760,6 +4874,7 @@ const loadNotaSpeseDraft = React.useCallback(async () => {
         if (added > 0) {
           setNoteSpeseMsg({ ok: true, text: `${added} ${added === 1 ? 'voce aggiunta' : 'voci aggiunte'} dal prezzario. Compila le quantità e salva.` })
         }
+      }
       }
     }
     setNoteSpeseRowsDraft(draft)
@@ -4771,7 +4886,7 @@ const loadNotaSpeseDraft = React.useCallback(async () => {
   } finally {
     setNoteSpeseBusy(false)
   }
-}, [mode, currentOid, currentGlobalId, noteSpeseMissing.length, noteSpeseCfg])
+}, [mode, currentOid, currentGlobalId, noteSpeseMissing.length, noteSpeseCfg, activeNotaSpeseCasistica])
 
 const refreshNotaSpeseSummary = React.useCallback(async () => {
   const rows = nsRowsByCategoryToFlat(noteSpeseRowsDraft)
@@ -4791,6 +4906,10 @@ React.useEffect(() => {
     try { raw = sessionStorage.getItem(GII_NS_CART_KEY) } catch {}
     if (!raw) return
     try { sessionStorage.removeItem(GII_NS_CART_KEY) } catch {}
+    if (!activeNotaSpeseCasistica) {
+      setNoteSpeseMsg({ ok: false, text: 'Le voci del prezzario non sono state aggiunte: seleziona prima una nota spese collegata a una violazione.' })
+      return
+    }
     let cartItems: any[] = []
     try { cartItems = JSON.parse(raw) } catch { return }
     if (!Array.isArray(cartItems) || cartItems.length === 0) return
@@ -4816,7 +4935,8 @@ React.useEffect(() => {
           prezzo_unitario_snapshot: nsRound(nsSafeNum(item.prezzo_unitario, 0), 4),
           quantita: 0, importo_riga: 0,
           anno_prezzario_snapshot: nsSafeNum(item.anno_riferimento, 0) > 0 ? Math.trunc(nsSafeNum(item.anno_riferimento, 0)) : null,
-          ordine: maxOrdine, note: ''
+          ordine: maxOrdine, note: '',
+          codice_casistica: activeNotaSpeseCasistica
         })
         existingCodes.add(item.codice_voce)
         added++
@@ -4829,11 +4949,15 @@ React.useEffect(() => {
     })
   }, 500)
   return () => window.clearInterval(id)
-}, [mode, currentOid, currentGlobalId])
+}, [mode, currentOid, currentGlobalId, activeNotaSpeseCasistica])
 
 React.useEffect(() => {
   setNoteSpeseSummary(nsComputeSummaryFromRows(nsRowsByCategoryToFlat(noteSpeseRowsDraft), noteSpesePercent))
 }, [noteSpeseRowsDraft, noteSpesePercent])
+
+React.useEffect(() => {
+  setNoteSpeseManagerResetKey(k => k + 1)
+}, [activeNotaSpeseCasistica])
 
 const noteSpeseRowsDirty = React.useMemo(() => !nsRowsByCategoryEqual(noteSpeseRowsDraft, noteSpeseRowsBaseline), [noteSpeseRowsDraft, noteSpeseRowsBaseline])
 const noteSpeseFormsDirty = React.useMemo(() => NS_CATEGORIES.some((cat) => !!noteSpeseFormDirtyByCategory[cat]), [noteSpeseFormDirtyByCategory])
@@ -5030,8 +5154,33 @@ React.useEffect(() => {
   const norma3SelectedLabels = React.useMemo(() => CHOICES.norma3.filter(o => norma3Set.has(o.v)).map(o => o.l), [norma3Set])
   const toggleNorma3 = (v: string) => {
     const s = new Set(norma3Set)
-    if (s.has(v)) s.delete(v); else s.add(v)
-    set('norma_violata3', Array.from(s).join(' '))
+    const isRemoving = s.has(v)
+    const nsOpt = isRemoving ? getNotaSpeseCasisticaByArtCode(v) : null
+    if (isRemoving && nsOpt && hasNotaSpeseRowsForCasistica(noteSpeseRowsDraft, nsOpt.codice)) {
+      setMsg({ kind: 'err', text: `Impossibile deselezionare Art. ${nsOpt.art}: per questa violazione è già presente una nota spese. Eliminare prima le righe della nota spese collegata.` })
+      setActiveNotaSpeseCasistica(nsOpt.codice)
+      setNpTab('nota_spese')
+      return
+    }
+    if (isRemoving) s.delete(v); else s.add(v)
+    const nextNorma3 = Array.from(s).join(' ')
+    const vField = NORMA3_TO_VFIELD[v]
+    const artCode = normalizeArtCode(v)
+    setDraft(prev => {
+      if (isRiAgrTecLimitedEdit && !riAgrTecEditableDraftFields.has('norma_violata3')) return prev
+      const next: any = { ...prev, norma_violata3: nextNorma3 }
+      // Mantiene sincronizzati anche i campi flag v_artXX del FL madre: senza questo
+      // il badge Violazione restava agganciato al valore salvato fino al successivo salvataggio.
+      if (vField) next[vField] = isRemoving ? 0 : 1
+      if (isRemoving && artCode) {
+        const gradi = parseGradiViolazioni(next.gradi_violazioni)
+        if (gradi[artCode] != null) {
+          delete gradi[artCode]
+          next.gradi_violazioni = buildGradiViolazioni(gradi, Array.from(s).map(normalizeArtCode).filter(code => RI_GRADO_ART_CODES.includes(code as any)))
+        }
+      }
+      return next
+    })
   }
 
   // Derived
@@ -5705,6 +5854,58 @@ React.useEffect(() => {
 
   
   const showDatiGen = p.showDatiGenerali
+
+  const selectedViolazioniCount = React.useMemo(() => getSelectedViolazioniCount(draft), [draft])
+  const noteSpeseExpectedCasistiche = React.useMemo(() => getNotaSpeseCasistiche(draft), [draft])
+  const noteSpeseCasistiche = React.useMemo(() => getNotaSpeseCasisticheWithExistingRows(draft, noteSpeseRowsDraft), [draft, noteSpeseRowsDraft])
+  const noteSpeseCompiledCount = React.useMemo(() => {
+    return noteSpeseExpectedCasistiche.filter(opt => isNotaSpeseCompiledForCasistica(noteSpeseRowsDraft, opt.codice, noteSpesePercent)).length
+  }, [noteSpeseExpectedCasistiche, noteSpeseRowsDraft, noteSpesePercent])
+  const noteSpeseIncompleteCasistiche = React.useMemo(() => {
+    return noteSpeseCasistiche.filter(opt => hasNotaSpeseIncompleteRowsForCasistica(noteSpeseRowsDraft, opt.codice))
+  }, [noteSpeseCasistiche, noteSpeseRowsDraft])
+  const noteSpeseIncompleteCount = noteSpeseIncompleteCasistiche.length
+  const allegatiCount = React.useMemo(() => {
+    if (mode !== 'edit' || currentOid == null) return 0
+    const existingCount = attachmentsForOid === currentOid && Array.isArray(attachments) ? attachments.length : 0
+    const pendingCount = Array.isArray(attachmentFiles) ? attachmentFiles.length : 0
+    return Math.max(0, existingCount + pendingCount)
+  }, [mode, currentOid, attachmentsForOid, attachments, attachmentFiles])
+
+  React.useEffect(() => {
+    if (noteSpeseCasistiche.length === 0) {
+      if (activeNotaSpeseCasistica) setActiveNotaSpeseCasistica('')
+      return
+    }
+    if (!activeNotaSpeseCasistica || !noteSpeseCasistiche.some(opt => opt.codice === activeNotaSpeseCasistica)) {
+      setActiveNotaSpeseCasistica(noteSpeseCasistiche[0].codice)
+    }
+  }, [noteSpeseCasistiche, activeNotaSpeseCasistica])
+
+  const activeNotaSpeseRows = React.useMemo(() => filterRowsByCasistica(noteSpeseRowsDraft, activeNotaSpeseCasistica), [noteSpeseRowsDraft, activeNotaSpeseCasistica])
+  const activeNotaSpeseSummary = React.useMemo(() => nsComputeSummaryFromRows(nsRowsByCategoryToFlat(activeNotaSpeseRows), noteSpesePercent), [activeNotaSpeseRows, noteSpesePercent])
+  const activeNotaSpeseOption = React.useMemo(() => noteSpeseCasistiche.find(opt => opt.codice === activeNotaSpeseCasistica) || null, [noteSpeseCasistiche, activeNotaSpeseCasistica])
+  const activeNotaSpeseIncompleteRowsCount = React.useMemo(() => {
+    if (!activeNotaSpeseCasistica) return 0
+    return countNotaSpeseIncompleteRowsForCasistica(noteSpeseRowsDraft, activeNotaSpeseCasistica)
+  }, [noteSpeseRowsDraft, activeNotaSpeseCasistica])
+  const noteSpeseBrowseDisabled = isRiAgrTecLimitedEdit || noteSpeseBusy || noteSpeseDraftDirty || !activeNotaSpeseCasistica || noteSpeseCasistiche.length === 0
+
+  React.useEffect(() => {
+    const counts = {
+      violazione: selectedViolazioniCount,
+      'nota-spese': noteSpeseCompiledCount,
+      nota_spese: noteSpeseCompiledCount,
+      allegati: allegatiCount
+    }
+    const badgeDetails = {
+      'nota-spese': { total: noteSpeseCompiledCount, done: noteSpeseCompiledCount, warning: noteSpeseIncompleteCount },
+      nota_spese: { total: noteSpeseCompiledCount, done: noteSpeseCompiledCount, warning: noteSpeseIncompleteCount }
+    }
+    try { ;(window as any).__giiEditSectionCounts = counts } catch {}
+    try { ;(window as any).__giiEditSectionBadgeDetails = badgeDetails } catch {}
+    try { window.dispatchEvent(new CustomEvent('gii:edit-section-counts', { detail: { counts, badgeDetails } })) } catch {}
+  }, [selectedViolazioniCount, noteSpeseCompiledCount, noteSpeseIncompleteCount, allegatiCount])
 
   const NP_TABS = [
     { id: 'dati_generali', label: 'Dati generali' },
@@ -6735,16 +6936,25 @@ React.useEffect(() => {
           {npTab === 'nota_spese' && mode === 'edit' && currentOid != null && noteSpeseMissing.length === 0 && currentGlobalId && (
             <button
               type='button'
-              onClick={() => { if (isRiAgrTecLimitedEdit) return; try { const pg = resolvePageId('browser-nota-spese'); if (pg) { try { const curPage = getAppStore()?.getState()?.appRuntimeInfo?.currentPageId || ''; sessionStorage.setItem('GII_NS_RETURN_PAGE', curPage) } catch {} UrlManager.getInstance().changePage(pg) } else { setNoteSpeseMsg({ ok: false, text: 'Pagina "browser-nota-spese" non trovata. Configura una pagina ExB con il widget consultazione prezzario e il widget gii-ns-carrello.' }) } } catch (e: any) { setNoteSpeseMsg({ ok: false, text: e?.message || String(e) }) } }}
-              disabled={isRiAgrTecLimitedEdit || noteSpeseBusy || noteSpeseDraftDirty}
+              onClick={() => {
+                if (noteSpeseBrowseDisabled) {
+                  if (!activeNotaSpeseCasistica || noteSpeseCasistiche.length === 0) {
+                    setNoteSpeseMsg({ ok: false, text: 'Seleziona una violazione collegabile alla nota spese prima di sfogliare il prezzario.' })
+                  }
+                  return
+                }
+                try { const pg = resolvePageId('browser-nota-spese'); if (pg) { try { const curPage = getAppStore()?.getState()?.appRuntimeInfo?.currentPageId || ''; sessionStorage.setItem('GII_NS_RETURN_PAGE', curPage) } catch {} UrlManager.getInstance().changePage(pg) } else { setNoteSpeseMsg({ ok: false, text: 'Pagina "browser-nota-spese" non trovata. Configura una pagina ExB con il widget consultazione prezzario e il widget gii-ns-carrello.' }) } } catch (e: any) { setNoteSpeseMsg({ ok: false, text: e?.message || String(e) }) }
+              }}
+              disabled={noteSpeseBrowseDisabled}
+              title={!activeNotaSpeseCasistica || noteSpeseCasistiche.length === 0 ? 'Seleziona prima una violazione collegabile alla nota spese.' : undefined}
               style={{
                 ...btnBase,
                 marginRight: 12,
                 border: '1px solid rgba(15,115,117,0.75)',
-                background: (isRiAgrTecLimitedEdit || noteSpeseBusy || noteSpeseDraftDirty) ? '#e5e7eb' : '#0f7375',
-                color: (isRiAgrTecLimitedEdit || noteSpeseBusy || noteSpeseDraftDirty) ? '#9ca3af' : '#fff',
-                cursor: (isRiAgrTecLimitedEdit || noteSpeseBusy || noteSpeseDraftDirty) ? 'not-allowed' : 'pointer',
-                opacity: (isRiAgrTecLimitedEdit || noteSpeseBusy || noteSpeseDraftDirty) ? 0.75 : 1,
+                background: noteSpeseBrowseDisabled ? '#e5e7eb' : '#0f7375',
+                color: noteSpeseBrowseDisabled ? '#9ca3af' : '#fff',
+                cursor: noteSpeseBrowseDisabled ? 'not-allowed' : 'pointer',
+                opacity: noteSpeseBrowseDisabled ? 0.75 : 1,
                 whiteSpace: 'nowrap'
               }}
             >📋 Sfoglia prezzario</button>
@@ -6817,16 +7027,42 @@ React.useEffect(() => {
         </div>
       )}
       <div style={{ border: '1px solid #c5d9f1', borderRadius: 8, background: '#fff', padding: 10 }}>
-        <div style={{ display: 'grid', gap: 8 }}>
+        <div style={{ display: 'grid', gap: 10 }}>
+          {noteSpeseCasistiche.length > 0 ? (
+            <div style={{ display: 'grid', gap: 6, padding: 10, borderRadius: 10, border: '2px solid #0f7375', background: '#f0fdfa' }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, flexWrap: 'wrap' }}>
+                <label style={{ fontSize: 13, fontWeight: 900, color: '#0f4f50' }}>Scegli la nota spese da compilare</label>
+                <span style={{ fontSize: 11, fontWeight: 800, color: '#0f7375', background: '#d9f7f2', border: '1px solid #9ee5db', borderRadius: 999, padding: '2px 8px' }}>Scelta obbligatoria</span>
+              </div>
+              <select
+                value={activeNotaSpeseCasistica}
+                onChange={(e) => setActiveNotaSpeseCasistica(e.target.value)}
+                style={{ ...fieldBaseStyle(formStyle, false), height: 38, maxWidth: 460, border: '1px solid #0f7375', fontWeight: 800, color: '#16375a', background: '#fff' }}
+                disabled={noteSpeseBusy || noteSpeseCasistiche.length <= 1}
+              >
+                {noteSpeseCasistiche.map(opt => <option key={opt.codice} value={opt.codice}>{opt.label}</option>)}
+              </select>
+              <div style={{ fontSize: 11, color: '#336666', lineHeight: 1.35 }}>Le voci aggiunte dal prezzario saranno collegate alla violazione selezionata.</div>
+              {activeNotaSpeseIncompleteRowsCount > 0 && (
+                <div style={{ marginTop: 4, padding: '8px 10px', borderRadius: 8, border: '1px solid #f59e0b', background: '#fffbeb', color: '#92400e', fontSize: 12, fontWeight: 700, lineHeight: 1.35 }}>
+                  Nota spese incompleta: sono presenti {activeNotaSpeseIncompleteRowsCount} {activeNotaSpeseIncompleteRowsCount === 1 ? 'riga senza quantità o con quantità pari a zero' : 'righe senza quantità o con quantità pari a zero'}. Completa le quantità oppure elimina le righe non necessarie prima dell’inoltro.
+                </div>
+              )}
+            </div>
+          ) : (
+            <div style={{ padding: 10, borderRadius: 8, background: '#f8fbff', border: '1px solid #d7e5f5', color: '#64748b', fontSize: 12 }}>
+              Nessuna violazione collegabile alla nota spese. Le note spese sono previste per gli artt. 8, 27, 30 e 39.
+            </div>
+          )}
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, minmax(0, 1fr))', gap: 6 }}>
             {([
-              ['Attrezz./Trasp.', noteSpeseSummary.totaleAT],
-              ['Mat. costruz.', noteSpeseSummary.totalePR],
-              ['Risorse umane', noteSpeseSummary.totaleRU],
-              ['Semilavorati', noteSpeseSummary.totaleSL],
-              ['Prod. finiti', noteSpeseSummary.totalePF],
-              [`Spese gen. (${noteSpeseSummary.percentualeSpeseGenerali.toLocaleString('it-IT', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}%)`, noteSpeseSummary.importoSpeseGenerali],
-              ['Totale', noteSpeseSummary.totaleComplessivo]
+              ['Attrezz./Trasp.', activeNotaSpeseSummary.totaleAT],
+              ['Mat. costruz.', activeNotaSpeseSummary.totalePR],
+              ['Risorse umane', activeNotaSpeseSummary.totaleRU],
+              ['Semilavorati', activeNotaSpeseSummary.totaleSL],
+              ['Prod. finiti', activeNotaSpeseSummary.totalePF],
+              [`Spese gen. (${activeNotaSpeseSummary.percentualeSpeseGenerali.toLocaleString('it-IT', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}%)`, activeNotaSpeseSummary.importoSpeseGenerali],
+              ['Totale', activeNotaSpeseSummary.totaleComplessivo]
             ] as [string, number][]).map(([label, value], idx) => (
               <div key={idx} style={{ background: idx === 6 ? formStyle.cardHeaderBg : '#f5f9ff', border: '1px solid #c5d9f1', borderRadius: formStyle.cardBorderRadius, padding: '6px 8px' }}>
                 <div style={{ fontSize: 10, fontWeight: 700, color: idx === 6 ? 'rgba(255,255,255,0.86)' : formStyle.hdrColor, marginBottom: 2, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{label}</div>
@@ -6834,15 +7070,16 @@ React.useEffect(() => {
               </div>
             ))}
           </div>
+          {!activeNotaSpeseCasistica && noteSpeseCasistiche.length > 0 && <span style={{ fontSize: 11, color: '#b45309', fontWeight: 700 }}>Seleziona una nota spese per abilitare lo sfoglia prezzario.</span>}
           {noteSpeseDraftDirty && <span style={{ fontSize: 11, color: '#856404' }}>Salva le modifiche prima di sfogliare il prezzario.</span>}
         </div>
       </div>
       <div style={{ display: 'grid', gap: 8 }}>
-        <NoteSpeseManager category='AT' title='Attrezzature e trasporti' rows={noteSpeseRowsDraft['AT']} onRowsChange={(nextRows) => { if (isRiAgrTecLimitedEdit) return; setNoteSpeseRowsDraft((prev) => ({ ...prev, AT: nextRows.map(nsCloneRow) })) }} onDirtyChange={(dirty) => { if (isRiAgrTecLimitedEdit) return; setNoteSpeseFormDirtyByCategory((prev) => ({ ...prev, AT: dirty })) }} resetKey={noteSpeseManagerResetKey} readonly={isRiAgrTecLimitedEdit} />
-        <NoteSpeseManager category='PR' title='Materiali da costruzione' rows={noteSpeseRowsDraft['PR']} onRowsChange={(nextRows) => { if (isRiAgrTecLimitedEdit) return; setNoteSpeseRowsDraft((prev) => ({ ...prev, PR: nextRows.map(nsCloneRow) })) }} onDirtyChange={(dirty) => { if (isRiAgrTecLimitedEdit) return; setNoteSpeseFormDirtyByCategory((prev) => ({ ...prev, PR: dirty })) }} resetKey={noteSpeseManagerResetKey} readonly={isRiAgrTecLimitedEdit} />
-        <NoteSpeseManager category='RU' title='Risorse umane' rows={noteSpeseRowsDraft['RU']} onRowsChange={(nextRows) => { if (isRiAgrTecLimitedEdit) return; setNoteSpeseRowsDraft((prev) => ({ ...prev, RU: nextRows.map(nsCloneRow) })) }} onDirtyChange={(dirty) => { if (isRiAgrTecLimitedEdit) return; setNoteSpeseFormDirtyByCategory((prev) => ({ ...prev, RU: dirty })) }} resetKey={noteSpeseManagerResetKey} readonly={isRiAgrTecLimitedEdit} />
-        <NoteSpeseManager category='SL' title='Semilavorati' rows={noteSpeseRowsDraft['SL']} onRowsChange={(nextRows) => { if (isRiAgrTecLimitedEdit) return; setNoteSpeseRowsDraft((prev) => ({ ...prev, SL: nextRows.map(nsCloneRow) })) }} onDirtyChange={(dirty) => { if (isRiAgrTecLimitedEdit) return; setNoteSpeseFormDirtyByCategory((prev) => ({ ...prev, SL: dirty })) }} resetKey={noteSpeseManagerResetKey} readonly={isRiAgrTecLimitedEdit} />
-        <NoteSpeseManager category='PF' title='Prodotti finiti' rows={noteSpeseRowsDraft['PF']} onRowsChange={(nextRows) => { if (isRiAgrTecLimitedEdit) return; setNoteSpeseRowsDraft((prev) => ({ ...prev, PF: nextRows.map(nsCloneRow) })) }} onDirtyChange={(dirty) => { if (isRiAgrTecLimitedEdit) return; setNoteSpeseFormDirtyByCategory((prev) => ({ ...prev, PF: dirty })) }} resetKey={noteSpeseManagerResetKey} readonly={isRiAgrTecLimitedEdit} />
+        <NoteSpeseManager category='AT' title='Attrezzature e trasporti' rows={activeNotaSpeseRows['AT']} onRowsChange={(nextRows) => { if (isRiAgrTecLimitedEdit || !activeNotaSpeseCasistica) return; setNoteSpeseRowsDraft((prev) => mergeCategoryRowsForCasistica(prev, 'AT', activeNotaSpeseCasistica, nextRows)) }} onDirtyChange={(dirty) => { if (isRiAgrTecLimitedEdit) return; setNoteSpeseFormDirtyByCategory((prev) => ({ ...prev, AT: dirty })) }} resetKey={noteSpeseManagerResetKey} readonly={isRiAgrTecLimitedEdit || !activeNotaSpeseCasistica} />
+        <NoteSpeseManager category='PR' title='Materiali da costruzione' rows={activeNotaSpeseRows['PR']} onRowsChange={(nextRows) => { if (isRiAgrTecLimitedEdit || !activeNotaSpeseCasistica) return; setNoteSpeseRowsDraft((prev) => mergeCategoryRowsForCasistica(prev, 'PR', activeNotaSpeseCasistica, nextRows)) }} onDirtyChange={(dirty) => { if (isRiAgrTecLimitedEdit) return; setNoteSpeseFormDirtyByCategory((prev) => ({ ...prev, PR: dirty })) }} resetKey={noteSpeseManagerResetKey} readonly={isRiAgrTecLimitedEdit || !activeNotaSpeseCasistica} />
+        <NoteSpeseManager category='RU' title='Risorse umane' rows={activeNotaSpeseRows['RU']} onRowsChange={(nextRows) => { if (isRiAgrTecLimitedEdit || !activeNotaSpeseCasistica) return; setNoteSpeseRowsDraft((prev) => mergeCategoryRowsForCasistica(prev, 'RU', activeNotaSpeseCasistica, nextRows)) }} onDirtyChange={(dirty) => { if (isRiAgrTecLimitedEdit) return; setNoteSpeseFormDirtyByCategory((prev) => ({ ...prev, RU: dirty })) }} resetKey={noteSpeseManagerResetKey} readonly={isRiAgrTecLimitedEdit || !activeNotaSpeseCasistica} />
+        <NoteSpeseManager category='SL' title='Semilavorati' rows={activeNotaSpeseRows['SL']} onRowsChange={(nextRows) => { if (isRiAgrTecLimitedEdit || !activeNotaSpeseCasistica) return; setNoteSpeseRowsDraft((prev) => mergeCategoryRowsForCasistica(prev, 'SL', activeNotaSpeseCasistica, nextRows)) }} onDirtyChange={(dirty) => { if (isRiAgrTecLimitedEdit) return; setNoteSpeseFormDirtyByCategory((prev) => ({ ...prev, SL: dirty })) }} resetKey={noteSpeseManagerResetKey} readonly={isRiAgrTecLimitedEdit || !activeNotaSpeseCasistica} />
+        <NoteSpeseManager category='PF' title='Prodotti finiti' rows={activeNotaSpeseRows['PF']} onRowsChange={(nextRows) => { if (isRiAgrTecLimitedEdit || !activeNotaSpeseCasistica) return; setNoteSpeseRowsDraft((prev) => mergeCategoryRowsForCasistica(prev, 'PF', activeNotaSpeseCasistica, nextRows)) }} onDirtyChange={(dirty) => { if (isRiAgrTecLimitedEdit) return; setNoteSpeseFormDirtyByCategory((prev) => ({ ...prev, PF: dirty })) }} resetKey={noteSpeseManagerResetKey} readonly={isRiAgrTecLimitedEdit || !activeNotaSpeseCasistica} />
       </div>
     </div>
   )

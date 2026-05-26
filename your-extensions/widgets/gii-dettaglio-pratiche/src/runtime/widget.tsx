@@ -2316,6 +2316,7 @@ type NsdDetailRow = {
   anno_prezzario_snapshot?: number | null
   ordine: number
   note: string
+  codice_casistica: string
 }
 type NsdSummary = {
   totaleAT: number
@@ -2335,6 +2336,74 @@ const NSD_CATEGORY_LABELS: Record<NsdCategory, string> = {
   RU: 'Risorse umane',
   SL: 'Semilavorati',
   PF: 'Prodotti finiti'
+}
+
+const NSD_UNLINKED_CASISTICA = '__GII_NSD_NON_COLLEGATA__'
+const NSD_CASISTICA_INFO: Record<string, { label: string; order: number }> = {
+  C100_REPERIBILITA: { label: 'Art. 8 – Violazione servizio reperibilità', order: 8 },
+  C101_SPRECO_ACQUA: { label: 'Art. 27 – Spreco d’acqua / uso negligente risorsa idrica', order: 27 },
+  C104_ATTREZZATURE_DANNEGGIATE: { label: 'Art. 30 – Danneggiamento e/o perdita attrezzature', order: 30 },
+  C113_DANNI_STRUTTURE_IRRIGUE: { label: 'Art. 39 – Danni strutture irrigue', order: 39 }
+}
+
+function nsdNormalizeCasistica (v: any): string {
+  const s = String(v || '').trim().toUpperCase()
+  return s || NSD_UNLINKED_CASISTICA
+}
+
+function nsdCasisticaInfo (codiceCasistica: string): { label: string; order: number; isUnlinked: boolean } {
+  const key = nsdNormalizeCasistica(codiceCasistica)
+  if (key === NSD_UNLINKED_CASISTICA) {
+    return { label: 'Nota spese non collegata a violazione', order: 9999, isUnlinked: true }
+  }
+  const known = NSD_CASISTICA_INFO[key]
+  if (known) return { ...known, isUnlinked: false }
+  return { label: 'Nota spese collegata a casistica non riconosciuta', order: 9998, isUnlinked: false }
+}
+
+function nsdTruthyFlag (v: any): boolean {
+  if (v == null || v === '') return false
+  if (typeof v === 'boolean') return v
+  if (typeof v === 'number') return v === 1
+  const s = String(v).trim().toLowerCase()
+  return s === '1' || s === 'true' || s === 'si' || s === 'sì' || s === 'yes' || s === 'x' || s === '✓'
+}
+
+function nsdSplitMulti (v: any): string[] {
+  if (Array.isArray(v)) return v.map(x => String(x || '').trim()).filter(Boolean)
+  const s = String(v || '').trim()
+  if (!s) return []
+  return s.split(/[;,|]/g).map(x => x.trim()).filter(Boolean)
+}
+
+function nsdHasArticleCode (data: any, art: string): boolean {
+  const needle = `ART${String(art).replace(/\D/g, '')}`
+  const rawValues = [
+    nsdPickAttrCI(data, [`v_art${String(art).padStart(2, '0')}`, `v_art${art}`]),
+    ...nsdSplitMulti(nsdPickAttrCI(data, ['norma_violata3', 'norme_violata3', 'altre_violazioni']))
+  ]
+  return rawValues.some(v => {
+    if (nsdTruthyFlag(v)) return true
+    const s = String(v || '').replace(/[\s._-]/g, '').toUpperCase()
+    return s.includes(needle) || s === String(art)
+  })
+}
+
+function nsdExpectedCasisticheFromData (data: any): string[] {
+  const items: Array<{ code: string; order: number }> = []
+  if (nsdHasArticleCode(data, '8')) items.push({ code: 'C100_REPERIBILITA', order: 8 })
+  if (nsdHasArticleCode(data, '27')) items.push({ code: 'C101_SPRECO_ACQUA', order: 27 })
+  if (nsdHasArticleCode(data, '30')) items.push({ code: 'C104_ATTREZZATURE_DANNEGGIATE', order: 30 })
+  if (nsdHasArticleCode(data, '39')) items.push({ code: 'C113_DANNI_STRUTTURE_IRRIGUE', order: 39 })
+  const seen = new Set<string>()
+  return items
+    .sort((a, b) => a.order - b.order)
+    .map(x => x.code)
+    .filter(code => {
+      if (seen.has(code)) return false
+      seen.add(code)
+      return true
+    })
 }
 const NSD_PARENT_SUMMARY_FIELDS = [
   'GlobalID', 'globalid',
@@ -2507,7 +2576,7 @@ async function nsdQueryRows (detailUrl: string, parentGlobalId: string): Promise
     String(fl?.objectIdField || 'OBJECTID'), 'OBJECTID', 'categoria_costo', 'origine_voce_snapshot', 'codice_voce_snapshot',
     'descrizione_snapshot', 'unita_misura_snapshot', 'prezzo_unitario_snapshot',
     'costo_unitario_snapshot', 'quantita', 'importo_riga', 'anno_prezzario_snapshot',
-    'ordine', 'note'
+    'ordine', 'note', 'codice_casistica'
   ]
   const realByLower = new Map<string, string>()
   ;(Array.isArray(fl?.fields) ? fl.fields : []).forEach((f: any) => {
@@ -2538,7 +2607,8 @@ async function nsdQueryRows (detailUrl: string, parentGlobalId: string): Promise
       importo_riga: nsdRound(nsdSafeNum(r?.importo_riga, 0), 2),
       anno_prezzario_snapshot: r?.anno_prezzario_snapshot != null ? Math.trunc(nsdSafeNum(r?.anno_prezzario_snapshot, 0)) : null,
       ordine: Math.trunc(nsdSafeNum(r?.ordine, 0)),
-      note: String(r?.note || '').trim()
+      note: String(r?.note || '').trim(),
+      codice_casistica: nsdNormalizeCasistica(nsdPickAttrCI(r, ['codice_casistica']))
     }
   }).sort((a: NsdDetailRow, b: NsdDetailRow) => {
     const ca = NSD_CATEGORIES.indexOf(a.categoria_costo)
@@ -2588,14 +2658,39 @@ function NotaSpeseDetailPanel (props: { data: any; detailUrl: string; hasSel: bo
   }, [props.hasSel, parentGlobalId, props.detailUrl, loadedKey])
 
   const parentSummary = React.useMemo(() => nsdReadParentSummary(props.data || {}), [props.data])
-  const computedSummary = React.useMemo(() => nsdComputeSummaryFromRows(rows, parentSummary.percentualeSpeseGenerali), [rows, parentSummary.percentualeSpeseGenerali])
-  const summary = React.useMemo(() => nsdMergeSummary(parentSummary, computedSummary), [parentSummary, computedSummary])
-  const rowsByCategory = React.useMemo(() => {
-    const out: Record<NsdCategory, NsdDetailRow[]> = { AT: [], PR: [], RU: [], SL: [], PF: [] }
-    rows.forEach(row => { out[row.categoria_costo].push(row) })
-    return out
-  }, [rows])
+  const percentualeSpeseGenerali = parentSummary.percentualeSpeseGenerali
   const lastCalc = nsdPickAttrCI(props.data, ['ns_ricalcolata_il'])
+
+  const expectedCasistiche = React.useMemo(() => nsdExpectedCasisticheFromData(props.data || {}), [props.data])
+
+  const noteGroups = React.useMemo(() => {
+    const byCode = new Map<string, NsdDetailRow[]>()
+    ;(rows || []).forEach(row => {
+      const code = nsdNormalizeCasistica(row.codice_casistica)
+      const list = byCode.get(code) || []
+      list.push(row)
+      byCode.set(code, list)
+    })
+
+    expectedCasistiche.forEach(code => {
+      const norm = nsdNormalizeCasistica(code)
+      if (!byCode.has(norm)) byCode.set(norm, [])
+    })
+
+    return Array.from(byCode.entries()).map(([code, groupRows]) => {
+      const info = nsdCasisticaInfo(code)
+      const firstOrder = groupRows.length
+        ? Math.min(...groupRows.map(r => Number.isFinite(Number(r.ordine)) ? Number(r.ordine) : 9999))
+        : info.order
+      return { code, rows: groupRows, info, firstOrder, isExpectedMissing: expectedCasistiche.includes(code) && groupRows.length === 0 }
+    }).sort((a, b) => {
+      if (a.info.order !== b.info.order) return a.info.order - b.info.order
+      if (a.firstOrder !== b.firstOrder) return a.firstOrder - b.firstOrder
+      return a.code.localeCompare(b.code)
+    })
+  }, [rows, expectedCasistiche])
+
+  const overallSummary = React.useMemo(() => nsdComputeSummaryFromRows(rows, percentualeSpeseGenerali), [rows, percentualeSpeseGenerali])
 
   const card = (label: string, value: number, strong = false) => (
     <div
@@ -2617,8 +2712,8 @@ function NotaSpeseDetailPanel (props: { data: any; detailUrl: string; hasSel: bo
     </div>
   )
 
-  const renderRows = (cat: NsdCategory) => {
-    const catRows = rowsByCategory[cat] || []
+  const renderRows = (cat: NsdCategory, sourceRows: NsdDetailRow[]) => {
+    const catRows = (sourceRows || []).filter(row => row.categoria_costo === cat)
     if (!catRows.length) return <div style={{ fontSize: 12, color: '#6b7280', padding: '8px 2px' }}>Nessuna voce.</div>
     return (
       <div style={{ overflowX: 'auto', marginTop: 8 }}>
@@ -2626,7 +2721,7 @@ function NotaSpeseDetailPanel (props: { data: any; detailUrl: string; hasSel: bo
           <thead>
             <tr style={{ background: 'rgba(0,0,0,0.04)' }}>
               {['Origine', 'Codice', 'Descrizione', 'U.M.', 'Q.tà', 'Prezzo unit.', 'Importo'].map(h => (
-                <th key={h} style={{ textAlign: h === 'Descrizione' ? 'left' : 'right', padding: '6px 8px', borderBottom: '1px solid rgba(0,0,0,0.10)', color: '#374151', whiteSpace: 'nowrap' }}>{h}</th>
+                <th key={h} style={{ textAlign: ['Origine', 'Codice', 'Descrizione'].includes(h) ? 'left' : 'right', padding: '6px 8px', borderBottom: '1px solid rgba(0,0,0,0.10)', color: '#374151', whiteSpace: 'nowrap' }}>{h}</th>
               ))}
             </tr>
           </thead>
@@ -2667,42 +2762,80 @@ function NotaSpeseDetailPanel (props: { data: any; detailUrl: string; hasSel: bo
 
   return (
     <div style={{ display: 'grid', gap: 12, paddingTop: 0 }}>
-      <DetailSectionCard title="Riepilogo nota spese">
-        <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr)', gap: 0 }}>
-          {card('Attrezzature/Trasporti', summary.totaleAT)}
-          {card('Materiali da costruzione', summary.totalePR)}
-          {card('Risorse umane', summary.totaleRU)}
-          {card('Semilavorati', summary.totaleSL)}
-          {card('Prodotti finiti', summary.totalePF)}
-          {card(`Spese generali (${nsdMoney(summary.percentualeSpeseGenerali)}%)`, summary.importoSpeseGenerali)}
-          {card('Totale nota spese', summary.totaleComplessivo, true)}
+      {!props.detailUrl && (
+        <div style={{ border: '1px solid #d1d5db', borderRadius: 10, background: '#f9fafb', padding: 12, color: '#374151', fontSize: 12, lineHeight: 1.45 }}>
+          URL della tabella <strong>GII_NOTA_SPESE_DETTAGLIO</strong> non configurato nel setting del widget dettaglio.
+          La nota spese per casistica non può essere visualizzata.
         </div>
-        {lastCalc ? <div style={{ fontSize: 11, color: '#6b7280', marginTop: 8 }}>Ultimo ricalcolo: {formatDateSafe(lastCalc)}</div> : null}
-      </DetailSectionCard>
-
+      )}
       {props.detailUrl && loading && <div style={{ opacity: 0.75, fontSize: 12 }}>Caricamento dettaglio nota spese…</div>}
       {props.detailUrl && !loading && error && <div style={{ color: '#b00020', fontSize: 12 }}>{error}</div>}
-      {props.detailUrl && !loading && !error && rows.length === 0 && (
+      {props.detailUrl && !loading && !error && noteGroups.length === 0 && (
         <div style={{ opacity: 0.75, fontSize: 12 }}>Nessuna voce di nota spese collegata al rapporto.</div>
       )}
-      {props.detailUrl && !loading && !error && rows.length > 0 && (
-        <div style={{ display: 'grid', gap: 8 }}>
-          {NSD_CATEGORIES.map(cat => {
-            const total = rowsByCategory[cat].reduce((s, r) => s + nsdSafeNum(r.importo_riga, 0), 0)
-            return (
-              <details key={cat} open={rowsByCategory[cat].length > 0} style={{ border: '1px solid #c5d9f1', borderRadius: 10, background: '#fff', overflow: 'hidden' }}>
-                <summary style={{ cursor: 'pointer', fontSize: 13, fontWeight: 800, color: '#1f2937', padding: '8px 12px', background: '#eaf2ff', borderBottom: '1px solid #c5d9f1' }}>
-                  {NSD_CATEGORY_LABELS[cat]} <span style={{ color: '#6b7280', fontWeight: 700 }}>({rowsByCategory[cat].length} voci · € {nsdMoney(total)})</span>
-                </summary>
-                <div style={{ padding: 10 }}>{renderRows(cat)}</div>
-              </details>
-            )
-          })}
-        </div>
+
+      {props.detailUrl && !loading && !error && rows.length > 0 && noteGroups.length > 1 && (
+        <DetailSectionCard
+          title="Riepilogo complessivo note spese"
+          right={<span style={{ fontSize: 12, fontWeight: 900, color: '#1F4E79', whiteSpace: 'nowrap' }}>€ {nsdMoney(overallSummary.totaleComplessivo)}</span>}
+        >
+          <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr)', gap: 0 }}>
+            {card('Totale voci', nsdRound(overallSummary.totaleAT + overallSummary.totalePR + overallSummary.totaleRU + overallSummary.totaleSL + overallSummary.totalePF, 2))}
+            {card(`Spese generali (${nsdMoney(overallSummary.percentualeSpeseGenerali)}%)`, overallSummary.importoSpeseGenerali)}
+            {card('Totale complessivo note spese', overallSummary.totaleComplessivo, true)}
+          </div>
+          {lastCalc ? <div style={{ fontSize: 11, color: '#6b7280', marginTop: 8 }}>Ultimo ricalcolo: {formatDateSafe(lastCalc)}</div> : null}
+        </DetailSectionCard>
       )}
+
+      {props.detailUrl && !loading && !error && noteGroups.map(group => {
+        const groupSummary = nsdComputeSummaryFromRows(group.rows, percentualeSpeseGenerali)
+        return (
+          <DetailSectionCard
+            key={group.code}
+            title={`Nota spese – ${group.info.label}`}
+            right={<span style={{ fontSize: 12, fontWeight: 900, color: '#1F4E79', whiteSpace: 'nowrap' }}>€ {nsdMoney(groupSummary.totaleComplessivo)}</span>}
+            borderColor={group.info.isUnlinked ? '#d1d5db' : '#c5d9f1'}
+            headerBg={group.info.isUnlinked ? '#f3f4f6' : '#eaf2ff'}
+          >
+            {group.isExpectedMissing && (
+              <div style={{ marginBottom: 10, padding: '8px 10px', borderRadius: 8, border: '1px solid #d1d5db', background: '#f9fafb', color: '#374151', fontSize: 12, lineHeight: 1.45 }}>
+                La violazione è presente nel rapporto, ma non risultano righe di nota spese collegate.
+              </div>
+            )}
+            {group.info.isUnlinked && (
+              <div style={{ marginBottom: 10, padding: '8px 10px', borderRadius: 8, border: '1px solid #d1d5db', background: '#f9fafb', color: '#374151', fontSize: 12, lineHeight: 1.45 }}>
+                Queste righe sono presenti nella tabella nota spese, ma non risultano collegate a una violazione tramite il campo “Casistica collegata”.
+              </div>
+            )}
+
+            {group.rows.length === 0 ? null : <div style={{ display: 'grid', gap: 8 }}>
+              {NSD_CATEGORIES.map(cat => {
+                const catRows = group.rows.filter(row => row.categoria_costo === cat)
+                if (!catRows.length) return null
+                const total = catRows.reduce((s, r) => s + nsdSafeNum(r.importo_riga, 0), 0)
+                return (
+                  <details key={`${group.code}-${cat}`} style={{ border: '1px solid #cbd5e1', borderRadius: 10, background: '#fff', overflow: 'hidden' }}>
+                    <summary style={{ cursor: 'pointer', fontSize: 13, fontWeight: 800, color: '#1f2937', padding: '8px 12px', background: '#e5e7eb', borderBottom: '1px solid #cbd5e1' }}>
+                      {NSD_CATEGORY_LABELS[cat]} <span style={{ color: '#4b5563', fontWeight: 700 }}>({catRows.length} voci · € {nsdMoney(total)})</span>
+                    </summary>
+                    <div style={{ padding: 10 }}>{renderRows(cat, group.rows)}</div>
+                  </details>
+                )
+              })}
+
+              <div style={{ marginTop: 2, border: '1px solid rgba(31,78,121,0.24)', borderRadius: 10, overflow: 'hidden', background: '#fff' }}>
+                {card(`Spese generali (${nsdMoney(groupSummary.percentualeSpeseGenerali)}%)`, groupSummary.importoSpeseGenerali)}
+                {card('Totale nota spese', groupSummary.totaleComplessivo, true)}
+              </div>
+            </div>}
+          </DetailSectionCard>
+        )
+      })}
     </div>
   )
 }
+
 
 
 function DetailTabsPanel (props: {
@@ -3834,6 +3967,7 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
     // Campi codificati testuali introdotti nella migrazione; restano nascosti
     // nel dettaglio, ma vengono letti per mantenere cache/selezione coerenti.
     'area_cod', 'settore_cod',
+    'norma_violata3', 'v_art08', 'v_art27', 'v_art30', 'v_art39',
 
     // Campi tecnici usati dal rendering dedicato della scheda Violazione.
     // Non vengono mostrati come righe grezze, ma devono essere sempre disponibili

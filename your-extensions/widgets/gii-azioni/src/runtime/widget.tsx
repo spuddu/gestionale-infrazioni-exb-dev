@@ -1517,6 +1517,8 @@ function ActionsPanel (props: {
 
   // Popup di diniego (validazione pre-trasmissione)
   const [denyPopupMessages, setDenyPopupMessages] = React.useState<string[]>([])
+  const [zeroNotaSpeseWarning, setZeroNotaSpeseWarning] = React.useState<string[]>([])
+  const [incompleteNotaSpeseWarning, setIncompleteNotaSpeseWarning] = React.useState<string[]>([])
 
   const [previewOpen, setPreviewOpen] = React.useState(false)
   const [previewLoading, setPreviewLoading] = React.useState(false)
@@ -1720,6 +1722,83 @@ function ActionsPanel (props: {
   }
 
   const sqlQuote = (v: any): string => `'${String(v ?? '').replace(/'/g, "''")}'`
+
+  type NotaSpeseCasisticaCheck = { codice: string; art: number; label: string }
+  const NOTE_SPESE_CASISTICHE_CHECK: NotaSpeseCasisticaCheck[] = [
+    { codice: 'C100_REPERIBILITA', art: 8, label: 'Art. 8 – Violazione servizio reperibilità' },
+    { codice: 'C101_SPRECO_ACQUA', art: 27, label: 'Art. 27 – Spreco d’acqua / uso negligente risorsa idrica' },
+    { codice: 'C104_ATTREZZATURE_DANNEGGIATE', art: 30, label: 'Art. 30 – Danneggiamento e/o perdita attrezzature' },
+    { codice: 'C113_DANNI_STRUTTURE_IRRIGUE', art: 39, label: 'Art. 39 – Danni strutture irrigue' }
+  ]
+
+  const isFlagSelectedLocal = (v: any): boolean => {
+    if (v === true) return true
+    const s = String(v ?? '').trim().toLowerCase()
+    return s === '1' || s === 'true' || s === 'si' || s === 'sì' || s === 'x'
+  }
+
+  const hasArtSelectedForNotaSpeseCheck = (attrs: any, art: number): boolean => {
+    const code = `Art${art}`
+    const norma = String(pickAttrCI(attrs, ['norma_violata3', 'NORMA_VIOLATA3']) || '')
+    const multi = new Set(norma.split(/\s+/).filter(Boolean))
+    if (multi.has(code)) return true
+    return isFlagSelectedLocal(pickAttrCI(attrs, [`v_art${String(art).padStart(2, '0')}`, `V_ART${String(art).padStart(2, '0')}`, `v_art${art}`, `V_ART${art}`]))
+  }
+
+  const getSelectedNotaSpeseCasisticheCheck = (attrs: any): NotaSpeseCasisticaCheck[] => {
+    return NOTE_SPESE_CASISTICHE_CHECK.filter(opt => hasArtSelectedForNotaSpeseCheck(attrs, opt.art)).sort((a, b) => a.art - b.art)
+  }
+
+  type NotaSpeseCasisticaStatus = { total: number; rows: number; incompleteRows: number }
+
+  const queryNotaSpeseStatusByCasistica = async (parentGlobalId: string): Promise<Record<string, NotaSpeseCasisticaStatus>> => {
+    const detailUrl = String(props.nsConfig?.detailUrl || '').trim()
+    const gid = String(parentGlobalId || '').trim()
+    if (!detailUrl || !gid) return {}
+    const FeatureLayer = await loadEsriModule<any>('esri/layers/FeatureLayer')
+    const fl = new FeatureLayer({ url: detailUrl, outFields: ['*'] })
+    if (typeof fl.load === 'function') { try { await fl.load() } catch {} }
+    const q = fl.createQuery ? fl.createQuery() : {}
+    q.where = `parent_globalid = ${sqlQuote(gid)}`
+    q.outFields = ['codice_casistica', 'importo_riga', 'quantita']
+    q.returnGeometry = false
+    const res = await fl.queryFeatures(q)
+    const statuses: Record<string, NotaSpeseCasisticaStatus> = {}
+    ;(res?.features || []).forEach((f: any) => {
+      const a = f?.attributes || {}
+      const code = String(a.codice_casistica || '').trim()
+      if (!code) return
+      const value = Number(a.importo_riga)
+      const qty = Number(a.quantita)
+      const cur = statuses[code] || { total: 0, rows: 0, incompleteRows: 0 }
+      cur.total += Number.isFinite(value) ? value : 0
+      cur.rows += 1
+      if (!Number.isFinite(qty) || qty <= 0) cur.incompleteRows += 1
+      statuses[code] = cur
+    })
+    return statuses
+  }
+
+  const findNotaSpeseWarnings = async (): Promise<{ blocking: string[]; confirmable: string[] }> => {
+    // Avvisi persistenti anche negli inoltri successivi del flusso tecnico:
+    // TI → RZ, RZ → RI e RI → DT.
+    if (!(role === 'TI' || role === 'RZ' || role === 'RI')) return { blocking: [], confirmable: [] }
+    const selected = getSelectedNotaSpeseCasisticheCheck(data)
+    if (selected.length === 0) return { blocking: [], confirmable: [] }
+    const parentGlobalId = String(pickAttrCI(data, ['GlobalID', 'globalid', 'GLOBALID']) || '').trim()
+    const statuses = await queryNotaSpeseStatusByCasistica(parentGlobalId)
+    const blocking: string[] = []
+    const confirmable: string[] = []
+    selected.forEach(opt => {
+      const st = statuses[opt.codice] || { total: 0, rows: 0, incompleteRows: 0 }
+      if (st.incompleteRows > 0) {
+        blocking.push(`${opt.label}: ${st.incompleteRows} ${st.incompleteRows === 1 ? 'riga senza quantità o con quantità pari a zero' : 'righe senza quantità o con quantità pari a zero'}`)
+        return
+      }
+      if (Number(st.total || 0) <= 0) confirmable.push(`${opt.label}: 0,00 €`)
+    })
+    return { blocking, confirmable }
+  }
 
   const getCurrentCycleContext = () => {
     const giiRole: any = (window as any).__giiUserRole || {}
@@ -3827,6 +3906,8 @@ function ActionsPanel (props: {
     setTiAmmSelected('')
     setTiLoadErr('')
     setTiAmmLoadErr('')
+    setZeroNotaSpeseWarning([])
+    setIncompleteNotaSpeseWarning([])
   }
 
   const openWorkflowMenu = () => {
@@ -3840,6 +3921,8 @@ function ActionsPanel (props: {
     setTiAmmSelected('')
     setTiLoadErr('')
     setTiAmmLoadErr('')
+    setZeroNotaSpeseWarning([])
+    setIncompleteNotaSpeseWarning([])
   }
 
   const canConfirmWorkflowAction = (() => {
@@ -3852,6 +3935,26 @@ function ActionsPanel (props: {
     return true
   })()
 
+  const confirmApprovaWithNotaSpeseWarning = async () => {
+    if (role === 'TI' || role === 'RZ' || role === 'RI') {
+      try {
+        const warnings = await findNotaSpeseWarnings()
+        if (warnings.blocking.length > 0) {
+          setIncompleteNotaSpeseWarning(warnings.blocking)
+          return
+        }
+        if (warnings.confirmable.length > 0) {
+          setZeroNotaSpeseWarning(warnings.confirmable)
+          return
+        }
+      } catch (e: any) {
+        setMsg({ kind: 'err', text: `Errore verifica note spese: ${e?.message || String(e)}` })
+        return
+      }
+    }
+    await onConfirmEsito(ESITO_APPROVATA, approvaDoneLabel)
+  }
+
   const confirmWorkflowAction = async () => {
     setConfirmAttempted(true)
     if (!canConfirmWorkflowAction || !pending) return
@@ -3860,7 +3963,7 @@ function ActionsPanel (props: {
     else if (pending === 'ASSEGNA_TI_AMM') await onConfirmAssegnaTiAmm()
     else if (pending === 'INVIA_TI_AMM' || pending === 'RESTITUISCI_TI_AMM') await onConfirmRestituisciTiAmm()
     else if (pending === 'INTEGRAZIONE' || pending === 'INTEGRAZIONE_TI_AMM' || pending === 'INTEGRAZIONE_TECNICA') await onConfirmIntegrazione()
-    else if (pending === 'APPROVA') await onConfirmEsito(ESITO_APPROVATA, approvaDoneLabel)
+    else if (pending === 'APPROVA') await confirmApprovaWithNotaSpeseWarning()
     else if (pending === 'RESPINGI') await onConfirmRespinta()
     else if (pending === 'ELIMINA') await onConfirmElimina()
 
@@ -4193,9 +4296,93 @@ function ActionsPanel (props: {
           {pending === 'ASSEGNA_TI_AMM' && <button type='button' onClick={onConfirmAssegnaTiAmm} disabled={loading || !tiAmmSelected} style={{ padding: '8px 18px', borderRadius: 8, border: `1px solid ${theme.buttonBorder}`, background: theme.buttonBg, color: '#fff', fontWeight: 700, fontSize: 13, cursor: (loading || !tiAmmSelected) ? 'not-allowed' : 'pointer', opacity: (loading || !tiAmmSelected) ? 0.6 : 1 }}>{loading ? 'Aggiorno…' : 'Conferma'}</button>}
           {(pending === 'INVIA_TI_AMM' || pending === 'RESTITUISCI_TI_AMM') && <button type='button' onClick={onConfirmRestituisciTiAmm} disabled={loading} style={{ padding: '8px 18px', borderRadius: 8, border: `1px solid ${theme.buttonBorder}`, background: theme.buttonBg, color: '#fff', fontWeight: 700, fontSize: 13, cursor: loading ? 'not-allowed' : 'pointer' }}>{loading ? 'Aggiorno…' : 'Conferma'}</button>}
           {(pending === 'INTEGRAZIONE' || pending === 'INTEGRAZIONE_TI_AMM' || pending === 'INTEGRAZIONE_TECNICA') && <button type='button' onClick={onConfirmIntegrazione} disabled={loading} style={{ padding: '8px 18px', borderRadius: 8, border: `1px solid ${theme.buttonBorder}`, background: theme.buttonBg, color: '#fff', fontWeight: 700, fontSize: 13, cursor: loading ? 'not-allowed' : 'pointer' }}>{loading ? 'Aggiorno…' : 'Conferma'}</button>}
-          {pending === 'APPROVA' && <button type='button' onClick={() => onConfirmEsito(ESITO_APPROVATA, approvaDoneLabel)} disabled={loading} style={{ padding: '8px 18px', borderRadius: 8, border: `1px solid ${theme.buttonBorder}`, background: theme.buttonBg, color: '#fff', fontWeight: 700, fontSize: 13, cursor: loading ? 'not-allowed' : 'pointer' }}>{loading ? 'Aggiorno…' : 'Conferma'}</button>}
+          {pending === 'APPROVA' && <button type='button' onClick={() => { void confirmApprovaWithNotaSpeseWarning() }} disabled={loading} style={{ padding: '8px 18px', borderRadius: 8, border: `1px solid ${theme.buttonBorder}`, background: theme.buttonBg, color: '#fff', fontWeight: 700, fontSize: 13, cursor: loading ? 'not-allowed' : 'pointer' }}>{loading ? 'Aggiorno…' : 'Conferma'}</button>}
           {pending === 'RESPINGI' && <button type='button' onClick={onConfirmRespinta} disabled={loading} style={{ padding: '8px 18px', borderRadius: 8, border: `1px solid ${theme.buttonBorder}`, background: theme.buttonBg, color: '#fff', fontWeight: 700, fontSize: 13, cursor: loading ? 'not-allowed' : 'pointer' }}>{loading ? 'Aggiorno…' : 'Conferma'}</button>}
           {pending === 'ELIMINA' && <button type='button' onClick={onConfirmElimina} disabled={loading} style={{ padding: '8px 18px', borderRadius: 8, border: `1px solid ${theme.buttonBorder}`, background: theme.buttonBg, color: '#fff', fontWeight: 700, fontSize: 13, cursor: loading ? 'not-allowed' : 'pointer' }}>{loading ? 'Archivio…' : 'Conferma'}</button>}
+        </div>
+      </div>
+    </div>,
+    document.body
+  ) : null
+
+  const incompleteNotaSpeseWarningModal = incompleteNotaSpeseWarning.length > 0 ? createPortal(
+    <div
+      data-gii-global-popup-root='1'
+      style={{ position: 'fixed', inset: 0, zIndex: 2147483647, background: 'rgba(0,0,0,0.52)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16, pointerEvents: 'auto' }}
+      onClick={(e) => { e.preventDefault(); e.stopPropagation() }}
+      onMouseDown={(e) => { e.preventDefault(); e.stopPropagation() }}
+    >
+      <div
+        role='dialog'
+        aria-modal='true'
+        data-gii-global-popup-dialog='1'
+        style={{ width: 'min(92vw, 640px)', maxHeight: 'calc(100vh - 48px)', overflowY: 'auto', background: '#fff', borderRadius: 14, boxShadow: '0 20px 60px rgba(0,0,0,0.30)', border: '1px solid #dc2626', padding: 18, display: 'grid', gap: 14 }}
+        onClick={(e) => { e.stopPropagation() }}
+        onMouseDown={(e) => { e.stopPropagation() }}
+      >
+        <div style={{ background: '#fef2f2', border: '1px solid #fecaca', color: '#991b1b', borderRadius: 10, padding: '10px 12px' }}>
+          <div style={{ fontWeight: 800, fontSize: 16 }}>Nota spese incompleta</div>
+          <div style={{ marginTop: 6, fontSize: 13, lineHeight: 1.45 }}>
+            Non è possibile procedere con l’inoltro perché sono presenti righe di nota spese senza quantità o con quantità pari a zero.
+          </div>
+        </div>
+        <ul style={{ margin: 0, paddingLeft: 22, display: 'grid', gap: 5, fontSize: 13, color: '#374151' }}>
+          {incompleteNotaSpeseWarning.map((m, i) => <li key={i}>{m}</li>)}
+        </ul>
+        <div style={{ fontSize: 13, color: '#4b5563' }}>Completare le quantità oppure eliminare le righe non necessarie prima dell’inoltro.</div>
+        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10 }}>
+          <button
+            type='button'
+            onClick={() => setIncompleteNotaSpeseWarning([])}
+            style={{ padding: '8px 18px', borderRadius: 8, border: '1px solid #dc2626', background: '#dc2626', color: '#fff', fontWeight: 800, fontSize: 13, cursor: 'pointer' }}
+          >Chiudi</button>
+        </div>
+      </div>
+    </div>,
+    document.body
+  ) : null
+
+  const zeroNotaSpeseWarningModal = zeroNotaSpeseWarning.length > 0 ? createPortal(
+    <div
+      data-gii-global-popup-root='1'
+      style={{ position: 'fixed', inset: 0, zIndex: 2147483647, background: 'rgba(0,0,0,0.52)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16, pointerEvents: 'auto' }}
+      onClick={(e) => { e.preventDefault(); e.stopPropagation() }}
+      onMouseDown={(e) => { e.preventDefault(); e.stopPropagation() }}
+    >
+      <div
+        role='dialog'
+        aria-modal='true'
+        data-gii-global-popup-dialog='1'
+        style={{ width: 'min(92vw, 620px)', maxHeight: 'calc(100vh - 48px)', overflowY: 'auto', background: '#fff', borderRadius: 14, boxShadow: '0 20px 60px rgba(0,0,0,0.30)', border: '1px solid #f59e0b', padding: 18, display: 'grid', gap: 14 }}
+        onClick={(e) => { e.stopPropagation() }}
+        onMouseDown={(e) => { e.stopPropagation() }}
+      >
+        <div style={{ background: '#fff7ed', border: '1px solid #fed7aa', color: '#9a3412', borderRadius: 10, padding: '10px 12px' }}>
+          <div style={{ fontWeight: 800, fontSize: 16 }}>Attenzione</div>
+          <div style={{ marginTop: 6, fontSize: 13, lineHeight: 1.45 }}>
+            Una o più violazioni selezionate prevedono la possibilità di nota spese, ma risultano prive di importo.
+          </div>
+        </div>
+        <ul style={{ margin: 0, paddingLeft: 22, display: 'grid', gap: 5, fontSize: 13, color: '#374151' }}>
+          {zeroNotaSpeseWarning.map((m, i) => <li key={i}>{m}</li>)}
+        </ul>
+        <div style={{ fontSize: 13, color: '#4b5563' }}>Confermare comunque la trasmissione?</div>
+        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10 }}>
+          <button
+            type='button'
+            onClick={() => setZeroNotaSpeseWarning([])}
+            style={{ padding: '8px 18px', borderRadius: 8, border: '1px solid rgba(0,0,0,0.18)', background: '#fff', color: '#374151', fontWeight: 700, fontSize: 13, cursor: 'pointer' }}
+          >Annulla</button>
+          <button
+            type='button'
+            onClick={async () => {
+              setZeroNotaSpeseWarning([])
+              await onConfirmEsito(ESITO_APPROVATA, approvaDoneLabel)
+              setActionsMenuOpen(false)
+            }}
+            disabled={loading}
+            style={{ padding: '8px 18px', borderRadius: 8, border: '1px solid #f97316', background: '#f97316', color: '#fff', fontWeight: 800, fontSize: 13, cursor: loading ? 'not-allowed' : 'pointer', opacity: loading ? 0.65 : 1 }}
+          >Conferma trasmissione</button>
         </div>
       </div>
     </div>,
@@ -4377,6 +4564,8 @@ function ActionsPanel (props: {
 
         {actionMenuModal}
         {pendingModal}
+        {incompleteNotaSpeseWarningModal}
+        {zeroNotaSpeseWarningModal}
         {reportPreviewModal}
 
         {denyPopupMessages.length > 0 && createPortal(
@@ -4796,17 +4985,141 @@ function normalizeArcgisLayerUrl (raw?: string | null): string {
 }
 
 
+type NsCatPdf = 'AT' | 'PR' | 'RU' | 'SL' | 'PF'
+type NsRowPdf = {
+  objectid: number
+  categoria_costo: NsCatPdf
+  origine_voce_snapshot: string
+  codice_voce_snapshot: string
+  descrizione_snapshot: string
+  unita_misura_snapshot: string
+  prezzo_unitario_snapshot: number
+  quantita: number
+  importo_riga: number
+  anno_prezzario_snapshot?: number | null
+  ordine: number
+  note: string
+  codice_casistica?: string | null
+}
+type NsSummaryPdf = {
+  totaleAT: number
+  totalePR: number
+  totaleRU: number
+  totaleSL: number
+  totalePF: number
+  percentualeSpeseGenerali: number
+  importoSpeseGenerali: number
+  totaleComplessivo: number
+}
+
+const NS_PDF_CATS: NsCatPdf[] = ['AT', 'PR', 'RU', 'SL', 'PF']
+const NS_PDF_CASISTICA_META: Record<string, { order: number; label: string }> = {
+  C100_REPERIBILITA: { order: 8, label: 'Art. 8 – Violazione servizio reperibilità' },
+  C101_SPRECO_ACQUA: { order: 27, label: 'Art. 27 – Spreco d’acqua / uso negligente risorsa idrica' },
+  C104_ATTREZZATURE_DANNEGGIATE: { order: 30, label: 'Art. 30 – Danneggiamento e/o perdita attrezzature' },
+  C113_DANNI_STRUTTURE_IRRIGUE: { order: 39, label: 'Art. 39 – Danni strutture irrigue' }
+}
+
+function escapeSqlStringForRapportoPdf (v: any): string {
+  return String(v ?? '').replace(/'/g, "''")
+}
+
+function parentGlobalidWhereForRapportoPdf (parentGlobalId: string): string {
+  const raw = String(parentGlobalId || '').trim()
+  const noBraces = raw.replace(/^\{/, '').replace(/\}$/, '')
+  const values = Array.from(new Set([raw, noBraces, `{${noBraces}}`].filter(Boolean)))
+  return values.map(v => `parent_globalid = '${escapeSqlStringForRapportoPdf(v)}'`).join(' OR ')
+}
+
+function moneyItRapportoPdf (v: number): string {
+  if (!Number.isFinite(v)) return ''
+  return v.toLocaleString('it-IT', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + ' €'
+}
+
+function emptyNsRowsForRapportoPdf (): Record<NsCatPdf, NsRowPdf[]> {
+  return { AT: [], PR: [], RU: [], SL: [], PF: [] }
+}
+
+function nsSummaryForRapportoPdf (rows: Record<NsCatPdf, NsRowPdf[]>, percentualeSpeseGenerali: number): NsSummaryPdf {
+  const sumCat = (cat: NsCatPdf) => (rows[cat] || []).reduce((sum, r) => sum + (Number(r.importo_riga) || 0), 0)
+  const totaleAT = sumCat('AT')
+  const totalePR = sumCat('PR')
+  const totaleRU = sumCat('RU')
+  const totaleSL = sumCat('SL')
+  const totalePF = sumCat('PF')
+  const imponibile = totaleAT + totalePR + totaleRU + totaleSL + totalePF
+  const pct = Number.isFinite(percentualeSpeseGenerali) ? percentualeSpeseGenerali : 15
+  const importoSpeseGenerali = imponibile * pct / 100
+  return {
+    totaleAT,
+    totalePR,
+    totaleRU,
+    totaleSL,
+    totalePF,
+    percentualeSpeseGenerali: pct,
+    importoSpeseGenerali,
+    totaleComplessivo: imponibile + importoSpeseGenerali
+  }
+}
+
+function notaSpeseGroupsForRapportoPdf (
+  rawRows: any[],
+  percentualeSpeseGenerali: number
+): Array<{ codiceCasistica: string; label: string; rows: Record<NsCatPdf, NsRowPdf[]>; summary: NsSummaryPdf }> {
+  const byCode = new Map<string, Record<NsCatPdf, NsRowPdf[]>>()
+
+  for (const r of rawRows || []) {
+    const cat = String(r.categoria_costo || '').toUpperCase() as NsCatPdf
+    if (!NS_PDF_CATS.includes(cat)) continue
+    const code = String(r.codice_casistica || '').trim() || '__NON_COLLEGATA__'
+    if (!byCode.has(code)) byCode.set(code, emptyNsRowsForRapportoPdf())
+    byCode.get(code)![cat].push({
+      objectid: Number(r.OBJECTID ?? r.objectid ?? 0),
+      categoria_costo: cat,
+      origine_voce_snapshot: String(r.origine_voce_snapshot || ''),
+      codice_voce_snapshot: String(r.codice_voce_snapshot || ''),
+      descrizione_snapshot: String(r.descrizione_snapshot || ''),
+      unita_misura_snapshot: String(r.unita_misura_snapshot || ''),
+      prezzo_unitario_snapshot: Number(r.prezzo_unitario_snapshot || 0),
+      quantita: Number(r.quantita || 0),
+      importo_riga: Number(r.importo_riga || 0),
+      anno_prezzario_snapshot: r.anno_prezzario_snapshot == null ? null : Number(r.anno_prezzario_snapshot),
+      ordine: Number(r.ordine || 0),
+      note: String(r.note || ''),
+      codice_casistica: code === '__NON_COLLEGATA__' ? null : code
+    })
+  }
+
+  return Array.from(byCode.entries())
+    .map(([code, rows]) => {
+      const meta = NS_PDF_CASISTICA_META[code]
+      return {
+        codiceCasistica: code,
+        label: meta?.label || (code === '__NON_COLLEGATA__' ? 'Nota spese non collegata a violazione' : 'Nota spese collegata'),
+        rows,
+        summary: nsSummaryForRapportoPdf(rows, percentualeSpeseGenerali)
+      }
+    })
+    .filter(g => g.summary.totaleComplessivo > 0)
+    .sort((a, b) => {
+      const ao = NS_PDF_CASISTICA_META[a.codiceCasistica]?.order ?? 999
+      const bo = NS_PDF_CASISTICA_META[b.codiceCasistica]?.order ?? 999
+      if (ao !== bo) return ao - bo
+      return a.label.localeCompare(b.label, 'it')
+    })
+}
+
 async function buildRapportoPdfBlob (
   data: any, utentiCache: Map<string, UtenteCached> | null,
   nsConfig?: { detailUrl: string; parametriUrl: string; parametroCode: string }
 ): Promise<{ blob: Blob; fileName: string }> {
   const map = buildPlaceholderMap(data, utentiCache)
-  const rapportoBytes = await buildRapportoPdf(map)
   const fileName = rapportoPdfFileName(map)
 
-  let finalBytes: Uint8Array = rapportoBytes
+  let nsGroups: Array<{ codiceCasistica: string; label: string; rows: Record<NsCatPdf, NsRowPdf[]>; summary: NsSummaryPdf }> = []
 
-  // Se le URL NS sono configurate, query le righe e genera la nota spese
+  // Se le URL NS sono configurate, query le righe prima di generare il rapporto:
+  // il riepilogo nel rapporto principale deve indicare se gli allegati sono più di uno.
   const detailUrl = normalizeArcgisLayerUrl(nsConfig?.detailUrl)
   const parametriUrl = normalizeArcgisLayerUrl(nsConfig?.parametriUrl)
   if (detailUrl && data) {
@@ -4815,78 +5128,70 @@ async function buildRapportoPdfBlob (
       if (parentGlobalId) {
         const FeatureLayer = await loadEsriModule<any>('esri/layers/FeatureLayer')
 
-        // Query righe dettaglio e percentuale in parallelo
         const detailPromise = (async () => {
           const fl = new FeatureLayer({ url: detailUrl })
           if (typeof fl.load === 'function') await fl.load()
-          const res = await fl.queryFeatures({ where: `parent_globalid = '${parentGlobalId}'`, outFields: ['*'], returnGeometry: false })
+          const where = parentGlobalidWhereForRapportoPdf(parentGlobalId)
+          const res = await fl.queryFeatures({ where, outFields: ['*'], returnGeometry: false })
           return (res?.features || []).map((f: any) => f.attributes || {})
         })()
 
         const percPromise = (async () => {
-          if (!parametriUrl) return 0
+          if (!parametriUrl) return 15
           try {
             const pCode = nsConfig?.parametroCode || 'SPESE_GENERALI_PERC'
             const pfl = new FeatureLayer({ url: parametriUrl })
             if (typeof pfl.load === 'function') await pfl.load()
-            const pRes = await pfl.queryFeatures({ where: `codice_parametro = '${pCode}'`, outFields: ['valore_num'], returnGeometry: false })
+            const pRes = await pfl.queryFeatures({ where: `codice_parametro = '${escapeSqlStringForRapportoPdf(pCode)}'`, outFields: ['valore_num'], returnGeometry: false })
             const pVal = pRes?.features?.[0]?.attributes?.valore_num
-            return (pVal != null) ? (Number(pVal) || 0) : 0
-          } catch { return 0 }
+            return (pVal != null) ? (Number(pVal) || 15) : 15
+          } catch { return 15 }
         })()
 
         const [rawRows, percSG] = await Promise.all([detailPromise, percPromise])
-
-        if (rawRows.length > 0) {
-          const cats: string[] = ['AT', 'PR', 'RU', 'SL', 'PF']
-          const rowsByCat: Record<string, any[]> = { AT: [], PR: [], RU: [], SL: [], PF: [] }
-          for (const r of rawRows) {
-            const cat = String(r.categoria_costo || '').toUpperCase() as string
-            if (cats.includes(cat)) {
-              rowsByCat[cat].push({
-                codice_voce_snapshot: String(r.codice_voce_snapshot || ''),
-                descrizione_snapshot: String(r.descrizione_snapshot || ''),
-                unita_misura_snapshot: String(r.unita_misura_snapshot || ''),
-                prezzo_unitario_snapshot: Number(r.prezzo_unitario_snapshot || 0),
-                quantita: Number(r.quantita || 0),
-                importo_riga: Number(r.importo_riga || 0)
-              } as any)
-            }
-          }
-
-          const hasRows = Object.values(rowsByCat).some(arr => arr.length > 0)
-          if (hasRows) {
-            const sumCat = (cat: string) => rowsByCat[cat].reduce((s, r) => s + (r.importo_riga || 0), 0)
-            const totAT = sumCat('AT'), totPR = sumCat('PR'), totRU = sumCat('RU'), totSL = sumCat('SL'), totPF = sumCat('PF')
-            const subtot = totAT + totPR + totRU + totSL + totPF
-            const importoSG = Math.round(subtot * percSG) / 100
-            const totComp = subtot + importoSG
-
-            const nsData: NotaSpeseData = {
-              cod_pratica: map.cod_pratica || '',
-              area_label: map.area_label || '',
-              settore_label: map.settore_label || '',
-              rows: rowsByCat,
-              summary: {
-                totaleAT: totAT, totalePR: totPR, totaleRU: totRU, totaleSL: totSL, totalePF: totPF,
-                percentualeSpeseGenerali: percSG, importoSpeseGenerali: importoSG, totaleComplessivo: totComp
-              },
-              luogo_data: 'Cagliari, ' + (formatDateIt(data.data_firma) || new Date().toLocaleDateString('it-IT', { day: '2-digit', month: '2-digit', year: 'numeric' })),
-              firma_nome: map.firma_ti || ''
-            }
-            const nsBytes = await buildNotaSpesePdf(nsData)
-            const merged = await PDFDocument.create()
-            const rapDoc = await PDFDocument.load(rapportoBytes)
-            const nsDoc = await PDFDocument.load(nsBytes)
-            const rapPages = await merged.copyPages(rapDoc, rapDoc.getPageIndices())
-            rapPages.forEach(pg => merged.addPage(pg))
-            const nsPages = await merged.copyPages(nsDoc, nsDoc.getPageIndices())
-            nsPages.forEach(pg => merged.addPage(pg))
-            finalBytes = await merged.save()
-          }
-        }
+        nsGroups = notaSpeseGroupsForRapportoPdf(rawRows, percSG)
       }
     } catch {}
+  }
+
+  if (nsGroups.length > 0) {
+    const totaleNoteSpese = nsGroups.reduce((sum, group) => sum + (Number(group?.summary?.totaleComplessivo) || 0), 0)
+    map.importo_rimborso = moneyItRapportoPdf(totaleNoteSpese)
+    map.nota_spese_label = nsGroups.length > 1 ? '(Vedi note spese allegate)' : '(Vedi nota spese allegata)'
+  } else {
+    map.nota_spese_label = ''
+  }
+
+  const rapportoBytes = await buildRapportoPdf(map)
+  let finalBytes: Uint8Array = rapportoBytes
+
+  if (nsGroups.length > 0) {
+    const merged = await PDFDocument.create()
+    const rapDoc = await PDFDocument.load(rapportoBytes)
+    const rapPages = await merged.copyPages(rapDoc, rapDoc.getPageIndices())
+    rapPages.forEach(pg => merged.addPage(pg))
+
+    for (let i = 0; i < nsGroups.length; i++) {
+      const group = nsGroups[i]
+      const nsData: NotaSpeseData = {
+        cod_pratica: map.cod_pratica || '',
+        area_label: map.area_label || '',
+        settore_label: map.settore_label || '',
+        area_cod: map.area_cod || '',
+        numero_nota: i + 1,
+        titolo_nota: group.label,
+        rows: group.rows as any,
+        summary: group.summary as any,
+        luogo_data: 'Cagliari, ' + (formatDateIt(data.data_firma) || new Date().toLocaleDateString('it-IT', { day: '2-digit', month: '2-digit', year: 'numeric' })),
+        firma_nome: map.firma_ti || ''
+      }
+      const nsBytes = await buildNotaSpesePdf(nsData)
+      const nsDoc = await PDFDocument.load(nsBytes)
+      const nsPages = await merged.copyPages(nsDoc, nsDoc.getPageIndices())
+      nsPages.forEach(pg => merged.addPage(pg))
+    }
+
+    finalBytes = await merged.save()
   }
 
   const blob = new Blob([finalBytes as any], { type: 'application/pdf' })

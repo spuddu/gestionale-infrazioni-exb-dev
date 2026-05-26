@@ -315,7 +315,87 @@ const containerCss = css`display: flex; flex-direction: column; width: 100%; hei
 
 type NsCat = 'AT' | 'PR' | 'RU' | 'SL' | 'PF'
 type NsSummaryP = { totaleAT: number; totalePR: number; totaleRU: number; totaleSL: number; totalePF: number; percentualeSpeseGenerali: number; importoSpeseGenerali: number; totaleComplessivo: number }
-type NsRowP = { objectid: number; categoria_costo: NsCat; origine_voce_snapshot: string; codice_voce_snapshot: string; descrizione_snapshot: string; unita_misura_snapshot: string; prezzo_unitario_snapshot: number; quantita: number; importo_riga: number; anno_prezzario_snapshot?: number | null; ordine: number; note: string }
+type NsRowP = { objectid: number; categoria_costo: NsCat; origine_voce_snapshot: string; codice_voce_snapshot: string; descrizione_snapshot: string; unita_misura_snapshot: string; prezzo_unitario_snapshot: number; quantita: number; importo_riga: number; anno_prezzario_snapshot?: number | null; ordine: number; note: string; codice_casistica?: string | null }
+
+
+const NS_CATS: NsCat[] = ['AT', 'PR', 'RU', 'SL', 'PF']
+const EMPTY_NS_ROWS: Record<NsCat, NsRowP[]> = { AT: [], PR: [], RU: [], SL: [], PF: [] }
+
+const NS_CASISTICA_META: Record<string, { order: number; label: string }> = {
+  C100_REPERIBILITA: { order: 8, label: 'Art. 8 – Violazione servizio reperibilità' },
+  C101_SPRECO_ACQUA: { order: 27, label: 'Art. 27 – Spreco d’acqua / uso negligente risorsa idrica' },
+  C104_ATTREZZATURE_DANNEGGIATE: { order: 30, label: 'Art. 30 – Danneggiamento e/o perdita attrezzature' },
+  C113_DANNI_STRUTTURE_IRRIGUE: { order: 39, label: 'Art. 39 – Danni strutture irrigue' }
+}
+
+function moneyIt (v: number): string {
+  if (!Number.isFinite(v)) return ''
+  return v.toLocaleString('it-IT', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + ' €'
+}
+
+function normalizeNsCasistica (v: any): string {
+  return String(v ?? '').trim()
+}
+
+function cloneEmptyNsRows (): Record<NsCat, NsRowP[]> {
+  return { AT: [], PR: [], RU: [], SL: [], PF: [] }
+}
+
+function buildNsSummaryForRows (rows: Record<NsCat, NsRowP[]>, percentualeSpeseGenerali: number): NsSummaryP {
+  const sumCat = (cat: NsCat) => (rows[cat] || []).reduce((sum, r) => sum + (Number(r.importo_riga) || 0), 0)
+  const totaleAT = sumCat('AT')
+  const totalePR = sumCat('PR')
+  const totaleRU = sumCat('RU')
+  const totaleSL = sumCat('SL')
+  const totalePF = sumCat('PF')
+  const imponibile = totaleAT + totalePR + totaleRU + totaleSL + totalePF
+  const pct = Number.isFinite(percentualeSpeseGenerali) ? percentualeSpeseGenerali : 15
+  const importoSpeseGenerali = imponibile * pct / 100
+  return {
+    totaleAT,
+    totalePR,
+    totaleRU,
+    totaleSL,
+    totalePF,
+    percentualeSpeseGenerali: pct,
+    importoSpeseGenerali,
+    totaleComplessivo: imponibile + importoSpeseGenerali
+  }
+}
+
+function buildNotaSpeseGroups (
+  rowsByCategory: Record<NsCat, NsRowP[]> | undefined,
+  globalSummary: NsSummaryP | undefined
+): Array<{ codiceCasistica: string; label: string; rows: Record<NsCat, NsRowP[]>; summary: NsSummaryP }> {
+  const byCode = new Map<string, Record<NsCat, NsRowP[]>>()
+  for (const cat of NS_CATS) {
+    for (const row of (rowsByCategory?.[cat] || [])) {
+      const code = normalizeNsCasistica(row.codice_casistica) || '__NON_COLLEGATA__'
+      if (!byCode.has(code)) byCode.set(code, cloneEmptyNsRows())
+      byCode.get(code)![cat].push({ ...row, categoria_costo: cat })
+    }
+  }
+
+  const pct = Number(globalSummary?.percentualeSpeseGenerali)
+  const groups = Array.from(byCode.entries()).map(([code, rows]) => {
+    const meta = NS_CASISTICA_META[code]
+    return {
+      codiceCasistica: code,
+      label: meta?.label || (code === '__NON_COLLEGATA__' ? 'Nota spese non collegata a violazione' : 'Nota spese collegata'),
+      rows,
+      summary: buildNsSummaryForRows(rows, Number.isFinite(pct) ? pct : 15)
+    }
+  })
+
+  return groups
+    .filter(g => g.summary.totaleComplessivo > 0)
+    .sort((a, b) => {
+      const ao = NS_CASISTICA_META[a.codiceCasistica]?.order ?? 999
+      const bo = NS_CASISTICA_META[b.codiceCasistica]?.order ?? 999
+      if (ao !== bo) return ao - bo
+      return a.label.localeCompare(b.label, 'it')
+    })
+}
 
 export default function AnteprimaPanel (p: { data: Record<string, any>; mode: 'create' | 'edit'; nsRows?: Record<NsCat, NsRowP[]>; nsSummary?: NsSummaryP }): any {
   const [pdfUrl, setPdfUrl] = React.useState<string | null>(null)
@@ -375,30 +455,46 @@ export default function AnteprimaPanel (p: { data: Record<string, any>; mode: 'c
     ;(async () => {
       try {
         const map = buildPlaceholderMap(dataSnapshot, utenti)
+        const nsGroups = buildNotaSpeseGroups(p.nsRows, p.nsSummary)
+        if (nsGroups.length > 0) {
+          const totaleNoteSpese = nsGroups.reduce((sum, group) => sum + (Number(group?.summary?.totaleComplessivo) || 0), 0)
+          map.importo_rimborso = moneyIt(totaleNoteSpese)
+          map.nota_spese_label = nsGroups.length > 1 ? '(Vedi note spese allegate)' : '(Vedi nota spese allegata)'
+        } else {
+          map.nota_spese_label = ''
+        }
+
         const rapportoBytes = await buildRapportoPdf(map)
         if (cancelled) return
 
-        // Se ci sono righe nota spese, genera e accoda al rapporto
+        // Se ci sono più note spese, genera un allegato distinto per ciascuna casistica.
         let finalBytes: Uint8Array = rapportoBytes
-        const hasNs = p.nsRows && Object.values(p.nsRows).some(arr => arr && arr.length > 0)
-        if (hasNs && p.nsSummary) {
-          const nsData: NotaSpeseData = {
-            cod_pratica: map.cod_pratica || '',
-            area_label: map.area_label || '',
-            settore_label: map.settore_label || '',
-            rows: p.nsRows as any,
-            summary: p.nsSummary,
-            luogo_data: 'Cagliari, ' + (formatDateIt(dataSnapshot.data_firma) || new Date().toLocaleDateString('it-IT', { day: '2-digit', month: '2-digit', year: 'numeric' })),
-            firma_nome: map.firma_ti || ''
-          }
-          const nsBytes = await buildNotaSpesePdf(nsData)
+        if (nsGroups.length > 0) {
           const merged = await PDFDocument.create()
           const rapDoc = await PDFDocument.load(rapportoBytes)
-          const nsDoc = await PDFDocument.load(nsBytes)
           const rapPages = await merged.copyPages(rapDoc, rapDoc.getPageIndices())
           rapPages.forEach(pg => merged.addPage(pg))
-          const nsPages = await merged.copyPages(nsDoc, nsDoc.getPageIndices())
-          nsPages.forEach(pg => merged.addPage(pg))
+
+          for (let i = 0; i < nsGroups.length; i++) {
+            const group = nsGroups[i]
+            const nsData: NotaSpeseData = {
+              cod_pratica: map.cod_pratica || '',
+              area_label: map.area_label || '',
+              settore_label: map.settore_label || '',
+              area_cod: map.area_cod || '',
+              numero_nota: i + 1,
+              titolo_nota: group.label,
+              rows: group.rows as any,
+              summary: group.summary,
+              luogo_data: 'Cagliari, ' + (formatDateIt(dataSnapshot.data_firma) || new Date().toLocaleDateString('it-IT', { day: '2-digit', month: '2-digit', year: 'numeric' })),
+              firma_nome: map.firma_ti || ''
+            }
+            const nsBytes = await buildNotaSpesePdf(nsData)
+            const nsDoc = await PDFDocument.load(nsBytes)
+            const nsPages = await merged.copyPages(nsDoc, nsDoc.getPageIndices())
+            nsPages.forEach(pg => merged.addPage(pg))
+          }
+
           finalBytes = await merged.save()
         }
 

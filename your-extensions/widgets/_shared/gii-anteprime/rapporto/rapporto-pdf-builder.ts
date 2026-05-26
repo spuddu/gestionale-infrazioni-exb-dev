@@ -333,6 +333,12 @@ export async function buildRapportoPdf (m: Record<string, string>): Promise<Uint
   // ── Importo (top=769.19, riga "Importo a piè di") ──
   txt(p1, v('importo_rimborso'), fR, 8.5, 130, bY(769.19, 8.5), BLACK, 165)
 
+  // Nota laterale variabile: singolare/plurale in base agli allegati nota spese.
+  // Il template contiene già una dicitura statica; la copro e riscrivo quella corretta.
+  const notaSpeseLabel = v('nota_spese_label')
+  p1.drawRectangle({ x: 302, y: bY(769.19, 8.5) - 3, width: 248, height: 14, color: WHITE })
+  if (notaSpeseLabel) txt(p1, notaSpeseLabel, fR, 8.5, 316, bY(769.19, 8.5), BLACK, 226)
+
   // ════════════════════════════════════════════════════════════
   //  PAGINA 2
   // ════════════════════════════════════════════════════════════

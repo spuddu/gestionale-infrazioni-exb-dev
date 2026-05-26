@@ -84,6 +84,7 @@ type SanzioneConsultivaVoce = {
   articoloSanzione: string
   articoliSanzione: RegolamentoArticolo[]
   parametro?: SanzioneParametro | null
+  valueOverride?: string
 }
 
 type SanzioneConsultivaGroup = {
@@ -533,8 +534,19 @@ function getPaymentMode (draft: Record<string, any>, fields: LayerFieldInfo[]): 
 }
 
 function parseNumberInput (v: any): number | null {
-  const s = String(v ?? '').trim().replace(/\./g, '').replace(',', '.')
+  if (typeof v === 'number') return Number.isFinite(v) ? v : null
+  let s = String(v ?? '').trim().replace(/\s+/g, '')
   if (!s) return null
+  const hasComma = s.includes(',')
+  const dotCount = (s.match(/\./g) || []).length
+  if (hasComma) {
+    s = s.replace(/\./g, '').replace(',', '.')
+  } else if (dotCount > 1) {
+    s = s.replace(/\./g, '')
+  } else if (dotCount === 1) {
+    const parts = s.split('.')
+    if (parts[1]?.length === 3 && parts[0]?.length <= 3) s = parts.join('')
+  }
   const n = Number(s)
   return Number.isFinite(n) ? n : null
 }
@@ -617,8 +629,20 @@ async function refreshDs (ds: any): Promise<void> {
 
 function Section (props: { title: string, children: React.ReactNode, right?: React.ReactNode }) {
   return (
-    <section style={{ border: '1px solid #e5e7eb', borderRadius: 12, background: '#fff', overflow: 'hidden' }}>
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, background: '#0d3b66', color: '#fff', padding: '9px 12px', fontWeight: 700, fontSize: 13 }}>
+    <section style={{ border: '1px solid #b9d1ea', borderRadius: 12, background: '#fff', overflow: 'hidden' }}>
+      <div style={{
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        gap: 12,
+        background: 'linear-gradient(90deg, #0d3b66, #155e9d)',
+        color: '#fff',
+        padding: '8px 12px',
+        fontWeight: 800,
+        fontSize: 11,
+        letterSpacing: 0.25,
+        textTransform: 'uppercase'
+      }}>
         <span>{props.title}</span>
         {props.right}
       </div>
@@ -758,6 +782,28 @@ function parseGradiViolazioniField (raw: any): Record<string, string> {
   return out
 }
 
+function normalizeGravitaValue (raw: any): string {
+  const s = String(raw ?? '').trim()
+  if (!s) return ''
+  const m = s.match(/[1-4]/)
+  return m ? m[0] : ''
+}
+
+function getGravitaForArticle (data: any, articleNumber: any): string {
+  const d = data || {}
+  const article = normalizeArticleNumber(articleNumber)
+  const gradi = parseGradiViolazioniField(pickAttrCI(d, ['gradi_violazioni']))
+  if (article && gradi[article]) return gradi[article]
+
+  const specificNames = article
+    ? [`grado_art${article}`, `gravita_art${article}`, `grado_art_${article}`, `gravita_art_${article}`]
+    : []
+  const specific = normalizeGravitaValue(pickAttrCI(d, specificNames))
+  if (specific) return specific
+
+  return normalizeGravitaValue(pickAttrCI(d, ['grado', 'gravita']))
+}
+
 function formatOccorrenzaValue (raw: any, fields: LayerFieldInfo[]): string {
   if (!isMeaningfulValue(raw)) return ''
 
@@ -777,8 +823,7 @@ function addCommonViolationDetails (data: any, fields: LayerFieldInfo[], details
   const article = normalizeArticleNumber(articleNumber)
 
   if (ARTICLES_WITH_GRAVITA.has(article)) {
-    const gradi = parseGradiViolazioniField(pickAttrCI(data, ['gradi_violazioni']))
-    addViolationDetail(details, 'Gravità', gradi[article] || '')
+    addViolationDetail(details, 'Gravità', getGravitaForArticle(data, article))
   }
 
   if (article === '15') {
@@ -870,20 +915,163 @@ function fieldRawOrLabel (data: any, fields: LayerFieldInfo[], name: string): st
   return `${raw ?? ''} ${label || ''}`.trim()
 }
 
+function numericAttr (data: any, names: string[]): number | null {
+  for (const name of names) {
+    const raw = pickAttrCI(data, [name])
+    const n = parseNumberInput(raw)
+    if (n != null) return n
+  }
+  return null
+}
+
+function isRecidivaPractice (data: any, fields: LayerFieldInfo[]): boolean {
+  const d = data || {}
+  const names = ['occorrenza', 'recidiva', 'occorrenza_art15', 'art15_occorrenza', 'norma15_occorrenza']
+  for (const name of names) {
+    const raw = pickAttrCI(d, [name])
+    const combined = normalizeToken(fieldRawOrLabel(d, fields, name))
+    if (String(raw).trim() === '2') return true
+    if (String(raw).trim() === '1' && normalizeToken(name).includes('RECID')) return true
+    if (combined.includes('RECID')) return true
+  }
+
+  for (const [key, raw] of Object.entries(d)) {
+    const k = normalizeToken(key)
+    if (!k.includes('RECID') && !k.includes('OCCORRENZA')) continue
+    const value = normalizeToken(raw)
+    if (String(raw).trim() === '2' || value.includes('RECID')) return true
+    if (k.includes('RECID') && (String(raw).trim() === '1' || value === 'SI' || value === 'SÌ')) return true
+  }
+
+  return false
+}
+
+function deriveArt15FallbackCase (data: any, fields: LayerFieldInfo[]): string {
+  const dichiarata = numericAttr(data, ['sup_dichiarata_art15'])
+  const irrigata = numericAttr(data, ['sup_irrigata_art15'])
+  if (irrigata == null || irrigata <= 0) return ''
+
+  const tipo = normalizeToken(fieldRawOrLabel(data, fields, 'tipo_prelievo') || fieldRawOrLabel(data, fields, 'tipo_abuso'))
+  const recidiva = isRecidivaPractice(data, fields)
+  const totale = tipo.includes('TOTALE') || dichiarata == null || dichiarata <= 0
+  const parziale = tipo.includes('PARZIALE') || (!totale && dichiarata != null && irrigata > dichiarata)
+
+  if (totale) return recidiva ? 'C118_PRELIEVO_TOTALE_RECIDIVA' : 'C117_PRELIEVO_TOTALE_PRIMA'
+  if (parziale) return recidiva ? 'C116_PRELIEVO_PARZIALE_RECIDIVA' : 'C115_PRELIEVO_PARZIALE_PRIMA'
+  return ''
+}
+
+function normalizeNotaSpeseAmount (n: number | null): number | null {
+  if (n == null || !Number.isFinite(n)) return null
+  // Alcuni dati storici/di passaggio possono arrivare come centesimi interi
+  // (es. 10889 invece di 108,89). La normalizzazione è usata solo come fallback
+  // quando non sono disponibili i subtotali della nota spese.
+  if (Number.isInteger(n) && n >= 10000 && n % 100 !== 0) return n / 100
+  return n
+}
+
+function getNotaSpeseValueText (data: any): string {
+  const d = data || {}
+  const componentNames = [
+    'ns_totale_attrezzature_trasporti',
+    'ns_totale_materiali_costruzione',
+    'ns_totale_manodopera',
+    'ns_totale_semilavorati',
+    'ns_totale_prodotti_finiti',
+    'ns_importo_spese_generali'
+  ]
+  const components = componentNames
+    .map(name => numericAttr(d, [name]))
+    .filter((n): n is number => n != null && Number.isFinite(n) && n > 0)
+  if (components.length) {
+    const total = components.reduce((acc, n) => acc + n, 0)
+    return total > 0 ? formatEuroText(total) : '0,00 €'
+  }
+
+  const n = normalizeNotaSpeseAmount(numericAttr(d, ['ns_totale_complessivo', 'risarcimento_danni_importo']))
+  return n != null && n > 0 ? formatEuroText(n) : '0,00 €'
+}
+
+function art15SurfaceHaForCase (data: any, codiceCasistica: string): number | null {
+  const code = String(codiceCasistica || '').toUpperCase()
+  if (!code.includes('PRELIEVO_PARZIALE') && !code.includes('PRELIEVO_TOTALE')) return null
+  const dichiarata = numericAttr(data || {}, ['sup_dichiarata_art15'])
+  const irrigata = numericAttr(data || {}, ['sup_irrigata_art15'])
+  if (irrigata == null || irrigata <= 0) return null
+  const mq = code.includes('PRELIEVO_TOTALE') ? irrigata : Math.max(0, irrigata - (dichiarata || 0))
+  if (!Number.isFinite(mq) || mq <= 0) return null
+  return mq / 10000
+}
+
+function art15CalculatedValueText (data: any, codiceCasistica: string, param?: SanzioneParametro | null): string {
+  const ha = art15SurfaceHaForCase(data, codiceCasistica)
+  const rate = parseNumberInput(param?.valore_num)
+  if (ha == null || rate == null) return ''
+  return formatEuroText(rate * ha)
+}
+
+const VIOLATION_ARTICLE_TITLES: Record<string, string> = {
+  '8': 'Violazione servizio reperibilità',
+  '12': 'Negato accesso ai fondi (al personale consortile)',
+  '15': 'Prelievo abusivo d’acqua',
+  '16': 'Inosservanza termini presentazione comunicazioni (comunicazione di irrigazione tardiva)',
+  '17': 'Inosservanza termini presentazione comunicazioni (comunicazione di variazione o di rinuncia tardiva)',
+  '27': 'Spreco d’acqua / Uso negligente risorsa idrica',
+  '28': 'Violazione prescrizioni del Consorzio',
+  '29': 'Violazione termini restituzione attrezzature',
+  '30': 'Danneggiamento e/o perdita attrezzature',
+  '31': 'Mancata segnalazione guasti',
+  '32': 'Negato accesso ai fondi (al consorziato)',
+  '33': 'Inosservanza limiti temporali di prelievo',
+  '34': 'Interferenze',
+  '35': 'Manomissione reti di dispensa e allaccio di apparecchi di aspirazione all’idrante',
+  '36': 'Uso attrezzature non autorizzate',
+  '37': 'Uso sistemi di irrigazione incompatibili',
+  '39': 'Danni strutture irrigue'
+}
+
+function firstArticleNumberFromCodes (raw: any): number {
+  const first = splitArticleCodes(raw)[0] || ''
+  const n = Number(normalizeArticleNumber(first))
+  return Number.isFinite(n) ? n : 999
+}
+
+function displayViolationTitle (group: SanzioneConsultivaGroup): string {
+  const article = String(firstArticleNumberFromCodes(group.articoloViolato))
+  return VIOLATION_ARTICLE_TITLES[article] || sentenceFirst(group.descrizione || '') || 'Violazione contestata'
+}
+
+function isPieListaParametro (param?: SanzioneParametro | null): boolean {
+  const code = normalizeToken(param?.codice_parametro || '')
+  const txt = normalizeToken(`${param?.valore_testo || ''} ${param?.descrizione || ''}`)
+  return code.includes('PIELISTA') || txt.includes('PIELISTA') || txt.includes('DAQUANTIFICARE')
+}
+
+function getViolationArticleFromCase (codiceCasistica: string): string {
+  const code = String(codiceCasistica || '')
+  const direct = Object.entries(ARTICLE_CASE_MAP).find(([, c]) => c === code)
+  if (direct) return String(Number(direct[0]))
+  if (code.includes('C114')) return '16'
+  if (code.includes('C115') || code.includes('C116') || code.includes('C117') || code.includes('C118')) return '15'
+  return ''
+}
+
 function deriveSanzioneCasistiche (data: any, fields: LayerFieldInfo[]): string[] {
   const d = data || {}
   const out: string[] = []
 
   const n15p = fieldRawOrLabel(d, fields, 'norma15_parziale')
   const n15t = fieldRawOrLabel(d, fields, 'norma15_totale')
+  const art15Recidiva = isRecidivaPractice(d, fields)
   if (n15p) {
     const t = normalizeToken(n15p)
-    pushUnique(out, t.includes('ART152') || t.includes('RECID') ? 'C116_PRELIEVO_PARZIALE_RECIDIVA' : 'C115_PRELIEVO_PARZIALE_PRIMA')
+    pushUnique(out, art15Recidiva || t.includes('ART152') || t.includes('RECID') ? 'C116_PRELIEVO_PARZIALE_RECIDIVA' : 'C115_PRELIEVO_PARZIALE_PRIMA')
   }
   if (n15t) {
     const t = normalizeToken(n15t)
-    pushUnique(out, t.includes('ART154') || t.includes('RECID') ? 'C118_PRELIEVO_TOTALE_RECIDIVA' : 'C117_PRELIEVO_TOTALE_PRIMA')
+    pushUnique(out, art15Recidiva || t.includes('ART154') || t.includes('RECID') ? 'C118_PRELIEVO_TOTALE_RECIDIVA' : 'C117_PRELIEVO_TOTALE_PRIMA')
   }
+  if (!n15p && !n15t) pushUnique(out, deriveArt15FallbackCase(d, fields))
 
   const norma1617 = fieldRawOrLabel(d, fields, 'norma16_17')
   const art17Tipo = fieldRawOrLabel(d, fields, 'art17_tipo')
@@ -1013,10 +1201,68 @@ function formatParametroValue (param?: SanzioneParametro | null): string {
   if (n == null || !Number.isFinite(n)) return txt || 'Da quantificare'
   const cat = String(param.categoria_parametro || '').toUpperCase()
   const code = String(param.codice_parametro || '').toUpperCase()
+  if (n === 0 && txt && /quantificare|definire|pi[eè]\s*lista/i.test(txt)) return txt
   if (cat === 'TERMINE') return `${n.toLocaleString('it-IT', { maximumFractionDigits: 0 })} giorni`
   if (code.includes('PERCENTUALE') || cat === 'RIDUZIONE') return `${n.toLocaleString('it-IT', { maximumFractionDigits: 2 })}%`
+  if (code.includes('EURO_HA')) return `${formatEuroText(n)}/ha`
   if (['SANZIONE', 'ATTREZZATURA', 'CAUZIONE', 'SPESE', 'RIMBORSO'].includes(cat)) return formatEuroText(n)
   return txt ? `${n.toLocaleString('it-IT')} — ${txt}` : n.toLocaleString('it-IT')
+}
+
+function formatVoceValue (voce: SanzioneConsultivaVoce): string {
+  return voce.valueOverride || formatParametroValue(voce.parametro)
+}
+
+function parseEuroTextValue (value: any): number | null {
+  const s = String(value ?? '').trim()
+  if (!s || !s.includes('€')) return null
+  const m = s.match(/-?\d+(?:[\.,]\d{3})*(?:[\.,]\d+)?/)
+  if (!m) return null
+  return parseNumberInput(m[0])
+}
+
+function voceAppliedAmount (voce: SanzioneConsultivaVoce): number | null {
+  if (voce.valueOverride) return parseEuroTextValue(voce.valueOverride)
+  const param = voce.parametro
+  if (!param) return null
+  const cat = String(param.categoria_parametro || '').toUpperCase()
+  const code = String(param.codice_parametro || '').toUpperCase()
+  if (cat === 'TERMINE' || cat === 'RIDUZIONE') return null
+  if (code.includes('PERCENTUALE') || code.includes('EURO_HA')) return null
+  if (!['SANZIONE', 'RISARCIMENTO', 'RIMBORSO', 'ATTREZZATURA', 'CAUZIONE', 'SPESE'].includes(cat)) return null
+  const n = parseNumberInput(param.valore_num)
+  return n != null && Number.isFinite(n) ? n : null
+}
+
+function groupsAppliedTotal (groups: SanzioneConsultivaGroup[]): number {
+  return (groups || []).reduce((acc, group) => {
+    return acc + (group.voci || []).reduce((inner, voce) => {
+      const n = voceAppliedAmount(voce)
+      return inner + (n != null && Number.isFinite(n) ? n : 0)
+    }, 0)
+  }, 0)
+}
+
+function SanzioniHeaderTotal (props: { groups: SanzioneConsultivaGroup[] }) {
+  const total = groupsAppliedTotal(props.groups || [])
+  return (
+    <span style={{
+      display: 'inline-flex',
+      alignItems: 'center',
+      gap: 6,
+      padding: '3px 8px',
+      borderRadius: 999,
+      background: 'rgba(255,255,255,0.14)',
+      border: '1px solid rgba(255,255,255,0.22)',
+      color: '#fff',
+      fontSize: 11,
+      fontWeight: 900,
+      textTransform: 'none',
+      letterSpacing: 0
+    }}>
+      Totale importi: {formatEuroText(total)}
+    </span>
+  )
 }
 
 function buildVoceLabel (raccordo: RegolamentoRaccordo, parametro?: SanzioneParametro | null): string {
@@ -1027,13 +1273,20 @@ function buildVoceLabel (raccordo: RegolamentoRaccordo, parametro?: SanzionePara
   const norm = normalizeToken(candidate)
 
   if (cat === 'SANZIONE') {
+    const paramCode = String(parametro?.codice_parametro || '').toUpperCase()
+    const gravitaMatch = paramCode.match(/SANZIONE\.ART42\.GRAVITA\.([1-4])$/)
+    if (gravitaMatch) return `Sanzione pecuniaria - grado di gravità ${gravitaMatch[1]}`
+    if (paramCode.startsWith('SANZIONE.ART41.')) {
+      if (String(raccordo.codice_casistica || '').toUpperCase().includes('RECIDIVA')) return 'Sanzione pecuniaria - recidiva'
+      return 'Sanzione pecuniaria'
+    }
     if (norm.includes('SANZIONEFISSA') || norm.includes('MANCATORISPETTOLIMITI')) return 'Sanzione pecuniaria'
     if (norm.includes('IMPORTOMINIMO')) return 'Sanzione pecuniaria variabile - importo minimo'
     if (norm.includes('IMPORTOMASSIMO')) return 'Sanzione pecuniaria variabile - importo massimo'
-    if (norm.includes('GRADODIGRAVITA1')) return 'Sanzione pecuniaria variabile - grado di gravità 1'
-    if (norm.includes('GRADODIGRAVITA2')) return 'Sanzione pecuniaria variabile - grado di gravità 2'
-    if (norm.includes('GRADODIGRAVITA3')) return 'Sanzione pecuniaria variabile - grado di gravità 3'
-    if (norm.includes('GRADODIGRAVITA4')) return 'Sanzione pecuniaria variabile - grado di gravità 4'
+    if (norm.includes('GRADODIGRAVITA1')) return 'Sanzione pecuniaria - grado di gravità 1'
+    if (norm.includes('GRADODIGRAVITA2')) return 'Sanzione pecuniaria - grado di gravità 2'
+    if (norm.includes('GRADODIGRAVITA3')) return 'Sanzione pecuniaria - grado di gravità 3'
+    if (norm.includes('GRADODIGRAVITA4')) return 'Sanzione pecuniaria - grado di gravità 4'
     if (norm.includes('EUROPERETTARO')) return 'Sanzione pecuniaria per ettaro irrigato'
     return candidate || 'Sanzione pecuniaria'
   }
@@ -1057,14 +1310,31 @@ function buildSanzioneGroups (
   casistiche: string[],
   raccordi: RegolamentoRaccordo[],
   parametri: SanzioneParametro[],
-  articoli: RegolamentoArticolo[]
+  articoli: RegolamentoArticolo[],
+  data?: any
 ): SanzioneConsultivaGroup[] {
   const wanted = new Set(casistiche)
   const paramByCode = new Map(parametri.map(p => [p.codice_parametro, p]))
   const artByCode = new Map(articoli.map(a => [a.codice_articolo, a]))
+  const selectedRaccordi = raccordi.filter(r => wanted.has(r.codice_casistica))
+  const pieListaCount = selectedRaccordi.filter(r => isPieListaParametro(paramByCode.get(r.codice_parametro) || null)).length
   const groups = new Map<string, SanzioneConsultivaGroup>()
 
-  raccordi.filter(r => wanted.has(r.codice_casistica)).forEach(r => {
+  selectedRaccordi.forEach(r => {
+    const parametro = paramByCode.get(r.codice_parametro) || null
+    const pCode = String(r.codice_parametro || '').toUpperCase()
+    const articleForCase = getViolationArticleFromCase(r.codice_casistica)
+    const grado = getGravitaForArticle(data || {}, articleForCase)
+    if (pCode.includes('SANZIONE.ART42.GRAVITA.')) {
+      const m = pCode.match(/GRAVITA\.(MIN|MAX|[1-4])$/)
+      const suffix = m ? m[1] : ''
+      if (grado) {
+        if (suffix !== grado) return
+      } else if (!['MIN', 'MAX'].includes(suffix)) {
+        return
+      }
+    }
+
     let g = groups.get(r.codice_casistica)
     if (!g) {
       const articoliViolati = splitArticleCodes(r.articolo_violato).map(c => artByCode.get(c)).filter(Boolean) as RegolamentoArticolo[]
@@ -1080,21 +1350,28 @@ function buildSanzioneGroups (
       }
       groups.set(r.codice_casistica, g)
     }
-    const parametro = paramByCode.get(r.codice_parametro) || null
     const voceLabel = buildVoceLabel(r, parametro)
     if (!g.voci.some(v => v.codiceParametro === r.codice_parametro && v.descrizione === voceLabel && v.articoloSanzione === r.articolo_sanzione)) {
       const voceArticoliSanzione = splitArticleCodes(r.articolo_sanzione).map(c => artByCode.get(c)).filter(Boolean) as RegolamentoArticolo[]
+      const nsValue = isPieListaParametro(parametro) ? (pieListaCount === 1 ? getNotaSpeseValueText(data || {}) : '0,00 €') : ''
+      const art15Value = pCode.includes('SANZIONE.ART41') ? art15CalculatedValueText(data || {}, r.codice_casistica, parametro) : ''
       g.voci.push({
         codiceParametro: r.codice_parametro,
         descrizione: voceLabel,
         articoloSanzione: r.articolo_sanzione,
         articoliSanzione: voceArticoliSanzione,
-        parametro
+        parametro,
+        valueOverride: nsValue || art15Value
       })
     }
   })
 
-  return Array.from(groups.values())
+  return Array.from(groups.values()).sort((a, b) => {
+    const an = firstArticleNumberFromCodes(a.articoloViolato)
+    const bn = firstArticleNumberFromCodes(b.articoloViolato)
+    if (an !== bn) return an - bn
+    return String(a.codiceCasistica || '').localeCompare(String(b.codiceCasistica || ''), 'it')
+  })
 }
 
 
@@ -1112,33 +1389,84 @@ function articleListTitle (articles: RegolamentoArticolo[], fallback: string): s
   return list.map(a => articleTitleLine(a)).join('; ')
 }
 
-function uniqueArticlesForDetails (group: SanzioneConsultivaGroup): Array<{ role: string, article: RegolamentoArticolo }> {
-  const out: Array<{ role: string, article: RegolamentoArticolo }> = []
-  const seen = new Set<string>()
-  const push = (role: string, a: RegolamentoArticolo) => {
-    const key = String(a.codice_articolo || articleTitleLine(a)).toUpperCase()
-    if (!key || seen.has(key)) return
-    seen.add(key)
-    out.push({ role, article: a })
-  }
-  ;(group.articoliViolati || []).forEach(a => push('Norma violata', a))
-  ;(group.articoliSanzione || []).forEach(a => push('Norma sanzionatoria', a))
-  ;(group.voci || []).forEach(v => (v.articoliSanzione || []).forEach(a => push('Norma sanzionatoria', a)))
-  return out
+function violationNormSummary (group: SanzioneConsultivaGroup): string {
+  const article = formatArticleFallback(group.articoloViolato)
+  const descr = displayViolationTitle(group)
+  return descr ? `Norma violata: ${article} — ${descr}` : `Norma violata: ${article}`
 }
 
-function ArticleDetailsContent (props: { group: SanzioneConsultivaGroup }) {
-  const items = uniqueArticlesForDetails(props.group)
-  if (!items.length) return <div style={{ color: '#6b7280', fontSize: 12 }}>Testo regolamentare non disponibile nelle tabelle configurate.</div>
+function articleDetailsByRole (role: string, articles: RegolamentoArticolo[]) {
+  const list = Array.isArray(articles) ? articles.filter(Boolean) : []
+  if (!list.length) return <div style={{ color: '#6b7280', fontSize: 12 }}>Testo regolamentare non disponibile nelle tabelle configurate.</div>
   return (
     <div style={{ display: 'grid', gap: 10, marginTop: 8 }}>
-      {items.map(({ role, article }) => (
+      {list.map(article => (
         <div key={`${role}-${article.codice_articolo}`} style={{ display: 'grid', gap: 4 }}>
-          <div style={{ color: '#111827', fontSize: 12, fontWeight: 850 }}>{role}: {articleTitleLine(article)}</div>
+          <div style={{ color: '#111827', fontSize: 12, fontWeight: 850 }}>{articleTitleLine(article)}</div>
           {article.testo_articolo && <div style={{ color: '#374151', fontSize: 12, lineHeight: 1.45, whiteSpace: 'pre-wrap' }}>{article.testo_articolo}</div>}
           {(article.atto_regolamento || article.anno_riferimento) && <div style={{ color: '#6b7280', fontSize: 11 }}>{[article.atto_regolamento, article.anno_riferimento ? `Anno ${article.anno_riferimento}` : ''].filter(Boolean).join(' · ')}</div>}
         </div>
       ))}
+    </div>
+  )
+}
+
+function groupVociBySanzioneArticle (group: SanzioneConsultivaGroup, voci: SanzioneConsultivaVoce[]): Array<{ key: string, articles: RegolamentoArticolo[], fallback: string, voci: SanzioneConsultivaVoce[] }> {
+  const map = new Map<string, { key: string, articles: RegolamentoArticolo[], fallback: string, voci: SanzioneConsultivaVoce[] }>()
+  ;(voci || []).forEach((voce, idx) => {
+    const fallback = voce.articoloSanzione || group.articoloSanzione || ''
+    const articles = (voce.articoliSanzione && voce.articoliSanzione.length ? voce.articoliSanzione : group.articoliSanzione) || []
+    const key = articles.length ? articles.map(a => a.codice_articolo).join('|') : (fallback || `missing-${idx}`)
+    const existing = map.get(key)
+    if (existing) {
+      existing.voci.push(voce)
+    } else {
+      map.set(key, { key, articles, fallback, voci: [voce] })
+    }
+  })
+  return Array.from(map.values())
+}
+
+
+type NormToggleVariant = 'violata' | 'sanzionatoria'
+
+function NormToggleBox (props: { title: string, variant: NormToggleVariant, children: any }) {
+  const [open, setOpen] = React.useState(false)
+  const isViolata = props.variant === 'violata'
+  const palette = isViolata
+    ? { background: '#eff6ff', border: '#93c5fd', header: '#dbeafe', text: '#0f172a' }
+    : { background: '#f8fafc', border: '#cbd5e1', header: '#e2e8f0', text: '#0f172a' }
+
+  return (
+    <div style={{ border: `1px solid ${palette.border}`, background: palette.background, borderRadius: 9, overflow: 'hidden' }}>
+      <button
+        type='button'
+        onClick={() => setOpen(!open)}
+        style={{
+          width: '100%',
+          border: 0,
+          background: palette.header,
+          color: palette.text,
+          display: 'flex',
+          alignItems: 'center',
+          gap: 8,
+          padding: '8px 10px',
+          textAlign: 'left',
+          cursor: 'pointer',
+          fontSize: 13,
+          fontWeight: 900,
+          lineHeight: 1.35
+        }}
+        aria-expanded={open}
+      >
+        <span aria-hidden='true' style={{ color: '#1d4ed8', fontSize: 11, fontWeight: 900, lineHeight: 1, width: 14, display: 'inline-flex', justifyContent: 'center' }}>{open ? '▲' : '▼'}</span>
+        <span>{props.title}</span>
+      </button>
+      {open && (
+        <div style={{ padding: '8px 10px', borderTop: `1px solid ${palette.border}`, background: '#ffffff' }}>
+          {props.children}
+        </div>
+      )}
     </div>
   )
 }
@@ -1148,7 +1476,6 @@ function ParametriSanzionatoriTable (props: { groups: SanzioneConsultivaGroup[] 
   if (!groups.length) return null
 
   const valueStyle = (voce: SanzioneConsultivaVoce): any => ({
-    textAlign: 'right',
     color: !voce.parametro ? '#991b1b' : '#166534',
     fontWeight: 850,
     whiteSpace: 'nowrap'
@@ -1160,51 +1487,30 @@ function ParametriSanzionatoriTable (props: { groups: SanzioneConsultivaGroup[] 
         const voci = group.voci.length
           ? group.voci
           : [{ codiceParametro: `${group.codiceCasistica}-empty`, descrizione: 'Voce applicabile', articoloSanzione: group.articoloSanzione, articoliSanzione: group.articoliSanzione, parametro: null }]
+        const sanzioneBlocks = groupVociBySanzioneArticle(group, voci)
         return (
-          <div key={group.codiceCasistica} style={{ border: '1px solid #dbeafe', background: '#fff', borderRadius: 11, overflow: 'hidden' }}>
-            <div style={{ padding: '11px 12px 9px 12px', borderBottom: '1px solid #e5edf8', background: '#f8fbff' }}>
-              <div style={{ color: '#0f172a', fontSize: 13, fontWeight: 900, lineHeight: 1.3 }}>
-                {group.descrizione || 'Violazione contestata'}
-              </div>
-              <div style={{ marginTop: 5, color: '#334155', fontSize: 12, lineHeight: 1.35 }}>
-                <strong>Norma violata:</strong> {articleListTitle(group.articoliViolati, group.articoloViolato)}
-              </div>
-            </div>
+          <div key={group.codiceCasistica} style={{ border: '1px solid #93c5fd', background: '#fff', borderRadius: 10, padding: 10, display: 'grid', gap: 8 }}>
+            <NormToggleBox variant='violata' title={violationNormSummary(group)}>
+              {articleDetailsByRole('Norma violata', group.articoliViolati)}
+            </NormToggleBox>
 
-            <div style={{ padding: '10px 12px 12px 12px', display: 'grid', gap: 8 }}>
-              <div style={{ color: '#475569', fontSize: 11, fontWeight: 850, textTransform: 'uppercase', letterSpacing: 0.25 }}>
-                Conseguenze sanzionatorie / economiche
-              </div>
-              <div style={{ overflowX: 'auto', border: '1px solid #e5e7eb', borderRadius: 8 }}>
-                <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 650 }}>
-                  <thead>
-                    <tr style={{ background: '#f8fafc' }}>
-                      <th style={{ padding: '8px 10px', textAlign: 'left', color: '#64748b', fontSize: 11, fontWeight: 850, borderBottom: '1px solid #e5e7eb' }}>Voce</th>
-                      <th style={{ padding: '8px 10px', textAlign: 'left', color: '#64748b', fontSize: 11, fontWeight: 850, borderBottom: '1px solid #e5e7eb' }}>Norma sanzionatoria</th>
-                      <th style={{ padding: '8px 10px', textAlign: 'right', color: '#64748b', fontSize: 11, fontWeight: 850, borderBottom: '1px solid #e5e7eb', whiteSpace: 'nowrap' }}>Valore</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {voci.map((voce, idx) => (
-                      <tr key={`${group.codiceCasistica}-${voce.codiceParametro || idx}-${voce.articoloSanzione || idx}`}>
-                        <td style={{ padding: '8px 10px', borderTop: idx === 0 ? '0' : '1px solid #eef2f7', color: '#111827', fontSize: 12, fontWeight: 700, verticalAlign: 'top' }}>
-                          {voce.descrizione || 'Voce applicabile'}
-                        </td>
-                        <td style={{ padding: '8px 10px', borderTop: idx === 0 ? '0' : '1px solid #eef2f7', color: '#374151', fontSize: 12, verticalAlign: 'top' }}>
-                          {articleListTitle(voce.articoliSanzione || group.articoliSanzione, voce.articoloSanzione || group.articoloSanzione)}
-                        </td>
-                        <td style={{ padding: '8px 10px', borderTop: idx === 0 ? '0' : '1px solid #eef2f7', fontSize: 12, verticalAlign: 'top', ...valueStyle(voce) }}>
-                          {formatParametroValue(voce.parametro)}
-                        </td>
-                      </tr>
+            <div style={{ display: 'grid', gap: 8, padding: '2px 0 0 0' }}>
+              {sanzioneBlocks.map(block => (
+                <div key={block.key} style={{ display: 'grid', gap: 6, borderTop: '1px solid #cbd5e1', paddingTop: 8 }}>
+                  <NormToggleBox variant='sanzionatoria' title={`Norma sanzionatoria: ${articleListTitle(block.articles, block.fallback)}`}>
+                    {articleDetailsByRole('Norma sanzionatoria', block.articles)}
+                  </NormToggleBox>
+
+                  <div style={{ display: 'grid', gap: 0, padding: '0 10px 2px 10px' }}>
+                    {block.voci.map((voce, idx) => (
+                      <div key={`${group.codiceCasistica}-${voce.codiceParametro || idx}-${voce.articoloSanzione || idx}`} style={{ display: 'flex', justifyContent: 'space-between', gap: 16, alignItems: 'baseline', borderTop: idx === 0 ? '0' : '1px solid #eef2f7', padding: idx === 0 ? '4px 0' : '7px 0 4px 0' }}>
+                        <div style={{ color: '#111827', fontSize: 12, fontWeight: 800 }}>{voce.descrizione || 'Voce applicabile'}:</div>
+                        <div style={{ fontSize: 12, textAlign: 'right', ...valueStyle(voce) }}>{formatVoceValue(voce)}</div>
+                      </div>
                     ))}
-                  </tbody>
-                </table>
-              </div>
-              <details style={{ fontSize: 12, color: '#374151' }}>
-                <summary style={{ cursor: 'pointer', color: '#0d3b66', fontWeight: 800 }}>Leggi testi normativi</summary>
-                <ArticleDetailsContent group={group} />
-              </details>
+                  </div>
+                </div>
+              ))}
             </div>
           </div>
         )
@@ -1283,7 +1589,7 @@ function ParametriSanzionatoriSection (props: { cfg: any, data: any, layerFields
         const parametri = paramRows.map(normalizeParam).filter(p => p.codice_parametro && isRowValidAt(p, refMs))
         const articoli = artRows.map(normalizeArticle).filter(a => a.codice_articolo && isRowValidAt(a, refMs))
         const raccordi = raccordiRows.map(normalizeRaccordo).filter(r => r.codice_casistica && isRowValidAt(r, refMs))
-        const groups = buildSanzioneGroups(casistiche, raccordi, parametri, articoli)
+        const groups = buildSanzioneGroups(casistiche, raccordi, parametri, articoli, data || {})
         if (!cancelled) setState({ loading: false, error: '', groups })
       } catch (e: any) {
         if (!cancelled) setState({ loading: false, error: e?.message || String(e), groups: [] })
@@ -1294,7 +1600,7 @@ function ParametriSanzionatoriSection (props: { cfg: any, data: any, layerFields
   }, [urlsReady, parametriUrl, articoliUrl, raccordiUrl, casistiche.join('|'), data])
 
   return (
-    <Section title='Violazioni contestate e parametri sanzionatori' right={<span style={{ fontSize: 11, opacity: 0.85 }}>Sola lettura</span>}>
+    <Section title='Violazioni contestate e parametri sanzionatori' right={<SanzioniHeaderTotal groups={state.groups} />}>
       {!urlsReady && (
         <InfoBox kind='warn'>Configurare in Builder gli URL di GII_PARAMETRI_SANZIONI, GII_REGOLAMENTO_ARTICOLI e GII_REGOLAMENTO_RACCORDI.</InfoBox>
       )}

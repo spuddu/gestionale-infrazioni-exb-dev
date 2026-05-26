@@ -70,6 +70,10 @@ export interface NotaSpeseData {
   settore_cod?: string | number | null
   area?: string | number | null
   settore?: string | number | null
+  /** Numero deterministico dell'allegato, calcolato al momento della generazione. */
+  numero_nota?: number | null
+  /** Titolo leggibile della casistica/violazione collegata alla singola nota spese. */
+  titolo_nota?: string | null
   rows: Record<NsCategory, NsDetailRow[]>
   summary: NsSummary
   luogo_data: string
@@ -347,18 +351,25 @@ export async function buildNotaSpesePdf(data: NotaSpeseData): Promise<Uint8Array
   const settoreLabel = resolveSettoreLabel(areaCod, settoreCod, data.settore_label)
   if (areaLabel) centered(pg, 'AREA ' + areaLabel, fontR, 9, ML, PW - MR, PH - TEXT_AREA_TOP, CLR_BLUE)
   if (settoreLabel) centered(pg, 'SETTORE ' + settoreLabel, fontR, 9, ML, PW - MR, PH - TEXT_SETT_TOP, CLR_BLUE)
-  const nsTitle = data.cod_pratica
-    ? 'NOTA SPESE ALLEGATA AL RAPPORTO TECNICO DI RILEVAZIONE N. ' + data.cod_pratica
+  const nsBaseTitle = data.numero_nota
+    ? `NOTA SPESE N. ${data.numero_nota} ALLEGATA AL RAPPORTO TECNICO DI RILEVAZIONE`
     : 'NOTA SPESE ALLEGATA AL RAPPORTO TECNICO DI RILEVAZIONE'
+  const nsTitle = data.cod_pratica ? `${nsBaseTitle} N. ${data.cod_pratica}` : nsBaseTitle
   const titleW = fontB.widthOfTextAtSize(nsTitle, 10)
   if (titleW <= TW) {
     centered(pg, nsTitle, fontB, 10, ML, PW - MR, PH - TEXT_TITLE_TOP, CLR_BLUE)
   } else {
-    centered(pg, 'NOTA SPESE ALLEGATA AL RAPPORTO TECNICO DI RILEVAZIONE', fontB, 10, ML, PW - MR, PH - TEXT_TITLE_TOP, CLR_BLUE)
+    centered(pg, nsBaseTitle, fontB, 10, ML, PW - MR, PH - TEXT_TITLE_TOP, CLR_BLUE)
     centered(pg, 'N. ' + (data.cod_pratica || ''), fontB, 10, ML, PW - MR, PH - TEXT_TITLE_TOP - 14, CLR_BLUE)
   }
 
   let top = (titleW <= TW) ? TABLE_START_TOP : TABLE_START_TOP + 14
+
+  const titoloNota = cleanText(String(data.titolo_nota || '').trim())
+  if (titoloNota) {
+    centered(pg, titoloNota, fontB, 9, ML, PW - MR, PH - top, CLR_BLUE)
+    top += 14
+  }
 
   function newPage(): void {
     pg = doc.addPage([PW, PH])
