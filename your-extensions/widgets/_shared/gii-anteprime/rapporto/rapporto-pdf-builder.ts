@@ -1,7 +1,7 @@
 // =================================================================
 // rapporto-pdf-builder.ts  (v4 — auto-sizing + giustificazione)
 // =================================================================
-import { PDFDocument, type PDFFont, type PDFPage, rgb } from 'pdf-lib'
+import { PDFDocument, StandardFonts, type PDFFont, type PDFPage, rgb } from 'pdf-lib'
 import fontkit from '@pdf-lib/fontkit'
 import { CALIBRI_REGULAR_B64, CALIBRI_BOLD_B64 } from './calibri-fonts'
 import { BASE_PDF_B64 } from './base-pdf'
@@ -274,6 +274,7 @@ export async function buildRapportoPdf (m: Record<string, string>): Promise<Uint
 
   const fR = await doc.embedFont(b64ToBytes(CALIBRI_REGULAR_B64), { subset: false })
   const fB = await doc.embedFont(b64ToBytes(CALIBRI_BOLD_B64), { subset: false })
+  const fI = await doc.embedFont(StandardFonts.HelveticaOblique)
 
   const p1 = doc.getPages()[0]
   const p2 = doc.getPages()[1]
@@ -334,10 +335,8 @@ export async function buildRapportoPdf (m: Record<string, string>): Promise<Uint
   txt(p1, v('importo_rimborso'), fR, 8.5, 130, bY(769.19, 8.5), BLACK, 165)
 
   // Nota laterale variabile: singolare/plurale in base agli allegati nota spese.
-  // Il template contiene già una dicitura statica; la copro e riscrivo quella corretta.
   const notaSpeseLabel = v('nota_spese_label')
-  p1.drawRectangle({ x: 302, y: bY(769.19, 8.5) - 3, width: 248, height: 14, color: WHITE })
-  if (notaSpeseLabel) txt(p1, notaSpeseLabel, fR, 8.5, 316, bY(769.19, 8.5), BLACK, 226)
+  if (notaSpeseLabel) rightTxt(p1, notaSpeseLabel, fI, 8.5, 545, bY(769.19, 8.5), BLUE)
 
   // ════════════════════════════════════════════════════════════
   //  PAGINA 2
