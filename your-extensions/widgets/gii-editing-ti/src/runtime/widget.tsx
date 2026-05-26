@@ -5644,15 +5644,104 @@ React.useEffect(() => {
       return
     }
 
+    const art15HasData = !!String(n3parziale || n3totale || '').trim() ||
+      !!String(g('occorrenza') || '').trim() ||
+      surfaceToCentiareNumber(g('sup_dichiarata_art15')) > 0 ||
+      surfaceToCentiareNumber(g('sup_irrigata_art15')) > 0
+
+    if (!hasTipoAbuso15 && art15HasData) {
+      setValidationPopup({
+        title: 'Tipo di abuso obbligatorio',
+        text: "Per l'Art. 15, selezionare il tipo di abuso: Parziale oppure Totale."
+      })
+      return
+    }
+
     if (tipoAbuso === 'parziale') {
       const dich = surfaceToCentiareNumber(g('sup_dichiarata_art15'))
       const irr = surfaceToCentiareNumber(g('sup_irrigata_art15'))
-      if (irr > 0 && irr < dich) {
+      if (dich <= 0) {
         setValidationPopup({
-          title: 'Superficie irrigata non valida',
-          text: 'La superficie irrigata non può essere inferiore a quella dichiarata per l\'Art. 15 (abuso parziale).'
+          title: 'Superficie dichiarata non valida',
+          text: 'Per l\'Art. 15 (abuso parziale), la superficie dichiarata deve essere compilata e maggiore di 0. Se la superficie dichiarata è pari a 0, selezionare il tipo di abuso Totale.'
         })
         return
+      }
+      if (irr <= 0) {
+        setValidationPopup({
+          title: 'Superficie irrigata non valida',
+          text: 'Per l\'Art. 15 (abuso parziale), la superficie irrigata deve essere compilata e maggiore di 0.'
+        })
+        return
+      }
+      if (irr <= dich) {
+        setValidationPopup({
+          title: 'Superficie irrigata non valida',
+          text: 'La superficie irrigata deve essere superiore a quella dichiarata per l\'Art. 15 (abuso parziale).'
+        })
+        return
+      }
+    }
+
+    if (tipoAbuso === 'totale') {
+      const irr = surfaceToCentiareNumber(g('sup_irrigata_art15'))
+      if (irr <= 0) {
+        setValidationPopup({
+          title: 'Superficie irrigata non valida',
+          text: 'Per l\'Art. 15 (abuso totale), la superficie irrigata deve essere compilata e maggiore di 0.'
+        })
+        return
+      }
+    }
+
+    if (norma1516 === 'Art16') {
+      const dich = surfaceToCentiareNumber(g('sup_dichiarata_art16'))
+      if (dich <= 0) {
+        setValidationPopup({
+          title: 'Superficie dichiarata non valida',
+          text: 'Per l\'Art. 16, la superficie dichiarata deve essere compilata e maggiore di 0.'
+        })
+        return
+      }
+    }
+
+    if (norma1516 === 'Art17') {
+      if (!art17tipo) {
+        setValidationPopup({
+          title: 'Tipo comunicazione obbligatorio',
+          text: 'Per l\'Art. 17, selezionare il tipo di comunicazione: Variazione tardiva oppure Rinuncia tardiva.'
+        })
+        return
+      }
+
+      if (art17tipo === 'Art17.1') {
+        const dich = surfaceToCentiareNumber(g('sup_dichiarata_art17_1'))
+        const variata = surfaceToCentiareNumber(g('sup_irrigata_art17_1'))
+        if (dich <= 0) {
+          setValidationPopup({
+            title: 'Superficie dichiarata non valida',
+            text: 'Per l\'Art. 17 - Variazione tardiva, la superficie dichiarata deve essere compilata e maggiore di 0.'
+          })
+          return
+        }
+        if (variata <= 0) {
+          setValidationPopup({
+            title: 'Superficie variata non valida',
+            text: 'Per l\'Art. 17 - Variazione tardiva, la superficie variata deve essere compilata e maggiore di 0.'
+          })
+          return
+        }
+      }
+
+      if (art17tipo === 'Art17.2') {
+        const dich = surfaceToCentiareNumber(g('sup_dichiarata_art17_2'))
+        if (dich <= 0) {
+          setValidationPopup({
+            title: 'Superficie dichiarata non valida',
+            text: 'Per l\'Art. 17 - Rinuncia tardiva, la superficie dichiarata deve essere compilata e maggiore di 0.'
+          })
+          return
+        }
       }
     }
 

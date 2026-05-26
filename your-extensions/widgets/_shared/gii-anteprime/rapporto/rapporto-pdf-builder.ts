@@ -40,6 +40,35 @@ function firstMeaningfulValue (...vals: any[]): any {
   return undefined
 }
 
+function formatSurfaceHaACa (raw: any): string {
+  if (raw == null) return ''
+  const txt = String(raw).trim()
+  if (!txt) return ''
+  if (/^\d+\.\d{2}\.\d{2}$/.test(txt)) return txt
+
+  const compact = txt.replace(/\s+/g, '')
+  let num: number
+  if (typeof raw === 'number') {
+    num = raw
+  } else if (/^\d{1,3}(?:\.\d{3})+$/.test(compact)) {
+    num = Number(compact.replace(/\./g, ''))
+  } else if (/^\d+$/.test(compact)) {
+    num = Number(compact)
+  } else if (/^\d+(?:,\d+)?$/.test(compact)) {
+    num = Number(compact.replace(',', '.'))
+  } else {
+    const digits = compact.replace(/\D/g, '')
+    num = digits ? Number(digits) : NaN
+  }
+
+  if (!Number.isFinite(num)) return txt
+  const centiare = Math.max(0, Math.round(num))
+  const ha = Math.floor(centiare / 10000)
+  const are = Math.floor((centiare % 10000) / 100)
+  const ca = centiare % 100
+  return `${ha}.${String(are).padStart(2, '0')}.${String(ca).padStart(2, '0')}`
+}
+
 const AREA_LABELS: Record<string, string> = {
   AMM: 'AMMINISTRATIVA',
   AGR: 'AGRARIA',
@@ -313,11 +342,14 @@ export async function buildRapportoPdf (m: Record<string, string>): Promise<Uint
 
   // ── Tabella infrazioni ──
   const artSz = 8
+  p1.drawRectangle({ x: C.dic0, y: PH - 322, width: C.irr1 - C.dic0, height: 22, color: BLUE })
+  centered(p1, 'SUPERFICI (ha.a.ca)', fB, 8.1, C.dic0, C.irr1, bY(309.6, 8.1), WHITE)
+
   for (const row of ROWS) {
     const y = bY(row.top, artSz)
     centered(p1, v(`x_art${row.art}`), fB, artSz, C.chk0, C.chk1, y)
-    centered(p1, v(`sup_dich_art${row.art}`), fR, artSz, C.dic0, C.dic1, y)
-    centered(p1, v(`sup_irr_art${row.art}`), fR, artSz, C.irr0, C.irr1, y)
+    centered(p1, formatSurfaceHaACa(v(`sup_dich_art${row.art}`)), fR, artSz, C.dic0, C.dic1, y)
+    centered(p1, formatSurfaceHaACa(v(`sup_irr_art${row.art}`)), fR, artSz, C.irr0, C.irr1, y)
     centered(p1, v(`grado_art${row.art}`), fR, artSz, C.gra0, C.gra1, y)
 
     const occ = firstMeaningfulValue(v(`occorrenza_art${row.art}`))

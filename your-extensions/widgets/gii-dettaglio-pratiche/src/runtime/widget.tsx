@@ -1073,19 +1073,37 @@ function fieldLooksLikeSurface (fieldName?: string, fieldLabel?: string): boolea
   return n.startsWith('sup ') || n.startsWith('sup_') || n.includes('superficie') || l.includes('superficie')
 }
 
-function formatSurfaceSafe (raw: any): string {
+function formatSurfaceHaACa (raw: any): string {
   if (raw == null || raw === '') return '—'
   const txt = String(raw).trim()
-  const normalized = txt.replace(/\./g, '').replace(',', '.')
-  const num = typeof raw === 'number' ? raw : Number(normalized)
-  if (Number.isFinite(num)) {
-    const formatted = new Intl.NumberFormat('it-IT', {
-      minimumFractionDigits: Number.isInteger(num) ? 0 : 2,
-      maximumFractionDigits: 2
-    }).format(num)
-    return `${formatted} m²`
+  if (!txt) return '—'
+  if (/^\d+\.\d{2}\.\d{2}$/.test(txt)) return txt
+
+  const compact = txt.replace(/\s+/g, '')
+  let num: number
+  if (typeof raw === 'number') {
+    num = raw
+  } else if (/^\d{1,3}(?:\.\d{3})+$/.test(compact)) {
+    num = Number(compact.replace(/\./g, ''))
+  } else if (/^\d+$/.test(compact)) {
+    num = Number(compact)
+  } else if (/^\d+(?:,\d+)?$/.test(compact)) {
+    num = Number(compact.replace(',', '.'))
+  } else {
+    const digits = compact.replace(/\D/g, '')
+    num = digits ? Number(digits) : NaN
   }
-  return `${txt} m²`
+
+  if (!Number.isFinite(num)) return txt
+  const centiare = Math.max(0, Math.round(num))
+  const ha = Math.floor(centiare / 10000)
+  const are = Math.floor((centiare % 10000) / 100)
+  const ca = centiare % 100
+  return `${ha}.${String(are).padStart(2, '0')}.${String(ca).padStart(2, '0')}`
+}
+
+function formatSurfaceSafe (raw: any): string {
+  return formatSurfaceHaACa(raw)
 }
 
 function formatFieldValue (raw: any, fieldName: string, fieldType?: string, fieldLabel?: string): any {
@@ -3338,25 +3356,34 @@ const isPgOnlyField = React.useCallback((fieldName: string) => {
   }, [])
 
   const violationSurveyContent = React.useMemo(() => {
+    const art15TipoAbusoRaw = getRawField('tipo_abuso')
+    const art15TipoAbusoKey = String(art15TipoAbusoRaw ?? '').trim().toLowerCase()
     const art15ParzRaw = getRawField('norma15_parziale')
     const art15TotRaw = getRawField('norma15_totale')
     const art15Code = !isEmptyValue(art15ParzRaw) ? art15ParzRaw : art15TotRaw
     const occorrenzaInfo = getRawFieldWithName(['occorrenza'])
-    const hasArt15 = !isEmptyValue(art15Code) || !isEmptyValue(occorrenzaInfo.value) || !isEmptyValue(getRawField('sup_dichiarata_art15')) || !isEmptyValue(getRawField('sup_irrigata_art15'))
+    const hasArt15 = !isEmptyValue(art15TipoAbusoRaw) || !isEmptyValue(art15Code) || !isEmptyValue(occorrenzaInfo.value) || !isEmptyValue(getRawField('sup_dichiarata_art15')) || !isEmptyValue(getRawField('sup_irrigata_art15'))
 
     const art15Body = hasArt15
       ? (() => {
-          const isParziale = !isEmptyValue(art15ParzRaw)
-          const tipoAbuso = isParziale ? 'Parziale' : 'Totale'
+          const isParziale = art15TipoAbusoKey
+            ? art15TipoAbusoKey === 'parziale'
+            : !isEmptyValue(art15ParzRaw)
+          const tipoAbusoFromField = !isEmptyValue(art15TipoAbusoRaw)
+            ? getFieldLabel('tipo_abuso', art15TipoAbusoRaw)
+            : ''
+          const tipoAbuso = tipoAbusoFromField
+            ? (String(tipoAbusoFromField).toLowerCase() === 'parziale' ? 'Parziale' : (String(tipoAbusoFromField).toLowerCase() === 'totale' ? 'Totale' : tipoAbusoFromField))
+            : (isParziale ? 'Parziale' : 'Totale')
           const occorrenza = !isEmptyValue(occorrenzaInfo.value)
             ? (String(occorrenzaInfo.value) === '1' ? 'Prima contestazione' : (String(occorrenzaInfo.value) === '2' ? 'Recidiva' : getFieldLabel(occorrenzaInfo.fieldName, occorrenzaInfo.value)))
             : '—'
-          const supDich = formatFieldValue(getRawField('sup_dichiarata_art15'), 'sup_dichiarata_art15', fieldTypeMap?.sup_dichiarata_art15, 'Superficie dichiarata')
-          const supIrr = formatFieldValue(getRawField('sup_irrigata_art15'), 'sup_irrigata_art15', fieldTypeMap?.sup_irrigata_art15, 'Superficie irrigata')
+          const supDich = formatFieldValue(getRawField('sup_dichiarata_art15'), 'sup_dichiarata_art15', fieldTypeMap?.sup_dichiarata_art15, 'Superficie dichiarata (ha.a.ca)')
+          const supIrr = formatFieldValue(getRawField('sup_irrigata_art15'), 'sup_irrigata_art15', fieldTypeMap?.sup_irrigata_art15, 'Superficie irrigata (ha.a.ca)')
           return (
             <div style={{ display: 'grid', gap: 8 }}>
               {renderViolationSurfacesLine('Tipo di abuso', tipoAbuso, 'Occorrenza', occorrenza)}
-              {renderViolationSurfacesLine('Superficie dichiarata', supDich, 'Superficie irrigata', supIrr)}
+              {renderViolationSurfacesLine('Superficie dichiarata (ha.a.ca)', supDich, 'Superficie irrigata (ha.a.ca)', supIrr)}
             </div>
           )
         })()
@@ -3374,10 +3401,10 @@ const isPgOnlyField = React.useCallback((fieldName: string) => {
               <div style={{ display: 'grid', gap: 8 }}>
                 {renderViolationTextLine('Descrizione', descr)}
                 {renderViolationSurfacesLine(
-                  'Superficie dichiarata',
-                  formatFieldValue(getRawField('sup_dichiarata_art16'), 'sup_dichiarata_art16', fieldTypeMap?.sup_dichiarata_art16, 'Superficie dichiarata'),
-                  'Superficie irrigata',
-                  formatFieldValue(getRawField('sup_irrigata_art16_17_2'), 'sup_irrigata_art16_17_2', fieldTypeMap?.sup_irrigata_art16_17_2, 'Superficie irrigata')
+                  'Superficie dichiarata (ha.a.ca)',
+                  formatFieldValue(getRawField('sup_dichiarata_art16'), 'sup_dichiarata_art16', fieldTypeMap?.sup_dichiarata_art16, 'Superficie dichiarata (ha.a.ca)'),
+                  'Superficie irrigata (ha.a.ca)',
+                  formatFieldValue(getRawField('sup_irrigata_art16_17_2'), 'sup_irrigata_art16_17_2', fieldTypeMap?.sup_irrigata_art16_17_2, 'Superficie irrigata (ha.a.ca)')
                 )}
               </div>
             )
@@ -3391,16 +3418,16 @@ const isPgOnlyField = React.useCallback((fieldName: string) => {
                 {renderViolationTextLine('Tipo comunicazione', tipoViolazione)}
                 {isVar
                   ? renderViolationSurfacesLine(
-                    'Superficie dichiarata',
-                    formatFieldValue(getRawField('sup_dichiarata_art17_1'), 'sup_dichiarata_art17_1', fieldTypeMap?.sup_dichiarata_art17_1, 'Superficie dichiarata'),
-                    'Superficie variata',
-                    formatFieldValue(getRawField('sup_irrigata_art17_1'), 'sup_irrigata_art17_1', fieldTypeMap?.sup_irrigata_art17_1, 'Superficie variata')
+                    'Superficie dichiarata (ha.a.ca)',
+                    formatFieldValue(getRawField('sup_dichiarata_art17_1'), 'sup_dichiarata_art17_1', fieldTypeMap?.sup_dichiarata_art17_1, 'Superficie dichiarata (ha.a.ca)'),
+                    'Superficie variata (ha.a.ca)',
+                    formatFieldValue(getRawField('sup_irrigata_art17_1'), 'sup_irrigata_art17_1', fieldTypeMap?.sup_irrigata_art17_1, 'Superficie variata (ha.a.ca)')
                     )
                   : renderViolationSurfacesLine(
-                    'Superficie dichiarata',
-                    formatFieldValue(getRawField('sup_dichiarata_art17_2'), 'sup_dichiarata_art17_2', fieldTypeMap?.sup_dichiarata_art17_2, 'Superficie dichiarata'),
-                    'Superficie irrigata',
-                    formatFieldValue(getRawField('sup_irrigata_art16_17_2'), 'sup_irrigata_art16_17_2', fieldTypeMap?.sup_irrigata_art16_17_2, 'Superficie irrigata')
+                    'Superficie dichiarata (ha.a.ca)',
+                    formatFieldValue(getRawField('sup_dichiarata_art17_2'), 'sup_dichiarata_art17_2', fieldTypeMap?.sup_dichiarata_art17_2, 'Superficie dichiarata (ha.a.ca)'),
+                    'Superficie irrigata (ha.a.ca)',
+                    formatFieldValue(getRawField('sup_irrigata_art16_17_2'), 'sup_irrigata_art16_17_2', fieldTypeMap?.sup_irrigata_art16_17_2, 'Superficie irrigata (ha.a.ca)')
                     )}
               </div>
             )
