@@ -120,10 +120,8 @@ type AdminField = {
 }
 
 const ADMIN_FIELDS: AdminField[] = [
-  { group: 'atto', name: 'tipo_atto_amm', label: 'Tipo atto amministrativo', kind: 'domain' },
-  { group: 'atto', name: 'protocollo_istanza_numero', label: 'Protocollo istanza', kind: 'text' },
-  { group: 'atto', name: 'protocollo_istanza_data', label: 'Data istanza', kind: 'date' },
-  { group: 'atto', name: 'oggetto_atto_amm', label: 'Oggetto atto amministrativo', kind: 'text', full: true },
+  { group: 'atto', name: 'tipo_atto_amm', label: 'Tipo atto amministrativo (automatico)', kind: 'domain', readonly: true },
+  { group: 'atto', name: 'oggetto_atto_amm', label: 'Oggetto atto amministrativo (automatico)', kind: 'text', full: true, readonly: true },
   { group: 'verbale', name: 'numero_verbale', label: 'Numero verbale (assegnato alla chiusura)', kind: 'readonly-text', readonly: true },
   { group: 'verbale', name: 'data_verbale', label: 'Data verbale (assegnata alla chiusura)', kind: 'readonly-date', readonly: true },
   { group: 'verbale', name: 'note_atto_amm', label: 'Note amministrative', kind: 'textarea', full: true },
@@ -175,25 +173,24 @@ const MONEY_FIELDS = new Set([
   'sanzione_importo_base',
   'sanzione_importo_ridotta',
   'risarcimento_danni_importo',
-  'sanzione_spese_notifica',
   'attrezzature_rimborso_importo',
   'attrezzature_cauzione_decurtata',
   'attrezzature_importo_netto',
   'pagamento_importo_totale'
 ])
 
-const PAYMENT_COMMON_FIELDS = ['pagamento_modalita', 'pagamento_importo_totale', 'pagamento_scadenza', 'pagamento_stato']
-const PAYMENT_NOTE_FIELDS = ['pagamento_note']
+const PAYMENT_COMMON_FIELDS = ['pagamento_modalita', 'pagamento_scadenza', 'pagamento_stato', 'pagamento_note']
 const PAGOPA_FIELDS = ['pagopa_iuv', 'pagopa_codice_avviso']
 const BONIFICO_FIELDS = ['bonifico_conto_cod', 'bonifico_iban_snapshot', 'bonifico_intestatario_snapshot', 'bonifico_causale', 'bonifico_cro_trn', 'bonifico_data_accredito']
 
 const SYSTEM_CALCULATED_ADMIN_FIELDS = new Set([
+  'tipo_atto_amm',
+  'oggetto_atto_amm',
   'numero_verbale',
   'data_verbale',
   'sanzione_importo_base',
   'sanzione_importo_ridotta',
   'risarcimento_danni_importo',
-  'sanzione_spese_notifica',
   'sanzione_dettaglio_calcolo',
   'sanzione_calcolata_il',
   'sanzione_calcolata_da',
@@ -475,10 +472,67 @@ function getDomainOptions (field: LayerFieldInfo | null): Array<{ code: any, nam
   return vals.map((x: any) => ({ code: x?.code, name: String(x?.name ?? x?.code ?? '') }))
 }
 
-function domainLabel (field: LayerFieldInfo | null, raw: any): string {
+function getFallbackDomainOptions (fieldName: string): Array<{ code: any, name: string }> {
+  if (fieldName === 'tipo_atto_amm') {
+    return [
+      { code: 'VERBALE', name: 'Verbale amministrativo' },
+      { code: 'RISARCIMENTO_DANNI', name: 'Richiesta risarcimento danni' },
+      { code: 'VERBALE_RISARCIMENTO', name: 'Verbale e richiesta risarcimento' },
+      { code: 'ARCHIVIAZIONE', name: 'Archiviazione / non luogo a procedere' }
+    ]
+  }
+  if (fieldName === 'pagamento_modalita') {
+    return [
+      { code: 'PAGOPA', name: 'pagoPA' },
+      { code: 'BONIFICO', name: 'Bonifico bancario' },
+      { code: 'MISTO', name: 'Pagamento misto' },
+      { code: 'ALTRO', name: 'Altro' }
+    ]
+  }
+  if (fieldName === 'pagamento_stato') {
+    return [
+      { code: 'DA_GENERARE', name: 'Da generare' },
+      { code: 'DA_PAGARE', name: 'Da pagare' },
+      { code: 'GENERATO', name: 'Generato' },
+      { code: 'NOTIFICATO', name: 'Notificato' },
+      { code: 'PARZIALE', name: 'Pagato parzialmente' },
+      { code: 'PAGATO', name: 'Pagato' },
+      { code: 'SCADUTO', name: 'Scaduto' },
+      { code: 'ANNULLATO', name: 'Annullato' }
+    ]
+  }
+  if (fieldName === 'notifica_tipo') {
+    return [
+      { code: 'PEC', name: 'PEC' },
+      { code: 'RACCOMANDATA_AR', name: 'Raccomandata A/R' },
+      { code: 'MESSO', name: 'Messo notificatore' },
+      { code: 'CONSEGNA_MANO', name: 'Consegna a mano' },
+      { code: 'ALTRO', name: 'Altro' }
+    ]
+  }
+  if (fieldName === 'notifica_esito') {
+    return [
+      { code: 'DA_NOTIFICARE', name: 'Da notificare' },
+      { code: 'NOTIFICATA', name: 'Notificata' },
+      { code: 'NON_NOTIFICATA', name: 'Non notificata' },
+      { code: 'COMPIUTA_GIACENZA', name: 'Compiuta giacenza' },
+      { code: 'ALTRO', name: 'Altro' }
+    ]
+  }
+  if (fieldName === 'attrezzature_cauzione_presente') {
+    return [
+      { code: 0, name: 'No' },
+      { code: 1, name: 'Sì' }
+    ]
+  }
+  return []
+}
+
+function domainLabel (field: LayerFieldInfo | null, raw: any, fallbackFieldName?: string): string {
   if (raw == null || raw === '') return '—'
   const opts = getDomainOptions(field)
-  const found = opts.find(o => String(o.code) === String(raw))
+  const fallback = fallbackFieldName ? getFallbackDomainOptions(fallbackFieldName) : []
+  const found = [...opts, ...fallback].find(o => String(o.code) === String(raw))
   return found ? found.name : String(raw)
 }
 
@@ -702,38 +756,98 @@ async function refreshDs (ds: any): Promise<void> {
   }
 }
 
-function Section (props: { title: string, children: React.ReactNode, right?: React.ReactNode }) {
+const ADMIN_STYLE_DEFAULTS: Record<string, any> = {
+  maskBg: '#eef4fb',
+  maskBorderColor: '#cbd8e6',
+  maskBorderWidth: 1,
+  maskBorderRadius: 10,
+  maskInnerPadding: 12,
+  formLabelColor: '#334155',
+  formLabelFontSize: 12,
+  formLabelFontWeight: 600,
+  formLabelMarginBottom: 3,
+  formFieldColor: '#0f172a',
+  formFieldFontSize: 13,
+  formFieldHeight: 32,
+  formFieldPaddingX: 9,
+  formFieldBorderColor: '#bfcede',
+  formFieldBorderWidth: 1,
+  formFieldBorderRadius: 7,
+  formFieldBg: '#f8fbff',
+  formFieldDisabledBg: '#e7eef7',
+  formFieldDisabledColor: '#64748b',
+  formSectionGap: 10,
+  formCardBg: '#f8fbff',
+  formCardBorderColor: '#c6d7ea',
+  formCardBorderWidth: 1,
+  formCardBorderRadius: 8,
+  formCardShadow: '0 8px 22px rgba(15, 23, 42, 0.08)',
+  formCardHeaderBg: 'linear-gradient(90deg, #0d3b66, #155e9d)',
+  formCardHeaderColor: '#ffffff',
+  formCardHeaderFontSize: 11,
+  formCardHeaderFontWeight: 800,
+  formCardHeaderPaddingX: 10,
+  formCardHeaderPaddingY: 7,
+  formCardBodyPadding: 10,
+  amountFontSize: 16,
+  titleFontSize: 18,
+  subtitleFontSize: 13,
+  msgFontSize: 14
+}
+
+const AdminStyleCtx = React.createContext<Record<string, any>>(ADMIN_STYLE_DEFAULTS)
+
+function useAdminStyle (): Record<string, any> {
+  const ctx = React.useContext(AdminStyleCtx) || {}
+  return { ...ADMIN_STYLE_DEFAULTS, ...ctx }
+}
+
+
+function Section (props: { title: string, children: React.ReactNode, right?: React.ReactNode, bodyStyle?: React.CSSProperties, cardStyle?: React.CSSProperties }) {
+  const st = useAdminStyle()
   return (
-    <section style={{ border: '1px solid #b9d1ea', borderRadius: 12, background: '#fff', overflow: 'hidden' }}>
+    <section style={{
+      border: `${Number(st.formCardBorderWidth ?? 1)}px solid ${st.formCardBorderColor || '#c6d7ea'}`,
+      borderRadius: Number(st.formCardBorderRadius ?? 8),
+      background: st.formCardBg || '#f8fbff',
+      boxShadow: st.formCardShadow || 'none',
+      overflow: 'hidden',
+      minWidth: 0,
+      flex: '0 0 auto',
+      alignSelf: 'stretch',
+      height: 'auto',
+      ...props.cardStyle
+    }}>
       <div style={{
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'space-between',
         gap: 12,
-        background: 'linear-gradient(90deg, #0d3b66, #155e9d)',
-        color: '#fff',
-        padding: '8px 12px',
-        fontWeight: 800,
-        fontSize: 11,
+        background: st.formCardHeaderBg || 'linear-gradient(90deg, #0d3b66, #155e9d)',
+        color: st.formCardHeaderColor || '#fff',
+        padding: `${Number(st.formCardHeaderPaddingY ?? 7)}px ${Number(st.formCardHeaderPaddingX ?? 10)}px`,
+        fontWeight: Number(st.formCardHeaderFontWeight ?? 800) as any,
+        fontSize: Number(st.formCardHeaderFontSize ?? 11),
         letterSpacing: 0.25,
         textTransform: 'uppercase'
       }}>
         <span>{props.title}</span>
         {props.right}
       </div>
-      <div style={{ padding: 12 }}>{props.children}</div>
+      <div style={{ padding: Number(st.formCardBodyPadding ?? 10), ...props.bodyStyle }}>{props.children}</div>
     </section>
   )
 }
 
 function InfoBox (props: { children: React.ReactNode, kind?: 'info' | 'warn' | 'ok' }) {
+  const stCtx = useAdminStyle()
   const kind = props.kind || 'info'
   const st: React.CSSProperties = kind === 'warn'
     ? { background: '#fff7ed', color: '#9a3412', borderColor: '#fed7aa' }
     : kind === 'ok'
       ? { background: '#ecfdf3', color: '#166534', borderColor: '#bbf7d0' }
       : { background: '#eff6ff', color: '#1d4ed8', borderColor: '#bfdbfe' }
-  return <div style={{ ...st, border: '1px solid', borderRadius: 10, padding: '10px 12px', fontSize: 13, lineHeight: 1.35 }}>{props.children}</div>
+  return <div style={{ ...st, border: '1px solid', borderRadius: Number(stCtx.formCardBorderRadius ?? 8), padding: '10px 12px', fontSize: 13, lineHeight: 1.35 }}>{props.children}</div>
 }
 
 function BlockingDialog (props: { kind: 'ok' | 'err' | 'warn', title: string, text: string, onClose: () => void }) {
@@ -762,7 +876,7 @@ function FieldGrid (props: { fields: SummaryFieldConfig[], data: any, layerField
         const hasDomain = !!lf?.domain?.codedValues
         const val = hasDomain ? domainLabel(lf, raw) : looksLikeDateField(f.name) ? formatDateValue(raw) : formatValue(raw)
         return (
-          <div key={`${f.name}-${f.label}`} style={{ background: '#f6f7f9', border: '1px solid rgba(0,0,0,0.06)', borderRadius: 9, padding: '8px 10px', minWidth: 0 }}>
+          <div key={`${f.name}-${f.label}`} style={{ background: '#f8fbff', border: '1px solid #c5d9f1', borderRadius: 8, padding: '8px 10px', minWidth: 0 }}>
             <div style={{ color: '#6b7280', fontSize: props.labelSize, fontWeight: 700, marginBottom: 3, overflowWrap: 'anywhere' }}>{f.label || f.name}</div>
             <div style={{ color: '#111827', fontSize: props.valueSize, fontWeight: 600, overflowWrap: 'anywhere' }}>{val}</div>
           </div>
@@ -1368,7 +1482,7 @@ function buildAutomaticSanzioneCalculation (
   let risarcimentoDanni = 0
   let rimborsoAttrezzature = 0
   let cauzioneDecurtata = 0
-  let speseNotifica = 0
+  let speseNotificaAutomatica = 0
   let riduzionePercentuale: number | null = null
   let riduzioneImporto: number | null = null
   const dettaglio: string[] = [
@@ -1400,11 +1514,15 @@ function buildAutomaticSanzioneCalculation (
       else if (categoria === 'RISARCIMENTO' || categoria === 'RIMBORSO') risarcimentoDanni += amount
       else if (categoria === 'ATTREZZATURA') rimborsoAttrezzature += amount
       else if (categoria === 'CAUZIONE') cauzioneDecurtata += amount
-      else if (categoria === 'SPESE') speseNotifica += amount
+      else if (categoria === 'SPESE') speseNotificaAutomatica += amount
     })
     dettaglio.push('')
   })
 
+  const speseManuali = parseNumberInput(pickAttrCI(previousDraft || {}, ['sanzione_spese_notifica']))
+  const speseNotifica = speseManuali != null && Number.isFinite(speseManuali)
+    ? Math.max(0, speseManuali)
+    : speseNotificaAutomatica
   const importoNettoAttrezzature = Math.max(0, rimborsoAttrezzature - cauzioneDecurtata)
   const sanzioneRidotta = riduzioneImporto != null
     ? riduzioneImporto
@@ -1422,10 +1540,10 @@ function buildAutomaticSanzioneCalculation (
   dettaglio.push(`Rimborso attrezzature: ${formatEuroText(rimborsoAttrezzature)}`)
   dettaglio.push(`Cauzione decurtata: ${formatEuroText(cauzioneDecurtata)}`)
   dettaglio.push(`Importo netto attrezzature: ${formatEuroText(importoNettoAttrezzature)}`)
-  dettaglio.push(`Spese: ${formatEuroText(speseNotifica)}`)
+  dettaglio.push(`Spese di notifica: ${formatEuroText(speseNotifica)}`)
   dettaglio.push(`Totale da pagare: ${formatEuroText(totale)}`)
   dettaglio.push('')
-  dettaglio.push("Gli importi sono calcolati automaticamente: l'operatore amministrativo compila solo i dati di verbale, protocollo, notifica, pagamento e allegazione.")
+  dettaglio.push("Gli importi principali sono calcolati automaticamente; le spese di notifica possono essere inserite dall'operatore amministrativo e concorrono al totale.")
 
   const currentCalcDate = pickAttrCI(previousDraft, ['sanzione_calcolata_il'])
   const currentCalcUser = String(pickAttrCI(previousDraft, ['sanzione_calcolata_da']) || '').trim()
@@ -1448,61 +1566,292 @@ function buildAutomaticSanzioneCalculation (
   }
 }
 
+function amountFromDraft (data: Record<string, any>, fieldName: string): number {
+  const n = parseNumberInput(pickAttrCI(data, [fieldName]))
+  return n != null && Number.isFinite(n) ? n : 0
+}
+
+function buildAutomaticAttoAmministrativo (data: Record<string, any>): Record<string, any> {
+  const d = data || {}
+  const sanzioneBase = amountFromDraft(d, 'sanzione_importo_base')
+  const sanzioneRidotta = amountFromDraft(d, 'sanzione_importo_ridotta')
+  const sanzione = sanzioneRidotta > 0 ? sanzioneRidotta : sanzioneBase
+  const risarcimento = amountFromDraft(d, 'risarcimento_danni_importo') + amountFromDraft(d, 'attrezzature_importo_netto')
+  const hasSanzione = sanzione > 0
+  const hasRisarcimento = risarcimento > 0
+  const tipo = hasSanzione && hasRisarcimento
+    ? 'VERBALE_RISARCIMENTO'
+    : hasRisarcimento && !hasSanzione
+      ? 'RISARCIMENTO_DANNI'
+      : 'VERBALE'
+  const nRapporto = String(pickAttrCI(d, ['n_rapporto', 'numero_rapporto', 'codice_rapporto', 'cod_pratica', 'objectid', 'OBJECTID']) || '').trim()
+  const rapportoSuffix = nRapporto ? ` n. ${nRapporto}` : ''
+  const oggetto = tipo === 'RISARCIMENTO_DANNI'
+    ? `Richiesta di risarcimento danni conseguente al rapporto di rilevazione infrazione irrigua${rapportoSuffix}`
+    : tipo === 'VERBALE_RISARCIMENTO'
+      ? `Verbale amministrativo e richiesta di risarcimento danni conseguenti al rapporto di rilevazione infrazione irrigua${rapportoSuffix}`
+      : `Verbale amministrativo conseguente al rapporto di rilevazione infrazione irrigua${rapportoSuffix}`
+  return {
+    tipo_atto_amm: tipo,
+    oggetto_atto_amm: oggetto
+  }
+}
+
+function buildDefaultAdminNote (key: string, data: Record<string, any>): string {
+  const nRapporto = String(pickAttrCI(data || {}, ['n_rapporto', 'numero_rapporto', 'codice_rapporto', 'cod_pratica']) || '').trim()
+  const rapporto = nRapporto ? ` n. ${nRapporto}` : ''
+  if (key === 'completezza') return `Verificata la completezza del rapporto approvato${rapporto} e della documentazione disponibile ai fini della predisposizione del verbale amministrativo.`
+  if (key === 'notifica') return `Predisposta la bozza del verbale amministrativo; restano da completare protocollazione, notifica e registrazione dell'avviso di pagamento.`
+  if (key === 'integrazione') return `Dalla verifica amministrativa emergono elementi da integrare prima della chiusura dell'istruttoria.`
+  if (key === 'ri') return `Istruttoria amministrativa predisposta per la successiva verifica del RI_AMM.`
+  return ''
+}
+
+function NoteAmministrativeQuickActions (props: { data: Record<string, any>, canEdit: boolean, onApply: (text: string) => void }) {
+  const actions = [
+    { key: 'completezza', label: 'Rapporto completo' },
+    { key: 'notifica', label: 'Bozza e adempimenti successivi' },
+    { key: 'integrazione', label: 'Da integrare' },
+    { key: 'ri', label: 'Da verificare RI_AMM' }
+  ]
+  const st = useAdminStyle()
+  return (
+    <div style={{ display: 'grid', gridTemplateColumns: 'minmax(220px, 360px)', gap: 5 }}>
+      <label style={{ color: st.formLabelColor || '#334155', fontSize: Number(st.formLabelFontSize ?? 12), fontWeight: Number(st.formLabelFontWeight ?? 600) as any }}>Casistica note</label>
+      <select
+        disabled={!props.canEdit}
+        value=''
+        onChange={e => {
+          const key = e.target.value
+          if (!key) return
+          props.onApply(buildDefaultAdminNote(key, props.data || {}))
+        }}
+        style={inputStyleFrom(st, !props.canEdit)}
+      >
+        <option value=''>- Seleziona -</option>
+        {actions.map(a => <option key={a.key} value={a.key}>{a.label}</option>)}
+      </select>
+    </div>
+  )
+}
+
+function displayAdminFieldValue (data: Record<string, any>, fields: LayerFieldInfo[], fieldName: string, emptyLabel = '—'): string {
+  const lf = getFieldInfo(fields, fieldName)
+  const raw = pickAttrCI(data || {}, [lf?.name || fieldName, fieldName])
+  if (raw == null || raw === '') return emptyLabel
+  if (lf?.domain?.codedValues || getFallbackDomainOptions(fieldName).length) return domainLabel(lf, raw, fieldName)
+  if (looksLikeDateField(fieldName)) return formatDateValue(raw)
+  if (MONEY_FIELDS.has(fieldName)) return `${formatMoney(raw)} €`
+  return String(raw)
+}
+
+function StatusSummaryItem (props: { label: string, value: React.ReactNode, hint?: string, tone?: 'normal' | 'auto' | 'warn' | 'total' }) {
+  const st = useAdminStyle()
+  const tone = props.tone || 'normal'
+  const total = tone === 'total'
+  const borderColor = total ? '#0d3b66' : tone === 'warn' ? '#fed7aa' : tone === 'auto' ? '#bfdbfe' : '#c5d9f1'
+  const bg = total ? (st.formCardHeaderBg || 'linear-gradient(90deg, #0d3b66, #155e9d)') : tone === 'warn' ? '#fff7ed' : tone === 'auto' ? '#f5f9ff' : '#f8fbff'
+  const labelColor = total ? 'rgba(255,255,255,0.86)' : '#6b7280'
+  const valueColor = total ? (st.formCardHeaderColor || '#fff') : '#111827'
+  return (
+    <div style={{ border: `1px solid ${borderColor}`, background: bg, borderRadius: Number(st.formCardBorderRadius ?? 8), padding: '9px 11px', minWidth: 0 }}>
+      <div style={{ color: labelColor, fontSize: 11, fontWeight: 800, textTransform: 'uppercase', letterSpacing: 0.25, marginBottom: 4 }}>{props.label}</div>
+      <div style={{ color: valueColor, fontSize: total ? Number(st.amountFontSize ?? 16) : Number(st.valueFontSize ?? 13), fontWeight: 800, overflowWrap: 'anywhere', whiteSpace: 'pre-wrap' }}>{props.value || '—'}</div>
+      {props.hint && <div style={{ marginTop: 4, color: total ? 'rgba(255,255,255,0.78)' : '#6b7280', fontSize: 11, lineHeight: 1.3 }}>{props.hint}</div>}
+    </div>
+  )
+}
+
+function AttoAmministrativoSummary (props: { data: Record<string, any>, fields: LayerFieldInfo[] }) {
+  const d = props.data || {}
+  return (
+    <Section title='Atto amministrativo'>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: 10 }}>
+        <StatusSummaryItem label='Tipo atto' value={displayAdminFieldValue(d, props.fields, 'tipo_atto_amm', 'Da determinare automaticamente')} tone='auto' hint='Dato calcolato dal sistema; non è un campo da compilare.' />
+        <StatusSummaryItem label='Oggetto' value={displayAdminFieldValue(d, props.fields, 'oggetto_atto_amm', 'Da determinare automaticamente')} tone='auto' hint='Sarà riportato nel verbale senza digitazione manuale.' />
+      </div>
+    </Section>
+  )
+}
+
+function isVerbaleDefinitivo (data: Record<string, any>): boolean {
+  return hasAdminValue(pickAttrCI(data || {}, ['numero_verbale'])) && hasAdminValue(pickAttrCI(data || {}, ['data_verbale']))
+}
+
+
+function VerbaleSummary (props: { data: Record<string, any>, fields: LayerFieldInfo[], canEdit: boolean, onApplyNote: (text: string) => void, onPreview: () => void, onDownload: () => void, disabledPdf: boolean, loadingPdf: boolean }) {
+  const d = props.data || {}
+  const definitivo = isVerbaleDefinitivo(d)
+  const numero = displayAdminFieldValue(d, props.fields, 'numero_verbale', 'Non ancora assegnato')
+  const dataVerbale = displayAdminFieldValue(d, props.fields, 'data_verbale', 'Non ancora assegnata')
+  const tipoAtto = displayAdminFieldValue(d, props.fields, 'tipo_atto_amm', 'Da determinare automaticamente')
+  const oggettoAtto = displayAdminFieldValue(d, props.fields, 'oggetto_atto_amm', 'Da determinare automaticamente')
+  const noteField = getFieldInfo(props.fields, 'note_atto_amm')
+  const noteReal = noteField?.name || 'note_atto_amm'
+  const noteRaw = pickAttrCI(d, [noteReal, 'note_atto_amm'])
+  const noteExists = !!noteField
+  const noteReadonly = !props.canEdit || !noteExists || noteField?.editable === false
+  const noteMissing = !hasAdminValue(noteRaw)
+  return (
+    <Section title='2. Predisposizione verbale' right={<span style={{ fontSize: 11, opacity: 0.85 }}>{definitivo ? 'Verbale definitivo' : 'Bozza'}</span>}>
+      <div style={{ display: 'grid', gap: 10, marginBottom: 12 }}>
+        <div style={{ border: '1px solid #dbeafe', background: '#eff6ff', borderRadius: 11, padding: 11, display: 'grid', gap: 9 }}>
+          <div style={{ display: 'grid', gap: 3 }}>
+            <div style={{ color: '#64748b', fontSize: 11, fontWeight: 900, textTransform: 'uppercase', letterSpacing: 0.25 }}>Tipo atto</div>
+            <div style={{ color: '#111827', fontSize: 13, fontWeight: 850 }}>{tipoAtto}</div>
+          </div>
+          <div style={{ display: 'grid', gap: 3 }}>
+            <div style={{ color: '#64748b', fontSize: 11, fontWeight: 900, textTransform: 'uppercase', letterSpacing: 0.25 }}>Oggetto</div>
+            <div style={{ color: '#374151', fontSize: 12, fontWeight: 700, lineHeight: 1.35 }}>{oggettoAtto}</div>
+          </div>
+        </div>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(210px, 1fr))', gap: 10 }}>
+          <StatusSummaryItem label='Stato verbale' value={definitivo ? 'Definitivo' : 'Bozza'} tone={definitivo ? 'auto' : 'warn'} hint={definitivo ? 'Numero e data risultano assegnati dopo approvazione del Direttore d’Area.' : 'Numero e data saranno assegnati dopo approvazione del Direttore d’Area.'} />
+          <StatusSummaryItem label='Numero' value={numero} tone='auto' hint={definitivo ? undefined : 'Sarà assegnato dopo approvazione del Direttore d’Area.'} />
+          <StatusSummaryItem label='Data' value={dataVerbale} tone='auto' hint={definitivo ? undefined : 'Corrisponderà alla data di approvazione del Direttore d’Area.'} />
+        </div>
+      </div>
+      <div style={{ marginBottom: 10 }}>
+        <div style={{ color: noteMissing ? '#b45309' : '#374151', fontSize: 12, fontWeight: 900, marginBottom: 5 }}>Note amministrative *</div>
+        <TextArea value={noteRaw ?? ''} disabled={noteReadonly} placeholder='Annotazioni istruttorie obbligatorie. Compilarle manualmente oppure usare una casistica rapida.' onChange={v => props.onApplyNote(v || '')} />
+        {!noteExists && <div style={{ marginTop: 4, color: '#b45309', fontSize: 11, fontWeight: 700 }}>Campo note_atto_amm assente nella vista.</div>}
+        {noteExists && noteMissing && <div style={{ marginTop: 4, color: '#b45309', fontSize: 11, fontWeight: 800 }}>Le note amministrative sono obbligatorie prima del salvataggio dell’istruttoria.</div>}
+      </div>
+      <NoteAmministrativeQuickActions data={d} canEdit={props.canEdit && noteExists} onApply={props.onApplyNote} />
+      <div style={{ marginTop: 12, display: 'flex', justifyContent: 'space-between', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+        <div style={{ color: '#6b7280', fontSize: 12, fontWeight: 700 }}>{definitivo ? 'Il verbale definitivo può essere protocollato e notificato.' : 'Numero e data saranno assegnati dopo approvazione del Direttore d’Area.'}</div>
+        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, flexWrap: 'wrap' }}>
+          <button type='button' disabled={props.disabledPdf || props.loadingPdf} onClick={props.onPreview} style={secondaryButtonStyle(props.disabledPdf || props.loadingPdf)}>Anteprima verbale PDF</button>
+          <button type='button' disabled={props.disabledPdf || props.loadingPdf} onClick={props.onDownload} style={secondaryButtonStyle(props.disabledPdf || props.loadingPdf)}>Scarica verbale PDF</button>
+        </div>
+      </div>
+    </Section>
+  )
+}
+
+function QuantificazioneAutomaticaSummary (props: { data: Record<string, any>, fields: LayerFieldInfo[] }) {
+  const d = props.data || {}
+  return (
+    <Section title='Riepilogo economico automatico'>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(210px, 1fr))', gap: 10 }}>
+        <StatusSummaryItem label='Sanzione base' value={displayAdminFieldValue(d, props.fields, 'sanzione_importo_base')} tone='auto' />
+        <StatusSummaryItem label='Sanzione ridotta' value={displayAdminFieldValue(d, props.fields, 'sanzione_importo_ridotta')} tone='auto' />
+        <StatusSummaryItem label='Risarcimento danni' value={displayAdminFieldValue(d, props.fields, 'risarcimento_danni_importo')} tone='auto' />
+        <StatusSummaryItem label='Rimborso attrezzature netto' value={displayAdminFieldValue(d, props.fields, 'attrezzature_importo_netto')} tone='auto' />
+        <StatusSummaryItem label='Spese notifica' value={displayAdminFieldValue(d, props.fields, 'sanzione_spese_notifica')} tone='auto' />
+        <StatusSummaryItem label='Totale da pagare' value={displayAdminFieldValue(d, props.fields, 'pagamento_importo_totale')} tone='total' />
+      </div>
+      <div style={{ marginTop: 10 }}>
+        <StatusSummaryItem label='Dettaglio calcolo' value={displayAdminFieldValue(d, props.fields, 'sanzione_dettaglio_calcolo')} tone='auto' />
+      </div>
+    </Section>
+  )
+}
+
+function CompactPracticeHeader (props: { title: string, data: Record<string, any>, fields: LayerFieldInfo[], profile: { role: string, label: string, fullName: string, username: string }, hasDsForSave: boolean, summaryFields: any[], labelSize: number, valueSize: number }) {
+  const st = useAdminStyle()
+  const d = props.data || {}
+  const totale = displayAdminFieldValue(d, props.fields, 'pagamento_importo_totale')
+  const statoVerbale = isVerbaleDefinitivo(d) ? 'Verbale definitivo' : 'Verbale in bozza'
+  return (
+    <Section title='Istruttoria amministrativa' right={<span style={{ fontSize: 11, opacity: 0.85 }}>{props.hasDsForSave ? 'Fonte dati collegata' : 'Dati da selezione'}</span>}>
+      <div style={{ display: 'grid', gap: 10 }}>
+        <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
+          <span style={{ background: '#0d3b66', color: '#fff', borderRadius: 999, padding: '6px 11px', fontSize: 12, fontWeight: 900 }}>{props.title}</span>
+          <span style={{ background: st.formCardHeaderBg || '#0d3b66', color: st.formCardHeaderColor || '#fff', border: '1px solid #0d3b66', borderRadius: 999, padding: '6px 11px', fontSize: Number(st.amountFontSize ?? 16), fontWeight: 900 }}>Totale: {totale}</span>
+          <span style={{ background: isVerbaleDefinitivo(d) ? '#ecfdf5' : '#fff7ed', color: isVerbaleDefinitivo(d) ? '#166534' : '#9a3412', border: `1px solid ${isVerbaleDefinitivo(d) ? '#bbf7d0' : '#fed7aa'}`, borderRadius: 999, padding: '6px 11px', fontSize: 12, fontWeight: 850 }}>{statoVerbale}</span>
+          <span style={{ marginLeft: 'auto', color: '#4b5563', fontSize: 12, fontWeight: 800 }}>{props.profile.label || props.profile.role || 'Profilo non rilevato'} · {props.profile.fullName || props.profile.username || 'Utente'}</span>
+        </div>
+        <details style={{ border: '1px solid #e5e7eb', borderRadius: 10, background: '#f9fafb', padding: 10 }}>
+          <summary style={{ cursor: 'pointer', color: '#0d3b66', fontSize: 12, fontWeight: 900 }}>Dettagli pratica e workflow</summary>
+          <div style={{ display: 'grid', gap: 12, marginTop: 10 }}>
+            <FieldGrid fields={props.summaryFields || []} data={d} layerFields={props.fields} labelSize={props.labelSize} valueSize={props.valueSize} />
+            <FieldGrid
+              fields={[
+                { name: 'presa_in_carico_TI_AMM', label: 'Presa TI_AMM' },
+                { name: 'dt_presa_in_carico_TI_AMM', label: 'Data presa TI_AMM' },
+                { name: 'esito_TI_AMM', label: 'Esito TI_AMM' },
+                { name: 'dt_esito_TI_AMM', label: 'Data esito TI_AMM' },
+                { name: 'esito_RI_AMM', label: 'Esito RI_AMM' },
+                { name: 'dt_esito_RI_AMM', label: 'Data esito RI_AMM' },
+                { name: 'esito_DA', label: 'Esito DA' },
+                { name: 'dt_esito_DA', label: 'Data esito DA' }
+              ]}
+              data={d}
+              layerFields={props.fields}
+              labelSize={props.labelSize}
+              valueSize={props.valueSize}
+            />
+          </div>
+        </details>
+      </div>
+    </Section>
+  )
+}
+
+function ProtocolloNotificaGuidataSection (props: { data: Record<string, any>, fields: LayerFieldInfo[], canEdit: boolean, onChange: (name: string, value: any) => void }) {
+  const definitivo = isVerbaleDefinitivo(props.data || {})
+  return (
+    <Section title='4. Protocollo e notifica' right={<span style={{ fontSize: 11, opacity: 0.85 }}>{definitivo ? 'Compilabile' : 'Dopo verbale definitivo'}</span>}>
+      {!definitivo && <InfoBox kind='warn'>Protocollo e notifica vanno compilati solo dopo che il Direttore d'Area ha approvato l’istruttoria e il sistema ha assegnato numero e data del verbale.</InfoBox>}
+      <AdminFieldsGrid group='notifica' draft={props.data || {}} fields={props.fields} canEdit={props.canEdit && definitivo} onChange={props.onChange} />
+    </Section>
+  )
+}
+
+function PagamentoGuidatoSection (props: { data: Record<string, any>, fields: LayerFieldInfo[], canEdit: boolean, onChange: (name: string, value: any) => void }) {
+  const d = props.data || {}
+  return (
+    <Section title='3. Avviso pagoPA e pagamento' right={<span style={{ fontSize: 11, opacity: 0.85 }}>Modalità ordinaria: pagoPA</span>}>
+      <div style={{ display: 'grid', gap: 10 }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(210px, 1fr))', gap: 10 }}>
+          <StatusSummaryItem label='Importo da riportare nel bollettino' value={displayAdminFieldValue(d, props.fields, 'pagamento_importo_totale')} tone='auto' />
+          <StatusSummaryItem label='IUV pagoPA' value={displayAdminFieldValue(d, props.fields, 'pagopa_iuv')} />
+          <StatusSummaryItem label='Codice avviso pagoPA' value={displayAdminFieldValue(d, props.fields, 'pagopa_codice_avviso')} />
+          <StatusSummaryItem label='Scadenza pagamento' value={displayAdminFieldValue(d, props.fields, 'pagamento_scadenza')} />
+        </div>
+        <InfoBox>Il flusso ordinario è pagoPA. Il caricamento del PDF del bollettino dovrà compilare automaticamente IUV, codice avviso, importo e scadenza, evitando digitazioni manuali. Per ora l’inserimento manuale resta disponibile solo come correzione controllata.</InfoBox>
+        <details style={{ border: '1px solid #e5e7eb', borderRadius: 10, background: '#f9fafb', padding: 10 }}>
+          <summary style={{ cursor: 'pointer', color: '#0d3b66', fontSize: 12, fontWeight: 900 }}>Inserimento manuale / correzione dati pagoPA</summary>
+          <div style={{ marginTop: 10 }}>
+            <AdminFieldsGrid group='pagamento' draft={d} fields={props.fields} canEdit={props.canEdit} onChange={props.onChange} fieldNames={['pagamento_scadenza', 'pagamento_stato', 'pagamento_note', 'pagopa_iuv', 'pagopa_codice_avviso']} />
+          </div>
+        </details>
+      </div>
+    </Section>
+  )
+}
+
+function ChiusuraIstruttoriaSummary (props: { data: Record<string, any>, fields: LayerFieldInfo[], canEdit: boolean, onFillClose: () => void, completionIssues: string[] }) {
+  const d = props.data || {}
+  const definitivo = isVerbaleDefinitivo(d)
+  const issues = props.completionIssues || []
+  const ready = issues.length === 0
+  const chiusa = hasAdminValue(pickAttrCI(d, ['istruttoria_amm_chiusa_il']))
+  return (
+    <Section title='5. Completamento istruttoria amministrativa' right={<span style={{ fontSize: 11, opacity: 0.85 }}>{chiusa ? 'Chiusa' : 'Da completare'}</span>}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(230px, 1fr))', gap: 10 }}>
+        <StatusSummaryItem label='Istruttoria chiusa il' value={displayAdminFieldValue(d, props.fields, 'istruttoria_amm_chiusa_il')} />
+        <StatusSummaryItem label='Istruttoria chiusa da' value={displayAdminFieldValue(d, props.fields, 'istruttoria_amm_chiusa_da')} />
+      </div>
+      <div style={{ marginTop: 12, display: 'grid', gap: 10 }}>
+        {issues.length > 0 && <InfoBox kind='warn'>
+          <div>Procedura ancora da completare:</div>
+          <ul style={{ margin: '6px 0 0 18px', padding: 0 }}>
+            {issues.map((m, i) => <li key={i}>{m}</li>)}
+          </ul>
+        </InfoBox>}
+        {issues.length === 0 && <InfoBox kind='ok'>Dati amministrativi completi. La chiusura può essere compilata; le trasmissioni di workflow restano gestite da gii-azioni.</InfoBox>}
+        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, flexWrap: 'wrap' }}>
+          <button type='button' disabled={!props.canEdit || !ready || chiusa} onClick={props.onFillClose} style={secondaryButtonStyle(!props.canEdit || !ready || chiusa)}>Chiudi istruttoria amministrativa</button>
+        </div>
+      </div>
+    </Section>
+  )
+}
 
 function hasAdminValue (v: any): boolean {
   return v != null && String(v).trim() !== ''
-}
-
-function verbaleProgressiveFromValue (v: any): number | null {
-  const s = String(v ?? '').trim()
-  if (!s) return null
-  const m = s.match(/\d+/)
-  if (!m) return null
-  const n = Number(m[0])
-  return Number.isFinite(n) ? n : null
-}
-
-function formatGlobalVerbaleNumber (n: number): string {
-  return String(Math.max(1, Math.trunc(Number(n) || 1)))
-}
-
-async function queryNextGlobalVerbaleNumber (layer: any, fields: LayerFieldInfo[]): Promise<string> {
-  const numeroField = realFieldName(fields, 'numero_verbale') || 'numero_verbale'
-  let maxNum = 0
-  if (!layer?.queryFeatures) return formatGlobalVerbaleNumber(1)
-  if (typeof layer.load === 'function') { try { await layer.load() } catch {} }
-  const pageSize = 2000
-  let start = 0
-  for (let guard = 0; guard < 100; guard++) {
-    const q = layer.createQuery ? layer.createQuery() : {}
-    q.where = `${numeroField} IS NOT NULL`
-    q.outFields = [numeroField]
-    q.returnGeometry = false
-    q.start = start
-    q.num = pageSize
-    const res = await layer.queryFeatures(q)
-    const features = Array.isArray(res?.features) ? res.features : []
-    for (const f of features) {
-      const n = verbaleProgressiveFromValue(f?.attributes?.[numeroField])
-      if (n != null && n > maxNum) maxNum = n
-    }
-    if (features.length < pageSize) break
-    start += pageSize
-  }
-  return formatGlobalVerbaleNumber(maxNum + 1)
-}
-
-async function buildAutomaticVerbaleDefaults (layer: any, fields: LayerFieldInfo[], current: Record<string, any>): Promise<Record<string, any>> {
-  const numeroField = realFieldName(fields, 'numero_verbale') || 'numero_verbale'
-  const dataField = realFieldName(fields, 'data_verbale') || 'data_verbale'
-  const out: Record<string, any> = {}
-  if (!hasAdminValue(pickAttrCI(current, [numeroField, 'numero_verbale']))) {
-    out[numeroField] = await queryNextGlobalVerbaleNumber(layer, fields)
-  }
-  if (!hasAdminValue(pickAttrCI(current, [dataField, 'data_verbale']))) {
-    out[dataField] = Date.now()
-  }
-  return out
 }
 
 function buildVoceLabel (raccordo: RegolamentoRaccordo, parametro?: SanzioneParametro | null): string {
@@ -1847,16 +2196,42 @@ function useSanzioneConsultivaState (cfg: any, data: any, layerFields: LayerFiel
   }
 }
 
-function ParametriSanzionatoriSection (props: { loadState: SanzioneConsultivaLoadState }) {
+
+function SpeseNotificaEditor (props: { data: Record<string, any>, fields: LayerFieldInfo[], canEdit: boolean, onChange: (name: string, value: any) => void }) {
+  const st = useAdminStyle()
+  const fieldName = realFieldName(props.fields, 'sanzione_spese_notifica') || 'sanzione_spese_notifica'
+  const raw = pickAttrCI(props.data || {}, [fieldName, 'sanzione_spese_notifica'])
+  const fieldExists = !!getFieldInfo(props.fields, 'sanzione_spese_notifica')
+  const readonly = !props.canEdit || !fieldExists || getFieldInfo(props.fields, 'sanzione_spese_notifica')?.editable === false
+  return (
+    <div style={{ border: `1px solid ${st.formCardBorderColor || '#c6d7ea'}`, background: st.formCardBg || '#fff', borderRadius: Number(st.formCardBorderRadius ?? 8), padding: '9px 11px', minWidth: 0 }}>
+      <div style={{ color: '#6b7280', fontSize: 11, fontWeight: 800, textTransform: 'uppercase', letterSpacing: 0.25, marginBottom: 4 }}>Spese notifica</div>
+      <input
+        type='text'
+        inputMode='decimal'
+        value={raw == null || raw === '' ? '' : String(raw)}
+        disabled={readonly}
+        onChange={e => props.onChange(fieldName, parseNumberInput(e.target.value) ?? null)}
+        onBlur={e => { e.currentTarget.value = formatMoney(e.currentTarget.value) }}
+        style={inputStyleFrom(st, readonly)}
+        placeholder='0,00'
+      />
+      <div style={{ marginTop: 4, color: '#6b7280', fontSize: 11, lineHeight: 1.3 }}>Importo inseribile dal TI_AMM; concorre al totale da pagare.</div>
+    </div>
+  )
+}
+
+function ParametriSanzionatoriSection (props: { loadState: SanzioneConsultivaLoadState, data: Record<string, any>, fields: LayerFieldInfo[], canEdit: boolean, onChange: (name: string, value: any) => void }) {
   const { loadState } = props
   const urlsReady = loadState.urlsReady
   const casistiche = loadState.casistiche || []
   const loading = loadState.loading
   const error = loadState.error
   const groups = loadState.groups || []
+  const d = props.data || {}
 
   return (
-    <Section title='Violazioni contestate e quantificazione automatica' right={<SanzioniHeaderTotal groups={groups} />}>
+    <Section title='1. Verifica dati automatici' right={<span style={{ fontSize: 11, opacity: 0.85 }}>Quantificazione</span>}>
       {!urlsReady && (
         <InfoBox kind='warn'>Configurare in Builder gli URL di GII_PARAMETRI_SANZIONI, GII_REGOLAMENTO_ARTICOLI e GII_REGOLAMENTO_RACCORDI.</InfoBox>
       )}
@@ -1870,16 +2245,30 @@ function ParametriSanzionatoriSection (props: { loadState: SanzioneConsultivaLoa
       )}
       {urlsReady && groups.length > 0 && (
         <div style={{ display: 'grid', gap: 10 }}>
-          <InfoBox kind='ok'>La quantificazione è calcolata automaticamente dal sistema sulla base del rapporto approvato e delle tabelle regolamentari configurate. L’operatore amministrativo non modifica questi importi.</InfoBox>
-          <ParametriSanzionatoriTable groups={groups} />
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(190px, 1fr))', gap: 10 }}>
+            <StatusSummaryItem label='Sanzione' value={displayAdminFieldValue(d, props.fields, 'sanzione_importo_base')} tone='auto' />
+            <StatusSummaryItem label='Risarcimento / rimborsi' value={displayAdminFieldValue(d, props.fields, 'risarcimento_danni_importo')} tone='auto' />
+            <SpeseNotificaEditor data={d} fields={props.fields} canEdit={props.canEdit} onChange={props.onChange} />
+            <StatusSummaryItem label='Totale da pagare' value={displayAdminFieldValue(d, props.fields, 'pagamento_importo_totale')} tone='total' />
+          </div>
+          <InfoBox kind='ok'>Gli importi sono calcolati automaticamente dal sistema. Il TI_AMM deve solo verificarli prima di predisporre il verbale.</InfoBox>
+          <details style={{ border: '1px solid #bfdbfe', borderRadius: 10, background: '#f8fafc', padding: 10 }}>
+            <summary style={{ cursor: 'pointer', fontWeight: 900, color: '#0d3b66', fontSize: 13 }}>Mostra dettaglio norme e calcolo</summary>
+            <div style={{ marginTop: 10 }}>
+              <ParametriSanzionatoriTable groups={groups} />
+              <div style={{ marginTop: 10 }}>
+                <StatusSummaryItem label='Dettaglio calcolo salvato' value={displayAdminFieldValue(d, props.fields, 'sanzione_dettaglio_calcolo')} tone='auto' />
+              </div>
+            </div>
+          </details>
         </div>
       )}
     </Section>
   )
 }
 
-function SanzioniConsultiveSection (props: { loadState: SanzioneConsultivaLoadState }) {
-  return <ParametriSanzionatoriSection loadState={props.loadState} />
+function SanzioniConsultiveSection (props: { loadState: SanzioneConsultivaLoadState, data: Record<string, any>, fields: LayerFieldInfo[], canEdit: boolean, onChange: (name: string, value: any) => void }) {
+  return <ParametriSanzionatoriSection loadState={props.loadState} data={props.data} fields={props.fields} canEdit={props.canEdit} onChange={props.onChange} />
 }
 
 function pdfFieldValue (data: any, fields: LayerFieldInfo[], name: string, opts?: { money?: boolean }): string {
@@ -2164,12 +2553,30 @@ function SelectionWatcher (props: {
   return null
 }
 
+
+function inputStyleFrom (st: Record<string, any>, disabled?: boolean): React.CSSProperties {
+  return {
+    width: '100%',
+    boxSizing: 'border-box',
+    minHeight: Number(st.formFieldHeight ?? 32),
+    border: `${Number(st.formFieldBorderWidth ?? 1)}px solid ${st.formFieldBorderColor || '#bfcede'}`,
+    borderRadius: Number(st.formFieldBorderRadius ?? 7),
+    padding: `6px ${Number(st.formFieldPaddingX ?? 9)}px`,
+    fontSize: Number(st.formFieldFontSize ?? 13),
+    color: disabled ? (st.formFieldDisabledColor || '#64748b') : (st.formFieldColor || '#0f172a'),
+    background: disabled ? (st.formFieldDisabledBg || '#e7eef7') : (st.formFieldBg || '#f8fbff'),
+    outline: 'none'
+  }
+}
+
 function TextInput (props: { value: any, disabled?: boolean, placeholder?: string, onChange: (v: string) => void }) {
-  return <input type='text' value={props.value ?? ''} disabled={props.disabled} placeholder={props.placeholder || ''} onChange={e => props.onChange(e.target.value)} style={inputStyle(props.disabled)} />
+  const st = useAdminStyle()
+  return <input type='text' value={props.value ?? ''} disabled={props.disabled} placeholder={props.placeholder || ''} onChange={e => props.onChange(e.target.value)} style={inputStyleFrom(st, props.disabled)} />
 }
 
 function TextArea (props: { value: any, disabled?: boolean, placeholder?: string, onChange: (v: string) => void }) {
-  return <textarea value={props.value ?? ''} disabled={props.disabled} placeholder={props.placeholder || ''} onChange={e => props.onChange(e.target.value)} rows={4} style={{ ...inputStyle(props.disabled), resize: 'vertical', minHeight: 88, lineHeight: 1.35 }} />
+  const st = useAdminStyle()
+  return <textarea value={props.value ?? ''} disabled={props.disabled} placeholder={props.placeholder || ''} onChange={e => props.onChange(e.target.value)} rows={4} style={{ ...inputStyleFrom(st, props.disabled), resize: 'vertical', minHeight: 88, lineHeight: 1.35 }} />
 }
 
 function inputStyle (disabled?: boolean): React.CSSProperties {
@@ -2194,6 +2601,7 @@ function FieldEditor (props: {
   onChange: (name: string, value: any) => void
 }) {
   const { field, draft, fields, canEdit, onChange } = props
+  const st = useAdminStyle()
   const lf = getFieldInfo(fields, field.name)
   const exists = !!lf
   const real = lf?.name || field.name
@@ -2201,10 +2609,11 @@ function FieldEditor (props: {
   const systemCalculated = isSystemCalculatedAdminField(field.name)
   const readonly = field.readonly || systemCalculated || !canEdit || !exists || lf?.editable === false
   const options = getDomainOptions(lf)
+  const effectiveOptions: Array<{ code: any, name: string }> = options.length ? options : getFallbackDomainOptions(field.name)
   const miss = !exists
 
   const label = (
-    <div style={{ color: '#374151', fontSize: 12, fontWeight: 800, marginBottom: 5, display: 'flex', gap: 6, alignItems: 'center', justifyContent: 'space-between' }}>
+    <div style={{ color: st.formLabelColor || '#334155', fontSize: Number(st.formLabelFontSize ?? 12), fontWeight: Number(st.formLabelFontWeight ?? 600) as any, marginBottom: Number(st.formLabelMarginBottom ?? 3), display: 'flex', gap: 6, alignItems: 'center', justifyContent: 'space-between' }}>
       <span>{field.label}</span>
       {systemCalculated && !miss && <span style={{ color: '#1d4ed8', fontWeight: 800, fontSize: 10 }}>automatico</span>}
       {miss && <span style={{ color: '#b45309', fontWeight: 700, fontSize: 10 }}>campo assente</span>}
@@ -2215,14 +2624,14 @@ function FieldEditor (props: {
   if (field.kind === 'textarea') {
     control = <TextArea value={raw ?? ''} disabled={readonly} placeholder={field.placeholder} onChange={v => onChange(real, v || null)} />
   } else if (field.kind === 'date' || field.kind === 'readonly-date') {
-    control = <input type='date' value={dateInputValue(raw)} disabled={readonly} onChange={e => onChange(real, fromDateInputValue(e.target.value))} style={inputStyle(readonly)} />
+    control = <input type='date' value={dateInputValue(raw)} disabled={readonly} onChange={e => onChange(real, fromDateInputValue(e.target.value))} style={inputStyleFrom(st, readonly)} />
   } else if (field.kind === 'number') {
-    control = <input type='text' inputMode='decimal' value={raw == null || raw === '' ? '' : String(raw)} disabled={readonly} onChange={e => onChange(real, parseNumberInput(e.target.value))} onBlur={e => { if (MONEY_FIELDS.has(field.name)) e.currentTarget.value = formatMoney(e.currentTarget.value) }} style={inputStyle(readonly)} placeholder='0,00' />
+    control = <input type='text' inputMode='decimal' value={raw == null || raw === '' ? '' : String(raw)} disabled={readonly} onChange={e => onChange(real, parseNumberInput(e.target.value))} onBlur={e => { if (MONEY_FIELDS.has(field.name)) e.currentTarget.value = formatMoney(e.currentTarget.value) }} style={inputStyleFrom(st, readonly)} placeholder='0,00' />
   } else if (field.kind === 'domain') {
     control = (
-      <select value={raw ?? ''} disabled={readonly} onChange={e => onChange(real, e.target.value || null)} style={inputStyle(readonly)}>
+      <select value={raw ?? ''} disabled={readonly} onChange={e => onChange(real, e.target.value || null)} style={inputStyleFrom(st, readonly)}>
         <option value=''>—</option>
-        {options.map(o => <option key={String(o.code)} value={String(o.code)}>{o.name}</option>)}
+        {effectiveOptions.map(o => <option key={String(o.code)} value={String(o.code)}>{o.name}</option>)}
       </select>
     )
   } else {
@@ -2259,13 +2668,30 @@ function AdminFormSection (props: {
   )
 }
 
+function AdminFieldsGrid (props: {
+  group: AdminField['group']
+  draft: Record<string, any>
+  fields: LayerFieldInfo[]
+  canEdit: boolean
+  onChange: (name: string, value: any) => void
+  fieldNames?: string[]
+}) {
+  const wanted = Array.isArray(props.fieldNames) && props.fieldNames.length ? new Set(props.fieldNames.map(String)) : null
+  const items = ADMIN_FIELDS.filter(f => f.group === props.group && (!wanted || wanted.has(f.name)))
+  return (
+    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: 12 }}>
+      {items.map(f => <FieldEditor key={f.name} field={f} draft={props.draft} fields={props.fields} canEdit={props.canEdit} onChange={props.onChange} />)}
+    </div>
+  )
+}
+
 function PaymentModeInfo (props: { mode: PaymentMode }) {
   const { mode } = props
   if (!mode) {
     return <div style={{ marginTop: 12 }}><InfoBox kind='warn'>Selezionare la modalità di pagamento per visualizzare i campi specifici.</InfoBox></div>
   }
   if (mode === 'PAGOPA') {
-    return <div style={{ marginTop: 12 }}><InfoBox>Modalità selezionata: pagoPA. Sono visibili solo i campi IUV e codice avviso.</InfoBox></div>
+    return <div style={{ marginTop: 12 }}><InfoBox>Modalità selezionata: pagoPA. Per ora sono visibili IUV e codice avviso; il caricamento del PDF bollettino sarà gestito come fase dedicata.</InfoBox></div>
   }
   if (mode === 'BONIFICO') {
     return <div style={{ marginTop: 12 }}><InfoBox>Modalità selezionata: bonifico. Sono visibili solo i campi bancari.</InfoBox></div>
@@ -2303,6 +2729,7 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
   const [layerFields, setLayerFields] = React.useState<LayerFieldInfo[]>([])
   const [draft, setDraft] = React.useState<Record<string, any>>({})
   const [initialDraft, setInitialDraft] = React.useState<Record<string, any>>({})
+  const [automaticValues, setAutomaticValues] = React.useState<Record<string, any>>({})
   const [saving, setSaving] = React.useState(false)
   const [dialog, setDialog] = React.useState<{ kind: 'ok' | 'err' | 'warn', title: string, text: string } | null>(null)
   const [verbalePreviewOpen, setVerbalePreviewOpen] = React.useState(false)
@@ -2355,10 +2782,6 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
   const title = buildPracticeTitle(cfg, data || {}, oid)
   const hasDsForSave = !!configuredDs
   const canEdit = roleAllowed && ['TI_AMM', 'RI_AMM', 'ADMIN'].includes(String(profile.role || '').toUpperCase()) && hasDsForSave
-  const paymentMode = getPaymentMode(draft || data || {}, layerFields)
-  const paymentFieldNames = paymentMode === 'ALTRO' ? [...PAYMENT_COMMON_FIELDS, ...PAYMENT_NOTE_FIELDS] : PAYMENT_COMMON_FIELDS
-  const showPagopaFields = paymentMode === 'PAGOPA' || paymentMode === 'MISTO'
-  const showBonificoFields = paymentMode === 'BONIFICO' || paymentMode === 'MISTO'
   const sanzioniConsultive = useSanzioneConsultivaState(cfg, data || {}, layerFields)
   React.useEffect(() => {
     let cancelled = false
@@ -2379,29 +2802,25 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
     const base = data || {}
     setDraft({ ...base })
     setInitialDraft({ ...base })
+    setAutomaticValues({})
   }, [active?.sig])
 
   React.useEffect(() => {
-    if (!hasSelection || !canEdit) return
-    if (sanzioniConsultive.loading || sanzioniConsultive.error || !sanzioniConsultive.groups.length) return
-
-    setDraft(prev => {
-      const current = prev || {}
-      const calculated = buildAutomaticSanzioneCalculation(sanzioniConsultive.groups, data || current || {}, profile, current)
-      const entries = Object.entries(calculated).filter(([name]) => isSystemCalculatedAdminField(name))
-      if (!entries.length) return prev
-
-      let changed = false
-      const next: Record<string, any> = { ...current }
-      for (const [name, value] of entries) {
-        if (!sameDraftValue(pickAttrCI(next, [name]), value, name)) {
-          next[name] = value
-          changed = true
-        }
-      }
-      return changed ? next : prev
+    if (!hasSelection || sanzioniConsultive.loading || sanzioniConsultive.error || !sanzioniConsultive.groups.length) {
+      setAutomaticValues({})
+      return
+    }
+    const base = { ...(data || {}), ...(draft || {}) }
+    const calculated = buildAutomaticSanzioneCalculation(sanzioniConsultive.groups, data || base || {}, profile, base)
+    const automaticAtto = buildAutomaticAttoAmministrativo({ ...(data || {}), ...base, ...calculated })
+    const next: Record<string, any> = {}
+    Object.entries({ ...calculated, ...automaticAtto }).forEach(([name, value]) => {
+      if (isSystemCalculatedAdminField(name)) next[name] = value
     })
-  }, [hasSelection, canEdit, sanzioniConsultive.loading, sanzioniConsultive.error, sanzioniConsultive.groups, data, profile])
+    setAutomaticValues(next)
+  }, [hasSelection, sanzioniConsultive.loading, sanzioniConsultive.error, sanzioniConsultive.groups, data, draft, profile])
+
+  const viewData = React.useMemo(() => ({ ...(draft || data || {}), ...automaticValues }), [draft, data, automaticValues])
 
   const onFieldChange = React.useCallback((name: string, value: any) => {
     setDraft(prev => ({ ...(prev || {}), [name]: value }))
@@ -2549,56 +2968,67 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
     setDraft({ ...(initialDraft || {}) })
   }
 
-  const fillCloseMeta = async () => {
+
+  const getCompletionIssues = React.useCallback((source: Record<string, any>): string[] => {
+    const current = source || {}
+    const issues: string[] = []
+    if (!hasAdminValue(pickAttrCI(current, ['numero_verbale'])) || !hasAdminValue(pickAttrCI(current, ['data_verbale']))) issues.push('Verbale non ancora definitivo: numero e data saranno assegnati dopo approvazione DA.')
+    if (!hasAdminValue(pickAttrCI(current, ['note_atto_amm']))) issues.push('Note amministrative obbligatorie non compilate.')
+    if (!hasAdminValue(pickAttrCI(current, ['protocollo_verbale_numero']))) issues.push('Numero protocollo verbale mancante.')
+    if (!hasAdminValue(pickAttrCI(current, ['protocollo_verbale_data']))) issues.push('Data protocollo verbale mancante.')
+    if (!hasAdminValue(pickAttrCI(current, ['notifica_tipo']))) issues.push('Tipo notifica mancante.')
+    if (!hasAdminValue(pickAttrCI(current, ['notifica_data']))) issues.push('Data notifica mancante.')
+    if (!hasAdminValue(pickAttrCI(current, ['notifica_esito']))) issues.push('Esito notifica mancante.')
+    if (!hasAdminValue(pickAttrCI(current, ['notifica_estremi']))) issues.push('Estremi notifica mancanti.')
+    const totale = parseNumberInput(pickAttrCI(current, ['pagamento_importo_totale'])) || 0
+    if (totale > 0) {
+      if (!hasAdminValue(pickAttrCI(current, ['pagopa_iuv']))) issues.push('IUV pagoPA mancante.')
+      if (!hasAdminValue(pickAttrCI(current, ['pagopa_codice_avviso']))) issues.push('Codice avviso pagoPA mancante.')
+      if (!hasAdminValue(pickAttrCI(current, ['pagamento_scadenza']))) issues.push('Scadenza pagamento mancante.')
+      if (!hasAdminValue(pickAttrCI(current, ['pagamento_stato']))) issues.push('Stato pagamento mancante.')
+    }
+    return issues
+  }, [])
+
+  const completionIssues = React.useMemo(() => getCompletionIssues(viewData || {}), [getCompletionIssues, viewData])
+
+  const fillCloseMeta = () => {
+    if (!canEdit) return
+    const current = { ...(draft || data || {}), ...automaticValues }
+    const issues = getCompletionIssues(current)
+    if (issues.length) {
+      setDialog({ kind: 'warn', title: 'Istruttoria non completabile', text: `Non è possibile chiudere l’istruttoria amministrativa:\n- ${issues.join('\n- ')}` })
+      return
+    }
     const now = Date.now()
-    const closeMeta: Record<string, any> = {
+    const closeMeta = {
       istruttoria_amm_chiusa_il: now,
       istruttoria_amm_chiusa_da: profile.fullName || profile.username || ''
     }
-    let verbaleMeta: Record<string, any> = {}
-    try {
-      if (active?.ds && layerFields.length) {
-        const layer = await resolveLayerForEdit(active.ds)
-        if (layer) {
-          const fields = layer?.fields?.length
-            ? (layer.fields as any[]).map(f => ({ name: String(f.name), type: String(f.type || ''), alias: String(f.alias || f.name), domain: f.domain || null, editable: f.editable !== false }))
-            : layerFields
-          verbaleMeta = await buildAutomaticVerbaleDefaults(layer, fields, { ...(draft || data || {}), ...closeMeta })
-        }
-      }
-    } catch (e) {
-      console.warn('[gii-editing-amm] Impossibile assegnare numero/data verbale alla chiusura:', e)
-      setDialog({ kind: 'err', title: 'Errore numerazione verbale', text: 'Non è stato possibile assegnare automaticamente numero e data del verbale. Verifica la connessione al layer e riprova.' })
-      return
-    }
     setDraft(prev => ({
       ...(prev || {}),
-      ...verbaleMeta,
       ...closeMeta
     }))
   }
 
   const handleVerbaleDownload = React.useCallback(() => {
-    const base = draft || data
+    const base = { ...(draft || data || {}), ...automaticValues }
     if (!hasSelection || !base) return
     const stamp = buildVerbalePdfGenerationMeta(profile)
     const source = { ...base, ...stamp }
-    if (canEdit) {
-      setDraft(prev => ({ ...(prev || {}), ...stamp }))
-    }
     ;(async () => {
       try {
         const { blob, fileName } = await buildVerbalePdfBlob(source, layerFields, profile)
         downloadBlobFile(blob, fileName)
-        setDialog({ kind: 'ok', title: 'Verbale PDF generato', text: canEdit ? 'Il PDF è stato scaricato e i metadati di generazione sono stati compilati. Ricordati di salvare i dati amministrativi.' : 'Il PDF è stato scaricato.' })
+        setDialog({ kind: 'ok', title: 'Verbale PDF generato', text: 'Il PDF è stato scaricato.' })
       } catch (e: any) {
         setDialog({ kind: 'err', title: 'Errore PDF verbale', text: e?.message || String(e) })
       }
     })()
-  }, [canEdit, data, draft, hasSelection, layerFields, profile])
+  }, [automaticValues, canEdit, data, draft, hasSelection, layerFields, profile])
 
   const handleVerbalePreview = React.useCallback(() => {
-    const source = draft || data
+    const source = { ...(draft || data || {}), ...automaticValues }
     if (!hasSelection || !source) return
     setVerbalePreviewOpen(true)
     setVerbalePreviewLoading(true)
@@ -2618,7 +3048,7 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
         setVerbalePreviewLoading(false)
       }
     })()
-  }, [data, draft, hasSelection, layerFields, profile])
+  }, [automaticValues, data, draft, hasSelection, layerFields, profile])
 
   const closeVerbalePreview = React.useCallback(() => {
     setVerbalePreviewOpen(false)
@@ -2643,7 +3073,19 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
       setDialog({ kind: 'warn', title: 'Scheda in sola lettura', text: 'Il profilo corrente può consultare la scheda, ma non modificarla.' })
       return
     }
+    const currentForValidation = { ...(draft || data || {}), ...automaticValues }
+    if (!hasAdminValue(pickAttrCI(currentForValidation, ['note_atto_amm']))) {
+      setDialog({ kind: 'warn', title: 'Note amministrative obbligatorie', text: 'Compilare le note amministrative, manualmente o tramite una casistica rapida, prima di salvare l’istruttoria.' })
+      return
+    }
     const attrs = changedAttrs(layerFields, initialDraft, draft)
+    Object.entries(automaticValues || {}).forEach(([name, value]) => {
+      if (name === 'numero_verbale' || name === 'data_verbale') return
+      const real = realFieldName(layerFields, name)
+      if (!real) return
+      const before = pickAttrCI(initialDraft, [real, name])
+      if (!sameDraftValue(before, value, name)) attrs[real] = value == null || value === '' ? null : value
+    })
     if (!Object.keys(attrs).length) {
       setDialog({ kind: 'warn', title: 'Nessuna modifica', text: 'Non risultano modifiche da salvare.' })
       return
@@ -2688,19 +3130,41 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
     }
   }
 
+  const adminStyle = React.useMemo(() => ({ ...ADMIN_STYLE_DEFAULTS, ...cfg }), [cfg])
+
   const wrapperStyle: React.CSSProperties = {
     width: '100%',
     height: '100%',
+    display: 'flex',
+    flexDirection: 'column',
     minHeight: 0,
     boxSizing: 'border-box',
-    padding: Number(cfg.panelPadding ?? 14),
-    background: String(cfg.mutedBg || '#f6f7f9'),
-    overflow: 'auto',
+    background: String(adminStyle.maskBg || '#eef4fb'),
+    border: `${Number(adminStyle.maskBorderWidth ?? 1)}px solid ${adminStyle.maskBorderColor || '#cbd8e6'}`,
+    borderRadius: Number(adminStyle.maskBorderRadius ?? 10),
+    padding: Number(adminStyle.maskInnerPadding ?? 12),
+    overflow: 'hidden',
     color: '#111827',
     fontFamily: 'inherit'
   }
 
+  const contentStyle: React.CSSProperties = {
+    flex: '1 1 auto',
+    minHeight: 0,
+    height: 0,
+    overflowY: 'auto',
+    overflowX: 'hidden',
+    overscrollBehavior: 'contain',
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'stretch',
+    gap: Number(adminStyle.formSectionGap ?? 10),
+    paddingTop: 12,
+    paddingRight: 4
+  }
+
   return (
+    <AdminStyleCtx.Provider value={adminStyle}>
     <div style={wrapperStyle}>
       {useDs.map((uds: any, idx: number) => {
         const dsKey = String(uds?.dataSourceId || uds?.mainDataSourceId || `ds_${idx}`)
@@ -2708,46 +3172,22 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
       })}
 
       {dialog && <BlockingDialog kind={dialog.kind} title={dialog.title} text={dialog.text} onClose={() => setDialog(null)} />}
-      {verbalePreviewOpen && (
-        <div style={{ position: 'fixed', inset: 0, zIndex: 2147483000, background: 'rgba(0,0,0,0.58)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 14 }}>
-          <div role='dialog' aria-modal='true' style={{ width: 'calc(100vw - 28px)', height: 'calc(100vh - 28px)', maxWidth: 1920, maxHeight: 1200, borderRadius: 14, boxShadow: '0 20px 70px rgba(0,0,0,0.32)', overflow: 'hidden' }}>
-            <RapportoPdfViewer
-              url={verbalePreviewUrl}
-              fileName={verbalePreviewFileName}
-              title='Anteprima verbale'
-              subtitle={verbalePreviewFileName}
-              loading={verbalePreviewLoading}
-              error={verbalePreviewError}
-              emptyText='Nessun dato disponibile per l&apos;anteprima del verbale.'
-              onDownload={handleVerbaleDownload}
-              onClose={closeVerbalePreview}
-            />
+        <div style={{ flex: '0 0 auto', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 8, padding: '8px 0', borderBottom: `1px solid ${cfg.dividerColor || '#cbd8e6'}` }}>
+          <div style={{ minWidth: 0 }}>
+            <div style={{ fontSize: Number(adminStyle.titleFontSize || 18), fontWeight: Number(cfg.titleFontWeight || 700) as any, color: '#111827', lineHeight: 1.25 }}>
+              {cfg.title}{hasSelection && title ? <> <span style={{ color: '#0b5fff' }}>{title}</span></> : null}
+            </div>
+            <div style={{ fontSize: Number(adminStyle.subtitleFontSize || 13), color: '#6b7280', marginTop: 3 }}>{cfg.subtitle}</div>
+          </div>
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+            <span style={{ background: isDirty ? '#fff7ed' : '#f8fafc', color: isDirty ? '#9a3412' : '#475569', border: '1px solid #e5e7eb', borderRadius: 999, padding: '6px 10px', fontSize: 12, fontWeight: 800 }}>{isDirty ? `${Object.keys(pendingAttrs).length} modifiche da salvare` : 'Nessuna modifica da salvare'}</span>
+            <span style={{ background: '#eff6ff', color: '#0d3b66', border: '1px solid #bfdbfe', borderRadius: 999, padding: '6px 10px', fontSize: 12, fontWeight: 800 }}>{profile.role || 'Profilo non rilevato'}</span>
+            <button type='button' disabled={!isDirty || saving} onClick={handleReset} style={secondaryButtonStyle(!isDirty || saving)}>Annulla modifiche</button>
+            <button type='button' disabled={!isDirty || saving || !canEdit} onClick={handleSave} style={primaryButtonStyle(!isDirty || saving || !canEdit)}>{saving ? 'Salvataggio…' : 'Salva dati amministrativi'}</button>
           </div>
         </div>
-      )}
 
-      <div style={{ maxWidth: 1320, margin: '0 auto', display: 'grid', gap: 12 }}>
-        <div style={{
-          background: cfg.panelBg,
-          border: `${Number(cfg.panelBorderWidth ?? 1)}px solid ${cfg.panelBorderColor}`,
-          borderRadius: Number(cfg.panelBorderRadius ?? 10),
-          padding: 14,
-          display: 'grid',
-          gap: 8
-        }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'flex-start', flexWrap: 'wrap' }}>
-            <div>
-              <div style={{ fontSize: Number(cfg.titleFontSize || 18), fontWeight: Number(cfg.titleFontWeight || 700), color: '#111827', lineHeight: 1.25 }}>{cfg.title}</div>
-              <div style={{ fontSize: Number(cfg.subtitleFontSize || 13), color: '#6b7280', marginTop: 3 }}>{cfg.subtitle}</div>
-            </div>
-            <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
-              {isDirty && <span style={{ background: '#fff7ed', color: '#9a3412', borderRadius: 999, padding: '6px 10px', fontSize: 12, fontWeight: 800 }}>Modifiche non salvate</span>}
-              <div style={{ background: cfg.primaryColor, color: cfg.primaryTextColor, borderRadius: 999, padding: '6px 10px', fontSize: 12, fontWeight: 700 }}>
-                {profile.role || 'Profilo non rilevato'}
-              </div>
-            </div>
-          </div>
-        </div>
+        <div style={contentStyle}>
 
         {!roleAllowed && (
           <InfoBox kind='warn'>
@@ -2763,57 +3203,35 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
 
         {hasSelection && (
           <>
-            <Section title={title} right={<span style={{ fontSize: 11, opacity: 0.85 }}>{hasDsForSave ? 'Fonte dati collegata' : 'Dati da selezione'}</span>}>
-              <FieldGrid
-                fields={Array.isArray(cfg.summaryFields) ? cfg.summaryFields : []}
-                data={draft || data || { [active?.idFieldName || 'OBJECTID']: oid }}
-                layerFields={layerFields}
-                labelSize={Number(cfg.labelFontSize || 12)}
-                valueSize={Number(cfg.valueFontSize || 13)}
-              />
-            </Section>
+        {verbalePreviewOpen && (
+          <Section title='Anteprima verbale' right={<button type='button' onClick={closeVerbalePreview} style={secondaryButtonStyle(false)}>Chiudi anteprima</button>} cardStyle={{ minHeight: 560, display: 'flex', flexDirection: 'column' }} bodyStyle={{ flex: '1 1 auto', minHeight: 0, padding: 0 }}>
+            <RapportoPdfViewer
+              url={verbalePreviewUrl}
+              fileName={verbalePreviewFileName}
+              title='Anteprima verbale'
+              subtitle={verbalePreviewFileName}
+              loading={verbalePreviewLoading}
+              error={verbalePreviewError}
+              emptyText='Nessun dato disponibile per l&apos;anteprima del verbale.'
+              onDownload={handleVerbaleDownload}
+              onClose={closeVerbalePreview}
+            />
+          </Section>
+        )}
 
-            {cfg.showRoleBox !== false && (
-              <Section title='Profilo operativo'>
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(230px, 1fr))', gap: 10 }}>
-                  <div style={{ background: '#f6f7f9', borderRadius: 9, padding: '8px 10px' }}>
-                    <div style={{ color: '#6b7280', fontSize: 12, fontWeight: 700 }}>Utente</div>
-                    <div style={{ fontSize: 13, fontWeight: 600 }}>{profile.fullName || profile.username || '—'}</div>
-                  </div>
-                  <div style={{ background: '#f6f7f9', borderRadius: 9, padding: '8px 10px' }}>
-                    <div style={{ color: '#6b7280', fontSize: 12, fontWeight: 700 }}>Profilo</div>
-                    <div style={{ fontSize: 13, fontWeight: 600 }}>{profile.label || profile.role || '—'}</div>
-                  </div>
-                  <div style={{ background: '#f6f7f9', borderRadius: 9, padding: '8px 10px' }}>
-                    <div style={{ color: '#6b7280', fontSize: 12, fontWeight: 700 }}>Modalità</div>
-                    <div style={{ fontSize: 13, fontWeight: 600 }}>{profile.role === 'TI_AMM' ? 'Compilazione amministrativa' : profile.role === 'RI_AMM' ? 'Verifica amministrativa' : profile.role === 'DA' ? 'Approvazione direzione amministrativa' : 'Consultazione / amministrazione'}</div>
-                  </div>
-                </div>
-              </Section>
-            )}
 
-            {cfg.showWorkflowBox !== false && (
-              <Section title='Stato workflow amministrativo'>
-                <FieldGrid
-                  fields={[
-                    { name: 'presa_in_carico_TI_AMM', label: 'Presa in carico TI_AMM' },
-                    { name: 'dt_presa_in_carico_TI_AMM', label: 'Data presa TI_AMM' },
-                    { name: 'esito_TI_AMM', label: 'Esito TI_AMM' },
-                    { name: 'dt_esito_TI_AMM', label: 'Data esito TI_AMM' },
-                    { name: 'esito_RI_AMM', label: 'Esito RI_AMM' },
-                    { name: 'dt_esito_RI_AMM', label: 'Data esito RI_AMM' },
-                    { name: 'esito_DA', label: 'Esito DA' },
-                    { name: 'dt_esito_DA', label: 'Data esito DA' }
-                  ]}
-                  data={draft || data || {}}
-                  layerFields={layerFields}
-                  labelSize={Number(cfg.labelFontSize || 12)}
-                  valueSize={Number(cfg.valueFontSize || 13)}
-                />
-              </Section>
-            )}
+            <CompactPracticeHeader
+              title={title}
+              data={viewData || {}}
+              fields={layerFields}
+              profile={profile}
+              hasDsForSave={hasDsForSave}
+              summaryFields={Array.isArray(cfg.summaryFields) ? cfg.summaryFields : []}
+              labelSize={Number(cfg.labelFontSize || 12)}
+              valueSize={Number(cfg.valueFontSize || 13)}
+            />
 
-            <SanzioniConsultiveSection loadState={sanzioniConsultive} />
+            <SanzioniConsultiveSection loadState={sanzioniConsultive} data={viewData || {}} fields={layerFields} canEdit={canEdit} onChange={onFieldChange} />
 
             {!hasDsForSave && (
               <InfoBox kind='warn'>
@@ -2827,63 +3245,27 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
               </InfoBox>
             )}
 
-            <AdminFormSection title='Atto amministrativo' group='atto' draft={draft} fields={layerFields} canEdit={canEdit} onChange={onFieldChange} />
-            <AdminFormSection title='Dati verbale' group='verbale' draft={draft} fields={layerFields} canEdit={canEdit} onChange={onFieldChange}>
-              <div style={{ marginTop: 12, display: 'grid', gap: 10 }}>
-                <InfoBox>
-                  Numero verbale e data verbale sono generati automaticamente dal sistema. La numerazione è progressiva globale e non viene azzerata per anno o per area; il TI_AMM può compilare solo le note amministrative e generare/consultare il PDF.
-                </InfoBox>
-                <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, flexWrap: 'wrap' }}>
-                  <button type='button' disabled={!hasSelection || verbalePreviewLoading} onClick={handleVerbalePreview} style={secondaryButtonStyle(!hasSelection || verbalePreviewLoading)}>Anteprima verbale PDF</button>
-                  <button type='button' disabled={!hasSelection || verbalePreviewLoading} onClick={handleVerbaleDownload} style={secondaryButtonStyle(!hasSelection || verbalePreviewLoading)}>Scarica verbale PDF</button>
-                </div>
-              </div>
-            </AdminFormSection>
-            <AdminFormSection title='Protocollo e notifica' group='notifica' draft={draft} fields={layerFields} canEdit={canEdit} onChange={onFieldChange} />
-            <AdminFormSection title='Sanzione e risarcimento danni' group='sanzione' draft={draft} fields={layerFields} canEdit={canEdit} onChange={onFieldChange}>
-              <div style={{ marginTop: 12 }}>
-                <InfoBox>
-                  Gli importi sono calcolati automaticamente sulla base del rapporto approvato e delle tabelle regolamentari configurate. TI_AMM compila solo i dati amministrativi successivi: verbale, protocollo, notifica, pagamento, pagoPA/bonifico e allegazioni.
-                </InfoBox>
-              </div>
-            </AdminFormSection>
-            <AdminFormSection title='Rimborso attrezzature' group='attrezzature' draft={draft} fields={layerFields} canEdit={canEdit} onChange={onFieldChange}>
-              <div style={{ marginTop: 12 }}>
-                <InfoBox>
-                  Le componenti economiche del rimborso attrezzature e dell’eventuale cauzione sono alimentate automaticamente dai parametri sanzionatori; le note restano disponibili per integrazioni amministrative non quantitative.
-                </InfoBox>
-              </div>
-            </AdminFormSection>
-            <AdminFormSection title='Pagamento' group='pagamento' draft={draft} fields={layerFields} canEdit={canEdit} onChange={onFieldChange} fieldNames={paymentFieldNames}>
-              <PaymentModeInfo mode={paymentMode} />
-            </AdminFormSection>
-            {showPagopaFields && (
-              <AdminFormSection title='pagoPA' group='pagamento' draft={draft} fields={layerFields} canEdit={canEdit} onChange={onFieldChange} fieldNames={PAGOPA_FIELDS} />
-            )}
-            {showBonificoFields && (
-              <AdminFormSection title='Bonifico bancario' group='bonifico' draft={draft} fields={layerFields} canEdit={canEdit} onChange={onFieldChange} fieldNames={BONIFICO_FIELDS} />
-            )}
-            <AdminFormSection title='Chiusura istruttoria amministrativa' group='chiusura' draft={draft} fields={layerFields} canEdit={canEdit} onChange={onFieldChange}>
-              <div style={{ marginTop: 12, display: 'grid', gap: 10 }}>
-                <InfoBox>
-                  Il pulsante assegna numero e data del verbale solo se ancora assenti e compila i campi di chiusura amministrativa. Stati, esiti e workflow restano gestiti da gii-azioni.
-                </InfoBox>
-                <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, flexWrap: 'wrap' }}>
-                  <button type='button' disabled={!canEdit} onClick={fillCloseMeta} style={secondaryButtonStyle(!canEdit)}>Compila chiusura istruttoria</button>
-                </div>
-              </div>
-            </AdminFormSection>
+            <VerbaleSummary
+              data={viewData || {}}
+              fields={layerFields}
+              canEdit={canEdit}
+              onApplyNote={text => onFieldChange(realFieldName(layerFields, 'note_atto_amm') || 'note_atto_amm', text)}
+              onPreview={handleVerbalePreview}
+              onDownload={handleVerbaleDownload}
+              disabledPdf={!hasSelection}
+              loadingPdf={verbalePreviewLoading}
+            />
+            <PagamentoGuidatoSection data={viewData || {}} fields={layerFields} canEdit={canEdit} onChange={onFieldChange} />
+            <ProtocolloNotificaGuidataSection data={viewData || {}} fields={layerFields} canEdit={canEdit} onChange={onFieldChange} />
+            <ChiusuraIstruttoriaSummary data={viewData || {}} fields={layerFields} canEdit={canEdit} onFillClose={fillCloseMeta} completionIssues={completionIssues} />
 
-            <div style={{ position: 'sticky', bottom: 0, zIndex: 20, background: 'rgba(246,247,249,0.94)', backdropFilter: 'blur(4px)', border: '1px solid #e5e7eb', borderRadius: 12, padding: 10, display: 'flex', gap: 8, justifyContent: 'flex-end', alignItems: 'center', flexWrap: 'wrap' }}>
-              <span style={{ marginRight: 'auto', color: isDirty ? '#9a3412' : '#6b7280', fontSize: 12, fontWeight: 700 }}>{isDirty ? `${Object.keys(pendingAttrs).length} modifiche da salvare` : 'Nessuna modifica da salvare'}</span>
-              <button type='button' disabled={!isDirty || saving} onClick={handleReset} style={secondaryButtonStyle(!isDirty || saving)}>Annulla modifiche</button>
-              <button type='button' disabled={!isDirty || saving || !canEdit} onClick={handleSave} style={primaryButtonStyle(!isDirty || saving || !canEdit)}>{saving ? 'Salvataggio…' : 'Salva dati amministrativi'}</button>
-            </div>
+
 
           </>
         )}
       </div>
     </div>
+    </AdminStyleCtx.Provider>
   )
 }
 

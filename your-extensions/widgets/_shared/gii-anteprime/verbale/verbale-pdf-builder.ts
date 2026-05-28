@@ -4,7 +4,7 @@
 // Layout generato, senza template esterno, con font e logica base
 // riusati dal builder del rapporto.
 // =================================================================
-import { PDFDocument, type PDFFont, type PDFPage, rgb } from 'pdf-lib'
+import { degrees, PDFDocument, type PDFFont, type PDFPage, rgb } from 'pdf-lib'
 import fontkit from '@pdf-lib/fontkit'
 import { CALIBRI_REGULAR_B64, CALIBRI_BOLD_B64 } from '../rapporto/calibri-fonts'
 
@@ -268,6 +268,21 @@ function addFooterNumbers (doc: PDFDocument, font: PDFFont): void {
   })
 }
 
+function addBozzaWatermark (doc: PDFDocument, bold: PDFFont): void {
+  const pages = doc.getPages()
+  pages.forEach(page => {
+    page.drawText('BOZZA', {
+      x: 116,
+      y: 360,
+      size: 82,
+      font: bold,
+      color: rgb(0.78, 0.78, 0.78),
+      opacity: 0.28,
+      rotate: degrees(34)
+    })
+  })
+}
+
 export function getVerbalePdfFilePrefix (m: Record<string, string>): string {
   return getAttoMeta(m).filePrefix
 }
@@ -283,6 +298,7 @@ export async function buildVerbalePdf (m: Record<string, string>): Promise<Uint8
   const meta = getAttoMeta(m)
   const pratica = v(m, 'pratica') || v(m, 'objectid')
   const numeroVerbale = v(m, 'numero_verbale')
+  const isBozza = meta.hasVerbale && (!numeroVerbale || !v(m, 'data_verbale') || !v(m, 'istruttoria_amm_chiusa_il'))
   const title = meta.hasVerbale && numeroVerbale ? `${meta.title} N. ${numeroVerbale}` : meta.title
   const subtitle = pratica ? `Pratica ${pratica}` : ''
   const object = v(m, 'oggetto_atto_amm') || meta.fallbackObject
@@ -413,6 +429,7 @@ export async function buildVerbalePdf (m: Record<string, string>): Promise<Uint8
   ctx.page.drawText(`Cagliari, ${v(m, 'data_generazione')}`, { x: M, y: ctx.y, size: 8.5, font, color: BLACK })
   ctx.page.drawText('L\'Ufficio Amministrativo', { x: PAGE_W - M - 160, y: ctx.y, size: 8.5, font: bold, color: BLACK })
 
+  if (isBozza) addBozzaWatermark(doc, bold)
   addFooterNumbers(doc, font)
   return await doc.save()
 }

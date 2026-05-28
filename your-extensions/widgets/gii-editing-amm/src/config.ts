@@ -27,6 +27,42 @@ export interface Config {
   labelFontSize: number
   valueFontSize: number
   msgFontSize: number
+  amountFontSize: number
+
+  // Stile form/card, allineato alla scheda Nota spese del gii-editing-ti.
+  maskBg: string
+  maskBorderColor: string
+  maskBorderWidth: number
+  maskBorderRadius: number
+  maskInnerPadding: number
+  maskOuterOffset: number
+  formLabelColor: string
+  formLabelFontSize: number
+  formLabelFontWeight: number
+  formLabelMarginBottom: number
+  formFieldColor: string
+  formFieldFontSize: number
+  formFieldHeight: number
+  formFieldPaddingX: number
+  formFieldBorderColor: string
+  formFieldBorderWidth: number
+  formFieldBorderRadius: number
+  formFieldBg: string
+  formFieldDisabledBg: string
+  formFieldDisabledColor: string
+  formSectionGap: number
+  formCardBg: string
+  formCardBorderColor: string
+  formCardBorderWidth: number
+  formCardBorderRadius: number
+  formCardShadow: string
+  formCardHeaderBg: string
+  formCardHeaderColor: string
+  formCardHeaderFontSize: number
+  formCardHeaderFontWeight: number
+  formCardHeaderPaddingX: number
+  formCardHeaderPaddingY: number
+  formCardBodyPadding: number
 
   primaryColor: string
   primaryTextColor: string
@@ -58,7 +94,7 @@ export const defaultSummaryFields: SummaryFieldConfig[] = [
 
 export const defaultConfig: Config = {
   title: 'Istruttoria amministrativa',
-  subtitle: 'Scheda di lavorazione amministrativa su pratica già esistente.',
+  subtitle: 'Predisposizione verbale, pagoPA, protocollo e notifica.',
   detailTitlePrefix: 'Pratica selezionata',
 
   summaryFields: defaultSummaryFields,
@@ -76,6 +112,41 @@ export const defaultConfig: Config = {
   labelFontSize: 12,
   valueFontSize: 13,
   msgFontSize: 14,
+  amountFontSize: 16,
+
+  maskBg: '#eef4fb',
+  maskBorderColor: '#cbd8e6',
+  maskBorderWidth: 1,
+  maskBorderRadius: 10,
+  maskInnerPadding: 12,
+  maskOuterOffset: 12,
+  formLabelColor: '#334155',
+  formLabelFontSize: 12,
+  formLabelFontWeight: 600,
+  formLabelMarginBottom: 3,
+  formFieldColor: '#0f172a',
+  formFieldFontSize: 13,
+  formFieldHeight: 32,
+  formFieldPaddingX: 9,
+  formFieldBorderColor: '#bfcede',
+  formFieldBorderWidth: 1,
+  formFieldBorderRadius: 7,
+  formFieldBg: '#f8fbff',
+  formFieldDisabledBg: '#e7eef7',
+  formFieldDisabledColor: '#64748b',
+  formSectionGap: 10,
+  formCardBg: '#f8fbff',
+  formCardBorderColor: '#c6d7ea',
+  formCardBorderWidth: 1,
+  formCardBorderRadius: 8,
+  formCardShadow: '0 8px 22px rgba(15, 23, 42, 0.08)',
+  formCardHeaderBg: 'linear-gradient(90deg, #0d3b66, #155e9d)',
+  formCardHeaderColor: '#ffffff',
+  formCardHeaderFontSize: 11,
+  formCardHeaderFontWeight: 800,
+  formCardHeaderPaddingX: 10,
+  formCardHeaderPaddingY: 7,
+  formCardBodyPadding: 10,
 
   primaryColor: '#0d3b66',
   primaryTextColor: '#ffffff',
