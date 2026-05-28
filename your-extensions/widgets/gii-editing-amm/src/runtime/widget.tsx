@@ -99,6 +99,14 @@ type SanzioneConsultivaGroup = {
   voci: SanzioneConsultivaVoce[]
 }
 
+type SanzioneConsultivaLoadState = {
+  loading: boolean
+  error: string
+  groups: SanzioneConsultivaGroup[]
+  urlsReady: boolean
+  casistiche: string[]
+}
+
 type AdminFieldKind = 'text' | 'textarea' | 'date' | 'number' | 'domain' | 'readonly-date' | 'readonly-text'
 
 type AdminField = {
@@ -116,10 +124,9 @@ const ADMIN_FIELDS: AdminField[] = [
   { group: 'atto', name: 'protocollo_istanza_numero', label: 'Protocollo istanza', kind: 'text' },
   { group: 'atto', name: 'protocollo_istanza_data', label: 'Data istanza', kind: 'date' },
   { group: 'atto', name: 'oggetto_atto_amm', label: 'Oggetto atto amministrativo', kind: 'text', full: true },
-  { group: 'atto', name: 'note_atto_amm', label: 'Note atto amministrativo', kind: 'textarea', full: true },
-
-  { group: 'verbale', name: 'numero_verbale', label: 'Numero verbale', kind: 'text' },
-  { group: 'verbale', name: 'data_verbale', label: 'Data verbale', kind: 'date' },
+  { group: 'verbale', name: 'numero_verbale', label: 'Numero verbale (assegnato alla chiusura)', kind: 'readonly-text', readonly: true },
+  { group: 'verbale', name: 'data_verbale', label: 'Data verbale (assegnata alla chiusura)', kind: 'readonly-date', readonly: true },
+  { group: 'verbale', name: 'note_atto_amm', label: 'Note amministrative', kind: 'textarea', full: true },
 
   { group: 'notifica', name: 'protocollo_verbale_numero', label: 'Numero protocollo verbale', kind: 'text' },
   { group: 'notifica', name: 'protocollo_verbale_data', label: 'Data protocollo verbale', kind: 'date' },
@@ -179,6 +186,27 @@ const PAYMENT_COMMON_FIELDS = ['pagamento_modalita', 'pagamento_importo_totale',
 const PAYMENT_NOTE_FIELDS = ['pagamento_note']
 const PAGOPA_FIELDS = ['pagopa_iuv', 'pagopa_codice_avviso']
 const BONIFICO_FIELDS = ['bonifico_conto_cod', 'bonifico_iban_snapshot', 'bonifico_intestatario_snapshot', 'bonifico_causale', 'bonifico_cro_trn', 'bonifico_data_accredito']
+
+const SYSTEM_CALCULATED_ADMIN_FIELDS = new Set([
+  'numero_verbale',
+  'data_verbale',
+  'sanzione_importo_base',
+  'sanzione_importo_ridotta',
+  'risarcimento_danni_importo',
+  'sanzione_spese_notifica',
+  'sanzione_dettaglio_calcolo',
+  'sanzione_calcolata_il',
+  'sanzione_calcolata_da',
+  'attrezzature_rimborso_importo',
+  'attrezzature_cauzione_decurtata',
+  'attrezzature_importo_netto',
+  'attrezzature_rimborso_dettaglio',
+  'pagamento_importo_totale'
+])
+
+function isSystemCalculatedAdminField (name: string): boolean {
+  return SYSTEM_CALCULATED_ADMIN_FIELDS.has(String(name || ''))
+}
 
 type PaymentMode = '' | 'PAGOPA' | 'BONIFICO' | 'MISTO' | 'ALTRO'
 
@@ -416,56 +444,6 @@ function formatEuroText (v: any): string {
   const n = Number(v)
   if (!Number.isFinite(n)) return '—'
   return `${n.toLocaleString('it-IT', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €`
-}
-
-function readMoneyFromDraft (draft: Record<string, any>, name: string): number | null {
-  const raw = pickAttrCI(draft, [name])
-  if (raw == null || raw === '') return null
-  if (typeof raw === 'number') return Number.isFinite(raw) ? raw : null
-  return parseNumberInput(raw)
-}
-
-function buildBaseCalculation (draft: Record<string, any>, profile: { username: string, fullName: string }): Record<string, any> {
-  const base = readMoneyFromDraft(draft, 'sanzione_importo_base')
-  const ridotta = readMoneyFromDraft(draft, 'sanzione_importo_ridotta')
-  const danni = readMoneyFromDraft(draft, 'risarcimento_danni_importo') ?? 0
-  const spese = readMoneyFromDraft(draft, 'sanzione_spese_notifica') ?? 0
-  const attrezzatureNetto = readMoneyFromDraft(draft, 'attrezzature_importo_netto') ?? 0
-  const sanzioneUsata = ridotta ?? base ?? 0
-  const criterio = ridotta != null ? 'Importo sanzione ridotta' : base != null ? 'Importo sanzione base' : 'Nessun importo sanzione valorizzato'
-  const totale = sanzioneUsata + danni + attrezzatureNetto + spese
-  const now = Date.now()
-  const user = String(profile.fullName || profile.username || '').trim()
-  const when = new Date(now).toLocaleString('it-IT')
-  const dettaglio = [
-    'Riepilogo importi inseriti nella scheda amministrativa.',
-    '',
-    `Importo sanzione base: ${base != null ? formatEuroText(base) : '—'}`,
-    `Importo sanzione ridotta: ${ridotta != null ? formatEuroText(ridotta) : '—'}`,
-    `Criterio di totale: ${criterio}`,
-    'Nota: la determinazione normativa degli importi deve essere demandata ai parametri sanzioni gestiti dall\'Area Amministrativa.',
-    `Risarcimento danni: ${formatEuroText(danni)}`,
-    `Rimborso netto attrezzature: ${formatEuroText(attrezzatureNetto)}`,
-    `Spese di notifica: ${formatEuroText(spese)}`,
-    `Totale da pagare: ${formatEuroText(totale)}`,
-    '',
-    `Calcolo effettuato da: ${user || '—'}`,
-    `Data calcolo: ${when}`
-  ].join('\n')
-  return {
-    pagamento_importo_totale: totale,
-    sanzione_calcolata_il: now,
-    sanzione_calcolata_da: user,
-    sanzione_dettaglio_calcolo: dettaglio
-  }
-}
-
-
-function buildAttrezzatureNetto (draft: Record<string, any>): Record<string, any> {
-  const lordo = readMoneyFromDraft(draft, 'attrezzature_rimborso_importo') ?? 0
-  const cauzione = readMoneyFromDraft(draft, 'attrezzature_cauzione_decurtata') ?? 0
-  const netto = Math.max(0, lordo - cauzione)
-  return { attrezzature_importo_netto: netto }
 }
 
 function looksLikeDateField (name: string): boolean {
@@ -1362,6 +1340,171 @@ function SanzioniHeaderTotal (props: { groups: SanzioneConsultivaGroup[] }) {
   )
 }
 
+function roundMoneyValue (value: number): number {
+  return Math.round((Number(value) || 0) * 100) / 100
+}
+
+function sameDraftValue (a: any, b: any, fieldName: string): boolean {
+  if (MONEY_FIELDS.has(fieldName)) {
+    const na = parseNumberInput(a)
+    const nb = parseNumberInput(b)
+    if (na == null && nb == null) return true
+    if (na == null || nb == null) return false
+    return Math.abs(roundMoneyValue(na) - roundMoneyValue(nb)) < 0.005
+  }
+  return normalizeAuditComparable(a) === normalizeAuditComparable(b)
+}
+
+function buildAutomaticSanzioneCalculation (
+  groups: SanzioneConsultivaGroup[],
+  data: Record<string, any>,
+  profile: { username: string, fullName: string },
+  previousDraft: Record<string, any>
+): Record<string, any> {
+  const validGroups = (groups || []).filter(g => Array.isArray(g.voci) && g.voci.length)
+  if (!validGroups.length) return {}
+
+  let sanzioneBase = 0
+  let risarcimentoDanni = 0
+  let rimborsoAttrezzature = 0
+  let cauzioneDecurtata = 0
+  let speseNotifica = 0
+  let riduzionePercentuale: number | null = null
+  let riduzioneImporto: number | null = null
+  const dettaglio: string[] = [
+    'Quantificazione automatica della sanzione sulla base del rapporto approvato e delle tabelle regolamentari configurate.',
+    ''
+  ]
+
+  validGroups.forEach(group => {
+    dettaglio.push(`${formatArticleFallback(group.articoloViolato)} — ${displayViolationTitle(group)}`)
+    ;(group.voci || []).forEach(voce => {
+      const parametro = voce.parametro || null
+      const categoria = String(parametro?.categoria_parametro || '').toUpperCase()
+      const codice = String(parametro?.codice_parametro || voce.codiceParametro || '').toUpperCase()
+      const valore = formatVoceValue(voce)
+      const amount = voceAppliedAmount(voce)
+      dettaglio.push(`- ${voce.descrizione || 'Voce applicabile'} (${codice || 'parametro non configurato'}): ${valore}`)
+
+      if (categoria === 'RIDUZIONE') {
+        const n = parseNumberInput(parametro?.valore_num)
+        if (n != null && Number.isFinite(n)) {
+          if (codice.includes('PERCENTUALE') || n <= 100) riduzionePercentuale = n
+          else riduzioneImporto = n
+        }
+        return
+      }
+
+      if (amount == null || !Number.isFinite(amount)) return
+      if (categoria === 'SANZIONE') sanzioneBase += amount
+      else if (categoria === 'RISARCIMENTO' || categoria === 'RIMBORSO') risarcimentoDanni += amount
+      else if (categoria === 'ATTREZZATURA') rimborsoAttrezzature += amount
+      else if (categoria === 'CAUZIONE') cauzioneDecurtata += amount
+      else if (categoria === 'SPESE') speseNotifica += amount
+    })
+    dettaglio.push('')
+  })
+
+  const importoNettoAttrezzature = Math.max(0, rimborsoAttrezzature - cauzioneDecurtata)
+  const sanzioneRidotta = riduzioneImporto != null
+    ? riduzioneImporto
+    : riduzionePercentuale != null
+      ? sanzioneBase * (riduzionePercentuale / 100)
+      : null
+  const sanzionePerTotale = sanzioneRidotta != null ? sanzioneRidotta : sanzioneBase
+  const totale = sanzionePerTotale + risarcimentoDanni + importoNettoAttrezzature + speseNotifica
+  const user = String(profile.fullName || profile.username || '').trim()
+
+  dettaglio.push('Riepilogo automatico')
+  dettaglio.push(`Importo sanzione base: ${formatEuroText(sanzioneBase)}`)
+  dettaglio.push(`Importo sanzione ridotta: ${sanzioneRidotta != null ? formatEuroText(sanzioneRidotta) : '—'}`)
+  dettaglio.push(`Risarcimento danni / rimborsi: ${formatEuroText(risarcimentoDanni)}`)
+  dettaglio.push(`Rimborso attrezzature: ${formatEuroText(rimborsoAttrezzature)}`)
+  dettaglio.push(`Cauzione decurtata: ${formatEuroText(cauzioneDecurtata)}`)
+  dettaglio.push(`Importo netto attrezzature: ${formatEuroText(importoNettoAttrezzature)}`)
+  dettaglio.push(`Spese: ${formatEuroText(speseNotifica)}`)
+  dettaglio.push(`Totale da pagare: ${formatEuroText(totale)}`)
+  dettaglio.push('')
+  dettaglio.push("Gli importi sono calcolati automaticamente: l'operatore amministrativo compila solo i dati di verbale, protocollo, notifica, pagamento e allegazione.")
+
+  const currentCalcDate = pickAttrCI(previousDraft, ['sanzione_calcolata_il'])
+  const currentCalcUser = String(pickAttrCI(previousDraft, ['sanzione_calcolata_da']) || '').trim()
+
+  return {
+    sanzione_importo_base: roundMoneyValue(sanzioneBase),
+    sanzione_importo_ridotta: sanzioneRidotta != null ? roundMoneyValue(sanzioneRidotta) : null,
+    risarcimento_danni_importo: roundMoneyValue(risarcimentoDanni),
+    sanzione_spese_notifica: roundMoneyValue(speseNotifica),
+    attrezzature_rimborso_importo: roundMoneyValue(rimborsoAttrezzature),
+    attrezzature_cauzione_decurtata: roundMoneyValue(cauzioneDecurtata),
+    attrezzature_importo_netto: roundMoneyValue(importoNettoAttrezzature),
+    attrezzature_rimborso_dettaglio: rimborsoAttrezzature > 0 || cauzioneDecurtata > 0
+      ? `Rimborso attrezzature: ${formatEuroText(rimborsoAttrezzature)}\nCauzione decurtata: ${formatEuroText(cauzioneDecurtata)}\nImporto netto: ${formatEuroText(importoNettoAttrezzature)}`
+      : '',
+    pagamento_importo_totale: roundMoneyValue(totale),
+    sanzione_dettaglio_calcolo: dettaglio.join('\n'),
+    sanzione_calcolata_il: currentCalcDate || Date.now(),
+    sanzione_calcolata_da: currentCalcUser || user
+  }
+}
+
+
+function hasAdminValue (v: any): boolean {
+  return v != null && String(v).trim() !== ''
+}
+
+function verbaleProgressiveFromValue (v: any): number | null {
+  const s = String(v ?? '').trim()
+  if (!s) return null
+  const m = s.match(/\d+/)
+  if (!m) return null
+  const n = Number(m[0])
+  return Number.isFinite(n) ? n : null
+}
+
+function formatGlobalVerbaleNumber (n: number): string {
+  return String(Math.max(1, Math.trunc(Number(n) || 1)))
+}
+
+async function queryNextGlobalVerbaleNumber (layer: any, fields: LayerFieldInfo[]): Promise<string> {
+  const numeroField = realFieldName(fields, 'numero_verbale') || 'numero_verbale'
+  let maxNum = 0
+  if (!layer?.queryFeatures) return formatGlobalVerbaleNumber(1)
+  if (typeof layer.load === 'function') { try { await layer.load() } catch {} }
+  const pageSize = 2000
+  let start = 0
+  for (let guard = 0; guard < 100; guard++) {
+    const q = layer.createQuery ? layer.createQuery() : {}
+    q.where = `${numeroField} IS NOT NULL`
+    q.outFields = [numeroField]
+    q.returnGeometry = false
+    q.start = start
+    q.num = pageSize
+    const res = await layer.queryFeatures(q)
+    const features = Array.isArray(res?.features) ? res.features : []
+    for (const f of features) {
+      const n = verbaleProgressiveFromValue(f?.attributes?.[numeroField])
+      if (n != null && n > maxNum) maxNum = n
+    }
+    if (features.length < pageSize) break
+    start += pageSize
+  }
+  return formatGlobalVerbaleNumber(maxNum + 1)
+}
+
+async function buildAutomaticVerbaleDefaults (layer: any, fields: LayerFieldInfo[], current: Record<string, any>): Promise<Record<string, any>> {
+  const numeroField = realFieldName(fields, 'numero_verbale') || 'numero_verbale'
+  const dataField = realFieldName(fields, 'data_verbale') || 'data_verbale'
+  const out: Record<string, any> = {}
+  if (!hasAdminValue(pickAttrCI(current, [numeroField, 'numero_verbale']))) {
+    out[numeroField] = await queryNextGlobalVerbaleNumber(layer, fields)
+  }
+  if (!hasAdminValue(pickAttrCI(current, [dataField, 'data_verbale']))) {
+    out[dataField] = Date.now()
+  }
+  return out
+}
+
 function buildVoceLabel (raccordo: RegolamentoRaccordo, parametro?: SanzioneParametro | null): string {
   const cat = String(parametro?.categoria_parametro || '').toUpperCase()
   const fromRaccordo = voceDescriptionFromRaccordo(raccordo.descrizione)
@@ -1659,8 +1802,7 @@ function BasicViolationsOnly (props: { data: any, layerFields: LayerFieldInfo[],
   )
 }
 
-function ParametriSanzionatoriSection (props: { cfg: any, data: any, layerFields: LayerFieldInfo[] }) {
-  const { cfg, data, layerFields } = props
+function useSanzioneConsultivaState (cfg: any, data: any, layerFields: LayerFieldInfo[]): SanzioneConsultivaLoadState {
   const parametriUrl = normalizeLookupTableUrl(cfg.parametriSanzioniUrl)
   const articoliUrl = normalizeLookupTableUrl(cfg.regolamentoArticoliUrl)
   const raccordiUrl = normalizeLookupTableUrl(cfg.regolamentoRaccordiUrl)
@@ -1696,26 +1838,48 @@ function ParametriSanzionatoriSection (props: { cfg: any, data: any, layerFields
     return () => { cancelled = true }
   }, [urlsReady, parametriUrl, articoliUrl, raccordiUrl, casistiche.join('|'), data])
 
+  return {
+    loading: state.loading,
+    error: state.error,
+    groups: state.groups,
+    urlsReady,
+    casistiche
+  }
+}
+
+function ParametriSanzionatoriSection (props: { loadState: SanzioneConsultivaLoadState }) {
+  const { loadState } = props
+  const urlsReady = loadState.urlsReady
+  const casistiche = loadState.casistiche || []
+  const loading = loadState.loading
+  const error = loadState.error
+  const groups = loadState.groups || []
+
   return (
-    <Section title='Violazioni contestate e parametri sanzionatori' right={<SanzioniHeaderTotal groups={state.groups} />}>
+    <Section title='Violazioni contestate e quantificazione automatica' right={<SanzioniHeaderTotal groups={groups} />}>
       {!urlsReady && (
         <InfoBox kind='warn'>Configurare in Builder gli URL di GII_PARAMETRI_SANZIONI, GII_REGOLAMENTO_ARTICOLI e GII_REGOLAMENTO_RACCORDI.</InfoBox>
       )}
       {urlsReady && casistiche.length === 0 && (
         <InfoBox kind='warn'>Nessuna casistica sanzionatoria rilevata dai dati della pratica.</InfoBox>
       )}
-      {urlsReady && casistiche.length > 0 && state.loading && <InfoBox>Caricamento parametri sanzionatori…</InfoBox>}
-      {urlsReady && state.error && <InfoBox kind='warn'>Errore caricamento parametri sanzionatori: {state.error}</InfoBox>}
-      {urlsReady && !state.loading && !state.error && casistiche.length > 0 && state.groups.length === 0 && (
+      {urlsReady && casistiche.length > 0 && loading && <InfoBox>Caricamento parametri sanzionatori…</InfoBox>}
+      {urlsReady && error && <InfoBox kind='warn'>Errore caricamento parametri sanzionatori: {error}</InfoBox>}
+      {urlsReady && !loading && !error && casistiche.length > 0 && groups.length === 0 && (
         <InfoBox kind='warn'>Sono presenti violazioni contestate, ma non risultano raccordi attivi nelle tabelle configurate.</InfoBox>
       )}
-      {urlsReady && state.groups.length > 0 && <ParametriSanzionatoriTable groups={state.groups} />}
+      {urlsReady && groups.length > 0 && (
+        <div style={{ display: 'grid', gap: 10 }}>
+          <InfoBox kind='ok'>La quantificazione è calcolata automaticamente dal sistema sulla base del rapporto approvato e delle tabelle regolamentari configurate. L’operatore amministrativo non modifica questi importi.</InfoBox>
+          <ParametriSanzionatoriTable groups={groups} />
+        </div>
+      )}
     </Section>
   )
 }
 
-function SanzioniConsultiveSection (props: { cfg: any, data: any, layerFields: LayerFieldInfo[] }) {
-  return <ParametriSanzionatoriSection cfg={props.cfg} data={props.data} layerFields={props.layerFields} />
+function SanzioniConsultiveSection (props: { loadState: SanzioneConsultivaLoadState }) {
+  return <ParametriSanzionatoriSection loadState={props.loadState} />
 }
 
 function pdfFieldValue (data: any, fields: LayerFieldInfo[], name: string, opts?: { money?: boolean }): string {
@@ -2034,13 +2198,15 @@ function FieldEditor (props: {
   const exists = !!lf
   const real = lf?.name || field.name
   const raw = pickAttrCI(draft, [real, field.name])
-  const readonly = field.readonly || !canEdit || !exists || lf?.editable === false
+  const systemCalculated = isSystemCalculatedAdminField(field.name)
+  const readonly = field.readonly || systemCalculated || !canEdit || !exists || lf?.editable === false
   const options = getDomainOptions(lf)
   const miss = !exists
 
   const label = (
     <div style={{ color: '#374151', fontSize: 12, fontWeight: 800, marginBottom: 5, display: 'flex', gap: 6, alignItems: 'center', justifyContent: 'space-between' }}>
       <span>{field.label}</span>
+      {systemCalculated && !miss && <span style={{ color: '#1d4ed8', fontWeight: 800, fontSize: 10 }}>automatico</span>}
       {miss && <span style={{ color: '#b45309', fontWeight: 700, fontSize: 10 }}>campo assente</span>}
     </div>
   )
@@ -2193,7 +2359,7 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
   const paymentFieldNames = paymentMode === 'ALTRO' ? [...PAYMENT_COMMON_FIELDS, ...PAYMENT_NOTE_FIELDS] : PAYMENT_COMMON_FIELDS
   const showPagopaFields = paymentMode === 'PAGOPA' || paymentMode === 'MISTO'
   const showBonificoFields = paymentMode === 'BONIFICO' || paymentMode === 'MISTO'
-
+  const sanzioniConsultive = useSanzioneConsultivaState(cfg, data || {}, layerFields)
   React.useEffect(() => {
     let cancelled = false
     const load = async () => {
@@ -2214,6 +2380,28 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
     setDraft({ ...base })
     setInitialDraft({ ...base })
   }, [active?.sig])
+
+  React.useEffect(() => {
+    if (!hasSelection || !canEdit) return
+    if (sanzioniConsultive.loading || sanzioniConsultive.error || !sanzioniConsultive.groups.length) return
+
+    setDraft(prev => {
+      const current = prev || {}
+      const calculated = buildAutomaticSanzioneCalculation(sanzioniConsultive.groups, data || current || {}, profile, current)
+      const entries = Object.entries(calculated).filter(([name]) => isSystemCalculatedAdminField(name))
+      if (!entries.length) return prev
+
+      let changed = false
+      const next: Record<string, any> = { ...current }
+      for (const [name, value] of entries) {
+        if (!sameDraftValue(pickAttrCI(next, [name]), value, name)) {
+          next[name] = value
+          changed = true
+        }
+      }
+      return changed ? next : prev
+    })
+  }, [hasSelection, canEdit, sanzioniConsultive.loading, sanzioniConsultive.error, sanzioniConsultive.groups, data, profile])
 
   const onFieldChange = React.useCallback((name: string, value: any) => {
     setDraft(prev => ({ ...(prev || {}), [name]: value }))
@@ -2361,29 +2549,32 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
     setDraft({ ...(initialDraft || {}) })
   }
 
-  const fillCalculatedMeta = () => {
-    const next = buildBaseCalculation(draft || {}, profile)
-    setDraft(prev => ({
-      ...(prev || {}),
-      ...next
-    }))
-    setDialog({ kind: 'ok', title: 'Totale aggiornato', text: 'Totale da pagare e dettaglio importi sono stati aggiornati. Ricordati di salvare i dati amministrativi.' })
-  }
-
-  const fillAttrezzatureNetto = () => {
-    const next = buildAttrezzatureNetto(draft || {})
-    setDraft(prev => ({
-      ...(prev || {}),
-      ...next
-    }))
-  }
-
-  const fillCloseMeta = () => {
+  const fillCloseMeta = async () => {
     const now = Date.now()
-    setDraft(prev => ({
-      ...(prev || {}),
+    const closeMeta: Record<string, any> = {
       istruttoria_amm_chiusa_il: now,
       istruttoria_amm_chiusa_da: profile.fullName || profile.username || ''
+    }
+    let verbaleMeta: Record<string, any> = {}
+    try {
+      if (active?.ds && layerFields.length) {
+        const layer = await resolveLayerForEdit(active.ds)
+        if (layer) {
+          const fields = layer?.fields?.length
+            ? (layer.fields as any[]).map(f => ({ name: String(f.name), type: String(f.type || ''), alias: String(f.alias || f.name), domain: f.domain || null, editable: f.editable !== false }))
+            : layerFields
+          verbaleMeta = await buildAutomaticVerbaleDefaults(layer, fields, { ...(draft || data || {}), ...closeMeta })
+        }
+      }
+    } catch (e) {
+      console.warn('[gii-editing-amm] Impossibile assegnare numero/data verbale alla chiusura:', e)
+      setDialog({ kind: 'err', title: 'Errore numerazione verbale', text: 'Non è stato possibile assegnare automaticamente numero e data del verbale. Verifica la connessione al layer e riprova.' })
+      return
+    }
+    setDraft(prev => ({
+      ...(prev || {}),
+      ...verbaleMeta,
+      ...closeMeta
     }))
   }
 
@@ -2622,7 +2813,7 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
               </Section>
             )}
 
-            <SanzioniConsultiveSection cfg={cfg} data={draft || data || {}} layerFields={layerFields} />
+            <SanzioniConsultiveSection loadState={sanzioniConsultive} />
 
             {!hasDsForSave && (
               <InfoBox kind='warn'>
@@ -2637,21 +2828,30 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
             )}
 
             <AdminFormSection title='Atto amministrativo' group='atto' draft={draft} fields={layerFields} canEdit={canEdit} onChange={onFieldChange} />
-            <AdminFormSection title='Dati verbale' group='verbale' draft={draft} fields={layerFields} canEdit={canEdit} onChange={onFieldChange} />
+            <AdminFormSection title='Dati verbale' group='verbale' draft={draft} fields={layerFields} canEdit={canEdit} onChange={onFieldChange}>
+              <div style={{ marginTop: 12, display: 'grid', gap: 10 }}>
+                <InfoBox>
+                  Numero verbale e data verbale sono generati automaticamente dal sistema. La numerazione è progressiva globale e non viene azzerata per anno o per area; il TI_AMM può compilare solo le note amministrative e generare/consultare il PDF.
+                </InfoBox>
+                <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, flexWrap: 'wrap' }}>
+                  <button type='button' disabled={!hasSelection || verbalePreviewLoading} onClick={handleVerbalePreview} style={secondaryButtonStyle(!hasSelection || verbalePreviewLoading)}>Anteprima verbale PDF</button>
+                  <button type='button' disabled={!hasSelection || verbalePreviewLoading} onClick={handleVerbaleDownload} style={secondaryButtonStyle(!hasSelection || verbalePreviewLoading)}>Scarica verbale PDF</button>
+                </div>
+              </div>
+            </AdminFormSection>
             <AdminFormSection title='Protocollo e notifica' group='notifica' draft={draft} fields={layerFields} canEdit={canEdit} onChange={onFieldChange} />
             <AdminFormSection title='Sanzione e risarcimento danni' group='sanzione' draft={draft} fields={layerFields} canEdit={canEdit} onChange={onFieldChange}>
               <div style={{ marginTop: 12 }}>
                 <InfoBox>
-                  Gli importi della sanzione restano dati amministrativi modificabili. In una fase successiva potranno essere alimentati da una tabella parametri sanzioni gestita da RI_AMM, così da evitare importi fissi cablati nel codice.
+                  Gli importi sono calcolati automaticamente sulla base del rapporto approvato e delle tabelle regolamentari configurate. TI_AMM compila solo i dati amministrativi successivi: verbale, protocollo, notifica, pagamento, pagoPA/bonifico e allegazioni.
                 </InfoBox>
-              </div>
-              <div style={{ marginTop: 12, display: 'flex', justifyContent: 'flex-end' }}>
-                <button type='button' disabled={!canEdit} onClick={fillCalculatedMeta} style={secondaryButtonStyle(!canEdit)}>Aggiorna totale e dettaglio importi</button>
               </div>
             </AdminFormSection>
             <AdminFormSection title='Rimborso attrezzature' group='attrezzature' draft={draft} fields={layerFields} canEdit={canEdit} onChange={onFieldChange}>
-              <div style={{ marginTop: 12, display: 'flex', justifyContent: 'flex-end' }}>
-                <button type='button' disabled={!canEdit} onClick={fillAttrezzatureNetto} style={secondaryButtonStyle(!canEdit)}>Calcola importo netto</button>
+              <div style={{ marginTop: 12 }}>
+                <InfoBox>
+                  Le componenti economiche del rimborso attrezzature e dell’eventuale cauzione sono alimentate automaticamente dai parametri sanzionatori; le note restano disponibili per integrazioni amministrative non quantitative.
+                </InfoBox>
               </div>
             </AdminFormSection>
             <AdminFormSection title='Pagamento' group='pagamento' draft={draft} fields={layerFields} canEdit={canEdit} onChange={onFieldChange} fieldNames={paymentFieldNames}>
@@ -2666,11 +2866,9 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
             <AdminFormSection title='Chiusura istruttoria amministrativa' group='chiusura' draft={draft} fields={layerFields} canEdit={canEdit} onChange={onFieldChange}>
               <div style={{ marginTop: 12, display: 'grid', gap: 10 }}>
                 <InfoBox>
-                  Il pulsante compila solo i campi di chiusura amministrativa. Non aggiorna stati, esiti o workflow: quelli restano gestiti da gii-azioni.
+                  Il pulsante assegna numero e data del verbale solo se ancora assenti e compila i campi di chiusura amministrativa. Stati, esiti e workflow restano gestiti da gii-azioni.
                 </InfoBox>
                 <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, flexWrap: 'wrap' }}>
-                  <button type='button' disabled={!hasSelection || verbalePreviewLoading} onClick={handleVerbalePreview} style={secondaryButtonStyle(!hasSelection || verbalePreviewLoading)}>Anteprima verbale PDF</button>
-                  <button type='button' disabled={!hasSelection || verbalePreviewLoading} onClick={handleVerbaleDownload} style={secondaryButtonStyle(!hasSelection || verbalePreviewLoading)}>Scarica verbale PDF</button>
                   <button type='button' disabled={!canEdit} onClick={fillCloseMeta} style={secondaryButtonStyle(!canEdit)}>Compila chiusura istruttoria</button>
                 </div>
               </div>
