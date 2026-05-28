@@ -384,6 +384,33 @@ function notifySelectionCleared () {
   } catch {}
 }
 
+function readRestoreSelectionAfterEdit (): { oid: number, layerUrl: string, idFieldName: string } | null {
+  try {
+    const raw = sessionStorage.getItem('GII_RESTORE_SELECTION_AFTER_EDIT')
+    if (!raw) return null
+    const j: any = JSON.parse(raw)
+    const oidNum = j?.oid != null && j?.oid !== '' ? Number(j.oid) : NaN
+    if (!Number.isFinite(oidNum)) return null
+    const ts = Number(j?.ts || 0)
+    const ageMs = Math.abs(Date.now() - (Number.isFinite(ts) ? ts : 0))
+    if (!Number.isFinite(ts) || ageMs > 10 * 60 * 1000) {
+      try { sessionStorage.removeItem('GII_RESTORE_SELECTION_AFTER_EDIT') } catch {}
+      return null
+    }
+    return {
+      oid: Number(oidNum),
+      layerUrl: String(j?.layerUrl || '').trim(),
+      idFieldName: String(j?.idFieldName || 'OBJECTID').trim() || 'OBJECTID'
+    }
+  } catch {
+    return null
+  }
+}
+
+function clearRestoreSelectionAfterEdit () {
+  try { sessionStorage.removeItem('GII_RESTORE_SELECTION_AFTER_EDIT') } catch {}
+}
+
 function compareValues (a: any, b: any): number {
   const aNull = (a === null || a === undefined || a === '')
   const bNull = (b === null || b === undefined || b === '')
@@ -1604,13 +1631,13 @@ React.useEffect(() => {
   const lastLogGidSigRef = React.useRef('')
   const logLoadedRef = React.useRef(false)
 
-  // ── Tab ruolo: Tutte / In attesa mia / In attesa di altri ────────────────────
+  // ── Tab ruolo: In attesa mia / In attesa di altri / Tutte ────────────────────
   const ROLE_TABS = [
-    { id: 'tutte',        label: 'Tutte le pratiche' },
     { id: 'attesa_mia',   label: 'In attesa mia' },
     { id: 'attesa_altri', label: 'In attesa di altri' },
+    { id: 'tutte',        label: 'Tutte le pratiche' },
   ]
-  const [activeRoleTab, setActiveRoleTab] = React.useState<string>('tutte')
+  const [activeRoleTab, setActiveRoleTab] = React.useState<string>('attesa_mia')
 
   // Funzione filtro per tab ruolo
   const passesRoleTab = React.useCallback((r: DataRecord, tabId: string): boolean => {
@@ -1620,15 +1647,15 @@ React.useEffect(() => {
     const stato = computeDisplaySintetico(d)
     const label = labelNorm(txt(stato.label)).trim().toLowerCase()
 
-    // La tab "In attesa mia" deve contenere solo pratiche su cui il ruolo
-    // corrente deve agire adesso. Tutto il resto, se è comunque visibile al ruolo,
-    // deve rientrare in "In attesa di altri": con sole due tab operative non
-    // possiamo lasciare pratiche visibili solo in "Tutte", altrimenti i conteggi
-    // diventano incomprensibili e alcune pratiche spariscono da entrambe le code.
+    // La tab "In attesa mia" contiene solo pratiche su cui il ruolo
+    // corrente deve agire adesso. La tab "In attesa di altri" contiene
+    // le pratiche ancora operative presso altri ruoli; le pratiche respinte
+    // sono chiuse e restano consultabili solo in "Tutte le pratiche".
     const isAttesaMia = label === 'da prendere in carico' || label === 'in carico'
+    const isRespinto = isRapportoRespintoChiuso(d) || label === 'respinto' || label.startsWith('respint')
 
     if (tabId === 'attesa_mia') return isAttesaMia
-    if (tabId === 'attesa_altri') return !isAttesaMia
+    if (tabId === 'attesa_altri') return !isAttesaMia && !isRespinto
     return true
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [statoRuoloField, giiUser?.ruoloLabel, giiUser?.area, giiUser?.username, logVer])
@@ -1991,7 +2018,7 @@ React.useEffect(() => {
 
   // Sort: array (ordinamento multiplo con clic sulle intestazioni)
   const defaultSort: SortItem[] = React.useMemo(() => {
-    const f = txt(cfg.orderByField || 'objectid')
+    const f = txt(cfg.orderByField || V_DATA_MSG)
     const d = (txt(cfg.orderByDir || 'DESC').toUpperCase() === 'ASC' ? 'ASC' : 'DESC') as SortDir
     return [{ field: f, dir: d }]
   }, [cfg.orderByField, cfg.orderByDir])
@@ -2484,6 +2511,18 @@ React.useEffect(() => {
     return Number.isFinite(n) ? n : null
   }
 
+  function isRapportoRespintoChiuso (d: any): boolean {
+    const logEvent = String(getLogForRecord(d)?.evento || '').trim().toUpperCase()
+    if (logEvent === 'RESPINTA') return true
+
+    const roles = ['RZ', 'DT', 'RI', 'DA', 'RI_AMM', 'TI_AMM', 'TI', 'TR']
+    return roles.some(role => {
+      const statoNum = readRoleNumber(d, role, 'stato')
+      const esitoNum = readRoleNumber(d, role, 'esito')
+      return statoNum === statoRespinta || esitoNum === esitoRespinta
+    })
+  }
+
   function formatCausaleForLog (log: LogEntry | null, d: any): string {
     if (!log) return '—'
     const evento = String(log.evento || '').trim().toUpperCase()
@@ -2884,6 +2923,69 @@ React.useEffect(() => {
     if (!stillVisible) clearAllSelections()
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [mergedRecs, recDsLookup])
+
+  // Quando si rientra nell'elenco dopo la modifica di un rapporto, ripristina
+  // la selezione del record appena salvato/chiuso. Usiamo un marker separato
+  // dai normali GII_SELECTED_* per evitare che una pulizia transitoria della
+  // selezione runtime lo cancelli durante il cambio pagina.
+  React.useEffect(() => {
+    const restoreInfo = readRestoreSelectionAfterEdit()
+    if (!restoreInfo) return
+    if (Object.keys(localSelectedByDs || {}).length > 0) return
+    if (!mergedRecs.length) return
+
+    const oidNum = Number(restoreInfo.oid)
+    if (!Number.isFinite(oidNum)) return
+
+    let found: { dsId: string, rid: string, rec: DataRecord, idFieldName: string } | null = null
+    for (const r of mergedRecs) {
+      const dsId = recDsLookup.get(r) || ''
+      if (!dsId) continue
+      const entry = dsDataRef.current[dsId]
+      const idFieldName = String(restoreInfo?.idFieldName || entry?.ds?.getIdField?.() || 'OBJECTID').trim() || 'OBJECTID'
+      const d = r.getData?.() || {}
+      const rid = String(r.getId?.() ?? '')
+      const recOid = Number(d?.[idFieldName] ?? d?.OBJECTID ?? d?.objectid ?? d?.ObjectId ?? d?.objectId ?? rid)
+      if (Number.isFinite(recOid) && recOid === oidNum) {
+        found = { dsId, rid: rid || String(oidNum), rec: r, idFieldName }
+        break
+      }
+    }
+    if (!found) {
+      // Il record non è più presente nella scheda corrente: non va forzata
+      // alcuna selezione e il marker non deve riattivarsi cambiando tab.
+      clearRestoreSelectionAfterEdit()
+      return
+    }
+
+    setLocalSelectedByDs({ [found.dsId]: found.rid })
+    const entry = dsDataRef.current[found.dsId]
+    if (entry?.ds) trySelectRecord(entry.ds, found.rec, found.rid)
+
+    if (activeGroup) {
+      activeGroup.dsIndices.forEach(di => {
+        const otherId = String(filteredUseDsJs[di]?.dataSourceId || '')
+        if (otherId === found?.dsId) return
+        const otherEntry = dsDataRef.current[otherId]
+        if (otherEntry?.ds) {
+          try { (otherEntry.ds as any).setSelectedRecords?.([found?.rec]) } catch {}
+          try { (otherEntry.ds as any).selectRecordsByIds?.([found?.rid]) } catch {}
+        }
+      })
+    }
+
+    const restoredData = found.rec.getData?.() || {}
+    publishRuntimeSelection({
+      oid: Number(oidNum),
+      layerUrl: resolvedView?.layerUrl || restoreInfo.layerUrl || sessionStorage.getItem('GII_SELECTED_LAYER_URL') || found.dsId,
+      serviceUrl: resolvedView?.serviceUrl || sessionStorage.getItem('GII_SELECTED_SERVICE_URL') || found.dsId,
+      idFieldName: found.idFieldName,
+      viewName: resolvedView?.viewName || sessionStorage.getItem('GII_SELECTED_VIEW_NAME') || getDsLabel({ __label: '' }, 'Vista runtime'),
+      data: restoredData
+    })
+    clearRestoreSelectionAfterEdit()
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mergedRecs, recDsLookup, activeGroup, filteredUseDsJs, localSelectedByDs, resolvedView])
 
   const ultimoIngressoCodaMs = React.useMemo(() => {
     let best: number | null = null
@@ -3523,7 +3625,7 @@ React.useEffect(() => {
             </>
           )}
 
-          {/* ── Tab ruolo: Tutte / In attesa mia / In attesa di altri ── */}
+          {/* ── Tab ruolo: In attesa mia / In attesa di altri / Tutte ── */}
           {!userLoading && statoRuoloField && (
             <div style={{ display: 'flex', gap: 8, padding: '8px 12px', borderBottom: '1px solid rgba(0,0,0,0.08)', alignItems: 'center', flexWrap: 'nowrap' }}>
               <span style={{ fontSize: 11, color: '#6b7280', marginRight: 4, flex: '0 0 auto' }}>
@@ -3797,6 +3899,7 @@ React.useEffect(() => {
                           className={`rowCard ${even ? 'even' : 'odd'} ${isSel ? 'selected' : ''}`}
                           style={rowOggettoStyle}
                           onClick={() => {
+                            clearRestoreSelectionAfterEdit()
                             if (isSel) {
                               // Deseleziona su TUTTI i DS
                               setLocalSelectedByDs({})

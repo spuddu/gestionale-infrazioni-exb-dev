@@ -1723,6 +1723,70 @@ function ActionsPanel (props: {
 
   const sqlQuote = (v: any): string => `'${String(v ?? '').replace(/'/g, "''")}'`
 
+  const globalIdVariants = (raw: any): string[] => {
+    const s = String(raw ?? '').trim()
+    if (!s) return []
+    const clean = s.replace(/[{}]/g, '').trim()
+    const variants = [s]
+    if (clean) {
+      variants.push(clean)
+      variants.push(`{${clean}}`)
+    }
+    return Array.from(new Set(variants.filter(Boolean)))
+  }
+
+  const parentGlobalIdWhere = (fieldName: string, raw: any): string => {
+    const variants = globalIdVariants(raw)
+    return variants.length
+      ? variants.map(g => `${fieldName} = ${sqlQuote(g)}`).join(' OR ')
+      : '1=0'
+  }
+
+  const getObjectIdValue = (attrs: any, layer?: any): any => {
+    const oidField = String(layer?.objectIdField || 'OBJECTID')
+    return pickAttrCI(attrs, [oidField, 'OBJECTID', 'ObjectID', 'ObjectId', 'objectId', 'objectid'])
+  }
+
+  const queryCurrentRecordAttrs = async (): Promise<Record<string, any> | null> => {
+    if (oid == null || !Number.isFinite(Number(oid))) return null
+    try {
+      let layer: any = null
+      try {
+        const resolved = await resolveLayer(ds)
+        layer = resolved?.layer || null
+      } catch {}
+
+      if (!layer?.queryFeatures) {
+        const FeatureLayer = await loadEsriModule<any>('esri/layers/FeatureLayer')
+        const w: any = window as any
+        const layerUrl = String(
+          active?.state?.ds?.getDataSourceJson?.()?.url ||
+          active?.state?.ds?.dataSourceJson?.url ||
+          active?.state?.ds?.layer?.url ||
+          w.__giiSelection?.layerUrl ||
+          sessionStorage.getItem('GII_SELECTED_LAYER_URL') ||
+          active?.key ||
+          ''
+        ).trim()
+        if (layerUrl) layer = new FeatureLayer({ url: layerUrl, outFields: ['*'] })
+      }
+
+      if (!layer?.queryFeatures) return null
+      if (typeof layer.load === 'function') { try { await layer.load() } catch {} }
+      const idField = String(layer.objectIdField || idFieldNameFromSel || 'OBJECTID')
+      const q = layer.createQuery ? layer.createQuery() : {}
+      q.where = `${idField} = ${Number(oid)}`
+      q.outFields = ['*']
+      q.returnGeometry = false
+      q.num = 1
+      const res = await layer.queryFeatures(q)
+      return res?.features?.[0]?.attributes || null
+    } catch (e) {
+      console.warn('[GII_LOG_EVENTI_CICLI] Impossibile rileggere il record corrente per il contesto ciclo:', e)
+      return null
+    }
+  }
+
   type NotaSpeseCasisticaCheck = { codice: string; art: number; label: string }
   const NOTE_SPESE_CASISTICHE_CHECK: NotaSpeseCasisticaCheck[] = [
     { codice: 'C100_REPERIBILITA', art: 8, label: 'Art. 8 – Violazione servizio reperibilità' },
@@ -1800,7 +1864,9 @@ function ActionsPanel (props: {
     return { blocking, confirmable }
   }
 
-  const getCurrentCycleContext = () => {
+  type CycleContext = { parentGlobalId: string, area: string, settore: string, username: string }
+
+  const getCurrentCycleContext = (): CycleContext => {
     const giiRole: any = (window as any).__giiUserRole || {}
     const parentGlobalId = String(pickAttrCI(data, ['globalid', 'global_id', 'GlobalID', 'GLOBALID', 'parent_globalid']) || '')
     const area = normalizeAreaLabel(giiRole.areaCod || giiRole.area_cod || giiRole.areaLabel || giiRole.area || pickAttrCI(data, ['area_cod', 'area', 'cod_area']))
@@ -1810,6 +1876,23 @@ function ActionsPanel (props: {
     )
     const username = String(giiRole.username || (window as any).__giiUser?.username || '').trim()
     return { parentGlobalId, area, settore, username }
+  }
+
+  const getCurrentCycleContextAsync = async (): Promise<CycleContext> => {
+    const base = getCurrentCycleContext()
+    if (base.parentGlobalId) return base
+
+    const attrs = await queryCurrentRecordAttrs()
+    if (!attrs) return base
+
+    const giiRole: any = (window as any).__giiUserRole || {}
+    const parentGlobalId = String(pickAttrCI(attrs, ['globalid', 'global_id', 'GlobalID', 'GLOBALID', 'parent_globalid']) || '')
+    const area = base.area || normalizeAreaLabel(giiRole.areaCod || giiRole.area_cod || giiRole.areaLabel || giiRole.area || pickAttrCI(attrs, ['area_cod', 'area', 'cod_area']))
+    const settore = base.settore || normalizeSettoreLabel(
+      area,
+      giiRole.settoreCod || giiRole.settore_cod || giiRole.settoreLabel || giiRole.settore || pickAttrCI(attrs, ['settore_cod', 'settore', 'cod_settore']) || inferSettoreFromUsername(String(giiRole.username || pickAttrCI(attrs, ['creator', 'Creator', 'editor', 'Editor']) || ''))
+    )
+    return { ...base, parentGlobalId, area, settore }
   }
 
   /**
@@ -1876,11 +1959,12 @@ function ActionsPanel (props: {
     const logLayer = await getCycleLogLayer()
     if (!logLayer?.queryFeatures) return null
     const q = logLayer.createQuery ? logLayer.createQuery() : {}
-    q.where = `parent_globalid = ${sqlQuote(parentGlobalId)} AND ruolo_competente = ${sqlQuote(ruoloCompetente)} AND stato_record = 'APERTO'`
+    q.where = `(${parentGlobalIdWhere('parent_globalid', parentGlobalId)}) AND ruolo_competente = ${sqlQuote(ruoloCompetente)} AND stato_record = 'APERTO'`
     q.outFields = ['*']
     q.returnGeometry = false
     q.num = 1
-    q.orderByFields = ['numero_ciclo_ruolo DESC', 'ObjectId DESC']
+    const oidField = String(logLayer.objectIdField || 'OBJECTID')
+    q.orderByFields = ['numero_ciclo_ruolo DESC', `${oidField} DESC`]
     const res = await logLayer.queryFeatures(q)
     return res?.features?.[0] || null
   }
@@ -1890,11 +1974,12 @@ function ActionsPanel (props: {
     const logLayer = await getCycleLogLayer()
     if (!logLayer?.queryFeatures) return 1
     const q = logLayer.createQuery ? logLayer.createQuery() : {}
-    q.where = `parent_globalid = ${sqlQuote(parentGlobalId)} AND ruolo_competente = ${sqlQuote(ruoloCompetente)}`
+    q.where = `(${parentGlobalIdWhere('parent_globalid', parentGlobalId)}) AND ruolo_competente = ${sqlQuote(ruoloCompetente)}`
     q.outFields = ['numero_ciclo_ruolo']
     q.returnGeometry = false
     q.num = 1
-    q.orderByFields = ['numero_ciclo_ruolo DESC', 'ObjectId DESC']
+    const oidField = String(logLayer.objectIdField || 'OBJECTID')
+    q.orderByFields = ['numero_ciclo_ruolo DESC', `${oidField} DESC`]
     try {
       const res = await logLayer.queryFeatures(q)
       const lastNum = Number(res?.features?.[0]?.attributes?.numero_ciclo_ruolo || 0)
@@ -1904,15 +1989,24 @@ function ActionsPanel (props: {
     }
   }
 
-  const openCycleLog = async (opts: { eventoApertura?: string, fase?: string }) => {
+  const openCycleLog = async (opts: { eventoApertura?: string, fase?: string, context?: Partial<CycleContext>, forceNew?: boolean }) => {
     try {
       if (oid == null) return
-      const { parentGlobalId, area, settore, username } = getCurrentCycleContext()
-      if (!parentGlobalId) return
+      const fallbackCtx = opts.context?.parentGlobalId ? null : await getCurrentCycleContextAsync()
+      const parentGlobalId = String(opts.context?.parentGlobalId || fallbackCtx?.parentGlobalId || '').trim()
+      const area = String(opts.context?.area || fallbackCtx?.area || '').trim()
+      const settore = String(opts.context?.settore || fallbackCtx?.settore || '').trim()
+      const username = String(opts.context?.username || fallbackCtx?.username || '').trim()
+      if (!parentGlobalId) {
+        console.warn('[GII_LOG_EVENTI_CICLI] Apertura ciclo saltata: parent_globalid non disponibile.', { oid, role })
+        return
+      }
       const logLayer = await getCycleLogLayer()
       if (!logLayer?.applyEdits) return
-      const existing = await queryOpenCycle(parentGlobalId, role)
-      if (existing) return
+      if (!opts.forceNew) {
+        const existing = await queryOpenCycle(parentGlobalId, role)
+        if (existing) return
+      }
       const nextNum = await getNextCycleNumber(parentGlobalId, role)
       const attrsRaw: Record<string, any> = {
         parent_globalid: parentGlobalId,
@@ -1934,7 +2028,10 @@ function ActionsPanel (props: {
         riepilogo_ciclo: ''
       }
       const attrs = filterAttrsForLayer(attrsRaw, logLayer)
-      await logLayer.applyEdits({ addFeatures: [{ attributes: attrs }] })
+      const addRes = await logLayer.applyEdits({ addFeatures: [{ attributes: attrs }] })
+      const add = addRes?.addFeatureResults?.[0] || addRes?.addResults?.[0] || null
+      if (add?.error) throw new Error(add.error.message || JSON.stringify(add.error))
+      notifyWorkflowLogChanged()
     } catch (e) {
       console.warn('[GII_LOG_EVENTI_CICLI] Errore apertura ciclo:', e)
     }
@@ -1944,13 +2041,17 @@ function ActionsPanel (props: {
     // Mantenuta solo come compatibilità interna: il refresh operativo viene
     // eseguito una sola volta dai chiamanti, dopo applyEdits sul record e dopo
     // scrittura del LOG eventi/cicli.
+    try { window.dispatchEvent(new CustomEvent('gii-log-eventi-cicli-changed', { detail: { source: 'gii-azioni', oid, role, ts: Date.now() } })) } catch {}
   }
 
   const closeCycleLog = async (opts: { eventoChiusura: string, ruoloDestinatario?: string, utenteDestinatario?: string, noteChiusura?: string, fase?: string }) => {
     try {
       if (oid == null) return
-      const { parentGlobalId, area, settore, username } = getCurrentCycleContext()
-      if (!parentGlobalId) return
+      const { parentGlobalId, area, settore, username } = await getCurrentCycleContextAsync()
+      if (!parentGlobalId) {
+        console.warn('[GII_LOG_EVENTI_CICLI] Chiusura ciclo saltata: parent_globalid non disponibile.', { oid, role })
+        return
+      }
       const logLayer = await getCycleLogLayer()
       if (!logLayer?.applyEdits) return
       const feature = await queryOpenCycle(parentGlobalId, role)
@@ -1986,7 +2087,9 @@ function ActionsPanel (props: {
           riepilogo_ciclo: summary
         }
         const newAttrs = filterAttrsForLayer(newRaw, logLayer)
-        await logLayer.applyEdits({ addFeatures: [{ attributes: newAttrs }] })
+        const addRes = await logLayer.applyEdits({ addFeatures: [{ attributes: newAttrs }] })
+        const add = addRes?.addFeatureResults?.[0] || addRes?.addResults?.[0] || null
+        if (add?.error) throw new Error(add.error.message || JSON.stringify(add.error))
         notifyWorkflowLogChanged()
         return
       }
@@ -1995,7 +2098,7 @@ function ActionsPanel (props: {
       const numCampi = Number(attrs.num_campi_modificati || 0)
       const summary = buildCycleSummary(String(attrs.evento_apertura || 'PRESA_IN_CARICO'), opts.eventoChiusura, numCampi)
       const updRaw: Record<string, any> = {
-        ObjectId: attrs.ObjectId ?? attrs.objectid,
+        [String(logLayer.objectIdField || 'OBJECTID')]: getObjectIdValue(attrs, logLayer),
         utente_operatore: username || attrs.utente_operatore || '',
         evento_chiusura: opts.eventoChiusura,
         dt_chiusura: Date.now(),
@@ -2010,7 +2113,9 @@ function ActionsPanel (props: {
         stato_record: 'CHIUSO'
       }
       const upd = filterAttrsForLayer(updRaw, logLayer)
-      await logLayer.applyEdits({ updateFeatures: [{ attributes: upd }] })
+      const updRes = await logLayer.applyEdits({ updateFeatures: [{ attributes: upd }] })
+      const updResult = updRes?.updateFeatureResults?.[0] || updRes?.updateResults?.[0] || null
+      if (updResult?.error) throw new Error(updResult.error.message || JSON.stringify(updResult.error))
       notifyWorkflowLogChanged()
     } catch (e) {
       console.warn('[GII_LOG_EVENTI_CICLI] Errore chiusura ciclo:', e)
@@ -2862,65 +2967,80 @@ function ActionsPanel (props: {
   // Destinazione forward risolta (usata anche per le label)
   const fwdDest = getNextRoleForForward()
 
+  const areaNameForRoleLabel = (areaCode: string): string => {
+    const code = normalizeAreaLabel(areaCode)
+    if (code === 'AGR') return 'Agraria'
+    if (code === 'TEC') return 'Tecnica'
+    if (code === 'AMM') return 'Amministrativa'
+    return ''
+  }
+
   const getRoleLabelForMenu = (destRole: string, opts?: { technicalIntegration?: boolean }): string => {
     const dest = String(destRole || '').trim().toUpperCase()
     if (!dest) return ''
-    if (dest === 'RI_AMM') return 'RI AMM'
-    if (dest === 'TI_AMM') return 'TI AMM'
-    if (dest === 'DA') return 'DA'
+    if (dest === 'RI_AMM') return 'Responsabile Istruttoria amministrativa'
+    if (dest === 'TI_AMM') return 'Tecnico Istruttore amministrativo'
+    if (dest === 'DA') return 'Direttore dell’Area Amministrativa'
 
     const meta = getRoutingMetaForRole(dest, opts)
-    const areaLabel = normalizeAreaLabel(meta.area || getPracticeAreaForRouting())
+    const areaCode = normalizeAreaLabel(meta.area || getPracticeAreaForRouting())
+    const areaName = areaNameForRoleLabel(areaCode)
 
-    if (dest === 'RI') return areaLabel ? `RI ${areaLabel}` : 'RI'
-    if (dest === 'TI') return areaLabel ? `TI ${areaLabel}` : 'TI'
-    if (dest === 'DT') return areaLabel ? `DT ${areaLabel}` : 'DT'
-    if (dest === 'RZ') return 'RZ'
+    if (dest === 'RI') return 'Responsabile Istruttoria'
+    if (dest === 'TI') return 'Tecnico Istruttore'
+    if (dest === 'DT') return areaName ? `Direttore dell’Area ${areaName}` : 'Direttore dell’Area Tecnica'
+    if (dest === 'RZ') return 'Responsabile di Zona'
     return dest.replace(/_/g, ' ')
   }
 
-  const fwdDestLabel = getRoleLabelForMenu(fwdDest)
+  const getRoleLabelForForward = (destRole: string): string => {
+    const dest = String(destRole || '').trim().toUpperCase()
+    if (dest === 'DT' || dest === 'DA') return 'Direttore d’Area'
+    return getRoleLabelForMenu(dest)
+  }
+
+  const fwdDestLabel = getRoleLabelForForward(fwdDest)
   const currentIntegrationRequesterLabel = currentIntegrationRequester
-    ? getRoleLabelForMenu(currentIntegrationRequester)
+    ? getRoleLabelForForward(currentIntegrationRequester)
     : ''
 
   const approvaBtnLabel =
-    role === 'TI' ? 'Trasmetti a RZ' :
-    role === 'RZ' ? 'Trasmetti a RI' :
-    role === 'RI' ? 'Trasmetti a DT' :
-    role === 'DT' ? 'Approva Rapporto' :
-    role === 'DA' ? 'Approva Sanzione' :
-    role === 'RI_AMM' ? `Trasmetti a ${fwdDestLabel}` :
-    role === 'TI_AMM' ? 'Trasmetti a RI AMM' :
+    role === 'TI' ? `Trasmetti al ${getRoleLabelForMenu('RZ')}` :
+    role === 'RZ' ? `Trasmetti al ${getRoleLabelForMenu('RI')}` :
+    role === 'RI' ? `Trasmetti al ${getRoleLabelForForward('DT')}` :
+    role === 'DT' ? 'Approva' :
+    role === 'DA' ? 'Approva' :
+    role === 'RI_AMM' ? `Trasmetti al ${fwdDestLabel}` :
+    role === 'TI_AMM' ? `Trasmetti al ${getRoleLabelForMenu('RI_AMM')}` :
     'Approva'
 
   const approvaDoneLabel = currentIntegrationRequesterLabel
-    ? `Risposta inviata al ${currentIntegrationRequesterLabel}`
-    : role === 'TI' ? 'Trasmessa a RZ' :
-    role === 'RZ' ? `Trasmessa a ${getRoleLabelForMenu('RI')}` :
-    role === 'RI' ? `Trasmessa a ${getRoleLabelForMenu('DT')}` :
-    role === 'DT' ? 'Trasmessa a RI AMM' :
-    role === 'DA' ? 'Trasmessa a TI AMM' :
-    role === 'RI_AMM' ? `Trasmessa a ${fwdDestLabel}` :
-    role === 'TI_AMM' ? 'Trasmessa a RI AMM' :
+    ? `Trasmessa al ${currentIntegrationRequesterLabel}`
+    : role === 'TI' ? `Trasmessa al ${getRoleLabelForMenu('RZ')}` :
+    role === 'RZ' ? `Trasmessa al ${getRoleLabelForMenu('RI')}` :
+    role === 'RI' ? `Trasmessa al ${getRoleLabelForForward('DT')}` :
+    role === 'DT' ? `Trasmessa al ${getRoleLabelForMenu('RI_AMM')}` :
+    role === 'DA' ? `Trasmessa al ${getRoleLabelForMenu('TI_AMM')}` :
+    role === 'RI_AMM' ? `Trasmessa al ${fwdDestLabel}` :
+    role === 'TI_AMM' ? `Trasmessa al ${getRoleLabelForMenu('RI_AMM')}` :
     'Approvata'
 
   const approvaConfirmLabel = currentIntegrationRequesterLabel
-    ? `Conferma risposta al ${currentIntegrationRequesterLabel}`
-    : role === 'TI' ? 'Conferma trasmissione al RZ' :
+    ? `Conferma trasmissione al ${currentIntegrationRequesterLabel}`
+    : role === 'TI' ? `Conferma trasmissione al ${getRoleLabelForMenu('RZ')}` :
     role === 'RZ' ? `Conferma trasmissione al ${getRoleLabelForMenu('RI')}` :
-    role === 'RI' ? `Conferma trasmissione al ${getRoleLabelForMenu('DT')}` :
-    role === 'DT' ? 'Conferma approvazione rapporto' :
-    role === 'DA' ? 'Conferma approvazione sanzione' :
+    role === 'RI' ? `Conferma trasmissione al ${getRoleLabelForForward('DT')}` :
+    role === 'DT' ? 'Conferma approvazione' :
+    role === 'DA' ? 'Conferma approvazione' :
     role === 'RI_AMM' ? `Conferma trasmissione al ${fwdDestLabel}` :
-    role === 'TI_AMM' ? 'Conferma trasmissione al RI AMM' :
+    role === 'TI_AMM' ? `Conferma trasmissione al ${getRoleLabelForMenu('RI_AMM')}` :
     'Conferma approvazione'
 
   const getRiTecnicoTargetLabel = (): string => {
     const areaPratica = normalizeAreaLabel(pickAttrCI(data, ['area_cod', 'area', 'cod_area']))
-    if (areaPratica === 'AGR') return 'RI AGR'
-    if (areaPratica === 'TEC') return 'RI TEC'
-    return 'RI'
+    const areaName = areaNameForRoleLabel(areaPratica)
+    if ((areaPratica === 'AGR' || areaPratica === 'TEC') && areaName) return `Responsabile Istruttoria dell’Area ${areaName}`
+    return 'Responsabile Istruttoria'
   }
 
   const formatRimandoRoleLabel = (destRole: string): string => {
@@ -2932,15 +3052,15 @@ function ActionsPanel (props: {
 
   const rimandoGenericDest = getPrevRoleForIntegration()
   const rimandoGenericTargetLabel = formatRimandoRoleLabel(rimandoGenericDest)
-  const rimandoGenericButtonLabel = rimandoGenericTargetLabel ? `Rimanda al ${rimandoGenericTargetLabel}` : 'Rimanda'
-  const rimandoTiAmmButtonLabel = 'Rimanda al TI AMM'
+  const rimandoGenericButtonLabel = 'Rimanda'
+  const rimandoTiAmmButtonLabel = `Rimanda al ${getRoleLabelForMenu('TI_AMM')}`
   const rimandoTecnicaTargetLabel = getRiTecnicoTargetLabel()
   const rimandoTecnicaButtonLabel = `Rimanda al ${rimandoTecnicaTargetLabel}`
-  const pendingRimandoTargetLabel = pending === 'INTEGRAZIONE_TI_AMM'
-    ? 'TI AMM'
-    : pending === 'INTEGRAZIONE_TECNICA'
+  const pendingRimandoTargetLabel = role === 'RI_AMM' && pending === 'INTEGRAZIONE_TI_AMM'
+    ? getRoleLabelForMenu('TI_AMM')
+    : role === 'RI_AMM' && pending === 'INTEGRAZIONE_TECNICA'
       ? rimandoTecnicaTargetLabel
-      : rimandoGenericTargetLabel
+      : ''
 
   // TI: eliminazione consentita solo per pratiche originate da sé (origine=TI) e mai inoltrate a RZ.
   const currentUsername = String((window as any).__giiUserRole?.username || (window as any).__giiUser?.username || '').trim()
@@ -3018,41 +3138,37 @@ function ActionsPanel (props: {
   }
 
   const approvaMenuLabel = currentIntegrationRequesterLabel
-    ? `Rispondi al ${currentIntegrationRequesterLabel}`
+    ? `Trasmetti al ${currentIntegrationRequesterLabel}`
     : role === 'TI' ? `Trasmetti al ${getRoleLabelForMenu('RZ')}` :
     role === 'RZ' ? `Trasmetti al ${getRoleLabelForMenu('RI')}` :
-    role === 'RI' ? `Trasmetti al ${getRoleLabelForMenu('DT')}` :
-    role === 'DT' ? 'Approva rapporto' :
-    role === 'DA' ? 'Approva sanzione' :
+    role === 'RI' ? `Trasmetti al ${getRoleLabelForForward('DT')}` :
+    role === 'DT' ? 'Approva' :
+    role === 'DA' ? 'Approva' :
     role === 'RI_AMM' ? `Trasmetti al ${fwdDestLabel}` :
-    role === 'TI_AMM' ? 'Trasmetti al RI AMM' :
+    role === 'TI_AMM' ? `Trasmetti al ${getRoleLabelForMenu('RI_AMM')}` :
     approvaBtnLabel
 
   const approvaMenuDesc = currentIntegrationRequesterLabel
     ? `Invia la risposta al ${currentIntegrationRequesterLabel}.`
-    : role === 'DT' ? 'Approva il rapporto tecnico.' :
-    role === 'DA' ? 'Approva la fase sanzionatoria.' :
+    : role === 'DT' ? 'Approva.' :
+    role === 'DA' ? 'Approva.' :
     fwdDestLabel ? `Invia la pratica al ${fwdDestLabel}.` :
     'Avanza la pratica al passaggio successivo.'
 
-  const rimandoTecnicaMenuDesc = rimandoTecnicaTargetLabel === 'RI AGR'
-    ? 'Rimando all’istruttoria agraria.'
-    : rimandoTecnicaTargetLabel === 'RI TEC'
-      ? 'Rimando all’istruttoria tecnica.'
-      : 'Rimando all’istruttoria tecnica.'
+  const rimandoTecnicaMenuDesc = 'Rimando all’istruttoria tecnica.'
 
   // RI_AMM non deve vedere contemporaneamente una trasmissione e una restituzione
   // verso lo stesso TI_AMM: per l'utente sarebbero due scelte indistinguibili.
-  const hideRiAmmForwardToTiAmm = role === 'RI_AMM' && fwdDestLabel === 'TI AMM'
+  const hideRiAmmForwardToTiAmm = role === 'RI_AMM' && fwdDest === 'TI_AMM'
 
-  const workflowMenuSections: WorkflowMenuSection[] = hasSel ? [
+  const workflowMenuSections: WorkflowMenuSection[] = hasSel ? ([
     {
       title: 'Avanzamento',
       items: [
         {
           key: 'ASSEGNA_TI',
           label: `Assegna al ${getRoleLabelForMenu('TI')}`,
-          desc: 'Assegna la pratica al tecnico istruttore.',
+          desc: 'Assegna la pratica al Tecnico Istruttore.',
           enabled: canStartAssegnaTi,
           visible: role === 'RZ',
           color: buttonColors.take,
@@ -3060,8 +3176,8 @@ function ActionsPanel (props: {
         },
         {
           key: 'ASSEGNA_TI_AMM',
-          label: 'Assegna al TI AMM',
-          desc: 'Assegna la pratica al tecnico amministrativo.',
+          label: `Assegna al ${getRoleLabelForMenu('TI_AMM')}`,
+          desc: 'Assegna la pratica al Tecnico Istruttore amministrativo.',
           enabled: canStartAssegnaTiAmm,
           visible: role === 'RI_AMM' && riAmmShouldAssignTiAmm,
           color: buttonColors.approva,
@@ -3069,8 +3185,8 @@ function ActionsPanel (props: {
         },
         {
           key: 'INVIA_TI_AMM',
-          label: 'Invia al TI AMM',
-          desc: 'Invia la pratica al tecnico amministrativo già assegnato.',
+          label: `Trasmetti al ${getRoleLabelForMenu('TI_AMM')}`,
+          desc: 'Invia la pratica al Tecnico Istruttore amministrativo già assegnato.',
           enabled: canStartInviaTiAmm,
           visible: role === 'RI_AMM' && isRientroTecnicoDaDt,
           color: buttonColors.approva,
@@ -3111,7 +3227,7 @@ function ActionsPanel (props: {
         {
           key: 'INTEGRAZIONE',
           label: rimandoGenericButtonLabel,
-          desc: rimandoGenericTargetLabel ? `Rimando al ${rimandoGenericTargetLabel}.` : 'Rimando per integrazione.',
+          desc: 'Rimando per integrazione.',
           enabled: canStartIntegrazione,
           visible: role !== 'TI' && role !== 'RI_AMM',
           color: buttonColors.integrazione,
@@ -3142,7 +3258,7 @@ function ActionsPanel (props: {
         }
       ].filter(i => i.visible)
     }
-  ].filter(s => s.items.length > 0) : []
+  ] as WorkflowMenuSection[]).filter(s => s.items.length > 0) : []
 
   const workflowMenuEnabledSections: WorkflowMenuSection[] = workflowMenuSections
     .map(section => ({ ...section, items: section.items.filter(item => item.enabled) }))
@@ -3263,8 +3379,8 @@ function ActionsPanel (props: {
       setTiAmmSelected('')
     }
 
-    if (p === 'INTEGRAZIONE' || p === 'INTEGRAZIONE_TI_AMM' || p === 'INTEGRAZIONE_TECNICA') {
-      setNoteDraft('')  // Pulisci note per nuova richiesta di integrazione
+    if (p === 'INTEGRAZIONE' || p === 'INTEGRAZIONE_TI_AMM' || p === 'INTEGRAZIONE_TECNICA' || p === 'RESPINGI') {
+      setNoteDraft('')  // Pulisci note/motivazioni per una nuova azione distinta
       window.setTimeout(() => {
         try { noteRef.current?.focus?.() } catch {}
         autoResizeNote(noteRef.current)
@@ -3298,6 +3414,36 @@ function ActionsPanel (props: {
     deferRefresh?: boolean
   }
 
+  const markRestoreSelectionAfterAction = React.useCallback((source = 'azioni') => {
+    try {
+      if (!hasSel || oid == null || !Number.isFinite(Number(oid))) return
+      const w: any = window as any
+      const layerUrl = String(
+        active?.state?.ds?.getDataSourceJson?.()?.url ||
+        active?.state?.ds?.dataSourceJson?.url ||
+        active?.state?.ds?.layer?.url ||
+        w.__giiSelection?.layerUrl ||
+        sessionStorage.getItem('GII_SELECTED_LAYER_URL') ||
+        active?.key ||
+        ''
+      ).trim()
+      if (!layerUrl) return
+      const idFieldName = String(
+        idFieldNameFromSel ||
+        w.__giiSelection?.idFieldName ||
+        sessionStorage.getItem('GII_SELECTED_IDFIELD') ||
+        'OBJECTID'
+      ).trim() || 'OBJECTID'
+      sessionStorage.setItem('GII_RESTORE_SELECTION_AFTER_EDIT', JSON.stringify({
+        oid: Number(oid),
+        layerUrl,
+        idFieldName,
+        source,
+        ts: Date.now()
+      }))
+    } catch {}
+  }, [active, hasSel, idFieldNameFromSel, oid])
+
   const refreshAfterWorkflowSave = async (reason = 'azioni-post-applyedits') => {
     const root = getRootDs(ds)
     await refreshRootAndDerived(root)
@@ -3320,6 +3466,12 @@ function ActionsPanel (props: {
     okText: string,
     logOpts: { eventoChiusura: string, ruoloDestinatario?: string, utenteDestinatario?: string, noteChiusura?: string, fase?: string }
   ) => {
+    // Le azioni di workflow possono lasciare il rapporto visibile nella scheda corrente
+    // (es. tab "Tutte le pratiche") oppure farlo uscire dalla coda corrente
+    // (es. tab "In attesa mia" dopo una trasmissione).
+    // Registriamo solo l'intenzione di ripristino: sarà l'elenco a ripristinare
+    // la selezione esclusivamente se il record è ancora visibile nella scheda attiva.
+    markRestoreSelectionAfterAction(String(logOpts?.eventoChiusura || 'workflow'))
     await runApplyEdits(attributesIn, okText, { deferRefresh: true })
     await closeCycleLog(logOpts)
     await refreshAfterWorkflowSave('azioni-post-log')
@@ -3443,9 +3595,11 @@ function ActionsPanel (props: {
       upd[realFieldName(statoField)] = STATO_PRESA_IN_CARICO
       upd[realFieldName(dtStatoField)] = Date.now()
 
-      await runApplyEdits(upd, 'Presa in carico salvata.')
-
-      void openCycleLog({ eventoApertura: 'PRESA_IN_CARICO', fase: role })
+      markRestoreSelectionAfterAction('presa-in-carico')
+      const cycleContextBeforeSave = await getCurrentCycleContextAsync()
+      await runApplyEdits(upd, 'Presa in carico salvata.', { deferRefresh: true })
+      await openCycleLog({ eventoApertura: 'PRESA_IN_CARICO', fase: role, context: cycleContextBeforeSave, forceNew: true })
+      await refreshAfterWorkflowSave('azioni-presa-in-carico-post-log')
 
       setPending(null)
       setConfirmAttempted(false)
@@ -3499,7 +3653,7 @@ function ActionsPanel (props: {
 
       addGiiRoutingFields(upd, 'TI', 'TRASMISSIONE', { destUsername: tiSelected })
 
-      await saveWithWorkflowLog(upd, `TI assegnato: ${tiName}.`, { eventoChiusura: 'NUOVA_ASSEGNAZIONE', ruoloDestinatario: 'TI', utenteDestinatario: tiSelected, noteChiusura: `Assegna TI: ${tiName} (${tiSelected})`, fase: role })
+      await saveWithWorkflowLog(upd, `Tecnico Istruttore assegnato: ${tiName}.`, { eventoChiusura: 'NUOVA_ASSEGNAZIONE', ruoloDestinatario: 'TI', utenteDestinatario: tiSelected, noteChiusura: `Assegna Tecnico Istruttore: ${tiName} (${tiSelected})`, fase: role })
 
       setPending(null)
       setConfirmAttempted(false)
@@ -3565,7 +3719,7 @@ function ActionsPanel (props: {
 
       addGiiRoutingFields(upd, 'TI_AMM', 'TRASMISSIONE', { destUsername: tiAmmSelected })
 
-      await saveWithWorkflowLog(upd, `TI AMM assegnato: ${tiAmmName}.`, { eventoChiusura: 'NUOVA_ASSEGNAZIONE', ruoloDestinatario: 'TI_AMM', utenteDestinatario: tiAmmSelected, noteChiusura: `Assegna TI AMM: ${tiAmmName} (${tiAmmSelected})`, fase: role })
+      await saveWithWorkflowLog(upd, `Tecnico Istruttore amministrativo assegnato: ${tiAmmName}.`, { eventoChiusura: 'NUOVA_ASSEGNAZIONE', ruoloDestinatario: 'TI_AMM', utenteDestinatario: tiAmmSelected, noteChiusura: `Assegna Tecnico Istruttore amministrativo: ${tiAmmName} (${tiAmmSelected})`, fase: role })
 
       setPending(null)
       setConfirmAttempted(false)
@@ -3608,9 +3762,9 @@ function ActionsPanel (props: {
       addGiiRoutingFields(upd, 'TI_AMM', 'TRASMISSIONE', { destUsername: String(tiAmmUserRaw || '') })
 
       const noteInvioTiAmm = isRientroTecnicoDaDt
-        ? 'Invio al TI AMM dopo rientro da integrazione tecnica.'
-        : 'Invio al TI AMM.'
-      await saveWithWorkflowLog(upd, 'Pratica inviata al TI AMM.', { eventoChiusura: 'INVIO_A_TI_AMM', ruoloDestinatario: 'TI_AMM', utenteDestinatario: String(tiAmmUserRaw || resolveDestUser('TI_AMM')), noteChiusura: noteInvioTiAmm, fase: role })
+        ? 'Invio al Tecnico Istruttore amministrativo dopo rientro da integrazione tecnica.'
+        : 'Invio al Tecnico Istruttore amministrativo.'
+      await saveWithWorkflowLog(upd, 'Pratica inviata al Tecnico Istruttore amministrativo.', { eventoChiusura: 'INVIO_A_TI_AMM', ruoloDestinatario: 'TI_AMM', utenteDestinatario: String(tiAmmUserRaw || resolveDestUser('TI_AMM')), noteChiusura: noteInvioTiAmm, fase: role })
       setPending(null)
       setConfirmAttempted(false)
     } catch (e: any) {
@@ -3776,8 +3930,7 @@ function ActionsPanel (props: {
 
       const upd: Record<string, any> = {
         [esitoField]: ESITO_RESPINTA,
-        [dtEsitoField]: Date.now(),
-        [noteField]: finalNote
+        [dtEsitoField]: Date.now()
       }
 
       if (stato != null) {
@@ -3853,11 +4006,11 @@ function ActionsPanel (props: {
   const pendingTitle = pending === 'TAKE'
     ? 'Conferma presa in carico'
     : pending === 'ASSEGNA_TI'
-      ? 'Conferma assegnazione al TI'
+      ? `Conferma assegnazione al ${getRoleLabelForMenu('TI')}`
       : pending === 'ASSEGNA_TI_AMM'
-        ? 'Conferma assegnazione al TI AMM'
+        ? `Conferma assegnazione al ${getRoleLabelForMenu('TI_AMM')}`
         : pending === 'RESTITUISCI_TI_AMM'
-          ? 'Conferma restituzione al TI AMM'
+          ? `Conferma restituzione al ${getRoleLabelForMenu('TI_AMM')}`
           : (pending === 'INTEGRAZIONE' || pending === 'INTEGRAZIONE_TI_AMM' || pending === 'INTEGRAZIONE_TECNICA')
           ? (pendingRimandoTargetLabel ? `Conferma rimando al ${pendingRimandoTargetLabel}` : 'Conferma rimando')
           : pending === 'APPROVA'
@@ -3872,13 +4025,13 @@ function ActionsPanel (props: {
   type PendingTheme = { icon: string; color: string; bg: string; border: string; desc: string; buttonBg: string; buttonBorder: string }
   const pendingTheme: Record<string, PendingTheme> = {
     TAKE:           { icon: '✓', color: '#2563eb', bg: '#eff6ff', border: '#bfdbfe', buttonBg: '#2563eb', buttonBorder: '#1d4ed8', desc: 'Il rapporto verrà preso in carico.' },
-    ASSEGNA_TI:     { icon: '✓', color: '#2563eb', bg: '#eff6ff', border: '#bfdbfe', buttonBg: '#2563eb', buttonBorder: '#1d4ed8', desc: 'Il rapporto verrà assegnato al TI selezionato.' },
-    ASSEGNA_TI_AMM: { icon: '✓', color: '#2563eb', bg: '#eff6ff', border: '#bfdbfe', buttonBg: '#2563eb', buttonBorder: '#1d4ed8', desc: 'La pratica verrà assegnata al TI AMM selezionato.' },
-    INVIA_TI_AMM: { icon: '✓', color: '#2563eb', bg: '#eff6ff', border: '#bfdbfe', buttonBg: '#2563eb', buttonBorder: '#1d4ed8', desc: 'La pratica verrà inviata al TI AMM già assegnato.' },
-    RESTITUISCI_TI_AMM: { icon: '✓', color: '#2563eb', bg: '#eff6ff', border: '#bfdbfe', buttonBg: '#2563eb', buttonBorder: '#1d4ed8', desc: 'La pratica verrà inviata al TI AMM già assegnato.' },
+    ASSEGNA_TI:     { icon: '✓', color: '#2563eb', bg: '#eff6ff', border: '#bfdbfe', buttonBg: '#2563eb', buttonBorder: '#1d4ed8', desc: 'Il rapporto verrà assegnato al Tecnico Istruttore selezionato.' },
+    ASSEGNA_TI_AMM: { icon: '✓', color: '#2563eb', bg: '#eff6ff', border: '#bfdbfe', buttonBg: '#2563eb', buttonBorder: '#1d4ed8', desc: 'La pratica verrà assegnata al Tecnico Istruttore amministrativo selezionato.' },
+    INVIA_TI_AMM: { icon: '✓', color: '#2563eb', bg: '#eff6ff', border: '#bfdbfe', buttonBg: '#2563eb', buttonBorder: '#1d4ed8', desc: 'La pratica verrà inviata al Tecnico Istruttore amministrativo già assegnato.' },
+    RESTITUISCI_TI_AMM: { icon: '✓', color: '#2563eb', bg: '#eff6ff', border: '#bfdbfe', buttonBg: '#2563eb', buttonBorder: '#1d4ed8', desc: 'La pratica verrà inviata al Tecnico Istruttore amministrativo già assegnato.' },
     APPROVA:        { icon: '✓', color: '#2563eb', bg: '#eff6ff', border: '#bfdbfe', buttonBg: '#2563eb', buttonBorder: '#1d4ed8', desc: `Il rapporto verrà ${approvaDoneLabel.toLowerCase()}.` },
-    INTEGRAZIONE:   { icon: '↩', color: '#b45309', bg: '#fffbeb', border: '#fde68a', buttonBg: '#d97706', buttonBorder: '#b45309', desc: rimandoGenericTargetLabel ? `La pratica verrà rimandata al ${rimandoGenericTargetLabel}.` : 'Confermi di voler rimandare la pratica?' },
-    INTEGRAZIONE_TI_AMM: { icon: '↩', color: '#b45309', bg: '#fffbeb', border: '#fde68a', buttonBg: '#d97706', buttonBorder: '#b45309', desc: 'La pratica verrà rimandata al TI AMM assegnato.' },
+    INTEGRAZIONE:   { icon: '↩', color: '#b45309', bg: '#fffbeb', border: '#fde68a', buttonBg: '#d97706', buttonBorder: '#b45309', desc: 'La pratica verrà rimandata.' },
+    INTEGRAZIONE_TI_AMM: { icon: '↩', color: '#b45309', bg: '#fffbeb', border: '#fde68a', buttonBg: '#d97706', buttonBorder: '#b45309', desc: 'La pratica verrà rimandata al Tecnico Istruttore amministrativo assegnato.' },
     INTEGRAZIONE_TECNICA: { icon: '↩', color: '#b45309', bg: '#fffbeb', border: '#fde68a', buttonBg: '#d97706', buttonBorder: '#b45309', desc: `La pratica verrà rimandata al ${rimandoTecnicaTargetLabel}.` },
     RESPINGI:       { icon: '✕', color: '#b42318', bg: '#fef2f2', border: '#fecaca', buttonBg: '#dc2626', buttonBorder: '#b42318', desc: 'Il rapporto verrà respinto.' },
     ELIMINA:        { icon: '✕', color: '#b42318', bg: '#fef2f2', border: '#fecaca', buttonBg: '#dc2626', buttonBorder: '#b42318', desc: 'Il rapporto verrà archiviato e non sarà più visibile nell\'elenco.' },
@@ -4035,12 +4188,8 @@ function ActionsPanel (props: {
                 style={{ width: '100%', padding: '9px 10px', borderRadius: 8, border: '1px solid rgba(0,0,0,0.18)', outline: 'none', fontSize: 13, background: '#fff' }}
               >
                 <option value=''>— Seleziona —</option>
-                {workflowMenuEnabledSections.map(section => (
-                  <optgroup key={section.title} label={section.title}>
-                    {section.items.map(item => (
-                      <option key={item.key} value={item.key}>{item.label}</option>
-                    ))}
-                  </optgroup>
+                {workflowMenuEnabledItems.map(item => (
+                  <option key={item.key} value={item.key}>{item.label}</option>
                 ))}
               </select>
             </div>
@@ -4069,8 +4218,8 @@ function ActionsPanel (props: {
                   placeholder='— seleziona —'
                   disabled={loading || !hasSel || lockedByTransmit}
                   onChange={(v) => { setRejectReason(String(v ?? '')); if (confirmAttempted) setConfirmAttempted(false) }}
-                  evenBg={ui.reasonsZebraEvenBg}
-                  oddBg={ui.reasonsZebraOddBg}
+                  evenBg='#ffffff'
+                  oddBg='#ffffff'
                   borderColor={ui.reasonsRowBorderColor}
                   borderWidth={ui.reasonsRowBorderWidth}
                   radius={ui.reasonsRowRadius}
@@ -4092,20 +4241,20 @@ function ActionsPanel (props: {
                   disabled={loading}
                   style={{ width: '100%', padding: '8px 10px', borderRadius: 8, border: `1px solid ${tiReqErr ? '#dc2626' : 'rgba(0,0,0,0.15)'}`, outline: 'none' }}
                 >
-                  <option value=''>— Seleziona TI —</option>
+                  <option value=''>— Seleziona Tecnico Istruttore —</option>
                   {tiOptions.map(o => (
                     <option key={o.username} value={o.username}>{(o.fullName || o.username)} ({o.username})</option>
                   ))}
                 </select>
-                {!tiLoading && !tiLoadErr && tiOptions.length === 0 && <div style={{ fontSize: 12, opacity: 0.75 }}>Nessun TI trovato.</div>}
-                {!!tiLoadErr && <div style={{ fontSize: 12, color: '#dc2626' }}>Errore elenco TI: {tiLoadErr}</div>}
+                {!tiLoading && !tiLoadErr && tiOptions.length === 0 && <div style={{ fontSize: 12, opacity: 0.75 }}>Nessun Tecnico Istruttore trovato.</div>}
+                {!!tiLoadErr && <div style={{ fontSize: 12, color: '#dc2626' }}>Errore elenco Tecnici Istruttori: {tiLoadErr}</div>}
               </div>
             )}
 
             {pending === 'ASSEGNA_TI_AMM' && role === 'RI_AMM' && (
               <div style={{ display: 'grid', gap: 6 }}>
                 <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
-                  <div style={{ fontSize: titleFontSize, fontWeight: 700 }}>Tecnico amministrativo</div>
+                  <div style={{ fontSize: titleFontSize, fontWeight: 700 }}>Tecnico Istruttore amministrativo</div>
                   <div style={labelReqStyle(true, tiAmmReqErr)}>Scelta obbligatoria</div>
                 </div>
                 <select
@@ -4114,13 +4263,13 @@ function ActionsPanel (props: {
                   disabled={loading}
                   style={{ width: '100%', padding: '8px 10px', borderRadius: 8, border: `1px solid ${tiAmmReqErr ? '#dc2626' : 'rgba(0,0,0,0.15)'}`, outline: 'none' }}
                 >
-                  <option value=''>— Seleziona TI AMM —</option>
+                  <option value=''>— Seleziona Tecnico Istruttore amministrativo —</option>
                   {tiAmmOptions.map(o => (
                     <option key={o.username} value={o.username}>{(o.fullName || o.username)} ({o.username})</option>
                   ))}
                 </select>
-                {!tiAmmLoading && !tiAmmLoadErr && tiAmmOptions.length === 0 && <div style={{ fontSize: 12, opacity: 0.75 }}>Nessun TI AMM trovato.</div>}
-                {!!tiAmmLoadErr && <div style={{ fontSize: 12, color: '#dc2626' }}>Errore elenco TI AMM: {tiAmmLoadErr}</div>}
+                {!tiAmmLoading && !tiAmmLoadErr && tiAmmOptions.length === 0 && <div style={{ fontSize: 12, opacity: 0.75 }}>Nessun Tecnico Istruttore amministrativo trovato.</div>}
+                {!!tiAmmLoadErr && <div style={{ fontSize: 12, color: '#dc2626' }}>Errore elenco Tecnici Istruttori amministrativi: {tiAmmLoadErr}</div>}
               </div>
             )}
 
@@ -4215,8 +4364,8 @@ function ActionsPanel (props: {
               placeholder='— seleziona —'
               disabled={loading || !hasSel || lockedByTransmit}
               onChange={(v) => { setRejectReason(String(v ?? '')); if (confirmAttempted) setConfirmAttempted(false) }}
-              evenBg={ui.reasonsZebraEvenBg}
-              oddBg={ui.reasonsZebraOddBg}
+              evenBg='#ffffff'
+              oddBg='#ffffff'
               borderColor={ui.reasonsRowBorderColor}
               borderWidth={ui.reasonsRowBorderWidth}
               radius={ui.reasonsRowRadius}
@@ -4236,13 +4385,13 @@ function ActionsPanel (props: {
               disabled={loading}
               style={{ width: 'auto', minWidth: 280, maxWidth: '100%', padding: '8px 10px', borderRadius: 8, border: `1px solid ${tiReqErr ? '#dc2626' : 'rgba(0,0,0,0.15)'}`, outline: 'none' }}
             >
-              <option value=''>— Seleziona TI —</option>
+              <option value=''>— Seleziona Tecnico Istruttore —</option>
               {tiOptions.map(o => (
                 <option key={o.username} value={o.username}>{(o.fullName || o.username)} ({o.username})</option>
               ))}
             </select>
-            {!tiLoading && !tiLoadErr && tiOptions.length === 0 && <div style={{ fontSize: 12, opacity: 0.75 }}>Nessun TI trovato.</div>}
-            {!!tiLoadErr && <div style={{ fontSize: 12, color: '#dc2626' }}>Errore elenco TI: {tiLoadErr}</div>}
+            {!tiLoading && !tiLoadErr && tiOptions.length === 0 && <div style={{ fontSize: 12, opacity: 0.75 }}>Nessun Tecnico Istruttore trovato.</div>}
+            {!!tiLoadErr && <div style={{ fontSize: 12, color: '#dc2626' }}>Errore elenco Tecnici Istruttori: {tiLoadErr}</div>}
           </div>
         )}
 
@@ -4255,13 +4404,13 @@ function ActionsPanel (props: {
               disabled={loading}
               style={{ width: 'auto', minWidth: 280, maxWidth: '100%', padding: '8px 10px', borderRadius: 8, border: `1px solid ${tiAmmReqErr ? '#dc2626' : 'rgba(0,0,0,0.15)'}`, outline: 'none' }}
             >
-              <option value=''>— Seleziona TI AMM —</option>
+              <option value=''>— Seleziona Tecnico Istruttore amministrativo —</option>
               {tiAmmOptions.map(o => (
                 <option key={o.username} value={o.username}>{(o.fullName || o.username)} ({o.username})</option>
               ))}
             </select>
-            {!tiAmmLoading && !tiAmmLoadErr && tiAmmOptions.length === 0 && <div style={{ fontSize: 12, opacity: 0.75 }}>Nessun TI AMM trovato.</div>}
-            {!!tiAmmLoadErr && <div style={{ fontSize: 12, color: '#dc2626' }}>Errore elenco TI AMM: {tiAmmLoadErr}</div>}
+            {!tiAmmLoading && !tiAmmLoadErr && tiAmmOptions.length === 0 && <div style={{ fontSize: 12, opacity: 0.75 }}>Nessun Tecnico Istruttore amministrativo trovato.</div>}
+            {!!tiAmmLoadErr && <div style={{ fontSize: 12, color: '#dc2626' }}>Errore elenco Tecnici Istruttori amministrativi: {tiAmmLoadErr}</div>}
           </div>
         )}
 
@@ -4604,7 +4753,7 @@ function ActionsPanel (props: {
 
         {lockedByTransmit && hasSel && (
           <div style={{ ...msgStyle('info', msgFontSize), marginTop: 4 }}>
-            Pratica già trasmessa a DA: azioni non disponibili.
+            Pratica già trasmessa al Direttore d’Area: azioni non disponibili.
           </div>
         )}
       </div>
@@ -4865,6 +5014,48 @@ function art15AttivoForRapporto (data: any): boolean {
   return String(norma15Parziale ?? '').trim() !== '' || String(norma15Totale ?? '').trim() !== ''
 }
 
+function isRapportoRespintoForPdf (data: any): boolean {
+  const d = data || {}
+
+  // La filigrana RESPINTO deve dipendere dall'esito/evento conclusivo,
+  // non dagli stati operativi usati anche per rimandi o integrazioni.
+  const esitoVals = [
+    pickRapportoAttrCI(d, ['esito_rz', 'ESITO_RZ']),
+    pickRapportoAttrCI(d, ['esito_dt', 'ESITO_DT'])
+  ].map(v => {
+    const n = Number(v)
+    return Number.isFinite(n) ? n : null
+  })
+
+  if (esitoVals.includes(ESITO_RESPINTA)) return true
+
+  const txtVals = [
+    pickRapportoAttrCI(d, ['esito_rz_label', 'ESITO_RZ_LABEL', 'esito_rz', 'ESITO_RZ']),
+    pickRapportoAttrCI(d, ['esito_dt_label', 'ESITO_DT_LABEL', 'esito_dt', 'ESITO_DT']),
+    pickRapportoAttrCI(d, ['ultimo_evento', 'ULTIMO_EVENTO', 'ultimo_evento_codice', 'ULTIMO_EVENTO_CODICE'])
+  ]
+    .map(v => String(v ?? '').trim().toLowerCase())
+    .filter(Boolean)
+
+  return txtVals.some(v => v.includes('respint'))
+}
+
+function isRapportoApprovatoForPdf (data: any): boolean {
+  const d = data || {}
+  const statoDt = Number(pickRapportoAttrCI(d, ['stato_dt', 'STATO_DT']))
+  const esitoDt = Number(pickRapportoAttrCI(d, ['esito_dt', 'ESITO_DT']))
+  if (statoDt === STATO_APPROVATA || esitoDt === ESITO_APPROVATA) return true
+
+  const txtVals = [
+    pickRapportoAttrCI(d, ['stato_dt_label', 'STATO_DT_LABEL', 'stato_dt', 'STATO_DT']),
+    pickRapportoAttrCI(d, ['esito_dt_label', 'ESITO_DT_LABEL', 'esito_dt', 'ESITO_DT'])
+  ]
+    .map(v => String(v ?? '').trim().toLowerCase())
+    .filter(Boolean)
+
+  return txtVals.some(v => v.includes('approvat'))
+}
+
 /** Costruisce la mappa dei placeholder → valori dal record e dalla cache utenti.
  * Allineata alla scheda Anteprima del CW editing.
  */
@@ -4896,6 +5087,10 @@ function buildPlaceholderMap (data: any, utentiCache: Map<string, UtenteCached> 
   const nomeRZ = findUserFullName(utentiCache, 3, areaN ?? undefined, settoreN ?? undefined)
   const nomeRI = findUserFullName(utentiCache, 4, areaN ?? undefined)
   const nomeDT = findUserFullName(utentiCache, 5, areaN ?? undefined)
+  const rapportoRespinto = isRapportoRespintoForPdf(d)
+  const rapportoApprovato = !rapportoRespinto && isRapportoApprovatoForPdf(d)
+  const rapportoIstruttoria = !rapportoRespinto && !rapportoApprovato
+  const dataApprovazioneRapporto = rapportoApprovato ? dateFrom('dt_esito_DT', 'dt_stato_DT') : ''
 
   return {
     cod_pratica: codPratica, anno: d.data_rilevazione ? String(new Date(d.data_rilevazione).getFullYear()) : '', area_cod: areaCod,
@@ -4955,12 +5150,16 @@ function buildPlaceholderMap (data: any, utentiCache: Map<string, UtenteCached> 
     iter_supervisione_data: dateFrom('dt_esito_RI'),
     iter_approvazione_nome: esc(nomeDT),
     iter_approvazione_presa: dateFrom('dt_presa_in_carico_DT', 'dt_stato_DT'),
-    iter_approvazione_data: dateFrom('dt_esito_DT'),
+    iter_approvazione_data: dataApprovazioneRapporto,
     idrante: esc(d.idrante || ''), comune: '', foglio: '', mappali: '', altro_luogo: '',
     distretto_irriguo: esc(d.distretto_irriguo || ''), comizio: esc(d.comizio || ''),
     matricola_contatore: esc(d.matricola_contatore || ''), matricola_tessera: esc(d.matricola_tessera || ''),
     importo_rimborso: fmtNum(d.ns_totale_complessivo) ? fmtNum(d.ns_totale_complessivo) + ' €' : '',
-    data_compilazione: formatDateIt(d.data_firma)
+    data_compilazione: formatDateIt(d.data_firma),
+    rapporto_respinto: rapportoRespinto ? '1' : '',
+    rapporto_approvato: rapportoApprovato ? '1' : '',
+    rapporto_istruttoria: rapportoIstruttoria ? '1' : '',
+    data_approvazione_rapporto: dataApprovazioneRapporto
   }
 }
 
@@ -5035,6 +5234,7 @@ function moneyItRapportoPdf (v: number): string {
   if (!Number.isFinite(v)) return ''
   return v.toLocaleString('it-IT', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + ' €'
 }
+
 
 function emptyNsRowsForRapportoPdf (): Record<NsCatPdf, NsRowPdf[]> {
   return { AT: [], PR: [], RU: [], SL: [], PF: [] }
@@ -5183,13 +5383,16 @@ async function buildRapportoPdfBlob (
         rows: group.rows as any,
         summary: group.summary as any,
         luogo_data: 'Cagliari, ' + (formatDateIt(data.data_firma) || new Date().toLocaleDateString('it-IT', { day: '2-digit', month: '2-digit', year: 'numeric' })),
-        firma_nome: map.firma_ti || ''
+        firma_nome: map.firma_ti || '',
+        rapporto_respinto: map.rapporto_respinto === '1',
+        rapporto_istruttoria: map.rapporto_istruttoria === '1'
       }
       const nsBytes = await buildNotaSpesePdf(nsData)
       const nsDoc = await PDFDocument.load(nsBytes)
       const nsPages = await merged.copyPages(nsDoc, nsDoc.getPageIndices())
       nsPages.forEach(pg => merged.addPage(pg))
     }
+
 
     finalBytes = await merged.save()
   }

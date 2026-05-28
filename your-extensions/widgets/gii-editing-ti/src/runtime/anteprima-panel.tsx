@@ -34,6 +34,11 @@ const SETTORE_LABELS: Record<string, string> = {
   GI: 'GESTIONE IRRIGUA'
 }
 
+const STATO_APPROVATA = 4
+const STATO_RESPINTA = 5
+const ESITO_APPROVATA = 2
+const ESITO_RESPINTA = 3
+
 function firstMeaningfulValue (...vals: any[]): any {
   for (const v of vals) {
     if (v == null) continue
@@ -215,6 +220,64 @@ function art15AttivoForRapporto (data: any): boolean {
   return !!firstMeaningfulValue(d.norma15_parziale, d.NORMA15_PARZIALE, d.norma15_totale, d.NORMA15_TOTALE)
 }
 
+function pickAttrCI (obj: any, keys: string[]): any {
+  if (!obj) return undefined
+  const map: Record<string, string> = {}
+  try { Object.keys(obj).forEach(k => { map[String(k).toLowerCase()] = k }) } catch {}
+  for (const key of keys) {
+    const direct = obj[key]
+    if (direct !== undefined && direct !== null && direct !== '') return direct
+    const realKey = map[String(key).toLowerCase()]
+    if (realKey) {
+      const value = obj[realKey]
+      if (value !== undefined && value !== null && value !== '') return value
+    }
+  }
+  return undefined
+}
+
+function isRapportoRespintoForPdf (data: any): boolean {
+  const d = data || {}
+
+  // La filigrana RESPINTO deve dipendere dall'esito/evento conclusivo,
+  // non dagli stati operativi usati anche per rimandi o integrazioni.
+  const esitoVals = [
+    pickAttrCI(d, ['esito_rz', 'ESITO_RZ']),
+    pickAttrCI(d, ['esito_dt', 'ESITO_DT'])
+  ].map(v => {
+    const n = Number(v)
+    return Number.isFinite(n) ? n : null
+  })
+
+  if (esitoVals.includes(ESITO_RESPINTA)) return true
+
+  const txtVals = [
+    pickAttrCI(d, ['esito_rz_label', 'ESITO_RZ_LABEL', 'esito_rz', 'ESITO_RZ']),
+    pickAttrCI(d, ['esito_dt_label', 'ESITO_DT_LABEL', 'esito_dt', 'ESITO_DT']),
+    pickAttrCI(d, ['ultimo_evento', 'ULTIMO_EVENTO', 'ultimo_evento_codice', 'ULTIMO_EVENTO_CODICE'])
+  ]
+    .map(v => String(v ?? '').trim().toLowerCase())
+    .filter(Boolean)
+
+  return txtVals.some(v => v.includes('respint'))
+}
+
+function isRapportoApprovatoForPdf (data: any): boolean {
+  const d = data || {}
+  const statoDt = Number(pickAttrCI(d, ['stato_dt', 'STATO_DT']))
+  const esitoDt = Number(pickAttrCI(d, ['esito_dt', 'ESITO_DT']))
+  if (statoDt === STATO_APPROVATA || esitoDt === ESITO_APPROVATA) return true
+
+  const txtVals = [
+    pickAttrCI(d, ['stato_dt_label', 'STATO_DT_LABEL', 'stato_dt', 'STATO_DT']),
+    pickAttrCI(d, ['esito_dt_label', 'ESITO_DT_LABEL', 'esito_dt', 'ESITO_DT'])
+  ]
+    .map(v => String(v ?? '').trim().toLowerCase())
+    .filter(Boolean)
+
+  return txtVals.some(v => v.includes('approvat'))
+}
+
 function buildPlaceholderMap (data: any, utentiCache: Map<string, UtenteCached> | null): Record<string, string> {
   const d = data || {}
   const areaCod = normalizeAreaCode(firstMeaningfulValue(d.area_cod, d.area))
@@ -243,6 +306,10 @@ function buildPlaceholderMap (data: any, utentiCache: Map<string, UtenteCached> 
   const nomeRZ = findUserFullName(utentiCache, 3, areaN ?? undefined, settoreN ?? undefined)
   const nomeRI = findUserFullName(utentiCache, 4, areaN ?? undefined)
   const nomeDT = findUserFullName(utentiCache, 5, areaN ?? undefined)
+  const rapportoRespinto = isRapportoRespintoForPdf(d)
+  const rapportoApprovato = !rapportoRespinto && isRapportoApprovatoForPdf(d)
+  const rapportoIstruttoria = !rapportoRespinto && !rapportoApprovato
+  const dataApprovazioneRapporto = rapportoApprovato ? dateFrom('dt_esito_DT', 'dt_stato_DT') : ''
 
   return {
     cod_pratica: codPratica, anno: d.data_rilevazione ? String(new Date(d.data_rilevazione).getFullYear()) : '', area_cod: areaCod,
@@ -302,12 +369,16 @@ function buildPlaceholderMap (data: any, utentiCache: Map<string, UtenteCached> 
     iter_supervisione_data: dateFrom('dt_esito_RI'),
     iter_approvazione_nome: esc(nomeDT),
     iter_approvazione_presa: dateFrom('dt_presa_in_carico_DT', 'dt_stato_DT'),
-    iter_approvazione_data: dateFrom('dt_esito_DT'),
+    iter_approvazione_data: dataApprovazioneRapporto,
     idrante: esc(d.idrante || ''), comune: '', foglio: '', mappali: '', altro_luogo: '',
     distretto_irriguo: esc(d.distretto_irriguo || ''), comizio: esc(d.comizio || ''),
     matricola_contatore: esc(d.matricola_contatore || ''), matricola_tessera: esc(d.matricola_tessera || ''),
     importo_rimborso: fmtNum(d.ns_totale_complessivo) ? fmtNum(d.ns_totale_complessivo) + ' €' : '',
-    data_compilazione: formatDateIt(d.data_firma)
+    data_compilazione: formatDateIt(d.data_firma),
+    rapporto_respinto: rapportoRespinto ? '1' : '',
+    rapporto_approvato: rapportoApprovato ? '1' : '',
+    rapporto_istruttoria: rapportoIstruttoria ? '1' : '',
+    data_approvazione_rapporto: dataApprovazioneRapporto
   }
 }
 
@@ -487,7 +558,9 @@ export default function AnteprimaPanel (p: { data: Record<string, any>; mode: 'c
               rows: group.rows as any,
               summary: group.summary,
               luogo_data: 'Cagliari, ' + (formatDateIt(dataSnapshot.data_firma) || new Date().toLocaleDateString('it-IT', { day: '2-digit', month: '2-digit', year: 'numeric' })),
-              firma_nome: map.firma_ti || ''
+              firma_nome: map.firma_ti || '',
+              rapporto_respinto: map.rapporto_respinto === '1',
+              rapporto_istruttoria: map.rapporto_istruttoria === '1'
             }
             const nsBytes = await buildNotaSpesePdf(nsData)
             const nsDoc = await PDFDocument.load(nsBytes)

@@ -6,6 +6,8 @@ import { buildVerbalePdf, getVerbalePdfFilePrefix } from '../../../_shared/gii-a
 import type { IMConfig, SummaryFieldConfig } from '../config'
 import { defaultConfig } from '../config'
 
+const LOG_EVENTI_CICLI_URL = 'https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_LOG_EVENTI_CICLI/FeatureServer/0'
+
 function loadEsriModule<T = any> (path: string): Promise<T> {
   return new Promise((resolve, reject) => {
     const req = (window as any).require
@@ -561,6 +563,101 @@ function filterAttrsForLayer (attrs: Record<string, any>, fields: LayerFieldInfo
     if (realName) out[realName] = attrs[k]
   }
   return out
+}
+
+function sqlQuote (v: any): string {
+  return `'${String(v ?? '').replace(/'/g, "''")}'`
+}
+
+function globalIdVariantsForLog (raw: any): string[] {
+  const s = String(raw ?? '').trim()
+  if (!s) return []
+  const clean = s.replace(/[{}]/g, '').trim()
+  const variants = [s]
+  if (clean) {
+    variants.push(clean)
+    variants.push(`{${clean}}`)
+  }
+  return Array.from(new Set(variants.filter(Boolean)))
+}
+
+function parentGlobalIdWhereForLog (raw: any): string {
+  const variants = globalIdVariantsForLog(raw)
+  return variants.length ? variants.map(g => `parent_globalid = ${sqlQuote(g)}`).join(' OR ') : '1=0'
+}
+
+function getLogObjectIdValue (attrs: any, layer?: any): any {
+  const oidField = String(layer?.objectIdField || 'OBJECTID')
+  return pickAttrCI(attrs, [oidField, 'OBJECTID', 'ObjectID', 'ObjectId', 'objectId', 'objectid'])
+}
+
+function parseJsonObject (v: any): Record<string, any> {
+  if (!v) return {}
+  if (typeof v === 'object' && !Array.isArray(v)) return { ...(v as any) }
+  try {
+    const parsed = JSON.parse(String(v))
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {}
+  } catch {
+    return {}
+  }
+}
+
+function normalizeAuditComparable (v: any): string {
+  if (v == null) return ''
+  if (v instanceof Date) return Number.isNaN(v.getTime()) ? '' : String(v.getTime())
+  if (typeof v === 'number') return Number.isFinite(v) ? String(v) : ''
+  if (typeof v === 'boolean') return v ? '1' : '0'
+  return String(v).trim()
+}
+
+function toAuditStoredValue (v: any): any {
+  if (v == null) return ''
+  if (v instanceof Date) return Number.isNaN(v.getTime()) ? '' : v.getTime()
+  if (typeof v === 'number') return Number.isFinite(v) ? v : ''
+  if (typeof v === 'boolean') return v ? 1 : 0
+  return String(v).trim()
+}
+
+function buildAuditDeltaMaps (prevAttrs: Record<string, any>, nextAttrs: Record<string, any>, fields: string[]): { oldMap: Record<string, any>, newMap: Record<string, any> } {
+  const oldMap: Record<string, any> = {}
+  const newMap: Record<string, any> = {}
+  for (const field of Array.from(new Set((fields || []).filter(Boolean)))) {
+    const before = pickAttrCI(prevAttrs, [field])
+    const after = pickAttrCI(nextAttrs, [field])
+    if (normalizeAuditComparable(before) === normalizeAuditComparable(after)) continue
+    oldMap[field] = toAuditStoredValue(before)
+    newMap[field] = toAuditStoredValue(after)
+  }
+  return { oldMap, newMap }
+}
+
+function mergeAuditCycleMaps (baseOld: Record<string, any>, baseNew: Record<string, any>, deltaOld: Record<string, any>, deltaNew: Record<string, any>) {
+  const oldMap: Record<string, any> = { ...(baseOld || {}) }
+  const newMap: Record<string, any> = { ...(baseNew || {}) }
+  const changedKeys = Array.from(new Set([...Object.keys(deltaOld || {}), ...Object.keys(deltaNew || {})]))
+  for (const field of changedKeys) {
+    if (!(field in oldMap)) oldMap[field] = deltaOld[field]
+    newMap[field] = deltaNew[field]
+    if (normalizeAuditComparable(oldMap[field]) === normalizeAuditComparable(newMap[field])) {
+      delete oldMap[field]
+      delete newMap[field]
+    }
+  }
+  const fields = Object.keys(newMap).sort((a, b) => a.localeCompare(b))
+  return { oldMap, newMap, fields }
+}
+
+async function queryCurrentLayerAttrsByOid (layer: any, oidFieldName: string, oid: number): Promise<Record<string, any>> {
+  if (!layer?.queryFeatures) return {}
+  if (typeof layer.load === 'function') { try { await layer.load() } catch {} }
+  const idField = String(layer.objectIdField || oidFieldName || 'OBJECTID')
+  const q = layer.createQuery ? layer.createQuery() : {}
+  q.where = `${idField} = ${Number(oid)}`
+  q.outFields = ['*']
+  q.returnGeometry = false
+  q.num = 1
+  const res = await layer.queryFeatures(q)
+  return res?.features?.[0]?.attributes || {}
 }
 
 async function resolveLayerForEdit (ds: any): Promise<any | null> {
@@ -2125,6 +2222,141 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
   const pendingAttrs = React.useMemo(() => changedAttrs(layerFields, initialDraft, draft), [layerFields, initialDraft, draft])
   const isDirty = Object.keys(pendingAttrs).length > 0
 
+  const logLayerRef = React.useRef<any | null>(null)
+
+  const getLogLayer = React.useCallback(async () => {
+    if (logLayerRef.current) return logLayerRef.current
+    try {
+      const FeatureLayer = await loadEsriModule<any>('esri/layers/FeatureLayer')
+      const fl = new FeatureLayer({ url: LOG_EVENTI_CICLI_URL, outFields: ['*'] })
+      if (typeof fl?.load === 'function') { try { await fl.load() } catch {} }
+      logLayerRef.current = fl
+      return fl
+    } catch (e) {
+      console.warn('[GII_LOG_EVENTI_CICLI] Layer log non disponibile:', e)
+      return null
+    }
+  }, [])
+
+  const findOpenAmmCycle = React.useCallback(async (parentGlobalId: string, roleForLog: string) => {
+    const logLayer = await getLogLayer()
+    if (!parentGlobalId || !roleForLog || !logLayer?.queryFeatures) return null
+    const q = logLayer.createQuery ? logLayer.createQuery() : {}
+    q.where = `(${parentGlobalIdWhereForLog(parentGlobalId)}) AND ruolo_competente = ${sqlQuote(roleForLog)} AND stato_record = 'APERTO'`
+    q.outFields = ['*']
+    q.returnGeometry = false
+    q.num = 1
+    const oidField = String(logLayer.objectIdField || 'OBJECTID')
+    q.orderByFields = ['numero_ciclo_ruolo DESC', `${oidField} DESC`]
+    const res = await logLayer.queryFeatures(q)
+    return res?.features?.[0] || null
+  }, [getLogLayer])
+
+  const getNextAmmCycleNumber = React.useCallback(async (parentGlobalId: string, roleForLog: string): Promise<number> => {
+    const logLayer = await getLogLayer()
+    if (!parentGlobalId || !roleForLog || !logLayer?.queryFeatures) return 1
+    const q = logLayer.createQuery ? logLayer.createQuery() : {}
+    q.where = `(${parentGlobalIdWhereForLog(parentGlobalId)}) AND ruolo_competente = ${sqlQuote(roleForLog)}`
+    q.outFields = ['numero_ciclo_ruolo']
+    q.returnGeometry = false
+    q.num = 1
+    const oidField = String(logLayer.objectIdField || 'OBJECTID')
+    q.orderByFields = ['numero_ciclo_ruolo DESC', `${oidField} DESC`]
+    try {
+      const res = await logLayer.queryFeatures(q)
+      const lastNum = Number(res?.features?.[0]?.attributes?.numero_ciclo_ruolo || 0)
+      return Number.isFinite(lastNum) && lastNum > 0 ? lastNum + 1 : 1
+    } catch {
+      return 1
+    }
+  }, [getLogLayer])
+
+  const upsertAmmCycleAudit = React.useCallback(async (prevAttrs: Record<string, any>, nextAttrs: Record<string, any>, changedFieldNames: string[]) => {
+    const roleForLog = String(profile.role || '').trim().toUpperCase()
+    if (roleForLog !== 'TI_AMM' && roleForLog !== 'RI_AMM') return 0
+
+    const parentGlobalId = String(
+      pickAttrCI(nextAttrs, ['GlobalID', 'globalid', 'GLOBALID']) ||
+      pickAttrCI(prevAttrs, ['GlobalID', 'globalid', 'GLOBALID']) ||
+      pickAttrCI(data, ['GlobalID', 'globalid', 'GLOBALID']) ||
+      ''
+    ).trim()
+    if (!parentGlobalId || oid == null) {
+      console.warn('[GII_LOG_EVENTI_CICLI] Audit amministrativo saltato: parent_globalid non disponibile.', { roleForLog, oid })
+      return 0
+    }
+
+    const delta = buildAuditDeltaMaps(prevAttrs, nextAttrs, changedFieldNames)
+    if (Object.keys(delta.oldMap).length === 0) return 0
+
+    const logLayer = await getLogLayer()
+    if (!logLayer?.applyEdits) return 0
+
+    const username = String(profile.username || '').trim()
+    const sessionId = `${roleForLog.toLowerCase()}-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`
+
+    let openFeature = await findOpenAmmCycle(parentGlobalId, roleForLog)
+    if (!openFeature?.attributes) {
+      const nextNum = await getNextAmmCycleNumber(parentGlobalId, roleForLog)
+      const addAttrs = filterAttrsForLayer({
+        parent_globalid: parentGlobalId,
+        parent_objectid: oid,
+        numero_ciclo_ruolo: nextNum,
+        ruolo_competente: roleForLog,
+        utente_operatore: username,
+        stato_record: 'APERTO',
+        evento_apertura: 'PRESA_IN_CARICO',
+        dt_apertura: Date.now(),
+        area: 'AMM',
+        settore: '',
+        fase: roleForLog,
+        session_id: sessionId,
+        num_campi_modificati: 0,
+        campi_modificati: '',
+        valori_prima_json: '',
+        valori_dopo_json: '',
+        riepilogo_ciclo: ''
+      }, (logLayer.fields || []).map((f: any) => ({ name: String(f.name), type: String(f.type || ''), alias: String(f.alias || f.name), domain: f.domain || null, editable: f.editable !== false })))
+      try {
+        const addRes = await logLayer.applyEdits({ addFeatures: [{ attributes: addAttrs }] })
+        const add = addRes?.addFeatureResults?.[0] || addRes?.addResults?.[0] || null
+        if (add?.error) throw new Error(add.error.message || JSON.stringify(add.error))
+      } catch (e) {
+        console.warn('[GII_LOG_EVENTI_CICLI] Errore creazione ciclo audit amministrativo:', e)
+      }
+      openFeature = await findOpenAmmCycle(parentGlobalId, roleForLog)
+    }
+
+    if (!openFeature?.attributes) return 0
+    const attrs = openFeature.attributes || {}
+    const existingOld = parseJsonObject(attrs.valori_prima_json)
+    const existingNew = parseJsonObject(attrs.valori_dopo_json)
+    const merged = mergeAuditCycleMaps(existingOld, existingNew, delta.oldMap, delta.newMap)
+    const num = merged.fields.length
+    const logFields = (logLayer.fields || []).map((f: any) => ({ name: String(f.name), type: String(f.type || ''), alias: String(f.alias || f.name), domain: f.domain || null, editable: f.editable !== false }))
+    const updAttrs = filterAttrsForLayer({
+      [String(logLayer.objectIdField || 'OBJECTID')]: getLogObjectIdValue(attrs, logLayer),
+      utente_operatore: username || attrs.utente_operatore || '',
+      area: 'AMM',
+      settore: attrs.settore || '',
+      session_id: sessionId,
+      num_campi_modificati: num,
+      campi_modificati: merged.fields.join(', '),
+      valori_prima_json: num > 0 ? JSON.stringify(merged.oldMap) : '',
+      valori_dopo_json: num > 0 ? JSON.stringify(merged.newMap) : ''
+    }, logFields)
+    try {
+      const updRes = await logLayer.applyEdits({ updateFeatures: [{ attributes: updAttrs }] })
+      const upd = updRes?.updateFeatureResults?.[0] || updRes?.updateResults?.[0] || null
+      if (upd?.error) throw new Error(upd.error.message || JSON.stringify(upd.error))
+      try { window.dispatchEvent(new CustomEvent('gii-log-eventi-cicli-changed', { detail: { source: 'gii-editing-amm', oid, role: roleForLog, ts: Date.now() } })) } catch {}
+      return num
+    } catch (e) {
+      console.warn('[GII_LOG_EVENTI_CICLI] Errore aggiornamento audit ciclo amministrativo:', e)
+      return 0
+    }
+  }, [data, findOpenAmmCycle, getLogLayer, getNextAmmCycleNumber, oid, profile.role, profile.username])
+
   const handleReset = () => {
     setDraft({ ...(initialDraft || {}) })
   }
@@ -2233,6 +2465,13 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
       if (typeof layer.load === 'function') { try { await layer.load() } catch { } }
       const fields = layer?.fields?.length ? (layer.fields as any[]).map(f => ({ name: String(f.name), type: String(f.type || ''), alias: String(f.alias || f.name), domain: f.domain || null, editable: f.editable !== false })) : layerFields
       const idName = realFieldName(fields, active.idFieldName) || active.idFieldName || 'OBJECTID'
+      let prevRecordAttrs = { ...(initialDraft || {}) }
+      try {
+        const liveAttrs = await queryCurrentLayerAttrsByOid(layer, idName, Number(oid))
+        if (liveAttrs && Object.keys(liveAttrs).length) prevRecordAttrs = liveAttrs
+      } catch (e) {
+        console.warn('[GII_LOG_EVENTI_CICLI] Impossibile rileggere il record amministrativo prima del salvataggio:', e)
+      }
       const cleanAttrs = filterAttrsForLayer({ [idName]: Number(oid), ...attrs }, fields)
       const res = await layer.applyEdits({ updateFeatures: [{ attributes: cleanAttrs }] })
       const upd = res?.updateFeatureResults?.[0] || res?.updateResults?.[0] || null
@@ -2242,6 +2481,7 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
         const detail = err ? `${err.code ?? ''}: ${err.message ?? ''}` : JSON.stringify(res)
         throw new Error(detail)
       }
+      await upsertAmmCycleAudit(prevRecordAttrs, { ...prevRecordAttrs, ...attrs }, Object.keys(attrs))
       await refreshDs(active.ds)
       const next = { ...(initialDraft || {}), ...attrs }
       setInitialDraft(next)

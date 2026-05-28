@@ -5,7 +5,7 @@
  * poi disegna le tabelle dinamiche con pdf-lib.
  */
 
-import { PDFDocument, type PDFFont, type PDFPage, rgb } from 'pdf-lib'
+import { PDFDocument, degrees, type PDFFont, type PDFPage, rgb } from 'pdf-lib'
 import fontkit from '@pdf-lib/fontkit'
 import { CALIBRI_REGULAR_B64, CALIBRI_BOLD_B64 } from './calibri-fonts'
 import { NOTASPESE_BASE_PDF_B64 } from './notaspese-base-pdf'
@@ -78,6 +78,8 @@ export interface NotaSpeseData {
   summary: NsSummary
   luogo_data: string
   firma_nome: string
+  rapporto_respinto?: boolean | string | number | null
+  rapporto_istruttoria?: boolean | string | number | null
 }
 
 /* ------------------------------------------------------------------ */
@@ -328,6 +330,44 @@ function centeredY(topFromPage: number, rowH: number, fontSize: number): number 
   return PH - topFromPage - (rowH + fontSize * 0.75) / 2
 }
 
+function truthyStatusFlag (value: any): boolean {
+  const s = String(value ?? '').trim().toLowerCase()
+  return value === true || value === 1 || s === '1' || s === 'true' || s === 'sì' || s === 'si'
+}
+
+function isRejectedFlag (value: any): boolean {
+  const s = String(value ?? '').trim().toLowerCase()
+  return truthyStatusFlag(value) || s.includes('respint')
+}
+
+function isInProgressFlag (value: any): boolean {
+  const s = String(value ?? '').trim().toLowerCase()
+  return truthyStatusFlag(value) || s.includes('istruttoria')
+}
+
+function drawStatusWatermark (pg: PDFPage, text: string, font: PDFFont, color: any, opacity: number): void {
+  const { width, height } = pg.getSize()
+  let size = text.length > 10 ? 52 : 74
+  size = Math.min(size, width * (text.length > 10 ? 0.09 : 0.12))
+  size = Math.max(text.length > 10 ? 38 : 54, size)
+  while (size > 32 && font.widthOfTextAtSize(text, size) > width * 0.92) size -= 1
+
+  const tw = font.widthOfTextAtSize(text, size)
+  const angle = 35
+  const rad = angle * Math.PI / 180
+  const rotatedW = tw * Math.cos(rad) - size * Math.sin(rad)
+  const rotatedH = tw * Math.sin(rad) + size * Math.cos(rad)
+  pg.drawText(text, {
+    x: width / 2 - rotatedW / 2,
+    y: height / 2 - rotatedH / 2,
+    size,
+    font,
+    color,
+    opacity,
+    rotate: degrees(angle)
+  })
+}
+
 /* ------------------------------------------------------------------ */
 /*  Builder principale                                                 */
 /* ------------------------------------------------------------------ */
@@ -503,6 +543,12 @@ export async function buildNotaSpesePdf(data: NotaSpeseData): Promise<Uint8Array
   rightAligned(pg, data.firma_nome || '', fontB, 9, ML, TW, centeredY(top, 14, 9), CLR_BLACK, 0)
 
   drawIndependentPageNumbers()
+
+  if (isRejectedFlag(data.rapporto_respinto)) {
+    doc.getPages().forEach(page => drawStatusWatermark(page, 'RESPINTO', fontB, rgb(0.72, 0.16, 0.16), 0.18))
+  } else if (isInProgressFlag(data.rapporto_istruttoria)) {
+    doc.getPages().forEach(page => drawStatusWatermark(page, 'ISTRUTTORIA IN CORSO', fontB, CLR_BLUE, 0.14))
+  }
 
   return doc.save()
 

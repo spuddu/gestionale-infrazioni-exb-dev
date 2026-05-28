@@ -1106,10 +1106,38 @@ function formatSurfaceSafe (raw: any): string {
   return formatSurfaceHaACa(raw)
 }
 
+function fieldLooksLikeMoney (fieldName: string, fieldLabel = ''): boolean {
+  const combined = `${fieldName || ''} ${fieldLabel || ''}`
+    .toLowerCase()
+    .replace(/_/g, ' ')
+    .replace(/\s+/g, ' ')
+
+  if (!combined.trim()) return false
+  if (combined.includes('percentuale') || combined.includes('percent') || combined.includes('%')) return false
+
+  return (
+    combined.includes('importo') ||
+    combined.includes('prezzo') ||
+    combined.includes('costo') ||
+    combined.includes('sanzione') ||
+    combined.includes('rimborso') ||
+    combined.includes('risarcimento') ||
+    combined.includes('cauzione') ||
+    combined.includes('spese')
+  )
+}
+
+function formatMoneySafe (raw: any): string {
+  const n = Number(raw)
+  if (!Number.isFinite(n)) return String(raw ?? '').trim() || '—'
+  return `${n.toLocaleString('it-IT', { useGrouping: true, minimumFractionDigits: 2, maximumFractionDigits: 2 })} €`
+}
+
 function formatFieldValue (raw: any, fieldName: string, fieldType?: string, fieldLabel?: string): any {
   if (raw == null || raw === '') return '—'
   if (fieldLooksLikeDate(fieldName, fieldLabel || '', fieldType, raw)) return formatDateSafe(raw)
   if (fieldLooksLikeSurface(fieldName, fieldLabel || '')) return formatSurfaceSafe(raw)
+  if (fieldLooksLikeMoney(fieldName, fieldLabel || '')) return formatMoneySafe(raw)
   return raw
 }
 
@@ -2032,7 +2060,16 @@ const ITER_TECHNICAL_MODIFIED_FIELDS = new Set([
   'GII_da',
   'GII_a',
   'GII_dt',
-  'GII_arch'
+  'GII_arch',
+  'ns_importo_spese_generali',
+  'ns_ricalcolata_il',
+  'ns_spese_generali_perc',
+  'ns_totale_attrezzature_trasporti',
+  'ns_totale_complessivo',
+  'ns_totale_manodopera',
+  'ns_totale_materiali_costruzione',
+  'ns_totale_prodotti_finiti',
+  'ns_totale_semilavorati'
 ].map(normKey))
 
 const ITER_TECHNICAL_MODIFIED_ALIASES = new Set([
@@ -2041,8 +2078,10 @@ const ITER_TECHNICAL_MODIFIED_ALIASES = new Set([
 ].map(normKey))
 
 function isTechnicalIterModifiedField (raw: any, alias?: any): boolean {
+  const rawText = String(raw ?? '').trim().toLowerCase()
   const rawKey = normKey(raw)
   const aliasKey = normKey(alias)
+  if (rawText.startsWith('ns_')) return true
   return ITER_TECHNICAL_MODIFIED_FIELDS.has(rawKey) || ITER_TECHNICAL_MODIFIED_ALIASES.has(rawKey) || ITER_TECHNICAL_MODIFIED_ALIASES.has(aliasKey)
 }
 
@@ -2056,6 +2095,9 @@ function parseModifiedFieldNames (raw: any): string[] {
 function getFieldAliasForIter (fieldName: string, aliasMap?: Record<string, string>): string {
   const raw = String(fieldName || '').trim()
   if (!raw) return ''
+  const artMatch = raw.match(/^v_art0*(\d+)$/i)
+  if (artMatch) return `Violazione Art. ${Number(artMatch[1])}`
+  if (normKey(raw) === normKey('coordinate_punto_mappa')) return 'Coordinate punto in mappa'
   const aliases = aliasMap || {}
   if (aliases[raw]) return String(aliases[raw] || raw)
   const rawKey = normKey(raw)
@@ -2135,6 +2177,13 @@ function CicliTimeline (props: { globalId: string; hasSel: boolean; sortDir: 'as
   const [cicli, setCicli] = React.useState<CicloRecord[]>([])
   const [loading, setLoading] = React.useState(false)
   const [error, setError] = React.useState<string | null>(null)
+  const [reloadKey, setReloadKey] = React.useState(0)
+
+  React.useEffect(() => {
+    const h = () => setReloadKey(k => k + 1)
+    window.addEventListener('gii-log-eventi-cicli-changed', h as EventListener)
+    return () => window.removeEventListener('gii-log-eventi-cicli-changed', h as EventListener)
+  }, [])
 
   React.useEffect(() => {
     setCicli([]); setError(null)
@@ -2198,7 +2247,7 @@ function CicliTimeline (props: { globalId: string; hasSel: boolean; sortDir: 'as
       }
     })()
     return () => { cancelled = true }
-  }, [props.hasSel, props.globalId, props.sortDir])
+  }, [props.hasSel, props.globalId, props.sortDir, reloadKey])
 
   const displayCicli = React.useMemo(() => {
     const synthetic = buildSyntheticCreationCycle(props.data, cicli)
@@ -2448,7 +2497,7 @@ function nsdRound (v: number, decimals = 2): number {
 }
 
 function nsdMoney (v: any): string {
-  return nsdSafeNum(v, 0).toLocaleString('it-IT', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+  return nsdSafeNum(v, 0).toLocaleString('it-IT', { useGrouping: true, minimumFractionDigits: 2, maximumFractionDigits: 2 })
 }
 
 function nsdQty (v: any): string {
@@ -2818,7 +2867,7 @@ function NotaSpeseDetailPanel (props: { data: any; detailUrl: string; hasSel: bo
           >
             {group.isExpectedMissing && (
               <div style={{ marginBottom: 10, padding: '8px 10px', borderRadius: 8, border: '1px solid #d1d5db', background: '#f9fafb', color: '#374151', fontSize: 12, lineHeight: 1.45 }}>
-                La violazione è presente nel rapporto, ma non risultano righe di nota spese collegate.
+                Per questa violazione è prevista la possibilità di compilare una nota spese, ma al momento non risultano importi valorizzati.
               </div>
             )}
             {group.info.isUnlinked && (

@@ -3960,16 +3960,21 @@ async function deleteTableObjectId (rawUrl: any, objectid: number): Promise<void
   if (r?.error) throw new Error(r.error.message || 'Eliminazione non riuscita.')
 }
 
-async function loadRecordGlobalIdByOid (rawUrl: any, oidFieldName: string, oid: number): Promise<string> {
+async function loadRecordAttrsByOid (rawUrl: any, oidFieldName: string, oid: number): Promise<Record<string, any>> {
   const fl = await getFeatureLayerByUrl(rawUrl)
   const q = fl.createQuery ? fl.createQuery() : {}
-  q.where = `${oidFieldName} = ${Number(oid)}`
-  q.outFields = ['GlobalID']
+  const idField = String(fl?.objectIdField || oidFieldName || 'OBJECTID')
+  q.where = `${idField} = ${Number(oid)}`
+  q.outFields = ['*']
   q.returnGeometry = false
   q.num = 1
   const res = await fl.queryFeatures(q)
-  const attrs = res?.features?.[0]?.attributes || {}
-  return String(pickAttrCI(attrs, ['GlobalID', 'globalid']) || '').trim()
+  return res?.features?.[0]?.attributes || {}
+}
+
+async function loadRecordGlobalIdByOid (rawUrl: any, oidFieldName: string, oid: number): Promise<string> {
+  const attrs = await loadRecordAttrsByOid(rawUrl, oidFieldName, oid)
+  return String(pickAttrCI(attrs, ['GlobalID', 'globalid', 'GLOBALID']) || '').trim()
 }
 
 async function getNsPercentuale (rawUrl: any, codice: string): Promise<number> {
@@ -4133,7 +4138,7 @@ function NoteSpeseManager (props: NsManagerProps) {
   React.useEffect(() => { if (!msg) return; const t = window.setTimeout(() => setMsg(null), 5000); return () => window.clearTimeout(t) }, [msg])
   React.useEffect(() => { setEditIdx(null); setEditQty('') }, [props.resetKey])
 
-  const money = (n: any) => nsSafeNum(n, 0).toLocaleString('it-IT', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+  const money = (n: any) => nsSafeNum(n, 0).toLocaleString('it-IT', { useGrouping: true, minimumFractionDigits: 2, maximumFractionDigits: 2 })
   const categoryTotal = React.useMemo(() => nsRound(rows.reduce((s, r) => s + nsSafeNum(r.importo_riga, 0), 0), 2), [rows])
   const cardRadius = Math.max(0, Number(formStyle.cardBorderRadius) || 0)
 
@@ -4342,6 +4347,7 @@ function NuovaPraticaForm (p: {
   mapClickEnabled?: boolean
   onToggleMapClick?: (on: boolean) => void
   onSaved?: (oid: number, savedData?: any) => void
+  onCloseEdit?: () => void
   mode?: 'create' | 'edit'
   initialData?: any | null
   editOid?: number | null
@@ -5366,7 +5372,7 @@ React.useEffect(() => {
     if (k.startsWith('ti_assegnato_') || k.startsWith('dt_assegnazione_')) return false
     if (k.startsWith('ri_assegnato_') || k.startsWith('dt_assegnazione_ri')) return false
     if (k.startsWith('note_')) return false
-    if (/^v_art\d+$/i.test(k)) return false
+    if (k.startsWith('ns_')) return false
     if (k.startsWith('dt_') && k !== 'data_rilevazione' && k !== 'data_firma') return false
     return true
   }, [])
@@ -5452,6 +5458,23 @@ React.useEffect(() => {
 
   const sqlQuote = React.useCallback((v: any): string => `'${String(v ?? '').replace(/'/g, "''")}'`, [])
 
+  const AUDIT_MAP_POINT_FIELD = 'coordinate_punto_mappa'
+
+  const formatAuditMapPoint = React.useCallback((pt: any): string => {
+    if (!pt) return ''
+    const lon = Number(pt.x ?? pt.longitude)
+    const lat = Number(pt.y ?? pt.latitude)
+    if (!Number.isFinite(lon) || !Number.isFinite(lat)) return ''
+    if (Math.abs(lon) < 0.0000005 && Math.abs(lat) < 0.0000005) return ''
+    return `Lon ${lon.toFixed(6)} - Lat ${lat.toFixed(6)}`
+  }, [])
+
+  const buildMapPointAuditDelta = React.useCallback((prevPoint: any, nextPoint: any): null | { before: string; after: string } => {
+    const before = formatAuditMapPoint(prevPoint)
+    const after = formatAuditMapPoint(nextPoint)
+    return before === after ? null : { before, after }
+  }, [formatAuditMapPoint])
+
   const buildDeltaMaps = React.useCallback((prevAttrs: Record<string, any>, nextAttrs: Record<string, any>) => {
     const fields = Array.from(new Set([...Object.keys(prevAttrs || {}), ...Object.keys(nextAttrs || {})]))
       .filter((k) => isSubstantiveField(k))
@@ -5483,30 +5506,62 @@ React.useEffect(() => {
     return { oldMap, newMap, fields: finalFields }
   }, [normalizeFieldComparable])
 
-  const findOpenTiCycle = React.useCallback(async (parentGlobalId: string) => {
-    if (!parentGlobalId) return null
+  const globalIdVariantsForLog = React.useCallback((raw: any): string[] => {
+    const s = String(raw ?? '').trim()
+    if (!s) return []
+    const clean = s.replace(/[{}]/g, '').trim()
+    const variants = [s]
+    if (clean) {
+      variants.push(clean)
+      variants.push(`{${clean}}`)
+    }
+    return Array.from(new Set(variants.filter(Boolean)))
+  }, [])
+
+  const parentGlobalIdWhereForLog = React.useCallback((raw: any): string => {
+    const variants = globalIdVariantsForLog(raw)
+    return variants.length
+      ? variants.map(g => `parent_globalid = ${sqlQuote(g)}`).join(' OR ')
+      : '1=0'
+  }, [globalIdVariantsForLog, sqlQuote])
+
+  const getLogObjectIdValue = React.useCallback((attrs: any, layer?: any): any => {
+    const oidField = String(layer?.objectIdField || 'OBJECTID')
+    return pickAttrCI(attrs, [oidField, 'OBJECTID', 'ObjectID', 'ObjectId', 'objectId', 'objectid'])
+  }, [])
+
+  const getAuditRole = React.useCallback((): string => {
+    const ctx = readGiiUserContext()
+    const r = String(ctx.role || '').trim().toUpperCase()
+    return (r === 'TI' || r === 'RI') ? r : ''
+  }, [])
+
+  const findOpenRoleCycle = React.useCallback(async (parentGlobalId: string, ruoloCompetente: string) => {
+    if (!parentGlobalId || !ruoloCompetente) return null
     const logLayer = await getLogLayer()
     if (!logLayer?.queryFeatures) return null
     const q = logLayer.createQuery ? logLayer.createQuery() : {}
-    q.where = `parent_globalid = ${sqlQuote(parentGlobalId)} AND ruolo_competente = 'TI' AND stato_record = 'APERTO'`
+    q.where = `(${parentGlobalIdWhereForLog(parentGlobalId)}) AND ruolo_competente = ${sqlQuote(ruoloCompetente)} AND stato_record = 'APERTO'`
     q.outFields = ['*']
     q.returnGeometry = false
     q.num = 1
-    q.orderByFields = ['numero_ciclo_ruolo DESC', 'ObjectId DESC']
+    const oidField = String(logLayer.objectIdField || 'OBJECTID')
+    q.orderByFields = ['numero_ciclo_ruolo DESC', `${oidField} DESC`]
     const res = await logLayer.queryFeatures(q)
     return res?.features?.[0] || null
-  }, [getLogLayer, sqlQuote])
+  }, [getLogLayer, parentGlobalIdWhereForLog, sqlQuote])
 
-  const getNextTiCycleNumber = React.useCallback(async (parentGlobalId: string): Promise<number> => {
-    if (!parentGlobalId) return 1
+  const getNextRoleCycleNumber = React.useCallback(async (parentGlobalId: string, ruoloCompetente: string): Promise<number> => {
+    if (!parentGlobalId || !ruoloCompetente) return 1
     const logLayer = await getLogLayer()
     if (!logLayer?.queryFeatures) return 1
     const q = logLayer.createQuery ? logLayer.createQuery() : {}
-    q.where = `parent_globalid = ${sqlQuote(parentGlobalId)} AND ruolo_competente = 'TI'`
+    q.where = `(${parentGlobalIdWhereForLog(parentGlobalId)}) AND ruolo_competente = ${sqlQuote(ruoloCompetente)}`
     q.outFields = ['numero_ciclo_ruolo']
     q.returnGeometry = false
     q.num = 1
-    q.orderByFields = ['numero_ciclo_ruolo DESC', 'ObjectId DESC']
+    const oidField = String(logLayer.objectIdField || 'OBJECTID')
+    q.orderByFields = ['numero_ciclo_ruolo DESC', `${oidField} DESC`]
     try {
       const res = await logLayer.queryFeatures(q)
       const lastNum = Number(res?.features?.[0]?.attributes?.numero_ciclo_ruolo || 0)
@@ -5514,11 +5569,16 @@ React.useEffect(() => {
     } catch {
       return 1
     }
-  }, [getLogLayer, sqlQuote])
+  }, [getLogLayer, parentGlobalIdWhereForLog, sqlQuote])
 
-  const upsertTiCycleAudit = React.useCallback(async (prevAttrs: Record<string, any>, nextAttrs: Record<string, any>) => {
-    const parentGlobalId = String(p.initialData?.GlobalID || p.initialData?.globalid || p.initialData?.GLOBALID || '')
-    if (!parentGlobalId || editOid == null) return 0
+  const upsertCurrentRoleCycleAudit = React.useCallback(async (prevAttrs: Record<string, any>, nextAttrs: Record<string, any>) => {
+    const roleForLog = getAuditRole()
+    if (!roleForLog) return 0
+    const parentGlobalId = String(currentGlobalId || p.initialData?.GlobalID || p.initialData?.globalid || p.initialData?.GLOBALID || '')
+    if (!parentGlobalId || editOid == null) {
+      console.warn('[GII_LOG_EVENTI_CICLI] Audit ciclo saltato: parent_globalid non disponibile.', { roleForLog, editOid })
+      return 0
+    }
     const delta = buildDeltaMaps(prevAttrs, nextAttrs)
     if (Object.keys(delta.oldMap).length === 0) return 0
     const logLayer = await getLogLayer()
@@ -5527,23 +5587,23 @@ React.useEffect(() => {
     const area = giiCtx.area
     const settore = giiCtx.settore
     const username = String(giiCtx.username || '').trim()
-    const sessionId = `ti-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`
+    const sessionId = `${roleForLog.toLowerCase()}-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`
 
-    let openFeature = await findOpenTiCycle(parentGlobalId)
+    let openFeature = await findOpenRoleCycle(parentGlobalId, roleForLog)
     if (!openFeature?.attributes) {
-      const nextNum = await getNextTiCycleNumber(parentGlobalId)
+      const nextNum = await getNextRoleCycleNumber(parentGlobalId, roleForLog)
       const addAttrs = filterAttrsForLayer({
         parent_globalid: parentGlobalId,
         parent_objectid: editOid,
         numero_ciclo_ruolo: nextNum,
-        ruolo_competente: 'TI',
+        ruolo_competente: roleForLog,
         utente_operatore: username,
         stato_record: 'APERTO',
         evento_apertura: 'PRESA_IN_CARICO',
         dt_apertura: Date.now(),
         area,
         settore,
-        fase: 'TI',
+        fase: roleForLog,
         session_id: sessionId,
         num_campi_modificati: 0,
         campi_modificati: '',
@@ -5552,9 +5612,13 @@ React.useEffect(() => {
         riepilogo_ciclo: ''
       }, logLayer)
       try {
-        await logLayer.applyEdits({ addFeatures: [{ attributes: addAttrs }] })
-      } catch {}
-      openFeature = await findOpenTiCycle(parentGlobalId)
+        const addRes = await logLayer.applyEdits({ addFeatures: [{ attributes: addAttrs }] })
+        const add = addRes?.addFeatureResults?.[0] || addRes?.addResults?.[0] || null
+        if (add?.error) throw new Error(add.error.message || JSON.stringify(add.error))
+      } catch (e) {
+        console.warn('[GII_LOG_EVENTI_CICLI] Errore creazione ciclo audit:', e)
+      }
+      openFeature = await findOpenRoleCycle(parentGlobalId, roleForLog)
     }
 
     if (!openFeature?.attributes) return 0
@@ -5564,7 +5628,7 @@ React.useEffect(() => {
     const merged = mergeCycleMaps(existingOld, existingNew, delta.oldMap, delta.newMap)
     const num = merged.fields.length
     const updAttrs = filterAttrsForLayer({
-      ObjectId: attrs.ObjectId ?? attrs.objectid,
+      [String(logLayer.objectIdField || 'OBJECTID')]: getLogObjectIdValue(attrs, logLayer),
       utente_operatore: username || attrs.utente_operatore || '',
       area: area || attrs.area || '',
       settore: settore || attrs.settore || '',
@@ -5575,12 +5639,16 @@ React.useEffect(() => {
       valori_dopo_json: num > 0 ? JSON.stringify(merged.newMap) : ''
     }, logLayer)
     try {
-      await logLayer.applyEdits({ updateFeatures: [{ attributes: updAttrs }] })
+      const updRes = await logLayer.applyEdits({ updateFeatures: [{ attributes: updAttrs }] })
+      const upd = updRes?.updateFeatureResults?.[0] || updRes?.updateResults?.[0] || null
+      if (upd?.error) throw new Error(upd.error.message || JSON.stringify(upd.error))
+      try { window.dispatchEvent(new CustomEvent('gii-log-eventi-cicli-changed', { detail: { source: 'gii-editing-ti', oid: editOid, role: roleForLog, ts: Date.now() } })) } catch {}
       return num
-    } catch {
+    } catch (e) {
+      console.warn('[GII_LOG_EVENTI_CICLI] Errore aggiornamento audit ciclo:', e)
       return 0
     }
-  }, [buildDeltaMaps, editOid, findOpenTiCycle, getLogLayer, getNextTiCycleNumber, mergeCycleMaps, p.initialData, parseJsonObject])
+  }, [buildDeltaMaps, currentGlobalId, editOid, findOpenRoleCycle, getAuditRole, getLogLayer, getLogObjectIdValue, getNextRoleCycleNumber, mergeCycleMaps, p.initialData, parseJsonObject])
 
   const processAttachmentChanges = React.useCallback(async (_oid: number, _preferredUrl?: string | null) => {
     // Gli allegati vengono gestiti immediatamente (allega/sostituisci/elimina), non al Salva del rapporto.
@@ -5615,6 +5683,11 @@ React.useEffect(() => {
   const handleCancel = () => {
     if (!isDirty || saving) return
     setCancelUnsavedPopupOpen(true)
+  }
+
+  const handleCloseEdit = () => {
+    if (saving || isDirty) return
+    p.onCloseEdit?.()
   }
 
   const handleSave = async () => {
@@ -5727,7 +5800,7 @@ React.useEffect(() => {
         if (variata <= 0) {
           setValidationPopup({
             title: 'Superficie variata non valida',
-            text: 'Per l\'Art. 17 - Variazione tardiva, la superficie variata deve essere compilata e maggiore di 0.'
+            text: 'Per l\'Art. 17 - Variazione tardiva, la superficie variata deve essere compilata e maggiore di 0. Se la superficie variata è pari a 0, selezionare il tipo di comunicazione Rinuncia tardiva.'
           })
           return
         }
@@ -5882,7 +5955,16 @@ React.useEffect(() => {
 
       if (mode === 'edit') {
         if (editOid == null) throw new Error('Nessuna pratica selezionata per la modifica.')
-        const prevAttrs = filterAttrsForLayer(p.initialData || {}, layer)
+        const auditFallbackUrl = currentLayerUrl || String(cfg.schemaLayerUrl || '').trim() || String(cfg.motherLayerUrl || '').trim()
+        let prevAttrs = filterAttrsForLayer(p.initialData || {}, layer)
+        if (auditFallbackUrl && editOid != null) {
+          try {
+            const liveAttrs = await loadRecordAttrsByOid(auditFallbackUrl, editIdFieldName, Number(editOid))
+            if (liveAttrs && Object.keys(liveAttrs).length) prevAttrs = filterAttrsForLayer(liveAttrs, layer)
+          } catch (e) {
+            console.warn('[GII_LOG_EVENTI_CICLI] Impossibile rileggere il record prima del salvataggio:', e)
+          }
+        }
         const changedFields = Object.keys(cleanAttrs).filter((k) => normalizeLogValue(prevAttrs?.[k]) !== normalizeLogValue(cleanAttrs[k]))
         const hasAttachmentOps = !isRiAgrTecLimitedEdit && (attachmentFiles.length > 0 || pendingDeleteAttachmentIds.length > 0 || Object.keys(pendingReplaceAttachments).length > 0)
         const hasNoteSpeseOps = !isRiAgrTecLimitedEdit && noteSpeseDraftDirty
@@ -5953,7 +6035,12 @@ React.useEffect(() => {
           setNoteSpeseFormDirtyByCategory({ AT: false, PR: false, RU: false, SL: false, PF: false })
           setNoteSpeseManagerResetKey(k => k + 1)
         }
-        await upsertTiCycleAudit(prevAttrs, cleanAttrs)
+        const mapPointAuditDelta = geom ? buildMapPointAuditDelta(p.existingGeomWgs84, geomWgs84) : null
+        const auditPrevAttrs = mapPointAuditDelta ? { ...prevAttrs, [AUDIT_MAP_POINT_FIELD]: mapPointAuditDelta.before } : prevAttrs
+        const auditNextAttrs = mapPointAuditDelta
+          ? { ...prevAttrs, ...cleanAttrs, [AUDIT_MAP_POINT_FIELD]: mapPointAuditDelta.after }
+          : { ...prevAttrs, ...cleanAttrs }
+        await upsertCurrentRoleCycleAudit(auditPrevAttrs, auditNextAttrs)
         const nextLayerUrl = ensureLayerIndex(normalizeFeatureLayerUrl(layer?.url) || normalizeFeatureLayerUrl(readDynamicSelection().layerUrl), layer)
         writeSelectedFeatureCache(nextLayerUrl, editOid, editIdFieldName, nextSavedData, 'edit')
         invalidateRuntimeProxyCache(nextLayerUrl)
@@ -7136,6 +7223,19 @@ React.useEffect(() => {
             }}>
             Annulla
           </button>
+          {mode === 'edit' && (
+            <button type='button' disabled={saving || isDirty} onClick={handleCloseEdit}
+              title={isDirty ? 'Salvare o annullare le modifiche prima di chiudere.' : undefined}
+              style={{
+                ...btnBase,
+                border: '1px solid rgba(0,0,0,0.24)',
+                background: (saving || isDirty) ? '#e5e7eb' : '#f8fbff',
+                color: (saving || isDirty) ? '#9ca3af' : '#111827',
+                cursor: (saving || isDirty) ? 'not-allowed' : 'pointer'
+              }}>
+              Chiudi
+            </button>
+          )}
         </div>
       </div>
 
@@ -7223,7 +7323,7 @@ React.useEffect(() => {
             ] as [string, number][]).map(([label, value], idx) => (
               <div key={idx} style={{ background: idx === 6 ? formStyle.cardHeaderBg : '#f5f9ff', border: '1px solid #c5d9f1', borderRadius: formStyle.cardBorderRadius, padding: '6px 8px' }}>
                 <div style={{ fontSize: 10, fontWeight: 700, color: idx === 6 ? 'rgba(255,255,255,0.86)' : formStyle.hdrColor, marginBottom: 2, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{label}</div>
-                <div style={{ fontSize: 14, fontWeight: 800, color: idx === 6 ? formStyle.cardHeaderColor : '#16375a' }}>{nsSafeNum(value, 0).toLocaleString('it-IT', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €</div>
+                <div style={{ fontSize: 14, fontWeight: 800, color: idx === 6 ? formStyle.cardHeaderColor : '#16375a' }}>{nsSafeNum(value, 0).toLocaleString('it-IT', { useGrouping: true, minimumFractionDigits: 2, maximumFractionDigits: 2 })} €</div>
               </div>
             ))}
           </div>
@@ -7456,14 +7556,17 @@ React.useEffect(() => {
             <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10 }}>
               <button
                 type='button'
-                onClick={() => { setCancelUnsavedPopupOpen(false); performCancel() }}
+                onClick={() => {
+                  setCancelUnsavedPopupOpen(false)
+                  performCancel()
+                }}
                 style={{ ...btnBase, border: '1px solid rgba(0,0,0,0.18)', background: '#d92d20', color: '#fff', cursor: 'pointer', pointerEvents: 'auto' }}
               >
                 Sì, annulla
               </button>
               <button
                 type='button'
-                onClick={() => setCancelUnsavedPopupOpen(false)}
+                onClick={() => { setCancelUnsavedPopupOpen(false) }}
                 style={{ ...btnBase, border: '1px solid rgba(0,0,0,0.18)', background: '#f8fbff', color: '#111827', cursor: 'pointer', pointerEvents: 'auto' }}
               >
                 No, resta in modifica
@@ -8216,7 +8319,7 @@ function readDynamicSelection (): DynamicSelectionInfo {
     const w: any = window as any
     const sel: any = w.__giiSelection || {}
     const rawOid = sel?.oid ?? sessionStorage.getItem('GII_SELECTED_OID')
-    const oidNum = rawOid != null && rawOid !== '' ? Number(rawOid) : NaN
+    const oidNum = rawOid != null && String(rawOid).trim() !== '' ? Number(rawOid) : NaN
     const layerUrl = normalizeFeatureLayerUrl(sel?.layerUrl || sessionStorage.getItem('GII_SELECTED_LAYER_URL') || '')
     const idFieldName = String(sel?.idFieldName || sessionStorage.getItem('GII_SELECTED_IDFIELD') || 'OBJECTID').trim() || 'OBJECTID'
     const cache = (layerUrl && Number.isFinite(oidNum)) ? readSelectedFeatureCache(layerUrl, oidNum) : null
@@ -8271,7 +8374,7 @@ function readEditIntent (): EditIntentInfo | null {
     const raw = sessionStorage.getItem('GII_EDIT_INTENT')
     if (!raw) return null
     const j: any = JSON.parse(raw)
-    const oidNum = j?.oid != null && j?.oid !== '' ? Number(j.oid) : NaN
+    const oidNum = j?.oid != null && String(j.oid).trim() !== '' ? Number(j.oid) : NaN
     const layerUrl = normalizeFeatureLayerUrl(j?.layerUrl || '')
     const idFieldName = String(j?.idFieldName || 'OBJECTID').trim() || 'OBJECTID'
     const ts = Number(j?.ts || 0)
@@ -8287,6 +8390,23 @@ function readEditIntent (): EditIntentInfo | null {
 
 function clearEditIntent () {
   try { sessionStorage.removeItem('GII_EDIT_INTENT') } catch {}
+}
+
+function markSelectionRestoreAfterEdit (sel?: { oid?: number | null, layerUrl?: string, idFieldName?: string, data?: any | null }) {
+  try {
+    const current = sel || readDynamicSelection()
+    const rawOid = current?.oid
+    const oidNum = rawOid != null && String(rawOid).trim() !== '' ? Number(rawOid) : NaN
+    if (!Number.isFinite(oidNum)) return
+    const layerUrl = normalizeFeatureLayerUrl(current?.layerUrl || '')
+    const idFieldName = String(current?.idFieldName || 'OBJECTID').trim() || 'OBJECTID'
+    sessionStorage.setItem('GII_RESTORE_SELECTION_AFTER_EDIT', JSON.stringify({
+      oid: Number(oidNum),
+      layerUrl,
+      idFieldName,
+      ts: Date.now()
+    }))
+  } catch {}
 }
 
 function selectionToIntent (): EditIntentInfo | null {
@@ -8930,11 +9050,13 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
   const rootRef = React.useRef<HTMLDivElement | null>(null)
   // Contatore che si incrementa ogni volta che il widget diventa visibile (= ingresso nella pagina ExB)
   const [pageVisitCount, setPageVisitCount] = React.useState(0)
+  const [pageVisible, setPageVisible] = React.useState(false)
   const wasVisibleRef = React.useRef(false)
   React.useEffect(() => {
     const check = () => {
       const el = rootRef.current
       const isVisible = !!(el && el.offsetWidth > 0 && el.offsetHeight > 0)
+      setPageVisible(prev => prev === isVisible ? prev : isVisible)
       if (isVisible && !wasVisibleRef.current) {
         setPageVisitCount(c => c + 1)
         // Reset punti ad ogni ingresso nella pagina
@@ -9124,6 +9246,36 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
     return () => { cancelled = true }
   }, [mapView, editOid, editIdFieldName, inCreateMode, editReqPoint, pageVisitCount, cfg.mapLayerId, cfg.mapLayerUrl, cfg.mapLayerLayerId, cfg.mapLayerTitle])
 
+  const handleCloseEditPage = React.useCallback(() => {
+    if (inCreateMode) return
+    const currentSelection = readDynamicSelection()
+    const restoreLayerUrl = normalizeFeatureLayerUrl(effectiveIntent?.layerUrl || currentSelection.layerUrl || '')
+    const restoreIdFieldName = String(editIdFieldName || currentSelection.idFieldName || 'OBJECTID').trim() || 'OBJECTID'
+    markSelectionRestoreAfterEdit({
+      oid: editOid,
+      layerUrl: restoreLayerUrl,
+      idFieldName: restoreIdFieldName,
+      data: editRecordData || effectiveIntent?.data || currentSelection.data || null
+    })
+    clearEditIntent()
+    try { delete (window as any).__giiEdit } catch { try { ;(window as any).__giiEdit = null } catch {} }
+    setEditIntent(null)
+    setEditDs(null)
+    setEditRecordData(null)
+    setSelectionIntent(null)
+    setClickedPointWgs84(null)
+    setMapClickEnabled(false)
+
+    const elencoPageId = resolvePageId('Elenco Rapporti') || resolvePageId('elenco-rapporti') || resolvePageId('Elenco-Rapporti') || resolvePageId('Elenco')
+    try {
+      if (elencoPageId) {
+        UrlManager.getInstance().changePage(elencoPageId)
+        return
+      }
+    } catch {}
+    try { window.location.hash = elencoPageId ? `#${elencoPageId}` : '#Elenco-Rapporti' } catch {}
+  }, [inCreateMode, effectiveIntent, editIdFieldName, editOid, editRecordData])
+
   return (
     <div ref={rootRef} data-gii-editing-root='1' style={{ width: '100%', height: '100%', display: 'flex', flexDirection: 'column', minHeight: 0, boxSizing: 'border-box', padding: Number.isFinite(Number((cfg as any).maskOuterOffset ?? 0)) ? Number((cfg as any).maskOuterOffset) : 0, position: 'relative', zIndex: uiLocked ? 1001 : 'auto', background: modeBg, transition: 'background 0.3s' }}>
       {/* Mappa esterna ExB (fallback legacy) — nascosta, solo per agganciare la view */}
@@ -9159,6 +9311,7 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
               saveText={'Salva'}
               onDirtyChange={(dirty: boolean) => setFormDirty(dirty)}
               onTabChange={(tab: string) => setFormTab(tab)}
+              onCloseEdit={handleCloseEditPage}
               onSaved={(savedOid: number, savedData?: any) => {
                 if (inCreateMode) {
                   setClickedPointWgs84(null)
@@ -9178,6 +9331,7 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
                 }
                 invalidateRuntimeProxyCache(nextLayerUrl)
                 writeDynamicSelection({ oid: savedOid, layerUrl: nextLayerUrl, idFieldName: nextIdFieldName, data: nextData })
+                markSelectionRestoreAfterEdit({ oid: savedOid, layerUrl: nextLayerUrl, idFieldName: nextIdFieldName, data: nextData })
                 try { window.dispatchEvent(new CustomEvent('gii-force-refresh-selection', { detail: { oid: savedOid, layerUrl: nextLayerUrl } })) } catch {}
               }}
             />
@@ -9187,7 +9341,7 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
         </div>
 
       </div>
-      <DirtyNavigationLockOverlay active={formDirty} targetRef={rootRef} />
+      <DirtyNavigationLockOverlay active={pageVisible && (((!inCreateMode && !!effectiveIntent) || formDirty))} targetRef={rootRef} />
     </div>
   )
 }

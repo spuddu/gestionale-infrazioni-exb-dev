@@ -1,7 +1,7 @@
 // =================================================================
 // rapporto-pdf-builder.ts  (v4 — auto-sizing + giustificazione)
 // =================================================================
-import { PDFDocument, StandardFonts, type PDFFont, type PDFPage, rgb } from 'pdf-lib'
+import { PDFDocument, StandardFonts, degrees, type PDFFont, type PDFPage, rgb } from 'pdf-lib'
 import fontkit from '@pdf-lib/fontkit'
 import { CALIBRI_REGULAR_B64, CALIBRI_BOLD_B64 } from './calibri-fonts'
 import { BASE_PDF_B64 } from './base-pdf'
@@ -67,6 +67,106 @@ function formatSurfaceHaACa (raw: any): string {
   const are = Math.floor((centiare % 10000) / 100)
   const ca = centiare % 100
   return `${ha}.${String(are).padStart(2, '0')}.${String(ca).padStart(2, '0')}`
+}
+
+
+function truthyStatusFlag (value: any): boolean {
+  const s = String(value ?? '').trim().toLowerCase()
+  return value === true || value === 1 || s === '1' || s === 'true' || s === 'sì' || s === 'si'
+}
+
+function isRapportoRespinto (m: Record<string, string>): boolean {
+  const vals = [
+    m.rapporto_respinto,
+    m.is_respinto,
+    m.stato_finale,
+    m.esito_finale,
+    m.ultimo_evento,
+    m.ultimo_evento_codice,
+    m.stato_rz,
+    m.stato_dt,
+    m.esito_rz,
+    m.esito_dt
+  ]
+    .map(v => String(v ?? '').trim().toLowerCase())
+    .filter(Boolean)
+
+  return vals.some(v => truthyStatusFlag(v) || v.includes('respint'))
+}
+
+function isRapportoApprovato (m: Record<string, string>): boolean {
+  const vals = [
+    m.rapporto_approvato,
+    m.is_approvato,
+    m.stato_finale,
+    m.esito_finale,
+    m.stato_dt,
+    m.esito_dt
+  ]
+    .map(v => String(v ?? '').trim().toLowerCase())
+    .filter(Boolean)
+
+  return vals.some(v => truthyStatusFlag(v) || v.includes('approvat'))
+}
+
+function isRapportoInIstruttoria (m: Record<string, string>): boolean {
+  if (isRapportoRespinto(m) || isRapportoApprovato(m)) return false
+  return truthyStatusFlag(m.rapporto_istruttoria) || truthyStatusFlag(m.is_istruttoria) || String(m.stato_finale ?? '').toLowerCase().includes('istruttoria')
+}
+
+function drawStatusWatermark (pg: PDFPage, text: string, font: PDFFont, color: any, opacity: number): void {
+  const { width, height } = pg.getSize()
+  let size = text.length > 10 ? 52 : 74
+  size = Math.min(size, width * (text.length > 10 ? 0.09 : 0.12))
+  size = Math.max(text.length > 10 ? 38 : 54, size)
+  while (size > 32 && font.widthOfTextAtSize(text, size) > width * 0.92) size -= 1
+
+  const tw = font.widthOfTextAtSize(text, size)
+  const angle = 35
+  const rad = angle * Math.PI / 180
+  const rotatedW = tw * Math.cos(rad) - size * Math.sin(rad)
+  const rotatedH = tw * Math.sin(rad) + size * Math.cos(rad)
+  pg.drawText(text, {
+    x: width / 2 - rotatedW / 2,
+    y: height / 2 - rotatedH / 2,
+    size,
+    font,
+    color,
+    opacity,
+    rotate: degrees(angle)
+  })
+}
+
+function formatMoneyIt (raw: any): string {
+  if (raw == null) return ''
+  const txt = String(raw).trim()
+  if (!txt) return ''
+
+  const hasEuro = txt.includes('€')
+  const euroBefore = /^\s*€/.test(txt)
+  const euroAfter = /€\s*$/.test(txt)
+  const compact = txt.replace(/€/g, '').replace(/\s+/g, '').replace(/[^\d.,-]/g, '')
+  if (!compact || !/\d/.test(compact)) return txt
+
+  let normalized = compact
+  if (compact.includes(',')) {
+    normalized = compact.replace(/\./g, '').replace(',', '.')
+  } else if (/^-?\d{1,3}(?:\.\d{3})+$/.test(compact)) {
+    normalized = compact.replace(/\./g, '')
+  }
+
+  const num = Number(normalized)
+  if (!Number.isFinite(num)) return txt
+
+  const out = new Intl.NumberFormat('it-IT', {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+    useGrouping: true
+  }).format(num)
+
+  if (!hasEuro) return out
+  if (euroBefore && !euroAfter) return `€ ${out}`
+  return `${out} €`
 }
 
 const AREA_LABELS: Record<string, string> = {
@@ -330,6 +430,10 @@ export async function buildRapportoPdf (m: Record<string, string>): Promise<Uint
     ? `RAPPORTO TECNICO DI RILEVAZIONE N. ${codP}`
     : 'RAPPORTO TECNICO DI RILEVAZIONE'
   centered(p1, titolo, fB, 12, 62.3, 532.6, bY(190, 12), BLUE)
+  const dataApprovazione = v('data_approvazione_rapporto') || v('data_approvazione') || v('iter_approvazione_data')
+  if (isRapportoApprovato(m) && dataApprovazione) {
+    centered(p1, `— Approvato il ${dataApprovazione} —`, fR, 8.5, 62.3, 532.6, bY(207, 8.5), BLUE)
+  }
 
   // ── Numerazione autonoma del rapporto ──
   rightTxt(p1, 'Pag. 1 di 2', fR, 7, 532.6, bY(818, 7), BLUE)
@@ -364,7 +468,7 @@ export async function buildRapportoPdf (m: Record<string, string>): Promise<Uint
   }
 
   // ── Importo (top=769.19, riga "Importo a piè di") ──
-  txt(p1, v('importo_rimborso'), fR, 8.5, 130, bY(769.19, 8.5), BLACK, 165)
+  txt(p1, formatMoneyIt(v('importo_rimborso')), fR, 8.5, 155, bY(769.19, 8.5), BLACK, 165)
 
   // Nota laterale variabile: singolare/plurale in base agli allegati nota spese.
   const notaSpeseLabel = v('nota_spese_label')
@@ -448,6 +552,12 @@ export async function buildRapportoPdf (m: Record<string, string>): Promise<Uint
     txt(p2, row.nome, fR, iterSz, 109, y, BLACK, 108)
     centered(p2, row.presa, fR, iterSz, 319.20, 368.28, y, BLACK)
     centered(p2, row.data, fR, iterSz, 503.40, 552.60, y, BLACK)
+  }
+
+  if (isRapportoRespinto(m)) {
+    for (const page of doc.getPages()) drawStatusWatermark(page, 'RESPINTO', fB, rgb(0.72, 0.16, 0.16), 0.18)
+  } else if (isRapportoInIstruttoria(m)) {
+    for (const page of doc.getPages()) drawStatusWatermark(page, 'ISTRUTTORIA IN CORSO', fB, BLUE, 0.14)
   }
 
   return await doc.save()
