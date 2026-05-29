@@ -40,6 +40,7 @@ type SortItem = { field: string, dir: SortDir }
 
 // Campi virtuali (ordinamento su campi calcolati)
 const V_STATO = '__stato_sint__'
+const V_FASE = '__fase_istruttoria__'
 const V_ULTIMO = '__ultimo_agg__'
 const V_PROSSIMA = '__prossima__'
 const V_MITTENTE = '__mittente__'
@@ -481,7 +482,8 @@ function migrateColumns (cfg: any): ColumnDef[] {
     take({ id: 'col_data', label: 'Data rilevazione', field: 'data_rilevazione', width: 140 }),
     take({ id: 'col_ufficio', label: 'Ufficio origine', field: fieldUfficio, width: 190 }),
     take({ id: 'col_stato', label: 'Il mio stato', field: V_STATO, width: 170 }),
-    take({ id: 'col_causale', label: 'Stato istruttoria', field: V_CAUSALE, width: 250 }),
+    take({ id: 'col_fase', label: 'Fase istruttoria', field: V_FASE, width: 150 }),
+    take({ id: 'col_causale', label: 'Stato', field: V_CAUSALE, width: 250 }),
     take({ id: 'col_mittente', label: 'Mittente', field: V_MITTENTE, width: 210 }),
     take({ id: 'col_prossima', label: 'Destinatario', field: V_PROSSIMA, width: 210 })
   ]
@@ -2213,6 +2215,17 @@ React.useEffect(() => {
            meaningful(d['stato_DA'])     || meaningful(d['esito_DA'])
   }
 
+  const computeFaseIstruttoria = (d: any): 'Tecnica' | 'Amministrativa' => {
+    // La fase dipende dal nodo che ha in carico la pratica in questo momento,
+    // non dalla semplice presenza storica di campi amministrativi valorizzati.
+    // Se il nodo corrente e' TI_AMM, RI_AMM o DA => fase amministrativa.
+    // Se il nodo corrente e' TI/RZ/RI/DT/TR di area tecnica/agronomica => fase tecnica.
+    const currentRole = normalizeWorkflowRole(computeSintetico(d)?.ruolo)
+    return (currentRole === 'TI_AMM' || currentRole === 'RI_AMM' || currentRole === 'DA')
+      ? 'Amministrativa'
+      : 'Tecnica'
+  }
+
   // Destinatario di trasmissione positiva per ruolo — dipende dal contesto del record.
   // DT approva e trasmette direttamente a RI_AMM (attiva fase sanzionatoria).
   // RI_AMM punta a TI_AMM in prima assegnazione, a DA dopo che TI_AMM ha restituito.
@@ -2677,6 +2690,7 @@ React.useEffect(() => {
   const getSortValue = (r: DataRecord, field: string): any => {
     const d = r.getData?.() || {}
     if (field === V_STATO) return computeDisplaySintetico(d).label
+    if (field === V_FASE) return computeFaseIstruttoria(d)
     if (field === V_ULTIMO) return computeUltimoAggMs(d)
     if (field === V_PROSSIMA) {
       const log = getLogForRecord(d)
@@ -3018,7 +3032,7 @@ React.useEffect(() => {
 
   const gridCols = columns.map(c => `${c.width}px`).join(' ')
   const minWidth = columns.reduce((sum, c) => sum + c.width, 0) + (gap * Math.max(0, columns.length - 1)) + 24
-  const procGroupFields = new Set([V_CAUSALE, V_MITTENTE, V_PROSSIMA, V_DATA_MSG])
+  const procGroupFields = new Set([V_FASE, V_CAUSALE, V_MITTENTE, V_PROSSIMA, V_DATA_MSG])
   const procGroupIndexes = columns
     .map((c, i) => procGroupFields.has(String(c.field || '').toLowerCase()) ? i : -1)
     .filter(i => i >= 0)
@@ -3823,6 +3837,7 @@ React.useEffect(() => {
                       const ufficio = txt(d[fieldUfficio])
 
                       const displaySintetico = computeDisplaySintetico(d)
+                      const faseIstruttoria = computeFaseIstruttoria(d)
 
                       const statoLabel = labelNorm(txt(displaySintetico.label))
                       const statoChipNum = displaySintetico.statoForChip
@@ -3981,6 +3996,18 @@ React.useEffect(() => {
                                 <div key={col.id} className={ci === 0 ? 'cell first' : 'cell'} title={statoLabel}>
                                   <span className='chip' style={getChipStyleByLabel(statoLabel)}>
                                     {statoLabel}
+                                  </span>
+                                </div>
+                              )
+                            }
+                            if (f === V_FASE) {
+                              const faseStyle = faseIstruttoria === 'Amministrativa'
+                                ? { background: '#eef2ff', color: '#3730a3', borderColor: '#c7d2fe' }
+                                : { background: '#ecfeff', color: '#155e75', borderColor: '#a5f3fc' }
+                              return (
+                                <div key={col.id} className={ci === 0 ? 'cell first' : 'cell'} title={faseIstruttoria}>
+                                  <span className='chip' style={faseStyle}>
+                                    {faseIstruttoria}
                                   </span>
                                 </div>
                               )

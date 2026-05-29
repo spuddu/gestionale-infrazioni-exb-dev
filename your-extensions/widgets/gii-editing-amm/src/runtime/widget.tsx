@@ -1,10 +1,11 @@
 /** @jsx jsx */
 /** @jsxFrag React.Fragment */
-import { React, jsx, type AllWidgetProps, DataSourceComponent } from 'jimu-core'
+import { React, jsx, type AllWidgetProps, DataSourceComponent, UrlManager, getAppStore } from 'jimu-core'
 import RapportoPdfViewer from '../../../_shared/gii-anteprime/rapporto/rapporto-pdf-viewer'
 import { buildVerbalePdf, getVerbalePdfFilePrefix } from '../../../_shared/gii-anteprime/verbale/verbale-pdf-builder'
 import type { IMConfig, SummaryFieldConfig } from '../config'
 import { defaultConfig } from '../config'
+import { createPortal } from 'react-dom'
 
 const LOG_EVENTI_CICLI_URL = 'https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_LOG_EVENTI_CICLI/FeatureServer/0'
 
@@ -173,6 +174,7 @@ const MONEY_FIELDS = new Set([
   'sanzione_importo_base',
   'sanzione_importo_ridotta',
   'risarcimento_danni_importo',
+  'sanzione_spese_notifica',
   'attrezzature_rimborso_importo',
   'attrezzature_cauzione_decurtata',
   'attrezzature_importo_netto',
@@ -275,6 +277,194 @@ function pickOidFromData (data: any, idFieldName: string): number | null {
 function safeJsonParse (raw: string | null): any | null {
   if (!raw) return null
   try { return JSON.parse(raw) } catch { return null }
+}
+
+function getGlobalOverlayHost (): HTMLElement | null {
+  try {
+    const topBody = (window as any)?.top?.document?.body
+    if (topBody) return topBody as HTMLElement
+  } catch {}
+  try {
+    if (typeof document !== 'undefined' && document.body) return document.body as HTMLElement
+  } catch {}
+  return null
+}
+
+type GiiLockRect = {
+  key: string
+  left: number
+  top: number
+  width: number
+  height: number
+}
+
+function findGiiWidgetElement (doc: Document, widgetId: string): HTMLElement | null {
+  const id = String(widgetId || '').trim()
+  if (!id) return null
+  const selectors = [
+    `[data-widgetid="${id}"]`,
+    `[data-widget-id="${id}"]`,
+    `[widgetid="${id}"]`,
+    `[id="${id}"]`,
+    `#${id}`
+  ]
+  for (const sel of selectors) {
+    try {
+      const el = doc.querySelector(sel) as HTMLElement | null
+      if (el) return el
+    } catch {}
+  }
+  return null
+}
+
+function getVisibleLockRect (el: HTMLElement, key: string, viewW: number, viewH: number, win: Window): GiiLockRect | null {
+  try {
+    if (!el || !el.isConnected) return null
+    const st = win.getComputedStyle?.(el)
+    if (st && (st.display === 'none' || st.visibility === 'hidden' || st.opacity === '0')) return null
+    const r = el.getBoundingClientRect()
+    const left = Math.max(0, Math.floor(r.left))
+    const top = Math.max(0, Math.floor(r.top))
+    const right = Math.min(viewW, Math.ceil(r.right))
+    const bottom = Math.min(viewH, Math.ceil(r.bottom))
+    const width = Math.max(0, right - left)
+    const height = Math.max(0, bottom - top)
+    if (width < 2 || height < 2) return null
+    return { key, left, top, width, height }
+  } catch {
+    return null
+  }
+}
+
+function DirtyNavigationLockOverlay (props: { active: boolean; targetRef: React.RefObject<HTMLElement | null> }) {
+  const { active, targetRef } = props
+  const [rects, setRects] = React.useState<GiiLockRect[]>([])
+
+  const computeRects = React.useCallback(() => {
+    if (!active) { setRects([]); return }
+    const host = getGlobalOverlayHost()
+    if (!host) { setRects([]); return }
+    const doc = host.ownerDocument || document
+    const win = doc.defaultView || window
+    const viewW = Math.max(0, win.innerWidth || doc.documentElement?.clientWidth || 0)
+    const viewH = Math.max(0, win.innerHeight || doc.documentElement?.clientHeight || 0)
+
+    const idsToMask = [
+      'widget_840',  // GII Header
+      'widget_1319', // GII Navigazione - Nuovo Rapporto
+      'widget_1371', // GII Navigazione - Modifica Rapporto
+      'widget_1409'  // GII Navigazione - Verbale
+    ]
+
+    const next: GiiLockRect[] = []
+    for (const id of idsToMask) {
+      const el = findGiiWidgetElement(doc, id)
+      const rect = el ? getVisibleLockRect(el, id, viewW, viewH, win) : null
+      if (rect) next.push(rect)
+    }
+
+    if (next.length === 0 && targetRef.current) {
+      try {
+        const r = targetRef.current.getBoundingClientRect()
+        const headerH = Math.max(0, Math.floor(r.top))
+        const leftW = Math.max(0, Math.floor(r.left))
+        if (headerH > 0) next.push({ key: 'fallback-header', left: 0, top: 0, width: viewW, height: headerH })
+        if (leftW > 0) next.push({ key: 'fallback-left', left: 0, top: headerH, width: leftW, height: Math.max(0, viewH - headerH) })
+      } catch {}
+    }
+
+    setRects(next)
+  }, [active, targetRef])
+
+  React.useEffect(() => {
+    if (!active) { setRects([]); return }
+    const host = getGlobalOverlayHost()
+    const doc = host?.ownerDocument || document
+    const win = doc.defaultView || window
+    let raf = 0
+    const schedule = () => {
+      try { if (raf) win.cancelAnimationFrame(raf) } catch {}
+      try { raf = win.requestAnimationFrame(computeRects) } catch { computeRects() }
+    }
+
+    schedule()
+
+    let ro: ResizeObserver | null = null
+    try {
+      if (typeof ResizeObserver !== 'undefined') {
+        ro = new ResizeObserver(schedule)
+        const observed = new Set<Element>()
+        for (const id of ['widget_840', 'widget_1319', 'widget_1371', 'widget_1409']) {
+          const el = findGiiWidgetElement(doc, id)
+          if (el && !observed.has(el)) {
+            observed.add(el)
+            ro.observe(el)
+          }
+        }
+        if (targetRef.current && !observed.has(targetRef.current)) ro.observe(targetRef.current)
+      }
+    } catch { ro = null }
+
+    win.addEventListener('resize', schedule, true)
+    win.addEventListener('scroll', schedule, true)
+    const id = win.setInterval(schedule, 300)
+
+    return () => {
+      try { if (raf) win.cancelAnimationFrame(raf) } catch {}
+      try { ro?.disconnect() } catch {}
+      try { win.removeEventListener('resize', schedule, true) } catch {}
+      try { win.removeEventListener('scroll', schedule, true) } catch {}
+      try { win.clearInterval(id) } catch {}
+    }
+  }, [active, computeRects, targetRef])
+
+  if (!active || rects.length === 0) return null
+
+  const host = getGlobalOverlayHost()
+  if (!host) return null
+
+  const stop = (e: any) => {
+    try { e.preventDefault() } catch {}
+    try { e.stopPropagation() } catch {}
+  }
+  const maskBase: React.CSSProperties = {
+    position: 'fixed',
+    zIndex: 2147483000,
+    background: 'rgba(0,0,0,0.52)',
+    pointerEvents: 'auto',
+    touchAction: 'none'
+  }
+  const mask = (rect: GiiLockRect) => (
+    <div
+      key={rect.key}
+      data-gii-admin-lock-mask='1'
+      aria-hidden='true'
+      style={{ ...maskBase, left: rect.left, top: rect.top, width: rect.width, height: rect.height }}
+      onPointerDown={stop}
+      onMouseDown={stop}
+      onClick={stop}
+      onDoubleClick={stop}
+      onWheel={stop}
+      onTouchStart={stop}
+    />
+  )
+
+  return createPortal(<>{rects.map(mask)}</>, host)
+}
+
+function resolvePageId (label: string): string | null {
+  const wanted = String(label || '').trim().toLowerCase()
+  if (!wanted) return null
+  try {
+    const st: any = getAppStore?.().getState?.() || {}
+    const pages = st?.appConfig?.pages || st?.appStateInBuilder?.appConfig?.pages || {}
+    const entries = Object.entries(pages) as Array<[string, any]>
+    const byLabel = entries.find(([id, p]) => String(p?.label || id).trim().toLowerCase() === wanted)
+    if (byLabel) return byLabel[0]
+    const byId = entries.find(([id]) => String(id).trim().toLowerCase() === wanted)
+    if (byId) return byId[0]
+  } catch {}
+  return null
 }
 
 function readEditIntent (): EditIntentInfo | null {
@@ -523,6 +713,43 @@ function getFallbackDomainOptions (fieldName: string): Array<{ code: any, name: 
     return [
       { code: 0, name: 'No' },
       { code: 1, name: 'Sì' }
+    ]
+  }
+  if (fieldName === 'area_cod') {
+    return [
+      { code: 'AMM', name: 'Amministrativa' },
+      { code: 'AGR', name: 'Agraria' },
+      { code: 'TEC', name: 'Tecnica' }
+    ]
+  }
+  if (fieldName === 'settore_cod') {
+    return [
+      { code: 'CR', name: 'Catasto, Ruoli e Servizi Territoriali' },
+      { code: 'GI', name: 'Gestione irrigua' },
+      { code: 'D1', name: "Distretto 1 (Quartu Sant'Elena/Villaputzu/Muravera – San Sperate)" },
+      { code: 'D2', name: 'Distretto 2 (Serramanna/Pimpisu)' },
+      { code: 'D3', name: 'Distretto 3 (San Gavino - Villacidro)' },
+      { code: 'D4', name: 'Distretto 4 (Basso Sulcis)' },
+      { code: 'D5', name: 'Distretto 5 (Senorbì)' },
+      { code: 'D6', name: 'Distretto 6 (Cixerri)' },
+      { code: 'DS', name: 'Manutenzione opere di dreno e di scolo' }
+    ]
+  }
+  if (/^stato_(TI_AMM|RI_AMM|DA)$/i.test(fieldName)) {
+    return [
+      { code: 0, name: 'Non attivo' },
+      { code: 1, name: 'Da prendere in carico' },
+      { code: 2, name: 'Presa in carico' },
+      { code: 3, name: 'Integrazione richiesta' },
+      { code: 4, name: 'Trasmesso' },
+      { code: 5, name: 'Respinto' }
+    ]
+  }
+  if (/^esito_(TI_AMM|RI_AMM|DA|DT)$/i.test(fieldName)) {
+    return [
+      { code: 1, name: 'Integrazione richiesta' },
+      { code: 2, name: 'Approvata' },
+      { code: 3, name: 'Respinta' }
     ]
   }
   return []
@@ -873,8 +1100,8 @@ function FieldGrid (props: { fields: SummaryFieldConfig[], data: any, layerField
       {fields.map(f => {
         const raw = pickAttrCI(props.data, [f.name])
         const lf = props.layerFields ? getFieldInfo(props.layerFields, f.name) : null
-        const hasDomain = !!lf?.domain?.codedValues
-        const val = hasDomain ? domainLabel(lf, raw) : looksLikeDateField(f.name) ? formatDateValue(raw) : formatValue(raw)
+        const hasDomain = !!lf?.domain?.codedValues || getFallbackDomainOptions(f.name).length > 0
+        const val = hasDomain ? domainLabel(lf, raw, f.name) : looksLikeDateField(f.name) ? formatDateValue(raw) : formatValue(raw)
         return (
           <div key={`${f.name}-${f.label}`} style={{ background: '#f8fbff', border: '1px solid #c5d9f1', borderRadius: 8, padding: '8px 10px', minWidth: 0 }}>
             <div style={{ color: '#6b7280', fontSize: props.labelSize, fontWeight: 700, marginBottom: 3, overflowWrap: 'anywhere' }}>{f.label || f.name}</div>
@@ -886,11 +1113,32 @@ function FieldGrid (props: { fields: SummaryFieldConfig[], data: any, layerField
   )
 }
 
+function normalizeReportCode (raw: any, oid: number | null): string {
+  const code = String(raw ?? '').trim()
+  if (code) return /^\d+$/.test(code) ? `TR-${code}` : code
+  if (oid != null && Number.isFinite(Number(oid))) return `TR-${Number(oid)}`
+  return '—'
+}
+
+function getReportCode (data: any, oid: number | null): string {
+  return normalizeReportCode(
+    pickAttrCI(data || {}, ['codice_rapporto', 'n_rapporto', 'numero_rapporto', 'cod_pratica', 'nrapporto', 'N_RAPPORTO']),
+    oid
+  )
+}
+
 function buildPracticeTitle (cfg: any, data: any, oid: number | null): string {
-  const code = pickAttrCI(data, ['codice_rapporto', 'n_rapporto', 'numero_rapporto', 'nrapporto', 'N_RAPPORTO'])
-  if (code != null && String(code).trim()) return `${cfg.detailTitlePrefix}: ${String(code).trim()}`
-  if (oid != null && Number.isFinite(Number(oid))) return `${cfg.detailTitlePrefix}: OBJECTID ${Number(oid)}`
-  return cfg.detailTitlePrefix
+  const rapporto = getReportCode(data || {}, oid)
+  const numeroVerbale = String(pickAttrCI(data || {}, ['numero_verbale']) || '').trim()
+  if (numeroVerbale) return `Verbale n. ${numeroVerbale} - Rapporto ${rapporto}`
+  return `Verbale in corso di istruttoria - Rapporto ${rapporto}`
+}
+
+function buildPracticeTitleParts (data: any, oid: number | null): { prefix: string, reportCode: string, full: string } {
+  const reportCode = getReportCode(data || {}, oid)
+  const numeroVerbale = String(pickAttrCI(data || {}, ['numero_verbale']) || '').trim()
+  const prefix = numeroVerbale ? `Verbale n. ${numeroVerbale} - Rapporto ` : 'Verbale in corso di istruttoria - Rapporto '
+  return { prefix, reportCode, full: `${prefix}${reportCode}` }
 }
 
 
@@ -1693,7 +1941,7 @@ function VerbaleSummary (props: { data: Record<string, any>, fields: LayerFieldI
   const noteReadonly = !props.canEdit || !noteExists || noteField?.editable === false
   const noteMissing = !hasAdminValue(noteRaw)
   return (
-    <Section title='2. Predisposizione verbale' right={<span style={{ fontSize: 11, opacity: 0.85 }}>{definitivo ? 'Verbale definitivo' : 'Bozza'}</span>}>
+    <Section title='2. Predisposizione verbale'>
       <div style={{ display: 'grid', gap: 10, marginBottom: 12 }}>
         <div style={{ border: '1px solid #dbeafe', background: '#eff6ff', borderRadius: 11, padding: 11, display: 'grid', gap: 9 }}>
           <div style={{ display: 'grid', gap: 3 }}>
@@ -1748,43 +1996,115 @@ function QuantificazioneAutomaticaSummary (props: { data: Record<string, any>, f
   )
 }
 
-function CompactPracticeHeader (props: { title: string, data: Record<string, any>, fields: LayerFieldInfo[], profile: { role: string, label: string, fullName: string, username: string }, hasDsForSave: boolean, summaryFields: any[], labelSize: number, valueSize: number }) {
+
+
+function PracticeDetailBadge (props: { title: string, rows: Array<{ label: string, value: React.ReactNode, highlight?: boolean }> }) {
   const st = useAdminStyle()
-  const d = props.data || {}
-  const totale = displayAdminFieldValue(d, props.fields, 'pagamento_importo_totale')
-  const statoVerbale = isVerbaleDefinitivo(d) ? 'Verbale definitivo' : 'Verbale in bozza'
   return (
-    <Section title='Istruttoria amministrativa' right={<span style={{ fontSize: 11, opacity: 0.85 }}>{props.hasDsForSave ? 'Fonte dati collegata' : 'Dati da selezione'}</span>}>
-      <div style={{ display: 'grid', gap: 10 }}>
-        <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
-          <span style={{ background: '#0d3b66', color: '#fff', borderRadius: 999, padding: '6px 11px', fontSize: 12, fontWeight: 900 }}>{props.title}</span>
-          <span style={{ background: st.formCardHeaderBg || '#0d3b66', color: st.formCardHeaderColor || '#fff', border: '1px solid #0d3b66', borderRadius: 999, padding: '6px 11px', fontSize: Number(st.amountFontSize ?? 16), fontWeight: 900 }}>Totale: {totale}</span>
-          <span style={{ background: isVerbaleDefinitivo(d) ? '#ecfdf5' : '#fff7ed', color: isVerbaleDefinitivo(d) ? '#166534' : '#9a3412', border: `1px solid ${isVerbaleDefinitivo(d) ? '#bbf7d0' : '#fed7aa'}`, borderRadius: 999, padding: '6px 11px', fontSize: 12, fontWeight: 850 }}>{statoVerbale}</span>
-          <span style={{ marginLeft: 'auto', color: '#4b5563', fontSize: 12, fontWeight: 800 }}>{props.profile.label || props.profile.role || 'Profilo non rilevato'} · {props.profile.fullName || props.profile.username || 'Utente'}</span>
-        </div>
-        <details style={{ border: '1px solid #e5e7eb', borderRadius: 10, background: '#f9fafb', padding: 10 }}>
-          <summary style={{ cursor: 'pointer', color: '#0d3b66', fontSize: 12, fontWeight: 900 }}>Dettagli pratica e workflow</summary>
-          <div style={{ display: 'grid', gap: 12, marginTop: 10 }}>
-            <FieldGrid fields={props.summaryFields || []} data={d} layerFields={props.fields} labelSize={props.labelSize} valueSize={props.valueSize} />
-            <FieldGrid
-              fields={[
-                { name: 'presa_in_carico_TI_AMM', label: 'Presa TI_AMM' },
-                { name: 'dt_presa_in_carico_TI_AMM', label: 'Data presa TI_AMM' },
-                { name: 'esito_TI_AMM', label: 'Esito TI_AMM' },
-                { name: 'dt_esito_TI_AMM', label: 'Data esito TI_AMM' },
-                { name: 'esito_RI_AMM', label: 'Esito RI_AMM' },
-                { name: 'dt_esito_RI_AMM', label: 'Data esito RI_AMM' },
-                { name: 'esito_DA', label: 'Esito DA' },
-                { name: 'dt_esito_DA', label: 'Data esito DA' }
-              ]}
-              data={d}
-              layerFields={props.fields}
-              labelSize={props.labelSize}
-              valueSize={props.valueSize}
-            />
+    <div style={{ background: '#ffffff', border: '1px solid #d8e6f7', borderRadius: Number(st.formCardBorderRadius ?? 8), padding: '10px 12px', minWidth: 0 }}>
+      <div style={{ color: '#0d3b66', fontSize: 12.5, fontWeight: 900, marginBottom: 6, overflowWrap: 'anywhere' }}>{props.title}</div>
+      <div style={{ display: 'grid', gap: 4 }}>
+        {props.rows.map((row, idx) => (
+          <div key={`${row.label}-${idx}`} style={{ display: 'grid', gridTemplateColumns: 'auto 1fr', columnGap: 6, alignItems: 'baseline', minWidth: 0 }}>
+            <span style={{ color: '#6b7280', fontSize: 12, fontWeight: 750, whiteSpace: 'nowrap' }}>{row.label}:</span>
+            <span style={{ color: row.highlight ? '#2563eb' : '#111827', fontSize: 13, fontWeight: row.highlight ? 850 : 650, overflowWrap: 'anywhere' }}>{row.value || '—'}</span>
           </div>
-        </details>
+        ))}
       </div>
+    </div>
+  )
+}
+
+function PracticePhaseGroup (props: { title: string, items: Array<{ title: string, rows: Array<{ label: string, value: React.ReactNode, highlight?: boolean }> }> }) {
+  const st = useAdminStyle()
+  return (
+    <div style={{ border: '1px solid #d7e3f2', borderRadius: Number(st.formCardBorderRadius ?? 8), background: '#f8fbff', padding: 10, minWidth: 0 }}>
+      <div style={{ color: '#0d3b66', fontSize: 13, fontWeight: 950, marginBottom: 8 }}>{props.title}</div>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(245px, 1fr))', gap: 10 }}>
+        {props.items.map(item => <PracticeDetailBadge key={item.title} title={item.title} rows={item.rows} />)}
+      </div>
+    </div>
+  )
+}
+
+function compactValue (data: Record<string, any>, fields: LayerFieldInfo[], fieldName: string, fallback = '—'): string {
+  return displayAdminFieldValue(data || {}, fields || [], fieldName, fallback)
+}
+
+function esitoTecnicoValue (data: Record<string, any>, fields: LayerFieldInfo[]): string {
+  const lf = getFieldInfo(fields, 'esito_DT')
+  const raw = pickAttrCI(data || {}, [lf?.name || 'esito_DT', 'esito_DT'])
+  if (raw == null || raw === '') return 'Approvato'
+  if (String(raw) === '2') return 'Approvato'
+  if (String(raw) === '1') return 'Integrazione richiesta'
+  if (String(raw) === '3') return 'Respinto'
+  return domainLabel(lf, raw, 'esito_DT')
+}
+
+function CompactPracticeHeader (props: { title: string, data: Record<string, any>, fields: LayerFieldInfo[], profile: { role: string, label: string, fullName: string, username: string }, hasDsForSave: boolean, summaryFields: any[], labelSize: number, valueSize: number }) {
+  const d = props.data || {}
+  const oid = pickOidFromData(d, 'OBJECTID')
+  const rapporto = getReportCode(d, oid != null ? Number(oid) : null)
+  const tiAmmAssegnato = String(pickAttrCI(d, ['ti_amm_assegnato_nome', 'ti_amm_assegnato_username']) || '—')
+  const faseTecnicaDetails = [
+    {
+      title: 'Rapporto',
+      rows: [
+        { label: 'Rapporto', value: rapporto, highlight: true },
+        { label: 'Data rilevazione', value: compactValue(d, props.fields, 'data_rilevazione') }
+      ]
+    },
+    {
+      title: 'Competenza',
+      rows: [
+        { label: 'Area', value: compactValue(d, props.fields, 'area_cod') },
+        { label: 'Settore', value: compactValue(d, props.fields, 'settore_cod') },
+        { label: 'Ufficio di zona', value: compactValue(d, props.fields, 'ufficio_zona') }
+      ]
+    },
+    {
+      title: 'Istruttoria tecnica',
+      rows: [
+        { label: 'Esito', value: esitoTecnicoValue(d, props.fields) },
+        { label: 'Data', value: compactValue(d, props.fields, 'dt_esito_DT') }
+      ]
+    }
+  ]
+  const faseAmministrativaDetails = [
+    {
+      title: 'Stato TI AMM',
+      rows: [
+        { label: 'Stato', value: compactValue(d, props.fields, 'stato_TI_AMM') },
+        { label: 'Data', value: compactValue(d, props.fields, 'dt_presa_in_carico_TI_AMM') },
+        { label: 'Assegnato a', value: tiAmmAssegnato }
+      ]
+    },
+    {
+      title: 'Stato RI AMM',
+      rows: [
+        { label: 'Stato', value: compactValue(d, props.fields, 'stato_RI_AMM') },
+        { label: 'Data', value: compactValue(d, props.fields, 'dt_stato_RI_AMM') }
+      ]
+    },
+    {
+      title: 'Direttore d\'Area',
+      rows: [
+        { label: 'Stato', value: compactValue(d, props.fields, 'stato_DA') },
+        { label: 'Data stato', value: compactValue(d, props.fields, 'dt_stato_DA') },
+        { label: 'Esito', value: compactValue(d, props.fields, 'esito_DA') },
+        { label: 'Data esito', value: compactValue(d, props.fields, 'dt_esito_DA') }
+      ]
+    }
+  ]
+  return (
+    <Section title='Istruttoria amministrativa'>
+      <details style={{ border: '1px solid #e5e7eb', borderRadius: 10, background: '#f9fafb', padding: 10 }}>
+        <summary style={{ cursor: 'pointer', color: '#0d3b66', fontSize: 12, fontWeight: 900 }}>Dettagli pratica e workflow</summary>
+        <div style={{ display: 'grid', gap: 12, marginTop: 10 }}>
+          <PracticePhaseGroup title='Fase tecnica' items={faseTecnicaDetails} />
+          <PracticePhaseGroup title='Fase amministrativa' items={faseAmministrativaDetails} />
+        </div>
+      </details>
     </Section>
   )
 }
@@ -1792,7 +2112,7 @@ function CompactPracticeHeader (props: { title: string, data: Record<string, any
 function ProtocolloNotificaGuidataSection (props: { data: Record<string, any>, fields: LayerFieldInfo[], canEdit: boolean, onChange: (name: string, value: any) => void }) {
   const definitivo = isVerbaleDefinitivo(props.data || {})
   return (
-    <Section title='4. Protocollo e notifica' right={<span style={{ fontSize: 11, opacity: 0.85 }}>{definitivo ? 'Compilabile' : 'Dopo verbale definitivo'}</span>}>
+    <Section title='4. Protocollo e notifica'>
       {!definitivo && <InfoBox kind='warn'>Protocollo e notifica vanno compilati solo dopo che il Direttore d'Area ha approvato l’istruttoria e il sistema ha assegnato numero e data del verbale.</InfoBox>}
       <AdminFieldsGrid group='notifica' draft={props.data || {}} fields={props.fields} canEdit={props.canEdit && definitivo} onChange={props.onChange} />
     </Section>
@@ -1801,22 +2121,48 @@ function ProtocolloNotificaGuidataSection (props: { data: Record<string, any>, f
 
 function PagamentoGuidatoSection (props: { data: Record<string, any>, fields: LayerFieldInfo[], canEdit: boolean, onChange: (name: string, value: any) => void }) {
   const d = props.data || {}
+  const mode = getPaymentMode(d, props.fields)
+  const showPagoPa = mode === 'PAGOPA' || mode === 'MISTO'
+  const showBonifico = mode === 'BONIFICO' || mode === 'MISTO'
+  const showAltro = mode === 'ALTRO'
   return (
-    <Section title='3. Avviso pagoPA e pagamento' right={<span style={{ fontSize: 11, opacity: 0.85 }}>Modalità ordinaria: pagoPA</span>}>
-      <div style={{ display: 'grid', gap: 10 }}>
+    <Section title='3. Pagamento'>
+      <div style={{ display: 'grid', gap: 12 }}>
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(210px, 1fr))', gap: 10 }}>
-          <StatusSummaryItem label='Importo da riportare nel bollettino' value={displayAdminFieldValue(d, props.fields, 'pagamento_importo_totale')} tone='auto' />
-          <StatusSummaryItem label='IUV pagoPA' value={displayAdminFieldValue(d, props.fields, 'pagopa_iuv')} />
-          <StatusSummaryItem label='Codice avviso pagoPA' value={displayAdminFieldValue(d, props.fields, 'pagopa_codice_avviso')} />
+          <StatusSummaryItem label='Importo da pagare' value={displayAdminFieldValue(d, props.fields, 'pagamento_importo_totale')} tone='total' />
           <StatusSummaryItem label='Scadenza pagamento' value={displayAdminFieldValue(d, props.fields, 'pagamento_scadenza')} />
+          <StatusSummaryItem label='Stato pagamento' value={displayAdminFieldValue(d, props.fields, 'pagamento_stato')} />
         </div>
-        <InfoBox>Il flusso ordinario è pagoPA. Il caricamento del PDF del bollettino dovrà compilare automaticamente IUV, codice avviso, importo e scadenza, evitando digitazioni manuali. Per ora l’inserimento manuale resta disponibile solo come correzione controllata.</InfoBox>
-        <details style={{ border: '1px solid #e5e7eb', borderRadius: 10, background: '#f9fafb', padding: 10 }}>
-          <summary style={{ cursor: 'pointer', color: '#0d3b66', fontSize: 12, fontWeight: 900 }}>Inserimento manuale / correzione dati pagoPA</summary>
+
+        <AdminFieldsGrid
+          group='pagamento'
+          draft={d}
+          fields={props.fields}
+          canEdit={props.canEdit}
+          onChange={props.onChange}
+          fieldNames={['pagamento_modalita', 'pagamento_scadenza', 'pagamento_stato', 'pagamento_note']}
+        />
+
+        {!mode && <InfoBox kind='warn'>Selezionare la modalità di pagamento: pagoPA, bonifico bancario, pagamento misto o altro.</InfoBox>}
+
+        {showPagoPa && <details open style={{ border: '1px solid #cfe0f5', borderRadius: 10, background: '#f8fbff', padding: 10 }}>
+          <summary style={{ cursor: 'pointer', color: '#0d3b66', fontSize: 12, fontWeight: 900 }}>Dati pagoPA</summary>
           <div style={{ marginTop: 10 }}>
-            <AdminFieldsGrid group='pagamento' draft={d} fields={props.fields} canEdit={props.canEdit} onChange={props.onChange} fieldNames={['pagamento_scadenza', 'pagamento_stato', 'pagamento_note', 'pagopa_iuv', 'pagopa_codice_avviso']} />
+            <div style={{ marginBottom: 10 }}>
+              <InfoBox>Il caricamento del PDF del bollettino dovrà compilare automaticamente IUV, codice avviso, importo e scadenza. Per ora la compilazione manuale resta disponibile come correzione controllata.</InfoBox>
+            </div>
+            <AdminFieldsGrid group='pagamento' draft={d} fields={props.fields} canEdit={props.canEdit} onChange={props.onChange} fieldNames={['pagopa_iuv', 'pagopa_codice_avviso']} />
           </div>
-        </details>
+        </details>}
+
+        {showBonifico && <details open style={{ border: '1px solid #d7e6d8', borderRadius: 10, background: '#f8fff8', padding: 10 }}>
+          <summary style={{ cursor: 'pointer', color: '#166534', fontSize: 12, fontWeight: 900 }}>Dati bonifico bancario</summary>
+          <div style={{ marginTop: 10 }}>
+            <AdminFieldsGrid group='bonifico' draft={d} fields={props.fields} canEdit={props.canEdit} onChange={props.onChange} />
+          </div>
+        </details>}
+
+        {showAltro && <InfoBox>Modalità “Altro”: indicare i dettagli nel campo note pagamento.</InfoBox>}
       </div>
     </Section>
   )
@@ -1829,7 +2175,7 @@ function ChiusuraIstruttoriaSummary (props: { data: Record<string, any>, fields:
   const ready = issues.length === 0
   const chiusa = hasAdminValue(pickAttrCI(d, ['istruttoria_amm_chiusa_il']))
   return (
-    <Section title='5. Completamento istruttoria amministrativa' right={<span style={{ fontSize: 11, opacity: 0.85 }}>{chiusa ? 'Chiusa' : 'Da completare'}</span>}>
+    <Section title='5. Completamento istruttoria amministrativa'>
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(230px, 1fr))', gap: 10 }}>
         <StatusSummaryItem label='Istruttoria chiusa il' value={displayAdminFieldValue(d, props.fields, 'istruttoria_amm_chiusa_il')} />
         <StatusSummaryItem label='Istruttoria chiusa da' value={displayAdminFieldValue(d, props.fields, 'istruttoria_amm_chiusa_da')} />
@@ -2023,8 +2369,8 @@ function NormToggleBox (props: { title: string, variant: NormToggleVariant, chil
   const [open, setOpen] = React.useState(false)
   const isViolata = props.variant === 'violata'
   const palette = isViolata
-    ? { background: '#eff6ff', border: '#93c5fd', header: '#dbeafe', text: '#0f172a' }
-    : { background: '#f8fafc', border: '#cbd5e1', header: '#e2e8f0', text: '#0f172a' }
+    ? { background: '#eff6ff', border: '#93c5fd', header: '#dbeafe', text: '#0f172a', arrow: '#1d4ed8', body: '#ffffff' }
+    : { background: '#fff7f7', border: '#fecaca', header: '#fee2e2', text: '#7f1d1d', arrow: '#b91c1c', body: '#fffafa' }
 
   return (
     <div style={{ border: `1px solid ${palette.border}`, background: palette.background, borderRadius: 9, overflow: 'hidden' }}>
@@ -2048,11 +2394,11 @@ function NormToggleBox (props: { title: string, variant: NormToggleVariant, chil
         }}
         aria-expanded={open}
       >
-        <span aria-hidden='true' style={{ color: '#1d4ed8', fontSize: 11, fontWeight: 900, lineHeight: 1, width: 14, display: 'inline-flex', justifyContent: 'center' }}>{open ? '▲' : '▼'}</span>
+        <span aria-hidden='true' style={{ color: palette.arrow, fontSize: 11, fontWeight: 900, lineHeight: 1, width: 14, display: 'inline-flex', justifyContent: 'center' }}>{open ? '▲' : '▼'}</span>
         <span>{props.title}</span>
       </button>
       {open && (
-        <div style={{ padding: '8px 10px', borderTop: `1px solid ${palette.border}`, background: '#ffffff' }}>
+        <div style={{ padding: '8px 10px', borderTop: `1px solid ${palette.border}`, background: palette.body }}>
           {props.children}
         </div>
       )}
@@ -2113,7 +2459,7 @@ function BasicViolationsOnly (props: { data: any, layerFields: LayerFieldInfo[],
   const descrizione = firstViolationValue(props.data || {}, props.layerFields || [], ['descrizione_fatti'])
   const circostanze = firstViolationValue(props.data || {}, props.layerFields || [], ['circostanze'])
   return (
-    <Section title='Violazioni contestate' right={<span style={{ fontSize: 11, opacity: 0.85 }}>Sola lettura</span>}>
+    <Section title='Violazioni contestate'>
       {props.message && <InfoBox kind='warn'>{props.message}</InfoBox>}
       {rows.length === 0 ? (
         <InfoBox kind='warn'>Nessuna violazione contestata rilevata nei dati della pratica.</InfoBox>
@@ -2203,17 +2549,50 @@ function SpeseNotificaEditor (props: { data: Record<string, any>, fields: LayerF
   const raw = pickAttrCI(props.data || {}, [fieldName, 'sanzione_spese_notifica'])
   const fieldExists = !!getFieldInfo(props.fields, 'sanzione_spese_notifica')
   const readonly = !props.canEdit || !fieldExists || getFieldInfo(props.fields, 'sanzione_spese_notifica')?.editable === false
+  const [focused, setFocused] = React.useState(false)
+  const [textValue, setTextValue] = React.useState(raw == null || raw === '' ? '' : formatMoney(raw))
+
+  React.useEffect(() => {
+    if (focused) return
+    setTextValue(raw == null || raw === '' ? '' : formatMoney(raw))
+  }, [raw, focused])
+
+  const commitValue = (value: string) => {
+    const n = parseNumberInput(value)
+    if (n == null) {
+      props.onChange(fieldName, null)
+      setTextValue('')
+      return
+    }
+    const rounded = roundMoneyValue(n)
+    props.onChange(fieldName, rounded)
+    setTextValue(formatMoney(rounded))
+  }
+
   return (
-    <div style={{ border: `1px solid ${st.formCardBorderColor || '#c6d7ea'}`, background: st.formCardBg || '#fff', borderRadius: Number(st.formCardBorderRadius ?? 8), padding: '9px 11px', minWidth: 0 }}>
+    <div style={{ border: `1px solid ${st.formCardBorderColor || '#c6d7ea'}`, background: '#ffffff', borderRadius: Number(st.formCardBorderRadius ?? 8), padding: '9px 11px', minWidth: 0 }}>
       <div style={{ color: '#6b7280', fontSize: 11, fontWeight: 800, textTransform: 'uppercase', letterSpacing: 0.25, marginBottom: 4 }}>Spese notifica</div>
       <input
         type='text'
         inputMode='decimal'
-        value={raw == null || raw === '' ? '' : String(raw)}
+        value={textValue}
         disabled={readonly}
-        onChange={e => props.onChange(fieldName, parseNumberInput(e.target.value) ?? null)}
-        onBlur={e => { e.currentTarget.value = formatMoney(e.currentTarget.value) }}
-        style={inputStyleFrom(st, readonly)}
+        onFocus={() => setFocused(true)}
+        onChange={e => {
+          const next = e.target.value.replace(/[^0-9.,]/g, '')
+          setTextValue(next)
+          if (!next.trim()) {
+            props.onChange(fieldName, null)
+            return
+          }
+          const n = parseNumberInput(next)
+          if (n != null) props.onChange(fieldName, roundMoneyValue(n))
+        }}
+        onBlur={() => {
+          setFocused(false)
+          commitValue(textValue)
+        }}
+        style={{ ...inputStyleFrom(st, readonly), background: readonly ? (st.formFieldDisabledBg || '#e7eef7') : '#ffffff' }}
         placeholder='0,00'
       />
       <div style={{ marginTop: 4, color: '#6b7280', fontSize: 11, lineHeight: 1.3 }}>Importo inseribile dal TI_AMM; concorre al totale da pagare.</div>
@@ -2231,7 +2610,7 @@ function ParametriSanzionatoriSection (props: { loadState: SanzioneConsultivaLoa
   const d = props.data || {}
 
   return (
-    <Section title='1. Verifica dati automatici' right={<span style={{ fontSize: 11, opacity: 0.85 }}>Quantificazione</span>}>
+    <Section title='1. Verifica dati automatici'>
       {!urlsReady && (
         <InfoBox kind='warn'>Configurare in Builder gli URL di GII_PARAMETRI_SANZIONI, GII_REGOLAMENTO_ARTICOLI e GII_REGOLAMENTO_RACCORDI.</InfoBox>
       )}
@@ -2251,7 +2630,6 @@ function ParametriSanzionatoriSection (props: { loadState: SanzioneConsultivaLoa
             <SpeseNotificaEditor data={d} fields={props.fields} canEdit={props.canEdit} onChange={props.onChange} />
             <StatusSummaryItem label='Totale da pagare' value={displayAdminFieldValue(d, props.fields, 'pagamento_importo_totale')} tone='total' />
           </div>
-          <InfoBox kind='ok'>Gli importi sono calcolati automaticamente dal sistema. Il TI_AMM deve solo verificarli prima di predisporre il verbale.</InfoBox>
           <details style={{ border: '1px solid #bfdbfe', borderRadius: 10, background: '#f8fafc', padding: 10 }}>
             <summary style={{ cursor: 'pointer', fontWeight: 900, color: '#0d3b66', fontSize: 13 }}>Mostra dettaglio norme e calcolo</summary>
             <div style={{ marginTop: 10 }}>
@@ -2432,7 +2810,7 @@ function ViolationsSection (props: { data: any, layerFields: LayerFieldInfo[] })
   const descrizione = firstViolationValue(props.data || {}, props.layerFields || [], ['descrizione_fatti'])
   const circostanze = firstViolationValue(props.data || {}, props.layerFields || [], ['circostanze'])
   return (
-    <Section title='Violazioni contestate' right={<span style={{ fontSize: 11, opacity: 0.85 }}>Sola lettura</span>}>
+    <Section title='Violazioni contestate'>
       {rows.length === 0 ? (
         <InfoBox kind='warn'>Nessuna violazione contestata rilevata nei dati della pratica.</InfoBox>
       ) : (
@@ -2737,6 +3115,19 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
   const [verbalePreviewError, setVerbalePreviewError] = React.useState<string | null>(null)
   const [verbalePreviewUrl, setVerbalePreviewUrl] = React.useState<string | null>(null)
   const [verbalePreviewFileName, setVerbalePreviewFileName] = React.useState('verbale.pdf')
+  const rootRef = React.useRef<HTMLDivElement | null>(null)
+  const [pageVisible, setPageVisible] = React.useState(false)
+
+  React.useEffect(() => {
+    const check = () => {
+      const el = rootRef.current
+      const visible = !!(el && el.offsetWidth > 0 && el.offsetHeight > 0)
+      setPageVisible(prev => prev === visible ? prev : visible)
+    }
+    const id = window.setInterval(check, 300)
+    check()
+    return () => window.clearInterval(id)
+  }, [])
 
   React.useEffect(() => {
     return () => { revokePdfUrl(verbalePreviewUrl) }
@@ -2780,6 +3171,7 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
   const hasSelection = !!data || (oid != null && Number.isFinite(Number(oid)))
   const roleAllowed = isAllowedAdminRole(profile.role)
   const title = buildPracticeTitle(cfg, data || {}, oid)
+  const titleParts = buildPracticeTitleParts(data || {}, oid)
   const hasDsForSave = !!configuredDs
   const canEdit = roleAllowed && ['TI_AMM', 'RI_AMM', 'ADMIN'].includes(String(profile.role || '').toUpperCase()) && hasDsForSave
   const sanzioniConsultive = useSanzioneConsultivaState(cfg, data || {}, layerFields)
@@ -2982,13 +3374,23 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
     if (!hasAdminValue(pickAttrCI(current, ['notifica_estremi']))) issues.push('Estremi notifica mancanti.')
     const totale = parseNumberInput(pickAttrCI(current, ['pagamento_importo_totale'])) || 0
     if (totale > 0) {
-      if (!hasAdminValue(pickAttrCI(current, ['pagopa_iuv']))) issues.push('IUV pagoPA mancante.')
-      if (!hasAdminValue(pickAttrCI(current, ['pagopa_codice_avviso']))) issues.push('Codice avviso pagoPA mancante.')
+      const mode = getPaymentMode(current, layerFields)
+      if (!mode) issues.push('Modalità di pagamento mancante.')
       if (!hasAdminValue(pickAttrCI(current, ['pagamento_scadenza']))) issues.push('Scadenza pagamento mancante.')
       if (!hasAdminValue(pickAttrCI(current, ['pagamento_stato']))) issues.push('Stato pagamento mancante.')
+      if (mode === 'PAGOPA' || mode === 'MISTO') {
+        if (!hasAdminValue(pickAttrCI(current, ['pagopa_iuv']))) issues.push('IUV pagoPA mancante.')
+        if (!hasAdminValue(pickAttrCI(current, ['pagopa_codice_avviso']))) issues.push('Codice avviso pagoPA mancante.')
+      }
+      if (mode === 'BONIFICO' || mode === 'MISTO') {
+        if (!hasAdminValue(pickAttrCI(current, ['bonifico_iban_snapshot']))) issues.push('IBAN bonifico mancante.')
+        if (!hasAdminValue(pickAttrCI(current, ['bonifico_intestatario_snapshot']))) issues.push('Intestatario conto bonifico mancante.')
+        if (!hasAdminValue(pickAttrCI(current, ['bonifico_causale']))) issues.push('Causale bonifico mancante.')
+      }
+      if (mode === 'ALTRO' && !hasAdminValue(pickAttrCI(current, ['pagamento_note']))) issues.push('Note pagamento mancanti per modalità Altro.')
     }
     return issues
-  }, [])
+  }, [layerFields])
 
   const completionIssues = React.useMemo(() => getCompletionIssues(viewData || {}), [getCompletionIssues, viewData])
 
@@ -3130,6 +3532,20 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
     }
   }
 
+  const handleCloseAdmin = React.useCallback(() => {
+    if (saving || isDirty) return
+    try { delete (window as any).__giiEdit } catch { try { ;(window as any).__giiEdit = null } catch {} }
+    try { sessionStorage.removeItem('GII_EDIT_INTENT') } catch {}
+    const elencoPageId = resolvePageId('Elenco Rapporti') || resolvePageId('elenco-rapporti') || resolvePageId('Elenco')
+    try {
+      if (elencoPageId) {
+        UrlManager.getInstance().changePage(elencoPageId)
+        return
+      }
+    } catch {}
+    try { window.history.back() } catch {}
+  }, [saving, isDirty])
+
   const adminStyle = React.useMemo(() => ({ ...ADMIN_STYLE_DEFAULTS, ...cfg }), [cfg])
 
   const wrapperStyle: React.CSSProperties = {
@@ -3145,7 +3561,9 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
     padding: Number(adminStyle.maskInnerPadding ?? 12),
     overflow: 'hidden',
     color: '#111827',
-    fontFamily: 'inherit'
+    fontFamily: 'inherit',
+    position: 'relative',
+    zIndex: hasSelection ? 1001 : 'auto'
   }
 
   const contentStyle: React.CSSProperties = {
@@ -3155,17 +3573,29 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
     overflowY: 'auto',
     overflowX: 'hidden',
     overscrollBehavior: 'contain',
+    scrollbarGutter: 'stable',
     display: 'flex',
     flexDirection: 'column',
     alignItems: 'stretch',
     gap: Number(adminStyle.formSectionGap ?? 10),
-    paddingTop: 12,
-    paddingRight: 4
+    padding: '12px 2px 2px 2px'
   }
+
+  const editBtnBase: React.CSSProperties = {
+    padding: '7px 16px',
+    borderRadius: 8,
+    border: 'none',
+    fontWeight: 700,
+    fontSize: 13,
+    cursor: saving ? 'not-allowed' : 'pointer'
+  }
+  const saveDisabled = saving || !isDirty || !canEdit
+  const cancelDisabled = saving || !isDirty
+  const closeDisabled = saving || isDirty
 
   return (
     <AdminStyleCtx.Provider value={adminStyle}>
-    <div style={wrapperStyle}>
+    <div ref={rootRef} data-gii-editing-amm-root='1' style={wrapperStyle}>
       {useDs.map((uds: any, idx: number) => {
         const dsKey = String(uds?.dataSourceId || uds?.mainDataSourceId || `ds_${idx}`)
         return <DataSourceSelectionBridge key={dsKey} widgetId={props.id} uds={uds} dsKey={dsKey} onUpdate={onDsUpdate} />
@@ -3175,15 +3605,41 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
         <div style={{ flex: '0 0 auto', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 8, padding: '8px 0', borderBottom: `1px solid ${cfg.dividerColor || '#cbd8e6'}` }}>
           <div style={{ minWidth: 0 }}>
             <div style={{ fontSize: Number(adminStyle.titleFontSize || 18), fontWeight: Number(cfg.titleFontWeight || 700) as any, color: '#111827', lineHeight: 1.25 }}>
-              {cfg.title}{hasSelection && title ? <> <span style={{ color: '#0b5fff' }}>{title}</span></> : null}
+              {hasSelection ? (<>{titleParts.prefix}<span style={{ color: '#2563eb', fontWeight: Number(cfg.titleFontWeight || 700) as any }}>{titleParts.reportCode}</span></>) : 'Verbale amministrativo'}
             </div>
-            <div style={{ fontSize: Number(adminStyle.subtitleFontSize || 13), color: '#6b7280', marginTop: 3 }}>{cfg.subtitle}</div>
           </div>
           <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
-            <span style={{ background: isDirty ? '#fff7ed' : '#f8fafc', color: isDirty ? '#9a3412' : '#475569', border: '1px solid #e5e7eb', borderRadius: 999, padding: '6px 10px', fontSize: 12, fontWeight: 800 }}>{isDirty ? `${Object.keys(pendingAttrs).length} modifiche da salvare` : 'Nessuna modifica da salvare'}</span>
-            <span style={{ background: '#eff6ff', color: '#0d3b66', border: '1px solid #bfdbfe', borderRadius: 999, padding: '6px 10px', fontSize: 12, fontWeight: 800 }}>{profile.role || 'Profilo non rilevato'}</span>
-            <button type='button' disabled={!isDirty || saving} onClick={handleReset} style={secondaryButtonStyle(!isDirty || saving)}>Annulla modifiche</button>
-            <button type='button' disabled={!isDirty || saving || !canEdit} onClick={handleSave} style={primaryButtonStyle(!isDirty || saving || !canEdit)}>{saving ? 'Salvataggio…' : 'Salva dati amministrativi'}</button>
+            <button type='button' disabled={saveDisabled} onClick={handleSave}
+              style={{
+                ...editBtnBase,
+                border: '1px solid rgba(0,0,0,0.18)',
+                background: saveDisabled ? '#e5e7eb' : '#1a7f37',
+                color: saveDisabled ? '#9ca3af' : '#fff',
+                cursor: saveDisabled ? 'not-allowed' : 'pointer'
+              }}>
+              {saving ? 'Salvataggio…' : 'Salva'}
+            </button>
+            <button type='button' disabled={cancelDisabled} onClick={handleReset}
+              style={{
+                ...editBtnBase,
+                border: '1px solid rgba(0,0,0,0.24)',
+                background: cancelDisabled ? '#e5e7eb' : '#d92d20',
+                color: cancelDisabled ? '#9ca3af' : '#fff',
+                cursor: cancelDisabled ? 'not-allowed' : 'pointer'
+              }}>
+              Annulla
+            </button>
+            <button type='button' disabled={closeDisabled} onClick={handleCloseAdmin}
+              title={isDirty ? 'Salvare o annullare le modifiche prima di chiudere.' : undefined}
+              style={{
+                ...editBtnBase,
+                border: '1px solid rgba(0,0,0,0.24)',
+                background: closeDisabled ? '#e5e7eb' : '#f8fbff',
+                color: closeDisabled ? '#9ca3af' : '#111827',
+                cursor: closeDisabled ? 'not-allowed' : 'pointer'
+              }}>
+              Chiudi
+            </button>
           </div>
         </div>
 
@@ -3264,6 +3720,7 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
           </>
         )}
       </div>
+      <DirtyNavigationLockOverlay active={pageVisible && hasSelection} targetRef={rootRef} />
     </div>
     </AdminStyleCtx.Provider>
   )
