@@ -75,43 +75,108 @@ function truthyStatusFlag (value: any): boolean {
   return value === true || value === 1 || s === '1' || s === 'true' || s === 'sì' || s === 'si'
 }
 
+function normStatusText (value: any): string {
+  return String(value ?? '').trim().toLowerCase()
+}
+
+function statusCodeIs (value: any, expected: number): boolean {
+  const s = String(value ?? '').trim()
+  if (!s) return false
+  const n = Number(s)
+  return Number.isFinite(n) && n === expected
+}
+
+function textIncludesAny (value: any, tokens: string[]): boolean {
+  const s = normStatusText(value)
+  return !!s && tokens.some(t => s.includes(t))
+}
+
 function isRapportoRespinto (m: Record<string, string>): boolean {
-  const vals = [
-    m.rapporto_respinto,
-    m.is_respinto,
+  if (truthyStatusFlag(m.rapporto_respinto) || truthyStatusFlag(m.is_respinto)) return true
+
+  const statoVals = [
     m.stato_finale,
-    m.esito_finale,
-    m.ultimo_evento,
-    m.ultimo_evento_codice,
     m.stato_rz,
     m.stato_dt,
-    m.esito_rz,
-    m.esito_dt
+    m.stato_ri,
+    m.stato_ti
   ]
-    .map(v => String(v ?? '').trim().toLowerCase())
-    .filter(Boolean)
 
-  return vals.some(v => truthyStatusFlag(v) || v.includes('respint'))
+  const esitoVals = [
+    m.esito_finale,
+    m.esito_rz,
+    m.esito_dt,
+    m.esito_ri,
+    m.esito_ti
+  ]
+
+  if (statoVals.some(v => statusCodeIs(v, 5))) return true
+  if (esitoVals.some(v => statusCodeIs(v, 3))) return true
+
+  const textVals = [
+    ...statoVals,
+    ...esitoVals,
+    m.ultimo_evento,
+    m.ultimo_evento_codice,
+    m.stato_finale_label,
+    m.esito_finale_label,
+    m.stato_rz_label,
+    m.stato_dt_label,
+    m.esito_rz_label,
+    m.esito_dt_label
+  ]
+
+  return textVals.some(v => textIncludesAny(v, ['respint', 'rigett', 'rifiutat']))
 }
 
 function isRapportoApprovato (m: Record<string, string>): boolean {
-  const vals = [
-    m.rapporto_approvato,
-    m.is_approvato,
+  if (truthyStatusFlag(m.rapporto_approvato) || truthyStatusFlag(m.is_approvato)) return true
+
+  const statoVals = [
     m.stato_finale,
+    m.stato_dt
+  ]
+
+  const esitoVals = [
     m.esito_finale,
-    m.stato_dt,
     m.esito_dt
   ]
-    .map(v => String(v ?? '').trim().toLowerCase())
-    .filter(Boolean)
 
-  return vals.some(v => truthyStatusFlag(v) || v.includes('approvat'))
+  if (statoVals.some(v => statusCodeIs(v, 4))) return true
+  if (esitoVals.some(v => statusCodeIs(v, 2))) return true
+
+  const textVals = [
+    ...statoVals,
+    ...esitoVals,
+    m.stato_finale_label,
+    m.esito_finale_label,
+    m.stato_dt_label,
+    m.esito_dt_label
+  ]
+
+  return textVals.some(v => textIncludesAny(v, ['approvat']))
+}
+
+function hasRapportoIdentity (m: Record<string, string>): boolean {
+  return [
+    m.cod_pratica,
+    m.n_rapporto,
+    m.objectid,
+    m.OBJECTID,
+    m.data_rilevazione,
+    m.tecnico_rilevatore
+  ].some(v => String(v ?? '').trim() !== '')
 }
 
 function isRapportoInIstruttoria (m: Record<string, string>): boolean {
   if (isRapportoRespinto(m) || isRapportoApprovato(m)) return false
-  return truthyStatusFlag(m.rapporto_istruttoria) || truthyStatusFlag(m.is_istruttoria) || String(m.stato_finale ?? '').toLowerCase().includes('istruttoria')
+  if (truthyStatusFlag(m.rapporto_istruttoria) || truthyStatusFlag(m.is_istruttoria)) return true
+  if (textIncludesAny(m.stato_finale, ['istruttoria', 'attesa', 'carico'])) return true
+
+  // Comportamento atteso: ogni rapporto non approvato e non respinto deve
+  // mostrare la filigrana di istruttoria, anche se dal widget non arrivano
+  // flag espliciti sullo stato corrente.
+  return hasRapportoIdentity(m)
 }
 
 function drawStatusWatermark (pg: PDFPage, text: string, font: PDFFont, color: any, opacity: number): void {
@@ -555,9 +620,9 @@ export async function buildRapportoPdf (m: Record<string, string>): Promise<Uint
   }
 
   if (isRapportoRespinto(m)) {
-    for (const page of doc.getPages()) drawStatusWatermark(page, 'RESPINTO', fB, rgb(0.72, 0.16, 0.16), 0.18)
+    for (const page of doc.getPages()) drawStatusWatermark(page, 'RESPINTO', fB, rgb(0.60, 0.10, 0.10), 0.24)
   } else if (isRapportoInIstruttoria(m)) {
-    for (const page of doc.getPages()) drawStatusWatermark(page, 'ISTRUTTORIA IN CORSO', fB, BLUE, 0.14)
+    for (const page of doc.getPages()) drawStatusWatermark(page, 'ISTRUTTORIA IN CORSO', fB, rgb(0.60, 0.60, 0.60), 0.28)
   }
 
   return await doc.save()

@@ -291,13 +291,19 @@ export default function Widget(props: Props) {
   }
 
   const visibleItems = [...items].sort((a, b) => a.order - b.order).filter(isVisible)
+  const isHorizontal = cfg.direction === 'horizontal'
+  const initialPadding = Number.isFinite(Number(cfg.initialPadding)) ? Number(cfg.initialPadding) : 8
 
   return (
     <div ref={containerRef} style={{
       width: '100%', height: '100%',
       display: 'flex',
-      flexDirection: cfg.direction === 'horizontal' ? 'row' : 'column',
-      gap: cfg.gap, padding: 8,
+      flexDirection: isHorizontal ? 'row' : 'column',
+      gap: cfg.gap,
+      paddingTop: isHorizontal ? 8 : initialPadding,
+      paddingRight: 8,
+      paddingBottom: 8,
+      paddingLeft: isHorizontal ? initialPadding : 8,
       boxSizing: 'border-box', overflow: 'auto'
     }}>
       <style>{`

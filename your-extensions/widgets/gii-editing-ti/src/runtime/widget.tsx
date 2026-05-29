@@ -165,6 +165,43 @@ function getGlobalOverlayDocument (): Document | null {
   return (host?.ownerDocument || (typeof document !== 'undefined' ? document : null)) as Document | null
 }
 
+function isExperienceBuilderDesignMode (): boolean {
+  const isBuilderUrl = (raw: any): boolean => {
+    const s = String(raw || '').toLowerCase()
+    return /\/builder(?:[/?#]|$)/.test(s) ||
+      s.includes('/experiencebuilder/builder') ||
+      s.includes('mode=builder') ||
+      s.includes('appmode=builder') ||
+      s.includes('jimu-builder')
+  }
+
+  try {
+    if (typeof window !== 'undefined') {
+      if (isBuilderUrl(window.location?.href)) return true
+      const topWin = (window as any).top
+      if (topWin && topWin !== window && isBuilderUrl(topWin.location?.href)) return true
+    }
+  } catch {}
+
+  try {
+    const st: any = getAppStore?.().getState?.() || {}
+    if (st?.appStateInBuilder) return true
+    if (st?.builderState || st?.widgetsRuntimeInfoInBuilder) return true
+    const appMode = String(st?.appRuntimeInfo?.appMode || st?.appContext?.appMode || st?.appMode || '').toLowerCase()
+    if (appMode.includes('builder') || appMode.includes('design')) return true
+  } catch {}
+
+  try {
+    const doc = (window as any)?.top?.document || document
+    const body = doc?.body
+    const classes = body?.classList ? Array.from(body.classList).join(' ').toLowerCase() : ''
+    if (classes.includes('builder') || classes.includes('jimu-builder')) return true
+    if (doc?.querySelector?.('[data-testid="builder"], .builder-header, .jimu-builder')) return true
+  } catch {}
+
+  return false
+}
+
 
 type GiiLockRect = {
   key: string
@@ -217,7 +254,7 @@ function DirtyNavigationLockOverlay (props: { active: boolean; targetRef: React.
   const [rects, setRects] = React.useState<GiiLockRect[]>([])
 
   const computeRects = React.useCallback(() => {
-    if (!active) { setRects([]); return }
+    if (!active || isExperienceBuilderDesignMode()) { setRects([]); return }
     const host = getGlobalOverlayHost()
     if (!host) { setRects([]); return }
     const doc = host.ownerDocument || document
@@ -260,7 +297,7 @@ function DirtyNavigationLockOverlay (props: { active: boolean; targetRef: React.
   }, [active, targetRef])
 
   React.useEffect(() => {
-    if (!active) { setRects([]); return }
+    if (!active || isExperienceBuilderDesignMode()) { setRects([]); return }
     const host = getGlobalOverlayHost()
     const doc = host?.ownerDocument || document
     const win = doc.defaultView || window
@@ -302,7 +339,7 @@ function DirtyNavigationLockOverlay (props: { active: boolean; targetRef: React.
   }, [active, computeRects, targetRef])
 
 
-  if (!active || rects.length === 0) return null
+  if (!active || isExperienceBuilderDesignMode() || rects.length === 0) return null
 
   const host = getGlobalOverlayHost()
   if (!host) return null

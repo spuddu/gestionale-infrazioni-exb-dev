@@ -290,6 +290,43 @@ function getGlobalOverlayHost (): HTMLElement | null {
   return null
 }
 
+function isExperienceBuilderDesignMode (): boolean {
+  const isBuilderUrl = (raw: any): boolean => {
+    const s = String(raw || '').toLowerCase()
+    return /\/builder(?:[/?#]|$)/.test(s) ||
+      s.includes('/experiencebuilder/builder') ||
+      s.includes('mode=builder') ||
+      s.includes('appmode=builder') ||
+      s.includes('jimu-builder')
+  }
+
+  try {
+    if (typeof window !== 'undefined') {
+      if (isBuilderUrl(window.location?.href)) return true
+      const topWin = (window as any).top
+      if (topWin && topWin !== window && isBuilderUrl(topWin.location?.href)) return true
+    }
+  } catch {}
+
+  try {
+    const st: any = getAppStore?.().getState?.() || {}
+    if (st?.appStateInBuilder) return true
+    if (st?.builderState || st?.widgetsRuntimeInfoInBuilder) return true
+    const appMode = String(st?.appRuntimeInfo?.appMode || st?.appContext?.appMode || st?.appMode || '').toLowerCase()
+    if (appMode.includes('builder') || appMode.includes('design')) return true
+  } catch {}
+
+  try {
+    const doc = (window as any)?.top?.document || document
+    const body = doc?.body
+    const classes = body?.classList ? Array.from(body.classList).join(' ').toLowerCase() : ''
+    if (classes.includes('builder') || classes.includes('jimu-builder')) return true
+    if (doc?.querySelector?.('[data-testid="builder"], .builder-header, .jimu-builder')) return true
+  } catch {}
+
+  return false
+}
+
 type GiiLockRect = {
   key: string
   left: number
@@ -341,7 +378,7 @@ function DirtyNavigationLockOverlay (props: { active: boolean; targetRef: React.
   const [rects, setRects] = React.useState<GiiLockRect[]>([])
 
   const computeRects = React.useCallback(() => {
-    if (!active) { setRects([]); return }
+    if (!active || isExperienceBuilderDesignMode()) { setRects([]); return }
     const host = getGlobalOverlayHost()
     if (!host) { setRects([]); return }
     const doc = host.ownerDocument || document
@@ -377,7 +414,7 @@ function DirtyNavigationLockOverlay (props: { active: boolean; targetRef: React.
   }, [active, targetRef])
 
   React.useEffect(() => {
-    if (!active) { setRects([]); return }
+    if (!active || isExperienceBuilderDesignMode()) { setRects([]); return }
     const host = getGlobalOverlayHost()
     const doc = host?.ownerDocument || document
     const win = doc.defaultView || window
@@ -418,7 +455,7 @@ function DirtyNavigationLockOverlay (props: { active: boolean; targetRef: React.
     }
   }, [active, computeRects, targetRef])
 
-  if (!active || rects.length === 0) return null
+  if (!active || isExperienceBuilderDesignMode() || rects.length === 0) return null
 
   const host = getGlobalOverlayHost()
   if (!host) return null
@@ -919,14 +956,39 @@ async function queryCurrentLayerAttrsByOid (layer: any, oidFieldName: string, oi
   return res?.features?.[0]?.attributes || {}
 }
 
-async function resolveLayerForEdit (ds: any): Promise<any | null> {
-  if (!ds) return null
+function normalizeEditLayerUrl (raw: any): string {
+  let url = normalizeFeatureLayerUrl(raw)
+  if (!url) return ''
+  if (/(\/FeatureServer|\/MapServer)$/i.test(url)) url = `${url}/0`
+  return url
+}
+
+const EDIT_LAYER_CACHE: Record<string, any> = {}
+
+async function resolveLayerForEdit (ds: any, fallbackUrl?: string): Promise<any | null> {
+  if (!ds && !fallbackUrl) return null
+
   try {
-    const raw = (ds as any)?.getLayer?.() || (ds as any)?.getJSAPILayer?.() || (ds as any)?.getJsApiLayer?.() || (ds as any)?.layer || null
+    const raw = ds ? ((ds as any)?.getLayer?.() || (ds as any)?.getJSAPILayer?.() || (ds as any)?.getJsApiLayer?.() || (ds as any)?.layer || null) : null
     const resolved = await Promise.resolve(raw)
     const layer = (resolved && (resolved.layer || resolved)) || null
     if (layer && typeof layer.applyEdits === 'function') return layer
   } catch { }
+
+  const url = normalizeEditLayerUrl(fallbackUrl || getDataSourceUrl(ds))
+  if (!url) return null
+
+  try {
+    if (EDIT_LAYER_CACHE[url]?.applyEdits) return EDIT_LAYER_CACHE[url]
+    const FeatureLayer = await loadEsriModule<any>('esri/layers/FeatureLayer')
+    const fl = new FeatureLayer({ url, outFields: ['*'] })
+    try { if (typeof fl.load === 'function') await fl.load() } catch { }
+    if (fl && typeof fl.applyEdits === 'function') {
+      EDIT_LAYER_CACHE[url] = fl
+      return fl
+    }
+  } catch { }
+
   return null
 }
 
@@ -1005,6 +1067,69 @@ const ADMIN_STYLE_DEFAULTS: Record<string, any> = {
   formFieldDisabledColor: '#64748b',
   formSectionGap: 10,
   formCardBg: '#f8fbff',
+  formExpandableCardBg: '#f9fafb',
+  formExpandableCardBorderColor: '#e5e7eb',
+  formExpandableCardBorderWidth: 1,
+  formPhaseCardBg: '#f8fbff',
+  formPhaseCardBorderColor: '#d7e3f2',
+  formPhaseCardBorderWidth: 1,
+  formPhaseCardTitleColor: '#0d3b66',
+  formWorkflowBadgeBg: '#ffffff',
+  formWorkflowBadgeBorderColor: '#d8e6f7',
+  formWorkflowBadgeBorderWidth: 1,
+  formWorkflowBadgeTitleColor: '#0d3b66',
+  formWorkflowBadgeLabelColor: '#6b7280',
+  formWorkflowBadgeValueColor: '#111827',
+  formWorkflowBadgeHighlightColor: '#2563eb',
+  statusSummaryNormalBg: '#f8fbff',
+  statusSummaryNormalBorderColor: '#c5d9f1',
+  statusSummaryAutoBg: '#f5f9ff',
+  statusSummaryAutoBorderColor: '#bfdbfe',
+  statusSummaryWarnBg: '#fff7ed',
+  statusSummaryWarnBorderColor: '#fed7aa',
+  statusSummaryTotalBg: 'linear-gradient(90deg, #0d3b66, #155e9d)',
+  statusSummaryTotalBorderColor: '#0d3b66',
+  statusSummaryBorderWidth: 1,
+  statusSummaryLabelColor: '#6b7280',
+  statusSummaryValueColor: '#111827',
+  statusSummaryHintColor: '#6b7280',
+  statusSummaryTotalLabelColor: 'rgba(255,255,255,0.86)',
+  statusSummaryTotalValueColor: '#ffffff',
+  statusSummaryTotalHintColor: 'rgba(255,255,255,0.78)',
+  verbaleInfoCardBg: '#eff6ff',
+  verbaleInfoCardBorderColor: '#dbeafe',
+  verbaleInfoCardBorderWidth: 1,
+  verbaleInfoLabelColor: '#64748b',
+  verbaleInfoTipoTextColor: '#111827',
+  verbaleInfoOggettoTextColor: '#374151',
+  normGroupBg: '#ffffff',
+  normGroupBorderColor: '#93c5fd',
+  normGroupBorderWidth: 1,
+  normBlockSeparatorColor: '#cbd5e1',
+  normVoceSeparatorColor: '#eef2f7',
+  normVoceLabelColor: '#111827',
+  normParametroOkColor: '#166534',
+  normParametroMissingColor: '#991b1b',
+  normViolataCardBg: '#eff6ff',
+  normViolataBorderColor: '#93c5fd',
+  normViolataBorderWidth: 1,
+  normViolataHeaderBg: '#dbeafe',
+  normViolataHeaderTextColor: '#0f172a',
+  normViolataArrowColor: '#1d4ed8',
+  normViolataBodyBg: '#ffffff',
+  normViolataArticleTitleColor: '#111827',
+  normViolataArticleTextColor: '#374151',
+  normViolataArticleMetaColor: '#6b7280',
+  normSanzionatoriaCardBg: '#fff7f7',
+  normSanzionatoriaBorderColor: '#fecaca',
+  normSanzionatoriaBorderWidth: 1,
+  normSanzionatoriaHeaderBg: '#fee2e2',
+  normSanzionatoriaHeaderTextColor: '#7f1d1d',
+  normSanzionatoriaArrowColor: '#b91c1c',
+  normSanzionatoriaBodyBg: '#fffafa',
+  normSanzionatoriaArticleTitleColor: '#111827',
+  normSanzionatoriaArticleTextColor: '#374151',
+  normSanzionatoriaArticleMetaColor: '#6b7280',
   formCardBorderColor: '#c6d7ea',
   formCardBorderWidth: 1,
   formCardBorderRadius: 8,
@@ -1897,15 +2022,28 @@ function StatusSummaryItem (props: { label: string, value: React.ReactNode, hint
   const st = useAdminStyle()
   const tone = props.tone || 'normal'
   const total = tone === 'total'
-  const borderColor = total ? '#0d3b66' : tone === 'warn' ? '#fed7aa' : tone === 'auto' ? '#bfdbfe' : '#c5d9f1'
-  const bg = total ? (st.formCardHeaderBg || 'linear-gradient(90deg, #0d3b66, #155e9d)') : tone === 'warn' ? '#fff7ed' : tone === 'auto' ? '#f5f9ff' : '#f8fbff'
-  const labelColor = total ? 'rgba(255,255,255,0.86)' : '#6b7280'
-  const valueColor = total ? (st.formCardHeaderColor || '#fff') : '#111827'
+  const borderColor = total
+    ? (st.statusSummaryTotalBorderColor || '#0d3b66')
+    : tone === 'warn'
+      ? (st.statusSummaryWarnBorderColor || '#fed7aa')
+      : tone === 'auto'
+        ? (st.statusSummaryAutoBorderColor || '#bfdbfe')
+        : (st.statusSummaryNormalBorderColor || '#c5d9f1')
+  const bg = total
+    ? (st.statusSummaryTotalBg || st.formCardHeaderBg || 'linear-gradient(90deg, #0d3b66, #155e9d)')
+    : tone === 'warn'
+      ? (st.statusSummaryWarnBg || '#fff7ed')
+      : tone === 'auto'
+        ? (st.statusSummaryAutoBg || '#f5f9ff')
+        : (st.statusSummaryNormalBg || '#f8fbff')
+  const labelColor = total ? (st.statusSummaryTotalLabelColor || 'rgba(255,255,255,0.86)') : (st.statusSummaryLabelColor || '#6b7280')
+  const valueColor = total ? (st.statusSummaryTotalValueColor || st.formCardHeaderColor || '#fff') : (st.statusSummaryValueColor || '#111827')
+  const hintColor = total ? (st.statusSummaryTotalHintColor || 'rgba(255,255,255,0.78)') : (st.statusSummaryHintColor || '#6b7280')
   return (
-    <div style={{ border: `1px solid ${borderColor}`, background: bg, borderRadius: Number(st.formCardBorderRadius ?? 8), padding: '9px 11px', minWidth: 0 }}>
+    <div style={{ border: `${Number(st.statusSummaryBorderWidth ?? 1)}px solid ${borderColor}`, background: bg, borderRadius: Number(st.formCardBorderRadius ?? 8), padding: '9px 11px', minWidth: 0 }}>
       <div style={{ color: labelColor, fontSize: 11, fontWeight: 800, textTransform: 'uppercase', letterSpacing: 0.25, marginBottom: 4 }}>{props.label}</div>
       <div style={{ color: valueColor, fontSize: total ? Number(st.amountFontSize ?? 16) : Number(st.valueFontSize ?? 13), fontWeight: 800, overflowWrap: 'anywhere', whiteSpace: 'pre-wrap' }}>{props.value || '—'}</div>
-      {props.hint && <div style={{ marginTop: 4, color: total ? 'rgba(255,255,255,0.78)' : '#6b7280', fontSize: 11, lineHeight: 1.3 }}>{props.hint}</div>}
+      {props.hint && <div style={{ marginTop: 4, color: hintColor, fontSize: 11, lineHeight: 1.3 }}>{props.hint}</div>}
     </div>
   )
 }
@@ -1940,17 +2078,18 @@ function VerbaleSummary (props: { data: Record<string, any>, fields: LayerFieldI
   const noteExists = !!noteField
   const noteReadonly = !props.canEdit || !noteExists || noteField?.editable === false
   const noteMissing = !hasAdminValue(noteRaw)
+  const st = useAdminStyle()
   return (
     <Section title='2. Predisposizione verbale'>
       <div style={{ display: 'grid', gap: 10, marginBottom: 12 }}>
-        <div style={{ border: '1px solid #dbeafe', background: '#eff6ff', borderRadius: 11, padding: 11, display: 'grid', gap: 9 }}>
+        <div style={{ border: `${Number(st.verbaleInfoCardBorderWidth ?? 1)}px solid ${st.verbaleInfoCardBorderColor || '#dbeafe'}`, background: st.verbaleInfoCardBg || '#eff6ff', borderRadius: 11, padding: 11, display: 'grid', gap: 9 }}>
           <div style={{ display: 'grid', gap: 3 }}>
-            <div style={{ color: '#64748b', fontSize: 11, fontWeight: 900, textTransform: 'uppercase', letterSpacing: 0.25 }}>Tipo atto</div>
-            <div style={{ color: '#111827', fontSize: 13, fontWeight: 850 }}>{tipoAtto}</div>
+            <div style={{ color: st.verbaleInfoLabelColor || '#64748b', fontSize: 11, fontWeight: 900, textTransform: 'uppercase', letterSpacing: 0.25 }}>Tipo atto</div>
+            <div style={{ color: st.verbaleInfoTipoTextColor || '#111827', fontSize: 13, fontWeight: 850 }}>{tipoAtto}</div>
           </div>
           <div style={{ display: 'grid', gap: 3 }}>
-            <div style={{ color: '#64748b', fontSize: 11, fontWeight: 900, textTransform: 'uppercase', letterSpacing: 0.25 }}>Oggetto</div>
-            <div style={{ color: '#374151', fontSize: 12, fontWeight: 700, lineHeight: 1.35 }}>{oggettoAtto}</div>
+            <div style={{ color: st.verbaleInfoLabelColor || '#64748b', fontSize: 11, fontWeight: 900, textTransform: 'uppercase', letterSpacing: 0.25 }}>Oggetto</div>
+            <div style={{ color: st.verbaleInfoOggettoTextColor || '#374151', fontSize: 12, fontWeight: 700, lineHeight: 1.35 }}>{oggettoAtto}</div>
           </div>
         </div>
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(210px, 1fr))', gap: 10 }}>
@@ -2001,13 +2140,19 @@ function QuantificazioneAutomaticaSummary (props: { data: Record<string, any>, f
 function PracticeDetailBadge (props: { title: string, rows: Array<{ label: string, value: React.ReactNode, highlight?: boolean }> }) {
   const st = useAdminStyle()
   return (
-    <div style={{ background: '#ffffff', border: '1px solid #d8e6f7', borderRadius: Number(st.formCardBorderRadius ?? 8), padding: '10px 12px', minWidth: 0 }}>
-      <div style={{ color: '#0d3b66', fontSize: 12.5, fontWeight: 900, marginBottom: 6, overflowWrap: 'anywhere' }}>{props.title}</div>
+    <div style={{
+      background: st.formWorkflowBadgeBg || '#ffffff',
+      border: `${Number(st.formWorkflowBadgeBorderWidth ?? 1)}px solid ${st.formWorkflowBadgeBorderColor || '#d8e6f7'}`,
+      borderRadius: Number(st.formCardBorderRadius ?? 8),
+      padding: '10px 12px',
+      minWidth: 0
+    }}>
+      <div style={{ color: st.formWorkflowBadgeTitleColor || '#0d3b66', fontSize: 12.5, fontWeight: 900, marginBottom: 6, overflowWrap: 'anywhere' }}>{props.title}</div>
       <div style={{ display: 'grid', gap: 4 }}>
         {props.rows.map((row, idx) => (
           <div key={`${row.label}-${idx}`} style={{ display: 'grid', gridTemplateColumns: 'auto 1fr', columnGap: 6, alignItems: 'baseline', minWidth: 0 }}>
-            <span style={{ color: '#6b7280', fontSize: 12, fontWeight: 750, whiteSpace: 'nowrap' }}>{row.label}:</span>
-            <span style={{ color: row.highlight ? '#2563eb' : '#111827', fontSize: 13, fontWeight: row.highlight ? 850 : 650, overflowWrap: 'anywhere' }}>{row.value || '—'}</span>
+            <span style={{ color: st.formWorkflowBadgeLabelColor || '#6b7280', fontSize: 12, fontWeight: 750, whiteSpace: 'nowrap' }}>{row.label}:</span>
+            <span style={{ color: row.highlight ? (st.formWorkflowBadgeHighlightColor || '#2563eb') : (st.formWorkflowBadgeValueColor || '#111827'), fontSize: 13, fontWeight: row.highlight ? 850 : 650, overflowWrap: 'anywhere' }}>{row.value || '—'}</span>
           </div>
         ))}
       </div>
@@ -2018,8 +2163,14 @@ function PracticeDetailBadge (props: { title: string, rows: Array<{ label: strin
 function PracticePhaseGroup (props: { title: string, items: Array<{ title: string, rows: Array<{ label: string, value: React.ReactNode, highlight?: boolean }> }> }) {
   const st = useAdminStyle()
   return (
-    <div style={{ border: '1px solid #d7e3f2', borderRadius: Number(st.formCardBorderRadius ?? 8), background: '#f8fbff', padding: 10, minWidth: 0 }}>
-      <div style={{ color: '#0d3b66', fontSize: 13, fontWeight: 950, marginBottom: 8 }}>{props.title}</div>
+    <div style={{
+      border: `${Number(st.formPhaseCardBorderWidth ?? 1)}px solid ${st.formPhaseCardBorderColor || '#d7e3f2'}`,
+      borderRadius: Number(st.formCardBorderRadius ?? 8),
+      background: st.formPhaseCardBg || '#f8fbff',
+      padding: 10,
+      minWidth: 0
+    }}>
+      <div style={{ color: st.formPhaseCardTitleColor || '#0d3b66', fontSize: 13, fontWeight: 950, marginBottom: 8 }}>{props.title}</div>
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(245px, 1fr))', gap: 10 }}>
         {props.items.map(item => <PracticeDetailBadge key={item.title} title={item.title} rows={item.rows} />)}
       </div>
@@ -2042,6 +2193,7 @@ function esitoTecnicoValue (data: Record<string, any>, fields: LayerFieldInfo[])
 }
 
 function CompactPracticeHeader (props: { title: string, data: Record<string, any>, fields: LayerFieldInfo[], profile: { role: string, label: string, fullName: string, username: string }, hasDsForSave: boolean, summaryFields: any[], labelSize: number, valueSize: number }) {
+  const st = useAdminStyle()
   const d = props.data || {}
   const oid = pickOidFromData(d, 'OBJECTID')
   const rapporto = getReportCode(d, oid != null ? Number(oid) : null)
@@ -2098,7 +2250,7 @@ function CompactPracticeHeader (props: { title: string, data: Record<string, any
   ]
   return (
     <Section title='Istruttoria amministrativa'>
-      <details style={{ border: '1px solid #e5e7eb', borderRadius: 10, background: '#f9fafb', padding: 10 }}>
+      <details style={{ border: `${Number(st.formExpandableCardBorderWidth ?? 1)}px solid ${st.formExpandableCardBorderColor || '#e5e7eb'}`, borderRadius: 10, background: st.formExpandableCardBg || '#f9fafb', padding: 10 }}>
         <summary style={{ cursor: 'pointer', color: '#0d3b66', fontSize: 12, fontWeight: 900 }}>Dettagli pratica e workflow</summary>
         <div style={{ display: 'grid', gap: 12, marginTop: 10 }}>
           <PracticePhaseGroup title='Fase tecnica' items={faseTecnicaDetails} />
@@ -2114,12 +2266,15 @@ function ProtocolloNotificaGuidataSection (props: { data: Record<string, any>, f
   return (
     <Section title='4. Protocollo e notifica'>
       {!definitivo && <InfoBox kind='warn'>Protocollo e notifica vanno compilati solo dopo che il Direttore d'Area ha approvato l’istruttoria e il sistema ha assegnato numero e data del verbale.</InfoBox>}
-      <AdminFieldsGrid group='notifica' draft={props.data || {}} fields={props.fields} canEdit={props.canEdit && definitivo} onChange={props.onChange} />
+      <div style={{ marginTop: definitivo ? 0 : 14 }}>
+        <AdminFieldsGrid group='notifica' draft={props.data || {}} fields={props.fields} canEdit={props.canEdit && definitivo} onChange={props.onChange} />
+      </div>
     </Section>
   )
 }
 
 function PagamentoGuidatoSection (props: { data: Record<string, any>, fields: LayerFieldInfo[], canEdit: boolean, onChange: (name: string, value: any) => void }) {
+  const st = useAdminStyle()
   const d = props.data || {}
   const mode = getPaymentMode(d, props.fields)
   const showPagoPa = mode === 'PAGOPA' || mode === 'MISTO'
@@ -2145,7 +2300,7 @@ function PagamentoGuidatoSection (props: { data: Record<string, any>, fields: La
 
         {!mode && <InfoBox kind='warn'>Selezionare la modalità di pagamento: pagoPA, bonifico bancario, pagamento misto o altro.</InfoBox>}
 
-        {showPagoPa && <details open style={{ border: '1px solid #cfe0f5', borderRadius: 10, background: '#f8fbff', padding: 10 }}>
+        {showPagoPa && <details open style={{ border: `${Number(st.formExpandableCardBorderWidth ?? 1)}px solid ${st.formExpandableCardBorderColor || '#e5e7eb'}`, borderRadius: 10, background: st.formExpandableCardBg || '#f9fafb', padding: 10 }}>
           <summary style={{ cursor: 'pointer', color: '#0d3b66', fontSize: 12, fontWeight: 900 }}>Dati pagoPA</summary>
           <div style={{ marginTop: 10 }}>
             <div style={{ marginBottom: 10 }}>
@@ -2155,7 +2310,7 @@ function PagamentoGuidatoSection (props: { data: Record<string, any>, fields: La
           </div>
         </details>}
 
-        {showBonifico && <details open style={{ border: '1px solid #d7e6d8', borderRadius: 10, background: '#f8fff8', padding: 10 }}>
+        {showBonifico && <details open style={{ border: `${Number(st.formExpandableCardBorderWidth ?? 1)}px solid ${st.formExpandableCardBorderColor || '#e5e7eb'}`, borderRadius: 10, background: st.formExpandableCardBg || '#f9fafb', padding: 10 }}>
           <summary style={{ cursor: 'pointer', color: '#166534', fontSize: 12, fontWeight: 900 }}>Dati bonifico bancario</summary>
           <div style={{ marginTop: 10 }}>
             <AdminFieldsGrid group='bonifico' draft={d} fields={props.fields} canEdit={props.canEdit} onChange={props.onChange} />
@@ -2330,16 +2485,27 @@ function violationNormSummary (group: SanzioneConsultivaGroup): string {
   return descr ? `Norma violata: ${article} — ${descr}` : `Norma violata: ${article}`
 }
 
-function articleDetailsByRole (role: string, articles: RegolamentoArticolo[]) {
+function normArticleColors (st: Record<string, any>, variant: 'violata' | 'sanzionatoria') {
+  const isViolata = variant === 'violata'
+  return {
+    title: isViolata ? (st.normViolataArticleTitleColor || '#111827') : (st.normSanzionatoriaArticleTitleColor || '#111827'),
+    text: isViolata ? (st.normViolataArticleTextColor || '#374151') : (st.normSanzionatoriaArticleTextColor || '#374151'),
+    meta: isViolata ? (st.normViolataArticleMetaColor || '#6b7280') : (st.normSanzionatoriaArticleMetaColor || '#6b7280')
+  }
+}
+
+function articleDetailsByRole (role: string, articles: RegolamentoArticolo[], variant: 'violata' | 'sanzionatoria' = 'violata') {
+  const st = useAdminStyle()
+  const c = normArticleColors(st, variant)
   const list = Array.isArray(articles) ? articles.filter(Boolean) : []
-  if (!list.length) return <div style={{ color: '#6b7280', fontSize: 12 }}>Testo regolamentare non disponibile nelle tabelle configurate.</div>
+  if (!list.length) return <div style={{ color: c.meta, fontSize: 12 }}>Testo regolamentare non disponibile nelle tabelle configurate.</div>
   return (
     <div style={{ display: 'grid', gap: 10, marginTop: 8 }}>
       {list.map(article => (
         <div key={`${role}-${article.codice_articolo}`} style={{ display: 'grid', gap: 4 }}>
-          <div style={{ color: '#111827', fontSize: 12, fontWeight: 850 }}>{articleTitleLine(article)}</div>
-          {article.testo_articolo && <div style={{ color: '#374151', fontSize: 12, lineHeight: 1.45, whiteSpace: 'pre-wrap' }}>{article.testo_articolo}</div>}
-          {(article.atto_regolamento || article.anno_riferimento) && <div style={{ color: '#6b7280', fontSize: 11 }}>{[article.atto_regolamento, article.anno_riferimento ? `Anno ${article.anno_riferimento}` : ''].filter(Boolean).join(' · ')}</div>}
+          <div style={{ color: c.title, fontSize: 12, fontWeight: 850 }}>{articleTitleLine(article)}</div>
+          {article.testo_articolo && <div style={{ color: c.text, fontSize: 12, lineHeight: 1.45, whiteSpace: 'pre-wrap' }}>{article.testo_articolo}</div>}
+          {(article.atto_regolamento || article.anno_riferimento) && <div style={{ color: c.meta, fontSize: 11 }}>{[article.atto_regolamento, article.anno_riferimento ? `Anno ${article.anno_riferimento}` : ''].filter(Boolean).join(' · ')}</div>}
         </div>
       ))}
     </div>
@@ -2366,14 +2532,31 @@ function groupVociBySanzioneArticle (group: SanzioneConsultivaGroup, voci: Sanzi
 type NormToggleVariant = 'violata' | 'sanzionatoria'
 
 function NormToggleBox (props: { title: string, variant: NormToggleVariant, children: any }) {
+  const st = useAdminStyle()
   const [open, setOpen] = React.useState(false)
   const isViolata = props.variant === 'violata'
   const palette = isViolata
-    ? { background: '#eff6ff', border: '#93c5fd', header: '#dbeafe', text: '#0f172a', arrow: '#1d4ed8', body: '#ffffff' }
-    : { background: '#fff7f7', border: '#fecaca', header: '#fee2e2', text: '#7f1d1d', arrow: '#b91c1c', body: '#fffafa' }
+    ? {
+        background: st.normViolataCardBg || '#eff6ff',
+        border: st.normViolataBorderColor || '#93c5fd',
+        borderWidth: Number(st.normViolataBorderWidth ?? 1),
+        header: st.normViolataHeaderBg || '#dbeafe',
+        text: st.normViolataHeaderTextColor || '#0f172a',
+        arrow: st.normViolataArrowColor || '#1d4ed8',
+        body: st.normViolataBodyBg || '#ffffff'
+      }
+    : {
+        background: st.normSanzionatoriaCardBg || '#fff7f7',
+        border: st.normSanzionatoriaBorderColor || '#fecaca',
+        borderWidth: Number(st.normSanzionatoriaBorderWidth ?? 1),
+        header: st.normSanzionatoriaHeaderBg || '#fee2e2',
+        text: st.normSanzionatoriaHeaderTextColor || '#7f1d1d',
+        arrow: st.normSanzionatoriaArrowColor || '#b91c1c',
+        body: st.normSanzionatoriaBodyBg || '#fffafa'
+      }
 
   return (
-    <div style={{ border: `1px solid ${palette.border}`, background: palette.background, borderRadius: 9, overflow: 'hidden' }}>
+    <div style={{ border: `${palette.borderWidth}px solid ${palette.border}`, background: palette.background, borderRadius: 9, overflow: 'hidden' }}>
       <button
         type='button'
         onClick={() => setOpen(!open)}
@@ -2407,11 +2590,12 @@ function NormToggleBox (props: { title: string, variant: NormToggleVariant, chil
 }
 
 function ParametriSanzionatoriTable (props: { groups: SanzioneConsultivaGroup[] }) {
+  const st = useAdminStyle()
   const groups = Array.isArray(props.groups) ? props.groups : []
   if (!groups.length) return null
 
   const valueStyle = (voce: SanzioneConsultivaVoce): any => ({
-    color: !voce.parametro ? '#991b1b' : '#166534',
+    color: !voce.parametro ? (st.normParametroMissingColor || '#991b1b') : (st.normParametroOkColor || '#166534'),
     fontWeight: 850,
     whiteSpace: 'nowrap'
   })
@@ -2424,22 +2608,22 @@ function ParametriSanzionatoriTable (props: { groups: SanzioneConsultivaGroup[] 
           : [{ codiceParametro: `${group.codiceCasistica}-empty`, descrizione: 'Voce applicabile', articoloSanzione: group.articoloSanzione, articoliSanzione: group.articoliSanzione, parametro: null }]
         const sanzioneBlocks = groupVociBySanzioneArticle(group, voci)
         return (
-          <div key={group.codiceCasistica} style={{ border: '1px solid #93c5fd', background: '#fff', borderRadius: 10, padding: 10, display: 'grid', gap: 8 }}>
+          <div key={group.codiceCasistica} style={{ border: `${Number(st.normGroupBorderWidth ?? 1)}px solid ${st.normGroupBorderColor || '#93c5fd'}`, background: st.normGroupBg || '#ffffff', borderRadius: 10, padding: 10, display: 'grid', gap: 8 }}>
             <NormToggleBox variant='violata' title={violationNormSummary(group)}>
-              {articleDetailsByRole('Norma violata', group.articoliViolati)}
+              {articleDetailsByRole('Norma violata', group.articoliViolati, 'violata')}
             </NormToggleBox>
 
             <div style={{ display: 'grid', gap: 8, padding: '2px 0 0 0' }}>
               {sanzioneBlocks.map(block => (
-                <div key={block.key} style={{ display: 'grid', gap: 6, borderTop: '1px solid #cbd5e1', paddingTop: 8 }}>
+                <div key={block.key} style={{ display: 'grid', gap: 6, borderTop: `1px solid ${st.normBlockSeparatorColor || '#cbd5e1'}`, paddingTop: 8 }}>
                   <NormToggleBox variant='sanzionatoria' title={`Norma sanzionatoria: ${articleListTitle(block.articles, block.fallback)}`}>
-                    {articleDetailsByRole('Norma sanzionatoria', block.articles)}
+                    {articleDetailsByRole('Norma sanzionatoria', block.articles, 'sanzionatoria')}
                   </NormToggleBox>
 
                   <div style={{ display: 'grid', gap: 0, padding: '0 10px 2px 10px' }}>
                     {block.voci.map((voce, idx) => (
-                      <div key={`${group.codiceCasistica}-${voce.codiceParametro || idx}-${voce.articoloSanzione || idx}`} style={{ display: 'flex', justifyContent: 'space-between', gap: 16, alignItems: 'baseline', borderTop: idx === 0 ? '0' : '1px solid #eef2f7', padding: idx === 0 ? '4px 0' : '7px 0 4px 0' }}>
-                        <div style={{ color: '#111827', fontSize: 12, fontWeight: 800 }}>{voce.descrizione || 'Voce applicabile'}:</div>
+                      <div key={`${group.codiceCasistica}-${voce.codiceParametro || idx}-${voce.articoloSanzione || idx}`} style={{ display: 'flex', justifyContent: 'space-between', gap: 16, alignItems: 'baseline', borderTop: idx === 0 ? '0' : `1px solid ${st.normVoceSeparatorColor || '#eef2f7'}`, padding: idx === 0 ? '4px 0' : '7px 0 4px 0' }}>
+                        <div style={{ color: st.normVoceLabelColor || '#111827', fontSize: 12, fontWeight: 800 }}>{voce.descrizione || 'Voce applicabile'}:</div>
                         <div style={{ fontSize: 12, textAlign: 'right', ...valueStyle(voce) }}>{formatVoceValue(voce)}</div>
                       </div>
                     ))}
@@ -2592,6 +2776,13 @@ function SpeseNotificaEditor (props: { data: Record<string, any>, fields: LayerF
           setFocused(false)
           commitValue(textValue)
         }}
+        onKeyDown={e => {
+          if (e.key !== 'Enter') return
+          e.preventDefault()
+          setFocused(false)
+          commitValue(e.currentTarget.value)
+          e.currentTarget.blur()
+        }}
         style={{ ...inputStyleFrom(st, readonly), background: readonly ? (st.formFieldDisabledBg || '#e7eef7') : '#ffffff' }}
         placeholder='0,00'
       />
@@ -2601,6 +2792,7 @@ function SpeseNotificaEditor (props: { data: Record<string, any>, fields: LayerF
 }
 
 function ParametriSanzionatoriSection (props: { loadState: SanzioneConsultivaLoadState, data: Record<string, any>, fields: LayerFieldInfo[], canEdit: boolean, onChange: (name: string, value: any) => void }) {
+  const st = useAdminStyle()
   const { loadState } = props
   const urlsReady = loadState.urlsReady
   const casistiche = loadState.casistiche || []
@@ -2630,7 +2822,7 @@ function ParametriSanzionatoriSection (props: { loadState: SanzioneConsultivaLoa
             <SpeseNotificaEditor data={d} fields={props.fields} canEdit={props.canEdit} onChange={props.onChange} />
             <StatusSummaryItem label='Totale da pagare' value={displayAdminFieldValue(d, props.fields, 'pagamento_importo_totale')} tone='total' />
           </div>
-          <details style={{ border: '1px solid #bfdbfe', borderRadius: 10, background: '#f8fafc', padding: 10 }}>
+          <details style={{ border: `${Number(st.formExpandableCardBorderWidth ?? 1)}px solid ${st.formExpandableCardBorderColor || '#e5e7eb'}`, borderRadius: 10, background: st.formExpandableCardBg || '#f9fafb', padding: 10 }}>
             <summary style={{ cursor: 'pointer', fontWeight: 900, color: '#0d3b66', fontSize: 13 }}>Mostra dettaglio norme e calcolo</summary>
             <div style={{ marginTop: 10 }}>
               <ParametriSanzionatoriTable groups={groups} />
@@ -3004,11 +3196,31 @@ function FieldEditor (props: {
   } else if (field.kind === 'date' || field.kind === 'readonly-date') {
     control = <input type='date' value={dateInputValue(raw)} disabled={readonly} onChange={e => onChange(real, fromDateInputValue(e.target.value))} style={inputStyleFrom(st, readonly)} />
   } else if (field.kind === 'number') {
-    control = <input type='text' inputMode='decimal' value={raw == null || raw === '' ? '' : String(raw)} disabled={readonly} onChange={e => onChange(real, parseNumberInput(e.target.value))} onBlur={e => { if (MONEY_FIELDS.has(field.name)) e.currentTarget.value = formatMoney(e.currentTarget.value) }} style={inputStyleFrom(st, readonly)} placeholder='0,00' />
+    control = (
+      <input
+        type='text'
+        inputMode='decimal'
+        value={raw == null || raw === '' ? '' : String(raw)}
+        disabled={readonly}
+        onChange={e => onChange(real, parseNumberInput(e.target.value))}
+        onBlur={e => { if (MONEY_FIELDS.has(field.name)) e.currentTarget.value = formatMoney(e.currentTarget.value) }}
+        onKeyDown={e => {
+          if (field.name !== 'sanzione_spese_notifica' || e.key !== 'Enter') return
+          e.preventDefault()
+          const value = parseNumberInput(e.currentTarget.value)
+          onChange(real, value)
+          e.currentTarget.value = value == null ? '' : formatMoney(value)
+          e.currentTarget.blur()
+        }}
+        style={inputStyleFrom(st, readonly)}
+        placeholder='0,00'
+      />
+    )
   } else if (field.kind === 'domain') {
+    const emptyOptionLabel = field.placeholder || (field.name === 'pagamento_modalita' || field.name === 'pagamento_stato' ? '- Seleziona -' : '—')
     control = (
       <select value={raw ?? ''} disabled={readonly} onChange={e => onChange(real, e.target.value || null)} style={inputStyleFrom(st, readonly)}>
-        <option value=''>—</option>
+        <option value=''>{emptyOptionLabel}</option>
         {effectiveOptions.map(o => <option key={String(o.code)} value={String(o.code)}>{o.name}</option>)}
       </select>
     )
@@ -3495,8 +3707,8 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
 
     setSaving(true)
     try {
-      const layer = await resolveLayerForEdit(active.ds)
-      if (!layer?.applyEdits) throw new Error('Layer non disponibile per applyEdits.')
+      const layer = await resolveLayerForEdit(active.ds, active.layerUrl || configuredDsState?.layerUrl || getDataSourceUrl(configuredDs))
+      if (!layer?.applyEdits) throw new Error('Layer non disponibile per applyEdits. Verificare che la vista amministrativa collegata al widget abbia un URL FeatureServer valido e consenta l’editing.')
       if (typeof layer.load === 'function') { try { await layer.load() } catch { } }
       const fields = layer?.fields?.length ? (layer.fields as any[]).map(f => ({ name: String(f.name), type: String(f.type || ''), alias: String(f.alias || f.name), domain: f.domain || null, editable: f.editable !== false })) : layerFields
       const idName = realFieldName(fields, active.idFieldName) || active.idFieldName || 'OBJECTID'
@@ -3593,6 +3805,37 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
   const cancelDisabled = saving || !isDirty
   const closeDisabled = saving || isDirty
 
+  const verbalePreviewModal = verbalePreviewOpen ? createPortal(
+    <div
+      data-gii-global-popup-root='1'
+      style={{ position: 'fixed', inset: 0, zIndex: 2147483646, background: 'rgba(0,0,0,0.58)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 14, pointerEvents: 'auto' }}
+      onClick={(e) => { e.preventDefault(); e.stopPropagation() }}
+      onMouseDown={(e) => { e.preventDefault(); e.stopPropagation() }}
+    >
+      <div
+        role='dialog'
+        aria-modal='true'
+        data-gii-global-popup-dialog='1'
+        style={{ width: 'calc(100vw - 28px)', height: 'calc(100vh - 28px)', maxWidth: 1920, maxHeight: 1200, borderRadius: 14, boxShadow: '0 20px 70px rgba(0,0,0,0.32)', overflow: 'hidden', position: 'relative', zIndex: 2147483647 }}
+        onClick={(e) => { e.stopPropagation() }}
+        onMouseDown={(e) => { e.stopPropagation() }}
+      >
+        <RapportoPdfViewer
+          url={verbalePreviewUrl}
+          fileName={verbalePreviewFileName}
+          title='Anteprima verbale'
+          subtitle={verbalePreviewFileName}
+          loading={verbalePreviewLoading}
+          error={verbalePreviewError}
+          emptyText='Nessun dato disponibile per l&apos;anteprima del verbale.'
+          onDownload={handleVerbaleDownload}
+          onClose={closeVerbalePreview}
+        />
+      </div>
+    </div>,
+    document.body
+  ) : null
+
   return (
     <AdminStyleCtx.Provider value={adminStyle}>
     <div ref={rootRef} data-gii-editing-amm-root='1' style={wrapperStyle}>
@@ -3602,6 +3845,7 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
       })}
 
       {dialog && <BlockingDialog kind={dialog.kind} title={dialog.title} text={dialog.text} onClose={() => setDialog(null)} />}
+      {verbalePreviewModal}
         <div style={{ flex: '0 0 auto', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 8, padding: '8px 0', borderBottom: `1px solid ${cfg.dividerColor || '#cbd8e6'}` }}>
           <div style={{ minWidth: 0 }}>
             <div style={{ fontSize: Number(adminStyle.titleFontSize || 18), fontWeight: Number(cfg.titleFontWeight || 700) as any, color: '#111827', lineHeight: 1.25 }}>
@@ -3659,23 +3903,6 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
 
         {hasSelection && (
           <>
-        {verbalePreviewOpen && (
-          <Section title='Anteprima verbale' right={<button type='button' onClick={closeVerbalePreview} style={secondaryButtonStyle(false)}>Chiudi anteprima</button>} cardStyle={{ minHeight: 560, display: 'flex', flexDirection: 'column' }} bodyStyle={{ flex: '1 1 auto', minHeight: 0, padding: 0 }}>
-            <RapportoPdfViewer
-              url={verbalePreviewUrl}
-              fileName={verbalePreviewFileName}
-              title='Anteprima verbale'
-              subtitle={verbalePreviewFileName}
-              loading={verbalePreviewLoading}
-              error={verbalePreviewError}
-              emptyText='Nessun dato disponibile per l&apos;anteprima del verbale.'
-              onDownload={handleVerbaleDownload}
-              onClose={closeVerbalePreview}
-            />
-          </Section>
-        )}
-
-
             <CompactPracticeHeader
               title={title}
               data={viewData || {}}

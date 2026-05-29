@@ -187,8 +187,11 @@ export default function Setting(props: AllWidgetSettingProps<IMConfig>) {
       ]}/>
       <div style={P.row3}>
         <div style={{minWidth:0}}><label style={P.lbl}>Gap</label><NumInp value={cfg.gap} onChange={v=>set('gap',v)} min={0} max={24} unit='px' compact/></div>
+        <div style={{minWidth:0}}><label style={P.lbl}>Padding iniziale</label><NumInp value={cfg.initialPadding} onChange={v=>set('initialPadding',v)} min={0} max={80} unit='px' compact/></div>
+        <div style={{minWidth:0}}><label style={P.lbl}>Padding card</label><NumInp value={cfg.itemPadding} onChange={v=>set('itemPadding',v)} min={4} max={30} unit='px' compact/></div>
+      </div>
+      <div style={P.row3}>
         <div style={{minWidth:0}}><label style={P.lbl}>Bordi arrot.</label><NumInp value={cfg.itemBorderRadius} onChange={v=>set('itemBorderRadius',v)} min={0} max={30} unit='px' compact/></div>
-        <div style={{minWidth:0}}><label style={P.lbl}>Padding</label><NumInp value={cfg.itemPadding} onChange={v=>set('itemPadding',v)} min={4} max={30} unit='px' compact/></div>
       </div>
       <label style={P.lbl}>Font etichette</label>
       <Sel value={cfg.labelFont} onChange={v=>set('labelFont',v)} options={FONTS}/>

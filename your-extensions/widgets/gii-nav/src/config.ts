@@ -17,6 +17,7 @@ export interface NavItem {
 export interface Config {
   direction: 'vertical' | 'horizontal'
   gap: number
+  initialPadding: number
   itemBorderRadius: number
   itemPadding: number
   labelSize: number
@@ -28,6 +29,7 @@ export interface Config {
 export const defaultConfig: Config = {
   direction: 'vertical',
   gap: 8,
+  initialPadding: 8,
   itemBorderRadius: 12,
   itemPadding: 14,
   labelSize: 14,

@@ -5017,8 +5017,19 @@ function art15AttivoForRapporto (data: any): boolean {
 function isRapportoRespintoForPdf (data: any): boolean {
   const d = data || {}
 
-  // La filigrana RESPINTO deve dipendere dall'esito/evento conclusivo,
-  // non dagli stati operativi usati anche per rimandi o integrazioni.
+  // La filigrana RESPINTO deve dipendere dall'esito/evento conclusivo.
+  // Alcune viste espongono però lo stato conclusivo e non l'esito: per
+  // questo intercetto anche stato_rz/stato_dt = STATO_RESPINTA.
+  const statoVals = [
+    pickRapportoAttrCI(d, ['stato_rz', 'STATO_RZ']),
+    pickRapportoAttrCI(d, ['stato_dt', 'STATO_DT'])
+  ].map(v => {
+    const n = Number(v)
+    return Number.isFinite(n) ? n : null
+  })
+
+  if (statoVals.includes(STATO_RESPINTA)) return true
+
   const esitoVals = [
     pickRapportoAttrCI(d, ['esito_rz', 'ESITO_RZ']),
     pickRapportoAttrCI(d, ['esito_dt', 'ESITO_DT'])
@@ -5030,6 +5041,8 @@ function isRapportoRespintoForPdf (data: any): boolean {
   if (esitoVals.includes(ESITO_RESPINTA)) return true
 
   const txtVals = [
+    pickRapportoAttrCI(d, ['stato_rz_label', 'STATO_RZ_LABEL', 'stato_rz', 'STATO_RZ']),
+    pickRapportoAttrCI(d, ['stato_dt_label', 'STATO_DT_LABEL', 'stato_dt', 'STATO_DT']),
     pickRapportoAttrCI(d, ['esito_rz_label', 'ESITO_RZ_LABEL', 'esito_rz', 'ESITO_RZ']),
     pickRapportoAttrCI(d, ['esito_dt_label', 'ESITO_DT_LABEL', 'esito_dt', 'ESITO_DT']),
     pickRapportoAttrCI(d, ['ultimo_evento', 'ULTIMO_EVENTO', 'ultimo_evento_codice', 'ULTIMO_EVENTO_CODICE'])
@@ -5037,7 +5050,7 @@ function isRapportoRespintoForPdf (data: any): boolean {
     .map(v => String(v ?? '').trim().toLowerCase())
     .filter(Boolean)
 
-  return txtVals.some(v => v.includes('respint'))
+  return txtVals.some(v => v.includes('respint') || v.includes('rigett') || v.includes('rifiutat'))
 }
 
 function isRapportoApprovatoForPdf (data: any): boolean {

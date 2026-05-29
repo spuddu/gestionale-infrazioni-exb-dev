@@ -545,9 +545,9 @@ export async function buildNotaSpesePdf(data: NotaSpeseData): Promise<Uint8Array
   drawIndependentPageNumbers()
 
   if (isRejectedFlag(data.rapporto_respinto)) {
-    doc.getPages().forEach(page => drawStatusWatermark(page, 'RESPINTO', fontB, rgb(0.72, 0.16, 0.16), 0.18))
+    doc.getPages().forEach(page => drawStatusWatermark(page, 'RESPINTO', fontB, rgb(0.60, 0.10, 0.10), 0.24))
   } else if (isInProgressFlag(data.rapporto_istruttoria)) {
-    doc.getPages().forEach(page => drawStatusWatermark(page, 'ISTRUTTORIA IN CORSO', fontB, CLR_BLUE, 0.14))
+    doc.getPages().forEach(page => drawStatusWatermark(page, 'ISTRUTTORIA IN CORSO', fontB, rgb(0.60, 0.60, 0.60), 0.28))
   }
 
   return doc.save()

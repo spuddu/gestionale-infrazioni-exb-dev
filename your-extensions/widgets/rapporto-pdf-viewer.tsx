@@ -170,7 +170,6 @@ export default function RapportoPdfViewer (props: Props): any {
   const pdfDocRef = React.useRef<any>(null)
   const pageScrollAfterRenderRef = React.useRef<'top' | 'bottom' | null>(null)
   const panStateRef = React.useRef<{ pointerId: number; startX: number; startY: number; scrollLeft: number; scrollTop: number } | null>(null)
-  const renderedUrlRef = React.useRef<string | null>(null)
 
   const url = props.url || null
   const fileName = fallbackFileName(url, props.fileName)
@@ -185,14 +184,12 @@ export default function RapportoPdfViewer (props: Props): any {
   const [fitMode, setFitMode] = React.useState<'height' | 'width'>('height')
   const [internalLoading, setInternalLoading] = React.useState(false)
   const [internalError, setInternalError] = React.useState<string | null>(null)
-  const [fitReady, setFitReady] = React.useState(false)
   const [twoPageView, setTwoPageView] = React.useState(false)
   const [isPanning, setIsPanning] = React.useState(false)
 
   const externalLoading = !!props.loading
   const effectiveLoading = externalLoading || internalLoading
   const effectiveError = props.error || internalError
-  const urlPending = !!url && cleanPdfUrl(url) !== renderedUrlRef.current
 
   const clampZoom = React.useCallback((value: number) => clampInt(value, 25, 400), [])
   const clampPage = React.useCallback((value: number) => clampInt(value, 1, Math.max(1, pageCount || 1)), [pageCount])
@@ -254,7 +251,6 @@ export default function RapportoPdfViewer (props: Props): any {
         try { previousDoc?.destroy?.() } catch {}
         pdfDocRef.current = doc
         pageScrollAfterRenderRef.current = 'top'
-        renderedUrlRef.current = cleanPdfUrl(src)
 
         // Apertura al 100% relativo alla massima altezza disponibile.
         // La base reale viene calcolata appena il contenitore è misurabile.
@@ -262,7 +258,6 @@ export default function RapportoPdfViewer (props: Props): any {
         setFitBaseZoom(100)
         setPageCount(totalPages)
         setPageNumber(1)
-        setFitReady(false)
         setPdfDoc(doc)
       } catch (ex: any) {
         if (!cancelled) setInternalError(ex?.message || String(ex))
@@ -380,7 +375,6 @@ export default function RapportoPdfViewer (props: Props): any {
         }))
 
         if (!cancelled) {
-          setFitReady(true)
           const scrollMode = pageScrollAfterRenderRef.current
           if (scrollMode) {
             pageScrollAfterRenderRef.current = null
@@ -599,13 +593,13 @@ export default function RapportoPdfViewer (props: Props): any {
           style={{ flex: '1 1 0', width: 0, maxWidth: '100%', minWidth: 0, minHeight: 0, position: 'relative', background: '#282828', overflow: 'auto', padding: 12, cursor: isPanning ? 'grabbing' : 'grab', userSelect: 'none', touchAction: 'none', boxSizing: 'border-box', overscrollBehavior: 'contain' as any }}
           title='Trascina per spostarti; scorri per cambiare pagina; usa Shift + rotellina per lo zoom'
         >
-          {(effectiveLoading || urlPending || !fitReady) && !effectiveError && <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'rgba(255,255,255,0.76)', fontSize: 14, pointerEvents: 'none' }}>Generazione anteprima…</div>}
+          {effectiveLoading && <div style={{ color: 'rgba(255,255,255,0.76)', fontSize: 14 }}>Generazione anteprima…</div>}
           {!effectiveLoading && effectiveError && <div style={{ color: '#fca5a5', fontSize: 14, padding: 20, textAlign: 'center' }}>{effectiveError}</div>}
           {!effectiveLoading && !effectiveError && !url && <div style={{ color: 'rgba(255,255,255,0.64)', fontSize: 14, padding: 20, textAlign: 'center' }}>{props.emptyText || 'Nessun dato disponibile per l\'anteprima.'}</div>}
           {!effectiveLoading && !effectiveError && url && (
-            <div style={{ width: 'max-content', minWidth: '100%', minHeight: '100%', display: fitReady ? 'flex' : 'none', alignItems: 'center', justifyContent: 'center', gap: 18, boxSizing: 'border-box' }}>
-              <canvas ref={canvasRef} style={{ display: 'block', flex: '0 0 auto', background: '#fff', boxShadow: '0 0 18px rgba(0,0,0,0.50)' }} />
-              {twoPageView && visiblePages.length > 1 && <canvas ref={canvasSecondRef} style={{ display: 'block', flex: '0 0 auto', background: '#fff', boxShadow: '0 0 18px rgba(0,0,0,0.50)' }} />}
+            <div style={{ width: 'max-content', minWidth: '100%', minHeight: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 18, boxSizing: 'border-box' }}>
+              <canvas ref={canvasRef} style={{ display: pdfDoc ? 'block' : 'none', flex: '0 0 auto', background: '#fff', boxShadow: '0 0 18px rgba(0,0,0,0.50)' }} />
+              {twoPageView && visiblePages.length > 1 && <canvas ref={canvasSecondRef} style={{ display: pdfDoc ? 'block' : 'none', flex: '0 0 auto', background: '#fff', boxShadow: '0 0 18px rgba(0,0,0,0.50)' }} />}
             </div>
           )}
         </div>

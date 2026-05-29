@@ -270,15 +270,25 @@ function addFooterNumbers (doc: PDFDocument, font: PDFFont): void {
 
 function addBozzaWatermark (doc: PDFDocument, bold: PDFFont): void {
   const pages = doc.getPages()
+  const text = 'BOZZA'
+  const size = 82
+  const angleDeg = 34
+  const angleRad = angleDeg * Math.PI / 180
+  const textW = bold.widthOfTextAtSize(text, size)
+  const textH = size
+  const rotatedW = textW * Math.cos(angleRad) + textH * Math.sin(angleRad)
+  const rotatedH = textW * Math.sin(angleRad) + textH * Math.cos(angleRad)
   pages.forEach(page => {
-    page.drawText('BOZZA', {
-      x: 116,
-      y: 360,
-      size: 82,
+    const x = (PAGE_W - rotatedW) / 2
+    const y = (PAGE_H - rotatedH) / 2
+    page.drawText(text, {
+      x,
+      y,
+      size,
       font: bold,
       color: rgb(0.78, 0.78, 0.78),
       opacity: 0.28,
-      rotate: degrees(34)
+      rotate: degrees(angleDeg)
     })
   })
 }

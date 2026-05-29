@@ -52,6 +52,69 @@ export interface Config {
   formFieldDisabledColor: string
   formSectionGap: number
   formCardBg: string
+  formExpandableCardBg: string
+  formExpandableCardBorderColor: string
+  formExpandableCardBorderWidth: number
+  formPhaseCardBg: string
+  formPhaseCardBorderColor: string
+  formPhaseCardBorderWidth: number
+  formPhaseCardTitleColor: string
+  formWorkflowBadgeBg: string
+  formWorkflowBadgeBorderColor: string
+  formWorkflowBadgeBorderWidth: number
+  formWorkflowBadgeTitleColor: string
+  formWorkflowBadgeLabelColor: string
+  formWorkflowBadgeValueColor: string
+  formWorkflowBadgeHighlightColor: string
+  statusSummaryNormalBg: string
+  statusSummaryNormalBorderColor: string
+  statusSummaryAutoBg: string
+  statusSummaryAutoBorderColor: string
+  statusSummaryWarnBg: string
+  statusSummaryWarnBorderColor: string
+  statusSummaryTotalBg: string
+  statusSummaryTotalBorderColor: string
+  statusSummaryBorderWidth: number
+  statusSummaryLabelColor: string
+  statusSummaryValueColor: string
+  statusSummaryHintColor: string
+  statusSummaryTotalLabelColor: string
+  statusSummaryTotalValueColor: string
+  statusSummaryTotalHintColor: string
+  verbaleInfoCardBg: string
+  verbaleInfoCardBorderColor: string
+  verbaleInfoCardBorderWidth: number
+  verbaleInfoLabelColor: string
+  verbaleInfoTipoTextColor: string
+  verbaleInfoOggettoTextColor: string
+  normGroupBg: string
+  normGroupBorderColor: string
+  normGroupBorderWidth: number
+  normBlockSeparatorColor: string
+  normVoceSeparatorColor: string
+  normVoceLabelColor: string
+  normParametroOkColor: string
+  normParametroMissingColor: string
+  normViolataCardBg: string
+  normViolataBorderColor: string
+  normViolataBorderWidth: number
+  normViolataHeaderBg: string
+  normViolataHeaderTextColor: string
+  normViolataArrowColor: string
+  normViolataBodyBg: string
+  normViolataArticleTitleColor: string
+  normViolataArticleTextColor: string
+  normViolataArticleMetaColor: string
+  normSanzionatoriaCardBg: string
+  normSanzionatoriaBorderColor: string
+  normSanzionatoriaBorderWidth: number
+  normSanzionatoriaHeaderBg: string
+  normSanzionatoriaHeaderTextColor: string
+  normSanzionatoriaArrowColor: string
+  normSanzionatoriaBodyBg: string
+  normSanzionatoriaArticleTitleColor: string
+  normSanzionatoriaArticleTextColor: string
+  normSanzionatoriaArticleMetaColor: string
   formCardBorderColor: string
   formCardBorderWidth: number
   formCardBorderRadius: number
@@ -136,6 +199,69 @@ export const defaultConfig: Config = {
   formFieldDisabledColor: '#64748b',
   formSectionGap: 10,
   formCardBg: '#f8fbff',
+  formExpandableCardBg: '#f9fafb',
+  formExpandableCardBorderColor: '#e5e7eb',
+  formExpandableCardBorderWidth: 1,
+  formPhaseCardBg: '#f8fbff',
+  formPhaseCardBorderColor: '#d7e3f2',
+  formPhaseCardBorderWidth: 1,
+  formPhaseCardTitleColor: '#0d3b66',
+  formWorkflowBadgeBg: '#ffffff',
+  formWorkflowBadgeBorderColor: '#d8e6f7',
+  formWorkflowBadgeBorderWidth: 1,
+  formWorkflowBadgeTitleColor: '#0d3b66',
+  formWorkflowBadgeLabelColor: '#6b7280',
+  formWorkflowBadgeValueColor: '#111827',
+  formWorkflowBadgeHighlightColor: '#2563eb',
+  statusSummaryNormalBg: '#f8fbff',
+  statusSummaryNormalBorderColor: '#c5d9f1',
+  statusSummaryAutoBg: '#f5f9ff',
+  statusSummaryAutoBorderColor: '#bfdbfe',
+  statusSummaryWarnBg: '#fff7ed',
+  statusSummaryWarnBorderColor: '#fed7aa',
+  statusSummaryTotalBg: 'linear-gradient(90deg, #0d3b66, #155e9d)',
+  statusSummaryTotalBorderColor: '#0d3b66',
+  statusSummaryBorderWidth: 1,
+  statusSummaryLabelColor: '#6b7280',
+  statusSummaryValueColor: '#111827',
+  statusSummaryHintColor: '#6b7280',
+  statusSummaryTotalLabelColor: 'rgba(255,255,255,0.86)',
+  statusSummaryTotalValueColor: '#ffffff',
+  statusSummaryTotalHintColor: 'rgba(255,255,255,0.78)',
+  verbaleInfoCardBg: '#eff6ff',
+  verbaleInfoCardBorderColor: '#dbeafe',
+  verbaleInfoCardBorderWidth: 1,
+  verbaleInfoLabelColor: '#64748b',
+  verbaleInfoTipoTextColor: '#111827',
+  verbaleInfoOggettoTextColor: '#374151',
+  normGroupBg: '#ffffff',
+  normGroupBorderColor: '#93c5fd',
+  normGroupBorderWidth: 1,
+  normBlockSeparatorColor: '#cbd5e1',
+  normVoceSeparatorColor: '#eef2f7',
+  normVoceLabelColor: '#111827',
+  normParametroOkColor: '#166534',
+  normParametroMissingColor: '#991b1b',
+  normViolataCardBg: '#eff6ff',
+  normViolataBorderColor: '#93c5fd',
+  normViolataBorderWidth: 1,
+  normViolataHeaderBg: '#dbeafe',
+  normViolataHeaderTextColor: '#0f172a',
+  normViolataArrowColor: '#1d4ed8',
+  normViolataBodyBg: '#ffffff',
+  normViolataArticleTitleColor: '#111827',
+  normViolataArticleTextColor: '#374151',
+  normViolataArticleMetaColor: '#6b7280',
+  normSanzionatoriaCardBg: '#fff7f7',
+  normSanzionatoriaBorderColor: '#fecaca',
+  normSanzionatoriaBorderWidth: 1,
+  normSanzionatoriaHeaderBg: '#fee2e2',
+  normSanzionatoriaHeaderTextColor: '#7f1d1d',
+  normSanzionatoriaArrowColor: '#b91c1c',
+  normSanzionatoriaBodyBg: '#fffafa',
+  normSanzionatoriaArticleTitleColor: '#111827',
+  normSanzionatoriaArticleTextColor: '#374151',
+  normSanzionatoriaArticleMetaColor: '#6b7280',
   formCardBorderColor: '#c6d7ea',
   formCardBorderWidth: 1,
   formCardBorderRadius: 8,
