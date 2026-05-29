@@ -114,7 +114,7 @@ type AdminField = {
   name: string
   label: string
   kind: AdminFieldKind
-  group: 'atto' | 'verbale' | 'notifica' | 'sanzione' | 'attrezzature' | 'pagamento' | 'bonifico' | 'chiusura'
+  group: 'atto' | 'verbale' | 'notifica' | 'sanzione' | 'attrezzature' | 'pagamento' | 'bonifico' | 'chiusura' | 'post_notifica' | 'ricorso' | 'cda' | 'riapertura' | 'definizione' | 'incasso'
   placeholder?: string
   full?: boolean
   readonly?: boolean
@@ -167,7 +167,47 @@ const ADMIN_FIELDS: AdminField[] = [
   { group: 'chiusura', name: 'verbale_pdf_generato_il', label: 'Verbale PDF generato il', kind: 'readonly-date', readonly: true },
   { group: 'chiusura', name: 'verbale_pdf_generato_da', label: 'Verbale PDF generato da', kind: 'readonly-text', readonly: true },
   { group: 'chiusura', name: 'istruttoria_amm_chiusa_il', label: 'Istruttoria amministrativa chiusa il', kind: 'readonly-date', readonly: true },
-  { group: 'chiusura', name: 'istruttoria_amm_chiusa_da', label: 'Istruttoria amministrativa chiusa da', kind: 'readonly-text', readonly: true }
+  { group: 'chiusura', name: 'istruttoria_amm_chiusa_da', label: 'Istruttoria amministrativa chiusa da', kind: 'readonly-text', readonly: true },
+
+  { group: 'post_notifica', name: 'stato_post_notifica', label: 'Stato post-notifica', kind: 'domain' },
+  { group: 'post_notifica', name: 'data_avvio_post_notifica', label: 'Data avvio fase post-notifica', kind: 'date' },
+  { group: 'post_notifica', name: 'note_post_notifica', label: 'Note fase post-notifica', kind: 'textarea', full: true },
+
+  { group: 'ricorso', name: 'ricorso_presentato', label: 'Ricorso presentato', kind: 'domain' },
+  { group: 'ricorso', name: 'ricorso_protocollo', label: 'Protocollo ricorso', kind: 'text' },
+  { group: 'ricorso', name: 'ricorso_data_presentazione', label: 'Data presentazione ricorso', kind: 'date' },
+  { group: 'ricorso', name: 'ricorso_presentato_da', label: 'Ricorso presentato da', kind: 'text' },
+  { group: 'ricorso', name: 'ricorso_cf_piva', label: 'CF/P.IVA ricorrente', kind: 'text' },
+  { group: 'ricorso', name: 'ricorso_sospende_pagamento', label: 'Ricorso con sospensione pagamento', kind: 'domain' },
+  { group: 'ricorso', name: 'ricorso_sintesi', label: 'Sintesi motivi del ricorso', kind: 'textarea', full: true },
+  { group: 'ricorso', name: 'ricorso_note', label: 'Note ricorso', kind: 'textarea', full: true },
+
+  { group: 'cda', name: 'cda_esito_ricorso', label: 'Esito ricorso CdA', kind: 'domain' },
+  { group: 'cda', name: 'cda_data_esito', label: 'Data esito CdA', kind: 'date' },
+  { group: 'cda', name: 'cda_numero_delibera', label: 'Numero delibera CdA', kind: 'text' },
+  { group: 'cda', name: 'cda_data_delibera', label: 'Data delibera CdA', kind: 'date' },
+  { group: 'cda', name: 'cda_estremi_atto', label: 'Estremi atto/determina comunicata al RI AMM', kind: 'text', full: true },
+  { group: 'cda', name: 'cda_importo_rideterminato', label: 'Importo rideterminato dal CdA', kind: 'number' },
+  { group: 'cda', name: 'cda_note_esito', label: 'Note esito CdA', kind: 'textarea', full: true },
+  { group: 'cda', name: 'ricorso_definito_il', label: 'Ricorso definito il', kind: 'date' },
+  { group: 'cda', name: 'ricorso_definito_da', label: 'Ricorso definito da', kind: 'text' },
+
+  { group: 'riapertura', name: 'riapertura_amm', label: 'Riapertura amministrativa', kind: 'domain' },
+  { group: 'riapertura', name: 'riapertura_amm_causale', label: 'Causale riapertura amministrativa', kind: 'domain' },
+  { group: 'riapertura', name: 'riapertura_amm_disposta_il', label: 'Riapertura disposta il', kind: 'date' },
+  { group: 'riapertura', name: 'riapertura_amm_disposta_da', label: 'Riapertura disposta da', kind: 'text' },
+  { group: 'riapertura', name: 'riapertura_amm_autorizzazione', label: 'Estremi autorizzazione riapertura', kind: 'text', full: true },
+  { group: 'riapertura', name: 'riapertura_amm_motivo', label: 'Motivo riapertura', kind: 'textarea', full: true },
+  { group: 'riapertura', name: 'riapertura_amm_numero', label: 'Numero riapertura amministrativa', kind: 'number' },
+
+  { group: 'incasso', name: 'pagamento_importo_incassato', label: 'Importo incassato', kind: 'number' },
+  { group: 'incasso', name: 'pagamento_data_incasso', label: 'Data incasso', kind: 'date' },
+  { group: 'incasso', name: 'pagamento_estremi_incasso', label: 'Estremi incasso', kind: 'text', full: true },
+
+  { group: 'definizione', name: 'definizione_pratica_esito', label: 'Esito definizione pratica', kind: 'domain' },
+  { group: 'definizione', name: 'definizione_pratica_data', label: 'Data definizione pratica', kind: 'date' },
+  { group: 'definizione', name: 'definizione_pratica_da', label: 'Pratica definita da', kind: 'text' },
+  { group: 'definizione', name: 'definizione_pratica_note', label: 'Note definizione pratica', kind: 'textarea', full: true }
 ]
 
 const MONEY_FIELDS = new Set([
@@ -178,7 +218,9 @@ const MONEY_FIELDS = new Set([
   'attrezzature_rimborso_importo',
   'attrezzature_cauzione_decurtata',
   'attrezzature_importo_netto',
-  'pagamento_importo_totale'
+  'pagamento_importo_totale',
+  'cda_importo_rideterminato',
+  'pagamento_importo_incassato'
 ])
 
 const PAYMENT_COMMON_FIELDS = ['pagamento_modalita', 'pagamento_scadenza', 'pagamento_stato', 'pagamento_note']
@@ -209,10 +251,10 @@ function isSystemCalculatedAdminField (name: string): boolean {
 
 type PaymentMode = '' | 'PAGOPA' | 'BONIFICO' | 'MISTO' | 'ALTRO'
 
-type AmmSectionKey = 'atto' | 'pagamento' | 'notifica' | 'anteprima' | 'allegati' | 'dati_generali'
+type AmmSectionKey = 'atto' | 'pagamento' | 'notifica' | 'anteprima' | 'allegati' | 'dati_generali' | 'ricorso' | 'cda' | 'riapertura' | 'definizione'
 
 const AMM_DEFAULT_SECTION: AmmSectionKey = 'atto'
-const VALID_AMM_SECTIONS = new Set(['atto', 'pagamento', 'notifica', 'anteprima', 'allegati', 'dati_generali'])
+const VALID_AMM_SECTIONS = new Set(['atto', 'pagamento', 'notifica', 'anteprima', 'allegati', 'dati_generali', 'ricorso', 'cda', 'riapertura', 'definizione'])
 
 function normalizeAmmSection (raw: any): AmmSectionKey | null {
   const s = String(raw || '').trim().toLowerCase().replace(/_/g, '-').replace(/\s+/g, '-')
@@ -242,6 +284,24 @@ function normalizeAmmSection (raw: any): AmmSectionKey | null {
     case 'allegati':
     case 'attachments':
       return 'allegati'
+    case 'ricorso':
+    case 'post-notifica':
+    case 'post_notifica':
+    case 'riesame':
+      return 'ricorso'
+    case 'cda':
+    case 'esito-cda':
+    case 'esito_ricorso':
+    case 'esito-ricorso':
+      return 'cda'
+    case 'riapertura':
+    case 'riapertura-amministrativa':
+    case 'riapertura_amm':
+      return 'riapertura'
+    case 'definizione':
+    case 'definizione-pratica':
+    case 'chiusura-pratica':
+      return 'definizione'
     default:
       return null
   }
@@ -749,8 +809,8 @@ function formatValue (v: any): string {
 
 function formatMoney (v: any): string {
   if (v == null || v === '') return ''
-  const n = Number(String(v).replace(',', '.'))
-  if (!Number.isFinite(n)) return String(v)
+  const n = parseNumberInput(v)
+  if (n == null || !Number.isFinite(n)) return String(v)
   return n.toLocaleString('it-IT', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 }
 
@@ -2595,6 +2655,77 @@ function ChiusuraIstruttoriaSummary (props: { data: Record<string, any>, fields:
   )
 }
 
+function RicorsoPostNotificaSection (props: { data: Record<string, any>, fields: LayerFieldInfo[], canEdit: boolean, onChange: (name: string, value: any) => void }) {
+  const d = props.data || {}
+  return (
+    <>
+      <Section title='Post-notifica'>
+        <AdminFieldsGrid group='post_notifica' draft={d} fields={props.fields} canEdit={props.canEdit} onChange={props.onChange} />
+      </Section>
+      <Section title='Ricorso / riesame post-notifica'>
+        <InfoBox>
+          Registrare qui l&apos;eventuale ricorso o istanza presentata dopo la notifica. L&apos;esito del CdA è gestito nella scheda dedicata.
+        </InfoBox>
+        <div style={{ marginTop: 12 }}>
+          <AdminFieldsGrid group='ricorso' draft={d} fields={props.fields} canEdit={props.canEdit} onChange={props.onChange} />
+        </div>
+      </Section>
+    </>
+  )
+}
+
+function EsitoCdaSection (props: { data: Record<string, any>, fields: LayerFieldInfo[], canEdit: boolean, onChange: (name: string, value: any) => void }) {
+  const d = props.data || {}
+  return (
+    <Section title='Esito CdA'>
+      <InfoBox>
+        Registrare l&apos;esito del CdA e gli estremi dell&apos;atto comunicato al RI AMM. Se l&apos;esito richiede una nuova lavorazione, la riapertura va gestita nella scheda Riapertura.
+      </InfoBox>
+      <div style={{ marginTop: 12 }}>
+        <AdminFieldsGrid group='cda' draft={d} fields={props.fields} canEdit={props.canEdit} onChange={props.onChange} />
+      </div>
+    </Section>
+  )
+}
+
+function RiaperturaAmmSection (props: { data: Record<string, any>, fields: LayerFieldInfo[], canEdit: boolean, onChange: (name: string, value: any) => void, role: string }) {
+  const d = props.data || {}
+  const role = String(props.role || '').toUpperCase()
+  const canCompile = props.canEdit && (role === 'RI_AMM' || role === 'ADMIN')
+  return (
+    <Section title='Riapertura amministrativa'>
+      <InfoBox kind={canCompile ? 'info' : 'warn'}>
+        La riapertura è di competenza del RI AMM, su indicazione del DA a seguito della decisione del CdA. Questa scheda registra gli estremi; il nuovo ciclo di lavorazione sarà gestito con il workflow dedicato.
+      </InfoBox>
+      <div style={{ marginTop: 12 }}>
+        <AdminFieldsGrid group='riapertura' draft={d} fields={props.fields} canEdit={canCompile} onChange={props.onChange} />
+      </div>
+    </Section>
+  )
+}
+
+function DefinizionePraticaSection (props: { data: Record<string, any>, fields: LayerFieldInfo[], canEdit: boolean, onChange: (name: string, value: any) => void }) {
+  const d = props.data || {}
+  return (
+    <>
+      <Section title='Incasso'>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(210px, 1fr))', gap: 10, marginBottom: 12 }}>
+          <StatusSummaryItem label='Importo dovuto' value={displayAdminFieldValue(d, props.fields, 'pagamento_importo_totale')} tone='total' />
+        </div>
+        <AdminFieldsGrid group='incasso' draft={d} fields={props.fields} canEdit={props.canEdit} onChange={props.onChange} />
+      </Section>
+      <Section title='Definizione pratica'>
+        <InfoBox>
+          La definizione della pratica è distinta dalla chiusura dell&apos;istruttoria amministrativa. Usarla solo dopo pagamento, esito ricorso, archiviazione, annullamento o avvio a riscossione.
+        </InfoBox>
+        <div style={{ marginTop: 12 }}>
+          <AdminFieldsGrid group='definizione' draft={d} fields={props.fields} canEdit={props.canEdit} onChange={props.onChange} />
+        </div>
+      </Section>
+    </>
+  )
+}
+
 function hasAdminValue (v: any): boolean {
   return v != null && String(v).trim() !== ''
 }
@@ -3654,28 +3785,100 @@ function SelectionWatcher (props: {
 
 
 function inputStyleFrom (st: Record<string, any>, disabled?: boolean): React.CSSProperties {
+  const h = Number(st.formFieldHeight ?? 32)
+  const fieldHeight = Number.isFinite(h) && h > 0 ? h : 32
+  const fontSize = Number(st.formFieldFontSize ?? 13)
   return {
     width: '100%',
     boxSizing: 'border-box',
-    minHeight: Number(st.formFieldHeight ?? 32),
+    height: fieldHeight,
+    minHeight: fieldHeight,
     border: `${Number(st.formFieldBorderWidth ?? 1)}px solid ${st.formFieldBorderColor || '#bfcede'}`,
     borderRadius: Number(st.formFieldBorderRadius ?? 7),
-    padding: `6px ${Number(st.formFieldPaddingX ?? 9)}px`,
-    fontSize: Number(st.formFieldFontSize ?? 13),
+    padding: `0 ${Number(st.formFieldPaddingX ?? 9)}px`,
+    fontSize,
+    lineHeight: `${Math.max(16, fieldHeight - 2)}px`,
     color: disabled ? (st.formFieldDisabledColor || '#64748b') : (st.formFieldColor || '#0f172a'),
     background: disabled ? (st.formFieldDisabledBg || '#e7eef7') : (st.formFieldBg || '#f8fbff'),
     outline: 'none'
   }
 }
 
+function blurOnEnter (e: React.KeyboardEvent<HTMLInputElement | HTMLSelectElement>): void {
+  if (e.key !== 'Enter') return
+  e.preventDefault()
+  e.currentTarget.blur()
+}
+
 function TextInput (props: { value: any, disabled?: boolean, placeholder?: string, onChange: (v: string) => void }) {
   const st = useAdminStyle()
-  return <input type='text' value={props.value ?? ''} disabled={props.disabled} placeholder={props.placeholder || ''} onChange={e => props.onChange(e.target.value)} style={inputStyleFrom(st, props.disabled)} />
+  return <input type='text' value={props.value ?? ''} disabled={props.disabled} placeholder={props.placeholder || ''} onChange={e => props.onChange(e.target.value)} onKeyDown={blurOnEnter} style={inputStyleFrom(st, props.disabled)} />
 }
 
 function TextArea (props: { value: any, disabled?: boolean, placeholder?: string, onChange: (v: string) => void }) {
   const st = useAdminStyle()
-  return <textarea value={props.value ?? ''} disabled={props.disabled} placeholder={props.placeholder || ''} onChange={e => props.onChange(e.target.value)} rows={4} style={{ ...inputStyleFrom(st, props.disabled), resize: 'vertical', minHeight: 88, lineHeight: 1.35 }} />
+  return <textarea value={props.value ?? ''} disabled={props.disabled} placeholder={props.placeholder || ''} onChange={e => props.onChange(e.target.value)} rows={4} style={{ ...inputStyleFrom(st, props.disabled), height: 'auto', padding: `6px ${Number(st.formFieldPaddingX ?? 9)}px`, resize: 'vertical', minHeight: 88, lineHeight: 1.35 }} />
+}
+
+function NumberInput (props: { value: any, disabled?: boolean, money?: boolean, onChange: (v: number | null) => void }) {
+  const st = useAdminStyle()
+  const [focused, setFocused] = React.useState(false)
+  const [textValue, setTextValue] = React.useState(() => {
+    if (props.value == null || props.value === '') return ''
+    return props.money ? formatMoney(props.value) : String(props.value)
+  })
+
+  React.useEffect(() => {
+    if (focused) return
+    if (props.value == null || props.value === '') {
+      setTextValue('')
+      return
+    }
+    setTextValue(props.money ? formatMoney(props.value) : String(props.value))
+  }, [props.value, props.money, focused])
+
+  const commit = (value: string) => {
+    const n = parseNumberInput(value)
+    props.onChange(n)
+    if (n == null) {
+      setTextValue('')
+      return
+    }
+    setTextValue(props.money ? formatMoney(n) : String(n))
+  }
+
+  return (
+    <input
+      type='text'
+      inputMode='decimal'
+      value={textValue}
+      disabled={props.disabled}
+      onFocus={() => setFocused(true)}
+      onChange={e => {
+        const next = e.currentTarget.value.replace(/[^0-9.,-]/g, '')
+        setTextValue(next)
+        if (!next.trim()) {
+          props.onChange(null)
+          return
+        }
+        const n = parseNumberInput(next)
+        if (n != null) props.onChange(n)
+      }}
+      onBlur={e => {
+        setFocused(false)
+        commit(e.currentTarget.value)
+      }}
+      onKeyDown={e => {
+        if (e.key !== 'Enter') return
+        e.preventDefault()
+        setFocused(false)
+        commit(e.currentTarget.value)
+        e.currentTarget.blur()
+      }}
+      style={inputStyleFrom(st, props.disabled)}
+      placeholder='0,00'
+    />
+  )
 }
 
 function inputStyle (disabled?: boolean): React.CSSProperties {
@@ -3723,32 +3926,13 @@ function FieldEditor (props: {
   if (field.kind === 'textarea') {
     control = <TextArea value={raw ?? ''} disabled={readonly} placeholder={field.placeholder} onChange={v => onChange(real, v || null)} />
   } else if (field.kind === 'date' || field.kind === 'readonly-date') {
-    control = <input type='date' value={dateInputValue(raw)} disabled={readonly} onChange={e => onChange(real, fromDateInputValue(e.target.value))} style={inputStyleFrom(st, readonly)} />
+    control = <input type='date' value={dateInputValue(raw)} disabled={readonly} onChange={e => onChange(real, fromDateInputValue(e.target.value))} onKeyDown={blurOnEnter} style={inputStyleFrom(st, readonly)} />
   } else if (field.kind === 'number') {
-    control = (
-      <input
-        type='text'
-        inputMode='decimal'
-        value={raw == null || raw === '' ? '' : String(raw)}
-        disabled={readonly}
-        onChange={e => onChange(real, parseNumberInput(e.target.value))}
-        onBlur={e => { if (MONEY_FIELDS.has(field.name)) e.currentTarget.value = formatMoney(e.currentTarget.value) }}
-        onKeyDown={e => {
-          if (field.name !== 'sanzione_spese_notifica' || e.key !== 'Enter') return
-          e.preventDefault()
-          const value = parseNumberInput(e.currentTarget.value)
-          onChange(real, value)
-          e.currentTarget.value = value == null ? '' : formatMoney(value)
-          e.currentTarget.blur()
-        }}
-        style={inputStyleFrom(st, readonly)}
-        placeholder='0,00'
-      />
-    )
+    control = <NumberInput value={raw} disabled={readonly} money={MONEY_FIELDS.has(field.name)} onChange={v => onChange(real, v)} />
   } else if (field.kind === 'domain') {
-    const emptyOptionLabel = field.placeholder || (field.name === 'pagamento_modalita' || field.name === 'pagamento_stato' ? '- Seleziona -' : '—')
+    const emptyOptionLabel = field.placeholder || '- Seleziona -'
     control = (
-      <select value={raw ?? ''} disabled={readonly} onChange={e => onChange(real, e.target.value || null)} style={inputStyleFrom(st, readonly)}>
+      <select value={raw ?? ''} disabled={readonly} onChange={e => onChange(real, e.target.value || null)} onKeyDown={blurOnEnter} style={inputStyleFrom(st, readonly)}>
         <option value=''>{emptyOptionLabel}</option>
         {effectiveOptions.map(o => <option key={String(o.code)} value={String(o.code)}>{o.name}</option>)}
       </select>
@@ -4525,6 +4709,22 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
                   <ProtocolloNotificaGuidataSection data={viewData || {}} fields={layerFields} canEdit={canEdit} onChange={onFieldChange} />
                   <ChiusuraIstruttoriaSummary data={viewData || {}} fields={layerFields} canEdit={canEdit} onFillClose={fillCloseMeta} completionIssues={completionIssues} />
                 </>
+              )}
+
+              {activeAmmSection === 'ricorso' && (
+                <RicorsoPostNotificaSection data={viewData || {}} fields={layerFields} canEdit={canEdit} onChange={onFieldChange} />
+              )}
+
+              {activeAmmSection === 'cda' && (
+                <EsitoCdaSection data={viewData || {}} fields={layerFields} canEdit={canEdit} onChange={onFieldChange} />
+              )}
+
+              {activeAmmSection === 'riapertura' && (
+                <RiaperturaAmmSection data={viewData || {}} fields={layerFields} canEdit={canEdit} onChange={onFieldChange} role={profile.role} />
+              )}
+
+              {activeAmmSection === 'definizione' && (
+                <DefinizionePraticaSection data={viewData || {}} fields={layerFields} canEdit={canEdit} onChange={onFieldChange} />
               )}
 
               {activeAmmSection === 'allegati' && (
