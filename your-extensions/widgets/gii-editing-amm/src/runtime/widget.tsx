@@ -209,6 +209,96 @@ function isSystemCalculatedAdminField (name: string): boolean {
 
 type PaymentMode = '' | 'PAGOPA' | 'BONIFICO' | 'MISTO' | 'ALTRO'
 
+type AmmSectionKey = 'atto' | 'pagamento' | 'notifica' | 'anteprima' | 'allegati' | 'dati_generali'
+
+const AMM_DEFAULT_SECTION: AmmSectionKey = 'atto'
+const VALID_AMM_SECTIONS = new Set(['atto', 'pagamento', 'notifica', 'anteprima', 'allegati', 'dati_generali'])
+
+function normalizeAmmSection (raw: any): AmmSectionKey | null {
+  const s = String(raw || '').trim().toLowerCase().replace(/_/g, '-').replace(/\s+/g, '-')
+  switch (s) {
+    case 'atto':
+    case 'dati-atto':
+    case 'verbale':
+    case 'predisposizione-verbale':
+      return 'atto'
+    case 'dati-generali':
+    case 'dati-generali-amministrativi':
+    case 'generali':
+      return 'dati_generali'
+    case 'pagamento':
+    case 'pagamenti':
+    case 'importi':
+      return 'pagamento'
+    case 'notifica':
+    case 'protocollo':
+    case 'protocollo-notifica':
+    case 'protocollo-e-notifica':
+      return 'notifica'
+    case 'anteprima':
+    case 'preview':
+    case 'pdf':
+      return 'anteprima'
+    case 'allegati':
+    case 'attachments':
+      return 'allegati'
+    default:
+      return null
+  }
+}
+
+function parseAmmSectionFromUrlPart (value: string): AmmSectionKey | null {
+  const text = String(value || '')
+  if (!text) return null
+  try {
+    const q = text.includes('?') ? text.slice(text.indexOf('?') + 1) : text
+    const clean = q.includes('#') ? q.slice(0, q.indexOf('#')) : q
+    const params = new URLSearchParams(clean)
+    return normalizeAmmSection(params.get('section') || params.get('giiSection') || '')
+  } catch {
+    return null
+  }
+}
+
+function getRequestedAmmSection (forced?: any): AmmSectionKey | null {
+  const fromForced = normalizeAmmSection(forced)
+  if (fromForced) return fromForced
+
+  try {
+    const fromUrl =
+      parseAmmSectionFromUrlPart(window.location.search || '') ||
+      parseAmmSectionFromUrlPart(window.location.hash || '') ||
+      parseAmmSectionFromUrlPart(window.location.href || '')
+    if (fromUrl) return fromUrl
+  } catch {}
+
+  try {
+    const fromNav = normalizeAmmSection(window.sessionStorage.getItem('GII_NAV_SECTION'))
+    if (fromNav) return fromNav
+  } catch {}
+
+  try {
+    const fromRequested = normalizeAmmSection(window.sessionStorage.getItem('GII_REQUESTED_EDIT_SECTION'))
+    if (fromRequested) return fromRequested
+  } catch {}
+
+  try {
+    const fromEditTab = normalizeAmmSection(window.sessionStorage.getItem('GII_EDIT_TAB'))
+    if (fromEditTab) return fromEditTab
+  } catch {}
+
+  return null
+}
+
+function persistAmmSection (section: AmmSectionKey): void {
+  try { window.sessionStorage.setItem('GII_EDIT_TAB', section) } catch {}
+  try { window.sessionStorage.setItem('GII_REQUESTED_EDIT_SECTION', section) } catch {}
+}
+
+function broadcastAmmSection (section: AmmSectionKey): void {
+  try { window.dispatchEvent(new CustomEvent('gii:edit-section-change', { detail: { section } })) } catch {}
+}
+
 function asJs<T = any> (v: any): T {
   return v?.asMutable ? v.asMutable({ deep: true }) : v
 }
@@ -990,6 +1080,160 @@ async function resolveLayerForEdit (ds: any, fallbackUrl?: string): Promise<any 
   } catch { }
 
   return null
+}
+
+type AmmAttachmentInfo = { id: number; name?: string; size?: number; contentType?: string; url?: string }
+
+function formatAttachmentBytes (value?: number): string {
+  const n = Number(value)
+  if (!Number.isFinite(n)) return ''
+  if (n < 1024) return `${n} B`
+  const kb = n / 1024
+  if (kb < 1024) return `${kb.toFixed(1)} KB`
+  const mb = kb / 1024
+  if (mb < 1024) return `${mb.toFixed(1)} MB`
+  const gb = mb / 1024
+  return `${gb.toFixed(1)} GB`
+}
+
+function normalizeAttachmentInfos (raw: any): AmmAttachmentInfo[] {
+  const pull = (obj: any): any[] => {
+    if (!obj) return []
+    if (Array.isArray(obj)) return obj
+    if (Array.isArray(obj.attachmentInfos)) return obj.attachmentInfos
+    if (Array.isArray(obj.attachments)) return obj.attachments
+    return []
+  }
+  return pull(raw)
+    .map((a: any) => ({
+      id: Number(a?.id ?? a?.objectId ?? a?.attachmentId),
+      name: a?.name,
+      size: Number(a?.size),
+      contentType: a?.contentType,
+      url: a?.url
+    }))
+    .filter(a => Number.isFinite(a.id) && a.id > 0)
+}
+
+async function getEsriTokenForUrl (url: string): Promise<string> {
+  try {
+    const IdentityManager = await loadEsriModule<any>('esri/identity/IdentityManager')
+    const cred = IdentityManager?.findCredential?.(url) || IdentityManager?.findCredential?.(url.replace(/\/\d+$/, ''))
+    return cred?.token ? String(cred.token) : ''
+  } catch {
+    return ''
+  }
+}
+
+function attachmentRawUrl (att: AmmAttachmentInfo, oid: number, layerUrl: string): string {
+  const direct = String(att?.url || '').trim()
+  if (direct) return direct
+  if (!layerUrl || !oid || !Number.isFinite(Number(att?.id))) return ''
+  return `${layerUrl}/${Number(oid)}/attachments/${Number(att.id)}`
+}
+
+async function queryAmmAttachments (layer: any, oid: number, layerUrl: string): Promise<AmmAttachmentInfo[]> {
+  if (!oid) return []
+
+  const oidField = String(layer?.objectIdField || 'OBJECTID')
+  if (layer && typeof layer.queryAttachments === 'function') {
+    try {
+      const featureRef = { attributes: { [oidField]: oid } }
+      let res: any = null
+      try {
+        res = await layer.queryAttachments(featureRef, { returnMetadata: true, returnUrl: true })
+      } catch {
+        res = await layer.queryAttachments(featureRef)
+      }
+      if (Array.isArray(res)) {
+        for (const g of res) {
+          const pid = g?.parentObjectId ?? g?.objectId
+          if (Number(pid) === Number(oid)) return normalizeAttachmentInfos(g)
+        }
+        return normalizeAttachmentInfos(res)
+      }
+      if (res && typeof res === 'object') {
+        if (Array.isArray(res.attachmentGroups)) {
+          for (const g of res.attachmentGroups) {
+            const pid = g?.parentObjectId ?? g?.objectId
+            if (Number(pid) === Number(oid)) return normalizeAttachmentInfos(g)
+          }
+        }
+        if ((res as any)[oid]) return normalizeAttachmentInfos((res as any)[oid])
+        if ((res as any)[String(oid)]) return normalizeAttachmentInfos((res as any)[String(oid)])
+        return normalizeAttachmentInfos(res)
+      }
+    } catch {
+      // fallback REST sotto
+    }
+  }
+
+  if (!layerUrl) return []
+  const token = await getEsriTokenForUrl(layerUrl)
+  const qs = new URLSearchParams({ f: 'json', objectIds: String(oid), returnMetadata: 'true', returnUrl: 'true' })
+  if (token) qs.set('token', token)
+  const resp = await fetch(`${layerUrl}/queryAttachments?${qs.toString()}`)
+  const json: any = await resp.json().catch(() => ({}))
+  if (!resp.ok || json?.error) throw new Error(String(json?.error?.message || `HTTP ${resp.status}`))
+  if (Array.isArray(json?.attachmentGroups)) {
+    for (const g of json.attachmentGroups) {
+      const pid = g?.parentObjectId ?? g?.objectId
+      if (Number(pid) === Number(oid)) return normalizeAttachmentInfos(g)
+    }
+  }
+  if (json && typeof json === 'object') {
+    if ((json as any)[oid]) return normalizeAttachmentInfos((json as any)[oid])
+    if ((json as any)[String(oid)]) return normalizeAttachmentInfos((json as any)[String(oid)])
+  }
+  return normalizeAttachmentInfos(json)
+}
+
+async function addAmmAttachments (layer: any, oid: number, files: File[], layerUrl: string): Promise<void> {
+  if (!oid || !Array.isArray(files) || files.length === 0) return
+  if (!layerUrl) throw new Error('URL del FeatureLayer non disponibile per caricare gli allegati.')
+
+  const token = await getEsriTokenForUrl(layerUrl)
+  for (const file of files) {
+    const fd = new FormData()
+    fd.append('attachment', file)
+    fd.append('f', 'json')
+    if (token) fd.append('token', token)
+    const resp = await fetch(`${layerUrl}/${Number(oid)}/addAttachment`, { method: 'POST', body: fd })
+    const json: any = await resp.json().catch(() => ({}))
+    const addRes = json?.addAttachmentResult || json
+    if (!resp.ok || addRes?.error || json?.error) {
+      throw new Error(String(addRes?.error?.message || json?.error?.message || `HTTP ${resp.status}`))
+    }
+  }
+}
+
+async function deleteAmmAttachment (layer: any, oid: number, attachmentId: number, layerUrl: string): Promise<void> {
+  if (!oid || !attachmentId) return
+  if (!layerUrl) throw new Error('URL del FeatureLayer non disponibile per eliminare gli allegati.')
+
+  const token = await getEsriTokenForUrl(layerUrl)
+  const fd = new FormData()
+  fd.append('f', 'json')
+  fd.append('attachmentIds', String(attachmentId))
+  if (token) fd.append('token', token)
+  const resp = await fetch(`${layerUrl}/${Number(oid)}/deleteAttachments`, { method: 'POST', body: fd })
+  const json: any = await resp.json().catch(() => ({}))
+  const err = json?.error
+  if (!resp.ok || err) throw new Error(String(err?.message || `HTTP ${resp.status}`))
+}
+
+async function buildAttachmentPreviewUrl (att: AmmAttachmentInfo, oid: number, layerUrl: string): Promise<string> {
+  const raw = attachmentRawUrl(att, oid, layerUrl)
+  if (!raw) throw new Error('URL allegato non disponibile.')
+  const token = await getEsriTokenForUrl(layerUrl || raw)
+  let url = raw
+  if (token && /^https?:/i.test(url) && !/[?&]token=/.test(url)) {
+    url = `${url}${url.includes('?') ? '&' : '?'}token=${encodeURIComponent(token)}`
+  }
+  const resp = await fetch(url, { credentials: 'same-origin' })
+  if (!resp.ok) throw new Error(`Caricamento allegato fallito (HTTP ${resp.status}).`)
+  const blob = await resp.blob()
+  return URL.createObjectURL(blob)
 }
 
 async function readLayerFields (ds: any): Promise<LayerFieldInfo[]> {
@@ -2786,7 +3030,7 @@ function SpeseNotificaEditor (props: { data: Record<string, any>, fields: LayerF
         style={{ ...inputStyleFrom(st, readonly), background: readonly ? (st.formFieldDisabledBg || '#e7eef7') : '#ffffff' }}
         placeholder='0,00'
       />
-      <div style={{ marginTop: 4, color: '#6b7280', fontSize: 11, lineHeight: 1.3 }}>Importo inseribile dal TI_AMM; concorre al totale da pagare.</div>
+      <div style={{ marginTop: 4, color: '#6b7280', fontSize: 11, lineHeight: 1.3 }}>Concorre al totale da pagare.</div>
     </div>
   )
 }
@@ -3036,6 +3280,291 @@ function ViolationsSection (props: { data: any, layerFields: LayerFieldInfo[] })
         </div>
       )}
     </Section>
+  )
+}
+
+function DatiGeneraliAmmSection (props: { title: string, data: Record<string, any>, fields: LayerFieldInfo[], profile: { role: string, label: string, fullName: string, username: string }, hasDsForSave: boolean, summaryFields: any[], labelSize: number, valueSize: number }) {
+  const d = props.data || {}
+  const oid = pickOidFromData(d, 'OBJECTID')
+  const rapporto = getReportCode(d, oid != null ? Number(oid) : null)
+  return (
+    <>
+      <CompactPracticeHeader
+        title={props.title}
+        data={d}
+        fields={props.fields}
+        profile={props.profile}
+        hasDsForSave={props.hasDsForSave}
+        summaryFields={props.summaryFields}
+        labelSize={props.labelSize}
+        valueSize={props.valueSize}
+      />
+      <Section title='Dati generali'>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(210px, 1fr))', gap: 10 }}>
+          <StatusSummaryItem label='Rapporto' value={rapporto} tone='auto' />
+          <StatusSummaryItem label='Data rilevazione' value={displayAdminFieldValue(d, props.fields, 'data_rilevazione')} tone='auto' />
+          <StatusSummaryItem label='Area' value={displayAdminFieldValue(d, props.fields, 'area_cod')} tone='auto' />
+          <StatusSummaryItem label='Settore' value={displayAdminFieldValue(d, props.fields, 'settore_cod')} tone='auto' />
+          <StatusSummaryItem label='Ufficio di zona' value={displayAdminFieldValue(d, props.fields, 'ufficio_zona')} tone='auto' />
+          <StatusSummaryItem label='Tecnico rilevatore' value={displayAdminFieldValue(d, props.fields, 'tecnico_rilevatore')} tone='auto' />
+          <StatusSummaryItem label='TI AMM assegnato' value={displayAdminFieldValue(d, props.fields, 'ti_amm_assegnato_nome', displayAdminFieldValue(d, props.fields, 'ti_amm_assegnato_username'))} tone='auto' />
+          <StatusSummaryItem label='Stato TI AMM' value={displayAdminFieldValue(d, props.fields, 'stato_TI_AMM')} tone='auto' />
+        </div>
+      </Section>
+    </>
+  )
+}
+
+function VerbaleInlinePreviewSection (props: { data: Record<string, any>, fields: LayerFieldInfo[], profile: { username: string, fullName: string }, hasSelection: boolean }) {
+  const [pdfUrl, setPdfUrl] = React.useState<string | null>(null)
+  const [pdfFileName, setPdfFileName] = React.useState('verbale.pdf')
+  const [loading, setLoading] = React.useState(false)
+  const [error, setError] = React.useState<string | null>(null)
+
+  const signature = React.useMemo(() => {
+    try {
+      return JSON.stringify({ data: props.data || {}, fields: (props.fields || []).map(f => f.name), user: props.profile?.username || '' })
+    } catch {
+      return String(Date.now())
+    }
+  }, [props.data, props.fields, props.profile])
+
+  React.useEffect(() => {
+    let cancelled = false
+    if (!props.hasSelection) {
+      setPdfUrl(prev => { revokePdfUrl(prev); return null })
+      setError(null)
+      setLoading(false)
+      return () => { cancelled = true }
+    }
+
+    setLoading(true)
+    setError(null)
+    ;(async () => {
+      try {
+        const { blob, fileName } = await buildVerbalePdfBlob(props.data || {}, props.fields || [], props.profile || { username: '', fullName: '' })
+        if (cancelled) return
+        const url = makePdfUrl(blob, fileName)
+        setPdfFileName(fileName)
+        setPdfUrl(prev => {
+          revokePdfUrl(prev)
+          return url
+        })
+      } catch (e: any) {
+        if (!cancelled) setError(e?.message || String(e))
+      } finally {
+        if (!cancelled) setLoading(false)
+      }
+    })()
+
+    return () => { cancelled = true }
+  }, [signature, props.hasSelection])
+
+  React.useEffect(() => {
+    return () => { revokePdfUrl(pdfUrl) }
+  }, [pdfUrl])
+
+  return (
+    <div style={{ width: '100%', height: '100%', minHeight: 0, borderRadius: 12, overflow: 'hidden' }}>
+      <RapportoPdfViewer
+        url={pdfUrl}
+        fileName={pdfFileName}
+        title='Anteprima verbale'
+        subtitle={pdfFileName}
+        loading={loading}
+        error={error}
+        emptyText='Nessun dato disponibile per l&apos;anteprima del verbale.'
+      />
+    </div>
+  )
+}
+
+function AllegatiAmmSection (props: { oid: number | null, ds: any, layerUrl?: string, canEdit: boolean }) {
+  const st = useAdminStyle()
+  const oid = props.oid != null && Number.isFinite(Number(props.oid)) ? Number(props.oid) : null
+  const [items, setItems] = React.useState<AmmAttachmentInfo[]>([])
+  const [loadedOid, setLoadedOid] = React.useState<number | null>(null)
+  const [loading, setLoading] = React.useState(false)
+  const [busy, setBusy] = React.useState(false)
+  const [error, setError] = React.useState<string | null>(null)
+  const [selected, setSelected] = React.useState<AmmAttachmentInfo | null>(null)
+  const [previewUrl, setPreviewUrl] = React.useState<string | null>(null)
+  const [previewLoading, setPreviewLoading] = React.useState(false)
+  const [inputKey, setInputKey] = React.useState(0)
+
+  const resolveAttachmentLayer = React.useCallback(async () => {
+    const layer = await resolveLayerForEdit(props.ds, props.layerUrl)
+    const layerUrl = normalizeEditLayerUrl(props.layerUrl || layer?.url || getDataSourceUrl(props.ds))
+    return { layer, layerUrl }
+  }, [props.ds, props.layerUrl])
+
+  const load = React.useCallback(async () => {
+    if (!oid) {
+      setItems([])
+      setLoadedOid(null)
+      setError(null)
+      return
+    }
+    setLoading(true)
+    setError(null)
+    try {
+      const { layer, layerUrl } = await resolveAttachmentLayer()
+      if (!layer && !layerUrl) throw new Error('FeatureLayer non disponibile per gli allegati.')
+      const list = await queryAmmAttachments(layer, oid, layerUrl)
+      setItems(list)
+      setLoadedOid(oid)
+    } catch (e: any) {
+      setItems([])
+      setLoadedOid(oid)
+      setError(e?.message || String(e))
+    } finally {
+      setLoading(false)
+    }
+  }, [oid, resolveAttachmentLayer])
+
+  React.useEffect(() => {
+    if (oid && loadedOid !== oid) void load()
+  }, [oid, loadedOid, load])
+
+  React.useEffect(() => {
+    let cancelled = false
+    setPreviewUrl(prev => { revokePdfUrl(prev); return null })
+    if (!selected || !oid) {
+      setPreviewLoading(false)
+      return () => { cancelled = true }
+    }
+    setPreviewLoading(true)
+    ;(async () => {
+      try {
+        const { layerUrl } = await resolveAttachmentLayer()
+        const url = await buildAttachmentPreviewUrl(selected, oid, layerUrl)
+        if (!cancelled) setPreviewUrl(url)
+      } catch (e: any) {
+        if (!cancelled) setError(e?.message || String(e))
+      } finally {
+        if (!cancelled) setPreviewLoading(false)
+      }
+    })()
+    return () => { cancelled = true }
+  }, [selected, oid, resolveAttachmentLayer])
+
+  React.useEffect(() => {
+    return () => { revokePdfUrl(previewUrl) }
+  }, [previewUrl])
+
+  const upload = React.useCallback(async (files: File[]) => {
+    if (!oid || !files.length || !props.canEdit) return
+    setBusy(true)
+    setError(null)
+    try {
+      const { layer, layerUrl } = await resolveAttachmentLayer()
+      await addAmmAttachments(layer, oid, files, layerUrl)
+      setInputKey(k => k + 1)
+      await load()
+    } catch (e: any) {
+      setError(e?.message || String(e))
+    } finally {
+      setBusy(false)
+    }
+  }, [oid, props.canEdit, resolveAttachmentLayer, load])
+
+  const remove = React.useCallback(async (att: AmmAttachmentInfo) => {
+    if (!oid || !att?.id || !props.canEdit) return
+    const ok = window.confirm(`Eliminare l'allegato "${att.name || att.id}"?`)
+    if (!ok) return
+    setBusy(true)
+    setError(null)
+    try {
+      const { layer, layerUrl } = await resolveAttachmentLayer()
+      await deleteAmmAttachment(layer, oid, Number(att.id), layerUrl)
+      if (selected?.id === att.id) setSelected(null)
+      await load()
+    } catch (e: any) {
+      setError(e?.message || String(e))
+    } finally {
+      setBusy(false)
+    }
+  }, [oid, props.canEdit, resolveAttachmentLayer, load, selected])
+
+  const headerBg = st.formCardHeaderBg || '#0d3b66'
+  const headerColor = st.formCardHeaderColor || '#fff'
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', minHeight: '100%', height: '100%', border: `1px solid ${st.formCardBorderColor || '#c5d9f1'}`, borderRadius: Number(st.formCardBorderRadius ?? 10), background: '#fff', overflow: 'hidden' }}>
+      <div style={{ flex: '0 0 auto', padding: '8px 12px', background: headerBg, color: headerColor, fontWeight: 800, fontSize: Number(st.formCardHeaderFontSize ?? 13) }}>
+        Allegati
+      </div>
+
+      {!oid ? (
+        <div style={{ flex: '1 1 auto', minHeight: 0, padding: 12 }}>
+          <InfoBox kind='warn'>Selezionare una pratica prima di consultare o caricare gli allegati.</InfoBox>
+        </div>
+      ) : (
+        <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) minmax(0, 1fr)', gap: 12, flex: '1 1 auto', minHeight: 0, padding: 12 }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 10, minHeight: 0, overflow: 'hidden' }}>
+            <div style={{ flex: '0 0 auto', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, flexWrap: 'wrap' }}>
+              <div style={{ fontWeight: 800, fontSize: 13 }}>Elenco allegati</div>
+              <label style={{ minHeight: 36, height: 36, boxSizing: 'border-box', padding: '0 14px', borderRadius: 10, border: '1px solid rgba(0,0,0,0.12)', background: (!props.canEdit || busy) ? '#e5e7eb' : '#f8fbff', color: (!props.canEdit || busy) ? '#9ca3af' : '#111827', fontSize: 12, fontWeight: 600, cursor: (!props.canEdit || busy) ? 'not-allowed' : 'pointer', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', lineHeight: 1, whiteSpace: 'nowrap' }}>
+                Scegli file
+                <input
+                  key={inputKey}
+                  type='file'
+                  multiple
+                  disabled={!props.canEdit || busy}
+                  style={{ display: 'none' }}
+                  onChange={e => {
+                    const files = Array.from(e.currentTarget.files || [])
+                    if (files.length) void upload(files)
+                  }}
+                />
+              </label>
+            </div>
+
+            {error && <div style={{ flex: '0 0 auto', color: '#b42318', fontSize: 12, fontWeight: 700 }}>{error}</div>}
+            {loading ? (
+              <div style={{ flex: '0 0 auto', color: '#6b7280', fontSize: 12 }}>Caricamento allegati…</div>
+            ) : items.length ? (
+              <div style={{ flex: '1 1 auto', minHeight: 0, overflowY: 'auto', display: 'grid', alignContent: 'start', gap: 8, paddingRight: 2 }}>
+                {items.map(att => {
+                  const active = selected?.id === att.id
+                  return (
+                    <div key={att.id} onClick={() => setSelected(active ? null : att)} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, border: `1px solid ${active ? '#2563eb' : 'rgba(0,0,0,0.08)'}`, background: active ? '#eff6ff' : '#fff', borderRadius: 10, padding: '8px 10px', cursor: 'pointer', transition: 'all 0.15s' }}>
+                      <div style={{ minWidth: 0 }}>
+                        <div style={{ fontWeight: 600, fontSize: 12, color: '#111827', wordBreak: 'break-word' }}>{att.name || `Allegato #${att.id}`}</div>
+                        <div style={{ fontSize: 11, color: '#64748b' }}>{formatAttachmentBytes(att.size)}{att.contentType ? ` • ${att.contentType}` : ''}</div>
+                      </div>
+                      <button type='button' disabled={!props.canEdit || busy} onClick={e => { e.preventDefault(); e.stopPropagation(); void remove(att) }} style={secondaryButtonStyle(!props.canEdit || busy)}>Elimina</button>
+                    </div>
+                  )
+                })}
+              </div>
+            ) : (
+              <div style={{ flex: '0 0 auto', color: '#6b7280', fontSize: 12 }}>Nessun allegato.</div>
+            )}
+          </div>
+
+          <div style={{ border: '1px solid rgba(255,255,255,0.08)', borderRadius: 10, padding: 12, background: '#282828', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: selected ? 'flex-start' : 'center', overflow: 'hidden', minHeight: 0 }}>
+            {!selected ? (
+              <div style={{ fontSize: 12, color: 'rgba(255,255,255,0.45)', textAlign: 'center' }}>Seleziona un allegato per visualizzare l&apos;anteprima</div>
+            ) : previewLoading ? (
+              <div style={{ fontSize: 12, color: 'rgba(255,255,255,0.55)' }}>Caricamento anteprima…</div>
+            ) : previewUrl ? (() => {
+              const ct = String(selected.contentType || '').toLowerCase()
+              if (ct.startsWith('image/')) return <img src={previewUrl} alt={selected.name || ''} style={{ maxWidth: '100%', maxHeight: '100%', borderRadius: 6, objectFit: 'contain', flex: '1 1 auto', minHeight: 0 }} />
+              if (ct === 'application/pdf') return <iframe src={previewUrl} title={selected.name || 'PDF'} style={{ width: '100%', flex: '1 1 auto', minHeight: 0, border: 'none', borderRadius: 6 }} />
+              return <div style={{ fontSize: 12, color: 'rgba(255,255,255,0.45)', textAlign: 'center' }}>Anteprima non disponibile per questo tipo di file.</div>
+            })() : (
+              <div style={{ fontSize: 12, color: 'rgba(255,255,255,0.45)', textAlign: 'center' }}>Anteprima non disponibile per questo tipo di file.</div>
+            )}
+            {selected && (
+              <div style={{ flex: '0 0 auto', marginTop: 8, fontSize: 11, color: 'rgba(255,255,255,0.78)', textAlign: 'center', wordBreak: 'break-word' }}>
+                {selected.name || `Allegato #${selected.id}`}{selected.contentType ? ` • ${selected.contentType}` : ''}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
   )
 }
 
@@ -3327,6 +3856,7 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
   const [verbalePreviewError, setVerbalePreviewError] = React.useState<string | null>(null)
   const [verbalePreviewUrl, setVerbalePreviewUrl] = React.useState<string | null>(null)
   const [verbalePreviewFileName, setVerbalePreviewFileName] = React.useState('verbale.pdf')
+  const [activeAmmSection, setActiveAmmSection] = React.useState<AmmSectionKey>(AMM_DEFAULT_SECTION)
   const rootRef = React.useRef<HTMLDivElement | null>(null)
   const [pageVisible, setPageVisible] = React.useState(false)
 
@@ -3346,6 +3876,13 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
   }, [verbalePreviewUrl])
 
   React.useEffect(() => {
+    if (!pageVisible) return
+    if (!VALID_AMM_SECTIONS.has(activeAmmSection)) return
+    persistAmmSection(activeAmmSection)
+    broadcastAmmSection(activeAmmSection)
+  }, [pageVisible, activeAmmSection])
+
+  React.useEffect(() => {
     const sync = () => {
       const editIntent = readEditIntent()
       if (editIntent) setIntentState(selectionStateFromIntent(editIntent, 'editIntent'))
@@ -3362,6 +3899,27 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
       window.removeEventListener('gii-selection-changed', sync as EventListener)
       window.removeEventListener('gii:userLoaded', sync as EventListener)
       window.removeEventListener('focus', sync as EventListener)
+    }
+  }, [])
+
+  React.useEffect(() => {
+    const applyRequestedSection = (forcedSection?: any) => {
+      const requested = getRequestedAmmSection(forcedSection)
+      if (!requested) return
+      persistAmmSection(requested)
+      setActiveAmmSection(prev => prev === requested ? prev : requested)
+    }
+    const onExternalSectionChange = (evt: any) => applyRequestedSection(evt?.detail?.section)
+    const onUrlChange = () => applyRequestedSection()
+    window.addEventListener('hashchange', onUrlChange)
+    window.addEventListener('popstate', onUrlChange)
+    window.addEventListener('gii:edit-section-change', onExternalSectionChange as EventListener)
+    window.addEventListener('focus', onUrlChange as EventListener)
+    return () => {
+      window.removeEventListener('hashchange', onUrlChange)
+      window.removeEventListener('popstate', onUrlChange)
+      window.removeEventListener('gii:edit-section-change', onExternalSectionChange as EventListener)
+      window.removeEventListener('focus', onUrlChange as EventListener)
     }
   }, [])
 
@@ -3407,6 +3965,9 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
     setDraft({ ...base })
     setInitialDraft({ ...base })
     setAutomaticValues({})
+    setActiveAmmSection(AMM_DEFAULT_SECTION)
+    persistAmmSection(AMM_DEFAULT_SECTION)
+    broadcastAmmSection(AMM_DEFAULT_SECTION)
   }, [active?.sig])
 
   React.useEffect(() => {
@@ -3778,20 +4339,29 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
     zIndex: hasSelection ? 1001 : 'auto'
   }
 
-  const contentStyle: React.CSSProperties = {
+  // Stesso schema del gii-editing-ti:
+  // - contenitore tab = flex child a tutta altezza disponibile;
+  // - schede ordinarie = scroll verticale interno;
+  // - schede full-height, come Anteprima e Allegati = nessuno scroll generale, layout interno a tutta altezza.
+  const baseTabContentStyle: React.CSSProperties = {
     flex: '1 1 auto',
-    minHeight: 0,
-    height: 0,
-    overflowY: 'auto',
-    overflowX: 'hidden',
-    overscrollBehavior: 'contain',
-    scrollbarGutter: 'stable',
-    display: 'flex',
-    flexDirection: 'column',
-    alignItems: 'stretch',
-    gap: Number(adminStyle.formSectionGap ?? 10),
-    padding: '12px 2px 2px 2px'
+    minHeight: 0
   }
+
+  const activeContentStyle: React.CSSProperties = (activeAmmSection === 'anteprima' || activeAmmSection === 'allegati')
+    ? {
+        ...baseTabContentStyle,
+        overflow: 'hidden',
+        padding: 0
+      }
+    : {
+        ...baseTabContentStyle,
+        overflowY: 'auto',
+        overflowX: 'hidden',
+        overscrollBehavior: 'contain',
+        scrollbarGutter: 'stable',
+        padding: '12px 2px 2px 2px'
+      }
 
   const editBtnBase: React.CSSProperties = {
     padding: '7px 16px',
@@ -3887,7 +4457,7 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
           </div>
         </div>
 
-        <div style={contentStyle}>
+        <div style={activeContentStyle}>
 
         {!roleAllowed && (
           <InfoBox kind='warn'>
@@ -3903,46 +4473,78 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
 
         {hasSelection && (
           <>
-            <CompactPracticeHeader
-              title={title}
-              data={viewData || {}}
-              fields={layerFields}
-              profile={profile}
-              hasDsForSave={hasDsForSave}
-              summaryFields={Array.isArray(cfg.summaryFields) ? cfg.summaryFields : []}
-              labelSize={Number(cfg.labelFontSize || 12)}
-              valueSize={Number(cfg.valueFontSize || 13)}
-            />
+            <div style={{ display: 'grid', gap: Number(adminStyle.formSectionGap ?? 10), minHeight: (activeAmmSection === 'anteprima' || activeAmmSection === 'allegati') ? '100%' : undefined, height: (activeAmmSection === 'anteprima' || activeAmmSection === 'allegati') ? '100%' : undefined, alignContent: (activeAmmSection === 'anteprima' || activeAmmSection === 'allegati') ? 'stretch' : 'start' }} data-gii-editing-amm-section={activeAmmSection}>
+              {activeAmmSection === 'dati_generali' && (
+                <DatiGeneraliAmmSection
+                  title={title}
+                  data={viewData || {}}
+                  fields={layerFields}
+                  profile={profile}
+                  hasDsForSave={hasDsForSave}
+                  summaryFields={Array.isArray(cfg.summaryFields) ? cfg.summaryFields : []}
+                  labelSize={Number(cfg.labelFontSize || 12)}
+                  valueSize={Number(cfg.valueFontSize || 13)}
+                />
+              )}
 
-            <SanzioniConsultiveSection loadState={sanzioniConsultive} data={viewData || {}} fields={layerFields} canEdit={canEdit} onChange={onFieldChange} />
+              {activeAmmSection === 'atto' && (
+                <>
+                  <SanzioniConsultiveSection loadState={sanzioniConsultive} data={viewData || {}} fields={layerFields} canEdit={canEdit} onChange={onFieldChange} />
 
-            {!hasDsForSave && (
-              <InfoBox kind='warn'>
-                Fonte dati amministrativa non collegata. Collegare la vista amministrativa al widget in Builder per abilitare il salvataggio.
-              </InfoBox>
-            )}
+                  {!hasDsForSave && (
+                    <InfoBox kind='warn'>
+                      Fonte dati amministrativa non collegata. Collegare la vista amministrativa al widget in Builder per abilitare il salvataggio.
+                    </InfoBox>
+                  )}
 
-            {hasDsForSave && roleAllowed && !canEdit && (
-              <InfoBox kind='info'>
-                Scheda in sola lettura per il profilo corrente. La compilazione è abilitata per TI_AMM, RI_AMM e ADMIN.
-              </InfoBox>
-            )}
+                  {hasDsForSave && roleAllowed && !canEdit && (
+                    <InfoBox kind='info'>
+                      Scheda in sola lettura per il profilo corrente. La compilazione è abilitata per TI_AMM, RI_AMM e ADMIN.
+                    </InfoBox>
+                  )}
 
-            <VerbaleSummary
-              data={viewData || {}}
-              fields={layerFields}
-              canEdit={canEdit}
-              onApplyNote={text => onFieldChange(realFieldName(layerFields, 'note_atto_amm') || 'note_atto_amm', text)}
-              onPreview={handleVerbalePreview}
-              onDownload={handleVerbaleDownload}
-              disabledPdf={!hasSelection}
-              loadingPdf={verbalePreviewLoading}
-            />
-            <PagamentoGuidatoSection data={viewData || {}} fields={layerFields} canEdit={canEdit} onChange={onFieldChange} />
-            <ProtocolloNotificaGuidataSection data={viewData || {}} fields={layerFields} canEdit={canEdit} onChange={onFieldChange} />
-            <ChiusuraIstruttoriaSummary data={viewData || {}} fields={layerFields} canEdit={canEdit} onFillClose={fillCloseMeta} completionIssues={completionIssues} />
+                  <VerbaleSummary
+                    data={viewData || {}}
+                    fields={layerFields}
+                    canEdit={canEdit}
+                    onApplyNote={text => onFieldChange(realFieldName(layerFields, 'note_atto_amm') || 'note_atto_amm', text)}
+                    onPreview={handleVerbalePreview}
+                    onDownload={handleVerbaleDownload}
+                    disabledPdf={!hasSelection}
+                    loadingPdf={verbalePreviewLoading}
+                  />
+                </>
+              )}
 
+              {activeAmmSection === 'pagamento' && (
+                <PagamentoGuidatoSection data={viewData || {}} fields={layerFields} canEdit={canEdit} onChange={onFieldChange} />
+              )}
 
+              {activeAmmSection === 'notifica' && (
+                <>
+                  <ProtocolloNotificaGuidataSection data={viewData || {}} fields={layerFields} canEdit={canEdit} onChange={onFieldChange} />
+                  <ChiusuraIstruttoriaSummary data={viewData || {}} fields={layerFields} canEdit={canEdit} onFillClose={fillCloseMeta} completionIssues={completionIssues} />
+                </>
+              )}
+
+              {activeAmmSection === 'allegati' && (
+                <AllegatiAmmSection
+                  oid={oid != null && Number.isFinite(Number(oid)) ? Number(oid) : null}
+                  ds={active?.ds}
+                  layerUrl={active?.layerUrl || configuredDsState?.layerUrl || getDataSourceUrl(configuredDs)}
+                  canEdit={canEdit}
+                />
+              )}
+
+              {activeAmmSection === 'anteprima' && (
+                <VerbaleInlinePreviewSection
+                  data={viewData || {}}
+                  fields={layerFields}
+                  profile={profile}
+                  hasSelection={hasSelection}
+                />
+              )}
+            </div>
 
           </>
         )}
