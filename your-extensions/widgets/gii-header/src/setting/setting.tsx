@@ -219,15 +219,16 @@ export default function Setting(props: AllWidgetSettingProps<IMConfig>) {
       <Acc id='posizione' label='🧭 Posizione elementi'/>
       {openSec==='posizione' && <div>
         <div style={{ fontSize:11, color:'#4b9dd4', lineHeight:1.5, background:'rgba(59,130,246,0.08)', borderRadius:8, padding:'7px 10px', marginBottom:4 }}>
-          <strong>Riga:</strong> Logo · Titoli · Banner utente · Login/Esci
+          <strong>Riga:</strong> Logo · Titoli · Campanella allarmi · Banner utente · Login/Esci
         </div>
         <Nudge label='Logo' icon='🖼' value={getOffset('offsetLogo')} onChange={v=>set('offsetLogo',v)}/>
         <Nudge label='Testi (ente + titolo)' icon='📝' value={getOffset('offsetTitoli')} onChange={v=>set('offsetTitoli',v)}/>
+        <Nudge label='Campanella allarmi' icon='🔔' value={getOffset('offsetAlertBell')} onChange={v=>set('offsetAlertBell',v)}/>
         <Nudge label='Banner utente' icon='👤' value={getOffset('offsetBanner')} onChange={v=>set('offsetBanner',v)}/>
         <Nudge label='Login / Esci'  icon='🔐' value={getOffset('offsetLogin')} onChange={v=>set('offsetLogin',v)}/>
         <div style={{ marginTop:10 }}>
           <button type='button'
-            onClick={()=>['offsetLogo','offsetTitoli','offsetBanner','offsetLogin'].forEach(k=>set(k,{x:0,y:0}))}
+            onClick={()=>['offsetLogo','offsetTitoli','offsetAlertBell','offsetBanner','offsetLogin'].forEach(k=>set(k,{x:0,y:0}))}
             style={{ padding:'4px 12px', borderRadius:6, border:'1px solid rgba(255,255,255,0.15)', background:'rgba(255,255,255,0.05)', color:'#9ca3af', fontSize:11, cursor:'pointer' }}>
             ↺ Azzera tutti
           </button>
@@ -288,6 +289,44 @@ export default function Setting(props: AllWidgetSettingProps<IMConfig>) {
         </label>
       </div>}
 
+
+
+      {/* ═══ ALLARMI ═══ */}
+      <Acc id='allarmi' label='🔔 Allarmi'/>
+      {openSec==='allarmi' && <div>
+        <Check value={cfg.alertsEnabled ?? true} onChange={v=>set('alertsEnabled',v)} label='Mostra campanella allarmi fuori dalla homepage'/>
+        {(cfg.alertsEnabled ?? true) && <>
+          <label style={P.lbl}>URL vista pratiche AMM</label>
+          <Inp value={cfg.alertsPracticeLayerUrl ?? 'https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_VIEW_EB_AMM_ALL/FeatureServer/0'} onChange={v=>set('alertsPracticeLayerUrl',v)} placeholder='https://.../FeatureServer/0'/>
+          <div style={P.hint}>Vista usata per calcolare gli allarmi amministrativi.</div>
+
+          <label style={P.lbl}>URL vista pratiche AGR</label>
+          <Inp value={cfg.alertsPracticeLayerUrlAgr ?? ''} onChange={v=>set('alertsPracticeLayerUrlAgr',v)} placeholder='https://.../GII_VIEW_EB_AGR_ALL/FeatureServer/0'/>
+          <label style={P.lbl}>URL vista pratiche TEC</label>
+          <Inp value={cfg.alertsPracticeLayerUrlTec ?? ''} onChange={v=>set('alertsPracticeLayerUrlTec',v)} placeholder='https://.../GII_VIEW_EB_TEC_ALL/FeatureServer/0'/>
+          <div style={P.hint}>Viste operative aggregate usate per calcolare gli allarmi tecnici e agrari, ad esempio rapporti da prendere in carico.</div>
+
+          <label style={P.lbl}>URL vista allarmi amministrativi archiviati</label>
+          <Inp value={cfg.alertsArchiveTableUrl ?? 'https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_VIEW_ALLARMI_AMMINISTRATIVI_ARCHIVIATI/FeatureServer/0'} onChange={v=>set('alertsArchiveTableUrl',v)} placeholder='https://.../FeatureServer/0'/>
+
+          <label style={P.lbl}>URL vista allarmi tecnici archiviati</label>
+          <Inp value={cfg.alertsArchiveTableUrlTecnici ?? 'https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_VIEW_ALLARMI_TECNICI_ARCHIVIATI/FeatureServer/0'} onChange={v=>set('alertsArchiveTableUrlTecnici',v)} placeholder='https://.../FeatureServer/0'/>
+          <div style={P.hint}>Le due viste puntano alla stessa tabella madre: cambia solo la condivisione con i gruppi.</div>
+
+          <div style={P.row2}>
+            <div><label style={P.lbl}>Giorni in scadenza</label><NumInp value={Number(cfg.alertsWarningDays ?? 5)} onChange={v=>set('alertsWarningDays',v)} min={1} max={60} unit='gg'/></div>
+            <div><label style={P.lbl}>Aggiorna ogni</label><NumInp value={Number(cfg.alertsPollSeconds ?? 60)} onChange={v=>set('alertsPollSeconds',v)} min={30} max={600} unit='s'/></div>
+          </div>
+
+          <label style={P.lbl}>Pagina homepage</label>
+          <PageSel value={cfg.alertsHomePage ?? ''} onChange={v=>set('alertsHomePage',v)} includeHidden={true}/>
+          <div style={P.hint}>Se impostata, nella homepage la campanella del gii-header viene nascosta.</div>
+
+          <label style={P.lbl}>Pagina apertura pratica</label>
+          <PageSel value={cfg.alertsOpenPage ?? ''} onChange={v=>set('alertsOpenPage',v)} includeHidden={true}/>
+          <div style={P.hint}>Usata dal pulsante “Apri pratica”.</div>
+        </>}
+      </div>}
 
       {/* ═══ SFONDO HEADER ═══ */}
       <Acc id='bg' label='🎨 Sfondo intestazione'/>

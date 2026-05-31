@@ -120,6 +120,11 @@ type AdminField = {
   readonly?: boolean
 }
 
+const ADMIN_COMPACT_FIELD_MIN_WIDTH = 240
+const ADMIN_COMPACT_FIELD_MAX_WIDTH = 300
+const ADMIN_COMPACT_GRID_COLUMNS = `repeat(auto-fit, minmax(${ADMIN_COMPACT_FIELD_MIN_WIDTH}px, ${ADMIN_COMPACT_FIELD_MAX_WIDTH}px))`
+const ADMIN_NOTE_CASES_COLUMN = `minmax(${ADMIN_COMPACT_FIELD_MIN_WIDTH}px, ${ADMIN_COMPACT_FIELD_MAX_WIDTH}px) minmax(0, 1fr)`
+
 const ADMIN_FIELDS: AdminField[] = [
   { group: 'atto', name: 'tipo_atto_amm', label: 'Tipo atto amministrativo (automatico)', kind: 'domain', readonly: true },
   { group: 'atto', name: 'oggetto_atto_amm', label: 'Oggetto atto amministrativo (automatico)', kind: 'text', full: true, readonly: true },
@@ -174,6 +179,8 @@ const ADMIN_FIELDS: AdminField[] = [
   { group: 'post_notifica', name: 'note_post_notifica', label: 'Note fase post-notifica', kind: 'textarea', full: true },
 
   { group: 'ricorso', name: 'ricorso_presentato', label: 'Ricorso presentato', kind: 'domain' },
+  { group: 'ricorso', name: 'termine_ricorso_data', label: 'Data termine ricorso', kind: 'date' },
+  { group: 'ricorso', name: 'termine_ricorso_note', label: 'Note termine ricorso', kind: 'textarea', full: true },
   { group: 'ricorso', name: 'ricorso_protocollo', label: 'Protocollo ricorso', kind: 'text' },
   { group: 'ricorso', name: 'ricorso_data_presentazione', label: 'Data presentazione ricorso', kind: 'date' },
   { group: 'ricorso', name: 'ricorso_presentato_da', label: 'Ricorso presentato da', kind: 'text' },
@@ -188,6 +195,8 @@ const ADMIN_FIELDS: AdminField[] = [
   { group: 'cda', name: 'cda_data_delibera', label: 'Data delibera CdA', kind: 'date' },
   { group: 'cda', name: 'cda_estremi_atto', label: 'Estremi atto/determina comunicata al RI AMM', kind: 'text', full: true },
   { group: 'cda', name: 'cda_importo_rideterminato', label: 'Importo rideterminato dal CdA', kind: 'number' },
+  { group: 'cda', name: 'termine_pagamento_rideterminato_data', label: 'Scadenza pagamento rideterminato', kind: 'date' },
+  { group: 'cda', name: 'termine_pagamento_rideterminato_note', label: 'Note pagamento rideterminato', kind: 'textarea', full: true },
   { group: 'cda', name: 'cda_note_esito', label: 'Note esito CdA', kind: 'textarea', full: true },
   { group: 'cda', name: 'ricorso_definito_il', label: 'Ricorso definito il', kind: 'date' },
   { group: 'cda', name: 'ricorso_definito_da', label: 'Ricorso definito da', kind: 'text' },
@@ -210,6 +219,62 @@ const ADMIN_FIELDS: AdminField[] = [
   { group: 'definizione', name: 'definizione_pratica_note', label: 'Note definizione pratica', kind: 'textarea', full: true }
 ]
 
+type NoteCasisticaOption = { key: string; label: string; text: string }
+
+const NOTE_FIELD_CASES: Record<string, NoteCasisticaOption[]> = {
+  attrezzature_note: [
+    { key: 'cauzione_detratta', label: 'Cauzione detratta', text: 'La cauzione versata è stata detratta dall’importo del rimborso attrezzature.' },
+    { key: 'rimborso_integrale', label: 'Rimborso integrale', text: 'Il rimborso attrezzature è stato quantificato integralmente sulla base degli elementi disponibili.' },
+    { key: 'verifica_documentale', label: 'Da documentazione agli atti', text: 'Il rimborso attrezzature è stato determinato sulla base della documentazione agli atti.' }
+  ],
+  pagamento_note: [
+    { key: 'pagopa_allegato', label: 'Avviso pagoPA allegato', text: 'Il pagamento dovrà essere effettuato mediante l’avviso pagoPA allegato al verbale.' },
+    { key: 'bonifico_indicato', label: 'Bonifico indicato', text: 'Il pagamento dovrà essere effettuato mediante bonifico bancario, secondo le coordinate indicate nell’atto.' },
+    { key: 'modalita_mista', label: 'Pagamento misto', text: 'Il pagamento è previsto con modalità mista, secondo le indicazioni riportate nell’atto e negli allegati.' },
+    { key: 'verifica_successiva', label: 'Verifica successiva incasso', text: 'L’effettivo incasso dovrà essere verificato successivamente alla scadenza indicata.' }
+  ],
+  note_post_notifica: [
+    { key: 'fase_avviata', label: 'Fase avviata', text: 'Fase post-notifica avviata a seguito della chiusura dell’istruttoria amministrativa.' },
+    { key: 'monitoraggio', label: 'Monitoraggio termini', text: 'Pratica in monitoraggio per verifica del pagamento, dell’eventuale ricorso e degli ulteriori adempimenti post-notifica.' },
+    { key: 'nessuna_anomalia', label: 'Nessuna anomalia', text: 'Non risultano, allo stato, anomalie nella fase post-notifica.' }
+  ],
+  termine_ricorso_note: [
+    { key: 'verbale', label: 'Termine da verbale', text: 'Termine per la presentazione del ricorso indicato nel verbale notificato.' },
+    { key: 'notifica', label: 'Termine dalla notifica', text: 'Termine per la presentazione del ricorso decorrente dalla data di notifica del verbale.' },
+    { key: 'atto', label: 'Termine da atto notificato', text: 'Termine individuato sulla base delle indicazioni contenute nell’atto notificato.' },
+    { key: 'documentazione', label: 'Da documentazione agli atti', text: 'Termine indicato dall’operatore sulla base della documentazione agli atti.' }
+  ],
+  ricorso_note: [
+    { key: 'in_esame', label: 'Ricorso in esame', text: 'Ricorso acquisito agli atti e in corso di esame.' },
+    { key: 'da_cda', label: 'Da sottoporre al CdA', text: 'Ricorso da sottoporre alla valutazione del CdA secondo l’iter previsto.' },
+    { key: 'documentazione_incompleta', label: 'Documentazione incompleta', text: 'La documentazione trasmessa necessita di integrazione o ulteriore verifica.' },
+    { key: 'oltre_termine', label: 'Presentato oltre termine', text: 'Il ricorso risulta presentato oltre il termine indicato; resta ferma la successiva valutazione amministrativa.' }
+  ],
+  termine_pagamento_rideterminato_note: [
+    { key: 'cda', label: 'Termine da esito CdA', text: 'Termine indicato nella comunicazione successiva all’esito del CdA.' },
+    { key: 'rideterminazione', label: 'Rideterminazione importo', text: 'Nuovo termine di pagamento conseguente alla rideterminazione dell’importo.' },
+    { key: 'comunicazione', label: 'Termine dalla comunicazione', text: 'Termine decorrente dalla notifica o comunicazione dell’esito del CdA.' },
+    { key: 'atto_rideterminazione', label: 'Da atto rideterminazione', text: 'Termine indicato dall’operatore sulla base dell’atto di rideterminazione.' }
+  ],
+  cda_note_esito: [
+    { key: 'accolto', label: 'Ricorso accolto', text: 'Il ricorso è stato accolto secondo quanto disposto dal CdA.' },
+    { key: 'parziale', label: 'Parziale accoglimento', text: 'Il ricorso è stato parzialmente accolto, con conseguente rideterminazione degli importi o degli adempimenti.' },
+    { key: 'respinto', label: 'Ricorso respinto', text: 'Il ricorso è stato respinto dal CdA.' },
+    { key: 'nuova_istruttoria', label: 'Nuova istruttoria', text: 'L’esito del CdA richiede una nuova lavorazione amministrativa della pratica.' }
+  ],
+  definizione_pratica_note: [
+    { key: 'pagata', label: 'Pagata', text: 'La pratica è definita a seguito dell’avvenuto pagamento.' },
+    { key: 'archiviata', label: 'Archiviata', text: 'La pratica è definita con archiviazione, secondo gli atti e le verifiche effettuate.' },
+    { key: 'annullata', label: 'Annullata', text: 'La pratica è definita a seguito dell’annullamento dell’atto.' },
+    { key: 'riscossione', label: 'Avviata a riscossione', text: 'La pratica è definita ai fini della gestione ordinaria ed è avviata alla fase di riscossione.' },
+    { key: 'ricorso', label: 'Definita dopo ricorso', text: 'La pratica è definita a seguito dell’esito del ricorso.' }
+  ]
+}
+
+function getNoteCasistiche (fieldName: string): NoteCasisticaOption[] {
+  return NOTE_FIELD_CASES[String(fieldName || '').toLowerCase()] || []
+}
+
 const MONEY_FIELDS = new Set([
   'sanzione_importo_base',
   'sanzione_importo_ridotta',
@@ -223,7 +288,9 @@ const MONEY_FIELDS = new Set([
   'pagamento_importo_incassato'
 ])
 
-const PAYMENT_COMMON_FIELDS = ['pagamento_modalita', 'pagamento_scadenza', 'pagamento_stato', 'pagamento_note']
+const PAYMENT_COMMON_FIELDS = ['pagamento_modalita', 'pagamento_stato', 'pagamento_scadenza', 'pagamento_note']
+const PAYMENT_MAIN_FIELDS = ['pagamento_modalita', 'pagamento_stato', 'pagamento_scadenza']
+const PAYMENT_NOTE_FIELDS = ['pagamento_note']
 const PAGOPA_FIELDS = ['pagopa_iuv', 'pagopa_codice_avviso']
 const BONIFICO_FIELDS = ['bonifico_conto_cod', 'bonifico_iban_snapshot', 'bonifico_intestatario_snapshot', 'bonifico_causale', 'bonifico_cro_trn', 'bonifico_data_accredito']
 
@@ -321,38 +388,32 @@ function parseAmmSectionFromUrlPart (value: string): AmmSectionKey | null {
 }
 
 function getRequestedAmmSection (forced?: any): AmmSectionKey | null {
+  // Richiesta esplicita proveniente dal nav orizzontale o da evento applicativo.
+  // Questa vale solo nel momento in cui l'utente clicca/attiva una scheda.
   const fromForced = normalizeAmmSection(forced)
   if (fromForced) return fromForced
 
-  try {
-    const fromUrl =
-      parseAmmSectionFromUrlPart(window.location.search || '') ||
-      parseAmmSectionFromUrlPart(window.location.hash || '') ||
-      parseAmmSectionFromUrlPart(window.location.href || '')
-    if (fromUrl) return fromUrl
-  } catch {}
-
-  try {
-    const fromNav = normalizeAmmSection(window.sessionStorage.getItem('GII_NAV_SECTION'))
-    if (fromNav) return fromNav
-  } catch {}
-
+  // Apertura da allarme: è l'unico caso in cui una richiesta memorizzata
+  // deve influenzare la scheda iniziale.
   try {
     const fromRequested = normalizeAmmSection(window.sessionStorage.getItem('GII_REQUESTED_EDIT_SECTION'))
-    if (fromRequested) return fromRequested
-  } catch {}
-
-  try {
-    const fromEditTab = normalizeAmmSection(window.sessionStorage.getItem('GII_EDIT_TAB'))
-    if (fromEditTab) return fromEditTab
+    if (fromRequested) {
+      const rawIntent = window.sessionStorage.getItem('GII_EDIT_INTENT') || ''
+      const source = rawIntent ? String(JSON.parse(rawIntent)?.source || '') : ''
+      if (source === 'gii-alerts' || source === 'gii-alerts-homepage') return fromRequested
+    }
   } catch {}
 
   return null
 }
 
+function clearExplicitAmmSectionRequest (): void {
+  try { window.sessionStorage.removeItem('GII_REQUESTED_EDIT_SECTION') } catch {}
+  try { window.sessionStorage.removeItem('GII_NAV_SECTION') } catch {}
+}
+
 function persistAmmSection (section: AmmSectionKey): void {
   try { window.sessionStorage.setItem('GII_EDIT_TAB', section) } catch {}
-  try { window.sessionStorage.setItem('GII_REQUESTED_EDIT_SECTION', section) } catch {}
 }
 
 function broadcastAmmSection (section: AmmSectionKey): void {
@@ -818,6 +879,25 @@ function formatEuroText (v: any): string {
   const n = Number(v)
   if (!Number.isFinite(n)) return '—'
   return `${n.toLocaleString('it-IT', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €`
+}
+
+function moneyAttr (data: Record<string, any>, fieldName: string): number {
+  const n = parseNumberInput(pickAttrCI(data || {}, [fieldName]))
+  return n != null && Number.isFinite(n) ? n : 0
+}
+
+function formatEuroAmount (value: number): string {
+  return formatEuroText(roundMoneyValue(value))
+}
+
+function sanzioneDovutaAmount (data: Record<string, any>): number {
+  const ridotta = parseNumberInput(pickAttrCI(data || {}, ['sanzione_importo_ridotta']))
+  if (ridotta != null && Number.isFinite(ridotta)) return ridotta
+  return moneyAttr(data, 'sanzione_importo_base')
+}
+
+function risarcimentoRimborsiAmount (data: Record<string, any>): number {
+  return moneyAttr(data, 'risarcimento_danni_importo') + moneyAttr(data, 'attrezzature_importo_netto')
 }
 
 function looksLikeDateField (name: string): boolean {
@@ -2293,8 +2373,8 @@ function NoteAmministrativeQuickActions (props: { data: Record<string, any>, can
   ]
   const st = useAdminStyle()
   return (
-    <div style={{ display: 'grid', gridTemplateColumns: 'minmax(220px, 360px)', gap: 5 }}>
-      <label style={{ color: st.formLabelColor || '#334155', fontSize: Number(st.formLabelFontSize ?? 12), fontWeight: Number(st.formLabelFontWeight ?? 600) as any }}>Casistica note</label>
+    <div style={{ display: 'grid', gap: 4, width: '100%' }}>
+      <label style={{ color: st.formLabelColor || '#334155', fontSize: Number(st.formLabelFontSize ?? 12), fontWeight: Number(st.formLabelFontWeight ?? 600) as any, marginBottom: Number(st.formLabelMarginBottom ?? 3) }}>Casistica note</label>
       <select
         disabled={!props.canEdit}
         value=''
@@ -2303,6 +2383,7 @@ function NoteAmministrativeQuickActions (props: { data: Record<string, any>, can
           if (!key) return
           props.onApply(buildDefaultAdminNote(key, props.data || {}))
         }}
+        onKeyDown={blurOnEnter}
         style={inputStyleFrom(st, !props.canEdit)}
       >
         <option value=''>- Seleziona -</option>
@@ -2368,8 +2449,12 @@ function isVerbaleDefinitivo (data: Record<string, any>): boolean {
   return hasAdminValue(pickAttrCI(data || {}, ['numero_verbale'])) && hasAdminValue(pickAttrCI(data || {}, ['data_verbale']))
 }
 
+function isVerbaleNotificato (data: Record<string, any>): boolean {
+  return hasAdminValue(pickAttrCI(data || {}, ['notifica_data']))
+}
 
-function VerbaleSummary (props: { data: Record<string, any>, fields: LayerFieldInfo[], canEdit: boolean, onApplyNote: (text: string) => void, onPreview: () => void, onDownload: () => void, disabledPdf: boolean, loadingPdf: boolean }) {
+
+function VerbaleSummary (props: { data: Record<string, any>, fields: LayerFieldInfo[], canEdit: boolean, onApplyNote: (text: string) => void }) {
   const d = props.data || {}
   const definitivo = isVerbaleDefinitivo(d)
   const numero = displayAdminFieldValue(d, props.fields, 'numero_verbale', 'Non ancora assegnato')
@@ -2381,7 +2466,6 @@ function VerbaleSummary (props: { data: Record<string, any>, fields: LayerFieldI
   const noteRaw = pickAttrCI(d, [noteReal, 'note_atto_amm'])
   const noteExists = !!noteField
   const noteReadonly = !props.canEdit || !noteExists || noteField?.editable === false
-  const noteMissing = !hasAdminValue(noteRaw)
   const st = useAdminStyle()
   return (
     <Section title='2. Predisposizione verbale'>
@@ -2397,23 +2481,16 @@ function VerbaleSummary (props: { data: Record<string, any>, fields: LayerFieldI
           </div>
         </div>
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(210px, 1fr))', gap: 10 }}>
-          <StatusSummaryItem label='Stato verbale' value={definitivo ? 'Definitivo' : 'Bozza'} tone={definitivo ? 'auto' : 'warn'} hint={definitivo ? 'Numero e data risultano assegnati dopo approvazione del Direttore d’Area.' : 'Numero e data saranno assegnati dopo approvazione del Direttore d’Area.'} />
+          <StatusSummaryItem label='Stato verbale' value={definitivo ? 'Definitivo' : 'Bozza'} tone={definitivo ? 'auto' : 'warn'} hint={definitivo ? 'Numero e data risultano assegnati dopo approvazione del Direttore d’Area.' : 'Numero e data saranno assegnati dopo l’approvazione del Direttore d’Area.'} />
           <StatusSummaryItem label='Numero' value={numero} tone='auto' hint={definitivo ? undefined : 'Sarà assegnato dopo approvazione del Direttore d’Area.'} />
           <StatusSummaryItem label='Data' value={dataVerbale} tone='auto' hint={definitivo ? undefined : 'Corrisponderà alla data di approvazione del Direttore d’Area.'} />
         </div>
       </div>
-      <div style={{ marginBottom: 10 }}>
-        <div style={{ color: noteMissing ? '#b45309' : '#374151', fontSize: 12, fontWeight: 900, marginBottom: 5 }}>Note amministrative *</div>
-        <TextArea value={noteRaw ?? ''} disabled={noteReadonly} placeholder='Annotazioni istruttorie obbligatorie. Compilarle manualmente oppure usare una casistica rapida.' onChange={v => props.onApplyNote(v || '')} />
-        {!noteExists && <div style={{ marginTop: 4, color: '#b45309', fontSize: 11, fontWeight: 700 }}>Campo note_atto_amm assente nella vista.</div>}
-        {noteExists && noteMissing && <div style={{ marginTop: 4, color: '#b45309', fontSize: 11, fontWeight: 800 }}>Le note amministrative sono obbligatorie prima del salvataggio dell’istruttoria.</div>}
-      </div>
-      <NoteAmministrativeQuickActions data={d} canEdit={props.canEdit && noteExists} onApply={props.onApplyNote} />
-      <div style={{ marginTop: 12, display: 'flex', justifyContent: 'space-between', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
-        <div style={{ color: '#6b7280', fontSize: 12, fontWeight: 700 }}>{definitivo ? 'Il verbale definitivo può essere protocollato e notificato.' : 'Numero e data saranno assegnati dopo approvazione del Direttore d’Area.'}</div>
-        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, flexWrap: 'wrap' }}>
-          <button type='button' disabled={props.disabledPdf || props.loadingPdf} onClick={props.onPreview} style={secondaryButtonStyle(props.disabledPdf || props.loadingPdf)}>Anteprima verbale PDF</button>
-          <button type='button' disabled={props.disabledPdf || props.loadingPdf} onClick={props.onDownload} style={secondaryButtonStyle(props.disabledPdf || props.loadingPdf)}>Scarica verbale PDF</button>
+      <div style={{ marginBottom: 10, display: 'grid', gridTemplateColumns: ADMIN_NOTE_CASES_COLUMN, gap: 10, alignItems: 'start', width: '100%' }}>
+        <NoteAmministrativeQuickActions data={d} canEdit={props.canEdit && noteExists} onApply={props.onApplyNote} />
+        <div style={{ minWidth: 0, width: '100%' }}>
+          <div style={{ color: '#374151', fontSize: 12, fontWeight: 900, marginBottom: 5 }}>Note amministrative</div>
+          <TextArea value={noteRaw ?? ''} disabled={noteReadonly} placeholder='Annotazioni istruttorie. Compilarle manualmente oppure usare una casistica rapida.' onChange={v => props.onApplyNote(v || '')} />
         </div>
       </div>
     </Section>
@@ -2565,6 +2642,22 @@ function CompactPracticeHeader (props: { title: string, data: Record<string, any
   )
 }
 
+function PostApprovalLockedBox () {
+  return (
+    <InfoBox kind='warn'>
+      La compilazione di questa sezione sarà disponibile dopo l’approvazione del Direttore d’Area.
+    </InfoBox>
+  )
+}
+
+function PostNotificationLockedBox () {
+  return (
+    <InfoBox kind='warn'>
+      La compilazione di questa sezione sarà disponibile dopo la registrazione della notifica del verbale.
+    </InfoBox>
+  )
+}
+
 function ProtocolloNotificaGuidataSection (props: { data: Record<string, any>, fields: LayerFieldInfo[], canEdit: boolean, onChange: (name: string, value: any) => void }) {
   const definitivo = isVerbaleDefinitivo(props.data || {})
   return (
@@ -2577,7 +2670,7 @@ function ProtocolloNotificaGuidataSection (props: { data: Record<string, any>, f
   )
 }
 
-function PagamentoGuidatoSection (props: { data: Record<string, any>, fields: LayerFieldInfo[], canEdit: boolean, onChange: (name: string, value: any) => void }) {
+function PagamentoGuidatoSection (props: { data: Record<string, any>, fields: LayerFieldInfo[], canEdit: boolean, canEditSpeseNotifica: boolean, onChange: (name: string, value: any) => void }) {
   const st = useAdminStyle()
   const d = props.data || {}
   const mode = getPaymentMode(d, props.fields)
@@ -2587,10 +2680,9 @@ function PagamentoGuidatoSection (props: { data: Record<string, any>, fields: La
   return (
     <Section title='3. Pagamento'>
       <div style={{ display: 'grid', gap: 12 }}>
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(210px, 1fr))', gap: 10 }}>
-          <StatusSummaryItem label='Importo da pagare' value={displayAdminFieldValue(d, props.fields, 'pagamento_importo_totale')} tone='total' />
-          <StatusSummaryItem label='Scadenza pagamento' value={displayAdminFieldValue(d, props.fields, 'pagamento_scadenza')} />
-          <StatusSummaryItem label='Stato pagamento' value={displayAdminFieldValue(d, props.fields, 'pagamento_stato')} />
+        <div style={{ display: 'grid', gridTemplateColumns: ADMIN_COMPACT_GRID_COLUMNS, gap: 10, alignItems: 'stretch' }}>
+          <SpeseNotificaEditor data={d} fields={props.fields} canEdit={props.canEditSpeseNotifica} onChange={props.onChange} />
+          <StatusSummaryItem label='Totale da pagare' value={displayAdminFieldValue(d, props.fields, 'pagamento_importo_totale')} tone='total' />
         </div>
 
         <AdminFieldsGrid
@@ -2599,7 +2691,16 @@ function PagamentoGuidatoSection (props: { data: Record<string, any>, fields: La
           fields={props.fields}
           canEdit={props.canEdit}
           onChange={props.onChange}
-          fieldNames={['pagamento_modalita', 'pagamento_scadenza', 'pagamento_stato', 'pagamento_note']}
+          fieldNames={PAYMENT_MAIN_FIELDS}
+        />
+
+        <AdminFieldsGrid
+          group='pagamento'
+          draft={d}
+          fields={props.fields}
+          canEdit={props.canEdit}
+          onChange={props.onChange}
+          fieldNames={PAYMENT_NOTE_FIELDS}
         />
 
         {!mode && <InfoBox kind='warn'>Selezionare la modalità di pagamento: pagoPA, bonifico bancario, pagamento misto o altro.</InfoBox>}
@@ -2709,8 +2810,8 @@ function DefinizionePraticaSection (props: { data: Record<string, any>, fields: 
   return (
     <>
       <Section title='Incasso'>
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(210px, 1fr))', gap: 10, marginBottom: 12 }}>
-          <StatusSummaryItem label='Importo dovuto' value={displayAdminFieldValue(d, props.fields, 'pagamento_importo_totale')} tone='total' />
+        <div style={{ display: 'grid', gridTemplateColumns: ADMIN_COMPACT_GRID_COLUMNS, gap: 10, marginBottom: 12 }}>
+          <StatusSummaryItem label='Totale da pagare' value={displayAdminFieldValue(d, props.fields, 'pagamento_importo_totale')} tone='total' />
         </div>
         <AdminFieldsGrid group='incasso' draft={d} fields={props.fields} canEdit={props.canEdit} onChange={props.onChange} />
       </Section>
@@ -3130,7 +3231,7 @@ function SpeseNotificaEditor (props: { data: Record<string, any>, fields: LayerF
 
   return (
     <div style={{ border: `1px solid ${st.formCardBorderColor || '#c6d7ea'}`, background: '#ffffff', borderRadius: Number(st.formCardBorderRadius ?? 8), padding: '9px 11px', minWidth: 0 }}>
-      <div style={{ color: '#6b7280', fontSize: 11, fontWeight: 800, textTransform: 'uppercase', letterSpacing: 0.25, marginBottom: 4 }}>Spese notifica</div>
+      <div style={{ color: '#6b7280', fontSize: 11, fontWeight: 800, textTransform: 'uppercase', letterSpacing: 0.25, marginBottom: 4 }}>Spese di notifica</div>
       <input
         type='text'
         inputMode='decimal'
@@ -3175,6 +3276,10 @@ function ParametriSanzionatoriSection (props: { loadState: SanzioneConsultivaLoa
   const error = loadState.error
   const groups = loadState.groups || []
   const d = props.data || {}
+  const sanzioneDovuta = sanzioneDovutaAmount(d)
+  const risarcimentoRimborsi = risarcimentoRimborsiAmount(d)
+  const speseNotifica = moneyAttr(d, 'sanzione_spese_notifica')
+  const totaleAtto = sanzioneDovuta + risarcimentoRimborsi + speseNotifica
 
   return (
     <Section title='1. Verifica dati automatici'>
@@ -3191,11 +3296,13 @@ function ParametriSanzionatoriSection (props: { loadState: SanzioneConsultivaLoa
       )}
       {urlsReady && groups.length > 0 && (
         <div style={{ display: 'grid', gap: 10 }}>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(190px, 1fr))', gap: 10 }}>
-            <StatusSummaryItem label='Sanzione' value={displayAdminFieldValue(d, props.fields, 'sanzione_importo_base')} tone='auto' />
-            <StatusSummaryItem label='Risarcimento / rimborsi' value={displayAdminFieldValue(d, props.fields, 'risarcimento_danni_importo')} tone='auto' />
-            <SpeseNotificaEditor data={d} fields={props.fields} canEdit={props.canEdit} onChange={props.onChange} />
-            <StatusSummaryItem label='Totale da pagare' value={displayAdminFieldValue(d, props.fields, 'pagamento_importo_totale')} tone='total' />
+          <div style={{ display: 'grid', gap: 10 }}>
+            <div style={{ display: 'grid', gridTemplateColumns: ADMIN_COMPACT_GRID_COLUMNS, gap: 10 }}>
+              <StatusSummaryItem label='Sanzione dovuta' value={formatEuroAmount(sanzioneDovuta)} tone='auto' />
+              <StatusSummaryItem label='Risarcimento / rimborsi' value={formatEuroAmount(risarcimentoRimborsi)} tone='auto' />
+              <StatusSummaryItem label='Spese di notifica' value={formatEuroAmount(speseNotifica)} tone='auto' />
+              <StatusSummaryItem label='Totale da pagare' value={formatEuroAmount(totaleAtto)} tone='total' />
+            </div>
           </div>
           <details style={{ border: `${Number(st.formExpandableCardBorderWidth ?? 1)}px solid ${st.formExpandableCardBorderColor || '#e5e7eb'}`, borderRadius: 10, background: st.formExpandableCardBg || '#f9fafb', padding: 10 }}>
             <summary style={{ cursor: 'pointer', fontWeight: 900, color: '#0d3b66', fontSize: 13 }}>Mostra dettaglio norme e calcolo</summary>
@@ -3418,6 +3525,13 @@ function DatiGeneraliAmmSection (props: { title: string, data: Record<string, an
   const d = props.data || {}
   const oid = pickOidFromData(d, 'OBJECTID')
   const rapporto = getReportCode(d, oid != null ? Number(oid) : null)
+  const verbaleDefinitivo = isVerbaleDefinitivo(d)
+  const verbaleNotificato = isVerbaleNotificato(d)
+  const tecnicoIstruttoreTecnico = String(pickAttrCI(d, ['ti_assegnato_nome', 'ti_assegnato_username', 'tecnico_istruttore_nome', 'tecnico_istruttore', 'istruttore_tecnico_nome', 'istruttore_tecnico']) || '—')
+  const panelStyle: React.CSSProperties = { border: '1px solid #dbeafe', background: '#f8fafc', borderRadius: 12, padding: 12, display: 'grid', gap: 10 }
+  const panelTitleStyle: React.CSSProperties = { color: '#0d3b66', fontSize: 13, fontWeight: 900, letterSpacing: 0.2, textTransform: 'uppercase' }
+  const gridStyle: React.CSSProperties = { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(210px, 1fr))', gap: 10 }
+
   return (
     <>
       <CompactPracticeHeader
@@ -3431,15 +3545,29 @@ function DatiGeneraliAmmSection (props: { title: string, data: Record<string, an
         valueSize={props.valueSize}
       />
       <Section title='Dati generali'>
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(210px, 1fr))', gap: 10 }}>
-          <StatusSummaryItem label='Rapporto' value={rapporto} tone='auto' />
-          <StatusSummaryItem label='Data rilevazione' value={displayAdminFieldValue(d, props.fields, 'data_rilevazione')} tone='auto' />
-          <StatusSummaryItem label='Area' value={displayAdminFieldValue(d, props.fields, 'area_cod')} tone='auto' />
-          <StatusSummaryItem label='Settore' value={displayAdminFieldValue(d, props.fields, 'settore_cod')} tone='auto' />
-          <StatusSummaryItem label='Ufficio di zona' value={displayAdminFieldValue(d, props.fields, 'ufficio_zona')} tone='auto' />
-          <StatusSummaryItem label='Tecnico rilevatore' value={displayAdminFieldValue(d, props.fields, 'tecnico_rilevatore')} tone='auto' />
-          <StatusSummaryItem label='TI AMM assegnato' value={displayAdminFieldValue(d, props.fields, 'ti_amm_assegnato_nome', displayAdminFieldValue(d, props.fields, 'ti_amm_assegnato_username'))} tone='auto' />
-          <StatusSummaryItem label='Stato TI AMM' value={displayAdminFieldValue(d, props.fields, 'stato_TI_AMM')} tone='auto' />
+        <div style={{ display: 'grid', gap: 14 }}>
+          <div style={panelStyle}>
+            <div style={panelTitleStyle}>Fase tecnica</div>
+            <div style={gridStyle}>
+              <StatusSummaryItem label='Numero rapporto' value={rapporto} tone='auto' />
+              <StatusSummaryItem label='Data approvazione' value={displayAdminFieldValue(d, props.fields, 'dt_esito_DT')} tone={hasAdminValue(pickAttrCI(d, ['dt_esito_DT'])) ? 'auto' : 'warn'} />
+              <StatusSummaryItem label='Area tecnica di provenienza' value={displayAdminFieldValue(d, props.fields, 'area_cod')} tone='auto' />
+              <StatusSummaryItem label='Settore' value={displayAdminFieldValue(d, props.fields, 'settore_cod')} tone='auto' />
+              <StatusSummaryItem label='Ufficio di zona' value={displayAdminFieldValue(d, props.fields, 'ufficio_zona')} tone='auto' />
+              <StatusSummaryItem label='Tecnico istruttore' value={tecnicoIstruttoreTecnico} tone='auto' />
+            </div>
+          </div>
+
+          <div style={panelStyle}>
+            <div style={panelTitleStyle}>Fase amministrativa</div>
+            <div style={gridStyle}>
+              <StatusSummaryItem label='Numero verbale' value={displayAdminFieldValue(d, props.fields, 'numero_verbale')} tone={hasAdminValue(pickAttrCI(d, ['numero_verbale'])) ? 'auto' : 'warn'} />
+              <StatusSummaryItem label='Data approvazione' value={displayAdminFieldValue(d, props.fields, 'data_verbale')} tone={hasAdminValue(pickAttrCI(d, ['data_verbale'])) ? 'auto' : 'warn'} />
+              <StatusSummaryItem label='Stato' value={verbaleDefinitivo ? 'Definitivo' : 'In corso di istruttoria'} tone={verbaleDefinitivo ? 'auto' : 'warn'} />
+              <StatusSummaryItem label='Notifica' value={verbaleNotificato ? displayAdminFieldValue(d, props.fields, 'notifica_data') : 'Non registrata'} tone={verbaleNotificato ? 'auto' : 'warn'} />
+              <StatusSummaryItem label='Tecnico istruttore' value={displayAdminFieldValue(d, props.fields, 'ti_amm_assegnato_nome', displayAdminFieldValue(d, props.fields, 'ti_amm_assegnato_username'))} tone='auto' />
+            </div>
+          </div>
         </div>
       </Section>
     </>
@@ -3895,6 +4023,32 @@ function inputStyle (disabled?: boolean): React.CSSProperties {
   }
 }
 
+function NoteCasisticaSelect (props: { fieldName: string, disabled?: boolean, onApply: (text: string) => void }) {
+  const st = useAdminStyle()
+  const options = getNoteCasistiche(props.fieldName)
+  if (!options.length) return null
+  return (
+    <div style={{ display: 'grid', gap: 4, width: '100%' }}>
+      <label style={{ color: st.formLabelColor || '#334155', fontSize: Number(st.formLabelFontSize ?? 12), fontWeight: Number(st.formLabelFontWeight ?? 600) as any, marginBottom: Number(st.formLabelMarginBottom ?? 3) }}>Casistica note</label>
+      <select
+        disabled={props.disabled}
+        value=''
+        onChange={e => {
+          const key = e.currentTarget.value
+          if (!key) return
+          const opt = options.find(o => o.key === key)
+          if (opt?.text) props.onApply(opt.text)
+        }}
+        onKeyDown={blurOnEnter}
+        style={inputStyleFrom(st, props.disabled)}
+      >
+        <option value=''>- Seleziona -</option>
+        {options.map(o => <option key={o.key} value={o.key}>{o.label}</option>)}
+      </select>
+    </div>
+  )
+}
+
 function FieldEditor (props: {
   field: AdminField
   draft: Record<string, any>
@@ -3924,6 +4078,20 @@ function FieldEditor (props: {
 
   let control: React.ReactNode = null
   if (field.kind === 'textarea') {
+    const noteCases = getNoteCasistiche(field.name)
+    if (noteCases.length > 0) {
+      return (
+        <div style={{ width: '100%' }}>
+          <div style={{ display: 'grid', gridTemplateColumns: ADMIN_NOTE_CASES_COLUMN, gap: 10, alignItems: 'start', width: '100%' }}>
+            <NoteCasisticaSelect fieldName={field.name} disabled={readonly} onApply={text => onChange(real, text)} />
+            <div style={{ minWidth: 0, width: '100%' }}>
+              {label}
+              <TextArea value={raw ?? ''} disabled={readonly} placeholder={field.placeholder} onChange={v => onChange(real, v || null)} />
+            </div>
+          </div>
+        </div>
+      )
+    }
     control = <TextArea value={raw ?? ''} disabled={readonly} placeholder={field.placeholder} onChange={v => onChange(real, v || null)} />
   } else if (field.kind === 'date' || field.kind === 'readonly-date') {
     control = <input type='date' value={dateInputValue(raw)} disabled={readonly} onChange={e => onChange(real, fromDateInputValue(e.target.value))} onKeyDown={blurOnEnter} style={inputStyleFrom(st, readonly)} />
@@ -3949,6 +4117,43 @@ function FieldEditor (props: {
   )
 }
 
+function AdminFieldsLayout (props: {
+  items: AdminField[]
+  draft: Record<string, any>
+  fields: LayerFieldInfo[]
+  canEdit: boolean
+  onChange: (name: string, value: any) => void
+}) {
+  const rows: React.ReactNode[] = []
+  let compact: AdminField[] = []
+
+  const flushCompact = () => {
+    if (!compact.length) return
+    const key = `compact-${rows.length}`
+    const fields = compact
+    compact = []
+    rows.push(
+      <div key={key} style={{ display: 'grid', gridTemplateColumns: ADMIN_COMPACT_GRID_COLUMNS, justifyContent: 'start', alignItems: 'start', gap: 12 }}>
+        {fields.map(f => <FieldEditor key={f.name} field={f} draft={props.draft} fields={props.fields} canEdit={props.canEdit} onChange={props.onChange} />)}
+      </div>
+    )
+  }
+
+  props.items.forEach(f => {
+    if (f.full || f.kind === 'textarea') {
+      flushCompact()
+      rows.push(
+        <FieldEditor key={f.name} field={f} draft={props.draft} fields={props.fields} canEdit={props.canEdit} onChange={props.onChange} />
+      )
+    } else {
+      compact.push(f)
+    }
+  })
+  flushCompact()
+
+  return <div style={{ display: 'grid', gap: 12, width: '100%' }}>{rows}</div>
+}
+
 function AdminFormSection (props: {
   title: string
   group: AdminField['group']
@@ -3963,9 +4168,7 @@ function AdminFormSection (props: {
   const items = ADMIN_FIELDS.filter(f => f.group === props.group && (!wanted || wanted.has(f.name)))
   return (
     <Section title={props.title}>
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: 12 }}>
-        {items.map(f => <FieldEditor key={f.name} field={f} draft={props.draft} fields={props.fields} canEdit={props.canEdit} onChange={props.onChange} />)}
-      </div>
+      <AdminFieldsLayout items={items} draft={props.draft} fields={props.fields} canEdit={props.canEdit} onChange={props.onChange} />
       {props.children}
     </Section>
   )
@@ -3982,9 +4185,7 @@ function AdminFieldsGrid (props: {
   const wanted = Array.isArray(props.fieldNames) && props.fieldNames.length ? new Set(props.fieldNames.map(String)) : null
   const items = ADMIN_FIELDS.filter(f => f.group === props.group && (!wanted || wanted.has(f.name)))
   return (
-    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: 12 }}>
-      {items.map(f => <FieldEditor key={f.name} field={f} draft={props.draft} fields={props.fields} canEdit={props.canEdit} onChange={props.onChange} />)}
-    </div>
+    <AdminFieldsLayout items={items} draft={props.draft} fields={props.fields} canEdit={props.canEdit} onChange={props.onChange} />
   )
 }
 
@@ -4095,6 +4296,7 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
     }
     const onExternalSectionChange = (evt: any) => applyRequestedSection(evt?.detail?.section)
     const onUrlChange = () => applyRequestedSection()
+    applyRequestedSection()
     window.addEventListener('hashchange', onUrlChange)
     window.addEventListener('popstate', onUrlChange)
     window.addEventListener('gii:edit-section-change', onExternalSectionChange as EventListener)
@@ -4127,7 +4329,9 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
   const title = buildPracticeTitle(cfg, data || {}, oid)
   const titleParts = buildPracticeTitleParts(data || {}, oid)
   const hasDsForSave = !!configuredDs
-  const canEdit = roleAllowed && ['TI_AMM', 'RI_AMM', 'ADMIN'].includes(String(profile.role || '').toUpperCase()) && hasDsForSave
+  const currentRole = String(profile.role || '').toUpperCase()
+  const canEdit = roleAllowed && ['TI_AMM', 'ADMIN'].includes(currentRole) && hasDsForSave
+  const canEditAttoNotes = canEdit
   const sanzioniConsultive = useSanzioneConsultivaState(cfg, data || {}, layerFields)
   React.useEffect(() => {
     let cancelled = false
@@ -4146,12 +4350,15 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
 
   React.useEffect(() => {
     const base = data || {}
+    const requestedSection = getRequestedAmmSection()
+    const nextSection = requestedSection || AMM_DEFAULT_SECTION
     setDraft({ ...base })
     setInitialDraft({ ...base })
     setAutomaticValues({})
-    setActiveAmmSection(AMM_DEFAULT_SECTION)
-    persistAmmSection(AMM_DEFAULT_SECTION)
-    broadcastAmmSection(AMM_DEFAULT_SECTION)
+    setActiveAmmSection(nextSection)
+    persistAmmSection(nextSection)
+    broadcastAmmSection(nextSection)
+    clearExplicitAmmSectionRequest()
   }, [active?.sig])
 
   React.useEffect(() => {
@@ -4170,6 +4377,10 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
   }, [hasSelection, sanzioniConsultive.loading, sanzioniConsultive.error, sanzioniConsultive.groups, data, draft, profile])
 
   const viewData = React.useMemo(() => ({ ...(draft || data || {}), ...automaticValues }), [draft, data, automaticValues])
+  const headerVerbaleDefinitivo = isVerbaleDefinitivo(viewData || {})
+  const verbaleNotificato = isVerbaleNotificato(viewData || {})
+  const canEditPostApproval = canEdit && headerVerbaleDefinitivo
+  const canEditPostNotification = canEdit && headerVerbaleDefinitivo && verbaleNotificato
 
   const onFieldChange = React.useCallback((name: string, value: any) => {
     setDraft(prev => ({ ...(prev || {}), [name]: value }))
@@ -4321,30 +4532,30 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
   const getCompletionIssues = React.useCallback((source: Record<string, any>): string[] => {
     const current = source || {}
     const issues: string[] = []
-    if (!hasAdminValue(pickAttrCI(current, ['numero_verbale'])) || !hasAdminValue(pickAttrCI(current, ['data_verbale']))) issues.push('Verbale non ancora definitivo: numero e data saranno assegnati dopo approvazione DA.')
-    if (!hasAdminValue(pickAttrCI(current, ['note_atto_amm']))) issues.push('Note amministrative obbligatorie non compilate.')
-    if (!hasAdminValue(pickAttrCI(current, ['protocollo_verbale_numero']))) issues.push('Numero protocollo verbale mancante.')
-    if (!hasAdminValue(pickAttrCI(current, ['protocollo_verbale_data']))) issues.push('Data protocollo verbale mancante.')
-    if (!hasAdminValue(pickAttrCI(current, ['notifica_tipo']))) issues.push('Tipo notifica mancante.')
-    if (!hasAdminValue(pickAttrCI(current, ['notifica_data']))) issues.push('Data notifica mancante.')
-    if (!hasAdminValue(pickAttrCI(current, ['notifica_esito']))) issues.push('Esito notifica mancante.')
-    if (!hasAdminValue(pickAttrCI(current, ['notifica_estremi']))) issues.push('Estremi notifica mancanti.')
+    if (!hasAdminValue(pickAttrCI(current, ['numero_verbale'])) || !hasAdminValue(pickAttrCI(current, ['data_verbale']))) issues.push('Atto: verbale non ancora definitivo; numero e data saranno assegnati dopo l’approvazione del Direttore d’Area.')
+    if (!hasAdminValue(pickAttrCI(current, ['note_atto_amm']))) issues.push('Atto: compilare le note amministrative.')
+    if (!hasAdminValue(pickAttrCI(current, ['protocollo_verbale_numero']))) issues.push('Notifica: indicare il numero protocollo verbale.')
+    if (!hasAdminValue(pickAttrCI(current, ['protocollo_verbale_data']))) issues.push('Notifica: indicare la data protocollo verbale.')
+    if (!hasAdminValue(pickAttrCI(current, ['notifica_tipo']))) issues.push('Notifica: indicare il tipo notifica.')
+    if (!hasAdminValue(pickAttrCI(current, ['notifica_data']))) issues.push('Notifica: indicare la data notifica.')
+    if (!hasAdminValue(pickAttrCI(current, ['notifica_esito']))) issues.push('Notifica: indicare l’esito notifica.')
+    if (!hasAdminValue(pickAttrCI(current, ['notifica_estremi']))) issues.push('Notifica: indicare gli estremi notifica.')
     const totale = parseNumberInput(pickAttrCI(current, ['pagamento_importo_totale'])) || 0
     if (totale > 0) {
       const mode = getPaymentMode(current, layerFields)
-      if (!mode) issues.push('Modalità di pagamento mancante.')
-      if (!hasAdminValue(pickAttrCI(current, ['pagamento_scadenza']))) issues.push('Scadenza pagamento mancante.')
-      if (!hasAdminValue(pickAttrCI(current, ['pagamento_stato']))) issues.push('Stato pagamento mancante.')
+      if (!mode) issues.push('Pagamento: indicare la modalità di pagamento.')
+      if (!hasAdminValue(pickAttrCI(current, ['pagamento_scadenza']))) issues.push('Pagamento: indicare la scadenza pagamento.')
+      if (!hasAdminValue(pickAttrCI(current, ['pagamento_stato']))) issues.push('Pagamento: indicare lo stato pagamento.')
       if (mode === 'PAGOPA' || mode === 'MISTO') {
-        if (!hasAdminValue(pickAttrCI(current, ['pagopa_iuv']))) issues.push('IUV pagoPA mancante.')
-        if (!hasAdminValue(pickAttrCI(current, ['pagopa_codice_avviso']))) issues.push('Codice avviso pagoPA mancante.')
+        if (!hasAdminValue(pickAttrCI(current, ['pagopa_iuv']))) issues.push('Pagamento: indicare l’IUV pagoPA.')
+        if (!hasAdminValue(pickAttrCI(current, ['pagopa_codice_avviso']))) issues.push('Pagamento: indicare il codice avviso pagoPA.')
       }
       if (mode === 'BONIFICO' || mode === 'MISTO') {
-        if (!hasAdminValue(pickAttrCI(current, ['bonifico_iban_snapshot']))) issues.push('IBAN bonifico mancante.')
-        if (!hasAdminValue(pickAttrCI(current, ['bonifico_intestatario_snapshot']))) issues.push('Intestatario conto bonifico mancante.')
-        if (!hasAdminValue(pickAttrCI(current, ['bonifico_causale']))) issues.push('Causale bonifico mancante.')
+        if (!hasAdminValue(pickAttrCI(current, ['bonifico_iban_snapshot']))) issues.push('Pagamento: indicare l’IBAN bonifico.')
+        if (!hasAdminValue(pickAttrCI(current, ['bonifico_intestatario_snapshot']))) issues.push('Pagamento: indicare l’intestatario conto bonifico.')
+        if (!hasAdminValue(pickAttrCI(current, ['bonifico_causale']))) issues.push('Pagamento: indicare la causale bonifico.')
       }
-      if (mode === 'ALTRO' && !hasAdminValue(pickAttrCI(current, ['pagamento_note']))) issues.push('Note pagamento mancanti per modalità Altro.')
+      if (mode === 'ALTRO' && !hasAdminValue(pickAttrCI(current, ['pagamento_note']))) issues.push('Pagamento: compilare le note pagamento per la modalità Altro.')
     }
     return issues
   }, [layerFields])
@@ -4356,7 +4567,7 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
     const current = { ...(draft || data || {}), ...automaticValues }
     const issues = getCompletionIssues(current)
     if (issues.length) {
-      setDialog({ kind: 'warn', title: 'Istruttoria non completabile', text: `Non è possibile chiudere l’istruttoria amministrativa:\n- ${issues.join('\n- ')}` })
+      setDialog({ kind: 'warn', title: 'Campi obbligatori mancanti', text: `Non è possibile chiudere l’istruttoria amministrativa. Completare i seguenti campi:\n- ${issues.join('\n- ')}` })
       return
     }
     const now = Date.now()
@@ -4434,7 +4645,7 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
     }
     const currentForValidation = { ...(draft || data || {}), ...automaticValues }
     if (!hasAdminValue(pickAttrCI(currentForValidation, ['note_atto_amm']))) {
-      setDialog({ kind: 'warn', title: 'Note amministrative obbligatorie', text: 'Compilare le note amministrative, manualmente o tramite una casistica rapida, prima di salvare l’istruttoria.' })
+      setDialog({ kind: 'warn', title: 'Campi obbligatori mancanti', text: 'Prima di salvare completare:\n- Atto: compilare le note amministrative.' })
       return
     }
     const attrs = changedAttrs(layerFields, initialDraft, draft)
@@ -4478,7 +4689,7 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
       const next = { ...(initialDraft || {}), ...attrs }
       setInitialDraft(next)
       setDraft(next)
-      setDialog({ kind: 'ok', title: 'Salvataggio completato', text: 'Dati amministrativi salvati.' })
+      setDialog({ kind: 'ok', title: 'Bozza salvata', text: 'Dati amministrativi salvati.' })
       try {
         window.dispatchEvent(new CustomEvent('gii:record-updated', { detail: { oid: Number(oid), source: 'gii-editing-amm' } }))
       } catch { }
@@ -4605,6 +4816,11 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
             <div style={{ fontSize: Number(adminStyle.titleFontSize || 18), fontWeight: Number(cfg.titleFontWeight || 700) as any, color: '#111827', lineHeight: 1.25 }}>
               {hasSelection ? (<>{titleParts.prefix}<span style={{ color: '#2563eb', fontWeight: Number(cfg.titleFontWeight || 700) as any }}>{titleParts.reportCode}</span></>) : 'Verbale amministrativo'}
             </div>
+            {hasSelection && !headerVerbaleDefinitivo && (
+              <div style={{ marginTop: 3, color: '#b42318', fontSize: 12, fontWeight: 850, lineHeight: 1.25 }}>
+                Numero e data saranno assegnati dopo l’approvazione del Direttore d’Area.
+              </div>
+            )}
           </div>
           <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
             <button type='button' disabled={saveDisabled} onClick={handleSave}
@@ -4615,7 +4831,7 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
                 color: saveDisabled ? '#9ca3af' : '#fff',
                 cursor: saveDisabled ? 'not-allowed' : 'pointer'
               }}>
-              {saving ? 'Salvataggio…' : 'Salva'}
+              {saving ? 'Salvataggio bozza…' : 'Salva bozza'}
             </button>
             <button type='button' disabled={cancelDisabled} onClick={handleReset}
               style={{
@@ -4673,7 +4889,7 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
 
               {activeAmmSection === 'atto' && (
                 <>
-                  <SanzioniConsultiveSection loadState={sanzioniConsultive} data={viewData || {}} fields={layerFields} canEdit={canEdit} onChange={onFieldChange} />
+                  <SanzioniConsultiveSection loadState={sanzioniConsultive} data={viewData || {}} fields={layerFields} canEdit={false} onChange={onFieldChange} />
 
                   {!hasDsForSave && (
                     <InfoBox kind='warn'>
@@ -4683,48 +4899,60 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
 
                   {hasDsForSave && roleAllowed && !canEdit && (
                     <InfoBox kind='info'>
-                      Scheda in sola lettura per il profilo corrente. La compilazione è abilitata per TI_AMM, RI_AMM e ADMIN.
+                      Scheda in sola lettura per il profilo corrente. La compilazione è abilitata per TI_AMM e ADMIN.
                     </InfoBox>
                   )}
 
                   <VerbaleSummary
                     data={viewData || {}}
                     fields={layerFields}
-                    canEdit={canEdit}
+                    canEdit={canEditAttoNotes}
                     onApplyNote={text => onFieldChange(realFieldName(layerFields, 'note_atto_amm') || 'note_atto_amm', text)}
-                    onPreview={handleVerbalePreview}
-                    onDownload={handleVerbaleDownload}
-                    disabledPdf={!hasSelection}
-                    loadingPdf={verbalePreviewLoading}
                   />
                 </>
               )}
 
               {activeAmmSection === 'pagamento' && (
-                <PagamentoGuidatoSection data={viewData || {}} fields={layerFields} canEdit={canEdit} onChange={onFieldChange} />
+                <>
+                  {!headerVerbaleDefinitivo && <PostApprovalLockedBox />}
+                  <PagamentoGuidatoSection data={viewData || {}} fields={layerFields} canEdit={canEditPostApproval} canEditSpeseNotifica={canEditPostApproval} onChange={onFieldChange} />
+                </>
               )}
 
               {activeAmmSection === 'notifica' && (
                 <>
-                  <ProtocolloNotificaGuidataSection data={viewData || {}} fields={layerFields} canEdit={canEdit} onChange={onFieldChange} />
-                  <ChiusuraIstruttoriaSummary data={viewData || {}} fields={layerFields} canEdit={canEdit} onFillClose={fillCloseMeta} completionIssues={completionIssues} />
+                  {!headerVerbaleDefinitivo && <PostApprovalLockedBox />}
+                  <ProtocolloNotificaGuidataSection data={viewData || {}} fields={layerFields} canEdit={canEditPostApproval} onChange={onFieldChange} />
+                  <ChiusuraIstruttoriaSummary data={viewData || {}} fields={layerFields} canEdit={canEditPostNotification} onFillClose={fillCloseMeta} completionIssues={completionIssues} />
                 </>
               )}
 
               {activeAmmSection === 'ricorso' && (
-                <RicorsoPostNotificaSection data={viewData || {}} fields={layerFields} canEdit={canEdit} onChange={onFieldChange} />
+                <>
+                  {!canEditPostNotification && <PostNotificationLockedBox />}
+                  <RicorsoPostNotificaSection data={viewData || {}} fields={layerFields} canEdit={canEditPostNotification} onChange={onFieldChange} />
+                </>
               )}
 
               {activeAmmSection === 'cda' && (
-                <EsitoCdaSection data={viewData || {}} fields={layerFields} canEdit={canEdit} onChange={onFieldChange} />
+                <>
+                  {!canEditPostNotification && <PostNotificationLockedBox />}
+                  <EsitoCdaSection data={viewData || {}} fields={layerFields} canEdit={canEditPostNotification} onChange={onFieldChange} />
+                </>
               )}
 
               {activeAmmSection === 'riapertura' && (
-                <RiaperturaAmmSection data={viewData || {}} fields={layerFields} canEdit={canEdit} onChange={onFieldChange} role={profile.role} />
+                <>
+                  {!canEditPostNotification && <PostNotificationLockedBox />}
+                  <RiaperturaAmmSection data={viewData || {}} fields={layerFields} canEdit={canEditPostNotification} onChange={onFieldChange} role={profile.role} />
+                </>
               )}
 
               {activeAmmSection === 'definizione' && (
-                <DefinizionePraticaSection data={viewData || {}} fields={layerFields} canEdit={canEdit} onChange={onFieldChange} />
+                <>
+                  {!canEditPostNotification && <PostNotificationLockedBox />}
+                  <DefinizionePraticaSection data={viewData || {}} fields={layerFields} canEdit={canEditPostNotification} onChange={onFieldChange} />
+                </>
               )}
 
               {activeAmmSection === 'allegati' && (

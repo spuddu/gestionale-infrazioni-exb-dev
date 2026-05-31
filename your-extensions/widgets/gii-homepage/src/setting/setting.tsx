@@ -733,6 +733,7 @@ export default function Setting(props: AllWidgetSettingProps<IMConfig>) {
       </div>}
 
       {/* ═══ LAYOUT CARDS ═══ */}
+
       <Acc id='cardlayout' label='📐 Layout cards'/>
       {openSec==='cardlayout' && <div>
         <div style={P.row2}>

@@ -32,6 +32,7 @@ export interface Config {
   offsetTitoli:  GroupOffset   // testi (orgName + title)
   offsetLogin:   GroupOffset   // pulsante accedi/esci
   offsetBanner:  GroupOffset   // banner utente
+  offsetAlertBell: GroupOffset // campanella allarmi
 
   // ── Opzioni accesso (come Login widget) ──
   loginView: 'popup' | 'redirect'
@@ -41,6 +42,19 @@ export interface Config {
 
   // ── Compatibilità ExB 1.19 ──
   forceReloadAfterLogoutLogin: boolean
+
+  // ── Allarmi globali ──
+  alertsEnabled: boolean
+  alertsPracticeLayerUrl: string
+  alertsPracticeLayerUrlTecnici: string
+  alertsPracticeLayerUrlAgr: string
+  alertsPracticeLayerUrlTec: string
+  alertsArchiveTableUrl: string
+  alertsArchiveTableUrlTecnici: string
+  alertsWarningDays: number
+  alertsPollSeconds: number
+  alertsOpenPage: string
+  alertsHomePage: string
 }
 
 const Z: GroupOffset = { x: 0, y: 0 }
@@ -70,12 +84,24 @@ export const defaultConfig: Config = {
   userNameColor: '#ffffff', userNameSize: 14,
   userBadgeBg: 'rgba(59,130,246,0.20)', userBadgeColor: '#93c5fd',
   userInfoColor: 'rgba(147,197,253,0.75)',
-  offsetLogo: Z, offsetTitoli: Z, offsetLogin: Z, offsetBanner: Z,
+  offsetLogo: Z, offsetTitoli: Z, offsetLogin: Z, offsetBanner: Z, offsetAlertBell: Z,
   loginView: 'popup',
   redirectAfterSignIn: '',
   redirectAfterSignOut: '',
   signedInClick: 'signout',
-  forceReloadAfterLogoutLogin: true
+  forceReloadAfterLogoutLogin: true,
+
+  alertsEnabled: true,
+  alertsPracticeLayerUrl: 'https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_VIEW_EB_AMM_ALL/FeatureServer/0',
+  alertsPracticeLayerUrlTecnici: '',
+  alertsPracticeLayerUrlAgr: '',
+  alertsPracticeLayerUrlTec: '',
+  alertsArchiveTableUrl: 'https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_VIEW_ALLARMI_AMMINISTRATIVI_ARCHIVIATI/FeatureServer/0',
+  alertsArchiveTableUrlTecnici: 'https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_VIEW_ALLARMI_TECNICI_ARCHIVIATI/FeatureServer/0',
+  alertsWarningDays: 5,
+  alertsPollSeconds: 60,
+  alertsOpenPage: '',
+  alertsHomePage: ''
 
 }
 

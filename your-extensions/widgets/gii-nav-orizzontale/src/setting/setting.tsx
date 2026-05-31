@@ -218,11 +218,29 @@ export default function Setting (props: AllWidgetSettingProps<IMConfig>) {
 
   const set = (key: string, value: any) => props.onSettingChange({ id: props.id, config: { ...cfg, [key]: value } as any })
   const setItem = (idx: number, patch: Partial<NavItem>) => set('items', items.map((it, i) => i === idx ? { ...it, ...patch } : it))
-  const moveItem = (idx: number, dir: -1 | 1) => {
-    const next = items.map(i => ({ ...i }))
-    const t = idx + dir
-    if (t < 0 || t >= next.length) return
-    ;[next[idx].order, next[t].order] = [next[t].order, next[idx].order]
+  const moveItem = (id: string, dir: -1 | 1) => {
+    const ordered = items
+      .map((it, rawIndex) => ({ ...it, rawIndex }))
+      .sort((a, b) => {
+        const ao = Number.isFinite(Number(a.order)) ? Number(a.order) : a.rawIndex
+        const bo = Number.isFinite(Number(b.order)) ? Number(b.order) : b.rawIndex
+        return ao === bo ? a.rawIndex - b.rawIndex : ao - bo
+      })
+
+    const from = ordered.findIndex(it => it.id === id)
+    const to = from + dir
+    if (from < 0 || to < 0 || to >= ordered.length) return
+
+    const current = ordered[from]
+    const target = ordered[to]
+    const currentOrder = Number.isFinite(Number(current.order)) ? Number(current.order) : from
+    const targetOrder = Number.isFinite(Number(target.order)) ? Number(target.order) : to
+
+    const next = items.map(it => {
+      if (it.id === current.id) return { ...it, order: targetOrder }
+      if (it.id === target.id) return { ...it, order: currentOrder }
+      return { ...it }
+    })
     set('items', next)
   }
   const addItem = () => {
@@ -324,8 +342,8 @@ export default function Setting (props: AllWidgetSettingProps<IMConfig>) {
                 {isCustom && <span style={{ fontSize:9, color:'#6b7280', fontStyle:'italic', flexShrink:0 }}>custom</span>}
               </div>
               <div style={{ display:'flex', alignItems:'center', gap:3, flexShrink:0 }}>
-                {si > 0 && <button type='button' onClick={e => { e.stopPropagation(); moveItem(ri, -1) }} style={{ padding:'1px 5px', fontSize:11, border:'1px solid rgba(255,255,255,0.15)', borderRadius:4, background:'rgba(255,255,255,0.05)', color:'#d1d5db', cursor:'pointer' }}>↑</button>}
-                {si < sorted.length - 1 && <button type='button' onClick={e => { e.stopPropagation(); moveItem(ri, 1) }} style={{ padding:'1px 5px', fontSize:11, border:'1px solid rgba(255,255,255,0.15)', borderRadius:4, background:'rgba(255,255,255,0.05)', color:'#d1d5db', cursor:'pointer' }}>↓</button>}
+                {si > 0 && <button type='button' onClick={e => { e.stopPropagation(); moveItem(item.id, -1) }} style={{ padding:'1px 5px', fontSize:11, border:'1px solid rgba(255,255,255,0.15)', borderRadius:4, background:'rgba(255,255,255,0.05)', color:'#d1d5db', cursor:'pointer' }}>↑</button>}
+                {si < sorted.length - 1 && <button type='button' onClick={e => { e.stopPropagation(); moveItem(item.id, 1) }} style={{ padding:'1px 5px', fontSize:11, border:'1px solid rgba(255,255,255,0.15)', borderRadius:4, background:'rgba(255,255,255,0.05)', color:'#d1d5db', cursor:'pointer' }}>↓</button>}
                 <span style={{ fontSize:10, color:'#a0aec0', marginLeft:2 }}>{isO ? '▲' : '▼'}</span>
               </div>
             </div>

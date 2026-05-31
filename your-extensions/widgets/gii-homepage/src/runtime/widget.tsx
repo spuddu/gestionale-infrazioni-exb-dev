@@ -265,6 +265,8 @@ function gotoPage(pageToken: string): void {
   window.location.hash = `#/page/${t}`
 }
 
+
+
 // ── Card ──────────────────────────────────────────────────────────────────────
 function Card(p: { card: CardConfig; cfg: any; idx: number }) {
   const { card, cfg } = p
@@ -341,15 +343,14 @@ export default function Widget(props: Props) {
 
   const [now, setNow] = React.useState(new Date())
 
-  React.useEffect(() => {
-    if (!cfg.showClock) return
-    // aggiorna ogni minuto (precisione sufficiente)
-    const t = setInterval(() => setNow(new Date()), 60000)
-    return () => clearInterval(t)
-  }, [cfg.showClock])
-
   const fmtDate = (d: Date) => d.toLocaleDateString('it-IT', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })
   const fmtTime = (d: Date) => d.toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' })
+
+  React.useEffect(() => {
+    if (!cfg.showClock) return
+    const t = window.setInterval(() => setNow(new Date()), 60000)
+    return () => window.clearInterval(t)
+  }, [cfg.showClock])
 
   React.useEffect(() => {
     let cancelled = false
@@ -362,8 +363,6 @@ export default function Widget(props: Props) {
           setULoad(false)
           return
         }
-        // Se non autenticato, chiude il loading.
-        // Se autenticato ma l'Header non ha ancora caricato il contesto, resta in loading.
         if (!isSignedIn()) {
           setUser(null)
           setULoad(false)
@@ -371,6 +370,10 @@ export default function Widget(props: Props) {
           setUser(null)
           setULoad(true)
         }
+      }).catch(() => {
+        if (cancelled) return
+        setUser(null)
+        setULoad(false)
       })
     }
 
@@ -381,6 +384,7 @@ export default function Widget(props: Props) {
       window.removeEventListener('gii:userLoaded', apply)
     }
   }, [])
+
 
   const isVisible = (c: CardConfig) => {
     if (!c.visible) return false

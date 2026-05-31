@@ -1,7 +1,9 @@
 /** @jsx jsx */
 import { React, jsx, type AllWidgetProps, SessionManager, UrlManager, getAppStore } from 'jimu-core'
+import { createPortal } from 'react-dom'
 import type { IMConfig } from '../config'
 import { defaultConfig } from '../config'
+import { queryGiiAlerts, queryGiiCurrentActivities, archiveGiiAlert, getGiiAlertBellTone, isGiiTakeChargeAlert, summarizeGiiAlerts, type GiiAlertItem, type GiiAlertQueryResult } from '../../../_shared/gii-alerts/gii-alerts'
 
 const GII_PORTAL     = 'https://cbsm-hub.maps.arcgis.com'
 const GII_UTENTI_URL = 'https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_utenti/FeatureServer/0'
@@ -14,7 +16,7 @@ const RUOLO_FULL:  Record<string, string> = {
 const PROFILO_FULL: Record<string, string> = {
   ...RUOLO_FULL,
   TI_AMM: 'Tecnico istruttore amministrativo',
-  RI_AMM: 'Responsabile istruttoria amministrativo'
+  RI_AMM: 'Responsabile istruttoria amministrativa'
 }
 const AREA_LABEL: Record<number, string> = { 1:'AMM', 2:'AGR', 3:'TEC' }
 const AREA_NUM: Record<string, number> = { AMM:1, AGR:2, TEC:3 }
@@ -527,6 +529,284 @@ async function signOut(): Promise<void> {
   try { window.dispatchEvent(new Event('gii:userLoaded')) } catch { }
 }
 
+
+
+function alertRoleAreaKey (user: any): string {
+  const role = String(user?.profiloCod || user?.ruoloCod || user?.role || '').trim().toUpperCase()
+  const area = String(user?.areaCod || user?.area || '').trim().toUpperCase()
+  if (role === 'ADMIN') return 'ADMIN'
+  if (role === 'DA') return 'DA'
+  if (role === 'TI_AMM' || role === 'RI_AMM') return role
+  if (role === 'TI' && area === 'AMM') return 'TI_AMM'
+  if (role === 'RI' && area === 'AMM') return 'RI_AMM'
+  if (role === 'RZ' && area === 'TEC') return 'RZ_TEC'
+  if (role === 'TI' && area === 'TEC') return 'TI_TEC'
+  if (role === 'RI' && area === 'TEC') return 'RI_TEC'
+  if (role === 'DT' && area === 'TEC') return 'DT_TEC'
+  if (role === 'RZ' && area === 'AGR') return 'RZ_AGR'
+  if (role === 'TI' && area === 'AGR') return 'TI_AGR'
+  if (role === 'RI' && area === 'AGR') return 'RI_AGR'
+  if (role === 'DT' && area === 'AGR') return 'DT_AGR'
+  if (role.endsWith('_TEC') || role.endsWith('_AGR')) return role
+  return role
+}
+
+function canUseGiiAlerts (user: any): boolean {
+  const k = alertRoleAreaKey(user)
+  return ['ADMIN', 'TI_AMM', 'RI_AMM', 'DA', 'RZ_TEC', 'TI_TEC', 'RI_TEC', 'DT_TEC', 'RZ_AGR', 'TI_AGR', 'RI_AGR', 'DT_AGR'].includes(k)
+}
+
+function alertAreaForUrls (user: any): 'AMM' | 'AGR' | 'TEC' {
+  const k = alertRoleAreaKey(user)
+  if (k.endsWith('_AGR')) return 'AGR'
+  if (k.endsWith('_TEC')) return 'TEC'
+  return 'AMM'
+}
+
+function usesTecniciAlertUrls (user: any): boolean {
+  const area = alertAreaForUrls(user)
+  return area === 'AGR' || area === 'TEC'
+}
+
+const GII_ATTIVITA_CORRENTI_WRITE_URL = 'https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_ATTIVITA_CORRENTI/FeatureServer/0'
+const GII_ATTIVITA_CORRENTI_AMM_URL = 'https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_VIEW_ATTIVITA_CORRENTI_AMM/FeatureServer/0'
+const GII_ATTIVITA_CORRENTI_AGR_URL = 'https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_VIEW_ATTIVITA_CORRENTI_AGR/FeatureServer/0'
+const GII_ATTIVITA_CORRENTI_TEC_URL = 'https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_VIEW_ATTIVITA_CORRENTI_TEC/FeatureServer/0'
+
+function selectCurrentActivityLayerUrl (cfg: any, user: any): string {
+  const area = alertAreaForUrls(user)
+  if (String(user?.profiloCod || user?.ruoloCod || '').trim().toUpperCase() === 'ADMIN') {
+    return String(cfg.alertsActivityLayerUrl || cfg.attivitaCorrentiLayerUrl || GII_ATTIVITA_CORRENTI_WRITE_URL).trim()
+  }
+  if (area === 'AGR') return String(cfg.alertsActivityLayerUrlAgr || cfg.attivitaCorrentiLayerUrlAgr || GII_ATTIVITA_CORRENTI_AGR_URL).trim()
+  if (area === 'TEC') return String(cfg.alertsActivityLayerUrlTec || cfg.attivitaCorrentiLayerUrlTec || GII_ATTIVITA_CORRENTI_TEC_URL).trim()
+  return String(cfg.alertsActivityLayerUrlAmm || cfg.attivitaCorrentiLayerUrlAmm || GII_ATTIVITA_CORRENTI_AMM_URL).trim()
+}
+
+function selectAlertPracticeLayerUrl (cfg: any, user: any): string {
+  const area = alertAreaForUrls(user)
+  if (area === 'AGR') return String(cfg.alertsPracticeLayerUrlAgr || cfg.alertsPracticeLayerUrlTecnici || '').trim()
+  if (area === 'TEC') return String(cfg.alertsPracticeLayerUrlTec || cfg.alertsPracticeLayerUrlTecnici || '').trim()
+  return String(cfg.alertsPracticeLayerUrl || '').trim()
+}
+
+function selectAlertArchiveTableUrl (cfg: any, user: any): string {
+  return String(usesTecniciAlertUrls(user) ? (cfg.alertsArchiveTableUrlTecnici || '') : (cfg.alertsArchiveTableUrl || '')).trim()
+}
+
+function withGiiTimeout<T> (promise: Promise<T>, ms: number, message: string): Promise<T> {
+  let timer: number | undefined
+  const timeout = new Promise<T>((_, reject) => {
+    timer = window.setTimeout(() => reject(new Error(message)), ms)
+  })
+  return Promise.race([promise, timeout]).finally(() => {
+    if (timer != null) window.clearTimeout(timer)
+  })
+}
+
+function emptyAlertCounts (): GiiAlertQueryResult['counts'] {
+  return { total: 0, red: 0, orange: 0, blue: 0, gray: 0, scaduti: 0, inScadenza: 0, critici: 0, informativi: 0 }
+}
+
+function formatAlertDate (ms: number | null): string {
+  if (ms == null) return ''
+  try { return new Date(ms).toLocaleDateString('it-IT') } catch { return '' }
+}
+
+function alertToneColor (tone: 'none' | 'red' | 'orange' | 'blue'): string {
+  if (tone === 'red') return '#dc2626'
+  if (tone === 'orange') return '#f97316'
+  if (tone === 'blue') return '#2563eb'
+  return 'rgba(148,163,184,0.7)'
+}
+
+function normalizePageId (value: any): string {
+  return String(value || '').trim()
+}
+
+function currentPageIdFromUrl (): string {
+  try {
+    const hash = String(window.location.hash || '')
+    const mHash = hash.match(/(?:page|pageid)=([^&]+)/i)
+    if (mHash?.[1]) return decodeURIComponent(mHash[1])
+    const u = new URL(window.location.href)
+    return u.searchParams.get('page') || u.searchParams.get('pageid') || ''
+  } catch {
+    return ''
+  }
+}
+
+function sectionForAlert (tipo: string): string {
+  const t = String(tipo || '').toUpperCase()
+  if (t.includes('PAGAMENTO')) return 'pagamento'
+  if (t.includes('RICORSO')) return 'ricorso'
+  if (t.includes('DEFINIRE')) return 'definizione'
+  return 'atto'
+}
+
+function storeAlertEditIntent (alert: GiiAlertItem, layerUrl: string): void {
+  const section = sectionForAlert(alert.tipoAlert)
+  const raw = alert.raw || {}
+  const rawGid = String((raw as any)?.GlobalID || (raw as any)?.globalid || '').trim().replace(/^\{|\}$/g, '').toLowerCase()
+  const alertGid = String(alert.parentGlobalId || '').trim().replace(/^\{|\}$/g, '').toLowerCase()
+  const rawOid = Number((raw as any)?.OBJECTID ?? (raw as any)?.objectid)
+  const isPracticeRaw = (!!rawGid && !!alertGid && rawGid === alertGid) || (Number.isFinite(rawOid) && alert.parentObjectId != null && rawOid === Number(alert.parentObjectId))
+
+  const intent = {
+    oid: alert.parentObjectId,
+    parentObjectId: alert.parentObjectId,
+    parentGlobalId: alert.parentGlobalId || '',
+    reportCode: alert.reportCode || '',
+    alertKey: alert.alertKey || '',
+    tipoAlert: alert.tipoAlert || '',
+    idFieldName: 'OBJECTID',
+    layerUrl,
+    data: isPracticeRaw ? raw : null,
+    ts: Date.now(),
+    source: 'gii-alerts'
+  }
+
+  try { (window as any).__giiEdit = intent } catch {}
+  try { window.sessionStorage.setItem('GII_EDIT_INTENT', JSON.stringify(intent)) } catch {}
+  try { window.sessionStorage.setItem('GII_OPEN_PRACTICE_INTENT', JSON.stringify(intent)) } catch {}
+  try { window.sessionStorage.setItem('GII_OPEN_PRACTICE_REQUESTED', '1') } catch {}
+  try { window.sessionStorage.setItem('GII_SELECTED_OID', String(alert.parentObjectId ?? '')) } catch {}
+  try { window.sessionStorage.setItem('GII_SELECTED_GLOBALID', alert.parentGlobalId || '') } catch {}
+  try { window.sessionStorage.setItem('GII_SELECTED_REPORT_CODE', alert.reportCode || '') } catch {}
+  try { window.sessionStorage.setItem('GII_SELECTED_IDFIELD', 'OBJECTID') } catch {}
+  try { window.sessionStorage.setItem('GII_SELECTED_LAYER_URL', layerUrl || '') } catch {}
+  if (isPracticeRaw) {
+    try { window.sessionStorage.setItem('GII_SELECTED_DATA', JSON.stringify(raw)) } catch {}
+  } else {
+    try { window.sessionStorage.removeItem('GII_SELECTED_DATA') } catch {}
+  }
+  try { window.sessionStorage.setItem('GII_REQUESTED_EDIT_SECTION', section) } catch {}
+  try { window.sessionStorage.setItem('GII_EDIT_TAB', section) } catch {}
+  try { window.dispatchEvent(new CustomEvent('gii-edit-intent-changed', { detail: intent })) } catch {}
+  try { window.dispatchEvent(new CustomEvent('gii-open-practice-intent', { detail: intent })) } catch {}
+  try { window.dispatchEvent(new CustomEvent('gii-selection-changed', { detail: intent })) } catch {}
+  try { window.dispatchEvent(new CustomEvent('gii:edit-section-change', { detail: { section } })) } catch {}
+}
+
+function AlertBellButton (props: { counts: GiiAlertQueryResult['counts'], loading: boolean, error: string, onClick: () => void }) {
+  const tone = getGiiAlertBellTone(props.counts)
+  const total = props.counts?.total || 0
+  if (total <= 0 && !props.error) return null
+  const color = props.error ? '#dc2626' : alertToneColor(tone)
+  return (
+    <button
+      type='button'
+      title={props.error ? `Errore allarmi: ${props.error}` : `${total} allarmi attivi`}
+      onClick={props.onClick}
+      style={{
+        position: 'relative',
+        width: 42,
+        height: 42,
+        borderRadius: 14,
+        border: `1px solid ${color}66`,
+        background: `${color}22`,
+        color: '#fff',
+        cursor: 'pointer',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        boxShadow: tone === 'red' ? `0 0 0 3px ${color}22` : undefined,
+        fontSize: 20,
+        flex: '0 0 auto'
+      }}
+    >
+      <span aria-hidden='true'>🔔</span>
+      {total > 0 && (
+        <span style={{
+          position: 'absolute',
+          top: -5,
+          right: -5,
+          minWidth: 18,
+          height: 18,
+          padding: '0 5px',
+          borderRadius: 999,
+          background: color,
+          color: '#fff',
+          fontSize: 10,
+          fontWeight: 900,
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          lineHeight: 1
+        }}>{total > 99 ? '99+' : total}</span>
+      )}
+    </button>
+  )
+}
+
+function HeaderAlertsPopup (props: {
+  alerts: GiiAlertItem[]
+  counts: GiiAlertQueryResult['counts']
+  loading: boolean
+  error: string
+  archivingKey: string
+  homeMode?: boolean
+  onClose: () => void
+  onOpenPractice: (alert: GiiAlertItem) => void
+  onArchive: (alert: GiiAlertItem) => void
+}) {
+  const popup = (
+    <div
+      data-gii-global-alert-popup='1'
+      style={{ position: 'fixed', inset: 0, zIndex: 2147483646, pointerEvents: 'none' }}
+    >
+      <div style={{ position: 'absolute', right: 18, top: 82, width: 430, maxWidth: 'calc(100vw - 28px)', maxHeight: 'calc(100vh - 110px)', overflow: 'hidden', borderRadius: 16, background: 'rgba(15,23,42,0.97)', border: '1px solid rgba(255,255,255,0.14)', boxShadow: '0 24px 70px rgba(0,0,0,0.45)', color: '#e5e7eb', backdropFilter: 'blur(14px)', pointerEvents: 'auto' }}>
+        <div style={{ padding: '14px 16px', borderBottom: '1px solid rgba(255,255,255,0.10)', display: 'flex', justifyContent: 'space-between', gap: 10, alignItems: 'center' }}>
+          <div>
+            <div style={{ fontWeight: 900, fontSize: 15 }}>Allarmi e scadenze</div>
+            <div style={{ color: 'rgba(203,213,225,0.75)', fontSize: 12, marginTop: 2 }}>
+              {props.counts.total} attivi · {props.counts.scaduti + props.counts.critici} scaduti/critici · {props.counts.inScadenza} in scadenza
+            </div>
+          </div>
+          <button type='button' onClick={props.onClose} style={{ border: '1px solid rgba(255,255,255,0.12)', background: 'rgba(255,255,255,0.06)', color: '#e5e7eb', borderRadius: 9, padding: '6px 9px', cursor: 'pointer', fontWeight: 800 }}>Chiudi</button>
+        </div>
+        <div style={{ padding: 12, overflowY: 'auto', maxHeight: 'calc(100vh - 190px)', display: 'grid', gap: 10 }}>
+          {props.error && <div style={{ border: '1px solid rgba(248,113,113,0.35)', background: 'rgba(127,29,29,0.35)', color: '#fecaca', borderRadius: 10, padding: 10, fontSize: 12 }}>{props.error}</div>}
+          {!props.loading && !props.error && props.alerts.length === 0 && props.counts.total <= 0 && (
+            <div style={{ color: '#cbd5e1', fontSize: 13, padding: 10 }}>Nessun allarme attivo.</div>
+          )}
+          {props.alerts.map(alert => {
+            const color = alertToneColor(alert.severity === 'red' ? 'red' : alert.severity === 'orange' ? 'orange' : 'blue')
+            return (
+              <div key={alert.alertKey} style={{ border: `1px solid ${color}66`, background: `${color}16`, borderRadius: 12, padding: 11 }}>
+                <div style={{ display: 'flex', gap: 8, alignItems: 'start' }}>
+                  <div style={{ width: 10, height: 10, borderRadius: '50%', background: color, marginTop: 4, flex: '0 0 auto' }} />
+                  <div style={{ minWidth: 0, flex: 1 }}>
+                    <div style={{ fontSize: 13, fontWeight: 900, color: '#fff' }}>{alert.title}</div>
+                    <div style={{ fontSize: 12, color: '#cbd5e1', lineHeight: 1.35, marginTop: 3 }}>{alert.message}</div>
+                    <div style={{ fontSize: 11, color: 'rgba(203,213,225,0.65)', marginTop: 6 }}>
+                      Rapporto: <strong>{alert.reportCode}</strong>{alert.termineData != null ? ` · Termine: ${formatAlertDate(alert.termineData)}` : ''}
+                    </div>
+                    <div style={{ marginTop: 9, display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                      <button type='button' onClick={() => props.onOpenPractice(alert)} style={{ border: `1px solid ${color}88`, background: `${color}33`, color: '#fff', borderRadius: 8, padding: '6px 10px', cursor: 'pointer', fontSize: 12, fontWeight: 850 }}>Apri pratica</button>
+                      {!props.homeMode && !isGiiTakeChargeAlert(alert) && (
+
+                        <button type='button' disabled={props.archivingKey === alert.alertKey} onClick={() => props.onArchive(alert)} style={{ border: '1px solid rgba(255,255,255,0.14)', background: 'rgba(255,255,255,0.06)', color: props.archivingKey === alert.alertKey ? '#94a3b8' : '#e5e7eb', borderRadius: 8, padding: '6px 10px', cursor: props.archivingKey === alert.alertKey ? 'wait' : 'pointer', fontSize: 12, fontWeight: 800 }}>{props.archivingKey === alert.alertKey ? 'Archiviazione…' : 'Archivia'}</button>
+
+                      )}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )
+          })}
+        </div>
+      </div>
+    </div>
+  )
+
+  if (typeof document !== 'undefined' && document.body) {
+    return createPortal(popup, document.body)
+  }
+
+  return popup
+}
+
 type Props = AllWidgetProps<IMConfig>
 
 export default function Widget(props: Props) {
@@ -555,6 +835,12 @@ export default function Widget(props: Props) {
   const [signingIn,setSigning] = React.useState(false)
   const [menuOpen, setMenuOpen] = React.useState(false)
   const [urlTick, setUrlTick] = React.useState(0)
+  const [alerts, setAlerts] = React.useState<GiiAlertItem[]>([])
+  const [alertCounts, setAlertCounts] = React.useState<GiiAlertQueryResult['counts']>(() => emptyAlertCounts())
+  const [alertsLoading, setAlertsLoading] = React.useState(false)
+  const [alertsError, setAlertsError] = React.useState('')
+  const [alertsOpen, setAlertsOpen] = React.useState(false)
+  const [archivingAlertKey, setArchivingAlertKey] = React.useState('')
   const guardLockRef = React.useRef(false)
 
   React.useEffect(() => {
@@ -656,6 +942,165 @@ export default function Widget(props: Props) {
     }
   }, [])
 
+
+  const currentPageId = React.useMemo(() => currentPageIdFromUrl(), [urlTick])
+  const configuredHomePage = normalizePageId(cfg.alertsHomePage)
+  const isAlertsHomePage = !!configuredHomePage && currentPageId === configuredHomePage
+  const canReadGiiAlerts = canUseGiiAlerts(user)
+  const showHeaderAlertBell = (cfg.alertsEnabled ?? true) && !!user && canReadGiiAlerts
+
+
+  const refreshAlerts = React.useCallback(async () => {
+    const enabled = cfg.alertsEnabled ?? true
+    const practiceLayerUrl = selectAlertPracticeLayerUrl(cfg, user)
+    const activityLayerUrl = selectCurrentActivityLayerUrl(cfg, user)
+    const archiveTableUrl = selectAlertArchiveTableUrl(cfg, user)
+
+    if (!enabled || !user?.username || !canUseGiiAlerts(user) || !activityLayerUrl) {
+      setAlerts([])
+      setAlertCounts(emptyAlertCounts())
+      setAlertsError('')
+      return
+    }
+
+    setAlertsLoading(true)
+
+    const alertUser = {
+      username: user.username,
+      fullName: user.fullName,
+      role: user.profiloCod || user.ruoloCod,
+      roleCod: user.profiloCod || user.ruoloCod,
+      areaCod: user.areaCod,
+      settoreCod: user.settoreCod,
+      ufficio: user.ufficio,
+      isAdmin: !!user.isWorkflowAdmin
+    }
+
+    let currentActivities: GiiAlertItem[] = []
+
+    try {
+      // Lettura veloce: tabella/vista piccola delle attività correnti già pronte.
+      const current = await withGiiTimeout(queryGiiCurrentActivities({
+        activityLayerUrl,
+        user: alertUser,
+        pageSize: 100
+      }), 8000, 'Timeout caricamento attività correnti.')
+
+      currentActivities = current.alerts
+      setAlerts(currentActivities)
+      setAlertCounts(current.counts)
+      setAlertsError('')
+    } catch (e: any) {
+      setAlerts([])
+      setAlertCounts(emptyAlertCounts())
+      setAlertsError(e?.message || String(e))
+      setAlertsLoading(false)
+      return
+    }
+
+    // Seconda fase non bloccante: conserva le scadenze/anomalie già esistenti,
+    // ma ignora le vecchie prese in carico calcolate dinamicamente per evitare duplicati.
+    if (practiceLayerUrl && archiveTableUrl) {
+      try {
+        const res = await withGiiTimeout(queryGiiAlerts({
+          practiceLayerUrl,
+          archiveTableUrl,
+          user: alertUser,
+          warningDays: Number(cfg.alertsWarningDays ?? 5)
+        }), 25000, 'Timeout caricamento scadenze e anomalie.')
+        const legacy = (res.alerts || []).filter(a => !isGiiTakeChargeAlert(a))
+        const merged = [...currentActivities, ...legacy]
+        setAlerts(merged)
+        setAlertCounts(summarizeGiiAlerts(merged))
+        setAlertsError('')
+      } catch (e: any) {
+        // Non cancellare le attività correnti se fallisce solo la fase secondaria.
+        if (currentActivities.length === 0) setAlertsError(e?.message || String(e))
+      }
+    }
+
+    setAlertsLoading(false)
+  }, [
+    cfg.alertsEnabled,
+    cfg.alertsPracticeLayerUrl,
+    cfg.alertsPracticeLayerUrlTecnici,
+    cfg.alertsPracticeLayerUrlAgr,
+    cfg.alertsPracticeLayerUrlTec,
+    cfg.alertsArchiveTableUrl,
+    cfg.alertsArchiveTableUrlTecnici,
+    cfg.alertsActivityLayerUrl,
+    cfg.alertsActivityLayerUrlAmm,
+    cfg.alertsActivityLayerUrlAgr,
+    cfg.alertsActivityLayerUrlTec,
+    cfg.attivitaCorrentiLayerUrl,
+    cfg.attivitaCorrentiLayerUrlAmm,
+    cfg.attivitaCorrentiLayerUrlAgr,
+    cfg.attivitaCorrentiLayerUrlTec,
+    cfg.alertsWarningDays,
+    user?.username,
+    user?.fullName,
+    user?.profiloCod,
+    user?.ruoloCod,
+    user?.areaCod,
+    user?.settoreCod,
+    user?.ufficio,
+    user?.isWorkflowAdmin
+  ])
+
+  React.useEffect(() => {
+    if (!(cfg.alertsEnabled ?? true) || !user?.username) return
+    refreshAlerts()
+    const secs = Math.max(30, Number(cfg.alertsPollSeconds ?? 60) || 60)
+    const id = window.setInterval(refreshAlerts, secs * 1000)
+    const onChanged = () => refreshAlerts()
+    const refreshEvents = [
+      'gii:record-updated',
+      'gii-record-updated',
+      'gii:practice-updated',
+      'gii:presa-in-carico-saved',
+      'gii:presa-in-carico-salvata',
+      'gii:take-charge-saved',
+      'gii-alerts-refresh',
+      'gii-alerts-archived'
+    ]
+    refreshEvents.forEach(evt => window.addEventListener(evt, onChanged as EventListener))
+    return () => {
+      window.clearInterval(id)
+      refreshEvents.forEach(evt => window.removeEventListener(evt, onChanged as EventListener))
+    }
+  }, [cfg.alertsEnabled, cfg.alertsPollSeconds, user?.username, refreshAlerts])
+
+  const openAlertPractice = React.useCallback((alert: GiiAlertItem) => {
+    const layerUrl = selectAlertPracticeLayerUrl(cfg, user)
+    storeAlertEditIntent(alert, layerUrl)
+    setAlertsOpen(false)
+    const page = String(cfg.alertsOpenPage || '').trim()
+    if (page) gotoPage(page)
+  }, [cfg.alertsPracticeLayerUrl, cfg.alertsPracticeLayerUrlTecnici, cfg.alertsPracticeLayerUrlAgr, cfg.alertsPracticeLayerUrlTec, cfg.alertsOpenPage, user?.profiloCod, user?.ruoloCod, user?.areaCod])
+
+  const archiveAlertFromHeader = React.useCallback(async (alert: GiiAlertItem) => {
+    if (!alert?.alertKey || !user?.username) return
+    if (isGiiTakeChargeAlert(alert)) return
+    const archiveTableUrl = selectAlertArchiveTableUrl(cfg, user)
+    if (!archiveTableUrl) return
+    setArchivingAlertKey(alert.alertKey)
+    try {
+      await archiveGiiAlert({
+        archiveTableUrl,
+        alert,
+        user: { username: user.username, fullName: user.fullName },
+        now: Date.now()
+      })
+      try { window.dispatchEvent(new CustomEvent('gii-alerts-archived', { detail: { alertKey: alert.alertKey } })) } catch {}
+      await refreshAlerts()
+    } catch (e: any) {
+      setAlertsError(e?.message || String(e))
+    } finally {
+      setArchivingAlertKey('')
+    }
+  }, [cfg.alertsArchiveTableUrl, cfg.alertsArchiveTableUrlTecnici, user?.username, user?.fullName, user?.profiloCod, user?.ruoloCod, user?.areaCod, refreshAlerts])
+
+
   // Auth-guard: se non autenticato → pagina Accesso; se autenticato e sei su Accesso → pagina Home
   React.useEffect(() => {
     if (uLoad) return
@@ -730,6 +1175,7 @@ export default function Widget(props: Props) {
   const accountHierarchy = accountHierarchyParts.join(' · ')
   const displayRoleCode = user?.profiloCod || user?.ruoloLabel || ''
   const displayRoleLabel = user?.profiloLabel || user?.ruoloFull || ''
+  const displayRoleBadge = displayRoleLabel || displayRoleCode
 
   return (
     <div style={{
@@ -753,6 +1199,20 @@ export default function Widget(props: Props) {
           100% { box-shadow: 0 0 0 0 rgba(59,130,246,0); }
         }
       `}</style>
+
+      {alertsOpen && showHeaderAlertBell && (
+        <HeaderAlertsPopup
+          alerts={alerts}
+          counts={alertCounts}
+          loading={alertsLoading}
+          error={alertsError}
+          archivingKey={archivingAlertKey}
+          homeMode={isAlertsHomePage}
+          onClose={() => setAlertsOpen(false)}
+          onOpenPractice={openAlertPractice}
+          onArchive={archiveAlertFromHeader}
+        />
+      )}
 
       {/* Logo + Titoli */}
       <div style={{ display:'flex', alignItems:'center', gap:16, flex:'1 1 auto', minWidth:0, overflow:'hidden' }}>
@@ -798,6 +1258,11 @@ export default function Widget(props: Props) {
 
       {/* Utente + Pulsante Accedi/Esci */}
       <div style={{ display:'flex', alignItems:'center', gap:12 }}>
+        {showHeaderAlertBell && (
+          <div style={{ ...off('offsetAlertBell') }}>
+            <AlertBellButton counts={alertCounts} loading={alertsLoading} error={alertsError} onClick={() => { if (showHeaderAlertBell) setAlertsOpen(true) }} />
+          </div>
+        )}
         {(cfg.showUserBanner ?? true) && (
           <div style={{ ...off('offsetBanner') }}>
             {uLoad ? (
@@ -817,10 +1282,9 @@ export default function Widget(props: Props) {
                 <div style={{ fontSize:cfg.userNameSize,fontWeight:600,color:cfg.userNameColor,whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis',minWidth:0 }}>
                   Benvenuto, {user.fullName||user.username}
                 </div>
-                {(displayRoleCode || displayRoleLabel) && (
-                  <div title={[displayRoleCode, displayRoleLabel].filter(Boolean).join(' · ')} style={{ fontSize:11.5,color:cfg.userInfoColor,marginTop:2,whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis',display:'flex',alignItems:'center',gap:7,minWidth:0 }}>
-                    {displayRoleCode && <span style={{ background:cfg.userBadgeBg,border:`1px solid ${cfg.userBadgeColor}44`,borderRadius:6,padding:'1px 8px',fontSize:11.5,fontWeight:600,color:cfg.userBadgeColor,flex:'0 0 auto' }}>{displayRoleCode}</span>}
-                    {displayRoleLabel && <span style={{ fontWeight:600,color:cfg.userInfoColor,overflow:'hidden',textOverflow:'ellipsis',flex:'1 1 auto',minWidth:0 }}>{displayRoleLabel}</span>}
+                {displayRoleBadge && (
+                  <div title={[displayRoleLabel, displayRoleCode].filter(Boolean).join(' · ')} style={{ fontSize:11.5,color:cfg.userInfoColor,marginTop:2,whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis',display:'flex',alignItems:'center',gap:7,minWidth:0 }}>
+                    <span style={{ background:cfg.userBadgeBg,border:`1px solid ${cfg.userBadgeColor}44`,borderRadius:6,padding:'1px 8px',fontSize:11.5,fontWeight:600,color:cfg.userBadgeColor,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap',maxWidth:260 }}>{displayRoleBadge}</span>
                   </div>
                 )}
               </div>
@@ -863,7 +1327,7 @@ export default function Widget(props: Props) {
                       {user.fullName || user.username}
                     </div>
                     <div style={{ fontSize:11.5, color:'rgba(147,197,253,0.75)', marginBottom:10, lineHeight:1.35 }}>
-                      {[displayRoleCode, displayRoleLabel, accountHierarchy].filter(Boolean).join(' · ')}
+                      {[displayRoleBadge, accountHierarchy].filter(Boolean).join(' · ')}
                     </div>
 
                     <button type='button' disabled={signingIn}

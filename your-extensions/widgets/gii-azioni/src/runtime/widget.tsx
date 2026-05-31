@@ -13,6 +13,7 @@ import RapportoPdfViewer from '../../../_shared/gii-anteprime/rapporto/rapporto-
 
 const GII_LOG_EVENTI_CICLI_URL = 'https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_LOG_EVENTI_CICLI/FeatureServer/0'
 const GII_UTENTI_URL = 'https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_utenti/FeatureServer/0'
+const GII_ATTIVITA_CORRENTI_URL = 'https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_ATTIVITA_CORRENTI/FeatureServer/0'
 
 // ── Cache GII_utenti per risolvere utente_destinatario ──────────────────────
 type UtenteCached = {
@@ -2214,6 +2215,200 @@ function ActionsPanel (props: {
     } catch {}
   }
 
+  const attivitaLayerRef = React.useRef<any>(null)
+
+  const getAttivitaLayer = async (): Promise<any> => {
+    if (attivitaLayerRef.current?.applyEdits) return attivitaLayerRef.current
+    const FeatureLayer = await loadEsriModule<any>('esri/layers/FeatureLayer')
+    const fl = new FeatureLayer({ url: GII_ATTIVITA_CORRENTI_URL, outFields: ['*'] })
+    if (typeof fl?.load === 'function') await fl.load()
+    attivitaLayerRef.current = fl
+    return fl
+  }
+
+  const shortReportNumberForActivity = (): string => {
+    const raw = String(pickAttrCI(data, ['n_rapporto', 'numero_rapporto', 'codice_rapporto', 'cod_pratica', 'rapporto', 'num_rapporto']) || '').trim()
+    if (raw) return raw.replace(/^Rapporto\s*/i, '').trim()
+    return oid != null ? `TR-${oid}` : '—'
+  }
+
+  const getActivityParentGlobalId = async (): Promise<string> => {
+    const fromData = String(pickAttrCI(data, ['globalid', 'GlobalID', 'GLOBALID', 'global_id', 'parent_globalid']) || '').trim()
+    if (fromData) return fromData
+    const fresh = await queryCurrentRecordAttrs()
+    return String(pickAttrCI(fresh || {}, ['globalid', 'GlobalID', 'GLOBALID', 'global_id', 'parent_globalid']) || '').trim()
+  }
+
+  const activitySubTypeFromEvent = (evento: string, ruoloMittente: string, ruoloDest: string, opts?: { technicalIntegration?: boolean }): string => {
+    const ev = String(evento || '').trim().toUpperCase()
+    const src = String(ruoloMittente || '').trim().toUpperCase()
+    const dst = String(ruoloDest || '').trim().toUpperCase()
+
+    if (ev === 'NUOVA_ASSEGNAZIONE') return 'NUOVA_ASSEGNAZIONE'
+    if (ev === 'RAPPORTO_APPROVATO') return 'RAPPORTO_APPROVATO'
+    if (ev === 'SANZIONE_APPROVATA') return 'VERBALE_APPROVATO'
+    if (ev === 'INTEGRAZIONE_RICHIESTA') return 'RICHIESTA_INTEGRAZIONE'
+    if (ev === 'INTEGRAZIONE_TRASMESSA') return 'INTEGRAZIONE_TRASMESSA'
+    if (ev === 'INVIO_A_TI_AMM' || ev === 'RESTITUZIONE_A_TI_AMM') return 'INTEGRAZIONE_TRASMESSA'
+    if (ev === 'ISTRUTTORIA_TRASMESSA') {
+      if (dst === 'DA') return 'PROPOSTA_VERBALE'
+      return 'INTEGRAZIONE_TRASMESSA'
+    }
+    if (ev === 'RESPINTA') {
+      if (src === 'DA') return 'VERBALE_RESPINTO'
+      if (src === 'DT') return 'ISTRUTTORIA_TECNICA_RESPINTA'
+      return 'RILEVAZIONE_RESPINTA'
+    }
+    return 'NUOVA_ASSEGNAZIONE'
+  }
+
+  const activityTitleForSubtype = (subtipo: string): string => {
+    const st = String(subtipo || '').trim().toUpperCase()
+    if (st === 'NUOVO_RAPPORTO') return 'Nuovo rapporto'
+    if (st === 'RAPPORTO_UFFICIO') return 'Rapporto d’ufficio'
+    if (st === 'NUOVA_ASSEGNAZIONE') return 'Nuova assegnazione'
+    if (st === 'RICHIESTA_INTEGRAZIONE') return 'Richiesta di integrazione'
+    if (st === 'INTEGRAZIONE_TRASMESSA') return 'Integrazione trasmessa'
+    if (st === 'RAPPORTO_APPROVATO') return 'Rapporto approvato'
+    if (st === 'PROPOSTA_VERBALE') return 'Proposta di verbale'
+    if (st === 'VERBALE_APPROVATO') return 'Verbale approvato'
+    if (st === 'RILEVAZIONE_RESPINTA') return 'Rilevazione respinta'
+    if (st === 'ISTRUTTORIA_TECNICA_RESPINTA') return 'Istruttoria tecnica respinta'
+    if (st === 'VERBALE_RESPINTO') return 'Verbale respinto'
+    return 'Attività da prendere in carico'
+  }
+
+  const activityMessageForSubtype = (subtipo: string, numeroRapporto: string): string => {
+    const st = String(subtipo || '').trim().toUpperCase()
+    const n = String(numeroRapporto || '').trim() || '—'
+    if (st === 'NUOVO_RAPPORTO') return `Nuovo rapporto n. ${n} da prendere in carico.`
+    if (st === 'RAPPORTO_UFFICIO') return `Rapporto d’ufficio n. ${n} da prendere in carico.`
+    if (st === 'NUOVA_ASSEGNAZIONE') return `Nuova assegnazione: rapporto n. ${n} da prendere in carico.`
+    if (st === 'RICHIESTA_INTEGRAZIONE') return `Richiesta di integrazione relativa al rapporto n. ${n} da prendere in carico.`
+    if (st === 'INTEGRAZIONE_TRASMESSA') return `Integrazione trasmessa relativa al rapporto n. ${n} da prendere in carico.`
+    if (st === 'RAPPORTO_APPROVATO') return `Rapporto approvato n. ${n} da prendere in carico.`
+    if (st === 'PROPOSTA_VERBALE') return `Proposta di verbale relativa al rapporto n. ${n} da prendere in carico.`
+    if (st === 'VERBALE_APPROVATO') return `Verbale approvato relativo al rapporto n. ${n} da prendere in carico.`
+    if (st === 'RILEVAZIONE_RESPINTA') return `Rilevazione respinta relativa al rapporto n. ${n} da prendere in carico.`
+    if (st === 'ISTRUTTORIA_TECNICA_RESPINTA') return `Istruttoria tecnica respinta relativa al rapporto n. ${n} da prendere in carico.`
+    if (st === 'VERBALE_RESPINTO') return `Verbale respinto relativo al rapporto n. ${n} da prendere in carico.`
+    return `Rapporto n. ${n} da prendere in carico.`
+  }
+
+  const normalizeActivityDestRole = (r: string): string => {
+    const rr = String(r || '').trim().toUpperCase()
+    if (rr === 'TI_AMM' || rr === 'RI_AMM' || rr === 'DA') return rr
+    if (rr.startsWith('DT')) return 'DT'
+    if (rr.startsWith('RI') && rr !== 'RI_AMM') return 'RI'
+    if (rr.startsWith('RZ')) return 'RZ'
+    if (rr.startsWith('TI') && rr !== 'TI_AMM') return 'TI'
+    return rr
+  }
+
+  const upsertCurrentActivityForDest = async (logOpts: { eventoChiusura: string, ruoloDestinatario?: string, utenteDestinatario?: string, noteChiusura?: string, fase?: string }) => {
+    const ruoloDest = normalizeActivityDestRole(String(logOpts?.ruoloDestinatario || ''))
+    if (!ruoloDest) return
+    const parentGlobalId = await getActivityParentGlobalId()
+    if (!parentGlobalId) {
+      console.warn('[GII_ATTIVITA_CORRENTI] Creazione attività saltata: GlobalID pratica non disponibile.', { oid, ruoloDest, evento: logOpts?.eventoChiusura })
+      return
+    }
+
+    try {
+      const layer = await getAttivitaLayer()
+      const numeroRapporto = shortReportNumberForActivity()
+      const destMeta = getRoutingMetaForRole(ruoloDest, { technicalIntegration: logOpts?.eventoChiusura === 'INTEGRAZIONE_RICHIESTA' && ruoloDest === 'RI' && role === 'RI_AMM' })
+      const areaDest = normalizeAreaLabel(destMeta.area || (ruoloDest === 'DA' || ruoloDest === 'RI_AMM' || ruoloDest === 'TI_AMM' ? 'AMM' : ''))
+      const settoreDest = normalizeSettoreCod(destMeta.settore || '')
+      const subtipo = activitySubTypeFromEvent(logOpts?.eventoChiusura, role, ruoloDest)
+      const titolo = activityTitleForSubtype(subtipo)
+      const messaggio = activityMessageForSubtype(subtipo, numeroRapporto)
+      const destUsername = String(logOpts?.utenteDestinatario || resolveDestUser(ruoloDest) || '').trim()
+      const key = `${parentGlobalId}|PRESA_IN_CARICO|${subtipo}|${ruoloDest}|${areaDest}|${settoreDest}|${destUsername}`
+      const now = Date.now()
+
+      const attrs: Record<string, any> = {
+        chiave_attivita: key,
+        parent_globalid: parentGlobalId,
+        parent_objectid: oid != null && Number.isFinite(Number(oid)) ? Number(oid) : null,
+        numero_rapporto: numeroRapporto,
+        tipo_attivita: 'PRESA_IN_CARICO',
+        sottotipo_attivita: subtipo,
+        titolo,
+        messaggio,
+        destinatario_ruolo: ruoloDest,
+        destinatario_area: areaDest || null,
+        destinatario_settore: settoreDest || null,
+        destinatario_ufficio_id: null,
+        destinatario_ufficio_zona: null,
+        destinatario_username: destUsername || null,
+        origine_evento: String(logOpts?.eventoChiusura || '').trim().toUpperCase(),
+        priorita: 'INFO',
+        data_attivazione: now,
+        creato_il: now,
+        creato_da: String((window as any).__giiUserRole?.username || ''),
+        aggiornato_il: now,
+        aggiornato_da: String((window as any).__giiUserRole?.username || '')
+      }
+
+      const q = layer.createQuery ? layer.createQuery() : {}
+      q.where = `chiave_attivita = ${sqlQuote(key)}`
+      q.outFields = ['OBJECTID']
+      q.returnGeometry = false
+      q.num = 1
+      const found = await layer.queryFeatures(q)
+      const existing = found?.features?.[0]?.attributes || null
+      if (existing?.OBJECTID != null) {
+        await layer.applyEdits({ updateFeatures: [{ attributes: { OBJECTID: existing.OBJECTID, ...attrs } }] })
+      } else {
+        await layer.applyEdits({ addFeatures: [{ attributes: attrs }] })
+      }
+      try { window.dispatchEvent(new CustomEvent('gii-alerts-refresh', { detail: { source: 'gii-azioni-upsert-attivita', key, oid, ts: now } })) } catch {}
+    } catch (e) {
+      console.warn('[GII_ATTIVITA_CORRENTI] Errore creazione/aggiornamento attività corrente:', e)
+    }
+  }
+
+  const deleteCurrentActivityForCurrentRole = async () => {
+    if (!hasSel || oid == null) return
+    try {
+      const layer = await getAttivitaLayer()
+      const parentGlobalId = await getActivityParentGlobalId()
+      const currentRole = normalizeActivityDestRole(role)
+      const currentMeta = getRoutingMetaForRole(currentRole)
+      const currentArea = normalizeAreaLabel(currentMeta.area || (currentRole === 'DA' || currentRole === 'RI_AMM' || currentRole === 'TI_AMM' ? 'AMM' : ''))
+      const currentSettore = normalizeSettoreCod(currentMeta.settore || '')
+      const username = String((window as any).__giiUserRole?.username || '').trim()
+      const parts: string[] = [
+        `tipo_attivita = 'PRESA_IN_CARICO'`,
+        `destinatario_ruolo = ${sqlQuote(currentRole)}`
+      ]
+      if (currentArea) parts.push(`destinatario_area = ${sqlQuote(currentArea)}`)
+      if (currentSettore) parts.push(`(destinatario_settore IS NULL OR destinatario_settore = '' OR destinatario_settore = ${sqlQuote(currentSettore)})`)
+      if (username) parts.push(`(destinatario_username IS NULL OR destinatario_username = '' OR UPPER(destinatario_username) = ${sqlQuote(username.toUpperCase())})`)
+
+      const targetParts: string[] = []
+      if (parentGlobalId) targetParts.push(`(${parentGlobalIdWhere('parent_globalid', parentGlobalId)})`)
+      if (oid != null && Number.isFinite(Number(oid))) targetParts.push(`parent_objectid = ${Number(oid)}`)
+      if (!targetParts.length) return
+      parts.push(`(${targetParts.join(' OR ')})`)
+
+      const q = layer.createQuery ? layer.createQuery() : {}
+      q.where = parts.join(' AND ')
+      q.outFields = ['OBJECTID']
+      q.returnGeometry = false
+      const res = await layer.queryFeatures(q)
+      const deletes = (res?.features || [])
+        .map((f: any) => f?.attributes?.OBJECTID)
+        .filter((v: any) => v != null)
+        .map((objectId: any) => ({ objectId }))
+      if (deletes.length) await layer.applyEdits({ deleteFeatures: deletes })
+      try { window.dispatchEvent(new CustomEvent('gii-alerts-refresh', { detail: { source: 'gii-azioni-delete-attivita', oid, ts: Date.now() } })) } catch {}
+    } catch (e) {
+      console.warn('[GII_ATTIVITA_CORRENTI] Errore eliminazione attività corrente:', e)
+    }
+  }
+
   const getPrevRoleForIntegration = (target?: 'TI_AMM' | 'TECNICA'): string => {
     if (role === 'RZ')     return 'TI'
     if (role === 'RI')     return 'TI'
@@ -3474,6 +3669,8 @@ function ActionsPanel (props: {
     markRestoreSelectionAfterAction(String(logOpts?.eventoChiusura || 'workflow'))
     await runApplyEdits(attributesIn, okText, { deferRefresh: true })
     await closeCycleLog(logOpts)
+    await deleteCurrentActivityForCurrentRole()
+    if (logOpts?.ruoloDestinatario) await upsertCurrentActivityForDest(logOpts)
     await refreshAfterWorkflowSave('azioni-post-log')
   }
 
@@ -3599,6 +3796,7 @@ function ActionsPanel (props: {
       const cycleContextBeforeSave = await getCurrentCycleContextAsync()
       await runApplyEdits(upd, 'Presa in carico salvata.', { deferRefresh: true })
       await openCycleLog({ eventoApertura: 'PRESA_IN_CARICO', fase: role, context: cycleContextBeforeSave, forceNew: true })
+      await deleteCurrentActivityForCurrentRole()
       await refreshAfterWorkflowSave('azioni-presa-in-carico-post-log')
 
       setPending(null)
@@ -5017,19 +5215,8 @@ function art15AttivoForRapporto (data: any): boolean {
 function isRapportoRespintoForPdf (data: any): boolean {
   const d = data || {}
 
-  // La filigrana RESPINTO deve dipendere dall'esito/evento conclusivo.
-  // Alcune viste espongono però lo stato conclusivo e non l'esito: per
-  // questo intercetto anche stato_rz/stato_dt = STATO_RESPINTA.
-  const statoVals = [
-    pickRapportoAttrCI(d, ['stato_rz', 'STATO_RZ']),
-    pickRapportoAttrCI(d, ['stato_dt', 'STATO_DT'])
-  ].map(v => {
-    const n = Number(v)
-    return Number.isFinite(n) ? n : null
-  })
-
-  if (statoVals.includes(STATO_RESPINTA)) return true
-
+  // La filigrana RESPINTO deve dipendere dall'esito/evento conclusivo,
+  // non dagli stati operativi usati anche per rimandi o integrazioni.
   const esitoVals = [
     pickRapportoAttrCI(d, ['esito_rz', 'ESITO_RZ']),
     pickRapportoAttrCI(d, ['esito_dt', 'ESITO_DT'])
@@ -5041,8 +5228,6 @@ function isRapportoRespintoForPdf (data: any): boolean {
   if (esitoVals.includes(ESITO_RESPINTA)) return true
 
   const txtVals = [
-    pickRapportoAttrCI(d, ['stato_rz_label', 'STATO_RZ_LABEL', 'stato_rz', 'STATO_RZ']),
-    pickRapportoAttrCI(d, ['stato_dt_label', 'STATO_DT_LABEL', 'stato_dt', 'STATO_DT']),
     pickRapportoAttrCI(d, ['esito_rz_label', 'ESITO_RZ_LABEL', 'esito_rz', 'ESITO_RZ']),
     pickRapportoAttrCI(d, ['esito_dt_label', 'ESITO_DT_LABEL', 'esito_dt', 'ESITO_DT']),
     pickRapportoAttrCI(d, ['ultimo_evento', 'ULTIMO_EVENTO', 'ultimo_evento_codice', 'ULTIMO_EVENTO_CODICE'])
@@ -5050,7 +5235,7 @@ function isRapportoRespintoForPdf (data: any): boolean {
     .map(v => String(v ?? '').trim().toLowerCase())
     .filter(Boolean)
 
-  return txtVals.some(v => v.includes('respint') || v.includes('rigett') || v.includes('rifiutat'))
+  return txtVals.some(v => v.includes('respint'))
 }
 
 function isRapportoApprovatoForPdf (data: any): boolean {

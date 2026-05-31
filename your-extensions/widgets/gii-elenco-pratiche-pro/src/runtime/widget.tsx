@@ -412,6 +412,100 @@ function clearRestoreSelectionAfterEdit () {
   try { sessionStorage.removeItem('GII_RESTORE_SELECTION_AFTER_EDIT') } catch {}
 }
 
+type GiiOpenPracticeIntent = {
+  oid: number | null
+  parentObjectId?: number | null
+  parentGlobalId?: string
+  reportCode?: string
+  layerUrl?: string
+  idFieldName?: string
+  ts?: number
+}
+
+function readOpenPracticeIntent (): GiiOpenPracticeIntent | null {
+  try {
+    // Deve reagire solo al clic esplicito su "Apri pratica" dalla campanella.
+    // Il flag evita selezioni automatiche entrando normalmente nell'elenco,
+    // anche se qualche dato residuo fosse rimasto in sessionStorage.
+    const requested = sessionStorage.getItem('GII_OPEN_PRACTICE_REQUESTED') === '1'
+    if (!requested) return null
+    const raw = sessionStorage.getItem('GII_OPEN_PRACTICE_INTENT')
+    if (!raw) return null
+    const j: any = JSON.parse(raw)
+    const ts = Number(j?.ts || 0)
+    const ageMs = Math.abs(Date.now() - (Number.isFinite(ts) ? ts : 0))
+    if (!Number.isFinite(ts) || ageMs > 10 * 60 * 1000) {
+      try { sessionStorage.removeItem('GII_OPEN_PRACTICE_INTENT') } catch {}
+      return null
+    }
+    const oidRaw = j?.parentObjectId ?? j?.oid
+    const oidNum = oidRaw != null && oidRaw !== '' ? Number(oidRaw) : NaN
+    return {
+      oid: Number.isFinite(oidNum) ? oidNum : null,
+      parentObjectId: Number.isFinite(oidNum) ? oidNum : null,
+      parentGlobalId: String(j?.parentGlobalId || j?.globalId || '').trim(),
+      reportCode: String(j?.reportCode || '').trim(),
+      layerUrl: String(j?.layerUrl || '').trim(),
+      idFieldName: String(j?.idFieldName || 'OBJECTID').trim() || 'OBJECTID',
+      ts
+    }
+  } catch {
+    return null
+  }
+}
+
+function clearOpenPracticeIntent () {
+  try { sessionStorage.removeItem('GII_OPEN_PRACTICE_INTENT') } catch {}
+  try { sessionStorage.removeItem('GII_OPEN_PRACTICE_REQUESTED') } catch {}
+}
+
+function normalizeReportCodeForMatch (value: any): string {
+  return String(value ?? '')
+    .trim()
+    .toUpperCase()
+    .replace(/^RAPPORTO\s+/i, '')
+    .replace(/^N\.\s*/i, '')
+    .replace(/\s+/g, '')
+}
+
+function recordMatchesOpenPracticeIntent (recordData: any, rid: string, idFieldName: string, intent: GiiOpenPracticeIntent): boolean {
+  const d = recordData || {}
+
+  const oidWanted = Number(intent?.parentObjectId ?? intent?.oid)
+  if (Number.isFinite(oidWanted)) {
+    const oidHere = Number(
+      d?.[idFieldName] ??
+      d?.OBJECTID ??
+      d?.objectid ??
+      d?.ObjectId ??
+      d?.objectId ??
+      rid
+    )
+    if (Number.isFinite(oidHere) && oidHere === oidWanted) return true
+  }
+
+  const gidWanted = normGid(intent?.parentGlobalId)
+  if (gidWanted) {
+    const gidHere = normGid(d?.GlobalID ?? d?.globalid ?? d?.globalId ?? d?.GLOBALID)
+    if (gidHere && gidHere === gidWanted) return true
+  }
+
+  const reportWanted = normalizeReportCodeForMatch(intent?.reportCode)
+  if (reportWanted) {
+    const candidates = [
+      d?.n_rapporto,
+      d?.numero_rapporto,
+      d?.codice_rapporto,
+      d?.cod_pratica,
+      d?.rapporto,
+      d?.num_rapporto
+    ].map(normalizeReportCodeForMatch).filter(Boolean)
+    if (candidates.some(v => v === reportWanted)) return true
+  }
+
+  return false
+}
+
 function compareValues (a: any, b: any): number {
   const aNull = (a === null || a === undefined || a === '')
   const bNull = (b === null || b === undefined || b === '')
@@ -3001,6 +3095,124 @@ React.useEffect(() => {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [mergedRecs, recDsLookup, activeGroup, filteredUseDsJs, localSelectedByDs, resolvedView])
 
+  const [openPracticeIntentTick, setOpenPracticeIntentTick] = React.useState(0)
+
+  React.useEffect(() => {
+    const h = () => setOpenPracticeIntentTick(v => v + 1)
+    window.addEventListener('gii-open-practice-intent', h as EventListener)
+    return () => window.removeEventListener('gii-open-practice-intent', h as EventListener)
+  }, [])
+
+  // Quando lo header apre la pagina Elenco Rapporti da un allarme, seleziona
+  // automaticamente la pratica corrispondente appena i record sono disponibili.
+  React.useEffect(() => {
+    const intent = readOpenPracticeIntent()
+    if (!intent) return
+    if (!activeGroup) return
+
+    // Cerca su tutti i record visibili del gruppo, non solo nella scheda ruolo attiva:
+    // se l'utente era in "In attesa di altri", una pratica da prendere in carico
+    // sarebbe filtrata fuori e non verrebbe mai selezionata.
+    const svcCache = new Map<string, string>()
+    const candidates: Array<{ dsId: string, rec: DataRecord }> = []
+    const seen = new Set<string>()
+
+    for (const di of activeGroup.dsIndices) {
+      const dsId = String(filteredUseDsJs[di]?.dataSourceId || '')
+      const entry = dsDataRef.current[dsId]
+      if (!entry?.recs?.length) continue
+
+      for (const r of entry.recs) {
+        const key = getRecordUniqKey(r, dsId, svcCache)
+        if (seen.has(key)) continue
+        seen.add(key)
+        if (!isRecordVisibleForCurrentUser(r)) continue
+        candidates.push({ dsId, rec: r })
+      }
+    }
+
+    if (!candidates.length) return
+
+    let found: { dsId: string, rid: string, rec: DataRecord, idFieldName: string } | null = null
+
+    for (const item of candidates) {
+      const entry = dsDataRef.current[item.dsId]
+      const idFieldName = String(intent.idFieldName || entry?.ds?.getIdField?.() || 'OBJECTID').trim() || 'OBJECTID'
+      const rid = String(item.rec.getId?.() ?? '')
+      const d = item.rec.getData?.() || {}
+      if (recordMatchesOpenPracticeIntent(d, rid, idFieldName, intent)) {
+        found = { dsId: item.dsId, rid: rid || String(intent.parentObjectId || intent.oid || ''), rec: item.rec, idFieldName }
+        break
+      }
+    }
+
+    if (!found) return
+
+    // Per gli allarmi di attività corrente la scheda corretta è "In attesa mia".
+    // Se però il FL/log non è ancora coerente e la pratica non passa quel filtro,
+    // la mostriamo in "Tutte le pratiche", mai in "In attesa di altri".
+    if (statoRuoloField) {
+      const targetRoleTab = passesRoleTab(found.rec, 'attesa_mia') ? 'attesa_mia' : 'tutte'
+      if (activeRoleTab !== targetRoleTab) setActiveRoleTab(targetRoleTab)
+    }
+
+    // Se filtri integrati la nasconderebbero, li resettiamo: il clic sull'allarme
+    // deve sempre portare l'utente alla pratica.
+    if (!passesIntegratedFilters(found.rec)) resetIntegratedFilters()
+
+    // Pulisce tutte le selezioni precedenti su tutti i DS del gruppo.
+    Object.keys(dsDataRef.current).forEach(id => {
+      const e = dsDataRef.current[id]
+      if (e?.ds) tryClearSelection(e.ds)
+    })
+    notifySelectionCleared()
+
+    setLocalSelectedByDs({ [found.dsId]: found.rid })
+    const entry = dsDataRef.current[found.dsId]
+    if (entry?.ds) trySelectRecord(entry.ds, found.rec, found.rid)
+
+    if (activeGroup) {
+      activeGroup.dsIndices.forEach(di => {
+        const otherId = String(filteredUseDsJs[di]?.dataSourceId || '')
+        if (otherId === found?.dsId) return
+        const otherEntry = dsDataRef.current[otherId]
+        if (otherEntry?.ds) {
+          try { (otherEntry.ds as any).setSelectedRecords?.([found?.rec]) } catch {}
+          try { (otherEntry.ds as any).selectRecordsByIds?.([found?.rid]) } catch {}
+        }
+      })
+    }
+
+    const selectedData = found.rec.getData?.() || {}
+    const oidVal = Number(
+      selectedData?.[found.idFieldName] ??
+      selectedData?.OBJECTID ??
+      selectedData?.objectid ??
+      selectedData?.ObjectId ??
+      selectedData?.objectId ??
+      found.rid
+    )
+
+    publishRuntimeSelection({
+      oid: Number.isFinite(oidVal) ? oidVal : Number(intent.parentObjectId || intent.oid || 0),
+      layerUrl: resolvedView?.layerUrl || intent.layerUrl || sessionStorage.getItem('GII_SELECTED_LAYER_URL') || found.dsId,
+      serviceUrl: resolvedView?.serviceUrl || sessionStorage.getItem('GII_SELECTED_SERVICE_URL') || found.dsId,
+      idFieldName: found.idFieldName,
+      viewName: resolvedView?.viewName || sessionStorage.getItem('GII_SELECTED_VIEW_NAME') || getDsLabel({ __label: '' }, 'Vista runtime'),
+      data: selectedData
+    })
+
+    clearOpenPracticeIntent()
+
+    window.setTimeout(() => {
+      try {
+        const el = document.querySelector(`[data-gii-oid="${Number.isFinite(oidVal) ? oidVal : ''}"]`) as HTMLElement | null
+        el?.scrollIntoView?.({ block: 'center', behavior: 'smooth' })
+      } catch {}
+    }, 120)
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeGroup, filteredUseDsJs, dsDataVer, logVer, activeRoleTab, statoRuoloField, resolvedView, passesRoleTab, passesIntegratedFilters, resetIntegratedFilters, isRecordVisibleForCurrentUser, openPracticeIntentTick])
+
   const ultimoIngressoCodaMs = React.useMemo(() => {
     let best: number | null = null
     for (const r of mergedRecs) {
@@ -4001,16 +4213,8 @@ React.useEffect(() => {
                               )
                             }
                             if (f === V_FASE) {
-                              const faseStyle = faseIstruttoria === 'Amministrativa'
-                                ? { background: '#eef2ff', color: '#3730a3', borderColor: '#c7d2fe' }
-                                : { background: '#ecfeff', color: '#155e75', borderColor: '#a5f3fc' }
-                              return (
-                                <div key={col.id} className={ci === 0 ? 'cell first' : 'cell'} title={faseIstruttoria}>
-                                  <span className='chip' style={faseStyle}>
-                                    {faseIstruttoria}
-                                  </span>
-                                </div>
-                              )
+                              const faseLabel = String(faseIstruttoria || '').toUpperCase()
+                              return <div key={col.id} className={ci === 0 ? 'cell first' : 'cell'} title={faseLabel}>{faseLabel}</div>
                             }
                             if (f === V_ULTIMO) {
                               return <div key={col.id} className={ci === 0 ? 'cell first' : 'cell'} title={ultimo}>{ultimo}</div>

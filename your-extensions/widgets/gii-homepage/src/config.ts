@@ -92,4 +92,5 @@ export const defaultConfig: Config = {
 }
 
 export type IMConfig = ImmutableObject<Config>
-export const defaultIMConfig: IMConfig = Immutable(defaultConfig) as any
+const toImmutable = Immutable as unknown as <T>(value: T) => ImmutableObject<T>
+export const defaultIMConfig: IMConfig = toImmutable(defaultConfig)
