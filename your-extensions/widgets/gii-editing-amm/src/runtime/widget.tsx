@@ -1,7 +1,7 @@
 /** @jsx jsx */
 /** @jsxFrag React.Fragment */
 import { React, jsx, type AllWidgetProps, DataSourceComponent, UrlManager, getAppStore } from 'jimu-core'
-import RapportoPdfViewer from '../../../_shared/gii-anteprime/rapporto/rapporto-pdf-viewer'
+import AnteprimaPdfViewer from '../../../_shared/gii-anteprime/anteprima-pdf-viewer'
 import { buildVerbalePdf, getVerbalePdfFilePrefix } from '../../../_shared/gii-anteprime/verbale/verbale-pdf-builder'
 import type { IMConfig, SummaryFieldConfig } from '../config'
 import { defaultConfig } from '../config'
@@ -128,8 +128,8 @@ const ADMIN_NOTE_CASES_COLUMN = `minmax(${ADMIN_COMPACT_FIELD_MIN_WIDTH}px, ${AD
 const ADMIN_FIELDS: AdminField[] = [
   { group: 'atto', name: 'tipo_atto_amm', label: 'Tipo atto amministrativo (automatico)', kind: 'domain', readonly: true },
   { group: 'atto', name: 'oggetto_atto_amm', label: 'Oggetto atto amministrativo (automatico)', kind: 'text', full: true, readonly: true },
-  { group: 'verbale', name: 'numero_verbale', label: 'Numero verbale (assegnato alla chiusura)', kind: 'readonly-text', readonly: true },
-  { group: 'verbale', name: 'data_verbale', label: 'Data verbale (assegnata alla chiusura)', kind: 'readonly-date', readonly: true },
+  { group: 'verbale', name: 'numero_verbale', label: 'Numero verbale (assegnato all’approvazione DA)', kind: 'readonly-text', readonly: true },
+  { group: 'verbale', name: 'data_verbale', label: 'Data verbale (assegnata all’approvazione DA)', kind: 'readonly-date', readonly: true },
   { group: 'verbale', name: 'note_atto_amm', label: 'Note amministrative', kind: 'textarea', full: true },
 
   { group: 'notifica', name: 'protocollo_verbale_numero', label: 'Numero protocollo verbale', kind: 'text' },
@@ -599,8 +599,8 @@ function DirtyNavigationLockOverlay (props: { active: boolean; targetRef: React.
 
     const idsToMask = [
       'widget_840',  // GII Header
-      'widget_1319', // GII Navigazione - Nuovo Rapporto
-      'widget_1371', // GII Navigazione - Modifica Rapporto
+      'widget_1319', // GII Navigazione - Nuova pratica
+      'widget_1371', // GII Navigazione - Modifica pratica
       'widget_1409'  // GII Navigazione - Verbale
     ]
 
@@ -1636,16 +1636,57 @@ function getReportCode (data: any, oid: number | null): string {
   )
 }
 
+function isDaApprovalComplete (data: Record<string, any>): boolean {
+  const d = data || {}
+  const esitoDa = parseNumberInput(pickAttrCI(d, ['esito_DA', 'ESITO_DA']))
+  const statoDa = parseNumberInput(pickAttrCI(d, ['stato_DA', 'STATO_DA']))
+  return esitoDa === 2 || statoDa === 4
+}
+
+function verbaleApprovalDateValue (data: Record<string, any>): any {
+  const d = data || {}
+  return pickAttrCI(d, ['data_verbale']) || pickAttrCI(d, ['dt_esito_DA', 'DT_ESITO_DA']) || pickAttrCI(d, ['dt_stato_DA', 'DT_STATO_DA'])
+}
+
+function displayVerbaleApprovalDate (data: Record<string, any>, fields: LayerFieldInfo[]): string {
+  const value = verbaleApprovalDateValue(data || {})
+  if (!hasAdminValue(value)) return '—'
+  const fieldName = hasAdminValue(pickAttrCI(data || {}, ['data_verbale'])) ? 'data_verbale' : (hasAdminValue(pickAttrCI(data || {}, ['dt_esito_DA', 'DT_ESITO_DA'])) ? 'dt_esito_DA' : 'dt_stato_DA')
+  const lf = getFieldInfo(fields, fieldName)
+  if (lf?.domain?.codedValues || getFallbackDomainOptions(fieldName).length) return domainLabel(lf, value, fieldName)
+  return formatDateValue(value)
+}
+
+function verbaleNumberValue (data: Record<string, any>, oid?: any): string {
+  const d = data || {}
+  return String(pickAttrCI(d, ['numero_verbale']) || '').trim()
+}
+
+function displayVerbaleNumber (data: Record<string, any>, fields: LayerFieldInfo[], oid?: any, emptyLabel = '—'): string {
+  const current = verbaleNumberValue(data || {}, oid)
+  if (current) return displayAdminFieldValue(data || {}, fields, 'numero_verbale', emptyLabel)
+  return emptyLabel
+}
+
+function isVerbaleDefinitivo (data: Record<string, any>): boolean {
+  const d = data || {}
+  return isDaApprovalComplete(d) || (hasAdminValue(verbaleNumberValue(d)) && hasAdminValue(verbaleApprovalDateValue(d)))
+}
+
+function isVerbaleNotificato (data: Record<string, any>): boolean {
+  return hasAdminValue(pickAttrCI(data || {}, ['notifica_data']))
+}
+
 function buildPracticeTitle (cfg: any, data: any, oid: number | null): string {
   const rapporto = getReportCode(data || {}, oid)
-  const numeroVerbale = String(pickAttrCI(data || {}, ['numero_verbale']) || '').trim()
+  const numeroVerbale = verbaleNumberValue(data || {}, oid)
   if (numeroVerbale) return `Verbale n. ${numeroVerbale} - Rapporto ${rapporto}`
   return `Verbale in corso di istruttoria - Rapporto ${rapporto}`
 }
 
 function buildPracticeTitleParts (data: any, oid: number | null): { prefix: string, reportCode: string, full: string } {
   const reportCode = getReportCode(data || {}, oid)
-  const numeroVerbale = String(pickAttrCI(data || {}, ['numero_verbale']) || '').trim()
+  const numeroVerbale = verbaleNumberValue(data || {}, oid)
   const prefix = numeroVerbale ? `Verbale n. ${numeroVerbale} - Rapporto ` : 'Verbale in corso di istruttoria - Rapporto '
   return { prefix, reportCode, full: `${prefix}${reportCode}` }
 }
@@ -2445,20 +2486,12 @@ function AttoAmministrativoSummary (props: { data: Record<string, any>, fields: 
   )
 }
 
-function isVerbaleDefinitivo (data: Record<string, any>): boolean {
-  return hasAdminValue(pickAttrCI(data || {}, ['numero_verbale'])) && hasAdminValue(pickAttrCI(data || {}, ['data_verbale']))
-}
-
-function isVerbaleNotificato (data: Record<string, any>): boolean {
-  return hasAdminValue(pickAttrCI(data || {}, ['notifica_data']))
-}
-
-
 function VerbaleSummary (props: { data: Record<string, any>, fields: LayerFieldInfo[], canEdit: boolean, onApplyNote: (text: string) => void }) {
   const d = props.data || {}
   const definitivo = isVerbaleDefinitivo(d)
-  const numero = displayAdminFieldValue(d, props.fields, 'numero_verbale', 'Non ancora assegnato')
-  const dataVerbale = displayAdminFieldValue(d, props.fields, 'data_verbale', 'Non ancora assegnata')
+  const oid = pickOidFromData(d, 'OBJECTID')
+  const numero = displayVerbaleNumber(d, props.fields, oid, 'Non ancora assegnato')
+  const dataVerbale = displayVerbaleApprovalDate(d, props.fields)
   const tipoAtto = displayAdminFieldValue(d, props.fields, 'tipo_atto_amm', 'Da determinare automaticamente')
   const oggettoAtto = displayAdminFieldValue(d, props.fields, 'oggetto_atto_amm', 'Da determinare automaticamente')
   const noteField = getFieldInfo(props.fields, 'note_atto_amm')
@@ -3396,8 +3429,8 @@ function buildVerbalePdfMap (data: any, fields: LayerFieldInfo[], profile: { use
     protocollo_istanza_data: pdfFieldValue(d, fields, 'protocollo_istanza_data'),
     oggetto_atto_amm: String(pickAttrCI(d, ['oggetto_atto_amm']) || ''),
     note_atto_amm: String(pickAttrCI(d, ['note_atto_amm']) || ''),
-    numero_verbale: String(pickAttrCI(d, ['numero_verbale']) || ''),
-    data_verbale: pdfFieldValue(d, fields, 'data_verbale'),
+    numero_verbale: verbaleNumberValue(d, oid),
+    data_verbale: hasAdminValue(pickAttrCI(d, ['data_verbale'])) ? pdfFieldValue(d, fields, 'data_verbale') : displayVerbaleApprovalDate(d, fields),
     protocollo_verbale: String(pickAttrCI(d, ['protocollo_verbale_numero']) || ''),
     protocollo_verbale_data: pdfFieldValue(d, fields, 'protocollo_verbale_data'),
     notifica_tipo: pdfFieldValue(d, fields, 'notifica_tipo'),
@@ -3561,8 +3594,8 @@ function DatiGeneraliAmmSection (props: { title: string, data: Record<string, an
           <div style={panelStyle}>
             <div style={panelTitleStyle}>Fase amministrativa</div>
             <div style={gridStyle}>
-              <StatusSummaryItem label='Numero verbale' value={displayAdminFieldValue(d, props.fields, 'numero_verbale')} tone={hasAdminValue(pickAttrCI(d, ['numero_verbale'])) ? 'auto' : 'warn'} />
-              <StatusSummaryItem label='Data approvazione' value={displayAdminFieldValue(d, props.fields, 'data_verbale')} tone={hasAdminValue(pickAttrCI(d, ['data_verbale'])) ? 'auto' : 'warn'} />
+              <StatusSummaryItem label='Numero verbale' value={displayVerbaleNumber(d, props.fields, oid)} tone={hasAdminValue(verbaleNumberValue(d, oid)) ? 'auto' : 'warn'} />
+              <StatusSummaryItem label='Data approvazione' value={displayVerbaleApprovalDate(d, props.fields)} tone={hasAdminValue(verbaleApprovalDateValue(d)) ? 'auto' : 'warn'} />
               <StatusSummaryItem label='Stato' value={verbaleDefinitivo ? 'Definitivo' : 'In corso di istruttoria'} tone={verbaleDefinitivo ? 'auto' : 'warn'} />
               <StatusSummaryItem label='Notifica' value={verbaleNotificato ? displayAdminFieldValue(d, props.fields, 'notifica_data') : 'Non registrata'} tone={verbaleNotificato ? 'auto' : 'warn'} />
               <StatusSummaryItem label='Tecnico istruttore' value={displayAdminFieldValue(d, props.fields, 'ti_amm_assegnato_nome', displayAdminFieldValue(d, props.fields, 'ti_amm_assegnato_username'))} tone='auto' />
@@ -3625,7 +3658,7 @@ function VerbaleInlinePreviewSection (props: { data: Record<string, any>, fields
 
   return (
     <div style={{ width: '100%', height: '100%', minHeight: 0, borderRadius: 12, overflow: 'hidden' }}>
-      <RapportoPdfViewer
+      <AnteprimaPdfViewer
         url={pdfUrl}
         fileName={pdfFileName}
         title='Anteprima verbale'
@@ -4532,7 +4565,7 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
   const getCompletionIssues = React.useCallback((source: Record<string, any>): string[] => {
     const current = source || {}
     const issues: string[] = []
-    if (!hasAdminValue(pickAttrCI(current, ['numero_verbale'])) || !hasAdminValue(pickAttrCI(current, ['data_verbale']))) issues.push('Atto: verbale non ancora definitivo; numero e data saranno assegnati dopo l’approvazione del Direttore d’Area.')
+    if (!isVerbaleDefinitivo(current)) issues.push('Atto: verbale non ancora definitivo; numero e data saranno assegnati dopo l’approvazione del Direttore d’Area.')
     if (!hasAdminValue(pickAttrCI(current, ['note_atto_amm']))) issues.push('Atto: compilare le note amministrative.')
     if (!hasAdminValue(pickAttrCI(current, ['protocollo_verbale_numero']))) issues.push('Notifica: indicare il numero protocollo verbale.')
     if (!hasAdminValue(pickAttrCI(current, ['protocollo_verbale_data']))) issues.push('Notifica: indicare la data protocollo verbale.')
@@ -4704,7 +4737,7 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
     if (saving || isDirty) return
     try { delete (window as any).__giiEdit } catch { try { ;(window as any).__giiEdit = null } catch {} }
     try { sessionStorage.removeItem('GII_EDIT_INTENT') } catch {}
-    const elencoPageId = resolvePageId('Elenco Rapporti') || resolvePageId('elenco-rapporti') || resolvePageId('Elenco')
+    const elencoPageId = resolvePageId('page_3') || resolvePageId('Elenco pratiche') || resolvePageId('Elenco Rapporti') || resolvePageId('elenco-pratiche') || resolvePageId('elenco-rapporti') || resolvePageId('Elenco')
     try {
       if (elencoPageId) {
         UrlManager.getInstance().changePage(elencoPageId)
@@ -4785,7 +4818,7 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
         onClick={(e) => { e.stopPropagation() }}
         onMouseDown={(e) => { e.stopPropagation() }}
       >
-        <RapportoPdfViewer
+        <AnteprimaPdfViewer
           url={verbalePreviewUrl}
           fileName={verbalePreviewFileName}
           title='Anteprima verbale'

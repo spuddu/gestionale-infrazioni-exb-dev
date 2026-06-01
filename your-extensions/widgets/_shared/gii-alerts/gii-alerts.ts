@@ -1173,8 +1173,7 @@ function currentActivityToAlert (row: Record<string, any>): GiiAlertItem | null 
   if (!keyBase) return null
 
   const title = String(attr(row, ['titolo']) || attr(row, ['sottotipo_attivita']) || 'Attività da prendere in carico').trim()
-  const message = String(attr(row, ['messaggio']) || `${title} relativa al rapporto n. ${reportCode}.`).trim()
-  const dataAtt = dateMsOrNull(attr(row, ['data_attivazione'])) ?? dateMsOrNull(attr(row, ['creato_il']))
+  const message = String(attr(row, ['messaggio']) || `${title} relativa alla pratica n. ${reportCode}.`).trim()
 
   return {
     alertKey: chiave || `${keyBase}|PRESA_IN_CARICO_CORRENTE`,
@@ -1186,7 +1185,9 @@ function currentActivityToAlert (row: Record<string, any>): GiiAlertItem | null 
     parentGlobalId,
     parentObjectId,
     reportCode,
-    termineData: dataAtt,
+    // Le attività correnti non hanno una scadenza: data_attivazione/creato_il sono solo dati di apertura.
+    // Non valorizziamo termineData per evitare che lo header mostri un finto “Termine”.
+    termineData: null,
     giorniResidui: null,
     raw: { ...row }
   }

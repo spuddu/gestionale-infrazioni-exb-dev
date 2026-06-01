@@ -24,7 +24,9 @@ function loadPdfJs (): Promise<any> {
     // senza tentare di scaricare un file worker da /widgets/chunks.
     // @ts-ignore - le dichiarazioni dei moduli legacy possono non essere risolte dal TS di Experience Builder.
     pdfJsPromise = Promise.all([
+      // @ts-ignore - le dichiarazioni dei moduli legacy possono non essere risolte dal TS di Experience Builder.
       import('pdfjs-dist/legacy/build/pdf.js'),
+      // @ts-ignore - le dichiarazioni dei moduli legacy possono non essere risolte dal TS di Experience Builder.
       import('pdfjs-dist/legacy/build/pdf.worker.entry.js')
     ]).then(([pdfjs]) => pdfjs)
   }
@@ -161,7 +163,7 @@ function PdfPageThumbnail (props: { pdfDoc: any; pageNumber: number; active: boo
   )
 }
 
-export default function RapportoPdfViewer (props: Props): any {
+export default function AnteprimaPdfViewer (props: Props): any {
   const viewerRef = React.useRef<HTMLDivElement | null>(null)
   const pageHostRef = React.useRef<HTMLDivElement | null>(null)
   const canvasRef = React.useRef<HTMLCanvasElement | null>(null)
@@ -749,7 +751,11 @@ export default function RapportoPdfViewer (props: Props): any {
               <path d='M4.5 8.5 9 4.5M19.5 8.5 15 4.5M4.5 15.5 9 19.5M19.5 15.5 15 19.5' fill='none' stroke='currentColor' strokeWidth='1.9' strokeLinecap='round' strokeLinejoin='round' />
             </svg>
           </button>
-          {props.onClose && <button type='button' onClick={props.onClose} style={btnStyle} title='Chiudi anteprima'>Chiudi</button>}
+          {props.onClose && (
+            <button type='button' onClick={props.onClose} style={closeBtnStyle} title='Chiudi anteprima'>
+              <span style={closeBtnTextStyle}>Chiudi</span>
+            </button>
+          )}
         </div>
       )}
     </div>
@@ -770,6 +776,18 @@ const btnStyle: React.CSSProperties = {
   borderRadius: 8,
   padding: '0 12px',
   cursor: 'pointer'
+}
+
+const closeBtnStyle: React.CSSProperties = {
+  ...btnStyle,
+  background: '#dc2626',
+  border: '1px solid #b91c1c',
+  boxShadow: '0 0 0 1px rgba(255,255,255,0.10) inset'
+}
+
+const closeBtnTextStyle: React.CSSProperties = {
+  display: 'inline-block',
+  transform: 'translate(-1px, 2px)'
 }
 
 const inputStyle: React.CSSProperties = {

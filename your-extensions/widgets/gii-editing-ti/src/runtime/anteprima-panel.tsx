@@ -4,7 +4,7 @@ import { React, jsx, css } from 'jimu-core'
 import { buildRapportoPdf } from '../../../_shared/gii-anteprime/rapporto/rapporto-pdf-builder'
 import { buildNotaSpesePdf, type NotaSpeseData } from '../../../_shared/gii-anteprime/rapporto/notaspese-pdf-builder'
 import { PDFDocument } from 'pdf-lib'
-import RapportoPdfViewer from '../../../_shared/gii-anteprime/rapporto/rapporto-pdf-viewer'
+import AnteprimaPdfViewer from '../../../_shared/gii-anteprime/anteprima-pdf-viewer'
 
 const GII_UTENTI_URL = 'https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_utenti/FeatureServer/0'
 type UtenteCached = {
@@ -598,7 +598,7 @@ export default function AnteprimaPanel (p: { data: Record<string, any>; mode: 'c
 
   return (
     <div css={containerCss}>
-      <RapportoPdfViewer
+      <AnteprimaPdfViewer
         url={pdfUrl}
         fileName={pdfFileName}
         title='Anteprima rapporto'

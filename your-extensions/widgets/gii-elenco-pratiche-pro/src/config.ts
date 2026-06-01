@@ -10,7 +10,8 @@ export interface FilterTab {
 /**
  * Colonna visualizzata nella lista.
  * `field` può essere un campo layer o un campo virtuale:
- *   __stato_sint__  /  __fase_istruttoria__  /  __ultimo_agg__  /  __prossima__
+ *   __tipo_pratica__ / __numero_pratica__ / __numero_verbale_display__
+ *   __stato_sint__ / __fase_istruttoria__ / __ultimo_agg__ / __prossima__
  */
 export interface ColumnDef {
   id: string
@@ -179,15 +180,17 @@ export interface Config {
 export type IMConfig = ImmutableObject<Config>
 
 export const DEFAULT_COLUMNS: ColumnDef[] = [
-  { id: 'col_pratica',   label: 'N. rapporto',        field: 'objectid',          width: 110 },
-  { id: 'col_data',      label: 'Data rilevazione',   field: 'data_rilevazione',  width: 140 },
-  { id: 'col_ufficio',   label: 'Ufficio origine',    field: 'ufficio_zona',      width: 190 },
-  { id: 'col_stato',     label: 'Il mio stato',       field: '__stato_sint__',        width: 170 },
-  { id: 'col_fase',      label: 'Fase istruttoria',   field: '__fase_istruttoria__', width: 150 },
-  { id: 'col_causale',   label: 'Stato',              field: '__causale__',           width: 250 },
-  { id: 'col_mittente',  label: 'Mittente',           field: '__mittente__',      width: 210 },
-  { id: 'col_prossima',  label: 'Destinatario',       field: '__prossima__',      width: 210 },
-  { id: 'col_data_msg',  label: 'Ultimo agg.',        field: '__data_msg__',      width: 150 }
+  { id: 'col_tipo_pratica',    label: 'Tipo pratica',     field: '__tipo_pratica__',          width: 150 },
+  { id: 'col_numero',          label: 'Numero',           field: '__numero_pratica__',        width: 140 },
+  { id: 'col_numero_verbale',  label: 'N. verbale',       field: '__numero_verbale_display__', width: 120 },
+  { id: 'col_data',            label: 'Data rilevazione', field: 'data_rilevazione',           width: 140 },
+  { id: 'col_ufficio',         label: 'Ufficio origine',  field: 'ufficio_zona',               width: 190 },
+  { id: 'col_stato',           label: 'Il mio stato',     field: '__stato_sint__',             width: 170 },
+  { id: 'col_fase',            label: 'Fase istruttoria', field: '__fase_istruttoria__',        width: 150 },
+  { id: 'col_causale',         label: 'Stato',            field: '__causale__',                width: 250 },
+  { id: 'col_mittente',        label: 'Mittente',         field: '__mittente__',               width: 210 },
+  { id: 'col_prossima',        label: 'Destinatario',     field: '__prossima__',               width: 210 },
+  { id: 'col_data_msg',        label: 'Ultimo agg.',      field: '__data_msg__',               width: 150 }
 ]
 
 export const defaultConfig: IMConfig = {
@@ -327,7 +330,7 @@ export const defaultConfig: IMConfig = {
   maskRadius: 12,
 
   // Titolo elenco
-  listTitleText: 'Elenco rapporti di rilevazione',
+  listTitleText: 'Elenco pratiche',
   listTitleHeight: 28,
   listTitlePaddingBottom: 10,
   listTitlePaddingLeft: 0,

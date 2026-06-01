@@ -81,9 +81,9 @@ export interface Config {
   btnPaddingX: number
   btnPaddingY: number
 
-  // --- Colore sfondo per modalità (distingue visivamente nuovo rapporto da modifica)
-  modeBgCreate: string   // sfondo quando il widget è in modalità "Nuovo rapporto"
-  modeBgEdit: string     // sfondo quando il widget è in modalità "Modifica rapporto"
+  // --- Colore sfondo per modalità (distingue visivamente nuova pratica da modifica)
+  modeBgCreate: string   // sfondo quando il widget è in modalità "Nuova pratica"
+  modeBgEdit: string     // sfondo quando il widget è in modalità "Modifica pratica"
 
   // --- Pannello (sfondo/bordi/spazi)
   panelBg: string
@@ -250,7 +250,7 @@ export const defaultConfig: Config = {
   btnPaddingX: 16,
   btnPaddingY: 8,
 
-  modeBgCreate: '#ecfdf5',   // verde chiaro → nuovo rapporto
+  modeBgCreate: '#ecfdf5',   // verde chiaro → nuova pratica
   modeBgEdit:   '#edf5ff',   // azzurro chiaro → modifica
 
   panelBg: '#eef4fb',
@@ -313,7 +313,7 @@ export const defaultConfig: Config = {
   anteprimaPdfPaddingBottom: 0,
   anteprimaPdfBottomRadius: 10,
 
-  detailTitlePrefix: 'Dettaglio rapporto n.',
+  detailTitlePrefix: 'Dettaglio pratica n.',
   detailTitleBg: 'transparent',
   detailTitleHeight: 28,
   detailTitlePaddingBottom: 10,
@@ -348,7 +348,7 @@ export const defaultConfig: Config = {
   showEditButtons: true,
   editOverlayColor: '#7c3aed',
   editPageColor: '#5b21b6',
-  editPageId: 'page_32',
+  editPageId: 'page_45',
   fieldStatoTI: 'stato_TI',
   fieldPresaTI: 'presa_in_carico_TI',
   editMinStato: 2,

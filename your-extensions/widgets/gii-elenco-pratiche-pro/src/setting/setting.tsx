@@ -20,6 +20,9 @@ const P = {
   grp:   { fontSize:11, fontWeight:700, color:'#93c5fd', marginTop:14, marginBottom:6, paddingBottom:4, borderBottom:'1px solid rgba(255,255,255,0.07)' } as React.CSSProperties,
 }
 
+const SELECT_OPTION_STYLE = { backgroundColor:'#ffffff', color:'#111827' } as React.CSSProperties
+const SELECT_GROUP_STYLE = { backgroundColor:'#ffffff', color:'#111827' } as React.CSSProperties
+
 const parseNum = (v:any, fb:number) => { const n=Number(v); return Number.isFinite(n)?n:fb }
 function asJs<T=any>(v:any):T { return v?.asMutable?v.asMutable({deep:true}):v }
 
@@ -56,12 +59,15 @@ function Check(p: { value:boolean; onChange:(v:boolean)=>void; label:string }) {
 function Sel(p: { value:string; onChange:(v:string)=>void; options:Array<{value:string;label:string}> }) {
   return (
     <select value={p.value} onChange={e=>p.onChange(e.target.value)} style={{ ...P.inp, cursor:'pointer' }}>
-      {p.options.map(o=><option key={o.value} value={o.value} style={{ background:'#1a1f2e', color:'#e5e7eb' }}>{o.label}</option>)}
+      {p.options.map(o=><option key={o.value} value={o.value} style={SELECT_OPTION_STYLE}>{o.label}</option>)}
     </select>
   )
 }
 
 const VIRTUAL_FIELDS: FieldOpt[] = [
+  { name:'__tipo_pratica__', alias:'⚙ Tipo pratica (calcolato)', type:'virtual' },
+  { name:'__numero_pratica__', alias:'⚙ Numero (calcolato)', type:'virtual' },
+  { name:'__numero_verbale_display__', alias:'⚙ N. verbale (calcolato)', type:'virtual' },
   { name:'__stato_sint__', alias:'⚙ Stato sintetico (calcolato)', type:'virtual' },
   { name:'__ultimo_agg__', alias:'⚙ Ultimo aggiornamento (calcolato)', type:'virtual' },
   { name:'__prossima__',   alias:'⚙ Destinatario (calcolato)', type:'virtual' },
@@ -90,9 +96,9 @@ function FieldSel(p: { value:string; fields:FieldOpt[]; onChange:(v:string)=>voi
   if(!p.fields.length) return <Inp value={p.value} onChange={p.onChange} placeholder={p.placeholder||'nome campo'}/>
   return (
     <select style={P.inp} value={p.value} onChange={e=>p.onChange(e.target.value)}>
-      <option value=''>— seleziona —</option>
-      {p.virtual && <optgroup label='Calcolati'>{VIRTUAL_FIELDS.map(f=><option key={f.name} value={f.name}>{f.alias}</option>)}</optgroup>}
-      <optgroup label='Layer'>{p.fields.map(f=><option key={f.name} value={f.name}>{f.alias} ({f.name})</option>)}</optgroup>
+      <option value='' style={SELECT_OPTION_STYLE}>— seleziona —</option>
+      {p.virtual && <optgroup label='Calcolati' style={SELECT_GROUP_STYLE}>{VIRTUAL_FIELDS.map(f=><option key={f.name} value={f.name} style={SELECT_OPTION_STYLE}>{f.alias}</option>)}</optgroup>}
+      <optgroup label='Layer' style={SELECT_GROUP_STYLE}>{p.fields.map(f=><option key={f.name} value={f.name} style={SELECT_OPTION_STYLE}>{f.alias} ({f.name})</option>)}</optgroup>
     </select>
   )
 }
@@ -104,6 +110,30 @@ function Acc(p: { id:string; label:string; open:boolean; onToggle:()=>void }) {
       <span style={{ fontSize:10, color:'#a0aec0' }}>{p.open?'▲':'▼'}</span>
     </div>
   )
+}
+
+
+function normalizeColumnLabel (label: any): string {
+  const s = String(label || '').trim()
+  if (/^n\.?\s*(rapporto|pratica)$/i.test(s)) return 'Numero'
+  if (/^stato\s+rapporto$/i.test(s)) return 'Stato pratica'
+  return s
+}
+
+function normalizeColumnsForSave (columns: any[]): any[] {
+  return (Array.isArray(columns) ? columns : []).map((col: any) => {
+    if (!col || typeof col !== 'object') return col
+    return { ...col, label: normalizeColumnLabel(col.label) }
+  })
+}
+
+function columnsHaveLegacyLabels (columns: any[]): boolean {
+  if (!Array.isArray(columns)) return false
+  return columns.some((col: any) => {
+    if (!col || typeof col !== 'object') return false
+    const current = String(col.label || '')
+    return normalizeColumnLabel(current) !== current.trim()
+  })
 }
 
 function ColumnManager(p: { columns:ColumnDef[]; allFields:FieldOpt[]; onChange:(c:ColumnDef[])=>void }) {
@@ -149,9 +179,9 @@ function ColumnManager(p: { columns:ColumnDef[]; allFields:FieldOpt[]; onChange:
           </div>
           <div style={{fontSize:10,color:'#a0aec0',marginBottom:3}}>Campo</div>
           <select style={fi} value={col.field} onChange={e=>upd(idx,{field:e.target.value})}>
-            <option value=''>— seleziona —</option>
-            <optgroup label='Calcolati'>{VIRTUAL_FIELDS.map(f=><option key={f.name} value={f.name}>{f.alias}</option>)}</optgroup>
-            <optgroup label='Layer'>{(p.allFields||[]).map(f=><option key={f.name} value={f.name}>{f.alias} ({f.name})</option>)}</optgroup>
+            <option value='' style={SELECT_OPTION_STYLE}>— seleziona —</option>
+            <optgroup label='Calcolati' style={SELECT_GROUP_STYLE}>{VIRTUAL_FIELDS.map(f=><option key={f.name} value={f.name} style={SELECT_OPTION_STYLE}>{f.alias}</option>)}</optgroup>
+            <optgroup label='Layer' style={SELECT_GROUP_STYLE}>{(p.allFields||[]).map(f=><option key={f.name} value={f.name} style={SELECT_OPTION_STYLE}>{f.alias} ({f.name})</option>)}</optgroup>
           </select>
         </div>
       ))}
@@ -243,10 +273,19 @@ export default function Setting(props: Props) {
 
   React.useEffect(() => {
     const raw = asJs<Record<string, any>>(cfgImm) || {}
-    const missing = BADGE_OGGETTO_KEYS.filter(k => raw[k] === undefined)
-    if (!missing.length) return
     const patch: Record<string, any> = {}
-    BADGE_OGGETTO_KEYS.forEach(k => { patch[k] = (cfg as any)[k] })
+
+    const rawColumns = asJs<any[]>(raw.columns) || []
+    if (columnsHaveLegacyLabels(rawColumns)) {
+      patch.columns = normalizeColumnsForSave(rawColumns)
+    }
+
+    const missing = BADGE_OGGETTO_KEYS.filter(k => raw[k] === undefined)
+    if (missing.length) {
+      BADGE_OGGETTO_KEYS.forEach(k => { patch[k] = (cfg as any)[k] })
+    }
+
+    if (!Object.keys(patch).length) return
     props.onSettingChange({ id: props.id, config: toConfig(patch) })
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
@@ -254,7 +293,7 @@ export default function Setting(props: Props) {
   const cfgJs:any=cfg
   const columns=(()=>{
     const raw=cfgJs?.columns;const cols:any[]=asJs(raw)
-    if(Array.isArray(cols)&&cols.length>0) return cols.map((c:any)=>({id:String(c.id||`col_${Math.random().toString(36).slice(2,8)}`),label:String(c.label||''),field:String(c.field||''),width:parseNum(c.width,150)}))
+    if(Array.isArray(cols)&&cols.length>0) return cols.map((c:any)=>({id:String(c.id||`col_${Math.random().toString(36).slice(2,8)}`),label:normalizeColumnLabel(c.label),field:String(c.field||''),width:parseNum(c.width,150)}))
     return DEFAULT_COLUMNS.map(c=>({...c}))
   })()
 
@@ -274,7 +313,7 @@ export default function Setting(props: Props) {
       <Acc id='colonne' label='📋 Colonne' open={isOpen('colonne')} onToggle={()=>toggle('colonne')}/>
       {isOpen('colonne') && <div>
         <div style={{...P.hint,marginBottom:10}}>Aggiungi, rimuovi e riordina. Trascina ☰ o usa ▲▼.</div>
-        <ColumnManager columns={columns} allFields={fields} onChange={newCols=>update('columns',newCols)}/>
+        <ColumnManager columns={columns} allFields={fields} onChange={newCols=>update('columns',normalizeColumnsForSave(newCols))}/>
       </div>}
 
       <Acc id='query' label='🔍 Query e ordinamento' open={isOpen('query')} onToggle={()=>toggle('query')}/>
@@ -379,7 +418,7 @@ export default function Setting(props: Props) {
           { name:'Giallo — Da prendere in carico',   bg:'chipBgGiallo',    text:'chipTextGiallo',    border:'chipBorderGiallo'    },
           { name:'Azzurro — Trasmesso',             bg:'chipBgAzzurro',   text:'chipTextAzzurro',   border:'chipBorderAzzurro'   },
           { name:'Celeste — In carico',              bg:'chipBgCeleste',   text:'chipTextCeleste',   border:'chipBorderCeleste'   },
-          { name:'Verde — Rapporto approvato',       bg:'chipBgVerde',     text:'chipTextVerde',     border:'chipBorderVerde'     },
+          { name:'Verde — Pratica approvata',        bg:'chipBgVerde',     text:'chipTextVerde',     border:'chipBorderVerde'     },
           { name:'Arancione — In attesa di …',        bg:'chipBgArancione', text:'chipTextArancione', border:'chipBorderArancione' },
           { name:'Rosso — Respinto / Eliminato',      bg:'chipBgRosso',     text:'chipTextRosso',     border:'chipBorderRosso'     },
           { name:'Viola — Sanzione approvata',       bg:'chipBgViola',     text:'chipTextViola',     border:'chipBorderViola'     },
@@ -406,7 +445,7 @@ export default function Setting(props: Props) {
       <Acc id='titolo' label='📝 Titolo elenco' open={isOpen('titolo')} onToggle={()=>toggle('titolo')}/>
       {isOpen('titolo') && <div>
         <label style={P.lbl}>Testo</label>
-        <Inp value={String(cfg.listTitleText||'')} onChange={v=>update('listTitleText',v)} placeholder='Elenco rapporti di rilevazione'/>
+        <Inp value={String(cfg.listTitleText||'')} onChange={v=>update('listTitleText',v)} placeholder='Elenco pratiche'/>
         <div style={P.row3}>
           <div><label style={P.lbl}>Altezza</label><NumInp value={cfg.listTitleHeight} onChange={n=>update('listTitleHeight',n)} min={0} unit='px'/></div>
           <div><label style={P.lbl}>Font sz</label><NumInp value={cfg.listTitleFontSize} onChange={n=>update('listTitleFontSize',n)} min={10} unit='px'/></div>

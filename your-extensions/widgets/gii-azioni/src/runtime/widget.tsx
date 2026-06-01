@@ -8,7 +8,7 @@ import { defaultConfig } from '../config'
 import { buildRapportoPdf } from '../../../_shared/gii-anteprime/rapporto/rapporto-pdf-builder'
 import { buildNotaSpesePdf, type NotaSpeseData } from '../../../_shared/gii-anteprime/rapporto/notaspese-pdf-builder'
 import { PDFDocument } from 'pdf-lib'
-import RapportoPdfViewer from '../../../_shared/gii-anteprime/rapporto/rapporto-pdf-viewer'
+import AnteprimaPdfViewer from '../../../_shared/gii-anteprime/anteprima-pdf-viewer'
 
 
 const GII_LOG_EVENTI_CICLI_URL = 'https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_LOG_EVENTI_CICLI/FeatureServer/0'
@@ -1494,6 +1494,7 @@ function ActionsPanel (props: {
   // lock procedura: solo quando parte un’azione (pending) o quando salvo (loading)
   const [pending, setPending] = React.useState<Pending>(null)
   const [actionsMenuOpen, setActionsMenuOpen] = React.useState(false)
+  const [workflowSubmitting, setWorkflowSubmitting] = React.useState(false)
 
   // validazioni “soft”: si attivano solo dopo tentativo di conferma
   const [confirmAttempted, setConfirmAttempted] = React.useState(false)
@@ -1788,6 +1789,83 @@ function ActionsPanel (props: {
     }
   }
 
+
+  const verbaleNumberForYearRegex = (anno: number): RegExp => new RegExp(`^\\s*(\\d+)\\s*/\\s*${anno}\\s*$`)
+
+  const parseNumeroVerbaleProgressivo = (value: any, anno: number): number | null => {
+    const s = String(value ?? '').trim()
+    if (!s) return null
+    const m = s.match(verbaleNumberForYearRegex(anno))
+    if (!m) return null
+    const n = Number(m[1])
+    return Number.isFinite(n) && n > 0 ? Math.floor(n) : null
+  }
+
+  const formatNumeroVerbale = (progressivo: number, anno: number): string => `${Math.max(1, Math.floor(progressivo))}/${anno}`
+
+  const queryNextNumeroVerbale = async (anno: number): Promise<string> => {
+    let layer: any = null
+    try {
+      const resolved = await resolveLayer(ds)
+      layer = resolved?.layer || null
+    } catch {}
+
+    if (!layer?.queryFeatures) {
+      const FeatureLayer = await loadEsriModule<any>('esri/layers/FeatureLayer')
+      const w: any = window as any
+      const layerUrl = String(
+        active?.state?.ds?.getDataSourceJson?.()?.url ||
+        active?.state?.ds?.dataSourceJson?.url ||
+        active?.state?.ds?.layer?.url ||
+        w.__giiSelection?.layerUrl ||
+        sessionStorage.getItem('GII_SELECTED_LAYER_URL') ||
+        active?.key ||
+        ''
+      ).trim()
+      if (layerUrl) layer = new FeatureLayer({ url: layerUrl, outFields: ['*'] })
+    }
+
+    if (!layer?.queryFeatures) throw new Error('Impossibile determinare il numero del verbale: layer non disponibile per la query.')
+    if (typeof layer.load === 'function') { try { await layer.load() } catch {} }
+
+    const schemaFields: Record<string, any> = {}
+    try {
+      ;(Array.isArray(layer?.fields) ? layer.fields : []).forEach((f: any) => {
+        if (f?.name) schemaFields[String(f.name)] = f
+      })
+    } catch {}
+
+    const fNumeroVerbale = getSchemaFieldNameCI(schemaFields, 'numero_verbale') || 'numero_verbale'
+    const fDataVerbale = getSchemaFieldNameCI(schemaFields, 'data_verbale') || 'data_verbale'
+    const idField = String(layer.objectIdField || idFieldNameFromSel || 'OBJECTID')
+    const outFields = Array.from(new Set([idField, fNumeroVerbale, fDataVerbale].filter(Boolean)))
+
+    let maxProgressivo = 0
+    let start = 0
+    const pageSize = 2000
+
+    while (true) {
+      const q = layer.createQuery ? layer.createQuery() : {}
+      q.where = `${fNumeroVerbale} IS NOT NULL`
+      q.outFields = outFields
+      q.returnGeometry = false
+      q.start = start
+      q.num = pageSize
+      const res = await layer.queryFeatures(q)
+      const features = Array.isArray(res?.features) ? res.features : []
+      features.forEach((f: any) => {
+        const attrs = f?.attributes || {}
+        const n = parseNumeroVerbaleProgressivo(pickAttrCI(attrs, [fNumeroVerbale, 'numero_verbale']), anno)
+        if (n != null && n > maxProgressivo) maxProgressivo = n
+      })
+      if (features.length < pageSize) break
+      start += features.length
+      if (start > 100000) break
+    }
+
+    return formatNumeroVerbale(maxProgressivo + 1, anno)
+  }
+
   type NotaSpeseCasisticaCheck = { codice: string; art: number; label: string }
   const NOTE_SPESE_CASISTICHE_CHECK: NotaSpeseCasisticaCheck[] = [
     { codice: 'C100_REPERIBILITA', art: 8, label: 'Art. 8 – Violazione servizio reperibilità' },
@@ -2045,7 +2123,111 @@ function ActionsPanel (props: {
     try { window.dispatchEvent(new CustomEvent('gii-log-eventi-cicli-changed', { detail: { source: 'gii-azioni', oid, role, ts: Date.now() } })) } catch {}
   }
 
-  const closeCycleLog = async (opts: { eventoChiusura: string, ruoloDestinatario?: string, utenteDestinatario?: string, noteChiusura?: string, fase?: string }) => {
+  const parseCycleAuditJson = (v: any): Record<string, any> => {
+    if (!v) return {}
+    if (typeof v === 'object' && !Array.isArray(v)) return { ...(v as any) }
+    try {
+      const parsed = JSON.parse(String(v))
+      return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {}
+    } catch {
+      return {}
+    }
+  }
+
+  const normalizeCycleAuditComparable = (fieldName: string, v: any): string => {
+    const k = String(fieldName || '').trim().toLowerCase()
+    if (v == null) return ''
+    if (v instanceof Date) return Number.isNaN(v.getTime()) ? '' : String(v.getTime())
+    if (typeof v === 'number') return Number.isFinite(v) ? String(v) : ''
+    if (typeof v === 'boolean') return v ? '1' : '0'
+    const raw = String(v).trim()
+    if ((k.includes('data') || k.startsWith('dt_')) && /^\d{12,}$/.test(raw)) {
+      const n = Number(raw)
+      return Number.isFinite(n) ? String(n) : raw
+    }
+    return raw
+  }
+
+  const formatCycleAuditDateTime = (v: any): string => {
+    if (v == null || v === '') return ''
+    try {
+      const n = Number(v)
+      const d = Number.isFinite(n) && n > 0 ? new Date(n) : new Date(String(v))
+      if (Number.isNaN(d.getTime())) return ''
+      const dd = String(d.getDate()).padStart(2, '0')
+      const mm = String(d.getMonth() + 1).padStart(2, '0')
+      const yy = String(d.getFullYear())
+      const hh = String(d.getHours()).padStart(2, '0')
+      const mi = String(d.getMinutes()).padStart(2, '0')
+      return `${dd}/${mm}/${yy} ${hh}:${mi}`
+    } catch {
+      return ''
+    }
+  }
+
+  const toCycleAuditStoredValue = (fieldName: string, v: any): any => {
+    const k = String(fieldName || '').trim().toLowerCase()
+    if (v == null) return ''
+    if (v instanceof Date) return Number.isNaN(v.getTime()) ? '' : formatCycleAuditDateTime(v.getTime())
+    if (typeof v === 'number') {
+      if (k.includes('data') || k.startsWith('dt_')) return formatCycleAuditDateTime(v) || v
+      return Number.isFinite(v) ? v : ''
+    }
+    if (typeof v === 'boolean') return v ? 1 : 0
+    return String(v).trim()
+  }
+
+  const isWorkflowAuditField = (fieldName: string): boolean => {
+    const k = String(fieldName || '').trim().toLowerCase()
+    if (!k) return false
+    if (k === 'objectid' || k === 'globalid') return false
+    if (k === 'creationdate' || k === 'creator' || k === 'editdate' || k === 'editor') return false
+    if (k === 'origine_pratica' || k === 'utente_loggato' || k === 'area_cod' || k === 'settore_cod' || k === 'req_point') return false
+    if (k === 'id_ufficio' || k === 'start' || k === 'end') return false
+    if (k.startsWith('gii_')) return false
+    if (k.startsWith('stato_') || k.startsWith('dt_stato_')) return false
+    if (k.startsWith('presa_in_carico_') || k.startsWith('dt_presa_in_carico_')) return false
+    if (k.startsWith('esito_') || k.startsWith('dt_esito_')) return false
+    if (k.startsWith('ti_assegnato_') || k.startsWith('ri_assegnato_')) return false
+    if (k.startsWith('dt_assegnazione_')) return false
+    if (k.startsWith('note_')) return false
+    if (k.startsWith('ns_')) return false
+    if (k.startsWith('dt_')) return false
+    return true
+  }
+
+  const buildWorkflowActionAuditDelta = (attributesIn: Record<string, any>) => {
+    const oldMap: Record<string, any> = {}
+    const newMap: Record<string, any> = {}
+    const before = data || {}
+    for (const field of Object.keys(attributesIn || {})) {
+      if (!isWorkflowAuditField(field)) continue
+      const prevVal = pickAttrCI(before, [field])
+      const nextVal = attributesIn[field]
+      if (normalizeCycleAuditComparable(field, prevVal) === normalizeCycleAuditComparable(field, nextVal)) continue
+      oldMap[field] = toCycleAuditStoredValue(field, prevVal)
+      newMap[field] = toCycleAuditStoredValue(field, nextVal)
+    }
+    return { oldMap, newMap }
+  }
+
+  const mergeWorkflowActionAuditMaps = (baseOld: Record<string, any>, baseNew: Record<string, any>, deltaOld: Record<string, any>, deltaNew: Record<string, any>) => {
+    const oldMap: Record<string, any> = { ...(baseOld || {}) }
+    const newMap: Record<string, any> = { ...(baseNew || {}) }
+    const changedKeys = Array.from(new Set([...Object.keys(deltaOld || {}), ...Object.keys(deltaNew || {})]))
+    for (const field of changedKeys) {
+      if (!(field in oldMap)) oldMap[field] = deltaOld[field]
+      newMap[field] = deltaNew[field]
+      if (normalizeCycleAuditComparable(field, oldMap[field]) === normalizeCycleAuditComparable(field, newMap[field])) {
+        delete oldMap[field]
+        delete newMap[field]
+      }
+    }
+    const fields = Object.keys(newMap).sort((a, b) => a.localeCompare(b))
+    return { oldMap, newMap, fields }
+  }
+
+  const closeCycleLog = async (opts: { eventoChiusura: string, ruoloDestinatario?: string, utenteDestinatario?: string, noteChiusura?: string, fase?: string, auditOldMap?: Record<string, any>, auditNewMap?: Record<string, any> }) => {
     try {
       if (oid == null) return
       const { parentGlobalId, area, settore, username } = await getCurrentCycleContextAsync()
@@ -2062,7 +2244,9 @@ function ActionsPanel (props: {
         // Creo un record completo direttamente come CHIUSO (apertura + chiusura in un colpo).
         const nextNum = await getNextCycleNumber(parentGlobalId, role)
         const now = Date.now()
-        const summary = buildCycleSummary('CREAZIONE', opts.eventoChiusura, 0)
+        const auditDelta = mergeWorkflowActionAuditMaps({}, {}, opts.auditOldMap || {}, opts.auditNewMap || {})
+        const numCampi = auditDelta.fields.length
+        const summary = buildCycleSummary('CREAZIONE', opts.eventoChiusura, numCampi)
         const newRaw: Record<string, any> = {
           parent_globalid: parentGlobalId,
           parent_objectid: oid,
@@ -2081,10 +2265,10 @@ function ActionsPanel (props: {
           settore,
           fase: opts.fase || role,
           session_id: sessionIdRef.current,
-          num_campi_modificati: 0,
-          campi_modificati: '',
-          valori_prima_json: '',
-          valori_dopo_json: '',
+          num_campi_modificati: numCampi,
+          campi_modificati: auditDelta.fields.join(', '),
+          valori_prima_json: numCampi > 0 ? JSON.stringify(auditDelta.oldMap) : '',
+          valori_dopo_json: numCampi > 0 ? JSON.stringify(auditDelta.newMap) : '',
           riepilogo_ciclo: summary
         }
         const newAttrs = filterAttrsForLayer(newRaw, logLayer)
@@ -2096,7 +2280,13 @@ function ActionsPanel (props: {
       }
 
       const attrs = feature.attributes || {}
-      const numCampi = Number(attrs.num_campi_modificati || 0)
+      const auditDelta = mergeWorkflowActionAuditMaps(
+        parseCycleAuditJson(attrs.valori_prima_json),
+        parseCycleAuditJson(attrs.valori_dopo_json),
+        opts.auditOldMap || {},
+        opts.auditNewMap || {}
+      )
+      const numCampi = auditDelta.fields.length
       const summary = buildCycleSummary(String(attrs.evento_apertura || 'PRESA_IN_CARICO'), opts.eventoChiusura, numCampi)
       const updRaw: Record<string, any> = {
         [String(logLayer.objectIdField || 'OBJECTID')]: getObjectIdValue(attrs, logLayer),
@@ -2110,6 +2300,10 @@ function ActionsPanel (props: {
         settore: settore || attrs.settore || '',
         fase: opts.fase || attrs.fase || role,
         session_id: sessionIdRef.current,
+        num_campi_modificati: numCampi,
+        campi_modificati: auditDelta.fields.join(', '),
+        valori_prima_json: numCampi > 0 ? JSON.stringify(auditDelta.oldMap) : '',
+        valori_dopo_json: numCampi > 0 ? JSON.stringify(auditDelta.newMap) : '',
         riepilogo_ciclo: summary,
         stato_record: 'CHIUSO'
       }
@@ -2226,10 +2420,15 @@ function ActionsPanel (props: {
     return fl
   }
 
+  const practicePrefixForActivity = (): string => {
+    const origin = pickAttrCI(data, ['origine_pratica', 'Origine_pratica', 'ORIGINE_PRATICA'])
+    return origin === 2 || String(origin || '').trim() === '2' ? 'TI' : 'TR'
+  }
+
   const shortReportNumberForActivity = (): string => {
     const raw = String(pickAttrCI(data, ['n_rapporto', 'numero_rapporto', 'codice_rapporto', 'cod_pratica', 'rapporto', 'num_rapporto']) || '').trim()
     if (raw) return raw.replace(/^Rapporto\s*/i, '').trim()
-    return oid != null ? `TR-${oid}` : '—'
+    return oid != null ? `${practicePrefixForActivity()}-${oid}` : '—'
   }
 
   const getActivityParentGlobalId = async (): Promise<string> => {
@@ -2249,10 +2448,10 @@ function ActionsPanel (props: {
     if (ev === 'SANZIONE_APPROVATA') return 'VERBALE_APPROVATO'
     if (ev === 'INTEGRAZIONE_RICHIESTA') return 'RICHIESTA_INTEGRAZIONE'
     if (ev === 'INTEGRAZIONE_TRASMESSA') return 'INTEGRAZIONE_TRASMESSA'
-    if (ev === 'INVIO_A_TI_AMM' || ev === 'RESTITUZIONE_A_TI_AMM') return 'INTEGRAZIONE_TRASMESSA'
+    if (ev === 'INVIO_A_TI_AMM' || ev === 'RESTITUZIONE_A_TI_AMM') return 'NUOVA_ASSEGNAZIONE'
     if (ev === 'ISTRUTTORIA_TRASMESSA') {
       if (dst === 'DA') return 'PROPOSTA_VERBALE'
-      return 'INTEGRAZIONE_TRASMESSA'
+      return 'NUOVA_ASSEGNAZIONE'
     }
     if (ev === 'RESPINTA') {
       if (src === 'DA') return 'VERBALE_RESPINTO'
@@ -2264,12 +2463,12 @@ function ActionsPanel (props: {
 
   const activityTitleForSubtype = (subtipo: string): string => {
     const st = String(subtipo || '').trim().toUpperCase()
-    if (st === 'NUOVO_RAPPORTO') return 'Nuovo rapporto'
-    if (st === 'RAPPORTO_UFFICIO') return 'Rapporto d’ufficio'
+    if (st === 'NUOVO_RAPPORTO') return 'Nuova pratica'
+    if (st === 'RAPPORTO_UFFICIO') return 'Pratica d’ufficio'
     if (st === 'NUOVA_ASSEGNAZIONE') return 'Nuova assegnazione'
-    if (st === 'RICHIESTA_INTEGRAZIONE') return 'Richiesta di integrazione'
+    if (st === 'RICHIESTA_INTEGRAZIONE') return 'Integrazione richiesta'
     if (st === 'INTEGRAZIONE_TRASMESSA') return 'Integrazione trasmessa'
-    if (st === 'RAPPORTO_APPROVATO') return 'Rapporto approvato'
+    if (st === 'RAPPORTO_APPROVATO') return 'Pratica approvata'
     if (st === 'PROPOSTA_VERBALE') return 'Proposta di verbale'
     if (st === 'VERBALE_APPROVATO') return 'Verbale approvato'
     if (st === 'RILEVAZIONE_RESPINTA') return 'Rilevazione respinta'
@@ -2281,18 +2480,57 @@ function ActionsPanel (props: {
   const activityMessageForSubtype = (subtipo: string, numeroRapporto: string): string => {
     const st = String(subtipo || '').trim().toUpperCase()
     const n = String(numeroRapporto || '').trim() || '—'
-    if (st === 'NUOVO_RAPPORTO') return `Nuovo rapporto n. ${n} da prendere in carico.`
-    if (st === 'RAPPORTO_UFFICIO') return `Rapporto d’ufficio n. ${n} da prendere in carico.`
-    if (st === 'NUOVA_ASSEGNAZIONE') return `Nuova assegnazione: rapporto n. ${n} da prendere in carico.`
-    if (st === 'RICHIESTA_INTEGRAZIONE') return `Richiesta di integrazione relativa al rapporto n. ${n} da prendere in carico.`
-    if (st === 'INTEGRAZIONE_TRASMESSA') return `Integrazione trasmessa relativa al rapporto n. ${n} da prendere in carico.`
-    if (st === 'RAPPORTO_APPROVATO') return `Rapporto approvato n. ${n} da prendere in carico.`
-    if (st === 'PROPOSTA_VERBALE') return `Proposta di verbale relativa al rapporto n. ${n} da prendere in carico.`
-    if (st === 'VERBALE_APPROVATO') return `Verbale approvato relativo al rapporto n. ${n} da prendere in carico.`
-    if (st === 'RILEVAZIONE_RESPINTA') return `Rilevazione respinta relativa al rapporto n. ${n} da prendere in carico.`
-    if (st === 'ISTRUTTORIA_TECNICA_RESPINTA') return `Istruttoria tecnica respinta relativa al rapporto n. ${n} da prendere in carico.`
-    if (st === 'VERBALE_RESPINTO') return `Verbale respinto relativo al rapporto n. ${n} da prendere in carico.`
-    return `Rapporto n. ${n} da prendere in carico.`
+    if (st === 'NUOVO_RAPPORTO') return `Nuova pratica n. ${n} da prendere in carico.`
+    if (st === 'RAPPORTO_UFFICIO') return `Pratica d’ufficio n. ${n} da prendere in carico.`
+    if (st === 'NUOVA_ASSEGNAZIONE') return `Pratica n. ${n} da prendere in carico.`
+    if (st === 'RICHIESTA_INTEGRAZIONE') return `Integrazione n. ${n} da prendere in carico.`
+    if (st === 'INTEGRAZIONE_TRASMESSA') return `Integrazione n. ${n} da prendere in carico.`
+    if (st === 'RAPPORTO_APPROVATO') return `Pratica approvata n. ${n} da prendere in carico.`
+    if (st === 'PROPOSTA_VERBALE') return `Proposta di verbale sulla pratica n. ${n} da prendere in carico.`
+    if (st === 'VERBALE_APPROVATO') return `Verbale della pratica n. ${n} da prendere in carico.`
+    if (st === 'RILEVAZIONE_RESPINTA') return `Rilevazione respinta sulla pratica n. ${n}.`
+    if (st === 'ISTRUTTORIA_TECNICA_RESPINTA') return `Istruttoria tecnica respinta sulla pratica n. ${n}.`
+    if (st === 'VERBALE_RESPINTO') return `Verbale respinto sulla pratica n. ${n}.`
+    return `Pratica n. ${n} da prendere in carico.`
+  }
+
+  const activityTitleForEvent = (subtipo: string, evento: string, ruoloMittente: string, ruoloDest: string): string => {
+    const ev = String(evento || '').trim().toUpperCase()
+    const src = String(ruoloMittente || '').trim().toUpperCase()
+    const dst = String(ruoloDest || '').trim().toUpperCase()
+
+    if (ev === 'ISTRUTTORIA_TRASMESSA') {
+      if ((src === 'TI' || src === 'TR') && dst === 'RZ') return 'Bozza trasmessa'
+      if (src === 'RZ' && dst === 'RI') return 'Bozza approvata'
+      if (src === 'RI' && dst === 'DT') return 'Istruttoria tecnica approvata'
+      if (src === 'TI_AMM' && dst === 'RI_AMM') return 'Istruttoria amministrativa trasmessa'
+      if (src === 'RI_AMM' && dst === 'DA') return 'Istruttoria amministrativa approvata'
+    }
+
+    if (ev === 'INVIO_A_TI_AMM') return 'Istruttoria amministrativa trasmessa'
+    if (ev === 'RESTITUZIONE_A_TI_AMM') return 'Pratica restituita'
+
+    return activityTitleForSubtype(subtipo)
+  }
+
+  const activityMessageForEvent = (subtipo: string, evento: string, ruoloMittente: string, ruoloDest: string, numeroRapporto: string): string => {
+    const ev = String(evento || '').trim().toUpperCase()
+    const src = String(ruoloMittente || '').trim().toUpperCase()
+    const dst = String(ruoloDest || '').trim().toUpperCase()
+    const n = String(numeroRapporto || '').trim() || '—'
+
+    if (ev === 'ISTRUTTORIA_TRASMESSA') {
+      if ((src === 'TI' || src === 'TR') && dst === 'RZ') return `Bozza n. ${n} da prendere in carico.`
+      if (src === 'RZ' && dst === 'RI') return `Istruttoria tecnica n. ${n} da prendere in carico.`
+      if (src === 'RI' && dst === 'DT') return `Rapporto tecnico n. ${n} da prendere in carico.`
+      if (src === 'TI_AMM' && dst === 'RI_AMM') return `Istruttoria amministrativa n. ${n} da prendere in carico.`
+      if (src === 'RI_AMM' && dst === 'DA') return `Proposta di verbale sulla pratica n. ${n} da prendere in carico.`
+    }
+
+    if (ev === 'INVIO_A_TI_AMM') return `Istruttoria amministrativa n. ${n} da prendere in carico.`
+    if (ev === 'RESTITUZIONE_A_TI_AMM') return `Pratica n. ${n} restituita al Tecnico Istruttore amministrativo.`
+
+    return activityMessageForSubtype(subtipo, n)
   }
 
   const normalizeActivityDestRole = (r: string): string => {
@@ -2321,8 +2559,8 @@ function ActionsPanel (props: {
       const areaDest = normalizeAreaLabel(destMeta.area || (ruoloDest === 'DA' || ruoloDest === 'RI_AMM' || ruoloDest === 'TI_AMM' ? 'AMM' : ''))
       const settoreDest = normalizeSettoreCod(destMeta.settore || '')
       const subtipo = activitySubTypeFromEvent(logOpts?.eventoChiusura, role, ruoloDest)
-      const titolo = activityTitleForSubtype(subtipo)
-      const messaggio = activityMessageForSubtype(subtipo, numeroRapporto)
+      const titolo = activityTitleForEvent(subtipo, logOpts?.eventoChiusura, role, ruoloDest)
+      const messaggio = activityMessageForEvent(subtipo, logOpts?.eventoChiusura, role, ruoloDest, numeroRapporto)
       const destUsername = String(logOpts?.utenteDestinatario || resolveDestUser(ruoloDest) || '').trim()
       const key = `${parentGlobalId}|PRESA_IN_CARICO|${subtipo}|${ruoloDest}|${areaDest}|${settoreDest}|${destUsername}`
       const now = Date.now()
@@ -2510,10 +2748,10 @@ function ActionsPanel (props: {
     !roleClosedOrForwarded
 
   const editButtonTitle = canEdit
-    ? (isAmmEditRole ? 'Apri scheda verbale' : 'Modifica rapporto')
+    ? (isAmmEditRole ? 'Apri scheda verbale' : 'Modifica pratica')
     : (isAmmEditRole
       ? 'Modifica verbale non disponibile: la pratica deve essere già presa in carico dal ruolo corrente.'
-      : 'Modifica non disponibile: il rapporto deve essere già preso in carico dal ruolo corrente.')
+      : 'Modifica non disponibile: la pratica deve essere già presa in carico dal ruolo corrente.')
 
   const canUseRapportoPdf =
     hasSel &&
@@ -2544,10 +2782,10 @@ function ActionsPanel (props: {
         try { sessionStorage.removeItem('GII_EDIT_TAB') } catch {}
       }
     } catch { }
-    const resolvePageId = (pageTokenRaw: string): string => {
+    const resolveConfiguredPageId = (pageTokenRaw: string): string | null => {
       const tok0 = String(pageTokenRaw || '').trim()
-      const wanted = tok0 || 'page_20'
-      let tok = wanted.replace(/^#+\/?/, '').replace(/^\/+/, '')
+      if (!tok0) return null
+      let tok = tok0.replace(/^#+\/?/, '').replace(/^\/+/, '')
       if (tok.startsWith('page/')) tok = tok.slice(5)
       try {
         const state: any = getAppStore?.()?.getState?.()
@@ -2555,43 +2793,22 @@ function ActionsPanel (props: {
         const rawPages: any = appConfig?.pages ?? {}
         const pagesMap: any = rawPages?.asMutable ? rawPages.asMutable({ deep: true }) : (rawPages?.toJS ? rawPages.toJS() : rawPages)
         if (pagesMap && pagesMap[tok]) return tok
-        const hist = appConfig?.historyLabels?.page || {}
-        const cand: Array<[string, any]> = Object.entries(pagesMap || {}) as any
-        for (const [pageId, pg] of cand) {
-          const p: any = pg || {}
-          if (p?.name === tok || p?.label === tok || p?.title === tok) return String(pageId)
-          if (hist && (hist as any)[pageId] === tok) return String(pageId)
-        }
-        const low = tok.toLowerCase()
-        const preferredNeedles = isAmmEditRole
-          ? [low, 'page_48', 'verbale']
-          : [low, 'page_45', 'page_20', 'modifica rapporto']
-        for (const needle of preferredNeedles) {
-          if (!needle) continue
-          for (const [pageId, pg] of cand) {
-            const p: any = pg || {}
-            const vals = [p?.name, p?.label, p?.title, (hist as any)?.[pageId]].filter(Boolean).map((v: any) => String(v).toLowerCase())
-            if (vals.some((v: string) => v === needle || v.includes(needle))) return String(pageId)
-          }
-        }
       } catch {}
-      return tok
+      return null
     }
 
+    const pageToken = String(isAmmEditRole ? (ec.ammPageId || 'page_48') : (ec.pageId || 'page_45')).trim()
+    const pageId = resolveConfiguredPageId(pageToken)
+    if (!pageId) {
+      const expected = isAmmEditRole ? 'page_48' : 'page_45'
+      setMsg({ kind: 'err', text: `Pagina di modifica non trovata: ${pageToken || '(vuota)'}. Correggere il setting del widget: valore atteso ${expected}.` })
+      return
+    }
     try {
-      const pageToken = String(isAmmEditRole ? (ec.ammPageId || 'page_48') : (ec.pageId || 'page_45')).trim()
-      const pageId = resolvePageId(pageToken)
-      if (pageId) {
-        UrlManager.getInstance().changePage(pageId)
-        return
-      }
-    } catch { }
-    try {
-      const pageToken = String(isAmmEditRole ? (ec.ammPageId || 'page_48') : (ec.pageId || 'page_45')).trim()
-      const clean = pageToken.replace(/^#+\/?/, '').replace(/^\/+/, '')
-      const t = clean.startsWith('page/') ? clean.slice(5) : clean
-      window.location.hash = `#/page/${t}`
-    } catch { }
+      UrlManager.getInstance().changePage(pageId)
+    } catch (e: any) {
+      setMsg({ kind: 'err', text: `Errore apertura pagina di modifica: ${e?.message || String(e)}` })
+    }
   }
 
   // Leggi i valori in modo robusto:
@@ -2698,6 +2915,7 @@ function ActionsPanel (props: {
       setMsg({ kind: 'info', text: 'Selezionare una riga.' })
       setPending(null)
       setActionsMenuOpen(false)
+      setWorkflowSubmitting(false)
       setLoading(false)
       setConfirmAttempted(false)
       noteOrigRef.current = ''
@@ -2711,6 +2929,7 @@ function ActionsPanel (props: {
     setMsg(null)
     setPending(null)
     setActionsMenuOpen(false)
+    setWorkflowSubmitting(false)
     setLoading(false)
     setConfirmAttempted(false)
 
@@ -3200,35 +3419,38 @@ function ActionsPanel (props: {
     : ''
 
   const approvaBtnLabel =
-    role === 'TI' ? `Trasmetti al ${getRoleLabelForMenu('RZ')}` :
-    role === 'RZ' ? `Trasmetti al ${getRoleLabelForMenu('RI')}` :
-    role === 'RI' ? `Trasmetti al ${getRoleLabelForForward('DT')}` :
-    role === 'DT' ? 'Approva' :
-    role === 'DA' ? 'Approva' :
+    role === 'TI' ? `Trasmetti bozza al ${getRoleLabelForMenu('RZ')}` :
+    role === 'RZ' ? 'Approva bozza' :
+    role === 'RI' ? 'Approva istruttoria tecnica' :
+    role === 'DT' ? 'Approva Rapporto tecnico di rilevazione' :
+    role === 'DA' ? 'Approva verbale' :
+    role === 'RI_AMM' && fwdDest === 'DA' ? 'Approva istruttoria amministrativa' :
     role === 'RI_AMM' ? `Trasmetti al ${fwdDestLabel}` :
-    role === 'TI_AMM' ? `Trasmetti al ${getRoleLabelForMenu('RI_AMM')}` :
+    role === 'TI_AMM' ? `Trasmetti istruttoria amministrativa al ${getRoleLabelForMenu('RI_AMM')}` :
     'Approva'
 
   const approvaDoneLabel = currentIntegrationRequesterLabel
     ? `Trasmessa al ${currentIntegrationRequesterLabel}`
-    : role === 'TI' ? `Trasmessa al ${getRoleLabelForMenu('RZ')}` :
-    role === 'RZ' ? `Trasmessa al ${getRoleLabelForMenu('RI')}` :
-    role === 'RI' ? `Trasmessa al ${getRoleLabelForForward('DT')}` :
-    role === 'DT' ? `Trasmessa al ${getRoleLabelForMenu('RI_AMM')}` :
-    role === 'DA' ? `Trasmessa al ${getRoleLabelForMenu('TI_AMM')}` :
+    : role === 'TI' ? `Bozza trasmessa al ${getRoleLabelForMenu('RZ')}` :
+    role === 'RZ' ? `Bozza approvata e trasmessa al ${getRoleLabelForMenu('RI')}` :
+    role === 'RI' ? `Istruttoria tecnica approvata e trasmessa al ${getRoleLabelForForward('DT')}` :
+    role === 'DT' ? `Rapporto tecnico di rilevazione approvato e trasmesso al ${getRoleLabelForMenu('RI_AMM')}` :
+    role === 'DA' ? `Verbale approvato e trasmesso al ${getRoleLabelForMenu('TI_AMM')}` :
+    role === 'RI_AMM' && fwdDest === 'DA' ? `Istruttoria amministrativa approvata e trasmessa al ${getRoleLabelForForward('DA')}` :
     role === 'RI_AMM' ? `Trasmessa al ${fwdDestLabel}` :
-    role === 'TI_AMM' ? `Trasmessa al ${getRoleLabelForMenu('RI_AMM')}` :
+    role === 'TI_AMM' ? `Istruttoria amministrativa trasmessa al ${getRoleLabelForMenu('RI_AMM')}` :
     'Approvata'
 
   const approvaConfirmLabel = currentIntegrationRequesterLabel
     ? `Conferma trasmissione al ${currentIntegrationRequesterLabel}`
-    : role === 'TI' ? `Conferma trasmissione al ${getRoleLabelForMenu('RZ')}` :
-    role === 'RZ' ? `Conferma trasmissione al ${getRoleLabelForMenu('RI')}` :
-    role === 'RI' ? `Conferma trasmissione al ${getRoleLabelForForward('DT')}` :
-    role === 'DT' ? 'Conferma approvazione' :
-    role === 'DA' ? 'Conferma approvazione' :
+    : role === 'TI' ? `Conferma trasmissione bozza al ${getRoleLabelForMenu('RZ')}` :
+    role === 'RZ' ? 'Conferma approvazione bozza' :
+    role === 'RI' ? 'Conferma approvazione istruttoria tecnica' :
+    role === 'DT' ? 'Conferma approvazione Rapporto tecnico di rilevazione' :
+    role === 'DA' ? 'Conferma approvazione verbale' :
+    role === 'RI_AMM' && fwdDest === 'DA' ? 'Conferma approvazione istruttoria amministrativa' :
     role === 'RI_AMM' ? `Conferma trasmissione al ${fwdDestLabel}` :
-    role === 'TI_AMM' ? `Conferma trasmissione al ${getRoleLabelForMenu('RI_AMM')}` :
+    role === 'TI_AMM' ? `Conferma trasmissione istruttoria amministrativa al ${getRoleLabelForMenu('RI_AMM')}` :
     'Conferma approvazione'
 
   const getRiTecnicoTargetLabel = (): string => {
@@ -3334,19 +3556,25 @@ function ActionsPanel (props: {
 
   const approvaMenuLabel = currentIntegrationRequesterLabel
     ? `Trasmetti al ${currentIntegrationRequesterLabel}`
-    : role === 'TI' ? `Trasmetti al ${getRoleLabelForMenu('RZ')}` :
-    role === 'RZ' ? `Trasmetti al ${getRoleLabelForMenu('RI')}` :
-    role === 'RI' ? `Trasmetti al ${getRoleLabelForForward('DT')}` :
-    role === 'DT' ? 'Approva' :
-    role === 'DA' ? 'Approva' :
+    : role === 'TI' ? `Trasmetti bozza al ${getRoleLabelForMenu('RZ')}` :
+    role === 'RZ' ? 'Approva bozza' :
+    role === 'RI' ? 'Approva istruttoria tecnica' :
+    role === 'DT' ? 'Approva Rapporto tecnico di rilevazione' :
+    role === 'DA' ? 'Approva verbale' :
+    role === 'RI_AMM' && fwdDest === 'DA' ? 'Approva istruttoria amministrativa' :
     role === 'RI_AMM' ? `Trasmetti al ${fwdDestLabel}` :
-    role === 'TI_AMM' ? `Trasmetti al ${getRoleLabelForMenu('RI_AMM')}` :
+    role === 'TI_AMM' ? `Trasmetti istruttoria amministrativa al ${getRoleLabelForMenu('RI_AMM')}` :
     approvaBtnLabel
 
   const approvaMenuDesc = currentIntegrationRequesterLabel
     ? `Invia la risposta al ${currentIntegrationRequesterLabel}.`
-    : role === 'DT' ? 'Approva.' :
-    role === 'DA' ? 'Approva.' :
+    : role === 'TI' ? `Invia la bozza al ${getRoleLabelForMenu('RZ')}.` :
+    role === 'RZ' ? `Approva la bozza e la trasmette al ${getRoleLabelForMenu('RI')}.` :
+    role === 'RI' ? `Approva l’istruttoria tecnica e la trasmette al ${getRoleLabelForForward('DT')}.` :
+    role === 'DT' ? `Approva il Rapporto tecnico di rilevazione e lo trasmette al ${getRoleLabelForMenu('RI_AMM')}.` :
+    role === 'DA' ? `Approva il verbale e lo trasmette al ${getRoleLabelForMenu('TI_AMM')}.` :
+    role === 'RI_AMM' && fwdDest === 'DA' ? `Approva l’istruttoria amministrativa e la trasmette al ${getRoleLabelForForward('DA')}.` :
+    role === 'TI_AMM' ? `Trasmette l’istruttoria amministrativa al ${getRoleLabelForMenu('RI_AMM')}.` :
     fwdDestLabel ? `Invia la pratica al ${fwdDestLabel}.` :
     'Avanza la pratica al passaggio successivo.'
 
@@ -3436,7 +3664,7 @@ function ActionsPanel (props: {
         {
           key: 'ELIMINA',
           label: 'Elimina',
-          desc: 'Archivia il rapporto.',
+          desc: 'Archivia la pratica.',
           enabled: canStartElimina,
           visible: role === 'TI',
           color: buttonColors.respingi,
@@ -3445,7 +3673,7 @@ function ActionsPanel (props: {
         {
           key: 'RESPINGI',
           label: 'Respingi',
-          desc: 'Respinge il rapporto.',
+          desc: 'Respinge la pratica.',
           enabled: canStartRespingi,
           visible: role !== 'RI_AMM' && role !== 'TI',
           color: buttonColors.respingi,
@@ -3491,8 +3719,10 @@ function ActionsPanel (props: {
   const tiAmmReqErr = confirmAttempted && pending === 'ASSEGNA_TI_AMM' && !tiAmmSelected
 
   const onAnnulla = () => {
+    if (loading) return
     setPending(null)
     setActionsMenuOpen(false)
+    setWorkflowSubmitting(false)
     setLoading(false)
     setMsg(null)
     setConfirmAttempted(false)
@@ -3607,6 +3837,7 @@ function ActionsPanel (props: {
 
   type RunApplyEditsOptions = {
     deferRefresh?: boolean
+    keepLoading?: boolean
   }
 
   const markRestoreSelectionAfterAction = React.useCallback((source = 'azioni') => {
@@ -3667,11 +3898,16 @@ function ActionsPanel (props: {
     // Registriamo solo l'intenzione di ripristino: sarà l'elenco a ripristinare
     // la selezione esclusivamente se il record è ancora visibile nella scheda attiva.
     markRestoreSelectionAfterAction(String(logOpts?.eventoChiusura || 'workflow'))
-    await runApplyEdits(attributesIn, okText, { deferRefresh: true })
-    await closeCycleLog(logOpts)
-    await deleteCurrentActivityForCurrentRole()
-    if (logOpts?.ruoloDestinatario) await upsertCurrentActivityForDest(logOpts)
-    await refreshAfterWorkflowSave('azioni-post-log')
+    const auditDelta = buildWorkflowActionAuditDelta(attributesIn)
+    try {
+      await runApplyEdits(attributesIn, okText, { deferRefresh: true, keepLoading: true })
+      await closeCycleLog({ ...logOpts, auditOldMap: auditDelta.oldMap, auditNewMap: auditDelta.newMap })
+      await deleteCurrentActivityForCurrentRole()
+      if (logOpts?.ruoloDestinatario) await upsertCurrentActivityForDest(logOpts)
+      await refreshAfterWorkflowSave('azioni-post-log')
+    } finally {
+      setLoading(false)
+    }
   }
 
   const runApplyEdits = async (attributesIn: Record<string, any>, okText: string, options?: RunApplyEditsOptions) => {
@@ -3772,7 +4008,7 @@ function ActionsPanel (props: {
         if (selectionKeyRef.current === startKey) setMsg(null)
       }, 4500)
 
-      setLoading(false)
+      if (!options?.keepLoading) setLoading(false)
     } catch (e) {
       setLoading(false)
       throw e
@@ -3780,6 +4016,10 @@ function ActionsPanel (props: {
   }
 
   const onConfirmTakeInCharge = async () => {
+    setConfirmAttempted(true)
+    setLoading(true)
+    setMsg(null)
+
     try {
       // Costruisci l'update SOLO con i campi che esistono nello schema.
       // Questo evita patch ottimistici su campi inesistenti che poi "spariscono" al reselect.
@@ -3794,14 +4034,16 @@ function ActionsPanel (props: {
 
       markRestoreSelectionAfterAction('presa-in-carico')
       const cycleContextBeforeSave = await getCurrentCycleContextAsync()
-      await runApplyEdits(upd, 'Presa in carico salvata.', { deferRefresh: true })
+      await runApplyEdits(upd, 'Presa in carico salvata.', { deferRefresh: true, keepLoading: true })
       await openCycleLog({ eventoApertura: 'PRESA_IN_CARICO', fase: role, context: cycleContextBeforeSave, forceNew: true })
       await deleteCurrentActivityForCurrentRole()
       await refreshAfterWorkflowSave('azioni-presa-in-carico-post-log')
+      setLoading(false)
 
       setPending(null)
       setConfirmAttempted(false)
     } catch (e: any) {
+      setLoading(false)
       const txt = e?.message ? String(e.message) : String(e)
       setMsg({ kind: 'err', text: `Errore salvataggio: ${txt}` })
     }
@@ -3811,6 +4053,8 @@ function ActionsPanel (props: {
   const onConfirmAssegnaTi = async () => {
     setConfirmAttempted(true)
     if (!tiSelected) return
+    setLoading(true)
+    setMsg(null)
 
     try {
       const u: any = (window as any).__giiUserRole || {}
@@ -3856,6 +4100,7 @@ function ActionsPanel (props: {
       setPending(null)
       setConfirmAttempted(false)
     } catch (e: any) {
+      setLoading(false)
       const txt = e?.message ? String(e.message) : String(e)
       setMsg({ kind: 'err', text: `Errore salvataggio: ${txt}` })
     }
@@ -3864,6 +4109,8 @@ function ActionsPanel (props: {
   const onConfirmAssegnaTiAmm = async () => {
     setConfirmAttempted(true)
     if (!tiAmmSelected) return
+    setLoading(true)
+    setMsg(null)
 
     try {
       const u: any = (window as any).__giiUserRole || {}
@@ -3922,6 +4169,7 @@ function ActionsPanel (props: {
       setPending(null)
       setConfirmAttempted(false)
     } catch (e: any) {
+      setLoading(false)
       const txt = e?.message ? String(e.message) : String(e)
       setMsg({ kind: 'err', text: `Errore salvataggio: ${txt}` })
     }
@@ -3929,6 +4177,8 @@ function ActionsPanel (props: {
 
   const onConfirmRestituisciTiAmm = async () => {
     setConfirmAttempted(true)
+    setLoading(true)
+    setMsg(null)
 
     try {
       const now = Date.now()
@@ -3966,6 +4216,7 @@ function ActionsPanel (props: {
       setPending(null)
       setConfirmAttempted(false)
     } catch (e: any) {
+      setLoading(false)
       const txt = e?.message ? String(e.message) : String(e)
       setMsg({ kind: 'err', text: `Errore salvataggio: ${txt}` })
     }
@@ -3974,6 +4225,8 @@ function ActionsPanel (props: {
   const onConfirmIntegrazione = async () => {
     setConfirmAttempted(true)
     if (!noteTrim) return
+    setLoading(true)
+    setMsg(null)
 
     try {
       const stato = mapEsitoToStato(ESITO_INTEGRAZIONE) // => 3
@@ -4022,21 +4275,55 @@ function ActionsPanel (props: {
       setPending(null)
       setConfirmAttempted(false)
     } catch (e: any) {
+      setLoading(false)
       const txt = e?.message ? String(e.message) : String(e)
       setMsg({ kind: 'err', text: `Errore salvataggio: ${txt}` })
     }
   }
 
   const onConfirmEsito = async (esito: number, label: string) => {
+    setLoading(true)
+    setMsg(null)
+
     try {
+      const now = Date.now()
       const stato = mapEsitoToStato(esito)
       const upd: Record<string, any> = {
         [esitoField]: esito,
-        [dtEsitoField]: Date.now()
+        [dtEsitoField]: now
       }
       if (stato != null) {
         upd[statoField] = stato
-        upd[dtStatoField] = Date.now()
+        upd[dtStatoField] = now
+      }
+
+      if (role === 'DA' && esito === ESITO_APPROVATA) {
+        const schemaFields: Record<string, any> = (ds as any)?.getSchema?.()?.fields || {}
+        const fNumeroVerbale = getSchemaFieldNameCI(schemaFields, 'numero_verbale')
+        const fDataVerbale = getSchemaFieldNameCI(schemaFields, 'data_verbale')
+        if (!fNumeroVerbale || !fDataVerbale) {
+          throw new Error('Impossibile approvare il verbale: campi numero_verbale/data_verbale non presenti nella fonte dati.')
+        }
+
+        const liveAttrs = await queryCurrentRecordAttrs()
+        const currentNumeroVerbale = String(pickAttrCI(liveAttrs || data, ['numero_verbale', fNumeroVerbale]) || '').trim()
+        const currentDataVerbale = pickAttrCI(liveAttrs || data, ['data_verbale', fDataVerbale])
+
+        const yearBase = (currentDataVerbale != null && currentDataVerbale !== '') ? currentDataVerbale : now
+        const parsedYearDate = new Date(typeof yearBase === 'number' ? yearBase : (Number(yearBase) || String(yearBase)))
+        const annoVerbale = Number.isNaN(parsedYearDate.getTime()) ? new Date(now).getFullYear() : parsedYearDate.getFullYear()
+
+        if (currentNumeroVerbale) {
+          const parsedProgressivo = parseNumeroVerbaleProgressivo(currentNumeroVerbale, annoVerbale)
+          if (parsedProgressivo == null) {
+            throw new Error(`Numero verbale già presente ma non conforme al formato progressivo/anno: ${currentNumeroVerbale}`)
+          }
+        } else {
+          upd[fNumeroVerbale] = await queryNextNumeroVerbale(annoVerbale)
+        }
+        if (currentDataVerbale == null || currentDataVerbale === '') {
+          upd[fDataVerbale] = now
+        }
       }
 
       const integRequester = esito === ESITO_APPROVATA ? getIntegrationRequesterForCurrentRole() : ''
@@ -4051,7 +4338,7 @@ function ActionsPanel (props: {
           const fEsito = getSchemaFieldNameCI(schemaFields, `esito_${ruoloDest}`)
           const fDtEsito = getSchemaFieldNameCI(schemaFields, `dt_esito_${ruoloDest}`)
           if (fStato) upd[fStato] = STATO_DA_PRENDERE
-          if (fDtStato) upd[fDtStato] = Date.now()
+          if (fDtStato) upd[fDtStato] = now
           if (fPresa) upd[fPresa] = PRESA_DA_PRENDERE
           if (fDtPresa) upd[fDtPresa] = null
           if (fEsito) upd[fEsito] = null
@@ -4110,6 +4397,7 @@ function ActionsPanel (props: {
       setPending(null)
       setConfirmAttempted(false)
     } catch (e: any) {
+      setLoading(false)
       const txt = e?.message ? String(e.message) : String(e)
       setMsg({ kind: 'err', text: `Errore salvataggio: ${txt}` })
     }
@@ -4119,6 +4407,8 @@ function ActionsPanel (props: {
     setConfirmAttempted(true)
     if (!reasonTrim) return
     if (noteIsRequired && !noteTrim) return
+    setLoading(true)
+    setMsg(null)
 
     try {
       const stato = mapEsitoToStato(ESITO_RESPINTA)
@@ -4140,6 +4430,7 @@ function ActionsPanel (props: {
       setPending(null)
       setConfirmAttempted(false)
     } catch (e: any) {
+      setLoading(false)
       const txt = e?.message ? String(e.message) : String(e)
       setMsg({ kind: 'err', text: `Errore salvataggio: ${txt}` })
     }
@@ -4148,6 +4439,8 @@ function ActionsPanel (props: {
   const onConfirmElimina = async () => {
     setConfirmAttempted(true)
     if (!noteTrim) return  // nota obbligatoria (Matrice_TI caso 1/b)
+    setLoading(true)
+    setMsg(null)
 
     try {
       // Archiviazione logica: GII_arch = 1, nota nel campo note_TI.
@@ -4164,10 +4457,11 @@ function ActionsPanel (props: {
       if (fDt) upd[fDt] = Date.now()
       if (fDa) upd[fDa] = String((window as any).__giiUserRole?.username || '').trim() || undefined
 
-      await saveWithWorkflowLog(upd, 'Rapporto archiviato.', { eventoChiusura: 'ARCHIVIAZIONE', noteChiusura: noteTrim, fase: role })
+      await saveWithWorkflowLog(upd, 'Pratica archiviata.', { eventoChiusura: 'ARCHIVIAZIONE', noteChiusura: noteTrim, fase: role })
       setPending(null)
       setConfirmAttempted(false)
     } catch (e: any) {
+      setLoading(false)
       const txt = e?.message ? String(e.message) : String(e)
       setMsg({ kind: 'err', text: `Errore archiviazione: ${txt}` })
     }
@@ -4216,25 +4510,48 @@ function ActionsPanel (props: {
             : pending === 'RESPINGI'
               ? 'Conferma respinta'
               : pending === 'ELIMINA'
-                ? 'Conferma archiviazione rapporto'
+                ? 'Conferma archiviazione pratica'
                 : 'Conferma azione'
 
   // ── Colore/icona/testo per ogni tipo di azione ────────────────────────────
   type PendingTheme = { icon: string; color: string; bg: string; border: string; desc: string; buttonBg: string; buttonBorder: string }
+
+  const approvaActionDesc = currentIntegrationRequesterLabel
+    ? `La pratica verrà trasmessa al ${currentIntegrationRequesterLabel}.`
+    : role === 'TI' ? `La bozza verrà trasmessa al ${getRoleLabelForMenu('RZ')}.` :
+    role === 'RZ' ? `La bozza verrà approvata e trasmessa al ${getRoleLabelForMenu('RI')}.` :
+    role === 'RI' ? `L’istruttoria tecnica verrà approvata e trasmessa al ${getRoleLabelForForward('DT')}.` :
+    role === 'DT' ? `Il Rapporto tecnico di rilevazione verrà approvato e trasmesso al ${getRoleLabelForMenu('RI_AMM')}.` :
+    role === 'DA' ? `Il verbale verrà approvato e trasmesso al ${getRoleLabelForMenu('TI_AMM')}.` :
+    role === 'RI_AMM' && fwdDest === 'DA' ? `L’istruttoria amministrativa verrà approvata e trasmessa al ${getRoleLabelForForward('DA')}.` :
+    role === 'RI_AMM' ? `La pratica verrà trasmessa al ${fwdDestLabel}.` :
+    role === 'TI_AMM' ? `L’istruttoria amministrativa verrà trasmessa al ${getRoleLabelForMenu('RI_AMM')}.` :
+    'La pratica verrà avanzata al passaggio successivo.'
+
+  const integrazioneActionDesc = pendingRimandoTargetLabel
+    ? `La pratica verrà rimandata al ${pendingRimandoTargetLabel}.`
+    : 'La pratica verrà rimandata per integrazione.'
+
   const pendingTheme: Record<string, PendingTheme> = {
-    TAKE:           { icon: '✓', color: '#2563eb', bg: '#eff6ff', border: '#bfdbfe', buttonBg: '#2563eb', buttonBorder: '#1d4ed8', desc: 'Il rapporto verrà preso in carico.' },
-    ASSEGNA_TI:     { icon: '✓', color: '#2563eb', bg: '#eff6ff', border: '#bfdbfe', buttonBg: '#2563eb', buttonBorder: '#1d4ed8', desc: 'Il rapporto verrà assegnato al Tecnico Istruttore selezionato.' },
+    TAKE:           { icon: '✓', color: '#2563eb', bg: '#eff6ff', border: '#bfdbfe', buttonBg: '#2563eb', buttonBorder: '#1d4ed8', desc: 'La pratica verrà presa in carico.' },
+    ASSEGNA_TI:     { icon: '✓', color: '#2563eb', bg: '#eff6ff', border: '#bfdbfe', buttonBg: '#2563eb', buttonBorder: '#1d4ed8', desc: 'La pratica verrà assegnata al Tecnico Istruttore selezionato.' },
     ASSEGNA_TI_AMM: { icon: '✓', color: '#2563eb', bg: '#eff6ff', border: '#bfdbfe', buttonBg: '#2563eb', buttonBorder: '#1d4ed8', desc: 'La pratica verrà assegnata al Tecnico Istruttore amministrativo selezionato.' },
-    INVIA_TI_AMM: { icon: '✓', color: '#2563eb', bg: '#eff6ff', border: '#bfdbfe', buttonBg: '#2563eb', buttonBorder: '#1d4ed8', desc: 'La pratica verrà inviata al Tecnico Istruttore amministrativo già assegnato.' },
-    RESTITUISCI_TI_AMM: { icon: '✓', color: '#2563eb', bg: '#eff6ff', border: '#bfdbfe', buttonBg: '#2563eb', buttonBorder: '#1d4ed8', desc: 'La pratica verrà inviata al Tecnico Istruttore amministrativo già assegnato.' },
-    APPROVA:        { icon: '✓', color: '#2563eb', bg: '#eff6ff', border: '#bfdbfe', buttonBg: '#2563eb', buttonBorder: '#1d4ed8', desc: `Il rapporto verrà ${approvaDoneLabel.toLowerCase()}.` },
-    INTEGRAZIONE:   { icon: '↩', color: '#b45309', bg: '#fffbeb', border: '#fde68a', buttonBg: '#d97706', buttonBorder: '#b45309', desc: 'La pratica verrà rimandata.' },
+    INVIA_TI_AMM: { icon: '✓', color: '#2563eb', bg: '#eff6ff', border: '#bfdbfe', buttonBg: '#2563eb', buttonBorder: '#1d4ed8', desc: 'La pratica verrà trasmessa al Tecnico Istruttore amministrativo già assegnato.' },
+    RESTITUISCI_TI_AMM: { icon: '✓', color: '#2563eb', bg: '#eff6ff', border: '#bfdbfe', buttonBg: '#2563eb', buttonBorder: '#1d4ed8', desc: 'La pratica verrà restituita al Tecnico Istruttore amministrativo già assegnato.' },
+    APPROVA:        { icon: '✓', color: '#2563eb', bg: '#eff6ff', border: '#bfdbfe', buttonBg: '#2563eb', buttonBorder: '#1d4ed8', desc: approvaActionDesc },
+    INTEGRAZIONE:   { icon: '↩', color: '#b45309', bg: '#fffbeb', border: '#fde68a', buttonBg: '#d97706', buttonBorder: '#b45309', desc: integrazioneActionDesc },
     INTEGRAZIONE_TI_AMM: { icon: '↩', color: '#b45309', bg: '#fffbeb', border: '#fde68a', buttonBg: '#d97706', buttonBorder: '#b45309', desc: 'La pratica verrà rimandata al Tecnico Istruttore amministrativo assegnato.' },
     INTEGRAZIONE_TECNICA: { icon: '↩', color: '#b45309', bg: '#fffbeb', border: '#fde68a', buttonBg: '#d97706', buttonBorder: '#b45309', desc: `La pratica verrà rimandata al ${rimandoTecnicaTargetLabel}.` },
-    RESPINGI:       { icon: '✕', color: '#b42318', bg: '#fef2f2', border: '#fecaca', buttonBg: '#dc2626', buttonBorder: '#b42318', desc: 'Il rapporto verrà respinto.' },
-    ELIMINA:        { icon: '✕', color: '#b42318', bg: '#fef2f2', border: '#fecaca', buttonBg: '#dc2626', buttonBorder: '#b42318', desc: 'Il rapporto verrà archiviato e non sarà più visibile nell\'elenco.' },
+    RESPINGI:       { icon: '✕', color: '#b42318', bg: '#fef2f2', border: '#fecaca', buttonBg: '#dc2626', buttonBorder: '#b42318', desc: 'La pratica verrà respinta.' },
+    ELIMINA:        { icon: '✕', color: '#b42318', bg: '#fef2f2', border: '#fecaca', buttonBg: '#dc2626', buttonBorder: '#b42318', desc: 'La pratica verrà archiviata e non sarà più visibile nell\'elenco.' },
   }
   const theme = pending ? (pendingTheme[pending] ?? { icon: '●', color: '#2f6fed', bg: '#eff6ff', border: '#bfdbfe', buttonBg: '#2563eb', buttonBorder: '#1d4ed8', desc: '' }) : pendingTheme.TAKE
+  const operationProgressBox = (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 10, justifyContent: 'flex-end', marginTop: 4, color: '#374151', fontSize: 13, fontWeight: 700 }}>
+      <span style={{ width: 14, height: 14, borderRadius: '50%', border: '2px solid #cbd5e1', borderTopColor: theme.color, display: 'inline-block', animation: 'gii-spin 0.8s linear infinite' }} />
+      <span>Operazione in corso…</span>
+    </div>
+  )
 
   const selectedWorkflowMenuItem = pending ? (workflowMenuEnabledItems.find(item => item.key === pending) || null) : null
   const actionMenuTheme = pending ? theme : pendingTheme.TAKE
@@ -4246,7 +4563,9 @@ function ActionsPanel (props: {
     : (noteIsRequired ? 'Specifica il motivo…' : 'Nota facoltativa…')
 
   const closeWorkflowMenu = () => {
+    if (loading) return
     setActionsMenuOpen(false)
+    setWorkflowSubmitting(false)
     setPending(null)
     setLoading(false)
     setMsg(null)
@@ -4263,6 +4582,7 @@ function ActionsPanel (props: {
 
   const openWorkflowMenu = () => {
     setActionsMenuOpen(true)
+    setWorkflowSubmitting(false)
     setPending(null)
     setMsg(null)
     setConfirmAttempted(false)
@@ -4287,18 +4607,24 @@ function ActionsPanel (props: {
   })()
 
   const confirmApprovaWithNotaSpeseWarning = async () => {
+    setLoading(true)
+    setMsg(null)
+
     if (role === 'TI' || role === 'RZ' || role === 'RI') {
       try {
         const warnings = await findNotaSpeseWarnings()
         if (warnings.blocking.length > 0) {
+          setLoading(false)
           setIncompleteNotaSpeseWarning(warnings.blocking)
           return
         }
         if (warnings.confirmable.length > 0) {
+          setLoading(false)
           setZeroNotaSpeseWarning(warnings.confirmable)
           return
         }
       } catch (e: any) {
+        setLoading(false)
         setMsg({ kind: 'err', text: `Errore verifica note spese: ${e?.message || String(e)}` })
         return
       }
@@ -4310,15 +4636,22 @@ function ActionsPanel (props: {
     setConfirmAttempted(true)
     if (!canConfirmWorkflowAction || !pending) return
 
-    if (pending === 'ASSEGNA_TI') await onConfirmAssegnaTi()
-    else if (pending === 'ASSEGNA_TI_AMM') await onConfirmAssegnaTiAmm()
-    else if (pending === 'INVIA_TI_AMM' || pending === 'RESTITUISCI_TI_AMM') await onConfirmRestituisciTiAmm()
-    else if (pending === 'INTEGRAZIONE' || pending === 'INTEGRAZIONE_TI_AMM' || pending === 'INTEGRAZIONE_TECNICA') await onConfirmIntegrazione()
-    else if (pending === 'APPROVA') await confirmApprovaWithNotaSpeseWarning()
-    else if (pending === 'RESPINGI') await onConfirmRespinta()
-    else if (pending === 'ELIMINA') await onConfirmElimina()
+    setWorkflowSubmitting(true)
+    setLoading(true)
+    setMsg(null)
 
-    setActionsMenuOpen(false)
+    try {
+      if (pending === 'ASSEGNA_TI') await onConfirmAssegnaTi()
+      else if (pending === 'ASSEGNA_TI_AMM') await onConfirmAssegnaTiAmm()
+      else if (pending === 'INVIA_TI_AMM' || pending === 'RESTITUISCI_TI_AMM') await onConfirmRestituisciTiAmm()
+      else if (pending === 'INTEGRAZIONE' || pending === 'INTEGRAZIONE_TI_AMM' || pending === 'INTEGRAZIONE_TECNICA') await onConfirmIntegrazione()
+      else if (pending === 'APPROVA') await confirmApprovaWithNotaSpeseWarning()
+      else if (pending === 'RESPINGI') await onConfirmRespinta()
+      else if (pending === 'ELIMINA') await onConfirmElimina()
+    } finally {
+      setActionsMenuOpen(false)
+      setWorkflowSubmitting(false)
+    }
   }
 
   const actionMenuModal = actionsMenuOpen ? createPortal(
@@ -4344,21 +4677,31 @@ function ActionsPanel (props: {
             </div>
             {hasSel && oid != null && (
               <div style={{ marginTop: 5, fontSize: 13, color: '#4b5563' }}>
-                Rapporto: <span style={{ fontWeight: 700, fontFamily: 'monospace', color: actionMenuTheme.color }}>{praticaCode}</span>
+                Pratica: <span style={{ fontWeight: 700, fontFamily: 'monospace', color: actionMenuTheme.color }}>{praticaCode}</span>
               </div>
             )}
           </div>
           <button
             type='button'
             onClick={closeWorkflowMenu}
-            style={{ border: `1px solid ${actionMenuTheme.border}`, background: '#fff', color: '#374151', borderRadius: 8, padding: '6px 10px', fontWeight: 700, cursor: 'pointer' }}
+            disabled={loading || workflowSubmitting}
+            style={{ border: `1px solid ${actionMenuTheme.border}`, background: '#fff', color: (loading || workflowSubmitting) ? '#9ca3af' : '#374151', borderRadius: 8, padding: '6px 10px', fontWeight: 700, cursor: (loading || workflowSubmitting) ? 'not-allowed' : 'pointer', opacity: (loading || workflowSubmitting) ? 0.65 : 1 }}
             aria-label='Chiudi'
           >
             ×
           </button>
         </div>
 
-        {workflowMenuEnabledItems.length > 0 ? (
+        {(loading || workflowSubmitting) ? (
+          <React.Fragment>
+            {pending && actionMenuTheme.desc && (
+              <div style={{ fontSize: 13, color: '#374151', lineHeight: 1.6 }}>
+                {actionMenuTheme.desc}
+              </div>
+            )}
+            {operationProgressBox}
+          </React.Fragment>
+        ) : workflowMenuEnabledItems.length > 0 ? (
           <React.Fragment>
             <div style={{ display: 'grid', gap: 6 }}>
               <div style={{ fontSize: titleFontSize, fontWeight: 700 }}>Azione</div>
@@ -4392,9 +4735,9 @@ function ActionsPanel (props: {
               </select>
             </div>
 
-            {selectedWorkflowMenuItem?.desc && (
+            {pending && actionMenuTheme.desc && (
               <div style={{ fontSize: 13, color: '#374151', lineHeight: 1.55, padding: 10, background: actionMenuTheme.bg, border: `1px solid ${actionMenuTheme.border}`, borderRadius: 8 }}>
-                {selectedWorkflowMenuItem.desc}
+                {actionMenuTheme.desc}
               </div>
             )}
 
@@ -4488,16 +4831,18 @@ function ActionsPanel (props: {
               </div>
             )}
 
-            <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end', marginTop: 4 }}>
-              <button type='button' onClick={closeWorkflowMenu} disabled={loading}
-                style={{ padding: '8px 18px', borderRadius: 8, border: '1px solid rgba(0,0,0,0.18)', background: '#fff', color: '#374151', fontWeight: 600, fontSize: 13, cursor: loading ? 'not-allowed' : 'pointer' }}>
-                Annulla
-              </button>
-              <button type='button' onClick={() => { void confirmWorkflowAction() }} disabled={!canConfirmWorkflowAction}
-                style={{ padding: '8px 18px', borderRadius: 8, border: `1px solid ${actionMenuTheme.buttonBorder}`, background: actionMenuTheme.buttonBg, color: '#fff', fontWeight: 700, fontSize: 13, cursor: canConfirmWorkflowAction ? 'pointer' : 'not-allowed', opacity: canConfirmWorkflowAction ? 1 : 0.6 }}>
-                {loading ? 'Aggiorno…' : 'Conferma'}
-              </button>
-            </div>
+            {(loading || workflowSubmitting) ? operationProgressBox : (
+              <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end', marginTop: 4 }}>
+                <button type='button' onClick={closeWorkflowMenu}
+                  style={{ padding: '8px 18px', borderRadius: 8, border: '1px solid rgba(0,0,0,0.18)', background: '#fff', color: '#374151', fontWeight: 600, fontSize: 13, cursor: 'pointer' }}>
+                  Annulla
+                </button>
+                <button type='button' onClick={() => { void confirmWorkflowAction() }} disabled={!canConfirmWorkflowAction}
+                  style={{ padding: '8px 18px', borderRadius: 8, border: `1px solid ${actionMenuTheme.buttonBorder}`, background: actionMenuTheme.buttonBg, color: '#fff', fontWeight: 700, fontSize: 13, cursor: canConfirmWorkflowAction ? 'pointer' : 'not-allowed', opacity: canConfirmWorkflowAction ? 1 : 0.6 }}>
+                  Conferma
+                </button>
+              </div>
+            )}
           </React.Fragment>
         ) : (
           <div style={{ fontSize: 13, color: '#6b7280', background: '#f9fafb', border: '1px solid #e5e7eb', borderRadius: 8, padding: 10 }}>
@@ -4530,10 +4875,10 @@ function ActionsPanel (props: {
           <span>{pendingTitle}</span>
         </div>
 
-        {/* Box numero rapporto */}
+        {/* Box numero pratica */}
         {hasSel && oid != null && (
           <div style={{ fontWeight: 600, color: '#1f2937', padding: 10, background: theme.bg, border: `1px solid ${theme.border}`, borderRadius: 6, fontSize: 13 }}>
-            Rapporto: <span style={{ color: theme.color, fontSize: 14, fontFamily: 'monospace' }}>{praticaCode}</span>
+            Pratica: <span style={{ color: theme.color, fontSize: 14, fontFamily: 'monospace' }}>{praticaCode}</span>
           </div>
         )}
 
@@ -4633,20 +4978,22 @@ function ActionsPanel (props: {
         )}
 
         {/* Bottoni */}
-        <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end', marginTop: 4 }}>
-          <button type='button' onClick={onAnnulla} disabled={loading}
-            style={{ padding: '8px 18px', borderRadius: 8, border: '1px solid rgba(0,0,0,0.18)', background: '#fff', color: '#374151', fontWeight: 600, fontSize: 13, cursor: loading ? 'not-allowed' : 'pointer' }}>
-            Annulla
-          </button>
-          {pending === 'TAKE' && <button type='button' onClick={onConfirmTakeInCharge} disabled={loading} style={{ padding: '8px 18px', borderRadius: 8, border: `1px solid ${theme.buttonBorder}`, background: theme.buttonBg, color: '#fff', fontWeight: 700, fontSize: 13, cursor: loading ? 'not-allowed' : 'pointer' }}>{loading ? 'Aggiorno…' : 'Conferma'}</button>}
-          {pending === 'ASSEGNA_TI' && <button type='button' onClick={onConfirmAssegnaTi} disabled={loading || !tiSelected} style={{ padding: '8px 18px', borderRadius: 8, border: `1px solid ${theme.buttonBorder}`, background: theme.buttonBg, color: '#fff', fontWeight: 700, fontSize: 13, cursor: (loading || !tiSelected) ? 'not-allowed' : 'pointer', opacity: (loading || !tiSelected) ? 0.6 : 1 }}>{loading ? 'Aggiorno…' : 'Conferma'}</button>}
-          {pending === 'ASSEGNA_TI_AMM' && <button type='button' onClick={onConfirmAssegnaTiAmm} disabled={loading || !tiAmmSelected} style={{ padding: '8px 18px', borderRadius: 8, border: `1px solid ${theme.buttonBorder}`, background: theme.buttonBg, color: '#fff', fontWeight: 700, fontSize: 13, cursor: (loading || !tiAmmSelected) ? 'not-allowed' : 'pointer', opacity: (loading || !tiAmmSelected) ? 0.6 : 1 }}>{loading ? 'Aggiorno…' : 'Conferma'}</button>}
-          {(pending === 'INVIA_TI_AMM' || pending === 'RESTITUISCI_TI_AMM') && <button type='button' onClick={onConfirmRestituisciTiAmm} disabled={loading} style={{ padding: '8px 18px', borderRadius: 8, border: `1px solid ${theme.buttonBorder}`, background: theme.buttonBg, color: '#fff', fontWeight: 700, fontSize: 13, cursor: loading ? 'not-allowed' : 'pointer' }}>{loading ? 'Aggiorno…' : 'Conferma'}</button>}
-          {(pending === 'INTEGRAZIONE' || pending === 'INTEGRAZIONE_TI_AMM' || pending === 'INTEGRAZIONE_TECNICA') && <button type='button' onClick={onConfirmIntegrazione} disabled={loading} style={{ padding: '8px 18px', borderRadius: 8, border: `1px solid ${theme.buttonBorder}`, background: theme.buttonBg, color: '#fff', fontWeight: 700, fontSize: 13, cursor: loading ? 'not-allowed' : 'pointer' }}>{loading ? 'Aggiorno…' : 'Conferma'}</button>}
-          {pending === 'APPROVA' && <button type='button' onClick={() => { void confirmApprovaWithNotaSpeseWarning() }} disabled={loading} style={{ padding: '8px 18px', borderRadius: 8, border: `1px solid ${theme.buttonBorder}`, background: theme.buttonBg, color: '#fff', fontWeight: 700, fontSize: 13, cursor: loading ? 'not-allowed' : 'pointer' }}>{loading ? 'Aggiorno…' : 'Conferma'}</button>}
-          {pending === 'RESPINGI' && <button type='button' onClick={onConfirmRespinta} disabled={loading} style={{ padding: '8px 18px', borderRadius: 8, border: `1px solid ${theme.buttonBorder}`, background: theme.buttonBg, color: '#fff', fontWeight: 700, fontSize: 13, cursor: loading ? 'not-allowed' : 'pointer' }}>{loading ? 'Aggiorno…' : 'Conferma'}</button>}
-          {pending === 'ELIMINA' && <button type='button' onClick={onConfirmElimina} disabled={loading} style={{ padding: '8px 18px', borderRadius: 8, border: `1px solid ${theme.buttonBorder}`, background: theme.buttonBg, color: '#fff', fontWeight: 700, fontSize: 13, cursor: loading ? 'not-allowed' : 'pointer' }}>{loading ? 'Archivio…' : 'Conferma'}</button>}
-        </div>
+        {loading ? operationProgressBox : (
+          <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end', marginTop: 4 }}>
+            <button type='button' onClick={onAnnulla}
+              style={{ padding: '8px 18px', borderRadius: 8, border: '1px solid rgba(0,0,0,0.18)', background: '#fff', color: '#374151', fontWeight: 600, fontSize: 13, cursor: 'pointer' }}>
+              Annulla
+            </button>
+            {pending === 'TAKE' && <button type='button' onClick={onConfirmTakeInCharge} style={{ padding: '8px 18px', borderRadius: 8, border: `1px solid ${theme.buttonBorder}`, background: theme.buttonBg, color: '#fff', fontWeight: 700, fontSize: 13, cursor: 'pointer' }}>Conferma</button>}
+            {pending === 'ASSEGNA_TI' && <button type='button' onClick={onConfirmAssegnaTi} disabled={!tiSelected} style={{ padding: '8px 18px', borderRadius: 8, border: `1px solid ${theme.buttonBorder}`, background: theme.buttonBg, color: '#fff', fontWeight: 700, fontSize: 13, cursor: !tiSelected ? 'not-allowed' : 'pointer', opacity: !tiSelected ? 0.6 : 1 }}>Conferma</button>}
+            {pending === 'ASSEGNA_TI_AMM' && <button type='button' onClick={onConfirmAssegnaTiAmm} disabled={!tiAmmSelected} style={{ padding: '8px 18px', borderRadius: 8, border: `1px solid ${theme.buttonBorder}`, background: theme.buttonBg, color: '#fff', fontWeight: 700, fontSize: 13, cursor: !tiAmmSelected ? 'not-allowed' : 'pointer', opacity: !tiAmmSelected ? 0.6 : 1 }}>Conferma</button>}
+            {(pending === 'INVIA_TI_AMM' || pending === 'RESTITUISCI_TI_AMM') && <button type='button' onClick={onConfirmRestituisciTiAmm} style={{ padding: '8px 18px', borderRadius: 8, border: `1px solid ${theme.buttonBorder}`, background: theme.buttonBg, color: '#fff', fontWeight: 700, fontSize: 13, cursor: 'pointer' }}>Conferma</button>}
+            {(pending === 'INTEGRAZIONE' || pending === 'INTEGRAZIONE_TI_AMM' || pending === 'INTEGRAZIONE_TECNICA') && <button type='button' onClick={onConfirmIntegrazione} style={{ padding: '8px 18px', borderRadius: 8, border: `1px solid ${theme.buttonBorder}`, background: theme.buttonBg, color: '#fff', fontWeight: 700, fontSize: 13, cursor: 'pointer' }}>Conferma</button>}
+            {pending === 'APPROVA' && <button type='button' onClick={() => { void confirmApprovaWithNotaSpeseWarning() }} style={{ padding: '8px 18px', borderRadius: 8, border: `1px solid ${theme.buttonBorder}`, background: theme.buttonBg, color: '#fff', fontWeight: 700, fontSize: 13, cursor: 'pointer' }}>Conferma</button>}
+            {pending === 'RESPINGI' && <button type='button' onClick={onConfirmRespinta} style={{ padding: '8px 18px', borderRadius: 8, border: `1px solid ${theme.buttonBorder}`, background: theme.buttonBg, color: '#fff', fontWeight: 700, fontSize: 13, cursor: 'pointer' }}>Conferma</button>}
+            {pending === 'ELIMINA' && <button type='button' onClick={onConfirmElimina} style={{ padding: '8px 18px', borderRadius: 8, border: `1px solid ${theme.buttonBorder}`, background: theme.buttonBg, color: '#fff', fontWeight: 700, fontSize: 13, cursor: 'pointer' }}>Conferma</button>}
+          </div>
+        )}
       </div>
     </div>,
     document.body
@@ -4751,7 +5098,7 @@ function ActionsPanel (props: {
         onClick={(e) => { e.stopPropagation() }}
         onMouseDown={(e) => { e.stopPropagation() }}
       >
-        <RapportoPdfViewer
+        <AnteprimaPdfViewer
           url={previewUrl}
           fileName={previewFileName}
           title='Anteprima rapporto'
@@ -4781,6 +5128,7 @@ function ActionsPanel (props: {
 
   return (
     <div>
+      <style>{'@keyframes gii-spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }'}</style>
       {showOverlay && (
         <div
           style={{

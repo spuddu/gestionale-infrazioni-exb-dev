@@ -19,20 +19,57 @@ import { defaultConfig, DEFAULT_COLUMNS } from '../config'
 
 type Props = AllWidgetProps<IMConfig>
 
-function getCodPraticaDisplay(rec: DataRecord): string {
+function getOriginePraticaPrefix (d: any, rec?: DataRecord): 'TR' | 'TI' {
+  const op = pickField(d, 'origine_pratica')
+  if (op === 2 || op === '2') return 'TI'
+  if (op === 1 || op === '1') return 'TR'
+
+  // Fallback prudente per vecchi record/configurazioni prive di origine_pratica.
+  const dsId = String((rec as any)?.dataSource?.id || '').toLowerCase()
+  if (dsId.includes('gii_pratiche') || dsId.includes('schema') || dsId.includes('ti')) return 'TI'
+  return 'TR'
+}
+
+function pickOfficialRapportoNumber (d: any): string {
+  return String(getFirstValue(d, [
+    'numero_rapporto',
+    'numero_rapporto_tecnico',
+    'num_rapporto',
+    'codice_rapporto',
+    'n_rapporto'
+  ]) || '').trim()
+}
+
+function pickVerbaleNumber (d: any): string {
+  return String(getFirstValue(d, ['numero_verbale', 'num_verbale', 'codice_verbale']) || '').trim()
+}
+
+function getRilevazioneDisplay (rec: DataRecord): string {
   const a: any = rec?.getData?.() || {}
-  const oid =
-    a?.OBJECTID ?? a?.ObjectId ?? a?.objectid ?? a?.objectId
-  // 1=TR, 2=TI (se presente). Se non presente, fallback su datasource id.
-  let prefix = 'TR'
-  const op = a?.origine_pratica
-  if (op === 2 || op === '2') prefix = 'TI'
-  else if (op === 1 || op === '1') prefix = 'TR'
-  else {
-    const dsId = String((rec as any)?.dataSource?.id || '').toLowerCase()
-    if (dsId.includes('gii_pratiche') || dsId.includes('schema') || dsId.includes('ti')) prefix = 'TI'
-  }
-  return oid != null ? `${prefix}-${oid}` : `${prefix}-?`
+  const oid = a?.OBJECTID ?? a?.ObjectId ?? a?.objectid ?? a?.objectId
+  const prefix = getOriginePraticaPrefix(a, rec)
+  const settore = getSettoreCodeFromRecord(a)
+  const base = oid != null ? `${prefix}-${oid}` : `${prefix}-?`
+  return settore ? `${base}-${settore}` : base
+}
+
+function getTipoPraticaDisplay (rec: DataRecord): string {
+  const d: any = rec?.getData?.() || {}
+  return pickOfficialRapportoNumber(d) ? 'Rapporto tecnico' : 'Rilevazione'
+}
+
+function getNumeroPraticaDisplay (rec: DataRecord): string {
+  const d: any = rec?.getData?.() || {}
+  return pickOfficialRapportoNumber(d) || getRilevazioneDisplay(rec)
+}
+
+function getNumeroVerbaleDisplay (rec: DataRecord): string {
+  const d: any = rec?.getData?.() || {}
+  return pickVerbaleNumber(d) || '—'
+}
+
+function getCodPraticaDisplay(rec: DataRecord): string {
+  return getNumeroPraticaDisplay(rec)
 }
 
 type SortDir = 'ASC' | 'DESC'
@@ -41,6 +78,9 @@ type SortItem = { field: string, dir: SortDir }
 // Campi virtuali (ordinamento su campi calcolati)
 const V_STATO = '__stato_sint__'
 const V_FASE = '__fase_istruttoria__'
+const V_TIPO_PRATICA = '__tipo_pratica__'
+const V_NUMERO_PRATICA = '__numero_pratica__'
+const V_NUMERO_VERBALE = '__numero_verbale_display__'
 const V_ULTIMO = '__ultimo_agg__'
 const V_PROSSIMA = '__prossima__'
 const V_MITTENTE = '__mittente__'
@@ -420,9 +460,70 @@ type GiiOpenPracticeIntent = {
   layerUrl?: string
   idFieldName?: string
   ts?: number
+  requestedByUsername?: string
+  requestedByRole?: string
+  requestedByArea?: string
+  requestedBySettore?: string
+  requestedByUfficio?: string
 }
 
-function readOpenPracticeIntent (): GiiOpenPracticeIntent | null {
+function normalizeOpenPracticeScopeValue (value: any): string {
+  const s = String(value ?? '').trim().toUpperCase()
+  return (s === 'NULL' || s === 'UNDEFINED') ? '' : s
+}
+
+function normalizeOpenPracticeScopeUsername (value: any): string {
+  const s = String(value ?? '').trim().toLowerCase()
+  return (s === 'null' || s === 'undefined') ? '' : s
+}
+
+function buildOpenPracticeScopeFromUser (user: any): { username: string, role: string, area: string, settore: string, ufficio: string } {
+  const role = getEffectiveRole(String(user?.ruoloCod || user?.ruoloLabel || '').trim(), user?.area)
+  return {
+    username: normalizeOpenPracticeScopeUsername(user?.username),
+    role: normalizeOpenPracticeScopeValue(role || user?.ruoloCod || user?.ruoloLabel),
+    area: normalizeOpenPracticeScopeValue(user?.areaCod || normalizeAreaCode(user?.area)),
+    settore: normalizeOpenPracticeScopeValue(user?.settoreCod || normalizeSettoreCode(user?.settore)),
+    ufficio: user?.ufficio != null && user?.ufficio !== '' ? String(user.ufficio).trim() : ''
+  }
+}
+
+function clearOpenPracticeIntentIfStaleForUser (intentRaw: any, currentUser: any): boolean {
+  const requested = {
+    username: normalizeOpenPracticeScopeUsername(intentRaw?.requestedByUsername),
+    role: normalizeOpenPracticeScopeValue(intentRaw?.requestedByRole),
+    area: normalizeOpenPracticeScopeValue(intentRaw?.requestedByArea),
+    settore: normalizeOpenPracticeScopeValue(intentRaw?.requestedBySettore),
+    ufficio: intentRaw?.requestedByUfficio != null && intentRaw?.requestedByUfficio !== '' ? String(intentRaw.requestedByUfficio).trim() : ''
+  }
+
+  // Gli intenti vecchi, privi della firma utente, non devono più produrre
+  // selezioni automatiche dopo cambio login/ruolo. Verranno ricreati dallo
+  // header solo al prossimo clic esplicito su "Apri pratica".
+  if (!requested.username || !requested.role) {
+    clearOpenPracticeIntent()
+    return true
+  }
+
+  const current = buildOpenPracticeScopeFromUser(currentUser)
+  if (!current.username || !current.role) return true
+
+  const mismatch =
+    requested.username !== current.username ||
+    requested.role !== current.role ||
+    requested.area !== current.area ||
+    requested.settore !== current.settore ||
+    requested.ufficio !== current.ufficio
+
+  if (mismatch) {
+    clearOpenPracticeIntent()
+    return true
+  }
+
+  return false
+}
+
+function readOpenPracticeIntent (currentUser?: any): GiiOpenPracticeIntent | null {
   try {
     // Deve reagire solo al clic esplicito su "Apri pratica" dalla campanella.
     // Il flag evita selezioni automatiche entrando normalmente nell'elenco,
@@ -432,6 +533,8 @@ function readOpenPracticeIntent (): GiiOpenPracticeIntent | null {
     const raw = sessionStorage.getItem('GII_OPEN_PRACTICE_INTENT')
     if (!raw) return null
     const j: any = JSON.parse(raw)
+    if (clearOpenPracticeIntentIfStaleForUser(j, currentUser)) return null
+
     const ts = Number(j?.ts || 0)
     const ageMs = Math.abs(Date.now() - (Number.isFinite(ts) ? ts : 0))
     if (!Number.isFinite(ts) || ageMs > 10 * 60 * 1000) {
@@ -447,7 +550,12 @@ function readOpenPracticeIntent (): GiiOpenPracticeIntent | null {
       reportCode: String(j?.reportCode || '').trim(),
       layerUrl: String(j?.layerUrl || '').trim(),
       idFieldName: String(j?.idFieldName || 'OBJECTID').trim() || 'OBJECTID',
-      ts
+      ts,
+      requestedByUsername: String(j?.requestedByUsername || '').trim(),
+      requestedByRole: String(j?.requestedByRole || '').trim(),
+      requestedByArea: String(j?.requestedByArea || '').trim(),
+      requestedBySettore: String(j?.requestedBySettore || '').trim(),
+      requestedByUfficio: String(j?.requestedByUfficio || '').trim()
     }
   } catch {
     return null
@@ -572,7 +680,9 @@ function migrateColumns (cfg: any): ColumnDef[] {
   // operativa per il ruolo corrente. Le colonne procedimentali sono raggruppate
   // visivamente nell'header: stato istruttoria + mittente + destinatario + ultimo agg.
   const out: ColumnDef[] = [
-    take({ id: 'col_pratica', label: 'N. rapporto', field: 'objectid', width: 110 }, findPratica()),
+    take({ id: 'col_tipo_pratica', label: 'Tipo pratica', field: V_TIPO_PRATICA, width: 150 }),
+    take({ id: 'col_numero', label: 'Numero', field: V_NUMERO_PRATICA, width: 140 }),
+    take({ id: 'col_numero_verbale', label: 'N. verbale', field: V_NUMERO_VERBALE, width: 120 }),
     take({ id: 'col_data', label: 'Data rilevazione', field: 'data_rilevazione', width: 140 }),
     take({ id: 'col_ufficio', label: 'Ufficio origine', field: fieldUfficio, width: 190 }),
     take({ id: 'col_stato', label: 'Il mio stato', field: V_STATO, width: 170 }),
@@ -586,6 +696,7 @@ function migrateColumns (cfg: any): ColumnDef[] {
   for (const c of normalized) {
     const f = String(c.field || '').toLowerCase()
     if (!f || used.has(f)) continue
+    if (f === 'objectid' || f === 'oid' || f === 'object_id') continue
     if (f === V_ULTIMO || f === V_DATA_MSG) continue
     out.push(c)
     used.add(f)
@@ -1134,6 +1245,9 @@ function pickPraticaSearchText (r: DataRecord, fieldPratica: string): string {
   const d = r.getData?.() || {}
   const parts = [
     getCodPraticaDisplay(r),
+    getRilevazioneDisplay(r),
+    pickOfficialRapportoNumber(d),
+    pickVerbaleNumber(d),
     pickField(d, fieldPratica),
     pickField(d, 'OBJECTID'),
     pickField(d, 'objectid'),
@@ -1885,22 +1999,37 @@ React.useEffect(() => {
 
   const [listRefreshNonce, setListRefreshNonce] = React.useState(0)
   const [lastListRefreshAt, setLastListRefreshAt] = React.useState<number | null>(null)
-  React.useEffect(() => {
-    const forceListRefresh = () => {
-      // Forza anche il ricaricamento del LOG: il set dei GlobalID puo' restare
-      // identico dopo un'azione (es. RZ assegna a TI), ma l'ultimo evento cambia.
-      // Senza azzerare questa firma l'elenco continua a mostrare l'oggetto vecchio
-      // fino al refresh manuale della pagina/lista.
-      lastLogGidSigRef.current = ''
-      logLoadedRef.current = false
-      setListRefreshNonce(n => n + 1)
+
+  const forceListRefresh = React.useCallback((options?: { refreshAlerts?: boolean }) => {
+    // Forza anche il ricaricamento del LOG: il set dei GlobalID puo' restare
+    // identico dopo un'azione (es. RZ assegna a TI), ma l'ultimo evento cambia.
+    // Senza azzerare questa firma l'elenco continua a mostrare l'oggetto vecchio
+    // fino al refresh manuale della pagina/lista.
+    lastLogGidSigRef.current = ''
+    logLoadedRef.current = false
+    Object.keys(dsDataRef.current || {}).forEach(key => {
+      const entry = dsDataRef.current[key]
+      if (entry) dsDataRef.current[key] = { ...entry, loading: true }
+    })
+    setDsDataVer(v => v + 1)
+    setListRefreshNonce(n => n + 1)
+
+    // Il pulsante "Aggiorna elenco" deve allineare anche la campanella:
+    // elenco e allarmi sono due viste dello stesso stato operativo.
+    if (options?.refreshAlerts) {
+      try {
+        window.dispatchEvent(new CustomEvent('gii-alerts-refresh', { detail: { source: 'elenco-refresh' } }))
+      } catch {}
     }
+  }, [])
+
+  React.useEffect(() => {
     const h = () => forceListRefresh()
     const hSelectionCleared = (evt?: any) => {
       const source = String(evt?.detail?.source || '')
       // Dopo un'azione procedimentale il cw azioni azzera la selezione; l'elenco
       // deve ricaricare record e LOG, altrimenti puo' restare visualizzato lo
-      // snapshot precedente del rapporto appena preso in carico/trasmesso/ecc.
+      // snapshot precedente della pratica appena presa in carico/trasmessa/ecc.
       if (source === 'azioni-post-applyedits') forceListRefresh()
     }
     window.addEventListener('gii-force-refresh-selection', h as any)
@@ -1909,7 +2038,7 @@ React.useEffect(() => {
       window.removeEventListener('gii-force-refresh-selection', h as any)
       window.removeEventListener('gii-selection-cleared', hSelectionCleared as any)
     }
-  }, [])
+  }, [forceListRefresh])
 
   React.useEffect(() => {
     let cancelled = false
@@ -2785,6 +2914,9 @@ React.useEffect(() => {
     const d = r.getData?.() || {}
     if (field === V_STATO) return computeDisplaySintetico(d).label
     if (field === V_FASE) return computeFaseIstruttoria(d)
+    if (field === V_TIPO_PRATICA) return getTipoPraticaDisplay(r)
+    if (field === V_NUMERO_PRATICA) return getNumeroPraticaDisplay(r)
+    if (field === V_NUMERO_VERBALE) return getNumeroVerbaleDisplay(r)
     if (field === V_ULTIMO) return computeUltimoAggMs(d)
     if (field === V_PROSSIMA) {
       const log = getLogForRecord(d)
@@ -3096,6 +3228,7 @@ React.useEffect(() => {
   }, [mergedRecs, recDsLookup, activeGroup, filteredUseDsJs, localSelectedByDs, resolvedView])
 
   const [openPracticeIntentTick, setOpenPracticeIntentTick] = React.useState(0)
+  const openPracticeIntentRefreshKeyRef = React.useRef('')
 
   React.useEffect(() => {
     const h = () => setOpenPracticeIntentTick(v => v + 1)
@@ -3103,11 +3236,34 @@ React.useEffect(() => {
     return () => window.removeEventListener('gii-open-practice-intent', h as EventListener)
   }, [])
 
-  // Quando lo header apre la pagina Elenco Rapporti da un allarme, seleziona
+  // Quando lo header apre la pagina Elenco pratiche da un allarme, seleziona
   // automaticamente la pratica corrispondente appena i record sono disponibili.
   React.useEffect(() => {
-    const intent = readOpenPracticeIntent()
-    if (!intent) return
+    const intent = readOpenPracticeIntent(giiUser)
+    if (!intent) {
+      openPracticeIntentRefreshKeyRef.current = ''
+      return
+    }
+
+    // Il clic su "Apri pratica" dalla campanella deve prima riallineare l'elenco.
+    // Se l'allarme è appena stato creato, la pratica può non essere ancora nella
+    // snapshot locale: forziamo una rilettura del FL/LOG e poi selezioniamo.
+    const intentRefreshKey = [
+      intent.parentObjectId ?? intent.oid ?? '',
+      intent.parentGlobalId || '',
+      intent.reportCode || '',
+      intent.ts || ''
+    ].join('|')
+
+    if (openPracticeIntentRefreshKeyRef.current !== intentRefreshKey) {
+      openPracticeIntentRefreshKeyRef.current = intentRefreshKey
+      if (statoRuoloField && activeRoleTab !== 'attesa_mia') setActiveRoleTab('attesa_mia')
+      forceListRefresh()
+      return
+    }
+
+    const anyLoading = Object.values(dsDataRef.current).some((e: any) => !!e?.loading)
+    if (anyLoading) return
     if (!activeGroup) return
 
     // Cerca su tutti i record visibili del gruppo, non solo nella scheda ruolo attiva:
@@ -3148,9 +3304,10 @@ React.useEffect(() => {
 
     if (!found) return
 
-    // Per gli allarmi di attività corrente la scheda corretta è "In attesa mia".
-    // Se però il FL/log non è ancora coerente e la pratica non passa quel filtro,
-    // la mostriamo in "Tutte le pratiche", mai in "In attesa di altri".
+    // Dopo il refresh forzato, la destinazione corretta degli allarmi operativi
+    // deve essere "In attesa mia". Usiamo "Tutte le pratiche" solo come
+    // fallback reale se, anche dopo la rilettura, il record non risulta più in
+    // carico/al turno dell'utente.
     if (statoRuoloField) {
       const targetRoleTab = passesRoleTab(found.rec, 'attesa_mia') ? 'attesa_mia' : 'tutte'
       if (activeRoleTab !== targetRoleTab) setActiveRoleTab(targetRoleTab)
@@ -3203,6 +3360,7 @@ React.useEffect(() => {
     })
 
     clearOpenPracticeIntent()
+    openPracticeIntentRefreshKeyRef.current = ''
 
     window.setTimeout(() => {
       try {
@@ -3211,7 +3369,7 @@ React.useEffect(() => {
       } catch {}
     }, 120)
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeGroup, filteredUseDsJs, dsDataVer, logVer, activeRoleTab, statoRuoloField, resolvedView, passesRoleTab, passesIntegratedFilters, resetIntegratedFilters, isRecordVisibleForCurrentUser, openPracticeIntentTick])
+  }, [activeGroup, filteredUseDsJs, dsDataVer, logVer, activeRoleTab, statoRuoloField, resolvedView, passesRoleTab, passesIntegratedFilters, resetIntegratedFilters, isRecordVisibleForCurrentUser, openPracticeIntentTick, giiUser?.username, giiUser?.ruoloLabel, giiUser?.ruoloCod, giiUser?.area, giiUser?.areaCod, giiUser?.settore, giiUser?.settoreCod, giiUser?.ufficio, forceListRefresh])
 
   const ultimoIngressoCodaMs = React.useMemo(() => {
     let best: number | null = null
@@ -3640,7 +3798,7 @@ React.useEffect(() => {
   }
 
   // Titolo elenco
-  const listTitleText = txt(cfg.listTitleText || 'Elenco rapporti di rilevazione')
+  const listTitleText = txt(cfg.listTitleText || 'Elenco pratiche')
   const listTitleHeight = num(cfg.listTitleHeight, 28)
   const listTitlePaddingBottom = num(cfg.listTitlePaddingBottom, 10)
   const listTitlePaddingLeft = num(cfg.listTitlePaddingLeft, 0)
@@ -3684,7 +3842,7 @@ React.useEffect(() => {
                   if (e?.ds) tryClearSelection(e.ds)
                 })
                 notifySelectionCleared()
-                setListRefreshNonce(n => n + 1)
+                forceListRefresh({ refreshAlerts: true })
               }}
               style={{
                 height: 34,
@@ -3767,7 +3925,7 @@ React.useEffect(() => {
                     className='filterInput'
                     value={searchFilter}
                     onChange={(e: any) => setSearchFilter(e?.target?.value || '')}
-                    placeholder='Cerca n. rapporto…'
+                    placeholder='Cerca n. pratica…'
                   />
                 </div>
                 <div>
@@ -4215,6 +4373,18 @@ React.useEffect(() => {
                             if (f === V_FASE) {
                               const faseLabel = String(faseIstruttoria || '').toUpperCase()
                               return <div key={col.id} className={ci === 0 ? 'cell first' : 'cell'} title={faseLabel}>{faseLabel}</div>
+                            }
+                            if (f === V_TIPO_PRATICA) {
+                              const val = getTipoPraticaDisplay(r)
+                              return <div key={col.id} className={ci === 0 ? 'cell first' : 'cell'} title={val}>{val}</div>
+                            }
+                            if (f === V_NUMERO_PRATICA) {
+                              const val = getNumeroPraticaDisplay(r)
+                              return <div key={col.id} className={ci === 0 ? 'cell first' : 'cell'} title={val}>{val}</div>
+                            }
+                            if (f === V_NUMERO_VERBALE) {
+                              const val = getNumeroVerbaleDisplay(r)
+                              return <div key={col.id} className={ci === 0 ? 'cell first' : 'cell'} title={val}>{val}</div>
                             }
                             if (f === V_ULTIMO) {
                               return <div key={col.id} className={ci === 0 ? 'cell first' : 'cell'} title={ultimo}>{ultimo}</div>

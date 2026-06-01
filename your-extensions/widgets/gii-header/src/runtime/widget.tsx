@@ -10,8 +10,8 @@ const GII_UTENTI_URL = 'https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/res
 const RUOLO_LABEL: Record<number, string> = { 1:'TR', 2:'TI', 3:'RZ', 4:'RI', 5:'DT', 6:'DA', 7:'ADMIN' }
 const RUOLO_NUM: Record<string, number> = { TR:1, TI:2, RZ:3, RI:4, DT:5, DA:6, ADMIN:7 }
 const RUOLO_FULL:  Record<string, string> = {
-  TR:'Tecnico Rilevatore', TI:'Tecnico Istruttore', RZ:'Responsabile di Zona',
-  RI:'Responsabile Istruttoria', DT:'Direttore Tecnico', DA:'Direttore Amministrativo', ADMIN:'Amministratore'
+  TR:'Tecnico rilevatore', TI:'Tecnico istruttore', RZ:'Responsabile di zona',
+  RI:'Responsabile istruttoria', DT:'Direttore d\'area', DA:'Direttore Area AA. GG. e P.F.', ADMIN:'Amministratore'
 }
 const PROFILO_FULL: Record<string, string> = {
   ...RUOLO_FULL,
@@ -258,8 +258,26 @@ function getDomainLabelFromCandidates(domainMap: DomainLabelMap | null | undefin
   return getDomainLabel(domainMap, textField, textCode) || getDomainLabel(domainMap, legacyField, legacyNum)
 }
 
-function getProfiloLabel(profiloCod: string, ruoloFull: string, ruoloCod: string): string {
+function getDirettoreLabel(profiloCod: string, ruoloCod: string, areaCod?: string): string {
   const profilo = normCode(profiloCod)
+  const ruolo = normCode(ruoloCod)
+  const area = normCode(areaCod)
+
+  if (profilo === 'DA' || ruolo === 'DA') return 'Direttore Area AA. GG. e P.F.'
+
+  if (profilo === 'DT' || ruolo === 'DT') {
+    if (area === 'AGR') return 'Direttore Area Agraria'
+    if (area === 'TEC') return 'Direttore Area Tecnico-Ambientale'
+    return 'Direttore d\'area'
+  }
+
+  return ''
+}
+
+function getProfiloLabel(profiloCod: string, ruoloFull: string, ruoloCod: string, areaCod?: string): string {
+  const profilo = normCode(profiloCod)
+  const direttoreLabel = getDirettoreLabel(profilo, ruoloCod, areaCod)
+  if (direttoreLabel) return direttoreLabel
   return PROFILO_FULL[profilo] || ruoloFull || RUOLO_FULL[normCode(ruoloCod)] || profilo
 }
 
@@ -363,7 +381,7 @@ async function loadUser(): Promise<GiiUserRole | null> {
       ruoloLabel: ruoloCod,
       ruoloFull,
       profiloCod,
-      profiloLabel: String(cached.profiloLabel || getProfiloLabel(profiloCod, ruoloFull, ruoloCod)),
+      profiloLabel: String(getProfiloLabel(profiloCod, ruoloFull, ruoloCod, areaCod)),
       area,
       areaCod,
       area_cod: areaCod,
@@ -413,7 +431,7 @@ async function loadUser(): Promise<GiiUserRole | null> {
         const u: GiiUserRole = {
           username, fullName,
           ruolo: 7, ruoloCod: 'ADMIN', ruolo_cod: 'ADMIN', ruoloLabel: 'ADMIN', ruoloFull,
-          profiloCod: 'ADMIN', profiloLabel: getProfiloLabel('ADMIN', ruoloFull, 'ADMIN'),
+          profiloCod: 'ADMIN', profiloLabel: getProfiloLabel('ADMIN', ruoloFull, 'ADMIN', ''),
           area: null, areaCod: '', area_cod: '', areaFull: '', settore: null, settoreCod: '', settore_cod: '', settoreFull: '', ufficio: null, ufficioLabel: '', gruppo: '',
           isAdmin: true,
           isOrgAdmin: true,
@@ -459,7 +477,7 @@ async function loadUser(): Promise<GiiUserRole | null> {
     const settoreFull = isWorkflowAdmin ? '' : (getDomainLabelFromCandidates(domainLabels, 'settore_cod', settoreCod, 'settore', settore) || SETTORE_FULL[settoreCod] || settoreCod)
     const ufficioLabel = isWorkflowAdmin ? '' : (getDomainLabel(domainLabels, 'ufficio', ufficio) || getDomainLabel(domainLabels, 'id_ufficio', ufficio) || (ufficio != null ? UFFICIO_LABEL[ufficio] || String(ufficio) : ''))
     const profiloCod = getProfiloCod(ruoloCod, areaCod)
-    const profiloLabel = getProfiloLabel(profiloCod, ruoloFull, ruoloCod)
+    const profiloLabel = getProfiloLabel(profiloCod, ruoloFull, ruoloCod, areaCod)
 
     const u: GiiUserRole = {
       username,
@@ -627,13 +645,23 @@ function normalizePageId (value: any): string {
 function currentPageIdFromUrl (): string {
   try {
     const hash = String(window.location.hash || '')
-    const mHash = hash.match(/(?:page|pageid)=([^&]+)/i)
-    if (mHash?.[1]) return decodeURIComponent(mHash[1])
+
+    // Experience Builder può esporre la pagina sia come parametro
+    // (?page=page_14 / #page=page_14) sia come hash path (#/page/page_14).
+    const mHashPath = hash.match(/(?:^|#|\/)page\/([^/?#&]+)/i)
+    if (mHashPath?.[1]) return decodeURIComponent(mHashPath[1])
+
+    const mHashParam = hash.match(/(?:[?&#]|^)(?:page|pageid)=([^&]+)/i)
+    if (mHashParam?.[1]) return decodeURIComponent(mHashParam[1])
+
     const u = new URL(window.location.href)
-    return u.searchParams.get('page') || u.searchParams.get('pageid') || ''
-  } catch {
-    return ''
-  }
+    const qPage = u.searchParams.get('page') || u.searchParams.get('pageid') || ''
+    if (qPage) return qPage
+
+    const mPath = u.pathname.match(/\/page\/([^/?#&]+)/i)
+    if (mPath?.[1]) return decodeURIComponent(mPath[1])
+  } catch { }
+  return ''
 }
 
 function sectionForAlert (tipo: string): string {
@@ -651,6 +679,12 @@ function storeAlertEditIntent (alert: GiiAlertItem, layerUrl: string): void {
   const alertGid = String(alert.parentGlobalId || '').trim().replace(/^\{|\}$/g, '').toLowerCase()
   const rawOid = Number((raw as any)?.OBJECTID ?? (raw as any)?.objectid)
   const isPracticeRaw = (!!rawGid && !!alertGid && rawGid === alertGid) || (Number.isFinite(rawOid) && alert.parentObjectId != null && rawOid === Number(alert.parentObjectId))
+  const currentUser: any = (window as any).__giiUserRole || {}
+  const requestedByUsername = String(currentUser?.username || '').trim().toLowerCase()
+  const requestedByRole = normCode(currentUser?.profiloCod || currentUser?.ruoloCod || currentUser?.ruolo_cod || currentUser?.ruoloLabel || '')
+  const requestedByArea = normCode(currentUser?.areaCod || currentUser?.area_cod || '')
+  const requestedBySettore = normCode(currentUser?.settoreCod || currentUser?.settore_cod || '')
+  const requestedByUfficio = currentUser?.ufficio != null && currentUser?.ufficio !== '' ? String(currentUser.ufficio).trim() : ''
 
   const intent = {
     oid: alert.parentObjectId,
@@ -663,7 +697,12 @@ function storeAlertEditIntent (alert: GiiAlertItem, layerUrl: string): void {
     layerUrl,
     data: isPracticeRaw ? raw : null,
     ts: Date.now(),
-    source: 'gii-alerts'
+    source: 'gii-alerts',
+    requestedByUsername,
+    requestedByRole,
+    requestedByArea,
+    requestedBySettore,
+    requestedByUfficio
   }
 
   try { (window as any).__giiEdit = intent } catch {}
@@ -772,6 +811,7 @@ function HeaderAlertsPopup (props: {
           )}
           {props.alerts.map(alert => {
             const color = alertToneColor(alert.severity === 'red' ? 'red' : alert.severity === 'orange' ? 'orange' : 'blue')
+            const showMeta = !isGiiTakeChargeAlert(alert) || alert.termineData != null
             return (
               <div key={alert.alertKey} style={{ border: `1px solid ${color}66`, background: `${color}16`, borderRadius: 12, padding: 11 }}>
                 <div style={{ display: 'flex', gap: 8, alignItems: 'start' }}>
@@ -779,9 +819,11 @@ function HeaderAlertsPopup (props: {
                   <div style={{ minWidth: 0, flex: 1 }}>
                     <div style={{ fontSize: 13, fontWeight: 900, color: '#fff' }}>{alert.title}</div>
                     <div style={{ fontSize: 12, color: '#cbd5e1', lineHeight: 1.35, marginTop: 3 }}>{alert.message}</div>
-                    <div style={{ fontSize: 11, color: 'rgba(203,213,225,0.65)', marginTop: 6 }}>
-                      Rapporto: <strong>{alert.reportCode}</strong>{alert.termineData != null ? ` · Termine: ${formatAlertDate(alert.termineData)}` : ''}
-                    </div>
+                    {showMeta && (
+                      <div style={{ fontSize: 11, color: 'rgba(203,213,225,0.65)', marginTop: 6 }}>
+                        Pratica: <strong>{alert.reportCode}</strong>{alert.termineData != null ? ` · Termine: ${formatAlertDate(alert.termineData)}` : ''}
+                      </div>
+                    )}
                     <div style={{ marginTop: 9, display: 'flex', gap: 8, flexWrap: 'wrap' }}>
                       <button type='button' onClick={() => props.onOpenPractice(alert)} style={{ border: `1px solid ${color}88`, background: `${color}33`, color: '#fff', borderRadius: 8, padding: '6px 10px', cursor: 'pointer', fontSize: 12, fontWeight: 850 }}>Apri pratica</button>
                       {!props.homeMode && !isGiiTakeChargeAlert(alert) && (
@@ -1052,7 +1094,12 @@ export default function Widget(props: Props) {
     refreshAlerts()
     const secs = Math.max(30, Number(cfg.alertsPollSeconds ?? 60) || 60)
     const id = window.setInterval(refreshAlerts, secs * 1000)
-    const onChanged = () => refreshAlerts()
+    const onChanged = () => {
+      // Qualsiasi azione operativa sulla pratica deve chiudere il popup allarmi:
+      // il refresh può svuotare o cambiare la lista e lasciarla aperta crea ambiguità.
+      setAlertsOpen(false)
+      refreshAlerts()
+    }
     const refreshEvents = [
       'gii:record-updated',
       'gii-record-updated',

@@ -177,10 +177,10 @@ export default function Setting(props: Props) {
           <div><label style={P.lbl}>Colore pagina</label><ColInp value={String(cfgJs.editPageColor??defaultConfig.editPageColor)} onChange={v=>patch({editPageColor:v})}/></div>
         </div>
         <label style={P.lbl}>Pagina modifica tecnica (ID ExB)</label>
-        <Inp value={cfgJs.editPageId??defaultConfig.editPageId} onChange={v=>patch({editPageId:v})} placeholder='page_45 o Modifica Rapporto'/>
+        <Inp value={cfgJs.editPageId??defaultConfig.editPageId} onChange={v=>patch({editPageId:v})} placeholder='page_45'/>
         <label style={P.lbl}>Pagina modifica amministrativa TI_AMM (ID ExB)</label>
-        <Inp value={cfgJs.editAmmPageId??defaultConfig.editAmmPageId} onChange={v=>patch({editAmmPageId:v})} placeholder='page_48 o Verbale'/>
-        <div style={P.hint}>Default: page_48 / Verbale. Se il campo viene svuotato, il TI_AMM non viene inviato alla pagina tecnica.</div>
+        <Inp value={cfgJs.editAmmPageId??defaultConfig.editAmmPageId} onChange={v=>patch({editAmmPageId:v})} placeholder='page_48'/>
+        <div style={P.hint}>Default: page_48. Usare l'ID ExB esatto della pagina; se l'ID è errato, il widget segnala l'errore senza applicare fallback.</div>
         <div style={P.grp}>Campi e condizioni</div>
         <div style={P.row2}>
           <div><label style={P.lbl}>Campo stato TI</label><Inp value={cfgJs.fieldStatoTI??defaultConfig.fieldStatoTI} onChange={v=>patch({fieldStatoTI:v})}/></div>

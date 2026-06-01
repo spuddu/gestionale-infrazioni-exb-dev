@@ -265,13 +265,13 @@ function DirtyNavigationLockOverlay (props: { active: boolean; targetRef: React.
     // La maschera non dipende più da un'area libera calcolata a pixel.
     // Oscura solo gli elementi che devono essere bloccati:
     // - header GII;
-    // - navigazione sinistra principale delle pagine Nuovo/Modifica rapporto.
+    // - navigazione sinistra principale delle pagine Nuova/Modifica pratica.
     // Il pulsante della barra laterale resta libero perché non oscuriamo il widget sidebar,
     // ma solo il widget gii-nav contenuto nel suo primo pannello.
     const idsToMask = [
       'widget_840',  // GII Header
-      'widget_1319', // GII Navigazione - Nuovo Rapporto
-      'widget_1371'  // GII Navigazione - Modifica Rapporto
+      'widget_1319', // GII Navigazione - Nuova pratica
+      'widget_1371'  // GII Navigazione - Modifica pratica
     ]
 
     const next: GiiLockRect[] = []
@@ -4693,11 +4693,13 @@ function NuovaPraticaForm (p: {
     setMsg(null)
     skipNpTabSyncRef.current = true
     setNpTab('trasgressore')
-    const pageToken = String(cfg.editPageId || 'page_32').trim()
-    const pageId = resolvePageId(pageToken) || resolvePageId('Modifica Rapporto')
-    if (pageId) {
-      UrlManager.getInstance().changePage(pageId)
+    const pageToken = String(cfg.editPageId || 'page_45').trim()
+    const pageId = resolvePageId(pageToken)
+    if (!pageId) {
+      setMsg({ kind: 'err', text: `Pagina Modifica pratica non trovata: ${pageToken || '(vuota)'}. Correggere editPageId nel setting del widget: valore atteso page_45.` })
+      return
     }
+    UrlManager.getInstance().changePage(pageId)
   }, [cfg.editPageId])
 
   React.useEffect(() => {
@@ -5338,7 +5340,7 @@ React.useEffect(() => {
     }
 
     const baseUrl = dsUrl || schemaUrl
-    if (!baseUrl) throw new Error('URL schema non configurata per la creazione del rapporto.')
+    if (!baseUrl) throw new Error('URL schema non configurata per la creazione della pratica.')
 
     const candidateUrls = serviceNames
       .map((name) => replaceServiceNameInLayerUrl(baseUrl, name))
@@ -5688,7 +5690,7 @@ React.useEffect(() => {
   }, [buildDeltaMaps, currentGlobalId, editOid, findOpenRoleCycle, getAuditRole, getLogLayer, getLogObjectIdValue, getNextRoleCycleNumber, mergeCycleMaps, p.initialData, parseJsonObject])
 
   const processAttachmentChanges = React.useCallback(async (_oid: number, _preferredUrl?: string | null) => {
-    // Gli allegati vengono gestiti immediatamente (allega/sostituisci/elimina), non al Salva del rapporto.
+    // Gli allegati vengono gestiti immediatamente (allega/sostituisci/elimina), non al Salva della pratica.
     setAttachmentFiles([])
     setAttachmentInputKey(k => k + 1)
     setPendingDeleteAttachmentIds([])
@@ -6213,7 +6215,7 @@ React.useEffect(() => {
     // reqPoint === 1
     if (p.clickedPointWgs84) return { kind: 'ok' as const, text: 'Punto impostato da click in mappa.' }
     if (p.existingGeomWgs84 && (Number(p.existingGeomWgs84.x) !== 0 || Number(p.existingGeomWgs84.y) !== 0)) {
-      return { kind: 'ok' as const, text: 'Punto già presente nel rapporto.' }
+      return { kind: 'ok' as const, text: 'Punto già presente nella pratica.' }
     }
     return { kind: 'err' as const, text: 'Localizzazione obbligatoria: fai click in mappa.' }
   }, [p.clickedPointWgs84, p.existingGeomWgs84, reqPoint])
@@ -6224,7 +6226,7 @@ React.useEffect(() => {
   }, [mode, p.initialData, editOid])
 
   const toolbarTitleInfo = React.useMemo(() => {
-    const baseTitle = String(p.titleText || (mode === 'edit' ? 'Modifica rapporto' : 'Nuovo rapporto'))
+    const baseTitle = String(p.titleText || (mode === 'edit' ? 'Modifica pratica' : 'Nuova pratica'))
     if (mode !== 'edit' || !editPraticaCode) return { baseTitle, praticaCode: '' }
     if (baseTitle.includes(editPraticaCode)) return { baseTitle: baseTitle.replace(editPraticaCode, '').trim(), praticaCode: editPraticaCode }
     return { baseTitle, praticaCode: editPraticaCode }
@@ -7297,7 +7299,7 @@ React.useEffect(() => {
   mode !== 'edit' || currentOid == null ? (
     renderFullHeightEditCard('Nota spese', (
       <div style={{ fontSize: formStyle.labelFontSize, color: formStyle.labelColor, lineHeight: 1.5 }}>
-        Sarà possibile aggiungere la nota spese <b>solo dopo il primo salvataggio</b> del rapporto.
+        Sarà possibile aggiungere la nota spese <b>solo dopo il primo salvataggio</b> della pratica.
       </div>
     ))
   ) : noteSpeseMissing.length > 0 ? (
@@ -7310,7 +7312,7 @@ React.useEffect(() => {
   ) : !currentGlobalId ? (
     renderFullHeightEditCard('GlobalID pratica non disponibile', (
       <div style={{ padding: 12, borderRadius: 10, border: '1px solid #f5b8b8', background: '#fce4e4', color: '#7a1c1c' }}>
-        <div style={{ fontSize: 12, lineHeight: 1.5 }}>Il widget non riesce a leggere il GlobalID del rapporto selezionato. Verifica che il layer/view usato per l’editing esponga il campo <b>GlobalID</b>.</div>
+        <div style={{ fontSize: 12, lineHeight: 1.5 }}>Il widget non riesce a leggere il GlobalID della pratica selezionata. Verifica che il layer/view usato per l’editing esponga il campo <b>GlobalID</b>.</div>
       </div>
     ))
   ) : (
@@ -7385,7 +7387,7 @@ React.useEffect(() => {
           mode !== 'edit' || currentOid == null ? (
             renderFullHeightEditCard('Allegati', (
               <div style={{ fontSize: formStyle.labelFontSize, color: formStyle.labelColor, lineHeight: 1.5 }}>
-                Sarà possibile aggiungere gli allegati <b>solo dopo il primo salvataggio</b> del rapporto.
+                Sarà possibile aggiungere gli allegati <b>solo dopo il primo salvataggio</b> della pratica.
               </div>
             ))
           ) : (
@@ -7704,16 +7706,16 @@ React.useEffect(() => {
           >
             <div style={{ fontWeight: 800, fontSize: 16, marginBottom: 8, color: '#1a7f37', display: 'flex', alignItems: 'center', gap: 8 }}>
               <span style={{ fontSize: 20 }}>✓</span>
-              Rapporto inserito correttamente
+              Pratica inserita correttamente
             </div>
             <div style={{ fontSize: 13, color: '#374151', lineHeight: 1.6, marginBottom: 14, display: 'grid', gap: 10 }}>
-              <div>Il rapporto è stato salvato correttamente nel sistema.</div>
+              <div>La pratica è stata salvata correttamente nel sistema.</div>
               {createSuccessPraticaCode && (
                 <div style={{ fontWeight: 600, color: '#1f2937', padding: 10, background: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: 6 }}>
-                  Numero rapporto assegnato: <span style={{ color: '#15803d', fontSize: 14, fontFamily: 'monospace' }}>{createSuccessPraticaCode}</span>
+                  Numero pratica assegnato: <span style={{ color: '#15803d', fontSize: 14, fontFamily: 'monospace' }}>{createSuccessPraticaCode}</span>
                 </div>
               )}
-              <div>Clicca <b>OK</b> per aprire il rapporto in modalità modifica.</div>
+              <div>Clicca <b>OK</b> per aprire la pratica in modalità modifica.</div>
             </div>
             <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10 }}>
               <button
@@ -8186,7 +8188,7 @@ if (!hasSel) {
           </div>
 
           {!hasSel && (
-            <div style={{ opacity: 0.75, fontSize: 12 }}>Selezionare un rapporto per vedere gli allegati.</div>
+            <div style={{ opacity: 0.75, fontSize: 12 }}>Selezionare una pratica per vedere gli allegati.</div>
           )}
 
           {hasSel && attachmentFiles.length > 0 && (
@@ -8274,7 +8276,7 @@ if (!hasSel) {
               <ReadOnlyPanel
                 title={activeTab.label}
                 rows={rows}
-                emptyText={hasSel ? 'Nessun campo configurato per questa tab.' : 'Selezionare un rapporto.'}
+                emptyText={hasSel ? 'Nessun campo configurato per questa tab.' : 'Selezionare una pratica.'}
               />
             </div>
           )}
@@ -8285,7 +8287,7 @@ if (!hasSel) {
         <ReadOnlyPanel
           title={activeTab.label}
           rows={rows}
-          emptyText={hasSel ? 'Nessun campo configurato per questa tab.' : 'Selezionare un rapporto.'}
+          emptyText={hasSel ? 'Nessun campo configurato per questa tab.' : 'Selezionare una pratica.'}
         />
       )
     }
@@ -8312,7 +8314,7 @@ return (
           ? (ui.detailTitleColor ?? 'rgba(0,0,0,0.85)')
           : 'rgba(0,0,0,0.40)'
       }}>
-        {String(ui.detailTitlePrefix ?? 'Dettaglio rapporto n.')} {hasSel && praticaCode ? praticaCode : '–'}
+        {String(ui.detailTitlePrefix ?? 'Dettaglio pratica n.')} {hasSel && praticaCode ? praticaCode : '–'}
       </span>
     </div>
     <div style={frameStyle}>
@@ -9303,14 +9305,16 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
     setClickedPointWgs84(null)
     setMapClickEnabled(false)
 
-    const elencoPageId = resolvePageId('Elenco Rapporti') || resolvePageId('elenco-rapporti') || resolvePageId('Elenco-Rapporti') || resolvePageId('Elenco')
+    const elencoPageId = resolvePageId('page_3')
+    if (!elencoPageId) {
+      setMsg({ kind: 'err', text: 'Pagina Elenco pratiche non trovata. Correggere la configurazione: page_3 deve essere la pagina elenco.' })
+      return
+    }
     try {
-      if (elencoPageId) {
-        UrlManager.getInstance().changePage(elencoPageId)
-        return
-      }
-    } catch {}
-    try { window.location.hash = elencoPageId ? `#${elencoPageId}` : '#Elenco-Rapporti' } catch {}
+      UrlManager.getInstance().changePage(elencoPageId)
+    } catch (e: any) {
+      setMsg({ kind: 'err', text: `Errore apertura Elenco pratiche: ${e?.message || String(e)}` })
+    }
   }, [inCreateMode, effectiveIntent, editIdFieldName, editOid, editRecordData])
 
   return (
@@ -9344,7 +9348,7 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
               editOid={editOid}
               editIdFieldName={editIdFieldName}
               editLayerUrl={!inCreateMode ? ensureLayerIndex(normalizeFeatureLayerUrl(effectiveIntent?.layerUrl || activeGate?.state?.layerUrl || readDynamicSelection().layerUrl || '')) : ''}
-              titleText={inCreateMode ? 'Nuovo rapporto' : 'Modifica rapporto'}
+              titleText={inCreateMode ? 'Nuova pratica' : 'Modifica pratica'}
               saveText={'Salva'}
               onDirtyChange={(dirty: boolean) => setFormDirty(dirty)}
               onTabChange={(tab: string) => setFormTab(tab)}
