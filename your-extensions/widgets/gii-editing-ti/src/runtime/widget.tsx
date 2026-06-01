@@ -2022,10 +2022,8 @@ function InlineEditOverlay(props: {
     )
   }
 
-  const praticaCode = (() => {
-    const op = data?.origine_pratica ?? data?.Origine_pratica
-    return `${(op === 2 || op === '2') ? 'TI' : 'TR'}-${oid}`
-  })()
+  const praticaCode = buildPraticaCodeFromData(data || {}, oid)
+  const editDocTitle = hasRapportoTecnicoNumber(data || {}) ? 'Modifica rapporto tecnico' : 'Modifica rilevazione'
 
   const overlay = (
     <div style={{ position: 'fixed', inset: 0, zIndex: 99999, background: 'rgba(0,0,0,0.55)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
@@ -2039,7 +2037,7 @@ function InlineEditOverlay(props: {
         {/* Header */}
         <div style={{ flex: '0 0 auto', padding: '14px 20px', borderBottom: '1px solid #e5e7eb', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
           <div style={{ fontWeight: 700, fontSize: 15 }}>
-            ✏️ Modifica pratica&nbsp;<span style={{ color: '#2f6fed' }}>{praticaCode}</span>
+            ✏️ {editDocTitle}&nbsp;<span style={{ color: '#2f6fed' }}>{praticaCode}</span>
           </div>
           <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
             {saveMsg && (
@@ -2830,7 +2828,7 @@ function ActionsPanel (props: {
         </div>
 
         <div style={{ display: 'grid', gap: 6 }}>
-          <DetailRow label='N.pratica (OID)' value={oid} labelSize={ui.statusFontSize} valueSize={titleFontSize} labelColor={(ui as any).formLabelColor} />
+          <DetailRow label={hasRapportoTecnicoNumber(data || {}) ? 'Rapporto tecnico' : 'Rilevazione'} value={praticaCode} labelSize={ui.statusFontSize} valueSize={titleFontSize} labelColor={(ui as any).formLabelColor} />
           {hasCurrentDedicatedPresaField && <DetailRow label={presaField} value={presaVal} labelSize={ui.statusFontSize} valueSize={titleFontSize} labelColor={(ui as any).formLabelColor} />}
           <DetailRow label={statoField} value={statoVal} labelSize={ui.statusFontSize} valueSize={titleFontSize} labelColor={(ui as any).formLabelColor} />
           <DetailRow label={esitoField} value={esitoVal} labelSize={ui.statusFontSize} valueSize={titleFontSize} labelColor={(ui as any).formLabelColor} />
@@ -4218,7 +4216,7 @@ function NoteSpeseManager (props: NsManagerProps) {
     const nextRows = rows.filter((_, i) => i !== idx).map(nsCloneRow)
     props.onRowsChange(nextRows)
     if (editIdx === idx) { setEditIdx(null); setEditQty('') }
-    setMsg({ ok: true, text: 'Riga rimossa dalla bozza.' })
+    setMsg({ ok: true, text: 'Riga rimossa dalla nota spese.' })
   }
 
   const thS: React.CSSProperties = { background: '#eef5fc', color: formStyle.hdrColor, padding: '7px 8px', textAlign: 'left', position: 'sticky', top: 0, zIndex: 1, fontSize: 12, whiteSpace: 'nowrap', borderBottom: '1px solid #c5d9f1' }
@@ -4363,13 +4361,35 @@ function draftsEqual (a: NpDraft, b: NpDraft): boolean {
   return true
 }
 
+function getRapportoTecnicoNumberFromData (data: any): string {
+  const d = data || {}
+  return String(
+    d?.numero_rapporto_tecnico ?? d?.Numero_rapporto_tecnico ?? d?.NUMERO_RAPPORTO_TECNICO ??
+    d?.numero_rapporto ?? d?.Numero_rapporto ?? d?.NUMERO_RAPPORTO ??
+    d?.codice_rapporto ?? d?.Codice_rapporto ?? d?.CODICE_RAPPORTO ??
+    d?.n_rapporto ?? d?.N_RAPPORTO ?? ''
+  ).trim()
+}
+
+function hasRapportoTecnicoNumber (data: any): boolean {
+  return !!getRapportoTecnicoNumberFromData(data)
+}
+
 function buildPraticaCodeFromData (data: any, oid: number | null | undefined): string {
+  const rapportoTecnico = getRapportoTecnicoNumberFromData(data)
+  if (rapportoTecnico) return rapportoTecnico
+
   if (oid == null || !Number.isFinite(Number(oid))) return ''
   const op = data?.origine_pratica ?? data?.Origine_pratica ?? data?.ORIGINE_PRATICA
   let prefix = 'TR'
   if (op === 2 || op === '2' || String(op || '').toUpperCase() === 'TI') prefix = 'TI'
   else if (op === 1 || op === '1' || String(op || '').toUpperCase() === 'TR') prefix = 'TR'
-  return `${prefix}-${Number(oid)}`
+
+  const settoreRaw = data?.settore_cod ?? data?.Settore_cod ?? data?.SETTORE_COD ?? data?.settore ?? data?.Settore ?? data?.SETTORE
+  const settore = String(settoreRaw || '').trim().toUpperCase()
+  const settoreSuffix = settore ? `-${settore}` : ''
+
+  return `${prefix}-${Number(oid)}${settoreSuffix}`
 }
 
 
@@ -6106,10 +6126,8 @@ React.useEffect(() => {
 
       const newOid = Number(added.objectId)
       
-      // Leggi il codice ruolo dal cw header per il prefisso del codice pratica, con fallback sul vecchio ruoloLabel
-      const ctxForCode = readGiiUserContext()
-      const cwRoleLabel = shortRoleLabel(ctxForCode.role, ctxForCode.username) || 'TI'
-      const newPraticaCode = `${cwRoleLabel}-${newOid}`
+      // Codice provvisorio della rilevazione: TR/TI-OBJECTID-settore.
+      const newPraticaCode = buildPraticaCodeFromData(cleanAttrs, newOid)
 
       // In create mode NON aggiornare la datasource schema/base e NON provare a selezionare il nuovo OID:
       // queste due operazioni possono riattivare il banner credenziali quando la pagina usa solo lo schema.
@@ -6117,7 +6135,7 @@ React.useEffect(() => {
       const recordInfo = { oid: newOid, layerUrl: createdLayerUrl, data: { ...cleanAttrs } }
       setCreatedRecordInfo(recordInfo)
       createdRecordInfoRef.current = recordInfo
-      setMsg({ kind: 'ok', text: 'Pratica creata.' })
+      setMsg({ kind: 'ok', text: 'Rilevazione creata.' })
       setSaving(false)
       setCreateSuccessPraticaCode(newPraticaCode)
       setShowCreateSuccessPopup(true)
@@ -6226,11 +6244,14 @@ React.useEffect(() => {
   }, [mode, p.initialData, editOid])
 
   const toolbarTitleInfo = React.useMemo(() => {
-    const baseTitle = String(p.titleText || (mode === 'edit' ? 'Modifica pratica' : 'Nuova pratica'))
+    const hasOfficialRapporto = hasRapportoTecnicoNumber(p.initialData || {})
+    const defaultTitle = mode === 'edit' ? (hasOfficialRapporto ? 'Modifica rapporto tecnico' : 'Modifica rilevazione') : 'Nuova rilevazione'
+    const rawTitle = String(p.titleText || defaultTitle)
+    const baseTitle = mode === 'edit' && /modifica\s+(pratica|rilevazione|rapporto)/i.test(rawTitle) ? defaultTitle : rawTitle
     if (mode !== 'edit' || !editPraticaCode) return { baseTitle, praticaCode: '' }
     if (baseTitle.includes(editPraticaCode)) return { baseTitle: baseTitle.replace(editPraticaCode, '').trim(), praticaCode: editPraticaCode }
     return { baseTitle, praticaCode: editPraticaCode }
-  }, [p.titleText, mode, editPraticaCode])
+  }, [p.titleText, mode, editPraticaCode, p.initialData])
 
   const numCfg = React.useCallback((key: string, fallback: number, min?: number, max?: number): number => {
     const n = Number((cfg as any)[key])
@@ -7706,16 +7727,16 @@ React.useEffect(() => {
           >
             <div style={{ fontWeight: 800, fontSize: 16, marginBottom: 8, color: '#1a7f37', display: 'flex', alignItems: 'center', gap: 8 }}>
               <span style={{ fontSize: 20 }}>✓</span>
-              Pratica inserita correttamente
+              Rilevazione inserita correttamente
             </div>
             <div style={{ fontSize: 13, color: '#374151', lineHeight: 1.6, marginBottom: 14, display: 'grid', gap: 10 }}>
-              <div>La pratica è stata salvata correttamente nel sistema.</div>
+              <div>La rilevazione è stata salvata correttamente nel sistema.</div>
               {createSuccessPraticaCode && (
                 <div style={{ fontWeight: 600, color: '#1f2937', padding: 10, background: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: 6 }}>
-                  Numero pratica assegnato: <span style={{ color: '#15803d', fontSize: 14, fontFamily: 'monospace' }}>{createSuccessPraticaCode}</span>
+                  Numero rilevazione provvisorio: <span style={{ color: '#15803d', fontSize: 14, fontFamily: 'monospace' }}>{createSuccessPraticaCode}</span>
                 </div>
               )}
-              <div>Clicca <b>OK</b> per aprire la pratica in modalità modifica.</div>
+              <div>Clicca <b>OK</b> per aprire la rilevazione in modalità modifica.</div>
             </div>
             <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10 }}>
               <button
@@ -9348,7 +9369,7 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
               editOid={editOid}
               editIdFieldName={editIdFieldName}
               editLayerUrl={!inCreateMode ? ensureLayerIndex(normalizeFeatureLayerUrl(effectiveIntent?.layerUrl || activeGate?.state?.layerUrl || readDynamicSelection().layerUrl || '')) : ''}
-              titleText={inCreateMode ? 'Nuova pratica' : 'Modifica pratica'}
+              titleText={inCreateMode ? 'Nuova rilevazione' : 'Modifica rilevazione'}
               saveText={'Salva'}
               onDirtyChange={(dirty: boolean) => setFormDirty(dirty)}
               onTabChange={(tab: string) => setFormTab(tab)}

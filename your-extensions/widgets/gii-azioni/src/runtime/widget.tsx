@@ -1266,8 +1266,17 @@ function InlineEditOverlay(props: {
   }
 
   const praticaCode = (() => {
-    const op = data?.origine_pratica ?? data?.Origine_pratica
-    return `${(op === 2 || op === '2') ? 'TI' : 'TR'}-${oid}`
+    const ufficiale = String(data?.numero_rapporto_tecnico ?? data?.Numero_rapporto_tecnico ?? data?.NUMERO_RAPPORTO_TECNICO ?? '').trim()
+    if (ufficiale) return ufficiale.replace(/^Rapporto\s*/i, '').trim()
+    const op = data?.origine_pratica ?? data?.Origine_pratica ?? data?.ORIGINE_PRATICA
+    const settore = normalizeSettoreCod(data?.settore_cod ?? data?.Settore_cod ?? data?.SETTORE_COD ?? '')
+    const base = `${(op === 2 || op === '2' || String(op || '').toUpperCase() === 'TI') ? 'TI' : 'TR'}-${oid}`
+    return settore ? `${base}-${settore}` : base
+  })()
+
+  const praticaLabel = (() => {
+    const ufficiale = String(data?.numero_rapporto_tecnico ?? data?.Numero_rapporto_tecnico ?? data?.NUMERO_RAPPORTO_TECNICO ?? '').trim()
+    return ufficiale ? 'Rapporto tecnico' : 'Rilevazione'
   })()
 
   const overlay = (
@@ -1282,7 +1291,7 @@ function InlineEditOverlay(props: {
         {/* Header */}
         <div style={{ flex: '0 0 auto', padding: '14px 20px', borderBottom: '1px solid #e5e7eb', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
           <div style={{ fontWeight: 700, fontSize: 15 }}>
-            ✏️ Modifica pratica&nbsp;<span style={{ color: '#2f6fed' }}>{praticaCode}</span>
+            ✏️ Modifica rilevazione&nbsp;<span style={{ color: '#2f6fed' }}>{praticaCode}</span>
           </div>
           <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
             {saveMsg && (
@@ -1629,8 +1638,17 @@ function ActionsPanel (props: {
   const hasSel = oid != null && Number.isFinite(oid)
 
   const praticaCode = (() => {
+    const ufficiale = String(data?.numero_rapporto_tecnico ?? data?.Numero_rapporto_tecnico ?? data?.NUMERO_RAPPORTO_TECNICO ?? '').trim()
+    if (ufficiale) return ufficiale.replace(/^Rapporto\s*/i, '').trim()
     const op = data?.origine_pratica ?? data?.Origine_pratica ?? data?.ORIGINE_PRATICA
-    return `${(op === 2 || op === '2' || String(op || '').toUpperCase() === 'TI') ? 'TI' : 'TR'}-${oid}`
+    const settore = normalizeSettoreCod(data?.settore_cod ?? data?.Settore_cod ?? data?.SETTORE_COD ?? '')
+    const base = `${(op === 2 || op === '2' || String(op || '').toUpperCase() === 'TI') ? 'TI' : 'TR'}-${oid}`
+    return settore ? `${base}-${settore}` : base
+  })()
+
+  const praticaLabel = (() => {
+    const ufficiale = String(data?.numero_rapporto_tecnico ?? data?.Numero_rapporto_tecnico ?? data?.NUMERO_RAPPORTO_TECNICO ?? '').trim()
+    return ufficiale ? 'Rapporto tecnico' : 'Rilevazione'
   })()
 
   const closeRapportoPreview = React.useCallback(() => {
@@ -1790,20 +1808,24 @@ function ActionsPanel (props: {
   }
 
 
-  const verbaleNumberForYearRegex = (anno: number): RegExp => new RegExp(`^\\s*(\\d+)\\s*/\\s*${anno}\\s*$`)
+  const numeroAttoForYearRegex = (prefix: string, anno: number, allowLegacyWithoutPrefix = false): RegExp => {
+    const p = String(prefix || '').trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+    const pref = allowLegacyWithoutPrefix ? `(?:${p}\\s*-\\s*)?` : `${p}\\s*-\\s*`
+    return new RegExp(`^\\s*${pref}(\\d+)\\s*/\\s*${anno}\\s*$`, 'i')
+  }
 
-  const parseNumeroVerbaleProgressivo = (value: any, anno: number): number | null => {
+  const parseNumeroAttoProgressivo = (value: any, prefix: string, anno: number, allowLegacyWithoutPrefix = false): number | null => {
     const s = String(value ?? '').trim()
     if (!s) return null
-    const m = s.match(verbaleNumberForYearRegex(anno))
+    const m = s.match(numeroAttoForYearRegex(prefix, anno, allowLegacyWithoutPrefix))
     if (!m) return null
     const n = Number(m[1])
     return Number.isFinite(n) && n > 0 ? Math.floor(n) : null
   }
 
-  const formatNumeroVerbale = (progressivo: number, anno: number): string => `${Math.max(1, Math.floor(progressivo))}/${anno}`
+  const formatNumeroAtto = (prefix: string, progressivo: number, anno: number): string => `${String(prefix || '').trim().toUpperCase()}-${Math.max(1, Math.floor(progressivo))}/${anno}`
 
-  const queryNextNumeroVerbale = async (anno: number): Promise<string> => {
+  const queryLayerForOfficialNumber = async (): Promise<any> => {
     let layer: any = null
     try {
       const resolved = await resolveLayer(ds)
@@ -1825,20 +1847,15 @@ function ActionsPanel (props: {
       if (layerUrl) layer = new FeatureLayer({ url: layerUrl, outFields: ['*'] })
     }
 
-    if (!layer?.queryFeatures) throw new Error('Impossibile determinare il numero del verbale: layer non disponibile per la query.')
+    if (!layer?.queryFeatures) throw new Error('Impossibile determinare il numero ufficiale: layer non disponibile per la query.')
     if (typeof layer.load === 'function') { try { await layer.load() } catch {} }
+    return layer
+  }
 
-    const schemaFields: Record<string, any> = {}
-    try {
-      ;(Array.isArray(layer?.fields) ? layer.fields : []).forEach((f: any) => {
-        if (f?.name) schemaFields[String(f.name)] = f
-      })
-    } catch {}
-
-    const fNumeroVerbale = getSchemaFieldNameCI(schemaFields, 'numero_verbale') || 'numero_verbale'
-    const fDataVerbale = getSchemaFieldNameCI(schemaFields, 'data_verbale') || 'data_verbale'
+  const queryNextNumeroAtto = async (prefix: 'R' | 'V', anno: number, numeroFieldName: string, allowLegacyWithoutPrefix = false): Promise<string> => {
+    const layer = await queryLayerForOfficialNumber()
     const idField = String(layer.objectIdField || idFieldNameFromSel || 'OBJECTID')
-    const outFields = Array.from(new Set([idField, fNumeroVerbale, fDataVerbale].filter(Boolean)))
+    const outFields = Array.from(new Set([idField, numeroFieldName].filter(Boolean)))
 
     let maxProgressivo = 0
     let start = 0
@@ -1846,7 +1863,7 @@ function ActionsPanel (props: {
 
     while (true) {
       const q = layer.createQuery ? layer.createQuery() : {}
-      q.where = `${fNumeroVerbale} IS NOT NULL`
+      q.where = `${numeroFieldName} IS NOT NULL`
       q.outFields = outFields
       q.returnGeometry = false
       q.start = start
@@ -1855,7 +1872,7 @@ function ActionsPanel (props: {
       const features = Array.isArray(res?.features) ? res.features : []
       features.forEach((f: any) => {
         const attrs = f?.attributes || {}
-        const n = parseNumeroVerbaleProgressivo(pickAttrCI(attrs, [fNumeroVerbale, 'numero_verbale']), anno)
+        const n = parseNumeroAttoProgressivo(pickAttrCI(attrs, [numeroFieldName]), prefix, anno, allowLegacyWithoutPrefix)
         if (n != null && n > maxProgressivo) maxProgressivo = n
       })
       if (features.length < pageSize) break
@@ -1863,7 +1880,7 @@ function ActionsPanel (props: {
       if (start > 100000) break
     }
 
-    return formatNumeroVerbale(maxProgressivo + 1, anno)
+    return formatNumeroAtto(prefix, maxProgressivo + 1, anno)
   }
 
   type NotaSpeseCasisticaCheck = { codice: string; art: number; label: string }
@@ -2009,7 +2026,7 @@ function ActionsPanel (props: {
   const isRespondingToIntegration = (): boolean => {
     if (!data) return false
     const integSources: Record<string, string[]> = {
-      TI: ['RZ', 'RI'], RI: ['DT'], TI_AMM: ['RI_AMM'],
+      TI: ['RZ'], RI: ['DT'], TI_AMM: ['RI_AMM'],
       // RI_AMM -> RI è una integrazione tecnica speciale: il RI non risponde
       // direttamente a RI_AMM, ma deve ritrasmettere a DT. Per questo RI_AMM
       // non va considerato qui come requester diretto del RI.
@@ -2370,14 +2387,17 @@ function ActionsPanel (props: {
     // Il destinatario è il RI dell'area tecnica di provenienza della pratica,
     // non l'RI dell'Area Amministrativa.
     if (opts?.technicalIntegration && rr === 'RI') {
-      return { area: areaPratica || ctx.area, settore: settorePratica || ctx.settore }
+      return { area: areaPratica || ctx.area, settore: '' }
     }
 
-    if (rr === 'DT') {
-      return { area: areaPratica || ctx.area, settore: settorePratica || ctx.settore }
+    if (rr === 'RI' || rr === 'DT') {
+      return { area: areaPratica || ctx.area, settore: '' }
     }
 
-    return { area: ctx.area || areaPratica, settore: ctx.settore || settorePratica }
+    // Per i destinatari settoriali (RZ/TI/TR) va usato il settore della pratica,
+    // non il settore del ruolo che sta eseguendo l'azione. Altrimenti, ad esempio,
+    // un rimando RI -> RZ finisce sul settore del RI e non sul distretto RZ corretto.
+    return { area: areaPratica || ctx.area, settore: settorePratica || ctx.settore }
   }
 
   const addGiiRoutingFields = (
@@ -2420,15 +2440,19 @@ function ActionsPanel (props: {
     return fl
   }
 
-  const practicePrefixForActivity = (): string => {
-    const origin = pickAttrCI(data, ['origine_pratica', 'Origine_pratica', 'ORIGINE_PRATICA'])
+  const practicePrefixForActivity = (overrideAttrs?: Record<string, any>): string => {
+    const merged = { ...(data || {}), ...(overrideAttrs || {}) }
+    const origin = pickAttrCI(merged, ['origine_pratica', 'Origine_pratica', 'ORIGINE_PRATICA'])
     return origin === 2 || String(origin || '').trim() === '2' ? 'TI' : 'TR'
   }
 
-  const shortReportNumberForActivity = (): string => {
-    const raw = String(pickAttrCI(data, ['n_rapporto', 'numero_rapporto', 'codice_rapporto', 'cod_pratica', 'rapporto', 'num_rapporto']) || '').trim()
-    if (raw) return raw.replace(/^Rapporto\s*/i, '').trim()
-    return oid != null ? `${practicePrefixForActivity()}-${oid}` : '—'
+  const shortReportNumberForActivity = (overrideAttrs?: Record<string, any>): string => {
+    const merged = { ...(data || {}), ...(overrideAttrs || {}) }
+    const ufficiale = String(pickAttrCI(merged, ['numero_rapporto_tecnico', 'numero_rapporto', 'n_rapporto', 'codice_rapporto', 'cod_pratica', 'rapporto', 'num_rapporto']) || '').trim()
+    if (ufficiale) return ufficiale.replace(/^Rapporto\s*/i, '').trim()
+    const settore = normalizeSettoreCod(pickAttrCI(merged, ['settore_cod', 'SETTORE_COD']) || '')
+    const base = oid != null ? `${practicePrefixForActivity(overrideAttrs)}-${oid}` : '—'
+    return settore && base !== '—' ? `${base}-${settore}` : base
   }
 
   const getActivityParentGlobalId = async (): Promise<string> => {
@@ -2463,8 +2487,8 @@ function ActionsPanel (props: {
 
   const activityTitleForSubtype = (subtipo: string): string => {
     const st = String(subtipo || '').trim().toUpperCase()
-    if (st === 'NUOVO_RAPPORTO') return 'Nuova pratica'
-    if (st === 'RAPPORTO_UFFICIO') return 'Pratica d’ufficio'
+    if (st === 'NUOVO_RAPPORTO') return 'Nuova rilevazione'
+    if (st === 'RAPPORTO_UFFICIO') return 'Rilevazione'
     if (st === 'NUOVA_ASSEGNAZIONE') return 'Nuova assegnazione'
     if (st === 'RICHIESTA_INTEGRAZIONE') return 'Integrazione richiesta'
     if (st === 'INTEGRAZIONE_TRASMESSA') return 'Integrazione trasmessa'
@@ -2480,8 +2504,8 @@ function ActionsPanel (props: {
   const activityMessageForSubtype = (subtipo: string, numeroRapporto: string): string => {
     const st = String(subtipo || '').trim().toUpperCase()
     const n = String(numeroRapporto || '').trim() || '—'
-    if (st === 'NUOVO_RAPPORTO') return `Nuova pratica n. ${n} da prendere in carico.`
-    if (st === 'RAPPORTO_UFFICIO') return `Pratica d’ufficio n. ${n} da prendere in carico.`
+    if (st === 'NUOVO_RAPPORTO') return `Rilevazione n. ${n} da prendere in carico.`
+    if (st === 'RAPPORTO_UFFICIO') return `Rilevazione n. ${n} da prendere in carico.`
     if (st === 'NUOVA_ASSEGNAZIONE') return `Pratica n. ${n} da prendere in carico.`
     if (st === 'RICHIESTA_INTEGRAZIONE') return `Integrazione n. ${n} da prendere in carico.`
     if (st === 'INTEGRAZIONE_TRASMESSA') return `Integrazione n. ${n} da prendere in carico.`
@@ -2500,8 +2524,8 @@ function ActionsPanel (props: {
     const dst = String(ruoloDest || '').trim().toUpperCase()
 
     if (ev === 'ISTRUTTORIA_TRASMESSA') {
-      if ((src === 'TI' || src === 'TR') && dst === 'RZ') return 'Bozza trasmessa'
-      if (src === 'RZ' && dst === 'RI') return 'Bozza approvata'
+      if ((src === 'TI' || src === 'TR') && dst === 'RZ') return 'Rilevazione trasmessa'
+      if (src === 'RZ' && dst === 'RI') return praticaLabel === 'Rapporto tecnico' ? 'Rapporto tecnico trasmesso' : 'Rilevazione approvata'
       if (src === 'RI' && dst === 'DT') return 'Istruttoria tecnica approvata'
       if (src === 'TI_AMM' && dst === 'RI_AMM') return 'Istruttoria amministrativa trasmessa'
       if (src === 'RI_AMM' && dst === 'DA') return 'Istruttoria amministrativa approvata'
@@ -2520,7 +2544,7 @@ function ActionsPanel (props: {
     const n = String(numeroRapporto || '').trim() || '—'
 
     if (ev === 'ISTRUTTORIA_TRASMESSA') {
-      if ((src === 'TI' || src === 'TR') && dst === 'RZ') return `Bozza n. ${n} da prendere in carico.`
+      if ((src === 'TI' || src === 'TR') && dst === 'RZ') return `Rilevazione n. ${n} da prendere in carico.`
       if (src === 'RZ' && dst === 'RI') return `Istruttoria tecnica n. ${n} da prendere in carico.`
       if (src === 'RI' && dst === 'DT') return `Rapporto tecnico n. ${n} da prendere in carico.`
       if (src === 'TI_AMM' && dst === 'RI_AMM') return `Istruttoria amministrativa n. ${n} da prendere in carico.`
@@ -2543,7 +2567,44 @@ function ActionsPanel (props: {
     return rr
   }
 
-  const upsertCurrentActivityForDest = async (logOpts: { eventoChiusura: string, ruoloDestinatario?: string, utenteDestinatario?: string, noteChiusura?: string, fase?: string }) => {
+  const deleteCurrentActivitiesForDestRole = async (ruoloDestRaw: string, excludeKey?: string) => {
+    const ruoloDest = normalizeActivityDestRole(String(ruoloDestRaw || ''))
+    if (!ruoloDest || !hasSel || oid == null) return
+    try {
+      const layer = await getAttivitaLayer()
+      const parentGlobalId = await getActivityParentGlobalId()
+      const targetParts: string[] = []
+      if (parentGlobalId) targetParts.push(`(${parentGlobalIdWhere('parent_globalid', parentGlobalId)})`)
+      if (oid != null && Number.isFinite(Number(oid))) targetParts.push(`parent_objectid = ${Number(oid)}`)
+      if (!targetParts.length) return
+
+      const parts: string[] = [
+        `tipo_attivita = 'PRESA_IN_CARICO'`,
+        `destinatario_ruolo = ${sqlQuote(ruoloDest)}`,
+        `(${targetParts.join(' OR ')})`
+      ]
+      const key = String(excludeKey || '').trim()
+      if (key) parts.push(`chiave_attivita <> ${sqlQuote(key)}`)
+
+      const q = layer.createQuery ? layer.createQuery() : {}
+      q.where = parts.join(' AND ')
+      q.outFields = ['OBJECTID']
+      q.returnGeometry = false
+      const res = await layer.queryFeatures(q)
+      const deletes = (res?.features || [])
+        .map((f: any) => f?.attributes?.OBJECTID)
+        .filter((v: any) => v != null)
+        .map((objectId: any) => ({ objectId }))
+      if (deletes.length) await layer.applyEdits({ deleteFeatures: deletes })
+    } catch (e) {
+      console.warn('[GII_ATTIVITA_CORRENTI] Errore eliminazione attività corrente per ruolo:', e)
+    }
+  }
+
+  const upsertCurrentActivityForDest = async (
+    logOpts: { eventoChiusura: string, ruoloDestinatario?: string, utenteDestinatario?: string, noteChiusura?: string, fase?: string },
+    overrideAttrs?: Record<string, any>
+  ) => {
     const ruoloDest = normalizeActivityDestRole(String(logOpts?.ruoloDestinatario || ''))
     if (!ruoloDest) return
     const parentGlobalId = await getActivityParentGlobalId()
@@ -2554,9 +2615,12 @@ function ActionsPanel (props: {
 
     try {
       const layer = await getAttivitaLayer()
-      const numeroRapporto = shortReportNumberForActivity()
+      const numeroRapporto = shortReportNumberForActivity(overrideAttrs)
       const destMeta = getRoutingMetaForRole(ruoloDest, { technicalIntegration: logOpts?.eventoChiusura === 'INTEGRAZIONE_RICHIESTA' && ruoloDest === 'RI' && role === 'RI_AMM' })
       const areaDest = normalizeAreaLabel(destMeta.area || (ruoloDest === 'DA' || ruoloDest === 'RI_AMM' || ruoloDest === 'TI_AMM' ? 'AMM' : ''))
+      // Manteniamo il settore di provenienza nel record dell'attività corrente.
+      // La visibilità area-level per RI/DT viene gestita dalla query degli allarmi,
+      // non svuotando il dato sul record.
       const settoreDest = normalizeSettoreCod(destMeta.settore || '')
       const subtipo = activitySubTypeFromEvent(logOpts?.eventoChiusura, role, ruoloDest)
       const titolo = activityTitleForEvent(subtipo, logOpts?.eventoChiusura, role, ruoloDest)
@@ -2589,6 +2653,10 @@ function ActionsPanel (props: {
         aggiornato_da: String((window as any).__giiUserRole?.username || '')
       }
 
+      // Evita attività correnti residue per lo stesso ruolo sulla stessa pratica.
+      // Può accadere nei rimandi/ritrasmissioni, quando cambia il sottotipo e quindi cambia la chiave.
+      await deleteCurrentActivitiesForDestRole(ruoloDest, key)
+
       const q = layer.createQuery ? layer.createQuery() : {}
       q.where = `chiave_attivita = ${sqlQuote(key)}`
       q.outFields = ['OBJECTID']
@@ -2609,43 +2677,12 @@ function ActionsPanel (props: {
 
   const deleteCurrentActivityForCurrentRole = async () => {
     if (!hasSel || oid == null) return
-    try {
-      const layer = await getAttivitaLayer()
-      const parentGlobalId = await getActivityParentGlobalId()
-      const currentRole = normalizeActivityDestRole(role)
-      const currentMeta = getRoutingMetaForRole(currentRole)
-      const currentArea = normalizeAreaLabel(currentMeta.area || (currentRole === 'DA' || currentRole === 'RI_AMM' || currentRole === 'TI_AMM' ? 'AMM' : ''))
-      const currentSettore = normalizeSettoreCod(currentMeta.settore || '')
-      const username = String((window as any).__giiUserRole?.username || '').trim()
-      const parts: string[] = [
-        `tipo_attivita = 'PRESA_IN_CARICO'`,
-        `destinatario_ruolo = ${sqlQuote(currentRole)}`
-      ]
-      if (currentArea) parts.push(`destinatario_area = ${sqlQuote(currentArea)}`)
-      if (currentSettore) parts.push(`(destinatario_settore IS NULL OR destinatario_settore = '' OR destinatario_settore = ${sqlQuote(currentSettore)})`)
-      if (username) parts.push(`(destinatario_username IS NULL OR destinatario_username = '' OR UPPER(destinatario_username) = ${sqlQuote(username.toUpperCase())})`)
-
-      const targetParts: string[] = []
-      if (parentGlobalId) targetParts.push(`(${parentGlobalIdWhere('parent_globalid', parentGlobalId)})`)
-      if (oid != null && Number.isFinite(Number(oid))) targetParts.push(`parent_objectid = ${Number(oid)}`)
-      if (!targetParts.length) return
-      parts.push(`(${targetParts.join(' OR ')})`)
-
-      const q = layer.createQuery ? layer.createQuery() : {}
-      q.where = parts.join(' AND ')
-      q.outFields = ['OBJECTID']
-      q.returnGeometry = false
-      const res = await layer.queryFeatures(q)
-      const deletes = (res?.features || [])
-        .map((f: any) => f?.attributes?.OBJECTID)
-        .filter((v: any) => v != null)
-        .map((objectId: any) => ({ objectId }))
-      if (deletes.length) await layer.applyEdits({ deleteFeatures: deletes })
-      try { window.dispatchEvent(new CustomEvent('gii-alerts-refresh', { detail: { source: 'gii-azioni-delete-attivita', oid, ts: Date.now() } })) } catch {}
-    } catch (e) {
-      console.warn('[GII_ATTIVITA_CORRENTI] Errore eliminazione attività corrente:', e)
-    }
+    const currentRole = normalizeActivityDestRole(role)
+    if (!currentRole) return
+    await deleteCurrentActivitiesForDestRole(currentRole)
+    try { window.dispatchEvent(new CustomEvent('gii-alerts-refresh', { detail: { source: 'gii-azioni-delete-attivita', oid, ts: Date.now() } })) } catch {}
   }
+
 
   const getPrevRoleForIntegration = (target?: 'TI_AMM' | 'TECNICA'): string => {
     if (role === 'RZ')     return 'TI'
@@ -2685,12 +2722,14 @@ function ActionsPanel (props: {
    * Esempi:
    * - RI_AMM chiede integrazione a RI → RI risponde direttamente a RI_AMM
    * - DT chiede integrazione a RI → RI risponde direttamente a DT
-   * - RI chiede integrazione a TI → TI risponde direttamente a RI
+   * - RI chiede integrazione a TI → TI integra, ma ritrasmette comunque al RZ
    */
   const getIntegrationRequesterForCurrentRole = (): string => {
     if (!data) return ''
     const requesterByResponder: Record<string, string[]> = {
-      TI: ['RI', 'RZ'],
+      // Il TI ritrasmette sempre al RZ, anche quando l'integrazione è stata richiesta dal RI:
+      // il workflow tecnico non prevede il bypass TI → RI.
+      TI: ['RZ'],
       // Caso speciale: RI_AMM -> RI è integrazione tecnica.
       // Il RI, dopo l'integrazione, NON deve tornare direttamente a RI_AMM:
       // deve ritrasmettere a DT, che poi approverà e rimanderà a RI_AMM.
@@ -2748,7 +2787,7 @@ function ActionsPanel (props: {
     !roleClosedOrForwarded
 
   const editButtonTitle = canEdit
-    ? (isAmmEditRole ? 'Apri scheda verbale' : 'Modifica pratica')
+    ? (isAmmEditRole ? 'Apri scheda verbale' : 'Modifica rilevazione')
     : (isAmmEditRole
       ? 'Modifica verbale non disponibile: la pratica deve essere già presa in carico dal ruolo corrente.'
       : 'Modifica non disponibile: la pratica deve essere già presa in carico dal ruolo corrente.')
@@ -3419,8 +3458,8 @@ function ActionsPanel (props: {
     : ''
 
   const approvaBtnLabel =
-    role === 'TI' ? `Trasmetti bozza al ${getRoleLabelForMenu('RZ')}` :
-    role === 'RZ' ? 'Approva bozza' :
+    role === 'TI' ? `Trasmetti ${praticaLabel === 'Rapporto tecnico' ? 'rapporto tecnico' : 'rilevazione'} al ${getRoleLabelForMenu('RZ')}` :
+    role === 'RZ' ? (praticaLabel === 'Rapporto tecnico' ? 'Valida integrazione' : 'Approva rilevazione') :
     role === 'RI' ? 'Approva istruttoria tecnica' :
     role === 'DT' ? 'Approva Rapporto tecnico di rilevazione' :
     role === 'DA' ? 'Approva verbale' :
@@ -3431,8 +3470,8 @@ function ActionsPanel (props: {
 
   const approvaDoneLabel = currentIntegrationRequesterLabel
     ? `Trasmessa al ${currentIntegrationRequesterLabel}`
-    : role === 'TI' ? `Bozza trasmessa al ${getRoleLabelForMenu('RZ')}` :
-    role === 'RZ' ? `Bozza approvata e trasmessa al ${getRoleLabelForMenu('RI')}` :
+    : role === 'TI' ? `${praticaLabel === 'Rapporto tecnico' ? 'Rapporto tecnico' : 'Rilevazione'} trasmessa al ${getRoleLabelForMenu('RZ')}` :
+    role === 'RZ' ? (praticaLabel === 'Rapporto tecnico' ? `Integrazione validata e trasmessa al ${getRoleLabelForMenu('RI')}` : `Rilevazione approvata e trasmessa al ${getRoleLabelForMenu('RI')}`) :
     role === 'RI' ? `Istruttoria tecnica approvata e trasmessa al ${getRoleLabelForForward('DT')}` :
     role === 'DT' ? `Rapporto tecnico di rilevazione approvato e trasmesso al ${getRoleLabelForMenu('RI_AMM')}` :
     role === 'DA' ? `Verbale approvato e trasmesso al ${getRoleLabelForMenu('TI_AMM')}` :
@@ -3443,8 +3482,8 @@ function ActionsPanel (props: {
 
   const approvaConfirmLabel = currentIntegrationRequesterLabel
     ? `Conferma trasmissione al ${currentIntegrationRequesterLabel}`
-    : role === 'TI' ? `Conferma trasmissione bozza al ${getRoleLabelForMenu('RZ')}` :
-    role === 'RZ' ? 'Conferma approvazione bozza' :
+    : role === 'TI' ? `Conferma trasmissione ${praticaLabel === 'Rapporto tecnico' ? 'rapporto tecnico' : 'rilevazione'} al ${getRoleLabelForMenu('RZ')}` :
+    role === 'RZ' ? (praticaLabel === 'Rapporto tecnico' ? 'Conferma validazione integrazione' : 'Conferma approvazione rilevazione') :
     role === 'RI' ? 'Conferma approvazione istruttoria tecnica' :
     role === 'DT' ? 'Conferma approvazione Rapporto tecnico di rilevazione' :
     role === 'DA' ? 'Conferma approvazione verbale' :
@@ -3469,7 +3508,7 @@ function ActionsPanel (props: {
 
   const rimandoGenericDest = getPrevRoleForIntegration()
   const rimandoGenericTargetLabel = formatRimandoRoleLabel(rimandoGenericDest)
-  const rimandoGenericButtonLabel = 'Rimanda'
+  const rimandoGenericButtonLabel = rimandoGenericTargetLabel ? `Rimanda al ${rimandoGenericTargetLabel}` : 'Rimanda'
   const rimandoTiAmmButtonLabel = `Rimanda al ${getRoleLabelForMenu('TI_AMM')}`
   const rimandoTecnicaTargetLabel = getRiTecnicoTargetLabel()
   const rimandoTecnicaButtonLabel = `Rimanda al ${rimandoTecnicaTargetLabel}`
@@ -3477,7 +3516,9 @@ function ActionsPanel (props: {
     ? getRoleLabelForMenu('TI_AMM')
     : role === 'RI_AMM' && pending === 'INTEGRAZIONE_TECNICA'
       ? rimandoTecnicaTargetLabel
-      : ''
+      : pending === 'INTEGRAZIONE'
+        ? rimandoGenericTargetLabel
+        : ''
 
   // TI: eliminazione consentita solo per pratiche originate da sé (origine=TI) e mai inoltrate a RZ.
   const currentUsername = String((window as any).__giiUserRole?.username || (window as any).__giiUser?.username || '').trim()
@@ -3556,8 +3597,8 @@ function ActionsPanel (props: {
 
   const approvaMenuLabel = currentIntegrationRequesterLabel
     ? `Trasmetti al ${currentIntegrationRequesterLabel}`
-    : role === 'TI' ? `Trasmetti bozza al ${getRoleLabelForMenu('RZ')}` :
-    role === 'RZ' ? 'Approva bozza' :
+    : role === 'TI' ? `Trasmetti ${praticaLabel === 'Rapporto tecnico' ? 'rapporto tecnico' : 'rilevazione'} al ${getRoleLabelForMenu('RZ')}` :
+    role === 'RZ' ? (praticaLabel === 'Rapporto tecnico' ? 'Valida integrazione' : 'Approva rilevazione') :
     role === 'RI' ? 'Approva istruttoria tecnica' :
     role === 'DT' ? 'Approva Rapporto tecnico di rilevazione' :
     role === 'DA' ? 'Approva verbale' :
@@ -3568,8 +3609,8 @@ function ActionsPanel (props: {
 
   const approvaMenuDesc = currentIntegrationRequesterLabel
     ? `Invia la risposta al ${currentIntegrationRequesterLabel}.`
-    : role === 'TI' ? `Invia la bozza al ${getRoleLabelForMenu('RZ')}.` :
-    role === 'RZ' ? `Approva la bozza e la trasmette al ${getRoleLabelForMenu('RI')}.` :
+    : role === 'TI' ? `${praticaLabel === 'Rapporto tecnico' ? 'Invia il rapporto tecnico' : 'Invia la rilevazione'} al ${getRoleLabelForMenu('RZ')}.` :
+    role === 'RZ' ? (praticaLabel === 'Rapporto tecnico' ? `Valida l’integrazione e trasmette il rapporto tecnico al ${getRoleLabelForMenu('RI')}.` : `Approva la rilevazione e la trasmette al ${getRoleLabelForMenu('RI')}.`) :
     role === 'RI' ? `Approva l’istruttoria tecnica e la trasmette al ${getRoleLabelForForward('DT')}.` :
     role === 'DT' ? `Approva il Rapporto tecnico di rilevazione e lo trasmette al ${getRoleLabelForMenu('RI_AMM')}.` :
     role === 'DA' ? `Approva il verbale e lo trasmette al ${getRoleLabelForMenu('TI_AMM')}.` :
@@ -3650,7 +3691,7 @@ function ActionsPanel (props: {
         {
           key: 'INTEGRAZIONE',
           label: rimandoGenericButtonLabel,
-          desc: 'Rimando per integrazione.',
+          desc: rimandoGenericTargetLabel ? `${praticaLabel === 'Rapporto tecnico' ? 'Il rapporto tecnico verrà rimandato' : 'La rilevazione verrà rimandata'} al ${rimandoGenericTargetLabel}.` : 'Rimando per integrazione.',
           enabled: canStartIntegrazione,
           visible: role !== 'TI' && role !== 'RI_AMM',
           color: buttonColors.integrazione,
@@ -3870,6 +3911,18 @@ function ActionsPanel (props: {
     } catch {}
   }, [active, hasSel, idFieldNameFromSel, oid])
 
+  const markAfterWorkflowListNavigation = React.useCallback((source = 'workflow') => {
+    try {
+      if (!hasSel || oid == null || !Number.isFinite(Number(oid))) return
+      sessionStorage.setItem('GII_AFTER_WORKFLOW_NAV', JSON.stringify({
+        oid: Number(oid),
+        source,
+        targetRoleTab: 'attesa_altri',
+        ts: Date.now()
+      }))
+    } catch {}
+  }, [hasSel, oid])
+
   const refreshAfterWorkflowSave = async (reason = 'azioni-post-applyedits') => {
     const root = getRootDs(ds)
     await refreshRootAndDerived(root)
@@ -3898,12 +3951,18 @@ function ActionsPanel (props: {
     // Registriamo solo l'intenzione di ripristino: sarà l'elenco a ripristinare
     // la selezione esclusivamente se il record è ancora visibile nella scheda attiva.
     markRestoreSelectionAfterAction(String(logOpts?.eventoChiusura || 'workflow'))
+    if (logOpts?.ruoloDestinatario) {
+      // Dopo una trasmissione/rimando/assegnazione l'oggetto esce normalmente
+      // da "In attesa mia". L'elenco, se l'utente era in quella scheda,
+      // passerà a "In attesa di altri" e manterrà la selezione sullo stesso record.
+      markAfterWorkflowListNavigation(String(logOpts?.eventoChiusura || 'workflow'))
+    }
     const auditDelta = buildWorkflowActionAuditDelta(attributesIn)
     try {
       await runApplyEdits(attributesIn, okText, { deferRefresh: true, keepLoading: true })
       await closeCycleLog({ ...logOpts, auditOldMap: auditDelta.oldMap, auditNewMap: auditDelta.newMap })
       await deleteCurrentActivityForCurrentRole()
-      if (logOpts?.ruoloDestinatario) await upsertCurrentActivityForDest(logOpts)
+      if (logOpts?.ruoloDestinatario) await upsertCurrentActivityForDest(logOpts, attributesIn)
       await refreshAfterWorkflowSave('azioni-post-log')
     } finally {
       setLoading(false)
@@ -4297,6 +4356,32 @@ function ActionsPanel (props: {
         upd[dtStatoField] = now
       }
 
+      if (role === 'RZ' && esito === ESITO_APPROVATA) {
+        const schemaFields: Record<string, any> = (ds as any)?.getSchema?.()?.fields || {}
+        const fNumeroRapportoTecnico = getSchemaFieldNameCI(schemaFields, 'numero_rapporto_tecnico')
+        const fDataRapportoTecnico = getSchemaFieldNameCI(schemaFields, 'data_rapporto_tecnico')
+        if (!fNumeroRapportoTecnico || !fDataRapportoTecnico) {
+          throw new Error('Impossibile approvare la rilevazione: campi numero_rapporto_tecnico/data_rapporto_tecnico non presenti nella fonte dati.')
+        }
+
+        const liveAttrs = await queryCurrentRecordAttrs()
+        const currentNumeroRapportoTecnico = String(pickAttrCI(liveAttrs || data, ['numero_rapporto_tecnico', fNumeroRapportoTecnico]) || '').trim()
+        const currentDataRapportoTecnico = pickAttrCI(liveAttrs || data, ['data_rapporto_tecnico', fDataRapportoTecnico])
+        const annoRapportoTecnico = new Date(now).getFullYear()
+
+        if (currentNumeroRapportoTecnico) {
+          const parsedProgressivo = parseNumeroAttoProgressivo(currentNumeroRapportoTecnico, 'R', annoRapportoTecnico)
+          if (parsedProgressivo == null) {
+            throw new Error(`Numero rapporto tecnico già presente ma non conforme al formato R-progressivo/anno: ${currentNumeroRapportoTecnico}`)
+          }
+        } else {
+          upd[fNumeroRapportoTecnico] = await queryNextNumeroAtto('R', annoRapportoTecnico, fNumeroRapportoTecnico)
+        }
+        if (currentDataRapportoTecnico == null || currentDataRapportoTecnico === '') {
+          upd[fDataRapportoTecnico] = now
+        }
+      }
+
       if (role === 'DA' && esito === ESITO_APPROVATA) {
         const schemaFields: Record<string, any> = (ds as any)?.getSchema?.()?.fields || {}
         const fNumeroVerbale = getSchemaFieldNameCI(schemaFields, 'numero_verbale')
@@ -4314,12 +4399,12 @@ function ActionsPanel (props: {
         const annoVerbale = Number.isNaN(parsedYearDate.getTime()) ? new Date(now).getFullYear() : parsedYearDate.getFullYear()
 
         if (currentNumeroVerbale) {
-          const parsedProgressivo = parseNumeroVerbaleProgressivo(currentNumeroVerbale, annoVerbale)
+          const parsedProgressivo = parseNumeroAttoProgressivo(currentNumeroVerbale, 'V', annoVerbale, true)
           if (parsedProgressivo == null) {
-            throw new Error(`Numero verbale già presente ma non conforme al formato progressivo/anno: ${currentNumeroVerbale}`)
+            throw new Error(`Numero verbale già presente ma non conforme al formato V-progressivo/anno: ${currentNumeroVerbale}`)
           }
         } else {
-          upd[fNumeroVerbale] = await queryNextNumeroVerbale(annoVerbale)
+          upd[fNumeroVerbale] = await queryNextNumeroAtto('V', annoVerbale, fNumeroVerbale, true)
         }
         if (currentDataVerbale == null || currentDataVerbale === '') {
           upd[fDataVerbale] = now
@@ -4516,34 +4601,42 @@ function ActionsPanel (props: {
   // ── Colore/icona/testo per ogni tipo di azione ────────────────────────────
   type PendingTheme = { icon: string; color: string; bg: string; border: string; desc: string; buttonBg: string; buttonBorder: string }
 
+  const subjectArticle = praticaLabel === 'Rapporto tecnico' ? 'Il' : 'La'
+  const subjectNameLower = praticaLabel === 'Rapporto tecnico' ? 'rapporto tecnico' : 'rilevazione'
+  const subjectVerbTrasmessa = praticaLabel === 'Rapporto tecnico' ? 'trasmesso' : 'trasmessa'
+  const subjectVerbAssegnata = praticaLabel === 'Rapporto tecnico' ? 'assegnato' : 'assegnata'
+  const subjectVerbRimandata = praticaLabel === 'Rapporto tecnico' ? 'rimandato' : 'rimandata'
+  const subjectVerbRespinta = praticaLabel === 'Rapporto tecnico' ? 'respinto' : 'respinta'
+  const subjectVerbArchiviata = praticaLabel === 'Rapporto tecnico' ? 'archiviato' : 'archiviata'
+
   const approvaActionDesc = currentIntegrationRequesterLabel
-    ? `La pratica verrà trasmessa al ${currentIntegrationRequesterLabel}.`
-    : role === 'TI' ? `La bozza verrà trasmessa al ${getRoleLabelForMenu('RZ')}.` :
-    role === 'RZ' ? `La bozza verrà approvata e trasmessa al ${getRoleLabelForMenu('RI')}.` :
+    ? `${subjectArticle} ${subjectNameLower} verrà ${subjectVerbTrasmessa} al ${currentIntegrationRequesterLabel}.`
+    : role === 'TI' ? `${subjectArticle} ${subjectNameLower} verrà ${subjectVerbTrasmessa} al ${getRoleLabelForMenu('RZ')}.` :
+    role === 'RZ' ? (praticaLabel === 'Rapporto tecnico' ? `L’integrazione verrà validata e il rapporto tecnico verrà trasmesso al ${getRoleLabelForMenu('RI')}.` : `La rilevazione verrà approvata e trasmessa al ${getRoleLabelForMenu('RI')}.`) :
     role === 'RI' ? `L’istruttoria tecnica verrà approvata e trasmessa al ${getRoleLabelForForward('DT')}.` :
     role === 'DT' ? `Il Rapporto tecnico di rilevazione verrà approvato e trasmesso al ${getRoleLabelForMenu('RI_AMM')}.` :
     role === 'DA' ? `Il verbale verrà approvato e trasmesso al ${getRoleLabelForMenu('TI_AMM')}.` :
     role === 'RI_AMM' && fwdDest === 'DA' ? `L’istruttoria amministrativa verrà approvata e trasmessa al ${getRoleLabelForForward('DA')}.` :
-    role === 'RI_AMM' ? `La pratica verrà trasmessa al ${fwdDestLabel}.` :
+    role === 'RI_AMM' ? `L’istruttoria amministrativa verrà trasmessa al ${fwdDestLabel}.` :
     role === 'TI_AMM' ? `L’istruttoria amministrativa verrà trasmessa al ${getRoleLabelForMenu('RI_AMM')}.` :
-    'La pratica verrà avanzata al passaggio successivo.'
+    `${subjectArticle} ${subjectNameLower} verrà ${subjectVerbTrasmessa} al passaggio successivo.`
 
   const integrazioneActionDesc = pendingRimandoTargetLabel
-    ? `La pratica verrà rimandata al ${pendingRimandoTargetLabel}.`
-    : 'La pratica verrà rimandata per integrazione.'
+    ? `${subjectArticle} ${subjectNameLower} verrà ${subjectVerbRimandata} al ${pendingRimandoTargetLabel}.`
+    : `${subjectArticle} ${subjectNameLower} verrà ${subjectVerbRimandata} per integrazione.`
 
   const pendingTheme: Record<string, PendingTheme> = {
-    TAKE:           { icon: '✓', color: '#2563eb', bg: '#eff6ff', border: '#bfdbfe', buttonBg: '#2563eb', buttonBorder: '#1d4ed8', desc: 'La pratica verrà presa in carico.' },
-    ASSEGNA_TI:     { icon: '✓', color: '#2563eb', bg: '#eff6ff', border: '#bfdbfe', buttonBg: '#2563eb', buttonBorder: '#1d4ed8', desc: 'La pratica verrà assegnata al Tecnico Istruttore selezionato.' },
-    ASSEGNA_TI_AMM: { icon: '✓', color: '#2563eb', bg: '#eff6ff', border: '#bfdbfe', buttonBg: '#2563eb', buttonBorder: '#1d4ed8', desc: 'La pratica verrà assegnata al Tecnico Istruttore amministrativo selezionato.' },
-    INVIA_TI_AMM: { icon: '✓', color: '#2563eb', bg: '#eff6ff', border: '#bfdbfe', buttonBg: '#2563eb', buttonBorder: '#1d4ed8', desc: 'La pratica verrà trasmessa al Tecnico Istruttore amministrativo già assegnato.' },
-    RESTITUISCI_TI_AMM: { icon: '✓', color: '#2563eb', bg: '#eff6ff', border: '#bfdbfe', buttonBg: '#2563eb', buttonBorder: '#1d4ed8', desc: 'La pratica verrà restituita al Tecnico Istruttore amministrativo già assegnato.' },
+    TAKE:           { icon: '✓', color: '#2563eb', bg: '#eff6ff', border: '#bfdbfe', buttonBg: '#2563eb', buttonBorder: '#1d4ed8', desc: praticaLabel === 'Rapporto tecnico' ? 'Il rapporto tecnico verrà preso in carico.' : 'La rilevazione verrà presa in carico.' },
+    ASSEGNA_TI:     { icon: '✓', color: '#2563eb', bg: '#eff6ff', border: '#bfdbfe', buttonBg: '#2563eb', buttonBorder: '#1d4ed8', desc: `${subjectArticle} ${subjectNameLower} verrà ${subjectVerbAssegnata} al ${getRoleLabelForMenu('TI')} selezionato.` },
+    ASSEGNA_TI_AMM: { icon: '✓', color: '#2563eb', bg: '#eff6ff', border: '#bfdbfe', buttonBg: '#2563eb', buttonBorder: '#1d4ed8', desc: `${subjectArticle} ${subjectNameLower} verrà ${subjectVerbAssegnata} al ${getRoleLabelForMenu('TI_AMM')} selezionato.` },
+    INVIA_TI_AMM: { icon: '✓', color: '#2563eb', bg: '#eff6ff', border: '#bfdbfe', buttonBg: '#2563eb', buttonBorder: '#1d4ed8', desc: `L’istruttoria amministrativa verrà trasmessa al ${getRoleLabelForMenu('TI_AMM')} già assegnato.` },
+    RESTITUISCI_TI_AMM: { icon: '✓', color: '#2563eb', bg: '#eff6ff', border: '#bfdbfe', buttonBg: '#2563eb', buttonBorder: '#1d4ed8', desc: `L’istruttoria amministrativa verrà restituita al ${getRoleLabelForMenu('TI_AMM')} già assegnato.` },
     APPROVA:        { icon: '✓', color: '#2563eb', bg: '#eff6ff', border: '#bfdbfe', buttonBg: '#2563eb', buttonBorder: '#1d4ed8', desc: approvaActionDesc },
     INTEGRAZIONE:   { icon: '↩', color: '#b45309', bg: '#fffbeb', border: '#fde68a', buttonBg: '#d97706', buttonBorder: '#b45309', desc: integrazioneActionDesc },
-    INTEGRAZIONE_TI_AMM: { icon: '↩', color: '#b45309', bg: '#fffbeb', border: '#fde68a', buttonBg: '#d97706', buttonBorder: '#b45309', desc: 'La pratica verrà rimandata al Tecnico Istruttore amministrativo assegnato.' },
-    INTEGRAZIONE_TECNICA: { icon: '↩', color: '#b45309', bg: '#fffbeb', border: '#fde68a', buttonBg: '#d97706', buttonBorder: '#b45309', desc: `La pratica verrà rimandata al ${rimandoTecnicaTargetLabel}.` },
-    RESPINGI:       { icon: '✕', color: '#b42318', bg: '#fef2f2', border: '#fecaca', buttonBg: '#dc2626', buttonBorder: '#b42318', desc: 'La pratica verrà respinta.' },
-    ELIMINA:        { icon: '✕', color: '#b42318', bg: '#fef2f2', border: '#fecaca', buttonBg: '#dc2626', buttonBorder: '#b42318', desc: 'La pratica verrà archiviata e non sarà più visibile nell\'elenco.' },
+    INTEGRAZIONE_TI_AMM: { icon: '↩', color: '#b45309', bg: '#fffbeb', border: '#fde68a', buttonBg: '#d97706', buttonBorder: '#b45309', desc: `L’istruttoria amministrativa verrà rimandata al ${getRoleLabelForMenu('TI_AMM')} assegnato.` },
+    INTEGRAZIONE_TECNICA: { icon: '↩', color: '#b45309', bg: '#fffbeb', border: '#fde68a', buttonBg: '#d97706', buttonBorder: '#b45309', desc: `L’istruttoria amministrativa verrà rimandata al ${rimandoTecnicaTargetLabel}.` },
+    RESPINGI:       { icon: '✕', color: '#b42318', bg: '#fef2f2', border: '#fecaca', buttonBg: '#dc2626', buttonBorder: '#b42318', desc: `${subjectArticle} ${subjectNameLower} verrà ${subjectVerbRespinta}.` },
+    ELIMINA:        { icon: '✕', color: '#b42318', bg: '#fef2f2', border: '#fecaca', buttonBg: '#dc2626', buttonBorder: '#b42318', desc: `${subjectArticle} ${subjectNameLower} verrà ${subjectVerbArchiviata} e non sarà più visibile nell'elenco.` },
   }
   const theme = pending ? (pendingTheme[pending] ?? { icon: '●', color: '#2f6fed', bg: '#eff6ff', border: '#bfdbfe', buttonBg: '#2563eb', buttonBorder: '#1d4ed8', desc: '' }) : pendingTheme.TAKE
   const operationProgressBox = (
@@ -4677,7 +4770,7 @@ function ActionsPanel (props: {
             </div>
             {hasSel && oid != null && (
               <div style={{ marginTop: 5, fontSize: 13, color: '#4b5563' }}>
-                Pratica: <span style={{ fontWeight: 700, fontFamily: 'monospace', color: actionMenuTheme.color }}>{praticaCode}</span>
+                {praticaLabel}: <span style={{ fontWeight: 700, fontFamily: 'monospace', color: actionMenuTheme.color }}>{praticaCode}</span>
               </div>
             )}
           </div>
@@ -4875,10 +4968,10 @@ function ActionsPanel (props: {
           <span>{pendingTitle}</span>
         </div>
 
-        {/* Box numero pratica */}
+        {/* Box numero rilevazione / rapporto tecnico */}
         {hasSel && oid != null && (
           <div style={{ fontWeight: 600, color: '#1f2937', padding: 10, background: theme.bg, border: `1px solid ${theme.border}`, borderRadius: 6, fontSize: 13 }}>
-            Pratica: <span style={{ color: theme.color, fontSize: 14, fontFamily: 'monospace' }}>{praticaCode}</span>
+            {praticaLabel}: <span style={{ color: theme.color, fontSize: 14, fontFamily: 'monospace' }}>{praticaCode}</span>
           </div>
         )}
 

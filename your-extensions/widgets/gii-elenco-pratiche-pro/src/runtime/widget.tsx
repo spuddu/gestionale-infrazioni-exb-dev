@@ -452,6 +452,41 @@ function clearRestoreSelectionAfterEdit () {
   try { sessionStorage.removeItem('GII_RESTORE_SELECTION_AFTER_EDIT') } catch {}
 }
 
+type GiiAfterWorkflowNav = {
+  oid: number
+  source?: string
+  targetRoleTab?: string
+  ts?: number
+}
+
+function readAfterWorkflowNav (): GiiAfterWorkflowNav | null {
+  try {
+    const raw = sessionStorage.getItem('GII_AFTER_WORKFLOW_NAV')
+    if (!raw) return null
+    const j: any = JSON.parse(raw)
+    const oidNum = Number(j?.oid)
+    if (!Number.isFinite(oidNum)) return null
+    const ts = Number(j?.ts || 0)
+    const ageMs = Math.abs(Date.now() - (Number.isFinite(ts) ? ts : 0))
+    if (!Number.isFinite(ts) || ageMs > 5 * 60 * 1000) {
+      try { sessionStorage.removeItem('GII_AFTER_WORKFLOW_NAV') } catch {}
+      return null
+    }
+    return {
+      oid: oidNum,
+      source: String(j?.source || ''),
+      targetRoleTab: String(j?.targetRoleTab || 'attesa_altri'),
+      ts
+    }
+  } catch {
+    return null
+  }
+}
+
+function clearAfterWorkflowNav () {
+  try { sessionStorage.removeItem('GII_AFTER_WORKFLOW_NAV') } catch {}
+}
+
 type GiiOpenPracticeIntent = {
   oid: number | null
   parentObjectId?: number | null
@@ -3157,12 +3192,110 @@ React.useEffect(() => {
   React.useEffect(() => {
     const selectedPairs = Object.entries(localSelectedByDs || {})
     if (!selectedPairs.length) return
+
+    // Durante il completamento di una trasmissione/rimando, la pratica può uscire
+    // da "In attesa mia" e ricomparire in "In attesa di altri" dopo il refresh.
+    // Non cancelliamo la selezione in quel brevissimo intervallo: un effetto dedicato
+    // la riposiziona nella scheda corretta.
+    if (readAfterWorkflowNav()) return
+
     const stillVisible = selectedPairs.some(([dsId, rid]) =>
       mergedRecs.some(r => (recDsLookup.get(r) || '') === dsId && String(r.getId?.() ?? '') === String(rid))
     )
     if (!stillVisible) clearAllSelections()
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [mergedRecs, recDsLookup])
+
+  React.useEffect(() => {
+    const pending = readAfterWorkflowNav()
+    if (!pending) return
+
+    // La regola richiesta vale solo se l'utente era in "In attesa mia".
+    // Se stava già consultando "Tutte le pratiche" o "In attesa di altri", non forziamo tab.
+    if (activeRoleTab !== 'attesa_mia') {
+      clearAfterWorkflowNav()
+      return
+    }
+
+    const anyLoading = Object.values(dsDataRef.current || {}).some((e: any) => !!e?.loading)
+    if (anyLoading) return
+    if (!activeGroup) return
+
+    let found: { dsId: string, rid: string, rec: DataRecord, idFieldName: string } | null = null
+
+    for (const di of activeGroup.dsIndices) {
+      const dsId = String(filteredUseDsJs[di]?.dataSourceId || '')
+      const entry = dsDataRef.current[dsId]
+      if (!entry?.recs?.length) continue
+      const idFieldName = String(entry?.ds?.getIdField?.() || 'OBJECTID').trim() || 'OBJECTID'
+
+      for (const r of entry.recs) {
+        if (!isRecordVisibleForCurrentUser(r)) continue
+        const d = r.getData?.() || {}
+        const rid = String(r.getId?.() ?? '')
+        const recOid = Number(d?.[idFieldName] ?? d?.OBJECTID ?? d?.objectid ?? d?.ObjectId ?? d?.objectId ?? rid)
+        if (Number.isFinite(recOid) && recOid === Number(pending.oid)) {
+          found = { dsId, rid: rid || String(pending.oid), rec: r, idFieldName }
+          break
+        }
+      }
+      if (found) break
+    }
+
+    if (!found) {
+      clearAfterWorkflowNav()
+      clearAllSelections()
+      return
+    }
+
+    const targetRoleTab = statoRuoloField
+      ? (passesRoleTab(found.rec, 'attesa_altri') ? 'attesa_altri' : 'tutte')
+      : activeRoleTab
+
+    if (statoRuoloField && activeRoleTab !== targetRoleTab) setActiveRoleTab(targetRoleTab)
+
+    Object.keys(dsDataRef.current).forEach(id => {
+      const e = dsDataRef.current[id]
+      if (e?.ds) tryClearSelection(e.ds)
+    })
+    notifySelectionCleared()
+
+    setLocalSelectedByDs({ [found.dsId]: found.rid })
+    const entry = dsDataRef.current[found.dsId]
+    if (entry?.ds) trySelectRecord(entry.ds, found.rec, found.rid)
+
+    if (activeGroup) {
+      activeGroup.dsIndices.forEach(di => {
+        const otherId = String(filteredUseDsJs[di]?.dataSourceId || '')
+        if (otherId === found?.dsId) return
+        const otherEntry = dsDataRef.current[otherId]
+        if (otherEntry?.ds) {
+          try { (otherEntry.ds as any).setSelectedRecords?.([found?.rec]) } catch {}
+          try { (otherEntry.ds as any).selectRecordsByIds?.([found?.rid]) } catch {}
+        }
+      })
+    }
+
+    const selectedData = found.rec.getData?.() || {}
+    publishRuntimeSelection({
+      oid: Number(pending.oid),
+      layerUrl: resolvedView?.layerUrl || sessionStorage.getItem('GII_SELECTED_LAYER_URL') || found.dsId,
+      serviceUrl: resolvedView?.serviceUrl || sessionStorage.getItem('GII_SELECTED_SERVICE_URL') || found.dsId,
+      idFieldName: found.idFieldName,
+      viewName: resolvedView?.viewName || sessionStorage.getItem('GII_SELECTED_VIEW_NAME') || getDsLabel({ __label: '' }, 'Vista runtime'),
+      data: selectedData
+    })
+
+    clearAfterWorkflowNav()
+
+    window.setTimeout(() => {
+      try {
+        const el = document.querySelector(`[data-gii-oid="${Number(pending.oid)}"]`) as HTMLElement | null
+        el?.scrollIntoView?.({ block: 'center', behavior: 'smooth' })
+      } catch {}
+    }, 120)
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeGroup, filteredUseDsJs, dsDataVer, logVer, activeRoleTab, statoRuoloField, passesRoleTab, isRecordVisibleForCurrentUser, resolvedView])
 
   // Quando si rientra nell'elenco dopo la modifica di un rapporto, ripristina
   // la selezione del record appena salvato/chiuso. Usiamo un marker separato

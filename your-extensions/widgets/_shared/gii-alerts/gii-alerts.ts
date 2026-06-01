@@ -1133,7 +1133,12 @@ function buildCurrentActivityWhere (user?: GiiUserProfileForAlerts, extraWhere?:
       clauses.push(`(destinatario_username IS NULL OR destinatario_username = '' OR UPPER(destinatario_username) = '${giiSqlString(username.toUpperCase())}')`)
     }
 
-    if (settore) {
+    // Il filtro per settore serve per ruoli effettivamente settoriali (TI/RZ/TR).
+    // RI e DT sono ruoli d'area: devono vedere tutte le attività della propria area,
+    // anche se il record conserva il settore/distretto di provenienza della rilevazione.
+    const roleForSectorFilter = String(role || '').trim().toUpperCase()
+    const mustMatchSector = roleForSectorFilter === 'TI' || roleForSectorFilter === 'RZ' || roleForSectorFilter === 'TR'
+    if (settore && mustMatchSector) {
       clauses.push(`(destinatario_settore IS NULL OR destinatario_settore = '' OR destinatario_settore = '${giiSqlString(settore)}')`)
     }
 

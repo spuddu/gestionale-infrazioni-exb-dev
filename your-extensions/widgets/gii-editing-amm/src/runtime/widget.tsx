@@ -1631,7 +1631,10 @@ function normalizeReportCode (raw: any, oid: number | null): string {
 
 function getReportCode (data: any, oid: number | null): string {
   return normalizeReportCode(
-    pickAttrCI(data || {}, ['codice_rapporto', 'n_rapporto', 'numero_rapporto', 'cod_pratica', 'nrapporto', 'N_RAPPORTO']),
+    pickAttrCI(data || {}, [
+      'numero_rapporto_tecnico', 'NUMERO_RAPPORTO_TECNICO', 'Numero_rapporto_tecnico',
+      'codice_rapporto', 'n_rapporto', 'numero_rapporto', 'cod_pratica', 'nrapporto', 'N_RAPPORTO'
+    ]),
     oid
   )
 }
@@ -1680,14 +1683,14 @@ function isVerbaleNotificato (data: Record<string, any>): boolean {
 function buildPracticeTitle (cfg: any, data: any, oid: number | null): string {
   const rapporto = getReportCode(data || {}, oid)
   const numeroVerbale = verbaleNumberValue(data || {}, oid)
-  if (numeroVerbale) return `Verbale n. ${numeroVerbale} - Rapporto ${rapporto}`
-  return `Verbale in corso di istruttoria - Rapporto ${rapporto}`
+  if (numeroVerbale) return `Verbale n. ${numeroVerbale} - Rapporto tecnico n. ${rapporto}`
+  return `Verbale in corso di istruttoria - Rapporto tecnico n. ${rapporto}`
 }
 
 function buildPracticeTitleParts (data: any, oid: number | null): { prefix: string, reportCode: string, full: string } {
   const reportCode = getReportCode(data || {}, oid)
   const numeroVerbale = verbaleNumberValue(data || {}, oid)
-  const prefix = numeroVerbale ? `Verbale n. ${numeroVerbale} - Rapporto ` : 'Verbale in corso di istruttoria - Rapporto '
+  const prefix = numeroVerbale ? `Verbale n. ${numeroVerbale} - Rapporto tecnico n. ` : 'Verbale in corso di istruttoria - Rapporto tecnico n. '
   return { prefix, reportCode, full: `${prefix}${reportCode}` }
 }
 
@@ -3582,8 +3585,9 @@ function DatiGeneraliAmmSection (props: { title: string, data: Record<string, an
           <div style={panelStyle}>
             <div style={panelTitleStyle}>Fase tecnica</div>
             <div style={gridStyle}>
-              <StatusSummaryItem label='Numero rapporto' value={rapporto} tone='auto' />
-              <StatusSummaryItem label='Data approvazione' value={displayAdminFieldValue(d, props.fields, 'dt_esito_DT')} tone={hasAdminValue(pickAttrCI(d, ['dt_esito_DT'])) ? 'auto' : 'warn'} />
+              <StatusSummaryItem label='Numero rapporto tecnico' value={rapporto} tone='auto' />
+              <StatusSummaryItem label='Data rapporto tecnico' value={displayAdminFieldValue(d, props.fields, 'data_rapporto_tecnico')} tone={hasAdminValue(pickAttrCI(d, ['data_rapporto_tecnico'])) ? 'auto' : 'warn'} />
+              <StatusSummaryItem label='Approvazione DT' value={displayAdminFieldValue(d, props.fields, 'dt_esito_DT')} tone={hasAdminValue(pickAttrCI(d, ['dt_esito_DT'])) ? 'auto' : 'warn'} />
               <StatusSummaryItem label='Area tecnica di provenienza' value={displayAdminFieldValue(d, props.fields, 'area_cod')} tone='auto' />
               <StatusSummaryItem label='Settore' value={displayAdminFieldValue(d, props.fields, 'settore_cod')} tone='auto' />
               <StatusSummaryItem label='Ufficio di zona' value={displayAdminFieldValue(d, props.fields, 'ufficio_zona')} tone='auto' />
