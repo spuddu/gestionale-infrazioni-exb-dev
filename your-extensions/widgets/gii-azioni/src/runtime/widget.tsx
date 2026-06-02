@@ -5716,7 +5716,16 @@ function buildPlaceholderMap (data: any, utentiCache: Map<string, UtenteCached> 
   const origPratica = d.origine_pratica ?? d.Origine_pratica
   const praticaPrefix = (origPratica === 2 || origPratica === '2') ? 'TI' : 'TR'
   const oidVal = d.OBJECTID ?? d.objectid ?? ''
-  const codPratica = oidVal ? `${praticaPrefix}-${oidVal}` : ''
+  const numeroRapportoTecnico = String(pickRapportoAttrCI(d, [
+    'numero_rapporto_tecnico', 'Numero_rapporto_tecnico', 'NUMERO_RAPPORTO_TECNICO',
+    'numero_rapporto', 'Numero_rapporto', 'NUMERO_RAPPORTO',
+    'codice_rapporto', 'Codice_rapporto', 'CODICE_RAPPORTO',
+    'n_rapporto', 'N_RAPPORTO'
+  ]) || '').trim()
+  const numeroRilevazione = oidVal
+    ? `${Number(oidVal)}-${praticaPrefix}${settoreCod ? `-${settoreCod}` : ''}`
+    : ''
+  const codPratica = numeroRapportoTecnico || numeroRilevazione
 
   const dateFrom = (...fields: string[]): string => formatDateIt(firstMeaningfulValue(
     ...fields.map(f => pickRapportoAttrCI(d, [f, f.toUpperCase()]))

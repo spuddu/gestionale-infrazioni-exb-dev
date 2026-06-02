@@ -707,7 +707,7 @@ export default function Setting(props: Props) {
       <Acc id='titolo' label='📝 Titolo dettaglio' open={isOpen('titolo')} onToggle={()=>toggle('titolo')}/>
       {isOpen('titolo') && <div>
         <label style={P.lbl}>Testo prefisso</label>
-        <Inp value={String(cfgJs.detailTitlePrefix || '')} onChange={v=>patch({detailTitlePrefix:v})} placeholder='Dettaglio rapporto n.'/>
+        <Inp value={String(cfgJs.detailTitlePrefix || '')} onChange={v=>patch({detailTitlePrefix:v})} placeholder='Dettaglio pratica selezionata'/>
         <div style={P.titleRow3}>
           <div style={P.compactCell}><label style={P.lbl}>Altezza</label><NumInp compact value={parseNum(cfgJs.detailTitleHeight, 40)} onChange={n=>patch({detailTitleHeight:n})} min={0} unit='px'/></div>
           <div style={P.compactCell}><label style={P.lbl}>Font sz</label><NumInp compact value={parseNum(cfgJs.detailTitleFontSize, 14)} onChange={n=>patch({detailTitleFontSize:n})} min={10} unit='px'/></div>

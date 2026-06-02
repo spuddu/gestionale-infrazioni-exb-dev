@@ -68,13 +68,67 @@ const VIRTUAL_FIELDS: FieldOpt[] = [
   { name:'__tipo_pratica__', alias:'⚙ Tipo pratica (calcolato)', type:'virtual' },
   { name:'__numero_pratica__', alias:'⚙ Numero (calcolato)', type:'virtual' },
   { name:'__numero_verbale_display__', alias:'⚙ N. verbale (calcolato)', type:'virtual' },
-  { name:'__stato_sint__', alias:'⚙ Stato sintetico (calcolato)', type:'virtual' },
-  { name:'__ultimo_agg__', alias:'⚙ Ultimo aggiornamento (calcolato)', type:'virtual' },
-  { name:'__prossima__',   alias:'⚙ Destinatario (calcolato)', type:'virtual' },
+  { name:'__stato_sint__', alias:'⚙ Stato pratica / Il mio stato (calcolato)', type:'virtual' },
+  { name:'__fase_istruttoria__', alias:'⚙ Fase istruttoria (calcolato)', type:'virtual' },
+  { name:'__ultimo_agg__', alias:'⚙ Ultimo aggiornamento sintetico (calcolato)', type:'virtual' },
+  { name:'__causale__',    alias:'⚙ Oggetto / Stato (da LOG)', type:'virtual' },
   { name:'__mittente__',   alias:'⚙ Mittente (da LOG)', type:'virtual' },
-  { name:'__causale__',    alias:'⚙ Causale (da LOG)', type:'virtual' },
-  { name:'__data_msg__',   alias:'⚙ Data messaggio (da LOG)', type:'virtual' },
+  { name:'__prossima__',   alias:'⚙ Destinatario (calcolato)', type:'virtual' },
+  { name:'__data_msg__',   alias:'⚙ Ultimo aggiornamento / Data messaggio (da LOG)', type:'virtual' },
 ]
+
+const FALLBACK_LAYER_FIELDS: FieldOpt[] = [
+  { name:'objectid', alias:'ObjectID', type:'esriFieldTypeOID' },
+  { name:'data_rilevazione', alias:'Data rilevazione', type:'esriFieldTypeDate' },
+  { name:'ufficio_zona', alias:'Ufficio origine', type:'esriFieldTypeString' },
+  { name:'numero_rapporto_tecnico', alias:'Numero rapporto tecnico', type:'esriFieldTypeString' },
+  { name:'data_rapporto_tecnico', alias:'Data rapporto tecnico', type:'esriFieldTypeDate' },
+  { name:'numero_verbale', alias:'Numero verbale', type:'esriFieldTypeString' },
+  { name:'data_verbale', alias:'Data verbale', type:'esriFieldTypeDate' },
+  { name:'origine_pratica', alias:'Origine pratica', type:'esriFieldTypeInteger' },
+  { name:'area_cod', alias:'Area origine', type:'esriFieldTypeString' },
+  { name:'settore_cod', alias:'Settore origine', type:'esriFieldTypeString' },
+  { name:'tecnico_rilevatore', alias:'Tecnico rilevatore', type:'esriFieldTypeString' },
+  { name:'utente_loggato', alias:'Utente loggato', type:'esriFieldTypeString' }
+]
+
+function dedupeFieldOptions (fields: FieldOpt[]): FieldOpt[] {
+  const seen = new Set<string>()
+  const out: FieldOpt[] = []
+  for (const f of fields || []) {
+    const name = String(f?.name || '').trim()
+    if (!name) continue
+    const key = name.toLowerCase()
+    if (seen.has(key)) continue
+    seen.add(key)
+    out.push({ name, alias: String(f?.alias || name), type: f?.type ? String(f.type) : undefined })
+  }
+  return out
+}
+
+function labelForConfiguredField (fieldName: string, columns: ColumnDef[]): string {
+  const hit = (columns || []).find(c => String(c?.field || '').trim().toLowerCase() === fieldName.toLowerCase())
+  return String(hit?.label || fieldName)
+}
+
+function mergeLayerFieldOptions (schemaFields: FieldOpt[], cfg: any, columns: ColumnDef[]): FieldOpt[] {
+  const configuredFieldNames = [
+    cfg?.fieldPratica,
+    cfg?.fieldDataRilevazione,
+    cfg?.fieldUfficio,
+    cfg?.orderByField,
+    ...(columns || []).map(c => c?.field)
+  ]
+    .map(v => String(v || '').trim())
+    .filter(v => v && !v.startsWith('__'))
+    .map(name => ({ name, alias: labelForConfiguredField(name, columns), type: undefined }))
+
+  return dedupeFieldOptions([
+    ...FALLBACK_LAYER_FIELDS,
+    ...configuredFieldNames,
+    ...(schemaFields || [])
+  ]).sort((a, b) => (a.alias || a.name).localeCompare(b.alias || b.name, 'it', { sensitivity: 'base' }))
+}
 
 const BADGE_OGGETTO_KEYS = [
   'oggettoBadgeEnabled',
@@ -296,6 +350,7 @@ export default function Setting(props: Props) {
     if(Array.isArray(cols)&&cols.length>0) return cols.map((c:any)=>({id:String(c.id||`col_${Math.random().toString(36).slice(2,8)}`),label:normalizeColumnLabel(c.label),field:String(c.field||''),width:parseNum(c.width,150)}))
     return DEFAULT_COLUMNS.map(c=>({...c}))
   })()
+  const columnFieldOptions = mergeLayerFieldOptions(fields, cfgJs, columns)
 
   return (
     <div style={P.wrap}>
@@ -313,7 +368,7 @@ export default function Setting(props: Props) {
       <Acc id='colonne' label='📋 Colonne' open={isOpen('colonne')} onToggle={()=>toggle('colonne')}/>
       {isOpen('colonne') && <div>
         <div style={{...P.hint,marginBottom:10}}>Aggiungi, rimuovi e riordina. Trascina ☰ o usa ▲▼.</div>
-        <ColumnManager columns={columns} allFields={fields} onChange={newCols=>update('columns',normalizeColumnsForSave(newCols))}/>
+        <ColumnManager columns={columns} allFields={columnFieldOptions} onChange={newCols=>update('columns',normalizeColumnsForSave(newCols))}/>
       </div>}
 
       <Acc id='query' label='🔍 Query e ordinamento' open={isOpen('query')} onToggle={()=>toggle('query')}/>
@@ -325,7 +380,7 @@ export default function Setting(props: Props) {
           <div><label style={P.lbl}>Direzione</label><Sel value={String(cfg.orderByDir||'DESC')} onChange={v=>update('orderByDir',v)} options={[{value:'DESC',label:'DESC'},{value:'ASC',label:'ASC'}]}/></div>
         </div>
         <label style={P.lbl}>Ordina per</label>
-        <FieldSel value={cfg.orderByField} fields={fields} onChange={v=>update('orderByField',v)} placeholder='objectid'/>
+        <FieldSel value={cfg.orderByField} fields={columnFieldOptions} onChange={v=>update('orderByField',v)} placeholder='objectid'/>
         <Check value={cfg.showHeader!==false} onChange={v=>update('showHeader',v)} label='Mostra intestazioni colonne'/>
       </div>}
 

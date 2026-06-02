@@ -56,6 +56,42 @@ function normalizeSettoreCod (v: any): string {
   return SETTORE_NUM[s] != null ? s : s
 }
 
+
+const AREA_LABEL: Record<string, string> = {
+  AMM: 'Amministrativa',
+  AGR: 'Agraria',
+  TEC: 'Tecnica'
+}
+
+const SETTORE_LABEL: Record<string, string> = {
+  CR: 'Catasto, Ruoli e Servizi Territoriali',
+  GI: 'Gestione irrigua',
+  D1: "Distretto 1 (Quartu Sant'Elena/Villaputzu/Muravera – San Sperate)",
+  D2: 'Distretto 2 (Serramanna/Pimpisu)',
+  D3: 'Distretto 3 (San Gavino - Villacidro)',
+  D4: 'Distretto 4 (Basso Sulcis)',
+  D5: 'Distretto 5 (Senorbì)',
+  D6: 'Distretto 6 (Cixerri)',
+  DS: 'Manutenzione opere di dreno e di scolo'
+}
+
+function formatAreaLabel (raw: any): string {
+  if (raw == null || raw === '') return '—'
+  const code = normalizeAreaCod(raw)
+  return AREA_LABEL[code] || String(raw)
+}
+
+function formatSettoreLabel (raw: any): string {
+  if (raw == null || raw === '') return '—'
+  const code = normalizeSettoreCod(raw)
+  return SETTORE_LABEL[code] || String(raw)
+}
+
+function formatUfficioLabel (raw: any): string {
+  if (raw == null || raw === '') return '—'
+  return String(raw)
+}
+
 function normalizeLogFieldNameSet (fields: any[]): Set<string> {
   return new Set((fields || []).map((f: any) => String(f?.name || '').trim()).filter(Boolean))
 }
@@ -1051,6 +1087,30 @@ function formatDateSafe (v: any): string {
   }
 }
 
+function formatDateTimeSafe (v: any): string {
+  if (v == null || v === '') return '—'
+  try {
+    const s = String(v).trim()
+    const n = Number(s)
+    let d: Date | null = null
+    if (Number.isFinite(n) && n > 0) {
+      const ms = /^\d{10}$/.test(s) ? (n * 1000) : n
+      d = new Date(ms)
+    } else {
+      d = new Date(s)
+    }
+    if (!d || Number.isNaN(d.getTime())) return String(v)
+    const dd = String(d.getDate()).padStart(2, '0')
+    const mm = String(d.getMonth() + 1).padStart(2, '0')
+    const yy = String(d.getFullYear())
+    const hh = String(d.getHours()).padStart(2, '0')
+    const mi = String(d.getMinutes()).padStart(2, '0')
+    return `${dd}/${mm}/${yy}, ${hh}:${mi}`
+  } catch {
+    return String(v)
+  }
+}
+
 function isLongTextFieldName (fieldName: string): boolean {
   const k = normKey(fieldName)
   return k.includes('descrizione fatti') || k.includes('descrizione_fatti') || k.includes('circostanze')
@@ -1461,6 +1521,56 @@ function ReadOnlyPanel (props: {
   )
 }
 
+
+
+function GeneralCompactRow (props: { label: string; value: any; dateLabel?: string; dateValue?: any; singleValue?: boolean }) {
+  const valueText = props.value == null || props.value === '' ? '—' : String(props.value)
+  const dateText = props.dateValue == null || props.dateValue === '' ? '—' : String(props.dateValue)
+  return (
+    <div style={{
+      display: 'grid',
+      gridTemplateColumns: props.singleValue ? '145px 1fr' : '145px minmax(120px, 1fr) 78px minmax(150px, 0.85fr)',
+      columnGap: 10,
+      rowGap: 4,
+      alignItems: 'center',
+      padding: '7px 0',
+      borderBottom: '1px solid rgba(0,0,0,0.07)',
+      minWidth: 0
+    }}>
+      <div style={{ fontSize: 12, color: '#6b7280', fontWeight: 700, lineHeight: 1.25, minWidth: 0 }}>{props.label}</div>
+      <div style={{ fontSize: 13, color: '#1f2937', fontWeight: 700, whiteSpace: props.singleValue ? 'normal' : 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', minWidth: 0 }} title={valueText}>{valueText}</div>
+      {!props.singleValue && <div style={{ fontSize: 12, color: '#6b7280', fontWeight: 700, textAlign: 'right' }}>{props.dateLabel || 'Data e ora:'}</div>}
+      {!props.singleValue && <div style={{ fontSize: 13, color: '#1f2937', fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', minWidth: 0 }} title={dateText}>{dateText}</div>}
+    </div>
+  )
+}
+
+function GeneralCompactPanel (props: {
+  area: string
+  settore: string
+  ufficio: string
+  numeroRilevazione: string
+  dataRilevazione: string
+  numeroRapporto: string
+  dataRapporto: string
+  numeroVerbale: string
+  dataVerbale: string
+}) {
+  return (
+    <div style={{ width: '100%', boxSizing: 'border-box', display: 'flex', flexDirection: 'column', minHeight: 0 }}>
+      <DetailSectionCard title="Dati generali">
+        <div style={{ display: 'grid', gap: 0 }}>
+          <GeneralCompactRow label="Area" value={props.area} singleValue />
+          <GeneralCompactRow label="Settore" value={props.settore} singleValue />
+          <GeneralCompactRow label="Ufficio" value={props.ufficio} singleValue />
+          <GeneralCompactRow label="Rilevazione n." value={props.numeroRilevazione} dateLabel="Data e ora:" dateValue={props.dataRilevazione} />
+          <GeneralCompactRow label="Rapporto n." value={props.numeroRapporto} dateLabel="Data e ora:" dateValue={props.dataRapporto} />
+          <GeneralCompactRow label="Verbale n." value={props.numeroVerbale} dateLabel="Data e ora:" dateValue={props.dataVerbale} />
+        </div>
+      </DetailSectionCard>
+    </div>
+  )
+}
 
 
 function normalizeLayerUrlForMatch (raw: any): string {
@@ -2061,6 +2171,49 @@ const ITER_TECHNICAL_MODIFIED_FIELDS = new Set([
   'GII_a',
   'GII_dt',
   'GII_arch',
+
+  // Metadati automatici di assegnazione: sono già rappresentati da evento/destinatario
+  // dell'iter e non devono comparire tra i campi effettivamente modificati dall'operatore.
+  'ti_assegnato_username',
+  'ti_assegnato_nome',
+  'ti_assegnato_da',
+  'dt_assegnazione_ti',
+  'ti_amm_assegnato_username',
+  'ti_amm_assegnato_nome',
+  'ti_amm_assegnato_da',
+  'dt_assegnazione_ti_amm',
+
+  // Numerazioni e date formali assegnate automaticamente dalle azioni di workflow:
+  // restano visibili nei Dati generali / nell'evento di iter, ma non sono campi
+  // editati manualmente dall'operatore e quindi non vanno elencati tra i campi modificati.
+  'numero_rapporto_tecnico',
+  'data_rapporto_tecnico',
+  'numero_verbale',
+  'data_verbale',
+
+  // Campi automatici di stato/esito/presa in carico del workflow.
+  'stato_TR',
+  'stato_TI',
+  'stato_RZ',
+  'stato_RI',
+  'stato_DT',
+  'stato_DA',
+  'dt_stato_TR',
+  'dt_stato_TI',
+  'dt_stato_RZ',
+  'dt_stato_RI',
+  'dt_stato_DT',
+  'dt_stato_DA',
+  'esito_DT',
+  'esito_DA',
+  'dt_esito_DT',
+  'dt_esito_DA',
+  'dt_presa_in_carico_TI',
+  'dt_presa_in_carico_RZ',
+  'dt_presa_in_carico_RI',
+  'dt_presa_in_carico_DT',
+  'dt_presa_in_carico_DA',
+
   'ns_importo_spese_generali',
   'ns_ricalcolata_il',
   'ns_spese_generali_perc',
@@ -2074,7 +2227,21 @@ const ITER_TECHNICAL_MODIFIED_FIELDS = new Set([
 
 const ITER_TECHNICAL_MODIFIED_ALIASES = new Set([
   'Rim.',
-  'Trasm.'
+  'Trasm.',
+  'TI assegnato da',
+  'TI AMM assegnato da',
+  'Assegnazione TI effettuata da',
+  'Assegnazione TI AMM effettuata da',
+  'Numero rapporto tecnico',
+  'Data rapporto tecnico',
+  'Numero verbale',
+  'Data verbale',
+  'Username TI assegnato',
+  'Username TI AMM assegnato',
+  'TI assegnato',
+  'TI AMM assegnato',
+  'Data assegnazione TI',
+  'Data assegnazione TI AMM'
 ].map(normKey))
 
 function isTechnicalIterModifiedField (raw: any, alias?: any): boolean {
@@ -2254,7 +2421,7 @@ function CicliTimeline (props: { globalId: string; hasSel: boolean; sortDir: 'as
     return sortCicliForDisplay(synthetic ? [...cicli, synthetic] : cicli, props.sortDir)
   }, [cicli, props.data, props.sortDir])
 
-  if (!props.hasSel) return <div style={{ opacity: 0.6, fontSize: 12, padding: 12 }}>Selezionare un rapporto.</div>
+  if (!props.hasSel) return <div style={{ opacity: 0.6, fontSize: 12, padding: 12 }}>Selezionare una pratica.</div>
   if (loading) return <div style={{ opacity: 0.6, fontSize: 12, padding: 12 }}>Caricamento cronologia…</div>
   if (error) return <div style={{ color: '#b42318', fontSize: 12, padding: 12 }}>{error}</div>
   if (displayCicli.length === 0) return <div style={{ opacity: 0.6, fontSize: 12, padding: 12 }}>Nessun evento registrato per questo rapporto.</div>
@@ -2342,12 +2509,10 @@ function CicliTimeline (props: { globalId: string; hasSel: boolean; sortDir: 'as
                   </div>
                   <div style={{ display: 'grid', gridTemplateColumns: 'minmax(150px, 220px) minmax(0, 1fr)', gap: 12, marginTop: 6 }}>
                     <span />
-                    <div style={{ border: '1px solid rgba(209,213,219,0.95)', borderRadius: 8, padding: '6px 8px', background: '#fff', display: 'flex', flexWrap: 'wrap', gap: '4px 12px' }}>
-                      {campiList.map((campo, ci) => (
-                        <span key={ci} style={{ fontSize: 11, color: '#374151', lineHeight: 1.35 }}>
-                          {campo}
-                        </span>
-                      ))}
+                    <div style={{ border: '1px solid rgba(209,213,219,0.95)', borderRadius: 8, padding: '6px 8px', background: '#fff' }}>
+                      <span style={{ fontSize: 11, color: '#374151', lineHeight: 1.35, whiteSpace: 'normal' }}>
+                        {campiList.join('; ')}
+                      </span>
                     </div>
                   </div>
                 </div>
@@ -2817,7 +2982,7 @@ function NotaSpeseDetailPanel (props: { data: any; detailUrl: string; hasSel: bo
     )
   }
 
-  if (!props.hasSel) return <div style={{ opacity: 0.75, fontSize: 12 }}>Selezionare un rapporto per vedere la nota spese.</div>
+  if (!props.hasSel) return <div style={{ opacity: 0.75, fontSize: 12 }}>Selezionare una pratica per vedere la nota spese.</div>
   if (!parentGlobalId) {
     return (
       <div style={{ padding: 12, borderRadius: 10, border: '1px solid #f5b8b8', background: '#fce4e4', color: '#7a1c1c' }}>
@@ -2932,15 +3097,21 @@ function DetailTabsPanel (props: {
   const oid = active?.state?.oid ?? null
   const hasSel = oid != null && Number.isFinite(oid)
 
-  // Codice pratica per il titolo
-  const praticaCode = React.useMemo(() => {
-    if (!hasSel || !data) return ''
-    const op = data.origine_pratica ?? data.Origine_pratica ?? data.ORIGINE_PRATICA
-    let prefix = 'TR'
-    if (op === 2 || op === '2' || String(op).toUpperCase() === 'TI') prefix = 'TI'
-    else if (op === 1 || op === '1' || String(op).toUpperCase() === 'TR') prefix = 'TR'
-    return `${prefix}-${oid}`
+  const numeroRilevazione = React.useMemo(() => {
+    if (!hasSel || !data || oid == null) return ''
+    const origin = normalizeOriginePraticaCod(pickAttrCI(data, ['origine_pratica', 'Origine_pratica', 'ORIGINE_PRATICA'])) || 'TR'
+    const settore = normalizeSettoreCod(pickAttrCI(data, ['settore_cod', 'Settore_cod', 'SETTORE_COD', 'settore', 'cod_settore']))
+    const base = String(oid)
+    return settore ? `${base}-${origin}-${settore}` : `${base}-${origin}`
   }, [hasSel, data, oid])
+
+  const numeroRapportoTecnico = React.useMemo(() => {
+    return String(pickAttrCI(data, ['numero_rapporto_tecnico', 'Numero_rapporto_tecnico', 'NUMERO_RAPPORTO_TECNICO']) || '').trim()
+  }, [data])
+
+  const numeroVerbale = React.useMemo(() => {
+    return String(pickAttrCI(data, ['numero_verbale', 'Numero_verbale', 'NUMERO_VERBALE']) || '').trim()
+  }, [data])
 
   const [tab, setTab] = React.useState<string>(tabs[0]?.id || 'anagrafica')
   const [iterSortDir, setIterSortDir] = React.useState<'asc' | 'desc' | null>(null)
@@ -3526,9 +3697,25 @@ const isPgOnlyField = React.useCallback((fieldName: string) => {
     )
   }, [getRawField, getRawFieldWithName, getFieldLabel, splitMultiValues, fieldTypeMap, getSurveyChoiceLabel, renderAltraViolazioneLine, renderViolationGroup, renderViolationSurfacesLine, renderViolationTextLine])
 
-  const generalRows = React.useMemo(() => {
-    return makeRows(DETAIL_GENERAL_FIELDS, 'generali', false)
-  }, [makeRows])
+  const generalSummary = React.useMemo(() => {
+    const areaRaw = pickAttrCI(data, ['area_cod', 'Area_cod', 'AREA_COD', 'area'])
+    const settoreRaw = pickAttrCI(data, ['settore_cod', 'Settore_cod', 'SETTORE_COD', 'settore', 'cod_settore'])
+    const ufficioRaw = pickAttrCI(data, ['ufficio_zona', 'Ufficio_zona', 'UFFICIO_ZONA', 'ufficio'])
+    const dataRil = pickAttrCI(data, ['data_rilevazione', 'Data_rilevazione', 'DATA_RILEVAZIONE', 'data_firma', 'CreationDate', 'creationdate'])
+    const dataRap = pickAttrCI(data, ['data_rapporto_tecnico', 'Data_rapporto_tecnico', 'DATA_RAPPORTO_TECNICO'])
+    const dataVerb = pickAttrCI(data, ['data_verbale', 'Data_verbale', 'DATA_VERBALE'])
+    return {
+      area: formatAreaLabel(getFieldLabel('area_cod', areaRaw)),
+      settore: formatSettoreLabel(getFieldLabel('settore_cod', settoreRaw)),
+      ufficio: formatUfficioLabel(getFieldLabel('ufficio_zona', ufficioRaw)),
+      numeroRilevazione: numeroRilevazione || '—',
+      dataRilevazione: formatDateTimeSafe(dataRil),
+      numeroRapporto: numeroRapportoTecnico || '—',
+      dataRapporto: formatDateTimeSafe(dataRap),
+      numeroVerbale: numeroVerbale || '—',
+      dataVerbale: formatDateTimeSafe(dataVerb)
+    }
+  }, [data, numeroRilevazione, numeroRapportoTecnico, numeroVerbale, getFieldLabel])
 
   const [selectedPointGeometryState, setSelectedPointGeometryState] = React.useState<{ oid: number | null, geometry: any | null } | null>(null)
   const selectedPointGeometry = React.useMemo(() => {
@@ -3727,7 +3914,7 @@ let content: React.ReactNode = null
 if (!hasSel) {
   content = (
     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', minHeight: 200, fontWeight: 700, fontSize: 14, color: 'rgba(0,0,0,0.6)' }}>
-      Selezionare un rapporto nell’elenco
+      Selezionare una pratica nell’elenco
     </div>
   )
 } else {
@@ -3745,7 +3932,7 @@ if (!hasSel) {
         <ReadOnlyPanel
           title="Luoghi e dati"
           rows={luoghiDatiRows}
-          emptyText={hasSel ? 'Dati luogo non disponibili.' : 'Selezionare un rapporto.'}
+          emptyText={hasSel ? 'Dati luogo non disponibili.' : 'Selezionare una pratica.'}
         />
       )
     } else if (activeTab.id === 'allegati') {
@@ -3768,7 +3955,7 @@ if (!hasSel) {
       content = (
         <div style={{ marginTop: 0 }}>
           {!hasSel && (
-            <div style={{ opacity: 0.75, fontSize: 12 }}>Selezionare un rapporto per vedere gli allegati.</div>
+            <div style={{ opacity: 0.75, fontSize: 12 }}>Selezionare una pratica per vedere gli allegati.</div>
           )}
 
           {hasSel && attachmentsLoading && (
@@ -3853,7 +4040,7 @@ if (!hasSel) {
         <div style={{ flex: '1 1 auto', minHeight: 0, display: 'flex', flexDirection: 'column' }}>
           {!hasSel ? (
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: 200, opacity: 0.6, fontSize: 12 }}>
-              Selezionare un rapporto per visualizzare la mappa.
+              Selezionare una pratica per visualizzare la mappa.
             </div>
           ) : (
             <MapTabContent oid={selectedOid} layerUrl={mapLayerUrl} hasSel={hasSel} mapCfg={props.mapCfg} selectionSig={active?.state?.sig}/>
@@ -3871,7 +4058,7 @@ if (!hasSel) {
           <ReadOnlyPanel
             title={activeTab.id === 'anagrafica' ? 'Trasgressore' : String(activeTab.label || '')}
             rows={rows}
-            emptyText={hasSel ? 'Nessun campo configurato per questa tab.' : 'Selezionare un rapporto.'}
+            emptyText={hasSel ? 'Nessun campo configurato per questa tab.' : 'Selezionare una pratica.'}
           />
           )
     }
@@ -3897,11 +4084,11 @@ return (
       <span style={{
         fontSize: ui.detailTitleFontSize ?? 14,
         fontWeight: ui.detailTitleFontWeight ?? 600,
-        color: hasSel && praticaCode
+        color: hasSel
           ? (ui.detailTitleColor ?? 'rgba(0,0,0,0.85)')
           : 'rgba(0,0,0,0.40)'
       }}>
-        {String(ui.detailTitlePrefix ?? 'Dettaglio rapporto n.')} {hasSel && praticaCode ? praticaCode : '–'}
+        {String(ui.detailTitlePrefix ?? 'Dettaglio pratica selezionata')}
       </span>
       {!hasSel && (
         <span style={{
@@ -3918,15 +4105,21 @@ return (
     <div style={frameStyle}>
       {!hasSel ? (
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', minHeight: 200, fontWeight: 700, fontSize: 14, color: 'rgba(0,0,0,0.6)' }}>
-          Selezionare un rapporto nell'elenco
+          Selezionare una pratica nell'elenco
         </div>
       ) : (
         <>
           <div style={{ padding: '10px 0 0' }}>
-            <ReadOnlyPanel
-              title="Dati generali"
-              rows={generalRows}
-              emptyText="Dati generali non disponibili."
+            <GeneralCompactPanel
+              area={generalSummary.area}
+              settore={generalSummary.settore}
+              ufficio={generalSummary.ufficio}
+              numeroRilevazione={generalSummary.numeroRilevazione}
+              dataRilevazione={generalSummary.dataRilevazione}
+              numeroRapporto={generalSummary.numeroRapporto}
+              dataRapporto={generalSummary.dataRapporto}
+              numeroVerbale={generalSummary.numeroVerbale}
+              dataVerbale={generalSummary.dataVerbale}
             />
           </div>
           <div style={tabsStyle}>{TabsBar}</div>

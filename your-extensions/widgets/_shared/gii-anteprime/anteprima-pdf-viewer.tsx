@@ -780,9 +780,8 @@ const btnStyle: React.CSSProperties = {
 
 const closeBtnStyle: React.CSSProperties = {
   ...btnStyle,
-  background: '#dc2626',
-  border: '1px solid #b91c1c',
-  boxShadow: '0 0 0 1px rgba(255,255,255,0.10) inset'
+  background: '#1d4ed8',
+  border: '1px solid #1d4ed8'
 }
 
 const closeBtnTextStyle: React.CSSProperties = {

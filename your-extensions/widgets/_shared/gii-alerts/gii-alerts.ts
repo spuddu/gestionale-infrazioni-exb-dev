@@ -256,13 +256,18 @@ function isDefinedClosed (value: any): boolean {
 }
 
 function getReportCode (data: Record<string, any>, oid: number | null): string {
-  const code = attr(data, ['n_rapporto', 'numero_rapporto', 'codice_rapporto', 'cod_pratica', 'rapporto', 'num_rapporto'])
+  const code = attr(data, ['numero_rapporto_tecnico', 'n_rapporto', 'numero_rapporto', 'codice_rapporto', 'cod_pratica', 'rapporto', 'num_rapporto'])
   if (hasValue(code)) {
     const text = String(code).trim()
     return /^rapporto\b/i.test(text) ? text : `Rapporto ${text}`
   }
-  return oid != null ? `Rapporto TR-${oid}` : 'Rapporto'
+  const op = attr(data, ['origine_pratica'])
+  const prefix = String(op ?? '').trim() === '2' || String(op ?? '').trim().toUpperCase() === 'TI' ? 'TI' : 'TR'
+  const settore = String(attr(data, ['settore_cod', 'settore']) || '').trim().toUpperCase()
+  if (oid != null) return settore ? `Rilevazione ${oid}-${prefix}-${settore}` : `Rilevazione ${oid}-${prefix}`
+  return 'Rilevazione'
 }
+
 
 function getParentObjectId (data: Record<string, any>): number | null {
   const v = attr(data, ['objectid', 'OBJECTID'])
@@ -590,7 +595,7 @@ function takeChargeTextFromElencoLogic (
   }
 
   if (label === 'RILEVAZIONE RESPINTA') {
-    return { title: 'Rilevazione respinta', message: `Rilevazione respinta relativa al rapporto n. ${n} da prendere in carico.` }
+    return { title: 'Rilevazione respinta', message: `Rilevazione respinta n. ${n} da prendere in carico.` }
   }
 
   if (label === 'ISTRUTTORIA TECNICA RESPINTA') {
@@ -1171,7 +1176,7 @@ function currentActivityToAlert (row: Record<string, any>): GiiAlertItem | null 
   const parentObjectIdNum = Number(parentObjectIdRaw)
   const parentObjectId = Number.isFinite(parentObjectIdNum) ? parentObjectIdNum : null
   const numero = String(attr(row, ['numero_rapporto']) || '').trim()
-  const reportCode = numero || (parentObjectId != null ? `TR-${parentObjectId}` : '—')
+  const reportCode = numero || (parentObjectId != null ? `${parentObjectId}-TR` : '—')
   const chiave = String(attr(row, ['chiave_attivita']) || '').trim()
   const rawGlobalId = String(attr(row, ['GlobalID', 'globalid']) || '').trim()
   const keyBase = parentGlobalId || rawGlobalId || chiave

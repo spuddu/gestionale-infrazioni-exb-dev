@@ -17,9 +17,14 @@ export interface TabFields {
 }
 
 export const DETAIL_GENERAL_FIELDS: string[] = [
-  'tecnico_rilevatore',
+  'area_cod',
+  'settore_cod',
   'ufficio_zona',
-  'data_rilevazione'
+  'data_rilevazione',
+  'numero_rapporto_tecnico',
+  'data_rapporto_tecnico',
+  'numero_verbale',
+  'data_verbale'
 ]
 
 export const DETAIL_DEFAULT_TAB_FIELDS: TabFields = {
@@ -236,7 +241,7 @@ export const defaultConfig: Config = {
   msgFontSize: 15,
 
   // Titolo pratica
-  detailTitlePrefix: 'Dettaglio rapporto n.',
+  detailTitlePrefix: 'Dettaglio pratica selezionata',
   detailTitleHeight: 40,
   detailTitlePaddingBottom: 10,
   detailTitlePaddingLeft: 0,

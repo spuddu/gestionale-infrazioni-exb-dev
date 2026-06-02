@@ -4417,28 +4417,8 @@ function giiReadLayoutSidebarBoundaryX (host: HTMLElement | null): number | null
   return null
 }
 
-function giiReadLayoutSidebarDefaultBoundaryX (host: HTMLElement | null): number | null {
-  if (!host) return null
-  try {
-    let cur: HTMLElement | null = host.parentElement
-    while (cur && cur !== document.body) {
-      if ((cur.className || '').includes('widget-sidebar-layout')) {
-        const inner = cur.children[0] as HTMLElement | undefined
-        const normal = Array.from(inner?.children || []).find(c => c.className.includes('side-normal')) as HTMLElement | undefined
-        if (!normal?.contains(host)) { cur = cur.parentElement; continue }
-        const r = cur.getBoundingClientRect()
-        if (!Number.isFinite(r.left) || !Number.isFinite(r.width) || r.width <= 0) return null
-        // Default del Builder: 50% della Sidebar orizzontale.
-        return r.left + (r.width / 2)
-      }
-      cur = cur.parentElement
-    }
-  } catch {}
-  return null
-}
-
-function giiMoveNearestLayoutSidebarToX (host: HTMLElement | null, targetX: number | null): void {
-  if (!host || targetX == null || !Number.isFinite(Number(targetX))) return
+function giiResetNearestLayoutSidebar (host: HTMLElement | null): void {
+  if (!host) return
   try {
     let cur: HTMLElement | null = host.parentElement
     while (cur && cur !== document.body) {
@@ -4449,8 +4429,10 @@ function giiMoveNearestLayoutSidebarToX (host: HTMLElement | null, targetX: numb
         if (!normal?.contains(host)) { cur = cur.parentElement; continue }
         const divider = inner.children[1] as HTMLElement | undefined
         if (!divider) return
+        const cr = cur.getBoundingClientRect()
         const dr = divider.getBoundingClientRect()
         const startX = dr.left + dr.width / 2
+        const targetX = cr.left + cr.width * 0.5
         const y = dr.top + dr.height / 2
         const fire = (target: EventTarget, type: string, x: number, buttons: number) => {
           const opts = { bubbles: true, cancelable: true, clientX: x, clientY: y, screenX: x, screenY: y, button: 0, buttons }
@@ -4460,10 +4442,10 @@ function giiMoveNearestLayoutSidebarToX (host: HTMLElement | null, targetX: numb
         fire(divider, 'pointerdown', startX, 1)
         const steps = 12
         for (let i = 1; i <= steps; i++) {
-          const x = startX + ((Number(targetX) - startX) * i / steps)
+          const x = startX + ((targetX - startX) * i / steps)
           fire(document, 'pointermove', x, 1)
         }
-        fire(document, 'pointerup', Number(targetX), 0)
+        fire(document, 'pointerup', targetX, 0)
         return
       }
       cur = cur.parentElement
@@ -4721,73 +4703,80 @@ function NuovaPraticaForm (p: {
 
   const npTabSyncElRef = React.useRef<HTMLDivElement | null>(null)
 
-  // Eleva il ramo del widget editing solo mentre è attiva la scheda Luoghi e dati.
-  // Non modifica larghezze/flex della Sidebar ExB: serve solo a non far coprire il reset dalla mappa.
+  // Eleva lo stacking context del widget editing sopra il widget mappa.
+  // Si ferma al primo nodo widget-sidebar-layout per non rompere il resize handle.
   React.useEffect(() => {
-    if (npTab !== 'dati_tecnici') return
     const touched: Array<{ el: HTMLElement; zIndex: string; overflow: string; overflowX: string; overflowY: string; position: string }> = []
-    const touch = (el: HTMLElement) => {
+    const lift = (el: HTMLElement) => {
+      const st = window.getComputedStyle(el)
+      // Salta nodi che non hanno overflow nascosto — non servono
+      if (st.overflow === 'visible' && st.overflowX === 'visible' && st.overflowY === 'visible' && st.zIndex !== 'auto') return
+      touched.push({ el, zIndex: el.style.zIndex, overflow: el.style.overflow, overflowX: el.style.overflowX, overflowY: el.style.overflowY, position: el.style.position })
+      if (st.position === 'static') el.style.position = 'relative'
+      el.style.setProperty('z-index', '2147483000', 'important')
+      el.style.setProperty('overflow', 'visible', 'important')
+    }
+    const doLift = () => {
       try {
-        const st = window.getComputedStyle(el)
-        touched.push({
-          el,
-          zIndex: el.style.zIndex,
-          overflow: el.style.overflow,
-          overflowX: el.style.overflowX,
-          overflowY: el.style.overflowY,
-          position: el.style.position
-        })
-        if (st.position === 'static') el.style.position = 'relative'
-        el.style.setProperty('z-index', '2147483000', 'important')
-        el.style.setProperty('overflow', 'visible', 'important')
-        el.style.setProperty('overflow-x', 'visible', 'important')
-        el.style.setProperty('overflow-y', 'visible', 'important')
+        let cur = npTabSyncElRef.current?.parentElement ?? null
+        while (cur && cur !== document.body) {
+          const cls = cur.className || ''
+          // Fermati appena raggiungi il container della sidebar ExB
+          if (cls.includes('widget-sidebar-layout')) break
+          lift(cur)
+          cur = cur.parentElement
+        }
       } catch {}
     }
-    try {
-      let cur = npTabSyncElRef.current?.parentElement ?? null
-      while (cur && cur !== document.body) {
-        const cls = String(cur.className || '')
-        // Non oltrepassare il contenitore Sidebar: altrimenti si alterano anche altri rami della pagina.
-        if (cls.includes('widget-sidebar-layout')) break
-        touch(cur)
-        cur = cur.parentElement
-      }
-    } catch {}
+    const t1 = window.setTimeout(doLift, 0)
+    const t2 = window.setTimeout(doLift, 300)
+    const t3 = window.setTimeout(doLift, 1000)
     return () => {
+      window.clearTimeout(t1)
+      window.clearTimeout(t2)
+      window.clearTimeout(t3)
       for (const item of touched.reverse()) {
         try {
-          item.el.style.zIndex = item.zIndex
-          item.el.style.overflow = item.overflow
-          item.el.style.overflowX = item.overflowX
-          item.el.style.overflowY = item.overflowY
-          item.el.style.position = item.position
+          item.el.style.removeProperty('z-index')
+          item.el.style.removeProperty('overflow')
+          item.el.style.removeProperty('overflow-x')
+          item.el.style.removeProperty('overflow-y')
+          if (item.zIndex) item.el.style.zIndex = item.zIndex
+          if (item.overflow) item.el.style.overflow = item.overflow
+          if (item.overflowX) item.el.style.overflowX = item.overflowX
+          if (item.overflowY) item.el.style.overflowY = item.overflowY
+          if (item.position) item.el.style.position = item.position
         } catch {}
       }
     }
-  }, [npTab])
+  }, [])
 
   const [datiTecniciSidebarDirty, setDatiTecniciSidebarDirty] = React.useState(false)
   const datiTecniciBaselineXRef = React.useRef<number | null>(null)
-  const datiTecniciDefaultBoundaryXRef = React.useRef<number | null>(null)
-  const datiTecniciAutoResettingRef = React.useRef(false)
   const datiTecniciUserDraggingRef = React.useRef(false)
   const datiTecniciSidebarElRef = React.useRef<{ left: HTMLElement; right: HTMLElement } | null>(null)
   const datiTecniciDividerRef = React.useRef<HTMLElement | null>(null)
 
-  // Trova i pannelli della Sidebar solo quando serve la scheda Luoghi e dati.
-  React.useEffect(() => {
-    if (npTab !== 'dati_tecnici') {
-      datiTecniciSidebarElRef.current = null
-      datiTecniciDividerRef.current = null
-      return
+  const computeDatiTecniciBaseline = React.useCallback((): number | null => {
+    const host = npTabSyncElRef.current
+    if (!host) return null
+    let cur: HTMLElement | null = host.parentElement
+    while (cur && cur !== document.body) {
+      if ((cur.className || '').includes('widget-sidebar-layout')) {
+        const inner = cur.children[0] as HTMLElement
+        const normal = Array.from(inner?.children || []).find(c => c.className.includes('side-normal')) as HTMLElement | undefined
+        if (normal?.contains(host)) {
+          const r = cur.getBoundingClientRect()
+          return r.width > 0 ? r.left + r.width * 0.5 : null
+        }
+      }
+      cur = cur.parentElement
     }
-    let dividerEl: HTMLElement | null = null
-    const onPointerDown = () => { datiTecniciUserDraggingRef.current = true }
-    const onPointerUp = () => { datiTecniciUserDraggingRef.current = false }
-    let oldDividerZ = ''
-    let oldDividerPosition = ''
+    return null
+  }, [])
 
+  // Trova e memorizza i pannelli della sidebar una volta al mount
+  React.useEffect(() => {
     const findPanels = () => {
       try {
         let cur = npTabSyncElRef.current?.parentElement ?? null
@@ -4800,13 +4789,11 @@ function NuovaPraticaForm (p: {
             if (normal?.contains(npTabSyncElRef.current) && collapsable && divider) {
               datiTecniciSidebarElRef.current = { left: normal, right: collapsable }
               datiTecniciDividerRef.current = divider
-              dividerEl = divider
-              oldDividerZ = divider.style.zIndex
-              oldDividerPosition = divider.style.position
+              // Eleva la maniglia sopra il widget editing (2147483000) ma sotto il pulsante (2147483647)
               divider.style.setProperty('z-index', '2147483646', 'important')
               divider.style.setProperty('position', 'relative', 'important')
-              divider.addEventListener('pointerdown', onPointerDown)
-              window.addEventListener('pointerup', onPointerUp)
+              divider.addEventListener('pointerdown', () => { datiTecniciUserDraggingRef.current = true })
+              window.addEventListener('pointerup', () => { datiTecniciUserDraggingRef.current = false })
             }
             return true
           }
@@ -4815,25 +4802,12 @@ function NuovaPraticaForm (p: {
       } catch {}
       return false
     }
-
-    const found = findPanels()
-    const t1 = found ? 0 : window.setTimeout(findPanels, 300)
-    const t2 = found ? 0 : window.setTimeout(findPanels, 1000)
-    return () => {
-      if (t1) window.clearTimeout(t1)
-      if (t2) window.clearTimeout(t2)
-      try { dividerEl?.removeEventListener('pointerdown', onPointerDown) } catch {}
-      try { window.removeEventListener('pointerup', onPointerUp) } catch {}
-      try {
-        if (dividerEl) {
-          dividerEl.style.zIndex = oldDividerZ
-          dividerEl.style.position = oldDividerPosition
-        }
-      } catch {}
-      datiTecniciSidebarElRef.current = null
-      datiTecniciDividerRef.current = null
+    if (!findPanels()) {
+      const t1 = window.setTimeout(findPanels, 300)
+      const t2 = window.setTimeout(findPanels, 1000)
+      return () => { window.clearTimeout(t1); window.clearTimeout(t2) }
     }
-  }, [npTab])
+  }, [])
 
   React.useEffect(() => {
     if (npTab !== 'dati_tecnici') {
@@ -4841,69 +4815,54 @@ function NuovaPraticaForm (p: {
       return
     }
 
-    let cancelled = false
-    const readX = () => giiReadLayoutSidebarBoundaryX(npTabSyncElRef.current)
-    const defaultX = () => giiReadLayoutSidebarDefaultBoundaryX(npTabSyncElRef.current)
+    // Imposta baseline geometrica
+    const baseline = computeDatiTecniciBaseline()
+    if (baseline != null) datiTecniciBaselineXRef.current = baseline
 
-    const syncDefault = (): number | null => {
-      const target = defaultX()
-      if (target == null || !Number.isFinite(Number(target))) return null
-      datiTecniciDefaultBoundaryXRef.current = Number(target)
-      datiTecniciBaselineXRef.current = Number(target)
-      return Number(target)
+    // ResizeObserver sul pannello collapsable: quando la dimensione si stabilizza
+    // (nessun cambiamento per 100ms) ExB ha finito il ripristino → reset al 50%
+    const panels = datiTecniciSidebarElRef.current
+    let mo: MutationObserver | null = null
+    let ro: ResizeObserver | null = null
+    const resetDoneRef = { current: false }
+    let stabilizeTimer: number | null = null
+    if (panels) {
+      ro = new ResizeObserver(() => {
+        if (datiTecniciUserDraggingRef.current) { resetDoneRef.current = true; return }
+        if (resetDoneRef.current) return
+        if (stabilizeTimer != null) window.clearTimeout(stabilizeTimer)
+        stabilizeTimer = window.setTimeout(() => {
+          if (!datiTecniciUserDraggingRef.current && !resetDoneRef.current) {
+            resetDoneRef.current = true
+            ro?.disconnect()
+            ro = null
+            giiResetNearestLayoutSidebar(npTabSyncElRef.current)
+          }
+        }, 500)
+      })
+      ro.observe(panels.right)
     }
 
-    const resetToDefault = (updateState = true) => {
-      const target = syncDefault()
-      if (target == null || !Number.isFinite(Number(target))) return false
-      datiTecniciAutoResettingRef.current = true
-      giiMoveNearestLayoutSidebarToX(npTabSyncElRef.current, target)
-      window.setTimeout(() => {
-        datiTecniciAutoResettingRef.current = false
-        if (updateState && !cancelled) setDatiTecniciSidebarDirty(false)
-      }, 450)
-      return true
-    }
-
-    const initOrReset = () => {
-      if (cancelled) return
-      const target = syncDefault()
-      const x = readX()
-      if (target == null || x == null) return
-
-      // Default del Builder: 50% della Sidebar. Al rientro in Luoghi e dati
-      // la Sidebar viene sempre riportata al 50%, come reset automatico.
-      if (Math.abs(Number(x) - Number(target)) > 2) {
-        resetToDefault()
-      } else {
-        setDatiTecniciSidebarDirty(false)
-      }
-    }
-
+    // Polling dirty
     const check = () => {
-      if (cancelled || datiTecniciAutoResettingRef.current) return
-      const target = syncDefault()
-      const x = readX()
-      if (target == null || x == null) return
-      setDatiTecniciSidebarDirty(Math.abs(Number(x) - Number(target)) > 2)
+      if (datiTecniciBaselineXRef.current == null) {
+        const b = computeDatiTecniciBaseline()
+        if (b != null) datiTecniciBaselineXRef.current = b
+        return
+      }
+      const x = giiReadLayoutSidebarBoundaryX(npTabSyncElRef.current)
+      if (x == null) return
+      setDatiTecniciSidebarDirty(Math.abs(x - datiTecniciBaselineXRef.current) > 2)
     }
-
-    // Lascia il tempo alla Sidebar ExB di assestarsi prima di leggere/ripristinare.
-    const t0 = window.setTimeout(initOrReset, 120)
-    const t1 = window.setTimeout(initOrReset, 450)
+    const t = window.setTimeout(check, 500)
     const id = window.setInterval(check, 300)
-
     return () => {
-      cancelled = true
-      window.clearTimeout(t0)
-      window.clearTimeout(t1)
+      ro?.disconnect()
+      if (stabilizeTimer != null) window.clearTimeout(stabilizeTimer)
+      window.clearTimeout(t)
       window.clearInterval(id)
-      // Uscendo dalla scheda, ripristina il default del Builder (50%) così il
-      // ridimensionamento della mappa non si ripercuote sulle altre schede.
-      if (!datiTecniciUserDraggingRef.current) resetToDefault(false)
-      setDatiTecniciSidebarDirty(false)
     }
-  }, [npTab])
+  }, [npTab, computeDatiTecniciBaseline])
 
   React.useEffect(() => {
     if (skipNpTabSyncRef.current) { skipNpTabSyncRef.current = false; return }
@@ -7647,11 +7606,8 @@ React.useEffect(() => {
                 e.preventDefault()
                 e.stopPropagation()
                 if (!datiTecniciSidebarDirty) return
-                const target = giiReadLayoutSidebarDefaultBoundaryX(npTabSyncElRef.current) ?? datiTecniciDefaultBoundaryXRef.current ?? datiTecniciBaselineXRef.current
-                giiMoveNearestLayoutSidebarToX(npTabSyncElRef.current, target)
-                datiTecniciDefaultBoundaryXRef.current = target
-                datiTecniciBaselineXRef.current = target
-                window.setTimeout(() => setDatiTecniciSidebarDirty(false), 350)
+                giiResetNearestLayoutSidebar(npTabSyncElRef.current)
+                window.setTimeout(() => { datiTecniciBaselineXRef.current = null }, 600)
               }}
               disabled={!datiTecniciSidebarDirty}
               title='Ripristina larghezza colonne'

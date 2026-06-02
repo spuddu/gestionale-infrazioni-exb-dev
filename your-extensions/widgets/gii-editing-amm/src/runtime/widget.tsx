@@ -1624,19 +1624,24 @@ function FieldGrid (props: { fields: SummaryFieldConfig[], data: any, layerField
 
 function normalizeReportCode (raw: any, oid: number | null): string {
   const code = String(raw ?? '').trim()
-  if (code) return /^\d+$/.test(code) ? `TR-${code}` : code
-  if (oid != null && Number.isFinite(Number(oid))) return `TR-${Number(oid)}`
+  if (code) return /^\d+$/.test(code) ? `R-${code}` : code
+  if (oid != null && Number.isFinite(Number(oid))) return `${Number(oid)}-TR`
   return '—'
 }
 
 function getReportCode (data: any, oid: number | null): string {
-  return normalizeReportCode(
-    pickAttrCI(data || {}, [
-      'numero_rapporto_tecnico', 'NUMERO_RAPPORTO_TECNICO', 'Numero_rapporto_tecnico',
-      'codice_rapporto', 'n_rapporto', 'numero_rapporto', 'cod_pratica', 'nrapporto', 'N_RAPPORTO'
-    ]),
-    oid
-  )
+  const d = data || {}
+  const official = pickAttrCI(d, [
+    'numero_rapporto_tecnico', 'NUMERO_RAPPORTO_TECNICO', 'Numero_rapporto_tecnico',
+    'codice_rapporto', 'n_rapporto', 'numero_rapporto', 'cod_pratica', 'nrapporto', 'N_RAPPORTO'
+  ])
+  if (String(official ?? '').trim()) return normalizeReportCode(official, oid)
+
+  const op = pickAttrCI(d, ['origine_pratica', 'Origine_pratica', 'ORIGINE_PRATICA'])
+  const prefix = (op === 2 || op === '2' || String(op || '').toUpperCase() === 'TI') ? 'TI' : 'TR'
+  const settore = String(pickAttrCI(d, ['settore_cod', 'Settore_cod', 'SETTORE_COD', 'settore', 'Settore', 'SETTORE']) || '').trim().toUpperCase()
+  if (oid != null && Number.isFinite(Number(oid))) return settore ? `${Number(oid)}-${prefix}-${settore}` : `${Number(oid)}-${prefix}`
+  return '—'
 }
 
 function isDaApprovalComplete (data: Record<string, any>): boolean {
@@ -4885,8 +4890,8 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
               style={{
                 ...editBtnBase,
                 border: '1px solid rgba(0,0,0,0.24)',
-                background: closeDisabled ? '#e5e7eb' : '#f8fbff',
-                color: closeDisabled ? '#9ca3af' : '#111827',
+                background: closeDisabled ? '#e5e7eb' : '#1d4ed8',
+                color: closeDisabled ? '#9ca3af' : '#fff',
                 cursor: closeDisabled ? 'not-allowed' : 'pointer'
               }}>
               Chiudi

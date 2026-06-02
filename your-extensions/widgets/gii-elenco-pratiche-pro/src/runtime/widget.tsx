@@ -49,7 +49,7 @@ function getRilevazioneDisplay (rec: DataRecord): string {
   const oid = a?.OBJECTID ?? a?.ObjectId ?? a?.objectid ?? a?.objectId
   const prefix = getOriginePraticaPrefix(a, rec)
   const settore = getSettoreCodeFromRecord(a)
-  const base = oid != null ? `${prefix}-${oid}` : `${prefix}-?`
+  const base = oid != null ? `${oid}-${prefix}` : `?-${prefix}`
   return settore ? `${base}-${settore}` : base
 }
 
@@ -2474,10 +2474,25 @@ React.useEffect(() => {
   }
 
   const computeFaseIstruttoria = (d: any): 'Tecnica' | 'Amministrativa' => {
-    // La fase dipende dal nodo che ha in carico la pratica in questo momento,
-    // non dalla semplice presenza storica di campi amministrativi valorizzati.
-    // Se il nodo corrente e' TI_AMM, RI_AMM o DA => fase amministrativa.
-    // Se il nodo corrente e' TI/RZ/RI/DT/TR di area tecnica/agronomica => fase tecnica.
+    // La fase deve rappresentare il nodo operativo CORRENTE, non il punto piu' avanzato
+    // raggiunto storicamente dalla pratica. Quindi, se un rapporto gia' passato dalla
+    // fase amministrativa viene rimandato all'area tecnica, deve tornare a risultare
+    // in fase Tecnica finche' e' in carico a TI/RZ/RI/DT AGR/TEC.
+    const log = getLogForRecord(d)
+    const destRole = normalizeWorkflowRole(log?.ruoloDest)
+    if (destRole) {
+      const destUser = String(log?.utenteDest || '').trim().toLowerCase()
+      const destEntry = destUser ? utentiMapRef.current?.get(destUser) : null
+      const destArea = normalizeTextCode(destEntry?.areaCod || normalizeAreaCode(destEntry?.area ?? null) || log?.area || '')
+
+      if (destRole === 'TI_AMM' || destRole === 'RI_AMM' || destRole === 'DA' || destArea === 'AMM') {
+        return 'Amministrativa'
+      }
+      if (destRole === 'TR' || destRole === 'TI' || destRole === 'RZ' || destRole === 'RI' || destRole === 'DT') {
+        return 'Tecnica'
+      }
+    }
+
     const currentRole = normalizeWorkflowRole(computeSintetico(d)?.ruolo)
     return (currentRole === 'TI_AMM' || currentRole === 'RI_AMM' || currentRole === 'DA')
       ? 'Amministrativa'

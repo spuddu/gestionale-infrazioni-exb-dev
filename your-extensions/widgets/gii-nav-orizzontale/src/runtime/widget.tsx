@@ -813,7 +813,6 @@ export default function Widget (props: Props) {
   const [sectionBadgeDetails, setSectionBadgeDetails] = React.useState<SectionBadgeDetails>(() => readSectionBadgeDetails())
   const [user, setUser] = React.useState<UserInfo | null>(null)
   const [uLoad, setULoad] = React.useState(true)
-  const [sidebarSizeChanged, setSidebarSizeChanged] = React.useState(false)
 
   React.useEffect(() => {
     const upd = () => {
@@ -935,57 +934,6 @@ export default function Widget (props: Props) {
   }
 
   const visibleItems = [...items].sort((a, b) => a.order - b.order).filter(isVisible)
-  const activeItem = visibleItems.find(item => isNavItemActive(item, cfg, currentPageId, currentSection, currentViewId)) || null
-  const activeSidebarItem = activeItem || visibleItems.find(item => {
-    const itemSection = normalizeSectionId(item.section)
-    return navItemShowsSidebar(item) && !!itemSection && itemSection === normalizeSectionId(currentSection)
-  }) || null
-  const sidebarWidgetId = String(cfg.sidebarWidgetId || '').trim()
-  const shouldHandleSidebarReset = !!sidebarWidgetId && navItemShowsSidebar(activeSidebarItem)
-
-  React.useEffect(() => {
-    if (!shouldHandleSidebarReset) {
-      setSidebarSizeChanged(false)
-      resetSidebarBaseline(sidebarWidgetId)
-      return
-    }
-
-    // Appena entro in una scheda con pannello laterale, considero la misura corrente
-    // come posizione iniziale. Il pulsante resta spento a riposo e compare solo dopo
-    // uno spostamento reale, anche minimo, del divisore.
-    setSidebarBaselineToCurrent(sidebarWidgetId)
-    setSidebarSizeChanged(false)
-
-    const update = () => setSidebarSizeChanged(isSidebarSizeChangedFromBaseline(sidebarWidgetId))
-    const delayedUpdate = () => window.setTimeout(update, 0)
-
-    let unsubStore: (() => void) | null = null
-    try { unsubStore = getAppStore().subscribe(update) } catch {}
-
-    const timer = window.setInterval(update, 80)
-    let ro: ResizeObserver | null = null
-    try {
-      const root = getWidgetRootElement(sidebarWidgetId)
-      if (root && typeof ResizeObserver !== 'undefined') {
-        ro = new ResizeObserver(update)
-        ro.observe(root)
-        const panels = getSidebarPanelWidgetIds(sidebarWidgetId)
-        ;[...panels.first, ...panels.second].forEach(id => {
-          const el = getWidgetRootElement(id)
-          if (el) ro?.observe(el)
-        })
-      }
-    } catch {}
-
-    window.addEventListener('resize', delayedUpdate)
-    return () => {
-      window.clearInterval(timer)
-      window.removeEventListener('resize', delayedUpdate)
-      try { ro?.disconnect() } catch {}
-      if (unsubStore) unsubStore()
-    }
-  }, [sidebarWidgetId, shouldHandleSidebarReset, activeSidebarItem?.id, currentPageId, currentSection, currentViewId])
-
   return (
     <div style={{
       width: '100%',
@@ -1003,17 +951,6 @@ export default function Widget (props: Props) {
         <NavButton key={item.id} item={item} cfg={cfg} idx={i} currentPageId={currentPageId} currentSection={currentSection} currentViewId={currentViewId} sectionCounts={sectionCounts} sectionBadgeDetails={sectionBadgeDetails} onSectionChange={setCurrentSection} onViewChange={setCurrentViewId} />
       ))}
       <div style={{ flex: '1 1 auto', minWidth: 8 }} />
-      <SidebarResetButton
-        visible={shouldHandleSidebarReset && sidebarSizeChanged}
-        item={activeSidebarItem}
-        cfg={cfg}
-        onClick={() => {
-          resetSidebarSize(sidebarWidgetId)
-          window.setTimeout(() => {
-            setSidebarSizeChanged(isSidebarSizeChangedFromBaseline(sidebarWidgetId))
-          }, 220)
-        }}
-      />
     </div>
   )
 }
