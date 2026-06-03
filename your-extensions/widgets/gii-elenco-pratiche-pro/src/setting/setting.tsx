@@ -65,8 +65,9 @@ function Sel(p: { value:string; onChange:(v:string)=>void; options:Array<{value:
 }
 
 const VIRTUAL_FIELDS: FieldOpt[] = [
+  { name:'__numero_rilevazione__', alias:'⚙ N. rilevazione (calcolato)', type:'virtual' },
+  { name:'__numero_pratica__', alias:'⚙ N. rapporto (calcolato)', type:'virtual' },
   { name:'__tipo_pratica__', alias:'⚙ Tipo pratica (calcolato)', type:'virtual' },
-  { name:'__numero_pratica__', alias:'⚙ Numero (calcolato)', type:'virtual' },
   { name:'__numero_verbale_display__', alias:'⚙ N. verbale (calcolato)', type:'virtual' },
   { name:'__stato_sint__', alias:'⚙ Stato pratica / Il mio stato (calcolato)', type:'virtual' },
   { name:'__fase_istruttoria__', alias:'⚙ Fase istruttoria (calcolato)', type:'virtual' },
@@ -167,26 +168,36 @@ function Acc(p: { id:string; label:string; open:boolean; onToggle:()=>void }) {
 }
 
 
-function normalizeColumnLabel (label: any): string {
+function normalizeColumnLabel (label: any, field?: any): string {
   const s = String(label || '').trim()
-  if (/^n\.?\s*(rapporto|pratica)$/i.test(s)) return 'Numero'
+  const f = String(field || '').trim().toLowerCase()
+  if (f === '__numero_rilevazione__') return 'N. rilevazione'
+  if (f === '__numero_pratica__') return 'N. rapporto'
+  if (f === '__tipo_pratica__') return 'N. rilevazione'
+  if (/^tipo\s+pratica$/i.test(s)) return 'N. rilevazione'
+  if (/^n\.?\s*(rapporto|pratica)$/i.test(s) || /^numero$/i.test(s)) return 'N. rapporto'
   if (/^stato\s+rapporto$/i.test(s)) return 'Stato pratica'
   return s
 }
 
+function normalizeColumnForSave (col: any): any {
+  if (!col || typeof col !== 'object') return col
+  let field = String(col.field || '').trim()
+  if (field.toLowerCase() === '__tipo_pratica__') field = '__numero_rilevazione__'
+  return { ...col, field, label: normalizeColumnLabel(col.label, field) }
+}
+
 function normalizeColumnsForSave (columns: any[]): any[] {
-  return (Array.isArray(columns) ? columns : []).map((col: any) => {
-    if (!col || typeof col !== 'object') return col
-    return { ...col, label: normalizeColumnLabel(col.label) }
-  })
+  return (Array.isArray(columns) ? columns : []).map(normalizeColumnForSave)
 }
 
 function columnsHaveLegacyLabels (columns: any[]): boolean {
   if (!Array.isArray(columns)) return false
   return columns.some((col: any) => {
     if (!col || typeof col !== 'object') return false
-    const current = String(col.label || '')
-    return normalizeColumnLabel(current) !== current.trim()
+    const normalized = normalizeColumnForSave(col)
+    return String(normalized?.label || '') !== String(col.label || '').trim() ||
+      String(normalized?.field || '') !== String(col.field || '').trim()
   })
 }
 
@@ -347,7 +358,10 @@ export default function Setting(props: Props) {
   const cfgJs:any=cfg
   const columns=(()=>{
     const raw=cfgJs?.columns;const cols:any[]=asJs(raw)
-    if(Array.isArray(cols)&&cols.length>0) return cols.map((c:any)=>({id:String(c.id||`col_${Math.random().toString(36).slice(2,8)}`),label:normalizeColumnLabel(c.label),field:String(c.field||''),width:parseNum(c.width,150)}))
+    if(Array.isArray(cols)&&cols.length>0) return cols.map((c:any)=>{
+      const n = normalizeColumnForSave(c)
+      return {id:String(n.id||`col_${Math.random().toString(36).slice(2,8)}`),label:String(n.label||''),field:String(n.field||''),width:parseNum(n.width,150)}
+    })
     return DEFAULT_COLUMNS.map(c=>({...c}))
   })()
   const columnFieldOptions = mergeLayerFieldOptions(fields, cfgJs, columns)

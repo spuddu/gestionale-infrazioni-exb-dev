@@ -165,7 +165,7 @@ function readCurrentSection (): string {
 }
 
 type SectionCounts = Record<string, number>
-type SectionBadgeDetails = Record<string, { total: number; done: number; warning?: number }>
+type SectionBadgeDetails = Record<string, { total: number; done: number; warning?: number; loading?: boolean }>
 
 function readSectionCounts (): SectionCounts {
   try {
@@ -191,7 +191,8 @@ function readSectionBadgeDetails (): SectionBadgeDetails {
       const total = Math.max(0, Math.trunc(Number(value?.total || 0)))
       const done = Math.max(0, Math.trunc(Number(value?.done || 0)))
       const warning = Math.max(0, Math.trunc(Number(value?.warning || value?.warn || value?.alert || 0)))
-      if (k && (total > 0 || warning > 0)) out[k] = { total, done: Math.min(done, total), warning }
+      const loading = value?.loading === true || value?.loading === 'true' || value?.loading === 1
+      if (k && (total > 0 || warning > 0)) out[k] = { total, done: Math.min(done, total), warning, loading }
     })
     return out
   } catch {
@@ -678,7 +679,12 @@ function NavButton (p: { item: NavItem, cfg: any, idx: number, currentPageId: st
   const itemSectionForCount = normalizeSectionId(item.section)
   const itemCount = itemSectionForCount ? Number(sectionCounts[itemSectionForCount] || 0) : 0
   const itemBadgeDetail = itemSectionForCount ? sectionBadgeDetails[itemSectionForCount] : undefined
+  const itemBadgeTotal = Math.max(0, Math.trunc(Number(itemBadgeDetail?.total || 0)))
+  const itemBadgeDone = Math.max(0, Math.min(itemBadgeTotal, Math.trunc(Number(itemBadgeDetail?.done || 0))))
   const itemWarningCount = Math.max(0, Math.trunc(Number(itemBadgeDetail?.warning || 0)))
+  const itemBadgeLoading = !!itemBadgeDetail?.loading
+  const showRatioBadge = !!itemBadgeDetail && itemBadgeTotal > 0
+  const ratioBadgeIncomplete = showRatioBadge && !itemBadgeLoading && (itemBadgeDone < itemBadgeTotal || itemWarningCount > 0)
 
   const handleClick = () => {
     if (sectionId && (itemViewId || itemSection)) {
@@ -738,7 +744,29 @@ function NavButton (p: { item: NavItem, cfg: any, idx: number, currentPageId: st
       }}>
         {item.label}
       </span>
-      {itemCount > 0 && (
+      {showRatioBadge ? (
+        <span style={{
+          marginLeft: 6,
+          minWidth: 30,
+          height: 18,
+          padding: '0 6px',
+          borderRadius: 999,
+          display: 'inline-flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          boxSizing: 'border-box',
+          fontSize: 11,
+          fontWeight: 800,
+          lineHeight: 1,
+          verticalAlign: 'middle',
+          color: ratioBadgeIncomplete
+            ? '#92400e'
+            : (hot ? (useTabColors ? (cfg.tabBgColorHover || '#1d3557') : (item.colorBgHover || '#1d3557')) : '#1d4ed8'),
+          background: ratioBadgeIncomplete ? (hot ? '#ffffff' : '#fef3c7') : (hot ? '#ffffff' : '#dbeafe'),
+          border: ratioBadgeIncomplete ? '1px solid #f59e0b' : (hot ? '1px solid rgba(255,255,255,0.85)' : '1px solid #93c5fd'),
+          flex: '0 0 auto'
+        }} title='Note spese compilate / note spese previste'>{itemBadgeLoading ? `…/${itemBadgeTotal}` : `${itemBadgeDone}/${itemBadgeTotal}`}</span>
+      ) : itemCount > 0 && (
         <span style={{
           marginLeft: 6,
           minWidth: 18,
@@ -757,25 +785,6 @@ function NavButton (p: { item: NavItem, cfg: any, idx: number, currentPageId: st
           border: hot ? '1px solid rgba(255,255,255,0.85)' : '1px solid #93c5fd',
           flex: '0 0 auto'
         }} title='Numero elementi'>{itemCount}</span>
-      )}
-      {itemWarningCount > 0 && (
-        <span style={{
-          marginLeft: itemCount > 0 ? 3 : 6,
-          width: 18,
-          height: 18,
-          borderRadius: 999,
-          display: 'inline-flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          boxSizing: 'border-box',
-          fontSize: 12,
-          fontWeight: 900,
-          lineHeight: 1,
-          color: hot ? '#92400e' : '#b45309',
-          background: hot ? '#fff7ed' : '#fef3c7',
-          border: hot ? '1px solid #fed7aa' : '1px solid #f59e0b',
-          flex: '0 0 auto'
-        }} title={`Note spese incomplete: ${itemWarningCount}`}>!</span>
       )}
     </div>
   )
@@ -843,7 +852,8 @@ export default function Widget (props: Props) {
         const total = Math.max(0, Math.trunc(Number(value?.total || 0)))
         const done = Math.max(0, Math.trunc(Number(value?.done || 0)))
         const warning = Math.max(0, Math.trunc(Number(value?.warning || value?.warn || value?.alert || 0)))
-        if (k && (total > 0 || warning > 0)) details[k] = { total, done: Math.min(done, total), warning }
+        const loading = value?.loading === true || value?.loading === 'true' || value?.loading === 1
+        if (k && (total > 0 || warning > 0)) details[k] = { total, done: Math.min(done, total), warning, loading }
       })
       setSectionBadgeDetails(details)
     }

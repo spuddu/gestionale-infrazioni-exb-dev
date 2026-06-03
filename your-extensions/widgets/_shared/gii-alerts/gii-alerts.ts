@@ -116,6 +116,10 @@ export const GII_ALERT_FIELDS = [
   'OBJECTID',
   'globalid',
   'GlobalID',
+  'numero_rapporto_tecnico',
+  'numero_rilevazione',
+  'area_cod',
+  'settore_cod',
   'n_rapporto',
   'numero_rapporto',
   'codice_rapporto',
@@ -255,17 +259,109 @@ function isDefinedClosed (value: any): boolean {
   return !!s && !['DA_DEFINIRE', 'APERTO', 'IN_CORSO', ''].includes(s)
 }
 
-function getReportCode (data: Record<string, any>, oid: number | null): string {
-  const code = attr(data, ['numero_rapporto_tecnico', 'n_rapporto', 'numero_rapporto', 'codice_rapporto', 'cod_pratica', 'rapporto', 'num_rapporto'])
-  if (hasValue(code)) {
-    const text = String(code).trim()
-    return /^rapporto\b/i.test(text) ? text : `Rapporto ${text}`
+function cleanPracticeNumberText (value: any): string {
+  return String(value ?? '')
+    .trim()
+    .replace(/^rapporto\s+tecnico\s+n\.?\s*/i, '')
+    .replace(/^rapporto\s+n\.?\s*/i, '')
+    .replace(/^rapporto\s*/i, '')
+    .replace(/^rilevazione\s+n\.?\s*/i, '')
+    .replace(/^rilevazione\s*/i, '')
+    .trim()
+}
+
+function normalizePracticeSectorCode (value: any): string {
+  const s = String(value ?? '').trim().toUpperCase()
+  if (!s) return ''
+  if (s === 'CS') return 'DS'
+  const mDist = s.match(/^D\s*([1-6])$/)
+  if (mDist) return `D${mDist[1]}`
+  if (s === 'DS' || s === 'CR' || s === 'GI') return s
+  return s
+}
+
+function practiceSectorForMessage (data: Record<string, any>): string {
+  return normalizePracticeSectorCode(attr(data, [
+    'settore_cod',
+    'settore',
+    'destinatario_settore',
+    'settore_destinatario'
+  ]))
+}
+
+function practicePrefixForMessage (data: Record<string, any>, rawCode?: any): 'TR' | 'TI' {
+  const raw = String(rawCode ?? '').trim().toUpperCase()
+  if (/(^|[-_\s])TI([-_\s]|$)/.test(raw) || /^TI[-_\s]/.test(raw)) return 'TI'
+  if (/(^|[-_\s])TR([-_\s]|$)/.test(raw) || /^TR[-_\s]/.test(raw)) return 'TR'
+  const op = String(attr(data, ['origine_pratica']) ?? '').trim().toUpperCase()
+  return (op === '2' || op === 'TI') ? 'TI' : 'TR'
+}
+
+function officialReportNumberForMessage (data: Record<string, any>): string {
+  const candidates = [
+    attr(data, ['numero_rapporto_tecnico']),
+    attr(data, ['n_rapporto']),
+    attr(data, ['numero_rapporto']),
+    attr(data, ['codice_rapporto']),
+    attr(data, ['rapporto']),
+    attr(data, ['num_rapporto'])
+  ]
+  for (const candidate of candidates) {
+    const text = cleanPracticeNumberText(candidate)
+    if (!text || /^[-–—]+$/.test(text)) continue
+    // I numeri provvisori di rilevazione non sono numeri ufficiali di rapporto.
+    if (/^RILEVAZIONE\b/i.test(String(candidate ?? '').trim())) continue
+    if (/^(TR|TI)[-_\s]*\d+/i.test(text)) continue
+    if (/^\d+[-_\s]*(TR|TI)\b/i.test(text)) continue
+    if (/^R[-_\s]*\d+/i.test(text) || /^\d+\s*\/\s*\d{4}$/.test(text)) return text.replace(/\s+/g, '')
   }
-  const op = attr(data, ['origine_pratica'])
-  const prefix = String(op ?? '').trim() === '2' || String(op ?? '').trim().toUpperCase() === 'TI' ? 'TI' : 'TR'
-  const settore = String(attr(data, ['settore_cod', 'settore']) || '').trim().toUpperCase()
-  if (oid != null) return settore ? `Rilevazione ${oid}-${prefix}-${settore}` : `Rilevazione ${oid}-${prefix}`
-  return 'Rilevazione'
+  return ''
+}
+
+function rilevazioneNumberForMessage (data: Record<string, any>, oid: number | null): string {
+  const rawCandidate = cleanPracticeNumberText(
+    attr(data, ['numero_rilevazione']) ||
+    attr(data, ['cod_pratica']) ||
+    attr(data, ['numero_rapporto']) ||
+    attr(data, ['n_rapporto']) ||
+    ''
+  )
+  const raw = rawCandidate.toUpperCase().replace(/_/g, '-').replace(/\s+/g, '-')
+  const settore = practiceSectorForMessage(data)
+
+  let oidPart = oid != null && Number.isFinite(Number(oid)) ? String(Number(oid)) : ''
+  let prefix = practicePrefixForMessage(data, raw)
+  let sectorPart = settore
+
+  let m = raw.match(/^(TR|TI)-?(\d+)(?:-([A-Z0-9]+))?$/i)
+  if (m) {
+    prefix = m[1].toUpperCase() as 'TR' | 'TI'
+    oidPart = m[2]
+    if (!sectorPart && m[3]) sectorPart = normalizePracticeSectorCode(m[3])
+  } else {
+    m = raw.match(/^(\d+)-?(TR|TI)(?:-([A-Z0-9]+))?$/i)
+    if (m) {
+      oidPart = m[1]
+      prefix = m[2].toUpperCase() as 'TR' | 'TI'
+      if (!sectorPart && m[3]) sectorPart = normalizePracticeSectorCode(m[3])
+    } else if (/^\d+$/.test(raw)) {
+      oidPart = raw
+    }
+  }
+
+  const base = oidPart || rawCandidate || '—'
+  if (base === '—') return base
+  return sectorPart ? `${base}-${prefix}-${sectorPart}` : `${base}-${prefix}`
+}
+
+function practiceDescriptionForMessage (data: Record<string, any>, oid: number | null): string {
+  const reportNumber = officialReportNumberForMessage(data)
+  if (reportNumber) return `Rapporto tecnico n. ${reportNumber}`
+  return `Rilevazione n. ${rilevazioneNumberForMessage(data, oid)}`
+}
+
+function getReportCode (data: Record<string, any>, oid: number | null): string {
+  return practiceDescriptionForMessage(data, oid)
 }
 
 
@@ -551,6 +647,12 @@ function isOfficeOriginReport (data: Record<string, any>): boolean {
   return String(op ?? '').trim() === '2'
 }
 
+function takeChargeTitleForMessage (label: string, row: Record<string, any>): string {
+  const hay = `${label || ''} ${attr(row, ['tipo_attivita']) || ''} ${attr(row, ['sottotipo_attivita']) || ''} ${attr(row, ['titolo']) || ''} ${attr(row, ['messaggio']) || ''} ${attr(row, ['origine_evento']) || ''}`.toUpperCase()
+  if (hay.includes('INTEGRAZ')) return 'Trasmissione integrazione'
+  return 'Trasmissione nuova istruttoria'
+}
+
 function takeChargeTextFromElencoLogic (
   roleAreaKey: string,
   log: LogEntry | null | undefined,
@@ -558,68 +660,13 @@ function takeChargeTextFromElencoLogic (
   reportCode: string
 ): { title: string, message: string } {
   const label = formatCausaleForLog(log || null, data)
-  const n = reportNumberForMessage(reportCode)
-
-  if (label === 'NUOVA RILEVAZIONE') {
-    if (isOfficeOriginReport(data)) {
-      return { title: 'Rapporto d’ufficio', message: `Rapporto d’ufficio n. ${n} da prendere in carico.` }
-    }
-    return { title: 'Nuovo rapporto', message: `Nuovo rapporto n. ${n} da prendere in carico.` }
+  const parentObjectId = getParentObjectId(data)
+  return {
+    title: takeChargeTitleForMessage(label, data),
+    message: practiceDescriptionForMessage(data, parentObjectId)
   }
-
-  if (label === 'ASSEGNAZIONE ISTRUTTORIA') {
-    return { title: 'Nuova assegnazione', message: `Nuova assegnazione: rapporto n. ${n} da prendere in carico.` }
-  }
-
-  if (label === 'RICHIESTA DI INTEGRAZIONE') {
-    return { title: 'Richiesta di integrazione', message: `Richiesta di integrazione relativa al rapporto n. ${n} da prendere in carico.` }
-  }
-
-  if (label === 'TRASMISSIONE INTEGRAZIONE') {
-    return { title: 'Integrazione trasmessa', message: `Integrazione trasmessa relativa al rapporto n. ${n} da prendere in carico.` }
-  }
-
-  if (label === 'ISTRUTTORIA TECNICA APPROVATA') {
-    return { title: 'Rapporto approvato', message: `Rapporto approvato n. ${n} da prendere in carico.` }
-  }
-
-  if (label === 'SANZIONE APPROVATA') {
-    return { title: 'Verbale approvato', message: `Verbale approvato relativo al rapporto n. ${n} da prendere in carico.` }
-  }
-
-  if (label === 'TRASMISSIONE ISTRUTTORIA') {
-    if (roleAreaKey === 'DA') {
-      return { title: 'Proposta di verbale', message: `Proposta di verbale relativa al rapporto n. ${n} da prendere in carico.` }
-    }
-    return { title: 'Istruttoria trasmessa', message: `Istruttoria trasmessa relativa al rapporto n. ${n} da prendere in carico.` }
-  }
-
-  if (label === 'RILEVAZIONE RESPINTA') {
-    return { title: 'Rilevazione respinta', message: `Rilevazione respinta n. ${n} da prendere in carico.` }
-  }
-
-  if (label === 'ISTRUTTORIA TECNICA RESPINTA') {
-    return { title: 'Istruttoria tecnica respinta', message: `Istruttoria tecnica respinta relativa al rapporto n. ${n} da prendere in carico.` }
-  }
-
-  if (label === 'SANZIONE RESPINTA') {
-    return { title: 'Verbale respinto', message: `Verbale respinto relativo al rapporto n. ${n} da prendere in carico.` }
-  }
-
-  if (roleAreaKey === 'DA') {
-    return { title: 'Proposta di verbale', message: `Proposta di verbale relativa al rapporto n. ${n} da prendere in carico.` }
-  }
-
-  if (roleAreaKey === 'TI_AMM') {
-    return { title: 'Verbale approvato', message: `Verbale approvato relativo al rapporto n. ${n} da prendere in carico.` }
-  }
-
-  if (roleAreaKey === 'RI_AMM') {
-    return { title: 'Rapporto approvato', message: `Rapporto approvato n. ${n} da prendere in carico.` }
-  }
-
-  return { title: 'Rapporto da prendere in carico', message: `Rapporto n. ${n} da prendere in carico.` }
 }
+
 
 function latestLogTargetsRole (log: LogEntry | null | undefined, roleAreaKey: string): boolean {
   if (!log) return false
@@ -1176,14 +1223,15 @@ function currentActivityToAlert (row: Record<string, any>): GiiAlertItem | null 
   const parentObjectIdNum = Number(parentObjectIdRaw)
   const parentObjectId = Number.isFinite(parentObjectIdNum) ? parentObjectIdNum : null
   const numero = String(attr(row, ['numero_rapporto']) || '').trim()
-  const reportCode = numero || (parentObjectId != null ? `${parentObjectId}-TR` : '—')
+  const rowForDisplay = { ...row, numero_rapporto: numero }
+  const reportCode = practiceDescriptionForMessage(rowForDisplay, parentObjectId)
   const chiave = String(attr(row, ['chiave_attivita']) || '').trim()
   const rawGlobalId = String(attr(row, ['GlobalID', 'globalid']) || '').trim()
   const keyBase = parentGlobalId || rawGlobalId || chiave
   if (!keyBase) return null
 
-  const title = String(attr(row, ['titolo']) || attr(row, ['sottotipo_attivita']) || 'Attività da prendere in carico').trim()
-  const message = String(attr(row, ['messaggio']) || `${title} relativa alla pratica n. ${reportCode}.`).trim()
+  const title = takeChargeTitleForMessage('', rowForDisplay)
+  const message = reportCode
 
   return {
     alertKey: chiave || `${keyBase}|PRESA_IN_CARICO_CORRENTE`,

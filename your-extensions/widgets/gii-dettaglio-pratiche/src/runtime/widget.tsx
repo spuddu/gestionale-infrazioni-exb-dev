@@ -1111,6 +1111,78 @@ function formatDateTimeSafe (v: any): string {
   }
 }
 
+
+function dateMsOrNull (v: any): number | null {
+  if (v == null || v === '') return null
+  try {
+    const s = String(v).trim()
+    const n = Number(s)
+    let ms: number
+    if (Number.isFinite(n) && n > 0) {
+      ms = /^\d{10}$/.test(s) ? (n * 1000) : n
+    } else {
+      ms = new Date(s).getTime()
+    }
+    return Number.isFinite(ms) && ms > 0 ? ms : null
+  } catch {
+    return null
+  }
+}
+
+function isMidnightUtcDateValue (v: any): boolean {
+  const ms = dateMsOrNull(v)
+  if (ms === null) return false
+  const d = new Date(ms)
+  return d.getUTCHours() === 0 &&
+    d.getUTCMinutes() === 0 &&
+    d.getUTCSeconds() === 0 &&
+    d.getUTCMilliseconds() === 0
+}
+
+function sameLocalDateValue (a: any, b: any): boolean {
+  const ma = dateMsOrNull(a)
+  const mb = dateMsOrNull(b)
+  if (ma === null || mb === null) return false
+  const da = new Date(ma)
+  const db = new Date(mb)
+  return da.getFullYear() === db.getFullYear() &&
+    da.getMonth() === db.getMonth() &&
+    da.getDate() === db.getDate()
+}
+
+function isSurveyOriginRecordForDate (data: any): boolean {
+  const op = pickAttrCI(data, ['origine_pratica', 'Origine_pratica', 'ORIGINE_PRATICA'])
+  return op === 1 || op === '1'
+}
+
+function pickSurveyRuntimeDateMs (data: any, dateOnlyValue: any): number | null {
+  const candidates = ['end', 'End', 'END', 'start', 'Start', 'START', 'CreationDate', 'creationDate', 'creationdate', 'CREATIONDATE']
+  for (const name of candidates) {
+    const raw = pickAttrCI(data, [name])
+    const ms = dateMsOrNull(raw)
+    if (ms !== null && sameLocalDateValue(dateOnlyValue, ms)) return ms
+  }
+  return null
+}
+
+function isRilevazioneDateFieldName (fieldName?: any, fieldLabel?: any): boolean {
+  const n = normKey(fieldName || '')
+  const l = normKey(fieldLabel || '')
+  return n === 'data rilevazione' || n === 'dt rilevazione' || l === 'data rilevazione'
+}
+
+function pickRilevazioneDateValueForDisplay (data: any): any {
+  const primary = pickAttrCI(data, ['data_rilevazione', 'Data_rilevazione', 'DATA_RILEVAZIONE', 'dt_rilevazione', 'DT_RILEVAZIONE'])
+  if (!isEmptyValue(primary)) {
+    if (isSurveyOriginRecordForDate(data) && isMidnightUtcDateValue(primary)) {
+      const surveyMs = pickSurveyRuntimeDateMs(data, primary)
+      if (surveyMs !== null) return surveyMs
+    }
+    return primary
+  }
+  return firstNonEmptyAttr(data, ['data_firma', 'CreationDate', 'creationdate', 'created_date', 'start', 'end'])
+}
+
 function isLongTextFieldName (fieldName: string): boolean {
   const k = normKey(fieldName)
   return k.includes('descrizione fatti') || k.includes('descrizione_fatti') || k.includes('circostanze')
@@ -2292,10 +2364,9 @@ function buildSyntheticCreationCycle (data: any, loggedCicli: CicloRecord[]): Ci
 
   const hasLogged = (loggedCicli || []).length > 0
   const isOpenTiCreation = origin === 'TI' && !hasLogged
-  const dt = firstNonEmptyAttr(data, origin === 'TI'
-    ? ['dt_presa_in_carico_TI', 'dt_stato_TI', 'data_firma', 'data_rilevazione', 'CreationDate', 'creationdate', 'created_date', 'start', 'end']
-    : ['data_rilevazione', 'CreationDate', 'creationdate', 'created_date', 'start', 'end', 'data_firma']
-  )
+  const dt = origin === 'TR'
+    ? (pickRilevazioneDateValueForDisplay(data) ?? firstNonEmptyAttr(data, ['data_rilevazione', 'CreationDate', 'creationdate', 'created_date', 'start', 'end', 'data_firma']))
+    : firstNonEmptyAttr(data, ['dt_presa_in_carico_TI', 'dt_stato_TI', 'data_firma', 'data_rilevazione', 'CreationDate', 'creationdate', 'created_date', 'start', 'end'])
   const user = firstNonEmptyAttr(data, origin === 'TI'
     ? ['ti_assegnato_nome', 'ti_assegnato_username', 'utente_loggato', 'created_user', 'Creator', 'creator']
     : ['tecnico_rilevatore', 'utente_loggato', 'created_user', 'Creator', 'creator']
@@ -3374,10 +3445,12 @@ const isPgOnlyField = React.useCallback((fieldName: string) => {
       if (!f) continue
       const resolved = resolveFieldNameLoose(data, aliasMap, f)
       const vv = data ? (data as any)[resolved] : null
-      if (hideEmpty && isEmptyValue(vv)) continue
       const label = toLabel(resolved || f)
+      const isRilevazioneDate = isRilevazioneDateFieldName(resolved || f, label)
+      const displayValue = isRilevazioneDate ? pickRilevazioneDateValueForDisplay(data) : vv
+      if (hideEmpty && isEmptyValue(displayValue)) continue
       const fieldType = fieldTypeMap?.[resolved || f] || ''
-      rows.push({ label, value: formatFieldValue(vv, resolved || f, fieldType, label), multiline: isLongTextFieldName(resolved || f) })
+      rows.push({ label, value: formatFieldValue(displayValue, resolved || f, fieldType, label), multiline: isLongTextFieldName(resolved || f) })
     }
     return rows
   }, [data, toLabel, classifyTipoSoggetto, isPfOnlyField, isPgOnlyField, aliasMap, fieldTypeMap])
@@ -3701,7 +3774,7 @@ const isPgOnlyField = React.useCallback((fieldName: string) => {
     const areaRaw = pickAttrCI(data, ['area_cod', 'Area_cod', 'AREA_COD', 'area'])
     const settoreRaw = pickAttrCI(data, ['settore_cod', 'Settore_cod', 'SETTORE_COD', 'settore', 'cod_settore'])
     const ufficioRaw = pickAttrCI(data, ['ufficio_zona', 'Ufficio_zona', 'UFFICIO_ZONA', 'ufficio'])
-    const dataRil = pickAttrCI(data, ['data_rilevazione', 'Data_rilevazione', 'DATA_RILEVAZIONE', 'data_firma', 'CreationDate', 'creationdate'])
+    const dataRil = pickRilevazioneDateValueForDisplay(data)
     const dataRap = pickAttrCI(data, ['data_rapporto_tecnico', 'Data_rapporto_tecnico', 'DATA_RAPPORTO_TECNICO'])
     const dataVerb = pickAttrCI(data, ['data_verbale', 'Data_verbale', 'DATA_VERBALE'])
     return {

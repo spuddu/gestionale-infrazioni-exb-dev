@@ -1885,7 +1885,7 @@ function InlineEditOverlay(props: {
   const [confirmCancel, setConfirmCancel] = React.useState(false)
   const [activeTab, setActiveTab] = React.useState<'trasgressore' | 'violazione'>('trasgressore')
 
-  const updateDraft = (field: string, value: any) => setDraft(prev => ({ ...prev, [field]: value }))
+  const updateDraft = (field: string, value: any) => setDraft(prev => ({ ...prev, [field]: normalizeUppercaseTextFieldValue(field, value) }))
 
   const handleCancel = () => {
     setDraft({ ...(data || {}) })
@@ -3513,9 +3513,10 @@ function NpField(p: { label: React.ReactNode; children: React.ReactNode; hint?: 
   )
 }
 
-function NpSel(p: { value: string; onChange: (v: string) => void; options: readonly {v:string;l:string}[]; disabled?: boolean }) {
+function NpSel(p: { value: string; onChange: (v: string) => void; options: readonly {v:string;l:string}[]; disabled?: boolean; allowEmpty?: boolean }) {
   const fs = React.useContext(FormStyleCtx)
   const st = fieldBaseStyle(fs, p.disabled)
+  const allowEmpty = p.allowEmpty !== false
   return (
     <select
       value={p.value}
@@ -3523,7 +3524,7 @@ function NpSel(p: { value: string; onChange: (v: string) => void; options: reado
       style={{ ...st, paddingTop: 0, paddingBottom: 0, cursor: p.disabled ? 'not-allowed' : 'pointer' }}
       disabled={p.disabled}
     >
-      <option value=''>— seleziona —</option>
+      {allowEmpty && <option value=''>— seleziona —</option>}
       {p.options.map(o => <option key={o.v} value={o.v}>{o.l}</option>)}
     </select>
   )
@@ -3532,16 +3533,379 @@ function NpSel(p: { value: string; onChange: (v: string) => void; options: reado
 function NpText(p: { value: string; onChange: (v: string) => void; placeholder?: string; multiline?: boolean; disabled?: boolean; maxLength?: number; minRows?: number }) {
   const fs = React.useContext(FormStyleCtx)
   const st = fieldBaseStyle(fs, p.disabled)
+  const toUpper = (v: any): string => String(v ?? '').toLocaleUpperCase('it-IT')
   if (p.multiline) {
     const rows = p.minRows != null ? Math.max(3, Number(p.minRows) || 3) : 3
     return (
-      <textarea value={p.value} onChange={e => p.onChange(e.target.value)} placeholder={p.placeholder}
+      <textarea value={p.value} onChange={e => p.onChange(toUpper(e.target.value))} placeholder={p.placeholder}
         rows={rows} style={{ ...st, height: 'auto', minHeight: (Number(fs.fieldHeight) || 32) * rows, lineHeight: 1.35, paddingTop: 6, paddingBottom: 6, resize: 'vertical' }} disabled={p.disabled} maxLength={p.maxLength}/>
     )
   }
-  return <input type='text' value={p.value} onChange={e => p.onChange(e.target.value)} placeholder={p.placeholder} style={st} disabled={p.disabled} maxLength={p.maxLength}/>
+  return <input type='text' value={p.value} onChange={e => p.onChange(toUpper(e.target.value))} placeholder={p.placeholder} style={st} disabled={p.disabled} maxLength={p.maxLength}/>
 }
 
+
+
+
+const GII_COMUNI_ISTAT_URL = 'https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_COMUNI_ISTAT_IMPORT/FeatureServer/0'
+const GII_COMUNI_CAP_URL = 'https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_COMUNI_CAP_IMPORT/FeatureServer/0'
+
+type ComuneIstatOption = {
+  denominazione_comune: string
+  sigla_provincia: string
+  stato: string
+  regione: string
+  codice_comune_alfanumerico: string
+  codice_catastale: string
+}
+
+type ComuneCapOption = {
+  cap: string
+  codice_comune_alfanumerico: string
+  codice_comune_numerico: string
+  codice_catastale: string
+  denominazione_comune: string
+  sigla_provincia: string
+  stato: string
+}
+
+const __giiComuniIstatSearchCache: Record<string, ComuneIstatOption[]> = {}
+const __giiComuniCapCache: Record<string, ComuneCapOption[]> = {}
+
+function comuneIstatText (v: any): string {
+  return String(v ?? '').trim().toLocaleUpperCase('it-IT')
+}
+
+function comuneIstatSearchKey (v: any): string {
+  return comuneIstatText(v)
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^A-Z0-9]+/g, ' ')
+    .trim()
+    .replace(/\s+/g, ' ')
+}
+
+function comuneIstatSqlText (v: any): string {
+  return comuneIstatText(v).replace(/'/g, "''")
+}
+
+function comuneIstatFromAttrs (a: any): ComuneIstatOption | null {
+  const attivo = String(a?.attivo ?? '1').trim()
+  if (attivo && attivo !== '1' && attivo.toLowerCase() !== 'true') return null
+  const comune = comuneIstatText(a?.denominazione_comune || a?.denominazione_comune_it)
+  const provincia = comuneIstatText(a?.sigla_provincia).slice(0, 2)
+  if (!comune) return null
+  return {
+    denominazione_comune: comune,
+    sigla_provincia: provincia,
+    stato: comuneIstatText(a?.stato || 'ITALIA') || 'ITALIA',
+    regione: comuneIstatText(a?.regione),
+    codice_comune_alfanumerico: String(a?.codice_comune_alfanumerico ?? '').trim(),
+    codice_catastale: comuneIstatText(a?.codice_catastale)
+  }
+}
+
+async function queryComuniIstat (rawTerm: string, exact = false): Promise<ComuneIstatOption[]> {
+  const term = comuneIstatText(rawTerm)
+  if (term.length < 2) return []
+  const cacheKey = `${exact ? 'exact' : 'like'}:${term}`
+  if (__giiComuniIstatSearchCache[cacheKey]) return __giiComuniIstatSearchCache[cacheKey]
+
+  const fl = await getFeatureLayerByUrl(GII_COMUNI_ISTAT_URL)
+  const sqlTerm = comuneIstatSqlText(term)
+  const q = fl.createQuery ? fl.createQuery() : {}
+  const activeWhere = '(attivo = 1 OR attivo IS NULL)'
+  q.where = exact
+    ? `${activeWhere} AND (denominazione_comune = '${sqlTerm}' OR denominazione_comune_it = '${sqlTerm}')`
+    : `${activeWhere} AND (denominazione_comune LIKE '%${sqlTerm}%' OR denominazione_comune_it LIKE '%${sqlTerm}%' OR sigla_provincia LIKE '${sqlTerm}%')`
+  q.outFields = [
+    'denominazione_comune',
+    'denominazione_comune_it',
+    'sigla_provincia',
+    'stato',
+    'regione',
+    'codice_comune_alfanumerico',
+    'codice_catastale',
+    'attivo'
+  ]
+  q.returnGeometry = false
+  q.orderByFields = ['denominazione_comune ASC', 'sigla_provincia ASC']
+  q.start = 0
+  q.num = exact ? 50 : 40
+  const res = await fl.queryFeatures(q)
+  const seen = new Set<string>()
+  const out: ComuneIstatOption[] = []
+  for (const f of (res?.features || [])) {
+    const opt = comuneIstatFromAttrs(f?.attributes || {})
+    if (!opt) continue
+    const key = `${opt.denominazione_comune}|${opt.sigla_provincia}|${opt.codice_comune_alfanumerico}`
+    if (seen.has(key)) continue
+    seen.add(key)
+    out.push(opt)
+  }
+  out.sort((a, b) => {
+    const c = a.denominazione_comune.localeCompare(b.denominazione_comune, 'it')
+    return c !== 0 ? c : a.sigla_provincia.localeCompare(b.sigla_provincia, 'it')
+  })
+  __giiComuniIstatSearchCache[cacheKey] = out
+  return out
+}
+
+function comuneCapFromAttrs (a: any): ComuneCapOption | null {
+  const attivo = String(a?.attivo ?? '1').trim()
+  if (attivo && attivo !== '1' && attivo.toLowerCase() !== 'true') return null
+  const cap = String(a?.cap ?? '').trim()
+  if (!cap) return null
+  return {
+    cap,
+    codice_comune_alfanumerico: String(a?.codice_comune_alfanumerico ?? '').trim(),
+    codice_comune_numerico: String(a?.codice_comune_numerico ?? '').trim(),
+    codice_catastale: comuneIstatText(a?.codice_catastale),
+    denominazione_comune: comuneIstatText(a?.denominazione_comune),
+    sigla_provincia: comuneIstatText(a?.sigla_provincia).slice(0, 2),
+    stato: comuneIstatText(a?.stato || 'ITALIA') || 'ITALIA'
+  }
+}
+
+async function queryCapForComuneIstat (comune: ComuneIstatOption): Promise<ComuneCapOption[]> {
+  const codice = String(comune?.codice_comune_alfanumerico ?? '').trim()
+  const cat = comuneIstatText(comune?.codice_catastale)
+  const nome = comuneIstatText(comune?.denominazione_comune)
+  const provincia = comuneIstatText(comune?.sigla_provincia).slice(0, 2)
+  if (!codice && !cat && (!nome || !provincia)) return []
+
+  const cacheKey = `${codice || ''}|${cat || ''}|${nome}|${provincia}`
+  if (__giiComuniCapCache[cacheKey]) return __giiComuniCapCache[cacheKey]
+
+  const fl = await getFeatureLayerByUrl(GII_COMUNI_CAP_URL)
+  const q = fl.createQuery ? fl.createQuery() : {}
+  const activeWhere = '(attivo = 1 OR attivo IS NULL)'
+  const clauses: string[] = []
+  if (codice) clauses.push(`codice_comune_alfanumerico = '${comuneIstatSqlText(codice)}'`)
+  if (cat) clauses.push(`codice_catastale = '${comuneIstatSqlText(cat)}'`)
+  if (nome && provincia) clauses.push(`(denominazione_comune = '${comuneIstatSqlText(nome)}' AND sigla_provincia = '${comuneIstatSqlText(provincia)}')`)
+  q.where = `${activeWhere} AND (${clauses.join(' OR ')})`
+  q.outFields = [
+    'codice_comune_alfanumerico',
+    'codice_comune_numerico',
+    'codice_catastale',
+    'denominazione_comune',
+    'sigla_provincia',
+    'cap',
+    'stato',
+    'attivo'
+  ]
+  q.returnGeometry = false
+  q.orderByFields = ['cap ASC']
+  q.start = 0
+  q.num = 100
+
+  const res = await fl.queryFeatures(q)
+  const seen = new Set<string>()
+  const out: ComuneCapOption[] = []
+  for (const f of (res?.features || [])) {
+    const opt = comuneCapFromAttrs(f?.attributes || {})
+    if (!opt) continue
+    const key = `${opt.cap}|${opt.codice_comune_alfanumerico}|${opt.codice_catastale}`
+    if (seen.has(key)) continue
+    seen.add(key)
+    out.push(opt)
+  }
+  out.sort((a, b) => a.cap.localeCompare(b.cap, 'it'))
+  __giiComuniCapCache[cacheKey] = out
+  return out
+}
+
+function CapIstatInput (p: { value: string; onChange: (v: string) => void; options?: ComuneCapOption[]; disabled?: boolean }) {
+  const fs = React.useContext(FormStyleCtx)
+  const st = fieldBaseStyle(fs, p.disabled)
+  const opts = Array.isArray(p.options) ? p.options : []
+  if (opts.length > 1) {
+    return (
+      <select
+        value={p.value}
+        onChange={e => p.onChange(String(e.target.value || '').trim())}
+        style={{ ...st, paddingTop: 0, paddingBottom: 0, cursor: p.disabled ? 'not-allowed' : 'pointer' }}
+        disabled={p.disabled}
+      >
+        <option value=''>— seleziona CAP —</option>
+        {opts.map(o => <option key={`${o.cap}-${o.codice_comune_alfanumerico}-${o.codice_catastale}`} value={o.cap}>{o.cap}</option>)}
+      </select>
+    )
+  }
+  return <NpText value={p.value} onChange={p.onChange} disabled={p.disabled} maxLength={20}/>
+}
+
+function ComuneIstatInput (p: {
+  value: string
+  disabled?: boolean
+  placeholder?: string
+  onManualChange: (v: string) => void
+  onSelect: (comune: ComuneIstatOption) => void
+}) {
+  const fs = React.useContext(FormStyleCtx)
+  const st = fieldBaseStyle(fs, p.disabled)
+  const [open, setOpen] = React.useState(false)
+  const [loading, setLoading] = React.useState(false)
+  const [options, setOptions] = React.useState<ComuneIstatOption[]>([])
+  const [err, setErr] = React.useState(false)
+  const rootRef = React.useRef<HTMLDivElement | null>(null)
+  const [menuPos, setMenuPos] = React.useState<{ left: number, top: number, width: number, maxHeight: number } | null>(null)
+
+  const term = comuneIstatSearchKey(p.value)
+
+  const computeMenuPos = React.useCallback(() => {
+    try {
+      const el = rootRef.current
+      if (!el) return
+      const r = el.getBoundingClientRect()
+      const margin = 8
+      const gap = 2
+      const below = Math.max(0, window.innerHeight - r.bottom - margin)
+      const above = Math.max(0, r.top - margin)
+      const preferred = 190
+      const openAbove = below < 180 && above > below
+      const maxHeight = Math.max(120, Math.min(preferred, openAbove ? above - gap : below - gap))
+      const top = openAbove ? Math.max(margin, r.top - gap - maxHeight) : Math.min(window.innerHeight - margin, r.bottom + gap)
+      setMenuPos({
+        left: Math.max(margin, r.left),
+        top,
+        width: Math.max(180, Math.min(r.width, window.innerWidth - margin - Math.max(margin, r.left))),
+        maxHeight
+      })
+    } catch {
+      // ignora: al prossimo focus/resize viene ricalcolato
+    }
+  }, [])
+
+  React.useEffect(() => {
+    if (!open) return
+    computeMenuPos()
+    const onMove = () => computeMenuPos()
+    try { window.addEventListener('resize', onMove, true) } catch {}
+    try { window.addEventListener('scroll', onMove, true) } catch {}
+    return () => {
+      try { window.removeEventListener('resize', onMove, true) } catch {}
+      try { window.removeEventListener('scroll', onMove, true) } catch {}
+    }
+  }, [open, computeMenuPos, options.length, loading, err])
+
+  React.useEffect(() => {
+    if (p.disabled || term.length < 2) {
+      setLoading(false)
+      setOptions([])
+      setErr(false)
+      return
+    }
+    let cancelled = false
+    const timer = window.setTimeout(() => {
+      setLoading(true)
+      setErr(false)
+      ;(async () => {
+        try {
+          const rows = await queryComuniIstat(term, false)
+          if (!cancelled) setOptions(rows)
+        } catch {
+          if (!cancelled) {
+            setOptions([])
+            setErr(true)
+          }
+        } finally {
+          if (!cancelled) setLoading(false)
+        }
+      })()
+    }, 180)
+    return () => {
+      cancelled = true
+      try { window.clearTimeout(timer) } catch {}
+    }
+  }, [p.disabled, term])
+
+  const selectComune = React.useCallback((opt: ComuneIstatOption) => {
+    p.onSelect(opt)
+    setOpen(false)
+  }, [p])
+
+  const applyExactIfUnique = React.useCallback(() => {
+    const v = comuneIstatSearchKey(p.value)
+    if (!v) return
+    const exact = options.filter(o => comuneIstatSearchKey(o.denominazione_comune) === v)
+    if (exact.length === 1) selectComune(exact[0])
+  }, [options, p.value, selectComune])
+
+  const menuVisible = !p.disabled && open && term.length >= 2 && (loading || options.length > 0 || err)
+  const menu = menuVisible && menuPos
+    ? createPortal(
+        <div
+          style={{
+            position: 'fixed',
+            left: menuPos.left,
+            top: menuPos.top,
+            width: menuPos.width,
+            zIndex: 2147483000,
+            maxHeight: menuPos.maxHeight,
+            overflowY: 'auto',
+            background: '#fff',
+            border: '1px solid #aac4e0',
+            borderRadius: 6,
+            boxShadow: '0 8px 18px rgba(15, 23, 42, 0.16)'
+          }}
+          onMouseDown={e => e.preventDefault()}
+        >
+          {loading && <div style={{ padding: '8px 10px', fontSize: 12, color: '#64748b' }}>Caricamento Comuni…</div>}
+          {!loading && err && <div style={{ padding: '8px 10px', fontSize: 12, color: '#b42318' }}>Comuni non disponibili. Inserire manualmente.</div>}
+          {!loading && !err && options.map((o, idx) => (
+            <button
+              key={`${o.codice_comune_alfanumerico || o.denominazione_comune}-${o.sigla_provincia}-${idx}`}
+              type='button'
+              onMouseDown={e => { e.preventDefault(); selectComune(o) }}
+              style={{
+                width: '100%',
+                textAlign: 'left',
+                border: 'none',
+                borderBottom: idx < options.length - 1 ? '1px solid #e5eef8' : 'none',
+                background: idx % 2 === 0 ? '#f8fbff' : '#fff',
+                padding: '7px 10px',
+                cursor: 'pointer',
+                fontSize: 12,
+                color: '#1f2937'
+              }}
+              title={`${o.denominazione_comune} (${o.sigla_provincia})${o.regione ? ` — ${o.regione}` : ''}`}
+            >
+              <span style={{ fontWeight: 700 }}>{o.denominazione_comune}</span>
+              {o.sigla_provincia && <span style={{ color: '#64748b' }}> ({o.sigla_provincia})</span>}
+              {o.regione && <span style={{ color: '#94a3b8' }}> — {o.regione}</span>}
+            </button>
+          ))}
+        </div>,
+        document.body
+      )
+    : null
+
+  return (
+    <div ref={rootRef} style={{ position: 'relative', width: '100%' }}>
+      <input
+        type='text'
+        value={p.value}
+        onChange={e => {
+          setOpen(true)
+          p.onManualChange(comuneIstatText(e.target.value))
+          window.setTimeout(computeMenuPos, 0)
+        }}
+        onFocus={() => { setOpen(true); window.setTimeout(computeMenuPos, 0) }}
+        onBlur={() => {
+          window.setTimeout(() => setOpen(false), 150)
+          applyExactIfUnique()
+        }}
+        placeholder={p.placeholder || 'Comune italiano o località estera'}
+        style={st}
+        disabled={p.disabled}
+        autoComplete='off'
+      />
+      {menu}
+    </div>
+  )
+}
 
 function parseSurfaceCentiareText(v: any): string {
   const digits = String(v ?? '').replace(/\D/g, '')
@@ -3594,6 +3958,25 @@ function NpDate(p: { value: string; onChange: (v: string) => void; withTime?: bo
 }
 
 type NpDraft = Record<string, string>
+
+const UPPERCASE_TEXT_FIELDS = new Set([
+  'nome', 'cognome', 'codice_fiscale',
+  'ragione_sociale', 'piva',
+  'via', 'civico', 'citta', 'provincia', 'cap', 'stato', 'telefono', 'cellulare', 'email', 'pec',
+  'dom_notifica_via', 'dom_notifica_civico', 'dom_notifica_citta', 'dom_notifica_provincia', 'dom_notifica_cap', 'dom_notifica_stato',
+  'rl_nome', 'rl_cognome', 'rl_cf',
+  'rl_dom_via', 'rl_dom_civico', 'rl_dom_citta', 'rl_dom_provincia', 'rl_dom_cap', 'rl_dom_stato',
+  'note_anagrafica',
+  'descrizione_fatti', 'circostanze', 'descrizione_luogo',
+  'distretto', 'comizio', 'idrante', 'matricola_contatore', 'matricola_tessera'
+])
+
+function normalizeUppercaseTextFieldValue (fieldName: string, value: any): any {
+  if (typeof value !== 'string') return value
+  const key = String(fieldName || '').trim().toLowerCase()
+  if (!UPPERCASE_TEXT_FIELDS.has(key)) return value
+  return value.toLocaleUpperCase('it-IT')
+}
 
 
 
@@ -4342,6 +4725,8 @@ function draftFromRecord (rec: any): NpDraft {
     else out[lk] = String(v)
   }
   if (out.dom_notifica_uguale == null || out.dom_notifica_uguale === '') out.dom_notifica_uguale = '1'
+  // Campo binario Sì/No: per persona giuridica il domicilio notifiche del rappresentante
+  // parte da No, lasciando comunque all'operatore la possibilità di scegliere Sì.
   if (out.rl_dom_notifica == null || out.rl_dom_notifica === '') out.rl_dom_notifica = '0'
   return out
 }
@@ -4354,10 +4739,29 @@ function normalizeLogValue (v: any): string {
   return String(v).trim()
 }
 
+function normalizeDraftComparableValue (fieldName: string, v: any): string {
+  const k = String(fieldName || '').trim().toLowerCase()
+
+  // I flag v_artXX possono arrivare dal layer come null/0/stringa vuota.
+  // Nel draft, selezionando e poi deselezionando una violazione, il valore diventa 0.
+  // Ai fini del dirty-state, tutti i valori non selezionati devono quindi equivalere a vuoto,
+  // altrimenti Salva/Annulla restano attivi anche dopo il ripristino della selezione iniziale.
+  if (/^v_art\d+$/i.test(k)) {
+    const s = String(v ?? '').trim().toLowerCase()
+    return (v === 1 || v === true || s === '1' || s === 'true' || s === 'sì' || s === 'si') ? '1' : ''
+  }
+
+  if (k === 'norma_violata3') {
+    return String(v ?? '').split(/\s+/).filter(Boolean).sort().join(' ')
+  }
+
+  return normalizeLogValue(v)
+}
+
 function draftsEqual (a: NpDraft, b: NpDraft): boolean {
   const keys = Array.from(new Set([...(Object.keys(a || {})), ...(Object.keys(b || {}))]))
   for (const k of keys) {
-    if (normalizeLogValue(a?.[k]) !== normalizeLogValue(b?.[k])) return false
+    if (normalizeDraftComparableValue(k, a?.[k]) !== normalizeDraftComparableValue(k, b?.[k])) return false
   }
   return true
 }
@@ -4471,6 +4875,76 @@ function giiMoveNearestLayoutSidebarToX (host: HTMLElement | null, targetX: numb
   } catch {}
 }
 
+function giiPlainObject<T = any> (value: any): T {
+  try {
+    if (value?.asMutable) return value.asMutable({ deep: true }) as T
+    if (value?.toJS) return value.toJS() as T
+  } catch {}
+  return value as T
+}
+
+function giiNormalizeEditSection (raw: any): string {
+  return String(raw || '').trim().toLowerCase().replace(/_/g, '-').replace(/\s+/g, '-')
+}
+
+function giiActivateExternalLayoutForEditSection (sectionRaw: any): void {
+  const targetSection = giiNormalizeEditSection(sectionRaw)
+  if (!targetSection) return
+  try {
+    const store: any = getAppStore?.()
+    const state: any = store?.getState?.() || {}
+    const currentPageId = String(state?.appRuntimeInfo?.currentPageId || '').trim()
+    const appConfig: any = state?.appConfig || state?.appStateInBuilder?.appConfig || null
+    const widgets = giiPlainObject<Record<string, any>>(appConfig?.widgets || {})
+    let best: { sectionId: string; viewId: string; sidebarWidgetId: string; collapseSidebar: boolean; score: number } | null = null
+
+    Object.entries(widgets || {}).forEach(([widgetId, widget]: [string, any]) => {
+      const uri = String(widget?.uri || widget?.manifest || '').toLowerCase()
+      const cfg = giiPlainObject<any>(widget?.config || {})
+      if (!uri.includes('gii-nav-orizzontale') && !cfg?.items) return
+      const items = Array.isArray(cfg?.items) ? cfg.items : []
+      for (const item of items) {
+        const section = giiNormalizeEditSection(item?.section)
+        if (section !== targetSection) continue
+        const sectionId = String(cfg?.sectionId || '').trim()
+        const viewId = String(item?.viewId || '').trim()
+        const sidebarWidgetId = String(cfg?.sidebarWidgetId || '').trim()
+        if (!sectionId && !sidebarWidgetId) continue
+        const hashPage = String(item?.hashPage || '').trim()
+        const score = (hashPage && currentPageId && hashPage === currentPageId) ? 100 : (hashPage ? 10 : 0)
+        if (!best || score > best.score) {
+          best = { sectionId, viewId, sidebarWidgetId, collapseSidebar: item?.collapseSidebar === true, score }
+        }
+      }
+    })
+
+    if (!best) return
+    if (best.sectionId && best.viewId) {
+      try {
+        store.dispatch({
+          type: 'SECTION_NAV_INFO_CHANGED',
+          sectionId: best.sectionId,
+          navInfo: { currentViewId: best.viewId, previousViewId: '', progress: 1 }
+        })
+      } catch {}
+    }
+    if (best.sidebarWidgetId) {
+      try {
+        store.dispatch({
+          type: 'WIDGET_STATE_PROP_CHANGE',
+          widgetId: best.sidebarWidgetId,
+          propKey: 'collapse',
+          value: best.collapseSidebar
+        })
+      } catch {}
+    }
+  } catch {}
+}
+
+function giiActivateDatiTecniciExternalLayout (): void {
+  giiActivateExternalLayoutForEditSection('dati-tecnici')
+}
+
 
 function NuovaPraticaForm (p: {
   ds: any
@@ -4525,11 +4999,19 @@ function NuovaPraticaForm (p: {
   const [createdRecordInfo, setCreatedRecordInfo] = React.useState<{ oid: number; layerUrl: string; data: any } | null>(null)
   const createdRecordInfoRef = React.useRef<{ oid: number; layerUrl: string; data: any } | null>(null)
   const [validationPopup, setValidationPopup] = React.useState<{ title: string; text: string } | null>(null)
+  const [generalErrorPopup, setGeneralErrorPopup] = React.useState<{ title: string; text: string } | null>(null)
   const [cancelUnsavedPopupOpen, setCancelUnsavedPopupOpen] = React.useState(false)
+  const [missingMapPointPopupOpen, setMissingMapPointPopupOpen] = React.useState(false)
+  const [notaSpeseLinkedViolationPopup, setNotaSpeseLinkedViolationPopup] = React.useState<null | { codice: string; art: number; label?: string }>(null)
   const validationPopupOkId = React.useMemo(() => `gii-val-ok-${Math.random().toString(36).slice(2)}`, [])
   const validationPopupBackdropId = React.useMemo(() => `gii-val-backdrop-${Math.random().toString(36).slice(2)}`, [])
   const successPopupOkId = React.useMemo(() => `gii-success-ok-${Math.random().toString(36).slice(2)}`, [])
   const successPopupBackdropId = React.useMemo(() => `gii-success-backdrop-${Math.random().toString(36).slice(2)}`, [])
+
+  const showGeneralErrorPopup = React.useCallback((title: string, text: string) => {
+    setMsg(null)
+    setGeneralErrorPopup({ title, text })
+  }, [])
 
   const defaultViolazioneColumnPercents = React.useMemo<[number, number]>(() => {
     const raw = Number((cfg as any).violazioneLayoutLeftPercent)
@@ -4673,14 +5155,14 @@ function NuovaPraticaForm (p: {
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.key !== 'Escape') return
       // Se un popup è aperto, blocca Escape per mantenere la modalità
-      if (validationPopup || showCreateSuccessPopup || cancelUnsavedPopupOpen) {
+      if (validationPopup || showCreateSuccessPopup || cancelUnsavedPopupOpen || missingMapPointPopupOpen) {
         e.preventDefault()
         e.stopPropagation()
       }
     }
     window.addEventListener('keydown', onKeyDown, true)
     return () => window.removeEventListener('keydown', onKeyDown, true)
-  }, [validationPopup, showCreateSuccessPopup, cancelUnsavedPopupOpen])
+  }, [validationPopup, showCreateSuccessPopup, cancelUnsavedPopupOpen, missingMapPointPopupOpen])
 
 
   React.useEffect(() => {
@@ -4916,6 +5398,26 @@ function NuovaPraticaForm (p: {
   }, [npTab])
 
   React.useEffect(() => {
+    const syncExternalLayout = () => {
+      const el = npTabSyncElRef.current?.closest?.('[data-gii-editing-root]') as HTMLElement | null
+      const isVisible = !!(el && el.offsetWidth > 0 && el.offsetHeight > 0)
+      if (!isVisible) return
+      // La mappa deve essere visibile solo nella scheda Luoghi e dati tecnici.
+      // Al rientro da Elenco/Azioni il widget può rimontare su Trasgressore mentre
+      // la Sidebar ExB conserva ancora lo stato aperto precedente: riallineo quindi
+      // sempre la Sidebar alla scheda corrente, non solo quando si cliccano le tab.
+      giiActivateExternalLayoutForEditSection(npTab.replace(/_/g, '-'))
+    }
+    syncExternalLayout()
+    const t1 = window.setTimeout(syncExternalLayout, 120)
+    const t2 = window.setTimeout(syncExternalLayout, 420)
+    return () => {
+      try { window.clearTimeout(t1) } catch {}
+      try { window.clearTimeout(t2) } catch {}
+    }
+  }, [npTab])
+
+  React.useEffect(() => {
     const applyRequestedSection = (forcedSection?: any) => {
       const requested = (() => {
         const raw = String(forcedSection || '').trim()
@@ -4979,11 +5481,14 @@ function NuovaPraticaForm (p: {
     const pageToken = String(cfg.editPageId || 'page_45').trim()
     const pageId = resolvePageId(pageToken)
     if (!pageId) {
-      setMsg({ kind: 'err', text: `Pagina Modifica pratica non trovata: ${pageToken || '(vuota)'}. Correggere editPageId nel setting del widget: valore atteso page_45.` })
+      showGeneralErrorPopup(
+        'Pagina Modifica pratica non trovata',
+        `Pagina Modifica pratica non trovata: ${pageToken || '(vuota)'}. Correggere editPageId nel setting del widget: valore atteso page_45.`
+      )
       return
     }
     UrlManager.getInstance().changePage(pageId)
-  }, [cfg.editPageId])
+  }, [cfg.editPageId, showGeneralErrorPopup])
 
   React.useEffect(() => {
     if (!showCreateSuccessPopup) return
@@ -5052,6 +5557,9 @@ function NuovaPraticaForm (p: {
       if (!String(next.data_rilevazione || '').trim()) {
         next.data_rilevazione = today
       }
+      if (!String(next.stato || '').trim()) next.stato = 'ITALIA'
+      if (!String(next.dom_notifica_stato || '').trim()) next.dom_notifica_stato = 'ITALIA'
+      if (!String(next.rl_dom_stato || '').trim()) next.rl_dom_stato = 'ITALIA'
       return next
     }
     setDraft(prev => withCreateDefaults(prev))
@@ -5072,9 +5580,36 @@ function NuovaPraticaForm (p: {
 
   const set = (k: string, v: any) => {
     if (isRiAgrTecLimitedEdit && !riAgrTecEditableDraftFields.has(k.toLowerCase())) return
-    setDraft(prev => ({ ...prev, [k]: v }))
+    setDraft(prev => ({ ...prev, [k]: normalizeUppercaseTextFieldValue(k, v) }))
   }
   const g = (k: string) => draft[k] ?? ''
+  const [capOptionsByAddress, setCapOptionsByAddress] = React.useState<Record<'main' | 'dom' | 'rl', ComuneCapOption[]>>({ main: [], dom: [], rl: [] })
+
+  const resetCapOptions = React.useCallback((kind: 'main' | 'dom' | 'rl') => {
+    setCapOptionsByAddress(prev => ({ ...prev, [kind]: [] }))
+  }, [])
+
+  const applyComuneToAddress = React.useCallback((kind: 'main' | 'dom' | 'rl', comune: ComuneIstatOption) => {
+    const prefix = kind === 'main' ? '' : (kind === 'dom' ? 'dom_notifica_' : 'rl_dom_')
+    const cityField = `${prefix}citta`
+    const provField = `${prefix}provincia`
+    const capField = `${prefix}cap`
+    const stateField = `${prefix}stato`
+    set(cityField, comune.denominazione_comune)
+    set(provField, comune.sigla_provincia)
+    set(stateField, comune.stato || 'ITALIA')
+    setCapOptionsByAddress(prev => ({ ...prev, [kind]: [] }))
+    ;(async () => {
+      try {
+        const caps = await queryCapForComuneIstat(comune)
+        setCapOptionsByAddress(prev => ({ ...prev, [kind]: caps }))
+        if (caps.length === 1) set(capField, caps[0].cap)
+        else if (caps.length > 1) set(capField, '')
+      } catch {
+        setCapOptionsByAddress(prev => ({ ...prev, [kind]: [] }))
+      }
+    })()
+  }, [set])
   const isSystemAdmin = normalizeRoleCode(readGiiUserContext().role) === 'ADMIN'
   const getOidFromAny = React.useCallback((obj: any): number | null => {
     if (!obj || typeof obj !== 'object') return null
@@ -5148,6 +5683,7 @@ const [noteSpesePercent, setNoteSpesePercent] = React.useState<number>(0)
 const [noteSpeseRowsBaseline, setNoteSpeseRowsBaseline] = React.useState<Record<NsCategory, NsDetailRow[]>>(nsCloneRowsByCategory(EMPTY_NS_ROWS_BY_CATEGORY))
 const [noteSpeseRowsDraft, setNoteSpeseRowsDraft] = React.useState<Record<NsCategory, NsDetailRow[]>>(nsCloneRowsByCategory(EMPTY_NS_ROWS_BY_CATEGORY))
 const [activeNotaSpeseCasistica, setActiveNotaSpeseCasistica] = React.useState<string>('')
+const [noteSpeseRowsLoadedKey, setNoteSpeseRowsLoadedKey] = React.useState<string>('')
 
 const noteSpeseCfg = React.useMemo(() => ({
   importPrezzariUrl: String((cfg as any).nsImportPrezzariUrl || (cfg as any).nsPrezzariUrl || '').trim(),
@@ -5264,8 +5800,10 @@ const loadNotaSpeseDraft = React.useCallback(async () => {
     setNoteSpeseRowsDraft(draft)
     setNoteSpesePercent(perc)
     setNoteSpeseSummary(nsComputeSummaryFromRows(rows, perc))
+    setNoteSpeseRowsLoadedKey(`${Number(currentOid)}|${String(currentGlobalId || '').trim()}`)
     if (!raw) setNoteSpeseMsg(null)
   } catch (e: any) {
+    setNoteSpeseRowsLoadedKey(`${Number(currentOid)}|${String(currentGlobalId || '').trim()}`)
     setNoteSpeseMsg({ ok: false, text: e?.message || String(e) })
   } finally {
     setNoteSpeseBusy(false)
@@ -5278,9 +5816,15 @@ const refreshNotaSpeseSummary = React.useCallback(async () => {
 }, [noteSpeseRowsDraft, noteSpesePercent])
 
 React.useEffect(() => {
-  if (mode === 'edit' && currentOid != null && currentGlobalId && noteSpeseMissing.length === 0) {
-    void loadNotaSpeseDraft()
+  if (mode !== 'edit' || currentOid == null) {
+    setNoteSpeseRowsLoadedKey('')
+    return
   }
+  if (!currentGlobalId || noteSpeseMissing.length > 0) {
+    setNoteSpeseRowsLoadedKey('')
+    return
+  }
+  void loadNotaSpeseDraft()
 }, [mode, currentOid, currentGlobalId, noteSpeseMissing.length, loadNotaSpeseDraft])
 
 React.useEffect(() => {
@@ -5541,9 +6085,8 @@ React.useEffect(() => {
     const isRemoving = s.has(v)
     const nsOpt = isRemoving ? getNotaSpeseCasisticaByArtCode(v) : null
     if (isRemoving && nsOpt && hasNotaSpeseRowsForCasistica(noteSpeseRowsDraft, nsOpt.codice)) {
-      setMsg({ kind: 'err', text: `Impossibile deselezionare Art. ${nsOpt.art}: per questa violazione è già presente una nota spese. Eliminare prima le righe della nota spese collegata.` })
-      setActiveNotaSpeseCasistica(nsOpt.codice)
-      setNpTab('nota_spese')
+      setMsg(null)
+      setNotaSpeseLinkedViolationPopup({ codice: nsOpt.codice, art: nsOpt.art, label: nsOpt.label })
       return
     }
     if (isRemoving) s.delete(v); else s.add(v)
@@ -6140,6 +6683,13 @@ React.useEffect(() => {
       }
     }
 
+    const hasValidExistingMapPoint = !!(p.existingGeomWgs84 && (Number(p.existingGeomWgs84.x) !== 0 || Number(p.existingGeomWgs84.y) !== 0))
+    if (reqPoint === 1 && !p.clickedPointWgs84 && !hasValidExistingMapPoint) {
+      setMsg(null)
+      setMissingMapPointPopupOpen(true)
+      return
+    }
+
     setSaving(true); setMsg(null)
     try {
       const layer = mode === 'edit' ? await resolveLayerForEdit(ds) : await getLayerForCreate()
@@ -6157,7 +6707,10 @@ React.useEffect(() => {
       if (reqPoint === 1 && !geomWgs84) {
         const hasValidExisting = p.existingGeomWgs84 && (Number(p.existingGeomWgs84.x) !== 0 || Number(p.existingGeomWgs84.y) !== 0)
         if (!hasValidExisting) {
-          throw new Error('Localizzazione obbligatoria: fai click in mappa per impostare il punto.')
+          setSaving(false)
+          setMsg(null)
+          setMissingMapPointPopupOpen(true)
+          return
         }
       }
 
@@ -6210,7 +6763,9 @@ React.useEffect(() => {
         via: g('via') || null,
         civico: g('civico') || null,
         citta: g('citta') || null,
+        provincia: g('provincia') || null,
         cap: g('cap') || null,
+        stato: g('stato') || 'ITALIA',
         email: g('email') || null,
         pec: g('pec') || null,
         telefono: g('telefono') || null,
@@ -6242,10 +6797,12 @@ React.useEffect(() => {
         // Trasgressore — nuovi campi
         qualifica_fondo: toInt(g('qualifica_fondo')),
         dom_notifica_uguale: toInt(g('dom_notifica_uguale')),
-        dom_notifica_via: g('dom_notifica_via') || null,
-        dom_notifica_civico: g('dom_notifica_civico') || null,
-        dom_notifica_citta: g('dom_notifica_citta') || null,
-        dom_notifica_cap: g('dom_notifica_cap') || null,
+        dom_notifica_via: String(g('dom_notifica_uguale')) !== '1' ? (g('dom_notifica_via') || null) : null,
+        dom_notifica_civico: String(g('dom_notifica_uguale')) !== '1' ? (g('dom_notifica_civico') || null) : null,
+        dom_notifica_citta: String(g('dom_notifica_uguale')) !== '1' ? (g('dom_notifica_citta') || null) : null,
+        dom_notifica_provincia: String(g('dom_notifica_uguale')) !== '1' ? (g('dom_notifica_provincia') || null) : null,
+        dom_notifica_cap: String(g('dom_notifica_uguale')) !== '1' ? (g('dom_notifica_cap') || null) : null,
+        dom_notifica_stato: String(g('dom_notifica_uguale')) !== '1' ? (g('dom_notifica_stato') || 'ITALIA') : null,
         rl_nome: (tipoSogg === 'PG' ? g('rl_nome') : null) || null,
         rl_cognome: (tipoSogg === 'PG' ? g('rl_cognome') : null) || null,
         rl_cf: (tipoSogg === 'PG' ? g('rl_cf') : null) || null,
@@ -6254,7 +6811,9 @@ React.useEffect(() => {
         rl_dom_via: (tipoSogg === 'PG' && String(g('rl_dom_notifica')) === '1' ? g('rl_dom_via') : null) || null,
         rl_dom_civico: (tipoSogg === 'PG' && String(g('rl_dom_notifica')) === '1' ? g('rl_dom_civico') : null) || null,
         rl_dom_citta: (tipoSogg === 'PG' && String(g('rl_dom_notifica')) === '1' ? g('rl_dom_citta') : null) || null,
+        rl_dom_provincia: (tipoSogg === 'PG' && String(g('rl_dom_notifica')) === '1' ? g('rl_dom_provincia') : null) || null,
         rl_dom_cap: (tipoSogg === 'PG' && String(g('rl_dom_notifica')) === '1' ? g('rl_dom_cap') : null) || null,
+        rl_dom_stato: tipoSogg === 'PG' && String(g('rl_dom_notifica')) === '1' ? (g('rl_dom_stato') || 'ITALIA') : null,
         note_anagrafica: g('note_anagrafica') || null,
         // Valutazione RI: gradi puntuali per articolo e occorrenza Art. 15
         gradi_violazioni: g('gradi_violazioni') || null,
@@ -6405,7 +6964,12 @@ React.useEffect(() => {
       p.onSaved?.(newOid)
     } catch (e: any) {
       setSaving(false)
-      setMsg({ kind: 'err', text: `Errore: ${e?.message || String(e)}` })
+      showGeneralErrorPopup(
+        'Errore salvataggio',
+        `Si è verificato un errore durante il salvataggio della pratica.
+
+${e?.message || String(e)}`
+      )
     }
   }
 
@@ -6416,13 +6980,23 @@ React.useEffect(() => {
   const selectedViolazioniCount = React.useMemo(() => getSelectedViolazioniCount(draft), [draft])
   const noteSpeseExpectedCasistiche = React.useMemo(() => getNotaSpeseCasistiche(draft), [draft])
   const noteSpeseCasistiche = React.useMemo(() => getNotaSpeseCasisticheWithExistingRows(draft, noteSpeseRowsDraft), [draft, noteSpeseRowsDraft])
+  const noteSpeseExpectedCount = React.useMemo(() => noteSpeseExpectedCasistiche.length, [noteSpeseExpectedCasistiche])
   const noteSpeseCompiledCount = React.useMemo(() => {
-    return noteSpeseExpectedCasistiche.filter(opt => isNotaSpeseCompiledForCasistica(noteSpeseRowsDraft, opt.codice, noteSpesePercent)).length
-  }, [noteSpeseExpectedCasistiche, noteSpeseRowsDraft, noteSpesePercent])
+    // Numeratore badge Nota spese: conteggia le note spese effettivamente presenti/salvate
+    // per le violazioni che le prevedono, anche se l'importo risulta pari a 0.
+    return noteSpeseExpectedCasistiche.filter(opt => hasNotaSpeseRowsForCasistica(noteSpeseRowsDraft, opt.codice)).length
+  }, [noteSpeseExpectedCasistiche, noteSpeseRowsDraft])
   const noteSpeseIncompleteCasistiche = React.useMemo(() => {
     return noteSpeseCasistiche.filter(opt => hasNotaSpeseIncompleteRowsForCasistica(noteSpeseRowsDraft, opt.codice))
   }, [noteSpeseCasistiche, noteSpeseRowsDraft])
   const noteSpeseIncompleteCount = noteSpeseIncompleteCasistiche.length
+  const noteSpeseMissingCount = Math.max(0, noteSpeseExpectedCount - noteSpeseCompiledCount)
+  const noteSpeseBadgeReady = React.useMemo(() => {
+    if (mode !== 'edit' || currentOid == null) return true
+    if (noteSpeseMissing.length > 0) return true
+    const key = `${Number(currentOid)}|${String(currentGlobalId || '').trim()}`
+    return !!currentGlobalId && noteSpeseRowsLoadedKey === key
+  }, [mode, currentOid, currentGlobalId, noteSpeseMissing.length, noteSpeseRowsLoadedKey])
   const allegatiCount = React.useMemo(() => {
     if (mode !== 'edit' || currentOid == null) return 0
     const existingCount = attachmentsForOid === currentOid && Array.isArray(attachments) ? attachments.length : 0
@@ -6450,20 +7024,26 @@ React.useEffect(() => {
   const noteSpeseBrowseDisabled = isRiAgrTecLimitedEdit || noteSpeseBusy || noteSpeseDraftDirty || !activeNotaSpeseCasistica || noteSpeseCasistiche.length === 0
 
   React.useEffect(() => {
+    // Evita il lampeggio arancione iniziale senza nascondere il badge:
+    // finché le righe già salvate non sono caricate, pubblichiamo uno stato
+    // provvisorio neutro, mostrato dal nav come …/n.
+    const noteSpeseLoadingForBadge = noteSpeseExpectedCount > 0 && !noteSpeseBadgeReady
+    const noteSpeseDoneForBadge = noteSpeseLoadingForBadge ? 0 : noteSpeseCompiledCount
+    const noteSpeseWarningForBadge = noteSpeseLoadingForBadge ? 0 : noteSpeseMissingCount
     const counts = {
       violazione: selectedViolazioniCount,
-      'nota-spese': noteSpeseCompiledCount,
-      nota_spese: noteSpeseCompiledCount,
+      'nota-spese': noteSpeseExpectedCount,
+      nota_spese: noteSpeseExpectedCount,
       allegati: allegatiCount
     }
     const badgeDetails = {
-      'nota-spese': { total: noteSpeseCompiledCount, done: noteSpeseCompiledCount, warning: noteSpeseIncompleteCount },
-      nota_spese: { total: noteSpeseCompiledCount, done: noteSpeseCompiledCount, warning: noteSpeseIncompleteCount }
+      'nota-spese': { total: noteSpeseExpectedCount, done: noteSpeseDoneForBadge, warning: noteSpeseWarningForBadge, loading: noteSpeseLoadingForBadge },
+      nota_spese: { total: noteSpeseExpectedCount, done: noteSpeseDoneForBadge, warning: noteSpeseWarningForBadge, loading: noteSpeseLoadingForBadge }
     }
     try { ;(window as any).__giiEditSectionCounts = counts } catch {}
     try { ;(window as any).__giiEditSectionBadgeDetails = badgeDetails } catch {}
     try { window.dispatchEvent(new CustomEvent('gii:edit-section-counts', { detail: { counts, badgeDetails } })) } catch {}
-  }, [selectedViolazioniCount, noteSpeseCompiledCount, noteSpeseIncompleteCount, allegatiCount])
+  }, [selectedViolazioniCount, noteSpeseBadgeReady, noteSpeseExpectedCount, noteSpeseCompiledCount, noteSpeseMissingCount, allegatiCount])
 
   const NP_TABS = [
     { id: 'dati_generali', label: 'Dati generali' },
@@ -6654,7 +7234,11 @@ React.useEffect(() => {
       case 'ti_assegnato_nome': return { label: 'Tecnico istruttore', el: <NpText value={g('ti_assegnato_nome')} onChange={() => {}} disabled/> }
       case 'data_firma': return { label: 'Data compilazione', el: <NpText value={fmtDateDMY(g('data_firma'))} onChange={() => {}} disabled/> }
       // Trasgressore — dati principali
-      case 'tipologia_soggetto': return { label: 'Tipologia soggetto', el: <NpSel value={tipoSogg} onChange={v => set('tipologia_soggetto', v)} options={CHOICES.tipo_soggetto} disabled={saving}/> }
+      case 'tipologia_soggetto': return { label: 'Tipologia soggetto', el: <NpSel value={tipoSogg} onChange={v => {
+        set('tipologia_soggetto', v)
+        if (!g('dom_notifica_uguale')) set('dom_notifica_uguale', '1')
+        if (v === 'PG' && !g('rl_dom_notifica')) set('rl_dom_notifica', '0')
+      }} options={CHOICES.tipo_soggetto} disabled={saving}/> }
       case 'nome': return tipoSogg === 'PF' ? { label: 'Nome', el: <NpText value={g('nome')} onChange={v => set('nome', v)} disabled={saving}/> } : null
       case 'cognome': return tipoSogg === 'PF' ? { label: 'Cognome', el: <NpText value={g('cognome')} onChange={v => set('cognome', v)} disabled={saving}/> } : null
       case 'codice_fiscale': return tipoSogg === 'PF' ? { label: 'Codice fiscale', hint: 'Massimo 16 caratteri', el: <NpText value={g('codice_fiscale')} onChange={v => set('codice_fiscale', v)} disabled={saving} maxLength={16}/> } : null
@@ -6663,8 +7247,10 @@ React.useEffect(() => {
       // Trasgressore — indirizzo
       case 'via': return { label: 'Via', el: <NpText value={g('via')} onChange={v => set('via', v)} disabled={saving}/> }
       case 'civico': return { label: 'N. civico', el: <NpText value={g('civico')} onChange={v => set('civico', v)} disabled={saving}/> }
-      case 'citta': return { label: 'Città', el: <NpText value={g('citta')} onChange={v => set('citta', v)} disabled={saving}/> }
-      case 'cap': return { label: 'CAP', el: <NpText value={g('cap')} onChange={v => set('cap', v)} disabled={saving}/> }
+      case 'citta': return { label: 'Città', el: <ComuneIstatInput value={g('citta')} onManualChange={v => { set('citta', v); set('provincia', ''); resetCapOptions('main') }} onSelect={o => applyComuneToAddress('main', o)} disabled={saving}/> }
+      case 'provincia': return { label: 'Provincia', el: <NpText value={g('provincia')} onChange={v => set('provincia', v)} disabled={saving} maxLength={2}/> }
+      case 'cap': return { label: 'CAP', el: <CapIstatInput value={g('cap')} onChange={v => set('cap', v)} options={capOptionsByAddress.main} disabled={saving}/> }
+      case 'stato': return { label: 'Stato', el: <NpText value={g('stato') || 'ITALIA'} onChange={v => set('stato', v)} disabled={saving}/> }
       case 'telefono': return { label: 'Telefono', el: <NpText value={g('telefono')} onChange={v => set('telefono', v)} disabled={saving}/> }
       case 'cellulare': return { label: 'Cellulare', el: <NpText value={g('cellulare')} onChange={v => set('cellulare', v)} disabled={saving}/> }
       case 'email': return { label: 'E-mail', el: <NpText value={g('email')} onChange={v => set('email', v)} disabled={saving}/> }
@@ -6672,21 +7258,25 @@ React.useEffect(() => {
       // Trasgressore — qualifica
       case 'qualifica_fondo': return { label: 'Qualifica rispetto al fondo', el: <NpSel value={g('qualifica_fondo')} onChange={v => set('qualifica_fondo', v)} options={domainOpts('qualifica_fondo', CHOICES.qualifica_fondo)} disabled={saving}/> }
       // Trasgressore — domicilio notifiche
-      case 'dom_notifica_uguale': return { label: 'Coincide con residenza/sede legale', el: <NpSel value={g('dom_notifica_uguale')} onChange={v => set('dom_notifica_uguale', v)} options={domainOpts('dom_notifica_uguale', CHOICES.si_no)} disabled={saving}/> }
+      case 'dom_notifica_uguale': return { label: 'Coincide con residenza/sede legale', el: <NpSel value={g('dom_notifica_uguale') || '1'} onChange={v => set('dom_notifica_uguale', v)} options={domainOpts('dom_notifica_uguale', CHOICES.si_no)} disabled={saving} allowEmpty={false}/> }
       case 'dom_notifica_via': return String(g('dom_notifica_uguale')) !== '1' ? { label: 'Via', el: <NpText value={g('dom_notifica_via')} onChange={v => set('dom_notifica_via', v)} disabled={saving}/> } : null
       case 'dom_notifica_civico': return String(g('dom_notifica_uguale')) !== '1' ? { label: 'N. civico', el: <NpText value={g('dom_notifica_civico')} onChange={v => set('dom_notifica_civico', v)} disabled={saving}/> } : null
-      case 'dom_notifica_citta': return String(g('dom_notifica_uguale')) !== '1' ? { label: 'Città', el: <NpText value={g('dom_notifica_citta')} onChange={v => set('dom_notifica_citta', v)} disabled={saving}/> } : null
-      case 'dom_notifica_cap': return String(g('dom_notifica_uguale')) !== '1' ? { label: 'CAP', el: <NpText value={g('dom_notifica_cap')} onChange={v => set('dom_notifica_cap', v)} disabled={saving}/> } : null
+      case 'dom_notifica_citta': return String(g('dom_notifica_uguale')) !== '1' ? { label: 'Città', el: <ComuneIstatInput value={g('dom_notifica_citta')} onManualChange={v => { set('dom_notifica_citta', v); set('dom_notifica_provincia', ''); resetCapOptions('dom') }} onSelect={o => applyComuneToAddress('dom', o)} disabled={saving}/> } : null
+      case 'dom_notifica_provincia': return String(g('dom_notifica_uguale')) !== '1' ? { label: 'Provincia', el: <NpText value={g('dom_notifica_provincia')} onChange={v => set('dom_notifica_provincia', v)} disabled={saving} maxLength={2}/> } : null
+      case 'dom_notifica_cap': return String(g('dom_notifica_uguale')) !== '1' ? { label: 'CAP', el: <CapIstatInput value={g('dom_notifica_cap')} onChange={v => set('dom_notifica_cap', v)} options={capOptionsByAddress.dom} disabled={saving}/> } : null
+      case 'dom_notifica_stato': return String(g('dom_notifica_uguale')) !== '1' ? { label: 'Stato', el: <NpText value={g('dom_notifica_stato') || 'ITALIA'} onChange={v => set('dom_notifica_stato', v)} disabled={saving}/> } : null
       // Trasgressore — rappresentante legale (PG only)
       case 'rl_nome': return tipoSogg === 'PG' ? { label: 'Nome', el: <NpText value={g('rl_nome')} onChange={v => set('rl_nome', v)} disabled={saving}/> } : null
       case 'rl_cognome': return tipoSogg === 'PG' ? { label: 'Cognome', el: <NpText value={g('rl_cognome')} onChange={v => set('rl_cognome', v)} disabled={saving}/> } : null
       case 'rl_cf': return tipoSogg === 'PG' ? { label: 'Codice fiscale', hint: 'Massimo 16 caratteri', el: <NpText value={g('rl_cf')} onChange={v => set('rl_cf', v)} disabled={saving} maxLength={16}/> } : null
       case 'rl_carica': return tipoSogg === 'PG' ? { label: 'Carica', el: <NpSel value={g('rl_carica')} onChange={v => set('rl_carica', v)} options={domainOpts('rl_carica', CHOICES.rl_carica)} disabled={saving}/> } : null
-      case 'rl_dom_notifica': return tipoSogg === 'PG' ? { label: 'Domicilio notifiche del rappresentante', el: <NpSel value={g('rl_dom_notifica')} onChange={v => set('rl_dom_notifica', v)} options={domainOpts('rl_dom_notifica', CHOICES.si_no)} disabled={saving}/> } : null
+      case 'rl_dom_notifica': return tipoSogg === 'PG' ? { label: 'Domicilio notifiche del rappresentante', el: <NpSel value={g('rl_dom_notifica') || '0'} onChange={v => set('rl_dom_notifica', v)} options={domainOpts('rl_dom_notifica', CHOICES.si_no)} disabled={saving} allowEmpty={false}/> } : null
       case 'rl_dom_via': return (tipoSogg === 'PG' && String(g('rl_dom_notifica')) === '1') ? { label: 'Via', el: <NpText value={g('rl_dom_via')} onChange={v => set('rl_dom_via', v)} disabled={saving}/> } : null
       case 'rl_dom_civico': return (tipoSogg === 'PG' && String(g('rl_dom_notifica')) === '1') ? { label: 'N. civico', el: <NpText value={g('rl_dom_civico')} onChange={v => set('rl_dom_civico', v)} disabled={saving}/> } : null
-      case 'rl_dom_citta': return (tipoSogg === 'PG' && String(g('rl_dom_notifica')) === '1') ? { label: 'Città', el: <NpText value={g('rl_dom_citta')} onChange={v => set('rl_dom_citta', v)} disabled={saving}/> } : null
-      case 'rl_dom_cap': return (tipoSogg === 'PG' && String(g('rl_dom_notifica')) === '1') ? { label: 'CAP', el: <NpText value={g('rl_dom_cap')} onChange={v => set('rl_dom_cap', v)} disabled={saving}/> } : null
+      case 'rl_dom_citta': return (tipoSogg === 'PG' && String(g('rl_dom_notifica')) === '1') ? { label: 'Città', el: <ComuneIstatInput value={g('rl_dom_citta')} onManualChange={v => { set('rl_dom_citta', v); set('rl_dom_provincia', ''); resetCapOptions('rl') }} onSelect={o => applyComuneToAddress('rl', o)} disabled={saving}/> } : null
+      case 'rl_dom_provincia': return (tipoSogg === 'PG' && String(g('rl_dom_notifica')) === '1') ? { label: 'Provincia', el: <NpText value={g('rl_dom_provincia')} onChange={v => set('rl_dom_provincia', v)} disabled={saving} maxLength={2}/> } : null
+      case 'rl_dom_cap': return (tipoSogg === 'PG' && String(g('rl_dom_notifica')) === '1') ? { label: 'CAP', el: <CapIstatInput value={g('rl_dom_cap')} onChange={v => set('rl_dom_cap', v)} options={capOptionsByAddress.rl} disabled={saving}/> } : null
+      case 'rl_dom_stato': return (tipoSogg === 'PG' && String(g('rl_dom_notifica')) === '1') ? { label: 'Stato', el: <NpText value={g('rl_dom_stato') || 'ITALIA'} onChange={v => set('rl_dom_stato', v)} disabled={saving}/> } : null
       // Trasgressore — note
       case 'note_anagrafica': return { label: 'Note trasgressore', el: <NpText value={g('note_anagrafica')} onChange={v => set('note_anagrafica', v)} multiline disabled={saving}/> }
       // Violazione — Art. 15
@@ -7171,28 +7761,73 @@ React.useEffect(() => {
           return <NpField label={label}>{node}</NpField>
         }
         const emptyGradeCell = <span style={{ color: '#94a3b8', fontSize: 12 }}>—</span>
+        const reqCheckCell = (required: boolean, title: string) => (
+          <span
+            title={title}
+            aria-label={required ? title : 'Non richiesto'}
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              width: '100%',
+              minHeight: 24,
+              color: required ? '#0f5132' : '#94a3b8',
+              fontSize: required ? 15 : 12,
+              fontWeight: required ? 700 : 400,
+              lineHeight: 1
+            }}
+          >
+            {required ? '✓' : '—'}
+          </span>
+        )
         const renderNorma3Rows = () => {
+          const pointColumnWidth = 86
+          const gravityReqColumnWidth = 74
+          const notaSpeseReqColumnWidth = 84
+          const gridColumns = `minmax(300px, 1fr) ${pointColumnWidth}px ${notaSpeseReqColumnWidth}px ${gravityReqColumnWidth}px ${formStyle.norma3GradeColumnWidth}px`
+          const reqHeaderStyle: React.CSSProperties = {
+            ...editMutedHeaderStyle,
+            marginBottom: 0,
+            padding: '6px 6px',
+            borderLeft: '1px solid #e5e7eb',
+            textAlign: 'center',
+            whiteSpace: 'normal',
+            lineHeight: 1.15
+          }
+          const reqCellStyle: React.CSSProperties = {
+            borderLeft: '1px solid #e5e7eb',
+            padding: '3px 4px',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center'
+          }
           return (
             <div style={{ border: '1px solid #e5e7eb', borderRadius: 8, overflow: 'hidden', background: '#f8fbff', display: 'grid', gap: formStyle.norma3RowGap }}>
-              <div style={{ display: 'grid', gridTemplateColumns: `minmax(360px, 1fr) ${formStyle.norma3GradeColumnWidth}px`, gap: 0, background: '#f8fafc', borderBottom: '1px solid #e5e7eb' }}>
+              <div style={{ display: 'grid', gridTemplateColumns: gridColumns, gap: 0, background: '#f8fafc', borderBottom: '1px solid #e5e7eb' }}>
                 <div style={{ ...editMutedHeaderStyle, marginBottom: 0, padding: '6px 8px' }}>Violazione</div>
-                <div style={{ ...editMutedHeaderStyle, marginBottom: 0, padding: '6px 8px', borderLeft: '1px solid #e5e7eb' }}>Gravità</div>
+                <div style={reqHeaderStyle}>Punto mappa</div>
+                <div style={reqHeaderStyle} title='Nota spese / rimborso / risarcimento'>Nota spese</div>
+                <div style={reqHeaderStyle}>Gravità</div>
+                <div style={reqHeaderStyle}>Grado</div>
               </div>
-              {CHOICES.norma3.map(o => {
+              {CHOICES.norma3.map((o, idx) => {
                 const art = normalizeArtCode(o.v)
                 const selected = norma3Set.has(o.v)
+                const requiresPoint = NORMA3_REQ_POINT.has(o.v)
                 const hasGrade = RI_GRADO_ART_CODES.includes(art as any)
+                const hasNotaSpese = getNotaSpeseCasisticaByArtCode(o.v) != null
                 const canEditGrade = isCurrentRiAgrTec() && selected && hasGrade && !saving
                 const gradeNode = selected && hasGrade
                   ? <NpSel value={riGradiViolazioniMap[art] || ''} onChange={v => setRiGradoForArt(art, v)} options={CHOICES.grado} disabled={!canEditGrade}/>
                   : emptyGradeCell
+                const rowBg = (idx % 2 === 0 ? '#ffffff' : '#f7fbff')
                 return (
                   <div key={o.v} style={{
                     display: 'grid',
-                    gridTemplateColumns: `minmax(360px, 1fr) ${formStyle.norma3GradeColumnWidth}px`,
+                    gridTemplateColumns: gridColumns,
                     minHeight: 30,
                     borderBottom: '1px solid #edf2f7',
-                    background: selected ? '#f8fbff' : '#fff'
+                    background: rowBg
                   }}>
                     <label style={{
                       display: 'flex',
@@ -7203,11 +7838,21 @@ React.useEffect(() => {
                       cursor: (saving || isRiAgrTecLimitedEdit) ? 'not-allowed' : 'pointer',
                       padding: '5px 8px',
                       opacity: isRiAgrTecLimitedEdit ? 0.72 : 1,
-                      lineHeight: 1.3
+                      lineHeight: 1.3,
+                      minWidth: 0
                     }}>
                       <input type='checkbox' checked={selected} disabled={saving || isRiAgrTecLimitedEdit} onChange={() => !(saving || isRiAgrTecLimitedEdit) && toggleNorma3(o.v)} style={{ margin: 0, flexShrink: 0 }}/>
                       <span>{o.l}</span>
                     </label>
+                    <div style={reqCellStyle}>
+                      {reqCheckCell(requiresPoint, 'Richiede punto in mappa')}
+                    </div>
+                    <div style={reqCellStyle}>
+                      {reqCheckCell(hasNotaSpese, 'Richiede nota spese / rimborso / risarcimento')}
+                    </div>
+                    <div style={reqCellStyle}>
+                      {reqCheckCell(hasGrade, 'Richiede grado di gravità')}
+                    </div>
                     <div style={{ borderLeft: '1px solid #e5e7eb', padding: '3px 6px', display: 'flex', alignItems: 'center' }}>
                       {gradeNode}
                     </div>
@@ -7501,7 +8146,7 @@ React.useEffect(() => {
           {toolbarTitleInfo.praticaCode ? <> <span style={{ color: '#0b5fff' }}>{toolbarTitleInfo.praticaCode}</span></> : null}
         </span>
         <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-          {msg && <span style={{ fontSize: formStyle.msgFontSize, color: msg.kind === 'ok' ? '#1a7f37' : '#b42318' }}>{msg.text}</span>}
+          {msg && msg.kind === 'ok' && <span style={{ fontSize: formStyle.msgFontSize, color: '#1a7f37' }}>{msg.text}</span>}
           {npTab === 'nota_spese' && mode === 'edit' && currentOid != null && noteSpeseMissing.length === 0 && currentGlobalId && (
             <button
               type='button'
@@ -7708,9 +8353,9 @@ React.useEffect(() => {
       <div style={{ border: '1px solid #c5d9f1', borderRadius: 8, background: '#fff', padding: 10 }}>
         <div style={{ display: 'grid', gap: 10 }}>
           {noteSpeseCasistiche.length > 0 ? (
-            <div style={{ display: 'grid', gap: 6, padding: 10, borderRadius: 10, border: '2px solid #0f7375', background: '#f0fdfa' }}>
+            <div style={{ display: 'grid', gap: 4, padding: 10, borderRadius: 10, border: '2px solid #0f7375', background: '#f0fdfa' }}>
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, flexWrap: 'wrap' }}>
-                <label style={{ fontSize: 13, fontWeight: 900, color: '#0f4f50' }}>Scegli la nota spese da compilare</label>
+                <label style={{ fontSize: 13, fontWeight: 900, color: '#0f4f50' }}>Seleziona la violazione</label>
                 <span style={{ fontSize: 11, fontWeight: 800, color: '#0f7375', background: '#d9f7f2', border: '1px solid #9ee5db', borderRadius: 999, padding: '2px 8px' }}>Scelta obbligatoria</span>
               </div>
               <select
@@ -7753,7 +8398,7 @@ React.useEffect(() => {
           {noteSpeseDraftDirty && <span style={{ fontSize: 11, color: '#856404' }}>Salva le modifiche prima di sfogliare il prezzario.</span>}
         </div>
       </div>
-      <div style={{ display: 'grid', gap: 8 }}>
+      <div style={{ display: 'grid', gap: 14 }}>
         <NoteSpeseManager category='AT' title='Attrezzature e trasporti' rows={activeNotaSpeseRows['AT']} onRowsChange={(nextRows) => { if (isRiAgrTecLimitedEdit || !activeNotaSpeseCasistica) return; setNoteSpeseRowsDraft((prev) => mergeCategoryRowsForCasistica(prev, 'AT', activeNotaSpeseCasistica, nextRows)) }} onDirtyChange={(dirty) => { if (isRiAgrTecLimitedEdit) return; setNoteSpeseFormDirtyByCategory((prev) => ({ ...prev, AT: dirty })) }} resetKey={noteSpeseManagerResetKey} readonly={isRiAgrTecLimitedEdit || !activeNotaSpeseCasistica} />
         <NoteSpeseManager category='PR' title='Materiali da costruzione' rows={activeNotaSpeseRows['PR']} onRowsChange={(nextRows) => { if (isRiAgrTecLimitedEdit || !activeNotaSpeseCasistica) return; setNoteSpeseRowsDraft((prev) => mergeCategoryRowsForCasistica(prev, 'PR', activeNotaSpeseCasistica, nextRows)) }} onDirtyChange={(dirty) => { if (isRiAgrTecLimitedEdit) return; setNoteSpeseFormDirtyByCategory((prev) => ({ ...prev, PR: dirty })) }} resetKey={noteSpeseManagerResetKey} readonly={isRiAgrTecLimitedEdit || !activeNotaSpeseCasistica} />
         <NoteSpeseManager category='RU' title='Risorse umane' rows={activeNotaSpeseRows['RU']} onRowsChange={(nextRows) => { if (isRiAgrTecLimitedEdit || !activeNotaSpeseCasistica) return; setNoteSpeseRowsDraft((prev) => mergeCategoryRowsForCasistica(prev, 'RU', activeNotaSpeseCasistica, nextRows)) }} onDirtyChange={(dirty) => { if (isRiAgrTecLimitedEdit) return; setNoteSpeseFormDirtyByCategory((prev) => ({ ...prev, RU: dirty })) }} resetKey={noteSpeseManagerResetKey} readonly={isRiAgrTecLimitedEdit || !activeNotaSpeseCasistica} />
@@ -7950,6 +8595,125 @@ React.useEffect(() => {
 
       </div>
 
+      {missingMapPointPopupOpen && createPortal(
+        <div
+          data-gii-global-popup-root='1'
+          style={{ position: 'fixed', inset: 0, zIndex: 2147483646, background: 'rgba(0,0,0,0.52)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16, pointerEvents: 'auto' }}
+          onClick={(e) => { e.preventDefault(); e.stopPropagation() }}
+          onMouseDown={(e) => { e.preventDefault(); e.stopPropagation() }}
+        >
+          <div
+            role='dialog'
+            aria-modal='true'
+            data-gii-global-popup-dialog='1'
+            style={{ width: 'min(92vw, 520px)', background: '#f8fbff', borderRadius: 14, boxShadow: '0 20px 60px rgba(0,0,0,0.28)', border: '1px solid rgba(0,0,0,0.08)', padding: 18, position: 'relative', zIndex: 2147483647 }}
+            onClick={(e) => { e.stopPropagation() }}
+            onMouseDown={(e) => { e.stopPropagation() }}
+          >
+            <div style={{ fontWeight: 800, fontSize: 16, marginBottom: 8, color: '#1d4ed8', display: 'flex', alignItems: 'center', gap: 8 }}>
+              <span style={{ fontSize: 20 }}>📍</span>
+              Punto in mappa obbligatorio
+            </div>
+            <div style={{ fontSize: 13, color: '#374151', lineHeight: 1.6, marginBottom: 14, display: 'grid', gap: 10 }}>
+              <div style={{ fontWeight: 500, padding: 10, background: '#eff6ff', border: '1px solid #bfdbfe', borderRadius: 6, color: '#1e3a8a' }}>
+                Per salvare la pratica è necessario indicare il punto in mappa.
+              </div>
+              <div>Confermando, verrà aperta la scheda <b>Luoghi e dati</b>.</div>
+            </div>
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10 }}>
+              <button
+                type='button'
+                onClick={() => { setMissingMapPointPopupOpen(false) }}
+                style={{ ...btnBase, border: '1px solid rgba(0,0,0,0.18)', background: '#d92d20', color: '#fff', cursor: 'pointer', pointerEvents: 'auto' }}
+              >
+                Annulla
+              </button>
+              <button
+                type='button'
+                onClick={() => {
+                  setMissingMapPointPopupOpen(false)
+                  setMsg(null)
+                  setIsExternalNavMode(false)
+                  try { sessionStorage.setItem('GII_EDIT_TAB', 'dati_tecnici') } catch {}
+                  try { sessionStorage.setItem('GII_NAV_SECTION', 'dati-tecnici') } catch {}
+                  giiActivateDatiTecniciExternalLayout()
+                  try { window.dispatchEvent(new CustomEvent('gii:edit-section-change', { detail: { section: 'dati-tecnici' } })) } catch {}
+                  setNpTab('dati_tecnici')
+                  const resetSidebar = () => {
+                    const target = giiReadLayoutSidebarDefaultBoundaryX(npTabSyncElRef.current)
+                    giiMoveNearestLayoutSidebarToX(npTabSyncElRef.current, target)
+                    try { window.dispatchEvent(new Event('resize')) } catch {}
+                  }
+                  window.setTimeout(resetSidebar, 160)
+                  window.setTimeout(resetSidebar, 450)
+                  window.setTimeout(resetSidebar, 900)
+                }}
+                style={{ ...btnBase, border: '1px solid rgba(0,0,0,0.18)', background: '#1d4ed8', color: '#fff', cursor: 'pointer', pointerEvents: 'auto' }}
+              >
+                Conferma
+              </button>
+            </div>
+          </div>
+        </div>,
+        getGlobalOverlayHost() || document.body
+      )}
+
+      {notaSpeseLinkedViolationPopup && createPortal(
+        <div
+          data-gii-global-popup-root='1'
+          style={{ position: 'fixed', inset: 0, zIndex: 2147483646, background: 'rgba(0,0,0,0.52)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16, pointerEvents: 'auto' }}
+          onClick={(e) => { e.preventDefault(); e.stopPropagation() }}
+          onMouseDown={(e) => { e.preventDefault(); e.stopPropagation() }}
+        >
+          <div
+            role='dialog'
+            aria-modal='true'
+            data-gii-global-popup-dialog='1'
+            style={{ width: 'min(92vw, 540px)', background: '#f8fbff', borderRadius: 14, boxShadow: '0 20px 60px rgba(0,0,0,0.28)', border: '1px solid rgba(0,0,0,0.08)', padding: 18, position: 'relative', zIndex: 2147483647 }}
+            onClick={(e) => { e.stopPropagation() }}
+            onMouseDown={(e) => { e.stopPropagation() }}
+          >
+            <div style={{ fontWeight: 800, fontSize: 16, marginBottom: 8, color: '#d92d20', display: 'flex', alignItems: 'center', gap: 8 }}>
+              <span style={{ fontSize: 20 }}>⚠</span>
+              Nota spese collegata
+            </div>
+            <div style={{ fontSize: 13, color: '#374151', lineHeight: 1.6, marginBottom: 14, display: 'grid', gap: 10 }}>
+              <div style={{ fontWeight: 500, padding: 10, background: '#fff7ed', border: '1px solid #fed7aa', borderRadius: 6, color: '#7c2d12' }}>
+                Per deselezionare <b>Art. {notaSpeseLinkedViolationPopup.art}</b> è necessario eliminare prima le righe della nota spese collegata.
+              </div>
+              <div>Confermando, verrà aperta la scheda <b>Nota spese</b>.</div>
+            </div>
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10 }}>
+              <button
+                type='button'
+                onClick={() => { setNotaSpeseLinkedViolationPopup(null) }}
+                style={{ ...btnBase, border: '1px solid rgba(0,0,0,0.18)', background: '#d92d20', color: '#fff', cursor: 'pointer', pointerEvents: 'auto' }}
+              >
+                Annulla
+              </button>
+              <button
+                type='button'
+                onClick={() => {
+                  const info = notaSpeseLinkedViolationPopup
+                  setNotaSpeseLinkedViolationPopup(null)
+                  setMsg(null)
+                  if (info?.codice) setActiveNotaSpeseCasistica(info.codice)
+                  setIsExternalNavMode(false)
+                  try { sessionStorage.setItem('GII_EDIT_TAB', 'nota_spese') } catch {}
+                  try { sessionStorage.setItem('GII_NAV_SECTION', 'nota-spese') } catch {}
+                  try { window.dispatchEvent(new CustomEvent('gii:edit-section-change', { detail: { section: 'nota-spese' } })) } catch {}
+                  setNpTab('nota_spese')
+                }}
+                style={{ ...btnBase, border: '1px solid rgba(0,0,0,0.18)', background: '#1d4ed8', color: '#fff', cursor: 'pointer', pointerEvents: 'auto' }}
+              >
+                Conferma
+              </button>
+            </div>
+          </div>
+        </div>,
+        getGlobalOverlayHost() || document.body
+      )}
+
       {cancelUnsavedPopupOpen && createPortal(
         <div
           data-gii-global-popup-root='1'
@@ -8025,6 +8789,44 @@ React.useEffect(() => {
             <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10 }}>
               <button type='button' onClick={confirmAttachmentAction} style={{ ...btnBase, border: '1px solid rgba(0,0,0,0.18)', background: '#1a7f37', color: '#fff', cursor: 'pointer' }}>Conferma</button>
               <button type='button' onClick={cancelAttachmentAction} style={{ ...btnBase, border: '1px solid rgba(0,0,0,0.18)', background: '#d92d20', color: '#fff', cursor: 'pointer' }}>Annulla</button>
+            </div>
+          </div>
+        </div>,
+        getGlobalOverlayHost() || document.body
+      )}
+
+      {generalErrorPopup && createPortal(
+        <div
+          data-gii-global-popup-root='1'
+          style={{ position: 'fixed', inset: 0, zIndex: 2147483646, background: 'rgba(0,0,0,0.52)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16, pointerEvents: 'auto' }}
+          onClick={(e) => { e.preventDefault(); e.stopPropagation() }}
+          onMouseDown={(e) => { e.preventDefault(); e.stopPropagation() }}
+        >
+          <div
+            role='dialog'
+            aria-modal='true'
+            data-gii-global-popup-dialog='1'
+            style={{ width: 'min(92vw, 540px)', background: '#f8fbff', borderRadius: 14, boxShadow: '0 20px 60px rgba(0,0,0,0.28)', border: '1px solid rgba(0,0,0,0.08)', padding: 18, position: 'relative', zIndex: 2147483647 }}
+            onClick={(e) => { e.stopPropagation() }}
+            onMouseDown={(e) => { e.stopPropagation() }}
+          >
+            <div style={{ fontWeight: 800, fontSize: 16, marginBottom: 8, color: '#dc2626', display: 'flex', alignItems: 'center', gap: 8 }}>
+              <span style={{ fontSize: 20 }}>⚠</span>
+              {generalErrorPopup.title}
+            </div>
+            <div style={{ fontSize: 13, color: '#374151', lineHeight: 1.6, marginBottom: 14, display: 'grid', gap: 10 }}>
+              <div style={{ fontWeight: 500, padding: 10, background: '#fef2f2', border: '1px solid #fecaca', borderRadius: 6, color: '#7f1d1d', whiteSpace: 'pre-wrap' }}>
+                {generalErrorPopup.text}
+              </div>
+            </div>
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10 }}>
+              <button
+                type='button'
+                onClick={() => setGeneralErrorPopup(null)}
+                style={{ ...btnBase, border: '1px solid rgba(0,0,0,0.18)', background: '#1d4ed8', color: '#fff', cursor: 'pointer', pointerEvents: 'auto' }}
+              >
+                Chiudi
+              </button>
             </div>
           </div>
         </div>,

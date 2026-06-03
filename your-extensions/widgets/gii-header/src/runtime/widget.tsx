@@ -612,6 +612,40 @@ function selectAlertArchiveTableUrl (cfg: any, user: any): string {
   return String(usesTecniciAlertUrls(user) ? (cfg.alertsArchiveTableUrlTecnici || '') : (cfg.alertsArchiveTableUrl || '')).trim()
 }
 
+
+function giiAlertPracticeIdentityKey (alert: GiiAlertItem): string {
+  const gid = String(alert?.parentGlobalId || '').trim().replace(/^\{|\}$/g, '').toLowerCase()
+  if (gid) return `gid:${gid}`
+  const oid = Number(alert?.parentObjectId)
+  if (Number.isFinite(oid)) return `oid:${oid}`
+  const raw = alert?.raw || {}
+  const rawGid = String((raw as any).parent_globalid || (raw as any).globalid || (raw as any).GlobalID || '').trim().replace(/^\{|\}$/g, '').toLowerCase()
+  if (rawGid) return `gid:${rawGid}`
+  const rawOid = Number((raw as any).parent_objectid || (raw as any).objectid || (raw as any).OBJECTID)
+  if (Number.isFinite(rawOid)) return `oid:${rawOid}`
+  return String(alert?.alertKey || '')
+}
+
+function mergeCurrentAndFallbackGiiAlerts (currentActivities: GiiAlertItem[], dynamicAlerts: GiiAlertItem[]): GiiAlertItem[] {
+  const current = Array.isArray(currentActivities) ? currentActivities : []
+  const dynamic = Array.isArray(dynamicAlerts) ? dynamicAlerts : []
+  const currentKeys = new Set(
+    current
+      .map(a => giiAlertPracticeIdentityKey(a))
+      .filter(Boolean)
+  )
+
+  const dynamicTakeChargeFallback = dynamic
+    .filter(a => isGiiTakeChargeAlert(a))
+    .filter(a => {
+      const key = giiAlertPracticeIdentityKey(a)
+      return !!key && !currentKeys.has(key)
+    })
+
+  const dynamicNonTakeCharge = dynamic.filter(a => !isGiiTakeChargeAlert(a))
+  return [...current, ...dynamicTakeChargeFallback, ...dynamicNonTakeCharge]
+}
+
 function withGiiTimeout<T> (promise: Promise<T>, ms: number, message: string): Promise<T> {
   let timer: number | undefined
   const timeout = new Promise<T>((_, reject) => {
@@ -1050,8 +1084,12 @@ export default function Widget(props: Props) {
           user: alertUser,
           warningDays: Number(cfg.alertsWarningDays ?? 5)
         }), 25000, 'Timeout caricamento scadenze e anomalie.')
-        const legacy = (res.alerts || []).filter(a => !isGiiTakeChargeAlert(a))
-        const merged = [...currentActivities, ...legacy]
+        // Le attività correnti sono la fonte primaria per le prese in carico.
+        // Le rilevazioni create da Survey/TR, però, possono non avere ancora una riga
+        // in GII_ATTIVITA_CORRENTI: in quel caso recuperiamo la presa in carico
+        // calcolata dinamicamente dal Feature Layer madre, senza duplicare quelle
+        // già presenti come attività correnti.
+        const merged = mergeCurrentAndFallbackGiiAlerts(currentActivities, res.alerts || [])
         setAlerts(merged)
         setAlertCounts(summarizeGiiAlerts(merged))
         setAlertsError('')

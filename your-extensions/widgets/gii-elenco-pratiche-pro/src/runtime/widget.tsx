@@ -63,6 +63,11 @@ function getNumeroPraticaDisplay (rec: DataRecord): string {
   return pickOfficialRapportoNumber(d) || getRilevazioneDisplay(rec)
 }
 
+function getNumeroRapportoDisplay (rec: DataRecord): string {
+  const d: any = rec?.getData?.() || {}
+  return pickOfficialRapportoNumber(d) || '—'
+}
+
 function getNumeroVerbaleDisplay (rec: DataRecord): string {
   const d: any = rec?.getData?.() || {}
   return pickVerbaleNumber(d) || '—'
@@ -79,6 +84,7 @@ type SortItem = { field: string, dir: SortDir }
 const V_STATO = '__stato_sint__'
 const V_FASE = '__fase_istruttoria__'
 const V_TIPO_PRATICA = '__tipo_pratica__'
+const V_NUMERO_RILEVAZIONE = '__numero_rilevazione__'
 const V_NUMERO_PRATICA = '__numero_pratica__'
 const V_NUMERO_VERBALE = '__numero_verbale_display__'
 const V_ULTIMO = '__ultimo_agg__'
@@ -297,6 +303,84 @@ function formatDateIt (v: any): string {
     year: 'numeric', month: '2-digit', day: '2-digit',
     hour: '2-digit', minute: '2-digit'
   }).format(d)
+}
+
+function formatDateOnlyIt (v: any): string {
+  if (v === null || v === undefined || v === '') return ''
+  let d: Date | null = null
+  if (typeof v === 'number') d = new Date(v)
+  else if (typeof v === 'string') {
+    const t = Date.parse(v)
+    if (!Number.isNaN(t)) d = new Date(t)
+  } else if (v instanceof Date) d = v
+  if (!d || Number.isNaN(d.getTime())) return txt(v)
+  return new Intl.DateTimeFormat('it-IT', {
+    year: 'numeric', month: '2-digit', day: '2-digit'
+  }).format(d)
+}
+
+function isSurveyOriginRecord (d: any): boolean {
+  const op = pickField(d, 'origine_pratica')
+  return op === 1 || op === '1'
+}
+
+function isMidnightUtcDateValue (v: any): boolean {
+  const ms = parseToMs(v)
+  if (ms === null) return false
+  const d = new Date(ms)
+  return d.getUTCHours() === 0 &&
+    d.getUTCMinutes() === 0 &&
+    d.getUTCSeconds() === 0 &&
+    d.getUTCMilliseconds() === 0
+}
+
+function sameLocalDate (a: any, b: any): boolean {
+  const ma = parseToMs(a)
+  const mb = parseToMs(b)
+  if (ma === null || mb === null) return false
+  const da = new Date(ma)
+  const db = new Date(mb)
+  return da.getFullYear() === db.getFullYear() &&
+    da.getMonth() === db.getMonth() &&
+    da.getDate() === db.getDate()
+}
+
+function pickSurveyRuntimeDateMs (d: any, dateOnlyValue: any): number | null {
+  const candidates = ['end', 'End', 'END', 'start', 'Start', 'START', 'CreationDate', 'creationDate', 'creationdate', 'CREATIONDATE']
+  for (const name of candidates) {
+    const raw = pickField(d, name)
+    const ms = parseToMs(raw)
+    if (ms !== null && sameLocalDate(dateOnlyValue, ms)) return ms
+  }
+  return null
+}
+
+function pickRilevazioneDateMs (d: any, configuredField?: string): number | null {
+  const field = configuredField || 'data_rilevazione'
+  const primary = pickField(d, field)
+  const primaryMs = parseToMs(primary)
+
+  // Per le rilevazioni Survey il campo data_rilevazione può arrivare come sola data
+  // a mezzanotte UTC: in Italia viene visualizzato come 01:00/02:00. In quel caso
+  // l'elenco deve usare l'orario reale di compilazione/invio del Survey.
+  if (primaryMs !== null) {
+    if (isSurveyOriginRecord(d) && isMidnightUtcDateValue(primary)) {
+      const surveyMs = pickSurveyRuntimeDateMs(d, primary)
+      if (surveyMs !== null) return surveyMs
+    }
+    return primaryMs
+  }
+
+  const fallbackFields = [
+    'data_rilevazione', 'dt_rilevazione',
+    'end', 'start',
+    'CreationDate', 'creationDate', 'creationdate', 'CREATIONDATE'
+  ]
+  for (const name of fallbackFields) {
+    const ms = parseToMs(pickField(d, name))
+    if (ms !== null) return ms
+  }
+  return null
 }
 
 
@@ -708,6 +792,18 @@ function migrateColumns (cfg: any): ColumnDef[] {
       width: num(base?.width, fallback.width)
     }
   }
+  const takeFixedField = (fallback: ColumnDef, existing?: ColumnDef | null): ColumnDef => {
+    const base = existing || findByField(fallback.field)
+    const baseField = String(base?.field || '')
+    if (baseField) used.add(baseField.toLowerCase())
+    used.add(String(fallback.field || '').toLowerCase())
+    return {
+      id: fallback.id,
+      label: fallback.label,
+      field: fallback.field,
+      width: num(base?.width, fallback.width)
+    }
+  }
 
   const fieldUfficio = String(cfg?.fieldUfficio || 'ufficio_zona')
 
@@ -715,8 +811,11 @@ function migrateColumns (cfg: any): ColumnDef[] {
   // operativa per il ruolo corrente. Le colonne procedimentali sono raggruppate
   // visivamente nell'header: stato istruttoria + mittente + destinatario + ultimo agg.
   const out: ColumnDef[] = [
-    take({ id: 'col_tipo_pratica', label: 'Tipo pratica', field: V_TIPO_PRATICA, width: 150 }),
-    take({ id: 'col_numero', label: 'Numero', field: V_NUMERO_PRATICA, width: 140 }),
+    takeFixedField(
+      { id: 'col_numero_rilevazione', label: 'N. rilevazione', field: V_NUMERO_RILEVAZIONE, width: 150 },
+      findByField(V_NUMERO_RILEVAZIONE) || findByField(V_TIPO_PRATICA)
+    ),
+    takeFixedField({ id: 'col_numero', label: 'N. rapporto', field: V_NUMERO_PRATICA, width: 140 }, findByField(V_NUMERO_PRATICA)),
     take({ id: 'col_numero_verbale', label: 'N. verbale', field: V_NUMERO_VERBALE, width: 120 }),
     take({ id: 'col_data', label: 'Data rilevazione', field: 'data_rilevazione', width: 140 }),
     take({ id: 'col_ufficio', label: 'Ufficio origine', field: fieldUfficio, width: 190 }),
@@ -732,6 +831,7 @@ function migrateColumns (cfg: any): ColumnDef[] {
     const f = String(c.field || '').toLowerCase()
     if (!f || used.has(f)) continue
     if (f === 'objectid' || f === 'oid' || f === 'object_id') continue
+    if (f === V_TIPO_PRATICA) continue
     if (f === V_ULTIMO || f === V_DATA_MSG) continue
     out.push(c)
     used.add(f)
@@ -1249,11 +1349,12 @@ function getDateOnlyMsFromInput (value: string, endOfDay = false): number | null
 }
 
 function pickReportDateMs (d: any, configuredField?: string): number | null {
+  const rilMs = pickRilevazioneDateMs(d, configuredField)
+  if (rilMs !== null) return rilMs
   const candidates = [
-    configuredField,
-    'data_rilevazione', 'dt_rilevazione', 'data_rapporto', 'dt_rapporto',
+    'data_rapporto', 'dt_rapporto',
     'CreationDate', 'creationDate', 'creationdate', 'CREATIONDATE'
-  ].filter(Boolean) as string[]
+  ]
   for (const name of candidates) {
     const ms = parseToMs(pickField(d, name))
     if (ms !== null) return ms
@@ -2944,18 +3045,44 @@ React.useEffect(() => {
     return normalizeMioStatoView(view)
   }
 
-  // ── computeUltimoAggMs: considera timestamp di TUTTI i ruoli ──────────────
+  // ── computeUltimoAggMs: considera timestamp workflow/log e, per le nuove rilevazioni, la data di invio ──────────────
   const computeUltimoAggMs = (d: any): number | null => {
     const roles = ['TR', 'TI', 'RZ', 'RI', 'DT', 'DA', 'RI_AMM', 'TI_AMM']
     const candidates: number[] = []
     for (const role of roles) {
-      const p = parseToMs(d[`dt_presa_in_carico_${role}`])
-      const s = parseToMs(d[`dt_stato_${role}`])
-      const e = parseToMs(d[`dt_esito_${role}`])
+      const p = parseToMs(pickField(d, `dt_presa_in_carico_${role}`))
+      const s = parseToMs(pickField(d, `dt_stato_${role}`))
+      const e = parseToMs(pickField(d, `dt_esito_${role}`))
       if (p !== null) candidates.push(p)
       if (s !== null) candidates.push(s)
       if (e !== null) candidates.push(e)
     }
+
+    const logDt = getLogForRecord(d)?.dt
+    if (logDt != null && Number.isFinite(Number(logDt))) candidates.push(Number(logDt))
+
+    // Le rilevazioni appena inviate da Survey/TR possono non avere ancora un log
+    // e, a seconda della vista, possono non esporre i timestamp di stato. In quel
+    // caso l'ultimo aggiornamento deve comunque coincidere con la rilevazione/invio,
+    // altrimenti la colonna resta vuota e l'ordinamento cronologico le porta in fondo.
+    if (candidates.length === 0) {
+      const rilMs = pickRilevazioneDateMs(d, fieldDataRil)
+      if (rilMs !== null) candidates.push(rilMs)
+    }
+
+    if (candidates.length === 0) {
+      const fallbackFields = [
+        'EditDate', 'editDate', 'editdate', 'EDITDATE',
+        'CreationDate', 'creationDate', 'creationdate', 'CREATIONDATE',
+        'end', 'End', 'END',
+        'start', 'Start', 'START'
+      ]
+      for (const name of fallbackFields) {
+        const ms = parseToMs(pickField(d, name))
+        if (ms !== null) candidates.push(ms)
+      }
+    }
+
     if (candidates.length === 0) return null
     return Math.max(...candidates)
   }
@@ -2965,7 +3092,8 @@ React.useEffect(() => {
     if (field === V_STATO) return computeDisplaySintetico(d).label
     if (field === V_FASE) return computeFaseIstruttoria(d)
     if (field === V_TIPO_PRATICA) return getTipoPraticaDisplay(r)
-    if (field === V_NUMERO_PRATICA) return getNumeroPraticaDisplay(r)
+    if (field === V_NUMERO_RILEVAZIONE) return getRilevazioneDisplay(r)
+    if (field === V_NUMERO_PRATICA) return getNumeroRapportoDisplay(r)
     if (field === V_NUMERO_VERBALE) return getNumeroVerbaleDisplay(r)
     if (field === V_ULTIMO) return computeUltimoAggMs(d)
     if (field === V_PROSSIMA) {
@@ -2982,7 +3110,7 @@ React.useEffect(() => {
     }
     if (field === V_DATA_MSG) {
       const log = getLogForRecord(d)
-      return log?.dt ?? 0
+      return log?.dt ?? computeUltimoAggMs(d) ?? 0
     }
     return d[field]
   }
@@ -2994,8 +3122,15 @@ React.useEffect(() => {
       for (const s of sort) {
         const da = ra.getData?.() || {}
         const db = rb.getData?.() || {}
-        const a = pickComparableDisplayValue(da, s.field, giiUser?.areaCod || giiUser?.area, giiUser?.settoreCod || giiUser?.settore, domainLabels) ?? getSortValue(ra, s.field)
-        const b = pickComparableDisplayValue(db, s.field, giiUser?.areaCod || giiUser?.area, giiUser?.settoreCod || giiUser?.settore, domainLabels) ?? getSortValue(rb, s.field)
+        const sortFieldLc = String(s.field || '').toLowerCase()
+        const rilFieldLc = String(fieldDataRil || 'data_rilevazione').toLowerCase()
+        const isRilevazioneDateSort = sortFieldLc === rilFieldLc || sortFieldLc === 'data_rilevazione'
+        const a = isRilevazioneDateSort
+          ? pickRilevazioneDateMs(da, fieldDataRil)
+          : (pickComparableDisplayValue(da, s.field, giiUser?.areaCod || giiUser?.area, giiUser?.settoreCod || giiUser?.settore, domainLabels) ?? getSortValue(ra, s.field))
+        const b = isRilevazioneDateSort
+          ? pickRilevazioneDateMs(db, fieldDataRil)
+          : (pickComparableDisplayValue(db, s.field, giiUser?.areaCod || giiUser?.area, giiUser?.settoreCod || giiUser?.settore, domainLabels) ?? getSortValue(rb, s.field))
         const cmp = compareValues(a, b)
         if (cmp !== 0) return (s.dir === 'ASC' ? cmp : -cmp)
       }
@@ -4351,7 +4486,7 @@ React.useEffect(() => {
                       const pratica = (fp === 'objectid' || fp === 'oid' || fp === 'object_id')
                         ? getCodPraticaDisplay(r)
                         : txt(d[fieldPratica])
-                      const dataRil = formatDateIt(d[fieldDataRil])
+                      const dataRil = formatDateOnlyIt(pickRilevazioneDateMs(d, fieldDataRil))
                       const ufficio = txt(d[fieldUfficio])
 
                       const displaySintetico = computeDisplaySintetico(d)
@@ -4377,8 +4512,9 @@ React.useEffect(() => {
                         causaleVal = formatCausaleForLog(_logEntry, d)
                         dataMsgVal = _logEntry.dt ? formatDateIt(_logEntry.dt) : '—'
                       } else if (!logLoadedRef.current) {
-                        // LOG non ancora caricato — mostra trattini (evita flash "NUOVO RAPPORTO")
-                        mittenteVal = '—'; destinatario = '—'; causaleVal = '—'; dataMsgVal = '—'
+                        // LOG non ancora caricato: oggetto/da/a restano a trattini, ma la data può usare il fallback cronologico.
+                        const fallbackMs = computeUltimoAggMs(d)
+                        mittenteVal = '—'; destinatario = '—'; causaleVal = '—'; dataMsgVal = fallbackMs ? formatDateIt(fallbackMs) : '—'
                       } else if (shouldUseInitialOggettoFallback(d)) {
                         // Nessun record LOG e pratica realmente iniziale: TI auto-assegnato o TR da survey.
                         causaleVal = 'NUOVA RILEVAZIONE'
@@ -4393,8 +4529,8 @@ React.useEffect(() => {
                         } else {
                           mittenteVal = creator || '—'
                         }
-                        const cd = d.CreationDate ?? d.creationdate ?? d.creationDate ?? d.CREATIONDATE
-                        dataMsgVal = cd ? formatDateIt(cd) : '—'
+                        const initialMs = computeUltimoAggMs(d)
+                        dataMsgVal = initialMs ? formatDateIt(initialMs) : '—'
                         // Destinatario: TR (origine=1) → RZ del settore con nome.
                         // TI (origine=2) appena creato e non ancora trasmesso → resta presso il TI.
                         const opRaw = d.origine_pratica ?? d.ORIGINE_PRATICA
@@ -4526,8 +4662,12 @@ React.useEffect(() => {
                               const val = getTipoPraticaDisplay(r)
                               return <div key={col.id} className={ci === 0 ? 'cell first' : 'cell'} title={val}>{val}</div>
                             }
+                            if (f === V_NUMERO_RILEVAZIONE) {
+                              const val = getRilevazioneDisplay(r)
+                              return <div key={col.id} className={ci === 0 ? 'cell first' : 'cell'} title={val}>{val}</div>
+                            }
                             if (f === V_NUMERO_PRATICA) {
-                              const val = getNumeroPraticaDisplay(r)
+                              const val = getNumeroRapportoDisplay(r)
                               return <div key={col.id} className={ci === 0 ? 'cell first' : 'cell'} title={val}>{val}</div>
                             }
                             if (f === V_NUMERO_VERBALE) {
@@ -4562,7 +4702,8 @@ React.useEffect(() => {
                               return <div key={col.id} className={ci === 0 ? 'cell first' : 'cell'} title={val}>{val}</div>
                             }
                             if (fl.startsWith('data_') || fl.startsWith('dt_')) {
-                              const val = formatDateIt(d[f])
+                              const isRilDate = fl === String(fieldDataRil || 'data_rilevazione').toLowerCase() || fl === 'data_rilevazione'
+                              const val = isRilDate ? formatDateOnlyIt(pickRilevazioneDateMs(d, fieldDataRil)) : formatDateIt(d[f])
                               return <div key={col.id} className={ci === 0 ? 'cell first' : 'cell'} title={val}>{val}</div>
                             }
                             const val = txt(d[f])
