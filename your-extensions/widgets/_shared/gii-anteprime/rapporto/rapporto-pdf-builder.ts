@@ -460,6 +460,357 @@ const ROWS: Array<{ art: string; top: number }> = [
   { art: '39', top: 727.43 }
 ]
 
+
+
+// ── Ricostruzione condivisa dell'iter del rapporto tecnico ──
+// Usata dai widget che preparano i placeholder del PDF, così la logica
+// resta accanto al builder del rapporto e non viene duplicata nei runtime.
+export type UtenteCacheEntry = {
+  full_name?: string
+  ruolo?: number | null
+  area?: number | null
+  settore?: number | null
+  ruolo_cod?: string
+  area_cod?: string
+  settore_cod?: string
+  ruoloCod?: string
+  areaCod?: string
+  settoreCod?: string
+}
+
+export type RapportoIterCicloPdf = {
+  ruolo_competente: string
+  evento_apertura: string
+  dt_apertura: any
+  evento_chiusura: string
+  dt_chiusura: any
+  ruolo_destinatario: string
+  stato_record: string
+}
+
+export type RapportoIterPlaceholders = {
+  firma_tr: string
+  firma_ti: string
+  firma_rz: string
+  firma_ri: string
+  firma_dt: string
+  iter_rilevazione_nome: string
+  iter_rilevazione_presa: string
+  iter_rilevazione_data: string
+  iter_compilazione_nome: string
+  iter_compilazione_presa: string
+  iter_compilazione_data: string
+  iter_verifica_nome: string
+  iter_verifica_presa: string
+  iter_verifica_data: string
+  iter_supervisione_nome: string
+  iter_supervisione_presa: string
+  iter_supervisione_data: string
+  iter_approvazione_nome: string
+  iter_approvazione_presa: string
+  iter_approvazione_data: string
+  data_approvazione_rapporto: string
+}
+
+const GII_LOG_EVENTI_CICLI_URL = 'https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_LOG_EVENTI_CICLI/FeatureServer/0'
+
+const AREA_NUM: Record<string, number> = { AMM: 1, AGR: 2, TEC: 3 }
+const SETTORE_NUM: Record<string, number> = { CR: 1, GI: 2, D1: 3, D2: 4, D3: 5, D4: 6, D5: 7, D6: 8, DS: 9, CS: 9 }
+
+function esc (s: any): string {
+  return String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
+}
+
+function pickAttrCI (obj: any, keys: string[]): any {
+  if (!obj) return undefined
+  const map: Record<string, string> = {}
+  try { Object.keys(obj).forEach(k => { map[String(k).toLowerCase()] = k }) } catch {}
+  for (const key of keys) {
+    const direct = obj[key]
+    if (direct !== undefined && direct !== null && direct !== '') return direct
+    const realKey = map[String(key).toLowerCase()]
+    if (realKey) {
+      const value = obj[realKey]
+      if (value !== undefined && value !== null && value !== '') return value
+    }
+  }
+  return undefined
+}
+
+function normalizeRoleCode (v: any): 'TR' | 'TI' | 'RZ' | 'RI' | 'DT' | 'DA' | 'ADMIN' | '' {
+  const s = String(v ?? '').trim().toUpperCase().replace(/[\s-]+/g, '_')
+  if (!s) return ''
+  if (s === '1' || s === 'TR' || s.startsWith('TR_') || s.includes('TECNICO_RILEVATORE')) return 'TR'
+  if (s === '2' || s === 'TI' || s === 'TI_AMM' || s.startsWith('TI_') || s.includes('TECNICO_ISTRUTTORE')) return 'TI'
+  if (s === '3' || s === 'RZ' || s.startsWith('RZ_') || s.includes('RESPONSABILE_DI_ZONA')) return 'RZ'
+  if (s === '4' || s === 'RI' || s === 'RI_AMM' || s.startsWith('RI_') || s.includes('RESPONSABILE_ISTRUTTORIA')) return 'RI'
+  if (s === '5' || s === 'DT' || s.startsWith('DT_') || s.includes('DIRETTORE_TECNICO')) return 'DT'
+  if (s === '6' || s === 'DA' || s.startsWith('DA_') || s.includes('DIRETTORE_AMMINISTRATIVO')) return 'DA'
+  if (s === '7' || s === 'ADMIN' || s.includes('AMMINISTRATORE')) return 'ADMIN'
+  return ''
+}
+
+function normalizeIterAreaCode (v: any): 'AGR' | 'TEC' | 'AMM' | '' {
+  const s = String(v ?? '').trim().toUpperCase()
+  if (!s) return ''
+  if (s === '1' || s === 'AMM' || s === 'AMMINISTRATIVA' || s === 'AMMINISTRAZIONE' || s.includes('AFFARI GENERALI')) return 'AMM'
+  if (s === '2' || s === 'AGR' || s === 'AGRARIA' || s === 'AGRICOLA' || s === 'AGRICOLTURA') return 'AGR'
+  if (s === '3' || s === 'TEC' || s === 'TECNICA' || s === 'TECNICO') return 'TEC'
+  return ''
+}
+
+function normalizeIterSettoreCode (area: string, v: any): string {
+  const s = String(v ?? '').trim().toUpperCase().replace(/\s+/g, '')
+  if (!s) return ''
+  if (s === 'CS') return 'DS'
+  if (s === '1') return area === 'AGR' ? 'D1' : 'CR'
+  if (s === '2') return area === 'AGR' ? 'D2' : 'GI'
+  if (s === '3') return 'D1'
+  if (s === '4') return 'D2'
+  if (s === '5') return 'D3'
+  if (s === '6') return 'D4'
+  if (s === '7') return 'D5'
+  if (s === '8') return 'D6'
+  if (s === '9') return 'DS'
+  const m = s.match(/^D([1-6])$/)
+  if (m) return `D${m[1]}`
+  if (s === 'DS' || s.includes('DRENO')) return 'DS'
+  if (s === 'CR' || s.includes('CATASTO')) return 'CR'
+  if (s === 'GI' || s.includes('GESTIONEIRRIGUA')) return 'GI'
+  return s
+}
+
+function normalizeEventCode (v: any): string {
+  return String(v ?? '').trim().toUpperCase()
+}
+
+function toTimeValue (v: any): number {
+  if (v == null || v === '') return 0
+  if (typeof v === 'number' && Number.isFinite(v)) return v
+  if (typeof v === 'string' && /^\d{10,13}$/.test(v.trim())) return Number(v.trim())
+  const d = new Date(v)
+  const t = d.getTime()
+  return Number.isFinite(t) ? t : 0
+}
+
+function sortIterCicliAsc (items: RapportoIterCicloPdf[]): RapportoIterCicloPdf[] {
+  return [...(items || [])].sort((a, b) => {
+    const ta = toTimeValue(a.dt_apertura) || toTimeValue(a.dt_chiusura)
+    const tb = toTimeValue(b.dt_apertura) || toTimeValue(b.dt_chiusura)
+    return ta - tb
+  })
+}
+
+function formatDateIt (v: any): string {
+  if (!v) return ''
+  try {
+    const raw = (typeof v === 'string' && /^\d{10,13}$/.test(v.trim())) ? Number(v) : v
+    const d = new Date(typeof raw === 'number' ? raw : String(raw))
+    if (isNaN(d.getTime())) return String(v)
+    return d.toLocaleDateString('it-IT', { day: '2-digit', month: '2-digit', year: 'numeric' })
+  } catch { return String(v) }
+}
+
+function rawFrom (data: any, ...fields: string[]): any {
+  return firstMeaningfulValue(...fields.map(f => pickAttrCI(data, [f, f.toUpperCase(), f.toLowerCase()])))
+}
+
+function dateFrom (data: any, ...fields: string[]): string {
+  return formatDateIt(rawFrom(data, ...fields))
+}
+
+function loadEsriModule<T = any> (path: string): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const req = (window as any).require
+    if (!req) { reject(new Error('AMD require non disponibile')); return }
+    req([path], (mod: T) => resolve(mod), (err: any) => reject(err))
+  })
+}
+
+function normGlobalIdForQuery (v: any): string {
+  return String(v ?? '').trim().replace(/[{}]/g, '').toLowerCase()
+}
+
+export async function loadRapportoIterCicliForPdf (globalId: any): Promise<RapportoIterCicloPdf[]> {
+  const gid = normGlobalIdForQuery(globalId)
+  if (!gid) return []
+
+  try {
+    const FeatureLayer = await loadEsriModule<any>('esri/layers/FeatureLayer')
+    const fl = new FeatureLayer({ url: GII_LOG_EVENTI_CICLI_URL })
+    if (typeof fl?.load === 'function') await fl.load()
+
+    const res = await fl.queryFeatures({
+      where: `LOWER(parent_globalid) = '${gid}' OR LOWER(parent_globalid) = '{${gid}}'`,
+      outFields: [
+        'ruolo_competente', 'evento_apertura', 'dt_apertura',
+        'evento_chiusura', 'dt_chiusura', 'ruolo_destinatario', 'stato_record'
+      ],
+      orderByFields: ['dt_apertura ASC'],
+      returnGeometry: false
+    })
+
+    const records: RapportoIterCicloPdf[] = (res?.features || []).map((f: any) => {
+      const a = f?.attributes || f || {}
+      return {
+        ruolo_competente: String(pickAttrCI(a, ['ruolo_competente', 'ruolo']) || ''),
+        evento_apertura: String(pickAttrCI(a, ['evento_apertura']) || ''),
+        dt_apertura: pickAttrCI(a, ['dt_apertura']),
+        evento_chiusura: String(pickAttrCI(a, ['evento_chiusura']) || ''),
+        dt_chiusura: pickAttrCI(a, ['dt_chiusura']),
+        ruolo_destinatario: String(pickAttrCI(a, ['ruolo_destinatario']) || ''),
+        stato_record: String(pickAttrCI(a, ['stato_record']) || '')
+      }
+    })
+    return sortIterCicliAsc(records)
+  } catch (e) {
+    console.warn('[RapportoPdfBuilder] Errore caricamento GII_LOG_EVENTI_CICLI per PDF rapporto:', e)
+    return []
+  }
+}
+
+function findFirstPresaInCaricoFromCicli (cicli: RapportoIterCicloPdf[], ruolo: 'TI' | 'RZ' | 'RI' | 'DT'): string {
+  const role = ruolo.toUpperCase()
+  const found = sortIterCicliAsc(cicli).find(c => {
+    const r = normalizeRoleCode(c.ruolo_competente)
+    const evOpen = normalizeEventCode(c.evento_apertura)
+    return r === role && evOpen === 'PRESA_IN_CARICO' && toTimeValue(c.dt_apertura) > 0
+  })
+  return found ? formatDateIt(found.dt_apertura) : ''
+}
+
+function findLastChiusuraFromCicli (
+  cicli: RapportoIterCicloPdf[],
+  ruolo: 'TI' | 'RZ' | 'RI' | 'DT',
+  eventi: string[],
+  destinatari?: string[]
+): string {
+  const role = ruolo.toUpperCase()
+  const eventSet = new Set((eventi || []).map(e => normalizeEventCode(e)))
+  const destSet = destinatari && destinatari.length > 0 ? new Set(destinatari.map(d => normalizeRoleCode(d))) : null
+  const matches = sortIterCicliAsc(cicli).filter(c => {
+    const r = normalizeRoleCode(c.ruolo_competente)
+    const evClose = normalizeEventCode(c.evento_chiusura)
+    const dst = normalizeRoleCode(c.ruolo_destinatario)
+    if (r !== role) return false
+    if (!eventSet.has(evClose)) return false
+    if (destSet && !destSet.has(dst)) return false
+    return toTimeValue(c.dt_chiusura) > 0
+  })
+  const last = matches[matches.length - 1]
+  return last ? formatDateIt(last.dt_chiusura) : ''
+}
+
+function entryRole (entry: UtenteCacheEntry): string {
+  return normalizeRoleCode(firstMeaningfulValue(entry.ruolo_cod, entry.ruoloCod, entry.ruolo))
+}
+
+function entryArea (entry: UtenteCacheEntry): string {
+  return normalizeIterAreaCode(firstMeaningfulValue(entry.area_cod, entry.areaCod, entry.area))
+}
+
+function entrySettore (entry: UtenteCacheEntry): string {
+  const area = entryArea(entry)
+  return normalizeIterSettoreCode(area, firstMeaningfulValue(entry.settore_cod, entry.settoreCod, entry.settore))
+}
+
+function findUserFullName (cache: Map<string, any> | null, ruoloNum: number, areaNum?: number, settoreNum?: number): string {
+  if (!cache) return ''
+  const targetRole = normalizeRoleCode(ruoloNum)
+  const targetArea = areaNum != null ? normalizeIterAreaCode(areaNum) : ''
+  const targetSettore = settoreNum != null ? normalizeIterSettoreCode(targetArea, settoreNum) : ''
+  for (const [, entry] of cache) {
+    const er = entryRole(entry)
+    const ea = entryArea(entry)
+    const es = entrySettore(entry)
+    if (targetRole && er !== targetRole) continue
+    if (targetArea && ea !== targetArea) continue
+    if (targetSettore && es !== targetSettore) continue
+    return entry.full_name || ''
+  }
+  return ''
+}
+
+function findFullNameByUsername (cache: Map<string, any> | null, username: string): string {
+  const raw = String(username || '').trim()
+  if (!raw) return ''
+  if (!cache) return raw
+  for (const [k, v] of cache) {
+    if (String(k).trim().toLowerCase() === raw.toLowerCase()) return v.full_name || raw
+  }
+  return raw
+}
+
+export function buildRapportoIterPlaceholders (opts: {
+  data: any
+  utentiCache: Map<string, any> | null
+  cicli?: RapportoIterCicloPdf[]
+  rapportoApprovato?: boolean
+  rapportoRespinto?: boolean
+}): RapportoIterPlaceholders {
+  const d = opts.data || {}
+  const cicli = Array.isArray(opts.cicli) ? opts.cicli : []
+  const hasIterCicli = cicli.length > 0
+  const areaCod = normalizeIterAreaCode(firstMeaningfulValue(pickAttrCI(d, ['area_cod', 'area']), pickAttrCI(d, ['AREA_COD', 'AREA'])))
+  const settoreCod = normalizeIterSettoreCode(areaCod, firstMeaningfulValue(pickAttrCI(d, ['settore_cod', 'settore']), pickAttrCI(d, ['SETTORE_COD', 'SETTORE'])))
+  const areaN = AREA_NUM[areaCod] ?? null
+  const settoreN = SETTORE_NUM[settoreCod] ?? null
+
+  const presaDateFromFieldIfTaken = (ruolo: 'TI' | 'RZ' | 'RI' | 'DT'): string => {
+    const stato = Number(rawFrom(d, `stato_${ruolo}`))
+    if (!Number.isFinite(stato) || stato <= 1) return ''
+    return dateFrom(d, `dt_presa_in_carico_${ruolo}`)
+  }
+
+  const iterTiPresa = findFirstPresaInCaricoFromCicli(cicli, 'TI') || (!hasIterCicli ? presaDateFromFieldIfTaken('TI') : '')
+  const iterRzPresa = findFirstPresaInCaricoFromCicli(cicli, 'RZ') || (!hasIterCicli ? presaDateFromFieldIfTaken('RZ') : '')
+  const iterRiPresa = findFirstPresaInCaricoFromCicli(cicli, 'RI') || (!hasIterCicli ? presaDateFromFieldIfTaken('RI') : '')
+  const iterDtPresa = findFirstPresaInCaricoFromCicli(cicli, 'DT') || (!hasIterCicli ? presaDateFromFieldIfTaken('DT') : '')
+
+  // Le date di chiusura fase arrivano dai cicli effettivi, non da stato_*/dt_stato_*.
+  // In particolare, un rimando RZ→TI non è una verifica RZ e non deve valorizzare la riga Verifica.
+  const iterTiCompilazione = findLastChiusuraFromCicli(cicli, 'TI', ['ISTRUTTORIA_TRASMESSA', 'INTEGRAZIONE_TRASMESSA'], ['RZ']) || (!hasIterCicli ? dateFrom(d, 'dt_esito_TI') : '')
+  const iterRzVerifica = findLastChiusuraFromCicli(cicli, 'RZ', ['ISTRUTTORIA_TRASMESSA'], ['RI']) || (!hasIterCicli ? dateFrom(d, 'dt_esito_RZ') : '')
+  const iterRiSupervisione = findLastChiusuraFromCicli(cicli, 'RI', ['ISTRUTTORIA_TRASMESSA'], ['DT']) || (!hasIterCicli ? dateFrom(d, 'dt_esito_RI') : '')
+  const iterDtApprovazione = findLastChiusuraFromCicli(cicli, 'DT', ['RAPPORTO_APPROVATO']) || (!hasIterCicli ? dateFrom(d, 'dt_esito_DT') : '')
+
+  const nomeTR = findFullNameByUsername(opts.utentiCache, firstMeaningfulValue(pickAttrCI(d, ['tecnico_rilevatore']), pickAttrCI(d, ['utente_loggato']), pickAttrCI(d, ['Creator'])) || '')
+  const nomeTI = firstMeaningfulValue(
+    pickAttrCI(d, ['ti_assegnato_nome']),
+    findFullNameByUsername(opts.utentiCache, pickAttrCI(d, ['ti_assegnato_username']) || ''),
+    findFullNameByUsername(opts.utentiCache, pickAttrCI(d, ['tecnico_rilevatore']) || '')
+  ) || ''
+  const nomeRZ = findUserFullName(opts.utentiCache, 3, areaN ?? undefined, settoreN ?? undefined)
+  const nomeRI = findUserFullName(opts.utentiCache, 4, areaN ?? undefined)
+  const nomeDT = findUserFullName(opts.utentiCache, 5, areaN ?? undefined)
+
+  const dataApprovazioneRapporto = opts.rapportoApprovato ? iterDtApprovazione : ''
+
+  return {
+    firma_tr: esc(nomeTR),
+    firma_ti: esc(nomeTI),
+    firma_rz: esc(nomeRZ),
+    firma_ri: esc(nomeRI),
+    firma_dt: esc(nomeDT),
+    iter_rilevazione_nome: esc(nomeTR),
+    iter_rilevazione_presa: '-',
+    iter_rilevazione_data: formatDateIt(pickAttrCI(d, ['data_rilevazione', 'DATA_RILEVAZIONE'])),
+    iter_compilazione_nome: esc(nomeTI),
+    iter_compilazione_presa: iterTiPresa,
+    iter_compilazione_data: iterTiCompilazione,
+    iter_verifica_nome: esc(nomeRZ),
+    iter_verifica_presa: iterRzPresa,
+    iter_verifica_data: iterRzVerifica,
+    iter_supervisione_nome: esc(nomeRI),
+    iter_supervisione_presa: iterRiPresa,
+    iter_supervisione_data: iterRiSupervisione,
+    iter_approvazione_nome: esc(nomeDT),
+    iter_approvazione_presa: iterDtPresa,
+    iter_approvazione_data: dataApprovazioneRapporto,
+    data_approvazione_rapporto: dataApprovazioneRapporto
+  }
+}
+
 // ══════════════════════════════════════════════════════════════
 export async function buildRapportoPdf (m: Record<string, string>): Promise<Uint8Array> {
   const pdfBytes = b64ToBytes(BASE_PDF_B64)

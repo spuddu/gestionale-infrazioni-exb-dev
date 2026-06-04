@@ -34,7 +34,7 @@ type GiiUserInfo = {
 
 type ReportRecord = Record<string, any>
 type SituationFilter = 'tutte' | 'da_gestire' | 'attesa_altri' | 'ferme' | 'sanzionatoria'
-type SortKey = 'lastUpdate' | 'id' | 'reportDate' | 'rilevatore' | 'istruttore' | 'area' | 'settore' | 'faseProcedimentale' | 'ruoloCorrente' | 'giorniFermo'
+type SortKey = 'lastUpdate' | 'rilevazioneNumber' | 'reportNumber' | 'verbaleNumber' | 'reportDate' | 'rilevatore' | 'istruttore' | 'area' | 'settore' | 'faseProcedimentale' | 'ruoloCorrente' | 'giorniFermo'
 type SortDir = 'asc' | 'desc'
 type SortRule = { key: SortKey; dir: SortDir }
 
@@ -794,16 +794,56 @@ function getObjectId (d: any): string {
   return getFirst(d, ['OBJECTID', 'objectid', 'ObjectId', 'objectId', 'FID'], '—')
 }
 
-function getNumeroRapporto (d: any): string {
-  const stored = getFirst(d, ['cod_pratica', 'Cod_pratica', 'COD_PRATICA', 'numero_rapporto', 'Numero_rapporto', 'NUMERO_RAPPORTO'], '')
-  if (stored) return stored
+function cleanNumeroPraticaText (v: any): string {
+  return String(v ?? '')
+    .trim()
+    .replace(/^rapporto\s+tecnico\s+n\.?\s*/i, '')
+    .replace(/^rapporto\s+n\.?\s*/i, '')
+    .replace(/^rilevazione\s+n\.?\s*/i, '')
+    .replace(/^rilevazione\s*/i, '')
+    .trim()
+}
+
+function buildNumeroRilevazioneReport (d: any): string {
+  const stored = cleanNumeroPraticaText(getFirst(d, ['numero_rilevazione', 'Numero_rilevazione', 'NUMERO_RILEVAZIONE', 'cod_pratica', 'Cod_pratica', 'COD_PRATICA'], ''))
+  const raw = stored.toUpperCase().replace(/_/g, '-').replace(/\s+/g, '-')
   const oid = getObjectId(d)
-  if (!oid || oid === '—') return '—'
   const op = pickField(d, 'origine_pratica')
-  let prefix = 'TR'
-  if (op === 2 || op === '2' || String(op).toUpperCase() === 'TI') prefix = 'TI'
-  else if (op === 1 || op === '1' || String(op).toUpperCase() === 'TR') prefix = 'TR'
-  return `${prefix}-${oid}`
+  let prefix = (op === 2 || op === '2' || String(op).toUpperCase() === 'TI') ? 'TI' : 'TR'
+  let oidPart = oid && oid !== '—' ? oid : ''
+  let settore = getSettoreCodeFromRecord(d)
+
+  let m = raw.match(/^(TR|TI)-?(\d+)(?:-([A-Z0-9]+))?$/i)
+  if (m) {
+    prefix = m[1].toUpperCase()
+    oidPart = m[2]
+    if (!settore && m[3]) settore = normalizeSettoreCode(m[3])
+  } else {
+    m = raw.match(/^(\d+)-?(TR|TI)(?:-([A-Z0-9]+))?$/i)
+    if (m) {
+      oidPart = m[1]
+      prefix = m[2].toUpperCase()
+      if (!settore && m[3]) settore = normalizeSettoreCode(m[3])
+    } else if (!oidPart && /^\d+$/.test(raw)) {
+      oidPart = raw
+    }
+  }
+
+  const base = oidPart || stored || '—'
+  if (base === '—') return base
+  return settore ? `${base}-${prefix}-${settore}` : `${base}-${prefix}`
+}
+
+function getNumeroRilevazione (d: any): string {
+  return buildNumeroRilevazioneReport(d)
+}
+
+function getNumeroRapporto (d: any): string {
+  return cleanNumeroPraticaText(getFirst(d, ['numero_rapporto', 'Numero_rapporto', 'NUMERO_RAPPORTO', 'numero_rapporto_tecnico', 'Numero_rapporto_tecnico', 'NUMERO_RAPPORTO_TECNICO', 'num_rapporto', 'codice_rapporto', 'n_rapporto'], '')) || '—'
+}
+
+function getNumeroVerbale (d: any): string {
+  return cleanNumeroPraticaText(getFirst(d, ['numero_verbale', 'Numero_verbale', 'NUMERO_VERBALE'], '')) || '—'
 }
 
 function isCheckedValue (v: any): boolean {
@@ -977,7 +1017,9 @@ function getRecordSearchText (d: any, user: GiiUserInfo | null, domainLabels?: D
     }
   })
   parts.push(
+    getNumeroRilevazione(d),
     getNumeroRapporto(d),
+    getNumeroVerbale(d),
     getObjectId(d),
     getTecnicoRilevatore(d),
     getIstruttore(d),
@@ -1215,7 +1257,9 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
 
     const getSortValue = (row: ReportRecord, key: SortKey): any => {
       if (key === 'lastUpdate') return getLastTouchMs(row) || 0
-      if (key === 'id') return getNumeroRapporto(row)
+      if (key === 'rilevazioneNumber') return getNumeroRilevazione(row)
+      if (key === 'reportNumber') return getNumeroRapporto(row)
+      if (key === 'verbaleNumber') return getNumeroVerbale(row)
       if (key === 'reportDate') return getDataRapportoMs(row) || 0
       if (key === 'rilevatore') return getTecnicoRilevatore(row)
       if (key === 'istruttore') return getIstruttore(row)
@@ -1238,7 +1282,7 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
           : ((av || 0) - (bv || 0))
         if (cmp !== 0) return cmp * dir
       }
-      return getNumeroRapporto(a).localeCompare(getNumeroRapporto(b), 'it', { numeric: true, sensitivity: 'base' })
+      return getNumeroRilevazione(a).localeCompare(getNumeroRilevazione(b), 'it', { numeric: true, sensitivity: 'base' })
     })
 
     return out
@@ -1388,7 +1432,9 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
 
   const exportCsv = () => {
     const headers = [
+      'N. rilevazione',
       'N. rapporto',
+      'N. verbale',
       'Data rilevazione',
       'Tecnico rilevatore',
       'Tecnico istruttore',
@@ -1400,7 +1446,9 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
       'Giorni di fermo'
     ]
     const rows = filtered.map(r => [
+      getNumeroRilevazione(r),
       getNumeroRapporto(r),
+      getNumeroVerbale(r),
       formatDate(getDataRapportoMs(r)),
       getTecnicoRilevatore(r),
       getIstruttore(r),
@@ -1538,20 +1586,24 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
           <div style={{ flex: '1 1 auto', minHeight: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
             <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12, tableLayout: 'fixed', flexShrink: 0 }}>
               <colgroup>
-                <col style={{ width: '6%' }} />
-                <col style={{ width: '8%' }} />
-                <col style={{ width: '10%' }} />
-                <col style={{ width: '10%' }} />
                 <col style={{ width: '7%' }} />
-                <col style={{ width: '15%' }} />
-                <col style={{ width: '14%' }} />
-                <col style={{ width: '13%' }} />
-                <col style={{ width: '11%' }} />
+                <col style={{ width: '7%' }} />
+                <col style={{ width: '7%' }} />
+                <col style={{ width: '8%' }} />
+                <col style={{ width: '9%' }} />
+                <col style={{ width: '9%' }} />
                 <col style={{ width: '6%' }} />
+                <col style={{ width: '12%' }} />
+                <col style={{ width: '12%' }} />
+                <col style={{ width: '10%' }} />
+                <col style={{ width: '8%' }} />
+                <col style={{ width: '5%' }} />
               </colgroup>
               <thead style={{ background: cfg.cardBg }}>
                 <tr style={{ textAlign: 'left' }}>
-                  {th('N. rapporto', 'id')}
+                  {th('N. rilevazione', 'rilevazioneNumber')}
+                  {th('N. rapporto', 'reportNumber')}
+                  {th('N. verbale', 'verbaleNumber')}
                   {th('Data rilevazione', 'reportDate')}
                   {th('Tecnico rilevatore', 'rilevatore')}
                   {th('Tecnico istruttore', 'istruttore')}
@@ -1567,16 +1619,18 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
             <div style={{ overflowY: 'auto', overflowX: 'hidden', flex: '1 1 auto', minHeight: 0 }}>
               <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12, tableLayout: 'fixed' }}>
               <colgroup>
-                <col style={{ width: '6%' }} />
-                <col style={{ width: '8%' }} />
-                <col style={{ width: '10%' }} />
-                <col style={{ width: '10%' }} />
                 <col style={{ width: '7%' }} />
-                <col style={{ width: '15%' }} />
-                <col style={{ width: '14%' }} />
-                <col style={{ width: '13%' }} />
-                <col style={{ width: '11%' }} />
+                <col style={{ width: '7%' }} />
+                <col style={{ width: '7%' }} />
+                <col style={{ width: '8%' }} />
+                <col style={{ width: '9%' }} />
+                <col style={{ width: '9%' }} />
                 <col style={{ width: '6%' }} />
+                <col style={{ width: '12%' }} />
+                <col style={{ width: '12%' }} />
+                <col style={{ width: '10%' }} />
+                <col style={{ width: '8%' }} />
+                <col style={{ width: '5%' }} />
               </colgroup>
               <tbody>
                 {pageRows.map((r, i) => {
@@ -1602,7 +1656,9 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
                       }}
                       style={{ borderBottom: `1px solid rgba(255,255,255,0.07)`, background: rowBg, boxShadow: selected ? `inset 3px 0 0 ${cfg.accentColor}` : 'none', cursor: 'pointer', outline: 'none', transition: 'background 120ms ease, box-shadow 120ms ease' }}
                     >
-                      <td title={getNumeroRapporto(r)} style={{ padding: '8px 7px', color: cfg.textColor, fontWeight: 800, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{getNumeroRapporto(r)}</td>
+                      <td title={getNumeroRilevazione(r)} style={{ padding: '8px 7px', color: cfg.textColor, fontWeight: 800, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{getNumeroRilevazione(r)}</td>
+                      <td title={getNumeroRapporto(r)} style={{ padding: '8px 7px', color: cfg.mutedColor, fontWeight: getNumeroRapporto(r) !== '—' ? 800 : 500, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{getNumeroRapporto(r)}</td>
+                      <td title={getNumeroVerbale(r)} style={{ padding: '8px 7px', color: cfg.mutedColor, fontWeight: getNumeroVerbale(r) !== '—' ? 800 : 500, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{getNumeroVerbale(r)}</td>
                       <td style={{ padding: '8px 7px', color: cfg.mutedColor, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{formatDate(getDataRapportoMs(r))}</td>
                       <td title={getTecnicoRilevatore(r)} style={{ padding: '8px 7px', color: cfg.mutedColor, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{getTecnicoRilevatore(r)}</td>
                       <td title={getIstruttore(r)} style={{ padding: '8px 7px', color: cfg.mutedColor, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{getIstruttore(r)}</td>
@@ -1616,7 +1672,7 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
                   )
                 })}
                 {pageRows.length === 0 && (
-                  <tr><td colSpan={10} style={{ padding: 14, color: cfg.mutedColor }}>Nessuna pratica corrisponde ai filtri impostati.</td></tr>
+                  <tr><td colSpan={12} style={{ padding: 14, color: cfg.mutedColor }}>Nessuna pratica corrisponde ai filtri impostati.</td></tr>
                 )}
               </tbody>
               </table>

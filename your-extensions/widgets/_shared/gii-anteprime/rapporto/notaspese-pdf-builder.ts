@@ -240,11 +240,19 @@ function cleanText(s: string): string {
     .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F]/g, '')
 }
 
-function money(n: number): string {
+function roundMoney(n: number): number {
+  if (!Number.isFinite(n)) return 0
+  const sign = n < 0 ? -1 : 1
   const abs = Math.abs(n)
+  return sign * (Math.round((abs + 1e-9) * 100) / 100)
+}
+
+function money(n: number): string {
+  const rounded = roundMoney(n)
+  const abs = Math.abs(rounded)
   const parts = abs.toFixed(2).split('.')
   const intPart = parts[0].replace(/\B(?=(\d{3})+(?!\d))/g, '.')
-  return (n < 0 ? '-' : '') + intPart + ',' + parts[1] + ' \u20AC'
+  return (rounded < 0 ? '-' : '') + intPart + ',' + parts[1] + ' \u20AC'
 }
 
 function txt(
@@ -514,8 +522,8 @@ export async function buildNotaSpesePdf(data: NotaSpeseData): Promise<Uint8Array
   pg.drawLine({ start: { x: CX_PU, y: PH - top }, end: { x: PW - MR, y: PH - top }, thickness: 1, color: CLR_BLACK })
   top += 6
 
-  const totSomma = data.summary.totaleAT + data.summary.totalePR +
-    data.summary.totaleRU + data.summary.totaleSL + data.summary.totalePF
+  const totSomma = roundMoney(data.summary.totaleAT + data.summary.totalePR +
+    data.summary.totaleRU + data.summary.totaleSL + data.summary.totalePF)
   txt(pg, 'Totale', fontB, 9, CX_PU + 3, centeredY(top, 14, 9), CLR_BLACK)
   rightAligned(pg, money(totSomma), fontB, 9, CX_IMP, CW_IMP, centeredY(top, 14, 9), CLR_BLACK)
   top += 16

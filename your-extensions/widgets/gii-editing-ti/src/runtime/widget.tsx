@@ -3513,35 +3513,61 @@ function NpField(p: { label: React.ReactNode; children: React.ReactNode; hint?: 
   )
 }
 
-function NpSel(p: { value: string; onChange: (v: string) => void; options: readonly {v:string;l:string}[]; disabled?: boolean; allowEmpty?: boolean }) {
+function NpSel(p: { value: string; onChange: (v: string) => void; options: readonly {v:string;l:string}[]; disabled?: boolean; allowEmpty?: boolean; attention?: boolean; attentionTitle?: string; centerText?: boolean }) {
   const fs = React.useContext(FormStyleCtx)
   const st = fieldBaseStyle(fs, p.disabled)
+  const attention = !!p.attention && !p.disabled
   const allowEmpty = p.allowEmpty !== false
+  const centeredOptionStyle = p.centerText
+    ? { textAlign: 'center' as const, textAlignLast: 'center' as any }
+    : undefined
   return (
     <select
       value={p.value}
       onChange={e => p.onChange(e.target.value)}
-      style={{ ...st, paddingTop: 0, paddingBottom: 0, cursor: p.disabled ? 'not-allowed' : 'pointer' }}
+      title={attention ? (p.attentionTitle || 'Campo da valorizzare') : undefined}
+      style={{
+        ...st,
+        paddingTop: 0,
+        paddingBottom: 0,
+        cursor: p.disabled ? 'not-allowed' : 'pointer',
+        ...(p.centerText ? {
+          textAlign: 'center' as const,
+          textAlignLast: 'center' as any,
+          paddingLeft: 0,
+          paddingRight: 0
+        } : {}),
+        ...(attention ? {
+          border: '1px solid #dc2626',
+          background: '#fff',
+          color: '#7f1d1d'
+        } : {})
+      }}
       disabled={p.disabled}
     >
-      {allowEmpty && <option value=''>— seleziona —</option>}
-      {p.options.map(o => <option key={o.v} value={o.v}>{o.l}</option>)}
+      {allowEmpty && <option value='' style={centeredOptionStyle}>— seleziona —</option>}
+      {p.options.map(o => <option key={o.v} value={o.v} style={centeredOptionStyle}>{o.l}</option>)}
     </select>
   )
 }
 
-function NpText(p: { value: string; onChange: (v: string) => void; placeholder?: string; multiline?: boolean; disabled?: boolean; maxLength?: number; minRows?: number }) {
+function NpText(p: { value: string; onChange: (v: string) => void; placeholder?: string; multiline?: boolean; disabled?: boolean; maxLength?: number; minRows?: number; uppercase?: boolean; lowercase?: boolean }) {
   const fs = React.useContext(FormStyleCtx)
   const st = fieldBaseStyle(fs, p.disabled)
-  const toUpper = (v: any): string => String(v ?? '').toLocaleUpperCase('it-IT')
+  const normalizeText = (v: any): string => {
+    const raw = String(v ?? '')
+    if (p.lowercase === true) return raw.toLocaleLowerCase('it-IT')
+    if (p.uppercase === false) return raw
+    return raw.toLocaleUpperCase('it-IT')
+  }
   if (p.multiline) {
     const rows = p.minRows != null ? Math.max(3, Number(p.minRows) || 3) : 3
     return (
-      <textarea value={p.value} onChange={e => p.onChange(toUpper(e.target.value))} placeholder={p.placeholder}
+      <textarea value={p.value} onChange={e => p.onChange(normalizeText(e.target.value))} placeholder={p.placeholder}
         rows={rows} style={{ ...st, height: 'auto', minHeight: (Number(fs.fieldHeight) || 32) * rows, lineHeight: 1.35, paddingTop: 6, paddingBottom: 6, resize: 'vertical' }} disabled={p.disabled} maxLength={p.maxLength}/>
     )
   }
-  return <input type='text' value={p.value} onChange={e => p.onChange(toUpper(e.target.value))} placeholder={p.placeholder} style={st} disabled={p.disabled} maxLength={p.maxLength}/>
+  return <input type='text' value={p.value} onChange={e => p.onChange(normalizeText(e.target.value))} placeholder={p.placeholder} style={st} disabled={p.disabled} maxLength={p.maxLength}/>
 }
 
 
@@ -3967,7 +3993,6 @@ const UPPERCASE_TEXT_FIELDS = new Set([
   'rl_nome', 'rl_cognome', 'rl_cf',
   'rl_dom_via', 'rl_dom_civico', 'rl_dom_citta', 'rl_dom_provincia', 'rl_dom_cap', 'rl_dom_stato',
   'note_anagrafica',
-  'descrizione_fatti', 'circostanze', 'descrizione_luogo',
   'distretto', 'comizio', 'idrante', 'matricola_contatore', 'matricola_tessera'
 ])
 
@@ -5269,6 +5294,8 @@ function NuovaPraticaForm (p: {
     const onPointerUp = () => { datiTecniciUserDraggingRef.current = false }
     let oldDividerZ = ''
     let oldDividerPosition = ''
+    let oldDividerPointerEvents = ''
+    let oldDividerCursor = ''
 
     const findPanels = () => {
       try {
@@ -5285,8 +5312,15 @@ function NuovaPraticaForm (p: {
               dividerEl = divider
               oldDividerZ = divider.style.zIndex
               oldDividerPosition = divider.style.position
+              oldDividerPointerEvents = divider.style.pointerEvents
+              oldDividerCursor = divider.style.cursor
               divider.style.setProperty('z-index', '2147483646', 'important')
               divider.style.setProperty('position', 'relative', 'important')
+              // Il divisore nativo della Sidebar ExB resta il destinatario degli eventi
+              // sintetici usati dall'overlay, ma non deve più partecipare all'hit-test:
+              // altrimenti il cursore/maniglia nativa rimane sopra al pulsante reset.
+              divider.style.setProperty('pointer-events', 'none', 'important')
+              divider.style.setProperty('cursor', 'default', 'important')
               divider.addEventListener('pointerdown', onPointerDown)
               window.addEventListener('pointerup', onPointerUp)
             }
@@ -5310,6 +5344,8 @@ function NuovaPraticaForm (p: {
         if (dividerEl) {
           dividerEl.style.zIndex = oldDividerZ
           dividerEl.style.position = oldDividerPosition
+          dividerEl.style.pointerEvents = oldDividerPointerEvents
+          dividerEl.style.cursor = oldDividerCursor
         }
       } catch {}
       datiTecniciSidebarElRef.current = null
@@ -5403,19 +5439,23 @@ function NuovaPraticaForm (p: {
       const isVisible = !!(el && el.offsetWidth > 0 && el.offsetHeight > 0)
       if (!isVisible) return
       // La mappa deve essere visibile solo nella scheda Luoghi e dati tecnici.
-      // Al rientro da Elenco/Azioni il widget può rimontare su Trasgressore mentre
-      // la Sidebar ExB conserva ancora lo stato aperto precedente: riallineo quindi
-      // sempre la Sidebar alla scheda corrente, non solo quando si cliccano le tab.
+      // Al rientro da Elenco/Azioni, o quando si apre un'altra pratica restando già
+      // sulla scheda Trasgressore, la Sidebar ExB può conservare lo stato aperto
+      // precedente: riallineo quindi sempre la Sidebar alla scheda corrente.
       giiActivateExternalLayoutForEditSection(npTab.replace(/_/g, '-'))
     }
     syncExternalLayout()
     const t1 = window.setTimeout(syncExternalLayout, 120)
     const t2 = window.setTimeout(syncExternalLayout, 420)
+    const t3 = window.setTimeout(syncExternalLayout, 900)
+    const t4 = window.setTimeout(syncExternalLayout, 1500)
     return () => {
       try { window.clearTimeout(t1) } catch {}
       try { window.clearTimeout(t2) } catch {}
+      try { window.clearTimeout(t3) } catch {}
+      try { window.clearTimeout(t4) } catch {}
     }
-  }, [npTab])
+  }, [npTab, mode, editOid])
 
   React.useEffect(() => {
     const applyRequestedSection = (forcedSection?: any) => {
@@ -5763,13 +5803,20 @@ const loadNotaSpeseDraft = React.useCallback(async () => {
       try { cartItems = JSON.parse(raw) } catch { cartItems = [] }
       if (Array.isArray(cartItems) && cartItems.length > 0) {
         const existingCodes = new Set<string>()
-        NS_CATEGORIES.forEach((cat) => { ;(draft[cat] || []).forEach((r) => { if (r.codice_voce_snapshot) existingCodes.add(r.codice_voce_snapshot) }) })
+        const activeCasisticaCode = String(activeNotaSpeseCasistica || '').trim()
+        NS_CATEGORIES.forEach((cat) => {
+          ;(draft[cat] || []).forEach((r) => {
+            const codice = String(r.codice_voce_snapshot || '').trim()
+            if (String(r.codice_casistica || '').trim() === activeCasisticaCode && codice) existingCodes.add(codice)
+          })
+        })
         let maxOrdine = 0
         NS_CATEGORIES.forEach((cat) => { ;(draft[cat] || []).forEach((r) => { maxOrdine = Math.max(maxOrdine, Math.trunc(nsSafeNum(r.ordine, 0))) }) })
         let added = 0
         cartItems.forEach((item: any) => {
-          if (!item?.codice_voce || !item?.famiglia) return
-          if (existingCodes.has(item.codice_voce)) return
+          const codiceVoce = String(item?.codice_voce || '').trim()
+          if (!codiceVoce || !item?.famiglia) return
+          if (existingCodes.has(codiceVoce)) return
           const cat = nsNormalizeCategory(item.famiglia)
           if (!cat) return
           maxOrdine += 10
@@ -5777,7 +5824,7 @@ const loadNotaSpeseDraft = React.useCallback(async () => {
             objectid: 0,
             categoria_costo: cat,
             origine_voce_snapshot: nsMapCartOrigine(item.codice_prezzario || ''),
-            codice_voce_snapshot: String(item.codice_voce || ''),
+            codice_voce_snapshot: codiceVoce,
             descrizione_snapshot: String(item.descrizione || ''),
             unita_misura_snapshot: String(item.unita_misura || ''),
             prezzo_unitario_snapshot: nsRound(nsSafeNum(item.prezzo_unitario, 0), 4),
@@ -5788,7 +5835,7 @@ const loadNotaSpeseDraft = React.useCallback(async () => {
             note: '',
             codice_casistica: activeNotaSpeseCasistica
           })
-          existingCodes.add(item.codice_voce)
+          existingCodes.add(codiceVoce)
           added++
         })
         if (added > 0) {
@@ -5843,21 +5890,28 @@ React.useEffect(() => {
     if (!Array.isArray(cartItems) || cartItems.length === 0) return
     setNoteSpeseRowsDraft((prev) => {
       const existingCodes = new Set<string>()
-      NS_CATEGORIES.forEach((cat) => { ;(prev[cat] || []).forEach((r) => { if (r.codice_voce_snapshot) existingCodes.add(r.codice_voce_snapshot) }) })
+      const activeCasisticaCode = String(activeNotaSpeseCasistica || '').trim()
+      NS_CATEGORIES.forEach((cat) => {
+        ;(prev[cat] || []).forEach((r) => {
+          const codice = String(r.codice_voce_snapshot || '').trim()
+          if (String(r.codice_casistica || '').trim() === activeCasisticaCode && codice) existingCodes.add(codice)
+        })
+      })
       let maxOrdine = 0
       NS_CATEGORIES.forEach((cat) => { ;(prev[cat] || []).forEach((r) => { maxOrdine = Math.max(maxOrdine, Math.trunc(nsSafeNum(r.ordine, 0))) }) })
       const draft = nsCloneRowsByCategory(prev)
       let added = 0
       cartItems.forEach((item: any) => {
-        if (!item?.codice_voce || !item?.famiglia) return
-        if (existingCodes.has(item.codice_voce)) return
+        const codiceVoce = String(item?.codice_voce || '').trim()
+        if (!codiceVoce || !item?.famiglia) return
+        if (existingCodes.has(codiceVoce)) return
         const cat = nsNormalizeCategory(item.famiglia)
         if (!cat) return
         maxOrdine += 10
         draft[cat].push({
           objectid: 0, categoria_costo: cat,
           origine_voce_snapshot: nsMapCartOrigine(item.codice_prezzario || ''),
-          codice_voce_snapshot: String(item.codice_voce || ''),
+          codice_voce_snapshot: codiceVoce,
           descrizione_snapshot: String(item.descrizione || ''),
           unita_misura_snapshot: String(item.unita_misura || ''),
           prezzo_unitario_snapshot: nsRound(nsSafeNum(item.prezzo_unitario, 0), 4),
@@ -5866,7 +5920,7 @@ React.useEffect(() => {
           ordine: maxOrdine, note: '',
           codice_casistica: activeNotaSpeseCasistica
         })
-        existingCodes.add(item.codice_voce)
+        existingCodes.add(codiceVoce)
         added++
       })
       if (added > 0) {
@@ -6072,10 +6126,13 @@ React.useEffect(() => {
   }, [])
 
   React.useEffect(() => {
-    if (mode === 'edit' && npTab === 'allegati' && currentOid != null) {
+    // Carica subito gli allegati della pratica in apertura, non solo quando
+    // l'operatore entra nella tab Allegati. In questo modo il badge della tab
+    // mostra il conteggio reale fin dal caricamento del widget.
+    if (mode === 'edit' && currentOid != null && attachmentsForOid !== currentOid) {
       void loadCurrentAttachments()
     }
-  }, [mode, npTab, currentOid, loadCurrentAttachments])
+  }, [mode, currentOid, attachmentsForOid, loadCurrentAttachments])
 
   // Norma violata 3 — select_multiple come Set (stringa separata da spazio)
   const norma3Set = React.useMemo(() => new Set(String(g('norma_violata3') || '').split(' ').filter(Boolean)), [draft.norma_violata3])
@@ -6766,8 +6823,8 @@ React.useEffect(() => {
         provincia: g('provincia') || null,
         cap: g('cap') || null,
         stato: g('stato') || 'ITALIA',
-        email: g('email') || null,
-        pec: g('pec') || null,
+        email: String(g('email') || '').trim().toLocaleLowerCase('it-IT') || null,
+        pec: String(g('pec') || '').trim().toLocaleLowerCase('it-IT') || null,
         telefono: g('telefono') || null,
         cellulare: g('cellulare') || null,
         tipo_abuso: tipoAbuso || null,
@@ -6948,7 +7005,7 @@ React.useEffect(() => {
 
       const newOid = Number(added.objectId)
       
-      // Codice provvisorio della rilevazione: TR/TI-OBJECTID-settore.
+      // Numero della rilevazione: OBJECTID-TR/TI-settore.
       const newPraticaCode = buildPraticaCodeFromData(cleanAttrs, newOid)
 
       // In create mode NON aggiornare la datasource schema/base e NON provare a selezionare il nuovo OID:
@@ -7071,7 +7128,7 @@ ${e?.message || String(e)}`
   const geomStatus = React.useMemo(() => {
     if (reqPoint === 0) {
       if (p.clickedPointWgs84) return { kind: 'ok' as const, text: 'Punto impostato manualmente (facoltativo per questa violazione).' }
-      return { kind: 'info' as const, text: 'Localizzazione non richiesta per questa violazione.' }
+      return { kind: 'info' as const, text: 'Non è stata selezionata alcuna violazione che richieda la localizzazione nella mappa.' }
     }
     // reqPoint === 1
     if (p.clickedPointWgs84) return { kind: 'ok' as const, text: 'Punto impostato da click in mappa.' }
@@ -7253,8 +7310,8 @@ ${e?.message || String(e)}`
       case 'stato': return { label: 'Stato', el: <NpText value={g('stato') || 'ITALIA'} onChange={v => set('stato', v)} disabled={saving}/> }
       case 'telefono': return { label: 'Telefono', el: <NpText value={g('telefono')} onChange={v => set('telefono', v)} disabled={saving}/> }
       case 'cellulare': return { label: 'Cellulare', el: <NpText value={g('cellulare')} onChange={v => set('cellulare', v)} disabled={saving}/> }
-      case 'email': return { label: 'E-mail', el: <NpText value={g('email')} onChange={v => set('email', v)} disabled={saving}/> }
-      case 'pec': return { label: 'PEC', el: <NpText value={g('pec')} onChange={v => set('pec', v)} disabled={saving}/> }
+      case 'email': return { label: 'E-mail', el: <NpText value={g('email')} onChange={v => set('email', v)} lowercase disabled={saving}/> }
+      case 'pec': return { label: 'PEC', el: <NpText value={g('pec')} onChange={v => set('pec', v)} lowercase disabled={saving}/> }
       // Trasgressore — qualifica
       case 'qualifica_fondo': return { label: 'Qualifica rispetto al fondo', el: <NpSel value={g('qualifica_fondo')} onChange={v => set('qualifica_fondo', v)} options={domainOpts('qualifica_fondo', CHOICES.qualifica_fondo)} disabled={saving}/> }
       // Trasgressore — domicilio notifiche
@@ -7278,7 +7335,7 @@ ${e?.message || String(e)}`
       case 'rl_dom_cap': return (tipoSogg === 'PG' && String(g('rl_dom_notifica')) === '1') ? { label: 'CAP', el: <CapIstatInput value={g('rl_dom_cap')} onChange={v => set('rl_dom_cap', v)} options={capOptionsByAddress.rl} disabled={saving}/> } : null
       case 'rl_dom_stato': return (tipoSogg === 'PG' && String(g('rl_dom_notifica')) === '1') ? { label: 'Stato', el: <NpText value={g('rl_dom_stato') || 'ITALIA'} onChange={v => set('rl_dom_stato', v)} disabled={saving}/> } : null
       // Trasgressore — note
-      case 'note_anagrafica': return { label: 'Note trasgressore', el: <NpText value={g('note_anagrafica')} onChange={v => set('note_anagrafica', v)} multiline disabled={saving}/> }
+      case 'note_anagrafica': return { label: 'Note', el: <NpText value={g('note_anagrafica')} onChange={v => set('note_anagrafica', v)} multiline disabled={saving}/> }
       // Violazione — Art. 15
       case 'tipo_abuso': return { label: 'Tipo di abuso', el: <NpSel value={tipoAbuso} onChange={v => { set('tipo_abuso', v); set('norma15_parziale', ''); set('norma15_totale', '') }} options={CHOICES.tipo_abuso} disabled={saving}/> }
       case 'norma15_sel': {
@@ -7313,21 +7370,33 @@ ${e?.message || String(e)}`
           ? <NpSel value={''} onChange={() => {}} options={CHOICES.grado} disabled/>
           : (
             <div style={{ display: 'grid', gap: 8 }}>
-              {riGradoSelectedArts.map(art => (
-                <div key={art} style={{ display: 'grid', gridTemplateColumns: '90px 1fr', gap: 8, alignItems: 'center' }}>
-                  <div style={{ fontSize: 12, fontWeight: 700, color: '#374151' }}>Art. {art}</div>
-                  <NpSel value={riGradiViolazioniMap[art] || ''} onChange={v => setRiGradoForArt(art, v)} options={CHOICES.grado} disabled={saving || !en}/>
-                </div>
-              ))}
+              {riGradoSelectedArts.map(art => {
+                const gradeValue = riGradiViolazioniMap[art] || ''
+                const gradePending = en && !gradeValue
+                return (
+                  <div key={art} style={{ display: 'grid', gridTemplateColumns: '90px 1fr', gap: 8, alignItems: 'center' }}>
+                    <div style={{ fontSize: 12, fontWeight: 700, color: '#374151' }}>Art. {art}</div>
+                    <NpSel
+                      value={gradeValue}
+                      onChange={v => setRiGradoForArt(art, v)}
+                      options={CHOICES.grado}
+                      centerText
+                      disabled={saving || !en}
+                      attention={gradePending}
+                      attentionTitle='Grado da valorizzare'
+                    />
+                  </div>
+                )
+              })}
             </div>
           )
         return { label: 'Gravità', el }
       }
       // Violazione — Descrizione
-      case 'descrizione_fatti': return { label: 'Descrizione dettagliata della violazione', el: <NpText value={g('descrizione_fatti')} onChange={v => set('descrizione_fatti', v)} multiline disabled={saving}/> }
-      case 'circostanze': return { label: 'Circostanze rilevanti', el: <NpText value={g('circostanze')} onChange={v => set('circostanze', v)} multiline disabled={saving}/> }
-      case 'presenza_trasgressore': return { label: 'Il trasgressore era presente?', el: <NpSel value={g('presenza_trasgressore')} onChange={v => set('presenza_trasgressore', v)} options={CHOICES.presenza} disabled={saving}/> }
-      case 'descrizione_luogo': return { label: 'Descrizione del luogo', el: <NpText value={g('descrizione_luogo')} onChange={v => set('descrizione_luogo', v)} multiline disabled={saving}/> }
+      case 'descrizione_fatti': return { label: 'Descrizione dettagliata della violazione', el: <NpText value={g('descrizione_fatti')} onChange={v => set('descrizione_fatti', v)} multiline uppercase={false} disabled={saving}/> }
+      case 'circostanze': return { label: 'Circostanze rilevanti', el: <NpText value={g('circostanze')} onChange={v => set('circostanze', v)} multiline uppercase={false} disabled={saving}/> }
+      case 'presenza_trasgressore': return { label: <span style={{ whiteSpace: 'nowrap' }}>Il trasgressore era presente?</span>, el: <NpSel value={g('presenza_trasgressore')} onChange={v => set('presenza_trasgressore', v)} options={CHOICES.presenza} disabled={saving}/> }
+      case 'descrizione_luogo': return { label: 'Descrizione del luogo', el: <NpText value={g('descrizione_luogo')} onChange={v => set('descrizione_luogo', v)} multiline uppercase={false} disabled={saving}/> }
       // Dati tecnici
       case 'distretto': return { label: 'Distretto', el: <NpText value={g('distretto')} onChange={v => set('distretto', v)} disabled={saving}/> }
       case 'comizio': return { label: 'Comizio', el: <NpText value={g('comizio')} onChange={v => set('comizio', v)} disabled={saving}/> }
@@ -7586,7 +7655,7 @@ ${e?.message || String(e)}`
 
         const rightColumn = (
           <section style={{ ...editCardStyle, minHeight: '100%', display: 'flex', flexDirection: 'column', minWidth: 0 }}>
-            <div style={editCardHeaderStyle}><span>Note</span></div>
+            <div style={editCardHeaderStyle}><span>Annotazioni del tecnico istruttore</span></div>
             <div style={{ ...editCardBodyStyle, flex: '1 1 auto', minHeight: 0 }}>{noteBody}</div>
           </section>
         )
@@ -7771,20 +7840,47 @@ ${e?.message || String(e)}`
               justifyContent: 'center',
               width: '100%',
               minHeight: 24,
-              color: required ? '#0f5132' : '#94a3b8',
-              fontSize: required ? 15 : 12,
+              color: required ? '#4b5563' : '#94a3b8',
+              fontSize: 12,
               fontWeight: required ? 700 : 400,
               lineHeight: 1
             }}
           >
-            {required ? '✓' : '—'}
+            {required ? '●' : '—'}
           </span>
         )
+        const selectedNorma3TextStyle: React.CSSProperties = { color: '#374151', fontWeight: 400, opacity: 1 }
+        const renderNorma3Checkbox = (selected: boolean, onChange: () => void, style?: React.CSSProperties) => {
+          if (selected && isRiAgrTecLimitedEdit) {
+            return (
+              <span
+                aria-hidden='true'
+                style={{
+                  width: 13,
+                  height: 13,
+                  border: '1.5px solid #4b5563',
+                  borderRadius: 2,
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  color: '#4b5563',
+                  fontSize: 10,
+                  fontWeight: 800,
+                  lineHeight: 1,
+                  background: '#e5e7eb',
+                  flexShrink: 0,
+                  ...style
+                }}
+              >
+                ✓
+              </span>
+            )
+          }
+          return <input type='checkbox' checked={selected} disabled={saving || isRiAgrTecLimitedEdit} onChange={onChange} style={{ margin: 0, flexShrink: 0, accentColor: '#4b5563', ...style }}/>
+        }
         const renderNorma3Rows = () => {
-          const pointColumnWidth = 86
-          const gravityReqColumnWidth = 74
-          const notaSpeseReqColumnWidth = 84
-          const gridColumns = `minmax(300px, 1fr) ${pointColumnWidth}px ${notaSpeseReqColumnWidth}px ${gravityReqColumnWidth}px ${formStyle.norma3GradeColumnWidth}px`
+          const norma3IndicatorColumnWidth = formStyle.norma3GradeColumnWidth
+          const gridColumns = `minmax(300px, 1fr) ${norma3IndicatorColumnWidth}px ${norma3IndicatorColumnWidth}px ${norma3IndicatorColumnWidth}px ${formStyle.norma3GradeColumnWidth}px`
           const reqHeaderStyle: React.CSSProperties = {
             ...editMutedHeaderStyle,
             marginBottom: 0,
@@ -7792,7 +7888,10 @@ ${e?.message || String(e)}`
             borderLeft: '1px solid #e5e7eb',
             textAlign: 'center',
             whiteSpace: 'normal',
-            lineHeight: 1.15
+            lineHeight: 1.15,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center'
           }
           const reqCellStyle: React.CSSProperties = {
             borderLeft: '1px solid #e5e7eb',
@@ -7804,7 +7903,7 @@ ${e?.message || String(e)}`
           return (
             <div style={{ border: '1px solid #e5e7eb', borderRadius: 8, overflow: 'hidden', background: '#f8fbff', display: 'grid', gap: formStyle.norma3RowGap }}>
               <div style={{ display: 'grid', gridTemplateColumns: gridColumns, gap: 0, background: '#f8fafc', borderBottom: '1px solid #e5e7eb' }}>
-                <div style={{ ...editMutedHeaderStyle, marginBottom: 0, padding: '6px 8px' }}>Violazione</div>
+                <div style={{ ...editMutedHeaderStyle, marginBottom: 0, padding: '6px 8px', display: 'flex', alignItems: 'center' }}>Violazione</div>
                 <div style={reqHeaderStyle}>Punto mappa</div>
                 <div style={reqHeaderStyle} title='Nota spese / rimborso / risarcimento'>Nota spese</div>
                 <div style={reqHeaderStyle}>Gravità</div>
@@ -7817,10 +7916,20 @@ ${e?.message || String(e)}`
                 const hasGrade = RI_GRADO_ART_CODES.includes(art as any)
                 const hasNotaSpese = getNotaSpeseCasisticaByArtCode(o.v) != null
                 const canEditGrade = isCurrentRiAgrTec() && selected && hasGrade && !saving
+                const gradeValue = riGradiViolazioniMap[art] || ''
+                const gradePending = canEditGrade && !gradeValue
                 const gradeNode = selected && hasGrade
-                  ? <NpSel value={riGradiViolazioniMap[art] || ''} onChange={v => setRiGradoForArt(art, v)} options={CHOICES.grado} disabled={!canEditGrade}/>
+                  ? <NpSel
+                      value={gradeValue}
+                      onChange={v => setRiGradoForArt(art, v)}
+                      options={CHOICES.grado}
+                      centerText
+                      disabled={!canEditGrade}
+                      attention={gradePending}
+                      attentionTitle='Grado da valorizzare'
+                    />
                   : emptyGradeCell
-                const rowBg = (idx % 2 === 0 ? '#ffffff' : '#f7fbff')
+                const rowBg = idx % 2 === 0 ? '#ffffff' : '#f7fbff'
                 return (
                   <div key={o.v} style={{
                     display: 'grid',
@@ -7834,14 +7943,15 @@ ${e?.message || String(e)}`
                       alignItems: 'center',
                       gap: 8,
                       fontSize: formStyle.norma3FontSize,
-                      color: '#334155',
+                      color: selected ? selectedNorma3TextStyle.color : (isRiAgrTecLimitedEdit ? '#64748b' : '#334155'),
                       cursor: (saving || isRiAgrTecLimitedEdit) ? 'not-allowed' : 'pointer',
-                      padding: '5px 8px',
-                      opacity: isRiAgrTecLimitedEdit ? 0.72 : 1,
+                      padding: '5px 8px 5px 10px',
+                      opacity: selected ? selectedNorma3TextStyle.opacity : (isRiAgrTecLimitedEdit ? 0.72 : 1),
+                      fontWeight: selected ? selectedNorma3TextStyle.fontWeight : 400,
                       lineHeight: 1.3,
                       minWidth: 0
                     }}>
-                      <input type='checkbox' checked={selected} disabled={saving || isRiAgrTecLimitedEdit} onChange={() => !(saving || isRiAgrTecLimitedEdit) && toggleNorma3(o.v)} style={{ margin: 0, flexShrink: 0 }}/>
+                      {renderNorma3Checkbox(selected, () => !(saving || isRiAgrTecLimitedEdit) && toggleNorma3(o.v))}
                       <span>{o.l}</span>
                     </label>
                     <div style={reqCellStyle}>
@@ -8013,13 +8123,16 @@ ${e?.message || String(e)}`
         return (
           <>
             <div style={{ display: 'grid', gridTemplateColumns: '1fr', gap: 6 }}>
-              {CHOICES.norma3.map(o => (
-                <label key={o.v} style={{ display: 'flex', alignItems: 'flex-start', gap: 8, fontSize: formStyle.norma3FontSize,
-                  color: '#374151', cursor: (saving || isRiAgrTecLimitedEdit) ? 'not-allowed' : 'pointer', padding: '4px 0', opacity: isRiAgrTecLimitedEdit ? 0.72 : 1 }}>
-                  <input type='checkbox' checked={norma3Set.has(o.v)} disabled={saving || isRiAgrTecLimitedEdit} onChange={() => !(saving || isRiAgrTecLimitedEdit) && toggleNorma3(o.v)} style={{ marginTop: 2, flexShrink: 0 }}/>
-                  {o.l}
-                </label>
-              ))}
+              {CHOICES.norma3.map(o => {
+                const selected = norma3Set.has(o.v)
+                return (
+                  <label key={o.v} style={{ display: 'flex', alignItems: 'flex-start', gap: 8, fontSize: formStyle.norma3FontSize,
+                    color: selected ? selectedNorma3TextStyle.color : (isRiAgrTecLimitedEdit ? '#64748b' : '#374151'), cursor: (saving || isRiAgrTecLimitedEdit) ? 'not-allowed' : 'pointer', padding: '4px 6px', opacity: selected ? selectedNorma3TextStyle.opacity : (isRiAgrTecLimitedEdit ? 0.72 : 1), fontWeight: selected ? selectedNorma3TextStyle.fontWeight : 400, background: 'transparent', borderRadius: 6 }}>
+                    {renderNorma3Checkbox(selected, () => !(saving || isRiAgrTecLimitedEdit) && toggleNorma3(o.v), { marginTop: 2 })}
+                    {o.l}
+                  </label>
+                )
+              })}
             </div>
           </>
         )
@@ -8298,7 +8411,7 @@ ${e?.message || String(e)}`
                 datiTecniciBaselineXRef.current = target
                 window.setTimeout(() => setDatiTecniciSidebarDirty(false), 350)
               }}
-              disabled={!datiTecniciSidebarDirty}
+              aria-disabled={!datiTecniciSidebarDirty}
               title='Ripristina larghezza colonne'
               aria-label='Ripristina larghezza colonne'
             >↔</button>
@@ -8616,7 +8729,7 @@ ${e?.message || String(e)}`
             </div>
             <div style={{ fontSize: 13, color: '#374151', lineHeight: 1.6, marginBottom: 14, display: 'grid', gap: 10 }}>
               <div style={{ fontWeight: 500, padding: 10, background: '#eff6ff', border: '1px solid #bfdbfe', borderRadius: 6, color: '#1e3a8a' }}>
-                Per salvare la pratica è necessario indicare il punto in mappa.
+                Per la violazione selezionata è necessario localizzare il punto nella mappa.
               </div>
               <div>Confermando, verrà aperta la scheda <b>Luoghi e dati</b>.</div>
             </div>
@@ -8897,7 +9010,7 @@ ${e?.message || String(e)}`
               <div>La rilevazione è stata salvata correttamente nel sistema.</div>
               {createSuccessPraticaCode && (
                 <div style={{ fontWeight: 600, color: '#1f2937', padding: 10, background: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: 6 }}>
-                  Numero rilevazione provvisorio: <span style={{ color: '#15803d', fontSize: 14, fontFamily: 'monospace' }}>{createSuccessPraticaCode}</span>
+                  Numero rilevazione: <span style={{ color: '#15803d', fontSize: 14, fontFamily: 'monospace' }}>{createSuccessPraticaCode}</span>
                 </div>
               )}
               <div>Clicca <b>OK</b> per aprire la rilevazione in modalità modifica.</div>

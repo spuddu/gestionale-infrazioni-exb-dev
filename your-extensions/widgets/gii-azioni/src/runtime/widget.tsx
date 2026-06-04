@@ -5,10 +5,10 @@ import { Button } from 'jimu-ui'
 import { createPortal } from 'react-dom'
 import type { IMConfig } from '../config'
 import { defaultConfig } from '../config'
-import { buildRapportoPdf } from '../../../_shared/gii-anteprime/rapporto/rapporto-pdf-builder'
 import { buildNotaSpesePdf, type NotaSpeseData } from '../../../_shared/gii-anteprime/rapporto/notaspese-pdf-builder'
 import { PDFDocument } from 'pdf-lib'
 import AnteprimaPdfViewer from '../../../_shared/gii-anteprime/anteprima-pdf-viewer'
+import { buildRapportoPdf, buildRapportoIterPlaceholders, loadRapportoIterCicliForPdf, type RapportoIterCicloPdf } from '../../../_shared/gii-anteprime/rapporto/rapporto-pdf-builder'
 
 
 const GII_LOG_EVENTI_CICLI_URL = 'https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_LOG_EVENTI_CICLI/FeatureServer/0'
@@ -68,6 +68,83 @@ function normalizeSettoreCod (v: any): string {
   if (s.includes('CATASTO') || s.includes('RUOLI')) return 'CR'
   if (s.includes('GESTIONEIRRIGUA')) return 'GI'
   return SETTORE_NUM[s] != null ? s : s
+}
+
+
+function cleanPracticeCodeText (value: any): string {
+  return String(value ?? '')
+    .trim()
+    .replace(/^rapporto\s+tecnico\s+n\.?\s*/i, '')
+    .replace(/^rapporto\s+n\.?\s*/i, '')
+    .replace(/^rapporto\s*/i, '')
+    .replace(/^rilevazione\s+n\.?\s*/i, '')
+    .replace(/^rilevazione\s*/i, '')
+    .trim()
+}
+
+function isRilevazioneCodeText (value: any): boolean {
+  const s = cleanPracticeCodeText(value).toUpperCase().replace(/_/g, '-').replace(/\s+/g, '-')
+  return /^(TR|TI)-\d+(?:-[A-Z0-9]+)?$/.test(s) || /^\d+-(TR|TI)(?:-[A-Z0-9]+)?$/.test(s)
+}
+
+function getOfficialRapportoTecnicoNumber (data: any): string {
+  const d = data || {}
+  const candidates = [
+    d?.numero_rapporto_tecnico, d?.Numero_rapporto_tecnico, d?.NUMERO_RAPPORTO_TECNICO,
+    d?.codice_rapporto, d?.Codice_rapporto, d?.CODICE_RAPPORTO,
+    d?.n_rapporto, d?.N_RAPPORTO,
+    d?.numero_rapporto, d?.Numero_rapporto, d?.NUMERO_RAPPORTO,
+    d?.cod_pratica, d?.Cod_pratica, d?.COD_PRATICA
+  ]
+  for (const c of candidates) {
+    const text = cleanPracticeCodeText(c)
+    if (!text || /^[-–—]+$/.test(text)) continue
+    // I numeri di rilevazione non sono numeri ufficiali di rapporto tecnico.
+    if (isRilevazioneCodeText(text)) continue
+    if (/^R[-_\s]*\d+/i.test(text) || /^\d+\s*\/\s*\d{4}$/.test(text)) return text.replace(/\s+/g, '')
+  }
+  return ''
+}
+
+function buildRilevazioneNumberFromData (data: any, oid: number | null | undefined): string {
+  const d = data || {}
+  const rawCandidate = cleanPracticeCodeText(
+    d?.numero_rilevazione ?? d?.Numero_rilevazione ?? d?.NUMERO_RILEVAZIONE ??
+    d?.cod_pratica ?? d?.Cod_pratica ?? d?.COD_PRATICA ??
+    d?.numero_rapporto ?? d?.Numero_rapporto ?? d?.NUMERO_RAPPORTO ??
+    d?.n_rapporto ?? d?.N_RAPPORTO ?? ''
+  )
+  const raw = rawCandidate.toUpperCase().replace(/_/g, '-').replace(/\s+/g, '-')
+  const op = d?.origine_pratica ?? d?.Origine_pratica ?? d?.ORIGINE_PRATICA
+  let prefix: 'TR' | 'TI' = (op === 2 || op === '2' || String(op || '').toUpperCase() === 'TI') ? 'TI' : 'TR'
+  let oidPart = oid != null && Number.isFinite(Number(oid)) ? String(Number(oid)) : ''
+  let sectorPart = normalizeSettoreCod(d?.settore_cod ?? d?.Settore_cod ?? d?.SETTORE_COD ?? d?.settore ?? d?.Settore ?? d?.SETTORE ?? '')
+
+  let m = raw.match(/^(TR|TI)-?(\d+)(?:-([A-Z0-9]+))?$/i)
+  if (m) {
+    prefix = m[1].toUpperCase() as 'TR' | 'TI'
+    oidPart = m[2]
+    if (!sectorPart && m[3]) sectorPart = normalizeSettoreCod(m[3])
+  } else {
+    m = raw.match(/^(\d+)-?(TR|TI)(?:-([A-Z0-9]+))?$/i)
+    if (m) {
+      oidPart = m[1]
+      prefix = m[2].toUpperCase() as 'TR' | 'TI'
+      if (!sectorPart && m[3]) sectorPart = normalizeSettoreCod(m[3])
+    } else if (!oidPart && /^\d+$/.test(raw)) {
+      oidPart = raw
+    }
+  }
+
+  const base = oidPart || rawCandidate || '—'
+  if (base === '—') return base
+  return sectorPart ? `${base}-${prefix}-${sectorPart}` : `${base}-${prefix}`
+}
+
+function buildPracticeCodeFromData (data: any, oid: number | null | undefined): string {
+  const official = getOfficialRapportoTecnicoNumber(data)
+  if (official) return official
+  return buildRilevazioneNumberFromData(data, oid)
 }
 
 /**
@@ -1265,17 +1342,10 @@ function InlineEditOverlay(props: {
     )
   }
 
-  const praticaCode = (() => {
-    const ufficiale = String(data?.numero_rapporto_tecnico ?? data?.Numero_rapporto_tecnico ?? data?.NUMERO_RAPPORTO_TECNICO ?? '').trim()
-    if (ufficiale) return ufficiale.replace(/^Rapporto\s*/i, '').trim()
-    const op = data?.origine_pratica ?? data?.Origine_pratica ?? data?.ORIGINE_PRATICA
-    const settore = normalizeSettoreCod(data?.settore_cod ?? data?.Settore_cod ?? data?.SETTORE_COD ?? '')
-    const base = `${(op === 2 || op === '2' || String(op || '').toUpperCase() === 'TI') ? 'TI' : 'TR'}-${oid}`
-    return settore ? `${base}-${settore}` : base
-  })()
+  const praticaCode = buildPracticeCodeFromData(data || {}, oid)
 
   const praticaLabel = (() => {
-    const ufficiale = String(data?.numero_rapporto_tecnico ?? data?.Numero_rapporto_tecnico ?? data?.NUMERO_RAPPORTO_TECNICO ?? '').trim()
+    const ufficiale = getOfficialRapportoTecnicoNumber(data || {})
     return ufficiale ? 'Rapporto tecnico' : 'Rilevazione'
   })()
 
@@ -1290,7 +1360,7 @@ function InlineEditOverlay(props: {
       }}>
         {/* Header */}
         <div style={{ flex: '0 0 auto', padding: '14px 20px', borderBottom: '1px solid #e5e7eb', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
-          <div style={{ fontWeight: 700, fontSize: 15 }}>
+          <div style={{ fontWeight: 700, fontSize: 15, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', minWidth: 0 }}>
             ✏️ Modifica rilevazione&nbsp;<span style={{ color: '#2f6fed' }}>{praticaCode}</span>
           </div>
           <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
@@ -1354,7 +1424,7 @@ function InlineEditOverlay(props: {
       {confirmCancel && (
         <div style={{ position: 'fixed', inset: 0, zIndex: 100000, background: 'rgba(0,0,0,0.4)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
           <div style={{ background: '#fff', borderRadius: 12, padding: 28, maxWidth: 380, width: '90%', boxShadow: '0 8px 32px rgba(0,0,0,0.25)' }}>
-            <div style={{ fontWeight: 700, fontSize: 16, marginBottom: 10 }}>Annullare le modifiche?</div>
+            <div style={{ fontWeight: 700, fontSize: 16, marginBottom: 10, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>Annullare le modifiche?</div>
             <div style={{ fontSize: 13, color: '#4b5563', marginBottom: 20 }}>Le modifiche non salvate andranno perse.</div>
             <div style={{ display: 'flex', gap: 10 }}>
               <button type='button' onClick={() => { setConfirmCancel(false); onClose(false) }}
@@ -1637,17 +1707,10 @@ function ActionsPanel (props: {
   const idFieldNameFromSel = active?.state?.idFieldName || 'OBJECTID'
   const hasSel = oid != null && Number.isFinite(oid)
 
-  const praticaCode = (() => {
-    const ufficiale = String(data?.numero_rapporto_tecnico ?? data?.Numero_rapporto_tecnico ?? data?.NUMERO_RAPPORTO_TECNICO ?? '').trim()
-    if (ufficiale) return ufficiale.replace(/^Rapporto\s*/i, '').trim()
-    const op = data?.origine_pratica ?? data?.Origine_pratica ?? data?.ORIGINE_PRATICA
-    const settore = normalizeSettoreCod(data?.settore_cod ?? data?.Settore_cod ?? data?.SETTORE_COD ?? '')
-    const base = `${(op === 2 || op === '2' || String(op || '').toUpperCase() === 'TI') ? 'TI' : 'TR'}-${oid}`
-    return settore ? `${base}-${settore}` : base
-  })()
+  const praticaCode = buildPracticeCodeFromData(data || {}, oid)
 
   const praticaLabel = (() => {
-    const ufficiale = String(data?.numero_rapporto_tecnico ?? data?.Numero_rapporto_tecnico ?? data?.NUMERO_RAPPORTO_TECNICO ?? '').trim()
+    const ufficiale = getOfficialRapportoTecnicoNumber(data || {})
     return ufficiale ? 'Rapporto tecnico' : 'Rilevazione'
   })()
 
@@ -2448,11 +2511,7 @@ function ActionsPanel (props: {
 
   const shortReportNumberForActivity = (overrideAttrs?: Record<string, any>): string => {
     const merged = { ...(data || {}), ...(overrideAttrs || {}) }
-    const ufficiale = String(pickAttrCI(merged, ['numero_rapporto_tecnico', 'numero_rapporto', 'n_rapporto', 'codice_rapporto', 'cod_pratica', 'rapporto', 'num_rapporto']) || '').trim()
-    if (ufficiale) return ufficiale.replace(/^Rapporto\s*/i, '').trim()
-    const settore = normalizeSettoreCod(pickAttrCI(merged, ['settore_cod', 'SETTORE_COD']) || '')
-    const base = oid != null ? `${practicePrefixForActivity(overrideAttrs)}-${oid}` : '—'
-    return settore && base !== '—' ? `${base}-${settore}` : base
+    return buildPracticeCodeFromData(merged, oid)
   }
 
   const getActivityParentGlobalId = async (): Promise<string> => {
@@ -3481,16 +3540,16 @@ function ActionsPanel (props: {
     'Approvata'
 
   const approvaConfirmLabel = currentIntegrationRequesterLabel
-    ? `Conferma trasmissione al ${currentIntegrationRequesterLabel}`
-    : role === 'TI' ? `Conferma trasmissione ${praticaLabel === 'Rapporto tecnico' ? 'rapporto tecnico' : 'rilevazione'} al ${getRoleLabelForMenu('RZ')}` :
-    role === 'RZ' ? (praticaLabel === 'Rapporto tecnico' ? 'Conferma validazione integrazione' : 'Conferma approvazione rilevazione') :
-    role === 'RI' ? 'Conferma approvazione istruttoria tecnica' :
-    role === 'DT' ? 'Conferma approvazione Rapporto tecnico di rilevazione' :
-    role === 'DA' ? 'Conferma approvazione verbale' :
-    role === 'RI_AMM' && fwdDest === 'DA' ? 'Conferma approvazione istruttoria amministrativa' :
-    role === 'RI_AMM' ? `Conferma trasmissione al ${fwdDestLabel}` :
-    role === 'TI_AMM' ? `Conferma trasmissione istruttoria amministrativa al ${getRoleLabelForMenu('RI_AMM')}` :
-    'Conferma approvazione'
+    ? `Trasmetti al ${currentIntegrationRequesterLabel}`
+    : role === 'TI' ? `Trasmetti al ${getRoleLabelForMenu('RZ')}` :
+    role === 'RZ' ? (praticaLabel === 'Rapporto tecnico' ? 'Valida integrazione' : 'Approva rilevazione') :
+    role === 'RI' ? 'Approva istruttoria tecnica' :
+    role === 'DT' ? 'Approva rapporto tecnico' :
+    role === 'DA' ? 'Approva verbale' :
+    role === 'RI_AMM' && fwdDest === 'DA' ? 'Approva istruttoria amministrativa' :
+    role === 'RI_AMM' ? `Trasmetti al ${fwdDestLabel}` :
+    role === 'TI_AMM' ? `Trasmetti al ${getRoleLabelForMenu('RI_AMM')}` :
+    'Approva'
 
   const getRiTecnicoTargetLabel = (): string => {
     const areaPratica = normalizeAreaLabel(pickAttrCI(data, ['area_cod', 'area', 'cod_area']))
@@ -4580,34 +4639,47 @@ function ActionsPanel (props: {
     cursor: loading ? 'not-allowed' : 'pointer'
   }
 
-  const pendingTitle = pending === 'TAKE'
-    ? 'Conferma presa in carico'
-    : pending === 'ASSEGNA_TI'
-      ? `Conferma assegnazione al ${getRoleLabelForMenu('TI')}`
-      : pending === 'ASSEGNA_TI_AMM'
-        ? `Conferma assegnazione al ${getRoleLabelForMenu('TI_AMM')}`
-        : pending === 'RESTITUISCI_TI_AMM'
-          ? `Conferma restituzione al ${getRoleLabelForMenu('TI_AMM')}`
-          : (pending === 'INTEGRAZIONE' || pending === 'INTEGRAZIONE_TI_AMM' || pending === 'INTEGRAZIONE_TECNICA')
-          ? (pendingRimandoTargetLabel ? `Conferma rimando al ${pendingRimandoTargetLabel}` : 'Conferma rimando')
-          : pending === 'APPROVA'
-            ? approvaConfirmLabel
-            : pending === 'RESPINGI'
-              ? 'Conferma respinta'
-              : pending === 'ELIMINA'
-                ? 'Conferma archiviazione pratica'
-                : 'Conferma azione'
-
   // ── Colore/icona/testo per ogni tipo di azione ────────────────────────────
   type PendingTheme = { icon: string; color: string; bg: string; border: string; desc: string; buttonBg: string; buttonBorder: string }
 
   const subjectArticle = praticaLabel === 'Rapporto tecnico' ? 'Il' : 'La'
   const subjectNameLower = praticaLabel === 'Rapporto tecnico' ? 'rapporto tecnico' : 'rilevazione'
+  const subjectNameWithArticle = praticaLabel === 'Rapporto tecnico' ? 'del rapporto tecnico' : 'della rilevazione'
   const subjectVerbTrasmessa = praticaLabel === 'Rapporto tecnico' ? 'trasmesso' : 'trasmessa'
   const subjectVerbAssegnata = praticaLabel === 'Rapporto tecnico' ? 'assegnato' : 'assegnata'
   const subjectVerbRimandata = praticaLabel === 'Rapporto tecnico' ? 'rimandato' : 'rimandata'
   const subjectVerbRespinta = praticaLabel === 'Rapporto tecnico' ? 'respinto' : 'respinta'
   const subjectVerbArchiviata = praticaLabel === 'Rapporto tecnico' ? 'archiviato' : 'archiviata'
+
+  const approvaPendingTitle = currentIntegrationRequesterLabel
+    ? `Trasmissione al ${currentIntegrationRequesterLabel}`
+    : role === 'TI' ? `Trasmissione ${subjectNameLower} al ${getRoleLabelForMenu('RZ')}` :
+    role === 'RZ' ? (praticaLabel === 'Rapporto tecnico' ? 'Validazione integrazione' : 'Approvazione rilevazione') :
+    role === 'RI' ? 'Approvazione istruttoria tecnica' :
+    role === 'DT' ? 'Approvazione rapporto tecnico' :
+    role === 'DA' ? 'Approvazione verbale' :
+    role === 'RI_AMM' && fwdDest === 'DA' ? 'Approvazione istruttoria amministrativa' :
+    role === 'RI_AMM' ? `Trasmissione al ${fwdDestLabel}` :
+    role === 'TI_AMM' ? `Trasmissione al ${getRoleLabelForMenu('RI_AMM')}` :
+    'Avanzamento pratica'
+
+  const pendingTitle = pending === 'TAKE'
+    ? 'Presa in carico'
+    : pending === 'ASSEGNA_TI'
+      ? `Assegnazione al ${getRoleLabelForMenu('TI')}`
+      : pending === 'ASSEGNA_TI_AMM'
+        ? `Assegnazione al ${getRoleLabelForMenu('TI_AMM')}`
+        : pending === 'RESTITUISCI_TI_AMM'
+          ? `Restituzione al ${getRoleLabelForMenu('TI_AMM')}`
+          : (pending === 'INTEGRAZIONE' || pending === 'INTEGRAZIONE_TI_AMM' || pending === 'INTEGRAZIONE_TECNICA')
+          ? (pendingRimandoTargetLabel ? `Rimando al ${pendingRimandoTargetLabel}` : 'Rimando')
+          : pending === 'APPROVA'
+            ? approvaPendingTitle
+            : pending === 'RESPINGI'
+              ? `Respinta ${subjectNameWithArticle}`
+              : pending === 'ELIMINA'
+                ? `Archiviazione ${subjectNameWithArticle}`
+                : 'Conferma azione'
 
   const approvaActionDesc = currentIntegrationRequesterLabel
     ? `${subjectArticle} ${subjectNameLower} verrà ${subjectVerbTrasmessa} al ${currentIntegrationRequesterLabel}.`
@@ -4764,9 +4836,9 @@ function ActionsPanel (props: {
       >
         <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12, background: actionMenuTheme.bg, border: `1px solid ${actionMenuTheme.border}`, borderRadius: 10, padding: '10px 12px' }}>
           <div>
-            <div style={{ fontWeight: 800, fontSize: 16, color: actionMenuTheme.color, display: 'flex', alignItems: 'center', gap: 8 }}>
-              <span style={{ fontSize: 20 }}>{pending ? actionMenuTheme.icon : '✓'}</span>
-              <span>Gestisci istruttoria</span>
+            <div style={{ fontWeight: 800, fontSize: 16, color: actionMenuTheme.color, display: 'flex', alignItems: 'center', gap: 8, minWidth: 0, overflow: 'hidden' }}>
+              <span style={{ fontSize: 20, flex: '0 0 auto' }}>{pending ? actionMenuTheme.icon : '✓'}</span>
+              <span style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', minWidth: 0, flex: '1 1 auto' }}>Gestisci istruttoria</span>
             </div>
             {hasSel && oid != null && (
               <div style={{ marginTop: 5, fontSize: 13, color: '#4b5563' }}>
@@ -4958,14 +5030,14 @@ function ActionsPanel (props: {
         role='dialog'
         aria-modal='true'
         data-gii-global-popup-dialog='1'
-        style={{ width: 'min(92vw, 520px)', maxHeight: 'calc(100vh - 48px)', overflowY: 'auto', background: '#fff', borderRadius: 14, boxShadow: '0 20px 60px rgba(0,0,0,0.28)', border: '1px solid rgba(0,0,0,0.08)', padding: 18, display: 'grid', gap: 12, position: 'relative', zIndex: 2147483647 }}
+        style={{ width: 'min(92vw, 560px)', maxHeight: 'calc(100vh - 48px)', overflowY: 'auto', background: '#fff', borderRadius: 14, boxShadow: '0 20px 60px rgba(0,0,0,0.28)', border: '1px solid rgba(0,0,0,0.08)', padding: 18, display: 'grid', gap: 12, position: 'relative', zIndex: 2147483647 }}
         onClick={(e) => { e.stopPropagation() }}
         onMouseDown={(e) => { e.stopPropagation() }}
       >
         {/* Titolo colorato con icona + banda chiara */}
         <div style={{ fontWeight: 800, fontSize: 16, marginBottom: 2, color: theme.color, display: 'flex', alignItems: 'center', gap: 8, background: theme.bg, border: `1px solid ${theme.border}`, borderRadius: 8, padding: '10px 12px' }}>
-          <span style={{ fontSize: 20 }}>{theme.icon}</span>
-          <span>{pendingTitle}</span>
+          <span style={{ fontSize: 20, flex: '0 0 auto' }}>{theme.icon}</span>
+          <span style={{ whiteSpace: 'nowrap' }}>{pendingTitle}</span>
         </div>
 
         {/* Box numero rilevazione / rapporto tecnico */}
@@ -5108,7 +5180,7 @@ function ActionsPanel (props: {
         onMouseDown={(e) => { e.stopPropagation() }}
       >
         <div style={{ background: '#fef2f2', border: '1px solid #fecaca', color: '#991b1b', borderRadius: 10, padding: '10px 12px' }}>
-          <div style={{ fontWeight: 800, fontSize: 16 }}>Nota spese incompleta</div>
+          <div style={{ fontWeight: 800, fontSize: 16, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>Nota spese incompleta</div>
           <div style={{ marginTop: 6, fontSize: 13, lineHeight: 1.45 }}>
             Non è possibile procedere con l’inoltro perché sono presenti righe di nota spese senza quantità o con quantità pari a zero.
           </div>
@@ -5145,7 +5217,7 @@ function ActionsPanel (props: {
         onMouseDown={(e) => { e.stopPropagation() }}
       >
         <div style={{ background: '#fff7ed', border: '1px solid #fed7aa', color: '#9a3412', borderRadius: 10, padding: '10px 12px' }}>
-          <div style={{ fontWeight: 800, fontSize: 16 }}>Attenzione</div>
+          <div style={{ fontWeight: 800, fontSize: 16, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>Attenzione</div>
           <div style={{ marginTop: 6, fontSize: 13, lineHeight: 1.45 }}>
             Una o più violazioni selezionate prevedono la possibilità di nota spese, ma risultano prive di importo.
           </div>
@@ -5367,7 +5439,7 @@ function ActionsPanel (props: {
               role='dialog'
               aria-modal='true'
               data-gii-global-popup-dialog='1'
-              style={{ width: 'min(92vw, 520px)', maxHeight: 'calc(100vh - 48px)', overflowY: 'auto', background: '#fff', borderRadius: 14, boxShadow: '0 20px 60px rgba(0,0,0,0.28)', border: '1px solid rgba(0,0,0,0.08)', padding: 18, display: 'grid', gap: 12, position: 'relative', zIndex: 2147483647 }}
+              style={{ width: 'min(92vw, 560px)', maxHeight: 'calc(100vh - 48px)', overflowY: 'auto', background: '#fff', borderRadius: 14, boxShadow: '0 20px 60px rgba(0,0,0,0.28)', border: '1px solid rgba(0,0,0,0.08)', padding: 18, display: 'grid', gap: 12, position: 'relative', zIndex: 2147483647 }}
               onClick={(e) => { e.stopPropagation() }}
               onMouseDown={(e) => { e.stopPropagation() }}
             >
@@ -5535,30 +5607,6 @@ const SETTORE_LABELS: Record<string, string> = {
   CR: 'CATASTO, RUOLI E SERVIZI TERRITORIALI'
 }
 
-function findUserFullName (cache: Map<string, UtenteCached> | null, ruoloNum: number, areaNum?: number, settoreNum?: number): string {
-  if (!cache) return ''
-  const ruoloCod = RUOLO_COD_FROM_NUM[ruoloNum] || ''
-  const areaCod = areaNum != null ? AREA_COD_FROM_NUM[areaNum] : ''
-  const settoreCod = settoreNum != null ? SETTORE_COD_FROM_NUM[settoreNum] : ''
-  for (const [, entry] of cache) {
-    if (ruoloCod && normalizeRuoloCod(entry.ruoloCod || entry.ruolo) !== ruoloCod) continue
-    if (!ruoloCod && entry.ruolo !== ruoloNum) continue
-    if (areaCod && normalizeAreaCod(entry.areaCod || entry.area) !== areaCod) continue
-    if (!areaCod && areaNum != null && entry.area !== areaNum) continue
-    if (settoreCod && normalizeSettoreCod(entry.settoreCod || entry.settore) !== settoreCod) continue
-    if (!settoreCod && settoreNum != null && entry.settore !== settoreNum) continue
-    return entry.full_name || ''
-  }
-  return ''
-}
-
-function findFullNameByUsername (cache: Map<string, UtenteCached> | null, username: string): string {
-  if (!cache || !username) return username || ''
-  for (const [k, v] of cache) {
-    if (k.toLowerCase() === String(username).trim().toLowerCase()) return v.full_name || username
-  }
-  return username
-}
 
 function firstMeaningfulValue (...vals: any[]): any {
   for (const v of vals) {
@@ -5584,8 +5632,15 @@ function formatDateIt (v: any): string {
 function formatTimeIt (v: any): string {
   if (!v) return ''
   try {
-    const d = new Date(typeof v === 'number' ? v : String(v))
+    const raw = (typeof v === 'string' && /^\d{10,13}$/.test(v.trim())) ? Number(v) : v
+    const d = new Date(typeof raw === 'number' ? raw : String(raw))
     if (isNaN(d.getTime())) return ''
+
+    // ArcGIS conserva i campi Date senza ora come mezzanotte UTC.
+    // In Italia, con l'ora legale, quella mezzanotte viene visualizzata come 02:00:
+    // non è un'ora reale della rilevazione e non va stampata nel rapporto.
+    if (d.getUTCHours() === 0 && d.getUTCMinutes() === 0 && d.getUTCSeconds() === 0 && d.getUTCMilliseconds() === 0) return ''
+
     return d.toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' })
   } catch { return '' }
 }
@@ -5698,13 +5753,11 @@ function isRapportoApprovatoForPdf (data: any): boolean {
 /** Costruisce la mappa dei placeholder → valori dal record e dalla cache utenti.
  * Allineata alla scheda Anteprima del CW editing.
  */
-function buildPlaceholderMap (data: any, utentiCache: Map<string, UtenteCached> | null): Record<string, string> {
+function buildPlaceholderMap (data: any, utentiCache: Map<string, UtenteCached> | null, cicli: RapportoIterCicloPdf[] = []): Record<string, string> {
   const d = data || {}
   const areaCod = normalizeAreaCod(d.area_cod || d.area)
   const settoreCod = normalizeSettoreCod(d.settore_cod || d.settore)
   const isPF = String(d.tipologia_soggetto || '').toUpperCase() === 'PF'
-  const areaN = AREA_NUM[areaCod] ?? null
-  const settoreN = SETTORE_NUM[settoreCod] ?? null
   const artChecked = (field: string): boolean => { const v = d[field]; return v === 1 || v === '1' || v === true }
   const art15on = art15AttivoForRapporto(d)
   const art16on = String(d.norma16_17 || '').toLowerCase().includes('art16')
@@ -5727,18 +5780,11 @@ function buildPlaceholderMap (data: any, utentiCache: Map<string, UtenteCached> 
     : ''
   const codPratica = numeroRapportoTecnico || numeroRilevazione
 
-  const dateFrom = (...fields: string[]): string => formatDateIt(firstMeaningfulValue(
-    ...fields.map(f => pickRapportoAttrCI(d, [f, f.toUpperCase()]))
-  ))
-  const nomeTR = findFullNameByUsername(utentiCache, d.tecnico_rilevatore || d.utente_loggato || d.Creator || '')
-  const nomeTI = d.ti_assegnato_nome || findFullNameByUsername(utentiCache, d.ti_assegnato_username || '') || findFullNameByUsername(utentiCache, d.tecnico_rilevatore || '')
-  const nomeRZ = findUserFullName(utentiCache, 3, areaN ?? undefined, settoreN ?? undefined)
-  const nomeRI = findUserFullName(utentiCache, 4, areaN ?? undefined)
-  const nomeDT = findUserFullName(utentiCache, 5, areaN ?? undefined)
   const rapportoRespinto = isRapportoRespintoForPdf(d)
   const rapportoApprovato = !rapportoRespinto && isRapportoApprovatoForPdf(d)
   const rapportoIstruttoria = !rapportoRespinto && !rapportoApprovato
-  const dataApprovazioneRapporto = rapportoApprovato ? dateFrom('dt_esito_DT', 'dt_stato_DT') : ''
+  const iterPlaceholders = buildRapportoIterPlaceholders({ data: d, utentiCache, cicli, rapportoApprovato, rapportoRespinto })
+  const dataApprovazioneRapporto = iterPlaceholders.data_approvazione_rapporto || ''
 
   return {
     cod_pratica: codPratica, anno: d.data_rilevazione ? String(new Date(d.data_rilevazione).getFullYear()) : '', area_cod: areaCod,
@@ -5779,26 +5825,7 @@ function buildPlaceholderMap (data: any, utentiCache: Map<string, UtenteCached> 
     via: esc(d.via || ''), civico: esc(d.civico || ''), cap: esc(d.cap || ''), localita: esc(d.localita || ''), citta: esc(d.citta || ''),
     telefono: esc(d.telefono || ''), cellulare: esc(d.cellulare || ''), email: esc(d.email || ''), pec: esc(d.pec || ''),
     presenza_trasgressore: String(d.presenza_trasgressore || '').toLowerCase() === 'si' || String(d.presenza_trasgressore || '').toLowerCase() === 'sì' || String(d.presenza_trasgressore || '') === '1' ? 'S\u00EC' : (String(d.presenza_trasgressore || '').toLowerCase() === 'no' || String(d.presenza_trasgressore || '') === '0' ? 'No' : String(d.presenza_trasgressore || '')),
-    firma_tr: esc(nomeTR),
-    firma_ti: esc(nomeTI),
-    firma_rz: esc(nomeRZ),
-    firma_ri: esc(nomeRI),
-    firma_dt: esc(nomeDT),
-    iter_rilevazione_nome: esc(nomeTR),
-    iter_rilevazione_presa: '',
-    iter_rilevazione_data: formatDateIt(d.data_rilevazione),
-    iter_compilazione_nome: esc(nomeTI),
-    iter_compilazione_presa: dateFrom('dt_presa_in_carico_TI', 'dt_stato_TI', 'dt_assegnazione_ti'),
-    iter_compilazione_data: dateFrom('dt_esito_TI'),
-    iter_verifica_nome: esc(nomeRZ),
-    iter_verifica_presa: dateFrom('dt_presa_in_carico_RZ', 'dt_stato_RZ'),
-    iter_verifica_data: dateFrom('dt_esito_RZ'),
-    iter_supervisione_nome: esc(nomeRI),
-    iter_supervisione_presa: dateFrom('dt_presa_in_carico_RI', 'dt_stato_RI'),
-    iter_supervisione_data: dateFrom('dt_esito_RI'),
-    iter_approvazione_nome: esc(nomeDT),
-    iter_approvazione_presa: dateFrom('dt_presa_in_carico_DT', 'dt_stato_DT'),
-    iter_approvazione_data: dataApprovazioneRapporto,
+    ...iterPlaceholders,
     idrante: esc(d.idrante || ''), comune: '', foglio: '', mappali: '', altro_luogo: '',
     distretto_irriguo: esc(d.distretto_irriguo || ''), comizio: esc(d.comizio || ''),
     matricola_contatore: esc(d.matricola_contatore || ''), matricola_tessera: esc(d.matricola_tessera || ''),
@@ -5961,7 +5988,9 @@ async function buildRapportoPdfBlob (
   data: any, utentiCache: Map<string, UtenteCached> | null,
   nsConfig?: { detailUrl: string; parametriUrl: string; parametroCode: string }
 ): Promise<{ blob: Blob; fileName: string }> {
-  const map = buildPlaceholderMap(data, utentiCache)
+  const iterGlobalId = pickRapportoAttrCI(data, ['globalid', 'GlobalID', 'GLOBALID', 'parent_globalid'])
+  const iterCicli = await loadRapportoIterCicliForPdf(iterGlobalId)
+  const map = buildPlaceholderMap(data, utentiCache, iterCicli)
   const fileName = rapportoPdfFileName(map)
 
   let nsGroups: Array<{ codiceCasistica: string; label: string; rows: Record<NsCatPdf, NsRowPdf[]>; summary: NsSummaryPdf }> = []

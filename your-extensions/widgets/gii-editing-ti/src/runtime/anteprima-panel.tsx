@@ -1,10 +1,10 @@
 /** @jsx jsx */
 /** @jsxFrag React.Fragment */
 import { React, jsx, css } from 'jimu-core'
-import { buildRapportoPdf } from '../../../_shared/gii-anteprime/rapporto/rapporto-pdf-builder'
 import { buildNotaSpesePdf, type NotaSpeseData } from '../../../_shared/gii-anteprime/rapporto/notaspese-pdf-builder'
 import { PDFDocument } from 'pdf-lib'
 import AnteprimaPdfViewer from '../../../_shared/gii-anteprime/anteprima-pdf-viewer'
+import { buildRapportoPdf, buildRapportoIterPlaceholders, loadRapportoIterCicliForPdf, type RapportoIterCicloPdf } from '../../../_shared/gii-anteprime/rapporto/rapporto-pdf-builder'
 
 const GII_UTENTI_URL = 'https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_utenti/FeatureServer/0'
 type UtenteCached = {
@@ -17,8 +17,7 @@ type UtenteCached = {
   settore_cod: string
 }
 
-const AREA_NUM: Record<string, number> = { AMM: 1, AGR: 2, TEC: 3 }
-const SETTORE_NUM: Record<string, number> = { CR: 1, GI: 2, D1: 3, D2: 4, D3: 5, D4: 6, D5: 7, D6: 8, DS: 9, CS: 9 }
+
 const AREA_LABELS: Record<string, string> = {
   AGR: 'AGRARIA', TEC: 'TECNICA', AMM: 'AFFARI GENERALI E PROGRAMMAZIONE FINANZIARIA'
 }
@@ -141,30 +140,10 @@ async function ensureUtentiCache (): Promise<Map<string, UtenteCached> | null> {
   finally { _utentiLoading = false }
 }
 
-function findUserFullName (cache: Map<string, UtenteCached> | null, ruoloNum: number, areaNum?: number, settoreNum?: number): string {
-  if (!cache) return ''
-  const targetRole = normalizeRoleCode(ruoloNum)
-  const targetArea = areaNum != null ? normalizeAreaCode(areaNum) : ''
-  const targetSettore = settoreNum != null ? normalizeSettoreCode(targetArea, settoreNum) : ''
-  for (const [, entry] of cache) {
-    const entryRole = entry.ruolo_cod || normalizeRoleCode(entry.ruolo)
-    const entryArea = entry.area_cod || normalizeAreaCode(entry.area)
-    const entrySettore = entry.settore_cod || normalizeSettoreCode(entryArea, entry.settore)
-    if (targetRole && entryRole !== targetRole) continue
-    if (!targetRole && entry.ruolo !== ruoloNum) continue
-    if (targetArea && entryArea !== targetArea) continue
-    if (!targetArea && areaNum != null && entry.area !== areaNum) continue
-    if (targetSettore && entrySettore !== targetSettore) continue
-    if (!targetSettore && settoreNum != null && entry.settore !== settoreNum) continue
-    return entry.full_name || ''
-  }
-  return ''
-}
 
-function findFullNameByUsername (cache: Map<string, UtenteCached> | null, username: string): string {
-  if (!cache || !username) return username || ''
-  for (const [k, v] of cache) { if (k.toLowerCase() === String(username).trim().toLowerCase()) return v.full_name || username }
-  return username
+
+function normGlobalIdForQuery (v: any): string {
+  return String(v ?? '').trim().replace(/[{}]/g, '').toLowerCase()
 }
 
 function formatDateIt (v: any): string {
@@ -182,6 +161,12 @@ function formatTimeIt (v: any): string {
     const raw = (typeof v === 'string' && /^\d{10,13}$/.test(v.trim())) ? Number(v) : v
     const d = new Date(typeof raw === 'number' ? raw : String(raw))
     if (isNaN(d.getTime())) return ''
+
+    // ArcGIS conserva i campi Date senza ora come mezzanotte UTC.
+    // In Italia, con l'ora legale, quella mezzanotte viene visualizzata come 02:00:
+    // non è un'ora reale della rilevazione e non va stampata nel rapporto.
+    if (d.getUTCHours() === 0 && d.getUTCMinutes() === 0 && d.getUTCSeconds() === 0 && d.getUTCMilliseconds() === 0) return ''
+
     return d.toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' })
   } catch { return '' }
 }
@@ -291,13 +276,11 @@ function isRapportoApprovatoForPdf (data: any): boolean {
   return txtVals.some(v => v.includes('approvat'))
 }
 
-function buildPlaceholderMap (data: any, utentiCache: Map<string, UtenteCached> | null): Record<string, string> {
+function buildPlaceholderMap (data: any, utentiCache: Map<string, UtenteCached> | null, cicli: RapportoIterCicloPdf[] = []): Record<string, string> {
   const d = data || {}
   const areaCod = normalizeAreaCode(firstMeaningfulValue(d.area_cod, d.area))
   const settoreCod = normalizeSettoreCode(areaCod, firstMeaningfulValue(d.settore_cod, d.settore))
   const isPF = String(d.tipologia_soggetto || '').toUpperCase() === 'PF'
-  const areaN = AREA_NUM[areaCod] ?? null
-  const settoreN = SETTORE_NUM[settoreCod] ?? null
   const artChecked = (field: string): boolean => { const v = d[field]; return v === 1 || v === '1' || v === true }
   const art15on = art15AttivoForRapporto(d)
   const art16on = String(d.norma16_17 || '').toLowerCase().includes('art16')
@@ -320,18 +303,11 @@ function buildPlaceholderMap (data: any, utentiCache: Map<string, UtenteCached> 
     : ''
   const codPratica = numeroRapportoTecnico || numeroRilevazione
 
-  const dateFrom = (...fields: string[]): string => formatDateIt(firstMeaningfulValue(
-    ...fields.map(f => (d[f] ?? d[f.toUpperCase()] ?? d[f.toLowerCase()]))
-  ))
-  const nomeTR = findFullNameByUsername(utentiCache, d.tecnico_rilevatore || d.utente_loggato || d.Creator || '')
-  const nomeTI = d.ti_assegnato_nome || findFullNameByUsername(utentiCache, d.ti_assegnato_username || '') || findFullNameByUsername(utentiCache, d.tecnico_rilevatore || '')
-  const nomeRZ = findUserFullName(utentiCache, 3, areaN ?? undefined, settoreN ?? undefined)
-  const nomeRI = findUserFullName(utentiCache, 4, areaN ?? undefined)
-  const nomeDT = findUserFullName(utentiCache, 5, areaN ?? undefined)
   const rapportoRespinto = isRapportoRespintoForPdf(d)
   const rapportoApprovato = !rapportoRespinto && isRapportoApprovatoForPdf(d)
   const rapportoIstruttoria = !rapportoRespinto && !rapportoApprovato
-  const dataApprovazioneRapporto = rapportoApprovato ? dateFrom('dt_esito_DT', 'dt_stato_DT') : ''
+  const iterPlaceholders = buildRapportoIterPlaceholders({ data: d, utentiCache, cicli, rapportoApprovato, rapportoRespinto })
+  const dataApprovazioneRapporto = iterPlaceholders.data_approvazione_rapporto || ''
 
   return {
     cod_pratica: codPratica, anno: d.data_rilevazione ? String(new Date(d.data_rilevazione).getFullYear()) : '', area_cod: areaCod,
@@ -372,26 +348,7 @@ function buildPlaceholderMap (data: any, utentiCache: Map<string, UtenteCached> 
     via: esc(d.via || ''), civico: esc(d.civico || ''), cap: esc(d.cap || ''), localita: esc(d.localita || ''), citta: esc(d.citta || ''),
     telefono: esc(d.telefono || ''), cellulare: esc(d.cellulare || ''), email: esc(d.email || ''), pec: esc(d.pec || ''),
     presenza_trasgressore: String(d.presenza_trasgressore || '').toLowerCase() === 'si' || String(d.presenza_trasgressore || '').toLowerCase() === 'sì' || String(d.presenza_trasgressore || '') === '1' ? 'S\u00EC' : (String(d.presenza_trasgressore || '').toLowerCase() === 'no' || String(d.presenza_trasgressore || '') === '0' ? 'No' : String(d.presenza_trasgressore || '')),
-    firma_tr: esc(nomeTR),
-    firma_ti: esc(nomeTI),
-    firma_rz: esc(nomeRZ),
-    firma_ri: esc(nomeRI),
-    firma_dt: esc(nomeDT),
-    iter_rilevazione_nome: esc(nomeTR),
-    iter_rilevazione_presa: '',
-    iter_rilevazione_data: formatDateIt(d.data_rilevazione),
-    iter_compilazione_nome: esc(nomeTI),
-    iter_compilazione_presa: dateFrom('dt_presa_in_carico_TI', 'dt_stato_TI', 'dt_assegnazione_ti'),
-    iter_compilazione_data: dateFrom('dt_esito_TI'),
-    iter_verifica_nome: esc(nomeRZ),
-    iter_verifica_presa: dateFrom('dt_presa_in_carico_RZ', 'dt_stato_RZ'),
-    iter_verifica_data: dateFrom('dt_esito_RZ'),
-    iter_supervisione_nome: esc(nomeRI),
-    iter_supervisione_presa: dateFrom('dt_presa_in_carico_RI', 'dt_stato_RI'),
-    iter_supervisione_data: dateFrom('dt_esito_RI'),
-    iter_approvazione_nome: esc(nomeDT),
-    iter_approvazione_presa: dateFrom('dt_presa_in_carico_DT', 'dt_stato_DT'),
-    iter_approvazione_data: dataApprovazioneRapporto,
+    ...iterPlaceholders,
     idrante: esc(d.idrante || ''), comune: '', foglio: '', mappali: '', altro_luogo: '',
     distretto_irriguo: esc(d.distretto_irriguo || ''), comizio: esc(d.comizio || ''),
     matricola_contatore: esc(d.matricola_contatore || ''), matricola_tessera: esc(d.matricola_tessera || ''),
@@ -421,9 +378,16 @@ const NS_CASISTICA_META: Record<string, { order: number; label: string }> = {
   C113_DANNI_STRUTTURE_IRRIGUE: { order: 39, label: 'Art. 39 – Danni strutture irrigue' }
 }
 
+function roundMoney (v: number): number {
+  if (!Number.isFinite(v)) return 0
+  const sign = v < 0 ? -1 : 1
+  const abs = Math.abs(v)
+  return sign * (Math.round((abs + 1e-9) * 100) / 100)
+}
+
 function moneyIt (v: number): string {
   if (!Number.isFinite(v)) return ''
-  return v.toLocaleString('it-IT', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + ' €'
+  return roundMoney(v).toLocaleString('it-IT', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + ' €'
 }
 
 function normalizeNsCasistica (v: any): string {
@@ -435,15 +399,15 @@ function cloneEmptyNsRows (): Record<NsCat, NsRowP[]> {
 }
 
 function buildNsSummaryForRows (rows: Record<NsCat, NsRowP[]>, percentualeSpeseGenerali: number): NsSummaryP {
-  const sumCat = (cat: NsCat) => (rows[cat] || []).reduce((sum, r) => sum + (Number(r.importo_riga) || 0), 0)
+  const sumCat = (cat: NsCat) => roundMoney((rows[cat] || []).reduce((sum, r) => sum + roundMoney(Number(r.importo_riga) || 0), 0))
   const totaleAT = sumCat('AT')
   const totalePR = sumCat('PR')
   const totaleRU = sumCat('RU')
   const totaleSL = sumCat('SL')
   const totalePF = sumCat('PF')
-  const imponibile = totaleAT + totalePR + totaleRU + totaleSL + totalePF
-  const pct = Number.isFinite(percentualeSpeseGenerali) ? percentualeSpeseGenerali : 15
-  const importoSpeseGenerali = imponibile * pct / 100
+  const imponibile = roundMoney(totaleAT + totalePR + totaleRU + totaleSL + totalePF)
+  const pct = Number.isFinite(percentualeSpeseGenerali) ? roundMoney(percentualeSpeseGenerali) : 15
+  const importoSpeseGenerali = roundMoney(imponibile * pct / 100)
   return {
     totaleAT,
     totalePR,
@@ -452,7 +416,7 @@ function buildNsSummaryForRows (rows: Record<NsCat, NsRowP[]>, percentualeSpeseG
     totalePF,
     percentualeSpeseGenerali: pct,
     importoSpeseGenerali,
-    totaleComplessivo: imponibile + importoSpeseGenerali
+    totaleComplessivo: roundMoney(imponibile + importoSpeseGenerali)
   }
 }
 
@@ -547,10 +511,12 @@ export default function AnteprimaPanel (p: { data: Record<string, any>; mode: 'c
     setLoading(true); setError(null)
     ;(async () => {
       try {
-        const map = buildPlaceholderMap(dataSnapshot, utenti)
+        const iterGlobalId = pickAttrCI(dataSnapshot, ['globalid', 'GlobalID', 'GLOBALID', 'parent_globalid'])
+        const iterCicli = await loadRapportoIterCicliForPdf(iterGlobalId)
+        const map = buildPlaceholderMap(dataSnapshot, utenti, iterCicli)
         const nsGroups = buildNotaSpeseGroups(p.nsRows, p.nsSummary)
         if (nsGroups.length > 0) {
-          const totaleNoteSpese = nsGroups.reduce((sum, group) => sum + (Number(group?.summary?.totaleComplessivo) || 0), 0)
+          const totaleNoteSpese = roundMoney(nsGroups.reduce((sum, group) => sum + roundMoney(Number(group?.summary?.totaleComplessivo) || 0), 0))
           map.importo_rimborso = moneyIt(totaleNoteSpese)
           map.nota_spese_label = nsGroups.length > 1 ? '(Vedi note spese allegate)' : '(Vedi nota spese allegata)'
         } else {

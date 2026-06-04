@@ -1622,26 +1622,65 @@ function FieldGrid (props: { fields: SummaryFieldConfig[], data: any, layerField
   )
 }
 
+function cleanReportCodeText (raw: any): string {
+  return String(raw ?? '')
+    .trim()
+    .replace(/^rapporto\s+tecnico\s+n\.?\s*/i, '')
+    .replace(/^rapporto\s+n\.?\s*/i, '')
+    .replace(/^rilevazione\s+n\.?\s*/i, '')
+    .replace(/^rilevazione\s*/i, '')
+    .trim()
+}
+
+function normalizeRilevazioneCodeForAmm (data: any, oid: number | null): string {
+  const d = data || {}
+  const stored = cleanReportCodeText(pickAttrCI(d, ['numero_rilevazione', 'Numero_rilevazione', 'NUMERO_RILEVAZIONE', 'cod_pratica', 'Cod_pratica', 'COD_PRATICA', 'numero_rapporto', 'Numero_rapporto', 'NUMERO_RAPPORTO']))
+  const raw = stored.toUpperCase().replace(/_/g, '-').replace(/\s+/g, '-')
+  const op = pickAttrCI(d, ['origine_pratica', 'Origine_pratica', 'ORIGINE_PRATICA'])
+  let prefix = (op === 2 || op === '2' || String(op || '').toUpperCase() === 'TI') ? 'TI' : 'TR'
+  let oidPart = oid != null && Number.isFinite(Number(oid)) ? String(Number(oid)) : ''
+  let settore = String(pickAttrCI(d, ['settore_cod', 'Settore_cod', 'SETTORE_COD', 'settore', 'Settore', 'SETTORE']) || '').trim().toUpperCase()
+
+  let m = raw.match(/^(TR|TI)-?(\d+)(?:-([A-Z0-9]+))?$/i)
+  if (m) {
+    prefix = m[1].toUpperCase()
+    oidPart = m[2]
+    if (!settore && m[3]) settore = m[3].toUpperCase()
+  } else {
+    m = raw.match(/^(\d+)-?(TR|TI)(?:-([A-Z0-9]+))?$/i)
+    if (m) {
+      oidPart = m[1]
+      prefix = m[2].toUpperCase()
+      if (!settore && m[3]) settore = m[3].toUpperCase()
+    } else if (!oidPart && /^\d+$/.test(raw)) {
+      oidPart = raw
+    }
+  }
+
+  const base = oidPart || stored || '—'
+  if (base === '—') return base
+  return settore ? `${base}-${prefix}-${settore}` : `${base}-${prefix}`
+}
+
 function normalizeReportCode (raw: any, oid: number | null): string {
-  const code = String(raw ?? '').trim()
-  if (code) return /^\d+$/.test(code) ? `R-${code}` : code
-  if (oid != null && Number.isFinite(Number(oid))) return `${Number(oid)}-TR`
-  return '—'
+  const code = cleanReportCodeText(raw)
+  if (code) {
+    const normalized = code.toUpperCase().replace(/_/g, '-').replace(/\s+/g, '-')
+    if (/^(TR|TI)-?\d+(?:-[A-Z0-9]+)?$/.test(normalized) || /^\d+-?(TR|TI)(?:-[A-Z0-9]+)?$/.test(normalized)) return ''
+    return /^\d+$/.test(code) ? `R-${code}` : code
+  }
+  return ''
 }
 
 function getReportCode (data: any, oid: number | null): string {
   const d = data || {}
   const official = pickAttrCI(d, [
     'numero_rapporto_tecnico', 'NUMERO_RAPPORTO_TECNICO', 'Numero_rapporto_tecnico',
-    'codice_rapporto', 'n_rapporto', 'numero_rapporto', 'cod_pratica', 'nrapporto', 'N_RAPPORTO'
+    'codice_rapporto', 'n_rapporto', 'nrapporto', 'N_RAPPORTO'
   ])
-  if (String(official ?? '').trim()) return normalizeReportCode(official, oid)
-
-  const op = pickAttrCI(d, ['origine_pratica', 'Origine_pratica', 'ORIGINE_PRATICA'])
-  const prefix = (op === 2 || op === '2' || String(op || '').toUpperCase() === 'TI') ? 'TI' : 'TR'
-  const settore = String(pickAttrCI(d, ['settore_cod', 'Settore_cod', 'SETTORE_COD', 'settore', 'Settore', 'SETTORE']) || '').trim().toUpperCase()
-  if (oid != null && Number.isFinite(Number(oid))) return settore ? `${Number(oid)}-${prefix}-${settore}` : `${Number(oid)}-${prefix}`
-  return '—'
+  const officialCode = normalizeReportCode(official, oid)
+  if (officialCode) return officialCode
+  return normalizeRilevazioneCodeForAmm(d, oid)
 }
 
 function isDaApprovalComplete (data: Record<string, any>): boolean {

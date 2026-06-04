@@ -199,11 +199,24 @@ export default function AnteprimaPdfViewer (props: Props): any {
   const clampZoom = React.useCallback((value: number) => clampInt(value, 25, 400), [])
   const clampPage = React.useCallback((value: number) => clampInt(value, 1, Math.max(1, pageCount || 1)), [pageCount])
   const pageStep = twoPageView ? 2 : 1
+  const getTwoPageStart = React.useCallback((page: number, total: number): number => {
+    const maxPage = Math.max(1, total || 1)
+    const current = clampInt(page, 1, maxPage)
+
+    // In vista affiancata la pagina corrente deve restare sempre visibile.
+    // Se l'utente attiva la vista dalla pagina finale, non mostriamo una pagina singola:
+    // arretriamo di una pagina e visualizziamo l'ultima coppia disponibile.
+    if (maxPage <= 1) return current
+    if (current >= maxPage) return maxPage - 1
+    return current
+  }, [])
   const visiblePages = React.useMemo(() => {
-    const first = clampInt(pageNumber, 1, Math.max(1, pageCount || 1))
-    if (!twoPageView || pageCount <= 1 || first >= pageCount) return [first]
-    return [first, first + 1]
-  }, [pageCount, pageNumber, twoPageView])
+    const maxPage = Math.max(1, pageCount || 1)
+    const first = clampInt(pageNumber, 1, maxPage)
+    if (!twoPageView || pageCount <= 1) return [first]
+    const spreadStart = getTwoPageStart(first, pageCount)
+    return [spreadStart, Math.min(pageCount, spreadStart + 1)]
+  }, [getTwoPageStart, pageCount, pageNumber, twoPageView])
 
   React.useEffect(() => {
     setZoomInput(String(zoom))
@@ -635,7 +648,16 @@ export default function AnteprimaPdfViewer (props: Props): any {
 
           <button
             type='button'
-            onClick={() => setTwoPageView(v => !v)}
+            onClick={() => {
+              setTwoPageView(v => {
+                const next = !v
+                if (next) {
+                  setPageNumber(current => getTwoPageStart(current, pageCount))
+                }
+                pageScrollAfterRenderRef.current = 'top'
+                return next
+              })
+            }}
             style={{ ...btnStyle, width: 34, minWidth: 34, padding: 0 }}
             title={twoPageView ? 'Passa alla vista a pagina singola' : 'Passa alla vista a pagine affiancate'}
             aria-label={twoPageView ? 'Passa alla vista a pagina singola' : 'Passa alla vista a pagine affiancate'}

@@ -643,7 +643,7 @@ function mergeCurrentAndFallbackGiiAlerts (currentActivities: GiiAlertItem[], dy
     })
 
   const dynamicNonTakeCharge = dynamic.filter(a => !isGiiTakeChargeAlert(a))
-  return [...current, ...dynamicTakeChargeFallback, ...dynamicNonTakeCharge]
+  return sortAlertsForPopup([...current, ...dynamicTakeChargeFallback, ...dynamicNonTakeCharge])
 }
 
 function withGiiTimeout<T> (promise: Promise<T>, ms: number, message: string): Promise<T> {
@@ -663,6 +663,777 @@ function emptyAlertCounts (): GiiAlertQueryResult['counts'] {
 function formatAlertDate (ms: number | null): string {
   if (ms == null) return ''
   try { return new Date(ms).toLocaleDateString('it-IT') } catch { return '' }
+}
+
+function asAlertDateMs (value: any): number | null {
+  if (value === null || value === undefined || value === '') return null
+  if (typeof value === 'number' && Number.isFinite(value)) return value
+  const d = value instanceof Date ? value : new Date(value)
+  const t = d.getTime()
+  return Number.isFinite(t) ? t : null
+}
+
+function formatAlertDateTime (ms: number | null): string {
+  if (ms == null) return ''
+  try {
+    return new Date(ms).toLocaleString('it-IT', {
+      day: '2-digit',
+      month: '2-digit',
+      year: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit'
+    })
+  } catch {
+    return formatAlertDate(ms)
+  }
+}
+
+function alertEventDateMs (alert: GiiAlertItem | null | undefined): number | null {
+  const raw: any = alert?.raw || {}
+
+  // Le attività correnti espongono normalmente data_attivazione/creato_il.
+  // Gli allarmi di presa in carico ricavati come fallback dal layer pratica, invece,
+  // possono avere solo la data di stato del ruolo destinatario (es. dt_stato_RZ per
+  // le rilevazioni TR). Usiamo quindi una lista ampia di fallback, mantenendo prima
+  // i campi specifici dell'attività e poi le date di workflow della pratica.
+  return asAlertDateMs(raw.data_attivazione) ??
+    asAlertDateMs(raw.creato_il) ??
+    asAlertDateMs(raw.data_evento) ??
+    asAlertDateMs(raw.dt_evento) ??
+    asAlertDateMs(raw.dt_chiusura) ??
+    asAlertDateMs(raw.dt_stato_RZ_AGR) ??
+    asAlertDateMs(raw.dt_stato_RZ_TEC) ??
+    asAlertDateMs(raw.dt_stato_RZ) ??
+    asAlertDateMs(raw.dt_stato_TI_AGR) ??
+    asAlertDateMs(raw.dt_stato_TI_TEC) ??
+    asAlertDateMs(raw.dt_stato_TI) ??
+    asAlertDateMs(raw.dt_stato_RI_AGR) ??
+    asAlertDateMs(raw.dt_stato_RI_TEC) ??
+    asAlertDateMs(raw.dt_stato_RI) ??
+    asAlertDateMs(raw.dt_stato_DT_AGR) ??
+    asAlertDateMs(raw.dt_stato_DT_TEC) ??
+    asAlertDateMs(raw.dt_stato_DT) ??
+    asAlertDateMs(raw.dt_stato_TI_AMM) ??
+    asAlertDateMs(raw.dt_stato_RI_AMM) ??
+    asAlertDateMs(raw.dt_stato_DA) ??
+    asAlertDateMs(raw.EditDate) ??
+    asAlertDateMs(raw.editDate) ??
+    asAlertDateMs(raw.CreationDate) ??
+    asAlertDateMs(raw.creationDate)
+}
+
+function normalizeGiiFeatureLayerUrl (url: string): string {
+  let s = String(url || '').trim().replace(/[?#].*$/, '').replace(/\/+$/, '')
+  if (/\/(FeatureServer|MapServer)$/i.test(s)) s = `${s}/0`
+  return s
+}
+
+function alertRawValue (alert: GiiAlertItem | null | undefined, names: string[]): any {
+  const raw: any = alert?.raw || {}
+  const sources = [raw, raw?.__practice].filter(Boolean)
+
+  for (const source of sources) {
+    for (const name of names) {
+      if (Object.prototype.hasOwnProperty.call(source, name)) return source[name]
+    }
+    const ci = new Map<string, any>()
+    Object.keys(source).forEach(k => ci.set(k.toLowerCase(), source[k]))
+    for (const name of names) {
+      const v = ci.get(String(name || '').toLowerCase())
+      if (v !== undefined) return v
+    }
+  }
+
+  return null
+}
+
+function firstNonEmptyAlertRawValue (alert: GiiAlertItem | null | undefined, names: string[]): string {
+  for (const name of names) {
+    const v = alertRawValue(alert, [name])
+    const text = String(v ?? '').trim()
+    if (text) return text
+  }
+  return ''
+}
+
+function alertRawValues (alert: GiiAlertItem | null | undefined, names: string[]): string[] {
+  const raw: any = alert?.raw || {}
+  const sources = [raw, raw?.__practice].filter(Boolean)
+  const out: string[] = []
+
+  const pushValue = (v: any) => {
+    const text = String(v ?? '').trim()
+    if (text && !out.some(x => x.toLowerCase() === text.toLowerCase())) out.push(text)
+  }
+
+  for (const source of sources) {
+    for (const name of names) {
+      if (Object.prototype.hasOwnProperty.call(source, name)) pushValue(source[name])
+    }
+    const ci = new Map<string, any>()
+    Object.keys(source).forEach(k => ci.set(k.toLowerCase(), source[k]))
+    for (const name of names) {
+      const v = ci.get(String(name || '').toLowerCase())
+      if (v !== undefined) pushValue(v)
+    }
+  }
+
+  return out
+}
+
+function normalizeUsernameLookupKey (value: any): string {
+  const text = String(value ?? '').trim().toLowerCase()
+  // Alcuni valori possono arrivare con prefissi tecnici; per la ricerca utente
+  // manteniamo anche una normalizzazione minima e stabile.
+  return text.replace(/^.*\|/, '')
+}
+
+function escapeSqlLiteral (value: string): string {
+  return String(value || '').replace(/'/g, "''")
+}
+
+function alertIsTiOrigin (alert: GiiAlertItem | null | undefined): boolean {
+  const values = [
+    alert?.reportCode,
+    alert?.message,
+    alertRawValue(alert, ['numero_rapporto', 'numero_rilevazione', 'cod_pratica', 'n_rapporto', 'numero_rapporto_tecnico']),
+    alertRawValue(alert, ['origine_pratica'])
+  ].map(v => String(v ?? '').trim().toUpperCase()).filter(Boolean)
+
+  return values.some(v => /(^|[-_\s])TI([-_\s]|$)/.test(v) || v === '2' || v === 'TI')
+}
+
+function alertRawValuesPracticeFirst (alert: GiiAlertItem | null | undefined, names: string[]): string[] {
+  const raw: any = alert?.raw || {}
+  const sources = [raw?.__practice, raw].filter(Boolean)
+  const out: string[] = []
+
+  const pushValue = (v: any) => {
+    const text = String(v ?? '').trim()
+    if (text && !out.some(x => x.toLowerCase() === text.toLowerCase())) out.push(text)
+  }
+
+  for (const source of sources) {
+    for (const name of names) {
+      if (Object.prototype.hasOwnProperty.call(source, name)) pushValue(source[name])
+    }
+    const ci = new Map<string, any>()
+    Object.keys(source).forEach(k => ci.set(k.toLowerCase(), source[k]))
+    for (const name of names) {
+      const v = ci.get(String(name || '').toLowerCase())
+      if (v !== undefined) pushValue(v)
+    }
+  }
+
+  return out
+}
+
+function firstNonEmptyAlertRawValuePracticeFirst (alert: GiiAlertItem | null | undefined, names: string[]): string {
+  for (const name of names) {
+    const values = alertRawValuesPracticeFirst(alert, [name])
+    const text = values.map(v => String(v ?? '').trim()).find(Boolean)
+    if (text) return text
+  }
+  return ''
+}
+
+function alertTechnicianLine (alert: GiiAlertItem): string {
+  const isTi = alertIsTiOrigin(alert)
+
+  // Per le nuove rilevazioni, sia TR sia TI valorizzano sul FL il campo
+  // tecnico_rilevatore con il nome/cognome AGOL dell'utente che ha creato la rilevazione.
+  // Non va quindi mostrato lo username né tentato un lookup su GII_utenti per questo dato.
+  const name = firstNonEmptyAlertRawValuePracticeFirst(alert, [
+    'tecnico_rilevatore',
+    'Tecnico_rilevatore',
+    'TECNICO_RILEVATORE'
+  ])
+
+  if (!name) return ''
+  return `${isTi ? 'Tecnico istruttore' : 'Tecnico rilevatore'}: ${name}`
+}
+function attrValueCi (attrs: Record<string, any>, names: string[]): any {
+  if (!attrs) return null
+  for (const name of names) {
+    if (Object.prototype.hasOwnProperty.call(attrs, name)) return attrs[name]
+  }
+  const ci = new Map<string, any>()
+  Object.keys(attrs).forEach(k => ci.set(k.toLowerCase(), attrs[k]))
+  for (const name of names) {
+    const v = ci.get(String(name || '').toLowerCase())
+    if (v !== undefined) return v
+  }
+  return null
+}
+
+function cleanUserDisplayName (value: any, username?: any): string {
+  const text = String(value ?? '').trim().replace(/\s+/g, ' ')
+  if (!text) return ''
+  const user = String(username ?? '').trim()
+  if (user && normalizeUsernameLookupKey(text) === normalizeUsernameLookupKey(user)) return ''
+  return text
+}
+
+function fullNameFromGiiUserAttrs (attrs: Record<string, any>): string {
+  const username = attrValueCi(attrs, ['username', 'USERNAME', 'user_name', 'agol_username'])
+  const direct = cleanUserDisplayName(attrValueCi(attrs, ['full_name', 'FULL_NAME', 'fullName', 'FullName', 'nome_cognome', 'display_name', 'name']), username)
+  if (direct) return direct
+
+  const nome = cleanUserDisplayName(attrValueCi(attrs, ['nome', 'Nome', 'NOME', 'first_name', 'given_name']), '')
+  const cognome = cleanUserDisplayName(attrValueCi(attrs, ['cognome', 'Cognome', 'COGNOME', 'last_name', 'surname']), '')
+  const composed = cleanUserDisplayName(`${nome} ${cognome}`.trim(), username)
+  return composed
+}
+
+async function loadGiiUserFullNameMap (values: string[]): Promise<Map<string, string>> {
+  const candidates = Array.from(new Set(
+    (values || [])
+      .map(v => String(v ?? '').trim())
+      .filter(Boolean)
+  ))
+
+  const wanted = new Set(candidates.map(normalizeUsernameLookupKey).filter(Boolean))
+  const out = new Map<string, string>()
+  if (!wanted.size) return out
+
+  try {
+    const FeatureLayer = await loadEsriModule<any>('esri/layers/FeatureLayer')
+    const layer = new FeatureLayer({ url: GII_UTENTI_URL })
+    if (typeof layer.load === 'function') await layer.load()
+
+    const availableFields = new Set<string>(
+      (Array.isArray(layer?.fields) ? layer.fields : [])
+        .map((f: any) => String(f?.name || '').trim())
+        .filter(Boolean)
+    )
+    const pickFields = ['username', 'full_name', 'nome', 'cognome', 'fullName', 'nome_cognome', 'display_name', 'name']
+      .filter(f => availableFields.has(f))
+    const outFields = pickFields.length ? Array.from(new Set(pickFields)) : ['*']
+
+    let offset = 0
+    const pageSize = 2000
+    for (;;) {
+      const q = layer.createQuery ? layer.createQuery() : {}
+      q.where = '1=1'
+      q.outFields = outFields
+      q.returnGeometry = false
+      q.resultOffset = offset
+      q.resultRecordCount = pageSize
+      const res = await layer.queryFeatures(q)
+      const features = Array.isArray(res?.features) ? res.features : []
+
+      features.forEach((f: any) => {
+        const attrs = f?.attributes || {}
+        const username = String(attrValueCi(attrs, ['username', 'USERNAME', 'user_name', 'agol_username']) ?? '').trim()
+        const fullName = fullNameFromGiiUserAttrs(attrs)
+        if (!username || !fullName) return
+        const key = normalizeUsernameLookupKey(username)
+        if (wanted.has(key)) out.set(key, fullName)
+      })
+
+      if (features.length < pageSize || out.size >= wanted.size) break
+      offset += features.length
+    }
+  } catch { }
+
+  return out
+}
+
+function technicianUserCandidates (alert: GiiAlertItem, isTi: boolean): string[] {
+  const usernameFields = isTi
+    ? [
+      'ti_assegnato_username',
+      'TI_ASSEGNATO_USERNAME',
+      'tecnico_istruttore_username',
+      'username_tecnico_istruttore',
+      'utente_loggato',
+      'Creator',
+      'created_user',
+      'Creator_'
+    ]
+    : [
+      'utente_loggato',
+      'Creator',
+      'created_user',
+      'Creator_',
+      'tecnico_rilevatore_username',
+      'username_tecnico_rilevatore'
+    ]
+
+  const fallbackFields = isTi
+    ? [
+      'ti_assegnato_nome',
+      'TI_ASSEGNATO_NOME',
+      'responsabile_istruttore',
+      'Responsabile_istruttore'
+    ]
+    : [
+      'tecnico_rilevatore',
+      'Tecnico_rilevatore',
+      'TECNICO_RILEVATORE'
+    ]
+
+  return [
+    ...alertRawValuesPracticeFirst(alert, usernameFields),
+    ...alertRawValuesPracticeFirst(alert, fallbackFields)
+  ]
+}
+
+async function enrichAlertsWithTechnicianFullNames (alerts: GiiAlertItem[]): Promise<GiiAlertItem[]> {
+  const list = Array.isArray(alerts) ? alerts : []
+  if (!list.length) return list
+
+  const allCandidates: string[] = []
+  list.forEach(alert => {
+    const isTi = alertIsTiOrigin(alert)
+    technicianUserCandidates(alert, isTi).forEach(v => allCandidates.push(v))
+  })
+
+  const fullNameByUsername = await loadGiiUserFullNameMap(allCandidates)
+  if (!fullNameByUsername.size) return list
+
+  return list.map(alert => {
+    const isTi = alertIsTiOrigin(alert)
+    const resolved = technicianUserCandidates(alert, isTi)
+      .map(v => fullNameByUsername.get(normalizeUsernameLookupKey(v)))
+      .find(v => !!String(v || '').trim())
+
+    if (!resolved) return alert
+
+    return {
+      ...alert,
+      raw: {
+        ...(alert.raw || {}),
+        [isTi ? '__gii_tecnico_istruttore_full_name' : '__gii_tecnico_rilevatore_full_name']: resolved
+      }
+    }
+  })
+}
+
+function alertPracticeLine (alert: GiiAlertItem): string {
+  if (isGiiTakeChargeAlert(alert)) return String(alert.reportCode || alert.message || '').trim()
+  return String(alert.message || alert.reportCode || '').trim()
+}
+
+async function enrichAlertsWithPracticeMeta (alerts: GiiAlertItem[], practiceLayerUrl: string): Promise<GiiAlertItem[]> {
+  const list = Array.isArray(alerts) ? alerts : []
+  const url = normalizeGiiFeatureLayerUrl(practiceLayerUrl)
+  if (!list.length) return list
+  if (!url) return list
+
+  const objectIds = Array.from(new Set(
+    list
+      .map(a => Number(a?.parentObjectId))
+      .filter(n => Number.isFinite(n))
+  ))
+  if (!objectIds.length) return list
+
+  try {
+    const FeatureLayer = await loadEsriModule<any>('esri/layers/FeatureLayer')
+    const layer = new FeatureLayer({ url })
+    if (typeof layer.load === 'function') await layer.load()
+    const oidField = String(layer?.objectIdField || 'OBJECTID')
+    const byOid = new Map<number, Record<string, any>>()
+
+    for (let i = 0; i < objectIds.length; i += 50) {
+      const chunk = objectIds.slice(i, i + 50)
+      const q = layer.createQuery ? layer.createQuery() : {}
+      q.where = `${oidField} IN (${chunk.join(',')})`
+      q.outFields = ['*']
+      q.returnGeometry = false
+      const res = await layer.queryFeatures(q)
+      ;(Array.isArray(res?.features) ? res.features : []).forEach((f: any) => {
+        const attrs = { ...(f?.attributes || {}) }
+        const oid = Number(attrs[oidField] ?? attrs.OBJECTID ?? attrs.objectid)
+        if (Number.isFinite(oid)) byOid.set(oid, attrs)
+      })
+    }
+
+    if (!byOid.size) return list
+
+    const enriched = list.map(alert => {
+      const oid = Number(alert?.parentObjectId)
+      const practice = Number.isFinite(oid) ? byOid.get(oid) : null
+      if (!practice) return alert
+      return {
+        ...alert,
+        raw: {
+          ...practice,
+          ...(alert.raw || {}),
+          __practice: practice
+        }
+      }
+    })
+
+    return enriched
+  } catch {
+    return list
+  }
+}
+
+function materializeAlertSqlQuote (value: any): string {
+  return `'${String(value ?? '').replace(/'/g, "''")}'`
+}
+
+function materializeAlertNormGid (value: any): string {
+  return String(value ?? '').trim().replace(/^\{|\}$/g, '').toLowerCase()
+}
+
+function materializeAlertRealField (fields: Map<string, string>, name: string): string {
+  return fields.get(String(name || '').toLowerCase()) || ''
+}
+
+function materializeAlertPick (alert: GiiAlertItem | null | undefined, names: string[]): any {
+  return alertRawValue(alert, names)
+}
+
+function materializeAlertArea (alert: GiiAlertItem, user: any): string {
+  const fromPractice = String(materializeAlertPick(alert, ['area_cod', 'area', 'destinatario_area']) ?? '').trim().toUpperCase()
+  if (fromPractice === 'AGR' || fromPractice === 'TEC' || fromPractice === 'AMM') return fromPractice
+  const fromUser = String(user?.areaCod || user?.area_cod || user?.area || '').trim().toUpperCase()
+  if (fromUser === 'AGR' || fromUser === 'TEC' || fromUser === 'AMM') return fromUser
+  return ''
+}
+
+function materializeAlertSector (alert: GiiAlertItem, user: any): string {
+  const raw = String(materializeAlertPick(alert, ['settore_cod', 'settore', 'destinatario_settore']) ?? user?.settoreCod ?? user?.settore_cod ?? '').trim().toUpperCase()
+  if (raw === 'CS') return 'DS'
+  const m = raw.match(/^D\s*([1-6])$/)
+  if (m) return `D${m[1]}`
+  return raw
+}
+
+
+function materializeAlertDestRole (user: any): string {
+  const role = String(user?.profiloCod || user?.ruoloCod || user?.role || '').trim().toUpperCase()
+  if (role === 'TI_AMM' || role === 'RI_AMM' || role === 'DA') return role
+  if (role === 'ADMIN') return ''
+  if (role.startsWith('DT')) return 'DT'
+  if (role.startsWith('RI') && role !== 'RI_AMM') return 'RI'
+  if (role.startsWith('RZ')) return 'RZ'
+  if (role.startsWith('TI') && role !== 'TI_AMM') return 'TI'
+  return role.replace(/_(AGR|TEC|AMM)$/i, '')
+}
+
+function materializeAlertOfficeId (alert: GiiAlertItem, user: any): number | null {
+  const raw = materializeAlertPick(alert, ['id_ufficio', 'ufficio_id', 'destinatario_ufficio_id']) ?? user?.ufficio
+  const n = Number(raw)
+  return Number.isFinite(n) ? n : null
+}
+
+function materializeAlertNumber (alert: GiiAlertItem): string {
+  const text = String(alertPracticeLine(alert) || alert.reportCode || alert.message || '').trim()
+  return text
+    .replace(/^Rapporto\s+tecnico\s+n\.?\s*/i, '')
+    .replace(/^Rapporto\s+n\.?\s*/i, '')
+    .replace(/^Rapporto\s*/i, '')
+    .replace(/^Rilevazione\s+n\.?\s*/i, '')
+    .replace(/^Rilevazione\s*/i, '')
+    .trim()
+}
+
+function materializeAlertTitle (alert: GiiAlertItem): string {
+  const t = String(alert?.title || '').trim()
+  return t || 'Trasmissione nuova istruttoria'
+}
+
+function materializeAlertMessage (alert: GiiAlertItem): string {
+  const m = String(alertPracticeLine(alert) || alert?.message || '').trim()
+  return m || materializeAlertNumber(alert) || '—'
+}
+
+
+// Normalizzazione limitata alle sole rilevazioni create da TR tramite Survey.
+// Il TI compila dal gestionale e ha già i controlli uppercase lato interfaccia.
+// Qui trattiamo solo i campi testuali effettivamente presenti nel Survey TR
+// per i quali il formato è funzionale: maiuscolo per anagrafica/indirizzi, minuscolo per email/PEC.
+const GII_SURVEY_TR_UPPERCASE_ORIGIN_FIELD = 'origine_pratica'
+const GII_SURVEY_TR_UPPERCASE_ORIGIN_VALUE = 1
+
+const GII_SURVEY_UPPERCASE_FIELDS = [
+  'nome',
+  'cognome',
+  'ragione_sociale',
+  'codice_fiscale',
+  'piva',
+  'via',
+  'civico',
+  'citta',
+  'cap'
+]
+
+const GII_SURVEY_LOWERCASE_FIELDS = [
+  'email',
+  'pec'
+]
+
+const GII_SURVEY_UPPERCASE_FLAG_FIELD = 'testi_normalizzati'
+const GII_SURVEY_UPPERCASE_DATE_FIELD = 'dt_testi_normalizzati'
+const GII_SURVEY_UPPERCASE_USER_FIELD = 'testi_normalizzati_da'
+
+function normalizeSurveyUppercaseValue (value: any): any {
+  if (value === null || value === undefined) return value
+  if (typeof value !== 'string') return value
+  return value.toLocaleUpperCase('it-IT')
+}
+
+function normalizeSurveyLowercaseValue (value: any): any {
+  if (value === null || value === undefined) return value
+  if (typeof value !== 'string') return value
+  return value.trim().toLocaleLowerCase('it-IT')
+}
+
+async function normalizeSurveyUppercaseFields (args: {
+  practiceLayerUrl: string
+  dynamicAlerts: GiiAlertItem[]
+  user: any
+}): Promise<number> {
+  const url = normalizeGiiFeatureLayerUrl(args.practiceLayerUrl)
+  const alerts = Array.isArray(args.dynamicAlerts) ? args.dynamicAlerts : []
+  if (!url || !alerts.length) return 0
+
+  const objectIds = Array.from(new Set(
+    alerts
+      .filter(a => isGiiTakeChargeAlert(a))
+      .map(a => Number(a?.parentObjectId ?? materializeAlertPick(a, ['OBJECTID', 'objectid', 'parent_objectid'])))
+      .filter(n => Number.isFinite(n))
+  ))
+  if (!objectIds.length) return 0
+
+  try {
+    const FeatureLayer = await loadEsriModule<any>('esri/layers/FeatureLayer')
+    const layer = new FeatureLayer({ url, outFields: ['*'] })
+    if (typeof layer.load === 'function') await layer.load()
+
+    const fieldMap = new Map<string, string>()
+    ;(Array.isArray(layer?.fields) ? layer.fields : []).forEach((f: any) => {
+      const name = String(f?.name || '').trim()
+      if (name) fieldMap.set(name.toLowerCase(), name)
+    })
+
+    const flagField = materializeAlertRealField(fieldMap, GII_SURVEY_UPPERCASE_FLAG_FIELD)
+    if (!flagField) return 0
+
+    const originField = materializeAlertRealField(fieldMap, GII_SURVEY_TR_UPPERCASE_ORIGIN_FIELD)
+    if (!originField) return 0
+
+    const oidField = String(layer?.objectIdField || materializeAlertRealField(fieldMap, 'OBJECTID') || 'OBJECTID')
+    const dateField = materializeAlertRealField(fieldMap, GII_SURVEY_UPPERCASE_DATE_FIELD)
+    const userField = materializeAlertRealField(fieldMap, GII_SURVEY_UPPERCASE_USER_FIELD)
+    const uppercaseFields = GII_SURVEY_UPPERCASE_FIELDS
+      .map(name => materializeAlertRealField(fieldMap, name))
+      .filter(Boolean)
+    const lowercaseFields = GII_SURVEY_LOWERCASE_FIELDS
+      .map(name => materializeAlertRealField(fieldMap, name))
+      .filter(Boolean)
+
+    if (!uppercaseFields.length && !lowercaseFields.length) return 0
+
+    let changed = 0
+    const chunkSize = 80
+    for (let i = 0; i < objectIds.length; i += chunkSize) {
+      const chunk = objectIds.slice(i, i + chunkSize)
+      const q = layer.createQuery ? layer.createQuery() : {}
+      q.objectIds = chunk
+      q.outFields = Array.from(new Set([oidField, originField, flagField, dateField, userField, ...uppercaseFields, ...lowercaseFields].filter(Boolean)))
+      q.returnGeometry = false
+      const res = await layer.queryFeatures(q)
+      const features = Array.isArray(res?.features) ? res.features : []
+      if (!features.length) continue
+
+      const updates: any[] = []
+      for (const f of features) {
+        const attrs = { ...(f?.attributes || {}) }
+        const oid = attrs[oidField] ?? attrs.OBJECTID ?? attrs.objectid
+        if (oid === null || oid === undefined) continue
+
+        // La normalizzazione uppercase riguarda esclusivamente le rilevazioni Survey/TR.
+        // I record creati da TI non devono essere ripassati qui perché sono già vincolati
+        // dal gestionale.
+        const origin = Number(attrs[originField])
+        if (origin !== GII_SURVEY_TR_UPPERCASE_ORIGIN_VALUE) continue
+
+        const already = Number(attrs[flagField]) === 1
+
+        const out: Record<string, any> = { [oidField]: oid }
+        let hasTextChange = false
+
+        for (const field of uppercaseFields) {
+          const oldValue = attrs[field]
+          const newValue = normalizeSurveyUppercaseValue(oldValue)
+          if (typeof oldValue === 'string' && newValue !== oldValue) {
+            out[field] = newValue
+            hasTextChange = true
+          }
+        }
+
+        for (const field of lowercaseFields) {
+          const oldValue = attrs[field]
+          const newValue = normalizeSurveyLowercaseValue(oldValue)
+          if (typeof oldValue === 'string' && newValue !== oldValue) {
+            out[field] = newValue
+            hasTextChange = true
+          }
+        }
+
+        // Anche se i testi erano già nel formato corretto, marchiamo il record come trattato:
+        // così il controllo non continua a ripassare inutilmente sulla stessa rilevazione.
+        // Se un record era già marcato ma email/PEC risultano ancora maiuscole, lo correggiamo comunque.
+        if (hasTextChange || !already) {
+          out[flagField] = 1
+          if (dateField) out[dateField] = Date.now()
+          if (userField) out[userField] = String(args.user?.username || '')
+          updates.push({ attributes: out })
+        }
+      }
+
+      if (updates.length) {
+        await layer.applyEdits({ updateFeatures: updates })
+        changed += updates.length
+      }
+    }
+
+    return changed
+  } catch (e) {
+    console.warn('[GII] Normalizzazione testi Survey non riuscita:', e)
+    return 0
+  }
+}
+
+async function materializeMissingTakeChargeActivities (args: {
+  currentActivities: GiiAlertItem[]
+  dynamicAlerts: GiiAlertItem[]
+  user: any
+}): Promise<number> {
+  const currentKeys = new Set((args.currentActivities || []).map(a => giiAlertPracticeIdentityKey(a)).filter(Boolean))
+  const missing = (args.dynamicAlerts || [])
+    .filter(a => isGiiTakeChargeAlert(a))
+    .filter(a => {
+      const key = giiAlertPracticeIdentityKey(a)
+      return !!key && !currentKeys.has(key)
+    })
+
+  if (!missing.length) return 0
+
+  try {
+    const FeatureLayer = await loadEsriModule<any>('esri/layers/FeatureLayer')
+    const layer = new FeatureLayer({ url: GII_ATTIVITA_CORRENTI_WRITE_URL, outFields: ['*'] })
+    if (typeof layer.load === 'function') await layer.load()
+
+    const fieldMap = new Map<string, string>()
+    ;(Array.isArray(layer?.fields) ? layer.fields : []).forEach((f: any) => {
+      const name = String(f?.name || '').trim()
+      if (name) fieldMap.set(name.toLowerCase(), name)
+    })
+
+    const oidField = String(layer?.objectIdField || materializeAlertRealField(fieldMap, 'OBJECTID') || 'OBJECTID')
+    const makeAttrsForLayer = (attrs: Record<string, any>): Record<string, any> => {
+      const out: Record<string, any> = {}
+      Object.entries(attrs).forEach(([name, value]) => {
+        const real = materializeAlertRealField(fieldMap, name)
+        if (real) out[real] = value
+      })
+      return out
+    }
+
+    let changed = 0
+
+    for (const alert of missing) {
+      const parentGlobalId = String(alert.parentGlobalId || materializeAlertPick(alert, ['globalid', 'GlobalID', 'parent_globalid']) || '').trim()
+      if (!parentGlobalId) continue
+
+      const parentObjectId = Number(alert.parentObjectId)
+      const area = materializeAlertArea(alert, args.user)
+      const settore = materializeAlertSector(alert, args.user)
+      const ufficioId = materializeAlertOfficeId(alert, args.user)
+      const role = materializeAlertDestRole(args.user)
+      // La materializzazione serve per le nuove rilevazioni Survey/TR dirette al RZ.
+      // Per gli altri ruoli le attività correnti devono continuare a essere generate
+      // dai widget operativi che chiudono/aprono i cicli.
+      if (role !== 'RZ') continue
+      const eventMs = alertEventDateMs(alert) ?? Date.now()
+      const numero = materializeAlertNumber(alert)
+      const key = `${materializeAlertNormGid(parentGlobalId)}|PRESA_IN_CARICO|NUOVA_RILEVAZIONE|${role}|${area}|${settore}|${ufficioId ?? ''}`
+
+      const attrs = makeAttrsForLayer({
+        chiave_attivita: key,
+        parent_globalid: parentGlobalId,
+        parent_objectid: Number.isFinite(parentObjectId) ? parentObjectId : null,
+        numero_rapporto: numero,
+        tipo_attivita: 'PRESA_IN_CARICO',
+        sottotipo_attivita: 'NUOVA_RILEVAZIONE',
+        titolo: materializeAlertTitle(alert),
+        messaggio: materializeAlertMessage(alert),
+        destinatario_ruolo: role,
+        destinatario_area: area || null,
+        destinatario_settore: settore || null,
+        destinatario_ufficio_id: ufficioId,
+        destinatario_ufficio_zona: materializeAlertPick(alert, ['ufficio_zona', 'destinatario_ufficio_zona']) || null,
+        destinatario_username: null,
+        origine_evento: 'NUOVA_RILEVAZIONE_SURVEY',
+        priorita: 'INFO',
+        data_attivazione: eventMs,
+        creato_il: eventMs,
+        creato_da: String(materializeAlertPick(alert, ['utente_loggato', 'Creator', 'created_user']) || 'survey'),
+        aggiornato_il: Date.now(),
+        aggiornato_da: String(args.user?.username || '')
+      })
+
+      const clauses: string[] = []
+      const fKey = materializeAlertRealField(fieldMap, 'chiave_attivita')
+      if (fKey) clauses.push(`${fKey} = ${materializeAlertSqlQuote(key)}`)
+      const fParentGid = materializeAlertRealField(fieldMap, 'parent_globalid')
+      const fTipo = materializeAlertRealField(fieldMap, 'tipo_attivita')
+      const fRole = materializeAlertRealField(fieldMap, 'destinatario_ruolo')
+      if (fParentGid && fTipo && fRole) {
+        const gid = materializeAlertNormGid(parentGlobalId)
+        clauses.push(`(LOWER(${fParentGid}) = ${materializeAlertSqlQuote(gid)} OR LOWER(${fParentGid}) = ${materializeAlertSqlQuote(`{${gid}}`)}) AND ${fTipo} = 'PRESA_IN_CARICO' AND ${fRole} = '${role}'`)
+      }
+      if (!clauses.length) continue
+
+      const q = layer.createQuery ? layer.createQuery() : {}
+      q.where = clauses.map(c => `(${c})`).join(' OR ')
+      q.outFields = [oidField]
+      q.returnGeometry = false
+      q.num = 1
+      const found = await layer.queryFeatures(q)
+      const existing = found?.features?.[0]?.attributes || null
+      const existingOid = existing?.[oidField] ?? existing?.OBJECTID ?? existing?.objectid
+      if (existingOid != null) {
+        await layer.applyEdits({ updateFeatures: [{ attributes: { [oidField]: existingOid, ...attrs } }] })
+      } else {
+        await layer.applyEdits({ addFeatures: [{ attributes: attrs }] })
+      }
+      changed += 1
+    }
+
+    return changed
+  } catch (e) {
+    console.warn('[GII_ATTIVITA_CORRENTI] Materializzazione allarmi da FL non riuscita:', e)
+    return 0
+  }
+}
+
+function sortAlertsForPopup (alerts: GiiAlertItem[]): GiiAlertItem[] {
+  const list = Array.isArray(alerts) ? alerts.slice() : []
+  const severityRank: Record<string, number> = { red: 0, orange: 1, blue: 2, gray: 3 }
+
+  return list.sort((a, b) => {
+    const da = alertEventDateMs(a)
+    const db = alertEventDateMs(b)
+    if (da != null || db != null) {
+      if (da == null) return 1
+      if (db == null) return -1
+      if (db !== da) return db - da
+    }
+
+    const sr = (severityRank[a?.severity || ''] ?? 9) - (severityRank[b?.severity || ''] ?? 9)
+    if (sr) return sr
+
+    const ta = a?.termineData ?? Number.MAX_SAFE_INTEGER
+    const tb = b?.termineData ?? Number.MAX_SAFE_INTEGER
+    return ta - tb
+  })
 }
 
 function alertToneColor (tone: 'none' | 'red' | 'orange' | 'blue'): string {
@@ -823,6 +1594,7 @@ function HeaderAlertsPopup (props: {
   onOpenPractice: (alert: GiiAlertItem) => void
   onArchive: (alert: GiiAlertItem) => void
 }) {
+  const popupAlerts = sortAlertsForPopup(props.alerts || [])
   const popup = (
     <div
       data-gii-global-alert-popup='1'
@@ -843,8 +1615,10 @@ function HeaderAlertsPopup (props: {
           {!props.loading && !props.error && props.alerts.length === 0 && props.counts.total <= 0 && (
             <div style={{ color: '#cbd5e1', fontSize: 13, padding: 10 }}>Nessun allarme attivo.</div>
           )}
-          {props.alerts.map(alert => {
+          {popupAlerts.map(alert => {
             const color = alertToneColor(alert.severity === 'red' ? 'red' : alert.severity === 'orange' ? 'orange' : 'blue')
+            const eventDate = alertEventDateMs(alert)
+            const technicianLine = alertTechnicianLine(alert)
             const showMeta = !isGiiTakeChargeAlert(alert) || alert.termineData != null
             return (
               <div key={alert.alertKey} style={{ border: `1px solid ${color}66`, background: `${color}16`, borderRadius: 12, padding: 11 }}>
@@ -852,7 +1626,17 @@ function HeaderAlertsPopup (props: {
                   <div style={{ width: 10, height: 10, borderRadius: '50%', background: color, marginTop: 4, flex: '0 0 auto' }} />
                   <div style={{ minWidth: 0, flex: 1 }}>
                     <div style={{ fontSize: 13, fontWeight: 900, color: '#fff' }}>{alert.title}</div>
-                    <div style={{ fontSize: 12, color: '#cbd5e1', lineHeight: 1.35, marginTop: 3 }}>{alert.message}</div>
+                    <div style={{ fontSize: 12, color: '#cbd5e1', lineHeight: 1.35, marginTop: 3 }}>{alertPracticeLine(alert)}</div>
+                    {technicianLine && (
+                      <div style={{ fontSize: 12, color: '#cbd5e1', lineHeight: 1.35, marginTop: 3 }}>
+                        {technicianLine}
+                      </div>
+                    )}
+                    {eventDate != null && (
+                      <div style={{ fontSize: 12, color: '#cbd5e1', lineHeight: 1.35, marginTop: 3 }}>
+                        Data evento: {formatAlertDateTime(eventDate)}
+                      </div>
+                    )}
                     {showMeta && (
                       <div style={{ fontSize: 11, color: 'rgba(203,213,225,0.65)', marginTop: 6 }}>
                         Pratica: <strong>{alert.reportCode}</strong>{alert.termineData != null ? ` · Termine: ${formatAlertDate(alert.termineData)}` : ''}
@@ -1054,18 +1838,23 @@ export default function Widget(props: Props) {
 
     let currentActivities: GiiAlertItem[] = []
 
-    try {
-      // Lettura veloce: tabella/vista piccola delle attività correnti già pronte.
+    const readCurrentActivities = async (): Promise<GiiAlertItem[]> => {
       const current = await withGiiTimeout(queryGiiCurrentActivities({
         activityLayerUrl,
         user: alertUser,
         pageSize: 100
       }), 8000, 'Timeout caricamento attività correnti.')
+      return sortAlertsForPopup(await enrichAlertsWithPracticeMeta(current.alerts, practiceLayerUrl))
+    }
 
-      currentActivities = current.alerts
+    try {
+      // La campanella deve comparire subito: il primo caricamento usa solo la
+      // tabella/vista GII_ATTIVITA_CORRENTI, che è la fonte veloce e ordinaria.
+      currentActivities = await readCurrentActivities()
       setAlerts(currentActivities)
-      setAlertCounts(current.counts)
+      setAlertCounts(summarizeGiiAlerts(currentActivities))
       setAlertsError('')
+      setAlertsLoading(false)
     } catch (e: any) {
       setAlerts([])
       setAlertCounts(emptyAlertCounts())
@@ -1074,9 +1863,13 @@ export default function Widget(props: Props) {
       return
     }
 
-    // Seconda fase non bloccante: conserva le scadenze/anomalie già esistenti,
-    // ma ignora le vecchie prese in carico calcolate dinamicamente per evitare duplicati.
-    if (practiceLayerUrl && archiveTableUrl) {
+    if (!practiceLayerUrl || !archiveTableUrl) return
+
+    // Il controllo sul FL madre resta necessario per intercettare le rilevazioni TR
+    // appena arrivate, ma non deve più bloccare la comparsa della campanella. Lo
+    // eseguiamo in background: se materializza nuove attività, rilegge la vista e
+    // aggiorna la lista una sola volta.
+    ;(async () => {
       try {
         const res = await withGiiTimeout(queryGiiAlerts({
           practiceLayerUrl,
@@ -1084,22 +1877,37 @@ export default function Widget(props: Props) {
           user: alertUser,
           warningDays: Number(cfg.alertsWarningDays ?? 5)
         }), 25000, 'Timeout caricamento scadenze e anomalie.')
-        // Le attività correnti sono la fonte primaria per le prese in carico.
-        // Le rilevazioni create da Survey/TR, però, possono non avere ancora una riga
-        // in GII_ATTIVITA_CORRENTI: in quel caso recuperiamo la presa in carico
-        // calcolata dinamicamente dal Feature Layer madre, senza duplicare quelle
-        // già presenti come attività correnti.
-        const merged = mergeCurrentAndFallbackGiiAlerts(currentActivities, res.alerts || [])
-        setAlerts(merged)
-        setAlertCounts(summarizeGiiAlerts(merged))
+
+        const dynamicAlerts = sortAlertsForPopup(await enrichAlertsWithPracticeMeta(res.alerts || [], practiceLayerUrl))
+
+        // Stesso passaggio background usato per materializzare le nuove rilevazioni TR:
+        // normalizziamo i testi arrivati da Survey senza bloccare la campanella.
+        const normalizedCount = await normalizeSurveyUppercaseFields({
+          practiceLayerUrl,
+          dynamicAlerts,
+          user
+        })
+
+        const materializedCount = await materializeMissingTakeChargeActivities({
+          currentActivities,
+          dynamicAlerts,
+          user
+        })
+
+        const refreshedActivities = (materializedCount > 0 || normalizedCount > 0) ? await readCurrentActivities() : currentActivities
+        const finalAlerts = sortAlertsForPopup(mergeCurrentAndFallbackGiiAlerts(refreshedActivities, dynamicAlerts))
+        setAlerts(finalAlerts)
+        setAlertCounts(summarizeGiiAlerts(finalAlerts))
         setAlertsError('')
       } catch (e: any) {
-        // Non cancellare le attività correnti se fallisce solo la fase secondaria.
-        if (currentActivities.length === 0) setAlertsError(e?.message || String(e))
+        // Se fallisce solo il controllo del FL/scadenze, lasciamo visibili le
+        // attività correnti già caricate: non oscuriamo la campanella e non
+        // mostriamo errori se l'utente ha comunque attività correnti valide.
+        if (currentActivities.length === 0) {
+          setAlertsError(e?.message || String(e))
+        }
       }
-    }
-
-    setAlertsLoading(false)
+    })()
   }, [
     cfg.alertsEnabled,
     cfg.alertsPracticeLayerUrl,

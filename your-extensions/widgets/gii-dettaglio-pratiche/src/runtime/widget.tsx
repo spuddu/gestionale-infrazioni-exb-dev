@@ -485,6 +485,7 @@ function findTipoSoggettoFieldName (ds: any): string | null {
     if (!names.length) return null
 
     const directCandidates = [
+      'tipologia_soggetto', 'TIPOLOGIA_SOGGETTO',
       'tipo_soggetto', 'TIPO_SOGGETTO',
       'tipoSoggetto', 'TipoSoggetto',
       'tipo_sogg', 'TIPO_SOGG',
@@ -793,8 +794,8 @@ function DetailRow (props: { label: string; value: any; labelSize: number; value
   return (
     <div style={{
       display: 'grid',
-      gridTemplateColumns: 'repeat(auto-fit, minmax(190px, 1fr))',
-      columnGap: 12,
+      gridTemplateColumns: 'minmax(120px, 170px) minmax(0, 1fr)',
+      columnGap: 10,
       rowGap: 3,
       alignItems: multiline ? 'start' : 'center',
       padding: '7px 0',
@@ -1174,9 +1175,12 @@ function isRilevazioneDateFieldName (fieldName?: any, fieldLabel?: any): boolean
 function pickRilevazioneDateValueForDisplay (data: any): any {
   const primary = pickAttrCI(data, ['data_rilevazione', 'Data_rilevazione', 'DATA_RILEVAZIONE', 'dt_rilevazione', 'DT_RILEVAZIONE'])
   if (!isEmptyValue(primary)) {
-    if (isSurveyOriginRecordForDate(data) && isMidnightUtcDateValue(primary)) {
-      const surveyMs = pickSurveyRuntimeDateMs(data, primary)
-      if (surveyMs !== null) return surveyMs
+    // Se data_rilevazione arriva come sola data, ArcGIS la espone come 00:00 UTC
+    // e in Italia può comparire come 02:00. In quel caso usiamo il timestamp reale
+    // della compilazione/creazione, quando è nello stesso giorno.
+    if (isMidnightUtcDateValue(primary)) {
+      const runtimeMs = pickSurveyRuntimeDateMs(data, primary)
+      if (runtimeMs !== null) return runtimeMs
     }
     return primary
   }
@@ -2183,7 +2187,7 @@ type CicloRecord = {
 }
 
 const EVENTO_LABELS: Record<string, string> = {
-  CREAZIONE: 'Creazione rapporto',
+  CREAZIONE: 'Creazione rilevazione',
   ISTRUTTORIA_TRASMESSA: 'Istruttoria trasmessa',
   INTEGRAZIONE_TRASMESSA: 'Integrazione trasmessa',
   INTEGRAZIONE: 'Richiesta integrazione',
@@ -2334,12 +2338,20 @@ function parseModifiedFieldNames (raw: any): string[] {
 function getFieldAliasForIter (fieldName: string, aliasMap?: Record<string, string>): string {
   const raw = String(fieldName || '').trim()
   if (!raw) return ''
+  const rawKey = normKey(raw)
+
+  // Alcuni alias del layer derivano ancora dalla struttura storica del Survey
+  // e, nell'iter, risultano troppo tecnici o ambigui. Qui li traduciamo
+  // in etichette funzionali, comprensibili per l'operatore.
+  if (rawKey === normKey('norma_violata1') || rawKey === normKey('Norma violata 1')) return 'Violazione Art. 15'
+  if (rawKey === normKey('norma_violata2') || rawKey === normKey('Norma violata 2')) return 'Violazione Art. 16/17'
+  if (rawKey === normKey('norma_violata3') || rawKey === normKey('Norma violata 3')) return 'Violazioni artt. 8, 12, 27-37 e 39'
+
   const artMatch = raw.match(/^v_art0*(\d+)$/i)
   if (artMatch) return `Violazione Art. ${Number(artMatch[1])}`
-  if (normKey(raw) === normKey('coordinate_punto_mappa')) return 'Coordinate punto in mappa'
+  if (rawKey === normKey('coordinate_punto_mappa')) return 'Coordinate punto in mappa'
   const aliases = aliasMap || {}
   if (aliases[raw]) return String(aliases[raw] || raw)
-  const rawKey = normKey(raw)
   for (const name of Object.keys(aliases)) {
     if (normKey(name) === rawKey) return String(aliases[name] || name)
   }
@@ -2499,8 +2511,8 @@ function CicliTimeline (props: { globalId: string; hasSel: boolean; sortDir: 'as
 
   const rowSt: React.CSSProperties = {
     display: 'grid',
-    gridTemplateColumns: 'minmax(150px, 220px) minmax(0, 1fr)',
-    gap: 12,
+    gridTemplateColumns: 'minmax(120px, 170px) minmax(0, 1fr)',
+    gap: 10,
     alignItems: 'center',
     padding: '7px 0',
     borderBottom: '1px solid rgba(0,0,0,0.07)',
@@ -2572,13 +2584,13 @@ function CicliTimeline (props: { globalId: string; hasSel: boolean; sortDir: 'as
 
               {campiList.length > 0 && (
                 <div style={{ padding: '7px 0', borderBottom: '1px solid rgba(0,0,0,0.07)' }}>
-                  <div style={{ display: 'grid', gridTemplateColumns: 'minmax(150px, 220px) minmax(0, 1fr)', gap: 12, alignItems: 'flex-start' }}>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'minmax(120px, 170px) minmax(0, 1fr)', gap: 10, alignItems: 'flex-start' }}>
                     <span style={lblSt}>Campi modificati</span>
                     <span style={{ ...valSt, fontSize: 11 }}>
                       {campiList.length} {campiList.length === 1 ? 'campo' : 'campi'}
                     </span>
                   </div>
-                  <div style={{ display: 'grid', gridTemplateColumns: 'minmax(150px, 220px) minmax(0, 1fr)', gap: 12, marginTop: 6 }}>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'minmax(120px, 170px) minmax(0, 1fr)', gap: 10, marginTop: 6 }}>
                     <span />
                     <div style={{ border: '1px solid rgba(209,213,219,0.95)', borderRadius: 8, padding: '6px 8px', background: '#fff' }}>
                       <span style={{ fontSize: 11, color: '#374151', lineHeight: 1.35, whiteSpace: 'normal' }}>
@@ -3426,7 +3438,13 @@ const isPgOnlyField = React.useCallback((fieldName: string) => {
     }
     // Se nessun campo configurato esplicitamente, usa autoPickFields come default
     const rawList = fieldArr.length ? fieldArr : autoPickFields(data, kind)
-    const tipoRaw = (data && (data as any).__tipo_soggetto_raw != null) ? (data as any).__tipo_soggetto_raw : ((data && (data as any).tipo_soggetto != null) ? (data as any).tipo_soggetto : null)
+    const tipoFieldForRows = resolveFieldNameLoose(data, aliasMap, 'tipologia_soggetto') || resolveFieldNameLoose(data, aliasMap, 'tipo_soggetto')
+    const tipoDirect = tipoFieldForRows && data ? (data as any)[tipoFieldForRows] : null
+    const tipoRaw = (data && (data as any).__tipo_soggetto_raw != null)
+      ? (data as any).__tipo_soggetto_raw
+      : ((data && tipoDirect != null)
+          ? tipoDirect
+          : ((data && (data as any).tipo_soggetto != null) ? (data as any).tipo_soggetto : null))
     const tipoLabel = (data && (data as any).__tipo_soggetto_label != null) ? (data as any).__tipo_soggetto_label : null
     const sogg = (kind === 'ANAGRAFICA') ? classifyTipoSoggetto(tipoRaw, tipoLabel) : null
     const blocked = new Set(DETAIL_NEVER_SHOW_FIELDS.map(x => String(x)))
@@ -3447,7 +3465,23 @@ const isPgOnlyField = React.useCallback((fieldName: string) => {
       const vv = data ? (data as any)[resolved] : null
       const label = toLabel(resolved || f)
       const isRilevazioneDate = isRilevazioneDateFieldName(resolved || f, label)
-      const displayValue = isRilevazioneDate ? pickRilevazioneDateValueForDisplay(data) : vv
+      let displayValue = isRilevazioneDate ? pickRilevazioneDateValueForDisplay(data) : vv
+
+      // Nel dettaglio non mostrare i codici tecnici PF/PG: il campo deve essere leggibile.
+      const isTipoSoggettoRow = String(kind || '').toUpperCase() === 'ANAGRAFICA' && (
+        normKey(resolved || f) === normKey(tipoFieldForRows || '') ||
+        normKey(resolved || f) === 'tipologia soggetto' ||
+        normKey(resolved || f) === 'tipo soggetto' ||
+        normKey(label).includes('tipologia soggetto') ||
+        normKey(label).includes('tipo soggetto')
+      )
+      if (isTipoSoggettoRow) {
+        const tipoKindRow = classifyTipoSoggetto(displayValue, tipoLabel)
+        if (tipoKindRow === 'PF') displayValue = 'Persona Fisica'
+        else if (tipoKindRow === 'PG') displayValue = 'Persona Giuridica'
+        else if (tipoLabel) displayValue = String(tipoLabel)
+      }
+
       if (hideEmpty && isEmptyValue(displayValue)) continue
       const fieldType = fieldTypeMap?.[resolved || f] || ''
       rows.push({ label, value: formatFieldValue(displayValue, resolved || f, fieldType, label), multiline: isLongTextFieldName(resolved || f) })
