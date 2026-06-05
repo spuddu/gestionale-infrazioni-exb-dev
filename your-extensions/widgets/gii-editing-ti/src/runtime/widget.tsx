@@ -20,6 +20,26 @@ type SelState = {
   layerUrl?: string
 }
 
+type RegolamentoArticolo = {
+  codice_articolo: string
+  numero_articolo: any
+  titolo_articolo: string
+  testo_articolo: string
+  atto_regolamento: string
+  anno_riferimento: any
+  data_validita_da: any
+  data_validita_a: any
+  attivo: any
+  note: string
+}
+
+type RegolamentoArticoliState = {
+  loading: boolean
+  error: string
+  configured: boolean
+  byArticle: Record<string, RegolamentoArticolo>
+}
+
 function unwrapJsapiLayer (maybe: any) {
   return (maybe && (maybe.layer || maybe)) || null
 }
@@ -3370,6 +3390,145 @@ const CHOICES = {
   ]
 } as const
 
+function normalizeRegolamentoArticleKey (raw: any): string {
+  const text = String(raw ?? '').trim()
+  if (!text) return ''
+  const cleaned = text
+    .replace(/[_-]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+  const m = cleaned.match(/(?:^|\b)(?:ART(?:ICOLO)?\.?\s*)?(\d{1,3})(?:\b|$)/i)
+  if (!m) return ''
+  return String(Number(m[1]))
+}
+
+function normalizeRegolamentoArticolo (row: any): RegolamentoArticolo {
+  return {
+    codice_articolo: String(pickAttrCI(row, ['codice_articolo', 'codice', 'articolo_codice']) || '').trim(),
+    numero_articolo: pickAttrCI(row, ['numero_articolo', 'numero', 'articolo_numero']),
+    titolo_articolo: String(pickAttrCI(row, ['titolo_articolo', 'titolo', 'descrizione']) || '').trim(),
+    testo_articolo: String(pickAttrCI(row, ['testo_articolo', 'testo', 'testo_norma', 'contenuto']) || '').trim(),
+    atto_regolamento: String(pickAttrCI(row, ['atto_regolamento', 'atto']) || '').trim(),
+    anno_riferimento: pickAttrCI(row, ['anno_riferimento', 'anno']),
+    data_validita_da: pickAttrCI(row, ['data_validita_da', 'validita_da']),
+    data_validita_a: pickAttrCI(row, ['data_validita_a', 'validita_a']),
+    attivo: pickAttrCI(row, ['attivo', 'stato']),
+    note: String(pickAttrCI(row, ['note', 'nota']) || '').trim()
+  }
+}
+
+function isRegolamentoRowActive (article: RegolamentoArticolo): boolean {
+  const raw = article.attivo
+  if (raw == null || raw === '') return true
+  if (raw === true || raw === 1) return true
+  const text = String(raw).trim().toLowerCase()
+  return text === '1' || text === 'true' || text === 'si' || text === 'sì' || text === 'attivo' || text === 'active'
+}
+
+function regolamentoArticleSortValue (article: RegolamentoArticolo): number {
+  const fromNum = normalizeRegolamentoArticleKey(article.numero_articolo)
+  if (fromNum) return Number(fromNum)
+  const fromCode = normalizeRegolamentoArticleKey(article.codice_articolo)
+  return fromCode ? Number(fromCode) : 9999
+}
+
+function regolamentoArticleDisplayTitle (article?: RegolamentoArticolo | null, fallback?: string): string {
+  const fallbackKey = normalizeRegolamentoArticleKey(fallback)
+  const articleKey = article ? (normalizeRegolamentoArticleKey(article.numero_articolo) || normalizeRegolamentoArticleKey(article.codice_articolo)) : ''
+  const artLabel = articleKey || fallbackKey
+  const title = String(article?.titolo_articolo || '').trim()
+  return artLabel ? (title ? `Art. ${artLabel} - ${title}` : `Art. ${artLabel}`) : (title || String(fallback || 'Articolo').trim())
+}
+
+function buildRegolamentoArticlesMap (rows: any[]): Record<string, RegolamentoArticolo> {
+  const map: Record<string, RegolamentoArticolo> = {}
+  ;(rows || [])
+    .map(normalizeRegolamentoArticolo)
+    .filter(a => isRegolamentoRowActive(a))
+    .sort((a, b) => regolamentoArticleSortValue(a) - regolamentoArticleSortValue(b))
+    .forEach(article => {
+      const keys = [
+        normalizeRegolamentoArticleKey(article.numero_articolo),
+        normalizeRegolamentoArticleKey(article.codice_articolo)
+      ].filter(Boolean)
+      keys.forEach(key => {
+        if (!map[key]) map[key] = article
+      })
+    })
+  return map
+}
+
+function useRegolamentoArticoliState (rawUrl: any): RegolamentoArticoliState {
+  const url = String(rawUrl || '').trim()
+  const [state, setState] = React.useState<RegolamentoArticoliState>({ loading: false, error: '', configured: !!url, byArticle: {} })
+
+  React.useEffect(() => {
+    let cancelled = false
+    if (!url) {
+      setState({ loading: false, error: '', configured: false, byArticle: {} })
+      return () => { cancelled = true }
+    }
+    setState({ loading: true, error: '', configured: true, byArticle: {} })
+    queryTableAttributes(url, '1=1', 'numero_articolo ASC')
+      .then(rows => {
+        if (!cancelled) setState({ loading: false, error: '', configured: true, byArticle: buildRegolamentoArticlesMap(rows) })
+      })
+      .catch((e: any) => {
+        if (!cancelled) setState({ loading: false, error: e?.message || String(e), configured: true, byArticle: {} })
+      })
+    return () => { cancelled = true }
+  }, [url])
+
+  return state
+}
+
+function RegolamentoArticleToggle (props: { articleCode: string, title?: string, state: RegolamentoArticoliState, compact?: boolean }) {
+  const [open, setOpen] = React.useState(false)
+  const key = normalizeRegolamentoArticleKey(props.articleCode)
+  const article = key ? props.state.byArticle[key] : null
+  const title = props.title || regolamentoArticleDisplayTitle(article, props.articleCode)
+  const bodyText = String(article?.testo_articolo || '').trim()
+  const meta = article ? [article.atto_regolamento, article.anno_riferimento ? `Anno ${article.anno_riferimento}` : ''].filter(Boolean).join(' · ') : ''
+  const compact = props.compact === true
+
+  return (
+    <div style={{ border: '1px solid #cbd5e1', borderRadius: 8, overflow: 'hidden', background: '#ffffff', marginTop: compact ? 4 : 0 }}>
+      <button
+        type='button'
+        onClick={(evt) => { evt.preventDefault(); evt.stopPropagation(); setOpen(!open) }}
+        aria-expanded={open}
+        style={{
+          width: '100%',
+          border: 0,
+          background: '#eef5fc',
+          color: '#0f3b63',
+          display: 'flex',
+          alignItems: 'center',
+          gap: 7,
+          padding: compact ? '5px 7px' : '7px 9px',
+          textAlign: 'left',
+          cursor: 'pointer',
+          fontSize: compact ? 11 : 12,
+          fontWeight: 850,
+          lineHeight: 1.3
+        }}
+      >
+        <span aria-hidden='true' style={{ width: 13, display: 'inline-flex', justifyContent: 'center', fontSize: 10, color: '#1d4ed8', fontWeight: 900 }}>{open ? '▲' : '▼'}</span>
+        <span>{title}</span>
+      </button>
+      {open && (
+        <div style={{ padding: compact ? '6px 8px' : '8px 10px', borderTop: '1px solid #cbd5e1', background: '#ffffff', color: '#334155', fontSize: compact ? 11 : 12, lineHeight: 1.45, whiteSpace: 'pre-wrap' }}>
+          {!props.state.configured ? 'Tabella regolamento articoli non configurata nel widget.'
+            : props.state.loading ? 'Caricamento testo regolamentare…'
+              : props.state.error ? `Errore caricamento testo regolamentare: ${props.state.error}`
+                : bodyText || 'Testo regolamentare non disponibile per questo articolo.'}
+          {meta && <div style={{ marginTop: 6, color: '#64748b', fontSize: compact ? 10 : 11, whiteSpace: 'normal' }}>{meta}</div>}
+        </div>
+      )}
+    </div>
+  )
+}
+
 // campi v_art* associati alle scelte norma3
 const NORMA3_TO_VFIELD: Record<string, string> = {
   Art8: 'v_art08', Art12: 'v_art12', Art27: 'v_art27', Art28: 'v_art28',
@@ -4994,6 +5153,7 @@ function NuovaPraticaForm (p: {
   onTabChange?: (tab: string) => void
 }) {
   const { ds, cfg } = p
+  const regolamentoArticoliState = useRegolamentoArticoliState((cfg as any).regolamentoArticoliUrl)
   const mode = p.mode === 'edit' ? 'edit' : 'create'
   const editOid = p.editOid != null ? Number(p.editOid) : null
   const editIdFieldName = String(p.editIdFieldName || ds?.getIdField?.() || 'OBJECTID')
@@ -5294,8 +5454,6 @@ function NuovaPraticaForm (p: {
     const onPointerUp = () => { datiTecniciUserDraggingRef.current = false }
     let oldDividerZ = ''
     let oldDividerPosition = ''
-    let oldDividerPointerEvents = ''
-    let oldDividerCursor = ''
 
     const findPanels = () => {
       try {
@@ -5312,15 +5470,8 @@ function NuovaPraticaForm (p: {
               dividerEl = divider
               oldDividerZ = divider.style.zIndex
               oldDividerPosition = divider.style.position
-              oldDividerPointerEvents = divider.style.pointerEvents
-              oldDividerCursor = divider.style.cursor
               divider.style.setProperty('z-index', '2147483646', 'important')
               divider.style.setProperty('position', 'relative', 'important')
-              // Il divisore nativo della Sidebar ExB resta il destinatario degli eventi
-              // sintetici usati dall'overlay, ma non deve più partecipare all'hit-test:
-              // altrimenti il cursore/maniglia nativa rimane sopra al pulsante reset.
-              divider.style.setProperty('pointer-events', 'none', 'important')
-              divider.style.setProperty('cursor', 'default', 'important')
               divider.addEventListener('pointerdown', onPointerDown)
               window.addEventListener('pointerup', onPointerUp)
             }
@@ -5344,8 +5495,6 @@ function NuovaPraticaForm (p: {
         if (dividerEl) {
           dividerEl.style.zIndex = oldDividerZ
           dividerEl.style.position = oldDividerPosition
-          dividerEl.style.pointerEvents = oldDividerPointerEvents
-          dividerEl.style.cursor = oldDividerCursor
         }
       } catch {}
       datiTecniciSidebarElRef.current = null
@@ -6662,17 +6811,10 @@ React.useEffect(() => {
         })
         return
       }
-      if (irr <= 0) {
+      if (irr <= 0 || irr <= dich) {
         setValidationPopup({
           title: 'Superficie irrigata non valida',
-          text: 'Per l\'Art. 15 (abuso parziale), la superficie irrigata deve essere compilata e maggiore di 0.'
-        })
-        return
-      }
-      if (irr <= dich) {
-        setValidationPopup({
-          title: 'Superficie irrigata non valida',
-          text: 'La superficie irrigata deve essere superiore a quella dichiarata per l\'Art. 15 (abuso parziale).'
+          text: 'Per l\'Art. 15 (abuso parziale), la superficie irrigata deve essere compilata e maggiore di quella dichiarata.'
         })
         return
       }
@@ -7265,7 +7407,7 @@ ${e?.message || String(e)}`
   }, [npTab, anteprimaPadding])
 
   // ── Layout engine ──────────────────────────────────────────────────
-  type FldR = { el: React.ReactNode; label: string; hint?: string }
+  type FldR = { el: React.ReactNode; label: React.ReactNode; hint?: string }
 
   const AREA_LABELS: Record<string, string> = { AGR: 'AGRARIA', TEC: 'TECNICA', AMM: 'AFFARI GENERALI E PROGRAMMAZIONE FINANZIARIA' }
   const SETTORE_LABELS: Record<string, string> = {
@@ -7396,7 +7538,7 @@ ${e?.message || String(e)}`
       case 'descrizione_fatti': return { label: 'Descrizione dettagliata della violazione', el: <NpText value={g('descrizione_fatti')} onChange={v => set('descrizione_fatti', v)} multiline uppercase={false} disabled={saving}/> }
       case 'circostanze': return { label: 'Circostanze rilevanti', el: <NpText value={g('circostanze')} onChange={v => set('circostanze', v)} multiline uppercase={false} disabled={saving}/> }
       case 'presenza_trasgressore': return { label: <span style={{ whiteSpace: 'nowrap' }}>Il trasgressore era presente?</span>, el: <NpSel value={g('presenza_trasgressore')} onChange={v => set('presenza_trasgressore', v)} options={CHOICES.presenza} disabled={saving}/> }
-      case 'descrizione_luogo': return { label: 'Descrizione del luogo', el: <NpText value={g('descrizione_luogo')} onChange={v => set('descrizione_luogo', v)} multiline uppercase={false} disabled={saving}/> }
+      case 'descrizione_luogo': return { label: 'Descrizione del luogo (Es. Comune, foglio, mappali)', el: <NpText value={g('descrizione_luogo')} onChange={v => set('descrizione_luogo', v)} multiline uppercase={false} disabled={saving}/> }
       // Dati tecnici
       case 'distretto': return { label: 'Distretto', el: <NpText value={g('distretto')} onChange={v => set('distretto', v)} disabled={saving}/> }
       case 'comizio': return { label: 'Comizio', el: <NpText value={g('comizio')} onChange={v => set('comizio', v)} disabled={saving}/> }
@@ -7467,6 +7609,10 @@ ${e?.message || String(e)}`
       </div>
       <div style={{ ...editCardBodyStyle, ...bodyStyle }}>{body}</div>
     </section>
+  )
+
+  const renderRegolamentoBox = (articleCode: string, title?: string, compact?: boolean): React.ReactNode => (
+    <RegolamentoArticleToggle articleCode={articleCode} title={title} state={regolamentoArticoliState} compact={compact} />
   )
 
   const renderFullHeightEditCard = (title: string, body: React.ReactNode, right?: React.ReactNode) => renderEditCard(
@@ -7791,21 +7937,25 @@ ${e?.message || String(e)}`
         const choiceBox = (value: 'Art16' | 'Art17', title: string) => {
           const active = norma1516 === value
           const disabled = saving || isRiAgrTecLimitedEdit || !canEditFieldForCurrentProfile('norma16_17')
+          const articleCode = value === 'Art16' ? '16' : '17'
           return (
-            <label style={compactChoiceStyle(active, disabled)}>
-              <input
-                type='checkbox'
-                checked={active}
-                disabled={disabled}
-                onChange={() => {
-                  if (disabled) return
-                  set('norma16_17', active ? '' : value)
-                  if (value !== 'Art17') set('art17_tipo', '')
-                }}
-                style={{ margin: 0, flexShrink: 0 }}
-              />
-              <span>{title}</span>
-            </label>
+            <div style={{ display: 'grid', gap: 5 }}>
+              <label style={compactChoiceStyle(active, disabled)}>
+                <input
+                  type='checkbox'
+                  checked={active}
+                  disabled={disabled}
+                  onChange={() => {
+                    if (disabled) return
+                    set('norma16_17', active ? '' : value)
+                    if (value !== 'Art17') set('art17_tipo', '')
+                  }}
+                  style={{ margin: 0, flexShrink: 0 }}
+                />
+                <span>{title}</span>
+              </label>
+              {renderRegolamentoBox(articleCode, title, true)}
+            </div>
           )
         }
         const textAreaField = (fieldName: string, label: string, rows: number) => {
@@ -7938,22 +8088,25 @@ ${e?.message || String(e)}`
                     borderBottom: '1px solid #edf2f7',
                     background: rowBg
                   }}>
-                    <label style={{
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: 8,
-                      fontSize: formStyle.norma3FontSize,
-                      color: selected ? selectedNorma3TextStyle.color : (isRiAgrTecLimitedEdit ? '#64748b' : '#334155'),
-                      cursor: (saving || isRiAgrTecLimitedEdit) ? 'not-allowed' : 'pointer',
-                      padding: '5px 8px 5px 10px',
-                      opacity: selected ? selectedNorma3TextStyle.opacity : (isRiAgrTecLimitedEdit ? 0.72 : 1),
-                      fontWeight: selected ? selectedNorma3TextStyle.fontWeight : 400,
-                      lineHeight: 1.3,
-                      minWidth: 0
-                    }}>
-                      {renderNorma3Checkbox(selected, () => !(saving || isRiAgrTecLimitedEdit) && toggleNorma3(o.v))}
-                      <span>{o.l}</span>
-                    </label>
+                    <div style={{ display: 'grid', gap: 4, padding: '5px 8px 6px 10px', minWidth: 0 }}>
+                      <label style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: 8,
+                        fontSize: formStyle.norma3FontSize,
+                        color: selected ? selectedNorma3TextStyle.color : (isRiAgrTecLimitedEdit ? '#64748b' : '#334155'),
+                        cursor: (saving || isRiAgrTecLimitedEdit) ? 'not-allowed' : 'pointer',
+                        padding: 0,
+                        opacity: selected ? selectedNorma3TextStyle.opacity : (isRiAgrTecLimitedEdit ? 0.72 : 1),
+                        fontWeight: selected ? selectedNorma3TextStyle.fontWeight : 400,
+                        lineHeight: 1.3,
+                        minWidth: 0
+                      }}>
+                        {renderNorma3Checkbox(selected, () => !(saving || isRiAgrTecLimitedEdit) && toggleNorma3(o.v))}
+                        <span>{o.l}</span>
+                      </label>
+                      {renderRegolamentoBox(art, o.l, true)}
+                    </div>
                     <div style={reqCellStyle}>
                       {reqCheckCell(requiresPoint, 'Richiede punto in mappa')}
                     </div>
@@ -7993,13 +8146,16 @@ ${e?.message || String(e)}`
         const leftColumn = (
           <div style={{ display: 'grid', gap: formStyle.sectionGap, minWidth: 0, minHeight: '100%', gridTemplateRows: 'auto auto minmax(0, 1fr)' }}>
             {renderEditCard('Art. 15 — Prelievo abusivo',
-              <div style={{ display: 'grid', gridTemplateColumns: termsGridColumns, gap: 10, alignItems: 'start' }}>
-                <div style={{ width: 155, maxWidth: '100%' }}>
-                  {selectField('tipo_abuso', 'Tipo di abuso', tipoAbuso, v => { set('tipo_abuso', v); set('norma15_parziale', ''); set('norma15_totale', '') }, CHOICES.tipo_abuso)}
+              <div style={{ display: 'grid', gap: 8 }}>
+                {renderRegolamentoBox('15', 'Art. 15 - Prelievo abusivo')}
+                <div style={{ display: 'grid', gridTemplateColumns: termsGridColumns, gap: 10, alignItems: 'start' }}>
+                  <div style={{ width: 155, maxWidth: '100%' }}>
+                    {selectField('tipo_abuso', 'Tipo di abuso', tipoAbuso, v => { set('tipo_abuso', v); set('norma15_parziale', ''); set('norma15_totale', '') }, CHOICES.tipo_abuso)}
+                  </div>
+                  {fieldNode('norma15_sel', 'Occorrenza')}
+                  {surfaceTextField('sup_dichiarata_art15', 'Sup. dichiarata (ha.a.ca)', g('sup_dichiarata_art15'), v => set('sup_dichiarata_art15', v), art15SupEnabled, art15SupDichLocked ? '0' : undefined)}
+                  {surfaceTextField('sup_irrigata_art15', 'Sup. irrigata (ha.a.ca)', g('sup_irrigata_art15'), v => set('sup_irrigata_art15', v), art15SupEnabled)}
                 </div>
-                {fieldNode('norma15_sel', 'Occorrenza')}
-                {surfaceTextField('sup_dichiarata_art15', 'Sup. dichiarata (ha.a.ca)', g('sup_dichiarata_art15'), v => set('sup_dichiarata_art15', v), art15SupEnabled, art15SupDichLocked ? '0' : undefined)}
-                {surfaceTextField('sup_irrigata_art15', 'Sup. irrigata (ha.a.ca)', g('sup_irrigata_art15'), v => set('sup_irrigata_art15', v), art15SupEnabled)}
               </div>
             )}
 
@@ -8119,7 +8275,37 @@ ${e?.message || String(e)}`
         )
       }
 
-      case '_checkboxes_norma3':
+      case '_checkboxes_norma3': {
+        const selectedNorma3TextStyle: React.CSSProperties = { color: '#374151', fontWeight: 400, opacity: 1 }
+        const renderNorma3Checkbox = (selected: boolean, onChange: () => void, style?: React.CSSProperties) => {
+          if (selected && isRiAgrTecLimitedEdit) {
+            return (
+              <span
+                aria-hidden='true'
+                style={{
+                  width: 13,
+                  height: 13,
+                  border: '1.5px solid #4b5563',
+                  borderRadius: 2,
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  color: '#4b5563',
+                  fontSize: 10,
+                  fontWeight: 800,
+                  lineHeight: 1,
+                  background: '#e5e7eb',
+                  flexShrink: 0,
+                  ...style
+                }}
+              >
+                ✓
+              </span>
+            )
+          }
+          return <input type='checkbox' checked={selected} disabled={saving || isRiAgrTecLimitedEdit} onChange={onChange} style={{ margin: 0, flexShrink: 0, accentColor: '#4b5563', ...style }}/>
+        }
+
         return (
           <>
             <div style={{ display: 'grid', gridTemplateColumns: '1fr', gap: 6 }}>
@@ -8136,6 +8322,7 @@ ${e?.message || String(e)}`
             </div>
           </>
         )
+      }
       case '_header_rappresentante_legale':
         return tipoSogg === 'PG' ? <div style={sHdr}>Rappresentante legale</div> : null
       default: return null
@@ -8411,7 +8598,7 @@ ${e?.message || String(e)}`
                 datiTecniciBaselineXRef.current = target
                 window.setTimeout(() => setDatiTecniciSidebarDirty(false), 350)
               }}
-              aria-disabled={!datiTecniciSidebarDirty}
+              disabled={!datiTecniciSidebarDirty}
               title='Ripristina larghezza colonne'
               aria-label='Ripristina larghezza colonne'
             >↔</button>
