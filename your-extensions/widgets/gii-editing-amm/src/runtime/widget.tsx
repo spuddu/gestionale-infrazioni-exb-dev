@@ -2548,7 +2548,7 @@ function VerbaleSummary (props: { data: Record<string, any>, fields: LayerFieldI
   const noteReadonly = !props.canEdit || !noteExists || noteField?.editable === false
   const st = useAdminStyle()
   return (
-    <Section title='2. Predisposizione verbale'>
+    <Section title='Predisposizione verbale'>
       <div style={{ display: 'grid', gap: 10, marginBottom: 12 }}>
         <div style={{ border: `${Number(st.verbaleInfoCardBorderWidth ?? 1)}px solid ${st.verbaleInfoCardBorderColor || '#dbeafe'}`, background: st.verbaleInfoCardBg || '#eff6ff', borderRadius: 11, padding: 11, display: 'grid', gap: 9 }}>
           <div style={{ display: 'grid', gap: 3 }}>
@@ -2741,7 +2741,7 @@ function PostNotificationLockedBox () {
 function ProtocolloNotificaGuidataSection (props: { data: Record<string, any>, fields: LayerFieldInfo[], canEdit: boolean, onChange: (name: string, value: any) => void }) {
   const definitivo = isVerbaleDefinitivo(props.data || {})
   return (
-    <Section title='4. Protocollo e notifica'>
+    <Section title='Protocollo e notifica'>
       {!definitivo && <InfoBox kind='warn'>Protocollo e notifica vanno compilati solo dopo che il Direttore d'Area ha approvato l’istruttoria e il sistema ha assegnato numero e data del verbale.</InfoBox>}
       <div style={{ marginTop: definitivo ? 0 : 14 }}>
         <AdminFieldsGrid group='notifica' draft={props.data || {}} fields={props.fields} canEdit={props.canEdit && definitivo} onChange={props.onChange} />
@@ -2758,7 +2758,7 @@ function PagamentoGuidatoSection (props: { data: Record<string, any>, fields: La
   const showBonifico = mode === 'BONIFICO' || mode === 'MISTO'
   const showAltro = mode === 'ALTRO'
   return (
-    <Section title='3. Pagamento'>
+    <Section title='Pagamento'>
       <div style={{ display: 'grid', gap: 12 }}>
         <div style={{ display: 'grid', gridTemplateColumns: ADMIN_COMPACT_GRID_COLUMNS, gap: 10, alignItems: 'stretch' }}>
           <SpeseNotificaEditor data={d} fields={props.fields} canEdit={props.canEditSpeseNotifica} onChange={props.onChange} />
@@ -2815,7 +2815,7 @@ function ChiusuraIstruttoriaSummary (props: { data: Record<string, any>, fields:
   const ready = issues.length === 0
   const chiusa = hasAdminValue(pickAttrCI(d, ['istruttoria_amm_chiusa_il']))
   return (
-    <Section title='5. Completamento istruttoria amministrativa'>
+    <Section title='Completamento istruttoria amministrativa'>
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(230px, 1fr))', gap: 10 }}>
         <StatusSummaryItem label='Istruttoria chiusa il' value={displayAdminFieldValue(d, props.fields, 'istruttoria_amm_chiusa_il')} />
         <StatusSummaryItem label='Istruttoria chiusa da' value={displayAdminFieldValue(d, props.fields, 'istruttoria_amm_chiusa_da')} />
@@ -3056,10 +3056,9 @@ function articleDetailsByRole (role: string, articles: RegolamentoArticolo[], va
   const list = Array.isArray(articles) ? articles.filter(Boolean) : []
   if (!list.length) return <div style={{ color: c.meta, fontSize: 12 }}>Testo regolamentare non disponibile nelle tabelle configurate.</div>
   return (
-    <div style={{ display: 'grid', gap: 10, marginTop: 8 }}>
+    <div style={{ display: 'grid', gap: 10 }}>
       {list.map(article => (
         <div key={`${role}-${article.codice_articolo}`} style={{ display: 'grid', gap: 4 }}>
-          <div style={{ color: c.title, fontSize: 12, fontWeight: 850 }}>{articleTitleLine(article)}</div>
           {article.testo_articolo && <div style={{ color: c.text, fontSize: 12, lineHeight: 1.45, whiteSpace: 'pre-wrap' }}>{article.testo_articolo}</div>}
           {(article.atto_regolamento || article.anno_riferimento) && <div style={{ color: c.meta, fontSize: 11 }}>{[article.atto_regolamento, article.anno_riferimento ? `Anno ${article.anno_riferimento}` : ''].filter(Boolean).join(' · ')}</div>}
         </div>
@@ -3133,7 +3132,7 @@ function NormToggleBox (props: { title: string, variant: NormToggleVariant, chil
         }}
         aria-expanded={open}
       >
-        <span aria-hidden='true' style={{ color: palette.arrow, fontSize: 11, fontWeight: 900, lineHeight: 1, width: 14, display: 'inline-flex', justifyContent: 'center' }}>{open ? '▲' : '▼'}</span>
+        <span aria-hidden='true' style={{ color: palette.arrow, fontSize: 11, fontWeight: 900, lineHeight: 1, width: 14, display: 'inline-flex', justifyContent: 'center' }}>{open ? '▼' : '▶'}</span>
         <span>{props.title}</span>
       </button>
       {open && (
@@ -3362,7 +3361,7 @@ function ParametriSanzionatoriSection (props: { loadState: SanzioneConsultivaLoa
   const totaleAtto = sanzioneDovuta + risarcimentoRimborsi + speseNotifica
 
   return (
-    <Section title='1. Verifica dati automatici'>
+    <Section title='Verifica dati automatici'>
       {!urlsReady && (
         <InfoBox kind='warn'>Configurare in Builder gli URL di GII_PARAMETRI_SANZIONI, GII_REGOLAMENTO_ARTICOLI e GII_REGOLAMENTO_RACCORDI.</InfoBox>
       )}
@@ -3832,7 +3831,7 @@ function AllegatiAmmSection (props: { oid: number | null, ds: any, layerUrl?: st
   return (
     <div style={{ display: 'flex', flexDirection: 'column', minHeight: '100%', height: '100%', border: `1px solid ${st.formCardBorderColor || '#c5d9f1'}`, borderRadius: Number(st.formCardBorderRadius ?? 10), background: '#fff', overflow: 'hidden' }}>
       <div style={{ flex: '0 0 auto', padding: '8px 12px', background: headerBg, color: headerColor, fontWeight: 800, fontSize: Number(st.formCardHeaderFontSize ?? 13) }}>
-        Allegati
+        ALLEGATI
       </div>
 
       {!oid ? (

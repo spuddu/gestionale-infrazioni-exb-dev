@@ -20,26 +20,6 @@ type SelState = {
   layerUrl?: string
 }
 
-type RegolamentoArticolo = {
-  codice_articolo: string
-  numero_articolo: any
-  titolo_articolo: string
-  testo_articolo: string
-  atto_regolamento: string
-  anno_riferimento: any
-  data_validita_da: any
-  data_validita_a: any
-  attivo: any
-  note: string
-}
-
-type RegolamentoArticoliState = {
-  loading: boolean
-  error: string
-  configured: boolean
-  byArticle: Record<string, RegolamentoArticolo>
-}
-
 function unwrapJsapiLayer (maybe: any) {
   return (maybe && (maybe.layer || maybe)) || null
 }
@@ -86,6 +66,177 @@ function ensureLayerIndex (url: string, layer?: any): string {
 }
 
 
+
+
+type RegolamentoArticolo = {
+  codice_articolo: string
+  numero_articolo: any
+  titolo_articolo: string
+  testo_articolo: string
+  atto_regolamento: string
+  anno_riferimento: any
+  data_validita_da: any
+  data_validita_a: any
+  attivo: any
+  note: string
+}
+
+type RegolamentoArticoliState = {
+  loading: boolean
+  error: string
+  urlsReady: boolean
+  byKey: Map<string, RegolamentoArticolo>
+}
+
+function normalizeLookupTableUrl (raw: any): string {
+  return ensureLayerIndex(normalizeFeatureLayerUrl(raw))
+}
+
+function normalizeRegolamentoArticleKey (raw: any): string {
+  const s = String(raw ?? '').trim().toUpperCase()
+  if (!s) return ''
+  const m = s.match(/(?:ART(?:ICOLO)?\.?\s*)?0*(\d{1,2})(?:\.\d+)?/i)
+  return m ? `ART${Number(m[1])}` : s.replace(/[\s._-]+/g, '')
+}
+
+function normalizeRegolamentoArticleNumber (raw: any): string {
+  const m = String(raw ?? '').match(/(\d{1,2})(?:\.\d+)?/)
+  return m ? String(Number(m[1])) : ''
+}
+
+function splitRegolamentoArticleCodes (raw: any): string[] {
+  return String(raw || '')
+    .toUpperCase()
+    .split(/[\/;,|+]+/)
+    .map(s => s.trim())
+    .filter(Boolean)
+}
+
+function formatRegolamentoArticleCode (raw: any): string {
+  const key = normalizeRegolamentoArticleKey(raw)
+  const m = key.match(/^ART(\d+)$/)
+  return m ? `Art. ${Number(m[1])}` : String(raw || '').trim().toUpperCase()
+}
+
+function articleTitleLineTi (article?: RegolamentoArticolo | null, fallback?: string): string {
+  if (article) {
+    const code = formatRegolamentoArticleCode(article.codice_articolo || article.numero_articolo)
+    return article.titolo_articolo ? `${code} — ${article.titolo_articolo}` : code
+  }
+  return String(fallback || '').trim() || '—'
+}
+
+function normalizeRegolamentoArticle (row: any): RegolamentoArticolo {
+  return {
+    codice_articolo: String(pickAttrCI(row, ['codice_articolo']) || '').trim().toUpperCase(),
+    numero_articolo: pickAttrCI(row, ['numero_articolo']),
+    titolo_articolo: String(pickAttrCI(row, ['titolo_articolo']) || '').trim(),
+    testo_articolo: String(pickAttrCI(row, ['testo_articolo']) || '').trim(),
+    atto_regolamento: String(pickAttrCI(row, ['atto_regolamento']) || '').trim(),
+    anno_riferimento: pickAttrCI(row, ['anno_riferimento']),
+    data_validita_da: pickAttrCI(row, ['data_validita_da']),
+    data_validita_a: pickAttrCI(row, ['data_validita_a']),
+    attivo: pickAttrCI(row, ['attivo']),
+    note: String(pickAttrCI(row, ['note']) || '').trim()
+  }
+}
+
+function dateMsForRegolamento (v: any): number | null {
+  if (v == null || v === '') return null
+  try {
+    const n = Number(v)
+    const d = Number.isFinite(n) && n > 0 ? new Date(n) : new Date(String(v))
+    return Number.isNaN(d.getTime()) ? null : d.getTime()
+  } catch {
+    return null
+  }
+}
+
+function isRegolamentoArticleUsable (article: RegolamentoArticolo, refMs = Date.now()): boolean {
+  const key = normalizeRegolamentoArticleKey(article.codice_articolo || article.numero_articolo)
+  if (!key) return false
+  const attivo = String(article.attivo ?? '').trim().toLowerCase()
+  if (attivo && !['1', 'true', 'sì', 'si', 'yes'].includes(attivo)) return false
+  const from = dateMsForRegolamento(article.data_validita_da)
+  const to = dateMsForRegolamento(article.data_validita_a)
+  if (from != null && from > refMs) return false
+  if (to != null && to < refMs) return false
+  return true
+}
+
+function buildRegolamentoArticleMap (articles: RegolamentoArticolo[]): Map<string, RegolamentoArticolo> {
+  const map = new Map<string, RegolamentoArticolo>()
+  ;(articles || []).forEach(article => {
+    const keys = [article.codice_articolo, article.numero_articolo, normalizeRegolamentoArticleNumber(article.numero_articolo)]
+      .map(normalizeRegolamentoArticleKey)
+      .filter(Boolean)
+    keys.forEach(key => { if (!map.has(key)) map.set(key, article) })
+  })
+  return map
+}
+
+function getRegolamentoArticle (state: RegolamentoArticoliState, code: any): RegolamentoArticolo | null {
+  const key = normalizeRegolamentoArticleKey(code)
+  return key ? (state.byKey.get(key) || null) : null
+}
+
+function resolveRegolamentoArticoliUrl (cfg: any): string {
+  const direct = normalizeLookupTableUrl(
+    cfg?.regolamentoArticoliUrl ||
+    cfg?.regolamentoIrriguoArticoliUrl ||
+    cfg?.regolamentoArticoliLayerUrl ||
+    ''
+  )
+  if (direct) return direct
+
+  // Fallback: riusa la stessa tabella già configurata nel widget amministrativo,
+  // quando presente nell'app Experience Builder.
+  try {
+    const state: any = getAppStore()?.getState?.()
+    const appConfig: any = state?.appConfig
+    const rawWidgets: any = appConfig?.widgets || {}
+    const widgets = rawWidgets?.asMutable ? rawWidgets.asMutable({ deep: true }) : (rawWidgets?.toJS ? rawWidgets.toJS() : rawWidgets)
+    for (const w of Object.values(widgets || {}) as any[]) {
+      const rawConfig = w?.config || {}
+      const wc = rawConfig?.asMutable ? rawConfig.asMutable({ deep: true }) : (rawConfig?.toJS ? rawConfig.toJS() : rawConfig)
+      const url = normalizeLookupTableUrl(wc?.regolamentoArticoliUrl || wc?.regolamentoIrriguoArticoliUrl || wc?.regolamentoArticoliLayerUrl || '')
+      if (url) return url
+    }
+  } catch {}
+
+  return ''
+}
+
+function useRegolamentoArticoliState (cfg: any): RegolamentoArticoliState {
+  const articoliUrl = React.useMemo(
+    () => resolveRegolamentoArticoliUrl(cfg || {}),
+    [cfg?.regolamentoArticoliUrl, cfg?.regolamentoIrriguoArticoliUrl, cfg?.regolamentoArticoliLayerUrl]
+  )
+  const [state, setState] = React.useState<RegolamentoArticoliState>({ loading: false, error: '', urlsReady: !!articoliUrl, byKey: new Map() })
+
+  React.useEffect(() => {
+    let cancelled = false
+    const load = async () => {
+      if (!articoliUrl) {
+        setState({ loading: false, error: '', urlsReady: false, byKey: new Map() })
+        return
+      }
+      setState({ loading: true, error: '', urlsReady: true, byKey: new Map() })
+      try {
+        const rows = await queryTableAttributes(articoliUrl, '1=1', 'numero_articolo ASC')
+        const refMs = Date.now()
+        const articles = rows.map(normalizeRegolamentoArticle).filter(a => isRegolamentoArticleUsable(a, refMs))
+        if (!cancelled) setState({ loading: false, error: '', urlsReady: true, byKey: buildRegolamentoArticleMap(articles) })
+      } catch (e: any) {
+        if (!cancelled) setState({ loading: false, error: e?.message || String(e), urlsReady: true, byKey: new Map() })
+      }
+    }
+    load()
+    return () => { cancelled = true }
+  }, [articoliUrl])
+
+  return state
+}
 
 function getRequestedEditSection (opts?: { skipUrl?: boolean }): 'dati_generali' | 'trasgressore' | 'violazione' | 'dati_tecnici' | 'nota_spese' | 'allegati' | 'anteprima' | null {
   const normalize = (raw: any): string => String(raw || '').trim().toLowerCase().replace(/_/g, '-').replace(/\s+/g, '-')
@@ -3390,145 +3541,6 @@ const CHOICES = {
   ]
 } as const
 
-function normalizeRegolamentoArticleKey (raw: any): string {
-  const text = String(raw ?? '').trim()
-  if (!text) return ''
-  const cleaned = text
-    .replace(/[_-]+/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim()
-  const m = cleaned.match(/(?:^|\b)(?:ART(?:ICOLO)?\.?\s*)?(\d{1,3})(?:\b|$)/i)
-  if (!m) return ''
-  return String(Number(m[1]))
-}
-
-function normalizeRegolamentoArticolo (row: any): RegolamentoArticolo {
-  return {
-    codice_articolo: String(pickAttrCI(row, ['codice_articolo', 'codice', 'articolo_codice']) || '').trim(),
-    numero_articolo: pickAttrCI(row, ['numero_articolo', 'numero', 'articolo_numero']),
-    titolo_articolo: String(pickAttrCI(row, ['titolo_articolo', 'titolo', 'descrizione']) || '').trim(),
-    testo_articolo: String(pickAttrCI(row, ['testo_articolo', 'testo', 'testo_norma', 'contenuto']) || '').trim(),
-    atto_regolamento: String(pickAttrCI(row, ['atto_regolamento', 'atto']) || '').trim(),
-    anno_riferimento: pickAttrCI(row, ['anno_riferimento', 'anno']),
-    data_validita_da: pickAttrCI(row, ['data_validita_da', 'validita_da']),
-    data_validita_a: pickAttrCI(row, ['data_validita_a', 'validita_a']),
-    attivo: pickAttrCI(row, ['attivo', 'stato']),
-    note: String(pickAttrCI(row, ['note', 'nota']) || '').trim()
-  }
-}
-
-function isRegolamentoRowActive (article: RegolamentoArticolo): boolean {
-  const raw = article.attivo
-  if (raw == null || raw === '') return true
-  if (raw === true || raw === 1) return true
-  const text = String(raw).trim().toLowerCase()
-  return text === '1' || text === 'true' || text === 'si' || text === 'sì' || text === 'attivo' || text === 'active'
-}
-
-function regolamentoArticleSortValue (article: RegolamentoArticolo): number {
-  const fromNum = normalizeRegolamentoArticleKey(article.numero_articolo)
-  if (fromNum) return Number(fromNum)
-  const fromCode = normalizeRegolamentoArticleKey(article.codice_articolo)
-  return fromCode ? Number(fromCode) : 9999
-}
-
-function regolamentoArticleDisplayTitle (article?: RegolamentoArticolo | null, fallback?: string): string {
-  const fallbackKey = normalizeRegolamentoArticleKey(fallback)
-  const articleKey = article ? (normalizeRegolamentoArticleKey(article.numero_articolo) || normalizeRegolamentoArticleKey(article.codice_articolo)) : ''
-  const artLabel = articleKey || fallbackKey
-  const title = String(article?.titolo_articolo || '').trim()
-  return artLabel ? (title ? `Art. ${artLabel} - ${title}` : `Art. ${artLabel}`) : (title || String(fallback || 'Articolo').trim())
-}
-
-function buildRegolamentoArticlesMap (rows: any[]): Record<string, RegolamentoArticolo> {
-  const map: Record<string, RegolamentoArticolo> = {}
-  ;(rows || [])
-    .map(normalizeRegolamentoArticolo)
-    .filter(a => isRegolamentoRowActive(a))
-    .sort((a, b) => regolamentoArticleSortValue(a) - regolamentoArticleSortValue(b))
-    .forEach(article => {
-      const keys = [
-        normalizeRegolamentoArticleKey(article.numero_articolo),
-        normalizeRegolamentoArticleKey(article.codice_articolo)
-      ].filter(Boolean)
-      keys.forEach(key => {
-        if (!map[key]) map[key] = article
-      })
-    })
-  return map
-}
-
-function useRegolamentoArticoliState (rawUrl: any): RegolamentoArticoliState {
-  const url = String(rawUrl || '').trim()
-  const [state, setState] = React.useState<RegolamentoArticoliState>({ loading: false, error: '', configured: !!url, byArticle: {} })
-
-  React.useEffect(() => {
-    let cancelled = false
-    if (!url) {
-      setState({ loading: false, error: '', configured: false, byArticle: {} })
-      return () => { cancelled = true }
-    }
-    setState({ loading: true, error: '', configured: true, byArticle: {} })
-    queryTableAttributes(url, '1=1', 'numero_articolo ASC')
-      .then(rows => {
-        if (!cancelled) setState({ loading: false, error: '', configured: true, byArticle: buildRegolamentoArticlesMap(rows) })
-      })
-      .catch((e: any) => {
-        if (!cancelled) setState({ loading: false, error: e?.message || String(e), configured: true, byArticle: {} })
-      })
-    return () => { cancelled = true }
-  }, [url])
-
-  return state
-}
-
-function RegolamentoArticleToggle (props: { articleCode: string, title?: string, state: RegolamentoArticoliState, compact?: boolean }) {
-  const [open, setOpen] = React.useState(false)
-  const key = normalizeRegolamentoArticleKey(props.articleCode)
-  const article = key ? props.state.byArticle[key] : null
-  const title = props.title || regolamentoArticleDisplayTitle(article, props.articleCode)
-  const bodyText = String(article?.testo_articolo || '').trim()
-  const meta = article ? [article.atto_regolamento, article.anno_riferimento ? `Anno ${article.anno_riferimento}` : ''].filter(Boolean).join(' · ') : ''
-  const compact = props.compact === true
-
-  return (
-    <div style={{ border: '1px solid #cbd5e1', borderRadius: 8, overflow: 'hidden', background: '#ffffff', marginTop: compact ? 4 : 0 }}>
-      <button
-        type='button'
-        onClick={(evt) => { evt.preventDefault(); evt.stopPropagation(); setOpen(!open) }}
-        aria-expanded={open}
-        style={{
-          width: '100%',
-          border: 0,
-          background: '#eef5fc',
-          color: '#0f3b63',
-          display: 'flex',
-          alignItems: 'center',
-          gap: 7,
-          padding: compact ? '5px 7px' : '7px 9px',
-          textAlign: 'left',
-          cursor: 'pointer',
-          fontSize: compact ? 11 : 12,
-          fontWeight: 850,
-          lineHeight: 1.3
-        }}
-      >
-        <span aria-hidden='true' style={{ width: 13, display: 'inline-flex', justifyContent: 'center', fontSize: 10, color: '#1d4ed8', fontWeight: 900 }}>{open ? '▲' : '▼'}</span>
-        <span>{title}</span>
-      </button>
-      {open && (
-        <div style={{ padding: compact ? '6px 8px' : '8px 10px', borderTop: '1px solid #cbd5e1', background: '#ffffff', color: '#334155', fontSize: compact ? 11 : 12, lineHeight: 1.45, whiteSpace: 'pre-wrap' }}>
-          {!props.state.configured ? 'Tabella regolamento articoli non configurata nel widget.'
-            : props.state.loading ? 'Caricamento testo regolamentare…'
-              : props.state.error ? `Errore caricamento testo regolamentare: ${props.state.error}`
-                : bodyText || 'Testo regolamentare non disponibile per questo articolo.'}
-          {meta && <div style={{ marginTop: 6, color: '#64748b', fontSize: compact ? 10 : 11, whiteSpace: 'normal' }}>{meta}</div>}
-        </div>
-      )}
-    </div>
-  )
-}
-
 // campi v_art* associati alle scelte norma3
 const NORMA3_TO_VFIELD: Record<string, string> = {
   Art8: 'v_art08', Art12: 'v_art12', Art27: 'v_art27', Art28: 'v_art28',
@@ -3614,6 +3626,93 @@ const _defaultFormStyle = {
   violazioneDescrizioneRows: 5, violazioneCircostanzeRows: 4
 }
 const FormStyleCtx = React.createContext(_defaultFormStyle)
+
+const REGOLAMENTO_VIOLATA_STYLE = {
+  cardBg: '#eff6ff',
+  borderColor: '#93c5fd',
+  borderWidth: 1,
+  headerBg: '#dbeafe',
+  headerTextColor: '#0f172a',
+  arrowColor: '#1d4ed8',
+  bodyBg: '#ffffff',
+  articleTitleColor: '#111827',
+  articleTextColor: '#374151',
+  articleMetaColor: '#6b7280'
+}
+
+function RegolamentoArticleDetailsTi (props: { articleState: RegolamentoArticoliState, articleCode: string }) {
+  const st = REGOLAMENTO_VIOLATA_STYLE
+  const article = getRegolamentoArticle(props.articleState, props.articleCode)
+
+  if (!props.articleState.urlsReady) {
+    return <div style={{ color: st.articleMetaColor, fontSize: 12 }}>Tabella articoli del regolamento non configurata.</div>
+  }
+  if (props.articleState.loading) {
+    return <div style={{ color: st.articleMetaColor, fontSize: 12 }}>Caricamento testo regolamentare…</div>
+  }
+  if (props.articleState.error) {
+    return <div style={{ color: '#991b1b', fontSize: 12 }}>Errore caricamento regolamento: {props.articleState.error}</div>
+  }
+  if (!article) {
+    return <div style={{ color: st.articleMetaColor, fontSize: 12 }}>Testo regolamentare non disponibile nelle tabelle configurate.</div>
+  }
+
+  return (
+    <div style={{ display: 'grid', gap: 4 }}>
+      {article.testo_articolo && <div style={{ color: st.articleTextColor, fontSize: 12, lineHeight: 1.45, whiteSpace: 'pre-wrap' }}>{article.testo_articolo}</div>}
+      {(article.atto_regolamento || article.anno_riferimento) && <div style={{ color: st.articleMetaColor, fontSize: 11 }}>{[article.atto_regolamento, article.anno_riferimento ? `Anno ${article.anno_riferimento}` : ''].filter(Boolean).join(' · ')}</div>}
+    </div>
+  )
+}
+
+function RegolamentoChoiceToggleTi (props: {
+  articleState: RegolamentoArticoliState
+  articleCode: string
+  title: string
+  checkbox?: React.ReactNode
+  textStyle?: React.CSSProperties
+  disabled?: boolean
+  fill?: boolean
+}) {
+  const fs = React.useContext(FormStyleCtx)
+  const [open, setOpen] = React.useState(false)
+  const st = REGOLAMENTO_VIOLATA_STYLE
+  const article = getRegolamentoArticle(props.articleState, props.articleCode)
+  const title = articleTitleLineTi(article, props.title)
+  const targetHeight = Math.max(24, Number(fs.fieldHeight) || 32)
+  const headerHeight = Math.max(22, targetHeight - (Number(st.borderWidth || 1) * 2))
+  const toggleOpen = (evt?: any) => {
+    try { evt?.preventDefault?.() } catch {}
+    try { evt?.stopPropagation?.() } catch {}
+    setOpen(v => !v)
+  }
+
+  return (
+    <div style={{ border: `${Number(st.borderWidth || 1)}px solid ${st.borderColor}`, background: st.cardBg, borderRadius: 7, overflow: 'hidden', minWidth: 0, width: props.fill === false ? undefined : '100%', boxSizing: 'border-box' }}>
+      <div style={{ minHeight: headerHeight, background: st.headerBg, color: st.headerTextColor, display: 'flex', alignItems: 'center', gap: 8, padding: '0 8px', boxSizing: 'border-box' }}>
+        <button
+          type='button'
+          onClick={toggleOpen}
+          aria-expanded={open}
+          title={open ? 'Nascondi testo regolamento' : 'Mostra testo regolamento'}
+          style={{ border: 0, background: 'transparent', color: st.arrowColor, width: 14, minWidth: 14, height: headerHeight, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', padding: 0, fontSize: 11, fontWeight: 900, lineHeight: 1 }}
+        >{open ? '▼' : '▶'}</button>
+        {props.checkbox && <span style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: 14, minWidth: 14, height: headerHeight, lineHeight: 1 }}>{props.checkbox}</span>}
+        <button
+          type='button'
+          onClick={toggleOpen}
+          aria-expanded={open}
+          style={{ border: 0, background: 'transparent', color: st.headerTextColor, display: 'flex', alignItems: 'center', minHeight: headerHeight, padding: 0, textAlign: 'left', cursor: 'pointer', minWidth: 0, flex: '1 1 auto', fontSize: fs.norma3FontSize, fontWeight: 900, lineHeight: 1.25, ...props.textStyle }}
+        ><span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>{title}</span></button>
+      </div>
+      {open && (
+        <div style={{ padding: '8px 10px', borderTop: `1px solid ${st.borderColor}`, background: st.bodyBg }}>
+          <RegolamentoArticleDetailsTi articleState={props.articleState} articleCode={props.articleCode} />
+        </div>
+      )}
+    </div>
+  )
+}
 
 const S: Record<string, React.CSSProperties> = {
   wrap:   { width: '100%', height: '100%', display: 'flex', flexDirection: 'column', minHeight: 0, overflowY: 'auto', padding: '0 2px' },
@@ -4792,9 +4891,9 @@ function NoteSpeseManager (props: NsManagerProps) {
 
   return (
     <div style={{ border: '1px solid #b9d1ea', borderRadius: cardRadius, overflow: 'hidden', background: '#fff' }}>
-      <div style={{ background: formStyle.cardHeaderBg, color: formStyle.cardHeaderColor, padding: '8px 10px', fontSize: 13, fontWeight: 700, display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderTopLeftRadius: cardRadius, borderTopRightRadius: cardRadius }}>
-        <span>{props.title}</span>
-        <span style={{ fontSize: 12, opacity: 0.9 }}>{money(categoryTotal)} €</span>
+      <div style={{ background: formStyle.cardHeaderBg, color: formStyle.cardHeaderColor, padding: `${formStyle.cardHeaderPaddingY}px ${formStyle.cardHeaderPaddingX}px`, fontSize: formStyle.cardHeaderFontSize, fontWeight: formStyle.cardHeaderFontWeight as any, letterSpacing: 0.25, textTransform: 'uppercase', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, borderTopLeftRadius: cardRadius, borderTopRightRadius: cardRadius }}>
+        <span>{String(props.title || '').toLocaleUpperCase('it-IT')}</span>
+        <span style={{ fontSize: formStyle.cardHeaderFontSize, opacity: 0.9 }}>{money(categoryTotal)} €</span>
       </div>
       <div style={{ padding: 0, display: 'grid', gap: 0 }}>
         {msg && (
@@ -5153,7 +5252,6 @@ function NuovaPraticaForm (p: {
   onTabChange?: (tab: string) => void
 }) {
   const { ds, cfg } = p
-  const regolamentoArticoliState = useRegolamentoArticoliState((cfg as any).regolamentoArticoliUrl)
   const mode = p.mode === 'edit' ? 'edit' : 'create'
   const editOid = p.editOid != null ? Number(p.editOid) : null
   const editIdFieldName = String(p.editIdFieldName || ds?.getIdField?.() || 'OBJECTID')
@@ -5454,6 +5552,8 @@ function NuovaPraticaForm (p: {
     const onPointerUp = () => { datiTecniciUserDraggingRef.current = false }
     let oldDividerZ = ''
     let oldDividerPosition = ''
+    let oldDividerPointerEvents = ''
+    let oldDividerCursor = ''
 
     const findPanels = () => {
       try {
@@ -5470,8 +5570,15 @@ function NuovaPraticaForm (p: {
               dividerEl = divider
               oldDividerZ = divider.style.zIndex
               oldDividerPosition = divider.style.position
+              oldDividerPointerEvents = divider.style.pointerEvents
+              oldDividerCursor = divider.style.cursor
               divider.style.setProperty('z-index', '2147483646', 'important')
               divider.style.setProperty('position', 'relative', 'important')
+              // Il divisore nativo della Sidebar ExB resta il destinatario degli eventi
+              // sintetici usati dall'overlay, ma non deve più partecipare all'hit-test:
+              // altrimenti il cursore/maniglia nativa rimane sopra al pulsante reset.
+              divider.style.setProperty('pointer-events', 'none', 'important')
+              divider.style.setProperty('cursor', 'default', 'important')
               divider.addEventListener('pointerdown', onPointerDown)
               window.addEventListener('pointerup', onPointerUp)
             }
@@ -5495,6 +5602,8 @@ function NuovaPraticaForm (p: {
         if (dividerEl) {
           dividerEl.style.zIndex = oldDividerZ
           dividerEl.style.position = oldDividerPosition
+          dividerEl.style.pointerEvents = oldDividerPointerEvents
+          dividerEl.style.cursor = oldDividerCursor
         }
       } catch {}
       datiTecniciSidebarElRef.current = null
@@ -5895,6 +6004,7 @@ const noteSpeseMissing = React.useMemo(() => {
   return missing
 }, [noteSpeseCfg])
 
+const regolamentoArticoliState = useRegolamentoArticoliState(cfg)
 
 React.useEffect(() => {
   let cancelled = false
@@ -6811,10 +6921,17 @@ React.useEffect(() => {
         })
         return
       }
-      if (irr <= 0 || irr <= dich) {
+      if (irr <= 0) {
         setValidationPopup({
           title: 'Superficie irrigata non valida',
-          text: 'Per l\'Art. 15 (abuso parziale), la superficie irrigata deve essere compilata e maggiore di quella dichiarata.'
+          text: 'Per l\'Art. 15 (abuso parziale), la superficie irrigata deve essere compilata e maggiore di 0.'
+        })
+        return
+      }
+      if (irr <= dich) {
+        setValidationPopup({
+          title: 'Superficie irrigata non valida',
+          text: 'La superficie irrigata deve essere superiore a quella dichiarata per l\'Art. 15 (abuso parziale).'
         })
         return
       }
@@ -7538,7 +7655,7 @@ ${e?.message || String(e)}`
       case 'descrizione_fatti': return { label: 'Descrizione dettagliata della violazione', el: <NpText value={g('descrizione_fatti')} onChange={v => set('descrizione_fatti', v)} multiline uppercase={false} disabled={saving}/> }
       case 'circostanze': return { label: 'Circostanze rilevanti', el: <NpText value={g('circostanze')} onChange={v => set('circostanze', v)} multiline uppercase={false} disabled={saving}/> }
       case 'presenza_trasgressore': return { label: <span style={{ whiteSpace: 'nowrap' }}>Il trasgressore era presente?</span>, el: <NpSel value={g('presenza_trasgressore')} onChange={v => set('presenza_trasgressore', v)} options={CHOICES.presenza} disabled={saving}/> }
-      case 'descrizione_luogo': return { label: 'Descrizione del luogo (Es. Comune, foglio, mappali)', el: <NpText value={g('descrizione_luogo')} onChange={v => set('descrizione_luogo', v)} multiline uppercase={false} disabled={saving}/> }
+      case 'descrizione_luogo': return { label: 'Descrizione del luogo', el: <NpText value={g('descrizione_luogo')} onChange={v => set('descrizione_luogo', v)} multiline uppercase={false} disabled={saving}/> }
       // Dati tecnici
       case 'distretto': return { label: 'Distretto', el: <NpText value={g('distretto')} onChange={v => set('distretto', v)} disabled={saving}/> }
       case 'comizio': return { label: 'Comizio', el: <NpText value={g('comizio')} onChange={v => set('comizio', v)} disabled={saving}/> }
@@ -7611,10 +7728,6 @@ ${e?.message || String(e)}`
     </section>
   )
 
-  const renderRegolamentoBox = (articleCode: string, title?: string, compact?: boolean): React.ReactNode => (
-    <RegolamentoArticleToggle articleCode={articleCode} title={title} state={regolamentoArticoliState} compact={compact} />
-  )
-
   const renderFullHeightEditCard = (title: string, body: React.ReactNode, right?: React.ReactNode) => renderEditCard(
     title,
     body,
@@ -7648,6 +7761,37 @@ ${e?.message || String(e)}`
     }
 
     return raw
+  }
+
+  const selectedNorma3TextStyle: React.CSSProperties = { color: '#374151', fontWeight: 400, opacity: 1 }
+
+  const renderNorma3Checkbox = (selected: boolean, onChange: () => void, style?: React.CSSProperties): React.ReactNode => {
+    if (selected && isRiAgrTecLimitedEdit) {
+      return (
+        <span
+          aria-hidden='true'
+          style={{
+            width: 13,
+            height: 13,
+            border: '1.5px solid #4b5563',
+            borderRadius: 2,
+            display: 'inline-flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            color: '#4b5563',
+            fontSize: 10,
+            fontWeight: 800,
+            lineHeight: 1,
+            background: '#e5e7eb',
+            flexShrink: 0,
+            ...style
+          }}
+        >
+          ✓
+        </span>
+      )
+    }
+    return <input type='checkbox' checked={selected} disabled={saving || isRiAgrTecLimitedEdit} onChange={onChange} style={{ margin: 0, flexShrink: 0, accentColor: '#4b5563', ...style }}/>
   }
 
   const renderSpecial = (id: string): React.ReactNode => {
@@ -7918,44 +8062,35 @@ ${e?.message || String(e)}`
             <NpSel value={value} onChange={onChange} options={options} disabled={!canEditRegularField(fieldName, enabled)}/>
           </NpField>
         )
-        const compactChoiceStyle = (active: boolean, disabled: boolean): React.CSSProperties => ({
-          display: 'flex',
-          alignItems: 'center',
-          gap: 8,
-          minHeight: 30,
-          padding: '5px 8px',
-          border: 'none',
-          background: 'transparent',
-          borderRadius: 0,
-          color: disabled ? '#94a3b8' : '#334155',
-          fontSize: formStyle.norma3FontSize,
-          fontWeight: 400,
-          cursor: disabled ? 'not-allowed' : 'pointer',
-          boxSizing: 'border-box',
-          lineHeight: 1.3
-        })
         const choiceBox = (value: 'Art16' | 'Art17', title: string) => {
           const active = norma1516 === value
           const disabled = saving || isRiAgrTecLimitedEdit || !canEditFieldForCurrentProfile('norma16_17')
-          const articleCode = value === 'Art16' ? '16' : '17'
+          const checkbox = (
+            <input
+              type='checkbox'
+              checked={active}
+              disabled={disabled}
+              onChange={() => {
+                if (disabled) return
+                set('norma16_17', active ? '' : value)
+                if (value !== 'Art17') set('art17_tipo', '')
+              }}
+              style={{ margin: 0, flexShrink: 0, accentColor: '#4b5563' }}
+            />
+          )
           return (
-            <div style={{ display: 'grid', gap: 5 }}>
-              <label style={compactChoiceStyle(active, disabled)}>
-                <input
-                  type='checkbox'
-                  checked={active}
-                  disabled={disabled}
-                  onChange={() => {
-                    if (disabled) return
-                    set('norma16_17', active ? '' : value)
-                    if (value !== 'Art17') set('art17_tipo', '')
-                  }}
-                  style={{ margin: 0, flexShrink: 0 }}
-                />
-                <span>{title}</span>
-              </label>
-              {renderRegolamentoBox(articleCode, title, true)}
-            </div>
+            <RegolamentoChoiceToggleTi
+              articleState={regolamentoArticoliState}
+              articleCode={value}
+              title={title}
+              checkbox={checkbox}
+              disabled={disabled}
+              textStyle={{
+                color: active ? selectedNorma3TextStyle.color : (disabled ? '#64748b' : '#334155'),
+                fontWeight: active ? selectedNorma3TextStyle.fontWeight : 400,
+                opacity: active ? selectedNorma3TextStyle.opacity : (disabled ? 0.72 : 1)
+              }}
+            />
           )
         }
         const textAreaField = (fieldName: string, label: string, rows: number) => {
@@ -7999,35 +8134,6 @@ ${e?.message || String(e)}`
             {required ? '●' : '—'}
           </span>
         )
-        const selectedNorma3TextStyle: React.CSSProperties = { color: '#374151', fontWeight: 400, opacity: 1 }
-        const renderNorma3Checkbox = (selected: boolean, onChange: () => void, style?: React.CSSProperties) => {
-          if (selected && isRiAgrTecLimitedEdit) {
-            return (
-              <span
-                aria-hidden='true'
-                style={{
-                  width: 13,
-                  height: 13,
-                  border: '1.5px solid #4b5563',
-                  borderRadius: 2,
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  color: '#4b5563',
-                  fontSize: 10,
-                  fontWeight: 800,
-                  lineHeight: 1,
-                  background: '#e5e7eb',
-                  flexShrink: 0,
-                  ...style
-                }}
-              >
-                ✓
-              </span>
-            )
-          }
-          return <input type='checkbox' checked={selected} disabled={saving || isRiAgrTecLimitedEdit} onChange={onChange} style={{ margin: 0, flexShrink: 0, accentColor: '#4b5563', ...style }}/>
-        }
         const renderNorma3Rows = () => {
           const norma3IndicatorColumnWidth = formStyle.norma3GradeColumnWidth
           const gridColumns = `minmax(300px, 1fr) ${norma3IndicatorColumnWidth}px ${norma3IndicatorColumnWidth}px ${norma3IndicatorColumnWidth}px ${formStyle.norma3GradeColumnWidth}px`
@@ -8045,10 +8151,12 @@ ${e?.message || String(e)}`
           }
           const reqCellStyle: React.CSSProperties = {
             borderLeft: '1px solid #e5e7eb',
-            padding: '3px 4px',
+            padding: '0 4px',
+            minHeight: formStyle.fieldHeight,
             display: 'flex',
             alignItems: 'center',
-            justifyContent: 'center'
+            justifyContent: 'center',
+            boxSizing: 'border-box'
           }
           return (
             <div style={{ border: '1px solid #e5e7eb', borderRadius: 8, overflow: 'hidden', background: '#f8fbff', display: 'grid', gap: formStyle.norma3RowGap }}>
@@ -8084,28 +8192,24 @@ ${e?.message || String(e)}`
                   <div key={o.v} style={{
                     display: 'grid',
                     gridTemplateColumns: gridColumns,
-                    minHeight: 30,
+                    minHeight: formStyle.fieldHeight,
                     borderBottom: '1px solid #edf2f7',
-                    background: rowBg
+                    background: rowBg,
+                    alignItems: 'stretch'
                   }}>
-                    <div style={{ display: 'grid', gap: 4, padding: '5px 8px 6px 10px', minWidth: 0 }}>
-                      <label style={{
-                        display: 'flex',
-                        alignItems: 'center',
-                        gap: 8,
-                        fontSize: formStyle.norma3FontSize,
-                        color: selected ? selectedNorma3TextStyle.color : (isRiAgrTecLimitedEdit ? '#64748b' : '#334155'),
-                        cursor: (saving || isRiAgrTecLimitedEdit) ? 'not-allowed' : 'pointer',
-                        padding: 0,
-                        opacity: selected ? selectedNorma3TextStyle.opacity : (isRiAgrTecLimitedEdit ? 0.72 : 1),
-                        fontWeight: selected ? selectedNorma3TextStyle.fontWeight : 400,
-                        lineHeight: 1.3,
-                        minWidth: 0
-                      }}>
-                        {renderNorma3Checkbox(selected, () => !(saving || isRiAgrTecLimitedEdit) && toggleNorma3(o.v))}
-                        <span>{o.l}</span>
-                      </label>
-                      {renderRegolamentoBox(art, o.l, true)}
+                    <div style={{ padding: 0, minWidth: 0, display: 'flex', alignItems: 'stretch' }}>
+                      <RegolamentoChoiceToggleTi
+                        articleState={regolamentoArticoliState}
+                        articleCode={o.v}
+                        title={o.l}
+                        checkbox={renderNorma3Checkbox(selected, () => !(saving || isRiAgrTecLimitedEdit) && toggleNorma3(o.v))}
+                        disabled={saving || isRiAgrTecLimitedEdit}
+                        textStyle={{
+                          color: selected ? selectedNorma3TextStyle.color : (isRiAgrTecLimitedEdit ? '#64748b' : '#334155'),
+                          fontWeight: selected ? selectedNorma3TextStyle.fontWeight : 400,
+                          opacity: selected ? selectedNorma3TextStyle.opacity : (isRiAgrTecLimitedEdit ? 0.72 : 1)
+                        }}
+                      />
                     </div>
                     <div style={reqCellStyle}>
                       {reqCheckCell(requiresPoint, 'Richiede punto in mappa')}
@@ -8116,7 +8220,7 @@ ${e?.message || String(e)}`
                     <div style={reqCellStyle}>
                       {reqCheckCell(hasGrade, 'Richiede grado di gravità')}
                     </div>
-                    <div style={{ borderLeft: '1px solid #e5e7eb', padding: '3px 6px', display: 'flex', alignItems: 'center' }}>
+                    <div style={{ borderLeft: '1px solid #e5e7eb', padding: '0 6px', minHeight: formStyle.fieldHeight, display: 'flex', alignItems: 'center', boxSizing: 'border-box' }}>
                       {gradeNode}
                     </div>
                   </div>
@@ -8146,8 +8250,12 @@ ${e?.message || String(e)}`
         const leftColumn = (
           <div style={{ display: 'grid', gap: formStyle.sectionGap, minWidth: 0, minHeight: '100%', gridTemplateRows: 'auto auto minmax(0, 1fr)' }}>
             {renderEditCard('Art. 15 — Prelievo abusivo',
-              <div style={{ display: 'grid', gap: 8 }}>
-                {renderRegolamentoBox('15', 'Art. 15 - Prelievo abusivo')}
+              <div style={{ display: 'grid', gap: 10, minWidth: 0 }}>
+                <RegolamentoChoiceToggleTi
+                  articleState={regolamentoArticoliState}
+                  articleCode='Art15'
+                  title='Norma violata: Art. 15 — Prelievo abusivo'
+                />
                 <div style={{ display: 'grid', gridTemplateColumns: termsGridColumns, gap: 10, alignItems: 'start' }}>
                   <div style={{ width: 155, maxWidth: '100%' }}>
                     {selectField('tipo_abuso', 'Tipo di abuso', tipoAbuso, v => { set('tipo_abuso', v); set('norma15_parziale', ''); set('norma15_totale', '') }, CHOICES.tipo_abuso)}
@@ -8275,54 +8383,32 @@ ${e?.message || String(e)}`
         )
       }
 
-      case '_checkboxes_norma3': {
-        const selectedNorma3TextStyle: React.CSSProperties = { color: '#374151', fontWeight: 400, opacity: 1 }
-        const renderNorma3Checkbox = (selected: boolean, onChange: () => void, style?: React.CSSProperties) => {
-          if (selected && isRiAgrTecLimitedEdit) {
-            return (
-              <span
-                aria-hidden='true'
-                style={{
-                  width: 13,
-                  height: 13,
-                  border: '1.5px solid #4b5563',
-                  borderRadius: 2,
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  color: '#4b5563',
-                  fontSize: 10,
-                  fontWeight: 800,
-                  lineHeight: 1,
-                  background: '#e5e7eb',
-                  flexShrink: 0,
-                  ...style
-                }}
-              >
-                ✓
-              </span>
-            )
-          }
-          return <input type='checkbox' checked={selected} disabled={saving || isRiAgrTecLimitedEdit} onChange={onChange} style={{ margin: 0, flexShrink: 0, accentColor: '#4b5563', ...style }}/>
-        }
-
+      case '_checkboxes_norma3':
         return (
           <>
             <div style={{ display: 'grid', gridTemplateColumns: '1fr', gap: 6 }}>
               {CHOICES.norma3.map(o => {
                 const selected = norma3Set.has(o.v)
                 return (
-                  <label key={o.v} style={{ display: 'flex', alignItems: 'flex-start', gap: 8, fontSize: formStyle.norma3FontSize,
-                    color: selected ? selectedNorma3TextStyle.color : (isRiAgrTecLimitedEdit ? '#64748b' : '#374151'), cursor: (saving || isRiAgrTecLimitedEdit) ? 'not-allowed' : 'pointer', padding: '4px 6px', opacity: selected ? selectedNorma3TextStyle.opacity : (isRiAgrTecLimitedEdit ? 0.72 : 1), fontWeight: selected ? selectedNorma3TextStyle.fontWeight : 400, background: 'transparent', borderRadius: 6 }}>
-                    {renderNorma3Checkbox(selected, () => !(saving || isRiAgrTecLimitedEdit) && toggleNorma3(o.v), { marginTop: 2 })}
-                    {o.l}
-                  </label>
+                  <React.Fragment key={o.v}>
+                    <RegolamentoChoiceToggleTi
+                      articleState={regolamentoArticoliState}
+                    articleCode={o.v}
+                    title={o.l}
+                    checkbox={renderNorma3Checkbox(selected, () => !(saving || isRiAgrTecLimitedEdit) && toggleNorma3(o.v))}
+                    disabled={saving || isRiAgrTecLimitedEdit}
+                    textStyle={{
+                      color: selected ? selectedNorma3TextStyle.color : (isRiAgrTecLimitedEdit ? '#64748b' : '#374151'),
+                      fontWeight: selected ? selectedNorma3TextStyle.fontWeight : 400,
+                      opacity: selected ? selectedNorma3TextStyle.opacity : (isRiAgrTecLimitedEdit ? 0.72 : 1)
+                    }}
+                    />
+                  </React.Fragment>
                 )
               })}
             </div>
           </>
         )
-      }
       case '_header_rappresentante_legale':
         return tipoSogg === 'PG' ? <div style={sHdr}>Rappresentante legale</div> : null
       default: return null
@@ -8598,7 +8684,7 @@ ${e?.message || String(e)}`
                 datiTecniciBaselineXRef.current = target
                 window.setTimeout(() => setDatiTecniciSidebarDirty(false), 350)
               }}
-              disabled={!datiTecniciSidebarDirty}
+              aria-disabled={!datiTecniciSidebarDirty}
               title='Ripristina larghezza colonne'
               aria-label='Ripristina larghezza colonne'
             >↔</button>
@@ -8625,20 +8711,20 @@ ${e?.message || String(e)}`
 {/* NOTA SPESE */}
 {npTab === 'nota_spese' && (
   mode !== 'edit' || currentOid == null ? (
-    renderFullHeightEditCard('Nota spese', (
+    renderFullHeightEditCard('NOTA SPESE', (
       <div style={{ fontSize: formStyle.labelFontSize, color: formStyle.labelColor, lineHeight: 1.5 }}>
         Sarà possibile aggiungere la nota spese <b>solo dopo il primo salvataggio</b> della pratica.
       </div>
     ))
   ) : noteSpeseMissing.length > 0 ? (
-    renderFullHeightEditCard('Nota spese non configurata', (
+    renderFullHeightEditCard('NOTA SPESE NON CONFIGURATA', (
       <div style={{ padding: 12, borderRadius: 10, border: '1px solid #f5b8b8', background: '#fce4e4', color: '#7a1c1c' }}>
         <div style={{ fontSize: 12, lineHeight: 1.5 }}>Completa nel setting del widget i seguenti URL:</div>
         <div style={{ marginTop: 8, fontSize: 12 }}>{noteSpeseMissing.join(' • ')}</div>
       </div>
     ))
   ) : !currentGlobalId ? (
-    renderFullHeightEditCard('GlobalID pratica non disponibile', (
+    renderFullHeightEditCard('GLOBALID PRATICA NON DISPONIBILE', (
       <div style={{ padding: 12, borderRadius: 10, border: '1px solid #f5b8b8', background: '#fce4e4', color: '#7a1c1c' }}>
         <div style={{ fontSize: 12, lineHeight: 1.5 }}>Il widget non riesce a leggere il GlobalID della pratica selezionata. Verifica che il layer/view usato per l’editing esponga il campo <b>GlobalID</b>.</div>
       </div>
@@ -8680,17 +8766,17 @@ ${e?.message || String(e)}`
           )}
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, minmax(0, 1fr))', gap: 6 }}>
             {([
-              ['Attrezz./Trasp.', activeNotaSpeseSummary.totaleAT],
-              ['Mat. costruz.', activeNotaSpeseSummary.totalePR],
-              ['Risorse umane', activeNotaSpeseSummary.totaleRU],
-              ['Semilavorati', activeNotaSpeseSummary.totaleSL],
-              ['Prod. finiti', activeNotaSpeseSummary.totalePF],
-              [`Spese gen. (${activeNotaSpeseSummary.percentualeSpeseGenerali.toLocaleString('it-IT', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}%)`, activeNotaSpeseSummary.importoSpeseGenerali],
-              ['Totale', activeNotaSpeseSummary.totaleComplessivo]
+              ['ATTREZZATURE E TRASPORTI', activeNotaSpeseSummary.totaleAT],
+              ['MATERIALI DA COSTRUZIONE', activeNotaSpeseSummary.totalePR],
+              ['RISORSE UMANE', activeNotaSpeseSummary.totaleRU],
+              ['SEMILAVORATI', activeNotaSpeseSummary.totaleSL],
+              ['PRODOTTI FINITI', activeNotaSpeseSummary.totalePF],
+              [`SPESE GENERALI (${activeNotaSpeseSummary.percentualeSpeseGenerali.toLocaleString('it-IT', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}%)`, activeNotaSpeseSummary.importoSpeseGenerali],
+              ['TOTALE COMPLESSIVO', activeNotaSpeseSummary.totaleComplessivo]
             ] as [string, number][]).map(([label, value], idx) => (
               <div key={idx} style={{ background: idx === 6 ? formStyle.cardHeaderBg : '#f5f9ff', border: '1px solid #c5d9f1', borderRadius: formStyle.cardBorderRadius, padding: '6px 8px' }}>
-                <div style={{ fontSize: 10, fontWeight: 700, color: idx === 6 ? 'rgba(255,255,255,0.86)' : formStyle.hdrColor, marginBottom: 2, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{label}</div>
-                <div style={{ fontSize: 14, fontWeight: 800, color: idx === 6 ? formStyle.cardHeaderColor : '#16375a' }}>{nsSafeNum(value, 0).toLocaleString('it-IT', { useGrouping: true, minimumFractionDigits: 2, maximumFractionDigits: 2 })} €</div>
+                <div style={{ fontSize: 11, fontWeight: 800, color: idx === 6 ? 'rgba(255,255,255,0.86)' : formStyle.hdrColor, marginBottom: 2, minHeight: 22, lineHeight: 1.12, display: 'flex', alignItems: 'center' }}>{label}</div>
+                <div style={{ fontSize: 16, fontWeight: 800, color: idx === 6 ? formStyle.cardHeaderColor : '#16375a' }}>{nsSafeNum(value, 0).toLocaleString('it-IT', { useGrouping: true, minimumFractionDigits: 2, maximumFractionDigits: 2 })} €</div>
               </div>
             ))}
           </div>
@@ -8713,15 +8799,15 @@ ${e?.message || String(e)}`
 {npTab === 'allegati' && (
 
           mode !== 'edit' || currentOid == null ? (
-            renderFullHeightEditCard('Allegati', (
+            renderFullHeightEditCard('ALLEGATI', (
               <div style={{ fontSize: formStyle.labelFontSize, color: formStyle.labelColor, lineHeight: 1.5 }}>
                 Sarà possibile aggiungere gli allegati <b>solo dopo il primo salvataggio</b> della pratica.
               </div>
             ))
           ) : (
             <div style={{ display: 'flex', flexDirection: 'column', minHeight: '100%', border: '1px solid #c5d9f1', borderRadius: formStyle.cardBorderRadius, background: '#fff', overflow: 'hidden' }}>
-              <div style={{ padding: '8px 12px', background: formStyle.cardHeaderBg, color: formStyle.cardHeaderColor, fontWeight: 800, fontSize: formStyle.cardHeaderFontSize }}>
-                Allegati
+              <div style={{ padding: `${formStyle.cardHeaderPaddingY}px ${formStyle.cardHeaderPaddingX}px`, background: formStyle.cardHeaderBg, color: formStyle.cardHeaderColor, fontWeight: formStyle.cardHeaderFontWeight as any, fontSize: formStyle.cardHeaderFontSize, letterSpacing: 0.25, textTransform: 'uppercase', display: 'flex', alignItems: 'center' }}>
+                ALLEGATI
               </div>
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, flex: '1 1 auto', minHeight: 0, padding: 12 }}>
             {/* Colonna sinistra: lista allegati */}

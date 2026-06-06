@@ -6,6 +6,7 @@ export interface CardConfig {
   colorBg: string; colorAccent: string
   colorBgRest: string; colorBgHover: string
   roles: string[]
+  icon: string
 }
 
 /** Offset posizione (px) applicato come position:relative top/left */

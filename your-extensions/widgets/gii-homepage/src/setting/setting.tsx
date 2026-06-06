@@ -450,6 +450,58 @@ const ROLE_OPTIONS = [
   {value:'DA',label:'DA'},{value:'RI_AMM',label:'RI_AMM'},
   {value:'TI_AMM',label:'TI_AMM'},{value:'ADMIN',label:'ADMIN'}
 ]
+const ICON_OPTIONS = [
+  {value:'home',        label:'🏠 Home'},
+  {value:'elenco',      label:'📋 Elenco'},
+  {value:'nuova',       label:'➕ Nuova'},
+  {value:'mappa',       label:'🗺 Mappa'},
+  {value:'dashboard',   label:'📊 Dashboard'},
+  {value:'report',      label:'📄 Report'},
+  {value:'utenti',      label:'👤 Utenti'},
+  {value:'gruppo',      label:'👥 Gruppo'},
+  {value:'prezzari',    label:'€ Prezzari'},
+  {value:'impostazioni',label:'⚙️ Impostazioni'},
+  {value:'allegati',    label:'📎 Allegati'},
+  {value:'calendario',  label:'📅 Calendario'},
+  {value:'allarmi',     label:'🔔 Allarmi'},
+  {value:'archivio',    label:'🗄 Archivio'},
+  {value:'ricerca',     label:'🔎 Ricerca'},
+  {value:'modifica',    label:'✏️ Modifica'},
+  {value:'verbale',     label:'📝 Verbale / Atto'},
+  {value:'tabelle',     label:'▦ Tabelle'},
+  {value:'statistiche', label:'📈 Statistiche'},
+  {value:'documenti',   label:'📑 Documenti'},
+]
+const VALID_ICON_VALUES = new Set(ICON_OPTIONS.map(o => o.value))
+
+function inferCardIconValue(input: any): string {
+  const explicit = String(input?.icon || '').trim()
+  if (explicit && VALID_ICON_VALUES.has(explicit)) return explicit
+
+  const id = String(input?.id || '').trim()
+  if (id && VALID_ICON_VALUES.has(id)) return id
+
+  const text = `${id} ${input?.pageId || ''} ${input?.hashPage || input?.token || ''} ${input?.label || ''}`.toLowerCase()
+  if (/(^|[^a-z])home([^a-z]|$)|homepage|inizio/.test(text)) return 'home'
+  if (/utent|utente|user|profil/.test(text)) return 'utenti'
+  if (/grupp|team|squadra/.test(text)) return 'gruppo'
+  if (/prezz|euro|€|tariff|import/.test(text)) return 'prezzari'
+  if (/allegat|attach|documenti allegati/.test(text)) return 'allegati'
+  if (/calendar|calendario|agenda|scadenz/.test(text)) return 'calendario'
+  if (/allarm|notific|avvis/.test(text)) return 'allarmi'
+  if (/archiv/.test(text)) return 'archivio'
+  if (/ricerc|search|cerca/.test(text)) return 'ricerca'
+  if (/modific|edit|gestione/.test(text) && !/prezz|utent/.test(text)) return 'modifica'
+  if (/verbale|atto/.test(text)) return 'verbale'
+  if (/tabell|parametr/.test(text)) return 'tabelle'
+  if (/statistic|graf|analisi/.test(text)) return 'statistiche'
+  if (/elenco|pratic/.test(text)) return 'elenco'
+  if (/mappa|map/.test(text)) return 'mappa'
+  if (/dashboard|cruscotto/.test(text)) return 'dashboard'
+  if (/report/.test(text)) return 'report'
+  if (/nuov|rilevaz|crea/.test(text)) return 'nuova'
+  return 'nuova'
+}
 
 let _newCardCounter = 0
 
@@ -515,7 +567,8 @@ export default function Setting(props: AllWidgetSettingProps<IMConfig>) {
       colorAccent: '#60a5fa',
       colorBgRest: 'rgba(30,58,95,0.25)',
       colorBgHover: '',
-      roles: ['*']
+      roles: ['*'],
+      icon: 'nuova'
     }
     const next = [...cards, newCard]
     set('cards', next)
@@ -566,6 +619,12 @@ export default function Setting(props: AllWidgetSettingProps<IMConfig>) {
         localChanged = true
       }
 
+      // Icona: per le vecchie configurazioni prive di campo, assegna una chiave configurabile
+      if (!String(c.icon || '').trim()) {
+        out = { ...out, icon: inferCardIconValue(c) }
+        localChanged = true
+      }
+
       if (localChanged) changed = true
       return out
     })
@@ -611,7 +670,8 @@ export default function Setting(props: AllWidgetSettingProps<IMConfig>) {
         colorAccent: accent,
         colorBgRest: '#192e4d',
         colorBgHover: '',
-        roles: ['*']
+        roles: ['*'],
+        icon: inferCardIconValue(pg)
       }
     })
 
@@ -849,6 +909,9 @@ export default function Setting(props: AllWidgetSettingProps<IMConfig>) {
                 <label style={P.lbl}>Etichetta</label><Inp value={card.label} onChange={v=>setCard(card.id,{label:v})}/>
                 <label style={P.lbl}>Descrizione</label>
                 <textarea value={card.desc} onChange={e=>setCard(card.id,{desc:e.target.value})} rows={2} style={{ ...P.inp,resize:'vertical',fontFamily:'inherit' }}/>
+
+                <label style={P.lbl}>Icona</label>
+                <Sel value={card.icon || inferCardIconValue(card)} onChange={v=>setCard(card.id,{icon:v})} options={ICON_OPTIONS}/>
 
                 <label style={P.lbl}>Pagina di destinazione</label>
                 <PageSel value={card.hashPage} onChange={v=>setCard(card.id,{hashPage:v})} options={pageOptions}/>

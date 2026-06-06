@@ -342,7 +342,7 @@ export default function Setting(props: AllWidgetSettingProps<IMConfig>) {
         <Text k='nsNotaSpeseDettaglioUrl' label='Tabella dettaglio nota spese'/>
         <Text k='nsParametriUrl' label='Tabella parametri nota spese'/>
         <Text k='nsParametroCode' label='Codice parametro spese generali' placeholder='SPESE_GENERALI_PERC'/>
-        <Text k='regolamentoArticoliUrl' label='Tabella regolamento articoli' placeholder='https://services2.arcgis.com/.../FeatureServer/0'/>
+        <Text k='regolamentoArticoliUrl' label='Tabella articoli regolamento irriguo' placeholder='https://.../FeatureServer/0'/>
       </SectionBox>
       <SectionBox title='Modalità e pagine'>
         <Toggle k='showDatiGenerali' label='Mostra sezione Dati generali nel form nuova pratica'/>

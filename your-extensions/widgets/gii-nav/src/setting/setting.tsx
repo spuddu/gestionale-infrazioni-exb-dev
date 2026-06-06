@@ -122,12 +122,26 @@ const ROLE_OPTIONS = [
   {value:'DA',label:'DA'},{value:'ADMIN',label:'ADMIN'}
 ]
 const ICON_OPTIONS = [
-  {value:'home',      label:'🏠 Home'},
-  {value:'elenco',    label:'📋 Elenco'},
-  {value:'nuova',     label:'➕ Nuova'},
-  {value:'mappa',     label:'🗺 Mappa'},
-  {value:'dashboard', label:'📊 Dashboard'},
-  {value:'report',    label:'📄 Report'},
+  {value:'home',        label:'🏠 Home'},
+  {value:'elenco',      label:'📋 Elenco'},
+  {value:'nuova',       label:'➕ Nuova'},
+  {value:'mappa',       label:'🗺 Mappa'},
+  {value:'dashboard',   label:'📊 Dashboard'},
+  {value:'report',      label:'📄 Report'},
+  {value:'utenti',      label:'👤 Utenti'},
+  {value:'gruppo',      label:'👥 Gruppo'},
+  {value:'prezzari',    label:'€ Prezzari'},
+  {value:'impostazioni',label:'⚙️ Impostazioni'},
+  {value:'allegati',    label:'📎 Allegati'},
+  {value:'calendario',  label:'📅 Calendario'},
+  {value:'allarmi',     label:'🔔 Allarmi'},
+  {value:'archivio',    label:'🗄 Archivio'},
+  {value:'ricerca',     label:'🔎 Ricerca'},
+  {value:'modifica',    label:'✏️ Modifica'},
+  {value:'verbale',     label:'📝 Verbale / Atto'},
+  {value:'tabelle',     label:'▦ Tabelle'},
+  {value:'statistiche', label:'📈 Statistiche'},
+  {value:'documenti',   label:'📑 Documenti'},
 ]
 
 function makeNewItem(order: number): NavItem {
