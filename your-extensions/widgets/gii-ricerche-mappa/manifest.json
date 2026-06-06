@@ -1,0 +1,16 @@
+{
+  "name": "gii-ricerche-mappa",
+  "label": "GII Ricerche mappa",
+  "type": "widget",
+  "version": "1.0.0",
+  "exbVersion": "1.19.0",
+  "author": "CBSM",
+  "description": "Ricerche configurabili sui layer del widget Mappa selezionato.",
+  "translatedLocales": [
+    "it"
+  ],
+  "defaultSize": {
+    "width": 980,
+    "height": 110
+  }
+}

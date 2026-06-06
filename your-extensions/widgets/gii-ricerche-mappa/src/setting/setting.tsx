@@ -106,6 +106,44 @@ function firstNonEmpty(...values: any[]): string {
   return ''
 }
 
+function isBasemapOrImageText(raw: any): boolean {
+  const text = String(raw || '').toLowerCase()
+  if (!text) return false
+  return /basemap|base\s*map|world[_\s-]*imagery|imagery|immagini|satellite|orthophoto|ortofoto|ortofoto|raster|hillshade|shaded\s*relief|terrain|elevation|topographic|topo\b|streets|navigation|oceans|labels|reference|vectortile|vector\s*tile|tileserver|tile\s*server|webtile|wmts|wms/.test(text)
+}
+
+function isBasemapOrImageLayerJson(layer: any, path: string[] = []): boolean {
+  const layerType = String(layer?.layerType || layer?.type || '').toLowerCase()
+  const url = String(layer?.url || layer?.styleUrl || '').toLowerCase()
+  const title = [...path, String(layer?.title || layer?.name || layer?.layerDefinition?.name || '')].filter(Boolean).join(' / ')
+
+  if (/vector|tile|tiled|webtile|wmts|wms|imagery|raster|elevation|bing|openstreetmap/.test(layerType)) return true
+  if (isBasemapOrImageText(title) || isBasemapOrImageText(url)) return true
+  return false
+}
+
+function isBasemapOrImageOption(opt: MapLayerOpt | null | undefined): boolean {
+  if (!opt) return false
+  const text = [opt.title, opt.url, opt.geometryType, opt.id].filter(Boolean).join(' ')
+  return isBasemapOrImageText(text)
+}
+
+function isCandidateMapLayerOption(opt: MapLayerOpt | null | undefined): boolean {
+  if (!opt) return false
+  if (isBasemapOrImageOption(opt)) return false
+  return !!normalizeFeatureLayerUrl(opt.url) || normalizeFieldList(opt.fields).length > 0 || !!String(opt.id || '').trim()
+}
+
+function isSelectableSearchLayerOption(opt: MapLayerOpt | null | undefined): boolean {
+  if (!opt) return false
+  if (isBasemapOrImageOption(opt)) return false
+  const url = normalizeFeatureLayerUrl(opt.url)
+  const hasFields = normalizeFieldList(opt.fields).length > 0
+  const hasConcreteServiceLayer = /\/(FeatureServer|MapServer)\/\d+$/i.test(url)
+  const isFeatureServiceRoot = /\/FeatureServer$/i.test(url)
+  return hasFields || hasConcreteServiceLayer || isFeatureServiceRoot
+}
+
 function loadEsriModule<T = any>(path: string): Promise<T> {
   return new Promise((resolve, reject) => {
     const req = (window as any).require
@@ -261,7 +299,8 @@ async function setMapLayerOptionsExpanded(
   }
 }
 
-function isFeatureLayerJson(layer: any): boolean {
+function isFeatureLayerJson(layer: any, path: string[] = []): boolean {
+  if (isBasemapOrImageLayerJson(layer, path)) return false
   const layerType = String(layer?.layerType || layer?.type || '').toLowerCase()
   const url = String(layer?.url || '').toLowerCase()
   return (
@@ -294,7 +333,8 @@ function collectFeatureLayersFromWebMapJson(webmapJson: any): MapLayerOpt[] {
     ]
     const rawLayerId = layer?.layerId ?? layer?.sourceLayerId ?? getLayerIdFromUrl(layer?.url) ?? ''
     const inheritedUrl = normalizeFeatureLayerUrl(layer?.url || layer?.layerDefinition?.source?.url || parentUrl || '')
-    if (isFeatureLayerJson(layer)) {
+    if (isBasemapOrImageLayerJson(layer, path)) return
+    if (isFeatureLayerJson(layer, path)) {
       const rawTitle = String(layer?.title || layer?.name || layer?.layerDefinition?.name || `Layer ${out.length + 1}`).trim()
       const title = [...path, rawTitle].filter(Boolean).join(' / ') || `Layer ${out.length + 1}`
       const layerId = String(rawLayerId).trim()
@@ -308,8 +348,7 @@ function collectFeatureLayersFromWebMapJson(webmapJson: any): MapLayerOpt[] {
     children.forEach((child: any) => visit(child, layer?.title ? [...path, String(layer.title)] : path, inheritedUrl))
   }
   ;[
-    ...(Array.isArray(webmapJson?.operationalLayers) ? webmapJson.operationalLayers : []),
-    ...(Array.isArray(webmapJson?.baseMap?.baseMapLayers) ? webmapJson.baseMap.baseMapLayers : [])
+    ...(Array.isArray(webmapJson?.operationalLayers) ? webmapJson.operationalLayers : [])
   ].forEach((layer: any) => visit(layer, []))
   return uniqueMapLayerOptions(out)
 }
@@ -332,6 +371,7 @@ function collectFeatureLayerOptionFromDsJson(dsJson: any, fallbackId = ''): MapL
   if (!looksFeature && !url) return null
   const title = String(ds?.sourceLabel || ds?.label || ds?.title || ds?.name || ds?.itemId || fallbackId || `Layer ${layerId || ''}`).trim() || `Layer ${layerId || ''}`
   const geometryType = String(ds?.geometryType || ds?.schema?.geometryType || ds?.sourceSchema?.geometryType || '').trim()
+  if (isBasemapOrImageText(`${type} ${title} ${fullUrl} ${geometryType}`)) return null
   const fields = normalizeFieldList(ds?.schema?.fields || ds?.sourceSchema?.fields || ds?.fields || ds?.itemData?.fields || ds?.layerDefinition?.fields)
   const key = `${id || `ds_${title}`}|${fullUrl || title}|${layerId}`
   return { key, title, url: fullUrl, id, layerId, geometryType, fields }
@@ -838,28 +878,199 @@ function LayerSelect(p: {
 }) {
   return (
     <select value={p.value || ''} disabled={p.disabled || p.loading} onChange={e => p.onChange(e.currentTarget.value)} style={{ ...P.sel, cursor: p.disabled || p.loading ? 'not-allowed' : 'pointer' }}>
-      <option value='' style={P.opt}>{p.loading ? 'Caricamento layer…' : '- Seleziona layer catastale -'}</option>
+      <option value='' style={P.opt}>{p.loading ? 'Caricamento layer…' : '- Seleziona layer -'}</option>
       {p.options.map(o => <option key={o.key} value={o.key} style={P.opt}>{o.title}</option>)}
     </select>
   )
 }
 
+
+type GenericSearch = {
+  id: string
+  title: string
+  layerKey: string
+  layerId: string
+  layerLayerId: string
+  layerUrl: string
+  layerTitle: string
+  fields: GenericSearchField[]
+}
+
+type GenericSearchField = {
+  id: string
+  fieldName: string
+  label: string
+  controlType: 'combo' | 'text' | 'number' | 'date'
+  operator: 'equals' | 'contains' | 'startsWith'
+  required: boolean
+  cascade: boolean
+}
+
+function makeId(prefix = 'id'): string {
+  return `${prefix}_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`
+}
+
+function normalizeGenericFields(raw: any): GenericSearchField[] {
+  const list = Array.isArray(asJs(raw)) ? asJs<any[]>(raw) : []
+  return list.map((f: any, idx: number) => ({
+    id: String(f?.id || makeId(`campo_${idx + 1}`)),
+    fieldName: String(f?.fieldName || f?.name || '').trim(),
+    label: String(f?.label || f?.alias || f?.fieldName || f?.name || `Campo ${idx + 1}`).trim(),
+    controlType: (['combo', 'text', 'number', 'date'].includes(String(f?.controlType)) ? String(f.controlType) : 'combo') as any,
+    operator: (['equals', 'contains', 'startsWith'].includes(String(f?.operator)) ? String(f.operator) : 'equals') as any,
+    required: f?.required === true,
+    cascade: f?.cascade !== false
+  })).filter(f => f.fieldName || f.label)
+}
+
+
+function hydrateBlankSearchFields(search: GenericSearch, fields: FieldOpt[]): GenericSearchField[] {
+  if (!fields.length || !search?.fields?.length) return search.fields || []
+  const used = new Set((search.fields || []).map(f => String(f.fieldName || '').trim()).filter(Boolean))
+  let changed = false
+  const next = search.fields.map((f, idx) => {
+    if (String(f.fieldName || '').trim()) return f
+    const candidate = fields.find(x => x.name && !used.has(x.name)) || fields[0]
+    if (!candidate?.name) return f
+    used.add(candidate.name)
+    changed = true
+    return {
+      ...f,
+      fieldName: candidate.name,
+      label: f.label && !/^Campo\s+\d+$/i.test(f.label) && f.label !== 'CAMPO' ? f.label : (candidate.alias || candidate.name || `Campo ${idx + 1}`)
+    }
+  })
+  return changed ? next : search.fields
+}
+
+function normalizeGenericSearches(cfg: any): GenericSearch[] {
+  const raw = asJs<any[]>(cfg?.searches || [])
+  if (Array.isArray(raw) && raw.length) {
+    return raw.map((s: any, idx: number) => ({
+      id: String(s?.id || makeId(`ricerca_${idx + 1}`)),
+      title: String(s?.title || s?.layerTitle || `Ricerca ${idx + 1}`).trim(),
+      layerKey: String(s?.layerKey || ''),
+      layerId: String(s?.layerId || ''),
+      layerLayerId: String(s?.layerLayerId || ''),
+      layerUrl: String(s?.layerUrl || ''),
+      layerTitle: String(s?.layerTitle || ''),
+      fields: normalizeGenericFields(s?.fields)
+    }))
+  }
+
+  // Migrazione leggera dal vecchio widget catastale, se il config esiste già.
+  if (cfg?.layerUrl || cfg?.layerTitle || cfg?.fieldComune || cfg?.fieldFoglio || cfg?.fieldMappale) {
+    const fields: GenericSearchField[] = []
+    const add = (fieldName: string, label: string, required = false) => {
+      const name = String(fieldName || '').trim()
+      if (!name) return
+      fields.push({ id: makeId('campo'), fieldName: name, label, controlType: 'combo', operator: 'equals', required, cascade: true })
+    }
+    add(String(cfg.fieldComune || 'COMUNE'), 'Comune')
+    if (cfg.mostraSezione !== false) add(String(cfg.fieldSezione || 'SEZIONE'), 'Sezione')
+    add(String(cfg.fieldFoglio || 'FOGLIO'), 'Foglio', cfg.richiediFoglioPerRicerca !== false)
+    add(String(cfg.fieldMappale || 'MAPPALE'), 'Mappale')
+    return [{
+      id: makeId('ricerca_catastale'),
+      title: 'Ricerca catastale',
+      layerKey: String(cfg.layerKey || ''),
+      layerId: String(cfg.layerId || ''),
+      layerLayerId: String(cfg.layerLayerId || ''),
+      layerUrl: String(cfg.layerUrl || ''),
+      layerTitle: String(cfg.layerTitle || ''),
+      fields
+    }]
+  }
+  return []
+}
+
+function findConfiguredLayerKey(search: GenericSearch, options: MapLayerOpt[]): string {
+  const cfgKey = String(search.layerKey || '').trim()
+  const cfgUrl = normalizeFeatureLayerUrl(search.layerUrl || '')
+  const cfgTitle = String(search.layerTitle || '').trim().toLowerCase()
+  const cfgId = String(search.layerId || '').trim()
+
+  // La stessa fonte può essere presente più volte in mappa con titoli/filtri diversi
+  // (es. "Opere CBSM / Tutte" e "Opere CBSM / Attive"). In questi casi l'URL è identico:
+  // quindi la chiave salvata della voce selezionata deve avere sempre priorità sull'URL.
+  const byKey = cfgKey ? options.find(o => o.key === cfgKey) : null
+  if (byKey) return byKey.key
+
+  const byIdAndUrl = cfgId && cfgUrl ? options.find(o => o.id === cfgId && normalizeFeatureLayerUrl(o.url) === cfgUrl) : null
+  if (byIdAndUrl) return byIdAndUrl.key
+
+  const byTitle = cfgTitle ? options.find(o => o.title.toLowerCase() === cfgTitle) : null
+  if (byTitle) return byTitle.key
+
+  const byId = cfgId ? options.find(o => o.id === cfgId) : null
+  if (byId) return byId.key
+
+  const byUrl = cfgUrl ? options.find(o => normalizeFeatureLayerUrl(o.url) === cfgUrl) : null
+  return byUrl?.key || ''
+}
+
+function SmallButton(p: { children: any; onClick: () => void; danger?: boolean; disabled?: boolean }) {
+  return (
+    <button
+      type='button'
+      disabled={p.disabled}
+      onClick={p.onClick}
+      style={{
+        height: 30,
+        border: `1px solid ${p.danger ? 'rgba(220,38,38,0.55)' : 'rgba(59,130,246,0.55)'}`,
+        borderRadius: 8,
+        background: p.danger ? 'rgba(220,38,38,0.12)' : 'rgba(59,130,246,0.13)',
+        color: p.danger ? '#fecaca' : '#bfdbfe',
+        fontSize: 12,
+        fontWeight: 800,
+        padding: '0 10px',
+        cursor: p.disabled ? 'not-allowed' : 'pointer'
+      }}
+    >{p.children}</button>
+  )
+}
+
+function StyledSelect(p: { value: string; onChange: (v: string) => void; children: any; disabled?: boolean }) {
+  return <select value={p.value || ''} disabled={p.disabled} onChange={e => p.onChange(e.currentTarget.value)} style={{ ...P.sel, cursor: p.disabled ? 'not-allowed' : 'pointer' }}>{p.children}</select>
+}
+
+function ColorInput(p: { label: string; value: string; onChange: (v: string) => void }) {
+  const isHex = /^#[0-9a-fA-F]{3,8}$/.test(p.value)
+  return (
+    <label style={{ display: 'block' }}>
+      <span style={P.lbl}>{p.label}</span>
+      <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+        <input
+          type='color'
+          value={isHex ? p.value : '#ffffff'}
+          onChange={e => p.onChange(e.currentTarget.value)}
+          style={{ width: 32, height: 28, border: '1px solid rgba(255,255,255,0.15)', borderRadius: 6, background: 'none', cursor: 'pointer', padding: 2, boxSizing: 'border-box' }}
+        />
+        <input
+          type='text'
+          value={p.value}
+          onChange={e => p.onChange(e.currentTarget.value)}
+          style={{ flex: 1, height: 28, border: '1px solid rgba(255,255,255,0.15)', borderRadius: 6, background: 'rgba(0,0,0,0.2)', color: '#e5e7eb', fontSize: 11, padding: '0 6px', outline: 'none', fontFamily: 'monospace', minWidth: 0 }}
+        />
+      </div>
+    </label>
+  )
+}
+
 export default function Setting(props: Props) {
   const cfg = { ...asJs<any>(defaultConfig), ...(asJs<any>(props.config) || {}) }
+  const searches = React.useMemo(() => normalizeGenericSearches(cfg), [props.config])
   const mapWidgetId = (asJs<string[]>(cfg.useMapWidgetIds || []) || [])[0] || ''
-  const selectedLayerKeyCfg = String((cfg as any).layerKey || '')
 
-  const [schemaFields, setSchemaFields] = React.useState<FieldOpt[]>([])
-  const [schemaLabel, setSchemaLabel] = React.useState('')
-  const [schemaLoading, setSchemaLoading] = React.useState(false)
   const [mapLayerOptions, setMapLayerOptions] = React.useState<MapLayerOpt[]>([])
   const [mapLayerLoading, setMapLayerLoading] = React.useState(false)
   const [mapLayerError, setMapLayerError] = React.useState('')
   const [mapLabel, setMapLabel] = React.useState('')
-
-  // Ref per leggere cfg.layerTitle dentro l'effect senza aggiungerlo alle dipendenze (evita loop)
-  const layerTitleRef = React.useRef('')
-  layerTitleRef.current = String(cfg.layerTitle || '')
+  const [openSearchId, setOpenSearchId] = React.useState('')
+  const [dragId, setDragId] = React.useState<string | null>(null)
+  const [dragOverId, setDragOverId] = React.useState<string | null>(null)
+  const [schemaBySearch, setSchemaBySearch] = React.useState<Record<string, FieldOpt[]>>({})
+  const [schemaLoadingBySearch, setSchemaLoadingBySearch] = React.useState<Record<string, boolean>>({})
 
   const setCfg = (patch: Record<string, any>) => {
     props.onSettingChange({
@@ -868,18 +1079,22 @@ export default function Setting(props: Props) {
     })
   }
 
-  const selectedMapLayerKey = React.useMemo(() => {
-    const cfgUrl = normalizeFeatureLayerUrl(cfg.layerUrl || '')
-    const cfgTitle = String(cfg.layerTitle || '').trim().toLowerCase()
-    const cfgId = String((cfg as any).layerId || '').trim()
-    // URL è stabile sia prima che dopo expandServiceSublayerOptions (la key stringa può cambiare per i sublayer)
-    return mapLayerOptions.find(o =>
-      (!!cfgUrl && normalizeFeatureLayerUrl(o.url) === cfgUrl) ||
-      (!!selectedLayerKeyCfg && o.key === selectedLayerKeyCfg) ||
-      (!!cfgId && o.id === cfgId) ||
-      (!!cfgTitle && o.title.toLowerCase() === cfgTitle)
-    )?.key || ''
-  }, [mapLayerOptions, selectedLayerKeyCfg, cfg.layerUrl, cfg.layerTitle, (cfg as any).layerId])
+  const setSearches = (items: GenericSearch[]) => setCfg({ searches: items, selectedSearchId: cfg.selectedSearchId || items[0]?.id || '' })
+  const moveSearch = (fromId: string, toId: string) => {
+    if (fromId === toId) return
+    const arr = [...searches]
+    const fromIdx = arr.findIndex(s => s.id === fromId)
+    const toIdx = arr.findIndex(s => s.id === toId)
+    if (fromIdx < 0 || toIdx < 0) return
+    const [item] = arr.splice(fromIdx, 1)
+    arr.splice(toIdx, 0, item)
+    setSearches(arr)
+  }
+  const updateSearch = (id: string, patch: Partial<GenericSearch>) => setSearches(searches.map(s => s.id === id ? { ...s, ...patch } : s))
+  const updateField = (searchId: string, fieldId: string, patch: Partial<GenericSearchField>) => {
+    setSearches(searches.map(s => s.id === searchId ? { ...s, fields: s.fields.map(f => f.id === fieldId ? { ...f, ...patch } : f) } : s))
+  }
+
 
   React.useEffect(() => {
     let cancelled = false
@@ -898,173 +1113,284 @@ export default function Setting(props: Props) {
     ;(async () => {
       setMapLayerLoading(true)
       setMapLayerError('')
-
       const collected: MapLayerOpt[] = []
-
-      // Carica esclusivamente i layer collegati al widget Mappa selezionato.
-      // Non interroga più l'elenco globale dei data source, altrimenti compaiono layer AGOL non presenti nella mappa.
       for (const mapInfo of mapInfos) {
         try { collected.push(...collectFeatureLayersFromDataSourceManager(mapInfo.dataSourceId)) } catch {}
         try { collected.push(...collectFeatureLayersFromAppConfigDataSources(appConfig, mapInfo.dataSourceId)) } catch {}
         if (mapInfo.itemId) {
-          try {
-            collected.push(...await readWebMapFeatureLayers(mapInfo.itemId, mapInfo.portalUrl))
-          } catch (e: any) {
-            // La lettura della WebMap è un supporto aggiuntivo: non deve bloccare le altre fonti.
-          }
+          try { collected.push(...await readWebMapFeatureLayers(mapInfo.itemId, mapInfo.portalUrl)) } catch {}
         }
       }
-
       if (cancelled) return
-
-      const base = uniqueMapLayerOptions(collected).filter(o => {
-        const hasUrl = !!normalizeFeatureLayerUrl(o.url)
-        const hasFields = normalizeFieldList(o.fields).length > 0
-        const hasId = !!String(o.id || '').trim()
-        return hasUrl || hasFields || hasId
-      })
-
+      const base = uniqueMapLayerOptions(collected).filter(isCandidateMapLayerOption)
       if (!base.length) {
         setMapLayerOptions([])
         setMapLayerError(mapInfos.length ? 'Nessun layer selezionabile rilevato nel widget Mappa selezionato.' : 'Non riesco a leggere la WebMap dal widget Mappa selezionato.')
         setMapLayerLoading(false)
         return
       }
-
       try {
-        const expanded = await expandServiceSublayerOptions(base)
+        const expanded = uniqueMapLayerOptions(await expandServiceSublayerOptions(base)).filter(isSelectableSearchLayerOption)
         if (cancelled) return
         setMapLayerOptions(expanded)
-        setMapLayerError(expanded.length ? '' : 'Nessun Feature Layer trovato nella mappa selezionata.')
+        setMapLayerError(expanded.length ? '' : 'Nessun layer interrogabile trovato nella mappa selezionata.')
       } catch (e: any) {
         if (cancelled) return
-        setMapLayerOptions(base)
-        setMapLayerError(base.length ? '' : (e?.message || String(e || 'Errore caricamento layer')))
+        const fallback = base.filter(isSelectableSearchLayerOption)
+        setMapLayerOptions(fallback)
+        setMapLayerError(fallback.length ? '' : (e?.message || String(e || 'Errore caricamento layer')))
       } finally {
         if (!cancelled) setMapLayerLoading(false)
       }
     })()
-
     return () => { cancelled = true }
   }, [mapWidgetId])
 
-  React.useEffect(() => {
-    let cancelled = false
-    const selectedOpt = mapLayerOptions.find(o => o.key === selectedMapLayerKey)
+  const loadFieldsForSearch = React.useCallback(async (search: GenericSearch) => {
+    const selectedKey = findConfiguredLayerKey(search, mapLayerOptions)
+    const selectedOpt = mapLayerOptions.find(o => o.key === selectedKey)
     const appConfig = getBuilderAppConfigForSetting()
-    const layerUrlRaw = cfg.layerUrl || selectedOpt?.url || ''
-    const layerSubId = (cfg as any).layerLayerId || selectedOpt?.layerId || getLayerIdFromUrl(layerUrlRaw) || getLayerIdFromDataSourceId(selectedOpt?.id)
-    const url = composeLayerUrl(layerUrlRaw, layerSubId)
-    const fieldsFromConfig = normalizeFieldList(selectedOpt?.fields || getFieldsFromDataSourceById(selectedOpt?.id || '', appConfig))
-    setSchemaFields([])
-    setSchemaLabel('')
-    setSchemaLoading(false)
-
+    const fieldsFromConfig = normalizeFieldList(selectedOpt?.fields || getFieldsFromDataSourceById(selectedOpt?.id || search.layerId || '', appConfig))
     if (fieldsFromConfig.length) {
-      // Usa ref per il titolo: non deve essere una dipendenza dell'effect (evita loop)
-      const label = String(layerTitleRef.current || selectedOpt?.title || '')
-      setSchemaFields(fieldsFromConfig)
-      setSchemaLabel(label)
-      const patch = buildFieldSuggestionPatch(fieldsFromConfig, cfg)
-      if (Object.keys(patch).length) setCfg(patch)
-      return () => { cancelled = true }
+      setSchemaBySearch(prev => ({ ...prev, [search.id]: fieldsFromConfig }))
+      const hydrated = hydrateBlankSearchFields(search, fieldsFromConfig)
+      if (hydrated !== search.fields) updateSearch(search.id, { fields: hydrated })
+      return
     }
-
-    if (!url) return () => { cancelled = true }
-
+    const layerSubId = search.layerLayerId || selectedOpt?.layerId || getLayerIdFromUrl(search.layerUrl || selectedOpt?.url) || getLayerIdFromDataSourceId(selectedOpt?.id || search.layerId)
+    const url = composeLayerUrl(search.layerUrl || selectedOpt?.url || '', layerSubId)
+    if (!url) return
     const cached = FIELD_SCHEMA_CACHE[url.toLowerCase()]
     if (cached?.length) {
-      setSchemaFields(cached)
-      setSchemaLabel(String(layerTitleRef.current || selectedOpt?.title || ''))
-      const patch = buildFieldSuggestionPatch(cached, cfg)
-      if (Object.keys(patch).length) setCfg(patch)
-      return () => { cancelled = true }
+      setSchemaBySearch(prev => ({ ...prev, [search.id]: cached }))
+      const hydrated = hydrateBlankSearchFields(search, cached)
+      if (hydrated !== search.fields) updateSearch(search.id, { fields: hydrated })
+      return
     }
+    setSchemaLoadingBySearch(prev => ({ ...prev, [search.id]: true }))
+    try {
+      const fields = await readFeatureLayerFields(url, search.layerTitle || selectedOpt?.title || '')
+      setSchemaBySearch(prev => ({ ...prev, [search.id]: fields }))
+      const hydrated = hydrateBlankSearchFields(search, fields)
+      if (hydrated !== search.fields) updateSearch(search.id, { fields: hydrated })
+    } finally {
+      setSchemaLoadingBySearch(prev => ({ ...prev, [search.id]: false }))
+    }
+  }, [mapLayerOptions])
 
-    setSchemaLoading(true)
-    readFeatureLayerFields(url, String(layerTitleRef.current || selectedOpt?.title || ''))
-      .then(fields => {
-        if (cancelled) return
-        setSchemaFields(fields)
-        setSchemaLabel(String(layerTitleRef.current || selectedOpt?.title || ''))
-        const patch = buildFieldSuggestionPatch(fields, cfg)
-        if (Object.keys(patch).length) setCfg(patch)
-      })
-      .finally(() => { setSchemaLoading(false) })
-    return () => { cancelled = true }
-  }, [cfg.layerUrl, selectedMapLayerKey, mapLayerOptions])
+  React.useEffect(() => {
+    const current = searches.find(s => s.id === openSearchId)
+    if (current) loadFieldsForSearch(current)
+  }, [openSearchId, searches, loadFieldsForSearch])
 
-  const onMapSelect = (ids: string[]) => {
-    setCfg({
-      useMapWidgetIds: ids,
+  const onMapSelect = (ids: string[]) => setCfg({ useMapWidgetIds: ids, searches: searches.map(s => ({ ...s, layerKey: '', layerId: '', layerLayerId: '', layerUrl: '', layerTitle: '' })) })
+
+  const addSearch = () => {
+    const item: GenericSearch = {
+      id: makeId('ricerca'),
+      title: `Ricerca ${searches.length + 1}`,
       layerKey: '',
       layerId: '',
       layerLayerId: '',
       layerUrl: '',
-      layerTitle: ''
-    })
+      layerTitle: '',
+      fields: []
+    }
+    setSearches([...searches, item])
+    setOpenSearchId(item.id)
   }
 
-  const onLayerSelect = (key: string) => {
+  const duplicateSearch = (search: GenericSearch) => {
+    const item: GenericSearch = { ...search, id: makeId('ricerca'), title: `${search.title || 'Ricerca'} copia`, fields: search.fields.map(f => ({ ...f, id: makeId('campo') })) }
+    setSearches([...searches, item])
+    setOpenSearchId(item.id)
+  }
+
+  const deleteSearch = (id: string) => {
+    const next = searches.filter(s => s.id !== id)
+    setSearches(next)
+    setOpenSearchId(current => current === id ? '' : current)
+  }
+
+  const onLayerSelect = (search: GenericSearch, key: string) => {
     const opt = mapLayerOptions.find(o => o.key === key)
     if (!opt) {
-      setCfg({ layerKey: '', layerId: '', layerLayerId: '', layerUrl: '', layerTitle: '' })
+      updateSearch(search.id, { layerKey: '', layerId: '', layerLayerId: '', layerUrl: '', layerTitle: '', fields: [] })
       return
     }
-    const fields = normalizeFieldList(opt.fields || getFieldsFromDataSourceById(opt.id, getBuilderAppConfigForSetting()))
-    const patch: Record<string, any> = {
+    const layerLayerId = opt.layerId || getLayerIdFromUrl(opt.url) || getLayerIdFromDataSourceId(opt.id)
+    const layerUrl = composeLayerUrl(opt.url, layerLayerId)
+    const currentKey = findConfiguredLayerKey(search, mapLayerOptions)
+    const isDifferentLayer = currentKey !== opt.key || normalizeFeatureLayerUrl(search.layerUrl) !== normalizeFeatureLayerUrl(layerUrl)
+    updateSearch(search.id, {
       layerKey: opt.key,
       layerId: opt.id,
-      layerLayerId: opt.layerId || getLayerIdFromUrl(opt.url) || getLayerIdFromDataSourceId(opt.id),
-      layerUrl: composeLayerUrl(opt.url, opt.layerId || getLayerIdFromUrl(opt.url) || getLayerIdFromDataSourceId(opt.id)),
-      layerTitle: opt.title
-    }
+      layerLayerId,
+      layerUrl,
+      layerTitle: opt.title,
+      // I campi di ricerca sono specifici del layer: quando si cambia layer si azzerano
+      // per evitare che restino campi del layer precedente (es. "Stato") su un layer diverso.
+      fields: isDifferentLayer ? [] : search.fields
+    })
+    const fields = normalizeFieldList(opt.fields || getFieldsFromDataSourceById(opt.id, getBuilderAppConfigForSetting()))
     if (fields.length) {
-      patch.fieldComune = suggestField(fields, 'comune', String(cfg.fieldComune || 'COMUNE'))
-      patch.fieldSezione = suggestField(fields, 'sezione', String(cfg.fieldSezione || 'SEZIONE'))
-      patch.fieldFoglio = suggestField(fields, 'foglio', String(cfg.fieldFoglio || 'FOGLIO'))
-      patch.fieldMappale = suggestField(fields, 'mappale', String(cfg.fieldMappale || 'MAPPALE'))
+      setSchemaBySearch(prev => ({ ...prev, [search.id]: fields }))
+      const nextFields = isDifferentLayer ? [] : hydrateBlankSearchFields(search, fields)
+      if (!isDifferentLayer && nextFields !== search.fields) updateSearch(search.id, { fields: nextFields })
     }
-    setCfg(patch)
+    else window.setTimeout(() => loadFieldsForSearch({ ...search, layerKey: opt.key, layerId: opt.id, layerLayerId, layerUrl, layerTitle: opt.title }), 0)
+  }
+
+  const addField = (search: GenericSearch) => {
+    const fields = schemaBySearch[search.id] || []
+    const first = fields.find(f => f.name) || null
+    const field: GenericSearchField = {
+      id: makeId('campo'),
+      fieldName: first?.name || '',
+      label: first?.alias || first?.name || `Campo ${search.fields.length + 1}`,
+      controlType: 'combo',
+      operator: 'equals',
+      required: false,
+      cascade: true
+    }
+    updateSearch(search.id, { fields: [...search.fields, field] })
+  }
+
+  const removeField = (search: GenericSearch, fieldId: string) => updateSearch(search.id, { fields: search.fields.filter(f => f.id !== fieldId) })
+
+  const moveField = (search: GenericSearch, fieldId: string, delta: number) => {
+    const arr = [...search.fields]
+    const idx = arr.findIndex(f => f.id === fieldId)
+    const nextIdx = idx + delta
+    if (idx < 0 || nextIdx < 0 || nextIdx >= arr.length) return
+    const [item] = arr.splice(idx, 1)
+    arr.splice(nextIdx, 0, item)
+    updateSearch(search.id, { fields: arr })
   }
 
   return (
     <div style={P.wrap}>
-      <div style={P.sec}>Mappa e layer catastale</div>
+      <div style={P.sec}>Widget Mappa</div>
       <div style={P.box}>
         <span style={P.lbl}>Widget Mappa</span>
         <MapWidgetSelector onSelect={onMapSelect} useMapWidgetIds={asJs(cfg.useMapWidgetIds || [])} />
-        <div style={P.hint}>Seleziona il widget Mappa già presente nella pagina. Da quella mappa verranno letti i layer disponibili.</div>
+        <div style={P.hint}>Seleziona il widget Mappa. Le ricerche potranno usare solo i layer presenti in quella mappa.</div>
         {!!mapLabel && <div style={P.hint}>Mappa rilevata: <b style={{ color: '#e5e7eb' }}>{mapLabel}</b></div>}
-
-        <span style={{ ...P.lbl, marginTop: 12 }}>Layer catastale nella mappa</span>
-        <LayerSelect
-          value={selectedMapLayerKey}
-          options={mapLayerOptions}
-          loading={mapLayerLoading}
-          disabled={!mapWidgetId || mapLayerOptions.length === 0}
-          onChange={onLayerSelect}
-        />
-        {!mapWidgetId && <div style={P.hint}>Seleziona prima il widget Mappa.</div>}
-        {mapWidgetId && !mapLayerLoading && mapLayerOptions.length === 0 && <div style={P.hint}>Nessun layer selezionabile rilevato nella mappa.</div>}
+        {mapLayerLoading && <div style={P.hint}>Caricamento layer della mappa…</div>}
         {mapLayerError && <div style={{ ...P.hint, color: '#fca5a5' }}>{mapLayerError}</div>}
-        {(cfg.layerTitle || cfg.layerUrl) && <div style={P.preview}>Layer selezionato: <b style={{ color: '#e5e7eb' }}>{cfg.layerTitle || '—'}</b>{cfg.layerUrl ? <><br />URL: {cfg.layerUrl}</> : null}</div>}
       </div>
 
-      <div style={P.sec}>Campi catastali</div>
+      <div style={P.sec}>Ricerche configurate</div>
       <div style={P.box}>
-        {schemaLoading && <div style={P.hint}>Lettura schema campi del layer selezionato…</div>}
-        {!!schemaLabel && <div style={P.hint}>Schema letto da: <b style={{ color: '#e5e7eb' }}>{schemaLabel}</b></div>}
-        {!schemaLoading && !schemaFields.length && <div style={P.hint}>Seleziona un layer catastale dalla mappa per compilare l’elenco dei campi.</div>}
-        <div style={P.grid2}>
-          <FieldSelect label='Campo Comune (nome)' value={String(cfg.fieldComune || 'COMUNE')} fields={schemaFields} onChange={v => setCfg({ fieldComune: v })} fallback='COMUNE' />
-          <FieldSelect label='Campo Sezione' value={String(cfg.fieldSezione || 'SEZIONE')} fields={schemaFields} onChange={v => setCfg({ fieldSezione: v })} fallback='SEZIONE' />
-          <FieldSelect label='Campo Foglio' value={String(cfg.fieldFoglio || 'FOGLIO')} fields={schemaFields} onChange={v => setCfg({ fieldFoglio: v })} fallback='FOGLIO' />
-          <FieldSelect label='Campo Mappale' value={String(cfg.fieldMappale || 'MAPPALE')} fields={schemaFields} onChange={v => setCfg({ fieldMappale: v })} fallback='MAPPALE' />
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8, marginBottom: 10 }}>
+          <div style={P.hint}>{searches.length ? `${searches.length} ricerche configurate.` : 'Nessuna ricerca configurata.'}</div>
         </div>
-        <div style={P.hint}>Per il Comune selezionare il campo con il nome descrittivo del Comune, non il codice catastale/ISTAT/Belfiore.</div>
-        <Check label='Mostra anche il filtro Sezione' value={cfg.mostraSezione !== false} onChange={v => setCfg({ mostraSezione: v })} />
-        <Check label='Richiedi almeno il Foglio per eseguire la ricerca' value={cfg.richiediFoglioPerRicerca !== false} onChange={v => setCfg({ richiediFoglioPerRicerca: v })} />
+
+        {searches.map((search, searchIndex) => {
+          const isOpen = openSearchId === search.id
+          const fields = schemaBySearch[search.id] || []
+          const layerKey = findConfiguredLayerKey(search, mapLayerOptions)
+          const schemaLoading = !!schemaLoadingBySearch[search.id]
+          return (
+            <div
+              key={search.id}
+              draggable
+              onDragStart={() => { setDragId(search.id); setDragOverId(null) }}
+              onDragOver={e => { e.preventDefault(); setDragOverId(search.id) }}
+              onDrop={() => { if (dragId) moveSearch(dragId, search.id); setDragId(null); setDragOverId(null) }}
+              onDragEnd={() => { setDragId(null); setDragOverId(null) }}
+              style={{ border: `1px solid ${dragOverId === search.id ? 'rgba(47,111,237,0.6)' : 'rgba(255,255,255,0.12)'}`, borderRadius: 10, marginBottom: 12, overflow: 'hidden', background: 'rgba(255,255,255,0.035)', opacity: dragId === search.id ? 0.5 : 1 }}
+            >
+              <button
+                type='button'
+                onClick={() => setOpenSearchId(isOpen ? '' : search.id)}
+                style={{ width: '100%', minHeight: 38, border: 0, background: 'rgba(59,130,246,0.13)', color: '#e5e7eb', display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0 10px', cursor: 'pointer', gap: 6 }}
+              >
+                <span style={{ fontSize: 14, color: 'rgba(255,255,255,0.35)', cursor: 'grab', userSelect: 'none' }} title='Trascina per riordinare'>⠿</span>
+                <span style={{ fontSize: 12, fontWeight: 900, textTransform: 'uppercase', letterSpacing: 0.7, flex: 1, textAlign: 'left' }}>{search.title || `Ricerca ${searchIndex + 1}`}</span>
+                <span style={{ fontSize: 12, color: '#bfdbfe' }}>{isOpen ? '▴' : '▾'}</span>
+              </button>
+
+              {isOpen && (
+                <div style={{ padding: 10 }}>
+                  <TextInput label='Titolo ricerca' value={search.title} onChange={v => updateSearch(search.id, { title: v })} placeholder='Es. Ricerca catastale' />
+                  <span style={{ ...P.lbl, marginTop: 12 }}>Layer da interrogare</span>
+                  <LayerSelect value={layerKey} options={mapLayerOptions} loading={mapLayerLoading} disabled={!mapWidgetId || mapLayerOptions.length === 0} onChange={key => onLayerSelect(search, key)} />
+                  {search.layerTitle && <div style={{ ...P.preview, wordBreak: 'break-all' }}>Layer selezionato: <b style={{ color: '#e5e7eb' }}>{search.layerTitle}</b>{search.layerUrl ? <><br />URL: {search.layerUrl}</> : null}</div>}
+                  {schemaLoading && <div style={P.hint}>Lettura schema campi del layer selezionato…</div>}
+                  {!schemaLoading && search.layerUrl && !fields.length && <div style={{ ...P.hint, color: '#fca5a5' }}>Elenco campi non ancora caricato per il layer selezionato.</div>}
+
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 14, marginBottom: 8 }}>
+                    <div style={{ ...P.lbl, margin: 0 }}>Campi di ricerca</div>
+                  </div>
+
+                  {!search.fields.length && <div style={P.hint}>Aggiungi almeno un campo da usare nella ricerca.</div>}
+                  {search.fields.map((f, idx) => {
+                    const fOpt = fields.find(x => x.name === f.fieldName)
+                    return (
+                      <div key={f.id} style={{ border: '1px solid rgba(255,255,255,0.10)', borderRadius: 9, padding: 9, marginBottom: 8, background: 'rgba(0,0,0,0.10)' }}>
+                        <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: 8, minWidth: 0 }}>
+                          <FieldSelect
+                            label='Campo layer'
+                            value={f.fieldName}
+                            fields={fields}
+                            onChange={v => {
+                              const opt = fields.find(x => x.name === v)
+                              updateField(search.id, f.id, { fieldName: v, label: f.label && f.label !== f.fieldName ? f.label : (opt?.alias || opt?.name || v) })
+                            }}
+                            fallback={f.fieldName || 'CAMPO'}
+                          />
+                          <TextInput label='Etichetta' value={f.label || fOpt?.alias || f.fieldName} onChange={v => updateField(search.id, f.id, { label: v })} />
+                        </div>
+                        <div style={P.grid2}>
+                          <label style={{ display: 'block' }}>
+                            <span style={P.lbl}>Tipo controllo</span>
+                            <StyledSelect value={f.controlType} onChange={v => updateField(search.id, f.id, { controlType: v as any })}>
+                              <option value='combo' style={P.opt}>Combo ricercabile</option>
+                              <option value='text' style={P.opt}>Testo libero</option>
+                              <option value='number' style={P.opt}>Numero</option>
+                              <option value='date' style={P.opt}>Data</option>
+                            </StyledSelect>
+                          </label>
+                          <label style={{ display: 'block' }}>
+                            <span style={P.lbl}>Confronto</span>
+                            <StyledSelect value={f.operator} onChange={v => updateField(search.id, f.id, { operator: v as any })} disabled={f.controlType === 'number' || f.controlType === 'date'}>
+                              <option value='equals' style={P.opt}>Uguale a</option>
+                              <option value='contains' style={P.opt}>Contiene</option>
+                              <option value='startsWith' style={P.opt}>Inizia con</option>
+                            </StyledSelect>
+                          </label>
+                        </div>
+                        <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', marginTop: 6 }}>
+                          <Check label='Obbligatorio' value={f.required === true} onChange={v => updateField(search.id, f.id, { required: v })} />
+                          <Check label='Filtra i campi successivi' value={f.cascade !== false} onChange={v => updateField(search.id, f.id, { cascade: v })} />
+                        </div>
+                        <div style={{ display: 'flex', gap: 6, alignItems: 'center', marginTop: 6 }}>
+                          <SmallButton onClick={() => moveField(search, f.id, -1)} disabled={idx === 0}>Su</SmallButton>
+                          <SmallButton onClick={() => moveField(search, f.id, 1)} disabled={idx === search.fields.length - 1}>Giù</SmallButton>
+                          <div style={{ flex: 1 }} />
+                          <SmallButton danger onClick={() => removeField(search, f.id)}>Rimuovi</SmallButton>
+                        </div>
+                      </div>
+                    )
+                  })}
+
+                  <div style={{ display: 'flex', gap: 8, justifyContent: 'space-between', alignItems: 'center', marginTop: 12 }}>
+                    <SmallButton onClick={() => addField(search)} disabled={!search.layerUrl}>Aggiungi campo</SmallButton>
+                    <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', flexWrap: 'wrap' }}>
+                      <SmallButton onClick={() => duplicateSearch(search)}>Duplica ricerca</SmallButton>
+                      <SmallButton danger onClick={() => deleteSearch(search.id)}>Elimina ricerca</SmallButton>
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+          )
+        })}
+
+        <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: searches.length ? 4 : 0 }}>
+          <SmallButton onClick={addSearch} disabled={!mapWidgetId}>Aggiungi ricerca</SmallButton>
+        </div>
       </div>
 
       <div style={P.sec}>Comportamento ricerca</div>
@@ -1078,11 +1404,37 @@ export default function Setting(props: Props) {
         </div>
       </div>
 
-      <div style={P.sec}>Fallback tecnico</div>
+      <div style={P.sec}>Personalizzazione colori</div>
       <div style={P.box}>
-        <TextInput label='URL layer selezionato' value={String(cfg.layerUrl || '')} onChange={v => setCfg({ layerUrl: v })} placeholder='Compilato automaticamente dalla scelta del layer in mappa' />
-        <TextInput label='Titolo layer selezionato' value={String(cfg.layerTitle || '')} onChange={v => setCfg({ layerTitle: v })} placeholder='Compilato automaticamente dalla scelta del layer in mappa' />
-        <div style={P.hint}>Questi campi restano disponibili solo come fallback. Normalmente basta scegliere il widget Mappa e poi il layer catastale dalla combo.</div>
+        <div style={P.grid2}>
+          <NumInput label='Arrotondamento bordi (px)' value={parseNum(cfg.borderRadius, 8, 0, 32)} min={0} max={32} onChange={v => setCfg({ borderRadius: v })} />
+          <NumInput label='Altezza campi (px)' value={parseNum(cfg.fieldHeight, 28, 20, 48)} min={20} max={48} onChange={v => setCfg({ fieldHeight: v })} />
+          <NumInput label='Padding orizzontale (px)' value={parseNum(cfg.paddingH, 8, 0, 40)} min={0} max={40} onChange={v => setCfg({ paddingH: v })} />
+          <NumInput label='Padding verticale (px)' value={parseNum(cfg.paddingV, 6, 0, 40)} min={0} max={40} onChange={v => setCfg({ paddingV: v })} />
+          <TextInput label='Etichetta selezione ricerca' value={String(cfg.searchLabel || 'Tipo ricerca')} onChange={v => setCfg({ searchLabel: v })} />
+        </div>
+        <div style={{ ...P.grid2, marginTop: 8 }}>
+          <ColorInput label='Sfondo widget' value={String(cfg.colorBackground || '#ffffff')} onChange={v => setCfg({ colorBackground: v })} />
+          <ColorInput label='Bordo widget' value={String(cfg.colorBorder || 'rgba(0,0,0,0.12)')} onChange={v => setCfg({ colorBorder: v })} />
+          <ColorInput label='Testo label' value={String(cfg.colorLabel || '#374151')} onChange={v => setCfg({ colorLabel: v })} />
+          <ColorInput label='Bordo campi' value={String(cfg.colorFieldBorder || 'rgba(0,0,0,0.16)')} onChange={v => setCfg({ colorFieldBorder: v })} />
+          <ColorInput label='Sfondo campi' value={String(cfg.colorFieldBackground || '#ffffff')} onChange={v => setCfg({ colorFieldBackground: v })} />
+          <ColorInput label='Testo campi' value={String(cfg.colorFieldText || '#111827')} onChange={v => setCfg({ colorFieldText: v })} />
+          <ColorInput label='Pulsante Cerca' value={String(cfg.colorBtnPrimary || '#2f6fed')} onChange={v => setCfg({ colorBtnPrimary: v })} />
+          <ColorInput label='Testo Cerca' value={String(cfg.colorBtnPrimaryText || '#ffffff')} onChange={v => setCfg({ colorBtnPrimaryText: v })} />
+          <ColorInput label='Pulsante Annulla' value={String(cfg.colorBtnGhost || 'rgba(0,0,0,0.06)')} onChange={v => setCfg({ colorBtnGhost: v })} />
+          <ColorInput label='Testo Annulla' value={String(cfg.colorBtnGhostText || '#1f2937')} onChange={v => setCfg({ colorBtnGhostText: v })} />
+        </div>
+        <div style={{ marginTop: 10 }}>
+          <SmallButton onClick={() => setCfg({
+            colorBackground: '#ffffff', colorBorder: 'rgba(0,0,0,0.12)',
+            colorLabel: '#374151', colorFieldBorder: 'rgba(0,0,0,0.16)',
+            colorFieldBackground: '#ffffff', colorFieldText: '#111827',
+            colorBtnPrimary: '#2f6fed', colorBtnPrimaryText: '#ffffff',
+            colorBtnGhost: 'rgba(0,0,0,0.06)', colorBtnGhostText: '#1f2937',
+            borderRadius: 8, paddingH: 8, paddingV: 6, searchLabel: 'Tipo ricerca', fieldHeight: 28
+          })}>Ripristina valori predefiniti</SmallButton>
+        </div>
       </div>
     </div>
   )
