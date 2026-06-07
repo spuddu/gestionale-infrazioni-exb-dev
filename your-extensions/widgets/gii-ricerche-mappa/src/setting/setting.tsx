@@ -894,6 +894,7 @@ type GenericSearch = {
   layerUrl: string
   layerTitle: string
   fields: GenericSearchField[]
+  searchType?: 'generic' | 'pratica'
 }
 
 type GenericSearchField = {
@@ -954,7 +955,8 @@ function normalizeGenericSearches(cfg: any): GenericSearch[] {
       layerLayerId: String(s?.layerLayerId || ''),
       layerUrl: String(s?.layerUrl || ''),
       layerTitle: String(s?.layerTitle || ''),
-      fields: normalizeGenericFields(s?.fields)
+      fields: normalizeGenericFields(s?.fields),
+      searchType: s?.searchType === 'pratica' ? 'pratica' : 'generic'
     }))
   }
 
@@ -1313,7 +1315,13 @@ export default function Setting(props: Props) {
 
               {isOpen && (
                 <div style={{ padding: 10 }}>
-                  <TextInput label='Titolo ricerca' value={search.title} onChange={v => updateSearch(search.id, { title: v })} placeholder='Es. Ricerca catastale' />
+                  <TextInput label='Titolo ricerca' value={search.title} onChange={v => updateSearch(search.id, { title: v })} placeholder='Es. Dati pratica' />
+                  {search.searchType === 'pratica' ? (
+                    <div style={{ ...P.hint, marginTop: 10, borderRadius: 6, padding: '8px 10px', background: 'rgba(47,111,237,0.10)', color: '#93c5fd' }}>
+                      Ricerca pratica — i campi di ricerca (tipo pratica, nominativo, CF/PIVA, articoli violati) sono predefiniti e non richiedono configurazione aggiuntiva.
+                    </div>
+                  ) : (
+                    <React.Fragment>
                   <span style={{ ...P.lbl, marginTop: 12 }}>Layer da interrogare</span>
                   <LayerSelect value={layerKey} options={mapLayerOptions} loading={mapLayerLoading} disabled={!mapWidgetId || mapLayerOptions.length === 0} onChange={key => onLayerSelect(search, key)} />
                   {search.layerTitle && <div style={{ ...P.preview, wordBreak: 'break-all' }}>Layer selezionato: <b style={{ color: '#e5e7eb' }}>{search.layerTitle}</b>{search.layerUrl ? <><br />URL: {search.layerUrl}</> : null}</div>}
@@ -1374,13 +1382,12 @@ export default function Setting(props: Props) {
                       </div>
                     )
                   })}
-
-                  <div style={{ display: 'flex', gap: 8, justifyContent: 'space-between', alignItems: 'center', marginTop: 12 }}>
-                    <SmallButton onClick={() => addField(search)} disabled={!search.layerUrl}>Aggiungi campo</SmallButton>
-                    <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', flexWrap: 'wrap' }}>
-                      <SmallButton onClick={() => duplicateSearch(search)}>Duplica ricerca</SmallButton>
-                      <SmallButton danger onClick={() => deleteSearch(search.id)}>Elimina ricerca</SmallButton>
-                    </div>
+                  <SmallButton onClick={() => addField(search)} disabled={!search.layerUrl}>Aggiungi campo</SmallButton>
+                    </React.Fragment>
+                  )}
+                  <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', flexWrap: 'wrap', marginTop: 12 }}>
+                    {search.searchType !== 'pratica' && <SmallButton onClick={() => duplicateSearch(search)}>Duplica ricerca</SmallButton>}
+                    <SmallButton danger onClick={() => deleteSearch(search.id)}>Elimina ricerca</SmallButton>
                   </div>
                 </div>
               )}
@@ -1388,7 +1395,22 @@ export default function Setting(props: Props) {
           )
         })}
 
-        <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: searches.length ? 4 : 0 }}>
+        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: searches.length ? 4 : 0 }}>
+          <SmallButton onClick={() => {
+            const item: GenericSearch = {
+              id: makeId('infrazioni'),
+              title: 'Infrazioni',
+              layerKey: '',
+              layerId: '',
+              layerLayerId: '',
+              layerUrl: '',
+              layerTitle: '',
+              fields: [],
+              searchType: 'pratica'
+            }
+            setSearches([...searches, item])
+            setOpenSearchId(item.id)
+          }} disabled={!mapWidgetId}>Aggiungi ricerca Infrazioni</SmallButton>
           <SmallButton onClick={addSearch} disabled={!mapWidgetId}>Aggiungi ricerca</SmallButton>
         </div>
       </div>

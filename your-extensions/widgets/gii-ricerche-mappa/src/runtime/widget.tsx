@@ -11,6 +11,95 @@ type Option = { value: string; label: string; raw: any }
 type QueryStatus = { kind: 'idle' | 'loading' | 'ok' | 'warn' | 'err'; text: string }
 
 const LAYER_CACHE: Record<string, Promise<any>> = {}
+
+const ARTICOLI_PRATICA = [
+  { id: 'norma15', label: 'Art. 15 — Prelievo abusivo', whereClause: "(norma15_parziale IS NOT NULL AND norma15_parziale <> '' OR norma15_totale IS NOT NULL AND norma15_totale <> '')" },
+  { id: 'norma16', label: 'Art. 16 — Termini per la presentazione delle comunicazioni', whereClause: "norma16_17 = 'Art16'" },
+  { id: 'norma17', label: 'Art. 17 — Variazioni, rinunce e verifiche sul campo', whereClause: "norma16_17 = 'Art17'" },
+  { id: 'v_art08', label: 'Art. 8 — Servizio reperibilità e segnalazione emergenze', whereClause: 'v_art08 = 1' },
+  { id: 'v_art12', label: 'Art. 12 — Accesso ai fondi per verifiche e controlli', whereClause: 'v_art12 = 1' },
+  { id: 'v_art27', label: 'Art. 27 — Diligenza nell\'uso dell\'acqua', whereClause: 'v_art27 = 1' },
+  { id: 'v_art28', label: 'Art. 28 — Sistemazione dei terreni e prescrizioni del Consorzio', whereClause: 'v_art28 = 1' },
+  { id: 'v_art29', label: 'Art. 29 — Custodia e restituzione attrezzature', whereClause: 'v_art29 = 1' },
+  { id: 'v_art30', label: 'Art. 30 — Cauzione e valore attrezzature danneggiate o non recuperabili', whereClause: 'v_art30 = 1' },
+  { id: 'v_art31', label: 'Art. 31 — Segnalazione prelievi abusivi, guasti e danni', whereClause: 'v_art31 = 1' },
+  { id: 'v_art32', label: 'Art. 32 — Accesso e attraversamento fondi per derivazioni', whereClause: 'v_art32 = 1' },
+  { id: 'v_art33', label: 'Art. 33 — Limiti temporali di prelievo per usi agricoli diversi', whereClause: 'v_art33 = 1' },
+  { id: 'v_art34', label: 'Art. 34 — Distanze da opere consortili', whereClause: 'v_art34 = 1' },
+  { id: 'v_art35', label: 'Art. 35 — Divieto di manomissione reti e allaccio aspirazione', whereClause: 'v_art35 = 1' },
+  { id: 'v_art36', label: 'Art. 36 — Divieto uso attrezzature non autorizzate', whereClause: 'v_art36 = 1' },
+  { id: 'v_art37', label: 'Art. 37 — Divieto sistemi di irrigazione incompatibili', whereClause: 'v_art37 = 1' },
+  { id: 'v_art39', label: 'Art. 39 — Responsabilità per danni alle strutture irrigue', whereClause: 'v_art39 = 1' },
+]
+
+type TipoPratica = '' | 'rilevazione' | 'rapporto' | 'verbale'
+
+type PraticaValues = {
+  nominativo: string
+  cfPiva: string
+  tipoPratica: TipoPratica
+  numeroPratica: string
+  articolo: string
+}
+
+const PRATICA_EMPTY: PraticaValues = { nominativo: '', cfPiva: '', tipoPratica: '', numeroPratica: '', articolo: '' }
+
+function sqlEscapePratica(v: string): string { return v.replace(/'/g, "''") }
+
+function buildNominativoClause(raw: string): string | null {
+  const words = raw.trim().split(/\s+/).filter(Boolean)
+  if (!words.length) return null
+  return words.map(w => {
+    const esc = sqlEscapePratica(w.toUpperCase())
+    return `(UPPER(nome) LIKE '%${esc}%' OR UPPER(cognome) LIKE '%${esc}%' OR UPPER(ragione_sociale) LIKE '%${esc}%')`
+  }).join(' AND ')
+}
+
+function buildCfPivaClause(raw: string): string | null {
+  const v = sqlEscapePratica(raw.trim().toUpperCase().replace(/\s+/g, ''))
+  if (!v) return null
+  return `(UPPER(codice_fiscale) LIKE '%${v}%' OR UPPER(piva) LIKE '%${v}%')`
+}
+
+function parseRilevazioneCode(raw: string): { oid: number | null; origine: number | null; settore: string | null } {
+  const parts = raw.trim().split('-')
+  const oidN = parts[0] ? parseInt(parts[0], 10) : NaN
+  const oid = !isNaN(oidN) ? oidN : null
+  let origine: number | null = null
+  let settore: string | null = null
+  if (parts[1]) { const r = parts[1].toUpperCase(); if (r === 'TR') origine = 1; else if (r === 'TI') origine = 2 }
+  if (parts[2]) settore = parts[2].toUpperCase()
+  return { oid, origine, settore }
+}
+
+function buildNumeroPraticaClause(tipo: TipoPratica, raw: string): string | null {
+  const v = raw.trim()
+  if (!v) return null
+  if (tipo === 'rilevazione') {
+    const { oid, origine, settore } = parseRilevazioneCode(v)
+    if (!oid) return null
+    const parts = [`OBJECTID = ${oid}`]
+    if (origine !== null) parts.push(`origine_pratica = ${origine}`)
+    if (settore) parts.push(`settore_cod = '${sqlEscapePratica(settore)}'`)
+    return parts.join(' AND ')
+  }
+  if (tipo === 'rapporto') { const n = /^R-/i.test(v) ? v : `R-${v}`; return `numero_rapporto_tecnico = '${sqlEscapePratica(n)}'` }
+  if (tipo === 'verbale') { const n = /^V-/i.test(v) ? v : `V-${v}`; return `numero_verbale = '${sqlEscapePratica(n)}'` }
+  return null
+}
+
+function buildWherePratica(pv: PraticaValues): { where: string | null; hasUserCriteria: boolean } {
+  const clauses: string[] = []
+  const nomClause = buildNominativoClause(pv.nominativo)
+  if (nomClause) clauses.push(nomClause)
+  const cfClause = buildCfPivaClause(pv.cfPiva)
+  if (cfClause) clauses.push(cfClause)
+  const numClause = buildNumeroPraticaClause(pv.tipoPratica, pv.numeroPratica)
+  if (numClause) clauses.push(numClause)
+  if (pv.articolo) { const art = ARTICOLI_PRATICA.find(a => a.id === pv.articolo); if (art) clauses.push(`(${art.whereClause})`) }
+  if (!clauses.length) return { where: null, hasUserCriteria: false }
+  return { where: ['req_point = 1', ...clauses].join(' AND '), hasUserCriteria: true }
+}
 const COLLATOR = new Intl.Collator('it', { numeric: true, sensitivity: 'base' })
 
 function asJs<T = any>(v: any): T { return v?.asMutable ? v.asMutable({ deep: true }) : v }
@@ -273,7 +362,7 @@ function findMapLayer(view: any, search: MapSearchConfig): any {
   return null
 }
 async function getConfiguredLayer(mapView: any, search: MapSearchConfig): Promise<any> {
-  if (search.layerUrl) return getLayer(search.layerUrl, search.layerLayerId)
+  // Cerca prima il layer nella mappa per preservare istanze filtrate (Tutte/Attive/Dismesse)
   const mapLayer = findMapLayer(mapView, search)
   if (mapLayer) {
     try { if (typeof mapLayer.load === 'function') await mapLayer.load() } catch {}
@@ -283,7 +372,9 @@ async function getConfiguredLayer(mapView: any, search: MapSearchConfig): Promis
     const mapUrl = normalizeLayerUrl(mapLayer?.url || mapLayer?.sourceJSON?.url || '', search.layerLayerId || mapLayer?.layerId || mapLayer?.sourceLayerId || mapLayer?.sublayerId)
     if (mapUrl) return getLayer(mapUrl)
   }
-  return getLayer(search.layerUrl, search.layerLayerId)
+  // Fallback: crea layer dall'URL configurato
+  if (search.layerUrl) return getLayer(search.layerUrl, search.layerLayerId)
+  return null
 }
 function getObjectIdField(layer: any): string { return txt(layer?.objectIdField || layer?.objectIdFieldName || 'OBJECTID') || 'OBJECTID' }
 function getGraphicSymbol(geometry: any): any {
@@ -514,15 +605,28 @@ export default function Widget(props: Props) {
   const clearAll = React.useCallback(() => {
     if (!activeSearch) return
     setValues(prev => ({ ...prev, [activeSearch.id]: {} }))
+    if (isPratica) setPraticaValues(PRATICA_EMPTY)
     clearHighlight()
     setStatus({ kind: 'idle', text: '' })
   }, [activeSearch?.id, clearHighlight])
+
+  const [praticaValues, setPraticaValues] = React.useState<PraticaValues>(PRATICA_EMPTY)
+
+  const isPratica = activeSearch?.searchType === 'pratica'
 
   const applySearch = React.useCallback(async () => {
     if (!layer || !activeSearch) {
       setStatus({ kind: 'warn', text: 'Ricerca non disponibile.' })
       return
     }
+
+    let where = '1=1'
+
+    if (isPratica) {
+      const result = buildWherePratica(praticaValues)
+      if (!result.hasUserCriteria) { setStatus({ kind: 'warn', text: 'Impostare almeno un criterio di ricerca.' }); return }
+      where = result.where!
+    } else {
     const invalidFields = missingConfiguredFields(layer, activeSearch)
     if (invalidFields.length) {
       setStatus({ kind: 'warn', text: describeMissingFields(layer, activeSearch, invalidFields) })
@@ -538,12 +642,14 @@ export default function Widget(props: Props) {
       setStatus({ kind: 'warn', text: `Compilare i campi obbligatori: ${missing.map(f => f.label || f.fieldName).join(', ')}.` })
       return
     }
-    const hasAny = validFields.some(f => txt(activeValues[f.id]).trim())
-    if (!hasAny) {
-      setStatus({ kind: 'warn', text: 'Impostare almeno un criterio di ricerca.' })
-      return
+      const hasAny = validFields.some(f => txt(activeValues[f.id]).trim())
+      if (!hasAny) {
+        setStatus({ kind: 'warn', text: 'Impostare almeno un criterio di ricerca.' })
+        return
+      }
+      where = buildWhere(layer, validFields, activeValues)
     }
-    const where = buildWhere(layer, validFields, activeValues)
+
     try {
       setBusy(true)
       setStatus({ kind: 'loading', text: 'Ricerca feature...' })
@@ -588,7 +694,14 @@ export default function Widget(props: Props) {
         try {
           const geometries = features.map(f => f.geometry).filter(Boolean)
           if (geometries.length === 1 && zoomScale > 0 && txt(geometries[0]?.type).toLowerCase() === 'point') await mapView.goTo({ target: geometries[0], scale: zoomScale }, { duration: 500 })
-          else if (geometries.length) await mapView.goTo(geometries, { duration: 500 })
+          else if (geometries.length) {
+            try {
+              const prevPadding = { ...mapView.padding }
+              mapView.padding = { top: 60, right: 60, bottom: 60, left: 60 }
+              await mapView.goTo(geometries, { duration: 500 })
+              mapView.padding = prevPadding
+            } catch { await mapView.goTo(geometries, { duration: 500 }) }
+          }
         } catch {}
       }
       const azioni: string[] = []
@@ -598,7 +711,7 @@ export default function Widget(props: Props) {
     } catch (e: any) {
       setStatus({ kind: 'err', text: `Errore ricerca: ${e?.message || String(e)}` })
     } finally { setBusy(false) }
-  }, [layer, activeSearch, activeValues, mapView, maxResultFeatures, evidenziaRisultati, zoomAllaRicerca, zoomScale, clearHighlight])
+  }, [layer, activeSearch, activeValues, praticaValues, isPratica, mapView, maxResultFeatures, evidenziaRisultati, zoomAllaRicerca, zoomScale, clearHighlight])
 
   const c = {
     bg: txt(cfg.colorBackground) || '#ffffff',
@@ -643,6 +756,13 @@ export default function Widget(props: Props) {
     .btnGhost { background: ${c.btnGhost}; color: ${c.btnGhostText}; border: 1px solid ${c.fieldBorder}; }
     .status { flex: 1; min-width: 0; border-radius: ${fr}px; height: ${c.fh}px; padding: 0 8px; font-size: ${Math.max(10, c.fh * 0.4)}px; line-height: ${c.fh}px; border: 1px solid rgba(0,0,0,0.10); box-sizing: border-box; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
     .stIdle { background: rgba(0,0,0,0.04); color: #4b5563; } .stLoading { background: rgba(47,111,237,0.08); color: #1d4ed8; } .stOk { background: rgba(5,150,105,0.09); color: #047857; } .stWarn { background: rgba(245,158,11,0.12); color: #92400e; } .stErr { background: rgba(220,38,38,0.10); color: #991b1b; }
+    .praticaRow { display: flex; align-items: flex-end; gap: 6px; padding: ${c.pv}px ${c.ph}px 0; flex-wrap: wrap; background: ${c.bg}; }
+    .praticaArticoli { padding: ${Math.max(2, c.pv - 2)}px ${c.ph}px ${c.pv}px; background: ${c.bg}; display: none; }
+    .praticaArticoliLabel { font-size: 11px; font-weight: 800; color: ${c.label}; margin-right: 4px; white-space: nowrap; }
+    .praticaChip { display: inline-flex; align-items: center; gap: 4px; height: 22px; padding: 0 8px; border-radius: 999px; border: 1px solid ${c.fieldBorder}; background: ${c.fieldBg}; color: ${c.fieldText}; font-size: 11px; cursor: pointer; user-select: none; }
+    .praticaChipActive { background: ${c.btnPrimary}; color: ${c.btnPrimaryText}; border-color: ${c.btnPrimary}; }
+    .praticaActionRow { display: flex; align-items: center; gap: 6px; padding: 0 ${c.ph}px ${c.pv}px; background: ${c.bg}; }
+    .multiSelect { width: 100%; border: 1px solid ${c.fieldBorder}; border-radius: ${fr}px; background: ${c.fieldBg}; color: ${c.fieldText}; font-size: 12px; outline: none; box-sizing: border-box; }
   `
 
   const currentValues = activeSearch ? values[activeSearch.id] || {} : {}
@@ -652,7 +772,72 @@ export default function Widget(props: Props) {
       <div className='giiMapSearchWrap'>
         {mapWidgetId && <JimuMapViewComponent useMapWidgetId={mapWidgetId} onActiveViewChange={(jmv: JimuMapView) => setMapView(jmv?.view || null)} />}
         {searches.length === 0 && <div style={{ fontSize: 12, color: c.label, padding: '8px' }}>Nessuna ricerca configurata</div>}
-        {activeSearch && (
+        {activeSearch && isPratica && (
+          <React.Fragment>
+            <div className='praticaRow'>
+              {searches.length > 1 && (
+                <div className='searchTypeBlock'>
+                  <label className='filterLabel'>{c.searchLabel}</label>
+                  <div className='searchTypeWrap'>
+                    <select className='searchTypeSelect' value={activeSearch.id} onChange={e => setActiveSearchId(e.target.value)}>
+                      {searches.map(s => <option key={s.id} value={s.id}>{s.title || 'Ricerca'}</option>)}
+                    </select>
+                    <span className='searchSelectChevron'>▾</span>
+                  </div>
+                </div>
+              )}
+              <div className='fieldBlock' style={{ width: 200, flex: '0 1 200px' }}>
+                <label className='filterLabel'>Articolo violato</label>
+                <div className='searchTypeWrap'>
+                  <select className='filterSelect' style={{ appearance: 'none', WebkitAppearance: 'none', paddingRight: 28 }} value={praticaValues.articolo} disabled={busy || !layer}
+                    onChange={e => setPraticaValues(prev => ({ ...prev, articolo: e.target.value }))}>
+                    <option value=''>- Tutti -</option>
+                    {ARTICOLI_PRATICA.map(a => <option key={a.id} value={a.id}>{a.label}</option>)}
+                  </select>
+                  <span className='searchSelectChevron'>▾</span>
+                </div>
+              </div>
+              <div className='fieldBlock'>
+                <label className='filterLabel'>Tipo pratica</label>
+                <div className='searchTypeWrap'>
+                  <select className='filterSelect' style={{ appearance: 'none', WebkitAppearance: 'none', paddingRight: 28 }} value={praticaValues.tipoPratica} disabled={busy || !layer}
+                    onChange={e => setPraticaValues(prev => ({ ...prev, tipoPratica: e.target.value as TipoPratica, numeroPratica: '' }))}>
+                    <option value=''>- Tutti -</option>
+                    <option value='rilevazione'>Rilevazione</option>
+                    <option value='rapporto'>Rapporto tecnico</option>
+                    <option value='verbale'>Verbale</option>
+                  </select>
+                  <span className='searchSelectChevron'>▾</span>
+                </div>
+              </div>
+              <div className='fieldBlock' style={{ width: 160, flex: '0 1 160px' }}>
+                <label className='filterLabel'>Numero pratica</label>
+                <input className='filterInput' type='text' value={praticaValues.numeroPratica} disabled={busy || !layer || !praticaValues.tipoPratica}
+                  placeholder={praticaValues.tipoPratica === 'rilevazione' ? 'Es. 411-TI-D1' : praticaValues.tipoPratica === 'rapporto' ? 'Es. R-25/2026' : praticaValues.tipoPratica === 'verbale' ? 'Es. V-1/2026' : '— seleziona tipo —'}
+                  onChange={e => setPraticaValues(prev => ({ ...prev, numeroPratica: e.target.value }))} />
+              </div>
+              <div className='fieldBlock' style={{ width: 200, flex: '0 1 200px' }}>
+                <label className='filterLabel'>Nominativo / Ragione sociale</label>
+                <input className='filterInput' type='text' value={praticaValues.nominativo} disabled={busy || !layer} placeholder='Nome, Cognome o Ragione sociale…' onChange={e => setPraticaValues(prev => ({ ...prev, nominativo: e.target.value }))} />
+              </div>
+              <div className='fieldBlock' style={{ width: 160, flex: '0 1 160px' }}>
+                <label className='filterLabel'>CF / P. IVA</label>
+                <input className='filterInput' type='text' value={praticaValues.cfPiva} disabled={busy || !layer} placeholder='Codice fiscale o P. IVA…' onChange={e => setPraticaValues(prev => ({ ...prev, cfPiva: e.target.value }))} />
+              </div>
+              <div className='actionBlock'>
+                <label className='filterLabel'>&nbsp;</label>
+                <div className='actionInline'>
+                  <button className='btn btnGhost' type='button' disabled={busy} onClick={clearAll}>Annulla</button>
+                  <button className='btn btnPrimary' type='button' disabled={busy || !layer} onClick={applySearch}>Cerca</button>
+                  {(status.kind === 'loading' || status.kind === 'ok' || status.kind === 'warn' || status.kind === 'err') && (
+                    <div className={`status st${status.kind.charAt(0).toUpperCase()}${status.kind.slice(1)}`}>{status.text}</div>
+                  )}
+                </div>
+              </div>
+            </div>
+          </React.Fragment>
+        )}
+        {activeSearch && !isPratica && (
           <div className='row1'>
             {searches.length > 1 && (
               <div className='searchTypeBlock'>

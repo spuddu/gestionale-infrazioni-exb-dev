@@ -22,6 +22,7 @@ export interface MapSearchConfig {
   layerUrl: string
   layerTitle: string
   fields: SearchFieldConfig[]
+  searchType?: 'generic' | 'pratica'
 }
 
 export interface Config {
