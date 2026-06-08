@@ -198,8 +198,8 @@ const ADMIN_FIELDS: AdminField[] = [
   { group: 'cda', name: 'termine_pagamento_rideterminato_data', label: 'Scadenza pagamento rideterminato', kind: 'date' },
   { group: 'cda', name: 'termine_pagamento_rideterminato_note', label: 'Note pagamento rideterminato', kind: 'textarea', full: true },
   { group: 'cda', name: 'cda_note_esito', label: 'Note esito CdA', kind: 'textarea', full: true },
-  { group: 'cda', name: 'ricorso_definito_il', label: 'Ricorso definito il', kind: 'readonly-date', readonly: true },
-  { group: 'cda', name: 'ricorso_definito_da', label: 'Ricorso definito da', kind: 'readonly-text', readonly: true },
+  { group: 'cda', name: 'ricorso_definito_il', label: 'Ricorso definito il', kind: 'date' },
+  { group: 'cda', name: 'ricorso_definito_da', label: 'Ricorso definito da', kind: 'text' },
 
   { group: 'riapertura', name: 'riapertura_amm', label: 'Riapertura amministrativa', kind: 'domain' },
   { group: 'riapertura', name: 'riapertura_amm_causale', label: 'Causale riapertura amministrativa', kind: 'domain' },
@@ -1751,20 +1751,6 @@ function isVerbaleNotificato (data: Record<string, any>): boolean {
   return isNotificaPerfezionata(data || {})
 }
 
-function isRicorsoPresentato (data: Record<string, any>): boolean {
-  return isCheckedValue(pickAttrCI(data || {}, ['ricorso_presentato']))
-}
-
-function cdaEsitoCode (data: Record<string, any>): string {
-  return String(pickAttrCI(data || {}, ['cda_esito_ricorso']) || '').trim().toUpperCase()
-}
-
-const CDA_ESITI_CON_RIDETERMINAZIONE = new Set(['PARZIALMENTE_ACCOLTO', 'RIDETERMINATO'])
-
-function isRiaperturaAmmAttiva (data: Record<string, any>): boolean {
-  return isCheckedValue(pickAttrCI(data || {}, ['riapertura_amm']))
-}
-
 function buildPracticeTitle (cfg: any, data: any, oid: number | null): string {
   const d = data || {}
   const rapporto = getReportCode(d, oid)
@@ -1793,12 +1779,12 @@ type ViolationRow = {
 }
 
 const VIOLATION_ARTICLE_TITLES: Record<string, string> = {
-  '8': 'Violazione servizio reperibilità',
+  '8': 'Violazione servizio di reperibilità',
   '12': 'Negato accesso ai fondi (al personale consortile)',
   '15': 'Prelievo abusivo d’acqua',
-  '16': 'Comunicazione di irrigazione tardiva',
-  '17': 'Variazione o rinuncia tardiva',
-  '27': 'Spreco d’acqua/uso negligente risorsa idrica',
+  '16': 'Inosservanza dei termini di presentazione delle comunicazioni di irrigazione',
+  '17': 'Inosservanza dei termini di presentazione delle comunicazioni di variazione e di rinuncia',
+  '27': 'Spreco d’acqua/uso negligente della risorsa idrica',
   '28': 'Violazione prescrizioni del consorzio',
   '29': 'Violazione termini restituzione attrezzature',
   '30': 'Danneggiamento e/o perdita attrezzature',
@@ -1806,10 +1792,10 @@ const VIOLATION_ARTICLE_TITLES: Record<string, string> = {
   '32': 'Negato accesso ai fondi (al consorziato)',
   '33': 'Inosservanza limiti temporali di prelievo',
   '34': 'Interferenze',
-  '35': 'Manomissione reti di dispensa e allaccio aspirazione',
+  '35': 'Manomissione reti di dispensa e allaccio di apparecchi di aspirazione all’idrante',
   '36': 'Uso attrezzature non autorizzate',
   '37': 'Uso sistemi di irrigazione incompatibili',
-  '39': 'Danni strutture irrigue'
+  '39': 'Danni alle strutture irrigue'
 }
 
 const DIRECT_ARTICLE_FIELDS: Array<{ field: string, label: string, supDich?: string[], supIrr?: string[] }> = [
@@ -3074,197 +3060,48 @@ function ChiusuraIstruttoriaSummary (props: { data: Record<string, any>, fields:
 
 function RicorsoPostNotificaSection (props: { data: Record<string, any>, fields: LayerFieldInfo[], canEdit: boolean, onChange: (name: string, value: any) => void }) {
   const d = props.data || {}
-  const presented = isRicorsoPresentato(d)
-  const rawChoice = pickAttrCI(d, ['ricorso_presentato'])
-  const hasChoice = hasAdminValue(rawChoice)
-  const presentationMs = dateMsOrNull(pickAttrCI(d, ['ricorso_data_presentazione']))
-  const deadlineMs = dateMsOrNull(pickAttrCI(d, ['termine_ricorso_data']))
-  const notificationMs = dateMsOrNull(pickAttrCI(d, ['notifica_data']))
-  const late = presented && presentationMs != null && deadlineMs != null && presentationMs > deadlineMs
-  const beforeNotification = presented && presentationMs != null && notificationMs != null && presentationMs < notificationMs
-  const detailedNames = ['ricorso_protocollo', 'ricorso_data_presentazione', 'ricorso_presentato_da', 'ricorso_cf_piva', 'ricorso_sospende_pagamento', 'ricorso_sintesi', 'ricorso_note']
-  const hasOrphanDetails = !presented && detailedNames.some(name => hasAdminValue(pickAttrCI(d, [name])))
-
-  const onRicorsoChange = (name: string, value: any) => {
-    props.onChange(name, value)
-    if (String(name).toLowerCase() !== 'ricorso_presentato') return
-    const statusField = realFieldName(props.fields, 'stato_post_notifica') || 'stato_post_notifica'
-    if (isCheckedValue(value)) props.onChange(statusField, 'RICORSO_PRESENTATO')
-    else if (hasAdminValue(value)) props.onChange(statusField, 'IN_ATTESA')
-  }
-
   return (
     <>
       <Section title='Post-notifica'>
-        <AdminFieldsGrid group='post_notifica' draft={d} fields={props.fields} canEdit={props.canEdit} onChange={onRicorsoChange} />
+        <AdminFieldsGrid group='post_notifica' draft={d} fields={props.fields} canEdit={props.canEdit} onChange={props.onChange} />
       </Section>
-      <Section title='Ricorso / riesame'>
-        <div style={{ display: 'grid', gap: 10 }}>
-          <AdminFieldsGrid
-            group='ricorso'
-            draft={d}
-            fields={props.fields}
-            canEdit={props.canEdit}
-            onChange={onRicorsoChange}
-            fieldNames={['ricorso_presentato', 'termine_ricorso_data', 'termine_ricorso_note']}
-          />
-
-          {!hasChoice && <InfoBox>Indicare se è stato presentato un ricorso o un’istanza di riesame.</InfoBox>}
-          {hasChoice && !presented && <InfoBox kind='ok'>Non risulta presentato alcun ricorso.</InfoBox>}
-          {hasOrphanDetails && <InfoBox kind='warn'>Sono presenti dati di un ricorso, ma il campo “Ricorso presentato” è impostato su No. Verificare i dati registrati.</InfoBox>}
-
-          {presented && (
-            <>
-              <div style={{ marginTop: 2 }}>
-                <AdminFieldsGrid
-                  group='ricorso'
-                  draft={d}
-                  fields={props.fields}
-                  canEdit={props.canEdit}
-                  onChange={onRicorsoChange}
-                  fieldNames={detailedNames}
-                />
-              </div>
-              {late && <InfoBox kind='warn'>Il ricorso risulta presentato oltre il termine indicato.</InfoBox>}
-              {beforeNotification && <InfoBox kind='warn'>La data di presentazione del ricorso non può precedere la data di notifica dell’atto.</InfoBox>}
-              {!late && !beforeNotification && presentationMs != null && <InfoBox kind='ok'>Ricorso registrato. L’esito può essere gestito nella scheda CdA.</InfoBox>}
-            </>
-          )}
+      <Section title='Ricorso / riesame post-notifica'>
+        <InfoBox>
+          Registrare qui l&apos;eventuale ricorso o istanza presentata dopo la notifica. L&apos;esito del CdA è gestito nella scheda dedicata.
+        </InfoBox>
+        <div style={{ marginTop: 12 }}>
+          <AdminFieldsGrid group='ricorso' draft={d} fields={props.fields} canEdit={props.canEdit} onChange={props.onChange} />
         </div>
       </Section>
     </>
   )
 }
 
-function EsitoCdaSection (props: {
-  data: Record<string, any>
-  fields: LayerFieldInfo[]
-  canEdit: boolean
-  onChange: (name: string, value: any) => void
-  profile: { username: string, fullName: string }
-}) {
+function EsitoCdaSection (props: { data: Record<string, any>, fields: LayerFieldInfo[], canEdit: boolean, onChange: (name: string, value: any) => void }) {
   const d = props.data || {}
-  const presented = isRicorsoPresentato(d)
-  const outcome = cdaEsitoCode(d)
-  const needsRedetermination = CDA_ESITI_CON_RIDETERMINAZIONE.has(outcome)
-  const needsReopening = outcome === 'RINVIATO_ISTRUTTORIA'
-
-  const onCdaChange = (name: string, value: any) => {
-    props.onChange(name, value)
-    if (String(name).toLowerCase() !== 'cda_esito_ricorso') return
-    const statusField = realFieldName(props.fields, 'stato_post_notifica') || 'stato_post_notifica'
-    if (hasAdminValue(value)) {
-      if (!hasAdminValue(pickAttrCI(d, ['ricorso_definito_il']))) props.onChange(realFieldName(props.fields, 'ricorso_definito_il') || 'ricorso_definito_il', Date.now())
-      if (!hasAdminValue(pickAttrCI(d, ['ricorso_definito_da']))) props.onChange(realFieldName(props.fields, 'ricorso_definito_da') || 'ricorso_definito_da', props.profile.fullName || props.profile.username || '')
-      props.onChange(statusField, String(value).toUpperCase() === 'RINVIATO_ISTRUTTORIA' ? 'DA_RIAPRIRE' : 'RICORSO_DEFINITO')
-    } else {
-      props.onChange(realFieldName(props.fields, 'ricorso_definito_il') || 'ricorso_definito_il', null)
-      props.onChange(realFieldName(props.fields, 'ricorso_definito_da') || 'ricorso_definito_da', null)
-      props.onChange(statusField, 'RICORSO_PRESENTATO')
-    }
-  }
-
-  if (!presented) {
-    return (
-      <Section title='Esito CdA'>
-        <InfoBox kind='warn'>La scheda si attiva dopo la registrazione di un ricorso presentato.</InfoBox>
-      </Section>
-    )
-  }
-
   return (
     <Section title='Esito CdA'>
-      <div style={{ display: 'grid', gap: 10 }}>
-        {!props.canEdit && <InfoBox>La registrazione dell’esito del CdA è riservata al RI AMM.</InfoBox>}
-        <AdminFieldsGrid
-          group='cda'
-          draft={d}
-          fields={props.fields}
-          canEdit={props.canEdit}
-          onChange={onCdaChange}
-          fieldNames={['cda_esito_ricorso', 'cda_data_esito', 'cda_numero_delibera', 'cda_data_delibera', 'cda_estremi_atto', 'cda_note_esito']}
-        />
-
-        {needsRedetermination && (
-          <div style={{ marginTop: 2 }}>
-            <AdminFieldsGrid
-              group='cda'
-              draft={d}
-              fields={props.fields}
-              canEdit={props.canEdit}
-              onChange={onCdaChange}
-              fieldNames={['cda_importo_rideterminato', 'termine_pagamento_rideterminato_data', 'termine_pagamento_rideterminato_note']}
-            />
-          </div>
-        )}
-
-        <AdminFieldsGrid
-          group='cda'
-          draft={d}
-          fields={props.fields}
-          canEdit={false}
-          onChange={onCdaChange}
-          fieldNames={['ricorso_definito_il', 'ricorso_definito_da']}
-        />
-
-        {!outcome && <InfoBox>Registrare l’esito deliberato dal CdA.</InfoBox>}
-        {needsReopening && <InfoBox kind='warn'>L’esito richiede una nuova istruttoria. La riapertura deve essere registrata dal RI AMM nella scheda Riapertura.</InfoBox>}
-        {needsRedetermination && <InfoBox>Indicare il nuovo importo e, quando previsto, la nuova scadenza di pagamento.</InfoBox>}
-        {outcome && !needsReopening && !needsRedetermination && <InfoBox kind='ok'>Esito del ricorso registrato.</InfoBox>}
+      <InfoBox>
+        Registrare l&apos;esito del CdA e gli estremi dell&apos;atto comunicato al RI AMM. Se l&apos;esito richiede una nuova lavorazione, la riapertura va gestita nella scheda Riapertura.
+      </InfoBox>
+      <div style={{ marginTop: 12 }}>
+        <AdminFieldsGrid group='cda' draft={d} fields={props.fields} canEdit={props.canEdit} onChange={props.onChange} />
       </div>
     </Section>
   )
 }
 
-function RiaperturaAmmSection (props: {
-  data: Record<string, any>
-  fields: LayerFieldInfo[]
-  canEdit: boolean
-  onChange: (name: string, value: any) => void
-  role: string
-}) {
+function RiaperturaAmmSection (props: { data: Record<string, any>, fields: LayerFieldInfo[], canEdit: boolean, onChange: (name: string, value: any) => void, role: string }) {
   const d = props.data || {}
   const role = String(props.role || '').toUpperCase()
   const canCompile = props.canEdit && (role === 'RI_AMM' || role === 'ADMIN')
-  const active = isRiaperturaAmmAttiva(d)
-  const outcome = cdaEsitoCode(d)
-  const cdaRequiresReopening = outcome === 'RINVIATO_ISTRUTTORIA'
-
-  const onRiaperturaChange = (name: string, value: any) => {
-    props.onChange(name, value)
-    if (String(name).toLowerCase() !== 'riapertura_amm' || !isCheckedValue(value)) return
-    if (!hasAdminValue(pickAttrCI(d, ['riapertura_amm_disposta_il']))) props.onChange(realFieldName(props.fields, 'riapertura_amm_disposta_il') || 'riapertura_amm_disposta_il', Date.now())
-    if (!hasAdminValue(pickAttrCI(d, ['riapertura_amm_numero']))) props.onChange(realFieldName(props.fields, 'riapertura_amm_numero') || 'riapertura_amm_numero', 1)
-    if (cdaRequiresReopening && !hasAdminValue(pickAttrCI(d, ['riapertura_amm_causale']))) props.onChange(realFieldName(props.fields, 'riapertura_amm_causale') || 'riapertura_amm_causale', 'ESITO_CDA')
-    props.onChange(realFieldName(props.fields, 'stato_post_notifica') || 'stato_post_notifica', 'RIAPERTA')
-  }
-
   return (
     <Section title='Riapertura amministrativa'>
-      <div style={{ display: 'grid', gap: 10 }}>
-        {!canCompile && <InfoBox kind='warn'>La riapertura può essere registrata esclusivamente dal RI AMM.</InfoBox>}
-        {canCompile && cdaRequiresReopening && <InfoBox kind='warn'>Il CdA ha disposto una nuova istruttoria. Registrare la riapertura prima di avviare un nuovo ciclo di lavorazione.</InfoBox>}
-        {canCompile && !cdaRequiresReopening && <InfoBox>La riapertura può essere disposta anche per autotutela, errore materiale, integrazione documentale o rideterminazione degli importi.</InfoBox>}
-
-        <AdminFieldsGrid
-          group='riapertura'
-          draft={d}
-          fields={props.fields}
-          canEdit={canCompile}
-          onChange={onRiaperturaChange}
-          fieldNames={['riapertura_amm']}
-        />
-
-        {active && (
-          <AdminFieldsGrid
-            group='riapertura'
-            draft={d}
-            fields={props.fields}
-            canEdit={canCompile}
-            onChange={onRiaperturaChange}
-            fieldNames={['riapertura_amm_causale', 'riapertura_amm_disposta_il', 'riapertura_amm_disposta_da', 'riapertura_amm_autorizzazione', 'riapertura_amm_motivo', 'riapertura_amm_numero']}
-          />
-        )}
+      <InfoBox kind={canCompile ? 'info' : 'warn'}>
+        La riapertura è di competenza del RI AMM, su indicazione del DA a seguito della decisione del CdA. Questa scheda registra gli estremi; il nuovo ciclo di lavorazione sarà gestito con il workflow dedicato.
+      </InfoBox>
+      <div style={{ marginTop: 12 }}>
+        <AdminFieldsGrid group='riapertura' draft={d} fields={props.fields} canEdit={canCompile} onChange={props.onChange} />
       </div>
     </Section>
   )
@@ -4904,9 +4741,8 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
   const titleParts = buildPracticeTitleParts(data || {}, oid)
   const hasDsForSave = !!configuredDs
   const currentRole = String(profile.role || '').toUpperCase()
-  const canEdit = roleAllowed && ['TI_AMM', 'RI_AMM', 'ADMIN'].includes(currentRole) && hasDsForSave
-  const canEditCore = ['TI_AMM', 'ADMIN'].includes(currentRole) && hasDsForSave
-  const canEditAttoNotes = canEditCore
+  const canEdit = roleAllowed && ['TI_AMM', 'ADMIN'].includes(currentRole) && hasDsForSave
+  const canEditAttoNotes = canEdit
   const sanzioniConsultive = useSanzioneConsultivaState(cfg, data || {}, layerFields)
   React.useEffect(() => {
     let cancelled = false
@@ -4955,12 +4791,8 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
   const headerVerbaleDefinitivo = isVerbaleDefinitivo(viewData || {})
   const headerHasVerbale = tipoAttoAmmPrevedeVerbale(viewData || {})
   const verbaleNotificato = isVerbaleNotificato(viewData || {})
-  const canEditPostApproval = canEditCore && headerVerbaleDefinitivo
+  const canEditPostApproval = canEdit && headerVerbaleDefinitivo
   const canEditPostNotification = canEdit && headerVerbaleDefinitivo && verbaleNotificato
-  const canEditRicorso = canEditPostNotification && ['TI_AMM', 'RI_AMM', 'ADMIN'].includes(currentRole)
-  const canEditCda = canEditPostNotification && ['RI_AMM', 'ADMIN'].includes(currentRole) && isRicorsoPresentato(viewData || {})
-  const canEditRiapertura = canEditPostNotification && ['RI_AMM', 'ADMIN'].includes(currentRole)
-  const canEditDefinizione = canEditPostNotification && ['TI_AMM', 'RI_AMM', 'ADMIN'].includes(currentRole)
 
   const onFieldChange = React.useCallback((name: string, value: any) => {
     setDraft(prev => ({ ...(prev || {}), [name]: value }))
@@ -5178,47 +5010,6 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
       if (notificaMs != null && paymentDeadlineMs != null && paymentDeadlineMs < notificaMs) issues.push('Pagamento: la scadenza non può precedere la data di notifica.')
       if (paymentStatus === 'SCADUTO' && paymentDeadlineMs != null && paymentDeadlineMs >= new Date().setHours(0, 0, 0, 0)) issues.push('Pagamento: lo stato Scaduto non è coerente con la scadenza indicata.')
     }
-
-    const ricorsoChoice = pickAttrCI(current, ['ricorso_presentato'])
-    if (hasAdminValue(ricorsoChoice) && isRicorsoPresentato(current)) {
-      if (!hasAdminValue(pickAttrCI(current, ['ricorso_protocollo']))) issues.push('Ricorso: indicare il protocollo del ricorso.')
-      if (!hasAdminValue(pickAttrCI(current, ['ricorso_data_presentazione']))) issues.push('Ricorso: indicare la data di presentazione.')
-      if (!hasAdminValue(pickAttrCI(current, ['ricorso_presentato_da']))) issues.push('Ricorso: indicare il soggetto che ha presentato il ricorso.')
-      if (!hasAdminValue(pickAttrCI(current, ['ricorso_sospende_pagamento']))) issues.push('Ricorso: indicare se il ricorso sospende il pagamento.')
-      if (!hasAdminValue(pickAttrCI(current, ['ricorso_sintesi']))) issues.push('Ricorso: inserire una sintesi dei motivi.')
-      const ricorsoMs = dateMsOrNull(pickAttrCI(current, ['ricorso_data_presentazione']))
-      if (notificaMs != null && ricorsoMs != null && ricorsoMs < notificaMs) issues.push('Ricorso: la data di presentazione non può precedere la data di notifica.')
-
-      const esitoCda = cdaEsitoCode(current)
-      if (!esitoCda) issues.push('CdA: registrare l’esito del ricorso prima di definire la pratica.')
-      if (esitoCda) {
-        if (!hasAdminValue(pickAttrCI(current, ['cda_data_esito']))) issues.push('CdA: indicare la data dell’esito.')
-        if (!hasAdminValue(pickAttrCI(current, ['cda_numero_delibera']))) issues.push('CdA: indicare il numero della deliberazione.')
-        if (!hasAdminValue(pickAttrCI(current, ['cda_data_delibera']))) issues.push('CdA: indicare la data della deliberazione.')
-        if (!hasAdminValue(pickAttrCI(current, ['cda_estremi_atto']))) issues.push('CdA: indicare gli estremi dell’atto comunicato.')
-        const ricorsoDataMs = dateMsOrNull(pickAttrCI(current, ['ricorso_data_presentazione']))
-        const cdaEsitoMs = dateMsOrNull(pickAttrCI(current, ['cda_data_esito']))
-        const cdaDeliberaMs = dateMsOrNull(pickAttrCI(current, ['cda_data_delibera']))
-        if (ricorsoDataMs != null && cdaEsitoMs != null && cdaEsitoMs < ricorsoDataMs) issues.push('CdA: la data dell’esito non può precedere la presentazione del ricorso.')
-        if (ricorsoDataMs != null && cdaDeliberaMs != null && cdaDeliberaMs < ricorsoDataMs) issues.push('CdA: la data della deliberazione non può precedere la presentazione del ricorso.')
-        if (esitoCda === 'RINVIATO_ISTRUTTORIA' && !isRiaperturaAmmAttiva(current)) issues.push('Riapertura: il CdA ha disposto una nuova istruttoria; registrare la riapertura amministrativa.')
-        if (CDA_ESITI_CON_RIDETERMINAZIONE.has(esitoCda)) {
-          const rideterminatoRaw = pickAttrCI(current, ['cda_importo_rideterminato'])
-          const rideterminato = parseNumberInput(rideterminatoRaw)
-          if (!hasAdminValue(rideterminatoRaw) || rideterminato == null || rideterminato < 0) issues.push('CdA: indicare l’importo rideterminato.')
-          if (!hasAdminValue(pickAttrCI(current, ['termine_pagamento_rideterminato_data']))) issues.push('CdA: indicare la nuova scadenza di pagamento.')
-        }
-      }
-    }
-
-    if (isRiaperturaAmmAttiva(current)) {
-      if (!hasAdminValue(pickAttrCI(current, ['riapertura_amm_causale']))) issues.push('Riapertura: indicare la causale.')
-      if (!hasAdminValue(pickAttrCI(current, ['riapertura_amm_disposta_il']))) issues.push('Riapertura: indicare la data in cui è stata disposta.')
-      if (!hasAdminValue(pickAttrCI(current, ['riapertura_amm_disposta_da']))) issues.push('Riapertura: indicare chi ha disposto la riapertura.')
-      if (!hasAdminValue(pickAttrCI(current, ['riapertura_amm_autorizzazione']))) issues.push('Riapertura: indicare gli estremi dell’autorizzazione.')
-      if (!hasAdminValue(pickAttrCI(current, ['riapertura_amm_motivo']))) issues.push('Riapertura: indicare il motivo.')
-      if (!hasAdminValue(pickAttrCI(current, ['riapertura_amm_numero']))) issues.push('Riapertura: indicare il numero progressivo.')
-    }
     return issues
   }, [layerFields])
 
@@ -5306,20 +5097,18 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
       return
     }
     const currentForValidation = { ...(draft || data || {}), ...automaticValues }
-    if (canEditCore && !hasAdminValue(pickAttrCI(currentForValidation, ['note_atto_amm']))) {
+    if (!hasAdminValue(pickAttrCI(currentForValidation, ['note_atto_amm']))) {
       setDialog({ kind: 'warn', title: 'Campi obbligatori mancanti', text: 'Prima di salvare completare:\n- Atto: compilare le note amministrative.' })
       return
     }
     const attrs = changedAttrs(layerFields, initialDraft, draft)
-    if (canEditCore) {
-      Object.entries(automaticValues || {}).forEach(([name, value]) => {
-        if (name === 'numero_verbale' || name === 'data_verbale') return
-        const real = realFieldName(layerFields, name)
-        if (!real) return
-        const before = pickAttrCI(initialDraft, [real, name])
-        if (!sameDraftValue(before, value, name)) attrs[real] = value == null || value === '' ? null : value
-      })
-    }
+    Object.entries(automaticValues || {}).forEach(([name, value]) => {
+      if (name === 'numero_verbale' || name === 'data_verbale') return
+      const real = realFieldName(layerFields, name)
+      if (!real) return
+      const before = pickAttrCI(initialDraft, [real, name])
+      if (!sameDraftValue(before, value, name)) attrs[real] = value == null || value === '' ? null : value
+    })
     if (!Object.keys(attrs).length) {
       setDialog({ kind: 'warn', title: 'Nessuna modifica', text: 'Non risultano modifiche da salvare.' })
       return
@@ -5353,7 +5142,7 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
       const next = { ...(initialDraft || {}), ...attrs }
       setInitialDraft(next)
       setDraft(next)
-      setDialog({ kind: 'ok', title: 'Salvataggio completato', text: 'Dati amministrativi salvati.' })
+      setDialog({ kind: 'ok', title: 'Bozza salvata', text: 'Dati amministrativi salvati.' })
       try {
         window.dispatchEvent(new CustomEvent('gii:record-updated', { detail: { oid: Number(oid), source: 'gii-editing-amm' } }))
       } catch { }
@@ -5562,9 +5351,9 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
                     </InfoBox>
                   )}
 
-                  {hasDsForSave && roleAllowed && !canEditAttoNotes && (
+                  {hasDsForSave && roleAllowed && !canEdit && (
                     <InfoBox kind='info'>
-                      La scheda Atto è in sola lettura per il profilo corrente. La compilazione dell’atto è riservata al TI AMM.
+                      Scheda in sola lettura per il profilo corrente. La compilazione è abilitata per TI_AMM e ADMIN.
                     </InfoBox>
                   )}
 
@@ -5594,29 +5383,29 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
 
               {activeAmmSection === 'ricorso' && (
                 <>
-                  {(!headerVerbaleDefinitivo || !verbaleNotificato) && <PostNotificationLockedBox />}
-                  <RicorsoPostNotificaSection data={viewData || {}} fields={layerFields} canEdit={canEditRicorso} onChange={onFieldChange} />
+                  {!canEditPostNotification && <PostNotificationLockedBox />}
+                  <RicorsoPostNotificaSection data={viewData || {}} fields={layerFields} canEdit={canEditPostNotification} onChange={onFieldChange} />
                 </>
               )}
 
               {activeAmmSection === 'cda' && (
                 <>
-                  {(!headerVerbaleDefinitivo || !verbaleNotificato) && <PostNotificationLockedBox />}
-                  <EsitoCdaSection data={viewData || {}} fields={layerFields} canEdit={canEditCda} onChange={onFieldChange} profile={profile} />
+                  {!canEditPostNotification && <PostNotificationLockedBox />}
+                  <EsitoCdaSection data={viewData || {}} fields={layerFields} canEdit={canEditPostNotification} onChange={onFieldChange} />
                 </>
               )}
 
               {activeAmmSection === 'riapertura' && (
                 <>
-                  {(!headerVerbaleDefinitivo || !verbaleNotificato) && <PostNotificationLockedBox />}
-                  <RiaperturaAmmSection data={viewData || {}} fields={layerFields} canEdit={canEditRiapertura} onChange={onFieldChange} role={profile.role} />
+                  {!canEditPostNotification && <PostNotificationLockedBox />}
+                  <RiaperturaAmmSection data={viewData || {}} fields={layerFields} canEdit={canEditPostNotification} onChange={onFieldChange} role={profile.role} />
                 </>
               )}
 
               {activeAmmSection === 'definizione' && (
                 <>
-                  {(!headerVerbaleDefinitivo || !verbaleNotificato) && <PostNotificationLockedBox />}
-                  <DefinizionePraticaSection data={viewData || {}} fields={layerFields} canEdit={canEditDefinizione} onChange={onFieldChange} />
+                  {!canEditPostNotification && <PostNotificationLockedBox />}
+                  <DefinizionePraticaSection data={viewData || {}} fields={layerFields} canEdit={canEditPostNotification} onChange={onFieldChange} />
                 </>
               )}
 

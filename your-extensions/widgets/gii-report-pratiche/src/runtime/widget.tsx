@@ -862,12 +862,12 @@ function splitMultiValue (v: any): string[] {
 }
 
 const VIOLATION_LABEL_BY_ARTICLE: Record<string, string> = {
-  '8': 'Art. 8 - Violazione servizio reperibilità',
+  '8': 'Art. 8 - Violazione servizio di reperibilità',
   '12': 'Art. 12 - Negato accesso ai fondi (al personale consortile)',
   '15': 'Art. 15 - Prelievo abusivo d’acqua',
-  '16': 'Art. 16 - Comunicazione di irrigazione tardiva',
-  '17': 'Art. 17 - Variazione o rinuncia tardiva',
-  '27': 'Art. 27 - Spreco d’acqua/uso negligente risorsa idrica',
+  '16': 'Art. 16 - Inosservanza dei termini di presentazione delle comunicazioni di irrigazione',
+  '17': 'Art. 17 - Inosservanza dei termini di presentazione delle comunicazioni di variazione e di rinuncia',
+  '27': 'Art. 27 - Spreco d’acqua/uso negligente della risorsa idrica',
   '28': 'Art. 28 - Violazione prescrizioni del consorzio',
   '29': 'Art. 29 - Violazione termini restituzione attrezzature',
   '30': 'Art. 30 - Danneggiamento e/o perdita attrezzature',
@@ -875,10 +875,10 @@ const VIOLATION_LABEL_BY_ARTICLE: Record<string, string> = {
   '32': 'Art. 32 - Negato accesso ai fondi (al consorziato)',
   '33': 'Art. 33 - Inosservanza limiti temporali di prelievo',
   '34': 'Art. 34 - Interferenze',
-  '35': 'Art. 35 - Manomissione reti di dispensa e allaccio aspirazione',
+  '35': 'Art. 35 - Manomissione reti di dispensa e allaccio di apparecchi di aspirazione all’idrante',
   '36': 'Art. 36 - Uso attrezzature non autorizzate',
   '37': 'Art. 37 - Uso sistemi di irrigazione incompatibili',
-  '39': 'Art. 39 - Danni strutture irrigue'
+  '39': 'Art. 39 - Danni alle strutture irrigue'
 }
 
 function violationLabelByArticle (article: any): string {

@@ -3486,16 +3486,16 @@ const CHOICES = {
   art15_totale:   [{ v: 'Art15.3', l: 'Prima contestazione' }, { v: 'Art15.4', l: 'Recidiva' }],
   occorrenza: [{ v: '1', l: 'Prima contestazione' }, { v: '2', l: 'Recidiva' }],
   art16_17: [
-    { v: 'Art16', l: 'Art. 16 - Comunicazione di irrigazione tardiva' },
-    { v: 'Art17', l: 'Art. 17 - Variazione o rinuncia tardiva' },
+    { v: 'Art16', l: 'Art. 16 - Inosservanza termini di presentazione comunicazioni di irrigazione' },
+    { v: 'Art17', l: 'Art. 17 - Inosservanza termini di presentazione comunicazioni di variazione e di rinuncia' },
   ],
   art17_tipo: [{ v: 'Art17.1', l: 'Variazione tardiva' }, { v: 'Art17.2', l: 'Rinuncia tardiva' }],
   presenza: [{ v: 'sì', l: 'Sì' }, { v: 'no', l: 'No' }],
   grado: [{ v: '1', l: '1' }, { v: '2', l: '2' }, { v: '3', l: '3' }, { v: '4', l: '4' }],
   norma3: [
-    { v: 'Art8',  l: 'Art. 8 - Violazione servizio reperibilità' },
+    { v: 'Art8',  l: 'Art. 8 - Violazione servizio di reperibilità' },
     { v: 'Art12', l: 'Art. 12 - Negato accesso ai fondi (al personale consortile)' },
-    { v: 'Art27', l: 'Art. 27 - Spreco d\'acqua/uso negligente risorsa idrica' },
+    { v: 'Art27', l: 'Art. 27 - Spreco d’acqua/uso negligente della risorsa idrica' },
     { v: 'Art28', l: 'Art. 28 - Violazione prescrizioni del consorzio' },
     { v: 'Art29', l: 'Art. 29 - Violazione termini restituzione attrezzature' },
     { v: 'Art30', l: 'Art. 30 - Danneggiamento e/o perdita attrezzature' },
@@ -3503,10 +3503,10 @@ const CHOICES = {
     { v: 'Art32', l: 'Art. 32 - Negato accesso ai fondi (al consorziato)' },
     { v: 'Art33', l: 'Art. 33 - Inosservanza limiti temporali di prelievo' },
     { v: 'Art34', l: 'Art. 34 - Interferenze' },
-    { v: 'Art35', l: 'Art. 35 - Manomissione reti di dispensa e allaccio aspirazione' },
+    { v: 'Art35', l: 'Art. 35 - Manomissione reti di dispensa e allaccio di apparecchi di aspirazione all’idrante' },
     { v: 'Art36', l: 'Art. 36 - Uso attrezzature non autorizzate' },
     { v: 'Art37', l: 'Art. 37 - Uso sistemi di irrigazione incompatibili' },
-    { v: 'Art39', l: 'Art. 39 - Danni strutture irrigue' },
+    { v: 'Art39', l: 'Art. 39 - Danni alle strutture irrigue' },
   ],
   qualifica_fondo: [
     { v: '1', l: 'Proprietario' },
@@ -3663,8 +3663,7 @@ function RegolamentoChoiceToggleTi (props: {
   const fs = React.useContext(FormStyleCtx)
   const [open, setOpen] = React.useState(false)
   const st = REGOLAMENTO_VIOLATA_STYLE
-  const article = getRegolamentoArticle(props.articleState, props.articleCode)
-  const title = articleTitleLineTi(article, props.title)
+  const title = String(props.title || '').trim() || '—'
   const targetHeight = Math.max(24, Number(fs.fieldHeight) || 32)
   const headerHeight = Math.max(22, targetHeight - (Number(st.borderWidth || 1) * 2))
   const toggleOpen = (evt?: any) => {
@@ -4463,10 +4462,10 @@ function nsComputeSummaryFromRows (rows: NsDetailRow[], perc: number): NsSummary
 type NsCasisticaOption = { codice: string; art: number; label: string }
 
 const NS_CASISTICHE_BY_ART: NsCasisticaOption[] = [
-  { codice: 'C100_REPERIBILITA', art: 8, label: 'Art. 8 - Violazione servizio reperibilità' },
-  { codice: 'C101_SPRECO_ACQUA', art: 27, label: 'Art. 27 - Spreco d’acqua/uso negligente risorsa idrica' },
+  { codice: 'C100_REPERIBILITA', art: 8, label: 'Art. 8 - Violazione servizio di reperibilità' },
+  { codice: 'C101_SPRECO_ACQUA', art: 27, label: 'Art. 27 - Spreco d’acqua/uso negligente della risorsa idrica' },
   { codice: 'C104_ATTREZZATURE_DANNEGGIATE', art: 30, label: 'Art. 30 - Danneggiamento e/o perdita attrezzature' },
-  { codice: 'C113_DANNI_STRUTTURE_IRRIGUE', art: 39, label: 'Art. 39 - Danni strutture irrigue' }
+  { codice: 'C113_DANNI_STRUTTURE_IRRIGUE', art: 39, label: 'Art. 39 - Danni alle strutture irrigue' }
 ]
 
 function hasArtSelected (attrs: Record<string, any>, art: number): boolean {
@@ -5242,6 +5241,8 @@ function NuovaPraticaForm (p: {
   editLayerUrl?: string
   titleText?: string
   saveText?: string
+  readOnly?: boolean
+  readOnlyMessage?: string
   onDirtyChange?: (dirty: boolean) => void
   onTabChange?: (tab: string) => void
 }) {
@@ -5249,14 +5250,16 @@ function NuovaPraticaForm (p: {
   const mode = p.mode === 'edit' ? 'edit' : 'create'
   const editOid = p.editOid != null ? Number(p.editOid) : null
   const editIdFieldName = String(p.editIdFieldName || ds?.getIdField?.() || 'OBJECTID')
-  const isRiAgrTecLimitedEdit = mode === 'edit' && isCurrentRiAgrTec()
+  const isReadOnly = mode === 'edit' && p.readOnly === true
+  const isRiAgrTecLimitedEdit = mode === 'edit' && !isReadOnly && isCurrentRiAgrTec()
   const riAgrTecEditableUiFields = React.useMemo(() => new Set(['grado', 'norma15_sel', 'occorrenza']), [])
   const riAgrTecEditableDraftFields = React.useMemo(() => new Set(['gradi_violazioni', 'occorrenza']), [])
   const riAgrTecEditableSaveFields = React.useMemo(() => new Set(['gradi_violazioni', 'occorrenza']), [])
   const canEditFieldForCurrentProfile = React.useCallback((fieldName: string): boolean => {
+    if (isReadOnly) return false
     if (!isRiAgrTecLimitedEdit) return true
     return riAgrTecEditableUiFields.has(fieldName)
-  }, [isRiAgrTecLimitedEdit, riAgrTecEditableUiFields])
+  }, [isReadOnly, isRiAgrTecLimitedEdit, riAgrTecEditableUiFields])
 
   const [draft, setDraft] = React.useState<NpDraft>(() => draftFromRecord(p.initialData || {}))
   const [baselineDraft, setBaselineDraft] = React.useState<NpDraft>(() => draftFromRecord(p.initialData || {}))
@@ -5768,6 +5771,7 @@ function NuovaPraticaForm (p: {
     setCreatedRecordInfo(null)
     setDraft({})
     setBaselineDraft({})
+    setArt15SelectedUi(false)
     setMsg(null)
     skipNpTabSyncRef.current = true
     setNpTab('trasgressore')
@@ -5863,16 +5867,20 @@ function NuovaPraticaForm (p: {
   const hasPendingAttachments = attachmentFiles.length > 0
   const hasPendingAttachmentDeletes = pendingDeleteAttachmentIds.length > 0
   const hasPendingAttachmentReplacements = Object.keys(pendingReplaceAttachments).length > 0
+  const baselineArt15Selected = React.useMemo(() => draftHasArt15Selection(baselineDraft), [baselineDraft])
+  const art15SelectionDirty = art15SelectedUi !== baselineArt15Selected
   const isDirty = React.useMemo(() => {
+    if (isReadOnly) return false
     const draftDirty = !draftsEqual(draft, baselineDraft)
     if (isRiAgrTecLimitedEdit) return draftDirty
-    return draftDirty || !!p.clickedPointWgs84 || hasPendingAttachments || hasPendingAttachmentDeletes || hasPendingAttachmentReplacements || noteSpeseDraftDirty
-  }, [draft, baselineDraft, isRiAgrTecLimitedEdit, p.clickedPointWgs84, hasPendingAttachments, hasPendingAttachmentDeletes, hasPendingAttachmentReplacements, noteSpeseDraftDirty])
+    return draftDirty || art15SelectionDirty || !!p.clickedPointWgs84 || hasPendingAttachments || hasPendingAttachmentDeletes || hasPendingAttachmentReplacements || noteSpeseDraftDirty
+  }, [isReadOnly, draft, baselineDraft, art15SelectionDirty, isRiAgrTecLimitedEdit, p.clickedPointWgs84, hasPendingAttachments, hasPendingAttachmentDeletes, hasPendingAttachmentReplacements, noteSpeseDraftDirty])
   React.useEffect(() => {
     p.onDirtyChange?.(isDirty)
   }, [isDirty, p.onDirtyChange])
 
   const set = (k: string, v: any) => {
+    if (isReadOnly) return
     if (isRiAgrTecLimitedEdit && !riAgrTecEditableDraftFields.has(k.toLowerCase())) return
     setDraft(prev => ({ ...prev, [k]: normalizeUppercaseTextFieldValue(k, v) }))
   }
@@ -6841,6 +6849,7 @@ React.useEffect(() => {
 
   const performCancel = () => {
     setDraft({ ...baselineDraft })
+    setArt15SelectedUi(draftHasArt15Selection(baselineDraft))
     setNoteSpeseRowsDraft(nsCloneRowsByCategory(noteSpeseRowsBaseline))
     setNoteSpeseSummary(nsComputeSummaryFromRows(nsRowsByCategoryToFlat(noteSpeseRowsBaseline), noteSpesePercent))
     setNoteSpeseFormDirtyByCategory({ AT: false, PR: false, RU: false, SL: false, PF: false })
@@ -6859,7 +6868,7 @@ React.useEffect(() => {
   }
 
   const handleCancel = () => {
-    if (!isDirty || saving) return
+    if (isReadOnly || !isDirty || saving) return
     setCancelUnsavedPopupOpen(true)
   }
 
@@ -6869,6 +6878,7 @@ React.useEffect(() => {
   }
 
   const handleSave = async () => {
+    if (isReadOnly) return
     if (!isDirty) {
       setMsg({ kind: 'ok', text: mode === 'edit' ? 'Nessuna modifica da salvare.' : 'Compila almeno un campo prima di salvare.' })
       return
@@ -6971,14 +6981,14 @@ React.useEffect(() => {
         if (dich <= 0) {
           setValidationPopup({
             title: 'Superficie dichiarata non valida',
-            text: 'Per l\'Art. 17 - Variazione tardiva, la superficie dichiarata deve essere compilata e maggiore di 0.'
+            text: 'Per l\'Art. 17 - Inosservanza termini di presentazione comunicazioni di variazione e di rinuncia (variazione tardiva), la superficie dichiarata deve essere compilata e maggiore di 0.'
           })
           return
         }
         if (variata <= 0) {
           setValidationPopup({
             title: 'Superficie variata non valida',
-            text: 'Per l\'Art. 17 - Variazione tardiva, la superficie variata deve essere compilata e maggiore di 0. Se la superficie variata è pari a 0, selezionare il tipo di comunicazione Rinuncia tardiva.'
+            text: 'Per l\'Art. 17 - Inosservanza termini di presentazione comunicazioni di variazione e di rinuncia (variazione tardiva), la superficie variata deve essere compilata e maggiore di 0. Se la superficie variata è pari a 0, selezionare il tipo di comunicazione Rinuncia tardiva.'
           })
           return
         }
@@ -6989,7 +6999,7 @@ React.useEffect(() => {
         if (dich <= 0) {
           setValidationPopup({
             title: 'Superficie dichiarata non valida',
-            text: 'Per l\'Art. 17 - Rinuncia tardiva, la superficie dichiarata deve essere compilata e maggiore di 0.'
+            text: 'Per l\'Art. 17 - Inosservanza termini di presentazione comunicazioni di variazione e di rinuncia (rinuncia tardiva), la superficie dichiarata deve essere compilata e maggiore di 0.'
           })
           return
         }
@@ -7334,7 +7344,9 @@ ${e?.message || String(e)}`
     if (!activeNotaSpeseCasistica) return 0
     return countNotaSpeseIncompleteRowsForCasistica(noteSpeseRowsDraft, activeNotaSpeseCasistica)
   }, [noteSpeseRowsDraft, activeNotaSpeseCasistica])
-  const noteSpeseBrowseDisabled = isRiAgrTecLimitedEdit || noteSpeseBusy || noteSpeseDraftDirty || !activeNotaSpeseCasistica || noteSpeseCasistiche.length === 0
+  const noteSpeseBrowseDisabled = isReadOnly || isRiAgrTecLimitedEdit || noteSpeseBusy || noteSpeseDraftDirty || !activeNotaSpeseCasistica || noteSpeseCasistiche.length === 0
+  // La combo seleziona soltanto quale nota spese consultare: resta attiva anche in sola consultazione.
+  const noteSpeseCasisticaDisabled = noteSpeseBusy || noteSpeseCasistiche.length <= 1
 
   React.useEffect(() => {
     // Evita il lampeggio arancione iniziale senza nascondere il badge:
@@ -7788,7 +7800,7 @@ ${e?.message || String(e)}`
         </span>
       )
     }
-    return <input type='checkbox' checked={selected} disabled={saving || isRiAgrTecLimitedEdit} onChange={onChange} style={{ margin: 0, flexShrink: 0, accentColor: '#4b5563', ...style }}/>
+    return <input type='checkbox' checked={selected} disabled={saving || isReadOnly || isRiAgrTecLimitedEdit} onChange={onChange} style={{ margin: 0, flexShrink: 0, accentColor: '#4b5563', ...style }}/>
   }
 
   const renderSpecial = (id: string): React.ReactNode => {
@@ -7817,7 +7829,7 @@ ${e?.message || String(e)}`
               <div style={{ marginTop: 8, display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
                 {!p.mapClickEnabled ? (
                   <>
-                    <button type='button' disabled={saving || isRiAgrTecLimitedEdit} onClick={() => p.onToggleMapClick?.(true)} style={{
+                    <button type='button' disabled={saving || isReadOnly || isRiAgrTecLimitedEdit} onClick={() => p.onToggleMapClick?.(true)} style={{
                       padding: '5px 12px', borderRadius: 8, border: '1px solid #2563eb', background: '#2563eb', color: '#fff',
                       fontSize: 11, fontWeight: 700, cursor: (saving || isRiAgrTecLimitedEdit) ? 'not-allowed' : 'pointer', opacity: (saving || isRiAgrTecLimitedEdit) ? 0.5 : 1
                     }}>
@@ -8186,7 +8198,7 @@ ${e?.message || String(e)}`
                 const requiresPoint = NORMA3_REQ_POINT.has(o.v)
                 const hasGrade = RI_GRADO_ART_CODES.includes(art as any)
                 const hasNotaSpese = getNotaSpeseCasisticaByArtCode(o.v) != null
-                const canEditGrade = isCurrentRiAgrTec() && selected && hasGrade && !saving
+                const canEditGrade = !isReadOnly && isCurrentRiAgrTec() && selected && hasGrade && !saving
                 const gradeValue = riGradiViolazioniMap[art] || ''
                 const gradePending = canEditGrade && !gradeValue
                 const gradeNode = selected && hasGrade
@@ -8216,7 +8228,7 @@ ${e?.message || String(e)}`
                         articleCode={o.v}
                         title={o.l}
                         checkbox={renderNorma3Checkbox(selected, () => !(saving || isRiAgrTecLimitedEdit) && toggleNorma3(o.v))}
-                        disabled={saving || isRiAgrTecLimitedEdit}
+                        disabled={saving || isReadOnly || isRiAgrTecLimitedEdit}
                         textStyle={{
                           color: selected ? selectedNorma3TextStyle.color : (isRiAgrTecLimitedEdit ? '#64748b' : '#334155'),
                           fontWeight: selected ? selectedNorma3TextStyle.fontWeight : 400,
@@ -8293,7 +8305,7 @@ ${e?.message || String(e)}`
             <RegolamentoChoiceToggleTi
               articleState={regolamentoArticoliState}
               articleCode='Art15'
-              title='Art. 15 — Comunicazione di irrigazione'
+              title='Art. 15 - Prelievo abusivo d’acqua'
               checkbox={checkbox}
               disabled={disabled}
               textStyle={{
@@ -8307,7 +8319,7 @@ ${e?.message || String(e)}`
 
         const leftColumn = (
           <div style={{ display: 'grid', gap: formStyle.sectionGap, minWidth: 0, minHeight: '100%', gridTemplateRows: 'auto auto minmax(0, 1fr)' }}>
-            {renderEditCard('Prelievo abusivo',
+            {renderEditCard('Prelievo abusivo d’acqua',
               <div style={{ display: 'grid', gridTemplateColumns: art15GridColumns, gap: 10, alignItems: 'start', minWidth: 0 }}>
                 <div style={{ minWidth: 0 }}>
                   <div style={{ ...S.lbl, color: formStyle.labelColor, fontSize: formStyle.labelFontSize, visibility: 'hidden' }}>Violazione</div>
@@ -8320,12 +8332,12 @@ ${e?.message || String(e)}`
               </div>
             )}
 
-            {renderEditCard('Inosservanza termini',
+            {renderEditCard('Inosservanza termini presentazione comunicazioni',
               <div style={{ display: 'grid', gap: 8 }}>
                 <div style={{ display: 'grid', gridTemplateColumns: termsGridColumns, gap: 10, alignItems: 'start' }}>
                   <div style={{ gridColumn: '1 / span 2' }}>
                     <div style={{ ...S.lbl, color: formStyle.labelColor, fontSize: formStyle.labelFontSize, visibility: 'hidden' }}>Violazione</div>
-                    {choiceBox('Art16', 'Art. 16 - Comunicazione di irrigazione tardiva')}
+                    {choiceBox('Art16', 'Art. 16 - Inosservanza termini di presentazione comunicazioni di irrigazione')}
                   </div>
                   {surfaceTextField('sup_dichiarata_art16', 'Sup. dichiarata (ha.a.ca)', g('sup_dichiarata_art16'), v => set('sup_dichiarata_art16', v), art16Selected)}
                   {surfaceTextField('sup_irrigata_art16', 'Sup. irrigata (ha.a.ca)', '0', () => {}, art16Selected, '0')}
@@ -8333,7 +8345,7 @@ ${e?.message || String(e)}`
                 <div style={{ display: 'grid', gridTemplateColumns: termsGridColumns, gap: 10, alignItems: 'start' }}>
                   <div>
                     <div style={{ ...S.lbl, color: formStyle.labelColor, fontSize: formStyle.labelFontSize, visibility: 'hidden' }}>Violazione</div>
-                    {choiceBox('Art17', 'Art. 17 - Variazione o rinuncia tardiva')}
+                    {choiceBox('Art17', 'Art. 17 - Inosservanza termini di presentazione comunicazioni di variazione e di rinuncia')}
                   </div>
                   {selectField('art17_tipo', 'Tipo comunicazione', art17tipo, v => set('art17_tipo', v), CHOICES.art17_tipo, art17Selected)}
                   {surfaceTextField(art17DichField, 'Sup. dichiarata (ha.a.ca)', art17DichValue, v => set(art17DichField, v), art17SurfaceEnabled)}
@@ -8449,7 +8461,7 @@ ${e?.message || String(e)}`
                     articleCode={o.v}
                     title={o.l}
                     checkbox={renderNorma3Checkbox(selected, () => !(saving || isRiAgrTecLimitedEdit) && toggleNorma3(o.v))}
-                    disabled={saving || isRiAgrTecLimitedEdit}
+                    disabled={saving || isReadOnly || isRiAgrTecLimitedEdit}
                     textStyle={{
                       color: selected ? selectedNorma3TextStyle.color : (isRiAgrTecLimitedEdit ? '#64748b' : '#374151'),
                       fontWeight: selected ? selectedNorma3TextStyle.fontWeight : 400,
@@ -8612,23 +8624,23 @@ ${e?.message || String(e)}`
               }}
             >📋 Sfoglia prezzario</button>
           )}
-          <button type='button' disabled={saving || !isDirty} onClick={handleSave}
+          <button type='button' disabled={isReadOnly || saving || !isDirty} onClick={handleSave}
             style={{
               ...btnBase,
               border: '1px solid rgba(0,0,0,0.18)',
-              background: (saving || !isDirty) ? '#e5e7eb' : '#1a7f37',
-              color: (saving || !isDirty) ? '#9ca3af' : '#fff',
-              cursor: (saving || !isDirty) ? 'not-allowed' : 'pointer'
+              background: (isReadOnly || saving || !isDirty) ? '#e5e7eb' : '#1a7f37',
+              color: (isReadOnly || saving || !isDirty) ? '#9ca3af' : '#fff',
+              cursor: (isReadOnly || saving || !isDirty) ? 'not-allowed' : 'pointer'
             }}>
             {saving ? 'Salvataggio…' : (p.saveText || 'Salva')}
           </button>
-          <button type='button' disabled={saving || !isDirty} onClick={handleCancel}
+          <button type='button' disabled={isReadOnly || saving || !isDirty} onClick={handleCancel}
             style={{
               ...btnBase,
               border: '1px solid rgba(0,0,0,0.24)',
-              background: (saving || !isDirty) ? '#e5e7eb' : '#d92d20',
-              color: (saving || !isDirty) ? '#9ca3af' : '#fff',
-              cursor: (saving || !isDirty) ? 'not-allowed' : 'pointer'
+              background: (isReadOnly || saving || !isDirty) ? '#e5e7eb' : '#d92d20',
+              color: (isReadOnly || saving || !isDirty) ? '#9ca3af' : '#fff',
+              cursor: (isReadOnly || saving || !isDirty) ? 'not-allowed' : 'pointer'
             }}>
             Annulla
           </button>
@@ -8647,6 +8659,23 @@ ${e?.message || String(e)}`
           )}
         </div>
       </div>
+
+      {isReadOnly && (
+        <div style={{
+          flex: '0 0 auto',
+          margin: '8px 0 0',
+          padding: '10px 12px',
+          borderRadius: 8,
+          border: '1px solid #9a3412',
+          background: '#fff7ed',
+          color: '#9a3412',
+          fontSize: 13,
+          fontWeight: 700,
+          lineHeight: 1.35
+        }}>
+          {String(p.readOnlyMessage || 'Pratica non attualmente assegnata al proprio ruolo. I dati sono disponibili in sola consultazione.')}
+        </div>
+      )}
 
       {/* ── Splitter overlay Luoghi e dati tecnici ── */}
       {npTab === 'dati_tecnici' && (() => {
@@ -8746,6 +8775,10 @@ ${e?.message || String(e)}`
       })()}
 
       {/* ── Contenuto tab (scrollabile) ── */}
+      <fieldset
+        disabled={isReadOnly && npTab !== 'violazione' && npTab !== 'nota_spese' && npTab !== 'allegati' && npTab !== 'anteprima'}
+        style={{ border: 0, padding: 0, margin: 0, minWidth: 0, flex: '1 1 auto', minHeight: 0, display: 'flex', flexDirection: 'column' }}
+      >
       <div style={tabContentStyle}>
 
         {/* DATI GENERALI */}
@@ -8792,20 +8825,47 @@ ${e?.message || String(e)}`
       <div style={{ border: '1px solid #c5d9f1', borderRadius: 8, background: '#fff', padding: 10 }}>
         <div style={{ display: 'grid', gap: 10 }}>
           {noteSpeseCasistiche.length > 0 ? (
-            <div style={{ display: 'grid', gap: 4, padding: 10, borderRadius: 10, border: '2px solid #0f7375', background: '#f0fdfa' }}>
+            <div style={{
+              display: 'grid',
+              gap: 4,
+              padding: 10,
+              borderRadius: 10,
+              border: noteSpeseCasisticaDisabled ? '2px solid #cbd5e1' : '2px solid #0f7375',
+              background: noteSpeseCasisticaDisabled ? '#f1f5f9' : '#f0fdfa'
+            }}>
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, flexWrap: 'wrap' }}>
-                <label style={{ fontSize: 13, fontWeight: 900, color: '#0f4f50' }}>Seleziona la violazione</label>
-                <span style={{ fontSize: 11, fontWeight: 800, color: '#0f7375', background: '#d9f7f2', border: '1px solid #9ee5db', borderRadius: 999, padding: '2px 8px' }}>Scelta obbligatoria</span>
+                <label style={{ fontSize: 13, fontWeight: 900, color: noteSpeseCasisticaDisabled ? '#64748b' : '#0f4f50' }}>Seleziona la violazione</label>
+                <span style={{
+                  fontSize: 11,
+                  fontWeight: 800,
+                  color: noteSpeseCasisticaDisabled ? '#64748b' : '#0f7375',
+                  background: noteSpeseCasisticaDisabled ? '#e2e8f0' : '#d9f7f2',
+                  border: noteSpeseCasisticaDisabled ? '1px solid #cbd5e1' : '1px solid #9ee5db',
+                  borderRadius: 999,
+                  padding: '2px 8px'
+                }}>{isReadOnly ? 'Sola consultazione' : 'Scelta obbligatoria'}</span>
               </div>
               <select
                 value={activeNotaSpeseCasistica}
                 onChange={(e) => setActiveNotaSpeseCasistica(e.target.value)}
-                style={{ ...fieldBaseStyle(formStyle, false), height: 38, maxWidth: 460, border: '1px solid #0f7375', fontWeight: 800, color: '#16375a', background: '#fff' }}
-                disabled={noteSpeseBusy || noteSpeseCasistiche.length <= 1}
+                title={isReadOnly || isRiAgrTecLimitedEdit ? 'Seleziona la violazione per consultare la relativa nota spese.' : undefined}
+                style={{
+                  ...fieldBaseStyle(formStyle, noteSpeseCasisticaDisabled),
+                  height: 38,
+                  maxWidth: 460,
+                  border: noteSpeseCasisticaDisabled ? '1px solid #cbd5e1' : '1px solid #0f7375',
+                  fontWeight: 800,
+                  color: noteSpeseCasisticaDisabled ? String(formStyle.fieldDisabledColor || '#64748b') : '#16375a',
+                  background: noteSpeseCasisticaDisabled ? String(formStyle.fieldDisabledBg || '#e7eef7') : '#fff',
+                  cursor: noteSpeseCasisticaDisabled ? 'not-allowed' : 'pointer',
+                  opacity: noteSpeseCasisticaDisabled ? 0.78 : 1,
+                  WebkitTextFillColor: noteSpeseCasisticaDisabled ? String(formStyle.fieldDisabledColor || '#64748b') : undefined
+                }}
+                disabled={noteSpeseCasisticaDisabled}
               >
                 {noteSpeseCasistiche.map(opt => <option key={opt.codice} value={opt.codice}>{opt.label}</option>)}
               </select>
-              <div style={{ fontSize: 11, color: '#336666', lineHeight: 1.35 }}>Le voci aggiunte dal prezzario saranno collegate alla violazione selezionata.</div>
+              <div style={{ fontSize: 11, color: noteSpeseCasisticaDisabled ? '#64748b' : '#336666', lineHeight: 1.35 }}>{isReadOnly || isRiAgrTecLimitedEdit ? 'Seleziona la violazione per consultare la relativa nota spese.' : 'Le voci aggiunte dal prezzario saranno collegate alla violazione selezionata.'}</div>
               {activeNotaSpeseIncompleteRowsCount > 0 && (
                 <div style={{ marginTop: 4, padding: '8px 10px', borderRadius: 8, border: '1px solid #f59e0b', background: '#fffbeb', color: '#92400e', fontSize: 12, fontWeight: 700, lineHeight: 1.35 }}>
                   Nota spese incompleta: sono presenti {activeNotaSpeseIncompleteRowsCount} {activeNotaSpeseIncompleteRowsCount === 1 ? 'riga senza quantità o con quantità pari a zero' : 'righe senza quantità o con quantità pari a zero'}. Completa le quantità oppure elimina le righe non necessarie prima dell’inoltro.
@@ -8860,11 +8920,11 @@ ${e?.message || String(e)}`
         </div>
       </div>
       <div style={{ display: 'grid', gap: 14 }}>
-        <NoteSpeseManager category='AT' title='Attrezzature e trasporti' rows={activeNotaSpeseRows['AT']} onRowsChange={(nextRows) => { if (isRiAgrTecLimitedEdit || !activeNotaSpeseCasistica) return; setNoteSpeseRowsDraft((prev) => mergeCategoryRowsForCasistica(prev, 'AT', activeNotaSpeseCasistica, nextRows)) }} onDirtyChange={(dirty) => { if (isRiAgrTecLimitedEdit) return; setNoteSpeseFormDirtyByCategory((prev) => ({ ...prev, AT: dirty })) }} resetKey={noteSpeseManagerResetKey} readonly={isRiAgrTecLimitedEdit || !activeNotaSpeseCasistica} />
-        <NoteSpeseManager category='PR' title='Materiali da costruzione' rows={activeNotaSpeseRows['PR']} onRowsChange={(nextRows) => { if (isRiAgrTecLimitedEdit || !activeNotaSpeseCasistica) return; setNoteSpeseRowsDraft((prev) => mergeCategoryRowsForCasistica(prev, 'PR', activeNotaSpeseCasistica, nextRows)) }} onDirtyChange={(dirty) => { if (isRiAgrTecLimitedEdit) return; setNoteSpeseFormDirtyByCategory((prev) => ({ ...prev, PR: dirty })) }} resetKey={noteSpeseManagerResetKey} readonly={isRiAgrTecLimitedEdit || !activeNotaSpeseCasistica} />
-        <NoteSpeseManager category='RU' title='Risorse umane' rows={activeNotaSpeseRows['RU']} onRowsChange={(nextRows) => { if (isRiAgrTecLimitedEdit || !activeNotaSpeseCasistica) return; setNoteSpeseRowsDraft((prev) => mergeCategoryRowsForCasistica(prev, 'RU', activeNotaSpeseCasistica, nextRows)) }} onDirtyChange={(dirty) => { if (isRiAgrTecLimitedEdit) return; setNoteSpeseFormDirtyByCategory((prev) => ({ ...prev, RU: dirty })) }} resetKey={noteSpeseManagerResetKey} readonly={isRiAgrTecLimitedEdit || !activeNotaSpeseCasistica} />
-        <NoteSpeseManager category='SL' title='Semilavorati' rows={activeNotaSpeseRows['SL']} onRowsChange={(nextRows) => { if (isRiAgrTecLimitedEdit || !activeNotaSpeseCasistica) return; setNoteSpeseRowsDraft((prev) => mergeCategoryRowsForCasistica(prev, 'SL', activeNotaSpeseCasistica, nextRows)) }} onDirtyChange={(dirty) => { if (isRiAgrTecLimitedEdit) return; setNoteSpeseFormDirtyByCategory((prev) => ({ ...prev, SL: dirty })) }} resetKey={noteSpeseManagerResetKey} readonly={isRiAgrTecLimitedEdit || !activeNotaSpeseCasistica} />
-        <NoteSpeseManager category='PF' title='Prodotti finiti' rows={activeNotaSpeseRows['PF']} onRowsChange={(nextRows) => { if (isRiAgrTecLimitedEdit || !activeNotaSpeseCasistica) return; setNoteSpeseRowsDraft((prev) => mergeCategoryRowsForCasistica(prev, 'PF', activeNotaSpeseCasistica, nextRows)) }} onDirtyChange={(dirty) => { if (isRiAgrTecLimitedEdit) return; setNoteSpeseFormDirtyByCategory((prev) => ({ ...prev, PF: dirty })) }} resetKey={noteSpeseManagerResetKey} readonly={isRiAgrTecLimitedEdit || !activeNotaSpeseCasistica} />
+        <NoteSpeseManager category='AT' title='Attrezzature e trasporti' rows={activeNotaSpeseRows['AT']} onRowsChange={(nextRows) => { if (isReadOnly || isRiAgrTecLimitedEdit || !activeNotaSpeseCasistica) return; setNoteSpeseRowsDraft((prev) => mergeCategoryRowsForCasistica(prev, 'AT', activeNotaSpeseCasistica, nextRows)) }} onDirtyChange={(dirty) => { if (isReadOnly || isRiAgrTecLimitedEdit) return; setNoteSpeseFormDirtyByCategory((prev) => ({ ...prev, AT: dirty })) }} resetKey={noteSpeseManagerResetKey} readonly={isReadOnly || isRiAgrTecLimitedEdit || !activeNotaSpeseCasistica} />
+        <NoteSpeseManager category='PR' title='Materiali da costruzione' rows={activeNotaSpeseRows['PR']} onRowsChange={(nextRows) => { if (isReadOnly || isRiAgrTecLimitedEdit || !activeNotaSpeseCasistica) return; setNoteSpeseRowsDraft((prev) => mergeCategoryRowsForCasistica(prev, 'PR', activeNotaSpeseCasistica, nextRows)) }} onDirtyChange={(dirty) => { if (isReadOnly || isRiAgrTecLimitedEdit) return; setNoteSpeseFormDirtyByCategory((prev) => ({ ...prev, PR: dirty })) }} resetKey={noteSpeseManagerResetKey} readonly={isReadOnly || isRiAgrTecLimitedEdit || !activeNotaSpeseCasistica} />
+        <NoteSpeseManager category='RU' title='Risorse umane' rows={activeNotaSpeseRows['RU']} onRowsChange={(nextRows) => { if (isReadOnly || isRiAgrTecLimitedEdit || !activeNotaSpeseCasistica) return; setNoteSpeseRowsDraft((prev) => mergeCategoryRowsForCasistica(prev, 'RU', activeNotaSpeseCasistica, nextRows)) }} onDirtyChange={(dirty) => { if (isReadOnly || isRiAgrTecLimitedEdit) return; setNoteSpeseFormDirtyByCategory((prev) => ({ ...prev, RU: dirty })) }} resetKey={noteSpeseManagerResetKey} readonly={isReadOnly || isRiAgrTecLimitedEdit || !activeNotaSpeseCasistica} />
+        <NoteSpeseManager category='SL' title='Semilavorati' rows={activeNotaSpeseRows['SL']} onRowsChange={(nextRows) => { if (isReadOnly || isRiAgrTecLimitedEdit || !activeNotaSpeseCasistica) return; setNoteSpeseRowsDraft((prev) => mergeCategoryRowsForCasistica(prev, 'SL', activeNotaSpeseCasistica, nextRows)) }} onDirtyChange={(dirty) => { if (isReadOnly || isRiAgrTecLimitedEdit) return; setNoteSpeseFormDirtyByCategory((prev) => ({ ...prev, SL: dirty })) }} resetKey={noteSpeseManagerResetKey} readonly={isReadOnly || isRiAgrTecLimitedEdit || !activeNotaSpeseCasistica} />
+        <NoteSpeseManager category='PF' title='Prodotti finiti' rows={activeNotaSpeseRows['PF']} onRowsChange={(nextRows) => { if (isReadOnly || isRiAgrTecLimitedEdit || !activeNotaSpeseCasistica) return; setNoteSpeseRowsDraft((prev) => mergeCategoryRowsForCasistica(prev, 'PF', activeNotaSpeseCasistica, nextRows)) }} onDirtyChange={(dirty) => { if (isReadOnly || isRiAgrTecLimitedEdit) return; setNoteSpeseFormDirtyByCategory((prev) => ({ ...prev, PF: dirty })) }} resetKey={noteSpeseManagerResetKey} readonly={isReadOnly || isRiAgrTecLimitedEdit || !activeNotaSpeseCasistica} />
       </div>
     </div>
   )
@@ -8893,7 +8953,7 @@ ${e?.message || String(e)}`
                   <label style={{
                     minHeight: 36, height: 36, boxSizing: 'border-box',
                     padding: '0 14px', borderRadius: 10, border: '1px solid rgba(0,0,0,0.12)', background: '#f8fbff', color: '#111827',
-                    fontSize: 12, fontWeight: 600, cursor: (attachmentsUploading || isRiAgrTecLimitedEdit) ? 'not-allowed' : 'pointer', opacity: isRiAgrTecLimitedEdit ? 0.55 : 1,
+                    fontSize: 12, fontWeight: 600, cursor: (attachmentsUploading || isReadOnly || isRiAgrTecLimitedEdit) ? 'not-allowed' : 'pointer', opacity: (isReadOnly || isRiAgrTecLimitedEdit) ? 0.55 : 1,
                     display: 'inline-flex', alignItems: 'center', justifyContent: 'center', lineHeight: 1, whiteSpace: 'nowrap'
                   }}>
                     Scegli file
@@ -8902,9 +8962,9 @@ ${e?.message || String(e)}`
                       type='file'
                       multiple
                       style={{ display: 'none' }}
-                      disabled={attachmentsUploading || isRiAgrTecLimitedEdit}
+                      disabled={attachmentsUploading || isReadOnly || isRiAgrTecLimitedEdit}
                       onChange={(e) => {
-                        if (isRiAgrTecLimitedEdit) return
+                        if (isReadOnly || isRiAgrTecLimitedEdit) return
                         setAttachmentsError(null)
                         const files = Array.from((e.target as HTMLInputElement).files || [])
                         setAttachmentFiles(files)
@@ -8976,8 +9036,8 @@ ${e?.message || String(e)}`
                           </button>
                           <button
                             type='button'
-                            disabled={attachmentsUploading || isRiAgrTecLimitedEdit}
-                            onClick={() => { if (isRiAgrTecLimitedEdit) return; openReplacePicker({ id: Number(a.id), name: a.name }) }}
+                            disabled={attachmentsUploading || isReadOnly || isRiAgrTecLimitedEdit}
+                            onClick={() => { if (isReadOnly || isRiAgrTecLimitedEdit) return; openReplacePicker({ id: Number(a.id), name: a.name }) }}
                             style={{
                               fontSize: 12,
                               fontWeight: 700,
@@ -8987,16 +9047,16 @@ ${e?.message || String(e)}`
                               border: '1px solid rgba(29,78,216,0.18)',
                               borderRadius: 8,
                               padding: '6px 10px',
-                              cursor: (attachmentsUploading || isRiAgrTecLimitedEdit) ? 'not-allowed' : 'pointer',
-                              opacity: (attachmentsUploading || isRiAgrTecLimitedEdit) ? 0.6 : 1
+                              cursor: (attachmentsUploading || isReadOnly || isRiAgrTecLimitedEdit) ? 'not-allowed' : 'pointer',
+                              opacity: (attachmentsUploading || isReadOnly || isRiAgrTecLimitedEdit) ? 0.6 : 1
                             }}
                           >
                             Sostituisci
                           </button>
                           <button
                             type='button'
-                            disabled={attachmentsUploading || isRiAgrTecLimitedEdit}
-                            onClick={() => { if (isRiAgrTecLimitedEdit) return; setAttachmentConfirm({ type: 'delete', attachment: { id: Number(a.id), name: a.name } }) }}
+                            disabled={attachmentsUploading || isReadOnly || isRiAgrTecLimitedEdit}
+                            onClick={() => { if (isReadOnly || isRiAgrTecLimitedEdit) return; setAttachmentConfirm({ type: 'delete', attachment: { id: Number(a.id), name: a.name } }) }}
                             style={{
                               fontSize: 12,
                               fontWeight: 700,
@@ -9006,8 +9066,8 @@ ${e?.message || String(e)}`
                               border: '1px solid rgba(217,45,32,0.24)',
                               borderRadius: 8,
                               padding: '6px 10px',
-                              cursor: (attachmentsUploading || isRiAgrTecLimitedEdit) ? 'not-allowed' : 'pointer',
-                              opacity: (attachmentsUploading || isRiAgrTecLimitedEdit) ? 0.6 : 1
+                              cursor: (attachmentsUploading || isReadOnly || isRiAgrTecLimitedEdit) ? 'not-allowed' : 'pointer',
+                              opacity: (attachmentsUploading || isReadOnly || isRiAgrTecLimitedEdit) ? 0.6 : 1
                             }}
                           >
                             Elimina
@@ -9055,6 +9115,7 @@ ${e?.message || String(e)}`
 )}
 
       </div>
+      </fieldset>
 
       {missingMapPointPopupOpen && createPortal(
         <div
@@ -10054,7 +10115,7 @@ function writeDynamicSelection (
   } catch {}
 }
 
-type EditIntentInfo = { oid: number | null, layerUrl: string, idFieldName: string, data: any | null, ts: number }
+type EditIntentInfo = { oid: number | null, layerUrl: string, idFieldName: string, data: any | null, ts: number, readOnly?: boolean, readOnlyMessage?: string }
 
 function readEditIntent (): EditIntentInfo | null {
   try {
@@ -10069,7 +10130,15 @@ function readEditIntent (): EditIntentInfo | null {
     if (!layerUrl || !Number.isFinite(oidNum)) return null
     // evita che un vecchio intento di modifica resti appiccicato quando si entra da Nav > Nuova pratica
     if (!Number.isFinite(ts) || ageMs > 15000) return null
-    return { oid: Number(oidNum), layerUrl, idFieldName, data: j?.data || null, ts: Number.isFinite(ts) ? ts : 0 }
+    return {
+      oid: Number(oidNum),
+      layerUrl,
+      idFieldName,
+      data: j?.data || null,
+      ts: Number.isFinite(ts) ? ts : 0,
+      readOnly: j?.readOnly === true,
+      readOnlyMessage: String(j?.readOnlyMessage || '')
+    }
   } catch {
     return null
   }
@@ -10525,7 +10594,15 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
       const fromStorage = readEditIntent()
       const fromWindow: any = (window as any).__giiEdit || null
       const fallback = fromWindow && fromWindow.oid != null && fromWindow.layerUrl
-        ? { oid: Number(fromWindow.oid), layerUrl: String(fromWindow.layerUrl), idFieldName: String(fromWindow.idFieldName || 'OBJECTID'), data: fromWindow.data || null, ts: Number(fromWindow.ts || Date.now()) }
+        ? {
+            oid: Number(fromWindow.oid),
+            layerUrl: String(fromWindow.layerUrl),
+            idFieldName: String(fromWindow.idFieldName || 'OBJECTID'),
+            data: fromWindow.data || null,
+            ts: Number(fromWindow.ts || Date.now()),
+            readOnly: fromWindow.readOnly === true,
+            readOnlyMessage: String(fromWindow.readOnlyMessage || '')
+          }
         : null
       const next = fromStorage || fallback || null
       if (next) {
@@ -10746,6 +10823,20 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
       setPageVisible(prev => prev === isVisible ? prev : isVisible)
       if (isVisible && !wasVisibleRef.current) {
         setPageVisitCount(c => c + 1)
+        // Ogni ingresso in Nuova pratica deve partire con badge vuoti. Le pagine ExB
+        // restano montate anche quando sono nascoste, quindi i contatori globali possono
+        // altrimenti conservare quelli pubblicati dall'ultima pratica aperta in modifica.
+        if (isCreatePage) {
+          const emptyCounts = { violazione: 0, 'nota-spese': 0, nota_spese: 0, allegati: 0 }
+          const emptyBadgeDetails = {}
+          try { ;(window as any).__giiEditSectionCounts = emptyCounts } catch {}
+          try { ;(window as any).__giiEditSectionBadgeDetails = emptyBadgeDetails } catch {}
+          try {
+            window.dispatchEvent(new CustomEvent('gii:edit-section-counts', {
+              detail: { counts: emptyCounts, badgeDetails: emptyBadgeDetails }
+            }))
+          } catch {}
+        }
         // Reset punti ad ogni ingresso nella pagina
         setClickedPointWgs84(null)
         setMapClickEnabled(false)
@@ -10768,7 +10859,7 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
     const id = setInterval(check, 300)
     check()
     return () => clearInterval(id)
-  }, [])
+  }, [isCreatePage])
   const [formDirty, setFormDirty] = React.useState(false)
   const uiLocked = formDirty
   const [createDs, setCreateDs] = React.useState<any | null>(null)
@@ -10787,6 +10878,34 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
   const initialEditData = !inCreateMode ? (editRecordData || effectiveIntent?.data || activeGate?.state?.data || null) : null
   const editOid = !inCreateMode && effectiveIntent ? Number(effectiveIntent.oid) : null
   const editIdFieldName = !inCreateMode ? String(effectiveIntent?.idFieldName || activeGate?.state?.idFieldName || currentEditDs?.getIdField?.() || 'OBJECTID') : undefined
+
+  const technicalEditAvailability = React.useMemo<boolean | null>(() => {
+    if (inCreateMode) return null
+    const ctx = readGiiUserContext()
+    const currentRole = normalizeRoleCode(ctx.role)
+    if (currentRole !== 'TI' && currentRole !== 'RI') return null
+    const d: any = initialEditData || {}
+    const stato = normalizeIntOrNull(pickAttrCI(d, [`stato_${currentRole}`, `STATO_${currentRole}`]))
+    const presa = normalizeIntOrNull(pickAttrCI(d, [`presa_in_carico_${currentRole}`, `PRESA_IN_CARICO_${currentRole}`]))
+    const esito = pickAttrCI(d, [`esito_${currentRole}`, `ESITO_${currentRole}`])
+    const inCharge = stato === STATO_PRESA_IN_CARICO || presa === PRESA_IN_CARICO
+    const closedOrForwarded =
+      (esito !== null && esito !== undefined && String(esito).trim() !== '' && String(esito) !== '0') ||
+      (stato != null && stato > STATO_PRESA_IN_CARICO)
+    let owned = true
+    if (currentRole === 'TI') {
+      const currentUsername = String(ctx.username || '').trim().toLowerCase()
+      const assignedUsername = String(pickAttrCI(d, ['ti_assegnato_username', 'ti_assegnato_user', 'ti_assegnato']) || '').trim().toLowerCase()
+      owned = !!currentUsername && !!assignedUsername && currentUsername === assignedUsername
+    }
+    return owned && inCharge && !closedOrForwarded
+  }, [inCreateMode, initialEditData])
+
+  const readOnlyEditMode = !inCreateMode && (
+    technicalEditAvailability === false ||
+    (technicalEditAvailability == null && effectiveIntent?.readOnly === true)
+  )
+  const readOnlyEditMessage = String(effectiveIntent?.readOnlyMessage || 'Pratica non attualmente assegnata al proprio ruolo. I dati sono disponibili in sola consultazione.')
 
   const modeBg = inCreateMode
     ? String(cfg.modeBgCreate || defaultConfig.modeBgCreate)
@@ -11000,6 +11119,8 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
               editLayerUrl={!inCreateMode ? ensureLayerIndex(normalizeFeatureLayerUrl(effectiveIntent?.layerUrl || activeGate?.state?.layerUrl || readDynamicSelection().layerUrl || '')) : ''}
               titleText={inCreateMode ? 'Nuova rilevazione' : 'Modifica rilevazione'}
               saveText={'Salva'}
+              readOnly={readOnlyEditMode}
+              readOnlyMessage={readOnlyEditMessage}
               onDirtyChange={(dirty: boolean) => setFormDirty(dirty)}
               onTabChange={(tab: string) => setFormTab(tab)}
               onCloseEdit={handleCloseEditPage}

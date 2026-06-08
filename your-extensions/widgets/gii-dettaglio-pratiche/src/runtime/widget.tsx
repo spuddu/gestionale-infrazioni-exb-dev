@@ -2336,12 +2336,12 @@ function parseModifiedFieldNames (raw: any): string[] {
 }
 
 const VIOLATION_LABEL_BY_ARTICLE: Record<string, string> = {
-  '8': 'Art. 8 - Violazione servizio reperibilità',
+  '8': 'Art. 8 - Violazione servizio di reperibilità',
   '12': 'Art. 12 - Negato accesso ai fondi (al personale consortile)',
   '15': 'Art. 15 - Prelievo abusivo d’acqua',
-  '16': 'Art. 16 - Comunicazione di irrigazione tardiva',
-  '17': 'Art. 17 - Variazione o rinuncia tardiva',
-  '27': 'Art. 27 - Spreco d’acqua/uso negligente risorsa idrica',
+  '16': 'Art. 16 - Inosservanza dei termini di presentazione delle comunicazioni di irrigazione',
+  '17': 'Art. 17 - Inosservanza dei termini di presentazione delle comunicazioni di variazione e di rinuncia',
+  '27': 'Art. 27 - Spreco d’acqua/uso negligente della risorsa idrica',
   '28': 'Art. 28 - Violazione prescrizioni del consorzio',
   '29': 'Art. 29 - Violazione termini restituzione attrezzature',
   '30': 'Art. 30 - Danneggiamento e/o perdita attrezzature',
@@ -2349,10 +2349,10 @@ const VIOLATION_LABEL_BY_ARTICLE: Record<string, string> = {
   '32': 'Art. 32 - Negato accesso ai fondi (al consorziato)',
   '33': 'Art. 33 - Inosservanza limiti temporali di prelievo',
   '34': 'Art. 34 - Interferenze',
-  '35': 'Art. 35 - Manomissione reti di dispensa e allaccio aspirazione',
+  '35': 'Art. 35 - Manomissione reti di dispensa e allaccio di apparecchi di aspirazione all’idrante',
   '36': 'Art. 36 - Uso attrezzature non autorizzate',
   '37': 'Art. 37 - Uso sistemi di irrigazione incompatibili',
-  '39': 'Art. 39 - Danni strutture irrigue'
+  '39': 'Art. 39 - Danni alle strutture irrigue'
 }
 
 function getFieldAliasForIter (fieldName: string, aliasMap?: Record<string, string>): string {
@@ -2364,7 +2364,7 @@ function getFieldAliasForIter (fieldName: string, aliasMap?: Record<string, stri
   // e, nell'iter, risultano troppo tecnici o ambigui. Qui li traduciamo
   // in etichette funzionali, comprensibili per l'operatore.
   if (rawKey === normKey('norma_violata1') || rawKey === normKey('Norma violata 1')) return 'Art. 15 - Prelievo abusivo d’acqua'
-  if (rawKey === normKey('norma_violata2') || rawKey === normKey('Norma violata 2')) return 'Art. 16 - Comunicazione di irrigazione tardiva / Art. 17 - Variazione o rinuncia tardiva'
+  if (rawKey === normKey('norma_violata2') || rawKey === normKey('Norma violata 2')) return 'Articoli 16 e 17'
   if (rawKey === normKey('norma_violata3') || rawKey === normKey('Norma violata 3')) return 'Altre violazioni (artt. 8, 12, 27-37 e 39)'
 
   const artMatch = raw.match(/^v_art0*(\d+)$/i)
@@ -2675,10 +2675,10 @@ const NSD_CATEGORY_LABELS: Record<NsdCategory, string> = {
 
 const NSD_UNLINKED_CASISTICA = '__GII_NSD_NON_COLLEGATA__'
 const NSD_CASISTICA_INFO: Record<string, { label: string; order: number }> = {
-  C100_REPERIBILITA: { label: 'Art. 8 - Violazione servizio reperibilità', order: 8 },
-  C101_SPRECO_ACQUA: { label: 'Art. 27 - Spreco d’acqua/uso negligente risorsa idrica', order: 27 },
+  C100_REPERIBILITA: { label: 'Art. 8 - Violazione servizio di reperibilità', order: 8 },
+  C101_SPRECO_ACQUA: { label: 'Art. 27 - Spreco d’acqua/uso negligente della risorsa idrica', order: 27 },
   C104_ATTREZZATURE_DANNEGGIATE: { label: 'Art. 30 - Danneggiamento e/o perdita attrezzature', order: 30 },
-  C113_DANNI_STRUTTURE_IRRIGUE: { label: 'Art. 39 - Danni strutture irrigue', order: 39 }
+  C113_DANNI_STRUTTURE_IRRIGUE: { label: 'Art. 39 - Danni alle strutture irrigue', order: 39 }
 }
 
 function nsdNormalizeCasistica (v: any): string {
@@ -3570,10 +3570,10 @@ const isPgOnlyField = React.useCallback((fieldName: string) => {
 
   const SURVEY_CHOICE_LABELS: Record<string, Record<string, string>> = {
     norma1: {
-      'Art15.1': 'Art. 15.1 - Prelievo abusivo d’acqua parziale (superamento estensione terreni irrigati rispetto a quelli comunicati)',
-      'Art15.2': 'Art. 15.2 - Recidiva prelievo abusivo d’acqua parziale',
-      'Art15.3': 'Art. 15.3 - Prelievo abusivo d’acqua totale (mancata comunicazione)',
-      'Art15.4': 'Art. 15.4 - Recidiva prelievo abusivo d’acqua totale'
+      'Art15.1': 'Art. 15 - Prelievo abusivo d’acqua',
+      'Art15.2': 'Art. 15 - Prelievo abusivo d’acqua',
+      'Art15.3': 'Art. 15 - Prelievo abusivo d’acqua',
+      'Art15.4': 'Art. 15 - Prelievo abusivo d’acqua'
     },
     art15_parziale: {
       'Art15.1': 'Prima contestazione',
@@ -3584,17 +3584,17 @@ const isPgOnlyField = React.useCallback((fieldName: string) => {
       'Art15.4': 'Recidiva'
     },
     art16_17: {
-      'Art16': 'Art. 16 - Comunicazione di irrigazione tardiva',
-      'Art17': 'Art. 17 - Variazione o rinuncia tardiva'
+      'Art16': 'Art. 16 - Inosservanza dei termini di presentazione delle comunicazioni di irrigazione',
+      'Art17': 'Art. 17 - Inosservanza dei termini di presentazione delle comunicazioni di variazione e di rinuncia'
     },
     art17_tipo: {
       'Art17.1': 'Variazione tardiva',
       'Art17.2': 'Rinuncia tardiva'
     },
     norma3: {
-      'Art8': 'Art. 8 - Violazione servizio reperibilità',
+      'Art8': 'Art. 8 - Violazione servizio di reperibilità',
       'Art12': 'Art. 12 - Negato accesso ai fondi (al personale consortile)',
-      'Art27': 'Art. 27 - Spreco d’acqua/uso negligente risorsa idrica',
+      'Art27': 'Art. 27 - Spreco d’acqua/uso negligente della risorsa idrica',
       'Art28': 'Art. 28 - Violazione prescrizioni del consorzio',
       'Art29': 'Art. 29 - Violazione termini restituzione attrezzature',
       'Art30': 'Art. 30 - Danneggiamento e/o perdita attrezzature',
@@ -3602,10 +3602,10 @@ const isPgOnlyField = React.useCallback((fieldName: string) => {
       'Art32': 'Art. 32 - Negato accesso ai fondi (al consorziato)',
       'Art33': 'Art. 33 - Inosservanza limiti temporali di prelievo',
       'Art34': 'Art. 34 - Interferenze',
-      'Art35': 'Art. 35 - Manomissione reti di dispensa e allaccio aspirazione',
+      'Art35': 'Art. 35 - Manomissione reti di dispensa e allaccio di apparecchi di aspirazione all’idrante',
       'Art36': 'Art. 36 - Uso attrezzature non autorizzate',
       'Art37': 'Art. 37 - Uso sistemi di irrigazione incompatibili',
-      'Art39': 'Art. 39 - Danni strutture irrigue'
+      'Art39': 'Art. 39 - Danni alle strutture irrigue'
     }
   }
 
@@ -3648,29 +3648,68 @@ const isPgOnlyField = React.useCallback((fieldName: string) => {
     return { artLabel: artNum ? `Art. ${artNum}` : 'Art.', description: txt || '—' }
   }, [getArticleNumber])
 
+  const renderViolationArticleLine = React.useCallback((artLabel: string, description: string, grado?: string) => {
+    const hasGrado = grado != null && String(grado).trim() !== ''
+    return (
+      <div style={{
+        display: 'grid',
+        gridTemplateColumns: hasGrado
+          ? 'max-content minmax(0, 1fr) max-content'
+          : 'max-content minmax(0, 1fr)',
+        columnGap: 8,
+        alignItems: 'center',
+        padding: '7px 0',
+        borderBottom: '1px solid rgba(0,0,0,0.07)',
+        boxSizing: 'border-box',
+        minWidth: 0
+      }}>
+        <div style={{
+          fontSize: 12,
+          color: '#6b7280',
+          fontWeight: 700,
+          lineHeight: 1.25,
+          whiteSpace: 'nowrap'
+        }}>
+          {artLabel}
+        </div>
+        <div style={{
+          fontSize: 13,
+          color: '#1f2937',
+          fontWeight: 600,
+          lineHeight: 1.35,
+          minWidth: 0,
+          overflowWrap: 'anywhere'
+        }}>
+          {description || '—'}
+        </div>
+        {hasGrado
+          ? (
+            <div style={{ display: 'flex', alignItems: 'baseline', gap: 5, whiteSpace: 'nowrap', minWidth: 0 }}>
+              <span style={{ fontSize: 12, color: '#6b7280', fontWeight: 700, lineHeight: 1.25 }}>
+                Grado di gravità
+              </span>
+              <span style={{ fontSize: 13, color: '#1f2937', fontWeight: 600, lineHeight: 1.25 }}>
+                {grado}
+              </span>
+            </div>
+            )
+          : null}
+      </div>
+    )
+  }, [])
+
   const renderAltraViolazioneLine = React.useCallback((code: any, idx: number) => {
     const descrFull = getSurveyChoiceLabel('norma3', code)
     const artNum = getArticleNumber(code)
     const parsed = splitViolationLabel(code, descrFull)
     const hasGrado = !!artNum && articoliConGrado.has(artNum)
-    const grado = hasGrado ? (gradiViolazioniByArt[artNum] || '—') : ''
+    const grado = hasGrado ? (gradiViolazioniByArt[artNum] || '—') : undefined
     return (
-      <div key={`${String(code)}-${idx}`} style={{
-        display: 'grid',
-        gridTemplateColumns: hasGrado ? 'minmax(76px, auto) 1fr minmax(78px, auto)' : 'minmax(76px, auto) 1fr',
-        gap: 10,
-        alignItems: 'start',
-        padding: '7px 0',
-        borderBottom: '1px solid rgba(17, 24, 39, 0.06)'
-      }}>
-        <div style={{ fontSize: 12, fontWeight: 700, color: '#374151', whiteSpace: 'nowrap' }}>{parsed.artLabel}</div>
-        <div style={{ fontSize: 13, color: '#111827', lineHeight: 1.35 }}>{parsed.description}</div>
-        {hasGrado
-          ? <div style={{ fontSize: 12, fontWeight: 700, color: '#374151', whiteSpace: 'nowrap', textAlign: 'right' }}>Gravità: {grado}</div>
-          : null}
-      </div>
+      <React.Fragment key={`${String(code)}-${idx}`}>
+        {renderViolationArticleLine(parsed.artLabel, parsed.description, grado)}
+      </React.Fragment>
     )
-  }, [articoliConGrado, getArticleNumber, getSurveyChoiceLabel, gradiViolazioniByArt, splitViolationLabel])
+  }, [articoliConGrado, getArticleNumber, getSurveyChoiceLabel, gradiViolazioniByArt, renderViolationArticleLine, splitViolationLabel])
 
   const renderSurveyGroup = React.useCallback((title: string, rows: Array<{ label: string; value: any; multiline?: boolean }>, emptyText = '—') => {
     return (
@@ -3691,10 +3730,10 @@ const isPgOnlyField = React.useCallback((fieldName: string) => {
     const leftTxt = leftValue == null || leftValue === '' ? '—' : leftValue
     const rightTxt = rightValue == null || rightValue === '' ? '—' : rightValue
     return (
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: 8 }}>
+      <>
         <DetailRow label={leftLabel} value={leftTxt} labelSize={12} valueSize={13} multiline={false} />
         <DetailRow label={rightLabel} value={rightTxt} labelSize={12} valueSize={13} multiline={false} />
-      </div>
+      </>
     )
   }, [])
 
@@ -3708,8 +3747,12 @@ const isPgOnlyField = React.useCallback((fieldName: string) => {
     const art15ParzRaw = getRawField('norma15_parziale')
     const art15TotRaw = getRawField('norma15_totale')
     const art15Code = !isEmptyValue(art15ParzRaw) ? art15ParzRaw : art15TotRaw
+    const art15NormaRaw = getRawField('norma_violata1')
     const occorrenzaInfo = getRawFieldWithName(['occorrenza'])
-    const hasArt15 = !isEmptyValue(art15TipoAbusoRaw) || !isEmptyValue(art15Code) || !isEmptyValue(occorrenzaInfo.value) || !isEmptyValue(getRawField('sup_dichiarata_art15')) || !isEmptyValue(getRawField('sup_irrigata_art15'))
+    // Il gruppo deve comparire solo quando l'Art. 15 è realmente selezionato.
+    // Superfici e occorrenza possono contenere valori residui/default e non sono
+    // sufficienti, da sole, a dimostrare la presenza della violazione.
+    const hasArt15 = !isEmptyValue(art15TipoAbusoRaw) || !isEmptyValue(art15Code) || !isEmptyValue(art15NormaRaw)
 
     const art15Body = hasArt15
       ? (() => {
@@ -3728,7 +3771,8 @@ const isPgOnlyField = React.useCallback((fieldName: string) => {
           const supDich = formatFieldValue(getRawField('sup_dichiarata_art15'), 'sup_dichiarata_art15', fieldTypeMap?.sup_dichiarata_art15, 'Superficie dichiarata (ha.a.ca)')
           const supIrr = formatFieldValue(getRawField('sup_irrigata_art15'), 'sup_irrigata_art15', fieldTypeMap?.sup_irrigata_art15, 'Superficie irrigata (ha.a.ca)')
           return (
-            <div style={{ display: 'grid', gap: 8 }}>
+            <div style={{ display: 'grid', gap: 0 }}>
+              {renderViolationArticleLine('Art. 15', 'Prelievo abusivo d’acqua')}
               {renderViolationSurfacesLine('Tipo di abuso', tipoAbuso, 'Occorrenza', occorrenza)}
               {renderViolationSurfacesLine('Superficie dichiarata (ha.a.ca)', supDich, 'Superficie irrigata (ha.a.ca)', supIrr)}
             </div>
@@ -3738,15 +3782,16 @@ const isPgOnlyField = React.useCallback((fieldName: string) => {
 
     const art16_17Raw = getRawField('norma16_17')
     const art17TipoRaw = getRawField('art17_tipo')
-    const has16or17 = !isEmptyValue(art16_17Raw) || !isEmptyValue(art17TipoRaw) || !isEmptyValue(getRawField('sup_dichiarata_art16')) || !isEmptyValue(getRawField('sup_dichiarata_art17_1')) || !isEmptyValue(getRawField('sup_dichiarata_art17_2')) || !isEmptyValue(getRawField('sup_irrigata_art16_17_2')) || !isEmptyValue(getRawField('sup_irrigata_art17_1'))
+    const art16_17NormaRaw = getRawField('norma_violata2')
+    // Anche questo gruppo compare soltanto in presenza di una selezione reale;
+    // gli eventuali valori numerici residui delle superfici non lo rendono visibile.
+    const has16or17 = !isEmptyValue(art16_17Raw) || !isEmptyValue(art17TipoRaw) || !isEmptyValue(art16_17NormaRaw)
     const art1617Body = has16or17
       ? (() => {
           if (String(art16_17Raw || '') === 'Art16') {
-            const descrFull = getSurveyChoiceLabel('art16_17', art16_17Raw)
-            const descr = String(descrFull).replace(/^Art\.?\s*16\s*-\s*/i, '')
             return (
-              <div style={{ display: 'grid', gap: 8 }}>
-                {renderViolationTextLine('Descrizione', descr)}
+              <div style={{ display: 'grid', gap: 0 }}>
+                {renderViolationArticleLine('Art. 16', 'Inosservanza dei termini di presentazione delle comunicazioni di irrigazione')}
                 {renderViolationSurfacesLine(
                   'Superficie dichiarata (ha.a.ca)',
                   formatFieldValue(getRawField('sup_dichiarata_art16'), 'sup_dichiarata_art16', fieldTypeMap?.sup_dichiarata_art16, 'Superficie dichiarata (ha.a.ca)'),
@@ -3761,7 +3806,8 @@ const isPgOnlyField = React.useCallback((fieldName: string) => {
             const tipoViolazione = getSurveyChoiceLabel('art17_tipo', art17TipoRaw)
             const isVar = String(art17TipoRaw || '') === 'Art17.1'
             return (
-              <div style={{ display: 'grid', gap: 8 }}>
+              <div style={{ display: 'grid', gap: 0 }}>
+                {renderViolationArticleLine('Art. 17', 'Inosservanza dei termini di presentazione delle comunicazioni di variazione e di rinuncia')}
                 {renderViolationTextLine('Tipo comunicazione', tipoViolazione)}
                 {isVar
                   ? renderViolationSurfacesLine(
@@ -3816,13 +3862,13 @@ const isPgOnlyField = React.useCallback((fieldName: string) => {
 
     return (
       <div style={{ display: 'grid', gap: 12 }}>
-        {renderViolationGroup('Art. 15 - Prelievo abusivo d’acqua', art15Body)}
-        {renderViolationGroup('Art. 16 - Comunicazione di irrigazione tardiva / Art. 17 - Variazione o rinuncia tardiva', art1617Body)}
-        {renderViolationGroup('Altre violazioni', altreBody)}
+        {hasArt15 ? renderViolationGroup('Prelievo abusivo d’acqua', art15Body) : null}
+        {has16or17 ? renderViolationGroup('Inosservanza termini presentazione comunicazioni', art1617Body) : null}
+        {altreCodes.length ? renderViolationGroup('Altre violazioni', altreBody) : null}
         {renderViolationGroup('Dettagli della violazione', detailsBody)}
       </div>
     )
-  }, [getRawField, getRawFieldWithName, getFieldLabel, splitMultiValues, fieldTypeMap, getSurveyChoiceLabel, renderAltraViolazioneLine, renderViolationGroup, renderViolationSurfacesLine, renderViolationTextLine])
+  }, [getRawField, getRawFieldWithName, getFieldLabel, splitMultiValues, fieldTypeMap, getSurveyChoiceLabel, renderAltraViolazioneLine, renderViolationArticleLine, renderViolationGroup, renderViolationSurfacesLine, renderViolationTextLine])
 
   const generalSummary = React.useMemo(() => {
     const areaRaw = pickAttrCI(data, ['area_cod', 'Area_cod', 'AREA_COD', 'area'])

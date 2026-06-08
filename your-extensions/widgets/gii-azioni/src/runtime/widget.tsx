@@ -1596,6 +1596,11 @@ function ActionsPanel (props: {
   const tiAmmLoadingRef = React.useRef(false)
   const [tiAmmLoadErr, setTiAmmLoadErr] = React.useState<string>('')
 
+  // Riapertura amministrativa: evita che lo stesso numero di riapertura
+  // possa avviare più volte un nuovo ciclo TI_AMM.
+  const [riaperturaWorkflowStarted, setRiaperturaWorkflowStarted] = React.useState(false)
+  const [riaperturaWorkflowCheckLoading, setRiaperturaWorkflowCheckLoading] = React.useState(false)
+
   // Popup di diniego (validazione pre-trasmissione)
   const [denyPopupMessages, setDenyPopupMessages] = React.useState<string[]>([])
   const [zeroNotaSpeseWarning, setZeroNotaSpeseWarning] = React.useState<string[]>([])
@@ -1817,6 +1822,25 @@ function ActionsPanel (props: {
     return fl
   }
 
+  const riaperturaAmmFlag = toNumOrNull(pickAttrCI(data, ['riapertura_amm', 'RIAPERTURA_AMM'])) === 1
+  const riaperturaAmmNumero = toNumOrNull(pickAttrCI(data, ['riapertura_amm_numero', 'RIAPERTURA_AMM_NUMERO']))
+  const riaperturaAmmCausale = String(pickAttrCI(data, ['riapertura_amm_causale', 'RIAPERTURA_AMM_CAUSALE']) || '').trim()
+  const riaperturaAmmDispostaIl = pickAttrCI(data, ['riapertura_amm_disposta_il', 'RIAPERTURA_AMM_DISPOSTA_IL'])
+  const riaperturaAmmDispostaDa = String(pickAttrCI(data, ['riapertura_amm_disposta_da', 'RIAPERTURA_AMM_DISPOSTA_DA']) || '').trim()
+  const riaperturaAmmAutorizzazione = String(pickAttrCI(data, ['riapertura_amm_autorizzazione', 'RIAPERTURA_AMM_AUTORIZZAZIONE']) || '').trim()
+  const riaperturaAmmMotivo = String(pickAttrCI(data, ['riapertura_amm_motivo', 'RIAPERTURA_AMM_MOTIVO']) || '').trim()
+  const riaperturaAmmCompleta = Boolean(
+    riaperturaAmmFlag &&
+    riaperturaAmmNumero != null && riaperturaAmmNumero > 0 &&
+    riaperturaAmmCausale &&
+    riaperturaAmmDispostaIl &&
+    riaperturaAmmDispostaDa &&
+    riaperturaAmmAutorizzazione &&
+    riaperturaAmmMotivo
+  )
+
+
+
   const sqlQuote = (v: any): string => `'${String(v ?? '').replace(/'/g, "''")}'`
 
   const globalIdVariants = (raw: any): string[] => {
@@ -1837,6 +1861,43 @@ function ActionsPanel (props: {
       ? variants.map(g => `${fieldName} = ${sqlQuote(g)}`).join(' OR ')
       : '1=0'
   }
+
+  React.useEffect(() => {
+    let cancelled = false
+    setRiaperturaWorkflowStarted(false)
+    if (role !== 'RI_AMM' || !riaperturaAmmCompleta || !riaperturaAmmNumero || !data) {
+      setRiaperturaWorkflowCheckLoading(false)
+      return () => { cancelled = true }
+    }
+
+    const parentGlobalId = String(pickAttrCI(data, ['globalid', 'GlobalID', 'GLOBALID', 'parent_globalid']) || '').trim()
+    if (!parentGlobalId) {
+      setRiaperturaWorkflowCheckLoading(false)
+      return () => { cancelled = true }
+    }
+
+    setRiaperturaWorkflowCheckLoading(true)
+    ;(async () => {
+      try {
+        const logLayer = await getCycleLogLayer()
+        if (!logLayer?.queryFeatures) return
+        const q = logLayer.createQuery ? logLayer.createQuery() : {}
+        const marker = `Riapertura amministrativa n. ${riaperturaAmmNumero}`
+        q.where = `(${parentGlobalIdWhere('parent_globalid', parentGlobalId)}) AND ruolo_competente = 'RI_AMM' AND evento_chiusura = 'NUOVA_ASSEGNAZIONE' AND ruolo_destinatario = 'TI_AMM' AND note_chiusura LIKE ${sqlQuote(`%${marker}%`)}`
+        q.outFields = [String(logLayer.objectIdField || 'OBJECTID')]
+        q.returnGeometry = false
+        q.num = 1
+        const res = await logLayer.queryFeatures(q)
+        if (!cancelled) setRiaperturaWorkflowStarted(Boolean(res?.features?.length))
+      } catch (e) {
+        console.warn('[GII-Azioni] Verifica workflow di riapertura non disponibile:', e)
+      } finally {
+        if (!cancelled) setRiaperturaWorkflowCheckLoading(false)
+      }
+    })()
+
+    return () => { cancelled = true }
+  }, [data, role, riaperturaAmmCompleta, riaperturaAmmNumero, selectionKey])
 
   const getObjectIdValue = (attrs: any, layer?: any): any => {
     const oidField = String(layer?.objectIdField || 'OBJECTID')
@@ -1961,10 +2022,10 @@ function ActionsPanel (props: {
 
   type NotaSpeseCasisticaCheck = { codice: string; art: number; label: string }
   const NOTE_SPESE_CASISTICHE_CHECK: NotaSpeseCasisticaCheck[] = [
-    { codice: 'C100_REPERIBILITA', art: 8, label: 'Art. 8 - Violazione servizio reperibilità' },
-    { codice: 'C101_SPRECO_ACQUA', art: 27, label: 'Art. 27 - Spreco d’acqua/uso negligente risorsa idrica' },
+    { codice: 'C100_REPERIBILITA', art: 8, label: 'Art. 8 - Violazione servizio di reperibilità' },
+    { codice: 'C101_SPRECO_ACQUA', art: 27, label: 'Art. 27 - Spreco d’acqua/uso negligente della risorsa idrica' },
     { codice: 'C104_ATTREZZATURE_DANNEGGIATE', art: 30, label: 'Art. 30 - Danneggiamento e/o perdita attrezzature' },
-    { codice: 'C113_DANNI_STRUTTURE_IRRIGUE', art: 39, label: 'Art. 39 - Danni strutture irrigue' }
+    { codice: 'C113_DANNI_STRUTTURE_IRRIGUE', art: 39, label: 'Art. 39 - Danni alle strutture irrigue' }
   ]
 
   const isFlagSelectedLocal = (v: any): boolean => {
@@ -2858,11 +2919,27 @@ function ActionsPanel (props: {
     inChargeByRole &&
     !roleClosedOrForwarded
 
+  // TI e RI delle aree tecniche devono poter consultare anche le pratiche già
+  // trasmesse ad altri ruoli. In tal caso gii-editing-ti viene aperto in sola
+  // consultazione; quando la pratica torna nella disponibilità del ruolo, il
+  // medesimo controllo rende nuovamente editabili i campi di competenza.
+  const canOpenTechnicalReadOnly =
+    hasSel &&
+    !loading &&
+    pending === null &&
+    canShowEdit &&
+    (role === 'TI' || role === 'RI')
+
+  const canOpenEditPage = canEdit || canOpenTechnicalReadOnly
+  const openInReadOnly = canOpenEditPage && !canEdit && (role === 'TI' || role === 'RI')
+
   const editButtonTitle = canEdit
     ? (isAmmEditRole ? 'Apri scheda atto amministrativo' : 'Modifica rilevazione')
-    : (isAmmEditRole
-      ? 'Modifica dell’atto amministrativo non disponibile: la pratica deve essere già presa in carico dal ruolo corrente.'
-      : 'Modifica non disponibile: la pratica deve essere già presa in carico dal ruolo corrente.')
+    : (openInReadOnly
+      ? 'Apri la rilevazione in sola consultazione: la pratica non è attualmente nella disponibilità del ruolo corrente.'
+      : (isAmmEditRole
+        ? 'Modifica dell’atto amministrativo non disponibile: la pratica deve essere già presa in carico dal ruolo corrente.'
+        : 'Apertura non disponibile: selezionare una pratica.'))
 
   const canUseRapportoPdf =
     hasSel &&
@@ -2871,7 +2948,7 @@ function ActionsPanel (props: {
     pending === null
 
   const handleEditPage = () => {
-    if (!canEdit) return
+    if (!canOpenEditPage) return
     try {
       const payload = {
         oid,
@@ -2879,6 +2956,10 @@ function ActionsPanel (props: {
         idFieldName: active?.state?.idFieldName || 'OBJECTID',
         dsId: active?.state?.ds?.id ?? null,
         layerUrl: active?.state?.ds?.getDataSourceJson?.()?.url ?? active?.state?.ds?.dataSourceJson?.url ?? null,
+        readOnly: openInReadOnly,
+        readOnlyMessage: openInReadOnly
+          ? 'Pratica non attualmente assegnata al proprio ruolo. I dati sono disponibili in sola consultazione.'
+          : '',
         ts: Date.now()
       }
       ;(window as any).__giiEdit = payload
@@ -3382,6 +3463,21 @@ function ActionsPanel (props: {
   )
   const tiAmmReturned = (esitoTiAmmNum != null) || (statoTiAmmNum === STATO_APPROVATA) || (statoTiAmmNum === STATO_RESPINTA)
 
+  const riaperturaWorkflowCandidate =
+    role === 'RI_AMM' &&
+    riaperturaAmmFlag &&
+    !riaperturaWorkflowStarted &&
+    !tiAmmAssignmentOpen
+
+  const riaperturaWorkflowDaAvviare =
+    riaperturaWorkflowCandidate &&
+    riaperturaAmmCompleta &&
+    !riaperturaWorkflowCheckLoading
+
+  const riaperturaWorkflowDaCompletare =
+    riaperturaWorkflowCandidate &&
+    !riaperturaAmmCompleta
+
   // Caso specifico RI_AMM: rientro da integrazione tecnica.
   // Dopo il giro RI_AMM → RI_AGR o RI_TEC → DT_AGR o DT_TEC → RI_AMM, il rientro
   // verso il TI_AMM originario è una restituzione/trasmissione (blu).
@@ -3451,6 +3547,7 @@ function ActionsPanel (props: {
   const riAmmShouldAssignTiAmm =
     role === 'RI_AMM' &&
     (
+      riaperturaWorkflowDaAvviare ||
       !hasTiAmmAssigned ||
       (riAmmSenderIsTecnico && !riAmmHaChiestoIntegrazioneTecnica)
     )
@@ -3642,7 +3739,7 @@ function ActionsPanel (props: {
   // Non dipende più dalla sola presenza storica di ti_amm_assegnato_username:
   // se la pratica arriva ora da DT/DIR tecnico per la prima fase amministrativa,
   // RI_AMM deve poter assegnare anche se nel record esiste uno storico TI_AMM.
-  const canStartAssegnaTiAmm =
+  const canStartAssegnaTiAmmStandard =
     role === 'RI_AMM' &&
     hasSel &&
     !loading &&
@@ -3651,6 +3748,16 @@ function ActionsPanel (props: {
     riAmmShouldAssignTiAmm &&
     effectivePresaNum === PRESA_IN_CARICO &&
     effectiveStatoNum === STATO_PRESA_IN_CARICO
+
+  const canStartAssegnaTiAmmRiapertura =
+    role === 'RI_AMM' &&
+    hasSel &&
+    !loading &&
+    !lockedByTransmit &&
+    canChooseWorkflowAction &&
+    riaperturaWorkflowDaAvviare
+
+  const canStartAssegnaTiAmm = canStartAssegnaTiAmmStandard || canStartAssegnaTiAmmRiapertura
 
   type WorkflowMenuItem = {
     key: Exclude<Pending, null | 'TAKE'>
@@ -3712,10 +3819,18 @@ function ActionsPanel (props: {
         },
         {
           key: 'ASSEGNA_TI_AMM',
-          label: `Assegna al ${getRoleLabelForMenu('TI_AMM')}`,
-          desc: 'Assegna la pratica al Tecnico Istruttore amministrativo.',
+          label: riaperturaWorkflowCandidate
+            ? 'Avvia nuova istruttoria amministrativa'
+            : `Assegna al ${getRoleLabelForMenu('TI_AMM')}`,
+          desc: riaperturaWorkflowDaCompletare
+            ? 'Completare e salvare tutti i dati della scheda Riapertura prima di avviare il nuovo ciclo.'
+            : riaperturaWorkflowCheckLoading
+              ? 'Verifica del ciclo di riapertura in corso.'
+              : riaperturaWorkflowDaAvviare
+                ? `Apre il nuovo ciclo di riapertura n. ${riaperturaAmmNumero} e assegna la pratica al Tecnico Istruttore amministrativo.`
+                : 'Assegna la pratica al Tecnico Istruttore amministrativo.',
           enabled: canStartAssegnaTiAmm,
-          visible: role === 'RI_AMM' && riAmmShouldAssignTiAmm,
+          visible: role === 'RI_AMM' && (riAmmShouldAssignTiAmm || riaperturaWorkflowCandidate),
           color: buttonColors.approva,
           textColor: buttonColors.approvaText
         },
@@ -4248,6 +4363,7 @@ function ActionsPanel (props: {
       const riAmmUser = String(u?.username || '').trim()
       const tiAmm = tiAmmOptions.find(o => o.username === tiAmmSelected) || null
       const tiAmmName = String(tiAmm?.fullName || tiAmmSelected).trim()
+      const isRiaperturaAssignment = riaperturaWorkflowDaAvviare
 
       const upd: Record<string, any> = {
         ti_amm_assegnato_username: tiAmmSelected,
@@ -4291,11 +4407,49 @@ function ActionsPanel (props: {
         if (fDtStatoRiAmm) upd[fDtStatoRiAmm] = now
         if (fEsitoRiAmm) upd[fEsitoRiAmm] = null
         if (fDtEsitoRiAmm) upd[fDtEsitoRiAmm] = null
+
+        if (isRiaperturaAssignment) {
+          // La nuova istruttoria riparte dal TI_AMM e dovrà essere nuovamente
+          // verificata da RI_AMM e approvata dal DA. I dati sostanziali del
+          // ricorso/CdA restano storicizzati nel record e nel log.
+          const fStatoDa = pick('stato_DA')
+          const fDtStatoDa = pick('dt_stato_DA')
+          const fDtPresaDa = pick('dt_presa_in_carico_DA')
+          const fEsitoDa = pick('esito_DA')
+          const fDtEsitoDa = pick('dt_esito_DA')
+          const fChiusuraIl = pick('istruttoria_amm_chiusa_il')
+          const fChiusuraDa = pick('istruttoria_amm_chiusa_da')
+          const fPdfIl = pick('verbale_pdf_generato_il')
+          const fPdfDa = pick('verbale_pdf_generato_da')
+          const fDefEsito = pick('definizione_pratica_esito')
+          const fDefData = pick('definizione_pratica_data')
+          const fDefDa = pick('definizione_pratica_da')
+          const fDefNote = pick('definizione_pratica_note')
+
+          if (fStatoDa) upd[fStatoDa] = 0
+          if (fDtStatoDa) upd[fDtStatoDa] = null
+          if (fDtPresaDa) upd[fDtPresaDa] = null
+          if (fEsitoDa) upd[fEsitoDa] = null
+          if (fDtEsitoDa) upd[fDtEsitoDa] = null
+          if (fChiusuraIl) upd[fChiusuraIl] = null
+          if (fChiusuraDa) upd[fChiusuraDa] = null
+          if (fPdfIl) upd[fPdfIl] = null
+          if (fPdfDa) upd[fPdfDa] = null
+          if (fDefEsito) upd[fDefEsito] = null
+          if (fDefData) upd[fDefData] = null
+          if (fDefDa) upd[fDefDa] = null
+          if (fDefNote) upd[fDefNote] = null
+        }
       } catch {}
 
       addGiiRoutingFields(upd, 'TI_AMM', 'TRASMISSIONE', { destUsername: tiAmmSelected })
 
-      await saveWithWorkflowLog(upd, `Tecnico Istruttore amministrativo assegnato: ${tiAmmName}.`, { eventoChiusura: 'NUOVA_ASSEGNAZIONE', ruoloDestinatario: 'TI_AMM', utenteDestinatario: tiAmmSelected, noteChiusura: `Assegna Tecnico Istruttore amministrativo: ${tiAmmName} (${tiAmmSelected})`, fase: role })
+      const reopenMarker = isRiaperturaAssignment ? `Riapertura amministrativa n. ${riaperturaAmmNumero}. ` : ''
+      const successMessage = isRiaperturaAssignment
+        ? `Nuova istruttoria amministrativa avviata e assegnata a ${tiAmmName}.`
+        : `Tecnico Istruttore amministrativo assegnato: ${tiAmmName}.`
+      await saveWithWorkflowLog(upd, successMessage, { eventoChiusura: 'NUOVA_ASSEGNAZIONE', ruoloDestinatario: 'TI_AMM', utenteDestinatario: tiAmmSelected, noteChiusura: `${reopenMarker}Assegna Tecnico Istruttore amministrativo: ${tiAmmName} (${tiAmmSelected})`, fase: role })
+      if (isRiaperturaAssignment) setRiaperturaWorkflowStarted(true)
 
       setPending(null)
       setConfirmAttempted(false)
@@ -4720,7 +4874,9 @@ function ActionsPanel (props: {
   const pendingTheme: Record<string, PendingTheme> = {
     TAKE:           { icon: '✓', color: '#2563eb', bg: '#eff6ff', border: '#bfdbfe', buttonBg: '#2563eb', buttonBorder: '#1d4ed8', desc: praticaLabel === 'Rapporto tecnico' ? 'Il rapporto tecnico verrà preso in carico.' : 'La rilevazione verrà presa in carico.' },
     ASSEGNA_TI:     { icon: '✓', color: '#2563eb', bg: '#eff6ff', border: '#bfdbfe', buttonBg: '#2563eb', buttonBorder: '#1d4ed8', desc: `${subjectArticle} ${subjectNameLower} verrà ${subjectVerbAssegnata} al ${getRoleLabelForMenu('TI')} selezionato.` },
-    ASSEGNA_TI_AMM: { icon: '✓', color: '#2563eb', bg: '#eff6ff', border: '#bfdbfe', buttonBg: '#2563eb', buttonBorder: '#1d4ed8', desc: `${subjectArticle} ${subjectNameLower} verrà ${subjectVerbAssegnata} al ${getRoleLabelForMenu('TI_AMM')} selezionato.` },
+    ASSEGNA_TI_AMM: { icon: '✓', color: '#2563eb', bg: '#eff6ff', border: '#bfdbfe', buttonBg: '#2563eb', buttonBorder: '#1d4ed8', desc: riaperturaWorkflowDaAvviare
+      ? `Verrà aperto il nuovo ciclo di riapertura n. ${riaperturaAmmNumero} e la pratica sarà assegnata al ${getRoleLabelForMenu('TI_AMM')} selezionato.`
+      : `${subjectArticle} ${subjectNameLower} verrà ${subjectVerbAssegnata} al ${getRoleLabelForMenu('TI_AMM')} selezionato.` },
     INVIA_TI_AMM: { icon: '✓', color: '#2563eb', bg: '#eff6ff', border: '#bfdbfe', buttonBg: '#2563eb', buttonBorder: '#1d4ed8', desc: `L’istruttoria amministrativa verrà trasmessa al ${getRoleLabelForMenu('TI_AMM')} già assegnato.` },
     RESTITUISCI_TI_AMM: { icon: '✓', color: '#2563eb', bg: '#eff6ff', border: '#bfdbfe', buttonBg: '#2563eb', buttonBorder: '#1d4ed8', desc: `L’istruttoria amministrativa verrà restituita al ${getRoleLabelForMenu('TI_AMM')} già assegnato.` },
     APPROVA:        { icon: '✓', color: '#2563eb', bg: '#eff6ff', border: '#bfdbfe', buttonBg: '#2563eb', buttonBorder: '#1d4ed8', desc: approvaActionDesc },
@@ -5365,7 +5521,7 @@ function ActionsPanel (props: {
               {canShowEdit && (
                 <button
                   type='button'
-                  disabled={!canEdit}
+                  disabled={!canOpenEditPage}
                   onClick={handleEditPage}
                   title={editButtonTitle}
                   style={{
@@ -5374,10 +5530,10 @@ function ActionsPanel (props: {
                     padding: 0,
                     boxSizing: 'border-box',
                     borderRadius: 8,
-                    border: `2px solid ${canEdit ? ec.pageColor : '#e5e7eb'}`,
+                    border: `2px solid ${canOpenEditPage ? ec.pageColor : '#e5e7eb'}`,
                     background: '#fff',
-                    color: canEdit ? ec.pageColor : '#9ca3af',
-                    cursor: canEdit ? 'pointer' : 'not-allowed',
+                    color: canOpenEditPage ? ec.pageColor : '#9ca3af',
+                    cursor: canOpenEditPage ? 'pointer' : 'not-allowed',
                     display: 'flex',
                     alignItems: 'center',
                     justifyContent: 'center'
@@ -5908,10 +6064,10 @@ type NsSummaryPdf = {
 
 const NS_PDF_CATS: NsCatPdf[] = ['AT', 'PR', 'RU', 'SL', 'PF']
 const NS_PDF_CASISTICA_META: Record<string, { order: number; label: string }> = {
-  C100_REPERIBILITA: { order: 8, label: 'Art. 8 - Violazione servizio reperibilità' },
-  C101_SPRECO_ACQUA: { order: 27, label: 'Art. 27 - Spreco d’acqua/uso negligente risorsa idrica' },
+  C100_REPERIBILITA: { order: 8, label: 'Art. 8 - Violazione servizio di reperibilità' },
+  C101_SPRECO_ACQUA: { order: 27, label: 'Art. 27 - Spreco d’acqua/uso negligente della risorsa idrica' },
   C104_ATTREZZATURE_DANNEGGIATE: { order: 30, label: 'Art. 30 - Danneggiamento e/o perdita attrezzature' },
-  C113_DANNI_STRUTTURE_IRRIGUE: { order: 39, label: 'Art. 39 - Danni strutture irrigue' }
+  C113_DANNI_STRUTTURE_IRRIGUE: { order: 39, label: 'Art. 39 - Danni alle strutture irrigue' }
 }
 
 function escapeSqlStringForRapportoPdf (v: any): string {

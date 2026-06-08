@@ -14,11 +14,11 @@ const LAYER_CACHE: Record<string, Promise<any>> = {}
 
 const ARTICOLI_PRATICA = [
   { id: 'norma15', label: 'Art. 15 - Prelievo abusivo d’acqua', whereClause: "(norma15_parziale IS NOT NULL AND norma15_parziale <> '' OR norma15_totale IS NOT NULL AND norma15_totale <> '')" },
-  { id: 'norma16', label: 'Art. 16 - Comunicazione di irrigazione tardiva', whereClause: "norma16_17 = 'Art16'" },
-  { id: 'norma17', label: 'Art. 17 - Variazione o rinuncia tardiva', whereClause: "norma16_17 = 'Art17'" },
-  { id: 'v_art08', label: 'Art. 8 - Violazione servizio reperibilità', whereClause: 'v_art08 = 1' },
+  { id: 'norma16', label: 'Art. 16 - Inosservanza dei termini di presentazione delle comunicazioni di irrigazione', whereClause: "norma16_17 = 'Art16'" },
+  { id: 'norma17', label: 'Art. 17 - Inosservanza dei termini di presentazione delle comunicazioni di variazione e di rinuncia', whereClause: "norma16_17 = 'Art17'" },
+  { id: 'v_art08', label: 'Art. 8 - Violazione servizio di reperibilità', whereClause: 'v_art08 = 1' },
   { id: 'v_art12', label: 'Art. 12 - Negato accesso ai fondi (al personale consortile)', whereClause: 'v_art12 = 1' },
-  { id: 'v_art27', label: 'Art. 27 - Spreco d’acqua/uso negligente risorsa idrica', whereClause: 'v_art27 = 1' },
+  { id: 'v_art27', label: 'Art. 27 - Spreco d’acqua/uso negligente della risorsa idrica', whereClause: 'v_art27 = 1' },
   { id: 'v_art28', label: 'Art. 28 - Violazione prescrizioni del consorzio', whereClause: 'v_art28 = 1' },
   { id: 'v_art29', label: 'Art. 29 - Violazione termini restituzione attrezzature', whereClause: 'v_art29 = 1' },
   { id: 'v_art30', label: 'Art. 30 - Danneggiamento e/o perdita attrezzature', whereClause: 'v_art30 = 1' },
@@ -26,10 +26,10 @@ const ARTICOLI_PRATICA = [
   { id: 'v_art32', label: 'Art. 32 - Negato accesso ai fondi (al consorziato)', whereClause: 'v_art32 = 1' },
   { id: 'v_art33', label: 'Art. 33 - Inosservanza limiti temporali di prelievo', whereClause: 'v_art33 = 1' },
   { id: 'v_art34', label: 'Art. 34 - Interferenze', whereClause: 'v_art34 = 1' },
-  { id: 'v_art35', label: 'Art. 35 - Manomissione reti di dispensa e allaccio aspirazione', whereClause: 'v_art35 = 1' },
+  { id: 'v_art35', label: 'Art. 35 - Manomissione reti di dispensa e allaccio di apparecchi di aspirazione all’idrante', whereClause: 'v_art35 = 1' },
   { id: 'v_art36', label: 'Art. 36 - Uso attrezzature non autorizzate', whereClause: 'v_art36 = 1' },
   { id: 'v_art37', label: 'Art. 37 - Uso sistemi di irrigazione incompatibili', whereClause: 'v_art37 = 1' },
-  { id: 'v_art39', label: 'Art. 39 - Danni strutture irrigue', whereClause: 'v_art39 = 1' },
+  { id: 'v_art39', label: 'Art. 39 - Danni alle strutture irrigue', whereClause: 'v_art39 = 1' },
 ]
 
 type TipoPratica = '' | 'rilevazione' | 'rapporto' | 'verbale'
