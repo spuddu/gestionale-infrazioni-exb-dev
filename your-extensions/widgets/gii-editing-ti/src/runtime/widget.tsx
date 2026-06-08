@@ -4205,6 +4205,14 @@ function surfaceToCentiareNumber(v: any): number {
   return Number.isNaN(n) ? 0 : n
 }
 
+function draftHasArt15Selection (draft: any): boolean {
+  const hasTextValue = ['tipo_abuso', 'norma15_parziale', 'norma15_totale', 'occorrenza']
+    .some(field => String(draft?.[field] ?? '').trim() !== '')
+  return hasTextValue ||
+    surfaceToCentiareNumber(draft?.sup_dichiarata_art15) > 0 ||
+    surfaceToCentiareNumber(draft?.sup_irrigata_art15) > 0
+}
+
 function formatSurfaceHaAaCa(v: any): string {
   const raw = parseSurfaceCentiareText(v)
   if (!raw) return ''
@@ -5266,6 +5274,7 @@ function NuovaPraticaForm (p: {
 
   const [draft, setDraft] = React.useState<NpDraft>(() => draftFromRecord(p.initialData || {}))
   const [baselineDraft, setBaselineDraft] = React.useState<NpDraft>(() => draftFromRecord(p.initialData || {}))
+  const [art15SelectedUi, setArt15SelectedUi] = React.useState<boolean>(() => draftHasArt15Selection(draftFromRecord(p.initialData || {})))
   const [saving, setSaving] = React.useState(false)
   const [msg, setMsg] = React.useState<{ kind: 'ok' | 'err'; text: string } | null>(null)
   const [showCreateSuccessPopup, setShowCreateSuccessPopup] = React.useState(false)
@@ -5825,6 +5834,7 @@ function NuovaPraticaForm (p: {
     const nextBase = draftFromRecord(p.initialData || {})
     setDraft(nextBase)
     setBaselineDraft(nextBase)
+    setArt15SelectedUi(draftHasArt15Selection(nextBase))
     setAttachmentFiles([])
     setAttachmentInputKey(k => k + 1)
     setPendingDeleteAttachmentIds([])
@@ -6437,6 +6447,7 @@ React.useEffect(() => {
   const showSup15 = (tipoAbuso === 'parziale' && (n3parziale === 'Art15.1' || n3parziale === 'Art15.2')) ||
                     (tipoAbuso === 'totale'   && (n3totale   === 'Art15.3' || n3totale   === 'Art15.4'))
   const hasTipoAbuso15 = tipoAbuso === 'parziale' || tipoAbuso === 'totale'
+  const art15Selected = art15SelectedUi || draftHasArt15Selection(draft)
 
   const reqPoint = React.useMemo(() => computeReqPoint({
     norma15_parziale: n3parziale,
@@ -7596,7 +7607,7 @@ ${e?.message || String(e)}`
       // Trasgressore — note
       case 'note_anagrafica': return { label: 'Note', el: <NpText value={g('note_anagrafica')} onChange={v => set('note_anagrafica', v)} multiline disabled={saving}/> }
       // Violazione — Art. 15
-      case 'tipo_abuso': return { label: 'Tipo di abuso', el: <NpSel value={tipoAbuso} onChange={v => { set('tipo_abuso', v); set('norma15_parziale', ''); set('norma15_totale', '') }} options={CHOICES.tipo_abuso} disabled={saving}/> }
+      case 'tipo_abuso': return { label: 'Tipo di abuso', el: <NpSel value={tipoAbuso} onChange={v => { set('tipo_abuso', v); set('norma15_parziale', ''); set('norma15_totale', '') }} options={CHOICES.tipo_abuso} disabled={saving || !art15Selected}/> }
       case 'norma15_sel': {
         const canEdit = isCurrentRiAgrTec() && hasTipoAbuso15 && !saving
         return { label: 'Occorrenza', el: <NpSel value={g('occorrenza')} onChange={v => set('occorrenza', v)} options={CHOICES.occorrenza} disabled={!canEdit}/> }
@@ -7705,7 +7716,7 @@ ${e?.message || String(e)}`
     minWidth: 0
   }
   const editMutedHeaderStyle: React.CSSProperties = {
-    color: '#475569',
+    color: formStyle.hdrColor,
     fontSize: 11,
     fontWeight: 800,
     textTransform: 'uppercase',
@@ -7799,13 +7810,13 @@ ${e?.message || String(e)}`
       case '_dati_gen_label':
         return showDatiGen ? (
           <div style={{ marginBottom: 2 }}>
-            <span style={{ fontSize: formStyle.labelFontSize + 1, color: formStyle.labelColor }}>Dati generali (automatici)</span>
+            <span style={{ fontSize: formStyle.labelFontSize + 1, color: formStyle.hdrColor }}>Dati generali (automatici)</span>
           </div>
         ) : null
       case '_localizzazione':
         return (
           <div style={{ padding: 10, borderRadius: 8, border: `1px solid ${p.mapClickEnabled ? '#2563eb' : 'rgba(0,0,0,0.10)'}`, background: p.mapClickEnabled ? 'rgba(37,99,235,0.04)' : 'rgba(0,0,0,0.02)', marginBottom: 12, transition: 'all 0.2s' }}>
-            <div style={{ fontWeight: 800, fontSize: 12, color: '#374151', marginBottom: 6 }}>Localizzazione{isSystemAdmin ? ` (req_point = ${reqPoint})` : ''}</div>
+            <div style={{ fontWeight: 800, fontSize: 12, color: formStyle.hdrColor, marginBottom: 6 }}>Localizzazione{isSystemAdmin ? ` (req_point = ${reqPoint})` : ''}</div>
             <div style={{ fontSize: 12, color: geomStatus.kind === 'ok' ? '#1a7f37' : (geomStatus.kind === 'err' ? '#b42318' : '#6b7280') }}>{geomStatus.text}</div>
             {reqPoint === 1 && (() => {
               const ep = p.clickedPointWgs84 || p.existingGeomWgs84
@@ -8114,7 +8125,23 @@ ${e?.message || String(e)}`
           )
           return <NpField label={label}>{node}</NpField>
         }
-        const emptyGradeCell = <span style={{ color: '#94a3b8', fontSize: 12 }}>—</span>
+        const emptyGradeCell = (
+          <span
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              width: '100%',
+              minHeight: 24,
+              color: '#4b5563',
+              fontSize: 17,
+              fontWeight: 700,
+              lineHeight: 1
+            }}
+          >
+            —
+          </span>
+        )
         const reqCheckCell = (required: boolean, title: string) => (
           <span
             title={title}
@@ -8125,9 +8152,9 @@ ${e?.message || String(e)}`
               justifyContent: 'center',
               width: '100%',
               minHeight: 24,
-              color: required ? '#4b5563' : '#94a3b8',
-              fontSize: 12,
-              fontWeight: required ? 700 : 400,
+              color: '#4b5563',
+              fontSize: required ? 12 : 17,
+              fontWeight: 700,
               lineHeight: 1
             }}
           >
@@ -8220,7 +8247,7 @@ ${e?.message || String(e)}`
                     <div style={reqCellStyle}>
                       {reqCheckCell(hasGrade, 'Richiede grado di gravità')}
                     </div>
-                    <div style={{ borderLeft: '1px solid #e5e7eb', padding: '0 6px', minHeight: formStyle.fieldHeight, display: 'flex', alignItems: 'center', boxSizing: 'border-box' }}>
+                    <div style={{ borderLeft: '1px solid #e5e7eb', padding: '0 6px', minHeight: formStyle.fieldHeight, display: 'flex', alignItems: 'center', justifyContent: 'center', boxSizing: 'border-box' }}>
                       {gradeNode}
                     </div>
                   </div>
@@ -8230,7 +8257,7 @@ ${e?.message || String(e)}`
           )
         }
 
-        const art15SupEnabled = hasTipoAbuso15
+        const art15SupEnabled = art15Selected && hasTipoAbuso15
         const art15SupDichLocked = tipoAbuso === 'totale'
         const art16Selected = norma1516 === 'Art16'
         const art17Selected = norma1516 === 'Art17'
@@ -8246,28 +8273,68 @@ ${e?.message || String(e)}`
         const narrowSurfaceCol = 'minmax(145px, 155px)'
         const wideSurfaceCol = 'minmax(135px, 150px)'
         const termsGridColumns = `minmax(270px, 1fr) ${narrowSurfaceCol} ${narrowSurfaceCol} ${wideSurfaceCol}`
+        const art15GridColumns = `minmax(250px, 1fr) minmax(135px, 155px) minmax(125px, 145px) ${wideSurfaceCol} ${wideSurfaceCol}`
+
+        const art15ChoiceBox = () => {
+          const active = art15Selected
+          const disabled = saving || isRiAgrTecLimitedEdit || !canEditFieldForCurrentProfile('tipo_abuso')
+          const checkbox = (
+            <input
+              type='checkbox'
+              checked={active}
+              disabled={disabled}
+              onChange={() => {
+                if (disabled) return
+                if (active) {
+                  setArt15SelectedUi(false)
+                  setDraft(prev => ({
+                    ...prev,
+                    tipo_abuso: '',
+                    norma15_parziale: '',
+                    norma15_totale: '',
+                    occorrenza: '',
+                    sup_dichiarata_art15: '',
+                    sup_irrigata_art15: ''
+                  }))
+                } else {
+                  setArt15SelectedUi(true)
+                }
+              }}
+              style={{ margin: 0, flexShrink: 0, accentColor: '#4b5563' }}
+            />
+          )
+          return (
+            <RegolamentoChoiceToggleTi
+              articleState={regolamentoArticoliState}
+              articleCode='Art15'
+              title='Art. 15 — Comunicazione di irrigazione'
+              checkbox={checkbox}
+              disabled={disabled}
+              textStyle={{
+                color: active ? selectedNorma3TextStyle.color : (disabled ? '#64748b' : '#334155'),
+                fontWeight: active ? selectedNorma3TextStyle.fontWeight : 400,
+                opacity: active ? selectedNorma3TextStyle.opacity : (disabled ? 0.72 : 1)
+              }}
+            />
+          )
+        }
 
         const leftColumn = (
           <div style={{ display: 'grid', gap: formStyle.sectionGap, minWidth: 0, minHeight: '100%', gridTemplateRows: 'auto auto minmax(0, 1fr)' }}>
-            {renderEditCard('Art. 15 — Prelievo abusivo',
-              <div style={{ display: 'grid', gap: 10, minWidth: 0 }}>
-                <RegolamentoChoiceToggleTi
-                  articleState={regolamentoArticoliState}
-                  articleCode='Art15'
-                  title='Norma violata: Art. 15 — Prelievo abusivo'
-                />
-                <div style={{ display: 'grid', gridTemplateColumns: termsGridColumns, gap: 10, alignItems: 'start' }}>
-                  <div style={{ width: 155, maxWidth: '100%' }}>
-                    {selectField('tipo_abuso', 'Tipo di abuso', tipoAbuso, v => { set('tipo_abuso', v); set('norma15_parziale', ''); set('norma15_totale', '') }, CHOICES.tipo_abuso)}
-                  </div>
-                  {fieldNode('norma15_sel', 'Occorrenza')}
-                  {surfaceTextField('sup_dichiarata_art15', 'Sup. dichiarata (ha.a.ca)', g('sup_dichiarata_art15'), v => set('sup_dichiarata_art15', v), art15SupEnabled, art15SupDichLocked ? '0' : undefined)}
-                  {surfaceTextField('sup_irrigata_art15', 'Sup. irrigata (ha.a.ca)', g('sup_irrigata_art15'), v => set('sup_irrigata_art15', v), art15SupEnabled)}
+            {renderEditCard('Prelievo abusivo',
+              <div style={{ display: 'grid', gridTemplateColumns: art15GridColumns, gap: 10, alignItems: 'start', minWidth: 0 }}>
+                <div style={{ minWidth: 0 }}>
+                  <div style={{ ...S.lbl, color: formStyle.labelColor, fontSize: formStyle.labelFontSize, visibility: 'hidden' }}>Violazione</div>
+                  {art15ChoiceBox()}
                 </div>
+                {selectField('tipo_abuso', 'Tipo di abuso', tipoAbuso, v => { set('tipo_abuso', v); set('norma15_parziale', ''); set('norma15_totale', '') }, CHOICES.tipo_abuso, art15Selected)}
+                {fieldNode('norma15_sel', 'Occorrenza')}
+                {surfaceTextField('sup_dichiarata_art15', 'Sup. dichiarata (ha.a.ca)', g('sup_dichiarata_art15'), v => set('sup_dichiarata_art15', v), art15SupEnabled, art15SupDichLocked ? '0' : undefined)}
+                {surfaceTextField('sup_irrigata_art15', 'Sup. irrigata (ha.a.ca)', g('sup_irrigata_art15'), v => set('sup_irrigata_art15', v), art15SupEnabled)}
               </div>
             )}
 
-            {renderEditCard('Artt. 16 e 17 — Inosservanza termini',
+            {renderEditCard('Inosservanza termini',
               <div style={{ display: 'grid', gap: 8 }}>
                 <div style={{ display: 'grid', gridTemplateColumns: termsGridColumns, gap: 10, alignItems: 'start' }}>
                   <div style={{ gridColumn: '1 / span 2' }}>
@@ -8760,7 +8827,7 @@ ${e?.message || String(e)}`
               )}
             </div>
           ) : (
-            <div style={{ padding: 10, borderRadius: 8, background: '#f8fbff', border: '1px solid #d7e5f5', color: '#64748b', fontSize: 12 }}>
+            <div style={{ padding: 10, borderRadius: 8, border: '1px solid #f59e0b', background: '#fffbeb', color: '#92400e', fontSize: 12, fontWeight: 700, lineHeight: 1.35 }}>
               Nessuna violazione collegabile alla nota spese. Le note spese sono previste per gli artt. 8, 27, 30 e 39.
             </div>
           )}
@@ -8773,12 +8840,34 @@ ${e?.message || String(e)}`
               ['PRODOTTI FINITI', activeNotaSpeseSummary.totalePF],
               [`SPESE GENERALI (${activeNotaSpeseSummary.percentualeSpeseGenerali.toLocaleString('it-IT', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}%)`, activeNotaSpeseSummary.importoSpeseGenerali],
               ['TOTALE COMPLESSIVO', activeNotaSpeseSummary.totaleComplessivo]
-            ] as [string, number][]).map(([label, value], idx) => (
-              <div key={idx} style={{ background: idx === 6 ? formStyle.cardHeaderBg : '#f5f9ff', border: '1px solid #c5d9f1', borderRadius: formStyle.cardBorderRadius, padding: '6px 8px' }}>
-                <div style={{ fontSize: 11, fontWeight: 800, color: idx === 6 ? 'rgba(255,255,255,0.86)' : formStyle.hdrColor, marginBottom: 2, minHeight: 22, lineHeight: 1.12, display: 'flex', alignItems: 'center' }}>{label}</div>
-                <div style={{ fontSize: 16, fontWeight: 800, color: idx === 6 ? formStyle.cardHeaderColor : '#16375a' }}>{nsSafeNum(value, 0).toLocaleString('it-IT', { useGrouping: true, minimumFractionDigits: 2, maximumFractionDigits: 2 })} €</div>
-              </div>
-            ))}
+            ] as [string, number][]).map(([label, value], idx) => {
+              const isTotal = idx === 6
+              return (
+                <div key={idx} style={{
+                  background: isTotal ? formStyle.cardHeaderBg : '#f5f9ff',
+                  border: `1px solid ${isTotal ? '#0d3b66' : '#bfdbfe'}`,
+                  borderRadius: formStyle.cardBorderRadius,
+                  padding: '9px 11px',
+                  minWidth: 0
+                }}>
+                  <div style={{
+                    color: isTotal ? 'rgba(255,255,255,0.86)' : '#6b7280',
+                    fontSize: 11,
+                    fontWeight: 800,
+                    textTransform: 'uppercase',
+                    letterSpacing: 0.25,
+                    marginBottom: 4
+                  }}>{label}</div>
+                  <div style={{
+                    color: isTotal ? formStyle.cardHeaderColor : '#111827',
+                    fontSize: isTotal ? 16 : 13,
+                    fontWeight: 800,
+                    overflowWrap: 'anywhere',
+                    whiteSpace: 'pre-wrap'
+                  }}>{nsSafeNum(value, 0).toLocaleString('it-IT', { useGrouping: true, minimumFractionDigits: 2, maximumFractionDigits: 2 })} €</div>
+                </div>
+              )
+            })}
           </div>
           {!activeNotaSpeseCasistica && noteSpeseCasistiche.length > 0 && <span style={{ fontSize: 11, color: '#b45309', fontWeight: 700 }}>Seleziona una nota spese per abilitare lo sfoglia prezzario.</span>}
           {noteSpeseDraftDirty && <span style={{ fontSize: 11, color: '#856404' }}>Salva le modifiche prima di sfogliare il prezzario.</span>}
@@ -8813,7 +8902,7 @@ ${e?.message || String(e)}`
             {/* Colonna sinistra: lista allegati */}
             <div style={{ display: 'flex', flexDirection: 'column', gap: 10, minHeight: 0 }}>
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, flexWrap: 'wrap' }}>
-                <div style={{ fontWeight: 800, fontSize: 13 }}>Elenco allegati</div>
+                <div style={{ fontWeight: 800, fontSize: 13, color: formStyle.hdrColor }}>Elenco allegati</div>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
                   <label style={{
                     minHeight: 36, height: 36, boxSizing: 'border-box',

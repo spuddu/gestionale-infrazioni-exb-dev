@@ -49,6 +49,15 @@ export interface Config {
   paddingV: number
   searchLabel: string
   fieldHeight: number
+  pointColor: string
+  pointTransparency: number
+  pointSize: number
+  pointOutlineColor: string
+  pointOutlineWidth: number
+  polygonFillColor: string
+  polygonFillTransparency: number
+  polygonOutlineColor: string
+  polygonOutlineWidth: number
 }
 
 export type IMConfig = ImmutableObject<Config>
@@ -78,7 +87,16 @@ export const defaultConfig: IMConfig = makeImmutable<Config>({
   paddingH: 8,
   paddingV: 6,
   searchLabel: 'Tipo ricerca',
-  fieldHeight: 28
+  fieldHeight: 28,
+  pointColor: '#dc2626',
+  pointTransparency: 0,
+  pointSize: 18,
+  pointOutlineColor: '#ffffff',
+  pointOutlineWidth: 2.5,
+  polygonFillColor: '#ff6400',
+  polygonFillTransparency: 88,
+  polygonOutlineColor: '#ff6400',
+  polygonOutlineWidth: 2
 })
 
 export default defaultConfig

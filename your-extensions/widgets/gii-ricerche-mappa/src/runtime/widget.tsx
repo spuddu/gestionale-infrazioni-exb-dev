@@ -377,11 +377,46 @@ async function getConfiguredLayer(mapView: any, search: MapSearchConfig): Promis
   return null
 }
 function getObjectIdField(layer: any): string { return txt(layer?.objectIdField || layer?.objectIdFieldName || 'OBJECTID') || 'OBJECTID' }
-function getGraphicSymbol(geometry: any): any {
+
+function colorToRgba(raw: any, transparency: number, fallback: [number, number, number]): [number, number, number, number] {
+  const value = txt(raw).trim()
+  let rgb: [number, number, number] = fallback
+  const hex = value.match(/^#([0-9a-f]{3}|[0-9a-f]{6})$/i)
+  if (hex) {
+    const h = hex[1].length === 3 ? hex[1].split('').map(ch => ch + ch).join('') : hex[1]
+    rgb = [parseInt(h.slice(0, 2), 16), parseInt(h.slice(2, 4), 16), parseInt(h.slice(4, 6), 16)]
+  } else {
+    const m = value.match(/^rgba?\(\s*(\d+(?:\.\d+)?)\s*,\s*(\d+(?:\.\d+)?)\s*,\s*(\d+(?:\.\d+)?)/i)
+    if (m) rgb = [Number(m[1]), Number(m[2]), Number(m[3])].map(v => Math.max(0, Math.min(255, v))) as [number, number, number]
+  }
+  const alpha = 1 - num(transparency, 0, 0, 100) / 100
+  return [rgb[0], rgb[1], rgb[2], alpha]
+}
+
+function getGraphicSymbol(geometry: any, cfg: any): any {
   const type = txt(geometry?.type).toLowerCase()
-  if (type === 'point' || type === 'multipoint') return { type: 'simple-marker', style: 'circle', size: 13, color: [255, 100, 0, 0.28], outline: { color: [255, 100, 0, 1], width: 2 } }
-  if (type === 'polyline') return { type: 'simple-line', color: [255, 100, 0, 1], width: 3 }
-  return { type: 'simple-fill', color: [255, 100, 0, 0.12], outline: { color: [255, 100, 0, 1], width: 2 } }
+  const pointColor = colorToRgba(cfg.pointColor, num(cfg.pointTransparency, 0, 0, 100), [220, 38, 38])
+  const pointOutlineColor = colorToRgba(cfg.pointOutlineColor, 0, [255, 255, 255])
+  const polygonFillColor = colorToRgba(cfg.polygonFillColor, num(cfg.polygonFillTransparency, 88, 0, 100), [255, 100, 0])
+  const polygonOutlineColor = colorToRgba(cfg.polygonOutlineColor, 0, [255, 100, 0])
+
+  if (type === 'point' || type === 'multipoint') {
+    return {
+      type: 'simple-marker',
+      style: 'circle',
+      size: num(cfg.pointSize, 18, 1, 64),
+      color: pointColor,
+      outline: { color: pointOutlineColor, width: num(cfg.pointOutlineWidth, 2.5, 0, 12) }
+    }
+  }
+  if (type === 'polyline') {
+    return { type: 'simple-line', color: polygonOutlineColor, width: num(cfg.polygonOutlineWidth, 2, 0, 12) }
+  }
+  return {
+    type: 'simple-fill',
+    color: polygonFillColor,
+    outline: { color: polygonOutlineColor, width: num(cfg.polygonOutlineWidth, 2, 0, 12) }
+  }
 }
 function formatResultCount(n: number): string { return n.toLocaleString('it-IT') }
 
@@ -678,16 +713,10 @@ export default function Widget(props: Props) {
       if (mapView && evidenziaRisultati) {
         const Graphic = await loadEsriModule<any>('esri/Graphic')
         const now = Date.now()
-        const graphics = features.filter(f => f?.geometry).map((f, idx) => new Graphic({ geometry: f.geometry, attributes: { __giiRicercheMappaId: `${now}-${idx}` }, symbol: getGraphicSymbol(f.geometry) }))
+        const graphics = features.filter(f => f?.geometry).map((f, idx) => new Graphic({ geometry: f.geometry, attributes: { __giiRicercheMappaId: `${now}-${idx}` }, symbol: getGraphicSymbol(f.geometry, cfg) }))
         if (graphics.length) {
           graphicIdsRef.current = graphics.map(g => g.attributes.__giiRicercheMappaId)
           mapView.graphics?.addMany?.(graphics)
-        }
-        const mapLayer = findMapLayer(mapView, activeSearch)
-        const oidField = getObjectIdField(mapLayer || layer)
-        const oids = features.map(f => getAttrCI(f?.attributes || {}, oidField)).filter((v: any) => v !== undefined && v !== null)
-        if (mapLayer && oids.length) {
-          try { const lv = await mapView.whenLayerView(mapLayer); highlightRef.current = lv?.highlight?.(oids) } catch {}
         }
       }
       if (mapView && zoomAllaRicerca) {
@@ -711,7 +740,7 @@ export default function Widget(props: Props) {
     } catch (e: any) {
       setStatus({ kind: 'err', text: `Errore ricerca: ${e?.message || String(e)}` })
     } finally { setBusy(false) }
-  }, [layer, activeSearch, activeValues, praticaValues, isPratica, mapView, maxResultFeatures, evidenziaRisultati, zoomAllaRicerca, zoomScale, clearHighlight])
+  }, [layer, activeSearch, activeValues, praticaValues, isPratica, mapView, maxResultFeatures, evidenziaRisultati, zoomAllaRicerca, zoomScale, clearHighlight, cfg.pointColor, cfg.pointTransparency, cfg.pointSize, cfg.pointOutlineColor, cfg.pointOutlineWidth, cfg.polygonFillColor, cfg.polygonFillTransparency, cfg.polygonOutlineColor, cfg.polygonOutlineWidth])
 
   const c = {
     bg: txt(cfg.colorBackground) || '#ffffff',

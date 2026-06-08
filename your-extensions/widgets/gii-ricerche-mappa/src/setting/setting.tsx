@@ -1426,6 +1426,35 @@ export default function Setting(props: Props) {
         </div>
       </div>
 
+      <div style={P.sec}>Stile risultati</div>
+      <div style={P.box}>
+        <div style={{ fontSize: 12, fontWeight: 800, color: '#dbeafe', marginBottom: 2 }}>Elementi puntuali</div>
+        <div style={P.grid2}>
+          <ColorInput label='Colore punto' value={String(cfg.pointColor || '#dc2626')} onChange={v => setCfg({ pointColor: v })} />
+          <ColorInput label='Colore bordo' value={String(cfg.pointOutlineColor || '#ffffff')} onChange={v => setCfg({ pointOutlineColor: v })} />
+          <NumInput label='Trasparenza punto (%)' value={parseNum(cfg.pointTransparency, 0, 0, 100)} min={0} max={100} onChange={v => setCfg({ pointTransparency: v })} />
+          <NumInput label='Dimensione punto (px)' value={parseNum(cfg.pointSize, 18, 1, 64)} min={1} max={64} step={0.5} onChange={v => setCfg({ pointSize: v })} />
+          <NumInput label='Spessore bordo (px)' value={parseNum(cfg.pointOutlineWidth, 2.5, 0, 12)} min={0} max={12} step={0.5} onChange={v => setCfg({ pointOutlineWidth: v })} />
+        </div>
+
+        <div style={{ fontSize: 12, fontWeight: 800, color: '#dbeafe', marginTop: 16, marginBottom: 2 }}>Elementi poligonali</div>
+        <div style={P.grid2}>
+          <ColorInput label='Colore riempimento' value={String(cfg.polygonFillColor || '#ff6400')} onChange={v => setCfg({ polygonFillColor: v })} />
+          <ColorInput label='Colore contorno' value={String(cfg.polygonOutlineColor || '#ff6400')} onChange={v => setCfg({ polygonOutlineColor: v })} />
+          <NumInput label='Trasparenza riempimento (%)' value={parseNum(cfg.polygonFillTransparency, 88, 0, 100)} min={0} max={100} onChange={v => setCfg({ polygonFillTransparency: v })} />
+          <NumInput label='Spessore contorno (px)' value={parseNum(cfg.polygonOutlineWidth, 2, 0, 12)} min={0} max={12} step={0.5} onChange={v => setCfg({ polygonOutlineWidth: v })} />
+        </div>
+        <div style={P.hint}>Per gli elementi lineari vengono utilizzati il colore e lo spessore del contorno poligonale.</div>
+        <div style={{ marginTop: 10 }}>
+          <SmallButton onClick={() => setCfg({
+            pointColor: '#dc2626', pointTransparency: 0, pointSize: 18,
+            pointOutlineColor: '#ffffff', pointOutlineWidth: 2.5,
+            polygonFillColor: '#ff6400', polygonFillTransparency: 88,
+            polygonOutlineColor: '#ff6400', polygonOutlineWidth: 2
+          })}>Ripristina stile predefinito</SmallButton>
+        </div>
+      </div>
+
       <div style={P.sec}>Personalizzazione colori</div>
       <div style={P.box}>
         <div style={P.grid2}>

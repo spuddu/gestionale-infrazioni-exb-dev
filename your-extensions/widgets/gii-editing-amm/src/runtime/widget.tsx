@@ -1436,11 +1436,11 @@ const ADMIN_STYLE_DEFAULTS: Record<string, any> = {
   maskBorderRadius: 10,
   maskInnerPadding: 12,
   formLabelColor: '#334155',
-  formLabelFontSize: 12,
+  formLabelFontSize: 15,
   formLabelFontWeight: 600,
   formLabelMarginBottom: 3,
   formFieldColor: '#0f172a',
-  formFieldFontSize: 13,
+  formFieldFontSize: 15,
   formFieldHeight: 32,
   formFieldPaddingX: 9,
   formFieldBorderColor: '#bfcede',
@@ -1457,11 +1457,11 @@ const ADMIN_STYLE_DEFAULTS: Record<string, any> = {
   formPhaseCardBg: '#f8fbff',
   formPhaseCardBorderColor: '#d7e3f2',
   formPhaseCardBorderWidth: 1,
-  formPhaseCardTitleColor: '#0d3b66',
+  formPhaseCardTitleColor: '#0f4c81',
   formWorkflowBadgeBg: '#ffffff',
   formWorkflowBadgeBorderColor: '#d8e6f7',
   formWorkflowBadgeBorderWidth: 1,
-  formWorkflowBadgeTitleColor: '#0d3b66',
+  formWorkflowBadgeTitleColor: '#0f4c81',
   formWorkflowBadgeLabelColor: '#6b7280',
   formWorkflowBadgeValueColor: '#111827',
   formWorkflowBadgeHighlightColor: '#2563eb',
@@ -1520,7 +1520,9 @@ const ADMIN_STYLE_DEFAULTS: Record<string, any> = {
   formCardShadow: '0 8px 22px rgba(15, 23, 42, 0.08)',
   formCardHeaderBg: 'linear-gradient(90deg, #0d3b66, #155e9d)',
   formCardHeaderColor: '#ffffff',
-  formCardHeaderFontSize: 11,
+  formInnerHeaderColor: '#0f4c81',
+  formInnerHeaderFontSize: 14,
+  formCardHeaderFontSize: 14,
   formCardHeaderFontWeight: 800,
   formCardHeaderPaddingX: 10,
   formCardHeaderPaddingY: 7,
@@ -1563,7 +1565,7 @@ function Section (props: { title: string, children: React.ReactNode, right?: Rea
         color: st.formCardHeaderColor || '#fff',
         padding: `${Number(st.formCardHeaderPaddingY ?? 7)}px ${Number(st.formCardHeaderPaddingX ?? 10)}px`,
         fontWeight: Number(st.formCardHeaderFontWeight ?? 800) as any,
-        fontSize: Number(st.formCardHeaderFontSize ?? 11),
+        fontSize: Number(st.formCardHeaderFontSize ?? 14),
         letterSpacing: 0.25,
         textTransform: 'uppercase'
       }}>
@@ -2462,7 +2464,7 @@ function NoteAmministrativeQuickActions (props: { data: Record<string, any>, can
   const st = useAdminStyle()
   return (
     <div style={{ display: 'grid', gap: 4, width: '100%' }}>
-      <label style={{ color: st.formLabelColor || '#334155', fontSize: Number(st.formLabelFontSize ?? 12), fontWeight: Number(st.formLabelFontWeight ?? 600) as any, marginBottom: Number(st.formLabelMarginBottom ?? 3) }}>Casistica note</label>
+      <label style={{ color: st.formLabelColor || '#334155', fontSize: Number(st.formLabelFontSize ?? 15), fontWeight: Number(st.formLabelFontWeight ?? 600) as any, marginBottom: Number(st.formLabelMarginBottom ?? 3) }}>Casistica note</label>
       <select
         disabled={!props.canEdit}
         value=''
@@ -2516,7 +2518,7 @@ function StatusSummaryItem (props: { label: string, value: React.ReactNode, hint
     <div style={{ border: `${Number(st.statusSummaryBorderWidth ?? 1)}px solid ${borderColor}`, background: bg, borderRadius: Number(st.formCardBorderRadius ?? 8), padding: '9px 11px', minWidth: 0 }}>
       <div style={{ color: labelColor, fontSize: 11, fontWeight: 800, textTransform: 'uppercase', letterSpacing: 0.25, marginBottom: 4 }}>{props.label}</div>
       <div style={{ color: valueColor, fontSize: total ? Number(st.amountFontSize ?? 16) : Number(st.valueFontSize ?? 13), fontWeight: 800, overflowWrap: 'anywhere', whiteSpace: 'pre-wrap' }}>{props.value || '—'}</div>
-      {props.hint && <div style={{ marginTop: 4, color: hintColor, fontSize: 11, lineHeight: 1.3 }}>{props.hint}</div>}
+      {props.hint && <div style={{ marginTop: 4, color: hintColor, fontSize: 12, lineHeight: 1.35 }}>{props.hint}</div>}
     </div>
   )
 }
@@ -2552,12 +2554,12 @@ function VerbaleSummary (props: { data: Record<string, any>, fields: LayerFieldI
       <div style={{ display: 'grid', gap: 10, marginBottom: 12 }}>
         <div style={{ border: `${Number(st.verbaleInfoCardBorderWidth ?? 1)}px solid ${st.verbaleInfoCardBorderColor || '#dbeafe'}`, background: st.verbaleInfoCardBg || '#eff6ff', borderRadius: 11, padding: 11, display: 'grid', gap: 9 }}>
           <div style={{ display: 'grid', gap: 3 }}>
-            <div style={{ color: st.verbaleInfoLabelColor || '#64748b', fontSize: 11, fontWeight: 900, textTransform: 'uppercase', letterSpacing: 0.25 }}>Tipo atto</div>
-            <div style={{ color: st.verbaleInfoTipoTextColor || '#111827', fontSize: 13, fontWeight: 850 }}>{tipoAtto}</div>
+            <div style={{ color: st.verbaleInfoLabelColor || '#64748b', fontSize: Number(st.formLabelFontSize ?? 15), fontWeight: Number(st.formLabelFontWeight ?? 600) as any, letterSpacing: 0.1 }}>Tipo atto</div>
+            <div style={{ color: st.verbaleInfoTipoTextColor || '#111827', fontSize: Number(st.formFieldFontSize ?? 15), fontWeight: 700 }}>{tipoAtto}</div>
           </div>
           <div style={{ display: 'grid', gap: 3 }}>
-            <div style={{ color: st.verbaleInfoLabelColor || '#64748b', fontSize: 11, fontWeight: 900, textTransform: 'uppercase', letterSpacing: 0.25 }}>Oggetto</div>
-            <div style={{ color: st.verbaleInfoOggettoTextColor || '#374151', fontSize: 12, fontWeight: 700, lineHeight: 1.35 }}>{oggettoAtto}</div>
+            <div style={{ color: st.verbaleInfoLabelColor || '#64748b', fontSize: Number(st.formLabelFontSize ?? 15), fontWeight: Number(st.formLabelFontWeight ?? 600) as any, letterSpacing: 0.1 }}>Oggetto</div>
+            <div style={{ color: st.verbaleInfoOggettoTextColor || '#374151', fontSize: Number(st.formFieldFontSize ?? 15), fontWeight: 600, lineHeight: 1.35 }}>{oggettoAtto}</div>
           </div>
         </div>
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(210px, 1fr))', gap: 10 }}>
@@ -2569,7 +2571,7 @@ function VerbaleSummary (props: { data: Record<string, any>, fields: LayerFieldI
       <div style={{ marginBottom: 10, display: 'grid', gridTemplateColumns: ADMIN_NOTE_CASES_COLUMN, gap: 10, alignItems: 'start', width: '100%' }}>
         <NoteAmministrativeQuickActions data={d} canEdit={props.canEdit && noteExists} onApply={props.onApplyNote} />
         <div style={{ minWidth: 0, width: '100%' }}>
-          <div style={{ color: '#374151', fontSize: 12, fontWeight: 900, marginBottom: 5 }}>Note amministrative</div>
+          <div style={{ color: st.formLabelColor || '#334155', fontSize: Number(st.formLabelFontSize ?? 15), fontWeight: Number(st.formLabelFontWeight ?? 600) as any, marginBottom: Number(st.formLabelMarginBottom ?? 3) }}>Note amministrative</div>
           <TextArea value={noteRaw ?? ''} disabled={noteReadonly} placeholder='Annotazioni istruttorie. Compilarle manualmente oppure usare una casistica rapida.' onChange={v => props.onApplyNote(v || '')} />
         </div>
       </div>
@@ -2608,12 +2610,12 @@ function PracticeDetailBadge (props: { title: string, rows: Array<{ label: strin
       padding: '10px 12px',
       minWidth: 0
     }}>
-      <div style={{ color: st.formWorkflowBadgeTitleColor || '#0d3b66', fontSize: 12.5, fontWeight: 900, marginBottom: 6, overflowWrap: 'anywhere' }}>{props.title}</div>
+      <div style={{ color: st.formWorkflowBadgeTitleColor || st.formInnerHeaderColor || '#0f4c81', fontSize: Number(st.formInnerHeaderFontSize ?? 14), fontWeight: 900, marginBottom: 6, overflowWrap: 'anywhere' }}>{props.title}</div>
       <div style={{ display: 'grid', gap: 4 }}>
         {props.rows.map((row, idx) => (
           <div key={`${row.label}-${idx}`} style={{ display: 'grid', gridTemplateColumns: 'auto 1fr', columnGap: 6, alignItems: 'baseline', minWidth: 0 }}>
-            <span style={{ color: st.formWorkflowBadgeLabelColor || '#6b7280', fontSize: 12, fontWeight: 750, whiteSpace: 'nowrap' }}>{row.label}:</span>
-            <span style={{ color: row.highlight ? (st.formWorkflowBadgeHighlightColor || '#2563eb') : (st.formWorkflowBadgeValueColor || '#111827'), fontSize: 13, fontWeight: row.highlight ? 850 : 650, overflowWrap: 'anywhere' }}>{row.value || '—'}</span>
+            <span style={{ color: st.formWorkflowBadgeLabelColor || '#6b7280', fontSize: Number(st.formLabelFontSize ?? 15), fontWeight: Number(st.formLabelFontWeight ?? 600) as any, whiteSpace: 'nowrap' }}>{row.label}:</span>
+            <span style={{ color: row.highlight ? (st.formWorkflowBadgeHighlightColor || '#2563eb') : (st.formWorkflowBadgeValueColor || '#111827'), fontSize: Number(st.formFieldFontSize ?? 15), fontWeight: row.highlight ? 800 : 600, overflowWrap: 'anywhere' }}>{row.value || '—'}</span>
           </div>
         ))}
       </div>
@@ -2631,7 +2633,7 @@ function PracticePhaseGroup (props: { title: string, items: Array<{ title: strin
       padding: 10,
       minWidth: 0
     }}>
-      <div style={{ color: st.formPhaseCardTitleColor || '#0d3b66', fontSize: 13, fontWeight: 950, marginBottom: 8 }}>{props.title}</div>
+      <div style={{ color: st.formPhaseCardTitleColor || st.formInnerHeaderColor || '#0f4c81', fontSize: Number(st.formInnerHeaderFontSize ?? 14), fontWeight: 950, marginBottom: 8 }}>{props.title}</div>
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(245px, 1fr))', gap: 10 }}>
         {props.items.map(item => <PracticeDetailBadge key={item.title} title={item.title} rows={item.rows} />)}
       </div>
@@ -2712,7 +2714,7 @@ function CompactPracticeHeader (props: { title: string, data: Record<string, any
   return (
     <Section title='Istruttoria amministrativa'>
       <details style={{ border: `${Number(st.formExpandableCardBorderWidth ?? 1)}px solid ${st.formExpandableCardBorderColor || '#e5e7eb'}`, borderRadius: 10, background: st.formExpandableCardBg || '#f9fafb', padding: 10 }}>
-        <summary style={{ cursor: 'pointer', color: '#0d3b66', fontSize: 12, fontWeight: 900 }}>Dettagli pratica e workflow</summary>
+        <summary style={{ cursor: 'pointer', color: st.formInnerHeaderColor || '#0f4c81', fontSize: Number(st.formInnerHeaderFontSize ?? 14), fontWeight: 900 }}>Dettagli pratica e workflow</summary>
         <div style={{ display: 'grid', gap: 12, marginTop: 10 }}>
           <PracticePhaseGroup title='Fase tecnica' items={faseTecnicaDetails} />
           <PracticePhaseGroup title='Fase amministrativa' items={faseAmministrativaDetails} />
@@ -2786,7 +2788,7 @@ function PagamentoGuidatoSection (props: { data: Record<string, any>, fields: La
         {!mode && <InfoBox kind='warn'>Selezionare la modalità di pagamento: pagoPA, bonifico bancario, pagamento misto o altro.</InfoBox>}
 
         {showPagoPa && <details open style={{ border: `${Number(st.formExpandableCardBorderWidth ?? 1)}px solid ${st.formExpandableCardBorderColor || '#e5e7eb'}`, borderRadius: 10, background: st.formExpandableCardBg || '#f9fafb', padding: 10 }}>
-          <summary style={{ cursor: 'pointer', color: '#0d3b66', fontSize: 12, fontWeight: 900 }}>Dati pagoPA</summary>
+          <summary style={{ cursor: 'pointer', color: st.formInnerHeaderColor || '#0f4c81', fontSize: Number(st.formInnerHeaderFontSize ?? 14), fontWeight: 900 }}>Dati pagoPA</summary>
           <div style={{ marginTop: 10 }}>
             <div style={{ marginBottom: 10 }}>
               <InfoBox>Il caricamento del PDF del bollettino dovrà compilare automaticamente IUV, codice avviso, importo e scadenza. Per ora la compilazione manuale resta disponibile come correzione controllata.</InfoBox>
@@ -2796,7 +2798,7 @@ function PagamentoGuidatoSection (props: { data: Record<string, any>, fields: La
         </details>}
 
         {showBonifico && <details open style={{ border: `${Number(st.formExpandableCardBorderWidth ?? 1)}px solid ${st.formExpandableCardBorderColor || '#e5e7eb'}`, borderRadius: 10, background: st.formExpandableCardBg || '#f9fafb', padding: 10 }}>
-          <summary style={{ cursor: 'pointer', color: '#166534', fontSize: 12, fontWeight: 900 }}>Dati bonifico bancario</summary>
+          <summary style={{ cursor: 'pointer', color: st.formInnerHeaderColor || '#0f4c81', fontSize: Number(st.formInnerHeaderFontSize ?? 14), fontWeight: 900 }}>Dati bonifico bancario</summary>
           <div style={{ marginTop: 10 }}>
             <AdminFieldsGrid group='bonifico' draft={d} fields={props.fields} canEdit={props.canEdit} onChange={props.onChange} />
           </div>
@@ -3126,7 +3128,7 @@ function NormToggleBox (props: { title: string, variant: NormToggleVariant, chil
           padding: '8px 10px',
           textAlign: 'left',
           cursor: 'pointer',
-          fontSize: 13,
+          fontSize: Number(st.formFieldFontSize ?? 15),
           fontWeight: 900,
           lineHeight: 1.35
         }}
@@ -3178,8 +3180,8 @@ function ParametriSanzionatoriTable (props: { groups: SanzioneConsultivaGroup[] 
                   <div style={{ display: 'grid', gap: 0, padding: '0 10px 2px 10px' }}>
                     {block.voci.map((voce, idx) => (
                       <div key={`${group.codiceCasistica}-${voce.codiceParametro || idx}-${voce.articoloSanzione || idx}`} style={{ display: 'flex', justifyContent: 'space-between', gap: 16, alignItems: 'baseline', borderTop: idx === 0 ? '0' : `1px solid ${st.normVoceSeparatorColor || '#eef2f7'}`, padding: idx === 0 ? '4px 0' : '7px 0 4px 0' }}>
-                        <div style={{ color: st.normVoceLabelColor || '#111827', fontSize: 12, fontWeight: 800 }}>{voce.descrizione || 'Voce applicabile'}:</div>
-                        <div style={{ fontSize: 12, textAlign: 'right', ...valueStyle(voce) }}>{formatVoceValue(voce)}</div>
+                        <div style={{ color: st.normVoceLabelColor || '#111827', fontSize: Number(st.formFieldFontSize ?? 15), fontWeight: 800 }}>{voce.descrizione || 'Voce applicabile'}:</div>
+                        <div style={{ fontSize: Number(st.formFieldFontSize ?? 15), textAlign: 'right', ...valueStyle(voce) }}>{formatVoceValue(voce)}</div>
                       </div>
                     ))}
                   </div>
@@ -3194,6 +3196,7 @@ function ParametriSanzionatoriTable (props: { groups: SanzioneConsultivaGroup[] 
 }
 
 function BasicViolationsOnly (props: { data: any, layerFields: LayerFieldInfo[], message?: string }) {
+  const st = useAdminStyle()
   const rows = buildViolationRows(props.data || {}, props.layerFields || [])
   const descrizione = firstViolationValue(props.data || {}, props.layerFields || [], ['descrizione_fatti'])
   const circostanze = firstViolationValue(props.data || {}, props.layerFields || [], ['circostanze'])
@@ -3207,13 +3210,13 @@ function BasicViolationsOnly (props: { data: any, layerFields: LayerFieldInfo[],
           {rows.map(row => (
             <div key={row.key} style={{ border: '1px solid #dbeafe', background: '#f8fafc', borderRadius: 11, padding: 11, display: 'grid', gap: 8 }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-                <span style={{ background: '#0d3b66', color: '#fff', borderRadius: 999, padding: '5px 10px', fontWeight: 800, fontSize: 12 }}>{row.label}</span>
-                <span style={{ color: '#166534', fontSize: 12, fontWeight: 800 }}>Contestata</span>
+                <span style={{ background: '#0d3b66', color: '#fff', borderRadius: 999, padding: '5px 10px', fontWeight: 800, fontSize: Number(st.formFieldFontSize ?? 15) }}>{row.label}</span>
+                <span style={{ color: '#166534', fontSize: Number(st.formFieldFontSize ?? 15), fontWeight: 800 }}>Contestata</span>
               </div>
               {row.details.length > 0 ? (
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(210px, 1fr))', gap: 8 }}>
                   {row.details.map((d, idx) => (
-                    <div key={`${row.key}-${d.label}-${idx}`} style={{ fontSize: 12 }}>
+                    <div key={`${row.key}-${d.label}-${idx}`} style={{ fontSize: Number(st.formFieldFontSize ?? 15) }}>
                       <span style={{ color: '#6b7280', fontWeight: 800 }}>{d.label}: </span>
                       <span style={{ color: '#111827', fontWeight: 650 }}>{d.value}</span>
                     </div>
@@ -3310,7 +3313,7 @@ function SpeseNotificaEditor (props: { data: Record<string, any>, fields: LayerF
 
   return (
     <div style={{ border: `1px solid ${st.formCardBorderColor || '#c6d7ea'}`, background: '#ffffff', borderRadius: Number(st.formCardBorderRadius ?? 8), padding: '9px 11px', minWidth: 0 }}>
-      <div style={{ color: '#6b7280', fontSize: 11, fontWeight: 800, textTransform: 'uppercase', letterSpacing: 0.25, marginBottom: 4 }}>Spese di notifica</div>
+      <div style={{ color: st.formLabelColor || '#334155', fontSize: Number(st.formLabelFontSize ?? 15), fontWeight: Number(st.formLabelFontWeight ?? 600) as any, marginBottom: Number(st.formLabelMarginBottom ?? 3) }}>Spese di notifica</div>
       <input
         type='text'
         inputMode='decimal'
@@ -3341,7 +3344,7 @@ function SpeseNotificaEditor (props: { data: Record<string, any>, fields: LayerF
         style={{ ...inputStyleFrom(st, readonly), background: readonly ? (st.formFieldDisabledBg || '#e7eef7') : '#ffffff' }}
         placeholder='0,00'
       />
-      <div style={{ marginTop: 4, color: '#6b7280', fontSize: 11, lineHeight: 1.3 }}>Concorre al totale da pagare.</div>
+      <div style={{ marginTop: 4, color: '#6b7280', fontSize: 12, lineHeight: 1.35 }}>Concorre al totale da pagare.</div>
     </div>
   )
 }
@@ -3384,7 +3387,7 @@ function ParametriSanzionatoriSection (props: { loadState: SanzioneConsultivaLoa
             </div>
           </div>
           <details style={{ border: `${Number(st.formExpandableCardBorderWidth ?? 1)}px solid ${st.formExpandableCardBorderColor || '#e5e7eb'}`, borderRadius: 10, background: st.formExpandableCardBg || '#f9fafb', padding: 10 }}>
-            <summary style={{ cursor: 'pointer', fontWeight: 900, color: '#0d3b66', fontSize: 13 }}>Mostra dettaglio norme e calcolo</summary>
+            <summary style={{ cursor: 'pointer', fontWeight: 900, color: st.formInnerHeaderColor || '#0f4c81', fontSize: Number(st.formInnerHeaderFontSize ?? 14) }}>Mostra dettaglio norme e calcolo</summary>
             <div style={{ marginTop: 10 }}>
               <ParametriSanzionatoriTable groups={groups} />
               <div style={{ marginTop: 10 }}>
@@ -3559,6 +3562,7 @@ function downloadBlobFile (blob: Blob, fileName: string): void {
 }
 
 function ViolationsSection (props: { data: any, layerFields: LayerFieldInfo[] }) {
+  const st = useAdminStyle()
   const rows = buildViolationRows(props.data || {}, props.layerFields || [])
   const descrizione = firstViolationValue(props.data || {}, props.layerFields || [], ['descrizione_fatti'])
   const circostanze = firstViolationValue(props.data || {}, props.layerFields || [], ['circostanze'])
@@ -3571,13 +3575,13 @@ function ViolationsSection (props: { data: any, layerFields: LayerFieldInfo[] })
           {rows.map(row => (
             <div key={row.key} style={{ border: '1px solid #dbeafe', background: '#f8fafc', borderRadius: 11, padding: 11, display: 'grid', gap: 8 }}>
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
-                <span style={{ background: '#0d3b66', color: '#fff', borderRadius: 999, padding: '5px 10px', fontWeight: 800, fontSize: 12 }}>{row.label}</span>
-                <span style={{ color: '#166534', fontSize: 12, fontWeight: 800 }}>Contestata</span>
+                <span style={{ background: '#0d3b66', color: '#fff', borderRadius: 999, padding: '5px 10px', fontWeight: 800, fontSize: Number(st.formFieldFontSize ?? 15) }}>{row.label}</span>
+                <span style={{ color: '#166534', fontSize: Number(st.formFieldFontSize ?? 15), fontWeight: 800 }}>Contestata</span>
               </div>
               {row.details.length > 0 ? (
                 <div style={{ display: 'grid', gap: 6 }}>
                   {row.details.map((d, idx) => (
-                    <div key={`${row.key}-${d.label}-${idx}`} style={{ display: 'grid', gridTemplateColumns: 'minmax(110px, 0.8fr) minmax(0, 1.2fr)', gap: 8, fontSize: 12 }}>
+                    <div key={`${row.key}-${d.label}-${idx}`} style={{ display: 'grid', gridTemplateColumns: 'minmax(110px, 0.8fr) minmax(0, 1.2fr)', gap: 8, fontSize: Number(st.formFieldFontSize ?? 15) }}>
                       <div style={{ color: '#6b7280', fontWeight: 800 }}>{d.label}</div>
                       <div style={{ color: '#111827', fontWeight: 650, overflowWrap: 'anywhere' }}>{d.value}</div>
                     </div>
@@ -3601,6 +3605,7 @@ function ViolationsSection (props: { data: any, layerFields: LayerFieldInfo[] })
 }
 
 function DatiGeneraliAmmSection (props: { title: string, data: Record<string, any>, fields: LayerFieldInfo[], profile: { role: string, label: string, fullName: string, username: string }, hasDsForSave: boolean, summaryFields: any[], labelSize: number, valueSize: number }) {
+  const st = useAdminStyle()
   const d = props.data || {}
   const oid = pickOidFromData(d, 'OBJECTID')
   const rapporto = getReportCode(d, oid != null ? Number(oid) : null)
@@ -3608,7 +3613,7 @@ function DatiGeneraliAmmSection (props: { title: string, data: Record<string, an
   const verbaleNotificato = isVerbaleNotificato(d)
   const tecnicoIstruttoreTecnico = String(pickAttrCI(d, ['ti_assegnato_nome', 'ti_assegnato_username', 'tecnico_istruttore_nome', 'tecnico_istruttore', 'istruttore_tecnico_nome', 'istruttore_tecnico']) || '—')
   const panelStyle: React.CSSProperties = { border: '1px solid #dbeafe', background: '#f8fafc', borderRadius: 12, padding: 12, display: 'grid', gap: 10 }
-  const panelTitleStyle: React.CSSProperties = { color: '#0d3b66', fontSize: 13, fontWeight: 900, letterSpacing: 0.2, textTransform: 'uppercase' }
+  const panelTitleStyle: React.CSSProperties = { color: st.formInnerHeaderColor || '#0f4c81', fontSize: Number(st.formInnerHeaderFontSize ?? 14), fontWeight: 900, letterSpacing: 0.2, textTransform: 'uppercase' }
   const gridStyle: React.CSSProperties = { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(210px, 1fr))', gap: 10 }
 
   return (
@@ -3830,7 +3835,7 @@ function AllegatiAmmSection (props: { oid: number | null, ds: any, layerUrl?: st
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', minHeight: '100%', height: '100%', border: `1px solid ${st.formCardBorderColor || '#c5d9f1'}`, borderRadius: Number(st.formCardBorderRadius ?? 10), background: '#fff', overflow: 'hidden' }}>
-      <div style={{ flex: '0 0 auto', padding: '8px 12px', background: headerBg, color: headerColor, fontWeight: 800, fontSize: Number(st.formCardHeaderFontSize ?? 13) }}>
+      <div style={{ flex: '0 0 auto', padding: '8px 12px', background: headerBg, color: headerColor, fontWeight: 800, fontSize: Number(st.formCardHeaderFontSize ?? 14) }}>
         ALLEGATI
       </div>
 
@@ -3842,8 +3847,8 @@ function AllegatiAmmSection (props: { oid: number | null, ds: any, layerUrl?: st
         <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) minmax(0, 1fr)', gap: 12, flex: '1 1 auto', minHeight: 0, padding: 12 }}>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 10, minHeight: 0, overflow: 'hidden' }}>
             <div style={{ flex: '0 0 auto', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, flexWrap: 'wrap' }}>
-              <div style={{ fontWeight: 800, fontSize: 13 }}>Elenco allegati</div>
-              <label style={{ minHeight: 36, height: 36, boxSizing: 'border-box', padding: '0 14px', borderRadius: 10, border: '1px solid rgba(0,0,0,0.12)', background: (!props.canEdit || busy) ? '#e5e7eb' : '#f8fbff', color: (!props.canEdit || busy) ? '#9ca3af' : '#111827', fontSize: 12, fontWeight: 600, cursor: (!props.canEdit || busy) ? 'not-allowed' : 'pointer', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', lineHeight: 1, whiteSpace: 'nowrap' }}>
+              <div style={{ fontWeight: 800, fontSize: Number(st.formInnerHeaderFontSize ?? 14), color: st.formInnerHeaderColor || '#0f4c81' }}>Elenco allegati</div>
+              <label style={{ minHeight: 36, height: 36, boxSizing: 'border-box', padding: '0 14px', borderRadius: 10, border: '1px solid rgba(0,0,0,0.12)', background: (!props.canEdit || busy) ? '#e5e7eb' : '#f8fbff', color: (!props.canEdit || busy) ? '#9ca3af' : '#111827', fontSize: 13, fontWeight: 600, cursor: (!props.canEdit || busy) ? 'not-allowed' : 'pointer', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', lineHeight: 1, whiteSpace: 'nowrap' }}>
                 Scegli file
                 <input
                   key={inputKey}
@@ -3869,7 +3874,7 @@ function AllegatiAmmSection (props: { oid: number | null, ds: any, layerUrl?: st
                   return (
                     <div key={att.id} onClick={() => setSelected(active ? null : att)} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, border: `1px solid ${active ? '#2563eb' : 'rgba(0,0,0,0.08)'}`, background: active ? '#eff6ff' : '#fff', borderRadius: 10, padding: '8px 10px', cursor: 'pointer', transition: 'all 0.15s' }}>
                       <div style={{ minWidth: 0 }}>
-                        <div style={{ fontWeight: 600, fontSize: 12, color: '#111827', wordBreak: 'break-word' }}>{att.name || `Allegato #${att.id}`}</div>
+                        <div style={{ fontWeight: 600, fontSize: Number(st.formFieldFontSize ?? 15), color: '#111827', wordBreak: 'break-word' }}>{att.name || `Allegato #${att.id}`}</div>
                         <div style={{ fontSize: 11, color: '#64748b' }}>{formatAttachmentBytes(att.size)}{att.contentType ? ` • ${att.contentType}` : ''}</div>
                       </div>
                       <button type='button' disabled={!props.canEdit || busy} onClick={e => { e.preventDefault(); e.stopPropagation(); void remove(att) }} style={secondaryButtonStyle(!props.canEdit || busy)}>Elimina</button>
@@ -3995,7 +4000,7 @@ function SelectionWatcher (props: {
 function inputStyleFrom (st: Record<string, any>, disabled?: boolean): React.CSSProperties {
   const h = Number(st.formFieldHeight ?? 32)
   const fieldHeight = Number.isFinite(h) && h > 0 ? h : 32
-  const fontSize = Number(st.formFieldFontSize ?? 13)
+  const fontSize = Number(st.formFieldFontSize ?? 15)
   return {
     width: '100%',
     boxSizing: 'border-box',
@@ -4109,7 +4114,7 @@ function NoteCasisticaSelect (props: { fieldName: string, disabled?: boolean, on
   if (!options.length) return null
   return (
     <div style={{ display: 'grid', gap: 4, width: '100%' }}>
-      <label style={{ color: st.formLabelColor || '#334155', fontSize: Number(st.formLabelFontSize ?? 12), fontWeight: Number(st.formLabelFontWeight ?? 600) as any, marginBottom: Number(st.formLabelMarginBottom ?? 3) }}>Casistica note</label>
+      <label style={{ color: st.formLabelColor || '#334155', fontSize: Number(st.formLabelFontSize ?? 15), fontWeight: Number(st.formLabelFontWeight ?? 600) as any, marginBottom: Number(st.formLabelMarginBottom ?? 3) }}>Casistica note</label>
       <select
         disabled={props.disabled}
         value=''
@@ -4149,7 +4154,7 @@ function FieldEditor (props: {
   const miss = !exists
 
   const label = (
-    <div style={{ color: st.formLabelColor || '#334155', fontSize: Number(st.formLabelFontSize ?? 12), fontWeight: Number(st.formLabelFontWeight ?? 600) as any, marginBottom: Number(st.formLabelMarginBottom ?? 3), display: 'flex', gap: 6, alignItems: 'center', justifyContent: 'space-between' }}>
+    <div style={{ color: st.formLabelColor || '#334155', fontSize: Number(st.formLabelFontSize ?? 15), fontWeight: Number(st.formLabelFontWeight ?? 600) as any, marginBottom: Number(st.formLabelMarginBottom ?? 3), display: 'flex', gap: 6, alignItems: 'center', justifyContent: 'space-between' }}>
       <span>{field.label}</span>
       {systemCalculated && !miss && <span style={{ color: '#1d4ed8', fontWeight: 800, fontSize: 10 }}>automatico</span>}
       {miss && <span style={{ color: '#b45309', fontWeight: 700, fontSize: 10 }}>campo assente</span>}
@@ -4810,6 +4815,7 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
     overflow: 'hidden',
     color: '#111827',
     fontFamily: 'inherit',
+    fontSize: Number(adminStyle.formFieldFontSize ?? 15),
     position: 'relative',
     zIndex: hasSelection ? 1001 : 'auto'
   }
@@ -4897,7 +4903,7 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
               {hasSelection ? (<>{titleParts.prefix}<span style={{ color: '#2563eb', fontWeight: Number(cfg.titleFontWeight || 700) as any }}>{titleParts.reportCode}</span></>) : 'Verbale amministrativo'}
             </div>
             {hasSelection && !headerVerbaleDefinitivo && (
-              <div style={{ marginTop: 3, color: '#b42318', fontSize: 12, fontWeight: 850, lineHeight: 1.25 }}>
+              <div style={{ marginTop: 3, color: '#b42318', fontSize: 13, fontWeight: 850, lineHeight: 1.3 }}>
                 Numero e data saranno assegnati dopo l’approvazione del Direttore d’Area.
               </div>
             )}
@@ -4962,8 +4968,8 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
                   profile={profile}
                   hasDsForSave={hasDsForSave}
                   summaryFields={Array.isArray(cfg.summaryFields) ? cfg.summaryFields : []}
-                  labelSize={Number(cfg.labelFontSize || 12)}
-                  valueSize={Number(cfg.valueFontSize || 13)}
+                  labelSize={Number(cfg.labelFontSize || adminStyle.formLabelFontSize || 15)}
+                  valueSize={Number(cfg.valueFontSize || adminStyle.formFieldFontSize || 15)}
                 />
               )}
 
