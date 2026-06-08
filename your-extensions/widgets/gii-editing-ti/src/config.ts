@@ -410,7 +410,7 @@ export const DEFAULT_FIELD_LAYOUTS: Record<string, LayoutRow[]> = {
     { type: 'fields', columns: '1fr', cells: [{ field: 'note_anagrafica' }] }
   ],
   violazione: [
-    { type: 'header', label: 'Art. 15 — Prelievo abusivo' },
+    { type: 'header', label: 'Art. 15 - Prelievo abusivo d’acqua' },
     { type: 'fields', columns: '1fr', cells: [{ field: 'tipo_abuso' }] },
     { type: 'fields', columns: '1fr 1fr', cells: [{ field: 'sup_dichiarata_art15' }, { field: 'sup_irrigata_art15' }] },
     { type: 'header', label: 'Artt. 16 e 17 — Inosservanza termini' },

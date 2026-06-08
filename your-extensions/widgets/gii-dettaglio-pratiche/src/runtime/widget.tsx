@@ -2335,6 +2335,26 @@ function parseModifiedFieldNames (raw: any): string[] {
     .filter(Boolean)
 }
 
+const VIOLATION_LABEL_BY_ARTICLE: Record<string, string> = {
+  '8': 'Art. 8 - Violazione servizio reperibilità',
+  '12': 'Art. 12 - Negato accesso ai fondi (al personale consortile)',
+  '15': 'Art. 15 - Prelievo abusivo d’acqua',
+  '16': 'Art. 16 - Comunicazione di irrigazione tardiva',
+  '17': 'Art. 17 - Variazione o rinuncia tardiva',
+  '27': 'Art. 27 - Spreco d’acqua/uso negligente risorsa idrica',
+  '28': 'Art. 28 - Violazione prescrizioni del consorzio',
+  '29': 'Art. 29 - Violazione termini restituzione attrezzature',
+  '30': 'Art. 30 - Danneggiamento e/o perdita attrezzature',
+  '31': 'Art. 31 - Mancata segnalazione guasti',
+  '32': 'Art. 32 - Negato accesso ai fondi (al consorziato)',
+  '33': 'Art. 33 - Inosservanza limiti temporali di prelievo',
+  '34': 'Art. 34 - Interferenze',
+  '35': 'Art. 35 - Manomissione reti di dispensa e allaccio aspirazione',
+  '36': 'Art. 36 - Uso attrezzature non autorizzate',
+  '37': 'Art. 37 - Uso sistemi di irrigazione incompatibili',
+  '39': 'Art. 39 - Danni strutture irrigue'
+}
+
 function getFieldAliasForIter (fieldName: string, aliasMap?: Record<string, string>): string {
   const raw = String(fieldName || '').trim()
   if (!raw) return ''
@@ -2343,12 +2363,12 @@ function getFieldAliasForIter (fieldName: string, aliasMap?: Record<string, stri
   // Alcuni alias del layer derivano ancora dalla struttura storica del Survey
   // e, nell'iter, risultano troppo tecnici o ambigui. Qui li traduciamo
   // in etichette funzionali, comprensibili per l'operatore.
-  if (rawKey === normKey('norma_violata1') || rawKey === normKey('Norma violata 1')) return 'Violazione Art. 15'
-  if (rawKey === normKey('norma_violata2') || rawKey === normKey('Norma violata 2')) return 'Violazione Art. 16/17'
-  if (rawKey === normKey('norma_violata3') || rawKey === normKey('Norma violata 3')) return 'Violazioni artt. 8, 12, 27-37 e 39'
+  if (rawKey === normKey('norma_violata1') || rawKey === normKey('Norma violata 1')) return 'Art. 15 - Prelievo abusivo d’acqua'
+  if (rawKey === normKey('norma_violata2') || rawKey === normKey('Norma violata 2')) return 'Art. 16 - Comunicazione di irrigazione tardiva / Art. 17 - Variazione o rinuncia tardiva'
+  if (rawKey === normKey('norma_violata3') || rawKey === normKey('Norma violata 3')) return 'Altre violazioni (artt. 8, 12, 27-37 e 39)'
 
   const artMatch = raw.match(/^v_art0*(\d+)$/i)
-  if (artMatch) return `Violazione Art. ${Number(artMatch[1])}`
+  if (artMatch) return VIOLATION_LABEL_BY_ARTICLE[String(Number(artMatch[1]))] || `Art. ${Number(artMatch[1])}`
   if (rawKey === normKey('coordinate_punto_mappa')) return 'Coordinate punto in mappa'
   const aliases = aliasMap || {}
   if (aliases[raw]) return String(aliases[raw] || raw)
@@ -2655,10 +2675,10 @@ const NSD_CATEGORY_LABELS: Record<NsdCategory, string> = {
 
 const NSD_UNLINKED_CASISTICA = '__GII_NSD_NON_COLLEGATA__'
 const NSD_CASISTICA_INFO: Record<string, { label: string; order: number }> = {
-  C100_REPERIBILITA: { label: 'Art. 8 – Violazione servizio reperibilità', order: 8 },
-  C101_SPRECO_ACQUA: { label: 'Art. 27 – Spreco d’acqua / uso negligente risorsa idrica', order: 27 },
-  C104_ATTREZZATURE_DANNEGGIATE: { label: 'Art. 30 – Danneggiamento e/o perdita attrezzature', order: 30 },
-  C113_DANNI_STRUTTURE_IRRIGUE: { label: 'Art. 39 – Danni strutture irrigue', order: 39 }
+  C100_REPERIBILITA: { label: 'Art. 8 - Violazione servizio reperibilità', order: 8 },
+  C101_SPRECO_ACQUA: { label: 'Art. 27 - Spreco d’acqua/uso negligente risorsa idrica', order: 27 },
+  C104_ATTREZZATURE_DANNEGGIATE: { label: 'Art. 30 - Danneggiamento e/o perdita attrezzature', order: 30 },
+  C113_DANNI_STRUTTURE_IRRIGUE: { label: 'Art. 39 - Danni strutture irrigue', order: 39 }
 }
 
 function nsdNormalizeCasistica (v: any): string {
@@ -3565,7 +3585,7 @@ const isPgOnlyField = React.useCallback((fieldName: string) => {
     },
     art16_17: {
       'Art16': 'Art. 16 - Comunicazione di irrigazione tardiva',
-      'Art17': 'Art. 17 - Comunicazione di variazione o di rinuncia tardiva'
+      'Art17': 'Art. 17 - Variazione o rinuncia tardiva'
     },
     art17_tipo: {
       'Art17.1': 'Variazione tardiva',
@@ -3582,7 +3602,7 @@ const isPgOnlyField = React.useCallback((fieldName: string) => {
       'Art32': 'Art. 32 - Negato accesso ai fondi (al consorziato)',
       'Art33': 'Art. 33 - Inosservanza limiti temporali di prelievo',
       'Art34': 'Art. 34 - Interferenze',
-      'Art35': 'Art. 35 - Manomissione reti di dispensa e allaccio di apparecchi di aspirazione all’idrante',
+      'Art35': 'Art. 35 - Manomissione reti di dispensa e allaccio aspirazione',
       'Art36': 'Art. 36 - Uso attrezzature non autorizzate',
       'Art37': 'Art. 37 - Uso sistemi di irrigazione incompatibili',
       'Art39': 'Art. 39 - Danni strutture irrigue'
@@ -3796,8 +3816,8 @@ const isPgOnlyField = React.useCallback((fieldName: string) => {
 
     return (
       <div style={{ display: 'grid', gap: 12 }}>
-        {renderViolationGroup('Art. 15 - Prelievo abusivo', art15Body)}
-        {renderViolationGroup('Artt. 16 e 17 - Inosservanza termini presentazione comunicazioni', art1617Body)}
+        {renderViolationGroup('Art. 15 - Prelievo abusivo d’acqua', art15Body)}
+        {renderViolationGroup('Art. 16 - Comunicazione di irrigazione tardiva / Art. 17 - Variazione o rinuncia tardiva', art1617Body)}
         {renderViolationGroup('Altre violazioni', altreBody)}
         {renderViolationGroup('Dettagli della violazione', detailsBody)}
       </div>

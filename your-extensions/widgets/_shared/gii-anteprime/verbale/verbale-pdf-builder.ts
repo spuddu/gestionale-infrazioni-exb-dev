@@ -27,6 +27,7 @@ type AttoMeta = {
   filePrefix: string
   hasVerbale: boolean
   hasSanzione: boolean
+  hasRimborso: boolean
   hasRisarcimento: boolean
   isArchiviazione: boolean
 }
@@ -55,12 +56,42 @@ function v (m: Record<string, string>, key: string): string {
   return cleanText(m[key] || '')
 }
 
+function sanitizeCalculationDetailText (raw: any): string {
+  const text = String(raw ?? '')
+    .replace(/\s*\((?:SANZIONE|RISARCIMENTO|RIMBORSO|ATTREZZATURA|CAUZIONE|SPESE|RIDUZIONE|TERMINE|TESTO)\.[A-Z0-9._-]+\)(?=\s*:)/gi, '')
+    .replace(/^Quantificazione automatica (?:della sanzione|degli importi) sulla base del rapporto approvato e delle tabelle regolamentari configurate\.\s*$/gim, '')
+    .replace(/^Gli importi principali sono calcolati automaticamente; le spese di notifica possono essere inserite dall['’]operatore amministrativo e concorrono al totale\.\s*$/gim, '')
+    .replace(/[ \t]+:/g, ':')
+    .replace(/\r/g, '')
+  return text.replace(/^Riepilogo (?:automatico|importi)\s*$[\s\S]*$/im, '').replace(/\n{3,}/g, '\n\n').trim()
+}
+
 function hasValue (m: Record<string, string>, key: string): boolean {
   return !!v(m, key)
 }
 
 function anyValue (m: Record<string, string>, keys: string[]): boolean {
   return keys.some(k => hasValue(m, k))
+}
+
+function moneyNumber (value: string): number {
+  const raw = cleanText(value || '').replace(/[^0-9,.-]/g, '')
+  if (!raw) return 0
+  const normalized = raw.includes(',')
+    ? raw.replace(/\./g, '').replace(',', '.')
+    : raw
+  const n = Number(normalized)
+  return Number.isFinite(n) ? n : 0
+}
+
+function hasPositiveMoney (m: Record<string, string>, key: string): boolean {
+  return moneyNumber(v(m, key)) > 0.004
+}
+
+function preferredSanzioneAmount (m: Record<string, string>): string {
+  return hasPositiveMoney(m, 'sanzione_importo_ridotta')
+    ? v(m, 'sanzione_importo_ridotta')
+    : v(m, 'sanzione_importo_base')
 }
 
 function compactRows (rows: Row[]): Row[] {
@@ -100,7 +131,9 @@ function wrapText (font: PDFFont, text: string, size: number, maxWidth: number):
 function normalizeAttoCode (raw: string, label: string): string {
   const s = cleanText(raw || label).toUpperCase().replace(/[\s-]+/g, '_')
   if (s.includes('ARCHIV')) return 'ARCHIVIAZIONE'
-  if (s.includes('VERBALE') && (s.includes('RISARC') || s.includes('DANN'))) return 'VERBALE_RISARCIMENTO'
+  if (s === 'VERBALE_MISTO' || (s.includes('VERBALE') && (s.includes('MIST') || s.includes('RISARC') || s.includes('RIMBORS')))) return 'VERBALE_RISARCIMENTO'
+  if (s.includes('RIMBORS') && s.includes('RISARC')) return 'RIMBORSO_RISARCIMENTO'
+  if (s.includes('RIMBORS')) return 'RIMBORSO'
   if (s.includes('RISARC') || s.includes('DANN')) return 'RISARCIMENTO_DANNI'
   if (s.includes('VERBALE')) return 'VERBALE'
   return s || 'VERBALE'
@@ -117,19 +150,49 @@ function getAttoMeta (m: Record<string, string>): AttoMeta {
       filePrefix: 'archiviazione',
       hasVerbale: false,
       hasSanzione: false,
+      hasRimborso: false,
       hasRisarcimento: false,
       isArchiviazione: true
+    }
+  }
+  if (code === 'RIMBORSO') {
+    return {
+      code,
+      label: v(m, 'tipo_atto_amm_label') || 'Richiesta di rimborso',
+      title: 'RICHIESTA DI RIMBORSO',
+      fallbackObject: 'Richiesta di rimborso conseguente al rapporto tecnico',
+      filePrefix: 'richiesta_rimborso',
+      hasVerbale: false,
+      hasSanzione: false,
+      hasRimborso: true,
+      hasRisarcimento: false,
+      isArchiviazione: false
     }
   }
   if (code === 'RISARCIMENTO_DANNI') {
     return {
       code,
       label: v(m, 'tipo_atto_amm_label') || 'Richiesta risarcimento danni',
-      title: 'RICHIESTA RISARCIMENTO DANNI',
+      title: 'RICHIESTA DI RISARCIMENTO DANNI',
       fallbackObject: 'Richiesta di risarcimento danni conseguente al rapporto tecnico',
       filePrefix: 'richiesta_risarcimento',
       hasVerbale: false,
       hasSanzione: false,
+      hasRimborso: false,
+      hasRisarcimento: true,
+      isArchiviazione: false
+    }
+  }
+  if (code === 'RIMBORSO_RISARCIMENTO') {
+    return {
+      code,
+      label: v(m, 'tipo_atto_amm_label') || 'Richiesta di rimborso e risarcimento danni',
+      title: 'RICHIESTA DI RIMBORSO E RISARCIMENTO DANNI',
+      fallbackObject: 'Richiesta di rimborso e risarcimento danni conseguente al rapporto tecnico',
+      filePrefix: 'richiesta_rimborso_risarcimento',
+      hasVerbale: false,
+      hasSanzione: false,
+      hasRimborso: true,
       hasRisarcimento: true,
       isArchiviazione: false
     }
@@ -137,12 +200,13 @@ function getAttoMeta (m: Record<string, string>): AttoMeta {
   if (code === 'VERBALE_RISARCIMENTO') {
     return {
       code,
-      label: v(m, 'tipo_atto_amm_label') || 'Verbale e richiesta risarcimento',
-      title: 'VERBALE AMMINISTRATIVO E RICHIESTA RISARCIMENTO',
-      fallbackObject: 'Contestazione amministrativa e richiesta di risarcimento danni',
-      filePrefix: 'verbale_risarcimento',
+      label: v(m, 'tipo_atto_amm_label') || 'Verbale misto',
+      title: 'VERBALE MISTO',
+      fallbackObject: 'Verbale amministrativo con richiesta di rimborso e/o risarcimento danni',
+      filePrefix: 'verbale_misto',
       hasVerbale: true,
       hasSanzione: true,
+      hasRimborso: true,
       hasRisarcimento: true,
       isArchiviazione: false
     }
@@ -155,6 +219,7 @@ function getAttoMeta (m: Record<string, string>): AttoMeta {
     filePrefix: 'verbale',
     hasVerbale: true,
     hasSanzione: true,
+    hasRimborso: false,
     hasRisarcimento: false,
     isArchiviazione: false
   }
@@ -247,6 +312,159 @@ function drawParagraph (ctx: BuildCtx, text: string, opts?: { size?: number, max
   ctx.y -= 6
 }
 
+function drawViolationsList (ctx: BuildCtx, text: string, emptyMessage = 'Nessuna violazione contestata rilevata nei dati della pratica.'): void {
+  const source = cleanText(text || '')
+  if (!source) {
+    drawParagraph(ctx, emptyMessage, { size: 8.2 })
+    return
+  }
+
+  const groups = source
+    .split(/\n\s*\n+/)
+    .map(group => group.split(/\n+/).map(line => cleanText(line)).filter(Boolean))
+    .filter(group => group.length > 0)
+
+  const titleSize = 8.7
+  const detailSize = 8.2
+  const titleLineH = titleSize * 1.34
+  const detailLineH = detailSize * 1.34
+  const detailBulletX = M + 18
+  const detailTextX = M + 31
+  const detailMaxW = PAGE_W - M - detailTextX
+  const groupGap = 7
+  const finalGap = 4
+
+  groups.forEach((group, groupIndex) => {
+    const title = group[0]
+    const details = group.slice(1).map(line => line.replace(/^[•·\-]\s*/, ''))
+    const titleLines = wrapText(ctx.bold, title, titleSize, PAGE_W - M * 2)
+    const detailLineCount = details.reduce((count, detail) => count + Math.max(1, wrapText(ctx.font, detail, detailSize, detailMaxW).length), 0)
+    const estimatedHeight = titleLines.length * titleLineH + detailLineCount * detailLineH + (details.length ? 4 : 0) + (groupIndex < groups.length - 1 ? groupGap : finalGap)
+    ensureSpace(ctx, Math.min(estimatedHeight, 90))
+
+    titleLines.forEach(line => {
+      ensureSpace(ctx, titleLineH + 3)
+      ctx.page.drawText(line, { x: M, y: ctx.y, size: titleSize, font: ctx.bold, color: BLACK })
+      ctx.y -= titleLineH
+    })
+
+    if (details.length) ctx.y -= 2
+    details.forEach(detail => {
+      const wrapped = wrapText(ctx.font, detail, detailSize, detailMaxW)
+      const rows = wrapped.length ? wrapped : ['—']
+      ensureSpace(ctx, rows.length * detailLineH + 3)
+      ctx.page.drawText('•', { x: detailBulletX, y: ctx.y, size: detailSize, font: ctx.bold, color: BLACK })
+      rows.forEach((line, lineIndex) => {
+        ctx.page.drawText(line, { x: detailTextX, y: ctx.y, size: detailSize, font: ctx.font, color: BLACK })
+        ctx.y -= detailLineH
+        if (lineIndex < rows.length - 1) ensureSpace(ctx, detailLineH + 2)
+      })
+    })
+
+    ctx.y -= groupIndex < groups.length - 1 ? groupGap : finalGap
+  })
+}
+
+function drawCalculationDetail (ctx: BuildCtx, rawText: string): void {
+  const source = sanitizeCalculationDetailText(rawText || '').replace(/\r/g, '')
+  const lines = source.split('\n').map(line => cleanText(line))
+  const titleSize = 8.7
+  const detailSize = 8.2
+  const titleLineH = titleSize * 1.34
+  const detailLineH = detailSize * 1.34
+  const detailBulletX = M + 18
+  const detailTextX = M + 31
+  const detailMaxW = PAGE_W - M - detailTextX
+  const groupGap = 7
+
+  const isArticleTitle = (line: string): boolean => /^Art\.\s*\d+[A-Za-z]?(?:\s*[-–—]\s*.+)?$/i.test(line)
+  const isStructuredTitle = (line: string): boolean => isArticleTitle(line)
+
+  const drawGroup = (title: string, details: string[]): void => {
+    const articleMatch = String(title || '').match(/^(Art\.\s*\d+[A-Za-z]?)/i)
+    const articleLabel = articleMatch ? articleMatch[1].replace(/Art\.\s*/i, 'Art. ') : ''
+    const isSubtotal = (line: string): boolean => /^Totale(?:\s+Art\.\s*\d+[A-Za-z]?)?\s*:/i.test(String(line || '').trim())
+    const normalizedDetails = details
+      .map(line => line.replace(/^[•·\-]\s*/, ''))
+      .filter(Boolean)
+    const existingTotalIndex = normalizedDetails.findIndex(isSubtotal)
+    if (existingTotalIndex >= 0) {
+      normalizedDetails[existingTotalIndex] = normalizedDetails[existingTotalIndex].replace(
+        /^Totale(?:\s+Art\.\s*\d+[A-Za-z]?)?\s*:/i,
+        `Totale${articleLabel ? ` ${articleLabel}` : ''}:`
+      )
+    } else {
+      const amounts = normalizedDetails
+        .filter(line => !/riduzion/i.test(line))
+        .map(line => {
+          if (!/€/.test(line)) return null
+          const amount = moneyNumber(line)
+          if (!Number.isFinite(amount)) return null
+          return /cauzione|decurtat|detrazion/i.test(line) ? -Math.abs(amount) : amount
+        })
+        .filter((value): value is number => value != null && Number.isFinite(value))
+      if (amounts.length > 1) {
+        const total = amounts.reduce((sum, value) => sum + value, 0)
+        normalizedDetails.push(`Totale${articleLabel ? ` ${articleLabel}` : ''}: ${total.toLocaleString('it-IT', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €`)
+      }
+    }
+    const titleLines = wrapText(ctx.bold, title, titleSize, PAGE_W - M * 2)
+    const detailLineCount = normalizedDetails.reduce((count, detail) => {
+      return count + Math.max(1, wrapText(ctx.font, detail, detailSize, detailMaxW).length)
+    }, 0)
+    const estimatedHeight = titleLines.length * titleLineH + detailLineCount * detailLineH + (normalizedDetails.length ? 4 : 0) + groupGap
+    ensureSpace(ctx, Math.min(estimatedHeight, 100))
+
+    titleLines.forEach(line => {
+      ensureSpace(ctx, titleLineH + 3)
+      ctx.page.drawText(line, { x: M, y: ctx.y, size: titleSize, font: ctx.bold, color: BLACK })
+      ctx.y -= titleLineH
+    })
+
+    if (normalizedDetails.length) ctx.y -= 2
+    normalizedDetails.forEach(detail => {
+      const isTotal = isSubtotal(detail)
+      const detailFont = isTotal ? ctx.bold : ctx.font
+      const wrapped = wrapText(detailFont, detail, detailSize, detailMaxW)
+      const rows = wrapped.length ? wrapped : ['—']
+      ensureSpace(ctx, rows.length * detailLineH + 3)
+      ctx.page.drawText('•', { x: detailBulletX, y: ctx.y, size: detailSize, font: ctx.bold, color: BLACK })
+      rows.forEach((line, lineIndex) => {
+        ctx.page.drawText(line, { x: detailTextX, y: ctx.y, size: detailSize, font: detailFont, color: BLACK })
+        ctx.y -= detailLineH
+        if (lineIndex < rows.length - 1) ensureSpace(ctx, detailLineH + 2)
+      })
+    })
+    ctx.y -= groupGap
+  }
+
+  let index = 0
+  while (index < lines.length) {
+    while (index < lines.length && !lines[index]) index++
+    if (index >= lines.length) break
+
+    const current = lines[index]
+    if (isStructuredTitle(current)) {
+      const title = current
+      index++
+      const details: string[] = []
+      while (index < lines.length && lines[index] && !isStructuredTitle(lines[index])) {
+        details.push(lines[index])
+        index++
+      }
+      drawGroup(title, details)
+      continue
+    }
+
+    const paragraphLines: string[] = []
+    while (index < lines.length && lines[index] && !isStructuredTitle(lines[index])) {
+      paragraphLines.push(lines[index])
+      index++
+    }
+    if (paragraphLines.length) drawParagraph(ctx, paragraphLines.join('\n'), { size: 8.0 })
+  }
+}
+
 function drawGeneratedNotice (ctx: BuildCtx, m: Record<string, string>): void {
   const text = [
     v(m, 'data_generazione') ? `Documento generato il ${v(m, 'data_generazione')}` : '',
@@ -308,7 +526,8 @@ export async function buildVerbalePdf (m: Record<string, string>): Promise<Uint8
   const meta = getAttoMeta(m)
   const pratica = v(m, 'pratica') || v(m, 'objectid')
   const numeroVerbale = v(m, 'numero_verbale')
-  const isBozza = meta.hasVerbale && (!numeroVerbale || !v(m, 'data_verbale') || !v(m, 'istruttoria_amm_chiusa_il'))
+  const approvato = ['1', 'TRUE', 'SI', 'SÌ', 'APPROVATO'].includes(v(m, 'atto_approvato').toUpperCase())
+  const isBozza = !meta.isArchiviazione && (!approvato || (meta.hasVerbale && (!numeroVerbale || !v(m, 'data_verbale'))))
   const title = meta.hasVerbale && numeroVerbale ? `${meta.title} N. ${numeroVerbale}` : meta.title
   const subtitle = pratica ? `Pratica ${pratica}` : ''
   const object = v(m, 'oggetto_atto_amm') || meta.fallbackObject
@@ -318,15 +537,20 @@ export async function buildVerbalePdf (m: Record<string, string>): Promise<Uint8
   drawGeneratedNotice(ctx, m)
 
   drawSectionTitle(ctx, 'Atto amministrativo')
-  drawKeyValueGrid(ctx, [
+  const attoRows: Row[] = [
     ['Tipo atto', meta.label],
     ['Protocollo istanza', v(m, 'protocollo_istanza_numero')],
-    ['Data istanza', v(m, 'protocollo_istanza_data')],
-    ['Numero verbale', meta.hasVerbale ? v(m, 'numero_verbale') : '—'],
-    ['Data verbale', meta.hasVerbale ? v(m, 'data_verbale') : '—'],
-    ['Protocollo atto', v(m, 'protocollo_verbale')],
-    ['Data protocollo', v(m, 'protocollo_verbale_data')]
-  ])
+    ['Data istanza', v(m, 'protocollo_istanza_data')]
+  ]
+  if (meta.hasVerbale) {
+    attoRows.push(['Numero verbale', v(m, 'numero_verbale')])
+    attoRows.push(['Data verbale', v(m, 'data_verbale')])
+  } else if (approvato) {
+    attoRows.push(['Data approvazione', v(m, 'data_verbale')])
+  }
+  attoRows.push(['Protocollo atto', v(m, 'protocollo_verbale')])
+  attoRows.push(['Data protocollo', v(m, 'protocollo_verbale_data')])
+  drawKeyValueGrid(ctx, compactRows(attoRows))
   drawParagraph(ctx, `Oggetto: ${object}`, { size: 8.2 })
 
   drawSectionTitle(ctx, 'Riepilogo pratica')
@@ -353,47 +577,72 @@ export async function buildVerbalePdf (m: Record<string, string>): Promise<Uint8
   drawParagraph(ctx, v(m, 'descrizione_fatti') || 'Descrizione dei fatti non disponibile nei dati della pratica.', { size: 8.2 })
 
   if (!meta.isArchiviazione) {
-    drawSectionTitle(ctx, 'Violazioni / riferimenti normativi')
-    drawParagraph(ctx, v(m, 'violazioni') || 'Nessuna violazione contestata rilevata nei dati della pratica.', { size: 8.2 })
+    const referencesTitle = meta.hasVerbale
+      ? 'Violazioni contestate e riferimenti normativi'
+      : meta.code === 'RIMBORSO'
+        ? 'Presupposti e riferimenti regolamentari'
+        : 'Presupposti e riferimenti normativi'
+    const emptyReferences = meta.hasVerbale
+      ? 'Nessuna violazione contestata rilevata nei dati della pratica.'
+      : 'Nessun riferimento normativo disponibile nei dati della pratica.'
+    drawSectionTitle(ctx, referencesTitle)
+    drawViolationsList(ctx, v(m, 'violazioni'), emptyReferences)
   }
 
-  if (meta.hasSanzione || meta.hasRisarcimento || anyValue(m, ['sanzione_spese_notifica', 'pagamento_importo_totale'])) {
-    drawSectionTitle(ctx, 'Sanzione, risarcimento e spese')
-    const rows: Row[] = []
-    if (meta.hasSanzione) {
-      rows.push(['Sanzione base', v(m, 'sanzione_importo_base')])
-      rows.push(['Sanzione ridotta', v(m, 'sanzione_importo_ridotta')])
-    }
-    if (meta.hasRisarcimento || hasValue(m, 'risarcimento_danni_importo')) {
-      rows.push(['Risarcimento danni', v(m, 'risarcimento_danni_importo')])
-    }
-    rows.push(['Spese notifica', v(m, 'sanzione_spese_notifica')])
-    rows.push(['Totale da pagare', v(m, 'pagamento_importo_totale')])
-    rows.push(['Scadenza pagamento', v(m, 'pagamento_scadenza')])
-    drawKeyValueGrid(ctx, rows)
+  const hasSanzioneData = !meta.isArchiviazione && (meta.hasSanzione || hasPositiveMoney(m, 'sanzione_importo_base') || hasPositiveMoney(m, 'sanzione_importo_ridotta'))
+  const hasRimborsoData = !meta.isArchiviazione && (meta.code === 'RIMBORSO' || meta.code === 'RIMBORSO_RISARCIMENTO' ||
+    hasPositiveMoney(m, 'attrezzature_rimborso_importo') || hasPositiveMoney(m, 'attrezzature_cauzione_decurtata') ||
+    hasPositiveMoney(m, 'attrezzature_importo_netto') || anyValue(m, ['attrezzature_rimborso_dettaglio', 'attrezzature_note']))
+  const hasRisarcimentoData = !meta.isArchiviazione && (meta.code === 'RISARCIMENTO_DANNI' || meta.code === 'RIMBORSO_RISARCIMENTO' ||
+    hasPositiveMoney(m, 'risarcimento_danni_importo'))
+
+  if (hasSanzioneData) {
+    drawSectionTitle(ctx, 'Quantificazione della sanzione amministrativa')
+    drawKeyValueGrid(ctx, compactRows([
+      ['Sanzione base', v(m, 'sanzione_importo_base')],
+      ['Sanzione ridotta', v(m, 'sanzione_importo_ridotta')]
+    ]))
   }
 
-  const hasAttrezzature = anyValue(m, [
-    'attrezzature_rimborso_dettaglio',
-    'attrezzature_rimborso_importo',
-    'attrezzature_cauzione_presente',
-    'attrezzature_cauzione_decurtata',
-    'attrezzature_importo_netto',
-    'attrezzature_note'
-  ])
-  if (hasAttrezzature) {
+  if (hasRimborsoData) {
     drawSectionTitle(ctx, 'Rimborso attrezzature e cauzione')
     drawKeyValueGrid(ctx, compactRows([
       ['Cauzione presente', v(m, 'attrezzature_cauzione_presente')],
       ['Rimborso attrezzature', v(m, 'attrezzature_rimborso_importo')],
       ['Cauzione decurtata', v(m, 'attrezzature_cauzione_decurtata')],
-      ['Importo netto attrezzature', v(m, 'attrezzature_importo_netto')]
+      ['Rimborso netto', v(m, 'attrezzature_importo_netto')]
     ]))
     if (v(m, 'attrezzature_rimborso_dettaglio')) drawParagraph(ctx, v(m, 'attrezzature_rimborso_dettaglio'), { size: 8.2 })
     if (v(m, 'attrezzature_note')) drawParagraph(ctx, `Note: ${v(m, 'attrezzature_note')}`, { size: 8.2 })
   }
 
-  if (anyValue(m, ['pagamento_modalita', 'pagamento_stato', 'pagopa_iuv', 'pagopa_codice_avviso', 'bonifico_iban', 'bonifico_intestatario', 'bonifico_cro_trn', 'bonifico_data_accredito', 'bonifico_causale', 'pagamento_note'])) {
+  if (hasRisarcimentoData) {
+    drawSectionTitle(ctx, 'Risarcimento danni')
+    drawKeyValueGrid(ctx, compactRows([
+      ['Importo del risarcimento', v(m, 'risarcimento_danni_importo')]
+    ]), 1)
+  }
+
+  const economicComponents = [hasSanzioneData, hasRimborsoData, hasRisarcimentoData].filter(Boolean).length
+  const hasEconomicSummary = economicComponents > 0 || anyValue(m, ['sanzione_spese_notifica', 'pagamento_importo_totale', 'pagamento_scadenza'])
+  if (hasEconomicSummary) {
+    const summaryTitle = economicComponents > 1
+      ? 'Riepilogo complessivo'
+      : hasSanzioneData
+        ? 'Importi dovuti'
+        : 'Importo richiesto'
+    const rows: Row[] = []
+    if (hasSanzioneData) rows.push(['Sanzione amministrativa', preferredSanzioneAmount(m)])
+    if (hasRimborsoData) rows.push(['Rimborso netto', v(m, 'attrezzature_importo_netto')])
+    if (hasRisarcimentoData) rows.push(['Risarcimento danni', v(m, 'risarcimento_danni_importo')])
+    rows.push(['Spese di notifica', v(m, 'sanzione_spese_notifica')])
+    rows.push(['Totale da pagare', v(m, 'pagamento_importo_totale')])
+    rows.push(['Scadenza pagamento', v(m, 'pagamento_scadenza')])
+    drawSectionTitle(ctx, summaryTitle)
+    drawKeyValueGrid(ctx, compactRows(rows))
+  }
+
+  if (!meta.isArchiviazione && anyValue(m, ['pagamento_modalita', 'pagamento_stato', 'pagopa_iuv', 'pagopa_codice_avviso', 'bonifico_iban', 'bonifico_intestatario', 'bonifico_cro_trn', 'bonifico_data_accredito', 'bonifico_causale', 'pagamento_note'])) {
     drawSectionTitle(ctx, 'Pagamento')
     drawKeyValueGrid(ctx, compactRows([
       ['Modalità', v(m, 'pagamento_modalita')],
@@ -410,13 +659,25 @@ export async function buildVerbalePdf (m: Record<string, string>): Promise<Uint8
     }
   }
 
-  if (v(m, 'sanzione_dettaglio_calcolo')) {
-    drawSectionTitle(ctx, 'Dettaglio calcolo importi')
-    drawParagraph(ctx, v(m, 'sanzione_dettaglio_calcolo'), { size: 8.0 })
+  if (!meta.isArchiviazione && v(m, 'sanzione_dettaglio_calcolo')) {
+    const calculationTitle = meta.code === 'VERBALE'
+      ? 'Dettaglio calcolo della sanzione'
+      : meta.code === 'RIMBORSO'
+        ? 'Dettaglio calcolo del rimborso'
+        : meta.code === 'RISARCIMENTO_DANNI'
+          ? 'Dettaglio quantificazione del risarcimento danni'
+          : meta.code === 'RIMBORSO_RISARCIMENTO'
+            ? 'Dettaglio calcolo di rimborso e risarcimento'
+            : 'Dettaglio calcolo degli importi'
+    drawSectionTitle(ctx, calculationTitle)
+    drawCalculationDetail(ctx, v(m, 'sanzione_dettaglio_calcolo'))
   }
 
-  if (v(m, 'note_atto_amm')) {
-    drawSectionTitle(ctx, meta.isArchiviazione ? 'Motivazione / note istruttorie' : 'Note istruttorie amministrative')
+  // Le note amministrative sono metadati istruttori interni e non devono
+  // comparire nell'atto destinato all'interessato. Per l'archiviazione,
+  // invece, la motivazione costituisce parte sostanziale del documento.
+  if (meta.isArchiviazione && v(m, 'note_atto_amm')) {
+    drawSectionTitle(ctx, 'Motivazione')
     drawParagraph(ctx, v(m, 'note_atto_amm'), { size: 8.2 })
   }
 
@@ -426,8 +687,6 @@ export async function buildVerbalePdf (m: Record<string, string>): Promise<Uint8
     ['Data notifica', v(m, 'notifica_data')],
     ['Esito notifica', v(m, 'notifica_esito')],
     ['Estremi notifica', v(m, 'notifica_estremi')],
-    ['Importi calcolati il', v(m, 'sanzione_calcolata_il')],
-    ['Importi calcolati da', v(m, 'sanzione_calcolata_da')],
     ['PDF generato il', v(m, 'verbale_pdf_generato_il')],
     ['PDF generato da', v(m, 'verbale_pdf_generato_da')],
     ['Istruttoria chiusa il', v(m, 'istruttoria_amm_chiusa_il')],

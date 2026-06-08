@@ -181,30 +181,16 @@ function getRegolamentoArticle (state: RegolamentoArticoliState, code: any): Reg
 }
 
 function resolveRegolamentoArticoliUrl (cfg: any): string {
-  const direct = normalizeLookupTableUrl(
+  // Ogni istanza del widget deve usare esclusivamente la propria configurazione.
+  // Non recuperare l'URL da altri widget dell'app: una seconda istanza o il widget
+  // amministrativo potrebbero conservare un riferimento obsoleto e sovrascrivere
+  // di fatto la configurazione corretta dell'istanza corrente.
+  return normalizeLookupTableUrl(
     cfg?.regolamentoArticoliUrl ||
     cfg?.regolamentoIrriguoArticoliUrl ||
     cfg?.regolamentoArticoliLayerUrl ||
     ''
   )
-  if (direct) return direct
-
-  // Fallback: riusa la stessa tabella già configurata nel widget amministrativo,
-  // quando presente nell'app Experience Builder.
-  try {
-    const state: any = getAppStore()?.getState?.()
-    const appConfig: any = state?.appConfig
-    const rawWidgets: any = appConfig?.widgets || {}
-    const widgets = rawWidgets?.asMutable ? rawWidgets.asMutable({ deep: true }) : (rawWidgets?.toJS ? rawWidgets.toJS() : rawWidgets)
-    for (const w of Object.values(widgets || {}) as any[]) {
-      const rawConfig = w?.config || {}
-      const wc = rawConfig?.asMutable ? rawConfig.asMutable({ deep: true }) : (rawConfig?.toJS ? rawConfig.toJS() : rawConfig)
-      const url = normalizeLookupTableUrl(wc?.regolamentoArticoliUrl || wc?.regolamentoIrriguoArticoliUrl || wc?.regolamentoArticoliLayerUrl || '')
-      if (url) return url
-    }
-  } catch {}
-
-  return ''
 }
 
 function useRegolamentoArticoliState (cfg: any): RegolamentoArticoliState {
@@ -3500,8 +3486,8 @@ const CHOICES = {
   art15_totale:   [{ v: 'Art15.3', l: 'Prima contestazione' }, { v: 'Art15.4', l: 'Recidiva' }],
   occorrenza: [{ v: '1', l: 'Prima contestazione' }, { v: '2', l: 'Recidiva' }],
   art16_17: [
-    { v: 'Art16', l: 'Art. 16 – Comunicazione di irrigazione tardiva' },
-    { v: 'Art17', l: 'Art. 17 – Comunicazione di variazione o di rinuncia tardiva' },
+    { v: 'Art16', l: 'Art. 16 - Comunicazione di irrigazione tardiva' },
+    { v: 'Art17', l: 'Art. 17 - Variazione o rinuncia tardiva' },
   ],
   art17_tipo: [{ v: 'Art17.1', l: 'Variazione tardiva' }, { v: 'Art17.2', l: 'Rinuncia tardiva' }],
   presenza: [{ v: 'sì', l: 'Sì' }, { v: 'no', l: 'No' }],
@@ -3509,7 +3495,7 @@ const CHOICES = {
   norma3: [
     { v: 'Art8',  l: 'Art. 8 - Violazione servizio reperibilità' },
     { v: 'Art12', l: 'Art. 12 - Negato accesso ai fondi (al personale consortile)' },
-    { v: 'Art27', l: 'Art. 27 – Spreco d\'acqua/uso negligente risorsa idrica' },
+    { v: 'Art27', l: 'Art. 27 - Spreco d\'acqua/uso negligente risorsa idrica' },
     { v: 'Art28', l: 'Art. 28 - Violazione prescrizioni del consorzio' },
     { v: 'Art29', l: 'Art. 29 - Violazione termini restituzione attrezzature' },
     { v: 'Art30', l: 'Art. 30 - Danneggiamento e/o perdita attrezzature' },
@@ -4477,9 +4463,9 @@ function nsComputeSummaryFromRows (rows: NsDetailRow[], perc: number): NsSummary
 type NsCasisticaOption = { codice: string; art: number; label: string }
 
 const NS_CASISTICHE_BY_ART: NsCasisticaOption[] = [
-  { codice: 'C100_REPERIBILITA', art: 8, label: 'Art. 8 - Reperibilità' },
-  { codice: 'C101_SPRECO_ACQUA', art: 27, label: 'Art. 27 - Spreco / uso negligente acqua' },
-  { codice: 'C104_ATTREZZATURE_DANNEGGIATE', art: 30, label: 'Art. 30 - Attrezzature danneggiate o perse' },
+  { codice: 'C100_REPERIBILITA', art: 8, label: 'Art. 8 - Violazione servizio reperibilità' },
+  { codice: 'C101_SPRECO_ACQUA', art: 27, label: 'Art. 27 - Spreco d’acqua/uso negligente risorsa idrica' },
+  { codice: 'C104_ATTREZZATURE_DANNEGGIATE', art: 30, label: 'Art. 30 - Danneggiamento e/o perdita attrezzature' },
   { codice: 'C113_DANNI_STRUTTURE_IRRIGUE', art: 39, label: 'Art. 39 - Danni strutture irrigue' }
 ]
 

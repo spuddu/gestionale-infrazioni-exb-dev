@@ -372,10 +372,10 @@ const NS_CATS: NsCat[] = ['AT', 'PR', 'RU', 'SL', 'PF']
 const EMPTY_NS_ROWS: Record<NsCat, NsRowP[]> = { AT: [], PR: [], RU: [], SL: [], PF: [] }
 
 const NS_CASISTICA_META: Record<string, { order: number; label: string }> = {
-  C100_REPERIBILITA: { order: 8, label: 'Art. 8 – Violazione servizio reperibilità' },
-  C101_SPRECO_ACQUA: { order: 27, label: 'Art. 27 – Spreco d’acqua / uso negligente risorsa idrica' },
-  C104_ATTREZZATURE_DANNEGGIATE: { order: 30, label: 'Art. 30 – Danneggiamento e/o perdita attrezzature' },
-  C113_DANNI_STRUTTURE_IRRIGUE: { order: 39, label: 'Art. 39 – Danni strutture irrigue' }
+  C100_REPERIBILITA: { order: 8, label: 'Art. 8 - Violazione servizio reperibilità' },
+  C101_SPRECO_ACQUA: { order: 27, label: 'Art. 27 - Spreco d’acqua/uso negligente risorsa idrica' },
+  C104_ATTREZZATURE_DANNEGGIATE: { order: 30, label: 'Art. 30 - Danneggiamento e/o perdita attrezzature' },
+  C113_DANNI_STRUTTURE_IRRIGUE: { order: 39, label: 'Art. 39 - Danni strutture irrigue' }
 }
 
 function roundMoney (v: number): number {

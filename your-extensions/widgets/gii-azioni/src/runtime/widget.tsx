@@ -1775,6 +1775,19 @@ function ActionsPanel (props: {
     return undefined
   }
 
+  const normalizeTipoAttoAmmCode = (raw: any): string => {
+    const value = String(raw || '').trim().toUpperCase().replace(/[\s-]+/g, '_')
+    if (value === 'VERBALE_MISTO') return 'VERBALE_RISARCIMENTO'
+    if (value.includes('VERBALE') && (value.includes('MIST') || value.includes('RISARC') || value.includes('RIMBORS'))) return 'VERBALE_RISARCIMENTO'
+    if (value.includes('VERBALE')) return 'VERBALE'
+    return value
+  }
+
+  const attoAmmPrevedeVerbale = (attrs: any): boolean => {
+    const code = normalizeTipoAttoAmmCode(pickAttrCI(attrs || {}, ['tipo_atto_amm']))
+    return code === 'VERBALE' || code === 'VERBALE_RISARCIMENTO'
+  }
+
   const inferSettoreFromUsername = (u: string): string => {
     const up = String(u || '').toUpperCase()
     const m = up.match(/(D[1-6]|DS|CR)/)
@@ -1948,10 +1961,10 @@ function ActionsPanel (props: {
 
   type NotaSpeseCasisticaCheck = { codice: string; art: number; label: string }
   const NOTE_SPESE_CASISTICHE_CHECK: NotaSpeseCasisticaCheck[] = [
-    { codice: 'C100_REPERIBILITA', art: 8, label: 'Art. 8 – Violazione servizio reperibilità' },
-    { codice: 'C101_SPRECO_ACQUA', art: 27, label: 'Art. 27 – Spreco d’acqua / uso negligente risorsa idrica' },
-    { codice: 'C104_ATTREZZATURE_DANNEGGIATE', art: 30, label: 'Art. 30 – Danneggiamento e/o perdita attrezzature' },
-    { codice: 'C113_DANNI_STRUTTURE_IRRIGUE', art: 39, label: 'Art. 39 – Danni strutture irrigue' }
+    { codice: 'C100_REPERIBILITA', art: 8, label: 'Art. 8 - Violazione servizio reperibilità' },
+    { codice: 'C101_SPRECO_ACQUA', art: 27, label: 'Art. 27 - Spreco d’acqua/uso negligente risorsa idrica' },
+    { codice: 'C104_ATTREZZATURE_DANNEGGIATE', art: 30, label: 'Art. 30 - Danneggiamento e/o perdita attrezzature' },
+    { codice: 'C113_DANNI_STRUTTURE_IRRIGUE', art: 39, label: 'Art. 39 - Danni strutture irrigue' }
   ]
 
   const isFlagSelectedLocal = (v: any): boolean => {
@@ -2846,9 +2859,9 @@ function ActionsPanel (props: {
     !roleClosedOrForwarded
 
   const editButtonTitle = canEdit
-    ? (isAmmEditRole ? 'Apri scheda verbale' : 'Modifica rilevazione')
+    ? (isAmmEditRole ? 'Apri scheda atto amministrativo' : 'Modifica rilevazione')
     : (isAmmEditRole
-      ? 'Modifica verbale non disponibile: la pratica deve essere già presa in carico dal ruolo corrente.'
+      ? 'Modifica dell’atto amministrativo non disponibile: la pratica deve essere già presa in carico dal ruolo corrente.'
       : 'Modifica non disponibile: la pratica deve essere già presa in carico dal ruolo corrente.')
 
   const canUseRapportoPdf =
@@ -3521,7 +3534,7 @@ function ActionsPanel (props: {
     role === 'RZ' ? (praticaLabel === 'Rapporto tecnico' ? 'Valida integrazione' : 'Approva rilevazione') :
     role === 'RI' ? 'Approva istruttoria tecnica' :
     role === 'DT' ? 'Approva Rapporto tecnico di rilevazione' :
-    role === 'DA' ? 'Approva verbale' :
+    role === 'DA' ? 'Approva atto amministrativo' :
     role === 'RI_AMM' && fwdDest === 'DA' ? 'Approva istruttoria amministrativa' :
     role === 'RI_AMM' ? `Trasmetti al ${fwdDestLabel}` :
     role === 'TI_AMM' ? `Trasmetti istruttoria amministrativa al ${getRoleLabelForMenu('RI_AMM')}` :
@@ -3545,7 +3558,7 @@ function ActionsPanel (props: {
     role === 'RZ' ? (praticaLabel === 'Rapporto tecnico' ? 'Valida integrazione' : 'Approva rilevazione') :
     role === 'RI' ? 'Approva istruttoria tecnica' :
     role === 'DT' ? 'Approva rapporto tecnico' :
-    role === 'DA' ? 'Approva verbale' :
+    role === 'DA' ? 'Approva atto amministrativo' :
     role === 'RI_AMM' && fwdDest === 'DA' ? 'Approva istruttoria amministrativa' :
     role === 'RI_AMM' ? `Trasmetti al ${fwdDestLabel}` :
     role === 'TI_AMM' ? `Trasmetti al ${getRoleLabelForMenu('RI_AMM')}` :
@@ -3660,7 +3673,7 @@ function ActionsPanel (props: {
     role === 'RZ' ? (praticaLabel === 'Rapporto tecnico' ? 'Valida integrazione' : 'Approva rilevazione') :
     role === 'RI' ? 'Approva istruttoria tecnica' :
     role === 'DT' ? 'Approva Rapporto tecnico di rilevazione' :
-    role === 'DA' ? 'Approva verbale' :
+    role === 'DA' ? 'Approva atto amministrativo' :
     role === 'RI_AMM' && fwdDest === 'DA' ? 'Approva istruttoria amministrativa' :
     role === 'RI_AMM' ? `Trasmetti al ${fwdDestLabel}` :
     role === 'TI_AMM' ? `Trasmetti istruttoria amministrativa al ${getRoleLabelForMenu('RI_AMM')}` :
@@ -3672,7 +3685,7 @@ function ActionsPanel (props: {
     role === 'RZ' ? (praticaLabel === 'Rapporto tecnico' ? `Valida l’integrazione e trasmette il rapporto tecnico al ${getRoleLabelForMenu('RI')}.` : `Approva la rilevazione e la trasmette al ${getRoleLabelForMenu('RI')}.`) :
     role === 'RI' ? `Approva l’istruttoria tecnica e la trasmette al ${getRoleLabelForForward('DT')}.` :
     role === 'DT' ? `Approva il Rapporto tecnico di rilevazione e lo trasmette al ${getRoleLabelForMenu('RI_AMM')}.` :
-    role === 'DA' ? `Approva il verbale e lo trasmette al ${getRoleLabelForMenu('TI_AMM')}.` :
+    role === 'DA' ? `Approva l’atto amministrativo e lo trasmette al ${getRoleLabelForMenu('TI_AMM')}.` :
     role === 'RI_AMM' && fwdDest === 'DA' ? `Approva l’istruttoria amministrativa e la trasmette al ${getRoleLabelForForward('DA')}.` :
     role === 'TI_AMM' ? `Trasmette l’istruttoria amministrativa al ${getRoleLabelForMenu('RI_AMM')}.` :
     fwdDestLabel ? `Invia la pratica al ${fwdDestLabel}.` :
@@ -4442,31 +4455,38 @@ function ActionsPanel (props: {
       }
 
       if (role === 'DA' && esito === ESITO_APPROVATA) {
-        const schemaFields: Record<string, any> = (ds as any)?.getSchema?.()?.fields || {}
-        const fNumeroVerbale = getSchemaFieldNameCI(schemaFields, 'numero_verbale')
-        const fDataVerbale = getSchemaFieldNameCI(schemaFields, 'data_verbale')
-        if (!fNumeroVerbale || !fDataVerbale) {
-          throw new Error('Impossibile approvare il verbale: campi numero_verbale/data_verbale non presenti nella fonte dati.')
-        }
-
         const liveAttrs = await queryCurrentRecordAttrs()
-        const currentNumeroVerbale = String(pickAttrCI(liveAttrs || data, ['numero_verbale', fNumeroVerbale]) || '').trim()
-        const currentDataVerbale = pickAttrCI(liveAttrs || data, ['data_verbale', fDataVerbale])
+        const sourceAttrs = liveAttrs || data
 
-        const yearBase = (currentDataVerbale != null && currentDataVerbale !== '') ? currentDataVerbale : now
-        const parsedYearDate = new Date(typeof yearBase === 'number' ? yearBase : (Number(yearBase) || String(yearBase)))
-        const annoVerbale = Number.isNaN(parsedYearDate.getTime()) ? new Date(now).getFullYear() : parsedYearDate.getFullYear()
-
-        if (currentNumeroVerbale) {
-          const parsedProgressivo = parseNumeroAttoProgressivo(currentNumeroVerbale, 'V', annoVerbale, true)
-          if (parsedProgressivo == null) {
-            throw new Error(`Numero verbale già presente ma non conforme al formato V-progressivo/anno: ${currentNumeroVerbale}`)
+        // La numerazione V-progressivo/anno è riservata ai verbali amministrativi
+        // e ai verbali misti. Le richieste autonome di rimborso/risarcimento
+        // diventano definitive con l'esito del DA, senza consumare un numero V.
+        if (attoAmmPrevedeVerbale(sourceAttrs)) {
+          const schemaFields: Record<string, any> = (ds as any)?.getSchema?.()?.fields || {}
+          const fNumeroVerbale = getSchemaFieldNameCI(schemaFields, 'numero_verbale')
+          const fDataVerbale = getSchemaFieldNameCI(schemaFields, 'data_verbale')
+          if (!fNumeroVerbale || !fDataVerbale) {
+            throw new Error('Impossibile approvare il verbale: campi numero_verbale/data_verbale non presenti nella fonte dati.')
           }
-        } else {
-          upd[fNumeroVerbale] = await queryNextNumeroAtto('V', annoVerbale, fNumeroVerbale, true)
-        }
-        if (currentDataVerbale == null || currentDataVerbale === '') {
-          upd[fDataVerbale] = now
+
+          const currentNumeroVerbale = String(pickAttrCI(sourceAttrs, ['numero_verbale', fNumeroVerbale]) || '').trim()
+          const currentDataVerbale = pickAttrCI(sourceAttrs, ['data_verbale', fDataVerbale])
+
+          const yearBase = (currentDataVerbale != null && currentDataVerbale !== '') ? currentDataVerbale : now
+          const parsedYearDate = new Date(typeof yearBase === 'number' ? yearBase : (Number(yearBase) || String(yearBase)))
+          const annoVerbale = Number.isNaN(parsedYearDate.getTime()) ? new Date(now).getFullYear() : parsedYearDate.getFullYear()
+
+          if (currentNumeroVerbale) {
+            const parsedProgressivo = parseNumeroAttoProgressivo(currentNumeroVerbale, 'V', annoVerbale, true)
+            if (parsedProgressivo == null) {
+              throw new Error(`Numero verbale già presente ma non conforme al formato V-progressivo/anno: ${currentNumeroVerbale}`)
+            }
+          } else {
+            upd[fNumeroVerbale] = await queryNextNumeroAtto('V', annoVerbale, fNumeroVerbale, true)
+          }
+          if (currentDataVerbale == null || currentDataVerbale === '') {
+            upd[fDataVerbale] = now
+          }
         }
       }
 
@@ -4657,7 +4677,7 @@ function ActionsPanel (props: {
     role === 'RZ' ? (praticaLabel === 'Rapporto tecnico' ? 'Validazione integrazione' : 'Approvazione rilevazione') :
     role === 'RI' ? 'Approvazione istruttoria tecnica' :
     role === 'DT' ? 'Approvazione rapporto tecnico' :
-    role === 'DA' ? 'Approvazione verbale' :
+    role === 'DA' ? 'Approvazione atto amministrativo' :
     role === 'RI_AMM' && fwdDest === 'DA' ? 'Approvazione istruttoria amministrativa' :
     role === 'RI_AMM' ? `Trasmissione al ${fwdDestLabel}` :
     role === 'TI_AMM' ? `Trasmissione al ${getRoleLabelForMenu('RI_AMM')}` :
@@ -4687,7 +4707,7 @@ function ActionsPanel (props: {
     role === 'RZ' ? (praticaLabel === 'Rapporto tecnico' ? `L’integrazione verrà validata e il rapporto tecnico verrà trasmesso al ${getRoleLabelForMenu('RI')}.` : `La rilevazione verrà approvata e trasmessa al ${getRoleLabelForMenu('RI')}.`) :
     role === 'RI' ? `L’istruttoria tecnica verrà approvata e trasmessa al ${getRoleLabelForForward('DT')}.` :
     role === 'DT' ? `Il Rapporto tecnico di rilevazione verrà approvato e trasmesso al ${getRoleLabelForMenu('RI_AMM')}.` :
-    role === 'DA' ? `Il verbale verrà approvato e trasmesso al ${getRoleLabelForMenu('TI_AMM')}.` :
+    role === 'DA' ? `L’atto amministrativo verrà approvato e trasmesso al ${getRoleLabelForMenu('TI_AMM')}.` :
     role === 'RI_AMM' && fwdDest === 'DA' ? `L’istruttoria amministrativa verrà approvata e trasmessa al ${getRoleLabelForForward('DA')}.` :
     role === 'RI_AMM' ? `L’istruttoria amministrativa verrà trasmessa al ${fwdDestLabel}.` :
     role === 'TI_AMM' ? `L’istruttoria amministrativa verrà trasmessa al ${getRoleLabelForMenu('RI_AMM')}.` :
@@ -5888,10 +5908,10 @@ type NsSummaryPdf = {
 
 const NS_PDF_CATS: NsCatPdf[] = ['AT', 'PR', 'RU', 'SL', 'PF']
 const NS_PDF_CASISTICA_META: Record<string, { order: number; label: string }> = {
-  C100_REPERIBILITA: { order: 8, label: 'Art. 8 – Violazione servizio reperibilità' },
-  C101_SPRECO_ACQUA: { order: 27, label: 'Art. 27 – Spreco d’acqua / uso negligente risorsa idrica' },
-  C104_ATTREZZATURE_DANNEGGIATE: { order: 30, label: 'Art. 30 – Danneggiamento e/o perdita attrezzature' },
-  C113_DANNI_STRUTTURE_IRRIGUE: { order: 39, label: 'Art. 39 – Danni strutture irrigue' }
+  C100_REPERIBILITA: { order: 8, label: 'Art. 8 - Violazione servizio reperibilità' },
+  C101_SPRECO_ACQUA: { order: 27, label: 'Art. 27 - Spreco d’acqua/uso negligente risorsa idrica' },
+  C104_ATTREZZATURE_DANNEGGIATE: { order: 30, label: 'Art. 30 - Danneggiamento e/o perdita attrezzature' },
+  C113_DANNI_STRUTTURE_IRRIGUE: { order: 39, label: 'Art. 39 - Danni strutture irrigue' }
 }
 
 function escapeSqlStringForRapportoPdf (v: any): string {

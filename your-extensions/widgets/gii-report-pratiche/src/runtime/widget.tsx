@@ -861,12 +861,37 @@ function splitMultiValue (v: any): string[] {
     .filter(Boolean)
 }
 
+const VIOLATION_LABEL_BY_ARTICLE: Record<string, string> = {
+  '8': 'Art. 8 - Violazione servizio reperibilità',
+  '12': 'Art. 12 - Negato accesso ai fondi (al personale consortile)',
+  '15': 'Art. 15 - Prelievo abusivo d’acqua',
+  '16': 'Art. 16 - Comunicazione di irrigazione tardiva',
+  '17': 'Art. 17 - Variazione o rinuncia tardiva',
+  '27': 'Art. 27 - Spreco d’acqua/uso negligente risorsa idrica',
+  '28': 'Art. 28 - Violazione prescrizioni del consorzio',
+  '29': 'Art. 29 - Violazione termini restituzione attrezzature',
+  '30': 'Art. 30 - Danneggiamento e/o perdita attrezzature',
+  '31': 'Art. 31 - Mancata segnalazione guasti',
+  '32': 'Art. 32 - Negato accesso ai fondi (al consorziato)',
+  '33': 'Art. 33 - Inosservanza limiti temporali di prelievo',
+  '34': 'Art. 34 - Interferenze',
+  '35': 'Art. 35 - Manomissione reti di dispensa e allaccio aspirazione',
+  '36': 'Art. 36 - Uso attrezzature non autorizzate',
+  '37': 'Art. 37 - Uso sistemi di irrigazione incompatibili',
+  '39': 'Art. 39 - Danni strutture irrigue'
+}
+
+function violationLabelByArticle (article: any): string {
+  const n = String(Number(article))
+  return VIOLATION_LABEL_BY_ARTICLE[n] || (Number.isFinite(Number(article)) ? `Art. ${n}` : '')
+}
+
 function formatNormaToken (v: string): string {
   const raw = String(v || '').trim()
   if (!raw) return ''
   const compact = raw.replace(/_/g, '.').replace(/Art/i, 'Art.')
   const m = compact.match(/art\.?\s*(\d+)(?:[\.\-]?(\d+))?/i)
-  if (m) return m[2] ? `Art. ${m[1]}.${m[2]}` : `Art. ${m[1]}`
+  if (m) return violationLabelByArticle(m[1]) || (m[2] ? `Art. ${m[1]}.${m[2]}` : `Art. ${m[1]}`)
   return raw
 }
 
@@ -888,20 +913,20 @@ function getViolazione (d: any): string {
   const items: string[] = []
 
   const artFields: Array<[string, string]> = [
-    ['v_art08', 'Art. 08'],
-    ['v_art12', 'Art. 12'],
-    ['v_art27', 'Art. 27'],
-    ['v_art28', 'Art. 28'],
-    ['v_art29', 'Art. 29'],
-    ['v_art30', 'Art. 30'],
-    ['v_art31', 'Art. 31'],
-    ['v_art32', 'Art. 32'],
-    ['v_art33', 'Art. 33'],
-    ['v_art34', 'Art. 34'],
-    ['v_art35', 'Art. 35'],
-    ['v_art36', 'Art. 36'],
-    ['v_art37', 'Art. 37'],
-    ['v_art39', 'Art. 39']
+    ['v_art08', violationLabelByArticle(8)],
+    ['v_art12', violationLabelByArticle(12)],
+    ['v_art27', violationLabelByArticle(27)],
+    ['v_art28', violationLabelByArticle(28)],
+    ['v_art29', violationLabelByArticle(29)],
+    ['v_art30', violationLabelByArticle(30)],
+    ['v_art31', violationLabelByArticle(31)],
+    ['v_art32', violationLabelByArticle(32)],
+    ['v_art33', violationLabelByArticle(33)],
+    ['v_art34', violationLabelByArticle(34)],
+    ['v_art35', violationLabelByArticle(35)],
+    ['v_art36', violationLabelByArticle(36)],
+    ['v_art37', violationLabelByArticle(37)],
+    ['v_art39', violationLabelByArticle(39)]
   ]
   artFields.forEach(([field, label]) => {
     if (isCheckedValue(pickField(d, field))) items.push(label)
@@ -909,12 +934,12 @@ function getViolazione (d: any): string {
 
   const norma15Parziale = getFirst(d, ['norma15_parziale', 'Norma15_parziale'], '')
   const norma15Totale = getFirst(d, ['norma15_totale', 'Norma15_totale'], '')
-  if (norma15Parziale || norma15Totale) items.push('Art. 15')
+  if (norma15Parziale || norma15Totale || getFirst(d, ['tipo_abuso', 'Tipo_abuso'], '')) items.push(violationLabelByArticle(15))
 
   const norma1617 = getFirst(d, ['norma16_17', 'Norma16_17'], '')
   const art17Tipo = getFirst(d, ['art17_tipo', 'Art17_tipo'], '')
-  if (/art\.?\s*16/i.test(norma1617)) items.push('Art. 16')
-  if (/art\.?\s*17/i.test(norma1617) || art17Tipo) items.push('Art. 17')
+  if (/art\.?\s*16/i.test(norma1617)) items.push(violationLabelByArticle(16))
+  if (/art\.?\s*17/i.test(norma1617) || art17Tipo) items.push(violationLabelByArticle(17))
 
   ;['norma_violata1', 'norma_violata2', 'norma_violata3'].forEach(field => {
     splitMultiValue(pickField(d, field)).forEach(v => items.push(formatNormaToken(v)))

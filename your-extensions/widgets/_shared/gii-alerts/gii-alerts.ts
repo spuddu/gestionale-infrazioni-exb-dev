@@ -157,9 +157,13 @@ export const GII_ALERT_FIELDS = [
   'dt_stato_TI_AGR',
   'dt_stato_RI_AGR',
   'dt_stato_DT_AGR',
+  'tipo_atto_amm',
   'numero_verbale',
   'data_verbale',
+  'esito_DA',
+  'dt_esito_DA',
   'notifica_data',
+  'notifica_esito',
   'pagamento_scadenza',
   'pagamento_stato',
   'pagamento_importo_totale',
@@ -440,12 +444,21 @@ function isPaymentCompleted (data: Record<string, any>, expectedAmount: number):
   return paid >= expectedAmount
 }
 
-function isVerbaleDefinitivoForAlerts (data: Record<string, any>): boolean {
-  return hasValue(attr(data, ['numero_verbale'])) && hasValue(attr(data, ['data_verbale']))
+function isAttoDefinitivoForAlerts (data: Record<string, any>): boolean {
+  const tipoAtto = normalizeAlertCode(attr(data, ['tipo_atto_amm']))
+  const prevedeVerbale = tipoAtto === 'VERBALE' || tipoAtto === 'VERBALE_RISARCIMENTO'
+  const esitoDa = asNumber(attr(data, ['esito_DA']))
+  const statoDa = asNumber(attr(data, ['stato_DA']))
+  const approvatoDa = esitoDa === 2 || statoDa === 4
+  if (prevedeVerbale) {
+    return approvatoDa || (hasValue(attr(data, ['numero_verbale'])) && hasValue(attr(data, ['data_verbale'])))
+  }
+  return approvatoDa
 }
 
-function isVerbaleNotificatoForAlerts (data: Record<string, any>): boolean {
-  return hasValue(attr(data, ['notifica_data']))
+function isAttoNotificatoForAlerts (data: Record<string, any>): boolean {
+  const esito = normalizeAlertCode(attr(data, ['notifica_esito']))
+  return (esito === 'NOTIFICATA' || esito === 'COMPIUTA_GIACENZA') && hasValue(attr(data, ['notifica_data']))
 }
 
 function normalizeAlertCode (value: any): string {
@@ -760,7 +773,7 @@ export function computeGiiAlertsFromPractice (data: Record<string, any>, options
   const takeChargeAlert = computeTakeChargeAlert(data, { user: options?.user, log: options?.log || null })
   if (takeChargeAlert) alerts.push(takeChargeAlert)
 
-  if (!isVerbaleDefinitivoForAlerts(data) || !isVerbaleNotificatoForAlerts(data)) return alerts
+  if (!isAttoDefinitivoForAlerts(data) || !isAttoNotificatoForAlerts(data)) return alerts
   const parentObjectId = getParentObjectId(data)
   const reportCode = getReportCode(data, parentObjectId)
 
