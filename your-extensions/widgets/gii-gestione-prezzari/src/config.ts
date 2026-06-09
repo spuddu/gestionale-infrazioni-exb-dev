@@ -1,12 +1,17 @@
 import { type ImmutableObject } from 'jimu-core'
 
 export interface Config {
-  prezzariUrl?: string
-  vociUrl?: string
-  analisiUrl?: string
+  serviceUrl?: string
+  detailTableUrl?: string
   title?: string
   titleColor?: string
   titleFontSize?: number
+  sectionTitleColor?: string
+  sectionTitleFontSize?: number
+  toolbarLabelColor?: string
+  toolbarLabelFontSize?: number
+  detailCardBackgroundColor?: string
+  recordsCardBackgroundColor?: string
 }
 
 export type IMConfig = ImmutableObject<Config>

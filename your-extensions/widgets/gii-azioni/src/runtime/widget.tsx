@@ -1294,9 +1294,17 @@ function InlineEditOverlay(props: {
             style={{ padding: '7px 10px', borderRadius: 8, border: '1px solid rgba(0,0,0,0.20)', fontSize: 13, width: '100%', background: saving ? '#f3f4f6' : '#fff' }}
           >
             <option value=''>— seleziona —</option>
-            {domain.codedValues.map((cv: any) => (
-              <option key={String(cv.code)} value={String(cv.code)}>{cv.name}</option>
-            ))}
+            {domain.codedValues.map((cv: any) => {
+              const code = String(cv.code)
+              const label = fieldName === 'norma16_17'
+                ? (code === 'Art16'
+                    ? 'Art. 16 - Presentazione tardiva comunicazione di irrigazione'
+                    : (code === 'Art17'
+                        ? 'Art. 17 - Presentazione tardiva comunicazione di variazione o di rinuncia'
+                        : cv.name))
+                : cv.name
+              return <option key={code} value={code}>{label}</option>
+            })}
           </select>
         </div>
       )

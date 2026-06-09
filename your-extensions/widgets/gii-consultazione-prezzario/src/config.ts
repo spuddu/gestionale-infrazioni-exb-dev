@@ -17,6 +17,9 @@ export interface Config {
   leftColumnWidthPct?: number
   centerColumnWidthPct?: number
   rightColumnWidthPct?: number
+  leftPanelBackgroundColor?: string
+  detailCardBackgroundColor?: string
+  recordsCardBackgroundColor?: string
 }
 
 export type IMConfig = ImmutableObject<Config>

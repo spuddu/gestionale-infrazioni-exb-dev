@@ -3486,8 +3486,8 @@ const CHOICES = {
   art15_totale:   [{ v: 'Art15.3', l: 'Prima contestazione' }, { v: 'Art15.4', l: 'Recidiva' }],
   occorrenza: [{ v: '1', l: 'Prima contestazione' }, { v: '2', l: 'Recidiva' }],
   art16_17: [
-    { v: 'Art16', l: 'Art. 16 - Inosservanza termini di presentazione comunicazioni di irrigazione' },
-    { v: 'Art17', l: 'Art. 17 - Inosservanza termini di presentazione comunicazioni di variazione e di rinuncia' },
+    { v: 'Art16', l: 'Art. 16 - Presentazione tardiva comunicazione di irrigazione' },
+    { v: 'Art17', l: 'Art. 17 - Presentazione tardiva comunicazione di variazione o di rinuncia' },
   ],
   art17_tipo: [{ v: 'Art17.1', l: 'Variazione tardiva' }, { v: 'Art17.2', l: 'Rinuncia tardiva' }],
   presenza: [{ v: 'sì', l: 'Sì' }, { v: 'no', l: 'No' }],
@@ -4628,6 +4628,165 @@ async function queryTableAttributes (rawUrl: any, where = '1=1', orderByFields =
   return (res?.features || []).map((f: any) => f?.attributes || {})
 }
 
+
+type AttrezzaturaParametro = {
+  codice: string
+  descrizione: string
+  valoreUnitario: number
+}
+
+type AttrezzaturaRimborsoRow = AttrezzaturaParametro & {
+  selected: boolean
+  quantita: number
+}
+
+function attrezzaturaMoney (value: any): string {
+  const n = Number(value)
+  return (Number.isFinite(n) ? n : 0).toLocaleString('it-IT', { useGrouping: true, minimumFractionDigits: 2, maximumFractionDigits: 2 })
+}
+
+function attrezzaturaQty (value: any): string {
+  const n = Number(value)
+  return (Number.isFinite(n) ? n : 0).toLocaleString('it-IT', { useGrouping: false, minimumFractionDigits: 0, maximumFractionDigits: 4 })
+}
+
+function attrezzaturaKey (value: any): string {
+  return String(value ?? '')
+    .trim()
+    .toLocaleUpperCase('it-IT')
+    .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^A-Z0-9]+/g, '_')
+    .replace(/^_+|_+$/g, '')
+}
+
+type AttrezzaturaTipo = {
+  key: 'TESSERA_ELETTRONICA' | 'PARATOIA' | 'CURVA_DERIVAZIONE' | 'SIFONE'
+  label: string
+  order: number
+}
+
+function attrezzaturaTipo (value: any): AttrezzaturaTipo | null {
+  const key = attrezzaturaKey(value)
+  if (!key) return null
+  if (key.includes('TESSERA')) return { key: 'TESSERA_ELETTRONICA', label: 'Tessera elettronica', order: 0 }
+  if (key.includes('CURV')) return { key: 'CURVA_DERIVAZIONE', label: 'Curva di derivazione', order: 1 }
+  if (key.includes('SIFON')) return { key: 'SIFONE', label: 'Sifone', order: 2 }
+  if (key.includes('PARATOIA')) return { key: 'PARATOIA', label: 'Paratoia', order: 3 }
+  return null
+}
+
+function attrezzaturaMatchKey (value: any): string {
+  return attrezzaturaTipo(value)?.key || attrezzaturaKey(value)
+}
+
+function isTruthyParameterFlag (value: any): boolean {
+  if (value === 1 || value === true) return true
+  const s = String(value ?? '').trim().toLowerCase()
+  return s === '1' || s === 'true' || s === 'si' || s === 'sì' || s === 'yes'
+}
+
+function parameterDateTs (value: any): number | null {
+  if (value == null || value === '') return null
+  const n = Number(value)
+  if (Number.isFinite(n) && n > 0) return n
+  const d = new Date(value)
+  return Number.isNaN(d.getTime()) ? null : d.getTime()
+}
+
+function parseAttrezzatureDetail (raw: any): Array<{ descrizione: string, quantita: number }> {
+  const out: Array<{ descrizione: string, quantita: number }> = []
+  for (const line of String(raw ?? '').split(/\r?\n/)) {
+    const text = line.trim()
+    if (!text) continue
+    const m = text.match(/^(.*?)\s+—\s+Quantità:\s*([0-9.,]+)/i)
+    if (!m) continue
+    const quantita = Number(String(m[2]).replace(/\./g, '').replace(',', '.'))
+    if (!m[1].trim() || !Number.isFinite(quantita) || quantita <= 0) continue
+    out.push({ descrizione: m[1].trim(), quantita })
+  }
+  return out
+}
+
+function buildAttrezzatureDetail (rows: AttrezzaturaRimborsoRow[]): string {
+  return rows
+    .filter(row => row.selected && Number(row.quantita) > 0)
+    .map(row => {
+      const q = Number(row.quantita)
+      const unit = Number(row.valoreUnitario) || 0
+      return `${row.descrizione} — Quantità: ${attrezzaturaQty(q)} — Valore unitario: ${attrezzaturaMoney(unit)} € — Importo: ${attrezzaturaMoney(q * unit)} €`
+    })
+    .join('\n')
+}
+
+function attrezzatureTotal (rows: AttrezzaturaRimborsoRow[]): number {
+  return Math.round(rows.reduce((sum, row) => row.selected ? sum + ((Number(row.quantita) || 0) * (Number(row.valoreUnitario) || 0)) : sum, 0) * 100) / 100
+}
+
+async function loadAttrezzatureParameters (rawUrl: any, referenceDate?: any): Promise<AttrezzaturaParametro[]> {
+  const rows = await queryTableAttributes(rawUrl, '1=1', 'data_validita_da DESC, OBJECTID DESC')
+  const refTs = parameterDateTs(referenceDate) ?? Date.now()
+
+  const candidates = rows
+    .filter(row => {
+      const categoria = attrezzaturaKey(row?.categoria_parametro)
+      // La vista può essere già filtrata sulle attrezzature e non esporre la categoria.
+      return !categoria || categoria === 'ATTREZZATURA'
+    })
+    .filter(row => row?.attivo == null || row?.attivo === '' || isTruthyParameterFlag(row?.attivo))
+    .map(row => {
+      const codice = String(row?.codice_parametro ?? '').trim()
+      const descrizioneOrigine = String(row?.descrizione ?? row?.valore_testo ?? row?.codice_parametro ?? '').trim()
+      const tipo = attrezzaturaTipo(`${codice} ${descrizioneOrigine}`)
+      const valoreUnitario = Number(row?.valore_num)
+      const from = parameterDateTs(row?.data_validita_da)
+      const to = parameterDateTs(row?.data_validita_a)
+      const vigente = (from == null || from <= refTs) && (to == null || to >= refTs)
+      return { codice, descrizione: tipo?.label || '', valoreUnitario, tipo, vigente }
+    })
+    .filter(row => !!row.tipo && Number.isFinite(row.valoreUnitario) && row.valoreUnitario >= 0)
+
+  const tipi: AttrezzaturaTipo[] = [
+    { key: 'TESSERA_ELETTRONICA', label: 'Tessera elettronica', order: 0 },
+    { key: 'CURVA_DERIVAZIONE', label: 'Curva di derivazione', order: 1 },
+    { key: 'SIFONE', label: 'Sifone', order: 2 },
+    { key: 'PARATOIA', label: 'Paratoia', order: 3 }
+  ]
+
+  return tipi.flatMap(tipo => {
+    const perTipo = candidates.filter(row => row.tipo?.key === tipo.key)
+    // Si preferisce il prezzo vigente alla data della rilevazione. Se manca,
+    // si conserva comunque la tipologia usando l'ultima voce attiva disponibile,
+    // evitando che Curva di derivazione o Sifone spariscano dal popup.
+    const selected = perTipo.find(row => row.vigente) || perTipo[0]
+    if (!selected) return []
+    return [{ codice: selected.codice, descrizione: tipo.label, valoreUnitario: selected.valoreUnitario }]
+  })
+}
+
+
+async function loadCauzioneParameter (rawUrl: any, referenceDate?: any): Promise<number> {
+  const rows = await queryTableAttributes(rawUrl, '1=1', 'data_validita_da DESC, OBJECTID DESC')
+  const refTs = parameterDateTs(referenceDate) ?? Date.now()
+  const candidates = rows
+    .filter(row => String(row?.categoria_parametro ?? '').trim().toUpperCase() === 'CAUZIONE')
+    .filter(row => row?.attivo == null || row?.attivo === '' || isTruthyParameterFlag(row?.attivo))
+    .filter(row => {
+      const from = parameterDateTs(row?.data_validita_da)
+      const to = parameterDateTs(row?.data_validita_a)
+      return (from == null || from <= refTs) && (to == null || to >= refTs)
+    })
+    .map(row => ({
+      valore: Number(row?.valore_num),
+      chiave: attrezzaturaKey(`${row?.codice_parametro ?? ''} ${row?.descrizione ?? ''}`)
+    }))
+    .filter(row => Number.isFinite(row.valore) && row.valore >= 0)
+
+  const preferred = candidates.find(row => row.chiave.includes('CAUZIONE') && row.chiave.includes('TESSERA'))
+    || candidates.find(row => row.chiave.includes('CAUZIONE'))
+    || candidates[0]
+  return preferred ? Math.round(preferred.valore * 100) / 100 : 0
+}
+
 async function saveTableAttributes (rawUrl: any, attrs: Record<string, any>, objectid?: number | null): Promise<void> {
   const fl = await getFeatureLayerByUrl(rawUrl)
   const oidField = String(fl?.objectIdField || 'OBJECTID')
@@ -5284,6 +5443,16 @@ function NuovaPraticaForm (p: {
   const [cancelUnsavedPopupOpen, setCancelUnsavedPopupOpen] = React.useState(false)
   const [missingMapPointPopupOpen, setMissingMapPointPopupOpen] = React.useState(false)
   const [notaSpeseLinkedViolationPopup, setNotaSpeseLinkedViolationPopup] = React.useState<null | { codice: string; art: number; label?: string }>(null)
+  const [attrezzaturePopupOpen, setAttrezzaturePopupOpen] = React.useState(false)
+  const [attrezzaturePopupPendingArt30, setAttrezzaturePopupPendingArt30] = React.useState(false)
+  const [attrezzatureRemoveConfirmOpen, setAttrezzatureRemoveConfirmOpen] = React.useState(false)
+  const [attrezzatureRows, setAttrezzatureRows] = React.useState<AttrezzaturaRimborsoRow[]>([])
+  const [attrezzatureLoading, setAttrezzatureLoading] = React.useState(false)
+  const [attrezzatureError, setAttrezzatureError] = React.useState('')
+  const [attrezzatureCauzionePresente, setAttrezzatureCauzionePresente] = React.useState<boolean>(() => isSelectedFlag(p.initialData?.attrezzature_cauzione_presente))
+  // Valore unitario della cauzione letto dalla vista parametri Art. 30.
+  const [attrezzatureCauzioneImporto, setAttrezzatureCauzioneImporto] = React.useState<number>(() => Number(p.initialData?.attrezzature_cauzione_decurtata) || 0)
+  const [attrezzatureCauzioneQuantita, setAttrezzatureCauzioneQuantita] = React.useState<number>(1)
   const validationPopupOkId = React.useMemo(() => `gii-val-ok-${Math.random().toString(36).slice(2)}`, [])
   const validationPopupBackdropId = React.useMemo(() => `gii-val-backdrop-${Math.random().toString(36).slice(2)}`, [])
   const successPopupOkId = React.useMemo(() => `gii-success-ok-${Math.random().toString(36).slice(2)}`, [])
@@ -5825,6 +5994,13 @@ function NuovaPraticaForm (p: {
     setDraft(nextBase)
     setBaselineDraft(nextBase)
     setArt15SelectedUi(draftHasArt15Selection(nextBase))
+    setAttrezzatureCauzionePresente(isSelectedFlag(nextBase.attrezzature_cauzione_presente))
+    setAttrezzatureCauzioneImporto(Number(nextBase.attrezzature_cauzione_decurtata) || 0)
+    setAttrezzatureCauzioneQuantita(1)
+    setAttrezzatureRows([])
+    setAttrezzaturePopupOpen(false)
+    setAttrezzaturePopupPendingArt30(false)
+    setAttrezzatureRemoveConfirmOpen(false)
     setAttachmentFiles([])
     setAttachmentInputKey(k => k + 1)
     setPendingDeleteAttachmentIds([])
@@ -6397,6 +6573,139 @@ React.useEffect(() => {
     }
   }, [mode, currentOid, attachmentsForOid, loadCurrentAttachments])
 
+  const openAttrezzaturePopup = React.useCallback(async (pendingArt30Selection: boolean) => {
+    setAttrezzaturePopupPendingArt30(pendingArt30Selection)
+    const cauzionePresenteSnapshot = isSelectedFlag(g('attrezzature_cauzione_presente'))
+    setAttrezzatureCauzionePresente(cauzionePresenteSnapshot)
+    setAttrezzaturePopupOpen(true)
+    setAttrezzatureLoading(true)
+    setAttrezzatureError('')
+    try {
+      const current = parseAttrezzatureDetail(g('attrezzature_rimborso_dettaglio'))
+      const tesseraCurrentQty = Math.max(1, Math.trunc(Number(current.find(item => attrezzaturaTipo(item.descrizione)?.key === 'TESSERA_ELETTRONICA')?.quantita) || 1))
+      const parametersUrl = String((cfg as any).attrezzatureParametriUrl || '').trim()
+      const cauzioneUrl = parametersUrl
+      const cauzioneSnapshot = Number(g('attrezzature_cauzione_decurtata')) || 0
+      const warningMessages: string[] = []
+      if (cauzioneUrl) {
+        try {
+          const cauzioneUnitaria = await loadCauzioneParameter(cauzioneUrl, g('data_rilevazione'))
+          const valoreUnitario = cauzioneUnitaria > 0 ? cauzioneUnitaria : (cauzioneSnapshot > 0 ? cauzioneSnapshot / tesseraCurrentQty : 0)
+          setAttrezzatureCauzioneImporto(valoreUnitario)
+          const quantitaSnapshot = cauzionePresenteSnapshot && valoreUnitario > 0 && cauzioneSnapshot > 0
+            ? Math.max(1, Math.round(cauzioneSnapshot / valoreUnitario))
+            : tesseraCurrentQty
+          setAttrezzatureCauzioneQuantita(Math.min(tesseraCurrentQty, quantitaSnapshot))
+        } catch {
+          setAttrezzatureCauzioneImporto(cauzioneSnapshot > 0 ? cauzioneSnapshot / tesseraCurrentQty : 0)
+          setAttrezzatureCauzioneQuantita(tesseraCurrentQty)
+        }
+      } else {
+        setAttrezzatureCauzioneImporto(cauzioneSnapshot > 0 ? cauzioneSnapshot / tesseraCurrentQty : 0)
+        setAttrezzatureCauzioneQuantita(tesseraCurrentQty)
+      }
+      if (!parametersUrl) {
+        setAttrezzatureRows(current.map(item => ({ codice: '', descrizione: item.descrizione, valoreUnitario: 0, selected: true, quantita: item.quantita })))
+        warningMessages.unshift('Vista di consultazione parametri Art. 30 non configurata nel setting.')
+        setAttrezzatureError(warningMessages.join(' '))
+        return
+      }
+      const params = await loadAttrezzatureParameters(parametersUrl, g('data_rilevazione'))
+      const existingByKey = new Map(current.map(item => [attrezzaturaMatchKey(item.descrizione), item]))
+      const nextRows: AttrezzaturaRimborsoRow[] = params.map(item => {
+        const existing = existingByKey.get(attrezzaturaMatchKey(item.descrizione))
+        return { ...item, selected: !!existing, quantita: existing?.quantita || 1 }
+      })
+      for (const existing of current) {
+        const key = attrezzaturaMatchKey(existing.descrizione)
+        if (!nextRows.some(row => attrezzaturaMatchKey(row.descrizione) === key)) {
+          const tipo = attrezzaturaTipo(existing.descrizione)
+          nextRows.push({ codice: '', descrizione: tipo?.label || existing.descrizione, valoreUnitario: 0, selected: true, quantita: existing.quantita })
+        }
+      }
+      setAttrezzatureRows(nextRows)
+      if (nextRows.length === 0) warningMessages.unshift('Nessun parametro attrezzatura attivo e valido trovato nella vista configurata.')
+      setAttrezzatureError(warningMessages.join(' '))
+    } catch (e: any) {
+      setAttrezzatureRows([])
+      setAttrezzatureError(e?.message || String(e))
+    } finally {
+      setAttrezzatureLoading(false)
+    }
+  }, [cfg, draft.attrezzature_rimborso_dettaglio, draft.data_rilevazione])
+
+  const attrezzatureTesseraSelezionata = React.useMemo(
+    () => attrezzatureRows.some(row => row.selected && attrezzaturaTipo(`${row.codice} ${row.descrizione}`)?.key === 'TESSERA_ELETTRONICA'),
+    [attrezzatureRows]
+  )
+  const attrezzatureTesseraQuantita = React.useMemo(() => {
+    const row = attrezzatureRows.find(item => item.selected && attrezzaturaTipo(`${item.codice} ${item.descrizione}`)?.key === 'TESSERA_ELETTRONICA')
+    return row ? Math.max(1, Math.trunc(Number(row.quantita) || 1)) : 1
+  }, [attrezzatureRows])
+  const attrezzatureTotaleLordo = React.useMemo(() => attrezzatureTotal(attrezzatureRows), [attrezzatureRows])
+  const attrezzatureCauzioneApplicabile = attrezzatureTesseraSelezionata && attrezzatureCauzioneImporto > 0
+  const attrezzatureCauzioneApplicata = attrezzatureCauzioneApplicabile && attrezzatureCauzionePresente
+    ? Math.round(attrezzatureCauzioneImporto * Math.max(1, Math.min(attrezzatureTesseraQuantita, Math.trunc(Number(attrezzatureCauzioneQuantita) || 1))) * 100) / 100
+    : 0
+  const attrezzatureTotaleNetto = Math.max(0, Math.round((attrezzatureTotaleLordo - attrezzatureCauzioneApplicata) * 100) / 100)
+
+  React.useEffect(() => {
+    if (!attrezzatureCauzionePresente) {
+      setAttrezzatureCauzioneQuantita(attrezzatureTesseraQuantita)
+    }
+    if (attrezzaturePopupOpen && !attrezzatureLoading && !attrezzatureCauzioneApplicabile && attrezzatureCauzionePresente) {
+      setAttrezzatureCauzionePresente(false)
+    }
+  }, [attrezzaturePopupOpen, attrezzatureLoading, attrezzatureCauzioneApplicabile, attrezzatureCauzionePresente, attrezzatureTesseraQuantita])
+
+  const applyAttrezzaturePopup = React.useCallback(() => {
+    const selectedRows = attrezzatureRows.filter(row => row.selected && Number(row.quantita) > 0)
+    const total = attrezzatureTotal(selectedRows)
+    const tesseraSelected = selectedRows.some(row => attrezzaturaTipo(`${row.codice} ${row.descrizione}`)?.key === 'TESSERA_ELETTRONICA')
+    const tesseraQty = Math.max(1, Math.trunc(Number(selectedRows.find(row => attrezzaturaTipo(`${row.codice} ${row.descrizione}`)?.key === 'TESSERA_ELETTRONICA')?.quantita) || 1))
+    const cauzioneQty = Math.max(1, Math.min(tesseraQty, Math.trunc(Number(attrezzatureCauzioneQuantita) || 1)))
+    const cauzione = tesseraSelected && attrezzatureCauzionePresente && attrezzatureCauzioneImporto > 0
+      ? Math.round(attrezzatureCauzioneImporto * cauzioneQty * 100) / 100
+      : 0
+    const totalNetto = Math.max(0, Math.round((total - cauzione) * 100) / 100)
+    const detail = buildAttrezzatureDetail(selectedRows)
+    setDraft(prev => ({
+      ...prev,
+      attrezzature_rimborso_dettaglio: detail,
+      attrezzature_rimborso_importo: total > 0 ? String(total) : '',
+      attrezzature_cauzione_presente: cauzione > 0 ? '1' : '0',
+      attrezzature_cauzione_decurtata: cauzione > 0 ? String(cauzione) : '',
+      attrezzature_importo_netto: total > 0 ? String(totalNetto) : ''
+    }))
+    if (attrezzaturePopupPendingArt30) {
+      const next = new Set(parseMultiSelect(draft.norma_violata3))
+      next.add('Art30')
+      setDraft(prev => ({ ...prev, norma_violata3: Array.from(next).join(' '), v_art30: 1 }))
+    }
+    setAttrezzaturePopupOpen(false)
+    setAttrezzaturePopupPendingArt30(false)
+  }, [attrezzatureRows, attrezzatureCauzionePresente, attrezzatureCauzioneImporto, attrezzatureCauzioneQuantita, attrezzaturePopupPendingArt30, draft.norma_violata3])
+
+  const clearArt30AndAttrezzature = React.useCallback(() => {
+    const next = new Set(parseMultiSelect(draft.norma_violata3))
+    next.delete('Art30')
+    setDraft(prev => ({
+      ...prev,
+      norma_violata3: Array.from(next).join(' '),
+      v_art30: 0,
+      attrezzature_rimborso_dettaglio: '',
+      attrezzature_rimborso_importo: '',
+      attrezzature_cauzione_presente: '0',
+      attrezzature_cauzione_decurtata: '',
+      attrezzature_importo_netto: ''
+    }))
+    setAttrezzatureRows([])
+    setAttrezzatureCauzionePresente(false)
+    setAttrezzatureCauzioneImporto(0)
+    setAttrezzatureCauzioneQuantita(1)
+    setAttrezzatureRemoveConfirmOpen(false)
+  }, [draft.norma_violata3])
+
   // Norma violata 3 — select_multiple come Set (stringa separata da spazio)
   const norma3Set = React.useMemo(() => new Set(String(g('norma_violata3') || '').split(' ').filter(Boolean)), [draft.norma_violata3])
   const norma3SelectedLabels = React.useMemo(() => CHOICES.norma3.filter(o => norma3Set.has(o.v)).map(o => o.l), [norma3Set])
@@ -6407,6 +6716,14 @@ React.useEffect(() => {
     if (isRemoving && nsOpt && hasNotaSpeseRowsForCasistica(noteSpeseRowsDraft, nsOpt.codice)) {
       setMsg(null)
       setNotaSpeseLinkedViolationPopup({ codice: nsOpt.codice, art: nsOpt.art, label: nsOpt.label })
+      return
+    }
+    if (v === 'Art30' && !isRemoving) {
+      void openAttrezzaturePopup(true)
+      return
+    }
+    if (v === 'Art30' && isRemoving && (String(g('attrezzature_rimborso_dettaglio') || '').trim() || isSelectedFlag(g('attrezzature_cauzione_presente')))) {
+      setAttrezzatureRemoveConfirmOpen(true)
       return
     }
     if (isRemoving) s.delete(v); else s.add(v)
@@ -6981,14 +7298,14 @@ React.useEffect(() => {
         if (dich <= 0) {
           setValidationPopup({
             title: 'Superficie dichiarata non valida',
-            text: 'Per l\'Art. 17 - Inosservanza termini di presentazione comunicazioni di variazione e di rinuncia (variazione tardiva), la superficie dichiarata deve essere compilata e maggiore di 0.'
+            text: 'Per l\'Art. 17 - Presentazione tardiva comunicazione di variazione o di rinuncia (variazione tardiva), la superficie dichiarata deve essere compilata e maggiore di 0.'
           })
           return
         }
         if (variata <= 0) {
           setValidationPopup({
             title: 'Superficie variata non valida',
-            text: 'Per l\'Art. 17 - Inosservanza termini di presentazione comunicazioni di variazione e di rinuncia (variazione tardiva), la superficie variata deve essere compilata e maggiore di 0. Se la superficie variata è pari a 0, selezionare il tipo di comunicazione Rinuncia tardiva.'
+            text: 'Per l\'Art. 17 - Presentazione tardiva comunicazione di variazione o di rinuncia (variazione tardiva), la superficie variata deve essere compilata e maggiore di 0. Se la superficie variata è pari a 0, selezionare il tipo di comunicazione Rinuncia tardiva.'
           })
           return
         }
@@ -6999,7 +7316,7 @@ React.useEffect(() => {
         if (dich <= 0) {
           setValidationPopup({
             title: 'Superficie dichiarata non valida',
-            text: 'Per l\'Art. 17 - Inosservanza termini di presentazione comunicazioni di variazione e di rinuncia (rinuncia tardiva), la superficie dichiarata deve essere compilata e maggiore di 0.'
+            text: 'Per l\'Art. 17 - Presentazione tardiva comunicazione di variazione o di rinuncia (rinuncia tardiva), la superficie dichiarata deve essere compilata e maggiore di 0.'
           })
           return
         }
@@ -7146,7 +7463,14 @@ React.useEffect(() => {
         comizio: toInt(g('comizio')),
         idrante: toInt(g('idrante')),
         matricola_contatore: g('matricola_contatore') || null,
-        matricola_tessera: g('matricola_tessera') || null
+        matricola_tessera: g('matricola_tessera') || null,
+        // Art. 30 — snapshot del rimborso attrezzature selezionato dal TI AGR/TEC.
+        // Il rimborso spese per manodopera/mezzi/materiali resta invece nella Nota spese.
+        attrezzature_rimborso_dettaglio: g('attrezzature_rimborso_dettaglio') || null,
+        attrezzature_rimborso_importo: String(g('attrezzature_rimborso_importo') || '').trim() ? Number(g('attrezzature_rimborso_importo')) : null,
+        attrezzature_cauzione_presente: isSelectedFlag(g('attrezzature_cauzione_presente')) ? 1 : 0,
+        attrezzature_cauzione_decurtata: String(g('attrezzature_cauzione_decurtata') || '').trim() ? Number(g('attrezzature_cauzione_decurtata')) : null,
+        attrezzature_importo_netto: String(g('attrezzature_importo_netto') || '').trim() ? Number(g('attrezzature_importo_netto')) : null
       }
 
       const cleanAttrsAll = filterAttrsForLayer(attrs, layer)
@@ -8337,7 +8661,7 @@ ${e?.message || String(e)}`
                 <div style={{ display: 'grid', gridTemplateColumns: termsGridColumns, gap: 10, alignItems: 'start' }}>
                   <div style={{ gridColumn: '1 / span 2' }}>
                     <div style={{ ...S.lbl, color: formStyle.labelColor, fontSize: formStyle.labelFontSize, visibility: 'hidden' }}>Violazione</div>
-                    {choiceBox('Art16', 'Art. 16 - Inosservanza termini di presentazione comunicazioni di irrigazione')}
+                    {choiceBox('Art16', 'Art. 16 - Presentazione tardiva comunicazione di irrigazione')}
                   </div>
                   {surfaceTextField('sup_dichiarata_art16', 'Sup. dichiarata (ha.a.ca)', g('sup_dichiarata_art16'), v => set('sup_dichiarata_art16', v), art16Selected)}
                   {surfaceTextField('sup_irrigata_art16', 'Sup. irrigata (ha.a.ca)', '0', () => {}, art16Selected, '0')}
@@ -8345,7 +8669,7 @@ ${e?.message || String(e)}`
                 <div style={{ display: 'grid', gridTemplateColumns: termsGridColumns, gap: 10, alignItems: 'start' }}>
                   <div>
                     <div style={{ ...S.lbl, color: formStyle.labelColor, fontSize: formStyle.labelFontSize, visibility: 'hidden' }}>Violazione</div>
-                    {choiceBox('Art17', 'Art. 17 - Inosservanza termini di presentazione comunicazioni di variazione e di rinuncia')}
+                    {choiceBox('Art17', 'Art. 17 - Presentazione tardiva comunicazione di variazione o di rinuncia')}
                   </div>
                   {selectField('art17_tipo', 'Tipo comunicazione', art17tipo, v => set('art17_tipo', v), CHOICES.art17_tipo, art17Selected)}
                   {surfaceTextField(art17DichField, 'Sup. dichiarata (ha.a.ca)', art17DichValue, v => set(art17DichField, v), art17SurfaceEnabled)}
@@ -8355,6 +8679,32 @@ ${e?.message || String(e)}`
             )}
 
             {renderEditCard('Altre violazioni', renderNorma3Rows())}
+            {norma3Set.has('Art30') && renderEditCard('Rimborso attrezzature — Art. 30',
+              <div style={{ display: 'grid', gap: 9 }}>
+                <div style={{ fontSize: 12, color: '#475569', lineHeight: 1.45 }}>
+                  Il rimborso delle attrezzature e l’eventuale rimborso delle spese sostenute per l’intervento sul campo sono componenti autonome. Le spese di manodopera, mezzi e materiali continuano a essere inserite nella scheda <b>Nota spese</b>.
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap', padding: '9px 10px', borderRadius: 8, border: '1px solid #bfdbfe', background: '#eff6ff' }}>
+                  <span style={{ fontSize: 12, color: '#334155' }}>
+                    Attrezzature selezionate: <b>{parseAttrezzatureDetail(g('attrezzature_rimborso_dettaglio')).length}</b>
+                  </span>
+                  {isSelectedFlag(g('attrezzature_cauzione_presente')) && Number(g('attrezzature_cauzione_decurtata')) > 0 && <span style={{ fontSize: 12, color: '#334155' }}>
+                    Cauzione da detrarre: <b>- {attrezzaturaMoney(g('attrezzature_cauzione_decurtata'))} €</b>
+                  </span>}
+                  <span style={{ fontSize: 12, color: '#334155' }}>
+                    Totale: <b>{attrezzaturaMoney(g('attrezzature_importo_netto') || g('attrezzature_rimborso_importo'))} €</b>
+                  </span>
+                  <button
+                    type='button'
+                    onClick={() => { void openAttrezzaturePopup(false) }}
+                    disabled={saving}
+                    style={{ ...btnBase, marginLeft: 'auto', background: '#1d4ed8', color: '#fff', border: '1px solid #1d4ed8', cursor: saving ? 'not-allowed' : 'pointer' }}
+                  >
+                    {isReadOnly || isRiAgrTecLimitedEdit ? 'Consulta attrezzature' : 'Gestisci attrezzature'}
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
         )
 
@@ -9174,6 +9524,160 @@ ${e?.message || String(e)}`
               >
                 Conferma
               </button>
+            </div>
+          </div>
+        </div>,
+        getGlobalOverlayHost() || document.body
+      )}
+
+      {attrezzaturePopupOpen && createPortal(
+        <div
+          data-gii-global-popup-root='1'
+          style={{ position: 'fixed', inset: 0, zIndex: 2147483646, background: 'rgba(0,0,0,0.52)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16, pointerEvents: 'auto' }}
+          onClick={(e) => { e.preventDefault(); e.stopPropagation() }}
+          onMouseDown={(e) => { e.preventDefault(); e.stopPropagation() }}
+        >
+          <div
+            role='dialog'
+            aria-modal='true'
+            data-gii-global-popup-dialog='1'
+            style={{ width: 'min(94vw, 620px)', maxHeight: '88vh', overflowY: 'auto', background: '#f8fbff', borderRadius: 14, boxShadow: '0 20px 60px rgba(0,0,0,0.28)', border: '1px solid rgba(0,0,0,0.08)', padding: 18, position: 'relative', zIndex: 2147483647 }}
+            onClick={(e) => { e.stopPropagation() }}
+            onMouseDown={(e) => { e.stopPropagation() }}
+          >
+            <div style={{ fontWeight: 800, fontSize: formStyle.titleFontSize, marginBottom: 4, color: '#0f4c81' }}>Rimborso attrezzature — Art. 30</div>
+            <div style={{ width: '100%', fontSize: formStyle.labelFontSize, color: '#475569', lineHeight: 1.5, marginBottom: 12, textAlign: 'justify' }}>
+              Selezionare esclusivamente le attrezzature danneggiate o smarrite per le quali si richiede il rimborso. L’eventuale intervento sul campo, compresa la manodopera, deve essere inserito separatamente nella scheda <b>Nota spese</b>.
+            </div>
+
+            {attrezzatureError && <div style={{ padding: '9px 10px', borderRadius: 8, border: '1px solid #f59e0b', background: '#fff7ed', color: '#9a3412', fontSize: formStyle.labelFontSize, marginBottom: 10 }}>{attrezzatureError}</div>}
+
+            {attrezzatureLoading
+              ? <div style={{ padding: 18, textAlign: 'center', color: '#64748b', fontSize: formStyle.fieldFontSize }}>Caricamento prezzi attrezzature…</div>
+              : <div style={{ border: '1px solid #cbd5e1', borderRadius: 9, overflow: 'hidden', background: '#fff' }}>
+                  <div style={{ display: 'grid', gridTemplateColumns: '44px minmax(0, 1fr) 82px 118px 104px', background: '#eaf2fb', borderBottom: '1px solid #cbd5e1', fontSize: formStyle.labelFontSize, fontWeight: 800, color: '#334155', textAlign: 'center' }}>
+                    <div style={{ padding: '8px 6px' }}>Scelta</div>
+                    <div style={{ padding: '8px 8px', textAlign: 'left' }}>Attrezzatura</div>
+                    <div style={{ padding: '8px 6px' }}>Quantità</div>
+                    <div style={{ padding: '8px 10px', textAlign: 'right' }}>Valore unitario</div>
+                    <div style={{ padding: '8px 10px', textAlign: 'right' }}>Importo</div>
+                  </div>
+                  {attrezzatureRows.length === 0
+                    ? <div style={{ padding: 16, textAlign: 'center', color: '#64748b', fontSize: formStyle.labelFontSize }}>Nessuna attrezzatura disponibile.</div>
+                    : attrezzatureRows.map((row, index) => {
+                        const locked = isReadOnly || isRiAgrTecLimitedEdit
+                        const amount = row.selected ? (Number(row.quantita) || 0) * (Number(row.valoreUnitario) || 0) : 0
+                        return <div key={`${row.codice || row.descrizione}-${index}`} style={{ display: 'grid', gridTemplateColumns: '44px minmax(0, 1fr) 82px 118px 104px', alignItems: 'center', borderBottom: index === attrezzatureRows.length - 1 ? 0 : '1px solid #e2e8f0', background: index % 2 === 0 ? '#ffffff' : '#f8fbff', fontSize: formStyle.fieldFontSize }}>
+                          <div style={{ display: 'flex', justifyContent: 'center', padding: 8 }}>
+                            <input
+                              type='checkbox'
+                              checked={row.selected}
+                              disabled={locked}
+                              onChange={e => {
+                                const checked = e.target.checked
+                                setAttrezzatureRows(prev => prev.map((item, i) => i === index ? { ...item, selected: checked, quantita: checked ? Math.max(1, Number(item.quantita) || 1) : item.quantita } : item))
+                                if (!checked && attrezzaturaTipo(`${row.codice} ${row.descrizione}`)?.key === 'TESSERA_ELETTRONICA') {
+                                  setAttrezzatureCauzionePresente(false)
+                                  setAttrezzatureCauzioneQuantita(1)
+                                }
+                              }}
+                            />
+                          </div>
+                          <div style={{ padding: '8px 10px', fontWeight: row.selected ? 700 : 500, color: '#334155' }}>{row.descrizione}</div>
+                          <div style={{ padding: 6 }}>
+                            <input
+                              type='number'
+                              min={1}
+                              step={1}
+                              value={Number(row.quantita) || 1}
+                              disabled={locked || !row.selected}
+                              onChange={e => setAttrezzatureRows(prev => prev.map((item, i) => i === index ? { ...item, quantita: Math.max(1, Number(e.target.value) || 1) } : item))}
+                              style={{ width: '100%', height: formStyle.fieldHeight, boxSizing: 'border-box', textAlign: 'center', border: '1px solid #cbd5e1', borderRadius: 6, background: locked || !row.selected ? '#eef2f7' : '#fff', fontSize: formStyle.fieldFontSize }}
+                            />
+                          </div>
+                          <div style={{ padding: '8px 10px', textAlign: 'right', color: '#334155' }}>{attrezzaturaMoney(row.valoreUnitario)} €</div>
+                          <div style={{ padding: '8px 10px', textAlign: 'right', fontWeight: 800, color: '#0f4c81' }}>{attrezzaturaMoney(amount)} €</div>
+                        </div>
+                      })}
+                </div>}
+
+            <div style={{ display: 'grid', gap: 8, marginTop: 12, padding: '10px 0', borderRadius: 8, border: '1px solid #bfdbfe', background: '#eff6ff', overflow: 'hidden' }}>
+              {attrezzatureTesseraSelezionata && <div style={{ display: 'grid', gridTemplateColumns: '44px minmax(0, 1fr) 82px 118px 104px', alignItems: 'center', color: '#334155', fontSize: formStyle.fieldFontSize, fontWeight: 700 }}>
+                <div style={{ display: 'flex', justifyContent: 'center', padding: 8 }}>
+                  <input
+                    type='checkbox'
+                    checked={attrezzatureCauzionePresente}
+                    disabled={isReadOnly || isRiAgrTecLimitedEdit || !(attrezzatureCauzioneImporto > 0)}
+                    onChange={e => {
+                      const checked = e.target.checked
+                      setAttrezzatureCauzionePresente(checked)
+                      if (checked) setAttrezzatureCauzioneQuantita(attrezzatureTesseraQuantita)
+                    }}
+                  />
+                </div>
+                <div style={{ padding: '8px 10px' }}>Decurtazione della cauzione</div>
+                <div style={{ padding: 6 }}>
+                  {attrezzatureCauzionePresente && attrezzatureCauzioneImporto > 0 && <input
+                    type='number'
+                    min={1}
+                    max={attrezzatureTesseraQuantita}
+                    step={1}
+                    value={Math.max(1, Math.min(attrezzatureTesseraQuantita, Math.trunc(Number(attrezzatureCauzioneQuantita) || 1)))}
+                    disabled={isReadOnly || isRiAgrTecLimitedEdit}
+                    onChange={e => setAttrezzatureCauzioneQuantita(Math.max(1, Math.min(attrezzatureTesseraQuantita, Math.trunc(Number(e.target.value) || 1))))}
+                    style={{ width: '100%', height: formStyle.fieldHeight, boxSizing: 'border-box', textAlign: 'center', border: '1px solid #cbd5e1', borderRadius: 6, background: isReadOnly || isRiAgrTecLimitedEdit ? '#eef2f7' : '#fff', fontSize: formStyle.fieldFontSize }}
+                  />}
+                </div>
+                <div style={{ padding: '8px 10px', textAlign: 'right', color: '#334155', fontWeight: 400 }}>
+                  {attrezzatureCauzionePresente && attrezzatureCauzioneImporto > 0 ? `${attrezzaturaMoney(attrezzatureCauzioneImporto)} €` : ''}
+                </div>
+                <div style={{ padding: '8px 10px', textAlign: 'right', color: '#d92d20', fontWeight: 800 }}>
+                  {attrezzatureCauzionePresente && attrezzatureCauzioneImporto > 0 ? `- ${attrezzaturaMoney(attrezzatureCauzioneApplicata)} €` : ''}
+                </div>
+              </div>}
+              {attrezzatureTesseraSelezionata && !(attrezzatureCauzioneImporto > 0) && <div style={{ padding: '0 12px', fontSize: formStyle.labelFontSize, color: '#9a3412' }}>
+                Importo della cauzione non disponibile nella vista configurata.
+              </div>}
+              <div style={{ padding: '0 10px', fontSize: formStyle.fieldFontSize, color: '#0f4c81', textAlign: 'right', fontWeight: 800 }}>Totale: {attrezzaturaMoney(attrezzatureTotaleNetto)} €</div>
+            </div>
+
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10, marginTop: 14 }}>
+              <button
+                type='button'
+                onClick={() => { setAttrezzaturePopupOpen(false); setAttrezzaturePopupPendingArt30(false) }}
+                style={{ ...btnBase, border: '1px solid rgba(0,0,0,0.18)', background: isReadOnly || isRiAgrTecLimitedEdit ? '#1d4ed8' : '#64748b', color: '#fff', cursor: 'pointer' }}
+              >
+                {isReadOnly || isRiAgrTecLimitedEdit ? 'Chiudi' : 'Annulla'}
+              </button>
+              {!isReadOnly && !isRiAgrTecLimitedEdit && <button
+                type='button'
+                onClick={applyAttrezzaturePopup}
+                disabled={attrezzatureLoading}
+                style={{ ...btnBase, border: '1px solid rgba(0,0,0,0.18)', background: '#1d4ed8', color: '#fff', cursor: attrezzatureLoading ? 'not-allowed' : 'pointer' }}
+              >
+                Conferma
+              </button>}
+            </div>
+          </div>
+        </div>,
+        getGlobalOverlayHost() || document.body
+      )}
+
+      {attrezzatureRemoveConfirmOpen && createPortal(
+        <div
+          data-gii-global-popup-root='1'
+          style={{ position: 'fixed', inset: 0, zIndex: 2147483646, background: 'rgba(0,0,0,0.52)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16, pointerEvents: 'auto' }}
+          onClick={(e) => { e.preventDefault(); e.stopPropagation() }}
+          onMouseDown={(e) => { e.preventDefault(); e.stopPropagation() }}
+        >
+          <div role='dialog' aria-modal='true' data-gii-global-popup-dialog='1' style={{ width: 'min(92vw, 540px)', background: '#f8fbff', borderRadius: 14, boxShadow: '0 20px 60px rgba(0,0,0,0.28)', border: '1px solid rgba(0,0,0,0.08)', padding: 18, position: 'relative', zIndex: 2147483647 }} onClick={e => e.stopPropagation()} onMouseDown={e => e.stopPropagation()}>
+            <div style={{ fontWeight: 800, fontSize: 16, marginBottom: 8, color: '#d92d20' }}>Rimborso attrezzature collegato</div>
+            <div style={{ fontSize: 13, color: '#374151', lineHeight: 1.55, marginBottom: 14 }}>
+              Deselezionando l’Art. 30 saranno eliminati dalla pratica il dettaglio delle attrezzature selezionate e l’indicazione della cauzione. Le eventuali righe della Nota spese devono invece essere eliminate dalla relativa scheda.
+            </div>
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10 }}>
+              <button type='button' onClick={() => setAttrezzatureRemoveConfirmOpen(false)} style={{ ...btnBase, border: '1px solid rgba(0,0,0,0.18)', background: '#64748b', color: '#fff', cursor: 'pointer' }}>Annulla</button>
+              <button type='button' onClick={clearArt30AndAttrezzature} style={{ ...btnBase, border: '1px solid rgba(0,0,0,0.18)', background: '#d92d20', color: '#fff', cursor: 'pointer' }}>Conferma</button>
             </div>
           </div>
         </div>,

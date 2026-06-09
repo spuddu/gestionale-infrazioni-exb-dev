@@ -13,6 +13,8 @@ export interface Config {
   sectionTitleFontSize?: number
   toolbarLabelColor?: string
   toolbarLabelFontSize?: number
+  detailCardBackgroundColor?: string
+  recordsCardBackgroundColor?: string
 }
 
 export type IMConfig = ImmutableObject<Config>

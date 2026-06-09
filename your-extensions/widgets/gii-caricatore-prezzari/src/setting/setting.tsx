@@ -21,6 +21,8 @@ export default function Setting(props: AllWidgetSettingProps<IMConfig>) {
   const sectionTitleFontSize = Number(cfg.sectionTitleFontSize || 12.5)
   const toolbarLabelColor = String(cfg.toolbarLabelColor || '#1F4E79')
   const toolbarLabelFontSize = Number(cfg.toolbarLabelFontSize || 11.5)
+  const detailCardBackgroundColor = String(cfg.detailCardBackgroundColor || '#f5f9ff')
+  const recordsCardBackgroundColor = String(cfg.recordsCardBackgroundColor || '#f5f9ff')
   const set = (k: string, v: any) => props.onSettingChange({ id: props.id, config: (props.config as any)?.set ? (props.config as any).set(k, v) : { ...cfg, [k]: v } as any })
 
   return (
@@ -71,6 +73,26 @@ export default function Setting(props: AllWidgetSettingProps<IMConfig>) {
         <input style={inp} type='number' min={10} max={24} step={0.5} value={sectionTitleFontSize} onChange={(e) => set('sectionTitleFontSize', Number(e.target.value || 12.5))} />
 
         <div style={hint}>Queste impostazioni si applicano ai testi di stato interni del widget.</div>
+      </div>
+
+      <div style={section}>
+        <div style={sectionTitle}>Scheda caricamento prezzario</div>
+        <label style={lbl}>Colore di sfondo</label>
+        <div style={colorRow}>
+          <input style={colorInp} type='color' value={detailCardBackgroundColor} onChange={(e) => set('detailCardBackgroundColor', e.target.value)} aria-label='Colore di sfondo della scheda caricamento prezzario' />
+          <input style={inp} value={detailCardBackgroundColor} onChange={(e) => set('detailCardBackgroundColor', e.target.value)} placeholder='#f5f9ff' />
+        </div>
+        <div style={hint}>Imposta lo sfondo della scheda usata per selezionare e caricare un prezzario.</div>
+      </div>
+
+      <div style={section}>
+        <div style={sectionTitle}>Scheda import registrati</div>
+        <label style={lbl}>Colore di sfondo</label>
+        <div style={colorRow}>
+          <input style={colorInp} type='color' value={recordsCardBackgroundColor} onChange={(e) => set('recordsCardBackgroundColor', e.target.value)} aria-label='Colore di sfondo della scheda import registrati' />
+          <input style={inp} value={recordsCardBackgroundColor} onChange={(e) => set('recordsCardBackgroundColor', e.target.value)} placeholder='#f5f9ff' />
+        </div>
+        <div style={hint}>Imposta lo sfondo della scheda in cui sono visualizzati gli import già registrati.</div>
       </div>
 
       <div style={section}>

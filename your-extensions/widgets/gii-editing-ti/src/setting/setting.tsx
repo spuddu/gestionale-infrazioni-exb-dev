@@ -342,6 +342,7 @@ export default function Setting(props: AllWidgetSettingProps<IMConfig>) {
         <Text k='nsNotaSpeseDettaglioUrl' label='Tabella dettaglio nota spese'/>
         <Text k='nsParametriUrl' label='Tabella parametri nota spese'/>
         <Text k='nsParametroCode' label='Codice parametro spese generali' placeholder='SPESE_GENERALI_PERC'/>
+        <Text k='attrezzatureParametriUrl' label='Vista di consultazione parametri Art. 30 (attrezzature e cauzione)' placeholder='https://.../FeatureServer/0'/>
         <Text k='regolamentoArticoliUrl' label='Tabella articoli regolamento irriguo' placeholder='https://.../FeatureServer/0'/>
       </SectionBox>
       <SectionBox title='Modalità e pagine'>

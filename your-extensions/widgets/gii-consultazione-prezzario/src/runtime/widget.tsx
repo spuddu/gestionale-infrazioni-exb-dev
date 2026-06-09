@@ -627,6 +627,9 @@ const styles = `
 .gcp-msg-ok { background:#e2efda; color:#375623; border:1px solid #b8d4b0; }
 .gcp-layout { flex:1; min-height:0; display:grid; grid-template-columns: minmax(0, var(--gcp-left-col, 25%)) var(--gcp-split-col, 12px) minmax(0, var(--gcp-center-col, 45%)) var(--gcp-split-col, 12px) minmax(0, var(--gcp-right-col, 30%)); gap:0; column-gap:0; align-items:stretch; }
 .gcp-panel { min-height:0; border:1px solid #c5d9f1; border-radius:8px; background:#fff; display:flex; flex-direction:column; overflow:hidden; }
+.gcp-panel.gcp-grid-left, .gcp-panel.gcp-grid-left .gcp-panel-body { background:var(--gcp-left-panel-background, #f5f9ff); }
+.gcp-panel.gcp-grid-center, .gcp-panel.gcp-grid-center .gcp-panel-body { background:var(--gcp-records-card-background, #f5f9ff); }
+.gcp-panel.gcp-grid-right, .gcp-panel.gcp-grid-right .gcp-panel-body { background:var(--gcp-detail-card-background, #f5f9ff); }
 .gcp-panel-head { padding:10px 12px; background:#f5f9ff; border-bottom:1px solid #dbe7f4; font-weight:700; color:#1F4E79; border-top-left-radius:8px; border-top-right-radius:8px; }
 .gcp-panel-body { border-bottom-left-radius:8px; border-bottom-right-radius:8px; }
 .gcp-col-resizer { position:relative; width:100%; min-width:0; cursor:col-resize; user-select:none; touch-action:none; }
@@ -665,7 +668,8 @@ const styles = `
 .gcp-th-wrap { display:flex; align-items:center; justify-content:space-between; gap:8px; }
 .gcp-th-ind { font-size:11px; opacity:0.95; }
 .gcp-list-table td { padding:8px; border-bottom:1px solid #e6eef7; vertical-align:middle; }
-.gcp-list-table tbody tr:nth-child(odd) td { background:#f9fbff; }
+.gcp-list-table tbody tr:nth-child(odd) td { background:var(--gcp-records-card-background, #f5f9ff); }
+.gcp-list-table tbody tr:nth-child(even) td { background:linear-gradient(rgba(255,255,255,0.55), rgba(255,255,255,0.55)), var(--gcp-records-card-background, #f5f9ff); }
 .gcp-list-table tbody tr.sel td { background:#dfeefe; }
 .gcp-list-row { cursor:pointer; }
 .gcp-desc-short { display:block; white-space:nowrap; overflow:hidden; text-overflow:clip; line-height:1.25; }
@@ -680,7 +684,7 @@ const styles = `
 .gcp-detail { padding:12px; display:flex; flex-direction:column; gap:10px; }
 .gcp-kv { display:grid; grid-template-columns: 110px 1fr; gap:6px 10px; font-size:12px; }
 .gcp-kv div:nth-child(odd) { font-weight:700; }
-.gcp-desc { white-space:pre-wrap; line-height:1.45; background:#f8fbff; border:1px solid #dbe7f4; border-radius:6px; padding:10px; }
+.gcp-desc { white-space:pre-wrap; line-height:1.45; background:linear-gradient(rgba(255,255,255,0.38), rgba(255,255,255,0.38)), var(--gcp-detail-card-background, #f5f9ff); border:1px solid #dbe7f4; border-radius:6px; padding:10px; }
 .gcp-ana-wrap { width:100%; overflow-x:auto; overflow-y:visible; border:1px solid #dbe7f4; border-radius:6px; }
 .gcp-ana-table { width:100%; min-width:1020px; border-collapse:collapse; font-size:11.5px; table-layout:auto; }
 .gcp-ana-table th { background:#f5f9ff; color:#1F4E79; padding:6px; text-align:left; position:sticky; top:0; vertical-align:top; }
@@ -717,6 +721,9 @@ export default function Widget(props: AllWidgetProps<IMConfig>) {
   const sectionTitleFontSize = Number(cfg.sectionTitleFontSize || 12.5)
   const toolbarLabelColor = String(cfg.toolbarLabelColor || '#1F4E79')
   const toolbarLabelFontSize = Number(cfg.toolbarLabelFontSize || 11.5)
+  const leftPanelBackgroundColor = String(cfg.leftPanelBackgroundColor || '#f5f9ff')
+  const detailCardBackgroundColor = String(cfg.detailCardBackgroundColor || '#f5f9ff')
+  const recordsCardBackgroundColor = String(cfg.recordsCardBackgroundColor || '#f5f9ff')
   const [leftColPct, centerColPct, rightColPct] = normalizeColumnPercents(cfg.leftColumnWidthPct, cfg.centerColumnWidthPct, cfg.rightColumnWidthPct)
   const defaultColumnPercents = React.useMemo<[number, number, number]>(() => [leftColPct, centerColPct, rightColPct], [leftColPct, centerColPct, rightColPct])
   const [columnPercents, setColumnPercents] = React.useState<[number, number, number]>(defaultColumnPercents)
@@ -734,7 +741,10 @@ export default function Widget(props: AllWidgetProps<IMConfig>) {
     ['--gcp-left-col' as any]: `${columnPercents[0].toFixed(2)}%`,
     ['--gcp-center-col' as any]: `${columnPercents[1].toFixed(2)}%`,
     ['--gcp-right-col' as any]: `${columnPercents[2].toFixed(2)}%`,
-    ['--gcp-split-col' as any]: '12px'
+    ['--gcp-split-col' as any]: '12px',
+    ['--gcp-left-panel-background' as any]: leftPanelBackgroundColor,
+    ['--gcp-detail-card-background' as any]: detailCardBackgroundColor,
+    ['--gcp-records-card-background' as any]: recordsCardBackgroundColor
   }
   const columnsDirty = Math.abs(columnPercents[0] - defaultColumnPercents[0]) > 0.05 || Math.abs(columnPercents[1] - defaultColumnPercents[1]) > 0.05 || Math.abs(columnPercents[2] - defaultColumnPercents[2]) > 0.05
 

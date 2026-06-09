@@ -8,6 +8,7 @@ import { defaultConfig } from '../config'
 import { createPortal } from 'react-dom'
 
 const LOG_EVENTI_CICLI_URL = 'https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_LOG_EVENTI_CICLI/FeatureServer/0'
+const NOTA_SPESE_DETTAGLIO_VIEW_URL = 'https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_VIEW_EB_NOTA_SPESE_DETTAGLIO/FeatureServer/0'
 
 function loadEsriModule<T = any> (path: string): Promise<T> {
   return new Promise((resolve, reject) => {
@@ -79,6 +80,13 @@ type RegolamentoRaccordo = {
   codice_parametro: string
   descrizione: string
   attivo: any
+}
+
+type NotaSpeseDetailRow = {
+  codiceCasistica: string
+  codiceVoce: string
+  descrizione: string
+  importoRiga: number
 }
 
 type SanzioneConsultivaVoce = {
@@ -465,6 +473,32 @@ async function queryActiveTableRows<T = any> (rawUrl: any, orderByFields?: strin
   const res = await fl.queryFeatures(q)
   const features = Array.isArray(res?.features) ? res.features : []
   return features.map((g: any) => ({ ...(g?.attributes || {}) })) as T[]
+}
+
+async function queryNotaSpeseDetailRowsForPractice (data: Record<string, any>): Promise<NotaSpeseDetailRow[]> {
+  const rawGlobalId = String(pickAttrCI(data || {}, ['GlobalID', 'globalid', 'GLOBALID']) || '').trim()
+  if (!rawGlobalId) return []
+  const cleanGlobalId = rawGlobalId.replace(/[{}]/g, '').trim()
+  const variants = Array.from(new Set([rawGlobalId, cleanGlobalId, cleanGlobalId ? `{${cleanGlobalId}}` : ''].filter(Boolean)))
+  const fl = await getLookupLayer(NOTA_SPESE_DETTAGLIO_VIEW_URL)
+  const q: any = {
+    where: variants.map(value => `parent_globalid = ${sqlQuote(value)}`).join(' OR '),
+    outFields: ['OBJECTID', 'ordine', 'codice_casistica', 'codice_voce_snapshot', 'descrizione_snapshot', 'importo_riga'],
+    returnGeometry: false,
+    num: 2000,
+    orderByFields: ['ordine ASC', 'OBJECTID ASC']
+  }
+  const res = await fl.queryFeatures(q)
+  const features = Array.isArray(res?.features) ? res.features : []
+  return features.map((feature: any) => {
+    const attrs = feature?.attributes || {}
+    return {
+      codiceCasistica: String(pickAttrCI(attrs, ['codice_casistica']) || '').trim(),
+      codiceVoce: String(pickAttrCI(attrs, ['codice_voce_snapshot']) || '').trim(),
+      descrizione: String(pickAttrCI(attrs, ['descrizione_snapshot']) || '').trim(),
+      importoRiga: parseNumberInput(pickAttrCI(attrs, ['importo_riga'])) || 0
+    }
+  }).filter(row => !!row.codiceCasistica)
 }
 
 function pickAttrCI (data: any, names: string[]): any {
@@ -1782,8 +1816,8 @@ const VIOLATION_ARTICLE_TITLES: Record<string, string> = {
   '8': 'Violazione servizio di reperibilità',
   '12': 'Negato accesso ai fondi (al personale consortile)',
   '15': 'Prelievo abusivo d’acqua',
-  '16': 'Inosservanza dei termini di presentazione delle comunicazioni di irrigazione',
-  '17': 'Inosservanza dei termini di presentazione delle comunicazioni di variazione e di rinuncia',
+  '16': 'Presentazione tardiva comunicazione di irrigazione',
+  '17': 'Presentazione tardiva comunicazione di variazione o di rinuncia',
   '27': 'Spreco d’acqua/uso negligente della risorsa idrica',
   '28': 'Violazione prescrizioni del consorzio',
   '29': 'Violazione termini restituzione attrezzature',
@@ -1951,7 +1985,7 @@ function buildViolationRows (data: any, fields: LayerFieldInfo[]): ViolationRow[
   const art16On = norma1617Raw.toLowerCase().includes('art16') || norma1617Label.toLowerCase().includes('art. 16')
   if (art16On) {
     const details: Array<{ label: string, value: string }> = []
-    addViolationDetail(details, 'Tipo inosservanza', norma1617Label)
+    addViolationDetail(details, 'Tipo inosservanza', violationArticleLabel('16'))
     addViolationDetail(details, 'Superficie dichiarata', firstViolationValue(d, fields, ['sup_dichiarata_art16', 'sup_dichiarata_art16_17']))
     addViolationDetail(details, 'Superficie irrigata', firstViolationValue(d, fields, ['sup_irrigata_art16_17_2', 'sup_irrigata_art16_17']))
     addCommonViolationDetails(d, fields, details, '16')
@@ -1962,7 +1996,7 @@ function buildViolationRows (data: any, fields: LayerFieldInfo[]): ViolationRow[
   const art17On = norma1617Raw.toLowerCase().includes('art17') || norma1617Label.toLowerCase().includes('art. 17') || !!art17Tipo
   if (art17On) {
     const details: Array<{ label: string, value: string }> = []
-    addViolationDetail(details, 'Tipo inosservanza', norma1617Label)
+    addViolationDetail(details, 'Tipo inosservanza', violationArticleLabel('17'))
     addViolationDetail(details, 'Tipo violazione', art17Tipo)
     addViolationDetail(details, 'Superficie dichiarata', firstViolationValue(d, fields, ['sup_dichiarata_art17_1', 'sup_dichiarata_art17_2', 'sup_dichiarata_art16_17']))
     addViolationDetail(details, 'Superficie variata/irrigata', firstViolationValue(d, fields, ['sup_irrigata_art17_1', 'sup_irrigata_art16_17_2', 'sup_irrigata_art16_17']))
@@ -2090,15 +2124,20 @@ function getNotaSpeseValueText (data: any): string {
   return n != null && n > 0 ? formatEuroText(n) : '0,00 €'
 }
 
-function art15SurfaceHaForCase (data: any, codiceCasistica: string): number | null {
+function art15SurfaceCentiareForCase (data: any, codiceCasistica: string): number | null {
   const code = String(codiceCasistica || '').toUpperCase()
   if (!code.includes('PRELIEVO_PARZIALE') && !code.includes('PRELIEVO_TOTALE')) return null
   const dichiarata = numericAttr(data || {}, ['sup_dichiarata_art15'])
   const irrigata = numericAttr(data || {}, ['sup_irrigata_art15'])
   if (irrigata == null || irrigata <= 0) return null
-  const mq = code.includes('PRELIEVO_TOTALE') ? irrigata : Math.max(0, irrigata - (dichiarata || 0))
-  if (!Number.isFinite(mq) || mq <= 0) return null
-  return mq / 10000
+  const centiare = code.includes('PRELIEVO_TOTALE') ? irrigata : Math.max(0, irrigata - (dichiarata || 0))
+  if (!Number.isFinite(centiare) || centiare <= 0) return null
+  return centiare
+}
+
+function art15SurfaceHaForCase (data: any, codiceCasistica: string): number | null {
+  const centiare = art15SurfaceCentiareForCase(data, codiceCasistica)
+  return centiare == null ? null : centiare / 10000
 }
 
 function art15CalculatedValueText (data: any, codiceCasistica: string, param?: SanzioneParametro | null): string {
@@ -2132,6 +2171,64 @@ function getViolationArticleFromCase (codiceCasistica: string): string {
   if (code.includes('C114')) return '16'
   if (code.includes('C115') || code.includes('C116') || code.includes('C117') || code.includes('C118')) return '15'
   return ''
+}
+
+function selectedArticle1617 (data: any): string {
+  const raw = normalizeToken(pickAttrCI(data || {}, ['norma16_17']))
+  const art17Tipo = normalizeToken(pickAttrCI(data || {}, ['art17_tipo']))
+
+  if (raw.includes('ART17') || raw.includes('VARIAZIONE') || raw.includes('RINUNCIA')) return '17'
+  if (raw.includes('ART16') || raw.includes('IRRIGAZIONE')) return '16'
+  if (art17Tipo) return '17'
+  return ''
+}
+
+function firstPositiveNumericAttr (data: any, names: string[]): number | null {
+  for (const name of names) {
+    const n = parseNumberInput(pickAttrCI(data || {}, [name]))
+    if (n != null && Number.isFinite(n) && n > 0) return n
+  }
+  return null
+}
+
+function comunicazioneTardivaSurfaceCentiare (data: any): number | null {
+  const d = data || {}
+  const article = selectedArticle1617(d)
+  let centiare: number | null = null
+
+  if (article === '16') {
+    centiare = firstPositiveNumericAttr(d, ['sup_dichiarata_art16', 'sup_dichiarata_art16_17'])
+  } else if (article === '17') {
+    const tipo = normalizeToken(pickAttrCI(d, ['art17_tipo']))
+    if (tipo.includes('ART171') || tipo.includes('VARIAZIONE')) {
+      centiare = firstPositiveNumericAttr(d, ['sup_irrigata_art17_1', 'sup_variata', 'sup_irrigata_art16_17'])
+    } else if (tipo.includes('ART172') || tipo.includes('RINUNCIA')) {
+      centiare = firstPositiveNumericAttr(d, ['sup_dichiarata_art17_2', 'sup_dichiarata_art16_17'])
+    } else {
+      centiare = firstPositiveNumericAttr(d, [
+        'sup_irrigata_art17_1',
+        'sup_variata',
+        'sup_dichiarata_art17_2',
+        'sup_dichiarata_art16_17',
+        'sup_irrigata_art16_17'
+      ])
+    }
+  }
+
+  if (centiare == null || !Number.isFinite(centiare) || centiare <= 0) return null
+  return centiare
+}
+
+function comunicazioneTardivaSurfaceHa (data: any): number | null {
+  const centiare = comunicazioneTardivaSurfaceCentiare(data)
+  return centiare == null ? null : centiare / 10000
+}
+
+function comunicazioneTardivaCalculatedValueText (data: any, param?: SanzioneParametro | null): string {
+  const ha = comunicazioneTardivaSurfaceHa(data)
+  const rate = parseNumberInput(param?.valore_num)
+  if (ha == null || rate == null || !Number.isFinite(rate)) return ''
+  return formatEuroText(rate * ha)
 }
 
 function deriveSanzioneCasistiche (data: any, fields: LayerFieldInfo[]): string[] {
@@ -2296,9 +2393,9 @@ function splitArticleCodes (raw: any): string[] {
 }
 
 function formatArticleCode (raw: any): string {
-  const s = String(raw || '').trim().toUpperCase()
-  const m = s.match(/^ART\s*0*(\d+)$/)
-  return m ? `Art. ${m[1]}` : s
+  const s = String(raw || '').trim()
+  const article = normalizeArticleNumber(s)
+  return article ? `Art. ${article}` : s.toUpperCase()
 }
 
 function formatArticleFallback (raw: any): string {
@@ -2416,6 +2513,232 @@ function SanzioniHeaderTotal (props: { groups: SanzioneConsultivaGroup[] }) {
   )
 }
 
+function formatSurfaceHaACaForCalculation (centiare: number): string {
+  const total = Math.max(0, Math.round(Number(centiare) || 0))
+  const ha = Math.floor(total / 10000)
+  const are = Math.floor((total % 10000) / 100)
+  const ca = total % 100
+  return `${ha}.${String(are).padStart(2, '0')}.${String(ca).padStart(2, '0')} (ha.a.ca)`
+}
+
+function formatSurfaceHaDecimalNumberForCalculation (centiare: number): string {
+  const ha = Math.max(0, Number(centiare) || 0) / 10000
+  return ha.toLocaleString('it-IT', { minimumFractionDigits: 4, maximumFractionDigits: 4 })
+}
+
+function formatEuroNumberForCalculation (value: number): string {
+  return formatEuroText(value).replace(/\s*€$/, '')
+}
+
+function formatEuroPerHa (value: number): string {
+  return `${formatEuroNumberForCalculation(value)} €/ha`
+}
+
+function calculationSurfaceCentiare (group: SanzioneConsultivaGroup, data: Record<string, any>): number | null {
+  const article = normalizeArticleNumber(group.articoloViolato)
+  if (article === '15') return art15SurfaceCentiareForCase(data, group.codiceCasistica)
+  if (String(group.codiceCasistica || '').toUpperCase().includes('C114')) return comunicazioneTardivaSurfaceCentiare(data)
+  return null
+}
+
+function calculationOccurrenceLabel (group: SanzioneConsultivaGroup, data: Record<string, any>, fields: LayerFieldInfo[]): string {
+  const article = normalizeArticleNumber(group.articoloViolato)
+  if (article !== '15') return ''
+  const caseCode = normalizeToken(group.codiceCasistica)
+  if (caseCode.includes('RECIDIVA')) return 'Recidiva'
+  if (caseCode.includes('PRIMA')) return 'Prima contestazione'
+  return formatOccorrenzaValue(pickAttrCI(data || {}, ['occorrenza']), fields)
+}
+
+function calculationGravityLabel (group: SanzioneConsultivaGroup, data: Record<string, any>): string {
+  const article = normalizeArticleNumber(group.articoloViolato)
+  if (!ARTICLES_WITH_GRAVITA.has(article)) return ''
+  return getGravitaForArticle(data || {}, article)
+}
+
+type Art30EquipmentKind = 'tessera' | 'curve' | 'sifoni' | 'paratoie'
+
+const ART30_EQUIPMENT_META: Record<Art30EquipmentKind, { label: string, tokens: string[] }> = {
+  tessera: { label: 'tessera elettronica', tokens: ['TESSERA', 'TESSERE', 'TESSERAELETTRONICA', 'TESSEREELETTRONICHE'] },
+  curve: { label: 'curve di derivazione', tokens: ['CURVA', 'CURVE', 'CURVADIDERIVAZIONE', 'CURVEDIDERIVAZIONE'] },
+  sifoni: { label: 'sifoni', tokens: ['SIFONE', 'SIFONI'] },
+  paratoie: { label: 'paratoie', tokens: ['PARATOIA', 'PARATOIE'] }
+}
+
+function art30EquipmentKindFromText (raw: any): Art30EquipmentKind | null {
+  const token = normalizeToken(raw)
+  if (!token) return null
+  for (const kind of Object.keys(ART30_EQUIPMENT_META) as Art30EquipmentKind[]) {
+    if (ART30_EQUIPMENT_META[kind].tokens.some(value => token.includes(value))) return kind
+  }
+  return null
+}
+
+const NOTA_SPESE_CASE_ALIASES: Record<string, string[]> = {
+  C101_SPRECO_USO_NEGLIGENTE: ['C101_SPRECO_ACQUA'],
+  C104_DANNEGGIAMENTO_PERDITA_ATTREZZATURE: ['C104_ATTREZZATURE_DANNEGGIATE']
+}
+
+function normalizedCaseCodes (codiceCasistica: string): Set<string> {
+  const code = String(codiceCasistica || '').trim().toUpperCase()
+  const out = new Set<string>()
+  if (code) out.add(code)
+  ;(NOTA_SPESE_CASE_ALIASES[code] || []).forEach(alias => out.add(String(alias || '').trim().toUpperCase()))
+  Object.entries(NOTA_SPESE_CASE_ALIASES).forEach(([mainCode, aliases]) => {
+    if (aliases.some(alias => String(alias || '').trim().toUpperCase() === code)) {
+      out.add(mainCode)
+      aliases.forEach(alias => out.add(String(alias || '').trim().toUpperCase()))
+    }
+  })
+  return out
+}
+
+function isArt30CaseCode (codiceCasistica: string): boolean {
+  const codes = normalizedCaseCodes(codiceCasistica)
+  return codes.has('C104_DANNEGGIAMENTO_PERDITA_ATTREZZATURE') || codes.has('C104_ATTREZZATURE_DANNEGGIATE')
+}
+
+type Art30EquipmentSelection = { quantita: number, valoreUnitario: number | null, importo: number }
+
+function parseArt30EquipmentSelections (data: Record<string, any>): Map<Art30EquipmentKind, Art30EquipmentSelection> {
+  const out = new Map<Art30EquipmentKind, Art30EquipmentSelection>()
+  const raw = String(pickAttrCI(data || {}, ['attrezzature_rimborso_dettaglio']) || '')
+  for (const line of raw.split(/\r?\n/)) {
+    const text = line.trim()
+    if (!text) continue
+    const kind = art30EquipmentKindFromText(text)
+    if (!kind) continue
+    const full = text.match(/Quantità:\s*([0-9.,]+).*?Valore unitario:\s*([0-9.,]+)\s*€.*?Importo:\s*([0-9.,]+)\s*€/i)
+    if (full) {
+      const quantita = parseEuroTextValue(full[1]) || 0
+      const valoreUnitario = parseEuroTextValue(full[2])
+      const importo = parseEuroTextValue(full[3]) || 0
+      if (quantita > 0 && importo >= 0) out.set(kind, { quantita, valoreUnitario, importo })
+      continue
+    }
+    const legacyAmount = parseEuroTextValue(text)
+    if (legacyAmount != null && legacyAmount >= 0) out.set(kind, { quantita: 1, valoreUnitario: legacyAmount, importo: legacyAmount })
+  }
+  return out
+}
+
+function selectedArt30Equipment (data: Record<string, any>, _noteRows: NotaSpeseDetailRow[] = []): Set<Art30EquipmentKind> {
+  return new Set(parseArt30EquipmentSelections(data).keys())
+}
+
+function notaSpeseTotalForCase (noteRows: NotaSpeseDetailRow[], codiceCasistica: string, data: Record<string, any>): number | null {
+  const acceptedCodes = normalizedCaseCodes(codiceCasistica)
+  const rows = (noteRows || []).filter(row => acceptedCodes.has(String(row.codiceCasistica || '').trim().toUpperCase()))
+  if (!rows.length) return null
+  const imponibile = rows.reduce((sum, row) => sum + (Number.isFinite(row.importoRiga) ? row.importoRiga : 0), 0)
+  const configuredPercentage = parseNumberInput(pickAttrCI(data || {}, ['ns_spese_generali_perc']))
+  const percentage = configuredPercentage != null && Number.isFinite(configuredPercentage) ? configuredPercentage : 15
+  return roundMoneyValue(imponibile + (imponibile * percentage / 100))
+}
+
+function art30CauzioneSelected (data: Record<string, any>): boolean {
+  const rawFlag = pickAttrCI(data || {}, ['attrezzature_cauzione_presente'])
+  return rawFlag != null && rawFlag !== '' && isCheckedValue(rawFlag)
+}
+
+function art30EquipmentLineLabel (voce: SanzioneConsultivaVoce): string {
+  const kind = art30EquipmentKindFromText(`${voce.codiceParametro} ${voce.descrizione} ${voce.parametro?.descrizione || ''}`)
+  return kind ? `Rimborso ${ART30_EQUIPMENT_META[kind].label}` : 'Rimborso attrezzatura'
+}
+
+function art30VoceOrder (voce: SanzioneConsultivaVoce): number {
+  const categoria = String(voce.parametro?.categoria_parametro || '').toUpperCase()
+  if (categoria === 'CAUZIONE') return 100
+  if (categoria === 'RISARCIMENTO' || isPieListaParametro(voce.parametro)) return 80
+  const kind = art30EquipmentKindFromText(`${voce.codiceParametro} ${voce.descrizione} ${voce.parametro?.descrizione || ''}`)
+  if (kind === 'tessera') return 10
+  if (kind === 'curve') return 20
+  if (kind === 'sifoni') return 30
+  if (kind === 'paratoie') return 40
+  return 60
+}
+
+function calculationDetailLinesForVoce (
+  group: SanzioneConsultivaGroup,
+  voce: SanzioneConsultivaVoce,
+  data: Record<string, any>
+): string[] {
+  const parametro = voce.parametro || null
+  const categoria = String(parametro?.categoria_parametro || '').toUpperCase()
+  const codice = String(parametro?.codice_parametro || voce.codiceParametro || '').toUpperCase()
+  const article = normalizeArticleNumber(group.articoloViolato)
+  const base = parseNumberInput(parametro?.valore_num)
+  const amount = voceAppliedAmount(voce)
+  const lines: string[] = []
+
+  if (categoria === 'RISARCIMENTO' || isPieListaParametro(parametro)) {
+    const value = amount != null && Number.isFinite(amount) ? amount : 0
+    if (article === '8' || article === '30') lines.push(`Rimborso spese a piè di lista: ${formatEuroText(value)}`)
+    else lines.push(`Importo a piè di lista: ${formatEuroText(value)}`)
+    return lines
+  }
+
+  if (codice.includes('EURO_HA')) {
+    if (base != null && Number.isFinite(base)) lines.push(`Sanzione pecuniaria base: ${formatEuroPerHa(base)}`)
+    const centiare = calculationSurfaceCentiare(group, data)
+    if (centiare != null && Number.isFinite(centiare) && centiare > 0) {
+      const ha = centiare / 10000
+      const calculated = amount != null && Number.isFinite(amount)
+        ? amount
+        : (base != null && Number.isFinite(base) ? base * ha : null)
+      lines.push(`Superficie di calcolo: ${formatSurfaceHaACaForCalculation(centiare)}`)
+      if (base != null && Number.isFinite(base) && calculated != null && Number.isFinite(calculated)) {
+        lines.push(`Sanzione calcolata: ${formatEuroNumberForCalculation(base)} × ${formatSurfaceHaDecimalNumberForCalculation(centiare)} = ${formatEuroText(calculated)}`)
+      }
+    } else {
+      lines.push('Superficie di calcolo: non disponibile')
+    }
+    return lines
+  }
+
+  if (categoria === 'RIDUZIONE') {
+    if (base != null && Number.isFinite(base)) {
+      if (codice.includes('PERCENTUALE') || base <= 100) {
+        lines.push(`Riduzione prevista dal regolamento: ${base.toLocaleString('it-IT', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}%`)
+      } else {
+        lines.push(`Importo della riduzione previsto dal regolamento: ${formatEuroText(base)}`)
+      }
+    }
+    return lines
+  }
+
+  if (categoria === 'CAUZIONE') {
+    const value = amount != null && Number.isFinite(amount) ? amount : base
+    if (value != null && Number.isFinite(value)) lines.push(`Cauzione da detrarre: - ${formatEuroText(Math.abs(value))}`)
+    return lines
+  }
+
+  if (article === '30' && (categoria === 'ATTREZZATURA' || categoria === 'RIMBORSO')) {
+    const value = amount != null && Number.isFinite(amount) ? amount : base
+    if (value != null && Number.isFinite(value)) lines.push(`${art30EquipmentLineLabel(voce)}: ${formatEuroText(value)}`)
+    return lines
+  }
+
+  if (categoria === 'SANZIONE') {
+    const value = amount != null && Number.isFinite(amount) ? amount : base
+    if (value != null && Number.isFinite(value)) {
+      const label = ARTICLES_WITH_GRAVITA.has(article) ? 'Sanzione pecuniaria variabile' : 'Sanzione pecuniaria fissa'
+      lines.push(`${label}: ${formatEuroText(value)}`)
+    }
+    return lines
+  }
+
+  if (base != null && Number.isFinite(base) && ['RIMBORSO', 'ATTREZZATURA', 'SPESE'].includes(categoria)) {
+    const label = categoria === 'SPESE' ? 'Spese' : 'Rimborso'
+    lines.push(`${label}: ${formatEuroText(base)}`)
+    return lines
+  }
+
+  const displayed = formatVoceValue(voce)
+  if (displayed && displayed !== '—') lines.push(`Importo applicato: ${displayed}`)
+  return lines
+}
+
 function roundMoneyValue (value: number): number {
   return Math.round((Number(value) || 0) * 100) / 100
 }
@@ -2434,10 +2757,11 @@ function sameDraftValue (a: any, b: any, fieldName: string): boolean {
 function buildAutomaticSanzioneCalculation (
   groups: SanzioneConsultivaGroup[],
   data: Record<string, any>,
+  fields: LayerFieldInfo[],
   profile: { username: string, fullName: string },
   previousDraft: Record<string, any>
 ): Record<string, any> {
-  const validGroups = (groups || []).filter(g => Array.isArray(g.voci) && g.voci.length)
+  const validGroups = groups || []
   if (!validGroups.length) return {}
 
   let sanzioneBase = 0
@@ -2448,20 +2772,26 @@ function buildAutomaticSanzioneCalculation (
   let riduzionePercentuale: number | null = null
   let riduzioneImporto: number | null = null
   const dettaglio: string[] = []
+  const attrezzatureDettaglio: string[] = []
 
   validGroups.forEach(group => {
     dettaglio.push(`${formatArticleFallback(group.articoloViolato)} — ${displayViolationTitle(group)}`)
-    const groupAmounts: number[] = []
+    const occurrence = calculationOccurrenceLabel(group, data, fields)
+    const gravity = calculationGravityLabel(group, data)
+    if (occurrence) dettaglio.push(`- Occorrenza: ${occurrence}`)
+    if (gravity) dettaglio.push(`- Grado di gravità: ${gravity}`)
+
     ;(group.voci || []).forEach(voce => {
       const parametro = voce.parametro || null
       const categoria = String(parametro?.categoria_parametro || '').toUpperCase()
       const codice = String(parametro?.codice_parametro || voce.codiceParametro || '').toUpperCase()
-      const valore = formatVoceValue(voce)
       const amount = voceAppliedAmount(voce)
-      dettaglio.push(`- ${voce.descrizione || 'Voce applicabile'}: ${valore}`)
+      const voceDetailLines = calculationDetailLinesForVoce(group, voce, data)
+      voceDetailLines.forEach(line => dettaglio.push(`- ${line}`))
+      if (normalizeArticleNumber(group.articoloViolato) === '30' && ['ATTREZZATURA', 'RIMBORSO', 'CAUZIONE'].includes(categoria)) {
+        attrezzatureDettaglio.push(...voceDetailLines)
+      }
 
-      const subtotalAmount = voceSubtotalAmount(voce)
-      if (subtotalAmount != null && Number.isFinite(subtotalAmount)) groupAmounts.push(subtotalAmount)
 
       if (categoria === 'RIDUZIONE') {
         const n = parseNumberInput(parametro?.valore_num)
@@ -2479,9 +2809,6 @@ function buildAutomaticSanzioneCalculation (
       else if (categoria === 'CAUZIONE') cauzioneDecurtata += amount
       else if (categoria === 'SPESE') speseNotificaAutomatica += amount
     })
-    if (groupAmounts.length > 1) {
-      dettaglio.push(`- Totale ${formatArticleFallback(group.articoloViolato)}: ${formatEuroText(groupAmounts.reduce((sum, value) => sum + value, 0))}`)
-    }
     dettaglio.push('')
   })
 
@@ -2511,9 +2838,7 @@ function buildAutomaticSanzioneCalculation (
     attrezzature_rimborso_importo: roundMoneyValue(rimborsoAttrezzature),
     attrezzature_cauzione_decurtata: roundMoneyValue(cauzioneDecurtata),
     attrezzature_importo_netto: roundMoneyValue(importoNettoAttrezzature),
-    attrezzature_rimborso_dettaglio: rimborsoAttrezzature > 0 || cauzioneDecurtata > 0
-      ? `Rimborso attrezzature: ${formatEuroText(rimborsoAttrezzature)}\nCauzione decurtata: ${formatEuroText(cauzioneDecurtata)}\nImporto netto: ${formatEuroText(importoNettoAttrezzature)}`
-      : '',
+    attrezzature_rimborso_dettaglio: attrezzatureDettaglio.join('\n'),
     pagamento_importo_totale: roundMoneyValue(totale),
     sanzione_dettaglio_calcolo: dettaglio.join('\n'),
     sanzione_calcolata_il: currentCalcDate || Date.now(),
@@ -3211,13 +3536,25 @@ function buildSanzioneGroups (
   raccordi: RegolamentoRaccordo[],
   parametri: SanzioneParametro[],
   articoli: RegolamentoArticolo[],
-  data?: any
+  data?: any,
+  noteRows: NotaSpeseDetailRow[] = []
 ): SanzioneConsultivaGroup[] {
   const wanted = new Set(casistiche)
   const paramByCode = new Map(parametri.map(p => [p.codice_parametro, p]))
-  const artByCode = new Map(articoli.map(a => [a.codice_articolo, a]))
+  const artByCode = new Map<string, RegolamentoArticolo>()
+  articoli.forEach(article => {
+    const rawCode = String(article.codice_articolo || '').trim().toUpperCase()
+    const articleNumber = normalizeArticleNumber(rawCode || article.numero_articolo)
+    if (rawCode) artByCode.set(rawCode, article)
+    if (articleNumber) {
+      artByCode.set(articleNumber, article)
+      artByCode.set(`ART${articleNumber}`, article)
+    }
+  })
   const selectedRaccordi = raccordi.filter(r => wanted.has(r.codice_casistica))
   const pieListaCount = selectedRaccordi.filter(r => isPieListaParametro(paramByCode.get(r.codice_parametro) || null)).length
+  const art30EquipmentSelections = parseArt30EquipmentSelections(data || {})
+  const art30Equipment = new Set(art30EquipmentSelections.keys())
   const groups = new Map<string, SanzioneConsultivaGroup>()
 
   selectedRaccordi.forEach(r => {
@@ -3237,12 +3574,14 @@ function buildSanzioneGroups (
 
     let g = groups.get(r.codice_casistica)
     if (!g) {
-      const articoliViolati = splitArticleCodes(r.articolo_violato).map(c => artByCode.get(c)).filter(Boolean) as RegolamentoArticolo[]
+      const articolo1617 = r.codice_casistica.includes('C114') ? selectedArticle1617(data || {}) : ''
+      const articoloViolato = articolo1617 || r.articolo_violato
+      const articoliViolati = splitArticleCodes(articoloViolato).map(c => artByCode.get(c)).filter(Boolean) as RegolamentoArticolo[]
       const articoliSanzione = splitArticleCodes(r.articolo_sanzione).map(c => artByCode.get(c)).filter(Boolean) as RegolamentoArticolo[]
       g = {
         codiceCasistica: r.codice_casistica,
         descrizione: raccordoMainDescription(r.descrizione),
-        articoloViolato: r.articolo_violato,
+        articoloViolato,
         articoloSanzione: r.articolo_sanzione,
         articoliViolati,
         articoliSanzione,
@@ -3250,23 +3589,75 @@ function buildSanzioneGroups (
       }
       groups.set(r.codice_casistica, g)
     }
+
+    if (isArt30CaseCode(r.codice_casistica)) {
+      const categoria = String(parametro?.categoria_parametro || '').toUpperCase()
+      if (categoria === 'ATTREZZATURA' || categoria === 'RIMBORSO') {
+        const kind = art30EquipmentKindFromText(`${r.codice_parametro} ${r.descrizione} ${parametro?.descrizione || ''}`)
+        if (!kind || !art30Equipment.has(kind)) return
+      }
+      if (categoria === 'CAUZIONE' && !art30CauzioneSelected(data || {})) return
+    }
+
     const voceLabel = buildVoceLabel(r, parametro)
     if (!g.voci.some(v => v.codiceParametro === r.codice_parametro && v.descrizione === voceLabel && v.articoloSanzione === r.articolo_sanzione)) {
       const voceArticoliSanzione = splitArticleCodes(r.articolo_sanzione).map(c => artByCode.get(c)).filter(Boolean) as RegolamentoArticolo[]
-      const nsValue = isPieListaParametro(parametro) ? (pieListaCount === 1 ? getNotaSpeseValueText(data || {}) : '0,00 €') : ''
+      const noteTotalForCase = isPieListaParametro(parametro) ? notaSpeseTotalForCase(noteRows, r.codice_casistica, data || {}) : null
+      const nsValue = isPieListaParametro(parametro)
+        ? formatEuroText(noteTotalForCase != null ? noteTotalForCase : (pieListaCount === 1 ? (parseEuroTextValue(getNotaSpeseValueText(data || {})) || 0) : 0))
+        : ''
       const art15Value = pCode.includes('SANZIONE.ART41') ? art15CalculatedValueText(data || {}, r.codice_casistica, parametro) : ''
+      const comunicazioneTardivaValue = r.codice_casistica.includes('C114') && pCode.includes('EURO_HA')
+        ? comunicazioneTardivaCalculatedValueText(data || {}, parametro)
+        : ''
+      const art30Kind = isArt30CaseCode(r.codice_casistica) ? art30EquipmentKindFromText(`${r.codice_parametro} ${r.descrizione} ${parametro?.descrizione || ''}`) : null
+      const art30EquipmentValue = art30Kind ? art30EquipmentSelections.get(art30Kind)?.importo : null
       g.voci.push({
         codiceParametro: r.codice_parametro,
         descrizione: voceLabel,
         articoloSanzione: r.articolo_sanzione,
         articoliSanzione: voceArticoliSanzione,
         parametro,
-        valueOverride: nsValue || art15Value
+        valueOverride: nsValue || art15Value || comunicazioneTardivaValue || (art30EquipmentValue != null ? formatEuroText(art30EquipmentValue) : '')
       })
     }
   })
 
-  return Array.from(groups.values()).sort((a, b) => {
+  const art30Group = Array.from(groups.values()).find(group => isArt30CaseCode(group.codiceCasistica))
+  const art30NoteTotal = art30Group ? notaSpeseTotalForCase(noteRows, art30Group.codiceCasistica, data || {}) : null
+  if (art30Group && art30NoteTotal != null && Number.isFinite(art30NoteTotal)) {
+    const alreadyPresent = art30Group.voci.some(voce => isPieListaParametro(voce.parametro) || String(voce.codiceParametro || '').toUpperCase() === 'NOTA_SPESE.C104')
+    if (!alreadyPresent) {
+      const syntheticParam: SanzioneParametro = {
+        codice_parametro: 'NOTA_SPESE.C104',
+        categoria_parametro: 'RISARCIMENTO',
+        valore_num: null,
+        valore_testo: 'A piè di lista',
+        anno_riferimento: null,
+        data_validita_da: null,
+        data_validita_a: null,
+        descrizione: 'Rimborso spese a piè di lista',
+        note: ''
+      }
+      art30Group.voci.push({
+        codiceParametro: syntheticParam.codice_parametro,
+        descrizione: 'Rimborso spese a piè di lista',
+        articoloSanzione: art30Group.articoloSanzione,
+        articoliSanzione: art30Group.articoliSanzione,
+        parametro: syntheticParam,
+        valueOverride: formatEuroText(art30NoteTotal)
+      })
+    }
+  }
+
+  const result = Array.from(groups.values())
+  result.forEach(group => {
+    if (normalizeArticleNumber(group.articoloViolato) === '30') {
+      group.voci = [...group.voci].sort((a, b) => art30VoceOrder(a) - art30VoceOrder(b))
+    }
+  })
+
+  return result.sort((a, b) => {
     const an = firstArticleNumberFromCodes(a.articoloViolato)
     const bn = firstArticleNumberFromCodes(b.articoloViolato)
     if (an !== bn) return an - bn
@@ -3278,6 +3669,9 @@ function buildSanzioneGroups (
 function articleTitleLine (article?: RegolamentoArticolo | null, fallback?: string): string {
   if (article) {
     const code = formatArticleCode(article.codice_articolo)
+    if (normalizeArticleNumber(article.codice_articolo || article.numero_articolo) === '41') {
+      return 'Art. 41 — Sanzioni per prelievi abusivi e per inosservanza termini'
+    }
     return article.titolo_articolo ? `${code} — ${article.titolo_articolo}` : code
   }
   return formatArticleFallback(fallback)
@@ -3494,15 +3888,16 @@ function useSanzioneConsultivaState (cfg: any, data: any, layerFields: LayerFiel
       setState({ loading: true, error: '', groups: [] })
       try {
         const refMs = getSanzioneReferenceDate(data || {})
-        const [paramRows, artRows, raccordiRows] = await Promise.all([
+        const [paramRows, artRows, raccordiRows, noteRows] = await Promise.all([
           queryActiveTableRows<any>(parametriUrl, ['codice_parametro ASC']),
           queryActiveTableRows<any>(articoliUrl, ['numero_articolo ASC']),
-          queryActiveTableRows<any>(raccordiUrl, ['codice_casistica ASC'])
+          queryActiveTableRows<any>(raccordiUrl, ['codice_casistica ASC']),
+          queryNotaSpeseDetailRowsForPractice(data || {}).catch(() => [] as NotaSpeseDetailRow[])
         ])
         const parametri = paramRows.map(normalizeParam).filter(p => p.codice_parametro && isRowValidAt(p, refMs))
         const articoli = artRows.map(normalizeArticle).filter(a => a.codice_articolo && isRowValidAt(a, refMs))
         const raccordi = raccordiRows.map(normalizeRaccordo).filter(r => r.codice_casistica && isRowValidAt(r, refMs))
-        const groups = buildSanzioneGroups(casistiche, raccordi, parametri, articoli, data || {})
+        const groups = buildSanzioneGroups(casistiche, raccordi, parametri, articoli, data || {}, noteRows)
         if (!cancelled) setState({ loading: false, error: '', groups })
       } catch (e: any) {
         if (!cancelled) setState({ loading: false, error: e?.message || String(e), groups: [] })
@@ -3594,7 +3989,11 @@ function sanitizeImportDetailForDisplay (raw: any): string {
     .replace(/^Gli importi principali sono calcolati automaticamente; le spese di notifica possono essere inserite dall['’]operatore amministrativo e concorrono al totale\.\s*$/gim, '')
     .replace(/[ \t]+:/g, ':')
     .replace(/\r/g, '')
-  return text.replace(/^Riepilogo (?:automatico|importi)\s*$[\s\S]*$/im, '').replace(/\n{3,}/g, '\n\n').trim()
+  return text
+    .replace(/^Riepilogo (?:automatico|importi)\s*$[\s\S]*$/im, '')
+    .replace(/^Totali complessivi\s*$[\s\S]*$/im, '')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim()
 }
 
 function isArticleSubtotalLine (line: string): boolean {
@@ -3606,25 +4005,13 @@ function articleLabelFromDetailTitle (title: string): string {
   return match ? match[1].replace(/Art\.\s*/i, 'Art. ') : ''
 }
 
-function detailLineSubtotalAmount (line: string): number | null {
-  if (isArticleSubtotalLine(line) || /riduzion/i.test(line)) return null
-  const match = String(line || '').match(/(-?\d+(?:\.\d{3})*(?:,\d+)?)\s*€/)
-  if (!match) return null
-  const amount = parseNumberInput(match[1])
-  if (amount == null || !Number.isFinite(amount)) return null
-  return /cauzione|decurtat|detrazion/i.test(line) ? -Math.abs(amount) : amount
-}
-
 function normalizeImportDetailLines (details: string[], title: string): string[] {
   const articleLabel = articleLabelFromDetailTitle(title)
   const clean = details.map(line => line.replace(/^[•·\-]\s*/, '').trim()).filter(Boolean)
   const existingTotalIndex = clean.findIndex(isArticleSubtotalLine)
-  if (existingTotalIndex >= 0) {
-    clean[existingTotalIndex] = clean[existingTotalIndex].replace(/^Totale(?:\s+Art\.\s*\d+[A-Za-z]?)?\s*:/i, `Totale${articleLabel ? ` ${articleLabel}` : ''}:`)
-    return clean
+  if (existingTotalIndex >= 0 && articleLabel) {
+    clean[existingTotalIndex] = clean[existingTotalIndex].replace(/^Totale(?:\s+Art\.\s*\d+[A-Za-z]?)?\s*:/i, `Totale ${articleLabel}:`)
   }
-  const amounts = clean.map(detailLineSubtotalAmount).filter((value): value is number => value != null && Number.isFinite(value))
-  if (amounts.length > 1) clean.push(`Totale${articleLabel ? ` ${articleLabel}` : ''}: ${formatEuroText(amounts.reduce((sum, value) => sum + value, 0))}`)
   return clean
 }
 
@@ -3632,12 +4019,12 @@ function DettaglioImportiContent (props: { value: any }) {
   const source = sanitizeImportDetailForDisplay(props.value)
   if (!source) return <span>—</span>
   const lines = source.split('\n').map(line => line.trim())
-  const isArticle = (line: string) => /^Art\.\s*\d+[A-Za-z]?(?:\s*[-–—]\s*.+)?$/i.test(line)
+  const isSectionTitle = (line: string) => /^Art\.\s*\d+[A-Za-z]?(?:\s*[-–—]\s*.+)?$/i.test(line)
   const groups: Array<{ title: string, details: string[] }> = []
   let current: { title: string, details: string[] } | null = null
   lines.forEach(line => {
     if (!line) return
-    if (isArticle(line)) {
+    if (isSectionTitle(line)) {
       current = { title: line, details: [] }
       groups.push(current)
       return
@@ -3655,7 +4042,7 @@ function DettaglioImportiContent (props: { value: any }) {
             {details.length > 0 && (
               <ul style={{ margin: '5px 0 0 24px', padding: 0 }}>
                 {details.map((detail, detailIndex) => (
-                  <li key={`${groupIndex}-${detailIndex}`} style={{ marginTop: detailIndex === 0 ? 0 : 2, fontWeight: isArticleSubtotalLine(detail) ? 900 : 400 }}>
+                  <li key={`${groupIndex}-${detailIndex}`} style={{ marginTop: detailIndex === 0 ? 0 : 2, fontWeight: isArticleSubtotalLine(detail) || /^Totale da pagare\s*:/i.test(detail) ? 900 : 400 }}>
                     {detail}
                   </li>
                 ))}
@@ -3684,7 +4071,7 @@ function ParametriSanzionatoriSection (props: { loadState: SanzioneConsultivaLoa
   const totaleAtto = sanzioneDovuta + rimborsoNetto + risarcimentoDanni + speseNotifica
 
   return (
-    <Section title='Verifica dati automatici'>
+    <Section title='Importi e norme violate'>
       {!urlsReady && (
         <InfoBox kind='warn'>Configurare in Builder gli URL di GII_PARAMETRI_SANZIONI, GII_REGOLAMENTO_ARTICOLI e GII_REGOLAMENTO_RACCORDI.</InfoBox>
       )}
@@ -4778,14 +5165,14 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
       return
     }
     const base = { ...(data || {}), ...(draft || {}) }
-    const calculated = buildAutomaticSanzioneCalculation(sanzioniConsultive.groups || [], data || base || {}, profile, base)
+    const calculated = buildAutomaticSanzioneCalculation(sanzioniConsultive.groups || [], data || base || {}, layerFields, profile, base)
     const automaticAtto = buildAutomaticAttoAmministrativo({ ...(data || {}), ...base, ...calculated })
     const next: Record<string, any> = {}
     Object.entries({ ...calculated, ...automaticAtto }).forEach(([name, value]) => {
       if (isSystemCalculatedAdminField(name)) next[name] = value
     })
     setAutomaticValues(next)
-  }, [hasSelection, sanzioniConsultive.loading, sanzioniConsultive.error, sanzioniConsultive.groups, data, draft, profile])
+  }, [hasSelection, sanzioniConsultive.loading, sanzioniConsultive.error, sanzioniConsultive.groups, data, draft, layerFields, profile])
 
   const viewData = React.useMemo(() => ({ ...(draft || data || {}), ...automaticValues }), [draft, data, automaticValues])
   const headerVerbaleDefinitivo = isVerbaleDefinitivo(viewData || {})

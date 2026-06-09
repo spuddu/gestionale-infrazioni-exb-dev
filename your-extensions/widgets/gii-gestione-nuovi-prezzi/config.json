@@ -1,1 +1,21 @@
-{}
+{
+  "detailCardBackgroundColor": "#f5f9ff",
+  "recordsCardBackgroundColor": "#f5f9ff",
+  "panelBorderColor": "#c5d9f1",
+  "controlBackgroundColor": "#ffffff",
+  "controlTextColor": "#111827",
+  "controlBorderColor": "#aac4e0",
+  "controlFontSize": 13,
+  "readonlyBackgroundColor": "#eef4fb",
+  "readonlyTextColor": "#3f4d5a",
+  "tableHeaderBackgroundColor": "#1F4E79",
+  "tableHeaderTextColor": "#ffffff",
+  "tableTextColor": "#111827",
+  "tableFontSize": 12,
+  "primaryButtonBackgroundColor": "#1F4E79",
+  "primaryButtonTextColor": "#ffffff",
+  "secondaryButtonBackgroundColor": "#e0e0e0",
+  "secondaryButtonTextColor": "#333333",
+  "dangerButtonBackgroundColor": "#c00000",
+  "dangerButtonTextColor": "#ffffff"
+}

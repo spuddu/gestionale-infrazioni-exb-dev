@@ -13,11 +13,11 @@ type QueryStatus = { kind: 'idle' | 'loading' | 'ok' | 'warn' | 'err'; text: str
 const LAYER_CACHE: Record<string, Promise<any>> = {}
 
 const ARTICOLI_PRATICA = [
-  { id: 'norma15', label: 'Art. 15 - Prelievo abusivo d’acqua', whereClause: "(norma15_parziale IS NOT NULL AND norma15_parziale <> '' OR norma15_totale IS NOT NULL AND norma15_totale <> '')" },
-  { id: 'norma16', label: 'Art. 16 - Inosservanza dei termini di presentazione delle comunicazioni di irrigazione', whereClause: "norma16_17 = 'Art16'" },
-  { id: 'norma17', label: 'Art. 17 - Inosservanza dei termini di presentazione delle comunicazioni di variazione e di rinuncia', whereClause: "norma16_17 = 'Art17'" },
   { id: 'v_art08', label: 'Art. 8 - Violazione servizio di reperibilità', whereClause: 'v_art08 = 1' },
   { id: 'v_art12', label: 'Art. 12 - Negato accesso ai fondi (al personale consortile)', whereClause: 'v_art12 = 1' },
+  { id: 'norma15', label: 'Art. 15 - Prelievo abusivo d’acqua', whereClause: "(norma15_parziale IS NOT NULL AND norma15_parziale <> '' OR norma15_totale IS NOT NULL AND norma15_totale <> '')" },
+  { id: 'norma16', label: 'Art. 16 - Presentazione tardiva comunicazione di irrigazione', whereClause: "norma16_17 = 'Art16'" },
+  { id: 'norma17', label: 'Art. 17 - Presentazione tardiva comunicazione di variazione o di rinuncia', whereClause: "norma16_17 = 'Art17'" },
   { id: 'v_art27', label: 'Art. 27 - Spreco d’acqua/uso negligente della risorsa idrica', whereClause: 'v_art27 = 1' },
   { id: 'v_art28', label: 'Art. 28 - Violazione prescrizioni del consorzio', whereClause: 'v_art28 = 1' },
   { id: 'v_art29', label: 'Art. 29 - Violazione termini restituzione attrezzature', whereClause: 'v_art29 = 1' },
@@ -491,7 +491,7 @@ function SearchableFilter(props: SearchableFilterProps) {
         const key = `${opt.value}__${opt.label}`
         const active = txt(opt.value) === txt(value)
         const hover = hoverKey === key
-        return <button key={key} type='button' onMouseEnter={() => setHoverKey(key)} onMouseLeave={() => setHoverKey('')} onMouseDown={e => { e.preventDefault(); selectOption(opt) }} title={opt.label} style={{ width: '100%', minHeight: 30, display: 'flex', alignItems: 'center', border: 0, borderRadius: 8, background: active || hover ? 'rgba(47,111,237,0.10)' : 'transparent', color: active || hover ? '#1d4ed8' : '#111827', padding: '6px 8px', fontSize: 12, lineHeight: 1.2, textAlign: 'left', cursor: 'pointer', boxSizing: 'border-box' }}>{opt.label}</button>
+        return <button key={key} type='button' onMouseEnter={() => setHoverKey(key)} onMouseLeave={() => setHoverKey('')} onMouseDown={e => { e.preventDefault(); selectOption(opt) }} title={opt.label} style={{ width: '100%', minHeight: 30, display: 'flex', alignItems: 'center', border: 0, borderRadius: 8, background: active || hover ? 'rgba(47,111,237,0.10)' : 'transparent', color: active || hover ? '#1d4ed8' : '#111827', padding: '6px 8px', fontSize: 14, lineHeight: 1.2, textAlign: 'left', cursor: 'pointer', boxSizing: 'border-box' }}>{opt.label}</button>
       })}
     </div>
   ) : null
@@ -773,10 +773,10 @@ export default function Widget(props: Props) {
     .actionInline { display: flex; align-items: center; gap: 6px; height: ${c.fh}px; }
     .searchTypeBlock { min-width: 180px; }
     .searchTypeWrap { position: relative; width: 100%; }
-    .searchTypeSelect { width: 100%; height: ${c.fh}px; border: 1px solid ${c.fieldBorder}; border-radius: ${fr}px; background: ${c.fieldBg}; color: ${c.fieldText}; font-size: 12px; font-weight: 700; padding: 0 28px 0 8px; outline: none; cursor: pointer; box-sizing: border-box; appearance: none; -webkit-appearance: none; }
+    .searchTypeSelect { width: 100%; height: ${c.fh}px; border: 1px solid ${c.fieldBorder}; border-radius: ${fr}px; background: ${c.fieldBg}; color: ${c.fieldText}; font-size: 14px; font-weight: 700; padding: 0 28px 0 8px; outline: none; cursor: pointer; box-sizing: border-box; appearance: none; -webkit-appearance: none; }
     .fieldBlock { min-width: 0; width: 150px; flex: 0 1 150px; }
-    .filterLabel { display: block; font-size: 11px; font-weight: 800; color: ${c.label}; margin-bottom: 3px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-    .filterSelect, .filterInput { width: 100%; min-width: 0; height: ${c.fh}px; border: 1px solid ${c.fieldBorder}; border-radius: ${fr}px; background: ${c.fieldBg}; color: ${c.fieldText}; font-size: 12px; padding: 0 8px; outline: none; box-sizing: border-box; }
+    .filterLabel { display: block; font-size: 13px; font-weight: 800; color: ${c.label}; margin-bottom: 3px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .filterSelect, .filterInput { width: 100%; min-width: 0; height: ${c.fh}px; border: 1px solid ${c.fieldBorder}; border-radius: ${fr}px; background: ${c.fieldBg}; color: ${c.fieldText}; font-size: 14px; padding: 0 8px; outline: none; box-sizing: border-box; }
     .searchSelect { position: relative; width: 100%; min-width: 0; }
     .searchInput { padding-right: 23px; }
     .searchSelectChevron { position: absolute; right: 7px; top: 50%; transform: translateY(-50%); color: rgba(0,0,0,0.55); font-size: 18px; pointer-events: none; line-height: 1; }
@@ -787,8 +787,8 @@ export default function Widget(props: Props) {
     .stIdle { background: rgba(0,0,0,0.04); color: #4b5563; } .stLoading { background: rgba(47,111,237,0.08); color: #1d4ed8; } .stOk { background: rgba(5,150,105,0.09); color: #047857; } .stWarn { background: rgba(245,158,11,0.12); color: #92400e; } .stErr { background: rgba(220,38,38,0.10); color: #991b1b; }
     .praticaRow { display: flex; align-items: flex-end; gap: 6px; padding: ${c.pv}px ${c.ph}px 0; flex-wrap: wrap; background: ${c.bg}; }
     .praticaArticoli { padding: ${Math.max(2, c.pv - 2)}px ${c.ph}px ${c.pv}px; background: ${c.bg}; display: none; }
-    .praticaArticoliLabel { font-size: 11px; font-weight: 800; color: ${c.label}; margin-right: 4px; white-space: nowrap; }
-    .praticaChip { display: inline-flex; align-items: center; gap: 4px; height: 22px; padding: 0 8px; border-radius: 999px; border: 1px solid ${c.fieldBorder}; background: ${c.fieldBg}; color: ${c.fieldText}; font-size: 11px; cursor: pointer; user-select: none; }
+    .praticaArticoliLabel { font-size: 13px; font-weight: 800; color: ${c.label}; margin-right: 4px; white-space: nowrap; }
+    .praticaChip { display: inline-flex; align-items: center; gap: 4px; height: 22px; padding: 0 8px; border-radius: 999px; border: 1px solid ${c.fieldBorder}; background: ${c.fieldBg}; color: ${c.fieldText}; font-size: 13px; cursor: pointer; user-select: none; }
     .praticaChipActive { background: ${c.btnPrimary}; color: ${c.btnPrimaryText}; border-color: ${c.btnPrimary}; }
     .praticaActionRow { display: flex; align-items: center; gap: 6px; padding: 0 ${c.ph}px ${c.pv}px; background: ${c.bg}; }
     .multiSelect { width: 100%; border: 1px solid ${c.fieldBorder}; border-radius: ${fr}px; background: ${c.fieldBg}; color: ${c.fieldText}; font-size: 12px; outline: none; box-sizing: border-box; }

@@ -497,6 +497,7 @@ const styles = `
 .gap-title { font-size:15px; font-weight:700; color:#1F4E79; border-bottom:2px solid #1F4E79; padding-bottom:6px; }
 .gap-toolbar, .gap-subtoolbar { display:flex; gap:10px; flex-wrap:wrap; align-items:end; }
 .gap-panel { background:#f5f9ff; border:1px solid #c5d9f1; border-radius:6px; padding:12px; }
+.gap-detail-card { background:var(--gap-detail-card-background, #f5f9ff); }
 .gap-form-grid { display:grid; grid-template-columns: 0.9fr 0.9fr 0.8fr 0.8fr 0.8fr 1.4fr; gap:10px; align-items:end; }
 .gap-row-grid { display:grid; grid-template-columns: 0.9fr 1.3fr 1.1fr 1fr 0.9fr 0.9fr; gap:10px; align-items:end; }
 .gap-field { display:flex; flex-direction:column; gap:3px; min-width:0; }
@@ -533,12 +534,12 @@ const styles = `
 .gap-lookup { max-height:180px; overflow:auto; border:1px solid #c5d9f1; border-radius:6px; background:#fff; }
 .gap-lookup-item { padding:8px 10px; border-bottom:1px solid #e0eaf4; cursor:pointer; }
 .gap-lookup-item:hover { background:#eef4fb; }
-.gap-table-wrap { flex:1; min-height:0; overflow:auto; border:1px solid #c5d9f1; border-radius:6px; }
+.gap-table-wrap { flex:1; min-height:0; overflow:auto; border:1px solid #c5d9f1; border-radius:6px; background:var(--gap-records-card-background, #f5f9ff); }
 .gap-table { width:100%; border-collapse:collapse; font-size:12px; }
 .gap-table th { background:#1F4E79; color:#fff; padding:7px 8px; text-align:left; position:sticky; top:0; z-index:1; white-space:nowrap; }
 .gap-table td { padding:6px 8px; border-bottom:1px solid #e0eaf4; vertical-align:top; }
-.gap-table tbody tr:nth-child(odd) td { background:#f5f9ff; }
-.gap-table tbody tr:nth-child(even) td { background:#fff; }
+.gap-table tbody tr:nth-child(odd) td { background:var(--gap-records-card-background, #f5f9ff); }
+.gap-table tbody tr:nth-child(even) td { background:linear-gradient(rgba(255,255,255,0.55), rgba(255,255,255,0.55)), var(--gap-records-card-background, #f5f9ff); }
 .gap-table tbody tr.gap-row-selected td { background:#dcecff !important; }
 .gap-table tbody tr.gap-row-clickable { cursor:pointer; }
 .gap-msg { padding:7px 12px; border-radius:4px; font-size:12px; font-weight:700; }
@@ -631,6 +632,8 @@ export default function Widget(props: AllWidgetProps<IMConfig>) {
   const sectionTitleFontSize = Number(cfg.sectionTitleFontSize || 12.5)
   const toolbarLabelColor = String(cfg.toolbarLabelColor || '#1F4E79')
   const toolbarLabelFontSize = Number(cfg.toolbarLabelFontSize || 11.5)
+  const detailCardBackgroundColor = String(cfg.detailCardBackgroundColor || '#f5f9ff')
+  const recordsCardBackgroundColor = String(cfg.recordsCardBackgroundColor || '#f5f9ff')
 
   const [parents, setParents] = React.useState<any[]>([])
   const [selectedParent, setSelectedParent] = React.useState('')
@@ -1494,7 +1497,7 @@ ${r.codice_riferimento} — ${r.descrizione}`,
   return (
     <Fragment>
       <style>{styles}</style>
-      <div className='gap' ref={rootRef} style={interactionLocked ? { position: 'relative', zIndex: 9999 } : undefined}>
+      <div className='gap' ref={rootRef} style={{ '--gap-detail-card-background': detailCardBackgroundColor, '--gap-records-card-background': recordsCardBackgroundColor, ...(interactionLocked ? { position: 'relative', zIndex: 9999 } : {}) } as React.CSSProperties}>
         <div className='gap-title' style={{ color: titleColor, fontSize: titleFontSize }}>{title}</div>
 
         {(!serviceUrl || !parentTableUrl || !generalDataUrl) ? <div className='gap-msg gap-err'>Configura gli URL delle tabelle nel setting del widget.</div> : null}
@@ -1524,7 +1527,7 @@ ${r.codice_riferimento} — ${r.descrizione}`,
         </div>
 
         {parentEditing && (
-          <div className='gap-panel' ref={parentPanelRef} onKeyDown={(e) => handlePanelEnterNav(e, parentPanelRef.current)}>
+          <div className='gap-panel gap-detail-card' ref={parentPanelRef} onKeyDown={(e) => handlePanelEnterNav(e, parentPanelRef.current)}>
             <div style={{ fontWeight: 700, color: sectionTitleColor, fontSize: sectionTitleFontSize, marginBottom: 10 }}>{parentForm.objectid != null ? 'Modifica testata Nuovo Prezzo' : 'Nuovo Prezzo'}</div>
             {!hasConfiguredStructure && parentForm.objectid == null ? <div className='gap-msg gap-err' style={{ marginBottom: 10 }}>Configura GII_DATI_GENERALI con SUPERCAPITOLI, CAPITOLI e SUBCAPITOLI attivi prima di creare un Nuovo Prezzo.</div> : null}
             <div className='gap-form-grid'>
@@ -1662,7 +1665,7 @@ ${r.codice_riferimento} — ${r.descrizione}`,
             </div>
 
             {lineEditing && (
-              <div className='gap-panel gap-line-panel' ref={linePanelRef} onKeyDown={(e) => handlePanelEnterNav(e, linePanelRef.current)}>
+              <div className='gap-panel gap-detail-card gap-line-panel' ref={linePanelRef} onKeyDown={(e) => handlePanelEnterNav(e, linePanelRef.current)}>
                 <div style={{ fontWeight: 700, color: sectionTitleColor, fontSize: sectionTitleFontSize, marginBottom: 10 }}>{lineForm.objectid != null ? 'Modifica riga di analisi' : 'Nuova riga di analisi'}</div>
                 <div className='gap-row-grid'>
                   <div className='gap-field'>

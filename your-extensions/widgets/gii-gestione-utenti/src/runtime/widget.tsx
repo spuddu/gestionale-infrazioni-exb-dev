@@ -7,7 +7,7 @@ import { createPortal } from 'react-dom'
 
 const { Fragment } = React
 
-const SERVICE_URL =
+const DEFAULT_SERVICE_URL =
   'https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_utenti/FeatureServer/0'
 
 // ── loadEsriModule (AMD require) ───────────────────────────────────────────
@@ -544,17 +544,20 @@ const emptyForm = (): UtenteForm => ({
 
 // ── FeatureLayer ───────────────────────────────────────────────────────────
 let _fl: any = null
+let _flUrl = ''
 
-async function getFL(): Promise<any> {
-  if (_fl) return _fl
+async function getFL(serviceUrl: string): Promise<any> {
+  const cleanUrl = String(serviceUrl || DEFAULT_SERVICE_URL).trim().replace(/\/$/, '')
+  if (_fl && _flUrl === cleanUrl) return _fl
   const FeatureLayer = await loadEsriModule<any>('esri/layers/FeatureLayer')
-  _fl = new FeatureLayer({ url: SERVICE_URL })
+  _fl = new FeatureLayer({ url: cleanUrl })
+  _flUrl = cleanUrl
   await _fl.load().catch(() => {})
   return _fl
 }
 
-async function fetchUtenti(): Promise<UtenteRecord[]> {
-  const fl = await getFL()
+async function fetchUtenti(serviceUrl: string): Promise<UtenteRecord[]> {
+  const fl = await getFL(serviceUrl)
   const res = await fl.queryFeatures({
     where: '1=1',
     outFields: ['OBJECTID','username','full_name','ruolo','area','settore','ufficio','ruolo_cod','area_cod','settore_cod','gruppo','gruppo_precedente'],
@@ -579,8 +582,8 @@ async function fetchUtenti(): Promise<UtenteRecord[]> {
   })
 }
 
-async function saveUtente(form: UtenteForm): Promise<void> {
-  const fl = await getFL()
+async function saveUtente(form: UtenteForm, serviceUrl: string): Promise<void> {
+  const fl = await getFL(serviceUrl)
   const attrs: any = {
     username:          form.username,
     full_name:         form.full_name,
@@ -618,7 +621,7 @@ function friendlyDeleteErrorMessage(error: any): string {
   return message || 'Eliminazione non completata.'
 }
 
-async function deleteUtente(objectid: number, token: string): Promise<void> {
+async function deleteUtente(objectid: number, token: string, serviceUrl: string): Promise<void> {
   if (!objectid) throw new Error('OBJECTID utente non valido')
   if (!token) throw new Error('Token AGOL non disponibile: impossibile eliminare il record utente')
 
@@ -629,7 +632,8 @@ async function deleteUtente(objectid: number, token: string): Promise<void> {
     token,
     objectIds: String(objectid),
   })
-  const res = await fetch(`${SERVICE_URL}/deleteFeatures`, { method: 'POST', body })
+  const cleanUrl = String(serviceUrl || DEFAULT_SERVICE_URL).trim().replace(/\/$/, '')
+  const res = await fetch(`${cleanUrl}/deleteFeatures`, { method: 'POST', body })
   const json = await res.json()
 
   if (!res.ok || json?.error) {
@@ -695,10 +699,10 @@ function compareText(a: string, b: string): number {
 // ── CSS ────────────────────────────────────────────────────────────────────
 const styles = `
   .ggu { font-family: Arial, sans-serif; font-size: 13px; padding: 12px; height: 100%; display: flex; flex-direction: column; gap: 10px; box-sizing: border-box; }
-  .ggu-title { font-size: 15px; font-weight: bold; color: #93c5fd; border-bottom: 2px solid #93c5fd; padding-bottom: 6px; margin: 0; }
-  .ggu-form { background: #f5f9ff; border: 1px solid #c5d9f1; border-radius: 6px; padding: 14px; display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  .ggu-title { font-size: var(--ggu-title-font-size, 15px); font-weight: bold; color: var(--ggu-title-color, #93c5fd); border-bottom: 2px solid var(--ggu-title-color, #93c5fd); padding-bottom: 6px; margin: 0; }
+  .ggu-form { background: var(--ggu-detail-card-background, #f5f9ff); border: 1px solid #c5d9f1; border-radius: 6px; padding: 14px; display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
   .ggu-field { display: flex; flex-direction: column; gap: 3px; }
-  .ggu-label { font-size: 11px; font-weight: bold; color: #1F4E79; }
+  .ggu-label { font-size: var(--ggu-field-label-font-size, 11px); font-weight: bold; color: var(--ggu-field-label-color, #1F4E79); }
   .ggu-input, .ggu-select { width: 100%; padding: 5px 8px; border: 1px solid #aac4e0; border-radius: 4px; font-size: 13px; box-sizing: border-box; background: #fff; }
   .ggu-input:focus, .ggu-select:focus { outline: none; border-color: #1F4E79; }
   .ggu-input:disabled, .ggu-select:disabled { background: #e8f0e9; color: #375623; font-style: italic; border-color: #b8d4b0; }
@@ -717,16 +721,16 @@ const styles = `
   .ggu-btn-reset-sort:hover:not(:disabled) { background: #16375a; border-color: #93c5fd; }
   .ggu-btn-reset-sort:disabled { background: #e5e7eb; color: #94a3b8; border-color: #cbd5e1; opacity: 1; }
   .ggu-toolbar { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
-  .ggu-table-wrap { flex: 1; overflow-y: auto; border: 1px solid #c5d9f1; border-radius: 6px; min-height: 0; }
-  .ggu-table { width: 100%; border-collapse: collapse; font-size: 12px; }
-  .ggu-table th { background: #1F4E79; color: #fff; padding: 7px 8px; text-align: left; position: sticky; top: 0; z-index: 1; white-space: nowrap; }
+  .ggu-table-wrap { flex: 1; overflow-y: auto; border: 1px solid #c5d9f1; border-radius: 6px; min-height: 0; background: var(--ggu-records-card-background, #f5f9ff); }
+  .ggu-table { width: 100%; border-collapse: collapse; font-size: var(--ggu-table-font-size, 12px); }
+  .ggu-table th { background: var(--ggu-table-header-background, #1F4E79); color: var(--ggu-table-header-text, #fff); padding: 7px 8px; text-align: left; position: sticky; top: 0; z-index: 1; white-space: nowrap; }
   .ggu-table th.ggu-sortable { cursor: pointer; user-select: none; }
-  .ggu-table th.ggu-sortable:hover { background: #174162; }
+  .ggu-table th.ggu-sortable:hover { filter: brightness(0.9); }
   .ggu-sort-ind { display: inline-flex; align-items: center; gap: 2px; margin-left: 6px; font-size: 10px; opacity: 0.95; }
   .ggu-sort-order { background: rgba(255,255,255,0.18); border-radius: 999px; padding: 0 4px; font-size: 9px; }
   .ggu-table td { padding: 6px 8px; border-bottom: 1px solid #e0eaf4; vertical-align: middle; }
-  .ggu-table tbody tr:nth-child(odd) td { background: #f5f9ff; }
-  .ggu-table tbody tr:nth-child(even) td { background: #ffffff; }
+  .ggu-table tbody tr:nth-child(odd) td { background: var(--ggu-records-card-background, #f5f9ff); }
+  .ggu-table tbody tr:nth-child(even) td { background: linear-gradient(rgba(255,255,255,0.55), rgba(255,255,255,0.55)), var(--ggu-records-card-background, #f5f9ff); }
   .ggu-table tbody tr { cursor: pointer; }
   .ggu-table tbody tr:hover > td { background: #ddeeff !important; }
   .ggu-table tbody tr.ggu-sel > td { background: #cfe6ff !important; color: #08233f; box-shadow: none; }
@@ -758,6 +762,19 @@ const styles = `
 
 // ── Widget ─────────────────────────────────────────────────────────────────
 export default function Widget(props: AllWidgetProps<IMConfig>) {
+  const cfg: any = props.config || {}
+  const serviceUrl = String(cfg.serviceUrl || DEFAULT_SERVICE_URL).trim() || DEFAULT_SERVICE_URL
+  const title = String(cfg.title || 'GII – Gestione Utenti')
+  const titleColor = String(cfg.titleColor || '#93c5fd')
+  const titleFontSize = Number(cfg.titleFontSize || 15)
+  const fieldLabelColor = String(cfg.fieldLabelColor || '#1F4E79')
+  const fieldLabelFontSize = Number(cfg.fieldLabelFontSize || 11)
+  const detailCardBackgroundColor = String(cfg.detailCardBackgroundColor || '#f5f9ff')
+  const recordsCardBackgroundColor = String(cfg.recordsCardBackgroundColor || '#f5f9ff')
+  const tableHeaderBackgroundColor = String(cfg.tableHeaderBackgroundColor || '#1F4E79')
+  const tableHeaderTextColor = String(cfg.tableHeaderTextColor || '#ffffff')
+  const tableFontSize = Number(cfg.tableFontSize || 12)
+
   const [utenti, setUtenti]   = useState<UtenteRecord[]>([])
   const [form, setForm]       = useState<UtenteForm>(emptyForm())
   const [editing, setEditing] = useState(false)
@@ -916,9 +933,9 @@ export default function Widget(props: AllWidgetProps<IMConfig>) {
   const load = async () => {
     setLoading(true)
     try {
-      const fl = await getFL()
+      const fl = await getFL(serviceUrl)
       setDomainLabels(buildDomainLabelMap(fl.fields))
-      const rows = await fetchUtenti()
+      const rows = await fetchUtenti(serviceUrl)
       setUtenti(rows)
       setSelectedObjectId(sel => rows.some(r => r.objectid === sel) ? sel : null)
     }
@@ -1079,7 +1096,7 @@ export default function Widget(props: AllWidgetProps<IMConfig>) {
         if (formSan.gruppo) await addUserToGroup(formSan.username, formSan.gruppo, token)
       }
 
-      await saveUtente(formSan)
+      await saveUtente(formSan, serviceUrl)
       showMsg(formSan.objectid ? 'Utente aggiornato' : 'Utente aggiunto', true)
       setEditing(false); setForm(emptyForm()); await load()
     } catch (e: any) { showMsg('Errore: ' + (e?.message ?? e), false) }
@@ -1098,7 +1115,7 @@ export default function Widget(props: AllWidgetProps<IMConfig>) {
     try {
       const token = await getAGOLToken(props.config?.clientSecret ?? '')
       if (u.gruppo) await removeUserFromGroup(u.username, u.gruppo, token)
-      await deleteUtente(u.objectid, token)
+      await deleteUtente(u.objectid, token, serviceUrl)
       setSelectedObjectId(sel => sel === u.objectid ? null : sel)
       showMsg('Utente eliminato', true)
       await load()
@@ -1208,8 +1225,22 @@ export default function Widget(props: AllWidgetProps<IMConfig>) {
       {editLockPortal}
       {errorPopupPortal}
       {deleteConfirmPortal}
-      <div ref={rootRef} className={`ggu ${editing ? 'ggu-editing-global-lock' : ''}`}>
-        <div className="ggu-title">GII – Gestione Utenti</div>
+      <div
+        ref={rootRef}
+        className={`ggu ${editing ? 'ggu-editing-global-lock' : ''}`}
+        style={{
+          '--ggu-title-color': titleColor,
+          '--ggu-title-font-size': `${titleFontSize}px`,
+          '--ggu-field-label-color': fieldLabelColor,
+          '--ggu-field-label-font-size': `${fieldLabelFontSize}px`,
+          '--ggu-detail-card-background': detailCardBackgroundColor,
+          '--ggu-records-card-background': recordsCardBackgroundColor,
+          '--ggu-table-header-background': tableHeaderBackgroundColor,
+          '--ggu-table-header-text': tableHeaderTextColor,
+          '--ggu-table-font-size': `${tableFontSize}px`
+        } as React.CSSProperties}
+      >
+        <div className="ggu-title">{title}</div>
 
         {msg && <div className={`ggu-msg ${msg.ok ? 'ggu-msg-ok' : 'ggu-msg-err'}`}>{msg.text}</div>}
 

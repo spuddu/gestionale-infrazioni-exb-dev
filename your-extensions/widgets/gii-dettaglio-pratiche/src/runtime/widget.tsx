@@ -2339,8 +2339,8 @@ const VIOLATION_LABEL_BY_ARTICLE: Record<string, string> = {
   '8': 'Art. 8 - Violazione servizio di reperibilità',
   '12': 'Art. 12 - Negato accesso ai fondi (al personale consortile)',
   '15': 'Art. 15 - Prelievo abusivo d’acqua',
-  '16': 'Art. 16 - Inosservanza dei termini di presentazione delle comunicazioni di irrigazione',
-  '17': 'Art. 17 - Inosservanza dei termini di presentazione delle comunicazioni di variazione e di rinuncia',
+  '16': 'Art. 16 - Presentazione tardiva comunicazione di irrigazione',
+  '17': 'Art. 17 - Presentazione tardiva comunicazione di variazione o di rinuncia',
   '27': 'Art. 27 - Spreco d’acqua/uso negligente della risorsa idrica',
   '28': 'Art. 28 - Violazione prescrizioni del consorzio',
   '29': 'Art. 29 - Violazione termini restituzione attrezzature',
@@ -2364,7 +2364,7 @@ function getFieldAliasForIter (fieldName: string, aliasMap?: Record<string, stri
   // e, nell'iter, risultano troppo tecnici o ambigui. Qui li traduciamo
   // in etichette funzionali, comprensibili per l'operatore.
   if (rawKey === normKey('norma_violata1') || rawKey === normKey('Norma violata 1')) return 'Art. 15 - Prelievo abusivo d’acqua'
-  if (rawKey === normKey('norma_violata2') || rawKey === normKey('Norma violata 2')) return 'Articoli 16 e 17'
+  if (rawKey === normKey('norma_violata2') || rawKey === normKey('Norma violata 2')) return 'Inosservanza termini presentazione comunicazioni'
   if (rawKey === normKey('norma_violata3') || rawKey === normKey('Norma violata 3')) return 'Altre violazioni (artt. 8, 12, 27-37 e 39)'
 
   const artMatch = raw.match(/^v_art0*(\d+)$/i)
@@ -3584,8 +3584,8 @@ const isPgOnlyField = React.useCallback((fieldName: string) => {
       'Art15.4': 'Recidiva'
     },
     art16_17: {
-      'Art16': 'Art. 16 - Inosservanza dei termini di presentazione delle comunicazioni di irrigazione',
-      'Art17': 'Art. 17 - Inosservanza dei termini di presentazione delle comunicazioni di variazione e di rinuncia'
+      'Art16': 'Art. 16 - Presentazione tardiva comunicazione di irrigazione',
+      'Art17': 'Art. 17 - Presentazione tardiva comunicazione di variazione o di rinuncia'
     },
     art17_tipo: {
       'Art17.1': 'Variazione tardiva',
@@ -3791,7 +3791,7 @@ const isPgOnlyField = React.useCallback((fieldName: string) => {
           if (String(art16_17Raw || '') === 'Art16') {
             return (
               <div style={{ display: 'grid', gap: 0 }}>
-                {renderViolationArticleLine('Art. 16', 'Inosservanza dei termini di presentazione delle comunicazioni di irrigazione')}
+                {renderViolationArticleLine('Art. 16', 'Presentazione tardiva comunicazione di irrigazione')}
                 {renderViolationSurfacesLine(
                   'Superficie dichiarata (ha.a.ca)',
                   formatFieldValue(getRawField('sup_dichiarata_art16'), 'sup_dichiarata_art16', fieldTypeMap?.sup_dichiarata_art16, 'Superficie dichiarata (ha.a.ca)'),
@@ -3807,7 +3807,7 @@ const isPgOnlyField = React.useCallback((fieldName: string) => {
             const isVar = String(art17TipoRaw || '') === 'Art17.1'
             return (
               <div style={{ display: 'grid', gap: 0 }}>
-                {renderViolationArticleLine('Art. 17', 'Inosservanza dei termini di presentazione delle comunicazioni di variazione e di rinuncia')}
+                {renderViolationArticleLine('Art. 17', 'Presentazione tardiva comunicazione di variazione o di rinuncia')}
                 {renderViolationTextLine('Tipo comunicazione', tipoViolazione)}
                 {isVar
                   ? renderViolationSurfacesLine(

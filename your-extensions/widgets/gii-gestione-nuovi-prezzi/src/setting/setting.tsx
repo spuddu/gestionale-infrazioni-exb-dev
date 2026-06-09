@@ -21,6 +21,25 @@ export default function Setting(props: AllWidgetSettingProps<IMConfig>) {
   const sectionTitleFontSize = Number(cfg.sectionTitleFontSize || 12.5)
   const toolbarLabelColor = String(cfg.toolbarLabelColor || '#1F4E79')
   const toolbarLabelFontSize = Number(cfg.toolbarLabelFontSize || 11.5)
+  const detailCardBackgroundColor = String(cfg.detailCardBackgroundColor || '#f5f9ff')
+  const recordsCardBackgroundColor = String(cfg.recordsCardBackgroundColor || '#f5f9ff')
+  const panelBorderColor = String(cfg.panelBorderColor || '#c5d9f1')
+  const controlBackgroundColor = String(cfg.controlBackgroundColor || '#ffffff')
+  const controlTextColor = String(cfg.controlTextColor || '#111827')
+  const controlBorderColor = String(cfg.controlBorderColor || '#aac4e0')
+  const controlFontSize = Number(cfg.controlFontSize || 13)
+  const readonlyBackgroundColor = String(cfg.readonlyBackgroundColor || '#eef4fb')
+  const readonlyTextColor = String(cfg.readonlyTextColor || '#3f4d5a')
+  const tableHeaderBackgroundColor = String(cfg.tableHeaderBackgroundColor || '#1F4E79')
+  const tableHeaderTextColor = String(cfg.tableHeaderTextColor || '#ffffff')
+  const tableTextColor = String(cfg.tableTextColor || '#111827')
+  const tableFontSize = Number(cfg.tableFontSize || 12)
+  const primaryButtonBackgroundColor = String(cfg.primaryButtonBackgroundColor || '#1F4E79')
+  const primaryButtonTextColor = String(cfg.primaryButtonTextColor || '#ffffff')
+  const secondaryButtonBackgroundColor = String(cfg.secondaryButtonBackgroundColor || '#e0e0e0')
+  const secondaryButtonTextColor = String(cfg.secondaryButtonTextColor || '#333333')
+  const dangerButtonBackgroundColor = String(cfg.dangerButtonBackgroundColor || '#c00000')
+  const dangerButtonTextColor = String(cfg.dangerButtonTextColor || '#ffffff')
   const set = (k: string, v: any) => props.onSettingChange({ id: props.id, config: (props.config as any)?.set ? (props.config as any).set(k, v) : { ...cfg, [k]: v } as any })
   return (
     <div style={box}>
@@ -70,6 +89,135 @@ export default function Setting(props: AllWidgetSettingProps<IMConfig>) {
         <input style={inp} type='number' min={10} max={24} step={0.5} value={sectionTitleFontSize} onChange={(e) => set('sectionTitleFontSize', Number(e.target.value || 12.5))} />
 
         <div style={hint}>Queste impostazioni si applicano ai titoli dei pannelli di modifica.</div>
+      </div>
+
+      <div style={section}>
+        <div style={sectionTitle}>Scheda dettaglio Nuovo Prezzo</div>
+        <label style={lbl}>Colore di sfondo</label>
+        <div style={colorRow}>
+          <input style={colorInp} type='color' value={detailCardBackgroundColor} onChange={(e) => set('detailCardBackgroundColor', e.target.value)} aria-label='Colore di sfondo della scheda dettaglio nuovo prezzo' />
+          <input style={inp} value={detailCardBackgroundColor} onChange={(e) => set('detailCardBackgroundColor', e.target.value)} placeholder='#f5f9ff' />
+        </div>
+        <div style={hint}>Imposta lo sfondo della scheda usata per modificare il dettaglio di un Nuovo Prezzo.</div>
+      </div>
+
+      <div style={section}>
+        <div style={sectionTitle}>Scheda Nuovi Prezzi salvati</div>
+        <label style={lbl}>Colore di sfondo</label>
+        <div style={colorRow}>
+          <input style={colorInp} type='color' value={recordsCardBackgroundColor} onChange={(e) => set('recordsCardBackgroundColor', e.target.value)} aria-label='Colore di sfondo della scheda nuovi prezzi salvati' />
+          <input style={inp} value={recordsCardBackgroundColor} onChange={(e) => set('recordsCardBackgroundColor', e.target.value)} placeholder='#f5f9ff' />
+        </div>
+        <div style={hint}>Imposta lo sfondo della scheda in cui sono visualizzati i Nuovi Prezzi già salvati.</div>
+      </div>
+
+      <div style={section}>
+        <div style={sectionTitle}>Schede e bordi</div>
+
+        <label style={lbl}>Colore bordi schede e tabella</label>
+        <div style={colorRow}>
+          <input style={colorInp} type='color' value={panelBorderColor} onChange={(e) => set('panelBorderColor', e.target.value)} aria-label='Colore bordi schede e tabella' />
+          <input style={inp} value={panelBorderColor} onChange={(e) => set('panelBorderColor', e.target.value)} placeholder='#c5d9f1' />
+        </div>
+      </div>
+
+      <div style={section}>
+        <div style={sectionTitle}>Campi e controlli</div>
+
+        <label style={lbl}>Colore di sfondo</label>
+        <div style={colorRow}>
+          <input style={colorInp} type='color' value={controlBackgroundColor} onChange={(e) => set('controlBackgroundColor', e.target.value)} aria-label='Colore di sfondo campi e controlli' />
+          <input style={inp} value={controlBackgroundColor} onChange={(e) => set('controlBackgroundColor', e.target.value)} placeholder='#ffffff' />
+        </div>
+
+        <label style={lbl}>Colore testo</label>
+        <div style={colorRow}>
+          <input style={colorInp} type='color' value={controlTextColor} onChange={(e) => set('controlTextColor', e.target.value)} aria-label='Colore testo campi e controlli' />
+          <input style={inp} value={controlTextColor} onChange={(e) => set('controlTextColor', e.target.value)} placeholder='#111827' />
+        </div>
+
+        <label style={lbl}>Colore bordo</label>
+        <div style={colorRow}>
+          <input style={colorInp} type='color' value={controlBorderColor} onChange={(e) => set('controlBorderColor', e.target.value)} aria-label='Colore bordo campi e controlli' />
+          <input style={inp} value={controlBorderColor} onChange={(e) => set('controlBorderColor', e.target.value)} placeholder='#aac4e0' />
+        </div>
+
+        <label style={lbl}>Dimensione testo (px)</label>
+        <input style={inp} type='number' min={9} max={24} step={0.5} value={controlFontSize} onChange={(e) => set('controlFontSize', Number(e.target.value || 13))} />
+
+        <label style={lbl}>Sfondo campi bloccati</label>
+        <div style={colorRow}>
+          <input style={colorInp} type='color' value={readonlyBackgroundColor} onChange={(e) => set('readonlyBackgroundColor', e.target.value)} aria-label='Sfondo campi bloccati' />
+          <input style={inp} value={readonlyBackgroundColor} onChange={(e) => set('readonlyBackgroundColor', e.target.value)} placeholder='#eef4fb' />
+        </div>
+
+        <label style={lbl}>Testo campi bloccati</label>
+        <div style={colorRow}>
+          <input style={colorInp} type='color' value={readonlyTextColor} onChange={(e) => set('readonlyTextColor', e.target.value)} aria-label='Colore testo campi bloccati' />
+          <input style={inp} value={readonlyTextColor} onChange={(e) => set('readonlyTextColor', e.target.value)} placeholder='#3f4d5a' />
+        </div>
+      </div>
+
+      <div style={section}>
+        <div style={sectionTitle}>Tabella Nuovi Prezzi</div>
+
+        <label style={lbl}>Colore intestazione</label>
+        <div style={colorRow}>
+          <input style={colorInp} type='color' value={tableHeaderBackgroundColor} onChange={(e) => set('tableHeaderBackgroundColor', e.target.value)} aria-label='Colore intestazione tabella' />
+          <input style={inp} value={tableHeaderBackgroundColor} onChange={(e) => set('tableHeaderBackgroundColor', e.target.value)} placeholder='#1F4E79' />
+        </div>
+
+        <label style={lbl}>Colore testo intestazione</label>
+        <div style={colorRow}>
+          <input style={colorInp} type='color' value={tableHeaderTextColor} onChange={(e) => set('tableHeaderTextColor', e.target.value)} aria-label='Colore testo intestazione tabella' />
+          <input style={inp} value={tableHeaderTextColor} onChange={(e) => set('tableHeaderTextColor', e.target.value)} placeholder='#ffffff' />
+        </div>
+
+        <label style={lbl}>Colore testo righe</label>
+        <div style={colorRow}>
+          <input style={colorInp} type='color' value={tableTextColor} onChange={(e) => set('tableTextColor', e.target.value)} aria-label='Colore testo righe tabella' />
+          <input style={inp} value={tableTextColor} onChange={(e) => set('tableTextColor', e.target.value)} placeholder='#111827' />
+        </div>
+
+        <label style={lbl}>Dimensione testo tabella (px)</label>
+        <input style={inp} type='number' min={9} max={22} step={0.5} value={tableFontSize} onChange={(e) => set('tableFontSize', Number(e.target.value || 12))} />
+      </div>
+
+      <div style={section}>
+        <div style={sectionTitle}>Pulsanti</div>
+
+        <label style={lbl}>Sfondo pulsanti Aggiorna / Modifica</label>
+        <div style={colorRow}>
+          <input style={colorInp} type='color' value={primaryButtonBackgroundColor} onChange={(e) => set('primaryButtonBackgroundColor', e.target.value)} aria-label='Sfondo pulsanti principali' />
+          <input style={inp} value={primaryButtonBackgroundColor} onChange={(e) => set('primaryButtonBackgroundColor', e.target.value)} placeholder='#1F4E79' />
+        </div>
+        <label style={lbl}>Testo pulsanti Aggiorna / Modifica</label>
+        <div style={colorRow}>
+          <input style={colorInp} type='color' value={primaryButtonTextColor} onChange={(e) => set('primaryButtonTextColor', e.target.value)} aria-label='Testo pulsanti principali' />
+          <input style={inp} value={primaryButtonTextColor} onChange={(e) => set('primaryButtonTextColor', e.target.value)} placeholder='#ffffff' />
+        </div>
+
+        <label style={lbl}>Sfondo pulsante Annulla</label>
+        <div style={colorRow}>
+          <input style={colorInp} type='color' value={secondaryButtonBackgroundColor} onChange={(e) => set('secondaryButtonBackgroundColor', e.target.value)} aria-label='Sfondo pulsante Annulla' />
+          <input style={inp} value={secondaryButtonBackgroundColor} onChange={(e) => set('secondaryButtonBackgroundColor', e.target.value)} placeholder='#e0e0e0' />
+        </div>
+        <label style={lbl}>Testo pulsante Annulla</label>
+        <div style={colorRow}>
+          <input style={colorInp} type='color' value={secondaryButtonTextColor} onChange={(e) => set('secondaryButtonTextColor', e.target.value)} aria-label='Testo pulsante Annulla' />
+          <input style={inp} value={secondaryButtonTextColor} onChange={(e) => set('secondaryButtonTextColor', e.target.value)} placeholder='#333333' />
+        </div>
+
+        <label style={lbl}>Sfondo pulsante Elimina</label>
+        <div style={colorRow}>
+          <input style={colorInp} type='color' value={dangerButtonBackgroundColor} onChange={(e) => set('dangerButtonBackgroundColor', e.target.value)} aria-label='Sfondo pulsante Elimina' />
+          <input style={inp} value={dangerButtonBackgroundColor} onChange={(e) => set('dangerButtonBackgroundColor', e.target.value)} placeholder='#c00000' />
+        </div>
+        <label style={lbl}>Testo pulsante Elimina</label>
+        <div style={colorRow}>
+          <input style={colorInp} type='color' value={dangerButtonTextColor} onChange={(e) => set('dangerButtonTextColor', e.target.value)} aria-label='Testo pulsante Elimina' />
+          <input style={inp} value={dangerButtonTextColor} onChange={(e) => set('dangerButtonTextColor', e.target.value)} placeholder='#ffffff' />
+        </div>
       </div>
 
       <div style={section}>

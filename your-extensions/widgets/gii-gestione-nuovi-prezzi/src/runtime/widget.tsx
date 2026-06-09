@@ -144,26 +144,26 @@ async function countReferences(detailUrl: string, sourceObjectId: number): Promi
 
 const styles = `
 .gnp { font-family: Arial, sans-serif; font-size: 13px; padding: 12px; height: 100%; display:flex; flex-direction:column; gap:10px; box-sizing:border-box; }
-.gnp-title { font-size:15px; font-weight:700; color:#1F4E79; border-bottom:2px solid #1F4E79; padding-bottom:6px; }
+.gnp-title { font-size:15px; font-weight:700; color:var(--gnp-title-color, #1F4E79); border-bottom:2px solid var(--gnp-title-color, #1F4E79); padding-bottom:6px; }
 .gnp-toolbar { display:flex; gap:10px; align-items:end; flex-wrap:wrap; }
-.gnp-panel { background:#f5f9ff; border:1px solid #c5d9f1; border-radius:6px; padding:12px; }
+.gnp-panel { background:var(--gnp-detail-card-background, #f5f9ff); border:1px solid var(--gnp-panel-border-color, #c5d9f1); border-radius:6px; padding:12px; }
 .gnp-form { display:grid; grid-template-columns: 1.7fr 0.7fr 0.95fr 1.1fr 0.8fr 0.8fr; gap:10px; align-items:end; }
 .gnp-field { display:flex; flex-direction:column; gap:3px; }
 .gnp-label { font-size:var(--gnp-toolbar-label-font-size, 11px); font-weight:700; color:var(--gnp-toolbar-label-color, #1F4E79); }
-.gnp-input, .gnp-select, .gnp-textarea { width:100%; padding:6px 8px; border:1px solid #aac4e0; border-radius:4px; font-size:13px; box-sizing:border-box; background:#fff; }
+.gnp-input, .gnp-select, .gnp-textarea { width:100%; padding:6px 8px; border:1px solid var(--gnp-control-border-color, #aac4e0); border-radius:4px; font-size:var(--gnp-control-font-size, 13px); box-sizing:border-box; background:var(--gnp-control-background, #ffffff); color:var(--gnp-control-text-color, #111827); }
 .gnp-textarea { min-height:60px; resize:vertical; }
-.gnp-readonly { background:#eef4fb; color:#3f4d5a; }
+.gnp-readonly { background:var(--gnp-readonly-background, #eef4fb); color:var(--gnp-readonly-text-color, #3f4d5a); }
 .gnp-btn { padding:6px 14px; border:none; border-radius:4px; font-size:13px; cursor:pointer; font-weight:700; }
 .gnp-btn:disabled { opacity:0.55; cursor:not-allowed; }
-.gnp-save { background:#1F4E79; color:#fff; }
-.gnp-cancel { background:#e0e0e0; color:#333; }
-.gnp-danger { background:#c00000; color:#fff; }
-.gnp-table-wrap { flex:1; min-height:0; overflow:auto; border:1px solid #c5d9f1; border-radius:6px; }
-.gnp-table { width:100%; border-collapse:collapse; font-size:12px; }
-.gnp-table th { background:#1F4E79; color:#fff; padding:7px 8px; text-align:left; position:sticky; top:0; z-index:1; white-space:nowrap; }
+.gnp-save { background:var(--gnp-primary-button-background, #1F4E79); color:var(--gnp-primary-button-text, #ffffff); }
+.gnp-cancel { background:var(--gnp-secondary-button-background, #e0e0e0); color:var(--gnp-secondary-button-text, #333333); }
+.gnp-danger { background:var(--gnp-danger-button-background, #c00000); color:var(--gnp-danger-button-text, #ffffff); }
+.gnp-table-wrap { flex:1; min-height:0; overflow:auto; border:1px solid var(--gnp-panel-border-color, #c5d9f1); border-radius:6px; background:var(--gnp-records-card-background, #f5f9ff); }
+.gnp-table { width:100%; border-collapse:collapse; font-size:var(--gnp-table-font-size, 12px); color:var(--gnp-table-text-color, #111827); }
+.gnp-table th { background:var(--gnp-table-header-background, #1F4E79); color:var(--gnp-table-header-text, #ffffff); padding:7px 8px; text-align:left; position:sticky; top:0; z-index:1; white-space:nowrap; }
 .gnp-table td { padding:6px 8px; border-bottom:1px solid #e0eaf4; vertical-align:top; }
-.gnp-table tbody tr:nth-child(odd) td { background:#f5f9ff; }
-.gnp-table tbody tr:nth-child(even) td { background:#fff; }
+.gnp-table tbody tr:nth-child(odd) td { background:var(--gnp-records-card-background, #f5f9ff); }
+.gnp-table tbody tr:nth-child(even) td { background:linear-gradient(rgba(255,255,255,0.55), rgba(255,255,255,0.55)), var(--gnp-records-card-background, #f5f9ff); }
 .gnp-msg { padding:7px 12px; border-radius:4px; font-size:12px; font-weight:700; }
 .gnp-ok { background:#e2efda; color:#375623; border:1px solid #b8d4b0; }
 .gnp-err { background:#fce4e4; color:#c00; border:1px solid #f5b8b8; }
@@ -195,6 +195,25 @@ export default function Widget(props: AllWidgetProps<IMConfig>) {
   const sectionTitleFontSize = Number(cfg.sectionTitleFontSize || 12.5)
   const toolbarLabelColor = String(cfg.toolbarLabelColor || '#1F4E79')
   const toolbarLabelFontSize = Number(cfg.toolbarLabelFontSize || 11.5)
+  const detailCardBackgroundColor = String(cfg.detailCardBackgroundColor || '#f5f9ff')
+  const recordsCardBackgroundColor = String(cfg.recordsCardBackgroundColor || '#f5f9ff')
+  const panelBorderColor = String(cfg.panelBorderColor || '#c5d9f1')
+  const controlBackgroundColor = String(cfg.controlBackgroundColor || '#ffffff')
+  const controlTextColor = String(cfg.controlTextColor || '#111827')
+  const controlBorderColor = String(cfg.controlBorderColor || '#aac4e0')
+  const controlFontSize = Number(cfg.controlFontSize || 13)
+  const readonlyBackgroundColor = String(cfg.readonlyBackgroundColor || '#eef4fb')
+  const readonlyTextColor = String(cfg.readonlyTextColor || '#3f4d5a')
+  const tableHeaderBackgroundColor = String(cfg.tableHeaderBackgroundColor || '#1F4E79')
+  const tableHeaderTextColor = String(cfg.tableHeaderTextColor || '#ffffff')
+  const tableTextColor = String(cfg.tableTextColor || '#111827')
+  const tableFontSize = Number(cfg.tableFontSize || 12)
+  const primaryButtonBackgroundColor = String(cfg.primaryButtonBackgroundColor || '#1F4E79')
+  const primaryButtonTextColor = String(cfg.primaryButtonTextColor || '#ffffff')
+  const secondaryButtonBackgroundColor = String(cfg.secondaryButtonBackgroundColor || '#e0e0e0')
+  const secondaryButtonTextColor = String(cfg.secondaryButtonTextColor || '#333333')
+  const dangerButtonBackgroundColor = String(cfg.dangerButtonBackgroundColor || '#c00000')
+  const dangerButtonTextColor = String(cfg.dangerButtonTextColor || '#ffffff')
 
   const [rows, setRows] = React.useState<any[]>([])
   const [filterText, setFilterText] = React.useState('')
@@ -287,7 +306,7 @@ export default function Widget(props: AllWidgetProps<IMConfig>) {
   return (
     <Fragment>
       <style>{styles}</style>
-      <div className='gnp' style={{ '--gnp-toolbar-label-color': toolbarLabelColor, '--gnp-toolbar-label-font-size': `${toolbarLabelFontSize}px`, '--gnp-section-title-color': sectionTitleColor, '--gnp-section-title-font-size': `${sectionTitleFontSize}px` } as React.CSSProperties}>
+      <div className='gnp' style={{ '--gnp-title-color': titleColor, '--gnp-toolbar-label-color': toolbarLabelColor, '--gnp-toolbar-label-font-size': `${toolbarLabelFontSize}px`, '--gnp-section-title-color': sectionTitleColor, '--gnp-section-title-font-size': `${sectionTitleFontSize}px`, '--gnp-detail-card-background': detailCardBackgroundColor, '--gnp-records-card-background': recordsCardBackgroundColor, '--gnp-panel-border-color': panelBorderColor, '--gnp-control-background': controlBackgroundColor, '--gnp-control-text-color': controlTextColor, '--gnp-control-border-color': controlBorderColor, '--gnp-control-font-size': `${controlFontSize}px`, '--gnp-readonly-background': readonlyBackgroundColor, '--gnp-readonly-text-color': readonlyTextColor, '--gnp-table-header-background': tableHeaderBackgroundColor, '--gnp-table-header-text': tableHeaderTextColor, '--gnp-table-text-color': tableTextColor, '--gnp-table-font-size': `${tableFontSize}px`, '--gnp-primary-button-background': primaryButtonBackgroundColor, '--gnp-primary-button-text': primaryButtonTextColor, '--gnp-secondary-button-background': secondaryButtonBackgroundColor, '--gnp-secondary-button-text': secondaryButtonTextColor, '--gnp-danger-button-background': dangerButtonBackgroundColor, '--gnp-danger-button-text': dangerButtonTextColor } as React.CSSProperties}>
         <div className='gnp-title' style={{ color: titleColor, fontSize: titleFontSize }}>{title}</div>
         {!serviceUrl ? <div className='gnp-msg gnp-err'>Configura l'URL della tabella nel setting del widget.</div> : null}
         {msg && <div className={`gnp-msg ${msg.ok ? 'gnp-ok' : 'gnp-err'}`}>{msg.text}</div>}

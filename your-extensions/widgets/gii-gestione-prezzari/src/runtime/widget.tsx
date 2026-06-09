@@ -12,7 +12,6 @@ function loadEsriModule<T = any>(path: string): Promise<T> {
     try { req([path], (mod: T) => resolve(mod), (err: any) => reject(err)) } catch (e) { reject(e) }
   })
 }
-
 function normalizeUrl(raw: any): string {
   const s = String(raw || '').trim()
   if (!s) return ''
@@ -25,67 +24,6 @@ function normalizeUrl(raw: any): string {
     return out
   } catch { return '' }
 }
-
-function cleanCode(v: any): string {
-  return String(v ?? '').trim().toUpperCase()
-}
-
-function normalizeRoleCode(u: any): string {
-  const direct = cleanCode(u?.ruoloCod ?? u?.ruolo_cod ?? u?.roleCod ?? u?.role_code)
-  if (direct) return direct
-
-  const label = cleanCode(u?.ruoloLabel ?? u?.roleLabel ?? u?.ruolo_nome ?? u?.ruolo)
-  if (/^ADMIN$/.test(label) || /(^|[^A-Z])ADMIN([^A-Z]|$)/.test(label)) return 'ADMIN'
-  if (/^RI$/.test(label) || /(^|[^A-Z])RI([^A-Z]|$)/.test(label)) return 'RI'
-  if (/^TR$/.test(label)) return 'TR'
-  if (/^TI$/.test(label)) return 'TI'
-  if (/^RZ$/.test(label)) return 'RZ'
-  if (/^DT$/.test(label)) return 'DT'
-  if (/^DA$/.test(label)) return 'DA'
-
-  const n = Number(u?.ruolo)
-  if (n === 1) return 'TR'
-  if (n === 2) return 'TI'
-  if (n === 3) return 'RZ'
-  if (n === 4) return 'RI'
-  if (n === 5) return 'DT'
-  if (n === 6) return 'DA'
-  if (n === 7) return 'ADMIN'
-  return ''
-}
-
-function normalizeAreaCode(u: any): string {
-  const direct = cleanCode(u?.areaCod ?? u?.area_cod ?? u?.areaCode)
-  if (direct) return direct
-  const n = Number(u?.area)
-  if (n === 1) return 'AMM'
-  if (n === 2) return 'AGR'
-  if (n === 3) return 'TEC'
-  return cleanCode(u?.areaLabel ?? u?.area)
-}
-
-function normalizeSettoreCode(u: any): string {
-  const direct = cleanCode(u?.settoreCod ?? u?.settore_cod ?? u?.settoreCode)
-  if (direct === 'CS') return 'DS'
-  if (direct) return direct
-  const n = Number(u?.settore)
-  if (n === 1) return 'CR'
-  if (n === 2) return 'GI'
-  if (n >= 3 && n <= 8) return `D${n - 2}`
-  if (n === 9) return 'DS'
-  const label = cleanCode(u?.settoreLabel ?? u?.settore)
-  return label === 'CS' ? 'DS' : label
-}
-
-function getCurrentUserContext(): { ruoloCod: string, areaCod: string, settoreCod: string } {
-  const u: any = (window as any).__giiUserRole || {}
-  return {
-    ruoloCod: normalizeRoleCode(u),
-    areaCod: normalizeAreaCode(u),
-    settoreCod: normalizeSettoreCode(u)
-  }
-}
-
 function normalizeGiiAccessCode(v: any): string {
   return String(v ?? '').trim().toUpperCase().replace(/-/g, '_')
 }
@@ -138,7 +76,6 @@ function isRiOrAdminUser(): boolean {
   const profiloCod = getGiiOperationalProfileCode()
   return profiloCod === 'RI' || profiloCod === 'ADMIN'
 }
-
 const LAYER_CACHE: Record<string, any> = {}
 async function getLayer(urlRaw: any): Promise<any> {
   const url = normalizeUrl(urlRaw)
@@ -150,91 +87,24 @@ async function getLayer(urlRaw: any): Promise<any> {
   LAYER_CACHE[url] = fl
   return fl
 }
-
 function num(v: any): number { const n = Number(v); return Number.isFinite(n) ? n : 0 }
 function round(v: number, d = 2): number { const f = Math.pow(10, d); return Math.round((Number(v) + Number.EPSILON) * f) / f }
 function esc(v: string): string { return String(v || '').replace(/'/g, "''") }
-function toDateValue(v: any): string { if (v == null || v === '') return ''; try { const d = new Date(v); if (Number.isNaN(d.getTime())) return ''; const y=d.getFullYear(); const m=String(d.getMonth()+1).padStart(2,'0'); const dd=String(d.getDate()).padStart(2,'0'); return `${y}-${m}-${dd}`; } catch { return '' } }
+function money(n: any, d = 2): string { return num(n).toLocaleString('it-IT', { minimumFractionDigits: d, maximumFractionDigits: d }) }
+function pad4(v: any): string { return String(v == null ? '' : v).replace(/\D/g, '').slice(0, 4).padStart(4, '0') }
+function asYear(v: any): number { const y = Math.trunc(num(v)); return y > 0 ? y : new Date().getFullYear() }
+function upper(v: any): string { return String(v || '').trim().toUpperCase() }
 
-function decodeHtmlEntities(v: any): string {
-  const s = String(v ?? '')
-  if (!s || s.indexOf('&') < 0) return s
-  try {
-    const el = document.createElement('textarea')
-    el.innerHTML = s
-    return String(el.value || '')
-  } catch {
-    return s
-      .replace(/&quot;/gi, '"')
-      .replace(/&#34;/g, '"')
-      .replace(/&#39;/g, "'")
-      .replace(/&apos;/gi, "'")
-      .replace(/&lt;/gi, '<')
-      .replace(/&gt;/gi, '>')
-      .replace(/&amp;/gi, '&')
-  }
-}
-function sanitizeText(v: any): string {
-  return decodeHtmlEntities(v)
-    .replace(/\u0000/g, '')
-    .replace(/[\u0001-\u0008\u000B\u000C\u000E-\u001F\u007F]/g, ' ')
-    .replace(/\r\n?/g, '\n')
-    .replace(/<[^>]*>/g, ' ')
-    .replace(/[<>]/g, ' ')
-    .replace(/\u00A0/g, ' ')
-    .replace(/[ \t]+/g, ' ')
-    .replace(/ *\n */g, ' ')
-    .trim()
-}
-function getFieldMap(fl: any): Record<string, any> {
-  const out: Record<string, any> = {}
-  ;((fl?.fields || []) as any[]).forEach((f: any) => {
-    const name = String(f?.name || '')
-    if (name) out[name] = f
-  })
-  return out
-}
-function fieldTypeName(f: any): string { return String(f?.type || '').toLowerCase() }
-function truncateForField(v: string, f: any): string {
-  const len = Number(f?.length || 0)
-  return len > 0 ? String(v).slice(0, len) : String(v)
-}
-function prepareAttrsForLayer(fl: any, attrs: any): any {
-  const fieldMap = getFieldMap(fl)
-  const out: any = {}
-  Object.keys(attrs || {}).forEach((k) => {
-    const f = fieldMap[k]
-    if (!f) return
-    const raw = attrs[k]
-    if (raw == null) { out[k] = raw; return }
-    if (typeof raw === 'string') {
-      out[k] = truncateForField(sanitizeText(raw), f)
-      return
-    }
-    if (fieldTypeName(f).includes('date') && raw instanceof Date) {
-      out[k] = raw.getTime()
-      return
-    }
-    out[k] = raw
-  })
-  return out
-}
-function formatApplyEditsError(err: any): string {
-  if (!err) return 'Errore sconosciuto.'
-  const msg = String(err?.message || err?.description || err || '').trim()
-  const details = Array.isArray(err?.details)
-    ? err.details.map((x: any) => String(x || '').trim()).filter(Boolean)
-    : []
-  return [msg, ...details].filter(Boolean).join(' | ') || 'Errore sconosciuto.'
-}
-function getRowKey(attrs: any): string {
-  const parts = ['codice_voce', 'codice_analisi', 'codice_elemento', 'codice_prezzario']
-    .map((k) => String(attrs?.[k] || '').trim())
-    .filter(Boolean)
-  return parts.join(' / ')
-}
+const MODALITA: Record<number, string> = { 1: 'ELEMENTARE', 2: 'ANALIZZATA' }
+const FAMIGLIE_NUM: Record<number, string> = { 1: 'AT', 2: 'PR', 3: 'RU', 4: 'SL', 5: 'PF' }
+const FAMILY_CODES = ['AT', 'PR', 'RU', 'SL', 'PF'] as const
+const FAMILY_DESCRIPTIONS: Record<string, string> = { AT: 'Attrezzature e trasporti', PR: 'Materiali da costruzione', RU: 'Risorse umane', SL: 'Semilavorati', PF: 'Prodotti finiti' }
+function normalizeModality(v: any): number { const s = upper(v); if (s === 'ANALIZZATA' || s === '2') return 2; return 1 }
+function modalityLabel(v: any): string { return MODALITA[normalizeModality(v)] || 'ELEMENTARE' }
+function normalizeFamily(v: any): string { const s = upper(v); if ((FAMILY_CODES as readonly string[]).includes(s)) return s; const n = Math.trunc(num(v)); return FAMIGLIE_NUM[n] || 'AT' }
+function familyDisplay(v: any): string { const code = normalizeFamily(v); return `${FAMILY_DESCRIPTIONS[code] || code} (${code})` }
 
-async function queryRows(urlRaw: any, where = '1=1', orderBy = 'OBJECTID DESC'): Promise<any[]> {
+async function queryRows(urlRaw: any, where = '1=1', orderBy = 'codice_np ASC, OBJECTID ASC'): Promise<any[]> {
   const fl = await getLayer(urlRaw)
   const q = fl.createQuery ? fl.createQuery() : {}
   q.where = where
@@ -244,461 +114,173 @@ async function queryRows(urlRaw: any, where = '1=1', orderBy = 'OBJECTID DESC'):
   const res = await fl.queryFeatures(q)
   return (res?.features || []).map((f: any) => ({ ...f.attributes, objectid: Number(f.attributes?.OBJECTID || f.attributes?.objectid || 0) }))
 }
-async function queryAllObjectIds(urlRaw: any, where = '1=1'): Promise<number[]> {
-  const fl = await getLayer(urlRaw)
-  const q = fl.createQuery ? fl.createQuery() : {}
-  q.where = where
-  q.returnGeometry = false
-  if (typeof fl.queryObjectIds === 'function') {
-    const ids = await fl.queryObjectIds(q)
-    return Array.isArray(ids) ? ids.map((x: any) => Number(x)).filter((x: number) => Number.isFinite(x) && x > 0) : []
-  }
-  const oidField = String(fl?.objectIdField || 'OBJECTID')
-  q.outFields = [oidField]
-  const res = await fl.queryFeatures(q)
-  return (res?.features || []).map((f: any) => Number(f?.attributes?.[oidField] || 0)).filter((x: number) => Number.isFinite(x) && x > 0)
-}
 async function applyAttrs(urlRaw: any, attrs: any, objectid?: number | null): Promise<void> {
   const fl = await getLayer(urlRaw)
   const oidField = String(fl?.objectIdField || 'OBJECTID')
-  const out: any = prepareAttrsForLayer(fl, attrs)
+  const fieldNames = new Set(((fl?.fields || []) as any[]).map((f: any) => String(f?.name || '')))
+  const out: any = {}
+  Object.keys(attrs || {}).forEach((k) => { if (fieldNames.has(k)) out[k] = attrs[k] })
   if (objectid != null) out[oidField] = Number(objectid)
-  const payload = objectid != null ? { updateFeatures: [{ attributes: out }] } : { addFeatures: [{ attributes: out }] }
+  const payload = { updateFeatures: [{ attributes: out }] }
   const res = await fl.applyEdits(payload as any)
-  const r = objectid != null ? res?.updateFeatureResults?.[0] : res?.addFeatureResults?.[0]
-  if (r?.error) throw new Error(formatApplyEditsError(r.error) || 'Salvataggio non riuscito.')
+  const r = res?.updateFeatureResults?.[0]
+  if (r?.error) throw new Error(r.error.message || 'Salvataggio non riuscito.')
 }
 async function deleteObjectIds(urlRaw: any, objectIds: number[]): Promise<void> {
   if (!objectIds.length) return
   const fl = await getLayer(urlRaw)
   const oidField = String(fl?.objectIdField || 'OBJECTID')
   const Graphic = await loadEsriModule<any>('esri/Graphic')
-  for (let i = 0; i < objectIds.length; i += 200) {
-    const chunk = objectIds.slice(i, i + 200)
-    const dels = chunk.map((id) => new Graphic({ attributes: { [oidField]: id } }))
-    const res = await fl.applyEdits({ deleteFeatures: dels } as any)
-    const bad = (res?.deleteFeatureResults || []).find((r: any) => r?.error)
-    if (bad?.error) throw new Error(formatApplyEditsError(bad.error) || 'Eliminazione non riuscita.')
-  }
+  const dels = objectIds.map((id) => new Graphic({ attributes: { [oidField]: id } }))
+  const res = await fl.applyEdits({ deleteFeatures: dels } as any)
+  const bad = (res?.deleteFeatureResults || []).find((r: any) => r?.error)
+  if (bad?.error) throw new Error(bad.error.message || 'Eliminazione non riuscita.')
 }
-async function deleteWhere(urlRaw: any, where: string): Promise<number> {
-  const ids = await queryAllObjectIds(urlRaw, where)
-  await deleteObjectIds(urlRaw, ids)
-  return ids.length
-}
-async function setOnlyOneActive(urlRaw: any, objectid: number): Promise<void> {
-  const rows = await queryRows(urlRaw, '1=1', 'OBJECTID DESC')
-  const fl = await getLayer(urlRaw)
-  const fieldNames = new Set(((fl?.fields || []) as any[]).map((f: any) => String(f?.name || '')))
-  if (!fieldNames.has('stato_prezzario')) throw new Error('Il campo stato_prezzario non esiste nella tabella.')
-  const oidField = String(fl?.objectIdField || 'OBJECTID')
-  for (let i = 0; i < rows.length; i += 200) {
-    const batch = rows.slice(i, i + 200).map((r: any) => ({ attributes: { [oidField]: r.objectid, stato_prezzario: r.objectid === objectid ? 1 : (num(r.stato_prezzario) === 0 ? 0 : 2) } }))
-    const res = await fl.applyEdits({ updateFeatures: batch } as any)
-    const bad = (res?.updateFeatureResults || []).find((x: any) => x?.error)
-    if (bad?.error) throw new Error(formatApplyEditsError(bad.error) || 'Aggiornamento attivo non riuscito.')
-  }
-}
-async function setPrezzarioStatus(urlRaw: any, objectid: number, status: number): Promise<void> {
-  const fl = await getLayer(urlRaw)
-  const fieldNames = new Set(((fl?.fields || []) as any[]).map((f: any) => String(f?.name || '')))
-  if (!fieldNames.has('stato_prezzario')) throw new Error('Il campo stato_prezzario non esiste nella tabella.')
-  const oidField = String(fl?.objectIdField || 'OBJECTID')
-  const res = await fl.applyEdits({ updateFeatures: [{ attributes: { [oidField]: Number(objectid), stato_prezzario: Number(status) } }] } as any)
-  const bad = (res?.updateFeatureResults || []).find((x: any) => x?.error)
-  if (bad?.error) throw new Error(formatApplyEditsError(bad.error) || 'Aggiornamento stato prezzario non riuscito.')
-}
-
-function normalizeCategory(v: any): string {
-  const s = String(v || '').trim().toUpperCase()
-  if (s === 'NOLI') return 'NOLO'
-  if (s === 'TRASPORTI') return 'TRASPORTO'
-  if (s === 'MATERIALE') return 'MATERIALI'
-  return s
+async function countReferences(detailUrl: string, sourceObjectId: number): Promise<number> {
+  if (!detailUrl || !sourceObjectId) return 0
+  const rows = await queryRows(detailUrl, `origine_riga = '3' AND objectid_sorgente = ${Math.trunc(num(sourceObjectId))}`, 'OBJECTID ASC')
+  return rows.length
 }
 
 const styles = `
-.gpw { font-family: Arial, sans-serif; font-size: 13px; padding: 12px; height: 100%; display:flex; flex-direction:column; gap:10px; box-sizing:border-box; }
-.gpw-title { font-size:15px; font-weight:700; color:#1F4E79; border-bottom:2px solid #1F4E79; padding-bottom:6px; }
-.gpw-card { background:#f5f9ff; border:1px solid #c5d9f1; border-radius:6px; padding:12px; }
-.gpw-grid { display:grid; grid-template-columns:1fr 1fr 1fr 1fr; gap:10px; }
-.gpw-field { display:flex; flex-direction:column; gap:3px; }
-.gpw-label { font-size:11px; font-weight:700; color:#1F4E79; }
-.gpw-input, .gpw-select { width:100%; padding:6px 8px; border:1px solid #aac4e0; border-radius:4px; font-size:13px; box-sizing:border-box; background:#fff; }
-.gpw-btns { display:flex; gap:8px; flex-wrap:wrap; }
-.gpw-btns-inline { display:flex; gap:10px; align-items:center; flex-wrap:wrap; }
-.gpw-btn { padding:6px 16px; border:none; border-radius:4px; font-size:13px; cursor:pointer; font-weight:700; }
-.gpw-primary { background:#1F4E79; color:#fff; }
-.gpw-secondary { background:#375623; color:#fff; }
-.gpw-warning { background:#b45f06; color:#fff; }
-.gpw-danger { background:#c00; color:#fff; }
-.gpw-table-wrap { flex:1; min-height:0; overflow:auto; border:1px solid #c5d9f1; border-radius:6px; }
-.gpw-table { width:100%; border-collapse:collapse; font-size:12px; }
-.gpw-table th { background:#1F4E79; color:#fff; padding:7px 8px; text-align:left; position:sticky; top:0; z-index:1; white-space:nowrap; }
-.gpw-table td { padding:6px 8px; border-bottom:1px solid #e0eaf4; vertical-align:middle; }
-.gpw-table tbody tr:nth-child(odd) td { background:#f5f9ff; }
-.gpw-table tbody tr:nth-child(even) td { background:#fff; }
-.gpw-msg { padding:7px 12px; border-radius:4px; font-size:12px; font-weight:700; }
-.gpw-msg-ok { background:#e2efda; color:#375623; border:1px solid #b8d4b0; }
-.gpw-msg-err { background:#fce4e4; color:#c00; border:1px solid #f5b8b8; }
-`;
+.gnp { font-family: Arial, sans-serif; font-size: 13px; padding: 12px; height: 100%; display:flex; flex-direction:column; gap:10px; box-sizing:border-box; }
+.gnp-title { font-size:15px; font-weight:700; color:#1F4E79; border-bottom:2px solid #1F4E79; padding-bottom:6px; }
+.gnp-toolbar { display:flex; gap:10px; align-items:end; flex-wrap:wrap; }
+.gnp-panel { background:var(--gnp-detail-card-background, #f5f9ff); border:1px solid #c5d9f1; border-radius:6px; padding:12px; }
+.gnp-form { display:grid; grid-template-columns: 1.7fr 0.7fr 0.95fr 1.1fr 0.8fr 0.8fr; gap:10px; align-items:end; }
+.gnp-field { display:flex; flex-direction:column; gap:3px; }
+.gnp-label { font-size:var(--gnp-toolbar-label-font-size, 11px); font-weight:700; color:var(--gnp-toolbar-label-color, #1F4E79); }
+.gnp-input, .gnp-select, .gnp-textarea { width:100%; padding:6px 8px; border:1px solid #aac4e0; border-radius:4px; font-size:13px; box-sizing:border-box; background:#fff; }
+.gnp-textarea { min-height:60px; resize:vertical; }
+.gnp-readonly { background:#eef4fb; color:#3f4d5a; }
+.gnp-btn { padding:6px 14px; border:none; border-radius:4px; font-size:13px; cursor:pointer; font-weight:700; }
+.gnp-btn:disabled { opacity:0.55; cursor:not-allowed; }
+.gnp-save { background:#1F4E79; color:#fff; }
+.gnp-cancel { background:#e0e0e0; color:#333; }
+.gnp-danger { background:#c00000; color:#fff; }
+.gnp-table-wrap { flex:1; min-height:0; overflow:auto; border:1px solid #c5d9f1; border-radius:6px; background:var(--gnp-records-card-background, #f5f9ff); }
+.gnp-table { width:100%; border-collapse:collapse; font-size:12px; }
+.gnp-table th { background:#1F4E79; color:#fff; padding:7px 8px; text-align:left; position:sticky; top:0; z-index:1; white-space:nowrap; }
+.gnp-table td { padding:6px 8px; border-bottom:1px solid #e0eaf4; vertical-align:top; }
+.gnp-table tbody tr:nth-child(odd) td { background:var(--gnp-records-card-background, #f5f9ff); }
+.gnp-table tbody tr:nth-child(even) td { background:linear-gradient(rgba(255,255,255,0.55), rgba(255,255,255,0.55)), var(--gnp-records-card-background, #f5f9ff); }
+.gnp-msg { padding:7px 12px; border-radius:4px; font-size:12px; font-weight:700; }
+.gnp-ok { background:#e2efda; color:#375623; border:1px solid #b8d4b0; }
+.gnp-err { background:#fce4e4; color:#c00; border:1px solid #f5b8b8; }
+.gnp-muted { color:#6b7280; }
+`
 
-type MetaRow = { objectid: number; codice_prezzario: string; anno_prezzario: number; titolo_prezzario: string; tipo_prezzario: string; stato_prezzario: number; origine_file: string; nome_file_origine: string; data_import: any; importato_da: string; note: string }
-type ArtRow = { codice_voce:string; famiglia:string; capitolo:string; sottocapitolo:string; descrizione:string; unita_misura:string; prezzo_unitario:number; categoria_default:string; selezionabile:number; attivo:number }
-type AnalisiRow = { codice_analisi:string; codice_elemento:string; descrizione_elemento:string; categoria_costo:string; quantita:number; prezzo_unitario:number; importo:number; attivo:number }
-
-function inferCategory(famiglia: string, codice: string, descr: string): string {
-  const tok = String(famiglia || codice || '').trim().toUpperCase()
-  const d = String(descr || '').trim().toUpperCase()
-  if (tok.startsWith('RU')) return 'MANODOPERA'
-  if (tok.startsWith('AT')) return /TRASPORT/.test(d) ? 'TRASPORTO' : 'NOLO'
-  if (tok.startsWith('PR') || tok.startsWith('SL')) return 'MATERIALI'
-  return 'MATERIALI'
-}
-
-function decodeBytes(data: Uint8Array): string {
-  try { return new TextDecoder('windows-1252').decode(data) } catch { return new TextDecoder('utf-8').decode(data) }
-}
-
-async function inflateRaw(data: Uint8Array): Promise<Uint8Array> {
-  const W: any = window as any
-  if (!W.DecompressionStream) throw new Error('Il browser non supporta DecompressionStream per importare lo zip.')
-  const ds = new W.DecompressionStream('deflate-raw')
-  const ab = data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength) as ArrayBuffer
-  const stream = new Blob([ab]).stream().pipeThrough(ds)
-  const buf = await new Response(stream).arrayBuffer()
-  return new Uint8Array(buf)
-}
-
-async function unzipEntries(file: File): Promise<Array<{ name: string; data: Uint8Array }>> {
-  const bytes = new Uint8Array(await file.arrayBuffer())
-  const out: Array<{ name: string; data: Uint8Array }> = []
-  const readU16 = (o: number) => bytes[o] | (bytes[o + 1] << 8)
-  const readU32 = (o: number) => (bytes[o]) | (bytes[o + 1] << 8) | (bytes[o + 2] << 16) | (bytes[o + 3] << 24)
-  let off = 0
-  while (off + 30 <= bytes.length) {
-    const sig = readU32(off) >>> 0
-    if (sig !== 0x04034b50) break
-    const flags = readU16(off + 6)
-    const method = readU16(off + 8)
-    if ((flags & 0x08) !== 0) throw new Error('Zip con data descriptor non supportato.')
-    const compSize = readU32(off + 18) >>> 0
-    const nameLen = readU16(off + 26)
-    const extraLen = readU16(off + 28)
-    const name = decodeBytes(bytes.slice(off + 30, off + 30 + nameLen))
-    const dataStart = off + 30 + nameLen + extraLen
-    const dataEnd = dataStart + compSize
-    const comp = bytes.slice(dataStart, dataEnd)
-    let data: Uint8Array
-    if (method === 0) data = comp
-    else if (method === 8) data = await inflateRaw(comp)
-    else throw new Error(`Metodo ZIP non supportato: ${method}`)
-    out.push({ name, data })
-    off = dataEnd
-  }
-  return out
-}
-
-function parsePipeCsv(text: string): string[][] {
-  return text.split(/\r?\n/).filter(Boolean).slice(1).map((line) => line.split('|').map((x) => x.trim()))
-}
-
-function zipBaseName(path: string): string {
-  const norm = String(path || '').replace(/\\/g, '/')
-  const parts = norm.split('/')
-  return String(parts[parts.length - 1] || '').trim()
-}
-
-async function parseOfficialZip(file: File): Promise<{ articoli: ArtRow[]; analisi: AnalisiRow[] }> {
-  const entries = await unzipEntries(file)
-  const artEntry = entries.find((e) => /anagrafica_articoli_prezzario\.csv$/i.test(zipBaseName(e.name)))
-    || entries.find((e) => /anagrafica/i.test(zipBaseName(e.name)))
-  const anaEntry = entries.find((e) => /analisi_prezzario\.csv$/i.test(zipBaseName(e.name)))
-    || entries.find((e) => /analisi/i.test(zipBaseName(e.name)))
-  if (!artEntry || !anaEntry) throw new Error('Nel pacchetto non trovo i due CSV attesi (anagrafica e analisi).')
-  if (zipBaseName(artEntry.name) === zipBaseName(anaEntry.name)) throw new Error('Il CSV analisi non è stato individuato correttamente nello ZIP.')
-  const artRows = parsePipeCsv(decodeBytes(artEntry.data))
-  const anaRows = parsePipeCsv(decodeBytes(anaEntry.data))
-
-  const articoli: ArtRow[] = artRows.map((r) => {
-    const codice = String(r[0] || '').trim()
-    const famiglia = String(r[1] || '').trim()
-    const descrizione = String(r[4] || '').trim()
-    return {
-      codice_voce: codice,
-      famiglia,
-      capitolo: String(r[2] || '').trim(),
-      sottocapitolo: String(r[3] || '').trim(),
-      descrizione,
-      unita_misura: String(r[5] || '').trim(),
-      prezzo_unitario: round(num(String(r[10] || '').replace(/\./g, '').replace(',', '.')), 4),
-      categoria_default: inferCategory(famiglia, codice, descrizione),
-      selezionabile: 1,
-      attivo: 1
-    }
-  }).filter((r) => !!r.codice_voce && !!r.descrizione)
-
-  const artMap = new Map<string, ArtRow>()
-  articoli.forEach((a) => artMap.set(String(a.codice_voce || '').trim(), a))
-
-  const analisi: AnalisiRow[] = anaRows.map((r) => {
-    const codiceAnalisi = String(r[0] || '').trim()
-    const codiceElemento = String(r[1] || '').trim()
-    const art = artMap.get(codiceElemento)
-    return {
-      codice_analisi: codiceAnalisi,
-      codice_elemento: codiceElemento,
-      descrizione_elemento: String(art?.descrizione || ''),
-      categoria_costo: normalizeCategory(String(art?.categoria_default || inferCategory(String(art?.famiglia || ''), codiceElemento, String(art?.descrizione || '')))),
-      quantita: num(String(r[2] || '').replace(/\./g, '').replace(',', '.')),
-      prezzo_unitario: round(num(String(r[3] || '').replace(/\./g, '').replace(',', '.')), 4),
-      importo: round(num(String(r[4] || '').replace(/\./g, '').replace(',', '.')), 4),
-      attivo: 1
-    }
-  }).filter((r) => !!r.codice_analisi && !!r.codice_elemento)
-
-  return { articoli, analisi }
-}
-
-async function addOneByOne(fl: any, attrsList: any[], startIndex: number, total: number, label: string, onProgress?: (done: number, total: number) => void): Promise<void> {
-  const createdIds: number[] = []
-  for (let i = 0; i < attrsList.length; i++) {
-    const attrs = prepareAttrsForLayer(fl, attrsList[i])
-    const res = await fl.applyEdits({ addFeatures: [{ attributes: attrs }] } as any)
-    const row = res?.addFeatureResults?.[0]
-    if (row?.error) {
-      if (createdIds.length) {
-        try { await deleteObjectIds(fl.url, createdIds) } catch {}
-      }
-      const idx = startIndex + i + 1
-      const key = getRowKey(attrsList[i])
-      throw new Error(`${label} riga ${idx}${key ? ` (${key})` : ''}: ${formatApplyEditsError(row.error)}`)
-    }
-    const oid = Number(row?.objectId || row?.objectID || 0)
-    if (oid) createdIds.push(oid)
-    if (onProgress) onProgress(startIndex + i + 1, total)
+function mapRow(r: any) {
+  return {
+    ...r,
+    codice_voce: String(r.codice_np || ''),
+    unita_misura: String(r.um || ''),
+    prezzo_unitario: r.prezzo,
+    modalita_voce: r.modalita_prezzo,
+    progressivo_voce: String(r.progressivo_prezzo || '')
   }
 }
-async function addInChunks(urlRaw: string, attrsList: any[], label: string, onProgress?: (done: number, total: number) => void, preferredChunkSize = 250): Promise<void> {
-  if (!attrsList.length) return
-  const fl = await getLayer(urlRaw)
-  const total = attrsList.length
-  const tryRange = async (start: number, endExclusive: number, chunkSize: number): Promise<void> => {
-    for (let i = start; i < endExclusive; i += chunkSize) {
-      const rawSlice = attrsList.slice(i, Math.min(i + chunkSize, endExclusive))
-      const slice = rawSlice.map((attrs) => ({ attributes: prepareAttrsForLayer(fl, attrs) }))
-      try {
-        const res = await fl.applyEdits({ addFeatures: slice } as any)
-        const bad = (res?.addFeatureResults || []).find((x: any) => x?.error)
-        if (bad?.error) {
-          if (rawSlice.length === 1) {
-            await addOneByOne(fl, rawSlice, i, total, label, onProgress)
-          } else {
-            const smaller = Math.max(1, Math.floor(chunkSize / 2))
-            await tryRange(i, i + rawSlice.length, smaller)
-          }
-        } else if (onProgress) {
-          onProgress(Math.min(i + rawSlice.length, total), total)
-        }
-      } catch (e: any) {
-        const msg = String(e?.message || e || '')
-        if (/failed to fetch/i.test(msg) || /network/i.test(msg)) {
-          if (rawSlice.length === 1) {
-            throw new Error(`${label} riga ${i + 1}${getRowKey(rawSlice[0]) ? ` (${getRowKey(rawSlice[0])})` : ''}: ${msg || 'Failed to fetch'}`)
-          }
-          const smaller = Math.max(1, Math.floor(chunkSize / 2))
-          await tryRange(i, i + rawSlice.length, smaller)
-        } else {
-          throw e
-        }
-      }
-    }
-  }
-  await tryRange(0, total, Math.max(1, preferredChunkSize))
-}
-
-async function cleanupPrezzarioByCode(prezzariUrl: string, vociUrl: string, analisiUrl: string, code: string): Promise<{ voci: number; analisi: number; meta: number }> {
-  const safeCode = esc(String(code || '').trim())
-  const where = `codice_prezzario = '${safeCode}'`
-  const deletedVoci = await deleteWhere(vociUrl, where)
-  const deletedAnalisi = await deleteWhere(analisiUrl, where)
-  const deletedMeta = await deleteWhere(prezzariUrl, where)
-  return { voci: deletedVoci, analisi: deletedAnalisi, meta: deletedMeta }
+function emptyForm() {
+  return { objectid: undefined, codice_voce: '', descrizione: '', unita_misura: '', prezzo_unitario: '', attivo: '1', note: '', modalita_voce: '1', anno_listino: new Date().getFullYear(), famiglia: 'AT', capitolo: '0001', sottocapitolo: '0001', progressivo_voce: '0001' } as any
 }
 
 export default function Widget(props: AllWidgetProps<IMConfig>) {
   const cfg: any = props.config || {}
-  const prezzariUrl = String(cfg.prezzariUrl || '').trim()
-  const vociUrl = String(cfg.vociUrl || '').trim()
-  const analisiUrl = String(cfg.analisiUrl || '').trim()
-  const title = String(cfg.title || 'GII - Gestione Prezzari')
+  const serviceUrl = String(cfg.serviceUrl || '').trim()
+  const detailTableUrl = String(cfg.detailTableUrl || '').trim()
+  const title = String(cfg.title || 'GII - Gestione Nuovi Prezzi')
   const titleColor = String(cfg.titleColor || '#1F4E79')
   const titleFontSize = Number(cfg.titleFontSize || 15)
-  const [rows, setRows] = React.useState<MetaRow[]>([])
+  const sectionTitleColor = String(cfg.sectionTitleColor || '#1F4E79')
+  const sectionTitleFontSize = Number(cfg.sectionTitleFontSize || 12.5)
+  const toolbarLabelColor = String(cfg.toolbarLabelColor || '#1F4E79')
+  const toolbarLabelFontSize = Number(cfg.toolbarLabelFontSize || 11.5)
+  const detailCardBackgroundColor = String(cfg.detailCardBackgroundColor || '#f5f9ff')
+  const recordsCardBackgroundColor = String(cfg.recordsCardBackgroundColor || '#f5f9ff')
+
+  const [rows, setRows] = React.useState<any[]>([])
+  const [filterText, setFilterText] = React.useState('')
+  const [form, setForm] = React.useState<any>(emptyForm())
+  const [editing, setEditing] = React.useState(false)
   const [loading, setLoading] = React.useState(false)
   const [saving, setSaving] = React.useState(false)
-  const [msg, setMsg] = React.useState<{ text: string; ok: boolean } | null>(null)
-  const [isRi, setIsRi] = React.useState<boolean>(isRiOrAdminUser())
-  const [file, setFile] = React.useState<File | null>(null)
-  const [anno, setAnno] = React.useState('')
-  const [codice, setCodice] = React.useState('')
-  const [descrizione, setDescrizione] = React.useState('')
-  const [activateAfterImport, setActivateAfterImport] = React.useState(true)
-  const [progress, setProgress] = React.useState('')
+  const [msg, setMsg] = React.useState<{ text: string, ok: boolean } | null>(null)
+  const [isRi, setIsRi] = React.useState(isRiOrAdminUser())
 
-  React.useEffect(() => {
-    const refresh = () => setIsRi(isRiOrAdminUser())
-    refresh(); window.addEventListener('gii:userLoaded', refresh)
-    return () => window.removeEventListener('gii:userLoaded', refresh)
-  }, [])
-  React.useEffect(() => { if (!msg) return; const t = window.setTimeout(() => setMsg(null), 7000); return () => window.clearTimeout(t) }, [msg])
+  React.useEffect(() => { const refresh = () => setIsRi(isRiOrAdminUser()); refresh(); window.addEventListener('gii:userLoaded', refresh); return () => window.removeEventListener('gii:userLoaded', refresh) }, [])
+  React.useEffect(() => { if (!msg) return; const t = window.setTimeout(() => setMsg(null), 6000); return () => window.clearTimeout(t) }, [msg])
 
   const load = React.useCallback(async () => {
-    if (!prezzariUrl) { setRows([]); return }
+    if (!serviceUrl) { setRows([]); return }
     setLoading(true)
     try {
-      const rr = await queryRows(prezzariUrl, '1=1', 'anno_prezzario DESC, OBJECTID DESC')
-      setRows(rr as any)
+      const term = upper(filterText)
+      const where = term ? `(UPPER(codice_np) LIKE '%${esc(term)}%' OR UPPER(descrizione) LIKE '%${esc(term)}%')` : '1=1'
+      setRows((await queryRows(serviceUrl, where, 'codice_np ASC, OBJECTID ASC')).map(mapRow))
     } catch (e: any) {
       setMsg({ text: 'Errore caricamento: ' + (e?.message ?? e), ok: false })
     }
     setLoading(false)
-  }, [prezzariUrl])
-
+  }, [serviceUrl, filterText])
   React.useEffect(() => { void load() }, [load])
 
-  const applyFileDefaults = React.useCallback((selected: File | null) => {
-    setFile(selected)
-    if (!selected) return
-    const name = String(selected.name || '')
-    const matchYear = name.match(/(20\d{2})/)
-    const year = matchYear?.[1] || ''
-    if (!anno.trim() && year) setAnno(year)
-    if (!codice.trim() && year) setCodice(`SAR_LLPP_${year}`)
-    if (!descrizione.trim() && year) setDescrizione(`Prezzario LLPP Sardegna ${year}`)
-    if (!descrizione.trim() && !year) setDescrizione('Prezzario LLPP Sardegna')
-  }, [anno, codice, descrizione])
-
-  const onImport = async () => {
-    if (!prezzariUrl || !vociUrl || !analisiUrl) { setMsg({ text: 'Configura gli URL delle tre tabelle.', ok: false }); return }
-    if (!file) { setMsg({ text: 'Seleziona lo zip regionale del prezzario.', ok: false }); return }
-    const code = String(codice || '').trim()
-    const desc = String(descrizione || '').trim()
-    const year = Math.trunc(num(anno))
-    if (!code || !desc || !year) { setMsg({ text: 'Compila codice, descrizione e anno.', ok: false }); return }
-    setSaving(true)
-    setProgress('Lettura zip…')
-    try {
-      const existing = await queryAllObjectIds(prezzariUrl, `codice_prezzario = '${esc(code)}'`)
-      const existingVoci = await queryAllObjectIds(vociUrl, `codice_prezzario = '${esc(code)}'`)
-      const existingAnalisi = await queryAllObjectIds(analisiUrl, `codice_prezzario = '${esc(code)}'`)
-      if (existing.length || existingVoci.length || existingAnalisi.length) {
-        if (!window.confirm(`Esiste già materiale per il prezzario ${code}. Sostituirlo?`)) { setSaving(false); setProgress(''); return }
-        setProgress('Eliminazione versione precedente…')
-        await cleanupPrezzarioByCode(prezzariUrl, vociUrl, analisiUrl, code)
-      }
-
-      const parsed = await parseOfficialZip(file)
-      setProgress(`Import voci 0/${parsed.articoli.length}…`)
-      await addInChunks(vociUrl, parsed.articoli.map((r) => ({
-        codice_prezzario: code,
-        anno_prezzario: year,
-        origine_voce: 'REGIONE',
-        codice_voce: r.codice_voce,
-        descrizione: r.descrizione,
-        unita_misura: r.unita_misura,
-        prezzo_unitario: r.prezzo_unitario,
-        famiglia: r.famiglia,
-        capitolo: r.capitolo,
-        sottocapitolo: r.sottocapitolo,
-        categoria_default: r.categoria_default,
-        selezionabile: r.selezionabile,
-        attivo: r.attivo
-      })), 'Voce prezzario', (done, total) => setProgress(`Import voci ${done}/${total}…`))
-
-      setProgress(`Import analisi 0/${parsed.analisi.length}…`)
-      await addInChunks(analisiUrl, parsed.analisi.map((r) => ({
-        codice_prezzario: code,
-        codice_analisi: r.codice_analisi,
-        codice_elemento: r.codice_elemento,
-        descrizione_elemento: r.descrizione_elemento,
-        categoria_costo: r.categoria_costo,
-        quantita: r.quantita,
-        prezzo_unitario: r.prezzo_unitario,
-        importo: r.importo,
-        attivo: r.attivo
-      })), 'Analisi prezzario', (done, total) => setProgress(`Import analisi ${done}/${total}…`), 100)
-
-      setProgress('Registrazione metadati…')
-      await applyAttrs(prezzariUrl, {
-        codice_prezzario: code,
-        titolo_prezzario: desc,
-        anno_prezzario: year,
-        tipo_prezzario: 'REGIONE',
-        stato_prezzario: activateAfterImport ? 1 : 0,
-        origine_file: 'ZIP_CSV_REGIONE',
-        nome_file_origine: String(file?.name || ''),
-        data_import: Date.now(),
-        importato_da: String((window as any).__giiUserRole?.username || (window as any).__giiUserRole?.utente || ''),
-        note: `Importato da widget il ${new Date().toLocaleString('it-IT')} - voci: ${parsed.articoli.length}; analisi: ${parsed.analisi.length}`
-      })
-      if (activateAfterImport) {
-        const all = await queryRows(prezzariUrl, '1=1', 'OBJECTID DESC')
-        const target = all.find((r: any) => String(r.codice_prezzario || '') === code)
-        if (target?.objectid) await setOnlyOneActive(prezzariUrl, Number(target.objectid))
-      }
-      setMsg({ text: `Prezzario ${code} importato: ${parsed.articoli.length} voci e ${parsed.analisi.length} righe di analisi.`, ok: true })
-      setFile(null)
-      setProgress('')
-      await load()
-    } catch (e: any) {
-      try { await cleanupPrezzarioByCode(prezzariUrl, vociUrl, analisiUrl, code) } catch {}
-      setMsg({ text: 'Errore import: ' + (e?.message ?? e), ok: false })
-    } finally {
-      setSaving(false)
-      setProgress('')
-    }
+  const onEdit = (r: any) => {
+    setEditing(true)
+    setForm({
+      objectid: r.objectid,
+      codice_voce: String(r.codice_voce || ''),
+      descrizione: String(r.descrizione || ''),
+      unita_misura: String(r.unita_misura || ''),
+      prezzo_unitario: String(r.prezzo_unitario ?? ''),
+      attivo: String(num(r.attivo) === 0 ? '0' : '1'),
+      note: String(r.note || ''),
+      modalita_voce: String(r.modalita_voce ?? '1'),
+      anno_listino: asYear(r.anno_listino),
+      famiglia: normalizeFamily(r.famiglia),
+      capitolo: pad4(r.capitolo),
+      sottocapitolo: pad4(r.sottocapitolo),
+      progressivo_voce: pad4(r.progressivo_voce)
+    })
   }
-
-  const onToggleActive = async (r: any) => {
-    if (!prezzariUrl) return
+  const onCancel = () => { setEditing(false); setForm(emptyForm()) }
+  const onSave = async () => {
+    if (!String(form.descrizione || '').trim()) { setMsg({ text: 'Compila la descrizione.', ok: false }); return }
+    if (!String(form.unita_misura || '').trim()) { setMsg({ text: 'Compila l’unità di misura.', ok: false }); return }
+    if (normalizeModality(form.modalita_voce) === 1 && String(form.prezzo_unitario || '').trim() === '') { setMsg({ text: 'Per un Nuovo Prezzo elementare il prezzo non può essere vuoto.', ok: false }); return }
     setSaving(true)
     try {
-      if (num(r.stato_prezzario) === 1) {
-        await setPrezzarioStatus(prezzariUrl, Number(r.objectid), 2)
-        await load()
-        setMsg({ text: `Prezzario ${r.codice_prezzario} disattivato.`, ok: true })
-      } else {
-        await setOnlyOneActive(prezzariUrl, Number(r.objectid))
-        await load()
-        setMsg({ text: `Prezzario ${r.codice_prezzario} attivato.`, ok: true })
-      }
+      await applyAttrs(serviceUrl, {
+        descrizione: String(form.descrizione || '').trim(),
+        um: String(form.unita_misura || '').trim(),
+        prezzo: String(form.prezzo_unitario || '').trim() === '' ? null : round(num(form.prezzo_unitario), 4),
+        attivo: String(form.attivo) === '1' ? 1 : 0,
+        note: String(form.note || '').trim()
+      }, Number(form.objectid))
+      setMsg({ text: 'Nuovo Prezzo aggiornato.', ok: true })
+      onCancel()
+      await load()
     } catch (e: any) {
       setMsg({ text: 'Errore: ' + (e?.message ?? e), ok: false })
     }
     setSaving(false)
   }
-
   const onDelete = async (r: any) => {
-    if (num(r.stato_prezzario) === 1) { setMsg({ text: 'Disattiva prima il prezzario attivo, poi eliminalo.', ok: false }); return }
-    if (!window.confirm(`Eliminare il prezzario ${r.codice_prezzario} e tutte le sue voci/analisi?`)) return
+    if (!detailTableUrl) { setMsg({ text: 'Configura anche la tabella analisi nuovi prezzi per poter eliminare una voce in sicurezza.', ok: false }); return }
     setSaving(true)
     try {
-      setProgress('Eliminazione record collegati…')
-      const deleted = await cleanupPrezzarioByCode(prezzariUrl, vociUrl, analisiUrl, String(r.codice_prezzario || ''))
-      const residuiVoci = await queryAllObjectIds(vociUrl, `codice_prezzario = '${esc(String(r.codice_prezzario || ''))}'`)
-      const residuiAnalisi = await queryAllObjectIds(analisiUrl, `codice_prezzario = '${esc(String(r.codice_prezzario || ''))}'`)
-      const residuiMeta = await queryAllObjectIds(prezzariUrl, `codice_prezzario = '${esc(String(r.codice_prezzario || ''))}'`)
-      if (residuiVoci.length || residuiAnalisi.length || residuiMeta.length) {
-        throw new Error(`Eliminazione incompleta. Residui - voci: ${residuiVoci.length}, analisi: ${residuiAnalisi.length}, prezzari: ${residuiMeta.length}`)
+      const refs = await countReferences(detailTableUrl, Number(r.objectid))
+      if (refs > 0) {
+        setMsg({ text: 'Non puoi eliminare questo Nuovo Prezzo perché è utilizzato in una o più analisi di nuovi prezzi.', ok: false })
+        return
       }
+      if (!window.confirm(`Eliminare il Nuovo Prezzo "${r.codice_voce} — ${r.descrizione}"?`)) return
+      await deleteObjectIds(serviceUrl, [Number(r.objectid)])
       await load()
-      setMsg({ text: `Prezzario eliminato. Rimossi: ${deleted.voci} voci, ${deleted.analisi} analisi, ${deleted.meta} record prezzario.`, ok: true })
+      setMsg({ text: 'Nuovo Prezzo eliminato.', ok: true })
     } catch (e: any) {
       setMsg({ text: 'Errore: ' + (e?.message ?? e), ok: false })
     } finally {
       setSaving(false)
-      setProgress('')
     }
   }
 
@@ -707,48 +289,108 @@ export default function Widget(props: AllWidgetProps<IMConfig>) {
   return (
     <Fragment>
       <style>{styles}</style>
-      <div className='gpw'>
-        <div className='gpw-title' style={{ color: titleColor, fontSize: titleFontSize }}>{title}</div>
-        {(!prezzariUrl || !vociUrl || !analisiUrl) ? <div className='gpw-msg gpw-msg-err'>Configura gli URL delle tre tabelle nel setting del widget.</div> : null}
-        {msg && <div className={`gpw-msg ${msg.ok ? 'gpw-msg-ok' : 'gpw-msg-err'}`}>{msg.text}</div>}
-        <div className='gpw-card'>
-          <div className='gpw-grid'>
-            <div className='gpw-field'><div className='gpw-label'>File zip prezzario regionale</div><input className='gpw-input' type='file' accept='.zip' onChange={(e) => applyFileDefaults(((e.target as HTMLInputElement).files || [])[0] || null)} /></div>
-            <div className='gpw-field'><div className='gpw-label'>Anno</div><input className='gpw-input' value={anno} onChange={(e) => setAnno(e.target.value)} /></div>
-            <div className='gpw-field'><div className='gpw-label'>Codice prezzario</div><input className='gpw-input' value={codice} onChange={(e) => setCodice(e.target.value)} /></div>
-            <div className='gpw-field'><div className='gpw-label'>Descrizione</div><input className='gpw-input' value={descrizione} onChange={(e) => setDescrizione(e.target.value)} /></div>
+      <div className='gnp' style={{ '--gnp-toolbar-label-color': toolbarLabelColor, '--gnp-toolbar-label-font-size': `${toolbarLabelFontSize}px`, '--gnp-section-title-color': sectionTitleColor, '--gnp-section-title-font-size': `${sectionTitleFontSize}px`, '--gnp-detail-card-background': detailCardBackgroundColor, '--gnp-records-card-background': recordsCardBackgroundColor } as React.CSSProperties}>
+        <div className='gnp-title' style={{ color: titleColor, fontSize: titleFontSize }}>{title}</div>
+        {!serviceUrl ? <div className='gnp-msg gnp-err'>Configura l'URL della tabella nel setting del widget.</div> : null}
+        {msg && <div className={`gnp-msg ${msg.ok ? 'gnp-ok' : 'gnp-err'}`}>{msg.text}</div>}
+
+        <div className='gnp-toolbar'>
+          <div className='gnp-field' style={{ minWidth: 320, flex: '1 1 320px' }}>
+            <div className='gnp-label'>Filtro codice / descrizione</div>
+            <input className='gnp-input' value={filterText} onChange={(e) => setFilterText(e.target.value)} placeholder='cerca nuovo prezzo...' />
           </div>
-          <div style={{ marginTop: 10, padding: '8px 10px', background: '#fff8e1', border: '1px solid #f3d48b', borderRadius: 4, color: '#6b4e00', fontSize: 12, lineHeight: 1.5 }}>
-            <b>Istruzioni import prezzario regionale:</b> caricare <b>lo ZIP originale</b> del prezzario regionale <b>senza estrarlo</b>.
-            Il pacchetto deve contenere entrambi i CSV: anagrafica articoli e analisi prezzario. <b>Non</b> caricare i CSV separatamente.
-          </div>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, marginTop: 10, flexWrap: 'wrap' }}>
-            <label style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}><input type='checkbox' checked={activateAfterImport} onChange={(e) => setActivateAfterImport((e.target as HTMLInputElement).checked)} /> Attiva subito dopo l'import</label>
-            <div className='gpw-btns'>
-              <button className='gpw-btn gpw-primary' disabled={saving || !file} onClick={onImport}>{saving ? 'Import in corso…' : 'Importa prezzario'}</button>
+        </div>
+
+        {editing && (
+          <div className='gnp-panel'>
+            <div style={{ fontWeight: 700, color: sectionTitleColor, fontSize: sectionTitleFontSize, marginBottom: 10 }}>Modifica testata Nuovo Prezzo</div>
+            <div className='gnp-form'>
+              <div className='gnp-field'>
+                <div className='gnp-label'>Codice</div>
+                <input className='gnp-input gnp-readonly' value={form.codice_voce || ''} readOnly />
+              </div>
+              <div className='gnp-field'>
+                <div className='gnp-label'>Modalità</div>
+                <input className='gnp-input gnp-readonly' value={modalityLabel(form.modalita_voce)} readOnly />
+              </div>
+              <div className='gnp-field'>
+                <div className='gnp-label'>Anno</div>
+                <input className='gnp-input gnp-readonly' value={String(form.anno_listino || '')} readOnly />
+              </div>
+              <div className='gnp-field'>
+                <div className='gnp-label'>Famiglia</div>
+                <input className='gnp-input gnp-readonly' value={familyDisplay(form.famiglia)} readOnly />
+              </div>
+              <div className='gnp-field'>
+                <div className='gnp-label'>Capitolo</div>
+                <input className='gnp-input gnp-readonly' value={form.capitolo || ''} readOnly />
+              </div>
+              <div className='gnp-field'>
+                <div className='gnp-label'>Sottocapitolo</div>
+                <input className='gnp-input gnp-readonly' value={form.sottocapitolo || ''} readOnly />
+              </div>
+
+              <div className='gnp-field' style={{ gridColumn: '1 / span 3' }}>
+                <div className='gnp-label'>Descrizione</div>
+                <input className='gnp-input' value={form.descrizione || ''} onChange={(e) => setForm((f: any) => ({ ...f, descrizione: e.target.value }))} />
+              </div>
+              <div className='gnp-field'>
+                <div className='gnp-label'>UM</div>
+                <input className='gnp-input' value={form.unita_misura || ''} onChange={(e) => setForm((f: any) => ({ ...f, unita_misura: e.target.value }))} />
+              </div>
+              <div className='gnp-field'>
+                <div className='gnp-label'>Prezzo</div>
+                <input className={`gnp-input ${normalizeModality(form.modalita_voce) === 2 ? 'gnp-readonly' : ''}`} type='number' step='0.0001' value={form.prezzo_unitario || ''} readOnly={normalizeModality(form.modalita_voce) === 2} onChange={(e) => setForm((f: any) => ({ ...f, prezzo_unitario: e.target.value }))} />
+              </div>
+              <div className='gnp-field'>
+                <div className='gnp-label'>Attivo</div>
+                <select className='gnp-select' value={String(form.attivo ?? '1')} onChange={(e) => setForm((f: any) => ({ ...f, attivo: e.target.value }))}>
+                  <option value='1'>Sì</option>
+                  <option value='0'>No</option>
+                </select>
+              </div>
+              <div className='gnp-field' style={{ gridColumn: '1 / -1' }}>
+                <div className='gnp-label'>Note</div>
+                <textarea className='gnp-textarea' value={form.note || ''} onChange={(e) => setForm((f: any) => ({ ...f, note: e.target.value }))} />
+              </div>
+            </div>
+            <div style={{ display: 'flex', gap: 8, marginTop: 10 }}>
+              <button className='gnp-btn gnp-save' disabled={saving} onClick={() => void onSave()}>Aggiorna</button>
+              <button className='gnp-btn gnp-cancel' disabled={saving} onClick={onCancel}>Annulla</button>
             </div>
           </div>
-          {progress ? <div style={{ marginTop: 8, fontSize: 12, color: '#1F4E79', fontWeight: 700 }}>{progress}</div> : null}
-        </div>
-        <div className='gpw-table-wrap'>
-          <table className='gpw-table'>
-            <thead><tr><th>Anno</th><th>Codice</th><th>Titolo</th><th>Tipo</th><th>Stato</th><th>File</th><th>Importato il</th><th>Azioni</th></tr></thead>
+        )}
+
+        <div className='gnp-table-wrap'>
+          <table className='gnp-table'>
+            <thead>
+              <tr>
+                <th>Codice</th>
+                <th>Modalità</th>
+                <th>Famiglia</th>
+                <th>Descrizione</th>
+                <th>UM</th>
+                <th>Prezzo (€)</th>
+                <th>Attivo</th>
+                <th>Azioni</th>
+              </tr>
+            </thead>
             <tbody>
-              {rows.length === 0 ? <tr><td colSpan={8} style={{ padding: 16, textAlign: 'center', color: '#6b7280' }}>{loading ? 'Caricamento…' : 'Nessun prezzario caricato.'}</td></tr> : rows.map((r: any) => (
+              {rows.length === 0 ? (
+                <tr><td colSpan={8} style={{ padding: 16, textAlign: 'center', color: '#6b7280' }}>{loading ? 'Caricamento…' : 'Nessun Nuovo Prezzo.'}</td></tr>
+              ) : rows.map((r: any) => (
                 <tr key={r.objectid}>
-                  <td>{r.anno_prezzario}</td>
-                  <td><b>{r.codice_prezzario}</b></td>
-                  <td>{r.titolo_prezzario}</td>
-                  <td>{r.tipo_prezzario}</td>
-                  <td>{num(r.stato_prezzario) === 1 ? 'Attivo' : (num(r.stato_prezzario) === 0 ? 'In test' : 'Disattivato')}</td>
-                  <td>{r.nome_file_origine}</td>
-                  <td>{toDateValue(r.data_import) ? toDateValue(r.data_import).split('-').reverse().join('/') : ''}</td>
-                  <td>
-                    <div className='gpw-btns-inline'>
-                      <button className={`gpw-btn ${num(r.stato_prezzario) === 1 ? 'gpw-warning' : 'gpw-secondary'}`} disabled={saving} onClick={() => void onToggleActive(r)}>
-                        {num(r.stato_prezzario) === 1 ? 'Disattiva' : 'Attiva'}
-                      </button>
-                      <button className='gpw-btn gpw-danger' disabled={saving} onClick={() => void onDelete(r)}>Elimina</button>
+                  <td><b>{r.codice_voce}</b></td>
+                  <td>{modalityLabel(r.modalita_voce)}</td>
+                  <td>{familyDisplay(r.famiglia)}</td>
+                  <td>{r.descrizione}</td>
+                  <td>{r.unita_misura}</td>
+                  <td>{money(r.prezzo_unitario, 4)}</td>
+                  <td>{num(r.attivo) === 1 ? 'Sì' : 'No'}</td>
+                  <td style={{ whiteSpace: 'nowrap' }}>
+                    <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                      <button className='gnp-btn gnp-save' onClick={() => onEdit(r)}>Modifica</button>
+                      <button className='gnp-btn gnp-danger' onClick={() => void onDelete(r)}>Elimina</button>
                     </div>
                   </td>
                 </tr>

@@ -497,7 +497,7 @@ async function setOnlyOneActiveForType(importUrl: string, allRows: ImportRow[], 
 const styles = `
 .gpw { font-family: Arial, sans-serif; font-size: 13px; padding: 12px; height: 100%; display:flex; flex-direction:column; gap:10px; box-sizing:border-box; }
 .gpw-title { font-size:15px; font-weight:700; color:#1F4E79; border-bottom:2px solid #1F4E79; padding-bottom:6px; }
-.gpw-card { background:#f5f9ff; border:1px solid #c5d9f1; border-radius:6px; padding:12px; }
+.gpw-card { background:var(--gpw-detail-card-background, #f5f9ff); border:1px solid #c5d9f1; border-radius:6px; padding:12px; }
 .gpw-grid { display:grid; grid-template-columns:minmax(280px,1.35fr) 170px 120px minmax(260px,1.2fr); gap:10px; }
 .gpw-field { display:flex; flex-direction:column; gap:3px; }
 .gpw-label { font-size:var(--gpw-toolbar-label-font-size, 11px); font-weight:700; color:var(--gpw-toolbar-label-color, #1F4E79); }
@@ -519,12 +519,12 @@ const styles = `
 .gpw-secondary { background:#375623; color:#fff; }
 .gpw-warning { background:#b45f06; color:#fff; }
 .gpw-danger { background:#c00; color:#fff; }
-.gpw-table-wrap { flex:1; min-height:0; overflow:auto; border:1px solid #c5d9f1; border-radius:6px; }
+.gpw-table-wrap { flex:1; min-height:0; overflow:auto; border:1px solid #c5d9f1; border-radius:6px; background:var(--gpw-records-card-background, #f5f9ff); }
 .gpw-table { width:100%; border-collapse:collapse; font-size:12px; }
 .gpw-table th { background:#1F4E79; color:#fff; padding:7px 8px; text-align:left; position:sticky; top:0; z-index:1; white-space:nowrap; }
 .gpw-table td { padding:6px 8px; border-bottom:1px solid #e0eaf4; vertical-align:middle; }
-.gpw-table tbody tr:nth-child(odd) td { background:#f5f9ff; }
-.gpw-table tbody tr:nth-child(even) td { background:#fff; }
+.gpw-table tbody tr:nth-child(odd) td { background:var(--gpw-records-card-background, #f5f9ff); }
+.gpw-table tbody tr:nth-child(even) td { background:linear-gradient(rgba(255,255,255,0.55), rgba(255,255,255,0.55)), var(--gpw-records-card-background, #f5f9ff); }
 .gpw-msg { padding:7px 12px; border-radius:4px; font-size:12px; font-weight:700; }
 .gpw-msg-ok { background:#e2efda; color:#375623; border:1px solid #b8d4b0; }
 .gpw-msg-err { background:#fce4e4; color:#c00; border:1px solid #f5b8b8; }
@@ -540,6 +540,8 @@ export default function Widget(props: AllWidgetProps<IMConfig>) {
   const sectionTitleFontSize = Number(cfg.sectionTitleFontSize || 12.5)
   const toolbarLabelColor = String(cfg.toolbarLabelColor || '#1F4E79')
   const toolbarLabelFontSize = Number(cfg.toolbarLabelFontSize || 11.5)
+  const detailCardBackgroundColor = String(cfg.detailCardBackgroundColor || '#f5f9ff')
+  const recordsCardBackgroundColor = String(cfg.recordsCardBackgroundColor || '#f5f9ff')
   const [rows, setRows] = React.useState<ImportRow[]>([])
   const [loading, setLoading] = React.useState(false)
   const [saving, setSaving] = React.useState(false)
@@ -710,7 +712,7 @@ export default function Widget(props: AllWidgetProps<IMConfig>) {
   return (
     <Fragment>
       <style>{styles}</style>
-      <div className='gpw' style={{ '--gpw-toolbar-label-color': toolbarLabelColor, '--gpw-toolbar-label-font-size': `${toolbarLabelFontSize}px`, '--gpw-section-title-color': sectionTitleColor, '--gpw-section-title-font-size': `${sectionTitleFontSize}px` } as React.CSSProperties}>
+      <div className='gpw' style={{ '--gpw-toolbar-label-color': toolbarLabelColor, '--gpw-toolbar-label-font-size': `${toolbarLabelFontSize}px`, '--gpw-section-title-color': sectionTitleColor, '--gpw-section-title-font-size': `${sectionTitleFontSize}px`, '--gpw-detail-card-background': detailCardBackgroundColor, '--gpw-records-card-background': recordsCardBackgroundColor } as React.CSSProperties}>
         <div className='gpw-title' style={{ color: titleColor, fontSize: titleFontSize }}>{title}</div>
         {(!importUrl || !cfg.regionaleArticoliUrl || !cfg.regionaleAnalisiUrl) ? <div className='gpw-msg gpw-msg-err'>Configura almeno la tabella import e le due tabelle del prezzario regionale nel setting del widget.</div> : null}
         {msg && <div className={`gpw-msg ${msg.ok ? 'gpw-msg-ok' : 'gpw-msg-err'}`}>{msg.text}</div>}

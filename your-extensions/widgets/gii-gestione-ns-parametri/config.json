@@ -1,4 +1,8 @@
 {
   "serviceUrl": "",
-  "title": "GII - Gestione Parametri Nota Spese"
+  "serviceUrlSanzioniAmm": "",
+  "serviceUrlAttrezzatureAgrTec": "",
+  "title": "Gestione parametri",
+  "detailCardBackgroundColor": "#f5f9ff",
+  "recordsCardBackgroundColor": "#f5f9ff"
 }

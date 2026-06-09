@@ -21,6 +21,9 @@ export default function Setting(props: AllWidgetSettingProps<IMConfig>) {
   const sectionTitleFontSize = Number(cfg.sectionTitleFontSize || 12.5)
   const toolbarLabelColor = String(cfg.toolbarLabelColor || '#1F4E79')
   const toolbarLabelFontSize = Number(cfg.toolbarLabelFontSize || 11.5)
+  const leftPanelBackgroundColor = String(cfg.leftPanelBackgroundColor || '#f5f9ff')
+  const detailCardBackgroundColor = String(cfg.detailCardBackgroundColor || '#f5f9ff')
+  const recordsCardBackgroundColor = String(cfg.recordsCardBackgroundColor || '#f5f9ff')
   const leftColumnWidthPct = Number(cfg.leftColumnWidthPct || 25)
   const centerColumnWidthPct = Number(cfg.centerColumnWidthPct || 45)
   const rightColumnWidthPct = Number(cfg.rightColumnWidthPct || 30)
@@ -88,6 +91,36 @@ export default function Setting(props: AllWidgetSettingProps<IMConfig>) {
         <input style={inp} type='number' min={10} max={70} step={1} value={rightColumnWidthPct} onChange={(e) => set('rightColumnWidthPct', Number(e.target.value || 30))} />
 
         <div style={hint}>Le tre larghezze vengono normalizzate automaticamente e si applicano sia alla barra superiore sia ai tre pannelli sottostanti.</div>
+      </div>
+
+      <div style={section}>
+        <div style={sectionTitle}>Pannello di navigazione</div>
+        <label style={lbl}>Colore di sfondo del pannello sinistro</label>
+        <div style={colorRow}>
+          <input style={colorInp} type='color' value={leftPanelBackgroundColor} onChange={(e) => set('leftPanelBackgroundColor', e.target.value)} aria-label='Colore di sfondo del pannello sinistro' />
+          <input style={inp} value={leftPanelBackgroundColor} onChange={(e) => set('leftPanelBackgroundColor', e.target.value)} placeholder='#f5f9ff' />
+        </div>
+        <div style={hint}>Imposta lo sfondo del pannello sinistro dedicato alla navigazione per livelli.</div>
+      </div>
+
+      <div style={section}>
+        <div style={sectionTitle}>Scheda dettaglio voce</div>
+        <label style={lbl}>Colore di sfondo</label>
+        <div style={colorRow}>
+          <input style={colorInp} type='color' value={detailCardBackgroundColor} onChange={(e) => set('detailCardBackgroundColor', e.target.value)} aria-label='Colore di sfondo della scheda dettaglio voce' />
+          <input style={inp} value={detailCardBackgroundColor} onChange={(e) => set('detailCardBackgroundColor', e.target.value)} placeholder='#f5f9ff' />
+        </div>
+        <div style={hint}>Imposta lo sfondo della scheda in cui sono visualizzati i dati della voce selezionata.</div>
+      </div>
+
+      <div style={section}>
+        <div style={sectionTitle}>Scheda elenco voci</div>
+        <label style={lbl}>Colore di sfondo</label>
+        <div style={colorRow}>
+          <input style={colorInp} type='color' value={recordsCardBackgroundColor} onChange={(e) => set('recordsCardBackgroundColor', e.target.value)} aria-label='Colore di sfondo della scheda elenco voci' />
+          <input style={inp} value={recordsCardBackgroundColor} onChange={(e) => set('recordsCardBackgroundColor', e.target.value)} placeholder='#f5f9ff' />
+        </div>
+        <div style={hint}>Imposta lo sfondo della scheda in cui sono visualizzate le voci del prezzario.</div>
       </div>
 
       <div style={section}>

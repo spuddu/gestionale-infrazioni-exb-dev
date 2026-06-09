@@ -62,6 +62,7 @@ export interface Config {
   nsNotaSpeseDettaglioUrl?: string
   nsParametriUrl?: string
   nsParametroCode?: string
+  attrezzatureParametriUrl?: string
   regolamentoArticoliUrl?: string
 
   // --- Ruolo
@@ -235,6 +236,7 @@ export const defaultConfig: Config = {
   nsNotaSpeseDettaglioUrl: '',
   nsParametriUrl: '',
   nsParametroCode: 'SPESE_GENERALI_PERC',
+  attrezzatureParametriUrl: '',
   regolamentoArticoliUrl: '',
 
   roleCode: 'DT',
