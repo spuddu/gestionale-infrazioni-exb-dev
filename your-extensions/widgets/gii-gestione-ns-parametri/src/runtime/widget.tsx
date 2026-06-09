@@ -88,7 +88,9 @@ const styles = `
   .gns-table td { padding: 6px 8px; border-bottom: 1px solid #e0eaf4; vertical-align: middle; }
   .gns-table tbody tr:nth-child(odd) td { background: var(--gns-records-card-background, #f5f9ff); }
   .gns-table tbody tr:nth-child(even) td { background: linear-gradient(rgba(255,255,255,0.55), rgba(255,255,255,0.55)), var(--gns-records-card-background, #f5f9ff); }
-  .gns-table tr:hover td { background: #ddeeff; }
+  .gns-table-attrezzature tbody tr:nth-child(odd) td { background: #ffffff; }
+  .gns-table-attrezzature tbody tr:nth-child(even) td { background: #eaf2fb; }
+  .gns-table tr:hover td, .gns-table-attrezzature tbody tr:hover td { background: #d8eaff; }
   .gns-act { cursor: pointer; font-size: 11px; padding: 2px 8px; border-radius: 3px; border: none; margin-right: 4px; font-weight: bold; }
   .gns-act-edit { background: #1B6584; color: #fff; }
   .gns-act-del { background: #c00; color: #fff; }
@@ -203,13 +205,18 @@ function formatCell(v: any, kind: string): string {
   return String(v)
 }
 
-async function fetchRows(url: string): Promise<any[]> {
+async function fetchRows(url: string, orderByCode = false): Promise<any[]> {
   const fl = await getLayer(url)
   const q = fl.createQuery ? fl.createQuery() : {}
   q.where = '1=1'
   q.outFields = ['*']
   q.returnGeometry = false
-  q.orderByFields = [`${String(fl?.objectIdField || 'OBJECTID')} DESC`]
+  const oidField = String(fl?.objectIdField || 'OBJECTID')
+  const fields = fieldMapForLayer(fl)
+  const codeField = fields.codice_parametro
+  q.orderByFields = orderByCode && codeField
+    ? [`${codeField} ASC`, `${oidField} ASC`]
+    : [`${oidField} DESC`]
   const res = await fl.queryFeatures(q)
   return (res?.features || []).map((feature: any) => {
     const attrs = feature?.attributes || {}
@@ -257,10 +264,10 @@ async function deleteRow(url: string, objectid: number): Promise<void> {
   if (result?.error) throw new Error(result.error.message || 'Eliminazione non riuscita.')
 }
 
-function exportCsv(rows: any[], title: string, definition: DatasetDefinition, includeTechnicalCode: boolean) {
+function exportCsv(rows: any[], title: string, definition: DatasetDefinition, includeParameterCode: boolean) {
   const allFields = definition.hasCategory ? ['codice_parametro', 'categoria_parametro', ...COMMON_FIELD_ORDER.slice(1)] : COMMON_FIELD_ORDER
   const visibleFields = definition.key === 'attrezzature' ? allFields.filter((field) => field !== 'valore_testo') : allFields
-  const fields = includeTechnicalCode ? visibleFields : visibleFields.filter((field) => field !== 'codice_parametro')
+  const fields = includeParameterCode ? visibleFields : visibleFields.filter((field) => field !== 'codice_parametro')
   const header = fields.join(',')
   const body = rows.map((row) => fields.map((field) => `"${String(row?.[field] ?? '').replace(/"/g, '""')}"`).join(',')).join('\n')
   const blob = new Blob([header + '\n' + body], { type: 'text/csv;charset=utf-8;' })
@@ -472,6 +479,7 @@ export default function Widget(props: AllWidgetProps<IMConfig>) {
 
   const definition = activeDataset ? DATASETS[activeDataset] : null
   const isAdmin = access.profiloCod === 'ADMIN' || access.ruoloCod === 'ADMIN'
+  const showParameterCode = isAdmin || definition?.key === 'attrezzature'
   const serviceUrlByDataset: Record<DatasetKey, string> = {
     notaSpese: String(cfg.serviceUrl || '').trim(),
     sanzioniAmm: String(cfg.serviceUrlSanzioniAmm || '').trim(),
@@ -494,10 +502,10 @@ export default function Widget(props: AllWidgetProps<IMConfig>) {
   const load = React.useCallback(async () => {
     if (!resolvedUrl) { setRows([]); return }
     setLoading(true)
-    try { setRows(await fetchRows(resolvedUrl)) }
+    try { setRows(await fetchRows(resolvedUrl, definition?.key === 'attrezzature')) }
     catch (e: any) { setRows([]); setMsg({ text: 'Errore caricamento: ' + (e?.message ?? e), ok: false }) }
     setLoading(false)
-  }, [resolvedUrl])
+  }, [resolvedUrl, definition?.key])
 
   React.useEffect(() => {
     setEditing(false)
@@ -522,7 +530,7 @@ export default function Widget(props: AllWidgetProps<IMConfig>) {
   }, [editing, definition?.key, form.attrezzatura_tipo, form.descrizione])
 
   React.useEffect(() => {
-    if (!editing || form.objectid != null || adminCodeOverride || !definition) return
+    if (!editing || form.objectid != null || adminCodeOverride || !definition || definition.key === 'attrezzature') return
     const generated = generateParameterCode(
       definition,
       form.categoria_parametro,
@@ -588,7 +596,11 @@ export default function Widget(props: AllWidgetProps<IMConfig>) {
       nextForm.categoria_parametro = category
     }
 
-    if (nextForm.objectid == null && (!isAdmin || !String(nextForm.codice_parametro || '').trim())) {
+    if (definition.key === 'attrezzature' && !String(nextForm.codice_parametro || '').trim()) {
+      setMsg({ text: 'Compilare il codice dell’attrezzatura.', ok: false })
+      return
+    }
+    if (nextForm.objectid == null && definition.key !== 'attrezzature' && (!isAdmin || !String(nextForm.codice_parametro || '').trim())) {
       nextForm.codice_parametro = generateParameterCode(
         definition,
         nextForm.categoria_parametro,
@@ -661,15 +673,15 @@ export default function Widget(props: AllWidgetProps<IMConfig>) {
         {!editing && (
           <div style={{ display: 'flex', gap: 8 }}>
             <button className="gns-btn gns-btn-new" onClick={onNew} disabled={!resolvedUrl}>+ Nuovo parametro</button>
-            <button className="gns-btn gns-btn-export" onClick={() => exportCsv(rows, `${title}_${definition.shortLabel}`, definition, isAdmin)} disabled={rows.length === 0}>⬇ Esporta CSV</button>
+            <button className="gns-btn gns-btn-export" onClick={() => exportCsv(rows, `${title}_${definition.shortLabel}`, definition, showParameterCode)} disabled={rows.length === 0}>⬇ Esporta CSV</button>
           </div>
         )}
 
         {editing && (
           <div className="gns-form">
-            {isAdmin && (
+            {showParameterCode && (
               <div className="gns-field">
-                <div className="gns-label">Codice parametro (tecnico)</div>
+                <div className="gns-label">{definition.key === 'attrezzature' ? 'Codice' : 'Codice parametro (tecnico)'}</div>
                 <input
                   className="gns-input"
                   value={form.codice_parametro || ''}
@@ -762,10 +774,10 @@ export default function Widget(props: AllWidgetProps<IMConfig>) {
 
         <div className="gns-table-wrap">
           {loading ? <div className="gns-empty">Caricamento...</div> : (
-            <table className="gns-table">
+            <table className={`gns-table${definition.key === 'attrezzature' ? ' gns-table-attrezzature' : ''}`}>
               <thead>
                 <tr>
-                  {isAdmin && <th>Codice parametro</th>}
+                  {showParameterCode && <th>{definition.key === 'attrezzature' ? 'Codice' : 'Codice parametro'}</th>}
                   {definition.hasCategory && <th>Categoria</th>}
                   <th>Descrizione parametro</th>
                   <th>Anno</th>
@@ -779,10 +791,10 @@ export default function Widget(props: AllWidgetProps<IMConfig>) {
                 </tr>
               </thead>
               <tbody>
-                {rows.length === 0 && <tr><td colSpan={(definition.hasCategory ? 10 : 9) + (isAdmin ? 1 : 0) - (definition.key === 'attrezzature' ? 1 : 0)} className="gns-empty">Nessun parametro presente</td></tr>}
+                {rows.length === 0 && <tr><td colSpan={(definition.hasCategory ? 10 : 9) + (showParameterCode ? 1 : 0) - (definition.key === 'attrezzature' ? 1 : 0)} className="gns-empty">Nessun parametro presente</td></tr>}
                 {rows.map((row, index) => (
                   <tr key={row.objectid || index}>
-                    {isAdmin && <td>{formatCell(row.codice_parametro, 'text')}</td>}
+                    {showParameterCode && <td>{formatCell(row.codice_parametro, 'text')}</td>}
                     {definition.hasCategory && <td>{categoryLabel(row.categoria_parametro)}</td>}
                     <td>{formatCell(row.descrizione, 'text')}</td>
                     <td>{formatCell(row.anno_riferimento, 'int')}</td>

@@ -2598,7 +2598,15 @@ function isArt30CaseCode (codiceCasistica: string): boolean {
   return codes.has('C104_DANNEGGIAMENTO_PERDITA_ATTREZZATURE') || codes.has('C104_ATTREZZATURE_DANNEGGIATE')
 }
 
-type Art30EquipmentSelection = { quantita: number, valoreUnitario: number | null, importo: number }
+type Art30EquipmentSelection = {
+  codice: string
+  descrizione: string
+  quantita: number
+  valoreUnitario: number | null
+  importo: number
+}
+
+const ART30_EQUIPMENT_ORDER: Art30EquipmentKind[] = ['tessera', 'curve', 'sifoni', 'paratoie']
 
 function parseArt30EquipmentSelections (data: Record<string, any>): Map<Art30EquipmentKind, Art30EquipmentSelection> {
   const out = new Map<Art30EquipmentKind, Art30EquipmentSelection>()
@@ -2608,16 +2616,29 @@ function parseArt30EquipmentSelections (data: Record<string, any>): Map<Art30Equ
     if (!text) continue
     const kind = art30EquipmentKindFromText(text)
     if (!kind) continue
+    const quantityMarker = text.match(/\s+—\s+Quantità:\s*([0-9.,]+)/i)
+    const prefix = quantityMarker?.index != null ? text.slice(0, quantityMarker.index).trim() : text
+    const codeMatch = prefix.match(/^(.*?)\s+—\s+Codice:\s*(.+)$/i)
+    const descrizione = String(codeMatch?.[1] || prefix || ART30_EQUIPMENT_META[kind].label).trim()
+    const codice = String(codeMatch?.[2] || '').trim()
     const full = text.match(/Quantità:\s*([0-9.,]+).*?Valore unitario:\s*([0-9.,]+)\s*€.*?Importo:\s*([0-9.,]+)\s*€/i)
     if (full) {
       const quantita = parseEuroTextValue(full[1]) || 0
       const valoreUnitario = parseEuroTextValue(full[2])
       const importo = parseEuroTextValue(full[3]) || 0
-      if (quantita > 0 && importo >= 0) out.set(kind, { quantita, valoreUnitario, importo })
+      if (quantita > 0 && importo >= 0) out.set(kind, { codice, descrizione, quantita, valoreUnitario, importo })
       continue
     }
     const legacyAmount = parseEuroTextValue(text)
-    if (legacyAmount != null && legacyAmount >= 0) out.set(kind, { quantita: 1, valoreUnitario: legacyAmount, importo: legacyAmount })
+    if (legacyAmount != null && legacyAmount >= 0) {
+      out.set(kind, {
+        codice,
+        descrizione: descrizione || ART30_EQUIPMENT_META[kind].label,
+        quantita: 1,
+        valoreUnitario: legacyAmount,
+        importo: legacyAmount
+      })
+    }
   }
   return out
 }
@@ -2816,6 +2837,37 @@ function buildAutomaticSanzioneCalculation (
   const speseNotifica = speseManuali != null && Number.isFinite(speseManuali)
     ? Math.max(0, speseManuali)
     : speseNotificaAutomatica
+
+  // Gli importi e il dettaglio dell'Art. 30 costituiscono uno snapshot tecnico
+  // definito nella fase AGR/TEC. La fase amministrativa deve applicarli senza
+  // ricostruirli dai parametri correnti, che contengono valori unitari.
+  const art30Snapshot = { ...(data || {}), ...(previousDraft || {}) }
+  const art30SnapshotDetail = String(pickAttrCI(art30Snapshot, ['attrezzature_rimborso_dettaglio']) || '')
+  const art30SnapshotGrossRaw = pickAttrCI(art30Snapshot, ['attrezzature_rimborso_importo'])
+  const art30SnapshotCauzioneRaw = pickAttrCI(art30Snapshot, ['attrezzature_cauzione_decurtata'])
+  const art30SnapshotNettoRaw = pickAttrCI(art30Snapshot, ['attrezzature_importo_netto'])
+  const art30SnapshotGross = parseNumberInput(art30SnapshotGrossRaw)
+  const art30SnapshotCauzione = parseNumberInput(art30SnapshotCauzioneRaw)
+  const art30Selections = parseArt30EquipmentSelections(art30Snapshot)
+  const art30DetailGross = Array.from(art30Selections.values()).reduce((sum, item) => sum + (Number(item.importo) || 0), 0)
+  const hasArt30Snapshot = !!art30SnapshotDetail.trim() ||
+    (art30SnapshotGrossRaw != null && art30SnapshotGrossRaw !== '') ||
+    (art30SnapshotCauzioneRaw != null && art30SnapshotCauzioneRaw !== '') ||
+    (art30SnapshotNettoRaw != null && art30SnapshotNettoRaw !== '')
+
+  if (hasArt30Snapshot) {
+    const calculatedRimborsoAttrezzature = rimborsoAttrezzature
+    const calculatedCauzioneDecurtata = cauzioneDecurtata
+    rimborsoAttrezzature = art30SnapshotGross != null && Number.isFinite(art30SnapshotGross)
+      ? Math.max(0, art30SnapshotGross)
+      : (art30DetailGross > 0 ? Math.max(0, art30DetailGross) : calculatedRimborsoAttrezzature)
+    cauzioneDecurtata = art30CauzioneSelected(art30Snapshot)
+      ? (art30SnapshotCauzione != null && Number.isFinite(art30SnapshotCauzione)
+          ? Math.max(0, art30SnapshotCauzione)
+          : calculatedCauzioneDecurtata)
+      : 0
+  }
+
   const importoNettoAttrezzature = Math.max(0, rimborsoAttrezzature - cauzioneDecurtata)
   const sanzioneRidotta = riduzioneImporto != null
     ? riduzioneImporto
@@ -2838,7 +2890,7 @@ function buildAutomaticSanzioneCalculation (
     attrezzature_rimborso_importo: roundMoneyValue(rimborsoAttrezzature),
     attrezzature_cauzione_decurtata: roundMoneyValue(cauzioneDecurtata),
     attrezzature_importo_netto: roundMoneyValue(importoNettoAttrezzature),
-    attrezzature_rimborso_dettaglio: attrezzatureDettaglio.join('\n'),
+    attrezzature_rimborso_dettaglio: art30SnapshotDetail.trim() ? art30SnapshotDetail : attrezzatureDettaglio.join('\n'),
     pagamento_importo_totale: roundMoneyValue(totale),
     sanzione_dettaglio_calcolo: dettaglio.join('\n'),
     sanzione_calcolata_il: currentCalcDate || Date.now(),
@@ -3555,6 +3607,7 @@ function buildSanzioneGroups (
   const pieListaCount = selectedRaccordi.filter(r => isPieListaParametro(paramByCode.get(r.codice_parametro) || null)).length
   const art30EquipmentSelections = parseArt30EquipmentSelections(data || {})
   const art30Equipment = new Set(art30EquipmentSelections.keys())
+  const art30CauzioneImporto = Math.max(0, parseNumberInput(pickAttrCI(data || {}, ['attrezzature_cauzione_decurtata'])) || 0)
   const groups = new Map<string, SanzioneConsultivaGroup>()
 
   selectedRaccordi.forEach(r => {
@@ -3610,15 +3663,22 @@ function buildSanzioneGroups (
       const comunicazioneTardivaValue = r.codice_casistica.includes('C114') && pCode.includes('EURO_HA')
         ? comunicazioneTardivaCalculatedValueText(data || {}, parametro)
         : ''
-      const art30Kind = isArt30CaseCode(r.codice_casistica) ? art30EquipmentKindFromText(`${r.codice_parametro} ${r.descrizione} ${parametro?.descrizione || ''}`) : null
+      const isArt30 = isArt30CaseCode(r.codice_casistica)
+      const art30Categoria = String(parametro?.categoria_parametro || '').toUpperCase()
+      const art30Kind = isArt30 && ['ATTREZZATURA', 'RIMBORSO'].includes(art30Categoria)
+        ? art30EquipmentKindFromText(`${r.codice_parametro} ${r.descrizione} ${parametro?.descrizione || ''}`)
+        : null
       const art30EquipmentValue = art30Kind ? art30EquipmentSelections.get(art30Kind)?.importo : null
+      const art30CauzioneValue = isArt30 && art30Categoria === 'CAUZIONE' && art30CauzioneImporto > 0
+        ? art30CauzioneImporto
+        : null
       g.voci.push({
         codiceParametro: r.codice_parametro,
         descrizione: voceLabel,
         articoloSanzione: r.articolo_sanzione,
         articoliSanzione: voceArticoliSanzione,
         parametro,
-        valueOverride: nsValue || art15Value || comunicazioneTardivaValue || (art30EquipmentValue != null ? formatEuroText(art30EquipmentValue) : '')
+        valueOverride: nsValue || art15Value || comunicazioneTardivaValue || (art30CauzioneValue != null ? formatEuroText(art30CauzioneValue) : '') || (art30EquipmentValue != null ? formatEuroText(art30EquipmentValue) : '')
       })
     }
   })
@@ -4055,6 +4115,101 @@ function DettaglioImportiContent (props: { value: any }) {
   )
 }
 
+
+function Art30SnapshotSummary (props: { data: Record<string, any> }) {
+  const st = useAdminStyle()
+  const d = props.data || {}
+  const selections = parseArt30EquipmentSelections(d)
+  const rows = ART30_EQUIPMENT_ORDER
+    .map(kind => ({ kind, selection: selections.get(kind) }))
+    .filter(item => !!item.selection) as Array<{ kind: Art30EquipmentKind, selection: Art30EquipmentSelection }>
+  const lordo = moneyAttr(d, 'attrezzature_rimborso_importo')
+  const cauzione = moneyAttr(d, 'attrezzature_cauzione_decurtata')
+  const netto = moneyAttr(d, 'attrezzature_importo_netto')
+  const rawDetail = String(pickAttrCI(d, ['attrezzature_rimborso_dettaglio']) || '').trim()
+  const hasData = rows.length > 0 || !!rawDetail || lordo > 0 || cauzione > 0 || netto > 0
+  if (!hasData) return null
+
+  const gridColumns = 'minmax(78px, 0.75fr) minmax(190px, 1.65fr) minmax(68px, 0.55fr) minmax(105px, 0.85fr) minmax(105px, 0.85fr)'
+  const headStyle: React.CSSProperties = {
+    padding: '7px 8px',
+    fontSize: 11,
+    fontWeight: 900,
+    color: st.formInnerHeaderColor || '#0f4c81',
+    background: st.formInnerHeaderBg || '#eaf3fb',
+    borderBottom: `1px solid ${st.formCardBorderColor || '#c6d7ea'}`,
+    minWidth: 0
+  }
+  const cellStyle: React.CSSProperties = {
+    padding: '7px 8px',
+    fontSize: Number(st.formFieldFontSize ?? 15),
+    color: '#111827',
+    minWidth: 0,
+    overflowWrap: 'anywhere',
+    borderBottom: `1px solid ${st.formCardBorderColor || '#d8e6f7'}`
+  }
+
+  return (
+    <details
+      open
+      style={{
+        border: `${Number(st.formExpandableCardBorderWidth ?? 1)}px solid ${st.formExpandableCardBorderColor || '#c6d7ea'}`,
+        borderRadius: 10,
+        background: st.formExpandableCardBg || '#f9fafb',
+        padding: 10
+      }}
+    >
+      <summary style={{ cursor: 'pointer', fontWeight: 900, color: st.formInnerHeaderColor || '#0f4c81', fontSize: Number(st.formInnerHeaderFontSize ?? 14) }}>
+        Riepilogo rimborsi attrezzature e cauzione
+      </summary>
+
+      <div style={{ marginTop: 10 }}>
+        {rows.length > 0 ? (
+          <div style={{ border: `1px solid ${st.formCardBorderColor || '#c6d7ea'}`, borderRadius: Number(st.formCardBorderRadius ?? 8), overflow: 'hidden', background: '#fff' }}>
+            <div style={{ display: 'grid', gridTemplateColumns: gridColumns }}>
+              <div style={headStyle}>Codice</div>
+              <div style={headStyle}>Attrezzatura</div>
+              <div style={{ ...headStyle, textAlign: 'right' }}>Quantità</div>
+              <div style={{ ...headStyle, textAlign: 'right' }}>Valore unitario</div>
+              <div style={{ ...headStyle, textAlign: 'right' }}>Importo</div>
+            </div>
+            {rows.map((item, index) => {
+              const row = item.selection
+              const bg = index % 2 === 0 ? '#f7fbff' : '#ffffff'
+              return (
+                <div key={item.kind} style={{ display: 'grid', gridTemplateColumns: gridColumns, background: bg }}>
+                  <div style={cellStyle}>{row.codice || '—'}</div>
+                  <div style={{ ...cellStyle, fontWeight: 700 }}>{row.descrizione || ART30_EQUIPMENT_META[item.kind].label}</div>
+                  <div style={{ ...cellStyle, textAlign: 'right' }}>{Number(row.quantita || 0).toLocaleString('it-IT', { maximumFractionDigits: 2 })}</div>
+                  <div style={{ ...cellStyle, textAlign: 'right' }}>{row.valoreUnitario != null ? formatEuroAmount(row.valoreUnitario) : '—'}</div>
+                  <div style={{ ...cellStyle, textAlign: 'right', fontWeight: 800 }}>{formatEuroAmount(row.importo)}</div>
+                </div>
+              )
+            })}
+            {cauzione > 0 && (
+              <div style={{ display: 'grid', gridTemplateColumns: gridColumns, background: rows.length % 2 === 0 ? '#f7fbff' : '#ffffff' }}>
+                <div style={cellStyle}>—</div>
+                <div style={{ ...cellStyle, fontWeight: 700 }}>Decurtazione della cauzione</div>
+                <div style={{ ...cellStyle, textAlign: 'right' }}>—</div>
+                <div style={{ ...cellStyle, textAlign: 'right' }}>—</div>
+                <div style={{ ...cellStyle, textAlign: 'right', fontWeight: 900, color: '#b42318' }}>− {formatEuroAmount(cauzione)}</div>
+              </div>
+            )}
+          </div>
+        ) : (
+          <InfoBox>{rawDetail}</InfoBox>
+        )}
+
+        <div style={{ display: 'grid', gridTemplateColumns: ADMIN_COMPACT_GRID_COLUMNS, gap: 10, marginTop: 10 }}>
+          <StatusSummaryItem label='Rimborso lordo' value={formatEuroAmount(lordo)} tone='auto' />
+          <StatusSummaryItem label='Cauzione decurtata' value={formatEuroAmount(cauzione)} tone={cauzione > 0 ? 'warn' : 'auto'} />
+          <StatusSummaryItem label='Rimborso netto' value={formatEuroAmount(netto)} tone='total' />
+        </div>
+      </div>
+    </details>
+  )
+}
+
 function ParametriSanzionatoriSection (props: { loadState: SanzioneConsultivaLoadState, data: Record<string, any>, fields: LayerFieldInfo[], canEdit: boolean, onChange: (name: string, value: any) => void }) {
   const st = useAdminStyle()
   const { loadState } = props
@@ -4083,6 +4238,7 @@ function ParametriSanzionatoriSection (props: { loadState: SanzioneConsultivaLoa
       {urlsReady && !loading && !error && casistiche.length > 0 && groups.length === 0 && (
         <InfoBox kind='warn'>Sono presenti violazioni contestate, ma non risultano raccordi attivi nelle tabelle configurate.</InfoBox>
       )}
+      <Art30SnapshotSummary data={d} />
       {urlsReady && groups.length > 0 && (
         <div style={{ display: 'grid', gap: 10 }}>
           <div style={{ display: 'grid', gap: 10 }}>

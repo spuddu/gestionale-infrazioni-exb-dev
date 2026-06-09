@@ -390,6 +390,89 @@ function moneyIt (v: number): string {
   return roundMoney(v).toLocaleString('it-IT', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + ' €'
 }
 
+type Art30RimborsoPdfRow = {
+  codice: string
+  descrizione: string
+  quantita: number
+  valoreUnitario: number | null
+  importo: number | null
+}
+
+function parseArt30Number (value: any): number | null {
+  if (value == null || value === '') return null
+  if (typeof value === 'number') return Number.isFinite(value) ? value : null
+  const text = String(value).trim()
+  if (!text) return null
+  const normalized = text.includes(',')
+    ? text.replace(/\s/g, '').replace(/\./g, '').replace(',', '.')
+    : text.replace(/\s/g, '')
+  const parsed = Number(normalized)
+  return Number.isFinite(parsed) ? parsed : null
+}
+
+function parseArt30DetailForPdf (raw: any): Art30RimborsoPdfRow[] {
+  const out: Art30RimborsoPdfRow[] = []
+  for (const line of String(raw ?? '').split(/\r?\n/)) {
+    const text = line.trim()
+    if (!text) continue
+    const quantitaMatch = text.match(/\s+—\s+Quantità:\s*([0-9.,]+)/i)
+    if (!quantitaMatch || quantitaMatch.index == null) continue
+    const prefix = text.slice(0, quantitaMatch.index).trim()
+    const codiceMatch = prefix.match(/^(.*?)\s+—\s+Codice:\s*(.+)$/i)
+    const descrizione = String(codiceMatch?.[1] || prefix).trim()
+    const codice = String(codiceMatch?.[2] || '').trim()
+    const quantita = parseArt30Number(quantitaMatch[1])
+    if (!descrizione || quantita == null || quantita <= 0) continue
+    const valoreUnitarioMatch = text.match(/Valore unitario:\s*([0-9.,]+)/i)
+    const importoMatch = text.match(/Importo:\s*([0-9.,]+)/i)
+    out.push({
+      codice,
+      descrizione,
+      quantita,
+      valoreUnitario: parseArt30Number(valoreUnitarioMatch?.[1]),
+      importo: parseArt30Number(importoMatch?.[1])
+    })
+  }
+  return out
+}
+
+function qtyArt30It (value: number): string {
+  return Number(value).toLocaleString('it-IT', { minimumFractionDigits: 0, maximumFractionDigits: 4 })
+}
+
+function buildArt30RapportoSummary (data: Record<string, any>): { hasData: boolean; rows: Art30RimborsoPdfRow[]; rimborso: number; cauzione: number; netto: number; text: string } {
+  const rows = parseArt30DetailForPdf(pickAttrCI(data, ['attrezzature_rimborso_dettaglio']))
+  const rimborsoSalvato = parseArt30Number(pickAttrCI(data, ['attrezzature_rimborso_importo']))
+  const cauzioneSalvata = parseArt30Number(pickAttrCI(data, ['attrezzature_cauzione_decurtata']))
+  const nettoSalvato = parseArt30Number(pickAttrCI(data, ['attrezzature_importo_netto']))
+  const cauzionePresente = String(pickAttrCI(data, ['attrezzature_cauzione_presente']) ?? '').trim().toLowerCase()
+  const cauzioneAttiva = cauzionePresente === '1' || cauzionePresente === 'true' || cauzionePresente === 'si' || cauzionePresente === 'sì'
+
+  const rimborsoDaRighe = roundMoney(rows.reduce((sum, row) => {
+    const importo = row.importo ?? ((row.valoreUnitario ?? 0) * row.quantita)
+    return sum + (Number.isFinite(importo) ? importo : 0)
+  }, 0))
+  const rimborso = roundMoney(rimborsoSalvato ?? rimborsoDaRighe)
+  const cauzione = roundMoney(cauzioneAttiva ? (cauzioneSalvata ?? 0) : 0)
+  const netto = roundMoney(nettoSalvato ?? (rimborso - cauzione))
+  const hasData = rows.length > 0 || rimborsoSalvato != null || cauzioneSalvata != null || nettoSalvato != null || cauzioneAttiva
+  if (!hasData) return { hasData: false, rows: [], rimborso: 0, cauzione: 0, netto: 0, text: '' }
+
+  const parts: string[] = rows.map(row => {
+    const importo = roundMoney(row.importo ?? ((row.valoreUnitario ?? 0) * row.quantita))
+    if (row.valoreUnitario != null) {
+      return `${row.descrizione}: n. ${qtyArt30It(row.quantita)} x ${moneyIt(row.valoreUnitario)} = ${moneyIt(importo)}`
+    }
+    return `${row.descrizione}: n. ${qtyArt30It(row.quantita)} = ${moneyIt(importo)}`
+  })
+
+  if (parts.length === 0 && rimborso !== 0) parts.push(`rimborso attrezzature: ${moneyIt(rimborso)}`)
+  if (cauzioneAttiva || cauzione !== 0) parts.push(`cauzione: -${moneyIt(Math.abs(cauzione))}`)
+  parts.push(`netto Art. 30: ${moneyIt(netto)}`)
+
+  return { hasData: true, rows, rimborso, cauzione, netto, text: `Art. 30 - ${parts.join('; ')}.` }
+}
+
 function normalizeNsCasistica (v: any): string {
   return String(v ?? '').trim()
 }
@@ -515,27 +598,42 @@ export default function AnteprimaPanel (p: { data: Record<string, any>; mode: 'c
         const iterCicli = await loadRapportoIterCicliForPdf(iterGlobalId)
         const map = buildPlaceholderMap(dataSnapshot, utenti, iterCicli)
         const nsGroups = buildNotaSpeseGroups(p.nsRows, p.nsSummary)
-        if (nsGroups.length > 0) {
-          const totaleNoteSpese = roundMoney(nsGroups.reduce((sum, group) => sum + roundMoney(Number(group?.summary?.totaleComplessivo) || 0), 0))
-          map.importo_rimborso = moneyIt(totaleNoteSpese)
-          map.nota_spese_label = nsGroups.length > 1 ? '(Vedi note spese allegate)' : '(Vedi nota spese allegata)'
-        } else {
-          map.nota_spese_label = ''
+        const art30Summary = buildArt30RapportoSummary(dataSnapshot)
+        const reportNsGroups = nsGroups.slice()
+        if (art30Summary.hasData && !reportNsGroups.some(group => group.codiceCasistica === 'C104_ATTREZZATURE_DANNEGGIATE')) {
+          reportNsGroups.push({
+            codiceCasistica: 'C104_ATTREZZATURE_DANNEGGIATE',
+            label: NS_CASISTICA_META.C104_ATTREZZATURE_DANNEGGIATE.label,
+            rows: cloneEmptyNsRows(),
+            summary: buildNsSummaryForRows(cloneEmptyNsRows(), Number(p.nsSummary?.percentualeSpeseGenerali) || 15)
+          })
+          reportNsGroups.sort((a, b) => (NS_CASISTICA_META[a.codiceCasistica]?.order ?? 999) - (NS_CASISTICA_META[b.codiceCasistica]?.order ?? 999))
         }
+        const totaleNoteSpeseDaGruppi = roundMoney(nsGroups.reduce((sum, group) => sum + roundMoney(Number(group?.summary?.totaleComplessivo) || 0), 0))
+        const totaleNoteSpeseSalvato = roundMoney(parseArt30Number(pickAttrCI(dataSnapshot, ['ns_totale_complessivo'])) ?? 0)
+        const totaleNoteSpese = nsGroups.length > 0 ? totaleNoteSpeseDaGruppi : totaleNoteSpeseSalvato
+        const hasRimborso = nsGroups.length > 0 || totaleNoteSpese !== 0 || art30Summary.hasData
+        const totaleRimborso = roundMoney(totaleNoteSpese + (art30Summary.hasData ? art30Summary.netto : 0))
+
+        map.importo_rimborso = hasRimborso ? moneyIt(totaleRimborso) : ''
+        map.riepilogo_art30 = art30Summary.text
+        map.nota_spese_label = reportNsGroups.length > 1
+          ? '(Vedi note spese allegate)'
+          : (reportNsGroups.length === 1 ? '(Vedi nota spese allegata)' : '')
 
         const rapportoBytes = await buildRapportoPdf(map)
         if (cancelled) return
 
         // Se ci sono più note spese, genera un allegato distinto per ciascuna casistica.
         let finalBytes: Uint8Array = rapportoBytes
-        if (nsGroups.length > 0) {
+        if (reportNsGroups.length > 0) {
           const merged = await PDFDocument.create()
           const rapDoc = await PDFDocument.load(rapportoBytes)
           const rapPages = await merged.copyPages(rapDoc, rapDoc.getPageIndices())
           rapPages.forEach(pg => merged.addPage(pg))
 
-          for (let i = 0; i < nsGroups.length; i++) {
-            const group = nsGroups[i]
+          for (let i = 0; i < reportNsGroups.length; i++) {
+            const group = reportNsGroups[i]
             const nsData: NotaSpeseData = {
               cod_pratica: map.cod_pratica || '',
               area_label: map.area_label || '',
@@ -545,6 +643,20 @@ export default function AnteprimaPanel (p: { data: Record<string, any>; mode: 'c
               titolo_nota: group.label,
               rows: group.rows as any,
               summary: group.summary,
+              art30: group.codiceCasistica === 'C104_ATTREZZATURE_DANNEGGIATE' && art30Summary.hasData
+                ? {
+                    rows: art30Summary.rows.map(row => ({
+                      codice: row.codice,
+                      descrizione: row.descrizione,
+                      quantita: row.quantita,
+                      valore_unitario: row.valoreUnitario,
+                      importo: roundMoney(row.importo ?? ((row.valoreUnitario ?? 0) * row.quantita))
+                    })),
+                    rimborso: art30Summary.rimborso,
+                    cauzione: art30Summary.cauzione,
+                    netto: art30Summary.netto
+                  }
+                : null,
               luogo_data: 'Cagliari, ' + (formatDateIt(dataSnapshot.data_firma) || new Date().toLocaleDateString('it-IT', { day: '2-digit', month: '2-digit', year: 'numeric' })),
               firma_nome: map.firma_ti || '',
               rapporto_respinto: map.rapporto_respinto === '1',

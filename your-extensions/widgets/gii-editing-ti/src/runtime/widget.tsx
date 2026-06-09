@@ -4693,16 +4693,43 @@ function parameterDateTs (value: any): number | null {
   return Number.isNaN(d.getTime()) ? null : d.getTime()
 }
 
-function parseAttrezzatureDetail (raw: any): Array<{ descrizione: string, quantita: number }> {
-  const out: Array<{ descrizione: string, quantita: number }> = []
+type AttrezzaturaRimborsoDettaglio = {
+  codice: string
+  descrizione: string
+  quantita: number
+  valoreUnitario: number | null
+  importo: number | null
+}
+
+function parseAttrezzaturaNumber (value: any): number | null {
+  const text = String(value ?? '').trim()
+  if (!text) return null
+  const parsed = Number(text.replace(/\s/g, '').replace(/\./g, '').replace(',', '.'))
+  return Number.isFinite(parsed) ? parsed : null
+}
+
+function parseAttrezzatureDetail (raw: any): AttrezzaturaRimborsoDettaglio[] {
+  const out: AttrezzaturaRimborsoDettaglio[] = []
   for (const line of String(raw ?? '').split(/\r?\n/)) {
     const text = line.trim()
     if (!text) continue
-    const m = text.match(/^(.*?)\s+—\s+Quantità:\s*([0-9.,]+)/i)
-    if (!m) continue
-    const quantita = Number(String(m[2]).replace(/\./g, '').replace(',', '.'))
-    if (!m[1].trim() || !Number.isFinite(quantita) || quantita <= 0) continue
-    out.push({ descrizione: m[1].trim(), quantita })
+    const quantitaMatch = text.match(/\s+—\s+Quantità:\s*([0-9.,]+)/i)
+    if (!quantitaMatch || quantitaMatch.index == null) continue
+    const quantita = parseAttrezzaturaNumber(quantitaMatch[1])
+    const prefix = text.slice(0, quantitaMatch.index).trim()
+    const codiceMatch = prefix.match(/^(.*?)\s+—\s+Codice:\s*(.+)$/i)
+    const descrizione = String(codiceMatch?.[1] || prefix).trim()
+    const codice = String(codiceMatch?.[2] || '').trim()
+    if (!descrizione || quantita == null || quantita <= 0) continue
+    const valoreUnitarioMatch = text.match(/Valore unitario:\s*([0-9.,]+)/i)
+    const importoMatch = text.match(/Importo:\s*([0-9.,]+)/i)
+    out.push({
+      codice,
+      descrizione,
+      quantita,
+      valoreUnitario: parseAttrezzaturaNumber(valoreUnitarioMatch?.[1]),
+      importo: parseAttrezzaturaNumber(importoMatch?.[1])
+    })
   }
   return out
 }
@@ -4713,7 +4740,8 @@ function buildAttrezzatureDetail (rows: AttrezzaturaRimborsoRow[]): string {
     .map(row => {
       const q = Number(row.quantita)
       const unit = Number(row.valoreUnitario) || 0
-      return `${row.descrizione} — Quantità: ${attrezzaturaQty(q)} — Valore unitario: ${attrezzaturaMoney(unit)} € — Importo: ${attrezzaturaMoney(q * unit)} €`
+      const codice = String(row.codice || '').trim()
+      return `${row.descrizione}${codice ? ` — Codice: ${codice}` : ''} — Quantità: ${attrezzaturaQty(q)} — Valore unitario: ${attrezzaturaMoney(unit)} € — Importo: ${attrezzaturaMoney(q * unit)} €`
     })
     .join('\n')
 }
@@ -6605,7 +6633,13 @@ React.useEffect(() => {
         setAttrezzatureCauzioneQuantita(tesseraCurrentQty)
       }
       if (!parametersUrl) {
-        setAttrezzatureRows(current.map(item => ({ codice: '', descrizione: item.descrizione, valoreUnitario: 0, selected: true, quantita: item.quantita })))
+        setAttrezzatureRows(current.map(item => ({
+          codice: item.codice,
+          descrizione: item.descrizione,
+          valoreUnitario: item.valoreUnitario ?? (item.importo != null ? item.importo / item.quantita : 0),
+          selected: true,
+          quantita: item.quantita
+        })))
         warningMessages.unshift('Vista di consultazione parametri Art. 30 non configurata nel setting.')
         setAttrezzatureError(warningMessages.join(' '))
         return
@@ -6614,13 +6648,25 @@ React.useEffect(() => {
       const existingByKey = new Map(current.map(item => [attrezzaturaMatchKey(item.descrizione), item]))
       const nextRows: AttrezzaturaRimborsoRow[] = params.map(item => {
         const existing = existingByKey.get(attrezzaturaMatchKey(item.descrizione))
-        return { ...item, selected: !!existing, quantita: existing?.quantita || 1 }
+        return {
+          codice: existing?.codice || item.codice,
+          descrizione: existing?.descrizione || item.descrizione,
+          valoreUnitario: existing?.valoreUnitario ?? item.valoreUnitario,
+          selected: !!existing,
+          quantita: existing?.quantita || 1
+        }
       })
       for (const existing of current) {
         const key = attrezzaturaMatchKey(existing.descrizione)
         if (!nextRows.some(row => attrezzaturaMatchKey(row.descrizione) === key)) {
           const tipo = attrezzaturaTipo(existing.descrizione)
-          nextRows.push({ codice: '', descrizione: tipo?.label || existing.descrizione, valoreUnitario: 0, selected: true, quantita: existing.quantita })
+          nextRows.push({
+            codice: existing.codice,
+            descrizione: tipo?.label || existing.descrizione,
+            valoreUnitario: existing.valoreUnitario ?? (existing.importo != null ? existing.importo / existing.quantita : 0),
+            selected: true,
+            quantita: existing.quantita
+          })
         }
       }
       setAttrezzatureRows(nextRows)
@@ -6680,7 +6726,7 @@ React.useEffect(() => {
     if (attrezzaturePopupPendingArt30) {
       const next = new Set(parseMultiSelect(draft.norma_violata3))
       next.add('Art30')
-      setDraft(prev => ({ ...prev, norma_violata3: Array.from(next).join(' '), v_art30: 1 }))
+      setDraft(prev => ({ ...prev, norma_violata3: Array.from(next).join(' '), v_art30: '1' }))
     }
     setAttrezzaturePopupOpen(false)
     setAttrezzaturePopupPendingArt30(false)
@@ -6692,7 +6738,7 @@ React.useEffect(() => {
     setDraft(prev => ({
       ...prev,
       norma_violata3: Array.from(next).join(' '),
-      v_art30: 0,
+      v_art30: '0',
       attrezzature_rimborso_dettaglio: '',
       attrezzature_rimborso_importo: '',
       attrezzature_cauzione_presente: '0',
@@ -6709,6 +6755,10 @@ React.useEffect(() => {
   // Norma violata 3 — select_multiple come Set (stringa separata da spazio)
   const norma3Set = React.useMemo(() => new Set(String(g('norma_violata3') || '').split(' ').filter(Boolean)), [draft.norma_violata3])
   const norma3SelectedLabels = React.useMemo(() => CHOICES.norma3.filter(o => norma3Set.has(o.v)).map(o => o.l), [norma3Set])
+  const attrezzatureRiepilogo = React.useMemo(
+    () => parseAttrezzatureDetail(g('attrezzature_rimborso_dettaglio')),
+    [draft.attrezzature_rimborso_dettaglio]
+  )
   const toggleNorma3 = (v: string) => {
     const s = new Set(norma3Set)
     const isRemoving = s.has(v)
@@ -8050,10 +8100,11 @@ ${e?.message || String(e)}`
     body: React.ReactNode,
     right?: React.ReactNode,
     cardStyle?: React.CSSProperties,
-    bodyStyle?: React.CSSProperties
+    bodyStyle?: React.CSSProperties,
+    headerStyle?: React.CSSProperties
   ) => (
     <section style={{ ...editCardStyle, ...cardStyle }}>
-      <div style={editCardHeaderStyle}>
+      <div style={{ ...editCardHeaderStyle, ...headerStyle }}>
         <span>{title}</span>
         {right}
       </div>
@@ -8679,20 +8730,45 @@ ${e?.message || String(e)}`
             )}
 
             {renderEditCard('Altre violazioni', renderNorma3Rows())}
-            {norma3Set.has('Art30') && renderEditCard('Rimborso attrezzature — Art. 30',
+            {norma3Set.has('Art30') && renderEditCard('Riepilogo rimborsi attrezzature e cauzione',
               <div style={{ display: 'grid', gap: 9 }}>
                 <div style={{ fontSize: 12, color: '#475569', lineHeight: 1.45 }}>
                   Il rimborso delle attrezzature e l’eventuale rimborso delle spese sostenute per l’intervento sul campo sono componenti autonome. Le spese di manodopera, mezzi e materiali continuano a essere inserite nella scheda <b>Nota spese</b>.
                 </div>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap', padding: '9px 10px', borderRadius: 8, border: '1px solid #bfdbfe', background: '#eff6ff' }}>
+
+                {attrezzatureRiepilogo.length > 0
+                  ? <div style={{ border: '1px solid #cbd5e1', borderRadius: 8, overflow: 'hidden', background: '#fff' }}>
+                      <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) 82px 118px 104px', background: '#d8f1e7', borderBottom: '1px solid #9fd6c1', fontSize: 12, fontWeight: 800, color: '#334155' }}>
+                        <div style={{ padding: '7px 9px' }}>Attrezzatura</div>
+                        <div style={{ padding: '7px 6px', textAlign: 'center' }}>Quantità</div>
+                        <div style={{ padding: '7px 9px', textAlign: 'right' }}>Valore unitario</div>
+                        <div style={{ padding: '7px 9px', textAlign: 'right' }}>Importo</div>
+                      </div>
+                      {attrezzatureRiepilogo.map((item, index) => (
+                        <div
+                          key={`${item.descrizione}-${index}`}
+                          style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) 82px 118px 104px', alignItems: 'center', borderBottom: index === attrezzatureRiepilogo.length - 1 ? 0 : '1px solid #e2e8f0', fontSize: 12, color: '#334155' }}
+                        >
+                          <div style={{ padding: '7px 9px', fontWeight: 600 }}>{item.descrizione}</div>
+                          <div style={{ padding: '7px 6px', textAlign: 'center' }}>{attrezzaturaQty(item.quantita)}</div>
+                          <div style={{ padding: '7px 9px', textAlign: 'right' }}>{item.valoreUnitario != null ? `${attrezzaturaMoney(item.valoreUnitario)} €` : '—'}</div>
+                          <div style={{ padding: '7px 9px', textAlign: 'right', fontWeight: 700 }}>{item.importo != null ? `${attrezzaturaMoney(item.importo)} €` : '—'}</div>
+                        </div>
+                      ))}
+                    </div>
+                  : <div style={{ padding: '9px 10px', borderRadius: 8, border: '1px solid #e2e8f0', background: '#f8fafc', color: '#64748b', fontSize: 12 }}>
+                      Nessuna attrezzatura selezionata.
+                    </div>}
+
+                <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap', padding: '9px 10px', borderRadius: 8, border: '1px solid #9fd6c1', background: '#e2f5ed' }}>
                   <span style={{ fontSize: 12, color: '#334155' }}>
-                    Attrezzature selezionate: <b>{parseAttrezzatureDetail(g('attrezzature_rimborso_dettaglio')).length}</b>
+                    Rimborso attrezzature: <b>{attrezzaturaMoney(g('attrezzature_rimborso_importo'))} €</b>
                   </span>
                   {isSelectedFlag(g('attrezzature_cauzione_presente')) && Number(g('attrezzature_cauzione_decurtata')) > 0 && <span style={{ fontSize: 12, color: '#334155' }}>
-                    Cauzione da detrarre: <b>- {attrezzaturaMoney(g('attrezzature_cauzione_decurtata'))} €</b>
+                    Cauzione da detrarre: <b style={{ color: '#d92d20' }}>- {attrezzaturaMoney(g('attrezzature_cauzione_decurtata'))} €</b>
                   </span>}
-                  <span style={{ fontSize: 12, color: '#334155' }}>
-                    Totale: <b>{attrezzaturaMoney(g('attrezzature_importo_netto') || g('attrezzature_rimborso_importo'))} €</b>
+                  <span style={{ fontSize: 12, color: '#176b52' }}>
+                    Totale netto: <b>{attrezzaturaMoney(g('attrezzature_importo_netto') || g('attrezzature_rimborso_importo'))} €</b>
                   </span>
                   <button
                     type='button'
@@ -8703,7 +8779,11 @@ ${e?.message || String(e)}`
                     {isReadOnly || isRiAgrTecLimitedEdit ? 'Consulta attrezzature' : 'Gestisci attrezzature'}
                   </button>
                 </div>
-              </div>
+              </div>,
+              undefined,
+              { background: '#eef9f4', border: '1px solid #9fd6c1', boxShadow: '0 1px 3px rgba(23, 107, 82, 0.14)' },
+              { background: '#eef9f4' },
+              { background: 'linear-gradient(90deg, #005222, #008337)', color: '#fff' }
             )}
           </div>
         )
