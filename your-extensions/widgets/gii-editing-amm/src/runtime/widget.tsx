@@ -1583,6 +1583,21 @@ function useAdminStyle (): Record<string, any> {
   return { ...ADMIN_STYLE_DEFAULTS, ...ctx }
 }
 
+function adminLabelFontSize (st: Record<string, any>): number {
+  const n = Number(st?.formLabelFontSize ?? 15)
+  return Math.max(15, Number.isFinite(n) ? n : 15)
+}
+
+function adminFieldFontSize (st: Record<string, any>): number {
+  const n = Number(st?.formFieldFontSize ?? 15)
+  return Math.max(15, Number.isFinite(n) ? n : 15)
+}
+
+function adminInnerHeaderFontSize (st: Record<string, any>): number {
+  const n = Number(st?.formInnerHeaderFontSize ?? 14)
+  return Math.max(14, Number.isFinite(n) ? n : 14)
+}
+
 
 function Section (props: { title: string, children: React.ReactNode, right?: React.ReactNode, bodyStyle?: React.CSSProperties, cardStyle?: React.CSSProperties }) {
   const st = useAdminStyle()
@@ -1628,19 +1643,20 @@ function InfoBox (props: { children: React.ReactNode, kind?: 'info' | 'warn' | '
     : kind === 'ok'
       ? { background: '#ecfdf3', color: '#166534', borderColor: '#bbf7d0' }
       : { background: '#eff6ff', color: '#1d4ed8', borderColor: '#bfdbfe' }
-  return <div style={{ ...st, border: '1px solid', borderRadius: Number(stCtx.formCardBorderRadius ?? 8), padding: '10px 12px', fontSize: 13, lineHeight: 1.35 }}>{props.children}</div>
+  return <div style={{ ...st, border: '1px solid', borderRadius: Number(stCtx.formCardBorderRadius ?? 8), padding: '10px 12px', fontSize: adminFieldFontSize(stCtx), lineHeight: 1.35 }}>{props.children}</div>
 }
 
 function BlockingDialog (props: { kind: 'ok' | 'err' | 'warn', title: string, text: string, onClose: () => void }) {
+  const st = useAdminStyle()
   const color = props.kind === 'ok' ? '#166534' : props.kind === 'warn' ? '#9a3412' : '#991b1b'
   const bg = props.kind === 'ok' ? '#ecfdf3' : props.kind === 'warn' ? '#fff7ed' : '#fef2f2'
   return (
     <div style={{ position: 'fixed', zIndex: 2147483000, inset: 0, background: 'rgba(0,0,0,0.55)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24 }}>
       <div role='dialog' aria-modal='true' style={{ width: 'min(520px, 100%)', background: '#fff', borderRadius: 14, boxShadow: '0 18px 60px rgba(0,0,0,0.35)', overflow: 'hidden' }}>
-        <div style={{ background: bg, color, padding: '14px 16px', fontWeight: 800, fontSize: 15, borderBottom: '1px solid rgba(0,0,0,0.08)' }}>{props.title}</div>
-        <div style={{ padding: 16, color: '#111827', fontSize: 14, lineHeight: 1.45, whiteSpace: 'pre-wrap' }}>{props.text}</div>
+        <div style={{ background: bg, color, padding: '14px 16px', fontWeight: 800, fontSize: Math.max(18, adminFieldFontSize(st)), borderBottom: '1px solid rgba(0,0,0,0.08)' }}>{props.title}</div>
+        <div style={{ padding: 16, color: '#111827', fontSize: adminFieldFontSize(st), lineHeight: 1.45, whiteSpace: 'pre-wrap' }}>{props.text}</div>
         <div style={{ padding: '0 16px 16px', display: 'flex', justifyContent: 'flex-end' }}>
-          <button type='button' onClick={props.onClose} style={{ border: '1px solid #0d3b66', background: '#0d3b66', color: '#fff', borderRadius: 9, padding: '8px 14px', fontWeight: 700, cursor: 'pointer' }}>OK</button>
+          <button type='button' onClick={props.onClose} style={{ border: '1px solid #0d3b66', background: '#0d3b66', color: '#fff', borderRadius: 9, padding: '8px 14px', fontWeight: 700, fontSize: adminFieldFontSize(st), cursor: 'pointer' }}>OK</button>
         </div>
       </div>
     </div>
@@ -2492,6 +2508,7 @@ function voceSubtotalAmount (voce: SanzioneConsultivaVoce): number | null {
 }
 
 function SanzioniHeaderTotal (props: { groups: SanzioneConsultivaGroup[] }) {
+  const st = useAdminStyle()
   const total = groupsAppliedTotal(props.groups || [])
   return (
     <span style={{
@@ -2503,7 +2520,7 @@ function SanzioniHeaderTotal (props: { groups: SanzioneConsultivaGroup[] }) {
       background: 'rgba(255,255,255,0.14)',
       border: '1px solid rgba(255,255,255,0.22)',
       color: '#fff',
-      fontSize: 11,
+      fontSize: adminLabelFontSize(st),
       fontWeight: 900,
       textTransform: 'none',
       letterSpacing: 0
@@ -2623,9 +2640,11 @@ function parseArt30EquipmentSelections (data: Record<string, any>): Map<Art30Equ
     const codice = String(codeMatch?.[2] || '').trim()
     const full = text.match(/Quantità:\s*([0-9.,]+).*?Valore unitario:\s*([0-9.,]+)\s*€.*?Importo:\s*([0-9.,]+)\s*€/i)
     if (full) {
-      const quantita = parseEuroTextValue(full[1]) || 0
-      const valoreUnitario = parseEuroTextValue(full[2])
-      const importo = parseEuroTextValue(full[3]) || 0
+      // I gruppi catturati non includono il simbolo €: usare il parser numerico
+      // generico, non parseEuroTextValue (che richiede espressamente "€").
+      const quantita = parseNumberInput(full[1]) || 0
+      const valoreUnitario = parseNumberInput(full[2])
+      const importo = parseNumberInput(full[3]) || 0
       if (quantita > 0 && importo >= 0) out.set(kind, { codice, descrizione, quantita, valoreUnitario, importo })
       continue
     }
@@ -3050,9 +3069,9 @@ function StatusSummaryItem (props: { label: string, value: React.ReactNode, hint
   const hintColor = total ? (st.statusSummaryTotalHintColor || 'rgba(255,255,255,0.78)') : (st.statusSummaryHintColor || '#6b7280')
   return (
     <div style={{ border: `${Number(st.statusSummaryBorderWidth ?? 1)}px solid ${borderColor}`, background: bg, borderRadius: Number(st.formCardBorderRadius ?? 8), padding: '9px 11px', minWidth: 0 }}>
-      <div style={{ color: labelColor, fontSize: 11, fontWeight: 800, textTransform: 'uppercase', letterSpacing: 0.25, marginBottom: 4 }}>{props.label}</div>
-      <div style={{ color: valueColor, fontSize: total ? Number(st.amountFontSize ?? 16) : Number(st.valueFontSize ?? 13), fontWeight: 800, overflowWrap: 'anywhere', whiteSpace: 'pre-wrap' }}>{props.value || '—'}</div>
-      {props.hint && <div style={{ marginTop: 4, color: hintColor, fontSize: 12, lineHeight: 1.35 }}>{props.hint}</div>}
+      <div style={{ color: labelColor, fontSize: adminLabelFontSize(st), fontWeight: 800, textTransform: 'uppercase', letterSpacing: 0.25, marginBottom: 4 }}>{props.label}</div>
+      <div style={{ color: valueColor, fontSize: total ? Math.max(16, Number(st.amountFontSize ?? 16)) : adminFieldFontSize(st), fontWeight: 800, overflowWrap: 'anywhere', whiteSpace: 'pre-wrap' }}>{props.value || '—'}</div>
+      {props.hint && <div style={{ marginTop: 4, color: hintColor, fontSize: adminLabelFontSize(st), lineHeight: 1.35 }}>{props.hint}</div>}
     </div>
   )
 }
@@ -3611,8 +3630,33 @@ function buildSanzioneGroups (
   const groups = new Map<string, SanzioneConsultivaGroup>()
 
   selectedRaccordi.forEach(r => {
-    const parametro = paramByCode.get(r.codice_parametro) || null
+    let parametro = paramByCode.get(r.codice_parametro) || null
     const pCode = String(r.codice_parametro || '').toUpperCase()
+    const raccordoArt30 = isArt30CaseCode(r.codice_casistica)
+    const raccordoArt30Kind = raccordoArt30
+      ? art30EquipmentKindFromText(`${r.codice_parametro} ${r.descrizione} ${parametro?.descrizione || ''}`)
+      : null
+
+    // Per l'Art. 30 i raccordi identificano esclusivamente la tipologia e il
+    // riferimento normativo. Codice, descrizione e importo applicati alla pratica
+    // devono provenire sempre dallo snapshot tecnico congelato dal TI, anche quando
+    // ATT-001...ATT-004 esistono nella tabella dei parametri correnti.
+    if (raccordoArt30Kind) {
+      const selection = art30EquipmentSelections.get(raccordoArt30Kind)
+      if (!selection) return
+      parametro = {
+        codice_parametro: selection.codice || r.codice_parametro,
+        categoria_parametro: 'ATTREZZATURA',
+        valore_num: selection.importo,
+        valore_testo: '',
+        anno_riferimento: null,
+        data_validita_da: null,
+        data_validita_a: null,
+        descrizione: selection.descrizione || ART30_EQUIPMENT_META[raccordoArt30Kind].label,
+        note: 'Snapshot tecnico Art. 30'
+      }
+    }
+
     const articleForCase = getViolationArticleFromCase(r.codice_casistica)
     const grado = getGravitaForArticle(data || {}, articleForCase)
     if (pCode.includes('SANZIONE.ART42.GRAVITA.')) {
@@ -3762,13 +3806,13 @@ function articleDetailsByRole (role: string, articles: RegolamentoArticolo[], va
   const st = useAdminStyle()
   const c = normArticleColors(st, variant)
   const list = Array.isArray(articles) ? articles.filter(Boolean) : []
-  if (!list.length) return <div style={{ color: c.meta, fontSize: 12 }}>Testo regolamentare non disponibile nelle tabelle configurate.</div>
+  if (!list.length) return <div style={{ color: c.meta, fontSize: adminLabelFontSize(st) }}>Testo regolamentare non disponibile nelle tabelle configurate.</div>
   return (
     <div style={{ display: 'grid', gap: 10 }}>
       {list.map(article => (
         <div key={`${role}-${article.codice_articolo}`} style={{ display: 'grid', gap: 4 }}>
-          {article.testo_articolo && <div style={{ color: c.text, fontSize: 12, lineHeight: 1.45, whiteSpace: 'pre-wrap' }}>{article.testo_articolo}</div>}
-          {(article.atto_regolamento || article.anno_riferimento) && <div style={{ color: c.meta, fontSize: 11 }}>{[article.atto_regolamento, article.anno_riferimento ? `Anno ${article.anno_riferimento}` : ''].filter(Boolean).join(' · ')}</div>}
+          {article.testo_articolo && <div style={{ color: c.text, fontSize: adminFieldFontSize(st), lineHeight: 1.45, whiteSpace: 'pre-wrap' }}>{article.testo_articolo}</div>}
+          {(article.atto_regolamento || article.anno_riferimento) && <div style={{ color: c.meta, fontSize: adminLabelFontSize(st) }}>{[article.atto_regolamento, article.anno_riferimento ? `Anno ${article.anno_riferimento}` : ''].filter(Boolean).join(' · ')}</div>}
         </div>
       ))}
     </div>
@@ -3914,7 +3958,7 @@ function BasicViolationsOnly (props: { data: any, layerFields: LayerFieldInfo[],
                   ))}
                 </div>
               ) : (
-                <div style={{ color: '#6b7280', fontSize: 12 }}>Nessun dettaglio tecnico aggiuntivo valorizzato.</div>
+                <div style={{ color: '#6b7280', fontSize: adminLabelFontSize(st) }}>Nessun dettaglio tecnico aggiuntivo valorizzato.</div>
               )}
             </div>
           ))}
@@ -4036,7 +4080,7 @@ function SpeseNotificaEditor (props: { data: Record<string, any>, fields: LayerF
         style={{ ...inputStyleFrom(st, readonly), background: readonly ? (st.formFieldDisabledBg || '#e7eef7') : '#ffffff' }}
         placeholder='0,00'
       />
-      <div style={{ marginTop: 4, color: '#6b7280', fontSize: 12, lineHeight: 1.35 }}>Concorre al totale da pagare.</div>
+      <div style={{ marginTop: 4, color: '#6b7280', fontSize: adminLabelFontSize(st), lineHeight: 1.35 }}>Concorre al totale da pagare.</div>
     </div>
   )
 }
@@ -4133,7 +4177,7 @@ function Art30SnapshotSummary (props: { data: Record<string, any> }) {
   const gridColumns = 'minmax(78px, 0.75fr) minmax(190px, 1.65fr) minmax(68px, 0.55fr) minmax(105px, 0.85fr) minmax(105px, 0.85fr)'
   const headStyle: React.CSSProperties = {
     padding: '7px 8px',
-    fontSize: 11,
+    fontSize: adminLabelFontSize(st),
     fontWeight: 900,
     color: st.formInnerHeaderColor || '#0f4c81',
     background: st.formInnerHeaderBg || '#eaf3fb',
@@ -4238,20 +4282,19 @@ function ParametriSanzionatoriSection (props: { loadState: SanzioneConsultivaLoa
       {urlsReady && !loading && !error && casistiche.length > 0 && groups.length === 0 && (
         <InfoBox kind='warn'>Sono presenti violazioni contestate, ma non risultano raccordi attivi nelle tabelle configurate.</InfoBox>
       )}
-      <Art30SnapshotSummary data={d} />
       {urlsReady && groups.length > 0 && (
         <div style={{ display: 'grid', gap: 10 }}>
           <div style={{ display: 'grid', gap: 10 }}>
-            <div style={{ display: 'grid', gridTemplateColumns: ADMIN_COMPACT_GRID_COLUMNS, gap: 10 }}>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(380px, 1fr))', gap: 10 }}>
               <StatusSummaryItem label='Sanzione dovuta' value={formatEuroAmount(sanzioneDovuta)} tone='auto' />
-              <StatusSummaryItem label='Rimborso netto' value={formatEuroAmount(rimborsoNetto)} tone='auto' />
-              <StatusSummaryItem label='Risarcimento danni' value={formatEuroAmount(risarcimentoDanni)} tone='auto' />
+              <StatusSummaryItem label='Rimborso attrezzature' value={formatEuroAmount(rimborsoNetto)} tone='auto' />
+              <StatusSummaryItem label='Rimborso spese/risarcimento danni' value={formatEuroAmount(risarcimentoDanni)} tone='auto' />
               <StatusSummaryItem label='Spese di notifica' value={formatEuroAmount(speseNotifica)} tone='auto' />
               <StatusSummaryItem label='Totale da pagare' value={formatEuroAmount(totaleAtto)} tone='total' />
             </div>
           </div>
           <details style={{ border: `${Number(st.formExpandableCardBorderWidth ?? 1)}px solid ${st.formExpandableCardBorderColor || '#e5e7eb'}`, borderRadius: 10, background: st.formExpandableCardBg || '#f9fafb', padding: 10 }}>
-            <summary style={{ cursor: 'pointer', fontWeight: 900, color: st.formInnerHeaderColor || '#0f4c81', fontSize: Number(st.formInnerHeaderFontSize ?? 14) }}>Dettaglio importi</summary>
+            <summary style={{ cursor: 'pointer', fontWeight: 900, color: st.formInnerHeaderColor || '#0f4c81', fontSize: Number(st.formInnerHeaderFontSize ?? 14) }}>Riepilogo importi</summary>
             <div style={{ marginTop: 10, border: `1px solid ${st.formCardBorderColor || '#c6d7ea'}`, borderRadius: Number(st.formCardBorderRadius ?? 8), background: '#ffffff', padding: '10px 12px', color: '#111827', fontSize: Number(st.formFieldFontSize ?? 15), lineHeight: 1.5, overflowWrap: 'anywhere' }}>
               <DettaglioImportiContent value={pickAttrCI(d, ['sanzione_dettaglio_calcolo'])} />
             </div>
@@ -4456,7 +4499,7 @@ function ViolationsSection (props: { data: any, layerFields: LayerFieldInfo[] })
                   ))}
                 </div>
               ) : (
-                <div style={{ color: '#6b7280', fontSize: 12 }}>Nessun dettaglio tecnico aggiuntivo valorizzato.</div>
+                <div style={{ color: '#6b7280', fontSize: adminLabelFontSize(st) }}>Nessun dettaglio tecnico aggiuntivo valorizzato.</div>
               )}
             </div>
           ))}
@@ -4717,7 +4760,7 @@ function AllegatiAmmSection (props: { oid: number | null, ds: any, layerUrl?: st
           <div style={{ display: 'flex', flexDirection: 'column', gap: 10, minHeight: 0, overflow: 'hidden' }}>
             <div style={{ flex: '0 0 auto', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, flexWrap: 'wrap' }}>
               <div style={{ fontWeight: 800, fontSize: Number(st.formInnerHeaderFontSize ?? 14), color: st.formInnerHeaderColor || '#0f4c81' }}>Elenco allegati</div>
-              <label style={{ minHeight: 36, height: 36, boxSizing: 'border-box', padding: '0 14px', borderRadius: 10, border: '1px solid rgba(0,0,0,0.12)', background: (!props.canEdit || busy) ? '#e5e7eb' : '#f8fbff', color: (!props.canEdit || busy) ? '#9ca3af' : '#111827', fontSize: 13, fontWeight: 600, cursor: (!props.canEdit || busy) ? 'not-allowed' : 'pointer', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', lineHeight: 1, whiteSpace: 'nowrap' }}>
+              <label style={{ minHeight: 36, height: 36, boxSizing: 'border-box', padding: '0 14px', borderRadius: 10, border: '1px solid rgba(0,0,0,0.12)', background: (!props.canEdit || busy) ? '#e5e7eb' : '#f8fbff', color: (!props.canEdit || busy) ? '#9ca3af' : '#111827', fontSize: adminFieldFontSize(st), fontWeight: 600, cursor: (!props.canEdit || busy) ? 'not-allowed' : 'pointer', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', lineHeight: 1, whiteSpace: 'nowrap' }}>
                 Scegli file
                 <input
                   key={inputKey}
@@ -4733,9 +4776,9 @@ function AllegatiAmmSection (props: { oid: number | null, ds: any, layerUrl?: st
               </label>
             </div>
 
-            {error && <div style={{ flex: '0 0 auto', color: '#b42318', fontSize: 12, fontWeight: 700 }}>{error}</div>}
+            {error && <div style={{ flex: '0 0 auto', color: '#b42318', fontSize: adminLabelFontSize(st), fontWeight: 700 }}>{error}</div>}
             {loading ? (
-              <div style={{ flex: '0 0 auto', color: '#6b7280', fontSize: 12 }}>Caricamento allegati…</div>
+              <div style={{ flex: '0 0 auto', color: '#6b7280', fontSize: adminLabelFontSize(st) }}>Caricamento allegati…</div>
             ) : items.length ? (
               <div style={{ flex: '1 1 auto', minHeight: 0, overflowY: 'auto', display: 'grid', alignContent: 'start', gap: 8, paddingRight: 2 }}>
                 {items.map(att => {
@@ -4744,7 +4787,7 @@ function AllegatiAmmSection (props: { oid: number | null, ds: any, layerUrl?: st
                     <div key={att.id} onClick={() => setSelected(active ? null : att)} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, border: `1px solid ${active ? '#2563eb' : 'rgba(0,0,0,0.08)'}`, background: active ? '#eff6ff' : '#fff', borderRadius: 10, padding: '8px 10px', cursor: 'pointer', transition: 'all 0.15s' }}>
                       <div style={{ minWidth: 0 }}>
                         <div style={{ fontWeight: 600, fontSize: Number(st.formFieldFontSize ?? 15), color: '#111827', wordBreak: 'break-word' }}>{att.name || `Allegato #${att.id}`}</div>
-                        <div style={{ fontSize: 11, color: '#64748b' }}>{formatAttachmentBytes(att.size)}{att.contentType ? ` • ${att.contentType}` : ''}</div>
+                        <div style={{ fontSize: adminLabelFontSize(st), color: '#64748b' }}>{formatAttachmentBytes(att.size)}{att.contentType ? ` • ${att.contentType}` : ''}</div>
                       </div>
                       <button type='button' disabled={!props.canEdit || busy} onClick={e => { e.preventDefault(); e.stopPropagation(); void remove(att) }} style={secondaryButtonStyle(!props.canEdit || busy)}>Elimina</button>
                     </div>
@@ -4752,25 +4795,25 @@ function AllegatiAmmSection (props: { oid: number | null, ds: any, layerUrl?: st
                 })}
               </div>
             ) : (
-              <div style={{ flex: '0 0 auto', color: '#6b7280', fontSize: 12 }}>Nessun allegato.</div>
+              <div style={{ flex: '0 0 auto', color: '#6b7280', fontSize: adminLabelFontSize(st) }}>Nessun allegato.</div>
             )}
           </div>
 
           <div style={{ border: '1px solid rgba(255,255,255,0.08)', borderRadius: 10, padding: 12, background: '#282828', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: selected ? 'flex-start' : 'center', overflow: 'hidden', minHeight: 0 }}>
             {!selected ? (
-              <div style={{ fontSize: 12, color: 'rgba(255,255,255,0.45)', textAlign: 'center' }}>Seleziona un allegato per visualizzare l&apos;anteprima</div>
+              <div style={{ fontSize: adminLabelFontSize(st), color: 'rgba(255,255,255,0.45)', textAlign: 'center' }}>Seleziona un allegato per visualizzare l&apos;anteprima</div>
             ) : previewLoading ? (
-              <div style={{ fontSize: 12, color: 'rgba(255,255,255,0.55)' }}>Caricamento anteprima…</div>
+              <div style={{ fontSize: adminLabelFontSize(st), color: 'rgba(255,255,255,0.55)' }}>Caricamento anteprima…</div>
             ) : previewUrl ? (() => {
               const ct = String(selected.contentType || '').toLowerCase()
               if (ct.startsWith('image/')) return <img src={previewUrl} alt={selected.name || ''} style={{ maxWidth: '100%', maxHeight: '100%', borderRadius: 6, objectFit: 'contain', flex: '1 1 auto', minHeight: 0 }} />
               if (ct === 'application/pdf') return <iframe src={previewUrl} title={selected.name || 'PDF'} style={{ width: '100%', flex: '1 1 auto', minHeight: 0, border: 'none', borderRadius: 6 }} />
-              return <div style={{ fontSize: 12, color: 'rgba(255,255,255,0.45)', textAlign: 'center' }}>Anteprima non disponibile per questo tipo di file.</div>
+              return <div style={{ fontSize: adminLabelFontSize(st), color: 'rgba(255,255,255,0.45)', textAlign: 'center' }}>Anteprima non disponibile per questo tipo di file.</div>
             })() : (
-              <div style={{ fontSize: 12, color: 'rgba(255,255,255,0.45)', textAlign: 'center' }}>Anteprima non disponibile per questo tipo di file.</div>
+              <div style={{ fontSize: adminLabelFontSize(st), color: 'rgba(255,255,255,0.45)', textAlign: 'center' }}>Anteprima non disponibile per questo tipo di file.</div>
             )}
             {selected && (
-              <div style={{ flex: '0 0 auto', marginTop: 8, fontSize: 11, color: 'rgba(255,255,255,0.78)', textAlign: 'center', wordBreak: 'break-word' }}>
+              <div style={{ flex: '0 0 auto', marginTop: 8, fontSize: adminLabelFontSize(st), color: 'rgba(255,255,255,0.78)', textAlign: 'center', wordBreak: 'break-word' }}>
                 {selected.name || `Allegato #${selected.id}`}{selected.contentType ? ` • ${selected.contentType}` : ''}
               </div>
             )}
@@ -4970,7 +5013,7 @@ function inputStyle (disabled?: boolean): React.CSSProperties {
     border: '1px solid #d1d5db',
     borderRadius: 9,
     padding: '8px 10px',
-    fontSize: 13,
+    fontSize: 15,
     color: disabled ? '#6b7280' : '#111827',
     background: disabled ? '#f3f4f6' : '#fff',
     outline: 'none'
@@ -5025,8 +5068,8 @@ function FieldEditor (props: {
   const label = (
     <div style={{ color: st.formLabelColor || '#334155', fontSize: Number(st.formLabelFontSize ?? 15), fontWeight: Number(st.formLabelFontWeight ?? 600) as any, marginBottom: Number(st.formLabelMarginBottom ?? 3), display: 'flex', gap: 6, alignItems: 'center', justifyContent: 'space-between' }}>
       <span>{field.label}</span>
-      {systemCalculated && !miss && <span style={{ color: '#1d4ed8', fontWeight: 800, fontSize: 10 }}>automatico</span>}
-      {miss && <span style={{ color: '#b45309', fontWeight: 700, fontSize: 10 }}>campo assente</span>}
+      {systemCalculated && !miss && <span style={{ color: '#1d4ed8', fontWeight: 800, fontSize: Math.max(13, adminLabelFontSize(st) - 2) }}>automatico</span>}
+      {miss && <span style={{ color: '#b45309', fontWeight: 700, fontSize: Math.max(13, adminLabelFontSize(st) - 2) }}>campo assente</span>}
     </div>
   )
 
@@ -5710,7 +5753,20 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
     try { window.history.back() } catch {}
   }, [saving, isDirty])
 
-  const adminStyle = React.useMemo(() => ({ ...ADMIN_STYLE_DEFAULTS, ...cfg }), [cfg])
+  const adminStyle = React.useMemo(() => {
+    const merged: Record<string, any> = { ...ADMIN_STYLE_DEFAULTS, ...cfg }
+    return {
+      ...merged,
+      formLabelFontSize: adminLabelFontSize(merged),
+      formFieldFontSize: adminFieldFontSize(merged),
+      formInnerHeaderFontSize: adminInnerHeaderFontSize(merged),
+      formCardHeaderFontSize: Math.max(14, Number(merged.formCardHeaderFontSize ?? 14) || 14),
+      titleFontSize: Math.max(18, Number(merged.titleFontSize ?? 18) || 18),
+      subtitleFontSize: Math.max(15, Number(merged.subtitleFontSize ?? 15) || 15),
+      msgFontSize: Math.max(15, Number(merged.msgFontSize ?? 15) || 15),
+      valueFontSize: adminFieldFontSize(merged)
+    }
+  }, [cfg])
 
   const wrapperStyle: React.CSSProperties = {
     width: '100%',
@@ -5760,7 +5816,7 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
     borderRadius: 8,
     border: 'none',
     fontWeight: 700,
-    fontSize: 13,
+    fontSize: adminFieldFontSize(adminStyle),
     cursor: saving ? 'not-allowed' : 'pointer'
   }
   const saveDisabled = saving || !isDirty || !canEdit
@@ -5814,7 +5870,7 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
               {hasSelection ? (<>{titleParts.prefix}<span style={{ color: '#2563eb', fontWeight: Number(cfg.titleFontWeight || 700) as any }}>{titleParts.reportCode}</span></>) : 'Atto amministrativo'}
             </div>
             {hasSelection && !headerVerbaleDefinitivo && (
-              <div style={{ marginTop: 3, color: '#b42318', fontSize: 13, fontWeight: 850, lineHeight: 1.3 }}>
+              <div style={{ marginTop: 3, color: '#b42318', fontSize: adminLabelFontSize(adminStyle), fontWeight: 850, lineHeight: 1.3 }}>
                 {headerHasVerbale ? 'Numero e data saranno assegnati dopo l’approvazione del Direttore d’Area.' : 'Il documento diventerà definitivo dopo l’approvazione del Direttore d’Area.'}
               </div>
             )}
@@ -5988,7 +6044,7 @@ function primaryButtonStyle (disabled?: boolean): React.CSSProperties {
     borderRadius: 9,
     padding: '8px 14px',
     fontWeight: 800,
-    fontSize: 13,
+    fontSize: 15,
     cursor: disabled ? 'not-allowed' : 'pointer'
   }
 }
@@ -6001,7 +6057,7 @@ function secondaryButtonStyle (disabled?: boolean): React.CSSProperties {
     borderRadius: 9,
     padding: '8px 12px',
     fontWeight: 700,
-    fontSize: 13,
+    fontSize: 15,
     cursor: disabled ? 'not-allowed' : 'pointer'
   }
 }

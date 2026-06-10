@@ -552,9 +552,10 @@ const styles = `
 .gap-btn-icon { min-width:32px; width:32px; height:32px; padding:0; display:inline-flex; align-items:center; justify-content:center; font-size:16px; line-height:1; }
 .gap-confirm-backdrop { position:fixed; inset:0; background:rgba(0,0,0,.28); display:flex; align-items:center; justify-content:center; z-index:9999; }
 .gap-confirm-modal { width:min(560px, calc(100vw - 32px)); background:#fff; border:1px solid #c5d9f1; border-radius:6px; box-shadow:0 12px 28px rgba(0,0,0,.18); padding:16px; }
-.gap-confirm-title { font-size:15px; font-weight:700; color:#1F4E79; margin-bottom:8px; }
-.gap-confirm-text { font-size:13px; line-height:1.5; color:#243447; white-space:pre-line; }
+.gap-confirm-title { font-size:18px; font-weight:700; color:#1F4E79; margin-bottom:8px; }
+.gap-confirm-text { font-size:15px; line-height:1.5; color:#243447; white-space:pre-line; }
 .gap-confirm-actions { display:flex; gap:8px; justify-content:flex-end; margin-top:14px; }
+.gap-confirm-actions .gap-btn { font-size:15px; }
 `
 
 function emptyParentForm() {

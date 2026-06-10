@@ -1603,17 +1603,17 @@ function HeaderAlertsPopup (props: {
       <div style={{ position: 'absolute', right: 18, top: 82, width: 430, maxWidth: 'calc(100vw - 28px)', maxHeight: 'calc(100vh - 110px)', overflow: 'hidden', borderRadius: 16, background: 'rgba(15,23,42,0.97)', border: '1px solid rgba(255,255,255,0.14)', boxShadow: '0 24px 70px rgba(0,0,0,0.45)', color: '#e5e7eb', backdropFilter: 'blur(14px)', pointerEvents: 'auto' }}>
         <div style={{ padding: '14px 16px', borderBottom: '1px solid rgba(255,255,255,0.10)', display: 'flex', justifyContent: 'space-between', gap: 10, alignItems: 'center' }}>
           <div>
-            <div style={{ fontWeight: 900, fontSize: 15 }}>Allarmi e scadenze</div>
-            <div style={{ color: 'rgba(203,213,225,0.75)', fontSize: 12, marginTop: 2 }}>
+            <div style={{ fontWeight: 900, fontSize: 18 }}>Allarmi e scadenze</div>
+            <div style={{ color: 'rgba(203,213,225,0.75)', fontSize: 14, marginTop: 2 }}>
               {props.counts.total} attivi · {props.counts.scaduti + props.counts.critici} scaduti/critici · {props.counts.inScadenza} in scadenza
             </div>
           </div>
-          <button type='button' onClick={props.onClose} style={{ border: '1px solid rgba(255,255,255,0.12)', background: 'rgba(255,255,255,0.06)', color: '#e5e7eb', borderRadius: 9, padding: '6px 9px', cursor: 'pointer', fontWeight: 800 }}>Chiudi</button>
+          <button type='button' onClick={props.onClose} style={{ border: '1px solid rgba(255,255,255,0.12)', background: 'rgba(255,255,255,0.06)', color: '#e5e7eb', borderRadius: 9, padding: '6px 9px', cursor: 'pointer', fontWeight: 800, fontSize: 14 }}>Chiudi</button>
         </div>
         <div style={{ padding: 12, overflowY: 'auto', maxHeight: 'calc(100vh - 190px)', display: 'grid', gap: 10 }}>
-          {props.error && <div style={{ border: '1px solid rgba(248,113,113,0.35)', background: 'rgba(127,29,29,0.35)', color: '#fecaca', borderRadius: 10, padding: 10, fontSize: 12 }}>{props.error}</div>}
+          {props.error && <div style={{ border: '1px solid rgba(248,113,113,0.35)', background: 'rgba(127,29,29,0.35)', color: '#fecaca', borderRadius: 10, padding: 10, fontSize: 14 }}>{props.error}</div>}
           {!props.loading && !props.error && props.alerts.length === 0 && props.counts.total <= 0 && (
-            <div style={{ color: '#cbd5e1', fontSize: 13, padding: 10 }}>Nessun allarme attivo.</div>
+            <div style={{ color: '#cbd5e1', fontSize: 15, padding: 10 }}>Nessun allarme attivo.</div>
           )}
           {popupAlerts.map(alert => {
             const color = alertToneColor(alert.severity === 'red' ? 'red' : alert.severity === 'orange' ? 'orange' : 'blue')
@@ -1625,28 +1625,28 @@ function HeaderAlertsPopup (props: {
                 <div style={{ display: 'flex', gap: 8, alignItems: 'start' }}>
                   <div style={{ width: 10, height: 10, borderRadius: '50%', background: color, marginTop: 4, flex: '0 0 auto' }} />
                   <div style={{ minWidth: 0, flex: 1 }}>
-                    <div style={{ fontSize: 13, fontWeight: 900, color: '#fff' }}>{alert.title}</div>
-                    <div style={{ fontSize: 12, color: '#cbd5e1', lineHeight: 1.35, marginTop: 3 }}>{alertPracticeLine(alert)}</div>
+                    <div style={{ fontSize: 15, fontWeight: 900, color: '#fff' }}>{alert.title}</div>
+                    <div style={{ fontSize: 14, color: '#cbd5e1', lineHeight: 1.35, marginTop: 3 }}>{alertPracticeLine(alert)}</div>
                     {technicianLine && (
-                      <div style={{ fontSize: 12, color: '#cbd5e1', lineHeight: 1.35, marginTop: 3 }}>
+                      <div style={{ fontSize: 14, color: '#cbd5e1', lineHeight: 1.35, marginTop: 3 }}>
                         {technicianLine}
                       </div>
                     )}
                     {eventDate != null && (
-                      <div style={{ fontSize: 12, color: '#cbd5e1', lineHeight: 1.35, marginTop: 3 }}>
+                      <div style={{ fontSize: 14, color: '#cbd5e1', lineHeight: 1.35, marginTop: 3 }}>
                         Data evento: {formatAlertDateTime(eventDate)}
                       </div>
                     )}
                     {showMeta && (
-                      <div style={{ fontSize: 11, color: 'rgba(203,213,225,0.65)', marginTop: 6 }}>
+                      <div style={{ fontSize: 13, color: 'rgba(203,213,225,0.65)', marginTop: 6 }}>
                         Pratica: <strong>{alert.reportCode}</strong>{alert.termineData != null ? ` · Termine: ${formatAlertDate(alert.termineData)}` : ''}
                       </div>
                     )}
                     <div style={{ marginTop: 9, display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-                      <button type='button' onClick={() => props.onOpenPractice(alert)} style={{ border: `1px solid ${color}88`, background: `${color}33`, color: '#fff', borderRadius: 8, padding: '6px 10px', cursor: 'pointer', fontSize: 12, fontWeight: 850 }}>Apri pratica</button>
+                      <button type='button' onClick={() => props.onOpenPractice(alert)} style={{ border: `1px solid ${color}88`, background: `${color}33`, color: '#fff', borderRadius: 8, padding: '6px 10px', cursor: 'pointer', fontSize: 14, fontWeight: 850 }}>Apri pratica</button>
                       {!props.homeMode && !isGiiTakeChargeAlert(alert) && (
 
-                        <button type='button' disabled={props.archivingKey === alert.alertKey} onClick={() => props.onArchive(alert)} style={{ border: '1px solid rgba(255,255,255,0.14)', background: 'rgba(255,255,255,0.06)', color: props.archivingKey === alert.alertKey ? '#94a3b8' : '#e5e7eb', borderRadius: 8, padding: '6px 10px', cursor: props.archivingKey === alert.alertKey ? 'wait' : 'pointer', fontSize: 12, fontWeight: 800 }}>{props.archivingKey === alert.alertKey ? 'Archiviazione…' : 'Archivia'}</button>
+                        <button type='button' disabled={props.archivingKey === alert.alertKey} onClick={() => props.onArchive(alert)} style={{ border: '1px solid rgba(255,255,255,0.14)', background: 'rgba(255,255,255,0.06)', color: props.archivingKey === alert.alertKey ? '#94a3b8' : '#e5e7eb', borderRadius: 8, padding: '6px 10px', cursor: props.archivingKey === alert.alertKey ? 'wait' : 'pointer', fontSize: 14, fontWeight: 800 }}>{props.archivingKey === alert.alertKey ? 'Archiviazione…' : 'Archivia'}</button>
 
                       )}
                     </div>

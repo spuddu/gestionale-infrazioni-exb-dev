@@ -72,9 +72,9 @@ const BAR_STYLE = `
 .gnc-btn-confirm:hover:not(:disabled) { background: #28753f; border-color:#28753f; }
 .gnc-btn-cancel { background:#d92d20; color:#fff; border-color:#d92d20; }
 .gnc-btn-cancel:hover:not(:disabled) { background:#b42318; border-color:#b42318; }
-.gnc-btn-remove { background:#c00; color:#fff; padding:2px 7px; border:none; border-radius:3px; font-size:11px; font-weight:700; cursor:pointer; }
-.gnc-dd-table { width:100%; border-collapse:collapse; font-size:11px; table-layout:fixed; }
-.gnc-dd-table th { background:#f5f9ff; color:#1F4E79; padding:4px 8px; text-align:left; position:sticky; top:0; z-index:1; font-weight:700; white-space:nowrap; font-size:11px; }
+.gnc-btn-remove { background:#c00; color:#fff; padding:2px 7px; border:none; border-radius:3px; font-size:13px; font-weight:700; cursor:pointer; }
+.gnc-dd-table { width:100%; border-collapse:collapse; font-size:14px; table-layout:fixed; }
+.gnc-dd-table th { background:#f5f9ff; color:#1F4E79; padding:4px 8px; text-align:left; position:sticky; top:0; z-index:1; font-weight:700; white-space:nowrap; font-size:14px; }
 .gnc-dd-table td { padding:4px 8px; border-bottom:1px solid #e6eef7; vertical-align:middle; }
 .gnc-dd-table tbody tr:nth-child(odd) td { background:#f9fbff; }
 .gnc-msg { padding:5px 12px; border-radius:4px; font-size:12px; font-weight:700; }
@@ -230,10 +230,10 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
             const key = cartItemKey(item)
             return (
               <tr key={key}>
-                <td><span className='gnc-muted' style={{ fontSize: 10 }}>{ORIGINE_SHORT[item.codice_prezzario] || item.codice_prezzario}{item.anno_riferimento ? ` ${item.anno_riferimento}` : ''}</span></td>
-                <td style={{ fontWeight: 700, fontSize: 11 }}>{item.codice_voce}</td>
+                <td><span className='gnc-muted' style={{ fontSize: 13 }}>{ORIGINE_SHORT[item.codice_prezzario] || item.codice_prezzario}{item.anno_riferimento ? ` ${item.anno_riferimento}` : ''}</span></td>
+                <td style={{ fontWeight: 700, fontSize: 14 }}>{item.codice_voce}</td>
                 <td title={item.descrizione} style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{item.descrizione}</td>
-                <td><span style={{ fontSize: 10 }}>{FAMIGLIA_SHORT[item.famiglia] || item.famiglia}</span></td>
+                <td><span style={{ fontSize: 13 }}>{FAMIGLIA_SHORT[item.famiglia] || item.famiglia}</span></td>
                 <td>{item.unita_misura || '—'}</td>
                 <td style={{ whiteSpace: 'nowrap', textAlign: 'right' }}>{money(item.prezzo_unitario, 4)}</td>
                 <td><button className='gnc-btn-remove' onClick={() => onRemoveByKey(key)}>✕</button></td>
@@ -248,12 +248,12 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
 
   const confirmPortal = confirmClear ? createPortal(
     <div style={{ position: 'fixed', inset: 0, zIndex: 100000, background: 'rgba(0,0,0,0.4)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-      <div style={{ background: '#fff', borderRadius: 12, padding: 28, maxWidth: 380, width: '90%', boxShadow: '0 8px 32px rgba(0,0,0,0.25)' }}>
-        <div style={{ fontWeight: 700, fontSize: 16, marginBottom: 10 }}>Svuotare l'elenco?</div>
-        <div style={{ fontSize: 13, color: '#4b5563', marginBottom: 20 }}>Verranno rimosse {cart.length} {cart.length === 1 ? 'voce' : 'voci'}.</div>
+      <div role='dialog' aria-modal='true' data-gii-global-popup-dialog='1' style={{ background: '#fff', borderRadius: 12, padding: 28, maxWidth: 380, width: '90%', boxShadow: '0 8px 32px rgba(0,0,0,0.25)' }}>
+        <div style={{ fontWeight: 700, fontSize: 18, marginBottom: 10 }}>Svuotare l'elenco?</div>
+        <div style={{ fontSize: 15, color: '#4b5563', marginBottom: 20 }}>Verranno rimosse {cart.length} {cart.length === 1 ? 'voce' : 'voci'}.</div>
         <div style={{ display: 'flex', gap: 10 }}>
-          <button type='button' onClick={doClearAll} style={{ padding: '8px 18px', borderRadius: 8, border: 'none', background: '#d13438', color: '#fff', fontWeight: 700, fontSize: 13, cursor: 'pointer' }}>Sì, svuota</button>
-          <button type='button' onClick={() => setConfirmClear(false)} style={{ padding: '8px 18px', borderRadius: 8, border: '1px solid rgba(0,0,0,0.15)', background: '#fff', color: '#111827', fontWeight: 600, fontSize: 13, cursor: 'pointer' }}>Annulla</button>
+          <button type='button' onClick={doClearAll} style={{ padding: '8px 18px', borderRadius: 8, border: 'none', background: '#d13438', color: '#fff', fontWeight: 700, fontSize: 15, cursor: 'pointer' }}>Sì, svuota</button>
+          <button type='button' onClick={() => setConfirmClear(false)} style={{ padding: '8px 18px', borderRadius: 8, border: '1px solid rgba(0,0,0,0.15)', background: '#fff', color: '#111827', fontWeight: 600, fontSize: 15, cursor: 'pointer' }}>Annulla</button>
         </div>
       </div>
     </div>,

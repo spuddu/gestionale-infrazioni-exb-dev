@@ -170,6 +170,15 @@ function formatTimeIt (v: any): string {
     return d.toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' })
   } catch { return '' }
 }
+function formatRilevazioneTime (data: any): string {
+  // data_rilevazione può essere stata normalizzata a sola data durante la modifica.
+  // In quel caso recupera l'ora originaria dal timestamp di avvio della rilevazione.
+  for (const value of [data?.data_rilevazione, data?.start]) {
+    const formatted = formatTimeIt(value)
+    if (formatted) return formatted
+  }
+  return ''
+}
 function esc (s: any): string { return String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;') }
 function fmtNum (v: any): string { if (v == null || v === '') return ''; const n = Number(v); if (isNaN(n)) return String(v); return n.toLocaleString('it-IT', { maximumFractionDigits: 2 }) }
 
@@ -287,6 +296,7 @@ function buildPlaceholderMap (data: any, utentiCache: Map<string, UtenteCached> 
   const art17on = String(d.norma16_17 || '').toLowerCase().includes('art17') || !!d.art17_tipo
   const xMark = (on: boolean) => on ? 'x' : ''
   const surfVal = (on: boolean, ...fields: string[]) => { if (!on) return ''; for (const f of fields) { const v = d[f]; if (v != null && v !== '' && v !== 0) return fmtNum(v) } return '' }
+  const surfValIncludingZero = (on: boolean, ...fields: string[]) => { if (!on) return ''; for (const f of fields) { const v = d[f]; if (v != null && v !== '') return fmtNum(v) } return '0' }
   const gradiViolazioni = parseGradiViolazioniForRapporto(d.gradi_violazioni)
   const occorrenzaArt15 = occorrenzaArt15ForRapporto(d.occorrenza, art15on)
   const origPratica = d.origine_pratica ?? d.Origine_pratica
@@ -312,7 +322,7 @@ function buildPlaceholderMap (data: any, utentiCache: Map<string, UtenteCached> 
   return {
     cod_pratica: codPratica, anno: d.data_rilevazione ? String(new Date(d.data_rilevazione).getFullYear()) : '', area_cod: areaCod,
     area_label: AREA_LABELS[areaCod] || areaCod, settore_label: SETTORE_LABELS[settoreCod] || settoreCod,
-    tecnico_rilevatore: esc(d.tecnico_rilevatore || ''), data_rilevazione: formatDateIt(d.data_rilevazione), ora_rilevazione: formatTimeIt(d.data_rilevazione),
+    tecnico_rilevatore: esc(d.tecnico_rilevatore || ''), data_rilevazione: formatDateIt(d.data_rilevazione), ora_rilevazione: formatRilevazioneTime(d),
     x_art08: xMark(artChecked('v_art08')), x_art12: xMark(artChecked('v_art12')), x_art15: xMark(art15on), x_art16: xMark(art16on), x_art17: xMark(art17on),
     x_art27: xMark(artChecked('v_art27')), x_art28: xMark(artChecked('v_art28')), x_art29: xMark(artChecked('v_art29')), x_art30: xMark(artChecked('v_art30')),
     x_art31: xMark(artChecked('v_art31')), x_art32: xMark(artChecked('v_art32')), x_art33: xMark(artChecked('v_art33')), x_art34: xMark(artChecked('v_art34')),
@@ -320,7 +330,7 @@ function buildPlaceholderMap (data: any, utentiCache: Map<string, UtenteCached> 
     sup_dich_art08: surfVal(artChecked('v_art08'), 'sup_dichiarata_art08'), sup_irr_art08: surfVal(artChecked('v_art08'), 'sup_irrigata_art08'),
     sup_dich_art12: surfVal(artChecked('v_art12'), 'sup_dichiarata_art12'), sup_irr_art12: surfVal(artChecked('v_art12'), 'sup_irrigata_art12'),
     sup_dich_art15: surfVal(art15on, 'sup_dichiarata_art15'), sup_irr_art15: surfVal(art15on, 'sup_irrigata_art15'),
-    sup_dich_art16: surfVal(art16on, 'sup_dichiarata_art16'), sup_irr_art16: surfVal(art16on, 'sup_irrigata_art16_17_2'),
+    sup_dich_art16: surfVal(art16on, 'sup_dichiarata_art16'), sup_irr_art16: surfValIncludingZero(art16on, 'sup_irrigata_art16_17_2'),
     sup_dich_art17: surfVal(art17on, 'sup_dichiarata_art17_1', 'sup_dichiarata_art17_2'), sup_irr_art17: surfVal(art17on, 'sup_irrigata_art17_1', 'sup_irrigata_art16_17_2'),
     sup_dich_art27: surfVal(artChecked('v_art27'), 'sup_dichiarata_art27'), sup_irr_art27: surfVal(artChecked('v_art27'), 'sup_irrigata_art27'),
     sup_dich_art28: surfVal(artChecked('v_art28'), 'sup_dichiarata_art28'), sup_irr_art28: surfVal(artChecked('v_art28'), 'sup_irrigata_art28'),
@@ -398,6 +408,13 @@ type Art30RimborsoPdfRow = {
   importo: number | null
 }
 
+type Art30CauzionePdfDetail = {
+  unitaMisura: string
+  quantita: number
+  valoreUnitario: number
+  importo: number
+}
+
 function parseArt30Number (value: any): number | null {
   if (value == null || value === '') return null
   if (typeof value === 'number') return Number.isFinite(value) ? value : null
@@ -436,12 +453,36 @@ function parseArt30DetailForPdf (raw: any): Art30RimborsoPdfRow[] {
   return out
 }
 
+function parseArt30CauzioneDetailForPdf (raw: any): Art30CauzionePdfDetail | null {
+  for (const line of String(raw ?? '').split(/\r?\n/)) {
+    const text = line.trim()
+    if (!/^Decurtazione della cauzione\b/i.test(text)) continue
+    const unitaMisuraMatch = text.match(/U\.M\.:\s*([^—|]+?)(?:\s+(?:—|\|)|$)/i)
+    const quantitaMatch = text.match(/Quantità:\s*([0-9.,]+)/i)
+    const valoreUnitarioMatch = text.match(/Valore unitario:\s*([0-9.,]+)/i)
+    const importoMatch = text.match(/Importo:\s*-?\s*([0-9.,]+)/i)
+    const quantita = parseArt30Number(quantitaMatch?.[1])
+    const valoreUnitario = parseArt30Number(valoreUnitarioMatch?.[1])
+    const importo = parseArt30Number(importoMatch?.[1])
+    if (quantita == null || quantita <= 0 || valoreUnitario == null || valoreUnitario < 0 || importo == null || importo < 0) return null
+    return {
+      unitaMisura: String(unitaMisuraMatch?.[1] || 'n.').trim() || 'n.',
+      quantita,
+      valoreUnitario,
+      importo
+    }
+  }
+  return null
+}
+
 function qtyArt30It (value: number): string {
   return Number(value).toLocaleString('it-IT', { minimumFractionDigits: 0, maximumFractionDigits: 4 })
 }
 
-function buildArt30RapportoSummary (data: Record<string, any>): { hasData: boolean; rows: Art30RimborsoPdfRow[]; rimborso: number; cauzione: number; netto: number; text: string } {
-  const rows = parseArt30DetailForPdf(pickAttrCI(data, ['attrezzature_rimborso_dettaglio']))
+function buildArt30RapportoSummary (data: Record<string, any>): { hasData: boolean; rows: Art30RimborsoPdfRow[]; rimborso: number; cauzione: number; cauzioneQuantita: number | null; cauzioneValoreUnitario: number | null; cauzioneUnitaMisura: string; netto: number; text: string } {
+  const detailRaw = pickAttrCI(data, ['attrezzature_rimborso_dettaglio'])
+  const rows = parseArt30DetailForPdf(detailRaw)
+  const cauzioneDetail = parseArt30CauzioneDetailForPdf(detailRaw)
   const rimborsoSalvato = parseArt30Number(pickAttrCI(data, ['attrezzature_rimborso_importo']))
   const cauzioneSalvata = parseArt30Number(pickAttrCI(data, ['attrezzature_cauzione_decurtata']))
   const nettoSalvato = parseArt30Number(pickAttrCI(data, ['attrezzature_importo_netto']))
@@ -456,7 +497,7 @@ function buildArt30RapportoSummary (data: Record<string, any>): { hasData: boole
   const cauzione = roundMoney(cauzioneAttiva ? (cauzioneSalvata ?? 0) : 0)
   const netto = roundMoney(nettoSalvato ?? (rimborso - cauzione))
   const hasData = rows.length > 0 || rimborsoSalvato != null || cauzioneSalvata != null || nettoSalvato != null || cauzioneAttiva
-  if (!hasData) return { hasData: false, rows: [], rimborso: 0, cauzione: 0, netto: 0, text: '' }
+  if (!hasData) return { hasData: false, rows: [], rimborso: 0, cauzione: 0, cauzioneQuantita: null, cauzioneValoreUnitario: null, cauzioneUnitaMisura: 'n.', netto: 0, text: '' }
 
   const parts: string[] = rows.map(row => {
     const importo = roundMoney(row.importo ?? ((row.valoreUnitario ?? 0) * row.quantita))
@@ -470,7 +511,17 @@ function buildArt30RapportoSummary (data: Record<string, any>): { hasData: boole
   if (cauzioneAttiva || cauzione !== 0) parts.push(`cauzione: -${moneyIt(Math.abs(cauzione))}`)
   parts.push(`netto Art. 30: ${moneyIt(netto)}`)
 
-  return { hasData: true, rows, rimborso, cauzione, netto, text: `Art. 30 - ${parts.join('; ')}.` }
+  return {
+    hasData: true,
+    rows,
+    rimborso,
+    cauzione,
+    cauzioneQuantita: cauzioneDetail?.quantita ?? null,
+    cauzioneValoreUnitario: cauzioneDetail?.valoreUnitario ?? null,
+    cauzioneUnitaMisura: cauzioneDetail?.unitaMisura || 'n.',
+    netto,
+    text: `Art. 30 - ${parts.join('; ')}.`
+  }
 }
 
 function normalizeNsCasistica (v: any): string {
@@ -654,6 +705,9 @@ export default function AnteprimaPanel (p: { data: Record<string, any>; mode: 'c
                     })),
                     rimborso: art30Summary.rimborso,
                     cauzione: art30Summary.cauzione,
+                    cauzione_quantita: art30Summary.cauzioneQuantita,
+                    cauzione_valore_unitario: art30Summary.cauzioneValoreUnitario,
+                    cauzione_unita_misura: art30Summary.cauzioneUnitaMisura,
                     netto: art30Summary.netto
                   }
                 : null,

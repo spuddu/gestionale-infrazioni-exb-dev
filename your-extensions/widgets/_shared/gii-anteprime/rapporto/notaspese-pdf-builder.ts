@@ -74,6 +74,9 @@ export type NotaSpeseArt30Data = {
   rows: NotaSpeseArt30Row[]
   rimborso: number
   cauzione: number
+  cauzione_quantita?: number | null
+  cauzione_valore_unitario?: number | null
+  cauzione_unita_misura?: string | null
   netto: number
 }
 
@@ -91,7 +94,7 @@ export interface NotaSpeseData {
   titolo_nota?: string | null
   rows: Record<NsCategory, NsDetailRow[]>
   summary: NsSummary
-  /** Riepilogo Art. 30, accodato come sezione autonoma dopo le normali super categorie. */
+  /** Riepilogo Art. 30, separato dalle voci dell'intervento sul campo. */
   art30?: NotaSpeseArt30Data | null
   luogo_data: string
   firma_nome: string
@@ -129,6 +132,7 @@ const CX_IMP    = CX_PU + CW_PU
 const ROW_H = 16
 const HDR_H = 20
 const COL_HDR_H = 16
+const SUPER_HDR_H = 22
 
 // Posizioni placeholder nel template (y da bordo superiore pagina)
 // Posizioni testo (la linea orizzontale è a top≈173.79)
@@ -146,6 +150,7 @@ const CLR_BLACK   = rgb(0, 0, 0)
 const CLR_BLUE    = rgb(0, 0.357, 0.549)
 const CLR_BORDER  = rgb(197 / 255, 217 / 255, 241 / 255)
 const CLR_ALT_ROW = rgb(245 / 255, 249 / 255, 255 / 255)
+const CLR_SUPER_BG = rgb(221 / 255, 235 / 255, 247 / 255)
 
 /* ------------------------------------------------------------------ */
 /*  Helper                                                             */
@@ -449,7 +454,106 @@ export async function buildNotaSpesePdf(data: NotaSpeseData): Promise<Uint8Array
     return false
   }
 
-  /* ---- Tabelle per categoria ---- */
+  /* ---- Gruppi della Nota spese Art. 30 ---- */
+
+  const art30Rows = (data.art30?.rows || []).filter(row => row && Number(row.quantita) > 0)
+  const art30Rimborso = roundMoney(Number(data.art30?.rimborso) || art30Rows.reduce((sum, row) => sum + (Number(row.importo) || 0), 0))
+  const art30Cauzione = roundMoney(Math.abs(Number(data.art30?.cauzione) || 0))
+  const art30CauzioneQuantita = Number(data.art30?.cauzione_quantita)
+  const art30CauzioneValoreUnitario = Number(data.art30?.cauzione_valore_unitario)
+  const art30CauzioneUnitaMisura = String(data.art30?.cauzione_unita_misura || 'n.').trim() || 'n.'
+  const hasArt30CauzioneDetail = Number.isFinite(art30CauzioneQuantita) && art30CauzioneQuantita > 0 && Number.isFinite(art30CauzioneValoreUnitario) && art30CauzioneValoreUnitario >= 0
+  const art30Netto = roundMoney(Number.isFinite(Number(data.art30?.netto))
+    ? Number(data.art30?.netto)
+    : art30Rimborso - art30Cauzione)
+  const hasArt30 = art30Rows.length > 0 || art30Rimborso !== 0 || art30Cauzione !== 0 || art30Netto !== 0
+
+  if (hasArt30) {
+    ensureSpace(SUPER_HDR_H + COL_HDR_H + ROW_H * 3 + 20)
+
+    drawSuperTitle('RIMBORSO ATTREZZATURE')
+
+    drawColumnHeaders(pg, fontB, top)
+    top += COL_HDR_H
+
+    const rowsToDraw = art30Rows.length > 0
+      ? art30Rows
+      : [{ codice: '', descrizione: 'Rimborso attrezzature', quantita: 1, valore_unitario: art30Rimborso, importo: art30Rimborso }]
+
+    for (let ri = 0; ri < rowsToDraw.length; ri++) {
+      const row = rowsToDraw[ri]
+      const descLines = wrapText(String(row.descrizione || ''), fontR, 7.5, CW_DESC - 6)
+      const rowH = Math.max(ROW_H, descLines.length * 10 + 6)
+      ensureSpace(rowH + ROW_H * 2)
+      if (top <= 36 + 1) {
+        drawColumnHeaders(pg, fontB, top)
+        top += COL_HDR_H
+      }
+
+      const rowY = PH - top - rowH
+      if (ri % 2 === 0) fillRect(pg, ML, rowY, TW, rowH, CLR_ALT_ROW)
+      hLine(pg, ML, PW - MR, rowY)
+      hLine(pg, ML, PW - MR, rowY + rowH)
+      drawColumnVerticals(pg, rowY, rowH)
+
+      const textY = centeredY(top, rowH, 7.5)
+      txt(pg, String(row.codice || '').trim(), fontR, 7.5, CX_CODICE + 3, textY, CLR_BLACK, CW_CODICE - 6)
+      centered(pg, 'n.', fontR, 7.5, CX_UM, CX_UM + CW_UM, textY, CLR_BLACK)
+      rightAligned(pg, formatQty(Number(row.quantita) || 0), fontR, 7.5, CX_QTA, CW_QTA, textY, CLR_BLACK)
+      if (row.valore_unitario != null && Number.isFinite(Number(row.valore_unitario))) {
+        rightAligned(pg, money(Number(row.valore_unitario)), fontR, 7.5, CX_PU, CW_PU, textY, CLR_BLACK)
+      }
+      rightAligned(pg, money(Number(row.importo) || 0), fontR, 7.5, CX_IMP, CW_IMP, textY, CLR_BLACK)
+
+      let dY = PH - top - 3 - 7.5 * 0.75
+      for (const line of descLines) {
+        txt(pg, line, fontR, 7.5, CX_DESC + 3, dY, CLR_BLACK, CW_DESC - 6)
+        dY -= 10
+      }
+      top += rowH
+    }
+
+    if (art30Cauzione !== 0) {
+      ensureSpace(ROW_H * 2)
+      const rowY = PH - top - ROW_H
+      if (rowsToDraw.length % 2 === 0) fillRect(pg, ML, rowY, TW, ROW_H, CLR_ALT_ROW)
+      hLine(pg, ML, PW - MR, rowY)
+      hLine(pg, ML, PW - MR, rowY + ROW_H)
+      drawColumnVerticals(pg, rowY, ROW_H)
+      const cauzioneTextY = centeredY(top, ROW_H, 7.5)
+      txt(pg, 'Decurtazione della cauzione', fontR, 7.5, CX_DESC + 3, cauzioneTextY, CLR_BLACK, CW_DESC - 6)
+      if (hasArt30CauzioneDetail) {
+        centered(pg, art30CauzioneUnitaMisura, fontR, 7.5, CX_UM, CX_UM + CW_UM, cauzioneTextY, CLR_BLACK)
+        rightAligned(pg, formatQty(art30CauzioneQuantita), fontR, 7.5, CX_QTA, CW_QTA, cauzioneTextY, CLR_BLACK)
+        rightAligned(pg, money(art30CauzioneValoreUnitario), fontR, 7.5, CX_PU, CW_PU, cauzioneTextY, CLR_BLACK)
+      }
+      rightAligned(pg, money(-art30Cauzione), fontR, 7.5, CX_IMP, CW_IMP, cauzioneTextY, CLR_BLACK)
+      top += ROW_H
+    }
+
+    ensureSpace(ROW_H)
+    const subY = PH - top - ROW_H
+    hLine(pg, ML, PW - MR, subY)
+    hLine(pg, ML, PW - MR, subY + ROW_H)
+    drawColumnVerticals(pg, subY, ROW_H)
+    rightAligned(pg, 'Subtotale', fontB, 8.5, CX_PU, CW_PU, centeredY(top, ROW_H, 8.5), CLR_BLACK)
+    rightAligned(pg, money(art30Netto), fontB, 8.5, CX_IMP, CW_IMP, centeredY(top, ROW_H, 8.5), CLR_BLACK)
+    top += ROW_H + 10
+  }
+
+  /* ---- Voci connesse all'intervento sul campo ---- */
+
+  const ordinaryCategories = CATEGORY_ORDER.filter(cat => (data.rows[cat] || []).length > 0)
+
+  if (hasArt30 && ordinaryCategories.length > 0) {
+    const firstCatRows = (data.rows[ordinaryCategories[0]] || []).slice().sort((a, b) => a.ordine - b.ordine)
+    const firstRow = firstCatRows[0]
+    const firstCodeLines = firstRow ? wrapText(firstRow.codice_voce_snapshot, fontR, 7.5, CW_CODICE - 6) : ['']
+    const firstDescLines = firstRow ? wrapText(firstRow.descrizione_snapshot, fontR, 7.5, CW_DESC - 6) : ['']
+    const firstRowH = Math.max(ROW_H, firstCodeLines.length * 10 + 6, firstDescLines.length * 10 + 6)
+    ensureSpace(SUPER_HDR_H + HDR_H + COL_HDR_H + firstRowH + ROW_H + 24)
+    drawSuperTitle("RIMBORSO SPESE CONNESSE ALL'INTERVENTO")
+  }
 
   for (const cat of CATEGORY_ORDER) {
     const catRows = (data.rows[cat] || []).slice().sort((a, b) => a.ordine - b.ordine)
@@ -553,86 +657,6 @@ export async function buildNotaSpesePdf(data: NotaSpeseData): Promise<Uint8Array
     top += 22
   }
 
-  /* ---- Sezione Art. 30: attrezzature da rimborsare ---- */
-
-  const art30Rows = (data.art30?.rows || []).filter(row => row && Number(row.quantita) > 0)
-  const art30Rimborso = roundMoney(Number(data.art30?.rimborso) || art30Rows.reduce((sum, row) => sum + (Number(row.importo) || 0), 0))
-  const art30Cauzione = roundMoney(Math.abs(Number(data.art30?.cauzione) || 0))
-  const art30Netto = roundMoney(Number.isFinite(Number(data.art30?.netto))
-    ? Number(data.art30?.netto)
-    : art30Rimborso - art30Cauzione)
-  const hasArt30 = art30Rows.length > 0 || art30Rimborso !== 0 || art30Cauzione !== 0 || art30Netto !== 0
-
-  if (hasArt30) {
-    ensureSpace(HDR_H + COL_HDR_H + ROW_H * 3 + 14)
-
-    const art30HdrY = PH - top - HDR_H
-    fillRect(pg, ML, art30HdrY, TW, HDR_H, CLR_CAT_BG)
-    centered(pg, 'Attrezzature da rimborsare — Art. 30', fontB, 9, ML, PW - MR, centeredY(top, HDR_H, 9), CLR_WHITE)
-    top += HDR_H
-
-    drawColumnHeaders(pg, fontB, top)
-    top += COL_HDR_H
-
-    const rowsToDraw = art30Rows.length > 0
-      ? art30Rows
-      : [{ codice: '', descrizione: 'Rimborso attrezzature', quantita: 1, valore_unitario: art30Rimborso, importo: art30Rimborso }]
-
-    for (let ri = 0; ri < rowsToDraw.length; ri++) {
-      const row = rowsToDraw[ri]
-      const descLines = wrapText(String(row.descrizione || ''), fontR, 7.5, CW_DESC - 6)
-      const rowH = Math.max(ROW_H, descLines.length * 10 + 6)
-      ensureSpace(rowH + ROW_H * 2)
-      if (top <= 36 + 1) {
-        drawColumnHeaders(pg, fontB, top)
-        top += COL_HDR_H
-      }
-
-      const rowY = PH - top - rowH
-      if (ri % 2 === 0) fillRect(pg, ML, rowY, TW, rowH, CLR_ALT_ROW)
-      hLine(pg, ML, PW - MR, rowY)
-      hLine(pg, ML, PW - MR, rowY + rowH)
-      drawColumnVerticals(pg, rowY, rowH)
-
-      const textY = centeredY(top, rowH, 7.5)
-      txt(pg, String(row.codice || '').trim(), fontR, 7.5, CX_CODICE + 3, textY, CLR_BLACK, CW_CODICE - 6)
-      centered(pg, 'n.', fontR, 7.5, CX_UM, CX_UM + CW_UM, textY, CLR_BLACK)
-      rightAligned(pg, formatQty(Number(row.quantita) || 0), fontR, 7.5, CX_QTA, CW_QTA, textY, CLR_BLACK)
-      if (row.valore_unitario != null && Number.isFinite(Number(row.valore_unitario))) {
-        rightAligned(pg, money(Number(row.valore_unitario)), fontR, 7.5, CX_PU, CW_PU, textY, CLR_BLACK)
-      }
-      rightAligned(pg, money(Number(row.importo) || 0), fontR, 7.5, CX_IMP, CW_IMP, textY, CLR_BLACK)
-
-      let dY = PH - top - 3 - 7.5 * 0.75
-      for (const line of descLines) {
-        txt(pg, line, fontR, 7.5, CX_DESC + 3, dY, CLR_BLACK, CW_DESC - 6)
-        dY -= 10
-      }
-      top += rowH
-    }
-
-    if (art30Cauzione !== 0) {
-      ensureSpace(ROW_H * 2)
-      const rowY = PH - top - ROW_H
-      if (rowsToDraw.length % 2 === 0) fillRect(pg, ML, rowY, TW, ROW_H, CLR_ALT_ROW)
-      hLine(pg, ML, PW - MR, rowY)
-      hLine(pg, ML, PW - MR, rowY + ROW_H)
-      drawColumnVerticals(pg, rowY, ROW_H)
-      txt(pg, 'Decurtazione della cauzione', fontR, 7.5, CX_DESC + 3, centeredY(top, ROW_H, 7.5), CLR_BLACK, CW_DESC - 6)
-      rightAligned(pg, money(-art30Cauzione), fontR, 7.5, CX_IMP, CW_IMP, centeredY(top, ROW_H, 7.5), CLR_BLACK)
-      top += ROW_H
-    }
-
-    ensureSpace(ROW_H)
-    const subY = PH - top - ROW_H
-    hLine(pg, ML, PW - MR, subY)
-    hLine(pg, ML, PW - MR, subY + ROW_H)
-    drawColumnVerticals(pg, subY, ROW_H)
-    rightAligned(pg, 'Subtotale', fontB, 8.5, CX_PU, CW_PU, centeredY(top, ROW_H, 8.5), CLR_BLACK)
-    rightAligned(pg, money(art30Netto), fontB, 8.5, CX_IMP, CW_IMP, centeredY(top, ROW_H, 8.5), CLR_BLACK)
-    top += ROW_H + 10
-  }
-
   /* ---- Piede: totale complessivo ---- */
 
   ensureSpace(46)
@@ -670,6 +694,21 @@ export async function buildNotaSpesePdf(data: NotaSpeseData): Promise<Uint8Array
 
   /* ---- Funzioni interne ---- */
 
+  function drawSuperTitle(label: string): void {
+    const y = PH - top - SUPER_HDR_H
+    pg.drawRectangle({
+      x: ML,
+      y,
+      width: TW,
+      height: SUPER_HDR_H,
+      color: CLR_SUPER_BG,
+      borderColor: CLR_CAT_BG,
+      borderWidth: 0.8
+    })
+    centered(pg, label, fontB, 10, ML, PW - MR, centeredY(top, SUPER_HDR_H, 10), CLR_CAT_BG)
+    top += SUPER_HDR_H + 6
+  }
+
   function drawIndependentPageNumbers(): void {
     const pages = doc.getPages()
     const totalPages = pages.length
@@ -701,7 +740,7 @@ export async function buildNotaSpesePdf(data: NotaSpeseData): Promise<Uint8Array
     centered(p, 'Descrizione', fb, 7.5, CX_DESC, CX_DESC + CW_DESC, ty, CLR_BLACK)
     centered(p, 'U.M.', fb, 7.5, CX_UM, CX_UM + CW_UM, ty, CLR_BLACK)
     centered(p, 'Q.t\u00E0', fb, 7.5, CX_QTA, CX_QTA + CW_QTA, ty, CLR_BLACK)
-    centered(p, 'Prezzo unit.', fb, 7.5, CX_PU, CX_PU + CW_PU, ty, CLR_BLACK)
+    centered(p, 'Prezzo unitario', fb, 7.5, CX_PU, CX_PU + CW_PU, ty, CLR_BLACK)
     centered(p, 'Importo', fb, 7.5, CX_IMP, CX_IMP + CW_IMP, ty, CLR_BLACK)
   }
 

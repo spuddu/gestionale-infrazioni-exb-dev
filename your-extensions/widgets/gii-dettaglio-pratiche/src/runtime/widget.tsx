@@ -838,18 +838,23 @@ function DetailSectionCard (props: {
   right?: React.ReactNode
   borderColor?: string
   headerBg?: string
+  headerColor?: string
+  bodyBg?: string
+  boxShadow?: string
   bodyPadding?: number | string
 }) {
   const borderColor = props.borderColor || '#c5d9f1'
   const headerBg = props.headerBg || '#eaf2ff'
+  const headerColor = props.headerColor || '#1f2937'
+  const bodyBg = props.bodyBg || '#fff'
   const bodyPadding = props.bodyPadding ?? 12
   return (
-    <div style={{ border: `1px solid ${borderColor}`, borderRadius: 10, background: '#fff', overflow: 'hidden' }}>
+    <div style={{ border: `1px solid ${borderColor}`, borderRadius: 10, background: bodyBg, boxShadow: props.boxShadow, overflow: 'hidden' }}>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, padding: '8px 12px', background: headerBg, borderBottom: `1px solid ${borderColor}` }}>
-        <div style={{ fontWeight: 800, fontSize: 13, color: '#1f2937', lineHeight: 1.25 }}>{props.title}</div>
+        <div style={{ fontWeight: 800, fontSize: 13, color: headerColor, lineHeight: 1.25 }}>{props.title}</div>
         {props.right ? <div style={{ flexShrink: 0 }}>{props.right}</div> : null}
       </div>
-      <div style={{ padding: bodyPadding, overflowX: 'auto' }}>{props.children}</div>
+      <div style={{ padding: bodyPadding, overflowX: 'auto', background: bodyBg }}>{props.children}</div>
     </div>
   )
 }
@@ -2750,7 +2755,12 @@ const NSD_PARENT_SUMMARY_FIELDS = [
   'ns_spese_generali_perc',
   'ns_importo_spese_generali',
   'ns_totale_complessivo',
-  'ns_ricalcolata_il'
+  'ns_ricalcolata_il',
+  'attrezzature_rimborso_dettaglio',
+  'attrezzature_rimborso_importo',
+  'attrezzature_cauzione_presente',
+  'attrezzature_cauzione_decurtata',
+  'attrezzature_importo_netto'
 ]
 const __giiNsdLayerCache: Record<string, any> = {}
 
@@ -2770,6 +2780,115 @@ function nsdMoney (v: any): string {
 
 function nsdQty (v: any): string {
   return nsdSafeNum(v, 0).toLocaleString('it-IT', { minimumFractionDigits: 0, maximumFractionDigits: 4 })
+}
+
+type NsdArt30EquipmentRow = {
+  codice: string
+  descrizione: string
+  unitaMisura: string
+  quantita: number | null
+  valoreUnitario: number | null
+  importo: number
+  isCauzione: boolean
+}
+
+type NsdArt30EquipmentSummary = {
+  rows: NsdArt30EquipmentRow[]
+  rimborsoLordo: number
+  cauzione: number
+  netto: number
+  hasData: boolean
+}
+
+function nsdParseArt30Number (value: any): number | null {
+  if (value == null || value === '') return null
+  if (typeof value === 'number') return Number.isFinite(value) ? value : null
+  const text = String(value).trim().replace(/\s/g, '')
+  if (!text) return null
+  const normalized = text.includes(',') ? text.replace(/\./g, '').replace(',', '.') : text
+  const parsed = Number(normalized)
+  return Number.isFinite(parsed) ? parsed : null
+}
+
+function nsdReadArt30Equipment (data: any): NsdArt30EquipmentSummary {
+  const equipmentRows: NsdArt30EquipmentRow[] = []
+  let cauzioneSnapshot: NsdArt30EquipmentRow | null = null
+  const raw = String(nsdPickAttrCI(data || {}, ['attrezzature_rimborso_dettaglio']) || '')
+
+  for (const rawLine of raw.split(/\r?\n/)) {
+    const line = rawLine.trim()
+    if (!line) continue
+
+    if (/^Decurtazione della cauzione\b/i.test(line)) {
+      const um = String(line.match(/U\.M\.\s*:\s*([^|]+)/i)?.[1] || 'n.').trim()
+      const quantita = nsdParseArt30Number(line.match(/Quantità\s*:\s*(-?[0-9][0-9.,]*)/i)?.[1])
+      const valoreUnitario = nsdParseArt30Number(line.match(/Valore unitario\s*:\s*(-?[0-9][0-9.,]*)/i)?.[1])
+      const importoRaw = nsdParseArt30Number(line.match(/Importo\s*:\s*(-?[0-9][0-9.,]*)/i)?.[1])
+      cauzioneSnapshot = {
+        codice: '',
+        descrizione: 'Decurtazione della cauzione',
+        unitaMisura: um || 'n.',
+        quantita,
+        valoreUnitario,
+        importo: Math.abs(importoRaw || 0),
+        isCauzione: true
+      }
+      continue
+    }
+
+    const quantitaMatch = line.match(/\s+—\s+Quantità\s*:\s*([0-9][0-9.,]*)/i)
+    if (!quantitaMatch || quantitaMatch.index == null) continue
+    const quantita = nsdParseArt30Number(quantitaMatch[1])
+    if (quantita == null || quantita <= 0) continue
+
+    const prefix = line.slice(0, quantitaMatch.index).trim()
+    const codiceMatch = prefix.match(/^(.*?)\s+—\s+Codice\s*:\s*(.+)$/i)
+    const descrizione = String(codiceMatch?.[1] || prefix).trim()
+    const codice = String(codiceMatch?.[2] || '').trim()
+    if (!descrizione) continue
+
+    const valoreUnitario = nsdParseArt30Number(line.match(/Valore unitario\s*:\s*([0-9][0-9.,]*)/i)?.[1])
+    const importoSnapshot = nsdParseArt30Number(line.match(/Importo\s*:\s*([0-9][0-9.,]*)/i)?.[1])
+    const importo = nsdRound(importoSnapshot ?? ((valoreUnitario || 0) * quantita), 2)
+    equipmentRows.push({
+      codice,
+      descrizione,
+      unitaMisura: 'n.',
+      quantita,
+      valoreUnitario,
+      importo,
+      isCauzione: false
+    })
+  }
+
+  const rimborsoDaRighe = nsdRound(equipmentRows.reduce((sum, row) => sum + nsdSafeNum(row.importo, 0), 0), 2)
+  const rimborsoSalvato = nsdParseArt30Number(nsdPickAttrCI(data || {}, ['attrezzature_rimborso_importo']))
+  const cauzioneSalvata = Math.abs(nsdParseArt30Number(nsdPickAttrCI(data || {}, ['attrezzature_cauzione_decurtata'])) || 0)
+  const nettoSalvato = nsdParseArt30Number(nsdPickAttrCI(data || {}, ['attrezzature_importo_netto']))
+  const cauzioneAttiva = nsdTruthyFlag(nsdPickAttrCI(data || {}, ['attrezzature_cauzione_presente'])) || cauzioneSalvata > 0
+  const rimborsoLordo = nsdRound(rimborsoSalvato ?? rimborsoDaRighe, 2)
+  const cauzione = nsdRound(cauzioneAttiva ? (cauzioneSalvata || cauzioneSnapshot?.importo || 0) : 0, 2)
+  const netto = nsdRound(nettoSalvato ?? (rimborsoLordo - cauzione), 2)
+
+  if (cauzioneAttiva && cauzione > 0) {
+    equipmentRows.push({
+      codice: '',
+      descrizione: 'Decurtazione della cauzione',
+      unitaMisura: cauzioneSnapshot?.unitaMisura || 'n.',
+      quantita: cauzioneSnapshot?.quantita ?? null,
+      valoreUnitario: cauzioneSnapshot?.valoreUnitario ?? null,
+      importo: cauzione,
+      isCauzione: true
+    })
+  }
+
+  return {
+    rows: equipmentRows,
+    rimborsoLordo,
+    cauzione,
+    netto,
+    hasData: equipmentRows.some(row => !row.isCauzione) || rimborsoSalvato != null || nettoSalvato != null || cauzione > 0
+  }
 }
 
 function nsdEscapeSqlString (v: string): string {
@@ -2993,6 +3112,7 @@ function NotaSpeseDetailPanel (props: { data: any; detailUrl: string; hasSel: bo
   }, [props.hasSel, parentGlobalId, props.detailUrl, loadedKey])
 
   const parentSummary = React.useMemo(() => nsdReadParentSummary(props.data || {}), [props.data])
+  const art30Equipment = React.useMemo(() => nsdReadArt30Equipment(props.data || {}), [props.data])
   const percentualeSpeseGenerali = parentSummary.percentualeSpeseGenerali
   const lastCalc = nsdPickAttrCI(props.data, ['ns_ricalcolata_il'])
 
@@ -3026,6 +3146,7 @@ function NotaSpeseDetailPanel (props: { data: any; detailUrl: string; hasSel: bo
   }, [rows, expectedCasistiche])
 
   const overallSummary = React.useMemo(() => nsdComputeSummaryFromRows(rows, percentualeSpeseGenerali), [rows, percentualeSpeseGenerali])
+  const overallTotalWithArt30 = nsdRound(overallSummary.totaleComplessivo + (art30Equipment.hasData ? art30Equipment.netto : 0), 2)
 
   const card = (label: string, value: number, strong = false) => (
     <div
@@ -3046,6 +3167,65 @@ function NotaSpeseDetailPanel (props: { data: any; detailUrl: string; hasSel: bo
       <div style={{ fontSize: strong ? 15 : 13, fontWeight: strong ? 900 : 700, color: strong ? '#fff' : '#1f2937', whiteSpace: 'nowrap', textAlign: 'right' }}>€ {nsdMoney(value)}</div>
     </div>
   )
+
+  const greenSummaryCard = (label: string, value: number, strong = false) => (
+    <div
+      style={{
+        display: 'grid',
+        gridTemplateColumns: 'minmax(0, 1fr) 132px',
+        alignItems: 'center',
+        gap: 12,
+        width: '100%',
+        boxSizing: 'border-box',
+        background: strong ? 'linear-gradient(90deg, #005222, #008337)' : 'transparent',
+        borderRadius: strong ? 8 : 0,
+        padding: strong ? '11px 14px' : '7px 14px',
+        border: 'none',
+        borderBottom: strong ? 'none' : '1px solid #cfe5dc'
+      }}
+    >
+      <div style={{ fontSize: 12, fontWeight: strong ? 800 : 700, color: strong ? '#fff' : '#475569', lineHeight: 1.25 }}>{label}</div>
+      <div style={{ fontSize: strong ? 15 : 13, fontWeight: strong ? 900 : 700, color: strong ? '#fff' : '#176b52', whiteSpace: 'nowrap', textAlign: 'right' }}>€ {nsdMoney(value)}</div>
+    </div>
+  )
+
+  const renderArt30Equipment = () => {
+    if (!art30Equipment.hasData) return null
+    return (
+      <div style={{ display: 'grid', gap: 8 }}>
+        <div style={{ padding: '8px 12px', borderRadius: 8, background: '#dbeafe', border: '1px solid #bfdbfe', color: '#1F4E79', fontSize: 12, fontWeight: 900, letterSpacing: 0.15, textTransform: 'uppercase' }}>
+          Rimborso attrezzature
+        </div>
+        <div style={{ overflowX: 'auto', border: '1px solid #cbd5e1', borderRadius: 10, background: '#fff' }}>
+          <table style={{ width: '100%', minWidth: 560, borderCollapse: 'collapse', fontSize: 12 }}>
+            <thead>
+              <tr style={{ background: '#eef6ff' }}>
+                {['Codice', 'Attrezzatura', 'U.M.', 'Q.tà', 'Valore unitario', 'Importo'].map(h => (
+                  <th key={h} style={{ textAlign: ['Codice', 'Attrezzatura'].includes(h) ? 'left' : 'right', padding: '7px 8px', borderBottom: '1px solid #cbd5e1', color: '#374151', whiteSpace: 'nowrap' }}>{h}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {art30Equipment.rows.map((row, idx) => (
+                <tr key={`${row.isCauzione ? 'cauzione' : row.codice || row.descrizione}-${idx}`} style={{ background: idx % 2 === 0 ? '#fff' : '#f8fbff' }}>
+                  <td style={{ padding: '7px 8px', borderBottom: '1px solid rgba(0,0,0,0.07)', whiteSpace: 'nowrap', fontWeight: row.isCauzione ? 400 : 700 }}>{row.codice || ''}</td>
+                  <td style={{ padding: '7px 8px', borderBottom: '1px solid rgba(0,0,0,0.07)', minWidth: 170, fontWeight: row.isCauzione ? 700 : 400 }}>{row.descrizione}</td>
+                  <td style={{ padding: '7px 8px', borderBottom: '1px solid rgba(0,0,0,0.07)', textAlign: 'right', whiteSpace: 'nowrap' }}>{row.unitaMisura || '—'}</td>
+                  <td style={{ padding: '7px 8px', borderBottom: '1px solid rgba(0,0,0,0.07)', textAlign: 'right', whiteSpace: 'nowrap' }}>{row.quantita != null ? nsdQty(row.quantita) : '—'}</td>
+                  <td style={{ padding: '7px 8px', borderBottom: '1px solid rgba(0,0,0,0.07)', textAlign: 'right', whiteSpace: 'nowrap' }}>{row.valoreUnitario != null ? `€ ${nsdMoney(row.valoreUnitario)}` : '—'}</td>
+                  <td style={{ padding: '7px 8px', borderBottom: '1px solid rgba(0,0,0,0.07)', textAlign: 'right', whiteSpace: 'nowrap', fontWeight: 800, color: row.isCauzione ? '#d92d20' : '#1f2937' }}>{row.isCauzione ? '- ' : ''}€ {nsdMoney(Math.abs(row.importo))}</td>
+                </tr>
+              ))}
+              <tr style={{ background: '#eaf2ff' }}>
+                <td colSpan={5} style={{ padding: '8px', textAlign: 'right', fontWeight: 900, color: '#1F4E79' }}>Totale rimborso attrezzature</td>
+                <td style={{ padding: '8px', textAlign: 'right', fontWeight: 900, color: '#1F4E79', whiteSpace: 'nowrap' }}>€ {nsdMoney(art30Equipment.netto)}</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    )
+  }
 
   const renderRows = (cat: NsdCategory, sourceRows: NsdDetailRow[]) => {
     const catRows = (sourceRows || []).filter(row => row.categoria_costo === cat)
@@ -3109,31 +3289,39 @@ function NotaSpeseDetailPanel (props: { data: any; detailUrl: string; hasSel: bo
         <div style={{ opacity: 0.75, fontSize: 12 }}>Nessuna voce di nota spese collegata al rapporto.</div>
       )}
 
-      {props.detailUrl && !loading && !error && rows.length > 0 && noteGroups.length > 1 && (
+      {props.detailUrl && !loading && !error && (rows.length > 0 || art30Equipment.hasData) && noteGroups.length > 1 && (
         <DetailSectionCard
           title="Riepilogo complessivo note spese"
-          right={<span style={{ fontSize: 12, fontWeight: 900, color: '#1F4E79', whiteSpace: 'nowrap' }}>€ {nsdMoney(overallSummary.totaleComplessivo)}</span>}
+          borderColor="#9fd6c1"
+          headerBg="linear-gradient(90deg, #005222, #008337)"
+          headerColor="#fff"
+          bodyBg="#eef9f4"
+          boxShadow="0 1px 3px rgba(23, 107, 82, 0.14)"
         >
           <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr)', gap: 0 }}>
-            {card('Totale voci', nsdRound(overallSummary.totaleAT + overallSummary.totalePR + overallSummary.totaleRU + overallSummary.totaleSL + overallSummary.totalePF, 2))}
-            {card(`Spese generali (${nsdMoney(overallSummary.percentualeSpeseGenerali)}%)`, overallSummary.importoSpeseGenerali)}
-            {card('Totale complessivo note spese', overallSummary.totaleComplessivo, true)}
+            {greenSummaryCard('Totale voci per interventi', nsdRound(overallSummary.totaleAT + overallSummary.totalePR + overallSummary.totaleRU + overallSummary.totaleSL + overallSummary.totalePF, 2))}
+            {greenSummaryCard(`Spese generali (${nsdMoney(overallSummary.percentualeSpeseGenerali)}%)`, overallSummary.importoSpeseGenerali)}
+            {art30Equipment.hasData && greenSummaryCard('Rimborso attrezzature', art30Equipment.netto)}
+            {greenSummaryCard('Totale complessivo note spese', overallTotalWithArt30, true)}
           </div>
-          {lastCalc ? <div style={{ fontSize: 11, color: '#6b7280', marginTop: 8 }}>Ultimo ricalcolo: {formatDateSafe(lastCalc)}</div> : null}
+          {lastCalc ? <div style={{ fontSize: 11, color: '#477264', marginTop: 8 }}>Ultimo ricalcolo: {formatDateSafe(lastCalc)}</div> : null}
         </DetailSectionCard>
       )}
 
       {props.detailUrl && !loading && !error && noteGroups.map(group => {
         const groupSummary = nsdComputeSummaryFromRows(group.rows, percentualeSpeseGenerali)
+        const isArt30Group = group.code === 'C104_ATTREZZATURE_DANNEGGIATE'
+        const equipmentNet = isArt30Group && art30Equipment.hasData ? art30Equipment.netto : 0
+        const groupTotal = nsdRound(groupSummary.totaleComplessivo + equipmentNet, 2)
+        const hasGroupContent = group.rows.length > 0 || (isArt30Group && art30Equipment.hasData)
         return (
           <DetailSectionCard
             key={group.code}
             title={`Nota spese – ${group.info.label}`}
-            right={<span style={{ fontSize: 12, fontWeight: 900, color: '#1F4E79', whiteSpace: 'nowrap' }}>€ {nsdMoney(groupSummary.totaleComplessivo)}</span>}
             borderColor={group.info.isUnlinked ? '#d1d5db' : '#c5d9f1'}
             headerBg={group.info.isUnlinked ? '#f3f4f6' : '#eaf2ff'}
           >
-            {group.isExpectedMissing && (
+            {group.isExpectedMissing && !hasGroupContent && (
               <div style={{ marginBottom: 10, padding: '8px 10px', borderRadius: 8, border: '1px solid #d1d5db', background: '#f9fafb', color: '#374151', fontSize: 12, lineHeight: 1.45 }}>
                 Per questa violazione è prevista la possibilità di compilare una nota spese, ma al momento non risultano importi valorizzati.
               </div>
@@ -3144,25 +3332,47 @@ function NotaSpeseDetailPanel (props: { data: any; detailUrl: string; hasSel: bo
               </div>
             )}
 
-            {group.rows.length === 0 ? null : <div style={{ display: 'grid', gap: 8 }}>
-              {NSD_CATEGORIES.map(cat => {
-                const catRows = group.rows.filter(row => row.categoria_costo === cat)
-                if (!catRows.length) return null
-                const total = catRows.reduce((s, r) => s + nsdSafeNum(r.importo_riga, 0), 0)
-                return (
-                  <details key={`${group.code}-${cat}`} style={{ border: '1px solid #cbd5e1', borderRadius: 10, background: '#fff', overflow: 'hidden' }}>
-                    <summary style={{ cursor: 'pointer', fontSize: 13, fontWeight: 800, color: '#1f2937', padding: '8px 12px', background: '#e5e7eb', borderBottom: '1px solid #cbd5e1' }}>
-                      {NSD_CATEGORY_LABELS[cat]} <span style={{ color: '#4b5563', fontWeight: 700 }}>({catRows.length} voci · € {nsdMoney(total)})</span>
-                    </summary>
-                    <div style={{ padding: 10 }}>{renderRows(cat, group.rows)}</div>
-                  </details>
-                )
-              })}
+            {!hasGroupContent ? null : <div style={{ display: 'grid', gap: 10 }}>
+              {isArt30Group && art30Equipment.hasData && renderArt30Equipment()}
 
-              <div style={{ marginTop: 2, border: '1px solid rgba(31,78,121,0.24)', borderRadius: 10, overflow: 'hidden', background: '#fff' }}>
-                {card(`Spese generali (${nsdMoney(groupSummary.percentualeSpeseGenerali)}%)`, groupSummary.importoSpeseGenerali)}
-                {card('Totale nota spese', groupSummary.totaleComplessivo, true)}
-              </div>
+              {group.rows.length > 0 && <>
+                {isArt30Group && art30Equipment.hasData && (
+                  <div style={{ padding: '8px 12px', borderRadius: 8, background: '#dbeafe', border: '1px solid #bfdbfe', color: '#1F4E79', fontSize: 12, fontWeight: 900, letterSpacing: 0.15, textTransform: 'uppercase' }}>
+                    Rimborso spese connesse all’intervento
+                  </div>
+                )}
+
+                {NSD_CATEGORIES.map(cat => {
+                  const catRows = group.rows.filter(row => row.categoria_costo === cat)
+                  if (!catRows.length) return null
+                  const total = catRows.reduce((sum, row) => sum + nsdSafeNum(row.importo_riga, 0), 0)
+                  return (
+                    <details key={`${group.code}-${cat}`} style={{ border: '1px solid #cbd5e1', borderRadius: 10, background: '#fff', overflow: 'hidden' }}>
+                      <summary style={{ cursor: 'pointer', fontSize: 13, fontWeight: 800, color: '#1f2937', padding: '8px 12px', background: '#e5e7eb', borderBottom: '1px solid #cbd5e1' }}>
+                        {NSD_CATEGORY_LABELS[cat]} <span style={{ color: '#4b5563', fontWeight: 700 }}>({catRows.length} voci · € {nsdMoney(total)})</span>
+                      </summary>
+                      <div style={{ padding: 10 }}>{renderRows(cat, group.rows)}</div>
+                    </details>
+                  )
+                })}
+
+                <div style={{ marginTop: 2, border: '1px solid rgba(31,78,121,0.24)', borderRadius: 10, overflow: 'hidden', background: '#fff' }}>
+                  {isArt30Group && art30Equipment.hasData && card(
+                    'Totale voci dell’intervento',
+                    nsdRound(groupSummary.totaleAT + groupSummary.totalePR + groupSummary.totaleRU + groupSummary.totaleSL + groupSummary.totalePF, 2)
+                  )}
+                  {card(`Spese generali (${nsdMoney(groupSummary.percentualeSpeseGenerali)}%)`, groupSummary.importoSpeseGenerali)}
+                  {isArt30Group && art30Equipment.hasData
+                    ? card('Totale spese connesse all’intervento', groupSummary.totaleComplessivo)
+                    : card('Totale nota spese', groupSummary.totaleComplessivo, true)}
+                </div>
+              </>}
+
+              {isArt30Group && art30Equipment.hasData && (
+                <div style={{ border: '1px solid rgba(31,78,121,0.24)', borderRadius: 10, overflow: 'hidden', background: '#fff' }}>
+                  {card('Totale nota spese Art. 30', groupTotal, true)}
+                </div>
+              )}
             </div>}
           </DetailSectionCard>
         )

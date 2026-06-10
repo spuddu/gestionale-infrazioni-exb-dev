@@ -865,6 +865,34 @@ export async function buildRapportoPdf (m: Record<string, string>): Promise<Uint
   p1.drawRectangle({ x: C.dic0, y: PH - 322, width: C.irr1 - C.dic0, height: 22, color: BLUE })
   centered(p1, 'SUPERFICI (ha.a.ca)', fB, 8.1, C.dic0, C.irr1, bY(309.6, 8.1), WHITE)
 
+  // Aggiorna le descrizioni degli artt. 16 e 17 senza modificare il template PDF.
+  // La schermatura resta all'interno dei bordi originali della cella.
+  const drawViolationDescription = (lines: string[], top: number, bottom: number): void => {
+    const x = 71.04
+    const width = 304.44 - x
+    p1.drawRectangle({
+      x: x + 0.5,
+      y: PH - bottom + 0.5,
+      width: width - 1,
+      height: bottom - top - 1,
+      color: WHITE
+    })
+    const fontSize = 8.2
+    const lineTop = top + 2.2
+    lines.forEach((line, index) => {
+      txt(p1, line, fR, fontSize, 73.68, bY(lineTop + index * 11.8, fontSize), BLUE, 228)
+    })
+  }
+
+  drawViolationDescription([
+    'Art. 16 - Presentazione tardiva comunicazione',
+    'di irrigazione'
+  ], 409.68, 440.40)
+  drawViolationDescription([
+    'Art. 17 - Presentazione tardiva comunicazione',
+    'di variazione o di rinuncia.'
+  ], 444.84, 475.44)
+
   for (const row of ROWS) {
     const y = bY(row.top, artSz)
     centered(p1, v(`x_art${row.art}`), fB, artSz, C.chk0, C.chk1, y)

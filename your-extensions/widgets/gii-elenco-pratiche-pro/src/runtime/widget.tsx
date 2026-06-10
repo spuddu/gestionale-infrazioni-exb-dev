@@ -19,6 +19,14 @@ import { defaultConfig, DEFAULT_COLUMNS } from "../config";
 
 type Props = AllWidgetProps<IMConfig>;
 
+type OggettoLegendInfo = {
+  label: string;
+  description: string;
+  color: string;
+  x: number;
+  y: number;
+};
+
 function getOriginePraticaPrefix(d: any, rec?: DataRecord): "TR" | "TI" {
   const op = pickField(d, "origine_pratica");
   if (op === 2 || op === "2") return "TI";
@@ -2677,6 +2685,26 @@ export default function Widget(props: Props) {
   const elencoSidebarUserDraggingRef = React.useRef(false);
   const [elencoSidebarDirty, setElencoSidebarDirty] = React.useState(false);
   const [elencoSidebarReady, setElencoSidebarReady] = React.useState(false);
+  const [oggettoLegendInfo, setOggettoLegendInfo] =
+    React.useState<OggettoLegendInfo | null>(null);
+  const oggettoLegendTouchTimerRef = React.useRef<number | null>(null);
+
+  React.useEffect(() => {
+    if (!oggettoLegendInfo) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setOggettoLegendInfo(null);
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [oggettoLegendInfo]);
+
+  React.useEffect(() => {
+    return () => {
+      if (oggettoLegendTouchTimerRef.current != null) {
+        window.clearTimeout(oggettoLegendTouchTimerRef.current);
+      }
+    };
+  }, []);
 
   // Stesso accorgimento usato nel cw editing: l’overlay è locale al widget,
   // però il ramo ExB che lo contiene deve poter mostrare elementi fuori bordo.
@@ -3646,59 +3674,115 @@ export default function Widget(props: Props) {
     return CHIP_NEUTRAL;
   };
 
-  const getOggettoAccentStyle = (oggetto: string): any => {
+  const getOggettoAccentColor = (oggetto: string): string => {
     const o = normalizeOggettoLabel(oggetto);
-    const color = (() => {
-      if (!oggettoBadgeEnabled || !o || o === "—") return "transparent";
-      if (o.includes("RESPINTA"))
-        return txt(cfg.oggettoBadgeColorRespingimento || CHIP_RED.background);
-      if (o.includes("NOTIFIC"))
-        return txt(
-          cfg.oggettoBadgeColorNotifica ||
-            cfg.oggettoBadgeColorApprovazione ||
-            CHIP_GREEN.background,
-        );
-      if (o.includes("ISTRUTTORIA TECNICA APPROVATA"))
-        return txt(
-          cfg.oggettoBadgeColorApprovazioneTecnica ||
-            cfg.oggettoBadgeColorApprovazione ||
-            CHIP_GREEN.background,
-        );
-      if (
-        o.includes("SANZIONE APPROVATA") ||
-        o.includes("ISTRUTTORIA AMMINISTRATIVA APPROVATA")
-      )
-        return txt(
-          cfg.oggettoBadgeColorApprovazioneAmministrativa ||
-            cfg.oggettoBadgeColorApprovazione ||
-            CHIP_GREEN.background,
-        );
-      if (o.includes("APPROVATA"))
-        return txt(
-          cfg.oggettoBadgeColorApprovazioneAmministrativa ||
-            cfg.oggettoBadgeColorApprovazione ||
-            CHIP_GREEN.background,
-        );
-      if (o.includes("INTEGRAZIONE"))
-        return txt(cfg.oggettoBadgeColorIntegrazione || CHIP_ORANGE.background);
-      if (o === "ASSEGNAZIONE ISTRUTTORIA")
-        return txt(cfg.oggettoBadgeColorAssegnazione || CHIP_BLUE.background);
-      if (o === "TRASMISSIONE ISTRUTTORIA")
-        return txt(cfg.oggettoBadgeColorTrasmissione || CHIP_PURPLE.background);
-      if (o === "NUOVA RILEVAZIONE")
-        return txt(
-          cfg.oggettoBadgeColorNuovaRilevazione || CHIP_CELESTE.background,
-        );
+    if (!oggettoBadgeEnabled || !o || o === "—") return "transparent";
+    if (o.includes("RESPINTA"))
+      return txt(cfg.oggettoBadgeColorRespingimento || CHIP_RED.background);
+    if (o.includes("NOTIFIC"))
       return txt(
-        cfg.oggettoBadgeColorNeutro || CHIP_NEUTRAL.borderColor || "#d0d0d0",
+        cfg.oggettoBadgeColorNotifica ||
+          cfg.oggettoBadgeColorApprovazione ||
+          CHIP_GREEN.background,
       );
-    })();
-    return {
-      "--gii-object-accent": color,
-      "--gii-object-accent-width": `${oggettoBadgeEnabled ? oggettoBadgeWidth : 0}px`,
-      "--gii-object-accent-opacity": oggettoBadgeOpacity,
-    };
+    if (o.includes("ISTRUTTORIA TECNICA APPROVATA"))
+      return txt(
+        cfg.oggettoBadgeColorApprovazioneTecnica ||
+          cfg.oggettoBadgeColorApprovazione ||
+          CHIP_GREEN.background,
+      );
+    if (
+      o.includes("SANZIONE APPROVATA") ||
+      o.includes("ISTRUTTORIA AMMINISTRATIVA APPROVATA")
+    )
+      return txt(
+        cfg.oggettoBadgeColorApprovazioneAmministrativa ||
+          cfg.oggettoBadgeColorApprovazione ||
+          CHIP_GREEN.background,
+      );
+    if (o.includes("APPROVATA"))
+      return txt(
+        cfg.oggettoBadgeColorApprovazioneAmministrativa ||
+          cfg.oggettoBadgeColorApprovazione ||
+          CHIP_GREEN.background,
+      );
+    if (o.includes("INTEGRAZIONE"))
+      return txt(cfg.oggettoBadgeColorIntegrazione || CHIP_ORANGE.background);
+    if (o === "ASSEGNAZIONE ISTRUTTORIA")
+      return txt(cfg.oggettoBadgeColorAssegnazione || CHIP_BLUE.background);
+    if (o === "TRASMISSIONE ISTRUTTORIA")
+      return txt(cfg.oggettoBadgeColorTrasmissione || CHIP_PURPLE.background);
+    if (o === "NUOVA RILEVAZIONE")
+      return txt(
+        cfg.oggettoBadgeColorNuovaRilevazione || CHIP_CELESTE.background,
+      );
+    return txt(
+      cfg.oggettoBadgeColorNeutro || CHIP_NEUTRAL.borderColor || "#d0d0d0",
+    );
   };
+
+  const getOggettoLegendDescription = (oggetto: string): string => {
+    const o = normalizeOggettoLabel(oggetto);
+    if (o === "NUOVA RILEVAZIONE")
+      return "Il colore identifica una nuova rilevazione, creata dal Tecnico istruttore o inviata dal Tecnico rilevatore, non ancora trasformata in rapporto tecnico ufficiale.";
+    if (o === "ASSEGNAZIONE ISTRUTTORIA")
+      return "Il colore identifica l’assegnazione della pratica al Tecnico istruttore incaricato della compilazione.";
+    if (o === "TRASMISSIONE ISTRUTTORIA")
+      return "Il colore identifica la trasmissione dell’istruttoria al ruolo successivo del procedimento.";
+    if (o === "RICHIESTA DI INTEGRAZIONE")
+      return "Il colore identifica una richiesta di integrazione rivolta al ruolo che deve completare o correggere la pratica.";
+    if (o === "TRASMISSIONE INTEGRAZIONE")
+      return "Il colore identifica la ritrasmissione della pratica dopo il completamento dell’integrazione richiesta.";
+    if (o.includes("ISTRUTTORIA TECNICA APPROVATA"))
+      return "Il colore identifica l’approvazione dell’istruttoria tecnica da parte del Direttore dell’Area tecnica competente.";
+    if (o.includes("SANZIONE APPROVATA") || o.includes("ISTRUTTORIA AMMINISTRATIVA APPROVATA"))
+      return "Il colore identifica l’approvazione della fase amministrativa o della sanzione.";
+    if (o.includes("NOTIFIC"))
+      return "Il colore identifica l’avvenuta notifica dell’atto amministrativo.";
+    if (o.includes("RESPINTA"))
+      return "Il colore identifica una rilevazione, un’istruttoria o una sanzione respinta.";
+    return "Il colore identifica l’oggetto dell’ultimo evento registrato per la pratica.";
+  };
+
+  const showOggettoLegend = (
+    target: HTMLElement,
+    oggetto: string,
+    color: string,
+    autoClose = false,
+  ) => {
+    if (oggettoLegendTouchTimerRef.current != null) {
+      window.clearTimeout(oggettoLegendTouchTimerRef.current);
+      oggettoLegendTouchTimerRef.current = null;
+    }
+    const rect = target.getBoundingClientRect();
+    setOggettoLegendInfo({
+      label: normalizeOggettoLabel(oggetto),
+      description: getOggettoLegendDescription(oggetto),
+      color,
+      x: rect.right + 10,
+      y: rect.top,
+    });
+    if (autoClose) {
+      oggettoLegendTouchTimerRef.current = window.setTimeout(() => {
+        setOggettoLegendInfo(null);
+        oggettoLegendTouchTimerRef.current = null;
+      }, 4000);
+    }
+  };
+
+  const hideOggettoLegend = () => {
+    if (oggettoLegendTouchTimerRef.current != null) {
+      window.clearTimeout(oggettoLegendTouchTimerRef.current);
+      oggettoLegendTouchTimerRef.current = null;
+    }
+    setOggettoLegendInfo(null);
+  };
+
+  const getOggettoAccentStyle = (oggetto: string): any => ({
+    "--gii-object-accent": getOggettoAccentColor(oggetto),
+    "--gii-object-accent-width": `${oggettoBadgeEnabled ? oggettoBadgeWidth : 0}px`,
+    "--gii-object-accent-opacity": oggettoBadgeOpacity,
+  });
 
   // Mantenuta per compatibilità con eventuali usi interni residui
   const getChipStyle = (statoNum: number | null) => {
@@ -5849,6 +5933,27 @@ export default function Widget(props: Props) {
       opacity: var(--gii-object-accent-opacity, 1);
       pointer-events: none;
     }
+    .objectAccentBtn {
+      position: absolute;
+      left: 0;
+      top: 0;
+      bottom: 0;
+      width: var(--gii-object-accent-width, 0px);
+      min-width: var(--gii-object-accent-width, 0px);
+      border: 0;
+      padding: 0;
+      margin: 0;
+      background: transparent;
+      cursor: pointer;
+      z-index: 3;
+    }
+    .objectAccentBtn:hover {
+      background: rgba(255, 255, 255, 0.22);
+    }
+    .objectAccentBtn:focus-visible {
+      outline: 2px solid rgba(17, 24, 39, 0.9);
+      outline-offset: -2px;
+    }
     .rowCard.even {
       background: ${txt(cfg.zebraEvenBg || "#ffffff")};
     }
@@ -6506,6 +6611,21 @@ export default function Widget(props: Props) {
 
                       const displaySintetico = computeDisplaySintetico(d);
                       const faseIstruttoria = computeFaseIstruttoria(d);
+                      const originePraticaRaw =
+                        d.origine_pratica ?? d.ORIGINE_PRATICA;
+                      const originePraticaNum =
+                        originePraticaRaw != null && originePraticaRaw !== ""
+                          ? Number(originePraticaRaw)
+                          : null;
+                      const statoInizialeTi = normalizeMioStatoLabel(
+                        txt(displaySintetico.label),
+                      ).toLowerCase();
+                      const isNewTiDetection =
+                        originePraticaNum === 2 &&
+                        !pickOfficialRapportoNumber(d) &&
+                        normalizeWorkflowRole(displaySintetico.ruolo) === "TI" &&
+                        (statoInizialeTi.startsWith("in carico") ||
+                          statoInizialeTi.startsWith("da prendere"));
 
                       const statoLabel = labelNorm(txt(displaySintetico.label));
                       const statoChipNum = displaySintetico.statoForChip;
@@ -6541,15 +6661,22 @@ export default function Widget(props: Props) {
                           ? formatDateIt(_logEntry.dt)
                           : "—";
                       } else if (!logLoadedRef.current) {
-                        // LOG non ancora caricato: oggetto/da/a restano a trattini, ma la data può usare il fallback cronologico.
+                        // Per una rilevazione appena creata dal TI il significato è già
+                        // certo anche prima del caricamento del LOG: mostra subito il
+                        // badge giallo, evitando una riga temporaneamente priva di colore.
                         const fallbackMs = computeUltimoAggMs(d);
                         mittenteVal = "—";
                         destinatario = "—";
-                        causaleVal = "—";
+                        causaleVal = isNewTiDetection
+                          ? "NUOVA RILEVAZIONE"
+                          : "—";
                         dataMsgVal = fallbackMs
                           ? formatDateIt(fallbackMs)
                           : "—";
-                      } else if (shouldUseInitialOggettoFallback(d)) {
+                      } else if (
+                        shouldUseInitialOggettoFallback(d) ||
+                        isNewTiDetection
+                      ) {
                         // Nessun record LOG e pratica realmente iniziale: TI auto-assegnato o TR da survey.
                         causaleVal = "NUOVA RILEVAZIONE";
                         const creator = String(
@@ -6682,6 +6809,12 @@ export default function Widget(props: Props) {
                       const isSel = localSelectedByDs[recDsId] === rid;
                       const even = idx % 2 === 0;
                       const rowOggettoStyle = getOggettoAccentStyle(causaleVal);
+                      const rowOggettoColor =
+                        getOggettoAccentColor(causaleVal);
+                      const hasOggettoBadge =
+                        oggettoBadgeEnabled &&
+                        causaleVal !== "—" &&
+                        rowOggettoColor !== "transparent";
 
                       return (
                         <div
@@ -6689,6 +6822,7 @@ export default function Widget(props: Props) {
                           className={`rowCard ${even ? "even" : "odd"} ${isSel ? "selected" : ""}`}
                           style={rowOggettoStyle}
                           onClick={() => {
+                            setOggettoLegendInfo(null);
                             clearRestoreSelectionAfterEdit();
                             if (isSel) {
                               // Deseleziona su TUTTI i DS
@@ -6801,6 +6935,45 @@ export default function Widget(props: Props) {
                             }
                           }}
                         >
+                          {hasOggettoBadge && (
+                            <button
+                              type="button"
+                              className="objectAccentBtn"
+                              aria-label={`Significato del colore: ${normalizeOggettoLabel(causaleVal)}`}
+                              onMouseEnter={(event) => {
+                                showOggettoLegend(
+                                  event.currentTarget,
+                                  causaleVal,
+                                  rowOggettoColor,
+                                );
+                              }}
+                              onMouseLeave={hideOggettoLegend}
+                              onFocus={(event) => {
+                                showOggettoLegend(
+                                  event.currentTarget,
+                                  causaleVal,
+                                  rowOggettoColor,
+                                );
+                              }}
+                              onBlur={hideOggettoLegend}
+                              onTouchStart={(event) => {
+                                event.stopPropagation();
+                                showOggettoLegend(
+                                  event.currentTarget,
+                                  causaleVal,
+                                  rowOggettoColor,
+                                  true,
+                                );
+                              }}
+                              onMouseDown={(event) => {
+                                event.stopPropagation();
+                              }}
+                              onClick={(event) => {
+                                event.preventDefault();
+                                event.stopPropagation();
+                              }}
+                            />
+                          )}
                           {columns.map((col, ci) => {
                             const f = col.field;
                             if (f === V_STATO) {
@@ -7033,6 +7206,96 @@ export default function Widget(props: Props) {
           </div>
         </div>
       </div>
+      {oggettoLegendInfo &&
+        (() => {
+          const tooltipWidth = 360;
+          const tooltipHeight = 150;
+          const viewportWidth =
+            typeof window !== "undefined" ? window.innerWidth : 1280;
+          const viewportHeight =
+            typeof window !== "undefined" ? window.innerHeight : 720;
+          const left = Math.max(
+            12,
+            Math.min(
+              oggettoLegendInfo.x,
+              viewportWidth - tooltipWidth - 12,
+            ),
+          );
+          const top = Math.max(
+            12,
+            Math.min(
+              oggettoLegendInfo.y,
+              viewportHeight - tooltipHeight - 12,
+            ),
+          );
+          return (
+            <div
+              role="tooltip"
+              aria-live="polite"
+              style={{
+                position: "fixed",
+                left,
+                top,
+                width: tooltipWidth,
+                maxWidth: "calc(100vw - 24px)",
+                padding: "12px 14px",
+                borderRadius: 9,
+                border: "1px solid rgba(17, 24, 39, 0.18)",
+                background: "#ffffff",
+                boxShadow: "0 10px 26px rgba(15, 23, 42, 0.22)",
+                color: "#111827",
+                zIndex: 2147483647,
+                pointerEvents: "none",
+              }}
+            >
+              <div
+                style={{
+                  display: "flex",
+                  alignItems: "flex-start",
+                  gap: 10,
+                }}
+              >
+                <span
+                  aria-hidden="true"
+                  style={{
+                    width: 11,
+                    height: 34,
+                    borderRadius: 4,
+                    background: oggettoLegendInfo.color,
+                    border: "1px solid rgba(17, 24, 39, 0.16)",
+                    flex: "0 0 auto",
+                  }}
+                />
+                <div style={{ minWidth: 0 }}>
+                  <div
+                    style={{
+                      fontSize: 14,
+                      fontWeight: 700,
+                      color: "#6b7280",
+                      textTransform: "uppercase",
+                      letterSpacing: 0.3,
+                      marginBottom: 2,
+                    }}
+                  >
+                    STATO DEL PROCEDIMENTO ISTRUTTORIO
+                  </div>
+                  <div
+                    style={{
+                      fontSize: 17,
+                      fontWeight: 800,
+                      marginBottom: 6,
+                    }}
+                  >
+                    {oggettoLegendInfo.label}
+                  </div>
+                  <div style={{ fontSize: 15, lineHeight: 1.45 }}>
+                    {oggettoLegendInfo.description}
+                  </div>
+                </div>
+              </div>
+            </div>
+          );
+        })()}
       {elencoSidebarReady &&
         (() => {
           const splitterW = 14;

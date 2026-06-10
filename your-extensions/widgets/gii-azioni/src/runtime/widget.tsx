@@ -1286,12 +1286,12 @@ function InlineEditOverlay(props: {
     if (hasCoded) {
       return (
         <div key={fieldName} style={{ display: 'grid', gap: 4 }}>
-          <div style={{ fontSize: 12, color: '#6b7280' }}>{alias}</div>
+          <div style={{ fontSize: 14, color: '#6b7280' }}>{alias}</div>
           <select
             value={val ?? ''}
             disabled={saving}
             onChange={e => updateDraft(fieldName, (e.target as HTMLSelectElement).value === '' ? null : (isNum ? Number((e.target as HTMLSelectElement).value) : (e.target as HTMLSelectElement).value))}
-            style={{ padding: '7px 10px', borderRadius: 8, border: '1px solid rgba(0,0,0,0.20)', fontSize: 13, width: '100%', background: saving ? '#f3f4f6' : '#fff' }}
+            style={{ padding: '7px 10px', borderRadius: 8, border: '1px solid rgba(0,0,0,0.20)', fontSize: 15, width: '100%', background: saving ? '#f3f4f6' : '#fff' }}
           >
             <option value=''>— seleziona —</option>
             {domain.codedValues.map((cv: any) => {
@@ -1321,13 +1321,13 @@ function InlineEditOverlay(props: {
       }
       return (
         <div key={fieldName} style={{ display: 'grid', gap: 4 }}>
-          <div style={{ fontSize: 12, color: '#6b7280' }}>{alias}</div>
+          <div style={{ fontSize: 14, color: '#6b7280' }}>{alias}</div>
           <input type='date' value={toInputVal(val)} disabled={saving}
             onChange={e => {
               const d = new Date((e.target as HTMLInputElement).value)
               updateDraft(fieldName, Number.isNaN(d.getTime()) ? null : d.getTime())
             }}
-            style={{ padding: '7px 10px', borderRadius: 8, border: '1px solid rgba(0,0,0,0.20)', fontSize: 13, width: '100%', background: saving ? '#f3f4f6' : '#fff' }}
+            style={{ padding: '7px 10px', borderRadius: 8, border: '1px solid rgba(0,0,0,0.20)', fontSize: 15, width: '100%', background: saving ? '#f3f4f6' : '#fff' }}
           />
         </div>
       )
@@ -1335,15 +1335,15 @@ function InlineEditOverlay(props: {
     const isMultiline = /descr|note|fatti|circostanz/i.test(fieldName)
     return (
       <div key={fieldName} style={{ display: 'grid', gap: 4 }}>
-        <div style={{ fontSize: 12, color: '#6b7280' }}>{alias}</div>
+        <div style={{ fontSize: 14, color: '#6b7280' }}>{alias}</div>
         {isMultiline
           ? <textarea value={val != null ? String(val) : ''} disabled={saving} rows={3}
             onChange={e => updateDraft(fieldName, (e.target as HTMLTextAreaElement).value || null)}
-            style={{ padding: '7px 10px', borderRadius: 8, border: '1px solid rgba(0,0,0,0.20)', fontSize: 13, width: '100%', resize: 'vertical', background: saving ? '#f3f4f6' : '#fff', boxSizing: 'border-box' }}
+            style={{ padding: '7px 10px', borderRadius: 8, border: '1px solid rgba(0,0,0,0.20)', fontSize: 15, width: '100%', resize: 'vertical', background: saving ? '#f3f4f6' : '#fff', boxSizing: 'border-box' }}
           />
           : <input type='text' value={val != null ? String(val) : ''} disabled={saving}
             onChange={e => updateDraft(fieldName, (e.target as HTMLInputElement).value === '' ? null : (isNum ? Number((e.target as HTMLInputElement).value) : (e.target as HTMLInputElement).value))}
-            style={{ padding: '7px 10px', borderRadius: 8, border: '1px solid rgba(0,0,0,0.20)', fontSize: 13, width: '100%', background: saving ? '#f3f4f6' : '#fff', boxSizing: 'border-box' }}
+            style={{ padding: '7px 10px', borderRadius: 8, border: '1px solid rgba(0,0,0,0.20)', fontSize: 15, width: '100%', background: saving ? '#f3f4f6' : '#fff', boxSizing: 'border-box' }}
           />
         }
       </div>
@@ -1368,21 +1368,21 @@ function InlineEditOverlay(props: {
       }}>
         {/* Header */}
         <div style={{ flex: '0 0 auto', padding: '14px 20px', borderBottom: '1px solid #e5e7eb', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
-          <div style={{ fontWeight: 700, fontSize: 15, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', minWidth: 0 }}>
+          <div style={{ fontWeight: 700, fontSize: 18, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', minWidth: 0 }}>
             ✏️ Modifica rilevazione&nbsp;<span style={{ color: '#2f6fed' }}>{praticaCode}</span>
           </div>
           <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
             {saveMsg && (
-              <span style={{ fontSize: 13, color: saveMsg.kind === 'ok' ? '#1a7f37' : '#b42318' }}>
+              <span style={{ fontSize: 15, color: saveMsg.kind === 'ok' ? '#1a7f37' : '#b42318' }}>
                 {saveMsg.text}
               </span>
             )}
             <button type='button' disabled={saving} onClick={handleSave}
-              style={{ padding: '8px 18px', borderRadius: 8, border: 'none', background: saving ? '#e5e7eb' : '#1a7f37', color: saving ? '#9ca3af' : '#fff', fontWeight: 700, fontSize: 13, cursor: saving ? 'not-allowed' : 'pointer' }}>
+              style={{ padding: '8px 18px', borderRadius: 8, border: 'none', background: saving ? '#e5e7eb' : '#1a7f37', color: saving ? '#9ca3af' : '#fff', fontWeight: 700, fontSize: 15, cursor: saving ? 'not-allowed' : 'pointer' }}>
               {saving ? 'Salvataggio…' : '💾 Salva'}
             </button>
             <button type='button' disabled={saving} onClick={() => setConfirmCancel(true)}
-              style={{ padding: '8px 18px', borderRadius: 8, border: '1px solid #d13438', background: '#fff', color: '#d13438', fontWeight: 700, fontSize: 13, cursor: saving ? 'not-allowed' : 'pointer' }}>
+              style={{ padding: '8px 18px', borderRadius: 8, border: '1px solid #d13438', background: '#fff', color: '#d13438', fontWeight: 700, fontSize: 15, cursor: saving ? 'not-allowed' : 'pointer' }}>
               ✕ Annulla
             </button>
           </div>
@@ -1396,12 +1396,12 @@ function InlineEditOverlay(props: {
                 padding: '8px 14px', borderRadius: 10, border: `1px solid ${activeTab === t ? '#2f6fed' : 'rgba(0,0,0,0.12)'}`,
                 background: activeTab === t ? '#eaf2ff' : 'rgba(0,0,0,0.02)',
                 color: activeTab === t ? '#1d4ed8' : '#111827',
-                fontWeight: 700, fontSize: 12, cursor: saving ? 'not-allowed' : 'pointer'
+                fontWeight: 700, fontSize: 14, cursor: saving ? 'not-allowed' : 'pointer'
               }}>
               {t.charAt(0).toUpperCase() + t.slice(1)}
             </button>
           ))}
-          <div style={{ fontSize: 12, color: '#9ca3af', alignSelf: 'center', marginLeft: 8 }}>
+          <div style={{ fontSize: 14, color: '#9ca3af', alignSelf: 'center', marginLeft: 8 }}>
             Per localizzazione e allegati usa "Modifica (pagina)"
           </div>
         </div>
@@ -1409,18 +1409,18 @@ function InlineEditOverlay(props: {
         {/* Contenuto scrollabile */}
         <div style={{ flex: '1 1 auto', minHeight: 0, overflowY: 'auto', padding: '16px 20px' }}>
           {!aliasReady
-            ? <div style={{ color: '#6b7280', fontSize: 13 }}>Caricamento schema campi…</div>
+            ? <div style={{ color: '#6b7280', fontSize: 15 }}>Caricamento schema campi…</div>
             : (
               <div style={{ display: 'grid', gap: 14 }}>
                 {activeTab === 'anagrafica' && (
                   anagraficaFields.length
                     ? anagraficaFields.map(f => renderField(f))
-                    : <div style={{ color: '#6b7280', fontSize: 13 }}>Nessun campo rilevato automaticamente. Usare la pagina di editing completa.</div>
+                    : <div style={{ color: '#6b7280', fontSize: 15 }}>Nessun campo rilevato automaticamente. Usare la pagina di editing completa.</div>
                 )}
                 {activeTab === 'violazione' && (
                   violazioneFields.length
                     ? violazioneFields.map(f => renderField(f))
-                    : <div style={{ color: '#6b7280', fontSize: 13 }}>Nessun campo rilevato automaticamente. Usare la pagina di editing completa.</div>
+                    : <div style={{ color: '#6b7280', fontSize: 15 }}>Nessun campo rilevato automaticamente. Usare la pagina di editing completa.</div>
                 )}
               </div>
             )
@@ -1432,15 +1432,15 @@ function InlineEditOverlay(props: {
       {confirmCancel && (
         <div style={{ position: 'fixed', inset: 0, zIndex: 100000, background: 'rgba(0,0,0,0.4)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
           <div style={{ background: '#fff', borderRadius: 12, padding: 28, maxWidth: 380, width: '90%', boxShadow: '0 8px 32px rgba(0,0,0,0.25)' }}>
-            <div style={{ fontWeight: 700, fontSize: 16, marginBottom: 10, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>Annullare le modifiche?</div>
-            <div style={{ fontSize: 13, color: '#4b5563', marginBottom: 20 }}>Le modifiche non salvate andranno perse.</div>
+            <div style={{ fontWeight: 700, fontSize: 18, marginBottom: 10, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>Annullare le modifiche?</div>
+            <div style={{ fontSize: 15, color: '#4b5563', marginBottom: 20 }}>Le modifiche non salvate andranno perse.</div>
             <div style={{ display: 'flex', gap: 10 }}>
               <button type='button' onClick={() => { setConfirmCancel(false); onClose(false) }}
-                style={{ padding: '8px 18px', borderRadius: 8, border: 'none', background: '#d13438', color: '#fff', fontWeight: 700, fontSize: 13, cursor: 'pointer' }}>
+                style={{ padding: '8px 18px', borderRadius: 8, border: 'none', background: '#d13438', color: '#fff', fontWeight: 700, fontSize: 15, cursor: 'pointer' }}>
                 Sì, annulla
               </button>
               <button type='button' onClick={() => setConfirmCancel(false)}
-                style={{ padding: '8px 18px', borderRadius: 8, border: '1px solid rgba(0,0,0,0.15)', background: '#fff', color: '#111827', fontWeight: 600, fontSize: 13, cursor: 'pointer' }}>
+                style={{ padding: '8px 18px', borderRadius: 8, border: '1px solid rgba(0,0,0,0.15)', background: '#fff', color: '#111827', fontWeight: 600, fontSize: 15, cursor: 'pointer' }}>
                 Torna all'editing
               </button>
             </div>
@@ -4795,7 +4795,7 @@ function ActionsPanel (props: {
 
   const labelReqStyle = (isRequired: boolean, isError: boolean): React.CSSProperties => {
     if (!isRequired) return { display: 'none' }
-    return { fontSize: ui.statusFontSize, color: isError ? '#b42318' : '#6b7280' }
+    return { fontSize: Math.max(14, Number(ui.statusFontSize) || 14), color: isError ? '#b42318' : '#6b7280' }
   }
 
 
@@ -4806,7 +4806,7 @@ function ActionsPanel (props: {
     background: '#16a34a',
     color: '#fff',
     fontWeight: 700,
-    fontSize: 13,
+    fontSize: 15,
     cursor: loading ? 'not-allowed' : 'pointer'
   }
 
@@ -4817,7 +4817,7 @@ function ActionsPanel (props: {
     background: '#dc2626',
     color: '#fff',
     fontWeight: 700,
-    fontSize: 13,
+    fontSize: 15,
     cursor: loading ? 'not-allowed' : 'pointer'
   }
 
@@ -4896,7 +4896,7 @@ function ActionsPanel (props: {
   }
   const theme = pending ? (pendingTheme[pending] ?? { icon: '●', color: '#2f6fed', bg: '#eff6ff', border: '#bfdbfe', buttonBg: '#2563eb', buttonBorder: '#1d4ed8', desc: '' }) : pendingTheme.TAKE
   const operationProgressBox = (
-    <div style={{ display: 'flex', alignItems: 'center', gap: 10, justifyContent: 'flex-end', marginTop: 4, color: '#374151', fontSize: 13, fontWeight: 700 }}>
+    <div style={{ display: 'flex', alignItems: 'center', gap: 10, justifyContent: 'flex-end', marginTop: 4, color: '#374151', fontSize: 15, fontWeight: 700 }}>
       <span style={{ width: 14, height: 14, borderRadius: '50%', border: '2px solid #cbd5e1', borderTopColor: theme.color, display: 'inline-block', animation: 'gii-spin 0.8s linear infinite' }} />
       <span>Operazione in corso…</span>
     </div>
@@ -5020,12 +5020,12 @@ function ActionsPanel (props: {
       >
         <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12, background: actionMenuTheme.bg, border: `1px solid ${actionMenuTheme.border}`, borderRadius: 10, padding: '10px 12px' }}>
           <div>
-            <div style={{ fontWeight: 800, fontSize: 16, color: actionMenuTheme.color, display: 'flex', alignItems: 'center', gap: 8, minWidth: 0, overflow: 'hidden' }}>
+            <div style={{ fontWeight: 800, fontSize: 18, color: actionMenuTheme.color, display: 'flex', alignItems: 'center', gap: 8, minWidth: 0, overflow: 'hidden' }}>
               <span style={{ fontSize: 20, flex: '0 0 auto' }}>{pending ? actionMenuTheme.icon : '✓'}</span>
               <span style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', minWidth: 0, flex: '1 1 auto' }}>Gestisci istruttoria</span>
             </div>
             {hasSel && oid != null && (
-              <div style={{ marginTop: 5, fontSize: 13, color: '#4b5563' }}>
+              <div style={{ marginTop: 5, fontSize: 15, color: '#4b5563' }}>
                 {praticaLabel}: <span style={{ fontWeight: 700, fontFamily: 'monospace', color: actionMenuTheme.color }}>{praticaCode}</span>
               </div>
             )}
@@ -5044,7 +5044,7 @@ function ActionsPanel (props: {
         {(loading || workflowSubmitting) ? (
           <React.Fragment>
             {pending && actionMenuTheme.desc && (
-              <div style={{ fontSize: 13, color: '#374151', lineHeight: 1.6 }}>
+              <div style={{ fontSize: 15, color: '#374151', lineHeight: 1.6 }}>
                 {actionMenuTheme.desc}
               </div>
             )}
@@ -5053,7 +5053,7 @@ function ActionsPanel (props: {
         ) : workflowMenuEnabledItems.length > 0 ? (
           <React.Fragment>
             <div style={{ display: 'grid', gap: 6 }}>
-              <div style={{ fontSize: titleFontSize, fontWeight: 700 }}>Azione</div>
+              <div style={{ fontSize: Math.max(15, Number(titleFontSize) || 15), fontWeight: 700 }}>Azione</div>
               <select
                 value={selectedWorkflowMenuKey}
                 onChange={(e) => {
@@ -5075,7 +5075,7 @@ function ActionsPanel (props: {
                   if (item) startAction(item.key, { keepActionsMenuOpen: true })
                 }}
                 disabled={loading}
-                style={{ width: '100%', padding: '9px 10px', borderRadius: 8, border: '1px solid rgba(0,0,0,0.18)', outline: 'none', fontSize: 13, background: '#fff' }}
+                style={{ width: '100%', padding: '9px 10px', borderRadius: 8, border: '1px solid rgba(0,0,0,0.18)', outline: 'none', fontSize: 15, background: '#fff' }}
               >
                 <option value=''>— Seleziona —</option>
                 {workflowMenuEnabledItems.map(item => (
@@ -5085,13 +5085,13 @@ function ActionsPanel (props: {
             </div>
 
             {pending && actionMenuTheme.desc && (
-              <div style={{ fontSize: 13, color: '#374151', lineHeight: 1.55, padding: 10, background: actionMenuTheme.bg, border: `1px solid ${actionMenuTheme.border}`, borderRadius: 8 }}>
+              <div style={{ fontSize: 15, color: '#374151', lineHeight: 1.55, padding: 10, background: actionMenuTheme.bg, border: `1px solid ${actionMenuTheme.border}`, borderRadius: 8 }}>
                 {actionMenuTheme.desc}
               </div>
             )}
 
             {msg && msg.kind === 'err' && (
-              <div style={{ fontWeight: 500, padding: 10, background: '#fef2f2', border: '1px solid #fecaca', borderRadius: 6, color: '#7f1d1d', fontSize: 13 }}>
+              <div style={{ fontWeight: 500, padding: 10, background: '#fef2f2', border: '1px solid #fecaca', borderRadius: 6, color: '#7f1d1d', fontSize: 15 }}>
                 {msg.text}
               </div>
             )}
@@ -5099,7 +5099,7 @@ function ActionsPanel (props: {
             {pending === 'RESPINGI' && (
               <div style={{ display: 'grid', gap: 6 }}>
                 <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
-                  <div style={{ fontSize: titleFontSize, fontWeight: 700 }}>Motivazione</div>
+                  <div style={{ fontSize: Math.max(15, Number(titleFontSize) || 15), fontWeight: 700 }}>Motivazione</div>
                   <div style={labelReqStyle(true, reasonReqErr)}>(obbligatoria)</div>
                 </div>
                 <ZebraDropdown
@@ -5113,7 +5113,7 @@ function ActionsPanel (props: {
                   borderColor={ui.reasonsRowBorderColor}
                   borderWidth={ui.reasonsRowBorderWidth}
                   radius={ui.reasonsRowRadius}
-                  fontSize={ui.statusFontSize}
+                  fontSize={Math.max(15, Number(ui.statusFontSize) || 15)}
                   isError={reasonReqErr}
                 />
               </div>
@@ -5122,51 +5122,51 @@ function ActionsPanel (props: {
             {pending === 'ASSEGNA_TI' && role === 'RZ' && (
               <div style={{ display: 'grid', gap: 6 }}>
                 <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
-                  <div style={{ fontSize: titleFontSize, fontWeight: 700 }}>Tecnico istruttore</div>
+                  <div style={{ fontSize: Math.max(15, Number(titleFontSize) || 15), fontWeight: 700 }}>Tecnico istruttore</div>
                   <div style={labelReqStyle(true, tiReqErr)}>Scelta obbligatoria</div>
                 </div>
                 <select
                   value={tiSelected}
                   onChange={(e) => { setTiSelected(e.target.value); if (confirmAttempted) setConfirmAttempted(false) }}
                   disabled={loading}
-                  style={{ width: '100%', padding: '8px 10px', borderRadius: 8, border: `1px solid ${tiReqErr ? '#dc2626' : 'rgba(0,0,0,0.15)'}`, outline: 'none' }}
+                  style={{ width: '100%', padding: '8px 10px', borderRadius: 8, border: `1px solid ${tiReqErr ? '#dc2626' : 'rgba(0,0,0,0.15)'}`, outline: 'none', fontSize: 15 }}
                 >
                   <option value=''>— Seleziona Tecnico Istruttore —</option>
                   {tiOptions.map(o => (
                     <option key={o.username} value={o.username}>{(o.fullName || o.username)} ({o.username})</option>
                   ))}
                 </select>
-                {!tiLoading && !tiLoadErr && tiOptions.length === 0 && <div style={{ fontSize: 12, opacity: 0.75 }}>Nessun Tecnico Istruttore trovato.</div>}
-                {!!tiLoadErr && <div style={{ fontSize: 12, color: '#dc2626' }}>Errore elenco Tecnici Istruttori: {tiLoadErr}</div>}
+                {!tiLoading && !tiLoadErr && tiOptions.length === 0 && <div style={{ fontSize: 14, opacity: 0.75 }}>Nessun Tecnico Istruttore trovato.</div>}
+                {!!tiLoadErr && <div style={{ fontSize: 14, color: '#dc2626' }}>Errore elenco Tecnici Istruttori: {tiLoadErr}</div>}
               </div>
             )}
 
             {pending === 'ASSEGNA_TI_AMM' && role === 'RI_AMM' && (
               <div style={{ display: 'grid', gap: 6 }}>
                 <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
-                  <div style={{ fontSize: titleFontSize, fontWeight: 700 }}>Tecnico Istruttore amministrativo</div>
+                  <div style={{ fontSize: Math.max(15, Number(titleFontSize) || 15), fontWeight: 700 }}>Tecnico Istruttore amministrativo</div>
                   <div style={labelReqStyle(true, tiAmmReqErr)}>Scelta obbligatoria</div>
                 </div>
                 <select
                   value={tiAmmSelected}
                   onChange={(e) => { setTiAmmSelected(e.target.value); if (confirmAttempted) setConfirmAttempted(false) }}
                   disabled={loading}
-                  style={{ width: '100%', padding: '8px 10px', borderRadius: 8, border: `1px solid ${tiAmmReqErr ? '#dc2626' : 'rgba(0,0,0,0.15)'}`, outline: 'none' }}
+                  style={{ width: '100%', padding: '8px 10px', borderRadius: 8, border: `1px solid ${tiAmmReqErr ? '#dc2626' : 'rgba(0,0,0,0.15)'}`, outline: 'none', fontSize: 15 }}
                 >
                   <option value=''>— Seleziona Tecnico Istruttore amministrativo —</option>
                   {tiAmmOptions.map(o => (
                     <option key={o.username} value={o.username}>{(o.fullName || o.username)} ({o.username})</option>
                   ))}
                 </select>
-                {!tiAmmLoading && !tiAmmLoadErr && tiAmmOptions.length === 0 && <div style={{ fontSize: 12, opacity: 0.75 }}>Nessun Tecnico Istruttore amministrativo trovato.</div>}
-                {!!tiAmmLoadErr && <div style={{ fontSize: 12, color: '#dc2626' }}>Errore elenco Tecnici Istruttori amministrativi: {tiAmmLoadErr}</div>}
+                {!tiAmmLoading && !tiAmmLoadErr && tiAmmOptions.length === 0 && <div style={{ fontSize: 14, opacity: 0.75 }}>Nessun Tecnico Istruttore amministrativo trovato.</div>}
+                {!!tiAmmLoadErr && <div style={{ fontSize: 14, color: '#dc2626' }}>Errore elenco Tecnici Istruttori amministrativi: {tiAmmLoadErr}</div>}
               </div>
             )}
 
             {showNote && (
               <div style={{ display: 'grid', gap: 6 }}>
                 <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
-                  <div style={{ fontSize: titleFontSize, fontWeight: 700 }}>{workflowNoteLabel}</div>
+                  <div style={{ fontSize: Math.max(15, Number(titleFontSize) || 15), fontWeight: 700 }}>{workflowNoteLabel}</div>
                   {noteIsRequired && <div style={labelReqStyle(true, noteReqErr)}>(obbligatoria)</div>}
                 </div>
                 <textarea
@@ -5174,7 +5174,7 @@ function ActionsPanel (props: {
                   value={noteDraft}
                   onChange={(e) => { const v = String((e.target as HTMLTextAreaElement).value ?? ''); setNoteDraft(v); autoResizeNote(e.target as HTMLTextAreaElement); if (confirmAttempted) setConfirmAttempted(false) }}
                   placeholder={workflowNotePlaceholder}
-                  style={{ width: '100%', minHeight: NOTE_MIN_H, maxHeight: NOTE_MAX_H, overflowY: 'hidden', resize: 'none', padding: '8px 10px', borderRadius: 8, border: noteReqErr ? '1px solid #dc2626' : '1px solid rgba(0,0,0,0.20)', fontSize: ui.statusFontSize, outline: 'none', boxSizing: 'border-box' }}
+                  style={{ width: '100%', minHeight: NOTE_MIN_H, maxHeight: NOTE_MAX_H, overflowY: 'hidden', resize: 'none', padding: '8px 10px', borderRadius: 8, border: noteReqErr ? '1px solid #dc2626' : '1px solid rgba(0,0,0,0.20)', fontSize: Math.max(15, Number(ui.statusFontSize) || 15), outline: 'none', boxSizing: 'border-box' }}
                   disabled={!noteEnabled}
                 />
               </div>
@@ -5183,18 +5183,18 @@ function ActionsPanel (props: {
             {(loading || workflowSubmitting) ? operationProgressBox : (
               <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end', marginTop: 4 }}>
                 <button type='button' onClick={closeWorkflowMenu}
-                  style={{ padding: '8px 18px', borderRadius: 8, border: '1px solid rgba(0,0,0,0.18)', background: '#fff', color: '#374151', fontWeight: 600, fontSize: 13, cursor: 'pointer' }}>
+                  style={{ padding: '8px 18px', borderRadius: 8, border: '1px solid rgba(0,0,0,0.18)', background: '#fff', color: '#374151', fontWeight: 600, fontSize: 15, cursor: 'pointer' }}>
                   Annulla
                 </button>
                 <button type='button' onClick={() => { void confirmWorkflowAction() }} disabled={!canConfirmWorkflowAction}
-                  style={{ padding: '8px 18px', borderRadius: 8, border: `1px solid ${actionMenuTheme.buttonBorder}`, background: actionMenuTheme.buttonBg, color: '#fff', fontWeight: 700, fontSize: 13, cursor: canConfirmWorkflowAction ? 'pointer' : 'not-allowed', opacity: canConfirmWorkflowAction ? 1 : 0.6 }}>
+                  style={{ padding: '8px 18px', borderRadius: 8, border: `1px solid ${actionMenuTheme.buttonBorder}`, background: actionMenuTheme.buttonBg, color: '#fff', fontWeight: 700, fontSize: 15, cursor: canConfirmWorkflowAction ? 'pointer' : 'not-allowed', opacity: canConfirmWorkflowAction ? 1 : 0.6 }}>
                   Conferma
                 </button>
               </div>
             )}
           </React.Fragment>
         ) : (
-          <div style={{ fontSize: 13, color: '#6b7280', background: '#f9fafb', border: '1px solid #e5e7eb', borderRadius: 8, padding: 10 }}>
+          <div style={{ fontSize: 15, color: '#6b7280', background: '#f9fafb', border: '1px solid #e5e7eb', borderRadius: 8, padding: 10 }}>
             Nessuna azione disponibile per lo stato corrente della pratica.
           </div>
         )}
@@ -5219,26 +5219,26 @@ function ActionsPanel (props: {
         onMouseDown={(e) => { e.stopPropagation() }}
       >
         {/* Titolo colorato con icona + banda chiara */}
-        <div style={{ fontWeight: 800, fontSize: 16, marginBottom: 2, color: theme.color, display: 'flex', alignItems: 'center', gap: 8, background: theme.bg, border: `1px solid ${theme.border}`, borderRadius: 8, padding: '10px 12px' }}>
+        <div style={{ fontWeight: 800, fontSize: 18, marginBottom: 2, color: theme.color, display: 'flex', alignItems: 'center', gap: 8, background: theme.bg, border: `1px solid ${theme.border}`, borderRadius: 8, padding: '10px 12px' }}>
           <span style={{ fontSize: 20, flex: '0 0 auto' }}>{theme.icon}</span>
           <span style={{ whiteSpace: 'nowrap' }}>{pendingTitle}</span>
         </div>
 
         {/* Box numero rilevazione / rapporto tecnico */}
         {hasSel && oid != null && (
-          <div style={{ fontWeight: 600, color: '#1f2937', padding: 10, background: theme.bg, border: `1px solid ${theme.border}`, borderRadius: 6, fontSize: 13 }}>
-            {praticaLabel}: <span style={{ color: theme.color, fontSize: 14, fontFamily: 'monospace' }}>{praticaCode}</span>
+          <div style={{ fontWeight: 600, color: '#1f2937', padding: 10, background: theme.bg, border: `1px solid ${theme.border}`, borderRadius: 6, fontSize: 15 }}>
+            {praticaLabel}: <span style={{ color: theme.color, fontSize: 15, fontFamily: 'monospace' }}>{praticaCode}</span>
           </div>
         )}
 
         {/* Descrizione azione */}
         {theme.desc && (
-          <div style={{ fontSize: 13, color: '#374151', lineHeight: 1.6 }}>{theme.desc}</div>
+          <div style={{ fontSize: 15, color: '#374151', lineHeight: 1.6 }}>{theme.desc}</div>
         )}
 
         {/* Errore */}
         {msg && msg.kind === 'err' && (
-          <div style={{ fontWeight: 500, padding: 10, background: '#fef2f2', border: '1px solid #fecaca', borderRadius: 6, color: '#7f1d1d', fontSize: 13 }}>
+          <div style={{ fontWeight: 500, padding: 10, background: '#fef2f2', border: '1px solid #fecaca', borderRadius: 6, color: '#7f1d1d', fontSize: 15 }}>
             {msg.text}
           </div>
         )}
@@ -5247,7 +5247,7 @@ function ActionsPanel (props: {
         {pending === 'RESPINGI' && (
           <div style={{ display: 'grid', gap: 6 }}>
             <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
-              <div style={{ fontSize: titleFontSize, fontWeight: 700 }}>Motivazione</div>
+              <div style={{ fontSize: Math.max(15, Number(titleFontSize) || 15), fontWeight: 700 }}>Motivazione</div>
               <div style={labelReqStyle(true, reasonReqErr)}>(obbligatoria)</div>
             </div>
             <ZebraDropdown
@@ -5261,7 +5261,7 @@ function ActionsPanel (props: {
               borderColor={ui.reasonsRowBorderColor}
               borderWidth={ui.reasonsRowBorderWidth}
               radius={ui.reasonsRowRadius}
-              fontSize={ui.statusFontSize}
+              fontSize={Math.max(15, Number(ui.statusFontSize) || 15)}
               isError={reasonReqErr}
             />
           </div>
@@ -5275,15 +5275,15 @@ function ActionsPanel (props: {
               value={tiSelected}
               onChange={(e) => { setTiSelected(e.target.value); if (confirmAttempted) setConfirmAttempted(false) }}
               disabled={loading}
-              style={{ width: 'auto', minWidth: 280, maxWidth: '100%', padding: '8px 10px', borderRadius: 8, border: `1px solid ${tiReqErr ? '#dc2626' : 'rgba(0,0,0,0.15)'}`, outline: 'none' }}
+              style={{ width: 'auto', minWidth: 280, maxWidth: '100%', padding: '8px 10px', borderRadius: 8, border: `1px solid ${tiReqErr ? '#dc2626' : 'rgba(0,0,0,0.15)'}`, outline: 'none', fontSize: 15 }}
             >
               <option value=''>— Seleziona Tecnico Istruttore —</option>
               {tiOptions.map(o => (
                 <option key={o.username} value={o.username}>{(o.fullName || o.username)} ({o.username})</option>
               ))}
             </select>
-            {!tiLoading && !tiLoadErr && tiOptions.length === 0 && <div style={{ fontSize: 12, opacity: 0.75 }}>Nessun Tecnico Istruttore trovato.</div>}
-            {!!tiLoadErr && <div style={{ fontSize: 12, color: '#dc2626' }}>Errore elenco Tecnici Istruttori: {tiLoadErr}</div>}
+            {!tiLoading && !tiLoadErr && tiOptions.length === 0 && <div style={{ fontSize: 14, opacity: 0.75 }}>Nessun Tecnico Istruttore trovato.</div>}
+            {!!tiLoadErr && <div style={{ fontSize: 14, color: '#dc2626' }}>Errore elenco Tecnici Istruttori: {tiLoadErr}</div>}
           </div>
         )}
 
@@ -5294,15 +5294,15 @@ function ActionsPanel (props: {
               value={tiAmmSelected}
               onChange={(e) => { setTiAmmSelected(e.target.value); if (confirmAttempted) setConfirmAttempted(false) }}
               disabled={loading}
-              style={{ width: 'auto', minWidth: 280, maxWidth: '100%', padding: '8px 10px', borderRadius: 8, border: `1px solid ${tiAmmReqErr ? '#dc2626' : 'rgba(0,0,0,0.15)'}`, outline: 'none' }}
+              style={{ width: 'auto', minWidth: 280, maxWidth: '100%', padding: '8px 10px', borderRadius: 8, border: `1px solid ${tiAmmReqErr ? '#dc2626' : 'rgba(0,0,0,0.15)'}`, outline: 'none', fontSize: 15 }}
             >
               <option value=''>— Seleziona Tecnico Istruttore amministrativo —</option>
               {tiAmmOptions.map(o => (
                 <option key={o.username} value={o.username}>{(o.fullName || o.username)} ({o.username})</option>
               ))}
             </select>
-            {!tiAmmLoading && !tiAmmLoadErr && tiAmmOptions.length === 0 && <div style={{ fontSize: 12, opacity: 0.75 }}>Nessun Tecnico Istruttore amministrativo trovato.</div>}
-            {!!tiAmmLoadErr && <div style={{ fontSize: 12, color: '#dc2626' }}>Errore elenco Tecnici Istruttori amministrativi: {tiAmmLoadErr}</div>}
+            {!tiAmmLoading && !tiAmmLoadErr && tiAmmOptions.length === 0 && <div style={{ fontSize: 14, opacity: 0.75 }}>Nessun Tecnico Istruttore amministrativo trovato.</div>}
+            {!!tiAmmLoadErr && <div style={{ fontSize: 14, color: '#dc2626' }}>Errore elenco Tecnici Istruttori amministrativi: {tiAmmLoadErr}</div>}
           </div>
         )}
 
@@ -5310,7 +5310,7 @@ function ActionsPanel (props: {
         {showNote && (
           <div style={{ display: 'grid', gap: 6 }}>
             <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
-              <div style={{ fontSize: titleFontSize, fontWeight: 700 }}>Note</div>
+              <div style={{ fontSize: Math.max(15, Number(titleFontSize) || 15), fontWeight: 700 }}>Note</div>
               {(pending === 'INTEGRAZIONE' || (pending === 'RESPINGI' && noteIsRequired) || pending === 'ELIMINA') && (
                 <div style={labelReqStyle(true, noteReqErr)}>(obbligatoria)</div>
               )}
@@ -5320,7 +5320,7 @@ function ActionsPanel (props: {
               value={noteDraft}
               onChange={(e) => { const v = String((e.target as HTMLTextAreaElement).value ?? ''); setNoteDraft(v); autoResizeNote(e.target as HTMLTextAreaElement) }}
               placeholder={(pending === 'INTEGRAZIONE' || pending === 'INTEGRAZIONE_TI_AMM' || pending === 'INTEGRAZIONE_TECNICA') ? 'Scrivi la richiesta di integrazione…' : (noteIsRequired ? 'Specifica il motivo (Altro)…' : 'Nota facoltativa…')}
-              style={{ width: '100%', minHeight: NOTE_MIN_H, maxHeight: NOTE_MAX_H, overflowY: 'hidden', resize: 'none', padding: '8px 10px', borderRadius: 8, border: noteReqErr ? '1px solid #dc2626' : '1px solid rgba(0,0,0,0.20)', fontSize: ui.statusFontSize, outline: 'none', boxSizing: 'border-box' }}
+              style={{ width: '100%', minHeight: NOTE_MIN_H, maxHeight: NOTE_MAX_H, overflowY: 'hidden', resize: 'none', padding: '8px 10px', borderRadius: 8, border: noteReqErr ? '1px solid #dc2626' : '1px solid rgba(0,0,0,0.20)', fontSize: Math.max(15, Number(ui.statusFontSize) || 15), outline: 'none', boxSizing: 'border-box' }}
               disabled={!noteEnabled}
             />
           </div>
@@ -5330,17 +5330,17 @@ function ActionsPanel (props: {
         {loading ? operationProgressBox : (
           <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end', marginTop: 4 }}>
             <button type='button' onClick={onAnnulla}
-              style={{ padding: '8px 18px', borderRadius: 8, border: '1px solid rgba(0,0,0,0.18)', background: '#fff', color: '#374151', fontWeight: 600, fontSize: 13, cursor: 'pointer' }}>
+              style={{ padding: '8px 18px', borderRadius: 8, border: '1px solid rgba(0,0,0,0.18)', background: '#fff', color: '#374151', fontWeight: 600, fontSize: 15, cursor: 'pointer' }}>
               Annulla
             </button>
-            {pending === 'TAKE' && <button type='button' onClick={onConfirmTakeInCharge} style={{ padding: '8px 18px', borderRadius: 8, border: `1px solid ${theme.buttonBorder}`, background: theme.buttonBg, color: '#fff', fontWeight: 700, fontSize: 13, cursor: 'pointer' }}>Conferma</button>}
-            {pending === 'ASSEGNA_TI' && <button type='button' onClick={onConfirmAssegnaTi} disabled={!tiSelected} style={{ padding: '8px 18px', borderRadius: 8, border: `1px solid ${theme.buttonBorder}`, background: theme.buttonBg, color: '#fff', fontWeight: 700, fontSize: 13, cursor: !tiSelected ? 'not-allowed' : 'pointer', opacity: !tiSelected ? 0.6 : 1 }}>Conferma</button>}
-            {pending === 'ASSEGNA_TI_AMM' && <button type='button' onClick={onConfirmAssegnaTiAmm} disabled={!tiAmmSelected} style={{ padding: '8px 18px', borderRadius: 8, border: `1px solid ${theme.buttonBorder}`, background: theme.buttonBg, color: '#fff', fontWeight: 700, fontSize: 13, cursor: !tiAmmSelected ? 'not-allowed' : 'pointer', opacity: !tiAmmSelected ? 0.6 : 1 }}>Conferma</button>}
-            {(pending === 'INVIA_TI_AMM' || pending === 'RESTITUISCI_TI_AMM') && <button type='button' onClick={onConfirmRestituisciTiAmm} style={{ padding: '8px 18px', borderRadius: 8, border: `1px solid ${theme.buttonBorder}`, background: theme.buttonBg, color: '#fff', fontWeight: 700, fontSize: 13, cursor: 'pointer' }}>Conferma</button>}
-            {(pending === 'INTEGRAZIONE' || pending === 'INTEGRAZIONE_TI_AMM' || pending === 'INTEGRAZIONE_TECNICA') && <button type='button' onClick={onConfirmIntegrazione} style={{ padding: '8px 18px', borderRadius: 8, border: `1px solid ${theme.buttonBorder}`, background: theme.buttonBg, color: '#fff', fontWeight: 700, fontSize: 13, cursor: 'pointer' }}>Conferma</button>}
-            {pending === 'APPROVA' && <button type='button' onClick={() => { void confirmApprovaWithNotaSpeseWarning() }} style={{ padding: '8px 18px', borderRadius: 8, border: `1px solid ${theme.buttonBorder}`, background: theme.buttonBg, color: '#fff', fontWeight: 700, fontSize: 13, cursor: 'pointer' }}>Conferma</button>}
-            {pending === 'RESPINGI' && <button type='button' onClick={onConfirmRespinta} style={{ padding: '8px 18px', borderRadius: 8, border: `1px solid ${theme.buttonBorder}`, background: theme.buttonBg, color: '#fff', fontWeight: 700, fontSize: 13, cursor: 'pointer' }}>Conferma</button>}
-            {pending === 'ELIMINA' && <button type='button' onClick={onConfirmElimina} style={{ padding: '8px 18px', borderRadius: 8, border: `1px solid ${theme.buttonBorder}`, background: theme.buttonBg, color: '#fff', fontWeight: 700, fontSize: 13, cursor: 'pointer' }}>Conferma</button>}
+            {pending === 'TAKE' && <button type='button' onClick={onConfirmTakeInCharge} style={{ padding: '8px 18px', borderRadius: 8, border: `1px solid ${theme.buttonBorder}`, background: theme.buttonBg, color: '#fff', fontWeight: 700, fontSize: 15, cursor: 'pointer' }}>Conferma</button>}
+            {pending === 'ASSEGNA_TI' && <button type='button' onClick={onConfirmAssegnaTi} disabled={!tiSelected} style={{ padding: '8px 18px', borderRadius: 8, border: `1px solid ${theme.buttonBorder}`, background: theme.buttonBg, color: '#fff', fontWeight: 700, fontSize: 15, cursor: !tiSelected ? 'not-allowed' : 'pointer', opacity: !tiSelected ? 0.6 : 1 }}>Conferma</button>}
+            {pending === 'ASSEGNA_TI_AMM' && <button type='button' onClick={onConfirmAssegnaTiAmm} disabled={!tiAmmSelected} style={{ padding: '8px 18px', borderRadius: 8, border: `1px solid ${theme.buttonBorder}`, background: theme.buttonBg, color: '#fff', fontWeight: 700, fontSize: 15, cursor: !tiAmmSelected ? 'not-allowed' : 'pointer', opacity: !tiAmmSelected ? 0.6 : 1 }}>Conferma</button>}
+            {(pending === 'INVIA_TI_AMM' || pending === 'RESTITUISCI_TI_AMM') && <button type='button' onClick={onConfirmRestituisciTiAmm} style={{ padding: '8px 18px', borderRadius: 8, border: `1px solid ${theme.buttonBorder}`, background: theme.buttonBg, color: '#fff', fontWeight: 700, fontSize: 15, cursor: 'pointer' }}>Conferma</button>}
+            {(pending === 'INTEGRAZIONE' || pending === 'INTEGRAZIONE_TI_AMM' || pending === 'INTEGRAZIONE_TECNICA') && <button type='button' onClick={onConfirmIntegrazione} style={{ padding: '8px 18px', borderRadius: 8, border: `1px solid ${theme.buttonBorder}`, background: theme.buttonBg, color: '#fff', fontWeight: 700, fontSize: 15, cursor: 'pointer' }}>Conferma</button>}
+            {pending === 'APPROVA' && <button type='button' onClick={() => { void confirmApprovaWithNotaSpeseWarning() }} style={{ padding: '8px 18px', borderRadius: 8, border: `1px solid ${theme.buttonBorder}`, background: theme.buttonBg, color: '#fff', fontWeight: 700, fontSize: 15, cursor: 'pointer' }}>Conferma</button>}
+            {pending === 'RESPINGI' && <button type='button' onClick={onConfirmRespinta} style={{ padding: '8px 18px', borderRadius: 8, border: `1px solid ${theme.buttonBorder}`, background: theme.buttonBg, color: '#fff', fontWeight: 700, fontSize: 15, cursor: 'pointer' }}>Conferma</button>}
+            {pending === 'ELIMINA' && <button type='button' onClick={onConfirmElimina} style={{ padding: '8px 18px', borderRadius: 8, border: `1px solid ${theme.buttonBorder}`, background: theme.buttonBg, color: '#fff', fontWeight: 700, fontSize: 15, cursor: 'pointer' }}>Conferma</button>}
           </div>
         )}
       </div>
@@ -5364,20 +5364,20 @@ function ActionsPanel (props: {
         onMouseDown={(e) => { e.stopPropagation() }}
       >
         <div style={{ background: '#fef2f2', border: '1px solid #fecaca', color: '#991b1b', borderRadius: 10, padding: '10px 12px' }}>
-          <div style={{ fontWeight: 800, fontSize: 16, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>Nota spese incompleta</div>
-          <div style={{ marginTop: 6, fontSize: 13, lineHeight: 1.45 }}>
+          <div style={{ fontWeight: 800, fontSize: 18, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>Nota spese incompleta</div>
+          <div style={{ marginTop: 6, fontSize: 15, lineHeight: 1.45 }}>
             Non è possibile procedere con l’inoltro perché sono presenti righe di nota spese senza quantità o con quantità pari a zero.
           </div>
         </div>
-        <ul style={{ margin: 0, paddingLeft: 22, display: 'grid', gap: 5, fontSize: 13, color: '#374151' }}>
+        <ul style={{ margin: 0, paddingLeft: 22, display: 'grid', gap: 5, fontSize: 15, color: '#374151' }}>
           {incompleteNotaSpeseWarning.map((m, i) => <li key={i}>{m}</li>)}
         </ul>
-        <div style={{ fontSize: 13, color: '#4b5563' }}>Completare le quantità oppure eliminare le righe non necessarie prima dell’inoltro.</div>
+        <div style={{ fontSize: 15, color: '#4b5563' }}>Completare le quantità oppure eliminare le righe non necessarie prima dell’inoltro.</div>
         <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10 }}>
           <button
             type='button'
             onClick={() => setIncompleteNotaSpeseWarning([])}
-            style={{ padding: '8px 18px', borderRadius: 8, border: '1px solid #dc2626', background: '#dc2626', color: '#fff', fontWeight: 800, fontSize: 13, cursor: 'pointer' }}
+            style={{ padding: '8px 18px', borderRadius: 8, border: '1px solid #dc2626', background: '#dc2626', color: '#fff', fontWeight: 800, fontSize: 15, cursor: 'pointer' }}
           >Chiudi</button>
         </div>
       </div>
@@ -5401,20 +5401,20 @@ function ActionsPanel (props: {
         onMouseDown={(e) => { e.stopPropagation() }}
       >
         <div style={{ background: '#fff7ed', border: '1px solid #fed7aa', color: '#9a3412', borderRadius: 10, padding: '10px 12px' }}>
-          <div style={{ fontWeight: 800, fontSize: 16, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>Attenzione</div>
-          <div style={{ marginTop: 6, fontSize: 13, lineHeight: 1.45 }}>
+          <div style={{ fontWeight: 800, fontSize: 18, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>Attenzione</div>
+          <div style={{ marginTop: 6, fontSize: 15, lineHeight: 1.45 }}>
             Una o più violazioni selezionate prevedono la possibilità di nota spese, ma risultano prive di importo.
           </div>
         </div>
-        <ul style={{ margin: 0, paddingLeft: 22, display: 'grid', gap: 5, fontSize: 13, color: '#374151' }}>
+        <ul style={{ margin: 0, paddingLeft: 22, display: 'grid', gap: 5, fontSize: 15, color: '#374151' }}>
           {zeroNotaSpeseWarning.map((m, i) => <li key={i}>{m}</li>)}
         </ul>
-        <div style={{ fontSize: 13, color: '#4b5563' }}>Confermare comunque la trasmissione?</div>
+        <div style={{ fontSize: 15, color: '#4b5563' }}>Confermare comunque la trasmissione?</div>
         <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10 }}>
           <button
             type='button'
             onClick={() => setZeroNotaSpeseWarning([])}
-            style={{ padding: '8px 18px', borderRadius: 8, border: '1px solid rgba(0,0,0,0.18)', background: '#fff', color: '#374151', fontWeight: 700, fontSize: 13, cursor: 'pointer' }}
+            style={{ padding: '8px 18px', borderRadius: 8, border: '1px solid rgba(0,0,0,0.18)', background: '#fff', color: '#374151', fontWeight: 700, fontSize: 15, cursor: 'pointer' }}
           >Annulla</button>
           <button
             type='button'
@@ -5424,7 +5424,7 @@ function ActionsPanel (props: {
               setActionsMenuOpen(false)
             }}
             disabled={loading}
-            style={{ padding: '8px 18px', borderRadius: 8, border: '1px solid #f97316', background: '#f97316', color: '#fff', fontWeight: 800, fontSize: 13, cursor: loading ? 'not-allowed' : 'pointer', opacity: loading ? 0.65 : 1 }}
+            style={{ padding: '8px 18px', borderRadius: 8, border: '1px solid #f97316', background: '#f97316', color: '#fff', fontWeight: 800, fontSize: 15, cursor: loading ? 'not-allowed' : 'pointer', opacity: loading ? 0.65 : 1 }}
           >Conferma trasmissione</button>
         </div>
       </div>
@@ -5627,17 +5627,17 @@ function ActionsPanel (props: {
               onClick={(e) => { e.stopPropagation() }}
               onMouseDown={(e) => { e.stopPropagation() }}
             >
-              <div style={{ fontWeight: 800, fontSize: 16, color: '#b42318', display: 'flex', alignItems: 'center', gap: 8 }}>
+              <div style={{ fontWeight: 800, fontSize: 18, color: '#b42318', display: 'flex', alignItems: 'center', gap: 8 }}>
                 <span style={{ fontSize: 20 }}>⚠</span>
                 <span>Validazione trasmissione</span>
               </div>
               {denyPopupMessages.map((m, i) => (
-                <div key={i} style={{ fontSize: 13, color: '#374151', lineHeight: 1.6, padding: 10, background: '#fef2f2', border: '1px solid #fecaca', borderRadius: 6 }}>
+                <div key={i} style={{ fontSize: 15, color: '#374151', lineHeight: 1.6, padding: 10, background: '#fef2f2', border: '1px solid #fecaca', borderRadius: 6 }}>
                   {m}
                 </div>
               ))}
               <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 4 }}>
-                <button type='button' onClick={() => setDenyPopupMessages([])} style={{ padding: '8px 18px', borderRadius: 8, border: '1px solid rgba(0,0,0,0.18)', background: '#b42318', color: '#fff', fontWeight: 700, fontSize: 13, cursor: 'pointer' }}>
+                <button type='button' onClick={() => setDenyPopupMessages([])} style={{ padding: '8px 18px', borderRadius: 8, border: '1px solid rgba(0,0,0,0.18)', background: '#b42318', color: '#fff', fontWeight: 700, fontSize: 15, cursor: 'pointer' }}>
                   Chiudi
                 </button>
               </div>
@@ -5828,6 +5828,15 @@ function formatTimeIt (v: any): string {
     return d.toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' })
   } catch { return '' }
 }
+function formatRilevazioneTime (data: any): string {
+  // data_rilevazione può contenere la sola data; in tal caso usa il timestamp
+  // originario di avvio della rilevazione.
+  for (const value of [data?.data_rilevazione, data?.start]) {
+    const formatted = formatTimeIt(value)
+    if (formatted) return formatted
+  }
+  return ''
+}
 
 function esc (s: any): string {
   return String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
@@ -5948,6 +5957,7 @@ function buildPlaceholderMap (data: any, utentiCache: Map<string, UtenteCached> 
   const art17on = String(d.norma16_17 || '').toLowerCase().includes('art17') || !!d.art17_tipo
   const xMark = (on: boolean) => on ? 'x' : ''
   const surfVal = (on: boolean, ...fields: string[]) => { if (!on) return ''; for (const f of fields) { const v = d[f]; if (v != null && v !== '' && v !== 0) return fmtNum(v) } return '' }
+  const surfValIncludingZero = (on: boolean, ...fields: string[]) => { if (!on) return ''; for (const f of fields) { const v = d[f]; if (v != null && v !== '') return fmtNum(v) } return '0' }
   const gradiViolazioni = parseGradiViolazioniForRapporto(d.gradi_violazioni)
   const occorrenzaArt15 = occorrenzaArt15ForRapporto(d.occorrenza, art15on)
   const origPratica = d.origine_pratica ?? d.Origine_pratica
@@ -5973,7 +5983,7 @@ function buildPlaceholderMap (data: any, utentiCache: Map<string, UtenteCached> 
   return {
     cod_pratica: codPratica, anno: d.data_rilevazione ? String(new Date(d.data_rilevazione).getFullYear()) : '', area_cod: areaCod,
     area_label: AREA_LABELS[areaCod] || areaCod, settore_label: SETTORE_LABELS[settoreCod] || settoreCod,
-    tecnico_rilevatore: esc(d.tecnico_rilevatore || ''), data_rilevazione: formatDateIt(d.data_rilevazione), ora_rilevazione: formatTimeIt(d.data_rilevazione),
+    tecnico_rilevatore: esc(d.tecnico_rilevatore || ''), data_rilevazione: formatDateIt(d.data_rilevazione), ora_rilevazione: formatRilevazioneTime(d),
     x_art08: xMark(artChecked('v_art08')), x_art12: xMark(artChecked('v_art12')), x_art15: xMark(art15on), x_art16: xMark(art16on), x_art17: xMark(art17on),
     x_art27: xMark(artChecked('v_art27')), x_art28: xMark(artChecked('v_art28')), x_art29: xMark(artChecked('v_art29')), x_art30: xMark(artChecked('v_art30')),
     x_art31: xMark(artChecked('v_art31')), x_art32: xMark(artChecked('v_art32')), x_art33: xMark(artChecked('v_art33')), x_art34: xMark(artChecked('v_art34')),
@@ -5981,7 +5991,7 @@ function buildPlaceholderMap (data: any, utentiCache: Map<string, UtenteCached> 
     sup_dich_art08: surfVal(artChecked('v_art08'), 'sup_dichiarata_art08'), sup_irr_art08: surfVal(artChecked('v_art08'), 'sup_irrigata_art08'),
     sup_dich_art12: surfVal(artChecked('v_art12'), 'sup_dichiarata_art12'), sup_irr_art12: surfVal(artChecked('v_art12'), 'sup_irrigata_art12'),
     sup_dich_art15: surfVal(art15on, 'sup_dichiarata_art15'), sup_irr_art15: surfVal(art15on, 'sup_irrigata_art15'),
-    sup_dich_art16: surfVal(art16on, 'sup_dichiarata_art16'), sup_irr_art16: surfVal(art16on, 'sup_irrigata_art16_17_2'),
+    sup_dich_art16: surfVal(art16on, 'sup_dichiarata_art16'), sup_irr_art16: surfValIncludingZero(art16on, 'sup_irrigata_art16_17_2'),
     sup_dich_art17: surfVal(art17on, 'sup_dichiarata_art17_1', 'sup_dichiarata_art17_2'), sup_irr_art17: surfVal(art17on, 'sup_irrigata_art17_1', 'sup_irrigata_art16_17_2'),
     sup_dich_art27: surfVal(artChecked('v_art27'), 'sup_dichiarata_art27'), sup_irr_art27: surfVal(artChecked('v_art27'), 'sup_irrigata_art27'),
     sup_dich_art28: surfVal(artChecked('v_art28'), 'sup_dichiarata_art28'), sup_irr_art28: surfVal(artChecked('v_art28'), 'sup_irrigata_art28'),
@@ -6111,6 +6121,13 @@ type Art30RimborsoRapportoPdfRow = {
   importo: number | null
 }
 
+type Art30CauzioneRapportoPdfDetail = {
+  unitaMisura: string
+  quantita: number
+  valoreUnitario: number
+  importo: number
+}
+
 function parseArt30NumberForRapportoPdf (value: any): number | null {
   if (value == null || value === '') return null
   if (typeof value === 'number') return Number.isFinite(value) ? value : null
@@ -6149,12 +6166,36 @@ function parseArt30DetailForRapportoPdf (raw: any): Art30RimborsoRapportoPdfRow[
   return out
 }
 
+function parseArt30CauzioneDetailForRapportoPdf (raw: any): Art30CauzioneRapportoPdfDetail | null {
+  for (const line of String(raw ?? '').split(/\r?\n/)) {
+    const text = line.trim()
+    if (!/^Decurtazione della cauzione\b/i.test(text)) continue
+    const unitaMisuraMatch = text.match(/U\.M\.:\s*([^—|]+?)(?:\s+(?:—|\|)|$)/i)
+    const quantitaMatch = text.match(/Quantità:\s*([0-9.,]+)/i)
+    const valoreUnitarioMatch = text.match(/Valore unitario:\s*([0-9.,]+)/i)
+    const importoMatch = text.match(/Importo:\s*-?\s*([0-9.,]+)/i)
+    const quantita = parseArt30NumberForRapportoPdf(quantitaMatch?.[1])
+    const valoreUnitario = parseArt30NumberForRapportoPdf(valoreUnitarioMatch?.[1])
+    const importo = parseArt30NumberForRapportoPdf(importoMatch?.[1])
+    if (quantita == null || quantita <= 0 || valoreUnitario == null || valoreUnitario < 0 || importo == null || importo < 0) return null
+    return {
+      unitaMisura: String(unitaMisuraMatch?.[1] || 'n.').trim() || 'n.',
+      quantita,
+      valoreUnitario,
+      importo
+    }
+  }
+  return null
+}
+
 function qtyArt30ItForRapportoPdf (value: number): string {
   return Number(value).toLocaleString('it-IT', { minimumFractionDigits: 0, maximumFractionDigits: 4 })
 }
 
-function buildArt30RapportoSummaryForAzioni (data: any): { hasData: boolean; rows: Art30RimborsoRapportoPdfRow[]; rimborso: number; cauzione: number; netto: number; text: string } {
-  const rows = parseArt30DetailForRapportoPdf(pickRapportoAttrCI(data, ['attrezzature_rimborso_dettaglio']))
+function buildArt30RapportoSummaryForAzioni (data: any): { hasData: boolean; rows: Art30RimborsoRapportoPdfRow[]; rimborso: number; cauzione: number; cauzioneQuantita: number | null; cauzioneValoreUnitario: number | null; cauzioneUnitaMisura: string; netto: number; text: string } {
+  const detailRaw = pickRapportoAttrCI(data, ['attrezzature_rimborso_dettaglio'])
+  const rows = parseArt30DetailForRapportoPdf(detailRaw)
+  const cauzioneDetail = parseArt30CauzioneDetailForRapportoPdf(detailRaw)
   const rimborsoSalvato = parseArt30NumberForRapportoPdf(pickRapportoAttrCI(data, ['attrezzature_rimborso_importo']))
   const cauzioneSalvata = parseArt30NumberForRapportoPdf(pickRapportoAttrCI(data, ['attrezzature_cauzione_decurtata']))
   const nettoSalvato = parseArt30NumberForRapportoPdf(pickRapportoAttrCI(data, ['attrezzature_importo_netto']))
@@ -6169,7 +6210,7 @@ function buildArt30RapportoSummaryForAzioni (data: any): { hasData: boolean; row
   const cauzione = roundMoneyRapportoPdf(cauzioneAttiva ? (cauzioneSalvata ?? 0) : 0)
   const netto = roundMoneyRapportoPdf(nettoSalvato ?? (rimborso - cauzione))
   const hasData = rows.length > 0 || rimborsoSalvato != null || cauzioneSalvata != null || nettoSalvato != null || cauzioneAttiva
-  if (!hasData) return { hasData: false, rows: [], rimborso: 0, cauzione: 0, netto: 0, text: '' }
+  if (!hasData) return { hasData: false, rows: [], rimborso: 0, cauzione: 0, cauzioneQuantita: null, cauzioneValoreUnitario: null, cauzioneUnitaMisura: 'n.', netto: 0, text: '' }
 
   const parts: string[] = rows.map(row => {
     const importo = roundMoneyRapportoPdf(row.importo ?? ((row.valoreUnitario ?? 0) * row.quantita))
@@ -6183,7 +6224,17 @@ function buildArt30RapportoSummaryForAzioni (data: any): { hasData: boolean; row
   if (cauzioneAttiva || cauzione !== 0) parts.push(`cauzione: -${moneyItRapportoPdf(Math.abs(cauzione))}`)
   parts.push(`netto Art. 30: ${moneyItRapportoPdf(netto)}`)
 
-  return { hasData: true, rows, rimborso, cauzione, netto, text: `Art. 30 - ${parts.join('; ')}.` }
+  return {
+    hasData: true,
+    rows,
+    rimborso,
+    cauzione,
+    cauzioneQuantita: cauzioneDetail?.quantita ?? null,
+    cauzioneValoreUnitario: cauzioneDetail?.valoreUnitario ?? null,
+    cauzioneUnitaMisura: cauzioneDetail?.unitaMisura || 'n.',
+    netto,
+    text: `Art. 30 - ${parts.join('; ')}.`
+  }
 }
 
 function emptyNsRowsForRapportoPdf (): Record<NsCatPdf, NsRowPdf[]> {
@@ -6361,6 +6412,9 @@ async function buildRapportoPdfBlob (
               })),
               rimborso: art30Summary.rimborso,
               cauzione: art30Summary.cauzione,
+              cauzione_quantita: art30Summary.cauzioneQuantita,
+              cauzione_valore_unitario: art30Summary.cauzioneValoreUnitario,
+              cauzione_unita_misura: art30Summary.cauzioneUnitaMisura,
               netto: art30Summary.netto
             }
           : null,

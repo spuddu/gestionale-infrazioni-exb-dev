@@ -743,14 +743,14 @@ const styles = `
   .ggu-msg-err { background: #fce4e4; color: #c00; border: 1px solid #f5b8b8; }
   .ggu-modal-backdrop { position: fixed; inset: 0; z-index: 2147483647; background: rgba(15, 23, 42, 0.72); display: flex; align-items: center; justify-content: center; padding: 24px; box-sizing: border-box; pointer-events: auto; }
   .ggu-modal { width: min(560px, 100%); background: #fff; border-radius: 10px; border: 1px solid #f5b8b8; box-shadow: 0 18px 48px rgba(15, 23, 42, 0.55); overflow: hidden; pointer-events: auto; }
-  .ggu-modal-head { background: #c00; color: #fff; font-weight: 700; font-size: 14px; padding: 12px 16px; }
-  .ggu-modal-body { color: #2b2b2b; font-size: 13px; line-height: 1.45; padding: 16px; white-space: pre-line; }
+  .ggu-modal-head { background: #c00; color: #fff; font-weight: 700; font-size: 18px; padding: 12px 16px; }
+  .ggu-modal-body { color: #2b2b2b; font-size: 15px; line-height: 1.5; padding: 16px; white-space: pre-line; }
   .ggu-modal-actions { display: flex; justify-content: flex-end; gap: 8px; padding: 0 16px 16px 16px; }
-  .ggu-modal-close { background: #1F4E79; color: #fff; border: none; border-radius: 5px; padding: 7px 18px; font-size: 13px; font-weight: 700; cursor: pointer; }
+  .ggu-modal-close { background: #1F4E79; color: #fff; border: none; border-radius: 5px; padding: 7px 18px; font-size: 15px; font-weight: 700; cursor: pointer; }
   .ggu-modal-close:hover { background: #16375a; }
-  .ggu-modal-cancel { background: #e0e0e0; color: #333; border: none; border-radius: 5px; padding: 7px 18px; font-size: 13px; font-weight: 700; cursor: pointer; }
+  .ggu-modal-cancel { background: #e0e0e0; color: #333; border: none; border-radius: 5px; padding: 7px 18px; font-size: 15px; font-weight: 700; cursor: pointer; }
   .ggu-modal-cancel:hover { background: #ccc; }
-  .ggu-modal-danger { background: #c00; color: #fff; border: none; border-radius: 5px; padding: 7px 18px; font-size: 13px; font-weight: 700; cursor: pointer; }
+  .ggu-modal-danger { background: #c00; color: #fff; border: none; border-radius: 5px; padding: 7px 18px; font-size: 15px; font-weight: 700; cursor: pointer; }
   .ggu-modal-danger:hover { background: #a00000; }
   .ggu-edit-lock-zone { position: fixed; z-index: 2147483000; background: rgba(0, 0, 0, 0.52); pointer-events: auto; touch-action: none; }
   .ggu.ggu-editing-global-lock { position: relative; }

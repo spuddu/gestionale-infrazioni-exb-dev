@@ -1990,7 +1990,7 @@ function InlineEditOverlay(props: {
 }) {
   const { oid, data, ds, idFieldName, cfg, ui, onClose } = props
   const _flColor = String(ui?.formLabelColor || '#6b7280')
-  const _flSize = Number.isFinite(Number(ui?.formLabelFontSize)) ? Number(ui.formLabelFontSize) : 12
+  const _flSize = Math.max(14, Number.isFinite(Number(ui?.formLabelFontSize)) ? Number(ui.formLabelFontSize) : 14)
 
   // Alias e schema dal DS (caricati una volta sola)
   const [aliasMap, setAliasMap] = React.useState<Record<string, string>>({})
@@ -2128,7 +2128,7 @@ function InlineEditOverlay(props: {
             value={val ?? ''}
             disabled={saving}
             onChange={e => updateDraft(fieldName, (e.target as HTMLSelectElement).value === '' ? null : (isNum ? Number((e.target as HTMLSelectElement).value) : (e.target as HTMLSelectElement).value))}
-            style={{ height: 36, minHeight: 36, padding: '0 10px', lineHeight: '36px', verticalAlign: 'middle', borderRadius: 8, border: '1px solid rgba(0,0,0,0.20)', fontSize: 13, width: '100%', boxSizing: 'border-box', background: saving ? '#f3f4f6' : '#fff' }}
+            style={{ height: 36, minHeight: 36, padding: '0 10px', lineHeight: '36px', verticalAlign: 'middle', borderRadius: 8, border: '1px solid rgba(0,0,0,0.20)', fontSize: 15, width: '100%', boxSizing: 'border-box', background: saving ? '#f3f4f6' : '#fff' }}
           >
             <option value=''>— seleziona —</option>
             {domain.codedValues.map((cv: any) => (
@@ -2156,7 +2156,7 @@ function InlineEditOverlay(props: {
               const d = new Date((e.target as HTMLInputElement).value)
               updateDraft(fieldName, Number.isNaN(d.getTime()) ? null : d.getTime())
             }}
-            style={{ padding: '7px 10px', borderRadius: 8, border: '1px solid rgba(0,0,0,0.20)', fontSize: 13, width: '100%', background: saving ? '#f3f4f6' : '#fff' }}
+            style={{ padding: '7px 10px', borderRadius: 8, border: '1px solid rgba(0,0,0,0.20)', fontSize: 15, width: '100%', background: saving ? '#f3f4f6' : '#fff' }}
           />
         </div>
       )
@@ -2168,11 +2168,11 @@ function InlineEditOverlay(props: {
         {isMultiline
           ? <textarea value={val != null ? String(val) : ''} disabled={saving} rows={3}
             onChange={e => updateDraft(fieldName, (e.target as HTMLTextAreaElement).value || null)}
-            style={{ padding: '7px 10px', borderRadius: 8, border: '1px solid rgba(0,0,0,0.20)', fontSize: 13, width: '100%', resize: 'vertical', background: saving ? '#f3f4f6' : '#fff', boxSizing: 'border-box' }}
+            style={{ padding: '7px 10px', borderRadius: 8, border: '1px solid rgba(0,0,0,0.20)', fontSize: 15, width: '100%', resize: 'vertical', background: saving ? '#f3f4f6' : '#fff', boxSizing: 'border-box' }}
           />
           : <input type='text' value={val != null ? String(val) : ''} disabled={saving}
             onChange={e => updateDraft(fieldName, (e.target as HTMLInputElement).value === '' ? null : (isNum ? Number((e.target as HTMLInputElement).value) : (e.target as HTMLInputElement).value))}
-            style={{ padding: '7px 10px', borderRadius: 8, border: '1px solid rgba(0,0,0,0.20)', fontSize: 13, width: '100%', background: saving ? '#f3f4f6' : '#fff', boxSizing: 'border-box' }}
+            style={{ padding: '7px 10px', borderRadius: 8, border: '1px solid rgba(0,0,0,0.20)', fontSize: 15, width: '100%', background: saving ? '#f3f4f6' : '#fff', boxSizing: 'border-box' }}
           />
         }
       </div>
@@ -2193,21 +2193,21 @@ function InlineEditOverlay(props: {
       }}>
         {/* Header */}
         <div style={{ flex: '0 0 auto', padding: '14px 20px', borderBottom: '1px solid #e5e7eb', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
-          <div style={{ fontWeight: 700, fontSize: 15 }}>
+          <div style={{ fontWeight: 700, fontSize: 18 }}>
             ✏️ {editDocTitle}&nbsp;<span style={{ color: '#2f6fed' }}>{praticaCode}</span>
           </div>
           <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
             {saveMsg && (
-              <span style={{ fontSize: 13, color: saveMsg.kind === 'ok' ? '#1a7f37' : '#b42318' }}>
+              <span style={{ fontSize: 15, color: saveMsg.kind === 'ok' ? '#1a7f37' : '#b42318' }}>
                 {saveMsg.text}
               </span>
             )}
             <button type='button' disabled={saving} onClick={handleSave}
-              style={{ padding: '8px 18px', borderRadius: 8, border: 'none', background: saving ? '#e5e7eb' : '#1a7f37', color: saving ? '#9ca3af' : '#fff', fontWeight: 700, fontSize: 13, cursor: saving ? 'not-allowed' : 'pointer' }}>
+              style={{ padding: '8px 18px', borderRadius: 8, border: 'none', background: saving ? '#e5e7eb' : '#1a7f37', color: saving ? '#9ca3af' : '#fff', fontWeight: 700, fontSize: 15, cursor: saving ? 'not-allowed' : 'pointer' }}>
               {saving ? 'Salvataggio…' : '💾 Salva'}
             </button>
             <button type='button' disabled={saving} onClick={() => setConfirmCancel(true)}
-              style={{ padding: '8px 18px', borderRadius: 8, border: '1px solid #d13438', background: '#f8fbff', color: '#d13438', fontWeight: 700, fontSize: 13, cursor: saving ? 'not-allowed' : 'pointer' }}>
+              style={{ padding: '8px 18px', borderRadius: 8, border: '1px solid #d13438', background: '#f8fbff', color: '#d13438', fontWeight: 700, fontSize: 15, cursor: saving ? 'not-allowed' : 'pointer' }}>
               ✕ Annulla
             </button>
           </div>
@@ -2221,12 +2221,12 @@ function InlineEditOverlay(props: {
                 padding: '8px 14px', borderRadius: 10, border: `1px solid ${activeTab === t ? '#2f6fed' : 'rgba(0,0,0,0.12)'}`,
                 background: activeTab === t ? '#eaf2ff' : 'rgba(0,0,0,0.02)',
                 color: activeTab === t ? '#1d4ed8' : '#111827',
-                fontWeight: 700, fontSize: 12, cursor: saving ? 'not-allowed' : 'pointer'
+                fontWeight: 700, fontSize: 14, cursor: saving ? 'not-allowed' : 'pointer'
               }}>
               {t.charAt(0).toUpperCase() + t.slice(1)}
             </button>
           ))}
-          <div style={{ fontSize: 12, color: '#9ca3af', alignSelf: 'center', marginLeft: 8 }}>
+          <div style={{ fontSize: 14, color: '#9ca3af', alignSelf: 'center', marginLeft: 8 }}>
             Per localizzazione e allegati usa "Modifica (pagina)"
           </div>
         </div>
@@ -2234,18 +2234,18 @@ function InlineEditOverlay(props: {
         {/* Contenuto scrollabile */}
         <div style={{ flex: '1 1 auto', minHeight: 0, overflowY: 'auto', padding: '16px 20px' }}>
           {!aliasReady
-            ? <div style={{ color: '#64748b', fontSize: 13 }}>Caricamento schema campi…</div>
+            ? <div style={{ color: '#64748b', fontSize: 15 }}>Caricamento schema campi…</div>
             : (
               <div style={{ display: 'grid', gap: 14 }}>
                 {activeTab === 'trasgressore' && (
                   trasgressoreFields.length
                     ? trasgressoreFields.map(f => renderField(f))
-                    : <div style={{ color: '#64748b', fontSize: 13 }}>Nessun campo rilevato automaticamente. Usare la pagina di editing completa.</div>
+                    : <div style={{ color: '#64748b', fontSize: 15 }}>Nessun campo rilevato automaticamente. Usare la pagina di editing completa.</div>
                 )}
                 {activeTab === 'violazione' && (
                   violazioneFields.length
                     ? violazioneFields.map(f => renderField(f))
-                    : <div style={{ color: '#64748b', fontSize: 13 }}>Nessun campo rilevato automaticamente. Usare la pagina di editing completa.</div>
+                    : <div style={{ color: '#64748b', fontSize: 15 }}>Nessun campo rilevato automaticamente. Usare la pagina di editing completa.</div>
                 )}
               </div>
             )
@@ -2257,15 +2257,15 @@ function InlineEditOverlay(props: {
       {confirmCancel && (
         <div style={{ position: 'fixed', inset: 0, zIndex: 100000, background: 'rgba(0,0,0,0.4)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
           <div style={{ background: '#f8fbff', borderRadius: 12, padding: 28, maxWidth: 380, width: '90%', boxShadow: '0 8px 32px rgba(0,0,0,0.25)' }}>
-            <div style={{ fontWeight: 700, fontSize: 16, marginBottom: 10 }}>Annullare le modifiche?</div>
-            <div style={{ fontSize: 13, color: '#4b5563', marginBottom: 20 }}>Le modifiche non salvate andranno perse.</div>
+            <div style={{ fontWeight: 700, fontSize: 18, marginBottom: 10 }}>Annullare le modifiche?</div>
+            <div style={{ fontSize: 15, color: '#4b5563', marginBottom: 20 }}>Le modifiche non salvate andranno perse.</div>
             <div style={{ display: 'flex', gap: 10 }}>
               <button type='button' onClick={() => { setConfirmCancel(false); onClose(false) }}
-                style={{ padding: '8px 18px', borderRadius: 8, border: 'none', background: '#d13438', color: '#fff', fontWeight: 700, fontSize: 13, cursor: 'pointer' }}>
+                style={{ padding: '8px 18px', borderRadius: 8, border: 'none', background: '#d13438', color: '#fff', fontWeight: 700, fontSize: 15, cursor: 'pointer' }}>
                 Sì, annulla
               </button>
               <button type='button' onClick={() => setConfirmCancel(false)}
-                style={{ padding: '8px 18px', borderRadius: 8, border: '1px solid rgba(0,0,0,0.15)', background: '#f8fbff', color: '#111827', fontWeight: 600, fontSize: 13, cursor: 'pointer' }}>
+                style={{ padding: '8px 18px', borderRadius: 8, border: '1px solid rgba(0,0,0,0.15)', background: '#f8fbff', color: '#111827', fontWeight: 600, fontSize: 15, cursor: 'pointer' }}>
                 Torna all'editing
               </button>
             </div>
@@ -4121,8 +4121,8 @@ function ComuneIstatInput (p: {
           }}
           onMouseDown={e => e.preventDefault()}
         >
-          {loading && <div style={{ padding: '8px 10px', fontSize: 12, color: '#64748b' }}>Caricamento Comuni…</div>}
-          {!loading && err && <div style={{ padding: '8px 10px', fontSize: 12, color: '#b42318' }}>Comuni non disponibili. Inserire manualmente.</div>}
+          {loading && <div style={{ padding: '8px 10px', fontSize: 14, color: '#64748b' }}>Caricamento Comuni…</div>}
+          {!loading && err && <div style={{ padding: '8px 10px', fontSize: 14, color: '#b42318' }}>Comuni non disponibili. Inserire manualmente.</div>}
           {!loading && !err && options.map((o, idx) => (
             <button
               key={`${o.codice_comune_alfanumerico || o.denominazione_comune}-${o.sigla_provincia}-${idx}`}
@@ -4136,7 +4136,7 @@ function ComuneIstatInput (p: {
                 background: idx % 2 === 0 ? '#f8fbff' : '#fff',
                 padding: '7px 10px',
                 cursor: 'pointer',
-                fontSize: 12,
+                fontSize: 14,
                 color: '#1f2937'
               }}
               title={`${o.denominazione_comune} (${o.sigla_provincia})${o.regione ? ` — ${o.regione}` : ''}`}
@@ -4701,6 +4701,13 @@ type AttrezzaturaRimborsoDettaglio = {
   importo: number | null
 }
 
+type AttrezzaturaCauzioneDettaglio = {
+  unitaMisura: string
+  quantita: number
+  valoreUnitario: number
+  importo: number
+}
+
 function parseAttrezzaturaNumber (value: any): number | null {
   const text = String(value ?? '').trim()
   if (!text) return null
@@ -4734,8 +4741,33 @@ function parseAttrezzatureDetail (raw: any): AttrezzaturaRimborsoDettaglio[] {
   return out
 }
 
-function buildAttrezzatureDetail (rows: AttrezzaturaRimborsoRow[]): string {
-  return rows
+function parseAttrezzatureCauzioneDetail (raw: any): AttrezzaturaCauzioneDettaglio | null {
+  for (const line of String(raw ?? '').split(/\r?\n/)) {
+    const text = line.trim()
+    if (!/^Decurtazione della cauzione\b/i.test(text)) continue
+    const unitaMisuraMatch = text.match(/U\.M\.:\s*([^—|]+?)(?:\s+(?:—|\|)|$)/i)
+    const quantitaMatch = text.match(/Quantità:\s*([0-9.,]+)/i)
+    const valoreUnitarioMatch = text.match(/Valore unitario:\s*([0-9.,]+)/i)
+    const importoMatch = text.match(/Importo:\s*-?\s*([0-9.,]+)/i)
+    const quantita = parseAttrezzaturaNumber(quantitaMatch?.[1])
+    const valoreUnitario = parseAttrezzaturaNumber(valoreUnitarioMatch?.[1])
+    const importo = parseAttrezzaturaNumber(importoMatch?.[1])
+    if (quantita == null || quantita <= 0 || valoreUnitario == null || valoreUnitario < 0 || importo == null || importo < 0) return null
+    return {
+      unitaMisura: String(unitaMisuraMatch?.[1] || 'n.').trim() || 'n.',
+      quantita,
+      valoreUnitario,
+      importo
+    }
+  }
+  return null
+}
+
+function buildAttrezzatureDetail (
+  rows: AttrezzaturaRimborsoRow[],
+  cauzione?: AttrezzaturaCauzioneDettaglio | null
+): string {
+  const lines = rows
     .filter(row => row.selected && Number(row.quantita) > 0)
     .map(row => {
       const q = Number(row.quantita)
@@ -4743,7 +4775,12 @@ function buildAttrezzatureDetail (rows: AttrezzaturaRimborsoRow[]): string {
       const codice = String(row.codice || '').trim()
       return `${row.descrizione}${codice ? ` — Codice: ${codice}` : ''} — Quantità: ${attrezzaturaQty(q)} — Valore unitario: ${attrezzaturaMoney(unit)} € — Importo: ${attrezzaturaMoney(q * unit)} €`
     })
-    .join('\n')
+
+  if (cauzione && cauzione.quantita > 0 && cauzione.valoreUnitario >= 0 && cauzione.importo > 0) {
+    lines.push(`Decurtazione della cauzione | U.M.: ${cauzione.unitaMisura || 'n.'} | Quantità: ${attrezzaturaQty(cauzione.quantita)} | Valore unitario: ${attrezzaturaMoney(cauzione.valoreUnitario)} € | Importo: -${attrezzaturaMoney(cauzione.importo)} €`)
+  }
+
+  return lines.join('\n')
 }
 
 function attrezzatureTotal (rows: AttrezzaturaRimborsoRow[]): number {
@@ -5144,11 +5181,11 @@ function NoteSpeseManager (props: NsManagerProps) {
       {confirmDeleteIdx != null && confirmDeleteIdx >= 0 && confirmDeleteIdx < rows.length && createPortal(
         <div style={{ position: 'fixed', inset: 0, zIndex: 100000, background: 'rgba(0,0,0,0.4)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
           <div style={{ background: '#f8fbff', borderRadius: 12, padding: 28, maxWidth: 420, width: '90%', boxShadow: '0 8px 32px rgba(0,0,0,0.25)' }}>
-            <div style={{ fontWeight: 700, fontSize: 16, marginBottom: 10 }}>Eliminare la riga?</div>
-            <div style={{ fontSize: 13, color: '#4b5563', marginBottom: 20 }}>{rows[confirmDeleteIdx].codice_voce_snapshot} — {rows[confirmDeleteIdx].descrizione_snapshot}</div>
+            <div style={{ fontWeight: 700, fontSize: 18, marginBottom: 10 }}>Eliminare la riga?</div>
+            <div style={{ fontSize: 15, color: '#4b5563', marginBottom: 20 }}>{rows[confirmDeleteIdx].codice_voce_snapshot} — {rows[confirmDeleteIdx].descrizione_snapshot}</div>
             <div style={{ display: 'flex', gap: 10 }}>
-              <button type='button' onClick={doDelete} style={{ padding: '8px 18px', borderRadius: 8, border: 'none', background: '#d13438', color: '#fff', fontWeight: 700, fontSize: 13, cursor: 'pointer' }}>Sì, elimina</button>
-              <button type='button' onClick={() => setConfirmDeleteIdx(null)} style={{ padding: '8px 18px', borderRadius: 8, border: '1px solid rgba(0,0,0,0.15)', background: '#f8fbff', color: '#111827', fontWeight: 600, fontSize: 13, cursor: 'pointer' }}>Annulla</button>
+              <button type='button' onClick={doDelete} style={{ padding: '8px 18px', borderRadius: 8, border: 'none', background: '#d13438', color: '#fff', fontWeight: 700, fontSize: 15, cursor: 'pointer' }}>Sì, elimina</button>
+              <button type='button' onClick={() => setConfirmDeleteIdx(null)} style={{ padding: '8px 18px', borderRadius: 8, border: '1px solid rgba(0,0,0,0.15)', background: '#f8fbff', color: '#111827', fontWeight: 600, fontSize: 15, cursor: 'pointer' }}>Annulla</button>
             </div>
           </div>
         </div>,
@@ -6609,7 +6646,9 @@ React.useEffect(() => {
     setAttrezzatureLoading(true)
     setAttrezzatureError('')
     try {
-      const current = parseAttrezzatureDetail(g('attrezzature_rimborso_dettaglio'))
+      const detailSnapshotRaw = g('attrezzature_rimborso_dettaglio')
+      const current = parseAttrezzatureDetail(detailSnapshotRaw)
+      const cauzioneDetailSnapshot = parseAttrezzatureCauzioneDetail(detailSnapshotRaw)
       const tesseraCurrentQty = Math.max(1, Math.trunc(Number(current.find(item => attrezzaturaTipo(item.descrizione)?.key === 'TESSERA_ELETTRONICA')?.quantita) || 1))
       const parametersUrl = String((cfg as any).attrezzatureParametriUrl || '').trim()
       const cauzioneUrl = parametersUrl
@@ -6618,19 +6657,31 @@ React.useEffect(() => {
       if (cauzioneUrl) {
         try {
           const cauzioneUnitaria = await loadCauzioneParameter(cauzioneUrl, g('data_rilevazione'))
-          const valoreUnitario = cauzioneUnitaria > 0 ? cauzioneUnitaria : (cauzioneSnapshot > 0 ? cauzioneSnapshot / tesseraCurrentQty : 0)
+          const valoreUnitario = cauzioneDetailSnapshot?.valoreUnitario != null && cauzioneDetailSnapshot.valoreUnitario > 0
+            ? cauzioneDetailSnapshot.valoreUnitario
+            : cauzioneUnitaria > 0
+              ? cauzioneUnitaria
+              : (cauzioneSnapshot > 0 ? cauzioneSnapshot / tesseraCurrentQty : 0)
           setAttrezzatureCauzioneImporto(valoreUnitario)
-          const quantitaSnapshot = cauzionePresenteSnapshot && valoreUnitario > 0 && cauzioneSnapshot > 0
-            ? Math.max(1, Math.round(cauzioneSnapshot / valoreUnitario))
-            : tesseraCurrentQty
+          const quantitaSnapshot = cauzioneDetailSnapshot?.quantita != null && cauzioneDetailSnapshot.quantita > 0
+            ? Math.trunc(cauzioneDetailSnapshot.quantita)
+            : cauzionePresenteSnapshot && valoreUnitario > 0 && cauzioneSnapshot > 0
+              ? Math.max(1, Math.round(cauzioneSnapshot / valoreUnitario))
+              : tesseraCurrentQty
           setAttrezzatureCauzioneQuantita(Math.min(tesseraCurrentQty, quantitaSnapshot))
         } catch {
-          setAttrezzatureCauzioneImporto(cauzioneSnapshot > 0 ? cauzioneSnapshot / tesseraCurrentQty : 0)
-          setAttrezzatureCauzioneQuantita(tesseraCurrentQty)
+          const valoreUnitario = cauzioneDetailSnapshot?.valoreUnitario != null && cauzioneDetailSnapshot.valoreUnitario > 0
+            ? cauzioneDetailSnapshot.valoreUnitario
+            : (cauzioneSnapshot > 0 ? cauzioneSnapshot / tesseraCurrentQty : 0)
+          setAttrezzatureCauzioneImporto(valoreUnitario)
+          setAttrezzatureCauzioneQuantita(Math.min(tesseraCurrentQty, Math.max(1, Math.trunc(cauzioneDetailSnapshot?.quantita || tesseraCurrentQty))))
         }
       } else {
-        setAttrezzatureCauzioneImporto(cauzioneSnapshot > 0 ? cauzioneSnapshot / tesseraCurrentQty : 0)
-        setAttrezzatureCauzioneQuantita(tesseraCurrentQty)
+        const valoreUnitario = cauzioneDetailSnapshot?.valoreUnitario != null && cauzioneDetailSnapshot.valoreUnitario > 0
+          ? cauzioneDetailSnapshot.valoreUnitario
+          : (cauzioneSnapshot > 0 ? cauzioneSnapshot / tesseraCurrentQty : 0)
+        setAttrezzatureCauzioneImporto(valoreUnitario)
+        setAttrezzatureCauzioneQuantita(Math.min(tesseraCurrentQty, Math.max(1, Math.trunc(cauzioneDetailSnapshot?.quantita || tesseraCurrentQty))))
       }
       if (!parametersUrl) {
         setAttrezzatureRows(current.map(item => ({
@@ -6714,7 +6765,12 @@ React.useEffect(() => {
       ? Math.round(attrezzatureCauzioneImporto * cauzioneQty * 100) / 100
       : 0
     const totalNetto = Math.max(0, Math.round((total - cauzione) * 100) / 100)
-    const detail = buildAttrezzatureDetail(selectedRows)
+    const detail = buildAttrezzatureDetail(
+      selectedRows,
+      cauzione > 0
+        ? { unitaMisura: 'n.', quantita: cauzioneQty, valoreUnitario: attrezzatureCauzioneImporto, importo: cauzione }
+        : null
+    )
     setDraft(prev => ({
       ...prev,
       attrezzature_rimborso_dettaglio: detail,
@@ -6759,6 +6815,33 @@ React.useEffect(() => {
     () => parseAttrezzatureDetail(g('attrezzature_rimborso_dettaglio')),
     [draft.attrezzature_rimborso_dettaglio]
   )
+  const attrezzatureParametriUrl = String((cfg as any).attrezzatureParametriUrl || '').trim()
+  const [attrezzatureCauzioneRiepilogo, setAttrezzatureCauzioneRiepilogo] = React.useState<{ quantita: number | null; valoreUnitario: number | null }>({ quantita: null, valoreUnitario: null })
+
+  React.useEffect(() => {
+    let cancelled = false
+    const totaleCauzione = Number(g('attrezzature_cauzione_decurtata')) || 0
+    const cauzionePresente = isSelectedFlag(g('attrezzature_cauzione_presente')) && totaleCauzione > 0
+
+    if (!cauzionePresente || !attrezzatureParametriUrl) {
+      setAttrezzatureCauzioneRiepilogo({ quantita: null, valoreUnitario: null })
+      return () => { cancelled = true }
+    }
+
+    void (async () => {
+      try {
+        const valoreUnitario = await loadCauzioneParameter(attrezzatureParametriUrl, g('data_rilevazione'))
+        if (!Number.isFinite(valoreUnitario) || valoreUnitario <= 0) throw new Error('Valore unitario cauzione non disponibile.')
+        const quantita = Math.max(1, Math.round(totaleCauzione / valoreUnitario))
+        if (!cancelled) setAttrezzatureCauzioneRiepilogo({ quantita, valoreUnitario })
+      } catch {
+        if (!cancelled) setAttrezzatureCauzioneRiepilogo({ quantita: null, valoreUnitario: null })
+      }
+    })()
+
+    return () => { cancelled = true }
+  }, [draft.attrezzature_cauzione_presente, draft.attrezzature_cauzione_decurtata, draft.data_rilevazione, attrezzatureParametriUrl])
+
   const toggleNorma3 = (v: string) => {
     const s = new Set(norma3Set)
     const isRemoving = s.has(v)
@@ -7853,6 +7936,10 @@ ${e?.message || String(e)}`
     msgFontSize: numCfg('msgFontSize', 12, 9, 24)
   }), [cfg, numCfg])
 
+  const popupBodyFontSize = Math.max(15, Number(formStyle.fieldFontSize) || 15)
+  const popupTitleFontSize = Math.max(18, Number(formStyle.titleFontSize) || 18)
+  const popupBtnBase: React.CSSProperties = { ...btnBase, fontSize: popupBodyFontSize }
+
   const sHdr: React.CSSProperties = React.useMemo(() => ({
     ...S.hdr,
     fontSize: formStyle.hdrFontSize,
@@ -7944,7 +8031,7 @@ ${e?.message || String(e)}`
       case 'ragione_sociale': return tipoSogg === 'PG' ? { label: 'Ragione sociale', el: <NpText value={g('ragione_sociale')} onChange={v => set('ragione_sociale', v)} disabled={saving}/> } : null
       case 'piva': return tipoSogg === 'PG' ? { label: 'P. IVA', hint: 'Massimo 11 caratteri', el: <NpText value={g('piva')} onChange={v => set('piva', v)} disabled={saving} maxLength={11}/> } : null
       // Trasgressore — indirizzo
-      case 'via': return { label: 'Via', el: <NpText value={g('via')} onChange={v => set('via', v)} disabled={saving}/> }
+      case 'via': return { label: 'Via/P.zza', el: <NpText value={g('via')} onChange={v => set('via', v)} disabled={saving}/> }
       case 'civico': return { label: 'N. civico', el: <NpText value={g('civico')} onChange={v => set('civico', v)} disabled={saving}/> }
       case 'citta': return { label: 'Città', el: <ComuneIstatInput value={g('citta')} onManualChange={v => { set('citta', v); set('provincia', ''); resetCapOptions('main') }} onSelect={o => applyComuneToAddress('main', o)} disabled={saving}/> }
       case 'provincia': return { label: 'Provincia', el: <NpText value={g('provincia')} onChange={v => set('provincia', v)} disabled={saving} maxLength={2}/> }
@@ -7952,13 +8039,13 @@ ${e?.message || String(e)}`
       case 'stato': return { label: 'Stato', el: <NpText value={g('stato') || 'ITALIA'} onChange={v => set('stato', v)} disabled={saving}/> }
       case 'telefono': return { label: 'Telefono', el: <NpText value={g('telefono')} onChange={v => set('telefono', v)} disabled={saving}/> }
       case 'cellulare': return { label: 'Cellulare', el: <NpText value={g('cellulare')} onChange={v => set('cellulare', v)} disabled={saving}/> }
-      case 'email': return { label: 'E-mail', el: <NpText value={g('email')} onChange={v => set('email', v)} lowercase disabled={saving}/> }
-      case 'pec': return { label: 'PEC', el: <NpText value={g('pec')} onChange={v => set('pec', v)} lowercase disabled={saving}/> }
+      case 'email': return { label: 'E-mail', el: <NpText value={String(g('email') || '').toLocaleLowerCase('it-IT')} onChange={v => set('email', String(v || '').toLocaleLowerCase('it-IT'))} lowercase disabled={saving}/> }
+      case 'pec': return { label: 'PEC', el: <NpText value={String(g('pec') || '').toLocaleLowerCase('it-IT')} onChange={v => set('pec', String(v || '').toLocaleLowerCase('it-IT'))} lowercase disabled={saving}/> }
       // Trasgressore — qualifica
       case 'qualifica_fondo': return { label: 'Qualifica rispetto al fondo', el: <NpSel value={g('qualifica_fondo')} onChange={v => set('qualifica_fondo', v)} options={domainOpts('qualifica_fondo', CHOICES.qualifica_fondo)} disabled={saving}/> }
       // Trasgressore — domicilio notifiche
       case 'dom_notifica_uguale': return { label: 'Coincide con residenza/sede legale', el: <NpSel value={g('dom_notifica_uguale') || '1'} onChange={v => set('dom_notifica_uguale', v)} options={domainOpts('dom_notifica_uguale', CHOICES.si_no)} disabled={saving} allowEmpty={false}/> }
-      case 'dom_notifica_via': return String(g('dom_notifica_uguale')) !== '1' ? { label: 'Via', el: <NpText value={g('dom_notifica_via')} onChange={v => set('dom_notifica_via', v)} disabled={saving}/> } : null
+      case 'dom_notifica_via': return String(g('dom_notifica_uguale')) !== '1' ? { label: 'Via/P.zza', el: <NpText value={g('dom_notifica_via')} onChange={v => set('dom_notifica_via', v)} disabled={saving}/> } : null
       case 'dom_notifica_civico': return String(g('dom_notifica_uguale')) !== '1' ? { label: 'N. civico', el: <NpText value={g('dom_notifica_civico')} onChange={v => set('dom_notifica_civico', v)} disabled={saving}/> } : null
       case 'dom_notifica_citta': return String(g('dom_notifica_uguale')) !== '1' ? { label: 'Città', el: <ComuneIstatInput value={g('dom_notifica_citta')} onManualChange={v => { set('dom_notifica_citta', v); set('dom_notifica_provincia', ''); resetCapOptions('dom') }} onSelect={o => applyComuneToAddress('dom', o)} disabled={saving}/> } : null
       case 'dom_notifica_provincia': return String(g('dom_notifica_uguale')) !== '1' ? { label: 'Provincia', el: <NpText value={g('dom_notifica_provincia')} onChange={v => set('dom_notifica_provincia', v)} disabled={saving} maxLength={2}/> } : null
@@ -7970,7 +8057,7 @@ ${e?.message || String(e)}`
       case 'rl_cf': return tipoSogg === 'PG' ? { label: 'Codice fiscale', hint: 'Massimo 16 caratteri', el: <NpText value={g('rl_cf')} onChange={v => set('rl_cf', v)} disabled={saving} maxLength={16}/> } : null
       case 'rl_carica': return tipoSogg === 'PG' ? { label: 'Carica', el: <NpSel value={g('rl_carica')} onChange={v => set('rl_carica', v)} options={domainOpts('rl_carica', CHOICES.rl_carica)} disabled={saving}/> } : null
       case 'rl_dom_notifica': return tipoSogg === 'PG' ? { label: 'Domicilio notifiche del rappresentante', el: <NpSel value={g('rl_dom_notifica') || '0'} onChange={v => set('rl_dom_notifica', v)} options={domainOpts('rl_dom_notifica', CHOICES.si_no)} disabled={saving} allowEmpty={false}/> } : null
-      case 'rl_dom_via': return (tipoSogg === 'PG' && String(g('rl_dom_notifica')) === '1') ? { label: 'Via', el: <NpText value={g('rl_dom_via')} onChange={v => set('rl_dom_via', v)} disabled={saving}/> } : null
+      case 'rl_dom_via': return (tipoSogg === 'PG' && String(g('rl_dom_notifica')) === '1') ? { label: 'Via/P.zza', el: <NpText value={g('rl_dom_via')} onChange={v => set('rl_dom_via', v)} disabled={saving}/> } : null
       case 'rl_dom_civico': return (tipoSogg === 'PG' && String(g('rl_dom_notifica')) === '1') ? { label: 'N. civico', el: <NpText value={g('rl_dom_civico')} onChange={v => set('rl_dom_civico', v)} disabled={saving}/> } : null
       case 'rl_dom_citta': return (tipoSogg === 'PG' && String(g('rl_dom_notifica')) === '1') ? { label: 'Città', el: <ComuneIstatInput value={g('rl_dom_citta')} onManualChange={v => { set('rl_dom_citta', v); set('rl_dom_provincia', ''); resetCapOptions('rl') }} onSelect={o => applyComuneToAddress('rl', o)} disabled={saving}/> } : null
       case 'rl_dom_provincia': return (tipoSogg === 'PG' && String(g('rl_dom_notifica')) === '1') ? { label: 'Provincia', el: <NpText value={g('rl_dom_provincia')} onChange={v => set('rl_dom_provincia', v)} disabled={saving} maxLength={2}/> } : null
@@ -8692,6 +8779,12 @@ ${e?.message || String(e)}`
           )
         }
 
+        const attrezzatureRiepilogoFontSize = Math.max(
+          14,
+          Number(formStyle.fieldFontSize) || 13,
+          Number(formStyle.norma3FontSize) || 12
+        )
+
         const leftColumn = (
           <div style={{ display: 'grid', gap: formStyle.sectionGap, minWidth: 0, minHeight: '100%', gridTemplateRows: 'auto auto minmax(0, 1fr)' }}>
             {renderEditCard('Prelievo abusivo d’acqua',
@@ -8730,24 +8823,24 @@ ${e?.message || String(e)}`
             )}
 
             {renderEditCard('Altre violazioni', renderNorma3Rows())}
-            {norma3Set.has('Art30') && renderEditCard('Riepilogo rimborsi attrezzature e cauzione',
+            {norma3Set.has('Art30') && renderEditCard('Riepilogo rimborsi attrezzature',
               <div style={{ display: 'grid', gap: 9 }}>
-                <div style={{ fontSize: 12, color: '#475569', lineHeight: 1.45 }}>
-                  Il rimborso delle attrezzature e l’eventuale rimborso delle spese sostenute per l’intervento sul campo sono componenti autonome. Le spese di manodopera, mezzi e materiali continuano a essere inserite nella scheda <b>Nota spese</b>.
+                <div style={{ fontSize: attrezzatureRiepilogoFontSize, color: '#475569', lineHeight: 1.45 }}>
+                  L’eventuale rimborso delle spese sostenute per l’intervento sul campo, connesse al ripristino delle attrezzature danneggiate, deve essere quantificato nella scheda <b>Nota spese</b>.
                 </div>
 
                 {attrezzatureRiepilogo.length > 0
                   ? <div style={{ border: '1px solid #cbd5e1', borderRadius: 8, overflow: 'hidden', background: '#fff' }}>
-                      <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) 82px 118px 104px', background: '#d8f1e7', borderBottom: '1px solid #9fd6c1', fontSize: 12, fontWeight: 800, color: '#334155' }}>
+                      <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) 82px 142px 104px', background: '#d8f1e7', borderBottom: '1px solid #9fd6c1', fontSize: attrezzatureRiepilogoFontSize, fontWeight: 800, color: '#334155' }}>
                         <div style={{ padding: '7px 9px' }}>Attrezzatura</div>
                         <div style={{ padding: '7px 6px', textAlign: 'center' }}>Quantità</div>
-                        <div style={{ padding: '7px 9px', textAlign: 'right' }}>Valore unitario</div>
+                        <div style={{ padding: '7px 9px', textAlign: 'right', whiteSpace: 'nowrap' }}>Valore unitario</div>
                         <div style={{ padding: '7px 9px', textAlign: 'right' }}>Importo</div>
                       </div>
                       {attrezzatureRiepilogo.map((item, index) => (
                         <div
                           key={`${item.descrizione}-${index}`}
-                          style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) 82px 118px 104px', alignItems: 'center', borderBottom: index === attrezzatureRiepilogo.length - 1 ? 0 : '1px solid #e2e8f0', fontSize: 12, color: '#334155' }}
+                          style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) 82px 142px 104px', alignItems: 'center', borderBottom: '1px solid #e2e8f0', background: index % 2 === 0 ? '#ffffff' : '#f8fbff', fontSize: attrezzatureRiepilogoFontSize, color: '#334155' }}
                         >
                           <div style={{ padding: '7px 9px', fontWeight: 600 }}>{item.descrizione}</div>
                           <div style={{ padding: '7px 6px', textAlign: 'center' }}>{attrezzaturaQty(item.quantita)}</div>
@@ -8755,26 +8848,29 @@ ${e?.message || String(e)}`
                           <div style={{ padding: '7px 9px', textAlign: 'right', fontWeight: 700 }}>{item.importo != null ? `${attrezzaturaMoney(item.importo)} €` : '—'}</div>
                         </div>
                       ))}
+                      {isSelectedFlag(g('attrezzature_cauzione_presente')) && Number(g('attrezzature_cauzione_decurtata')) > 0 && <div
+                        style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) 82px 142px 104px', alignItems: 'center', borderBottom: '1px solid #e2e8f0', background: attrezzatureRiepilogo.length % 2 === 0 ? '#ffffff' : '#f8fbff', fontSize: attrezzatureRiepilogoFontSize, color: '#334155' }}
+                      >
+                        <div style={{ padding: '7px 9px', fontWeight: 600 }}>Decurtazione della cauzione</div>
+                        <div style={{ padding: '7px 6px', textAlign: 'center' }}>{attrezzatureCauzioneRiepilogo.quantita != null ? attrezzaturaQty(attrezzatureCauzioneRiepilogo.quantita) : '—'}</div>
+                        <div style={{ padding: '7px 9px', textAlign: 'right' }}>{attrezzatureCauzioneRiepilogo.valoreUnitario != null ? `${attrezzaturaMoney(attrezzatureCauzioneRiepilogo.valoreUnitario)} €` : '—'}</div>
+                        <div style={{ padding: '7px 9px', textAlign: 'right', fontWeight: 700, color: '#d92d20' }}>- {attrezzaturaMoney(g('attrezzature_cauzione_decurtata'))} €</div>
+                      </div>}
+                      <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) 82px 142px 104px', alignItems: 'center', background: '#e2f5ed', fontSize: attrezzatureRiepilogoFontSize, color: '#176b52' }}>
+                        <div style={{ gridColumn: '1 / span 3', padding: '8px 9px', textAlign: 'right', fontWeight: 800 }}>Totale</div>
+                        <div style={{ padding: '8px 9px', textAlign: 'right', fontWeight: 800 }}>{attrezzaturaMoney(g('attrezzature_importo_netto') || g('attrezzature_rimborso_importo'))} €</div>
+                      </div>
                     </div>
-                  : <div style={{ padding: '9px 10px', borderRadius: 8, border: '1px solid #e2e8f0', background: '#f8fafc', color: '#64748b', fontSize: 12 }}>
+                  : <div style={{ padding: '9px 10px', borderRadius: 8, border: '1px solid #e2e8f0', background: '#f8fafc', color: '#64748b', fontSize: attrezzatureRiepilogoFontSize }}>
                       Nessuna attrezzatura selezionata.
                     </div>}
 
-                <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap', padding: '9px 10px', borderRadius: 8, border: '1px solid #9fd6c1', background: '#e2f5ed' }}>
-                  <span style={{ fontSize: 12, color: '#334155' }}>
-                    Rimborso attrezzature: <b>{attrezzaturaMoney(g('attrezzature_rimborso_importo'))} €</b>
-                  </span>
-                  {isSelectedFlag(g('attrezzature_cauzione_presente')) && Number(g('attrezzature_cauzione_decurtata')) > 0 && <span style={{ fontSize: 12, color: '#334155' }}>
-                    Cauzione da detrarre: <b style={{ color: '#d92d20' }}>- {attrezzaturaMoney(g('attrezzature_cauzione_decurtata'))} €</b>
-                  </span>}
-                  <span style={{ fontSize: 12, color: '#176b52' }}>
-                    Totale netto: <b>{attrezzaturaMoney(g('attrezzature_importo_netto') || g('attrezzature_rimborso_importo'))} €</b>
-                  </span>
+                <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
                   <button
                     type='button'
                     onClick={() => { void openAttrezzaturePopup(false) }}
                     disabled={saving}
-                    style={{ ...btnBase, marginLeft: 'auto', background: '#1d4ed8', color: '#fff', border: '1px solid #1d4ed8', cursor: saving ? 'not-allowed' : 'pointer' }}
+                    style={{ ...btnBase, fontSize: attrezzatureRiepilogoFontSize, background: '#1d4ed8', color: '#fff', border: '1px solid #1d4ed8', cursor: saving ? 'not-allowed' : 'pointer' }}
                   >
                     {isReadOnly || isRiAgrTecLimitedEdit ? 'Consulta attrezzature' : 'Gestisci attrezzature'}
                   </button>
@@ -9562,11 +9658,11 @@ ${e?.message || String(e)}`
             onClick={(e) => { e.stopPropagation() }}
             onMouseDown={(e) => { e.stopPropagation() }}
           >
-            <div style={{ fontWeight: 800, fontSize: 16, marginBottom: 8, color: '#1d4ed8', display: 'flex', alignItems: 'center', gap: 8 }}>
+            <div style={{ fontWeight: 800, fontSize: popupTitleFontSize, marginBottom: 8, color: '#1d4ed8', display: 'flex', alignItems: 'center', gap: 8 }}>
               <span style={{ fontSize: 20 }}>📍</span>
               Punto in mappa obbligatorio
             </div>
-            <div style={{ fontSize: 13, color: '#374151', lineHeight: 1.6, marginBottom: 14, display: 'grid', gap: 10 }}>
+            <div style={{ fontSize: popupBodyFontSize, color: '#374151', lineHeight: 1.6, marginBottom: 14, display: 'grid', gap: 10 }}>
               <div style={{ fontWeight: 500, padding: 10, background: '#eff6ff', border: '1px solid #bfdbfe', borderRadius: 6, color: '#1e3a8a' }}>
                 Per la violazione selezionata è necessario localizzare il punto nella mappa.
               </div>
@@ -9576,7 +9672,7 @@ ${e?.message || String(e)}`
               <button
                 type='button'
                 onClick={() => { setMissingMapPointPopupOpen(false) }}
-                style={{ ...btnBase, border: '1px solid rgba(0,0,0,0.18)', background: '#d92d20', color: '#fff', cursor: 'pointer', pointerEvents: 'auto' }}
+                style={{ ...popupBtnBase, border: '1px solid rgba(0,0,0,0.18)', background: '#d92d20', color: '#fff', cursor: 'pointer', pointerEvents: 'auto' }}
               >
                 Annulla
               </button>
@@ -9600,7 +9696,7 @@ ${e?.message || String(e)}`
                   window.setTimeout(resetSidebar, 450)
                   window.setTimeout(resetSidebar, 900)
                 }}
-                style={{ ...btnBase, border: '1px solid rgba(0,0,0,0.18)', background: '#1d4ed8', color: '#fff', cursor: 'pointer', pointerEvents: 'auto' }}
+                style={{ ...popupBtnBase, border: '1px solid rgba(0,0,0,0.18)', background: '#1d4ed8', color: '#fff', cursor: 'pointer', pointerEvents: 'auto' }}
               >
                 Conferma
               </button>
@@ -9625,17 +9721,17 @@ ${e?.message || String(e)}`
             onClick={(e) => { e.stopPropagation() }}
             onMouseDown={(e) => { e.stopPropagation() }}
           >
-            <div style={{ fontWeight: 800, fontSize: formStyle.titleFontSize, marginBottom: 4, color: '#0f4c81' }}>Rimborso attrezzature — Art. 30</div>
-            <div style={{ width: '100%', fontSize: formStyle.labelFontSize, color: '#475569', lineHeight: 1.5, marginBottom: 12, textAlign: 'justify' }}>
+            <div style={{ fontWeight: 800, fontSize: popupTitleFontSize, marginBottom: 4, color: '#0f4c81' }}>Rimborso attrezzature — Art. 30</div>
+            <div style={{ width: '100%', fontSize: popupBodyFontSize, color: '#475569', lineHeight: 1.5, marginBottom: 12, textAlign: 'justify' }}>
               Selezionare esclusivamente le attrezzature danneggiate o smarrite per le quali si richiede il rimborso. L’eventuale intervento sul campo, compresa la manodopera, deve essere inserito separatamente nella scheda <b>Nota spese</b>.
             </div>
 
-            {attrezzatureError && <div style={{ padding: '9px 10px', borderRadius: 8, border: '1px solid #f59e0b', background: '#fff7ed', color: '#9a3412', fontSize: formStyle.labelFontSize, marginBottom: 10 }}>{attrezzatureError}</div>}
+            {attrezzatureError && <div style={{ padding: '9px 10px', borderRadius: 8, border: '1px solid #f59e0b', background: '#fff7ed', color: '#9a3412', fontSize: popupBodyFontSize, marginBottom: 10 }}>{attrezzatureError}</div>}
 
             {attrezzatureLoading
-              ? <div style={{ padding: 18, textAlign: 'center', color: '#64748b', fontSize: formStyle.fieldFontSize }}>Caricamento prezzi attrezzature…</div>
+              ? <div style={{ padding: 18, textAlign: 'center', color: '#64748b', fontSize: popupBodyFontSize }}>Caricamento prezzi attrezzature…</div>
               : <div style={{ border: '1px solid #cbd5e1', borderRadius: 9, overflow: 'hidden', background: '#fff' }}>
-                  <div style={{ display: 'grid', gridTemplateColumns: '44px minmax(0, 1fr) 82px 118px 104px', background: '#eaf2fb', borderBottom: '1px solid #cbd5e1', fontSize: formStyle.labelFontSize, fontWeight: 800, color: '#334155', textAlign: 'center' }}>
+                  <div style={{ display: 'grid', gridTemplateColumns: '44px minmax(0, 1fr) 82px 118px 104px', background: '#eaf2fb', borderBottom: '1px solid #cbd5e1', fontSize: popupBodyFontSize, fontWeight: 800, color: '#334155', textAlign: 'center' }}>
                     <div style={{ padding: '8px 6px' }}>Scelta</div>
                     <div style={{ padding: '8px 8px', textAlign: 'left' }}>Attrezzatura</div>
                     <div style={{ padding: '8px 6px' }}>Quantità</div>
@@ -9643,11 +9739,11 @@ ${e?.message || String(e)}`
                     <div style={{ padding: '8px 10px', textAlign: 'right' }}>Importo</div>
                   </div>
                   {attrezzatureRows.length === 0
-                    ? <div style={{ padding: 16, textAlign: 'center', color: '#64748b', fontSize: formStyle.labelFontSize }}>Nessuna attrezzatura disponibile.</div>
+                    ? <div style={{ padding: 16, textAlign: 'center', color: '#64748b', fontSize: popupBodyFontSize }}>Nessuna attrezzatura disponibile.</div>
                     : attrezzatureRows.map((row, index) => {
                         const locked = isReadOnly || isRiAgrTecLimitedEdit
                         const amount = row.selected ? (Number(row.quantita) || 0) * (Number(row.valoreUnitario) || 0) : 0
-                        return <div key={`${row.codice || row.descrizione}-${index}`} style={{ display: 'grid', gridTemplateColumns: '44px minmax(0, 1fr) 82px 118px 104px', alignItems: 'center', borderBottom: index === attrezzatureRows.length - 1 ? 0 : '1px solid #e2e8f0', background: index % 2 === 0 ? '#ffffff' : '#f8fbff', fontSize: formStyle.fieldFontSize }}>
+                        return <div key={`${row.codice || row.descrizione}-${index}`} style={{ display: 'grid', gridTemplateColumns: '44px minmax(0, 1fr) 82px 118px 104px', alignItems: 'center', borderBottom: index === attrezzatureRows.length - 1 ? 0 : '1px solid #e2e8f0', background: index % 2 === 0 ? '#ffffff' : '#f8fbff', fontSize: popupBodyFontSize }}>
                           <div style={{ display: 'flex', justifyContent: 'center', padding: 8 }}>
                             <input
                               type='checkbox'
@@ -9672,7 +9768,7 @@ ${e?.message || String(e)}`
                               value={Number(row.quantita) || 1}
                               disabled={locked || !row.selected}
                               onChange={e => setAttrezzatureRows(prev => prev.map((item, i) => i === index ? { ...item, quantita: Math.max(1, Number(e.target.value) || 1) } : item))}
-                              style={{ width: '100%', height: formStyle.fieldHeight, boxSizing: 'border-box', textAlign: 'center', border: '1px solid #cbd5e1', borderRadius: 6, background: locked || !row.selected ? '#eef2f7' : '#fff', fontSize: formStyle.fieldFontSize }}
+                              style={{ width: '100%', height: formStyle.fieldHeight, boxSizing: 'border-box', textAlign: 'center', border: '1px solid #cbd5e1', borderRadius: 6, background: locked || !row.selected ? '#eef2f7' : '#fff', fontSize: popupBodyFontSize }}
                             />
                           </div>
                           <div style={{ padding: '8px 10px', textAlign: 'right', color: '#334155' }}>{attrezzaturaMoney(row.valoreUnitario)} €</div>
@@ -9682,7 +9778,7 @@ ${e?.message || String(e)}`
                 </div>}
 
             <div style={{ display: 'grid', gap: 8, marginTop: 12, padding: '10px 0', borderRadius: 8, border: '1px solid #bfdbfe', background: '#eff6ff', overflow: 'hidden' }}>
-              {attrezzatureTesseraSelezionata && <div style={{ display: 'grid', gridTemplateColumns: '44px minmax(0, 1fr) 82px 118px 104px', alignItems: 'center', color: '#334155', fontSize: formStyle.fieldFontSize, fontWeight: 700 }}>
+              {attrezzatureTesseraSelezionata && <div style={{ display: 'grid', gridTemplateColumns: '44px minmax(0, 1fr) 82px 118px 104px', alignItems: 'center', color: '#334155', fontSize: popupBodyFontSize, fontWeight: 700 }}>
                 <div style={{ display: 'flex', justifyContent: 'center', padding: 8 }}>
                   <input
                     type='checkbox'
@@ -9705,7 +9801,7 @@ ${e?.message || String(e)}`
                     value={Math.max(1, Math.min(attrezzatureTesseraQuantita, Math.trunc(Number(attrezzatureCauzioneQuantita) || 1)))}
                     disabled={isReadOnly || isRiAgrTecLimitedEdit}
                     onChange={e => setAttrezzatureCauzioneQuantita(Math.max(1, Math.min(attrezzatureTesseraQuantita, Math.trunc(Number(e.target.value) || 1))))}
-                    style={{ width: '100%', height: formStyle.fieldHeight, boxSizing: 'border-box', textAlign: 'center', border: '1px solid #cbd5e1', borderRadius: 6, background: isReadOnly || isRiAgrTecLimitedEdit ? '#eef2f7' : '#fff', fontSize: formStyle.fieldFontSize }}
+                    style={{ width: '100%', height: formStyle.fieldHeight, boxSizing: 'border-box', textAlign: 'center', border: '1px solid #cbd5e1', borderRadius: 6, background: isReadOnly || isRiAgrTecLimitedEdit ? '#eef2f7' : '#fff', fontSize: popupBodyFontSize }}
                   />}
                 </div>
                 <div style={{ padding: '8px 10px', textAlign: 'right', color: '#334155', fontWeight: 400 }}>
@@ -9715,17 +9811,17 @@ ${e?.message || String(e)}`
                   {attrezzatureCauzionePresente && attrezzatureCauzioneImporto > 0 ? `- ${attrezzaturaMoney(attrezzatureCauzioneApplicata)} €` : ''}
                 </div>
               </div>}
-              {attrezzatureTesseraSelezionata && !(attrezzatureCauzioneImporto > 0) && <div style={{ padding: '0 12px', fontSize: formStyle.labelFontSize, color: '#9a3412' }}>
+              {attrezzatureTesseraSelezionata && !(attrezzatureCauzioneImporto > 0) && <div style={{ padding: '0 12px', fontSize: popupBodyFontSize, color: '#9a3412' }}>
                 Importo della cauzione non disponibile nella vista configurata.
               </div>}
-              <div style={{ padding: '0 10px', fontSize: formStyle.fieldFontSize, color: '#0f4c81', textAlign: 'right', fontWeight: 800 }}>Totale: {attrezzaturaMoney(attrezzatureTotaleNetto)} €</div>
+              <div style={{ padding: '0 10px', fontSize: popupBodyFontSize, color: '#0f4c81', textAlign: 'right', fontWeight: 800 }}>Totale: {attrezzaturaMoney(attrezzatureTotaleNetto)} €</div>
             </div>
 
             <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10, marginTop: 14 }}>
               <button
                 type='button'
                 onClick={() => { setAttrezzaturePopupOpen(false); setAttrezzaturePopupPendingArt30(false) }}
-                style={{ ...btnBase, border: '1px solid rgba(0,0,0,0.18)', background: isReadOnly || isRiAgrTecLimitedEdit ? '#1d4ed8' : '#64748b', color: '#fff', cursor: 'pointer' }}
+                style={{ ...popupBtnBase, border: '1px solid rgba(0,0,0,0.18)', background: isReadOnly || isRiAgrTecLimitedEdit ? '#1d4ed8' : '#64748b', color: '#fff', cursor: 'pointer' }}
               >
                 {isReadOnly || isRiAgrTecLimitedEdit ? 'Chiudi' : 'Annulla'}
               </button>
@@ -9733,7 +9829,7 @@ ${e?.message || String(e)}`
                 type='button'
                 onClick={applyAttrezzaturePopup}
                 disabled={attrezzatureLoading}
-                style={{ ...btnBase, border: '1px solid rgba(0,0,0,0.18)', background: '#1d4ed8', color: '#fff', cursor: attrezzatureLoading ? 'not-allowed' : 'pointer' }}
+                style={{ ...popupBtnBase, border: '1px solid rgba(0,0,0,0.18)', background: '#1d4ed8', color: '#fff', cursor: attrezzatureLoading ? 'not-allowed' : 'pointer' }}
               >
                 Conferma
               </button>}
@@ -9751,13 +9847,13 @@ ${e?.message || String(e)}`
           onMouseDown={(e) => { e.preventDefault(); e.stopPropagation() }}
         >
           <div role='dialog' aria-modal='true' data-gii-global-popup-dialog='1' style={{ width: 'min(92vw, 540px)', background: '#f8fbff', borderRadius: 14, boxShadow: '0 20px 60px rgba(0,0,0,0.28)', border: '1px solid rgba(0,0,0,0.08)', padding: 18, position: 'relative', zIndex: 2147483647 }} onClick={e => e.stopPropagation()} onMouseDown={e => e.stopPropagation()}>
-            <div style={{ fontWeight: 800, fontSize: 16, marginBottom: 8, color: '#d92d20' }}>Rimborso attrezzature collegato</div>
-            <div style={{ fontSize: 13, color: '#374151', lineHeight: 1.55, marginBottom: 14 }}>
+            <div style={{ fontWeight: 800, fontSize: popupTitleFontSize, marginBottom: 8, color: '#d92d20' }}>Rimborso attrezzature collegato</div>
+            <div style={{ fontSize: popupBodyFontSize, color: '#374151', lineHeight: 1.55, marginBottom: 14 }}>
               Deselezionando l’Art. 30 saranno eliminati dalla pratica il dettaglio delle attrezzature selezionate e l’indicazione della cauzione. Le eventuali righe della Nota spese devono invece essere eliminate dalla relativa scheda.
             </div>
             <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10 }}>
-              <button type='button' onClick={() => setAttrezzatureRemoveConfirmOpen(false)} style={{ ...btnBase, border: '1px solid rgba(0,0,0,0.18)', background: '#64748b', color: '#fff', cursor: 'pointer' }}>Annulla</button>
-              <button type='button' onClick={clearArt30AndAttrezzature} style={{ ...btnBase, border: '1px solid rgba(0,0,0,0.18)', background: '#d92d20', color: '#fff', cursor: 'pointer' }}>Conferma</button>
+              <button type='button' onClick={() => setAttrezzatureRemoveConfirmOpen(false)} style={{ ...popupBtnBase, border: '1px solid rgba(0,0,0,0.18)', background: '#64748b', color: '#fff', cursor: 'pointer' }}>Annulla</button>
+              <button type='button' onClick={clearArt30AndAttrezzature} style={{ ...popupBtnBase, border: '1px solid rgba(0,0,0,0.18)', background: '#d92d20', color: '#fff', cursor: 'pointer' }}>Conferma</button>
             </div>
           </div>
         </div>,
@@ -9779,11 +9875,11 @@ ${e?.message || String(e)}`
             onClick={(e) => { e.stopPropagation() }}
             onMouseDown={(e) => { e.stopPropagation() }}
           >
-            <div style={{ fontWeight: 800, fontSize: 16, marginBottom: 8, color: '#d92d20', display: 'flex', alignItems: 'center', gap: 8 }}>
+            <div style={{ fontWeight: 800, fontSize: popupTitleFontSize, marginBottom: 8, color: '#d92d20', display: 'flex', alignItems: 'center', gap: 8 }}>
               <span style={{ fontSize: 20 }}>⚠</span>
               Nota spese collegata
             </div>
-            <div style={{ fontSize: 13, color: '#374151', lineHeight: 1.6, marginBottom: 14, display: 'grid', gap: 10 }}>
+            <div style={{ fontSize: popupBodyFontSize, color: '#374151', lineHeight: 1.6, marginBottom: 14, display: 'grid', gap: 10 }}>
               <div style={{ fontWeight: 500, padding: 10, background: '#fff7ed', border: '1px solid #fed7aa', borderRadius: 6, color: '#7c2d12' }}>
                 Per deselezionare <b>Art. {notaSpeseLinkedViolationPopup.art}</b> è necessario eliminare prima le righe della nota spese collegata.
               </div>
@@ -9793,7 +9889,7 @@ ${e?.message || String(e)}`
               <button
                 type='button'
                 onClick={() => { setNotaSpeseLinkedViolationPopup(null) }}
-                style={{ ...btnBase, border: '1px solid rgba(0,0,0,0.18)', background: '#d92d20', color: '#fff', cursor: 'pointer', pointerEvents: 'auto' }}
+                style={{ ...popupBtnBase, border: '1px solid rgba(0,0,0,0.18)', background: '#d92d20', color: '#fff', cursor: 'pointer', pointerEvents: 'auto' }}
               >
                 Annulla
               </button>
@@ -9810,7 +9906,7 @@ ${e?.message || String(e)}`
                   try { window.dispatchEvent(new CustomEvent('gii:edit-section-change', { detail: { section: 'nota-spese' } })) } catch {}
                   setNpTab('nota_spese')
                 }}
-                style={{ ...btnBase, border: '1px solid rgba(0,0,0,0.18)', background: '#1d4ed8', color: '#fff', cursor: 'pointer', pointerEvents: 'auto' }}
+                style={{ ...popupBtnBase, border: '1px solid rgba(0,0,0,0.18)', background: '#1d4ed8', color: '#fff', cursor: 'pointer', pointerEvents: 'auto' }}
               >
                 Conferma
               </button>
@@ -9835,11 +9931,11 @@ ${e?.message || String(e)}`
             onClick={(e) => { e.stopPropagation() }}
             onMouseDown={(e) => { e.stopPropagation() }}
           >
-            <div style={{ fontWeight: 800, fontSize: 16, marginBottom: 8, color: '#d92d20', display: 'flex', alignItems: 'center', gap: 8 }}>
+            <div style={{ fontWeight: 800, fontSize: popupTitleFontSize, marginBottom: 8, color: '#d92d20', display: 'flex', alignItems: 'center', gap: 8 }}>
               <span style={{ fontSize: 20 }}>⚠</span>
               Annullare le modifiche?
             </div>
-            <div style={{ fontSize: 13, color: '#374151', lineHeight: 1.6, marginBottom: 14, display: 'grid', gap: 10 }}>
+            <div style={{ fontSize: popupBodyFontSize, color: '#374151', lineHeight: 1.6, marginBottom: 14, display: 'grid', gap: 10 }}>
               <div style={{ fontWeight: 500, padding: 10, background: '#fff7ed', border: '1px solid #fed7aa', borderRadius: 6, color: '#7c2d12' }}>
                 Tutte le modifiche non salvate andranno perse.
               </div>
@@ -9852,14 +9948,14 @@ ${e?.message || String(e)}`
                   setCancelUnsavedPopupOpen(false)
                   performCancel()
                 }}
-                style={{ ...btnBase, border: '1px solid rgba(0,0,0,0.18)', background: '#d92d20', color: '#fff', cursor: 'pointer', pointerEvents: 'auto' }}
+                style={{ ...popupBtnBase, border: '1px solid rgba(0,0,0,0.18)', background: '#d92d20', color: '#fff', cursor: 'pointer', pointerEvents: 'auto' }}
               >
                 Sì, annulla
               </button>
               <button
                 type='button'
                 onClick={() => { setCancelUnsavedPopupOpen(false) }}
-                style={{ ...btnBase, border: '1px solid rgba(0,0,0,0.18)', background: '#f8fbff', color: '#111827', cursor: 'pointer', pointerEvents: 'auto' }}
+                style={{ ...popupBtnBase, border: '1px solid rgba(0,0,0,0.18)', background: '#f8fbff', color: '#111827', cursor: 'pointer', pointerEvents: 'auto' }}
               >
                 No, resta in modifica
               </button>
@@ -9884,17 +9980,17 @@ ${e?.message || String(e)}`
             onClick={(e) => { e.preventDefault(); e.stopPropagation() }}
             onMouseDown={(e) => { e.preventDefault(); e.stopPropagation() }}
           >
-            <div style={{ fontWeight: 800, fontSize: 16, marginBottom: 8 }}>
+            <div style={{ fontWeight: 800, fontSize: popupTitleFontSize, marginBottom: 8 }}>
               {attachmentConfirm.type === 'delete' ? 'Confermare l’eliminazione?' : 'Confermare la sostituzione?'}
             </div>
-            <div style={{ fontSize: 13, color: '#374151', lineHeight: 1.5, marginBottom: 14 }}>
+            <div style={{ fontSize: popupBodyFontSize, color: '#374151', lineHeight: 1.5, marginBottom: 14 }}>
               {attachmentConfirm.type === 'delete'
                 ? <>L’allegato <b>{attachmentConfirm.attachment?.name || `Allegato #${attachmentConfirm.attachment?.id}`}</b> verrà eliminato subito.</>
                 : <>L’allegato <b>{attachmentConfirm.attachment?.name || `Allegato #${attachmentConfirm.attachment?.id}`}</b> verrà sostituito subito con <b>{attachmentConfirm.file?.name || 'il nuovo file selezionato'}</b>.</>}
             </div>
             <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10 }}>
-              <button type='button' onClick={confirmAttachmentAction} style={{ ...btnBase, border: '1px solid rgba(0,0,0,0.18)', background: '#1a7f37', color: '#fff', cursor: 'pointer' }}>Conferma</button>
-              <button type='button' onClick={cancelAttachmentAction} style={{ ...btnBase, border: '1px solid rgba(0,0,0,0.18)', background: '#d92d20', color: '#fff', cursor: 'pointer' }}>Annulla</button>
+              <button type='button' onClick={confirmAttachmentAction} style={{ ...popupBtnBase, border: '1px solid rgba(0,0,0,0.18)', background: '#1a7f37', color: '#fff', cursor: 'pointer' }}>Conferma</button>
+              <button type='button' onClick={cancelAttachmentAction} style={{ ...popupBtnBase, border: '1px solid rgba(0,0,0,0.18)', background: '#d92d20', color: '#fff', cursor: 'pointer' }}>Annulla</button>
             </div>
           </div>
         </div>,
@@ -9916,11 +10012,11 @@ ${e?.message || String(e)}`
             onClick={(e) => { e.stopPropagation() }}
             onMouseDown={(e) => { e.stopPropagation() }}
           >
-            <div style={{ fontWeight: 800, fontSize: 16, marginBottom: 8, color: '#dc2626', display: 'flex', alignItems: 'center', gap: 8 }}>
+            <div style={{ fontWeight: 800, fontSize: popupTitleFontSize, marginBottom: 8, color: '#dc2626', display: 'flex', alignItems: 'center', gap: 8 }}>
               <span style={{ fontSize: 20 }}>⚠</span>
               {generalErrorPopup.title}
             </div>
-            <div style={{ fontSize: 13, color: '#374151', lineHeight: 1.6, marginBottom: 14, display: 'grid', gap: 10 }}>
+            <div style={{ fontSize: popupBodyFontSize, color: '#374151', lineHeight: 1.6, marginBottom: 14, display: 'grid', gap: 10 }}>
               <div style={{ fontWeight: 500, padding: 10, background: '#fef2f2', border: '1px solid #fecaca', borderRadius: 6, color: '#7f1d1d', whiteSpace: 'pre-wrap' }}>
                 {generalErrorPopup.text}
               </div>
@@ -9929,7 +10025,7 @@ ${e?.message || String(e)}`
               <button
                 type='button'
                 onClick={() => setGeneralErrorPopup(null)}
-                style={{ ...btnBase, border: '1px solid rgba(0,0,0,0.18)', background: '#1d4ed8', color: '#fff', cursor: 'pointer', pointerEvents: 'auto' }}
+                style={{ ...popupBtnBase, border: '1px solid rgba(0,0,0,0.18)', background: '#1d4ed8', color: '#fff', cursor: 'pointer', pointerEvents: 'auto' }}
               >
                 Chiudi
               </button>
@@ -9954,11 +10050,11 @@ ${e?.message || String(e)}`
             onClick={(e) => { e.stopPropagation() }}
             onMouseDown={(e) => { e.stopPropagation() }}
           >
-            <div style={{ fontWeight: 800, fontSize: 16, marginBottom: 8, color: '#dc2626', display: 'flex', alignItems: 'center', gap: 8 }}>
+            <div style={{ fontWeight: 800, fontSize: popupTitleFontSize, marginBottom: 8, color: '#dc2626', display: 'flex', alignItems: 'center', gap: 8 }}>
               <span style={{ fontSize: 20 }}>⚠</span>
               {validationPopup.title}
             </div>
-            <div style={{ fontSize: 13, color: '#374151', lineHeight: 1.6, marginBottom: 14, display: 'grid', gap: 10 }}>
+            <div style={{ fontSize: popupBodyFontSize, color: '#374151', lineHeight: 1.6, marginBottom: 14, display: 'grid', gap: 10 }}>
               <div style={{ fontWeight: 500, padding: 10, background: '#fef2f2', border: '1px solid #fecaca', borderRadius: 6, color: '#7f1d1d' }}>
                 {validationPopup.text}
               </div>
@@ -9969,7 +10065,7 @@ ${e?.message || String(e)}`
                 id={validationPopupOkId}
                 type='button'
                 onClick={() => setValidationPopup(null)}
-                style={{ ...btnBase, border: '1px solid rgba(0,0,0,0.18)', background: '#dc2626', color: '#fff', cursor: 'pointer', pointerEvents: 'auto' }}
+                style={{ ...popupBtnBase, border: '1px solid rgba(0,0,0,0.18)', background: '#dc2626', color: '#fff', cursor: 'pointer', pointerEvents: 'auto' }}
               >
                 OK
               </button>
@@ -9995,15 +10091,15 @@ ${e?.message || String(e)}`
             onClick={(e) => { e.stopPropagation() }}
             onMouseDown={(e) => { e.stopPropagation() }}
           >
-            <div style={{ fontWeight: 800, fontSize: 16, marginBottom: 8, color: '#1a7f37', display: 'flex', alignItems: 'center', gap: 8 }}>
+            <div style={{ fontWeight: 800, fontSize: popupTitleFontSize, marginBottom: 8, color: '#1a7f37', display: 'flex', alignItems: 'center', gap: 8 }}>
               <span style={{ fontSize: 20 }}>✓</span>
               Rilevazione inserita correttamente
             </div>
-            <div style={{ fontSize: 13, color: '#374151', lineHeight: 1.6, marginBottom: 14, display: 'grid', gap: 10 }}>
+            <div style={{ fontSize: popupBodyFontSize, color: '#374151', lineHeight: 1.6, marginBottom: 14, display: 'grid', gap: 10 }}>
               <div>La rilevazione è stata salvata correttamente nel sistema.</div>
               {createSuccessPraticaCode && (
                 <div style={{ fontWeight: 600, color: '#1f2937', padding: 10, background: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: 6 }}>
-                  Numero rilevazione: <span style={{ color: '#15803d', fontSize: 14, fontFamily: 'monospace' }}>{createSuccessPraticaCode}</span>
+                  Numero rilevazione: <span style={{ color: '#15803d', fontSize: popupBodyFontSize, fontFamily: 'monospace' }}>{createSuccessPraticaCode}</span>
                 </div>
               )}
               <div>Clicca <b>OK</b> per aprire la rilevazione in modalità modifica.</div>
@@ -10013,7 +10109,7 @@ ${e?.message || String(e)}`
                 id={successPopupOkId}
                 type='button'
                 onClick={() => { setShowCreateSuccessPopup(false); setCreateSuccessPraticaCode(''); navigateToEditAfterCreate() }}
-                style={{ ...btnBase, border: '1px solid rgba(0,0,0,0.18)', background: '#1a7f37', color: '#fff', cursor: 'pointer', pointerEvents: 'auto' }}
+                style={{ ...popupBtnBase, border: '1px solid rgba(0,0,0,0.18)', background: '#1a7f37', color: '#fff', cursor: 'pointer', pointerEvents: 'auto' }}
               >
                 OK
               </button>
