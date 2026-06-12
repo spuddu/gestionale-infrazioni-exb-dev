@@ -2,7 +2,7 @@
 /** @jsxFrag React.Fragment */
 import { React, jsx, type AllWidgetProps, DataSourceComponent, UrlManager, getAppStore } from 'jimu-core'
 import AnteprimaPdfViewer from '../../../_shared/gii-anteprime/anteprima-pdf-viewer'
-import { buildVerbalePdf, getVerbalePdfFilePrefix } from '../../../_shared/gii-anteprime/verbale/verbale-pdf-builder'
+import { buildPropostaContestazionePdf as buildVerbalePdf, getPropostaContestazionePdfFilePrefix as getVerbalePdfFilePrefix } from '../../../_shared/gii-anteprime/documenti-amministrativi/proposta-contestazione/proposta-contestazione-pdf-builder'
 import type { IMConfig, SummaryFieldConfig } from '../config'
 import { defaultConfig } from '../config'
 import { createPortal } from 'react-dom'
@@ -122,7 +122,7 @@ type AdminField = {
   name: string
   label: string
   kind: AdminFieldKind
-  group: 'atto' | 'verbale' | 'notifica' | 'sanzione' | 'attrezzature' | 'pagamento' | 'bonifico' | 'chiusura' | 'post_notifica' | 'ricorso' | 'cda' | 'riapertura' | 'definizione' | 'incasso'
+  group: 'trasgressore' | 'atto' | 'verbale' | 'notifica' | 'sanzione' | 'attrezzature' | 'pagamento' | 'bonifico' | 'chiusura' | 'post_notifica' | 'ricorso' | 'cda' | 'riapertura' | 'definizione' | 'incasso'
   placeholder?: string
   full?: boolean
   readonly?: boolean
@@ -134,6 +134,22 @@ const ADMIN_COMPACT_GRID_COLUMNS = `repeat(auto-fit, minmax(${ADMIN_COMPACT_FIEL
 const ADMIN_NOTE_CASES_COLUMN = `minmax(${ADMIN_COMPACT_FIELD_MIN_WIDTH}px, ${ADMIN_COMPACT_FIELD_MAX_WIDTH}px) minmax(0, 1fr)`
 
 const ADMIN_FIELDS: AdminField[] = [
+  { group: 'trasgressore', name: 'tipologia_soggetto', label: 'Tipo soggetto', kind: 'domain' },
+  { group: 'trasgressore', name: 'cognome', label: 'Cognome', kind: 'text' },
+  { group: 'trasgressore', name: 'nome', label: 'Nome', kind: 'text' },
+  { group: 'trasgressore', name: 'codice_fiscale', label: 'Codice fiscale', kind: 'text' },
+  { group: 'trasgressore', name: 'ragione_sociale', label: 'Ragione sociale', kind: 'text', full: true },
+  { group: 'trasgressore', name: 'piva', label: 'P. IVA', kind: 'text' },
+  { group: 'trasgressore', name: 'via', label: 'Via/P.zza', kind: 'text' },
+  { group: 'trasgressore', name: 'civico', label: 'Civico', kind: 'text' },
+  { group: 'trasgressore', name: 'comune', label: 'Comune', kind: 'text' },
+  { group: 'trasgressore', name: 'citta', label: 'Comune', kind: 'text' },
+  { group: 'trasgressore', name: 'cap', label: 'CAP', kind: 'text' },
+  { group: 'trasgressore', name: 'pec', label: 'PEC', kind: 'text' },
+  { group: 'trasgressore', name: 'email', label: 'E-mail', kind: 'text' },
+  { group: 'trasgressore', name: 'telefono', label: 'Telefono', kind: 'text' },
+  { group: 'trasgressore', name: 'cellulare', label: 'Cellulare', kind: 'text' },
+
   { group: 'atto', name: 'tipo_atto_amm', label: 'Tipo atto amministrativo (automatico)', kind: 'domain', readonly: true },
   { group: 'atto', name: 'oggetto_atto_amm', label: 'Oggetto atto amministrativo (automatico)', kind: 'text', full: true, readonly: true },
   { group: 'verbale', name: 'numero_verbale', label: 'Numero verbale (assegnato all’approvazione DA)', kind: 'readonly-text', readonly: true },
@@ -328,14 +344,23 @@ function isSystemCalculatedAdminField (name: string): boolean {
 
 type PaymentMode = '' | 'PAGOPA' | 'BONIFICO' | 'MISTO' | 'ALTRO'
 
-type AmmSectionKey = 'atto' | 'pagamento' | 'notifica' | 'anteprima' | 'allegati' | 'dati_generali' | 'ricorso' | 'cda' | 'riapertura' | 'definizione'
+type AmmSectionKey = 'trasgressore' | 'atto' | 'pagamento' | 'notifica' | 'anteprima' | 'allegati' | 'dati_generali' | 'ricorso' | 'cda' | 'riapertura' | 'definizione'
 
-const AMM_DEFAULT_SECTION: AmmSectionKey = 'atto'
-const VALID_AMM_SECTIONS = new Set(['atto', 'pagamento', 'notifica', 'anteprima', 'allegati', 'dati_generali', 'ricorso', 'cda', 'riapertura', 'definizione'])
+const AMM_DEFAULT_SECTION: AmmSectionKey = 'trasgressore'
+const VALID_AMM_SECTIONS = new Set(['trasgressore', 'atto', 'pagamento', 'notifica', 'anteprima', 'allegati', 'dati_generali', 'ricorso', 'cda', 'riapertura', 'definizione'])
 
 function normalizeAmmSection (raw: any): AmmSectionKey | null {
   const s = String(raw || '').trim().toLowerCase().replace(/_/g, '-').replace(/\s+/g, '-')
   switch (s) {
+    case 'trasgressore':
+    case 'dati-trasgressore':
+    case 'recapiti':
+    case 'trasgressore-recapiti':
+      return 'trasgressore'
+    case 'contestazioni':
+    case 'contestazioni-importi':
+    case 'contestazioni-e-importi':
+      return 'atto'
     case 'atto':
     case 'dati-atto':
     case 'verbale':
@@ -904,17 +929,27 @@ function formatValue (v: any): string {
   return String(v)
 }
 
+function formatDecimalIt (value: number, fractionDigits = 2): string {
+  const n = Number(value)
+  if (!Number.isFinite(n)) return '—'
+  const sign = n < 0 ? '-' : ''
+  const fixed = Math.abs(n).toFixed(fractionDigits)
+  const [integerPart, decimalPart] = fixed.split('.')
+  const groupedInteger = integerPart.replace(/\B(?=(\d{3})+(?!\d))/g, '.')
+  return decimalPart != null ? `${sign}${groupedInteger},${decimalPart}` : `${sign}${groupedInteger}`
+}
+
 function formatMoney (v: any): string {
   if (v == null || v === '') return ''
   const n = parseNumberInput(v)
   if (n == null || !Number.isFinite(n)) return String(v)
-  return n.toLocaleString('it-IT', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+  return formatDecimalIt(n, 2)
 }
 
 function formatEuroText (v: any): string {
-  const n = Number(v)
-  if (!Number.isFinite(n)) return '—'
-  return `${n.toLocaleString('it-IT', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €`
+  const n = typeof v === 'number' ? v : parseNumberInput(v)
+  if (n == null || !Number.isFinite(n)) return '—'
+  return `${formatDecimalIt(n, 2)} €`
 }
 
 function moneyAttr (data: Record<string, any>, fieldName: string): number {
@@ -1543,7 +1578,7 @@ const ADMIN_STYLE_DEFAULTS: Record<string, any> = {
   normViolataHeaderBg: '#dbeafe',
   normViolataHeaderTextColor: '#0f172a',
   normViolataArrowColor: '#1d4ed8',
-  normViolataBodyBg: '#ffffff',
+  normViolataBodyBg: '#f8fbff',
   normViolataArticleTitleColor: '#111827',
   normViolataArticleTextColor: '#374151',
   normViolataArticleMetaColor: '#6b7280',
@@ -1805,19 +1840,18 @@ function buildPracticeTitle (cfg: any, data: any, oid: number | null): string {
   const d = data || {}
   const rapporto = getReportCode(d, oid)
   const numeroVerbale = verbaleNumberValue(d, oid)
-  const titoloAtto = tipoAttoAmmTitolo(d)
-  if (tipoAttoAmmPrevedeVerbale(d) && numeroVerbale) return `${titoloAtto} n. ${numeroVerbale} - Rapporto tecnico n. ${rapporto}`
-  return `${titoloAtto}${isVerbaleDefinitivo(d) ? '' : ' in corso di istruttoria'} - Rapporto tecnico n. ${rapporto}`
+  const suffix = rapporto ? ` - Rapporto tecnico n. ${rapporto}` : ''
+  if (tipoAttoAmmPrevedeVerbale(d) && numeroVerbale) return `${tipoAttoAmmTitolo(d)} n. ${numeroVerbale}${suffix}`
+  return `Proposta di contestazione in corso di istruttoria${suffix}`
 }
 
 function buildPracticeTitleParts (data: any, oid: number | null): { prefix: string, reportCode: string, full: string } {
   const d = data || {}
   const reportCode = getReportCode(d, oid)
   const numeroVerbale = verbaleNumberValue(d, oid)
-  const titoloAtto = tipoAttoAmmTitolo(d)
   const prefix = tipoAttoAmmPrevedeVerbale(d) && numeroVerbale
-    ? `${titoloAtto} n. ${numeroVerbale} - Rapporto tecnico n. `
-    : `${titoloAtto}${isVerbaleDefinitivo(d) ? '' : ' in corso di istruttoria'} - Rapporto tecnico n. `
+    ? `${tipoAttoAmmTitolo(d)} n. ${numeroVerbale} - Rapporto tecnico n. `
+    : 'Proposta di contestazione in corso di istruttoria - Rapporto tecnico n. '
   return { prefix, reportCode, full: `${prefix}${reportCode}` }
 }
 
@@ -2012,7 +2046,6 @@ function buildViolationRows (data: any, fields: LayerFieldInfo[]): ViolationRow[
   const art17On = norma1617Raw.toLowerCase().includes('art17') || norma1617Label.toLowerCase().includes('art. 17') || !!art17Tipo
   if (art17On) {
     const details: Array<{ label: string, value: string }> = []
-    addViolationDetail(details, 'Tipo inosservanza', violationArticleLabel('17'))
     addViolationDetail(details, 'Tipo violazione', art17Tipo)
     addViolationDetail(details, 'Superficie dichiarata', firstViolationValue(d, fields, ['sup_dichiarata_art17_1', 'sup_dichiarata_art17_2', 'sup_dichiarata_art16_17']))
     addViolationDetail(details, 'Superficie variata/irrigata', firstViolationValue(d, fields, ['sup_irrigata_art17_1', 'sup_irrigata_art16_17_2', 'sup_irrigata_art16_17']))
@@ -2143,10 +2176,16 @@ function getNotaSpeseValueText (data: any): string {
 function art15SurfaceCentiareForCase (data: any, codiceCasistica: string): number | null {
   const code = String(codiceCasistica || '').toUpperCase()
   if (!code.includes('PRELIEVO_PARZIALE') && !code.includes('PRELIEVO_TOTALE')) return null
-  const dichiarata = numericAttr(data || {}, ['sup_dichiarata_art15'])
+
+  const dichiarata = numericAttr(data || {}, ['sup_dichiarata_art15']) || 0
   const irrigata = numericAttr(data || {}, ['sup_irrigata_art15'])
   if (irrigata == null || irrigata <= 0) return null
-  const centiare = code.includes('PRELIEVO_TOTALE') ? irrigata : Math.max(0, irrigata - (dichiarata || 0))
+
+  // Art. 15: la superficie di calcolo è sempre la differenza tra
+  // superficie irrigata e superficie dichiarata. Per il prelievo totale
+  // la dichiarata è normalmente pari a zero, quindi il risultato coincide
+  // con l'intera superficie irrigata.
+  const centiare = Math.max(0, irrigata - dichiarata)
   if (!Number.isFinite(centiare) || centiare <= 0) return null
   return centiare
 }
@@ -2213,21 +2252,30 @@ function comunicazioneTardivaSurfaceCentiare (data: any): number | null {
   let centiare: number | null = null
 
   if (article === '16') {
+    // Art. 16: la superficie di calcolo è la superficie dichiarata.
+    // La superficie irrigata non rileva perché, nella comunicazione tardiva
+    // di irrigazione, è sempre pari a zero.
     centiare = firstPositiveNumericAttr(d, ['sup_dichiarata_art16', 'sup_dichiarata_art16_17'])
   } else if (article === '17') {
     const tipo = normalizeToken(pickAttrCI(d, ['art17_tipo']))
     if (tipo.includes('ART171') || tipo.includes('VARIAZIONE')) {
-      centiare = firstPositiveNumericAttr(d, ['sup_irrigata_art17_1', 'sup_variata', 'sup_irrigata_art16_17'])
+      const dichiarata = firstPositiveNumericAttr(d, ['sup_dichiarata_art17_1', 'sup_dichiarata_art16_17'])
+      const variata = firstPositiveNumericAttr(d, ['sup_irrigata_art17_1', 'sup_variata', 'sup_irrigata_art16_17_2', 'sup_irrigata_art16_17'])
+      if (dichiarata != null && variata != null) {
+        // Art. 17 - variazione tardiva: differenza assoluta tra superficie
+        // dichiarata e superficie variata, indipendentemente dal segno.
+        centiare = Math.abs(variata - dichiarata)
+      }
     } else if (tipo.includes('ART172') || tipo.includes('RINUNCIA')) {
+      // Art. 17 - rinuncia tardiva: la superficie irrigata è pari a zero,
+      // quindi la superficie di calcolo coincide con la dichiarata.
       centiare = firstPositiveNumericAttr(d, ['sup_dichiarata_art17_2', 'sup_dichiarata_art16_17'])
     } else {
-      centiare = firstPositiveNumericAttr(d, [
-        'sup_irrigata_art17_1',
-        'sup_variata',
-        'sup_dichiarata_art17_2',
-        'sup_dichiarata_art16_17',
-        'sup_irrigata_art16_17'
-      ])
+      const dichiarataVariazione = firstPositiveNumericAttr(d, ['sup_dichiarata_art17_1'])
+      const variata = firstPositiveNumericAttr(d, ['sup_irrigata_art17_1', 'sup_variata', 'sup_irrigata_art16_17_2', 'sup_irrigata_art16_17'])
+      const dichiarataRinuncia = firstPositiveNumericAttr(d, ['sup_dichiarata_art17_2', 'sup_dichiarata_art16_17'])
+      if (dichiarataVariazione != null && variata != null) centiare = Math.abs(variata - dichiarataVariazione)
+      else centiare = dichiarataRinuncia
     }
   }
 
@@ -2567,6 +2615,46 @@ function calculationOccurrenceLabel (group: SanzioneConsultivaGroup, data: Recor
   return formatOccorrenzaValue(pickAttrCI(data || {}, ['occorrenza']), fields)
 }
 
+function normalizeArt15AbuseTypeLabel (raw: any): string {
+  const value = String(raw ?? '').trim()
+  if (!value) return ''
+  const token = normalizeToken(value)
+  if (token.includes('PARZIALE')) return 'Parziale'
+  if (token.includes('TOTALE')) return 'Totale'
+  return value
+}
+
+function art15AbuseTypeLabel (data: Record<string, any>, fields: LayerFieldInfo[], caseCodeRaw?: any): string {
+  const direct = normalizeArt15AbuseTypeLabel(firstViolationValue(data || {}, fields || [], ['tipo_abuso', 'tipo_prelievo']))
+  if (direct) return direct
+
+  if (isCheckedValue(pickAttrCI(data || {}, ['norma15_parziale']))) return 'Parziale'
+  if (isCheckedValue(pickAttrCI(data || {}, ['norma15_totale']))) return 'Totale'
+
+  const fallback = normalizeToken(caseCodeRaw || deriveArt15FallbackCase(data || {}, fields || []))
+  if (fallback.includes('PARZIALE')) return 'Parziale'
+  if (fallback.includes('TOTALE')) return 'Totale'
+  return ''
+}
+
+function normalizeArt17CommunicationTypeLabel (raw: any): string {
+  const value = String(raw ?? '').trim()
+  if (!value) return ''
+  const token = normalizeToken(value)
+  if (token.includes('VARIAZIONE')) return 'Variazione tardiva'
+  if (token.includes('RINUNCIA')) return 'Rinuncia tardiva'
+  return value
+}
+
+function art17CommunicationTypeLabel (data: Record<string, any>, fields: LayerFieldInfo[], caseCodeRaw?: any): string {
+  const direct = normalizeArt17CommunicationTypeLabel(firstViolationValue(data || {}, fields || [], ['art17_tipo']))
+  if (direct) return direct
+  const fallback = normalizeToken(caseCodeRaw || '')
+  if (fallback.includes('VARIAZIONE')) return 'Variazione tardiva'
+  if (fallback.includes('RINUNCIA')) return 'Rinuncia tardiva'
+  return ''
+}
+
 function calculationGravityLabel (group: SanzioneConsultivaGroup, data: Record<string, any>): string {
   const article = normalizeArticleNumber(group.articoloViolato)
   if (!ARTICLES_WITH_GRAVITA.has(article)) return ''
@@ -2816,8 +2904,21 @@ function buildAutomaticSanzioneCalculation (
 
   validGroups.forEach(group => {
     dettaglio.push(`${formatArticleFallback(group.articoloViolato)} — ${displayViolationTitle(group)}`)
+    const normaSanzionatoria = articleListTitle(group.articoliSanzione || [], group.articoloSanzione)
+    if (normaSanzionatoria && normaSanzionatoria !== '—') {
+      dettaglio.push(`- Norma sanzionatoria: ${normaSanzionatoria}`)
+    }
+    const articleNumber = normalizeArticleNumber(group.articoloViolato)
     const occurrence = calculationOccurrenceLabel(group, data, fields)
     const gravity = calculationGravityLabel(group, data)
+    if (articleNumber === '15') {
+      const tipoAbuso = art15AbuseTypeLabel(data, fields, group.codiceCasistica)
+      if (tipoAbuso) dettaglio.push(`- Tipo di abuso: ${tipoAbuso}`)
+    }
+    if (articleNumber === '17') {
+      const tipoComunicazione = art17CommunicationTypeLabel(data, fields, group.codiceCasistica)
+      if (tipoComunicazione) dettaglio.push(`- Tipo comunicazione: ${tipoComunicazione}`)
+    }
     if (occurrence) dettaglio.push(`- Occorrenza: ${occurrence}`)
     if (gravity) dettaglio.push(`- Grado di gravità: ${gravity}`)
 
@@ -3088,47 +3189,29 @@ function AttoAmministrativoSummary (props: { data: Record<string, any>, fields: 
   )
 }
 
-function VerbaleSummary (props: { data: Record<string, any>, fields: LayerFieldInfo[], canEdit: boolean, onApplyNote: (text: string) => void }) {
-  const d = props.data || {}
-  const definitivo = isVerbaleDefinitivo(d)
-  const hasVerbale = tipoAttoAmmPrevedeVerbale(d)
-  const oid = pickOidFromData(d, 'OBJECTID')
-  const numero = displayVerbaleNumber(d, props.fields, oid, 'Non ancora assegnato')
-  const dataApprovazione = displayVerbaleApprovalDate(d, props.fields)
-  const tipoAtto = displayAdminFieldValue(d, props.fields, 'tipo_atto_amm', 'Da determinare automaticamente')
-  const oggettoAtto = displayAdminFieldValue(d, props.fields, 'oggetto_atto_amm', 'Da determinare automaticamente')
-  const noteField = getFieldInfo(props.fields, 'note_atto_amm')
-  const noteReal = noteField?.name || 'note_atto_amm'
-  const noteRaw = pickAttrCI(d, [noteReal, 'note_atto_amm'])
-  const noteExists = !!noteField
-  const noteReadonly = !props.canEdit || !noteExists || noteField?.editable === false
+
+function AttestazioneConformitaSummary (props: { data: Record<string, any>, fields: LayerFieldInfo[] }) {
   const st = useAdminStyle()
+  const d = props.data || {}
+  const note = String(pickAttrCI(d, ['note_atto_amm']) || '').trim()
+  const tecnico = displayAdminFieldValue(d, props.fields, 'ti_amm_assegnato_nome', displayAdminFieldValue(d, props.fields, 'ti_amm_assegnato_username'))
+  const dataTrasmissione = displayAdminFieldValue(d, props.fields, 'dt_esito_TI_AMM') || displayAdminFieldValue(d, props.fields, 'dt_stato_RI_AMM')
   return (
-    <Section title='Predisposizione atto amministrativo'>
-      <div style={{ display: 'grid', gap: 10, marginBottom: 12 }}>
-        <div style={{ border: `${Number(st.verbaleInfoCardBorderWidth ?? 1)}px solid ${st.verbaleInfoCardBorderColor || '#dbeafe'}`, background: st.verbaleInfoCardBg || '#eff6ff', borderRadius: 11, padding: 11, display: 'grid', gap: 9 }}>
-          <div style={{ display: 'grid', gap: 3 }}>
-            <div style={{ color: st.verbaleInfoLabelColor || '#64748b', fontSize: Number(st.formLabelFontSize ?? 15), fontWeight: Number(st.formLabelFontWeight ?? 600) as any, letterSpacing: 0.1 }}>Tipo atto</div>
-            <div style={{ color: st.verbaleInfoTipoTextColor || '#111827', fontSize: Number(st.formFieldFontSize ?? 15), fontWeight: 700 }}>{tipoAtto}</div>
+    <Section title='Attestazione di conformità'>
+      {note ? (
+        <div style={{ display: 'grid', gap: 8 }}>
+          <div style={{ display: 'grid', gridTemplateColumns: ADMIN_COMPACT_GRID_COLUMNS, justifyContent: 'start', gap: 10 }}>
+            <StatusSummaryItem label='Tecnico istruttore' value={tecnico || '—'} tone='auto' />
+            <StatusSummaryItem label='Data trasmissione al Responsabile istruttoria' value={dataTrasmissione || '—'} tone='auto' />
           </div>
-          <div style={{ display: 'grid', gap: 3 }}>
-            <div style={{ color: st.verbaleInfoLabelColor || '#64748b', fontSize: Number(st.formLabelFontSize ?? 15), fontWeight: Number(st.formLabelFontWeight ?? 600) as any, letterSpacing: 0.1 }}>Oggetto</div>
-            <div style={{ color: st.verbaleInfoOggettoTextColor || '#374151', fontSize: Number(st.formFieldFontSize ?? 15), fontWeight: 600, lineHeight: 1.35 }}>{oggettoAtto}</div>
+          <div style={{ border: `1px solid ${st.formWorkflowBadgeBorderColor || '#d8e6f7'}`, background: st.formWorkflowBadgeBg || '#ffffff', borderRadius: 9, padding: 10 }}>
+            <div style={{ color: st.formWorkflowBadgeTitleColor || '#0d3b66', fontWeight: 900, fontSize: adminLabelFontSize(st), marginBottom: 5 }}>Testo dell’attestazione</div>
+            <div style={{ color: st.formWorkflowBadgeValueColor || '#111827', fontSize: Number(st.formFieldFontSize ?? 15), lineHeight: 1.45, whiteSpace: 'pre-wrap' }}>{note}</div>
           </div>
         </div>
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(210px, 1fr))', gap: 10 }}>
-          <StatusSummaryItem label='Stato atto' value={definitivo ? 'Definitivo' : 'Bozza'} tone={definitivo ? 'auto' : 'warn'} hint={definitivo ? 'L’atto risulta approvato dal Direttore d’Area.' : 'L’atto diventerà definitivo dopo l’approvazione del Direttore d’Area.'} />
-          {hasVerbale && <StatusSummaryItem label='Numero verbale' value={numero} tone='auto' hint={definitivo ? undefined : 'Sarà assegnato dopo l’approvazione del Direttore d’Area.'} />}
-          <StatusSummaryItem label={hasVerbale ? 'Data verbale' : 'Data approvazione'} value={dataApprovazione} tone='auto' hint={definitivo ? undefined : 'Corrisponderà alla data di approvazione del Direttore d’Area.'} />
-        </div>
-      </div>
-      <div style={{ marginBottom: 10, display: 'grid', gridTemplateColumns: ADMIN_NOTE_CASES_COLUMN, gap: 10, alignItems: 'start', width: '100%' }}>
-        <NoteAmministrativeQuickActions data={d} canEdit={props.canEdit && noteExists} onApply={props.onApplyNote} />
-        <div style={{ minWidth: 0, width: '100%' }}>
-          <div style={{ color: st.formLabelColor || '#334155', fontSize: Number(st.formLabelFontSize ?? 15), fontWeight: Number(st.formLabelFontWeight ?? 600) as any, marginBottom: Number(st.formLabelMarginBottom ?? 3) }}>Note amministrative</div>
-          <TextArea value={noteRaw ?? ''} disabled={noteReadonly} placeholder='Annotazioni istruttorie. Compilarle manualmente oppure usare una casistica rapida.' onChange={v => props.onApplyNote(v || '')} />
-        </div>
-      </div>
+      ) : (
+        <InfoBox kind='warn'>Attestazione di conformità non ancora acquisita. Verrà richiesta obbligatoriamente nel popup di trasmissione al Responsabile istruttoria.</InfoBox>
+      )}
     </Section>
   )
 }
@@ -3291,6 +3374,157 @@ function PostNotificationLockedBox () {
     <InfoBox kind='warn'>
       La compilazione di questa sezione sarà disponibile solo dopo che la notifica risulta perfezionata con esito “Notificata” o “Compiuta giacenza”.
     </InfoBox>
+  )
+}
+
+
+function trasgressoreField (fields: LayerFieldInfo[], candidates: string[]): string | null {
+  for (const name of candidates) {
+    const f = getFieldInfo(fields, name)
+    if (f) return f.name
+  }
+  return null
+}
+
+function TrasgressoreAmmSection (props: { data: Record<string, any>, fields: LayerFieldInfo[], canEdit: boolean, onChange: (name: string, value: any) => void }) {
+  const d = props.data || {}
+  const fields = props.fields || []
+  const rawTipo = String(pickAttrCI(d, ['tipologia_soggetto']) || '').toUpperCase()
+  const ragioneSociale = String(pickAttrCI(d, ['ragione_sociale']) || '').trim()
+  const piva = String(pickAttrCI(d, ['piva', 'partita_iva']) || '').trim()
+  const isPg = rawTipo.includes('GIUR') || rawTipo === 'PG' || !!ragioneSociale || !!piva
+
+  const mk = (name: string, label: string, kind: AdminFieldKind = 'text', full = false): AdminField => ({ group: 'trasgressore', name, label, kind, full })
+  const existingField = (candidates: string[], label: string, kind: AdminFieldKind = 'text', full = false): AdminField | null => {
+    const name = trasgressoreField(fields, candidates)
+    return name ? mk(name, label, kind, full) : null
+  }
+  const existingFields = (defs: Array<[string[], string, AdminFieldKind?, boolean?]>): AdminField[] => defs
+    .map(def => existingField(def[0], def[1], def[2] || 'text', !!def[3]))
+    .filter(Boolean) as AdminField[]
+
+  const tipoField = existingField(['tipologia_soggetto'], 'Tipologia soggetto', 'domain')
+  const idItems: AdminField[] = []
+  if (tipoField) idItems.push(tipoField)
+  if (isPg) {
+    idItems.push(...existingFields([
+      [['ragione_sociale'], 'Ragione sociale', 'text', true],
+      [['piva', 'partita_iva'], 'P. IVA']
+    ]))
+  } else {
+    idItems.push(...existingFields([
+      [['cognome'], 'Cognome'],
+      [['nome'], 'Nome'],
+      [['codice_fiscale', 'cf'], 'Codice fiscale']
+    ]))
+  }
+
+  const indirizzoItems = existingFields([
+    [['via'], 'Via/P.zza'],
+    [['civico', 'numero_civico'], 'N. civico'],
+    [['citta', 'comune'], 'Città'],
+    [['provincia'], 'Provincia'],
+    [['cap'], 'CAP'],
+    [['stato'], 'Stato'],
+    [['telefono'], 'Telefono'],
+    [['cellulare'], 'Cellulare'],
+    [['email', 'e_mail'], 'E-mail'],
+    [['pec'], 'PEC']
+  ])
+
+  const qualificaItems = existingFields([
+    [['qualifica_fondo'], 'Qualifica rispetto al fondo', 'domain']
+  ])
+
+  const domRaw = pickAttrCI(d, ['dom_notifica_uguale'])
+  const domicilioCoincide = domRaw == null || domRaw === '' || String(domRaw) === '1' || String(domRaw).toLowerCase() === 'si' || String(domRaw).toLowerCase() === 'sì' || String(domRaw).toLowerCase() === 'true'
+  const domicilioItems: AdminField[] = []
+  const domUguale = existingField(['dom_notifica_uguale'], 'Coincide con residenza/sede legale', 'domain')
+  if (domUguale) domicilioItems.push(domUguale)
+  if (!domicilioCoincide) {
+    domicilioItems.push(...existingFields([
+      [['dom_notifica_via'], 'Via/P.zza'],
+      [['dom_notifica_civico'], 'N. civico'],
+      [['dom_notifica_citta'], 'Città'],
+      [['dom_notifica_provincia'], 'Provincia'],
+      [['dom_notifica_cap'], 'CAP'],
+      [['dom_notifica_stato'], 'Stato']
+    ]))
+  }
+
+  const rlItems: AdminField[] = []
+  if (isPg) {
+    rlItems.push(...existingFields([
+      [['rl_cognome'], 'Cognome'],
+      [['rl_nome'], 'Nome'],
+      [['rl_cf'], 'Codice fiscale'],
+      [['rl_carica'], 'Carica', 'domain']
+    ]))
+    const rlDomRaw = pickAttrCI(d, ['rl_dom_notifica'])
+    const rlDomPresente = String(rlDomRaw || '0') === '1' || String(rlDomRaw || '').toLowerCase() === 'si' || String(rlDomRaw || '').toLowerCase() === 'sì' || String(rlDomRaw || '').toLowerCase() === 'true'
+    const rlDom = existingField(['rl_dom_notifica'], 'Domicilio notifiche del rappresentante', 'domain')
+    if (rlDom) rlItems.push(rlDom)
+    if (rlDomPresente) {
+      rlItems.push(...existingFields([
+        [['rl_dom_via'], 'Via/P.zza'],
+        [['rl_dom_civico'], 'N. civico'],
+        [['rl_dom_citta'], 'Città'],
+        [['rl_dom_provincia'], 'Provincia'],
+        [['rl_dom_cap'], 'CAP'],
+        [['rl_dom_stato'], 'Stato']
+      ]))
+    }
+  }
+
+  const noteItems = existingFields([
+    [['note_anagrafica'], 'Annotazioni del tecnico istruttore', 'textarea', true]
+  ])
+
+  const renderReadOnlyLayout = (items: AdminField[], emptyText: string) => items.length > 0 ? (
+    <AdminFieldsLayout items={items} draft={d} fields={fields} canEdit={false} onChange={() => {}} />
+  ) : (
+    <InfoBox kind='warn'>{emptyText}</InfoBox>
+  )
+
+  return (
+    <>
+      <InfoBox kind='warn'>
+        I dati del trasgressore sono riportati in sola lettura. Eventuali inesattezze devono essere segnalate al Responsabile istruttoria amministrativa, affinché sia valutato il rimando all’Area di provenienza per la rettifica.
+      </InfoBox>
+
+      <Section title='Dati identificativi'>
+        {renderReadOnlyLayout(idItems, 'Campi identificativi del trasgressore non disponibili nella fonte dati.')}
+      </Section>
+
+      <Section title='Residenza / sede'>
+        {renderReadOnlyLayout(indirizzoItems, 'Dati di residenza/sede non disponibili nella fonte dati.')}
+      </Section>
+
+      <Section title='Qualifica'>
+        {renderReadOnlyLayout(qualificaItems, 'Qualifica rispetto al fondo non disponibile nella fonte dati.')}
+      </Section>
+
+      <Section title='Domicilio per le notifiche'>
+        {domicilioItems.length > 0 ? (
+          <div style={{ display: 'grid', gap: 8 }}>
+            <AdminFieldsLayout items={domicilioItems} draft={d} fields={fields} canEdit={false} onChange={() => {}} />
+            {domicilioCoincide && <InfoBox>Il domicilio per le notifiche coincide con la residenza/sede legale.</InfoBox>}
+          </div>
+        ) : (
+          <InfoBox kind='warn'>Dati del domicilio per le notifiche non disponibili nella fonte dati.</InfoBox>
+        )}
+      </Section>
+
+      {isPg && (
+        <Section title='Rappresentante legale'>
+          {renderReadOnlyLayout(rlItems, 'Dati del rappresentante legale non disponibili nella fonte dati.')}
+        </Section>
+      )}
+
+      <Section title='Annotazioni'>
+        {renderReadOnlyLayout(noteItems, 'Annotazioni del tecnico istruttore non disponibili nella fonte dati.')}
+      </Section>
+    </>
   )
 }
 
@@ -3838,10 +4072,11 @@ function groupVociBySanzioneArticle (group: SanzioneConsultivaGroup, voci: Sanzi
 
 type NormToggleVariant = 'violata' | 'sanzionatoria'
 
-function NormToggleBox (props: { title: string, variant: NormToggleVariant, children: any }) {
+function NormToggleBox (props: { title: string, variant: NormToggleVariant, children: any, amount?: string }) {
   const st = useAdminStyle()
   const [open, setOpen] = React.useState(false)
   const isViolata = props.variant === 'violata'
+  const normViolataBodyBg = String(st.normViolataBodyBg || '').trim().toLowerCase()
   const palette = isViolata
     ? {
         background: st.normViolataCardBg || '#eff6ff',
@@ -3850,7 +4085,7 @@ function NormToggleBox (props: { title: string, variant: NormToggleVariant, chil
         header: st.normViolataHeaderBg || '#dbeafe',
         text: st.normViolataHeaderTextColor || '#0f172a',
         arrow: st.normViolataArrowColor || '#1d4ed8',
-        body: st.normViolataBodyBg || '#ffffff'
+        body: (!normViolataBodyBg || normViolataBodyBg === '#fff' || normViolataBodyBg === '#ffffff' || normViolataBodyBg === '#dbeafe') ? '#f8fbff' : st.normViolataBodyBg
       }
     : {
         background: st.normSanzionatoriaCardBg || '#fff7f7',
@@ -3861,6 +4096,41 @@ function NormToggleBox (props: { title: string, variant: NormToggleVariant, chil
         arrow: st.normSanzionatoriaArrowColor || '#b91c1c',
         body: st.normSanzionatoriaBodyBg || '#fffafa'
       }
+
+  if (!isViolata) {
+    return (
+      <div style={{ border: `${palette.borderWidth}px solid ${palette.border}`, background: 'transparent', borderRadius: 8, overflow: 'hidden' }}>
+        <button
+          type='button'
+          onClick={() => setOpen(!open)}
+          style={{
+            width: '100%',
+            border: 0,
+            background: 'transparent',
+            color: palette.text,
+            display: 'flex',
+            alignItems: 'center',
+            gap: 6,
+            padding: '5px 9px',
+            textAlign: 'left',
+            cursor: 'pointer',
+            fontSize: Number(st.formFieldFontSize ?? 15),
+            fontWeight: 800,
+            lineHeight: 1.35
+          }}
+          aria-expanded={open}
+        >
+          <span aria-hidden='true' style={{ color: palette.arrow, fontSize: 10, fontWeight: 900, lineHeight: 1, width: 12, display: 'inline-flex', justifyContent: 'center' }}>{open ? '▼' : '▶'}</span>
+          <span>{props.title}</span>
+        </button>
+        {open && (
+          <div style={{ padding: '8px 10px', borderTop: `${palette.borderWidth}px solid ${palette.border}`, background: palette.body }}>
+            {props.children}
+          </div>
+        )}
+      </div>
+    )
+  }
 
   return (
     <div style={{ border: `${palette.borderWidth}px solid ${palette.border}`, background: palette.background, borderRadius: 9, overflow: 'hidden' }}>
@@ -3884,8 +4154,9 @@ function NormToggleBox (props: { title: string, variant: NormToggleVariant, chil
         }}
         aria-expanded={open}
       >
-        <span aria-hidden='true' style={{ color: palette.arrow, fontSize: 11, fontWeight: 900, lineHeight: 1, width: 14, display: 'inline-flex', justifyContent: 'center' }}>{open ? '▼' : '▶'}</span>
-        <span>{props.title}</span>
+        <span aria-hidden='true' style={{ color: palette.arrow, fontSize: 11, fontWeight: 900, lineHeight: 1, width: 14, display: 'inline-flex', justifyContent: 'center', flex: '0 0 auto' }}>{open ? '▼' : '▶'}</span>
+        <span style={{ minWidth: 0, flex: '1 1 auto' }}>{props.title}</span>
+        {props.amount && <span style={{ flex: '0 0 auto', marginLeft: 12, whiteSpace: 'nowrap', fontWeight: 900 }}>{props.amount}</span>}
       </button>
       {open && (
         <div style={{ padding: '8px 10px', borderTop: `1px solid ${palette.border}`, background: palette.body }}>
@@ -4101,7 +4372,8 @@ function sanitizeImportDetailForDisplay (raw: any): string {
 }
 
 function isArticleSubtotalLine (line: string): boolean {
-  return /^Totale(?:\s+Art\.\s*\d+[A-Za-z]?)?\s*:/i.test(String(line || '').trim())
+  const text = String(line || '').trim()
+  return /^Totale(?:\s+Art\.\s*\d+[A-Za-z]?)?(?:\s*:|\s+[-−]?\s*\d)/i.test(text)
 }
 
 function articleLabelFromDetailTitle (title: string): string {
@@ -4109,9 +4381,52 @@ function articleLabelFromDetailTitle (title: string): string {
   return match ? match[1].replace(/Art\.\s*/i, 'Art. ') : ''
 }
 
-function normalizeImportDetailLines (details: string[], title: string): string[] {
+function normalizeImportDetailMoneyText (raw: string): string {
+  const value = String(raw || '').trim()
+  const match = value.match(/^([-−]?\s*\d+(?:\.\d{3})*,\d{2})\s*€(\s*\/\s*ha)?$/i)
+  if (!match) return value.replace(/^−/, '-')
+  const n = parseNumberInput(match[1])
+  if (n == null || !Number.isFinite(n)) return value.replace(/^−/, '-')
+  const euro = formatEuroText(n)
+  return match[2] ? euro.replace(/\s*€$/, ' €/ha') : euro
+}
+
+function splitImportDetailMoneyLine (line: string): { label: string, amount: string } | null {
+  const text = String(line || '').trim()
+  const match = text.match(/^(.*?)([-−]?\s*\d+(?:\.\d{3})*,\d{2}\s*€(?:\s*\/\s*ha)?)\s*$/i)
+  if (!match) return null
+  const label = match[1].replace(/[:=]?\s*$/, '').trim()
+  const amount = normalizeImportDetailMoneyText(match[2])
+  if (!label || !amount) return null
+  return { label, amount }
+}
+
+function normalizeImportDetailLineText (line: string): string {
+  const text = String(line || '').replace(/^[•·\-]\s*/, '').trim()
+  const parts = splitImportDetailMoneyLine(text)
+  if (!parts) return text.replace(/^Cauzione\s+decurtata\s*:/i, 'Decurtazione cauzione:')
+  let label = parts.label.replace(/^Cauzione\s+decurtata$/i, 'Decurtazione cauzione').replace(/^Cauzione\s+da\s+detrarre$/i, 'Decurtazione cauzione')
+  let amount = parts.amount
+  if (/decurtazione\s+cauzione/i.test(label) && !/^[-−]/.test(amount)) amount = `-${amount}`
+  return `${label}: ${amount}`
+}
+
+function normalizeImportDetailLines (details: string[], title: string, data?: any, fields?: LayerFieldInfo[]): string[] {
   const articleLabel = articleLabelFromDetailTitle(title)
-  const clean = details.map(line => line.replace(/^[•·\-]\s*/, '').trim()).filter(Boolean)
+  const articleNumber = normalizeArticleNumber(articleLabel)
+  const clean = details
+    .map(line => normalizeImportDetailLineText(line))
+    .filter(line => line && !/^Norma\s+(violata|sanzionatoria)\s*:/i.test(line))
+
+  if (articleNumber === '15' && !clean.some(line => /^Tipo\s+di\s+abuso\s*:/i.test(line))) {
+    const tipoAbuso = art15AbuseTypeLabel(data || {}, fields || [], '')
+    if (tipoAbuso) clean.unshift(`Tipo di abuso: ${tipoAbuso}`)
+  }
+  if (articleNumber === '17' && !clean.some(line => /^Tipo\s+comunicazione\s*:/i.test(line))) {
+    const tipoComunicazione = art17CommunicationTypeLabel(data || {}, fields || [], '')
+    if (tipoComunicazione) clean.unshift(`Tipo comunicazione: ${tipoComunicazione}`)
+  }
+
   const existingTotalIndex = clean.findIndex(isArticleSubtotalLine)
   if (existingTotalIndex >= 0 && articleLabel) {
     clean[existingTotalIndex] = clean[existingTotalIndex].replace(/^Totale(?:\s+Art\.\s*\d+[A-Za-z]?)?\s*:/i, `Totale ${articleLabel}:`)
@@ -4119,7 +4434,47 @@ function normalizeImportDetailLines (details: string[], title: string): string[]
   return clean
 }
 
-function DettaglioImportiContent (props: { value: any }) {
+
+function articleSubtotalFromDetails (details: string[]): { index: number, amount: string } | null {
+  const list = Array.isArray(details) ? details : []
+  for (let i = 0; i < list.length; i++) {
+    const line = String(list[i] || '').trim()
+    if (!isArticleSubtotalLine(line)) continue
+    const parts = splitImportDetailMoneyLine(line)
+    if (parts?.amount) return { index: i, amount: parts.amount }
+
+    const amountMatch = line.match(/([-−]?\s*\d+(?:\.\d{3})*,\d{2}\s*€(?:\s*\/\s*ha)?)\s*$/i)
+    if (amountMatch) {
+      const amount = normalizeImportDetailMoneyText(amountMatch[1])
+      if (amount) return { index: i, amount }
+    }
+  }
+
+  let total = 0
+  let foundAmount = false
+  for (const raw of list) {
+    const parts = splitImportDetailMoneyLine(raw)
+    if (!parts?.amount) continue
+    if (/\/\s*ha\b/i.test(parts.amount)) continue
+    const n = parseNumberInput(parts.amount.replace(/€/g, ''))
+    if (n == null || !Number.isFinite(n)) continue
+    total += n
+    foundAmount = true
+  }
+
+  return foundAmount ? { index: -1, amount: formatEuroText(total) } : null
+}
+
+function matchingNormGroupsForDetailTitle (title: string, groups?: SanzioneConsultivaGroup[]): SanzioneConsultivaGroup[] {
+  const articleLabel = articleLabelFromDetailTitle(title)
+  const articleNumber = normalizeArticleNumber(articleLabel)
+  if (!articleNumber) return []
+  const list = Array.isArray(groups) ? groups : []
+  return list.filter(group => normalizeArticleNumber(group.articoloViolato) === articleNumber)
+}
+
+function DettaglioImportiContent (props: { value: any, data?: any, fields?: LayerFieldInfo[], groups?: SanzioneConsultivaGroup[] }) {
+  const st = useAdminStyle()
   const source = sanitizeImportDetailForDisplay(props.value)
   if (!source) return <span>—</span>
   const lines = source.split('\n').map(line => line.trim())
@@ -4139,17 +4494,55 @@ function DettaglioImportiContent (props: { value: any }) {
   return (
     <div style={{ display: 'grid', gap: 10 }}>
       {groups.map((group, groupIndex) => {
-        const details = normalizeImportDetailLines(group.details, group.title)
+        const details = normalizeImportDetailLines(group.details, group.title, props.data, props.fields)
+        const subtotal = articleSubtotalFromDetails(details)
+        const visibleDetails = subtotal && subtotal.index >= 0 ? details.filter((_, idx) => idx !== subtotal.index) : details
+        const normGroups = matchingNormGroupsForDetailTitle(group.title, props.groups)
         return (
-          <div key={`${group.title}-${groupIndex}`}>
-            <div style={{ fontWeight: 900 }}>{group.title}</div>
-            {details.length > 0 && (
-              <ul style={{ margin: '5px 0 0 24px', padding: 0 }}>
-                {details.map((detail, detailIndex) => (
-                  <li key={`${groupIndex}-${detailIndex}`} style={{ marginTop: detailIndex === 0 ? 0 : 2, fontWeight: isArticleSubtotalLine(detail) || /^Totale da pagare\s*:/i.test(detail) ? 900 : 400 }}>
-                    {detail}
-                  </li>
+          <div
+            key={`${group.title}-${groupIndex}`}
+            style={{
+              display: 'grid',
+              gap: 8,
+              border: `${Number(st.normGroupBorderWidth ?? 1)}px solid ${st.normGroupBorderColor || '#93c5fd'}`,
+              borderRadius: 10,
+              background: st.normGroupBg || '#ffffff',
+              padding: 10
+            }}
+          >
+            {normGroups.length === 0 && <div style={{ fontWeight: 900 }}>{group.title}</div>}
+            {normGroups.length > 0 && (
+              <div style={{ display: 'grid', gap: 6 }}>
+                {normGroups.map((normGroup, normIndex) => (
+                  <React.Fragment key={`${group.title}-norm-${normGroup.codiceCasistica}-${normIndex}`}>
+                    <NormToggleBox variant='violata' title={violationNormSummary(normGroup)} amount={subtotal?.amount}>
+                      {articleDetailsByRole('Norma violata', normGroup.articoliViolati, 'violata')}
+                    </NormToggleBox>
+                    {groupVociBySanzioneArticle(normGroup, normGroup.voci).map(block => (
+                      <NormToggleBox key={`${normGroup.codiceCasistica}-${block.key}`} variant='sanzionatoria' title={`Norma sanzionatoria: ${articleListTitle(block.articles, block.fallback)}`}>
+                        {articleDetailsByRole('Norma sanzionatoria', block.articles, 'sanzionatoria')}
+                      </NormToggleBox>
+                    ))}
+                  </React.Fragment>
                 ))}
+              </div>
+            )}
+            {visibleDetails.length > 0 && (
+              <ul style={{ margin: '2px 0 0 34px', padding: 0 }}>
+                {visibleDetails.map((detail, detailIndex) => {
+                  const moneyLine = splitImportDetailMoneyLine(detail)
+                  const isTotal = isArticleSubtotalLine(detail) || /^Totale da pagare\s*:/i.test(detail)
+                  return (
+                    <li key={`${groupIndex}-${detailIndex}`} style={{ marginTop: detailIndex === 0 ? 0 : 2, fontWeight: isTotal ? 900 : 400 }}>
+                      {moneyLine ? (
+                        <span>
+                          <span>{moneyLine.label}: </span>
+                          <span style={{ whiteSpace: 'nowrap', fontWeight: 400 }}>{moneyLine.amount}</span>
+                        </span>
+                      ) : detail}
+                    </li>
+                  )
+                })}
               </ul>
             )}
           </div>
@@ -4270,46 +4663,41 @@ function ParametriSanzionatoriSection (props: { loadState: SanzioneConsultivaLoa
   const totaleAtto = sanzioneDovuta + rimborsoNetto + risarcimentoDanni + speseNotifica
 
   return (
-    <Section title='Importi e norme violate'>
-      {!urlsReady && (
-        <InfoBox kind='warn'>Configurare in Builder gli URL di GII_PARAMETRI_SANZIONI, GII_REGOLAMENTO_ARTICOLI e GII_REGOLAMENTO_RACCORDI.</InfoBox>
-      )}
-      {urlsReady && casistiche.length === 0 && (
-        <InfoBox kind='warn'>Nessuna casistica sanzionatoria rilevata dai dati della pratica.</InfoBox>
-      )}
-      {urlsReady && casistiche.length > 0 && loading && <InfoBox>Caricamento parametri sanzionatori…</InfoBox>}
-      {urlsReady && error && <InfoBox kind='warn'>Errore caricamento parametri sanzionatori: {error}</InfoBox>}
-      {urlsReady && !loading && !error && casistiche.length > 0 && groups.length === 0 && (
-        <InfoBox kind='warn'>Sono presenti violazioni contestate, ma non risultano raccordi attivi nelle tabelle configurate.</InfoBox>
-      )}
-      {urlsReady && groups.length > 0 && (
-        <div style={{ display: 'grid', gap: 10 }}>
-          <div style={{ display: 'grid', gap: 10 }}>
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(380px, 1fr))', gap: 10 }}>
-              <StatusSummaryItem label='Sanzione dovuta' value={formatEuroAmount(sanzioneDovuta)} tone='auto' />
-              <StatusSummaryItem label='Rimborso attrezzature' value={formatEuroAmount(rimborsoNetto)} tone='auto' />
-              <StatusSummaryItem label='Rimborso spese/risarcimento danni' value={formatEuroAmount(risarcimentoDanni)} tone='auto' />
-              <StatusSummaryItem label='Spese di notifica' value={formatEuroAmount(speseNotifica)} tone='auto' />
-              <StatusSummaryItem label='Totale da pagare' value={formatEuroAmount(totaleAtto)} tone='total' />
-            </div>
+    <>
+      <Section title='Importi totali'>
+        {!urlsReady && (
+          <InfoBox kind='warn'>Configurare in Builder gli URL di GII_PARAMETRI_SANZIONI, GII_REGOLAMENTO_ARTICOLI e GII_REGOLAMENTO_RACCORDI.</InfoBox>
+        )}
+        {urlsReady && casistiche.length === 0 && (
+          <InfoBox kind='warn'>Nessuna casistica sanzionatoria rilevata dai dati della pratica.</InfoBox>
+        )}
+        {urlsReady && casistiche.length > 0 && loading && <InfoBox>Caricamento parametri sanzionatori…</InfoBox>}
+        {urlsReady && error && <InfoBox kind='warn'>Errore caricamento parametri sanzionatori: {error}</InfoBox>}
+        {urlsReady && !loading && !error && casistiche.length > 0 && groups.length === 0 && (
+          <InfoBox kind='warn'>Sono presenti violazioni contestate, ma non risultano raccordi attivi nelle tabelle configurate.</InfoBox>
+        )}
+        {urlsReady && groups.length > 0 && (
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(380px, 1fr))', gap: 10 }}>
+            <StatusSummaryItem label='Sanzione dovuta' value={formatEuroAmount(sanzioneDovuta)} tone='auto' />
+            <StatusSummaryItem label='Rimborso attrezzature' value={formatEuroAmount(rimborsoNetto)} tone='auto' />
+            <StatusSummaryItem label='Rimborso spese/risarcimento danni' value={formatEuroAmount(risarcimentoDanni)} tone='auto' />
+            <StatusSummaryItem label='Spese di notifica' value={formatEuroAmount(speseNotifica)} tone='auto' />
+            <StatusSummaryItem label='Totale da pagare' value={formatEuroAmount(totaleAtto)} tone='total' />
           </div>
-          <details style={{ border: `${Number(st.formExpandableCardBorderWidth ?? 1)}px solid ${st.formExpandableCardBorderColor || '#e5e7eb'}`, borderRadius: 10, background: st.formExpandableCardBg || '#f9fafb', padding: 10 }}>
-            <summary style={{ cursor: 'pointer', fontWeight: 900, color: st.formInnerHeaderColor || '#0f4c81', fontSize: Number(st.formInnerHeaderFontSize ?? 14) }}>Riepilogo importi</summary>
-            <div style={{ marginTop: 10, border: `1px solid ${st.formCardBorderColor || '#c6d7ea'}`, borderRadius: Number(st.formCardBorderRadius ?? 8), background: '#ffffff', padding: '10px 12px', color: '#111827', fontSize: Number(st.formFieldFontSize ?? 15), lineHeight: 1.5, overflowWrap: 'anywhere' }}>
-              <DettaglioImportiContent value={pickAttrCI(d, ['sanzione_dettaglio_calcolo'])} />
-            </div>
-          </details>
-          <details style={{ border: `${Number(st.formExpandableCardBorderWidth ?? 1)}px solid ${st.formExpandableCardBorderColor || '#e5e7eb'}`, borderRadius: 10, background: st.formExpandableCardBg || '#f9fafb', padding: 10 }}>
-            <summary style={{ cursor: 'pointer', fontWeight: 900, color: st.formInnerHeaderColor || '#0f4c81', fontSize: Number(st.formInnerHeaderFontSize ?? 14) }}>Dettaglio contestazioni</summary>
-            <div style={{ marginTop: 10 }}>
-              <ParametriNormeTable groups={groups} />
-            </div>
-          </details>
-        </div>
+        )}
+      </Section>
+
+      {urlsReady && !loading && !error && groups.length > 0 && (
+        <Section title='Dettaglio contestazioni'>
+          <div style={{ color: '#111827', fontSize: Number(st.formFieldFontSize ?? 15), lineHeight: 1.5, overflowWrap: 'anywhere' }}>
+            <DettaglioImportiContent value={pickAttrCI(d, ['sanzione_dettaglio_calcolo'])} data={d} fields={props.fields} groups={groups} />
+          </div>
+        </Section>
       )}
-    </Section>
+    </>
   )
 }
+
 
 function SanzioniConsultiveSection (props: { loadState: SanzioneConsultivaLoadState, data: Record<string, any>, fields: LayerFieldInfo[], canEdit: boolean, onChange: (name: string, value: any) => void }) {
   return <ParametriSanzionatoriSection loadState={props.loadState} data={props.data} fields={props.fields} canEdit={props.canEdit} onChange={props.onChange} />
@@ -4339,8 +4727,19 @@ function joinParts (...parts: string[]): string {
   return parts.map(p => String(p || '').trim()).filter(Boolean).join(' ')
 }
 
+function firstTextAttr (data: any, names: string[]): string {
+  for (const name of names) {
+    const value = String(pickAttrCI(data || {}, [name]) || '').trim()
+    if (value) return value
+  }
+  return ''
+}
+
 function buildVerbaleViolationsText (data: any, fields: LayerFieldInfo[]): string {
   const rows = buildViolationRows(data || {}, fields || [])
+    .map((row, index) => ({ row, index }))
+    .sort((a, b) => Number(normalizeArticleNumber(a.row.label) || Number.MAX_SAFE_INTEGER) - Number(normalizeArticleNumber(b.row.label) || Number.MAX_SAFE_INTEGER) || a.index - b.index)
+    .map(item => item.row)
   if (!rows.length) return ''
   return rows.map(row => {
     const lines = [row.label, ...row.details.map(d => `• ${d.label}: ${d.value}`)]
@@ -4351,11 +4750,20 @@ function buildVerbaleViolationsText (data: any, fields: LayerFieldInfo[]): strin
 function buildVerbalePdfMap (data: any, fields: LayerFieldInfo[], profile: { username: string, fullName: string }): Record<string, string> {
   const d = data || {}
   const oid = pickAttrCI(d, ['OBJECTID', 'objectid', 'ObjectId', 'FID'])
-  const pratica = joinParts(String(pickAttrCI(d, ['cod_pratica', 'codice_rapporto', 'n_rapporto', 'numero_rapporto']) || ''), oid != null && String(oid) ? `(OBJECTID ${oid})` : '')
-  const isPg = String(pickAttrCI(d, ['tipologia_soggetto']) || '').toUpperCase().includes('GIUR') || !!String(pickAttrCI(d, ['ragione_sociale']) || '').trim()
+  const oidNumber = oid != null && Number.isFinite(Number(oid)) ? Number(oid) : null
+  const nRapporto = normalizeReportCode(pickAttrCI(d, [
+    'numero_rapporto_tecnico', 'NUMERO_RAPPORTO_TECNICO', 'Numero_rapporto_tecnico',
+    'n_rapporto', 'numero_rapporto', 'codice_rapporto'
+  ]), oidNumber)
+  const nRilevazione = normalizeRilevazioneCodeForAmm(d, oidNumber)
+  const dataApprovazioneRapporto = pdfFieldValue(d, fields, 'dt_esito_DT') || pdfFieldValue(d, fields, 'data_rapporto_tecnico')
+  const nomeTrasgressore = String(pickAttrCI(d, ['nome']) || '').trim()
+  const cognomeTrasgressore = String(pickAttrCI(d, ['cognome']) || '').trim()
+  const ragioneSociale = String(pickAttrCI(d, ['ragione_sociale']) || '').trim()
+  const isPg = String(pickAttrCI(d, ['tipologia_soggetto']) || '').toUpperCase().includes('GIUR') || !!ragioneSociale
   const trasgressore = isPg
-    ? String(pickAttrCI(d, ['ragione_sociale']) || '').trim()
-    : joinParts(String(pickAttrCI(d, ['nome']) || ''), String(pickAttrCI(d, ['cognome']) || ''))
+    ? ragioneSociale
+    : joinParts(cognomeTrasgressore, nomeTrasgressore)
   const cfPiva = isPg ? String(pickAttrCI(d, ['piva']) || '').trim() : String(pickAttrCI(d, ['codice_fiscale']) || '').trim()
   const indirizzo = joinParts(String(pickAttrCI(d, ['via']) || ''), String(pickAttrCI(d, ['civico']) || ''))
   const comuneCap = joinParts(String(pickAttrCI(d, ['citta', 'comune']) || ''), String(pickAttrCI(d, ['cap']) || ''))
@@ -4364,16 +4772,33 @@ function buildVerbalePdfMap (data: any, fields: LayerFieldInfo[], profile: { use
   const settore = pdfFieldValue(d, fields, 'settore_cod') || String(pickAttrCI(d, ['settore_label', 'settore']) || '')
   const rawTipoAtto = String(pickAttrCI(d, ['tipo_atto_amm']) || '').trim()
   const tipoAttoLabel = pdfFieldValue(d, fields, 'tipo_atto_amm') || rawTipoAtto
+  const tiAmmNome = firstTextAttr(d, ['ti_amm_assegnato_nome', 'ti_amm_assegnato_username'])
+  const riAmmNome = firstTextAttr(d, [
+    'ri_amm_nome', 'ri_amm_username',
+    'responsabile_istruttoria_amm_nome', 'responsabile_istruttoria_amm_username',
+    'istruttoria_amm_chiusa_da'
+  ])
+  const daNome = firstTextAttr(d, [
+    'da_nome', 'da_username',
+    'direttore_area_nome', 'direttore_area_username',
+    'direttore_amm_nome', 'direttore_amm_username',
+    'dt_amm_nome', 'dt_amm_username',
+    'atto_approvato_da', 'approvato_da', 'istruttoria_amm_approvata_da'
+  ])
+  const approvatoDa = isDaApprovalComplete(d)
   return {
     objectid: oid != null ? String(oid) : '',
-    pratica,
-    n_rapporto: String(pickAttrCI(d, ['n_rapporto', 'numero_rapporto', 'codice_rapporto', 'cod_pratica']) || ''),
+    pratica: '',
+    n_rilevazione: nRilevazione,
+    n_rapporto: nRapporto,
     data_rilevazione: pdfFieldValue(d, fields, 'data_rilevazione'),
+    data_approvazione_rapporto: dataApprovazioneRapporto,
     area,
     settore,
     ufficio_zona: pdfFieldValue(d, fields, 'ufficio_zona'),
     tecnico_rilevatore: String(pickAttrCI(d, ['tecnico_rilevatore']) || ''),
     ti_amm: String(pickAttrCI(d, ['ti_amm_assegnato_nome', 'ti_amm_assegnato_username']) || ''),
+    trasgressore_tipo: isPg ? 'PG' : 'PF',
     trasgressore,
     cf_piva: cfPiva,
     indirizzo,
@@ -4419,6 +4844,8 @@ function buildVerbalePdfMap (data: any, fields: LayerFieldInfo[], profile: { use
     bonifico_causale: String(pickAttrCI(d, ['bonifico_causale']) || ''),
     bonifico_cro_trn: String(pickAttrCI(d, ['bonifico_cro_trn']) || ''),
     bonifico_data_accredito: pdfFieldValue(d, fields, 'bonifico_data_accredito'),
+    tipo_abuso_art15: art15AbuseTypeLabel(d, fields, ''),
+    tipo_comunicazione_art17: art17CommunicationTypeLabel(d, fields, ''),
     sanzione_dettaglio_calcolo: String(pickAttrCI(d, ['sanzione_dettaglio_calcolo']) || ''),
     sanzione_calcolata_il: pdfFieldValue(d, fields, 'sanzione_calcolata_il'),
     sanzione_calcolata_da: String(pickAttrCI(d, ['sanzione_calcolata_da']) || ''),
@@ -4426,14 +4853,23 @@ function buildVerbalePdfMap (data: any, fields: LayerFieldInfo[], profile: { use
     verbale_pdf_generato_da: String(pickAttrCI(d, ['verbale_pdf_generato_da']) || ''),
     istruttoria_amm_chiusa_il: pdfFieldValue(d, fields, 'istruttoria_amm_chiusa_il'),
     istruttoria_amm_chiusa_da: String(pickAttrCI(d, ['istruttoria_amm_chiusa_da']) || ''),
+    amm_iter_compilazione_nome: tiAmmNome || String(pickAttrCI(d, ['verbale_pdf_generato_da']) || ''),
+    amm_iter_compilazione_presa: pdfFieldValue(d, fields, 'dt_presa_in_carico_TI_AMM'),
+    amm_iter_compilazione_data: pdfFieldValue(d, fields, 'dt_esito_TI_AMM') || pdfFieldValue(d, fields, 'sanzione_calcolata_il') || pdfFieldValue(d, fields, 'verbale_pdf_generato_il'),
+    amm_iter_supervisione_nome: riAmmNome,
+    amm_iter_supervisione_presa: pdfFieldValue(d, fields, 'dt_presa_in_carico_RI_AMM'),
+    amm_iter_supervisione_data: pdfFieldValue(d, fields, 'dt_esito_RI_AMM') || pdfFieldValue(d, fields, 'istruttoria_amm_chiusa_il'),
+    amm_iter_approvazione_nome: daNome,
+    amm_iter_approvazione_presa: pdfFieldValue(d, fields, 'dt_presa_in_carico_DA') || pdfFieldValue(d, fields, 'dt_stato_DA'),
+    amm_iter_approvazione_data: approvatoDa ? (pdfFieldValue(d, fields, 'dt_esito_DA') || displayVerbaleApprovalDate(d, fields)) : '',
     data_generazione: new Date().toLocaleString('it-IT'),
     generato_da: profile.fullName || profile.username || ''
   }
 }
 
 function verbalePdfFileName (map: Record<string, string>): string {
-  const prefix = getVerbalePdfFilePrefix(map) || 'verbale'
-  const base = String(map.numero_verbale || map.n_rapporto || map.objectid || prefix).replace(/[^a-zA-Z0-9_-]/g, '_')
+  const prefix = getVerbalePdfFilePrefix(map) || 'proposta_contestazione'
+  const base = String(map.n_rapporto || map.objectid || prefix).replace(/[^a-zA-Z0-9_-]/g, '_')
   return `${prefix}_${base || prefix}.pdf`
 }
 
@@ -4573,7 +5009,7 @@ function DatiGeneraliAmmSection (props: { title: string, data: Record<string, an
 
 function VerbaleInlinePreviewSection (props: { data: Record<string, any>, fields: LayerFieldInfo[], profile: { username: string, fullName: string }, hasSelection: boolean }) {
   const [pdfUrl, setPdfUrl] = React.useState<string | null>(null)
-  const [pdfFileName, setPdfFileName] = React.useState('verbale.pdf')
+  const [pdfFileName, setPdfFileName] = React.useState('proposta-contestazione.pdf')
   const [loading, setLoading] = React.useState(false)
   const [error, setError] = React.useState<string | null>(null)
 
@@ -4625,11 +5061,11 @@ function VerbaleInlinePreviewSection (props: { data: Record<string, any>, fields
       <AnteprimaPdfViewer
         url={pdfUrl}
         fileName={pdfFileName}
-        title='Anteprima atto amministrativo'
+        title='Anteprima proposta di contestazione'
         subtitle={pdfFileName}
         loading={loading}
         error={error}
-        emptyText='Nessun dato disponibile per l&apos;anteprima dell&apos;atto.'
+        emptyText='Nessun dato disponibile per l&apos;anteprima della proposta.'
       />
     </div>
   )
@@ -5237,7 +5673,7 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
   const [verbalePreviewLoading, setVerbalePreviewLoading] = React.useState(false)
   const [verbalePreviewError, setVerbalePreviewError] = React.useState<string | null>(null)
   const [verbalePreviewUrl, setVerbalePreviewUrl] = React.useState<string | null>(null)
-  const [verbalePreviewFileName, setVerbalePreviewFileName] = React.useState('verbale.pdf')
+  const [verbalePreviewFileName, setVerbalePreviewFileName] = React.useState('proposta-contestazione.pdf')
   const [activeAmmSection, setActiveAmmSection] = React.useState<AmmSectionKey>(AMM_DEFAULT_SECTION)
   const rootRef = React.useRef<HTMLDivElement | null>(null)
   const [pageVisible, setPageVisible] = React.useState(false)
@@ -5531,9 +5967,9 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
     const current = source || {}
     const issues: string[] = []
     if (!isVerbaleDefinitivo(current)) issues.push(tipoAttoAmmPrevedeVerbale(current)
-      ? 'Atto: verbale non ancora definitivo; numero e data saranno assegnati dopo l’approvazione del Direttore d’Area.'
-      : 'Atto: documento non ancora definitivo; è necessaria l’approvazione del Direttore d’Area.')
-    if (!hasAdminValue(pickAttrCI(current, ['note_atto_amm']))) issues.push('Atto: compilare le note amministrative.')
+      ? 'Proposta: verbale non ancora definitivo; numero e data saranno assegnati dopo l’approvazione del Direttore d’Area.'
+      : 'Proposta: documento non ancora definitivo; è necessaria l’approvazione del Direttore d’Area.')
+    if (!hasAdminValue(pickAttrCI(current, ['note_atto_amm']))) issues.push('Attestazione di conformità: attestazione non ancora acquisita.')
     const protocolloNumero = pickAttrCI(current, ['protocollo_verbale_numero'])
     const protocolloData = pickAttrCI(current, ['protocollo_verbale_data'])
     const notificaTipo = pickAttrCI(current, ['notifica_tipo'])
@@ -5680,11 +6116,6 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
     }
     if (!canEdit) {
       setDialog({ kind: 'warn', title: 'Scheda in sola lettura', text: 'Il profilo corrente può consultare la scheda, ma non modificarla.' })
-      return
-    }
-    const currentForValidation = { ...(draft || data || {}), ...automaticValues }
-    if (!hasAdminValue(pickAttrCI(currentForValidation, ['note_atto_amm']))) {
-      setDialog({ kind: 'warn', title: 'Campi obbligatori mancanti', text: 'Prima di salvare completare:\n- Atto: compilare le note amministrative.' })
       return
     }
     const attrs = changedAttrs(layerFields, initialDraft, draft)
@@ -5841,11 +6272,11 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
         <AnteprimaPdfViewer
           url={verbalePreviewUrl}
           fileName={verbalePreviewFileName}
-          title='Anteprima atto amministrativo'
+          title='Anteprima proposta di contestazione'
           subtitle={verbalePreviewFileName}
           loading={verbalePreviewLoading}
           error={verbalePreviewError}
-          emptyText='Nessun dato disponibile per l&apos;anteprima dell&apos;atto.'
+          emptyText='Nessun dato disponibile per l&apos;anteprima della proposta.'
           onDownload={handleVerbaleDownload}
           onClose={closeVerbalePreview}
         />
@@ -5867,7 +6298,7 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
         <div style={{ flex: '0 0 auto', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 8, padding: '8px 0', borderBottom: `1px solid ${cfg.dividerColor || '#cbd8e6'}` }}>
           <div style={{ minWidth: 0 }}>
             <div style={{ fontSize: Number(adminStyle.titleFontSize || 18), fontWeight: Number(cfg.titleFontWeight || 700) as any, color: '#111827', lineHeight: 1.25 }}>
-              {hasSelection ? (<>{titleParts.prefix}<span style={{ color: '#2563eb', fontWeight: Number(cfg.titleFontWeight || 700) as any }}>{titleParts.reportCode}</span></>) : 'Atto amministrativo'}
+              {hasSelection ? (<>{titleParts.prefix}<span style={{ color: '#2563eb', fontWeight: Number(cfg.titleFontWeight || 700) as any }}>{titleParts.reportCode}</span></>) : 'Istruttoria amministrativa'}
             </div>
             {hasSelection && !headerVerbaleDefinitivo && (
               <div style={{ marginTop: 3, color: '#b42318', fontSize: adminLabelFontSize(adminStyle), fontWeight: 850, lineHeight: 1.3 }}>
@@ -5927,6 +6358,15 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
         {hasSelection && (
           <>
             <div style={{ display: 'grid', gap: Number(adminStyle.formSectionGap ?? 10), minHeight: (activeAmmSection === 'anteprima' || activeAmmSection === 'allegati') ? '100%' : undefined, height: (activeAmmSection === 'anteprima' || activeAmmSection === 'allegati') ? '100%' : undefined, alignContent: (activeAmmSection === 'anteprima' || activeAmmSection === 'allegati') ? 'stretch' : 'start' }} data-gii-editing-amm-section={activeAmmSection}>
+              {activeAmmSection === 'trasgressore' && (
+                <TrasgressoreAmmSection
+                  data={viewData || {}}
+                  fields={layerFields}
+                  canEdit={canEdit}
+                  onChange={onFieldChange}
+                />
+              )}
+
               {activeAmmSection === 'dati_generali' && (
                 <DatiGeneraliAmmSection
                   title={title}
@@ -5956,11 +6396,9 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
                     </InfoBox>
                   )}
 
-                  <VerbaleSummary
+                  <AttestazioneConformitaSummary
                     data={viewData || {}}
                     fields={layerFields}
-                    canEdit={canEditAttoNotes}
-                    onApplyNote={text => onFieldChange(realFieldName(layerFields, 'note_atto_amm') || 'note_atto_amm', text)}
                   />
                 </>
               )}

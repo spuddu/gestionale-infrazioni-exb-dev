@@ -248,7 +248,7 @@ export const defaultConfig: Config = {
   normViolataHeaderBg: '#dbeafe',
   normViolataHeaderTextColor: '#0f172a',
   normViolataArrowColor: '#1d4ed8',
-  normViolataBodyBg: '#ffffff',
+  normViolataBodyBg: '#f8fbff',
   normViolataArticleTitleColor: '#111827',
   normViolataArticleTextColor: '#374151',
   normViolataArticleMetaColor: '#6b7280',

@@ -5,10 +5,10 @@ import { Button } from 'jimu-ui'
 import { createPortal } from 'react-dom'
 import type { IMConfig } from '../config'
 import { defaultConfig } from '../config'
-import { buildNotaSpesePdf, type NotaSpeseData } from '../../../_shared/gii-anteprime/rapporto/notaspese-pdf-builder'
+import { buildNotaSpesePdf, type NotaSpeseData } from '../../../_shared/gii-anteprime/documenti-tecnici/rapporto/notaspese-pdf-builder'
 import { PDFDocument } from 'pdf-lib'
 import AnteprimaPdfViewer from '../../../_shared/gii-anteprime/anteprima-pdf-viewer'
-import { buildRapportoPdf, buildRapportoIterPlaceholders, loadRapportoIterCicliForPdf, type RapportoIterCicloPdf } from '../../../_shared/gii-anteprime/rapporto/rapporto-pdf-builder'
+import { buildRapportoPdf, buildRapportoIterPlaceholders, loadRapportoIterCicliForPdf, type RapportoIterCicloPdf } from '../../../_shared/gii-anteprime/documenti-tecnici/rapporto/rapporto-pdf-builder'
 
 
 const GII_LOG_EVENTI_CICLI_URL = 'https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_LOG_EVENTI_CICLI/FeatureServer/0'
@@ -3928,7 +3928,7 @@ function ActionsPanel (props: {
   const showTakeDirect = canStartTakeInCharge || !hasSel || !hasVisibleWorkflowMenuActions
 
   // NOTE: compare per integrazione, respinta e — Matrice_TI caso 1/b — anche per eliminazione (obbligatoria)
-  const showNote = pending === 'INTEGRAZIONE' || pending === 'INTEGRAZIONE_TI_AMM' || pending === 'INTEGRAZIONE_TECNICA' || pending === 'RESPINGI' || pending === 'ELIMINA'
+  const showNote = pending === 'INTEGRAZIONE' || pending === 'INTEGRAZIONE_TI_AMM' || pending === 'INTEGRAZIONE_TECNICA' || pending === 'RESPINGI' || pending === 'ELIMINA' || (pending === 'APPROVA' && role === 'TI_AMM')
   const noteEnabled = showNote && hasSel && !loading && !lockedByTransmit
 
   const noteTrim = String(noteDraft ?? '').trim()
@@ -3940,6 +3940,7 @@ function ActionsPanel (props: {
     (pending === 'INTEGRAZIONE') ||
     (pending === 'INTEGRAZIONE_TI_AMM') ||
     (pending === 'INTEGRAZIONE_TECNICA') ||
+    (pending === 'APPROVA' && role === 'TI_AMM') ||
     (pending === 'RESPINGI' && isAltro) ||
     (pending === 'ELIMINA')  // Matrice_TI caso 1/b: note obbligatoria per eliminazione
 
@@ -4585,6 +4586,11 @@ function ActionsPanel (props: {
         [esitoField]: esito,
         [dtEsitoField]: now
       }
+      if (role === 'TI_AMM' && esito === ESITO_APPROVATA) {
+        const schemaFields: Record<string, any> = (ds as any)?.getSchema?.()?.fields || {}
+        const fNoteAttoAmm = getSchemaFieldNameCI(schemaFields, 'note_atto_amm')
+        if (fNoteAttoAmm) upd[fNoteAttoAmm] = noteTrim
+      }
       if (stato != null) {
         upd[statoField] = stato
         upd[dtStatoField] = now
@@ -4711,6 +4717,8 @@ function ActionsPanel (props: {
                     : 'ISTRUTTORIA_TRASMESSA',
                   ruoloDestinatario: ruoloDest,
                   utenteDestinatario: resolveDestUser(ruoloDest),
+                  noteChiusura: role === 'TI_AMM' && noteTrim ? `Attestazione di conformità:
+${noteTrim}` : undefined,
                   fase: role
                 })
         : null
@@ -4906,10 +4914,13 @@ function ActionsPanel (props: {
   const actionMenuTheme = pending ? theme : pendingTheme.TAKE
   const selectedWorkflowMenuKey = selectedWorkflowMenuItem?.key || ''
   const isWorkflowRimandoPending = pending === 'INTEGRAZIONE' || pending === 'INTEGRAZIONE_TI_AMM' || pending === 'INTEGRAZIONE_TECNICA'
-  const workflowNoteLabel = isWorkflowRimandoPending ? 'Motivazione del rimando' : 'Note'
-  const workflowNotePlaceholder = isWorkflowRimandoPending
-    ? 'Indicare la motivazione del rimando…'
-    : (noteIsRequired ? 'Specifica il motivo…' : 'Nota facoltativa…')
+  const isAttestazioneConformitaPending = pending === 'APPROVA' && role === 'TI_AMM'
+  const workflowNoteLabel = isAttestazioneConformitaPending ? 'Attestazione di conformità' : (isWorkflowRimandoPending ? 'Motivazione del rimando' : 'Note')
+  const workflowNotePlaceholder = isAttestazioneConformitaPending
+    ? 'Attestare la conformità della proposta agli elementi istruttori e ai dati disponibili…'
+    : isWorkflowRimandoPending
+      ? 'Indicare la motivazione del rimando…'
+      : (noteIsRequired ? 'Specifica il motivo…' : 'Nota facoltativa…')
 
   const closeWorkflowMenu = () => {
     if (loading) return
@@ -4950,6 +4961,7 @@ function ActionsPanel (props: {
     if (pending === 'ASSEGNA_TI') return !!tiSelected
     if (pending === 'ASSEGNA_TI_AMM') return !!tiAmmSelected
     if (pending === 'INTEGRAZIONE' || pending === 'INTEGRAZIONE_TI_AMM' || pending === 'INTEGRAZIONE_TECNICA') return !!noteTrim
+    if (pending === 'APPROVA' && role === 'TI_AMM') return !!noteTrim
     if (pending === 'RESPINGI') return !!reasonTrim && (!isAltro || !!noteTrim)
     if (pending === 'ELIMINA') return !!noteTrim
     return true
@@ -5310,8 +5322,8 @@ function ActionsPanel (props: {
         {showNote && (
           <div style={{ display: 'grid', gap: 6 }}>
             <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
-              <div style={{ fontSize: Math.max(15, Number(titleFontSize) || 15), fontWeight: 700 }}>Note</div>
-              {(pending === 'INTEGRAZIONE' || (pending === 'RESPINGI' && noteIsRequired) || pending === 'ELIMINA') && (
+              <div style={{ fontSize: Math.max(15, Number(titleFontSize) || 15), fontWeight: 700 }}>{workflowNoteLabel}</div>
+              {noteIsRequired && (
                 <div style={labelReqStyle(true, noteReqErr)}>(obbligatoria)</div>
               )}
             </div>
@@ -5319,7 +5331,7 @@ function ActionsPanel (props: {
               ref={noteRef}
               value={noteDraft}
               onChange={(e) => { const v = String((e.target as HTMLTextAreaElement).value ?? ''); setNoteDraft(v); autoResizeNote(e.target as HTMLTextAreaElement) }}
-              placeholder={(pending === 'INTEGRAZIONE' || pending === 'INTEGRAZIONE_TI_AMM' || pending === 'INTEGRAZIONE_TECNICA') ? 'Scrivi la richiesta di integrazione…' : (noteIsRequired ? 'Specifica il motivo (Altro)…' : 'Nota facoltativa…')}
+              placeholder={workflowNotePlaceholder}
               style={{ width: '100%', minHeight: NOTE_MIN_H, maxHeight: NOTE_MAX_H, overflowY: 'hidden', resize: 'none', padding: '8px 10px', borderRadius: 8, border: noteReqErr ? '1px solid #dc2626' : '1px solid rgba(0,0,0,0.20)', fontSize: Math.max(15, Number(ui.statusFontSize) || 15), outline: 'none', boxSizing: 'border-box' }}
               disabled={!noteEnabled}
             />
