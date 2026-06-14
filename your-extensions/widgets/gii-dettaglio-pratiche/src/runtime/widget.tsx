@@ -13,6 +13,7 @@ type MsgKind = 'info' | 'ok' | 'err'
 type Msg = { kind: MsgKind; text: string }
 
 const GII_LOG_EVENTI_CICLI_URL = 'https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_LOG_EVENTI_CICLI/FeatureServer/0'
+const GII_UTENTI_URL = 'https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_utenti/FeatureServer/0'
 
 const RUOLO_NUM: Record<string, number> = { TR: 1, TI: 2, RZ: 3, RI: 4, DT: 5, DA: 6, ADMIN: 7 }
 const AREA_NUM: Record<string, number> = { AMM: 1, AGR: 2, TEC: 3 }
@@ -2171,6 +2172,60 @@ function MapTabContent (props: {
 }
 
 
+
+type IterUtenteEntry = {
+  fullName: string
+}
+
+let _iterUtentiMapCache: Map<string, IterUtenteEntry> | null = null
+let _iterUtentiMapLoading = false
+
+function normalizeIterUsernameKey (raw: any): string {
+  return String(raw ?? '').trim().toLowerCase()
+}
+
+function buildIterFullNameFromAttrs (attrs: any): string {
+  const direct = String(pickAttrCI(attrs, ['full_name', 'nome_completo', 'nominativo']) || '').trim()
+  if (direct) return direct
+  const nome = String(pickAttrCI(attrs, ['nome']) || '').trim()
+  const cognome = String(pickAttrCI(attrs, ['cognome']) || '').trim()
+  return [nome, cognome].filter(Boolean).join(' ').trim()
+}
+
+function isLikelyTechnicalUsername (raw: any): boolean {
+  const s = String(raw ?? '').trim()
+  if (!s) return false
+  if (s.includes('@') || s.includes('\\')) return true
+  if (/[_]/.test(s)) return true
+  if (/^(TEST|TR|TI|RZ|RI|DT|DA|ADMIN)([\s_-]|$)/i.test(s)) return true
+  return false
+}
+
+function resolveIterPersonName (raw: any, utentiMap?: Map<string, IterUtenteEntry> | null): string {
+  const text = String(raw ?? '').trim()
+  if (!text) return ''
+  const entry = utentiMap?.get(normalizeIterUsernameKey(text))
+  const fullName = String(entry?.fullName || '').trim()
+  if (fullName) return fullName
+  return isLikelyTechnicalUsername(text) ? '' : text
+}
+
+function formatIterQualificaLabel (raw: any): string {
+  const original = String(raw ?? '').trim()
+  const s = original.toUpperCase().replace(/[\s-]+/g, '_')
+  if (!s) return ''
+  if (s === 'TI_AMM' || s.includes('TECNICO_ISTRUTTORE_AMMINISTRATIVO')) return 'Tecnico istruttore amministrativo'
+  if (s === 'RI_AMM' || s.includes('RESPONSABILE_ISTRUTTORIA_AMMINISTRATIVA')) return 'Responsabile istruttoria amministrativa'
+  if (s === 'DA' || s.includes('AA_GG') || s.includes('PROGRAMMAZIONE_FINANZIARIA')) return 'Direttore Area AA. GG. e P.F.'
+  if (s === 'TR' || s.includes('TECNICO_RILEVATORE')) return 'Tecnico rilevatore'
+  if (s === 'TI' || s.includes('TECNICO_ISTRUTTORE')) return 'Tecnico istruttore'
+  if (s === 'RZ' || s.includes('RESPONSABILE_DI_ZONA') || s.includes('CAPO_SETTORE')) return 'Capo Settore'
+  if (s === 'RI' || s.includes('RESPONSABILE_ISTRUTTORIA')) return 'Responsabile istruttoria'
+  if (s === 'DT' || s.includes('DIRETTORE')) return 'Direttore d’Area'
+  if (s === 'ADMIN' || s.includes('AMMINISTRATORE')) return 'Amministratore'
+  return original
+}
+
 type CicloRecord = {
   numero_ciclo_ruolo: number | null
   ruolo_competente: string
@@ -2220,6 +2275,34 @@ function formatEventoFallback (code: string): string {
 function formatEvento (code: string): string {
   if (!code) return '—'
   return EVENTO_LABELS[code] || formatEventoFallback(code)
+}
+
+function cleanIterNoteForDisplay (raw: any): string {
+  const text = String(raw ?? '').replace(/\r\n/g, '\n').replace(/\r/g, '\n').trim()
+  if (!text) return ''
+
+  // Le assegnazioni sono già rappresentate da titolo ciclo e destinatario.
+  // Nel log storico possono però contenere note automatiche tipo:
+  // "Assegna Tecnico Istruttore: Test_TI_D1 (Test_TI_D1)".
+  const assignmentOnly = text.match(/^\s*(Riapertura amministrativa n\.\s*\d+\.\s*)?(?:(?:Assegna|Assegnazione)\s+Tecnico\s+Istruttore(?:\s+amministrativo)?|Tecnico\s+Istruttore(?:\s+amministrativo)?\s+assegnato)\s*[:.-]/i)
+  if (assignmentOnly) {
+    return String(assignmentOnly[1] || '').trim()
+  }
+
+  const paragraphs = text
+    .split(/\n\s*\n/g)
+    .map(p => p.trim())
+    .filter(Boolean)
+
+  const cleaned = paragraphs.filter(paragraph => {
+    const normalized = paragraph.replace(/\s+/g, ' ').trim()
+    if (/^A seguito della (verifica svolta|valutazione di competenza),/i.test(normalized)) return false
+    if (/^Si attesta la conformità della pratica/i.test(normalized)) return false
+    if (/^Si condivide l['’]istruttoria amministrativa proposta/i.test(normalized)) return false
+    return true
+  })
+
+  return cleaned.join('\n\n').trim()
 }
 
 function formatRuoloIter (raw: any): string {
@@ -2405,8 +2488,8 @@ function buildSyntheticCreationCycle (data: any, loggedCicli: CicloRecord[]): Ci
     ? (pickRilevazioneDateValueForDisplay(data) ?? firstNonEmptyAttr(data, ['data_rilevazione', 'CreationDate', 'creationdate', 'created_date', 'start', 'end', 'data_firma']))
     : firstNonEmptyAttr(data, ['dt_presa_in_carico_TI', 'dt_stato_TI', 'data_firma', 'data_rilevazione', 'CreationDate', 'creationdate', 'created_date', 'start', 'end'])
   const user = firstNonEmptyAttr(data, origin === 'TI'
-    ? ['ti_assegnato_nome', 'ti_assegnato_username', 'utente_loggato', 'created_user', 'Creator', 'creator']
-    : ['tecnico_rilevatore', 'utente_loggato', 'created_user', 'Creator', 'creator']
+    ? ['ti_assegnato_username', 'utente_loggato', 'created_user', 'Creator', 'creator', 'ti_assegnato_nome']
+    : ['utente_loggato', 'created_user', 'Creator', 'creator', 'tecnico_rilevatore']
   )
   const areaRaw = firstNonEmptyAttr(data, ['area_cod', 'area', 'cod_area'])
   const settoreRaw = firstNonEmptyAttr(data, ['settore_cod', 'settore', 'cod_settore'])
@@ -2453,11 +2536,51 @@ function CicliTimeline (props: { globalId: string; hasSel: boolean; sortDir: 'as
   const [loading, setLoading] = React.useState(false)
   const [error, setError] = React.useState<string | null>(null)
   const [reloadKey, setReloadKey] = React.useState(0)
+  const [utentiMap, setUtentiMap] = React.useState<Map<string, IterUtenteEntry> | null>(_iterUtentiMapCache)
 
   React.useEffect(() => {
     const h = () => setReloadKey(k => k + 1)
     window.addEventListener('gii-log-eventi-cicli-changed', h as EventListener)
     return () => window.removeEventListener('gii-log-eventi-cicli-changed', h as EventListener)
+  }, [])
+
+  React.useEffect(() => {
+    if (_iterUtentiMapCache) {
+      setUtentiMap(_iterUtentiMapCache)
+      return
+    }
+    if (_iterUtentiMapLoading) return
+    _iterUtentiMapLoading = true
+    ;(async () => {
+      try {
+        const FeatureLayer = await loadEsriModule<any>('esri/layers/FeatureLayer')
+        const fl = new FeatureLayer({ url: GII_UTENTI_URL })
+        if (typeof fl?.load === 'function') await fl.load()
+        const userFields = fl?.fields || []
+        const availableFields = normalizeLogFieldNameSet(userFields)
+        const outFields = pickLogOutFields(availableFields, [
+          'username', 'full_name', 'nome', 'cognome', 'nome_completo', 'nominativo'
+        ])
+        const res = await fl.queryFeatures({
+          where: '1=1',
+          outFields,
+          returnGeometry: false
+        })
+        const map = new Map<string, IterUtenteEntry>()
+        for (const f of res?.features || []) {
+          const a = f?.attributes || {}
+          const username = String(pickAttrCI(a, ['username']) || '').trim()
+          const fullName = buildIterFullNameFromAttrs(a)
+          if (username) map.set(normalizeIterUsernameKey(username), { fullName })
+        }
+        _iterUtentiMapCache = map
+        setUtentiMap(map)
+      } catch (e) {
+        console.warn('[GII-Dettaglio] Errore caricamento GII_utenti:', e)
+      } finally {
+        _iterUtentiMapLoading = false
+      }
+    })()
   }, [])
 
   React.useEffect(() => {
@@ -2534,10 +2657,12 @@ function CicliTimeline (props: { globalId: string; hasSel: boolean; sortDir: 'as
   if (error) return <div style={{ color: '#b42318', fontSize: 12, padding: 12 }}>{error}</div>
   if (displayCicli.length === 0) return <div style={{ opacity: 0.6, fontSize: 12, padding: 12 }}>Nessun evento registrato per questo rapporto.</div>
 
+  const iterLabelValueColumns = '112px minmax(0, 1fr)'
+
   const rowSt: React.CSSProperties = {
     display: 'grid',
-    gridTemplateColumns: 'minmax(120px, 170px) minmax(0, 1fr)',
-    gap: 10,
+    gridTemplateColumns: iterLabelValueColumns,
+    gap: 8,
     alignItems: 'center',
     padding: '7px 0',
     borderBottom: '1px solid rgba(0,0,0,0.07)',
@@ -2566,8 +2691,13 @@ function CicliTimeline (props: { globalId: string; hasSel: boolean; sortDir: 'as
         const headerBg = isOpen ? '#eaf2ff' : '#f3f4f6'
         const statusLabel = isOpen ? 'In corso' : 'Chiuso'
         const statusColor = isOpen ? '#2563eb' : '#6b7280'
-        const ruoloLabel = c.ruolo_competente + (c.utente_operatore ? ` — ${c.utente_operatore}` : '')
+        const qualificaLabel = formatIterQualificaLabel(c.ruolo_competente)
+        const operatoreLabel = resolveIterPersonName(c.utente_operatore, utentiMap)
+        const destinatarioQualificaLabel = formatIterQualificaLabel(c.ruolo_destinatario)
+        const destinatarioNomeLabel = resolveIterPersonName(c.utente_destinatario, utentiMap)
+        const noteChiusuraLabel = cleanIterNoteForDisplay(c.note_chiusura)
         const cycleLabelNumber = props.sortDir === 'asc' ? (i + 1) : (displayCicli.length - i)
+        const cycleActionLabel = formatEvento(c.evento_chiusura || c.evento_apertura)
 
         const campiList = parseModifiedFieldNames(c.campi_modificati)
           .map(campo => ({ raw: campo, alias: getFieldAliasForIter(campo, props.aliasMap) }))
@@ -2579,8 +2709,7 @@ function CicliTimeline (props: { globalId: string; hasSel: boolean; sortDir: 'as
             {/* Header */}
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '8px 12px', background: headerBg, borderBottom: `1px solid ${borderColor}` }}>
               <div style={{ fontWeight: 700, fontSize: 13, color: '#1f2937' }}>
-                Ciclo {cycleLabelNumber} — {c.ruolo_competente || '?'}
-                {c.area ? <span style={{ color: '#6b7280', fontWeight: 400 }}> ({c.area}{c.settore ? `/${c.settore}` : ''})</span> : null}
+                Ciclo {cycleLabelNumber} — {cycleActionLabel}
               </div>
               <span style={{ fontSize: 11, fontWeight: 600, color: statusColor, background: isOpen ? 'rgba(37,99,235,0.10)' : 'rgba(0,0,0,0.05)', padding: '2px 8px', borderRadius: 6 }}>
                 {statusLabel}
@@ -2589,33 +2718,45 @@ function CicliTimeline (props: { globalId: string; hasSel: boolean; sortDir: 'as
 
             {/* Body */}
             <div style={{ padding: '8px 12px' }}>
-              {c.utente_operatore && (
-                <div style={rowSt}><span style={lblSt}>Operatore</span><span style={valSt}>{c.utente_operatore}</span></div>
+              {(operatoreLabel || qualificaLabel) && (
+                <div style={rowSt}>
+                  <span style={lblSt}>Operatore</span>
+                  <span style={valSt}>
+                    {operatoreLabel || qualificaLabel}
+                    {operatoreLabel && qualificaLabel ? <span style={{ color: '#6b7280', fontWeight: 500 }}> ({qualificaLabel})</span> : null}
+                  </span>
+                </div>
               )}
 
               <div style={rowSt}><span style={lblSt}>Apertura</span><span style={valSt}>{formatEvento(c.evento_apertura)} — {formatDateSafe(c.dt_apertura)}</span></div>
 
               {c.stato_record === 'CHIUSO' && (
-                <div style={rowSt}><span style={lblSt}>Chiusura</span><span style={valSt}>{formatEvento(c.evento_chiusura)} — {formatDateSafe(c.dt_chiusura)}</span></div>
+                <div style={rowSt}><span style={lblSt}>Chiusura</span><span style={valSt}>{formatDateSafe(c.dt_chiusura)}</span></div>
               )}
 
-              {c.ruolo_destinatario && (
-                <div style={rowSt}><span style={lblSt}>Destinatario</span><span style={valSt}>{c.ruolo_destinatario}{c.utente_destinatario ? ` — ${c.utente_destinatario}` : ''}</span></div>
+              {(destinatarioNomeLabel || destinatarioQualificaLabel) && (
+                <div style={rowSt}>
+                  <span style={lblSt}>Destinatario</span>
+                  <span style={valSt}>
+                    {destinatarioNomeLabel || destinatarioQualificaLabel}
+                    {destinatarioNomeLabel && destinatarioQualificaLabel ? <span style={{ color: '#6b7280', fontWeight: 500 }}> ({destinatarioQualificaLabel})</span> : null}
+                  </span>
+                </div>
               )}
 
-              {c.note_chiusura && (
-                <div style={rowSt}><span style={lblSt}>Note</span><span style={valSt}>{c.note_chiusura}</span></div>
+              {noteChiusuraLabel && (
+                <div style={rowSt}><span style={lblSt}>Note</span><span style={{ ...valSt, whiteSpace: 'pre-wrap' }}>{noteChiusuraLabel}</span></div>
               )}
 
               {campiList.length > 0 && (
                 <div style={{ padding: '7px 0', borderBottom: '1px solid rgba(0,0,0,0.07)' }}>
-                  <div style={{ display: 'grid', gridTemplateColumns: 'minmax(120px, 170px) minmax(0, 1fr)', gap: 10, alignItems: 'flex-start' }}>
+                  <div style={{ display: 'grid', gridTemplateColumns: iterLabelValueColumns, gap: 8, alignItems: 'flex-start' }}>
                     <span style={lblSt}>Campi modificati</span>
                     <span style={{ ...valSt, fontSize: 11 }}>
                       {campiList.length} {campiList.length === 1 ? 'campo' : 'campi'}
                     </span>
                   </div>
-                  <div style={{ display: 'grid', gridTemplateColumns: 'minmax(120px, 170px) minmax(0, 1fr)', gap: 10, marginTop: 6 }}>
+                  <div style={{ display: 'grid', gridTemplateColumns: iterLabelValueColumns, gap: 8, marginTop: 6 }}>
                     <span />
                     <div style={{ border: '1px solid rgba(209,213,219,0.95)', borderRadius: 8, padding: '6px 8px', background: '#fff' }}>
                       <span style={{ fontSize: 11, color: '#374151', lineHeight: 1.35, whiteSpace: 'normal' }}>
@@ -2626,12 +2767,8 @@ function CicliTimeline (props: { globalId: string; hasSel: boolean; sortDir: 'as
                 </div>
               )}
 
-              {c.riepilogo_ciclo && (
-                <div style={{ ...rowSt, marginTop: 4, alignItems: 'flex-start' }}>
-                  <span style={lblSt}>Riepilogo</span>
-                  <span style={{ ...valSt, fontSize: 11, whiteSpace: 'pre-wrap' }}>{c.riepilogo_ciclo}</span>
-                </div>
-              )}
+              {/* Riepilogo tecnico omesso: i codici evento sono già tradotti nel titolo/Apertura,
+                  e i campi effettivamente modificati sono mostrati nella sezione dedicata. */}
             </div>
           </div>
         )

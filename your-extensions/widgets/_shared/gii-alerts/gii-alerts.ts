@@ -28,6 +28,7 @@ export type GiiAlertType =
   | 'PRESA_IN_CARICO_RI_AGR'
   | 'PRESA_IN_CARICO_DT_AGR'
   | 'PRESA_IN_CARICO_CORRENTE'
+  | 'ATTIVITA_INFORMATIVA'
   | 'ALTRO'
 
 export type GiiAlertStatus =
@@ -662,8 +663,8 @@ function isOfficeOriginReport (data: Record<string, any>): boolean {
 
 function takeChargeTitleForMessage (label: string, row: Record<string, any>): string {
   const hay = `${label || ''} ${attr(row, ['tipo_attivita']) || ''} ${attr(row, ['sottotipo_attivita']) || ''} ${attr(row, ['titolo']) || ''} ${attr(row, ['messaggio']) || ''} ${attr(row, ['origine_evento']) || ''}`.toUpperCase()
-  if (hay.includes('INTEGRAZ')) return 'Trasmissione integrazione'
-  return 'Trasmissione nuova istruttoria'
+  if (hay.includes('INTEGRAZ')) return 'Richiesta di integrazione ricevuta'
+  return 'Nuova istruttoria ricevuta'
 }
 
 function takeChargeTextFromElencoLogic (
@@ -1141,7 +1142,8 @@ function countOnlyResult (count: number): GiiAlertQueryResult {
       gray: 0,
       scaduti: 0,
       critici: 0,
-      inScadenza: 0
+      inScadenza: 0,
+      informativi: 0
     }
   }
 }
@@ -1149,8 +1151,10 @@ function countOnlyResult (count: number): GiiAlertQueryResult {
 export interface GiiCurrentActivityQueryOptions {
   activityLayerUrl: string
   user: GiiUserProfileForAlerts
+  archiveTableUrl?: string
   where?: string
   pageSize?: number
+  includeArchived?: boolean
 }
 
 function giiSqlString (value: any): string {
@@ -1177,7 +1181,9 @@ function activityAreaForUser (user?: GiiUserProfileForAlerts): string {
 function buildCurrentActivityWhere (user?: GiiUserProfileForAlerts, extraWhere?: string): string {
   const clauses: string[] = []
 
-  clauses.push(`tipo_attivita = 'PRESA_IN_CARICO'`)
+  // La stessa tabella contiene sia attività operative di presa in carico,
+  // sia comunicazioni informative archiviabili dai destinatari.
+  clauses.push(`(tipo_attivita = 'PRESA_IN_CARICO' OR tipo_attivita = 'INFORMATIVA')`)
 
   if (user?.isAdmin) {
     // ADMIN vede tutto ciò che è corrente nella vista/tabella configurata.
@@ -1243,12 +1249,19 @@ function currentActivityToAlert (row: Record<string, any>): GiiAlertItem | null 
   const keyBase = parentGlobalId || rawGlobalId || chiave
   if (!keyBase) return null
 
-  const title = takeChargeTitleForMessage('', rowForDisplay)
-  const message = reportCode
+  const tipoAttivita = String(attr(row, ['tipo_attivita']) || '').trim().toUpperCase()
+  const isInformativa = tipoAttivita === 'INFORMATIVA'
+  const title = isInformativa
+    ? (String(attr(row, ['titolo']) || '').trim() || 'Comunicazione informativa')
+    : takeChargeTitleForMessage('', rowForDisplay)
+  const message = isInformativa
+    ? (String(attr(row, ['messaggio']) || '').trim() || reportCode)
+    : reportCode
+  const tipoAlert: GiiAlertType = isInformativa ? 'ATTIVITA_INFORMATIVA' : 'PRESA_IN_CARICO_CORRENTE'
 
   return {
-    alertKey: chiave || `${keyBase}|PRESA_IN_CARICO_CORRENTE`,
-    tipoAlert: 'PRESA_IN_CARICO_CORRENTE',
+    alertKey: chiave || `${keyBase}|${tipoAlert}`,
+    tipoAlert,
     statoAlert: 'INFORMATIVO',
     severity: severityFromActivityPriority(attr(row, ['priorita'])),
     title,
@@ -1289,19 +1302,27 @@ export async function queryGiiCurrentActivities (options: GiiCurrentActivityQuer
       'origine_evento',
       'priorita',
       'data_attivazione',
-      'creato_il'
+      'creato_il',
+      'creato_da',
+      'aggiornato_il',
+      'aggiornato_da'
     ],
     orderByFields: ['data_attivazione DESC', 'OBJECTID DESC'],
     returnGeometry: false
   }, pageSize)
 
-  const alerts = rows
+  const computed = rows
     .map(row => currentActivityToAlert(row))
     .filter((a): a is GiiAlertItem => !!a)
 
+  const archivedKeys = options.archiveTableUrl
+    ? await loadArchivedGiiAlertKeys(options.archiveTableUrl, options.user?.username)
+    : new Set<string>()
+  const alerts = filterArchivedGiiAlerts(computed, archivedKeys, options.includeArchived)
+
   return {
     alerts,
-    archivedKeys: new Set<string>(),
+    archivedKeys,
     counts: summarizeGiiAlerts(alerts)
   }
 }

@@ -1507,6 +1507,17 @@ function actionButtonStyle (bg: string, disabled: boolean, ui?: { btnBorderRadiu
 
 type Pending = null | 'TAKE' | 'ASSEGNA_TI' | 'ASSEGNA_TI_AMM' | 'INVIA_TI_AMM' | 'RESTITUISCI_TI_AMM' | 'INTEGRAZIONE' | 'INTEGRAZIONE_TI_AMM' | 'INTEGRAZIONE_TECNICA' | 'APPROVA' | 'RESPINGI' | 'TRASMETTI' | 'ELIMINA'
 
+type WorkflowEsitoChoice = '' | 'CONFORME' | 'DA_INTEGRARE' | 'RESPINTA'
+
+type InformativeActivityTarget = {
+  ruoloDestinatario: string
+  utenteDestinatario?: string
+  sottotipo: string
+  titolo: string
+  messaggio: string
+  priorita?: string
+}
+
 function ActionsPanel (props: {
   active: { key: string; state: SelState } | null
   roleCode: string
@@ -1586,9 +1597,24 @@ function ActionsPanel (props: {
   // validazioni “soft”: si attivano solo dopo tentativo di conferma
   const [confirmAttempted, setConfirmAttempted] = React.useState(false)
 
+  // Nel popup di workflow l'esito della verifica viene scelto prima;
+  // l'azione procedurale viene derivata o scelta solo dopo, quando serve.
+  const [workflowEsitoChoice, setWorkflowEsitoChoice] = React.useState<WorkflowEsitoChoice>('')
+  const [workflowRimandoChoice, setWorkflowRimandoChoice] = React.useState<string>('')
+
   // note / motivazione
   const [noteDraft, setNoteDraft] = React.useState('')
   const [rejectReason, setRejectReason] = React.useState('')
+  const [integrationReason, setIntegrationReason] = React.useState('')
+  const [integrationTargets, setIntegrationTargets] = React.useState<string[]>([])
+  const [integrationOtherText, setIntegrationOtherText] = React.useState('')
+
+  const resetStructuredReasons = React.useCallback(() => {
+    setRejectReason('')
+    setIntegrationReason('')
+    setIntegrationTargets([])
+    setIntegrationOtherText('')
+  }, [])
 
   // Assegna TI (solo RZ)
   type TiOpt = { username: string; fullName: string }
@@ -1665,16 +1691,12 @@ function ActionsPanel (props: {
   const noteOrigRef = React.useRef<string>('')
   const noteRef = React.useRef<HTMLTextAreaElement | null>(null)
 
-  // textarea: max ~5 righe, poi scrollbar
-  const NOTE_MIN_H = 42
-  const NOTE_MAX_H = 118
+  // textarea annotazioni: ridimensionabile verticalmente tramite trascinamento
+  const NOTE_MIN_H = 74
   const autoResizeNote = React.useCallback((el: HTMLTextAreaElement | null) => {
     if (!el) return
     try {
-      el.style.height = 'auto'
-      const next = Math.min(el.scrollHeight || NOTE_MIN_H, NOTE_MAX_H)
-      el.style.height = `${next}px`
-      el.style.overflowY = (el.scrollHeight > NOTE_MAX_H) ? 'auto' : 'hidden'
+      el.style.overflowY = 'auto'
     } catch {}
   }, [])
 
@@ -2518,6 +2540,19 @@ function ActionsPanel (props: {
     return label.length > 30 ? label.slice(0, 30) : label
   }
 
+  const makeGiiSenderRoleLabel = (r: string): string => {
+    const rr = String(r || '').trim().toUpperCase()
+    if (rr === 'TR') return 'Tecnico rilevatore'
+    if (rr === 'TI') return 'Tecnico istruttore'
+    if (rr === 'RZ') return 'Responsabile di Zona'
+    if (rr === 'RI') return 'Responsabile Istruttoria'
+    if (rr === 'DT') return 'Direttore d’Area'
+    if (rr === 'TI_AMM') return 'Tecnico Istruttore amministrativo'
+    if (rr === 'RI_AMM') return 'Responsabile Istruttoria amministrativa'
+    if (rr === 'DA') return 'Direttore Area Amministrativa'
+    return rr || '—'
+  }
+
   const getRoutingMetaForRole = (r: string, opts?: { technicalIntegration?: boolean }) => {
     const rr = String(r || '').trim().toUpperCase()
     const ctx = getCurrentCycleContext()
@@ -2765,7 +2800,9 @@ function ActionsPanel (props: {
       const settoreDest = normalizeSettoreCod(destMeta.settore || '')
       const subtipo = activitySubTypeFromEvent(logOpts?.eventoChiusura, role, ruoloDest)
       const titolo = activityTitleForEvent(subtipo, logOpts?.eventoChiusura, role, ruoloDest)
-      const messaggio = activityMessageForEvent(subtipo, logOpts?.eventoChiusura, role, ruoloDest, numeroRapporto)
+      const messaggioBase = activityMessageForEvent(subtipo, logOpts?.eventoChiusura, role, ruoloDest, numeroRapporto)
+      const mittenteAllarme = makeGiiSenderRoleLabel(role)
+      const messaggio = mittenteAllarme ? `${messaggioBase}\nDa: ${mittenteAllarme}` : messaggioBase
       const destUsername = String(logOpts?.utenteDestinatario || resolveDestUser(ruoloDest) || '').trim()
       const key = `${parentGlobalId}|PRESA_IN_CARICO|${subtipo}|${ruoloDest}|${areaDest}|${settoreDest}|${destUsername}`
       const now = Date.now()
@@ -2816,6 +2853,62 @@ function ActionsPanel (props: {
     }
   }
 
+
+  const upsertInformativeActivityForDest = async (
+    info: InformativeActivityTarget,
+    overrideAttrs?: Record<string, any>
+  ) => {
+    const ruoloDest = normalizeActivityDestRole(String(info?.ruoloDestinatario || ''))
+    if (!ruoloDest) return
+    const parentGlobalId = await getActivityParentGlobalId()
+    if (!parentGlobalId) {
+      console.warn('[GII_ATTIVITA_CORRENTI] Creazione informativa saltata: GlobalID pratica non disponibile.', { oid, ruoloDest, sottotipo: info?.sottotipo })
+      return
+    }
+
+    try {
+      const layer = await getAttivitaLayer()
+      const now = Date.now()
+      const numeroRapporto = shortReportNumberForActivity(overrideAttrs)
+      const destMeta = getRoutingMetaForRole(ruoloDest)
+      const areaDest = normalizeAreaLabel(destMeta.area || (ruoloDest === 'DA' || ruoloDest === 'RI_AMM' || ruoloDest === 'TI_AMM' ? 'AMM' : ''))
+      const settoreDest = normalizeSettoreCod(destMeta.settore || '')
+      const destUsername = String(info?.utenteDestinatario || resolveDestUser(ruoloDest) || '').trim()
+      // Le informative devono restare archiviabili per singolo destinatario/evento:
+      // la chiave include il timestamp e non sostituisce eventuali informative precedenti.
+      const key = `${parentGlobalId}|INFORMATIVA|${String(info.sottotipo || 'INFO').trim().toUpperCase()}|${ruoloDest}|${areaDest}|${settoreDest}|${destUsername}|${now}`
+
+      const attrs: Record<string, any> = {
+        chiave_attivita: key,
+        parent_globalid: parentGlobalId,
+        parent_objectid: oid != null && Number.isFinite(Number(oid)) ? Number(oid) : null,
+        numero_rapporto: numeroRapporto,
+        tipo_attivita: 'INFORMATIVA',
+        sottotipo_attivita: String(info.sottotipo || 'INFO').trim().toUpperCase(),
+        titolo: String(info.titolo || 'Comunicazione informativa').trim(),
+        messaggio: String(info.messaggio || '').trim(),
+        destinatario_ruolo: ruoloDest,
+        destinatario_area: areaDest || null,
+        destinatario_settore: settoreDest || null,
+        destinatario_ufficio_id: null,
+        destinatario_ufficio_zona: null,
+        destinatario_username: destUsername || null,
+        origine_evento: String(info.sottotipo || 'INFO').trim().toUpperCase(),
+        priorita: String(info.priorita || 'INFO').trim().toUpperCase(),
+        data_attivazione: now,
+        creato_il: now,
+        creato_da: String((window as any).__giiUserRole?.username || ''),
+        aggiornato_il: now,
+        aggiornato_da: String((window as any).__giiUserRole?.username || '')
+      }
+
+      await layer.applyEdits({ addFeatures: [{ attributes: attrs }] })
+      try { window.dispatchEvent(new CustomEvent('gii-alerts-refresh', { detail: { source: 'gii-azioni-upsert-informativa', key, oid, ts: now } })) } catch {}
+    } catch (e) {
+      console.warn('[GII_ATTIVITA_CORRENTI] Errore creazione informativa:', e)
+    }
+  }
+
   const deleteCurrentActivityForCurrentRole = async () => {
     if (!hasSel || oid == null) return
     const currentRole = normalizeActivityDestRole(role)
@@ -2825,10 +2918,18 @@ function ActionsPanel (props: {
   }
 
 
+  const dtRiOnlyIntegrationTargets = ['Occorrenza', 'Grado di gravità']
+  const isDtIntegrationOnlyRiCompetence = (): boolean => {
+    if (role !== 'DT') return false
+    if (String(integrationReason || '').trim() !== 'Necessità di integrazione o rettifica') return false
+    const selected = (integrationTargets || []).map(v => String(v || '').trim()).filter(Boolean)
+    return selected.length > 0 && selected.every(v => dtRiOnlyIntegrationTargets.includes(v))
+  }
+
   const getPrevRoleForIntegration = (target?: 'TI_AMM' | 'TECNICA'): string => {
     if (role === 'RZ')     return 'TI'
     if (role === 'RI')     return 'TI'
-    if (role === 'DT')     return 'RI'
+    if (role === 'DT')     return isDtIntegrationOnlyRiCompetence() ? 'RI' : 'TI'
     if (role === 'RI_AMM') {
       // RI_AMM ha due percorsi distinti di richiesta integrazione:
       // - amministrativa verso il TI_AMM assegnato;
@@ -2942,12 +3043,12 @@ function ActionsPanel (props: {
   const openInReadOnly = canOpenEditPage && !canEdit && (role === 'TI' || role === 'RI')
 
   const editButtonTitle = canEdit
-    ? (isAmmEditRole ? 'Apri scheda atto amministrativo' : 'Modifica rilevazione')
+    ? (isAmmEditRole ? 'Apri la gestione amministrativa della pratica' : 'Apri la gestione tecnica della pratica')
     : (openInReadOnly
-      ? 'Apri la rilevazione in sola consultazione: la pratica non è attualmente nella disponibilità del ruolo corrente.'
+      ? 'Apri la gestione tecnica in sola consultazione: la pratica non è attualmente nella disponibilità del ruolo corrente.'
       : (isAmmEditRole
-        ? 'Modifica dell’atto amministrativo non disponibile: la pratica deve essere già presa in carico dal ruolo corrente.'
-        : 'Apertura non disponibile: selezionare una pratica.'))
+        ? 'Gestione amministrativa non disponibile: la pratica deve essere già presa in carico dal ruolo corrente.'
+        : 'Apertura gestione pratica non disponibile: selezionare una pratica.'))
 
   const canUseRapportoPdf =
     hasSel &&
@@ -3120,7 +3221,7 @@ function ActionsPanel (props: {
       setConfirmAttempted(false)
       noteOrigRef.current = ''
       setNoteDraft('')
-      setRejectReason('')
+      resetStructuredReasons()
       setTiSelected('')
       setTiLoadErr('')
       return
@@ -3136,7 +3237,7 @@ function ActionsPanel (props: {
     const v = (data && data[noteField] != null) ? String(data[noteField]) : ''
     noteOrigRef.current = v
     setNoteDraft(v)
-    setRejectReason('')
+    resetStructuredReasons()
     setTiSelected('')
     setTiLoadErr('')
 
@@ -3453,6 +3554,8 @@ function ActionsPanel (props: {
   const hasTiAnyEvidence = hasTiAssigned || hasTiWorkflowTouched
   const tiReturned = (esitoTiNum != null) || (statoTiNum === STATO_APPROVATA) || (statoTiNum === STATO_RESPINTA) || hasHigherWorkflowTouched
   const lockRZBecauseAssignedToTi = role === 'RZ' && (origineNum == null || origineNum === 1) && hasTiAnyEvidence && !tiReturned && !awaitingRetakeByRz
+  const numeroRapportoTecnicoCorrente = String(pickAttrCI(data, ['numero_rapporto_tecnico', 'NUMERO_RAPPORTO_TECNICO']) || '').trim()
+  const rzCanRejectOnlyFirstEvaluation = role !== 'RZ' || !numeroRapportoTecnicoCorrente
 
   // TI_AMM già assegnato?
   const tiAmmUserRaw = pickAttrCI(data, ['ti_amm_assegnato_username'])
@@ -3591,7 +3694,10 @@ function ActionsPanel (props: {
     canStartEsito &&
     role !== 'TI' &&
     role !== 'RI' &&
-    role !== 'TI_AMM'  // TI_AMM non può respingere
+    role !== 'TI_AMM' &&  // TI_AMM non può respingere
+    role !== 'RI_AMM' &&  // il RI-AMM rimanda o trasmette, non respinge
+    role !== 'DA' &&      // DA non respinge: può approvare o rimandare per chiarimenti/integrazioni
+    rzCanRejectOnlyFirstEvaluation
 
   // Label dinamiche (inoltro vs approva)
   // Destinazione forward risolta (usata anche per le label)
@@ -3911,7 +4017,7 @@ function ActionsPanel (props: {
           label: 'Respingi',
           desc: 'Respinge la pratica.',
           enabled: canStartRespingi,
-          visible: role !== 'RI_AMM' && role !== 'TI',
+          visible: role !== 'RI_AMM' && role !== 'TI' && role !== 'DA',
           color: buttonColors.respingi,
           textColor: buttonColors.respingiText
         }
@@ -3927,29 +4033,94 @@ function ActionsPanel (props: {
   const hasEnabledWorkflowMenuActions = workflowMenuEnabledItems.length > 0
   const showTakeDirect = canStartTakeInCharge || !hasSel || !hasVisibleWorkflowMenuActions
 
-  // NOTE: compare per integrazione, respinta e — Matrice_TI caso 1/b — anche per eliminazione (obbligatoria)
-  const showNote = pending === 'INTEGRAZIONE' || pending === 'INTEGRAZIONE_TI_AMM' || pending === 'INTEGRAZIONE_TECNICA' || pending === 'RESPINGI' || pending === 'ELIMINA' || (pending === 'APPROVA' && role === 'TI_AMM')
+  const integrationReasonOptions = [
+    'Fatti accertati da chiarire',
+    'Incongruenza tra violazioni rilevate e descrizione dei fatti accertati',
+    'Necessità di integrazione o rettifica'
+  ]
+  const integrationTargetOptionsBase = [
+    'Trasgressore',
+    'Violazione',
+    'Luoghi e dati tecnici',
+    'Nota spese',
+    'Allegati',
+    'Altro'
+  ]
+  const integrationTargetOptions = role === 'DT'
+    ? ['Occorrenza', 'Grado di gravità', ...integrationTargetOptionsBase]
+    : integrationTargetOptionsBase
+  const technicalRejectReasonOptions = [
+    'Insussistenza dei presupposti della violazione',
+    'Accertamento non procedibile',
+    'Pratica duplicata',
+    'Altro'
+  ]
+
+  const toggleIntegrationTarget = (target: string) => {
+    setIntegrationTargets(prev => prev.includes(target) ? prev.filter(x => x !== target) : [...prev, target])
+    if (confirmAttempted) setConfirmAttempted(false)
+  }
+
+  const renderIntegrationTargetCheckbox = (opt: string, displayLabel?: string) => (
+    <label key={opt} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '3px 4px', border: 'none', borderRadius: 4, background: 'transparent', fontSize: Math.max(14, Number(ui.statusFontSize) || 14), cursor: loading ? 'not-allowed' : 'pointer', minWidth: 0 }}>
+      <input
+        type='checkbox'
+        checked={integrationTargets.includes(opt)}
+        onChange={() => toggleIntegrationTarget(opt)}
+        disabled={loading || !hasSel || lockedByTransmit}
+        style={{ margin: 0, flex: '0 0 auto' }}
+      />
+      <span style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{displayLabel || opt}</span>
+    </label>
+  )
+
+  // NOTE: compare per esito conforme/non conforme, respinta e — Matrice_TI caso 1/b — anche per eliminazione (obbligatoria)
+  const showNote = pending === 'APPROVA' || pending === 'INVIA_TI_AMM' || pending === 'INTEGRAZIONE' || pending === 'INTEGRAZIONE_TI_AMM' || pending === 'INTEGRAZIONE_TECNICA' || pending === 'RESPINGI' || pending === 'ELIMINA'
   const noteEnabled = showNote && hasSel && !loading && !lockedByTransmit
 
-  const noteTrim = String(noteDraft ?? '').trim()
+  const noteDraftTrim = String(noteDraft ?? '').trim()
+  const fixedWorkflowNoteTrim = pending ? buildDefaultWorkflowNote(pending).trim() : ''
   const reasonTrim = String(rejectReason ?? '').trim()
+  const integrationReasonTrim = String(integrationReason ?? '').trim()
+  const integrationOtherTextTrim = String(integrationOtherText ?? '').trim()
+  const isWorkflowRimandoPendingForValidation = pending === 'INTEGRAZIONE' || pending === 'INTEGRAZIONE_TI_AMM' || pending === 'INTEGRAZIONE_TECNICA'
+  const isIntegrationNeedsDetail = integrationReasonTrim === 'Necessità di integrazione o rettifica'
+  const integrationOtherSelected = integrationTargets.includes('Altro')
   const isAltro = /\baltro\b/i.test(reasonTrim)
+  const hasOtherMotivation = (pending === 'RESPINGI' && isAltro) || (isWorkflowRimandoPendingForValidation && isIntegrationNeedsDetail && integrationOtherSelected)
+  const freeNotePrefix = hasOtherMotivation ? 'Altre motivazioni e ulteriori annotazioni' : 'Ulteriori annotazioni'
+  const integrationReasonBlock = isWorkflowRimandoPendingForValidation && integrationReasonTrim
+    ? [
+        `Motivazione del rimando: ${integrationReasonTrim}`,
+        isIntegrationNeedsDetail && integrationTargets.length > 0 ? `Dati da integrare o rettificare: ${integrationTargets.join(', ')}` : ''
+      ].filter(Boolean).join('\n')
+    : ''
+  const noteTrim = [
+    fixedWorkflowNoteTrim,
+    integrationReasonBlock,
+    noteDraftTrim ? `${freeNotePrefix}:\n${noteDraftTrim}` : ''
+  ].filter(Boolean).join('\n\n')
 
   // obblighi:
   const noteIsRequired =
-    (pending === 'INTEGRAZIONE') ||
-    (pending === 'INTEGRAZIONE_TI_AMM') ||
-    (pending === 'INTEGRAZIONE_TECNICA') ||
-    (pending === 'APPROVA' && role === 'TI_AMM') ||
-    (pending === 'RESPINGI' && isAltro) ||
+    hasOtherMotivation ||
     (pending === 'ELIMINA')  // Matrice_TI caso 1/b: note obbligatoria per eliminazione
 
   const reasonIsRequired = pending === 'RESPINGI'
+  const integrationReasonIsRequired = isWorkflowRimandoPendingForValidation
+  const integrationTargetsIsRequired = isWorkflowRimandoPendingForValidation && isIntegrationNeedsDetail
+  const integrationOtherTextIsRequired = false
 
   const reasonInvalid = reasonIsRequired && !reasonTrim
-  const noteInvalid = noteIsRequired && !noteTrim
+  const integrationReasonInvalid = integrationReasonIsRequired && !integrationReasonTrim
+  const integrationTargetsInvalid = integrationTargetsIsRequired && integrationTargets.length === 0
+  const integrationOtherTextInvalid = integrationOtherTextIsRequired && !integrationOtherTextTrim
+  const noteInvalid = noteIsRequired && !noteDraftTrim
 
   const reasonReqErr = confirmAttempted && reasonInvalid
+  const integrationReasonReqErr = confirmAttempted && integrationReasonInvalid
+  const integrationTargetsReqErr = confirmAttempted && integrationTargetsInvalid
+  const integrationOtherTextReqErr = confirmAttempted && integrationOtherTextInvalid
   const noteReqErr = confirmAttempted && noteInvalid
 
   const tiReqErr = confirmAttempted && pending === 'ASSEGNA_TI' && !tiSelected
@@ -3963,8 +4134,10 @@ function ActionsPanel (props: {
     setLoading(false)
     setMsg(null)
     setConfirmAttempted(false)
+    setWorkflowEsitoChoice('')
+    setWorkflowRimandoChoice('')
     setNoteDraft(noteOrigRef.current)
-    setRejectReason('')
+    resetStructuredReasons()
     setTiSelected('')
     setTiLoadErr('')
   }
@@ -4019,7 +4192,7 @@ function ActionsPanel (props: {
     setPending(p)
     setMsg(null)
     setConfirmAttempted(false)
-    setRejectReason('')
+    resetStructuredReasons()
     setTiLoadErr('')
 
     if (p === 'ASSEGNA_TI') {
@@ -4136,10 +4309,68 @@ function ActionsPanel (props: {
     setLocalData(null)
   }
 
+  const buildTechnicalChainInformativeActivities = (kind: 'DT_APPROVA' | 'DT_RESPINGE' | 'DT_RIMANDA_TI' | 'RI_RIMANDA_TI' | 'RZ_APPROVA' | 'RZ_RESPINGE', _overrideAttrs?: Record<string, any>): InformativeActivityTarget[] => {
+    const tiUser = resolveDestUser('TI')
+    const hasTiDest = !!String(tiUser || '').trim()
+    const out: InformativeActivityTarget[] = []
+    const add = (ruoloDestinatario: string, titolo: string, messaggio: string, sottotipo: string, utenteDestinatario?: string) => {
+      out.push({ ruoloDestinatario, utenteDestinatario, titolo, messaggio, sottotipo, priorita: 'INFO' })
+    }
+    const addTiIfPresent = (titolo: string, messaggio: string, sottotipo: string) => {
+      // Il TI va avvisato solo quando esiste davvero un TI assegnato alla pratica
+      // (origine TI oppure rilevazione già assegnata a TI). Per le rilevazioni TR
+      // non va creato un avviso generico rivolto a tutti i TI del settore.
+      if (hasTiDest) add('TI', titolo, messaggio, sottotipo, tiUser)
+    }
+
+    if (kind === 'DT_APPROVA') {
+      const titolo = 'Rapporto tecnico approvato'
+      const messaggio = 'Trasmesso all’Area Amministrativa.'
+      add('RI', titolo, messaggio, 'DT_APPROVA_RAPPORTO')
+      add('RZ', titolo, messaggio, 'DT_APPROVA_RAPPORTO')
+      addTiIfPresent(titolo, messaggio, 'DT_APPROVA_RAPPORTO')
+    }
+
+    if (kind === 'DT_RESPINGE') {
+      const titolo = 'Rapporto tecnico respinto'
+      const messaggio = 'Esito registrato.'
+      add('RI', titolo, messaggio, 'DT_RESPINGE_RAPPORTO')
+      add('RZ', titolo, messaggio, 'DT_RESPINGE_RAPPORTO')
+      addTiIfPresent(titolo, messaggio, 'DT_RESPINGE_RAPPORTO')
+    }
+
+    if (kind === 'DT_RIMANDA_TI') {
+      const titolo = 'Rimando al Tecnico istruttore'
+      const messaggio = 'Richieste integrazioni o rettifiche.'
+      add('RI', titolo, messaggio, 'DT_RIMANDA_A_TI')
+      add('RZ', titolo, messaggio, 'DT_RIMANDA_A_TI')
+    }
+
+    if (kind === 'RI_RIMANDA_TI') {
+      const titolo = 'Rimando al Tecnico istruttore'
+      const messaggio = 'Richieste integrazioni o rettifiche.'
+      add('RZ', titolo, messaggio, 'RI_RIMANDA_A_TI')
+    }
+
+    if (kind === 'RZ_APPROVA') {
+      const titolo = praticaLabel === 'Rapporto tecnico' ? 'Integrazione validata' : 'Rilevazione approvata'
+      const messaggio = 'Trasmessa al Responsabile istruttoria.'
+      addTiIfPresent(titolo, messaggio, 'RZ_APPROVA_RILEVAZIONE')
+    }
+
+    if (kind === 'RZ_RESPINGE') {
+      const titolo = 'Rilevazione respinta'
+      const messaggio = 'Esito registrato.'
+      addTiIfPresent(titolo, messaggio, 'RZ_RESPINGE_RILEVAZIONE')
+    }
+
+    return out
+  }
+
   const saveWithWorkflowLog = async (
     attributesIn: Record<string, any>,
     okText: string,
-    logOpts: { eventoChiusura: string, ruoloDestinatario?: string, utenteDestinatario?: string, noteChiusura?: string, fase?: string }
+    logOpts: { eventoChiusura: string, ruoloDestinatario?: string, utenteDestinatario?: string, noteChiusura?: string, fase?: string, informativeActivities?: InformativeActivityTarget[] }
   ) => {
     // Le azioni di workflow possono lasciare il rapporto visibile nella scheda corrente
     // (es. tab "Tutte le pratiche") oppure farlo uscire dalla coda corrente
@@ -4159,6 +4390,9 @@ function ActionsPanel (props: {
       await closeCycleLog({ ...logOpts, auditOldMap: auditDelta.oldMap, auditNewMap: auditDelta.newMap })
       await deleteCurrentActivityForCurrentRole()
       if (logOpts?.ruoloDestinatario) await upsertCurrentActivityForDest(logOpts, attributesIn)
+      for (const info of (logOpts?.informativeActivities || [])) {
+        await upsertInformativeActivityForDest(info, attributesIn)
+      }
       await refreshAfterWorkflowSave('azioni-post-log')
     } finally {
       setLoading(false)
@@ -4503,9 +4737,9 @@ function ActionsPanel (props: {
 
       addGiiRoutingFields(upd, 'TI_AMM', 'TRASMISSIONE', { destUsername: String(tiAmmUserRaw || '') })
 
-      const noteInvioTiAmm = isRientroTecnicoDaDt
+      const noteInvioTiAmm = noteTrim || (isRientroTecnicoDaDt
         ? 'Invio al Tecnico Istruttore amministrativo dopo rientro da integrazione tecnica.'
-        : 'Invio al Tecnico Istruttore amministrativo.'
+        : 'Invio al Tecnico Istruttore amministrativo.')
       await saveWithWorkflowLog(upd, 'Pratica inviata al Tecnico Istruttore amministrativo.', { eventoChiusura: 'INVIO_A_TI_AMM', ruoloDestinatario: 'TI_AMM', utenteDestinatario: String(tiAmmUserRaw || resolveDestUser('TI_AMM')), noteChiusura: noteInvioTiAmm, fase: role })
       setPending(null)
       setConfirmAttempted(false)
@@ -4518,7 +4752,7 @@ function ActionsPanel (props: {
 
   const onConfirmIntegrazione = async () => {
     setConfirmAttempted(true)
-    if (!noteTrim) return
+    if (integrationReasonInvalid || integrationTargetsInvalid || (hasOtherMotivation && !noteDraftTrim)) return
     setLoading(true)
     setMsg(null)
 
@@ -4561,7 +4795,12 @@ function ActionsPanel (props: {
 
       if (ruoloDest) {
         const successMsg = pending === 'INTEGRAZIONE' ? 'Pratica rimandata per integrazione.' : 'Integrazione richiesta salvata.'
-        await saveWithWorkflowLog(upd, successMsg, { eventoChiusura: 'INTEGRAZIONE_RICHIESTA', ruoloDestinatario: ruoloDest, utenteDestinatario: resolveDestUser(ruoloDest), noteChiusura: noteTrim, fase: role })
+        const informativeActivities = role === 'DT' && ruoloDest === 'TI'
+          ? buildTechnicalChainInformativeActivities('DT_RIMANDA_TI', upd)
+          : role === 'RI' && ruoloDest === 'TI'
+            ? buildTechnicalChainInformativeActivities('RI_RIMANDA_TI', upd)
+            : []
+        await saveWithWorkflowLog(upd, successMsg, { eventoChiusura: 'INTEGRAZIONE_RICHIESTA', ruoloDestinatario: ruoloDest, utenteDestinatario: resolveDestUser(ruoloDest), noteChiusura: noteTrim, fase: role, informativeActivities })
       } else {
         const successMsg = pending === 'INTEGRAZIONE' ? 'Pratica rimandata per integrazione.' : 'Integrazione richiesta salvata.'
         await runApplyEdits(upd, successMsg)
@@ -4586,10 +4825,22 @@ function ActionsPanel (props: {
         [esitoField]: esito,
         [dtEsitoField]: now
       }
+      if (esito === ESITO_APPROVATA && noteTrim) {
+        upd[noteField] = noteTrim
+      }
       if (role === 'TI_AMM' && esito === ESITO_APPROVATA) {
         const schemaFields: Record<string, any> = (ds as any)?.getSchema?.()?.fields || {}
         const fNoteAttoAmm = getSchemaFieldNameCI(schemaFields, 'note_atto_amm')
         if (fNoteAttoAmm) upd[fNoteAttoAmm] = noteTrim
+      }
+      if (role === 'RI_AMM' && esito === ESITO_APPROVATA) {
+        const schemaFields: Record<string, any> = (ds as any)?.getSchema?.()?.fields || {}
+        const fIstrAmmChiusaIl = getSchemaFieldNameCI(schemaFields, 'istruttoria_amm_chiusa_il')
+        const fIstrAmmChiusaDa = getSchemaFieldNameCI(schemaFields, 'istruttoria_amm_chiusa_da')
+        const currentUserRole: any = (window as any).__giiUserRole || {}
+        const currentUserLabel = String(currentUserRole.fullName || currentUserRole.full_name || currentUserRole.username || (window as any).__giiUser?.username || '').trim()
+        if (fIstrAmmChiusaIl) upd[fIstrAmmChiusaIl] = now
+        if (fIstrAmmChiusaDa) upd[fIstrAmmChiusaDa] = currentUserLabel
       }
       if (stato != null) {
         upd[statoField] = stato
@@ -4717,14 +4968,23 @@ function ActionsPanel (props: {
                     : 'ISTRUTTORIA_TRASMESSA',
                   ruoloDestinatario: ruoloDest,
                   utenteDestinatario: resolveDestUser(ruoloDest),
-                  noteChiusura: role === 'TI_AMM' && noteTrim ? `Attestazione di conformità:
-${noteTrim}` : undefined,
+                  noteChiusura: noteTrim
+                    ? (role === 'TI_AMM' ? `Attestazione di conformità:
+${noteTrim}` : noteTrim)
+                    : undefined,
                   fase: role
                 })
         : null
 
       if (logOpts) {
-        await saveWithWorkflowLog(upd, `Esito salvato: ${label}.`, logOpts)
+        const informativeActivities = esito === ESITO_APPROVATA
+          ? (role === 'DT'
+              ? buildTechnicalChainInformativeActivities('DT_APPROVA', upd)
+              : role === 'RZ'
+                ? buildTechnicalChainInformativeActivities('RZ_APPROVA', upd)
+                : [])
+          : []
+        await saveWithWorkflowLog(upd, `Esito salvato: ${label}.`, { ...logOpts, informativeActivities })
       } else {
         await runApplyEdits(upd, `Esito salvato: ${label}.`)
       }
@@ -4740,7 +5000,7 @@ ${noteTrim}` : undefined,
   const onConfirmRespinta = async () => {
     setConfirmAttempted(true)
     if (!reasonTrim) return
-    if (noteIsRequired && !noteTrim) return
+    if (noteIsRequired && !noteDraftTrim) return
     setLoading(true)
     setMsg(null)
 
@@ -4760,7 +5020,12 @@ ${noteTrim}` : undefined,
         upd[dtStatoField] = Date.now()
       }
 
-      await saveWithWorkflowLog(upd, 'Esito salvato: Respinta.', { eventoChiusura: 'RESPINTA', noteChiusura: finalNote, fase: role })
+      const informativeActivities = role === 'DT'
+        ? buildTechnicalChainInformativeActivities('DT_RESPINGE', upd)
+        : role === 'RZ'
+          ? buildTechnicalChainInformativeActivities('RZ_RESPINGE', upd)
+          : []
+      await saveWithWorkflowLog(upd, 'Esito salvato: Respinta.', { eventoChiusura: 'RESPINTA', noteChiusura: finalNote, fase: role, informativeActivities })
       setPending(null)
       setConfirmAttempted(false)
     } catch (e: any) {
@@ -4884,8 +5149,12 @@ ${noteTrim}` : undefined,
     `${subjectArticle} ${subjectNameLower} verrà ${subjectVerbTrasmessa} al passaggio successivo.`
 
   const integrazioneActionDesc = pendingRimandoTargetLabel
-    ? `${subjectArticle} ${subjectNameLower} verrà ${subjectVerbRimandata} al ${pendingRimandoTargetLabel}.`
-    : `${subjectArticle} ${subjectNameLower} verrà ${subjectVerbRimandata} per integrazione.`
+    ? (praticaLabel === 'Rapporto tecnico'
+        ? `Il rapporto verrà rimandato al ${pendingRimandoTargetLabel}.`
+        : `La rilevazione verrà rimandata al ${pendingRimandoTargetLabel}.`)
+    : (praticaLabel === 'Rapporto tecnico'
+        ? 'Il rapporto verrà rimandato per integrazione.'
+        : 'La rilevazione verrà rimandata per integrazione.')
 
   const pendingTheme: Record<string, PendingTheme> = {
     TAKE:           { icon: '✓', color: '#2563eb', bg: '#eff6ff', border: '#bfdbfe', buttonBg: '#2563eb', buttonBorder: '#1d4ed8', desc: praticaLabel === 'Rapporto tecnico' ? 'Il rapporto tecnico verrà preso in carico.' : 'La rilevazione verrà presa in carico.' },
@@ -4903,6 +5172,7 @@ ${noteTrim}` : undefined,
     ELIMINA:        { icon: '✕', color: '#b42318', bg: '#fef2f2', border: '#fecaca', buttonBg: '#dc2626', buttonBorder: '#b42318', desc: `${subjectArticle} ${subjectNameLower} verrà ${subjectVerbArchiviata} e non sarà più visibile nell'elenco.` },
   }
   const theme = pending ? (pendingTheme[pending] ?? { icon: '●', color: '#2f6fed', bg: '#eff6ff', border: '#bfdbfe', buttonBg: '#2563eb', buttonBorder: '#1d4ed8', desc: '' }) : pendingTheme.TAKE
+  const pendingModalWidth = pending === 'TAKE' ? 'min(92vw, 520px)' : 'min(94vw, 780px)'
   const operationProgressBox = (
     <div style={{ display: 'flex', alignItems: 'center', gap: 10, justifyContent: 'flex-end', marginTop: 4, color: '#374151', fontSize: 15, fontWeight: 700 }}>
       <span style={{ width: 14, height: 14, borderRadius: '50%', border: '2px solid #cbd5e1', borderTopColor: theme.color, display: 'inline-block', animation: 'gii-spin 0.8s linear infinite' }} />
@@ -4910,17 +5180,233 @@ ${noteTrim}` : undefined,
     </div>
   )
 
+  const isWorkflowEsitoPendingKey = (key: any): boolean =>
+    key === 'APPROVA' || key === 'INVIA_TI_AMM' || key === 'INTEGRAZIONE' || key === 'INTEGRAZIONE_TI_AMM' || key === 'INTEGRAZIONE_TECNICA' || key === 'RESPINGI'
+
+  const workflowConformeItem = workflowMenuEnabledItems.find(item => item.key === 'APPROVA' || item.key === 'INVIA_TI_AMM') || null
+  const workflowIntegrationItems = workflowMenuEnabledItems.filter(item => item.key === 'INTEGRAZIONE' || item.key === 'INTEGRAZIONE_TI_AMM' || item.key === 'INTEGRAZIONE_TECNICA')
+  const workflowRespintaItem = workflowMenuEnabledItems.find(item => item.key === 'RESPINGI') || null
+  const workflowDirectActionItems = workflowMenuEnabledItems.filter(item => !isWorkflowEsitoPendingKey(item.key))
+  const showEsitoDrivenWorkflow = Boolean(workflowConformeItem || workflowIntegrationItems.length > 0 || workflowRespintaItem)
+  const useUnifiedWorkflowActionSelect = role === 'RZ'
+  const unifiedWorkflowActionItems = useUnifiedWorkflowActionSelect ? workflowMenuEnabledItems : []
+
+  function buildDefaultWorkflowNote (nextPending: Pending): string {
+    if (role === 'DT') {
+      if (nextPending === 'APPROVA' || nextPending === 'INVIA_TI_AMM') {
+        return `A seguito della valutazione di competenza, si approva l’istruttoria tecnica e se ne dispone la trasmissione all’Area Amministrativa.`
+      }
+      if (nextPending === 'INTEGRAZIONE' || nextPending === 'INTEGRAZIONE_TI_AMM' || nextPending === 'INTEGRAZIONE_TECNICA') {
+        return `A seguito della valutazione di competenza, non si approva l’istruttoria tecnica e si dispone il rinvio per le necessarie integrazioni o rettifiche.`
+      }
+      if (nextPending === 'RESPINGI') {
+        return `A seguito della valutazione di competenza, non si ravvisano i presupposti per l’approvazione dell’istruttoria tecnica e si dispone il respingimento della pratica.`
+      }
+    }
+
+    if (role === 'DA') {
+      if (nextPending === 'APPROVA' || nextPending === 'INVIA_TI_AMM') {
+        return `A seguito della valutazione di competenza, si approva l'istruttoria amministrativa proposta e si dispone la prosecuzione della pratica alla fase conclusiva.`
+      }
+      if (nextPending === 'INTEGRAZIONE' || nextPending === 'INTEGRAZIONE_TI_AMM' || nextPending === 'INTEGRAZIONE_TECNICA') {
+        return `A seguito della valutazione di competenza, non si approva l'istruttoria amministrativa proposta e si dispone il rinvio al Responsabile istruttoria amministrativa per le necessarie verifiche, integrazioni o rettifiche.`
+      }
+      return ''
+    }
+
+    if (role === 'RZ') {
+      if (nextPending === 'APPROVA' || nextPending === 'INVIA_TI_AMM') {
+        return `A seguito della verifica svolta, si attesta la conformità della pratica sotto il profilo tecnico-istruttorio e se ne dispone la trasmissione al Responsabile istruttoria.`
+      }
+      if (nextPending === 'INTEGRAZIONE' || nextPending === 'INTEGRAZIONE_TI_AMM' || nextPending === 'INTEGRAZIONE_TECNICA') {
+        return `A seguito della verifica svolta, si rileva la necessità di integrazioni o rettifiche tecnico-istruttorie e si dispone il rinvio al Tecnico istruttore competente.`
+      }
+      if (nextPending === 'RESPINGI') {
+        return `A seguito della verifica svolta, non si ravvisano i presupposti per la prosecuzione dell’istruttoria tecnica e si dispone il respingimento della pratica.`
+      }
+    }
+
+    if (role === 'RI_AMM') {
+      if (nextPending === 'APPROVA' || nextPending === 'INVIA_TI_AMM') {
+        return `A seguito della verifica svolta, si condivide l'istruttoria amministrativa proposta e se ne dispone la trasmissione al Direttore d’Area.`
+      }
+      if (nextPending === 'INTEGRAZIONE_TI_AMM') {
+        return `A seguito della verifica svolta, si rileva la necessità di integrazioni o rettifiche dell’istruttoria amministrativa e si dispone il rinvio al Tecnico Istruttore amministrativo.`
+      }
+      if (nextPending === 'INTEGRAZIONE_TECNICA') {
+        return `A seguito della verifica svolta, si rileva la necessità di chiarimenti o integrazioni sugli elementi tecnici posti a base dell’istruttoria amministrativa e si dispone il rinvio al Responsabile istruttoria dell’area di provenienza.`
+      }
+      if (nextPending === 'INTEGRAZIONE') {
+        return `A seguito della verifica svolta, si rileva la necessità di integrazioni o rettifiche sotto il profilo istruttorio-amministrativo.`
+      }
+    }
+
+    const isAmmWorkflowRole = role === 'TI_AMM'
+    const profiloVerifica = isAmmWorkflowRole ? 'istruttorio-amministrativo' : 'tecnico-istruttorio'
+
+    if (nextPending === 'APPROVA' || nextPending === 'INVIA_TI_AMM') {
+      return `A seguito della verifica svolta, si attesta la conformità della pratica sotto il profilo ${profiloVerifica}.`
+    }
+    if (nextPending === 'INTEGRAZIONE' || nextPending === 'INTEGRAZIONE_TI_AMM' || nextPending === 'INTEGRAZIONE_TECNICA') {
+      return `A seguito della verifica svolta, si segnala la necessità di integrazioni o rettifiche sotto il profilo ${profiloVerifica}.`
+    }
+    if (nextPending === 'RESPINGI') {
+      return `A seguito della verifica svolta, si rilevano elementi di non conformità sotto il profilo ${profiloVerifica} tali da non consentire la prosecuzione della pratica.`
+    }
+    return ''
+  }
+
+  const startDerivedWorkflowAction = (nextPending: Exclude<Pending, null | 'TAKE'>, opts?: { defaultNote?: boolean }) => {
+    startAction(nextPending, { keepActionsMenuOpen: true })
+    if (opts?.defaultNote !== false) {
+      setNoteDraft('')
+      window.setTimeout(() => {
+        try { noteRef.current?.focus?.() } catch {}
+        autoResizeNote(noteRef.current)
+      }, 0)
+    }
+  }
+
+  const applyWorkflowEsitoChoice = (choice: WorkflowEsitoChoice) => {
+    setWorkflowEsitoChoice(choice)
+    setWorkflowRimandoChoice('')
+    setConfirmAttempted(false)
+    resetStructuredReasons()
+
+    if (!choice) {
+      setPending(null)
+      setMsg(null)
+      setNoteDraft(noteOrigRef.current)
+      return
+    }
+
+    if (choice === 'CONFORME') {
+      if (workflowConformeItem) startDerivedWorkflowAction(workflowConformeItem.key)
+      return
+    }
+
+    if (choice === 'DA_INTEGRARE') {
+      if (workflowIntegrationItems.length === 1) {
+        startDerivedWorkflowAction(workflowIntegrationItems[0].key)
+      } else {
+        setPending(null)
+        setMsg(null)
+        setNoteDraft(noteOrigRef.current)
+      }
+      return
+    }
+
+    if (choice === 'RESPINTA') {
+      if (workflowRespintaItem) startDerivedWorkflowAction('RESPINGI')
+    }
+  }
+
+  const applyWorkflowRimandoChoice = (key: string) => {
+    setWorkflowRimandoChoice(key)
+    setConfirmAttempted(false)
+    if (!key) {
+      setPending(null)
+      setNoteDraft(noteOrigRef.current)
+      return
+    }
+    const item = workflowIntegrationItems.find(i => i.key === key)
+    if (item) startDerivedWorkflowAction(item.key)
+  }
+
   const selectedWorkflowMenuItem = pending ? (workflowMenuEnabledItems.find(item => item.key === pending) || null) : null
   const actionMenuTheme = pending ? theme : pendingTheme.TAKE
+  const hideWorkflowOperationalDesc = role === 'DT' && pending === 'INTEGRAZIONE' && (
+    !integrationReasonTrim ||
+    (isIntegrationNeedsDetail && integrationTargets.length === 0)
+  )
+  const workflowOperationalDesc = hideWorkflowOperationalDesc ? '' : actionMenuTheme.desc
   const selectedWorkflowMenuKey = selectedWorkflowMenuItem?.key || ''
   const isWorkflowRimandoPending = pending === 'INTEGRAZIONE' || pending === 'INTEGRAZIONE_TI_AMM' || pending === 'INTEGRAZIONE_TECNICA'
-  const isAttestazioneConformitaPending = pending === 'APPROVA' && role === 'TI_AMM'
-  const workflowNoteLabel = isAttestazioneConformitaPending ? 'Attestazione di conformità' : (isWorkflowRimandoPending ? 'Motivazione del rimando' : 'Note')
-  const workflowNotePlaceholder = isAttestazioneConformitaPending
-    ? 'Attestare la conformità della proposta agli elementi istruttori e ai dati disponibili…'
-    : isWorkflowRimandoPending
-      ? 'Indicare la motivazione del rimando…'
-      : (noteIsRequired ? 'Specifica il motivo…' : 'Nota facoltativa…')
+  const isAttestazioneConformitaPending = pending === 'APPROVA' || pending === 'INVIA_TI_AMM'
+  const workflowNoteLabel = isAttestazioneConformitaPending ? 'Attestazione di conformità' : (isWorkflowRimandoPending ? 'Integrazioni/rettifiche proposte' : 'Note')
+  const hasFixedWorkflowNote = Boolean(fixedWorkflowNoteTrim)
+  const workflowFreeNoteLabel = hasFixedWorkflowNote
+    ? (hasOtherMotivation ? 'Altre motivazioni e ulteriori annotazioni' : 'Ulteriori annotazioni')
+    : workflowNoteLabel
+  const workflowNoteTextAreaRequired = noteIsRequired
+  const workflowNotePlaceholder = hasFixedWorkflowNote
+    ? (hasOtherMotivation ? 'Inserire altre motivazioni ed eventuali ulteriori annotazioni…' : 'Inserire eventuali ulteriori annotazioni…')
+    : isAttestazioneConformitaPending
+      ? 'Attestare la conformità della pratica agli elementi verificati…'
+      : isWorkflowRimandoPending
+        ? (hasOtherMotivation ? 'Inserire altre motivazioni ed eventuali ulteriori annotazioni…' : 'Inserire eventuali ulteriori annotazioni…')
+        : (noteIsRequired ? 'Specifica il motivo…' : 'Nota facoltativa…')
+
+  const integrationMotivationControls = isWorkflowRimandoPending ? (
+    <div style={{ display: 'grid', gap: 8 }}>
+      <div style={{ display: 'grid', gap: 6 }}>
+        <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
+          <div style={{ fontSize: Math.max(15, Number(titleFontSize) || 15), fontWeight: 700 }}>Motivazione del rimando</div>
+          <div style={labelReqStyle(true, integrationReasonReqErr)}>(obbligatoria)</div>
+        </div>
+        <select
+          value={integrationReason}
+          onChange={(e) => {
+            const v = String(e.target.value || '')
+            setIntegrationReason(v)
+            setIntegrationTargets([])
+            setIntegrationOtherText('')
+            if (confirmAttempted) setConfirmAttempted(false)
+          }}
+          disabled={loading || !hasSel || lockedByTransmit}
+          style={{ width: '100%', padding: '9px 10px', borderRadius: 8, border: `1px solid ${integrationReasonReqErr ? '#dc2626' : 'rgba(0,0,0,0.18)'}`, outline: 'none', fontSize: Math.max(15, Number(ui.statusFontSize) || 15), background: '#fff' }}
+        >
+          <option value=''>— Seleziona —</option>
+          {integrationReasonOptions.map(opt => <option key={opt} value={opt}>{opt}</option>)}
+        </select>
+      </div>
+
+      {isIntegrationNeedsDetail && (
+        <div style={{ display: 'grid', gap: 7 }}>
+          <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
+            <div style={{ fontSize: Math.max(15, Number(titleFontSize) || 15), fontWeight: 700 }}>Dati da integrare o rettificare</div>
+            <div style={labelReqStyle(true, integrationTargetsReqErr)}>(obbligatoria)</div>
+          </div>
+          {role === 'DT' ? (
+            <div style={{ border: `1px solid ${integrationTargetsReqErr ? '#fecaca' : '#e5e7eb'}`, borderRadius: 8, padding: '6px 8px', background: '#fff' }}>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', columnGap: 10, rowGap: 2 }}>
+                {integrationTargetOptions.map(opt => renderIntegrationTargetCheckbox(opt))}
+              </div>
+            </div>
+          ) : (
+            <div style={{ border: `1px solid ${integrationTargetsReqErr ? '#fecaca' : '#e5e7eb'}`, borderRadius: 8, padding: '6px 8px', background: '#fff' }}>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(190px, 1fr))', columnGap: 10, rowGap: 2 }}>
+                {integrationTargetOptions.map(opt => renderIntegrationTargetCheckbox(opt))}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  ) : null
+
+  const rejectReasonControls = pending === 'RESPINGI' ? (
+    <div style={{ display: 'grid', gap: 6 }}>
+      <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
+        <div style={{ fontSize: Math.max(15, Number(titleFontSize) || 15), fontWeight: 700 }}>Motivazione del respingimento</div>
+        <div style={labelReqStyle(true, reasonReqErr)}>(obbligatoria)</div>
+      </div>
+      <ZebraDropdown
+        value={rejectReason}
+        options={technicalRejectReasonOptions}
+        placeholder='— seleziona —'
+        disabled={loading || !hasSel || lockedByTransmit}
+        onChange={(v) => { setRejectReason(String(v ?? '')); if (confirmAttempted) setConfirmAttempted(false) }}
+        evenBg='#ffffff'
+        oddBg='#ffffff'
+        borderColor={ui.reasonsRowBorderColor}
+        borderWidth={ui.reasonsRowBorderWidth}
+        radius={ui.reasonsRowRadius}
+        fontSize={Math.max(15, Number(ui.statusFontSize) || 15)}
+        isError={reasonReqErr}
+      />
+    </div>
+  ) : null
 
   const closeWorkflowMenu = () => {
     if (loading) return
@@ -4930,8 +5416,10 @@ ${noteTrim}` : undefined,
     setLoading(false)
     setMsg(null)
     setConfirmAttempted(false)
+    setWorkflowEsitoChoice('')
+    setWorkflowRimandoChoice('')
     setNoteDraft(noteOrigRef.current)
-    setRejectReason('')
+    resetStructuredReasons()
     setTiSelected('')
     setTiAmmSelected('')
     setTiLoadErr('')
@@ -4946,8 +5434,10 @@ ${noteTrim}` : undefined,
     setPending(null)
     setMsg(null)
     setConfirmAttempted(false)
+    setWorkflowEsitoChoice('')
+    setWorkflowRimandoChoice('')
     setNoteDraft(noteOrigRef.current)
-    setRejectReason('')
+    resetStructuredReasons()
     setTiSelected('')
     setTiAmmSelected('')
     setTiLoadErr('')
@@ -4960,9 +5450,9 @@ ${noteTrim}` : undefined,
     if (!pending || loading || !selectedWorkflowMenuItem) return false
     if (pending === 'ASSEGNA_TI') return !!tiSelected
     if (pending === 'ASSEGNA_TI_AMM') return !!tiAmmSelected
-    if (pending === 'INTEGRAZIONE' || pending === 'INTEGRAZIONE_TI_AMM' || pending === 'INTEGRAZIONE_TECNICA') return !!noteTrim
-    if (pending === 'APPROVA' && role === 'TI_AMM') return !!noteTrim
-    if (pending === 'RESPINGI') return !!reasonTrim && (!isAltro || !!noteTrim)
+    if (pending === 'INTEGRAZIONE' || pending === 'INTEGRAZIONE_TI_AMM' || pending === 'INTEGRAZIONE_TECNICA') return !integrationReasonInvalid && !integrationTargetsInvalid && (!hasOtherMotivation || !!noteDraftTrim)
+    if (pending === 'APPROVA' || pending === 'INVIA_TI_AMM') return !!noteTrim
+    if (pending === 'RESPINGI') return !!reasonTrim && (!isAltro || !!noteDraftTrim)
     if (pending === 'ELIMINA') return !!noteTrim
     return true
   })()
@@ -5064,70 +5554,120 @@ ${noteTrim}` : undefined,
           </React.Fragment>
         ) : workflowMenuEnabledItems.length > 0 ? (
           <React.Fragment>
-            <div style={{ display: 'grid', gap: 6 }}>
-              <div style={{ fontSize: Math.max(15, Number(titleFontSize) || 15), fontWeight: 700 }}>Azione</div>
-              <select
-                value={selectedWorkflowMenuKey}
-                onChange={(e) => {
-                  const raw = String(e.target.value || '')
-                  if (!raw) {
-                    setPending(null)
-                    setMsg(null)
-                    setConfirmAttempted(false)
-                    setNoteDraft(noteOrigRef.current)
-                    setRejectReason('')
-                    setTiSelected('')
-                    setTiAmmSelected('')
-                    setTiLoadErr('')
-                    setTiAmmLoadErr('')
-                    return
-                  }
-                  const key = raw as Exclude<Pending, null | 'TAKE'>
-                  const item = workflowMenuEnabledItems.find(i => i.key === key)
-                  if (item) startAction(item.key, { keepActionsMenuOpen: true })
-                }}
-                disabled={loading}
-                style={{ width: '100%', padding: '9px 10px', borderRadius: 8, border: '1px solid rgba(0,0,0,0.18)', outline: 'none', fontSize: 15, background: '#fff' }}
-              >
-                <option value=''>— Seleziona —</option>
-                {workflowMenuEnabledItems.map(item => (
-                  <option key={item.key} value={item.key}>{item.label}</option>
-                ))}
-              </select>
-            </div>
+            {useUnifiedWorkflowActionSelect ? (
+              <div style={{ display: 'grid', gap: 6 }}>
+                <div style={{ fontSize: Math.max(15, Number(titleFontSize) || 15), fontWeight: 700 }}>Azione</div>
+                <select
+                  value={selectedWorkflowMenuKey}
+                  onChange={(e) => {
+                    const raw = String(e.target.value || '')
+                    setWorkflowEsitoChoice('')
+                    setWorkflowRimandoChoice('')
+                    if (!raw) {
+                      setPending(null)
+                      setMsg(null)
+                      setConfirmAttempted(false)
+                      setNoteDraft(noteOrigRef.current)
+                      resetStructuredReasons()
+                      setTiSelected('')
+                      setTiAmmSelected('')
+                      setTiLoadErr('')
+                      setTiAmmLoadErr('')
+                      return
+                    }
+                    const key = raw as Exclude<Pending, null | 'TAKE'>
+                    const item = unifiedWorkflowActionItems.find(i => i.key === key)
+                    if (!item) return
+                    if (isWorkflowEsitoPendingKey(item.key)) {
+                      startDerivedWorkflowAction(item.key)
+                    } else {
+                      startAction(item.key, { keepActionsMenuOpen: true })
+                    }
+                  }}
+                  disabled={loading}
+                  style={{ width: '100%', padding: '9px 10px', borderRadius: 8, border: '1px solid rgba(0,0,0,0.18)', outline: 'none', fontSize: 15, background: '#fff' }}
+                >
+                  <option value=''>— Seleziona —</option>
+                  {unifiedWorkflowActionItems.map(item => (
+                    <option key={item.key} value={item.key}>{item.label}</option>
+                  ))}
+                </select>
+              </div>
+            ) : workflowDirectActionItems.length > 0 && (
+              <div style={{ display: 'grid', gap: 6 }}>
+                <div style={{ fontSize: Math.max(15, Number(titleFontSize) || 15), fontWeight: 700 }}>
+                  {showEsitoDrivenWorkflow ? 'Azione preliminare' : 'Azione'}
+                </div>
+                <select
+                  value={!isWorkflowEsitoPendingKey(selectedWorkflowMenuKey) ? selectedWorkflowMenuKey : ''}
+                  onChange={(e) => {
+                    const raw = String(e.target.value || '')
+                    setWorkflowEsitoChoice('')
+                    setWorkflowRimandoChoice('')
+                    if (!raw) {
+                      setPending(null)
+                      setMsg(null)
+                      setConfirmAttempted(false)
+                      setNoteDraft(noteOrigRef.current)
+                      resetStructuredReasons()
+                      setTiSelected('')
+                      setTiAmmSelected('')
+                      setTiLoadErr('')
+                      setTiAmmLoadErr('')
+                      return
+                    }
+                    const key = raw as Exclude<Pending, null | 'TAKE'>
+                    const item = workflowDirectActionItems.find(i => i.key === key)
+                    if (item) startAction(item.key, { keepActionsMenuOpen: true })
+                  }}
+                  disabled={loading}
+                  style={{ width: '100%', padding: '9px 10px', borderRadius: 8, border: '1px solid rgba(0,0,0,0.18)', outline: 'none', fontSize: 15, background: '#fff' }}
+                >
+                  <option value=''>— Seleziona —</option>
+                  {workflowDirectActionItems.map(item => (
+                    <option key={item.key} value={item.key}>{item.label}</option>
+                  ))}
+                </select>
+              </div>
+            )}
 
-            {pending && actionMenuTheme.desc && (
-              <div style={{ fontSize: 15, color: '#374151', lineHeight: 1.55, padding: 10, background: actionMenuTheme.bg, border: `1px solid ${actionMenuTheme.border}`, borderRadius: 8 }}>
-                {actionMenuTheme.desc}
+            {!useUnifiedWorkflowActionSelect && showEsitoDrivenWorkflow && (
+              <div style={{ display: 'grid', gap: 6 }}>
+                <div style={{ fontSize: Math.max(15, Number(titleFontSize) || 15), fontWeight: 700 }}>Esito verifica</div>
+                <select
+                  value={workflowEsitoChoice}
+                  onChange={(e) => applyWorkflowEsitoChoice(String(e.target.value || '') as WorkflowEsitoChoice)}
+                  disabled={loading}
+                  style={{ width: '100%', padding: '9px 10px', borderRadius: 8, border: '1px solid rgba(0,0,0,0.18)', outline: 'none', fontSize: 15, background: '#fff' }}
+                >
+                  <option value=''>— Seleziona —</option>
+                  {workflowConformeItem && <option value='CONFORME'>Conforme</option>}
+                  {workflowIntegrationItems.length > 0 && <option value='DA_INTEGRARE'>Da integrare/rettificare</option>}
+                  {workflowRespintaItem && <option value='RESPINTA'>Non conforme / respinta</option>}
+                </select>
+              </div>
+            )}
+
+            {!useUnifiedWorkflowActionSelect && showEsitoDrivenWorkflow && workflowEsitoChoice === 'DA_INTEGRARE' && workflowIntegrationItems.length > 1 && (
+              <div style={{ display: 'grid', gap: 6 }}>
+                <div style={{ fontSize: Math.max(15, Number(titleFontSize) || 15), fontWeight: 700 }}>Destinazione del rimando</div>
+                <select
+                  value={workflowRimandoChoice}
+                  onChange={(e) => applyWorkflowRimandoChoice(String(e.target.value || ''))}
+                  disabled={loading}
+                  style={{ width: '100%', padding: '9px 10px', borderRadius: 8, border: '1px solid rgba(0,0,0,0.18)', outline: 'none', fontSize: 15, background: '#fff' }}
+                >
+                  <option value=''>— Seleziona —</option>
+                  {workflowIntegrationItems.map(item => (
+                    <option key={item.key} value={item.key}>{item.label}</option>
+                  ))}
+                </select>
               </div>
             )}
 
             {msg && msg.kind === 'err' && (
               <div style={{ fontWeight: 500, padding: 10, background: '#fef2f2', border: '1px solid #fecaca', borderRadius: 6, color: '#7f1d1d', fontSize: 15 }}>
                 {msg.text}
-              </div>
-            )}
-
-            {pending === 'RESPINGI' && (
-              <div style={{ display: 'grid', gap: 6 }}>
-                <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
-                  <div style={{ fontSize: Math.max(15, Number(titleFontSize) || 15), fontWeight: 700 }}>Motivazione</div>
-                  <div style={labelReqStyle(true, reasonReqErr)}>(obbligatoria)</div>
-                </div>
-                <ZebraDropdown
-                  value={rejectReason}
-                  options={ui.rejectReasons || []}
-                  placeholder='— seleziona —'
-                  disabled={loading || !hasSel || lockedByTransmit}
-                  onChange={(v) => { setRejectReason(String(v ?? '')); if (confirmAttempted) setConfirmAttempted(false) }}
-                  evenBg='#ffffff'
-                  oddBg='#ffffff'
-                  borderColor={ui.reasonsRowBorderColor}
-                  borderWidth={ui.reasonsRowBorderWidth}
-                  radius={ui.reasonsRowRadius}
-                  fontSize={Math.max(15, Number(ui.statusFontSize) || 15)}
-                  isError={reasonReqErr}
-                />
               </div>
             )}
 
@@ -5176,32 +5716,54 @@ ${noteTrim}` : undefined,
             )}
 
             {showNote && (
-              <div style={{ display: 'grid', gap: 6 }}>
-                <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
-                  <div style={{ fontSize: Math.max(15, Number(titleFontSize) || 15), fontWeight: 700 }}>{workflowNoteLabel}</div>
-                  {noteIsRequired && <div style={labelReqStyle(true, noteReqErr)}>(obbligatoria)</div>}
+              <div style={{ display: 'grid', gap: 8 }}>
+                {hasFixedWorkflowNote && (
+                  <div style={{ display: 'grid', gap: 6 }}>
+                    <div style={{ fontSize: Math.max(15, Number(titleFontSize) || 15), fontWeight: 700 }}>{workflowNoteLabel}</div>
+                    <div style={{ whiteSpace: 'pre-wrap', overflowWrap: 'break-word', padding: '8px 10px', borderRadius: 8, border: '1px solid rgba(0,0,0,0.12)', background: '#f9fafb', color: '#374151', fontSize: Math.max(15, Number(ui.statusFontSize) || 15), lineHeight: 1.45 }}>
+                      {fixedWorkflowNoteTrim}
+                    </div>
+                  </div>
+                )}
+
+                {integrationMotivationControls}
+                {rejectReasonControls}
+
+                <div style={{ display: 'grid', gap: 6 }}>
+                  <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
+                    <div style={{ fontSize: Math.max(15, Number(titleFontSize) || 15), fontWeight: 700 }}>{workflowFreeNoteLabel}</div>
+                    {workflowNoteTextAreaRequired && <div style={labelReqStyle(true, noteReqErr)}>(obbligatoria)</div>}
+                  </div>
+                  <textarea
+                    ref={noteRef}
+                    value={noteDraft}
+                    onChange={(e) => { const v = String((e.target as HTMLTextAreaElement).value ?? ''); setNoteDraft(v); autoResizeNote(e.target as HTMLTextAreaElement); if (confirmAttempted) setConfirmAttempted(false) }}
+                    placeholder={workflowNotePlaceholder}
+                    style={{ width: '100%', minHeight: NOTE_MIN_H, overflowY: 'auto', resize: 'vertical', padding: '8px 10px', borderRadius: 8, border: noteReqErr ? '1px solid #dc2626' : '1px solid rgba(0,0,0,0.20)', fontSize: Math.max(15, Number(ui.statusFontSize) || 15), outline: 'none', boxSizing: 'border-box' }}
+                    disabled={!noteEnabled}
+                  />
                 </div>
-                <textarea
-                  ref={noteRef}
-                  value={noteDraft}
-                  onChange={(e) => { const v = String((e.target as HTMLTextAreaElement).value ?? ''); setNoteDraft(v); autoResizeNote(e.target as HTMLTextAreaElement); if (confirmAttempted) setConfirmAttempted(false) }}
-                  placeholder={workflowNotePlaceholder}
-                  style={{ width: '100%', minHeight: NOTE_MIN_H, maxHeight: NOTE_MAX_H, overflowY: 'hidden', resize: 'none', padding: '8px 10px', borderRadius: 8, border: noteReqErr ? '1px solid #dc2626' : '1px solid rgba(0,0,0,0.20)', fontSize: Math.max(15, Number(ui.statusFontSize) || 15), outline: 'none', boxSizing: 'border-box' }}
-                  disabled={!noteEnabled}
-                />
               </div>
             )}
 
             {(loading || workflowSubmitting) ? operationProgressBox : (
-              <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end', marginTop: 4 }}>
-                <button type='button' onClick={closeWorkflowMenu}
-                  style={{ padding: '8px 18px', borderRadius: 8, border: '1px solid rgba(0,0,0,0.18)', background: '#fff', color: '#374151', fontWeight: 600, fontSize: 15, cursor: 'pointer' }}>
-                  Annulla
-                </button>
-                <button type='button' onClick={() => { void confirmWorkflowAction() }} disabled={!canConfirmWorkflowAction}
-                  style={{ padding: '8px 18px', borderRadius: 8, border: `1px solid ${actionMenuTheme.buttonBorder}`, background: actionMenuTheme.buttonBg, color: '#fff', fontWeight: 700, fontSize: 15, cursor: canConfirmWorkflowAction ? 'pointer' : 'not-allowed', opacity: canConfirmWorkflowAction ? 1 : 0.6 }}>
-                  Conferma
-                </button>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 12, justifyContent: 'space-between', marginTop: 4 }}>
+                <div
+                  style={{ flex: '1 1 auto', minWidth: 0, minHeight: 20, textAlign: 'left', fontSize: 15, color: '#374151', lineHeight: 1.35, whiteSpace: 'normal', overflowWrap: 'break-word' }}
+                  title={pending && workflowOperationalDesc ? workflowOperationalDesc : undefined}
+                >
+                  {pending && workflowOperationalDesc ? workflowOperationalDesc : ' '}
+                </div>
+                <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end', flex: '0 0 auto' }}>
+                  <button type='button' onClick={closeWorkflowMenu}
+                    style={{ padding: '8px 18px', borderRadius: 8, border: '1px solid rgba(0,0,0,0.18)', background: '#fff', color: '#374151', fontWeight: 600, fontSize: 15, cursor: 'pointer' }}>
+                    Annulla
+                  </button>
+                  <button type='button' onClick={() => { void confirmWorkflowAction() }} disabled={!canConfirmWorkflowAction}
+                    style={{ padding: '8px 18px', borderRadius: 8, border: `1px solid ${actionMenuTheme.buttonBorder}`, background: actionMenuTheme.buttonBg, color: '#fff', fontWeight: 700, fontSize: 15, cursor: canConfirmWorkflowAction ? 'pointer' : 'not-allowed', opacity: canConfirmWorkflowAction ? 1 : 0.6 }}>
+                    Conferma
+                  </button>
+                </div>
               </div>
             )}
           </React.Fragment>
@@ -5226,14 +5788,14 @@ ${noteTrim}` : undefined,
         role='dialog'
         aria-modal='true'
         data-gii-global-popup-dialog='1'
-        style={{ width: 'min(92vw, 560px)', maxHeight: 'calc(100vh - 48px)', overflowY: 'auto', background: '#fff', borderRadius: 14, boxShadow: '0 20px 60px rgba(0,0,0,0.28)', border: '1px solid rgba(0,0,0,0.08)', padding: 18, display: 'grid', gap: 12, position: 'relative', zIndex: 2147483647 }}
+        style={{ width: pendingModalWidth, maxHeight: 'calc(100vh - 48px)', overflowY: 'auto', background: '#fff', borderRadius: 14, boxShadow: '0 20px 60px rgba(0,0,0,0.28)', border: '1px solid rgba(0,0,0,0.08)', padding: 18, display: 'grid', gap: 12, position: 'relative', zIndex: 2147483647 }}
         onClick={(e) => { e.stopPropagation() }}
         onMouseDown={(e) => { e.stopPropagation() }}
       >
         {/* Titolo colorato con icona + banda chiara */}
-        <div style={{ fontWeight: 800, fontSize: 18, marginBottom: 2, color: theme.color, display: 'flex', alignItems: 'center', gap: 8, background: theme.bg, border: `1px solid ${theme.border}`, borderRadius: 8, padding: '10px 12px' }}>
+        <div style={{ fontWeight: 800, fontSize: 18, marginBottom: 2, color: theme.color, display: 'flex', alignItems: 'flex-start', gap: 8, background: theme.bg, border: `1px solid ${theme.border}`, borderRadius: 8, padding: '10px 12px' }}>
           <span style={{ fontSize: 20, flex: '0 0 auto' }}>{theme.icon}</span>
-          <span style={{ whiteSpace: 'nowrap' }}>{pendingTitle}</span>
+          <span style={{ minWidth: 0, whiteSpace: 'normal', overflowWrap: 'break-word', lineHeight: 1.25 }}>{pendingTitle}</span>
         </div>
 
         {/* Box numero rilevazione / rapporto tecnico */}
@@ -5243,39 +5805,10 @@ ${noteTrim}` : undefined,
           </div>
         )}
 
-        {/* Descrizione azione */}
-        {theme.desc && (
-          <div style={{ fontSize: 15, color: '#374151', lineHeight: 1.6 }}>{theme.desc}</div>
-        )}
-
         {/* Errore */}
         {msg && msg.kind === 'err' && (
           <div style={{ fontWeight: 500, padding: 10, background: '#fef2f2', border: '1px solid #fecaca', borderRadius: 6, color: '#7f1d1d', fontSize: 15 }}>
             {msg.text}
-          </div>
-        )}
-
-        {/* Dropdown motivazione respinta */}
-        {pending === 'RESPINGI' && (
-          <div style={{ display: 'grid', gap: 6 }}>
-            <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
-              <div style={{ fontSize: Math.max(15, Number(titleFontSize) || 15), fontWeight: 700 }}>Motivazione</div>
-              <div style={labelReqStyle(true, reasonReqErr)}>(obbligatoria)</div>
-            </div>
-            <ZebraDropdown
-              value={rejectReason}
-              options={ui.rejectReasons || []}
-              placeholder='— seleziona —'
-              disabled={loading || !hasSel || lockedByTransmit}
-              onChange={(v) => { setRejectReason(String(v ?? '')); if (confirmAttempted) setConfirmAttempted(false) }}
-              evenBg='#ffffff'
-              oddBg='#ffffff'
-              borderColor={ui.reasonsRowBorderColor}
-              borderWidth={ui.reasonsRowBorderWidth}
-              radius={ui.reasonsRowRadius}
-              fontSize={Math.max(15, Number(ui.statusFontSize) || 15)}
-              isError={reasonReqErr}
-            />
           </div>
         )}
 
@@ -5320,22 +5853,41 @@ ${noteTrim}` : undefined,
 
         {/* Textarea note */}
         {showNote && (
-          <div style={{ display: 'grid', gap: 6 }}>
-            <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
-              <div style={{ fontSize: Math.max(15, Number(titleFontSize) || 15), fontWeight: 700 }}>{workflowNoteLabel}</div>
-              {noteIsRequired && (
-                <div style={labelReqStyle(true, noteReqErr)}>(obbligatoria)</div>
-              )}
+          <div style={{ display: 'grid', gap: 8 }}>
+            {hasFixedWorkflowNote && (
+              <div style={{ display: 'grid', gap: 6 }}>
+                <div style={{ fontSize: Math.max(15, Number(titleFontSize) || 15), fontWeight: 700 }}>{workflowNoteLabel}</div>
+                <div style={{ whiteSpace: 'pre-wrap', overflowWrap: 'break-word', padding: '8px 10px', borderRadius: 8, border: '1px solid rgba(0,0,0,0.12)', background: '#f9fafb', color: '#374151', fontSize: Math.max(15, Number(ui.statusFontSize) || 15), lineHeight: 1.45 }}>
+                  {fixedWorkflowNoteTrim}
+                </div>
+              </div>
+            )}
+
+            {integrationMotivationControls}
+            {rejectReasonControls}
+
+            <div style={{ display: 'grid', gap: 6 }}>
+              <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
+                <div style={{ fontSize: Math.max(15, Number(titleFontSize) || 15), fontWeight: 700 }}>{workflowFreeNoteLabel}</div>
+                {workflowNoteTextAreaRequired && (
+                  <div style={labelReqStyle(true, noteReqErr)}>(obbligatoria)</div>
+                )}
+              </div>
+              <textarea
+                ref={noteRef}
+                value={noteDraft}
+                onChange={(e) => { const v = String((e.target as HTMLTextAreaElement).value ?? ''); setNoteDraft(v); autoResizeNote(e.target as HTMLTextAreaElement) }}
+                placeholder={workflowNotePlaceholder}
+                style={{ width: '100%', minHeight: NOTE_MIN_H, overflowY: 'auto', resize: 'vertical', padding: '8px 10px', borderRadius: 8, border: noteReqErr ? '1px solid #dc2626' : '1px solid rgba(0,0,0,0.20)', fontSize: Math.max(15, Number(ui.statusFontSize) || 15), outline: 'none', boxSizing: 'border-box' }}
+                disabled={!noteEnabled}
+              />
             </div>
-            <textarea
-              ref={noteRef}
-              value={noteDraft}
-              onChange={(e) => { const v = String((e.target as HTMLTextAreaElement).value ?? ''); setNoteDraft(v); autoResizeNote(e.target as HTMLTextAreaElement) }}
-              placeholder={workflowNotePlaceholder}
-              style={{ width: '100%', minHeight: NOTE_MIN_H, maxHeight: NOTE_MAX_H, overflowY: 'hidden', resize: 'none', padding: '8px 10px', borderRadius: 8, border: noteReqErr ? '1px solid #dc2626' : '1px solid rgba(0,0,0,0.20)', fontSize: Math.max(15, Number(ui.statusFontSize) || 15), outline: 'none', boxSizing: 'border-box' }}
-              disabled={!noteEnabled}
-            />
           </div>
+        )}
+
+        {/* Descrizione azione */}
+        {theme.desc && (
+          <div style={{ fontSize: 15, color: '#374151', lineHeight: 1.6, whiteSpace: 'normal', overflowWrap: 'break-word' }}>{theme.desc}</div>
         )}
 
         {/* Bottoni */}
@@ -5371,7 +5923,7 @@ ${noteTrim}` : undefined,
         role='dialog'
         aria-modal='true'
         data-gii-global-popup-dialog='1'
-        style={{ width: 'min(92vw, 640px)', maxHeight: 'calc(100vh - 48px)', overflowY: 'auto', background: '#fff', borderRadius: 14, boxShadow: '0 20px 60px rgba(0,0,0,0.30)', border: '1px solid #dc2626', padding: 18, display: 'grid', gap: 14 }}
+        style={{ width: 'min(92vw, 560px)', maxHeight: 'calc(100vh - 48px)', overflowY: 'auto', background: '#fff', borderRadius: 14, boxShadow: '0 20px 60px rgba(0,0,0,0.30)', border: '1px solid #dc2626', padding: 18, display: 'grid', gap: 14 }}
         onClick={(e) => { e.stopPropagation() }}
         onMouseDown={(e) => { e.stopPropagation() }}
       >
@@ -5408,7 +5960,7 @@ ${noteTrim}` : undefined,
         role='dialog'
         aria-modal='true'
         data-gii-global-popup-dialog='1'
-        style={{ width: 'min(92vw, 620px)', maxHeight: 'calc(100vh - 48px)', overflowY: 'auto', background: '#fff', borderRadius: 14, boxShadow: '0 20px 60px rgba(0,0,0,0.30)', border: '1px solid #f59e0b', padding: 18, display: 'grid', gap: 14 }}
+        style={{ width: 'min(92vw, 560px)', maxHeight: 'calc(100vh - 48px)', overflowY: 'auto', background: '#fff', borderRadius: 14, boxShadow: '0 20px 60px rgba(0,0,0,0.30)', border: '1px solid #f59e0b', padding: 18, display: 'grid', gap: 14 }}
         onClick={(e) => { e.stopPropagation() }}
         onMouseDown={(e) => { e.stopPropagation() }}
       >

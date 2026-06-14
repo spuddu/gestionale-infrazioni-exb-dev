@@ -837,21 +837,598 @@ function firstNonEmptyAlertRawValuePracticeFirst (alert: GiiAlertItem | null | u
   return ''
 }
 
-function alertTechnicianLine (alert: GiiAlertItem): string {
-  const isTi = alertIsTiOrigin(alert)
+function alertIsNewRilevazione (alert: GiiAlertItem | null | undefined): boolean {
+  const subtype = String(
+    firstNonEmptyAlertRawValue(alert, ['sottotipo_attivita', 'origine_evento', 'tipo_evento']) ||
+    ''
+  ).trim().toUpperCase().replace(/[\s-]+/g, '_')
 
-  // Per le nuove rilevazioni, sia TR sia TI valorizzano sul FL il campo
-  // tecnico_rilevatore con il nome/cognome AGOL dell'utente che ha creato la rilevazione.
-  // Non va quindi mostrato lo username né tentato un lookup su GII_utenti per questo dato.
-  const name = firstNonEmptyAlertRawValuePracticeFirst(alert, [
+  if (subtype) return subtype === 'NUOVA_RILEVAZIONE' || subtype === 'NUOVA_RILEVAZIONE_SURVEY' || subtype.includes('NUOVA_RILEVAZIONE')
+
+  const rawValues = [
+    alert?.tipoAlert,
+    alert?.title,
+    alert?.message,
+    alert?.reportCode,
+    firstNonEmptyAlertRawValue(alert, ['titolo', 'messaggio', 'numero_rapporto'])
+  ].map(v => String(v ?? '').trim())
+
+  const hay = rawValues.join(' ').toUpperCase()
+  const text = `${alert?.message || ''} ${alert?.reportCode || ''}`.trim()
+
+  return hay.includes('NUOVA_RILEVAZIONE') || (
+    String(alert?.tipoAlert || '').toUpperCase().startsWith('PRESA_IN_CARICO') &&
+    hay.includes('NUOVA ISTRUTTORIA RICEVUTA') &&
+    /^Rilevazione\s+n\.?\s+/i.test(text)
+  )
+}
+
+function alertIsNewAssignmentReceived (alert: GiiAlertItem | null | undefined): boolean {
+  const subtype = String(
+    firstNonEmptyAlertRawValue(alert, ['sottotipo_attivita', 'origine_evento', 'tipo_evento']) ||
+    alert?.tipoAlert ||
+    ''
+  ).trim().toUpperCase().replace(/[\s-]+/g, '_')
+
+  const event = String(
+    firstNonEmptyAlertRawValue(alert, ['origine_evento', 'evento_chiusura', 'tipo_evento']) ||
+    ''
+  ).trim().toUpperCase().replace(/[\s-]+/g, '_')
+
+  const destRole = String(
+    firstNonEmptyAlertRawValue(alert, ['destinatario_ruolo', 'ruolo_destinatario', 'ruolo_competente']) ||
+    ''
+  ).trim().toUpperCase().replace(/[\s-]+/g, '_')
+
+  const isNewAssignment = subtype === 'NUOVA_ASSEGNAZIONE' || event === 'NUOVA_ASSEGNAZIONE' || subtype.includes('NUOVA_ASSEGNAZIONE')
+  if (!isNewAssignment) return false
+
+  // Nel flusso tecnico questa casistica corrisponde alla normale assegnazione
+  // RZ → TI della rilevazione appena ricevuta. Manteniamo incluso TI_AMM per
+  // la stessa semantica nella fase amministrativa, senza cambiare gli altri
+  // passaggi di trasmissione/rimando.
+  return destRole === 'TI' || destRole === 'TI_AMM'
+}
+
+function alertSubtypeCode (alert: GiiAlertItem | null | undefined): string {
+  return String(
+    firstNonEmptyAlertRawValue(alert, ['sottotipo_attivita', 'origine_evento', 'tipo_evento']) ||
+    alert?.tipoAlert ||
+    ''
+  ).trim().toUpperCase().replace(/[\s-]+/g, '_')
+}
+
+function alertOriginEventCode (alert: GiiAlertItem | null | undefined): string {
+  return String(
+    firstNonEmptyAlertRawValue(alert, ['origine_evento', 'evento_chiusura', 'tipo_evento']) ||
+    ''
+  ).trim().toUpperCase().replace(/[\s-]+/g, '_')
+}
+
+function alertDestRoleCode (alert: GiiAlertItem | null | undefined): string {
+  return String(
+    firstNonEmptyAlertRawValue(alert, ['destinatario_ruolo', 'ruolo_destinatario', 'ruolo_competente']) ||
+    ''
+  ).trim().toUpperCase().replace(/[\s-]+/g, '_')
+}
+
+function alertRawTitleText (alert: GiiAlertItem | null | undefined): string {
+  return String(firstNonEmptyAlertRawValue(alert, ['titolo', 'title']) || alert?.title || '').trim()
+}
+
+function alertDisplayTitle (alert: GiiAlertItem): string {
+  const subtype = alertSubtypeCode(alert)
+  const event = alertOriginEventCode(alert)
+  const destRole = alertDestRoleCode(alert)
+  const rawTitle = alertRawTitleText(alert)
+  const rawTitleUpper = rawTitle.toUpperCase()
+
+  if (alertIsNewRilevazione(alert)) return 'Nuova rilevazione ricevuta'
+  if (event === 'ISTRUTTORIA_TRASMESSA' && destRole === 'RZ' && alertIsTiOrigin(alert)) return 'Nuova rilevazione ricevuta'
+  if (alertIsNewAssignmentReceived(alert)) return 'Nuova istruttoria assegnata'
+  if (subtype === 'RILEVAZIONE_RESPINTA' || subtype === 'RZ_RESPINGE_RILEVAZIONE') return 'Nuova rilevazione respinta'
+  if (subtype === 'RZ_APPROVA_RILEVAZIONE') return rawTitleUpper.includes('INTEGRAZIONE') ? 'Integrazione validata' : 'Istruttoria approvata'
+  if (subtype === 'DT_APPROVA_RAPPORTO') return 'Rapporto tecnico approvato'
+  if (subtype === 'DT_RESPINGE_RAPPORTO') return 'Rapporto tecnico respinto'
+  if (subtype === 'DT_RIMANDA_A_TI' || subtype === 'RI_RIMANDA_A_TI') return 'Rimando al Tecnico istruttore'
+
+  return String(alert?.title || '').trim() || 'Allarme'
+}
+
+function roleLabelForBody (value: string): string {
+  const raw = String(value || '').trim()
+  const n = raw.toUpperCase()
+  if (!n) return ''
+
+  if (n.includes('TECNICO RILEVATORE')) return 'tecnico rilevatore'
+  if (n.includes('TECNICO ISTRUTTORE AMMINISTRATIVO')) return 'tecnico istruttore amministrativo'
+  if (n.includes('TECNICO ISTRUTTORE')) return 'tecnico istruttore'
+  if (n.includes('RESPONSABILE ISTRUTTORIA AMMINISTRATIVA')) return 'Responsabile istruttoria amministrativa'
+  if (n.includes('RESPONSABILE ISTRUTTORIA')) return 'Responsabile istruttoria'
+  if (n.includes('CAPO SETTORE')) return 'Capo Settore'
+  if (n.includes('RESPONSABILE DI ZONA')) return 'Responsabile di zona'
+  if (n.includes('DIRETTORE AREA AMMINISTRATIVA') || n.includes('DIRETTORE AREA AA')) return 'Direttore Area Amministrativa'
+  if (n.includes('DIRETTORE D’AREA') || n.includes("DIRETTORE D'AREA")) return 'Direttore d’Area'
+
+  const tag = raw.split(/\s+-\s+/)[0].trim().toUpperCase().replace(/_/g, '-')
+  if (tag === 'TR' || tag.startsWith('TR-')) return 'tecnico rilevatore'
+  if (tag === 'TI-AMM') return 'tecnico istruttore amministrativo'
+  if (tag === 'TI' || tag.startsWith('TI-')) return 'tecnico istruttore'
+  if (tag === 'RI-AMM') return 'Responsabile istruttoria amministrativa'
+  if (tag === 'RI' || tag.startsWith('RI-')) return 'Responsabile istruttoria'
+  if (tag === 'RZ' || tag.startsWith('RZ-')) return 'Responsabile di zona'
+  if (tag === 'DA' || tag === 'DIR-AMM') return 'Direttore Area Amministrativa'
+  if (tag === 'DT' || tag.startsWith('DT-') || tag === 'DIR' || tag.startsWith('DIR-')) return 'Direttore d’Area'
+
+  return raw
+}
+
+function alertPracticeRawValue (alert: GiiAlertItem | null | undefined, names: string[]): any {
+  const raw: any = alert?.raw || {}
+  const sources = [raw?.__practice, raw].filter(Boolean)
+
+  for (const source of sources) {
+    for (const name of names) {
+      if (Object.prototype.hasOwnProperty.call(source, name)) return source[name]
+    }
+    const ci = new Map<string, any>()
+    Object.keys(source).forEach(k => ci.set(k.toLowerCase(), source[k]))
+    for (const name of names) {
+      const v = ci.get(String(name || '').toLowerCase())
+      if (v !== undefined) return v
+    }
+  }
+
+  return null
+}
+
+function officeLabelFromAlert (alert: GiiAlertItem | null | undefined): string {
+  const label = String(alertPracticeRawValue(alert, ['ufficio_zona', 'ufficioZona', 'ufficio_di_zona']) ?? '').trim()
+  if (label && !/^\d+$/.test(label)) return label
+
+  const rawId = alertPracticeRawValue(alert, ['id_ufficio', 'ufficio_id', 'id_ufficio_zona', 'ufficio'])
+  const n = Number(rawId ?? label)
+  return Number.isFinite(n) ? String(UFFICIO_LABEL[n] || '').trim() : ''
+}
+
+function officeRefFromAlert (alert: GiiAlertItem | null | undefined): string {
+  const ufficio = officeLabelFromAlert(alert)
+  if (!ufficio) return ''
+  return /^Ufficio\b/i.test(ufficio) ? ufficio : `Ufficio di ${ufficio}`
+}
+
+function sectorCodeFromAlert (alert: GiiAlertItem | null | undefined): string {
+  const raw = alertPracticeRawValue(alert, ['settore_cod', 'settoreCod', 'settore', 'cod_settore'])
+  const text = String(raw ?? '').trim().toUpperCase().replace(/_/g, '-').replace(/\s+/g, '')
+  if (!text) return ''
+  if (text === 'CS') return 'DS'
+  const d = text.match(/^D([1-6])$/)
+  if (d) return `D${d[1]}`
+  if (text === 'DS' || text === 'CR' || text === 'GI') return text
+  const n = Number(text)
+  return Number.isFinite(n) ? String(SETTORE_LABEL[n] || '').trim().toUpperCase() : ''
+}
+
+function areaCodeFromAlert (alert: GiiAlertItem | null | undefined): string {
+  const raw = alertPracticeRawValue(alert, ['area_cod', 'areaCod', 'area', 'cod_area'])
+  const text = String(raw ?? '').trim().toUpperCase().replace(/_/g, '-')
+  if (text === 'AMM' || text === 'AGR' || text === 'TEC') return text
+  const n = Number(text)
+  return Number.isFinite(n) ? String(AREA_LABEL[n] || '').trim().toUpperCase() : ''
+}
+
+function areaRefFromAlert (alert: GiiAlertItem | null | undefined): string {
+  const area = areaCodeFromAlert(alert)
+  if (area === 'AGR') return 'Area Agraria'
+  if (area === 'TEC') return 'Area Tecnico-Ambientale'
+  if (area === 'AMM') return 'Area AA. GG. e P.F.'
+  return ''
+}
+
+function areaShortLabelFromAlert (alert: GiiAlertItem | null | undefined): string {
+  const area = areaCodeFromAlert(alert)
+  if (area === 'AGR') return 'Agraria'
+  if (area === 'TEC') return 'Tecnico-Ambientale'
+  if (area === 'AMM') return 'AA. GG. e P.F.'
+  return ''
+}
+
+function settoreFullLabelFromAlert (alert: GiiAlertItem | null | undefined): string {
+  const sector = sectorCodeFromAlert(alert)
+  if (!sector) return ''
+  return SETTORE_FULL[sector] || sector
+}
+
+function roleCodeFromGiiActor (value: string): string {
+  const raw = String(value || '').trim()
+  if (!raw) return ''
+  const tag = raw.split(/\s+-\s+/)[0].trim().toUpperCase().replace(/_/g, '-').replace(/\s+/g, '-')
+
+  if (tag === 'DIR-AMM' || tag === 'DA') return 'DA'
+  if (tag === 'RI-AMM') return 'RI_AMM'
+  if (tag === 'TI-AMM') return 'TI_AMM'
+  if (tag === 'DIR' || tag.startsWith('DIR-') || tag === 'DT' || tag.startsWith('DT-')) return 'DT'
+  if (tag === 'RI' || /^RI-(AGR|TEC|D\d|DS|CR)$/.test(tag)) return 'RI'
+  if (tag === 'RZ' || tag.startsWith('RZ-')) return 'RZ'
+  if (tag === 'TI' || tag.startsWith('TI-')) return 'TI'
+  if (tag === 'TR' || tag.startsWith('TR-')) return 'TR'
+
+  const label = roleLabelForBody(raw).toUpperCase()
+  if (label.includes('TECNICO RILEVATORE')) return 'TR'
+  if (label.includes('TECNICO ISTRUTTORE AMMINISTRATIVO')) return 'TI_AMM'
+  if (label.includes('TECNICO ISTRUTTORE')) return 'TI'
+  if (label.includes('RESPONSABILE ISTRUTTORIA AMMINISTRATIVA')) return 'RI_AMM'
+  if (label.includes('RESPONSABILE ISTRUTTORIA')) return 'RI'
+  if (label.includes('CAPO SETTORE')) return 'RZ'
+  if (label.includes('RESPONSABILE DI ZONA')) return 'RZ'
+  if (label.includes('DIRETTORE AREA AMMINISTRATIVA')) return 'DA'
+  if (label.includes('DIRETTORE D’AREA') || label.includes("DIRETTORE D'AREA")) return 'DT'
+
+  return ''
+}
+
+function alertSenderRoleCode (alert: GiiAlertItem | null | undefined): string {
+  const subtype = alertSubtypeCode(alert as any)
+  const event = alertOriginEventCode(alert as any)
+  const destRole = alertDestRoleCode(alert as any)
+
+  if (alertIsNewRilevazione(alert)) return alertIsTiOrigin(alert) ? 'TI' : 'TR'
+  if (event === 'ISTRUTTORIA_TRASMESSA' && destRole === 'RZ') return 'TI'
+
+  if (alertIsNewAssignmentReceived(alert)) {
+    if (destRole === 'TI_AMM') return 'RI_AMM'
+    if (destRole === 'TI') return 'RZ'
+  }
+
+  if (subtype === 'RILEVAZIONE_RESPINTA' || subtype === 'RZ_RESPINGE_RILEVAZIONE' || subtype === 'RZ_APPROVA_RILEVAZIONE') return 'RZ'
+  if (subtype === 'DT_APPROVA_RAPPORTO' || subtype === 'DT_RESPINGE_RAPPORTO' || subtype === 'DT_RIMANDA_A_TI') return 'DT'
+  if (subtype === 'RI_RIMANDA_A_TI') return 'RI'
+
+  if (subtype.startsWith('DA_')) return 'DA'
+  if (subtype.startsWith('RI_AMM_')) return 'RI_AMM'
+  if (subtype.startsWith('TI_AMM_')) return 'TI_AMM'
+  if (subtype.startsWith('DT_')) return 'DT'
+  if (subtype.startsWith('RI_')) return 'RI'
+  if (subtype.startsWith('RZ_')) return 'RZ'
+  if (subtype.startsWith('TI_')) return 'TI'
+  if (subtype.startsWith('TR_')) return 'TR'
+
+  if (event === 'INVIO_A_TI_AMM') return 'DT'
+  if (event === 'ISTRUTTORIA_TRASMESSA') {
+    if (destRole === 'RI') return 'RZ'
+    if (destRole === 'DT') return 'RI'
+    if (destRole === 'RI_AMM') return 'TI_AMM'
+    if (destRole === 'DA') return 'RI_AMM'
+  }
+
+  return roleCodeFromGiiActor(
+    alertSenderFromMessage(alert as any) ||
+    alertSenderFallbackFromActivitySubtype(alert as any) ||
+    alertSenderFallbackFromTitle(alert as any) ||
+    firstNonEmptyAlertRawValue(alert, ['GII_da', 'gii_da'])
+  )
+}
+
+function alertSenderRoleContext (alert: GiiAlertItem | null | undefined): string {
+  const role = alertSenderRoleCode(alert)
+  const office = officeRefFromAlert(alert)
+  const sector = settoreFullLabelFromAlert(alert)
+  const area = areaRefFromAlert(alert)
+
+  if (role === 'TR') return office ? `Tecnico rilevatore - ${office}` : 'Tecnico rilevatore'
+  if (role === 'TI') return office ? `Tecnico istruttore - ${office}` : 'Tecnico istruttore'
+  if (role === 'RZ') return sector ? `Capo Settore ${sector}` : 'Capo Settore'
+  if (role === 'RI') return area ? `Responsabile istruttoria - ${area}` : 'Responsabile istruttoria'
+  if (role === 'DT') return area ? `Direttore - ${area}` : 'Direttore d’Area'
+  if (role === 'TI_AMM') return 'Tecnico istruttore amministrativo'
+  if (role === 'RI_AMM') return 'Responsabile istruttoria amministrativa'
+  if (role === 'DA') return 'Direttore Area AA. GG. e P.F.'
+
+  const fallback = roleLabelForBody(
+    alertSenderFromMessage(alert as any) ||
+    alertSenderFallbackFromActivitySubtype(alert as any) ||
+    alertSenderFallbackFromTitle(alert as any) ||
+    alertRoleLabelFromGiiActor(firstNonEmptyAlertRawValue(alert, ['GII_da', 'gii_da']))
+  )
+  return fallback
+}
+
+function alertActorRoleForBody (alert: GiiAlertItem | null | undefined): string {
+  const role = alertSenderRoleCode(alert)
+  const office = officeRefFromAlert(alert)
+  const sector = settoreFullLabelFromAlert(alert)
+  const area = areaRefFromAlert(alert)
+
+  if (role === 'TR') return office ? `tecnico rilevatore dell’${office}` : 'tecnico rilevatore'
+  if (role === 'TI') return office ? `tecnico istruttore dell’${office}` : 'tecnico istruttore'
+  if (role === 'RZ') return sector ? `Capo Settore ${sector}` : 'Capo Settore'
+  if (role === 'RI') return area ? `Responsabile istruttoria dell’${area}` : 'Responsabile istruttoria'
+  if (role === 'DT') return area ? `Direttore dell’${area}` : 'Direttore d’Area'
+  if (role === 'TI_AMM') return 'tecnico istruttore amministrativo'
+  if (role === 'RI_AMM') return 'Responsabile istruttoria amministrativa'
+  if (role === 'DA') return 'Direttore Area AA. GG. e P.F.'
+
+  return roleLabelForBody(
+    alertSenderFromMessage(alert as any) ||
+    alertSenderFallbackFromActivitySubtype(alert as any) ||
+    alertSenderFallbackFromTitle(alert as any) ||
+    alertRoleLabelFromGiiActor(firstNonEmptyAlertRawValue(alert, ['GII_da', 'gii_da']))
+  )
+}
+
+function alertActorPhrase (alert: GiiAlertItem | null | undefined, fallbackRole = 'mittente'): string {
+  const role = alertActorRoleForBody(alert) || fallbackRole
+  return `Il ${role}`
+}
+
+function parseUsernameFromGiiActorLabel (value: any): string {
+  const text = String(value ?? '').trim()
+  if (!text) return ''
+  const parts = text.split(/\s+-\s+/)
+  if (parts.length > 1) return String(parts.slice(1).join(' - ') || '').trim()
+  return text
+}
+
+function isSenderDisplayNoise (value: any): boolean {
+  const text = String(value ?? '').trim()
+  if (!text) return true
+  const norm = text.toUpperCase()
+  if (norm === 'SURVEY' || norm === 'ARCGIS' || norm === 'SYSTEM' || norm === 'SISTEMA') return true
+  return false
+}
+
+function looksLikeGiiRoleCode (value: any): boolean {
+  const text = String(value ?? '').trim().toUpperCase().replace(/_/g, '-').replace(/\s+/g, ' ')
+  if (!text) return false
+  if (/^(TR|TI|RZ|RI|DT|DA|DIR)$/.test(text)) return true
+  if (/^(TI|RI)[\s-]+AMM$/.test(text)) return true
+  if (/^(TR|TI|RZ|RI|DT|DIR)[\s-]*(AGR|TEC|AMM|D[1-6]|DS|CR)$/.test(text)) return true
+  return false
+}
+
+function looksLikeGiiRoleLabel (value: any): boolean {
+  const norm = String(value ?? '').trim().replace(/\s+/g, ' ').toUpperCase()
+  return /^(TECNICO RILEVATORE|TECNICO ISTRUTTORE|TECNICO ISTRUTTORE AMMINISTRATIVO|RESPONSABILE DI ZONA|CAPO SETTORE(?:\s+(?:D[1-6]|DS|CR))?|RESPONSABILE ISTRUTTORIA|RESPONSABILE ISTRUTTORIA AMMINISTRATIVA|DIRETTORE D[’']AREA|DIRETTORE AREA AMMINISTRATIVA)$/.test(norm)
+}
+
+function maybePersonDisplayName (value: any): string {
+  const text = String(value ?? '').trim().replace(/\s+/g, ' ')
+  if (!text || isSenderDisplayNoise(text)) return ''
+  if (looksLikeGiiRoleLabel(text)) return ''
+  if (looksLikeGiiRoleCode(text)) return ''
+  if (/^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$/.test(text)) return ''
+  if (/^[A-Za-z0-9._-]+$/.test(text)) return ''
+  return text.split(/\s+/).length >= 2 ? text : ''
+}
+
+function alertTechnicianDisplayName (alert: GiiAlertItem | null | undefined): string {
+  const isTi = alertIsTiOrigin(alert)
+  const resolved = firstNonEmptyAlertRawValue(alert, [isTi ? '__gii_tecnico_istruttore_full_name' : '__gii_tecnico_rilevatore_full_name'])
+  if (resolved) return resolved
+
+  return alertRawValuesPracticeFirst(alert, [
     'tecnico_rilevatore',
     'Tecnico_rilevatore',
     'TECNICO_RILEVATORE'
   ])
-
-  if (!name) return ''
-  return `${isTi ? 'Tecnico istruttore' : 'Tecnico rilevatore'}: ${name}`
+    .map(maybePersonDisplayName)
+    .find(Boolean) || ''
 }
+
+function alertSenderUserCandidates (alert: GiiAlertItem | null | undefined): string[] {
+  const out: string[] = []
+  const push = (value: any) => {
+    const text = parseUsernameFromGiiActorLabel(value)
+    if (text && !isSenderDisplayNoise(text) && !out.some(v => normalizeUsernameLookupKey(v) === normalizeUsernameLookupKey(text))) out.push(text)
+  }
+
+  alertRawValues(alert, [
+    '__gii_actor_username',
+    'creato_da',
+    'aggiornato_da',
+    'utente_operatore',
+    'operatore_username',
+    'username_operatore',
+    'Creator',
+    'created_user'
+  ]).forEach(push)
+
+  alertRawValues(alert, ['GII_da', 'gii_da']).forEach(push)
+
+  return out
+}
+
+function alertSenderDisplayName (alert: GiiAlertItem): string {
+  const resolved = firstNonEmptyAlertRawValue(alert, ['__gii_actor_full_name'])
+  if (resolved) return String(resolved).trim()
+
+  if (alertIsNewRilevazione(alert)) {
+    const tecnico = alertTechnicianDisplayName(alert)
+    if (tecnico && !isSenderDisplayNoise(tecnico)) return String(tecnico).trim()
+  }
+
+  const directName = alertSenderUserCandidates(alert)
+    .map(maybePersonDisplayName)
+    .find(Boolean)
+  if (directName) return String(directName).trim()
+
+  // Gli username restano solo chiavi tecniche per risolvere il nominativo.
+  // Non vengono mai mostrati nella card allarmi.
+  return ''
+}
+
+function alertSenderFromMessage (alert: GiiAlertItem): string {
+  const rawMessage = firstNonEmptyAlertRawValue(alert, ['messaggio', 'message'])
+  const line = String(rawMessage || '')
+    .split(/\r?\n/)
+    .map(v => v.trim())
+    .find(v => /^(Da|Mittente)\s*:/i.test(v))
+  return line ? line.replace(/^(Da|Mittente)\s*:\s*/i, '').trim() : ''
+}
+
+function alertSenderFallbackFromActivitySubtype (alert: GiiAlertItem): string {
+  const subtype = String(
+    firstNonEmptyAlertRawValue(alert, ['sottotipo_attivita', 'origine_evento', 'tipo_evento']) ||
+    alert?.tipoAlert ||
+    ''
+  ).trim().toUpperCase()
+
+  if (subtype.startsWith('DT_')) return 'Direttore d’Area'
+  if (subtype.startsWith('RI_AMM_')) return 'Responsabile Istruttoria amministrativa'
+  if (subtype.startsWith('RI_')) return 'Responsabile Istruttoria'
+  if (subtype.startsWith('RZ_')) return 'Responsabile di Zona'
+  if (subtype.startsWith('TI_AMM_')) return 'Tecnico Istruttore amministrativo'
+  if (subtype.startsWith('DA_')) return 'Direttore Area Amministrativa'
+  if (subtype.startsWith('TI_')) return 'Tecnico istruttore'
+  if (subtype.startsWith('TR_')) return 'Tecnico rilevatore'
+  return ''
+}
+
+function alertSenderFallbackFromTitle (alert: GiiAlertItem): string {
+  const title = String(alert?.title || '').trim().toUpperCase()
+  if (title.includes('DIRETTORE D’AREA') || title.includes("DIRETTORE D'AREA")) return 'Direttore d’Area'
+  if (title.includes('TECNICO ISTRUTTORE AMMINISTRATIVO')) return 'Tecnico Istruttore amministrativo'
+  if (title.includes('RESPONSABILE ISTRUTTORIA AMMINISTRATIVA')) return 'Responsabile Istruttoria amministrativa'
+  if (title.includes('RESPONSABILE ISTRUTTORIA')) return 'Responsabile Istruttoria'
+  if (title.includes('RESPONSABILE DI ZONA')) return 'Responsabile di Zona'
+  return ''
+}
+
+function alertRoleLabelFromGiiActor (value: string): string {
+  const raw = String(value || '').trim()
+  if (!raw) return ''
+  if (looksLikeGiiRoleLabel(raw)) return raw
+  const tag = raw.split(/\s+-\s+/)[0].trim().toUpperCase().replace(/_/g, '-').replace(/\s+/g, '-')
+
+  if (tag === 'DIR-AMM' || tag === 'DA') return 'Direttore Area Amministrativa'
+  if (tag === 'RI-AMM') return 'Responsabile Istruttoria amministrativa'
+  if (tag === 'TI-AMM') return 'Tecnico Istruttore amministrativo'
+  if (tag === 'DIR' || tag.startsWith('DIR-') || tag === 'DT' || tag.startsWith('DT-')) return 'Direttore d’Area'
+  if (tag === 'RI' || /^RI-(AGR|TEC|D\d|DS|CR)$/.test(tag)) return 'Responsabile Istruttoria'
+  if (tag === 'RZ' || tag.startsWith('RZ-')) return 'Responsabile di Zona'
+  if (tag === 'TI' || tag.startsWith('TI-')) return 'Tecnico istruttore'
+  if (tag === 'TR' || tag.startsWith('TR-')) return 'Tecnico rilevatore'
+
+  return ''
+}
+
+function alertSenderFallbackFromRoutingFields (alert: GiiAlertItem): string {
+  const giiDa = firstNonEmptyAlertRawValuePracticeFirst(alert, ['GII_da', 'gii_da'])
+  const fromGiiDa = alertRoleLabelFromGiiActor(giiDa)
+  if (fromGiiDa) return fromGiiDa
+
+  const creator = firstNonEmptyAlertRawValuePracticeFirst(alert, ['creato_da', 'aggiornato_da'])
+  return alertRoleLabelFromGiiActor(creator)
+}
+
+function alertSenderLine (alert: GiiAlertItem): string {
+  if (!alertIsStandardWorkflowAlert(alert)) return 'Mittente: Sistema'
+
+  const sender = alertSenderDisplayName(alert)
+  if (sender) return `Mittente: ${sender}`
+
+  // Per gli allarmi di workflow evitiamo il fallback allo username.
+  // Se il nominativo non è risolto, la card resta comunque leggibile grazie
+  // alle righe Qualifica e riferimento organizzativo.
+  return alertSenderRoleCode(alert) ? 'Mittente: Nominativo non disponibile' : ''
+}
+
+function alertSenderQualificaLine (alert: GiiAlertItem): string {
+  if (!alertIsStandardWorkflowAlert(alert)) return ''
+
+  const role = alertSenderRoleCode(alert)
+  let label = ''
+
+  if (role === 'TR') label = 'Tecnico rilevatore'
+  else if (role === 'TI') label = 'Tecnico istruttore'
+  else if (role === 'RZ') label = 'Capo Settore'
+  else if (role === 'RI') label = 'Responsabile istruttoria'
+  else if (role === 'DT') label = 'Direttore d’Area'
+  else if (role === 'TI_AMM') label = 'Tecnico istruttore amministrativo'
+  else if (role === 'RI_AMM') label = 'Responsabile istruttoria amministrativa'
+  else if (role === 'DA') label = 'Direttore d’Area'
+
+  if (!label) {
+    label = roleLabelForBody(
+      alertSenderFromMessage(alert as any) ||
+      alertSenderFallbackFromActivitySubtype(alert as any) ||
+      alertSenderFallbackFromTitle(alert as any) ||
+      alertRoleLabelFromGiiActor(firstNonEmptyAlertRawValue(alert, ['GII_da', 'gii_da']))
+    )
+  }
+
+  return label ? `Qualifica: ${label}` : ''
+}
+
+function alertSenderOrgLine (alert: GiiAlertItem): string {
+  if (!alertIsStandardWorkflowAlert(alert)) return ''
+
+  const role = alertSenderRoleCode(alert)
+  const office = officeLabelFromAlert(alert)
+  const sector = settoreFullLabelFromAlert(alert)
+  const area = areaShortLabelFromAlert(alert)
+
+  if (role === 'TR' || role === 'TI') {
+    if (sector && office) return `Settore - Ufficio: ${sector} - ${office}`
+    if (sector) return `Settore: ${sector}`
+    if (office) return `Ufficio: ${office}`
+  }
+
+  if (role === 'RZ') {
+    return sector ? `Settore: ${sector}` : ''
+  }
+
+  if (role === 'RI' || role === 'DT') {
+    return area ? `Area: ${area}` : ''
+  }
+
+  if (role === 'TI_AMM' || role === 'RI_AMM') {
+    const settore = settoreFullLabelFromAlert(alert) || 'Catasto, Ruoli e Servizi Territoriali'
+    return `Settore: ${settore}`
+  }
+
+  if (role === 'DA') {
+    return 'Area: AA. GG. e P.F.'
+  }
+
+  return ''
+}
+
+function alertIsStandardWorkflowAlert (alert: GiiAlertItem): boolean {
+  const subtype = alertSubtypeCode(alert)
+  const event = alertOriginEventCode(alert)
+
+  if (isGiiTakeChargeAlert(alert)) return true
+  if (alertIsNewRilevazione(alert)) return true
+  if (alertIsNewAssignmentReceived(alert)) return true
+
+  if ([
+    'RILEVAZIONE_RESPINTA',
+    'RZ_RESPINGE_RILEVAZIONE',
+    'RZ_APPROVA_RILEVAZIONE',
+    'RICHIESTA_INTEGRAZIONE',
+    'INTEGRAZIONE_TRASMESSA',
+    'DT_APPROVA_RAPPORTO',
+    'DT_RESPINGE_RAPPORTO',
+    'DT_RIMANDA_A_TI',
+    'RI_RIMANDA_A_TI'
+  ].includes(subtype)) return true
+
+  if (event === 'ISTRUTTORIA_TRASMESSA' || event === 'INVIO_A_TI_AMM') return true
+
+  return false
+}
+
+function alertBodyLine (alert: GiiAlertItem): string {
+  if (alertIsStandardWorkflowAlert(alert)) return ''
+
+  const raw = String(firstNonEmptyAlertRawValue(alert, ['messaggio', 'message']) || alert?.message || '').trim()
+  const report = String(alert?.reportCode || '').trim()
+  if (!raw) return ''
+  if (report && raw.toLowerCase() === report.toLowerCase()) return ''
+  return raw
+}
+
 function attrValueCi (attrs: Record<string, any>, names: string[]): any {
   if (!attrs) return null
   for (const name of names) {
@@ -869,20 +1446,95 @@ function attrValueCi (attrs: Record<string, any>, names: string[]): any {
 function cleanUserDisplayName (value: any, username?: any): string {
   const text = String(value ?? '').trim().replace(/\s+/g, ' ')
   if (!text) return ''
+  if (looksLikeGiiRoleLabel(text) || looksLikeGiiRoleCode(text)) return ''
   const user = String(username ?? '').trim()
   if (user && normalizeUsernameLookupKey(text) === normalizeUsernameLookupKey(user)) return ''
+  const compactText = text.toLowerCase().replace(/[\s._-]+/g, '')
+  const compactUser = user.toLowerCase().replace(/[\s._-]+/g, '')
+  if (compactUser && compactText === compactUser) return ''
+  return text
+}
+
+function cleanResolvedUserFullName (value: any, username?: any): string {
+  const text = String(value ?? '').trim().replace(/\s+/g, ' ')
+  if (!text || isSenderDisplayNoise(text)) return ''
+  if (/^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$/.test(text)) return ''
+  const user = String(username ?? '').trim()
+  if (user && normalizeUsernameLookupKey(text) === normalizeUsernameLookupKey(user)) return ''
+  const compactText = text.toLowerCase().replace(/[\s._-]+/g, '')
+  const compactUser = user.toLowerCase().replace(/[\s._-]+/g, '')
+  if (compactUser && compactText === compactUser) return ''
   return text
 }
 
 function fullNameFromGiiUserAttrs (attrs: Record<string, any>): string {
   const username = attrValueCi(attrs, ['username', 'USERNAME', 'user_name', 'agol_username'])
-  const direct = cleanUserDisplayName(attrValueCi(attrs, ['full_name', 'FULL_NAME', 'fullName', 'FullName', 'nome_cognome', 'display_name', 'name']), username)
-  if (direct) return direct
+  const nome = cleanResolvedUserFullName(attrValueCi(attrs, ['nome', 'Nome', 'NOME', 'first_name', 'given_name', 'nome_utente', 'nome_operatore']), '')
+  const cognome = cleanResolvedUserFullName(attrValueCi(attrs, ['cognome', 'Cognome', 'COGNOME', 'last_name', 'surname', 'cognome_utente', 'cognome_operatore']), '')
+  const composed = cleanResolvedUserFullName(`${nome} ${cognome}`.trim(), username)
+  if (composed) return composed
 
-  const nome = cleanUserDisplayName(attrValueCi(attrs, ['nome', 'Nome', 'NOME', 'first_name', 'given_name']), '')
-  const cognome = cleanUserDisplayName(attrValueCi(attrs, ['cognome', 'Cognome', 'COGNOME', 'last_name', 'surname']), '')
-  const composed = cleanUserDisplayName(`${nome} ${cognome}`.trim(), username)
-  return composed
+  return cleanResolvedUserFullName(attrValueCi(attrs, ['full_name', 'FULL_NAME', 'fullName', 'FullName', 'nome_cognome', 'nomeCompleto', 'nominativo', 'display_name', 'displayName', 'name']), username)
+}
+
+function codeFromGiiUserAttrs (attrs: Record<string, any>, codNames: string[], numNames: string[], labelMap: Record<number, string>): string {
+  const rawCode = String(attrValueCi(attrs, codNames) ?? '').trim()
+  if (rawCode) return rawCode.toUpperCase().replace(/_/g, '-').replace(/\s+/g, '-')
+  const rawNum = attrValueCi(attrs, numNames)
+  const n = Number(rawNum)
+  return Number.isFinite(n) ? String(labelMap[n] || '').trim().toUpperCase() : ''
+}
+
+function addLookupAliasIfWanted (out: Map<string, string>, wanted: Set<string>, alias: any, fullName: string): void {
+  const text = String(alias ?? '').trim()
+  if (!text || !fullName) return
+  const key = normalizeUsernameLookupKey(text)
+  if (key && wanted.has(key) && !out.has(key)) out.set(key, fullName)
+}
+
+function addGiiUserLookupAliases (out: Map<string, string>, wanted: Set<string>, attrs: Record<string, any>, username: string, fullName: string): void {
+  addLookupAliasIfWanted(out, wanted, username, fullName)
+
+  const role = codeFromGiiUserAttrs(attrs, ['ruolo_cod', 'ruoloCod', 'role_cod'], ['ruolo', 'role'], RUOLO_LABEL)
+  const area = codeFromGiiUserAttrs(attrs, ['area_cod', 'areaCod'], ['area'], AREA_LABEL)
+  const settore = codeFromGiiUserAttrs(attrs, ['settore_cod', 'settoreCod'], ['settore'], SETTORE_LABEL)
+
+  const addRoleAreaAliases = (suffix: string) => {
+    if (!role || !suffix) return
+    addLookupAliasIfWanted(out, wanted, `${role} ${suffix}`, fullName)
+    addLookupAliasIfWanted(out, wanted, `${role}-${suffix}`, fullName)
+    addLookupAliasIfWanted(out, wanted, `${role}_${suffix}`, fullName)
+  }
+
+  addRoleAreaAliases(settore)
+  addRoleAreaAliases(area)
+}
+
+async function loadPortalUserFullNameMap (values: string[]): Promise<Map<string, string>> {
+  const candidates = Array.from(new Set(
+    (values || [])
+      .map(v => String(v ?? '').trim())
+      .filter(v => !!v && !looksLikeGiiRoleLabel(v) && !looksLikeGiiRoleCode(v) && !isSenderDisplayNoise(v))
+  ))
+  const out = new Map<string, string>()
+  if (!candidates.length) return out
+
+  try {
+    const token = await getToken()
+    if (!token) return out
+
+    for (const username of candidates.slice(0, 60)) {
+      try {
+        const url = `${GII_PORTAL}/sharing/rest/community/users/${encodeURIComponent(username)}?f=json&token=${encodeURIComponent(token)}`
+        const res = await fetch(url)
+        const json = await res.json()
+        const fullName = cleanResolvedUserFullName(json?.fullName || json?.full_name || json?.name, username)
+        if (fullName) out.set(normalizeUsernameLookupKey(username), fullName)
+      } catch { }
+    }
+  } catch { }
+
+  return out
 }
 
 async function loadGiiUserFullNameMap (values: string[]): Promise<Map<string, string>> {
@@ -901,13 +1553,18 @@ async function loadGiiUserFullNameMap (values: string[]): Promise<Map<string, st
     const layer = new FeatureLayer({ url: GII_UTENTI_URL })
     if (typeof layer.load === 'function') await layer.load()
 
-    const availableFields = new Set<string>(
-      (Array.isArray(layer?.fields) ? layer.fields : [])
-        .map((f: any) => String(f?.name || '').trim())
-        .filter(Boolean)
-    )
-    const pickFields = ['username', 'full_name', 'nome', 'cognome', 'fullName', 'nome_cognome', 'display_name', 'name']
-      .filter(f => availableFields.has(f))
+    const fieldNameByLower = new Map<string, string>()
+    ;(Array.isArray(layer?.fields) ? layer.fields : [])
+      .map((f: any) => String(f?.name || '').trim())
+      .filter(Boolean)
+      .forEach((name: string) => fieldNameByLower.set(name.toLowerCase(), name))
+    const pickFields = [
+      'username', 'user_name', 'agol_username',
+      'full_name', 'nome', 'cognome', 'fullName', 'nome_cognome', 'nomeCompleto', 'nominativo', 'display_name', 'displayName', 'name',
+      'ruolo', 'ruolo_cod', 'ruoloCod', 'area', 'area_cod', 'areaCod', 'settore', 'settore_cod', 'settoreCod', 'ufficio', 'id_ufficio'
+    ]
+      .map(f => fieldNameByLower.get(f.toLowerCase()))
+      .filter((f): f is string => !!f)
     const outFields = pickFields.length ? Array.from(new Set(pickFields)) : ['*']
 
     let offset = 0
@@ -926,15 +1583,22 @@ async function loadGiiUserFullNameMap (values: string[]): Promise<Map<string, st
         const attrs = f?.attributes || {}
         const username = String(attrValueCi(attrs, ['username', 'USERNAME', 'user_name', 'agol_username']) ?? '').trim()
         const fullName = fullNameFromGiiUserAttrs(attrs)
-        if (!username || !fullName) return
-        const key = normalizeUsernameLookupKey(username)
-        if (wanted.has(key)) out.set(key, fullName)
+        if (!fullName) return
+        addGiiUserLookupAliases(out, wanted, attrs, username, fullName)
       })
 
       if (features.length < pageSize || out.size >= wanted.size) break
       offset += features.length
     }
   } catch { }
+
+  const unresolvedCandidates = candidates.filter(v => !out.has(normalizeUsernameLookupKey(v)))
+  if (unresolvedCandidates.length) {
+    const portalNames = await loadPortalUserFullNameMap(unresolvedCandidates)
+    portalNames.forEach((fullName, key) => {
+      if (wanted.has(key) && !out.has(key)) out.set(key, fullName)
+    })
+  }
 
   return out
 }
@@ -976,15 +1640,16 @@ function technicianUserCandidates (alert: GiiAlertItem, isTi: boolean): string[]
   return [
     ...alertRawValuesPracticeFirst(alert, usernameFields),
     ...alertRawValuesPracticeFirst(alert, fallbackFields)
-  ]
+  ].map(v => parseUsernameFromGiiActorLabel(v)).filter(Boolean)
 }
 
-async function enrichAlertsWithTechnicianFullNames (alerts: GiiAlertItem[]): Promise<GiiAlertItem[]> {
+async function enrichAlertsWithActorFullNames (alerts: GiiAlertItem[]): Promise<GiiAlertItem[]> {
   const list = Array.isArray(alerts) ? alerts : []
   if (!list.length) return list
 
   const allCandidates: string[] = []
   list.forEach(alert => {
+    alertSenderUserCandidates(alert).forEach(v => allCandidates.push(v))
     const isTi = alertIsTiOrigin(alert)
     technicianUserCandidates(alert, isTi).forEach(v => allCandidates.push(v))
   })
@@ -994,17 +1659,21 @@ async function enrichAlertsWithTechnicianFullNames (alerts: GiiAlertItem[]): Pro
 
   return list.map(alert => {
     const isTi = alertIsTiOrigin(alert)
-    const resolved = technicianUserCandidates(alert, isTi)
+    const actorResolved = alertSenderUserCandidates(alert)
+      .map(v => fullNameByUsername.get(normalizeUsernameLookupKey(v)))
+      .find(v => !!String(v || '').trim())
+    const technicianResolved = technicianUserCandidates(alert, isTi)
       .map(v => fullNameByUsername.get(normalizeUsernameLookupKey(v)))
       .find(v => !!String(v || '').trim())
 
-    if (!resolved) return alert
+    if (!actorResolved && !technicianResolved) return alert
 
     return {
       ...alert,
       raw: {
         ...(alert.raw || {}),
-        [isTi ? '__gii_tecnico_istruttore_full_name' : '__gii_tecnico_rilevatore_full_name']: resolved
+        ...(actorResolved ? { __gii_actor_full_name: actorResolved } : {}),
+        ...(technicianResolved ? { [isTi ? '__gii_tecnico_istruttore_full_name' : '__gii_tecnico_rilevatore_full_name']: technicianResolved } : {})
       }
     }
   })
@@ -1013,6 +1682,24 @@ async function enrichAlertsWithTechnicianFullNames (alerts: GiiAlertItem[]): Pro
 function alertPracticeLine (alert: GiiAlertItem): string {
   if (isGiiTakeChargeAlert(alert)) return String(alert.reportCode || alert.message || '').trim()
   return String(alert.message || alert.reportCode || '').trim()
+}
+
+function alertDisplayPracticeLine (alert: GiiAlertItem): string {
+  const line = alertPracticeLine(alert)
+  const clean = String(line || '').replace(/^Pratica\s*:\s*/i, '').trim()
+
+  if (alertIsNewRilevazione(alert)) return clean ? `Pratica: ${clean}` : ''
+
+  if (isGiiTakeChargeAlert(alert)) {
+    // Per le attività operative il corpo mostrato dal pannello è in realtà
+    // l'identificativo della pratica da prendere in carico. Lo rendiamo
+    // coerente con le informative: “Pratica: Rilevazione n. ...”.
+    if (/^(Rilevazione|Rapporto\s+tecnico|Rapporto)\s+n\.?\s+/i.test(clean)) {
+      return `Pratica: ${clean}`
+    }
+  }
+
+  return line
 }
 
 async function enrichAlertsWithPracticeMeta (alerts: GiiAlertItem[], practiceLayerUrl: string): Promise<GiiAlertItem[]> {
@@ -1133,8 +1820,10 @@ function materializeAlertNumber (alert: GiiAlertItem): string {
 }
 
 function materializeAlertTitle (alert: GiiAlertItem): string {
+  if (alertIsNewRilevazione(alert)) return 'Nuova rilevazione ricevuta'
+  if (alertIsNewAssignmentReceived(alert)) return 'Nuova istruttoria assegnata'
   const t = String(alert?.title || '').trim()
-  return t || 'Trasmissione nuova istruttoria'
+  return t || 'Nuova istruttoria ricevuta'
 }
 
 function materializeAlertMessage (alert: GiiAlertItem): string {
@@ -1618,28 +2307,50 @@ function HeaderAlertsPopup (props: {
           {popupAlerts.map(alert => {
             const color = alertToneColor(alert.severity === 'red' ? 'red' : alert.severity === 'orange' ? 'orange' : 'blue')
             const eventDate = alertEventDateMs(alert)
-            const technicianLine = alertTechnicianLine(alert)
-            const showMeta = !isGiiTakeChargeAlert(alert) || alert.termineData != null
+            const bodyLine = alertBodyLine(alert)
+            const senderLine = alertSenderLine(alert)
+            const qualificaLine = alertSenderQualificaLine(alert)
+            const orgLine = alertSenderOrgLine(alert)
+            const practiceLine = alertDisplayPracticeLine(alert)
+            const isStandardWorkflow = alertIsStandardWorkflowAlert(alert)
+            const showMeta = (!isGiiTakeChargeAlert(alert) || alert.termineData != null) && !isStandardWorkflow
+            const showPracticeAsOwnLine = !!practiceLine && (!showMeta || !bodyLine)
+            const metaLineStyle: React.CSSProperties = { fontSize: 14, color: '#cbd5e1', lineHeight: 1.35, marginTop: 3, whiteSpace: 'normal', overflowWrap: 'anywhere', wordBreak: 'normal' }
             return (
               <div key={alert.alertKey} style={{ border: `1px solid ${color}66`, background: `${color}16`, borderRadius: 12, padding: 11 }}>
                 <div style={{ display: 'flex', gap: 8, alignItems: 'start' }}>
                   <div style={{ width: 10, height: 10, borderRadius: '50%', background: color, marginTop: 4, flex: '0 0 auto' }} />
                   <div style={{ minWidth: 0, flex: 1 }}>
-                    <div style={{ fontSize: 15, fontWeight: 900, color: '#fff' }}>{alert.title}</div>
-                    <div style={{ fontSize: 14, color: '#cbd5e1', lineHeight: 1.35, marginTop: 3 }}>{alertPracticeLine(alert)}</div>
-                    {technicianLine && (
-                      <div style={{ fontSize: 14, color: '#cbd5e1', lineHeight: 1.35, marginTop: 3 }}>
-                        {technicianLine}
+                    <div style={{ fontSize: 15, fontWeight: 900, color: '#fff', whiteSpace: 'normal', overflowWrap: 'anywhere', wordBreak: 'normal', lineHeight: 1.25 }}>{alertDisplayTitle(alert)}</div>
+                    {bodyLine && (
+                      <div style={{ fontSize: 14, color: '#cbd5e1', lineHeight: 1.35, marginTop: 3, whiteSpace: 'normal', overflowWrap: 'anywhere', wordBreak: 'normal' }}>{bodyLine}</div>
+                    )}
+                    {showPracticeAsOwnLine && (
+                      <div style={metaLineStyle}>{practiceLine}</div>
+                    )}
+                    {showMeta && (
+                      <div style={metaLineStyle}>
+                        Pratica: {alert.reportCode}{alert.termineData != null ? ` · Termine: ${formatAlertDate(alert.termineData)}` : ''}
+                      </div>
+                    )}
+                    {senderLine && (
+                      <div style={metaLineStyle}>
+                        {senderLine}
+                      </div>
+                    )}
+                    {qualificaLine && (
+                      <div style={metaLineStyle}>
+                        {qualificaLine}
+                      </div>
+                    )}
+                    {orgLine && (
+                      <div style={metaLineStyle}>
+                        {orgLine}
                       </div>
                     )}
                     {eventDate != null && (
-                      <div style={{ fontSize: 14, color: '#cbd5e1', lineHeight: 1.35, marginTop: 3 }}>
+                      <div style={metaLineStyle}>
                         Data evento: {formatAlertDateTime(eventDate)}
-                      </div>
-                    )}
-                    {showMeta && (
-                      <div style={{ fontSize: 13, color: 'rgba(203,213,225,0.65)', marginTop: 6 }}>
-                        Pratica: <strong>{alert.reportCode}</strong>{alert.termineData != null ? ` · Termine: ${formatAlertDate(alert.termineData)}` : ''}
                       </div>
                     )}
                     <div style={{ marginTop: 9, display: 'flex', gap: 8, flexWrap: 'wrap' }}>
@@ -1841,10 +2552,11 @@ export default function Widget(props: Props) {
     const readCurrentActivities = async (): Promise<GiiAlertItem[]> => {
       const current = await withGiiTimeout(queryGiiCurrentActivities({
         activityLayerUrl,
+        archiveTableUrl,
         user: alertUser,
         pageSize: 100
       }), 8000, 'Timeout caricamento attività correnti.')
-      return sortAlertsForPopup(await enrichAlertsWithPracticeMeta(current.alerts, practiceLayerUrl))
+      return sortAlertsForPopup(await enrichAlertsWithActorFullNames(await enrichAlertsWithPracticeMeta(current.alerts, practiceLayerUrl)))
     }
 
     try {
@@ -1878,7 +2590,7 @@ export default function Widget(props: Props) {
           warningDays: Number(cfg.alertsWarningDays ?? 5)
         }), 25000, 'Timeout caricamento scadenze e anomalie.')
 
-        const dynamicAlerts = sortAlertsForPopup(await enrichAlertsWithPracticeMeta(res.alerts || [], practiceLayerUrl))
+        const dynamicAlerts = sortAlertsForPopup(await enrichAlertsWithActorFullNames(await enrichAlertsWithPracticeMeta(res.alerts || [], practiceLayerUrl)))
 
         // Stesso passaggio background usato per materializzare le nuove rilevazioni TR:
         // normalizziamo i testi arrivati da Survey senza bloccare la campanella.

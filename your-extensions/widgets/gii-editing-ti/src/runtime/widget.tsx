@@ -9778,12 +9778,12 @@ ${e?.message || String(e)}`
                 </div>}
 
             <div style={{ display: 'grid', gap: 8, marginTop: 12, padding: '10px 0', borderRadius: 8, border: '1px solid #bfdbfe', background: '#eff6ff', overflow: 'hidden' }}>
-              {attrezzatureTesseraSelezionata && <div style={{ display: 'grid', gridTemplateColumns: '44px minmax(0, 1fr) 82px 118px 104px', alignItems: 'center', color: '#334155', fontSize: popupBodyFontSize, fontWeight: 700 }}>
+              <div style={{ display: 'grid', gridTemplateColumns: '44px minmax(0, 1fr) 82px 118px 104px', alignItems: 'center', color: '#334155', fontSize: popupBodyFontSize, fontWeight: 700 }}>
                 <div style={{ display: 'flex', justifyContent: 'center', padding: 8 }}>
                   <input
                     type='checkbox'
                     checked={attrezzatureCauzionePresente}
-                    disabled={isReadOnly || isRiAgrTecLimitedEdit || !(attrezzatureCauzioneImporto > 0)}
+                    disabled={isReadOnly || isRiAgrTecLimitedEdit || !attrezzatureCauzioneApplicabile}
                     onChange={e => {
                       const checked = e.target.checked
                       setAttrezzatureCauzionePresente(checked)
@@ -9793,24 +9793,24 @@ ${e?.message || String(e)}`
                 </div>
                 <div style={{ padding: '8px 10px' }}>Decurtazione della cauzione</div>
                 <div style={{ padding: 6 }}>
-                  {attrezzatureCauzionePresente && attrezzatureCauzioneImporto > 0 && <input
+                  <input
                     type='number'
                     min={1}
                     max={attrezzatureTesseraQuantita}
                     step={1}
                     value={Math.max(1, Math.min(attrezzatureTesseraQuantita, Math.trunc(Number(attrezzatureCauzioneQuantita) || 1)))}
-                    disabled={isReadOnly || isRiAgrTecLimitedEdit}
+                    disabled={isReadOnly || isRiAgrTecLimitedEdit || !attrezzatureCauzioneApplicabile || !attrezzatureCauzionePresente}
                     onChange={e => setAttrezzatureCauzioneQuantita(Math.max(1, Math.min(attrezzatureTesseraQuantita, Math.trunc(Number(e.target.value) || 1))))}
-                    style={{ width: '100%', height: formStyle.fieldHeight, boxSizing: 'border-box', textAlign: 'center', border: '1px solid #cbd5e1', borderRadius: 6, background: isReadOnly || isRiAgrTecLimitedEdit ? '#eef2f7' : '#fff', fontSize: popupBodyFontSize }}
-                  />}
+                    style={{ width: '100%', height: formStyle.fieldHeight, boxSizing: 'border-box', textAlign: 'center', border: '1px solid #cbd5e1', borderRadius: 6, background: isReadOnly || isRiAgrTecLimitedEdit || !attrezzatureCauzioneApplicabile || !attrezzatureCauzionePresente ? '#eef2f7' : '#fff', fontSize: popupBodyFontSize }}
+                  />
                 </div>
                 <div style={{ padding: '8px 10px', textAlign: 'right', color: '#334155', fontWeight: 400 }}>
-                  {attrezzatureCauzionePresente && attrezzatureCauzioneImporto > 0 ? `${attrezzaturaMoney(attrezzatureCauzioneImporto)} €` : ''}
+                  {`${attrezzaturaMoney(attrezzatureCauzioneImporto)} €`}
                 </div>
-                <div style={{ padding: '8px 10px', textAlign: 'right', color: '#d92d20', fontWeight: 800 }}>
-                  {attrezzatureCauzionePresente && attrezzatureCauzioneImporto > 0 ? `- ${attrezzaturaMoney(attrezzatureCauzioneApplicata)} €` : ''}
+                <div style={{ padding: '8px 10px', textAlign: 'right', color: attrezzatureCauzioneApplicabile && attrezzatureCauzionePresente ? '#d92d20' : '#334155', fontWeight: 800 }}>
+                  {attrezzatureCauzioneApplicabile && attrezzatureCauzionePresente ? `- ${attrezzaturaMoney(attrezzatureCauzioneApplicata)} €` : `${attrezzaturaMoney(0)} €`}
                 </div>
-              </div>}
+              </div>
               {attrezzatureTesseraSelezionata && !(attrezzatureCauzioneImporto > 0) && <div style={{ padding: '0 12px', fontSize: popupBodyFontSize, color: '#9a3412' }}>
                 Importo della cauzione non disponibile nella vista configurata.
               </div>}

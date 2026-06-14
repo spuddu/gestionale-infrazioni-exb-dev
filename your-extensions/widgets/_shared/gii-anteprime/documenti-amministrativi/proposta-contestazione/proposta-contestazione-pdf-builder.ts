@@ -1051,7 +1051,7 @@ Ditta “${trasgressore}”.`
   }
 
   if (!meta.isArchiviazione) {
-    drawSectionTitle(ctx, 'Iter dell’istruttoria amministrativa')
+    drawSectionTitle(ctx, 'Iter approvativo della proposta')
     drawAdministrativeIterTable(ctx, [
       {
         fase: 'Compilazione',
@@ -1071,7 +1071,7 @@ Ditta “${trasgressore}”.`
       },
       {
         fase: 'Approvazione',
-        nominativo: v(m, 'amm_iter_approvazione_nome'),
+        nominativo: approvato ? v(m, 'amm_iter_approvazione_nome') : '-',
         ruolo: 'Direttore dell’Area',
         presa: v(m, 'amm_iter_approvazione_presa'),
         esito: 'Approvazione istruttoria amministrativa',

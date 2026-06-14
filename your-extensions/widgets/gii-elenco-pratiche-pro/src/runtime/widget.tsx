@@ -1306,7 +1306,10 @@ type LogEntry = {
   history?: LogHistoryItem[]; // eventi utili precedenti, ordinati dal più recente al più vecchio
 };
 type UtentiEntry = {
+  username: string;
   full_name: string;
+  nome: string;
+  cognome: string;
   ruolo: number | null;
   ruoloCod: string;
   area: number | null;
@@ -1517,10 +1520,99 @@ function resolveRoleCode(
   return isAdmin ? "ADMIN" : "";
 }
 
+function normalizeRoleDisplayCode(role: any): string {
+  const raw = String(role || "")
+    .trim()
+    .toUpperCase()
+    .replace(/[\s-]+/g, "_");
+  if (raw === "RI_AMM" || raw === "RIAMM") return "RI_AMM";
+  if (raw === "TI_AMM" || raw === "TIAMM") return "TI_AMM";
+  if (raw.startsWith("RZ")) return "RZ";
+  if (raw.startsWith("TR")) return "TR";
+  if (raw.startsWith("TI") && raw !== "TI_AMM") return "TI";
+  if (raw.startsWith("RI") && raw !== "RI_AMM") return "RI";
+  if (raw.startsWith("DT") || raw.startsWith("DIR")) return "DT";
+  if (raw.startsWith("DA")) return "DA";
+  if (raw.startsWith("ADMIN")) return "ADMIN";
+  return raw;
+}
+
+function getQualificaLabel(role: any): string {
+  switch (normalizeRoleDisplayCode(role)) {
+    case "TR":
+      return "Tecnico rilevatore";
+    case "TI":
+      return "Tecnico istruttore";
+    case "RZ":
+      return "Capo Settore";
+    case "RI":
+      return "Responsabile istruttoria";
+    case "DT":
+      return "Direttore d’Area";
+    case "TI_AMM":
+      return "Tecnico istruttore amministrativo";
+    case "RI_AMM":
+      return "Responsabile istruttoria amministrativa";
+    case "DA":
+      return "Direttore Area AA. GG. e P.F.";
+    case "ADMIN":
+      return "Amministratore";
+    default:
+      return "";
+  }
+}
+
+function cleanNomeCognome(value: any): string {
+  return String(value || "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function getUtenteNomeCognome(utente?: UtentiEntry | null): string {
+  const nome = cleanNomeCognome(utente?.nome || "");
+  const cognome = cleanNomeCognome(utente?.cognome || "");
+  const composed = cleanNomeCognome(`${nome} ${cognome}`.trim());
+  if (composed) return composed;
+  return cleanNomeCognome(utente?.full_name || "");
+}
+
+function formatPersonaDisplay(nomeCognome: string, qualifica: string): string {
+  const name = cleanNomeCognome(nomeCognome) || "—";
+  const role = String(qualifica || "").trim();
+  return role ? `${name}\n(${role})` : name;
+}
+
+function getPersonaDisplayParts(value: any): { name: string; role: string } {
+  const raw = String(value || "").trim();
+  if (!raw || raw === "—") return { name: "—", role: "" };
+  const lines = raw
+    .split(/\r?\n/)
+    .map((x) => x.trim())
+    .filter(Boolean);
+  const name = lines[0] || "—";
+  const role = (lines[1] || "").replace(/^\((.*)\)$/u, "$1").trim();
+  return { name, role };
+}
+
+function getPersonaDisplayTitle(value: any): string {
+  const p = getPersonaDisplayParts(value);
+  return p.role ? `${p.name} (${p.role})` : p.name;
+}
+
+function PersonaCell(props: { value: string }) {
+  const p = getPersonaDisplayParts(props.value);
+  return (
+    <div className="personaCell">
+      <div className="personaName">{p.name}</div>
+      {p.role && <div className="personaRole">({p.role})</div>}
+    </div>
+  );
+}
+
 /**
- * Formatta una persona (mittente) dal LOG nel formato:
- *   "RUOLO-SETTORE/AREA - Nome Cognome"
- * Usa area/settore dal LOG (dato storico del mittente).
+ * Formatta una persona (mittente) nel formato visuale richiesto:
+ *   Nome Cognome
+ *   (Qualifica)
  */
 function formatPersona(
   ruolo: string,
@@ -1529,20 +1621,20 @@ function formatPersona(
   username: string,
   utentiMap: Map<string, UtentiEntry> | null,
 ): string {
-  const prefix = formatRolePrefix(ruolo, area, settore);
   const uname = String(username || "")
     .trim()
     .toLowerCase();
   const utente = utentiMap?.get(uname);
-  const nome = String(utente?.full_name || "").trim();
-  return nome ? `${prefix} - ${nome}` : prefix;
+  return formatPersonaDisplay(
+    getUtenteNomeCognome(utente),
+    getQualificaLabel(ruolo),
+  );
 }
 
 /**
- * Formatta il destinatario dal LOG.
- * Usa area/settore dal profilo del destinatario in GII_utenti (non dal LOG,
- * perché il LOG registra area/settore del mittente, non del destinatario).
- * Fallback ai valori del LOG se il destinatario non è in cache.
+ * Formatta il destinatario dal LOG nel formato visuale richiesto.
+ * Usa il profilo del destinatario in GII_utenti per risolvere nome/cognome
+ * e ruolo effettivo.
  */
 function formatPersonaDest(
   ruoloDest: string,
@@ -1555,17 +1647,11 @@ function formatPersonaDest(
     .trim()
     .toLowerCase();
   const destEntry = utentiMap?.get(uname);
-  const destArea = destEntry
-    ? destEntry.areaCod || AREA_FROM_CODE[destEntry.area ?? 0] || logArea
-    : logArea;
-  const destSettore = destEntry
-    ? destEntry.settoreCod ||
-      SETTORE_FROM_CODE[destEntry.settore ?? 0] ||
-      logSettore
-    : logSettore;
-  const prefix = formatRolePrefix(ruoloDest, destArea, destSettore);
-  const nome = String(destEntry?.full_name || "").trim();
-  return nome ? `${prefix} - ${nome}` : prefix;
+  const role = destEntry?.ruoloCod || ruoloDest;
+  return formatPersonaDisplay(
+    getUtenteNomeCognome(destEntry),
+    getQualificaLabel(role),
+  );
 }
 
 // Cache globale utenti (sopravvive a re-render ma non a refresh pagina)
@@ -3351,30 +3437,41 @@ export default function Widget(props: Props) {
         const layer = await getLoadedFeatureLayer(UTENTI_TABLE_URL);
         const res = await layer.queryFeatures({
           where: "1=1",
-          outFields: [
-            "username",
-            "full_name",
-            "ruolo",
-            "ruolo_cod",
-            "area",
-            "area_cod",
-            "settore",
-            "settore_cod",
-          ],
+          outFields: ["*"],
           returnGeometry: false,
         });
         const map = new Map<string, UtentiEntry>();
         for (const f of res?.features || []) {
-          const a = f?.attributes;
-          if (a?.username) {
-            map.set(String(a.username).trim().toLowerCase(), {
-              full_name: String(a.full_name || ""),
-              ruolo: a.ruolo ?? null,
-              ruoloCod: resolveRoleCode(a.ruolo ?? null, a.ruolo_cod),
-              area: a.area ?? null,
-              areaCod: resolveAreaCode(a.area ?? null, a.area_cod),
-              settore: a.settore ?? null,
-              settoreCod: resolveSettoreCode(a.settore ?? null, a.settore_cod),
+          const a = f?.attributes || {};
+          const username = String(pickField(a, "username") || "").trim();
+          if (username) {
+            const nome = cleanNomeCognome(pickField(a, "nome"));
+            const cognome = cleanNomeCognome(pickField(a, "cognome"));
+            const fullName =
+              cleanNomeCognome(`${nome} ${cognome}`.trim()) ||
+              cleanNomeCognome(pickField(a, "full_name")) ||
+              cleanNomeCognome(pickField(a, "nome_cognome")) ||
+              cleanNomeCognome(pickField(a, "nominativo"));
+            map.set(username.toLowerCase(), {
+              username,
+              full_name: fullName,
+              nome,
+              cognome,
+              ruolo: pickField(a, "ruolo") ?? null,
+              ruoloCod: resolveRoleCode(
+                pickField(a, "ruolo") ?? null,
+                pickField(a, "ruolo_cod"),
+              ),
+              area: pickField(a, "area") ?? null,
+              areaCod: resolveAreaCode(
+                pickField(a, "area") ?? null,
+                pickField(a, "area_cod"),
+              ),
+              settore: pickField(a, "settore") ?? null,
+              settoreCod: resolveSettoreCode(
+                pickField(a, "settore") ?? null,
+                pickField(a, "settore_cod"),
+              ),
             });
           }
         }
@@ -5980,6 +6077,31 @@ export default function Widget(props: Props) {
       z-index: 1;
     }
 
+    .personaCell {
+      min-width: 0;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      line-height: 1.06;
+    }
+    .personaName {
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      line-height: 1.08;
+    }
+    .personaRole {
+      min-width: 0;
+      margin-top: 3px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      font-size: 12px;
+      line-height: 1.05;
+      color: rgba(17, 24, 39, 0.68);
+    }
+
     .chip {
       display: inline-flex;
       align-items: center;
@@ -6733,7 +6855,7 @@ export default function Widget(props: Props) {
                             utentiMapRef.current,
                           );
                         } else {
-                          mittenteVal = creator || "—";
+                          mittenteVal = formatPersonaDisplay("", "");
                         }
                         const initialMs = computeUltimoAggMs(d);
                         dataMsgVal = initialMs ? formatDateIt(initialMs) : "—";
@@ -7070,9 +7192,9 @@ export default function Widget(props: Props) {
                                 <div
                                   key={col.id}
                                   className={ci === 0 ? "cell first" : "cell"}
-                                  title={destinatario}
+                                  title={getPersonaDisplayTitle(destinatario)}
                                 >
-                                  {destinatario}
+                                  <PersonaCell value={destinatario} />
                                 </div>
                               );
                             }
@@ -7081,9 +7203,9 @@ export default function Widget(props: Props) {
                                 <div
                                   key={col.id}
                                   className={ci === 0 ? "cell first" : "cell"}
-                                  title={mittenteVal}
+                                  title={getPersonaDisplayTitle(mittenteVal)}
                                 >
-                                  {mittenteVal}
+                                  <PersonaCell value={mittenteVal} />
                                 </div>
                               );
                             }

@@ -122,7 +122,7 @@ type AdminField = {
   name: string
   label: string
   kind: AdminFieldKind
-  group: 'trasgressore' | 'atto' | 'verbale' | 'notifica' | 'sanzione' | 'attrezzature' | 'pagamento' | 'bonifico' | 'chiusura' | 'post_notifica' | 'ricorso' | 'cda' | 'riapertura' | 'definizione' | 'incasso'
+  group: 'trasgressore' | 'contestazioni_importi' | 'verbale' | 'notifica' | 'sanzione' | 'attrezzature' | 'pagamento' | 'bonifico' | 'chiusura' | 'post_notifica' | 'ricorso' | 'cda' | 'riapertura' | 'definizione' | 'incasso'
   placeholder?: string
   full?: boolean
   readonly?: boolean
@@ -150,8 +150,8 @@ const ADMIN_FIELDS: AdminField[] = [
   { group: 'trasgressore', name: 'telefono', label: 'Telefono', kind: 'text' },
   { group: 'trasgressore', name: 'cellulare', label: 'Cellulare', kind: 'text' },
 
-  { group: 'atto', name: 'tipo_atto_amm', label: 'Tipo atto amministrativo (automatico)', kind: 'domain', readonly: true },
-  { group: 'atto', name: 'oggetto_atto_amm', label: 'Oggetto atto amministrativo (automatico)', kind: 'text', full: true, readonly: true },
+  { group: 'contestazioni_importi', name: 'tipo_atto_amm', label: 'Tipo atto amministrativo (automatico)', kind: 'domain', readonly: true },
+  { group: 'contestazioni_importi', name: 'oggetto_atto_amm', label: 'Oggetto atto amministrativo (automatico)', kind: 'text', full: true, readonly: true },
   { group: 'verbale', name: 'numero_verbale', label: 'Numero verbale (assegnato all’approvazione DA)', kind: 'readonly-text', readonly: true },
   { group: 'verbale', name: 'data_verbale', label: 'Data verbale (assegnata all’approvazione DA)', kind: 'readonly-date', readonly: true },
   { group: 'verbale', name: 'note_atto_amm', label: 'Note amministrative', kind: 'textarea', full: true },
@@ -265,7 +265,7 @@ const NOTE_FIELD_CASES: Record<string, NoteCasisticaOption[]> = {
   termine_ricorso_note: [
     { key: 'verbale', label: 'Termine da verbale', text: 'Termine per la presentazione del ricorso indicato nel verbale notificato.' },
     { key: 'notifica', label: 'Termine dalla notifica', text: 'Termine per la presentazione del ricorso decorrente dalla data di notifica del verbale.' },
-    { key: 'atto', label: 'Termine da atto notificato', text: 'Termine individuato sulla base delle indicazioni contenute nell’atto notificato.' },
+    { key: 'atto_notificato', label: 'Termine da atto notificato', text: 'Termine individuato sulla base delle indicazioni contenute nell’atto notificato.' },
     { key: 'documentazione', label: 'Da documentazione agli atti', text: 'Termine indicato dall’operatore sulla base della documentazione agli atti.' }
   ],
   ricorso_note: [
@@ -344,10 +344,10 @@ function isSystemCalculatedAdminField (name: string): boolean {
 
 type PaymentMode = '' | 'PAGOPA' | 'BONIFICO' | 'MISTO' | 'ALTRO'
 
-type AmmSectionKey = 'trasgressore' | 'atto' | 'pagamento' | 'notifica' | 'anteprima' | 'allegati' | 'dati_generali' | 'ricorso' | 'cda' | 'riapertura' | 'definizione'
+type AmmSectionKey = 'trasgressore' | 'contestazioni_importi' | 'verifica_istruttoria' | 'pagamento' | 'notifica' | 'anteprima' | 'allegati' | 'dati_generali' | 'ricorso' | 'cda' | 'riapertura' | 'definizione'
 
 const AMM_DEFAULT_SECTION: AmmSectionKey = 'trasgressore'
-const VALID_AMM_SECTIONS = new Set(['trasgressore', 'atto', 'pagamento', 'notifica', 'anteprima', 'allegati', 'dati_generali', 'ricorso', 'cda', 'riapertura', 'definizione'])
+const VALID_AMM_SECTIONS = new Set(['trasgressore', 'contestazioni_importi', 'verifica_istruttoria', 'pagamento', 'notifica', 'anteprima', 'allegati', 'dati_generali', 'ricorso', 'cda', 'riapertura', 'definizione'])
 
 function normalizeAmmSection (raw: any): AmmSectionKey | null {
   const s = String(raw || '').trim().toLowerCase().replace(/_/g, '-').replace(/\s+/g, '-')
@@ -360,12 +360,13 @@ function normalizeAmmSection (raw: any): AmmSectionKey | null {
     case 'contestazioni':
     case 'contestazioni-importi':
     case 'contestazioni-e-importi':
-      return 'atto'
-    case 'atto':
-    case 'dati-atto':
     case 'verbale':
     case 'predisposizione-verbale':
-      return 'atto'
+      return 'contestazioni_importi'
+    case 'verifica':
+    case 'verifica-istruttoria':
+    case 'esito-verifica':
+      return 'verifica_istruttoria'
     case 'dati-generali':
     case 'dati-generali-amministrativi':
     case 'generali':
@@ -3190,27 +3191,40 @@ function AttoAmministrativoSummary (props: { data: Record<string, any>, fields: 
 }
 
 
-function AttestazioneConformitaSummary (props: { data: Record<string, any>, fields: LayerFieldInfo[] }) {
+function TiAmmVerificationSummary (props: { data: Record<string, any>, fields: LayerFieldInfo[] }) {
   const st = useAdminStyle()
   const d = props.data || {}
-  const note = String(pickAttrCI(d, ['note_atto_amm']) || '').trim()
+  const esitoRaw = pickAttrCI(d, ['esito_TI_AMM'])
+  const esitoCode = parseNumberInput(esitoRaw)
+  const hasEsito = esitoCode != null
+  const esitoLabel = esitoCode === 1
+    ? 'Da integrare/rettificare'
+    : esitoCode === 2
+      ? 'Conforme'
+      : esitoCode === 3
+        ? 'Respinta'
+        : (hasAdminValue(esitoRaw) ? String(esitoRaw) : '')
+  const note = String(pickAttrCI(d, ['note_TI_AMM', 'note_atto_amm']) || '').trim()
+  const noteLabel = esitoCode === 1 ? 'Integrazioni/rettifiche proposte' : 'Attestazione di conformità'
   const tecnico = displayAdminFieldValue(d, props.fields, 'ti_amm_assegnato_nome', displayAdminFieldValue(d, props.fields, 'ti_amm_assegnato_username'))
   const dataTrasmissione = displayAdminFieldValue(d, props.fields, 'dt_esito_TI_AMM') || displayAdminFieldValue(d, props.fields, 'dt_stato_RI_AMM')
+  const hasVerification = hasEsito || !!note
   return (
-    <Section title='Attestazione di conformità'>
-      {note ? (
+    <Section title='Esito verifica del Tecnico istruttore'>
+      {hasVerification ? (
         <div style={{ display: 'grid', gap: 8 }}>
           <div style={{ display: 'grid', gridTemplateColumns: ADMIN_COMPACT_GRID_COLUMNS, justifyContent: 'start', gap: 10 }}>
+            <StatusSummaryItem label='Esito' value={esitoLabel || '—'} tone={esitoCode === 1 ? 'warn' : 'auto'} />
             <StatusSummaryItem label='Tecnico istruttore' value={tecnico || '—'} tone='auto' />
             <StatusSummaryItem label='Data trasmissione al Responsabile istruttoria' value={dataTrasmissione || '—'} tone='auto' />
           </div>
           <div style={{ border: `1px solid ${st.formWorkflowBadgeBorderColor || '#d8e6f7'}`, background: st.formWorkflowBadgeBg || '#ffffff', borderRadius: 9, padding: 10 }}>
-            <div style={{ color: st.formWorkflowBadgeTitleColor || '#0d3b66', fontWeight: 900, fontSize: adminLabelFontSize(st), marginBottom: 5 }}>Testo dell’attestazione</div>
-            <div style={{ color: st.formWorkflowBadgeValueColor || '#111827', fontSize: Number(st.formFieldFontSize ?? 15), lineHeight: 1.45, whiteSpace: 'pre-wrap' }}>{note}</div>
+            <div style={{ color: st.formWorkflowBadgeTitleColor || '#0d3b66', fontWeight: 900, fontSize: adminLabelFontSize(st), marginBottom: 5 }}>{noteLabel}</div>
+            <div style={{ color: st.formWorkflowBadgeValueColor || '#111827', fontSize: Number(st.formFieldFontSize ?? 15), lineHeight: 1.45, whiteSpace: 'pre-wrap' }}>{note || '—'}</div>
           </div>
         </div>
       ) : (
-        <InfoBox kind='warn'>Attestazione di conformità non ancora acquisita. Verrà richiesta obbligatoriamente nel popup di trasmissione al Responsabile istruttoria.</InfoBox>
+        <InfoBox kind='warn'>Esito verifica del Tecnico istruttore non ancora acquisito. Verrà richiesto obbligatoriamente nel popup di trasmissione al Responsabile istruttoria.</InfoBox>
       )}
     </Section>
   )
@@ -3386,6 +3400,7 @@ function trasgressoreField (fields: LayerFieldInfo[], candidates: string[]): str
   return null
 }
 
+
 function TrasgressoreAmmSection (props: { data: Record<string, any>, fields: LayerFieldInfo[], canEdit: boolean, onChange: (name: string, value: any) => void }) {
   const d = props.data || {}
   const fields = props.fields || []
@@ -3393,138 +3408,155 @@ function TrasgressoreAmmSection (props: { data: Record<string, any>, fields: Lay
   const ragioneSociale = String(pickAttrCI(d, ['ragione_sociale']) || '').trim()
   const piva = String(pickAttrCI(d, ['piva', 'partita_iva']) || '').trim()
   const isPg = rawTipo.includes('GIUR') || rawTipo === 'PG' || !!ragioneSociale || !!piva
+  const st = useAdminStyle()
 
   const mk = (name: string, label: string, kind: AdminFieldKind = 'text', full = false): AdminField => ({ group: 'trasgressore', name, label, kind, full })
   const existingField = (candidates: string[], label: string, kind: AdminFieldKind = 'text', full = false): AdminField | null => {
     const name = trasgressoreField(fields, candidates)
     return name ? mk(name, label, kind, full) : null
   }
-  const existingFields = (defs: Array<[string[], string, AdminFieldKind?, boolean?]>): AdminField[] => defs
-    .map(def => existingField(def[0], def[1], def[2] || 'text', !!def[3]))
-    .filter(Boolean) as AdminField[]
 
-  const tipoField = existingField(['tipologia_soggetto'], 'Tipologia soggetto', 'domain')
-  const idItems: AdminField[] = []
-  if (tipoField) idItems.push(tipoField)
-  if (isPg) {
-    idItems.push(...existingFields([
-      [['ragione_sociale'], 'Ragione sociale', 'text', true],
-      [['piva', 'partita_iva'], 'P. IVA']
-    ]))
-  } else {
-    idItems.push(...existingFields([
-      [['cognome'], 'Cognome'],
-      [['nome'], 'Nome'],
-      [['codice_fiscale', 'cf'], 'Codice fiscale']
-    ]))
+  const labelStyle: React.CSSProperties = {
+    color: st.formLabelColor || '#334155',
+    fontSize: Math.max(13, Number(st.formLabelFontSize ?? 15) - 1),
+    fontWeight: Number(st.formLabelFontWeight ?? 600) as any,
+    marginBottom: 3,
+    lineHeight: 1.2
+  }
+  const valueStyle: React.CSSProperties = {
+    color: st.formFieldColor || '#0f172a',
+    fontSize: Number(st.formFieldFontSize ?? 15),
+    fontWeight: 500,
+    lineHeight: 1.35,
+    minHeight: 22,
+    overflowWrap: 'anywhere',
+    whiteSpace: 'pre-wrap'
+  }
+  const valueBoxStyle: React.CSSProperties = {
+    border: `1px solid ${st.formFieldBorderColor || '#bfcede'}`,
+    background: '#ffffff',
+    borderRadius: Number(st.formFieldBorderRadius ?? 7),
+    padding: '7px 9px',
+    minWidth: 0,
+    boxSizing: 'border-box'
+  }
+  const noteBoxStyle: React.CSSProperties = {
+    ...valueBoxStyle,
+    minHeight: 220,
+    alignSelf: 'stretch'
   }
 
-  const indirizzoItems = existingFields([
-    [['via'], 'Via/P.zza'],
-    [['civico', 'numero_civico'], 'N. civico'],
-    [['citta', 'comune'], 'Città'],
-    [['provincia'], 'Provincia'],
-    [['cap'], 'CAP'],
-    [['stato'], 'Stato'],
-    [['telefono'], 'Telefono'],
-    [['cellulare'], 'Cellulare'],
-    [['email', 'e_mail'], 'E-mail'],
-    [['pec'], 'PEC']
-  ])
+  const fieldValue = (field: AdminField): string => {
+    const value = displayAdminFieldValue(d, fields, field.name)
+    if (['email', 'e_mail', 'pec'].includes(field.name.toLowerCase())) return value === '—' ? value : value.toLocaleLowerCase('it-IT')
+    return value
+  }
 
-  const qualificaItems = existingFields([
-    [['qualifica_fondo'], 'Qualifica rispetto al fondo', 'domain']
-  ])
+  const ReadOnlyField: React.FC<{ field: AdminField, note?: boolean }> = (props) => (
+    <div style={{ minWidth: 0, gridColumn: props.field.full ? '1 / -1' : undefined }}>
+      <div style={labelStyle}>{props.field.label}</div>
+      <div style={props.note ? noteBoxStyle : valueBoxStyle}>
+        <div style={valueStyle}>{fieldValue(props.field)}</div>
+      </div>
+    </div>
+  )
+
+  const renderRow = (key: React.Key, columns: string, rowFields: Array<AdminField | null>, gap = 12): React.ReactNode => {
+    const hasVisible = rowFields.some(Boolean)
+    if (!hasVisible) return null
+    return (
+      <div key={key} style={{ display: 'grid', gridTemplateColumns: columns, gap, minWidth: 0, maxWidth: '100%' }}>
+        {rowFields.map((field, i) => field ? <ReadOnlyField key={`${String(key)}-${field.name}`} field={field} /> : <div key={`${String(key)}-${i}`} />)}
+      </div>
+    )
+  }
+
+  const renderCardRows = (title: string, rows: React.ReactNode[], emptyText: string, cardStyle?: React.CSSProperties) => {
+    const visibleRows = rows.filter(Boolean)
+    return (
+      <Section title={title} cardStyle={cardStyle}>
+        {visibleRows.length > 0 ? <div style={{ display: 'grid', gap: 12 }}>{visibleRows}</div> : <InfoBox kind='warn'>{emptyText}</InfoBox>}
+      </Section>
+    )
+  }
+
+  const tipoField = existingField(['tipologia_soggetto'], 'Tipologia soggetto', 'domain')
+  const qualificaField = existingField(['qualifica_fondo'], 'Qualifica rispetto al fondo', 'domain')
+  const nomeField = existingField(['nome'], 'Nome')
+  const cognomeField = existingField(['cognome'], 'Cognome')
+  const cfField = existingField(['codice_fiscale', 'cf'], 'Codice fiscale')
+  const ragioneSocialeField = existingField(['ragione_sociale'], 'Ragione sociale', 'text', true)
+  const pivaField = existingField(['piva', 'partita_iva'], 'P. IVA')
+
+  const trasgressoreRows = [
+    renderRow('tipo-qualifica', '1fr 1fr', [tipoField, qualificaField]),
+    isPg
+      ? renderRow('pg', '2fr 1fr', [ragioneSocialeField, pivaField])
+      : renderRow('pf', '1fr 1fr 1fr', [nomeField, cognomeField, cfField])
+  ]
+
+  const indirizzoRows = [
+    renderRow('indirizzo-1', '4fr 1fr', [existingField(['via'], 'Via/P.zza'), existingField(['civico', 'numero_civico'], 'N. civico')]),
+    renderRow('indirizzo-2', '2fr 0.8fr 1fr 1.4fr', [existingField(['citta', 'comune'], 'Città'), existingField(['provincia'], 'Provincia'), existingField(['cap'], 'CAP'), existingField(['stato'], 'Stato')]),
+    renderRow('indirizzo-3', '1fr 1fr 1fr 1fr', [existingField(['telefono'], 'Telefono'), existingField(['cellulare'], 'Cellulare'), existingField(['email', 'e_mail'], 'E-mail'), existingField(['pec'], 'PEC')])
+  ]
 
   const domRaw = pickAttrCI(d, ['dom_notifica_uguale'])
   const domicilioCoincide = domRaw == null || domRaw === '' || String(domRaw) === '1' || String(domRaw).toLowerCase() === 'si' || String(domRaw).toLowerCase() === 'sì' || String(domRaw).toLowerCase() === 'true'
-  const domicilioItems: AdminField[] = []
-  const domUguale = existingField(['dom_notifica_uguale'], 'Coincide con residenza/sede legale', 'domain')
-  if (domUguale) domicilioItems.push(domUguale)
+  const domicilioRows = [
+    renderRow('dom-0', '1fr 2fr', [existingField(['dom_notifica_uguale'], 'Coincide con residenza/sede legale', 'domain'), null])
+  ]
   if (!domicilioCoincide) {
-    domicilioItems.push(...existingFields([
-      [['dom_notifica_via'], 'Via/P.zza'],
-      [['dom_notifica_civico'], 'N. civico'],
-      [['dom_notifica_citta'], 'Città'],
-      [['dom_notifica_provincia'], 'Provincia'],
-      [['dom_notifica_cap'], 'CAP'],
-      [['dom_notifica_stato'], 'Stato']
-    ]))
+    domicilioRows.push(
+      renderRow('dom-1', '4fr 1fr', [existingField(['dom_notifica_via'], 'Via/P.zza'), existingField(['dom_notifica_civico'], 'N. civico')]),
+      renderRow('dom-2', '2fr 0.8fr 1fr 1.4fr', [existingField(['dom_notifica_citta'], 'Città'), existingField(['dom_notifica_provincia'], 'Provincia'), existingField(['dom_notifica_cap'], 'CAP'), existingField(['dom_notifica_stato'], 'Stato')])
+    )
+  } else {
+    domicilioRows.push(<InfoBox key='dom-info'>Il domicilio per le notifiche coincide con la residenza/sede legale.</InfoBox>)
   }
 
-  const rlItems: AdminField[] = []
+  const rlDomRaw = pickAttrCI(d, ['rl_dom_notifica'])
+  const rlDomPresente = String(rlDomRaw || '0') === '1' || String(rlDomRaw || '').toLowerCase() === 'si' || String(rlDomRaw || '').toLowerCase() === 'sì' || String(rlDomRaw || '').toLowerCase() === 'true'
+  const rappresentanteRows: React.ReactNode[] = []
   if (isPg) {
-    rlItems.push(...existingFields([
-      [['rl_cognome'], 'Cognome'],
-      [['rl_nome'], 'Nome'],
-      [['rl_cf'], 'Codice fiscale'],
-      [['rl_carica'], 'Carica', 'domain']
-    ]))
-    const rlDomRaw = pickAttrCI(d, ['rl_dom_notifica'])
-    const rlDomPresente = String(rlDomRaw || '0') === '1' || String(rlDomRaw || '').toLowerCase() === 'si' || String(rlDomRaw || '').toLowerCase() === 'sì' || String(rlDomRaw || '').toLowerCase() === 'true'
-    const rlDom = existingField(['rl_dom_notifica'], 'Domicilio notifiche del rappresentante', 'domain')
-    if (rlDom) rlItems.push(rlDom)
+    rappresentanteRows.push(
+      renderRow('rl-1', '1fr 1fr 1fr', [existingField(['rl_nome'], 'Nome'), existingField(['rl_cognome'], 'Cognome'), existingField(['rl_cf'], 'Codice fiscale')]),
+      renderRow('rl-2', '2fr 1fr', [existingField(['rl_carica'], 'Carica', 'domain'), existingField(['rl_dom_notifica'], 'Domicilio notifiche del rappresentante', 'domain')])
+    )
     if (rlDomPresente) {
-      rlItems.push(...existingFields([
-        [['rl_dom_via'], 'Via/P.zza'],
-        [['rl_dom_civico'], 'N. civico'],
-        [['rl_dom_citta'], 'Città'],
-        [['rl_dom_provincia'], 'Provincia'],
-        [['rl_dom_cap'], 'CAP'],
-        [['rl_dom_stato'], 'Stato']
-      ]))
+      rappresentanteRows.push(
+        renderRow('rl-3', '4fr 1fr', [existingField(['rl_dom_via'], 'Via/P.zza'), existingField(['rl_dom_civico'], 'N. civico')]),
+        renderRow('rl-4', '2fr 0.8fr 1fr 1.4fr', [existingField(['rl_dom_citta'], 'Città'), existingField(['rl_dom_provincia'], 'Provincia'), existingField(['rl_dom_cap'], 'CAP'), existingField(['rl_dom_stato'], 'Stato')])
+      )
     }
   }
 
-  const noteItems = existingFields([
-    [['note_anagrafica'], 'Annotazioni del tecnico istruttore', 'textarea', true]
-  ])
+  const noteField = existingField(['note_anagrafica'], 'Annotazioni del tecnico istruttore', 'textarea', true)
+  const rightColumn = (
+    <Section title='Annotazioni del tecnico istruttore' cardStyle={{ minHeight: '100%', display: 'flex', flexDirection: 'column' }} bodyStyle={{ flex: '1 1 auto', display: 'flex', flexDirection: 'column' }}>
+      {noteField ? <ReadOnlyField field={noteField} note /> : <InfoBox kind='warn'>Annotazioni del tecnico istruttore non disponibili nella fonte dati.</InfoBox>}
+    </Section>
+  )
 
-  const renderReadOnlyLayout = (items: AdminField[], emptyText: string) => items.length > 0 ? (
-    <AdminFieldsLayout items={items} draft={d} fields={fields} canEdit={false} onChange={() => {}} />
-  ) : (
-    <InfoBox kind='warn'>{emptyText}</InfoBox>
+  const leftColumn = (
+    <div style={{ display: 'grid', gap: 12, minWidth: 0 }}>
+      {renderCardRows('Trasgressore', trasgressoreRows, 'Campi identificativi del trasgressore non disponibili nella fonte dati.')}
+      {renderCardRows('Indirizzo / Sede legale', indirizzoRows, 'Dati di residenza/sede non disponibili nella fonte dati.')}
+      {renderCardRows('Domicilio per le notifiche', domicilioRows, 'Dati del domicilio per le notifiche non disponibili nella fonte dati.')}
+      {isPg && renderCardRows('Rappresentante legale', rappresentanteRows, 'Dati del rappresentante legale non disponibili nella fonte dati.')}
+    </div>
   )
 
   return (
-    <>
+    <div style={{ display: 'grid', gap: 12 }}>
       <InfoBox kind='warn'>
         I dati del trasgressore sono riportati in sola lettura. Eventuali inesattezze devono essere segnalate al Responsabile istruttoria amministrativa, affinché sia valutato il rimando all’Area di provenienza per la rettifica.
       </InfoBox>
-
-      <Section title='Dati identificativi'>
-        {renderReadOnlyLayout(idItems, 'Campi identificativi del trasgressore non disponibili nella fonte dati.')}
-      </Section>
-
-      <Section title='Residenza / sede'>
-        {renderReadOnlyLayout(indirizzoItems, 'Dati di residenza/sede non disponibili nella fonte dati.')}
-      </Section>
-
-      <Section title='Qualifica'>
-        {renderReadOnlyLayout(qualificaItems, 'Qualifica rispetto al fondo non disponibile nella fonte dati.')}
-      </Section>
-
-      <Section title='Domicilio per le notifiche'>
-        {domicilioItems.length > 0 ? (
-          <div style={{ display: 'grid', gap: 8 }}>
-            <AdminFieldsLayout items={domicilioItems} draft={d} fields={fields} canEdit={false} onChange={() => {}} />
-            {domicilioCoincide && <InfoBox>Il domicilio per le notifiche coincide con la residenza/sede legale.</InfoBox>}
-          </div>
-        ) : (
-          <InfoBox kind='warn'>Dati del domicilio per le notifiche non disponibili nella fonte dati.</InfoBox>
-        )}
-      </Section>
-
-      {isPg && (
-        <Section title='Rappresentante legale'>
-          {renderReadOnlyLayout(rlItems, 'Dati del rappresentante legale non disponibili nella fonte dati.')}
-        </Section>
-      )}
-
-      <Section title='Annotazioni'>
-        {renderReadOnlyLayout(noteItems, 'Annotazioni del tecnico istruttore non disponibili nella fonte dati.')}
-      </Section>
-    </>
+      <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 66%) minmax(0, 34%)', gap: 12, alignItems: 'stretch', minWidth: 0 }}>
+        <div style={{ minWidth: 0 }}>{leftColumn}</div>
+        <div style={{ minWidth: 0 }}>{rightColumn}</div>
+      </div>
+    </div>
   )
 }
 
@@ -4773,19 +4805,20 @@ function buildVerbalePdfMap (data: any, fields: LayerFieldInfo[], profile: { use
   const rawTipoAtto = String(pickAttrCI(d, ['tipo_atto_amm']) || '').trim()
   const tipoAttoLabel = pdfFieldValue(d, fields, 'tipo_atto_amm') || rawTipoAtto
   const tiAmmNome = firstTextAttr(d, ['ti_amm_assegnato_nome', 'ti_amm_assegnato_username'])
+  const approvatoDa = isDaApprovalComplete(d)
+  const giiDaActor = firstTextAttr(d, ['GII_da', 'gii_da'])
   const riAmmNome = firstTextAttr(d, [
     'ri_amm_nome', 'ri_amm_username',
     'responsabile_istruttoria_amm_nome', 'responsabile_istruttoria_amm_username',
     'istruttoria_amm_chiusa_da'
-  ])
+  ]) || (!approvatoDa && pdfFieldValue(d, fields, 'dt_esito_RI_AMM') ? giiDaActor : '')
   const daNome = firstTextAttr(d, [
     'da_nome', 'da_username',
     'direttore_area_nome', 'direttore_area_username',
     'direttore_amm_nome', 'direttore_amm_username',
     'dt_amm_nome', 'dt_amm_username',
     'atto_approvato_da', 'approvato_da', 'istruttoria_amm_approvata_da'
-  ])
-  const approvatoDa = isDaApprovalComplete(d)
+  ]) || (approvatoDa ? giiDaActor : '')
   return {
     objectid: oid != null ? String(oid) : '',
     pratica: '',
@@ -4814,6 +4847,8 @@ function buildVerbalePdfMap (data: any, fields: LayerFieldInfo[], profile: { use
     protocollo_istanza_data: pdfFieldValue(d, fields, 'protocollo_istanza_data'),
     oggetto_atto_amm: String(pickAttrCI(d, ['oggetto_atto_amm']) || ''),
     note_atto_amm: String(pickAttrCI(d, ['note_atto_amm']) || ''),
+    esito_ti_amm: (() => { const v = parseNumberInput(pickAttrCI(d, ['esito_TI_AMM'])); return v === 1 ? 'Da integrare/rettificare' : v === 2 ? 'Conforme' : v === 3 ? 'Respinta' : '' })(),
+    note_ti_amm: String(pickAttrCI(d, ['note_TI_AMM', 'note_atto_amm']) || ''),
     numero_verbale: verbaleNumberValue(d, oid),
     data_verbale: hasAdminValue(pickAttrCI(d, ['data_verbale'])) ? pdfFieldValue(d, fields, 'data_verbale') : displayVerbaleApprovalDate(d, fields),
     protocollo_verbale: String(pickAttrCI(d, ['protocollo_verbale_numero']) || ''),
@@ -5969,7 +6004,7 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
     if (!isVerbaleDefinitivo(current)) issues.push(tipoAttoAmmPrevedeVerbale(current)
       ? 'Proposta: verbale non ancora definitivo; numero e data saranno assegnati dopo l’approvazione del Direttore d’Area.'
       : 'Proposta: documento non ancora definitivo; è necessaria l’approvazione del Direttore d’Area.')
-    if (!hasAdminValue(pickAttrCI(current, ['note_atto_amm']))) issues.push('Attestazione di conformità: attestazione non ancora acquisita.')
+    if (!hasAdminValue(pickAttrCI(current, ['esito_TI_AMM'])) || !hasAdminValue(pickAttrCI(current, ['note_TI_AMM', 'note_atto_amm']))) issues.push('Esito verifica TI-AMM: esito o note non ancora acquisiti.')
     const protocolloNumero = pickAttrCI(current, ['protocollo_verbale_numero'])
     const protocolloData = pickAttrCI(current, ['protocollo_verbale_data'])
     const notificaTipo = pickAttrCI(current, ['notifica_tipo'])
@@ -6380,7 +6415,7 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
                 />
               )}
 
-              {activeAmmSection === 'atto' && (
+              {activeAmmSection === 'contestazioni_importi' && (
                 <>
                   <SanzioniConsultiveSection loadState={sanzioniConsultive} data={viewData || {}} fields={layerFields} canEdit={false} onChange={onFieldChange} />
 
@@ -6396,7 +6431,15 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
                     </InfoBox>
                   )}
 
-                  <AttestazioneConformitaSummary
+                </>
+              )}
+
+              {activeAmmSection === 'verifica_istruttoria' && (
+                <>
+                  <InfoBox kind='info'>
+                    L’esito riguarda la verifica complessiva della pratica amministrativa, compresi i dati del trasgressore, le contestazioni e gli importi.
+                  </InfoBox>
+                  <TiAmmVerificationSummary
                     data={viewData || {}}
                     fields={layerFields}
                   />
