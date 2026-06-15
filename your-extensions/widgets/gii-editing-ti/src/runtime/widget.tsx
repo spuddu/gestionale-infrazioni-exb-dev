@@ -3813,6 +3813,25 @@ function NpText(p: { value: string; onChange: (v: string) => void; placeholder?:
   return <input type='text' value={p.value} onChange={e => p.onChange(normalizeText(e.target.value))} placeholder={p.placeholder} style={st} disabled={p.disabled} maxLength={p.maxLength}/>
 }
 
+function NpDerivedText (p: { value: string; maxLength?: number; disabled?: boolean }) {
+  const fs = React.useContext(FormStyleCtx)
+  const value = String(p.value || '')
+  const hasValue = value.trim() !== ''
+  const disabled = !!p.disabled || !hasValue
+  const st = fieldBaseStyle(fs, disabled)
+  return (
+    <input
+      type='text'
+      value={value}
+      onChange={() => {}}
+      readOnly
+      disabled={disabled}
+      maxLength={p.maxLength}
+      style={{ ...st, cursor: 'default' }}
+    />
+  )
+}
+
 
 
 
@@ -3987,22 +4006,23 @@ async function queryCapForComuneIstat (comune: ComuneIstatOption): Promise<Comun
 
 function CapIstatInput (p: { value: string; onChange: (v: string) => void; options?: ComuneCapOption[]; disabled?: boolean }) {
   const fs = React.useContext(FormStyleCtx)
-  const st = fieldBaseStyle(fs, p.disabled)
   const opts = Array.isArray(p.options) ? p.options : []
-  if (opts.length > 1) {
-    return (
-      <select
-        value={p.value}
-        onChange={e => p.onChange(String(e.target.value || '').trim())}
-        style={{ ...st, paddingTop: 0, paddingBottom: 0, cursor: p.disabled ? 'not-allowed' : 'pointer' }}
-        disabled={p.disabled}
-      >
-        <option value=''>— seleziona CAP —</option>
-        {opts.map(o => <option key={`${o.cap}-${o.codice_comune_alfanumerico}-${o.codice_catastale}`} value={o.cap}>{o.cap}</option>)}
-      </select>
-    )
-  }
-  return <NpText value={p.value} onChange={p.onChange} disabled={p.disabled} maxLength={20}/>
+  const value = String(p.value || '').trim()
+  const hasCurrentValueInOptions = opts.some(o => String(o.cap || '').trim() === value)
+  const disabled = !!p.disabled || opts.length === 0
+  const st = fieldBaseStyle(fs, disabled)
+  return (
+    <select
+      value={value}
+      onChange={e => p.onChange(String(e.target.value || '').trim())}
+      style={{ ...st, paddingTop: 0, paddingBottom: 0, cursor: disabled ? 'not-allowed' : 'pointer' }}
+      disabled={disabled}
+    >
+      <option value=''>{disabled ? '' : '— seleziona CAP —'}</option>
+      {value && !hasCurrentValueInOptions ? <option value={value}>{value}</option> : null}
+      {opts.map(o => <option key={`${o.cap}-${o.codice_comune_alfanumerico}-${o.codice_catastale}`} value={o.cap}>{o.cap}</option>)}
+    </select>
+  )
 }
 
 function ComuneIstatInput (p: {
@@ -4243,7 +4263,6 @@ const UPPERCASE_TEXT_FIELDS = new Set([
   'dom_notifica_via', 'dom_notifica_civico', 'dom_notifica_citta', 'dom_notifica_provincia', 'dom_notifica_cap', 'dom_notifica_stato',
   'rl_nome', 'rl_cognome', 'rl_cf',
   'rl_dom_via', 'rl_dom_civico', 'rl_dom_citta', 'rl_dom_provincia', 'rl_dom_cap', 'rl_dom_stato',
-  'note_anagrafica',
   'distretto', 'comizio', 'idrante', 'matricola_contatore', 'matricola_tessera'
 ])
 
@@ -4628,6 +4647,80 @@ async function queryTableAttributes (rawUrl: any, where = '1=1', orderByFields =
   return (res?.features || []).map((f: any) => f?.attributes || {})
 }
 
+function getLayerFieldName (fl: any, name: string): string {
+  const needle = String(name || '').toLowerCase()
+  const field = ((fl?.fields || []) as any[]).find((f: any) => String(f?.name || '').toLowerCase() === needle)
+  return String(field?.name || name)
+}
+
+function getExistingLayerFieldName (fl: any, name: string): string {
+  const needle = String(name || '').toLowerCase()
+  const field = ((fl?.fields || []) as any[]).find((f: any) => String(f?.name || '').toLowerCase() === needle)
+  return String(field?.name || '')
+}
+
+function art30ParameterOutFields (fl: any): string[] {
+  const wanted = [
+    'categoria_parametro',
+    'codice_parametro',
+    'descrizione',
+    'valore_testo',
+    'valore_num',
+    'data_validita_da',
+    'data_validita_a',
+    'attivo',
+    String(fl?.objectIdField || 'OBJECTID')
+  ]
+  const out = wanted
+    .map(name => getExistingLayerFieldName(fl, name))
+    .filter(Boolean)
+  return out.length > 0 ? Array.from(new Set(out)) : ['*']
+}
+
+async function queryArt30ParameterRows (rawUrl: any): Promise<any[]> {
+  const fl = await getFeatureLayerByUrl(rawUrl)
+  const categoryField = getExistingLayerFieldName(fl, 'categoria_parametro')
+  const dateField = getExistingLayerFieldName(fl, 'data_validita_da')
+  const objectIdField = getLayerFieldName(fl, String(fl?.objectIdField || 'OBJECTID'))
+  const outFields = art30ParameterOutFields(fl)
+
+  const run = async (where: string): Promise<any[]> => {
+    const q = fl.createQuery ? fl.createQuery() : {}
+    q.where = where || '1=1'
+    q.outFields = outFields
+    q.returnGeometry = false
+    q.orderByFields = [
+      ...(dateField ? [`${dateField} DESC`] : []),
+      `${objectIdField} DESC`
+    ]
+    const res = await fl.queryFeatures(q)
+    return (res?.features || []).map((f: any) => f?.attributes || {})
+  }
+
+  if (categoryField) {
+    try {
+      const filtered = await run(`UPPER(${categoryField}) IN ('ATTREZZATURA', 'CAUZIONE')`)
+      if (filtered.length > 0) return filtered
+    } catch {}
+  }
+
+  return await run('1=1')
+}
+
+const __giiArt30ParameterRowsCache: Record<string, Promise<any[]>> = {}
+
+function loadArt30ParameterRows (rawUrl: any): Promise<any[]> {
+  const url = ensureLayerIndex(normalizeFeatureLayerUrl(rawUrl))
+  if (!url) return Promise.reject(new Error('URL layer/tabella non configurata.'))
+  if (!__giiArt30ParameterRowsCache[url]) {
+    __giiArt30ParameterRowsCache[url] = queryArt30ParameterRows(url).catch((err) => {
+      delete __giiArt30ParameterRowsCache[url]
+      throw err
+    })
+  }
+  return __giiArt30ParameterRowsCache[url]
+}
+
 
 type AttrezzaturaParametro = {
   codice: string
@@ -4787,8 +4880,7 @@ function attrezzatureTotal (rows: AttrezzaturaRimborsoRow[]): number {
   return Math.round(rows.reduce((sum, row) => row.selected ? sum + ((Number(row.quantita) || 0) * (Number(row.valoreUnitario) || 0)) : sum, 0) * 100) / 100
 }
 
-async function loadAttrezzatureParameters (rawUrl: any, referenceDate?: any): Promise<AttrezzaturaParametro[]> {
-  const rows = await queryTableAttributes(rawUrl, '1=1', 'data_validita_da DESC, OBJECTID DESC')
+function buildAttrezzatureParametersFromRows (rows: any[], referenceDate?: any): AttrezzaturaParametro[] {
   const refTs = parameterDateTs(referenceDate) ?? Date.now()
 
   const candidates = rows
@@ -4829,8 +4921,7 @@ async function loadAttrezzatureParameters (rawUrl: any, referenceDate?: any): Pr
 }
 
 
-async function loadCauzioneParameter (rawUrl: any, referenceDate?: any): Promise<number> {
-  const rows = await queryTableAttributes(rawUrl, '1=1', 'data_validita_da DESC, OBJECTID DESC')
+function buildCauzioneParameterFromRows (rows: any[], referenceDate?: any): number {
   const refTs = parameterDateTs(referenceDate) ?? Date.now()
   const candidates = rows
     .filter(row => String(row?.categoria_parametro ?? '').trim().toUpperCase() === 'CAUZIONE')
@@ -4850,6 +4941,24 @@ async function loadCauzioneParameter (rawUrl: any, referenceDate?: any): Promise
     || candidates.find(row => row.chiave.includes('CAUZIONE'))
     || candidates[0]
   return preferred ? Math.round(preferred.valore * 100) / 100 : 0
+}
+
+async function loadArt30ParametersBundle (rawUrl: any, referenceDate?: any): Promise<{ attrezzature: AttrezzaturaParametro[]; cauzione: number }> {
+  const rows = await loadArt30ParameterRows(rawUrl)
+  return {
+    attrezzature: buildAttrezzatureParametersFromRows(rows, referenceDate),
+    cauzione: buildCauzioneParameterFromRows(rows, referenceDate)
+  }
+}
+
+async function loadAttrezzatureParameters (rawUrl: any, referenceDate?: any): Promise<AttrezzaturaParametro[]> {
+  const rows = await loadArt30ParameterRows(rawUrl)
+  return buildAttrezzatureParametersFromRows(rows, referenceDate)
+}
+
+async function loadCauzioneParameter (rawUrl: any, referenceDate?: any): Promise<number> {
+  const rows = await loadArt30ParameterRows(rawUrl)
+  return buildCauzioneParameterFromRows(rows, referenceDate)
 }
 
 async function saveTableAttributes (rawUrl: any, attrs: Record<string, any>, objectid?: number | null): Promise<void> {
@@ -6651,31 +6760,25 @@ React.useEffect(() => {
       const cauzioneDetailSnapshot = parseAttrezzatureCauzioneDetail(detailSnapshotRaw)
       const tesseraCurrentQty = Math.max(1, Math.trunc(Number(current.find(item => attrezzaturaTipo(item.descrizione)?.key === 'TESSERA_ELETTRONICA')?.quantita) || 1))
       const parametersUrl = String((cfg as any).attrezzatureParametriUrl || '').trim()
-      const cauzioneUrl = parametersUrl
       const cauzioneSnapshot = Number(g('attrezzature_cauzione_decurtata')) || 0
       const warningMessages: string[] = []
-      if (cauzioneUrl) {
-        try {
-          const cauzioneUnitaria = await loadCauzioneParameter(cauzioneUrl, g('data_rilevazione'))
-          const valoreUnitario = cauzioneDetailSnapshot?.valoreUnitario != null && cauzioneDetailSnapshot.valoreUnitario > 0
-            ? cauzioneDetailSnapshot.valoreUnitario
-            : cauzioneUnitaria > 0
-              ? cauzioneUnitaria
-              : (cauzioneSnapshot > 0 ? cauzioneSnapshot / tesseraCurrentQty : 0)
-          setAttrezzatureCauzioneImporto(valoreUnitario)
-          const quantitaSnapshot = cauzioneDetailSnapshot?.quantita != null && cauzioneDetailSnapshot.quantita > 0
-            ? Math.trunc(cauzioneDetailSnapshot.quantita)
-            : cauzionePresenteSnapshot && valoreUnitario > 0 && cauzioneSnapshot > 0
-              ? Math.max(1, Math.round(cauzioneSnapshot / valoreUnitario))
-              : tesseraCurrentQty
-          setAttrezzatureCauzioneQuantita(Math.min(tesseraCurrentQty, quantitaSnapshot))
-        } catch {
-          const valoreUnitario = cauzioneDetailSnapshot?.valoreUnitario != null && cauzioneDetailSnapshot.valoreUnitario > 0
-            ? cauzioneDetailSnapshot.valoreUnitario
+      let art30Parameters: { attrezzature: AttrezzaturaParametro[]; cauzione: number } | null = null
+      if (parametersUrl) art30Parameters = await loadArt30ParametersBundle(parametersUrl, g('data_rilevazione'))
+
+      if (art30Parameters) {
+        const cauzioneUnitaria = art30Parameters.cauzione
+        const valoreUnitario = cauzioneDetailSnapshot?.valoreUnitario != null && cauzioneDetailSnapshot.valoreUnitario > 0
+          ? cauzioneDetailSnapshot.valoreUnitario
+          : cauzioneUnitaria > 0
+            ? cauzioneUnitaria
             : (cauzioneSnapshot > 0 ? cauzioneSnapshot / tesseraCurrentQty : 0)
-          setAttrezzatureCauzioneImporto(valoreUnitario)
-          setAttrezzatureCauzioneQuantita(Math.min(tesseraCurrentQty, Math.max(1, Math.trunc(cauzioneDetailSnapshot?.quantita || tesseraCurrentQty))))
-        }
+        setAttrezzatureCauzioneImporto(valoreUnitario)
+        const quantitaSnapshot = cauzioneDetailSnapshot?.quantita != null && cauzioneDetailSnapshot.quantita > 0
+          ? Math.trunc(cauzioneDetailSnapshot.quantita)
+          : cauzionePresenteSnapshot && valoreUnitario > 0 && cauzioneSnapshot > 0
+            ? Math.max(1, Math.round(cauzioneSnapshot / valoreUnitario))
+            : tesseraCurrentQty
+        setAttrezzatureCauzioneQuantita(Math.min(tesseraCurrentQty, quantitaSnapshot))
       } else {
         const valoreUnitario = cauzioneDetailSnapshot?.valoreUnitario != null && cauzioneDetailSnapshot.valoreUnitario > 0
           ? cauzioneDetailSnapshot.valoreUnitario
@@ -6695,7 +6798,7 @@ React.useEffect(() => {
         setAttrezzatureError(warningMessages.join(' '))
         return
       }
-      const params = await loadAttrezzatureParameters(parametersUrl, g('data_rilevazione'))
+      const params = art30Parameters?.attrezzature || []
       const existingByKey = new Map(current.map(item => [attrezzaturaMatchKey(item.descrizione), item]))
       const nextRows: AttrezzaturaRimborsoRow[] = params.map(item => {
         const existing = existingByKey.get(attrezzaturaMatchKey(item.descrizione))
@@ -6817,6 +6920,11 @@ React.useEffect(() => {
   )
   const attrezzatureParametriUrl = String((cfg as any).attrezzatureParametriUrl || '').trim()
   const [attrezzatureCauzioneRiepilogo, setAttrezzatureCauzioneRiepilogo] = React.useState<{ quantita: number | null; valoreUnitario: number | null }>({ quantita: null, valoreUnitario: null })
+
+  React.useEffect(() => {
+    if (!attrezzatureParametriUrl) return
+    void loadArt30ParameterRows(attrezzatureParametriUrl)
+  }, [attrezzatureParametriUrl])
 
   React.useEffect(() => {
     let cancelled = false
@@ -8031,10 +8139,10 @@ ${e?.message || String(e)}`
       case 'ragione_sociale': return tipoSogg === 'PG' ? { label: 'Ragione sociale', el: <NpText value={g('ragione_sociale')} onChange={v => set('ragione_sociale', v)} disabled={saving}/> } : null
       case 'piva': return tipoSogg === 'PG' ? { label: 'P. IVA', hint: 'Massimo 11 caratteri', el: <NpText value={g('piva')} onChange={v => set('piva', v)} disabled={saving} maxLength={11}/> } : null
       // Trasgressore — indirizzo
-      case 'via': return { label: 'Via/P.zza', el: <NpText value={g('via')} onChange={v => set('via', v)} disabled={saving}/> }
+      case 'via': return { label: 'Via/Piazza/Località', el: <NpText value={g('via')} onChange={v => set('via', v)} disabled={saving}/> }
       case 'civico': return { label: 'N. civico', el: <NpText value={g('civico')} onChange={v => set('civico', v)} disabled={saving}/> }
       case 'citta': return { label: 'Città', el: <ComuneIstatInput value={g('citta')} onManualChange={v => { set('citta', v); set('provincia', ''); resetCapOptions('main') }} onSelect={o => applyComuneToAddress('main', o)} disabled={saving}/> }
-      case 'provincia': return { label: 'Provincia', el: <NpText value={g('provincia')} onChange={v => set('provincia', v)} disabled={saving} maxLength={2}/> }
+      case 'provincia': return { label: 'Provincia', el: <NpDerivedText value={g('provincia')} maxLength={2}/> }
       case 'cap': return { label: 'CAP', el: <CapIstatInput value={g('cap')} onChange={v => set('cap', v)} options={capOptionsByAddress.main} disabled={saving}/> }
       case 'stato': return { label: 'Stato', el: <NpText value={g('stato') || 'ITALIA'} onChange={v => set('stato', v)} disabled={saving}/> }
       case 'telefono': return { label: 'Telefono', el: <NpText value={g('telefono')} onChange={v => set('telefono', v)} disabled={saving}/> }
@@ -8045,10 +8153,10 @@ ${e?.message || String(e)}`
       case 'qualifica_fondo': return { label: 'Qualifica rispetto al fondo', el: <NpSel value={g('qualifica_fondo')} onChange={v => set('qualifica_fondo', v)} options={domainOpts('qualifica_fondo', CHOICES.qualifica_fondo)} disabled={saving}/> }
       // Trasgressore — domicilio notifiche
       case 'dom_notifica_uguale': return { label: 'Coincide con residenza/sede legale', el: <NpSel value={g('dom_notifica_uguale') || '1'} onChange={v => set('dom_notifica_uguale', v)} options={domainOpts('dom_notifica_uguale', CHOICES.si_no)} disabled={saving} allowEmpty={false}/> }
-      case 'dom_notifica_via': return String(g('dom_notifica_uguale')) !== '1' ? { label: 'Via/P.zza', el: <NpText value={g('dom_notifica_via')} onChange={v => set('dom_notifica_via', v)} disabled={saving}/> } : null
+      case 'dom_notifica_via': return String(g('dom_notifica_uguale')) !== '1' ? { label: 'Via/Piazza/Località', el: <NpText value={g('dom_notifica_via')} onChange={v => set('dom_notifica_via', v)} disabled={saving}/> } : null
       case 'dom_notifica_civico': return String(g('dom_notifica_uguale')) !== '1' ? { label: 'N. civico', el: <NpText value={g('dom_notifica_civico')} onChange={v => set('dom_notifica_civico', v)} disabled={saving}/> } : null
       case 'dom_notifica_citta': return String(g('dom_notifica_uguale')) !== '1' ? { label: 'Città', el: <ComuneIstatInput value={g('dom_notifica_citta')} onManualChange={v => { set('dom_notifica_citta', v); set('dom_notifica_provincia', ''); resetCapOptions('dom') }} onSelect={o => applyComuneToAddress('dom', o)} disabled={saving}/> } : null
-      case 'dom_notifica_provincia': return String(g('dom_notifica_uguale')) !== '1' ? { label: 'Provincia', el: <NpText value={g('dom_notifica_provincia')} onChange={v => set('dom_notifica_provincia', v)} disabled={saving} maxLength={2}/> } : null
+      case 'dom_notifica_provincia': return String(g('dom_notifica_uguale')) !== '1' ? { label: 'Provincia', el: <NpDerivedText value={g('dom_notifica_provincia')} maxLength={2}/> } : null
       case 'dom_notifica_cap': return String(g('dom_notifica_uguale')) !== '1' ? { label: 'CAP', el: <CapIstatInput value={g('dom_notifica_cap')} onChange={v => set('dom_notifica_cap', v)} options={capOptionsByAddress.dom} disabled={saving}/> } : null
       case 'dom_notifica_stato': return String(g('dom_notifica_uguale')) !== '1' ? { label: 'Stato', el: <NpText value={g('dom_notifica_stato') || 'ITALIA'} onChange={v => set('dom_notifica_stato', v)} disabled={saving}/> } : null
       // Trasgressore — rappresentante legale (PG only)
@@ -8057,14 +8165,14 @@ ${e?.message || String(e)}`
       case 'rl_cf': return tipoSogg === 'PG' ? { label: 'Codice fiscale', hint: 'Massimo 16 caratteri', el: <NpText value={g('rl_cf')} onChange={v => set('rl_cf', v)} disabled={saving} maxLength={16}/> } : null
       case 'rl_carica': return tipoSogg === 'PG' ? { label: 'Carica', el: <NpSel value={g('rl_carica')} onChange={v => set('rl_carica', v)} options={domainOpts('rl_carica', CHOICES.rl_carica)} disabled={saving}/> } : null
       case 'rl_dom_notifica': return tipoSogg === 'PG' ? { label: 'Domicilio notifiche del rappresentante', el: <NpSel value={g('rl_dom_notifica') || '0'} onChange={v => set('rl_dom_notifica', v)} options={domainOpts('rl_dom_notifica', CHOICES.si_no)} disabled={saving} allowEmpty={false}/> } : null
-      case 'rl_dom_via': return (tipoSogg === 'PG' && String(g('rl_dom_notifica')) === '1') ? { label: 'Via/P.zza', el: <NpText value={g('rl_dom_via')} onChange={v => set('rl_dom_via', v)} disabled={saving}/> } : null
+      case 'rl_dom_via': return (tipoSogg === 'PG' && String(g('rl_dom_notifica')) === '1') ? { label: 'Via/Piazza/Località', el: <NpText value={g('rl_dom_via')} onChange={v => set('rl_dom_via', v)} disabled={saving}/> } : null
       case 'rl_dom_civico': return (tipoSogg === 'PG' && String(g('rl_dom_notifica')) === '1') ? { label: 'N. civico', el: <NpText value={g('rl_dom_civico')} onChange={v => set('rl_dom_civico', v)} disabled={saving}/> } : null
       case 'rl_dom_citta': return (tipoSogg === 'PG' && String(g('rl_dom_notifica')) === '1') ? { label: 'Città', el: <ComuneIstatInput value={g('rl_dom_citta')} onManualChange={v => { set('rl_dom_citta', v); set('rl_dom_provincia', ''); resetCapOptions('rl') }} onSelect={o => applyComuneToAddress('rl', o)} disabled={saving}/> } : null
-      case 'rl_dom_provincia': return (tipoSogg === 'PG' && String(g('rl_dom_notifica')) === '1') ? { label: 'Provincia', el: <NpText value={g('rl_dom_provincia')} onChange={v => set('rl_dom_provincia', v)} disabled={saving} maxLength={2}/> } : null
+      case 'rl_dom_provincia': return (tipoSogg === 'PG' && String(g('rl_dom_notifica')) === '1') ? { label: 'Provincia', el: <NpDerivedText value={g('rl_dom_provincia')} maxLength={2}/> } : null
       case 'rl_dom_cap': return (tipoSogg === 'PG' && String(g('rl_dom_notifica')) === '1') ? { label: 'CAP', el: <CapIstatInput value={g('rl_dom_cap')} onChange={v => set('rl_dom_cap', v)} options={capOptionsByAddress.rl} disabled={saving}/> } : null
       case 'rl_dom_stato': return (tipoSogg === 'PG' && String(g('rl_dom_notifica')) === '1') ? { label: 'Stato', el: <NpText value={g('rl_dom_stato') || 'ITALIA'} onChange={v => set('rl_dom_stato', v)} disabled={saving}/> } : null
       // Trasgressore — note
-      case 'note_anagrafica': return { label: 'Note', el: <NpText value={g('note_anagrafica')} onChange={v => set('note_anagrafica', v)} multiline disabled={saving}/> }
+      case 'note_anagrafica': return { label: 'Note', el: <NpText value={g('note_anagrafica')} onChange={v => set('note_anagrafica', v)} multiline uppercase={false} disabled={saving}/> }
       // Violazione — Art. 15
       case 'tipo_abuso': return { label: 'Tipo di abuso', el: <NpSel value={tipoAbuso} onChange={v => { set('tipo_abuso', v); set('norma15_parziale', ''); set('norma15_totale', '') }} options={CHOICES.tipo_abuso} disabled={saving || !art15Selected}/> }
       case 'norma15_sel': {
@@ -8321,6 +8429,15 @@ ${e?.message || String(e)}`
         const defaultGap = Number(cfg.fieldGap) || 12
         const noteFieldName = 'note_anagrafica'
         const layout: any[] = ((cfg.fieldLayouts || {}) as any).trasgressore || DEFAULT_FIELD_LAYOUTS.trasgressore || []
+        const sectionTitleForTipoSoggetto = (raw: any): string => {
+          const title = String(raw || '').trim()
+          const normalized = title.toLocaleLowerCase('it-IT').replace(/\s*\/\s*/g, ' / ').replace(/\s+/g, ' ')
+          const isMainAddressTitle = normalized === 'indirizzo / sede legale' || normalized === 'residenza / sede legale'
+          if (!isMainAddressTitle) return title
+          if (tipoSogg === 'PG') return 'Sede legale'
+          if (tipoSogg === 'PF') return 'Residenza'
+          return 'Residenza / Sede legale'
+        }
 
         const renderLayoutRowContent = (row: any, key: React.Key): React.ReactNode => {
           if (row.type === 'special') {
@@ -8353,7 +8470,7 @@ ${e?.message || String(e)}`
 
         layout.forEach((row: any) => {
           if (row.type === 'header') {
-            const title = String(row.label || '').trim()
+            const title = sectionTitleForTipoSoggetto(row.label)
             if (title.toLowerCase().startsWith('note')) {
               pushCurrent()
               current = { title: '', rows: [] }
@@ -8405,6 +8522,7 @@ ${e?.message || String(e)}`
                 value={g(noteFieldName)}
                 onChange={v => set(noteFieldName, v)}
                 multiline
+                uppercase={false}
                 minRows={10}
                 disabled={saving}
               />

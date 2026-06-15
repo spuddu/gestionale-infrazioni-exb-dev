@@ -11,6 +11,18 @@ const AREA_CODES = new Set(['AMM', 'AGR', 'TEC'])
 const SETTORE_CODES = new Set(['CR', 'GI', 'D1', 'D2', 'D3', 'D4', 'D5', 'D6', 'DS'])
 const AREA_FROM_NUM: Record<number, string> = { 1:'AMM', 2:'AGR', 3:'TEC' }
 const SETTORE_FROM_NUM: Record<number, string> = { 1:'CR', 2:'GI', 3:'D1', 4:'D2', 5:'D3', 6:'D4', 7:'D5', 8:'D6', 9:'DS' }
+const AREA_FULL: Record<string, string> = { AMM:'Amministrativa', AGR:'Agraria', TEC:'Tecnica' }
+const SETTORE_FULL: Record<string, string> = {
+  CR:'Catasto, Ruoli e Servizi Territoriali',
+  GI:'Gestione irrigua',
+  D1:"Distretto 1 (Quartu Sant'Elena/Villaputzu/Muravera - San Sperate)",
+  D2:'Distretto 2 (Serramanna/Pimpisu)',
+  D3:'Distretto 3 (San Gavino - Villacidro)',
+  D4:'Distretto 4 (Basso Sulcis)',
+  D5:'Distretto 5 (Senorbì)',
+  D6:'Distretto 6 (Cixerri)',
+  DS:'Manutenzione opere di dreno e di scolo'
+}
 
 // Icone configurabili per le card della homepage.
 const CARD_ICONS: Record<string, string> = {
@@ -100,7 +112,11 @@ interface UserInfo {
   ruoloLabel: string
   ruoloCod: string
   areaCod: string
+  areaFull: string
   settoreCod: string
+  settoreFull: string
+  ufficio: number | null
+  ufficioLabel: string
   isAdmin: boolean
 }
 
@@ -153,6 +169,8 @@ async function loadUser(): Promise<UserInfo | null> {
     baseRuoloCod === 'TI_AMM' || (areaCod === 'AMM' && baseRuoloCod === 'TI') ? 'TI_AMM' :
     baseRuoloCod
   const settoreCod = normalizeSettoreCode(cached.settoreCod ?? cached.settore_cod ?? cached.settoreLabel, cached.settore)
+  const ufficioRaw = cached.ufficio ?? cached.id_ufficio ?? cached.ufficio_id
+  const ufficio = ufficioRaw != null && ufficioRaw !== '' ? Number(ufficioRaw) : null
 
   return {
     username: String(cached.username),
@@ -160,8 +178,30 @@ async function loadUser(): Promise<UserInfo | null> {
     ruoloLabel: ruoloCod,
     ruoloCod,
     areaCod,
+    areaFull: String(cached.areaFull || cached.area_full || (areaCod ? AREA_FULL[areaCod] || areaCod : '')),
     settoreCod,
+    settoreFull: String(cached.settoreFull || cached.settore_full || (settoreCod ? SETTORE_FULL[settoreCod] || settoreCod : '')),
+    ufficio: Number.isFinite(ufficio) ? ufficio : null,
+    ufficioLabel: String(cached.ufficioLabel || cached.ufficio_label || cached.ufficioZona || cached.ufficio_zona || ''),
     isAdmin: ruoloCod === 'ADMIN' || !!cached.isAdmin
+  }
+}
+
+function getOrgContext(user: UserInfo | null): { area: string; settore: string; ufficio: string; title: string } {
+  if (!user) return { area: '', settore: '', ufficio: '', title: '' }
+
+  const area = String(user.areaFull || (user.areaCod ? AREA_FULL[user.areaCod] || user.areaCod : '')).trim()
+  const settore = String(user.settoreFull || (user.settoreCod ? SETTORE_FULL[user.settoreCod] || user.settoreCod : '')).trim()
+  const ufficio = String(user.ufficioLabel || '').trim()
+  const areaText = area ? `Area ${area}` : (user.isAdmin ? 'Area Agraria' : '')
+  const settoreText = settore ? `Settore ${settore}` : (user.isAdmin ? "Settore Distretto 1 (Quartu Sant'Elena/Villaputzu/Muravera - San Sperate)" : '')
+  const ufficioText = ufficio ? (/^Ufficio\b/i.test(ufficio) ? ufficio : `Ufficio di ${ufficio}`) : (user.isAdmin ? 'Ufficio di Quartucciu (loc. Is Forreddus)' : '')
+
+  return {
+    area: areaText,
+    settore: settoreText,
+    ufficio: ufficioText,
+    title: [areaText, settoreText, ufficioText].filter(Boolean).join(' · ')
   }
 }
 
@@ -345,10 +385,35 @@ function Card(p: { card: CardConfig; cfg: any; idx: number }) {
         <div style={{ width:48,height:48,flex:'0 0 48px',borderRadius:12, background:hov?`${card.colorAccent}33`:'rgba(255,255,255,0.08)', display:'flex',alignItems:'center',justifyContent:'center', transition:'background 0.25s', color:hov?card.colorAccent:'rgba(255,255,255,0.7)' }}>
           <div style={{ width:24,height:24 }} dangerouslySetInnerHTML={{ __html: icon }} />
         </div>
-        <div style={{ fontFamily:cfg.cardLabelFont,fontSize:cfg.cardLabelSize,fontWeight:cfg.cardLabelWeight, color:hov?'#fff':'rgba(255,255,255,0.90)',transition:'color 0.2s' }}>{card.label}</div>
+        <div style={{
+          fontFamily:cfg.cardLabelFont,
+          fontSize:cfg.cardLabelSize,
+          fontWeight:cfg.cardLabelWeight,
+          fontStyle:cfg.cardLabelItalic ? 'italic' : 'normal',
+          color:hov ? (cfg.cardLabelHoverColor || '#ffffff') : (cfg.cardLabelColor || 'rgba(255,255,255,0.90)'),
+          transition:'color 0.2s'
+        }}>{card.label}</div>
       </div>
-      <div style={{ fontSize:cfg.cardDescSize,lineHeight:1.55, color:hov?'rgba(255,255,255,0.80)':'rgba(255,255,255,0.50)',transition:'color 0.2s' }}>{card.desc}</div>
-      <div style={{ marginTop:20,fontSize:cfg.cardCtaSize,fontWeight:700,letterSpacing:cfg.cardCtaSpacing, textTransform:'uppercase' as const, color:hov?card.colorAccent:'rgba(255,255,255,0.25)', display:'flex',alignItems:'center',gap:6,transition:'color 0.2s' }}>
+      <div style={{
+        fontFamily:cfg.cardDescFont || "'Source Sans 3', 'Segoe UI', sans-serif",
+        fontSize:cfg.cardDescSize,
+        fontWeight:cfg.cardDescWeight ?? 400,
+        fontStyle:cfg.cardDescItalic ? 'italic' : 'normal',
+        lineHeight:cfg.cardDescLineHeight ?? 1.55,
+        color:hov ? (cfg.cardDescHoverColor || 'rgba(255,255,255,0.80)') : (cfg.cardDescColor || 'rgba(255,255,255,0.50)'),
+        transition:'color 0.2s'
+      }}>{card.desc}</div>
+      <div style={{
+        marginTop:20,
+        fontFamily:cfg.cardCtaFont || "'Source Sans 3', 'Segoe UI', sans-serif",
+        fontSize:cfg.cardCtaSize,
+        fontWeight:cfg.cardCtaWeight ?? 700,
+        fontStyle:cfg.cardCtaItalic ? 'italic' : 'normal',
+        letterSpacing:cfg.cardCtaSpacing,
+        textTransform:'uppercase' as const,
+        color:hov ? (cfg.cardCtaHoverColor || card.colorAccent) : (cfg.cardCtaColor || 'rgba(255,255,255,0.25)'),
+        display:'flex',alignItems:'center',gap:6,transition:'color 0.2s'
+      }}>
         {cfg.cardCtaText}
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"
           style={{ transform:hov?'translateX(4px)':'translateX(0)',transition:'transform 0.2s' }}>
@@ -383,6 +448,7 @@ export default function Widget(props: Props) {
   const effCards: CardConfig[] = mergeCardsWithPages(rawCards, excludedPageIds)
 
   const oClock: GroupOffset = cfg.offsetClock || { x:0, y:0 }
+  const oOrgContext: GroupOffset = cfg.offsetOrgContext || { x:0, y:0 }
   const oCards: GroupOffset = cfg.offsetCards || { x:0, y:0 }
 
   const [user,  setUser]  = React.useState<UserInfo | null>(null)
@@ -460,6 +526,7 @@ export default function Widget(props: Props) {
   }
 
   const visibleCards = effCards.slice().sort((a,b) => a.order - b.order).filter(isVisible)
+  const orgContext = getOrgContext(user)
 
   return (
     <div style={{ width:'100%',height:'100%',minHeight:500,
@@ -512,18 +579,69 @@ export default function Widget(props: Props) {
           {cfg.showClock && (
             <div style={{ display:'flex', justifyContent:'flex-end', marginBottom: 10, flexShrink:0, ...off(oClock) }}>
               <div style={{ textAlign:'right' as const }}>
-                <div style={{ fontSize:cfg.clockSize, fontWeight:300, color:cfg.clockColor, letterSpacing:-0.5, fontFamily:cfg.cardLabelFont }}>
+                <div style={{
+                  fontFamily:cfg.clockFont || cfg.cardLabelFont,
+                  fontSize:cfg.clockSize,
+                  fontWeight:cfg.clockWeight ?? 300,
+                  fontStyle:cfg.clockItalic ? 'italic' : 'normal',
+                  color:cfg.clockColor,
+                  letterSpacing:cfg.clockLetterSpacing ?? -0.5
+                }}>
                   {fmtTime(now)}
                 </div>
-                <div style={{ fontSize:cfg.dateSize, color:cfg.dateColor, marginTop:1, textTransform:'capitalize' as const }}>
+                <div style={{
+                  fontFamily:cfg.dateFont || "'Source Sans 3', 'Segoe UI', sans-serif",
+                  fontSize:cfg.dateSize,
+                  fontWeight:cfg.dateWeight ?? 400,
+                  fontStyle:cfg.dateItalic ? 'italic' : 'normal',
+                  color:cfg.dateColor,
+                  letterSpacing:cfg.dateLetterSpacing ?? 0,
+                  marginTop:1,
+                  textTransform:'capitalize' as const
+                }}>
                   {fmtDate(now)}
                 </div>
               </div>
             </div>
           )}
 
-          <div style={{ fontSize:cfg.sectionLabelSize,fontWeight:700,letterSpacing:cfg.sectionLabelSpacing,
-            textTransform:'uppercase' as const,color:cfg.sectionLabelColor,marginBottom:14,flexShrink:0,
+          {(cfg.showOrgContext ?? true) && orgContext.title && (
+            <div style={{
+              display:'flex',
+              justifyContent:
+                cfg.orgContextAlign === 'right' ? 'flex-end' :
+                cfg.orgContextAlign === 'center' ? 'center' :
+                'flex-start',
+              marginBottom:8,
+              flexShrink:0,
+              ...off(oOrgContext)
+            }}>
+              <div title={orgContext.title} style={{
+                width:'100%',
+                fontFamily:cfg.orgContextFont || "'Source Sans 3', 'Segoe UI', sans-serif",
+                fontSize:Math.max(8, Number(cfg.orgContextSize || 10.5)),
+                fontWeight:cfg.orgContextWeight ?? 700,
+                fontStyle:cfg.orgContextItalic ? 'italic' : 'normal',
+                letterSpacing:cfg.orgContextLetterSpacing ?? 1.2,
+                color:cfg.orgContextColor || cfg.sectionLabelColor,
+                lineHeight:1.35,
+                textAlign: cfg.orgContextAlign || 'left',
+                whiteSpace:'normal',
+                overflowWrap:'anywhere'
+              }}>
+                {orgContext.title}
+              </div>
+            </div>
+          )}
+
+          <div style={{
+            fontFamily:cfg.sectionLabelFont || "'Source Sans 3', 'Segoe UI', sans-serif",
+            fontSize:cfg.sectionLabelSize,
+            fontWeight:cfg.sectionLabelWeight ?? 700,
+            fontStyle:cfg.sectionLabelItalic ? 'italic' : 'normal',
+            letterSpacing:cfg.sectionLabelSpacing,
+            textTransform:(cfg.sectionLabelUppercase ?? true) ? 'uppercase' as const : 'none' as const,
+            color:cfg.sectionLabelColor,marginBottom:14,flexShrink:0,
             animationName:'fadeIn',animationDuration:'0.5s',animationDelay:'0.1s',animationFillMode:'both' }}>
             {cfg.sectionLabelText}
           </div>
@@ -571,8 +689,20 @@ export default function Widget(props: Props) {
         {/* Footer */}
         {cfg.showFooter && (
           <div style={{ marginTop:20,flexShrink:0,display:'flex',justifyContent:'space-between',alignItems:'center',paddingTop:14,borderTop:'1px solid rgba(255,255,255,0.05)',animationName:'fadeIn',animationDuration:'0.5s',animationDelay:'0.2s',animationFillMode:'both' }}>
-            <div style={{ fontSize:cfg.footerSize,color:cfg.footerColor }}>{String(cfg.footerLeft || '').replace('{year}',String(now.getFullYear()))}</div>
-            <div style={{ fontSize:cfg.footerSize,color:cfg.footerColor }}>{cfg.footerRight}</div>
+            <div style={{
+              fontFamily:cfg.footerFont || "'Source Sans 3', 'Segoe UI', sans-serif",
+              fontSize:cfg.footerSize,
+              fontWeight:cfg.footerWeight ?? 400,
+              fontStyle:cfg.footerItalic ? 'italic' : 'normal',
+              color:cfg.footerColor
+            }}>{String(cfg.footerLeft || '').replace('{year}',String(now.getFullYear()))}</div>
+            <div style={{
+              fontFamily:cfg.footerFont || "'Source Sans 3', 'Segoe UI', sans-serif",
+              fontSize:cfg.footerSize,
+              fontWeight:cfg.footerWeight ?? 400,
+              fontStyle:cfg.footerItalic ? 'italic' : 'normal',
+              color:cfg.footerColor
+            }}>{cfg.footerRight}</div>
           </div>
         )}
       </div>

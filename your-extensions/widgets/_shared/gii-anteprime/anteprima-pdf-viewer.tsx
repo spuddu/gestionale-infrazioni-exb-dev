@@ -707,29 +707,24 @@ export default function AnteprimaPdfViewer (props: Props): any {
           <button type='button' onClick={() => setZoom(v => clampZoom(v + 10))} style={btnStyle} title='Aumenta zoom'>+</button>
           <button
             type='button'
-            onClick={() => { void applyFitMode('height') }}
+            onClick={() => { void applyFitMode(fitMode === 'height' ? 'width' : 'height') }}
             style={{ ...btnStyle, width: 34, minWidth: 34, padding: 0 }}
-            title='Adatta alla massima altezza visibile'
-            aria-label='Adatta altezza'
+            title={fitMode === 'height' ? 'Passa alla vista a tutta larghezza' : 'Passa alla vista a tutta altezza'}
+            aria-label={fitMode === 'height' ? 'Passa alla vista a tutta larghezza' : 'Passa alla vista a tutta altezza'}
           >
-            <svg width='18' height='18' viewBox='0 0 24 24' aria-hidden='true' focusable='false'>
-              <path d='M7 4.5h10M7 19.5h10' fill='none' stroke='currentColor' strokeWidth='1.9' strokeLinecap='round' />
-              <path d='M12 7.2v9.6' fill='none' stroke='currentColor' strokeWidth='1.9' strokeLinecap='round' />
-              <path d='M9.4 9.6 12 7l2.6 2.6M9.4 14.4 12 17l2.6-2.6' fill='none' stroke='currentColor' strokeWidth='1.9' strokeLinecap='round' strokeLinejoin='round' />
-            </svg>
-          </button>
-          <button
-            type='button'
-            onClick={() => { void applyFitMode('width') }}
-            style={{ ...btnStyle, width: 34, minWidth: 34, padding: 0 }}
-            title='Adatta alla massima larghezza visibile'
-            aria-label='Adatta larghezza'
-          >
-            <svg width='18' height='18' viewBox='0 0 24 24' aria-hidden='true' focusable='false'>
-              <path d='M4.5 7v10M19.5 7v10' fill='none' stroke='currentColor' strokeWidth='1.9' strokeLinecap='round' />
-              <path d='M7.2 12h9.6' fill='none' stroke='currentColor' strokeWidth='1.9' strokeLinecap='round' />
-              <path d='M9.6 9.4 7 12l2.6 2.6M14.4 9.4 17 12l-2.6 2.6' fill='none' stroke='currentColor' strokeWidth='1.9' strokeLinecap='round' strokeLinejoin='round' />
-            </svg>
+            {fitMode === 'height' ? (
+              <svg width='18' height='18' viewBox='0 0 24 24' aria-hidden='true' focusable='false'>
+                <path d='M4.5 7v10M19.5 7v10' fill='none' stroke='currentColor' strokeWidth='1.9' strokeLinecap='round' />
+                <path d='M7.2 12h9.6' fill='none' stroke='currentColor' strokeWidth='1.9' strokeLinecap='round' />
+                <path d='M9.6 9.4 7 12l2.6 2.6M14.4 9.4 17 12l-2.6 2.6' fill='none' stroke='currentColor' strokeWidth='1.9' strokeLinecap='round' strokeLinejoin='round' />
+              </svg>
+            ) : (
+              <svg width='18' height='18' viewBox='0 0 24 24' aria-hidden='true' focusable='false'>
+                <path d='M7 4.5h10M7 19.5h10' fill='none' stroke='currentColor' strokeWidth='1.9' strokeLinecap='round' />
+                <path d='M12 7.2v9.6' fill='none' stroke='currentColor' strokeWidth='1.9' strokeLinecap='round' />
+                <path d='M9.4 9.6 12 7l2.6 2.6M9.4 14.4 12 17l2.6-2.6' fill='none' stroke='currentColor' strokeWidth='1.9' strokeLinecap='round' strokeLinejoin='round' />
+              </svg>
+            )}
           </button>
 
           <span style={{ width: 1, height: 22, background: 'rgba(255,255,255,0.18)' }} />

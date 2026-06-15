@@ -440,10 +440,84 @@ const FONTS = [
   { value:"'Courier New', monospace",                label:'Courier New' },
   { value:"Impact, sans-serif",                      label:'Impact' },
 ]
+const DEFAULT_ORG_CONTEXT_FONT = "'Source Sans 3', 'Segoe UI', sans-serif"
+function normalizeFontChoice(value: any): string {
+  const raw = String(value || '').trim()
+  if (!raw) return DEFAULT_ORG_CONTEXT_FONT
+  const compact = raw.replace(/,\s*/g, ',')
+  const match = FONTS.find(f => f.value.replace(/,\s*/g, ',') === compact)
+  return match?.value || raw
+}
 const WEIGHTS = [300,400,500,600,700,800,900].map(w=>({
   value:String(w),
   label:`${w} — ${['Thin','Regular','Medium','SemiBold','Bold','ExtraBold','Black'][[300,400,500,600,700,800,900].indexOf(w)]}`
 }))
+function TextStyleControls(p: {
+  cfg: any
+  set: (key: string, value: any) => void
+  title: string
+  fontKey: string
+  sizeKey: string
+  colorKey: string
+  weightKey: string
+  italicKey: string
+  letterSpacingKey?: string
+  lineHeightKey?: string
+  uppercaseKey?: string
+  minSize?: number
+  maxSize?: number
+}) {
+  const cfg = p.cfg
+  const set = p.set
+
+  return (
+    <div style={{ ...P.cardBox, marginTop:10 }}>
+      <div style={{ fontSize:10, fontWeight:700, color:'#93c5fd', textTransform:'uppercase' as const, letterSpacing:1, marginBottom:8 }}>
+        {p.title}
+      </div>
+
+      <label style={P.lbl}>Carattere</label>
+      <Sel value={normalizeFontChoice(cfg[p.fontKey])} onChange={v=>set(p.fontKey,v)} options={FONTS}/>
+
+      <ColorNumRow
+        colorLabel='Colore / trasparenza'
+        colorValue={cfg[p.colorKey] ?? '#ffffff'}
+        onColorChange={v=>set(p.colorKey,v)}
+        numLabel='Dimensione'
+        numValue={cfg[p.sizeKey] ?? 12}
+        onNumChange={v=>set(p.sizeKey,v)}
+        min={p.minSize ?? 8}
+        max={p.maxSize ?? 48}
+        step={0.5}
+        unit='px'
+      />
+
+      <div style={P.row2}>
+        <div style={{ minWidth:0 }}>
+          <label style={P.lbl}>Peso</label>
+          <Sel value={String(cfg[p.weightKey] ?? 400)} onChange={v=>set(p.weightKey,Number(v))} options={WEIGHTS}/>
+        </div>
+        {p.letterSpacingKey && (
+          <div style={{ minWidth:0 }}>
+            <label style={P.lbl}>Spaziatura</label>
+            <NumInp value={cfg[p.letterSpacingKey] ?? 0} onChange={v=>set(p.letterSpacingKey as string,v)} min={-2} max={10} step={0.1} unit='px'/>
+          </div>
+        )}
+        {p.lineHeightKey && (
+          <div style={{ minWidth:0 }}>
+            <label style={P.lbl}>Interlinea</label>
+            <NumInp value={cfg[p.lineHeightKey] ?? 1.35} onChange={v=>set(p.lineHeightKey as string,v)} min={1} max={2.5} step={0.05}/>
+          </div>
+        )}
+      </div>
+
+      <Check value={!!cfg[p.italicKey]} onChange={v=>set(p.italicKey,v)} label='Corsivo'/>
+      {p.uppercaseKey && (
+        <Check value={cfg[p.uppercaseKey] ?? true} onChange={v=>set(p.uppercaseKey as string,v)} label='Maiuscolo'/>
+      )}
+    </div>
+  )
+}
 const ROLE_OPTIONS = [
   {value:'*',label:'Tutti'},{value:'TR',label:'TR'},{value:'TI',label:'TI'},
   {value:'RZ',label:'RZ'},{value:'RI',label:'RI'},{value:'DT',label:'DT'},
@@ -707,10 +781,11 @@ export default function Setting(props: AllWidgetSettingProps<IMConfig>) {
           Sposta i blocchi rispetto al contenitore del widget (utile per allineare orologio e cards).
         </div>
         <Nudge label='Orologio + Data'  icon='🕐' value={getOffset('offsetClock')}  onChange={v=>set('offsetClock',v)}/>
+        <Nudge label='Profilo organizzativo'  icon='🏢' value={getOffset('offsetOrgContext')}  onChange={v=>set('offsetOrgContext',v)}/>
         <Nudge label='Sezione + Cards'  icon='🃏' value={getOffset('offsetCards')}  onChange={v=>set('offsetCards',v)}/>
         <div style={{ marginTop:10 }}>
           <button type='button'
-            onClick={()=>{ set('offsetClock',{x:0,y:0}); set('offsetCards',{x:0,y:0}); }}
+            onClick={()=>{ set('offsetClock',{x:0,y:0}); set('offsetOrgContext',{x:0,y:0}); set('offsetCards',{x:0,y:0}); }}
             style={{ padding:'4px 12px', borderRadius:6, border:'1px solid rgba(255,255,255,0.15)', background:'rgba(255,255,255,0.05)', color:'#9ca3af', fontSize:11, cursor:'pointer' }}>
             ↺ Azzera
           </button>
@@ -757,39 +832,35 @@ export default function Setting(props: AllWidgetSettingProps<IMConfig>) {
       {openSec==='clock' && <div>
         <Check value={cfg.showClock??true} onChange={v=>set('showClock',v)} label='Mostra orologio e data'/>
         {(cfg.showClock??true) && <>
-          <ColorNumRow
-            colorLabel='Colore ora'
-            colorValue={cfg.clockColor??'#ffffff'}
-            onColorChange={v=>set('clockColor',v)}
-            numLabel='Dim. ora'
-            numValue={cfg.clockSize??22}
-            onNumChange={v=>set('clockSize',v)}
-            min={12}
-            max={48}
-            unit='px'
+          <TextStyleControls cfg={cfg} set={set} title='Ora' fontKey='clockFont' sizeKey='clockSize' colorKey='clockColor' weightKey='clockWeight' italicKey='clockItalic' letterSpacingKey='clockLetterSpacing' minSize={12} maxSize={48}/>
+          <TextStyleControls cfg={cfg} set={set} title='Data' fontKey='dateFont' sizeKey='dateSize' colorKey='dateColor' weightKey='dateWeight' italicKey='dateItalic' letterSpacingKey='dateLetterSpacing' minSize={8} maxSize={28}/>
+        </>}
+      </div>}
+
+      {/* ═══ PROFILO ORGANIZZATIVO ═══ */}
+      <Acc id='orgctx' label='🏢 Profilo organizzativo'/>
+      {openSec==='orgctx' && <div>
+        <Check value={cfg.showOrgContext??true} onChange={v=>set('showOrgContext',v)} label='Mostra area, settore e ufficio'/>
+        {(cfg.showOrgContext??true) && <>
+          <TextStyleControls cfg={cfg} set={set} title='Testo profilo' fontKey='orgContextFont' sizeKey='orgContextSize' colorKey='orgContextColor' weightKey='orgContextWeight' italicKey='orgContextItalic' letterSpacingKey='orgContextLetterSpacing' minSize={8} maxSize={22}/>
+          <label style={P.lbl}>Allineamento</label>
+          <Sel
+            value={cfg.orgContextAlign??'left'}
+            onChange={v=>set('orgContextAlign',v)}
+            options={[
+              { value:'left', label:'Sinistra' },
+              { value:'center', label:'Centro' },
+              { value:'right', label:'Destra' }
+            ]}
           />
-          <ColorNumRow
-            colorLabel='Colore data'
-            colorValue={cfg.dateColor??'rgba(147,197,253,0.7)'}
-            onColorChange={v=>set('dateColor',v)}
-            numLabel='Dim. data'
-            numValue={cfg.dateSize??11.5}
-            onNumChange={v=>set('dateSize',v)}
-            min={9}
-            max={22}
-            unit='px'
-          />
+          <div style={P.hint}>La posizione si regola dalla sezione “Posizione elementi”.</div>
         </>}
       </div>}
 
 <Acc id='seclabel' label='🏷 Etichetta sezione'/>
       {openSec==='seclabel' && <div>
         <label style={P.lbl}>Testo</label><Inp value={cfg.sectionLabelText} onChange={v=>set('sectionLabelText',v)}/>
-        <label style={P.lbl}>Colore</label><ColInp value={cfg.sectionLabelColor} onChange={v=>set('sectionLabelColor',v)}/>
-        <div style={P.row2}>
-          <div style={{ minWidth:0 }}><label style={P.lbl}>Dim.</label><NumInp value={cfg.sectionLabelSize} onChange={v=>set('sectionLabelSize',v)} min={8} max={20} unit='px'/></div>
-          <div style={{ minWidth:0 }}><label style={P.lbl}>Spaziatura</label><NumInp value={cfg.sectionLabelSpacing} onChange={v=>set('sectionLabelSpacing',v)} min={0} max={10} step={0.5} unit='px'/></div>
-        </div>
+        <TextStyleControls cfg={cfg} set={set} title='Etichetta' fontKey='sectionLabelFont' sizeKey='sectionLabelSize' colorKey='sectionLabelColor' weightKey='sectionLabelWeight' italicKey='sectionLabelItalic' letterSpacingKey='sectionLabelSpacing' uppercaseKey='sectionLabelUppercase' minSize={8} maxSize={22}/>
       </div>}
 
       {/* ═══ LAYOUT CARDS ═══ */}
@@ -809,20 +880,20 @@ export default function Setting(props: AllWidgetSettingProps<IMConfig>) {
       {/* ═══ TESTI CARDS ═══ */}
       <Acc id='cardtext' label='🔤 Testi cards (globale)'/>
       {openSec==='cardtext' && <div>
-        <label style={P.lbl}>Font titolo</label>
-        <Sel value={cfg.cardLabelFont} onChange={v=>set('cardLabelFont',v)} options={FONTS}/>
-        <div style={P.row2}>
-          <div><label style={P.lbl}>Dimensione titolo</label><NumInp value={cfg.cardLabelSize} onChange={v=>set('cardLabelSize',v)} min={10} max={32} unit='px'/></div>
-          <div><label style={P.lbl}>Peso titolo</label><Sel value={String(cfg.cardLabelWeight)} onChange={v=>set('cardLabelWeight',Number(v))} options={WEIGHTS}/></div>
-        </div>
-        <label style={P.lbl}>Dimensione descrizione</label>
-        <NumInp value={cfg.cardDescSize} onChange={v=>set('cardDescSize',v)} min={9} max={20} unit='px'/>
+        <TextStyleControls cfg={cfg} set={set} title='Titolo card' fontKey='cardLabelFont' sizeKey='cardLabelSize' colorKey='cardLabelColor' weightKey='cardLabelWeight' italicKey='cardLabelItalic' minSize={10} maxSize={36}/>
+        <label style={P.lbl}>Colore titolo hover</label>
+        <ColInp value={cfg.cardLabelHoverColor??'#ffffff'} onChange={v=>set('cardLabelHoverColor',v)}/>
+
+        <TextStyleControls cfg={cfg} set={set} title='Descrizione card' fontKey='cardDescFont' sizeKey='cardDescSize' colorKey='cardDescColor' weightKey='cardDescWeight' italicKey='cardDescItalic' lineHeightKey='cardDescLineHeight' minSize={8} maxSize={24}/>
+        <label style={P.lbl}>Colore descrizione hover</label>
+        <ColInp value={cfg.cardDescHoverColor??'rgba(255,255,255,0.80)'} onChange={v=>set('cardDescHoverColor',v)}/>
+
         <label style={P.lbl}>Testo pulsante CTA</label>
         <Inp value={cfg.cardCtaText} onChange={v=>set('cardCtaText',v)}/>
-        <div style={P.row2}>
-          <div><label style={P.lbl}>Dimensione CTA</label><NumInp value={cfg.cardCtaSize} onChange={v=>set('cardCtaSize',v)} min={8} max={18} unit='px'/></div>
-          <div><label style={P.lbl}>Spaziatura CTA</label><NumInp value={cfg.cardCtaSpacing} onChange={v=>set('cardCtaSpacing',v)} min={0} max={8} step={0.5} unit='px'/></div>
-        </div>
+        <TextStyleControls cfg={cfg} set={set} title='CTA card' fontKey='cardCtaFont' sizeKey='cardCtaSize' colorKey='cardCtaColor' weightKey='cardCtaWeight' italicKey='cardCtaItalic' letterSpacingKey='cardCtaSpacing' minSize={8} maxSize={20}/>
+        <label style={P.lbl}>Colore CTA hover</label>
+        <ColInp value={String(cfg.cardCtaHoverColor??'')} onChange={v=>set('cardCtaHoverColor',v)}/>
+        <div style={P.hint}>Vuoto = usa il colore accento della singola card.</div>
       </div>}
 
       {/* ═══ CARDS SINGOLE ═══ */}
@@ -980,17 +1051,7 @@ export default function Setting(props: AllWidgetSettingProps<IMConfig>) {
         {cfg.showFooter && <>
           <label style={P.lbl}>Testo sinistro</label><Inp value={cfg.footerLeft} onChange={v=>set('footerLeft',v)} placeholder="usa {year} per l'anno"/>
           <label style={P.lbl}>Testo destro</label><Inp value={cfg.footerRight} onChange={v=>set('footerRight',v)}/>
-          <ColorNumRow
-            colorLabel='Colore'
-            colorValue={cfg.footerColor}
-            onColorChange={v=>set('footerColor',v)}
-            numLabel='Dimensione'
-            numValue={cfg.footerSize}
-            onNumChange={v=>set('footerSize',v)}
-            min={8}
-            max={16}
-            unit='px'
-          />
+          <TextStyleControls cfg={cfg} set={set} title='Footer' fontKey='footerFont' sizeKey='footerSize' colorKey='footerColor' weightKey='footerWeight' italicKey='footerItalic' minSize={8} maxSize={18}/>
         </>}
       </div>}
 

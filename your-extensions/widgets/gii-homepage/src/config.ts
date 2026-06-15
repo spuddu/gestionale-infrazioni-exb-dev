@@ -20,13 +20,27 @@ export interface Config {
   circleOpacity: number; circleColor: string
   circleGradient: boolean; circleColorEnd: string
 
-    // ── Orologio ──
+  // ── Orologio ──
   showClock: boolean; clockColor: string; clockSize: number
+  clockFont: string; clockWeight: number; clockItalic: boolean; clockLetterSpacing: number
   dateColor: string; dateSize: number
+  dateFont: string; dateWeight: number; dateItalic: boolean; dateLetterSpacing: number
+
+  // ── Profilo organizzativo ──
+  showOrgContext: boolean
+  orgContextColor: string
+  orgContextSize: number
+  orgContextFont: string
+  orgContextWeight: number
+  orgContextItalic: boolean
+  orgContextLetterSpacing: number
+  orgContextAlign: 'left' | 'center' | 'right'
 
 // ── Etichetta sezione ──
   sectionLabelText: string; sectionLabelColor: string
   sectionLabelSize: number; sectionLabelSpacing: number
+  sectionLabelFont: string; sectionLabelWeight: number; sectionLabelItalic: boolean
+  sectionLabelUppercase: boolean
 
   // ── Layout cards ──
   cardsGap: number; cardMinWidth: number
@@ -34,14 +48,21 @@ export interface Config {
 
   // ── Testi cards ──
   cardLabelFont: string; cardLabelSize: number; cardLabelWeight: number
+  cardLabelColor: string; cardLabelHoverColor: string; cardLabelItalic: boolean
   cardDescSize: number; cardCtaText: string; cardCtaSize: number; cardCtaSpacing: number
+  cardDescFont: string; cardDescWeight: number; cardDescItalic: boolean
+  cardDescColor: string; cardDescHoverColor: string; cardDescLineHeight: number
+  cardCtaFont: string; cardCtaWeight: number; cardCtaItalic: boolean
+  cardCtaColor: string; cardCtaHoverColor: string
 
   // ── Footer ──
   showFooter: boolean; footerLeft: string; footerRight: string
   footerColor: string; footerSize: number
+  footerFont: string; footerWeight: number; footerItalic: boolean
 
   // ── Offset posizione ──
   offsetClock: GroupOffset   // orologio + data
+  offsetOrgContext: GroupOffset // profilo organizzativo
   offsetCards: GroupOffset   // etichetta + cards
 
   cards: CardConfig[]
@@ -70,22 +91,43 @@ export const defaultConfig: Config = {
   circleBaseSize: 700,
 
   showClock: true, clockColor: '#ffffff', clockSize: 22,
+  clockFont: "'Crimson Pro', Georgia, serif", clockWeight: 300, clockItalic: false, clockLetterSpacing: -0.5,
   dateColor: 'rgba(147,197,253,0.7)', dateSize: 11.5,
+  dateFont: "'Source Sans 3', 'Segoe UI', sans-serif", dateWeight: 400, dateItalic: false, dateLetterSpacing: 0,
+
+  showOrgContext: true,
+  orgContextColor: 'rgba(147,197,253,0.55)',
+  orgContextSize: 10.5,
+  orgContextFont: "'Source Sans 3', 'Segoe UI', sans-serif",
+  orgContextWeight: 700,
+  orgContextItalic: false,
+  orgContextLetterSpacing: 1.2,
+  orgContextAlign: 'left',
 
   sectionLabelText: 'Accesso rapido',
   sectionLabelColor: 'rgba(147,197,253,0.55)', sectionLabelSize: 11, sectionLabelSpacing: 2.5,
+  sectionLabelFont: "'Source Sans 3', 'Segoe UI', sans-serif", sectionLabelWeight: 700, sectionLabelItalic: false,
+  sectionLabelUppercase: true,
 
   cardsGap: 16, cardMinWidth: 200, cardBorderRadius: 16, cardPadding: 28,
 
   cardLabelFont: "'Crimson Pro', Georgia, serif",
-  cardLabelSize: 18, cardLabelWeight: 600, cardDescSize: 12.5,
+  cardLabelSize: 18, cardLabelWeight: 600,
+  cardLabelColor: 'rgba(255,255,255,0.90)', cardLabelHoverColor: '#ffffff', cardLabelItalic: false,
+  cardDescSize: 12.5,
+  cardDescFont: "'Source Sans 3', 'Segoe UI', sans-serif", cardDescWeight: 400, cardDescItalic: false,
+  cardDescColor: 'rgba(255,255,255,0.50)', cardDescHoverColor: 'rgba(255,255,255,0.80)', cardDescLineHeight: 1.55,
   cardCtaText: 'Accedi', cardCtaSize: 11, cardCtaSpacing: 1.5,
+  cardCtaFont: "'Source Sans 3', 'Segoe UI', sans-serif", cardCtaWeight: 700, cardCtaItalic: false,
+  cardCtaColor: 'rgba(255,255,255,0.25)', cardCtaHoverColor: '',
 
   showFooter: true,
   footerLeft: 'GII v1.0 · CBSM © {year}', footerRight: 'ArcGIS Experience Builder 1.19',
   footerColor: 'rgba(255,255,255,0.20)', footerSize: 11,
+  footerFont: "'Source Sans 3', 'Segoe UI', sans-serif", footerWeight: 400, footerItalic: false,
 
   offsetClock: Z,
+  offsetOrgContext: Z,
   offsetCards: Z,
 
   cards: DEFAULT_CARDS,

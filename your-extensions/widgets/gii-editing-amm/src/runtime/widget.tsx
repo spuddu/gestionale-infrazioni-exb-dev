@@ -140,7 +140,7 @@ const ADMIN_FIELDS: AdminField[] = [
   { group: 'trasgressore', name: 'codice_fiscale', label: 'Codice fiscale', kind: 'text' },
   { group: 'trasgressore', name: 'ragione_sociale', label: 'Ragione sociale', kind: 'text', full: true },
   { group: 'trasgressore', name: 'piva', label: 'P. IVA', kind: 'text' },
-  { group: 'trasgressore', name: 'via', label: 'Via/P.zza', kind: 'text' },
+  { group: 'trasgressore', name: 'via', label: 'Via/Piazza/Località', kind: 'text' },
   { group: 'trasgressore', name: 'civico', label: 'Civico', kind: 'text' },
   { group: 'trasgressore', name: 'comune', label: 'Comune', kind: 'text' },
   { group: 'trasgressore', name: 'citta', label: 'Comune', kind: 'text' },
@@ -3408,6 +3408,8 @@ function TrasgressoreAmmSection (props: { data: Record<string, any>, fields: Lay
   const ragioneSociale = String(pickAttrCI(d, ['ragione_sociale']) || '').trim()
   const piva = String(pickAttrCI(d, ['piva', 'partita_iva']) || '').trim()
   const isPg = rawTipo.includes('GIUR') || rawTipo === 'PG' || !!ragioneSociale || !!piva
+  const mainAddressTitle = isPg ? 'Sede legale' : 'Residenza'
+  const mainAddressRef = isPg ? 'la sede legale' : 'la residenza'
   const st = useAdminStyle()
 
   const mk = (name: string, label: string, kind: AdminFieldKind = 'text', full = false): AdminField => ({ group: 'trasgressore', name, label, kind, full })
@@ -3426,22 +3428,28 @@ function TrasgressoreAmmSection (props: { data: Record<string, any>, fields: Lay
   const valueStyle: React.CSSProperties = {
     color: st.formFieldColor || '#0f172a',
     fontSize: Number(st.formFieldFontSize ?? 15),
-    fontWeight: 500,
-    lineHeight: 1.35,
-    minHeight: 22,
+    fontWeight: 400,
+    lineHeight: 1.2,
+    minHeight: 0,
     overflowWrap: 'anywhere',
     whiteSpace: 'pre-wrap'
   }
+  const fieldHeight = Math.max(24, Number(st.formFieldHeight ?? 32) || 32)
   const valueBoxStyle: React.CSSProperties = {
-    border: `1px solid ${st.formFieldBorderColor || '#bfcede'}`,
-    background: '#ffffff',
+    border: `${Number(st.formFieldBorderWidth ?? 1)}px solid ${st.formFieldBorderColor || '#bfcede'}`,
+    background: st.formFieldBg || '#f8fbff',
     borderRadius: Number(st.formFieldBorderRadius ?? 7),
-    padding: '7px 9px',
+    padding: `0 ${Number(st.formFieldPaddingX ?? 9)}px`,
+    minHeight: fieldHeight,
     minWidth: 0,
-    boxSizing: 'border-box'
+    boxSizing: 'border-box',
+    display: 'flex',
+    alignItems: 'center'
   }
   const noteBoxStyle: React.CSSProperties = {
     ...valueBoxStyle,
+    padding: `6px ${Number(st.formFieldPaddingX ?? 9)}px`,
+    alignItems: 'flex-start',
     minHeight: 220,
     alignSelf: 'stretch'
   }
@@ -3496,7 +3504,7 @@ function TrasgressoreAmmSection (props: { data: Record<string, any>, fields: Lay
   ]
 
   const indirizzoRows = [
-    renderRow('indirizzo-1', '4fr 1fr', [existingField(['via'], 'Via/P.zza'), existingField(['civico', 'numero_civico'], 'N. civico')]),
+    renderRow('indirizzo-1', '4fr 1fr', [existingField(['via'], 'Via/Piazza/Località'), existingField(['civico', 'numero_civico'], 'N. civico')]),
     renderRow('indirizzo-2', '2fr 0.8fr 1fr 1.4fr', [existingField(['citta', 'comune'], 'Città'), existingField(['provincia'], 'Provincia'), existingField(['cap'], 'CAP'), existingField(['stato'], 'Stato')]),
     renderRow('indirizzo-3', '1fr 1fr 1fr 1fr', [existingField(['telefono'], 'Telefono'), existingField(['cellulare'], 'Cellulare'), existingField(['email', 'e_mail'], 'E-mail'), existingField(['pec'], 'PEC')])
   ]
@@ -3504,15 +3512,15 @@ function TrasgressoreAmmSection (props: { data: Record<string, any>, fields: Lay
   const domRaw = pickAttrCI(d, ['dom_notifica_uguale'])
   const domicilioCoincide = domRaw == null || domRaw === '' || String(domRaw) === '1' || String(domRaw).toLowerCase() === 'si' || String(domRaw).toLowerCase() === 'sì' || String(domRaw).toLowerCase() === 'true'
   const domicilioRows = [
-    renderRow('dom-0', '1fr 2fr', [existingField(['dom_notifica_uguale'], 'Coincide con residenza/sede legale', 'domain'), null])
+    renderRow('dom-0', '1fr 2fr', [existingField(['dom_notifica_uguale'], `Coincide con ${mainAddressRef}`, 'domain'), null])
   ]
   if (!domicilioCoincide) {
     domicilioRows.push(
-      renderRow('dom-1', '4fr 1fr', [existingField(['dom_notifica_via'], 'Via/P.zza'), existingField(['dom_notifica_civico'], 'N. civico')]),
+      renderRow('dom-1', '4fr 1fr', [existingField(['dom_notifica_via'], 'Via/Piazza/Località'), existingField(['dom_notifica_civico'], 'N. civico')]),
       renderRow('dom-2', '2fr 0.8fr 1fr 1.4fr', [existingField(['dom_notifica_citta'], 'Città'), existingField(['dom_notifica_provincia'], 'Provincia'), existingField(['dom_notifica_cap'], 'CAP'), existingField(['dom_notifica_stato'], 'Stato')])
     )
   } else {
-    domicilioRows.push(<InfoBox key='dom-info'>Il domicilio per le notifiche coincide con la residenza/sede legale.</InfoBox>)
+    domicilioRows.push(<InfoBox key='dom-info'>Il domicilio per le notifiche coincide con {mainAddressRef}.</InfoBox>)
   }
 
   const rlDomRaw = pickAttrCI(d, ['rl_dom_notifica'])
@@ -3525,7 +3533,7 @@ function TrasgressoreAmmSection (props: { data: Record<string, any>, fields: Lay
     )
     if (rlDomPresente) {
       rappresentanteRows.push(
-        renderRow('rl-3', '4fr 1fr', [existingField(['rl_dom_via'], 'Via/P.zza'), existingField(['rl_dom_civico'], 'N. civico')]),
+        renderRow('rl-3', '4fr 1fr', [existingField(['rl_dom_via'], 'Via/Piazza/Località'), existingField(['rl_dom_civico'], 'N. civico')]),
         renderRow('rl-4', '2fr 0.8fr 1fr 1.4fr', [existingField(['rl_dom_citta'], 'Città'), existingField(['rl_dom_provincia'], 'Provincia'), existingField(['rl_dom_cap'], 'CAP'), existingField(['rl_dom_stato'], 'Stato')])
       )
     }
@@ -3541,7 +3549,7 @@ function TrasgressoreAmmSection (props: { data: Record<string, any>, fields: Lay
   const leftColumn = (
     <div style={{ display: 'grid', gap: 12, minWidth: 0 }}>
       {renderCardRows('Trasgressore', trasgressoreRows, 'Campi identificativi del trasgressore non disponibili nella fonte dati.')}
-      {renderCardRows('Indirizzo / Sede legale', indirizzoRows, 'Dati di residenza/sede non disponibili nella fonte dati.')}
+      {renderCardRows(mainAddressTitle, indirizzoRows, 'Dati di residenza/sede non disponibili nella fonte dati.')}
       {renderCardRows('Domicilio per le notifiche', domicilioRows, 'Dati del domicilio per le notifiche non disponibili nella fonte dati.')}
       {isPg && renderCardRows('Rappresentante legale', rappresentanteRows, 'Dati del rappresentante legale non disponibili nella fonte dati.')}
     </div>

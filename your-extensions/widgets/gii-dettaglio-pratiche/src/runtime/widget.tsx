@@ -29,6 +29,12 @@ function normalizeRuoloCod (v: any): string {
   if (Number.isFinite(n) && RUOLO_COD_FROM_NUM[n]) return RUOLO_COD_FROM_NUM[n]
   if (s === 'RI_AMM') return 'RI'
   if (s === 'TI_AMM') return 'TI'
+  if (s === 'CAPO_SETTORE' || s.includes('RESPONSABILE_DI_ZONA')) return 'RZ'
+  if (s.includes('TECNICO_RILEVATORE')) return 'TR'
+  if (s.includes('TECNICO_ISTRUTTORE')) return 'TI'
+  if (s.includes('RESPONSABILE_ISTRUTTORIA')) return 'RI'
+  if (s.includes('DIRETTORE')) return 'DT'
+  if (s.includes('AMMINISTRATORE')) return 'ADMIN'
   return RUOLO_NUM[s] != null ? s : s
 }
 
@@ -2174,7 +2180,11 @@ function MapTabContent (props: {
 
 
 type IterUtenteEntry = {
+  username: string
   fullName: string
+  ruoloCod: string
+  areaCod: string
+  settoreCod: string
 }
 
 let _iterUtentiMapCache: Map<string, IterUtenteEntry> | null = null
@@ -2208,6 +2218,33 @@ function resolveIterPersonName (raw: any, utentiMap?: Map<string, IterUtenteEntr
   const fullName = String(entry?.fullName || '').trim()
   if (fullName) return fullName
   return isLikelyTechnicalUsername(text) ? '' : text
+}
+
+function findIterRecipientNameByRole (roleRaw: any, areaRaw: any, settoreRaw: any, utentiMap?: Map<string, IterUtenteEntry> | null): string {
+  if (!utentiMap || utentiMap.size === 0) return ''
+
+  const role = normalizeRuoloCod(roleRaw)
+  if (!role) return ''
+
+  const area = normalizeAreaCod(areaRaw)
+  const settore = normalizeSettoreCod(settoreRaw)
+  const matches: string[] = []
+
+  utentiMap.forEach(entry => {
+    if (!entry) return
+    if (normalizeRuoloCod(entry.ruoloCod) !== role) return
+
+    const entryArea = normalizeAreaCod(entry.areaCod)
+    const entrySettore = normalizeSettoreCod(entry.settoreCod)
+
+    if (area && entryArea && entryArea !== area) return
+    if ((role === 'TR' || role === 'TI' || role === 'RZ') && settore && entrySettore && entrySettore !== settore) return
+
+    const label = String(entry.fullName || entry.username || '').trim()
+    if (label && !matches.includes(label)) matches.push(label)
+  })
+
+  return matches.length === 1 ? matches[0] : ''
 }
 
 function formatIterQualificaLabel (raw: any): string {
@@ -2275,6 +2312,23 @@ function formatEventoFallback (code: string): string {
 function formatEvento (code: string): string {
   if (!code) return '—'
   return EVENTO_LABELS[code] || formatEventoFallback(code)
+}
+
+function formatCycleTitleEvento (c: CicloRecord, cycleLabelNumber: number): string {
+  const apertura = String(c?.evento_apertura || '').trim().toUpperCase()
+  const chiusura = String(c?.evento_chiusura || '').trim().toUpperCase()
+  const ruolo = normalizeRuoloCod(c?.ruolo_competente)
+
+  if (
+    cycleLabelNumber === 1 &&
+    apertura === 'CREAZIONE' &&
+    chiusura === 'ISTRUTTORIA_TRASMESSA' &&
+    (ruolo === 'TR' || ruolo === 'TI')
+  ) {
+    return 'Nuova rilevazione trasmessa'
+  }
+
+  return formatEvento(c.evento_chiusura || c.evento_apertura)
 }
 
 function cleanIterNoteForDisplay (raw: any): string {
@@ -2559,7 +2613,10 @@ function CicliTimeline (props: { globalId: string; hasSel: boolean; sortDir: 'as
         const userFields = fl?.fields || []
         const availableFields = normalizeLogFieldNameSet(userFields)
         const outFields = pickLogOutFields(availableFields, [
-          'username', 'full_name', 'nome', 'cognome', 'nome_completo', 'nominativo'
+          'username', 'full_name', 'nome', 'cognome', 'nome_completo', 'nominativo',
+          'ruolo', 'ruolo_cod', 'ruoloCod',
+          'area', 'area_cod', 'areaCod',
+          'settore', 'settore_cod', 'settoreCod'
         ])
         const res = await fl.queryFeatures({
           where: '1=1',
@@ -2571,7 +2628,10 @@ function CicliTimeline (props: { globalId: string; hasSel: boolean; sortDir: 'as
           const a = f?.attributes || {}
           const username = String(pickAttrCI(a, ['username']) || '').trim()
           const fullName = buildIterFullNameFromAttrs(a)
-          if (username) map.set(normalizeIterUsernameKey(username), { fullName })
+          const ruoloCod = normalizeRuoloCod(pickAttrCI(a, ['ruolo_cod', 'ruoloCod', 'ruolo']))
+          const areaCod = normalizeAreaCod(pickAttrCI(a, ['area_cod', 'areaCod', 'area']))
+          const settoreCod = normalizeSettoreCod(pickAttrCI(a, ['settore_cod', 'settoreCod', 'settore']))
+          if (username) map.set(normalizeIterUsernameKey(username), { username, fullName, ruoloCod, areaCod, settoreCod })
         }
         _iterUtentiMapCache = map
         setUtentiMap(map)
@@ -2694,10 +2754,12 @@ function CicliTimeline (props: { globalId: string; hasSel: boolean; sortDir: 'as
         const qualificaLabel = formatIterQualificaLabel(c.ruolo_competente)
         const operatoreLabel = resolveIterPersonName(c.utente_operatore, utentiMap)
         const destinatarioQualificaLabel = formatIterQualificaLabel(c.ruolo_destinatario)
-        const destinatarioNomeLabel = resolveIterPersonName(c.utente_destinatario, utentiMap)
+        const destinatarioNomeLabel =
+          resolveIterPersonName(c.utente_destinatario, utentiMap) ||
+          findIterRecipientNameByRole(c.ruolo_destinatario, c.area, c.settore, utentiMap)
         const noteChiusuraLabel = cleanIterNoteForDisplay(c.note_chiusura)
         const cycleLabelNumber = props.sortDir === 'asc' ? (i + 1) : (displayCicli.length - i)
-        const cycleActionLabel = formatEvento(c.evento_chiusura || c.evento_apertura)
+        const cycleActionLabel = formatCycleTitleEvento(c, cycleLabelNumber)
 
         const campiList = parseModifiedFieldNames(c.campi_modificati)
           .map(campo => ({ raw: campo, alias: getFieldAliasForIter(campo, props.aliasMap) }))

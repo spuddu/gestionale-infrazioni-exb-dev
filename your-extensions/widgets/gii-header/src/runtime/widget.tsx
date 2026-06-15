@@ -10,7 +10,7 @@ const GII_UTENTI_URL = 'https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/res
 const RUOLO_LABEL: Record<number, string> = { 1:'TR', 2:'TI', 3:'RZ', 4:'RI', 5:'DT', 6:'DA', 7:'ADMIN' }
 const RUOLO_NUM: Record<string, number> = { TR:1, TI:2, RZ:3, RI:4, DT:5, DA:6, ADMIN:7 }
 const RUOLO_FULL:  Record<string, string> = {
-  TR:'Tecnico rilevatore', TI:'Tecnico istruttore', RZ:'Responsabile di zona',
+  TR:'Tecnico rilevatore', TI:'Tecnico istruttore', RZ:'Capo Settore',
   RI:'Responsabile istruttoria', DT:'Direttore d\'area', DA:'Direttore Area AA. GG. e P.F.', ADMIN:'Amministratore'
 }
 const PROFILO_FULL: Record<string, string> = {
@@ -295,11 +295,6 @@ function getSettoreLabel(user: GiiUserRole | null, compact = false): string {
   return SETTORE_FULL[code] || code
 }
 
-function getUfficioLabel(user: GiiUserRole | null): string {
-  if (!user || user.ufficio == null) return ''
-  return String(user.ufficioLabel || UFFICIO_LABEL[user.ufficio] || user.ufficio).trim()
-}
-
 function getOrganizationalHierarchy(user: GiiUserRole | null, compact = false): string[] {
   if (!user || user.isWorkflowAdmin) return []
 
@@ -320,20 +315,6 @@ function getOrganizationalHierarchy(user: GiiUserRole | null, compact = false): 
   }
 
   return area ? [`Area ${area}`] : []
-}
-
-function getOrganizationalContext(user: GiiUserRole | null, compact = true): string[] {
-  if (!user || user.isWorkflowAdmin) return []
-
-  const area = getAreaLabel(user)
-  const settore = getSettoreLabel(user, compact)
-  const ufficio = getUfficioLabel(user)
-
-  const parts: string[] = []
-  if (area) parts.push(`Area ${area}`)
-  if (settore) parts.push(`Settore ${settore}`)
-  if (ufficio) parts.push(`Ufficio di ${ufficio}`)
-  return parts
 }
 
 function makeInitials(name: string): string {
@@ -946,8 +927,8 @@ function roleLabelForBody (value: string): string {
   if (n.includes('RESPONSABILE ISTRUTTORIA AMMINISTRATIVA')) return 'Responsabile istruttoria amministrativa'
   if (n.includes('RESPONSABILE ISTRUTTORIA')) return 'Responsabile istruttoria'
   if (n.includes('CAPO SETTORE')) return 'Capo Settore'
-  if (n.includes('RESPONSABILE DI ZONA')) return 'Responsabile di zona'
-  if (n.includes('DIRETTORE AREA AMMINISTRATIVA') || n.includes('DIRETTORE AREA AA')) return 'Direttore Area Amministrativa'
+  if (n.includes('RESPONSABILE DI ZONA')) return 'Capo Settore'
+  if (n.includes('DIRETTORE AREA AMMINISTRATIVA') || n.includes('DIRETTORE AREA AA')) return 'Direttore Area AA. GG. e P.F.'
   if (n.includes('DIRETTORE D’AREA') || n.includes("DIRETTORE D'AREA")) return 'Direttore d’Area'
 
   const tag = raw.split(/\s+-\s+/)[0].trim().toUpperCase().replace(/_/g, '-')
@@ -956,8 +937,8 @@ function roleLabelForBody (value: string): string {
   if (tag === 'TI' || tag.startsWith('TI-')) return 'tecnico istruttore'
   if (tag === 'RI-AMM') return 'Responsabile istruttoria amministrativa'
   if (tag === 'RI' || tag.startsWith('RI-')) return 'Responsabile istruttoria'
-  if (tag === 'RZ' || tag.startsWith('RZ-')) return 'Responsabile di zona'
-  if (tag === 'DA' || tag === 'DIR-AMM') return 'Direttore Area Amministrativa'
+  if (tag === 'RZ' || tag.startsWith('RZ-')) return 'Capo Settore'
+  if (tag === 'DA' || tag === 'DIR-AMM') return 'Direttore Area AA. GG. e P.F.'
   if (tag === 'DT' || tag.startsWith('DT-') || tag === 'DIR' || tag.startsWith('DIR-')) return 'Direttore d’Area'
 
   return raw
@@ -1276,9 +1257,9 @@ function alertSenderFallbackFromActivitySubtype (alert: GiiAlertItem): string {
   if (subtype.startsWith('DT_')) return 'Direttore d’Area'
   if (subtype.startsWith('RI_AMM_')) return 'Responsabile Istruttoria amministrativa'
   if (subtype.startsWith('RI_')) return 'Responsabile Istruttoria'
-  if (subtype.startsWith('RZ_')) return 'Responsabile di Zona'
+  if (subtype.startsWith('RZ_')) return 'Capo Settore'
   if (subtype.startsWith('TI_AMM_')) return 'Tecnico Istruttore amministrativo'
-  if (subtype.startsWith('DA_')) return 'Direttore Area Amministrativa'
+  if (subtype.startsWith('DA_')) return 'Direttore Area AA. GG. e P.F.'
   if (subtype.startsWith('TI_')) return 'Tecnico istruttore'
   if (subtype.startsWith('TR_')) return 'Tecnico rilevatore'
   return ''
@@ -1290,7 +1271,7 @@ function alertSenderFallbackFromTitle (alert: GiiAlertItem): string {
   if (title.includes('TECNICO ISTRUTTORE AMMINISTRATIVO')) return 'Tecnico Istruttore amministrativo'
   if (title.includes('RESPONSABILE ISTRUTTORIA AMMINISTRATIVA')) return 'Responsabile Istruttoria amministrativa'
   if (title.includes('RESPONSABILE ISTRUTTORIA')) return 'Responsabile Istruttoria'
-  if (title.includes('RESPONSABILE DI ZONA')) return 'Responsabile di Zona'
+  if (title.includes('RESPONSABILE DI ZONA')) return 'Capo Settore'
   return ''
 }
 
@@ -1300,12 +1281,12 @@ function alertRoleLabelFromGiiActor (value: string): string {
   if (looksLikeGiiRoleLabel(raw)) return raw
   const tag = raw.split(/\s+-\s+/)[0].trim().toUpperCase().replace(/_/g, '-').replace(/\s+/g, '-')
 
-  if (tag === 'DIR-AMM' || tag === 'DA') return 'Direttore Area Amministrativa'
+  if (tag === 'DIR-AMM' || tag === 'DA') return 'Direttore Area AA. GG. e P.F.'
   if (tag === 'RI-AMM') return 'Responsabile Istruttoria amministrativa'
   if (tag === 'TI-AMM') return 'Tecnico Istruttore amministrativo'
   if (tag === 'DIR' || tag.startsWith('DIR-') || tag === 'DT' || tag.startsWith('DT-')) return 'Direttore d’Area'
   if (tag === 'RI' || /^RI-(AGR|TEC|D\d|DS|CR)$/.test(tag)) return 'Responsabile Istruttoria'
-  if (tag === 'RZ' || tag.startsWith('RZ-')) return 'Responsabile di Zona'
+  if (tag === 'RZ' || tag.startsWith('RZ-')) return 'Capo Settore'
   if (tag === 'TI' || tag.startsWith('TI-')) return 'Tecnico istruttore'
   if (tag === 'TR' || tag.startsWith('TR-')) return 'Tecnico rilevatore'
 
@@ -1346,7 +1327,7 @@ function alertSenderQualificaLine (alert: GiiAlertItem): string {
   else if (role === 'DT') label = 'Direttore d’Area'
   else if (role === 'TI_AMM') label = 'Tecnico istruttore amministrativo'
   else if (role === 'RI_AMM') label = 'Responsabile istruttoria amministrativa'
-  else if (role === 'DA') label = 'Direttore d’Area'
+  else if (role === 'DA') label = 'Direttore Area AA. GG. e P.F.'
 
   if (!label) {
     label = roleLabelForBody(
@@ -2556,7 +2537,11 @@ export default function Widget(props: Props) {
         user: alertUser,
         pageSize: 100
       }), 8000, 'Timeout caricamento attività correnti.')
-      return sortAlertsForPopup(await enrichAlertsWithActorFullNames(await enrichAlertsWithPracticeMeta(current.alerts, practiceLayerUrl)))
+      return sortAlertsForPopup(current.alerts || [])
+    }
+
+    const enrichAlertsForPopup = async (items: GiiAlertItem[]): Promise<GiiAlertItem[]> => {
+      return sortAlertsForPopup(await enrichAlertsWithActorFullNames(await enrichAlertsWithPracticeMeta(items, practiceLayerUrl)))
     }
 
     try {
@@ -2583,6 +2568,13 @@ export default function Widget(props: Props) {
     // aggiorna la lista una sola volta.
     ;(async () => {
       try {
+        let popupCurrentActivities = currentActivities
+        if (currentActivities.length > 0) {
+          popupCurrentActivities = await enrichAlertsForPopup(currentActivities)
+          setAlerts(popupCurrentActivities)
+          setAlertCounts(summarizeGiiAlerts(popupCurrentActivities))
+        }
+
         const res = await withGiiTimeout(queryGiiAlerts({
           practiceLayerUrl,
           archiveTableUrl,
@@ -2590,7 +2582,7 @@ export default function Widget(props: Props) {
           warningDays: Number(cfg.alertsWarningDays ?? 5)
         }), 25000, 'Timeout caricamento scadenze e anomalie.')
 
-        const dynamicAlerts = sortAlertsForPopup(await enrichAlertsWithActorFullNames(await enrichAlertsWithPracticeMeta(res.alerts || [], practiceLayerUrl)))
+        const dynamicAlerts = await enrichAlertsForPopup(res.alerts || [])
 
         // Stesso passaggio background usato per materializzare le nuove rilevazioni TR:
         // normalizziamo i testi arrivati da Survey senza bloccare la campanella.
@@ -2606,7 +2598,7 @@ export default function Widget(props: Props) {
           user
         })
 
-        const refreshedActivities = (materializedCount > 0 || normalizedCount > 0) ? await readCurrentActivities() : currentActivities
+        const refreshedActivities = (materializedCount > 0 || normalizedCount > 0) ? await enrichAlertsForPopup(await readCurrentActivities()) : popupCurrentActivities
         const finalAlerts = sortAlertsForPopup(mergeCurrentAndFallbackGiiAlerts(refreshedActivities, dynamicAlerts))
         setAlerts(finalAlerts)
         setAlertCounts(summarizeGiiAlerts(finalAlerts))
@@ -2774,9 +2766,7 @@ export default function Widget(props: Props) {
     return (o.x || o.y) ? { position:'relative', left:o.x, top:o.y } : {}
   }
 
-  const orgContextParts = React.useMemo(() => getOrganizationalContext(user, true), [user])
   const accountHierarchyParts = React.useMemo(() => getOrganizationalHierarchy(user, false), [user])
-  const orgContextText = orgContextParts.join(' · ')
   const accountHierarchy = accountHierarchyParts.join(' · ')
   const displayRoleCode = user?.profiloCod || user?.ruoloLabel || ''
   const displayRoleLabel = user?.profiloLabel || user?.ruoloFull || ''
@@ -2843,21 +2833,6 @@ export default function Widget(props: Props) {
             fontFamily:cfg.titleFont, fontSize:cfg.titleSize, fontWeight:cfg.titleWeight,
             color:cfg.titleColor, letterSpacing:cfg.titleLetterSpacing ?? -0.5, lineHeight:1.1
           }}>{cfg.title}</div>
-          {orgContextText && (
-            <div title={orgContextText} style={{
-              marginTop:2,
-              fontFamily:cfg.titleFont,
-              fontSize:Math.max(10, Number(cfg.titleSize || 18) * 0.48),
-              fontWeight:500,
-              color:'rgba(226,232,240,0.78)',
-              letterSpacing:0.1,
-              lineHeight:1.15,
-              whiteSpace:'nowrap',
-              overflow:'hidden',
-              textOverflow:'ellipsis',
-              maxWidth:'100%'
-            }}>{orgContextText}</div>
-          )}
         </div>
       </div>
 

@@ -6461,16 +6461,6 @@ export default function Widget(props: Props) {
                 flexWrap: "nowrap",
               }}
             >
-              <span
-                style={{
-                  fontSize: 11,
-                  color: "#6b7280",
-                  marginRight: 4,
-                  flex: "0 0 auto",
-                }}
-              >
-                {`👤 ${labelNorm(getEffectiveRole(giiUser?.ruoloLabel ?? "", giiUser?.area))}`}
-              </span>
               <div
                 style={{
                   display: "flex",

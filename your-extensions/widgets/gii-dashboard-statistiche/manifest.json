@@ -1,0 +1,12 @@
+{
+  "name": "gii-dashboard-statistiche",
+  "label": "GII Dashboard statistiche",
+  "type": "widget",
+  "version": "1.0.0",
+  "exbVersion": "1.19.0",
+  "author": "CBSM",
+  "description": "Dashboard statistica moderna per pratiche, uffici e tipologie di infrazione.",
+  "dependency": ["jimu-arcgis"],
+  "translatedLocales": ["it"],
+  "defaultSize": { "width": 1200, "height": 720 }
+}

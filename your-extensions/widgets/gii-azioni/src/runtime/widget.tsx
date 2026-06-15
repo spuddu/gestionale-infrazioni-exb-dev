@@ -2544,12 +2544,12 @@ function ActionsPanel (props: {
     const rr = String(r || '').trim().toUpperCase()
     if (rr === 'TR') return 'Tecnico rilevatore'
     if (rr === 'TI') return 'Tecnico istruttore'
-    if (rr === 'RZ') return 'Responsabile di Zona'
+    if (rr === 'RZ') return 'Capo Settore'
     if (rr === 'RI') return 'Responsabile Istruttoria'
     if (rr === 'DT') return 'Direttore d’Area'
     if (rr === 'TI_AMM') return 'Tecnico Istruttore amministrativo'
     if (rr === 'RI_AMM') return 'Responsabile Istruttoria amministrativa'
-    if (rr === 'DA') return 'Direttore Area Amministrativa'
+    if (rr === 'DA') return 'Direttore Area AA. GG. e P.F.'
     return rr || '—'
   }
 
@@ -3716,7 +3716,7 @@ function ActionsPanel (props: {
     if (!dest) return ''
     if (dest === 'RI_AMM') return 'Responsabile Istruttoria amministrativa'
     if (dest === 'TI_AMM') return 'Tecnico Istruttore amministrativo'
-    if (dest === 'DA') return 'Direttore dell’Area Amministrativa'
+    if (dest === 'DA') return 'Direttore Area AA. GG. e P.F.'
 
     const meta = getRoutingMetaForRole(dest, opts)
     const areaCode = normalizeAreaLabel(meta.area || getPracticeAreaForRouting())
@@ -3725,13 +3725,14 @@ function ActionsPanel (props: {
     if (dest === 'RI') return 'Responsabile Istruttoria'
     if (dest === 'TI') return 'Tecnico Istruttore'
     if (dest === 'DT') return areaName ? `Direttore dell’Area ${areaName}` : 'Direttore dell’Area Tecnica'
-    if (dest === 'RZ') return 'Responsabile di Zona'
+    if (dest === 'RZ') return 'Capo Settore'
     return dest.replace(/_/g, ' ')
   }
 
   const getRoleLabelForForward = (destRole: string): string => {
     const dest = String(destRole || '').trim().toUpperCase()
-    if (dest === 'DT' || dest === 'DA') return 'Direttore d’Area'
+    if (dest === 'DT') return 'Direttore d’Area'
+    if (dest === 'DA') return 'Direttore Area AA. GG. e P.F.'
     return getRoleLabelForMenu(dest)
   }
 

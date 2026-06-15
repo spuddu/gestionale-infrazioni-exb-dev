@@ -49,15 +49,12 @@ type Metric = {
 }
 
 type PeriodFilter = 'all' | '30' | '90' | '365'
-type DashboardTab = 'operativo' | 'statistiche'
 type ChartItem = { label: string; value: number }
 type TrendPoint = { label: string; value: number }
 
 type RecentSortKey = 'numeroRapporto' | 'comune' | 'fase' | 'lastUpdate'
 type SortDir = 'asc' | 'desc'
 type RecentSortRule = { key: RecentSortKey; dir: SortDir }
-type UfficioSortBy = 'label' | 'count'
-type InfrazioneSortBy = 'article' | 'count'
 
 const DEFAULT_RECENT_SORT_RULES: RecentSortRule[] = [{ key: 'lastUpdate', dir: 'desc' }]
 
@@ -558,165 +555,33 @@ function getAnalysisDateMs (d: any): number | null {
     getLastTouchMs(d)
 }
 
-const UFFICIO_LABEL_BY_ID: Record<number, string> = {
-  1: 'Cagliari',
-  2: 'Quartucciu (loc. Is Forreddus)',
-  3: 'Muravera',
-  4: 'Villaputzu',
-  5: 'San Sperate',
-  6: 'Serramanna (loc. Pimpisu)',
-  7: 'San Gavino Monreale',
-  8: 'Villacidro',
-  9: 'San Giovanni Suergiu (loc. Sa Carabia)',
-  10: 'Masainas',
-  11: 'Senorbì',
-  12: 'Iglesias (loc. Sa Stoia)',
-  13: 'Siliqua',
-  14: 'Villasor',
-  15: 'San Giovanni Suergiu (loc. Is Samis)'
-}
-
-const UFFICIO_CANONICAL_BY_KEY: Record<string, string> = {
-  cagliari: 'Cagliari',
-  quartucciu: 'Quartucciu (loc. Is Forreddus)',
-  'quartucciu loc is forreddus': 'Quartucciu (loc. Is Forreddus)',
-  muravera: 'Muravera',
-  villaputzu: 'Villaputzu',
-  'san sperate': 'San Sperate',
-  serramanna: 'Serramanna (loc. Pimpisu)',
-  'serramanna loc pimpisu': 'Serramanna (loc. Pimpisu)',
-  'san gavino monreale': 'San Gavino Monreale',
-  villacidro: 'Villacidro',
-  masainas: 'Masainas',
-  senorbi: 'Senorbì',
-  'senorbì': 'Senorbì',
-  iglesias: 'Iglesias (loc. Sa Stoia)',
-  'iglesias loc sa stoia': 'Iglesias (loc. Sa Stoia)',
-  siliqua: 'Siliqua',
-  villasor: 'Villasor'
-}
-
-function normalizeOfficeKey (value: any): string {
-  return String(value ?? '')
-    .trim()
-    .toLowerCase()
-    .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '')
-    .replace(/[().']/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim()
-}
-
-function normalizeOfficeText (value: any): string {
-  const raw = String(value ?? '').trim()
-  if (!raw || raw === '—') return ''
-  const numeric = Number(raw)
-  if (/^\d+$/.test(raw) && UFFICIO_LABEL_BY_ID[numeric]) return UFFICIO_LABEL_BY_ID[numeric]
-  return UFFICIO_CANONICAL_BY_KEY[normalizeOfficeKey(raw)] || raw
-}
-
 function getUfficioLabel (d: any): string {
-  const textValue = getFirst(d, [
-    'ufficio_zona', 'Ufficio_zona', 'UFFICIO_ZONA',
-    'ufficioZona', 'ufficio_di_zona', 'Ufficio di Zona di competenza',
+  const value = getFirst(d, [
     'ufficioLabel', 'ufficio_label', 'ufficio',
-    'ufficio_competente', 'ufficio_utente'
+    'ufficio_competente', 'ufficio_utente',
+    'settoreFull', 'settore_full', 'settore',
+    'settore_competente', 'settore_utente'
   ], '')
-  const labelFromText = normalizeOfficeText(textValue)
-  if (labelFromText) return labelFromText
-
-  const idValue = getFirst(d, [
-    'id_ufficio', 'Id_ufficio', 'ID_UFFICIO',
-    'ufficio_id', 'idUfficio', 'Codice ufficio'
-  ], '')
-  const id = Number(String(idValue).trim())
-  if (Number.isFinite(id) && UFFICIO_LABEL_BY_ID[Math.trunc(id)]) {
-    return UFFICIO_LABEL_BY_ID[Math.trunc(id)]
-  }
-
-  return 'Non indicato'
-}
-
-const INFRACTION_LABEL_BY_CODE: Record<string, string> = {
-  Art8: 'Art. 8 - Violazione servizio di reperibilità',
-  Art12: 'Art. 12 - Negato accesso ai fondi (al personale consortile)',
-  Art15: 'Art. 15 - Uso irriguo abusivo',
-  Art16: 'Art. 16 - Presentazione tardiva comunicazione di irrigazione',
-  Art17: 'Art. 17 - Presentazione tardiva comunicazione di variazione o rinuncia',
-  Art27: 'Art. 27 - Spreco d’acqua/uso negligente della risorsa idrica',
-  Art28: 'Art. 28 - Violazione prescrizioni del consorzio',
-  Art29: 'Art. 29 - Violazione termini restituzione attrezzature',
-  Art30: 'Art. 30 - Danneggiamento e/o perdita attrezzature',
-  Art31: 'Art. 31 - Mancata segnalazione guasti',
-  Art32: 'Art. 32 - Negato accesso ai fondi (al consorziato)',
-  Art33: 'Art. 33 - Inosservanza limiti temporali di prelievo',
-  Art34: 'Art. 34 - Interferenze',
-  Art35: 'Art. 35 - Manomissione reti di dispensa e allaccio di apparecchi di aspirazione all’idrante',
-  Art36: 'Art. 36 - Uso attrezzature non autorizzate',
-  Art37: 'Art. 37 - Uso sistemi di irrigazione incompatibili',
-  Art39: 'Art. 39 - Danni alle strutture irrigue'
-}
-
-const INFRACTION_FIELD_BY_CODE: Record<string, string> = {
-  Art8: 'v_art08',
-  Art12: 'v_art12',
-  Art27: 'v_art27',
-  Art28: 'v_art28',
-  Art29: 'v_art29',
-  Art30: 'v_art30',
-  Art31: 'v_art31',
-  Art32: 'v_art32',
-  Art33: 'v_art33',
-  Art34: 'v_art34',
-  Art35: 'v_art35',
-  Art36: 'v_art36',
-  Art37: 'v_art37',
-  Art39: 'v_art39'
-}
-
-function isSelectedFlagValue (v: any): boolean {
-  if (v === true || v === 1) return true
-  const s = String(v ?? '').trim().toLowerCase()
-  return s === '1' || s === 'true' || s === 'si' || s === 'sì' || s === 'yes'
-}
-
-function parseMultiValue (raw: any): string[] {
-  return String(raw ?? '')
-    .split(/[;,\s]+/)
-    .map(v => v.trim())
-    .filter(Boolean)
-}
-
-function normalizeInfractionCode (value: any): string {
-  const raw = String(value ?? '').trim()
-  if (!raw) return ''
-  const match = raw.match(/(?:art(?:icolo)?\.?\s*)?0?(\d{1,2})(?:\.\d+)?/i)
-  if (!match) return ''
-  const n = Number(match[1])
-  return Number.isFinite(n) ? `Art${n}` : ''
-}
-
-function addInfractionLabel (set: Set<string>, code: string) {
-  const normalized = normalizeInfractionCode(code)
-  const label = INFRACTION_LABEL_BY_CODE[normalized]
-  if (label) set.add(label)
+  return value && value !== '—' ? value : 'Non indicato'
 }
 
 function addInfractionCode (set: Set<string>, value: any) {
   const raw = String(value ?? '').trim()
   if (!raw) return
-  parseMultiValue(raw.replace(/_/g, ' ')).forEach(part => addInfractionLabel(set, part))
+  const normalized = raw
+    .replace(/articolo/gi, 'art')
+    .replace(/art\./gi, 'art')
+    .replace(/_/g, ' ')
+  const matches = normalized.match(/(?:art\s*)?(15|16|17|30|41)\b/gi) || []
+  matches.forEach(m => {
+    const num = (m.match(/\d+/) || [''])[0]
+    if (num) set.add(`Art. ${num}`)
+  })
 }
 
 function getInfractionLabels (d: any): string[] {
   const set = new Set<string>()
   ;[
-    'norma15_parziale',
-    'norma15_totale',
-    'norma16_17',
-    'art17_tipo',
-    'norma_violata1',
-    'norma_violata2',
     'norma_violata3',
     'norma_violata',
     'articoli_violati',
@@ -725,87 +590,27 @@ function getInfractionLabels (d: any): string[] {
     'violazione_descrizione'
   ].forEach(name => addInfractionCode(set, d[name]))
 
-  Object.entries(INFRACTION_FIELD_BY_CODE).forEach(([code, field]) => {
+  ;[
+    ['v_art15', 'Art. 15'],
+    ['v_art16', 'Art. 16'],
+    ['v_art17', 'Art. 17'],
+    ['v_art30', 'Art. 30'],
+    ['v_art41', 'Art. 41']
+  ].forEach(([field, label]) => {
     const v = d[field] ?? d[String(field).toUpperCase()]
-    if (isSelectedFlagValue(v)) addInfractionLabel(set, code)
+    const selected = v === true || v === 1 || v === '1' || String(v ?? '').toLowerCase() === 'true'
+    if (selected) set.add(label)
   })
 
   return set.size ? Array.from(set) : ['Non classificata']
 }
 
-function recordHasInfraction (d: any, label: string): boolean {
-  const target = String(label || '').trim()
-  if (!target) return true
-  return getInfractionLabels(d).some(v => v === target)
-}
-
-function buildUfficioItems (records: DashRecord[]): ChartItem[] {
-  const map = new Map<string, number>()
-  for (const r of records) {
-    const k = getUfficioLabel(r)
-    map.set(k, (map.get(k) || 0) + 1)
-  }
-  return Array.from(map.entries()).map(([label, value]) => ({ label, value }))
-}
-
-function buildInfrazioneItems (records: DashRecord[]): ChartItem[] {
-  const map = new Map<string, number>()
-  for (const r of records) {
-    for (const label of getInfractionLabels(r)) map.set(label, (map.get(label) || 0) + 1)
-  }
-  return Array.from(map.entries()).map(([label, value]) => ({ label, value }))
-}
-
-function getInfractionArticleNumber (label: string): number | null {
-  const match = String(label || '').match(/Art\.\s*(\d{1,2})/i)
-  if (!match) return null
-  const n = Number(match[1])
-  return Number.isFinite(n) ? n : null
-}
-
-function sortUfficioItems (items: ChartItem[], sortBy: UfficioSortBy, dir: SortDir): ChartItem[] {
-  const direction = dir === 'asc' ? 1 : -1
-  return [...items].sort((a, b) => {
-    const cmp = sortBy === 'count'
-      ? (a.value - b.value || a.label.localeCompare(b.label, 'it', { sensitivity: 'base' }))
-      : a.label.localeCompare(b.label, 'it', { sensitivity: 'base' })
-    return cmp * direction
-  })
-}
-
-function sortInfrazioneItems (items: ChartItem[], sortBy: InfrazioneSortBy, dir: SortDir): ChartItem[] {
-  const direction = dir === 'asc' ? 1 : -1
-  return [...items].sort((a, b) => {
-    if (sortBy === 'count') {
-      return ((a.value - b.value) || a.label.localeCompare(b.label, 'it', { sensitivity: 'base' })) * direction
-    }
-    const aArt = getInfractionArticleNumber(a.label)
-    const bArt = getInfractionArticleNumber(b.label)
-    if (aArt === null && bArt !== null) return 1
-    if (aArt !== null && bArt === null) return -1
-    if (aArt !== null && bArt !== null && aArt !== bArt) return (aArt - bArt) * direction
-    return a.label.localeCompare(b.label, 'it', { sensitivity: 'base' }) * direction
-  })
-}
-
-function pad2 (n: number): string {
-  return String(n).padStart(2, '0')
-}
-
-function dayKey (d: Date): string {
-  return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`
-}
-
-function monthKey (d: Date): string {
-  return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}`
-}
-
-function buildMonthlyTrend (records: DashRecord[], months = 12, endDate = new Date()): TrendPoint[] {
-  const today = endDate
+function buildMonthlyTrend (records: DashRecord[], months = 12): TrendPoint[] {
+  const today = new Date()
   const buckets: Array<TrendPoint & { key: string }> = []
   for (let i = months - 1; i >= 0; i--) {
     const d = new Date(today.getFullYear(), today.getMonth() - i, 1)
-    const key = monthKey(d)
+    const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
     buckets.push({
       label: d.toLocaleDateString('it-IT', { month: 'short' }).replace('.', ''),
       value: 0,
@@ -818,60 +623,11 @@ function buildMonthlyTrend (records: DashRecord[], months = 12, endDate = new Da
     const ms = getAnalysisDateMs(r)
     if (!ms) continue
     const d = new Date(ms)
-    const key = monthKey(d)
+    const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
     const bucket = byKey.get(key)
     if (bucket) bucket.value += 1
   }
   return buckets.map(b => ({ label: b.label, value: b.value }))
-}
-
-function buildPeriodTrend (records: DashRecord[], period: PeriodFilter): TrendPoint[] {
-  if (period === '365') return buildMonthlyTrend(records, 12)
-
-  const now = new Date()
-  if (period === '30') {
-    const buckets: Array<TrendPoint & { key: string }> = []
-    const from = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 29)
-    for (let i = 0; i < 30; i++) {
-      const d = new Date(from.getFullYear(), from.getMonth(), from.getDate() + i)
-      buckets.push({ key: dayKey(d), label: d.toLocaleDateString('it-IT', { day: '2-digit', month: '2-digit' }), value: 0 })
-    }
-    const byKey = new Map<string, TrendPoint & { key: string }>()
-    buckets.forEach(b => byKey.set(b.key, b))
-    for (const r of records) {
-      const ms = getAnalysisDateMs(r)
-      if (!ms) continue
-      const bucket = byKey.get(dayKey(new Date(ms)))
-      if (bucket) bucket.value += 1
-    }
-    return buckets.map(b => ({ label: b.label, value: b.value }))
-  }
-
-  if (period === '90') {
-    const bucketDays = 7
-    const bucketCount = 13
-    const start = new Date(now.getFullYear(), now.getMonth(), now.getDate() - ((bucketCount * bucketDays) - 1))
-    const buckets: Array<TrendPoint & { from: number; to: number }> = []
-    for (let i = 0; i < bucketCount; i++) {
-      const from = new Date(start.getFullYear(), start.getMonth(), start.getDate() + (i * bucketDays))
-      const to = new Date(from.getFullYear(), from.getMonth(), from.getDate() + bucketDays)
-      buckets.push({ from: from.getTime(), to: to.getTime(), label: from.toLocaleDateString('it-IT', { day: '2-digit', month: '2-digit' }), value: 0 })
-    }
-    for (const r of records) {
-      const ms = getAnalysisDateMs(r)
-      if (!ms) continue
-      const bucket = buckets.find(b => ms >= b.from && ms < b.to)
-      if (bucket) bucket.value += 1
-    }
-    return buckets.map(b => ({ label: b.label, value: b.value }))
-  }
-
-  const dates = records.map(getAnalysisDateMs).filter((v): v is number => v !== null).sort((a, b) => a - b)
-  if (!dates.length) return buildMonthlyTrend(records, 12)
-  const first = new Date(dates[0])
-  const last = new Date(dates[dates.length - 1])
-  const monthSpan = Math.max(1, ((last.getFullYear() - first.getFullYear()) * 12) + last.getMonth() - first.getMonth() + 1)
-  return buildMonthlyTrend(records, Math.min(Math.max(monthSpan, 1), 24), last)
 }
 
 async function queryLayer (view: RuntimeDsView, where: string, pageSize: number): Promise<DashRecord[]> {
@@ -904,12 +660,10 @@ function CardShell (props: { cfg: any; title?: string; right?: React.ReactNode; 
       boxShadow: '0 18px 54px rgba(0,0,0,0.22), inset 0 1px 0 rgba(255,255,255,0.04)',
       backdropFilter: 'blur(10px)',
       overflow: 'hidden',
-      position: 'relative',
-      display: 'flex',
-      flexDirection: 'column'
+      position: 'relative'
     }}>
       {props.title && (
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, marginBottom: 14, flexShrink: 0 }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, marginBottom: 14 }}>
           <h3 style={{ margin: 0, fontSize: 13, fontWeight: 800, color: props.cfg.textColor, letterSpacing: 0.2 }}>{props.title}</h3>
           {props.right}
         </div>
@@ -954,113 +708,6 @@ function HorizontalBars (props: { title: string; items: ChartItem[]; total: numb
                 <div style={{ height: '100%', width: `${width}%`, borderRadius: 999, background: `linear-gradient(90deg, ${accent}, rgba(255,255,255,0.72))`, boxShadow: `0 0 18px ${accent}`, transition: 'width 260ms ease' }} />
               </div>
             </div>
-          )
-        })}
-      </div>
-    </CardShell>
-  )
-}
-
-function InteractiveRanking (props: {
-  title: string
-  subtitle: string
-  items: ChartItem[]
-  total: number
-  selected: string
-  cfg: any
-  accent: string
-  sortBy: string
-  sortDir: SortDir
-  sortOptions: Array<{ value: string; label: string }>
-  onSortByChange: (value: string) => void
-  onSortDirChange: (value: SortDir) => void
-  onSelect: (label: string) => void
-}) {
-  const max = Math.max(1, ...props.items.map(i => i.value))
-  return (
-    <CardShell
-      cfg={props.cfg}
-      title={props.title}
-      right={(
-        <div style={{ display: 'flex', alignItems: 'center', gap: 7, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
-          <span style={{ color: props.cfg.mutedColor, fontSize: 11, fontWeight: 800 }}>{props.items.length} voci</span>
-          <select
-            value={props.sortBy}
-            onChange={(e: any) => props.onSortByChange(String(e?.target?.value || ''))}
-            style={{
-              height: 28,
-              border: `1px solid ${props.cfg.cardBorder}`,
-              borderRadius: 8,
-              background: 'rgba(15,23,42,0.86)',
-              color: props.cfg.textColor,
-              fontSize: 11,
-              fontWeight: 800,
-              padding: '0 8px',
-              outline: 'none'
-            }}
-          >
-            {props.sortOptions.map(opt => <option key={opt.value} value={opt.value}>{opt.label}</option>)}
-          </select>
-          <button
-            type='button'
-            onClick={() => props.onSortDirChange(props.sortDir === 'asc' ? 'desc' : 'asc')}
-            title={props.sortDir === 'asc' ? 'Crescente' : 'Decrescente'}
-            style={{
-              width: 30,
-              height: 28,
-              border: `1px solid ${props.accent}`,
-              borderRadius: 8,
-              background: 'rgba(15,23,42,0.86)',
-              color: props.accent,
-              fontSize: 14,
-              fontWeight: 950,
-              lineHeight: '24px',
-              cursor: 'pointer'
-            }}
-          >{props.sortDir === 'asc' ? '↑' : '↓'}</button>
-        </div>
-      )}
-      minHeight={430}
-    >
-      <div style={{ color: props.cfg.mutedColor, fontSize: 12, lineHeight: 1.35, marginTop: -5, marginBottom: 11, flexShrink: 0 }}>{props.subtitle}</div>
-      {props.items.length === 0 && <EmptyState cfg={props.cfg} />}
-      <div style={{ display: 'grid', gap: 7, flex: '1 1 auto', minHeight: 0, overflowY: 'auto', paddingRight: 4, alignContent: 'start' }}>
-        {props.items.map(item => {
-          const active = props.selected === item.label
-          const pct = props.total > 0 ? Math.round((item.value / props.total) * 100) : 0
-          const width = Math.max(4, Math.round((item.value / max) * 100))
-          return (
-            <button
-              key={item.label}
-              type='button'
-              onClick={() => props.onSelect(active ? '' : item.label)}
-              title={item.label}
-              style={{
-                border: `1px solid ${active ? props.accent : props.cfg.cardBorder}`,
-                background: active ? 'rgba(56,189,248,0.16)' : 'rgba(2,6,23,0.22)',
-                color: props.cfg.textColor,
-                borderRadius: 12,
-                padding: 10,
-                textAlign: 'left',
-                width: '100%',
-                display: 'block',
-                cursor: 'pointer',
-                boxShadow: active ? '0 0 0 2px rgba(56,189,248,0.20), 0 10px 28px rgba(0,0,0,0.22)' : 'none'
-              }}
-            >
-              <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) minmax(58px, auto)', gap: 9, alignItems: 'center', width: '100%' }}>
-                <div style={{ minWidth: 0 }}>
-                  <div style={{ overflowWrap: 'anywhere', whiteSpace: 'normal', lineHeight: 1.22, fontSize: 12.5, fontWeight: 900 }}>{item.label}</div>
-                  <div style={{ marginTop: 7, height: 6, borderRadius: 999, background: 'rgba(148,163,184,0.16)', overflow: 'hidden' }}>
-                    <div style={{ width: `${width}%`, height: '100%', borderRadius: 999, background: `linear-gradient(90deg, ${props.accent}, rgba(255,255,255,0.78))`, boxShadow: `0 0 14px ${props.accent}` }} />
-                  </div>
-                </div>
-                <div style={{ textAlign: 'right' }}>
-                  <div style={{ fontSize: 15, fontWeight: 950, lineHeight: 1 }}>{item.value}</div>
-                  <div style={{ color: props.cfg.mutedColor, fontSize: 10.5, marginTop: 3 }}>{pct}%</div>
-                </div>
-              </div>
-            </button>
           )
         })}
       </div>
@@ -1140,7 +787,6 @@ function TrendChart (props: { title: string; points: TrendPoint[]; cfg: any }) {
   }))
   const path = coords.map((p, i) => `${i === 0 ? 'M' : 'L'}${p.x.toFixed(1)} ${p.y.toFixed(1)}`).join(' ')
   const areaPath = coords.length ? `${path} L${coords[coords.length - 1].x.toFixed(1)} ${height - padBottom} L${coords[0].x.toFixed(1)} ${height - padBottom} Z` : ''
-  const labelStep = Math.max(1, Math.ceil(coords.length / 8))
   return (
     <CardShell cfg={props.cfg} title={props.title} minHeight={260}>
       <svg viewBox={`0 0 ${width} ${height}`} width='100%' height='190' preserveAspectRatio='none' aria-hidden='true'>
@@ -1162,7 +808,7 @@ function TrendChart (props: { title: string; points: TrendPoint[]; cfg: any }) {
             {(i === 0 || i === coords.length - 1 || p.value === max) && <text x={p.x} y={Math.max(12, p.y - 9)} fill={props.cfg.textColor} fontSize='11' fontWeight='800' textAnchor='middle'>{p.value}</text>}
           </g>
         ))}
-        {coords.map((p, i) => (i === 0 || i === coords.length - 1 || i % labelStep === 0) && (
+        {coords.map((p, i) => (i % 2 === 0 || i === coords.length - 1) && (
           <text key={`l-${p.label}-${i}`} x={p.x} y={height - 8} fill={props.cfg.mutedColor} fontSize='10' textAnchor='middle'>{p.label}</text>
         ))}
       </svg>
@@ -1218,13 +864,6 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
   const [recentPage, setRecentPage] = React.useState(1)
   const [recentSortRules, setRecentSortRules] = React.useState<RecentSortRule[]>(DEFAULT_RECENT_SORT_RULES)
   const [periodFilter, setPeriodFilter] = React.useState<PeriodFilter>('all')
-  const [activeTab, setActiveTab] = React.useState<DashboardTab>('operativo')
-  const [selectedUfficio, setSelectedUfficio] = React.useState('')
-  const [selectedInfrazione, setSelectedInfrazione] = React.useState('')
-  const [ufficioSortBy, setUfficioSortBy] = React.useState<UfficioSortBy>('label')
-  const [ufficioSortDir, setUfficioSortDir] = React.useState<SortDir>('asc')
-  const [infrazioneSortBy, setInfrazioneSortBy] = React.useState<InfrazioneSortBy>('article')
-  const [infrazioneSortDir, setInfrazioneSortDir] = React.useState<SortDir>('asc')
 
   React.useEffect(() => {
     const hUser = () => setUser(readGiiUser())
@@ -1285,22 +924,14 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
       return ms !== null && ms >= from
     })
   }, [records, periodFilter])
-  const statsFilteredRecords = React.useMemo(() => {
-    return analysisRecords.filter(r => {
-      const ufficioOk = !selectedUfficio || getUfficioLabel(r) === selectedUfficio
-      const infrazioneOk = !selectedInfrazione || recordHasInfraction(r, selectedInfrazione)
-      return ufficioOk && infrazioneOk
-    })
-  }, [analysisRecords, selectedUfficio, selectedInfrazione])
-  const displayRecords = activeTab === 'statistiche' ? statsFilteredRecords : records
-  const attesaMia = displayRecords.filter(r => isAttesaMia(r, user)).length
-  const attesaAltri = displayRecords.filter(r => isAttesaAltri(r, user)).length
-  const sanz = displayRecords.filter(r => isInFaseSanzionatoria(r)).length
-  const ferme = displayRecords.filter(r => {
+  const attesaMia = analysisRecords.filter(r => isAttesaMia(r, user)).length
+  const attesaAltri = analysisRecords.filter(r => isAttesaAltri(r, user)).length
+  const sanz = analysisRecords.filter(r => isInFaseSanzionatoria(r)).length
+  const ferme = analysisRecords.filter(r => {
     const last = getLastTouchMs(r)
     return last !== null && (now - last) > staleMs
   }).length
-  const daPrendere = displayRecords.filter(r => {
+  const daPrendere = analysisRecords.filter(r => {
     const statoField = user ? getStatoFieldForRuolo(effectiveRole) : ''
     const v = statoField ? r[statoField] : null
     const n = v !== null && v !== undefined && v !== '' ? Number(v) : null
@@ -1309,84 +940,62 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
 
   const byFase = React.useMemo(() => {
     const map = new Map<string, number>()
-    for (const r of displayRecords) {
+    for (const r of analysisRecords) {
       const k = faseLabel(getActiveRole(r))
       map.set(k, (map.get(k) || 0) + 1)
     }
     return toChartItems(map, 8)
-  }, [displayRecords])
+  }, [analysisRecords])
 
   const byRole = React.useMemo(() => {
     const map = new Map<string, number>()
-    for (const r of displayRecords) {
+    for (const r of analysisRecords) {
       const k = ruoloOperativoLabel(getActiveRole(r))
       map.set(k, (map.get(k) || 0) + 1)
     }
     return toChartItems(map, 8)
-  }, [displayRecords])
+  }, [analysisRecords])
 
   const byStatus = React.useMemo(() => {
     if (!user || user.isAdmin || user.isWorkflowAdmin) return [] as ChartItem[]
     const statoField = getStatoFieldForRuolo(effectiveRole)
     const map = new Map<string, number>()
-    for (const r of displayRecords) {
+    for (const r of analysisRecords) {
       const k = statoLabel(r[statoField])
       map.set(k, (map.get(k) || 0) + 1)
     }
     return toChartItems(map, 8)
-  }, [displayRecords, user?.username, user?.ruoloCod, user?.areaCod, user?.ruoloLabel, user?.area])
+  }, [analysisRecords, user?.username, user?.ruoloCod, user?.areaCod, user?.ruoloLabel, user?.area])
 
   const byUfficio = React.useMemo(() => {
     const map = new Map<string, number>()
-    for (const r of displayRecords) {
+    for (const r of analysisRecords) {
       const k = getUfficioLabel(r)
       map.set(k, (map.get(k) || 0) + 1)
     }
     return toChartItems(map, 8)
-  }, [displayRecords])
+  }, [analysisRecords])
 
   const byInfrazione = React.useMemo(() => {
     const map = new Map<string, number>()
-    for (const r of displayRecords) {
+    for (const r of analysisRecords) {
       for (const label of getInfractionLabels(r)) map.set(label, (map.get(label) || 0) + 1)
     }
     return toChartItems(map, 8)
-  }, [displayRecords])
+  }, [analysisRecords])
 
-  const allUffici = React.useMemo(() => {
-    const base = selectedInfrazione
-      ? analysisRecords.filter(r => recordHasInfraction(r, selectedInfrazione))
-      : analysisRecords
-    return sortUfficioItems(buildUfficioItems(base), ufficioSortBy, ufficioSortDir)
-  }, [analysisRecords, selectedInfrazione, ufficioSortBy, ufficioSortDir])
-
-  const allInfrazioni = React.useMemo(() => {
-    const base = selectedUfficio
-      ? analysisRecords.filter(r => getUfficioLabel(r) === selectedUfficio)
-      : analysisRecords
-    return sortInfrazioneItems(buildInfrazioneItems(base), infrazioneSortBy, infrazioneSortDir)
-  }, [analysisRecords, selectedUfficio, infrazioneSortBy, infrazioneSortDir])
-
-  React.useEffect(() => {
-    if (selectedUfficio && !allUffici.some(item => item.label === selectedUfficio)) setSelectedUfficio('')
-  }, [allUffici, selectedUfficio])
-
-  React.useEffect(() => {
-    if (selectedInfrazione && !allInfrazioni.some(item => item.label === selectedInfrazione)) setSelectedInfrazione('')
-  }, [allInfrazioni, selectedInfrazione])
-
-  const trend = React.useMemo(() => buildPeriodTrend(displayRecords, activeTab === 'statistiche' ? periodFilter : '365'), [displayRecords, activeTab, periodFilter])
+  const trend = React.useMemo(() => buildMonthlyTrend(analysisRecords, 12), [analysisRecords])
 
   const criticalRows = React.useMemo(() => {
-    return displayRecords
+    return analysisRecords
       .map(r => ({ r, t: getLastTouchMs(r) || 0 }))
       .filter(({ t }) => t > 0 && (now - t) > staleMs)
       .sort((a, b) => a.t - b.t)
       .slice(0, 6)
-  }, [displayRecords, now, staleMs])
+  }, [analysisRecords, now, staleMs])
 
   const recent = React.useMemo(() => {
-    const recentBase = [...displayRecords]
+    const recentBase = [...analysisRecords]
       .map(r => ({ r, t: getLastTouchMs(r) || 0 }))
       .sort((a, b) => b.t - a.t)
 
@@ -1411,7 +1020,7 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
       }
       return (b.t || 0) - (a.t || 0)
     })
-  }, [displayRecords, recentSortRules])
+  }, [analysisRecords, recentSortRules])
 
   React.useEffect(() => {
     if (!selectedRecentRowId) return
@@ -1420,7 +1029,7 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
 
   React.useEffect(() => {
     setRecentPage(1)
-  }, [displayRecords.length, recentSortRules, periodFilter, activeTab, selectedUfficio, selectedInfrazione])
+  }, [analysisRecords.length, recentSortRules, periodFilter])
 
   const recentRowsPerPage = Math.max(1, Number((cfg as any).tableRows || 25))
   const recentPageCount = Math.max(1, Math.ceil(recent.length / recentRowsPerPage))
@@ -1489,7 +1098,7 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
   }
 
   const metrics: Metric[] = [
-    { id: 'tot', label: activeTab === 'statistiche' ? 'Pratiche analizzate' : 'Pratiche di competenza', value: displayRecords.length, hint: activeTab === 'statistiche' && periodFilter !== 'all' ? 'Pratiche nel periodo selezionato.' : 'Totale delle pratiche incluse nel quadro operativo.', tone: 'cyan' },
+    { id: 'tot', label: 'Pratiche analizzate', value: analysisRecords.length, hint: periodFilter === 'all' ? 'Totale delle pratiche incluse nel quadro operativo.' : 'Pratiche nel periodo selezionato.', tone: 'cyan' },
     { id: 'mia', label: 'Da gestire', value: attesaMia, hint: 'Pratiche che richiedono un intervento diretto.', tone: 'emerald' },
     { id: 'altri', label: 'In attesa di altri', value: attesaAltri, hint: 'Pratiche già inoltrate e attualmente presso altri ruoli.', tone: 'violet' },
     { id: 'da_prendere', label: 'Da prendere in carico', value: daPrendere, hint: 'Pratiche ancora da avviare nella fase corrente.', tone: 'slate' },
@@ -1512,42 +1121,11 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
         boxShadow: '0 28px 90px rgba(0,0,0,0.30)'
       }}>
         <div style={{ overflowY: 'auto', overflowX: 'hidden', paddingRight: 2 }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 14, borderBottom: `1px solid ${cfg.cardBorder}`, flexWrap: 'wrap' }}>
-            {[
-              { id: 'operativo' as DashboardTab, label: 'Operativo' },
-              { id: 'statistiche' as DashboardTab, label: 'Statistiche' }
-            ].map(tab => {
-              const active = activeTab === tab.id
-              return (
-                <button
-                  key={tab.id}
-                  type='button'
-                  onClick={() => setActiveTab(tab.id)}
-                  style={{
-                    border: 'none',
-                    borderBottom: `3px solid ${active ? cfg.accentColor : 'transparent'}`,
-                    background: active ? 'rgba(255,255,255,0.07)' : 'transparent',
-                    color: active ? cfg.textColor : cfg.mutedColor,
-                    padding: '10px 14px 9px',
-                    fontSize: 12,
-                    fontWeight: 900,
-                    letterSpacing: 0.4,
-                    textTransform: 'uppercase',
-                    cursor: 'pointer',
-                    borderRadius: '10px 10px 0 0'
-                  }}
-                >{tab.label}</button>
-              )
-            })}
-          </div>
-
-          {activeTab === 'statistiche' ? (
-            <React.Fragment>
           <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) auto', gap: 14, alignItems: 'start', marginBottom: 16 }}>
             <div style={{ minWidth: 0 }}>
               <div style={{ color: cfg.accentColor, fontSize: 10.5, fontWeight: 900, textTransform: 'uppercase', letterSpacing: 1.6, marginBottom: 5 }}>Statistiche dinamiche</div>
-              <h2 style={{ margin: 0, color: cfg.textColor, fontSize: 26, lineHeight: 1.05, fontWeight: 900 }}>Cruscotto statistiche</h2>
-              <div style={{ color: cfg.mutedColor, fontSize: 13, marginTop: 7, maxWidth: 760, lineHeight: 1.42 }}>Quadro dinamico delle pratiche, degli uffici e delle tipologie di infrazione.</div>
+              <h2 style={{ margin: 0, color: cfg.textColor, fontSize: 26, lineHeight: 1.05, fontWeight: 900 }}>{cfg.title || 'Cruscotto statistiche'}</h2>
+              <div style={{ color: cfg.mutedColor, fontSize: 13, marginTop: 7, maxWidth: 760, lineHeight: 1.42 }}>{cfg.subtitle || 'Quadro sintetico delle pratiche, degli uffici e delle tipologie di infrazione.'}</div>
               <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'center', marginTop: 11 }}>
                 {lastLoad && <div style={{ color: cfg.mutedColor, fontSize: 11.5 }}>Aggiornato: {new Date(lastLoad).toLocaleString('it-IT')}</div>}
                 {cfg.showTechnicalInfo && view && <div style={{ color: cfg.mutedColor, fontSize: 11.5 }}>Ambito dati: {view.viewName}</div>}
@@ -1556,13 +1134,6 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
             </div>
             <div style={{ display: 'flex', gap: 9, flexWrap: 'wrap', justifyContent: 'flex-end', alignItems: 'center' }}>
               <PeriodSelector value={periodFilter} onChange={setPeriodFilter} cfg={cfg} />
-              {(selectedUfficio || selectedInfrazione) && (
-                <button
-                  type='button'
-                  onClick={() => { setSelectedUfficio(''); setSelectedInfrazione('') }}
-                  style={{ border: `1px solid ${cfg.accentColor}`, background: 'rgba(56,189,248,0.16)', color: cfg.textColor, borderRadius: 999, padding: '9px 12px', fontWeight: 900, cursor: 'pointer' }}
-                >Azzera filtri</button>
-              )}
               <button onClick={() => setNonce(n => n + 1)} style={{ border: `1px solid ${cfg.cardBorder}`, background: 'rgba(15,23,42,0.86)', color: cfg.textColor, borderRadius: 999, padding: '9px 13px', fontWeight: 900, cursor: 'pointer', boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.06)' }}>Aggiorna</button>
             </div>
           </div>
@@ -1574,58 +1145,15 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
             {metrics.map(m => <MetricCard key={m.id} m={m} cfg={cfg} />)}
           </div>
 
-          <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', marginBottom: 12 }}>
-            <span style={{ color: cfg.mutedColor, fontSize: 11, fontWeight: 900, textTransform: 'uppercase', letterSpacing: 1.1 }}>Filtri attivi</span>
-            <span style={{ color: selectedUfficio ? '#03111f' : cfg.mutedColor, background: selectedUfficio ? cfg.accentColor : 'rgba(148,163,184,0.12)', border: `1px solid ${selectedUfficio ? cfg.accentColor : cfg.cardBorder}`, borderRadius: 999, padding: '6px 9px', fontSize: 11.5, fontWeight: 900 }}>Ufficio: {selectedUfficio || 'Tutti'}</span>
-            <span style={{ color: selectedInfrazione ? '#03111f' : cfg.mutedColor, background: selectedInfrazione ? '#34d399' : 'rgba(148,163,184,0.12)', border: `1px solid ${selectedInfrazione ? '#34d399' : cfg.cardBorder}`, borderRadius: 999, padding: '6px 9px', fontSize: 11.5, fontWeight: 900 }}>Infrazione: {selectedInfrazione || 'Tutte'}</span>
-            <span style={{ color: cfg.mutedColor, fontSize: 11.5, marginLeft: 'auto' }}>{displayRecords.length} pratiche nel perimetro selezionato</span>
-          </div>
-
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: 12, marginBottom: 12 }}>
-            <InteractiveRanking
-              title='Uffici di zona'
-              subtitle='Elenco completo. Clic su una riga per filtrare tutta la dashboard.'
-              items={allUffici}
-              total={allUffici.reduce((sum, item) => sum + item.value, 0)}
-              selected={selectedUfficio}
-              cfg={cfg}
-              accent={cfg.accentColor}
-              sortBy={ufficioSortBy}
-              sortDir={ufficioSortDir}
-              sortOptions={[
-                { value: 'label', label: 'Ufficio' },
-                { value: 'count', label: 'Numero' }
-              ]}
-              onSortByChange={value => setUfficioSortBy(value === 'count' ? 'count' : 'label')}
-              onSortDirChange={setUfficioSortDir}
-              onSelect={setSelectedUfficio}
-            />
-            <InteractiveRanking
-              title='Tipologie di infrazione'
-              subtitle='Elenco completo delle tipologie rilevate nel perimetro corrente.'
-              items={allInfrazioni}
-              total={allInfrazioni.reduce((sum, item) => sum + item.value, 0)}
-              selected={selectedInfrazione}
-              cfg={cfg}
-              accent='#34d399'
-              sortBy={infrazioneSortBy}
-              sortDir={infrazioneSortDir}
-              sortOptions={[
-                { value: 'article', label: 'Articolo' },
-                { value: 'count', label: 'Numero' }
-              ]}
-              onSortByChange={value => setInfrazioneSortBy(value === 'count' ? 'count' : 'article')}
-              onSortDirChange={setInfrazioneSortDir}
-              onSelect={setSelectedInfrazione}
-            />
-            <div style={{ display: 'grid', gap: 12, minWidth: 0 }}>
-              <TrendChart title='Andamento rilevazioni filtrate' points={trend} cfg={cfg} />
-              <DonutChart title='Distribuzione per fase' items={byFase.slice(0, 6)} cfg={cfg} />
-            </div>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: 12, marginBottom: 12 }}>
+            <TrendChart title='Andamento rilevazioni' points={trend} cfg={cfg} />
+            <DonutChart title='Distribuzione per fase' items={byFase.slice(0, 6)} cfg={cfg} />
           </div>
 
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: 12, marginBottom: 12 }}>
-            <HorizontalBars title='Ruolo competente' items={byRole} total={displayRecords.length} cfg={cfg} accent='#a78bfa' />
+            <HorizontalBars title='Pratiche per ufficio' items={byUfficio} total={analysisRecords.length} cfg={cfg} />
+            <HorizontalBars title='Tipologie di infrazione' items={byInfrazione} total={analysisRecords.length} cfg={cfg} accent='#34d399' />
+            <HorizontalBars title='Ruolo competente' items={byRole} total={analysisRecords.length} cfg={cfg} accent='#a78bfa' />
             <CardShell cfg={cfg} title='Pratiche critiche' minHeight={260}>
               {criticalRows.length === 0 && <EmptyState cfg={cfg} text='Nessuna pratica oltre la soglia impostata.' />}
               <div style={{ display: 'grid', gap: 9 }}>
@@ -1648,7 +1176,7 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
 
           <div style={{ display: 'grid', gridTemplateColumns: (user?.isAdmin || user?.isWorkflowAdmin) ? '1fr' : 'minmax(280px, 0.72fr) minmax(360px, 1.28fr)', gap: 12, marginBottom: 12 }}>
             {!(user?.isAdmin || user?.isWorkflowAdmin) && (
-              <HorizontalBars title='Stato delle attività' items={byStatus} total={displayRecords.length} cfg={cfg} accent='#fbbf24' />
+              <HorizontalBars title='Stato delle attività' items={byStatus} total={analysisRecords.length} cfg={cfg} accent='#fbbf24' />
             )}
             <CardShell cfg={cfg} title='Sintesi operativa' minHeight={220}>
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: 10 }}>
@@ -1668,40 +1196,6 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
             </CardShell>
           </div>
 
-            </React.Fragment>
-          ) : (
-            <React.Fragment>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, marginBottom: 12, flexWrap: 'wrap' }}>
-                <div style={{ minWidth: 0 }}>
-                  <div style={{ color: cfg.accentColor, fontSize: 10.5, fontWeight: 900, textTransform: 'uppercase', letterSpacing: 1.5, marginBottom: 5 }}>Quadro operativo</div>
-                  <h2 style={{ margin: 0, color: cfg.textColor, fontSize: 24, lineHeight: 1.08, fontWeight: 900 }}>{cfg.title || 'Cruscotto operativo'}</h2>
-                  <div style={{ color: cfg.mutedColor, fontSize: 13, marginTop: 7, maxWidth: 760, lineHeight: 1.42 }}>{cfg.subtitle || 'Sintesi delle attività, delle pratiche ferme e dell’avanzamento delle lavorazioni.'}</div>
-                  <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'center', marginTop: 10 }}>
-                    {lastLoad && <div style={{ color: cfg.mutedColor, fontSize: 11.5 }}>Aggiornato: {new Date(lastLoad).toLocaleString('it-IT')}</div>}
-                    {cfg.showTechnicalInfo && view && <div style={{ color: cfg.mutedColor, fontSize: 11.5 }}>Ambito dati: {view.viewName}</div>}
-                    <div style={{ color: cfg.mutedColor, fontSize: 11.5 }}>Record caricati: {records.length}</div>
-                  </div>
-                </div>
-                <button onClick={() => setNonce(n => n + 1)} style={{ border: `1px solid ${cfg.cardBorder}`, background: 'rgba(255,255,255,0.08)', color: cfg.textColor, borderRadius: 12, padding: '8px 12px', fontWeight: 800, cursor: 'pointer' }}>Aggiorna</button>
-              </div>
-
-              {loading && <div style={{ padding: 14, marginBottom: 16, borderRadius: 14, background: 'rgba(255,255,255,0.08)', color: cfg.mutedColor }}>Caricamento dashboard...</div>}
-              {error && <div style={{ padding: 14, marginBottom: 16, borderRadius: 14, background: 'rgba(127,29,29,0.40)', border: '1px solid rgba(248,113,113,0.35)', color: '#fecaca' }}>{error}</div>}
-
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(190px, 1fr))', gap: 12, marginBottom: 12 }}>
-                {metrics.map(m => <MetricCard key={m.id} m={m} cfg={cfg} />)}
-              </div>
-
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: 12, marginBottom: 12 }}>
-                <HorizontalBars title='Pratiche per fase di lavorazione' items={byFase} total={displayRecords.length} cfg={cfg} />
-                <HorizontalBars title='Pratiche per ruolo competente' items={byRole} total={displayRecords.length} cfg={cfg} accent='#a78bfa' />
-                {user?.isAdmin || user?.isWorkflowAdmin
-                  ? <CardShell cfg={cfg} title='Stato delle attività' minHeight={260}><EmptyState cfg={cfg} text='Per l’amministratore non è previsto uno stato attività specifico.' /></CardShell>
-                  : <HorizontalBars title='Stato delle attività' items={byStatus} total={displayRecords.length} cfg={cfg} accent='#fbbf24' />}
-              </div>
-            </React.Fragment>
-          )}
-
         <section style={{ background: cfg.cardBg, border: `1px solid ${cfg.cardBorder}`, borderRadius: 14, padding: 12, minHeight: 320, display: 'flex', flexDirection: 'column', boxShadow: '0 18px 54px rgba(0,0,0,0.20)' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, marginBottom: 8, flexShrink: 0 }}>
             <h3 style={{ margin: 0, fontSize: 15, color: cfg.textColor }}>Pratiche aggiornate di recente</h3>
@@ -1711,7 +1205,7 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
                 onClick={() => setRecentSortRules(DEFAULT_RECENT_SORT_RULES)}
                 disabled={isDefaultRecentSort}
                 title='Ripristina ordinamento predefinito'
-                style={{ width: 36, height: 36, border: `1px solid ${isDefaultRecentSort ? cfg.cardBorder : cfg.accentColor}`, background: isDefaultRecentSort ? 'rgba(255,255,255,0.04)' : cfg.accentColor, color: isDefaultRecentSort ? cfg.mutedColor : '#03111f', borderRadius: 8, padding: 0, fontSize: 17, fontWeight: 900, lineHeight: '34px', textAlign: 'center', cursor: isDefaultRecentSort ? 'not-allowed' : 'pointer', boxShadow: isDefaultRecentSort ? 'none' : '0 0 0 2px rgba(56,189,248,0.20)' }}
+                style={{ width: 36, height: 36, border: `1px solid ${isDefaultRecentSort ? cfg.cardBorder : cfg.accentColor}`, background: isDefaultRecentSort ? 'rgba(255,255,255,0.04)' : cfg.accentColor, color: isDefaultRecentSort ? cfg.mutedColor : '#03111f', borderRadius: 8, padding: 0, fontSize: 17, fontWeight: 900, lineHeight: '34px', textAlign: 'center', cursor: isDefaultRecentSort ? 'not-allowed' : 'pointer', boxShadow: isDefaultRecentSort ? 'none' : `0 0 0 2px ${cfg.accentColor}33` }}
               >↺</button>
             </div>
           </div>
