@@ -1968,7 +1968,10 @@ function MapTabContent (props: {
           fullscreenWidgetRef.current = null
         }
       } catch {}
-      if (viewRef.current) { try { viewRef.current.destroy() } catch {} viewRef.current = null }
+      if (viewRef.current) {
+        try { viewRef.current.destroy() } catch {}
+        viewRef.current = null
+      }
       targetLayerViewRefs.current = []
       targetLayerViewCacheRef.current = {}
       defaultViewpointRef.current = null
@@ -4931,6 +4934,54 @@ const queryFields = React.useMemo(() => {
 
   const activeGate = forcedActive
 
+  const detailMapCfg = React.useMemo(() => ({
+    basemap: String(cfg.mapBasemap || 'topo-vector'),
+    centerLon: Number(cfg.mapCenterLon) || 9.0,
+    centerLat: Number(cfg.mapCenterLat) || 39.5,
+    initZoom: Number(cfg.mapInitZoom) || 8,
+    pointZoom: Number(cfg.mapPointZoom) || 19,
+    markerColor: String(cfg.mapMarkerColor || '#dc2626'),
+    markerSize: Number(cfg.mapMarkerSize) || 18,
+    markerOutlineColor: String(cfg.mapMarkerOutlineColor || '#ffffff'),
+    markerOutlineWidth: Number(cfg.mapMarkerOutlineWidth) || 2.5,
+    showZoom: cfg.mapShowZoom !== false,
+    showAttribution: cfg.mapShowAttribution !== false,
+    showScaleBar: cfg.mapShowScaleBar === true,
+    showCompass: cfg.mapShowCompass === true,
+    showPopup: cfg.mapShowPopup !== false,
+    showHome: cfg.mapShowHome !== false,
+    showFullscreen: cfg.mapShowFullscreen !== false,
+    showLayerList: cfg.mapShowLayerList === true,
+    webMapItemId: String((cfg as any).mapWebMapItemId || ''),
+    webMapLabel: String((cfg as any).mapWebMapLabel || ''),
+    mapLayerTitle: String((cfg as any).mapLayerTitle || ''),
+    mapLayerUrl: String((cfg as any).mapLayerUrl || ''),
+    mapLayerId: String((cfg as any).mapLayerId || ''),
+    mapLayerLayerId: String((cfg as any).mapLayerLayerId || '')
+  }), [
+    cfg.mapBasemap, cfg.mapCenterLon, cfg.mapCenterLat, cfg.mapInitZoom, cfg.mapPointZoom,
+    cfg.mapMarkerColor, cfg.mapMarkerSize, cfg.mapMarkerOutlineColor, cfg.mapMarkerOutlineWidth,
+    cfg.mapShowZoom, cfg.mapShowAttribution, cfg.mapShowScaleBar, cfg.mapShowCompass, cfg.mapShowPopup,
+    cfg.mapShowHome, cfg.mapShowFullscreen, cfg.mapShowLayerList,
+    (cfg as any).mapWebMapItemId, (cfg as any).mapWebMapLabel, (cfg as any).mapLayerTitle,
+    (cfg as any).mapLayerUrl, (cfg as any).mapLayerId, (cfg as any).mapLayerLayerId
+  ])
+
+  React.useEffect(() => {
+    try {
+      ;(window as any).__giiDetailMapConfig = detailMapCfg
+      window.dispatchEvent(new CustomEvent('gii:detail-map-config-change', { detail: { config: detailMapCfg } }))
+    } catch {}
+    return () => {
+      try {
+        if ((window as any).__giiDetailMapConfig === detailMapCfg) {
+          ;(window as any).__giiDetailMapConfig = null
+          window.dispatchEvent(new CustomEvent('gii:detail-map-config-change', { detail: { config: null } }))
+        }
+      } catch {}
+    }
+  }, [detailMapCfg])
+
 
   return (
     <div style={{ width: '100%', height: '100%', display: 'flex', flexDirection: 'column', minHeight: 0, boxSizing: 'border-box', padding: Number.isFinite(Number((cfg as any).maskOuterOffset ?? 0)) ? Number((cfg as any).maskOuterOffset) : 0 }}>
@@ -4944,31 +4995,7 @@ const queryFields = React.useMemo(() => {
                   notaSpeseCfg={{
                     detailUrl: String((cfg as any).nsNotaSpeseDettaglioUrl || '')
                   }}
-                  mapCfg={{
-                    basemap: String(cfg.mapBasemap || 'topo-vector'),
-                    centerLon: Number(cfg.mapCenterLon) || 9.0,
-                    centerLat: Number(cfg.mapCenterLat) || 39.5,
-                    initZoom: Number(cfg.mapInitZoom) || 8,
-                    pointZoom: Number(cfg.mapPointZoom) || 19,
-                    markerColor: String(cfg.mapMarkerColor || '#dc2626'),
-                    markerSize: Number(cfg.mapMarkerSize) || 18,
-                    markerOutlineColor: String(cfg.mapMarkerOutlineColor || '#ffffff'),
-                    markerOutlineWidth: Number(cfg.mapMarkerOutlineWidth) || 2.5,
-                    showZoom: cfg.mapShowZoom !== false,
-                    showAttribution: cfg.mapShowAttribution !== false,
-                    showScaleBar: cfg.mapShowScaleBar === true,
-                    showCompass: cfg.mapShowCompass === true,
-                    showPopup: cfg.mapShowPopup !== false,
-                    showHome: cfg.mapShowHome !== false,
-                    showFullscreen: cfg.mapShowFullscreen !== false,
-                    showLayerList: cfg.mapShowLayerList === true,
-                    webMapItemId: String((cfg as any).mapWebMapItemId || ''),
-                    webMapLabel: String((cfg as any).mapWebMapLabel || ''),
-                    mapLayerTitle: String((cfg as any).mapLayerTitle || ''),
-                    mapLayerUrl: String((cfg as any).mapLayerUrl || ''),
-                    mapLayerId: String((cfg as any).mapLayerId || ''),
-                    mapLayerLayerId: String((cfg as any).mapLayerLayerId || '')
-                  }}
+                  mapCfg={detailMapCfg}
                 />
         </>
     </div>

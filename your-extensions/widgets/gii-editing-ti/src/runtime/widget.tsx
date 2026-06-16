@@ -5801,16 +5801,16 @@ function NuovaPraticaForm (p: {
     }
   }, [validationPopup, validationPopupOkId])
 
-  const [npTab, setNpTab] = React.useState<'dati_generali' | 'trasgressore' | 'violazione' | 'dati_tecnici' | 'nota_spese' | 'allegati' | 'anteprima'>('trasgressore')
+  const [npTab, setNpTab] = React.useState<'dati_generali' | 'trasgressore' | 'violazione' | 'dati_tecnici' | 'nota_spese' | 'allegati' | 'anteprima'>(() => getRequestedEditSection({ skipUrl: true }) || 'trasgressore')
   const [isExternalNavMode, setIsExternalNavMode] = React.useState<boolean>(true)
   const skipNpTabSyncRef = React.useRef(false)
   const tabResetFirstRef = React.useRef(true)
 
-  // Pulisci la sezione persistita al mount per evitare che il reload riapra l'ultimo tab
+  // Pulisci solo le richieste one-shot, conservando l'eventuale scheda richiesta in apertura.
   React.useEffect(() => {
     try { window.sessionStorage.removeItem('GII_NAV_SECTION') } catch {}
     try { window.sessionStorage.removeItem('GII_REQUESTED_EDIT_SECTION') } catch {}
-    resetInvalidEditSectionStorage('trasgressore')
+    resetInvalidEditSectionStorage(npTab)
   }, [])
 
   React.useEffect(() => {
@@ -8177,7 +8177,8 @@ ${e?.message || String(e)}`
       case 'tipo_abuso': return { label: 'Tipo di abuso', el: <NpSel value={tipoAbuso} onChange={v => { set('tipo_abuso', v); set('norma15_parziale', ''); set('norma15_totale', '') }} options={CHOICES.tipo_abuso} disabled={saving || !art15Selected}/> }
       case 'norma15_sel': {
         const canEdit = isCurrentRiAgrTec() && hasTipoAbuso15 && !saving
-        return { label: 'Occorrenza', el: <NpSel value={g('occorrenza')} onChange={v => set('occorrenza', v)} options={CHOICES.occorrenza} disabled={!canEdit}/> }
+        const occurrencePending = canEdit && !String(g('occorrenza') || '').trim()
+        return { label: 'Occorrenza', el: <NpSel value={g('occorrenza')} onChange={v => set('occorrenza', v)} options={CHOICES.occorrenza} disabled={!canEdit} attention={occurrencePending} attentionTitle='Occorrenza da valorizzare'/> }
       }
       case 'sup_dichiarata_art15': {
         if (!hasTipoAbuso15) return null
@@ -9754,7 +9755,17 @@ ${e?.message || String(e)}`
 {/* ANTEPRIMA */}
 {npTab === 'anteprima' && (
   <div style={{ width: '100%', height: '100%', minHeight: 0, borderRadius: formStyle.cardBorderRadius, overflow: 'hidden' }}>
-    <AnteprimaPanel data={draft} mode={mode} nsRows={noteSpeseRowsDraft} nsSummary={noteSpeseSummary} />
+    <AnteprimaPanel
+      data={draft}
+      mode={mode}
+      nsRows={noteSpeseRowsDraft}
+      nsSummary={noteSpeseSummary}
+      ds={ds as any}
+      oid={currentOid}
+      layerUrl={currentLayerUrl}
+      idFieldName={editIdFieldName}
+      mapPointWgs84={p.clickedPointWgs84 || p.existingGeomWgs84 || null}
+    />
   </div>
 )}
 

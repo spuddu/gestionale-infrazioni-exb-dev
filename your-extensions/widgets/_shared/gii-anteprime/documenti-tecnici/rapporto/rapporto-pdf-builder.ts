@@ -936,13 +936,13 @@ export async function buildRapportoPdf (m: Record<string, string>): Promise<Uint
 
   // ── Distretto / Comizio / Idrante (template v6) ──
   const dsz = 8.2
-  txt(p2, v('distretto_irriguo'), fR, dsz, 138, bY(450.11, dsz), BLACK, 198)
+  txt(p2, firstMeaningfulValue(v('distretto_irriguo'), v('distretto')), fR, dsz, 138, bY(450.11, dsz), BLACK, 198)
   txt(p2, v('comizio'), fR, dsz, 386, bY(450.11, dsz), BLACK, 66)
-  txt(p2, v('idrante'), fR, dsz, 499, bY(450.11, dsz), BLACK, 52)
+  txt(p2, firstMeaningfulValue(v('idrante'), v('idrante_numero')), fR, dsz, 499, bY(450.11, dsz), BLACK, 52)
 
   // ── Matricole (template v6) ──
-  txt(p2, v('matricola_contatore'), fR, dsz, 138, bY(471.11, dsz), BLACK, 160)
-  txt(p2, v('matricola_tessera'), fR, dsz, 386, bY(471.11, dsz), BLACK, 166)
+  txt(p2, firstMeaningfulValue(v('matricola_contatore'), v('contatore_matricola')), fR, dsz, 138, bY(471.11, dsz), BLACK, 160)
+  txt(p2, firstMeaningfulValue(v('matricola_tessera'), v('tessera_matricola')), fR, dsz, 386, bY(471.11, dsz), BLACK, 166)
 
   // ── DATI DEL TRASGRESSORE — PF vs PG ──
   const isPG = v('tipo_soggetto') === 'PG'

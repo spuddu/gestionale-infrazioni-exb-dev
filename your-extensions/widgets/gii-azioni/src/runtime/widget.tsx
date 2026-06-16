@@ -462,10 +462,11 @@ function readRuntimeSelectionForActions (): RuntimeSelection | null {
   return isRuntimeSelectionFromEditSave(sel) ? null : sel
 }
 
-function makeRuntimeRecord (attrs: any, idFieldName: string, sourceKey: string): any {
+function makeRuntimeRecord (attrs: any, idFieldName: string, sourceKey: string, geometry?: any): any {
   const id = String(attrs?.[idFieldName] ?? attrs?.OBJECTID ?? attrs?.objectid ?? '')
+  const data = geometry ? { ...(attrs || {}), geometry } : attrs
   return {
-    getData: () => attrs,
+    getData: () => data,
     getId: () => id,
     dataSource: { id: sourceKey }
   }
@@ -509,7 +510,7 @@ async function createRuntimeDsProxyFromLayerUrl (layerUrl: string, label?: strin
           outFields: (Array.isArray(q?.outFields) && q.outFields.length ? q.outFields : ['*']) as any,
           returnGeometry: !!q?.returnGeometry
         })
-        return { records: (res?.features || []).map((f: any) => makeRuntimeRecord(f?.attributes || {}, idFieldName, layerUrl)) }
+        return { records: (res?.features || []).map((f: any) => makeRuntimeRecord(f?.attributes || {}, idFieldName, layerUrl, f?.geometry)) }
       }
     }
     try {
@@ -1508,6 +1509,17 @@ function actionButtonStyle (bg: string, disabled: boolean, ui?: { btnBorderRadiu
 type Pending = null | 'TAKE' | 'ASSEGNA_TI' | 'ASSEGNA_TI_AMM' | 'INVIA_TI_AMM' | 'RESTITUISCI_TI_AMM' | 'INTEGRAZIONE' | 'INTEGRAZIONE_TI_AMM' | 'INTEGRAZIONE_TECNICA' | 'APPROVA' | 'RESPINGI' | 'TRASMETTI' | 'ELIMINA'
 
 type WorkflowEsitoChoice = '' | 'CONFORME' | 'DA_INTEGRARE' | 'RESPINTA'
+type DocumentRequestMode = 'preview' | 'download'
+type DocumentAvailability = {
+  loading: boolean
+  loadingNotaSpese?: boolean
+  loadingMappa?: boolean
+  loadingAllegati?: boolean
+  notaSpese: boolean
+  mappa: boolean
+  allegati: boolean
+  checkedKey: string
+}
 
 type InformativeActivityTarget = {
   ruoloDestinatario: string
@@ -1559,6 +1571,8 @@ function ActionsPanel (props: {
     presaRequiredVal: number
   }
   nsConfig: { detailUrl: string; parametriUrl: string; parametroCode: string }
+  printConfig: { serviceUrl: string }
+  mapView: any
 }) {
   const { active, roleCode, buttonText, buttonColors, ui } = props
   const role = String(roleCode || 'DT').trim().toUpperCase()
@@ -1755,39 +1769,231 @@ function ActionsPanel (props: {
     setPreviewLoading(false)
   }, [])
 
-  const handleRapportoPreview = React.useCallback(() => {
+  const [documentsMode, setDocumentsMode] = React.useState<DocumentRequestMode | null>(null)
+  const [documentsLoading, setDocumentsLoading] = React.useState(false)
+  const [docAvailability, setDocAvailability] = React.useState<DocumentAvailability>({
+    loading: false,
+    notaSpese: false,
+    mappa: false,
+    allegati: false,
+    checkedKey: ''
+  })
+  const [docMapTarget, setDocMapTarget] = React.useState<any | null>(null)
+  const docCheckReqRef = React.useRef('')
+  const printableLayerTree = React.useMemo(() => listPrintableMapLayerTree(props.mapView), [props.mapView])
+  const [docOptions, setDocOptions] = React.useState<DocumentPrintOptions>({
+    includeRapporto: true,
+    includeNotaSpese: true,
+    includeMappa: false,
+    includeAllegati: false,
+    mapLayout: 'A4 Portrait',
+    mapScale: 1000,
+    mapTitle: '',
+    mapBasemap: 'satellite',
+    mapLayerVisibility: {}
+  })
+
+  const openDocumentsDialog = React.useCallback((mode: DocumentRequestMode) => {
     if (!hasSel || !data) return
-    setPreviewOpen(true)
-    setPreviewLoading(true)
-    setPreviewError(null)
+    const quickMapTarget = pointGeometryFromAttrsForActions(data)
+    const quickNotaSpese = hasNotaSpeseLocalForActions(data)
+    const layerVisibility: Record<string, boolean> = {}
+    listPrintableMapLayers(props.mapView).forEach(item => { layerVisibility[item.key] = item.visible })
+    const title = `Allegato cartografico - ${praticaLabel} ${praticaCode || ''}`.trim()
+    setDocOptions(prev => ({
+      ...prev,
+      includeNotaSpese: quickNotaSpese ? prev.includeNotaSpese : false,
+      includeMappa: false,
+      includeAllegati: false,
+      mapTitle: prev.mapTitle || title,
+      mapBasemap: prev.mapBasemap || 'satellite',
+      mapLayerVisibility: Object.keys(prev.mapLayerVisibility || {}).length ? prev.mapLayerVisibility : layerVisibility
+    }))
+    const checkedKey = `${active?.key || ''}:${oid || ''}:${Date.now()}`
+    docCheckReqRef.current = checkedKey
+    setDocAvailability({
+      loading: false,
+      loadingNotaSpese: !quickNotaSpese,
+      loadingMappa: !quickMapTarget,
+      loadingAllegati: true,
+      notaSpese: quickNotaSpese,
+      mappa: !!quickMapTarget,
+      allegati: false,
+      checkedKey
+    })
+    setDocMapTarget(quickMapTarget || null)
+    setDocumentsMode(mode)
+    void hasNotaSpeseForActions(data, props.nsConfig).then(notaSpese => {
+      if (docCheckReqRef.current !== checkedKey) return
+      setDocAvailability(prev => prev.checkedKey === checkedKey ? { ...prev, loading: false, loadingNotaSpese: false, notaSpese } : prev)
+      setDocOptions(prev => ({ ...prev, includeNotaSpese: notaSpese ? true : false }))
+    }).catch(() => {
+      if (docCheckReqRef.current !== checkedKey) return
+      setDocAvailability(prev => prev.checkedKey === checkedKey ? { ...prev, loading: false, loadingNotaSpese: false, notaSpese: false } : prev)
+      setDocOptions(prev => ({ ...prev, includeNotaSpese: false }))
+    })
+    void resolvePointGeometryForActions(active?.state?.ds, Number(oid), active?.state?.idFieldName || idFieldNameFromSel, data, active?.key).then(mapTarget => {
+      if (docCheckReqRef.current !== checkedKey) return
+      const mappa = !!mapTarget
+      setDocMapTarget(mapTarget || null)
+      setDocAvailability(prev => prev.checkedKey === checkedKey ? { ...prev, loading: false, loadingMappa: false, mappa } : prev)
+      if (!mappa) setDocOptions(prev => ({ ...prev, includeMappa: false }))
+    }).catch(() => {
+      if (docCheckReqRef.current !== checkedKey) return
+      setDocMapTarget(null)
+      setDocAvailability(prev => prev.checkedKey === checkedKey ? { ...prev, loading: false, loadingMappa: false, mappa: false } : prev)
+      setDocOptions(prev => ({ ...prev, includeMappa: false }))
+    })
+    void hasAttachmentsForActions(active?.state?.ds, Number(oid)).then(allegati => {
+      if (docCheckReqRef.current !== checkedKey) return
+      setDocAvailability(prev => prev.checkedKey === checkedKey ? { ...prev, loading: false, loadingAllegati: false, allegati } : prev)
+      if (!allegati) setDocOptions(prev => ({ ...prev, includeAllegati: false }))
+    }).catch(() => {
+      if (docCheckReqRef.current !== checkedKey) return
+      setDocAvailability(prev => prev.checkedKey === checkedKey ? { ...prev, loading: false, loadingAllegati: false, allegati: false } : prev)
+      setDocOptions(prev => ({ ...prev, includeAllegati: false }))
+    })
+  }, [active, data, hasSel, idFieldNameFromSel, oid, praticaCode, praticaLabel, props.mapView, props.nsConfig])
+
+  const updateDocOption = React.useCallback((patch: Partial<DocumentPrintOptions>) => {
+    setDocOptions(prev => ({ ...prev, ...patch }))
+  }, [])
+
+  const setMapLayerKeysVisible = React.useCallback((keys: string[], visible: boolean) => {
+    setDocOptions(prev => {
+      const nextVisibility = { ...(prev.mapLayerVisibility || {}) }
+      keys.forEach(key => { nextVisibility[key] = visible })
+      return { ...prev, mapLayerVisibility: nextVisibility }
+    })
+  }, [])
+  const [expandedLayerGroups, setExpandedLayerGroups] = React.useState<Record<string, boolean>>({})
+
+  const renderPrintableLayerNode = React.useCallback((node: PrintableMapLayerNode, depth = 0): any => {
+    const leafKeys = collectPrintableMapLayerKeys(node)
+    const checkedCount = leafKeys.filter(key => docOptions.mapLayerVisibility[key] !== false).length
+    const checked = leafKeys.length > 0 && checkedCount === leafKeys.length
+    const partial = checkedCount > 0 && checkedCount < leafKeys.length
+    const hasChildren = node.children.length > 0
+    const expanded = !!expandedLayerGroups[node.key]
+    const checkbox = (
+      <input
+        type='checkbox'
+        checked={checked}
+        disabled={documentsLoading || leafKeys.length === 0}
+        ref={(el) => { if (el) el.indeterminate = partial }}
+        onClick={e => { e.stopPropagation() }}
+        onChange={e => setMapLayerKeysVisible(leafKeys, e.target.checked)}
+      />
+    )
+    const row = (
+      <div key={node.key} style={{ display: 'grid', gridTemplateColumns: '16px minmax(0, 1fr) 18px', alignItems: 'center', gap: 8, minHeight: 24, paddingLeft: depth * 18, fontSize: 13, color: '#334155', fontWeight: hasChildren ? 800 : 600 }}>
+        {hasChildren ? (
+          <button
+            type='button'
+            onClick={() => setExpandedLayerGroups(prev => ({ ...prev, [node.key]: !prev[node.key] }))}
+            aria-label={expanded ? 'Comprimi gruppo layer' : 'Espandi gruppo layer'}
+            style={{ border: 0, background: 'transparent', padding: 0, width: 16, height: 20, lineHeight: '20px', cursor: 'pointer', color: '#334155', fontSize: 12 }}
+          >
+            {expanded ? '▼' : '▶'}
+          </button>
+        ) : (
+          <span style={{ width: 16, height: 20 }} />
+        )}
+        <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{node.title}</span>
+        {checkbox}
+      </div>
+    )
+    if (!hasChildren) return row
+    return (
+      <div key={node.key} style={{ display: 'grid', gap: 4 }}>
+        {row}
+        {expanded && (
+          <div style={{ display: 'grid', gap: 4 }}>
+            {node.children.map(child => renderPrintableLayerNode(child, depth + 1))}
+          </div>
+        )}
+      </div>
+    )
+  }, [docOptions.mapLayerVisibility, documentsLoading, expandedLayerGroups, setMapLayerKeysVisible])
+
+  const buildSelectedDocumentsPdf = React.useCallback(async (): Promise<{ blob: Blob; fileName: string }> => {
+    if (!hasSel || !data) throw new Error('Selezionare un rapporto.')
+    const items: Array<{ blob: Blob; fileName: string }> = []
+    if (docOptions.includeRapporto || docOptions.includeNotaSpese) {
+      items.push(await buildRapportoPdfBlob(data, _utentiCache, props.nsConfig, {
+        includeRapporto: docOptions.includeRapporto,
+        includeNotaSpese: docOptions.includeNotaSpese
+      }))
+    }
+    if (docOptions.includeMappa) {
+      items.push(await buildMapPrintPdfBlob(props.mapView, props.printConfig?.serviceUrl, { ...docOptions, mapTarget: docMapTarget }))
+    }
+    if (docOptions.includeAllegati) {
+      const attPdf = await buildPracticeAttachmentsPdfBlob(active?.state?.ds, Number(oid))
+      if (attPdf) items.push(attPdf)
+      else setMsg({ kind: 'info', text: 'Nessun allegato probatorio impaginabile trovato.' })
+    }
+    if (items.length === 0) throw new Error('Selezionare almeno un documento.')
+    const safeCode = String(praticaCode || 'documenti').replace(/[^a-zA-Z0-9_-]/g, '_')
+    if (items.length === 1) return items[0]
+    return { blob: await mergePdfBlobs(items), fileName: `documenti_${safeCode}.pdf` }
+  }, [active, data, docMapTarget, docOptions, hasSel, oid, praticaCode, props.mapView, props.nsConfig, props.printConfig])
+
+  const runDocumentsAction = React.useCallback(() => {
+    if (!documentsMode || documentsLoading) return
     ;(async () => {
-      try {
-        const { blob, fileName } = await buildRapportoPdfBlob(data, _utentiCache, props.nsConfig)
-        const url = makeRapportoPdfUrl(blob, fileName)
-        setPreviewFileName(fileName)
+      setDocumentsLoading(true)
+      setPreviewError(null)
+      if (documentsMode === 'preview') {
+        setPreviewOpen(true)
+        setPreviewLoading(true)
+        setPreviewFileName('')
         setPreviewUrl(prev => {
           revokeRapportoPdfUrl(prev)
-          return url
+          return null
         })
+      }
+      try {
+        const { blob, fileName } = await buildSelectedDocumentsPdf()
+        if (documentsMode === 'preview') {
+          const url = makeRapportoPdfUrl(blob, fileName)
+          setPreviewFileName(fileName)
+          setPreviewUrl(prev => {
+            revokeRapportoPdfUrl(prev)
+            return url
+          })
+          setPreviewLoading(false)
+        } else {
+          downloadBlobFile(blob, fileName)
+        }
+        setDocumentsMode(null)
       } catch (ex: any) {
-        setPreviewError('Errore generazione anteprima: ' + (ex?.message || String(ex)))
+        const text = 'Errore generazione documenti: ' + (ex?.message || String(ex))
+        if (documentsMode === 'preview') {
+          setPreviewOpen(true)
+          setPreviewUrl(prev => {
+            revokeRapportoPdfUrl(prev)
+            return null
+          })
+          setPreviewLoading(false)
+          setPreviewError(text)
+        } else {
+          setMsg({ kind: 'err', text })
+        }
       } finally {
-        setPreviewLoading(false)
+        if (documentsMode === 'preview') setPreviewLoading(false)
+        setDocumentsLoading(false)
       }
     })()
-  }, [data, hasSel])
+  }, [buildSelectedDocumentsPdf, documentsLoading, documentsMode])
+
+  const handleRapportoPreview = React.useCallback(() => {
+    openDocumentsDialog('preview')
+  }, [openDocumentsDialog])
 
   const handleRapportoDownload = React.useCallback(() => {
-    if (!hasSel || !data) return
-    ;(async () => {
-      try {
-        const { blob, fileName } = await buildRapportoPdfBlob(data, _utentiCache, props.nsConfig)
-        downloadBlobFile(blob, fileName)
-      } catch (ex: any) {
-        setMsg({ kind: 'err', text: 'Errore download rapporto: ' + (ex?.message || String(ex)) })
-      }
-    })()
-  }, [data, hasSel])
+    openDocumentsDialog('download')
+  }, [openDocumentsDialog])
 
 
   const sessionIdRef = React.useRef<string>(`sess-${Date.now()}-${Math.random().toString(16).slice(2)}`)
@@ -2991,7 +3197,7 @@ function ActionsPanel (props: {
   // --- Editing pagina (tecnico: TI/RI; amministrativo: TI_AMM/RI_AMM) ---
   const ec = props.editConfig
   const isAmmEditRole = role === 'TI_AMM' || role === 'RI_AMM'
-  const canShowEdit = ec.show && (role === 'TI' || role === 'RI' || isAmmEditRole)
+  const canShowEdit = ec.show && (role === 'TI' || role === 'RI' || role === 'RZ' || isAmmEditRole)
   const roleStatoField = `stato_${role}`
   const rolePresaField = `presa_in_carico_${role}`
   const roleEsitoField = `esito_${role}`
@@ -3006,7 +3212,7 @@ function ActionsPanel (props: {
     : String(pickAttrCI(data, ['ti_assegnato_username', 'ti_assegnato_user', 'ti_assegnato']) || '').trim().toLowerCase()
   const isOwnedByCurrentRole = (role === 'TI' || role === 'TI_AMM')
     ? (!!currentTiUsername && !!assignedTiUsername && currentTiUsername === assignedTiUsername)
-    : (role === 'RI' || role === 'RI_AMM')
+    : (role === 'RI' || role === 'RZ' || role === 'RI_AMM')
 
   const isMeaningfulAudit = (v: any): boolean => !(v === null || v === undefined || v === '' || v === 0 || v === '0')
   const inChargeByRole =
@@ -3028,7 +3234,7 @@ function ActionsPanel (props: {
     inChargeByRole &&
     !roleClosedOrForwarded
 
-  // TI e RI delle aree tecniche devono poter consultare anche le pratiche già
+  // TI, RZ e RI delle aree tecniche devono poter consultare anche le pratiche già
   // trasmesse ad altri ruoli. In tal caso gii-editing-ti viene aperto in sola
   // consultazione; quando la pratica torna nella disponibilità del ruolo, il
   // medesimo controllo rende nuovamente editabili i campi di competenza.
@@ -3037,10 +3243,10 @@ function ActionsPanel (props: {
     !loading &&
     pending === null &&
     canShowEdit &&
-    (role === 'TI' || role === 'RI')
+    (role === 'TI' || role === 'RZ' || role === 'RI')
 
   const canOpenEditPage = canEdit || canOpenTechnicalReadOnly
-  const openInReadOnly = canOpenEditPage && !canEdit && (role === 'TI' || role === 'RI')
+  const openInReadOnly = canOpenEditPage && !canEdit && (role === 'TI' || role === 'RZ' || role === 'RI')
 
   const editButtonTitle = canEdit
     ? (isAmmEditRole ? 'Apri la gestione amministrativa della pratica' : 'Apri la gestione tecnica della pratica')
@@ -3056,7 +3262,7 @@ function ActionsPanel (props: {
     !loading &&
     pending === null
 
-  const handleEditPage = () => {
+  const openEditPage = (requestedSection?: 'violazione') => {
     if (!canOpenEditPage) return
     try {
       const payload = {
@@ -3074,12 +3280,19 @@ function ActionsPanel (props: {
       ;(window as any).__giiEdit = payload
       try { sessionStorage.setItem('GII_EDIT_INTENT', JSON.stringify(payload)) } catch {}
       try { window.dispatchEvent(new CustomEvent('gii-edit-intent-changed')) } catch {}
-      try { sessionStorage.removeItem('GII_NAV_SECTION') } catch {}
-      try { sessionStorage.removeItem('GII_REQUESTED_EDIT_SECTION') } catch {}
-      if (!isAmmEditRole) {
+      if (requestedSection) {
+        try { sessionStorage.setItem('GII_EDIT_TAB', requestedSection) } catch {}
+        try { sessionStorage.setItem('GII_NAV_SECTION', requestedSection) } catch {}
+        try { sessionStorage.setItem('GII_REQUESTED_EDIT_SECTION', requestedSection) } catch {}
+        try { window.dispatchEvent(new CustomEvent('gii:edit-section-change', { detail: { section: requestedSection } })) } catch {}
+      } else if (!isAmmEditRole) {
+        try { sessionStorage.removeItem('GII_NAV_SECTION') } catch {}
+        try { sessionStorage.removeItem('GII_REQUESTED_EDIT_SECTION') } catch {}
         try { sessionStorage.setItem('GII_EDIT_TAB', 'anagrafica') } catch {}
         try { window.dispatchEvent(new CustomEvent('gii:edit-section-change', { detail: { section: 'anagrafica' } })) } catch {}
       } else {
+        try { sessionStorage.removeItem('GII_NAV_SECTION') } catch {}
+        try { sessionStorage.removeItem('GII_REQUESTED_EDIT_SECTION') } catch {}
         try { sessionStorage.removeItem('GII_EDIT_TAB') } catch {}
       }
     } catch { }
@@ -3110,6 +3323,25 @@ function ActionsPanel (props: {
     } catch (e: any) {
       setMsg({ kind: 'err', text: `Errore apertura pagina di modifica: ${e?.message || String(e)}` })
     }
+  }
+
+  const handleEditPage = () => {
+    openEditPage()
+  }
+
+  const openViolationFromDenyPopup = () => {
+    if (!canOpenEditPage) return
+    setDenyPopupMessages([])
+    setActionsMenuOpen(false)
+    setWorkflowSubmitting(false)
+    setPending(null)
+    setLoading(false)
+    setMsg(null)
+    setConfirmAttempted(false)
+    setWorkflowEsitoChoice('')
+    setWorkflowRimandoChoice('')
+    resetStructuredReasons()
+    openEditPage('violazione')
   }
 
   // Leggi i valori in modo robusto:
@@ -4160,29 +4392,36 @@ function ActionsPanel (props: {
 
     // Validazione RI → DT: grado obbligatorio per ciascun articolo interessato, occorrenza obbligatoria solo per Art. 15
     if (p === 'APPROVA' && role === 'RI') {
-      const msgs: string[] = []
+      const missingItems: Array<{ art: number; message: string }> = []
       const artGradoMap: Array<[string, string]> = [
         ['12', 'v_art12'], ['27', 'v_art27'], ['28', 'v_art28'], ['31', 'v_art31'], ['32', 'v_art32'],
         ['33', 'v_art33'], ['34', 'v_art34'], ['35', 'v_art35'], ['36', 'v_art36'], ['37', 'v_art37']
       ]
       const gradi = parseGradiViolazioniForRapporto(pickAttrCI(data, ['gradi_violazioni', 'GRADI_VIOLAZIONI']))
       const norma3Selected = new Set(String(pickAttrCI(data, ['norma_violata3', 'NORMA_VIOLATA3']) || '').split(/\s+/).filter(Boolean))
-      const missingGradi: string[] = []
       for (const [art, field] of artGradoMap) {
         const v = pickAttrCI(data, [field, field.toUpperCase()])
         const selected = v === 1 || v === '1' || v === true || norma3Selected.has(`Art${art}`)
-        if (selected && !/^[1-4]$/.test(String(gradi[art] || ''))) missingGradi.push(`Art. ${art}`)
-      }
-      if (missingGradi.length > 0) {
-        msgs.push(`Impossibile trasmettere: il grado di gravità è obbligatorio per ${missingGradi.join(', ')}. Accedere alla maschera di modifica e impostare i gradi di gravità.`)
+        if (selected && !/^[1-4]$/.test(String(gradi[art] || ''))) {
+          missingItems.push({
+            art: Number(art),
+            message: `Impossibile trasmettere: per l'Art. ${art} è obbligatorio specificare il grado di gravità. Accedere alla scheda Violazione e impostare il valore.`
+          })
+        }
       }
       const tipoAbuso = String(pickAttrCI(data, ['tipo_abuso', 'TIPO_ABUSO']) || '').toLowerCase()
       if (tipoAbuso === 'parziale' || tipoAbuso === 'totale') {
         const occ = pickAttrCI(data, ['occorrenza', 'OCCORRENZA'])
         if (String(occ ?? '').trim() !== '1' && String(occ ?? '').trim() !== '2') {
-          msgs.push("Impossibile trasmettere: per l'Art. 15 è obbligatorio specificare l'occorrenza. Accedere alla maschera di modifica e impostare il valore.")
+          missingItems.push({
+            art: 15,
+            message: "Impossibile trasmettere: per l'Art. 15 è obbligatorio specificare l'occorrenza. Accedere alla scheda Violazione e impostare il valore."
+          })
         }
       }
+      const msgs = missingItems
+        .sort((a, b) => a.art - b.art)
+        .map(item => item.message)
       if (msgs.length > 0) {
         setDenyPopupMessages(msgs)
         return
@@ -5997,6 +6236,128 @@ ${noteTrim}` : noteTrim)
     document.body
   ) : null
 
+  const mapPrintPreparing = !!(docOptions.includeMappa && docAvailability.mappa && !props.mapView)
+  const documentsActionDisabled = documentsLoading || !hasSel || mapPrintPreparing
+
+  const documentsModal = documentsMode ? createPortal(
+    <div
+      data-gii-global-popup-root='1'
+      style={{ position: 'fixed', inset: 0, zIndex: 2147483645, background: 'rgba(15,23,42,0.55)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 18, pointerEvents: 'auto' }}
+      onClick={(e) => { e.preventDefault(); e.stopPropagation() }}
+      onMouseDown={(e) => { e.preventDefault(); e.stopPropagation() }}
+    >
+      <div
+        role='dialog'
+        aria-modal='true'
+        data-gii-global-popup-dialog='1'
+        style={{ width: 'min(600px, calc(100vw - 36px))', maxHeight: 'calc(100vh - 36px)', overflow: 'auto', borderRadius: 14, background: '#fff', color: '#0f172a', boxShadow: '0 22px 70px rgba(15,23,42,0.34)', padding: 18 }}
+        onClick={(e) => { e.stopPropagation() }}
+        onMouseDown={(e) => { e.stopPropagation() }}
+      >
+        <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'flex-start', marginBottom: 14 }}>
+          <div>
+            <div style={{ fontSize: 18, fontWeight: 900, color: '#0f172a' }}>{documentsMode === 'preview' ? 'Visualizza documenti' : 'Scarica documenti'}</div>
+            <div style={{ fontSize: 12.5, color: '#64748b', marginTop: 3 }}>{praticaCode || 'Pratica selezionata'}</div>
+          </div>
+          <button type='button' onClick={() => setDocumentsMode(null)} disabled={documentsLoading} style={{ border: 0, background: 'transparent', color: '#64748b', fontSize: 22, lineHeight: 1, cursor: documentsLoading ? 'not-allowed' : 'pointer' }}>×</button>
+        </div>
+
+        <div style={{ display: 'grid', gap: 10, marginBottom: 14 }}>
+          {([
+            ['includeRapporto', 'Rapporto tecnico'],
+            ['includeNotaSpese', 'Nota spese allegata'],
+            ['includeMappa', 'Mappa da servizio stampa ArcGIS'],
+            ['includeAllegati', 'Allegati probatori impaginabili']
+            ] as const).map(([key, label]) => {
+              const reason = key === 'includeNotaSpese'
+              ? (docAvailability.loadingNotaSpese ? 'verifica disponibilità...' : (!docAvailability.notaSpese ? 'nota spese non disponibile per questo rapporto' : ''))
+              : key === 'includeMappa'
+                ? (docAvailability.loadingMappa ? 'verifica disponibilità...' : (!docAvailability.mappa ? 'mappa non disponibile per questo rapporto' : (!props.mapView ? 'mappa in preparazione' : '')))
+                : key === 'includeAllegati'
+                  ? (docAvailability.loadingAllegati ? 'verifica disponibilità...' : (!docAvailability.allegati ? 'allegati non presenti per questo rapporto' : ''))
+                  : ''
+              const disabled = documentsLoading || (
+              key === 'includeNotaSpese' ? (!!docAvailability.loadingNotaSpese || !docAvailability.notaSpese) :
+              key === 'includeMappa' ? (!!docAvailability.loadingMappa || !docAvailability.mappa) :
+              key === 'includeAllegati' ? (!!docAvailability.loadingAllegati || !docAvailability.allegati) :
+              false
+            )
+            return (
+              <label key={key} style={{ display: 'flex', alignItems: 'center', gap: 9, fontSize: 14, color: disabled ? '#94a3b8' : '#334155', fontWeight: 700 }}>
+                <input
+                  type='checkbox'
+                  checked={!!(docOptions as any)[key]}
+                  disabled={disabled}
+                  onChange={e => updateDocOption({ [key]: e.target.checked } as any)}
+                />
+                <span>{label}</span>
+                {reason && <span style={{ fontSize: 12, fontWeight: 700, color: '#64748b' }}>({reason})</span>}
+              </label>
+            )
+          })}
+        </div>
+
+        {docOptions.includeMappa && !props.mapView && (
+          <div style={{ marginBottom: 14, padding: '10px 12px', borderRadius: 9, background: '#fff7ed', border: '1px solid #fed7aa', color: '#9a3412', fontSize: 13, fontWeight: 700 }}>
+            Mappa in caricamento per la stampa.
+          </div>
+        )}
+
+        {docOptions.includeMappa && props.mapView && (
+          <div style={{ display: 'grid', gap: 12, padding: 12, border: '1px solid #dbe4ef', borderRadius: 10, background: '#f8fafc', marginBottom: 14 }}>
+            <label style={{ display: 'grid', gap: 4, fontSize: 12, fontWeight: 800, color: '#334155' }}>
+              Titolo stampa mappa
+              <input type='text' value={docOptions.mapTitle} onChange={e => updateDocOption({ mapTitle: e.target.value })} style={{ padding: '8px 10px', border: '1px solid #cbd5e1', borderRadius: 8 }} />
+            </label>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1.2fr 0.8fr', gap: 10 }}>
+              <label style={{ display: 'grid', gap: 4, fontSize: 12, fontWeight: 800, color: '#334155' }}>
+                Layout
+                <select value={docOptions.mapLayout} onChange={e => updateDocOption({ mapLayout: e.target.value })} style={{ padding: '8px 10px', border: '1px solid #cbd5e1', borderRadius: 8 }}>
+                  <option value='A4 Portrait'>A4 Portrait</option>
+                  <option value='A4 Landscape'>A4 Landscape</option>
+                  <option value='A3 Portrait'>A3 Portrait</option>
+                  <option value='A3 Landscape'>A3 Landscape</option>
+                  <option value='MAP_ONLY'>MAP_ONLY</option>
+                </select>
+              </label>
+              <label style={{ display: 'grid', gap: 4, fontSize: 12, fontWeight: 800, color: '#334155' }}>
+                Mappa base
+                <select value={docOptions.mapBasemap} onChange={e => updateDocOption({ mapBasemap: e.target.value })} style={{ padding: '8px 10px', border: '1px solid #cbd5e1', borderRadius: 8 }}>
+                  <option value='satellite'>Ortofoto</option>
+                  <option value='hybrid'>Ortofoto con etichette</option>
+                  <option value='topo-vector'>Topografica</option>
+                  <option value='streets-vector'>Stradale</option>
+                </select>
+              </label>
+              <label style={{ display: 'grid', gap: 4, fontSize: 12, fontWeight: 800, color: '#334155' }}>
+                Scala
+                <input type='number' min={100} step={100} value={docOptions.mapScale} onChange={e => updateDocOption({ mapScale: Number(e.target.value) || 1000 })} style={{ padding: '8px 10px', border: '1px solid #cbd5e1', borderRadius: 8 }} />
+              </label>
+            </div>
+            <div style={{ display: 'grid', gap: 6 }}>
+              <div style={{ fontSize: 12, fontWeight: 900, color: '#334155' }}>Layer da stampare</div>
+              {printableLayerTree.length === 0 ? (
+                <div style={{ fontSize: 13, color: '#64748b' }}>La mappa è agganciata, ma non espone layer stampabili leggibili.</div>
+              ) : (
+                <div style={{ display: 'grid', gap: 5, maxHeight: 240, overflow: 'auto', padding: '6px 8px', border: '1px solid #e2e8f0', borderRadius: 8, background: '#fff' }}>
+                  {printableLayerTree.map(node => renderPrintableLayerNode(node))}
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
+        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10, flexWrap: 'wrap' }}>
+          <button type='button' onClick={() => setDocumentsMode(null)} disabled={documentsLoading} style={{ padding: '9px 16px', borderRadius: 8, border: '1px solid #cbd5e1', background: '#fff', color: '#334155', fontWeight: 700, cursor: documentsLoading ? 'not-allowed' : 'pointer' }}>Annulla</button>
+          <button type='button' onClick={runDocumentsAction} disabled={documentsActionDisabled} style={{ padding: '9px 18px', borderRadius: 8, border: '1px solid #1d4ed8', background: '#1d4ed8', color: '#fff', fontWeight: 900, cursor: documentsActionDisabled ? 'not-allowed' : 'pointer', opacity: documentsActionDisabled ? 0.65 : 1 }}>
+            {documentsLoading ? 'Genero...' : (mapPrintPreparing ? 'Preparo mappa...' : (documentsMode === 'preview' ? 'Visualizza' : 'Scarica'))}
+          </button>
+        </div>
+      </div>
+    </div>,
+    document.body
+  ) : null
+
   const reportPreviewModal = previewOpen ? createPortal(
     <div
       data-gii-global-popup-root='1'
@@ -6121,7 +6482,7 @@ ${noteTrim}` : noteTrim)
                 type='button'
                 disabled={!canUseRapportoPdf}
                 onClick={handleRapportoPreview}
-                title={canUseRapportoPdf ? 'Anteprima rapporto (PDF)' : 'Anteprima non disponibile: selezionare un rapporto.'}
+                title={canUseRapportoPdf ? 'Scegli documenti da visualizzare' : 'Anteprima non disponibile: selezionare un rapporto.'}
                 style={{
                   width: ((ui?.btnPaddingY ?? 8) * 2) + (ui?.btnFontSize ?? 14) + 10,
                   height: ((ui?.btnPaddingY ?? 8) * 2) + (ui?.btnFontSize ?? 14) + 10,
@@ -6149,7 +6510,7 @@ ${noteTrim}` : noteTrim)
                 type='button'
                 disabled={!canUseRapportoPdf}
                 onClick={handleRapportoDownload}
-                title={canUseRapportoPdf ? 'Scarica rapporto (PDF)' : 'Download non disponibile: selezionare un rapporto.'}
+                title={canUseRapportoPdf ? 'Scegli documenti da scaricare' : 'Download non disponibile: selezionare un rapporto.'}
                 style={{
                   width: ((ui?.btnPaddingY ?? 8) * 2) + (ui?.btnFontSize ?? 14) + 10,
                   height: ((ui?.btnPaddingY ?? 8) * 2) + (ui?.btnFontSize ?? 14) + 10,
@@ -6175,6 +6536,7 @@ ${noteTrim}` : noteTrim)
         {pendingModal}
         {incompleteNotaSpeseWarningModal}
         {zeroNotaSpeseWarningModal}
+        {documentsModal}
         {reportPreviewModal}
 
         {denyPopupMessages.length > 0 && createPortal(
@@ -6201,9 +6563,18 @@ ${noteTrim}` : noteTrim)
                   {m}
                 </div>
               ))}
-              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 4 }}>
-                <button type='button' onClick={() => setDenyPopupMessages([])} style={{ padding: '8px 18px', borderRadius: 8, border: '1px solid rgba(0,0,0,0.18)', background: '#b42318', color: '#fff', fontWeight: 700, fontSize: 15, cursor: 'pointer' }}>
+              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 4, flexWrap: 'wrap' }}>
+                <button type='button' onClick={() => setDenyPopupMessages([])} style={{ padding: '8px 18px', borderRadius: 8, border: '1px solid rgba(0,0,0,0.18)', background: '#fff', color: '#374151', fontWeight: 700, fontSize: 15, cursor: 'pointer' }}>
                   Chiudi
+                </button>
+                <button
+                  type='button'
+                  onClick={openViolationFromDenyPopup}
+                  disabled={!canOpenEditPage}
+                  title={canOpenEditPage ? 'Apri la scheda Violazione della pratica selezionata' : 'Scheda di modifica non disponibile per la pratica selezionata'}
+                  style={{ padding: '8px 18px', borderRadius: 8, border: '1px solid rgba(0,0,0,0.18)', background: canOpenEditPage ? '#1d4ed8' : '#e5e7eb', color: canOpenEditPage ? '#fff' : '#9ca3af', fontWeight: 700, fontSize: 15, cursor: canOpenEditPage ? 'pointer' : 'not-allowed' }}
+                >
+                  Vai alla scheda Violazione
                 </button>
               </div>
             </div>
@@ -6346,7 +6717,7 @@ const AREA_LABELS: Record<string, string> = {
   AGR: 'AGRARIA', TEC: 'TECNICA', AMM: 'AFFARI GENERALI E PROGRAMMAZIONE FINANZIARIA'
 }
 const SETTORE_LABELS: Record<string, string> = {
-  D1: 'DISTRETTO 1 \u2013 SAN SPERATE',
+  D1: "DISTRETTO 1 \u2013 QUARTU SANT'ELENA/VILLAPUTZU/MURAVERA \u2013 SAN SPERATE",
   D2: 'DISTRETTO 2 \u2013 SERRAMANNA/PIMPISU',
   D3: 'DISTRETTO 3 \u2013 SAN GAVINO/VILLACIDRO',
   D4: 'DISTRETTO 4 \u2013 BASSO SULCIS',
@@ -6525,19 +6896,13 @@ function buildPlaceholderMap (data: any, utentiCache: Map<string, UtenteCached> 
   const surfValIncludingZero = (on: boolean, ...fields: string[]) => { if (!on) return ''; for (const f of fields) { const v = d[f]; if (v != null && v !== '') return fmtNum(v) } return '0' }
   const gradiViolazioni = parseGradiViolazioniForRapporto(d.gradi_violazioni)
   const occorrenzaArt15 = occorrenzaArt15ForRapporto(d.occorrenza, art15on)
-  const origPratica = d.origine_pratica ?? d.Origine_pratica
-  const praticaPrefix = (origPratica === 2 || origPratica === '2') ? 'TI' : 'TR'
-  const oidVal = d.OBJECTID ?? d.objectid ?? ''
   const numeroRapportoTecnico = String(pickRapportoAttrCI(d, [
     'numero_rapporto_tecnico', 'Numero_rapporto_tecnico', 'NUMERO_RAPPORTO_TECNICO',
     'numero_rapporto', 'Numero_rapporto', 'NUMERO_RAPPORTO',
     'codice_rapporto', 'Codice_rapporto', 'CODICE_RAPPORTO',
     'n_rapporto', 'N_RAPPORTO'
   ]) || '').trim()
-  const numeroRilevazione = oidVal
-    ? `${Number(oidVal)}-${praticaPrefix}${settoreCod ? `-${settoreCod}` : ''}`
-    : ''
-  const codPratica = numeroRapportoTecnico || numeroRilevazione
+  const codPratica = numeroRapportoTecnico || '-'
 
   const rapportoRespinto = isRapportoRespintoForPdf(d)
   const rapportoApprovato = !rapportoRespinto && isRapportoApprovatoForPdf(d)
@@ -6585,9 +6950,9 @@ function buildPlaceholderMap (data: any, utentiCache: Map<string, UtenteCached> 
     telefono: esc(d.telefono || ''), cellulare: esc(d.cellulare || ''), email: esc(d.email || ''), pec: esc(d.pec || ''),
     presenza_trasgressore: String(d.presenza_trasgressore || '').toLowerCase() === 'si' || String(d.presenza_trasgressore || '').toLowerCase() === 'sì' || String(d.presenza_trasgressore || '') === '1' ? 'S\u00EC' : (String(d.presenza_trasgressore || '').toLowerCase() === 'no' || String(d.presenza_trasgressore || '') === '0' ? 'No' : String(d.presenza_trasgressore || '')),
     ...iterPlaceholders,
-    idrante: esc(d.idrante || ''), comune: '', foglio: '', mappali: '', altro_luogo: '',
-    distretto_irriguo: esc(d.distretto_irriguo || ''), comizio: esc(d.comizio || ''),
-    matricola_contatore: esc(d.matricola_contatore || ''), matricola_tessera: esc(d.matricola_tessera || ''),
+    idrante: esc(pickRapportoAttrCI(d, ['idrante', 'idrante_numero']) || ''), comune: '', foglio: '', mappali: '', altro_luogo: '',
+    distretto_irriguo: esc(pickRapportoAttrCI(d, ['distretto_irriguo', 'distretto']) || ''), comizio: esc(pickRapportoAttrCI(d, ['comizio']) || ''),
+    matricola_contatore: esc(pickRapportoAttrCI(d, ['matricola_contatore', 'contatore_matricola']) || ''), matricola_tessera: esc(pickRapportoAttrCI(d, ['matricola_tessera', 'tessera_matricola']) || ''),
     importo_rimborso: fmtNum(d.ns_totale_complessivo) ? fmtNum(d.ns_totale_complessivo) + ' €' : '',
     data_compilazione: formatDateIt(d.data_firma),
     rapporto_respinto: rapportoRespinto ? '1' : '',
@@ -6877,7 +7242,8 @@ function notaSpeseGroupsForRapportoPdf (
 
 async function buildRapportoPdfBlob (
   data: any, utentiCache: Map<string, UtenteCached> | null,
-  nsConfig?: { detailUrl: string; parametriUrl: string; parametroCode: string }
+  nsConfig?: { detailUrl: string; parametriUrl: string; parametroCode: string },
+  docOptions?: { includeRapporto?: boolean; includeNotaSpese?: boolean }
 ): Promise<{ blob: Blob; fileName: string }> {
   const iterGlobalId = pickRapportoAttrCI(data, ['globalid', 'GlobalID', 'GLOBALID', 'parent_globalid'])
   const iterCicli = await loadRapportoIterCicliForPdf(iterGlobalId)
@@ -6946,14 +7312,18 @@ async function buildRapportoPdfBlob (
     ? '(Vedi note spese allegate)'
     : (reportNsGroups.length === 1 ? '(Vedi nota spese allegata)' : '')
 
-  const rapportoBytes = await buildRapportoPdf(map)
-  let finalBytes: Uint8Array = rapportoBytes
+  const includeRapporto = docOptions?.includeRapporto !== false
+  const includeNotaSpese = docOptions?.includeNotaSpese !== false
+  const rapportoBytes = includeRapporto ? await buildRapportoPdf(map) : null
+  let finalBytes: Uint8Array = rapportoBytes || new Uint8Array()
 
-  if (reportNsGroups.length > 0) {
+  if (includeNotaSpese && reportNsGroups.length > 0) {
     const merged = await PDFDocument.create()
-    const rapDoc = await PDFDocument.load(rapportoBytes)
-    const rapPages = await merged.copyPages(rapDoc, rapDoc.getPageIndices())
-    rapPages.forEach(pg => merged.addPage(pg))
+    if (rapportoBytes) {
+      const rapDoc = await PDFDocument.load(rapportoBytes)
+      const rapPages = await merged.copyPages(rapDoc, rapDoc.getPageIndices())
+      rapPages.forEach(pg => merged.addPage(pg))
+    }
 
     for (let i = 0; i < reportNsGroups.length; i++) {
       const group = reportNsGroups[i]
@@ -6997,9 +7367,13 @@ async function buildRapportoPdfBlob (
 
     finalBytes = await merged.save()
   }
+  if (!includeRapporto && (!includeNotaSpese || reportNsGroups.length === 0)) {
+    throw new Error('Nessuna nota spese allegabile trovata per il rapporto selezionato.')
+  }
 
   const blob = new Blob([finalBytes as any], { type: 'application/pdf' })
-  return { blob, fileName }
+  const outFileName = includeRapporto ? fileName : fileName.replace(/^rapporto_/i, 'nota_spese_')
+  return { blob, fileName: outFileName }
 }
 
 function makeRapportoPdfUrl (blob: Blob, fileName: string): string {
@@ -7023,12 +7397,659 @@ function downloadBlobFile (blob: Blob, fileName: string): void {
   window.setTimeout(() => { try { URL.revokeObjectURL(url) } catch {} }, 1500)
 }
 
+type DocumentPrintOptions = {
+  includeRapporto: boolean
+  includeNotaSpese: boolean
+  includeMappa: boolean
+  includeAllegati: boolean
+  mapLayout: string
+  mapScale: number
+  mapTitle: string
+  mapBasemap: string
+  mapLayerVisibility: Record<string, boolean>
+  mapTarget?: any
+}
+
+type DetailMapConfigForActions = {
+  basemap: string
+  centerLon: number
+  centerLat: number
+  initZoom: number
+  pointZoom: number
+  webMapItemId: string
+  mapLayerTitle: string
+  mapLayerUrl: string
+  mapLayerId: string
+  mapLayerLayerId: string
+}
+
+type PrintableMapLayerItem = {
+  key: string
+  title: string
+  visible: boolean
+  layer: any
+  ancestors: any[]
+}
+
+type PrintableMapLayerNode = {
+  key: string
+  title: string
+  visible: boolean
+  layer: any
+  children: PrintableMapLayerNode[]
+  item?: PrintableMapLayerItem
+}
+
+function mapLayerKey (layer: any, idx: string): string {
+  return String(layer?.id || layer?.uid || layer?.title || layer?.url || `layer_${idx}`).replace(/\s+/g, '_')
+}
+
+function collectLayerListOrderForActions (collection: any): any[] {
+  const items: any[] = []
+  try { collection?.forEach?.((l: any) => items.push(l)) } catch {}
+  return items.reverse()
+}
+
+function listPrintableMapLayerTree (view: any): PrintableMapLayerNode[] {
+  const seen = new Set<string>()
+  const makeNode = (layer: any, idxPath: string, ancestors: any[], ancestorVisible: boolean): PrintableMapLayerNode | null => {
+    if (!layer) return null
+    const children: any[] = []
+    children.push(...collectLayerListOrderForActions(layer?.layers))
+    children.push(...collectLayerListOrderForActions(layer?.sublayers))
+    const title = String(layer?.title || layer?.id || layer?.name || `Layer ${idxPath}`)
+    const keyBase = mapLayerKey(layer, idxPath)
+    const key = seen.has(keyBase) ? `${keyBase}_${idxPath}` : keyBase
+    seen.add(key)
+    const visible = ancestorVisible && layer?.visible !== false
+    const childNodes = children
+      .map((child, childIdx) => makeNode(child, `${idxPath}_${childIdx}`, [...ancestors, layer], visible))
+      .filter(Boolean) as PrintableMapLayerNode[]
+    const node: PrintableMapLayerNode = {
+      key,
+      title,
+      visible,
+      layer,
+      children: childNodes
+    }
+    if (!childNodes.length) {
+      node.item = { key, title, visible, layer, ancestors }
+    }
+    return node
+  }
+  const out: PrintableMapLayerNode[] = []
+  try {
+    const layers = collectLayerListOrderForActions(view?.map?.layers)
+    layers.forEach((layer, idx) => {
+      const node = makeNode(layer, String(idx), [], true)
+      if (node) out.push(node)
+    })
+  } catch {}
+  return out
+}
+
+function flattenPrintableMapLayerTree (nodes: PrintableMapLayerNode[]): PrintableMapLayerItem[] {
+  const out: PrintableMapLayerItem[] = []
+  const walk = (node: PrintableMapLayerNode) => {
+    if (node.item) out.push(node.item)
+    node.children.forEach(walk)
+  }
+  nodes.forEach(walk)
+  return out
+}
+
+function listPrintableMapLayers (view: any): PrintableMapLayerItem[] {
+  return flattenPrintableMapLayerTree(listPrintableMapLayerTree(view))
+}
+
+function collectPrintableMapLayerKeys (node: PrintableMapLayerNode): string[] {
+  return flattenPrintableMapLayerTree([node]).map(item => item.key)
+}
+
+function mapPrintPointGeometryForActions (target: any, Point: any): any | null {
+  if (!target) return null
+  const sr = target.spatialReference || { wkid: 4326 }
+  const lon = Number(target.longitude ?? (sr?.wkid === 4326 ? target.x : NaN))
+  const lat = Number(target.latitude ?? (sr?.wkid === 4326 ? target.y : NaN))
+  if (Number.isFinite(lon) && Number.isFinite(lat) && !(lon === 0 && lat === 0)) {
+    return new Point({ longitude: lon, latitude: lat, spatialReference: { wkid: 4326 } })
+  }
+  const x = Number(target.x)
+  const y = Number(target.y)
+  if (Number.isFinite(x) && Number.isFinite(y) && !(x === 0 && y === 0)) {
+    return new Point({ x, y, spatialReference: sr })
+  }
+  return null
+}
+
+function delayForActions (ms: number): Promise<void> {
+  return new Promise(resolve => window.setTimeout(resolve, ms))
+}
+
+function currentBasemapId (view: any): string {
+  try {
+    return String(view?.map?.basemap?.id || view?.map?.basemap?.portalItem?.id || view?.map?.basemap?.title || '')
+  } catch {
+    return ''
+  }
+}
+
+function mutableForActions<T = any> (value: any): T {
+  return value?.asMutable ? value.asMutable({ deep: true }) : (value?.toJS ? value.toJS() : value)
+}
+
+function detailMapConfigFromWidgetConfigForActions (cfg: any): DetailMapConfigForActions {
+  return {
+    basemap: String(cfg?.basemap || cfg?.mapBasemap || 'topo-vector'),
+    centerLon: Number(cfg?.centerLon ?? cfg?.mapCenterLon) || 9.0,
+    centerLat: Number(cfg?.centerLat ?? cfg?.mapCenterLat) || 39.5,
+    initZoom: Number(cfg?.initZoom ?? cfg?.mapInitZoom) || 8,
+    pointZoom: Number(cfg?.pointZoom ?? cfg?.mapPointZoom) || 19,
+    webMapItemId: String(cfg?.webMapItemId || cfg?.mapWebMapItemId || ''),
+    mapLayerTitle: String(cfg?.mapLayerTitle || ''),
+    mapLayerUrl: String(cfg?.mapLayerUrl || ''),
+    mapLayerId: String(cfg?.mapLayerId || ''),
+    mapLayerLayerId: String(cfg?.mapLayerLayerId || '')
+  }
+}
+
+function discoverDetailMapConfigForActions (): DetailMapConfigForActions | null {
+  try {
+    const fromWindow = (window as any).__giiDetailMapConfig
+    if (fromWindow) return detailMapConfigFromWidgetConfigForActions(fromWindow)
+  } catch {}
+  try {
+    const state: any = getAppStore?.()?.getState?.()
+    const widgets = mutableForActions<Record<string, any>>(state?.appConfig?.widgets || {})
+    const entries = Object.entries(widgets || {}) as Array<[string, any]>
+    const found = entries.find(([, w]) => String(w?.uri || '').toLowerCase() === 'widgets/gii-dettaglio-pratiche/')
+    if (found) return detailMapConfigFromWidgetConfigForActions(found[1]?.config || {})
+  } catch {}
+  return null
+}
+
+function getAttachmentOidFieldNameForActions (layer: any, ds?: any): string {
+  const fromLayer = layer?.objectIdField ? String(layer.objectIdField) : ''
+  const fromDs = (typeof ds?.getIdField === 'function' ? String(ds.getIdField() || '') : '')
+  return fromLayer || fromDs || 'OBJECTID'
+}
+
+function attachmentLayerUrlForActions (layer: any, ds?: any): string {
+  return normalizeArcgisLayerUrl(layer?.url || ds?.getDataSourceJson?.()?.url || ds?.dataSourceJson?.url || '')
+}
+
+async function resolveFeatureLayerForActionsQuery (ds: any, preferredUrl?: string | null): Promise<any | null> {
+  if (!ds && !preferredUrl) return null
+  const candidates: any[] = []
+  const push = (x: any) => { if (x && !candidates.includes(x)) candidates.push(x) }
+  push(ds)
+  try {
+    const dm = DataSourceManager.getInstance()
+    const byId = ds?.id ? dm.getDataSource(ds.id) : null
+    push(byId)
+    const belongId = ds?.belongToDataSource
+    if (typeof belongId === 'string' && belongId) push(dm.getDataSource(belongId))
+  } catch {}
+  for (const c of candidates) {
+    const cAny: any = c
+    const l = unwrapJsapiLayer(
+      (typeof cAny.getLayer === 'function' ? cAny.getLayer() : null) ??
+      (typeof cAny.getJsApiLayer === 'function' ? cAny.getJsApiLayer() : null) ??
+      (typeof cAny.getJSAPILayer === 'function' ? cAny.getJSAPILayer() : null) ??
+      cAny.layer
+    ) as any
+    if (l && typeof l.queryFeatures === 'function') return l
+  }
+  try {
+    const url = normalizeArcgisLayerUrl(preferredUrl || ds?.getDataSourceJson?.()?.url || ds?.dataSourceJson?.url || '')
+    if (!url) return null
+    const FeatureLayer = await loadEsriModule<any>('esri/layers/FeatureLayer')
+    const fl = new FeatureLayer({ url })
+    if (typeof fl?.load === 'function') await fl.load().catch(() => {})
+    return fl && typeof fl.queryFeatures === 'function' ? fl : null
+  } catch {
+    return null
+  }
+}
+
+function parseCoordinatePairForActions (raw: any): { x: number; y: number } | null {
+  const text = String(raw ?? '').trim()
+  if (!text) return null
+  const nums = text.match(/-?\d+(?:[.,]\d+)?/g)
+  if (!nums || nums.length < 2) return null
+  const a = Number(String(nums[0]).replace(',', '.'))
+  const b = Number(String(nums[1]).replace(',', '.'))
+  if (!Number.isFinite(a) || !Number.isFinite(b)) return null
+  if (a === 0 && b === 0) return null
+  const looksLatLon = Math.abs(a) <= 90 && Math.abs(b) <= 180
+  const looksLonLat = Math.abs(a) <= 180 && Math.abs(b) <= 90
+  if (looksLonLat) return { x: a, y: b }
+  if (looksLatLon) return { x: b, y: a }
+  return { x: a, y: b }
+}
+
+function pointGeometryFromAttrsForActions (attrs: any): any | null {
+  if (!attrs) return null
+  const g = attrs.geometry || attrs
+  if (g && (g.type === 'point' || g.x != null || g.longitude != null) && (g.y != null || g.latitude != null)) {
+    const gx = Number(g.x ?? g.longitude)
+    const gy = Number(g.y ?? g.latitude)
+    if (Number.isFinite(gx) && Number.isFinite(gy) && !(gx === 0 && gy === 0)) {
+      if (attrs.geometry || g.type === 'point') return g
+      return { type: 'point', x: gx, y: gy, spatialReference: g.spatialReference || attrs.spatialReference || { wkid: 4326 } }
+    }
+  }
+  const directPairs: Array<[any, any, any]> = [
+    [g?.x ?? g?.longitude ?? attrs.longitude ?? attrs.lon ?? attrs.x, g?.y ?? g?.latitude ?? attrs.latitude ?? attrs.lat ?? attrs.y, g?.spatialReference],
+    [attrs.Longitude ?? attrs.LONGITUDE ?? attrs.LON ?? attrs.lon_wgs84 ?? attrs.x_wgs84, attrs.Latitude ?? attrs.LATITUDE ?? attrs.LAT ?? attrs.lat_wgs84 ?? attrs.y_wgs84, { wkid: 4326 }],
+    [attrs.coord_x ?? attrs.coordX ?? attrs.x_coord ?? attrs.X, attrs.coord_y ?? attrs.coordY ?? attrs.y_coord ?? attrs.Y, attrs.spatialReference]
+  ]
+  for (const [rawX, rawY, sr] of directPairs) {
+    const gx = Number(rawX)
+    const gy = Number(rawY)
+    if (Number.isFinite(gx) && Number.isFinite(gy) && !(gx === 0 && gy === 0)) {
+      return { type: 'point', x: gx, y: gy, spatialReference: sr || { wkid: 4326 } }
+    }
+  }
+  const textKeys = [
+    'coordinate_punto_mappa', 'Coordinate_punto_mappa', 'COORDINATE_PUNTO_MAPPA',
+    'coordinate', 'Coordinate', 'COORDINATE',
+    'coords', 'Coords', 'COORDS',
+    'punto_mappa', 'Punto_mappa', 'PUNTO_MAPPA'
+  ]
+  for (const key of textKeys) {
+    const pair = parseCoordinatePairForActions(attrs?.[key])
+    if (pair) return { type: 'point', longitude: pair.x, latitude: pair.y, spatialReference: { wkid: 4326 } }
+  }
+  return null
+}
+
+function hasUsablePointAttrsForActions (attrs: any): boolean {
+  return !!pointGeometryFromAttrsForActions(attrs)
+}
+
+async function resolvePointGeometryForActions (ds: any, oid: number, idFieldName: string, attrs?: any, preferredUrl?: string | null): Promise<any | null> {
+  if (!Number.isFinite(oid) || oid <= 0) return null
+  const fromAttrs = pointGeometryFromAttrsForActions(attrs)
+  if (fromAttrs) return fromAttrs
+  const layer = await resolveFeatureLayerForActionsQuery(ds, preferredUrl)
+  if (!layer || typeof layer.queryFeatures !== 'function') return null
+  if (typeof layer.load === 'function') { try { await layer.load() } catch {} }
+  const idField = String(layer.objectIdField || idFieldName || 'OBJECTID')
+  const q = layer.createQuery ? layer.createQuery() : {}
+  q.where = `${idField} = ${Number(oid)}`
+  q.outFields = ['*']
+  q.returnGeometry = true
+  const res = await layer.queryFeatures(q)
+  const feat = Array.isArray(res?.features) ? res.features[0] : null
+  const geom = feat?.geometry
+  const gx = Number(geom?.x ?? geom?.longitude ?? 0)
+  const gy = Number(geom?.y ?? geom?.latitude ?? 0)
+  if (Number.isFinite(gx) && Number.isFinite(gy) && !(gx === 0 && gy === 0)) return geom
+  return pointGeometryFromAttrsForActions(feat?.attributes)
+}
+
+async function hasPointGeometryForActions (ds: any, oid: number, idFieldName: string, attrs?: any, preferredUrl?: string | null): Promise<boolean> {
+  return !!(await resolvePointGeometryForActions(ds, oid, idFieldName, attrs, preferredUrl))
+}
+
+function hasNotaSpeseLocalForActions (data: any): boolean {
+  if (buildArt30RapportoSummaryForAzioni(data).hasData) return true
+  const saved = parseArt30NumberForRapportoPdf(pickRapportoAttrCI(data, ['ns_totale_complessivo']))
+  return saved != null && saved !== 0
+}
+
+async function hasNotaSpeseForActions (
+  data: any,
+  nsConfig?: { detailUrl: string; parametriUrl: string; parametroCode: string }
+): Promise<boolean> {
+  if (hasNotaSpeseLocalForActions(data)) return true
+  const detailUrl = normalizeArcgisLayerUrl(nsConfig?.detailUrl)
+  const parentGlobalId = String(data?.GlobalID || data?.globalid || data?.GLOBALID || data?.global_id || '').trim()
+  if (!detailUrl || !parentGlobalId) return false
+  try {
+    const FeatureLayer = await loadEsriModule<any>('esri/layers/FeatureLayer')
+    const fl = new FeatureLayer({ url: detailUrl })
+    if (typeof fl.load === 'function') await fl.load()
+    if (typeof fl.queryFeatureCount === 'function') {
+      const count = await fl.queryFeatureCount({ where: parentGlobalidWhereForRapportoPdf(parentGlobalId) })
+      return Number(count) > 0
+    }
+    const res = await fl.queryFeatures({ where: parentGlobalidWhereForRapportoPdf(parentGlobalId), outFields: ['OBJECTID'], returnGeometry: false })
+    return (res?.features || []).length > 0
+  } catch {
+    return false
+  }
+}
+
+async function mergePdfBlobs (items: Array<{ blob: Blob; fileName: string }>): Promise<Blob> {
+  const merged = await PDFDocument.create()
+  for (const item of items) {
+    const bytes = new Uint8Array(await item.blob.arrayBuffer())
+    const src = await PDFDocument.load(bytes as any)
+    const pages = await merged.copyPages(src, src.getPageIndices())
+    pages.forEach(pg => merged.addPage(pg))
+  }
+  const out = await merged.save()
+  return new Blob([out as any], { type: 'application/pdf' })
+}
+
+async function buildMapPrintPdfBlob (view: any, printServiceUrl: string, opts: DocumentPrintOptions): Promise<{ blob: Blob; fileName: string }> {
+  if (!view) throw new Error('Map view non disponibile per la stampa.')
+  const serviceUrl = String(printServiceUrl || '').trim()
+  if (!serviceUrl) throw new Error('Servizio stampa ArcGIS non configurato.')
+
+  const print = await loadEsriModule<any>('esri/rest/print')
+  const PrintTemplate = await loadEsriModule<any>('esri/rest/support/PrintTemplate')
+  const PrintParameters = await loadEsriModule<any>('esri/rest/support/PrintParameters')
+  const Basemap = await loadEsriModule<any>('esri/Basemap').catch(() => null)
+  const Graphic = await loadEsriModule<any>('esri/Graphic').catch(() => null)
+  const Point = await loadEsriModule<any>('esri/geometry/Point').catch(() => null)
+  const SimpleMarkerSymbol = await loadEsriModule<any>('esri/symbols/SimpleMarkerSymbol').catch(() => null)
+
+  const layers = listPrintableMapLayers(view)
+  const oldVisibilityMap = new Map<any, boolean>()
+  layers.forEach(item => {
+    ;[item.layer, ...(item.ancestors || [])].forEach(layer => {
+      if (layer && !oldVisibilityMap.has(layer)) oldVisibilityMap.set(layer, layer.visible !== false)
+    })
+  })
+  const oldBasemap = view?.map?.basemap
+  const oldScale = Number(view?.scale)
+  const oldViewpoint = (() => { try { return view?.viewpoint?.clone ? view.viewpoint.clone() : view?.viewpoint } catch { return null } })()
+  let printMarker: any = null
+  try {
+    layers.forEach(item => {
+      if (item.layer && Object.prototype.hasOwnProperty.call(opts.mapLayerVisibility || {}, item.key)) {
+        const visible = !!opts.mapLayerVisibility[item.key]
+        if (visible) {
+          ;(item.ancestors || []).forEach(layer => { try { layer.visible = true } catch {} })
+        }
+        item.layer.visible = visible
+      }
+    })
+    if (opts.mapBasemap && view?.map) {
+      try {
+        const bm = Basemap?.fromId ? Basemap.fromId(String(opts.mapBasemap)) : String(opts.mapBasemap)
+        view.map.basemap = bm || String(opts.mapBasemap)
+        if (typeof view.map.basemap?.load === 'function') await view.map.basemap.load().catch(() => {})
+        await view.when?.()
+        try { await view.whenLayerView?.(view.map.basemap?.baseLayers?.getItemAt?.(0)) } catch {}
+        try { view.requestRender?.() } catch {}
+      } catch {
+        try { view.map.basemap = String(opts.mapBasemap) } catch {}
+      }
+    }
+    const requestedScale = Number(opts.mapScale)
+    if (typeof view.goTo === 'function') {
+      if (opts.mapTarget) {
+        try { await view.goTo({ target: opts.mapTarget, scale: Number.isFinite(requestedScale) && requestedScale > 0 ? requestedScale : undefined }, { animate: false }) } catch {}
+      } else if (Number.isFinite(requestedScale) && requestedScale > 0) {
+        try { await view.goTo({ scale: requestedScale }, { animate: false }) } catch {}
+      }
+    }
+    if (opts.mapTarget && Graphic && Point && SimpleMarkerSymbol && view?.graphics) {
+      try {
+        const geometry = mapPrintPointGeometryForActions(opts.mapTarget, Point)
+        if (geometry) {
+          const symbol = new SimpleMarkerSymbol({
+            style: 'circle',
+            color: [220, 38, 38, 220],
+            size: 18,
+            outline: { color: [255, 255, 255, 255], width: 2.5 }
+          })
+          printMarker = new Graphic({ geometry, symbol, attributes: { source: 'gii-azioni-print-marker' } })
+          view.graphics.add(printMarker)
+          try { view.requestRender?.() } catch {}
+          await delayForActions(120)
+        }
+      } catch {}
+    }
+
+    const template = new PrintTemplate({
+      format: 'pdf',
+      layout: opts.mapLayout || 'A4 Portrait',
+      layoutOptions: {
+        titleText: opts.mapTitle || 'Allegato cartografico al rapporto tecnico',
+        authorText: 'Consorzio di Bonifica della Sardegna Meridionale',
+        copyrightText: ''
+      },
+      exportOptions: { dpi: 150 },
+      scalePreserved: true,
+      outScale: Number(opts.mapScale) || Number(view?.scale) || undefined
+    })
+    const params = new PrintParameters({ view, template })
+    const result = await print.execute(serviceUrl, params)
+    const url = String(result?.url || result?.href || '')
+    if (!url) throw new Error('Il servizio stampa non ha restituito un PDF.')
+    const resp = await fetch(url)
+    if (!resp.ok) throw new Error(`Download stampa mappa fallito (HTTP ${resp.status}).`)
+    return { blob: await resp.blob(), fileName: 'mappa_rapporto.pdf' }
+  } finally {
+    if (printMarker && view?.graphics) {
+      try { view.graphics.remove(printMarker) } catch {}
+    }
+    oldVisibilityMap.forEach((visible, layer) => { try { layer.visible = visible } catch {} })
+    try { if (oldBasemap && view?.map) view.map.basemap = oldBasemap } catch {}
+    if (typeof view?.goTo === 'function') {
+      if (oldViewpoint) {
+        try { await view.goTo(oldViewpoint, { animate: false }) } catch {}
+      } else if (Number.isFinite(oldScale) && oldScale > 0) {
+        try { await view.goTo({ scale: oldScale }, { animate: false }) } catch {}
+      }
+    }
+  }
+}
+
+async function queryFeatureAttachmentsForActions (layer: any, oid: number, ds?: any): Promise<any[]> {
+  if (!layer || !oid) return []
+  const pullInfos = (obj: any): any[] => {
+    if (!obj) return []
+    if (Array.isArray(obj)) return obj
+    if (Array.isArray(obj.attachmentInfos)) return obj.attachmentInfos
+    if (Array.isArray(obj.attachments)) return obj.attachments
+    return []
+  }
+  const oidField = getAttachmentOidFieldNameForActions(layer, ds)
+  try {
+    if (typeof layer.queryAttachments === 'function') {
+      let res: any = null
+      try {
+        res = await layer.queryAttachments({ attributes: { [oidField]: oid } }, { returnMetadata: true, returnUrl: true })
+      } catch {
+        res = await layer.queryAttachments({ objectIds: [oid], returnMetadata: true, returnUrl: true })
+      }
+      if (Array.isArray(res)) {
+        for (const g of res) {
+          const pid = Number(g?.parentObjectId ?? g?.objectId)
+          if (pid === oid) return pullInfos(g)
+        }
+      }
+      if (res && typeof res === 'object') {
+        if (Array.isArray(res.attachmentGroups)) {
+          for (const g of res.attachmentGroups) {
+            const pid = Number(g?.parentObjectId ?? g?.objectId)
+            if (pid === oid) return pullInfos(g)
+          }
+        }
+        return pullInfos(res[oid] || res[String(oid)] || res)
+      }
+    }
+  } catch {}
+  const layerUrl = attachmentLayerUrlForActions(layer, ds)
+  if (!layerUrl) return []
+  let token = ''
+  try {
+    const IdentityManager = await loadEsriModule<any>('esri/identity/IdentityManager')
+    const cred = IdentityManager?.findCredential?.(layerUrl) || IdentityManager?.findCredential?.(layerUrl.replace(/\/\d+$/, ''))
+    token = cred?.token ? String(cred.token) : ''
+  } catch {}
+  try {
+    const qs = new URLSearchParams({ f: 'json', objectIds: String(oid), returnMetadata: 'true', returnUrl: 'true' })
+    if (token) qs.set('token', token)
+    const resp = await fetch(`${layerUrl}/queryAttachments?${qs.toString()}`)
+    if (!resp.ok) return []
+    const json: any = await resp.json()
+    if (Array.isArray(json?.attachmentGroups)) {
+      for (const g of json.attachmentGroups) {
+        const pid = Number(g?.parentObjectId ?? g?.objectId)
+        if (pid === oid) return pullInfos(g)
+      }
+    }
+    return pullInfos(json?.[oid] || json?.[String(oid)] || json)
+  } catch {}
+  return []
+}
+
+async function hasAttachmentsForActions (ds: any, oid: number): Promise<boolean> {
+  if (!Number.isFinite(oid) || oid <= 0) return false
+  const layer = await resolveFeatureLayerForAttachments(ds)
+  if (!layer) return false
+  const infos = await queryFeatureAttachmentsForActions(layer, oid, ds)
+  return infos.length > 0
+}
+
+async function fetchAttachmentBlobForActions (layer: any, ds: any, oid: number, att: any, index: number): Promise<{ blob: Blob; fileName: string } | null> {
+  const id = Number(att?.id ?? att?.attachmentId ?? att?.objectId)
+  const layerUrl = attachmentLayerUrlForActions(layer, ds)
+  let url = String(att?.url || '').trim()
+  if (!url && layerUrl && Number.isFinite(id) && id > 0) url = `${layerUrl}/${oid}/attachments/${id}`
+  if (!url) return null
+  let token = ''
+  try {
+    const IdentityManager = await loadEsriModule<any>('esri/identity/IdentityManager')
+    const cred = IdentityManager?.findCredential?.(layerUrl || url) || IdentityManager?.findCredential?.((layerUrl || url).replace(/\/\d+$/, ''))
+    token = cred?.token ? String(cred.token) : ''
+  } catch {}
+  if (token && /^https?:/i.test(url) && !/[?&]token=/.test(url)) url = `${url}${url.includes('?') ? '&' : '?'}token=${encodeURIComponent(token)}`
+  const resp = await fetch(url, { credentials: 'same-origin' })
+  if (!resp.ok) return null
+  return { blob: await resp.blob(), fileName: String(att?.name || `allegato_${id || index + 1}`) }
+}
+
+async function buildPracticeAttachmentsPdfBlob (ds: any, oid: number): Promise<{ blob: Blob; fileName: string } | null> {
+  const layer = await resolveFeatureLayerForAttachments(ds)
+  if (!layer) throw new Error('FeatureLayer allegati non disponibile.')
+  const infos = await queryFeatureAttachmentsForActions(layer, oid, ds)
+  if (!infos.length) return null
+
+  const out = await PDFDocument.create()
+  let count = 0
+  for (let i = 0; i < infos.length; i++) {
+    const att = infos[i]
+    const fetched = await fetchAttachmentBlobForActions(layer, ds, oid, att, i)
+    if (!fetched) continue
+    const blob = fetched.blob
+    const contentType = String(blob.type || att?.contentType || '').toLowerCase()
+    const name = fetched.fileName
+    const bytes = new Uint8Array(await blob.arrayBuffer())
+    try {
+      if (contentType.includes('pdf') || /\.pdf$/i.test(name)) {
+        const src = await PDFDocument.load(bytes as any)
+        const pages = await out.copyPages(src, src.getPageIndices())
+        pages.forEach(pg => out.addPage(pg))
+        count++
+      } else if (contentType.includes('jpeg') || contentType.includes('jpg') || /\.(jpe?g)$/i.test(name)) {
+        const img = await out.embedJpg(bytes as any)
+        const page = out.addPage([595.28, 841.89])
+        const maxW = 515.28
+        const maxH = 761.89
+        const scale = Math.min(maxW / img.width, maxH / img.height)
+        const w = img.width * scale
+        const h = img.height * scale
+        page.drawImage(img, { x: (595.28 - w) / 2, y: (841.89 - h) / 2, width: w, height: h })
+        count++
+      } else if (contentType.includes('png') || /\.png$/i.test(name)) {
+        const img = await out.embedPng(bytes as any)
+        const page = out.addPage([595.28, 841.89])
+        const maxW = 515.28
+        const maxH = 761.89
+        const scale = Math.min(maxW / img.width, maxH / img.height)
+        const w = img.width * scale
+        const h = img.height * scale
+        page.drawImage(img, { x: (595.28 - w) / 2, y: (841.89 - h) / 2, width: w, height: h })
+        count++
+      }
+    } catch {
+      // Allegato non impaginabile: lo si ignora nel PDF unico.
+    }
+  }
+  if (count === 0) return null
+  const bytes = await out.save()
+  return { blob: new Blob([bytes as any], { type: 'application/pdf' }), fileName: 'allegati_probatori.pdf' }
+}
+
 
 export default function Widget (props: AllWidgetProps<IMConfig>) {
   const cfgMutable: any = (props.config && (props.config as any).asMutable)
     ? (props.config as any).asMutable({ deep: true })
     : (props.config as any || {})
   const cfg: any = { ...defaultConfig, ...cfgMutable }
+  const technicalMapContainerRef = React.useRef<HTMLDivElement | null>(null)
+  const [detailMapConfig, setDetailMapConfig] = React.useState<DetailMapConfigForActions | null>(() => discoverDetailMapConfigForActions())
+  const [technicalMapView, setTechnicalMapView] = React.useState<any>(null)
+  React.useEffect(() => {
+    const read = (evt?: any) => {
+      const next = evt?.detail?.config ? detailMapConfigFromWidgetConfigForActions(evt.detail.config) : discoverDetailMapConfigForActions()
+      setDetailMapConfig(next || null)
+    }
+    read()
+    window.addEventListener('gii:detail-map-config-change', read as any)
+    return () => window.removeEventListener('gii:detail-map-config-change', read as any)
+  }, [])
+  const detailMapConfigKey = React.useMemo(() => JSON.stringify(detailMapConfig || {}), [detailMapConfig])
+  React.useEffect(() => {
+    if (!detailMapConfig || !technicalMapContainerRef.current) return
+    let cancelled = false
+    let view: any = null
+    ;(async () => {
+      try {
+        const [MapView, Map, WebMap, FeatureLayer] = await Promise.all([
+          loadEsriModule<any>('esri/views/MapView'),
+          loadEsriModule<any>('esri/Map'),
+          loadEsriModule<any>('esri/WebMap'),
+          loadEsriModule<any>('esri/layers/FeatureLayer')
+        ])
+        if (cancelled || !technicalMapContainerRef.current) return
+        const mc = detailMapConfig
+        const map = mc.webMapItemId
+          ? new WebMap({ portalItem: { id: String(mc.webMapItemId) } })
+          : new Map({ basemap: mc.basemap || 'topo-vector' })
+        try { if (typeof map?.load === 'function') await map.load() } catch {}
+        if (!mc.webMapItemId && mc.mapLayerUrl) {
+          try {
+            const fl = new FeatureLayer({
+              url: mc.mapLayerUrl,
+              id: mc.mapLayerId || undefined,
+              title: mc.mapLayerTitle || undefined
+            })
+            map.layers?.add?.(fl)
+          } catch {}
+        }
+        view = new MapView({
+          container: technicalMapContainerRef.current,
+          map,
+          center: [mc.centerLon || 9.0, mc.centerLat || 39.5],
+          zoom: mc.initZoom || 8,
+          ui: { components: [] }
+        })
+        await view.when()
+        if (cancelled) {
+          try { view.destroy() } catch {}
+          return
+        }
+        setTechnicalMapView(view)
+      } catch {
+        if (!cancelled) setTechnicalMapView(null)
+      }
+    })()
+    return () => {
+      cancelled = true
+      setTechnicalMapView(null)
+      if (view) { try { view.destroy() } catch {} }
+    }
+  }, [detailMapConfigKey])
+  const mapView = technicalMapView || null
 
   // ── Ruolo utente: letto da window.__giiUserRole (scritto dal widget Header) ──
   const [detectedRole, setDetectedRole] = React.useState<string>('')
@@ -7244,7 +8265,7 @@ const queryFields = React.useMemo(() => ['*'], [])
         if (!needsQuery) return
 
         const where = `${idFieldName}=${selection.oid}`
-        const res: any = await dsTry.query({ where, outFields: queryFields, returnGeometry: false } as any)
+        const res: any = await dsTry.query({ where, outFields: queryFields, returnGeometry: true } as any)
         if (req !== forcedReqRef.current) return
         const recs: any[] = res?.records || []
         if (!recs.length) {
@@ -7276,6 +8297,11 @@ const queryFields = React.useMemo(() => ['*'], [])
   return (
     <div style={{ width: '100%', height: '100%', display: 'flex', flexDirection: 'column', minHeight: 0, boxSizing: 'border-box', padding: Number.isFinite(Number((cfg as any).maskOuterOffset ?? 0)) ? Number((cfg as any).maskOuterOffset) : 0 }}>
       <>
+        <div
+          ref={technicalMapContainerRef}
+          aria-hidden='true'
+          style={{ position: 'fixed', left: -12000, top: 0, width: 1024, height: 768, pointerEvents: 'none' }}
+        />
         <ActionsPanel
           active={activeGate}
           roleCode={roleCode}
@@ -7288,6 +8314,10 @@ const queryFields = React.useMemo(() => ['*'], [])
             parametriUrl: String(cfg.nsParametriUrl || ''),
             parametroCode: String(cfg.nsParametroCode || 'SPESE_GENERALI_PERC')
           }}
+          printConfig={{
+            serviceUrl: String((cfg as any).printServiceUrl || (defaultConfig as any).printServiceUrl || '')
+          }}
+          mapView={mapView}
         />
       </>
     </div>

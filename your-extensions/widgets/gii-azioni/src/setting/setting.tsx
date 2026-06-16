@@ -205,6 +205,19 @@ export default function Setting(props: Props) {
         <Inp value={cfgJs.nsParametroCode??'SPESE_GENERALI_PERC'} onChange={v=>patch({nsParametroCode:v})} placeholder='SPESE_GENERALI_PERC'/>
       </div>}
 
+      {/* ═══ STAMPA MAPPA ═══ */}
+      <Acc id='stampa-mappa' label='🗺 Stampa mappa' open={isOpen('stampa-mappa')} onToggle={()=>toggle('stampa-mappa')}/>
+      {isOpen('stampa-mappa') && <div>
+        <div style={P.hint}>Il CW Azioni usa automaticamente la mappa del dettaglio disponibile nell'app. Qui resta configurabile solo il servizio ArcGIS Print.</div>
+        <label style={P.lbl}>URL servizio ArcGIS Print</label>
+        <Inp
+          value={cfgJs.printServiceUrl??defaultConfig.printServiceUrl}
+          onChange={v=>patch({printServiceUrl:v})}
+          placeholder='https://.../GPServer/Export%20Web%20Map%20Task'
+        />
+        <div style={P.hint}>Il PDF mappa viene prodotto dal servizio Print ArcGIS, non da una cattura manuale del canvas.</div>
+      </div>}
+
       {/* ═══ RESET ═══ */}
       <div style={{marginTop:28,borderTop:'1px solid rgba(255,255,255,0.10)',paddingTop:16}}>
         <button type='button'

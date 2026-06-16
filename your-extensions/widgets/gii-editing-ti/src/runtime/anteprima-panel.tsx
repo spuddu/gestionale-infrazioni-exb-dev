@@ -5,6 +5,7 @@ import { buildNotaSpesePdf, type NotaSpeseData } from '../../../_shared/gii-ante
 import { PDFDocument } from 'pdf-lib'
 import AnteprimaPdfViewer from '../../../_shared/gii-anteprime/anteprima-pdf-viewer'
 import { buildRapportoPdf, buildRapportoIterPlaceholders, loadRapportoIterCicliForPdf, type RapportoIterCicloPdf } from '../../../_shared/gii-anteprime/documenti-tecnici/rapporto/rapporto-pdf-builder'
+import { appendRapportoExtraPages } from '../../../_shared/gii-anteprime/documenti-tecnici/rapporto/rapporto-allegati-pdf'
 
 const GII_UTENTI_URL = 'https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_utenti/FeatureServer/0'
 type UtenteCached = {
@@ -22,7 +23,7 @@ const AREA_LABELS: Record<string, string> = {
   AGR: 'AGRARIA', TEC: 'TECNICA', AMM: 'AFFARI GENERALI E PROGRAMMAZIONE FINANZIARIA'
 }
 const SETTORE_LABELS: Record<string, string> = {
-  D1: 'DISTRETTO 1 \u2013 SAN SPERATE',
+  D1: "DISTRETTO 1 \u2013 QUARTU SANT'ELENA/VILLAPUTZU/MURAVERA \u2013 SAN SPERATE",
   D2: 'DISTRETTO 2 \u2013 SERRAMANNA/PIMPISU',
   D3: 'DISTRETTO 3 \u2013 SAN GAVINO/VILLACIDRO',
   D4: 'DISTRETTO 4 \u2013 BASSO SULCIS',
@@ -299,19 +300,13 @@ function buildPlaceholderMap (data: any, utentiCache: Map<string, UtenteCached> 
   const surfValIncludingZero = (on: boolean, ...fields: string[]) => { if (!on) return ''; for (const f of fields) { const v = d[f]; if (v != null && v !== '') return fmtNum(v) } return '0' }
   const gradiViolazioni = parseGradiViolazioniForRapporto(d.gradi_violazioni)
   const occorrenzaArt15 = occorrenzaArt15ForRapporto(d.occorrenza, art15on)
-  const origPratica = d.origine_pratica ?? d.Origine_pratica
-  const praticaPrefix = (origPratica === 2 || origPratica === '2') ? 'TI' : 'TR'
-  const oidVal = d.OBJECTID ?? d.objectid ?? ''
   const numeroRapportoTecnico = String(pickAttrCI(d, [
     'numero_rapporto_tecnico', 'Numero_rapporto_tecnico', 'NUMERO_RAPPORTO_TECNICO',
     'numero_rapporto', 'Numero_rapporto', 'NUMERO_RAPPORTO',
     'codice_rapporto', 'Codice_rapporto', 'CODICE_RAPPORTO',
     'n_rapporto', 'N_RAPPORTO'
   ]) || '').trim()
-  const numeroRilevazione = oidVal
-    ? `${Number(oidVal)}-${praticaPrefix}${settoreCod ? `-${settoreCod}` : ''}`
-    : ''
-  const codPratica = numeroRapportoTecnico || numeroRilevazione
+  const codPratica = numeroRapportoTecnico || '-'
 
   const rapportoRespinto = isRapportoRespintoForPdf(d)
   const rapportoApprovato = !rapportoRespinto && isRapportoApprovatoForPdf(d)
@@ -359,9 +354,9 @@ function buildPlaceholderMap (data: any, utentiCache: Map<string, UtenteCached> 
     telefono: esc(d.telefono || ''), cellulare: esc(d.cellulare || ''), email: esc(d.email || ''), pec: esc(d.pec || ''),
     presenza_trasgressore: String(d.presenza_trasgressore || '').toLowerCase() === 'si' || String(d.presenza_trasgressore || '').toLowerCase() === 'sì' || String(d.presenza_trasgressore || '') === '1' ? 'S\u00EC' : (String(d.presenza_trasgressore || '').toLowerCase() === 'no' || String(d.presenza_trasgressore || '') === '0' ? 'No' : String(d.presenza_trasgressore || '')),
     ...iterPlaceholders,
-    idrante: esc(d.idrante || ''), comune: '', foglio: '', mappali: '', altro_luogo: '',
-    distretto_irriguo: esc(d.distretto_irriguo || ''), comizio: esc(d.comizio || ''),
-    matricola_contatore: esc(d.matricola_contatore || ''), matricola_tessera: esc(d.matricola_tessera || ''),
+    idrante: esc(pickAttrCI(d, ['idrante', 'idrante_numero']) || ''), comune: '', foglio: '', mappali: '', altro_luogo: '',
+    distretto_irriguo: esc(pickAttrCI(d, ['distretto_irriguo', 'distretto']) || ''), comizio: esc(pickAttrCI(d, ['comizio']) || ''),
+    matricola_contatore: esc(pickAttrCI(d, ['matricola_contatore', 'contatore_matricola']) || ''), matricola_tessera: esc(pickAttrCI(d, ['matricola_tessera', 'tessera_matricola']) || ''),
     importo_rimborso: fmtNum(d.ns_totale_complessivo) ? fmtNum(d.ns_totale_complessivo) + ' €' : '',
     data_compilazione: formatDateIt(d.data_firma),
     rapporto_respinto: rapportoRespinto ? '1' : '',
@@ -588,7 +583,17 @@ function buildNotaSpeseGroups (
     })
 }
 
-export default function AnteprimaPanel (p: { data: Record<string, any>; mode: 'create' | 'edit'; nsRows?: Record<NsCat, NsRowP[]>; nsSummary?: NsSummaryP }): any {
+export default function AnteprimaPanel (p: {
+  data: Record<string, any>
+  mode: 'create' | 'edit'
+  nsRows?: Record<NsCat, NsRowP[]>
+  nsSummary?: NsSummaryP
+  ds?: any
+  oid?: number | null
+  layerUrl?: string | null
+  idFieldName?: string | null
+  mapPointWgs84?: any | null
+}): any {
   const [pdfUrl, setPdfUrl] = React.useState<string | null>(null)
   const [pdfFileName, setPdfFileName] = React.useState<string>('rapporto.pdf')
   const [loading, setLoading] = React.useState(false)
@@ -603,6 +608,19 @@ export default function AnteprimaPanel (p: { data: Record<string, any>; mode: 'c
   const nsSignature = React.useMemo(() => {
     try { return JSON.stringify({ r: p.nsRows || {}, s: p.nsSummary || {} }) } catch { return '' }
   }, [p.nsRows, p.nsSummary])
+
+  const extraSignature = React.useMemo(() => {
+    try {
+      return JSON.stringify({
+        oid: p.oid ?? null,
+        layerUrl: p.layerUrl || '',
+        idFieldName: p.idFieldName || '',
+        mapPointWgs84: p.mapPointWgs84 || null
+      })
+    } catch {
+      return `${p.oid ?? ''}|${p.layerUrl || ''}|${p.idFieldName || ''}`
+    }
+  }, [p.oid, p.layerUrl, p.idFieldName, p.mapPointWgs84])
 
   React.useEffect(() => {
     let cancelled = false
@@ -725,6 +743,16 @@ export default function AnteprimaPanel (p: { data: Record<string, any>; mode: 'c
           finalBytes = await merged.save()
         }
 
+        finalBytes = await appendRapportoExtraPages(finalBytes, {
+          ds: p.ds,
+          oid: p.oid,
+          layerUrl: p.layerUrl,
+          idFieldName: p.idFieldName,
+          data: dataSnapshot,
+          mapPointWgs84: p.mapPointWgs84
+        })
+        if (cancelled) return
+
         const cp = map.cod_pratica || 'rapporto'
         const fileName = `rapporto_${cp.replace(/[^a-zA-Z0-9_-]/g, '_')}.pdf`
         const blob = new Blob([finalBytes as any], { type: 'application/pdf' })
@@ -735,7 +763,7 @@ export default function AnteprimaPanel (p: { data: Record<string, any>; mode: 'c
       finally { if (!cancelled) setLoading(false) }
     })()
     return () => { cancelled = true }
-  }, [dataSignature, p.mode, utenti, utentiReady, nsSignature])
+  }, [dataSignature, p.mode, utenti, utentiReady, nsSignature, extraSignature])
 
   return (
     <div css={containerCss}>
