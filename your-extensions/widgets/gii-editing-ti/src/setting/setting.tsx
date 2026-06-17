@@ -454,6 +454,7 @@ export default function Setting(props: AllWidgetSettingProps<IMConfig>) {
     <Acc id='anteprima' label='6. Anteprima PDF e titolo pratica' open={isOpen('anteprima')} onToggle={()=>toggle('anteprima')}/>
     {isOpen('anteprima') && <>
       <SectionBox title='Viewer PDF'>
+        <Text k='printServiceUrl' label='Servizio stampa ArcGIS' placeholder='https://.../Export%20Web%20Map%20Task'/>
         <div style={P.grid2}><Num k='anteprimaPdfPaddingTop' label='Padding superiore' min={0} max={80}/><Num k='anteprimaPdfPaddingX' label='Padding laterale' min={0} max={80}/></div>
         <div style={P.grid2}><Num k='anteprimaPdfPaddingBottom' label='Padding inferiore' min={0} max={80}/><Num k='anteprimaPdfBottomRadius' label='Raggio angoli inferiori' min={0} max={40}/></div>
       </SectionBox>

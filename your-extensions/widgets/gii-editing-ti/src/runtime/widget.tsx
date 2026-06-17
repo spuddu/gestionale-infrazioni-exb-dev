@@ -5492,6 +5492,35 @@ function giiPlainObject<T = any> (value: any): T {
   return value as T
 }
 
+function giiResolveMapWidgetWebMapInfo (mapWidgetId: any): { mapWidgetId: string; mapDataSourceId: string; webMapItemId: string; webMapPortalUrl: string } {
+  const id = String(mapWidgetId || '').trim()
+  if (!id) return { mapWidgetId: '', mapDataSourceId: '', webMapItemId: '', webMapPortalUrl: '' }
+  try {
+    const state: any = getAppStore?.()?.getState?.() || {}
+    const appConfig: any = state?.appConfig || state?.appStateInBuilder?.appConfig || null
+    const widgets = giiPlainObject<Record<string, any>>(appConfig?.widgets || {})
+    const dataSources = giiPlainObject<Record<string, any>>(appConfig?.dataSources || {})
+    const widget = giiPlainObject<any>(widgets?.[id] || {})
+    const wcfg = giiPlainObject<any>(widget?.config || {})
+    const useDataSources = Array.isArray(wcfg?.useDataSources) ? wcfg.useDataSources : []
+    const dsId = String(
+      wcfg?.initialMapDataSourceID ||
+      useDataSources?.[0]?.dataSourceId ||
+      useDataSources?.[0]?.mainDataSourceId ||
+      ''
+    ).trim()
+    const ds = giiPlainObject<any>(dataSources?.[dsId] || {})
+    return {
+      mapWidgetId: id,
+      mapDataSourceId: dsId,
+      webMapItemId: String(ds?.itemId || ds?.portalItemId || ds?.item?.id || '').trim(),
+      webMapPortalUrl: String(ds?.portalUrl || ds?.portal?.url || '').trim()
+    }
+  } catch {
+    return { mapWidgetId: id, mapDataSourceId: '', webMapItemId: '', webMapPortalUrl: '' }
+  }
+}
+
 function giiNormalizeEditSection (raw: any): string {
   return String(raw || '').trim().toLowerCase().replace(/_/g, '-').replace(/\s+/g, '-')
 }
@@ -5565,6 +5594,9 @@ function NuovaPraticaForm (p: {
   onGeomSaved?: (geom: any) => void
   mapClickEnabled?: boolean
   onToggleMapClick?: (on: boolean) => void
+  mapView?: any | null
+  mapConfig?: any
+  printServiceUrl?: string
   onSaved?: (oid: number, savedData?: any) => void
   onCloseEdit?: () => void
   mode?: 'create' | 'edit'
@@ -9760,11 +9792,13 @@ ${e?.message || String(e)}`
       mode={mode}
       nsRows={noteSpeseRowsDraft}
       nsSummary={noteSpeseSummary}
-      ds={ds as any}
-      oid={currentOid}
-      layerUrl={currentLayerUrl}
+      ds={ds}
+      oid={editOid}
       idFieldName={editIdFieldName}
-      mapPointWgs84={p.clickedPointWgs84 || p.existingGeomWgs84 || null}
+      mapView={p.mapView}
+      mapConfig={p.mapConfig}
+      mapTarget={p.clickedPointWgs84 || p.existingGeomWgs84 || null}
+      printServiceUrl={p.printServiceUrl}
     />
   </div>
 )}
@@ -11499,6 +11533,7 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
   }, [effectiveIntent?.layerUrl])
 
   const mapWidgetId = Array.isArray(cfg.useMapWidgetIds) ? cfg.useMapWidgetIds[0] : null
+  const editingPreviewMapInfo = React.useMemo(() => giiResolveMapWidgetWebMapInfo(mapWidgetId), [mapWidgetId])
   const [mapView, setMapView] = React.useState<any>(null)
   const [formTab, setFormTab] = React.useState<string>('trasgressore')
   const [clickedPointWgs84, setClickedPointWgs84] = React.useState<any | null>(null)
@@ -11921,6 +11956,17 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
               onGeomSaved={(geom: any) => { setExistingGeomWgs84(geom); setClickedPointWgs84(null) }}
               mapClickEnabled={mapClickEnabled}
               onToggleMapClick={(on: boolean) => setMapClickEnabled(on)}
+              mapView={mapView}
+              mapConfig={{
+                ...editingPreviewMapInfo,
+                mapLayerUrl: String((cfg as any).mapLayerUrl || ''),
+                mapLayerTitle: String((cfg as any).mapLayerTitle || ''),
+                mapLayerId: String((cfg as any).mapLayerId || ''),
+                mapLayerLayerId: String((cfg as any).mapLayerLayerId || ''),
+                officeLonWgs84: Number((cfg as any).officeLonWgs84) || 0,
+                officeLatWgs84: Number((cfg as any).officeLatWgs84) || 0
+              }}
+              printServiceUrl={String((cfg as any).printServiceUrl || '')}
               mode={inCreateMode ? 'create' : 'edit'}
               initialData={initialEditData}
               editOid={editOid}

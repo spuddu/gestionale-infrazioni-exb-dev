@@ -147,6 +147,7 @@ export interface Config {
   violazioneCircostanzeRows: number
 
   // --- Anteprima PDF
+  printServiceUrl: string
   anteprimaPdfPaddingTop: number
   anteprimaPdfPaddingX: number
   anteprimaPdfPaddingBottom: number
@@ -312,6 +313,7 @@ export const defaultConfig: Config = {
   violazioneDescrizioneRows: 5,
   violazioneCircostanzeRows: 4,
 
+  printServiceUrl: 'https://utility.arcgisonline.com/arcgis/rest/services/Utilities/PrintingTools/GPServer/Export%20Web%20Map%20Task',
   anteprimaPdfPaddingTop: 0,
   anteprimaPdfPaddingX: 0,
   anteprimaPdfPaddingBottom: 0,
