@@ -3,8 +3,11 @@
 import { React, jsx, css } from 'jimu-core'
 import { buildNotaSpesePdf, type NotaSpeseData } from '../../../_shared/gii-anteprime/documenti-tecnici/rapporto/notaspese-pdf-builder'
 import { PDFDocument } from 'pdf-lib'
-import AnteprimaPdfViewer from '../../../_shared/gii-anteprime/anteprima-pdf-viewer'
 import { buildRapportoPdf, buildRapportoIterPlaceholders, loadRapportoIterCicliForPdf, type RapportoIterCicloPdf } from '../../../_shared/gii-anteprime/documenti-tecnici/rapporto/rapporto-pdf-builder'
+import { drawEmbeddedPdfPageInRapportoTechnicalBody, drawRapportoTechnicalHeadersByPage, RAPPORTO_TECHNICAL_BODY_BOX, wrapMapPdfBlobWithRapportoTechnicalHeader } from '../../../_shared/gii-anteprime/documenti-tecnici/rapporto/technical-document-header'
+import { defaultGiiDocumentPrintOptions as defaultDocumentPrintOptions, cloneGiiDocumentPrintOptions as cloneDocumentPrintOptions, setGiiAttachmentPrintOptionVisible, setGiiMapLayerKeysVisible, setGiiNotaSpesePrintOptionVisible } from '../../../_shared/gii-anteprime/viewer-documenti/document-options'
+import type { GiiDocumentPrintOptions as DocumentPrintOptions, GiiAttachmentPrintOption as AttachmentPrintOption, GiiNotaSpesePrintOption as NotaSpesePrintOption } from '../../../_shared/gii-anteprime/viewer-documenti/document-options'
+import GiiDocumentViewer from '../../../_shared/gii-anteprime/viewer-documenti/document-viewer'
 
 const GII_UTENTI_URL = 'https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_utenti/FeatureServer/0'
 type UtenteCached = {
@@ -365,27 +368,29 @@ function buildPlaceholderMap (data: any, utentiCache: Map<string, UtenteCached> 
   }
 }
 
+function officialRapportoTecnicoNumberForEditing (data: any): string {
+  const d = data || {}
+  return String(pickAttrCI(d, [
+    'numero_rapporto_tecnico', 'Numero_rapporto_tecnico', 'NUMERO_RAPPORTO_TECNICO',
+    'numero_rapporto', 'Numero_rapporto', 'NUMERO_RAPPORTO',
+    'codice_rapporto', 'Codice_rapporto', 'CODICE_RAPPORTO',
+    'n_rapporto', 'N_RAPPORTO'
+  ]) || '').trim() || '-'
+}
+
+function mapTechnicalDocumentTitle (numeroRapportoTecnico?: string): string {
+  return `ELABORATO CARTOGRAFICO ALLEGATO AL RAPPORTO TECNICO DI RILEVAZIONE N. ${String(numeroRapportoTecnico || '').trim() || '-'}`
+}
+
+function attachmentTechnicalDocumentTitle (index: number, numeroRapportoTecnico?: string): string {
+  return `ELABORATO PROBATORIO N. ${index} ALLEGATO AL RAPPORTO TECNICO DI RILEVAZIONE N. ${String(numeroRapportoTecnico || '').trim() || '-'}`
+}
+
 const containerCss = css`display: flex; flex-direction: column; width: 100%; height: 100%; background: #282828; overflow: hidden;`
 
 type NsCat = 'AT' | 'PR' | 'RU' | 'SL' | 'PF'
 type NsSummaryP = { totaleAT: number; totalePR: number; totaleRU: number; totaleSL: number; totalePF: number; percentualeSpeseGenerali: number; importoSpeseGenerali: number; totaleComplessivo: number }
 type NsRowP = { objectid: number; categoria_costo: NsCat; origine_voce_snapshot: string; codice_voce_snapshot: string; descrizione_snapshot: string; unita_misura_snapshot: string; prezzo_unitario_snapshot: number; quantita: number; importo_riga: number; anno_prezzario_snapshot?: number | null; ordine: number; note: string; codice_casistica?: string | null }
-
-type DocumentPrintOptions = {
-  includeRapporto: boolean
-  includeNotaSpese: boolean
-  includeMappa: boolean
-  includeAllegati: boolean
-  mapLayout: string
-  mapScale: number
-  mapTitle: string
-  mapBasemap: string
-  mapLayerVisibility: Record<string, boolean>
-  mapTarget?: any
-  mapSelectedOid?: number | null
-  mapSelectedIdFieldName?: string
-  mapLocalizationLayerUrl?: string
-}
 
 type DocumentAvailability = {
   loadingAllegati?: boolean
@@ -414,18 +419,16 @@ type PrintableMapLayerNode = {
 
 const DEFAULT_PRINT_SERVICE_URL = 'https://utility.arcgisonline.com/arcgis/rest/services/Utilities/PrintingTools/GPServer/Export%20Web%20Map%20Task'
 
-function defaultDocumentPrintOptions (): DocumentPrintOptions {
-  return {
-    includeRapporto: true,
-    includeNotaSpese: true,
-    includeMappa: false,
-    includeAllegati: false,
-    mapLayout: 'A4 Portrait',
-    mapScale: 1000,
-    mapTitle: '',
-    mapBasemap: 'satellite',
-    mapLayerVisibility: {}
-  }
+const editingTiAnteprimaDocumentOptionsMemory = new Map<string, DocumentPrintOptions>()
+const editingTiAnteprimaAppliedOptionsMemory = new Map<string, DocumentPrintOptions>()
+const editingTiAnteprimaPdfMemory = new Map<string, { blob: Blob; fileName: string }>()
+
+function documentOptionsMemoryKey (oid?: number | null, data?: Record<string, any> | null): string {
+  const oidValue = Number(oid)
+  if (Number.isFinite(oidValue) && oidValue > 0) return `oid:${oidValue}`
+  const gid = String(data?.GlobalID || data?.globalid || data?.GLOBALID || '').trim()
+  if (gid) return `gid:${gid}`
+  return 'new'
 }
 
 const NS_CATS: NsCat[] = ['AT', 'PR', 'RU', 'SL', 'PF']
@@ -638,6 +641,26 @@ function buildNotaSpeseGroups (
     })
 }
 
+function buildNotaSpesePrintGroups (
+  rowsByCategory: Record<NsCat, NsRowP[]> | undefined,
+  globalSummary: NsSummaryP | undefined,
+  dataSnapshot: Record<string, any> | undefined
+): Array<{ codiceCasistica: string; label: string; rows: Record<NsCat, NsRowP[]>; summary: NsSummaryP }> {
+  const groups = buildNotaSpeseGroups(rowsByCategory, globalSummary)
+  const art30Summary = buildArt30RapportoSummary(dataSnapshot || {})
+  const out = groups.slice()
+  if (art30Summary.hasData && !out.some(group => group.codiceCasistica === 'C104_ATTREZZATURE_DANNEGGIATE')) {
+    out.push({
+      codiceCasistica: 'C104_ATTREZZATURE_DANNEGGIATE',
+      label: NS_CASISTICA_META.C104_ATTREZZATURE_DANNEGGIATE.label,
+      rows: cloneEmptyNsRows(),
+      summary: buildNsSummaryForRows(cloneEmptyNsRows(), Number(globalSummary?.percentualeSpeseGenerali) || 15)
+    })
+    out.sort((a, b) => (NS_CASISTICA_META[a.codiceCasistica]?.order ?? 999) - (NS_CASISTICA_META[b.codiceCasistica]?.order ?? 999))
+  }
+  return out
+}
+
 function rapportoPdfFileNameForEditing (map: Record<string, string>): string {
   const cp = map.cod_pratica || 'rapporto'
   return `rapporto_${cp.replace(/[^a-zA-Z0-9_-]/g, '_')}.pdf`
@@ -717,10 +740,6 @@ function listPrintableMapLayers (view: any): PrintableMapLayerItem[] {
   return flattenPrintableMapLayerTree(listPrintableMapLayerTree(view))
 }
 
-function collectPrintableMapLayerKeys (node: PrintableMapLayerNode): string[] {
-  return flattenPrintableMapLayerTree([node]).map(item => item.key)
-}
-
 function normalizePrintableLayerTitle (raw: any): string {
   return String(raw || '').trim().toLowerCase()
 }
@@ -763,6 +782,31 @@ function printableLayerIsLocalization (item: PrintableMapLayerItem, opts: Docume
   if (sameArcgisLayerUrl(item.layer?.url, opts.mapLocalizationLayerUrl)) return true
   const title = normalizePrintableLayerTitle(item.title || item.layer?.title || item.layer?.id || item.layer?.name)
   return title.includes('localizz') && title.includes('infraz')
+}
+
+function mapBasemapLabel (value: any): string {
+  const key = String(value || '').trim().toLowerCase()
+  if (key === 'satellite') return 'Ortofoto'
+  if (key === 'hybrid') return 'Ortofoto con etichette'
+  if (key === 'topo-vector') return 'Topografica'
+  if (key === 'streets-vector') return 'Stradale'
+  return String(value || '').trim()
+}
+
+function selectedPrintableLayerLabels (layers: PrintableMapLayerItem[], opts: DocumentPrintOptions, localizationLayerKeys: Set<string>): string[] {
+  const out: string[] = []
+  const seen = new Set<string>()
+  layers.forEach(item => {
+    if (!item?.key || localizationLayerKeys.has(item.key)) return
+    if (Object.prototype.hasOwnProperty.call(opts.mapLayerVisibility || {}, item.key) && opts.mapLayerVisibility[item.key] === false) return
+    const label = String(item.title || item.layer?.title || item.layer?.id || item.layer?.name || '').trim()
+    if (!label) return
+    const normalized = normalizePrintableLayerTitle(label)
+    if (!normalized || seen.has(normalized)) return
+    seen.add(normalized)
+    out.push(label)
+  })
+  return out.length > 4 ? [...out.slice(0, 4), `altri ${out.length - 4}`] : out
 }
 
 function pointGeometryFromAttrsForEditing (attrs: any): any | null {
@@ -901,8 +945,8 @@ async function buildMapPrintPdfBlob (view: any, printServiceUrl: string, opts: D
       format: 'pdf',
       layout: opts.mapLayout || 'A4 Portrait',
       layoutOptions: {
-        titleText: opts.mapTitle || 'Allegato cartografico al rapporto tecnico',
-        authorText: 'Consorzio di Bonifica della Sardegna Meridionale',
+        titleText: '',
+        authorText: '',
         copyrightText: ''
       },
       exportOptions: { dpi: 150 },
@@ -915,7 +959,16 @@ async function buildMapPrintPdfBlob (view: any, printServiceUrl: string, opts: D
     if (!url) throw new Error('Il servizio stampa non ha restituito un PDF.')
     const resp = await fetch(url)
     if (!resp.ok) throw new Error(`Download stampa mappa fallito (HTTP ${resp.status}).`)
-    return { blob: await resp.blob(), fileName: 'mappa_rapporto.pdf' }
+    const rawBlob = await resp.blob()
+    return {
+      blob: await wrapMapPdfBlobWithRapportoTechnicalHeader(rawBlob, opts.mapTitle || mapTechnicalDocumentTitle('-'), {
+        scale: Number(opts.mapScale) || Number(view?.scale) || null,
+        basemapLabel: mapBasemapLabel(opts.mapBasemap || view?.map?.basemap?.title || view?.map?.basemap?.id),
+        layerLabels: selectedPrintableLayerLabels(layers, opts, localizationLayerKeys),
+        sourceLayout: opts.mapLayout
+      }),
+      fileName: 'mappa_rapporto.pdf'
+    }
   } finally {
     if (printMarker && view?.graphics) {
       try { view.graphics.remove(printMarker) } catch {}
@@ -1032,6 +1085,20 @@ async function hasAttachments (ds: any, oid: number): Promise<boolean> {
   return infos.length > 0
 }
 
+async function loadAttachmentOptions (ds: any, oid: number): Promise<AttachmentPrintOption[]> {
+  if (!Number.isFinite(oid) || oid <= 0) return []
+  const layer = await resolveFeatureLayerForAttachments(ds)
+  if (!layer) return []
+  const infos = await queryFeatureAttachments(layer, oid, ds)
+  return (infos || []).map((att: any) => ({
+    id: Number(att?.id ?? att?.attachmentId ?? att?.objectId),
+    name: att?.name,
+    size: att?.size,
+    contentType: att?.contentType,
+    url: att?.url
+  })).filter((att: AttachmentPrintOption) => Number.isFinite(att.id) && att.id > 0)
+}
+
 async function fetchAttachmentBlob (layer: any, ds: any, oid: number, att: any, index: number): Promise<{ blob: Blob; fileName: string } | null> {
   const id = Number(att?.id ?? att?.attachmentId ?? att?.objectId)
   const layerUrl = attachmentLayerUrl(layer, ds)
@@ -1050,14 +1117,106 @@ async function fetchAttachmentBlob (layer: any, ds: any, oid: number, att: any, 
   return { blob: await resp.blob(), fileName: String(att?.name || `allegato_${id || index + 1}`) }
 }
 
-async function buildPracticeAttachmentsPdfBlob (ds: any, oid: number): Promise<{ blob: Blob; fileName: string } | null> {
+function canvasBlob (canvas: HTMLCanvasElement, type: string, quality?: number): Promise<Blob | null> {
+  return new Promise(resolve => {
+    try {
+      canvas.toBlob(blob => resolve(blob), type, quality)
+    } catch {
+      resolve(null)
+    }
+  })
+}
+
+async function normalizeRasterAttachmentForPdf (
+  blob: Blob,
+  originalBytes: Uint8Array,
+  fileName: string,
+  contentType: string
+): Promise<{ bytes: Uint8Array; contentType: string }> {
+  const lowerName = String(fileName || '').toLowerCase()
+  const isJpeg = contentType.includes('jpeg') || contentType.includes('jpg') || /\.(jpe?g)$/i.test(lowerName)
+  const isPng = contentType.includes('png') || /\.png$/i.test(lowerName)
+  if (!isJpeg && !isPng) return { bytes: originalBytes, contentType }
+  if (typeof document === 'undefined') return { bytes: originalBytes, contentType }
+
+  const outType = isJpeg ? 'image/jpeg' : 'image/png'
+  const drawToCanvas = async (source: CanvasImageSource, width: number, height: number): Promise<{ bytes: Uint8Array; contentType: string } | null> => {
+    const w = Math.max(1, Math.round(Number(width) || 0))
+    const h = Math.max(1, Math.round(Number(height) || 0))
+    if (!w || !h) return null
+    const canvas = document.createElement('canvas')
+    canvas.width = w
+    canvas.height = h
+    const ctx = canvas.getContext('2d')
+    if (!ctx) return null
+    ctx.drawImage(source, 0, 0, w, h)
+    const normalizedBlob = await canvasBlob(canvas, outType, isJpeg ? 0.92 : undefined)
+    if (!normalizedBlob) return null
+    return { bytes: new Uint8Array(await normalizedBlob.arrayBuffer()), contentType: outType }
+  }
+
+  try {
+    const createBitmap = (window as any)?.createImageBitmap
+    if (typeof createBitmap === 'function') {
+      const bitmap = await createBitmap(blob, { imageOrientation: 'from-image' }).catch(() => null)
+      if (bitmap) {
+        try {
+          const normalized = await drawToCanvas(bitmap, bitmap.width, bitmap.height)
+          if (normalized) return normalized
+        } finally {
+          try { bitmap.close?.() } catch {}
+        }
+      }
+    }
+  } catch {}
+
+  try {
+    const url = URL.createObjectURL(blob)
+    try {
+      const img = await new Promise<HTMLImageElement | null>(resolve => {
+        const el = new Image()
+        el.onload = () => resolve(el)
+        el.onerror = () => resolve(null)
+        el.src = url
+      })
+      if (img) {
+        const normalized = await drawToCanvas(img, img.naturalWidth || img.width, img.naturalHeight || img.height)
+        if (normalized) return normalized
+      }
+    } finally {
+      try { URL.revokeObjectURL(url) } catch {}
+    }
+  } catch {}
+
+  return { bytes: originalBytes, contentType }
+}
+
+async function addRasterAttachmentPage (doc: PDFDocument, img: any): Promise<void> {
+  const page = doc.addPage([595.28, 841.89])
+  const box = RAPPORTO_TECHNICAL_BODY_BOX
+  const scale = Math.min(box.width / Math.max(1, img.width), box.height / Math.max(1, img.height))
+  const w = img.width * scale
+  const h = img.height * scale
+  page.drawImage(img, { x: box.x + (box.width - w) / 2, y: box.y + (box.height - h) / 2, width: w, height: h })
+}
+
+async function buildPracticeAttachmentsPdfBlob (ds: any, oid: number, selectedAttachmentIds?: number[], numeroRapportoTecnico?: string): Promise<{ blob: Blob; fileName: string } | null> {
   const layer = await resolveFeatureLayerForAttachments(ds)
   if (!layer) throw new Error('FeatureLayer allegati non disponibile.')
-  const infos = await queryFeatureAttachments(layer, oid, ds)
+  const selectedSet = Array.isArray(selectedAttachmentIds) && selectedAttachmentIds.length > 0
+    ? new Set(selectedAttachmentIds.map(id => Number(id)).filter(id => Number.isFinite(id) && id > 0))
+    : null
+  const infos = (await queryFeatureAttachments(layer, oid, ds)).filter((att: any) => {
+    if (!selectedSet) return true
+    const id = Number(att?.id ?? att?.attachmentId ?? att?.objectId)
+    return selectedSet.has(id)
+  })
   if (!infos.length) return null
 
   const out = await PDFDocument.create()
   let count = 0
+  let elaboratoIndex = 0
+  const pageTitles: string[] = []
   for (let i = 0; i < infos.length; i++) {
     const att = infos[i]
     const fetched = await fetchAttachmentBlob(layer, ds, oid, att, i)
@@ -1069,28 +1228,31 @@ async function buildPracticeAttachmentsPdfBlob (ds: any, oid: number): Promise<{
     try {
       if (contentType.includes('pdf') || /\.pdf$/i.test(name)) {
         const src = await PDFDocument.load(bytes as any)
-        const pages = await out.copyPages(src, src.getPageIndices())
-        pages.forEach(pg => out.addPage(pg))
+        const sourcePages = src.getPages()
+        if (sourcePages.length === 0) continue
+        if (sourcePages.length > 0) elaboratoIndex++
+        const pageTitle = attachmentTechnicalDocumentTitle(elaboratoIndex, numeroRapportoTecnico)
+        for (const sourcePage of sourcePages) {
+          const page = out.addPage([595.28, 841.89])
+          const embedded = await (out as any).embedPage(sourcePage)
+          const size = sourcePage.getSize()
+          drawEmbeddedPdfPageInRapportoTechnicalBody(page, embedded, size.width, size.height)
+          pageTitles.push(pageTitle)
+        }
         count++
       } else if (contentType.includes('jpeg') || contentType.includes('jpg') || /\.(jpe?g)$/i.test(name)) {
-        const img = await out.embedJpg(bytes as any)
-        const page = out.addPage([595.28, 841.89])
-        const maxW = 515.28
-        const maxH = 761.89
-        const scale = Math.min(maxW / img.width, maxH / img.height)
-        const w = img.width * scale
-        const h = img.height * scale
-        page.drawImage(img, { x: (595.28 - w) / 2, y: (841.89 - h) / 2, width: w, height: h })
+        const normalized = await normalizeRasterAttachmentForPdf(blob, bytes, name, contentType)
+        const img = await out.embedJpg(normalized.bytes as any)
+        await addRasterAttachmentPage(out, img)
+        elaboratoIndex++
+        pageTitles.push(attachmentTechnicalDocumentTitle(elaboratoIndex, numeroRapportoTecnico))
         count++
       } else if (contentType.includes('png') || /\.png$/i.test(name)) {
-        const img = await out.embedPng(bytes as any)
-        const page = out.addPage([595.28, 841.89])
-        const maxW = 515.28
-        const maxH = 761.89
-        const scale = Math.min(maxW / img.width, maxH / img.height)
-        const w = img.width * scale
-        const h = img.height * scale
-        page.drawImage(img, { x: (595.28 - w) / 2, y: (841.89 - h) / 2, width: w, height: h })
+        const normalized = await normalizeRasterAttachmentForPdf(blob, bytes, name, contentType)
+        const img = await out.embedPng(normalized.bytes as any)
+        await addRasterAttachmentPage(out, img)
+        elaboratoIndex++
+        pageTitles.push(attachmentTechnicalDocumentTitle(elaboratoIndex, numeroRapportoTecnico))
         count++
       }
     } catch {
@@ -1098,6 +1260,7 @@ async function buildPracticeAttachmentsPdfBlob (ds: any, oid: number): Promise<{
     }
   }
   if (count === 0) return null
+  await drawRapportoTechnicalHeadersByPage(out, index => pageTitles[index] || attachmentTechnicalDocumentTitle(index + 1, numeroRapportoTecnico))
   const bytes = await out.save()
   return { blob: new Blob([bytes as any], { type: 'application/pdf' }), fileName: 'allegati_probatori.pdf' }
 }
@@ -1107,37 +1270,30 @@ async function buildRapportoDocumentsPdfBlob (
   utenti: Map<string, UtenteCached> | null,
   nsRows: Record<NsCat, NsRowP[]> | undefined,
   nsSummary: NsSummaryP | undefined,
-  docOptions: Pick<DocumentPrintOptions, 'includeRapporto' | 'includeNotaSpese'>
+  docOptions: Pick<DocumentPrintOptions, 'includeRapporto' | 'includeNotaSpese' | 'selectedNotaSpeseKeys'>
 ): Promise<{ blob: Blob; fileName: string }> {
   const iterGlobalId = pickAttrCI(dataSnapshot, ['globalid', 'GlobalID', 'GLOBALID', 'parent_globalid'])
   const iterCicli = await loadRapportoIterCicliForPdf(iterGlobalId)
   const map = buildPlaceholderMap(dataSnapshot, utenti, iterCicli)
   const nsGroups = buildNotaSpeseGroups(nsRows, nsSummary)
   const art30Summary = buildArt30RapportoSummary(dataSnapshot)
-  const reportNsGroups = nsGroups.slice()
-  if (art30Summary.hasData && !reportNsGroups.some(group => group.codiceCasistica === 'C104_ATTREZZATURE_DANNEGGIATE')) {
-    reportNsGroups.push({
-      codiceCasistica: 'C104_ATTREZZATURE_DANNEGGIATE',
-      label: NS_CASISTICA_META.C104_ATTREZZATURE_DANNEGGIATE.label,
-      rows: cloneEmptyNsRows(),
-      summary: buildNsSummaryForRows(cloneEmptyNsRows(), Number(nsSummary?.percentualeSpeseGenerali) || 15)
-    })
-    reportNsGroups.sort((a, b) => (NS_CASISTICA_META[a.codiceCasistica]?.order ?? 999) - (NS_CASISTICA_META[b.codiceCasistica]?.order ?? 999))
-  }
+  const allReportNsGroups = buildNotaSpesePrintGroups(nsRows, nsSummary, dataSnapshot)
+  const selectedNotaSpeseKeys = docOptions.selectedNotaSpeseKeys || {}
+  const reportNsGroups = allReportNsGroups.filter(group => selectedNotaSpeseKeys[group.codiceCasistica] !== false)
   const totaleNoteSpeseDaGruppi = roundMoney(nsGroups.reduce((sum, group) => sum + roundMoney(Number(group?.summary?.totaleComplessivo) || 0), 0))
   const totaleNoteSpeseSalvato = roundMoney(parseArt30Number(pickAttrCI(dataSnapshot, ['ns_totale_complessivo'])) ?? 0)
   const totaleNoteSpese = nsGroups.length > 0 ? totaleNoteSpeseDaGruppi : totaleNoteSpeseSalvato
   const hasRimborso = nsGroups.length > 0 || totaleNoteSpese !== 0 || art30Summary.hasData
   const totaleRimborso = roundMoney(totaleNoteSpese + (art30Summary.hasData ? art30Summary.netto : 0))
+  const includeRapporto = docOptions.includeRapporto !== false
+  const includeNotaSpese = docOptions.includeNotaSpese !== false
 
   map.importo_rimborso = hasRimborso ? moneyIt(totaleRimborso) : ''
   map.riepilogo_art30 = art30Summary.text
-  map.nota_spese_label = reportNsGroups.length > 1
+  map.nota_spese_label = !includeNotaSpese ? '' : reportNsGroups.length > 1
     ? '(Vedi note spese allegate)'
     : (reportNsGroups.length === 1 ? '(Vedi nota spese allegata)' : '')
 
-  const includeRapporto = docOptions.includeRapporto !== false
-  const includeNotaSpese = docOptions.includeNotaSpese !== false
   const rapportoBytes = includeRapporto ? await buildRapportoPdf(map) : null
   let finalBytes: Uint8Array = rapportoBytes || new Uint8Array()
 
@@ -1219,6 +1375,7 @@ export default function AnteprimaPanel (p: {
   const [utenti, setUtenti] = React.useState<Map<string, UtenteCached> | null>(null)
   const [utentiReady, setUtentiReady] = React.useState(false)
   const technicalMapContainerRef = React.useRef<HTMLDivElement | null>(null)
+  const optionsMemoryKey = React.useMemo(() => documentOptionsMemoryKey(p.oid, p.data), [p.oid, p.data])
   const [technicalMapView, setTechnicalMapView] = React.useState<any | null>(null)
   const [availability, setAvailability] = React.useState<DocumentAvailability>({
     notaSpese: false,
@@ -1226,12 +1383,34 @@ export default function AnteprimaPanel (p: {
     allegati: false,
     checkedKey: ''
   })
+  const [attachmentOptions, setAttachmentOptions] = React.useState<AttachmentPrintOption[]>([])
+  const [notaSpeseOptions, setNotaSpeseOptions] = React.useState<NotaSpesePrintOption[]>([])
   const printMapView = technicalMapView || null
   const printableLayerTree = React.useMemo(() => listPrintableMapLayerTree(printMapView), [printMapView])
   const [expandedLayerGroups, setExpandedLayerGroups] = React.useState<Record<string, boolean>>({})
-  const [docOptions, setDocOptions] = React.useState<DocumentPrintOptions>(() => defaultDocumentPrintOptions())
-  const [previewOptions, setPreviewOptions] = React.useState<DocumentPrintOptions>(() => defaultDocumentPrintOptions())
+  const [docOptions, setDocOptions] = React.useState<DocumentPrintOptions>(() => cloneDocumentPrintOptions(editingTiAnteprimaDocumentOptionsMemory.get(optionsMemoryKey) || defaultDocumentPrintOptions()))
+  const [previewOptions, setPreviewOptions] = React.useState<DocumentPrintOptions>(() => cloneDocumentPrintOptions(editingTiAnteprimaAppliedOptionsMemory.get(optionsMemoryKey) || editingTiAnteprimaDocumentOptionsMemory.get(optionsMemoryKey) || defaultDocumentPrintOptions()))
   const [previewRevision, setPreviewRevision] = React.useState(0)
+  const loadedOptionsKeyRef = React.useRef(optionsMemoryKey)
+  const forceNextPreviewRegenerateRef = React.useRef(false)
+
+  React.useEffect(() => {
+    if (loadedOptionsKeyRef.current !== optionsMemoryKey) return
+    editingTiAnteprimaDocumentOptionsMemory.set(optionsMemoryKey, cloneDocumentPrintOptions(docOptions))
+  }, [optionsMemoryKey, docOptions])
+
+  React.useEffect(() => {
+    if (loadedOptionsKeyRef.current !== optionsMemoryKey) return
+    editingTiAnteprimaAppliedOptionsMemory.set(optionsMemoryKey, cloneDocumentPrintOptions(previewOptions))
+  }, [optionsMemoryKey, previewOptions])
+
+  React.useEffect(() => {
+    const remembered = cloneDocumentPrintOptions(editingTiAnteprimaDocumentOptionsMemory.get(optionsMemoryKey) || defaultDocumentPrintOptions())
+    const rememberedApplied = cloneDocumentPrintOptions(editingTiAnteprimaAppliedOptionsMemory.get(optionsMemoryKey) || editingTiAnteprimaDocumentOptionsMemory.get(optionsMemoryKey) || defaultDocumentPrintOptions())
+    loadedOptionsKeyRef.current = optionsMemoryKey
+    setDocOptions(remembered)
+    setPreviewOptions(rememberedApplied)
+  }, [optionsMemoryKey])
 
   const dataSignature = React.useMemo(() => {
     try { return JSON.stringify(p.data || {}) } catch { return String(p.data || '') }
@@ -1262,6 +1441,13 @@ export default function AnteprimaPanel (p: {
   const hasNotaSpeseLocal = React.useMemo(() => {
     const groups = buildNotaSpeseGroups(p.nsRows, p.nsSummary)
     return groups.length > 0 || buildArt30RapportoSummary(p.data || {}).hasData
+  }, [dataSignature, nsSignature])
+
+  const computedNotaSpeseOptions = React.useMemo<NotaSpesePrintOption[]>(() => {
+    return buildNotaSpesePrintGroups(p.nsRows, p.nsSummary, p.data).map(group => ({
+      key: group.codiceCasistica,
+      label: group.label
+    }))
   }, [dataSignature, nsSignature])
 
   React.useEffect(() => {
@@ -1367,15 +1553,31 @@ export default function AnteprimaPanel (p: {
   }, [p.mapView, mapConfigSignature, mapTargetSignature])
 
   React.useEffect(() => {
+    setNotaSpeseOptions(computedNotaSpeseOptions)
+    setDocOptions(prev => {
+      const previousSelected = prev.selectedNotaSpeseKeys || {}
+      const selectedNotaSpeseKeys: Record<string, boolean> = {}
+      computedNotaSpeseOptions.forEach(item => {
+        selectedNotaSpeseKeys[item.key] = computedNotaSpeseOptions.length > 1 && Object.prototype.hasOwnProperty.call(previousSelected, item.key) ? previousSelected[item.key] : true
+      })
+      return {
+        ...prev,
+        selectedNotaSpeseKeys,
+        includeNotaSpese: computedNotaSpeseOptions.length > 0 ? prev.includeNotaSpese : false
+      }
+    })
+  }, [computedNotaSpeseOptions])
+
+  React.useEffect(() => {
     const layerVisibility: Record<string, boolean> = {}
     listPrintableMapLayers(printMapView).forEach(item => { layerVisibility[item.key] = item.visible })
-    const title = `Allegato cartografico - Rilevazione ${praticaCode || ''}`.trim()
+    const title = mapTechnicalDocumentTitle(officialRapportoTecnicoNumberForEditing(p.data))
     setDocOptions(prev => ({
       ...prev,
       includeNotaSpese: hasNotaSpeseLocal ? prev.includeNotaSpese : false,
       mapTitle: prev.mapTitle || title,
       mapBasemap: prev.mapBasemap || 'satellite',
-      mapLayerVisibility: Object.keys(layerVisibility).length ? layerVisibility : prev.mapLayerVisibility
+      mapLayerVisibility: Object.keys(prev.mapLayerVisibility || {}).length ? prev.mapLayerVisibility : layerVisibility
     }))
   }, [hasNotaSpeseLocal, printMapView, praticaCode])
 
@@ -1390,6 +1592,7 @@ export default function AnteprimaPanel (p: {
       allegati: false,
       checkedKey
     })
+    setAttachmentOptions([])
     if (!hasNotaSpeseLocal) setDocOptions(prev => ({ ...prev, includeNotaSpese: false }))
     if (!targetAvailable || !viewAvailable) setDocOptions(prev => ({ ...prev, includeMappa: false }))
     if (!p.ds || !p.oid) {
@@ -1397,12 +1600,24 @@ export default function AnteprimaPanel (p: {
       return
     }
     let cancelled = false
-    void hasAttachments(p.ds, Number(p.oid)).then(allegati => {
+    void loadAttachmentOptions(p.ds, Number(p.oid)).then(allegatiList => {
       if (cancelled) return
+      setAttachmentOptions(allegatiList)
+      setDocOptions(prev => {
+        const previousSelected = prev.selectedAttachmentIds || {}
+        const selectedAttachmentIds: Record<string, boolean> = {}
+        allegatiList.forEach(att => {
+          const key = String(att.id)
+          selectedAttachmentIds[key] = Object.prototype.hasOwnProperty.call(previousSelected, key) ? previousSelected[key] : true
+        })
+        return { ...prev, selectedAttachmentIds, includeAllegati: allegatiList.length > 0 ? prev.includeAllegati : false }
+      })
+      const allegati = allegatiList.length > 0
       setAvailability(prev => prev.checkedKey === checkedKey ? { ...prev, loadingAllegati: false, allegati } : prev)
       if (!allegati) setDocOptions(prev => ({ ...prev, includeAllegati: false }))
     }).catch(() => {
       if (cancelled) return
+      setAttachmentOptions([])
       setAvailability(prev => prev.checkedKey === checkedKey ? { ...prev, loadingAllegati: false, allegati: false } : prev)
       setDocOptions(prev => ({ ...prev, includeAllegati: false }))
     })
@@ -1413,58 +1628,17 @@ export default function AnteprimaPanel (p: {
     setDocOptions(prev => ({ ...prev, ...patch }))
   }, [])
 
-  const setMapLayerKeysVisible = React.useCallback((keys: string[], visible: boolean) => {
-    setDocOptions(prev => {
-      const nextVisibility = { ...(prev.mapLayerVisibility || {}) }
-      keys.forEach(key => { nextVisibility[key] = visible })
-      return { ...prev, mapLayerVisibility: nextVisibility }
-    })
+  const setAttachmentOptionVisible = React.useCallback((id: number, visible: boolean) => {
+    setDocOptions(prev => setGiiAttachmentPrintOptionVisible(prev, id, visible))
   }, [])
 
-  const renderPrintableLayerNode = React.useCallback((node: PrintableMapLayerNode, depth = 0): any => {
-    const leafKeys = collectPrintableMapLayerKeys(node)
-    const checkedCount = leafKeys.filter(key => docOptions.mapLayerVisibility[key] !== false).length
-    const checked = leafKeys.length > 0 && checkedCount === leafKeys.length
-    const partial = checkedCount > 0 && checkedCount < leafKeys.length
-    const hasChildren = node.children.length > 0
-    const expanded = !!expandedLayerGroups[node.key]
-    const row = (
-      <div key={node.key} style={{ display: 'grid', gridTemplateColumns: '16px minmax(0, 1fr) 18px', alignItems: 'center', gap: 8, minHeight: 24, paddingLeft: depth * 18, fontSize: 13, color: '#334155', fontWeight: hasChildren ? 800 : 600 }}>
-        {hasChildren ? (
-          <button
-            type='button'
-            onClick={() => setExpandedLayerGroups(prev => ({ ...prev, [node.key]: !prev[node.key] }))}
-            aria-label={expanded ? 'Comprimi gruppo layer' : 'Espandi gruppo layer'}
-            style={{ border: 0, background: 'transparent', padding: 0, width: 16, height: 20, lineHeight: '20px', cursor: 'pointer', color: '#334155', fontSize: 12 }}
-          >
-            {expanded ? '▼' : '▶'}
-          </button>
-        ) : (
-          <span style={{ width: 16, height: 20 }} />
-        )}
-        <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{node.title}</span>
-        <input
-          type='checkbox'
-          checked={checked}
-          disabled={loading || leafKeys.length === 0}
-          ref={(el) => { if (el) el.indeterminate = partial }}
-          onClick={e => { e.stopPropagation() }}
-          onChange={e => setMapLayerKeysVisible(leafKeys, e.target.checked)}
-        />
-      </div>
-    )
-    if (!hasChildren) return row
-    return (
-      <div key={node.key} style={{ display: 'grid', gap: 4 }}>
-        {row}
-        {expanded && (
-          <div style={{ display: 'grid', gap: 4 }}>
-            {node.children.map(child => renderPrintableLayerNode(child, depth + 1))}
-          </div>
-        )}
-      </div>
-    )
-  }, [docOptions.mapLayerVisibility, expandedLayerGroups, loading, setMapLayerKeysVisible])
+  const setNotaSpeseOptionVisible = React.useCallback((key: string, visible: boolean) => {
+    setDocOptions(prev => setGiiNotaSpesePrintOptionVisible(prev, key, visible))
+  }, [])
+
+  const setMapLayerKeysVisible = React.useCallback((keys: string[], visible: boolean) => {
+    setDocOptions(prev => setGiiMapLayerKeysVisible(prev, keys, visible))
+  }, [])
 
   React.useEffect(() => {
     let cancelled = false
@@ -1492,10 +1666,15 @@ export default function AnteprimaPanel (p: {
     const items: Array<{ blob: Blob; fileName: string }> = []
     const includeRapporto = opts.includeRapporto
     const includeNotaSpese = opts.includeNotaSpese && hasNotaSpeseLocal
+    const selectedNotaSpeseKeys = notaSpeseOptions
+      .filter(item => (opts.selectedNotaSpeseKeys || {})[item.key] !== false)
+      .map(item => item.key)
+    if (includeNotaSpese && selectedNotaSpeseKeys.length === 0) throw new Error('Selezionare almeno una nota spese.')
     if (includeRapporto || includeNotaSpese) {
       items.push(await buildRapportoDocumentsPdfBlob(dataSnapshot, utenti, p.nsRows, p.nsSummary, {
         includeRapporto,
-        includeNotaSpese
+        includeNotaSpese,
+        selectedNotaSpeseKeys: { ...(opts.selectedNotaSpeseKeys || {}) }
       }))
     }
     if (opts.includeMappa && mapTarget && printMapView) {
@@ -1509,19 +1688,57 @@ export default function AnteprimaPanel (p: {
       }))
     }
     if (opts.includeAllegati && p.ds && p.oid) {
-      const attPdf = await buildPracticeAttachmentsPdfBlob(p.ds, Number(p.oid))
+      const selectedAttachmentIds = attachmentOptions
+        .filter(att => (opts.selectedAttachmentIds || {})[String(att.id)] !== false)
+        .map(att => Number(att.id))
+        .filter(id => Number.isFinite(id) && id > 0)
+      if (selectedAttachmentIds.length === 0) throw new Error('Selezionare almeno un allegato.')
+      const attPdf = await buildPracticeAttachmentsPdfBlob(p.ds, Number(p.oid), selectedAttachmentIds, officialRapportoTecnicoNumberForEditing(dataSnapshot))
       if (attPdf) items.push(attPdf)
     }
     if (items.length === 0) throw new Error('Selezionare almeno un documento.')
     if (items.length === 1) return items[0]
     const safeCode = String(praticaCode || 'documenti').replace(/[^a-zA-Z0-9_-]/g, '_')
     return { blob: await mergePdfBlobs(items), fileName: `documenti_${safeCode}.pdf` }
-  }, [previewOptions, hasNotaSpeseLocal, mapTarget, p.data, p.ds, printMapView, p.nsRows, p.nsSummary, p.oid, p.idFieldName, p.printServiceUrl, mapConfigSignature, praticaCode, utenti])
+  }, [previewOptions, attachmentOptions, notaSpeseOptions, hasNotaSpeseLocal, mapTarget, p.data, p.ds, printMapView, p.nsRows, p.nsSummary, p.oid, p.idFieldName, p.printServiceUrl, mapConfigSignature, praticaCode, utenti])
+
+  const previewCacheSignature = React.useMemo(() => {
+    try {
+      const includeNotaSpese = !!previewOptions.includeNotaSpese
+      const includeMappa = !!previewOptions.includeMappa
+      const includeAllegati = !!previewOptions.includeAllegati
+      return JSON.stringify({
+        options: previewOptions,
+        dataSignature,
+        nsSignature: includeNotaSpese ? nsSignature : '',
+        mapTargetSignature: includeMappa ? mapTargetSignature : '',
+        mapConfigSignature: includeMappa ? mapConfigSignature : '',
+        oid: p.oid || null,
+        idFieldName: includeMappa ? (p.idFieldName || '') : '',
+        printServiceUrl: includeMappa ? (p.printServiceUrl || '') : '',
+        attachmentOptions: includeAllegati ? attachmentOptions.map(att => ({ id: att.id, name: att.name, contentType: att.contentType })) : [],
+        notaSpeseOptions: includeNotaSpese ? notaSpeseOptions : []
+      })
+    } catch {
+      return `${Date.now()}`
+    }
+  }, [previewOptions, dataSignature, nsSignature, mapTargetSignature, mapConfigSignature, p.oid, p.idFieldName, p.printServiceUrl, attachmentOptions, notaSpeseOptions])
 
   const regeneratePreview = React.useCallback(() => {
     if (!p.data || Object.keys(p.data).length === 0) {
       setPdfUrl(null)
       setPdfFileName('rapporto.pdf')
+      setLoading(false)
+      return
+    }
+
+    const cacheKey = `${optionsMemoryKey}:${previewCacheSignature}`
+    const cached = forceNextPreviewRegenerateRef.current ? null : editingTiAnteprimaPdfMemory.get(cacheKey)
+    if (cached) {
+      const url = makePdfUrl(cached.blob, cached.fileName)
+      setPdfFileName(cached.fileName)
+      setPdfUrl(prev => { revokePdfUrl(prev); return url })
+      setError(null)
       setLoading(false)
       return
     }
@@ -1540,146 +1757,58 @@ export default function AnteprimaPanel (p: {
       try {
         const { blob, fileName } = await buildSelectedDocumentsPdf()
         if (cancelled) return
+        editingTiAnteprimaPdfMemory.set(cacheKey, { blob, fileName })
         const url = makePdfUrl(blob, fileName)
         setPdfFileName(fileName)
         setPdfUrl(prev => { revokePdfUrl(prev); return url })
       } catch (ex: any) { if (!cancelled) setError('Errore: ' + (ex?.message || String(ex))) }
-      finally { if (!cancelled) setLoading(false) }
+      finally {
+        forceNextPreviewRegenerateRef.current = false
+        if (!cancelled) setLoading(false)
+      }
     })()
     return () => { cancelled = true }
-  }, [buildSelectedDocumentsPdf, p.data, utentiReady])
+  }, [buildSelectedDocumentsPdf, optionsMemoryKey, p.data, previewCacheSignature, utentiReady])
 
   React.useEffect(() => {
     return regeneratePreview()
-  }, [regeneratePreview, dataSignature, p.mode, utenti, utentiReady, nsSignature, mapTargetSignature, previewRevision])
-
-  const pendingOptionsSignature = React.useMemo(() => {
-    try { return JSON.stringify(docOptions || {}) } catch { return '' }
-  }, [docOptions])
-
-  const appliedOptionsSignature = React.useMemo(() => {
-    try { return JSON.stringify(previewOptions || {}) } catch { return '' }
-  }, [previewOptions])
-
-  const hasPendingDocumentOptions = pendingOptionsSignature !== appliedOptionsSignature
+  }, [previewCacheSignature, utentiReady, previewRevision])
 
   const applyDocumentOptionsAndRegenerate = React.useCallback(() => {
-    setPreviewOptions({ ...docOptions, mapLayerVisibility: { ...(docOptions.mapLayerVisibility || {}) } })
+    forceNextPreviewRegenerateRef.current = true
+    setPreviewOptions(cloneDocumentPrintOptions(docOptions))
     setPreviewRevision(v => v + 1)
   }, [docOptions])
 
-  const renderDocCheckbox = (key: keyof Pick<DocumentPrintOptions, 'includeRapporto' | 'includeNotaSpese' | 'includeMappa' | 'includeAllegati'>, label: string) => {
-    const unavailable = (
-      key === 'includeNotaSpese' ? !availability.notaSpese :
-      key === 'includeMappa' ? (!availability.mappa || !printMapView) :
-      key === 'includeAllegati' ? (!!availability.loadingAllegati || !availability.allegati) :
-      false
-    )
-    const disabled = loading || unavailable
-    const labelText = key === 'includeRapporto' ? label : `${label}${unavailable ? ' (n.d.)' : ''}`
-    return (
-      <label key={key} style={{ display: 'inline-flex', alignItems: 'center', gap: 7, minHeight: 24, fontSize: 13, color: disabled ? '#94a3b8' : '#334155', fontWeight: 800, whiteSpace: 'nowrap' }}>
-        <input
-          type='checkbox'
-          checked={!!(docOptions as any)[key]}
-          disabled={disabled}
-          onChange={e => updateDocOption({ [key]: e.target.checked } as any)}
-        />
-        <span>{labelText}</span>
-      </label>
-    )
-  }
-
   return (
     <div css={containerCss}>
-      <div style={{ flex: '1 1 auto', minHeight: 0, display: 'flex', alignItems: 'stretch', overflow: 'hidden' }}>
-        <div style={{ flex: '1 1 auto', minWidth: 0, minHeight: 0 }}>
-          <AnteprimaPdfViewer
-            url={pdfUrl}
-            fileName={pdfFileName}
-            title='Anteprima rapporto'
-            subtitle={pdfFileName}
-            loading={loading}
-            error={error}
-            emptyText='Nessun dato disponibile per l&apos;anteprima.'
-          />
-        </div>
-        <aside style={{ flex: '0 0 270px', width: 270, minHeight: 0, overflow: 'auto', padding: 10, background: '#eef4fb', borderLeft: '1px solid #dbe4ef', color: '#0f172a', display: 'grid', alignContent: 'start', gap: 10 }}>
-          <div style={{ fontSize: 13, fontWeight: 900, color: '#0f172a' }}>Documenti</div>
-          <div style={{ display: 'grid', gap: 8 }}>
-            {renderDocCheckbox('includeRapporto', 'Rapporto tecnico')}
-            {renderDocCheckbox('includeNotaSpese', 'Nota spese')}
-            {renderDocCheckbox('includeMappa', 'Mappa')}
-            {renderDocCheckbox('includeAllegati', 'Allegati')}
-          </div>
-
-          {docOptions.includeMappa && printMapView && (
-            <div style={{ display: 'grid', gap: 9, paddingTop: 8, borderTop: '1px solid #dbe4ef' }}>
-              <div style={{ fontSize: 13, fontWeight: 900, color: '#0f172a' }}>Stampa mappa</div>
-              <label style={{ display: 'grid', gap: 4, fontSize: 12, fontWeight: 800, color: '#334155' }}>
-                Titolo
-                <input type='text' value={docOptions.mapTitle} onChange={e => updateDocOption({ mapTitle: e.target.value })} style={{ padding: '7px 9px', border: '1px solid #cbd5e1', borderRadius: 8 }} />
-              </label>
-              <label style={{ display: 'grid', gap: 4, fontSize: 12, fontWeight: 800, color: '#334155' }}>
-                Layout
-                <select value={docOptions.mapLayout} onChange={e => updateDocOption({ mapLayout: e.target.value })} style={{ padding: '7px 9px', border: '1px solid #cbd5e1', borderRadius: 8 }}>
-                  <option value='A4 Portrait'>A4 Portrait</option>
-                  <option value='A4 Landscape'>A4 Landscape</option>
-                  <option value='A3 Portrait'>A3 Portrait</option>
-                  <option value='A3 Landscape'>A3 Landscape</option>
-                  <option value='MAP_ONLY'>MAP_ONLY</option>
-                </select>
-              </label>
-              <label style={{ display: 'grid', gap: 4, fontSize: 12, fontWeight: 800, color: '#334155' }}>
-                Mappa base
-                <select value={docOptions.mapBasemap} onChange={e => updateDocOption({ mapBasemap: e.target.value })} style={{ padding: '7px 9px', border: '1px solid #cbd5e1', borderRadius: 8 }}>
-                  <option value='satellite'>Ortofoto</option>
-                  <option value='hybrid'>Ortofoto con etichette</option>
-                  <option value='topo-vector'>Topografica</option>
-                  <option value='streets-vector'>Stradale</option>
-                </select>
-              </label>
-              <label style={{ display: 'grid', gap: 4, fontSize: 12, fontWeight: 800, color: '#334155' }}>
-                Scala
-                <input type='number' min={100} step={100} value={docOptions.mapScale} onChange={e => updateDocOption({ mapScale: Number(e.target.value) || 1000 })} style={{ padding: '7px 9px', border: '1px solid #cbd5e1', borderRadius: 8 }} />
-              </label>
-              <div style={{ display: 'grid', gap: 5 }}>
-                <div style={{ fontSize: 12, fontWeight: 900, color: '#334155' }}>Layer da stampare</div>
-                {printableLayerTree.length === 0 ? (
-                  <div style={{ fontSize: 12.5, color: '#64748b', lineHeight: 1.35 }}>{printMapView ? 'La mappa è agganciata, ma non espone layer stampabili leggibili.' : 'Mappa in preparazione.'}</div>
-                ) : (
-                  <div style={{ display: 'grid', gap: 5, maxHeight: 220, overflow: 'auto', padding: '6px 8px', border: '1px solid #e2e8f0', borderRadius: 8, background: '#fff' }}>
-                    {printableLayerTree.map(node => renderPrintableLayerNode(node))}
-                  </div>
-                )}
-              </div>
-            </div>
-          )}
-          <button
-            type='button'
-            disabled={loading}
-            onClick={applyDocumentOptionsAndRegenerate}
-            style={{
-              width: '100%',
-              minHeight: 34,
-              border: '1px solid #1d4ed8',
-              borderRadius: 8,
-              background: loading ? '#93c5fd' : '#2563eb',
-              color: '#fff',
-              fontSize: 13,
-              fontWeight: 900,
-              cursor: loading ? 'default' : 'pointer'
-            }}
-          >
-            {loading ? 'Rigenerazione...' : 'Rigenera documento'}
-          </button>
-          {hasPendingDocumentOptions && !loading && (
-            <div style={{ fontSize: 12, color: '#b45309', lineHeight: 1.35, fontWeight: 700 }}>
-              Modifiche non ancora applicate all&apos;anteprima.
-            </div>
-          )}
-        </aside>
-      </div>
+      <GiiDocumentViewer
+        url={pdfUrl}
+        fileName={pdfFileName}
+        title='Anteprima rapporto'
+        subtitle={pdfFileName}
+        loading={loading}
+        error={error}
+        emptyText='Nessun dato disponibile per l&apos;anteprima.'
+        width={270}
+        docOptions={docOptions}
+        availability={availability}
+        busy={loading}
+        canUseMap={!!printMapView}
+        mapPanelAvailable={!!printMapView}
+        documentUnavailableExtra={{ includeAllegati: !!availability.loadingAllegati }}
+        notaSpeseOptions={notaSpeseOptions}
+        attachmentOptions={attachmentOptions}
+        printableLayerTree={printableLayerTree}
+        expandedLayerGroups={expandedLayerGroups}
+        mapEmptyText={printMapView ? 'La mappa è agganciata, ma non espone layer stampabili leggibili.' : 'Mappa in preparazione.'}
+        updateDocOption={updateDocOption}
+        setNotaSpeseOptionVisible={setNotaSpeseOptionVisible}
+        setAttachmentOptionVisible={setAttachmentOptionVisible}
+        setMapLayerKeysVisible={setMapLayerKeysVisible}
+        setExpandedLayerGroups={setExpandedLayerGroups}
+        onRegenerate={applyDocumentOptionsAndRegenerate}
+      />
       <div
         ref={technicalMapContainerRef}
         aria-hidden='true'

@@ -717,7 +717,7 @@ export async function buildNotaSpesePdf(data: NotaSpeseData): Promise<Uint8Array
     pages.forEach((page, index) => {
       rightAligned(
         page,
-        `Allegato - Nota spese - Pag. ${index + 1} di ${totalPages}`,
+        `Pag. ${index + 1} di ${totalPages}`,
         fontR,
         7,
         ML,

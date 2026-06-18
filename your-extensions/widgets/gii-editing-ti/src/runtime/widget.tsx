@@ -831,6 +831,52 @@ async function uploadFilesToFeatureAttachments (ds: any, oid: number, files: Fil
   throw new Error('URL del FeatureLayer non disponibile per il caricamento allegati.')
 }
 
+async function updateFeatureAttachmentOnFeature (ds: any, oid: number, attachmentId: number, file: File, preferredUrl?: string | null): Promise<void> {
+  if (!oid || !Number.isFinite(Number(attachmentId)) || Number(attachmentId) <= 0 || !file) return
+  const layer = await resolveFeatureLayerForAttachments(ds, preferredUrl)
+  if (!layer && !preferredUrl) throw new Error('Non riesco a risalire al FeatureLayer per aggiornare l’allegato.')
+
+  const oidField = getAttachmentOidFieldName(layer, ds)
+  const featureRef = { attributes: { [oidField]: oid } }
+  const layerUrl = ensureLayerIndex(normalizeFeatureLayerUrl(preferredUrl) || normalizeFeatureLayerUrl(layer?.url), layer)
+  let token = ''
+  try {
+    const IdentityManager = await loadEsriModule<any>('esri/identity/IdentityManager')
+    const cred = IdentityManager?.findCredential?.(layerUrl) || IdentityManager?.findCredential?.(layerUrl.replace(/\/\d+$/, ''))
+    token = cred?.token ? String(cred.token) : ''
+  } catch {}
+
+  if (layer && typeof layer.updateAttachment === 'function') {
+    try {
+      const res = await layer.updateAttachment(featureRef, Number(attachmentId), file)
+      const err = (res as any)?.error
+      if (!err) return
+      throw new Error(String(err?.message || err))
+    } catch {
+      // fallback REST sotto
+    }
+  }
+
+  if (layerUrl) {
+    const fd = new FormData()
+    fd.append('f', 'json')
+    fd.append('attachmentId', String(Number(attachmentId)))
+    fd.append('attachment', file)
+    if (token) fd.append('token', token)
+    const res = await fetch(`${layerUrl}/${oid}/updateAttachment`, { method: 'POST', body: fd })
+    const j = await res.json().catch(() => ({}))
+    const updRes = j?.updateAttachmentResult || j
+    const err = updRes?.error || j?.error
+    if (!res.ok || err || updRes?.success === false) {
+      const msg = err?.message || `HTTP ${res.status}`
+      throw new Error(String(msg))
+    }
+    return
+  }
+
+  throw new Error('URL del FeatureLayer non disponibile per aggiornare l’allegato.')
+}
+
 async function deleteFeatureAttachmentsFromFeature (ds: any, oid: number, attachmentIds: number[], preferredUrl?: string | null): Promise<number[]> {
   const ids = Array.isArray(attachmentIds) ? attachmentIds.map((v) => Number(v)).filter((v) => Number.isFinite(v) && v > 0) : []
   if (!oid || ids.length === 0) return []
@@ -934,6 +980,106 @@ async function openAttachmentInNewTab (att: any, oid: number, preferredUrl?: str
   window.setTimeout(() => {
     try { URL.revokeObjectURL(blobUrl) } catch {}
   }, 60000)
+}
+
+async function fetchAttachmentBlobForEdit (att: any, oid: number, preferredUrl?: string | null): Promise<Blob> {
+  const layerUrl = ensureLayerIndex(normalizeFeatureLayerUrl(preferredUrl))
+  const rawUrl = buildAttachmentRawUrl(att, oid, preferredUrl)
+  if (!rawUrl) throw new Error('URL allegato non disponibile.')
+
+  let token = ''
+  try {
+    const IdentityManager = await loadEsriModule<any>('esri/identity/IdentityManager')
+    const baseForCred = layerUrl || rawUrl
+    const cred = IdentityManager?.findCredential?.(baseForCred) || IdentityManager?.findCredential?.(baseForCred.replace(/\/\d+$/, ''))
+    token = cred?.token ? String(cred.token) : ''
+  } catch {}
+
+  let finalUrl = rawUrl
+  if (token && !/[?&]token=/.test(finalUrl) && /^https?:/i.test(finalUrl)) {
+    finalUrl = `${finalUrl}${finalUrl.includes('?') ? '&' : '?'}token=${encodeURIComponent(token)}`
+  }
+
+  const resp = await fetch(finalUrl, { credentials: 'same-origin' })
+  if (!resp.ok) throw new Error(`Lettura allegato fallita (HTTP ${resp.status}).`)
+  return await resp.blob()
+}
+
+function canvasToBlobForEdit (canvas: HTMLCanvasElement, type: string, quality?: number): Promise<Blob> {
+  return new Promise((resolve, reject) => {
+    try {
+      canvas.toBlob(blob => {
+        if (blob) resolve(blob)
+        else reject(new Error('Rotazione immagine non riuscita.'))
+      }, type, quality)
+    } catch (ex) {
+      reject(ex)
+    }
+  })
+}
+
+async function rotateImageAttachmentFile (blob: Blob, fileName: string, rotationDeg: number): Promise<File> {
+  const contentType = String(blob.type || '').toLowerCase()
+  const lowerName = String(fileName || '').toLowerCase()
+  const isJpeg = contentType.includes('jpeg') || contentType.includes('jpg') || /\.(jpe?g)$/i.test(lowerName)
+  const isPng = contentType.includes('png') || /\.png$/i.test(lowerName)
+  if (!isJpeg && !isPng) throw new Error('La rotazione è disponibile solo per immagini JPEG o PNG.')
+  if (typeof document === 'undefined') throw new Error('Rotazione immagine non disponibile in questo ambiente.')
+
+  let source: any = null
+  let sourceUrl = ''
+  let closeSource = () => {}
+  try {
+    const createBitmap = (window as any)?.createImageBitmap
+    if (typeof createBitmap === 'function') {
+      source = await createBitmap(blob, { imageOrientation: 'from-image' }).catch(() => null)
+      if (source) closeSource = () => { try { source.close?.() } catch {} }
+    }
+    if (!source) {
+      sourceUrl = URL.createObjectURL(blob)
+      source = await new Promise<HTMLImageElement | null>(resolve => {
+        const img = new Image()
+        img.onload = () => resolve(img)
+        img.onerror = () => resolve(null)
+        img.src = sourceUrl
+      })
+      closeSource = () => { try { if (sourceUrl) URL.revokeObjectURL(sourceUrl) } catch {} }
+    }
+    if (!source) throw new Error('Immagine non leggibile.')
+
+    const srcW = Math.max(1, Math.round(Number(source.width || source.naturalWidth) || 0))
+    const srcH = Math.max(1, Math.round(Number(source.height || source.naturalHeight) || 0))
+    if (!srcW || !srcH) throw new Error('Dimensioni immagine non valide.')
+
+    const normalizedRotation = ((Math.round(rotationDeg / 90) * 90) % 360 + 360) % 360
+    if (normalizedRotation === 0) {
+      return new File([blob], fileName || `allegato.${isJpeg ? 'jpg' : 'png'}`, { type: isJpeg ? 'image/jpeg' : 'image/png' })
+    }
+
+    const canvas = document.createElement('canvas')
+    const swap = normalizedRotation === 90 || normalizedRotation === 270
+    canvas.width = swap ? srcH : srcW
+    canvas.height = swap ? srcW : srcH
+    const ctx = canvas.getContext('2d')
+    if (!ctx) throw new Error('Rotazione immagine non disponibile.')
+    if (normalizedRotation === 90) {
+      ctx.translate(canvas.width, 0)
+      ctx.rotate(Math.PI / 2)
+    } else if (normalizedRotation === 180) {
+      ctx.translate(canvas.width, canvas.height)
+      ctx.rotate(Math.PI)
+    } else if (normalizedRotation === 270) {
+      ctx.translate(0, canvas.height)
+      ctx.rotate(-Math.PI / 2)
+    }
+    ctx.drawImage(source, 0, 0, srcW, srcH)
+
+    const outType = isJpeg ? 'image/jpeg' : 'image/png'
+    const rotatedBlob = await canvasToBlobForEdit(canvas, outType, isJpeg ? 0.92 : undefined)
+    return new File([rotatedBlob], fileName || `allegato_ruotato.${isJpeg ? 'jpg' : 'png'}`, { type: outType })
+  } finally {
+    closeSource()
+  }
 }
 
 
@@ -6192,6 +6338,7 @@ function NuovaPraticaForm (p: {
   const [previewAttachment, setPreviewAttachment] = React.useState<{ id: number; name?: string; contentType?: string } | null>(null)
   const [previewBlobUrl, setPreviewBlobUrl] = React.useState<string | null>(null)
   const [previewLoading, setPreviewLoading] = React.useState(false)
+  const [previewRotationDeg, setPreviewRotationDeg] = React.useState(0)
   const prevBlobRef = React.useRef<string | null>(null)
 
   React.useEffect(() => {
@@ -6216,6 +6363,7 @@ function NuovaPraticaForm (p: {
     setReplaceInputKey(k => k + 1)
     setAttachmentsError(null)
     setPreviewAttachment(null)
+    setPreviewRotationDeg(0)
     setMsg(null)
   }, [mode, editOid, p.initialData])
 
@@ -6323,6 +6471,29 @@ function NuovaPraticaForm (p: {
     return ensureLayerIndex(normalizeFeatureLayerUrl(p.editLayerUrl) || normalizeFeatureLayerUrl(readDynamicSelection().layerUrl))
   }, [p.editLayerUrl])
 
+  React.useEffect(() => {
+    setPreviewRotationDeg(0)
+  }, [previewAttachment?.id])
+
+  React.useEffect(() => {
+    if (npTab !== 'allegati') return
+    if (attachmentsLoading) return
+    const list = Array.isArray(attachments) ? attachments : []
+    if (list.length === 0) {
+      if (previewAttachment) setPreviewAttachment(null)
+      return
+    }
+    const selectedStillExists = !!previewAttachment && list.some((a: any) => Number(a?.id) === Number(previewAttachment.id))
+    if (selectedStillExists) return
+    const first = list[0]
+    if (!first || first.id == null) return
+    setPreviewAttachment({
+      id: Number(first.id),
+      name: first.name,
+      contentType: first.contentType
+    })
+  }, [npTab, attachments, attachmentsLoading, previewAttachment?.id])
+
   // Effect anteprima allegato (richiede currentOid e currentLayerUrl)
   React.useEffect(() => {
     if (prevBlobRef.current) { try { URL.revokeObjectURL(prevBlobRef.current) } catch {} prevBlobRef.current = null }
@@ -6345,6 +6516,7 @@ function NuovaPraticaForm (p: {
         } catch {}
         let finalUrl = rawUrl
         if (token && !/[?&]token=/.test(finalUrl)) finalUrl = `${finalUrl}${finalUrl.includes('?') ? '&' : '?'}token=${encodeURIComponent(token)}`
+        finalUrl = `${finalUrl}${finalUrl.includes('?') ? '&' : '?'}giiPreviewTs=${Date.now()}`
         const resp = await fetch(finalUrl, { credentials: 'same-origin' })
         if (!resp.ok || cancelled) { setPreviewLoading(false); return }
         const blob = await resp.blob()
@@ -6659,7 +6831,7 @@ React.useEffect(() => {
   }, [currentOid, currentLayerUrl, ds, mapAttachmentInfos, attachmentsForOid])
 
   const refreshCurrentAttachmentsAfterUpload = React.useCallback(async (opts?: { optimistic?: Array<{ id: number; name?: string; size?: number; contentType?: string; url?: string }>; expectedCount?: number | null }) => {
-    if (currentOid == null) return
+    if (currentOid == null) return []
     const optimistic = Array.isArray(opts?.optimistic) ? opts!.optimistic : []
     const expectedCount = Number.isFinite(Number(opts?.expectedCount)) ? Math.max(0, Number(opts?.expectedCount)) : null
     if (optimistic.length > 0) setAttachments(optimistic)
@@ -6676,14 +6848,17 @@ React.useEffect(() => {
         best = clean
         if (expectedCount == null || clean.length === expectedCount) {
           setAttachments(clean)
-          return
+          return clean
         }
         if (i < 7) await wait(500)
       }
-      setAttachments(best.length > 0 || expectedCount === 0 ? best : optimistic)
+      const next = best.length > 0 || expectedCount === 0 ? best : optimistic
+      setAttachments(next)
+      return next
     } catch (e: any) {
       if (optimistic.length > 0 || expectedCount === 0) setAttachments(optimistic)
       setAttachmentsError(e?.message || String(e))
+      return optimistic
     } finally {
       setAttachmentsLoading(false)
     }
@@ -6727,6 +6902,44 @@ React.useEffect(() => {
     }, 0)
   }, [])
 
+  const canRotateAttachments = mode === 'edit' && normalizeRoleCode(readGiiUserContext().role) === 'TI' && !isReadOnly && !isRiAgrTecLimitedEdit
+
+  const isRotatableAttachment = React.useCallback((att: { name?: string; contentType?: string }) => {
+    const ct = String(att?.contentType || '').toLowerCase()
+    const name = String(att?.name || '').toLowerCase()
+    return ct.includes('jpeg') || ct.includes('jpg') || ct.includes('png') || /\.(jpe?g|png)$/i.test(name)
+  }, [])
+
+  const savePreviewRotation = React.useCallback(async () => {
+    const normalizedRotation = ((Math.round(previewRotationDeg / 90) * 90) % 360 + 360) % 360
+    if (!canRotateAttachments || currentOid == null || !previewAttachment || normalizedRotation === 0) return
+    const selectedAttachment = (Array.isArray(attachments) ? attachments : []).find((a: any) => Number(a?.id) === Number(previewAttachment.id)) || previewAttachment
+    if (!isRotatableAttachment(selectedAttachment)) return
+    try {
+      setAttachmentsUploading(true)
+      setAttachmentsError(null)
+      const preferredUrl = await getAttachmentPreferredUrl()
+      const blob = await fetchAttachmentBlobForEdit(selectedAttachment, Number(currentOid), preferredUrl || currentLayerUrl)
+      const file = await rotateImageAttachmentFile(blob, selectedAttachment.name || `allegato_${selectedAttachment.id}.jpg`, normalizedRotation)
+      await updateFeatureAttachmentOnFeature(ds as any, Number(currentOid), Number(selectedAttachment.id), file, preferredUrl)
+      if (prevBlobRef.current) { try { URL.revokeObjectURL(prevBlobRef.current) } catch {} prevBlobRef.current = null }
+      setPreviewBlobUrl(null)
+      setPreviewLoading(true)
+      setPreviewRotationDeg(0)
+      const refreshedAttachments = await refreshCurrentAttachmentsAfterUpload({ expectedCount: Array.isArray(attachments) ? attachments.length : null })
+      const refreshedAttachment = (Array.isArray(refreshedAttachments) ? refreshedAttachments : []).find((a: any) => Number(a?.id) === Number(selectedAttachment.id)) || selectedAttachment
+      setPreviewAttachment({
+        id: Number(selectedAttachment.id),
+        name: refreshedAttachment?.name || selectedAttachment.name,
+        contentType: refreshedAttachment?.contentType || file.type || selectedAttachment.contentType
+      })
+    } catch (e: any) {
+      setAttachmentsError(e?.message || String(e))
+    } finally {
+      setAttachmentsUploading(false)
+    }
+  }, [attachments, canRotateAttachments, currentLayerUrl, currentOid, ds, getAttachmentPreferredUrl, isRotatableAttachment, previewAttachment, previewRotationDeg, refreshCurrentAttachmentsAfterUpload])
+
   const confirmAttachmentAction = React.useCallback(async () => {
     if (!attachmentConfirm || currentOid == null) return
     try {
@@ -6744,13 +6957,14 @@ React.useEffect(() => {
       } else if (attachmentConfirm.type === 'replace' && attachmentConfirm.file) {
         const id = Number(attachmentConfirm.attachment?.id)
         if (Number.isFinite(id) && id > 0) {
-          const uploaded = await uploadFilesToFeatureAttachments(ds as any, currentOid, [attachmentConfirm.file], preferredUrl)
-          await deleteFeatureAttachmentsFromFeature(ds as any, currentOid, [id], preferredUrl)
-          const optimistic = [
-            ...(Array.isArray(attachments) ? attachments : []).filter((a: any) => Number(a?.id) !== id),
-            ...uploaded.map((a, idx) => ({ id: Number(a?.id) || -(idx + 1), name: a?.name, size: a?.size, contentType: a?.contentType, url: a?.url }))
-          ]
+          await updateFeatureAttachmentOnFeature(ds as any, currentOid, id, attachmentConfirm.file, preferredUrl)
+          const optimistic = (Array.isArray(attachments) ? attachments : []).map((a: any) => (
+            Number(a?.id) === id
+              ? { ...a, name: attachmentConfirm.file?.name || a?.name, size: attachmentConfirm.file?.size || a?.size, contentType: attachmentConfirm.file?.type || a?.contentType }
+              : a
+          ))
           setAttachments(optimistic)
+          setPreviewAttachment(null)
           await refreshCurrentAttachmentsAfterUpload({ optimistic, expectedCount: optimistic.length })
         }
       }
@@ -9617,13 +9831,13 @@ ${e?.message || String(e)}`
               </div>
             ))
           ) : (
-            <div style={{ display: 'flex', flexDirection: 'column', minHeight: '100%', border: '1px solid #c5d9f1', borderRadius: formStyle.cardBorderRadius, background: '#fff', overflow: 'hidden' }}>
+            <div style={{ display: 'flex', flexDirection: 'column', height: '100%', minHeight: 0, border: '1px solid #c5d9f1', borderRadius: formStyle.cardBorderRadius, background: '#fff', overflow: 'hidden' }}>
               <div style={{ padding: `${formStyle.cardHeaderPaddingY}px ${formStyle.cardHeaderPaddingX}px`, background: formStyle.cardHeaderBg, color: formStyle.cardHeaderColor, fontWeight: formStyle.cardHeaderFontWeight as any, fontSize: formStyle.cardHeaderFontSize, letterSpacing: 0.25, textTransform: 'uppercase', display: 'flex', alignItems: 'center' }}>
                 ALLEGATI
               </div>
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, flex: '1 1 auto', minHeight: 0, padding: 12 }}>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, flex: '1 1 auto', minHeight: 0, height: '100%', overflow: 'hidden', padding: 12 }}>
             {/* Colonna sinistra: lista allegati */}
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 10, minHeight: 0 }}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 10, minHeight: 0, overflow: 'hidden' }}>
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, flexWrap: 'wrap' }}>
                 <div style={{ fontWeight: 800, fontSize: 13, color: formStyle.hdrColor }}>Elenco allegati</div>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
@@ -9678,12 +9892,12 @@ ${e?.message || String(e)}`
               {attachmentsLoading ? (
                 <div style={{ opacity: 0.75, fontSize: 12 }}>Caricamento allegati…</div>
               ) : attachments.length > 0 ? (
-                <div style={{ display: 'grid', gap: 8 }}>
-                  {attachments.map(a => (
-                    <div key={a.id} onClick={() => setPreviewAttachment(previewAttachment?.id === a.id ? null : { id: a.id, name: a.name, contentType: a.contentType })} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, border: `1px solid ${previewAttachment?.id === a.id ? '#2563eb' : 'rgba(0,0,0,0.08)'}`, borderRadius: 10, padding: '8px 10px', background: previewAttachment?.id === a.id ? '#eff6ff' : '#fff', cursor: 'pointer', transition: 'all 0.15s' }}>
+                <div style={{ display: 'grid', gap: 8, flex: '1 1 auto', minHeight: 0, overflow: 'auto', paddingRight: 2, alignContent: 'start', gridAutoRows: 'max-content' }}>
+                  {attachments.map((a, idx) => (
+                    <div key={a.id} onClick={() => setPreviewAttachment({ id: a.id, name: a.name, contentType: a.contentType })} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, border: `1px solid ${previewAttachment?.id === a.id ? '#2563eb' : 'rgba(0,0,0,0.08)'}`, borderRadius: 10, padding: '8px 10px', background: previewAttachment?.id === a.id ? '#eff6ff' : '#fff', cursor: 'pointer', transition: 'all 0.15s' }}>
                       <div style={{ minWidth: 0 }}>
-                        <div style={{ fontWeight: 600, fontSize: 12, color: '#111827', wordBreak: 'break-word' }}>{a.name || `Allegato #${a.id}`}</div>
-                        <div style={{ fontSize: 11, color: '#64748b' }}>{formatBytesLocal(a.size)}{a.contentType ? ` • ${a.contentType}` : ''}</div>
+                        <div style={{ fontWeight: 700, fontSize: 12, color: '#111827', wordBreak: 'break-word' }}>{`Allegato ${idx + 1}`}</div>
+                        <div style={{ fontSize: 11, color: '#64748b' }}>{[a.name, formatBytesLocal(a.size), a.contentType].filter(Boolean).join(' • ')}</div>
 
                       </div>
                       {Number(a?.id) > 0 ? (
@@ -9759,25 +9973,66 @@ ${e?.message || String(e)}`
               )}
             </div>
             {/* Colonna destra: anteprima */}
-            <div style={{ border: '1px solid rgba(255,255,255,0.08)', borderRadius: 10, padding: 12, background: '#282828', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: previewAttachment ? 'flex-start' : 'center', overflow: 'hidden', minHeight: 0 }}>
-              {!previewAttachment ? (
-                <div style={{ fontSize: 12, color: 'rgba(255,255,255,0.45)', textAlign: 'center' }}>Seleziona un allegato per visualizzare l&apos;anteprima</div>
-              ) : previewLoading ? (
-                <div style={{ fontSize: 12, color: 'rgba(255,255,255,0.55)' }}>Caricamento anteprima…</div>
-              ) : previewBlobUrl ? (() => {
-                const ct = String(previewAttachment.contentType || '').toLowerCase()
-                if (ct.startsWith('image/')) return <img src={previewBlobUrl} alt={previewAttachment.name || ''} style={{ maxWidth: '100%', maxHeight: '100%', borderRadius: 6, objectFit: 'contain', flex: '1 1 auto', minHeight: 0 }}/>
-                if (ct === 'application/pdf') return <iframe src={previewBlobUrl} title={previewAttachment.name || 'PDF'} style={{ width: '100%', flex: '1 1 auto', minHeight: 0, border: 'none', borderRadius: 6 }}/>
-                return <div style={{ fontSize: 12, color: 'rgba(255,255,255,0.45)' }}>Anteprima non disponibile per questo tipo di file.</div>
-              })() : (
-                <div style={{ fontSize: 12, color: 'rgba(255,255,255,0.45)' }}>Anteprima non disponibile per questo tipo di file.</div>
-              )}
-              {previewAttachment && (
-                <div style={{ marginTop: 8, fontSize: 11, color: 'rgba(255,255,255,0.78)', textAlign: 'center', wordBreak: 'break-word' }}>
-                  {previewAttachment.name || `Allegato #${previewAttachment.id}`}
-                  {previewAttachment.contentType ? ` • ${previewAttachment.contentType}` : ''}
-                </div>
-              )}
+            <div style={{ border: '1px solid rgba(255,255,255,0.08)', borderRadius: 10, padding: 12, background: '#282828', display: 'grid', gridTemplateRows: 'minmax(0, 1fr) auto', gap: 8, overflow: 'hidden', minHeight: 0, height: '100%' }}>
+              <div style={{ minHeight: 0, width: '100%', overflow: 'hidden', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                {!previewAttachment ? (
+                  <div style={{ fontSize: 12, color: 'rgba(255,255,255,0.45)', textAlign: 'center' }}>Seleziona un allegato per visualizzare l&apos;anteprima</div>
+                ) : previewLoading ? (
+                  <div style={{ fontSize: 12, color: 'rgba(255,255,255,0.55)' }}>Caricamento anteprima…</div>
+                ) : previewBlobUrl ? (() => {
+                  const ct = String(previewAttachment.contentType || '').toLowerCase()
+                  if (ct.startsWith('image/')) return <img src={previewBlobUrl} alt={previewAttachment.name || ''} style={{ display: 'block', maxWidth: '100%', maxHeight: '100%', width: 'auto', height: 'auto', borderRadius: 6, objectFit: 'contain', transform: `rotate(${previewRotationDeg}deg)`, transformOrigin: 'center center', transition: 'transform 0.16s ease' }}/>
+                  if (ct === 'application/pdf') return <iframe src={previewBlobUrl} title={previewAttachment.name || 'PDF'} style={{ width: '100%', height: '100%', minHeight: 0, border: 'none', borderRadius: 6, background: '#fff' }}/>
+                  return <div style={{ fontSize: 12, color: 'rgba(255,255,255,0.45)', textAlign: 'center' }}>Anteprima non disponibile per questo tipo di file.</div>
+                })() : (
+                  <div style={{ fontSize: 12, color: 'rgba(255,255,255,0.45)', textAlign: 'center' }}>Anteprima non disponibile per questo tipo di file.</div>
+                )}
+              </div>
+              <div style={{ width: '100%', display: 'grid', gridTemplateRows: previewAttachment && canRotateAttachments && isRotatableAttachment(previewAttachment) && previewBlobUrl ? '34px auto' : 'auto', gap: 8 }}>
+                {previewAttachment && canRotateAttachments && isRotatableAttachment(previewAttachment) && previewBlobUrl && (
+                  <>
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 10 }}>
+                      <button
+                        type='button'
+                        disabled={attachmentsUploading}
+                        onClick={() => setPreviewRotationDeg(v => v - 90)}
+                        title='Ruota a sinistra'
+                        aria-label='Ruota a sinistra'
+                        style={{ width: 38, height: 34, borderRadius: 9, border: '1px solid rgba(255,255,255,0.28)', background: '#3b3b3b', color: '#fff', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', cursor: attachmentsUploading ? 'not-allowed' : 'pointer', opacity: attachmentsUploading ? 0.55 : 1, fontSize: 24, fontWeight: 800, lineHeight: 1, fontFamily: 'Arial, sans-serif' }}
+                      >
+                        ↺
+                      </button>
+                      <button
+                        type='button'
+                        disabled={attachmentsUploading || (((Math.round(previewRotationDeg / 90) * 90) % 360 + 360) % 360) === 0}
+                        onClick={() => { void savePreviewRotation() }}
+                        title='Conferma orientamento'
+                        aria-label='Conferma orientamento'
+                        style={{ width: 38, height: 34, borderRadius: 9, border: (((Math.round(previewRotationDeg / 90) * 90) % 360 + 360) % 360) !== 0 ? '1px solid #1a7f37' : '1px solid rgba(255,255,255,0.18)', background: (((Math.round(previewRotationDeg / 90) * 90) % 360 + 360) % 360) !== 0 ? '#1a7f37' : '#3b3b3b', color: '#fff', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', cursor: attachmentsUploading || (((Math.round(previewRotationDeg / 90) * 90) % 360 + 360) % 360) === 0 ? 'not-allowed' : 'pointer', opacity: attachmentsUploading ? 0.55 : ((((Math.round(previewRotationDeg / 90) * 90) % 360 + 360) % 360) !== 0 ? 1 : 0.38), fontSize: 20, fontWeight: 900, lineHeight: 1, fontFamily: 'Arial, sans-serif' }}
+                      >
+                        {attachmentsUploading ? '…' : '✓'}
+                      </button>
+                      <button
+                        type='button'
+                        disabled={attachmentsUploading}
+                        onClick={() => setPreviewRotationDeg(v => v + 90)}
+                        title='Ruota a destra'
+                        aria-label='Ruota a destra'
+                        style={{ width: 38, height: 34, borderRadius: 9, border: '1px solid rgba(255,255,255,0.28)', background: '#3b3b3b', color: '#fff', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', cursor: attachmentsUploading ? 'not-allowed' : 'pointer', opacity: attachmentsUploading ? 0.55 : 1, fontSize: 24, fontWeight: 800, lineHeight: 1, fontFamily: 'Arial, sans-serif' }}
+                      >
+                        ↻
+                      </button>
+                    </div>
+                  </>
+                )}
+                {previewAttachment && (
+                  <div style={{ fontSize: 11, color: 'rgba(255,255,255,0.78)', textAlign: 'center', wordBreak: 'break-word', maxHeight: 32, overflow: 'hidden' }}>
+                    {`Allegato ${Math.max(1, (attachments || []).findIndex((a: any) => Number(a?.id) === Number(previewAttachment.id)) + 1)}`}
+                    {previewAttachment.name ? ` • ${previewAttachment.name}` : ''}
+                    {previewAttachment.contentType ? ` • ${previewAttachment.contentType}` : ''}
+                  </div>
+                )}
+              </div>
             </div>
               </div>
             </div>
@@ -10147,9 +10402,14 @@ ${e?.message || String(e)}`
               {attachmentConfirm.type === 'delete' ? 'Confermare l’eliminazione?' : 'Confermare la sostituzione?'}
             </div>
             <div style={{ fontSize: popupBodyFontSize, color: '#374151', lineHeight: 1.5, marginBottom: 14 }}>
-              {attachmentConfirm.type === 'delete'
-                ? <>L’allegato <b>{attachmentConfirm.attachment?.name || `Allegato #${attachmentConfirm.attachment?.id}`}</b> verrà eliminato subito.</>
-                : <>L’allegato <b>{attachmentConfirm.attachment?.name || `Allegato #${attachmentConfirm.attachment?.id}`}</b> verrà sostituito subito con <b>{attachmentConfirm.file?.name || 'il nuovo file selezionato'}</b>.</>}
+              {(() => {
+                const idx = (attachments || []).findIndex((a: any) => Number(a?.id) === Number(attachmentConfirm.attachment?.id))
+                const label = `Allegato ${idx >= 0 ? idx + 1 : Number(attachmentConfirm.attachment?.id) || ''}`.trim()
+                const fullLabel = attachmentConfirm.attachment?.name ? `${label} • ${attachmentConfirm.attachment.name}` : label
+                return attachmentConfirm.type === 'delete'
+                  ? <>L’allegato <b>{fullLabel}</b> verrà eliminato subito.</>
+                  : <>L’allegato <b>{fullLabel}</b> verrà sostituito subito con <b>{attachmentConfirm.file?.name || 'il nuovo file selezionato'}</b>.</>
+              })()}
             </div>
             <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10 }}>
               <button type='button' onClick={confirmAttachmentAction} style={{ ...popupBtnBase, border: '1px solid rgba(0,0,0,0.18)', background: '#1a7f37', color: '#fff', cursor: 'pointer' }}>Conferma</button>
@@ -10758,9 +11018,9 @@ if (!hasSel) {
           {hasSel && !attachmentsLoading && !attachmentsError && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
               {(attachments && attachments.length) ? (
-                attachments.map((a) => {
+                attachments.map((a, idx) => {
                   const url = getOpenUrl(a)
-                  const meta = [a.contentType, formatBytes(a.size)].filter(Boolean).join(' • ')
+                  const meta = [a.name, a.contentType, formatBytes(a.size)].filter(Boolean).join(' • ')
                   return (
                     <div
                       key={a.id}
@@ -10776,7 +11036,7 @@ if (!hasSel) {
                     >
                       <div style={{ minWidth: 0 }}>
                         <div style={{ fontWeight: 600, fontSize: 12, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                          {a.name || `Allegato #${a.id}`}
+                          {`Allegato ${idx + 1}`}
                         </div>
                         {meta ? <div style={{ opacity: 0.7, fontSize: 11 }}>{meta}</div> : null}
                       </div>
