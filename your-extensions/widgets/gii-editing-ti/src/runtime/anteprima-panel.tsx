@@ -7,6 +7,8 @@ import { buildRapportoPdf, buildRapportoIterPlaceholders, loadRapportoIterCicliF
 import { drawEmbeddedPdfPageInRapportoTechnicalBody, drawRapportoTechnicalHeadersByPage, RAPPORTO_TECHNICAL_BODY_BOX, wrapMapPdfBlobWithRapportoTechnicalHeader } from '../../../_shared/gii-anteprime/documenti-tecnici/rapporto/technical-document-header'
 import { defaultGiiDocumentPrintOptions as defaultDocumentPrintOptions, cloneGiiDocumentPrintOptions as cloneDocumentPrintOptions, setGiiAttachmentPrintOptionVisible, setGiiMapLayerKeysVisible, setGiiNotaSpesePrintOptionVisible } from '../../../_shared/gii-anteprime/viewer-documenti/document-options'
 import type { GiiDocumentPrintOptions as DocumentPrintOptions, GiiAttachmentPrintOption as AttachmentPrintOption, GiiNotaSpesePrintOption as NotaSpesePrintOption } from '../../../_shared/gii-anteprime/viewer-documenti/document-options'
+import { buildGiiMapLegendItemsForView, computePrintExtentForView, ensureGiiPrintableMapLayersReady, flattenGiiPrintableMapLayerTree as flattenPrintableMapLayerTree, listGiiPrintableMapLayerTree as listPrintableMapLayerTree, listGiiPrintableMapLayers as listPrintableMapLayers } from '../../../_shared/gii-anteprime/viewer-documenti/map-layers'
+import type { GiiPrintableMapLayerItem as PrintableMapLayerItem } from '../../../_shared/gii-anteprime/viewer-documenti/map-layers'
 import GiiDocumentViewer from '../../../_shared/gii-anteprime/viewer-documenti/document-viewer'
 
 const GII_UTENTI_URL = 'https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_utenti/FeatureServer/0'
@@ -400,28 +402,15 @@ type DocumentAvailability = {
   checkedKey: string
 }
 
-type PrintableMapLayerItem = {
-  key: string
-  title: string
-  visible: boolean
-  layer: any
-  ancestors: any[]
-}
-
-type PrintableMapLayerNode = {
-  key: string
-  title: string
-  visible: boolean
-  layer: any
-  children: PrintableMapLayerNode[]
-  item?: PrintableMapLayerItem
-}
-
 const DEFAULT_PRINT_SERVICE_URL = 'https://utility.arcgisonline.com/arcgis/rest/services/Utilities/PrintingTools/GPServer/Export%20Web%20Map%20Task'
 
-const editingTiAnteprimaDocumentOptionsMemory = new Map<string, DocumentPrintOptions>()
 const editingTiAnteprimaAppliedOptionsMemory = new Map<string, DocumentPrintOptions>()
 const editingTiAnteprimaPdfMemory = new Map<string, { blob: Blob; fileName: string }>()
+
+export function clearEditingTiAnteprimaDocumentMemory (): void {
+  editingTiAnteprimaAppliedOptionsMemory.clear()
+  editingTiAnteprimaPdfMemory.clear()
+}
 
 function documentOptionsMemoryKey (oid?: number | null, data?: Record<string, any> | null): string {
   const oidValue = Number(oid)
@@ -687,59 +676,6 @@ async function mergePdfBlobs (items: Array<{ blob: Blob; fileName: string }>): P
   return new Blob([out as any], { type: 'application/pdf' })
 }
 
-function collectLayerListOrder (collection: any): any[] {
-  const items: any[] = []
-  try { collection?.forEach?.((l: any) => items.push(l)) } catch {}
-  return items.reverse()
-}
-
-function mapLayerKey (layer: any, idx: string): string {
-  return String(layer?.id || layer?.uid || layer?.title || layer?.url || `layer_${idx}`).replace(/\s+/g, '_')
-}
-
-function listPrintableMapLayerTree (view: any): PrintableMapLayerNode[] {
-  const seen = new Set<string>()
-  const makeNode = (layer: any, idxPath: string, ancestors: any[], ancestorVisible: boolean): PrintableMapLayerNode | null => {
-    if (!layer) return null
-    const children: any[] = []
-    children.push(...collectLayerListOrder(layer?.layers))
-    children.push(...collectLayerListOrder(layer?.sublayers))
-    const title = String(layer?.title || layer?.id || layer?.name || `Layer ${idxPath}`)
-    const keyBase = mapLayerKey(layer, idxPath)
-    const key = seen.has(keyBase) ? `${keyBase}_${idxPath}` : keyBase
-    seen.add(key)
-    const visible = ancestorVisible && layer?.visible !== false
-    const childNodes = children
-      .map((child, childIdx) => makeNode(child, `${idxPath}_${childIdx}`, [...ancestors, layer], visible))
-      .filter(Boolean) as PrintableMapLayerNode[]
-    const node: PrintableMapLayerNode = { key, title, visible, layer, children: childNodes }
-    if (!childNodes.length) node.item = { key, title, visible, layer, ancestors }
-    return node
-  }
-  const out: PrintableMapLayerNode[] = []
-  try {
-    collectLayerListOrder(view?.map?.layers).forEach((layer, idx) => {
-      const node = makeNode(layer, String(idx), [], true)
-      if (node) out.push(node)
-    })
-  } catch {}
-  return out
-}
-
-function flattenPrintableMapLayerTree (nodes: PrintableMapLayerNode[]): PrintableMapLayerItem[] {
-  const out: PrintableMapLayerItem[] = []
-  const walk = (node: PrintableMapLayerNode) => {
-    if (node.item) out.push(node.item)
-    node.children.forEach(walk)
-  }
-  nodes.forEach(walk)
-  return out
-}
-
-function listPrintableMapLayers (view: any): PrintableMapLayerItem[] {
-  return flattenPrintableMapLayerTree(listPrintableMapLayerTree(view))
-}
-
 function normalizePrintableLayerTitle (raw: any): string {
   return String(raw || '').trim().toLowerCase()
 }
@@ -793,22 +729,6 @@ function mapBasemapLabel (value: any): string {
   return String(value || '').trim()
 }
 
-function selectedPrintableLayerLabels (layers: PrintableMapLayerItem[], opts: DocumentPrintOptions, localizationLayerKeys: Set<string>): string[] {
-  const out: string[] = []
-  const seen = new Set<string>()
-  layers.forEach(item => {
-    if (!item?.key || localizationLayerKeys.has(item.key)) return
-    if (Object.prototype.hasOwnProperty.call(opts.mapLayerVisibility || {}, item.key) && opts.mapLayerVisibility[item.key] === false) return
-    const label = String(item.title || item.layer?.title || item.layer?.id || item.layer?.name || '').trim()
-    if (!label) return
-    const normalized = normalizePrintableLayerTitle(label)
-    if (!normalized || seen.has(normalized)) return
-    seen.add(normalized)
-    out.push(label)
-  })
-  return out.length > 4 ? [...out.slice(0, 4), `altri ${out.length - 4}`] : out
-}
-
 function pointGeometryFromAttrsForEditing (attrs: any): any | null {
   if (!attrs) return null
   const g = attrs.geometry || attrs
@@ -855,7 +775,7 @@ function delay (ms: number): Promise<void> {
   return new Promise(resolve => window.setTimeout(resolve, ms))
 }
 
-async function buildMapPrintPdfBlob (view: any, printServiceUrl: string, opts: DocumentPrintOptions): Promise<{ blob: Blob; fileName: string }> {
+async function buildMapPrintPdfBlob (view: any, printServiceUrl: string, opts: DocumentPrintOptions, sourceView?: any): Promise<{ blob: Blob; fileName: string }> {
   if (!view) throw new Error('Map view non disponibile per la stampa.')
   const serviceUrl = String(printServiceUrl || DEFAULT_PRINT_SERVICE_URL).trim()
   if (!serviceUrl) throw new Error('Servizio stampa ArcGIS non configurato.')
@@ -867,8 +787,12 @@ async function buildMapPrintPdfBlob (view: any, printServiceUrl: string, opts: D
   const Graphic = await loadEsriModule<any>('esri/Graphic').catch(() => null)
   const Point = await loadEsriModule<any>('esri/geometry/Point').catch(() => null)
   const SimpleMarkerSymbol = await loadEsriModule<any>('esri/symbols/SimpleMarkerSymbol').catch(() => null)
+  const symbolUtils = await loadEsriModule<any>('esri/symbols/support/symbolUtils').catch(() => null)
 
-  const layers = listPrintableMapLayers(view)
+  // Per la legenda usa sourceView (p.mapView già carica) se disponibile, altrimenti la printView
+  const legendView = sourceView ?? view
+  await ensureGiiPrintableMapLayersReady(legendView)
+  const layers = listPrintableMapLayers(legendView)
   const localizationLayerKeys = new Set(layers.filter(item => printableLayerIsLocalization(item, opts)).map(item => item.key))
   const hasLocalizationLayerControl = localizationLayerKeys.size > 0
   const localizationRequested = !hasLocalizationLayerControl || layers.some(item => {
@@ -909,29 +833,35 @@ async function buildMapPrintPdfBlob (view: any, printServiceUrl: string, opts: D
         view.map.basemap = bm || String(opts.mapBasemap)
         if (typeof view.map.basemap?.load === 'function') await view.map.basemap.load().catch(() => {})
         await view.when?.()
-        try { await view.whenLayerView?.(view.map.basemap?.baseLayers?.getItemAt?.(0)) } catch {}
+        try {
+          const baseLayer = view.map.basemap?.baseLayers?.getItemAt?.(0)
+          if (baseLayer && typeof view.whenLayerView === 'function') await Promise.race([view.whenLayerView(baseLayer), delay(300)])
+        } catch {}
         try { view.requestRender?.() } catch {}
       } catch {
         try { view.map.basemap = String(opts.mapBasemap) } catch {}
       }
     }
     const requestedScale = Number(opts.mapScale)
+    const printTargetGeometry = Point && opts.mapTarget ? mapPrintPointGeometry(opts.mapTarget, Point) : null
     if (typeof view.goTo === 'function') {
       if (opts.mapTarget) {
-        try { await view.goTo({ target: opts.mapTarget, scale: Number.isFinite(requestedScale) && requestedScale > 0 ? requestedScale : undefined }, { animate: false }) } catch {}
+        try { await view.goTo({ target: printTargetGeometry || opts.mapTarget, scale: Number.isFinite(requestedScale) && requestedScale > 0 ? requestedScale : undefined }, { animate: false }) } catch {}
       } else if (Number.isFinite(requestedScale) && requestedScale > 0) {
         try { await view.goTo({ scale: requestedScale }, { animate: false }) } catch {}
       }
     }
     if (localizationRequested && opts.mapTarget && Graphic && Point && SimpleMarkerSymbol && view?.graphics) {
       try {
-        const geometry = mapPrintPointGeometry(opts.mapTarget, Point)
+        const geometry = printTargetGeometry || mapPrintPointGeometry(opts.mapTarget, Point)
         if (geometry) {
           const symbol = new SimpleMarkerSymbol({
             style: 'circle',
             color: [220, 38, 38, 220],
-            size: 18,
-            outline: { color: [255, 255, 255, 255], width: 2.5 }
+            size: 9,
+            xoffset: 0,
+            yoffset: 0,
+            outline: { color: [255, 255, 255, 255], width: 1.5 }
           })
           printMarker = new Graphic({ geometry, symbol, attributes: { source: 'gii-editing-print-marker' } })
           view.graphics.add(printMarker)
@@ -941,6 +871,22 @@ async function buildMapPrintPdfBlob (view: any, printServiceUrl: string, opts: D
       } catch {}
     }
 
+    const printScale = Number(opts.mapScale) || Number(legendView?.scale) || 0
+    const printExtent = printScale > 0 ? computePrintExtentForView(legendView, printScale) ?? undefined : undefined
+
+    // === DIAGNOSTICA TEMPORANEA — rimuovere dopo il debug ===
+    console.warn('[GII-LEGENDA-DEBUG] scale=', legendView?.scale, 'resolution=', legendView?.resolution,
+      'extent=', legendView?.extent ? `${legendView.extent.xmin.toFixed(0)},${legendView.extent.ymin.toFixed(0)},${legendView.extent.xmax.toFixed(0)},${legendView.extent.ymax.toFixed(0)} wkid=${legendView.extent.spatialReference?.wkid}` : null,
+      'printExtent=', printExtent ? `${printExtent.xmin.toFixed(0)},${printExtent.ymin.toFixed(0)},${printExtent.xmax.toFixed(0)},${printExtent.ymax.toFixed(0)}` : null,
+      'mapLayerVisibility=', JSON.stringify(opts.mapLayerVisibility || {}))
+    console.warn('[GII-LEGENDA-DEBUG] layers=', layers.map(l =>
+      `${l.key}|visible=${l.layer?.visible}|type=${l.layer?.type||'?'}|loaded=${l.layer?.loaded}|url=${String(l.layer?.url||l.layer?.parent?.url||'').slice(-40)}`
+    ).join('\n'))
+    // === FINE DIAGNOSTICA ===
+
+    const legendItems = await buildGiiMapLegendItemsForView(legendView, layers, { ...opts, symbolUtils, printExtent }, localizationLayerKeys, localizationRequested)
+
+    console.warn('[GII-LEGENDA-DEBUG] legendItems=', legendItems.map(i => `${i.label}|img=${!!i.image}`).join(', '))
     const template = new PrintTemplate({
       format: 'pdf',
       layout: opts.mapLayout || 'A4 Portrait',
@@ -949,7 +895,7 @@ async function buildMapPrintPdfBlob (view: any, printServiceUrl: string, opts: D
         authorText: '',
         copyrightText: ''
       },
-      exportOptions: { dpi: 150 },
+      exportOptions: { dpi: 96 },
       scalePreserved: true,
       outScale: Number(opts.mapScale) || Number(view?.scale) || undefined
     })
@@ -961,10 +907,10 @@ async function buildMapPrintPdfBlob (view: any, printServiceUrl: string, opts: D
     if (!resp.ok) throw new Error(`Download stampa mappa fallito (HTTP ${resp.status}).`)
     const rawBlob = await resp.blob()
     return {
-      blob: await wrapMapPdfBlobWithRapportoTechnicalHeader(rawBlob, opts.mapTitle || mapTechnicalDocumentTitle('-'), {
+      blob: await wrapMapPdfBlobWithRapportoTechnicalHeader(rawBlob, mapTechnicalDocumentTitle('-'), {
         scale: Number(opts.mapScale) || Number(view?.scale) || null,
         basemapLabel: mapBasemapLabel(opts.mapBasemap || view?.map?.basemap?.title || view?.map?.basemap?.id),
-        layerLabels: selectedPrintableLayerLabels(layers, opts, localizationLayerKeys),
+        legendItems,
         sourceLayout: opts.mapLayout
       }),
       fileName: 'mappa_rapporto.pdf'
@@ -1386,18 +1332,15 @@ export default function AnteprimaPanel (p: {
   const [attachmentOptions, setAttachmentOptions] = React.useState<AttachmentPrintOption[]>([])
   const [notaSpeseOptions, setNotaSpeseOptions] = React.useState<NotaSpesePrintOption[]>([])
   const printMapView = technicalMapView || null
-  const printableLayerTree = React.useMemo(() => listPrintableMapLayerTree(printMapView), [printMapView])
+  const printableLayerTree = listPrintableMapLayerTree(printMapView)
+  const printableLayerItems = flattenPrintableMapLayerTree(printableLayerTree)
+  const printableLayerSignature = printableLayerItems.map(item => `${item.key}:${item.visible ? 1 : 0}`).join('|')
   const [expandedLayerGroups, setExpandedLayerGroups] = React.useState<Record<string, boolean>>({})
-  const [docOptions, setDocOptions] = React.useState<DocumentPrintOptions>(() => cloneDocumentPrintOptions(editingTiAnteprimaDocumentOptionsMemory.get(optionsMemoryKey) || defaultDocumentPrintOptions()))
-  const [previewOptions, setPreviewOptions] = React.useState<DocumentPrintOptions>(() => cloneDocumentPrintOptions(editingTiAnteprimaAppliedOptionsMemory.get(optionsMemoryKey) || editingTiAnteprimaDocumentOptionsMemory.get(optionsMemoryKey) || defaultDocumentPrintOptions()))
+  const [docOptions, setDocOptions] = React.useState<DocumentPrintOptions>(() => cloneDocumentPrintOptions(editingTiAnteprimaAppliedOptionsMemory.get(optionsMemoryKey) || defaultDocumentPrintOptions()))
+  const [previewOptions, setPreviewOptions] = React.useState<DocumentPrintOptions>(() => cloneDocumentPrintOptions(editingTiAnteprimaAppliedOptionsMemory.get(optionsMemoryKey) || defaultDocumentPrintOptions()))
   const [previewRevision, setPreviewRevision] = React.useState(0)
   const loadedOptionsKeyRef = React.useRef(optionsMemoryKey)
   const forceNextPreviewRegenerateRef = React.useRef(false)
-
-  React.useEffect(() => {
-    if (loadedOptionsKeyRef.current !== optionsMemoryKey) return
-    editingTiAnteprimaDocumentOptionsMemory.set(optionsMemoryKey, cloneDocumentPrintOptions(docOptions))
-  }, [optionsMemoryKey, docOptions])
 
   React.useEffect(() => {
     if (loadedOptionsKeyRef.current !== optionsMemoryKey) return
@@ -1405,10 +1348,9 @@ export default function AnteprimaPanel (p: {
   }, [optionsMemoryKey, previewOptions])
 
   React.useEffect(() => {
-    const remembered = cloneDocumentPrintOptions(editingTiAnteprimaDocumentOptionsMemory.get(optionsMemoryKey) || defaultDocumentPrintOptions())
-    const rememberedApplied = cloneDocumentPrintOptions(editingTiAnteprimaAppliedOptionsMemory.get(optionsMemoryKey) || editingTiAnteprimaDocumentOptionsMemory.get(optionsMemoryKey) || defaultDocumentPrintOptions())
+    const rememberedApplied = cloneDocumentPrintOptions(editingTiAnteprimaAppliedOptionsMemory.get(optionsMemoryKey) || defaultDocumentPrintOptions())
     loadedOptionsKeyRef.current = optionsMemoryKey
-    setDocOptions(remembered)
+    setDocOptions(rememberedApplied)
     setPreviewOptions(rememberedApplied)
   }, [optionsMemoryKey])
 
@@ -1419,6 +1361,9 @@ export default function AnteprimaPanel (p: {
   const nsSignature = React.useMemo(() => {
     try { return JSON.stringify({ r: p.nsRows || {}, s: p.nsSummary || {} }) } catch { return '' }
   }, [p.nsRows, p.nsSummary])
+
+  const preferConfiguredWebMapForPreview = !!String(p.mapConfig?.webMapItemId || '').trim()
+  const sourceMapViewForPreview = preferConfiguredWebMapForPreview ? null : p.mapView
 
   const mapConfigSignature = React.useMemo(() => {
     try { return JSON.stringify(p.mapConfig || {}) } catch { return '' }
@@ -1451,7 +1396,7 @@ export default function AnteprimaPanel (p: {
   }, [dataSignature, nsSignature])
 
   React.useEffect(() => {
-    const sourceView = p.mapView
+    const sourceView = sourceMapViewForPreview
     const cfg = p.mapConfig || {}
     if (!technicalMapContainerRef.current) {
       setTechnicalMapView(null)
@@ -1472,15 +1417,7 @@ export default function AnteprimaPanel (p: {
         const sourceMap = sourceView?.map
         let map: any = null
         let mapFromWebMap = false
-        if (sourceMap) {
-          try {
-            map = typeof sourceMap.clone === 'function'
-              ? sourceMap.clone()
-              : new Map({ basemap: sourceMap?.basemap?.clone ? sourceMap.basemap.clone() : (sourceMap?.basemap || 'satellite') })
-          } catch {
-            map = new Map({ basemap: 'satellite' })
-          }
-        } else if (WebMap && String(cfg.webMapItemId || '').trim()) {
+        if (WebMap && String(cfg.webMapItemId || '').trim()) {
           try {
             const portalUrl = String(cfg.webMapPortalUrl || cfg.portalUrl || '').trim()
             const portal = portalUrl && Portal ? new Portal({ url: portalUrl }) : undefined
@@ -1494,10 +1431,18 @@ export default function AnteprimaPanel (p: {
           } catch {
             map = new Map({ basemap: 'satellite' })
           }
+        } else if (sourceMap) {
+          try {
+            map = typeof sourceMap.clone === 'function'
+              ? sourceMap.clone()
+              : new Map({ basemap: sourceMap?.basemap?.clone ? sourceMap.basemap.clone() : (sourceMap?.basemap || 'satellite') })
+          } catch {
+            map = new Map({ basemap: 'satellite' })
+          }
         } else {
           map = new Map({ basemap: 'satellite' })
         }
-        if (map && map !== sourceMap && !map.layers?.length && sourceMap?.layers) {
+        if (!mapFromWebMap && map && map !== sourceMap && !map.layers?.length && sourceMap?.layers) {
           try {
             sourceMap.layers.forEach((layer: any) => {
               try { map.layers.add(layer?.clone ? layer.clone() : layer) } catch {}
@@ -1550,7 +1495,7 @@ export default function AnteprimaPanel (p: {
       setTechnicalMapView(null)
       if (view) { try { view.destroy() } catch {} }
     }
-  }, [p.mapView, mapConfigSignature, mapTargetSignature])
+  }, [sourceMapViewForPreview, mapConfigSignature, mapTargetSignature])
 
   React.useEffect(() => {
     setNotaSpeseOptions(computedNotaSpeseOptions)
@@ -1570,16 +1515,14 @@ export default function AnteprimaPanel (p: {
 
   React.useEffect(() => {
     const layerVisibility: Record<string, boolean> = {}
-    listPrintableMapLayers(printMapView).forEach(item => { layerVisibility[item.key] = item.visible })
-    const title = mapTechnicalDocumentTitle(officialRapportoTecnicoNumberForEditing(p.data))
+    printableLayerItems.forEach(item => { layerVisibility[item.key] = item.visible })
     setDocOptions(prev => ({
       ...prev,
       includeNotaSpese: hasNotaSpeseLocal ? prev.includeNotaSpese : false,
-      mapTitle: prev.mapTitle || title,
       mapBasemap: prev.mapBasemap || 'satellite',
       mapLayerVisibility: Object.keys(prev.mapLayerVisibility || {}).length ? prev.mapLayerVisibility : layerVisibility
     }))
-  }, [hasNotaSpeseLocal, printMapView, praticaCode])
+  }, [hasNotaSpeseLocal, printMapView, printableLayerSignature, praticaCode])
 
   React.useEffect(() => {
     const targetAvailable = !!mapTarget
@@ -1594,7 +1537,7 @@ export default function AnteprimaPanel (p: {
     })
     setAttachmentOptions([])
     if (!hasNotaSpeseLocal) setDocOptions(prev => ({ ...prev, includeNotaSpese: false }))
-    if (!targetAvailable || !viewAvailable) setDocOptions(prev => ({ ...prev, includeMappa: false }))
+    if (!targetAvailable) setDocOptions(prev => ({ ...prev, includeMappa: false }))
     if (!p.ds || !p.oid) {
       setDocOptions(prev => ({ ...prev, includeAllegati: false }))
       return
@@ -1685,7 +1628,7 @@ export default function AnteprimaPanel (p: {
         mapSelectedOid: Number.isFinite(selectedOid) && selectedOid > 0 ? selectedOid : null,
         mapSelectedIdFieldName: String(p.idFieldName || 'OBJECTID'),
         mapLocalizationLayerUrl: String(p.mapConfig?.mapLayerUrl || '')
-      }))
+      }, p.mapView ?? undefined))
     }
     if (opts.includeAllegati && p.ds && p.oid) {
       const selectedAttachmentIds = attachmentOptions
@@ -1775,10 +1718,12 @@ export default function AnteprimaPanel (p: {
   }, [previewCacheSignature, utentiReady, previewRevision])
 
   const applyDocumentOptionsAndRegenerate = React.useCallback(() => {
+    const nextOptions = cloneDocumentPrintOptions(docOptions)
+    editingTiAnteprimaAppliedOptionsMemory.set(optionsMemoryKey, nextOptions)
     forceNextPreviewRegenerateRef.current = true
-    setPreviewOptions(cloneDocumentPrintOptions(docOptions))
+    setPreviewOptions(nextOptions)
     setPreviewRevision(v => v + 1)
-  }, [docOptions])
+  }, [docOptions, optionsMemoryKey])
 
   return (
     <div css={containerCss}>

@@ -11,6 +11,8 @@ import { buildRapportoPdf, buildRapportoIterPlaceholders, loadRapportoIterCicliF
 import { drawEmbeddedPdfPageInRapportoTechnicalBody, drawRapportoTechnicalHeadersByPage, RAPPORTO_TECHNICAL_BODY_BOX, wrapMapPdfBlobWithRapportoTechnicalHeader } from '../../../_shared/gii-anteprime/documenti-tecnici/rapporto/technical-document-header'
 import { defaultGiiDocumentPrintOptions as defaultDocumentPrintOptions, cloneGiiDocumentPrintOptions as cloneDocumentPrintOptions, setGiiAttachmentPrintOptionVisible, setGiiMapLayerKeysVisible, setGiiNotaSpesePrintOptionVisible } from '../../../_shared/gii-anteprime/viewer-documenti/document-options'
 import type { GiiDocumentPrintOptions as DocumentPrintOptions, GiiAttachmentPrintOption as AttachmentPrintOption, GiiNotaSpesePrintOption as NotaSpesePrintOption } from '../../../_shared/gii-anteprime/viewer-documenti/document-options'
+import { buildGiiMapLegendItemsForView, computePrintExtentForView, ensureGiiPrintableMapLayersReady, flattenGiiPrintableMapLayerTree as flattenPrintableMapLayerTree, listGiiPrintableMapLayerTree as listPrintableMapLayerTree, listGiiPrintableMapLayers as listPrintableMapLayers } from '../../../_shared/gii-anteprime/viewer-documenti/map-layers'
+import type { GiiPrintableMapLayerItem as PrintableMapLayerItem } from '../../../_shared/gii-anteprime/viewer-documenti/map-layers'
 import GiiDocumentViewer from '../../../_shared/gii-anteprime/viewer-documenti/document-viewer'
 
 
@@ -1818,13 +1820,11 @@ function ActionsPanel (props: {
     const quickNotaSpese = hasNotaSpeseLocalForActions(data)
     const layerVisibility: Record<string, boolean> = {}
     listPrintableMapLayers(props.mapView).forEach(item => { layerVisibility[item.key] = item.visible })
-    const title = mapTechnicalDocumentTitleForActions(getOfficialRapportoTecnicoNumber(data) || '-')
     const nextOptions: DocumentPrintOptions = {
       ...docOptions,
       includeNotaSpese: false,
       includeMappa: false,
       includeAllegati: false,
-      mapTitle: docOptions.mapTitle || title,
       mapBasemap: docOptions.mapBasemap || 'satellite',
       mapLocalizationLayerUrl: String(active?.key || ''),
       mapLayerVisibility: Object.keys(docOptions.mapLayerVisibility || {}).length ? docOptions.mapLayerVisibility : layerVisibility
@@ -6259,7 +6259,6 @@ ${noteTrim}` : noteTrim)
           printableLayerTree={printableLayerTree}
           expandedLayerGroups={expandedLayerGroups}
           mapEmptyText='La mappa è agganciata, ma non espone layer stampabili leggibili.'
-          regenerateHint='Le modifiche alle opzioni vengono applicate solo alla rigenerazione.'
           updateDocOption={updateDocOption}
           setNotaSpeseOptionVisible={setNotaSpeseOptionVisible}
           setAttachmentOptionVisible={setAttachmentOptionVisible}
@@ -7315,27 +7314,6 @@ type DetailMapConfigForActions = {
   mapLayerLayerId: string
 }
 
-type PrintableMapLayerItem = {
-  key: string
-  title: string
-  visible: boolean
-  layer: any
-  ancestors: any[]
-}
-
-type PrintableMapLayerNode = {
-  key: string
-  title: string
-  visible: boolean
-  layer: any
-  children: PrintableMapLayerNode[]
-  item?: PrintableMapLayerItem
-}
-
-function mapLayerKey (layer: any, idx: string): string {
-  return String(layer?.id || layer?.uid || layer?.title || layer?.url || `layer_${idx}`).replace(/\s+/g, '_')
-}
-
 function comparableArcgisLayerUrlForActions (raw: any): string {
   return normalizeArcgisLayerUrl(String(raw || ''))
     .split(/[?#]/)[0]
@@ -7356,64 +7334,6 @@ function normalizePrintableLayerTitleForActions (raw: any): string {
     .toLowerCase()
 }
 
-function collectLayerListOrderForActions (collection: any): any[] {
-  const items: any[] = []
-  try { collection?.forEach?.((l: any) => items.push(l)) } catch {}
-  return items.reverse()
-}
-
-function listPrintableMapLayerTree (view: any): PrintableMapLayerNode[] {
-  const seen = new Set<string>()
-  const makeNode = (layer: any, idxPath: string, ancestors: any[], ancestorVisible: boolean): PrintableMapLayerNode | null => {
-    if (!layer) return null
-    const children: any[] = []
-    children.push(...collectLayerListOrderForActions(layer?.layers))
-    children.push(...collectLayerListOrderForActions(layer?.sublayers))
-    const title = String(layer?.title || layer?.id || layer?.name || `Layer ${idxPath}`)
-    const keyBase = mapLayerKey(layer, idxPath)
-    const key = seen.has(keyBase) ? `${keyBase}_${idxPath}` : keyBase
-    seen.add(key)
-    const visible = ancestorVisible && layer?.visible !== false
-    const childNodes = children
-      .map((child, childIdx) => makeNode(child, `${idxPath}_${childIdx}`, [...ancestors, layer], visible))
-      .filter(Boolean) as PrintableMapLayerNode[]
-    const node: PrintableMapLayerNode = {
-      key,
-      title,
-      visible,
-      layer,
-      children: childNodes
-    }
-    if (!childNodes.length) {
-      node.item = { key, title, visible, layer, ancestors }
-    }
-    return node
-  }
-  const out: PrintableMapLayerNode[] = []
-  try {
-    const layers = collectLayerListOrderForActions(view?.map?.layers)
-    layers.forEach((layer, idx) => {
-      const node = makeNode(layer, String(idx), [], true)
-      if (node) out.push(node)
-    })
-  } catch {}
-  return out
-}
-
-function flattenPrintableMapLayerTree (nodes: PrintableMapLayerNode[]): PrintableMapLayerItem[] {
-  const out: PrintableMapLayerItem[] = []
-  const walk = (node: PrintableMapLayerNode) => {
-    if (node.item) out.push(node.item)
-    node.children.forEach(walk)
-  }
-  nodes.forEach(walk)
-  return out
-}
-
-function listPrintableMapLayers (view: any): PrintableMapLayerItem[] {
-  return flattenPrintableMapLayerTree(listPrintableMapLayerTree(view))
-}
-
 function printableLayerIsLocalizationForActions (item: PrintableMapLayerItem, opts: DocumentPrintOptions): boolean {
   if (!item?.layer) return false
   if (sameArcgisLayerUrlForActions(item.layer?.url, opts.mapLocalizationLayerUrl)) return true
@@ -7428,22 +7348,6 @@ function mapBasemapLabelForActions (value: any): string {
   if (key === 'topo-vector') return 'Topografica'
   if (key === 'streets-vector') return 'Stradale'
   return String(value || '').trim()
-}
-
-function selectedPrintableLayerLabelsForActions (layers: PrintableMapLayerItem[], opts: DocumentPrintOptions, localizationLayerKeys: Set<string>): string[] {
-  const out: string[] = []
-  const seen = new Set<string>()
-  layers.forEach(item => {
-    if (!item?.key || localizationLayerKeys.has(item.key)) return
-    if (Object.prototype.hasOwnProperty.call(opts.mapLayerVisibility || {}, item.key) && opts.mapLayerVisibility[item.key] === false) return
-    const label = String(item.title || item.layer?.title || item.layer?.id || item.layer?.name || '').trim()
-    if (!label) return
-    const normalized = normalizePrintableLayerTitleForActions(label)
-    if (!normalized || seen.has(normalized)) return
-    seen.add(normalized)
-    out.push(label)
-  })
-  return out.length > 4 ? [...out.slice(0, 4), `altri ${out.length - 4}`] : out
 }
 
 function mapPrintPointGeometryForActions (target: any, Point: any): any | null {
@@ -7686,7 +7590,9 @@ async function buildMapPrintPdfBlob (view: any, printServiceUrl: string, opts: D
   const Graphic = await loadEsriModule<any>('esri/Graphic').catch(() => null)
   const Point = await loadEsriModule<any>('esri/geometry/Point').catch(() => null)
   const SimpleMarkerSymbol = await loadEsriModule<any>('esri/symbols/SimpleMarkerSymbol').catch(() => null)
+  const symbolUtils = await loadEsriModule<any>('esri/symbols/support/symbolUtils').catch(() => null)
 
+  await ensureGiiPrintableMapLayersReady(view)
   const layers = listPrintableMapLayers(view)
   const localizationLayerKeys = new Set(layers.filter(item => printableLayerIsLocalizationForActions(item, opts)).map(item => item.key))
   const hasLocalizationLayerControl = localizationLayerKeys.size > 0
@@ -7728,29 +7634,35 @@ async function buildMapPrintPdfBlob (view: any, printServiceUrl: string, opts: D
         view.map.basemap = bm || String(opts.mapBasemap)
         if (typeof view.map.basemap?.load === 'function') await view.map.basemap.load().catch(() => {})
         await view.when?.()
-        try { await view.whenLayerView?.(view.map.basemap?.baseLayers?.getItemAt?.(0)) } catch {}
+        try {
+          const baseLayer = view.map.basemap?.baseLayers?.getItemAt?.(0)
+          if (baseLayer && typeof view.whenLayerView === 'function') await Promise.race([view.whenLayerView(baseLayer), delayForActions(300)])
+        } catch {}
         try { view.requestRender?.() } catch {}
       } catch {
         try { view.map.basemap = String(opts.mapBasemap) } catch {}
       }
     }
     const requestedScale = Number(opts.mapScale)
+    const printTargetGeometry = Point && opts.mapTarget ? mapPrintPointGeometryForActions(opts.mapTarget, Point) : null
     if (typeof view.goTo === 'function') {
       if (opts.mapTarget) {
-        try { await view.goTo({ target: opts.mapTarget, scale: Number.isFinite(requestedScale) && requestedScale > 0 ? requestedScale : undefined }, { animate: false }) } catch {}
+        try { await view.goTo({ target: printTargetGeometry || opts.mapTarget, scale: Number.isFinite(requestedScale) && requestedScale > 0 ? requestedScale : undefined }, { animate: false }) } catch {}
       } else if (Number.isFinite(requestedScale) && requestedScale > 0) {
         try { await view.goTo({ scale: requestedScale }, { animate: false }) } catch {}
       }
     }
     if (localizationRequested && opts.mapTarget && Graphic && Point && SimpleMarkerSymbol && view?.graphics) {
       try {
-        const geometry = mapPrintPointGeometryForActions(opts.mapTarget, Point)
+        const geometry = printTargetGeometry || mapPrintPointGeometryForActions(opts.mapTarget, Point)
         if (geometry) {
           const symbol = new SimpleMarkerSymbol({
             style: 'circle',
             color: [220, 38, 38, 220],
-            size: 18,
-            outline: { color: [255, 255, 255, 255], width: 2.5 }
+            size: 9,
+            xoffset: 0,
+            yoffset: 0,
+            outline: { color: [255, 255, 255, 255], width: 1.5 }
           })
           printMarker = new Graphic({ geometry, symbol, attributes: { source: 'gii-azioni-print-marker' } })
           view.graphics.add(printMarker)
@@ -7760,6 +7672,15 @@ async function buildMapPrintPdfBlob (view: any, printServiceUrl: string, opts: D
       } catch {}
     }
 
+    const printScale = Number(opts.mapScale) || Number(view?.scale) || 0
+    const printExtent = printScale > 0 ? computePrintExtentForView(view, printScale) ?? undefined : undefined
+
+    console.warn('[GII-LEGENDA-DEBUG] gii-azioni scale=', view?.scale, 'resolution=', view?.resolution,
+      'printScale=', printScale,
+      'extent=', view?.extent ? `${view.extent.xmin.toFixed(0)},${view.extent.ymin.toFixed(0)},${view.extent.xmax.toFixed(0)},${view.extent.ymax.toFixed(0)}` : null,
+      'printExtent=', printExtent ? `${printExtent.xmin.toFixed(0)},${printExtent.ymin.toFixed(0)},${printExtent.xmax.toFixed(0)},${printExtent.ymax.toFixed(0)}` : null)
+
+    const legendItems = await buildGiiMapLegendItemsForView(view, layers, { ...opts, symbolUtils, printExtent }, localizationLayerKeys, localizationRequested)
     const template = new PrintTemplate({
       format: 'pdf',
       layout: opts.mapLayout || 'A4 Portrait',
@@ -7768,7 +7689,7 @@ async function buildMapPrintPdfBlob (view: any, printServiceUrl: string, opts: D
         authorText: '',
         copyrightText: ''
       },
-      exportOptions: { dpi: 150 },
+      exportOptions: { dpi: 96 },
       scalePreserved: true,
       outScale: Number(opts.mapScale) || Number(view?.scale) || undefined
     })
@@ -7780,10 +7701,10 @@ async function buildMapPrintPdfBlob (view: any, printServiceUrl: string, opts: D
     if (!resp.ok) throw new Error(`Download stampa mappa fallito (HTTP ${resp.status}).`)
     const rawBlob = await resp.blob()
     return {
-      blob: await wrapMapPdfBlobWithRapportoTechnicalHeader(rawBlob, opts.mapTitle || mapTechnicalDocumentTitleForActions('-'), {
+      blob: await wrapMapPdfBlobWithRapportoTechnicalHeader(rawBlob, mapTechnicalDocumentTitleForActions('-'), {
         scale: Number(opts.mapScale) || Number(view?.scale) || null,
         basemapLabel: mapBasemapLabelForActions(opts.mapBasemap || view?.map?.basemap?.title || view?.map?.basemap?.id),
-        layerLabels: selectedPrintableLayerLabelsForActions(layers, opts, localizationLayerKeys),
+        legendItems,
         sourceLayout: opts.mapLayout
       }),
       fileName: 'mappa_rapporto.pdf'

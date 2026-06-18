@@ -6,7 +6,7 @@ import { Button } from 'jimu-ui'
 import { createPortal } from 'react-dom'
 import type { IMConfig, TabConfig } from '../config'
 import { defaultConfig, DEFAULT_FIELD_LAYOUTS } from '../config'
-import AnteprimaPanel from './anteprima-panel'
+import AnteprimaPanel, { clearEditingTiAnteprimaDocumentMemory } from './anteprima-panel'
 
 type MsgKind = 'info' | 'ok' | 'err'
 type Msg = { kind: MsgKind; text: string }
@@ -11686,6 +11686,10 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
   const [selectionIntent, setSelectionIntent] = React.useState<EditIntentInfo | null>(null)
 
   React.useEffect(() => {
+    return () => { clearEditingTiAnteprimaDocumentMemory() }
+  }, [])
+
+  React.useEffect(() => {
     if (isCreatePage) {
       setEditIntent(null)
       setEditDs(null)
@@ -11746,6 +11750,10 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
   }, [isCreatePage])
 
   const effectiveIntent = !isCreatePage ? (editIntent || selectionIntent) : null
+
+  React.useEffect(() => {
+    if (!effectiveIntent && !isCreatePage) clearEditingTiAnteprimaDocumentMemory()
+  }, [effectiveIntent, isCreatePage])
 
   React.useEffect(() => {
     let cancelled = false

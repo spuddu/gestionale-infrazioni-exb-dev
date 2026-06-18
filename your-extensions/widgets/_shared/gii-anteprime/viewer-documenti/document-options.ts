@@ -7,7 +7,6 @@ export type GiiDocumentPrintOptions = {
   selectedAttachmentIds?: Record<string, boolean>
   mapLayout: string
   mapScale: number
-  mapTitle: string
   mapBasemap: string
   mapLayerVisibility: Record<string, boolean>
   mapTarget?: any
@@ -37,7 +36,6 @@ export function defaultGiiDocumentPrintOptions (): GiiDocumentPrintOptions {
     includeAllegati: false,
     mapLayout: 'A4 Portrait',
     mapScale: 1000,
-    mapTitle: '',
     mapBasemap: 'satellite',
     mapLayerVisibility: {}
   }

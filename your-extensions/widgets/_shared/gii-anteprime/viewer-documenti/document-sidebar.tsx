@@ -25,7 +25,6 @@ export type GiiDocumentSidebarProps = {
   printableLayerTree: any[]
   expandedLayerGroups: Record<string, boolean>
   mapEmptyText: string
-  regenerateHint?: string
   updateDocOption: (patch: Partial<GiiDocumentPrintOptions>) => void
   setNotaSpeseOptionVisible: (key: string, visible: boolean) => void
   setAttachmentOptionVisible: (id: number, visible: boolean) => void
@@ -61,7 +60,6 @@ export default function GiiDocumentSidebar (props: GiiDocumentSidebarProps) {
     printableLayerTree,
     expandedLayerGroups,
     mapEmptyText,
-    regenerateHint,
     updateDocOption,
     setNotaSpeseOptionVisible,
     setAttachmentOptionVisible,
@@ -206,10 +204,6 @@ export default function GiiDocumentSidebar (props: GiiDocumentSidebarProps) {
       {docOptions.includeMappa && mapPanelAvailable && (
         <div style={{ display: 'grid', gap: 9, paddingTop: 8, borderTop: '1px solid #dbe4ef' }}>
           <div style={{ fontSize: 13, fontWeight: 900, color: '#0f172a' }}>Stampa mappa</div>
-          <label style={{ display: 'grid', gap: 4, fontSize: 12, fontWeight: 800, color: '#334155' }}>
-            Titolo
-            <input type='text' value={docOptions.mapTitle} onChange={e => updateDocOption({ mapTitle: e.target.value })} style={{ padding: '7px 9px', border: '1px solid #cbd5e1', borderRadius: 8 }} />
-          </label>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 0.8fr', gap: 8 }}>
             <label style={{ display: 'grid', gap: 4, fontSize: 12, fontWeight: 800, color: '#334155' }}>
               Layout
@@ -266,11 +260,6 @@ export default function GiiDocumentSidebar (props: GiiDocumentSidebarProps) {
       >
         {busy ? 'Rigenerazione...' : 'Rigenera documento'}
       </button>
-      {regenerateHint ? (
-        <div style={{ fontSize: 12, color: '#64748b', lineHeight: 1.35, fontWeight: 700 }}>
-          {regenerateHint}
-        </div>
-      ) : null}
     </aside>
   )
 }
