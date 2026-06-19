@@ -119,6 +119,18 @@ function attachmentTechnicalDocumentTitleForActions (index: number, numeroRappor
   return `ELABORATO PROBATORIO N. ${index} ALLEGATO AL RAPPORTO TECNICO DI RILEVAZIONE N. ${String(numeroRapportoTecnico || '').trim() || '-'}`
 }
 
+function documentViewerTitleForActions (fileName: string, data: any, oid?: number | null): string {
+  const lower = String(fileName || '').toLowerCase()
+  const rapporto = getOfficialRapportoTecnicoNumber(data) || '-'
+  const rilevazione = buildRilevazioneNumberFromData(data, oid)
+  const prefix = `Rapporto n. ${rapporto}`
+  if (lower.includes('mappa')) return `${prefix} • Mappa della rilevazione n. ${rilevazione || '-'}`
+  if (lower.includes('allegat')) return `${prefix} • Allegati della rilevazione n. ${rilevazione || '-'}`
+  if (lower.includes('nota')) return `${prefix} • Nota spese della rilevazione n. ${rilevazione || '-'}`
+  if (lower.includes('documenti_')) return `${prefix} • Documenti della rilevazione n. ${rilevazione || '-'}`
+  return `${prefix} • Rilevazione n. ${rilevazione || '-'}`
+}
+
 function buildRilevazioneNumberFromData (data: any, oid: number | null | undefined): string {
   const d = data || {}
   const rawCandidate = cleanPracticeCodeText(
@@ -6237,8 +6249,8 @@ ${noteTrim}` : noteTrim)
         <GiiDocumentViewer
           url={previewUrl}
           fileName={previewFileName}
-          title='Anteprima documenti'
-          subtitle={hasSel && oid != null ? `${praticaCode} • ${previewFileName}` : previewFileName}
+          title={hasSel && oid != null ? documentViewerTitleForActions(previewFileName, data, oid) : previewFileName}
+          subtitle={undefined}
           loading={previewLoading}
           error={previewError}
           emptyText='Nessun dato disponibile per l&apos;anteprima.'
@@ -7591,6 +7603,7 @@ async function buildMapPrintPdfBlob (view: any, printServiceUrl: string, opts: D
   const Point = await loadEsriModule<any>('esri/geometry/Point').catch(() => null)
   const SimpleMarkerSymbol = await loadEsriModule<any>('esri/symbols/SimpleMarkerSymbol').catch(() => null)
   const symbolUtils = await loadEsriModule<any>('esri/symbols/support/symbolUtils').catch(() => null)
+  const ExtentCtor = await loadEsriModule<any>('esri/geometry/Extent').catch(() => null)
 
   await ensureGiiPrintableMapLayersReady(view)
   const layers = listPrintableMapLayers(view)
@@ -7652,6 +7665,18 @@ async function buildMapPrintPdfBlob (view: any, printServiceUrl: string, opts: D
         try { await view.goTo({ scale: requestedScale }, { animate: false }) } catch {}
       }
     }
+    // Attende che la view si sia effettivamente stabilizzata sulla nuova posizione/scala
+    // prima di leggere view.scale/view.extent per il calcolo della legenda. goTo() risolve
+    // la Promise quando la transizione è logicamente completa, ma su salti di scala ampi
+    // (da zoom iniziale di default a scala di stampa 1:1000) lo stato interno della view
+    // può non essere ancora sincronizzato nello stesso istante — causa di risultati diversi
+    // tra rigenerazioni successive della stessa anteprima.
+    try { await view.when?.() } catch {}
+    try { view.requestRender?.() } catch {}
+    if (typeof view.whenLayerView === 'function' && view.map?.layers?.length) {
+      try { await Promise.race([view.whenLayerView(view.map.layers.getItemAt(0)), delayForActions(400)]) } catch {}
+    }
+    await delayForActions(250)
     if (localizationRequested && opts.mapTarget && Graphic && Point && SimpleMarkerSymbol && view?.graphics) {
       try {
         const geometry = printTargetGeometry || mapPrintPointGeometryForActions(opts.mapTarget, Point)
@@ -7673,14 +7698,14 @@ async function buildMapPrintPdfBlob (view: any, printServiceUrl: string, opts: D
     }
 
     const printScale = Number(opts.mapScale) || Number(view?.scale) || 0
-    const printExtent = printScale > 0 ? computePrintExtentForView(view, printScale) ?? undefined : undefined
+    const printExtent = printScale > 0 ? computePrintExtentForView(view, printScale, opts.mapLayout) ?? undefined : undefined
 
     console.warn('[GII-LEGENDA-DEBUG] gii-azioni scale=', view?.scale, 'resolution=', view?.resolution,
       'printScale=', printScale,
       'extent=', view?.extent ? `${view.extent.xmin.toFixed(0)},${view.extent.ymin.toFixed(0)},${view.extent.xmax.toFixed(0)},${view.extent.ymax.toFixed(0)}` : null,
       'printExtent=', printExtent ? `${printExtent.xmin.toFixed(0)},${printExtent.ymin.toFixed(0)},${printExtent.xmax.toFixed(0)},${printExtent.ymax.toFixed(0)}` : null)
 
-    const legendItems = await buildGiiMapLegendItemsForView(view, layers, { ...opts, symbolUtils, printExtent }, localizationLayerKeys, localizationRequested)
+    const legendItems = await buildGiiMapLegendItemsForView(view, layers, { ...opts, symbolUtils, printExtent, ExtentCtor }, localizationLayerKeys, localizationRequested)
     const template = new PrintTemplate({
       format: 'pdf',
       layout: opts.mapLayout || 'A4 Portrait',

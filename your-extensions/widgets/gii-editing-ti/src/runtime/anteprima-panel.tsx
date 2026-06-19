@@ -372,12 +372,62 @@ function buildPlaceholderMap (data: any, utentiCache: Map<string, UtenteCached> 
 
 function officialRapportoTecnicoNumberForEditing (data: any): string {
   const d = data || {}
-  return String(pickAttrCI(d, [
+  const candidates = [
     'numero_rapporto_tecnico', 'Numero_rapporto_tecnico', 'NUMERO_RAPPORTO_TECNICO',
     'numero_rapporto', 'Numero_rapporto', 'NUMERO_RAPPORTO',
     'codice_rapporto', 'Codice_rapporto', 'CODICE_RAPPORTO',
     'n_rapporto', 'N_RAPPORTO'
-  ]) || '').trim() || '-'
+  ]
+  for (const field of candidates) {
+    const text = cleanViewerCodeTextForEditing(pickAttrCI(d, [field]))
+    if (!text || /^[-–—]+$/.test(text)) continue
+    if (isViewerRilevazioneCodeForEditing(text)) continue
+    return text
+  }
+  return '-'
+}
+
+function cleanViewerCodeTextForEditing (value: any): string {
+  return String(value ?? '')
+    .trim()
+    .replace(/^rapporto\s+tecnico\s+n\.?\s*/i, '')
+    .replace(/^rapporto\s+n\.?\s*/i, '')
+    .replace(/^rilevazione\s+n\.?\s*/i, '')
+    .replace(/^rilevazione\s*/i, '')
+    .trim()
+}
+
+function isViewerRilevazioneCodeForEditing (value: any): boolean {
+  const s = cleanViewerCodeTextForEditing(value).toUpperCase().replace(/_/g, '-').replace(/\s+/g, '-')
+  return /^(TR|TI)-\d+(?:-[A-Z0-9]+)?$/.test(s) || /^\d+-(TR|TI)(?:-[A-Z0-9]+)?$/.test(s)
+}
+
+function viewerRilevazioneNumberForEditing (data: any, oid?: number | null): string {
+  const d = data || {}
+  const explicit = cleanViewerCodeTextForEditing(pickAttrCI(d, [
+    'numero_rilevazione', 'Numero_rilevazione', 'NUMERO_RILEVAZIONE',
+    'cod_pratica', 'Cod_pratica', 'COD_PRATICA'
+  ]))
+  if (explicit) return explicit
+  const oidPart = oid != null && Number.isFinite(Number(oid)) ? String(Number(oid)) : ''
+  if (!oidPart) return '-'
+  const op = pickAttrCI(d, ['origine_pratica', 'Origine_pratica', 'ORIGINE_PRATICA'])
+  const prefix = (op === 2 || op === '2' || String(op || '').toUpperCase() === 'TI') ? 'TI' : 'TR'
+  const area = normalizeAreaCode(firstMeaningfulValue(d.area_cod, d.area))
+  const settore = normalizeSettoreCode(area, firstMeaningfulValue(d.settore_cod, d.settore))
+  return `${oidPart}-${prefix}${settore ? `-${settore}` : ''}`
+}
+
+function documentViewerTitleForEditing (fileName: string, data: any, oid?: number | null): string {
+  const lower = String(fileName || '').toLowerCase()
+  const rapporto = officialRapportoTecnicoNumberForEditing(data)
+  const rilevazione = viewerRilevazioneNumberForEditing(data, oid)
+  const prefix = `Rapporto n. ${rapporto || '-'}`
+  if (lower.includes('mappa')) return `${prefix} • Mappa della rilevazione n. ${rilevazione || '-'}`
+  if (lower.includes('allegat')) return `${prefix} • Allegati della rilevazione n. ${rilevazione || '-'}`
+  if (lower.includes('nota')) return `${prefix} • Nota spese della rilevazione n. ${rilevazione || '-'}`
+  if (lower.includes('documenti_')) return `${prefix} • Documenti della rilevazione n. ${rilevazione || '-'}`
+  return `${prefix} • Rilevazione n. ${rilevazione || '-'}`
 }
 
 function mapTechnicalDocumentTitle (numeroRapportoTecnico?: string): string {
@@ -775,7 +825,7 @@ function delay (ms: number): Promise<void> {
   return new Promise(resolve => window.setTimeout(resolve, ms))
 }
 
-async function buildMapPrintPdfBlob (view: any, printServiceUrl: string, opts: DocumentPrintOptions, sourceView?: any): Promise<{ blob: Blob; fileName: string }> {
+async function buildMapPrintPdfBlob (view: any, printServiceUrl: string, opts: DocumentPrintOptions): Promise<{ blob: Blob; fileName: string }> {
   if (!view) throw new Error('Map view non disponibile per la stampa.')
   const serviceUrl = String(printServiceUrl || DEFAULT_PRINT_SERVICE_URL).trim()
   if (!serviceUrl) throw new Error('Servizio stampa ArcGIS non configurato.')
@@ -788,11 +838,13 @@ async function buildMapPrintPdfBlob (view: any, printServiceUrl: string, opts: D
   const Point = await loadEsriModule<any>('esri/geometry/Point').catch(() => null)
   const SimpleMarkerSymbol = await loadEsriModule<any>('esri/symbols/SimpleMarkerSymbol').catch(() => null)
   const symbolUtils = await loadEsriModule<any>('esri/symbols/support/symbolUtils').catch(() => null)
+  const ExtentCtor = await loadEsriModule<any>('esri/geometry/Extent').catch(() => null)
 
-  // Per la legenda usa sourceView (p.mapView già carica) se disponibile, altrimenti la printView
-  const legendView = sourceView ?? view
-  await ensureGiiPrintableMapLayersReady(legendView)
-  const layers = listPrintableMapLayers(legendView)
+  // La legenda usa SEMPRE e SOLO la view tecnica isolata (view), mai una mappa esistente
+  // del gestionale (p.mapView o qualsiasi altra view in uso dall'utente). Questa view è
+  // costruita da zero unicamente per questo documento di stampa.
+  await ensureGiiPrintableMapLayersReady(view)
+  const layers = listPrintableMapLayers(view)
   const localizationLayerKeys = new Set(layers.filter(item => printableLayerIsLocalization(item, opts)).map(item => item.key))
   const hasLocalizationLayerControl = localizationLayerKeys.size > 0
   const localizationRequested = !hasLocalizationLayerControl || layers.some(item => {
@@ -851,6 +903,9 @@ async function buildMapPrintPdfBlob (view: any, printServiceUrl: string, opts: D
         try { await view.goTo({ scale: requestedScale }, { animate: false }) } catch {}
       }
     }
+    try { await view.when?.() } catch {}
+    try { view.requestRender?.() } catch {}
+    await delay(250)
     if (localizationRequested && opts.mapTarget && Graphic && Point && SimpleMarkerSymbol && view?.graphics) {
       try {
         const geometry = printTargetGeometry || mapPrintPointGeometry(opts.mapTarget, Point)
@@ -871,12 +926,12 @@ async function buildMapPrintPdfBlob (view: any, printServiceUrl: string, opts: D
       } catch {}
     }
 
-    const printScale = Number(opts.mapScale) || Number(legendView?.scale) || 0
-    const printExtent = printScale > 0 ? computePrintExtentForView(legendView, printScale) ?? undefined : undefined
+    const printScale = Number(opts.mapScale) || Number(view?.scale) || 0
+    const printExtent = printScale > 0 ? computePrintExtentForView(view, printScale, opts.mapLayout) ?? undefined : undefined
 
     // === DIAGNOSTICA TEMPORANEA — rimuovere dopo il debug ===
-    console.warn('[GII-LEGENDA-DEBUG] scale=', legendView?.scale, 'resolution=', legendView?.resolution,
-      'extent=', legendView?.extent ? `${legendView.extent.xmin.toFixed(0)},${legendView.extent.ymin.toFixed(0)},${legendView.extent.xmax.toFixed(0)},${legendView.extent.ymax.toFixed(0)} wkid=${legendView.extent.spatialReference?.wkid}` : null,
+    console.warn('[GII-LEGENDA-DEBUG] scale=', view?.scale, 'resolution=', view?.resolution,
+      'extent=', view?.extent ? `${view.extent.xmin.toFixed(0)},${view.extent.ymin.toFixed(0)},${view.extent.xmax.toFixed(0)},${view.extent.ymax.toFixed(0)} wkid=${view.extent.spatialReference?.wkid}` : null,
       'printExtent=', printExtent ? `${printExtent.xmin.toFixed(0)},${printExtent.ymin.toFixed(0)},${printExtent.xmax.toFixed(0)},${printExtent.ymax.toFixed(0)}` : null,
       'mapLayerVisibility=', JSON.stringify(opts.mapLayerVisibility || {}))
     console.warn('[GII-LEGENDA-DEBUG] layers=', layers.map(l =>
@@ -884,7 +939,7 @@ async function buildMapPrintPdfBlob (view: any, printServiceUrl: string, opts: D
     ).join('\n'))
     // === FINE DIAGNOSTICA ===
 
-    const legendItems = await buildGiiMapLegendItemsForView(legendView, layers, { ...opts, symbolUtils, printExtent }, localizationLayerKeys, localizationRequested)
+    const legendItems = await buildGiiMapLegendItemsForView(view, layers, { ...opts, symbolUtils, printExtent, ExtentCtor }, localizationLayerKeys, localizationRequested)
 
     console.warn('[GII-LEGENDA-DEBUG] legendItems=', legendItems.map(i => `${i.label}|img=${!!i.image}`).join(', '))
     const template = new PrintTemplate({
@@ -1362,9 +1417,6 @@ export default function AnteprimaPanel (p: {
     try { return JSON.stringify({ r: p.nsRows || {}, s: p.nsSummary || {} }) } catch { return '' }
   }, [p.nsRows, p.nsSummary])
 
-  const preferConfiguredWebMapForPreview = !!String(p.mapConfig?.webMapItemId || '').trim()
-  const sourceMapViewForPreview = preferConfiguredWebMapForPreview ? null : p.mapView
-
   const mapConfigSignature = React.useMemo(() => {
     try { return JSON.stringify(p.mapConfig || {}) } catch { return '' }
   }, [p.mapConfig])
@@ -1396,7 +1448,11 @@ export default function AnteprimaPanel (p: {
   }, [dataSignature, nsSignature])
 
   React.useEffect(() => {
-    const sourceView = sourceMapViewForPreview
+    // IMPORTANTE: la mappa usata per generare l'elaborato cartografico NON deve mai
+    // derivare da nessuna mappa in uso nel gestionale (p.mapView o qualsiasi altra view
+    // visibile all'utente), in nessuna forma — né come clone, né come centro/scala di
+    // partenza. È sempre una mappa indipendente, costruita da zero solo da configurazione
+    // statica (cfg) e dal punto della pratica (mapTarget), usata una volta e poi distrutta.
     const cfg = p.mapConfig || {}
     if (!technicalMapContainerRef.current) {
       setTechnicalMapView(null)
@@ -1414,7 +1470,6 @@ export default function AnteprimaPanel (p: {
           loadEsriModule<any>('esri/portal/Portal').catch(() => null)
         ])
         if (cancelled || !technicalMapContainerRef.current) return
-        const sourceMap = sourceView?.map
         let map: any = null
         let mapFromWebMap = false
         if (WebMap && String(cfg.webMapItemId || '').trim()) {
@@ -1431,23 +1486,8 @@ export default function AnteprimaPanel (p: {
           } catch {
             map = new Map({ basemap: 'satellite' })
           }
-        } else if (sourceMap) {
-          try {
-            map = typeof sourceMap.clone === 'function'
-              ? sourceMap.clone()
-              : new Map({ basemap: sourceMap?.basemap?.clone ? sourceMap.basemap.clone() : (sourceMap?.basemap || 'satellite') })
-          } catch {
-            map = new Map({ basemap: 'satellite' })
-          }
         } else {
-          map = new Map({ basemap: 'satellite' })
-        }
-        if (!mapFromWebMap && map && map !== sourceMap && !map.layers?.length && sourceMap?.layers) {
-          try {
-            sourceMap.layers.forEach((layer: any) => {
-              try { map.layers.add(layer?.clone ? layer.clone() : layer) } catch {}
-            })
-          } catch {}
+          map = new Map({ basemap: String(cfg.basemap || '').trim() || 'satellite' })
         }
         if (mapFromWebMap) {
           try { if (typeof map?.loadAll === 'function') await map.loadAll() } catch {}
@@ -1473,11 +1513,8 @@ export default function AnteprimaPanel (p: {
         view = new MapView({
           container: technicalMapContainerRef.current,
           map,
-          center: sourceView?.center?.clone
-            ? sourceView.center.clone()
-            : (Number.isFinite(targetLon) && Number.isFinite(targetLat) ? [targetLon, targetLat] : [officeLon, officeLat]),
-          scale: Number(sourceView?.scale) || 1000,
-          zoom: Number(sourceView?.zoom) || undefined,
+          center: Number.isFinite(targetLon) && Number.isFinite(targetLat) ? [targetLon, targetLat] : [officeLon, officeLat],
+          scale: 1000,
           ui: { components: [] }
         })
         await view.when()
@@ -1495,7 +1532,7 @@ export default function AnteprimaPanel (p: {
       setTechnicalMapView(null)
       if (view) { try { view.destroy() } catch {} }
     }
-  }, [sourceMapViewForPreview, mapConfigSignature, mapTargetSignature])
+  }, [mapConfigSignature, mapTargetSignature])
 
   React.useEffect(() => {
     setNotaSpeseOptions(computedNotaSpeseOptions)
@@ -1628,7 +1665,7 @@ export default function AnteprimaPanel (p: {
         mapSelectedOid: Number.isFinite(selectedOid) && selectedOid > 0 ? selectedOid : null,
         mapSelectedIdFieldName: String(p.idFieldName || 'OBJECTID'),
         mapLocalizationLayerUrl: String(p.mapConfig?.mapLayerUrl || '')
-      }, p.mapView ?? undefined))
+      }))
     }
     if (opts.includeAllegati && p.ds && p.oid) {
       const selectedAttachmentIds = attachmentOptions
@@ -1730,8 +1767,8 @@ export default function AnteprimaPanel (p: {
       <GiiDocumentViewer
         url={pdfUrl}
         fileName={pdfFileName}
-        title='Anteprima rapporto'
-        subtitle={pdfFileName}
+        title={documentViewerTitleForEditing(pdfFileName, p.data, p.oid)}
+        subtitle={undefined}
         loading={loading}
         error={error}
         emptyText='Nessun dato disponibile per l&apos;anteprima.'
