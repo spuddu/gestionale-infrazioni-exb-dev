@@ -307,13 +307,9 @@ function filterSymbolInfosByFeatures (renderer: any, infos: RendererSymbolInfo[]
   if (features == null) return infos
   if (!features.length) return []
   const type = normalizedRendererType(renderer)
-  console.warn('[GII-LEGENDA-DEBUG] filter renderer.type=', type, 'renderer.field=', renderer?.field,
-    'feature attrs=', features.map(f => JSON.stringify(f?.attributes)).join(' | '),
-    'infos labels/values=', infos.map(i => `${i.label}:[${(i.values||[]).join(',')}]`).join(' | '))
   if (!renderer) return infos.filter(info => !(info.values || []).length || features.some(feature => featureMatchesSymbolInfo(renderer, info, feature?.attributes || {})))
   if (type !== 'unique-value' && type !== 'class-breaks') return infos
   const matched = infos.filter(info => features.some(feature => featureMatchesSymbolInfo(renderer, info, feature?.attributes || {})))
-  console.warn('[GII-LEGENDA-DEBUG] filter matched=', matched.map(i => i.label).join(', '))
   return matched
 }
 
@@ -671,10 +667,9 @@ async function fetchOfficialLegendEntries (layer: any): Promise<ArcgisLegendEntr
         const resp = await withTimeout(fetch(url), null as any, 3000)
         if (!resp || !resp.ok) return []
         const json = await resp.json()
-        if (json?.error) { console.warn('[GII-LEGENDA-DEBUG] legend REST error', json.error); return [] }
+        if (json?.error) return []
         const layerLegend = (Array.isArray(json?.layers) ? json.layers : []).find((l: any) => String(l?.layerId) === String(info.layerId))
         const entries = Array.isArray(layerLegend?.legend) ? layerLegend.legend : []
-        console.warn('[GII-LEGENDA-DEBUG] legend entries for layerId=', info.layerId, 'count=', entries.length, 'labels=', entries.map((e: any) => e?.label).join(', '))
         return entries
           .map((entry: any) => ({
             label: String(entry?.label || '').trim(),
@@ -685,8 +680,7 @@ async function fetchOfficialLegendEntries (layer: any): Promise<ArcgisLegendEntr
             values: Array.isArray(entry?.values) ? entry.values : []
           }))
           .filter((entry: ArcgisLegendEntry) => !!entry.imageData)
-      } catch (e) {
-        console.warn('[GII-LEGENDA-DEBUG] legend fetch exception', e)
+      } catch {
         return []
       }
     })())
@@ -729,7 +723,6 @@ async function queryLegendFeaturesInExtent (layer: any, view: any, renderer: any
   if (!layer) return null
   const extentGeom = printExtent ?? extentToRestGeometry(view?.extent)
   if (!extentGeom) return null
-  console.warn('[GII-LEGENDA-DEBUG] query layer=', layer?.title, 'printExtent=', printExtent ? `${printExtent.xmin.toFixed(0)},${printExtent.ymin.toFixed(0)},${printExtent.xmax.toFixed(0)},${printExtent.ymax.toFixed(0)}` : 'NULL→usando view.extent', 'hasExtentCtor=', !!ExtentCtor)
 
   const outFields = legendQueryOutFields(renderer)
   // Costruisce una vera istanza Extent quando disponibile: l'operatore spaziale 'intersects'
@@ -763,7 +756,6 @@ async function queryLegendFeaturesInExtent (layer: any, view: any, renderer: any
       if (presenceOnly && typeof layer.queryFeatureCount === 'function') {
         const count = await withTimeout(layer.queryFeatureCount(q), null as any, 3500)
         if (Number.isFinite(Number(count))) {
-          console.warn('[GII-LEGENDA-DEBUG] JS API count ok layer=', layer?.title, 'count=', Number(count))
           return Number(count) > 0 ? [{ attributes: {} }] : []
         }
       }
@@ -771,12 +763,10 @@ async function queryLegendFeaturesInExtent (layer: any, view: any, renderer: any
       q.num = 10
       const res = await withTimeout(layer.queryFeatures(q), null, 2500)
       if (Array.isArray(res?.features)) {
-        console.warn('[GII-LEGENDA-DEBUG] JS API ok layer=', layer?.title, 'features=', res.features.length)
         return res.features
       }
     }
-  } catch (e) {
-    console.warn('[GII-LEGENDA-DEBUG] JS API error layer=', layer?.title, e)
+  } catch {
   }
 
   // Tentativo 2: REST fetch con token esplicito
@@ -803,15 +793,12 @@ async function queryLegendFeaturesInExtent (layer: any, view: any, renderer: any
     const resp = await withTimeout(fetch(`${queryUrl}?${params.toString()}`), null as any, presenceOnly ? 3500 : 2500)
     if (!resp || !resp.ok) return null
     const json = await resp.json()
-    if (json?.error) { console.warn('[GII-LEGENDA-DEBUG] REST error layer=', layer?.title, json.error); return null }
+    if (json?.error) return null
     if (presenceOnly && Number.isFinite(Number(json?.count))) {
-      console.warn('[GII-LEGENDA-DEBUG] REST count ok layer=', layer?.title, 'count=', Number(json.count))
       return Number(json.count) > 0 ? [{ attributes: {} }] : []
     }
-    console.warn('[GII-LEGENDA-DEBUG] REST ok layer=', layer?.title, 'features=', json?.features?.length)
     return Array.isArray(json?.features) ? json.features : null
-  } catch (e) {
-    console.warn('[GII-LEGENDA-DEBUG] REST exception layer=', layer?.title, e)
+  } catch {
     return null
   }
 }
@@ -840,8 +827,6 @@ async function buildLegendItemsForLayerInExtent (
   const categorizedRenderer = rendererType === 'unique-value' || rendererType === 'class-breaks'
   const presenceOnly = kind === 'parcel' || (!categorizedRenderer && !rendererFields(renderer).length)
   const features = await queryLegendFeaturesInExtent(item.layer, view, renderer, opts?.printExtent, opts?.ExtentCtor, presenceOnly)
-  const fullUrl = [item.layer?.parsedUrl?.value, item.layer?.url, item.layer?.parent?.parsedUrl?.value, item.layer?.parent?.url].map(u => String(u||'').trim()).find(u => u.startsWith('http')) ?? String(item.layer?.url||item.layer?.parent?.url||'')
-  console.warn('[GII-LEGENDA-DEBUG] layer=', label, '| type=', item.layer?.type, '| url=', fullUrl.slice(-60), '| features=', features === null ? 'null(FALLITO)' : features?.length)
   if (!Array.isArray(features) || !features.length) return []
   const groupLabel = legendGroupLabelForItem(item, label)
   const rendererInfos = kind === 'parcel'
@@ -860,7 +845,6 @@ async function buildLegendItemsForLayerInExtent (
     seen.add(key)
     let image: GiiMapLegendItem['image'] | undefined
     const restEntry = officialLegendEntryForLabel(restEntries, itemLabel)
-    console.warn('[GII-LEGENDA-DEBUG] symbol for', itemLabel, '| restEntry=', !!restEntry?.imageData, '| hasSymbol=', !!info.symbol, '| hasSymbolUtils=', !!opts?.symbolUtils)
     if (kind === 'parcel') {
       image = renderParcelLegendImage() ?? undefined
     } else if (restEntry?.imageData) {

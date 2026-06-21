@@ -148,10 +148,18 @@ export interface Config {
 
   // --- Anteprima PDF
   printServiceUrl: string
+  anteprimaViewerBg: string
+  anteprimaPdfHeaderBg: string
+  anteprimaPdfAreaBg: string
+  anteprimaPdfThumbnailsBg: string
+  anteprimaPdfToolbarBg: string
+  anteprimaSidebarBg: string
   anteprimaPdfPaddingTop: number
   anteprimaPdfPaddingX: number
   anteprimaPdfPaddingBottom: number
   anteprimaPdfBottomRadius: number
+  anteprimaSidebarBorderColor: string
+  anteprimaSidebarBorderWidth: number
 
   // --- Titolo pratica
   detailTitlePrefix: string
@@ -314,10 +322,18 @@ export const defaultConfig: Config = {
   violazioneCircostanzeRows: 4,
 
   printServiceUrl: 'https://utility.arcgisonline.com/arcgis/rest/services/Utilities/PrintingTools/GPServer/Export%20Web%20Map%20Task',
+  anteprimaViewerBg: '#282828',
+  anteprimaPdfHeaderBg: '#282828',
+  anteprimaPdfAreaBg: '#282828',
+  anteprimaPdfThumbnailsBg: '#1f1f1f',
+  anteprimaPdfToolbarBg: '#3c3c3c',
+  anteprimaSidebarBg: '#eef4fb',
   anteprimaPdfPaddingTop: 0,
   anteprimaPdfPaddingX: 0,
   anteprimaPdfPaddingBottom: 0,
   anteprimaPdfBottomRadius: 10,
+  anteprimaSidebarBorderColor: '#b8c7d9',
+  anteprimaSidebarBorderWidth: 1,
 
   detailTitlePrefix: 'Dettaglio pratica n.',
   detailTitleBg: 'transparent',

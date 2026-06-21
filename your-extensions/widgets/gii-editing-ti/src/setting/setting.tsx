@@ -455,8 +455,13 @@ export default function Setting(props: AllWidgetSettingProps<IMConfig>) {
     {isOpen('anteprima') && <>
       <SectionBox title='Viewer PDF'>
         <Text k='printServiceUrl' label='Servizio stampa ArcGIS' placeholder='https://.../Export%20Web%20Map%20Task'/>
+        <div style={{...P.hint, marginTop: 10}}>Colori sfondo viewer</div>
+        <div style={P.grid2}><Color k='anteprimaViewerBg' label='Sfondo contenitore viewer' fallback='#282828'/><Color k='anteprimaPdfHeaderBg' label='Sfondo intestazione PDF' fallback='#282828'/></div>
+        <div style={P.grid2}><Color k='anteprimaPdfAreaBg' label='Sfondo area pagine PDF' fallback='#282828'/><Color k='anteprimaPdfThumbnailsBg' label='Sfondo barra miniature' fallback='#1f1f1f'/></div>
+        <div style={P.grid2}><Color k='anteprimaPdfToolbarBg' label='Sfondo barra comandi PDF' fallback='#3c3c3c'/><Color k='anteprimaSidebarBg' label='Sfondo colonna documenti' fallback='#eef4fb'/></div>
         <div style={P.grid2}><Num k='anteprimaPdfPaddingTop' label='Padding superiore' min={0} max={80}/><Num k='anteprimaPdfPaddingX' label='Padding laterale' min={0} max={80}/></div>
         <div style={P.grid2}><Num k='anteprimaPdfPaddingBottom' label='Padding inferiore' min={0} max={80}/><Num k='anteprimaPdfBottomRadius' label='Raggio angoli inferiori' min={0} max={40}/></div>
+        <div style={P.grid2}><Color k='anteprimaSidebarBorderColor' label='Colore bordo colonna documenti' fallback='#b8c7d9'/><Num k='anteprimaSidebarBorderWidth' label='Spessore bordo colonna documenti' min={0} max={8}/></div>
       </SectionBox>
       <SectionBox title='Titolo pratica'>
         <Text k='detailTitlePrefix' label='Prefisso titolo'/>

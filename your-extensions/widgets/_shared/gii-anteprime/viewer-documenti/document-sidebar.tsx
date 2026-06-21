@@ -13,6 +13,9 @@ export type GiiDocumentSidebarAvailability = {
 
 export type GiiDocumentSidebarProps = {
   width: number
+  backgroundColor?: string
+  borderColor?: string
+  borderWidth?: number
   docOptions: GiiDocumentPrintOptions
   availability: GiiDocumentSidebarAvailability
   busy: boolean
@@ -48,6 +51,9 @@ function collectSidebarLayerKeys (node: any): string[] {
 export default function GiiDocumentSidebar (props: GiiDocumentSidebarProps) {
   const {
     width,
+    backgroundColor,
+    borderColor,
+    borderWidth,
     docOptions,
     availability,
     busy,
@@ -67,6 +73,10 @@ export default function GiiDocumentSidebar (props: GiiDocumentSidebarProps) {
     setExpandedLayerGroups,
     onRegenerate
   } = props
+  const hasCustomBorder = borderWidth != null || String(borderColor || '').trim() !== ''
+  const safeBorderWidth = Math.max(0, Math.min(8, Number(borderWidth) || 0))
+  const safeBorderColor = String(borderColor || '#dbe4ef').trim() || '#dbe4ef'
+  const safeBackgroundColor = String(backgroundColor || '#eef4fb').trim() || '#eef4fb'
 
   const renderDocCheckbox = (key: DocumentKey, label: string) => {
     const checking = !!documentChecking?.[key]
@@ -141,7 +151,7 @@ export default function GiiDocumentSidebar (props: GiiDocumentSidebarProps) {
   }
 
   return (
-    <aside style={{ flex: `0 0 ${width}px`, width, minHeight: 0, overflow: 'auto', padding: 10, background: '#eef4fb', borderLeft: '1px solid #dbe4ef', color: '#0f172a', display: 'grid', alignContent: 'start', gap: 10 }}>
+    <aside style={{ flex: `0 0 ${width}px`, width, minHeight: 0, overflow: 'auto', padding: 10, background: safeBackgroundColor, ...(hasCustomBorder ? { boxShadow: safeBorderWidth > 0 ? `inset 0 0 0 ${safeBorderWidth}px ${safeBorderColor}` : 'none' } : { borderLeft: '1px solid #dbe4ef' }), color: '#0f172a', display: 'grid', alignContent: 'start', gap: 10, boxSizing: 'border-box' }}>
       <div style={{ fontSize: 13, fontWeight: 900, color: '#0f172a' }}>Documenti</div>
       <div style={{ display: 'grid', gap: 8 }}>
         {renderDocCheckbox('includeRapporto', 'Rapporto tecnico')}

@@ -218,6 +218,9 @@ export interface Config {
 
   // --- Nota spese
   nsNotaSpeseDettaglioUrl?: string
+
+  // --- Regolamento
+  regolamentoArticoliUrl?: string
 }
 
 export const defaultConfig: Config = {
@@ -297,6 +300,8 @@ export const defaultConfig: Config = {
   mapLayerLayerId: '',
 
   nsNotaSpeseDettaglioUrl: '',
+
+  regolamentoArticoliUrl: '',
 
   mapBasemap: 'topo-vector',
   mapCenterLon: 9.0,

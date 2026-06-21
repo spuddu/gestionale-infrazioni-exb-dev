@@ -13,6 +13,10 @@ type Props = {
   onDownload?: () => void
   onClose?: () => void
   style?: React.CSSProperties
+  headerBackgroundColor?: string
+  pageAreaBackgroundColor?: string
+  thumbnailsBackgroundColor?: string
+  toolbarBackgroundColor?: string
 }
 
 let pdfJsPromise: Promise<any> | null = null
@@ -195,6 +199,10 @@ export default function AnteprimaPdfViewer (props: Props): any {
   const effectiveLoading = externalLoading || internalLoading
   const effectiveError = props.error || internalError
   const urlPending = !!url && cleanPdfUrl(url) !== renderedUrlRef.current
+  const headerBackgroundColor = String(props.headerBackgroundColor || '#282828').trim() || '#282828'
+  const pageAreaBackgroundColor = String(props.pageAreaBackgroundColor || '#282828').trim() || '#282828'
+  const thumbnailsBackgroundColor = String(props.thumbnailsBackgroundColor || '#1f1f1f').trim() || '#1f1f1f'
+  const toolbarBackgroundColor = String(props.toolbarBackgroundColor || '#3c3c3c').trim() || '#3c3c3c'
 
   const clampZoom = React.useCallback((value: number) => clampInt(value, 25, 400), [])
   const clampPage = React.useCallback((value: number) => clampInt(value, 1, Math.max(1, pageCount || 1)), [pageCount])
@@ -577,20 +585,20 @@ export default function AnteprimaPdfViewer (props: Props): any {
         borderRadius: 12,
         overflow: 'hidden',
         border: '1px solid rgba(255,255,255,0.12)',
-        background: '#282828',
+        background: pageAreaBackgroundColor,
         color: '#fff',
         ...(props.style || {})
       }}
     >
       {(props.title || props.subtitle) && (
-        <div style={{ flex: '0 0 auto', width: '100%', boxSizing: 'border-box', padding: props.subtitle ? '6px 14px 7px' : '7px 14px', background: '#282828', borderBottom: '1px solid rgba(255,255,255,0.12)', color: '#fff', textAlign: 'center', lineHeight: 1.2 }}>
+        <div style={{ flex: '0 0 auto', width: '100%', boxSizing: 'border-box', padding: props.subtitle ? '6px 14px 7px' : '7px 14px', background: headerBackgroundColor, borderBottom: '1px solid rgba(255,255,255,0.12)', color: '#fff', textAlign: 'center', lineHeight: 1.2 }}>
           {props.title && <div style={{ fontSize: 12, fontWeight: 800, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{props.title}</div>}
           {props.subtitle && <div style={{ marginTop: 2, fontSize: 10, color: 'rgba(255,255,255,0.78)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{props.subtitle}</div>}
         </div>
       )}
-      <div style={{ flex: '1 1 0', width: '100%', maxWidth: '100%', minWidth: 0, minHeight: 0, display: 'flex', background: '#282828', overflow: 'hidden', boxSizing: 'border-box' }}>
+      <div style={{ flex: '1 1 0', width: '100%', maxWidth: '100%', minWidth: 0, minHeight: 0, display: 'flex', background: pageAreaBackgroundColor, overflow: 'hidden', boxSizing: 'border-box' }}>
         {showToolbar && pageCount > 1 && (
-          <div style={{ flex: '0 0 124px', width: 124, maxWidth: 124, minWidth: 124, minHeight: 0, overflowY: 'auto', overflowX: 'hidden', padding: 10, boxSizing: 'border-box', borderRight: '1px solid rgba(255,255,255,0.12)', background: '#1f1f1f' }}>
+          <div style={{ flex: '0 0 124px', width: 124, maxWidth: 124, minWidth: 124, minHeight: 0, overflowY: 'auto', overflowX: 'hidden', padding: 10, boxSizing: 'border-box', borderRight: '1px solid rgba(255,255,255,0.12)', background: thumbnailsBackgroundColor }}>
             <div style={{ display: 'grid', gap: 9 }}>
               {Array.from({ length: pageCount }, (_, i) => i + 1).map(n => (
                 <PdfPageThumbnail
@@ -611,7 +619,7 @@ export default function AnteprimaPdfViewer (props: Props): any {
           onPointerMove={onPanMove}
           onPointerUp={(e) => endPan(e.pointerId)}
           onPointerCancel={(e) => endPan(e.pointerId)}
-          style={{ flex: '1 1 0', width: 0, maxWidth: '100%', minWidth: 0, minHeight: 0, position: 'relative', background: '#282828', overflow: 'auto', padding: 12, cursor: isPanning ? 'grabbing' : 'grab', userSelect: 'none', touchAction: 'none', boxSizing: 'border-box', overscrollBehavior: 'contain' as any }}
+          style={{ flex: '1 1 0', width: 0, maxWidth: '100%', minWidth: 0, minHeight: 0, position: 'relative', background: pageAreaBackgroundColor, overflow: 'auto', padding: 12, cursor: isPanning ? 'grabbing' : 'grab', userSelect: 'none', touchAction: 'none', boxSizing: 'border-box', overscrollBehavior: 'contain' as any }}
           title='Trascina per spostarti; scorri per cambiare pagina; usa Shift + rotellina per lo zoom'
         >
           {(effectiveLoading || urlPending || !fitReady) && !effectiveError && <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'rgba(255,255,255,0.76)', fontSize: 14, pointerEvents: 'none' }}>Generazione anteprima…</div>}
@@ -627,7 +635,7 @@ export default function AnteprimaPdfViewer (props: Props): any {
       </div>
 
       {showToolbar && (
-        <div style={{ flex: '0 0 auto', alignSelf: 'stretch', width: '100%', maxWidth: '100%', minWidth: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 10, flexWrap: 'wrap', padding: '9px 12px', background: '#3c3c3c', color: '#fff', boxSizing: 'border-box', overflowX: 'auto', overflowY: 'hidden', position: 'relative', zIndex: 2 }}>
+        <div style={{ flex: '0 0 auto', alignSelf: 'stretch', width: '100%', maxWidth: '100%', minWidth: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 10, flexWrap: 'wrap', padding: '9px 12px', background: toolbarBackgroundColor, color: '#fff', boxSizing: 'border-box', overflowX: 'auto', overflowY: 'hidden', position: 'relative', zIndex: 2 }}>
           <button type='button' disabled={!canPrev} onClick={() => setPageNumber(v => clampPage(v - pageStep))} style={{ ...btnStyle, opacity: canPrev ? 1 : 0.45, cursor: canPrev ? 'pointer' : 'not-allowed' }} title='Pagina precedente'>‹</button>
           <span style={{ fontSize: 12, fontWeight: 800 }}>Pagina</span>
           <input

@@ -14,6 +14,11 @@ type Props = GiiDocumentSidebarProps & {
   error?: string | null
   emptyText: string
   onClose?: () => void
+  viewerBackgroundColor?: string
+  pdfHeaderBackgroundColor?: string
+  pdfPageAreaBackgroundColor?: string
+  pdfThumbnailsBackgroundColor?: string
+  pdfToolbarBackgroundColor?: string
 }
 
 export default function GiiDocumentViewer (props: Props) {
@@ -26,11 +31,17 @@ export default function GiiDocumentViewer (props: Props) {
     error,
     emptyText,
     onClose,
+    viewerBackgroundColor,
+    pdfHeaderBackgroundColor,
+    pdfPageAreaBackgroundColor,
+    pdfThumbnailsBackgroundColor,
+    pdfToolbarBackgroundColor,
     ...sidebarProps
   } = props
+  const safeViewerBackgroundColor = String(viewerBackgroundColor || '#282828').trim() || '#282828'
 
   return (
-    <div style={{ flex: '1 1 auto', minHeight: 0, display: 'flex', alignItems: 'stretch', overflow: 'hidden' }}>
+    <div style={{ flex: '1 1 auto', minHeight: 0, display: 'flex', alignItems: 'stretch', overflow: 'hidden', background: safeViewerBackgroundColor }}>
       <div style={{ flex: '1 1 auto', minWidth: 0, minHeight: 0 }}>
         <AnteprimaPdfViewer
           url={url}
@@ -41,6 +52,10 @@ export default function GiiDocumentViewer (props: Props) {
           error={error}
           emptyText={emptyText}
           onClose={onClose}
+          headerBackgroundColor={pdfHeaderBackgroundColor}
+          pageAreaBackgroundColor={pdfPageAreaBackgroundColor}
+          thumbnailsBackgroundColor={pdfThumbnailsBackgroundColor}
+          toolbarBackgroundColor={pdfToolbarBackgroundColor}
         />
       </div>
       <GiiDocumentSidebar {...sidebarProps} />

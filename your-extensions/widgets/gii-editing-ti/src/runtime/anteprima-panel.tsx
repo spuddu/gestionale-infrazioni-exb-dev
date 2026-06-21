@@ -1368,6 +1368,14 @@ export default function AnteprimaPanel (p: {
   mapConfig?: any
   mapTarget?: any | null
   printServiceUrl?: string
+  viewerBackgroundColor?: string
+  pdfHeaderBackgroundColor?: string
+  pdfPageAreaBackgroundColor?: string
+  pdfThumbnailsBackgroundColor?: string
+  pdfToolbarBackgroundColor?: string
+  sidebarBackgroundColor?: string
+  sidebarBorderColor?: string
+  sidebarBorderWidth?: number
 }): any {
   const [pdfUrl, setPdfUrl] = React.useState<string | null>(null)
   const [pdfFileName, setPdfFileName] = React.useState<string>('rapporto.pdf')
@@ -1773,6 +1781,14 @@ export default function AnteprimaPanel (p: {
         error={error}
         emptyText='Nessun dato disponibile per l&apos;anteprima.'
         width={270}
+        viewerBackgroundColor={p.viewerBackgroundColor}
+        pdfHeaderBackgroundColor={p.pdfHeaderBackgroundColor}
+        pdfPageAreaBackgroundColor={p.pdfPageAreaBackgroundColor}
+        pdfThumbnailsBackgroundColor={p.pdfThumbnailsBackgroundColor}
+        pdfToolbarBackgroundColor={p.pdfToolbarBackgroundColor}
+        backgroundColor={p.sidebarBackgroundColor}
+        borderColor={p.sidebarBorderColor}
+        borderWidth={p.sidebarBorderWidth}
         docOptions={docOptions}
         availability={availability}
         busy={loading}

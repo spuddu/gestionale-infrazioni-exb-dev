@@ -10054,6 +10054,14 @@ ${e?.message || String(e)}`
       mapConfig={p.mapConfig}
       mapTarget={p.clickedPointWgs84 || p.existingGeomWgs84 || null}
       printServiceUrl={p.printServiceUrl}
+      viewerBackgroundColor={String((cfg as any).anteprimaViewerBg || '#282828')}
+      pdfHeaderBackgroundColor={String((cfg as any).anteprimaPdfHeaderBg || '#282828')}
+      pdfPageAreaBackgroundColor={String((cfg as any).anteprimaPdfAreaBg || '#282828')}
+      pdfThumbnailsBackgroundColor={String((cfg as any).anteprimaPdfThumbnailsBg || '#1f1f1f')}
+      pdfToolbarBackgroundColor={String((cfg as any).anteprimaPdfToolbarBg || '#3c3c3c')}
+      sidebarBackgroundColor={String((cfg as any).anteprimaSidebarBg || '#eef4fb')}
+      sidebarBorderColor={String((cfg as any).anteprimaSidebarBorderColor || '#b8c7d9')}
+      sidebarBorderWidth={Number((cfg as any).anteprimaSidebarBorderWidth ?? 1)}
     />
   </div>
 )}

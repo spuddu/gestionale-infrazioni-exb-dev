@@ -867,7 +867,248 @@ function DetailSectionCard (props: {
 }
 
 /**
+ * Regolamento articoli — testo regolamentare delle violazioni, mostrato cliccando
+ * sulla riga della violazione nella scheda Violazione (stesso comportamento di
+ * gii-editing-ti). Tabella opzionale: se l'URL non è configurato la riga resta
+ * statica come prima, senza freccia né possibilità di espansione.
+ */
+type RegolamentoArticolo = {
+  codice_articolo: string
+  numero_articolo: any
+  titolo_articolo: string
+  testo_articolo: string
+  atto_regolamento: string
+  anno_riferimento: any
+  data_validita_da: any
+  data_validita_a: any
+  attivo: any
+  note: string
+}
+
+type RegolamentoArticoliState = {
+  loading: boolean
+  error: string
+  urlsReady: boolean
+  byKey: Map<string, RegolamentoArticolo>
+}
+
+const __giiRegArtLayerCache: Record<string, any> = {}
+
+async function regArtGetFeatureLayerByUrl (rawUrl: any): Promise<any> {
+  const url = nsdEnsureLayerIndex(nsdNormalizeUrl(rawUrl))
+  if (!url) throw new Error('URL tabella articoli regolamento non configurata.')
+  if (__giiRegArtLayerCache[url]) return __giiRegArtLayerCache[url]
+  const FeatureLayer = await loadEsriModule<any>('esri/layers/FeatureLayer')
+  const fl = new FeatureLayer({ url })
+  try { if (typeof fl?.load === 'function') await fl.load() } catch {}
+  __giiRegArtLayerCache[url] = fl
+  return fl
+}
+
+async function regArtQueryAttributes (rawUrl: any): Promise<any[]> {
+  const fl = await regArtGetFeatureLayerByUrl(rawUrl)
+  const q = fl.createQuery ? fl.createQuery() : {}
+  q.where = '1=1'
+  q.outFields = ['*']
+  q.returnGeometry = false
+  q.orderByFields = ['numero_articolo ASC']
+  const res = await fl.queryFeatures(q)
+  return (res?.features || []).map((f: any) => f?.attributes || {})
+}
+
+function normalizeRegolamentoArticleKey (raw: any): string {
+  const s = String(raw ?? '').trim().toUpperCase()
+  if (!s) return ''
+  const m = s.match(/(?:ART(?:ICOLO)?\.?\s*)?0*(\d{1,2})(?:\.\d+)?/i)
+  return m ? `ART${Number(m[1])}` : s.replace(/[\s._-]+/g, '')
+}
+
+function normalizeRegolamentoArticleNumber (raw: any): string {
+  const m = String(raw ?? '').match(/(\d{1,2})(?:\.\d+)?/)
+  return m ? String(Number(m[1])) : ''
+}
+
+function normalizeRegolamentoArticle (row: any): RegolamentoArticolo {
+  return {
+    codice_articolo: String(pickAttrCI(row, ['codice_articolo']) || '').trim().toUpperCase(),
+    numero_articolo: pickAttrCI(row, ['numero_articolo']),
+    titolo_articolo: String(pickAttrCI(row, ['titolo_articolo']) || '').trim(),
+    testo_articolo: String(pickAttrCI(row, ['testo_articolo']) || '').trim(),
+    atto_regolamento: String(pickAttrCI(row, ['atto_regolamento']) || '').trim(),
+    anno_riferimento: pickAttrCI(row, ['anno_riferimento']),
+    data_validita_da: pickAttrCI(row, ['data_validita_da']),
+    data_validita_a: pickAttrCI(row, ['data_validita_a']),
+    attivo: pickAttrCI(row, ['attivo']),
+    note: String(pickAttrCI(row, ['note']) || '').trim()
+  }
+}
+
+function dateMsForRegolamento (v: any): number | null {
+  if (v == null || v === '') return null
+  try {
+    const n = Number(v)
+    const d = Number.isFinite(n) && n > 0 ? new Date(n) : new Date(String(v))
+    return Number.isNaN(d.getTime()) ? null : d.getTime()
+  } catch {
+    return null
+  }
+}
+
+function isRegolamentoArticleUsable (article: RegolamentoArticolo, refMs = Date.now()): boolean {
+  const key = normalizeRegolamentoArticleKey(article.codice_articolo || article.numero_articolo)
+  if (!key) return false
+  const attivo = String(article.attivo ?? '').trim().toLowerCase()
+  if (attivo && !['1', 'true', 'sì', 'si', 'yes'].includes(attivo)) return false
+  const from = dateMsForRegolamento(article.data_validita_da)
+  const to = dateMsForRegolamento(article.data_validita_a)
+  if (from != null && from > refMs) return false
+  if (to != null && to < refMs) return false
+  return true
+}
+
+function buildRegolamentoArticleMap (articles: RegolamentoArticolo[]): Map<string, RegolamentoArticolo> {
+  const map = new Map<string, RegolamentoArticolo>()
+  ;(articles || []).forEach(article => {
+    const keys = [article.codice_articolo, article.numero_articolo, normalizeRegolamentoArticleNumber(article.numero_articolo)]
+      .map(normalizeRegolamentoArticleKey)
+      .filter(Boolean)
+    keys.forEach(key => { if (!map.has(key)) map.set(key, article) })
+  })
+  return map
+}
+
+function getRegolamentoArticle (state: RegolamentoArticoliState, code: any): RegolamentoArticolo | null {
+  const key = normalizeRegolamentoArticleKey(code)
+  return key ? (state.byKey.get(key) || null) : null
+}
+
+function useRegolamentoArticoliState (articoliUrlRaw: string): RegolamentoArticoliState {
+  const articoliUrl = React.useMemo(() => nsdEnsureLayerIndex(nsdNormalizeUrl(articoliUrlRaw)), [articoliUrlRaw])
+  const [state, setState] = React.useState<RegolamentoArticoliState>({ loading: false, error: '', urlsReady: !!articoliUrl, byKey: new Map() })
+
+  React.useEffect(() => {
+    let cancelled = false
+    const load = async () => {
+      if (!articoliUrl) {
+        setState({ loading: false, error: '', urlsReady: false, byKey: new Map() })
+        return
+      }
+      setState({ loading: true, error: '', urlsReady: true, byKey: new Map() })
+      try {
+        const rows = await regArtQueryAttributes(articoliUrl)
+        const refMs = Date.now()
+        const articles = rows.map(normalizeRegolamentoArticle).filter(a => isRegolamentoArticleUsable(a, refMs))
+        if (!cancelled) setState({ loading: false, error: '', urlsReady: true, byKey: buildRegolamentoArticleMap(articles) })
+      } catch (e: any) {
+        if (!cancelled) setState({ loading: false, error: e?.message || String(e), urlsReady: true, byKey: new Map() })
+      }
+    }
+    load()
+    return () => { cancelled = true }
+  }, [articoliUrl])
+
+  return state
+}
+
+function RegolamentoArticleDetails (props: { articleState: RegolamentoArticoliState; articleCode: string }) {
+  const article = getRegolamentoArticle(props.articleState, props.articleCode)
+  if (!props.articleState.urlsReady) {
+    return <div style={{ color: '#6b7280', fontSize: 12 }}>Tabella articoli del regolamento non configurata.</div>
+  }
+  if (props.articleState.loading) {
+    return <div style={{ color: '#6b7280', fontSize: 12 }}>Caricamento testo regolamentare…</div>
+  }
+  if (props.articleState.error) {
+    return <div style={{ color: '#991b1b', fontSize: 12 }}>Errore caricamento regolamento: {props.articleState.error}</div>
+  }
+  if (!article) {
+    return <div style={{ color: '#6b7280', fontSize: 12 }}>Testo regolamentare non disponibile nelle tabelle configurate.</div>
+  }
+  return (
+    <div style={{ display: 'grid', gap: 4 }}>
+      {article.testo_articolo && <div style={{ color: '#374151', fontSize: 12, lineHeight: 1.45, whiteSpace: 'pre-wrap' }}>{article.testo_articolo}</div>}
+      {(article.atto_regolamento || article.anno_riferimento) && <div style={{ color: '#6b7280', fontSize: 11 }}>{[article.atto_regolamento, article.anno_riferimento ? `Anno ${article.anno_riferimento}` : ''].filter(Boolean).join(' · ')}</div>}
+    </div>
+  )
+}
+
+// Riga di una violazione nella scheda Violazione. Se è disponibile un codice
+// articolo (e quindi la tabella regolamento), la riga è cliccabile ed espande
+// il testo dell'articolo — stesso comportamento della scheda Violazione di
+// gii-editing-ti. Deve essere un componente React vero (non una semplice
+// funzione di rendering) perché tiene uno stato "aperto/chiuso" proprio.
+function ViolationArticleLine (props: { artLabel: string; description: string; grado?: string; articleCode?: string; articleState: RegolamentoArticoliState }) {
+  const [open, setOpen] = React.useState(false)
+  const hasGrado = props.grado != null && String(props.grado).trim() !== ''
+  const canExpand = !!props.articleCode
+  const toggle = () => { if (canExpand) setOpen(v => !v) }
+  return (
+    <div style={{ borderBottom: '1px solid rgba(0,0,0,0.07)' }}>
+      <div
+        onClick={canExpand ? toggle : undefined}
+        role={canExpand ? 'button' : undefined}
+        tabIndex={canExpand ? 0 : undefined}
+        onKeyDown={canExpand ? (e: any) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggle() } } : undefined}
+        style={{
+          display: 'grid',
+          gridTemplateColumns: hasGrado
+            ? 'max-content max-content minmax(0, 1fr) max-content'
+            : 'max-content max-content minmax(0, 1fr)',
+          columnGap: 8,
+          alignItems: 'center',
+          padding: '7px 0',
+          boxSizing: 'border-box',
+          minWidth: 0,
+          cursor: canExpand ? 'pointer' : 'default'
+        }}
+      >
+        <span aria-hidden='true' style={{ color: canExpand ? '#1d4ed8' : 'transparent', fontSize: 10, fontWeight: 900, width: 12, display: 'inline-flex', justifyContent: 'center', flexShrink: 0 }}>
+          {canExpand ? (open ? '▼' : '▶') : ''}
+        </span>
+        <div style={{
+          fontSize: 12,
+          color: '#6b7280',
+          fontWeight: 700,
+          lineHeight: 1.25,
+          whiteSpace: 'nowrap'
+        }}>
+          {props.artLabel}
+        </div>
+        <div style={{
+          fontSize: 13,
+          color: '#1f2937',
+          fontWeight: 600,
+          lineHeight: 1.35,
+          minWidth: 0,
+          overflowWrap: 'anywhere'
+        }}>
+          {props.description || '—'}
+        </div>
+        {hasGrado
+          ? (
+            <div style={{ display: 'flex', alignItems: 'baseline', gap: 5, whiteSpace: 'nowrap', minWidth: 0 }}>
+              <span style={{ fontSize: 12, color: '#6b7280', fontWeight: 700, lineHeight: 1.25 }}>
+                Grado di gravità
+              </span>
+              <span style={{ fontSize: 13, color: '#1f2937', fontWeight: 600, lineHeight: 1.25 }}>
+                {props.grado}
+              </span>
+            </div>
+            )
+          : null}
+      </div>
+      {canExpand && open && (
+        <div style={{ margin: '0 0 8px 20px', padding: '8px 10px', borderRadius: 8, background: '#f8fafc', border: '1px solid #e5e7eb' }}>
+          <RegolamentoArticleDetails articleState={props.articleState} articleCode={props.articleCode as string} />
+        </div>
+      )}
+    </div>
+  )
+}
+
+/**
  * Dropdown custom zebrato:
+
  * - rende il menu in portal su <body> (non viene tagliato dal widget)
  * - decide automaticamente se aprire sopra o sotto
  * - applica la zebra dalle impostazioni
@@ -1540,10 +1781,41 @@ function migrateTabs(tabFields: TabFields, tabs: TabConfig[] | undefined): TabCo
   })
 }
 
-function TabButton (props: { active: boolean; label: string; onClick: () => void; disabled?: boolean }) {
+type TabButtonBadge =
+  | { kind: 'count'; value: number }
+  | { kind: 'ratio'; done: number; total: number }
+
+function TabButton (props: { active: boolean; label: string; onClick: () => void; disabled?: boolean; badge?: TabButtonBadge }) {
   const bg = props.active ? '#eaf2ff' : 'rgba(0,0,0,0.02)'
   const bd = props.active ? '#2f6fed' : 'rgba(0,0,0,0.12)'
   const col = props.active ? '#1d4ed8' : '#111827'
+
+  const badge = props.badge
+  let badgeEl: React.ReactNode = null
+  if (badge?.kind === 'count') {
+    badgeEl = (
+      <span style={{
+        marginLeft: 6, minWidth: 18, height: 18, padding: '0 5px', borderRadius: 999,
+        display: 'inline-flex', alignItems: 'center', justifyContent: 'center', boxSizing: 'border-box',
+        fontSize: 11, fontWeight: 800, lineHeight: 1,
+        color: '#1d4ed8', background: '#dbeafe', border: '1px solid #93c5fd', flex: '0 0 auto'
+      }} title='Numero elementi'>{badge.value}</span>
+    )
+  } else if (badge?.kind === 'ratio') {
+    const incomplete = badge.done < badge.total
+    badgeEl = (
+      <span style={{
+        marginLeft: 6, minWidth: 30, height: 18, padding: '0 6px', borderRadius: 999,
+        display: 'inline-flex', alignItems: 'center', justifyContent: 'center', boxSizing: 'border-box',
+        fontSize: 11, fontWeight: 800, lineHeight: 1,
+        color: incomplete ? '#92400e' : '#1d4ed8',
+        background: incomplete ? '#fef3c7' : '#dbeafe',
+        border: incomplete ? '1px solid #f59e0b' : '1px solid #93c5fd',
+        flex: '0 0 auto'
+      }} title='Nota spese compilate / previste'>{badge.done}/{badge.total}</span>
+    )
+  }
+
   return (
     <button
       type='button'
@@ -1558,10 +1830,14 @@ function TabButton (props: { active: boolean; label: string; onClick: () => void
         fontWeight: 700,
         fontSize: 12,
         cursor: props.disabled ? 'not-allowed' : 'pointer',
-        opacity: props.disabled ? 0.55 : 1
+        opacity: props.disabled ? 0.55 : 1,
+        display: 'inline-flex',
+        alignItems: 'center',
+        whiteSpace: 'nowrap'
       }}
     >
-      {props.label}
+      <span>{props.label}</span>
+      {badgeEl}
     </button>
   )
 }
@@ -3211,6 +3487,18 @@ function nsdMergeSummary (parent: NsdSummary, computed: NsdSummary): NsdSummary 
   return computed
 }
 
+// Una casistica nota spese è "compilata" se ha almeno una riga collegata, nessuna riga
+// con quantità non valorizzata (<=0) e un totale economico non nullo. Stessa soglia
+// (0.004) usata in gii-editing-ti per evitare falsi "compilato" su importi arrotondati a zero.
+function nsdIsCasisticaCompiled (rows: NsdDetailRow[], codice: string, percentualeSpeseGenerali: number): boolean {
+  const norm = nsdNormalizeCasistica(codice)
+  const groupRows = (rows || []).filter(r => nsdNormalizeCasistica(r.codice_casistica) === norm)
+  if (!groupRows.length) return false
+  if (groupRows.some(r => nsdSafeNum(r.quantita, 0) <= 0)) return false
+  const totale = nsdComputeSummaryFromRows(groupRows, percentualeSpeseGenerali).totaleComplessivo
+  return totale > 0.004
+}
+
 async function nsdGetFeatureLayerByUrl (rawUrl: any): Promise<any> {
   const url = nsdEnsureLayerIndex(nsdNormalizeUrl(rawUrl))
   if (!url) throw new Error('URL tabella dettaglio nota spese non configurata.')
@@ -3275,43 +3563,14 @@ async function nsdQueryRows (detailUrl: string, parentGlobalId: string): Promise
   })
 }
 
-function NotaSpeseDetailPanel (props: { data: any; detailUrl: string; hasSel: boolean }) {
+function NotaSpeseDetailPanel (props: { data: any; detailUrl: string; hasSel: boolean; rows: NsdDetailRow[]; loading: boolean; error: string | null }) {
   const parentGlobalId = String(nsdPickAttrCI(props.data, ['GlobalID', 'globalid']) || '').trim()
-  const [rows, setRows] = React.useState<NsdDetailRow[]>([])
-  const [loadedKey, setLoadedKey] = React.useState<string>('')
-  const [loading, setLoading] = React.useState(false)
-  const [error, setError] = React.useState<string | null>(null)
-
-  React.useEffect(() => {
-    setRows([])
-    setLoadedKey('')
-    setError(null)
-  }, [parentGlobalId, props.detailUrl])
-
-  React.useEffect(() => {
-    if (!props.hasSel || !parentGlobalId || !props.detailUrl) return
-    const key = `${props.detailUrl}|${parentGlobalId}`
-    if (loadedKey === key) return
-    let cancelled = false
-    setLoading(true)
-    setError(null)
-    ;(async () => {
-      try {
-        const next = await nsdQueryRows(props.detailUrl, parentGlobalId)
-        if (cancelled) return
-        setRows(next)
-        setLoadedKey(key)
-      } catch (e: any) {
-        if (cancelled) return
-        setRows([])
-        setLoadedKey(key)
-        setError(e?.message || String(e))
-      } finally {
-        if (!cancelled) setLoading(false)
-      }
-    })()
-    return () => { cancelled = true }
-  }, [props.hasSel, parentGlobalId, props.detailUrl, loadedKey])
+  // Righe e stato di caricamento arrivano ora dal parent (DetailTabsPanel), che le
+  // carica eagerly ad ogni selezione record: serve per poter mostrare il numeratore
+  // "compilate/previste" sulla tab anche prima che l'utente la apra.
+  const rows = props.rows || []
+  const loading = props.loading
+  const error = props.error
 
   const parentSummary = React.useMemo(() => nsdReadParentSummary(props.data || {}), [props.data])
   const art30Equipment = React.useMemo(() => nsdReadArt30Equipment(props.data || {}), [props.data])
@@ -3524,7 +3783,7 @@ function NotaSpeseDetailPanel (props: { data: any; detailUrl: string; hasSel: bo
             headerBg={group.info.isUnlinked ? '#f3f4f6' : '#eaf2ff'}
           >
             {group.isExpectedMissing && !hasGroupContent && (
-              <div style={{ marginBottom: 10, padding: '8px 10px', borderRadius: 8, border: '1px solid #d1d5db', background: '#f9fafb', color: '#374151', fontSize: 12, lineHeight: 1.45 }}>
+              <div style={{ marginBottom: 10, padding: '8px 10px', borderRadius: 8, border: '1px solid #f5b8b8', background: '#fce4e4', color: '#7a1c1c', fontSize: 12, lineHeight: 1.45 }}>
                 Per questa violazione è prevista la possibilità di compilare una nota spese, ma al momento non risultano importi valorizzati.
               </div>
             )}
@@ -3593,6 +3852,7 @@ function DetailTabsPanel (props: {
   editConfig: any
   mapCfg: any
   notaSpeseCfg: { detailUrl: string }
+  regolamentoCfg: { articoliUrl: string }
 }) {
   const { active, ui } = props
 
@@ -3611,6 +3871,11 @@ function DetailTabsPanel (props: {
   const data = localData || baseData
   const oid = active?.state?.oid ?? null
   const hasSel = oid != null && Number.isFinite(oid)
+
+  // Testo regolamentare delle violazioni, per l'espansione al click sulla riga
+  // della violazione nella scheda Violazione. Caricato una volta, indipendente
+  // dal record selezionato (è una tabella di riferimento, non legata alla pratica).
+  const regolamentoArticoliState = useRegolamentoArticoliState(String(props.regolamentoCfg?.articoliUrl || ''))
 
   const numeroRilevazione = React.useMemo(() => {
     if (!hasSel || !data || oid == null) return ''
@@ -3733,11 +3998,60 @@ function DetailTabsPanel (props: {
   }, [ds, selectedOid])
 
   React.useEffect(() => {
-    if (tab === 'allegati' && selectedOid != null && attachmentsForOid !== selectedOid) {
+    // Eager: il numeratore Allegati deve essere visibile sulla tab ancora prima di aprirla,
+    // quindi il caricamento non è più condizionato dal tab attivo.
+    if (selectedOid != null && attachmentsForOid !== selectedOid) {
       loadAttachments()
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tab, selectedOid, attachmentsForOid])
+  }, [selectedOid, attachmentsForOid])
+
+  // Nota spese — righe della tabella dettaglio caricate eagerly (stesso criterio degli
+  // allegati) per calcolare il numeratore "compilate/previste" senza dover aprire la tab.
+  const nsdDetailUrlForBadge = String(props.notaSpeseCfg?.detailUrl || '')
+  const nsdParentGlobalId = React.useMemo(() => String(nsdPickAttrCI(data || {}, ['GlobalID', 'globalid']) || '').trim(), [data])
+  const [nsdRows, setNsdRows] = React.useState<NsdDetailRow[]>([])
+  const [nsdRowsKey, setNsdRowsKey] = React.useState<string>('')
+  const [nsdLoading, setNsdLoading] = React.useState<boolean>(false)
+  const [nsdError, setNsdError] = React.useState<string | null>(null)
+
+  React.useEffect(() => {
+    setNsdRows([])
+    setNsdRowsKey('')
+    setNsdError(null)
+  }, [nsdParentGlobalId, nsdDetailUrlForBadge])
+
+  React.useEffect(() => {
+    if (!hasSel || !nsdParentGlobalId || !nsdDetailUrlForBadge) return
+    const key = `${nsdDetailUrlForBadge}|${nsdParentGlobalId}`
+    if (nsdRowsKey === key) return
+    let cancelled = false
+    setNsdLoading(true)
+    setNsdError(null)
+    ;(async () => {
+      try {
+        const next = await nsdQueryRows(nsdDetailUrlForBadge, nsdParentGlobalId)
+        if (cancelled) return
+        setNsdRows(next)
+        setNsdRowsKey(key)
+      } catch (e: any) {
+        if (cancelled) return
+        setNsdRows([])
+        setNsdRowsKey(key)
+        setNsdError(e?.message || String(e))
+      } finally {
+        if (!cancelled) setNsdLoading(false)
+      }
+    })()
+    return () => { cancelled = true }
+  }, [hasSel, nsdParentGlobalId, nsdDetailUrlForBadge, nsdRowsKey])
+
+  const nsdExpectedCasisticheForBadge = React.useMemo(() => nsdExpectedCasisticheFromData(data || {}), [data])
+  const nsdPercForBadge = React.useMemo(() => nsdReadParentSummary(data || {}).percentualeSpeseGenerali, [data])
+  const nsdDoneCountForBadge = React.useMemo(() => {
+    return nsdExpectedCasisticheForBadge.filter(code => nsdIsCasisticaCompiled(nsdRows, code, nsdPercForBadge)).length
+  }, [nsdExpectedCasisticheForBadge, nsdRows, nsdPercForBadge])
+  const nsdTotalCountForBadge = nsdExpectedCasisticheForBadge.length
 
   // RIMOSSO: Non resettare la tab quando cambia selezione
   // React.useEffect(() => {
@@ -4060,56 +4374,6 @@ const isPgOnlyField = React.useCallback((fieldName: string) => {
     return { artLabel: artNum ? `Art. ${artNum}` : 'Art.', description: txt || '—' }
   }, [getArticleNumber])
 
-  const renderViolationArticleLine = React.useCallback((artLabel: string, description: string, grado?: string) => {
-    const hasGrado = grado != null && String(grado).trim() !== ''
-    return (
-      <div style={{
-        display: 'grid',
-        gridTemplateColumns: hasGrado
-          ? 'max-content minmax(0, 1fr) max-content'
-          : 'max-content minmax(0, 1fr)',
-        columnGap: 8,
-        alignItems: 'center',
-        padding: '7px 0',
-        borderBottom: '1px solid rgba(0,0,0,0.07)',
-        boxSizing: 'border-box',
-        minWidth: 0
-      }}>
-        <div style={{
-          fontSize: 12,
-          color: '#6b7280',
-          fontWeight: 700,
-          lineHeight: 1.25,
-          whiteSpace: 'nowrap'
-        }}>
-          {artLabel}
-        </div>
-        <div style={{
-          fontSize: 13,
-          color: '#1f2937',
-          fontWeight: 600,
-          lineHeight: 1.35,
-          minWidth: 0,
-          overflowWrap: 'anywhere'
-        }}>
-          {description || '—'}
-        </div>
-        {hasGrado
-          ? (
-            <div style={{ display: 'flex', alignItems: 'baseline', gap: 5, whiteSpace: 'nowrap', minWidth: 0 }}>
-              <span style={{ fontSize: 12, color: '#6b7280', fontWeight: 700, lineHeight: 1.25 }}>
-                Grado di gravità
-              </span>
-              <span style={{ fontSize: 13, color: '#1f2937', fontWeight: 600, lineHeight: 1.25 }}>
-                {grado}
-              </span>
-            </div>
-            )
-          : null}
-      </div>
-    )
-  }, [])
-
   const renderAltraViolazioneLine = React.useCallback((code: any, idx: number) => {
     const descrFull = getSurveyChoiceLabel('norma3', code)
     const artNum = getArticleNumber(code)
@@ -4117,11 +4381,16 @@ const isPgOnlyField = React.useCallback((fieldName: string) => {
     const hasGrado = !!artNum && articoliConGrado.has(artNum)
     const grado = hasGrado ? (gradiViolazioniByArt[artNum] || '—') : undefined
     return (
-      <React.Fragment key={`${String(code)}-${idx}`}>
-        {renderViolationArticleLine(parsed.artLabel, parsed.description, grado)}
-      </React.Fragment>
+      <ViolationArticleLine
+        key={`${String(code)}-${idx}`}
+        artLabel={parsed.artLabel}
+        description={parsed.description}
+        grado={grado}
+        articleCode={artNum ? `Art${artNum}` : undefined}
+        articleState={regolamentoArticoliState}
+      />
     )
-  }, [articoliConGrado, getArticleNumber, getSurveyChoiceLabel, gradiViolazioniByArt, renderViolationArticleLine, splitViolationLabel])
+  }, [articoliConGrado, getArticleNumber, getSurveyChoiceLabel, gradiViolazioniByArt, splitViolationLabel, regolamentoArticoliState])
 
   const renderSurveyGroup = React.useCallback((title: string, rows: Array<{ label: string; value: any; multiline?: boolean }>, emptyText = '—') => {
     return (
@@ -4184,7 +4453,7 @@ const isPgOnlyField = React.useCallback((fieldName: string) => {
           const supIrr = formatFieldValue(getRawField('sup_irrigata_art15'), 'sup_irrigata_art15', fieldTypeMap?.sup_irrigata_art15, 'Superficie irrigata (ha.a.ca)')
           return (
             <div style={{ display: 'grid', gap: 0 }}>
-              {renderViolationArticleLine('Art. 15', 'Prelievo abusivo d’acqua')}
+              <ViolationArticleLine artLabel='Art. 15' description='Prelievo abusivo d’acqua' articleCode='Art15' articleState={regolamentoArticoliState} />
               {renderViolationSurfacesLine('Tipo di abuso', tipoAbuso, 'Occorrenza', occorrenza)}
               {renderViolationSurfacesLine('Superficie dichiarata (ha.a.ca)', supDich, 'Superficie irrigata (ha.a.ca)', supIrr)}
             </div>
@@ -4203,7 +4472,7 @@ const isPgOnlyField = React.useCallback((fieldName: string) => {
           if (String(art16_17Raw || '') === 'Art16') {
             return (
               <div style={{ display: 'grid', gap: 0 }}>
-                {renderViolationArticleLine('Art. 16', 'Presentazione tardiva comunicazione di irrigazione')}
+                <ViolationArticleLine artLabel='Art. 16' description='Presentazione tardiva comunicazione di irrigazione' articleCode='Art16' articleState={regolamentoArticoliState} />
                 {renderViolationSurfacesLine(
                   'Superficie dichiarata (ha.a.ca)',
                   formatFieldValue(getRawField('sup_dichiarata_art16'), 'sup_dichiarata_art16', fieldTypeMap?.sup_dichiarata_art16, 'Superficie dichiarata (ha.a.ca)'),
@@ -4219,7 +4488,7 @@ const isPgOnlyField = React.useCallback((fieldName: string) => {
             const isVar = String(art17TipoRaw || '') === 'Art17.1'
             return (
               <div style={{ display: 'grid', gap: 0 }}>
-                {renderViolationArticleLine('Art. 17', 'Presentazione tardiva comunicazione di variazione o di rinuncia')}
+                <ViolationArticleLine artLabel='Art. 17' description='Presentazione tardiva comunicazione di variazione o di rinuncia' articleCode='Art17' articleState={regolamentoArticoliState} />
                 {renderViolationTextLine('Tipo comunicazione', tipoViolazione)}
                 {isVar
                   ? renderViolationSurfacesLine(
@@ -4280,7 +4549,25 @@ const isPgOnlyField = React.useCallback((fieldName: string) => {
         {renderViolationGroup('Dettagli della violazione', detailsBody)}
       </div>
     )
-  }, [getRawField, getRawFieldWithName, getFieldLabel, splitMultiValues, fieldTypeMap, getSurveyChoiceLabel, renderAltraViolazioneLine, renderViolationArticleLine, renderViolationGroup, renderViolationSurfacesLine, renderViolationTextLine])
+  }, [getRawField, getRawFieldWithName, getFieldLabel, splitMultiValues, fieldTypeMap, getSurveyChoiceLabel, renderAltraViolazioneLine, renderViolationGroup, renderViolationSurfacesLine, renderViolationTextLine, regolamentoArticoliState])
+
+  // Violazione — conteggio "a colpo d'occhio" delle violazioni selezionate per il badge
+  // sulla tab. Stessa logica booleana (hasArt15 / has16or17 / altreCodes) già usata sopra
+  // in violationSurveyContent per decidere quali gruppi mostrare: nessuna query aggiuntiva,
+  // i campi sono già tra quelli sempre interrogati per il record.
+  const violazioneSelectedCount = React.useMemo(() => {
+    if (!hasSel || !data) return 0
+    let count = 0
+    const art15ParzRaw = getRawField('norma15_parziale')
+    const art15TotRaw = getRawField('norma15_totale')
+    const art15Code = !isEmptyValue(art15ParzRaw) ? art15ParzRaw : art15TotRaw
+    const hasArt15 = !isEmptyValue(getRawField('tipo_abuso')) || !isEmptyValue(art15Code) || !isEmptyValue(getRawField('norma_violata1'))
+    if (hasArt15) count++
+    const has16or17 = !isEmptyValue(getRawField('norma16_17')) || !isEmptyValue(getRawField('art17_tipo')) || !isEmptyValue(getRawField('norma_violata2'))
+    if (has16or17) count++
+    count += splitMultiValues(getRawField('norma_violata3')).length
+    return count
+  }, [hasSel, data, getRawField, splitMultiValues])
 
   const generalSummary = React.useMemo(() => {
     const areaRaw = pickAttrCI(data, ['area_cod', 'Area_cod', 'AREA_COD', 'area'])
@@ -4423,6 +4710,9 @@ const isPgOnlyField = React.useCallback((fieldName: string) => {
     return rows
   }, [data, aliasMap, fieldTypeMap, selectedPointGeometry])
 
+  const allegatiCountForBadge = attachments.length
+  const allegatiLoadingForBadge = attachmentsLoading && attachmentsForOid !== selectedOid
+
   const TabsBar = (
     <div style={{ 
       display: 'flex', 
@@ -4438,11 +4728,20 @@ const isPgOnlyField = React.useCallback((fieldName: string) => {
       {hasSel && tabs.map((t) => {
         const isIterTab = Boolean((t as any).isIterTab)
         const iterSortIndicator = isIterTab && tab === t.id && iterSortDir ? (iterSortDir === 'desc' ? '▼' : '▲') : ''
+        let badge: TabButtonBadge | undefined
+        if (t.id === 'violazione') {
+          if (violazioneSelectedCount > 0) badge = { kind: 'count', value: violazioneSelectedCount }
+        } else if (t.id === 'nota_spese') {
+          if (!nsdLoading && nsdTotalCountForBadge > 0) badge = { kind: 'ratio', done: nsdDoneCountForBadge, total: nsdTotalCountForBadge }
+        } else if (t.id === 'allegati') {
+          if (!allegatiLoadingForBadge && allegatiCountForBadge > 0) badge = { kind: 'count', value: allegatiCountForBadge }
+        }
         return (
           <TabButton 
             key={t.id}
             active={tab === t.id} 
             label={iterSortIndicator ? `${t.label} ${iterSortIndicator}` : t.label} 
+            badge={badge}
             onClick={() => {
               if (isIterTab) {
                 if (tab === t.id) setIterSortDir(prev => prev === 'desc' ? 'asc' : 'desc')
@@ -4612,7 +4911,7 @@ if (!hasSel) {
         </div>
       )
     } else if (activeTab.id === 'nota_spese') {
-      content = <NotaSpeseDetailPanel data={data} detailUrl={String(props.notaSpeseCfg?.detailUrl || '')} hasSel={hasSel} />
+      content = <NotaSpeseDetailPanel data={data} detailUrl={String(props.notaSpeseCfg?.detailUrl || '')} hasSel={hasSel} rows={nsdRows} loading={nsdLoading} error={nsdError} />
     } else if (activeTab.id === 'mappa') {
       const dsAny: any = ds as any
       const mapLayerUrl = String(
@@ -4994,6 +5293,9 @@ const queryFields = React.useMemo(() => {
                   editConfig={editConfig}
                   notaSpeseCfg={{
                     detailUrl: String((cfg as any).nsNotaSpeseDettaglioUrl || '')
+                  }}
+                  regolamentoCfg={{
+                    articoliUrl: String((cfg as any).regolamentoArticoliUrl || '')
                   }}
                   mapCfg={detailMapCfg}
                 />

@@ -793,6 +793,15 @@ export default function Setting(props: Props) {
         <div style={P.hint}>Inserire la URL della tabella GII_NOTA_SPESE_DETTAGLIO. Può restare vuota se si vogliono mostrare solo i totali già presenti sul rapporto.</div>
       </div>}
 
+      {/* ═══ REGOLAMENTO ═══ */}
+      <Acc id='regolamento' label='📜 Regolamento' open={isOpen('regolamento')} onToggle={()=>toggle('regolamento')}/>
+      {isOpen('regolamento') && <div>
+        <div style={P.hint}>Tabella degli articoli del regolamento irriguo. Se configurata, cliccando su una violazione nella scheda Violazione si espande il testo dell'articolo corrispondente.</div>
+        <label style={P.lbl}>Tabella articoli regolamento irriguo</label>
+        <Inp value={String(cfgJs.regolamentoArticoliUrl || '')} onChange={v=>patch({regolamentoArticoliUrl:v})} placeholder='https://.../FeatureServer/0'/>
+        <div style={P.hint}>Può restare vuota: in tal caso la violazione non sarà cliccabile.</div>
+      </div>}
+
       {/* ═══ MAPPA ═══ */}
       <Acc id='mappa' label='🗺 Mappa' open={isOpen('mappa')} onToggle={()=>toggle('mappa')}/>
       {isOpen('mappa') && <div>

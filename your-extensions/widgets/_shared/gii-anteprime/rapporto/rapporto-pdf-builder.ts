@@ -855,10 +855,10 @@ export async function buildRapportoPdf (m: Record<string, string>): Promise<Uint
   rightTxt(p1, 'Pag. 1 di 2', fR, 7, 532.6, bY(818, 7), BLUE)
   rightTxt(p2, 'Pag. 2 di 2', fR, 7, 532.6, bY(818, 7), BLUE)
 
-  // ── Il sottoscritto / il giorno / alle ore (cella 252.24–273.24, centrato) ──
-  txt(p1, v('tecnico_rilevatore'), fR, 9, 113, bY(260.0, 9), BLACK, 200)
-  txt(p1, v('data_rilevazione'), fR, 9, 389, bY(260.0, 9), BLACK, 47)
-  txt(p1, v('ora_rilevazione'), fR, 9, 486, bY(260.0, 9), BLACK, 71)
+  // ── Il sottoscritto / il giorno / alle ore (riga reale a top=259.55) ──
+  txt(p1, v('tecnico_rilevatore'), fR, 9, 113, bY(254.99, 9), BLACK, 200)
+  txt(p1, v('data_rilevazione'), fR, 9, 389, bY(254.99, 9), BLACK, 47)
+  txt(p1, v('ora_rilevazione'), fR, 9, 486, bY(254.99, 9), BLACK, 71)
 
   // ── Tabella infrazioni ──
   const artSz = 8
@@ -921,71 +921,73 @@ export async function buildRapportoPdf (m: Record<string, string>): Promise<Uint
   // ════════════════════════════════════════════════════════════
   const taSz = 8
   const taLh = 10.5
-  const taW  = 499
+  const taW  = 497
 
   // ── Descrizione dettagliata (area da top=113 a top≈206) ──
-  textArea(p2, v('descrizione_fatti'), fR, taSz, 48, 114, taW, 90, taLh)
+  textArea(p2, v('descrizione_fatti'), fR, taSz, 48, 115, taW, 90, taLh)
 
   // ── Altre circostanze (area da top=231 a top≈324) ──
-  textArea(p2, v('circostanze'), fR, taSz, 48, 241, taW, 90, taLh)
+  textArea(p2, v('circostanze'), fR, taSz, 48, 234, taW, 90, taLh)
 
   // ── Descrizione dei luoghi (area da top=350 a top≈443) ──
-  textArea(p2, v('descrizione_luogo'), fR, taSz, 48, 368, taW, 90, taLh)
+  textArea(p2, v('descrizione_luogo'), fR, taSz, 48, 352, taW, 90, taLh)
 
-  // ── Distretto / Comizio / Idrante (cella 468.48–489.36, centrato) ──
+  // ── Distretto / Comizio / Idrante (riga reale a top=475.67) ──
   const dsz = 8.2
-  txt(p2, firstMeaningfulValue(v('distretto_irriguo'), v('distretto')), fR, dsz, 138, bY(476.82, dsz), BLACK, 198)
-  txt(p2, v('comizio'), fR, dsz, 386, bY(476.82, dsz), BLACK, 66)
-  txt(p2, firstMeaningfulValue(v('idrante'), v('idrante_numero')), fR, dsz, 499, bY(476.82, dsz), BLACK, 52)
+  txt(p2, firstMeaningfulValue(v('distretto_irriguo'), v('distretto')), fR, dsz, 138, bY(471.11, dsz), BLACK, 198)
+  txt(p2, v('comizio'), fR, dsz, 386, bY(471.11, dsz), BLACK, 66)
+  txt(p2, firstMeaningfulValue(v('idrante'), v('idrante_numero')), fR, dsz, 499, bY(471.11, dsz), BLACK, 52)
 
-  // ── Matricole (cella 489.36–510.36, centrato) ──
-  txt(p2, firstMeaningfulValue(v('matricola_contatore'), v('contatore_matricola')), fR, dsz, 138, bY(497.76, dsz), BLACK, 160)
-  txt(p2, firstMeaningfulValue(v('matricola_tessera'), v('tessera_matricola')), fR, dsz, 386, bY(497.76, dsz), BLACK, 166)
+  // ── Matricole (riga reale a top=496.55) ──
+  txt(p2, firstMeaningfulValue(v('matricola_contatore'), v('contatore_matricola')), fR, dsz, 138, bY(491.99, dsz), BLACK, 160)
+  txt(p2, firstMeaningfulValue(v('matricola_tessera'), v('tessera_matricola')), fR, dsz, 386, bY(491.99, dsz), BLACK, 166)
 
   // ── DATI DEL TRASGRESSORE — PF vs PG ──
   const isPG = v('tipo_soggetto') === 'PG'
   const LABEL_BG = rgb(0.855, 0.918, 0.961)
 
   if (isPG) {
-    // Copro "Nome e Cognome:" (cella 555.12–576.0) e riscrivo "Ragione Sociale:"
-    p2.drawRectangle({ x: 42.72, y: PH - 575.5, width: 86.28, height: 19.88, color: LABEL_BG })
-    txt(p2, 'Ragione Sociale:', fR, dsz, 45.36, bY(561.46, dsz), BLUE)
+    // Copro "Nome e Cognome:" (riga reale 555.36–576.24) e riscrivo "Ragione Sociale:"
+    p2.drawRectangle({ x: 42.72, y: PH - 576.24, width: 86.28, height: 20.88, color: LABEL_BG })
+    txt(p2, 'Ragione Sociale:', fR, dsz, 45.36, bY(557.87, dsz), BLUE)
     // Copro "C.F.:" e riscrivo "P.IVA:"
-    p2.drawRectangle({ x: 354.60, y: PH - 575.5, width: 37.44, height: 19.88, color: LABEL_BG })
-    txt(p2, 'P.IVA:', fR, dsz, 357, bY(561.46, dsz), BLUE)
-    // Copro "Residenza" (cella 576.0–597.0) e riscrivo "Sede legale" in BLU
-    p2.drawRectangle({ x: 240, y: PH - 596.5, width: 115, height: 20.0, color: WHITE })
-    centered(p2, 'Sede legale', fB, 9.0, 62.3, 532.6, bY(582.0, 9.0), BLUE)
+    p2.drawRectangle({ x: 354.60, y: PH - 576.24, width: 37.44, height: 20.88, color: LABEL_BG })
+    txt(p2, 'P.IVA:', fR, dsz, 357, bY(557.87, dsz), BLUE)
+    // Copro "Residenza" (riga reale 576.24–597.24) e riscrivo "Sede legale" in BLU
+    p2.drawRectangle({ x: 240, y: PH - 597.24, width: 115, height: 21.0, color: WHITE })
+    centered(p2, 'Sede legale', fB, 9.0, 62.3, 532.6, bY(579.24, 9.0), BLUE)
   }
 
-  // Valore denominazione / CF-PIVA (cella 555.12–576.0, centrato)
-  txt(p2, v('denominazione'), fR, dsz, 132, bY(562.46, dsz), BLACK, 220)
-  txt(p2, v('cf_piva'), fR, dsz, 395, bY(562.46, dsz), BLACK, 156)
+  // Valore denominazione / CF-PIVA (riga reale a top=562.43)
+  txt(p2, v('denominazione'), fR, dsz, 132, bY(557.87, dsz), BLACK, 220)
+  txt(p2, v('cf_piva'), fR, dsz, 395, bY(557.87, dsz), BLACK, 156)
 
-  // ── Via / N. / Comune / CAP (cella 597.0–618.0, centrato) ──
-  txt(p2, v('via'), fR, dsz, 95, bY(605.0, dsz), BLACK, 128)
-  txt(p2, v('civico'), fR, dsz, 253, bY(605.0, dsz), BLACK, 28)
-  txt(p2, v('citta'), fR, dsz, 336, bY(605.0, dsz), BLACK, 130)
-  txt(p2, v('cap'), fR, dsz, 511, bY(605.0, dsz), BLACK, 38)
+  // ── Via / N. / Comune / CAP (riga reale a top=604.31) ──
+  txt(p2, v('via'), fR, dsz, 95, bY(599.75, dsz), BLACK, 128)
+  txt(p2, v('civico'), fR, dsz, 253, bY(599.75, dsz), BLACK, 28)
+  txt(p2, v('citta'), fR, dsz, 336, bY(599.75, dsz), BLACK, 130)
+  txt(p2, v('cap'), fR, dsz, 511, bY(599.75, dsz), BLACK, 38)
 
-  // Telefono / Cellulare / e-mail / PEC (cella 618.0–638.88, centrato)
-  txt(p2, v('telefono'), fR, dsz, 95, bY(625.34, dsz), BLACK, 54)
-  txt(p2, v('cellulare'), fR, dsz, 202, bY(625.34, dsz), BLACK, 60)
-  txt(p2, v('email'), fR, dsz, 301, bY(625.34, dsz), BLACK, 110)
-  txt(p2, v('pec'), fR, dsz, 443, bY(625.34, dsz), BLACK, 106)
+  // Località
+  txt(p2, v('localita'), fR, dsz, 95, bY(599.75, dsz), BLACK, 455)
+  // Telefono / Cellulare / e-mail / PEC
+  txt(p2, v('telefono'), fR, dsz, 95, bY(620.75, dsz), BLACK, 54)
+  txt(p2, v('cellulare'), fR, dsz, 202, bY(620.75, dsz), BLACK, 60)
+  txt(p2, v('email'), fR, dsz, 301, bY(620.75, dsz), BLACK, 110)
+  txt(p2, v('pec'), fR, dsz, 443, bY(620.75, dsz), BLACK, 106)
 
-  // Trasgressore presente? (cella 638.88–659.88, centrato)
-  txt(p2, v('presenza_trasgressore'), fR, dsz, 173, bY(646.28, dsz), BLACK, 90)
+  // Trasgressore presente?
+  txt(p2, v('presenza_trasgressore'), fR, dsz, 173, bY(641.63, dsz), BLACK, 90)
 
   // ── ITER DELL'ISTRUTTORIA TECNICA ──
   // Colonne iter (template v6): Fase 42.72–106.08 | Nominativo 106.56–219.48 | Ruolo 219.96–318.72 | Presa 319.20–368.28 | Esito 368.76–502.92 | Data 503.40–552.60
   const iterSz = 7.2
   const iterRows: Array<{ top: number; nome: string; presa: string; data: string }> = [
-    { top: 701.50, nome: v('iter_rilevazione_nome') || v('firma_tr'), presa: v('iter_rilevazione_presa'), data: v('iter_rilevazione_data') || v('data_rilevazione') },
-    { top: 718.96, nome: v('iter_compilazione_nome') || v('firma_ti'), presa: v('iter_compilazione_presa'), data: v('iter_compilazione_data') },
-    { top: 736.48, nome: v('iter_verifica_nome') || v('firma_rz'), presa: v('iter_verifica_presa'), data: v('iter_verifica_data') },
-    { top: 754.00, nome: v('iter_supervisione_nome') || v('firma_ri'), presa: v('iter_supervisione_presa'), data: v('iter_supervisione_data') },
-    { top: 771.52, nome: v('iter_approvazione_nome') || v('firma_dt'), presa: v('iter_approvazione_presa'), data: v('iter_approvazione_data') }
+    { top: 696.65, nome: v('iter_rilevazione_nome') || v('firma_tr'), presa: v('iter_rilevazione_presa'), data: v('iter_rilevazione_data') || v('data_rilevazione') },
+    { top: 714.17, nome: v('iter_compilazione_nome') || v('firma_ti'), presa: v('iter_compilazione_presa'), data: v('iter_compilazione_data') },
+    { top: 731.69, nome: v('iter_verifica_nome') || v('firma_rz'), presa: v('iter_verifica_presa'), data: v('iter_verifica_data') },
+    { top: 749.21, nome: v('iter_supervisione_nome') || v('firma_ri'), presa: v('iter_supervisione_presa'), data: v('iter_supervisione_data') },
+    { top: 766.73, nome: v('iter_approvazione_nome') || v('firma_dt'), presa: v('iter_approvazione_presa'), data: v('iter_approvazione_data') }
   ]
   for (const row of iterRows) {
     const y = bY(row.top, iterSz)

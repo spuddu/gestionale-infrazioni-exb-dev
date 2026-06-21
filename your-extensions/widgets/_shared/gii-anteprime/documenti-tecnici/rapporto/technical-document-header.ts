@@ -178,9 +178,10 @@ async function drawLegendSymbol (doc: PDFDocument, page: PDFPage, item: GiiMapLe
   page.drawRectangle({ x, y: y + 1, width: 12, height: 6, borderColor: BLACK, borderWidth: 0.8 })
 }
 
-async function drawMapLegend (doc: PDFDocument, page: PDFPage, font: any, boldFont: any, items: GiiMapLegendItem[], x: number, y: number, maxWidth: number): Promise<void> {
+async function drawMapLegend (doc: PDFDocument, page: PDFPage, font: any, boldFont: any, items: GiiMapLegendItem[], x: number, y: number, maxWidth: number, basemapLabel?: string): Promise<void> {
   const legendItems = (items || []).filter(item => String(item?.label || '').trim()).slice(0, 80)
-  if (!legendItems.length) return
+  const basemapValue = String(basemapLabel || '').trim()
+  if (!legendItems.length && !basemapValue) return
   page.drawText('Legenda', { x, y: y + 18, size: 7.2, font: boldFont || font, color: BLACK })
   let cursorX = x
   let cursorY = y + 5
@@ -193,6 +194,14 @@ async function drawMapLegend (doc: PDFDocument, page: PDFPage, font: any, boldFo
     cursorX = x
     cursorY -= rowH
     row += 1
+  }
+  if (basemapValue) {
+    const basemapPrefix = 'Mappa di base:'
+    const prefixFont = boldFont || font
+    const prefixW = prefixFont.widthOfTextAtSize(basemapPrefix, groupSize)
+    page.drawText(basemapPrefix, { x: cursorX, y: cursorY + 1, size: groupSize, font: prefixFont, color: BLACK })
+    drawSafeText(page, basemapValue, font, groupSize, cursorX + prefixW + 3, cursorY + 1, maxWidth - prefixW - 3)
+    nextRow()
   }
   let currentGroup = ''
   for (const item of legendItems) {
@@ -291,12 +300,10 @@ export async function wrapMapPdfBlobWithRapportoTechnicalHeader (blob: Blob, tit
     })
 
     const scaleText = formatItalianScale(info.scale)
-    const basemapText = String(info.basemapLabel || '').trim() ? `Mappa di base: ${String(info.basemapLabel).trim()}` : ''
     const legendItems = Array.isArray(info.legendItems) ? info.legendItems : []
-    await drawMapLegend(out, page, regular, bold, legendItems, box.x, box.y + 44, box.width - 145)
+    await drawMapLegend(out, page, regular, bold, legendItems, box.x, box.y + 44, box.width - 145, info.basemapLabel)
     drawMetricScaleBar(page, regular, info.scale, box.x + box.width, box.y + 38, Math.min(185, box.width * 0.42))
     rightBlackText(page, scaleText, regular, 8, box.x + box.width, box.y + 10)
-    drawSafeText(page, basemapText, regular, 7.5, box.x, box.y - 28, scaleText ? box.width - 150 : box.width)
   }
   await drawRapportoTechnicalHeaders(out, title)
   const outBytes = await out.save()

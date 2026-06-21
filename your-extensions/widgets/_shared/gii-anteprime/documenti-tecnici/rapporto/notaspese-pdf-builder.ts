@@ -419,8 +419,8 @@ export async function buildNotaSpesePdf(data: NotaSpeseData): Promise<Uint8Array
   const settoreCod = normalizeSettoreCode(areaCod, firstMeaningfulValue(data.settore_cod, data.settore, data.settore_label))
   const areaLabel = resolveAreaLabel(areaCod, data.area_label)
   const settoreLabel = resolveSettoreLabel(areaCod, settoreCod, data.settore_label)
-  if (areaLabel) centered(pg, 'AREA ' + areaLabel, fontR, 9, ML, PW - MR, PH - TEXT_AREA_TOP, CLR_BLUE)
-  if (settoreLabel) centered(pg, 'SETTORE ' + settoreLabel, fontR, 9, ML, PW - MR, PH - TEXT_SETT_TOP, CLR_BLUE)
+  if (areaLabel) centered(pg, 'AREA ' + areaLabel, fontB, 9, ML, PW - MR, PH - TEXT_AREA_TOP, CLR_BLUE)
+  if (settoreLabel) centered(pg, 'SETTORE ' + settoreLabel, fontB, 9, ML, PW - MR, PH - TEXT_SETT_TOP, CLR_BLUE)
   const nsBaseTitle = data.numero_nota
     ? `NOTA SPESE N. ${data.numero_nota} ALLEGATA AL RAPPORTO TECNICO DI RILEVAZIONE`
     : 'NOTA SPESE ALLEGATA AL RAPPORTO TECNICO DI RILEVAZIONE'
