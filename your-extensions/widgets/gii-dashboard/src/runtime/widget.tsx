@@ -289,7 +289,7 @@ function getStatoFieldForRuolo (ruoloLabel: string): string {
   if (r === 'RZ') return 'stato_RZ'
   if (r === 'RI') return 'stato_RI'
   if (r === 'DT') return 'stato_DT'
-  if (r === 'DA') return 'stato_DA'
+  if (r === 'DA') return 'determinazione_stato'
   if (r === 'RI_AMM') return 'stato_RI_AMM'
   if (r === 'TI_AMM') return 'stato_TI_AMM'
   return 'stato_DT'
@@ -316,7 +316,7 @@ function hasRuoloData (d: any, role: string): boolean {
 function isInFaseSanzionatoria (d: any): boolean {
   return meaningful(d['stato_RI_AMM']) || meaningful(d['esito_RI_AMM']) ||
     meaningful(d['stato_TI_AMM']) || meaningful(d['esito_TI_AMM']) ||
-    meaningful(d['stato_DA']) || meaningful(d['esito_DA'])
+    meaningful(d['determinazione_stato']) || meaningful(d['determinazione_numero'])
 }
 
 function parseToMs (v: any): number | null {

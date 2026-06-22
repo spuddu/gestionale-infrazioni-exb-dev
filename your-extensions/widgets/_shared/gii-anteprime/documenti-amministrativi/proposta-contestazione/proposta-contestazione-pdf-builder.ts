@@ -993,9 +993,9 @@ Ditta “${trasgressore}”.`
     drawKeyValueGrid(ctx, compactRows([
       ['Protocollo istanza', v(m, 'protocollo_istanza_numero')],
       ['Data istanza', v(m, 'protocollo_istanza_data')],
-      ['Data approvazione', approvato ? v(m, 'data_verbale') : ''],
-      ['Protocollo', v(m, 'protocollo_verbale')],
-      ['Data protocollo', v(m, 'protocollo_verbale_data')]
+      ['Data approvazione', approvato ? v(m, 'data_atto_accertamento') : ''],
+      ['Protocollo', v(m, 'protocollo_atto_accertamento_numero') || v(m, 'protocollo_verbale')],
+      ['Data protocollo', v(m, 'protocollo_atto_accertamento_data')]
     ]))
   }
 
@@ -1037,14 +1037,11 @@ Ditta “${trasgressore}”.`
   }
 
   const closingKeys = [
-    'verbale_pdf_generato_il', 'verbale_pdf_generato_da',
     'istruttoria_amm_chiusa_il', 'istruttoria_amm_chiusa_da'
   ]
   if (meta.isArchiviazione && anyValue(m, closingKeys)) {
     drawSectionTitle(ctx, 'Iter autorizzativo finale')
     drawKeyValueGrid(ctx, compactRows([
-      ['Proposta generata il', v(m, 'verbale_pdf_generato_il')],
-      ['Proposta generata da', v(m, 'verbale_pdf_generato_da')],
       ['Istruttoria amministrativa chiusa il', v(m, 'istruttoria_amm_chiusa_il')],
       ['Istruttoria amministrativa chiusa da', v(m, 'istruttoria_amm_chiusa_da')]
     ]))
@@ -1075,7 +1072,7 @@ Ditta “${trasgressore}”.`
         ruolo: 'Direttore dell’Area',
         presa: v(m, 'amm_iter_approvazione_presa'),
         esito: 'Approvazione istruttoria amministrativa',
-        data: approvato ? (v(m, 'amm_iter_approvazione_data') || v(m, 'data_verbale')) : '-'
+        data: approvato ? (v(m, 'amm_iter_approvazione_data') || v(m, 'data_atto_accertamento')) : '-'
       }
     ])
   }

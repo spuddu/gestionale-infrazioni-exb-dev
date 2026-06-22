@@ -11,7 +11,9 @@ export interface Config {
 
 export type IMConfig = ImmutableObject<Config>
 
-export const defaultConfig: IMConfig = Immutable({
+const toImmutable = Immutable as unknown as <T>(value: T) => ImmutableObject<T>
+
+export const defaultConfig: IMConfig = toImmutable({
   placeholderRicerca: 'Cerca pratica, trasgressore o violazione',
   debounceMs: 250,
   mostraStato: true,

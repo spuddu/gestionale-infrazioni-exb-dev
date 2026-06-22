@@ -25,6 +25,7 @@ const SELECT_GROUP_STYLE = { backgroundColor:'#ffffff', color:'#111827' } as Rea
 
 const parseNum = (v:any, fb:number) => { const n=Number(v); return Number.isFinite(n)?n:fb }
 function asJs<T=any>(v:any):T { return v?.asMutable?v.asMutable({deep:true}):v }
+const toImmutable = Immutable as unknown as <T>(value: T) => any
 
 function Inp(p: { value:string|number; onChange:(v:string)=>void; placeholder?:string }) {
   return <input type='text' value={p.value} onChange={e=>p.onChange(e.target.value)} placeholder={p.placeholder} style={P.inp}/>
@@ -68,7 +69,7 @@ const VIRTUAL_FIELDS: FieldOpt[] = [
   { name:'__numero_rilevazione__', alias:'⚙ N. rilevazione (calcolato)', type:'virtual' },
   { name:'__numero_pratica__', alias:'⚙ N. rapporto (calcolato)', type:'virtual' },
   { name:'__tipo_pratica__', alias:'⚙ Tipo pratica (calcolato)', type:'virtual' },
-  { name:'__numero_verbale_display__', alias:'⚙ N. verbale (calcolato)', type:'virtual' },
+  { name:'__numero_atto_accertamento_display__', alias:'⚙ N. atto (calcolato)', type:'virtual' },
   { name:'__stato_sint__', alias:'⚙ Stato pratica / Il mio stato (calcolato)', type:'virtual' },
   { name:'__fase_istruttoria__', alias:'⚙ Fase istruttoria (calcolato)', type:'virtual' },
   { name:'__ultimo_agg__', alias:'⚙ Ultimo aggiornamento sintetico (calcolato)', type:'virtual' },
@@ -84,8 +85,8 @@ const FALLBACK_LAYER_FIELDS: FieldOpt[] = [
   { name:'ufficio_zona', alias:'Ufficio origine', type:'esriFieldTypeString' },
   { name:'numero_rapporto_tecnico', alias:'Numero rapporto tecnico', type:'esriFieldTypeString' },
   { name:'data_rapporto_tecnico', alias:'Data rapporto tecnico', type:'esriFieldTypeDate' },
-  { name:'numero_verbale', alias:'Numero verbale', type:'esriFieldTypeString' },
-  { name:'data_verbale', alias:'Data verbale', type:'esriFieldTypeDate' },
+  { name:'numero_atto_accertamento', alias:'Numero atto', type:'esriFieldTypeString' },
+  { name:'data_atto_accertamento', alias:'Data atto', type:'esriFieldTypeDate' },
   { name:'origine_pratica', alias:'Origine pratica', type:'esriFieldTypeInteger' },
   { name:'area_cod', alias:'Area origine', type:'esriFieldTypeString' },
   { name:'settore_cod', alias:'Settore origine', type:'esriFieldTypeString' },
@@ -113,7 +114,7 @@ function labelForConfiguredField (fieldName: string, columns: ColumnDef[]): stri
 }
 
 function mergeLayerFieldOptions (schemaFields: FieldOpt[], cfg: any, columns: ColumnDef[]): FieldOpt[] {
-  const configuredFieldNames = [
+  const configuredFieldNames: FieldOpt[] = [
     cfg?.fieldPratica,
     cfg?.fieldDataRilevazione,
     cfg?.fieldUfficio,
@@ -122,7 +123,7 @@ function mergeLayerFieldOptions (schemaFields: FieldOpt[], cfg: any, columns: Co
   ]
     .map(v => String(v || '').trim())
     .filter(v => v && !v.startsWith('__'))
-    .map(name => ({ name, alias: labelForConfiguredField(name, columns), type: undefined }))
+    .map((name): FieldOpt => ({ name, alias: labelForConfiguredField(name, columns), type: undefined }))
 
   return dedupeFieldOptions([
     ...FALLBACK_LAYER_FIELDS,
@@ -277,7 +278,7 @@ export default function Setting(props: Props) {
     // In alcuni casi ExB non serializza le nuove chiavi se si fa solo .set()
     // su una config storica che non le conteneva ancora.
     const current = asJs<Record<string, any>>(cfgImm) || {}
-    return Immutable({ ...current, ...patch }) as any
+    return toImmutable({ ...current, ...patch }) as any
   }
 
   const update = (key:string, value:any) => {
@@ -291,10 +292,10 @@ export default function Setting(props: Props) {
     props.onSettingChange({ id:props.id, config:toConfig(patch) })
   }
 
-  const dsTypes = Immutable([DataSourceTypes.FeatureLayer]) as any
+  const dsTypes = toImmutable([DataSourceTypes.FeatureLayer]) as any
   const onDsChange = (useDataSources:any) => {
-    const udsJs:any[]=asJs(useDataSources??Immutable([]))
-    const prevTabs:any[]=asJs(cfgImm.filterTabs??Immutable([]))
+    const udsJs:any[]=asJs(useDataSources ?? toImmutable([]))
+    const prevTabs:any[]=asJs(cfgImm.filterTabs ?? toImmutable([]))
     const dsm=DataSourceManager.getInstance()
     const nextTabs=udsJs.map(u=>{
       const dsId=String(u?.dataSourceId||'')
@@ -304,11 +305,11 @@ export default function Setting(props: Props) {
       label=label&&label.trim()?label.trim():'Filtro'
       return {dataSourceId:dsId,label}
     })
-    const c=cfgImm.set?cfgImm:Immutable(cfgImm)
+    const c = cfgImm.set ? cfgImm : toImmutable(cfgImm)
     props.onSettingChange({id:props.id,useDataSources,config:c.set('filterTabs',nextTabs)})
   }
 
-  const useDsImm:any=props.useDataSources??Immutable([])
+  const useDsImm:any = props.useDataSources ?? toImmutable([])
   const useDsJs:any[]=asJs(useDsImm)
   const primaryDsId=String(useDsJs?.[0]?.dataSourceId||'')
   const [fields,setFields]=React.useState<FieldOpt[]>([])
@@ -328,7 +329,7 @@ export default function Setting(props: Props) {
     load();return ()=>{cancelled=true}
   },[primaryDsId])
 
-  const legacyDsJs:any[] = asJs(props.useDataSources??Immutable([])) || []
+  const legacyDsJs:any[] = asJs(props.useDataSources ?? toImmutable([])) || []
   React.useEffect(()=>{
     if ((legacyDsJs?.length||0) > 0 || (props as any).useDataSourcesEnabled) {
       props.onSettingChange({ id: props.id, useDataSources: [] as any, useDataSourcesEnabled: false as any })

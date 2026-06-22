@@ -1032,7 +1032,7 @@ async function rotateImageAttachmentFile (blob: Blob, fileName: string, rotation
   try {
     const createBitmap = (window as any)?.createImageBitmap
     if (typeof createBitmap === 'function') {
-      source = await createBitmap(blob, { imageOrientation: 'from-image' }).catch(() => null)
+      source = await createBitmap(blob, { imageOrientation: 'from-image' }).catch((): null => null)
       if (source) closeSource = () => { try { source.close?.() } catch {} }
     }
     if (!source) {
@@ -1283,9 +1283,44 @@ const NORMA3_REQ_POINT = new Set([
 
 function parseMultiSelect (val: any): string[] {
   if (!val) return []
-  if (Array.isArray(val)) return val.map(String)
-  // Survey123 salva select_multiple spesso come stringa separata da spazio
-  return String(val).split(/\s+/).filter(Boolean)
+  if (Array.isArray(val)) return val.map(String).map(s => s.trim()).filter(Boolean)
+
+  // Survey123 può salvare il select_multiple come:
+  // - stringa separata da spazio: "Art8 Art12"
+  // - stringa separata da virgola/punto e virgola: "Art8, Art12"
+  // - etichette più estese: "Art. 8 - ...; Art. 12 - ..."
+  // Qui teniamo la stringa intera e la spezziamo in modo permissivo: il filtro
+  // finale resta comunque limitato agli articoli ammessi in NORMA3_TO_VFIELD.
+  const s = String(val || '').trim()
+  if (!s) return []
+
+  const artMatches = s.match(/Art\.?\s*0?\d{1,2}/gi)
+  if (artMatches && artMatches.length > 0) return artMatches.map(x => x.trim()).filter(Boolean)
+
+  return s.split(/[\s;,|\n]+/g).map(x => x.trim()).filter(Boolean)
+}
+
+function canonicalNorma3Code (value: any): string {
+  const raw = String(value ?? '').trim()
+  if (!raw) return ''
+  const m = raw.match(/^art\.?\s*0?(\d{1,2})$/i) || raw.match(/^0?(\d{1,2})$/)
+  if (!m) return raw
+  return `Art${Number(m[1])}`
+}
+
+function parseNorma3Codes (val: any): string[] {
+  const allowed = new Set(Object.keys(NORMA3_TO_VFIELD))
+  const out: string[] = []
+  const add = (token: any): void => {
+    const code = canonicalNorma3Code(token)
+    if (code && allowed.has(code) && !out.includes(code)) out.push(code)
+  }
+  parseMultiSelect(val).forEach(add)
+  return out
+}
+
+function normalizeNorma3Value (val: any): string {
+  return parseNorma3Codes(val).join(' ')
 }
 
 function computeReqPoint (attrs: Record<string, any>): 0 | 1 {
@@ -1294,7 +1329,7 @@ function computeReqPoint (attrs: Record<string, any>): 0 | 1 {
   if (p === 'Art15.1' || p === 'Art15.2') return 1
   if (t === 'Art15.3' || t === 'Art15.4') return 1
 
-  const norma3 = parseMultiSelect(attrs?.norma_violata3)
+  const norma3 = parseNorma3Codes(attrs?.norma_violata3)
   if (norma3.some(v => NORMA3_REQ_POINT.has(v))) return 1
   return 0
 }
@@ -1324,7 +1359,7 @@ function normalizeRoleCode (v: any): 'TR' | 'TI' | 'RZ' | 'RI' | 'DT' | 'DA' | '
   if (!s) return ''
   if (s === '1' || s === 'TR' || s.includes('TECNICO RILEVATORE')) return 'TR'
   if (s === '2' || s === 'TI' || s.includes('TECNICO ISTRUTTORE')) return 'TI'
-  if (s === '3' || s === 'RZ' || s.includes('RESPONSABILE DI ZONA')) return 'RZ'
+  if (s === '3' || s === 'RZ' || s.includes('RESPONSABILE DI ZONA') || s.includes('CAPO SETTORE')) return 'RZ'
   if (s === '4' || s === 'RI' || s.includes('RESPONSABILE ISTRUTTORIA')) return 'RI'
   if (s === '5' || s === 'DT' || s.includes('DIRETTORE TECNICO')) return 'DT'
   if (s === '6' || s === 'DA' || s.includes('DIRETTORE AMMINISTRATIVO')) return 'DA'
@@ -2543,9 +2578,9 @@ function ActionsPanel (props: {
 
   const noteField = `note_${role}`
 
-  const statoDAField = 'stato_DA'
-  const dtStatoDAField = 'dt_stato_DA'
-  const dtPresaDAField = 'dt_presa_in_carico_DA'
+  const statoDAField = 'stato_RI_AMM'
+  const dtStatoDAField = 'dt_stato_RI_AMM'
+  const dtPresaDAField = 'dt_presa_in_carico_RI_AMM'
 
   const [loading, setLoading] = React.useState(false)
   const [msg, setMsg] = React.useState<Msg | null>({ kind: 'info', text: 'Selezionare una riga.' })
@@ -2677,7 +2712,7 @@ function ActionsPanel (props: {
   const origineVal = data ? data['origine_pratica'] : null
   const origineNum = (origineVal != null && String(origineVal) !== '') ? Number(origineVal) : null
 
-  // blocca DT se già trasmesso a DA (DA ha uno stato valorizzato)
+  // blocca DT se già trasmesso all'Area Amministrativa (RI_AMM ha uno stato valorizzato)
   const lockedByTransmit = (role === 'DT') && (statoDANum != null && statoDANum >= 1)
 
   // quando cambio selezione: torno libero (nessuna memoria)
@@ -3085,7 +3120,7 @@ function ActionsPanel (props: {
           [dtStatoDAField]: Date.now(),
           [dtPresaDAField]: null
         },
-        'Trasmesso a DA.'
+        'Trasmesso al RI AMM.'
       )
       setPending(null)
       setConfirmAttempted(false)
@@ -3713,13 +3748,11 @@ function buildGradiViolazioni (map: Record<string, string>, selectedArts: string
 }
 
 function getRiGradoSelectedArts (attrs: Record<string, any>): string[] {
-  const selected = new Set(parseMultiSelect(attrs?.norma_violata3))
+  const selected = new Set(parseNorma3Codes(attrs?.norma_violata3))
   const out: string[] = []
   for (const artCode of RI_GRADO_ART_CODES) {
     const art = `Art${artCode}`
-    if (selected.has(art)) { out.push(artCode); continue }
-    const field = NORMA3_TO_VFIELD[art]
-    if (field && isSelectedFlag(attrs?.[field])) out.push(artCode)
+    if (selected.has(art)) out.push(artCode)
   }
   return out
 }
@@ -4641,10 +4674,8 @@ const NS_CASISTICHE_BY_ART: NsCasisticaOption[] = [
 
 function hasArtSelected (attrs: Record<string, any>, art: number): boolean {
   const code = `Art${art}`
-  const multi = new Set(parseMultiSelect(attrs?.norma_violata3))
-  if (multi.has(code)) return true
-  const field = NORMA3_TO_VFIELD[code]
-  return !!field && isSelectedFlag(attrs?.[field])
+  const multi = new Set(parseNorma3Codes(attrs?.norma_violata3))
+  return multi.has(code)
 }
 
 function getNotaSpeseCasistiche (attrs: Record<string, any>): NsCasisticaOption[] {
@@ -4703,10 +4734,7 @@ function getSelectedViolazioniCount (attrs: Record<string, any>, art15Selected?:
   const add = (code: string) => { if (code) seen.add(code) }
   if (art15Selected || String(attrs?.norma15_parziale || '').trim() || String(attrs?.norma15_totale || '').trim()) add('Art15')
   if (String(attrs?.norma16_17 || '').trim()) add(String(attrs?.norma16_17).trim())
-  parseMultiSelect(attrs?.norma_violata3).forEach(add)
-  Object.entries(NORMA3_TO_VFIELD).forEach(([code, field]) => {
-    if (isSelectedFlag((attrs as any)?.[field])) add(code)
-  })
+  parseNorma3Codes(attrs?.norma_violata3).forEach(add)
   return seen.size
 }
 
@@ -5488,6 +5516,7 @@ function draftFromRecord (rec: any): NpDraft {
   // Campo binario Sì/No: per persona giuridica il domicilio notifiche del rappresentante
   // parte da No, lasciando comunque all'operatore la possibilità di scegliere Sì.
   if (out.rl_dom_notifica == null || out.rl_dom_notifica === '') out.rl_dom_notifica = '0'
+  if (out.norma_violata3 != null && out.norma_violata3 !== '') out.norma_violata3 = normalizeNorma3Value(out.norma_violata3)
   return out
 }
 
@@ -5512,7 +5541,7 @@ function normalizeDraftComparableValue (fieldName: string, v: any): string {
   }
 
   if (k === 'norma_violata3') {
-    return String(v ?? '').split(/\s+/).filter(Boolean).sort().join(' ')
+    return parseNorma3Codes(v).sort().join(' ')
   }
 
   return normalizeLogValue(v)
@@ -5766,8 +5795,12 @@ function NuovaPraticaForm (p: {
   const mode = p.mode === 'edit' ? 'edit' : 'create'
   const editOid = p.editOid != null ? Number(p.editOid) : null
   const editIdFieldName = String(p.editIdFieldName || ds?.getIdField?.() || 'OBJECTID')
-  const isReadOnly = mode === 'edit' && p.readOnly === true
+  const currentUserContext = readGiiUserContext()
+  const currentProfileRole = normalizeRoleCode(currentUserContext.role)
+  const isPureConsultationRole = mode === 'edit' && (currentProfileRole === 'RZ' || currentProfileRole === 'DT')
+  const isReadOnly = mode === 'edit' && (p.readOnly === true || isPureConsultationRole)
   const isRiAgrTecLimitedEdit = mode === 'edit' && !isReadOnly && isCurrentRiAgrTec()
+  const canEditArt30Attrezzature = !isReadOnly && !isRiAgrTecLimitedEdit && currentProfileRole === 'TI'
   const riAgrTecEditableUiFields = React.useMemo(() => new Set(['grado', 'norma15_sel', 'occorrenza']), [])
   const riAgrTecEditableDraftFields = React.useMemo(() => new Set(['gradi_violazioni', 'occorrenza']), [])
   const riAgrTecEditableSaveFields = React.useMemo(() => new Set(['gradi_violazioni', 'occorrenza']), [])
@@ -6589,18 +6622,10 @@ React.useEffect(() => {
 }, [mode, currentOid, currentLayerUrl, cfg.schemaLayerUrl, cfg.motherLayerUrl, editIdFieldName, p.initialData])
 
 React.useEffect(() => {
-  let cancelled = false
-  const run = async () => {
-    if (!noteSpeseCfg.importPrezzariUrl) { if (!cancelled) setActivePrezzario(null); return }
-    try {
-      const row = await getActivePrezzario(noteSpeseCfg.importPrezzariUrl)
-      if (!cancelled) setActivePrezzario(row)
-    } catch {
-      if (!cancelled) setActivePrezzario(null)
-    }
-  }
-  void run()
-  return () => { cancelled = true }
+  // Non caricare automaticamente la tabella import prezzari in apertura.
+  // Il caricamento preventivo può richiedere credenziali a profili che stanno solo
+  // consultando/validando la pratica e non stanno compilando la nota spese.
+  setActivePrezzario(null)
 }, [noteSpeseCfg.importPrezzariUrl])
 
 const loadNotaSpeseDraft = React.useCallback(async () => {
@@ -7013,6 +7038,26 @@ React.useEffect(() => {
       const parametersUrl = String((cfg as any).attrezzatureParametriUrl || '').trim()
       const cauzioneSnapshot = Number(g('attrezzature_cauzione_decurtata')) || 0
       const warningMessages: string[] = []
+
+      // RI/RZ/DT: sola consultazione della scheda Art. 30 già salvata nella pratica.
+      // Non devono caricare viste/prezzari, né poter modificare quantità o valori.
+      if (!canEditArt30Attrezzature) {
+        const valoreUnitario = cauzioneDetailSnapshot?.valoreUnitario != null && cauzioneDetailSnapshot.valoreUnitario > 0
+          ? cauzioneDetailSnapshot.valoreUnitario
+          : (cauzioneSnapshot > 0 ? cauzioneSnapshot / tesseraCurrentQty : 0)
+        setAttrezzatureCauzioneImporto(valoreUnitario)
+        setAttrezzatureCauzioneQuantita(Math.min(tesseraCurrentQty, Math.max(1, Math.trunc(cauzioneDetailSnapshot?.quantita || tesseraCurrentQty))))
+        setAttrezzatureRows(current.map(item => ({
+          codice: item.codice,
+          descrizione: item.descrizione,
+          valoreUnitario: item.valoreUnitario ?? (item.importo != null ? item.importo / item.quantita : 0),
+          selected: true,
+          quantita: item.quantita
+        })))
+        setAttrezzatureError('')
+        return
+      }
+
       let art30Parameters: { attrezzature: AttrezzaturaParametro[]; cauzione: number } | null = null
       if (parametersUrl) art30Parameters = await loadArt30ParametersBundle(parametersUrl, g('data_rilevazione'))
 
@@ -7083,7 +7128,7 @@ React.useEffect(() => {
     } finally {
       setAttrezzatureLoading(false)
     }
-  }, [cfg, draft.attrezzature_rimborso_dettaglio, draft.data_rilevazione])
+  }, [cfg, draft.attrezzature_rimborso_dettaglio, draft.data_rilevazione, draft.attrezzature_cauzione_presente, draft.attrezzature_cauzione_decurtata, canEditArt30Attrezzature])
 
   const attrezzatureTesseraSelezionata = React.useMemo(
     () => attrezzatureRows.some(row => row.selected && attrezzaturaTipo(`${row.codice} ${row.descrizione}`)?.key === 'TESSERA_ELETTRONICA'),
@@ -7110,6 +7155,7 @@ React.useEffect(() => {
   }, [attrezzaturePopupOpen, attrezzatureLoading, attrezzatureCauzioneApplicabile, attrezzatureCauzionePresente, attrezzatureTesseraQuantita])
 
   const applyAttrezzaturePopup = React.useCallback(() => {
+    if (!canEditArt30Attrezzature) return
     const selectedRows = attrezzatureRows.filter(row => row.selected && Number(row.quantita) > 0)
     const total = attrezzatureTotal(selectedRows)
     const tesseraSelected = selectedRows.some(row => attrezzaturaTipo(`${row.codice} ${row.descrizione}`)?.key === 'TESSERA_ELETTRONICA')
@@ -7134,16 +7180,17 @@ React.useEffect(() => {
       attrezzature_importo_netto: total > 0 ? String(totalNetto) : ''
     }))
     if (attrezzaturePopupPendingArt30) {
-      const next = new Set(parseMultiSelect(draft.norma_violata3))
+      const next = new Set(parseNorma3Codes(draft.norma_violata3))
       next.add('Art30')
       setDraft(prev => ({ ...prev, norma_violata3: Array.from(next).join(' '), v_art30: '1' }))
     }
     setAttrezzaturePopupOpen(false)
     setAttrezzaturePopupPendingArt30(false)
-  }, [attrezzatureRows, attrezzatureCauzionePresente, attrezzatureCauzioneImporto, attrezzatureCauzioneQuantita, attrezzaturePopupPendingArt30, draft.norma_violata3])
+  }, [attrezzatureRows, attrezzatureCauzionePresente, attrezzatureCauzioneImporto, attrezzatureCauzioneQuantita, attrezzaturePopupPendingArt30, draft.norma_violata3, canEditArt30Attrezzature])
 
   const clearArt30AndAttrezzature = React.useCallback(() => {
-    const next = new Set(parseMultiSelect(draft.norma_violata3))
+    if (!canEditArt30Attrezzature) return
+    const next = new Set(parseNorma3Codes(draft.norma_violata3))
     next.delete('Art30')
     setDraft(prev => ({
       ...prev,
@@ -7160,10 +7207,10 @@ React.useEffect(() => {
     setAttrezzatureCauzioneImporto(0)
     setAttrezzatureCauzioneQuantita(1)
     setAttrezzatureRemoveConfirmOpen(false)
-  }, [draft.norma_violata3])
+  }, [draft.norma_violata3, canEditArt30Attrezzature])
 
   // Norma violata 3 — select_multiple come Set (stringa separata da spazio)
-  const norma3Set = React.useMemo(() => new Set(String(g('norma_violata3') || '').split(' ').filter(Boolean)), [draft.norma_violata3])
+  const norma3Set = React.useMemo(() => new Set(parseNorma3Codes(g('norma_violata3'))), [draft.norma_violata3])
   const norma3SelectedLabels = React.useMemo(() => CHOICES.norma3.filter(o => norma3Set.has(o.v)).map(o => o.l), [norma3Set])
   const attrezzatureRiepilogo = React.useMemo(
     () => parseAttrezzatureDetail(g('attrezzature_rimborso_dettaglio')),
@@ -7172,17 +7219,31 @@ React.useEffect(() => {
   const attrezzatureParametriUrl = String((cfg as any).attrezzatureParametriUrl || '').trim()
   const [attrezzatureCauzioneRiepilogo, setAttrezzatureCauzioneRiepilogo] = React.useState<{ quantita: number | null; valoreUnitario: number | null }>({ quantita: null, valoreUnitario: null })
 
-  React.useEffect(() => {
-    if (!attrezzatureParametriUrl) return
-    void loadArt30ParameterRows(attrezzatureParametriUrl)
-  }, [attrezzatureParametriUrl])
+  // I parametri Art. 30 vengono caricati solo quando servono davvero
+  // (apertura popup attrezzature o riepilogo cauzione presente), non all'apertura della pratica.
 
   React.useEffect(() => {
     let cancelled = false
     const totaleCauzione = Number(g('attrezzature_cauzione_decurtata')) || 0
     const cauzionePresente = isSelectedFlag(g('attrezzature_cauzione_presente')) && totaleCauzione > 0
 
-    if (!cauzionePresente || !attrezzatureParametriUrl) {
+    if (!cauzionePresente) {
+      setAttrezzatureCauzioneRiepilogo({ quantita: null, valoreUnitario: null })
+      return () => { cancelled = true }
+    }
+
+    // RI/RZ/DT consultano i valori Art. 30 già salvati nella pratica: non devono
+    // interrogare la vista parametri solo per visualizzare un riepilogo.
+    if (!canEditArt30Attrezzature) {
+      const cauzioneDetail = parseAttrezzatureCauzioneDetail(g('attrezzature_rimborso_dettaglio'))
+      setAttrezzatureCauzioneRiepilogo({
+        quantita: cauzioneDetail?.quantita ?? null,
+        valoreUnitario: cauzioneDetail?.valoreUnitario ?? null
+      })
+      return () => { cancelled = true }
+    }
+
+    if (!attrezzatureParametriUrl) {
       setAttrezzatureCauzioneRiepilogo({ quantita: null, valoreUnitario: null })
       return () => { cancelled = true }
     }
@@ -7199,7 +7260,7 @@ React.useEffect(() => {
     })()
 
     return () => { cancelled = true }
-  }, [draft.attrezzature_cauzione_presente, draft.attrezzature_cauzione_decurtata, draft.data_rilevazione, attrezzatureParametriUrl])
+  }, [draft.attrezzature_cauzione_presente, draft.attrezzature_cauzione_decurtata, draft.attrezzature_rimborso_dettaglio, draft.data_rilevazione, attrezzatureParametriUrl, canEditArt30Attrezzature])
 
   const toggleNorma3 = (v: string) => {
     const s = new Set(norma3Set)
@@ -9275,7 +9336,7 @@ ${e?.message || String(e)}`
                     disabled={saving}
                     style={{ ...btnBase, fontSize: attrezzatureRiepilogoFontSize, background: '#1d4ed8', color: '#fff', border: '1px solid #1d4ed8', cursor: saving ? 'not-allowed' : 'pointer' }}
                   >
-                    {isReadOnly || isRiAgrTecLimitedEdit ? 'Consulta attrezzature' : 'Gestisci attrezzature'}
+                    {canEditArt30Attrezzature ? 'Gestisci attrezzature' : 'Consulta attrezzature'}
                   </button>
                 </div>
               </div>,
@@ -10205,7 +10266,7 @@ ${e?.message || String(e)}`
                   {attrezzatureRows.length === 0
                     ? <div style={{ padding: 16, textAlign: 'center', color: '#64748b', fontSize: popupBodyFontSize }}>Nessuna attrezzatura disponibile.</div>
                     : attrezzatureRows.map((row, index) => {
-                        const locked = isReadOnly || isRiAgrTecLimitedEdit
+                        const locked = !canEditArt30Attrezzature
                         const amount = row.selected ? (Number(row.quantita) || 0) * (Number(row.valoreUnitario) || 0) : 0
                         return <div key={`${row.codice || row.descrizione}-${index}`} style={{ display: 'grid', gridTemplateColumns: '44px minmax(0, 1fr) 82px 118px 104px', alignItems: 'center', borderBottom: index === attrezzatureRows.length - 1 ? 0 : '1px solid #e2e8f0', background: index % 2 === 0 ? '#ffffff' : '#f8fbff', fontSize: popupBodyFontSize }}>
                           <div style={{ display: 'flex', justifyContent: 'center', padding: 8 }}>
@@ -10247,7 +10308,7 @@ ${e?.message || String(e)}`
                   <input
                     type='checkbox'
                     checked={attrezzatureCauzionePresente}
-                    disabled={isReadOnly || isRiAgrTecLimitedEdit || !attrezzatureCauzioneApplicabile}
+                    disabled={!canEditArt30Attrezzature || !attrezzatureCauzioneApplicabile}
                     onChange={e => {
                       const checked = e.target.checked
                       setAttrezzatureCauzionePresente(checked)
@@ -10263,9 +10324,9 @@ ${e?.message || String(e)}`
                     max={attrezzatureTesseraQuantita}
                     step={1}
                     value={Math.max(1, Math.min(attrezzatureTesseraQuantita, Math.trunc(Number(attrezzatureCauzioneQuantita) || 1)))}
-                    disabled={isReadOnly || isRiAgrTecLimitedEdit || !attrezzatureCauzioneApplicabile || !attrezzatureCauzionePresente}
+                    disabled={!canEditArt30Attrezzature || !attrezzatureCauzioneApplicabile || !attrezzatureCauzionePresente}
                     onChange={e => setAttrezzatureCauzioneQuantita(Math.max(1, Math.min(attrezzatureTesseraQuantita, Math.trunc(Number(e.target.value) || 1))))}
-                    style={{ width: '100%', height: formStyle.fieldHeight, boxSizing: 'border-box', textAlign: 'center', border: '1px solid #cbd5e1', borderRadius: 6, background: isReadOnly || isRiAgrTecLimitedEdit || !attrezzatureCauzioneApplicabile || !attrezzatureCauzionePresente ? '#eef2f7' : '#fff', fontSize: popupBodyFontSize }}
+                    style={{ width: '100%', height: formStyle.fieldHeight, boxSizing: 'border-box', textAlign: 'center', border: '1px solid #cbd5e1', borderRadius: 6, background: !canEditArt30Attrezzature || !attrezzatureCauzioneApplicabile || !attrezzatureCauzionePresente ? '#eef2f7' : '#fff', fontSize: popupBodyFontSize }}
                   />
                 </div>
                 <div style={{ padding: '8px 10px', textAlign: 'right', color: '#334155', fontWeight: 400 }}>
@@ -10285,11 +10346,11 @@ ${e?.message || String(e)}`
               <button
                 type='button'
                 onClick={() => { setAttrezzaturePopupOpen(false); setAttrezzaturePopupPendingArt30(false) }}
-                style={{ ...popupBtnBase, border: '1px solid rgba(0,0,0,0.18)', background: isReadOnly || isRiAgrTecLimitedEdit ? '#1d4ed8' : '#64748b', color: '#fff', cursor: 'pointer' }}
+                style={{ ...popupBtnBase, border: '1px solid rgba(0,0,0,0.18)', background: !canEditArt30Attrezzature ? '#1d4ed8' : '#64748b', color: '#fff', cursor: 'pointer' }}
               >
-                {isReadOnly || isRiAgrTecLimitedEdit ? 'Chiudi' : 'Annulla'}
+                {canEditArt30Attrezzature ? 'Annulla' : 'Chiudi'}
               </button>
-              {!isReadOnly && !isRiAgrTecLimitedEdit && <button
+              {canEditArt30Attrezzature && <button
                 type='button'
                 onClick={applyAttrezzaturePopup}
                 disabled={attrezzatureLoading}
@@ -10861,7 +10922,7 @@ const isPgOnlyField = React.useCallback((fieldName: string) => {
     }
     return rows
   }, [data, toLabel, classifyTipoSoggetto, isPfOnlyField, isPgOnlyField])
-// Iter: sempre blocchi DT/DA + extra selezionati
+// Iter: blocchi DT / Determinazione + extra selezionati
   const dtPresaDT = data ? data.dt_presa_in_carico_DT : null
   const statoDT = data ? data.stato_DT : null
   const dtStatoDT = data ? data.dt_stato_DT : null
@@ -10869,12 +10930,10 @@ const isPgOnlyField = React.useCallback((fieldName: string) => {
   const dtEsitoDT = data ? data.dt_esito_DT : null
   const noteDT = data ? data.note_DT : null
 
-  const dtPresaDA = data ? data.dt_presa_in_carico_DA : null
-  const statoDA = data ? data.stato_DA : null
-  const dtStatoDA = data ? data.dt_stato_DA : null
-  const esitoDA = data ? data.esito_DA : null
-  const dtEsitoDA = data ? data.dt_esito_DA : null
-  const noteDA = data ? data.note_DA : null
+  const determinazioneStato = data ? data.determinazione_stato : null
+  const determinazioneNumero = data ? data.determinazione_numero : null
+  const determinazioneData = data ? data.determinazione_data : null
+  const determinazioneTrasIl = data ? data.determinazione_trasmessa_firma_il : null
 
   const TabsBar = (
     <div style={{ 
@@ -10971,12 +11030,10 @@ if (!hasSel) {
     iterRows.push({ label: 'DT - Data esito', value: formatDateSafe(dtEsitoDT) })
     iterRows.push({ label: 'DT - Note', value: noteDT })
 
-    iterRows.push({ label: 'DA - Data presa in carico', value: formatDateSafe(dtPresaDA) })
-    iterRows.push({ label: 'DA - Stato', value: statoDA })
-    iterRows.push({ label: 'DA - Data stato', value: formatDateSafe(dtStatoDA) })
-    iterRows.push({ label: 'DA - Esito', value: esitoDA })
-    iterRows.push({ label: 'DA - Data esito', value: formatDateSafe(dtEsitoDA) })
-    iterRows.push({ label: 'DA - Note', value: noteDA })
+    iterRows.push({ label: 'Determinazione - Stato', value: determinazioneStato })
+    iterRows.push({ label: 'Determinazione - Numero', value: determinazioneNumero })
+    iterRows.push({ label: 'Determinazione - Data', value: formatDateSafe(determinazioneData) })
+    iterRows.push({ label: 'Determinazione - Trasmessa alla firma', value: formatDateSafe(determinazioneTrasIl) })
 
     // Aggiungi campi extra configurati
     const iterExtraRows = aliasesReady ? makeRows(activeTab.fields, activeTab.id.toUpperCase(), Boolean((activeTab as any).hideEmpty)) : []
@@ -11722,7 +11779,7 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
 
   const watchFields = [
     'dt_presa_in_carico_DT', 'stato_DT', 'dt_stato_DT', 'esito_DT', 'dt_esito_DT', 'note_DT',
-    'dt_presa_in_carico_DA', 'stato_DA', 'dt_stato_DA', 'esito_DA', 'dt_esito_DA', 'note_DA'
+    'determinazione_stato', 'determinazione_numero', 'determinazione_data', 'determinazione_trasmessa_firma_il'
   ]
 
   const isCreatePage = cfg.enableCreateWithoutSelection === true

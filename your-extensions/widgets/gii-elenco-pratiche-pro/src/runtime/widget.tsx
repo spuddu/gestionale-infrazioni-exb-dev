@@ -57,7 +57,7 @@ function pickOfficialRapportoNumber(d: any): string {
 
 function pickVerbaleNumber(d: any): string {
   return String(
-    getFirstValue(d, ["numero_verbale", "num_verbale", "codice_verbale"]) || "",
+    getFirstValue(d, ["numero_atto_accertamento", "num_verbale", "codice_verbale"]) || "",
   ).trim();
 }
 
@@ -103,7 +103,7 @@ const V_FASE = "__fase_istruttoria__";
 const V_TIPO_PRATICA = "__tipo_pratica__";
 const V_NUMERO_RILEVAZIONE = "__numero_rilevazione__";
 const V_NUMERO_PRATICA = "__numero_pratica__";
-const V_NUMERO_VERBALE = "__numero_verbale_display__";
+const V_NUMERO_VERBALE = "__numero_atto_accertamento_display__";
 const V_ULTIMO = "__ultimo_agg__";
 const V_PROSSIMA = "__prossima__";
 const V_MITTENTE = "__mittente__";
@@ -1021,8 +1021,8 @@ function migrateColumns(cfg: any): ColumnDef[] {
       findByField(V_NUMERO_PRATICA),
     ),
     take({
-      id: "col_numero_verbale",
-      label: "N. verbale",
+      id: "col_numero_atto_accertamento",
+      label: "N. atto",
       field: V_NUMERO_VERBALE,
       width: 120,
     }),
@@ -2736,7 +2736,7 @@ function getStatoFieldForRuolo(ruoloLabel: string): string {
   if (r === "RZ") return "stato_RZ";
   if (r === "RI") return "stato_RI";
   if (r === "DT") return "stato_DT";
-  if (r === "DA") return "stato_DA";
+  if (r === "DA") return "determinazione_stato";
   if (r === "RI_AMM") return "stato_RI_AMM";
   if (r === "TI_AMM") return "stato_TI_AMM";
   return "stato_DT"; // fallback
@@ -3931,13 +3931,13 @@ export default function Widget(props: Props) {
       "esito_DT",
       "esito_RI_AMM",
       "esito_TI_AMM",
-      "esito_DA",
+      "determinazione_numero",
       "stato_TI",
       "stato_RI",
       "stato_DT",
       "stato_RI_AMM",
       "stato_TI_AMM",
-      "stato_DA",
+      "determinazione_stato",
     ];
     return fields.some((f) => hasWorkflowValue(pickField(d, f)));
   };
@@ -3974,8 +3974,8 @@ export default function Widget(props: Props) {
       meaningful(d["esito_RI_AMM"]) ||
       meaningful(d["stato_TI_AMM"]) ||
       meaningful(d["esito_TI_AMM"]) ||
-      meaningful(d["stato_DA"]) ||
-      meaningful(d["esito_DA"])
+      meaningful(d["determinazione_stato"]) ||
+      meaningful(d["determinazione_numero"])
     );
   };
 

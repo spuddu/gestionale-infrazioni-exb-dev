@@ -729,10 +729,10 @@ async function addUnsupportedSummaryPage (pdf: PDFDocument, payloads: Attachment
 
 export async function appendRapportoExtraPages (baseBytes: Uint8Array, opts: RapportoExtraPdfOptions = {}): Promise<Uint8Array> {
   const [point, attachments] = await Promise.all([
-    resolveMapPoint(opts).catch(() => null),
-    loadAttachmentPayloads(opts).catch(() => [])
+    resolveMapPoint(opts).catch((): null => null),
+    loadAttachmentPayloads(opts).catch((): AttachmentPayload[] => [])
   ])
-  const mapCapture = point ? await captureMapPng(point).catch(() => null) : null
+  const mapCapture = point ? await captureMapPng(point).catch((): null => null) : null
   const hasExtras = !!mapCapture || attachments.length > 0
   if (!hasExtras) return baseBytes
 

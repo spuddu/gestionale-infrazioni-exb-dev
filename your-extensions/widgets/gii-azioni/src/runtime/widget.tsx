@@ -1622,7 +1622,7 @@ function ActionsPanel (props: {
 
   const noteField = `note_${role}`
 
-  const statoDAField = 'stato_DA'
+  const statoDeterminaField = 'determinazione_stato'
 
   const [loading, setLoading] = React.useState(false)
   const [msg, setMsg] = React.useState<Msg | null>({ kind: 'info', text: 'Selezionare una riga.' })
@@ -3149,12 +3149,12 @@ function ActionsPanel (props: {
     if (role === 'RI')     return 'DT'
     if (role === 'DT')     return 'RI_AMM'   // DT approva e trasmette direttamente a RI_AMM (fase sanzionatoria)
     if (role === 'RI_AMM') {
-      // RI_AMM: se TI_AMM ha già restituito (esito valorizzato) → trasmette a DA; altrimenti → assegna TI_AMM
+      // RI_AMM: prima assegna la pratica al TI_AMM; dopo la verifica del TI_AMM
+      // valida la bozza di determinazione e la trasmette fuori gestionale alla firma DA.
       const esitoTiAmm = pickAttrCI(data, ['esito_TI_AMM', 'ESITO_TI_AMM'])
-      return toNumOrNull(esitoTiAmm) != null ? 'DA' : 'TI_AMM'
+      return toNumOrNull(esitoTiAmm) != null ? '' : 'TI_AMM'
     }
     if (role === 'TI_AMM') return 'RI_AMM'
-    if (role === 'DA')     return 'TI_AMM'   // DA approva e trasmette a TI_AMM per adempimenti (verbale, bollettino, PEC)
     return ''
   }
 
@@ -3178,7 +3178,7 @@ function ActionsPanel (props: {
       // deve ritrasmettere a DT, che poi approverà e rimanderà a RI_AMM.
       // Per questo qui il requester diretto del RI resta solo DT.
       RI: ['DT'],
-      RI_AMM: ['DA', 'TI_AMM']
+      RI_AMM: ['TI_AMM']
     }
     const candidates = requesterByResponder[role] || []
     for (const requester of candidates) {
@@ -3349,14 +3349,12 @@ function ActionsPanel (props: {
   const presaVal = (data && presaFieldExists) ? data[realFieldName(presaField)] : null
   const statoVal = (data && statoFieldExists) ? data[realFieldName(statoField)] : (data ? data[statoField] : null)
   const esitoVal = data ? data[realFieldName(esitoField)] : null
-  const statoDAVal = data ? data[realFieldName(statoDAField)] : null
 
   const presaNumRaw = toNumOrNull(presaVal)
   const statoNum = toNumOrNull(statoVal)
   // Se il campo presa_in_carico_* non esiste (molto comune per RZ/TI in alcune viste),
   // interpretiamo "presa" = stato (stato=2 significa presa in carico).
   const presaNum = presaFieldExists ? presaNumRaw : statoNum
-  const statoDANum = toNumOrNull(statoDAVal)
   const origineVal = data ? data['origine_pratica'] : null
   // origine_pratica può arrivare come codice numerico (1/2) oppure come label ("TR"/"TI").
   let origineNum: number | null = null
@@ -3415,9 +3413,7 @@ function ActionsPanel (props: {
       (toNumOrNull(pickAttrCI(d, ['stato_RI', 'STATO_RI'])) != null) ||
       (toNumOrNull(pickAttrCI(d, ['esito_RI', 'ESITO_RI'])) != null) ||
       (toNumOrNull(pickAttrCI(d, ['stato_DT', 'STATO_DT'])) != null) ||
-      (toNumOrNull(pickAttrCI(d, ['esito_DT', 'ESITO_DT'])) != null) ||
-      (toNumOrNull(pickAttrCI(d, ['stato_DA', 'STATO_DA'])) != null) ||
-      (toNumOrNull(pickAttrCI(d, ['esito_DA', 'ESITO_DA'])) != null)
+      (toNumOrNull(pickAttrCI(d, ['esito_DT', 'ESITO_DT'])) != null)
     if (higherTouchedLocal) return false
 
     const statoTiLocal = toNumOrNull(pickAttrCI(d, ['stato_TI', 'stato_ti', 'STATO_TI']))
@@ -3434,7 +3430,7 @@ function ActionsPanel (props: {
   const effectiveStatoNum = awaitingRetakeByRz && role === 'RZ' ? STATO_DA_PRENDERE : statoNum
   const effectivePresaNum = awaitingRetakeByRz && role === 'RZ' ? PRESA_DA_PRENDERE : presaNum
 
-  // Matrice_DT: DT trasmette a RI (non a DA). Nessun lock basato su stato_DA.
+  // Matrice_DT: DT trasmette al RI AMM. Nessun lock basato sul vecchio nodo DA.
   const lockedByTransmit = false
 
   // quando cambio selezione: torno libero (nessuna memoria)
@@ -3775,9 +3771,7 @@ function ActionsPanel (props: {
     (toNumOrNull(pickAttrCI(data, ['stato_RI', 'STATO_RI'])) != null) ||
     (toNumOrNull(pickAttrCI(data, ['esito_RI', 'ESITO_RI'])) != null) ||
     (toNumOrNull(pickAttrCI(data, ['stato_DT', 'STATO_DT'])) != null) ||
-    (toNumOrNull(pickAttrCI(data, ['esito_DT', 'ESITO_DT'])) != null) ||
-    (toNumOrNull(pickAttrCI(data, ['stato_DA', 'STATO_DA'])) != null) ||
-    (toNumOrNull(pickAttrCI(data, ['esito_DA', 'ESITO_DA'])) != null)
+    (toNumOrNull(pickAttrCI(data, ['esito_DT', 'ESITO_DT'])) != null)
   const hasTiAnyEvidence = hasTiAssigned || hasTiWorkflowTouched
   const tiReturned = (esitoTiNum != null) || (statoTiNum === STATO_APPROVATA) || (statoTiNum === STATO_RESPINTA) || hasHigherWorkflowTouched
   const lockRZBecauseAssignedToTi = role === 'RZ' && (origineNum == null || origineNum === 1) && hasTiAnyEvidence && !tiReturned && !awaitingRetakeByRz
@@ -4846,7 +4840,8 @@ function ActionsPanel (props: {
       const upd: Record<string, any> = {
         ti_amm_assegnato_username: tiAmmSelected,
         ti_amm_assegnato_nome: tiAmmName,
-        ti_amm_assegnato_da: riAmmUser
+        ti_amm_assegnato_da: riAmmUser,
+        dt_assegnazione_ti_amm: Date.now()
       }
 
       // Inizializza nodo TI_AMM
@@ -4888,31 +4883,31 @@ function ActionsPanel (props: {
 
         if (isRiaperturaAssignment) {
           // La nuova istruttoria riparte dal TI_AMM e dovrà essere nuovamente
-          // verificata da RI_AMM e approvata dal DA. I dati sostanziali del
-          // ricorso/CdA restano storicizzati nel record e nel log.
-          const fStatoDa = pick('stato_DA')
-          const fDtStatoDa = pick('dt_stato_DA')
-          const fDtPresaDa = pick('dt_presa_in_carico_DA')
-          const fEsitoDa = pick('esito_DA')
-          const fDtEsitoDa = pick('dt_esito_DA')
+          // verificata da RI_AMM. I dati sostanziali del ricorso/CdA restano
+          // storicizzati nel record e nel log.
           const fChiusuraIl = pick('istruttoria_amm_chiusa_il')
           const fChiusuraDa = pick('istruttoria_amm_chiusa_da')
-          const fPdfIl = pick('verbale_pdf_generato_il')
-          const fPdfDa = pick('verbale_pdf_generato_da')
+          const fDeterminaStato = pick('determinazione_stato')
+          const fDeterminaNumero = pick('determinazione_numero')
+          const fDeterminaData = pick('determinazione_data')
+          const fDeterminaTrasIl = pick('determinazione_trasmessa_firma_il')
+          const fDeterminaTrasDa = pick('determinazione_trasmessa_firma_da')
+          const fDeterminaRegIl = pick('determinazione_registrata_il')
+          const fDeterminaRegDa = pick('determinazione_registrata_da')
           const fDefEsito = pick('definizione_pratica_esito')
           const fDefData = pick('definizione_pratica_data')
           const fDefDa = pick('definizione_pratica_da')
           const fDefNote = pick('definizione_pratica_note')
 
-          if (fStatoDa) upd[fStatoDa] = 0
-          if (fDtStatoDa) upd[fDtStatoDa] = null
-          if (fDtPresaDa) upd[fDtPresaDa] = null
-          if (fEsitoDa) upd[fEsitoDa] = null
-          if (fDtEsitoDa) upd[fDtEsitoDa] = null
           if (fChiusuraIl) upd[fChiusuraIl] = null
           if (fChiusuraDa) upd[fChiusuraDa] = null
-          if (fPdfIl) upd[fPdfIl] = null
-          if (fPdfDa) upd[fPdfDa] = null
+          if (fDeterminaStato) upd[fDeterminaStato] = null
+          if (fDeterminaNumero) upd[fDeterminaNumero] = null
+          if (fDeterminaData) upd[fDeterminaData] = null
+          if (fDeterminaTrasIl) upd[fDeterminaTrasIl] = null
+          if (fDeterminaTrasDa) upd[fDeterminaTrasDa] = null
+          if (fDeterminaRegIl) upd[fDeterminaRegIl] = null
+          if (fDeterminaRegDa) upd[fDeterminaRegDa] = null
           if (fDefEsito) upd[fDefEsito] = null
           if (fDefData) upd[fDefData] = null
           if (fDefDa) upd[fDefDa] = null
@@ -5108,40 +5103,16 @@ function ActionsPanel (props: {
         }
       }
 
-      if (role === 'DA' && esito === ESITO_APPROVATA) {
-        const liveAttrs = await queryCurrentRecordAttrs()
-        const sourceAttrs = liveAttrs || data
-
-        // La numerazione V-progressivo/anno è riservata ai verbali amministrativi
-        // e ai verbali misti. Le richieste autonome di rimborso/risarcimento
-        // diventano definitive con l'esito del DA, senza consumare un numero V.
-        if (attoAmmPrevedeVerbale(sourceAttrs)) {
-          const schemaFields: Record<string, any> = (ds as any)?.getSchema?.()?.fields || {}
-          const fNumeroVerbale = getSchemaFieldNameCI(schemaFields, 'numero_verbale')
-          const fDataVerbale = getSchemaFieldNameCI(schemaFields, 'data_verbale')
-          if (!fNumeroVerbale || !fDataVerbale) {
-            throw new Error('Impossibile approvare il verbale: campi numero_verbale/data_verbale non presenti nella fonte dati.')
-          }
-
-          const currentNumeroVerbale = String(pickAttrCI(sourceAttrs, ['numero_verbale', fNumeroVerbale]) || '').trim()
-          const currentDataVerbale = pickAttrCI(sourceAttrs, ['data_verbale', fDataVerbale])
-
-          const yearBase = (currentDataVerbale != null && currentDataVerbale !== '') ? currentDataVerbale : now
-          const parsedYearDate = new Date(typeof yearBase === 'number' ? yearBase : (Number(yearBase) || String(yearBase)))
-          const annoVerbale = Number.isNaN(parsedYearDate.getTime()) ? new Date(now).getFullYear() : parsedYearDate.getFullYear()
-
-          if (currentNumeroVerbale) {
-            const parsedProgressivo = parseNumeroAttoProgressivo(currentNumeroVerbale, 'V', annoVerbale, true)
-            if (parsedProgressivo == null) {
-              throw new Error(`Numero verbale già presente ma non conforme al formato V-progressivo/anno: ${currentNumeroVerbale}`)
-            }
-          } else {
-            upd[fNumeroVerbale] = await queryNextNumeroAtto('V', annoVerbale, fNumeroVerbale, true)
-          }
-          if (currentDataVerbale == null || currentDataVerbale === '') {
-            upd[fDataVerbale] = now
-          }
-        }
+      if (role === 'RI_AMM' && esito === ESITO_APPROVATA) {
+        const schemaFields: Record<string, any> = (ds as any)?.getSchema?.()?.fields || {}
+        const fDetStato = getSchemaFieldNameCI(schemaFields, 'determinazione_stato')
+        const fDetTrasIl = getSchemaFieldNameCI(schemaFields, 'determinazione_trasmessa_firma_il')
+        const fDetTrasDa = getSchemaFieldNameCI(schemaFields, 'determinazione_trasmessa_firma_da')
+        const currentUserRole: any = (window as any).__giiUserRole || {}
+        const currentUserLabel = String(currentUserRole.fullName || currentUserRole.full_name || currentUserRole.username || (window as any).__giiUser?.username || '').trim()
+        if (fDetStato) upd[fDetStato] = 'TRASMESSA_FIRMA_DA'
+        if (fDetTrasIl) upd[fDetTrasIl] = now
+        if (fDetTrasDa) upd[fDetTrasDa] = currentUserLabel
       }
 
       const integRequester = esito === ESITO_APPROVATA ? getIntegrationRequesterForCurrentRole() : ''
@@ -5191,10 +5162,7 @@ function ActionsPanel (props: {
       const wasIntegResponse = Boolean(integRequester)
 
       const logOpts = esito === ESITO_APPROVATA
-        ? (role === 'DA'
-            // DA approva la sanzione → destinatario è TI_AMM
-            ? { eventoChiusura: 'SANZIONE_APPROVATA', ruoloDestinatario: 'TI_AMM', utenteDestinatario: resolveDestUser('TI_AMM'), fase: role }
-            : role === 'DT'
+        ? (role === 'DT'
               // DT approva il rapporto tecnico → destinatario è RI
               ? { eventoChiusura: 'RAPPORTO_APPROVATO', ruoloDestinatario: ruoloDest, utenteDestinatario: resolveDestUser(ruoloDest), fase: role }
               : {
@@ -7598,12 +7566,12 @@ async function buildMapPrintPdfBlob (view: any, printServiceUrl: string, opts: D
   const print = await loadEsriModule<any>('esri/rest/print')
   const PrintTemplate = await loadEsriModule<any>('esri/rest/support/PrintTemplate')
   const PrintParameters = await loadEsriModule<any>('esri/rest/support/PrintParameters')
-  const Basemap = await loadEsriModule<any>('esri/Basemap').catch(() => null)
-  const Graphic = await loadEsriModule<any>('esri/Graphic').catch(() => null)
-  const Point = await loadEsriModule<any>('esri/geometry/Point').catch(() => null)
-  const SimpleMarkerSymbol = await loadEsriModule<any>('esri/symbols/SimpleMarkerSymbol').catch(() => null)
-  const symbolUtils = await loadEsriModule<any>('esri/symbols/support/symbolUtils').catch(() => null)
-  const ExtentCtor = await loadEsriModule<any>('esri/geometry/Extent').catch(() => null)
+  const Basemap = await loadEsriModule<any>('esri/Basemap').catch((): null => null)
+  const Graphic = await loadEsriModule<any>('esri/Graphic').catch((): null => null)
+  const Point = await loadEsriModule<any>('esri/geometry/Point').catch((): null => null)
+  const SimpleMarkerSymbol = await loadEsriModule<any>('esri/symbols/SimpleMarkerSymbol').catch((): null => null)
+  const symbolUtils = await loadEsriModule<any>('esri/symbols/support/symbolUtils').catch((): null => null)
+  const ExtentCtor = await loadEsriModule<any>('esri/geometry/Extent').catch((): null => null)
 
   await ensureGiiPrintableMapLayersReady(view)
   const layers = listPrintableMapLayers(view)
@@ -7698,7 +7666,7 @@ async function buildMapPrintPdfBlob (view: any, printServiceUrl: string, opts: D
     }
 
     const printScale = Number(opts.mapScale) || Number(view?.scale) || 0
-    const printExtent = printScale > 0 ? computePrintExtentForView(view, printScale, opts.mapLayout) ?? undefined : undefined
+    const printExtent = (printScale > 0 ? computePrintExtentForView(view, printScale, opts.mapLayout) ?? undefined : undefined) as { xmin: number; ymin: number; xmax: number; ymax: number; spatialReference?: any } | undefined
 
     console.warn('[GII-LEGENDA-DEBUG] gii-azioni scale=', view?.scale, 'resolution=', view?.resolution,
       'printScale=', printScale,
@@ -7892,7 +7860,7 @@ async function normalizeRasterAttachmentForPdf (
   try {
     const createBitmap = (window as any)?.createImageBitmap
     if (typeof createBitmap === 'function') {
-      const bitmap = await createBitmap(blob, { imageOrientation: 'from-image' }).catch(() => null)
+      const bitmap = await createBitmap(blob, { imageOrientation: 'from-image' }).catch((): null => null)
       if (bitmap) {
         try {
           const normalized = await drawToCanvas(bitmap, bitmap.width, bitmap.height)
@@ -8196,10 +8164,10 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
     'esito_DT', 'dt_esito_DT',
     'note_DT',
 
-    'dt_presa_in_carico_DA',
-    'stato_DA', 'dt_stato_DA',
-    'esito_DA', 'dt_esito_DA',
-    'note_DA',
+    'determinazione_stato', 'determinazione_numero', 'determinazione_data',
+    'determinazione_trasmessa_firma_il', 'determinazione_trasmessa_firma_da',
+    'determinazione_registrata_il', 'determinazione_registrata_da',
+    'determinazione_mancata_firma_protocollo', 'determinazione_mancata_firma_data', 'determinazione_mancata_firma_motivo',
 
     'dt_presa_in_carico_RI_AMM',
     'stato_RI_AMM', 'dt_stato_RI_AMM',

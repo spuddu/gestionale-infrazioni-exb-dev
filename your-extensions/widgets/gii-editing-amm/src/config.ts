@@ -152,12 +152,12 @@ export const defaultSummaryFields: SummaryFieldConfig[] = [
   { name: 'ti_amm_assegnato_username', label: 'TI_AMM assegnato' },
   { name: 'stato_TI_AMM', label: 'Stato TI_AMM' },
   { name: 'stato_RI_AMM', label: 'Stato RI_AMM' },
-  { name: 'stato_DA', label: 'Stato DA' }
+  { name: 'determinazione_stato', label: 'Stato determinazione' }
 ]
 
 export const defaultConfig: Config = {
   title: 'Istruttoria amministrativa',
-  subtitle: 'Predisposizione verbale, pagoPA, protocollo e notifica.',
+  subtitle: 'Proposta di contestazione, determinazione, atto di accertamento, pagamento e notifica.',
   detailTitlePrefix: 'Pratica selezionata',
 
   summaryFields: defaultSummaryFields,

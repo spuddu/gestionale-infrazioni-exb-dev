@@ -371,7 +371,7 @@ function getStatoFieldForRuolo (ruoloLabel: string): string {
   if (r === 'RZ') return 'stato_RZ'
   if (r === 'RI') return 'stato_RI'
   if (r === 'DT') return 'stato_DT'
-  if (r === 'DA') return 'stato_DA'
+  if (r === 'DA') return 'determinazione_stato'
   if (r === 'RI_AMM') return 'stato_RI_AMM'
   if (r === 'TI_AMM') return 'stato_TI_AMM'
   return 'stato_DT'
@@ -398,7 +398,7 @@ function hasRuoloData (d: any, role: string): boolean {
 function isInFaseSanzionatoria (d: any): boolean {
   return meaningful(pickField(d, 'stato_RI_AMM')) || meaningful(pickField(d, 'esito_RI_AMM')) ||
     meaningful(pickField(d, 'stato_TI_AMM')) || meaningful(pickField(d, 'esito_TI_AMM')) ||
-    meaningful(pickField(d, 'stato_DA')) || meaningful(pickField(d, 'esito_DA'))
+    meaningful(pickField(d, 'determinazione_stato')) || meaningful(pickField(d, 'determinazione_numero'))
 }
 
 function parseToMs (v: any): number | null {
@@ -843,7 +843,7 @@ function getNumeroRapporto (d: any): string {
 }
 
 function getNumeroVerbale (d: any): string {
-  return cleanNumeroPraticaText(getFirst(d, ['numero_verbale', 'Numero_verbale', 'NUMERO_VERBALE'], '')) || '—'
+  return cleanNumeroPraticaText(getFirst(d, ['numero_atto_accertamento', 'Numero_verbale', 'NUMERO_VERBALE'], '')) || '—'
 }
 
 function isCheckedValue (v: any): boolean {
@@ -1459,7 +1459,7 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
     const headers = [
       'N. rilevazione',
       'N. rapporto',
-      'N. verbale',
+      'N. atto',
       'Data rilevazione',
       'Tecnico rilevatore',
       'Tecnico istruttore',
@@ -1628,7 +1628,7 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
                 <tr style={{ textAlign: 'left' }}>
                   {th('N. rilevazione', 'rilevazioneNumber')}
                   {th('N. rapporto', 'reportNumber')}
-                  {th('N. verbale', 'verbaleNumber')}
+                  {th('N. atto', 'verbaleNumber')}
                   {th('Data rilevazione', 'reportDate')}
                   {th('Tecnico rilevatore', 'rilevatore')}
                   {th('Tecnico istruttore', 'istruttore')}

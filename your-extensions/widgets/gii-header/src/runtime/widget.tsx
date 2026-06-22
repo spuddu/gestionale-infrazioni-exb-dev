@@ -696,7 +696,8 @@ function alertEventDateMs (alert: GiiAlertItem | null | undefined): number | nul
     asAlertDateMs(raw.dt_stato_DT) ??
     asAlertDateMs(raw.dt_stato_TI_AMM) ??
     asAlertDateMs(raw.dt_stato_RI_AMM) ??
-    asAlertDateMs(raw.dt_stato_DA) ??
+    asAlertDateMs(raw.determinazione_data) ??
+    asAlertDateMs(raw.determinazione_trasmessa_firma_il) ??
     asAlertDateMs(raw.EditDate) ??
     asAlertDateMs(raw.editDate) ??
     asAlertDateMs(raw.CreationDate) ??

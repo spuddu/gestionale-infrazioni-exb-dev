@@ -833,12 +833,12 @@ async function buildMapPrintPdfBlob (view: any, printServiceUrl: string, opts: D
   const print = await loadEsriModule<any>('esri/rest/print')
   const PrintTemplate = await loadEsriModule<any>('esri/rest/support/PrintTemplate')
   const PrintParameters = await loadEsriModule<any>('esri/rest/support/PrintParameters')
-  const Basemap = await loadEsriModule<any>('esri/Basemap').catch(() => null)
-  const Graphic = await loadEsriModule<any>('esri/Graphic').catch(() => null)
-  const Point = await loadEsriModule<any>('esri/geometry/Point').catch(() => null)
-  const SimpleMarkerSymbol = await loadEsriModule<any>('esri/symbols/SimpleMarkerSymbol').catch(() => null)
-  const symbolUtils = await loadEsriModule<any>('esri/symbols/support/symbolUtils').catch(() => null)
-  const ExtentCtor = await loadEsriModule<any>('esri/geometry/Extent').catch(() => null)
+  const Basemap = await loadEsriModule<any>('esri/Basemap').catch((): null => null)
+  const Graphic = await loadEsriModule<any>('esri/Graphic').catch((): null => null)
+  const Point = await loadEsriModule<any>('esri/geometry/Point').catch((): null => null)
+  const SimpleMarkerSymbol = await loadEsriModule<any>('esri/symbols/SimpleMarkerSymbol').catch((): null => null)
+  const symbolUtils = await loadEsriModule<any>('esri/symbols/support/symbolUtils').catch((): null => null)
+  const ExtentCtor = await loadEsriModule<any>('esri/geometry/Extent').catch((): null => null)
 
   // La legenda usa SEMPRE e SOLO la view tecnica isolata (view), mai una mappa esistente
   // del gestionale (p.mapView o qualsiasi altra view in uso dall'utente). Questa view è
@@ -927,7 +927,16 @@ async function buildMapPrintPdfBlob (view: any, printServiceUrl: string, opts: D
     }
 
     const printScale = Number(opts.mapScale) || Number(view?.scale) || 0
-    const printExtent = printScale > 0 ? computePrintExtentForView(view, printScale, opts.mapLayout) ?? undefined : undefined
+    const rawPrintExtent = printScale > 0 ? computePrintExtentForView(view, printScale, opts.mapLayout) : null
+    const printExtent: { xmin: number; ymin: number; xmax: number; ymax: number; spatialReference?: any } | undefined = rawPrintExtent
+      ? {
+          xmin: Number((rawPrintExtent as any).xmin),
+          ymin: Number((rawPrintExtent as any).ymin),
+          xmax: Number((rawPrintExtent as any).xmax),
+          ymax: Number((rawPrintExtent as any).ymax),
+          spatialReference: (rawPrintExtent as any).spatialReference
+        }
+      : undefined
 
     // === DIAGNOSTICA TEMPORANEA — rimuovere dopo il debug ===
     console.warn('[GII-LEGENDA-DEBUG] scale=', view?.scale, 'resolution=', view?.resolution,
@@ -1159,7 +1168,7 @@ async function normalizeRasterAttachmentForPdf (
   try {
     const createBitmap = (window as any)?.createImageBitmap
     if (typeof createBitmap === 'function') {
-      const bitmap = await createBitmap(blob, { imageOrientation: 'from-image' }).catch(() => null)
+      const bitmap = await createBitmap(blob, { imageOrientation: 'from-image' }).catch((): null => null)
       if (bitmap) {
         try {
           const normalized = await drawToCanvas(bitmap, bitmap.width, bitmap.height)
@@ -1473,9 +1482,9 @@ export default function AnteprimaPanel (p: {
         const [MapView, Map, WebMap, FeatureLayer, Portal] = await Promise.all([
           loadEsriModule<any>('esri/views/MapView'),
           loadEsriModule<any>('esri/Map'),
-          loadEsriModule<any>('esri/WebMap').catch(() => null),
+          loadEsriModule<any>('esri/WebMap').catch((): null => null),
           loadEsriModule<any>('esri/layers/FeatureLayer'),
-          loadEsriModule<any>('esri/portal/Portal').catch(() => null)
+          loadEsriModule<any>('esri/portal/Portal').catch((): null => null)
         ])
         if (cancelled || !technicalMapContainerRef.current) return
         let map: any = null

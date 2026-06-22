@@ -84,7 +84,7 @@ function buildNumeroPraticaClause(tipo: TipoPratica, raw: string): string | null
     return parts.join(' AND ')
   }
   if (tipo === 'rapporto') { const n = /^R-/i.test(v) ? v : `R-${v}`; return `numero_rapporto_tecnico = '${sqlEscapePratica(n)}'` }
-  if (tipo === 'verbale') { const n = /^V-/i.test(v) ? v : `V-${v}`; return `numero_verbale = '${sqlEscapePratica(n)}'` }
+  if (tipo === 'verbale') { const n = /^V-/i.test(v) ? v : `V-${v}`; return `numero_atto_accertamento = '${sqlEscapePratica(n)}'` }
   return null
 }
 

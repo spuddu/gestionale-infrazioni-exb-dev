@@ -1929,7 +1929,7 @@ function GeneralCompactPanel (props: {
           <GeneralCompactRow label="Ufficio" value={props.ufficio} singleValue />
           <GeneralCompactRow label="Rilevazione n." value={props.numeroRilevazione} dateLabel="Data e ora:" dateValue={props.dataRilevazione} />
           <GeneralCompactRow label="Rapporto n." value={props.numeroRapporto} dateLabel="Data e ora:" dateValue={props.dataRapporto} />
-          <GeneralCompactRow label="Verbale n." value={props.numeroVerbale} dateLabel="Data e ora:" dateValue={props.dataVerbale} />
+          <GeneralCompactRow label="Atto n." value={props.numeroVerbale} dateLabel="Data e ora:" dateValue={props.dataVerbale} />
         </div>
       </DetailSectionCard>
     </div>
@@ -2685,8 +2685,8 @@ const ITER_TECHNICAL_MODIFIED_FIELDS = new Set([
   // editati manualmente dall'operatore e quindi non vanno elencati tra i campi modificati.
   'numero_rapporto_tecnico',
   'data_rapporto_tecnico',
-  'numero_verbale',
-  'data_verbale',
+  'numero_atto_accertamento',
+  'data_atto_accertamento',
 
   // Campi automatici di stato/esito/presa in carico del workflow.
   'stato_TR',
@@ -2694,22 +2694,22 @@ const ITER_TECHNICAL_MODIFIED_FIELDS = new Set([
   'stato_RZ',
   'stato_RI',
   'stato_DT',
-  'stato_DA',
+  'determinazione_stato',
   'dt_stato_TR',
   'dt_stato_TI',
   'dt_stato_RZ',
   'dt_stato_RI',
   'dt_stato_DT',
-  'dt_stato_DA',
+  'determinazione_data',
   'esito_DT',
-  'esito_DA',
+  'determinazione_numero',
   'dt_esito_DT',
-  'dt_esito_DA',
+  'determinazione_trasmessa_firma_il',
   'dt_presa_in_carico_TI',
   'dt_presa_in_carico_RZ',
   'dt_presa_in_carico_RI',
   'dt_presa_in_carico_DT',
-  'dt_presa_in_carico_DA',
+  'determinazione_registrata_il',
 
   'ns_importo_spese_generali',
   'ns_ricalcolata_il',
@@ -2731,8 +2731,8 @@ const ITER_TECHNICAL_MODIFIED_ALIASES = new Set([
   'Assegnazione TI AMM effettuata da',
   'Numero rapporto tecnico',
   'Data rapporto tecnico',
-  'Numero verbale',
-  'Data verbale',
+  'Numero atto',
+  'Data atto',
   'Username TI assegnato',
   'Username TI AMM assegnato',
   'TI assegnato',
@@ -3890,7 +3890,7 @@ function DetailTabsPanel (props: {
   }, [data])
 
   const numeroVerbale = React.useMemo(() => {
-    return String(pickAttrCI(data, ['numero_verbale', 'Numero_verbale', 'NUMERO_VERBALE']) || '').trim()
+    return String(pickAttrCI(data, ['numero_atto_accertamento', 'Numero_verbale', 'NUMERO_VERBALE']) || '').trim()
   }, [data])
 
   const [tab, setTab] = React.useState<string>(tabs[0]?.id || 'anagrafica')
@@ -4234,7 +4234,7 @@ const isPgOnlyField = React.useCallback((fieldName: string) => {
     }
     return rows
   }, [data, toLabel, classifyTipoSoggetto, isPfOnlyField, isPgOnlyField, aliasMap, fieldTypeMap])
-// Iter: blocchi DT/DA basati su stato/esito e date; i vecchi campi presa_in_carico_DT/DA sono deprecati.
+// Iter: blocchi DT / Determinazione basati su stato/esito e date.
   const dtPresaDT = data ? data.dt_presa_in_carico_DT : null
   const statoDT = data ? data.stato_DT : null
   const dtStatoDT = data ? data.dt_stato_DT : null
@@ -4242,12 +4242,10 @@ const isPgOnlyField = React.useCallback((fieldName: string) => {
   const dtEsitoDT = data ? data.dt_esito_DT : null
   const noteDT = data ? data.note_DT : null
 
-  const dtPresaDA = data ? data.dt_presa_in_carico_DA : null
-  const statoDA = data ? data.stato_DA : null
-  const dtStatoDA = data ? data.dt_stato_DA : null
-  const esitoDA = data ? data.esito_DA : null
-  const dtEsitoDA = data ? data.dt_esito_DA : null
-  const noteDA = data ? data.note_DA : null
+  const determinazioneStato = data ? data.determinazione_stato : null
+  const determinazioneNumero = data ? data.determinazione_numero : null
+  const determinazioneData = data ? data.determinazione_data : null
+  const determinazioneTrasIl = data ? data.determinazione_trasmessa_firma_il : null
 
 
 
@@ -4575,7 +4573,7 @@ const isPgOnlyField = React.useCallback((fieldName: string) => {
     const ufficioRaw = pickAttrCI(data, ['ufficio_zona', 'Ufficio_zona', 'UFFICIO_ZONA', 'ufficio'])
     const dataRil = pickRilevazioneDateValueForDisplay(data)
     const dataRap = pickAttrCI(data, ['data_rapporto_tecnico', 'Data_rapporto_tecnico', 'DATA_RAPPORTO_TECNICO'])
-    const dataVerb = pickAttrCI(data, ['data_verbale', 'Data_verbale', 'DATA_VERBALE'])
+    const dataVerb = pickAttrCI(data, ['data_atto_accertamento', 'Data_verbale', 'DATA_VERBALE'])
     return {
       area: formatAreaLabel(getFieldLabel('area_cod', areaRaw)),
       settore: formatSettoreLabel(getFieldLabel('settore_cod', settoreRaw)),
@@ -5112,10 +5110,8 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
     'esito_DT', 'dt_esito_DT',
     'note_DT',
 
-    'dt_presa_in_carico_DA',
-    'stato_DA', 'dt_stato_DA',
-    'esito_DA', 'dt_esito_DA',
-    'note_DA',
+    'determinazione_stato', 'determinazione_numero', 'determinazione_data',
+    'determinazione_trasmessa_firma_il', 'determinazione_registrata_il',
 
     // Campi codificati testuali introdotti nella migrazione; restano nascosti
     // nel dettaglio, ma vengono letti per mantenere cache/selezione coerenti.

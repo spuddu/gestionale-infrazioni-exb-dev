@@ -358,7 +358,7 @@ export async function ensureGiiPrintableMapLayersReady (view: any): Promise<void
     await withTimeout(Promise.all(layers.slice(0, 48).map(item => {
       const loaders = [item.layer, ...(item.ancestors || [])]
         .filter(Boolean)
-        .map(layer => typeof layer?.load === 'function' ? layer.load().catch(() => null) : Promise.resolve(null))
+        .map(layer => typeof layer?.load === 'function' ? layer.load().catch((): null => null) : Promise.resolve(null))
       return Promise.all(loaders)
     })), null as any, 2500)
   } catch {}
@@ -704,7 +704,7 @@ async function getArcgisToken (url: string): Promise<string> {
     const esriId = (window as any).__esri?.id || (window as any).esriConfig?.identity
     if (esriId?.getCredential) {
       const cred = await Promise.race([
-        Promise.resolve(esriId.getCredential(url, { prompt: false })).catch(() => null),
+        Promise.resolve(esriId.getCredential(url, { prompt: false })).catch((): null => null),
         new Promise<null>(resolve => setTimeout(() => resolve(null), 800))
       ])
       if ((cred as any)?.token) return String((cred as any).token)
@@ -817,7 +817,7 @@ async function buildLegendItemsForLayerInExtent (
   try {
     await withTimeout(Promise.all([item.layer, ...(item.ancestors || [])]
       .filter(Boolean)
-      .map(layer => typeof layer?.load === 'function' ? layer.load().catch(() => null) : Promise.resolve(null))), null as any, 1800)
+      .map(layer => typeof layer?.load === 'function' ? layer.load().catch((): null => null) : Promise.resolve(null))), null as any, 1800)
   } catch {}
   const label = String(item.title || item.layer?.title || item.layer?.id || item.layer?.name || '').trim()
   if (!label) return []

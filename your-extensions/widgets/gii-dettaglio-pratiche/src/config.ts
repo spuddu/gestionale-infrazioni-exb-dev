@@ -23,8 +23,8 @@ export const DETAIL_GENERAL_FIELDS: string[] = [
   'data_rilevazione',
   'numero_rapporto_tecnico',
   'data_rapporto_tecnico',
-  'numero_verbale',
-  'data_verbale'
+  'numero_atto_accertamento',
+  'data_atto_accertamento'
 ]
 
 export const DETAIL_DEFAULT_TAB_FIELDS: TabFields = {

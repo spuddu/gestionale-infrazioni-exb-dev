@@ -130,7 +130,7 @@ export const GII_ALERT_FIELDS = [
   'origine_pratica',
   'stato_TI_AMM',
   'stato_RI_AMM',
-  'stato_DA',
+  'determinazione_stato',
   'stato_RZ_TEC',
   'stato_RZ_AGR',
   'stato_RZ',
@@ -148,7 +148,7 @@ export const GII_ALERT_FIELDS = [
   'stato_DT',
   'dt_stato_TI_AMM',
   'dt_stato_RI_AMM',
-  'dt_stato_DA',
+  'determinazione_data',
   'dt_stato_RZ_TEC',
   'dt_stato_RZ_AGR',
   'dt_stato_RZ',
@@ -159,10 +159,10 @@ export const GII_ALERT_FIELDS = [
   'dt_stato_RI_AGR',
   'dt_stato_DT_AGR',
   'tipo_atto_amm',
-  'numero_verbale',
-  'data_verbale',
-  'esito_DA',
-  'dt_esito_DA',
+  'numero_atto_accertamento',
+  'data_atto_accertamento',
+  'determinazione_numero',
+  'determinazione_trasmessa_firma_il',
   'notifica_data',
   'notifica_esito',
   'pagamento_scadenza',
@@ -447,14 +447,12 @@ function isPaymentCompleted (data: Record<string, any>, expectedAmount: number):
 
 function isAttoDefinitivoForAlerts (data: Record<string, any>): boolean {
   const tipoAtto = normalizeAlertCode(attr(data, ['tipo_atto_amm']))
-  const prevedeVerbale = tipoAtto === 'VERBALE' || tipoAtto === 'VERBALE_RISARCIMENTO'
-  const esitoDa = asNumber(attr(data, ['esito_DA']))
-  const statoDa = asNumber(attr(data, ['stato_DA']))
-  const approvatoDa = esitoDa === 2 || statoDa === 4
-  if (prevedeVerbale) {
-    return approvatoDa || (hasValue(attr(data, ['numero_verbale'])) && hasValue(attr(data, ['data_verbale'])))
+  const prevedeAtto = tipoAtto === 'VERBALE' || tipoAtto === 'VERBALE_RISARCIMENTO'
+  const determinazioneAdottata = normalizeAlertCode(attr(data, ['determinazione_stato'])) === 'ADOTTATA' || (hasValue(attr(data, ['determinazione_numero'])) && hasValue(attr(data, ['determinazione_data'])))
+  if (prevedeAtto) {
+    return hasValue(attr(data, ['numero_atto_accertamento'])) && hasValue(attr(data, ['data_atto_accertamento']))
   }
-  return approvatoDa
+  return determinazioneAdottata
 }
 
 function isAttoNotificatoForAlerts (data: Record<string, any>): boolean {
@@ -720,7 +718,6 @@ function takeChargeConfigForRole (roleAreaKey: string): { tipo: GiiAlertType, fi
   switch (roleAreaKey) {
     case 'TI_AMM': return { tipo: 'PRESA_IN_CARICO_TI_AMM', fieldNames: ['stato_TI_AMM'], title: 'Pratica da prendere in carico' }
     case 'RI_AMM': return { tipo: 'PRESA_IN_CARICO_RI_AMM', fieldNames: ['stato_RI_AMM'], title: 'Pratica da prendere in carico' }
-    case 'DA': return { tipo: 'PRESA_IN_CARICO_DA', fieldNames: ['stato_DA'], title: 'Pratica da prendere in carico' }
 
     case 'RZ_TEC': return { tipo: 'PRESA_IN_CARICO_RZ_TEC', fieldNames: ['stato_RZ_TEC', 'stato_RZ', 'presa_in_carico_RZ_TEC', 'presa_in_carico_RZ'], title: 'Rapporto da prendere in carico' }
     case 'RZ_AGR': return { tipo: 'PRESA_IN_CARICO_RZ_AGR', fieldNames: ['stato_RZ_AGR', 'stato_RZ', 'presa_in_carico_RZ_AGR', 'presa_in_carico_RZ'], title: 'Rapporto da prendere in carico' }

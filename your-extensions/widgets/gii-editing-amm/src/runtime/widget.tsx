@@ -18,7 +18,7 @@ function loadEsriModule<T = any> (path: string): Promise<T> {
   })
 }
 
-type RoleCode = 'TI_AMM' | 'RI_AMM' | 'DA' | 'ADMIN' | string
+type RoleCode = 'TI_AMM' | 'RI_AMM' | 'ADMIN' | string
 
 type SelectedState = {
   ds?: any | null
@@ -152,12 +152,12 @@ const ADMIN_FIELDS: AdminField[] = [
 
   { group: 'contestazioni_importi', name: 'tipo_atto_amm', label: 'Tipo atto amministrativo (automatico)', kind: 'domain', readonly: true },
   { group: 'contestazioni_importi', name: 'oggetto_atto_amm', label: 'Oggetto atto amministrativo (automatico)', kind: 'text', full: true, readonly: true },
-  { group: 'verbale', name: 'numero_verbale', label: 'Numero verbale (assegnato all’approvazione DA)', kind: 'readonly-text', readonly: true },
-  { group: 'verbale', name: 'data_verbale', label: 'Data verbale (assegnata all’approvazione DA)', kind: 'readonly-date', readonly: true },
+  { group: 'verbale', name: 'numero_atto_accertamento', label: 'Numero atto di accertamento e contestazione', kind: 'text' },
+  { group: 'verbale', name: 'data_atto_accertamento', label: 'Data atto di accertamento e contestazione', kind: 'date' },
   { group: 'verbale', name: 'note_atto_amm', label: 'Note amministrative', kind: 'textarea', full: true },
 
-  { group: 'notifica', name: 'protocollo_verbale_numero', label: 'Numero protocollo atto', kind: 'text' },
-  { group: 'notifica', name: 'protocollo_verbale_data', label: 'Data protocollo atto', kind: 'date' },
+  { group: 'notifica', name: 'protocollo_atto_accertamento_numero', label: 'Numero protocollo atto', kind: 'text' },
+  { group: 'notifica', name: 'protocollo_atto_accertamento_data', label: 'Data protocollo atto', kind: 'date' },
   { group: 'notifica', name: 'notifica_tipo', label: 'Tipo notifica', kind: 'domain' },
   { group: 'notifica', name: 'notifica_data', label: 'Data notifica', kind: 'date' },
   { group: 'notifica', name: 'notifica_esito', label: 'Esito notifica', kind: 'domain' },
@@ -193,8 +193,6 @@ const ADMIN_FIELDS: AdminField[] = [
   { group: 'bonifico', name: 'bonifico_cro_trn', label: 'CRO/TRN bonifico', kind: 'text' },
   { group: 'bonifico', name: 'bonifico_data_accredito', label: 'Data accredito bonifico', kind: 'date' },
 
-  { group: 'chiusura', name: 'verbale_pdf_generato_il', label: 'PDF atto generato il', kind: 'readonly-date', readonly: true },
-  { group: 'chiusura', name: 'verbale_pdf_generato_da', label: 'PDF atto generato da', kind: 'readonly-text', readonly: true },
   { group: 'chiusura', name: 'istruttoria_amm_chiusa_il', label: 'Istruttoria amministrativa chiusa il', kind: 'readonly-date', readonly: true },
   { group: 'chiusura', name: 'istruttoria_amm_chiusa_da', label: 'Istruttoria amministrativa chiusa da', kind: 'readonly-text', readonly: true },
 
@@ -317,14 +315,14 @@ const PAYMENT_MAIN_FIELDS = ['pagamento_modalita', 'pagamento_stato', 'pagamento
 const PAYMENT_NOTE_FIELDS = ['pagamento_note']
 const PAGOPA_FIELDS = ['pagopa_iuv', 'pagopa_codice_avviso']
 const BONIFICO_FIELDS = ['bonifico_conto_cod', 'bonifico_iban_snapshot', 'bonifico_intestatario_snapshot', 'bonifico_causale', 'bonifico_cro_trn', 'bonifico_data_accredito']
-const PROTOCOLLO_ATTO_FIELDS = ['protocollo_verbale_numero', 'protocollo_verbale_data']
+const PROTOCOLLO_ATTO_FIELDS = ['protocollo_atto_accertamento_numero', 'protocollo_atto_accertamento_data']
 const NOTIFICA_ATTO_FIELDS = ['notifica_tipo', 'notifica_data', 'notifica_esito', 'notifica_estremi']
 
 const SYSTEM_CALCULATED_ADMIN_FIELDS = new Set([
   'tipo_atto_amm',
   'oggetto_atto_amm',
-  'numero_verbale',
-  'data_verbale',
+  'numero_atto_accertamento',
+  'data_atto_accertamento',
   'sanzione_importo_base',
   'sanzione_importo_ridotta',
   'risarcimento_danni_importo',
@@ -524,7 +522,7 @@ async function queryNotaSpeseDetailRowsForPractice (data: Record<string, any>): 
       descrizione: String(pickAttrCI(attrs, ['descrizione_snapshot']) || '').trim(),
       importoRiga: parseNumberInput(pickAttrCI(attrs, ['importo_riga'])) || 0
     }
-  }).filter(row => !!row.codiceCasistica)
+  }).filter((row: NotaSpeseDetailRow) => !!row.codiceCasistica)
 }
 
 function pickAttrCI (data: any, names: string[]): any {
@@ -1780,22 +1778,28 @@ function getReportCode (data: any, oid: number | null): string {
   return normalizeRilevazioneCodeForAmm(d, oid)
 }
 
-function isDaApprovalComplete (data: Record<string, any>): boolean {
+function isDeterminazioneAdottata (data: Record<string, any>): boolean {
   const d = data || {}
-  const esitoDa = parseNumberInput(pickAttrCI(d, ['esito_DA', 'ESITO_DA']))
-  const statoDa = parseNumberInput(pickAttrCI(d, ['stato_DA', 'STATO_DA']))
-  return esitoDa === 2 || statoDa === 4
+  const stato = String(pickAttrCI(d, ['determinazione_stato']) || '').trim().toUpperCase()
+  return stato === 'ADOTTATA' || (hasAdminValue(pickAttrCI(d, ['determinazione_numero'])) && hasAdminValue(pickAttrCI(d, ['determinazione_data'])))
 }
 
 function verbaleApprovalDateValue (data: Record<string, any>): any {
   const d = data || {}
-  return pickAttrCI(d, ['data_verbale']) || pickAttrCI(d, ['dt_esito_DA', 'DT_ESITO_DA']) || pickAttrCI(d, ['dt_stato_DA', 'DT_STATO_DA'])
+  return pickAttrCI(d, ['data_atto_accertamento']) || pickAttrCI(d, ['determinazione_data']) || pickAttrCI(d, ['determinazione_registrata_il']) || pickAttrCI(d, ['determinazione_trasmessa_firma_il'])
 }
 
 function displayVerbaleApprovalDate (data: Record<string, any>, fields: LayerFieldInfo[]): string {
-  const value = verbaleApprovalDateValue(data || {})
+  const d = data || {}
+  const value = verbaleApprovalDateValue(d)
   if (!hasAdminValue(value)) return '—'
-  const fieldName = hasAdminValue(pickAttrCI(data || {}, ['data_verbale'])) ? 'data_verbale' : (hasAdminValue(pickAttrCI(data || {}, ['dt_esito_DA', 'DT_ESITO_DA'])) ? 'dt_esito_DA' : 'dt_stato_DA')
+  const fieldName = hasAdminValue(pickAttrCI(d, ['data_atto_accertamento']))
+    ? 'data_atto_accertamento'
+    : hasAdminValue(pickAttrCI(d, ['determinazione_data']))
+      ? 'determinazione_data'
+      : hasAdminValue(pickAttrCI(d, ['determinazione_registrata_il']))
+        ? 'determinazione_registrata_il'
+        : 'determinazione_trasmessa_firma_il'
   const lf = getFieldInfo(fields, fieldName)
   if (lf?.domain?.codedValues || getFallbackDomainOptions(fieldName).length) return domainLabel(lf, value, fieldName)
   return formatDateValue(value)
@@ -1803,18 +1807,18 @@ function displayVerbaleApprovalDate (data: Record<string, any>, fields: LayerFie
 
 function verbaleNumberValue (data: Record<string, any>, oid?: any): string {
   const d = data || {}
-  return String(pickAttrCI(d, ['numero_verbale']) || '').trim()
+  return String(pickAttrCI(d, ['numero_atto_accertamento']) || '').trim()
 }
 
 function displayVerbaleNumber (data: Record<string, any>, fields: LayerFieldInfo[], oid?: any, emptyLabel = '—'): string {
   const current = verbaleNumberValue(data || {}, oid)
-  if (current) return displayAdminFieldValue(data || {}, fields, 'numero_verbale', emptyLabel)
+  if (current) return displayAdminFieldValue(data || {}, fields, 'numero_atto_accertamento', emptyLabel)
   return emptyLabel
 }
 
 function isVerbaleDefinitivo (data: Record<string, any>): boolean {
   const d = data || {}
-  return isDaApprovalComplete(d) || (hasAdminValue(verbaleNumberValue(d)) && hasAdminValue(verbaleApprovalDateValue(d)))
+  return hasAdminValue(verbaleNumberValue(d)) && hasAdminValue(pickAttrCI(d, ['data_atto_accertamento']))
 }
 
 const NOTIFICA_ESITI_PERFEZIONATI = new Set(['NOTIFICATA', 'COMPIUTA_GIACENZA'])
@@ -2398,7 +2402,7 @@ function paymentStatusDisplay (code: string, fields: LayerFieldInfo[]): string {
 
 function getSanzioneReferenceDate (data: any): number {
   const d = data || {}
-  return dateMsOrNull(pickAttrCI(d, ['data_verbale', 'protocollo_verbale_data', 'notifica_data', 'data_rilevazione'])) || Date.now()
+  return dateMsOrNull(pickAttrCI(d, ['data_atto_accertamento', 'protocollo_atto_accertamento_data', 'notifica_data', 'data_rilevazione'])) || Date.now()
 }
 
 function isRowValidAt (row: any, refMs: number): boolean {
@@ -3353,12 +3357,12 @@ function CompactPracticeHeader (props: { title: string, data: Record<string, any
       ]
     },
     {
-      title: 'Direttore d\'Area',
+      title: 'Determinazione autorizzativa',
       rows: [
-        { label: 'Stato', value: compactValue(d, props.fields, 'stato_DA') },
-        { label: 'Data stato', value: compactValue(d, props.fields, 'dt_stato_DA') },
-        { label: 'Esito', value: compactValue(d, props.fields, 'esito_DA') },
-        { label: 'Data esito', value: compactValue(d, props.fields, 'dt_esito_DA') }
+        { label: 'Stato', value: compactValue(d, props.fields, 'determinazione_stato') },
+        { label: 'Numero', value: compactValue(d, props.fields, 'determinazione_numero') },
+        { label: 'Data', value: compactValue(d, props.fields, 'determinazione_data') },
+        { label: 'Trasmissione firma', value: compactValue(d, props.fields, 'determinazione_trasmessa_firma_il') }
       ]
     }
   ]
@@ -3572,8 +3576,8 @@ function ProtocolloNotificaGuidataSection (props: { data: Record<string, any>, f
   const d = props.data || {}
   const definitivo = isVerbaleDefinitivo(d)
   const hasVerbale = tipoAttoAmmPrevedeVerbale(d)
-  const protocolloNumero = pickAttrCI(d, ['protocollo_verbale_numero'])
-  const protocolloData = pickAttrCI(d, ['protocollo_verbale_data'])
+  const protocolloNumero = pickAttrCI(d, ['protocollo_atto_accertamento_numero'])
+  const protocolloData = pickAttrCI(d, ['protocollo_atto_accertamento_data'])
   const protocolloCompleto = hasAdminValue(protocolloNumero) && hasAdminValue(protocolloData)
   const esito = notificaEsitoCode(d)
   const perfezionata = isNotificaPerfezionata(d)
@@ -3585,7 +3589,7 @@ function ProtocolloNotificaGuidataSection (props: { data: Record<string, any>, f
 
   return (
     <Section title='Protocollo e notifica'>
-      {!definitivo && <InfoBox kind='warn'>{hasVerbale ? 'Protocollo e notifica vanno compilati solo dopo che il Direttore d’Area ha approvato l’istruttoria e il sistema ha assegnato numero e data del verbale.' : 'Protocollo e notifica vanno compilati solo dopo che il Direttore d’Area ha approvato l’atto amministrativo.'}</InfoBox>}
+      {!definitivo && <InfoBox kind='warn'>Protocollo e notifica vanno compilati solo dopo la registrazione di numero e data dell’atto di accertamento e contestazione.</InfoBox>}
 
       <div style={{ marginTop: definitivo ? 0 : 14, display: 'grid', gap: 12 }}>
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(230px, 1fr))', gap: 10 }}>
@@ -4813,7 +4817,7 @@ function buildVerbalePdfMap (data: any, fields: LayerFieldInfo[], profile: { use
   const rawTipoAtto = String(pickAttrCI(d, ['tipo_atto_amm']) || '').trim()
   const tipoAttoLabel = pdfFieldValue(d, fields, 'tipo_atto_amm') || rawTipoAtto
   const tiAmmNome = firstTextAttr(d, ['ti_amm_assegnato_nome', 'ti_amm_assegnato_username'])
-  const approvatoDa = isDaApprovalComplete(d)
+  const approvatoDa = isDeterminazioneAdottata(d)
   const giiDaActor = firstTextAttr(d, ['GII_da', 'gii_da'])
   const riAmmNome = firstTextAttr(d, [
     'ri_amm_nome', 'ri_amm_username',
@@ -4850,17 +4854,17 @@ function buildVerbalePdfMap (data: any, fields: LayerFieldInfo[], profile: { use
     descrizione_fatti: String(pickAttrCI(d, ['descrizione_fatti']) || ''),
     tipo_atto_amm: rawTipoAtto,
     tipo_atto_amm_label: tipoAttoLabel,
-    atto_approvato: isDaApprovalComplete(d) ? '1' : '0',
+    atto_approvato: isDeterminazioneAdottata(d) ? '1' : '0',
     protocollo_istanza_numero: String(pickAttrCI(d, ['protocollo_istanza_numero']) || ''),
     protocollo_istanza_data: pdfFieldValue(d, fields, 'protocollo_istanza_data'),
     oggetto_atto_amm: String(pickAttrCI(d, ['oggetto_atto_amm']) || ''),
     note_atto_amm: String(pickAttrCI(d, ['note_atto_amm']) || ''),
     esito_ti_amm: (() => { const v = parseNumberInput(pickAttrCI(d, ['esito_TI_AMM'])); return v === 1 ? 'Da integrare/rettificare' : v === 2 ? 'Conforme' : v === 3 ? 'Respinta' : '' })(),
     note_ti_amm: String(pickAttrCI(d, ['note_TI_AMM', 'note_atto_amm']) || ''),
-    numero_verbale: verbaleNumberValue(d, oid),
-    data_verbale: hasAdminValue(pickAttrCI(d, ['data_verbale'])) ? pdfFieldValue(d, fields, 'data_verbale') : displayVerbaleApprovalDate(d, fields),
-    protocollo_verbale: String(pickAttrCI(d, ['protocollo_verbale_numero']) || ''),
-    protocollo_verbale_data: pdfFieldValue(d, fields, 'protocollo_verbale_data'),
+    numero_atto_accertamento: verbaleNumberValue(d, oid),
+    data_atto_accertamento: hasAdminValue(pickAttrCI(d, ['data_atto_accertamento'])) ? pdfFieldValue(d, fields, 'data_atto_accertamento') : displayVerbaleApprovalDate(d, fields),
+    protocollo_verbale: String(pickAttrCI(d, ['protocollo_atto_accertamento_numero']) || ''),
+    protocollo_atto_accertamento_data: pdfFieldValue(d, fields, 'protocollo_atto_accertamento_data'),
     notifica_tipo: pdfFieldValue(d, fields, 'notifica_tipo'),
     notifica_data: pdfFieldValue(d, fields, 'notifica_data'),
     notifica_esito: pdfFieldValue(d, fields, 'notifica_esito'),
@@ -4892,19 +4896,17 @@ function buildVerbalePdfMap (data: any, fields: LayerFieldInfo[], profile: { use
     sanzione_dettaglio_calcolo: String(pickAttrCI(d, ['sanzione_dettaglio_calcolo']) || ''),
     sanzione_calcolata_il: pdfFieldValue(d, fields, 'sanzione_calcolata_il'),
     sanzione_calcolata_da: String(pickAttrCI(d, ['sanzione_calcolata_da']) || ''),
-    verbale_pdf_generato_il: pdfFieldValue(d, fields, 'verbale_pdf_generato_il'),
-    verbale_pdf_generato_da: String(pickAttrCI(d, ['verbale_pdf_generato_da']) || ''),
     istruttoria_amm_chiusa_il: pdfFieldValue(d, fields, 'istruttoria_amm_chiusa_il'),
     istruttoria_amm_chiusa_da: String(pickAttrCI(d, ['istruttoria_amm_chiusa_da']) || ''),
-    amm_iter_compilazione_nome: tiAmmNome || String(pickAttrCI(d, ['verbale_pdf_generato_da']) || ''),
+    amm_iter_compilazione_nome: tiAmmNome,
     amm_iter_compilazione_presa: pdfFieldValue(d, fields, 'dt_presa_in_carico_TI_AMM'),
-    amm_iter_compilazione_data: pdfFieldValue(d, fields, 'dt_esito_TI_AMM') || pdfFieldValue(d, fields, 'sanzione_calcolata_il') || pdfFieldValue(d, fields, 'verbale_pdf_generato_il'),
+    amm_iter_compilazione_data: pdfFieldValue(d, fields, 'dt_esito_TI_AMM') || pdfFieldValue(d, fields, 'sanzione_calcolata_il'),
     amm_iter_supervisione_nome: riAmmNome,
     amm_iter_supervisione_presa: pdfFieldValue(d, fields, 'dt_presa_in_carico_RI_AMM'),
     amm_iter_supervisione_data: pdfFieldValue(d, fields, 'dt_esito_RI_AMM') || pdfFieldValue(d, fields, 'istruttoria_amm_chiusa_il'),
     amm_iter_approvazione_nome: daNome,
-    amm_iter_approvazione_presa: pdfFieldValue(d, fields, 'dt_presa_in_carico_DA') || pdfFieldValue(d, fields, 'dt_stato_DA'),
-    amm_iter_approvazione_data: approvatoDa ? (pdfFieldValue(d, fields, 'dt_esito_DA') || displayVerbaleApprovalDate(d, fields)) : '',
+    amm_iter_approvazione_presa: pdfFieldValue(d, fields, 'determinazione_trasmessa_firma_il'),
+    amm_iter_approvazione_data: isDeterminazioneAdottata(d) ? (pdfFieldValue(d, fields, 'determinazione_data') || pdfFieldValue(d, fields, 'determinazione_registrata_il')) : '',
     data_generazione: new Date().toLocaleString('it-IT'),
     generato_da: profile.fullName || profile.username || ''
   }
@@ -4916,11 +4918,8 @@ function verbalePdfFileName (map: Record<string, string>): string {
   return `${prefix}_${base || prefix}.pdf`
 }
 
-function buildVerbalePdfGenerationMeta (profile: { username: string, fullName: string }): Record<string, any> {
-  return {
-    verbale_pdf_generato_il: Date.now(),
-    verbale_pdf_generato_da: String(profile.fullName || profile.username || '').trim()
-  }
+function buildVerbalePdfGenerationMeta (_profile: { username: string, fullName: string }): Record<string, any> {
+  return {}
 }
 
 async function buildVerbalePdfBlob (data: any, fields: LayerFieldInfo[], profile: { username: string, fullName: string }): Promise<{ blob: Blob, fileName: string }> {
@@ -5037,7 +5036,7 @@ function DatiGeneraliAmmSection (props: { title: string, data: Record<string, an
           <div style={panelStyle}>
             <div style={panelTitleStyle}>Fase amministrativa</div>
             <div style={gridStyle}>
-              {hasVerbale && <StatusSummaryItem label='Numero verbale' value={displayVerbaleNumber(d, props.fields, oid)} tone={hasAdminValue(verbaleNumberValue(d, oid)) ? 'auto' : 'warn'} />}
+              {hasVerbale && <StatusSummaryItem label='Numero atto' value={displayVerbaleNumber(d, props.fields, oid)} tone={hasAdminValue(verbaleNumberValue(d, oid)) ? 'auto' : 'warn'} />}
               <StatusSummaryItem label='Data approvazione' value={displayVerbaleApprovalDate(d, props.fields)} tone={hasAdminValue(verbaleApprovalDateValue(d)) ? 'auto' : 'warn'} />
               <StatusSummaryItem label='Stato' value={verbaleDefinitivo ? 'Definitivo' : 'In corso di istruttoria'} tone={verbaleDefinitivo ? 'auto' : 'warn'} />
               <StatusSummaryItem label='Notifica' value={verbaleNotificato ? displayAdminFieldValue(d, props.fields, 'notifica_data') : 'Non registrata'} tone={verbaleNotificato ? 'auto' : 'warn'} />
@@ -6010,11 +6009,11 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
     const current = source || {}
     const issues: string[] = []
     if (!isVerbaleDefinitivo(current)) issues.push(tipoAttoAmmPrevedeVerbale(current)
-      ? 'Proposta: verbale non ancora definitivo; numero e data saranno assegnati dopo l’approvazione del Direttore d’Area.'
-      : 'Proposta: documento non ancora definitivo; è necessaria l’approvazione del Direttore d’Area.')
+      ? 'Atto di accertamento: numero e data non ancora registrati.'
+      : 'Atto amministrativo: numero e data non ancora registrati.')
     if (!hasAdminValue(pickAttrCI(current, ['esito_TI_AMM'])) || !hasAdminValue(pickAttrCI(current, ['note_TI_AMM', 'note_atto_amm']))) issues.push('Esito verifica TI-AMM: esito o note non ancora acquisiti.')
-    const protocolloNumero = pickAttrCI(current, ['protocollo_verbale_numero'])
-    const protocolloData = pickAttrCI(current, ['protocollo_verbale_data'])
+    const protocolloNumero = pickAttrCI(current, ['protocollo_atto_accertamento_numero'])
+    const protocolloData = pickAttrCI(current, ['protocollo_atto_accertamento_data'])
     const notificaTipo = pickAttrCI(current, ['notifica_tipo'])
     const notificaData = pickAttrCI(current, ['notifica_data'])
     const notificaEsito = notificaEsitoCode(current)
@@ -6163,8 +6162,7 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
     }
     const attrs = changedAttrs(layerFields, initialDraft, draft)
     Object.entries(automaticValues || {}).forEach(([name, value]) => {
-      if (name === 'numero_verbale' || name === 'data_verbale') return
-      const real = realFieldName(layerFields, name)
+            const real = realFieldName(layerFields, name)
       if (!real) return
       const before = pickAttrCI(initialDraft, [real, name])
       if (!sameDraftValue(before, value, name)) attrs[real] = value == null || value === '' ? null : value
@@ -6227,7 +6225,7 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
     try { window.history.back() } catch {}
   }, [saving, isDirty])
 
-  const adminStyle = React.useMemo(() => {
+  const adminStyle = React.useMemo<Record<string, any>>(() => {
     const merged: Record<string, any> = { ...ADMIN_STYLE_DEFAULTS, ...cfg }
     return {
       ...merged,

@@ -143,7 +143,7 @@ export default function GiiDocumentSidebar (props: GiiDocumentSidebarProps) {
         {row}
         {expanded && (
           <div style={{ display: 'grid', gap: 4 }}>
-            {children.map(child => renderPrintableLayerNode(child, depth + 1))}
+            {children.map((child: any) => renderPrintableLayerNode(child, depth + 1))}
           </div>
         )}
       </div>
