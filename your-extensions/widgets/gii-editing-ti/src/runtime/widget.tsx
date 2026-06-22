@@ -4375,16 +4375,22 @@ function formatSurfaceHaAaCa(v: any): string {
   return `${ha}.${String(aa).padStart(2, '0')}.${String(ca).padStart(2, '0')}`
 }
 
-function NpSurfaceText(p: { value: string; onChange: (v: string) => void; disabled?: boolean }) {
+function NpSurfaceText(p: { value: string; onChange: (v: string) => void; disabled?: boolean; attention?: boolean; attentionTitle?: string }) {
   const fs = React.useContext(FormStyleCtx)
   const st = fieldBaseStyle(fs, p.disabled)
+  const attention = !!p.attention && !p.disabled
   return (
     <input
       type='text'
       inputMode='numeric'
       value={formatSurfaceHaAaCa(p.value)}
       onChange={e => p.onChange(parseSurfaceCentiareText(e.target.value))}
-      style={{ ...st, textAlign: 'right' }}
+      title={attention ? (p.attentionTitle || 'Campo da valorizzare') : undefined}
+      style={{
+        ...st,
+        textAlign: 'right',
+        ...(attention ? { border: '1px solid #dc2626', background: '#fff', color: '#7f1d1d' } : {})
+      }}
       disabled={p.disabled}
     />
   )
@@ -4692,11 +4698,10 @@ function getNotaSpeseCasisticheWithExistingRows (attrs: Record<string, any>, row
   return Array.from(byCode.values()).sort((a, b) => a.art - b.art)
 }
 
-function getSelectedViolazioniCount (attrs: Record<string, any>): number {
+function getSelectedViolazioniCount (attrs: Record<string, any>, art15Selected?: boolean): number {
   const seen = new Set<string>()
   const add = (code: string) => { if (code) seen.add(code) }
-  if (String(attrs?.norma15_parziale || '').trim()) add('Art15')
-  if (String(attrs?.norma15_totale || '').trim()) add('Art15')
+  if (art15Selected || String(attrs?.norma15_parziale || '').trim() || String(attrs?.norma15_totale || '').trim()) add('Art15')
   if (String(attrs?.norma16_17 || '').trim()) add(String(attrs?.norma16_17).trim())
   parseMultiSelect(attrs?.norma_violata3).forEach(add)
   Object.entries(NORMA3_TO_VFIELD).forEach(([code, field]) => {
@@ -7714,7 +7719,7 @@ React.useEffect(() => {
       surfaceToCentiareNumber(g('sup_dichiarata_art15')) > 0 ||
       surfaceToCentiareNumber(g('sup_irrigata_art15')) > 0
 
-    if (!hasTipoAbuso15 && art15HasData) {
+    if (!hasTipoAbuso15 && (art15Selected || art15HasData)) {
       setValidationPopup({
         title: 'Tipo di abuso obbligatorio',
         text: "Per l'Art. 15, selezionare il tipo di abuso: Parziale oppure Totale."
@@ -7808,6 +7813,14 @@ React.useEffect(() => {
           return
         }
       }
+    }
+
+    if (selectedViolazioniCount > 0 && !String(g('presenza_trasgressore') || '').trim()) {
+      setValidationPopup({
+        title: 'Presenza trasgressore obbligatoria',
+        text: 'Indicare se il trasgressore era presente al momento del rilevamento.'
+      })
+      return
     }
 
     const hasValidExistingMapPoint = !!(p.existingGeomWgs84 && (Number(p.existingGeomWgs84.x) !== 0 || Number(p.existingGeomWgs84.y) !== 0))
@@ -8111,7 +8124,15 @@ ${e?.message || String(e)}`
   
   const showDatiGen = p.showDatiGenerali
 
-  const selectedViolazioniCount = React.useMemo(() => getSelectedViolazioniCount(draft), [draft])
+  const selectedViolazioniCount = React.useMemo(() => getSelectedViolazioniCount(draft, art15Selected), [draft, art15Selected])
+  const prevSelectedViolazioniCountRef = React.useRef(selectedViolazioniCount)
+  React.useEffect(() => {
+    const prev = prevSelectedViolazioniCountRef.current
+    prevSelectedViolazioniCountRef.current = selectedViolazioniCount
+    if (!isRiAgrTecLimitedEdit && prev > 0 && selectedViolazioniCount === 0 && String(g('presenza_trasgressore') || '').trim()) {
+      set('presenza_trasgressore', '')
+    }
+  }, [selectedViolazioniCount])
   const noteSpeseExpectedCasistiche = React.useMemo(() => getNotaSpeseCasistiche(draft), [draft])
   const noteSpeseCasistiche = React.useMemo(() => getNotaSpeseCasisticheWithExistingRows(draft, noteSpeseRowsDraft), [draft, noteSpeseRowsDraft])
   const noteSpeseExpectedCount = React.useMemo(() => noteSpeseExpectedCasistiche.length, [noteSpeseExpectedCasistiche])
@@ -8479,7 +8500,10 @@ ${e?.message || String(e)}`
       // Violazione — Descrizione
       case 'descrizione_fatti': return { label: 'Descrizione dettagliata della violazione', el: <NpText value={g('descrizione_fatti')} onChange={v => set('descrizione_fatti', v)} multiline uppercase={false} disabled={saving}/> }
       case 'circostanze': return { label: 'Circostanze rilevanti', el: <NpText value={g('circostanze')} onChange={v => set('circostanze', v)} multiline uppercase={false} disabled={saving}/> }
-      case 'presenza_trasgressore': return { label: <span style={{ whiteSpace: 'nowrap' }}>Il trasgressore era presente?</span>, el: <NpSel value={g('presenza_trasgressore')} onChange={v => set('presenza_trasgressore', v)} options={CHOICES.presenza} disabled={saving}/> }
+      case 'presenza_trasgressore': {
+        const presenzaPending = selectedViolazioniCount > 0 && !String(g('presenza_trasgressore') || '').trim()
+        return { label: <span style={{ whiteSpace: 'nowrap' }}>Il trasgressore era presente?</span>, el: <NpSel value={g('presenza_trasgressore')} onChange={v => set('presenza_trasgressore', v)} options={CHOICES.presenza} disabled={saving} attention={presenzaPending} attentionTitle='Campo obbligatorio se è selezionata almeno una violazione'/> }
+      }
       case 'descrizione_luogo': return { label: 'Descrizione del luogo', el: <NpText value={g('descrizione_luogo')} onChange={v => set('descrizione_luogo', v)} multiline uppercase={false} disabled={saving}/> }
       // Dati tecnici
       case 'distretto': return { label: 'Distretto', el: <NpText value={g('distretto')} onChange={v => set('distretto', v)} disabled={saving}/> }
@@ -8884,18 +8908,24 @@ ${e?.message || String(e)}`
           return <div style={{ display: 'grid', gridTemplateColumns: columns, gap }}>{nodes}</div>
         }
         const canEditRegularField = (fieldName: string, enabled = true) => enabled && !saving && !isRiAgrTecLimitedEdit && canEditFieldForCurrentProfile(fieldName)
-        const surfaceTextField = (fieldName: string, label: string, value: string, onChange: (v: string) => void, enabled: boolean, lockedValue?: string) => (
+        const surfaceTextField = (fieldName: string, label: string, value: string, onChange: (v: string) => void, enabled: boolean, lockedValue?: string, attentionTitle?: string) => {
+          const editable = canEditRegularField(fieldName, enabled) && lockedValue == null
+          const pending = !!attentionTitle && editable && surfaceToCentiareNumber(value) <= 0
+          return (
+            <NpField label={label}>
+              <NpSurfaceText
+                value={lockedValue != null ? lockedValue : value}
+                onChange={onChange}
+                disabled={!editable}
+                attention={pending}
+                attentionTitle={attentionTitle}
+              />
+            </NpField>
+          )
+        }
+        const selectField = (fieldName: string, label: string, value: string, onChange: (v: string) => void, options: readonly {v:string;l:string}[], enabled = true, attentionTitle?: string) => (
           <NpField label={label}>
-            <NpSurfaceText
-              value={lockedValue != null ? lockedValue : value}
-              onChange={onChange}
-              disabled={!canEditRegularField(fieldName, enabled) || lockedValue != null}
-            />
-          </NpField>
-        )
-        const selectField = (fieldName: string, label: string, value: string, onChange: (v: string) => void, options: readonly {v:string;l:string}[], enabled = true) => (
-          <NpField label={label}>
-            <NpSel value={value} onChange={onChange} options={options} disabled={!canEditRegularField(fieldName, enabled)}/>
+            <NpSel value={value} onChange={onChange} options={options} disabled={!canEditRegularField(fieldName, enabled)} attention={!!attentionTitle && enabled && !value} attentionTitle={attentionTitle}/>
           </NpField>
         )
         const choiceBox = (value: 'Art16' | 'Art17', title: string) => {
@@ -8908,8 +8938,16 @@ ${e?.message || String(e)}`
               disabled={disabled}
               onChange={() => {
                 if (disabled) return
-                set('norma16_17', active ? '' : value)
-                if (value !== 'Art17') set('art17_tipo', '')
+                setDraft(prev => ({
+                  ...prev,
+                  norma16_17: active ? '' : value,
+                  art17_tipo: '',
+                  sup_dichiarata_art16: '',
+                  sup_dichiarata_art17_1: '',
+                  sup_irrigata_art17_1: '',
+                  sup_dichiarata_art17_2: '',
+                  sup_irrigata_art17_2: ''
+                }))
               }}
               style={{ margin: 0, flexShrink: 0, accentColor: '#4b5563' }}
             />
@@ -9158,10 +9196,10 @@ ${e?.message || String(e)}`
                   <div style={{ ...S.lbl, color: formStyle.labelColor, fontSize: formStyle.labelFontSize, visibility: 'hidden' }}>Violazione</div>
                   {art15ChoiceBox()}
                 </div>
-                {selectField('tipo_abuso', 'Tipo di abuso', tipoAbuso, v => { set('tipo_abuso', v); set('norma15_parziale', ''); set('norma15_totale', '') }, CHOICES.tipo_abuso, art15Selected)}
+                {selectField('tipo_abuso', 'Tipo di abuso', tipoAbuso, v => { set('tipo_abuso', v); set('norma15_parziale', ''); set('norma15_totale', '') }, CHOICES.tipo_abuso, art15Selected, 'Tipo di abuso da selezionare')}
                 {fieldNode('norma15_sel', 'Occorrenza')}
-                {surfaceTextField('sup_dichiarata_art15', 'Sup. dichiarata (ha.a.ca)', g('sup_dichiarata_art15'), v => set('sup_dichiarata_art15', v), art15SupEnabled, art15SupDichLocked ? '0' : undefined)}
-                {surfaceTextField('sup_irrigata_art15', 'Sup. irrigata (ha.a.ca)', g('sup_irrigata_art15'), v => set('sup_irrigata_art15', v), art15SupEnabled)}
+                {surfaceTextField('sup_dichiarata_art15', 'Sup. dichiarata (ha.a.ca)', g('sup_dichiarata_art15'), v => set('sup_dichiarata_art15', v), art15SupEnabled, art15SupDichLocked ? '0' : undefined, 'Superficie dichiarata da valorizzare')}
+                {surfaceTextField('sup_irrigata_art15', 'Sup. irrigata (ha.a.ca)', g('sup_irrigata_art15'), v => set('sup_irrigata_art15', v), art15SupEnabled, undefined, 'Superficie irrigata da valorizzare')}
               </div>
             )}
 
@@ -9172,7 +9210,7 @@ ${e?.message || String(e)}`
                     <div style={{ ...S.lbl, color: formStyle.labelColor, fontSize: formStyle.labelFontSize, visibility: 'hidden' }}>Violazione</div>
                     {choiceBox('Art16', 'Art. 16 - Presentazione tardiva comunicazione di irrigazione')}
                   </div>
-                  {surfaceTextField('sup_dichiarata_art16', 'Sup. dichiarata (ha.a.ca)', g('sup_dichiarata_art16'), v => set('sup_dichiarata_art16', v), art16Selected)}
+                  {surfaceTextField('sup_dichiarata_art16', 'Sup. dichiarata (ha.a.ca)', g('sup_dichiarata_art16'), v => set('sup_dichiarata_art16', v), art16Selected, undefined, 'Superficie dichiarata da valorizzare')}
                   {surfaceTextField('sup_irrigata_art16', 'Sup. irrigata (ha.a.ca)', '0', () => {}, art16Selected, '0')}
                 </div>
                 <div style={{ display: 'grid', gridTemplateColumns: termsGridColumns, gap: 10, alignItems: 'start' }}>
@@ -9180,9 +9218,9 @@ ${e?.message || String(e)}`
                     <div style={{ ...S.lbl, color: formStyle.labelColor, fontSize: formStyle.labelFontSize, visibility: 'hidden' }}>Violazione</div>
                     {choiceBox('Art17', 'Art. 17 - Presentazione tardiva comunicazione di variazione o di rinuncia')}
                   </div>
-                  {selectField('art17_tipo', 'Tipo comunicazione', art17tipo, v => set('art17_tipo', v), CHOICES.art17_tipo, art17Selected)}
-                  {surfaceTextField(art17DichField, 'Sup. dichiarata (ha.a.ca)', art17DichValue, v => set(art17DichField, v), art17SurfaceEnabled)}
-                  {surfaceTextField(art17SecondField, art17SecondLabel, art17SecondValue, v => set(art17SecondField, v), art17SurfaceEnabled, art17RinSelected ? '0' : undefined)}
+                  {selectField('art17_tipo', 'Tipo comunicazione', art17tipo, v => set('art17_tipo', v), CHOICES.art17_tipo, art17Selected, 'Tipo di comunicazione da selezionare')}
+                  {surfaceTextField(art17DichField, 'Sup. dichiarata (ha.a.ca)', art17DichValue, v => set(art17DichField, v), art17SurfaceEnabled, undefined, 'Superficie dichiarata da valorizzare')}
+                  {surfaceTextField(art17SecondField, art17SecondLabel, art17SecondValue, v => set(art17SecondField, v), art17SurfaceEnabled, art17RinSelected ? '0' : undefined, 'Superficie da valorizzare')}
                 </div>
               </div>
             )}
