@@ -5396,7 +5396,7 @@ ${noteTrim}` : noteTrim)
   const workflowRespintaItem = workflowMenuEnabledItems.find(item => item.key === 'RESPINGI') || null
   const workflowDirectActionItems = workflowMenuEnabledItems.filter(item => !isWorkflowEsitoPendingKey(item.key))
   const showEsitoDrivenWorkflow = Boolean(workflowConformeItem || workflowIntegrationItems.length > 0 || workflowRespintaItem)
-  const useUnifiedWorkflowActionSelect = role === 'RZ'
+  const useUnifiedWorkflowActionSelect = role === 'RZ' || role === 'RI_AMM'
   const unifiedWorkflowActionItems = useUnifiedWorkflowActionSelect ? workflowMenuEnabledItems : []
 
   function buildDefaultWorkflowNote (nextPending: Pending): string {

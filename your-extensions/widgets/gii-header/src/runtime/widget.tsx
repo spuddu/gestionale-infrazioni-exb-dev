@@ -1073,6 +1073,22 @@ function parseSectorCodeCandidate (value: any): string {
 }
 
 function sectorCodeFromAlert (alert: GiiAlertItem | null | undefined): string {
+  const actorValues = [
+    ...alertSenderUserCandidates(alert),
+    ...alertRawValuesPracticeFirst(alert, ['creato_da', 'aggiornato_da', 'GII_da', 'gii_da', 'chiave_attivita'])
+  ]
+
+  const actorCodes = actorValues
+    .map(value => parseSectorCodeCandidate(value))
+    .filter(Boolean)
+
+  // Nei messaggi di workflow il settore deve riferirsi alla pratica/mittente reale.
+  // Alcune attività correnti possono avere campi diretti valorizzati con GI
+  // (Gestione irrigua), che è una categoria organizzativa generica e non il
+  // distretto della pratica. Se dal mittente reale si ricava un distretto
+  // (es. Test_RZ_D1 -> D1), quel valore deve prevalere su GI.
+  const actorDistrict = actorCodes.find(code => /^D[1-6]$/.test(code) || code === 'DS' || code === 'CR') || ''
+
   const directValues = alertRawValuesPracticeFirst(alert, [
     'settore_cod',
     'settoreCod',
@@ -1084,31 +1100,50 @@ function sectorCodeFromAlert (alert: GiiAlertItem | null | undefined): string {
 
   for (const value of directValues) {
     const code = parseSectorCodeCandidate(value)
-    if (code) return code
+    if (!code) continue
+    if (code === 'GI' && actorDistrict) return actorDistrict
+    return code
   }
 
-  // Se l'attività corrente non porta il settore, lo ricaviamo dal mittente reale
-  // quando contiene il codice organizzativo, ad esempio Test_RZ_D1.
-  // Questo evita di aspettare l'arricchimento dal FL madre solo per mostrare la riga Settore.
-  const actorValues = [
-    ...alertSenderUserCandidates(alert),
-    ...alertRawValuesPracticeFirst(alert, ['creato_da', 'aggiornato_da', 'GII_da', 'gii_da', 'chiave_attivita'])
-  ]
+  return actorDistrict || actorCodes[0] || ''
+}
 
-  for (const value of actorValues) {
-    const code = parseSectorCodeCandidate(value)
-    if (code) return code
-  }
+function parseAreaCodeCandidate (value: any): string {
+  const raw = String(value ?? '').trim()
+  if (!raw) return ''
+
+  const compact = raw.toUpperCase().replace(/_/g, '-').replace(/\s+/g, '')
+  if (compact === 'AMM' || compact === 'AGR' || compact === 'TEC') return compact
+
+  const n = Number(compact)
+  if (Number.isFinite(n)) return String(AREA_LABEL[n] || '').trim().toUpperCase()
+
+  // Fallback per valori compositi, ad esempio username/chiavi tipo
+  // Test_DT_AGR, Test_RI_TEC, RI-AMM o TI_AMM. Nei messaggi di
+  // workflow la riga Area deve riferirsi al mittente reale, non al
+  // destinatario dell'attività corrente.
+  const spaced = raw.toUpperCase().replace(/_/g, ' ').replace(/-/g, ' ').replace(/\s+/g, ' ').trim()
+  if (/(?:^|\s)AGR(?:\s|$)/.test(spaced)) return 'AGR'
+  if (/(?:^|\s)TEC(?:\s|$)/.test(spaced)) return 'TEC'
+  if (/(?:^|\s)AMM(?:\s|$)/.test(spaced)) return 'AMM'
 
   return ''
 }
 
 function areaCodeFromAlert (alert: GiiAlertItem | null | undefined): string {
-  const raw = alertPracticeRawValue(alert, ['area_cod', 'areaCod', 'area', 'cod_area', 'destinatario_area'])
-  const text = String(raw ?? '').trim().toUpperCase().replace(/_/g, '-')
-  if (text === 'AMM' || text === 'AGR' || text === 'TEC') return text
-  const n = Number(text)
-  return Number.isFinite(n) ? String(AREA_LABEL[n] || '').trim().toUpperCase() : ''
+  const actorValues = [
+    ...alertSenderUserCandidates(alert),
+    ...alertRawValuesPracticeFirst(alert, ['creato_da', 'aggiornato_da', 'GII_da', 'gii_da', 'chiave_attivita'])
+  ]
+
+  const actorArea = actorValues
+    .map(value => parseAreaCodeCandidate(value))
+    .find(Boolean) || ''
+
+  if (actorArea) return actorArea
+
+  const raw = alertPracticeRawValue(alert, ['area_cod', 'areaCod', 'area', 'cod_area', 'destinatario_area', '__gii_current_user_area_cod'])
+  return parseAreaCodeCandidate(raw)
 }
 
 function areaRefFromAlert (alert: GiiAlertItem | null | undefined): string {
