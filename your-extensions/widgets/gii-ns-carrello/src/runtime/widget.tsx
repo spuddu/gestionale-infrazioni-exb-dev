@@ -170,37 +170,50 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
     setConfirmClear(true)
   }, [cart.length])
 
-  const doClearAll = React.useCallback(() => {
+  const clearCartState = React.useCallback(() => {
     setCart([])
     setConfirmClear(false)
     setListOpen(false)
-    setMsg({ ok: true, text: 'Elenco svuotato.' })
+    try {
+      ;(window as any).__giiNsCartCodes = new Set<string>()
+      window.dispatchEvent(new CustomEvent('gii-ns-cart-change'))
+    } catch {}
   }, [])
 
-  const doNavigateBack = React.useCallback(() => {
+  const doClearAll = React.useCallback(() => {
+    clearCartState()
+    setMsg({ ok: true, text: 'Elenco svuotato.' })
+  }, [clearCartState])
+
+  const doNavigateBack = React.useCallback((): boolean => {
     setListOpen(false)
     let targetPageId = ''
     try { targetPageId = sessionStorage.getItem(GII_NS_RETURN_KEY) || '' } catch {}
     if (!targetPageId) targetPageId = resolvePageId(returnPageSlug)
     if (!targetPageId) {
       setMsg({ ok: false, text: `Pagina di ritorno non trovata. Configura lo slug "${returnPageSlug}" nel pannello setting.` })
-      return
+      return false
     }
     try { sessionStorage.removeItem(GII_NS_RETURN_KEY) } catch {}
-    try { UrlManager.getInstance().changePage(targetPageId) } catch (e: any) {
+    try {
+      UrlManager.getInstance().changePage(targetPageId)
+      return true
+    } catch (e: any) {
       setMsg({ ok: false, text: `Navigazione fallita: ${e?.message || String(e)}` })
+      return false
     }
   }, [returnPageSlug])
 
   const onConfirm = React.useCallback(() => {
+    if (cart.length === 0) return
     try { sessionStorage.setItem(GII_NS_CART_KEY, JSON.stringify(cart)) } catch {}
-    doNavigateBack()
-  }, [cart, doNavigateBack])
+    if (doNavigateBack()) clearCartState()
+  }, [cart, doNavigateBack, clearCartState])
 
   const onCancel = React.useCallback(() => {
     try { sessionStorage.removeItem(GII_NS_CART_KEY) } catch {}
-    doNavigateBack()
-  }, [doNavigateBack])
+    if (doNavigateBack()) clearCartState()
+  }, [doNavigateBack, clearCartState])
 
   const dropdownPortal = listOpen && cart.length > 0 && dropdownTop > 0 ? createPortal(
     <div ref={dropdownRef} style={{ position: 'fixed', top: dropdownTop, left: 10, right: 10, zIndex: 99999, background: '#fff', borderTop: `2px solid ${barBorderColor}`, boxShadow: '0 6px 20px rgba(0,0,0,0.15)', maxHeight: 260, overflow: 'auto', borderRadius: '0 0 6px 6px', padding: '0 8px 0 0' }}>

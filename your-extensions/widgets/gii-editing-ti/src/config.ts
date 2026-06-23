@@ -406,7 +406,7 @@ export const DEFAULT_FIELD_LAYOUTS: Record<string, LayoutRow[]> = {
   dati_generali: [
     { type: 'fields', columns: '1fr 1fr 1fr', cells: [{ field: 'area_cod', label: 'Area' }, { field: 'settore_cod', label: 'Settore' }, { field: 'ufficio_zona', label: 'Ufficio di zona' }] },
     { type: 'fields', columns: '1fr 1fr', cells: [{ field: 'tecnico_rilevatore', label: 'Tecnico rilevatore' }, { field: 'data_rilevazione', label: 'Data rilevazione' }] },
-    { type: 'fields', columns: '1fr 1fr', cells: [{ field: 'ti_assegnato_nome', label: 'Tecnico istruttore' }, { field: 'data_firma', label: 'Data compilazione' }] }
+    { type: 'fields', columns: '1fr 1fr', cells: [{ field: 'ti_assegnato_nome', label: 'Tecnico istruttore' }, { field: 'dt_trasmissione_capo_settore', label: 'Data trasmissione al Capo Settore' }] }
   ],
   trasgressore: [
     { type: 'header', label: 'Trasgressore' },

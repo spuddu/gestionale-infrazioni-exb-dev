@@ -471,14 +471,15 @@ export async function buildNotaSpesePdf(data: NotaSpeseData): Promise<Uint8Array
   if (hasArt30) {
     ensureSpace(SUPER_HDR_H + COL_HDR_H + ROW_H * 3 + 20)
 
-    drawSuperTitle('RIMBORSO ATTREZZATURE')
+    drawSuperTitle('COSTI PER ATTREZZATURE DANNEGGIATE O SMARRITE')
 
     drawColumnHeaders(pg, fontB, top)
+    hLine(pg, ML, PW - MR, PH - top, 0.5, CLR_CAT_BG)
     top += COL_HDR_H
 
     const rowsToDraw = art30Rows.length > 0
       ? art30Rows
-      : [{ codice: '', descrizione: 'Rimborso attrezzature', quantita: 1, valore_unitario: art30Rimborso, importo: art30Rimborso }]
+      : [{ codice: '', descrizione: 'Costi attrezzature', quantita: 1, valore_unitario: art30Rimborso, importo: art30Rimborso }]
 
     for (let ri = 0; ri < rowsToDraw.length; ri++) {
       const row = rowsToDraw[ri]
@@ -545,14 +546,14 @@ export async function buildNotaSpesePdf(data: NotaSpeseData): Promise<Uint8Array
 
   const ordinaryCategories = CATEGORY_ORDER.filter(cat => (data.rows[cat] || []).length > 0)
 
-  if (hasArt30 && ordinaryCategories.length > 0) {
+  if (ordinaryCategories.length > 0) {
     const firstCatRows = (data.rows[ordinaryCategories[0]] || []).slice().sort((a, b) => a.ordine - b.ordine)
     const firstRow = firstCatRows[0]
     const firstCodeLines = firstRow ? wrapText(firstRow.codice_voce_snapshot, fontR, 7.5, CW_CODICE - 6) : ['']
     const firstDescLines = firstRow ? wrapText(firstRow.descrizione_snapshot, fontR, 7.5, CW_DESC - 6) : ['']
     const firstRowH = Math.max(ROW_H, firstCodeLines.length * 10 + 6, firstDescLines.length * 10 + 6)
     ensureSpace(SUPER_HDR_H + HDR_H + COL_HDR_H + firstRowH + ROW_H + 24)
-    drawSuperTitle("RIMBORSO SPESE CONNESSE ALL'INTERVENTO")
+    drawSuperTitle("COSTI SOSTENUTI PER L'INTERVENTO")
   }
 
   for (const cat of CATEGORY_ORDER) {
@@ -565,11 +566,12 @@ export async function buildNotaSpesePdf(data: NotaSpeseData): Promise<Uint8Array
 
     // Header categoria
     const catHdrY = PH - top - HDR_H
-    fillRect(pg, ML, catHdrY, TW, HDR_H, CLR_CAT_BG)
+    pg.drawRectangle({ x: ML, y: catHdrY, width: TW, height: HDR_H, color: CLR_CAT_BG, borderColor: CLR_CAT_BG, borderWidth: 0.5 })
     centered(pg, NS_CATEGORY_LABELS[cat], fontB, 9, ML, PW - MR, centeredY(top, HDR_H, 9), CLR_WHITE)
     top += HDR_H
 
     drawColumnHeaders(pg, fontB, top)
+    hLine(pg, ML, PW - MR, PH - top, 0.5, CLR_CAT_BG)
     top += COL_HDR_H
 
     const DESC_LH = 10
@@ -644,7 +646,7 @@ export async function buildNotaSpesePdf(data: NotaSpeseData): Promise<Uint8Array
   if (hasOrdinaryCosts) {
     ensureSpace(58)
     top += 4
-    pg.drawLine({ start: { x: CX_PU, y: PH - top }, end: { x: PW - MR, y: PH - top }, thickness: 1, color: CLR_BLACK })
+    pg.drawLine({ start: { x: CX_PU, y: PH - top }, end: { x: PW - MR, y: PH - top }, thickness: 0.5, color: CLR_BLACK })
     top += 6
 
     txt(pg, 'Totale voci ordinarie', fontB, 9, CX_PU + 3, centeredY(top, 14, 9), CLR_BLACK)
@@ -661,7 +663,7 @@ export async function buildNotaSpesePdf(data: NotaSpeseData): Promise<Uint8Array
 
   ensureSpace(46)
   top += 4
-  pg.drawLine({ start: { x: CX_PU, y: PH - top }, end: { x: PW - MR, y: PH - top }, thickness: 1, color: CLR_BLACK })
+  pg.drawLine({ start: { x: CX_PU, y: PH - top }, end: { x: PW - MR, y: PH - top }, thickness: 0.5, color: CLR_BLACK })
   top += 6
 
   const totaleComplessivoConArt30 = roundMoney(Number(data.summary.totaleComplessivo || 0) + (hasArt30 ? art30Netto : 0))
@@ -703,10 +705,10 @@ export async function buildNotaSpesePdf(data: NotaSpeseData): Promise<Uint8Array
       height: SUPER_HDR_H,
       color: CLR_SUPER_BG,
       borderColor: CLR_CAT_BG,
-      borderWidth: 0.8
+      borderWidth: 0.5
     })
     centered(pg, label, fontB, 10, ML, PW - MR, centeredY(top, SUPER_HDR_H, 10), CLR_CAT_BG)
-    top += SUPER_HDR_H + 6
+    top += SUPER_HDR_H
   }
 
   function drawIndependentPageNumbers(): void {

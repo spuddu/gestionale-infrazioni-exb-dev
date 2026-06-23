@@ -1832,12 +1832,18 @@ function ActionsPanel (props: {
     const quickNotaSpese = hasNotaSpeseLocalForActions(data)
     const layerVisibility: Record<string, boolean> = {}
     listPrintableMapLayers(props.mapView).forEach(item => { layerVisibility[item.key] = item.visible })
+    const baseOptions = defaultDocumentPrintOptions()
     const nextOptions: DocumentPrintOptions = {
-      ...docOptions,
+      ...baseOptions,
+      includeRapporto: true,
       includeNotaSpese: false,
       includeMappa: false,
       includeAllegati: false,
-      mapBasemap: docOptions.mapBasemap || 'satellite',
+      selectedNotaSpeseKeys: {},
+      selectedAttachmentIds: {},
+      mapBasemap: docOptions.mapBasemap || baseOptions.mapBasemap || 'satellite',
+      mapLayout: docOptions.mapLayout || baseOptions.mapLayout,
+      mapScale: docOptions.mapScale || baseOptions.mapScale,
       mapLocalizationLayerUrl: String(active?.key || ''),
       mapLayerVisibility: Object.keys(docOptions.mapLayerVisibility || {}).length ? docOptions.mapLayerVisibility : layerVisibility
     }
@@ -1861,10 +1867,9 @@ function ActionsPanel (props: {
       if (docCheckReqRef.current !== checkedKey) return
       setDocNotaSpeseOptions(notaSpeseList)
       setDocOptions(prev => {
-        const previousSelected = prev.selectedNotaSpeseKeys || {}
         const selectedNotaSpeseKeys: Record<string, boolean> = {}
         notaSpeseList.forEach(item => {
-          selectedNotaSpeseKeys[item.key] = notaSpeseList.length > 1 && Object.prototype.hasOwnProperty.call(previousSelected, item.key) ? previousSelected[item.key] : true
+          selectedNotaSpeseKeys[item.key] = true
         })
         return { ...prev, selectedNotaSpeseKeys, includeNotaSpese: notaSpeseList.length > 0 ? prev.includeNotaSpese : false }
       })
@@ -3268,7 +3273,7 @@ function ActionsPanel (props: {
         layerUrl: active?.state?.ds?.getDataSourceJson?.()?.url ?? active?.state?.ds?.dataSourceJson?.url ?? null,
         readOnly: openInReadOnly,
         readOnlyMessage: openInReadOnly
-          ? 'Pratica non attualmente assegnata al proprio ruolo. I dati sono disponibili in sola consultazione.'
+          ? 'Pratica aperta in consultazione. Le modifiche sono consentite solo nei casi previsti dal ruolo e dallo stato istruttorio.'
           : '',
         ts: Date.now()
       }
@@ -6202,7 +6207,7 @@ ${noteTrim}` : noteTrim)
   const reportPreviewModal = previewOpen ? createPortal(
     <div
       data-gii-global-popup-root='1'
-      style={{ position: 'fixed', inset: 0, zIndex: 2147483646, background: 'rgba(0,0,0,0.58)', display: 'flex', alignItems: 'stretch', justifyContent: 'stretch', padding: 0, pointerEvents: 'auto' }}
+      style={{ position: 'fixed', inset: 0, zIndex: 2147483646, background: 'rgba(0,0,0,0.58)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 14, pointerEvents: 'auto' }}
       onClick={(e) => { e.preventDefault(); e.stopPropagation() }}
       onMouseDown={(e) => { e.preventDefault(); e.stopPropagation() }}
     >
@@ -6210,7 +6215,7 @@ ${noteTrim}` : noteTrim)
         role='dialog'
         aria-modal='true'
         data-gii-global-popup-dialog='1'
-        style={{ width: '100vw', height: '100vh', maxWidth: 'none', maxHeight: 'none', borderRadius: 0, boxShadow: 'none', overflow: 'hidden', position: 'relative', zIndex: 2147483647, display: 'flex', alignItems: 'stretch', background: '#282828' }}
+        style={{ width: 'calc(100vw - 28px)', height: 'calc(100vh - 28px)', maxWidth: 2180, maxHeight: 1200, borderRadius: 14, boxShadow: '0 20px 70px rgba(0,0,0,0.32)', overflow: 'hidden', position: 'relative', zIndex: 2147483647, display: 'flex', alignItems: 'stretch', background: '#282828' }}
         onClick={(e) => { e.stopPropagation() }}
         onMouseDown={(e) => { e.stopPropagation() }}
       >

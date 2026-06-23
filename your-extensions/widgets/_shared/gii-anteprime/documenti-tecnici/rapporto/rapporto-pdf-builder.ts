@@ -40,6 +40,22 @@ function firstMeaningfulValue (...vals: any[]): any {
   return undefined
 }
 
+function isRoleSectorSyntheticLabel (value: any): boolean {
+  const s = String(value ?? '').trim().toUpperCase().replace(/[\s_\-]+/g, ' ')
+  if (!s) return false
+  return /^(TR|TI|RZ|RI|DT)\s+(D[1-6]|DS|CR|GI|AGR|TEC|AMM)$/.test(s)
+}
+
+function firstPersonLikeValue (...vals: any[]): string {
+  for (const value of vals) {
+    const text = String(value ?? '').trim()
+    if (!text) continue
+    if (isRoleSectorSyntheticLabel(text)) continue
+    return text
+  }
+  return ''
+}
+
 function formatSurfaceHaACa (raw: any): string {
   if (raw == null) return ''
   const txt = String(raw).trim()
@@ -774,7 +790,16 @@ export function buildRapportoIterPlaceholders (opts: {
   const iterRiSupervisione = findLastChiusuraFromCicli(cicli, 'RI', ['ISTRUTTORIA_TRASMESSA'], ['DT']) || (!hasIterCicli ? dateFrom(d, 'dt_esito_RI') : '')
   const iterDtApprovazione = findLastChiusuraFromCicli(cicli, 'DT', ['RAPPORTO_APPROVATO']) || (!hasIterCicli ? dateFrom(d, 'dt_esito_DT') : '')
 
-  const nomeTR = findFullNameByUsername(opts.utentiCache, firstMeaningfulValue(pickAttrCI(d, ['tecnico_rilevatore']), pickAttrCI(d, ['utente_loggato']), pickAttrCI(d, ['Creator'])) || '')
+  const tecnicoRilevatoreRaw = firstMeaningfulValue(pickAttrCI(d, ['tecnico_rilevatore']), pickAttrCI(d, ['TECNICO_RILEVATORE']))
+  const creatoreRilevazioneRaw = firstMeaningfulValue(
+    pickAttrCI(d, ['Creator', 'creator', 'created_user', 'created_by', 'createdBy']),
+    pickAttrCI(d, ['utente_creazione', 'utente_rilevazione', 'username_rilevatore'])
+  )
+  const nomeTRDaUtente = findFullNameByUsername(opts.utentiCache, firstPersonLikeValue(creatoreRilevazioneRaw, tecnicoRilevatoreRaw))
+  const nomeTRDaRuoloSettore = isRoleSectorSyntheticLabel(tecnicoRilevatoreRaw)
+    ? findUserFullName(opts.utentiCache, 1, areaN ?? undefined, settoreN ?? undefined)
+    : ''
+  const nomeTR = firstPersonLikeValue(nomeTRDaUtente, nomeTRDaRuoloSettore, tecnicoRilevatoreRaw)
   const nomeTI = firstMeaningfulValue(
     pickAttrCI(d, ['ti_assegnato_nome']),
     findFullNameByUsername(opts.utentiCache, pickAttrCI(d, ['ti_assegnato_username']) || ''),
@@ -856,7 +881,13 @@ export async function buildRapportoPdf (m: Record<string, string>): Promise<Uint
   rightTxt(p2, 'Pag. 2 di 2', fR, 7, 532.6, bY(818, 7), BLUE)
 
   // ── Il sottoscritto / il giorno / alle ore (cella 252.24–273.24, centrato) ──
-  txt(p1, v('tecnico_rilevatore'), fR, 9, 113, bY(260.0, 9), BLACK, 200)
+  const sottoscritto = firstPersonLikeValue(
+    pickAttrCI(m, ['firma_tr', 'FIRMA_TR']),
+    pickAttrCI(m, ['iter_rilevazione_nome', 'ITER_RILEVAZIONE_NOME']),
+    pickAttrCI(m, ['Creator', 'creator', 'created_user', 'created_by', 'createdBy']),
+    pickAttrCI(m, ['tecnico_rilevatore', 'TECNICO_RILEVATORE'])
+  )
+  txt(p1, sottoscritto, fR, 9, 113, bY(260.0, 9), BLACK, 200)
   txt(p1, v('data_rilevazione'), fR, 9, 389, bY(260.0, 9), BLACK, 47)
   txt(p1, v('ora_rilevazione'), fR, 9, 486, bY(260.0, 9), BLACK, 71)
 
@@ -981,11 +1012,11 @@ export async function buildRapportoPdf (m: Record<string, string>): Promise<Uint
   // Colonne iter (template v6): Fase 42.72–106.08 | Nominativo 106.56–219.48 | Ruolo 219.96–318.72 | Presa 319.20–368.28 | Esito 368.76–502.92 | Data 503.40–552.60
   const iterSz = 7.2
   const iterRows: Array<{ top: number; nome: string; presa: string; data: string }> = [
-    { top: 701.50, nome: v('iter_rilevazione_nome') || v('firma_tr'), presa: v('iter_rilevazione_presa'), data: v('iter_rilevazione_data') || v('data_rilevazione') },
-    { top: 718.96, nome: v('iter_compilazione_nome') || v('firma_ti'), presa: v('iter_compilazione_presa'), data: v('iter_compilazione_data') },
-    { top: 736.48, nome: v('iter_verifica_nome') || v('firma_rz'), presa: v('iter_verifica_presa'), data: v('iter_verifica_data') },
-    { top: 754.00, nome: v('iter_supervisione_nome') || v('firma_ri'), presa: v('iter_supervisione_presa'), data: v('iter_supervisione_data') },
-    { top: 771.52, nome: v('iter_approvazione_nome') || v('firma_dt'), presa: v('iter_approvazione_presa'), data: v('iter_approvazione_data') }
+    { top: 703.36, nome: v('iter_rilevazione_nome') || v('firma_tr'), presa: v('iter_rilevazione_presa'), data: v('iter_rilevazione_data') || v('data_rilevazione') },
+    { top: 720.88, nome: v('iter_compilazione_nome') || v('firma_ti'), presa: v('iter_compilazione_presa'), data: v('iter_compilazione_data') },
+    { top: 738.34, nome: v('iter_verifica_nome') || v('firma_rz'), presa: v('iter_verifica_presa'), data: v('iter_verifica_data') },
+    { top: 755.80, nome: v('iter_supervisione_nome') || v('firma_ri'), presa: v('iter_supervisione_presa'), data: v('iter_supervisione_data') },
+    { top: 773.32, nome: v('iter_approvazione_nome') || v('firma_dt'), presa: v('iter_approvazione_presa'), data: v('iter_approvazione_data') }
   ]
   for (const row of iterRows) {
     const y = bY(row.top, iterSz)

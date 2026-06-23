@@ -1555,11 +1555,23 @@ function pickMostCommonInt (values: any[]): number | null {
   return best
 }
 
+function getCurrentGiiUserDisplayName (usernameFallback: any): string {
+  const w: any = window as any
+  const roleObj: any = w.__giiUserRole || {}
+  const userObj: any = w.__giiUser || {}
+  return String(firstMeaningfulValue(
+    roleObj.full_name, roleObj.fullName, roleObj.nome_completo, roleObj.nomeCompleto, roleObj.nome,
+    userObj.full_name, userObj.fullName, userObj.nome_completo, userObj.nomeCompleto, userObj.nome,
+    w.__giiFullName, w.__giiFull_name,
+    usernameFallback
+  ) || '').trim()
+}
+
 async function resolveCreateSurveyLikeDefaults (layer: any, ctx: { username: string, role: string, area: string, settore: string }): Promise<{ tecnicoRilevatore: string, ufficioZona: string, idUfficio: number | null }> {
   const w: any = window as any
   const roleShort = shortRoleLabel(ctx.role, ctx.username)
   const tecnicoFromRole = roleShort && ctx.settore ? `${roleShort} ${ctx.settore}` : (roleShort || String(ctx.username || '').trim())
-  let tecnicoRilevatore = tecnicoFromRole
+  let tecnicoRilevatore = getCurrentGiiUserDisplayName(ctx.username) || String(ctx.username || '').trim() || tecnicoFromRole
 
   let ufficioZona = String(firstMeaningfulValue(
     w.__giiUfficioLabel, w.__giiOfficeLabel,
@@ -3564,7 +3576,7 @@ function migrateTabs(tabFields: TabFields, tabs: TabConfig[] | undefined): TabCo
   // Normalizza hideEmpty per tab (retrocompatibilità)
   // Inietta dati_generali come primo tab se mancante
   if (!result.find(t => t.id === 'dati_generali')) {
-    result = [{ id: 'dati_generali', label: 'Dati generali', fields: ['area_cod', 'settore_cod', 'ufficio_zona', 'tecnico_rilevatore', 'data_rilevazione', 'ti_assegnato_nome', 'data_firma'], hideEmpty: false }, ...result]
+    result = [{ id: 'dati_generali', label: 'Dati generali', fields: ['area_cod', 'settore_cod', 'ufficio_zona', 'tecnico_rilevatore', 'data_rilevazione', 'ti_assegnato_nome', 'dt_trasmissione_capo_settore'], hideEmpty: false }, ...result]
   }
   return result.map(tab => {
     const normalizedHideEmpty =
@@ -5484,6 +5496,40 @@ function NoteSpeseManager (props: NsManagerProps) {
 }
 
 const GII_NS_CART_KEY = 'GII_NS_CART'
+const GII_NS_DRAFT_KEY_PREFIX = 'GII_NS_DRAFT'
+
+function nsDraftStorageKey (oid: any, globalId: any): string {
+  return `${GII_NS_DRAFT_KEY_PREFIX}:${String(oid || '').trim()}:${String(globalId || '').trim()}`
+}
+
+function nsReadDraftSnapshot (key: string): { rows: NsDetailRow[]; activeCasistica?: string } | null {
+  if (!key) return null
+  try {
+    const raw = sessionStorage.getItem(key)
+    if (!raw) return null
+    const parsed = JSON.parse(raw)
+    const rows = (Array.isArray(parsed?.rows) ? parsed.rows : []) as NsDetailRow[]
+    return { rows, activeCasistica: String(parsed?.activeCasistica || '').trim() }
+  } catch {
+    return null
+  }
+}
+
+function nsWriteDraftSnapshot (key: string, rowsByCategory: Record<NsCategory, NsDetailRow[]>, activeCasistica: string): void {
+  if (!key) return
+  try {
+    sessionStorage.setItem(key, JSON.stringify({
+      ts: Date.now(),
+      activeCasistica: String(activeCasistica || '').trim(),
+      rows: nsRowsByCategoryToFlat(rowsByCategory)
+    }))
+  } catch {}
+}
+
+function nsClearDraftSnapshot (key: string): void {
+  if (!key) return
+  try { sessionStorage.removeItem(key) } catch {}
+}
 
 const LOG_EVENTI_CICLI_URL = 'https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_LOG_EVENTI_CICLI/FeatureServer/0'
 const DRAFT_DATE_FIELDS = new Set(['data_rilevazione', 'data_firma'])
@@ -6578,6 +6624,9 @@ const [noteSpeseRowsBaseline, setNoteSpeseRowsBaseline] = React.useState<Record<
 const [noteSpeseRowsDraft, setNoteSpeseRowsDraft] = React.useState<Record<NsCategory, NsDetailRow[]>>(nsCloneRowsByCategory(EMPTY_NS_ROWS_BY_CATEGORY))
 const [activeNotaSpeseCasistica, setActiveNotaSpeseCasistica] = React.useState<string>('')
 const [noteSpeseRowsLoadedKey, setNoteSpeseRowsLoadedKey] = React.useState<string>('')
+const noteSpeseDraftStorageKey = React.useMemo(() => {
+  return mode === 'edit' && currentOid != null && currentGlobalId ? nsDraftStorageKey(currentOid, currentGlobalId) : ''
+}, [mode, currentOid, currentGlobalId])
 
 const noteSpeseCfg = React.useMemo(() => ({
   importPrezzariUrl: String((cfg as any).nsImportPrezzariUrl || (cfg as any).nsPrezzariUrl || '').trim(),
@@ -6639,18 +6688,24 @@ const loadNotaSpeseDraft = React.useCallback(async () => {
     const grouped = nsRowsFromFlat(rows)
     setNoteSpeseRowsBaseline(grouped)
     let draft = nsCloneRowsByCategory(grouped)
+    const savedDraftSnapshot = noteSpeseDraftStorageKey ? nsReadDraftSnapshot(noteSpeseDraftStorageKey) : null
+    const effectiveNotaSpeseCasistica = activeNotaSpeseCasistica || String(savedDraftSnapshot?.activeCasistica || '').trim()
+    if (savedDraftSnapshot && Array.isArray(savedDraftSnapshot.rows)) {
+      draft = nsRowsFromFlat(savedDraftSnapshot.rows)
+      if (!activeNotaSpeseCasistica && effectiveNotaSpeseCasistica) setActiveNotaSpeseCasistica(effectiveNotaSpeseCasistica)
+    }
     let raw: string | null = null
     try { raw = sessionStorage.getItem(GII_NS_CART_KEY) } catch {}
     if (raw) {
       try { sessionStorage.removeItem(GII_NS_CART_KEY) } catch {}
-      if (!activeNotaSpeseCasistica) {
+      if (!effectiveNotaSpeseCasistica) {
         setNoteSpeseMsg({ ok: false, text: 'Le voci del prezzario non sono state aggiunte: seleziona prima una nota spese collegata a una violazione.' })
       } else {
       let cartItems: any[] = []
       try { cartItems = JSON.parse(raw) } catch { cartItems = [] }
       if (Array.isArray(cartItems) && cartItems.length > 0) {
         const existingCodes = new Set<string>()
-        const activeCasisticaCode = String(activeNotaSpeseCasistica || '').trim()
+        const activeCasisticaCode = String(effectiveNotaSpeseCasistica || '').trim()
         NS_CATEGORIES.forEach((cat) => {
           ;(draft[cat] || []).forEach((r) => {
             const codice = String(r.codice_voce_snapshot || '').trim()
@@ -6680,7 +6735,7 @@ const loadNotaSpeseDraft = React.useCallback(async () => {
             anno_prezzario_snapshot: nsSafeNum(item.anno_riferimento, 0) > 0 ? Math.trunc(nsSafeNum(item.anno_riferimento, 0)) : null,
             ordine: maxOrdine,
             note: '',
-            codice_casistica: activeNotaSpeseCasistica
+            codice_casistica: effectiveNotaSpeseCasistica
           })
           existingCodes.add(codiceVoce)
           added++
@@ -6702,7 +6757,7 @@ const loadNotaSpeseDraft = React.useCallback(async () => {
   } finally {
     setNoteSpeseBusy(false)
   }
-}, [mode, currentOid, currentGlobalId, noteSpeseMissing.length, noteSpeseCfg, activeNotaSpeseCasistica])
+}, [mode, currentOid, currentGlobalId, noteSpeseMissing.length, noteSpeseCfg, activeNotaSpeseCasistica, noteSpeseDraftStorageKey])
 
 const refreshNotaSpeseSummary = React.useCallback(async () => {
   const rows = nsRowsByCategoryToFlat(noteSpeseRowsDraft)
@@ -6794,6 +6849,12 @@ const noteSpeseFormsDirty = React.useMemo(() => NS_CATEGORIES.some((cat) => !!no
 React.useEffect(() => {
   setNoteSpeseDraftDirty(noteSpeseRowsDirty || noteSpeseFormsDirty)
 }, [noteSpeseRowsDirty, noteSpeseFormsDirty])
+
+React.useEffect(() => {
+  if (!noteSpeseDraftStorageKey || isReadOnly || isRiAgrTecLimitedEdit) return
+  if (!noteSpeseDraftDirty) return
+  nsWriteDraftSnapshot(noteSpeseDraftStorageKey, noteSpeseRowsDraft, activeNotaSpeseCasistica)
+}, [noteSpeseDraftStorageKey, noteSpeseDraftDirty, noteSpeseRowsDraft, activeNotaSpeseCasistica, isReadOnly, isRiAgrTecLimitedEdit])
 
 
   React.useEffect(() => {
@@ -7724,6 +7785,7 @@ React.useEffect(() => {
     setNoteSpeseSummary(nsComputeSummaryFromRows(nsRowsByCategoryToFlat(noteSpeseRowsBaseline), noteSpesePercent))
     setNoteSpeseFormDirtyByCategory({ AT: false, PR: false, RU: false, SL: false, PF: false })
     setNoteSpeseManagerResetKey(k => k + 1)
+    if (noteSpeseDraftStorageKey) nsClearDraftSnapshot(noteSpeseDraftStorageKey)
     setNoteSpeseMsg(null)
     setAttachmentFiles([])
     setAttachmentInputKey(k => k + 1)
@@ -7934,6 +7996,7 @@ React.useEffect(() => {
       const nowTs = Date.now()
       const createStartTs = mode === 'create' ? createStartedAtRef.current : null
       const createSurveyDefaults = mode === 'create' ? await resolveCreateSurveyLikeDefaults(layer, giiCtx) : null
+      const currentGiiUserDisplayName = mode === 'create' ? getCurrentGiiUserDisplayName(giiCtx.username) : ''
       const initialAreaLabel = normalizeAreaCode(p.initialData?.area_cod ?? p.initialData?.['Area (codice)'] ?? p.initialData?.AREA_COD)
       const initialSettoreLabel = normalizeSettoreCode(initialAreaLabel || roleAreaLabel, p.initialData?.settore_cod ?? p.initialData?.['Settore (codice)'] ?? p.initialData?.SETTORE_COD)
       const attrs: Record<string, any> = {
@@ -7945,13 +8008,13 @@ React.useEffect(() => {
         dt_stato_TI: mode === 'create' ? nowTs : (p.initialData?.dt_stato_TI ?? p.initialData?.Dt_stato_TI ?? p.initialData?.DT_STATO_TI ?? null),
         dt_presa_in_carico_TI: mode === 'create' ? nowTs : (p.initialData?.dt_presa_in_carico_TI ?? p.initialData?.Dt_presa_in_carico_TI ?? p.initialData?.DT_PRESA_IN_CARICO_TI ?? null),
         ti_assegnato_username: mode === 'create' ? String(giiCtx.username || '') : (p.initialData?.ti_assegnato_username ?? p.initialData?.Ti_assegnato_username ?? p.initialData?.TI_ASSEGNATO_USERNAME ?? null),
-        ti_assegnato_nome: mode === 'create' ? String((window as any).__giiUserRole?.full_name || giiCtx.username || '') : (p.initialData?.ti_assegnato_nome ?? p.initialData?.Ti_assegnato_nome ?? p.initialData?.TI_ASSEGNATO_NOME ?? null),
+        ti_assegnato_nome: mode === 'create' ? currentGiiUserDisplayName : (p.initialData?.ti_assegnato_nome ?? p.initialData?.Ti_assegnato_nome ?? p.initialData?.TI_ASSEGNATO_NOME ?? null),
         dt_assegnazione_ti: mode === 'create' ? nowTs : (p.initialData?.dt_assegnazione_ti ?? p.initialData?.Dt_assegnazione_ti ?? p.initialData?.DT_ASSEGNAZIONE_TI ?? null),
         ti_assegnato_da: mode === 'create' ? String(giiCtx.username || '') : (p.initialData?.ti_assegnato_da ?? p.initialData?.Ti_assegnato_da ?? p.initialData?.TI_ASSEGNATO_DA ?? null),
         utente_loggato: String(giiCtx.username || p.initialData?.utente_loggato || ''),
         area_cod: String((mode === 'create' ? roleAreaLabel : (initialAreaLabel || roleAreaLabel)) || ''),
         settore_cod: String((mode === 'create' ? roleSettoreLabel : (initialSettoreLabel || roleSettoreLabel)) || ''),
-        tecnico_rilevatore: mode === 'create' ? (createSurveyDefaults?.tecnicoRilevatore || g('tecnico_rilevatore') || null) : (g('tecnico_rilevatore') || null),
+        tecnico_rilevatore: mode === 'create' ? (currentGiiUserDisplayName || createSurveyDefaults?.tecnicoRilevatore || g('tecnico_rilevatore') || null) : (g('tecnico_rilevatore') || null),
         ufficio_zona: mode === 'create' ? (createSurveyDefaults?.ufficioZona || g('ufficio_zona') || null) : (g('ufficio_zona') || null),
         id_ufficio: mode === 'create' ? (createSurveyDefaults?.idUfficio ?? null) : (normalizeIntOrNull(p.initialData?.id_ufficio ?? p.initialData?.['ID ufficio'] ?? p.initialData?.ID_UFFICIO)),
         data_rilevazione: mode === 'create' ? nowTs : toTs(g('data_rilevazione')),
@@ -8081,6 +8144,7 @@ React.useEffect(() => {
               })
               setNoteSpeseSummary(summary)
             }
+            if (noteSpeseDraftStorageKey) nsClearDraftSnapshot(noteSpeseDraftStorageKey)
             await loadNotaSpeseDraft()
             setNoteSpeseFormDirtyByCategory({ AT: false, PR: false, RU: false, SL: false, PF: false })
             setNoteSpeseManagerResetKey(k => k + 1)
@@ -8120,6 +8184,7 @@ React.useEffect(() => {
             })
             setNoteSpeseSummary(nsSummary)
           }
+          if (noteSpeseDraftStorageKey) nsClearDraftSnapshot(noteSpeseDraftStorageKey)
           await loadNotaSpeseDraft()
           setNoteSpeseFormDirtyByCategory({ AT: false, PR: false, RU: false, SL: false, PF: false })
           setNoteSpeseManagerResetKey(k => k + 1)
@@ -8237,7 +8302,7 @@ ${e?.message || String(e)}`
     if (!activeNotaSpeseCasistica) return 0
     return countNotaSpeseIncompleteRowsForCasistica(noteSpeseRowsDraft, activeNotaSpeseCasistica)
   }, [noteSpeseRowsDraft, activeNotaSpeseCasistica])
-  const noteSpeseBrowseDisabled = isReadOnly || isRiAgrTecLimitedEdit || noteSpeseBusy || noteSpeseDraftDirty || !activeNotaSpeseCasistica || noteSpeseCasistiche.length === 0
+  const noteSpeseBrowseDisabled = isReadOnly || isRiAgrTecLimitedEdit || noteSpeseBusy || !activeNotaSpeseCasistica || noteSpeseCasistiche.length === 0
   // La combo seleziona soltanto quale nota spese consultare: resta attiva anche in sola consultazione.
   const noteSpeseCasisticaDisabled = noteSpeseBusy || noteSpeseCasistiche.length <= 1
 
@@ -8445,6 +8510,29 @@ ${e?.message || String(e)}`
     return d.toLocaleDateString('it-IT', { day: '2-digit', month: '2-digit', year: 'numeric' })
   }
 
+  const getTiTransmissionToCapoSettoreDate = (): any => {
+    const src = p.initialData || {}
+    const statoTi = normalizeIntOrNull(firstMeaningfulValue(
+      pickAttrCI(src, ['stato_TI', 'stato_ti', 'STATO_TI']),
+      g('stato_ti'),
+      g('stato_TI')
+    ))
+    const esitoTi = normalizeIntOrNull(firstMeaningfulValue(
+      pickAttrCI(src, ['esito_TI', 'esito_ti', 'ESITO_TI']),
+      g('esito_ti'),
+      g('esito_TI')
+    ))
+    if (statoTi !== STATO_APPROVATA && esitoTi !== ESITO_APPROVATA) return null
+    return firstMeaningfulValue(
+      pickAttrCI(src, ['dt_stato_TI', 'dt_stato_ti', 'DT_STATO_TI']),
+      pickAttrCI(src, ['dt_esito_TI', 'dt_esito_ti', 'DT_ESITO_TI']),
+      g('dt_stato_ti'),
+      g('dt_stato_TI'),
+      g('dt_esito_ti'),
+      g('dt_esito_TI')
+    )
+  }
+
   const renderFieldControl = (name: string): FldR | null => {
     switch (name) {
       // Dati generali (read-only)
@@ -8454,7 +8542,7 @@ ${e?.message || String(e)}`
       case 'ufficio_zona': return { label: 'Ufficio di zona', el: <NpText value={g('ufficio_zona')} onChange={() => {}} disabled/> }
       case 'data_rilevazione': return { label: 'Data rilevazione', el: <NpText value={fmtDateDMY(g('data_rilevazione'))} onChange={() => {}} disabled/> }
       case 'ti_assegnato_nome': return { label: 'Tecnico istruttore', el: <NpText value={g('ti_assegnato_nome')} onChange={() => {}} disabled/> }
-      case 'data_firma': return { label: 'Data compilazione', el: <NpText value={fmtDateDMY(g('data_firma'))} onChange={() => {}} disabled/> }
+      case 'dt_trasmissione_capo_settore': return { label: 'Data trasmissione al Capo Settore', el: <NpText value={fmtDateDMY(getTiTransmissionToCapoSettoreDate()) || '—'} onChange={() => {}} disabled/> }
       // Trasgressore — dati principali
       case 'tipologia_soggetto': return { label: 'Tipologia soggetto', el: <NpSel value={tipoSogg} onChange={v => {
         set('tipologia_soggetto', v)
@@ -8676,6 +8764,8 @@ ${e?.message || String(e)}`
 
   const selectedNorma3TextStyle: React.CSSProperties = { color: '#374151', fontWeight: 400, opacity: 1 }
 
+  const mapPointEditDisabled = saving || isReadOnly || isRiAgrTecLimitedEdit
+
   const renderNorma3Checkbox = (selected: boolean, onChange: () => void, style?: React.CSSProperties): React.ReactNode => {
     if (selected && isRiAgrTecLimitedEdit) {
       return (
@@ -8731,16 +8821,16 @@ ${e?.message || String(e)}`
               <div style={{ marginTop: 8, display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
                 {!p.mapClickEnabled ? (
                   <>
-                    <button type='button' disabled={saving || isReadOnly || isRiAgrTecLimitedEdit} onClick={() => p.onToggleMapClick?.(true)} style={{
+                    <button type='button' disabled={mapPointEditDisabled} onClick={() => { if (mapPointEditDisabled) return; p.onToggleMapClick?.(true) }} style={{
                       padding: '5px 12px', borderRadius: 8, border: '1px solid #2563eb', background: '#2563eb', color: '#fff',
-                      fontSize: 11, fontWeight: 700, cursor: (saving || isRiAgrTecLimitedEdit) ? 'not-allowed' : 'pointer', opacity: (saving || isRiAgrTecLimitedEdit) ? 0.5 : 1
+                      fontSize: 11, fontWeight: 700, cursor: mapPointEditDisabled ? 'not-allowed' : 'pointer', opacity: mapPointEditDisabled ? 0.5 : 1
                     }}>
                       {p.clickedPointWgs84 || (p.existingGeomWgs84 && (Number(p.existingGeomWgs84.x) !== 0 || Number(p.existingGeomWgs84.y) !== 0)) ? '📍 Modifica punto' : '📍 Imposta punto in mappa'}
                     </button>
                     {p.clickedPointWgs84 && (
-                      <button type='button' disabled={isRiAgrTecLimitedEdit} onClick={() => { if (isRiAgrTecLimitedEdit) return; p.onClearPoint(); p.onToggleMapClick?.(false) }} style={{
+                      <button type='button' disabled={mapPointEditDisabled} onClick={() => { if (mapPointEditDisabled) return; p.onClearPoint(); p.onToggleMapClick?.(false) }} style={{
                         padding: '5px 12px', borderRadius: 8, border: '1px solid rgba(0,0,0,0.14)', background: '#f8fbff', color: '#374151',
-                        fontSize: 11, fontWeight: 700, cursor: isRiAgrTecLimitedEdit ? 'not-allowed' : 'pointer', opacity: isRiAgrTecLimitedEdit ? 0.5 : 1
+                        fontSize: 11, fontWeight: 700, cursor: mapPointEditDisabled ? 'not-allowed' : 'pointer', opacity: mapPointEditDisabled ? 0.5 : 1
                       }}>{p.existingGeomWgs84 && (Number(p.existingGeomWgs84.x) !== 0 || Number(p.existingGeomWgs84.y) !== 0) ? 'Ripristina posizione originale' : 'Annulla'}</button>
                     )}
                   </>
@@ -8749,7 +8839,7 @@ ${e?.message || String(e)}`
                     <span style={{ fontSize: 12, fontWeight: 700, color: '#2563eb' }}>⏳ Clicca sulla mappa per impostare il punto…</span>
                     <button type='button' disabled={isRiAgrTecLimitedEdit} onClick={() => { if (isRiAgrTecLimitedEdit) return; p.onToggleMapClick?.(false) }} style={{
                       padding: '5px 12px', borderRadius: 8, border: '1px solid rgba(0,0,0,0.14)', background: '#f8fbff', color: '#374151',
-                      fontSize: 11, fontWeight: 700, cursor: isRiAgrTecLimitedEdit ? 'not-allowed' : 'pointer', opacity: isRiAgrTecLimitedEdit ? 0.5 : 1
+                      fontSize: 11, fontWeight: 700, cursor: mapPointEditDisabled ? 'not-allowed' : 'pointer', opacity: mapPointEditDisabled ? 0.5 : 1
                     }}>Annulla</button>
                   </>
                 )}
@@ -9287,10 +9377,10 @@ ${e?.message || String(e)}`
             )}
 
             {renderEditCard('Altre violazioni', renderNorma3Rows())}
-            {norma3Set.has('Art30') && renderEditCard('Riepilogo rimborsi attrezzature',
+            {norma3Set.has('Art30') && renderEditCard('Riepilogo costi attrezzature',
               <div style={{ display: 'grid', gap: 9 }}>
                 <div style={{ fontSize: attrezzatureRiepilogoFontSize, color: '#475569', lineHeight: 1.45 }}>
-                  L’eventuale rimborso delle spese sostenute per l’intervento sul campo, connesse al ripristino delle attrezzature danneggiate, deve essere quantificato nella scheda <b>Nota spese</b>.
+                  L’eventuale intervento sul campo, compresa la manodopera, deve essere quantificato separatamente nella scheda <b>Nota spese</b>.
                 </div>
 
                 {attrezzatureRiepilogo.length > 0
@@ -9470,11 +9560,26 @@ ${e?.message || String(e)}`
     }
   }
 
+  const normalizeDatiGeneraliLayout = (rows: any[]): any[] => {
+    if (!Array.isArray(rows)) return rows
+    return rows.map((row: any) => {
+      if (!row || row.type !== 'fields' || !Array.isArray(row.cells)) return row
+      let changed = false
+      const cells = row.cells.map((cell: any) => {
+        if (String(cell?.field || '') !== 'data_firma') return cell
+        changed = true
+        return { ...cell, field: 'dt_trasmissione_capo_settore', label: 'Data trasmissione al Capo Settore' }
+      })
+      return changed ? { ...row, cells } : row
+    })
+  }
+
   const renderLayoutTab = (tabId: string): React.ReactNode => {
     if (tabId === 'trasgressore') return renderSpecial('_trasgressore_due_colonne')
     if (tabId === 'violazione') return renderSpecial('_violazione_due_colonne')
     const cfgLayouts = cfg.fieldLayouts || {}
-    const layout: any[] = (cfgLayouts as any)[tabId] || DEFAULT_FIELD_LAYOUTS[tabId] || []
+    const rawLayout: any[] = (cfgLayouts as any)[tabId] || DEFAULT_FIELD_LAYOUTS[tabId] || []
+    const layout: any[] = tabId === 'dati_generali' ? normalizeDatiGeneraliLayout(rawLayout) : rawLayout
     const defaultGap = Number(cfg.fieldGap) || 12
     const fallbackTitle = NP_TABS.find(t => t.id === tabId)?.label || 'Sezione'
 
@@ -9598,7 +9703,7 @@ ${e?.message || String(e)}`
                   }
                   return
                 }
-                try { const pg = resolvePageId('browser-nota-spese'); if (pg) { try { const curPage = getAppStore()?.getState()?.appRuntimeInfo?.currentPageId || ''; sessionStorage.setItem('GII_NS_RETURN_PAGE', curPage) } catch {} UrlManager.getInstance().changePage(pg) } else { setNoteSpeseMsg({ ok: false, text: 'Pagina "browser-nota-spese" non trovata. Configura una pagina ExB con il widget consultazione prezzario e il widget gii-ns-carrello.' }) } } catch (e: any) { setNoteSpeseMsg({ ok: false, text: e?.message || String(e) }) }
+                try { const pg = resolvePageId('browser-nota-spese'); if (pg) { if (noteSpeseDraftStorageKey) nsWriteDraftSnapshot(noteSpeseDraftStorageKey, noteSpeseRowsDraft, activeNotaSpeseCasistica); try { const curPage = getAppStore()?.getState()?.appRuntimeInfo?.currentPageId || ''; sessionStorage.setItem('GII_NS_RETURN_PAGE', curPage) } catch {} UrlManager.getInstance().changePage(pg) } else { setNoteSpeseMsg({ ok: false, text: 'Pagina "browser-nota-spese" non trovata. Configura una pagina ExB con il widget consultazione prezzario e il widget gii-ns-carrello.' }) } } catch (e: any) { setNoteSpeseMsg({ ok: false, text: e?.message || String(e) }) }
               }}
               disabled={noteSpeseBrowseDisabled}
               title={!activeNotaSpeseCasistica || noteSpeseCasistiche.length === 0 ? 'Seleziona prima una violazione collegabile alla nota spese.' : undefined}
@@ -9663,7 +9768,7 @@ ${e?.message || String(e)}`
           fontWeight: 700,
           lineHeight: 1.35
         }}>
-          {String(p.readOnlyMessage || 'Pratica non attualmente assegnata al proprio ruolo. I dati sono disponibili in sola consultazione.')}
+          {String(p.readOnlyMessage || 'Pratica aperta in consultazione. Le modifiche sono consentite solo nei casi previsti dal ruolo e dallo stato istruttorio.')}
         </div>
       )}
 
@@ -9906,7 +10011,7 @@ ${e?.message || String(e)}`
             })}
           </div>
           {!activeNotaSpeseCasistica && noteSpeseCasistiche.length > 0 && <span style={{ fontSize: 11, color: '#b45309', fontWeight: 700 }}>Seleziona una nota spese per abilitare lo sfoglia prezzario.</span>}
-          {noteSpeseDraftDirty && <span style={{ fontSize: 11, color: '#856404' }}>Salva le modifiche prima di sfogliare il prezzario.</span>}
+          {noteSpeseDraftDirty && <span style={{ fontSize: 11, color: '#856404' }}>Le modifiche alla nota spese saranno rese definitive con il salvataggio della pratica.</span>}
         </div>
       </div>
       <div style={{ display: 'grid', gap: 14 }}>
@@ -10246,9 +10351,9 @@ ${e?.message || String(e)}`
             onClick={(e) => { e.stopPropagation() }}
             onMouseDown={(e) => { e.stopPropagation() }}
           >
-            <div style={{ fontWeight: 800, fontSize: popupTitleFontSize, marginBottom: 4, color: '#0f4c81' }}>Rimborso attrezzature — Art. 30</div>
+            <div style={{ fontWeight: 800, fontSize: popupTitleFontSize, marginBottom: 4, color: '#0f4c81' }}>Computo costi attrezzature</div>
             <div style={{ width: '100%', fontSize: popupBodyFontSize, color: '#475569', lineHeight: 1.5, marginBottom: 12, textAlign: 'justify' }}>
-              Selezionare esclusivamente le attrezzature danneggiate o smarrite per le quali si richiede il rimborso. L’eventuale intervento sul campo, compresa la manodopera, deve essere inserito separatamente nella scheda <b>Nota spese</b>.
+              Selezionare le attrezzature danneggiate o smarrite e indicare le quantità da considerare nel computo tecnico dei costi. L’eventuale intervento sul campo, compresa la manodopera, deve essere inserito separatamente nella scheda <b>Nota spese</b>.
             </div>
 
             {attrezzatureError && <div style={{ padding: '9px 10px', borderRadius: 8, border: '1px solid #f59e0b', background: '#fff7ed', color: '#9a3412', fontSize: popupBodyFontSize, marginBottom: 10 }}>{attrezzatureError}</div>}
@@ -12120,7 +12225,7 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
     technicalEditAvailability === false ||
     (technicalEditAvailability == null && effectiveIntent?.readOnly === true)
   )
-  const readOnlyEditMessage = String(effectiveIntent?.readOnlyMessage || 'Pratica non attualmente assegnata al proprio ruolo. I dati sono disponibili in sola consultazione.')
+  const readOnlyEditMessage = String(effectiveIntent?.readOnlyMessage || 'Pratica aperta in consultazione. Le modifiche sono consentite solo nei casi previsti dal ruolo e dallo stato istruttorio.')
 
   const modeBg = inCreateMode
     ? String(cfg.modeBgCreate || defaultConfig.modeBgCreate)

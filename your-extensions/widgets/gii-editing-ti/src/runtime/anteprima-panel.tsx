@@ -1408,8 +1408,8 @@ export default function AnteprimaPanel (p: {
   const printableLayerItems = flattenPrintableMapLayerTree(printableLayerTree)
   const printableLayerSignature = printableLayerItems.map(item => `${item.key}:${item.visible ? 1 : 0}`).join('|')
   const [expandedLayerGroups, setExpandedLayerGroups] = React.useState<Record<string, boolean>>({})
-  const [docOptions, setDocOptions] = React.useState<DocumentPrintOptions>(() => cloneDocumentPrintOptions(editingTiAnteprimaAppliedOptionsMemory.get(optionsMemoryKey) || defaultDocumentPrintOptions()))
-  const [previewOptions, setPreviewOptions] = React.useState<DocumentPrintOptions>(() => cloneDocumentPrintOptions(editingTiAnteprimaAppliedOptionsMemory.get(optionsMemoryKey) || defaultDocumentPrintOptions()))
+  const [docOptions, setDocOptions] = React.useState<DocumentPrintOptions>(() => cloneDocumentPrintOptions(defaultDocumentPrintOptions()))
+  const [previewOptions, setPreviewOptions] = React.useState<DocumentPrintOptions>(() => cloneDocumentPrintOptions(defaultDocumentPrintOptions()))
   const [previewRevision, setPreviewRevision] = React.useState(0)
   const loadedOptionsKeyRef = React.useRef(optionsMemoryKey)
   const forceNextPreviewRegenerateRef = React.useRef(false)
@@ -1420,10 +1420,11 @@ export default function AnteprimaPanel (p: {
   }, [optionsMemoryKey, previewOptions])
 
   React.useEffect(() => {
-    const rememberedApplied = cloneDocumentPrintOptions(editingTiAnteprimaAppliedOptionsMemory.get(optionsMemoryKey) || defaultDocumentPrintOptions())
+    const freshOptions = cloneDocumentPrintOptions(defaultDocumentPrintOptions())
     loadedOptionsKeyRef.current = optionsMemoryKey
-    setDocOptions(rememberedApplied)
-    setPreviewOptions(rememberedApplied)
+    forceNextPreviewRegenerateRef.current = true
+    setDocOptions(freshOptions)
+    setPreviewOptions(freshOptions)
   }, [optionsMemoryKey])
 
   const dataSignature = React.useMemo(() => {
@@ -1554,10 +1555,9 @@ export default function AnteprimaPanel (p: {
   React.useEffect(() => {
     setNotaSpeseOptions(computedNotaSpeseOptions)
     setDocOptions(prev => {
-      const previousSelected = prev.selectedNotaSpeseKeys || {}
       const selectedNotaSpeseKeys: Record<string, boolean> = {}
       computedNotaSpeseOptions.forEach(item => {
-        selectedNotaSpeseKeys[item.key] = computedNotaSpeseOptions.length > 1 && Object.prototype.hasOwnProperty.call(previousSelected, item.key) ? previousSelected[item.key] : true
+        selectedNotaSpeseKeys[item.key] = true
       })
       return {
         ...prev,

@@ -607,24 +607,93 @@ function giiAlertPracticeIdentityKey (alert: GiiAlertItem): string {
   return String(alert?.alertKey || '')
 }
 
+function alertPracticeMergeKey (alert: GiiAlertItem | null | undefined): string {
+  const raw: any = alert?.raw || {}
+  const practice: any = raw?.__practice || {}
+  const reportLike = [
+    alert?.parentGlobalId,
+    raw.parent_globalid,
+    raw.parentGlobalId,
+    raw.globalid,
+    raw.GlobalID,
+    practice.globalid,
+    practice.GlobalID,
+    alert?.reportCode,
+    raw.numero_rapporto_tecnico,
+    raw.numero_rapporto,
+    raw.numero_rilevazione,
+    raw.cod_pratica,
+    raw.n_rapporto,
+    practice.numero_rapporto_tecnico,
+    practice.numero_rilevazione,
+    practice.cod_pratica
+  ]
+    .map(v => String(v ?? '').trim().replace(/^\{|\}$/g, '').toUpperCase())
+    .find(Boolean)
+
+  if (reportLike) return `practice:${reportLike}`
+
+  const parentOid = Number(alert?.parentObjectId ?? raw.parent_objectid ?? raw.parentObjectId)
+  if (Number.isFinite(parentOid)) return `parent-oid:${parentOid}`
+
+  return giiAlertPracticeIdentityKey(alert as any)
+}
+
 function mergeCurrentAndFallbackGiiAlerts (currentActivities: GiiAlertItem[], dynamicAlerts: GiiAlertItem[]): GiiAlertItem[] {
   const current = Array.isArray(currentActivities) ? currentActivities : []
   const dynamic = Array.isArray(dynamicAlerts) ? dynamicAlerts : []
   const currentKeys = new Set(
     current
-      .map(a => giiAlertPracticeIdentityKey(a))
+      .map(a => alertPracticeMergeKey(a))
+      .filter(Boolean)
+  )
+  const currentWorkflowKeys = new Set(
+    current
+      .filter(a => alertIsStandardWorkflowAlert(a))
+      .map(a => alertPracticeMergeKey(a))
       .filter(Boolean)
   )
 
   const dynamicTakeChargeFallback = dynamic
     .filter(a => isGiiTakeChargeAlert(a))
     .filter(a => {
-      const key = giiAlertPracticeIdentityKey(a)
+      const key = alertPracticeMergeKey(a)
       return !!key && !currentKeys.has(key)
     })
 
-  const dynamicNonTakeCharge = dynamic.filter(a => !isGiiTakeChargeAlert(a))
+  const dynamicNonTakeCharge = dynamic
+    .filter(a => !isGiiTakeChargeAlert(a))
+    .filter(a => {
+      const key = alertPracticeMergeKey(a)
+      // Le attività correnti sono la fonte autorevole per gli allarmi di workflow.
+      // Il controllo dinamico sul FL madre può integrare scadenze/fallback, ma non
+      // deve reintrodurre card equivalenti con mittenti sintetici tipo "RZ D1".
+      if (key && currentWorkflowKeys.has(key) && alertIsStandardWorkflowAlert(a)) return false
+      return true
+    })
   return sortAlertsForPopup([...current, ...dynamicTakeChargeFallback, ...dynamicNonTakeCharge])
+}
+
+function alertPopupVisualSignature (items: GiiAlertItem[]): string {
+  return (Array.isArray(items) ? items : [])
+    .map(a => [
+      alertPracticeMergeKey(a),
+      alertDisplayTitle(a as any),
+      alertSenderLine(a as any),
+      alertSenderQualificaLine(a as any),
+      alertSenderOrgLine(a as any),
+      alertEventDateMs(a),
+      String(a?.reportCode || ''),
+      String(a?.message || '')
+    ].join('§'))
+    .join('¶')
+}
+
+function alertPopupKeysSignature (items: GiiAlertItem[]): string {
+  return (Array.isArray(items) ? items : [])
+    .map(a => alertPracticeMergeKey(a) || String(a?.alertKey || ''))
+    .filter(Boolean)
+    .join('¶')
 }
 
 function withGiiTimeout<T> (promise: Promise<T>, ms: number, message: string): Promise<T> {
@@ -965,10 +1034,10 @@ function alertPracticeRawValue (alert: GiiAlertItem | null | undefined, names: s
 }
 
 function officeLabelFromAlert (alert: GiiAlertItem | null | undefined): string {
-  const label = String(alertPracticeRawValue(alert, ['ufficio_zona', 'ufficioZona', 'ufficio_di_zona']) ?? '').trim()
+  const label = String(alertPracticeRawValue(alert, ['ufficio_zona', 'ufficioZona', 'ufficio_di_zona', 'destinatario_ufficio_zona']) ?? '').trim()
   if (label && !/^\d+$/.test(label)) return label
 
-  const rawId = alertPracticeRawValue(alert, ['id_ufficio', 'ufficio_id', 'id_ufficio_zona', 'ufficio'])
+  const rawId = alertPracticeRawValue(alert, ['id_ufficio', 'ufficio_id', 'id_ufficio_zona', 'ufficio', 'destinatario_ufficio_id'])
   const n = Number(rawId ?? label)
   return Number.isFinite(n) ? String(UFFICIO_LABEL[n] || '').trim() : ''
 }
@@ -979,20 +1048,63 @@ function officeRefFromAlert (alert: GiiAlertItem | null | undefined): string {
   return /^Ufficio\b/i.test(ufficio) ? ufficio : `Ufficio di ${ufficio}`
 }
 
-function sectorCodeFromAlert (alert: GiiAlertItem | null | undefined): string {
-  const raw = alertPracticeRawValue(alert, ['settore_cod', 'settoreCod', 'settore', 'cod_settore'])
-  const text = String(raw ?? '').trim().toUpperCase().replace(/_/g, '-').replace(/\s+/g, '')
-  if (!text) return ''
-  if (text === 'CS') return 'DS'
-  const d = text.match(/^D([1-6])$/)
+function parseSectorCodeCandidate (value: any): string {
+  const raw = String(value ?? '').trim()
+  if (!raw) return ''
+
+  const compact = raw.toUpperCase().replace(/_/g, '-').replace(/\s+/g, '')
+  if (compact === 'CS') return 'DS'
+  if (/^D[1-6]$/.test(compact)) return compact
+  if (compact === 'DS' || compact === 'CR' || compact === 'GI') return compact
+
+  const n = Number(compact)
+  if (Number.isFinite(n)) return String(SETTORE_LABEL[n] || '').trim().toUpperCase()
+
+  // Fallback per valori compositi, ad esempio username/chiavi tipo Test_RZ_D1 o RZ-D1.
+  // Serve solo a ricavare il riferimento organizzativo, non il nominativo del mittente.
+  const spaced = raw.toUpperCase().replace(/_/g, ' ').replace(/-/g, ' ').replace(/\s+/g, ' ').trim()
+  const d = spaced.match(/(?:^|\s)D([1-6])(?:\s|$)/)
   if (d) return `D${d[1]}`
-  if (text === 'DS' || text === 'CR' || text === 'GI') return text
-  const n = Number(text)
-  return Number.isFinite(n) ? String(SETTORE_LABEL[n] || '').trim().toUpperCase() : ''
+  if (/(?:^|\s)DS(?:\s|$)/.test(spaced)) return 'DS'
+  if (/(?:^|\s)CR(?:\s|$)/.test(spaced)) return 'CR'
+  if (/(?:^|\s)GI(?:\s|$)/.test(spaced)) return 'GI'
+
+  return ''
+}
+
+function sectorCodeFromAlert (alert: GiiAlertItem | null | undefined): string {
+  const directValues = alertRawValuesPracticeFirst(alert, [
+    'settore_cod',
+    'settoreCod',
+    'settore',
+    'cod_settore',
+    'destinatario_settore',
+    '__gii_current_user_settore_cod'
+  ])
+
+  for (const value of directValues) {
+    const code = parseSectorCodeCandidate(value)
+    if (code) return code
+  }
+
+  // Se l'attività corrente non porta il settore, lo ricaviamo dal mittente reale
+  // quando contiene il codice organizzativo, ad esempio Test_RZ_D1.
+  // Questo evita di aspettare l'arricchimento dal FL madre solo per mostrare la riga Settore.
+  const actorValues = [
+    ...alertSenderUserCandidates(alert),
+    ...alertRawValuesPracticeFirst(alert, ['creato_da', 'aggiornato_da', 'GII_da', 'gii_da', 'chiave_attivita'])
+  ]
+
+  for (const value of actorValues) {
+    const code = parseSectorCodeCandidate(value)
+    if (code) return code
+  }
+
+  return ''
 }
 
 function areaCodeFromAlert (alert: GiiAlertItem | null | undefined): string {
-  const raw = alertPracticeRawValue(alert, ['area_cod', 'areaCod', 'area', 'cod_area'])
+  const raw = alertPracticeRawValue(alert, ['area_cod', 'areaCod', 'area', 'cod_area', 'destinatario_area'])
   const text = String(raw ?? '').trim().toUpperCase().replace(/_/g, '-')
   if (text === 'AMM' || text === 'AGR' || text === 'TEC') return text
   const n = Number(text)
@@ -1183,6 +1295,15 @@ function maybePersonDisplayName (value: any): string {
   return text.split(/\s+/).length >= 2 ? text : ''
 }
 
+function maybeSenderUsernameDisplay (value: any): string {
+  const text = parseUsernameFromGiiActorLabel(value).trim()
+  if (!text || isSenderDisplayNoise(text)) return ''
+  if (looksLikeGiiRoleLabel(text)) return ''
+  if (looksLikeGiiRoleCode(text)) return ''
+  if (/^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$/.test(text)) return ''
+  return text
+}
+
 function alertTechnicianDisplayName (alert: GiiAlertItem | null | undefined): string {
   const isTi = alertIsTiOrigin(alert)
   const resolved = firstNonEmptyAlertRawValue(alert, [isTi ? '__gii_tecnico_istruttore_full_name' : '__gii_tecnico_rilevatore_full_name'])
@@ -1222,11 +1343,13 @@ function alertSenderUserCandidates (alert: GiiAlertItem | null | undefined): str
 
 function alertSenderDisplayName (alert: GiiAlertItem): string {
   const resolved = firstNonEmptyAlertRawValue(alert, ['__gii_actor_full_name'])
-  if (resolved) return String(resolved).trim()
+  const resolvedDisplay = maybePersonDisplayName(resolved) || maybeSenderUsernameDisplay(resolved)
+  if (resolvedDisplay) return String(resolvedDisplay).trim()
 
   if (alertIsNewRilevazione(alert)) {
     const tecnico = alertTechnicianDisplayName(alert)
-    if (tecnico && !isSenderDisplayNoise(tecnico)) return String(tecnico).trim()
+    const tecnicoDisplay = maybePersonDisplayName(tecnico) || maybeSenderUsernameDisplay(tecnico)
+    if (tecnicoDisplay && !isSenderDisplayNoise(tecnicoDisplay)) return String(tecnicoDisplay).trim()
   }
 
   const directName = alertSenderUserCandidates(alert)
@@ -1234,8 +1357,11 @@ function alertSenderDisplayName (alert: GiiAlertItem): string {
     .find(Boolean)
   if (directName) return String(directName).trim()
 
-  // Gli username restano solo chiavi tecniche per risolvere il nominativo.
-  // Non vengono mai mostrati nella card allarmi.
+  const username = alertSenderUserCandidates(alert)
+    .map(maybeSenderUsernameDisplay)
+    .find(Boolean)
+  if (username) return String(username).trim()
+
   return ''
 }
 
@@ -2395,6 +2521,7 @@ export default function Widget(props: Props) {
   const [alertsOpen, setAlertsOpen] = React.useState(false)
   const [archivingAlertKey, setArchivingAlertKey] = React.useState('')
   const guardLockRef = React.useRef(false)
+  const alertsBackgroundRefreshInFlightRef = React.useRef(false)
 
   React.useEffect(() => {
     let cancelled = false
@@ -2538,19 +2665,36 @@ export default function Widget(props: Props) {
         user: alertUser,
         pageSize: 100
       }), 8000, 'Timeout caricamento attività correnti.')
-      return sortAlertsForPopup(current.alerts || [])
+
+      const annotated = (current.alerts || []).map(alert => ({
+        ...alert,
+        raw: {
+          ...(alert.raw || {}),
+          __gii_current_user_settore_cod: alertUser.settoreCod || '',
+          __gii_current_user_area_cod: alertUser.areaCod || '',
+          __gii_current_user_ufficio_id: alertUser.ufficio ?? null
+        }
+      }))
+
+      return sortAlertsForPopup(annotated)
     }
 
     const enrichAlertsForPopup = async (items: GiiAlertItem[]): Promise<GiiAlertItem[]> => {
       return sortAlertsForPopup(await enrichAlertsWithActorFullNames(await enrichAlertsWithPracticeMeta(items, practiceLayerUrl)))
     }
 
+    let popupCurrentActivities: GiiAlertItem[] = []
+
     try {
-      // La campanella deve comparire subito: il primo caricamento usa solo la
-      // tabella/vista GII_ATTIVITA_CORRENTI, che è la fonte veloce e ordinaria.
+      // Mostriamo subito le attività correnti: la campanella deve comparire
+      // rapidamente. Le righe organizzative principali sono ricavate anche dai
+      // campi destinatario_* dell'attività corrente, senza attendere il recupero
+      // completo della pratica. L'arricchimento successivo può integrare dati,
+      // ma non deve ritardare l'allarme.
       currentActivities = await readCurrentActivities()
-      setAlerts(currentActivities)
-      setAlertCounts(summarizeGiiAlerts(currentActivities))
+      popupCurrentActivities = sortAlertsForPopup(currentActivities)
+      setAlerts(popupCurrentActivities)
+      setAlertCounts(summarizeGiiAlerts(popupCurrentActivities))
       setAlertsError('')
       setAlertsLoading(false)
     } catch (e: any) {
@@ -2566,15 +2710,12 @@ export default function Widget(props: Props) {
     // Il controllo sul FL madre resta necessario per intercettare le rilevazioni TR
     // appena arrivate, ma non deve più bloccare la comparsa della campanella. Lo
     // eseguiamo in background: se materializza nuove attività, rilegge la vista e
-    // aggiorna la lista una sola volta.
+    // aggiorna la lista una sola volta. Il polling rapido non deve però accumulare
+    // più controlli pesanti contemporaneamente.
+    if (alertsBackgroundRefreshInFlightRef.current) return
+    alertsBackgroundRefreshInFlightRef.current = true
     ;(async () => {
       try {
-        let popupCurrentActivities = currentActivities
-        if (currentActivities.length > 0) {
-          popupCurrentActivities = await enrichAlertsForPopup(currentActivities)
-          setAlerts(popupCurrentActivities)
-          setAlertCounts(summarizeGiiAlerts(popupCurrentActivities))
-        }
 
         const res = await withGiiTimeout(queryGiiAlerts({
           practiceLayerUrl,
@@ -2583,6 +2724,7 @@ export default function Widget(props: Props) {
           warningDays: Number(cfg.alertsWarningDays ?? 5)
         }), 25000, 'Timeout caricamento scadenze e anomalie.')
 
+        const enrichedCurrentActivities = await enrichAlertsForPopup(currentActivities)
         const dynamicAlerts = await enrichAlertsForPopup(res.alerts || [])
 
         // Stesso passaggio background usato per materializzare le nuove rilevazioni TR:
@@ -2599,10 +2741,26 @@ export default function Widget(props: Props) {
           user
         })
 
-        const refreshedActivities = (materializedCount > 0 || normalizedCount > 0) ? await enrichAlertsForPopup(await readCurrentActivities()) : popupCurrentActivities
+        const refreshedActivities = (materializedCount > 0 || normalizedCount > 0) ? await enrichAlertsForPopup(await readCurrentActivities()) : enrichedCurrentActivities
         const finalAlerts = sortAlertsForPopup(mergeCurrentAndFallbackGiiAlerts(refreshedActivities, dynamicAlerts))
-        setAlerts(finalAlerts)
-        setAlertCounts(summarizeGiiAlerts(finalAlerts))
+
+        // Il controllo in background non deve produrre una seconda versione visibile
+        // della stessa card (es. prima Test_RZ_D1 e poi RZ D1). Aggiorniamo la UI
+        // solo se cambiano effettivamente le card da mostrare; non per un semplice
+        // arricchimento metadati della stessa attività già visibile.
+        const currentKeys = alertPopupKeysSignature(popupCurrentActivities)
+        const finalKeys = alertPopupKeysSignature(finalAlerts)
+        const currentVisual = alertPopupVisualSignature(popupCurrentActivities)
+        const finalVisual = alertPopupVisualSignature(finalAlerts)
+        const hasDifferentCards = finalKeys !== currentKeys
+        const hasMaterializedChanges = materializedCount > 0 || normalizedCount > 0
+
+        if (hasDifferentCards || (hasMaterializedChanges && finalVisual !== currentVisual)) {
+          setAlerts(finalAlerts)
+          setAlertCounts(summarizeGiiAlerts(finalAlerts))
+        } else {
+          setAlertCounts(summarizeGiiAlerts(popupCurrentActivities))
+        }
         setAlertsError('')
       } catch (e: any) {
         // Se fallisce solo il controllo del FL/scadenze, lasciamo visibili le
@@ -2611,6 +2769,8 @@ export default function Widget(props: Props) {
         if (currentActivities.length === 0) {
           setAlertsError(e?.message || String(e))
         }
+      } finally {
+        alertsBackgroundRefreshInFlightRef.current = false
       }
     })()
   }, [
@@ -2643,7 +2803,11 @@ export default function Widget(props: Props) {
   React.useEffect(() => {
     if (!(cfg.alertsEnabled ?? true) || !user?.username) return
     refreshAlerts()
-    const secs = Math.max(30, Number(cfg.alertsPollSeconds ?? 60) || 60)
+    // Gli allarmi operativi devono essere quasi immediati: la configurazione
+    // storica a 60 secondi è troppo lenta. Manteniamo un polling leggero sulle
+    // attività correnti ogni 5 secondi; il controllo pesante sul FL madre è
+    // protetto da lock per evitare sovrapposizioni.
+    const secs = 5
     const id = window.setInterval(refreshAlerts, secs * 1000)
     const onChanged = () => {
       // Qualsiasi azione operativa sulla pratica deve chiudere il popup allarmi:
@@ -2661,12 +2825,24 @@ export default function Widget(props: Props) {
       'gii-alerts-refresh',
       'gii-alerts-archived'
     ]
+    const onFocus = () => refreshAlerts()
+    const onVisibility = () => {
+      try {
+        if (document.visibilityState === 'visible') refreshAlerts()
+      } catch { }
+    }
+
     refreshEvents.forEach(evt => window.addEventListener(evt, onChanged as EventListener))
+    window.addEventListener('focus', onFocus)
+    try { document.addEventListener('visibilitychange', onVisibility) } catch { }
+
     return () => {
       window.clearInterval(id)
       refreshEvents.forEach(evt => window.removeEventListener(evt, onChanged as EventListener))
+      window.removeEventListener('focus', onFocus)
+      try { document.removeEventListener('visibilitychange', onVisibility) } catch { }
     }
-  }, [cfg.alertsEnabled, cfg.alertsPollSeconds, user?.username, refreshAlerts])
+  }, [cfg.alertsEnabled, user?.username, refreshAlerts])
 
   const openAlertPractice = React.useCallback((alert: GiiAlertItem) => {
     const layerUrl = selectAlertPracticeLayerUrl(cfg, user)

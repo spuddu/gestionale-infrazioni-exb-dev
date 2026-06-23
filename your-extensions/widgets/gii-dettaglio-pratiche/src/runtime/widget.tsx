@@ -2490,6 +2490,14 @@ function isLikelyTechnicalUsername (raw: any): boolean {
   return false
 }
 
+function isIterRoleSectorPlaceholder (raw: any): boolean {
+  const s = String(raw ?? '').trim().toUpperCase().replace(/[\s_-]+/g, ' ')
+  if (!s) return false
+  if (/^(TR|TI|RZ|RI|DT|DA|ADMIN)(?: (?:D[1-6]|DS|CR|GI|AGR|TEC|AMM))?$/.test(s)) return true
+  if (/^(TECNICO RILEVATORE|TECNICO ISTRUTTORE|CAPO SETTORE|RESPONSABILE ISTRUTTORIA|DIRETTORE D AREA|DIRETTORE AREA)$/.test(s)) return true
+  return false
+}
+
 function resolveIterPersonName (raw: any, utentiMap?: Map<string, IterUtenteEntry> | null): string {
   const text = String(raw ?? '').trim()
   if (!text) return ''
@@ -2497,6 +2505,14 @@ function resolveIterPersonName (raw: any, utentiMap?: Map<string, IterUtenteEntr
   const fullName = String(entry?.fullName || '').trim()
   if (fullName) return fullName
   return isLikelyTechnicalUsername(text) ? '' : text
+}
+
+
+function resolveIterPersonRoleCode (raw: any, utentiMap?: Map<string, IterUtenteEntry> | null): string {
+  const text = String(raw ?? '').trim()
+  if (!text || !utentiMap || utentiMap.size === 0) return ''
+  const entry = utentiMap.get(normalizeIterUsernameKey(text))
+  return normalizeRuoloCod(entry?.ruoloCod)
 }
 
 function findIterRecipientNameByRole (roleRaw: any, areaRaw: any, settoreRaw: any, utentiMap?: Map<string, IterUtenteEntry> | null): string {
@@ -2821,8 +2837,8 @@ function buildSyntheticCreationCycle (data: any, loggedCicli: CicloRecord[]): Ci
     ? (pickRilevazioneDateValueForDisplay(data) ?? firstNonEmptyAttr(data, ['data_rilevazione', 'CreationDate', 'creationdate', 'created_date', 'start', 'end', 'data_firma']))
     : firstNonEmptyAttr(data, ['dt_presa_in_carico_TI', 'dt_stato_TI', 'data_firma', 'data_rilevazione', 'CreationDate', 'creationdate', 'created_date', 'start', 'end'])
   const user = firstNonEmptyAttr(data, origin === 'TI'
-    ? ['ti_assegnato_username', 'utente_loggato', 'created_user', 'Creator', 'creator', 'ti_assegnato_nome']
-    : ['utente_loggato', 'created_user', 'Creator', 'creator', 'tecnico_rilevatore']
+    ? ['ti_assegnato_username', 'created_user', 'Creator', 'creator', 'utente_loggato', 'ti_assegnato_nome']
+    : ['created_user', 'Creator', 'creator', 'tecnico_rilevatore']
   )
   const areaRaw = firstNonEmptyAttr(data, ['area_cod', 'area', 'cod_area'])
   const settoreRaw = firstNonEmptyAttr(data, ['settore_cod', 'settore', 'cod_settore'])
@@ -2846,6 +2862,33 @@ function buildSyntheticCreationCycle (data: any, loggedCicli: CicloRecord[]): Ci
     campi_modificati: '',
     riepilogo_ciclo: 'CREAZIONE: nessun campo aggiornato'
   }
+}
+
+function isInitialCreationCycleForDisplay (c: CicloRecord, cycleLabelNumber: number): boolean {
+  const apertura = String(c?.evento_apertura || '').trim().toUpperCase()
+  const ruolo = normalizeRuoloCod(c?.ruolo_competente)
+  return cycleLabelNumber === 1 && apertura === 'CREAZIONE' && (ruolo === 'TR' || ruolo === 'TI')
+}
+
+function getInitialCreationOperatorRawForDisplay (data: any, c: CicloRecord, cycleLabelNumber: number): any {
+  if (!isInitialCreationCycleForDisplay(c, cycleLabelNumber)) return null
+
+  const ruolo = normalizeRuoloCod(c?.ruolo_competente) || normalizeOriginePraticaCod(pickAttrCI(data, ['origine_pratica', 'Origine_pratica', 'ORIGINE_PRATICA']))
+
+  // Il primo ciclo rappresenta l'autore originario della rilevazione.
+  // Non deve usare l'eventuale TI assegnato successivamente dal Capo Settore.
+  if (ruolo === 'TR') {
+    // Per le pratiche nate da TR il nominativo dell'operatore deve arrivare
+    // dall'autore reale della feature/log originario, non dal campo descrittivo
+    // tecnico_rilevatore quando questo contiene solo una sigla del tipo "TR D1".
+    return firstNonEmptyAttr(data, ['created_user', 'Creator', 'creator', 'tecnico_rilevatore'])
+  }
+
+  if (ruolo === 'TI') {
+    return firstNonEmptyAttr(data, ['ti_assegnato_username', 'created_user', 'Creator', 'creator', 'utente_loggato', 'tecnico_rilevatore', 'ti_assegnato_nome'])
+  }
+
+  return null
 }
 
 function getCycleSortTime (c: CicloRecord): number {
@@ -3030,14 +3073,32 @@ function CicliTimeline (props: { globalId: string; hasSel: boolean; sortDir: 'as
         const headerBg = isOpen ? '#eaf2ff' : '#f3f4f6'
         const statusLabel = isOpen ? 'In corso' : 'Chiuso'
         const statusColor = isOpen ? '#2563eb' : '#6b7280'
+        const cycleLabelNumber = props.sortDir === 'asc' ? (i + 1) : (displayCicli.length - i)
+        const initialCreationOperatorRaw = getInitialCreationOperatorRawForDisplay(props.data, c, cycleLabelNumber)
+        const operatorRaw = isEmptyValue(initialCreationOperatorRaw) ? c.utente_operatore : initialCreationOperatorRaw
         const qualificaLabel = formatIterQualificaLabel(c.ruolo_competente)
-        const operatoreLabel = resolveIterPersonName(c.utente_operatore, utentiMap)
+        const isInitialCreationCycle = isInitialCreationCycleForDisplay(c, cycleLabelNumber)
+        const initialRole = normalizeRuoloCod(c?.ruolo_competente) || normalizeOriginePraticaCod(pickAttrCI(props.data, ['origine_pratica', 'Origine_pratica', 'ORIGINE_PRATICA']))
+        const initialRoleFallbackName = isInitialCreationCycle
+          ? findIterRecipientNameByRole(
+            initialRole,
+            firstNonEmptyAttr(props.data, ['area_cod', 'area', 'cod_area']) || c.area,
+            firstNonEmptyAttr(props.data, ['settore_cod', 'settore', 'cod_settore']) || c.settore,
+            utentiMap
+          )
+          : ''
+        const operatorRoleFromMap = resolveIterPersonRoleCode(operatorRaw, utentiMap)
+        const operatorRoleMismatch = Boolean(isInitialCreationCycle && initialRole && operatorRoleFromMap && operatorRoleFromMap !== initialRole)
+        const resolvedOperatorName = operatorRoleMismatch ? '' : resolveIterPersonName(operatorRaw, utentiMap)
+        const rawOperatorLabel = (!operatorRoleMismatch && !isEmptyValue(initialCreationOperatorRaw) && !isIterRoleSectorPlaceholder(initialCreationOperatorRaw))
+          ? String(initialCreationOperatorRaw || '').trim()
+          : ''
+        const operatoreLabel = resolvedOperatorName || initialRoleFallbackName || rawOperatorLabel
         const destinatarioQualificaLabel = formatIterQualificaLabel(c.ruolo_destinatario)
         const destinatarioNomeLabel =
           resolveIterPersonName(c.utente_destinatario, utentiMap) ||
           findIterRecipientNameByRole(c.ruolo_destinatario, c.area, c.settore, utentiMap)
         const noteChiusuraLabel = cleanIterNoteForDisplay(c.note_chiusura)
-        const cycleLabelNumber = props.sortDir === 'asc' ? (i + 1) : (displayCicli.length - i)
         const cycleActionLabel = formatCycleTitleEvento(c, cycleLabelNumber)
 
         const campiList = parseModifiedFieldNames(c.campi_modificati)
