@@ -333,6 +333,7 @@ const PROTOCOLLO_ATTO_FIELDS = ['protocollo_atto_accertamento_numero', 'protocol
 const PROTOCOLLO_FASCICOLO_FIELDS = ['protocollo_fascicolo_numero', 'protocollo_fascicolo_data']
 const BOZZA_DETERMINAZIONE_STARTED_FIELDS = ['determinazione_stato', 'dt_bozza_determinazione', 'bozza_determinazione_da']
 const BOZZA_DETERMINAZIONE_WORD_NAME_RE = /bozza[_\s-]*determinazione.*\.docx?$/i
+const BOZZA_DETERMINAZIONE_WORD_KEYWORD = 'GII_BOZZA_DETERMINAZIONE_DOCX'
 const NOTIFICA_ATTO_FIELDS = ['notifica_tipo', 'notifica_data', 'notifica_esito', 'notifica_estremi']
 
 const SYSTEM_CALCULATED_ADMIN_FIELDS = new Set([
@@ -1330,7 +1331,7 @@ async function resolveLayerForEdit (ds: any, fallbackUrl?: string): Promise<any 
   return null
 }
 
-type AmmAttachmentInfo = { id: number; name?: string; size?: number; contentType?: string; url?: string }
+type AmmAttachmentInfo = { id: number; name?: string; size?: number; contentType?: string; url?: string; keywords?: string; created?: number; creationDate?: number; createdAt?: number; lastEditDate?: number; editDate?: number; uploadedAt?: number }
 
 function formatAttachmentBytes (value?: number): string {
   const n = Number(value)
@@ -1342,6 +1343,44 @@ function formatAttachmentBytes (value?: number): string {
   if (mb < 1024) return `${mb.toFixed(1)} MB`
   const gb = mb / 1024
   return `${gb.toFixed(1)} GB`
+}
+
+function formatDateTimeValue (v: any): string {
+  const d = toDateObj(v)
+  if (!d) return '—'
+  return new Intl.DateTimeFormat('it-IT', {
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit'
+  }).format(d)
+}
+
+function parseBozzaAttachmentUploadedAt (att: AmmAttachmentInfo | null | undefined): number | null {
+  const direct = Number(att?.uploadedAt ?? att?.created ?? att?.creationDate ?? att?.createdAt ?? att?.lastEditDate ?? att?.editDate)
+  if (Number.isFinite(direct) && direct > 0) return direct
+  const kw = String(att?.keywords || '').trim()
+  const m = kw.match(/(?:^|[|;\s])uploadedAt=(\d{10,})/i)
+  if (m) {
+    const n = Number(m[1])
+    if (Number.isFinite(n) && n > 0) return n
+  }
+  return null
+}
+
+function formatBozzaAttachmentUploadedAt (att: AmmAttachmentInfo | null | undefined): string {
+  const ts = parseBozzaAttachmentUploadedAt(att)
+  return ts ? formatDateTimeValue(ts) : '—'
+}
+
+function bozzaAttachmentKeywords (uploadedAt = Date.now()): string {
+  return `${BOZZA_DETERMINAZIONE_WORD_KEYWORD}|uploadedAt=${uploadedAt}`
+}
+
+function hasBozzaAttachmentKeyword (att: AmmAttachmentInfo | null | undefined): boolean {
+  const kw = String(att?.keywords || '').trim().toUpperCase()
+  return !!kw && kw.includes(BOZZA_DETERMINAZIONE_WORD_KEYWORD)
 }
 
 function normalizeAttachmentInfos (raw: any): AmmAttachmentInfo[] {
@@ -1358,13 +1397,22 @@ function normalizeAttachmentInfos (raw: any): AmmAttachmentInfo[] {
       name: a?.name,
       size: Number(a?.size),
       contentType: a?.contentType,
-      url: a?.url
+      url: a?.url,
+      keywords: a?.keywords,
+      created: Number(a?.created),
+      creationDate: Number(a?.creationDate),
+      createdAt: Number(a?.createdAt),
+      lastEditDate: Number(a?.lastEditDate),
+      editDate: Number(a?.editDate),
+      uploadedAt: Number(a?.uploadedAt)
     }))
     .filter(a => Number.isFinite(a.id) && a.id > 0)
 }
 
 function isBozzaDeterminazioneWordAttachment (att: AmmAttachmentInfo | null | undefined): boolean {
+  if (hasBozzaAttachmentKeyword(att)) return true
   const name = String(att?.name || '').trim()
+  // Fallback per le bozze caricate prima dell'introduzione del marker gestionale.
   return !!name && BOZZA_DETERMINAZIONE_WORD_NAME_RE.test(name)
 }
 
@@ -1441,15 +1489,17 @@ async function queryAmmAttachments (layer: any, oid: number, layerUrl: string): 
   return normalizeAttachmentInfos(json)
 }
 
-async function addAmmAttachments (layer: any, oid: number, files: File[], layerUrl: string): Promise<void> {
-  if (!oid || !Array.isArray(files) || files.length === 0) return
+async function addAmmAttachments (layer: any, oid: number, files: File[], layerUrl: string, keywords?: string): Promise<number[]> {
+  if (!oid || !Array.isArray(files) || files.length === 0) return []
   if (!layerUrl) throw new Error('URL del FeatureLayer non disponibile per caricare gli allegati.')
 
+  const addedIds: number[] = []
   const token = await getEsriTokenForUrl(layerUrl)
   for (const file of files) {
     const fd = new FormData()
     fd.append('attachment', file)
     fd.append('f', 'json')
+    if (keywords) fd.append('keywords', keywords)
     if (token) fd.append('token', token)
     const resp = await fetch(`${layerUrl}/${Number(oid)}/addAttachment`, { method: 'POST', body: fd })
     const json: any = await resp.json().catch(() => ({}))
@@ -1457,7 +1507,10 @@ async function addAmmAttachments (layer: any, oid: number, files: File[], layerU
     if (!resp.ok || addRes?.error || json?.error) {
       throw new Error(String(addRes?.error?.message || json?.error?.message || `HTTP ${resp.status}`))
     }
+    const addedId = Number(addRes?.objectId ?? addRes?.id ?? addRes?.attachmentId)
+    if (Number.isFinite(addedId) && addedId > 0) addedIds.push(addedId)
   }
+  return addedIds
 }
 
 async function deleteAmmAttachment (layer: any, oid: number, attachmentId: number, layerUrl: string): Promise<void> {
@@ -1475,6 +1528,45 @@ async function deleteAmmAttachment (layer: any, oid: number, attachmentId: numbe
   if (!resp.ok || err) throw new Error(String(err?.message || `HTTP ${resp.status}`))
 }
 
+
+async function replaceBozzaDeterminazioneWordAttachment (layer: any, oid: number, file: File, layerUrl: string): Promise<AmmAttachmentInfo[]> {
+  if (!oid || !file) return []
+  if (!layerUrl) throw new Error('URL del FeatureLayer non disponibile per sostituire la bozza Word.')
+
+  const before = await queryAmmAttachments(layer, oid, layerUrl)
+  const beforeIds = new Set(before.map(att => Number(att.id)).filter(id => Number.isFinite(id) && id > 0))
+  const uploadedAt = Date.now()
+  const addedIds = await addAmmAttachments(layer, oid, [file], layerUrl, bozzaAttachmentKeywords(uploadedAt))
+  const after = await queryAmmAttachments(layer, oid, layerUrl)
+  const bozzaAfter = after.filter(isBozzaDeterminazioneWordAttachment)
+  const addedIdSet = new Set(addedIds.filter(id => Number.isFinite(Number(id)) && Number(id) > 0).map(id => Number(id)))
+  let keepIds = new Set<number>(Array.from(addedIdSet))
+
+  if (keepIds.size === 0) {
+    const newIds = bozzaAfter
+      .map(att => Number(att.id))
+      .filter(id => Number.isFinite(id) && id > 0 && !beforeIds.has(id))
+    keepIds = new Set(newIds)
+  }
+
+  if (keepIds.size === 0 && bozzaAfter.length > 0) {
+    const maxId = Math.max(...bozzaAfter.map(att => Number(att.id)).filter(id => Number.isFinite(id) && id > 0))
+    if (Number.isFinite(maxId) && maxId > 0) keepIds.add(maxId)
+  }
+
+  for (const att of bozzaAfter) {
+    const id = Number(att.id)
+    if (Number.isFinite(id) && id > 0 && !keepIds.has(id)) {
+      await deleteAmmAttachment(layer, oid, id, layerUrl)
+    }
+  }
+
+  const finalList = await queryAmmAttachments(layer, oid, layerUrl)
+  return finalList
+    .filter(isBozzaDeterminazioneWordAttachment)
+    .map(att => keepIds.has(Number(att.id)) && !parseBozzaAttachmentUploadedAt(att) ? { ...att, uploadedAt } : att)
+}
+
 async function buildAttachmentPreviewUrl (att: AmmAttachmentInfo, oid: number, layerUrl: string): Promise<string> {
   const raw = attachmentRawUrl(att, oid, layerUrl)
   if (!raw) throw new Error('URL allegato non disponibile.')
@@ -1487,6 +1579,20 @@ async function buildAttachmentPreviewUrl (att: AmmAttachmentInfo, oid: number, l
   if (!resp.ok) throw new Error(`Caricamento allegato fallito (HTTP ${resp.status}).`)
   const blob = await resp.blob()
   return URL.createObjectURL(blob)
+}
+
+async function downloadAmmAttachmentFile (att: AmmAttachmentInfo, oid: number, layerUrl: string): Promise<void> {
+  const raw = attachmentRawUrl(att, oid, layerUrl)
+  if (!raw) throw new Error('URL allegato non disponibile.')
+  const token = await getEsriTokenForUrl(layerUrl || raw)
+  let url = raw
+  if (token && /^https?:/i.test(url) && !/[?&]token=/.test(url)) {
+    url = `${url}${url.includes('?') ? '&' : '?'}token=${encodeURIComponent(token)}`
+  }
+  const resp = await fetch(url, { credentials: 'same-origin' })
+  if (!resp.ok) throw new Error(`Download allegato fallito (HTTP ${resp.status}).`)
+  const blob = await resp.blob()
+  downloadBlobFile(blob, att.name || `allegato-${att.id}`)
 }
 
 async function readLayerFields (ds: any): Promise<LayerFieldInfo[]> {
@@ -3300,6 +3406,19 @@ function hasPostAttestazioneTiAmmStarted (data: Record<string, any>): boolean {
   return [...PROTOCOLLO_FASCICOLO_FIELDS, ...BOZZA_DETERMINAZIONE_STARTED_FIELDS].some(name => hasAdminValue(pickAttrCI(d, [name])))
 }
 
+function isBozzaDeterminazioneRientrataDaRiAmm (data: Record<string, any>): boolean {
+  const d = data || {}
+  const statoBozza = String(pickAttrCI(d, ['determinazione_stato']) || '').trim().toUpperCase()
+  if (statoBozza !== 'TRASMESSA_RI_AMM' && statoBozza !== 'BOZZA_TRASMESSA_RI_AMM') return false
+  const statoTiAmm = parseNumberInput(pickAttrCI(d, ['stato_TI_AMM']))
+  const presaTiAmm = parseNumberInput(pickAttrCI(d, ['presa_in_carico_TI_AMM']))
+  const statoRiAmm = parseNumberInput(pickAttrCI(d, ['stato_RI_AMM']))
+  const esitoRiAmm = parseNumberInput(pickAttrCI(d, ['esito_RI_AMM']))
+  const tiAmmRiaperto = statoTiAmm === 1 || statoTiAmm === 2 || presaTiAmm === 1 || presaTiAmm === 2
+  const riAmmHaRimandato = statoRiAmm === 3 || esitoRiAmm === 1
+  return tiAmmRiaperto && riAmmHaRimandato
+}
+
 
 function TiAmmVerificationSummary (props: {
   data: Record<string, any>
@@ -3340,6 +3459,7 @@ function TiAmmVerificationSummary (props: {
   const attestationTextToSave = String(noteDraft || '').trim() || defaultAttestationText
   const applyDisabled = !canApply || !!props.saving
   const postAttestationStarted = hasPostAttestazioneTiAmmStarted(d)
+  const bozzaRientrataDaRiAmm = isBozzaDeterminazioneRientrataDaRiAmm(d)
   const canUndoAttestation = props.canEdit && (role === 'TI_AMM' || role === 'ADMIN') && esitoCode === 2 && !postAttestationStarted && !props.saving
 
   return (
@@ -3357,6 +3477,12 @@ function TiAmmVerificationSummary (props: {
               <div style={{ color: st.formWorkflowBadgeValueColor || '#111827', fontSize: Number(st.formFieldFontSize ?? 15), lineHeight: 1.45, whiteSpace: 'pre-wrap' }}>{note || '—'}</div>
             </div>
           </div>
+        )}
+
+        {bozzaRientrataDaRiAmm && esitoCode !== 2 && (
+          <InfoBox kind='warn'>
+            La bozza di determinazione è rientrata dal Responsabile dell’istruttoria amministrativa. Riapporre l’attestazione di conformità per riabilitare la correzione della bozza e la successiva nuova trasmissione.
+          </InfoBox>
         )}
 
         {esitoCode === 2 ? (
@@ -3457,7 +3583,8 @@ function PostAttestazioneTiAmmWorkSection (props: {
   const canGenerateBozzaDeterminazione = props.canEdit && protocolliCompleti
   const hasBozzaGenerated = BOZZA_DETERMINAZIONE_STARTED_FIELDS.some(name => hasAdminValue(pickAttrCI(d, [name])))
   const currentStatoBozzaCode = String(pickAttrCI(d, ['determinazione_stato']) || '').trim().toUpperCase()
-  const bozzaAlreadyTransmitted = currentStatoBozzaCode && currentStatoBozzaCode !== 'BOZZA'
+  const bozzaRientrataDaRiAmm = isBozzaDeterminazioneRientrataDaRiAmm(d)
+  const bozzaAlreadyTransmitted = currentStatoBozzaCode && currentStatoBozzaCode !== 'BOZZA' && !bozzaRientrataDaRiAmm
   const statoBozza = displayAdminFieldValue(d, props.fields, 'determinazione_stato', hasBozzaGenerated ? 'Bozza generata' : 'Non generata')
   const dataGenerazione = displayAdminFieldValue(d, props.fields, 'dt_bozza_determinazione')
   const generataDa = displayAdminFieldValue(d, props.fields, 'bozza_determinazione_da')
@@ -3513,21 +3640,31 @@ function PostAttestazioneTiAmmWorkSection (props: {
     setAttachmentsBusy(true)
     setAttachmentsError(null)
     try {
-      const map = buildBozzaDeterminazioneDocxMap(d, props.fields, { username: '', fullName: '' }) as any
-      const targetName = getBozzaDeterminazioneDocxFileName(map)
-      const uploadFile = originalName === targetName
-        ? file
-        : new File([file], targetName, { type: file.type || 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', lastModified: file.lastModified })
       const { layer, layerUrl } = await resolveAttachmentLayer()
-      await addAmmAttachments(layer, oid, [uploadFile], layerUrl)
+      const updatedBozzaAttachments = await replaceBozzaDeterminazioneWordAttachment(layer, oid, file, layerUrl)
+      setBozzaAttachments(updatedBozzaAttachments)
+      setAttachmentsLoadedOid(oid)
       setInputKey(k => k + 1)
-      await loadBozzaAttachments()
     } catch (e: any) {
       setAttachmentsError(e?.message || String(e))
     } finally {
       setAttachmentsBusy(false)
     }
-  }, [attachmentsBusy, d, loadBozzaAttachments, oid, props.canEdit, props.fields, props.saving, resolveAttachmentLayer])
+  }, [attachmentsBusy, oid, props.canEdit, props.saving, resolveAttachmentLayer])
+
+  const downloadBozzaWord = React.useCallback(async (att: AmmAttachmentInfo) => {
+    if (!att || !oid || attachmentsBusy) return
+    setAttachmentsBusy(true)
+    setAttachmentsError(null)
+    try {
+      const { layerUrl } = await resolveAttachmentLayer()
+      await downloadAmmAttachmentFile(att, oid, layerUrl)
+    } catch (e: any) {
+      setAttachmentsError(e?.message || String(e))
+    } finally {
+      setAttachmentsBusy(false)
+    }
+  }, [attachmentsBusy, oid, resolveAttachmentLayer])
 
   const hasBozzaWordCaricata = bozzaAttachments.length > 0
   const canUploadBozza = props.canEdit && hasBozzaGenerated && !bozzaAlreadyTransmitted && !props.saving && !attachmentsBusy
@@ -3547,7 +3684,7 @@ function PostAttestazioneTiAmmWorkSection (props: {
       <Section title='Bozza determinazione' bodyStyle={{ padding: 10 }}>
         <div style={{ display: 'grid', gap: 10 }}>
           <InfoBox>
-            La bozza della determinazione viene generata in formato Word dal modello vigente dell’ente e precompilata con i dati della pratica. Il file prodotto è una copia di lavoro della singola pratica: il template base non viene modificato. Dopo eventuali integrazioni nel documento Word, caricare qui la versione definitiva da trasmettere al Responsabile dell’istruttoria amministrativa.
+            La bozza della determinazione viene generata in formato Word dal modello vigente dell’ente e precompilata con i dati della pratica. Il file prodotto è una copia di lavoro della singola pratica: il template base non viene modificato. Dopo eventuali integrazioni nel documento Word, caricare qui la versione definitiva da trasmettere al Responsabile dell’istruttoria amministrativa. Ogni nuovo caricamento sostituisce la bozza Word precedente della pratica e mantiene il nome scelto per il file dal Tecnico istruttore.
           </InfoBox>
           {!protocolliCompleti && (
             <InfoBox kind='warn'>
@@ -3566,11 +3703,29 @@ function PostAttestazioneTiAmmWorkSection (props: {
               {attachmentsError && <InfoBox kind='warn'>{attachmentsError}</InfoBox>}
               {hasBozzaGenerated && hasBozzaWordCaricata && (
                 <div style={{ border: '1px solid #d8e6f7', borderRadius: 8, padding: 8, background: '#f8fbff', display: 'grid', gap: 4 }}>
-                  <div style={{ fontWeight: 800, color: '#0d3b66', fontSize: 13 }}>Bozza Word caricata</div>
+                  <div style={{ fontWeight: 800, color: '#0d3b66', fontSize: 13 }}>Bozza Word corrente</div>
                   {bozzaAttachments.map(att => (
-                    <div key={att.id} style={{ display: 'flex', justifyContent: 'space-between', gap: 8, fontSize: 13, color: '#334155' }}>
-                      <span style={{ overflowWrap: 'anywhere' }}>{att.name || `Allegato ${att.id}`}</span>
+                    <div key={att.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8, fontSize: 13, color: '#334155' }}>
+                      <span style={{ overflowWrap: 'anywhere', minWidth: 0 }}>{att.name || `Allegato ${att.id}`}</span>
                       <span style={{ color: '#64748b', whiteSpace: 'nowrap' }}>{formatAttachmentBytes(att.size)}</span>
+                      <span style={{ color: '#64748b', whiteSpace: 'nowrap' }}>Caricato il {formatBozzaAttachmentUploadedAt(att)}</span>
+                      <button
+                        type='button'
+                        disabled={attachmentsBusy}
+                        onClick={() => { void downloadBozzaWord(att) }}
+                        style={{
+                          padding: '5px 10px',
+                          borderRadius: 7,
+                          border: '1px solid rgba(0,0,0,0.16)',
+                          background: attachmentsBusy ? '#e5e7eb' : '#fff',
+                          color: attachmentsBusy ? '#9ca3af' : '#0d3b66',
+                          fontWeight: 800,
+                          cursor: attachmentsBusy ? 'not-allowed' : 'pointer',
+                          whiteSpace: 'nowrap'
+                        }}
+                      >
+                        Scarica
+                      </button>
                     </div>
                   ))}
                 </div>
@@ -3578,6 +3733,11 @@ function PostAttestazioneTiAmmWorkSection (props: {
               {hasBozzaGenerated && !hasBozzaWordCaricata && (
                 <InfoBox kind='warn'>
                   Dopo aver aperto e rifinito il documento Word generato, caricare la bozza Word definitiva per abilitare la trasmissione al Responsabile dell’istruttoria amministrativa.
+                </InfoBox>
+              )}
+              {bozzaRientrataDaRiAmm && (
+                <InfoBox kind='warn'>
+                  La bozza è rientrata dal Responsabile dell’istruttoria amministrativa. È possibile scaricare la versione presente agli atti, correggerla o rigenerarla, quindi caricare la nuova bozza Word, che sostituirà quella precedente, e trasmetterla nuovamente.
                 </InfoBox>
               )}
               {bozzaAlreadyTransmitted && (
@@ -3614,7 +3774,7 @@ function PostAttestazioneTiAmmWorkSection (props: {
                     margin: 0
                   }}
                 >
-                  {attachmentsBusy ? 'Caricamento…' : (hasBozzaWordCaricata ? 'Carica bozza Word aggiornata' : 'Carica bozza Word')}
+                  {attachmentsBusy ? 'Caricamento…' : (hasBozzaWordCaricata ? 'Sostituisci bozza Word' : 'Carica bozza Word')}
                   <input
                     key={inputKey}
                     type='file'
@@ -6585,6 +6745,47 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
   }, [data, findOpenAmmCycle, getLogLayer, getNextAmmCycleNumber, oid, profile.username])
 
 
+
+  const deleteCurrentAmmActivitiesForRole = React.useCallback(async (roleRaw: string, sourceAttrs?: Record<string, any>, excludeKey?: string) => {
+    try {
+      const layer = await getAttivitaLayer()
+      if (!layer?.queryFeatures || !layer?.applyEdits) return
+      const merged = { ...(data || {}), ...(sourceAttrs || {}) }
+      const parentGlobalId = String(pickAttrCI(merged, ['globalid', 'GlobalID', 'GLOBALID', 'global_id']) || '').trim()
+      const oidFromAttrs = pickAttrCI(merged, [String(layer.objectIdField || 'OBJECTID'), 'OBJECTID', 'ObjectID', 'ObjectId', 'objectId', 'objectid'])
+      const oidNumber = Number.isFinite(Number(oidFromAttrs)) ? Number(oidFromAttrs) : (oid != null && Number.isFinite(Number(oid)) ? Number(oid) : null)
+      const ruoloDest = String(roleRaw || '').trim().toUpperCase()
+      if (!ruoloDest) return
+
+      const targetParts: string[] = []
+      if (parentGlobalId) targetParts.push(`(${parentGlobalIdWhereForLog(parentGlobalId)})`)
+      if (oidNumber != null) targetParts.push(`parent_objectid = ${oidNumber}`)
+      if (!targetParts.length) return
+
+      const parts: string[] = [
+        `tipo_attivita = 'PRESA_IN_CARICO'`,
+        `destinatario_ruolo = ${sqlQuote(ruoloDest)}`,
+        `(${targetParts.join(' OR ')})`
+      ]
+      const keepKey = String(excludeKey || '').trim()
+      if (keepKey) parts.push(`chiave_attivita <> ${sqlQuote(keepKey)}`)
+
+      const q = layer.createQuery ? layer.createQuery() : {}
+      q.where = parts.join(' AND ')
+      q.outFields = [String(layer.objectIdField || 'OBJECTID')]
+      q.returnGeometry = false
+      const found = await layer.queryFeatures(q)
+      const oidField = String(layer.objectIdField || 'OBJECTID')
+      const deletes = (found?.features || [])
+        .map((f: any) => pickAttrCI(f?.attributes || {}, [oidField, 'OBJECTID', 'ObjectID', 'ObjectId', 'objectId', 'objectid']))
+        .filter((v: any) => v != null)
+        .map((objectId: any) => ({ objectId }))
+      if (deletes.length) await layer.applyEdits({ deleteFeatures: deletes })
+    } catch (e) {
+      console.warn('[GII_ATTIVITA_CORRENTI] Errore eliminazione attività corrente amministrativa:', e)
+    }
+  }, [data, getAttivitaLayer, oid])
+
   const createRiAmmAttestationInfo = React.useCallback(async (overrideAttrs: Record<string, any>) => {
     try {
       const layer = await getAttivitaLayer()
@@ -6634,13 +6835,15 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
       const layer = await getAttivitaLayer()
       if (!layer?.applyEdits) return
       const now = Date.now()
-      const merged = { ...(data || {}), ...(overrideAttrs || {}) }
+      const overrideHasGlobalId = !!String(pickAttrCI(overrideAttrs || {}, ['globalid', 'GlobalID', 'GLOBALID', 'global_id']) || '').trim()
+      const merged = overrideHasGlobalId ? { ...(overrideAttrs || {}) } : { ...(data || {}), ...(overrideAttrs || {}) }
       const parentGlobalId = String(pickAttrCI(merged, ['globalid', 'GlobalID', 'GLOBALID', 'global_id']) || '').trim()
       if (!parentGlobalId) {
         console.warn('[GII_ATTIVITA_CORRENTI] Attività bozza determinazione saltata: GlobalID pratica non disponibile.', { oid })
         return
       }
-      const oidNumber = oid != null && Number.isFinite(Number(oid)) ? Number(oid) : null
+      const oidFromMerged = pickAttrCI(merged, ['OBJECTID', 'ObjectID', 'ObjectId', 'objectId', 'objectid'])
+      const oidNumber = Number.isFinite(Number(oidFromMerged)) ? Number(oidFromMerged) : (oid != null && Number.isFinite(Number(oid)) ? Number(oid) : null)
       const numeroRapporto = getReportCode(merged, oidNumber)
       const destUsername = String(pickAttrCI(merged, ['ri_amm_assegnato_username', 'RI_AMM_assegnato_username', 'ri_amm_username', 'RI_AMM_username']) || '').trim()
       const mittente = String(profile.fullName || profile.username || 'Tecnico istruttore').trim()
@@ -6670,6 +6873,8 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
       }
       const activityFields = (layer.fields || []).map((f: any) => ({ name: String(f.name), type: String(f.type || ''), alias: String(f.alias || f.name), domain: f.domain || null, editable: f.editable !== false }))
       const cleanAttrs = filterAttrsForLayer(attrs, activityFields)
+      await deleteCurrentAmmActivitiesForRole('TI_AMM', merged)
+      await deleteCurrentAmmActivitiesForRole('RI_AMM', merged, key)
       const chiaveField = realFieldName(activityFields, 'chiave_attivita') || 'chiave_attivita'
       const chiaveValue = cleanAttrs[chiaveField]
       let existingOid: any = null
@@ -6695,7 +6900,7 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
     } catch (e) {
       console.warn('[GII_ATTIVITA_CORRENTI] Errore creazione attività bozza determinazione:', e)
     }
-  }, [data, getAttivitaLayer, oid, profile.fullName, profile.username])
+  }, [data, deleteCurrentAmmActivitiesForRole, getAttivitaLayer, oid, profile.fullName, profile.username])
 
   const handleApponiAttestazioneTiAmm = React.useCallback(async (noteInput: string) => {
     const noteTrim = String(noteInput || '').trim()
@@ -7023,7 +7228,8 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
       return
     }
     const currentStato = String(pickAttrCI(base, ['determinazione_stato']) || '').trim().toUpperCase()
-    if (currentStato && currentStato !== 'BOZZA') {
+    const bozzaRientrataDaRiAmm = isBozzaDeterminazioneRientrataDaRiAmm(base)
+    if (currentStato && currentStato !== 'BOZZA' && !bozzaRientrataDaRiAmm) {
       setDialog({ kind: 'warn', title: 'Bozza già avanzata', text: 'La bozza di determinazione risulta già trasmessa o validata. Per modificarla liberamente servirà la fase di rimando/riapertura dedicata.' })
       return
     }
@@ -7042,10 +7248,10 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
       if (realFieldName(fields, 'dt_bozza_determinazione')) nextDraft.dt_bozza_determinazione = Date.now()
       if (realFieldName(fields, 'bozza_determinazione_da')) nextDraft.bozza_determinazione_da = profile.fullName || profile.username || ''
       const attrs: Record<string, any> = {}
-      ;['determinazione_stato', 'dt_bozza_determinazione', 'bozza_determinazione_da'].forEach(name => {
+      ;['protocollo_fascicolo_numero', 'protocollo_fascicolo_data', 'determinazione_stato', 'dt_bozza_determinazione', 'bozza_determinazione_da'].forEach(name => {
         const real = realFieldName(fields, name)
         if (!real) return
-        const value = pickAttrCI(nextDraft, [name])
+        const value = pickAttrCI(nextDraft, [real, name])
         if (value !== undefined) attrs[real] = value == null || value === '' ? null : value
       })
       let prevRecordAttrs = { ...(initialDraft || {}) }
@@ -7068,9 +7274,10 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
         const changedFieldNames = Object.keys(cleanAttrs).filter(k => k !== idName)
         await upsertAmmCycleAudit(prevRecordAttrs, { ...prevRecordAttrs, ...cleanAttrs }, changedFieldNames)
         await refreshDs(active.ds)
-        const next = { ...(initialDraft || {}), ...cleanAttrs }
-        setInitialDraft(next)
-        setDraft(next)
+        const savedAttrs = { ...cleanAttrs }
+        delete savedAttrs[idName]
+        setInitialDraft(prev => ({ ...(prev || {}), ...savedAttrs }))
+        setDraft(prev => ({ ...(prev || {}), ...savedAttrs }))
       }
       setDialog({ kind: 'ok', title: 'Bozza Word generata', text: 'La bozza Word della determinazione è stata scaricata come copia di lavoro della pratica. Il template base non è stato modificato.' })
       try { window.dispatchEvent(new CustomEvent('gii:record-updated', { detail: { oid: Number(oid), source: 'gii-editing-amm-bozza-determinazione-word' } })) } catch {}
@@ -7123,7 +7330,8 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
         return
       }
       const statoCorrente = String(pickAttrCI(base, ['determinazione_stato']) || '').trim().toUpperCase()
-      if (statoCorrente && statoCorrente !== 'BOZZA') {
+      const bozzaRientrataDaRiAmm = isBozzaDeterminazioneRientrataDaRiAmm(base)
+      if (statoCorrente && statoCorrente !== 'BOZZA' && !bozzaRientrataDaRiAmm) {
         setDialog({ kind: 'warn', title: 'Bozza già trasmessa', text: 'La bozza di determinazione risulta già trasmessa o avanzata.' })
         return
       }
@@ -7173,13 +7381,14 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
       const nextRecordAttrs = { ...prevRecordAttrs, ...cleanAttrs }
       await upsertAmmCycleAudit(prevRecordAttrs, nextRecordAttrs, changedFieldNames)
       await closeTiAmmBozzaDeterminazioneCycle(prevRecordAttrs, nextRecordAttrs, changedFieldNames)
-      await createRiAmmBozzaDeterminazioneActivity(cleanAttrs)
+      await createRiAmmBozzaDeterminazioneActivity(nextRecordAttrs)
       await refreshDs(active.ds)
-      const next = { ...(initialDraft || {}), ...cleanAttrs }
+      const next = { ...nextRecordAttrs }
       setInitialDraft(next)
       setDraft(next)
       setDialog({ kind: 'ok', title: 'Bozza trasmessa', text: 'La bozza Word della determinazione è stata trasmessa al Responsabile dell’istruttoria amministrativa per la verifica.' })
       try { window.dispatchEvent(new CustomEvent('gii:record-updated', { detail: { oid: Number(oid), source: 'gii-editing-amm-bozza-determinazione-trasmessa' } })) } catch {}
+      try { window.dispatchEvent(new CustomEvent('gii-force-refresh-selection', { detail: { oid: Number(oid), source: 'gii-editing-amm-bozza-determinazione-trasmessa', ts: Date.now() } })) } catch {}
     } catch (e: any) {
       setDialog({ kind: 'err', title: 'Errore trasmissione bozza', text: e?.message || String(e) })
     } finally {

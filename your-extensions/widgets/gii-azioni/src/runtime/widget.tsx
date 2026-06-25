@@ -4569,8 +4569,14 @@ function ActionsPanel (props: {
       }))
     } catch {}
 
-    clearRuntimeSelection(reason)
-    setLocalData(null)
+    // La presa in carico non fa uscire la pratica dalla disponibilità del ruolo corrente:
+    // dopo il refresh deve restare selezionata e il pannello azioni non deve perdere focus.
+    // Per trasmissioni/rimandi/chiusure, invece, la selezione viene ancora azzerata.
+    const keepCurrentSelection = String(reason || '').startsWith('azioni-presa-in-carico')
+    if (!keepCurrentSelection) {
+      clearRuntimeSelection(reason)
+      setLocalData(null)
+    }
   }
 
   const buildTechnicalChainInformativeActivities = (kind: 'DT_APPROVA' | 'DT_RESPINGE' | 'DT_RIMANDA_TI' | 'RI_RIMANDA_TI' | 'RZ_APPROVA' | 'RZ_RESPINGE', _overrideAttrs?: Record<string, any>): InformativeActivityTarget[] => {
@@ -5056,6 +5062,17 @@ function ActionsPanel (props: {
           if (fDtPresa) upd[fDtPresa] = null
           if (fEsito) upd[fEsito] = null
           if (fDtEsito) upd[fDtEsito] = null
+
+          // Rimando RI_AMM -> TI_AMM dopo trasmissione della bozza determinazione.
+          // La bozza non deve restare nello stato operativo TRASMESSA_RI_AMM,
+          // altrimenti il TI_AMM rientra in un limbo: pratica riaperta ma sezione
+          // bozza ancora bloccata come se fosse avanzata. Il rientro riporta la
+          // bozza alla lavorazione TI_AMM; la storia della trasmissione/rimando resta
+          // tracciata nel log eventi/cicli e nelle attività correnti.
+          if (pending === 'INTEGRAZIONE_TI_AMM' && ruoloDest === 'TI_AMM') {
+            const fDeterminaStato = getSchemaFieldNameCI(schemaFields, 'determinazione_stato')
+            if (fDeterminaStato) upd[fDeterminaStato] = 'BOZZA'
+          }
         } catch {}
       }
 

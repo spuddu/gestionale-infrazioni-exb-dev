@@ -542,6 +542,72 @@ function replaceTextAcrossRuns (xml: string, needle: string, replacement: string
   return out
 }
 
+
+function getRunBoundsForToken (xml: string, token: TextToken): { runStart: number, runEnd: number } | null {
+  let runStart = xml.lastIndexOf('<w:r', token.start)
+  while (runStart >= 0) {
+    const next = xml.charAt(runStart + '<w:r'.length)
+    if (next === '>' || /\s/.test(next)) break
+    runStart = xml.lastIndexOf('<w:r', runStart - 1)
+  }
+  if (runStart < 0) return null
+  const runOpenEnd = xml.indexOf('>', runStart)
+  if (runOpenEnd < 0 || runOpenEnd > token.start) return null
+  const runCloseStart = xml.indexOf('</w:r>', token.end)
+  if (runCloseStart < 0) return null
+  return { runStart, runEnd: runCloseStart + '</w:r>'.length }
+}
+
+function getRunPr (runXml: string): string {
+  const match = runXml.match(/<w:rPr>[\s\S]*?<\/w:rPr>/)
+  return match ? match[0] : ''
+}
+
+function ensureBoldRunPr (runPr: string): string {
+  let out = runPr || '<w:rPr></w:rPr>'
+  if (!/<w:b\b/.test(out)) out = out.replace('</w:rPr>', '<w:b/></w:rPr>')
+  if (!/<w:bCs\b/.test(out)) out = out.replace('</w:rPr>', '<w:bCs/></w:rPr>')
+  return out
+}
+
+function makeTextRun (text: string, runPr: string): string {
+  if (!text) return ''
+  const preserve = /^\s|\s$/.test(text) ? ' xml:space="preserve"' : ''
+  return `<w:r>${runPr}<w:t${preserve}>${escXml(text)}</w:t></w:r>`
+}
+
+function replaceTextAcrossRunsOnceWithBold (xml: string, needle: string, replacement: string): { xml: string, replaced: boolean } {
+  const n = String(needle || '')
+  if (!n) return { xml, replaced: false }
+  const parsed = parseTextTokens(xml)
+  const at = parsed.fullText.indexOf(n)
+  if (at < 0) return { xml, replaced: false }
+  const end = at + n.length
+  const affected = parsed.tokens.filter(t => t.fullEnd > at && t.fullStart < end)
+  if (affected.length !== 1) return replaceTextAcrossRunsOnce(xml, needle, replacement)
+  const token = affected[0]
+  const bounds = getRunBoundsForToken(xml, token)
+  if (!bounds) return replaceTextAcrossRunsOnce(xml, needle, replacement)
+  const startInside = Math.max(0, at - token.fullStart)
+  const endInside = Math.max(0, end - token.fullStart)
+  const before = token.text.slice(0, startInside)
+  const after = token.text.slice(endInside)
+  const runXml = xml.slice(bounds.runStart, bounds.runEnd)
+  const runPr = getRunPr(runXml)
+  const replacementXml = makeTextRun(before, runPr) + makeTextRun(replacement, ensureBoldRunPr(runPr)) + makeTextRun(after, runPr)
+  return { xml: xml.slice(0, bounds.runStart) + replacementXml + xml.slice(bounds.runEnd), replaced: true }
+}
+
+function replaceTextAcrossRunsWithBold (xml: string, needle: string, replacement: string): string {
+  let out = xml
+  for (let guard = 0; guard < 20; guard++) {
+    const res = replaceTextAcrossRunsOnceWithBold(out, needle, replacement)
+    out = res.xml
+    if (!res.replaced) break
+  }
+  return out
+}
+
 function patchCoreProps (xml: string, generatedBy: string): string {
   const by = clean(generatedBy) || 'Gestionale Infrazioni Irrigue'
   const now = new Date().toISOString()
@@ -570,7 +636,7 @@ function buildDocumentXmlFromTemplate (xml: string, m: BozzaDeterminazioneDocxMa
   out = replaceTextAcrossRuns(out, 'Rapporto tecnico di rilevazione n. ______ del ________, redatto dall’Area __________ / Settore __________, con il quale sono stati rilevati i fatti riconducibili alla violazione dell’art. ____ delle suddette Norme generali;', rapportoVisto)
   out = replaceTextAcrossRuns(out, 'del Rapporto tecnico di rilevazione n. ______ del ________, redatto dall’Area __________ / Settore __________, con il quale sono stati rilevati i fatti riconducibili alla violazione dell’art. ____ delle “Norme generali sulla distribuzione dell’acqua ad uso irriguo”, approvate con Deliberazione del C.d.D. n. 016 del 02.12.2019;', rapportoDisp)
   out = replaceTextAcrossRuns(out, 'Proposta di contestazione relativa al predetto Rapporto tecnico di rilevazione, prot. n. ______ del ________, predisposta dal Settore Catasto, Ruoli e Servizi Territoriali e finalizzata alla contestazione dell’infrazione rilevata e alla quantificazione degli importi dovuti;', proposta)
-  out = replaceTextAcrossRuns(out, '€ ________', importo)
+  out = replaceTextAcrossRunsWithBold(out, '€ ________', importo)
   return out
 }
 

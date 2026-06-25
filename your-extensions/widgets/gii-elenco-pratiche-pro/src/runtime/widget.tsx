@@ -3329,9 +3329,13 @@ export default function Widget(props: Props) {
   const [lastListRefreshAt, setLastListRefreshAt] = React.useState<
     number | null
   >(null);
+  const preserveSelectionRefreshUntilRef = React.useRef<number>(0);
 
   const forceListRefresh = React.useCallback(
-    (options?: { refreshAlerts?: boolean }) => {
+    (options?: { refreshAlerts?: boolean; preserveSelection?: boolean }) => {
+      if (options?.preserveSelection) {
+        preserveSelectionRefreshUntilRef.current = Date.now() + 10000;
+      }
       // Forza anche il ricaricamento del LOG: il set dei GlobalID puo' restare
       // identico dopo un'azione (es. RZ assegna a TI), ma l'ultimo evento cambia.
       // Senza azzerare questa firma l'elenco continua a mostrare l'oggetto vecchio
@@ -3361,7 +3365,10 @@ export default function Widget(props: Props) {
   );
 
   React.useEffect(() => {
-    const h = () => forceListRefresh();
+    const h = (evt?: any) => {
+      const source = String(evt?.detail?.source || "");
+      forceListRefresh({ preserveSelection: source.startsWith("azioni-presa-in-carico") });
+    };
     const hSelectionCleared = (evt?: any) => {
       const source = String(evt?.detail?.source || "");
       // Dopo un'azione procedimentale il cw azioni azzera la selezione; l'elenco
@@ -3370,9 +3377,13 @@ export default function Widget(props: Props) {
       if (source === "azioni-post-applyedits") forceListRefresh();
     };
     window.addEventListener("gii-force-refresh-selection", h as any);
+    window.addEventListener("gii:record-updated", h as any);
+    window.addEventListener("gii-log-eventi-cicli-changed", h as any);
     window.addEventListener("gii-selection-cleared", hSelectionCleared as any);
     return () => {
       window.removeEventListener("gii-force-refresh-selection", h as any);
+      window.removeEventListener("gii:record-updated", h as any);
+      window.removeEventListener("gii-log-eventi-cicli-changed", h as any);
       window.removeEventListener(
         "gii-selection-cleared",
         hSelectionCleared as any,
@@ -4712,7 +4723,11 @@ export default function Widget(props: Props) {
     if (bozzaTrasmessaRiAmm && role === "RI_AMM" && (statoNum === null || statoNum === statoDaPrendere)) {
       return getStateView(role, "Da prendere in carico", statoDaPrendere);
     }
-    if (bozzaTrasmessaRiAmm && role === "TI_AMM") {
+    // La bozza trasmessa al Responsabile dell'istruttoria amministrativa vale come
+    // stato storico del TI_AMM solo finché il nodo TI_AMM non viene riaperto.
+    // Dopo un rimando RI_AMM → TI_AMM, infatti, stato_TI_AMM torna a 1/2 e deve
+    // prevalere sul determinazione_stato rimasto TRASMESSA_RI_AMM.
+    if (bozzaTrasmessaRiAmm && role === "TI_AMM" && statoNum !== statoDaPrendere && statoNum !== statoPresa) {
       return getStateView(role, "Trasmesso", statoApprovata);
     }
 
@@ -5269,7 +5284,16 @@ export default function Widget(props: Props) {
           String(r.getId?.() ?? "") === String(rid),
       ),
     );
-    if (!stillVisible) clearAllSelections();
+    if (!stillVisible) {
+      const restoreInfo = readRestoreSelectionAfterEdit();
+      const preserveUntil = preserveSelectionRefreshUntilRef.current || 0;
+      // Durante una presa in carico il record resta nella disponibilita' del ruolo.
+      // Se il refresh FL/LOG genera un intervallo vuoto o una doppia notifica,
+      // non azzeriamo il focus: la selezione viene confermata appena il record
+      // rientra nella lista aggiornata.
+      if (restoreInfo && Date.now() <= preserveUntil) return;
+      clearAllSelections();
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [mergedRecs, recDsLookup]);
 
@@ -5419,7 +5443,15 @@ export default function Widget(props: Props) {
   React.useEffect(() => {
     const restoreInfo = readRestoreSelectionAfterEdit();
     if (!restoreInfo) return;
-    if (Object.keys(localSelectedByDs || {}).length > 0) return;
+    const preserveUntil = preserveSelectionRefreshUntilRef.current || 0;
+    const anyLoading = Object.values(dsDataRef.current || {}).some(
+      (e: any) => !!e?.loading,
+    );
+    if (anyLoading || (statoRuoloField && !logLoadedRef.current)) return;
+    if (Object.keys(localSelectedByDs || {}).length > 0) {
+      if (Date.now() > preserveUntil) clearRestoreSelectionAfterEdit();
+      return;
+    }
     if (!mergedRecs.length) return;
 
     const oidNum = Number(restoreInfo.oid);
@@ -5457,6 +5489,10 @@ export default function Widget(props: Props) {
     if (!found) {
       // Il record non è più presente nella scheda corrente: non va forzata
       // alcuna selezione e il marker non deve riattivarsi cambiando tab.
+      // Durante una presa in carico, però, può trattarsi solo di un transitorio
+      // del doppio refresh FL/LOG: attendiamo la stabilizzazione prima di perdere
+      // il focus.
+      if (Date.now() <= preserveUntil) return;
       clearRestoreSelectionAfterEdit();
       return;
     }
@@ -5501,6 +5537,7 @@ export default function Widget(props: Props) {
       data: restoredData,
     });
     clearRestoreSelectionAfterEdit();
+    preserveSelectionRefreshUntilRef.current = 0;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
     mergedRecs,
