@@ -843,7 +843,7 @@ function getNumeroRapporto (d: any): string {
 }
 
 function getNumeroVerbale (d: any): string {
-  return cleanNumeroPraticaText(getFirst(d, ['numero_atto_accertamento', 'Numero_verbale', 'NUMERO_VERBALE'], '')) || '—'
+  return cleanNumeroPraticaText(getFirst(d, ['accertamento_numero'], '')) || '—'
 }
 
 function isCheckedValue (v: any): boolean {

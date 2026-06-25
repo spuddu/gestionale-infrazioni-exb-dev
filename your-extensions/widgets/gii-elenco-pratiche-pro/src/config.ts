@@ -10,7 +10,7 @@ export interface FilterTab {
 /**
  * Colonna visualizzata nella lista.
  * `field` può essere un campo layer o un campo virtuale:
- *   __numero_rilevazione__ / __numero_pratica__ / __numero_atto_accertamento_display__
+ *   __numero_rilevazione__ / __numero_pratica__ / __accertamento_numero_display__
  *   __stato_sint__ / __fase_istruttoria__ / __ultimo_agg__ / __prossima__
  */
 export interface ColumnDef {
@@ -182,7 +182,7 @@ export type IMConfig = ImmutableObject<Config>
 export const DEFAULT_COLUMNS: ColumnDef[] = [
   { id: 'col_numero_rilevazione', label: 'N. rilevazione', field: '__numero_rilevazione__',  width: 150 },
   { id: 'col_numero',             label: 'N. rapporto',    field: '__numero_pratica__',      width: 140 },
-  { id: 'col_numero_atto_accertamento',  label: 'N. atto',       field: '__numero_atto_accertamento_display__', width: 120 },
+  { id: 'col_accertamento_numero',  label: 'N. atto',       field: '__accertamento_numero_display__', width: 120 },
   { id: 'col_data',            label: 'Data rilevazione', field: 'data_rilevazione',           width: 140 },
   { id: 'col_ufficio',         label: 'Ufficio origine',  field: 'ufficio_zona',               width: 190 },
   { id: 'col_stato',           label: 'Il mio stato',     field: '__stato_sint__',             width: 170 },

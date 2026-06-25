@@ -57,7 +57,7 @@ function pickOfficialRapportoNumber(d: any): string {
 
 function pickVerbaleNumber(d: any): string {
   return String(
-    getFirstValue(d, ["numero_atto_accertamento", "num_verbale", "codice_verbale"]) || "",
+    getFirstValue(d, ["accertamento_numero"]) || "",
   ).trim();
 }
 
@@ -103,7 +103,9 @@ const V_FASE = "__fase_istruttoria__";
 const V_TIPO_PRATICA = "__tipo_pratica__";
 const V_NUMERO_RILEVAZIONE = "__numero_rilevazione__";
 const V_NUMERO_PRATICA = "__numero_pratica__";
-const V_NUMERO_VERBALE = "__numero_atto_accertamento_display__";
+const V_NUMERO_VERBALE = "__accertamento_numero_display__";
+const V_NUMERO_VERBALE_LEGACY = "__numero_atto_accertamento_display__";
+function isNumeroAttoVirtualField (field: string): boolean { return field === V_NUMERO_VERBALE || field === V_NUMERO_VERBALE_LEGACY }
 const V_ULTIMO = "__ultimo_agg__";
 const V_PROSSIMA = "__prossima__";
 const V_MITTENTE = "__mittente__";
@@ -176,6 +178,8 @@ const ALLOWED_OGGETTI = new Set([
   "NUOVA RILEVAZIONE",
   "ASSEGNAZIONE ISTRUTTORIA",
   "TRASMISSIONE ISTRUTTORIA",
+  "TRASMISSIONE BOZZA DETERMINAZIONE",
+  "TRASMISSIONE PRATICA CON BOZZA DETERMINAZIONE",
   "RICHIESTA DI INTEGRAZIONE",
   "TRASMISSIONE INTEGRAZIONE",
   "RILEVAZIONE RESPINTA",
@@ -197,6 +201,7 @@ const ALLOWED_LOG_EVENTI = new Set([
   "SANZIONE_NOTIFICATA",
   "VERBALE_NOTIFICATO",
   "RESTITUZIONE_A_TI_AMM",
+  "BOZZA_DETERMINAZIONE_TRASMESSA",
   "RESPINTA",
   "RIMANDA_A_DT",
 ]);
@@ -250,6 +255,7 @@ function formatCausale(evento: string): string {
   if (e === "INTEGRAZIONE_TRASMESSA") return "TRASMISSIONE INTEGRAZIONE";
   if (e === "INTEGRAZIONE_RICHIESTA") return "RICHIESTA DI INTEGRAZIONE";
   if (e === "ISTRUTTORIA_TRASMESSA") return "TRASMISSIONE ISTRUTTORIA";
+  if (e === "BOZZA_DETERMINAZIONE_TRASMESSA") return "TRASMISSIONE PRATICA CON BOZZA DETERMINAZIONE";
   if (e === "RAPPORTO_APPROVATO") return "ISTRUTTORIA TECNICA APPROVATA";
   if (e === "SANZIONE_APPROVATA") return "SANZIONE APPROVATA";
   if (e === "SANZIONE_NOTIFICATA" || e === "VERBALE_NOTIFICATO")
@@ -266,6 +272,7 @@ function isTransmissionReturnEvent(evento: any): boolean {
     .toUpperCase();
   return (
     e === "ISTRUTTORIA_TRASMESSA" ||
+    e === "BOZZA_DETERMINAZIONE_TRASMESSA" ||
     e === "INTEGRAZIONE_TRASMESSA" ||
     e === "RAPPORTO_APPROVATO" ||
     e === "SANZIONE_APPROVATA" ||
@@ -1021,7 +1028,7 @@ function migrateColumns(cfg: any): ColumnDef[] {
       findByField(V_NUMERO_PRATICA),
     ),
     take({
-      id: "col_numero_atto_accertamento",
+      id: "col_accertamento_numero",
       label: "N. atto",
       field: V_NUMERO_VERBALE,
       width: 120,
@@ -3237,10 +3244,15 @@ export default function Widget(props: Props) {
 
   const filterByRoleTab = React.useCallback(
     (recs: DataRecord[]): DataRecord[] => {
+      // La classificazione "In attesa mia / In attesa di altri / Tutte" dipende
+      // anche dall'ultimo evento di workflow. Prima che il LOG sia stato caricato
+      // non mostriamo classificazioni provvisorie, altrimenti la pratica può
+      // comparire per un istante nella scheda sbagliata e poi spostarsi.
+      if (statoRuoloField && !logLoadedRef.current) return [];
       if (!statoRuoloField || activeRoleTab === "tutte") return recs;
       return recs.filter((r) => passesRoleTab(r, activeRoleTab));
     },
-    [statoRuoloField, activeRoleTab, passesRoleTab],
+    [statoRuoloField, activeRoleTab, passesRoleTab, logVer],
   );
 
   // Ordinamento priorità ruolo: prima ciò che devo lavorare, poi ciò che ho inviato ad altri.
@@ -3380,6 +3392,11 @@ export default function Widget(props: Props) {
       }
 
       dsDataRef.current[key] = { recs: [], ds: null as any, loading: true };
+      // La query runtime e il LOG devono avanzare insieme: durante la
+      // rilettura del Feature Layer non va riutilizzato il LOG dello stato
+      // precedente, altrimenti la pratica puo' comparire per un frame nella
+      // scheda operativa sbagliata prima della nuova query LOG.
+      logLoadedRef.current = false;
       setDsDataVer((v) => v + 1);
 
       try {
@@ -3396,6 +3413,19 @@ export default function Widget(props: Props) {
         if (cancelled) return;
         const recs: DataRecord[] = (res?.records || []) as DataRecord[];
         dsDataRef.current[key] = { recs, ds: proxy, loading: false };
+        // Se sono arrivati record, la classificazione per ruolo resta sospesa
+        // fino al completamento della query su GII_LOG_EVENTI_CICLI relativa a
+        // quei record. Se invece non ci sono record, il caricamento log puo'
+        // considerarsi concluso e i contatori restano a zero senza flicker.
+        const loadedGids = recs
+          .map((r) => {
+            const d: any = r.getData?.() || {};
+            return d.GlobalID ?? d.globalid ?? d.globalId ?? d.GLOBALID;
+          })
+          .filter((gid) => !!gid)
+          .map((gid) => normGid(gid));
+        const nextLogSig = `${loadedGids.sort().join(",")}::${listRefreshNonce}`;
+        logLoadedRef.current = !loadedGids.length || nextLogSig === lastLogGidSigRef.current;
         setLastListRefreshAt(Date.now());
         try {
           const w = window as any;
@@ -3405,6 +3435,7 @@ export default function Widget(props: Props) {
       } catch {
         if (cancelled) return;
         dsDataRef.current[key] = { recs: [], ds: null as any, loading: false };
+        logLoadedRef.current = true;
         setLastListRefreshAt(Date.now());
       }
       if (!cancelled) setDsDataVer((v) => v + 1);
@@ -3614,6 +3645,7 @@ export default function Widget(props: Props) {
           ex,
         );
         logLoadedRef.current = true;
+        setLogVer((v) => v + 1);
       }
     })();
     return () => {
@@ -3807,7 +3839,7 @@ export default function Widget(props: Props) {
       return txt(cfg.oggettoBadgeColorIntegrazione || CHIP_ORANGE.background);
     if (o === "ASSEGNAZIONE ISTRUTTORIA")
       return txt(cfg.oggettoBadgeColorAssegnazione || CHIP_BLUE.background);
-    if (o === "TRASMISSIONE ISTRUTTORIA")
+    if (o === "TRASMISSIONE ISTRUTTORIA" || o === "TRASMISSIONE BOZZA DETERMINAZIONE" || o === "TRASMISSIONE PRATICA CON BOZZA DETERMINAZIONE")
       return txt(cfg.oggettoBadgeColorTrasmissione || CHIP_PURPLE.background);
     if (o === "NUOVA RILEVAZIONE")
       return txt(
@@ -3826,6 +3858,8 @@ export default function Widget(props: Props) {
       return "Il colore identifica l’assegnazione della pratica al Tecnico istruttore incaricato della compilazione.";
     if (o === "TRASMISSIONE ISTRUTTORIA")
       return "Il colore identifica la trasmissione dell’istruttoria al ruolo successivo del procedimento.";
+    if (o === "TRASMISSIONE BOZZA DETERMINAZIONE" || o === "TRASMISSIONE PRATICA CON BOZZA DETERMINAZIONE")
+      return "Il colore identifica la trasmissione della pratica, contenente la bozza Word della determinazione, al Responsabile dell’istruttoria amministrativa per la verifica.";
     if (o === "RICHIESTA DI INTEGRAZIONE")
       return "Il colore identifica una richiesta di integrazione rivolta al ruolo che deve completare o correggere la pratica.";
     if (o === "TRASMISSIONE INTEGRAZIONE")
@@ -3977,6 +4011,42 @@ export default function Widget(props: Props) {
       meaningful(d["determinazione_stato"]) ||
       meaningful(d["determinazione_numero"])
     );
+  };
+
+  const isBozzaDeterminazioneTrasmessaRiAmm = (d: any): boolean => {
+    const stato = String(pickField(d, "determinazione_stato") ?? "")
+      .trim()
+      .toUpperCase();
+    return stato === "TRASMESSA_RI_AMM" || stato === "BOZZA_TRASMESSA_RI_AMM";
+  };
+
+  const getBozzaDeterminazioneTrasmissionDisplay = (d: any) => {
+    const tiAmmUser = String(
+      pickField(d, "bozza_determinazione_da") ??
+      pickField(d, "ti_amm_assegnato_username") ??
+      pickField(d, "ti_amm_assegnato_user") ??
+      pickField(d, "ti_amm_assegnato") ??
+      "",
+    ).trim();
+    const riAmmUser = String(
+      pickField(d, "ri_amm_assegnato_username") ??
+      pickField(d, "RI_AMM_assegnato_username") ??
+      pickField(d, "ri_amm_username") ??
+      pickField(d, "RI_AMM_username") ??
+      "",
+    ).trim();
+    const dt =
+      parseToMs(pickField(d, "dt_stato_RI_AMM")) ??
+      parseToMs(pickField(d, "dt_stato_TI_AMM")) ??
+      parseToMs(pickField(d, "dt_bozza_determinazione")) ??
+      computeUltimoAggMs(d);
+    return {
+      mittente: formatPersona("TI_AMM", "AMM", "CR", tiAmmUser, utentiMapRef.current),
+      destinatario: formatPersonaDest("RI_AMM", "AMM", "CR", riAmmUser, utentiMapRef.current),
+      causale: "TRASMISSIONE PRATICA CON BOZZA DETERMINAZIONE",
+      dataMs: dt,
+      data: dt ? formatDateIt(dt) : "—",
+    };
   };
 
   const computeFaseIstruttoria = (d: any): "Tecnica" | "Amministrativa" => {
@@ -4220,6 +4290,12 @@ export default function Widget(props: Props) {
   const computeSintetico = (
     d: any,
   ): { ruolo: string; label: string; statoForChip: number | null } => {
+    const bozzaTrasmessaRiAmm = isBozzaDeterminazioneTrasmessaRiAmm(d);
+    const statoRiAmm = readRoleNumber(d, "RI_AMM", "stato");
+    if (bozzaTrasmessaRiAmm && (statoRiAmm === null || statoRiAmm === statoDaPrendere)) {
+      return { ruolo: "RI_AMM", label: "Da prendere in carico", statoForChip: statoDaPrendere };
+    }
+
     const scanOrder = ["DA", "TI_AMM", "RI_AMM", "DT", "RI", "RZ", "TI", "TR"];
 
     // Caso speciale: assegnazione RZ -> TI.
@@ -4632,6 +4708,14 @@ export default function Widget(props: Props) {
     const presaNum = readRoleNumber(d, role, "presa");
     const esitoNum = readRoleNumber(d, role, "esito");
 
+    const bozzaTrasmessaRiAmm = isBozzaDeterminazioneTrasmessaRiAmm(d);
+    if (bozzaTrasmessaRiAmm && role === "RI_AMM" && (statoNum === null || statoNum === statoDaPrendere)) {
+      return getStateView(role, "Da prendere in carico", statoDaPrendere);
+    }
+    if (bozzaTrasmessaRiAmm && role === "TI_AMM") {
+      return getStateView(role, "Trasmesso", statoApprovata);
+    }
+
     // Ultima trasmissione partita dal mio ruolo: lo stato è mio, l'oggetto
     // racconta la causale e Da/A raccontano il percorso.
     if (log && logRole === role && logDest && logDest !== role) {
@@ -4801,9 +4885,10 @@ export default function Widget(props: Props) {
     if (field === V_TIPO_PRATICA) return getTipoPraticaDisplay(r);
     if (field === V_NUMERO_RILEVAZIONE) return getRilevazioneDisplay(r);
     if (field === V_NUMERO_PRATICA) return getNumeroRapportoDisplay(r);
-    if (field === V_NUMERO_VERBALE) return getNumeroVerbaleDisplay(r);
+    if (isNumeroAttoVirtualField(field)) return getNumeroVerbaleDisplay(r);
     if (field === V_ULTIMO) return computeUltimoAggMs(d);
     if (field === V_PROSSIMA) {
+      if (isBozzaDeterminazioneTrasmessaRiAmm(d)) return getBozzaDeterminazioneTrasmissionDisplay(d).destinatario;
       const log = getLogForRecord(d);
       return log?.ruoloDest
         ? formatPersonaDest(
@@ -4816,6 +4901,7 @@ export default function Widget(props: Props) {
         : "";
     }
     if (field === V_MITTENTE) {
+      if (isBozzaDeterminazioneTrasmessaRiAmm(d)) return getBozzaDeterminazioneTrasmissionDisplay(d).mittente;
       const log = getLogForRecord(d);
       return log
         ? formatPersona(
@@ -4828,10 +4914,12 @@ export default function Widget(props: Props) {
         : "";
     }
     if (field === V_CAUSALE) {
+      if (isBozzaDeterminazioneTrasmessaRiAmm(d)) return getBozzaDeterminazioneTrasmissionDisplay(d).causale;
       const log = getLogForRecord(d);
       return log ? formatCausaleForLog(log, d) : "";
     }
     if (field === V_DATA_MSG) {
+      if (isBozzaDeterminazioneTrasmessaRiAmm(d)) return getBozzaDeterminazioneTrasmissionDisplay(d).dataMs ?? computeUltimoAggMs(d) ?? 0;
       const log = getLogForRecord(d);
       return log?.dt ?? computeUltimoAggMs(d) ?? 0;
     }
@@ -5009,6 +5097,9 @@ export default function Widget(props: Props) {
   // ── Record fusi per il tab attivo, prima dei filtri integrati ─────────────
   const roleTabRecs = React.useMemo(() => {
     if (!activeGroup) return [] as DataRecord[];
+    // Evita il rendering di righe e contatori basati su uno stato ancora
+    // provvisorio: prima si carica il LOG, poi si stabilisce la scheda corretta.
+    if (statoRuoloField && !logLoadedRef.current) return [] as DataRecord[];
     const svcCache = new Map<string, string>();
     const uniq = new Map<string, DataRecord>();
     for (const di of activeGroup.dsIndices) {
@@ -5435,7 +5526,7 @@ export default function Widget(props: Props) {
 
   // Quando lo header apre la pagina Elenco pratiche da un allarme, seleziona
   // automaticamente la pratica corrispondente appena i record sono disponibili.
-  React.useEffect(() => {
+  React.useLayoutEffect(() => {
     const intent = readOpenPracticeIntent(giiUser);
     if (!intent) {
       openPracticeIntentRefreshKeyRef.current = "";
@@ -5454,8 +5545,13 @@ export default function Widget(props: Props) {
 
     if (openPracticeIntentRefreshKeyRef.current !== intentRefreshKey) {
       openPracticeIntentRefreshKeyRef.current = intentRefreshKey;
-      if (statoRuoloField && activeRoleTab !== "attesa_mia")
-        setActiveRoleTab("attesa_mia");
+      // Ogni clic su un messaggio di allarme sostituisce integralmente
+      // l'eventuale navigazione pendente precedente: niente scheda/record
+      // ereditati dal clic precedente.
+      clearAllSelections();
+      // Non forziamo preventivamente "In attesa mia": la scheda corretta viene
+      // stabilita dopo il refresh, sui dati e sul LOG aggiornati. Così il record
+      // non compare per un istante nella scheda sbagliata.
       forceListRefresh();
       return;
     }
@@ -5464,6 +5560,7 @@ export default function Widget(props: Props) {
       (e: any) => !!e?.loading,
     );
     if (anyLoading) return;
+    if (statoRuoloField && !logLoadedRef.current) return;
     if (!activeGroup) return;
 
     // Cerca su tutti i record visibili del gruppo, non solo nella scheda ruolo attiva:
@@ -5517,20 +5614,29 @@ export default function Widget(props: Props) {
 
     if (!found) return;
 
-    // Dopo il refresh forzato, la destinazione corretta degli allarmi operativi
-    // deve essere "In attesa mia". Usiamo "Tutte le pratiche" solo come
-    // fallback reale se, anche dopo la rilettura, il record non risulta più in
-    // carico/al turno dell'utente.
+    // La scheda di destinazione non viene mai presa dal messaggio: viene
+    // calcolata solo dopo FL + LOG, sulla classificazione reale della pratica.
     if (statoRuoloField) {
       const targetRoleTab = passesRoleTab(found.rec, "attesa_mia")
         ? "attesa_mia"
-        : "tutte";
-      if (activeRoleTab !== targetRoleTab) setActiveRoleTab(targetRoleTab);
+        : passesRoleTab(found.rec, "attesa_altri")
+          ? "attesa_altri"
+          : "tutte";
+      if (activeRoleTab !== targetRoleTab) {
+        setActiveRoleTab(targetRoleTab);
+        return;
+      }
     }
 
-    // Se filtri integrati la nasconderebbero, li resettiamo: il clic sull'allarme
-    // deve sempre portare l'utente alla pratica.
-    if (!passesIntegratedFilters(found.rec)) resetIntegratedFilters();
+    // Se filtri integrati la nasconderebbero, li resettiamo e attendiamo il
+    // render successivo: la selezione viene eseguita solo quando la riga è
+    // davvero presente nella lista filtrata corrente.
+    if (!passesIntegratedFilters(found.rec)) {
+      resetIntegratedFilters();
+      return;
+    }
+
+    if (!mergedRecs.includes(found.rec)) return;
 
     // Pulisce tutte le selezioni precedenti su tutti i DS del gruppo.
     Object.keys(dsDataRef.current).forEach((id) => {
@@ -5614,6 +5720,8 @@ export default function Widget(props: Props) {
     passesIntegratedFilters,
     resetIntegratedFilters,
     isRecordVisibleForCurrentUser,
+    clearAllSelections,
+    mergedRecs,
     openPracticeIntentTick,
     giiUser?.username,
     giiUser?.ruoloLabel,
@@ -5644,13 +5752,16 @@ export default function Widget(props: Props) {
 
   // Loading: true solo se TUTTI i DS del tab attivo stanno ancora caricando
   // (non se solo uno manca dall'entry — potrebbe essere che non ha ancora risposto)
+  const roleTabStateLoading = !!statoRuoloField && !logLoadedRef.current;
+
   const anyLoading =
-    activeGroup?.dsIndices.every((di) => {
+    roleTabStateLoading ||
+    (activeGroup?.dsIndices.every((di) => {
       const dsId = String(filteredUseDsJs[di]?.dataSourceId || "");
       const entry = dsDataRef.current[dsId];
       if (!entry) return true; // mai aggiornato → stiamo aspettando
       return entry.loading;
-    }) ?? false;
+    }) ?? false);
 
   // layout
   const gap = num(cfg.gap, 12);
@@ -6507,6 +6618,7 @@ export default function Widget(props: Props) {
                     {t.label}
                     {(() => {
                       if (!activeGroup) return null;
+                      if (statoRuoloField && !logLoadedRef.current) return null;
                       const svcCache = new Map<string, string>();
                       const uniq = new Map<string, DataRecord>();
                       for (const di of activeGroup.dsIndices) {
@@ -6751,7 +6863,13 @@ export default function Widget(props: Props) {
                       let destinatario: string;
                       let causaleVal: string;
                       let dataMsgVal: string;
-                      if (_logEntry) {
+                      if (isBozzaDeterminazioneTrasmessaRiAmm(d)) {
+                        const bozzaDisplay = getBozzaDeterminazioneTrasmissionDisplay(d);
+                        mittenteVal = bozzaDisplay.mittente;
+                        destinatario = bozzaDisplay.destinatario;
+                        causaleVal = bozzaDisplay.causale;
+                        dataMsgVal = bozzaDisplay.data;
+                      } else if (_logEntry) {
                         mittenteVal = formatPersona(
                           _logEntry.ruolo,
                           _logEntry.area,
@@ -7154,7 +7272,7 @@ export default function Widget(props: Props) {
                                 </div>
                               );
                             }
-                            if (f === V_NUMERO_VERBALE) {
+                            if (isNumeroAttoVirtualField(f)) {
                               const val = getNumeroVerbaleDisplay(r);
                               return (
                                 <div

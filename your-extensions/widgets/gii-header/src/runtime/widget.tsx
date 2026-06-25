@@ -982,6 +982,7 @@ function alertDisplayTitle (alert: GiiAlertItem): string {
   if (subtype === 'DT_APPROVA_RAPPORTO') return 'Rapporto tecnico approvato'
   if (subtype === 'DT_RESPINGE_RAPPORTO') return 'Rapporto tecnico respinto'
   if (subtype === 'DT_RIMANDA_A_TI' || subtype === 'RI_RIMANDA_A_TI') return 'Rimando al Tecnico istruttore'
+  if (subtype === 'BOZZA_DETERMINAZIONE' || event === 'TI_AMM_TRASMETTE_BOZZA_DETERMINAZIONE') return 'Bozza determinazione da verificare'
 
   return String(alert?.title || '').trim() || 'Allarme'
 }
@@ -1202,6 +1203,7 @@ function alertSenderRoleCode (alert: GiiAlertItem | null | undefined): string {
   const destRole = alertDestRoleCode(alert as any)
 
   if (alertIsNewRilevazione(alert)) return alertIsTiOrigin(alert) ? 'TI' : 'TR'
+  if (subtype === 'BOZZA_DETERMINAZIONE' || event === 'TI_AMM_TRASMETTE_BOZZA_DETERMINAZIONE') return 'TI_AMM'
   if (event === 'ISTRUTTORIA_TRASMESSA' && destRole === 'RZ') return 'TI'
 
   if (alertIsNewAssignmentReceived(alert)) {
@@ -1487,7 +1489,13 @@ function alertSenderQualificaLine (alert: GiiAlertItem): string {
   else if (role === 'RZ') label = 'Capo Settore'
   else if (role === 'RI') label = 'Responsabile istruttoria'
   else if (role === 'DT') label = 'Direttore d’Area'
-  else if (role === 'TI_AMM') label = 'Tecnico istruttore amministrativo'
+  else if (role === 'TI_AMM') {
+    const subtype = alertSubtypeCode(alert as any)
+    const event = alertOriginEventCode(alert as any)
+    label = subtype === 'BOZZA_DETERMINAZIONE' || event === 'TI_AMM_TRASMETTE_BOZZA_DETERMINAZIONE'
+      ? 'Tecnico istruttore'
+      : 'Tecnico istruttore amministrativo'
+  }
   else if (role === 'RI_AMM') label = 'Responsabile istruttoria amministrativa'
   else if (role === 'DA') label = 'Direttore Area AA. GG. e P.F.'
 
@@ -1554,10 +1562,11 @@ function alertIsStandardWorkflowAlert (alert: GiiAlertItem): boolean {
     'DT_APPROVA_RAPPORTO',
     'DT_RESPINGE_RAPPORTO',
     'DT_RIMANDA_A_TI',
-    'RI_RIMANDA_A_TI'
+    'RI_RIMANDA_A_TI',
+    'BOZZA_DETERMINAZIONE'
   ].includes(subtype)) return true
 
-  if (event === 'ISTRUTTORIA_TRASMESSA' || event === 'INVIO_A_TI_AMM') return true
+  if (event === 'ISTRUTTORIA_TRASMESSA' || event === 'INVIO_A_TI_AMM' || event === 'TI_AMM_TRASMETTE_BOZZA_DETERMINAZIONE') return true
 
   return false
 }

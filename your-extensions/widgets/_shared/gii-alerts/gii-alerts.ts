@@ -159,8 +159,8 @@ export const GII_ALERT_FIELDS = [
   'dt_stato_RI_AGR',
   'dt_stato_DT_AGR',
   'tipo_atto_amm',
-  'numero_atto_accertamento',
-  'data_atto_accertamento',
+  'accertamento_numero',
+  'accertamento_data',
   'determinazione_numero',
   'determinazione_trasmessa_firma_il',
   'notifica_data',
@@ -450,7 +450,7 @@ function isAttoDefinitivoForAlerts (data: Record<string, any>): boolean {
   const prevedeAtto = tipoAtto === 'VERBALE' || tipoAtto === 'VERBALE_RISARCIMENTO'
   const determinazioneAdottata = normalizeAlertCode(attr(data, ['determinazione_stato'])) === 'ADOTTATA' || (hasValue(attr(data, ['determinazione_numero'])) && hasValue(attr(data, ['determinazione_data'])))
   if (prevedeAtto) {
-    return hasValue(attr(data, ['numero_atto_accertamento'])) && hasValue(attr(data, ['data_atto_accertamento']))
+    return hasValue(attr(data, ['accertamento_numero'])) && hasValue(attr(data, ['accertamento_data']))
   }
   return determinazioneAdottata
 }
@@ -661,6 +661,7 @@ function isOfficeOriginReport (data: Record<string, any>): boolean {
 
 function takeChargeTitleForMessage (label: string, row: Record<string, any>): string {
   const hay = `${label || ''} ${attr(row, ['tipo_attivita']) || ''} ${attr(row, ['sottotipo_attivita']) || ''} ${attr(row, ['titolo']) || ''} ${attr(row, ['messaggio']) || ''} ${attr(row, ['origine_evento']) || ''}`.toUpperCase()
+  if (hay.includes('BOZZA_DETERMINAZIONE')) return 'Bozza determinazione da verificare'
   if (hay.includes('INTEGRAZ')) return 'Richiesta di integrazione ricevuta'
   return 'Nuova istruttoria ricevuta'
 }

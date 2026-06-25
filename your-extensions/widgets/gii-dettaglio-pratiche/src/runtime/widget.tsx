@@ -2701,8 +2701,8 @@ const ITER_TECHNICAL_MODIFIED_FIELDS = new Set([
   // editati manualmente dall'operatore e quindi non vanno elencati tra i campi modificati.
   'numero_rapporto_tecnico',
   'data_rapporto_tecnico',
-  'numero_atto_accertamento',
-  'data_atto_accertamento',
+  'accertamento_numero',
+  'accertamento_data',
 
   // Campi automatici di stato/esito/presa in carico del workflow.
   'stato_TR',
@@ -3130,7 +3130,7 @@ function CicliTimeline (props: { globalId: string; hasSel: boolean; sortDir: 'as
                 </div>
               )}
 
-              <div style={rowSt}><span style={lblSt}>Apertura</span><span style={valSt}>{formatEvento(c.evento_apertura)} — {formatDateSafe(c.dt_apertura)}</span></div>
+              <div style={rowSt}><span style={lblSt}>Apertura</span><span style={valSt}>{formatDateSafe(c.dt_apertura)}</span></div>
 
               {c.stato_record === 'CHIUSO' && (
                 <div style={rowSt}><span style={lblSt}>Chiusura</span><span style={valSt}>{formatDateSafe(c.dt_chiusura)}</span></div>
@@ -3169,7 +3169,7 @@ function CicliTimeline (props: { globalId: string; hasSel: boolean; sortDir: 'as
                 </div>
               )}
 
-              {/* Riepilogo tecnico omesso: i codici evento sono già tradotti nel titolo/Apertura,
+              {/* Riepilogo tecnico omesso: i codici evento sono già tradotti nel titolo,
                   e i campi effettivamente modificati sono mostrati nella sezione dedicata. */}
             </div>
           </div>
@@ -3951,7 +3951,7 @@ function DetailTabsPanel (props: {
   }, [data])
 
   const numeroVerbale = React.useMemo(() => {
-    return String(pickAttrCI(data, ['numero_atto_accertamento', 'Numero_verbale', 'NUMERO_VERBALE']) || '').trim()
+    return String(pickAttrCI(data, ['accertamento_numero']) || '').trim()
   }, [data])
 
   const [tab, setTab] = React.useState<string>(tabs[0]?.id || 'anagrafica')
@@ -4634,7 +4634,7 @@ const isPgOnlyField = React.useCallback((fieldName: string) => {
     const ufficioRaw = pickAttrCI(data, ['ufficio_zona', 'Ufficio_zona', 'UFFICIO_ZONA', 'ufficio'])
     const dataRil = pickRilevazioneDateValueForDisplay(data)
     const dataRap = pickAttrCI(data, ['data_rapporto_tecnico', 'Data_rapporto_tecnico', 'DATA_RAPPORTO_TECNICO'])
-    const dataVerb = pickAttrCI(data, ['data_atto_accertamento', 'Data_verbale', 'DATA_VERBALE'])
+    const dataVerb = pickAttrCI(data, ['accertamento_data'])
     return {
       area: formatAreaLabel(getFieldLabel('area_cod', areaRaw)),
       settore: formatSettoreLabel(getFieldLabel('settore_cod', settoreRaw)),

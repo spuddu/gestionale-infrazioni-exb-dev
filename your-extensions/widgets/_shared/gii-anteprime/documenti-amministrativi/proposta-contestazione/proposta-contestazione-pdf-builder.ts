@@ -993,7 +993,7 @@ Ditta “${trasgressore}”.`
     drawKeyValueGrid(ctx, compactRows([
       ['Protocollo istanza', v(m, 'protocollo_istanza_numero')],
       ['Data istanza', v(m, 'protocollo_istanza_data')],
-      ['Data approvazione', approvato ? v(m, 'data_atto_accertamento') : ''],
+      ['Data approvazione', approvato ? v(m, 'accertamento_data') : ''],
       ['Protocollo', v(m, 'protocollo_atto_accertamento_numero') || v(m, 'protocollo_verbale')],
       ['Data protocollo', v(m, 'protocollo_atto_accertamento_data')]
     ]))
@@ -1072,7 +1072,7 @@ Ditta “${trasgressore}”.`
         ruolo: 'Direttore dell’Area',
         presa: v(m, 'amm_iter_approvazione_presa'),
         esito: 'Approvazione istruttoria amministrativa',
-        data: approvato ? (v(m, 'amm_iter_approvazione_data') || v(m, 'data_atto_accertamento')) : '-'
+        data: approvato ? (v(m, 'amm_iter_approvazione_data') || v(m, 'accertamento_data')) : '-'
       }
     ])
   }

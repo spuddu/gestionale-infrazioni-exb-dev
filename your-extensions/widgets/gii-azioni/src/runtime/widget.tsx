@@ -2875,11 +2875,11 @@ function ActionsPanel (props: {
     if (st === 'RICHIESTA_INTEGRAZIONE') return 'Integrazione richiesta'
     if (st === 'INTEGRAZIONE_TRASMESSA') return 'Integrazione trasmessa'
     if (st === 'RAPPORTO_APPROVATO') return 'Pratica approvata'
-    if (st === 'PROPOSTA_VERBALE') return 'Proposta di verbale'
-    if (st === 'VERBALE_APPROVATO') return 'Verbale approvato'
+    if (st === 'PROPOSTA_VERBALE') return 'Proposta di contestazione'
+    if (st === 'VERBALE_APPROVATO') return 'Atto di accertamento approvato'
     if (st === 'RILEVAZIONE_RESPINTA') return 'Rilevazione respinta'
     if (st === 'ISTRUTTORIA_TECNICA_RESPINTA') return 'Istruttoria tecnica respinta'
-    if (st === 'VERBALE_RESPINTO') return 'Verbale respinto'
+    if (st === 'VERBALE_RESPINTO') return 'Atto di accertamento respinto'
     return 'Attività da prendere in carico'
   }
 
@@ -2892,11 +2892,11 @@ function ActionsPanel (props: {
     if (st === 'RICHIESTA_INTEGRAZIONE') return `Integrazione n. ${n} da prendere in carico.`
     if (st === 'INTEGRAZIONE_TRASMESSA') return `Integrazione n. ${n} da prendere in carico.`
     if (st === 'RAPPORTO_APPROVATO') return `Pratica approvata n. ${n} da prendere in carico.`
-    if (st === 'PROPOSTA_VERBALE') return `Proposta di verbale sulla pratica n. ${n} da prendere in carico.`
-    if (st === 'VERBALE_APPROVATO') return `Verbale della pratica n. ${n} da prendere in carico.`
+    if (st === 'PROPOSTA_VERBALE') return `Proposta di contestazione sulla pratica n. ${n} da prendere in carico.`
+    if (st === 'VERBALE_APPROVATO') return `Atto di accertamento della pratica n. ${n} da prendere in carico.`
     if (st === 'RILEVAZIONE_RESPINTA') return `Rilevazione respinta sulla pratica n. ${n}.`
     if (st === 'ISTRUTTORIA_TECNICA_RESPINTA') return `Istruttoria tecnica respinta sulla pratica n. ${n}.`
-    if (st === 'VERBALE_RESPINTO') return `Verbale respinto sulla pratica n. ${n}.`
+    if (st === 'VERBALE_RESPINTO') return `Atto di accertamento respinto sulla pratica n. ${n}.`
     return `Pratica n. ${n} da prendere in carico.`
   }
 
@@ -2930,7 +2930,7 @@ function ActionsPanel (props: {
       if (src === 'RZ' && dst === 'RI') return `Istruttoria tecnica n. ${n} da prendere in carico.`
       if (src === 'RI' && dst === 'DT') return `Rapporto tecnico n. ${n} da prendere in carico.`
       if (src === 'TI_AMM' && dst === 'RI_AMM') return `Istruttoria amministrativa n. ${n} da prendere in carico.`
-      if (src === 'RI_AMM' && dst === 'DA') return `Proposta di verbale sulla pratica n. ${n} da prendere in carico.`
+      if (src === 'RI_AMM' && dst === 'DA') return `Proposta di contestazione sulla pratica n. ${n} da prendere in carico.`
     }
 
     if (ev === 'INVIO_A_TI_AMM') return `Istruttoria amministrativa n. ${n} da prendere in carico.`
@@ -3143,7 +3143,9 @@ function ActionsPanel (props: {
       if (target === 'TI_AMM') return 'TI_AMM'
       return 'RI'
     }
-    if (role === 'TI_AMM') return 'RI_AMM'
+    // Dopo l'attestazione di conformità il TI_AMM non trasmette la pratica al RI_AMM:
+    // resta il soggetto operativo e prosegue con protocollazione/proposta e bozza di determinazione.
+    if (role === 'TI_AMM') return ''
     if (role === 'DA')     return 'RI_AMM'
     return ''
   }
@@ -3194,10 +3196,15 @@ function ActionsPanel (props: {
   }
 
 
-  // --- Editing pagina (tecnico: TI/RI; amministrativo: TI_AMM/RI_AMM) ---
+  // --- Apertura scheda pratica (tecnica/amministrativa) ---
+  // Regola generale:
+  // - se la pratica è da prendere in carico dal ruolo corrente, prima va presa in carico;
+  // - se è nella disponibilità del ruolo corrente, si apre in gestione;
+  // - in tutti gli altri casi si apre in sola consultazione.
   const ec = props.editConfig
-  const isAmmEditRole = role === 'TI_AMM' || role === 'RI_AMM'
-  const canShowEdit = ec.show && (role === 'TI' || role === 'RI' || role === 'RZ' || isAmmEditRole)
+  const isTechEditRole = role === 'TI' || role === 'RZ' || role === 'RI' || role === 'DT'
+  const isAmmEditRole = role === 'TI_AMM' || role === 'RI_AMM' || role === 'DA'
+  const canShowEdit = ec.show && (isTechEditRole || isAmmEditRole)
   const roleStatoField = `stato_${role}`
   const rolePresaField = `presa_in_carico_${role}`
   const roleEsitoField = `esito_${role}`
@@ -3212,18 +3219,27 @@ function ActionsPanel (props: {
     : String(pickAttrCI(data, ['ti_assegnato_username', 'ti_assegnato_user', 'ti_assegnato']) || '').trim().toLowerCase()
   const isOwnedByCurrentRole = (role === 'TI' || role === 'TI_AMM')
     ? (!!currentTiUsername && !!assignedTiUsername && currentTiUsername === assignedTiUsername)
-    : (role === 'RI' || role === 'RZ' || role === 'RI_AMM')
+    : (role === 'RZ' || role === 'RI' || role === 'DT' || role === 'RI_AMM' || role === 'DA')
 
   const isMeaningfulAudit = (v: any): boolean => !(v === null || v === undefined || v === '' || v === 0 || v === '0')
   const inChargeByRole =
     presaRoleNum === PRESA_IN_CARICO ||
     statoRoleNum === STATO_PRESA_IN_CARICO
 
+  const roleEsitoValue = pickAttrCI(data, [roleEsitoField, roleEsitoField.toUpperCase()])
+  const roleEsitoNum = toNumOrNull(roleEsitoValue)
+  const determinazioneStatoCorrente = String(pickAttrCI(data, ['determinazione_stato', 'DETERMINAZIONE_STATO']) || '').trim().toUpperCase()
+  const riAmmBozzaDeterminazioneDaVerificare = role === 'RI_AMM' && determinazioneStatoCorrente === 'TRASMESSA_RI_AMM'
+  const tiAmmAttestazioneOperativa = role === 'TI_AMM' && roleEsitoNum === ESITO_APPROVATA && (
+    !determinazioneStatoCorrente ||
+    determinazioneStatoCorrente === 'BOZZA'
+  )
+
   const roleClosedOrForwarded =
-    isMeaningfulAudit(pickAttrCI(data, [roleEsitoField, roleEsitoField.toUpperCase()])) ||
-    (statoRoleNum === STATO_APPROVATA) ||
+    (isMeaningfulAudit(roleEsitoValue) && !tiAmmAttestazioneOperativa) ||
+    (statoRoleNum === STATO_APPROVATA && !tiAmmAttestazioneOperativa) ||
     (statoRoleNum === STATO_RESPINTA) ||
-    (statoRoleNum != null && statoRoleNum > STATO_PRESA_IN_CARICO)
+    (statoRoleNum != null && statoRoleNum > STATO_PRESA_IN_CARICO && !tiAmmAttestazioneOperativa)
 
   const canEdit =
     hasSel &&
@@ -3234,26 +3250,33 @@ function ActionsPanel (props: {
     inChargeByRole &&
     !roleClosedOrForwarded
 
-  // TI, RZ e RI delle aree tecniche devono poter consultare anche le pratiche già
-  // trasmesse ad altri ruoli. In tal caso gii-editing-ti viene aperto in sola
-  // consultazione; quando la pratica torna nella disponibilità del ruolo, il
-  // medesimo controllo rende nuovamente editabili i campi di competenza.
-  const canOpenTechnicalReadOnly =
+  const roleToBeTakenInCharge =
+    isOwnedByCurrentRole &&
+    (statoRoleNum === STATO_DA_PRENDERE || presaRoleNum === PRESA_DA_PRENDERE)
+
+  // Tutti i ruoli abilitati alla scheda possono aprire la pratica anche quando non è
+  // nella propria disponibilità: in quel caso l'apertura è sempre in sola consultazione.
+  // Unica eccezione: se la pratica è da prendere in carico dal ruolo corrente, la presa
+  // in carico è obbligatoria prima di qualsiasi apertura, anche in sola lettura.
+  const canOpenReadOnly =
     hasSel &&
     !loading &&
     pending === null &&
     canShowEdit &&
-    (role === 'TI' || role === 'RZ' || role === 'RI')
+    !canEdit &&
+    !roleToBeTakenInCharge
 
-  const canOpenEditPage = canEdit || canOpenTechnicalReadOnly
-  const openInReadOnly = canOpenEditPage && !canEdit && (role === 'TI' || role === 'RZ' || role === 'RI')
+  const canOpenEditPage = canEdit || canOpenReadOnly
+  const openInReadOnly = canOpenReadOnly
 
   const editButtonTitle = canEdit
     ? (isAmmEditRole ? 'Apri la gestione amministrativa della pratica' : 'Apri la gestione tecnica della pratica')
     : (openInReadOnly
-      ? 'Apri la gestione tecnica in sola consultazione: la pratica non è attualmente nella disponibilità del ruolo corrente.'
-      : (isAmmEditRole
-        ? 'Gestione amministrativa non disponibile: la pratica deve essere già presa in carico dal ruolo corrente.'
+      ? (isAmmEditRole
+        ? 'Apri la gestione amministrativa in sola consultazione: la pratica non è attualmente nella disponibilità del ruolo corrente.'
+        : 'Apri la gestione tecnica in sola consultazione: la pratica non è attualmente nella disponibilità del ruolo corrente.')
+      : (roleToBeTakenInCharge
+        ? 'La pratica deve essere presa in carico prima di poter essere aperta.'
         : 'Apertura gestione pratica non disponibile: selezionare una pratica.'))
 
   const canUseRapportoPdf =
@@ -3911,8 +3934,11 @@ function ActionsPanel (props: {
     canStartEsito &&
     role === 'RI_AMM'
 
+  const tiAmmConformitaGiaApposta = role === 'TI_AMM' && esitoTiAmmNum === ESITO_APPROVATA
+
   const canStartApprova =
     canStartEsito &&
+    role !== 'TI_AMM' &&
     !(role === 'RZ' && (origineNum == null || origineNum === 1) && !hasTiAnyEvidence) &&
     !(role === 'RI_AMM' && !currentIntegrationRequester && esitoTiAmmNum !== ESITO_APPROVATA)
 
@@ -3975,7 +4001,7 @@ function ActionsPanel (props: {
     role === 'DA' ? 'Approva atto amministrativo' :
     role === 'RI_AMM' && fwdDest === 'DA' ? 'Approva istruttoria amministrativa' :
     role === 'RI_AMM' ? `Trasmetti al ${fwdDestLabel}` :
-    role === 'TI_AMM' ? `Trasmetti istruttoria amministrativa al ${getRoleLabelForMenu('RI_AMM')}` :
+    role === 'TI_AMM' ? 'Apponi attestazione di conformità' :
     'Approva'
 
   const approvaDoneLabel = currentIntegrationRequesterLabel
@@ -3984,10 +4010,10 @@ function ActionsPanel (props: {
     role === 'RZ' ? (praticaLabel === 'Rapporto tecnico' ? `Integrazione validata e trasmessa al ${getRoleLabelForMenu('RI')}` : `Rilevazione approvata e trasmessa al ${getRoleLabelForMenu('RI')}`) :
     role === 'RI' ? `Istruttoria tecnica approvata e trasmessa al ${getRoleLabelForForward('DT')}` :
     role === 'DT' ? `Rapporto tecnico di rilevazione approvato e trasmesso al ${getRoleLabelForMenu('RI_AMM')}` :
-    role === 'DA' ? `Verbale approvato e trasmesso al ${getRoleLabelForMenu('TI_AMM')}` :
+    role === 'DA' ? `Atto amministrativo approvato e trasmesso al ${getRoleLabelForMenu('TI_AMM')}` :
     role === 'RI_AMM' && fwdDest === 'DA' ? `Istruttoria amministrativa approvata e trasmessa al ${getRoleLabelForForward('DA')}` :
     role === 'RI_AMM' ? `Trasmessa al ${fwdDestLabel}` :
-    role === 'TI_AMM' ? `Istruttoria amministrativa trasmessa al ${getRoleLabelForMenu('RI_AMM')}` :
+    role === 'TI_AMM' ? 'Attestazione di conformità apposta' :
     'Approvata'
 
   const approvaConfirmLabel = currentIntegrationRequesterLabel
@@ -3999,7 +4025,7 @@ function ActionsPanel (props: {
     role === 'DA' ? 'Approva atto amministrativo' :
     role === 'RI_AMM' && fwdDest === 'DA' ? 'Approva istruttoria amministrativa' :
     role === 'RI_AMM' ? `Trasmetti al ${fwdDestLabel}` :
-    role === 'TI_AMM' ? `Trasmetti al ${getRoleLabelForMenu('RI_AMM')}` :
+    role === 'TI_AMM' ? 'Apponi attestazione' :
     'Approva'
 
   const getRiTecnicoTargetLabel = (): string => {
@@ -4124,7 +4150,7 @@ function ActionsPanel (props: {
     role === 'DA' ? 'Approva atto amministrativo' :
     role === 'RI_AMM' && fwdDest === 'DA' ? 'Approva istruttoria amministrativa' :
     role === 'RI_AMM' ? `Trasmetti al ${fwdDestLabel}` :
-    role === 'TI_AMM' ? `Trasmetti istruttoria amministrativa al ${getRoleLabelForMenu('RI_AMM')}` :
+    role === 'TI_AMM' ? 'Apponi attestazione di conformità' :
     approvaBtnLabel
 
   const approvaMenuDesc = currentIntegrationRequesterLabel
@@ -4135,7 +4161,7 @@ function ActionsPanel (props: {
     role === 'DT' ? `Approva il Rapporto tecnico di rilevazione e lo trasmette al ${getRoleLabelForMenu('RI_AMM')}.` :
     role === 'DA' ? `Approva l’atto amministrativo e lo trasmette al ${getRoleLabelForMenu('TI_AMM')}.` :
     role === 'RI_AMM' && fwdDest === 'DA' ? `Approva l’istruttoria amministrativa e la trasmette al ${getRoleLabelForForward('DA')}.` :
-    role === 'TI_AMM' ? `Trasmette l’istruttoria amministrativa al ${getRoleLabelForMenu('RI_AMM')}.` :
+    role === 'TI_AMM' ? 'Appone l’attestazione di conformità e sblocca la fase di protocollazione del fascicolo e della proposta di contestazione.' :
     fwdDestLabel ? `Invia la pratica al ${fwdDestLabel}.` :
     'Avanza la pratica al passaggio successivo.'
 
@@ -4189,7 +4215,7 @@ function ActionsPanel (props: {
           label: approvaMenuLabel,
           desc: approvaMenuDesc,
           enabled: canStartApprova,
-          visible: !hideRiAmmForwardToTiAmm,
+          visible: role !== 'TI_AMM' && !hideRiAmmForwardToTiAmm,
           color: (role === 'DT' || role === 'DA') ? buttonColors.approvaRapporto : buttonColors.approva,
           textColor: (role === 'DT' || role === 'DA') ? buttonColors.approvaRapportoText : buttonColors.approvaText
         }
@@ -4526,6 +4552,10 @@ function ActionsPanel (props: {
     } catch {}
   }, [hasSel, oid])
 
+  const clearAfterWorkflowListNavigation = React.useCallback(() => {
+    try { sessionStorage.removeItem('GII_AFTER_WORKFLOW_NAV') } catch {}
+  }, [])
+
   const refreshAfterWorkflowSave = async (reason = 'azioni-post-applyedits') => {
     const root = getRootDs(ds)
     await refreshRootAndDerived(root)
@@ -4755,12 +4785,17 @@ function ActionsPanel (props: {
       upd[realFieldName(statoField)] = STATO_PRESA_IN_CARICO
       upd[realFieldName(dtStatoField)] = Date.now()
 
+      // La presa in carico non e' una trasmissione/rimando: non deve attivare
+      // la navigazione post-workflow dell'elenco verso "In attesa di altri" o "Tutte".
+      // Puliamo anche eventuali marker rimasti da azioni precedenti sulla stessa sessione.
+      clearAfterWorkflowListNavigation()
       markRestoreSelectionAfterAction('presa-in-carico')
       const cycleContextBeforeSave = await getCurrentCycleContextAsync()
-      await runApplyEdits(upd, 'Presa in carico salvata.', { deferRefresh: true, keepLoading: true })
+      await runApplyEdits(upd, riAmmBozzaDeterminazioneDaVerificare ? 'Presa in carico della pratica salvata.' : 'Presa in carico salvata.', { deferRefresh: true, keepLoading: true })
       await openCycleLog({ eventoApertura: 'PRESA_IN_CARICO', fase: role, context: cycleContextBeforeSave, forceNew: true })
       await deleteCurrentActivityForCurrentRole()
       await refreshAfterWorkflowSave('azioni-presa-in-carico-post-log')
+      clearAfterWorkflowListNavigation()
       setLoading(false)
 
       setPending(null)
@@ -5063,7 +5098,8 @@ function ActionsPanel (props: {
       if (esito === ESITO_APPROVATA && noteTrim) {
         upd[noteField] = noteTrim
       }
-      if (role === 'TI_AMM' && esito === ESITO_APPROVATA) {
+      const isTiAmmAttestazioneConformita = role === 'TI_AMM' && esito === ESITO_APPROVATA
+      if (isTiAmmAttestazioneConformita) {
         const schemaFields: Record<string, any> = (ds as any)?.getSchema?.()?.fields || {}
         const fNoteAttoAmm = getSchemaFieldNameCI(schemaFields, 'note_atto_amm')
         if (fNoteAttoAmm) upd[fNoteAttoAmm] = noteTrim
@@ -5078,7 +5114,11 @@ function ActionsPanel (props: {
         if (fIstrAmmChiusaDa) upd[fIstrAmmChiusaDa] = currentUserLabel
       }
       if (stato != null) {
-        upd[statoField] = stato
+        // L'attestazione di conformità del TI_AMM non chiude la disponibilità operativa
+        // della pratica: sblocca la protocollazione e genera solo un messaggio
+        // informativo al RI_AMM. La pratica resta in capo al TI_AMM fino alla
+        // successiva trasmissione della bozza di determinazione.
+        upd[statoField] = isTiAmmAttestazioneConformita ? STATO_PRESA_IN_CARICO : stato
         upd[dtStatoField] = now
       }
 
@@ -5120,8 +5160,8 @@ function ActionsPanel (props: {
         if (fDetTrasDa) upd[fDetTrasDa] = currentUserLabel
       }
 
-      const integRequester = esito === ESITO_APPROVATA ? getIntegrationRequesterForCurrentRole() : ''
-      const ruoloDest = esito === ESITO_APPROVATA ? (integRequester || getNextRoleForForward()) : ''
+      const integRequester = (esito === ESITO_APPROVATA && !isTiAmmAttestazioneConformita) ? getIntegrationRequesterForCurrentRole() : ''
+      const ruoloDest = (esito === ESITO_APPROVATA && !isTiAmmAttestazioneConformita) ? (integRequester || getNextRoleForForward()) : ''
       if (ruoloDest) {
         try {
           const schemaFields: Record<string, any> = (ds as any)?.getSchema?.()?.fields || {}
@@ -5170,18 +5210,22 @@ function ActionsPanel (props: {
         ? (role === 'DT'
               // DT approva il rapporto tecnico → destinatario è RI
               ? { eventoChiusura: 'RAPPORTO_APPROVATO', ruoloDestinatario: ruoloDest, utenteDestinatario: resolveDestUser(ruoloDest), fase: role }
-              : {
-                  eventoChiusura: ruoloDest
-                    ? (wasIntegResponse ? 'INTEGRAZIONE_TRASMESSA' : 'ISTRUTTORIA_TRASMESSA')
-                    : 'ISTRUTTORIA_TRASMESSA',
-                  ruoloDestinatario: ruoloDest,
-                  utenteDestinatario: resolveDestUser(ruoloDest),
-                  noteChiusura: noteTrim
-                    ? (role === 'TI_AMM' ? `Attestazione di conformità:
-${noteTrim}` : noteTrim)
-                    : undefined,
-                  fase: role
-                })
+              : isTiAmmAttestazioneConformita
+                ? {
+                    eventoChiusura: 'ATTESTAZIONE_CONFORMITA',
+                    noteChiusura: noteTrim ? `Attestazione di conformità:
+${noteTrim}` : 'Attestazione di conformità apposta.',
+                    fase: role
+                  }
+                : {
+                    eventoChiusura: ruoloDest
+                      ? (wasIntegResponse ? 'INTEGRAZIONE_TRASMESSA' : 'ISTRUTTORIA_TRASMESSA')
+                      : 'ISTRUTTORIA_TRASMESSA',
+                    ruoloDestinatario: ruoloDest,
+                    utenteDestinatario: resolveDestUser(ruoloDest),
+                    noteChiusura: noteTrim,
+                    fase: role
+                  })
         : null
 
       if (logOpts) {
@@ -5190,9 +5234,19 @@ ${noteTrim}` : noteTrim)
               ? buildTechnicalChainInformativeActivities('DT_APPROVA', upd)
               : role === 'RZ'
                 ? buildTechnicalChainInformativeActivities('RZ_APPROVA', upd)
-                : [])
+                : isTiAmmAttestazioneConformita
+                  ? [{
+                      ruoloDestinatario: 'RI_AMM',
+                      utenteDestinatario: resolveDestUser('RI_AMM'),
+                      titolo: 'Attestazione di conformità apposta',
+                      messaggio: 'Il Tecnico Istruttore amministrativo ha apposto l’attestazione di conformità. La pratica resta in lavorazione al TI_AMM per la protocollazione del fascicolo/proposta e la predisposizione della bozza di determinazione.',
+                      sottotipo: 'ATTESTAZIONE_CONFORMITA_TI_AMM',
+                      priorita: 'INFO'
+                    }]
+                  : [])
           : []
-        await saveWithWorkflowLog(upd, `Esito salvato: ${label}.`, { ...logOpts, informativeActivities })
+        const successText = isTiAmmAttestazioneConformita ? 'Attestazione di conformità apposta.' : `Esito salvato: ${label}.`
+        await saveWithWorkflowLog(upd, successText, { ...logOpts, informativeActivities })
       } else {
         await runApplyEdits(upd, `Esito salvato: ${label}.`)
       }
@@ -5327,7 +5381,7 @@ ${noteTrim}` : noteTrim)
     'Avanzamento pratica'
 
   const pendingTitle = pending === 'TAKE'
-    ? 'Presa in carico'
+    ? (riAmmBozzaDeterminazioneDaVerificare ? 'Presa in carico pratica' : 'Presa in carico')
     : pending === 'ASSEGNA_TI'
       ? `Assegnazione al ${getRoleLabelForMenu('TI')}`
       : pending === 'ASSEGNA_TI_AMM'
@@ -5353,7 +5407,7 @@ ${noteTrim}` : noteTrim)
     role === 'DA' ? `L’atto amministrativo verrà approvato e trasmesso al ${getRoleLabelForMenu('TI_AMM')}.` :
     role === 'RI_AMM' && fwdDest === 'DA' ? `L’istruttoria amministrativa verrà approvata e trasmessa al ${getRoleLabelForForward('DA')}.` :
     role === 'RI_AMM' ? `L’istruttoria amministrativa verrà trasmessa al ${fwdDestLabel}.` :
-    role === 'TI_AMM' ? `L’istruttoria amministrativa verrà trasmessa al ${getRoleLabelForMenu('RI_AMM')}.` :
+    role === 'TI_AMM' ? 'L’attestazione di conformità verrà apposta. La pratica resterà in capo al Tecnico Istruttore amministrativo e sarà sbloccata la fase di protocollazione del fascicolo/proposta.' :
     `${subjectArticle} ${subjectNameLower} verrà ${subjectVerbTrasmessa} al passaggio successivo.`
 
   const integrazioneActionDesc = pendingRimandoTargetLabel
@@ -5365,7 +5419,7 @@ ${noteTrim}` : noteTrim)
         : 'La rilevazione verrà rimandata per integrazione.')
 
   const pendingTheme: Record<string, PendingTheme> = {
-    TAKE:           { icon: '✓', color: '#2563eb', bg: '#eff6ff', border: '#bfdbfe', buttonBg: '#2563eb', buttonBorder: '#1d4ed8', desc: praticaLabel === 'Rapporto tecnico' ? 'Il rapporto tecnico verrà preso in carico.' : 'La rilevazione verrà presa in carico.' },
+    TAKE:           { icon: '✓', color: '#2563eb', bg: '#eff6ff', border: '#bfdbfe', buttonBg: '#2563eb', buttonBorder: '#1d4ed8', desc: riAmmBozzaDeterminazioneDaVerificare ? 'La pratica contenente la bozza Word della determinazione verrà presa in carico per la verifica.' : (praticaLabel === 'Rapporto tecnico' ? 'Il rapporto tecnico verrà preso in carico.' : 'La rilevazione verrà presa in carico.') },
     ASSEGNA_TI:     { icon: '✓', color: '#2563eb', bg: '#eff6ff', border: '#bfdbfe', buttonBg: '#2563eb', buttonBorder: '#1d4ed8', desc: `${subjectArticle} ${subjectNameLower} verrà ${subjectVerbAssegnata} al ${getRoleLabelForMenu('TI')} selezionato.` },
     ASSEGNA_TI_AMM: { icon: '✓', color: '#2563eb', bg: '#eff6ff', border: '#bfdbfe', buttonBg: '#2563eb', buttonBorder: '#1d4ed8', desc: riaperturaWorkflowDaAvviare
       ? `Verrà aperto il nuovo ciclo di riapertura n. ${riaperturaAmmNumero} e la pratica sarà assegnata al ${getRoleLabelForMenu('TI_AMM')} selezionato.`
@@ -5396,7 +5450,7 @@ ${noteTrim}` : noteTrim)
   const workflowRespintaItem = workflowMenuEnabledItems.find(item => item.key === 'RESPINGI') || null
   const workflowDirectActionItems = workflowMenuEnabledItems.filter(item => !isWorkflowEsitoPendingKey(item.key))
   const showEsitoDrivenWorkflow = Boolean(workflowConformeItem || workflowIntegrationItems.length > 0 || workflowRespintaItem)
-  const useUnifiedWorkflowActionSelect = role === 'RZ' || role === 'RI_AMM'
+  const useUnifiedWorkflowActionSelect = role === 'RZ' || role === 'RI_AMM' || role === 'TI_AMM'
   const unifiedWorkflowActionItems = useUnifiedWorkflowActionSelect ? workflowMenuEnabledItems : []
 
   function buildDefaultWorkflowNote (nextPending: Pending): string {
@@ -6009,7 +6063,7 @@ ${noteTrim}` : noteTrim)
         {/* Box numero rilevazione / rapporto tecnico */}
         {hasSel && oid != null && (
           <div style={{ fontWeight: 600, color: '#1f2937', padding: 10, background: theme.bg, border: `1px solid ${theme.border}`, borderRadius: 6, fontSize: 15 }}>
-            {praticaLabel}: <span style={{ color: theme.color, fontSize: 15, fontFamily: 'monospace' }}>{praticaCode}</span>
+            {(pending === 'TAKE' && riAmmBozzaDeterminazioneDaVerificare) ? 'Pratica: Rapporto tecnico n.' : `${praticaLabel}:`} <span style={{ color: theme.color, fontSize: 15, fontFamily: 'monospace' }}>{praticaCode}</span>
           </div>
         )}
 

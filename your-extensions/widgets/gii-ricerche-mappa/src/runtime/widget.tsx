@@ -32,7 +32,7 @@ const ARTICOLI_PRATICA = [
   { id: 'v_art39', label: 'Art. 39 - Danni alle strutture irrigue', whereClause: 'v_art39 = 1' },
 ]
 
-type TipoPratica = '' | 'rilevazione' | 'rapporto' | 'verbale'
+type TipoPratica = '' | 'rilevazione' | 'rapporto' | 'accertamento' | 'verbale'
 
 type PraticaValues = {
   nominativo: string
@@ -84,7 +84,7 @@ function buildNumeroPraticaClause(tipo: TipoPratica, raw: string): string | null
     return parts.join(' AND ')
   }
   if (tipo === 'rapporto') { const n = /^R-/i.test(v) ? v : `R-${v}`; return `numero_rapporto_tecnico = '${sqlEscapePratica(n)}'` }
-  if (tipo === 'verbale') { const n = /^V-/i.test(v) ? v : `V-${v}`; return `numero_atto_accertamento = '${sqlEscapePratica(n)}'` }
+  if (tipo === 'accertamento' || tipo === 'verbale') { const n = /^A-/i.test(v) ? v : `A-${v}`; return `accertamento_numero = '${sqlEscapePratica(n)}'` }
   return null
 }
 
@@ -834,7 +834,7 @@ export default function Widget(props: Props) {
                     <option value=''>- Tutti -</option>
                     <option value='rilevazione'>Rilevazione</option>
                     <option value='rapporto'>Rapporto tecnico</option>
-                    <option value='verbale'>Verbale</option>
+                    <option value='accertamento'>Atto di accertamento</option>
                   </select>
                   <span className='searchSelectChevron'>▾</span>
                 </div>
@@ -842,7 +842,7 @@ export default function Widget(props: Props) {
               <div className='fieldBlock' style={{ width: 160, flex: '0 1 160px' }}>
                 <label className='filterLabel'>Numero pratica</label>
                 <input className='filterInput' type='text' value={praticaValues.numeroPratica} disabled={busy || !layer || !praticaValues.tipoPratica}
-                  placeholder={praticaValues.tipoPratica === 'rilevazione' ? 'Es. 411-TI-D1' : praticaValues.tipoPratica === 'rapporto' ? 'Es. R-25/2026' : praticaValues.tipoPratica === 'verbale' ? 'Es. V-1/2026' : '— seleziona tipo —'}
+                  placeholder={praticaValues.tipoPratica === 'rilevazione' ? 'Es. 411-TI-D1' : praticaValues.tipoPratica === 'rapporto' ? 'Es. R-25/2026' : (praticaValues.tipoPratica === 'accertamento' || praticaValues.tipoPratica === 'verbale') ? 'Es. A-1/2026' : '— seleziona tipo —'}
                   onChange={e => setPraticaValues(prev => ({ ...prev, numeroPratica: e.target.value }))} />
               </div>
               <div className='fieldBlock' style={{ width: 200, flex: '0 1 200px' }}>
