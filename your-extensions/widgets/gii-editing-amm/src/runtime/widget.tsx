@@ -4,6 +4,12 @@ import { React, jsx, type AllWidgetProps, DataSourceComponent, UrlManager, getAp
 import AnteprimaPdfViewer from '../../../_shared/gii-anteprime/anteprima-pdf-viewer'
 import { buildPropostaContestazionePdf as buildVerbalePdf, getPropostaContestazionePdfFilePrefix as getVerbalePdfFilePrefix } from '../../../_shared/gii-anteprime/documenti-amministrativi/proposta-contestazione/proposta-contestazione-pdf-builder'
 import { buildBozzaDeterminazioneDocx, getBozzaDeterminazioneDocxFileName } from '../../../_shared/gii-anteprime/documenti-amministrativi/bozza-determinazione/bozza-determinazione-docx-builder'
+import { buildBozzaDeterminazionePdf } from '../../../_shared/gii-anteprime/documenti-amministrativi/bozza-determinazione/bozza-determinazione-pdf-builder'
+import { buildRapportoPdf } from '../../../_shared/gii-anteprime/documenti-tecnici/rapporto/rapporto-pdf-builder'
+import { defaultGiiDocumentPrintOptions as defaultDocumentPrintOptions, cloneGiiDocumentPrintOptions as cloneDocumentPrintOptions, setGiiAttachmentPrintOptionVisible } from '../../../_shared/gii-anteprime/viewer-documenti/document-options'
+import type { GiiDocumentPrintOptions as DocumentPrintOptions, GiiAttachmentPrintOption as AttachmentPrintOption } from '../../../_shared/gii-anteprime/viewer-documenti/document-options'
+import GiiDocumentViewer from '../../../_shared/gii-anteprime/viewer-documenti/document-viewer'
+import { PDFDocument } from 'pdf-lib'
 import type { IMConfig, SummaryFieldConfig } from '../config'
 import { defaultConfig } from '../config'
 import { createPortal } from 'react-dom'
@@ -1357,11 +1363,11 @@ function formatDateTimeValue (v: any): string {
   }).format(d)
 }
 
-function parseBozzaAttachmentUploadedAt (att: AmmAttachmentInfo | null | undefined): number | null {
+function parseBozzaAttachmentFileCreatedAt (att: AmmAttachmentInfo | null | undefined): number | null {
   const direct = Number(att?.uploadedAt ?? att?.created ?? att?.creationDate ?? att?.createdAt ?? att?.lastEditDate ?? att?.editDate)
   if (Number.isFinite(direct) && direct > 0) return direct
   const kw = String(att?.keywords || '').trim()
-  const m = kw.match(/(?:^|[|;\s])uploadedAt=(\d{10,})/i)
+  const m = kw.match(/(?:^|[|;\s])fileCreatedAt=(\d{10,})/i) || kw.match(/(?:^|[|;\s])uploadedAt=(\d{10,})/i)
   if (m) {
     const n = Number(m[1])
     if (Number.isFinite(n) && n > 0) return n
@@ -1369,13 +1375,13 @@ function parseBozzaAttachmentUploadedAt (att: AmmAttachmentInfo | null | undefin
   return null
 }
 
-function formatBozzaAttachmentUploadedAt (att: AmmAttachmentInfo | null | undefined): string {
-  const ts = parseBozzaAttachmentUploadedAt(att)
+function formatBozzaAttachmentFileCreatedAt (att: AmmAttachmentInfo | null | undefined): string {
+  const ts = parseBozzaAttachmentFileCreatedAt(att)
   return ts ? formatDateTimeValue(ts) : '—'
 }
 
-function bozzaAttachmentKeywords (uploadedAt = Date.now()): string {
-  return `${BOZZA_DETERMINAZIONE_WORD_KEYWORD}|uploadedAt=${uploadedAt}`
+function bozzaAttachmentKeywords (fileCreatedAt = Date.now()): string {
+  return `${BOZZA_DETERMINAZIONE_WORD_KEYWORD}|fileCreatedAt=${fileCreatedAt}`
 }
 
 function hasBozzaAttachmentKeyword (att: AmmAttachmentInfo | null | undefined): boolean {
@@ -1535,8 +1541,8 @@ async function replaceBozzaDeterminazioneWordAttachment (layer: any, oid: number
 
   const before = await queryAmmAttachments(layer, oid, layerUrl)
   const beforeIds = new Set(before.map(att => Number(att.id)).filter(id => Number.isFinite(id) && id > 0))
-  const uploadedAt = Date.now()
-  const addedIds = await addAmmAttachments(layer, oid, [file], layerUrl, bozzaAttachmentKeywords(uploadedAt))
+  const fileCreatedAt = Number((file as any)?.lastModified) || Date.now()
+  const addedIds = await addAmmAttachments(layer, oid, [file], layerUrl, bozzaAttachmentKeywords(fileCreatedAt))
   const after = await queryAmmAttachments(layer, oid, layerUrl)
   const bozzaAfter = after.filter(isBozzaDeterminazioneWordAttachment)
   const addedIdSet = new Set(addedIds.filter(id => Number.isFinite(Number(id)) && Number(id) > 0).map(id => Number(id)))
@@ -1564,7 +1570,7 @@ async function replaceBozzaDeterminazioneWordAttachment (layer: any, oid: number
   const finalList = await queryAmmAttachments(layer, oid, layerUrl)
   return finalList
     .filter(isBozzaDeterminazioneWordAttachment)
-    .map(att => keepIds.has(Number(att.id)) && !parseBozzaAttachmentUploadedAt(att) ? { ...att, uploadedAt } : att)
+    .map(att => keepIds.has(Number(att.id)) && !parseBozzaAttachmentFileCreatedAt(att) ? { ...att, uploadedAt: fileCreatedAt } : att)
 }
 
 async function buildAttachmentPreviewUrl (att: AmmAttachmentInfo, oid: number, layerUrl: string): Promise<string> {
@@ -2047,22 +2053,21 @@ function isVerbaleNotificato (data: Record<string, any>): boolean {
 }
 
 function buildPracticeTitle (cfg: any, data: any, oid: number | null): string {
-  const d = data || {}
-  const rapporto = getReportCode(d, oid)
-  const numeroVerbale = verbaleNumberValue(d, oid)
-  const suffix = rapporto ? ` - Rapporto tecnico n. ${rapporto}` : ''
-  if (tipoAttoAmmPrevedeVerbale(d) && numeroVerbale) return `${tipoAttoAmmTitolo(d)} n. ${numeroVerbale}${suffix}`
-  return `Proposta di contestazione in corso di istruttoria${suffix}`
+  const titleParts = buildPracticeTitleParts(data || {}, oid)
+  return titleParts.full
 }
 
 function buildPracticeTitleParts (data: any, oid: number | null): { prefix: string, reportCode: string, full: string } {
   const d = data || {}
   const reportCode = getReportCode(d, oid)
-  const numeroVerbale = verbaleNumberValue(d, oid)
-  const prefix = tipoAttoAmmPrevedeVerbale(d) && numeroVerbale
-    ? `${tipoAttoAmmTitolo(d)} n. ${numeroVerbale} - Rapporto tecnico n. `
-    : 'Proposta di contestazione in corso di istruttoria - Rapporto tecnico n. '
-  return { prefix, reportCode, full: `${prefix}${reportCode}` }
+  const prefix = reportCode
+    ? 'Fascicolo documentale della pratica relativa al Rapporto tecnico n. '
+    : 'Fascicolo documentale della pratica'
+  return { prefix, reportCode, full: reportCode ? `${prefix}${reportCode}` : prefix }
+}
+
+function buildPracticeViewerTitleParts (data: any, oid: number | null): { prefix: string, reportCode: string, full: string } {
+  return buildPracticeTitleParts(data || {}, oid)
 }
 
 
@@ -3708,7 +3713,7 @@ function PostAttestazioneTiAmmWorkSection (props: {
                     <div key={att.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8, fontSize: 13, color: '#334155' }}>
                       <span style={{ overflowWrap: 'anywhere', minWidth: 0 }}>{att.name || `Allegato ${att.id}`}</span>
                       <span style={{ color: '#64748b', whiteSpace: 'nowrap' }}>{formatAttachmentBytes(att.size)}</span>
-                      <span style={{ color: '#64748b', whiteSpace: 'nowrap' }}>Caricato il {formatBozzaAttachmentUploadedAt(att)}</span>
+                      <span style={{ color: '#64748b', whiteSpace: 'nowrap' }}>Creato il {formatBozzaAttachmentFileCreatedAt(att)}</span>
                       <button
                         type='button'
                         disabled={attachmentsBusy}
@@ -4949,7 +4954,7 @@ function SpeseNotificaEditor (props: { data: Record<string, any>, fields: LayerF
           commitValue(e.currentTarget.value)
           e.currentTarget.blur()
         }}
-        style={{ ...inputStyleFrom(st, readonly), background: readonly ? (st.formFieldDisabledBg || '#e7eef7') : '#ffffff' }}
+        style={{ ...inputStyleFrom(st, readonly), background: '#ffffff' }}
         placeholder='0,00'
       />
       <div style={{ marginTop: 4, color: '#6b7280', fontSize: adminLabelFontSize(st), lineHeight: 1.35 }}>Concorre al totale da pagare.</div>
@@ -5684,65 +5689,270 @@ function DatiGeneraliAmmSection (props: { title: string, data: Record<string, an
   )
 }
 
-function VerbaleInlinePreviewSection (props: { data: Record<string, any>, fields: LayerFieldInfo[], profile: { username: string, fullName: string }, hasSelection: boolean }) {
+
+function buildRapportoAmmPreviewMap (data: any, fields: LayerFieldInfo[], profile: { username: string, fullName: string }): Record<string, string> {
+  const d = data || {}
+  const oidRaw = pickAttrCI(d, ['OBJECTID', 'objectid', 'ObjectId', 'FID'])
+  const oid = oidRaw != null && Number.isFinite(Number(oidRaw)) ? Number(oidRaw) : null
+  const ragioneSociale = String(pickAttrCI(d, ['ragione_sociale']) || '').trim()
+  const isPg = !!ragioneSociale
+  const nominativo = ragioneSociale || joinParts(String(pickAttrCI(d, ['cognome']) || ''), String(pickAttrCI(d, ['nome']) || ''))
+  const area = pdfFieldValue(d, fields, 'area_cod') || String(pickAttrCI(d, ['area_label', 'area']) || '')
+  const settore = pdfFieldValue(d, fields, 'settore_cod') || String(pickAttrCI(d, ['settore_label', 'settore']) || '')
+  return {
+    objectid: oid != null ? String(oid) : '',
+    cod_pratica: getReportCode(d, oid),
+    n_rapporto: getReportCode(d, oid),
+    numero_rapporto_tecnico: getReportCode(d, oid),
+    data_rapporto_tecnico: pdfFieldValue(d, fields, 'data_rapporto_tecnico'),
+    data_rilevazione: pdfFieldValue(d, fields, 'data_rilevazione'),
+    ora_rilevazione: String(pickAttrCI(d, ['ora_rilevazione']) || ''),
+    area_cod: area,
+    area_label: area,
+    settore_cod: settore,
+    settore_label: settore,
+    ufficio_zona: pdfFieldValue(d, fields, 'ufficio_zona'),
+    distretto_irriguo: String(pickAttrCI(d, ['distretto_irriguo', 'distretto']) || ''),
+    distretto: String(pickAttrCI(d, ['distretto']) || ''),
+    comizio: String(pickAttrCI(d, ['comizio']) || ''),
+    idrante: String(pickAttrCI(d, ['idrante', 'idrante_numero']) || ''),
+    idrante_numero: String(pickAttrCI(d, ['idrante_numero', 'idrante']) || ''),
+    matricola_contatore: String(pickAttrCI(d, ['matricola_contatore', 'contatore_matricola']) || ''),
+    contatore_matricola: String(pickAttrCI(d, ['contatore_matricola', 'matricola_contatore']) || ''),
+    matricola_tessera: String(pickAttrCI(d, ['matricola_tessera', 'tessera_matricola']) || ''),
+    tessera_matricola: String(pickAttrCI(d, ['tessera_matricola', 'matricola_tessera']) || ''),
+    descrizione_fatti: String(pickAttrCI(d, ['descrizione_fatti']) || ''),
+    circostanze: String(pickAttrCI(d, ['circostanze']) || ''),
+    descrizione_luogo: String(pickAttrCI(d, ['descrizione_luogo']) || ''),
+    importo_rimborso: pdfFieldValue(d, fields, 'importo_rimborso', { money: true }),
+    nota_spese_label: String(pickAttrCI(d, ['nota_spese_label']) || ''),
+    tipo_soggetto: isPg ? 'PG' : 'PF',
+    denominazione: nominativo,
+    cf_piva: isPg ? String(pickAttrCI(d, ['piva']) || '') : String(pickAttrCI(d, ['codice_fiscale']) || ''),
+    via: String(pickAttrCI(d, ['via', 'indirizzo']) || ''),
+    civico: String(pickAttrCI(d, ['civico']) || ''),
+    citta: String(pickAttrCI(d, ['comune']) || ''),
+    cap: String(pickAttrCI(d, ['cap']) || ''),
+    telefono: String(pickAttrCI(d, ['telefono']) || ''),
+    cellulare: String(pickAttrCI(d, ['cellulare']) || ''),
+    email: String(pickAttrCI(d, ['email']) || ''),
+    pec: String(pickAttrCI(d, ['pec']) || ''),
+    presenza_trasgressore: pdfFieldValue(d, fields, 'presenza_trasgressore'),
+    iter_rilevazione_nome: String(pickAttrCI(d, ['tecnico_rilevatore']) || ''),
+    iter_rilevazione_presa: pdfFieldValue(d, fields, 'dt_presa_in_carico_TR'),
+    iter_rilevazione_data: pdfFieldValue(d, fields, 'data_rilevazione'),
+    iter_compilazione_nome: String(pickAttrCI(d, ['ti_assegnato_nome', 'ti_assegnato_username']) || ''),
+    iter_compilazione_presa: pdfFieldValue(d, fields, 'dt_presa_in_carico_TI'),
+    iter_compilazione_data: pdfFieldValue(d, fields, 'dt_esito_TI'),
+    iter_verifica_nome: String(pickAttrCI(d, ['rz_nome', 'rz_username']) || ''),
+    iter_verifica_presa: pdfFieldValue(d, fields, 'dt_presa_in_carico_RZ'),
+    iter_verifica_data: pdfFieldValue(d, fields, 'dt_esito_RZ'),
+    iter_supervisione_nome: String(pickAttrCI(d, ['ri_nome', 'ri_username']) || ''),
+    iter_supervisione_presa: pdfFieldValue(d, fields, 'dt_presa_in_carico_RI'),
+    iter_supervisione_data: pdfFieldValue(d, fields, 'dt_esito_RI'),
+    iter_approvazione_nome: String(pickAttrCI(d, ['dt_nome', 'dt_username']) || ''),
+    iter_approvazione_presa: pdfFieldValue(d, fields, 'dt_presa_in_carico_DT'),
+    iter_approvazione_data: pdfFieldValue(d, fields, 'dt_esito_DT'),
+    data_generazione: new Date().toLocaleString('it-IT'),
+    generato_da: profile.fullName || profile.username || ''
+  }
+}
+
+async function buildRapportoAmmPreviewPdfBlob (data: any, fields: LayerFieldInfo[], profile: { username: string, fullName: string }): Promise<{ blob: Blob, fileName: string }> {
+  const map = buildRapportoAmmPreviewMap(data, fields, profile)
+  const bytes = await buildRapportoPdf(map)
+  const base = String(map.n_rapporto || map.objectid || 'rapporto').replace(/[^a-zA-Z0-9_-]/g, '_')
+  return { blob: new Blob([bytes as any], { type: 'application/pdf' }), fileName: `rapporto_tecnico_${base}.pdf` }
+}
+
+async function buildBozzaDeterminazionePdfBlob (data: any, fields: LayerFieldInfo[], profile: { username: string, fullName: string }): Promise<{ blob: Blob, fileName: string }> {
+  const map = buildBozzaDeterminazioneDocxMap(data, fields, profile)
+  const bytes = await buildBozzaDeterminazionePdf(map)
+  const base = String(map.n_rapporto || map.objectid || 'pratica').replace(/[^a-zA-Z0-9_-]/g, '_')
+  return { blob: new Blob([bytes as any], { type: 'application/pdf' }), fileName: `determinazione_dirigenziale_${base}.pdf` }
+}
+
+async function fetchAmmAttachmentBlobForPdf (att: AmmAttachmentInfo, oid: number, layerUrl: string): Promise<Blob> {
+  const raw = attachmentRawUrl(att, oid, layerUrl)
+  if (!raw) throw new Error('URL allegato non disponibile.')
+  const token = await getEsriTokenForUrl(layerUrl || raw)
+  let url = raw
+  if (token && /^https?:/i.test(url) && !/[?&]token=/.test(url)) {
+    url = `${url}${url.includes('?') ? '&' : '?'}token=${encodeURIComponent(token)}`
+  }
+  const resp = await fetch(url, { credentials: 'same-origin' })
+  if (!resp.ok) throw new Error(`Caricamento allegato fallito (HTTP ${resp.status}).`)
+  return await resp.blob()
+}
+
+async function buildAmmAttachmentsPdfBlob (items: AmmAttachmentInfo[], oid: number, layerUrl: string, baseName: string): Promise<{ blob: Blob, fileName: string } | null> {
+  const out = await PDFDocument.create()
+  const a4: [number, number] = [595.28, 841.89]
+  let added = 0
+  for (const att of items) {
+    const contentType = String(att.contentType || '').toLowerCase()
+    const name = String(att.name || '').toLowerCase()
+    if (isBozzaDeterminazioneWordAttachment(att)) continue
+    const blob = await fetchAmmAttachmentBlobForPdf(att, oid, layerUrl)
+    const bytes = new Uint8Array(await blob.arrayBuffer())
+    if (contentType.includes('pdf') || name.endsWith('.pdf')) {
+      const src = await PDFDocument.load(bytes)
+      const pages = await out.copyPages(src, src.getPageIndices())
+      pages.forEach(pg => { out.addPage(pg); added++ })
+    } else if (contentType.includes('png') || name.endsWith('.png') || contentType.includes('jpeg') || contentType.includes('jpg') || name.endsWith('.jpg') || name.endsWith('.jpeg')) {
+      const img = (contentType.includes('png') || name.endsWith('.png')) ? await out.embedPng(bytes) : await out.embedJpg(bytes)
+      const page = out.addPage(a4)
+      const margin = 36
+      const maxW = a4[0] - margin * 2
+      const maxH = a4[1] - margin * 2
+      const scale = Math.min(maxW / img.width, maxH / img.height)
+      const w = img.width * scale
+      const h = img.height * scale
+      page.drawImage(img, { x: (a4[0] - w) / 2, y: (a4[1] - h) / 2, width: w, height: h })
+      added++
+    }
+  }
+  if (!added) return null
+  const bytes = await out.save()
+  const safe = String(baseName || 'allegati').replace(/[^a-zA-Z0-9_-]/g, '_')
+  return { blob: new Blob([bytes as any], { type: 'application/pdf' }), fileName: `allegati_${safe}.pdf` }
+}
+
+async function mergeAmmPdfItems (items: Array<{ blob: Blob, fileName: string }>): Promise<Blob> {
+  if (items.length === 1) return items[0].blob
+  const merged = await PDFDocument.create()
+  for (const item of items) {
+    const src = await PDFDocument.load(new Uint8Array(await item.blob.arrayBuffer()))
+    const pages = await merged.copyPages(src, src.getPageIndices())
+    pages.forEach(pg => merged.addPage(pg))
+  }
+  const bytes = await merged.save()
+  return new Blob([bytes as any], { type: 'application/pdf' })
+}
+
+function FascicoloAmmPreviewSection (props: { data: Record<string, any>, fields: LayerFieldInfo[], profile: { username: string, fullName: string }, hasSelection: boolean, oid: number | null, ds: any, layerUrl?: string }) {
   const [pdfUrl, setPdfUrl] = React.useState<string | null>(null)
-  const [pdfFileName, setPdfFileName] = React.useState('proposta-contestazione.pdf')
+  const [pdfFileName, setPdfFileName] = React.useState('fascicolo_pratica.pdf')
   const [loading, setLoading] = React.useState(false)
   const [error, setError] = React.useState<string | null>(null)
+  const [docOptions, setDocOptions] = React.useState<DocumentPrintOptions>(() => ({ ...defaultDocumentPrintOptions(), includeRapporto: true, includePropostaContestazione: true, includeDeterminazione: false }))
+  const [attachmentOptions, setAttachmentOptions] = React.useState<AttachmentPrintOption[]>([])
+  const [expandedLayerGroups, setExpandedLayerGroups] = React.useState<Record<string, boolean>>({})
 
-  const signature = React.useMemo(() => {
-    try {
-      return JSON.stringify({ data: props.data || {}, fields: (props.fields || []).map(f => f.name), user: props.profile?.username || '' })
-    } catch {
-      return String(Date.now())
-    }
-  }, [props.data, props.fields, props.profile])
+  const oid = props.oid != null && Number.isFinite(Number(props.oid)) ? Number(props.oid) : null
+  const layerUrl = normalizeEditLayerUrl(props.layerUrl || getDataSourceUrl(props.ds))
+  const dataSignature = React.useMemo(() => {
+    try { return JSON.stringify({ data: props.data || {}, oid, user: props.profile?.username || '' }) } catch { return String(Date.now()) }
+  }, [props.data, oid, props.profile])
 
   React.useEffect(() => {
     let cancelled = false
-    if (!props.hasSelection) {
+    if (!props.hasSelection || !oid) {
+      setAttachmentOptions([])
+      setDocOptions(prev => ({ ...prev, includeAllegati: false, selectedAttachmentIds: {} }))
+      return () => { cancelled = true }
+    }
+    ;(async () => {
+      try {
+        const layer = await resolveLayerForEdit(props.ds, layerUrl)
+        const list = await queryAmmAttachments(layer, oid, layerUrl)
+        if (cancelled) return
+        const printable = list.filter(att => !isBozzaDeterminazioneWordAttachment(att))
+        const selectedAttachmentIds: Record<string, boolean> = {}
+        printable.forEach(att => { selectedAttachmentIds[String(att.id)] = true })
+        setAttachmentOptions(printable.map(att => ({ id: Number(att.id), name: att.name, size: att.size, contentType: att.contentType, url: att.url })))
+        setDocOptions(prev => ({ ...prev, selectedAttachmentIds, includeAllegati: printable.length > 0 ? prev.includeAllegati : false }))
+      } catch {
+        if (!cancelled) {
+          setAttachmentOptions([])
+          setDocOptions(prev => ({ ...prev, includeAllegati: false, selectedAttachmentIds: {} }))
+        }
+      }
+    })()
+    return () => { cancelled = true }
+  }, [props.hasSelection, oid, props.ds, layerUrl])
+
+  const regenerate = React.useCallback(async (opts?: DocumentPrintOptions) => {
+    if (!props.hasSelection || !oid) {
       setPdfUrl(prev => { revokePdfUrl(prev); return null })
       setError(null)
       setLoading(false)
-      return () => { cancelled = true }
+      return
     }
-
+    const options = cloneDocumentPrintOptions(opts || docOptions)
     setLoading(true)
     setError(null)
-    ;(async () => {
-      try {
-        const { blob, fileName } = await buildVerbalePdfBlob(props.data || {}, props.fields || [], props.profile || { username: '', fullName: '' })
-        if (cancelled) return
-        const url = makePdfUrl(blob, fileName)
-        setPdfFileName(fileName)
-        setPdfUrl(prev => {
-          revokePdfUrl(prev)
-          return url
-        })
-      } catch (e: any) {
-        if (!cancelled) setError(e?.message || String(e))
-      } finally {
-        if (!cancelled) setLoading(false)
+    try {
+      const items: Array<{ blob: Blob, fileName: string }> = []
+      if (options.includeRapporto) items.push(await buildRapportoAmmPreviewPdfBlob(props.data || {}, props.fields || [], props.profile || { username: '', fullName: '' }))
+      if (options.includePropostaContestazione) items.push(await buildVerbalePdfBlob(props.data || {}, props.fields || [], props.profile || { username: '', fullName: '' }))
+      if (options.includeDeterminazione) items.push(await buildBozzaDeterminazionePdfBlob(props.data || {}, props.fields || [], props.profile || { username: '', fullName: '' }))
+      if (options.includeAllegati) {
+        const ids = new Set(Object.entries(options.selectedAttachmentIds || {}).filter(([, visible]) => visible !== false).map(([id]) => Number(id)))
+        const all = await queryAmmAttachments(await resolveLayerForEdit(props.ds, layerUrl), oid, layerUrl)
+        const selected = all.filter(att => ids.has(Number(att.id)) && !isBozzaDeterminazioneWordAttachment(att))
+        if (selected.length === 0) throw new Error('Selezionare almeno un allegato.')
+        const attPdf = await buildAmmAttachmentsPdfBlob(selected, oid, layerUrl, getReportCode(props.data || {}, oid) || String(oid))
+        if (attPdf) items.push(attPdf)
       }
-    })()
+      if (items.length === 0) throw new Error('Selezionare almeno un documento.')
+      const fileName = items.length === 1 ? items[0].fileName : `fascicolo_${String(getReportCode(props.data || {}, oid) || oid).replace(/[^a-zA-Z0-9_-]/g, '_')}.pdf`
+      const blob = items.length === 1 ? items[0].blob : await mergeAmmPdfItems(items)
+      const url = makePdfUrl(blob, fileName)
+      setPdfFileName(fileName)
+      setPdfUrl(prev => { revokePdfUrl(prev); return url })
+    } catch (e: any) {
+      setError(e?.message || String(e))
+    } finally {
+      setLoading(false)
+    }
+  }, [docOptions, layerUrl, oid, props.data, props.ds, props.fields, props.hasSelection, props.profile])
 
-    return () => { cancelled = true }
-  }, [signature, props.hasSelection])
+  React.useEffect(() => {
+    void regenerate(docOptions)
+    return () => {}
+  }, [dataSignature])
 
   React.useEffect(() => {
     return () => { revokePdfUrl(pdfUrl) }
   }, [pdfUrl])
 
+  const updateDocOption = React.useCallback((patch: Partial<DocumentPrintOptions>) => {
+    setDocOptions(prev => ({ ...prev, ...patch }))
+  }, [])
+  const setAttachmentOptionVisible = React.useCallback((id: number, visible: boolean) => {
+    setDocOptions(prev => setGiiAttachmentPrintOptionVisible(prev, id, visible))
+  }, [])
+  const noop = React.useCallback(() => {}, [])
+
   return (
-    <div style={{ width: '100%', height: '100%', minHeight: 0, borderRadius: 12, overflow: 'hidden' }}>
-      <AnteprimaPdfViewer
+    <div style={{ width: '100%', height: '100%', minHeight: 0, borderRadius: 12, overflow: 'hidden', display: 'flex', flexDirection: 'column', background: '#282828' }}>
+      <GiiDocumentViewer
         url={pdfUrl}
         fileName={pdfFileName}
-        title='Anteprima proposta di contestazione'
+        title='Anteprima fascicolo pratica'
         subtitle={pdfFileName}
         loading={loading}
         error={error}
-        emptyText='Nessun dato disponibile per l&apos;anteprima della proposta.'
+        emptyText='Nessun dato disponibile per l&apos;anteprima della pratica.'
+        width={270}
+        docOptions={docOptions}
+        availability={{ notaSpese: false, mappa: false, allegati: attachmentOptions.length > 0, propostaContestazione: true, determinazione: true }}
+        showAdminDocuments={true}
+        busy={loading}
+        canUseMap={false}
+        mapPanelAvailable={false}
+        notaSpeseOptions={[]}
+        attachmentOptions={attachmentOptions}
+        printableLayerTree={[]}
+        expandedLayerGroups={expandedLayerGroups}
+        mapEmptyText='La mappa amministrativa non è disponibile in questa scheda.'
+        updateDocOption={updateDocOption}
+        setNotaSpeseOptionVisible={noop as any}
+        setAttachmentOptionVisible={setAttachmentOptionVisible}
+        setMapLayerKeysVisible={noop as any}
+        setExpandedLayerGroups={setExpandedLayerGroups}
+        onRegenerate={() => { void regenerate(docOptions) }}
       />
     </div>
   )
@@ -6036,8 +6246,10 @@ function inputStyleFrom (st: Record<string, any>, disabled?: boolean): React.CSS
     padding: `0 ${Number(st.formFieldPaddingX ?? 9)}px`,
     fontSize,
     lineHeight: `${Math.max(16, fieldHeight - 2)}px`,
-    color: disabled ? (st.formFieldDisabledColor || '#64748b') : (st.formFieldColor || '#0f172a'),
-    background: disabled ? (st.formFieldDisabledBg || '#e7eef7') : (st.formFieldBg || '#f8fbff'),
+    color: st.formFieldColor || '#0f172a',
+    background: st.formFieldBg || '#f8fbff',
+    opacity: 1,
+    WebkitTextFillColor: st.formFieldColor || '#0f172a',
     outline: 'none'
   }
 }
@@ -6453,6 +6665,8 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
   const roleAllowed = isAllowedAdminRole(profile.role)
   const title = buildPracticeTitle(cfg, data || {}, oid)
   const titleParts = buildPracticeTitleParts(data || {}, oid)
+  const headerTitleParts = titleParts
+  const showHeaderProcedureNote = activeAmmSection !== 'anteprima'
   const hasDsForSave = !!configuredDs
   const currentRole = String(profile.role || '').toUpperCase()
   const canEdit = roleAllowed && ['TI_AMM', 'ADMIN'].includes(currentRole) && hasDsForSave
@@ -6923,7 +7137,7 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
 
     setSaving(true)
     try {
-      const layer = await resolveLayerForEdit(active.ds, active.layerUrl || configuredDsState?.layerUrl || getDataSourceUrl(configuredDs))
+      const layer = await resolveLayerForEdit(active.ds, active.layerUrl || (configuredDsState as any)?.layerUrl || getDataSourceUrl(configuredDs))
       if (!layer?.applyEdits) throw new Error('Layer non disponibile per applyEdits. Verificare che la vista amministrativa collegata al widget abbia un URL FeatureServer valido e consenta l’editing.')
       if (typeof layer.load === 'function') { try { await layer.load() } catch { } }
       const fields = layer?.fields?.length ? (layer.fields as any[]).map(f => ({ name: String(f.name), type: String(f.type || ''), alias: String(f.alias || f.name), domain: f.domain || null, editable: f.editable !== false })) : layerFields
@@ -6973,7 +7187,7 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
     } finally {
       setSaving(false)
     }
-  }, [active, canEdit, configuredDs, configuredDsState?.layerUrl, createRiAmmAttestationInfo, hasSelection, initialDraft, layerFields, oid, upsertAmmCycleAudit])
+  }, [active, canEdit, configuredDs, (configuredDsState as any)?.layerUrl, createRiAmmAttestationInfo, hasSelection, initialDraft, layerFields, oid, upsertAmmCycleAudit])
 
   const handleUndoAttestazioneTiAmm = React.useCallback(async () => {
     if (!hasSelection || oid == null || !Number.isFinite(Number(oid))) {
@@ -6996,7 +7210,7 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
 
     setSaving(true)
     try {
-      const layer = await resolveLayerForEdit(active.ds, active.layerUrl || configuredDsState?.layerUrl || getDataSourceUrl(configuredDs))
+      const layer = await resolveLayerForEdit(active.ds, active.layerUrl || (configuredDsState as any)?.layerUrl || getDataSourceUrl(configuredDs))
       if (!layer?.applyEdits) throw new Error('Layer non disponibile per applyEdits. Verificare che la vista amministrativa collegata al widget abbia un URL FeatureServer valido e consenta l’editing.')
       if (typeof layer.load === 'function') { try { await layer.load() } catch { } }
       const fields = layer?.fields?.length ? (layer.fields as any[]).map(f => ({ name: String(f.name), type: String(f.type || ''), alias: String(f.alias || f.name), domain: f.domain || null, editable: f.editable !== false })) : layerFields
@@ -7048,7 +7262,7 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
       setSaving(false)
       setPendingUndoAttestation(false)
     }
-  }, [active, canEdit, configuredDs, configuredDsState?.layerUrl, draft, hasSelection, initialDraft, layerFields, oid, upsertAmmCycleAudit])
+  }, [active, canEdit, configuredDs, (configuredDsState as any)?.layerUrl, draft, hasSelection, initialDraft, layerFields, oid, upsertAmmCycleAudit])
 
 
   const handleReset = () => {
@@ -7239,7 +7453,7 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
       const { blob, fileName } = await buildBozzaDeterminazioneDocxBlob(base, layerFields, profile)
       downloadBlobFile(blob, fileName)
 
-      const layer = await resolveLayerForEdit(active.ds, active.layerUrl || configuredDsState?.layerUrl || getDataSourceUrl(configuredDs))
+      const layer = await resolveLayerForEdit(active.ds, active.layerUrl || (configuredDsState as any)?.layerUrl || getDataSourceUrl(configuredDs))
       if (!layer?.applyEdits) throw new Error('Layer non disponibile per applyEdits. Verificare che la vista amministrativa collegata al widget abbia un URL FeatureServer valido e consenta l’editing.')
       if (typeof layer.load === 'function') { try { await layer.load() } catch { } }
       const fields = layer?.fields?.length ? (layer.fields as any[]).map(f => ({ name: String(f.name), type: String(f.type || ''), alias: String(f.alias || f.name), domain: f.domain || null, editable: f.editable !== false })) : layerFields
@@ -7313,10 +7527,10 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
 
     setSaving(true)
     try {
-      const layer = await resolveLayerForEdit(active.ds, active.layerUrl || configuredDsState?.layerUrl || getDataSourceUrl(configuredDs))
+      const layer = await resolveLayerForEdit(active.ds, active.layerUrl || (configuredDsState as any)?.layerUrl || getDataSourceUrl(configuredDs))
       if (!layer?.applyEdits) throw new Error('Layer non disponibile per applyEdits. Verificare che la vista amministrativa collegata al widget abbia un URL FeatureServer valido e consenta l’editing.')
       if (typeof layer.load === 'function') { try { await layer.load() } catch { } }
-      const layerUrl = normalizeEditLayerUrl(active.layerUrl || configuredDsState?.layerUrl || layer?.url || getDataSourceUrl(configuredDs))
+      const layerUrl = normalizeEditLayerUrl(active.layerUrl || (configuredDsState as any)?.layerUrl || layer?.url || getDataSourceUrl(configuredDs))
       const fields = layer?.fields?.length ? (layer.fields as any[]).map(f => ({ name: String(f.name), type: String(f.type || ''), alias: String(f.alias || f.name), domain: f.domain || null, editable: f.editable !== false })) : layerFields
       const idName = realFieldName(fields, active.idFieldName) || active.idFieldName || 'OBJECTID'
       const base = buildBozzaDeterminazioneSource()
@@ -7428,7 +7642,7 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
 
     setSaving(true)
     try {
-      const layer = await resolveLayerForEdit(active.ds, active.layerUrl || configuredDsState?.layerUrl || getDataSourceUrl(configuredDs))
+      const layer = await resolveLayerForEdit(active.ds, active.layerUrl || (configuredDsState as any)?.layerUrl || getDataSourceUrl(configuredDs))
       if (!layer?.applyEdits) throw new Error('Layer non disponibile per applyEdits. Verificare che la vista amministrativa collegata al widget abbia un URL FeatureServer valido e consenta l’editing.')
       if (typeof layer.load === 'function') { try { await layer.load() } catch { } }
       const fields = layer?.fields?.length ? (layer.fields as any[]).map(f => ({ name: String(f.name), type: String(f.type || ''), alias: String(f.alias || f.name), domain: f.domain || null, editable: f.editable !== false })) : layerFields
@@ -7620,9 +7834,14 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
         <div style={{ flex: '0 0 auto', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 8, padding: '8px 0', borderBottom: `1px solid ${cfg.dividerColor || '#cbd8e6'}` }}>
           <div style={{ minWidth: 0 }}>
             <div style={{ fontSize: Number(adminStyle.titleFontSize || 18), fontWeight: Number(cfg.titleFontWeight || 700) as any, color: '#111827', lineHeight: 1.25 }}>
-              {hasSelection ? (<>{titleParts.prefix}<span style={{ color: '#2563eb', fontWeight: Number(cfg.titleFontWeight || 700) as any }}>{titleParts.reportCode}</span></>) : 'Istruttoria amministrativa'}
+              {hasSelection ? (<>{headerTitleParts.prefix}{headerTitleParts.reportCode ? <span style={{ color: '#2563eb', fontWeight: Number(cfg.titleFontWeight || 700) as any }}>{headerTitleParts.reportCode}</span> : null}</>) : 'Istruttoria amministrativa'}
             </div>
-            {hasSelection && !headerVerbaleDefinitivo && (
+            {hasSelection && roleAllowed && !canEdit && (
+              <div style={{ marginTop: 3, color: '#b42318', fontSize: Math.max(11, adminLabelFontSize(adminStyle)), fontWeight: 650, lineHeight: 1.3 }}>
+                Pratica aperta in consultazione. Le modifiche sono consentite solo nei casi previsti dal ruolo e dallo stato istruttorio.
+              </div>
+            )}
+            {showHeaderProcedureNote && hasSelection && !headerVerbaleDefinitivo && (
               <div style={{ marginTop: 3, color: '#b42318', fontSize: adminLabelFontSize(adminStyle), fontWeight: 850, lineHeight: 1.3 }}>
                 {headerHasVerbale ? 'Gli estremi della determinazione saranno registrati dopo la sottoscrizione dell’atto.' : 'Il documento diventerà definitivo dopo la sottoscrizione dell’atto.'}
               </div>
@@ -7712,12 +7931,6 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
                     </InfoBox>
                   )}
 
-                  {hasDsForSave && roleAllowed && !canEdit && (
-                    <InfoBox kind='info'>
-                      Scheda in sola lettura per il profilo corrente. La compilazione è abilitata per TI_AMM e ADMIN.
-                    </InfoBox>
-                  )}
-
                 </>
               )}
 
@@ -7735,8 +7948,8 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
                     onGenerateBozzaDeterminazioneWord={handleGenerateBozzaDeterminazioneWord}
                     onTransmitBozzaDeterminazioneRiAmm={handleTransmitBozzaDeterminazioneRiAmm}
                     oid={oid != null && Number.isFinite(Number(oid)) ? Number(oid) : null}
-                    ds={active?.ds}
-                    layerUrl={active?.layerUrl || configuredDsState?.layerUrl || getDataSourceUrl(configuredDs)}
+                    ds={(active as any)?.ds}
+                    layerUrl={(active as any)?.layerUrl || (configuredDsState as any)?.layerUrl || getDataSourceUrl(configuredDs)}
                   />
                 </>
               )}
@@ -7787,18 +8000,21 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
               {activeAmmSection === 'allegati' && (
                 <AllegatiAmmSection
                   oid={oid != null && Number.isFinite(Number(oid)) ? Number(oid) : null}
-                  ds={active?.ds}
-                  layerUrl={active?.layerUrl || configuredDsState?.layerUrl || getDataSourceUrl(configuredDs)}
+                  ds={(active as any)?.ds}
+                  layerUrl={(active as any)?.layerUrl || (configuredDsState as any)?.layerUrl || getDataSourceUrl(configuredDs)}
                   canEdit={canEdit}
                 />
               )}
 
               {activeAmmSection === 'anteprima' && (
-                <VerbaleInlinePreviewSection
+                <FascicoloAmmPreviewSection
                   data={viewData || {}}
                   fields={layerFields}
                   profile={profile}
                   hasSelection={hasSelection}
+                  oid={oid != null && Number.isFinite(Number(oid)) ? Number(oid) : null}
+                  ds={(active as any)?.ds}
+                  layerUrl={(active as any)?.layerUrl || (configuredDsState as any)?.layerUrl || getDataSourceUrl(configuredDs)}
                 />
               )}
             </div>

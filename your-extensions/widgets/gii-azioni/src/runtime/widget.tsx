@@ -6,6 +6,8 @@ import { createPortal } from 'react-dom'
 import type { IMConfig } from '../config'
 import { defaultConfig } from '../config'
 import { buildNotaSpesePdf, type NotaSpeseData } from '../../../_shared/gii-anteprime/documenti-tecnici/rapporto/notaspese-pdf-builder'
+import { buildPropostaContestazionePdf, getPropostaContestazionePdfFilePrefix } from '../../../_shared/gii-anteprime/documenti-amministrativi/proposta-contestazione/proposta-contestazione-pdf-builder'
+import { buildBozzaDeterminazionePdf } from '../../../_shared/gii-anteprime/documenti-amministrativi/bozza-determinazione/bozza-determinazione-pdf-builder'
 import { PDFDocument } from 'pdf-lib'
 import { buildRapportoPdf, buildRapportoIterPlaceholders, loadRapportoIterCicliForPdf, type RapportoIterCicloPdf } from '../../../_shared/gii-anteprime/documenti-tecnici/rapporto/rapporto-pdf-builder'
 import { drawEmbeddedPdfPageInRapportoTechnicalBody, drawRapportoTechnicalHeadersByPage, RAPPORTO_TECHNICAL_BODY_BOX, wrapMapPdfBlobWithRapportoTechnicalHeader } from '../../../_shared/gii-anteprime/documenti-tecnici/rapporto/technical-document-header'
@@ -1542,6 +1544,8 @@ type DocumentAvailability = {
   notaSpese: boolean
   mappa: boolean
   allegati: boolean
+  propostaContestazione?: boolean
+  determinazione?: boolean
   checkedKey: string
 }
 
@@ -1809,6 +1813,8 @@ function ActionsPanel (props: {
     notaSpese: false,
     mappa: false,
     allegati: false,
+    propostaContestazione: false,
+    determinazione: false,
     checkedKey: ''
   })
   const [docNotaSpeseOptions, setDocNotaSpeseOptions] = React.useState<NotaSpesePrintOption[]>([])
@@ -1817,6 +1823,7 @@ function ActionsPanel (props: {
   const docCheckReqRef = React.useRef('')
   const printableLayerTree = React.useMemo(() => listPrintableMapLayerTree(props.mapView), [props.mapView])
   const [docOptions, setDocOptions] = React.useState<DocumentPrintOptions>(() => defaultDocumentPrintOptions())
+  const showAdminPreviewDocuments = role === 'TI_AMM' || role === 'RI_AMM' || role === 'DA' || role === 'ADMIN'
 
   const setNotaSpeseOptionVisible = React.useCallback((key: string, visible: boolean) => {
     setDocOptions(prev => setGiiNotaSpesePrintOptionVisible(prev, key, visible))
@@ -1839,6 +1846,8 @@ function ActionsPanel (props: {
       includeNotaSpese: false,
       includeMappa: false,
       includeAllegati: false,
+      includePropostaContestazione: showAdminPreviewDocuments,
+      includeDeterminazione: false,
       selectedNotaSpeseKeys: {},
       selectedAttachmentIds: {},
       mapBasemap: docOptions.mapBasemap || baseOptions.mapBasemap || 'satellite',
@@ -1860,6 +1869,8 @@ function ActionsPanel (props: {
       notaSpese: quickNotaSpese,
       mappa: !!quickMapTarget,
       allegati: false,
+      propostaContestazione: showAdminPreviewDocuments,
+      determinazione: showAdminPreviewDocuments,
       checkedKey
     })
     setDocMapTarget(quickMapTarget || null)
@@ -1910,7 +1921,7 @@ function ActionsPanel (props: {
       setDocOptions(prev => ({ ...prev, includeAllegati: false }))
     })
     return { options: nextOptions, mapTarget: quickMapTarget || null }
-  }, [active, data, docOptions, hasSel, idFieldNameFromSel, oid, praticaCode, praticaLabel, props.mapView, props.nsConfig])
+  }, [active, data, docOptions, hasSel, idFieldNameFromSel, oid, praticaCode, praticaLabel, props.mapView, props.nsConfig, showAdminPreviewDocuments])
 
   const updateDocOption = React.useCallback((patch: Partial<DocumentPrintOptions>) => {
     setDocOptions(prev => ({ ...prev, ...patch }))
@@ -1920,6 +1931,129 @@ function ActionsPanel (props: {
     setDocOptions(prev => setGiiMapLayerKeysVisible(prev, keys, visible))
   }, [])
   const [expandedLayerGroups, setExpandedLayerGroups] = React.useState<Record<string, boolean>>({})
+
+
+  const pickAttrCI = (obj: any, keys: string[]): any => {
+    if (!obj) return undefined
+    const map: Record<string, string> = {}
+    try {
+      Object.keys(obj).forEach(k => { map[String(k).toLowerCase()] = k })
+    } catch {}
+    for (const k of keys) {
+      const direct = (obj as any)[k]
+      if (direct !== undefined && direct !== null && direct !== '') return direct
+      const kk = map[String(k).toLowerCase()]
+      if (kk) {
+        const v = (obj as any)[kk]
+        if (v !== undefined && v !== null && v !== '') return v
+      }
+    }
+    return undefined
+  }
+
+  const buildAdminPreviewPdfMapForActions = React.useCallback((): Record<string, string> => {
+    const d = data || {}
+    const oidNum = oid != null && Number.isFinite(Number(oid)) ? Number(oid) : null
+    const clean = (value: any): string => String(value ?? '').replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim()
+    const date = (value: any): string => formatDateIt(value)
+    const money = (value: any): string => {
+      const n = Number(String(value ?? '').replace(/\./g, '').replace(',', '.'))
+      if (!Number.isFinite(n)) return clean(value)
+      return n.toLocaleString('it-IT', { style: 'currency', currency: 'EUR' })
+    }
+    const rapporto = getOfficialRapportoTecnicoNumber(d) || (oidNum != null ? `Rilevazione n. ${oidNum}` : '')
+    const ragioneSociale = clean(pickAttrCI(d, ['ragione_sociale', 'RAGIONE_SOCIALE']))
+    const trasgressore = ragioneSociale || [pickAttrCI(d, ['cognome']), pickAttrCI(d, ['nome'])].map(clean).filter(Boolean).join(' ')
+    const cfPiva = ragioneSociale ? clean(pickAttrCI(d, ['piva', 'partita_iva'])) : clean(pickAttrCI(d, ['codice_fiscale', 'cf']))
+    const importoTotale = pickAttrCI(d, ['pagamento_importo_totale', 'importo_totale', 'totale_dovuto'])
+    const articoli = (() => {
+      const out: string[] = []
+      for (let i = 1; i <= 60; i++) {
+        const n = String(i).padStart(2, '0')
+        const selected = pickAttrCI(d, [`v_art${n}`, `V_ART${n}`, `v_art${i}`, `V_ART${i}`])
+        if (selected === 1 || selected === '1' || selected === true || String(selected).toUpperCase() === 'TRUE') out.push(String(i))
+      }
+      if (!out.length) return { elenco: '', riferimento: 'dell’art. ____' }
+      if (out.length === 1) return { elenco: `art. ${out[0]}`, riferimento: `dell’art. ${out[0]}` }
+      return { elenco: out.map(n => `art. ${n}`).join(', ').replace(/, ([^,]*)$/, ' e $1'), riferimento: `degli artt. ${out.join(', ').replace(/, ([^,]*)$/, ' e $1')}` }
+    })()
+    const area = clean(pickAttrCI(d, ['area_label', 'area_cod', 'area']))
+    const settore = clean(pickAttrCI(d, ['settore_label', 'settore_cod', 'settore']))
+    const map: Record<string, string> = {
+      objectid: oidNum != null ? String(oidNum) : '',
+      anno_corrente: String(new Date().getFullYear()),
+      n_rilevazione: oidNum != null ? String(oidNum) : '',
+      n_rapporto: rapporto,
+      data_rapporto_tecnico: date(pickAttrCI(d, ['data_rapporto_tecnico'])),
+      data_approvazione_rapporto: date(pickAttrCI(d, ['dt_esito_DT', 'data_rapporto_tecnico'])),
+      area,
+      settore,
+      ufficio_zona: clean(pickAttrCI(d, ['ufficio_zona'])),
+      trasgressore_tipo: ragioneSociale ? 'PG' : 'PF',
+      trasgressore,
+      cf_piva: cfPiva,
+      indirizzo: [pickAttrCI(d, ['via', 'indirizzo']), pickAttrCI(d, ['civico'])].map(clean).filter(Boolean).join(', '),
+      comune_cap: [pickAttrCI(d, ['comune']), pickAttrCI(d, ['cap'])].map(clean).filter(Boolean).join(' '),
+      pec: clean(pickAttrCI(d, ['pec'])),
+      contatti: [pickAttrCI(d, ['telefono']), pickAttrCI(d, ['email'])].map(clean).filter(Boolean).join(' • '),
+      descrizione_fatti: clean(pickAttrCI(d, ['descrizione_fatti', 'descrizione'])) || '-',
+      tipo_atto_amm: clean(pickAttrCI(d, ['tipo_atto_amm'])),
+      tipo_atto_amm_label: clean(pickAttrCI(d, ['tipo_atto_amm_label', 'tipo_atto_amm'])),
+      oggetto_atto_amm: clean(pickAttrCI(d, ['oggetto_atto_amm'])),
+      note_atto_amm: clean(pickAttrCI(d, ['note_atto_amm'])),
+      atto_approvato: clean(pickAttrCI(d, ['determinazione_numero'])) ? '1' : '0',
+      protocollo_istanza_numero: clean(pickAttrCI(d, ['protocollo_istanza_numero'])),
+      protocollo_istanza_data: date(pickAttrCI(d, ['protocollo_istanza_data'])),
+      protocollo_fascicolo_numero: clean(pickAttrCI(d, ['protocollo_fascicolo_numero'])),
+      protocollo_fascicolo_data: date(pickAttrCI(d, ['protocollo_fascicolo_data'])),
+      accertamento_data: date(pickAttrCI(d, ['accertamento_data'])),
+      protocollo_atto_accertamento_numero: clean(pickAttrCI(d, ['protocollo_atto_accertamento_numero'])),
+      protocollo_atto_accertamento_data: date(pickAttrCI(d, ['protocollo_atto_accertamento_data'])),
+      sanzione_importo_base: money(pickAttrCI(d, ['sanzione_importo_base'])),
+      sanzione_importo_ridotta: money(pickAttrCI(d, ['sanzione_importo_ridotta'])),
+      risarcimento_danni_importo: money(pickAttrCI(d, ['risarcimento_danni_importo'])),
+      sanzione_spese_notifica: money(pickAttrCI(d, ['sanzione_spese_notifica'])),
+      attrezzature_rimborso_importo: money(pickAttrCI(d, ['attrezzature_rimborso_importo'])),
+      attrezzature_cauzione_decurtata: money(pickAttrCI(d, ['attrezzature_cauzione_decurtata'])),
+      attrezzature_importo_netto: money(pickAttrCI(d, ['attrezzature_importo_netto'])),
+      attrezzature_rimborso_dettaglio: clean(pickAttrCI(d, ['attrezzature_rimborso_dettaglio'])),
+      pagamento_importo_totale: money(importoTotale),
+      pagamento_scadenza: date(pickAttrCI(d, ['pagamento_scadenza'])),
+      pagamento_modalita: clean(pickAttrCI(d, ['pagamento_modalita'])),
+      pagamento_stato: clean(pickAttrCI(d, ['pagamento_stato'])),
+      sanzione_dettaglio_calcolo: clean(pickAttrCI(d, ['sanzione_dettaglio_calcolo'])),
+      articoli_violati_elenco: articoli.elenco,
+      articoli_violati_riferimento: articoli.riferimento,
+      data_generazione: new Date().toLocaleString('it-IT'),
+      generato_da: clean((window as any).__giiUserRole?.fullName || (window as any).__giiUserRole?.full_name || (window as any).__giiUserRole?.username || (window as any).__giiUser?.username || ''),
+      amm_iter_compilazione_nome: clean(pickAttrCI(d, ['ti_amm_assegnato_nome', 'ti_amm_assegnato_username'])),
+      amm_iter_compilazione_presa: date(pickAttrCI(d, ['dt_presa_in_carico_TI_AMM'])),
+      amm_iter_compilazione_data: date(pickAttrCI(d, ['dt_esito_TI_AMM'])),
+      amm_iter_supervisione_nome: clean(pickAttrCI(d, ['ri_amm_nome', 'ri_amm_username'])),
+      amm_iter_supervisione_presa: date(pickAttrCI(d, ['dt_presa_in_carico_RI_AMM'])),
+      amm_iter_supervisione_data: date(pickAttrCI(d, ['dt_esito_RI_AMM'])),
+      amm_iter_approvazione_nome: clean(pickAttrCI(d, ['da_nome', 'da_username'])),
+      amm_iter_approvazione_presa: date(pickAttrCI(d, ['determinazione_trasmessa_firma_il'])),
+      amm_iter_approvazione_data: date(pickAttrCI(d, ['determinazione_data'])),
+      bozza_determinazione_oggetto: clean(pickAttrCI(d, ['oggetto_atto_amm']))
+    }
+    return map
+  }, [data, oid, pickAttrCI])
+
+  const buildPropostaContestazionePdfBlobForActions = React.useCallback(async (): Promise<{ blob: Blob; fileName: string }> => {
+    const map = buildAdminPreviewPdfMapForActions()
+    const bytes = await buildPropostaContestazionePdf(map)
+    const prefix = getPropostaContestazionePdfFilePrefix(map) || 'proposta_contestazione'
+    const base = String(map.n_rapporto || map.objectid || 'pratica').replace(/[^a-zA-Z0-9_-]/g, '_')
+    return { blob: new Blob([bytes as any], { type: 'application/pdf' }), fileName: `${prefix}_${base}.pdf` }
+  }, [buildAdminPreviewPdfMapForActions])
+
+  const buildDeterminazionePdfBlobForActions = React.useCallback(async (): Promise<{ blob: Blob; fileName: string }> => {
+    const map = buildAdminPreviewPdfMapForActions()
+    const bytes = await buildBozzaDeterminazionePdf(map)
+    const base = String(map.n_rapporto || map.objectid || 'pratica').replace(/[^a-zA-Z0-9_-]/g, '_')
+    return { blob: new Blob([bytes as any], { type: 'application/pdf' }), fileName: `determinazione_dirigenziale_${base}.pdf` }
+  }, [buildAdminPreviewPdfMapForActions])
 
   const buildSelectedDocumentsPdfWithOptions = React.useCallback(async (options: DocumentPrintOptions, mapTargetOverride?: any | null): Promise<{ blob: Blob; fileName: string }> => {
     if (!hasSel || !data) throw new Error('Selezionare un rapporto.')
@@ -1951,11 +2085,17 @@ function ActionsPanel (props: {
       if (attPdf) items.push(attPdf)
       else setMsg({ kind: 'info', text: 'Nessun allegato probatorio impaginabile trovato.' })
     }
+    if (showAdminPreviewDocuments && opts.includePropostaContestazione) {
+      items.push(await buildPropostaContestazionePdfBlobForActions())
+    }
+    if (showAdminPreviewDocuments && opts.includeDeterminazione) {
+      items.push(await buildDeterminazionePdfBlobForActions())
+    }
     if (items.length === 0) throw new Error('Selezionare almeno un documento.')
     const safeCode = String(praticaCode || 'documenti').replace(/[^a-zA-Z0-9_-]/g, '_')
     if (items.length === 1) return items[0]
     return { blob: await mergePdfBlobs(items), fileName: `documenti_${safeCode}.pdf` }
-  }, [active, data, docAttachmentOptions, docMapTarget, docNotaSpeseOptions, docOptions, hasSel, oid, praticaCode, props.mapView, props.nsConfig, props.printConfig])
+  }, [active, buildDeterminazionePdfBlobForActions, buildPropostaContestazionePdfBlobForActions, data, docAttachmentOptions, docMapTarget, docNotaSpeseOptions, docOptions, hasSel, oid, praticaCode, props.mapView, props.nsConfig, props.printConfig, showAdminPreviewDocuments])
 
   const generatePreviewDocuments = React.useCallback((options: DocumentPrintOptions, mapTarget: any | null) => {
     if (previewLoading) return
@@ -1997,24 +2137,6 @@ function ActionsPanel (props: {
 
 
   const sessionIdRef = React.useRef<string>(`sess-${Date.now()}-${Math.random().toString(16).slice(2)}`)
-
-  const pickAttrCI = (obj: any, keys: string[]): any => {
-    if (!obj) return undefined
-    const map: Record<string, string> = {}
-    try {
-      Object.keys(obj).forEach(k => { map[String(k).toLowerCase()] = k })
-    } catch {}
-    for (const k of keys) {
-      const direct = (obj as any)[k]
-      if (direct !== undefined && direct !== null && direct !== '') return direct
-      const kk = map[String(k).toLowerCase()]
-      if (kk) {
-        const v = (obj as any)[kk]
-        if (v !== undefined && v !== null && v !== '') return v
-      }
-    }
-    return undefined
-  }
 
   const normalizeTipoAttoAmmCode = (raw: any): string => {
     const value = String(raw || '').trim().toUpperCase().replace(/[\s-]+/g, '_')
@@ -6302,13 +6424,16 @@ ${noteTrim}` : 'Attestazione di conformità apposta.',
           width={290}
           docOptions={docOptions}
           availability={docAvailability}
+          showAdminDocuments={showAdminPreviewDocuments}
           busy={previewLoading}
           canUseMap={!!props.mapView}
           mapPanelAvailable={!!docAvailability.mappa && !!props.mapView}
           documentChecking={{
             includeNotaSpese: !!docAvailability.loadingNotaSpese,
             includeMappa: !!docAvailability.loadingMappa,
-            includeAllegati: !!docAvailability.loadingAllegati
+            includeAllegati: !!docAvailability.loadingAllegati,
+            includePropostaContestazione: false,
+            includeDeterminazione: false
           }}
           notaSpeseOptions={docNotaSpeseOptions}
           attachmentOptions={docAttachmentOptions}

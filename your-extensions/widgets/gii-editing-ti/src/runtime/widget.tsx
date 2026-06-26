@@ -3895,7 +3895,7 @@ const S: Record<string, React.CSSProperties> = {
   hdr:    { fontSize: 11, fontWeight: 700, color: '#0f4c81', textTransform: 'uppercase', letterSpacing: 1, borderBottom: '2px solid #93c5fd', paddingBottom: 4, marginBottom: 12, marginTop: 20 },
   lbl:    { fontSize: 12, color: '#334155', marginBottom: 3, display: 'block' },
   inp:    { width: '100%', padding: '5px 9px', borderRadius: 7, border: '1px solid rgba(0,0,0,0.18)', fontSize: 13, boxSizing: 'border-box' as const, background: '#f8fbff' },
-  inpDis: { width: '100%', padding: '5px 9px', borderRadius: 7, border: '1px solid rgba(0,0,0,0.10)', fontSize: 13, boxSizing: 'border-box' as const, background: '#e7eef7', color: '#64748b' },
+  inpDis: { width: '100%', padding: '5px 9px', borderRadius: 7, border: '1px solid rgba(0,0,0,0.18)', fontSize: 13, boxSizing: 'border-box' as const, background: '#f8fbff', color: '#0f172a', opacity: 1, WebkitTextFillColor: '#0f172a' as any },
   sel:    { width: '100%', height: 32, minHeight: 32, padding: '0 9px', lineHeight: '32px', borderRadius: 7, border: '1px solid rgba(0,0,0,0.18)', fontSize: 13, boxSizing: 'border-box' as const, background: '#f8fbff', cursor: 'pointer', verticalAlign: 'middle' },
   row2:   { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 },
   row3:   { display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 10 },
@@ -3915,8 +3915,10 @@ function fieldBaseStyle(fs: any, disabled?: boolean): React.CSSProperties {
     fontSize: Number(fs.fieldFontSize) || 13,
     lineHeight: `${h}px`,
     boxSizing: 'border-box' as const,
-    background: disabled ? String(fs.fieldDisabledBg || '#f3f4f6') : String(fs.fieldBg || '#fff'),
-    color: disabled ? String(fs.fieldDisabledColor || '#6b7280') : String(fs.fieldColor || '#111827'),
+    background: String(fs.fieldBg || '#fff'),
+    color: String(fs.fieldColor || '#111827'),
+    opacity: 1,
+    WebkitTextFillColor: String(fs.fieldColor || '#111827'),
     verticalAlign: 'middle'
   }
 }
@@ -5630,6 +5632,24 @@ function buildPraticaCodeFromData (data: any, oid: number | null | undefined): s
   const settoreSuffix = settore ? `-${settore}` : ''
 
   return `${Number(oid)}-${prefix}${settoreSuffix}`
+}
+
+function buildFascicoloDocumentaleTitleParts (data: any, oid: number | null | undefined): { prefix: string, code: string, full: string } {
+  const d = data || {}
+  const rapportoTecnico = getRapportoTecnicoNumberFromData(d)
+  if (rapportoTecnico) {
+    const prefix = 'Fascicolo documentale della pratica relativa al Rapporto tecnico n. '
+    return { prefix, code: rapportoTecnico, full: `${prefix}${rapportoTecnico}` }
+  }
+
+  const rilevazione = buildPraticaCodeFromData(d, oid)
+  if (rilevazione) {
+    const prefix = 'Fascicolo documentale della pratica relativa alla Rilevazione n. '
+    return { prefix, code: rilevazione, full: `${prefix}${rilevazione}` }
+  }
+
+  const prefix = 'Fascicolo documentale della pratica'
+  return { prefix, code: '', full: prefix }
 }
 
 function giiReadLayoutSidebarBoundaryX (host: HTMLElement | null): number | null {
@@ -8370,14 +8390,12 @@ ${e?.message || String(e)}`
   }, [mode, p.initialData, editOid])
 
   const toolbarTitleInfo = React.useMemo(() => {
-    const hasOfficialRapporto = hasRapportoTecnicoNumber(p.initialData || {})
-    const defaultTitle = mode === 'edit' ? (hasOfficialRapporto ? 'Modifica rapporto tecnico' : 'Modifica rilevazione') : 'Nuova rilevazione'
-    const rawTitle = String(p.titleText || defaultTitle)
-    const baseTitle = mode === 'edit' && /modifica\s+(pratica|rilevazione|rapporto)/i.test(rawTitle) ? defaultTitle : rawTitle
-    if (mode !== 'edit' || !editPraticaCode) return { baseTitle, praticaCode: '' }
-    if (baseTitle.includes(editPraticaCode)) return { baseTitle: baseTitle.replace(editPraticaCode, '').trim(), praticaCode: editPraticaCode }
-    return { baseTitle, praticaCode: editPraticaCode }
-  }, [p.titleText, mode, editPraticaCode, p.initialData])
+    if (mode === 'edit') {
+      const titleParts = buildFascicoloDocumentaleTitleParts(p.initialData || {}, editOid)
+      return { baseTitle: titleParts.prefix, praticaCode: titleParts.code }
+    }
+    return { baseTitle: String(p.titleText || 'Nuova rilevazione'), praticaCode: '' }
+  }, [p.titleText, mode, editOid, p.initialData])
 
   const numCfg = React.useCallback((key: string, fallback: number, min?: number, max?: number): number => {
     const n = Number((cfg as any)[key])
@@ -8766,33 +8784,36 @@ ${e?.message || String(e)}`
 
   const mapPointEditDisabled = saving || isReadOnly || isRiAgrTecLimitedEdit
 
+  const renderReadonlyCheckboxTi = (selected: boolean, style?: React.CSSProperties): React.ReactNode => (
+    <span
+      aria-hidden='true'
+      title={selected ? 'Selezionato' : 'Non selezionato'}
+      style={{
+        width: 13,
+        height: 13,
+        border: selected ? '1.5px solid #0f4c81' : '1.5px solid #64748b',
+        borderRadius: 2,
+        display: 'inline-flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        color: selected ? '#0f4c81' : 'transparent',
+        fontSize: 10,
+        fontWeight: 900,
+        lineHeight: 1,
+        background: '#ffffff',
+        boxShadow: selected ? 'inset 0 0 0 1px rgba(15,76,129,0.10)' : 'none',
+        flexShrink: 0,
+        ...style
+      }}
+    >
+      {selected ? '✓' : '•'}
+    </span>
+  )
+
   const renderNorma3Checkbox = (selected: boolean, onChange: () => void, style?: React.CSSProperties): React.ReactNode => {
-    if (selected && isRiAgrTecLimitedEdit) {
-      return (
-        <span
-          aria-hidden='true'
-          style={{
-            width: 13,
-            height: 13,
-            border: '1.5px solid #4b5563',
-            borderRadius: 2,
-            display: 'inline-flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            color: '#4b5563',
-            fontSize: 10,
-            fontWeight: 800,
-            lineHeight: 1,
-            background: '#e5e7eb',
-            flexShrink: 0,
-            ...style
-          }}
-        >
-          ✓
-        </span>
-      )
-    }
-    return <input type='checkbox' checked={selected} disabled={saving || isReadOnly || isRiAgrTecLimitedEdit} onChange={onChange} style={{ margin: 0, flexShrink: 0, accentColor: '#4b5563', ...style }}/>
+    const disabled = saving || isReadOnly || isRiAgrTecLimitedEdit
+    if (disabled) return renderReadonlyCheckboxTi(selected, style)
+    return <input type='checkbox' checked={selected} onChange={onChange} style={{ margin: 0, flexShrink: 0, accentColor: '#0f4c81', ...style }}/>
   }
 
   const renderSpecial = (id: string): React.ReactNode => {
@@ -9082,13 +9103,11 @@ ${e?.message || String(e)}`
         const choiceBox = (value: 'Art16' | 'Art17', title: string) => {
           const active = norma1516 === value
           const disabled = saving || isRiAgrTecLimitedEdit || !canEditFieldForCurrentProfile('norma16_17')
-          const checkbox = (
+          const checkbox = disabled ? renderReadonlyCheckboxTi(active) : (
             <input
               type='checkbox'
               checked={active}
-              disabled={disabled}
               onChange={() => {
-                if (disabled) return
                 setDraft(prev => ({
                   ...prev,
                   norma16_17: active ? '' : value,
@@ -9100,7 +9119,7 @@ ${e?.message || String(e)}`
                   sup_irrigata_art17_2: ''
                 }))
               }}
-              style={{ margin: 0, flexShrink: 0, accentColor: '#4b5563' }}
+              style={{ margin: 0, flexShrink: 0, accentColor: '#0f4c81' }}
             />
           )
           return (
@@ -9292,13 +9311,11 @@ ${e?.message || String(e)}`
         const art15ChoiceBox = () => {
           const active = art15Selected
           const disabled = saving || isRiAgrTecLimitedEdit || !canEditFieldForCurrentProfile('tipo_abuso')
-          const checkbox = (
+          const checkbox = disabled ? renderReadonlyCheckboxTi(active) : (
             <input
               type='checkbox'
               checked={active}
-              disabled={disabled}
               onChange={() => {
-                if (disabled) return
                 if (active) {
                   setArt15SelectedUi(false)
                   setDraft(prev => ({
@@ -9314,7 +9331,7 @@ ${e?.message || String(e)}`
                   setArt15SelectedUi(true)
                 }
               }}
-              style={{ margin: 0, flexShrink: 0, accentColor: '#4b5563' }}
+              style={{ margin: 0, flexShrink: 0, accentColor: '#0f4c81' }}
             />
           )
           return (
@@ -9687,10 +9704,17 @@ ${e?.message || String(e)}`
       {/* ── Toolbar ── */}
       <div style={{ flex: '0 0 auto', display: 'flex', alignItems: 'center', justifyContent: 'space-between',
         flexWrap: 'wrap', gap: 8, padding: '8px 0', borderBottom: '1px solid rgba(0,0,0,0.08)' }}>
-        <span style={{ fontWeight: 700, fontSize: formStyle.titleFontSize }}>
-          {toolbarTitleInfo.baseTitle}
-          {toolbarTitleInfo.praticaCode ? <> <span style={{ color: '#0b5fff' }}>{toolbarTitleInfo.praticaCode}</span></> : null}
-        </span>
+        <div style={{ minWidth: 0 }}>
+          <div style={{ fontWeight: 700, fontSize: formStyle.titleFontSize, lineHeight: 1.25 }}>
+            {toolbarTitleInfo.baseTitle}
+            {toolbarTitleInfo.praticaCode ? <> <span style={{ color: '#0b5fff' }}>{toolbarTitleInfo.praticaCode}</span></> : null}
+          </div>
+          {isReadOnly && (
+            <div style={{ marginTop: 3, color: '#b42318', fontSize: Math.max(11, Number(formStyle.msgFontSize || 12)), fontWeight: 650, lineHeight: 1.3 }}>
+              {String(p.readOnlyMessage || 'Pratica aperta in consultazione. Le modifiche sono consentite solo nei casi previsti dal ruolo e dallo stato istruttorio.')}
+            </div>
+          )}
+        </div>
         <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
           {msg && msg.kind === 'ok' && <span style={{ fontSize: formStyle.msgFontSize, color: '#1a7f37' }}>{msg.text}</span>}
           {npTab === 'nota_spese' && mode === 'edit' && currentOid != null && noteSpeseMissing.length === 0 && currentGlobalId && (
@@ -9754,23 +9778,6 @@ ${e?.message || String(e)}`
           )}
         </div>
       </div>
-
-      {isReadOnly && (
-        <div style={{
-          flex: '0 0 auto',
-          margin: '8px 0 0',
-          padding: '10px 12px',
-          borderRadius: 8,
-          border: '1px solid #9a3412',
-          background: '#fff7ed',
-          color: '#9a3412',
-          fontSize: 13,
-          fontWeight: 700,
-          lineHeight: 1.35
-        }}>
-          {String(p.readOnlyMessage || 'Pratica aperta in consultazione. Le modifiche sono consentite solo nei casi previsti dal ruolo e dallo stato istruttorio.')}
-        </div>
-      )}
 
       {/* ── Splitter overlay Luoghi e dati tecnici ── */}
       {npTab === 'dati_tecnici' && (() => {
@@ -10375,19 +10382,21 @@ ${e?.message || String(e)}`
                         const amount = row.selected ? (Number(row.quantita) || 0) * (Number(row.valoreUnitario) || 0) : 0
                         return <div key={`${row.codice || row.descrizione}-${index}`} style={{ display: 'grid', gridTemplateColumns: '44px minmax(0, 1fr) 82px 118px 104px', alignItems: 'center', borderBottom: index === attrezzatureRows.length - 1 ? 0 : '1px solid #e2e8f0', background: index % 2 === 0 ? '#ffffff' : '#f8fbff', fontSize: popupBodyFontSize }}>
                           <div style={{ display: 'flex', justifyContent: 'center', padding: 8 }}>
-                            <input
-                              type='checkbox'
-                              checked={row.selected}
-                              disabled={locked}
-                              onChange={e => {
-                                const checked = e.target.checked
-                                setAttrezzatureRows(prev => prev.map((item, i) => i === index ? { ...item, selected: checked, quantita: checked ? Math.max(1, Number(item.quantita) || 1) : item.quantita } : item))
-                                if (!checked && attrezzaturaTipo(`${row.codice} ${row.descrizione}`)?.key === 'TESSERA_ELETTRONICA') {
-                                  setAttrezzatureCauzionePresente(false)
-                                  setAttrezzatureCauzioneQuantita(1)
-                                }
-                              }}
-                            />
+                            {locked ? renderReadonlyCheckboxTi(row.selected) : (
+                              <input
+                                type='checkbox'
+                                checked={row.selected}
+                                onChange={e => {
+                                  const checked = e.target.checked
+                                  setAttrezzatureRows(prev => prev.map((item, i) => i === index ? { ...item, selected: checked, quantita: checked ? Math.max(1, Number(item.quantita) || 1) : item.quantita } : item))
+                                  if (!checked && attrezzaturaTipo(`${row.codice} ${row.descrizione}`)?.key === 'TESSERA_ELETTRONICA') {
+                                    setAttrezzatureCauzionePresente(false)
+                                    setAttrezzatureCauzioneQuantita(1)
+                                  }
+                                }}
+                                style={{ accentColor: '#0f4c81' }}
+                              />
+                            )}
                           </div>
                           <div style={{ padding: '8px 10px', fontWeight: row.selected ? 700 : 500, color: '#334155' }}>{row.descrizione}</div>
                           <div style={{ padding: 6 }}>
@@ -10410,16 +10419,18 @@ ${e?.message || String(e)}`
             <div style={{ display: 'grid', gap: 8, marginTop: 12, padding: '10px 0', borderRadius: 8, border: '1px solid #bfdbfe', background: '#eff6ff', overflow: 'hidden' }}>
               <div style={{ display: 'grid', gridTemplateColumns: '44px minmax(0, 1fr) 82px 118px 104px', alignItems: 'center', color: '#334155', fontSize: popupBodyFontSize, fontWeight: 700 }}>
                 <div style={{ display: 'flex', justifyContent: 'center', padding: 8 }}>
-                  <input
-                    type='checkbox'
-                    checked={attrezzatureCauzionePresente}
-                    disabled={!canEditArt30Attrezzature || !attrezzatureCauzioneApplicabile}
-                    onChange={e => {
-                      const checked = e.target.checked
-                      setAttrezzatureCauzionePresente(checked)
-                      if (checked) setAttrezzatureCauzioneQuantita(attrezzatureTesseraQuantita)
-                    }}
-                  />
+                  {(!canEditArt30Attrezzature || !attrezzatureCauzioneApplicabile) ? renderReadonlyCheckboxTi(attrezzatureCauzionePresente) : (
+                    <input
+                      type='checkbox'
+                      checked={attrezzatureCauzionePresente}
+                      onChange={e => {
+                        const checked = e.target.checked
+                        setAttrezzatureCauzionePresente(checked)
+                        if (checked) setAttrezzatureCauzioneQuantita(attrezzatureTesseraQuantita)
+                      }}
+                      style={{ accentColor: '#0f4c81' }}
+                    />
+                  )}
                 </div>
                 <div style={{ padding: '8px 10px' }}>Decurtazione della cauzione</div>
                 <div style={{ padding: 6 }}>
@@ -10788,13 +10799,12 @@ function DetailTabsPanel (props: {
   // Codice pratica per il titolo
   const praticaCode = React.useMemo(() => {
     if (!hasSel || !data) return ''
-    const op = data.origine_pratica ?? data.Origine_pratica ?? data.ORIGINE_PRATICA
-    let prefix = 'TR'
-    if (op === 2 || op === '2' || String(op).toUpperCase() === 'TI') prefix = 'TI'
-    else if (op === 1 || op === '1' || String(op).toUpperCase() === 'TR') prefix = 'TR'
-    const settoreRaw = data?.settore_cod ?? data?.Settore_cod ?? data?.SETTORE_COD ?? data?.settore ?? data?.Settore ?? data?.SETTORE
-    const settore = String(settoreRaw || '').trim().toUpperCase()
-    return settore ? `${oid}-${prefix}-${settore}` : `${oid}-${prefix}`
+    return buildPraticaCodeFromData(data || {}, oid)
+  }, [hasSel, data, oid])
+
+  const detailTitleParts = React.useMemo(() => {
+    if (!hasSel || !data) return { prefix: 'Fascicolo documentale della pratica', code: '', full: 'Fascicolo documentale della pratica' }
+    return buildFascicoloDocumentaleTitleParts(data || {}, oid)
   }, [hasSel, data, oid])
 
   const [tab, setTab] = React.useState<string>(tabs[0]?.id || 'trasgressore')
@@ -11334,7 +11344,12 @@ return (
           ? (ui.detailTitleColor ?? 'rgba(0,0,0,0.85)')
           : 'rgba(0,0,0,0.40)'
       }}>
-        {String(ui.detailTitlePrefix ?? 'Dettaglio pratica n.')} {hasSel && praticaCode ? praticaCode : '–'}
+        {hasSel ? (
+          <>
+            {detailTitleParts.prefix}
+            {detailTitleParts.code ? <span style={{ color: '#0b5fff' }}>{detailTitleParts.code}</span> : null}
+          </>
+        ) : 'Fascicolo documentale della pratica –'}
       </span>
     </div>
     <div style={frameStyle}>

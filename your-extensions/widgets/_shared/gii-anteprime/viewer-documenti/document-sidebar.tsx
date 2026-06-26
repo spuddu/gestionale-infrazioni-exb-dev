@@ -3,12 +3,14 @@
 import { React, jsx } from 'jimu-core'
 import type { GiiAttachmentPrintOption, GiiDocumentPrintOptions, GiiNotaSpesePrintOption } from './document-options'
 
-type DocumentKey = keyof Pick<GiiDocumentPrintOptions, 'includeRapporto' | 'includeNotaSpese' | 'includeMappa' | 'includeAllegati'>
+type DocumentKey = keyof Pick<GiiDocumentPrintOptions, 'includeRapporto' | 'includeNotaSpese' | 'includeMappa' | 'includeAllegati' | 'includePropostaContestazione' | 'includeDeterminazione'>
 
 export type GiiDocumentSidebarAvailability = {
   notaSpese: boolean
   mappa: boolean
   allegati: boolean
+  propostaContestazione?: boolean
+  determinazione?: boolean
 }
 
 export type GiiDocumentSidebarProps = {
@@ -23,6 +25,7 @@ export type GiiDocumentSidebarProps = {
   mapPanelAvailable: boolean
   documentChecking?: Partial<Record<DocumentKey, boolean>>
   documentUnavailableExtra?: Partial<Record<DocumentKey, boolean>>
+  showAdminDocuments?: boolean
   notaSpeseOptions: GiiNotaSpesePrintOption[]
   attachmentOptions: GiiAttachmentPrintOption[]
   printableLayerTree: any[]
@@ -61,6 +64,7 @@ export default function GiiDocumentSidebar (props: GiiDocumentSidebarProps) {
     mapPanelAvailable,
     documentChecking,
     documentUnavailableExtra,
+    showAdminDocuments,
     notaSpeseOptions,
     attachmentOptions,
     printableLayerTree,
@@ -84,6 +88,8 @@ export default function GiiDocumentSidebar (props: GiiDocumentSidebarProps) {
       key === 'includeNotaSpese' ? !availability.notaSpese :
       key === 'includeMappa' ? (!availability.mappa || !canUseMap) :
       key === 'includeAllegati' ? !availability.allegati :
+      key === 'includePropostaContestazione' ? !availability.propostaContestazione :
+      key === 'includeDeterminazione' ? !availability.determinazione :
       false
     )
     const unavailable = unavailableBase || !!documentUnavailableExtra?.[key]
@@ -153,12 +159,25 @@ export default function GiiDocumentSidebar (props: GiiDocumentSidebarProps) {
   return (
     <aside style={{ flex: `0 0 ${width}px`, width, minHeight: 0, overflow: 'auto', padding: 10, background: safeBackgroundColor, ...(hasCustomBorder ? { boxShadow: safeBorderWidth > 0 ? `inset 0 0 0 ${safeBorderWidth}px ${safeBorderColor}` : 'none' } : { borderLeft: '1px solid #dbe4ef' }), color: '#0f172a', display: 'grid', alignContent: 'start', gap: 10, boxSizing: 'border-box' }}>
       <div style={{ fontSize: 13, fontWeight: 900, color: '#0f172a' }}>Documenti</div>
-      <div style={{ display: 'grid', gap: 8 }}>
-        {renderDocCheckbox('includeRapporto', 'Rapporto tecnico')}
-        {renderDocCheckbox('includeNotaSpese', 'Nota spese')}
-        {renderDocCheckbox('includeMappa', 'Mappa')}
-        {renderDocCheckbox('includeAllegati', 'Allegati')}
+      <div style={{ display: 'grid', gap: 6 }}>
+        <div style={{ fontSize: 12, fontWeight: 900, color: '#334155', textTransform: 'uppercase', letterSpacing: 0.2 }}>Documenti tecnici</div>
+        <div style={{ display: 'grid', gap: 8 }}>
+          {renderDocCheckbox('includeRapporto', 'Rapporto tecnico')}
+          {renderDocCheckbox('includeNotaSpese', 'Nota spese')}
+          {renderDocCheckbox('includeMappa', 'Mappa')}
+          {renderDocCheckbox('includeAllegati', 'Allegati')}
+        </div>
       </div>
+
+      {showAdminDocuments && (
+        <div style={{ display: 'grid', gap: 6, paddingTop: 8, borderTop: '1px solid #dbe4ef' }}>
+          <div style={{ fontSize: 12, fontWeight: 900, color: '#334155', textTransform: 'uppercase', letterSpacing: 0.2 }}>Documenti amministrativi</div>
+          <div style={{ display: 'grid', gap: 8 }}>
+            {renderDocCheckbox('includePropostaContestazione', 'Proposta di contestazione')}
+            {renderDocCheckbox('includeDeterminazione', 'Determinazione dirigenziale')}
+          </div>
+        </div>
+      )}
 
       {docOptions.includeNotaSpese && availability.notaSpese && notaSpeseOptions.length > 0 && (
         <div style={{ display: 'grid', gap: 6, paddingTop: 8, borderTop: '1px solid #dbe4ef' }}>

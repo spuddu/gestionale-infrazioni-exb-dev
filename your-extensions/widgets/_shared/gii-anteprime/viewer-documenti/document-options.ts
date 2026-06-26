@@ -3,6 +3,8 @@ export type GiiDocumentPrintOptions = {
   includeNotaSpese: boolean
   includeMappa: boolean
   includeAllegati: boolean
+  includePropostaContestazione?: boolean
+  includeDeterminazione?: boolean
   selectedNotaSpeseKeys?: Record<string, boolean>
   selectedAttachmentIds?: Record<string, boolean>
   mapLayout: string
@@ -34,6 +36,8 @@ export function defaultGiiDocumentPrintOptions (): GiiDocumentPrintOptions {
     includeNotaSpese: false,
     includeMappa: false,
     includeAllegati: false,
+    includePropostaContestazione: false,
+    includeDeterminazione: false,
     mapLayout: 'A4 Portrait',
     mapScale: 1000,
     mapBasemap: 'satellite',
@@ -45,6 +49,8 @@ export function cloneGiiDocumentPrintOptions (opts?: GiiDocumentPrintOptions | n
   const base = opts || defaultGiiDocumentPrintOptions()
   return {
     ...base,
+    includePropostaContestazione: !!base.includePropostaContestazione,
+    includeDeterminazione: !!base.includeDeterminazione,
     selectedNotaSpeseKeys: { ...(base.selectedNotaSpeseKeys || {}) },
     selectedAttachmentIds: { ...(base.selectedAttachmentIds || {}) },
     mapLayerVisibility: { ...(base.mapLayerVisibility || {}) }
