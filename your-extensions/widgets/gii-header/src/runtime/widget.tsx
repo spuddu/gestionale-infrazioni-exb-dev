@@ -519,10 +519,19 @@ async function signOut(): Promise<void> {
   try { delete (window as any).__giiUserRole } catch { (window as any).__giiUserRole = null }
   try {
     const sm: any = SessionManager.getInstance()
+    let handled = false
+    if (typeof sm?.signOutByResourceUrl === 'function') {
+      try { await sm.signOutByResourceUrl(`${GII_PORTAL}/sharing/rest`) } catch { }
+      handled = true
+    } else if (typeof sm?.signOut === 'function') {
+      try { sm.signOut({}) } catch { }
+      handled = true
+    }
+    // Rimozione manuale DOPO la pulizia ufficiale (non prima: altrimenti signOutByResourceUrl
+    // trova la sessione già nulla e crasha internamente leggendo i suoi dati di portale).
+    // Resta comunque utile come garanzia ulteriore (es. browser chiuso senza logout esplicito).
     try { const main: any = sm?.getMainSession?.(); if (main && typeof sm?.removeSession === 'function') sm.removeSession(main) } catch { }
-    if (typeof sm?.signOutByResourceUrl === 'function') sm.signOutByResourceUrl(`${GII_PORTAL}/sharing/rest`)
-    else if (typeof sm?.signOut === 'function') sm.signOut({})
-    else if (typeof sm?.clearSessions === 'function') sm.clearSessions()
+    if (!handled && typeof sm?.clearSessions === 'function') { try { sm.clearSessions() } catch { } }
   } catch { }
   try { const id = await loadEsriModule<any>('esri/identity/IdentityManager'); if (typeof id?.destroyCredentials === 'function') id.destroyCredentials() } catch { }
   try { window.dispatchEvent(new Event('gii:userLoaded')) } catch { }
@@ -2557,6 +2566,8 @@ export default function Widget(props: Props) {
   const [uLoad,    setULoad]   = React.useState(true)
   const [signingIn,setSigning] = React.useState(false)
   const [menuOpen, setMenuOpen] = React.useState(false)
+  const accountBtnRef = React.useRef<HTMLButtonElement>(null)
+  const [accountMenuPos, setAccountMenuPos] = React.useState<{ top: number, right: number }>({ top: 0, right: 0 })
   const [urlTick, setUrlTick] = React.useState(0)
   const [alerts, setAlerts] = React.useState<GiiAlertItem[]>([])
   const [alertCounts, setAlertCounts] = React.useState<GiiAlertQueryResult['counts']>(() => emptyAlertCounts())
@@ -2621,9 +2632,21 @@ export default function Widget(props: Props) {
               if (needs) {
                 sessionStorage.removeItem(NEEDS_DS_RESET_KEY)
                 if (enabled) {
-                  setTimeout(() => {
+                  // Attendo che il nuovo token sia davvero disponibile prima di ricaricare:
+                  // un reload troppo anticipato (subito dopo credential-create) può avvenire
+                  // prima che la sessione sia assestata, facendo ripartire l'app come non
+                  // autenticata anche se il login è appena riuscito (si rientra su "Accesso").
+                  ;(async () => {
+                    const maxWaitMs = 2000
+                    const stepMs = 100
+                    let waited = 0
+                    while (waited < maxWaitMs) {
+                      try { if (await getToken()) break } catch { }
+                      await new Promise(r => setTimeout(r, stepMs))
+                      waited += stepMs
+                    }
                     try { window.location.reload() } catch { }
-                  }, 120)
+                  })()
                 }
               }
             } catch { }
@@ -2976,6 +2999,39 @@ export default function Widget(props: Props) {
     backdropFilter:'blur(8px)', transition:'all 0.2s', whiteSpace:'nowrap'
   }
 
+  // ── Menu utente: contenuto configurabile ──
+  const showAccountAvatar = cfg.accountMenuShowAvatar ?? true
+  const showAccountName = cfg.accountMenuShowName ?? true
+  const accountProfileUrl = String(cfg.accountMenuProfileUrl ?? '').trim()
+  const showAccountProfile = (cfg.accountMenuShowProfile ?? true) && !!accountProfileUrl
+  const accountSettingsUrl = String(cfg.accountMenuSettingsUrl ?? '').trim()
+  const showAccountSettings = (cfg.accountMenuShowSettings ?? true) && !!accountSettingsUrl
+  const menuItemBtnStyle: React.CSSProperties = {
+    width:'100%', display:'flex', alignItems:'center', gap:8,
+    padding:'8px 10px', borderRadius:8,
+    border:'1px solid rgba(255,255,255,0.12)', background:'rgba(255,255,255,0.06)',
+    color:'#e5e7eb', cursor:'pointer', fontSize:12.5, fontWeight:700,
+    marginBottom:6
+  }
+
+  // Disconnessione "pulita": se è configurata una pagina di destinazione diversa da
+  // quella corrente, naviga PRIMA di distruggere le credenziali. Così i widget dati
+  // della pagina corrente (elenco/mappa) si smontano e non restano agganciati a un
+  // layer protetto proprio mentre la sessione viene invalidata — evento che fa scattare
+  // un tentativo di ri-autenticazione automatica (il prompt "Eseguire l'accesso a ArcGIS Online").
+  const performSignOut = async () => {
+    const tok = String(afterOutRef.current || '').trim()
+    if (tok) {
+      const targetId = resolvePageId(tok)
+      const curId = resolvePageId(getCurrentPageToken() || '')
+      if (!targetId || !curId || curId !== targetId) {
+        gotoPage(tok)
+        await new Promise(r => setTimeout(r, 150))
+      }
+    }
+    await signOut()
+  }
+
   const getOffset = (key: string): { x:number; y:number } => {
     const v: any = (cfg as any)[key]
     if (v && typeof v.x === 'number') return { x: v.x, y: v.y }
@@ -2987,8 +3043,6 @@ export default function Widget(props: Props) {
     return (o.x || o.y) ? { position:'relative', left:o.x, top:o.y } : {}
   }
 
-  const accountHierarchyParts = React.useMemo(() => getOrganizationalHierarchy(user, false), [user])
-  const accountHierarchy = accountHierarchyParts.join(' · ')
   const displayRoleCode = user?.profiloCod || user?.ruoloLabel || ''
   const displayRoleLabel = user?.profiloLabel || user?.ruoloFull || ''
   const displayRoleBadge = displayRoleLabel || displayRoleCode
@@ -3104,7 +3158,14 @@ export default function Widget(props: Props) {
             signedInClickRef.current === 'menu' ? (
               <div style={{ position:'relative' }}>
                 <button type='button' disabled={signingIn}
-                  onClick={()=>setMenuOpen(v=>!v)}
+                  ref={accountBtnRef}
+                  onClick={() => {
+                    if (!menuOpen) {
+                      const rect = accountBtnRef.current?.getBoundingClientRect()
+                      if (rect) setAccountMenuPos({ top: rect.bottom + 8, right: Math.max(8, window.innerWidth - rect.right) })
+                    }
+                    setMenuOpen(v => !v)
+                  }}
                   style={{ ...btnStyle, padding:'7px 14px', fontWeight:700, letterSpacing:0.2 }}>
                   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                     <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/>
@@ -3113,52 +3174,105 @@ export default function Widget(props: Props) {
                   <span style={{ marginLeft:2, opacity:0.8 }}>▾</span>
                 </button>
 
-                {menuOpen && (
-                  <div style={{
-                    position:'absolute', right:0, top:'calc(100% + 8px)',
-                    minWidth:210, zIndex:9999,
-                    background:'rgba(17,24,39,0.92)',
-                    border:'1px solid rgba(255,255,255,0.12)',
-                    borderRadius:10,
-                    boxShadow:'0 18px 40px rgba(0,0,0,0.35)',
-                    padding:'10px 10px',
-                    backdropFilter:'blur(10px)'
-                  }}>
-                    <div style={{ fontSize:12.5, fontWeight:700, color:'#e5e7eb', marginBottom:2, whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis' }}>
-                      {user.fullName || user.username}
-                    </div>
-                    <div style={{ fontSize:11.5, color:'rgba(147,197,253,0.75)', marginBottom:10, lineHeight:1.35 }}>
-                      {[displayRoleBadge, accountHierarchy].filter(Boolean).join(' · ')}
-                    </div>
+                {menuOpen && createPortal(
+                  <div style={{ position:'fixed', inset:0, zIndex:2147483646, pointerEvents:'none' }}>
+                    <div style={{
+                      position:'fixed', top: accountMenuPos.top, right: accountMenuPos.right,
+                      minWidth:230, zIndex:9999,
+                      background:'rgba(17,24,39,0.92)',
+                      border:'1px solid rgba(255,255,255,0.12)',
+                      borderRadius:10,
+                      boxShadow:'0 18px 40px rgba(0,0,0,0.35)',
+                      padding:10,
+                      backdropFilter:'blur(10px)',
+                      pointerEvents:'auto'
+                    }}>
+                      {(showAccountAvatar || showAccountName) && <>
+                        <div style={{ display:'flex', alignItems:'center', gap:10, padding:'2px 2px 8px' }}>
+                          {showAccountAvatar && (
+                            <div style={{ width:36,height:36,borderRadius:'50%',
+                              background:`linear-gradient(135deg,${cfg.userAvatarBg1},${cfg.userAvatarBg2})`,
+                              display:'flex',alignItems:'center',justifyContent:'center',fontSize:14,fontWeight:700,color:'#fff',flexShrink:0 }}>
+                              {(user.fullName||user.username).charAt(0).toUpperCase()}
+                            </div>
+                          )}
+                          {showAccountName && (
+                            <div style={{ minWidth:0 }}>
+                              <div style={{ fontSize:13, fontWeight:700, color:'#e5e7eb', whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis' }}>
+                                {user.fullName || user.username}
+                              </div>
+                              <div style={{ fontSize:11.5, color:'rgba(147,197,253,0.7)', whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis' }}>
+                                {user.username}
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                        <div style={{ height:1, background:'rgba(255,255,255,0.10)', margin:'2px 0 8px' }}/>
+                      </>}
 
-                    <button type='button' disabled={signingIn}
-                      onClick={async () => {
-                        setSigning(true)
-                        try { setMenuOpen(false); await signOut() } finally { setSigning(false) }
-                      }}
-                      style={{
-                        width:'100%',
-                        display:'flex', alignItems:'center', gap:8,
-                        padding:'8px 10px',
-                        borderRadius:8,
-                        border:'1px solid rgba(255,255,255,0.12)',
-                        background:'rgba(255,255,255,0.06)',
-                        color:'#e5e7eb',
-                        cursor:'pointer',
-                        fontSize:12.5,
-                        fontWeight:700
-                      }}>
-                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                        <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/>
-                      </svg>
-                      {signingIn ? 'Uscita…' : 'Disconnetti'}
-                    </button>
-                  </div>
+                      {showAccountProfile && (
+                        <button type='button' title='Apri in una nuova finestra'
+                          onClick={() => { setMenuOpen(false); window.open(accountProfileUrl, '_blank', 'noopener') }}
+                          style={menuItemBtnStyle}>
+                          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                            <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/>
+                          </svg>
+                          <span style={{ flex:1, textAlign:'left' }}>Il mio profilo</span>
+                          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ opacity:0.6, flexShrink:0 }}>
+                            <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/>
+                          </svg>
+                        </button>
+                      )}
+
+                      {showAccountSettings && (
+                        <button type='button' title='Apri in una nuova finestra'
+                          onClick={() => { setMenuOpen(false); window.open(accountSettingsUrl, '_blank', 'noopener') }}
+                          style={menuItemBtnStyle}>
+                          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                            <circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>
+                          </svg>
+                          <span style={{ flex:1, textAlign:'left' }}>Le mie impostazioni</span>
+                          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ opacity:0.6, flexShrink:0 }}>
+                            <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/>
+                          </svg>
+                        </button>
+                      )}
+
+                      {(showAccountProfile || showAccountSettings) && (
+                        <div style={{ height:1, background:'rgba(255,255,255,0.10)', margin:'2px 0 8px' }}/>
+                      )}
+
+                      <button type='button' disabled={signingIn}
+                        onClick={async () => {
+                          setSigning(true)
+                          try { setMenuOpen(false); await performSignOut(); await signIn() } finally { setSigning(false) }
+                        }}
+                        style={menuItemBtnStyle}>
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                          <polyline points="17 1 21 5 17 9"/><path d="M3 11V9a4 4 0 0 1 4-4h14"/><polyline points="7 23 3 19 7 15"/><path d="M21 13v2a4 4 0 0 1-4 4H3"/>
+                        </svg>
+                        <span style={{ flex:1, textAlign:'left' }}>Cambia account</span>
+                      </button>
+
+                      <button type='button' disabled={signingIn}
+                        onClick={async () => {
+                          setSigning(true)
+                          try { setMenuOpen(false); await performSignOut() } finally { setSigning(false) }
+                        }}
+                        style={{ ...menuItemBtnStyle, marginBottom:0 }}>
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                          <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/>
+                        </svg>
+                        <span style={{ flex:1, textAlign:'left' }}>{signingIn ? 'Uscita…' : 'Disconnettersi'}</span>
+                      </button>
+                    </div>
+                  </div>,
+                  document.body
                 )}
               </div>
             ) : (
 <button type='button' disabled={signingIn}
-              onClick={async () => { setSigning(true); await signOut(); setSigning(false) }}
+              onClick={async () => { setSigning(true); await performSignOut(); setSigning(false) }}
               style={{ ...btnStyle, padding:'6px 14px', fontWeight:600 }}>
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                 <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/>
@@ -3173,7 +3287,11 @@ export default function Widget(props: Props) {
                 try {
                   if (loginViewRef.current === 'redirect') {
                     const tok = String(afterOutRef.current || '').trim()
-                    if (tok) { gotoPage(tok); return }
+                    if (tok) {
+                      const targetId = resolvePageId(tok)
+                      const curId = resolvePageId(getCurrentPageToken() || '')
+                      if (!targetId || !curId || curId !== targetId) { gotoPage(tok); return }
+                    }
                   }
                   await signIn()
                 } finally {

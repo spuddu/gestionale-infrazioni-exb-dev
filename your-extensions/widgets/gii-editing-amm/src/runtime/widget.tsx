@@ -1,7 +1,6 @@
 /** @jsx jsx */
 /** @jsxFrag React.Fragment */
 import { React, jsx, type AllWidgetProps, DataSourceComponent, UrlManager, getAppStore } from 'jimu-core'
-import AnteprimaPdfViewer from '../../../_shared/gii-anteprime/anteprima-pdf-viewer'
 import { buildPropostaContestazionePdf as buildVerbalePdf, getPropostaContestazionePdfFilePrefix as getVerbalePdfFilePrefix } from '../../../_shared/gii-anteprime/documenti-amministrativi/proposta-contestazione/proposta-contestazione-pdf-builder'
 import { buildBozzaDeterminazioneDocx, getBozzaDeterminazioneDocxFileName } from '../../../_shared/gii-anteprime/documenti-amministrativi/bozza-determinazione/bozza-determinazione-docx-builder'
 import { buildBozzaDeterminazionePdf } from '../../../_shared/gii-anteprime/documenti-amministrativi/bozza-determinazione/bozza-determinazione-pdf-builder'
@@ -9,6 +8,7 @@ import { buildRapportoPdf } from '../../../_shared/gii-anteprime/documenti-tecni
 import { defaultGiiDocumentPrintOptions as defaultDocumentPrintOptions, cloneGiiDocumentPrintOptions as cloneDocumentPrintOptions, setGiiAttachmentPrintOptionVisible } from '../../../_shared/gii-anteprime/viewer-documenti/document-options'
 import type { GiiDocumentPrintOptions as DocumentPrintOptions, GiiAttachmentPrintOption as AttachmentPrintOption } from '../../../_shared/gii-anteprime/viewer-documenti/document-options'
 import GiiDocumentViewer from '../../../_shared/gii-anteprime/viewer-documenti/document-viewer'
+import GiiAttachmentViewer from '../../../_shared/gii-anteprime/allegati/gii-attachment-viewer'
 import { PDFDocument } from 'pdf-lib'
 import type { IMConfig, SummaryFieldConfig } from '../config'
 import { defaultConfig } from '../config'
@@ -35,6 +35,8 @@ type SelectedState = {
   idFieldName: string
   layerUrl: string
   data: any | null
+  readOnly?: boolean
+  readOnlyMessage?: string
   source: 'datasource' | 'editIntent' | 'selection' | 'none'
   sig: string
 }
@@ -45,6 +47,8 @@ type EditIntentInfo = {
   layerUrl?: string
   idFieldName?: string
   data?: any | null
+  readOnly?: boolean
+  readOnlyMessage?: string
   ts?: number
 }
 
@@ -832,6 +836,8 @@ function readEditIntent (): EditIntentInfo | null {
       dsId,
       idFieldName,
       data,
+      readOnly: j?.readOnly === true || String(j?.readOnly || '').toLowerCase() === 'true',
+      readOnlyMessage: String(j?.readOnlyMessage || '').trim(),
       ts: Number(j?.ts || Date.now())
     }
   } catch {
@@ -856,6 +862,8 @@ function readSelectionIntent (): EditIntentInfo | null {
       dsId,
       idFieldName,
       data,
+      readOnly: sel?.readOnly === true || String(sel?.readOnly || '').toLowerCase() === 'true',
+      readOnlyMessage: String(sel?.readOnlyMessage || '').trim(),
       ts: Date.now()
     }
   } catch {
@@ -864,7 +872,7 @@ function readSelectionIntent (): EditIntentInfo | null {
 }
 
 function selectionStateFromIntent (intent: EditIntentInfo | null, source: 'editIntent' | 'selection'): SelectedState {
-  if (!intent) return { ds: null, oid: null, idFieldName: 'OBJECTID', layerUrl: '', data: null, source: 'none', sig: 'none' }
+  if (!intent) return { ds: null, oid: null, idFieldName: 'OBJECTID', layerUrl: '', data: null, readOnly: false, readOnlyMessage: '', source: 'none', sig: 'none' }
   const idFieldName = String(intent.idFieldName || 'OBJECTID').trim() || 'OBJECTID'
   const oid = intent.oid != null && Number.isFinite(Number(intent.oid)) ? Number(intent.oid) : pickOidFromData(intent.data, idFieldName)
   const layerUrl = normalizeFeatureLayerUrl(intent.layerUrl || '')
@@ -875,6 +883,8 @@ function selectionStateFromIntent (intent: EditIntentInfo | null, source: 'editI
     idFieldName,
     layerUrl,
     data: intent.data || null,
+    readOnly: intent.readOnly === true,
+    readOnlyMessage: String(intent.readOnlyMessage || '').trim(),
     source,
     sig: `${source}|${layerUrl}|${oid ?? ''}|${Number(intent.ts || 0)}`
   }
@@ -919,6 +929,31 @@ function readUserProfile (): { role: RoleCode, username: string, fullName: strin
 
 function isAllowedAdminRole (role: string): boolean {
   return ['TI_AMM', 'RI_AMM', 'DA', 'ADMIN'].includes(String(role || '').toUpperCase())
+}
+
+function normalizeGiiUsernameForCompare (v: any): string {
+  return String(v ?? '').trim().toLowerCase()
+}
+
+function sameGiiUsername (a: any, b: any): boolean {
+  const aa = normalizeGiiUsernameForCompare(a)
+  const bb = normalizeGiiUsernameForCompare(b)
+  return !!aa && !!bb && aa === bb
+}
+
+function getAmmDataEditAssigneeUsername (data: Record<string, any>, role: string): string {
+  const r = String(role || '').toUpperCase()
+  if (r === 'TI_AMM') {
+    return String(pickAttrCI(data || {}, [
+      'ti_amm_assegnato_username',
+      'TI_AMM_assegnato_username',
+      'ti_amm_username',
+      'TI_AMM_username',
+      'utente_TI_AMM',
+      'utente_ti_amm'
+    ]) || '').trim()
+  }
+  return ''
 }
 
 function toDateObj (v: any): Date | null {
@@ -1573,8 +1608,90 @@ async function replaceBozzaDeterminazioneWordAttachment (layer: any, oid: number
     .map(att => keepIds.has(Number(att.id)) && !parseBozzaAttachmentFileCreatedAt(att) ? { ...att, uploadedAt: fileCreatedAt } : att)
 }
 
-async function buildAttachmentPreviewUrl (att: AmmAttachmentInfo, oid: number, layerUrl: string): Promise<string> {
-  const raw = attachmentRawUrl(att, oid, layerUrl)
+function canvasToBlobForAmmEdit (canvas: HTMLCanvasElement, type: string, quality?: number): Promise<Blob> {
+  return new Promise((resolve, reject) => {
+    try {
+      canvas.toBlob(blob => {
+        if (blob) resolve(blob)
+        else reject(new Error('Rotazione immagine non riuscita.'))
+      }, type, quality)
+    } catch (ex) {
+      reject(ex)
+    }
+  })
+}
+
+async function rotateImageAttachmentFile (blob: Blob, fileName: string, rotationDeg: number): Promise<File> {
+  const contentType = String(blob.type || '').toLowerCase()
+  const lowerName = String(fileName || '').toLowerCase()
+  const isJpeg = contentType.includes('jpeg') || contentType.includes('jpg') || /\.(jpe?g)$/i.test(lowerName)
+  const isPng = contentType.includes('png') || /\.png$/i.test(lowerName)
+  if (!isJpeg && !isPng) throw new Error('La rotazione è disponibile solo per immagini JPEG o PNG.')
+  if (typeof document === 'undefined') throw new Error('Rotazione immagine non disponibile in questo ambiente.')
+
+  let source: any = null
+  let sourceUrl = ''
+  let closeSource = () => {}
+  try {
+    const createBitmap = (window as any)?.createImageBitmap
+    if (typeof createBitmap === 'function') {
+      source = await createBitmap(blob, { imageOrientation: 'from-image' }).catch((): null => null)
+      if (source) closeSource = () => { try { source.close?.() } catch {} }
+    }
+    if (!source) {
+      sourceUrl = URL.createObjectURL(blob)
+      source = await new Promise<HTMLImageElement | null>(resolve => {
+        const img = new Image()
+        img.onload = () => resolve(img)
+        img.onerror = () => resolve(null)
+        img.src = sourceUrl
+      })
+      closeSource = () => { try { if (sourceUrl) URL.revokeObjectURL(sourceUrl) } catch {} }
+    }
+    if (!source) throw new Error('Immagine non leggibile.')
+
+    const srcW = Math.max(1, Math.round(Number(source.width || source.naturalWidth) || 0))
+    const srcH = Math.max(1, Math.round(Number(source.height || source.naturalHeight) || 0))
+    if (!srcW || !srcH) throw new Error('Dimensioni immagine non valide.')
+
+    const normalizedRotation = ((Math.round(rotationDeg / 90) * 90) % 360 + 360) % 360
+    if (normalizedRotation === 0) {
+      return new File([blob], fileName || `allegato.${isJpeg ? 'jpg' : 'png'}`, { type: isJpeg ? 'image/jpeg' : 'image/png' })
+    }
+
+    const canvas = document.createElement('canvas')
+    const swap = normalizedRotation === 90 || normalizedRotation === 270
+    canvas.width = swap ? srcH : srcW
+    canvas.height = swap ? srcW : srcH
+    const ctx = canvas.getContext('2d')
+    if (!ctx) throw new Error('Rotazione immagine non disponibile.')
+    if (normalizedRotation === 90) {
+      ctx.translate(canvas.width, 0)
+      ctx.rotate(Math.PI / 2)
+    } else if (normalizedRotation === 180) {
+      ctx.translate(canvas.width, canvas.height)
+      ctx.rotate(Math.PI)
+    } else if (normalizedRotation === 270) {
+      ctx.translate(0, canvas.height)
+      ctx.rotate(-Math.PI / 2)
+    }
+    ctx.drawImage(source, 0, 0, srcW, srcH)
+
+    const outType = isJpeg ? 'image/jpeg' : 'image/png'
+    const rotatedBlob = await canvasToBlobForAmmEdit(canvas, outType, isJpeg ? 0.92 : undefined)
+    return new File([rotatedBlob], fileName || `allegato_ruotato.${isJpeg ? 'jpg' : 'png'}`, { type: outType })
+  } finally {
+    closeSource()
+  }
+}
+
+async function buildAttachmentPreviewUrl (att: AmmAttachmentInfo, oid: number, layerUrl: string): Promise<string | null> {
+  const ct = String(att?.contentType || '').toLowerCase()
+  const name = String(att?.name || '').toLowerCase()
+  const hasDerivedPdfPreview = !!String((att as any)?.previewUrl || '').trim()
+  const canPreviewDirect = hasDerivedPdfPreview || ct.startsWith('image/') || ct === 'application/pdf' || /\.(pdf|jpe?g|png|gif|webp|bmp|tif?f)$/i.test(name)
+  if (!canPreviewDirect) return null
+  const raw = hasDerivedPdfPreview ? String((att as any)?.previewUrl || '').trim() : attachmentRawUrl(att, oid, layerUrl)
   if (!raw) throw new Error('URL allegato non disponibile.')
   const token = await getEsriTokenForUrl(layerUrl || raw)
   let url = raw
@@ -1585,6 +1702,46 @@ async function buildAttachmentPreviewUrl (att: AmmAttachmentInfo, oid: number, l
   if (!resp.ok) throw new Error(`Caricamento allegato fallito (HTTP ${resp.status}).`)
   const blob = await resp.blob()
   return URL.createObjectURL(blob)
+}
+
+async function openAmmAttachmentInNewTab (att: AmmAttachmentInfo, oid: number, layerUrl: string): Promise<void> {
+  const raw = attachmentRawUrl(att, oid, layerUrl)
+  if (!raw) throw new Error('URL allegato non disponibile.')
+  const token = await getEsriTokenForUrl(layerUrl || raw)
+  let url = raw
+  if (token && /^https?:/i.test(url) && !/[?&]token=/.test(url)) {
+    url = `${url}${url.includes('?') ? '&' : '?'}token=${encodeURIComponent(token)}`
+  }
+  const resp = await fetch(url, { credentials: 'same-origin' })
+  if (!resp.ok) throw new Error(`Apertura allegato fallita (HTTP ${resp.status}).`)
+  const blob = await resp.blob()
+  const blobUrl = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = blobUrl
+  a.target = '_blank'
+  a.rel = 'noopener noreferrer'
+  document.body.appendChild(a)
+  a.click()
+  a.remove()
+  window.setTimeout(() => {
+    try { URL.revokeObjectURL(blobUrl) } catch {}
+  }, 60000)
+}
+
+async function updateAmmAttachment (oid: number, attachmentId: number, file: File, layerUrl: string): Promise<void> {
+  if (!oid || !attachmentId || !file) return
+  if (!layerUrl) throw new Error('URL del FeatureLayer non disponibile per sostituire gli allegati.')
+  const fd = new FormData()
+  fd.append('f', 'json')
+  const token = await getEsriTokenForUrl(layerUrl)
+  if (token) fd.append('token', token)
+  fd.append('attachmentId', String(Number(attachmentId)))
+  fd.append('attachment', file)
+  const resp = await fetch(`${layerUrl}/${Number(oid)}/updateAttachment`, { method: 'POST', body: fd })
+  const json = await resp.json().catch(() => null)
+  if (!resp.ok || json?.error) throw new Error(json?.error?.message || `Sostituzione allegato fallita (HTTP ${resp.status}).`)
+  const result = json?.updateAttachmentResult || json
+  if (result?.success === false) throw new Error(result?.error?.description || result?.error?.message || 'Sostituzione allegato non riuscita.')
 }
 
 async function downloadAmmAttachmentFile (att: AmmAttachmentInfo, oid: number, layerUrl: string): Promise<void> {
@@ -1672,8 +1829,8 @@ const ADMIN_STYLE_DEFAULTS: Record<string, any> = {
   formFieldBorderWidth: 1,
   formFieldBorderRadius: 7,
   formFieldBg: '#f8fbff',
-  formFieldDisabledBg: '#e7eef7',
-  formFieldDisabledColor: '#64748b',
+  formFieldDisabledBg: '#e8edf3',
+  formFieldDisabledColor: '#1f2937',
   formSectionGap: 10,
   formCardBg: '#f8fbff',
   formExpandableCardBg: '#f9fafb',
@@ -1826,6 +1983,107 @@ function InfoBox (props: { children: React.ReactNode, kind?: 'info' | 'warn' | '
       ? { background: '#ecfdf3', color: '#166534', borderColor: '#bbf7d0' }
       : { background: '#eff6ff', color: '#1d4ed8', borderColor: '#bfdbfe' }
   return <div style={{ ...st, border: '1px solid', borderRadius: Number(stCtx.formCardBorderRadius ?? 8), padding: '10px 12px', fontSize: adminFieldFontSize(stCtx), lineHeight: 1.35 }}>{props.children}</div>
+}
+
+function SectionInfoButton (props: { text?: React.ReactNode, title?: string }) {
+  const st = useAdminStyle()
+  const [open, setOpen] = React.useState(false)
+  const autoCloseTimerRef = React.useRef<number | null>(null)
+
+  React.useEffect(() => {
+    if (typeof window === 'undefined') return
+    if (autoCloseTimerRef.current !== null) {
+      window.clearTimeout(autoCloseTimerRef.current)
+      autoCloseTimerRef.current = null
+    }
+    if (!open || !props.text) return
+    autoCloseTimerRef.current = window.setTimeout(() => {
+      setOpen(false)
+      autoCloseTimerRef.current = null
+    }, 4000)
+    return () => {
+      if (autoCloseTimerRef.current !== null) {
+        window.clearTimeout(autoCloseTimerRef.current)
+        autoCloseTimerRef.current = null
+      }
+    }
+  }, [open, props.text])
+
+  if (!props.text) return null
+
+  const toggle = (e: React.MouseEvent) => {
+    e.preventDefault()
+    e.stopPropagation()
+    setOpen(v => !v)
+  }
+
+  return (
+    <span style={{ position: 'relative', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', flex: '0 0 auto' }}>
+      <button
+        type='button'
+        title={props.title || 'Informazioni'}
+        aria-label={props.title || 'Informazioni'}
+        onClick={toggle}
+        style={{
+          width: 18,
+          height: 18,
+          borderRadius: 999,
+          border: 'none',
+          background: 'transparent',
+          color: '#ffffff',
+          padding: 0,
+          display: 'inline-flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          cursor: 'pointer',
+          lineHeight: 1,
+          textTransform: 'none'
+        }}
+      >
+        <svg
+          aria-hidden='true'
+          focusable='false'
+          viewBox='0 0 512 512'
+          width='18'
+          height='18'
+          style={{ display: 'block', flex: '0 0 auto' }}
+        >
+          <path fill='currentColor' d='M256,0C114.6,0,0,114.6,0,256s114.6,256,256,256,256-114.6,256-256S397.4,0,256,0ZM256,482.8c-125.3,0-226.8-101.5-226.8-226.8S130.7,29.2,256,29.2s226.8,101.5,226.8,226.8-101.5,226.8-226.8,226.8Z' />
+          <path fill='currentColor' d='M306.5,195.8l-112.2,10.9-4,14.4,22.1,3.1c14.4,2.7,17.3,6.6,14.1,17.8l-36.1,131.5c-9.5,34,5.2,50,39.7,50s57.7-9.6,71.8-22.6l4.3-15.8c-9.8,6.6-24.2,9.4-33.7,9.4-13.5,0-18.4-7.3-14.9-20.3l49-178.4Z' />
+          <path fill='currentColor' d='M268.6,84.7c-24.7,0-44.6,19.9-44.6,44.6s19.9,44.6,44.6,44.6,44.6-19.9,44.6-44.6-19.9-44.6-44.6-44.6Z' />
+        </svg>
+
+      </button>
+      {open && (
+        <div
+          role='note'
+          onClick={(e) => { e.preventDefault(); e.stopPropagation() }}
+          style={{
+            position: 'absolute',
+            top: 'calc(100% + 8px)',
+            right: 0,
+            zIndex: 50,
+            width: 360,
+            maxWidth: 'min(360px, calc(100vw - 48px))',
+            background: '#ffffff',
+            color: '#111827',
+            border: '1px solid #cbd8e6',
+            borderRadius: Number(st.formCardBorderRadius ?? 8),
+            boxShadow: '0 12px 34px rgba(15,23,42,0.18)',
+            padding: '10px 12px',
+            fontSize: adminFieldFontSize(st),
+            fontWeight: 500,
+            lineHeight: 1.35,
+            letterSpacing: 0,
+            textTransform: 'none',
+            whiteSpace: 'normal'
+          }}
+        >
+          {props.text}
+        </div>
+      )}
+    </span>
+  )
 }
 
 function BlockingDialog (props: { kind: 'ok' | 'err' | 'warn', title: string, text: string, onClose: () => void }) {
@@ -3941,19 +4199,27 @@ function CompactPracticeHeader (props: { title: string, data: Record<string, any
   )
 }
 
-function PostApprovalLockedBox () {
-  return (
-    <InfoBox kind='warn'>
-      La compilazione di questa sezione sarà disponibile dopo l’approvazione del Direttore d’Area.
-    </InfoBox>
-  )
-}
+const POST_APPROVAL_INFO = 'La compilazione di questa scheda sarà disponibile dopo l’approvazione del Direttore d’Area.'
+const POST_NOTIFICATION_INFO = 'La compilazione di questa scheda sarà disponibile solo dopo che la notifica risulta perfezionata con esito “Notificata” o “Compiuta giacenza”.'
+const READONLY_RECTIFICATION_SUFFIX = 'Eventuali inesattezze devono essere segnalate al Responsabile istruttoria amministrativa, affinché sia valutato il rimando all’Area di provenienza per la rettifica.'
+const TRASGRESSORE_ANAGRAFICA_READONLY_INFO = `I dati anagrafici del trasgressore sono riportati in sola lettura. ${READONLY_RECTIFICATION_SUFFIX}`
+const RESIDENZA_READONLY_INFO = `I dati della residenza sono riportati in sola lettura. ${READONLY_RECTIFICATION_SUFFIX}`
+const SEDE_LEGALE_READONLY_INFO = `I dati della sede legale sono riportati in sola lettura. ${READONLY_RECTIFICATION_SUFFIX}`
+const DOMICILIO_NOTIFICA_READONLY_INFO = `I dati del domicilio per le notifiche sono riportati in sola lettura. ${READONLY_RECTIFICATION_SUFFIX}`
+const RAPPRESENTANTE_LEGALE_READONLY_INFO = `I dati del rappresentante legale sono riportati in sola lettura. ${READONLY_RECTIFICATION_SUFFIX}`
+const ANNOTAZIONI_TI_READONLY_INFO = `Le annotazioni del tecnico istruttore sono riportate in sola lettura. ${READONLY_RECTIFICATION_SUFFIX}`
+const PAYMENT_MODE_INFO = 'Selezionare la modalità di pagamento: pagoPA, bonifico bancario, pagamento misto o altro.'
+const PROTOCOLLO_NOTIFICA_INFO = 'Protocollo e notifica vanno compilati solo dopo la registrazione di numero e data dell’atto di accertamento e contestazione.'
+const RIAPERTURA_INFO = 'La riapertura è di competenza del RI AMM, su indicazione del DA a seguito della decisione del CdA. Questa scheda registra gli estremi; il nuovo ciclo di lavorazione sarà gestito con il workflow dedicato.'
 
-function PostNotificationLockedBox () {
+function infoTextList (...items: Array<React.ReactNode | null | undefined | false>): React.ReactNode | null {
+  const list = items.filter(Boolean) as React.ReactNode[]
+  if (!list.length) return null
+  if (list.length === 1) return <>{list[0]}</>
   return (
-    <InfoBox kind='warn'>
-      La compilazione di questa sezione sarà disponibile solo dopo che la notifica risulta perfezionata con esito “Notificata” o “Compiuta giacenza”.
-    </InfoBox>
+    <div style={{ display: 'grid', gap: 8 }}>
+      {list.map((item, idx) => <div key={idx}>{item}</div>)}
+    </div>
   )
 }
 
@@ -3967,7 +4233,7 @@ function trasgressoreField (fields: LayerFieldInfo[], candidates: string[]): str
 }
 
 
-function TrasgressoreAmmSection (props: { data: Record<string, any>, fields: LayerFieldInfo[], canEdit: boolean, onChange: (name: string, value: any) => void }) {
+function TrasgressoreAmmSection (props: { data: Record<string, any>, fields: LayerFieldInfo[], canEdit: boolean, showReadOnlyInfo?: boolean, onChange: (name: string, value: any) => void }) {
   const d = props.data || {}
   const fields = props.fields || []
   const rawTipo = String(pickAttrCI(d, ['tipologia_soggetto']) || '').toUpperCase()
@@ -4045,11 +4311,12 @@ function TrasgressoreAmmSection (props: { data: Record<string, any>, fields: Lay
     )
   }
 
-  const renderCardRows = (title: string, rows: React.ReactNode[], emptyText: string, cardStyle?: React.CSSProperties) => {
+  const renderCardRows = (title: string, rows: React.ReactNode[], cardStyle?: React.CSSProperties, right?: React.ReactNode) => {
     const visibleRows = rows.filter(Boolean)
+    if (visibleRows.length <= 0) return null
     return (
-      <Section title={title} cardStyle={cardStyle}>
-        {visibleRows.length > 0 ? <div style={{ display: 'grid', gap: 12 }}>{visibleRows}</div> : <InfoBox kind='warn'>{emptyText}</InfoBox>}
+      <Section title={title} cardStyle={cardStyle} right={right}>
+        <div style={{ display: 'grid', gap: 12 }}>{visibleRows}</div>
       </Section>
     )
   }
@@ -4106,26 +4373,34 @@ function TrasgressoreAmmSection (props: { data: Record<string, any>, fields: Lay
   }
 
   const noteField = existingField(['note_anagrafica'], 'Annotazioni del tecnico istruttore', 'textarea', true)
-  const rightColumn = (
-    <Section title='Annotazioni del tecnico istruttore' cardStyle={{ minHeight: '100%', display: 'flex', flexDirection: 'column' }} bodyStyle={{ flex: '1 1 auto', display: 'flex', flexDirection: 'column' }}>
-      {noteField ? <ReadOnlyField field={noteField} note /> : <InfoBox kind='warn'>Annotazioni del tecnico istruttore non disponibili nella fonte dati.</InfoBox>}
-    </Section>
+  const showReadOnlyInfo = props.showReadOnlyInfo !== false
+  const sectionInfoButton = (text: React.ReactNode, title: string) => (
+    showReadOnlyInfo ? <SectionInfoButton text={text} title={title} /> : null
   )
+  const mainAddressInfo = isPg ? SEDE_LEGALE_READONLY_INFO : RESIDENZA_READONLY_INFO
+
+  const rightColumn = noteField ? (
+    <Section
+      title='Annotazioni del tecnico istruttore'
+      right={sectionInfoButton(ANNOTAZIONI_TI_READONLY_INFO, 'Informazioni annotazioni del tecnico istruttore')}
+      cardStyle={{ minHeight: '100%', display: 'flex', flexDirection: 'column' }}
+      bodyStyle={{ flex: '1 1 auto', display: 'flex', flexDirection: 'column' }}
+    >
+      <ReadOnlyField field={noteField} note />
+    </Section>
+  ) : null
 
   const leftColumn = (
     <div style={{ display: 'grid', gap: 12, minWidth: 0 }}>
-      {renderCardRows('Trasgressore', trasgressoreRows, 'Campi identificativi del trasgressore non disponibili nella fonte dati.')}
-      {renderCardRows(mainAddressTitle, indirizzoRows, 'Dati di residenza/sede non disponibili nella fonte dati.')}
-      {renderCardRows('Domicilio per le notifiche', domicilioRows, 'Dati del domicilio per le notifiche non disponibili nella fonte dati.')}
-      {isPg && renderCardRows('Rappresentante legale', rappresentanteRows, 'Dati del rappresentante legale non disponibili nella fonte dati.')}
+      {renderCardRows('Trasgressore', trasgressoreRows, undefined, sectionInfoButton(TRASGRESSORE_ANAGRAFICA_READONLY_INFO, 'Informazioni dati anagrafici trasgressore'))}
+      {renderCardRows(mainAddressTitle, indirizzoRows, undefined, sectionInfoButton(mainAddressInfo, `Informazioni ${mainAddressTitle.toLowerCase()}`))}
+      {renderCardRows('Domicilio per le notifiche', domicilioRows, undefined, sectionInfoButton(DOMICILIO_NOTIFICA_READONLY_INFO, 'Informazioni domicilio per le notifiche'))}
+      {isPg && renderCardRows('Rappresentante legale', rappresentanteRows, undefined, sectionInfoButton(RAPPRESENTANTE_LEGALE_READONLY_INFO, 'Informazioni rappresentante legale'))}
     </div>
   )
 
   return (
     <div style={{ display: 'grid', gap: 12 }}>
-      <InfoBox kind='warn'>
-        I dati del trasgressore sono riportati in sola lettura. Eventuali inesattezze devono essere segnalate al Responsabile istruttoria amministrativa, affinché sia valutato il rimando all’Area di provenienza per la rettifica.
-      </InfoBox>
       <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 66%) minmax(0, 34%)', gap: 12, alignItems: 'stretch', minWidth: 0 }}>
         <div style={{ minWidth: 0 }}>{leftColumn}</div>
         <div style={{ minWidth: 0 }}>{rightColumn}</div>
@@ -4134,7 +4409,7 @@ function TrasgressoreAmmSection (props: { data: Record<string, any>, fields: Lay
   )
 }
 
-function ProtocolloNotificaGuidataSection (props: { data: Record<string, any>, fields: LayerFieldInfo[], canEdit: boolean, onChange: (name: string, value: any) => void }) {
+function ProtocolloNotificaGuidataSection (props: { data: Record<string, any>, fields: LayerFieldInfo[], canEdit: boolean, showContextualInfo?: boolean, sectionInfo?: React.ReactNode, onChange: (name: string, value: any) => void }) {
   const d = props.data || {}
   const definitivo = isVerbaleDefinitivo(d)
   const hasVerbale = tipoAttoAmmPrevedeVerbale(d)
@@ -4150,8 +4425,7 @@ function ProtocolloNotificaGuidataSection (props: { data: Record<string, any>, f
   const statoNotifica = esito ? displayAdminFieldValue(d, props.fields, 'notifica_esito') : 'Da registrare'
 
   return (
-    <Section title='Protocollo e notifica'>
-      {!definitivo && <InfoBox kind='warn'>Protocollo e notifica vanno compilati solo dopo la registrazione di numero e data dell’atto di accertamento e contestazione.</InfoBox>}
+    <Section title='Protocollo e notifica' right={<SectionInfoButton text={props.showContextualInfo && definitivo && !protocolloCompleto ? PROTOCOLLO_NOTIFICA_INFO : null} title='Informazioni protocollo e notifica' />}>
 
       <div style={{ marginTop: definitivo ? 0 : 14, display: 'grid', gap: 12 }}>
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(230px, 1fr))', gap: 10 }}>
@@ -4196,7 +4470,7 @@ function ProtocolloNotificaGuidataSection (props: { data: Record<string, any>, f
   )
 }
 
-function PagamentoGuidatoSection (props: { data: Record<string, any>, fields: LayerFieldInfo[], canEdit: boolean, canEditSpeseNotifica: boolean, onChange: (name: string, value: any) => void }) {
+function PagamentoGuidatoSection (props: { data: Record<string, any>, fields: LayerFieldInfo[], canEdit: boolean, canEditSpeseNotifica: boolean, showContextualInfo?: boolean, sectionInfo?: React.ReactNode, onChange: (name: string, value: any) => void }) {
   const st = useAdminStyle()
   const d = props.data || {}
   const mode = getPaymentMode(d, props.fields)
@@ -4207,7 +4481,7 @@ function PagamentoGuidatoSection (props: { data: Record<string, any>, fields: La
   const statusMismatch = !!snapshot.status && !!snapshot.suggestedStatus && snapshot.status !== snapshot.suggestedStatus
   const notificationComplete = isNotificaPerfezionata(d)
   return (
-    <Section title='Pagamento'>
+    <Section title='Pagamento' right={<SectionInfoButton text={props.showContextualInfo && props.canEdit ? PAYMENT_MODE_INFO : null} title='Informazioni pagamento' />}>
       <div style={{ display: 'grid', gap: 12 }}>
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(210px, 1fr))', gap: 10, alignItems: 'stretch' }}>
           <SpeseNotificaEditor data={d} fields={props.fields} canEdit={props.canEditSpeseNotifica} onChange={props.onChange} />
@@ -4227,8 +4501,6 @@ function PagamentoGuidatoSection (props: { data: Record<string, any>, fields: La
             fieldNames={['pagamento_modalita', 'pagamento_scadenza']}
           />
         </div>
-
-        {!mode && <InfoBox kind='warn'>Selezionare la modalità di pagamento: pagoPA, bonifico bancario, pagamento misto o altro.</InfoBox>}
 
         {showPagoPa && <details open style={{ border: `${Number(st.formExpandableCardBorderWidth ?? 1)}px solid ${st.formExpandableCardBorderColor || '#e5e7eb'}`, borderRadius: 10, background: st.formExpandableCardBg || '#f9fafb', padding: 10 }}>
           <summary style={{ cursor: 'pointer', color: st.formInnerHeaderColor || '#0f4c81', fontSize: Number(st.formInnerHeaderFontSize ?? 14), fontWeight: 900 }}>Dati pagoPA</summary>
@@ -4266,7 +4538,7 @@ function PagamentoGuidatoSection (props: { data: Record<string, any>, fields: La
   )
 }
 
-function ChiusuraIstruttoriaSummary (props: { data: Record<string, any>, fields: LayerFieldInfo[], canEdit: boolean, onFillClose: () => void, completionIssues: string[] }) {
+function ChiusuraIstruttoriaSummary (props: { data: Record<string, any>, fields: LayerFieldInfo[], canEdit: boolean, sectionInfo?: React.ReactNode, onFillClose: () => void, completionIssues: string[] }) {
   const d = props.data || {}
   const definitivo = isVerbaleDefinitivo(d)
   const issues = props.completionIssues || []
@@ -4294,14 +4566,15 @@ function ChiusuraIstruttoriaSummary (props: { data: Record<string, any>, fields:
   )
 }
 
-function RicorsoPostNotificaSection (props: { data: Record<string, any>, fields: LayerFieldInfo[], canEdit: boolean, onChange: (name: string, value: any) => void }) {
+function RicorsoPostNotificaSection (props: { data: Record<string, any>, fields: LayerFieldInfo[], canEdit: boolean, sectionInfo?: React.ReactNode, onChange: (name: string, value: any) => void }) {
   const d = props.data || {}
+  const infoButton = (_title: string): React.ReactNode => null
   return (
     <>
-      <Section title='Post-notifica'>
+      <Section title='Post-notifica' right={infoButton('Informazioni post-notifica')}>
         <AdminFieldsGrid group='post_notifica' draft={d} fields={props.fields} canEdit={props.canEdit} onChange={props.onChange} />
       </Section>
-      <Section title='Ricorso / riesame post-notifica'>
+      <Section title='Ricorso / riesame post-notifica' right={infoButton('Informazioni ricorso')}>
         <InfoBox>
           Registrare qui l&apos;eventuale ricorso o istanza presentata dopo la notifica. L&apos;esito del CdA è gestito nella scheda dedicata.
         </InfoBox>
@@ -4313,7 +4586,7 @@ function RicorsoPostNotificaSection (props: { data: Record<string, any>, fields:
   )
 }
 
-function EsitoCdaSection (props: { data: Record<string, any>, fields: LayerFieldInfo[], canEdit: boolean, onChange: (name: string, value: any) => void }) {
+function EsitoCdaSection (props: { data: Record<string, any>, fields: LayerFieldInfo[], canEdit: boolean, sectionInfo?: React.ReactNode, onChange: (name: string, value: any) => void }) {
   const d = props.data || {}
   return (
     <Section title='Esito CdA'>
@@ -4327,15 +4600,12 @@ function EsitoCdaSection (props: { data: Record<string, any>, fields: LayerField
   )
 }
 
-function RiaperturaAmmSection (props: { data: Record<string, any>, fields: LayerFieldInfo[], canEdit: boolean, onChange: (name: string, value: any) => void, role: string }) {
+function RiaperturaAmmSection (props: { data: Record<string, any>, fields: LayerFieldInfo[], canEdit: boolean, showContextualInfo?: boolean, sectionInfo?: React.ReactNode, onChange: (name: string, value: any) => void, role: string }) {
   const d = props.data || {}
   const role = String(props.role || '').toUpperCase()
   const canCompile = props.canEdit && (role === 'RI_AMM' || role === 'ADMIN')
   return (
-    <Section title='Riapertura amministrativa'>
-      <InfoBox kind={canCompile ? 'info' : 'warn'}>
-        La riapertura è di competenza del RI AMM, su indicazione del DA a seguito della decisione del CdA. Questa scheda registra gli estremi; il nuovo ciclo di lavorazione sarà gestito con il workflow dedicato.
-      </InfoBox>
+    <Section title='Riapertura amministrativa' right={<SectionInfoButton text={props.showContextualInfo ? RIAPERTURA_INFO : null} title='Informazioni riapertura' />}>
       <div style={{ marginTop: 12 }}>
         <AdminFieldsGrid group='riapertura' draft={d} fields={props.fields} canEdit={canCompile} onChange={props.onChange} />
       </div>
@@ -4343,7 +4613,7 @@ function RiaperturaAmmSection (props: { data: Record<string, any>, fields: Layer
   )
 }
 
-function DefinizionePraticaSection (props: { data: Record<string, any>, fields: LayerFieldInfo[], canEdit: boolean, onChange: (name: string, value: any) => void }) {
+function DefinizionePraticaSection (props: { data: Record<string, any>, fields: LayerFieldInfo[], canEdit: boolean, sectionInfo?: React.ReactNode, onChange: (name: string, value: any) => void }) {
   const d = props.data || {}
   const snapshot = getPaymentSnapshot(d, props.fields)
   const incassoDate = hasAdminValue(pickAttrCI(d, ['pagamento_data_incasso']))
@@ -5480,10 +5750,6 @@ function verbalePdfFileName (map: Record<string, string>): string {
   return `${prefix}_${base || prefix}.pdf`
 }
 
-function buildVerbalePdfGenerationMeta (_profile: { username: string, fullName: string }): Record<string, any> {
-  return {}
-}
-
 async function buildVerbalePdfBlob (data: any, fields: LayerFieldInfo[], profile: { username: string, fullName: string }): Promise<{ blob: Blob, fileName: string }> {
   const map = buildVerbalePdfMap(data, fields, profile)
   const bytes = await buildVerbalePdf(map)
@@ -5830,7 +6096,23 @@ async function mergeAmmPdfItems (items: Array<{ blob: Blob, fileName: string }>)
   return new Blob([bytes as any], { type: 'application/pdf' })
 }
 
-function FascicoloAmmPreviewSection (props: { data: Record<string, any>, fields: LayerFieldInfo[], profile: { username: string, fullName: string }, hasSelection: boolean, oid: number | null, ds: any, layerUrl?: string }) {
+function FascicoloAmmPreviewSection (props: {
+  data: Record<string, any>
+  fields: LayerFieldInfo[]
+  profile: { username: string, fullName: string }
+  hasSelection: boolean
+  oid: number | null
+  ds: any
+  layerUrl?: string
+  viewerBackgroundColor?: string
+  pdfHeaderBackgroundColor?: string
+  pdfPageAreaBackgroundColor?: string
+  pdfThumbnailsBackgroundColor?: string
+  pdfToolbarBackgroundColor?: string
+  sidebarBackgroundColor?: string
+  sidebarBorderColor?: string
+  sidebarBorderWidth?: number
+}) {
   const [pdfUrl, setPdfUrl] = React.useState<string | null>(null)
   const [pdfFileName, setPdfFileName] = React.useState('fascicolo_pratica.pdf')
   const [loading, setLoading] = React.useState(false)
@@ -5926,16 +6208,24 @@ function FascicoloAmmPreviewSection (props: { data: Record<string, any>, fields:
   const noop = React.useCallback(() => {}, [])
 
   return (
-    <div style={{ width: '100%', height: '100%', minHeight: 0, borderRadius: 12, overflow: 'hidden', display: 'flex', flexDirection: 'column', background: '#282828' }}>
+    <div style={{ width: '100%', height: '100%', minHeight: 0, borderRadius: 12, overflow: 'hidden', display: 'flex', flexDirection: 'column', background: props.viewerBackgroundColor || '#282828' }}>
       <GiiDocumentViewer
         url={pdfUrl}
         fileName={pdfFileName}
-        title='Anteprima fascicolo pratica'
+        title={`Anteprima fascicolo pratica n. ${getReportCode(props.data || {}, oid) || oid || '-'}`}
         subtitle={pdfFileName}
         loading={loading}
         error={error}
         emptyText='Nessun dato disponibile per l&apos;anteprima della pratica.'
         width={270}
+        viewerBackgroundColor={props.viewerBackgroundColor || '#282828'}
+        pdfHeaderBackgroundColor={props.pdfHeaderBackgroundColor || '#282828'}
+        pdfPageAreaBackgroundColor={props.pdfPageAreaBackgroundColor || '#282828'}
+        pdfThumbnailsBackgroundColor={props.pdfThumbnailsBackgroundColor || '#1f1f1f'}
+        pdfToolbarBackgroundColor={props.pdfToolbarBackgroundColor || '#3c3c3c'}
+        backgroundColor={props.sidebarBackgroundColor || '#eef4fb'}
+        borderColor={props.sidebarBorderColor || '#b8c7d9'}
+        borderWidth={props.sidebarBorderWidth ?? 1}
         docOptions={docOptions}
         availability={{ notaSpese: false, mappa: false, allegati: attachmentOptions.length > 0, propostaContestazione: true, determinazione: true }}
         showAdminDocuments={true}
@@ -5958,7 +6248,18 @@ function FascicoloAmmPreviewSection (props: { data: Record<string, any>, fields:
   )
 }
 
-function AllegatiAmmSection (props: { oid: number | null, ds: any, layerUrl?: string, canEdit: boolean }) {
+function AllegatiAmmSection (props: {
+  oid: number | null,
+  ds: any,
+  layerUrl?: string,
+  canEdit: boolean,
+  selectedAttachmentId: number | string | null,
+  onSelectedAttachmentChange: (item: AmmAttachmentInfo | null) => void,
+  rotationDeg: number,
+  onRotateLeft: () => void,
+  onRotateRight: () => void,
+  onRotationConfirmed: () => void
+}) {
   const st = useAdminStyle()
   const oid = props.oid != null && Number.isFinite(Number(props.oid)) ? Number(props.oid) : null
   const [items, setItems] = React.useState<AmmAttachmentInfo[]>([])
@@ -5966,9 +6267,6 @@ function AllegatiAmmSection (props: { oid: number | null, ds: any, layerUrl?: st
   const [loading, setLoading] = React.useState(false)
   const [busy, setBusy] = React.useState(false)
   const [error, setError] = React.useState<string | null>(null)
-  const [selected, setSelected] = React.useState<AmmAttachmentInfo | null>(null)
-  const [previewUrl, setPreviewUrl] = React.useState<string | null>(null)
-  const [previewLoading, setPreviewLoading] = React.useState(false)
   const [inputKey, setInputKey] = React.useState(0)
 
   const resolveAttachmentLayer = React.useCallback(async () => {
@@ -6005,32 +6303,6 @@ function AllegatiAmmSection (props: { oid: number | null, ds: any, layerUrl?: st
     if (oid && loadedOid !== oid) void load()
   }, [oid, loadedOid, load])
 
-  React.useEffect(() => {
-    let cancelled = false
-    setPreviewUrl(prev => { revokePdfUrl(prev); return null })
-    if (!selected || !oid) {
-      setPreviewLoading(false)
-      return () => { cancelled = true }
-    }
-    setPreviewLoading(true)
-    ;(async () => {
-      try {
-        const { layerUrl } = await resolveAttachmentLayer()
-        const url = await buildAttachmentPreviewUrl(selected, oid, layerUrl)
-        if (!cancelled) setPreviewUrl(url)
-      } catch (e: any) {
-        if (!cancelled) setError(e?.message || String(e))
-      } finally {
-        if (!cancelled) setPreviewLoading(false)
-      }
-    })()
-    return () => { cancelled = true }
-  }, [selected, oid, resolveAttachmentLayer])
-
-  React.useEffect(() => {
-    return () => { revokePdfUrl(previewUrl) }
-  }, [previewUrl])
-
   const upload = React.useCallback(async (files: File[]) => {
     if (!oid || !files.length || !props.canEdit) return
     setBusy(true)
@@ -6038,6 +6310,22 @@ function AllegatiAmmSection (props: { oid: number | null, ds: any, layerUrl?: st
     try {
       const { layer, layerUrl } = await resolveAttachmentLayer()
       await addAmmAttachments(layer, oid, files, layerUrl)
+      setInputKey(k => k + 1)
+      await load()
+    } catch (e: any) {
+      setError(e?.message || String(e))
+    } finally {
+      setBusy(false)
+    }
+  }, [oid, props.canEdit, resolveAttachmentLayer, load])
+
+  const replace = React.useCallback(async (att: AmmAttachmentInfo, file: File) => {
+    if (!oid || !att?.id || !file || !props.canEdit) return
+    setBusy(true)
+    setError(null)
+    try {
+      const { layerUrl } = await resolveAttachmentLayer()
+      await updateAmmAttachment(oid, Number(att.id), file, layerUrl)
       setInputKey(k => k + 1)
       await load()
     } catch (e: any) {
@@ -6056,94 +6344,96 @@ function AllegatiAmmSection (props: { oid: number | null, ds: any, layerUrl?: st
     try {
       const { layer, layerUrl } = await resolveAttachmentLayer()
       await deleteAmmAttachment(layer, oid, Number(att.id), layerUrl)
-      if (selected?.id === att.id) setSelected(null)
       await load()
     } catch (e: any) {
       setError(e?.message || String(e))
     } finally {
       setBusy(false)
     }
-  }, [oid, props.canEdit, resolveAttachmentLayer, load, selected])
+  }, [oid, props.canEdit, resolveAttachmentLayer, load])
 
-  const headerBg = st.formCardHeaderBg || '#0d3b66'
-  const headerColor = st.formCardHeaderColor || '#fff'
+  const open = React.useCallback(async (att: AmmAttachmentInfo) => {
+    if (!oid || !att?.id) return
+    setError(null)
+    try {
+      const { layerUrl } = await resolveAttachmentLayer()
+      await openAmmAttachmentInNewTab(att, oid, layerUrl)
+    } catch (e: any) {
+      setError(e?.message || String(e))
+    }
+  }, [oid, resolveAttachmentLayer])
+
+  const buildPreview = React.useCallback(async (att: AmmAttachmentInfo): Promise<string | null> => {
+    if (!oid || !att?.id) return null
+    const { layerUrl } = await resolveAttachmentLayer()
+    return await buildAttachmentPreviewUrl(att, oid, layerUrl)
+  }, [oid, resolveAttachmentLayer])
+
+  const isRotatableAmmAttachment = React.useCallback((att: { name?: string; contentType?: string }) => {
+    const ct = String(att?.contentType || '').toLowerCase()
+    const name = String(att?.name || '').toLowerCase()
+    return ct.includes('jpeg') || ct.includes('jpg') || ct.includes('png') || /\.(jpe?g|png)$/i.test(name)
+  }, [])
+
+  const confirmAmmRotation = React.useCallback(async () => {
+    const normalizedRotation = ((Math.round(props.rotationDeg / 90) * 90) % 360 + 360) % 360
+    if (!oid || !props.canEdit || props.selectedAttachmentId == null || normalizedRotation === 0) return
+    const att = items.find((it: any) => String(it?.id) === String(props.selectedAttachmentId))
+    if (!att || !isRotatableAmmAttachment(att)) return
+    setBusy(true)
+    setError(null)
+    try {
+      const previewBlobUrl = await buildPreview(att)
+      if (!previewBlobUrl) throw new Error('Anteprima non disponibile per la rotazione.')
+      const resp = await fetch(String(previewBlobUrl).split('#')[0])
+      if (!resp.ok) throw new Error(`Caricamento immagine fallito (HTTP ${resp.status}).`)
+      const blob = await resp.blob()
+      const file = await rotateImageAttachmentFile(blob, att.name || `allegato_${att.id}.jpg`, normalizedRotation)
+      const { layerUrl } = await resolveAttachmentLayer()
+      await updateAmmAttachment(oid, Number(att.id), file, layerUrl)
+      setInputKey(k => k + 1)
+      await load()
+      props.onRotationConfirmed()
+    } catch (e: any) {
+      setError(e?.message || String(e))
+    } finally {
+      setBusy(false)
+    }
+  }, [oid, props.canEdit, props.selectedAttachmentId, props.rotationDeg, props.onRotationConfirmed, items, isRotatableAmmAttachment, buildPreview, resolveAttachmentLayer, load])
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', minHeight: '100%', height: '100%', border: `1px solid ${st.formCardBorderColor || '#c5d9f1'}`, borderRadius: Number(st.formCardBorderRadius ?? 10), background: '#fff', overflow: 'hidden' }}>
-      <div style={{ flex: '0 0 auto', padding: '8px 12px', background: headerBg, color: headerColor, fontWeight: 800, fontSize: Number(st.formCardHeaderFontSize ?? 14) }}>
-        ALLEGATI
-      </div>
-
-      {!oid ? (
-        <div style={{ flex: '1 1 auto', minHeight: 0, padding: 12 }}>
-          <InfoBox kind='warn'>Selezionare una pratica prima di consultare o caricare gli allegati.</InfoBox>
-        </div>
-      ) : (
-        <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) minmax(0, 1fr)', gap: 12, flex: '1 1 auto', minHeight: 0, padding: 12 }}>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 10, minHeight: 0, overflow: 'hidden' }}>
-            <div style={{ flex: '0 0 auto', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, flexWrap: 'wrap' }}>
-              <div style={{ fontWeight: 800, fontSize: Number(st.formInnerHeaderFontSize ?? 14), color: st.formInnerHeaderColor || '#0f4c81' }}>Elenco allegati</div>
-              <label style={{ minHeight: 36, height: 36, boxSizing: 'border-box', padding: '0 14px', borderRadius: 10, border: '1px solid rgba(0,0,0,0.12)', background: (!props.canEdit || busy) ? '#e5e7eb' : '#f8fbff', color: (!props.canEdit || busy) ? '#9ca3af' : '#111827', fontSize: adminFieldFontSize(st), fontWeight: 600, cursor: (!props.canEdit || busy) ? 'not-allowed' : 'pointer', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', lineHeight: 1, whiteSpace: 'nowrap' }}>
-                Scegli file
-                <input
-                  key={inputKey}
-                  type='file'
-                  multiple
-                  disabled={!props.canEdit || busy}
-                  style={{ display: 'none' }}
-                  onChange={e => {
-                    const files = Array.from(e.currentTarget.files || [])
-                    if (files.length) void upload(files)
-                  }}
-                />
-              </label>
-            </div>
-
-            {error && <div style={{ flex: '0 0 auto', color: '#b42318', fontSize: adminLabelFontSize(st), fontWeight: 700 }}>{error}</div>}
-            {loading ? (
-              <div style={{ flex: '0 0 auto', color: '#6b7280', fontSize: adminLabelFontSize(st) }}>Caricamento allegati…</div>
-            ) : items.length ? (
-              <div style={{ flex: '1 1 auto', minHeight: 0, overflowY: 'auto', display: 'grid', alignContent: 'start', gap: 8, paddingRight: 2 }}>
-                {items.map(att => {
-                  const active = selected?.id === att.id
-                  return (
-                    <div key={att.id} onClick={() => setSelected(active ? null : att)} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, border: `1px solid ${active ? '#2563eb' : 'rgba(0,0,0,0.08)'}`, background: active ? '#eff6ff' : '#fff', borderRadius: 10, padding: '8px 10px', cursor: 'pointer', transition: 'all 0.15s' }}>
-                      <div style={{ minWidth: 0 }}>
-                        <div style={{ fontWeight: 600, fontSize: Number(st.formFieldFontSize ?? 15), color: '#111827', wordBreak: 'break-word' }}>{att.name || `Allegato #${att.id}`}</div>
-                        <div style={{ fontSize: adminLabelFontSize(st), color: '#64748b' }}>{formatAttachmentBytes(att.size)}{att.contentType ? ` • ${att.contentType}` : ''}</div>
-                      </div>
-                      <button type='button' disabled={!props.canEdit || busy} onClick={e => { e.preventDefault(); e.stopPropagation(); void remove(att) }} style={secondaryButtonStyle(!props.canEdit || busy)}>Elimina</button>
-                    </div>
-                  )
-                })}
-              </div>
-            ) : (
-              <div style={{ flex: '0 0 auto', color: '#6b7280', fontSize: adminLabelFontSize(st) }}>Nessun allegato.</div>
-            )}
-          </div>
-
-          <div style={{ border: '1px solid rgba(255,255,255,0.08)', borderRadius: 10, padding: 12, background: '#282828', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: selected ? 'flex-start' : 'center', overflow: 'hidden', minHeight: 0 }}>
-            {!selected ? (
-              <div style={{ fontSize: adminLabelFontSize(st), color: 'rgba(255,255,255,0.45)', textAlign: 'center' }}>Seleziona un allegato per visualizzare l&apos;anteprima</div>
-            ) : previewLoading ? (
-              <div style={{ fontSize: adminLabelFontSize(st), color: 'rgba(255,255,255,0.55)' }}>Caricamento anteprima…</div>
-            ) : previewUrl ? (() => {
-              const ct = String(selected.contentType || '').toLowerCase()
-              if (ct.startsWith('image/')) return <img src={previewUrl} alt={selected.name || ''} style={{ maxWidth: '100%', maxHeight: '100%', borderRadius: 6, objectFit: 'contain', flex: '1 1 auto', minHeight: 0 }} />
-              if (ct === 'application/pdf') return <iframe src={previewUrl} title={selected.name || 'PDF'} style={{ width: '100%', flex: '1 1 auto', minHeight: 0, border: 'none', borderRadius: 6 }} />
-              return <div style={{ fontSize: adminLabelFontSize(st), color: 'rgba(255,255,255,0.45)', textAlign: 'center' }}>Anteprima non disponibile per questo tipo di file.</div>
-            })() : (
-              <div style={{ fontSize: adminLabelFontSize(st), color: 'rgba(255,255,255,0.45)', textAlign: 'center' }}>Anteprima non disponibile per questo tipo di file.</div>
-            )}
-            {selected && (
-              <div style={{ flex: '0 0 auto', marginTop: 8, fontSize: adminLabelFontSize(st), color: 'rgba(255,255,255,0.78)', textAlign: 'center', wordBreak: 'break-word' }}>
-                {selected.name || `Allegato #${selected.id}`}{selected.contentType ? ` • ${selected.contentType}` : ''}
-              </div>
-            )}
-          </div>
-        </div>
-      )}
-    </div>
+    <GiiAttachmentViewer
+      title='ALLEGATI'
+      oidAvailable={!!oid}
+      noOidMessage='Selezionare una pratica prima di consultare o caricare gli allegati.'
+      items={items as any}
+      loading={loading}
+      busy={busy}
+      error={error}
+      canEdit={props.canEdit}
+      uploadInputKey={inputKey}
+      onUpload={upload}
+      selectedItemId={props.selectedAttachmentId}
+      onSelectedItemChange={props.onSelectedAttachmentChange as any}
+      onOpen={open as any}
+      onReplace={replace as any}
+      onDelete={remove as any}
+      buildPreviewUrl={buildPreview as any}
+      rotationDeg={props.rotationDeg}
+      rotationBusy={busy}
+      canConfirmRotation={props.canEdit && (((Math.round(props.rotationDeg / 90) * 90) % 360 + 360) % 360) !== 0}
+      onRotateLeft={props.onRotateLeft}
+      onRotateRight={props.onRotateRight}
+      onConfirmRotation={() => { void confirmAmmRotation() }}
+      formatBytes={formatAttachmentBytes}
+      labelFontSize={adminLabelFontSize(st)}
+      headerFontSize={Number(st.formCardHeaderFontSize ?? 14)}
+      headerBg={st.formCardHeaderBg || '#0d3b66'}
+      headerColor={st.formCardHeaderColor || '#fff'}
+      headerBorderColor={st.formCardBorderColor || '#c5d9f1'}
+      borderRadius={Number(st.formCardBorderRadius ?? 10)}
+      innerHeaderColor={st.formInnerHeaderColor || '#0f4c81'}
+    />
   )
 }
 
@@ -6236,21 +6526,28 @@ function inputStyleFrom (st: Record<string, any>, disabled?: boolean): React.CSS
   const h = Number(st.formFieldHeight ?? 32)
   const fieldHeight = Number.isFinite(h) && h > 0 ? h : 32
   const fontSize = Number(st.formFieldFontSize ?? 15)
+  const normalColor = st.formFieldColor || '#0f172a'
+  const disabledColor = st.formFieldDisabledColor || '#1f2937'
+  const normalBg = st.formFieldBg || '#f8fbff'
+  const disabledBg = st.formFieldDisabledBg || '#e8edf3'
+  const normalBorder = st.formFieldBorderColor || '#bfcede'
+  const disabledBorder = st.formFieldDisabledBorderColor || '#cbd5e1'
   return {
     width: '100%',
     boxSizing: 'border-box',
     height: fieldHeight,
     minHeight: fieldHeight,
-    border: `${Number(st.formFieldBorderWidth ?? 1)}px solid ${st.formFieldBorderColor || '#bfcede'}`,
+    border: `${Number(st.formFieldBorderWidth ?? 1)}px solid ${disabled ? disabledBorder : normalBorder}`,
     borderRadius: Number(st.formFieldBorderRadius ?? 7),
     padding: `0 ${Number(st.formFieldPaddingX ?? 9)}px`,
     fontSize,
     lineHeight: `${Math.max(16, fieldHeight - 2)}px`,
-    color: st.formFieldColor || '#0f172a',
-    background: st.formFieldBg || '#f8fbff',
+    color: disabled ? disabledColor : normalColor,
+    background: disabled ? disabledBg : normalBg,
     opacity: 1,
-    WebkitTextFillColor: st.formFieldColor || '#0f172a',
-    outline: 'none'
+    WebkitTextFillColor: disabled ? disabledColor : normalColor,
+    outline: 'none',
+    cursor: disabled ? 'default' : undefined
   }
 }
 
@@ -6335,13 +6632,16 @@ function inputStyle (disabled?: boolean): React.CSSProperties {
   return {
     width: '100%',
     boxSizing: 'border-box',
-    border: '1px solid #d1d5db',
+    border: disabled ? '1px solid #cbd5e1' : '1px solid #d1d5db',
     borderRadius: 9,
     padding: '8px 10px',
     fontSize: 15,
-    color: disabled ? '#6b7280' : '#111827',
-    background: disabled ? '#f3f4f6' : '#fff',
-    outline: 'none'
+    color: disabled ? '#1f2937' : '#111827',
+    background: disabled ? '#e8edf3' : '#fff',
+    opacity: 1,
+    WebkitTextFillColor: disabled ? '#1f2937' : '#111827',
+    outline: 'none',
+    cursor: disabled ? 'default' : undefined
   }
 }
 
@@ -6572,12 +6872,9 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
   const [pendingAttestationText, setPendingAttestationText] = React.useState<string | null>(null)
   const [pendingUndoAttestation, setPendingUndoAttestation] = React.useState(false)
   const [confirmTransmitBozza, setConfirmTransmitBozza] = React.useState(false)
-  const [verbalePreviewOpen, setVerbalePreviewOpen] = React.useState(false)
-  const [verbalePreviewLoading, setVerbalePreviewLoading] = React.useState(false)
-  const [verbalePreviewError, setVerbalePreviewError] = React.useState<string | null>(null)
-  const [verbalePreviewUrl, setVerbalePreviewUrl] = React.useState<string | null>(null)
-  const [verbalePreviewFileName, setVerbalePreviewFileName] = React.useState('proposta-contestazione.pdf')
-  const [activeAmmSection, setActiveAmmSection] = React.useState<AmmSectionKey>(AMM_DEFAULT_SECTION)
+  const [ammPreviewAttachment, setAmmPreviewAttachment] = React.useState<{ id: number; name?: string; contentType?: string } | null>(null)
+  const [ammPreviewRotationDeg, setAmmPreviewRotationDeg] = React.useState(0)
+  const [activeAmmSection, setActiveAmmSection] = React.useState<AmmSectionKey>(() => getRequestedAmmSection() || AMM_DEFAULT_SECTION)
   const rootRef = React.useRef<HTMLDivElement | null>(null)
   const [pageVisible, setPageVisible] = React.useState(false)
 
@@ -6591,10 +6888,6 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
     check()
     return () => window.clearInterval(id)
   }, [])
-
-  React.useEffect(() => {
-    return () => { revokePdfUrl(verbalePreviewUrl) }
-  }, [verbalePreviewUrl])
 
 
   React.useEffect(() => {
@@ -6669,7 +6962,17 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
   const showHeaderProcedureNote = activeAmmSection !== 'anteprima'
   const hasDsForSave = !!configuredDs
   const currentRole = String(profile.role || '').toUpperCase()
-  const canEdit = roleAllowed && ['TI_AMM', 'ADMIN'].includes(currentRole) && hasDsForSave
+  const openedInConsultation = activeSelection?.readOnly === true
+  const roleCanEditData = ['TI_AMM', 'ADMIN'].includes(currentRole)
+  const currentAssigneeUsername = getAmmDataEditAssigneeUsername(data || {}, currentRole)
+  const assignedToOtherUser = roleCanEditData && currentRole !== 'ADMIN' && !!currentAssigneeUsername && !!profile.username && !sameGiiUsername(currentAssigneeUsername, profile.username)
+  const dataEditBlockedByRole = roleAllowed && !roleCanEditData
+  const dataEditBlockedByOtherUser = roleCanEditData && (openedInConsultation || assignedToOtherUser)
+  const readOnlyBannerBaseMessage = dataEditBlockedByRole
+    ? 'Modifica dati non consentita per il tuo ruolo.'
+    : (dataEditBlockedByOtherUser ? 'Modifica dati non abilitata. La pratica risulta in carico presso un altro utente.' : '')
+  const showContextualSectionInfo = roleAllowed && roleCanEditData && !dataEditBlockedByRole && !dataEditBlockedByOtherUser
+  const canEdit = roleAllowed && roleCanEditData && hasDsForSave && !dataEditBlockedByOtherUser
   const canEditAttoNotes = canEdit
   const sanzioniConsultive = useSanzioneConsultivaState(cfg, data || {}, layerFields)
   React.useEffect(() => {
@@ -6694,6 +6997,8 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
     setDraft({ ...base })
     setInitialDraft({ ...base })
     setAutomaticValues({})
+    setAmmPreviewAttachment(null)
+    setAmmPreviewRotationDeg(0)
     setActiveAmmSection(nextSection)
     persistAmmSection(nextSection)
     broadcastAmmSection(nextSection)
@@ -6721,6 +7026,45 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
   const verbaleNotificato = isVerbaleNotificato(viewData || {})
   const canEditPostApproval = canEdit && headerVerbaleDefinitivo
   const canEditPostNotification = canEdit && headerVerbaleDefinitivo && verbaleNotificato
+  const readOnlySheetInfo = React.useMemo(() => {
+    if (!hasSelection || readOnlyBannerBaseMessage) return ''
+    if ((activeAmmSection === 'pagamento' || activeAmmSection === 'notifica') && !headerVerbaleDefinitivo) return POST_APPROVAL_INFO
+    if (activeAmmSection === 'notifica' && headerVerbaleDefinitivo && !canEditPostNotification) return POST_NOTIFICATION_INFO
+    if (['ricorso', 'cda', 'riapertura', 'definizione'].includes(activeAmmSection)) {
+      if (!headerVerbaleDefinitivo) return POST_APPROVAL_INFO
+      if (!canEditPostNotification) return POST_NOTIFICATION_INFO
+    }
+    return ''
+  }, [hasSelection, readOnlyBannerBaseMessage, activeAmmSection, headerVerbaleDefinitivo, canEditPostNotification])
+  const readOnlyBannerMessage = [readOnlyBannerBaseMessage, readOnlySheetInfo].filter(Boolean).join(' ')
+  const [readOnlyBannerMounted, setReadOnlyBannerMounted] = React.useState(false)
+  const [readOnlyBannerOpen, setReadOnlyBannerOpen] = React.useState(false)
+  const readOnlyBannerTimersRef = React.useRef<number[]>([])
+  const clearReadOnlyBannerTimers = React.useCallback(() => {
+    readOnlyBannerTimersRef.current.forEach(id => { try { window.clearTimeout(id) } catch {} })
+    readOnlyBannerTimersRef.current = []
+  }, [])
+  const showReadOnlyBanner = React.useCallback(() => {
+    clearReadOnlyBannerTimers()
+    if (!readOnlyBannerMessage) {
+      setReadOnlyBannerOpen(false)
+      setReadOnlyBannerMounted(false)
+      return
+    }
+    setReadOnlyBannerMounted(true)
+    const openTimer = window.setTimeout(() => setReadOnlyBannerOpen(true), 20)
+    const closeTimer = window.setTimeout(() => setReadOnlyBannerOpen(false), 4000)
+    readOnlyBannerTimersRef.current = [openTimer, closeTimer]
+  }, [clearReadOnlyBannerTimers, readOnlyBannerMessage])
+  React.useEffect(() => {
+    if (readOnlyBannerMessage) showReadOnlyBanner()
+    else {
+      clearReadOnlyBannerTimers()
+      setReadOnlyBannerOpen(false)
+      setReadOnlyBannerMounted(false)
+    }
+    return clearReadOnlyBannerTimers
+  }, [readOnlyBannerMessage, showReadOnlyBanner, clearReadOnlyBannerTimers])
 
   const onFieldChange = React.useCallback((name: string, value: any) => {
     setDraft(prev => ({ ...(prev || {}), [name]: value }))
@@ -7363,53 +7707,6 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
     }))
   }
 
-  const handleVerbaleDownload = React.useCallback(() => {
-    const base = { ...(draft || data || {}), ...automaticValues }
-    if (!hasSelection || !base) return
-    const stamp = buildVerbalePdfGenerationMeta(profile)
-    const source = { ...base, ...stamp }
-    ;(async () => {
-      try {
-        const { blob, fileName } = await buildVerbalePdfBlob(source, layerFields, profile)
-        downloadBlobFile(blob, fileName)
-        setDialog({ kind: 'ok', title: 'PDF dell’atto generato', text: 'Il PDF è stato scaricato.' })
-      } catch (e: any) {
-        setDialog({ kind: 'err', title: 'Errore PDF dell’atto', text: e?.message || String(e) })
-      }
-    })()
-  }, [automaticValues, canEdit, data, draft, hasSelection, layerFields, profile])
-
-  const handleVerbalePreview = React.useCallback(() => {
-    const source = { ...(draft || data || {}), ...automaticValues }
-    if (!hasSelection || !source) return
-    setVerbalePreviewOpen(true)
-    setVerbalePreviewLoading(true)
-    setVerbalePreviewError(null)
-    ;(async () => {
-      try {
-        const { blob, fileName } = await buildVerbalePdfBlob(source, layerFields, profile)
-        const url = makePdfUrl(blob, fileName)
-        setVerbalePreviewFileName(fileName)
-        setVerbalePreviewUrl(prev => {
-          revokePdfUrl(prev)
-          return url
-        })
-      } catch (e: any) {
-        setVerbalePreviewError(e?.message || String(e))
-      } finally {
-        setVerbalePreviewLoading(false)
-      }
-    })()
-  }, [automaticValues, data, draft, hasSelection, layerFields, profile])
-
-  const closeVerbalePreview = React.useCallback(() => {
-    setVerbalePreviewOpen(false)
-    setVerbalePreviewLoading(false)
-    setVerbalePreviewError(null)
-  }, [])
-
-
-
   const buildBozzaDeterminazioneSource = React.useCallback((source?: Record<string, any>) => {
     return source ? { ...(data || {}), ...(source || {}), ...automaticValues } : { ...(data || {}), ...(draft || {}), ...automaticValues }
   }, [automaticValues, data, draft])
@@ -7757,43 +8054,61 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
     border: 'none',
     fontWeight: 700,
     fontSize: adminFieldFontSize(adminStyle),
+    display: 'inline-flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    verticalAlign: 'middle',
+    boxSizing: 'border-box',
+    lineHeight: 'normal',
+    appearance: 'none',
+    WebkitAppearance: 'none',
+    MozAppearance: 'none',
     cursor: saving ? 'not-allowed' : 'pointer'
   }
   const saveDisabled = saving || !isDirty || !canEdit
   const cancelDisabled = saving || !isDirty
   const closeDisabled = saving || isDirty
 
-  const verbalePreviewModal = verbalePreviewOpen ? createPortal(
-    <div
-      data-gii-global-popup-root='1'
-      style={{ position: 'fixed', inset: 0, zIndex: 2147483646, background: 'rgba(0,0,0,0.58)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 14, pointerEvents: 'auto' }}
-      onClick={(e) => { e.preventDefault(); e.stopPropagation() }}
-      onMouseDown={(e) => { e.preventDefault(); e.stopPropagation() }}
+  const readOnlyInfoButton = readOnlyBannerMessage ? (
+    <button
+      type='button'
+      title='Informazioni sulla modifica dati'
+      aria-label='Informazioni sulla modifica dati'
+      onClick={() => {
+        if (readOnlyBannerOpen) {
+          clearReadOnlyBannerTimers()
+          setReadOnlyBannerOpen(false)
+        } else showReadOnlyBanner()
+      }}
+      style={{
+        flex: '0 0 22px',
+        width: 22,
+        height: 22,
+        borderRadius: 999,
+        border: 'none',
+        background: 'transparent',
+        color: '#b42318',
+        cursor: 'pointer',
+        padding: 0,
+        boxSizing: 'border-box',
+        display: 'inline-flex',
+        alignItems: 'center',
+        justifyContent: 'center'
+      }}
     >
-      <div
-        role='dialog'
-        aria-modal='true'
-        data-gii-global-popup-dialog='1'
-        style={{ width: 'calc(100vw - 28px)', height: 'calc(100vh - 28px)', maxWidth: 1920, maxHeight: 1200, borderRadius: 14, boxShadow: '0 20px 70px rgba(0,0,0,0.32)', overflow: 'hidden', position: 'relative', zIndex: 2147483647 }}
-        onClick={(e) => { e.stopPropagation() }}
-        onMouseDown={(e) => { e.stopPropagation() }}
-      >
-        <AnteprimaPdfViewer
-          url={verbalePreviewUrl}
-          fileName={verbalePreviewFileName}
-          title='Anteprima proposta di contestazione'
-          subtitle={verbalePreviewFileName}
-          loading={verbalePreviewLoading}
-          error={verbalePreviewError}
-          emptyText='Nessun dato disponibile per l&apos;anteprima della proposta.'
-          onDownload={handleVerbaleDownload}
-          onClose={closeVerbalePreview}
-        />
-      </div>
-    </div>,
-    document.body
+      <svg width='22' height='22' viewBox='0 0 512 512' aria-hidden='true' focusable='false' style={{ display: 'block' }}>
+        <path fill='#b42318' d='M256,0C114.6,0,0,114.6,0,256s114.6,256,256,256,256-114.6,256-256S397.4,0,256,0Z' />
+        <path fill='#ffffff' d='M306.5,195.8l-112.2,10.9-4,14.4,22.1,3.1c14.4,2.7,17.3,6.6,14.1,17.8l-36.1,131.5c-9.5,34,5.2,50,39.7,50s57.7-9.6,71.8-22.6l4.3-15.8c-9.8,6.6-24.2,9.4-33.7,9.4-13.5,0-18.4-7.3-14.9-20.3l49-178.4h-.1Z' />
+        <path fill='#ffffff' d='M268.6,84.7c-24.7,0-44.6,19.9-44.6,44.6s19.9,44.6,44.6,44.6,44.6-19.9,44.6-44.6-19.9-44.6-44.6-44.6Z' />
+      </svg>
+    </button>
   ) : null
 
+
+  // Pareggia lo spazio sotto la riga titolo/pulsanti (padding-bottom toolbar + suo border-bottom 1px)
+  // con quello sopra (border + padding del contenitore esterno), così il blocco non risulta
+  // visivamente più vicino al bordo superiore della card che a quello inferiore.
+  const toolbarBottomPad = Math.max(0, Number(adminStyle.maskBorderWidth ?? 1) + Number(adminStyle.maskInnerPadding ?? 12) - 1)
 
   return (
     <AdminStyleCtx.Provider value={adminStyle}>
@@ -7830,65 +8145,107 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
           onConfirm={() => { setConfirmTransmitBozza(false); void handleTransmitBozzaDeterminazioneRiAmm(true) }}
         />
       )}
-      {verbalePreviewModal}
-        <div style={{ flex: '0 0 auto', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 8, padding: '8px 0', borderBottom: `1px solid ${cfg.dividerColor || '#cbd8e6'}` }}>
-          <div style={{ minWidth: 0 }}>
-            <div style={{ fontSize: Number(adminStyle.titleFontSize || 18), fontWeight: Number(cfg.titleFontWeight || 700) as any, color: '#111827', lineHeight: 1.25 }}>
-              {hasSelection ? (<>{headerTitleParts.prefix}{headerTitleParts.reportCode ? <span style={{ color: '#2563eb', fontWeight: Number(cfg.titleFontWeight || 700) as any }}>{headerTitleParts.reportCode}</span> : null}</>) : 'Istruttoria amministrativa'}
+        <div style={{
+          flex: '0 0 auto',
+          position: 'relative',
+          padding: hasSelection && readOnlyBannerMessage && readOnlyBannerMounted ? (readOnlyBannerOpen ? `48px 0 ${toolbarBottomPad}px` : `0 0 ${toolbarBottomPad}px`) : `0 0 ${toolbarBottomPad}px`,
+          borderBottom: `1px solid ${cfg.dividerColor || '#cbd8e6'}`,
+          transition: 'padding 280ms ease'
+        }}>
+          <div style={{
+            position: 'relative',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            flexWrap: 'wrap',
+            gap: 8,
+            minHeight: hasSelection && readOnlyBannerMessage && readOnlyBannerMounted ? 36 : undefined
+          }}>
+            {hasSelection && readOnlyBannerMessage && readOnlyBannerMounted && (
+              <div style={{
+                position: 'absolute',
+                // Da chiuso: quadrato 36x36 centrato sulla riga reale (qualunque sia la sua altezza).
+                // Da aperto: stessa posizione di prima (zona padding-top:48 sopra la riga), spostandolo
+                // sopra il bordo superiore della riga della stessa misura del padding-top aggiunto al toolbar.
+                top: readOnlyBannerOpen ? -48 : '50%',
+                transform: readOnlyBannerOpen ? 'none' : 'translateY(-50%)',
+                left: 0,
+                right: readOnlyBannerOpen ? 0 : 'auto',
+                width: readOnlyBannerOpen ? 'auto' : 36,
+                height: 36,
+                display: 'flex',
+                alignItems: 'center',
+                gap: 8,
+                padding: readOnlyBannerOpen ? '6px 10px 6px 6px' : '6px',
+                border: '1px solid #fb923c',
+                borderRadius: readOnlyBannerOpen ? adminStyle.maskBorderRadius : 8,
+                background: '#fff7ed',
+                color: '#b42318',
+                boxSizing: 'border-box',
+                overflow: 'hidden',
+                zIndex: 2,
+                transition: 'top 280ms ease, transform 280ms ease, width 280ms ease, background-color 220ms ease, border-color 220ms ease'
+              }}>
+                {readOnlyInfoButton}
+                <span style={{
+                  fontSize: Math.max(12, adminLabelFontSize(adminStyle)),
+                  fontWeight: 700,
+                  lineHeight: 1.35,
+                  whiteSpace: 'nowrap',
+                  opacity: readOnlyBannerOpen ? 1 : 0,
+                  transform: readOnlyBannerOpen ? 'translateX(0)' : 'translateX(-8px)',
+                  maxWidth: readOnlyBannerOpen ? 'calc(100% - 40px)' : 0,
+                  overflow: 'hidden',
+                  textOverflow: 'ellipsis',
+                  transition: 'opacity 220ms ease, transform 220ms ease'
+                }}>
+                  {readOnlyBannerMessage}
+                </span>
+              </div>
+            )}
+            <div style={{ minWidth: 0, display: 'flex', alignItems: 'center', gap: 8, paddingLeft: hasSelection && readOnlyBannerMessage && readOnlyBannerMounted ? 44 : 0, transition: 'padding-left 220ms ease' }}>
+              <div style={{ fontSize: Number(adminStyle.titleFontSize || 18), fontWeight: Number(cfg.titleFontWeight || 700) as any, color: '#111827', lineHeight: 1.25 }}>
+                {hasSelection ? (<>{headerTitleParts.prefix}{headerTitleParts.reportCode ? <span style={{ color: '#2563eb', fontWeight: Number(cfg.titleFontWeight || 700) as any }}>{headerTitleParts.reportCode}</span> : null}</>) : 'Istruttoria amministrativa'}
+              </div>
             </div>
-            {hasSelection && roleAllowed && !canEdit && (
-              <div style={{ marginTop: 3, color: '#b42318', fontSize: Math.max(11, adminLabelFontSize(adminStyle)), fontWeight: 650, lineHeight: 1.3 }}>
-                Pratica aperta in consultazione. Le modifiche sono consentite solo nei casi previsti dal ruolo e dallo stato istruttorio.
-              </div>
-            )}
-            {showHeaderProcedureNote && hasSelection && !headerVerbaleDefinitivo && (
-              <div style={{ marginTop: 3, color: '#b42318', fontSize: adminLabelFontSize(adminStyle), fontWeight: 850, lineHeight: 1.3 }}>
-                {headerHasVerbale ? 'Gli estremi della determinazione saranno registrati dopo la sottoscrizione dell’atto.' : 'Il documento diventerà definitivo dopo la sottoscrizione dell’atto.'}
-              </div>
-            )}
-          </div>
-          <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
-            <button type='button' disabled={saveDisabled} onClick={handleSave}
-              style={{
-                ...editBtnBase,
-                border: '1px solid rgba(0,0,0,0.18)',
-                background: saveDisabled ? '#e5e7eb' : '#1a7f37',
-                color: saveDisabled ? '#9ca3af' : '#fff',
-                cursor: saveDisabled ? 'not-allowed' : 'pointer'
-              }}>
-              {saving ? 'Salvataggio bozza…' : 'Salva bozza'}
-            </button>
-            <button type='button' disabled={cancelDisabled} onClick={handleReset}
-              style={{
-                ...editBtnBase,
-                border: '1px solid rgba(0,0,0,0.24)',
-                background: cancelDisabled ? '#e5e7eb' : '#d92d20',
-                color: cancelDisabled ? '#9ca3af' : '#fff',
-                cursor: cancelDisabled ? 'not-allowed' : 'pointer'
-              }}>
-              Annulla
-            </button>
-            <button type='button' disabled={closeDisabled} onClick={handleCloseAdmin}
-              title={isDirty ? 'Salvare o annullare le modifiche prima di chiudere.' : undefined}
-              style={{
-                ...editBtnBase,
-                border: '1px solid rgba(0,0,0,0.24)',
-                background: closeDisabled ? '#e5e7eb' : '#1d4ed8',
-                color: closeDisabled ? '#9ca3af' : '#fff',
-                cursor: closeDisabled ? 'not-allowed' : 'pointer'
-              }}>
-              Chiudi
-            </button>
+            <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+              <button type='button' disabled={saveDisabled} onClick={handleSave}
+                style={{
+                  ...editBtnBase,
+                  border: '1px solid rgba(0,0,0,0.18)',
+                  background: saveDisabled ? '#e5e7eb' : '#1a7f37',
+                  color: saveDisabled ? '#9ca3af' : '#fff',
+                  cursor: saveDisabled ? 'not-allowed' : 'pointer'
+                }}>
+                {saving ? 'Salvataggio bozza…' : 'Salva bozza'}
+              </button>
+              <button type='button' disabled={cancelDisabled} onClick={handleReset}
+                style={{
+                  ...editBtnBase,
+                  border: '1px solid rgba(0,0,0,0.24)',
+                  background: cancelDisabled ? '#e5e7eb' : '#d92d20',
+                  color: cancelDisabled ? '#9ca3af' : '#fff',
+                  cursor: cancelDisabled ? 'not-allowed' : 'pointer'
+                }}>
+                Annulla
+              </button>
+              <button type='button' disabled={closeDisabled} onClick={handleCloseAdmin}
+                title={isDirty ? 'Salvare o annullare le modifiche prima di chiudere.' : undefined}
+                style={{
+                  ...editBtnBase,
+                  border: '1px solid rgba(0,0,0,0.24)',
+                  background: closeDisabled ? '#e5e7eb' : '#1d4ed8',
+                  color: closeDisabled ? '#9ca3af' : '#fff',
+                  cursor: closeDisabled ? 'not-allowed' : 'pointer'
+                }}>
+                Chiudi
+              </button>
+            </div>
           </div>
         </div>
 
         <div style={activeContentStyle}>
 
-        {!roleAllowed && (
-          <InfoBox kind='warn'>
-            Questo widget è destinato alla fase amministrativa. Il profilo rilevato non è TI_AMM, RI_AMM, DA o ADMIN.
-          </InfoBox>
-        )}
 
         {!hasSelection && (
           <InfoBox kind='warn'>
@@ -7904,6 +8261,7 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
                   data={viewData || {}}
                   fields={layerFields}
                   canEdit={canEdit}
+                  showReadOnlyInfo={showContextualSectionInfo}
                   onChange={onFieldChange}
                 />
               )}
@@ -7955,46 +8313,37 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
               )}
 
               {activeAmmSection === 'pagamento' && (
-                <>
-                  {!headerVerbaleDefinitivo && <PostApprovalLockedBox />}
-                  <PagamentoGuidatoSection data={viewData || {}} fields={layerFields} canEdit={canEditPostApproval} canEditSpeseNotifica={canEditPostApproval} onChange={onFieldChange} />
-                </>
+                <PagamentoGuidatoSection data={viewData || {}} fields={layerFields} canEdit={canEditPostApproval} canEditSpeseNotifica={canEditPostApproval} showContextualInfo={showContextualSectionInfo} onChange={onFieldChange} />
               )}
 
               {activeAmmSection === 'notifica' && (
                 <>
-                  {!headerVerbaleDefinitivo && <PostApprovalLockedBox />}
-                  <ProtocolloNotificaGuidataSection data={viewData || {}} fields={layerFields} canEdit={canEditPostApproval} onChange={onFieldChange} />
-                  <ChiusuraIstruttoriaSummary data={viewData || {}} fields={layerFields} canEdit={canEditPostNotification} onFillClose={fillCloseMeta} completionIssues={completionIssues} />
+                  <ProtocolloNotificaGuidataSection data={viewData || {}} fields={layerFields} canEdit={canEditPostApproval} showContextualInfo={showContextualSectionInfo} onChange={onFieldChange} />
+                  <ChiusuraIstruttoriaSummary
+                    data={viewData || {}}
+                    fields={layerFields}
+                    canEdit={canEditPostNotification}
+                    sectionInfo={null}
+                    onFillClose={fillCloseMeta}
+                    completionIssues={completionIssues}
+                  />
                 </>
               )}
 
               {activeAmmSection === 'ricorso' && (
-                <>
-                  {!canEditPostNotification && <PostNotificationLockedBox />}
-                  <RicorsoPostNotificaSection data={viewData || {}} fields={layerFields} canEdit={canEditPostNotification} onChange={onFieldChange} />
-                </>
+                <RicorsoPostNotificaSection data={viewData || {}} fields={layerFields} canEdit={canEditPostNotification} onChange={onFieldChange} />
               )}
 
               {activeAmmSection === 'cda' && (
-                <>
-                  {!canEditPostNotification && <PostNotificationLockedBox />}
-                  <EsitoCdaSection data={viewData || {}} fields={layerFields} canEdit={canEditPostNotification} onChange={onFieldChange} />
-                </>
+                <EsitoCdaSection data={viewData || {}} fields={layerFields} canEdit={canEditPostNotification} onChange={onFieldChange} />
               )}
 
               {activeAmmSection === 'riapertura' && (
-                <>
-                  {!canEditPostNotification && <PostNotificationLockedBox />}
-                  <RiaperturaAmmSection data={viewData || {}} fields={layerFields} canEdit={canEditPostNotification} onChange={onFieldChange} role={profile.role} />
-                </>
+                <RiaperturaAmmSection data={viewData || {}} fields={layerFields} canEdit={canEditPostNotification} showContextualInfo={showContextualSectionInfo} onChange={onFieldChange} role={profile.role} />
               )}
 
               {activeAmmSection === 'definizione' && (
-                <>
-                  {!canEditPostNotification && <PostNotificationLockedBox />}
-                  <DefinizionePraticaSection data={viewData || {}} fields={layerFields} canEdit={canEditPostNotification} onChange={onFieldChange} />
-                </>
+                <DefinizionePraticaSection data={viewData || {}} fields={layerFields} canEdit={canEditPostNotification} onChange={onFieldChange} />
               )}
 
               {activeAmmSection === 'allegati' && (
@@ -8003,6 +8352,15 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
                   ds={(active as any)?.ds}
                   layerUrl={(active as any)?.layerUrl || (configuredDsState as any)?.layerUrl || getDataSourceUrl(configuredDs)}
                   canEdit={canEdit}
+                  selectedAttachmentId={ammPreviewAttachment?.id ?? null}
+                  onSelectedAttachmentChange={(item) => {
+                    setAmmPreviewRotationDeg(0)
+                    setAmmPreviewAttachment(item ? { id: Number(item.id), name: item.name, contentType: item.contentType } : null)
+                  }}
+                  rotationDeg={ammPreviewRotationDeg}
+                  onRotateLeft={() => setAmmPreviewRotationDeg(v => v - 90)}
+                  onRotateRight={() => setAmmPreviewRotationDeg(v => v + 90)}
+                  onRotationConfirmed={() => setAmmPreviewRotationDeg(0)}
                 />
               )}
 
@@ -8015,6 +8373,14 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
                   oid={oid != null && Number.isFinite(Number(oid)) ? Number(oid) : null}
                   ds={(active as any)?.ds}
                   layerUrl={(active as any)?.layerUrl || (configuredDsState as any)?.layerUrl || getDataSourceUrl(configuredDs)}
+                  viewerBackgroundColor={String((cfg as any).anteprimaViewerBg || '#282828')}
+                  pdfHeaderBackgroundColor={String((cfg as any).anteprimaPdfHeaderBg || '#282828')}
+                  pdfPageAreaBackgroundColor={String((cfg as any).anteprimaPdfAreaBg || '#282828')}
+                  pdfThumbnailsBackgroundColor={String((cfg as any).anteprimaPdfThumbnailsBg || '#1f1f1f')}
+                  pdfToolbarBackgroundColor={String((cfg as any).anteprimaPdfToolbarBg || '#3c3c3c')}
+                  sidebarBackgroundColor={String((cfg as any).anteprimaSidebarBg || '#eef4fb')}
+                  sidebarBorderColor={String((cfg as any).anteprimaSidebarBorderColor || '#b8c7d9')}
+                  sidebarBorderWidth={Number((cfg as any).anteprimaSidebarBorderWidth ?? 1)}
                 />
               )}
             </div>

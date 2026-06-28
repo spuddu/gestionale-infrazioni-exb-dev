@@ -287,6 +287,28 @@ export default function Setting(props: AllWidgetSettingProps<IMConfig>) {
           <input type='radio' name='signedInClick' checked={(cfg.signedInClick ?? 'signout')==='menu'} onChange={()=>set('signedInClick','menu')}/>
           Abilita il menu utente
         </label>
+
+        {(cfg.signedInClick ?? 'signout') === 'menu' && <>
+          <div style={{ height:1, background:'rgba(255,255,255,0.08)', margin:'14px 0 10px' }}/>
+          <div style={{ fontSize:10, fontWeight:700, color:'#93c5fd', textTransform:'uppercase' as const, letterSpacing:1, marginBottom:8 }}>Contenuto menu utente</div>
+
+          <Check value={cfg.accountMenuShowAvatar ?? true} onChange={v=>set('accountMenuShowAvatar',v)} label='Mostra avatar utente'/>
+          <Check value={cfg.accountMenuShowName ?? true} onChange={v=>set('accountMenuShowName',v)} label='Mostra nome utente'/>
+
+          <Check value={cfg.accountMenuShowProfile ?? true} onChange={v=>set('accountMenuShowProfile',v)} label='Mostra "Il mio profilo"'/>
+          {(cfg.accountMenuShowProfile ?? true) && <>
+            <label style={P.lbl}>URL "Il mio profilo" (si apre in una nuova finestra)</label>
+            <Inp value={cfg.accountMenuProfileUrl ?? ''} onChange={v=>set('accountMenuProfileUrl',v)} placeholder='https://.../home/user.html'/>
+          </>}
+
+          <Check value={cfg.accountMenuShowSettings ?? true} onChange={v=>set('accountMenuShowSettings',v)} label='Mostra "Le mie impostazioni"'/>
+          {(cfg.accountMenuShowSettings ?? true) && <>
+            <label style={P.lbl}>URL "Le mie impostazioni" (si apre in una nuova finestra)</label>
+            <Inp value={cfg.accountMenuSettingsUrl ?? ''} onChange={v=>set('accountMenuSettingsUrl',v)} placeholder='https://.../home/user.html'/>
+          </>}
+
+          <div style={P.hint}>"Cambia account" e "Disconnettersi" sono sempre presenti nel menu. "Cambia account" disconnette e ripropone subito l&apos;accesso (stesso flusso popup/redirect configurato sopra).</div>
+        </>}
       </div>}
 
 

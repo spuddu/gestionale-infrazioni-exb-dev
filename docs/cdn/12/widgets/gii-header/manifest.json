@@ -1,0 +1,20 @@
+{
+  "name": "gii-header",
+  "label": "GII Header",
+  "type": "widget",
+  "version": "1.0.0",
+  "exbVersion": "1.19.0",
+  "author": "CBSM",
+  "description": "Intestazione GII — logo, titolo, pulsante accedi/esci. Da inserire su ogni pagina.",
+  "dependency": [
+    "jimu-arcgis"
+  ],
+  "translatedLocales": [
+    "it"
+  ],
+  "defaultSize": {
+    "width": 1200,
+    "height": 80
+  },
+  "properties": {}
+}

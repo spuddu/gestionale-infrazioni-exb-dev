@@ -1,0 +1,20 @@
+{
+  "name": "gii-homepage",
+  "label": "GII Homepage",
+  "type": "widget",
+  "version": "1.1.6",
+  "exbVersion": "1.19.0",
+  "author": "CBSM",
+  "description": "Homepage GII con cards autogenerate dalle pagine (banner rimosso) + orologio configurabile.",
+  "dependency": [
+    "jimu-arcgis"
+  ],
+  "translatedLocales": [
+    "it"
+  ],
+  "defaultSize": {
+    "width": 1200,
+    "height": 700
+  },
+  "properties": {}
+}

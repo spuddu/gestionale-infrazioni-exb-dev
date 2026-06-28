@@ -234,6 +234,7 @@ export default function Setting (props: Props) {
         <SectionBox title='Input / combo / textarea' hint='Campi compilabili e campi bloccati.'>
           <div style={P.row2}><div><label style={P.lbl}>Sfondo campo</label><ColInp value={cfgJs.formFieldBg || defaultConfig.formFieldBg} onChange={v => patch({ formFieldBg: v })} /></div><div><label style={P.lbl}>Colore testo</label><ColInp value={cfgJs.formFieldColor || defaultConfig.formFieldColor} onChange={v => patch({ formFieldColor: v })} /></div></div>
           <div style={P.row2}><div><label style={P.lbl}>Colore bordo</label><ColInp value={cfgJs.formFieldBorderColor || defaultConfig.formFieldBorderColor} onChange={v => patch({ formFieldBorderColor: v })} /></div><div><label style={P.lbl}>Sfondo campo bloccato</label><ColInp value={cfgJs.formFieldDisabledBg || defaultConfig.formFieldDisabledBg} onChange={v => patch({ formFieldDisabledBg: v })} /></div></div>
+          <div style={P.row2}><div><label style={P.lbl}>Colore testo campo bloccato</label><ColInp value={cfgJs.formFieldDisabledColor || defaultConfig.formFieldDisabledColor} onChange={v => patch({ formFieldDisabledColor: v })} /></div><div /></div>
           <div style={P.row3}>
             <div><label style={P.lbl}>Dimensione testo</label><NumInp value={parseNum(cfgJs.formFieldFontSize, defaultConfig.formFieldFontSize)} onChange={n => patch({ formFieldFontSize: n })} min={8} max={24} unit='px' /></div>
             <div><label style={P.lbl}>Altezza campo</label><NumInp value={parseNum(cfgJs.formFieldHeight, defaultConfig.formFieldHeight)} onChange={n => patch({ formFieldHeight: n })} min={24} max={60} unit='px' /></div>
@@ -242,7 +243,6 @@ export default function Setting (props: Props) {
           <div style={P.row3}>
             <div><label style={P.lbl}>Spessore bordo</label><NumInp value={parseNum(cfgJs.formFieldBorderWidth, defaultConfig.formFieldBorderWidth)} onChange={n => patch({ formFieldBorderWidth: n })} min={0} max={8} unit='px' /></div>
             <div><label style={P.lbl}>Arrotondamento</label><NumInp value={parseNum(cfgJs.formFieldBorderRadius, defaultConfig.formFieldBorderRadius)} onChange={n => patch({ formFieldBorderRadius: n })} min={0} max={30} unit='px' /></div>
-            <div><label style={P.lbl}>Testo campo bloccato</label><ColInp value={cfgJs.formFieldDisabledColor || defaultConfig.formFieldDisabledColor} onChange={v => patch({ formFieldDisabledColor: v })} /></div>
           </div>
         </SectionBox>
       </div>}

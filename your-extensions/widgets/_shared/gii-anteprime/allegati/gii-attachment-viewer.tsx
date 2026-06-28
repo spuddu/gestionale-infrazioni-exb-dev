@@ -1,0 +1,611 @@
+/** @jsx jsx */
+/** @jsxFrag React.Fragment */
+import { React, jsx } from 'jimu-core'
+import AnteprimaPdfViewer from '../anteprima-pdf-viewer'
+
+export type GiiAttachmentViewerItem = {
+  id: number | string
+  name?: string
+  size?: number
+  contentType?: string
+  url?: string
+  originalUrl?: string
+  previewUrl?: string
+}
+
+export type GiiAttachmentViewerProps<T extends GiiAttachmentViewerItem = GiiAttachmentViewerItem> = {
+  title?: string
+  items: T[]
+  loading?: boolean
+  busy?: boolean
+  error?: string | null
+  canEdit?: boolean
+  editDisabled?: boolean
+  uploadLabel?: string
+  uploadInputKey?: number
+  emptyMessage?: string
+  noOidMessage?: string
+  oidAvailable?: boolean
+  selectedItemId?: number | string | null
+  onSelectedItemChange?: (item: T | null) => void
+  onUpload?: (files: File[]) => void | Promise<void>
+  onOpen?: (item: T) => void | Promise<void>
+  onReplace?: (item: T, file: File) => void | Promise<void>
+  onDelete?: (item: T) => void | Promise<void>
+  buildPreviewUrl?: (item: T) => Promise<string | null>
+  revokePreviewUrl?: (url: string) => void
+  rotationDeg?: number
+  rotationBusy?: boolean
+  canConfirmRotation?: boolean
+  onRotateLeft?: (item: T) => void
+  onRotateRight?: (item: T) => void
+  onConfirmRotation?: (item: T) => void | Promise<void>
+  formatBytes?: (size?: number) => string
+  labelFontSize?: number
+  headerFontSize?: number
+  headerBg?: string
+  headerColor?: string
+  headerBorderColor?: string
+  borderRadius?: number
+  innerHeaderColor?: string
+}
+
+function defaultFormatBytes (value?: number): string {
+  const n = Number(value)
+  if (!Number.isFinite(n) || n <= 0) return ''
+  if (n < 1024) return `${Math.round(n)} B`
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`
+  return `${(n / (1024 * 1024)).toFixed(1)} MB`
+}
+
+function revokeObjectUrlSafe (url?: string | null, custom?: (url: string) => void): void {
+  if (!url) return
+  const clean = String(url || '').split('#')[0]
+  try {
+    if (custom) custom(clean)
+    else if (/^blob:/i.test(clean)) URL.revokeObjectURL(clean)
+  } catch {}
+}
+
+function isPdfAttachment (item: GiiAttachmentViewerItem): boolean {
+  const ct = String(item.contentType || '').toLowerCase()
+  const name = String(item.name || '').toLowerCase()
+  return ct === 'application/pdf' || name.endsWith('.pdf')
+}
+
+function isImageAttachment (item: GiiAttachmentViewerItem): boolean {
+  const ct = String(item.contentType || '').toLowerCase()
+  const name = String(item.name || '').toLowerCase()
+  return ct.startsWith('image/') || /\.(jpe?g|png|gif|webp|bmp|tif?f)$/i.test(name)
+}
+
+function isRotatableImageAttachment (item: GiiAttachmentViewerItem): boolean {
+  const ct = String(item.contentType || '').toLowerCase()
+  const name = String(item.name || '').toLowerCase()
+  return ct.includes('jpeg') || ct.includes('jpg') || ct.includes('png') || /\.(jpe?g|png)$/i.test(name)
+}
+
+const ALLOWED_ATTACHMENT_UPLOAD_HINT = 'Formati ammessi: PDF, JPG, PNG, GIF, WEBP, BMP, TIFF.'
+const ALLOWED_ATTACHMENT_UPLOAD_ACCEPT = 'application/pdf,image/*'
+
+function isAllowedAttachmentUpload (file: File): boolean {
+  const fake = { id: 0, contentType: file.type, name: file.name }
+  return isPdfAttachment(fake) || isImageAttachment(fake)
+}
+
+function canvasToBlobForAttachment (canvas: HTMLCanvasElement, type: string, quality?: number): Promise<Blob> {
+  return new Promise((resolve, reject) => {
+    try {
+      canvas.toBlob(blob => {
+        if (blob) resolve(blob)
+        else reject(new Error('Rotazione immagine non riuscita.'))
+      }, type, quality)
+    } catch (ex) {
+      reject(ex)
+    }
+  })
+}
+
+async function rotateImageAttachmentFile (blob: Blob, fileName: string, rotationDeg: number): Promise<File> {
+  const contentType = String(blob.type || '').toLowerCase()
+  const lowerName = String(fileName || '').toLowerCase()
+  const isJpeg = contentType.includes('jpeg') || contentType.includes('jpg') || /\.(jpe?g)$/i.test(lowerName)
+  const isPng = contentType.includes('png') || /\.png$/i.test(lowerName)
+  if (!isJpeg && !isPng) throw new Error('La rotazione è disponibile solo per immagini JPEG o PNG.')
+  if (typeof document === 'undefined') throw new Error('Rotazione immagine non disponibile in questo ambiente.')
+
+  let source: any = null
+  let sourceUrl = ''
+  let closeSource = () => {}
+  try {
+    const createBitmap = (window as any)?.createImageBitmap
+    if (typeof createBitmap === 'function') {
+      source = await createBitmap(blob, { imageOrientation: 'from-image' }).catch((): null => null)
+      if (source) closeSource = () => { try { source.close?.() } catch {} }
+    }
+    if (!source) {
+      sourceUrl = URL.createObjectURL(blob)
+      source = await new Promise<HTMLImageElement | null>(resolve => {
+        const img = new Image()
+        img.onload = () => resolve(img)
+        img.onerror = () => resolve(null)
+        img.src = sourceUrl
+      })
+      closeSource = () => { try { if (sourceUrl) URL.revokeObjectURL(sourceUrl) } catch {} }
+    }
+    if (!source) throw new Error('Immagine non leggibile.')
+
+    const srcW = Math.max(1, Math.round(Number(source.width || source.naturalWidth) || 0))
+    const srcH = Math.max(1, Math.round(Number(source.height || source.naturalHeight) || 0))
+    if (!srcW || !srcH) throw new Error('Dimensioni immagine non valide.')
+
+    const normalizedRotation = ((Math.round(rotationDeg / 90) * 90) % 360 + 360) % 360
+    if (normalizedRotation === 0) return new File([blob], fileName || `allegato.${isJpeg ? 'jpg' : 'png'}`, { type: isJpeg ? 'image/jpeg' : 'image/png' })
+
+    const canvas = document.createElement('canvas')
+    const swap = normalizedRotation === 90 || normalizedRotation === 270
+    canvas.width = swap ? srcH : srcW
+    canvas.height = swap ? srcW : srcH
+    const ctx = canvas.getContext('2d')
+    if (!ctx) throw new Error('Rotazione immagine non disponibile.')
+    if (normalizedRotation === 90) {
+      ctx.translate(canvas.width, 0)
+      ctx.rotate(Math.PI / 2)
+    } else if (normalizedRotation === 180) {
+      ctx.translate(canvas.width, canvas.height)
+      ctx.rotate(Math.PI)
+    } else if (normalizedRotation === 270) {
+      ctx.translate(0, canvas.height)
+      ctx.rotate(-Math.PI / 2)
+    }
+    ctx.drawImage(source, 0, 0, srcW, srcH)
+
+    const outType = isJpeg ? 'image/jpeg' : 'image/png'
+    const rotatedBlob = await canvasToBlobForAttachment(canvas, outType, isJpeg ? 0.92 : undefined)
+    return new File([rotatedBlob], fileName || `allegato_ruotato.${isJpeg ? 'jpg' : 'png'}`, { type: outType })
+  } finally {
+    closeSource()
+  }
+}
+
+function stripQueryHash (value: string): string {
+  return String(value || '').split(/[?#]/)[0]
+}
+
+function normalizeAttachmentNameKey (value?: string): string {
+  return stripQueryHash(String(value || '').trim()).toLowerCase().replace(/\\/g, '/').split('/').pop() || ''
+}
+
+function stripLastExtension (name: string): string {
+  return String(name || '').replace(/\.[^.\/]+$/, '')
+}
+
+function normalizeComparableNameKey (value?: string): string {
+  return normalizeAttachmentNameKey(value)
+    .replace(/[\[\](){}]/g, ' ')
+    .replace(/[._\-\s–—]+/g, ' ')
+    .trim()
+}
+
+function addOwnerKeyCandidate (out: Set<string>, value?: string): void {
+  const key = normalizeAttachmentNameKey(value)
+  if (key) out.add(key)
+  const comparable = normalizeComparableNameKey(value)
+  if (comparable) out.add(comparable)
+}
+
+function previewOwnerKeyCandidates (item: GiiAttachmentViewerItem): string[] {
+  const name = normalizeAttachmentNameKey(item.name)
+  if (!name) return []
+  if (!isPdfAttachment(item)) return []
+  const withoutPdf = name.replace(/\.pdf$/i, '')
+  const stems = new Set<string>()
+  const suffixes = [
+    /(?:\.|_|-|\s|\s+-\s+|\s+–\s+|\s+—\s+|\(|\[|\{)(preview)(?:\)|\]|\})?$/i,
+    /(?:\.|_|-|\s|\s+-\s+|\s+–\s+|\s+—\s+|\(|\[|\{)(anteprima)(?:\)|\]|\})?$/i,
+    /(?:\.|_|-|\s|\s+-\s+|\s+–\s+|\s+—\s+|\(|\[|\{)(pdf-preview)(?:\)|\]|\})?$/i,
+    /(?:\.|_|-|\s|\s+-\s+|\s+–\s+|\s+—\s+|\(|\[|\{)(preview-pdf)(?:\)|\]|\})?$/i
+  ]
+  for (const re of suffixes) {
+    const stem = withoutPdf.replace(re, '').replace(/[._\-\s–—\[\](){}]+$/g, '').trim()
+    if (stem && stem !== withoutPdf) stems.add(stem)
+  }
+  const out = new Set<string>()
+  for (const stem of stems) {
+    addOwnerKeyCandidate(out, stem)
+    addOwnerKeyCandidate(out, stripLastExtension(stem))
+  }
+  return Array.from(out).filter(Boolean)
+}
+
+function originalKeyCandidates (item: GiiAttachmentViewerItem): string[] {
+  const name = normalizeAttachmentNameKey(item.name)
+  if (!name) return []
+  const out = new Set<string>()
+  addOwnerKeyCandidate(out, name)
+  addOwnerKeyCandidate(out, stripLastExtension(name))
+  return Array.from(out).filter(Boolean)
+}
+
+function isDocumentPreviewCandidateOwner (item: GiiAttachmentViewerItem): boolean {
+  const ct = String(item.contentType || '').toLowerCase()
+  const name = normalizeAttachmentNameKey(item.name)
+  if (!name || isPdfAttachment(item) || isImageAttachment(item)) return false
+  return /\.(docx?|xlsx?|pptx?|odt|ods|rtf)$/i.test(name) ||
+    ct.includes('word') ||
+    ct.includes('excel') ||
+    ct.includes('spreadsheet') ||
+    ct.includes('presentation') ||
+    ct.includes('opendocument') ||
+    ct === 'application/rtf'
+}
+
+function withPdfPreviewCompanions<T extends GiiAttachmentViewerItem> (items: T[]): T[] {
+  const originalKeys = new Set<string>()
+  for (const item of items) {
+    if (!isDocumentPreviewCandidateOwner(item)) continue
+    for (const key of originalKeyCandidates(item)) originalKeys.add(key)
+  }
+
+  const previewByKey = new Map<string, T>()
+  const previewIds = new Set<string>()
+  for (const item of items) {
+    if (!isPdfAttachment(item)) continue
+    const explicitKeys = previewOwnerKeyCandidates(item)
+    let keys = explicitKeys
+
+    if (keys.length === 0) {
+      const pdfStem = stripLastExtension(normalizeAttachmentNameKey(item.name))
+      const possibleKeys = new Set<string>()
+      addOwnerKeyCandidate(possibleKeys, pdfStem)
+      keys = Array.from(possibleKeys).filter(key => originalKeys.has(key))
+    }
+
+    if (keys.length === 0) continue
+    const url = String((item as any).previewUrl || (item as any).url || '').trim()
+    if (!url) continue
+    previewIds.add(String((item as any).id))
+    for (const key of keys) {
+      if (key && !previewByKey.has(key)) previewByKey.set(key, item)
+    }
+  }
+
+  return items
+    .filter(item => !previewIds.has(String((item as any).id)))
+    .map(item => {
+      if (item.previewUrl) return item
+      let preview: T | undefined
+      for (const key of originalKeyCandidates(item)) {
+        preview = previewByKey.get(key)
+        if (preview) break
+      }
+      if (!preview) return item
+      const url = String((preview as any).previewUrl || (preview as any).url || '').trim()
+      if (!url) return item
+      return {
+        ...item,
+        previewUrl: url
+      } as T
+    })
+}
+
+function buttonStyle (opts?: { danger?: boolean, disabled?: boolean }): React.CSSProperties {
+  const disabled = !!opts?.disabled
+  const danger = !!opts?.danger
+  return {
+    fontSize: 12,
+    fontWeight: 700,
+    color: disabled ? '#9ca3af' : (danger ? '#d92d20' : '#1d4ed8'),
+    whiteSpace: 'nowrap',
+    background: disabled ? '#e5e7eb' : '#f8fbff',
+    border: danger ? '1px solid rgba(217,45,32,0.24)' : '1px solid rgba(29,78,216,0.18)',
+    borderRadius: 8,
+    padding: '6px 10px',
+    cursor: disabled ? 'not-allowed' : 'pointer',
+    opacity: disabled ? 0.6 : 1,
+    display: 'inline-flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    boxSizing: 'border-box',
+    lineHeight: 'normal'
+  }
+}
+
+export default function GiiAttachmentViewer<T extends GiiAttachmentViewerItem = GiiAttachmentViewerItem> (props: GiiAttachmentViewerProps<T>) {
+  const rawItems = Array.isArray(props.items) ? props.items : []
+  const items = React.useMemo(() => withPdfPreviewCompanions(rawItems), [rawItems])
+  const canEdit = !!props.canEdit && !props.editDisabled
+  const busy = !!props.busy
+  const oidAvailable = props.oidAvailable !== false
+  const formatBytes = props.formatBytes || defaultFormatBytes
+  const labelFontSize = Number(props.labelFontSize ?? 12)
+  const headerFontSize = Number(props.headerFontSize ?? 14)
+  const borderRadius = Number(props.borderRadius ?? 10)
+  const [internalSelectedId, setInternalSelectedId] = React.useState<number | string | null>(props.selectedItemId ?? null)
+  const selectedId = props.selectedItemId !== undefined ? props.selectedItemId : internalSelectedId
+  const selected = React.useMemo(() => {
+    if (selectedId == null) return null
+    return items.find((it: any) => String(it?.id) === String(selectedId)) || null
+  }, [items, selectedId])
+
+  const [previewUrl, setPreviewUrl] = React.useState<string | null>(null)
+  const [previewLoading, setPreviewLoading] = React.useState(false)
+  const [previewError, setPreviewError] = React.useState<string | null>(null)
+  const [uploadFormatError, setUploadFormatError] = React.useState<string | null>(null)
+  const replaceInputRef = React.useRef<HTMLInputElement | null>(null)
+  const [replaceInputKey, setReplaceInputKey] = React.useState(0)
+  const replaceTargetRef = React.useRef<T | null>(null)
+  const lastPreviewUrlRef = React.useRef<string | null>(null)
+  const [internalRotationDeg, setInternalRotationDeg] = React.useState(0)
+  const [internalRotationBusy, setInternalRotationBusy] = React.useState(false)
+
+  React.useEffect(() => {
+    setInternalRotationDeg(0)
+  }, [selected?.id])
+
+  const setSelected = React.useCallback((item: T | null) => {
+    if (props.selectedItemId === undefined) setInternalSelectedId(item?.id ?? null)
+    props.onSelectedItemChange?.(item)
+  }, [props.selectedItemId, props.onSelectedItemChange])
+
+  React.useEffect(() => {
+    if (props.loading) return
+    if (!items.length) {
+      if (selectedId != null) setSelected(null)
+      return
+    }
+    const exists = selectedId != null && items.some((it: any) => String(it?.id) === String(selectedId))
+    if (!exists) setSelected(items[0])
+  }, [items, props.loading, selectedId, setSelected])
+
+  React.useEffect(() => {
+    let cancelled = false
+    const previous = lastPreviewUrlRef.current
+    if (previous) revokeObjectUrlSafe(previous, props.revokePreviewUrl)
+    lastPreviewUrlRef.current = null
+    setPreviewUrl(null)
+    setPreviewError(null)
+    if (!selected) {
+      setPreviewLoading(false)
+      return () => { cancelled = true }
+    }
+    const directPreview = selected.previewUrl || (isPdfAttachment(selected) || isImageAttachment(selected) ? selected.url : '')
+    if (directPreview && !props.buildPreviewUrl) {
+      lastPreviewUrlRef.current = directPreview
+      setPreviewUrl(directPreview)
+      setPreviewLoading(false)
+      return () => { cancelled = true }
+    }
+    if (!props.buildPreviewUrl) {
+      setPreviewLoading(false)
+      return () => { cancelled = true }
+    }
+    setPreviewLoading(true)
+    ;(async () => {
+      try {
+        const url = await props.buildPreviewUrl!(selected)
+        if (cancelled) {
+          revokeObjectUrlSafe(url, props.revokePreviewUrl)
+          return
+        }
+        lastPreviewUrlRef.current = url || null
+        setPreviewUrl(url || null)
+      } catch (e: any) {
+        if (!cancelled) setPreviewError(e?.message || String(e))
+      } finally {
+        if (!cancelled) setPreviewLoading(false)
+      }
+    })()
+    return () => { cancelled = true }
+  }, [selected?.id, selected?.url, selected?.previewUrl, props.buildPreviewUrl])
+
+  React.useEffect(() => {
+    return () => {
+      const previous = lastPreviewUrlRef.current
+      if (previous) revokeObjectUrlSafe(previous, props.revokePreviewUrl)
+      lastPreviewUrlRef.current = null
+    }
+  }, [])
+
+  const disabledEdit = !canEdit || busy
+  const selectedCanRotate = !!selected && isRotatableImageAttachment(selected)
+  const usesExternalRotation = props.rotationDeg !== undefined || !!props.onRotateLeft || !!props.onRotateRight || !!props.onConfirmRotation
+  const effectiveRotationDeg = usesExternalRotation ? Number(props.rotationDeg || 0) : internalRotationDeg
+  const normalizedRotationDeg = ((Math.round(effectiveRotationDeg / 90) * 90) % 360 + 360) % 360
+  const effectiveRotationBusy = !!props.rotationBusy || internalRotationBusy
+  const canConfirmExternalRotation = !!props.onConfirmRotation && !!props.canConfirmRotation
+  const canConfirmInternalRotation = !props.onConfirmRotation && !!props.onReplace && canEdit && normalizedRotationDeg !== 0
+  const confirmRotationDisabled = effectiveRotationBusy || normalizedRotationDeg === 0 || !(canConfirmExternalRotation || canConfirmInternalRotation)
+
+  const rotateLeft = React.useCallback(() => {
+    if (!selectedCanRotate) return
+    if (props.onRotateLeft && selected) props.onRotateLeft(selected)
+    else setInternalRotationDeg(v => v - 90)
+  }, [props.onRotateLeft, selected, selectedCanRotate])
+
+  const rotateRight = React.useCallback(() => {
+    if (!selectedCanRotate) return
+    if (props.onRotateRight && selected) props.onRotateRight(selected)
+    else setInternalRotationDeg(v => v + 90)
+  }, [props.onRotateRight, selected, selectedCanRotate])
+
+  const confirmRotation = React.useCallback(async () => {
+    if (!selected || !selectedCanRotate || confirmRotationDisabled) return
+    if (props.onConfirmRotation) {
+      await props.onConfirmRotation(selected)
+      return
+    }
+    if (!props.onReplace || !previewUrl) return
+    setInternalRotationBusy(true)
+    try {
+      const resp = await fetch(String(previewUrl).split('#')[0], { credentials: 'same-origin' })
+      if (!resp.ok) throw new Error(`Caricamento immagine fallito (HTTP ${resp.status}).`)
+      const blob = await resp.blob()
+      const file = await rotateImageAttachmentFile(blob, selected.name || `allegato_${selected.id}.jpg`, normalizedRotationDeg)
+      await props.onReplace(selected, file)
+      setInternalRotationDeg(0)
+    } finally {
+      setInternalRotationBusy(false)
+    }
+  }, [confirmRotationDisabled, normalizedRotationDeg, previewUrl, props.onConfirmRotation, props.onReplace, selected, selectedCanRotate])
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', minHeight: '100%', height: '100%', border: `1px solid ${props.headerBorderColor || '#c5d9f1'}`, borderRadius, background: '#fff', overflow: 'hidden' }}>
+      <div style={{ flex: '0 0 auto', padding: '8px 12px', background: props.headerBg || '#0d3b66', color: props.headerColor || '#fff', fontWeight: 800, fontSize: headerFontSize, letterSpacing: 0.25, textTransform: 'uppercase' }}>
+        {props.title || 'ALLEGATI'}
+      </div>
+
+      {!oidAvailable ? (
+        <div style={{ flex: '1 1 auto', minHeight: 0, padding: 12, color: '#6b7280', fontSize: labelFontSize }}>
+          {props.noOidMessage || 'Selezionare una pratica prima di consultare o caricare gli allegati.'}
+        </div>
+      ) : (
+        <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) minmax(0, 1fr)', gap: 12, flex: '1 1 auto', minHeight: 0, height: '100%', overflow: 'hidden', padding: 12 }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 10, minHeight: 0, overflow: 'hidden' }}>
+            <div style={{ flex: '0 0 auto', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, flexWrap: 'wrap' }}>
+              <div style={{ fontWeight: 800, fontSize: Math.max(13, labelFontSize), color: props.innerHeaderColor || '#0f4c81' }}>Elenco allegati</div>
+              {props.onUpload && (
+                <label style={{ minHeight: 36, height: 36, boxSizing: 'border-box', padding: '0 14px', borderRadius: 10, border: '1px solid rgba(0,0,0,0.12)', background: disabledEdit ? '#e5e7eb' : '#f8fbff', color: disabledEdit ? '#9ca3af' : '#111827', fontSize: labelFontSize, fontWeight: 600, cursor: disabledEdit ? 'not-allowed' : 'pointer', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', lineHeight: 1, whiteSpace: 'nowrap' }}>
+                  {props.uploadLabel || 'Scegli file'}
+                  <input
+                    key={props.uploadInputKey}
+                    type='file'
+                    multiple
+                    accept={ALLOWED_ATTACHMENT_UPLOAD_ACCEPT}
+                    disabled={disabledEdit}
+                    style={{ display: 'none' }}
+                    onChange={(e: any) => {
+                      const files = Array.from(e.currentTarget.files || []) as File[]
+                      if (!files.length) return
+                      const rejected = files.filter(f => !isAllowedAttachmentUpload(f))
+                      if (rejected.length) {
+                        setUploadFormatError(`Formato non ammesso per: ${rejected.map(f => f.name).join(', ')}. ${ALLOWED_ATTACHMENT_UPLOAD_HINT}`)
+                        return
+                      }
+                      setUploadFormatError(null)
+                      void props.onUpload?.(files)
+                    }}
+                  />
+                </label>
+              )}
+              {props.onReplace && (
+                <input
+                  key={replaceInputKey}
+                  ref={replaceInputRef}
+                  type='file'
+                  accept={ALLOWED_ATTACHMENT_UPLOAD_ACCEPT}
+                  disabled={disabledEdit}
+                  style={{ display: 'none' }}
+                  onChange={(e: any) => {
+                    const file = Array.from(e.currentTarget.files || [])[0] as File | undefined
+                    const target = replaceTargetRef.current
+                    setReplaceInputKey(k => k + 1)
+                    replaceTargetRef.current = null
+                    if (!file || !target) return
+                    if (!isAllowedAttachmentUpload(file)) {
+                      setUploadFormatError(`Formato non ammesso: ${file.name}. ${ALLOWED_ATTACHMENT_UPLOAD_HINT}`)
+                      return
+                    }
+                    setUploadFormatError(null)
+                    void props.onReplace?.(target, file)
+                  }}
+                />
+              )}
+            </div>
+
+            {props.onUpload && (
+              <div style={{ flex: '0 0 auto', fontSize: Math.max(10, labelFontSize - 2), color: '#6b7280', fontWeight: 600 }}>
+                {ALLOWED_ATTACHMENT_UPLOAD_HINT}
+              </div>
+            )}
+
+            {uploadFormatError && <div style={{ flex: '0 0 auto', color: '#b42318', fontSize: labelFontSize, fontWeight: 700 }}>{uploadFormatError}</div>}
+            {props.error && <div style={{ flex: '0 0 auto', color: '#b42318', fontSize: labelFontSize, fontWeight: 700 }}>{props.error}</div>}
+            {props.loading ? (
+              <div style={{ flex: '0 0 auto', color: '#6b7280', fontSize: labelFontSize }}>Caricamento allegati…</div>
+            ) : items.length > 0 ? (
+              <div style={{ flex: '1 1 auto', minHeight: 0, overflowY: 'auto', display: 'grid', alignContent: 'start', gap: 8, paddingRight: 2, gridAutoRows: 'max-content' }}>
+                {items.map((att, idx) => {
+                  const active = selected?.id != null && String(selected.id) === String(att.id)
+                  return (
+                    <div key={String(att.id)} onClick={() => setSelected(att)} style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) auto', alignItems: 'start', columnGap: 10, border: `1px solid ${active ? '#2563eb' : 'rgba(0,0,0,0.08)'}`, background: active ? '#eff6ff' : '#fff', borderRadius: 10, padding: '8px 10px', cursor: 'pointer', transition: 'all 0.15s' }}>
+                      <div style={{ minWidth: 0 }}>
+                        <div style={{ fontWeight: 700, fontSize: labelFontSize, color: '#111827', wordBreak: 'break-word', overflowWrap: 'anywhere' }}>{att.name || `Allegato ${idx + 1}`}</div>
+                        {formatBytes(att.size) && <div style={{ fontSize: Math.max(11, labelFontSize - 1), color: '#64748b' }}>{formatBytes(att.size)}</div>}
+                      </div>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'nowrap', justifyContent: 'flex-end', alignSelf: 'start', whiteSpace: 'nowrap' }}>
+                        {props.onOpen && (
+                          <button type='button' onClick={e => { e.preventDefault(); e.stopPropagation(); void props.onOpen?.(att) }} style={buttonStyle()}>
+                            Apri
+                          </button>
+                        )}
+                        {props.onReplace && (
+                          <button type='button' disabled={disabledEdit} onClick={e => { e.preventDefault(); e.stopPropagation(); if (disabledEdit) return; replaceTargetRef.current = att; window.setTimeout(() => { try { replaceInputRef.current?.click() } catch {} }, 0) }} style={buttonStyle({ disabled: disabledEdit })}>
+                            Sostituisci
+                          </button>
+                        )}
+                        {props.onDelete && (
+                          <button type='button' disabled={disabledEdit} onClick={e => { e.preventDefault(); e.stopPropagation(); if (disabledEdit) return; void props.onDelete?.(att) }} style={buttonStyle({ danger: true, disabled: disabledEdit })}>
+                            Elimina
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
+            ) : (
+              <div style={{ flex: '0 0 auto', color: '#6b7280', fontSize: labelFontSize }}>{props.emptyMessage || 'Nessun allegato.'}</div>
+            )}
+          </div>
+
+          <div style={{ border: '1px solid rgba(255,255,255,0.08)', borderRadius: 10, padding: 12, background: '#282828', display: 'grid', gridTemplateRows: selectedCanRotate && previewUrl ? '34px minmax(0, 1fr) auto' : 'minmax(0, 1fr) auto', gap: 8, overflow: 'hidden', minHeight: 0, height: '100%' }}>
+            {selectedCanRotate && previewUrl && (
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 10 }}>
+                <button type='button' disabled={effectiveRotationBusy} onClick={rotateLeft} title='Ruota a sinistra' aria-label='Ruota a sinistra' style={{ width: 38, height: 34, borderRadius: 9, border: '1px solid rgba(255,255,255,0.28)', background: '#3b3b3b', color: '#fff', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', cursor: effectiveRotationBusy ? 'not-allowed' : 'pointer', opacity: effectiveRotationBusy ? 0.55 : 1, fontSize: 24, fontWeight: 800, lineHeight: 1, fontFamily: 'Arial, sans-serif' }}>↺</button>
+                <button type='button' disabled={confirmRotationDisabled} onClick={() => { void confirmRotation() }} title='Conferma orientamento' aria-label='Conferma orientamento' style={{ width: 38, height: 34, borderRadius: 9, border: !confirmRotationDisabled ? '1px solid #1a7f37' : '1px solid rgba(255,255,255,0.18)', background: !confirmRotationDisabled ? '#1a7f37' : '#3b3b3b', color: '#fff', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', cursor: confirmRotationDisabled ? 'not-allowed' : 'pointer', opacity: effectiveRotationBusy ? 0.55 : (!confirmRotationDisabled ? 1 : 0.38), fontSize: 20, fontWeight: 900, lineHeight: 1, fontFamily: 'Arial, sans-serif' }}>{effectiveRotationBusy ? '…' : '✓'}</button>
+                <button type='button' disabled={effectiveRotationBusy} onClick={rotateRight} title='Ruota a destra' aria-label='Ruota a destra' style={{ width: 38, height: 34, borderRadius: 9, border: '1px solid rgba(255,255,255,0.28)', background: '#3b3b3b', color: '#fff', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', cursor: effectiveRotationBusy ? 'not-allowed' : 'pointer', opacity: effectiveRotationBusy ? 0.55 : 1, fontSize: 24, fontWeight: 800, lineHeight: 1, fontFamily: 'Arial, sans-serif' }}>↻</button>
+              </div>
+            )}
+            <div style={{ minHeight: 0, width: '100%', overflow: 'hidden', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+              {!selected ? (
+                <div style={{ fontSize: labelFontSize, color: 'rgba(255,255,255,0.45)', textAlign: 'center' }}>Seleziona un allegato per visualizzare l&apos;anteprima</div>
+              ) : previewLoading ? (
+                <div style={{ fontSize: labelFontSize, color: 'rgba(255,255,255,0.55)' }}>Caricamento anteprima…</div>
+              ) : previewError ? (
+                <div style={{ fontSize: labelFontSize, color: 'rgba(255,255,255,0.45)', textAlign: 'center' }}>{previewError}</div>
+              ) : previewUrl ? (() => {
+                if (isImageAttachment(selected)) return <img src={previewUrl} alt={selected.name || ''} style={{ display: 'block', maxWidth: '100%', maxHeight: '100%', width: 'auto', height: 'auto', borderRadius: 6, objectFit: 'contain', transform: `rotate(${Number(effectiveRotationDeg || 0)}deg)`, transformOrigin: 'center center', transition: 'transform 0.16s ease' }}/>
+                const pdfPreview = isPdfAttachment(selected) || !!selected.previewUrl || String(previewUrl || '').toLowerCase().includes('.pdf') || /^blob:/i.test(previewUrl)
+                if (pdfPreview) {
+                  return (
+                    <div style={{ width: '100%', height: '100%', minHeight: 0, borderRadius: 6, overflow: 'hidden' }}>
+                      <AnteprimaPdfViewer
+                        url={previewUrl}
+                        fileName={selected.name || 'allegato.pdf'}
+                        title='Anteprima allegato'
+                        subtitle={selected.name || ''}
+                        loading={false}
+                        error={null}
+                        emptyText='Anteprima PDF non disponibile.'
+                        style={{ width: '100%', height: '100%', minHeight: 0 }}
+                      />
+                    </div>
+                  )
+                }
+                return <div style={{ fontSize: labelFontSize, color: 'rgba(255,255,255,0.45)', textAlign: 'center' }}>Anteprima non disponibile per questo tipo di file.</div>
+              })() : (
+                <div style={{ fontSize: labelFontSize, color: 'rgba(255,255,255,0.45)', textAlign: 'center' }}>Anteprima PDF non disponibile per questo allegato. Se il file originale non è PDF o immagine, deve essere presente un PDF di anteprima associato.</div>
+              )}
+            </div>
+            {selected && (
+              <div style={{ fontSize: Math.max(11, labelFontSize - 1), color: 'rgba(255,255,255,0.78)', textAlign: 'center', wordBreak: 'break-word', maxHeight: 36, overflow: 'hidden' }}>
+                {selected.name || `Allegato #${selected.id}`}{formatBytes(selected.size) ? ` • ${formatBytes(selected.size)}` : ''}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}

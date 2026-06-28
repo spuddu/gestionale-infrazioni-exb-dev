@@ -93,8 +93,8 @@ const MODERN_PALETTE = {
   formFieldBg: '#f8fbff',
   formFieldColor: '#0f172a',
   formFieldBorderColor: '#bfcede',
-  formFieldDisabledBg: '#e7eef7',
-  formFieldDisabledColor: '#64748b',
+  formFieldDisabledBg: '#e8edf3',
+  formFieldDisabledColor: '#1f2937',
   formCardBg: '#f8fbff',
   formCardBorderColor: '#c6d7ea',
   formCardBorderRadius: 8,
@@ -410,9 +410,10 @@ export default function Setting(props: AllWidgetSettingProps<IMConfig>) {
       </SectionBox>
       <SectionBox title='Campi input / combo / textarea'>
         <div style={P.grid2}><Color k='formFieldBg' label='Sfondo campo' fallback='#f8fbff'/><Color k='formFieldColor' label='Colore testo' fallback='#0f172a'/></div>
-        <div style={P.grid2}><Color k='formFieldBorderColor' label='Colore bordo' fallback='#bfcede'/><Color k='formFieldDisabledBg' label='Sfondo campo bloccato' fallback='#e7eef7'/></div>
+        <div style={P.grid2}><Color k='formFieldBorderColor' label='Colore bordo' fallback='#bfcede'/><Color k='formFieldDisabledBg' label='Sfondo campo bloccato' fallback='#e8edf3'/></div>
+        <div style={P.grid2}><Color k='formFieldDisabledColor' label='Colore testo campo bloccato' fallback='#1f2937'/><div /></div>
         <div style={P.grid3}><Num k='formFieldFontSize' label='Dimensione testo' min={8} max={24}/><Num k='formFieldHeight' label='Altezza campo' min={24} max={60}/><Num k='formFieldPaddingX' label='Padding orizzontale' min={0} max={30}/></div>
-        <div style={P.grid3}><Num k='formFieldBorderWidth' label='Spessore bordo' min={0} max={8}/><Num k='formFieldBorderRadius' label='Arrotondamento' min={0} max={30}/><Color k='formFieldDisabledColor' label='Testo campo bloccato' fallback='#334155'/></div>
+        <div style={P.grid3}><Num k='formFieldBorderWidth' label='Spessore bordo' min={0} max={8}/><Num k='formFieldBorderRadius' label='Arrotondamento' min={0} max={30}/><div /></div>
       </SectionBox>
       <SectionBox title='Card / gruppi sezione'>
         <div style={P.grid2}><Color k='formCardBg' label='Sfondo card' fallback='#f8fbff'/><Color k='formCardBorderColor' label='Bordo card' fallback='#c6d7ea'/></div>

@@ -1,0 +1,14 @@
+{
+  "serviceUrl": "https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_utenti/FeatureServer/0",
+  "clientSecret": "",
+  "title": "GII – Gestione Utenti",
+  "titleColor": "#93c5fd",
+  "titleFontSize": 15,
+  "fieldLabelColor": "#1F4E79",
+  "fieldLabelFontSize": 11,
+  "detailCardBackgroundColor": "#f5f9ff",
+  "recordsCardBackgroundColor": "#f5f9ff",
+  "tableHeaderBackgroundColor": "#1F4E79",
+  "tableHeaderTextColor": "#ffffff",
+  "tableFontSize": 12
+}

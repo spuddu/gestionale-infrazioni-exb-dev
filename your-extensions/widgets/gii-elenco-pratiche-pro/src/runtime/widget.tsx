@@ -1583,6 +1583,115 @@ function getUtenteNomeCognome(utente?: UtentiEntry | null): string {
   return cleanNomeCognome(utente?.full_name || "");
 }
 
+function normalizePersonaRoleForMatch(role: any): string {
+  const r = normalizeRoleDisplayCode(role);
+  if (r === "RI_AMM") return "RI";
+  if (r === "TI_AMM") return "TI";
+  return r;
+}
+
+function normalizePersonaAreaForMatch(area: any, role?: any): string {
+  const roleCode = normalizeRoleDisplayCode(role);
+  if (roleCode === "RI_AMM" || roleCode === "TI_AMM" || roleCode === "DA")
+    return "AMM";
+
+  const text = normalizeTextCode(area);
+  if (AREA_FROM_TEXT_CODE[text]) return AREA_FROM_TEXT_CODE[text];
+
+  const n = Number(area);
+  return Number.isFinite(n) ? normalizeAreaCode(n) : "";
+}
+
+function normalizePersonaSettoreForMatch(settore: any): string {
+  const text = normalizeTextCode(settore);
+  if (text === "CS") return "DS";
+  if (SETTORE_TEXT_CODES.has(text)) return text;
+
+  const n = Number(settore);
+  return Number.isFinite(n) ? normalizeSettoreCode(n) : "";
+}
+
+function getUtenteEntryRoleCode(utente?: UtentiEntry | null): string {
+  if (!utente) return "";
+  return normalizePersonaRoleForMatch(
+    utente.ruoloCod ||
+      (utente.ruolo != null && RUOLO_LABEL[Number(utente.ruolo)]
+        ? RUOLO_LABEL[Number(utente.ruolo)]
+        : ""),
+  );
+}
+
+function getUtenteEntryAreaCode(utente?: UtentiEntry | null): string {
+  if (!utente) return "";
+  return resolveAreaCode(utente.area, utente.areaCod);
+}
+
+function getUtenteEntrySettoreCode(utente?: UtentiEntry | null): string {
+  if (!utente) return "";
+  return resolveSettoreCode(utente.settore, utente.settoreCod);
+}
+
+function getDisplayRoleFromUtente(
+  utente: UtentiEntry | null | undefined,
+  fallbackRole: any,
+): string {
+  const role = normalizeRoleDisplayCode(
+    utente?.ruoloCod ||
+      (utente?.ruolo != null && RUOLO_LABEL[Number(utente.ruolo)]
+        ? RUOLO_LABEL[Number(utente.ruolo)]
+        : fallbackRole),
+  );
+  const area = getUtenteEntryAreaCode(utente) || normalizePersonaAreaForMatch("", fallbackRole);
+  if (role === "RI" && area === "AMM") return "RI_AMM";
+  if (role === "TI" && area === "AMM") return "TI_AMM";
+  return role || normalizeRoleDisplayCode(fallbackRole);
+}
+
+function resolveUtenteForPersona(
+  utentiMap: Map<string, UtentiEntry> | null,
+  ruolo: string,
+  area: string,
+  settore: string,
+  usernameOrName?: string,
+): UtentiEntry | null {
+  if (!utentiMap) return null;
+
+  const rawUser = String(usernameOrName || "").trim();
+  const uname = rawUser.toLowerCase();
+  const direct = uname ? utentiMap.get(uname) : null;
+  if (direct) return direct;
+
+  const cleanCandidate = cleanNomeCognome(rawUser).toLowerCase();
+  if (cleanCandidate && cleanCandidate !== "—") {
+    for (const entry of utentiMap.values()) {
+      const entryName = getUtenteNomeCognome(entry).toLowerCase();
+      if (entryName && entryName === cleanCandidate) return entry;
+    }
+  }
+
+  const targetRole = normalizePersonaRoleForMatch(ruolo);
+  if (!targetRole) return null;
+
+  const targetArea = normalizePersonaAreaForMatch(area, ruolo);
+  const targetSettore = normalizePersonaSettoreForMatch(settore);
+  const needsSettore =
+    (targetRole === "TR" || targetRole === "TI" || targetRole === "RZ") &&
+    targetArea !== "AMM";
+
+  for (const entry of utentiMap.values()) {
+    const entryRole = getUtenteEntryRoleCode(entry);
+    const entryArea = getUtenteEntryAreaCode(entry);
+    const entrySettore = getUtenteEntrySettoreCode(entry);
+
+    if (entryRole !== targetRole) continue;
+    if (targetArea && entryArea !== targetArea) continue;
+    if (needsSettore && targetSettore && entrySettore !== targetSettore) continue;
+    return entry;
+  }
+
+  return null;
+}
+
 function formatPersonaDisplay(nomeCognome: string, qualifica: string): string {
   const name = cleanNomeCognome(nomeCognome) || "—";
   const role = String(qualifica || "").trim();
@@ -1628,13 +1737,16 @@ function formatPersona(
   username: string,
   utentiMap: Map<string, UtentiEntry> | null,
 ): string {
-  const uname = String(username || "")
-    .trim()
-    .toLowerCase();
-  const utente = utentiMap?.get(uname);
+  const utente = resolveUtenteForPersona(
+    utentiMap,
+    ruolo,
+    area,
+    settore,
+    username,
+  );
   return formatPersonaDisplay(
     getUtenteNomeCognome(utente),
-    getQualificaLabel(ruolo),
+    getQualificaLabel(getDisplayRoleFromUtente(utente, ruolo)),
   );
 }
 
@@ -1650,14 +1762,16 @@ function formatPersonaDest(
   usernameDest: string,
   utentiMap: Map<string, UtentiEntry> | null,
 ): string {
-  const uname = String(usernameDest || "")
-    .trim()
-    .toLowerCase();
-  const destEntry = utentiMap?.get(uname);
-  const role = destEntry?.ruoloCod || ruoloDest;
+  const destEntry = resolveUtenteForPersona(
+    utentiMap,
+    ruoloDest,
+    logArea,
+    logSettore,
+    usernameDest,
+  );
   return formatPersonaDisplay(
     getUtenteNomeCognome(destEntry),
-    getQualificaLabel(role),
+    getQualificaLabel(getDisplayRoleFromUtente(destEntry, ruoloDest)),
   );
 }
 
@@ -2216,6 +2330,28 @@ function getRecordUniqKey(
     return `${svc}|OID|${String(oid).trim()}`;
   const rid = (rec as any)?.getId?.() || (rec as any)?.id || "";
   return `${svc}|RID|${String(rid)}`;
+}
+
+function getRecordObjectIdValue(
+  rec: DataRecord | null | undefined,
+  idFieldName?: string,
+  fallbackRid?: string,
+): number | null {
+  try {
+    const d: any = rec?.getData?.() || {};
+    const raw =
+      (idFieldName ? d?.[idFieldName] : undefined) ??
+      d?.OBJECTID ??
+      d?.ObjectId ??
+      d?.objectid ??
+      d?.objectId ??
+      fallbackRid;
+    const n = Number(raw);
+    return Number.isFinite(n) ? n : null;
+  } catch {
+    const n = Number(fallbackRid);
+    return Number.isFinite(n) ? n : null;
+  }
 }
 
 // Mappa codice ruolo numerico → label (dal widget gestione utenti)
@@ -3300,6 +3436,7 @@ export default function Widget(props: Props) {
   const [localSelectedByDs, setLocalSelectedByDs] = React.useState<
     Record<string, string>
   >({});
+  const [localSelectedOid, setLocalSelectedOid] = React.useState<number | null>(null);
   const dsDataRef = React.useRef<
     Record<
       string,
@@ -3318,6 +3455,7 @@ export default function Widget(props: Props) {
     runtimeRecordsRef.current = [];
     dsDataRef.current = {};
     setLocalSelectedByDs({});
+    setLocalSelectedOid(null);
     notifySelectionCleared();
   }, [giiUser?.username]);
 
@@ -3367,7 +3505,16 @@ export default function Widget(props: Props) {
   React.useEffect(() => {
     const h = (evt?: any) => {
       const source = String(evt?.detail?.source || "");
-      forceListRefresh({ preserveSelection: source.startsWith("azioni-presa-in-carico") });
+      const restoreInfo = readRestoreSelectionAfterEdit();
+      const evtOid = evt?.detail?.oid;
+      const sameRestoreOid =
+        !!restoreInfo &&
+        (evtOid == null || Number(evtOid) === Number(restoreInfo.oid));
+      forceListRefresh({
+        preserveSelection:
+          source.startsWith("azioni-presa-in-carico") ||
+          (source === "gii-azioni" && sameRestoreOid),
+      });
     };
     const hSelectionCleared = (evt?: any) => {
       const source = String(evt?.detail?.source || "");
@@ -4934,9 +5081,12 @@ export default function Widget(props: Props) {
       return log ? formatCausaleForLog(log, d) : "";
     }
     if (field === V_DATA_MSG) {
+      // "Ultimo agg." deve rappresentare l'ultimo movimento effettivo della pratica
+      // (presa in carico, rimando, trasmissione, esito), non solo la data del LOG
+      // usato per le colonne Stato/Mittente/Destinatario. Altrimenti, se il LOG
+      // informativo resta quello di un ciclo precedente, l'ordinamento rimane congelato.
       if (isBozzaDeterminazioneTrasmessaRiAmm(d)) return getBozzaDeterminazioneTrasmissionDisplay(d).dataMs ?? computeUltimoAggMs(d) ?? 0;
-      const log = getLogForRecord(d);
-      return log?.dt ?? computeUltimoAggMs(d) ?? 0;
+      return computeUltimoAggMs(d) ?? 0;
     }
     return d[field];
   };
@@ -5087,6 +5237,7 @@ export default function Widget(props: Props) {
 
   const clearAllSelections = React.useCallback(() => {
     setLocalSelectedByDs({});
+    setLocalSelectedOid(null);
     Object.keys(dsDataRef.current).forEach((id) => {
       const e = dsDataRef.current[id];
       if (e?.ds) tryClearSelection(e.ds);
@@ -5269,7 +5420,11 @@ export default function Widget(props: Props) {
 
   React.useEffect(() => {
     const selectedPairs = Object.entries(localSelectedByDs || {});
-    if (!selectedPairs.length) return;
+    const selectedOid =
+      localSelectedOid != null && Number.isFinite(Number(localSelectedOid))
+        ? Number(localSelectedOid)
+        : null;
+    if (!selectedPairs.length && selectedOid == null) return;
 
     // Durante il completamento di una trasmissione/rimando, la pratica può uscire
     // da "In attesa mia" e ricomparire in "In attesa di altri" dopo il refresh.
@@ -5277,13 +5432,20 @@ export default function Widget(props: Props) {
     // la riposiziona nella scheda corretta.
     if (readAfterWorkflowNav()) return;
 
-    const stillVisible = selectedPairs.some(([dsId, rid]) =>
-      mergedRecs.some(
-        (r) =>
-          (recDsLookup.get(r) || "") === dsId &&
-          String(r.getId?.() ?? "") === String(rid),
-      ),
-    );
+    const stillVisible = mergedRecs.some((r) => {
+      const dsId = recDsLookup.get(r) || "";
+      const rid = String(r.getId?.() ?? "");
+      if (selectedPairs.some(([selDsId, selRid]) => dsId === selDsId && rid === String(selRid)))
+        return true;
+      if (selectedOid != null) {
+        const entry = dsDataRef.current[dsId];
+        const idFieldName =
+          String(entry?.ds?.getIdField?.() || "OBJECTID").trim() || "OBJECTID";
+        return getRecordObjectIdValue(r, idFieldName, rid) === selectedOid;
+      }
+      return false;
+    });
+
     if (!stillVisible) {
       const restoreInfo = readRestoreSelectionAfterEdit();
       const preserveUntil = preserveSelectionRefreshUntilRef.current || 0;
@@ -5295,23 +5457,24 @@ export default function Widget(props: Props) {
       clearAllSelections();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [mergedRecs, recDsLookup]);
+  }, [mergedRecs, recDsLookup, localSelectedByDs, localSelectedOid]);
 
   React.useEffect(() => {
     const pending = readAfterWorkflowNav();
     if (!pending) return;
 
-    // La regola richiesta vale solo se l'utente era in "In attesa mia".
-    // Se stava già consultando "Tutte le pratiche" o "In attesa di altri", non forziamo tab.
-    if (activeRoleTab !== "attesa_mia") {
-      clearAfterWorkflowNav();
-      return;
-    }
+    // Il marker post-workflow rimane valido anche dopo il primo cambio scheda:
+    // prima possiamo dover passare da "In attesa mia" a "In attesa di altri",
+    // poi, nel render successivo, dobbiamo ancora selezionare la stessa pratica.
 
     const anyLoading = Object.values(dsDataRef.current || {}).some(
       (e: any) => !!e?.loading,
     );
     if (anyLoading) return;
+    // La scheda di destinazione dopo una trasmissione/rimando dipende anche
+    // dall'ultimo LOG chiuso. Se il LOG non è ancora ricaricato, attendiamo:
+    // altrimenti la selezione può essere spostata/azzerata sulla scheda sbagliata.
+    if (statoRuoloField && !logLoadedRef.current) return;
     if (!activeGroup) return;
 
     let found: {
@@ -5365,8 +5528,10 @@ export default function Widget(props: Props) {
         : "tutte"
       : activeRoleTab;
 
-    if (statoRuoloField && activeRoleTab !== targetRoleTab)
+    if (statoRuoloField && activeRoleTab !== targetRoleTab) {
       setActiveRoleTab(targetRoleTab);
+      return;
+    }
 
     Object.keys(dsDataRef.current).forEach((id) => {
       const e = dsDataRef.current[id];
@@ -5375,6 +5540,7 @@ export default function Widget(props: Props) {
     notifySelectionCleared();
 
     setLocalSelectedByDs({ [found.dsId]: found.rid });
+    setLocalSelectedOid(Number(pending.oid));
     const entry = dsDataRef.current[found.dsId];
     if (entry?.ds) trySelectRecord(entry.ds, found.rec, found.rid);
 
@@ -5448,9 +5614,28 @@ export default function Widget(props: Props) {
       (e: any) => !!e?.loading,
     );
     if (anyLoading || (statoRuoloField && !logLoadedRef.current)) return;
-    if (Object.keys(localSelectedByDs || {}).length > 0) {
-      if (Date.now() > preserveUntil) clearRestoreSelectionAfterEdit();
-      return;
+    const selectedPairs = Object.entries(localSelectedByDs || {});
+    if (selectedPairs.length > 0 || localSelectedOid != null) {
+      const stillSelectedVisible = mergedRecs.some((r) => {
+        const dsId = recDsLookup.get(r) || "";
+        const rid = String(r.getId?.() ?? "");
+        if (selectedPairs.some(([selDsId, selRid]) => dsId === selDsId && rid === String(selRid)))
+          return true;
+        if (localSelectedOid != null) {
+          const entry = dsDataRef.current[dsId];
+          const idFieldName =
+            String(entry?.ds?.getIdField?.() || "OBJECTID").trim() || "OBJECTID";
+          return getRecordObjectIdValue(r, idFieldName, rid) === Number(localSelectedOid);
+        }
+        return false;
+      });
+      // Se la selezione locale è ancora agganciata a una riga reale, non serve
+      // ripristinarla. Se invece il refresh ha ricreato record con id runtime
+      // diverso, proseguiamo e la riagganciamo per OBJECTID.
+      if (stillSelectedVisible) {
+        if (Date.now() > preserveUntil) clearRestoreSelectionAfterEdit();
+        return;
+      }
     }
     if (!mergedRecs.length) return;
 
@@ -5498,6 +5683,7 @@ export default function Widget(props: Props) {
     }
 
     setLocalSelectedByDs({ [found.dsId]: found.rid });
+    setLocalSelectedOid(Number(oidNum));
     const entry = dsDataRef.current[found.dsId];
     if (entry?.ds) trySelectRecord(entry.ds, found.rec, found.rid);
 
@@ -5545,6 +5731,7 @@ export default function Widget(props: Props) {
     activeGroup,
     filteredUseDsJs,
     localSelectedByDs,
+    localSelectedOid,
     resolvedView,
   ]);
 
@@ -5710,6 +5897,12 @@ export default function Widget(props: Props) {
         selectedData?.ObjectId ??
         selectedData?.objectId ??
         found.rid,
+    );
+
+    setLocalSelectedOid(
+      Number.isFinite(oidVal)
+        ? Number(oidVal)
+        : Number(intent.parentObjectId || intent.oid || 0),
     );
 
     publishRuntimeSelection({
@@ -6856,9 +7049,13 @@ export default function Widget(props: Props) {
                   <div className="list">
                     {mergedRecs.map((r, idx) => {
                       const d = r.getData?.() || {};
-                      const oid = Number(d.OBJECTID);
-                      const rid = String(r.getId?.() ?? oid);
                       const recDsId = recDsLookup.get(r) || "";
+                      const entryForRow = dsDataRef.current[recDsId];
+                      const rowIdFieldName =
+                        String(entryForRow?.ds?.getIdField?.() || "OBJECTID").trim() ||
+                        "OBJECTID";
+                      const oid = getRecordObjectIdValue(r, rowIdFieldName) ?? Number(d.OBJECTID);
+                      const rid = String(r.getId?.() ?? oid);
 
                       const fp = String(fieldPratica || "").toLowerCase();
                       const pratica =
@@ -6924,9 +7121,11 @@ export default function Widget(props: Props) {
                             )
                           : "—";
                         causaleVal = formatCausaleForLog(_logEntry, d);
-                        dataMsgVal = _logEntry.dt
-                          ? formatDateIt(_logEntry.dt)
-                          : "—";
+                        // La data visualizzata in "Ultimo agg." segue l'ultimo
+                        // movimento effettivo della pratica. Il LOG resta la fonte per
+                        // Stato/Mittente/Destinatario, ma non deve bloccare la data se
+                        // dopo quel LOG ci sono state prese in carico o nuove trasmissioni.
+                        dataMsgVal = ultimoMs ? formatDateIt(ultimoMs) : "—";
                       } else if (!logLoadedRef.current) {
                         // Per una rilevazione appena creata dal TI il significato è già
                         // certo anche prima del caricamento del LOG: mostra subito il
@@ -7073,7 +7272,11 @@ export default function Widget(props: Props) {
                         dataMsgVal = "—";
                       }
 
-                      const isSel = localSelectedByDs[recDsId] === rid;
+                      const isSel =
+                        localSelectedByDs[recDsId] === rid ||
+                        (localSelectedOid != null &&
+                          Number.isFinite(Number(oid)) &&
+                          Number(localSelectedOid) === Number(oid));
                       const even = idx % 2 === 0;
                       const rowOggettoStyle = getOggettoAccentStyle(causaleVal);
                       const rowOggettoColor =
@@ -7094,6 +7297,7 @@ export default function Widget(props: Props) {
                             if (isSel) {
                               // Deseleziona su TUTTI i DS
                               setLocalSelectedByDs({});
+                              setLocalSelectedOid(null);
                               Object.keys(dsDataRef.current).forEach((id) => {
                                 const e = dsDataRef.current[id];
                                 if (e?.ds) tryClearSelection(e.ds);
@@ -7129,6 +7333,7 @@ export default function Widget(props: Props) {
                               notifySelectionCleared();
                               // Seleziona questo record sul suo DS nativo
                               setLocalSelectedByDs({ [recDsId]: rid });
+                              setLocalSelectedOid(Number.isFinite(Number(oid)) ? Number(oid) : null);
                               const entry = dsDataRef.current[recDsId];
                               if (entry?.ds) trySelectRecord(entry.ds, r, rid);
                               // Notifica azioni del record selezionato
@@ -7137,7 +7342,7 @@ export default function Widget(props: Props) {
                                   entry?.ds?.getIdField?.() || "OBJECTID",
                                 );
                                 const oidVal = Number(
-                                  r.getData?.()[idFieldName] ?? rid,
+                                  getRecordObjectIdValue(r, idFieldName, rid) ?? rid,
                                 );
                                 if (Number.isFinite(oidVal)) {
                                   publishRuntimeSelection({
@@ -7580,8 +7785,7 @@ export default function Widget(props: Props) {
           const resetBtnStyle: React.CSSProperties = {
             position: "absolute",
             top: 6,
-            left: "50%",
-            transform: "translateX(-50%)",
+            right: -25,
             width: 28,
             height: 28,
             borderRadius: 999,
@@ -7632,85 +7836,91 @@ export default function Widget(props: Props) {
               );
             } catch {}
           };
+          const handleElencoSidebarReset = (e: React.SyntheticEvent): void => {
+            e.preventDefault();
+            e.stopPropagation();
+            if (!elencoSidebarDirty || elencoSidebarAutoResettingRef.current) return;
+            const target = giiReadNearestLayoutSidebarDefaultBoundaryX(
+              elencoSidebarHostRef.current,
+            );
+            if (target == null) return;
+            elencoSidebarAutoResettingRef.current = true;
+            giiMoveNearestLayoutSidebarToX(
+              elencoSidebarHostRef.current,
+              target,
+            );
+            window.setTimeout(() => {
+              elencoSidebarAutoResettingRef.current = false;
+              setElencoSidebarDirty(false);
+            }, 450);
+          };
+          const stopElencoSidebarResetEvent = (e: React.SyntheticEvent): void => {
+            e.preventDefault();
+            e.stopPropagation();
+          };
           return (
-            <div
-              style={{
-                position: "absolute",
-                top: 0,
-                bottom: 0,
-                right: -18,
-                width: splitterW,
-                cursor: "col-resize",
-                userSelect: "none",
-                touchAction: "none",
-                zIndex: 2147483646,
-              }}
-              onMouseDown={(e) => {
-                e.preventDefault();
-                e.stopPropagation();
-                const divider = elencoSidebarDividerRef.current;
-                if (!divider) return;
-                elencoSidebarUserDraggingRef.current = true;
-                document.body.style.cursor = "col-resize";
-                fire(divider, "pointerdown", e.clientX, e.clientY, 1);
-                const onMove = (me: MouseEvent) => {
-                  fire(document, "pointermove", me.clientX, me.clientY, 1);
-                };
-                const onUp = (me: MouseEvent) => {
-                  fire(document, "pointerup", me.clientX, me.clientY, 0);
-                  elencoSidebarUserDraggingRef.current = false;
-                  document.body.style.cursor = "";
-                  window.removeEventListener("mousemove", onMove);
-                  window.removeEventListener("mouseup", onUp);
-                  window.setTimeout(() => {
-                    const host = elencoSidebarHostRef.current;
-                    const target =
-                      giiReadNearestLayoutSidebarDefaultBoundaryX(host);
-                    const x = giiReadNearestLayoutSidebarBoundaryX(host);
-                    if (target != null && x != null) {
-                      setElencoSidebarDirty(
-                        Math.abs(Number(x) - Number(target)) > 2,
-                      );
-                    }
-                  }, 120);
-                };
-                window.addEventListener("mousemove", onMove);
-                window.addEventListener("mouseup", onUp);
-              }}
-              title="Ridimensiona pannelli"
-            >
-              <div style={splitterLineStyle} />
+            <>
+              <div
+                style={{
+                  position: "absolute",
+                  top: 0,
+                  bottom: 0,
+                  right: -18,
+                  width: splitterW,
+                  cursor: "col-resize",
+                  userSelect: "none",
+                  touchAction: "none",
+                  zIndex: 2147483646,
+                }}
+                onMouseDown={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  const divider = elencoSidebarDividerRef.current;
+                  if (!divider) return;
+                  elencoSidebarUserDraggingRef.current = true;
+                  document.body.style.cursor = "col-resize";
+                  fire(divider, "pointerdown", e.clientX, e.clientY, 1);
+                  const onMove = (me: MouseEvent) => {
+                    fire(document, "pointermove", me.clientX, me.clientY, 1);
+                  };
+                  const onUp = (me: MouseEvent) => {
+                    fire(document, "pointerup", me.clientX, me.clientY, 0);
+                    elencoSidebarUserDraggingRef.current = false;
+                    document.body.style.cursor = "";
+                    window.removeEventListener("mousemove", onMove);
+                    window.removeEventListener("mouseup", onUp);
+                    window.setTimeout(() => {
+                      const host = elencoSidebarHostRef.current;
+                      const target =
+                        giiReadNearestLayoutSidebarDefaultBoundaryX(host);
+                      const x = giiReadNearestLayoutSidebarBoundaryX(host);
+                      if (target != null && x != null) {
+                        setElencoSidebarDirty(
+                          Math.abs(Number(x) - Number(target)) > 2,
+                        );
+                      }
+                    }, 120);
+                  };
+                  window.addEventListener("mousemove", onMove);
+                  window.addEventListener("mouseup", onUp);
+                }}
+                title="Ridimensiona pannelli"
+              >
+                <div style={splitterLineStyle} />
+              </div>
               <button
                 type="button"
                 style={resetBtnStyle}
-                onMouseDown={(e) => {
-                  e.stopPropagation();
-                }}
-                onClick={(e) => {
-                  e.preventDefault();
-                  e.stopPropagation();
-                  if (!elencoSidebarDirty) return;
-                  const target = giiReadNearestLayoutSidebarDefaultBoundaryX(
-                    elencoSidebarHostRef.current,
-                  );
-                  if (target == null) return;
-                  elencoSidebarAutoResettingRef.current = true;
-                  giiMoveNearestLayoutSidebarToX(
-                    elencoSidebarHostRef.current,
-                    target,
-                  );
-                  window.setTimeout(() => {
-                    elencoSidebarAutoResettingRef.current = false;
-                    setElencoSidebarDirty(false);
-                  }, 450);
-                }}
+                onPointerDown={handleElencoSidebarReset}
+                onMouseDown={stopElencoSidebarResetEvent}
+                onClick={handleElencoSidebarReset}
                 aria-disabled={!elencoSidebarDirty}
                 title="Ripristina larghezza pannelli"
                 aria-label="Ripristina larghezza pannelli"
               >
                 ↔
               </button>
-            </div>
+            </>
           );
         })()}
     </div>

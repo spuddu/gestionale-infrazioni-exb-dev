@@ -34,6 +34,7 @@ type UtenteCached = {
 }
 let _utentiCache: Map<string, UtenteCached> | null = null
 let _utentiLoading = false
+let _utentiCachePromise: Promise<Map<string, UtenteCached> | null> | null = null
 
 const RUOLO_NUM: Record<string, number> = { TR:1, TI:2, RZ:3, RI:4, DT:5, DA:6, ADMIN:7 }
 const AREA_NUM: Record<string, number> = { AMM:1, AGR:2, TEC:3 }
@@ -216,6 +217,50 @@ function findDestUsername (
     return username
   }
   return ''
+}
+
+function ensureUtentiCache (): Promise<Map<string, UtenteCached> | null> {
+  if (_utentiCache) return Promise.resolve(_utentiCache)
+  if (_utentiCachePromise) return _utentiCachePromise
+
+  _utentiLoading = true
+  _utentiCachePromise = (async () => {
+    try {
+      const FeatureLayer = await loadEsriModule<any>('esri/layers/FeatureLayer')
+      const fl = new FeatureLayer({ url: GII_UTENTI_URL })
+      if (typeof fl?.load === 'function') await fl.load()
+      const res = await fl.queryFeatures({
+        where: '1=1',
+        outFields: ['username', 'full_name', 'ruolo', 'area', 'settore', 'ruolo_cod', 'area_cod', 'settore_cod'],
+        returnGeometry: false
+      })
+      const map = new Map<string, UtenteCached>()
+      for (const f of (res?.features || [])) {
+        const a = f?.attributes
+        if (a?.username) {
+          map.set(String(a.username).trim().toLowerCase(), {
+            full_name: String(a.full_name || ''),
+            ruolo: a.ruolo ?? null,
+            area: a.area ?? null,
+            settore: a.settore ?? null,
+            ruoloCod: normalizeRuoloCod(a.ruolo_cod || a.ruolo),
+            areaCod: normalizeAreaCod(a.area_cod || a.area),
+            settoreCod: normalizeSettoreCod(a.settore_cod || a.settore)
+          })
+        }
+      }
+      _utentiCache = map
+      return map
+    } catch (ex) {
+      console.warn('[GII-Azioni] Errore caricamento GII_utenti cache:', ex)
+      return _utentiCache
+    } finally {
+      _utentiLoading = false
+      _utentiCachePromise = null
+    }
+  })()
+
+  return _utentiCachePromise
 }
 
 
@@ -1705,40 +1750,7 @@ function ActionsPanel (props: {
 
   // ── Cache GII_utenti (per risolvere utente_destinatario) ──
   React.useEffect(() => {
-    if (_utentiCache || _utentiLoading) return
-    _utentiLoading = true
-    ;(async () => {
-      try {
-        const FeatureLayer = await loadEsriModule<any>('esri/layers/FeatureLayer')
-        const fl = new FeatureLayer({ url: GII_UTENTI_URL })
-        if (typeof fl?.load === 'function') await fl.load()
-        const res = await fl.queryFeatures({
-          where: '1=1',
-          outFields: ['username', 'full_name', 'ruolo', 'area', 'settore', 'ruolo_cod', 'area_cod', 'settore_cod'],
-          returnGeometry: false
-        })
-        const map = new Map<string, UtenteCached>()
-        for (const f of (res?.features || [])) {
-          const a = f?.attributes
-          if (a?.username) {
-            map.set(String(a.username).trim().toLowerCase(), {
-              full_name: String(a.full_name || ''),
-              ruolo: a.ruolo ?? null,
-              area: a.area ?? null,
-              settore: a.settore ?? null,
-              ruoloCod: normalizeRuoloCod(a.ruolo_cod || a.ruolo),
-              areaCod: normalizeAreaCod(a.area_cod || a.area),
-              settoreCod: normalizeSettoreCod(a.settore_cod || a.settore)
-            })
-          }
-        }
-        _utentiCache = map
-      } catch (ex) {
-        console.warn('[GII-Azioni] Errore caricamento GII_utenti cache:', ex)
-      } finally {
-        _utentiLoading = false
-      }
-    })()
+    void ensureUtentiCache()
   }, [])
 
   const noteOrigRef = React.useRef<string>('')
@@ -2457,11 +2469,16 @@ function ActionsPanel (props: {
 
   type CycleContext = { parentGlobalId: string, area: string, settore: string, username: string }
 
+  const isAreaScopedCycleRole = (r: string): boolean => {
+    const rr = String(r || '').trim().toUpperCase()
+    return rr === 'RI' || rr === 'DT' || rr === 'TI_AMM' || rr === 'RI_AMM' || rr === 'DA'
+  }
+
   const getCurrentCycleContext = (): CycleContext => {
     const giiRole: any = (window as any).__giiUserRole || {}
     const parentGlobalId = String(pickAttrCI(data, ['globalid', 'global_id', 'GlobalID', 'GLOBALID', 'parent_globalid']) || '')
     const area = normalizeAreaLabel(giiRole.areaCod || giiRole.area_cod || giiRole.areaLabel || giiRole.area || pickAttrCI(data, ['area_cod', 'area', 'cod_area']))
-    const settore = normalizeSettoreLabel(
+    const settore = isAreaScopedCycleRole(role) ? '' : normalizeSettoreLabel(
       area,
       giiRole.settoreCod || giiRole.settore_cod || giiRole.settoreLabel || giiRole.settore || pickAttrCI(data, ['settore_cod', 'settore', 'cod_settore']) || inferSettoreFromUsername(String(giiRole.username || pickAttrCI(data, ['creator', 'Creator', 'editor', 'Editor']) || ''))
     )
@@ -2479,10 +2496,10 @@ function ActionsPanel (props: {
     const giiRole: any = (window as any).__giiUserRole || {}
     const parentGlobalId = String(pickAttrCI(attrs, ['globalid', 'global_id', 'GlobalID', 'GLOBALID', 'parent_globalid']) || '')
     const area = base.area || normalizeAreaLabel(giiRole.areaCod || giiRole.area_cod || giiRole.areaLabel || giiRole.area || pickAttrCI(attrs, ['area_cod', 'area', 'cod_area']))
-    const settore = base.settore || normalizeSettoreLabel(
+    const settore = isAreaScopedCycleRole(role) ? '' : (base.settore || normalizeSettoreLabel(
       area,
       giiRole.settoreCod || giiRole.settore_cod || giiRole.settoreLabel || giiRole.settore || pickAttrCI(attrs, ['settore_cod', 'settore', 'cod_settore']) || inferSettoreFromUsername(String(giiRole.username || pickAttrCI(attrs, ['creator', 'Creator', 'editor', 'Editor']) || ''))
-    )
+    ))
     return { ...base, parentGlobalId, area, settore }
   }
 
@@ -2512,6 +2529,11 @@ function ActionsPanel (props: {
 
     const { area, settore } = getCurrentCycleContext()
     return findDestUsername(_utentiCache, destRole, area, settore)
+  }
+
+  const resolveDestUserAsync = async (destRole: string): Promise<string> => {
+    await ensureUtentiCache()
+    return resolveDestUser(destRole)
   }
 
   /**
@@ -4691,12 +4713,20 @@ function ActionsPanel (props: {
       }))
     } catch {}
 
-    // La presa in carico non fa uscire la pratica dalla disponibilità del ruolo corrente:
-    // dopo il refresh deve restare selezionata e il pannello azioni non deve perdere focus.
-    // Per trasmissioni/rimandi/chiusure, invece, la selezione viene ancora azzerata.
-    const keepCurrentSelection = String(reason || '').startsWith('azioni-presa-in-carico')
-    if (!keepCurrentSelection) {
+    const reasonText = String(reason || '')
+    // La presa in carico resta nella scheda corrente; le trasmissioni/rimandi
+    // con LOG possono spostare la pratica in un'altra scheda. In entrambi i casi
+    // NON va emesso un clear della selezione runtime: l'elenco deve poter
+    // riagganciare lo stesso OBJECTID e ripubblicarlo al dettaglio.
+    const keepRuntimeSelection =
+      reasonText.startsWith('azioni-presa-in-carico') ||
+      reasonText === 'azioni-post-log'
+    if (!keepRuntimeSelection) {
       clearRuntimeSelection(reason)
+    }
+    // Dopo trasmissione/rimando il pannello azioni può svuotarsi, ma senza
+    // cancellare la selezione runtime condivisa con elenco/dettaglio.
+    if (!reasonText.startsWith('azioni-presa-in-carico')) {
       setLocalData(null)
     }
   }
@@ -4764,25 +4794,38 @@ function ActionsPanel (props: {
     okText: string,
     logOpts: { eventoChiusura: string, ruoloDestinatario?: string, utenteDestinatario?: string, noteChiusura?: string, fase?: string, informativeActivities?: InformativeActivityTarget[] }
   ) => {
+    const resolvedLogOpts = {
+      ...logOpts,
+      informativeActivities: (logOpts?.informativeActivities || []).map((info) => ({ ...info }))
+    }
+    if (resolvedLogOpts.ruoloDestinatario && !String(resolvedLogOpts.utenteDestinatario || '').trim()) {
+      resolvedLogOpts.utenteDestinatario = await resolveDestUserAsync(resolvedLogOpts.ruoloDestinatario)
+    }
+    for (const info of resolvedLogOpts.informativeActivities || []) {
+      if (info?.ruoloDestinatario && !String(info.utenteDestinatario || '').trim()) {
+        info.utenteDestinatario = await resolveDestUserAsync(info.ruoloDestinatario)
+      }
+    }
+
     // Le azioni di workflow possono lasciare il rapporto visibile nella scheda corrente
     // (es. tab "Tutte le pratiche") oppure farlo uscire dalla coda corrente
     // (es. tab "In attesa mia" dopo una trasmissione).
     // Registriamo solo l'intenzione di ripristino: sarà l'elenco a ripristinare
     // la selezione esclusivamente se il record è ancora visibile nella scheda attiva.
-    markRestoreSelectionAfterAction(String(logOpts?.eventoChiusura || 'workflow'))
-    if (logOpts?.ruoloDestinatario) {
+    markRestoreSelectionAfterAction(String(resolvedLogOpts?.eventoChiusura || 'workflow'))
+    if (resolvedLogOpts?.ruoloDestinatario) {
       // Dopo una trasmissione/rimando/assegnazione l'oggetto esce normalmente
       // da "In attesa mia". L'elenco, se l'utente era in quella scheda,
       // passerà a "In attesa di altri" e manterrà la selezione sullo stesso record.
-      markAfterWorkflowListNavigation(String(logOpts?.eventoChiusura || 'workflow'))
+      markAfterWorkflowListNavigation(String(resolvedLogOpts?.eventoChiusura || 'workflow'))
     }
     const auditDelta = buildWorkflowActionAuditDelta(attributesIn)
     try {
       await runApplyEdits(attributesIn, okText, { deferRefresh: true, keepLoading: true })
-      await closeCycleLog({ ...logOpts, auditOldMap: auditDelta.oldMap, auditNewMap: auditDelta.newMap })
+      await closeCycleLog({ ...resolvedLogOpts, auditOldMap: auditDelta.oldMap, auditNewMap: auditDelta.newMap })
       await deleteCurrentActivityForCurrentRole()
-      if (logOpts?.ruoloDestinatario) await upsertCurrentActivityForDest(logOpts, attributesIn)
-      for (const info of (logOpts?.informativeActivities || [])) {
+      if (resolvedLogOpts?.ruoloDestinatario) await upsertCurrentActivityForDest(resolvedLogOpts, attributesIn)
+      for (const info of (resolvedLogOpts?.informativeActivities || [])) {
         await upsertInformativeActivityForDest(info, attributesIn)
       }
       await refreshAfterWorkflowSave('azioni-post-log')

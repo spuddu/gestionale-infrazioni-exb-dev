@@ -40,6 +40,14 @@ export interface Config {
   redirectAfterSignOut: string
   signedInClick: 'signout' | 'menu'
 
+  // ── Menu utente (quando signedInClick === 'menu') ──
+  accountMenuShowName: boolean
+  accountMenuShowAvatar: boolean
+  accountMenuShowProfile: boolean
+  accountMenuProfileUrl: string
+  accountMenuShowSettings: boolean
+  accountMenuSettingsUrl: string
+
   // ── Compatibilità ExB 1.19 ──
   forceReloadAfterLogoutLogin: boolean
 
@@ -89,6 +97,12 @@ export const defaultConfig: Config = {
   redirectAfterSignIn: '',
   redirectAfterSignOut: '',
   signedInClick: 'signout',
+  accountMenuShowName: true,
+  accountMenuShowAvatar: true,
+  accountMenuShowProfile: true,
+  accountMenuProfileUrl: 'https://cbsm-hub.maps.arcgis.com/home/user.html',
+  accountMenuShowSettings: true,
+  accountMenuSettingsUrl: 'https://cbsm-hub.maps.arcgis.com/home/user.html',
   forceReloadAfterLogoutLogin: true,
 
   alertsEnabled: true,

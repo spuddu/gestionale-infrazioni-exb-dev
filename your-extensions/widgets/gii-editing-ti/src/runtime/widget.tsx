@@ -7,6 +7,7 @@ import { createPortal } from 'react-dom'
 import type { IMConfig, TabConfig } from '../config'
 import { defaultConfig, DEFAULT_FIELD_LAYOUTS } from '../config'
 import AnteprimaPanel, { clearEditingTiAnteprimaDocumentMemory } from './anteprima-panel'
+import GiiAttachmentViewer, { type GiiAttachmentViewerItem } from '../../../_shared/gii-anteprime/allegati/gii-attachment-viewer'
 
 type MsgKind = 'info' | 'ok' | 'err'
 type Msg = { kind: MsgKind; text: string }
@@ -3793,7 +3794,7 @@ const _defaultFormStyle = {
   divColor: '#93c5fd', divWidth: 2,
   fieldColor: '#0f172a', fieldFontSize: 13, fieldHeight: 32, fieldPaddingX: 9,
   fieldBorderColor: '#bfcede', fieldBorderWidth: 1, fieldBorderRadius: 7, fieldBg: '#f8fbff',
-  fieldDisabledBg: '#e7eef7', fieldDisabledColor: '#64748b',
+  fieldDisabledBg: '#e8edf3', fieldDisabledColor: '#1f2937',
   sectionGap: 10,
   cardBg: '#f8fbff', cardBorderColor: '#c6d7ea', cardBorderWidth: 1, cardBorderRadius: 8, cardShadow: '0 8px 22px rgba(15, 23, 42, 0.08)',
   cardHeaderBg: 'linear-gradient(90deg, #0d3b66, #155e9d)', cardHeaderColor: '#ffffff', cardHeaderFontSize: 11,
@@ -3895,7 +3896,7 @@ const S: Record<string, React.CSSProperties> = {
   hdr:    { fontSize: 11, fontWeight: 700, color: '#0f4c81', textTransform: 'uppercase', letterSpacing: 1, borderBottom: '2px solid #93c5fd', paddingBottom: 4, marginBottom: 12, marginTop: 20 },
   lbl:    { fontSize: 12, color: '#334155', marginBottom: 3, display: 'block' },
   inp:    { width: '100%', padding: '5px 9px', borderRadius: 7, border: '1px solid rgba(0,0,0,0.18)', fontSize: 13, boxSizing: 'border-box' as const, background: '#f8fbff' },
-  inpDis: { width: '100%', padding: '5px 9px', borderRadius: 7, border: '1px solid rgba(0,0,0,0.18)', fontSize: 13, boxSizing: 'border-box' as const, background: '#f8fbff', color: '#0f172a', opacity: 1, WebkitTextFillColor: '#0f172a' as any },
+  inpDis: { width: '100%', padding: '5px 9px', borderRadius: 7, border: '1px solid #cbd5e1', fontSize: 13, boxSizing: 'border-box' as const, background: '#e8edf3', color: '#1f2937', opacity: 1, WebkitTextFillColor: '#1f2937' as any },
   sel:    { width: '100%', height: 32, minHeight: 32, padding: '0 9px', lineHeight: '32px', borderRadius: 7, border: '1px solid rgba(0,0,0,0.18)', fontSize: 13, boxSizing: 'border-box' as const, background: '#f8fbff', cursor: 'pointer', verticalAlign: 'middle' },
   row2:   { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 },
   row3:   { display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 10 },
@@ -3905,21 +3906,28 @@ const S: Record<string, React.CSSProperties> = {
 
 function fieldBaseStyle(fs: any, disabled?: boolean): React.CSSProperties {
   const h = Math.max(24, Number(fs.fieldHeight) || 32)
+  const normalColor = String(fs.fieldColor || '#111827')
+  const disabledColor = String(fs.fieldDisabledColor || '#1f2937')
+  const normalBg = String(fs.fieldBg || '#fff')
+  const disabledBg = String(fs.fieldDisabledBg || '#e8edf3')
+  const normalBorder = String(fs.fieldBorderColor || 'transparent')
+  const disabledBorder = String(fs.fieldDisabledBorderColor || '#cbd5e1')
   return {
     width: '100%',
     height: h,
     minHeight: h,
     padding: `0 ${Number(fs.fieldPaddingX) || 0}px`,
     borderRadius: Number(fs.fieldBorderRadius) || 0,
-    border: `${Number(fs.fieldBorderWidth) || 0}px solid ${String(fs.fieldBorderColor || 'transparent')}`,
+    border: `${Number(fs.fieldBorderWidth) || 0}px solid ${disabled ? disabledBorder : normalBorder}`,
     fontSize: Number(fs.fieldFontSize) || 13,
     lineHeight: `${h}px`,
     boxSizing: 'border-box' as const,
-    background: String(fs.fieldBg || '#fff'),
-    color: String(fs.fieldColor || '#111827'),
+    background: disabled ? disabledBg : normalBg,
+    color: disabled ? disabledColor : normalColor,
     opacity: 1,
-    WebkitTextFillColor: String(fs.fieldColor || '#111827'),
-    verticalAlign: 'middle'
+    WebkitTextFillColor: disabled ? disabledColor : normalColor,
+    verticalAlign: 'middle',
+    cursor: disabled ? 'default' : undefined
   }
 }
 
@@ -4329,7 +4337,7 @@ function ComuneIstatInput (p: {
             overflowY: 'auto',
             background: '#fff',
             border: '1px solid #aac4e0',
-            borderRadius: 6,
+            borderRadius: 8,
             boxShadow: '0 8px 18px rgba(15, 23, 42, 0.16)'
           }}
           onMouseDown={e => e.preventDefault()}
@@ -5419,7 +5427,7 @@ function NoteSpeseManager (props: NsManagerProps) {
           <div style={{ margin: '8px 10px', padding: '7px 10px', borderRadius: 4, fontSize: 12, fontWeight: 700, border: `1px solid ${msg.ok ? '#b8d4b0' : '#f5b8b8'}`, background: msg.ok ? '#e2efda' : '#fce4e4', color: msg.ok ? '#375623' : '#c00' }}>{msg.text}</div>
         )}
         {!props.readonly && editIdx != null && editIdx >= 0 && editIdx < rows.length && (
-          <div style={{ margin: '8px 10px', padding: 8, border: '1px solid #aac4e0', borderRadius: 6, background: '#f5f9ff', display: 'grid', gap: 6 }}>
+          <div style={{ margin: '8px 10px', padding: 8, border: '1px solid #aac4e0', borderRadius: 8, background: '#f5f9ff', display: 'grid', gap: 6 }}>
             <div style={{ fontSize: 12, color: '#1F4E79', fontWeight: 700 }}>Modifica quantità — {rows[editIdx].codice_voce_snapshot}</div>
             <div style={{ fontSize: 12, color: '#444' }}>{rows[editIdx].descrizione_snapshot}</div>
             <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
@@ -5865,6 +5873,69 @@ function NuovaPraticaForm (p: {
   const currentProfileRole = normalizeRoleCode(currentUserContext.role)
   const isPureConsultationRole = mode === 'edit' && (currentProfileRole === 'RZ' || currentProfileRole === 'DT')
   const isReadOnly = mode === 'edit' && (p.readOnly === true || isPureConsultationRole)
+  const readOnlyBannerText = String(p.readOnlyMessage || 'Pratica aperta in consultazione. Le modifiche sono consentite solo nei casi previsti dal ruolo e dallo stato istruttorio.')
+  const [readOnlyBannerMounted, setReadOnlyBannerMounted] = React.useState(false)
+  const [readOnlyBannerOpen, setReadOnlyBannerOpen] = React.useState(false)
+  const readOnlyBannerTimersRef = React.useRef<number[]>([])
+  const clearReadOnlyBannerTimers = React.useCallback(() => {
+    readOnlyBannerTimersRef.current.forEach(id => { try { window.clearTimeout(id) } catch {} })
+    readOnlyBannerTimersRef.current = []
+  }, [])
+  const showReadOnlyBanner = React.useCallback(() => {
+    clearReadOnlyBannerTimers()
+    if (!isReadOnly) {
+      setReadOnlyBannerOpen(false)
+      setReadOnlyBannerMounted(false)
+      return
+    }
+    setReadOnlyBannerMounted(true)
+    const openTimer = window.setTimeout(() => setReadOnlyBannerOpen(true), 20)
+    const closeTimer = window.setTimeout(() => setReadOnlyBannerOpen(false), 4000)
+    readOnlyBannerTimersRef.current = [openTimer, closeTimer]
+  }, [clearReadOnlyBannerTimers, isReadOnly])
+  React.useEffect(() => {
+    if (isReadOnly) showReadOnlyBanner()
+    else {
+      clearReadOnlyBannerTimers()
+      setReadOnlyBannerOpen(false)
+      setReadOnlyBannerMounted(false)
+    }
+    return clearReadOnlyBannerTimers
+  }, [isReadOnly, readOnlyBannerText, showReadOnlyBanner, clearReadOnlyBannerTimers])
+  const readOnlyInfoButton = isReadOnly ? (
+    <button
+      type='button'
+      title='Informazioni sulla modifica dati'
+      aria-label='Informazioni sulla modifica dati'
+      onClick={() => {
+        if (readOnlyBannerOpen) {
+          clearReadOnlyBannerTimers()
+          setReadOnlyBannerOpen(false)
+        } else showReadOnlyBanner()
+      }}
+      style={{
+        flex: '0 0 22px',
+        width: 22,
+        height: 22,
+        borderRadius: 999,
+        border: 'none',
+        background: 'transparent',
+        color: '#b42318',
+        cursor: 'pointer',
+        padding: 0,
+        boxSizing: 'border-box',
+        display: 'inline-flex',
+        alignItems: 'center',
+        justifyContent: 'center'
+      }}
+    >
+      <svg width='22' height='22' viewBox='0 0 512 512' aria-hidden='true' focusable='false' style={{ display: 'block' }}>
+        <path fill='#b42318' d='M256,0C114.6,0,0,114.6,0,256s114.6,256,256,256,256-114.6,256-256S397.4,0,256,0Z' />
+        <path fill='#ffffff' d='M306.5,195.8l-112.2,10.9-4,14.4,22.1,3.1c14.4,2.7,17.3,6.6,14.1,17.8l-36.1,131.5c-9.5,34,5.2,50,39.7,50s57.7-9.6,71.8-22.6l4.3-15.8c-9.8,6.6-24.2,9.4-33.7,9.4-13.5,0-18.4-7.3-14.9-20.3l49-178.4h-.1Z' />
+        <path fill='#ffffff' d='M268.6,84.7c-24.7,0-44.6,19.9-44.6,44.6s19.9,44.6,44.6,44.6,44.6-19.9,44.6-44.6-19.9-44.6-44.6-44.6Z' />
+      </svg>
+    </button>
+  ) : null
   const isRiAgrTecLimitedEdit = mode === 'edit' && !isReadOnly && isCurrentRiAgrTec()
   const canEditArt30Attrezzature = !isReadOnly && !isRiAgrTecLimitedEdit && currentProfileRole === 'TI'
   const riAgrTecEditableUiFields = React.useMemo(() => new Set(['grado', 'norma15_sel', 'occorrenza']), [])
@@ -5956,6 +6027,20 @@ function NuovaPraticaForm (p: {
   const resetTrasgressoreColumns = React.useCallback(() => {
     setTrasgressoreColumnPercents(defaultTrasgressoreColumnPercents)
   }, [defaultTrasgressoreColumnPercents])
+
+  const handleViolazioneColumnsReset = React.useCallback((evt: React.SyntheticEvent<HTMLButtonElement>) => {
+    evt.preventDefault()
+    evt.stopPropagation()
+    setDraggingViolazioneSplitter(false)
+    resetViolazioneColumns()
+  }, [resetViolazioneColumns])
+
+  const handleTrasgressoreColumnsReset = React.useCallback((evt: React.SyntheticEvent<HTMLButtonElement>) => {
+    evt.preventDefault()
+    evt.stopPropagation()
+    setDraggingTrasgressoreSplitter(false)
+    resetTrasgressoreColumns()
+  }, [resetTrasgressoreColumns])
 
   const startViolazioneResize = React.useCallback((evt: React.MouseEvent<HTMLDivElement>) => {
     evt.preventDefault()
@@ -7014,6 +7099,31 @@ React.useEffect(() => {
   }, [])
 
   const canRotateAttachments = mode === 'edit' && normalizeRoleCode(readGiiUserContext().role) === 'TI' && !isReadOnly && !isRiAgrTecLimitedEdit
+
+  const buildTiAttachmentPreviewUrl = React.useCallback(async (att: GiiAttachmentViewerItem): Promise<string | null> => {
+    if (!att || !currentOid) return null
+    const ct = String(att.contentType || '').toLowerCase()
+    const name = String(att.name || '').toLowerCase()
+    const hasDerivedPdfPreview = !!String((att as any).previewUrl || '').trim()
+    const canPreviewDirect = hasDerivedPdfPreview || ct.startsWith('image/') || ct === 'application/pdf' || /\.(pdf|jpe?g|png|gif|webp|bmp|tif?f)$/i.test(name)
+    if (!canPreviewDirect) return null
+    const rawUrl = hasDerivedPdfPreview ? String((att as any).previewUrl || '').trim() : buildAttachmentRawUrl(att, Number(currentOid), currentLayerUrl)
+    if (!rawUrl) return null
+    let token = ''
+    try {
+      const IdentityManager = await loadEsriModule<any>('esri/identity/IdentityManager')
+      const baseForCred = ensureLayerIndex(normalizeFeatureLayerUrl(currentLayerUrl)) || rawUrl
+      const cred = IdentityManager?.findCredential?.(baseForCred) || IdentityManager?.findCredential?.(baseForCred.replace(/\/\d+$/, ''))
+      token = cred?.token ? String(cred.token) : ''
+    } catch {}
+    let finalUrl = rawUrl
+    if (token && !/[?&]token=/.test(finalUrl)) finalUrl = `${finalUrl}${finalUrl.includes('?') ? '&' : '?'}token=${encodeURIComponent(token)}`
+    finalUrl = `${finalUrl}${finalUrl.includes('?') ? '&' : '?'}giiPreviewTs=${Date.now()}`
+    const resp = await fetch(finalUrl, { credentials: 'same-origin' })
+    if (!resp.ok) throw new Error(`Caricamento allegato fallito (HTTP ${resp.status}).`)
+    const blob = await resp.blob()
+    return URL.createObjectURL(blob)
+  }, [currentOid, currentLayerUrl])
 
   const isRotatableAttachment = React.useCallback((att: { name?: string; contentType?: string }) => {
     const ct = String(att?.contentType || '').toLowerCase()
@@ -8359,7 +8469,17 @@ ${e?.message || String(e)}`
 
   const btnBase: React.CSSProperties = {
     padding: '7px 16px', borderRadius: 8, border: 'none',
-    fontWeight: 700, fontSize: 13, cursor: saving ? 'not-allowed' : 'pointer'
+    fontWeight: 700, fontSize: 13,
+    display: 'inline-flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    verticalAlign: 'middle',
+    boxSizing: 'border-box',
+    lineHeight: 'normal',
+    appearance: 'none',
+    WebkitAppearance: 'none',
+    MozAppearance: 'none',
+    cursor: saving ? 'not-allowed' : 'pointer'
   }
 
   const tabBtn = (id: string, label: string) => (
@@ -8726,7 +8846,7 @@ ${e?.message || String(e)}`
     fontWeight: 800,
     textTransform: 'uppercase',
     letterSpacing: 0.5,
-    marginBottom: 8
+    marginBottom: readOnlyBannerOpen ? 8 : 0
   }
   const renderEditCard = (
     title: string,
@@ -8784,36 +8904,70 @@ ${e?.message || String(e)}`
 
   const mapPointEditDisabled = saving || isReadOnly || isRiAgrTecLimitedEdit
 
-  const renderReadonlyCheckboxTi = (selected: boolean, style?: React.CSSProperties): React.ReactNode => (
-    <span
-      aria-hidden='true'
-      title={selected ? 'Selezionato' : 'Non selezionato'}
-      style={{
-        width: 13,
-        height: 13,
-        border: selected ? '1.5px solid #0f4c81' : '1.5px solid #64748b',
-        borderRadius: 2,
-        display: 'inline-flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        color: selected ? '#0f4c81' : 'transparent',
-        fontSize: 10,
-        fontWeight: 900,
-        lineHeight: 1,
-        background: '#ffffff',
-        boxShadow: selected ? 'inset 0 0 0 1px rgba(15,76,129,0.10)' : 'none',
-        flexShrink: 0,
-        ...style
-      }}
-    >
-      {selected ? '✓' : '•'}
-    </span>
-  )
+  const renderReadonlyCheckboxTi = (selected: boolean, style?: React.CSSProperties): React.ReactNode => {
+    const disabledTextColor = String(formStyle.fieldDisabledColor || '#1f2937')
+    const disabledBgColor = String(formStyle.fieldDisabledBg || '#e8edf3')
+    const checkSvg = `<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><path d='M2.09 9.23L6.23 11.87L13.93 4.13' fill='none' stroke='${disabledTextColor}' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'/></svg>`
+    return (
+      <input
+        type='checkbox'
+        checked={selected}
+        readOnly
+        aria-disabled='true'
+        tabIndex={-1}
+        aria-label={selected ? 'Selezionato' : 'Non selezionato'}
+        title={selected ? 'Selezionato' : 'Non selezionato'}
+        onClick={evt => { evt.preventDefault(); evt.stopPropagation() }}
+        onKeyDown={evt => { evt.preventDefault(); evt.stopPropagation() }}
+        style={{
+          margin: 0,
+          padding: 0,
+          flexShrink: 0,
+          WebkitAppearance: 'none',
+          MozAppearance: 'none',
+          appearance: 'none',
+          boxSizing: 'border-box',
+          width: 13,
+          height: 13,
+          borderRadius: 1.5,
+          border: `1px solid ${disabledTextColor}`,
+          backgroundColor: disabledBgColor,
+          backgroundImage: selected ? `url("data:image/svg+xml,${encodeURIComponent(checkSvg)}")` : 'none',
+          backgroundSize: '100% 100%',
+          backgroundPosition: 'center',
+          backgroundRepeat: 'no-repeat',
+          opacity: 1,
+          cursor: 'default',
+          pointerEvents: 'none',
+          ...style
+        }}
+      />
+    )
+  }
 
   const renderNorma3Checkbox = (selected: boolean, onChange: () => void, style?: React.CSSProperties): React.ReactNode => {
     const disabled = saving || isReadOnly || isRiAgrTecLimitedEdit
     if (disabled) return renderReadonlyCheckboxTi(selected, style)
-    return <input type='checkbox' checked={selected} onChange={onChange} style={{ margin: 0, flexShrink: 0, accentColor: '#0f4c81', ...style }}/>
+    return (
+      <input
+        type='checkbox'
+        checked={selected}
+        disabled={disabled}
+        onChange={() => { if (!disabled) onChange() }}
+        style={{ margin: 0, flexShrink: 0, accentColor: '#0f4c81', ...style }}
+      />
+    )
+  }
+
+  const norma3ReadonlyTextStyle = (selected: boolean): React.CSSProperties => {
+    if (isReadOnly || isRiAgrTecLimitedEdit) {
+      return { color: String(formStyle.fieldDisabledColor || '#1f2937'), fontWeight: 400, opacity: 1 }
+    }
+    return {
+      color: selected ? selectedNorma3TextStyle.color : '#334155',
+      fontWeight: selected ? selectedNorma3TextStyle.fontWeight : 400,
+      opacity: selected ? selectedNorma3TextStyle.opacity : 1
+    }
   }
 
   const renderSpecial = (id: string): React.ReactNode => {
@@ -8990,6 +9144,14 @@ ${e?.message || String(e)}`
           userSelect: 'none',
           touchAction: 'none'
         }
+        const splitterDragZoneStyle: React.CSSProperties = {
+          position: 'absolute',
+          inset: 0,
+          cursor: 'col-resize',
+          userSelect: 'none',
+          touchAction: 'none',
+          zIndex: 1
+        }
         const splitterLineStyle: React.CSSProperties = {
           position: 'absolute',
           top: 0,
@@ -9036,19 +9198,17 @@ ${e?.message || String(e)}`
             <div style={{ minWidth: 0, minHeight: '100%', paddingRight: 6 }}>{leftColumn}</div>
             <div
               style={splitterStyle}
-              onMouseDown={startTrasgressoreResize}
               title='Ridimensiona colonne della scheda Trasgressore'
             >
-              <div style={splitterLineStyle} />
+              <div style={splitterDragZoneStyle} onMouseDown={startTrasgressoreResize}>
+                <div style={splitterLineStyle} />
+              </div>
               <button
                 type='button'
                 style={resetBtnStyle}
-                onMouseDown={e => { e.stopPropagation() }}
-                onClick={e => {
-                  e.preventDefault()
-                  e.stopPropagation()
-                  if (trasgressoreColumnsDirty) resetTrasgressoreColumns()
-                }}
+                onPointerDown={e => { if (trasgressoreColumnsDirty) handleTrasgressoreColumnsReset(e) }}
+                onMouseDown={e => { if (trasgressoreColumnsDirty) handleTrasgressoreColumnsReset(e) }}
+                onClick={e => { if (trasgressoreColumnsDirty) handleTrasgressoreColumnsReset(e) }}
                 disabled={!trasgressoreColumnsDirty}
                 title='Ripristina larghezza colonne'
                 aria-label='Ripristina larghezza colonne'
@@ -9129,10 +9289,10 @@ ${e?.message || String(e)}`
               title={title}
               checkbox={checkbox}
               disabled={disabled}
-              textStyle={{
-                color: active ? selectedNorma3TextStyle.color : (disabled ? '#64748b' : '#334155'),
+              textStyle={disabled ? { color: String(formStyle.fieldDisabledColor || '#1f2937'), fontWeight: 400, opacity: 1 } : {
+                color: active ? selectedNorma3TextStyle.color : '#334155',
                 fontWeight: active ? selectedNorma3TextStyle.fontWeight : 400,
-                opacity: active ? selectedNorma3TextStyle.opacity : (disabled ? 0.72 : 1)
+                opacity: active ? selectedNorma3TextStyle.opacity : 1
               }}
             />
           )
@@ -9264,11 +9424,7 @@ ${e?.message || String(e)}`
                         title={o.l}
                         checkbox={renderNorma3Checkbox(selected, () => !(saving || isRiAgrTecLimitedEdit) && toggleNorma3(o.v))}
                         disabled={saving || isReadOnly || isRiAgrTecLimitedEdit}
-                        textStyle={{
-                          color: selected ? selectedNorma3TextStyle.color : (isRiAgrTecLimitedEdit ? '#64748b' : '#334155'),
-                          fontWeight: selected ? selectedNorma3TextStyle.fontWeight : 400,
-                          opacity: selected ? selectedNorma3TextStyle.opacity : (isRiAgrTecLimitedEdit ? 0.72 : 1)
-                        }}
+                        textStyle={norma3ReadonlyTextStyle(selected)}
                       />
                     </div>
                     <div style={reqCellStyle}>
@@ -9341,10 +9497,10 @@ ${e?.message || String(e)}`
               title='Art. 15 - Prelievo abusivo d’acqua'
               checkbox={checkbox}
               disabled={disabled}
-              textStyle={{
-                color: active ? selectedNorma3TextStyle.color : (disabled ? '#64748b' : '#334155'),
+              textStyle={disabled ? { color: String(formStyle.fieldDisabledColor || '#1f2937'), fontWeight: 400, opacity: 1 } : {
+                color: active ? selectedNorma3TextStyle.color : '#334155',
                 fontWeight: active ? selectedNorma3TextStyle.fontWeight : 400,
-                opacity: active ? selectedNorma3TextStyle.opacity : (disabled ? 0.72 : 1)
+                opacity: active ? selectedNorma3TextStyle.opacity : 1
               }}
             />
           )
@@ -9475,6 +9631,14 @@ ${e?.message || String(e)}`
           userSelect: 'none',
           touchAction: 'none'
         }
+        const splitterDragZoneStyle: React.CSSProperties = {
+          position: 'absolute',
+          inset: 0,
+          cursor: 'col-resize',
+          userSelect: 'none',
+          touchAction: 'none',
+          zIndex: 1
+        }
         const splitterLineStyle: React.CSSProperties = {
           position: 'absolute',
           top: 0,
@@ -9522,19 +9686,17 @@ ${e?.message || String(e)}`
             <div style={{ minWidth: 0, minHeight: '100%', paddingRight: 6 }}>{leftColumn}</div>
             <div
               style={splitterStyle}
-              onMouseDown={startViolazioneResize}
               title='Ridimensiona colonne della scheda Violazione'
             >
-              <div style={splitterLineStyle} />
+              <div style={splitterDragZoneStyle} onMouseDown={startViolazioneResize}>
+                <div style={splitterLineStyle} />
+              </div>
               <button
                 type='button'
                 style={resetBtnStyle}
-                onMouseDown={e => { e.stopPropagation() }}
-                onClick={e => {
-                  e.preventDefault()
-                  e.stopPropagation()
-                  if (violazioneColumnsDirty) resetViolazioneColumns()
-                }}
+                onPointerDown={e => { if (violazioneColumnsDirty) handleViolazioneColumnsReset(e) }}
+                onMouseDown={e => { if (violazioneColumnsDirty) handleViolazioneColumnsReset(e) }}
+                onClick={e => { if (violazioneColumnsDirty) handleViolazioneColumnsReset(e) }}
                 disabled={!violazioneColumnsDirty}
                 title='Ripristina larghezza colonne'
                 aria-label='Ripristina larghezza colonne'
@@ -9559,11 +9721,7 @@ ${e?.message || String(e)}`
                     title={o.l}
                     checkbox={renderNorma3Checkbox(selected, () => !(saving || isRiAgrTecLimitedEdit) && toggleNorma3(o.v))}
                     disabled={saving || isReadOnly || isRiAgrTecLimitedEdit}
-                    textStyle={{
-                      color: selected ? selectedNorma3TextStyle.color : (isRiAgrTecLimitedEdit ? '#64748b' : '#374151'),
-                      fontWeight: selected ? selectedNorma3TextStyle.fontWeight : 400,
-                      opacity: selected ? selectedNorma3TextStyle.opacity : (isRiAgrTecLimitedEdit ? 0.72 : 1)
-                    }}
+                    textStyle={norma3ReadonlyTextStyle(selected)}
                     />
                   </React.Fragment>
                 )
@@ -9683,6 +9841,47 @@ ${e?.message || String(e)}`
     )
   }
 
+  const toolbarRowRef = React.useRef<HTMLDivElement | null>(null)
+  const [toolbarRowMultiline, setToolbarRowMultiline] = React.useState(false)
+
+  React.useEffect((): (() => void) | void => {
+    const el = toolbarRowRef.current
+    if (!el) {
+      setToolbarRowMultiline(false)
+      return
+    }
+
+    const updateToolbarRowMultiline = (): void => {
+      try {
+        const next = el.getBoundingClientRect().height > 44
+        setToolbarRowMultiline(prev => prev === next ? prev : next)
+      } catch {
+        setToolbarRowMultiline(false)
+      }
+    }
+
+    updateToolbarRowMultiline()
+
+    let ro: ResizeObserver | null = null
+    try {
+      if (typeof ResizeObserver !== 'undefined') {
+        ro = new ResizeObserver(updateToolbarRowMultiline)
+        ro.observe(el)
+      }
+    } catch { ro = null }
+
+    window.addEventListener('resize', updateToolbarRowMultiline, true)
+    return (): void => {
+      try { ro?.disconnect() } catch {}
+      window.removeEventListener('resize', updateToolbarRowMultiline, true)
+    }
+  }, [npTab, isReadOnly, readOnlyBannerMounted])
+
+  // Pareggia lo spazio sotto la riga titolo/pulsanti (padding-bottom toolbar + suo border-bottom 1px)
+  // con quello sopra (border + padding del contenitore esterno), così il blocco non risulta
+  // visivamente più vicino al bordo superiore della card che a quello inferiore.
+  const toolbarBottomPad = Math.max(0, Number(formStyle.maskBorderWidth || 0) + Number(formStyle.maskInnerPadding || 0) - 1)
+
   return (
   <FormStyleCtx.Provider value={formStyle}>
     <div ref={npTabSyncElRef} style={{
@@ -9702,86 +9901,145 @@ ${e?.message || String(e)}`
     }}>
 
       {/* ── Toolbar ── */}
-      <div style={{ flex: '0 0 auto', display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-        flexWrap: 'wrap', gap: 8, padding: '8px 0', borderBottom: '1px solid rgba(0,0,0,0.08)' }}>
-        <div style={{ minWidth: 0 }}>
-          <div style={{ fontWeight: 700, fontSize: formStyle.titleFontSize, lineHeight: 1.25 }}>
-            {toolbarTitleInfo.baseTitle}
-            {toolbarTitleInfo.praticaCode ? <> <span style={{ color: '#0b5fff' }}>{toolbarTitleInfo.praticaCode}</span></> : null}
-          </div>
-          {isReadOnly && (
-            <div style={{ marginTop: 3, color: '#b42318', fontSize: Math.max(11, Number(formStyle.msgFontSize || 12)), fontWeight: 650, lineHeight: 1.3 }}>
-              {String(p.readOnlyMessage || 'Pratica aperta in consultazione. Le modifiche sono consentite solo nei casi previsti dal ruolo e dallo stato istruttorio.')}
+      <div style={{
+        flex: '0 0 auto',
+        position: 'relative',
+        padding: isReadOnly && readOnlyBannerMounted ? (readOnlyBannerOpen ? `48px 0 ${toolbarBottomPad}px` : `0 0 ${toolbarBottomPad}px`) : `0 0 ${toolbarBottomPad}px`,
+        borderBottom: '1px solid rgba(0,0,0,0.08)',
+        transition: 'padding 280ms ease'
+      }}>
+        <div ref={toolbarRowRef} style={{
+          position: 'relative',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          flexWrap: 'wrap',
+          gap: 8,
+          minHeight: isReadOnly && readOnlyBannerMounted ? 36 : undefined
+        }}>
+          {isReadOnly && readOnlyBannerMounted && (
+            <div style={{
+              position: 'absolute',
+              // Da chiuso: quadrato 36x36 centrato sulla riga reale (qualunque sia la sua altezza).
+              // Da aperto: stessa posizione di prima (zona padding-top:48 sopra la riga), spostandolo
+              // sopra il bordo superiore della riga della stessa misura del padding-top aggiunto al toolbar.
+              top: readOnlyBannerOpen ? -48 : (toolbarRowMultiline ? 0 : '50%'),
+              transform: readOnlyBannerOpen || toolbarRowMultiline ? 'none' : 'translateY(-50%)',
+              left: 0,
+              right: readOnlyBannerOpen ? 0 : 'auto',
+              width: readOnlyBannerOpen ? 'auto' : 36,
+              height: 36,
+              display: 'flex',
+              alignItems: 'center',
+              gap: 8,
+              padding: readOnlyBannerOpen ? '6px 10px 6px 6px' : '6px',
+              border: '1px solid #fb923c',
+              borderRadius: readOnlyBannerOpen ? formStyle.maskBorderRadius : 8,
+              background: '#fff7ed',
+              color: '#b42318',
+              boxSizing: 'border-box',
+              overflow: 'hidden',
+              zIndex: 2,
+              transition: 'top 280ms ease, transform 280ms ease, width 280ms ease, background-color 220ms ease, border-color 220ms ease'
+            }}>
+              {readOnlyInfoButton}
+              <span style={{
+                fontSize: Math.max(12, Number(formStyle.msgFontSize || 12)),
+                fontWeight: 700,
+                lineHeight: 1.35,
+                whiteSpace: 'nowrap',
+                opacity: readOnlyBannerOpen ? 1 : 0,
+                transform: readOnlyBannerOpen ? 'translateX(0)' : 'translateX(-8px)',
+                maxWidth: readOnlyBannerOpen ? 900 : 0,
+                overflow: 'hidden',
+                transition: 'opacity 280ms ease, transform 280ms ease, max-width 280ms ease'
+              }}>
+                {readOnlyBannerText}
+              </span>
             </div>
           )}
-        </div>
-        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-          {msg && msg.kind === 'ok' && <span style={{ fontSize: formStyle.msgFontSize, color: '#1a7f37' }}>{msg.text}</span>}
-          {npTab === 'nota_spese' && mode === 'edit' && currentOid != null && noteSpeseMissing.length === 0 && currentGlobalId && (
-            <button
-              type='button'
-              onClick={() => {
-                if (noteSpeseBrowseDisabled) {
-                  if (!activeNotaSpeseCasistica || noteSpeseCasistiche.length === 0) {
-                    setNoteSpeseMsg({ ok: false, text: 'Seleziona una violazione collegabile alla nota spese prima di sfogliare il prezzario.' })
+          <div style={{ minWidth: 0, display: 'flex', alignItems: 'center', gap: 8, paddingLeft: isReadOnly && readOnlyBannerMounted ? 44 : 0, transition: 'padding-left 220ms ease', flex: '1 1 280px' }}>
+            <div style={{ fontWeight: 700, fontSize: formStyle.titleFontSize, lineHeight: 1.25 }}>
+              {toolbarTitleInfo.baseTitle}
+              {toolbarTitleInfo.praticaCode ? <> <span style={{ color: '#0b5fff' }}>{toolbarTitleInfo.praticaCode}</span></> : null}
+            </div>
+          </div>
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center', justifyContent: 'flex-end', flex: '0 0 auto', marginLeft: 'auto', flexWrap: 'nowrap' }}>
+            {msg && msg.kind === 'ok' && <span style={{ fontSize: formStyle.msgFontSize, color: '#1a7f37' }}>{msg.text}</span>}
+            {npTab === 'nota_spese' && mode === 'edit' && currentOid != null && noteSpeseMissing.length === 0 && currentGlobalId && (
+              <button
+                type='button'
+                onClick={() => {
+                  if (noteSpeseBrowseDisabled) {
+                    if (!activeNotaSpeseCasistica || noteSpeseCasistiche.length === 0) {
+                      setNoteSpeseMsg({ ok: false, text: 'Seleziona una violazione collegabile alla nota spese prima di sfogliare il prezzario.' })
+                    }
+                    return
                   }
-                  return
-                }
-                try { const pg = resolvePageId('browser-nota-spese'); if (pg) { if (noteSpeseDraftStorageKey) nsWriteDraftSnapshot(noteSpeseDraftStorageKey, noteSpeseRowsDraft, activeNotaSpeseCasistica); try { const curPage = getAppStore()?.getState()?.appRuntimeInfo?.currentPageId || ''; sessionStorage.setItem('GII_NS_RETURN_PAGE', curPage) } catch {} UrlManager.getInstance().changePage(pg) } else { setNoteSpeseMsg({ ok: false, text: 'Pagina "browser-nota-spese" non trovata. Configura una pagina ExB con il widget consultazione prezzario e il widget gii-ns-carrello.' }) } } catch (e: any) { setNoteSpeseMsg({ ok: false, text: e?.message || String(e) }) }
-              }}
-              disabled={noteSpeseBrowseDisabled}
-              title={!activeNotaSpeseCasistica || noteSpeseCasistiche.length === 0 ? 'Seleziona prima una violazione collegabile alla nota spese.' : undefined}
+                  try { const pg = resolvePageId('browser-nota-spese'); if (pg) { if (noteSpeseDraftStorageKey) nsWriteDraftSnapshot(noteSpeseDraftStorageKey, noteSpeseRowsDraft, activeNotaSpeseCasistica); try { const curPage = getAppStore()?.getState()?.appRuntimeInfo?.currentPageId || ''; sessionStorage.setItem('GII_NS_RETURN_PAGE', curPage) } catch {} UrlManager.getInstance().changePage(pg) } else { setNoteSpeseMsg({ ok: false, text: 'Pagina "browser-nota-spese" non trovata. Configura una pagina ExB con il widget consultazione prezzario e il widget gii-ns-carrello.' }) } } catch (e: any) { setNoteSpeseMsg({ ok: false, text: e?.message || String(e) }) }
+                }}
+                disabled={noteSpeseBrowseDisabled}
+                title={!activeNotaSpeseCasistica || noteSpeseCasistiche.length === 0 ? 'Seleziona prima una violazione collegabile alla nota spese.' : undefined}
+                style={{
+                  ...btnBase,
+                  marginRight: 12,
+                  border: '1px solid rgba(15,115,117,0.75)',
+                  background: noteSpeseBrowseDisabled ? '#e5e7eb' : '#0f7375',
+                  color: noteSpeseBrowseDisabled ? '#9ca3af' : '#fff',
+                  cursor: noteSpeseBrowseDisabled ? 'not-allowed' : 'pointer',
+                  opacity: noteSpeseBrowseDisabled ? 0.75 : 1,
+                  whiteSpace: 'nowrap'
+                }}
+              >📋 Sfoglia prezzario</button>
+            )}
+            <button type='button' disabled={isReadOnly || saving || !isDirty} onClick={handleSave}
               style={{
                 ...btnBase,
-                marginRight: 12,
-                border: '1px solid rgba(15,115,117,0.75)',
-                background: noteSpeseBrowseDisabled ? '#e5e7eb' : '#0f7375',
-                color: noteSpeseBrowseDisabled ? '#9ca3af' : '#fff',
-                cursor: noteSpeseBrowseDisabled ? 'not-allowed' : 'pointer',
-                opacity: noteSpeseBrowseDisabled ? 0.75 : 1,
-                whiteSpace: 'nowrap'
-              }}
-            >📋 Sfoglia prezzario</button>
-          )}
-          <button type='button' disabled={isReadOnly || saving || !isDirty} onClick={handleSave}
-            style={{
-              ...btnBase,
-              border: '1px solid rgba(0,0,0,0.18)',
-              background: (isReadOnly || saving || !isDirty) ? '#e5e7eb' : '#1a7f37',
-              color: (isReadOnly || saving || !isDirty) ? '#9ca3af' : '#fff',
-              cursor: (isReadOnly || saving || !isDirty) ? 'not-allowed' : 'pointer'
-            }}>
-            {saving ? 'Salvataggio…' : (p.saveText || 'Salva')}
-          </button>
-          <button type='button' disabled={isReadOnly || saving || !isDirty} onClick={handleCancel}
-            style={{
-              ...btnBase,
-              border: '1px solid rgba(0,0,0,0.24)',
-              background: (isReadOnly || saving || !isDirty) ? '#e5e7eb' : '#d92d20',
-              color: (isReadOnly || saving || !isDirty) ? '#9ca3af' : '#fff',
-              cursor: (isReadOnly || saving || !isDirty) ? 'not-allowed' : 'pointer'
-            }}>
-            Annulla
-          </button>
-          {mode === 'edit' && (
-            <button type='button' disabled={saving || isDirty} onClick={handleCloseEdit}
-              title={isDirty ? 'Salvare o annullare le modifiche prima di chiudere.' : undefined}
+                border: '1px solid rgba(0,0,0,0.18)',
+                background: (isReadOnly || saving || !isDirty) ? '#e5e7eb' : '#1a7f37',
+                color: (isReadOnly || saving || !isDirty) ? '#9ca3af' : '#fff',
+                cursor: (isReadOnly || saving || !isDirty) ? 'not-allowed' : 'pointer'
+              }}>
+              {saving ? 'Salvataggio…' : (p.saveText || 'Salva')}
+            </button>
+            <button type='button' disabled={isReadOnly || saving || !isDirty} onClick={handleCancel}
               style={{
                 ...btnBase,
                 border: '1px solid rgba(0,0,0,0.24)',
-                background: (saving || isDirty) ? '#e5e7eb' : '#1d4ed8',
-                color: (saving || isDirty) ? '#9ca3af' : '#fff',
-                cursor: (saving || isDirty) ? 'not-allowed' : 'pointer'
+                background: (isReadOnly || saving || !isDirty) ? '#e5e7eb' : '#d92d20',
+                color: (isReadOnly || saving || !isDirty) ? '#9ca3af' : '#fff',
+                cursor: (isReadOnly || saving || !isDirty) ? 'not-allowed' : 'pointer'
               }}>
-              Chiudi
+              Annulla
             </button>
-          )}
+            {mode === 'edit' && (
+              <button type='button' disabled={saving || isDirty} onClick={handleCloseEdit}
+                title={isDirty ? 'Salvare o annullare le modifiche prima di chiudere.' : undefined}
+                style={{
+                  ...btnBase,
+                  border: '1px solid rgba(0,0,0,0.24)',
+                  background: (saving || isDirty) ? '#e5e7eb' : '#1d4ed8',
+                  color: (saving || isDirty) ? '#9ca3af' : '#fff',
+                  cursor: (saving || isDirty) ? 'not-allowed' : 'pointer'
+                }}>
+                Chiudi
+              </button>
+            )}
+          </div>
         </div>
       </div>
 
       {/* ── Splitter overlay Luoghi e dati tecnici ── */}
       {npTab === 'dati_tecnici' && (() => {
         const splitterW = Math.max(6, Math.min(40, Number((cfg as any).violazioneSplitterWidth) || 14))
+        const splitterDragZoneStyle: React.CSSProperties = {
+          position: 'absolute',
+          inset: 0,
+          cursor: 'col-resize',
+          userSelect: 'none',
+          touchAction: 'none',
+          zIndex: 1
+        }
         const splitterLineStyle: React.CSSProperties = {
           position: 'absolute',
           top: 0,
@@ -9813,6 +10071,41 @@ ${e?.message || String(e)}`
           opacity: datiTecniciSidebarDirty ? 1 : 0.75,
           zIndex: 2
         }
+        const startDatiTecniciResize = (e: React.MouseEvent<HTMLDivElement>): void => {
+          e.preventDefault()
+          e.stopPropagation()
+          const divider = datiTecniciDividerRef.current
+          if (!divider) return
+          datiTecniciUserDraggingRef.current = true
+          const fire = (target: EventTarget, type: string, x: number, y: number, buttons: number): void => {
+            const opts = { bubbles: true, cancelable: true, clientX: x, clientY: y, screenX: x, screenY: y, button: 0, buttons }
+            try { target.dispatchEvent(new PointerEvent(type, { ...opts, pointerId: 1, pointerType: 'mouse', isPrimary: true })) } catch {}
+            try { target.dispatchEvent(new MouseEvent(type.replace('pointer', 'mouse'), opts)) } catch {}
+          }
+          // Pointerdown sul divisore ExB con le coordinate reali del mouse
+          fire(divider, 'pointerdown', e.clientX, e.clientY, 1)
+          const onMove = (me: MouseEvent): void => {
+            fire(document, 'pointermove', me.clientX, me.clientY, 1)
+          }
+          const onUp = (me: MouseEvent): void => {
+            fire(document, 'pointerup', me.clientX, me.clientY, 0)
+            datiTecniciUserDraggingRef.current = false
+            window.removeEventListener('mousemove', onMove)
+            window.removeEventListener('mouseup', onUp)
+          }
+          window.addEventListener('mousemove', onMove)
+          window.addEventListener('mouseup', onUp)
+        }
+        const handleDatiTecniciColumnsReset = (evt: React.SyntheticEvent<HTMLButtonElement>) => {
+          evt.preventDefault()
+          evt.stopPropagation()
+          datiTecniciUserDraggingRef.current = false
+          const target = giiReadLayoutSidebarDefaultBoundaryX(npTabSyncElRef.current) ?? datiTecniciDefaultBoundaryXRef.current ?? datiTecniciBaselineXRef.current
+          giiMoveNearestLayoutSidebarToX(npTabSyncElRef.current, target)
+          datiTecniciDefaultBoundaryXRef.current = target
+          datiTecniciBaselineXRef.current = target
+          window.setTimeout(() => setDatiTecniciSidebarDirty(false), 350)
+        }
         return (
           <div
             style={{
@@ -9826,49 +10119,18 @@ ${e?.message || String(e)}`
               touchAction: 'none',
               zIndex: 2147483646
             }}
-            onMouseDown={e => {
-              e.preventDefault()
-              e.stopPropagation()
-              const divider = datiTecniciDividerRef.current
-              if (!divider) return
-              datiTecniciUserDraggingRef.current = true
-              const fire = (target: EventTarget, type: string, x: number, y: number, buttons: number) => {
-                const opts = { bubbles: true, cancelable: true, clientX: x, clientY: y, screenX: x, screenY: y, button: 0, buttons }
-                try { target.dispatchEvent(new PointerEvent(type, { ...opts, pointerId: 1, pointerType: 'mouse', isPrimary: true })) } catch {}
-                try { target.dispatchEvent(new MouseEvent(type.replace('pointer', 'mouse'), opts)) } catch {}
-              }
-              // Pointerdown sul divisore ExB con le coordinate reali del mouse
-              fire(divider, 'pointerdown', e.clientX, e.clientY, 1)
-              const onMove = (me: MouseEvent) => {
-                fire(document, 'pointermove', me.clientX, me.clientY, 1)
-              }
-              const onUp = (me: MouseEvent) => {
-                fire(document, 'pointerup', me.clientX, me.clientY, 0)
-                datiTecniciUserDraggingRef.current = false
-                window.removeEventListener('mousemove', onMove)
-                window.removeEventListener('mouseup', onUp)
-              }
-              window.addEventListener('mousemove', onMove)
-              window.addEventListener('mouseup', onUp)
-            }}
-            title='Ridimensiona pannelli'
+            title='Ridimensiona pannelli della scheda Luoghi e dati tecnici'
           >
-            <div style={splitterLineStyle} />
+            <div style={splitterDragZoneStyle} onMouseDown={startDatiTecniciResize}>
+              <div style={splitterLineStyle} />
+            </div>
             <button
               type='button'
               style={resetBtnStyle}
-              onMouseDown={e => { e.stopPropagation() }}
-              onClick={e => {
-                e.preventDefault()
-                e.stopPropagation()
-                if (!datiTecniciSidebarDirty) return
-                const target = giiReadLayoutSidebarDefaultBoundaryX(npTabSyncElRef.current) ?? datiTecniciDefaultBoundaryXRef.current ?? datiTecniciBaselineXRef.current
-                giiMoveNearestLayoutSidebarToX(npTabSyncElRef.current, target)
-                datiTecniciDefaultBoundaryXRef.current = target
-                datiTecniciBaselineXRef.current = target
-                window.setTimeout(() => setDatiTecniciSidebarDirty(false), 350)
-              }}
-              aria-disabled={!datiTecniciSidebarDirty}
+              onPointerDown={e => { if (datiTecniciSidebarDirty) handleDatiTecniciColumnsReset(e) }}
+              onMouseDown={e => { if (datiTecniciSidebarDirty) handleDatiTecniciColumnsReset(e) }}
+              onClick={e => { if (datiTecniciSidebarDirty) handleDatiTecniciColumnsReset(e) }}
+              disabled={!datiTecniciSidebarDirty}
               title='Ripristina larghezza colonne'
               aria-label='Ripristina larghezza colonne'
             >↔</button>
@@ -10034,221 +10296,65 @@ ${e?.message || String(e)}`
 
 {/* ALLEGATI */}
 {npTab === 'allegati' && (
-
-          mode !== 'edit' || currentOid == null ? (
-            renderFullHeightEditCard('ALLEGATI', (
-              <div style={{ fontSize: formStyle.labelFontSize, color: formStyle.labelColor, lineHeight: 1.5 }}>
-                Sarà possibile aggiungere gli allegati <b>solo dopo il primo salvataggio</b> della pratica.
-              </div>
-            ))
-          ) : (
-            <div style={{ display: 'flex', flexDirection: 'column', height: '100%', minHeight: 0, border: '1px solid #c5d9f1', borderRadius: formStyle.cardBorderRadius, background: '#fff', overflow: 'hidden' }}>
-              <div style={{ padding: `${formStyle.cardHeaderPaddingY}px ${formStyle.cardHeaderPaddingX}px`, background: formStyle.cardHeaderBg, color: formStyle.cardHeaderColor, fontWeight: formStyle.cardHeaderFontWeight as any, fontSize: formStyle.cardHeaderFontSize, letterSpacing: 0.25, textTransform: 'uppercase', display: 'flex', alignItems: 'center' }}>
-                ALLEGATI
-              </div>
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, flex: '1 1 auto', minHeight: 0, height: '100%', overflow: 'hidden', padding: 12 }}>
-            {/* Colonna sinistra: lista allegati */}
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 10, minHeight: 0, overflow: 'hidden' }}>
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, flexWrap: 'wrap' }}>
-                <div style={{ fontWeight: 800, fontSize: 13, color: formStyle.hdrColor }}>Elenco allegati</div>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-                  <label style={{
-                    minHeight: 36, height: 36, boxSizing: 'border-box',
-                    padding: '0 14px', borderRadius: 10, border: '1px solid rgba(0,0,0,0.12)', background: '#f8fbff', color: '#111827',
-                    fontSize: 12, fontWeight: 600, cursor: (attachmentsUploading || isReadOnly || isRiAgrTecLimitedEdit) ? 'not-allowed' : 'pointer', opacity: (isReadOnly || isRiAgrTecLimitedEdit) ? 0.55 : 1,
-                    display: 'inline-flex', alignItems: 'center', justifyContent: 'center', lineHeight: 1, whiteSpace: 'nowrap'
-                  }}>
-                    Scegli file
-                    <input
-                      key={attachmentInputKey}
-                      type='file'
-                      multiple
-                      style={{ display: 'none' }}
-                      disabled={attachmentsUploading || isReadOnly || isRiAgrTecLimitedEdit}
-                      onChange={(e) => {
-                        if (isReadOnly || isRiAgrTecLimitedEdit) return
-                        setAttachmentsError(null)
-                        const files = Array.from((e.target as HTMLInputElement).files || [])
-                        setAttachmentFiles(files)
-                        if (files.length > 0) void uploadCurrentAttachments(files)
-                      }}
-                    />
-                  </label>
-                  <input
-                    key={replaceInputKey}
-                    ref={replaceInputRef}
-                    type='file'
-                    style={{ display: 'none' }}
-                    onChange={(e) => {
-                      const file = Array.from((e.target as HTMLInputElement).files || [])[0]
-                      if (isRiAgrTecLimitedEdit) return
-                      if (file && replaceTargetAttachment) {
-                        setAttachmentConfirm({ type: 'replace', attachment: { id: replaceTargetAttachment.id, name: replaceTargetAttachment.name }, file })
-                      }
-                    }}
-                  />
-                </div>
-              </div>
-
-              {attachmentFiles.length > 0 && (
-                <div style={{ fontSize: 12, color: '#374151' }}>
-                  File selezionati: {attachmentFiles.map(f => f.name).join(', ')}
-                </div>
-              )}
-
-              {attachmentsError && (
-                <div style={{ fontSize: 12, color: '#b42318' }}>{attachmentsError}</div>
-              )}
-
-              {attachmentsLoading ? (
-                <div style={{ opacity: 0.75, fontSize: 12 }}>Caricamento allegati…</div>
-              ) : attachments.length > 0 ? (
-                <div style={{ display: 'grid', gap: 8, flex: '1 1 auto', minHeight: 0, overflow: 'auto', paddingRight: 2, alignContent: 'start', gridAutoRows: 'max-content' }}>
-                  {attachments.map((a, idx) => (
-                    <div key={a.id} onClick={() => setPreviewAttachment({ id: a.id, name: a.name, contentType: a.contentType })} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, border: `1px solid ${previewAttachment?.id === a.id ? '#2563eb' : 'rgba(0,0,0,0.08)'}`, borderRadius: 10, padding: '8px 10px', background: previewAttachment?.id === a.id ? '#eff6ff' : '#fff', cursor: 'pointer', transition: 'all 0.15s' }}>
-                      <div style={{ minWidth: 0 }}>
-                        <div style={{ fontWeight: 700, fontSize: 12, color: '#111827', wordBreak: 'break-word' }}>{`Allegato ${idx + 1}`}</div>
-                        <div style={{ fontSize: 11, color: '#64748b' }}>{[a.name, formatBytesLocal(a.size), a.contentType].filter(Boolean).join(' • ')}</div>
-
-                      </div>
-                      {Number(a?.id) > 0 ? (
-                        <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
-                          <button
-                            type='button'
-                            onClick={(e) => {
-                              e.preventDefault()
-                              e.stopPropagation()
-                              void openAttachmentInNewTab(a, Number(currentOid), currentLayerUrl).catch((err: any) => {
-                                setAttachmentsError(err?.message || String(err))
-                              })
-                            }}
-                            style={{
-                              fontSize: 12,
-                              fontWeight: 700,
-                              color: '#1d4ed8',
-                              whiteSpace: 'nowrap',
-                              background: '#f8fbff',
-                              border: '1px solid rgba(29,78,216,0.18)',
-                              borderRadius: 8,
-                              padding: '6px 10px',
-                              cursor: 'pointer'
-                            }}
-                          >
-                            Apri
-                          </button>
-                          <button
-                            type='button'
-                            disabled={attachmentsUploading || isReadOnly || isRiAgrTecLimitedEdit}
-                            onClick={() => { if (isReadOnly || isRiAgrTecLimitedEdit) return; openReplacePicker({ id: Number(a.id), name: a.name }) }}
-                            style={{
-                              fontSize: 12,
-                              fontWeight: 700,
-                              color: '#1d4ed8',
-                              whiteSpace: 'nowrap',
-                              background: '#f8fbff',
-                              border: '1px solid rgba(29,78,216,0.18)',
-                              borderRadius: 8,
-                              padding: '6px 10px',
-                              cursor: (attachmentsUploading || isReadOnly || isRiAgrTecLimitedEdit) ? 'not-allowed' : 'pointer',
-                              opacity: (attachmentsUploading || isReadOnly || isRiAgrTecLimitedEdit) ? 0.6 : 1
-                            }}
-                          >
-                            Sostituisci
-                          </button>
-                          <button
-                            type='button'
-                            disabled={attachmentsUploading || isReadOnly || isRiAgrTecLimitedEdit}
-                            onClick={() => { if (isReadOnly || isRiAgrTecLimitedEdit) return; setAttachmentConfirm({ type: 'delete', attachment: { id: Number(a.id), name: a.name } }) }}
-                            style={{
-                              fontSize: 12,
-                              fontWeight: 700,
-                              color: '#d92d20',
-                              whiteSpace: 'nowrap',
-                              background: '#f8fbff',
-                              border: '1px solid rgba(217,45,32,0.24)',
-                              borderRadius: 8,
-                              padding: '6px 10px',
-                              cursor: (attachmentsUploading || isReadOnly || isRiAgrTecLimitedEdit) ? 'not-allowed' : 'pointer',
-                              opacity: (attachmentsUploading || isReadOnly || isRiAgrTecLimitedEdit) ? 0.6 : 1
-                            }}
-                          >
-                            Elimina
-                          </button>
-                        </div>
-                      ) : null}
-                    </div>
-                  ))}
-                </div>
-              ) : (
-                <div style={{ opacity: 0.75, fontSize: 12 }}>Nessun allegato.</div>
-              )}
-            </div>
-            {/* Colonna destra: anteprima */}
-            <div style={{ border: '1px solid rgba(255,255,255,0.08)', borderRadius: 10, padding: 12, background: '#282828', display: 'grid', gridTemplateRows: 'minmax(0, 1fr) auto', gap: 8, overflow: 'hidden', minHeight: 0, height: '100%' }}>
-              <div style={{ minHeight: 0, width: '100%', overflow: 'hidden', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                {!previewAttachment ? (
-                  <div style={{ fontSize: 12, color: 'rgba(255,255,255,0.45)', textAlign: 'center' }}>Seleziona un allegato per visualizzare l&apos;anteprima</div>
-                ) : previewLoading ? (
-                  <div style={{ fontSize: 12, color: 'rgba(255,255,255,0.55)' }}>Caricamento anteprima…</div>
-                ) : previewBlobUrl ? (() => {
-                  const ct = String(previewAttachment.contentType || '').toLowerCase()
-                  if (ct.startsWith('image/')) return <img src={previewBlobUrl} alt={previewAttachment.name || ''} style={{ display: 'block', maxWidth: '100%', maxHeight: '100%', width: 'auto', height: 'auto', borderRadius: 6, objectFit: 'contain', transform: `rotate(${previewRotationDeg}deg)`, transformOrigin: 'center center', transition: 'transform 0.16s ease' }}/>
-                  if (ct === 'application/pdf') return <iframe src={previewBlobUrl} title={previewAttachment.name || 'PDF'} style={{ width: '100%', height: '100%', minHeight: 0, border: 'none', borderRadius: 6, background: '#fff' }}/>
-                  return <div style={{ fontSize: 12, color: 'rgba(255,255,255,0.45)', textAlign: 'center' }}>Anteprima non disponibile per questo tipo di file.</div>
-                })() : (
-                  <div style={{ fontSize: 12, color: 'rgba(255,255,255,0.45)', textAlign: 'center' }}>Anteprima non disponibile per questo tipo di file.</div>
-                )}
-              </div>
-              <div style={{ width: '100%', display: 'grid', gridTemplateRows: previewAttachment && canRotateAttachments && isRotatableAttachment(previewAttachment) && previewBlobUrl ? '34px auto' : 'auto', gap: 8 }}>
-                {previewAttachment && canRotateAttachments && isRotatableAttachment(previewAttachment) && previewBlobUrl && (
-                  <>
-                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 10 }}>
-                      <button
-                        type='button'
-                        disabled={attachmentsUploading}
-                        onClick={() => setPreviewRotationDeg(v => v - 90)}
-                        title='Ruota a sinistra'
-                        aria-label='Ruota a sinistra'
-                        style={{ width: 38, height: 34, borderRadius: 9, border: '1px solid rgba(255,255,255,0.28)', background: '#3b3b3b', color: '#fff', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', cursor: attachmentsUploading ? 'not-allowed' : 'pointer', opacity: attachmentsUploading ? 0.55 : 1, fontSize: 24, fontWeight: 800, lineHeight: 1, fontFamily: 'Arial, sans-serif' }}
-                      >
-                        ↺
-                      </button>
-                      <button
-                        type='button'
-                        disabled={attachmentsUploading || (((Math.round(previewRotationDeg / 90) * 90) % 360 + 360) % 360) === 0}
-                        onClick={() => { void savePreviewRotation() }}
-                        title='Conferma orientamento'
-                        aria-label='Conferma orientamento'
-                        style={{ width: 38, height: 34, borderRadius: 9, border: (((Math.round(previewRotationDeg / 90) * 90) % 360 + 360) % 360) !== 0 ? '1px solid #1a7f37' : '1px solid rgba(255,255,255,0.18)', background: (((Math.round(previewRotationDeg / 90) * 90) % 360 + 360) % 360) !== 0 ? '#1a7f37' : '#3b3b3b', color: '#fff', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', cursor: attachmentsUploading || (((Math.round(previewRotationDeg / 90) * 90) % 360 + 360) % 360) === 0 ? 'not-allowed' : 'pointer', opacity: attachmentsUploading ? 0.55 : ((((Math.round(previewRotationDeg / 90) * 90) % 360 + 360) % 360) !== 0 ? 1 : 0.38), fontSize: 20, fontWeight: 900, lineHeight: 1, fontFamily: 'Arial, sans-serif' }}
-                      >
-                        {attachmentsUploading ? '…' : '✓'}
-                      </button>
-                      <button
-                        type='button'
-                        disabled={attachmentsUploading}
-                        onClick={() => setPreviewRotationDeg(v => v + 90)}
-                        title='Ruota a destra'
-                        aria-label='Ruota a destra'
-                        style={{ width: 38, height: 34, borderRadius: 9, border: '1px solid rgba(255,255,255,0.28)', background: '#3b3b3b', color: '#fff', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', cursor: attachmentsUploading ? 'not-allowed' : 'pointer', opacity: attachmentsUploading ? 0.55 : 1, fontSize: 24, fontWeight: 800, lineHeight: 1, fontFamily: 'Arial, sans-serif' }}
-                      >
-                        ↻
-                      </button>
-                    </div>
-                  </>
-                )}
-                {previewAttachment && (
-                  <div style={{ fontSize: 11, color: 'rgba(255,255,255,0.78)', textAlign: 'center', wordBreak: 'break-word', maxHeight: 32, overflow: 'hidden' }}>
-                    {`Allegato ${Math.max(1, (attachments || []).findIndex((a: any) => Number(a?.id) === Number(previewAttachment.id)) + 1)}`}
-                    {previewAttachment.name ? ` • ${previewAttachment.name}` : ''}
-                    {previewAttachment.contentType ? ` • ${previewAttachment.contentType}` : ''}
-                  </div>
-                )}
-              </div>
-            </div>
-              </div>
-            </div>
-          )
-        )}
+  mode !== 'edit' || currentOid == null ? (
+    renderFullHeightEditCard('ALLEGATI', (
+      <div style={{ fontSize: formStyle.labelFontSize, color: formStyle.labelColor, lineHeight: 1.5 }}>
+        Sarà possibile aggiungere gli allegati <b>solo dopo il primo salvataggio</b> della pratica.
+      </div>
+    ))
+  ) : (
+    <GiiAttachmentViewer
+      title='ALLEGATI'
+      oidAvailable={mode === 'edit' && currentOid != null}
+      items={attachments as any}
+      loading={attachmentsLoading}
+      busy={attachmentsUploading}
+      error={attachmentsError}
+      canEdit={!isReadOnly && !isRiAgrTecLimitedEdit}
+      uploadInputKey={attachmentInputKey}
+      onUpload={(files) => {
+        if (isReadOnly || isRiAgrTecLimitedEdit) return
+        setAttachmentsError(null)
+        setAttachmentFiles(files)
+        if (files.length > 0) void uploadCurrentAttachments(files)
+      }}
+      selectedItemId={previewAttachment?.id ?? null}
+      onSelectedItemChange={(item) => {
+        setPreviewRotationDeg(0)
+        if (!item) { setPreviewAttachment(null); return }
+        setPreviewAttachment({ id: Number(item.id), name: item.name, contentType: item.contentType })
+      }}
+      buildPreviewUrl={buildTiAttachmentPreviewUrl as any}
+      onOpen={(item) => {
+        void openAttachmentInNewTab(item, Number(currentOid), currentLayerUrl).catch((err: any) => {
+          setAttachmentsError(err?.message || String(err))
+        })
+      }}
+      onReplace={(item, file) => {
+        if (isReadOnly || isRiAgrTecLimitedEdit) return
+        setAttachmentConfirm({ type: 'replace', attachment: { id: Number(item.id), name: item.name }, file })
+      }}
+      onDelete={(item) => {
+        if (isReadOnly || isRiAgrTecLimitedEdit) return
+        setAttachmentConfirm({ type: 'delete', attachment: { id: Number(item.id), name: item.name } })
+      }}
+      rotationDeg={previewRotationDeg}
+      rotationBusy={attachmentsUploading}
+      canConfirmRotation={canRotateAttachments && (((Math.round(previewRotationDeg / 90) * 90) % 360 + 360) % 360) !== 0}
+      onRotateLeft={() => setPreviewRotationDeg(v => v - 90)}
+      onRotateRight={() => setPreviewRotationDeg(v => v + 90)}
+      onConfirmRotation={() => { void savePreviewRotation() }}
+      formatBytes={formatBytesLocal}
+      labelFontSize={12}
+      headerFontSize={formStyle.cardHeaderFontSize}
+      headerBg={formStyle.cardHeaderBg}
+      headerColor={formStyle.cardHeaderColor}
+      headerBorderColor='#c5d9f1'
+      borderRadius={formStyle.cardBorderRadius}
+      innerHeaderColor={formStyle.hdrColor}
+    />
+  )
+)}
 
 {/* ANTEPRIMA */}
 {npTab === 'anteprima' && (
@@ -12236,11 +12342,42 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
     return owned && inCharge && !closedOrForwarded
   }, [inCreateMode, initialEditData])
 
+  const technicalReadOnlyReason = React.useMemo<'role' | 'otherUser' | ''>(() => {
+    if (inCreateMode) return ''
+    const ctx = readGiiUserContext()
+    const currentRole = normalizeRoleCode(ctx.role)
+    const openedInConsultation = effectiveIntent?.readOnly === true
+
+    if (currentRole && currentRole !== 'TI' && currentRole !== 'RI' && currentRole !== 'ADMIN') {
+      return 'role'
+    }
+
+    if (currentRole === 'TI') {
+      const d: any = initialEditData || {}
+      const currentUsername = String(ctx.username || '').trim().toLowerCase()
+      const assignedUsername = String(pickAttrCI(d, ['ti_assegnato_username', 'ti_assegnato_user', 'ti_assegnato']) || '').trim().toLowerCase()
+      const assignedToOtherUser = !!currentUsername && !!assignedUsername && currentUsername !== assignedUsername
+      if (openedInConsultation || assignedToOtherUser || technicalEditAvailability === false) return 'otherUser'
+    }
+
+    if (currentRole === 'RI') {
+      if (openedInConsultation || technicalEditAvailability === false) return 'otherUser'
+    }
+
+    if (!currentRole && openedInConsultation) return 'role'
+    return ''
+  }, [inCreateMode, effectiveIntent?.readOnly, initialEditData, technicalEditAvailability])
+
   const readOnlyEditMode = !inCreateMode && (
+    technicalReadOnlyReason !== '' ||
     technicalEditAvailability === false ||
     (technicalEditAvailability == null && effectiveIntent?.readOnly === true)
   )
-  const readOnlyEditMessage = String(effectiveIntent?.readOnlyMessage || 'Pratica aperta in consultazione. Le modifiche sono consentite solo nei casi previsti dal ruolo e dallo stato istruttorio.')
+  const readOnlyEditMessage = technicalReadOnlyReason === 'role'
+    ? 'Modifica dati non consentita per il tuo ruolo.'
+    : (technicalReadOnlyReason === 'otherUser'
+      ? 'Modifica dati non abilitata. La pratica risulta in carico presso un altro utente.'
+      : String(effectiveIntent?.readOnlyMessage || 'Pratica aperta in consultazione. Le modifiche sono consentite solo nei casi previsti dal ruolo e dallo stato istruttorio.'))
 
   const modeBg = inCreateMode
     ? String(cfg.modeBgCreate || defaultConfig.modeBgCreate)
@@ -12493,9 +12630,9 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
                 try { window.dispatchEvent(new CustomEvent('gii-force-refresh-selection', { detail: { oid: savedOid, layerUrl: nextLayerUrl } })) } catch {}
               }}
             />
-          ) : (
-            <div style={{ padding: 12 }}>{!inCreateMode ? "Record di modifica non disponibile: torna all'elenco e riapri Modifica." : 'Datasource dinamica non pronta: configura il layer schema oppure seleziona una pratica.'}</div>
-          )}
+          ) : inCreateMode ? (
+            <div style={{ padding: 12 }}>Datasource dinamica non pronta: configura il layer schema oppure seleziona una pratica.</div>
+          ) : null}
         </div>
 
       </div>
