@@ -1,0 +1,15 @@
+{
+  "title": "Report pratiche",
+  "subtitle": "Quadro di sintesi delle fasi procedimentali delle pratiche di competenza.",
+  "whereClause": "1=1",
+  "pageSize": 2000,
+  "staleDays": 15,
+  "tableRows": 25,
+  "showTechnicalInfo": false,
+  "accentColor": "#b79ffe",
+  "panelBg": "rgba(11,26,48,0.92)",
+  "cardBg": "rgba(255,255,255,0.08)",
+  "cardBorder": "rgba(255,255,255,0.14)",
+  "textColor": "#ffffff",
+  "mutedColor": "rgba(255,255,255,0.70)"
+}

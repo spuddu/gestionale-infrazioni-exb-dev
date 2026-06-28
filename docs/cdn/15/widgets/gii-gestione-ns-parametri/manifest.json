@@ -1,0 +1,20 @@
+{
+  "name": "gii-gestione-ns-parametri",
+  "label": "GII - Gestione parametri",
+  "type": "widget",
+  "version": "1.0.0",
+  "exbVersion": "1.19.0",
+  "author": "CBSM",
+  "description": "Gestione profilata dei parametri nota spese, sanzioni, cauzione e attrezzature.",
+  "dependency": [
+    "jimu-arcgis"
+  ],
+  "translatedLocales": [
+    "it"
+  ],
+  "defaultSize": {
+    "width": 900,
+    "height": 650
+  },
+  "properties": {}
+}
