@@ -2581,6 +2581,7 @@ type CicloRecord = {
 const EVENTO_LABELS: Record<string, string> = {
   CREAZIONE: 'Creazione rilevazione',
   ISTRUTTORIA_TRASMESSA: 'Istruttoria trasmessa',
+  PROPOSTA_CONTESTAZIONE_APPROVATA: 'Istruttoria amministrativa approvata',
   INTEGRAZIONE_TRASMESSA: 'Integrazione trasmessa',
   INTEGRAZIONE: 'Richiesta integrazione',
   RAPPORTO_APPROVATO: 'Rapporto approvato',

@@ -985,6 +985,8 @@ function alertDisplayTitle (alert: GiiAlertItem): string {
 
   if (alertIsNewRilevazione(alert)) return 'Nuova rilevazione ricevuta'
   if (event === 'ISTRUTTORIA_TRASMESSA' && destRole === 'RZ' && alertIsTiOrigin(alert)) return 'Nuova rilevazione ricevuta'
+  if (subtype === 'ATTESTAZIONE_CONFORMITA_TI_AMM' || event === 'ATTESTAZIONE_CONFORMITA') return 'Attestazione di conformità apposta'
+  if (subtype === 'PROPOSTA_CONTESTAZIONE_APPROVATA' || event === 'PROPOSTA_CONTESTAZIONE_APPROVATA') return 'Proposta di contestazione approvata'
   if (alertIsNewAssignmentReceived(alert)) return 'Nuova istruttoria assegnata'
   if (subtype === 'RILEVAZIONE_RESPINTA' || subtype === 'RZ_RESPINGE_RILEVAZIONE') return 'Nuova rilevazione respinta'
   if (subtype === 'RZ_APPROVA_RILEVAZIONE') return rawTitleUpper.includes('INTEGRAZIONE') ? 'Integrazione validata' : 'Istruttoria approvata'
@@ -1981,7 +1983,11 @@ function materializeAlertNumber (alert: GiiAlertItem): string {
 }
 
 function materializeAlertTitle (alert: GiiAlertItem): string {
+  const subtype = alertSubtypeCode(alert)
+  const event = alertOriginEventCode(alert)
   if (alertIsNewRilevazione(alert)) return 'Nuova rilevazione ricevuta'
+  if (subtype === 'ATTESTAZIONE_CONFORMITA_TI_AMM' || event === 'ATTESTAZIONE_CONFORMITA') return 'Attestazione di conformità apposta'
+  if (subtype === 'PROPOSTA_CONTESTAZIONE_APPROVATA' || event === 'PROPOSTA_CONTESTAZIONE_APPROVATA') return 'Proposta di contestazione approvata'
   if (alertIsNewAssignmentReceived(alert)) return 'Nuova istruttoria assegnata'
   const t = String(alert?.title || '').trim()
   return t || 'Nuova istruttoria ricevuta'

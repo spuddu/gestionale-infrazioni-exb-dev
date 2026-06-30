@@ -25,6 +25,7 @@ const GII_ATTIVITA_CORRENTI_URL = 'https://services2.arcgis.com/vH5RykSdaAwiEGOJ
 // ── Cache GII_utenti per risolvere utente_destinatario ──────────────────────
 type UtenteCached = {
   full_name: string
+  email?: string
   ruolo: number | null
   area: number | null
   settore: number | null
@@ -219,6 +220,46 @@ function findDestUsername (
   return ''
 }
 
+function findDestEmail (
+  cache: Map<string, UtenteCached> | null,
+  roleLabel: string,
+  areaLabel: string,
+  settoreLabel: string
+): string {
+  if (!cache) return ''
+  const rRaw = String(roleLabel || '').trim().toUpperCase()
+
+  let ruoloCod = normalizeRuoloCod(rRaw)
+  let areaCod = normalizeAreaCod(areaLabel)
+  let settoreCod = normalizeSettoreCod(settoreLabel)
+
+  if (rRaw === 'RI_AMM')       { ruoloCod = 'RI'; areaCod = 'AMM'; settoreCod = '' }
+  else if (rRaw === 'TI_AMM')  { ruoloCod = 'TI'; areaCod = 'AMM'; settoreCod = '' }
+  else if (rRaw === 'DA')      { ruoloCod = 'DA'; areaCod = 'AMM'; settoreCod = '' }
+
+  const ruoloCode = RUOLO_NUM[ruoloCod]
+  const areaCode = areaCod ? AREA_NUM[areaCod] : undefined
+  const settoreCode = settoreCod ? SETTORE_NUM[settoreCod] : undefined
+  if (!ruoloCod && !ruoloCode) return ''
+
+  const needsSettore = (ruoloCod === 'TR' || ruoloCod === 'RZ') && areaCod !== 'AMM'
+
+  for (const [, entry] of cache) {
+    const entryRuoloCod = normalizeRuoloCod(entry.ruoloCod || entry.ruolo)
+    const entryAreaCod = normalizeAreaCod(entry.areaCod || entry.area)
+    const entrySettoreCod = normalizeSettoreCod(entry.settoreCod || entry.settore)
+
+    if (ruoloCod && entryRuoloCod !== ruoloCod) continue
+    if (!ruoloCod && ruoloCode != null && entry.ruolo !== ruoloCode) continue
+    if (areaCod && entryAreaCod !== areaCod) continue
+    if (!areaCod && areaCode != null && entry.area !== areaCode) continue
+    if (needsSettore && settoreCod && entrySettoreCod !== settoreCod) continue
+    if (needsSettore && !settoreCod && settoreCode != null && entry.settore !== settoreCode) continue
+    return String(entry.email || '').trim()
+  }
+  return ''
+}
+
 function ensureUtentiCache (): Promise<Map<string, UtenteCached> | null> {
   if (_utentiCache) return Promise.resolve(_utentiCache)
   if (_utentiCachePromise) return _utentiCachePromise
@@ -231,7 +272,7 @@ function ensureUtentiCache (): Promise<Map<string, UtenteCached> | null> {
       if (typeof fl?.load === 'function') await fl.load()
       const res = await fl.queryFeatures({
         where: '1=1',
-        outFields: ['username', 'full_name', 'ruolo', 'area', 'settore', 'ruolo_cod', 'area_cod', 'settore_cod'],
+        outFields: ['*'],
         returnGeometry: false
       })
       const map = new Map<string, UtenteCached>()
@@ -240,6 +281,7 @@ function ensureUtentiCache (): Promise<Map<string, UtenteCached> | null> {
         if (a?.username) {
           map.set(String(a.username).trim().toLowerCase(), {
             full_name: String(a.full_name || ''),
+            email: String(a.email || a.e_mail || a.mail || a.pec || '').trim(),
             ruolo: a.ruolo ?? null,
             area: a.area ?? null,
             settore: a.settore ?? null,
@@ -2536,6 +2578,109 @@ function ActionsPanel (props: {
     return resolveDestUser(destRole)
   }
 
+
+  const resolveDestEmailAsync = async (destRole: string): Promise<string> => {
+    await ensureUtentiCache()
+    const r = String(destRole || '').trim().toUpperCase()
+    if (!r) return ''
+    if (r === 'DA') return findDestEmail(_utentiCache, 'DA', 'AMM', '')
+    if (r === 'TI_AMM') return findDestEmail(_utentiCache, 'TI_AMM', 'AMM', '')
+    if (r === 'RI_AMM') return findDestEmail(_utentiCache, 'RI_AMM', 'AMM', '')
+    const { area, settore } = getCurrentCycleContext()
+    return findDestEmail(_utentiCache, destRole, area, settore)
+  }
+
+  const findBozzaDeterminazioneAttachmentForSendTo = async (): Promise<{ name: string, url: string } | null> => {
+    try {
+      if (!ds || !Number.isFinite(oid as any) || Number(oid) <= 0) return null
+      const layer = await resolveFeatureLayerForAttachments(ds)
+      if (!layer) return null
+      const infos = await queryFeatureAttachmentsForActions(layer, Number(oid), ds)
+      const normalized = (infos || [])
+        .map((att: any) => {
+          const name = String(att?.name || att?.attName || att?.fileName || '').trim()
+          const url = String(att?.url || '').trim()
+          const id = Number(att?.id ?? att?.attachmentId ?? att?.objectId)
+          return { name, url, id, raw: att }
+        })
+        .filter((att: any) => att.name)
+      const candidates = normalized.filter((att: any) => {
+        const n = String(att.name || '').toLowerCase()
+        return (n.includes('bozza') || n.includes('determina')) && (n.includes('determinaz') || n.includes('determina')) && /\.docx?$/i.test(att.name)
+      })
+      const chosen = (candidates[0] || normalized.find((att: any) => /\.docx?$/i.test(att.name) && String(att.name || '').toLowerCase().includes('bozza')) || null)
+      if (!chosen) return null
+      let url = String(chosen.url || '').trim()
+      if (!url && Number.isFinite(chosen.id) && chosen.id > 0) {
+        const layerUrl = attachmentLayerUrlForActions(layer, ds)
+        if (layerUrl) {
+          let token = ''
+          try {
+            const IdentityManager = await loadEsriModule<any>('esri/identity/IdentityManager')
+            const cred = IdentityManager?.findCredential?.(layerUrl) || IdentityManager?.findCredential?.(layerUrl.replace(/\/\d+$/, ''))
+            token = cred?.token ? String(cred.token) : ''
+          } catch {}
+          url = `${layerUrl}/${Number(oid)}/attachments/${chosen.id}${token ? `?token=${encodeURIComponent(token)}` : ''}`
+        }
+      }
+      return url ? { name: chosen.name, url } : null
+    } catch {
+      return null
+    }
+  }
+
+  const buildDaBozzaSendToMailtoPayload = async (): Promise<{ mailtoUrl: string, to: string, subject: string, body: string, attachmentName: string, attachmentUrl: string }> => {
+    const daEmail = await resolveDestEmailAsync('DA')
+    const numero = buildPracticeCodeFromData(data, oid)
+    const attachment = await findBozzaDeterminazioneAttachmentForSendTo()
+    const subject = `Bozza di determinazione - Rapporto tecnico n. ${numero || '—'}`
+    const bodyLines = [
+      `Si trasmette, per le valutazioni di competenza, la bozza di determinazione relativa al Rapporto tecnico n. ${numero || '—'}.`,
+      ''
+    ]
+    if (attachment?.url) {
+      bodyLines.push(`Collegamento alla bozza di determinazione: ${attachment.url}`)
+      bodyLines.push('')
+    } else {
+      bodyLines.push('La bozza definitiva è allegata alla pratica nel gestionale.')
+      bodyLines.push('')
+    }
+    bodyLines.push('Cordiali saluti.')
+    const body = bodyLines.join('\n')
+    const to = String(daEmail || '').trim()
+    const mailtoUrl = `mailto:${encodeURIComponent(to)}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`
+    return {
+      mailtoUrl,
+      to,
+      subject,
+      body,
+      attachmentName: attachment?.name || '',
+      attachmentUrl: attachment?.url || ''
+    }
+  }
+
+  const triggerDaBozzaSendTo = async (): Promise<void> => {
+    const numero = buildPracticeCodeFromData(data, oid)
+    const payload = await buildDaBozzaSendToMailtoPayload()
+    const detail = {
+      source: 'gii-azioni',
+      type: 'BOZZA_DETERMINAZIONE_DA',
+      oid,
+      numeroRapporto: numero,
+      destinatario: 'Direttore Area AA. GG. e P.F.',
+      to: payload.to,
+      subject: payload.subject,
+      body: payload.body,
+      attachmentName: payload.attachmentName,
+      attachmentUrl: payload.attachmentUrl,
+      mailtoUrl: payload.mailtoUrl,
+      ts: Date.now()
+    }
+    try { window.dispatchEvent(new CustomEvent('gii:send-to-da', { detail })) } catch {}
+    try { window.dispatchEvent(new CustomEvent('gii:send-to', { detail })) } catch {}
+    try { window.setTimeout(() => { window.location.href = payload.mailtoUrl }, 0) } catch {}
+  }
+
   /**
    * Verifica se il ruolo corrente è stato riattivato per rispondere a una richiesta di integrazione.
    * Controlla se un ruolo "superiore" ha esito=INTEGRAZIONE nei confronti di questo ruolo.
@@ -2568,11 +2713,14 @@ function ActionsPanel (props: {
   }
 
   const queryOpenCycle = async (parentGlobalId: string, ruoloCompetente: string) => {
-    if (!parentGlobalId) return null
+    const targetParts: string[] = []
+    if (parentGlobalId) targetParts.push(`(${parentGlobalIdWhere('parent_globalid', parentGlobalId)})`)
+    if (oid != null && Number.isFinite(Number(oid))) targetParts.push(`parent_objectid = ${Number(oid)}`)
+    if (!targetParts.length) return null
     const logLayer = await getCycleLogLayer()
     if (!logLayer?.queryFeatures) return null
     const q = logLayer.createQuery ? logLayer.createQuery() : {}
-    q.where = `(${parentGlobalIdWhere('parent_globalid', parentGlobalId)}) AND ruolo_competente = ${sqlQuote(ruoloCompetente)} AND stato_record = 'APERTO'`
+    q.where = `(${targetParts.join(' OR ')}) AND ruolo_competente = ${sqlQuote(ruoloCompetente)} AND stato_record = 'APERTO'`
     q.outFields = ['*']
     q.returnGeometry = false
     q.num = 1
@@ -2765,8 +2913,8 @@ function ActionsPanel (props: {
     try {
       if (oid == null) return
       const { parentGlobalId, area, settore, username } = await getCurrentCycleContextAsync()
-      if (!parentGlobalId) {
-        console.warn('[GII_LOG_EVENTI_CICLI] Chiusura ciclo saltata: parent_globalid non disponibile.', { oid, role })
+      if (!parentGlobalId && (oid == null || !Number.isFinite(Number(oid)))) {
+        console.warn('[GII_LOG_EVENTI_CICLI] Chiusura ciclo saltata: riferimenti pratica non disponibili.', { oid, role })
         return
       }
       const logLayer = await getCycleLogLayer()
@@ -2774,6 +2922,10 @@ function ActionsPanel (props: {
       const feature = await queryOpenCycle(parentGlobalId, role)
 
       if (!feature?.attributes) {
+        if (!parentGlobalId) {
+          console.warn('[GII_LOG_EVENTI_CICLI] Nessun ciclo aperto trovato e parent_globalid non disponibile: creazione record chiuso saltata.', { oid, role })
+          return
+        }
         // Nessun ciclo APERTO trovato (es. TI origine=2 che non passa dalla presa in carico).
         // Creo un record completo direttamente come CHIUSO (apertura + chiusura in un colpo).
         const nextNum = await getNextCycleNumber(parentGlobalId, role)
@@ -2934,7 +3086,7 @@ function ActionsPanel (props: {
     upd: Record<string, any>,
     ruoloDest: string,
     mode: 'TRASMISSIONE' | 'INTEGRAZIONE',
-    opts?: { technicalIntegration?: boolean, destUsername?: string }
+    opts?: { technicalIntegration?: boolean, destUsername?: string, externalDestLabel?: string }
   ) => {
     try {
       const schemaFields: Record<string, any> = (ds as any)?.getSchema?.()?.fields || {}
@@ -2948,7 +3100,7 @@ function ActionsPanel (props: {
       const ctx = getCurrentCycleContext()
       const destMeta = getRoutingMetaForRole(ruoloDest, opts)
       const mittente = makeGiiActorLabel(role, ctx.username, { area: ctx.area, settore: ctx.settore })
-      const destinatario = makeGiiActorLabel(ruoloDest, opts?.destUsername || resolveDestUser(ruoloDest), destMeta)
+      const destinatario = String(opts?.externalDestLabel || '').trim() || makeGiiActorLabel(ruoloDest, opts?.destUsername || resolveDestUser(ruoloDest), destMeta)
 
       if (fDa) upd[fDa] = mittente
       if (fA) upd[fA] = destinatario
@@ -2994,6 +3146,8 @@ function ActionsPanel (props: {
     const dst = String(ruoloDest || '').trim().toUpperCase()
 
     if (ev === 'NUOVA_ASSEGNAZIONE') return 'NUOVA_ASSEGNAZIONE'
+    if (ev === 'ATTESTAZIONE_CONFORMITA') return 'ATTESTAZIONE_CONFORMITA_TI_AMM'
+    if (ev === 'PROPOSTA_CONTESTAZIONE_APPROVATA') return 'PROPOSTA_CONTESTAZIONE_APPROVATA'
     if (ev === 'RAPPORTO_APPROVATO') return 'RAPPORTO_APPROVATO'
     if (ev === 'SANZIONE_APPROVATA') return 'VERBALE_APPROVATO'
     if (ev === 'INTEGRAZIONE_RICHIESTA') return 'RICHIESTA_INTEGRAZIONE'
@@ -3016,6 +3170,8 @@ function ActionsPanel (props: {
     if (st === 'NUOVO_RAPPORTO') return 'Nuova rilevazione'
     if (st === 'RAPPORTO_UFFICIO') return 'Rilevazione'
     if (st === 'NUOVA_ASSEGNAZIONE') return 'Nuova assegnazione'
+    if (st === 'ATTESTAZIONE_CONFORMITA_TI_AMM') return 'Attestazione di conformità apposta'
+    if (st === 'PROPOSTA_CONTESTAZIONE_APPROVATA') return 'Istruttoria amministrativa approvata'
     if (st === 'RICHIESTA_INTEGRAZIONE') return 'Integrazione richiesta'
     if (st === 'INTEGRAZIONE_TRASMESSA') return 'Integrazione trasmessa'
     if (st === 'RAPPORTO_APPROVATO') return 'Pratica approvata'
@@ -3033,6 +3189,8 @@ function ActionsPanel (props: {
     if (st === 'NUOVO_RAPPORTO') return `Rilevazione n. ${n} da prendere in carico.`
     if (st === 'RAPPORTO_UFFICIO') return `Rilevazione n. ${n} da prendere in carico.`
     if (st === 'NUOVA_ASSEGNAZIONE') return `Pratica n. ${n} da prendere in carico.`
+    if (st === 'ATTESTAZIONE_CONFORMITA_TI_AMM') return `Attestazione di conformità sulla pratica n. ${n} da prendere in carico.`
+    if (st === 'PROPOSTA_CONTESTAZIONE_APPROVATA') return `Istruttoria amministrativa della pratica n. ${n} approvata dal Responsabile dell’istruttoria amministrativa. Pratica da prendere in carico per protocollazione e predisposizione della bozza di determinazione.`
     if (st === 'RICHIESTA_INTEGRAZIONE') return `Integrazione n. ${n} da prendere in carico.`
     if (st === 'INTEGRAZIONE_TRASMESSA') return `Integrazione n. ${n} da prendere in carico.`
     if (st === 'RAPPORTO_APPROVATO') return `Pratica approvata n. ${n} da prendere in carico.`
@@ -3057,6 +3215,8 @@ function ActionsPanel (props: {
       if (src === 'RI_AMM' && dst === 'DA') return 'Istruttoria amministrativa approvata'
     }
 
+    if (ev === 'PROPOSTA_CONTESTAZIONE_APPROVATA' && src === 'RI_AMM' && dst === 'TI_AMM') return 'Istruttoria amministrativa approvata'
+    if (ev === 'ATTESTAZIONE_CONFORMITA' && src === 'TI_AMM' && dst === 'RI_AMM') return 'Attestazione di conformità apposta'
     if (ev === 'INVIO_A_TI_AMM') return 'Istruttoria amministrativa trasmessa'
     if (ev === 'RESTITUZIONE_A_TI_AMM') return 'Pratica restituita'
 
@@ -3077,6 +3237,8 @@ function ActionsPanel (props: {
       if (src === 'RI_AMM' && dst === 'DA') return `Proposta di contestazione sulla pratica n. ${n} da prendere in carico.`
     }
 
+    if (ev === 'PROPOSTA_CONTESTAZIONE_APPROVATA' && src === 'RI_AMM' && dst === 'TI_AMM') return `Il Responsabile dell’istruttoria amministrativa ha approvato l’istruttoria amministrativa della pratica n. ${n}. La pratica può essere presa in carico per protocollazione del fascicolo e predisposizione della bozza di determinazione.`
+    if (ev === 'ATTESTAZIONE_CONFORMITA' && src === 'TI_AMM' && dst === 'RI_AMM') return `Il Tecnico Istruttore amministrativo ha apposto il visto di conformità sulla pratica n. ${n}.`
     if (ev === 'INVIO_A_TI_AMM') return `Istruttoria amministrativa n. ${n} da prendere in carico.`
     if (ev === 'RESTITUZIONE_A_TI_AMM') return `Pratica n. ${n} restituita al Tecnico Istruttore amministrativo.`
 
@@ -3287,9 +3449,9 @@ function ActionsPanel (props: {
       if (target === 'TI_AMM') return 'TI_AMM'
       return 'RI'
     }
-    // Dopo l'attestazione di conformità il TI_AMM non trasmette la pratica al RI_AMM:
-    // resta il soggetto operativo e prosegue con protocollazione/proposta e bozza di determinazione.
-    if (role === 'TI_AMM') return ''
+    // TI_AMM: sia il visto positivo sia il rimando/non conformità rientrano al RI_AMM.
+    // Il TI_AMM non gestisce più un invio separato dalla maschera amministrativa.
+    if (role === 'TI_AMM') return 'RI_AMM'
     if (role === 'DA')     return 'RI_AMM'
     return ''
   }
@@ -3300,10 +3462,16 @@ function ActionsPanel (props: {
     if (role === 'RI')     return 'DT'
     if (role === 'DT')     return 'RI_AMM'   // DT approva e trasmette direttamente a RI_AMM (fase sanzionatoria)
     if (role === 'RI_AMM') {
-      // RI_AMM: prima assegna la pratica al TI_AMM; dopo la verifica del TI_AMM
-      // valida la bozza di determinazione e la trasmette fuori gestionale alla firma DA.
-      const esitoTiAmm = pickAttrCI(data, ['esito_TI_AMM', 'ESITO_TI_AMM'])
-      return toNumOrNull(esitoTiAmm) != null ? '' : 'TI_AMM'
+      const detStato = String(pickAttrCI(data, ['determinazione_stato', 'DETERMINAZIONE_STATO']) || '').trim().toUpperCase()
+      // Secondo passaggio RI_AMM: proposta e bozza determina sono state trasmesse dal TI_AMM.
+      // L'azione positiva è l'approvazione del fascicolo; la pratica rientra
+      // nella disponibilità operativa del TI_AMM per protocollazione e invio al Direttore.
+      if (detStato === 'TRASMESSA_RI_AMM' || detStato === 'BOZZA_TRASMESSA_RI_AMM') return 'TI_AMM'
+
+      // Primo passaggio RI_AMM dopo visto TI_AMM: approva la Proposta di contestazione
+      // e restituisce la pratica al TI_AMM per protocollazione e bozza determina.
+      const esitoTiAmm = toNumOrNull(pickAttrCI(data, ['esito_TI_AMM', 'ESITO_TI_AMM']))
+      return esitoTiAmm === ESITO_APPROVATA ? 'TI_AMM' : ''
     }
     if (role === 'TI_AMM') return 'RI_AMM'
     return ''
@@ -3373,7 +3541,10 @@ function ActionsPanel (props: {
   const roleEsitoValue = pickAttrCI(data, [roleEsitoField, roleEsitoField.toUpperCase()])
   const roleEsitoNum = toNumOrNull(roleEsitoValue)
   const determinazioneStatoCorrente = String(pickAttrCI(data, ['determinazione_stato', 'DETERMINAZIONE_STATO']) || '').trim().toUpperCase()
-  const riAmmBozzaDeterminazioneDaVerificare = role === 'RI_AMM' && determinazioneStatoCorrente === 'TRASMESSA_RI_AMM'
+  const riAmmBozzaDeterminazioneDaVerificare = role === 'RI_AMM' && (
+    determinazioneStatoCorrente === 'TRASMESSA_RI_AMM' ||
+    determinazioneStatoCorrente === 'BOZZA_TRASMESSA_RI_AMM'
+  )
   const tiAmmAttestazioneOperativa = role === 'TI_AMM' && roleEsitoNum === ESITO_APPROVATA && (
     !determinazioneStatoCorrente ||
     determinazioneStatoCorrente === 'BOZZA'
@@ -3811,7 +3982,7 @@ function ActionsPanel (props: {
       return isMeaningful(p) || isMeaningful(s) || isMeaningful(e)
     }
 
-    // fwdDest dinamico: DT→RI_AMM diretto, RI_AMM→TI_AMM/DA, DA→TI_AMM
+    // fwdDest dinamico: DT→RI_AMM diretto; RI_AMM non apre più un nodo DA interno.
     const getFwdDestLocal = (r: string): string => {
       switch (r) {
         case 'TI':     return 'RZ'
@@ -3819,8 +3990,10 @@ function ActionsPanel (props: {
         case 'RI':     return 'DT'
         case 'DT':     return 'RI_AMM'
         case 'RI_AMM': {
-          const esitoTiAmm = pickAttrCI(d, ['esito_TI_AMM', 'ESITO_TI_AMM'])
-          return toNum(esitoTiAmm) != null ? 'DA' : 'TI_AMM'
+          const detStato = String(pickAttrCI(d, ['determinazione_stato', 'DETERMINAZIONE_STATO']) || '').trim().toUpperCase()
+          if (detStato === 'TRASMESSA_RI_AMM' || detStato === 'BOZZA_TRASMESSA_RI_AMM') return ''
+          const esitoTiAmm = toNum(pickAttrCI(d, ['esito_TI_AMM', 'ESITO_TI_AMM']))
+          return esitoTiAmm === ESITO_APPROVATA ? 'TI_AMM' : ''
         }
         case 'TI_AMM': return 'RI_AMM'
         case 'DA':     return 'TI_AMM'
@@ -3960,6 +4133,7 @@ function ActionsPanel (props: {
   // bloccare RI_AMM né impedire una nuova assegnazione.
   const esitoTiAmmNum = toNumOrNull(pickAttrCI(data, ['esito_TI_AMM', 'ESITO_TI_AMM']))
   const statoTiAmmNum = toNumOrNull(pickAttrCI(data, ['stato_TI_AMM', 'STATO_TI_AMM']))
+  const riAmmStaApprovandoPropostaContestazione = role === 'RI_AMM' && esitoTiAmmNum === ESITO_APPROVATA
   const tiAmmAssignmentOpen = hasTiAmmAssigned && (
     statoTiAmmNum === STATO_DA_PRENDERE ||
     statoTiAmmNum === STATO_PRESA_IN_CARICO ||
@@ -4079,10 +4253,16 @@ function ActionsPanel (props: {
     role === 'RI_AMM'
 
   const tiAmmConformitaGiaApposta = role === 'TI_AMM' && esitoTiAmmNum === ESITO_APPROVATA
+  const riAmmHaRimandatoATiAmmDopoVisto = role === 'TI_AMM' && tiAmmConformitaGiaApposta && (
+    esitoRiAmmNum === ESITO_INTEGRAZIONE ||
+    statoRiAmmNum === STATO_INTEGRAZIONE
+  )
+  const tiAmmPuoApporreAttestazione = role !== 'TI_AMM' || !tiAmmConformitaGiaApposta || riAmmHaRimandatoATiAmmDopoVisto
 
   const canStartApprova =
     canStartEsito &&
     role !== 'TI_AMM' &&
+    tiAmmPuoApporreAttestazione &&
     !(role === 'RZ' && (origineNum == null || origineNum === 1) && !hasTiAnyEvidence) &&
     !(role === 'RI_AMM' && !currentIntegrationRequester && esitoTiAmmNum !== ESITO_APPROVATA)
 
@@ -4143,7 +4323,8 @@ function ActionsPanel (props: {
     role === 'RI' ? 'Approva istruttoria tecnica' :
     role === 'DT' ? 'Approva Rapporto tecnico di rilevazione' :
     role === 'DA' ? 'Approva atto amministrativo' :
-    role === 'RI_AMM' && fwdDest === 'DA' ? 'Approva istruttoria amministrativa' :
+    role === 'RI_AMM' && riAmmBozzaDeterminazioneDaVerificare ? 'Approva istruttoria amministrativa' :
+    role === 'RI_AMM' && riAmmStaApprovandoPropostaContestazione ? 'Approva istruttoria amministrativa' :
     role === 'RI_AMM' ? `Trasmetti al ${fwdDestLabel}` :
     role === 'TI_AMM' ? 'Apponi attestazione di conformità' :
     'Approva'
@@ -4155,7 +4336,8 @@ function ActionsPanel (props: {
     role === 'RI' ? `Istruttoria tecnica approvata e trasmessa al ${getRoleLabelForForward('DT')}` :
     role === 'DT' ? `Rapporto tecnico di rilevazione approvato e trasmesso al ${getRoleLabelForMenu('RI_AMM')}` :
     role === 'DA' ? `Atto amministrativo approvato e trasmesso al ${getRoleLabelForMenu('TI_AMM')}` :
-    role === 'RI_AMM' && fwdDest === 'DA' ? `Istruttoria amministrativa approvata e trasmessa al ${getRoleLabelForForward('DA')}` :
+    role === 'RI_AMM' && riAmmBozzaDeterminazioneDaVerificare ? 'Istruttoria amministrativa approvata' :
+    role === 'RI_AMM' && riAmmStaApprovandoPropostaContestazione ? 'Istruttoria amministrativa approvata' :
     role === 'RI_AMM' ? `Trasmessa al ${fwdDestLabel}` :
     role === 'TI_AMM' ? 'Attestazione di conformità apposta' :
     'Approvata'
@@ -4167,7 +4349,8 @@ function ActionsPanel (props: {
     role === 'RI' ? 'Approva istruttoria tecnica' :
     role === 'DT' ? 'Approva rapporto tecnico' :
     role === 'DA' ? 'Approva atto amministrativo' :
-    role === 'RI_AMM' && fwdDest === 'DA' ? 'Approva istruttoria amministrativa' :
+    role === 'RI_AMM' && riAmmBozzaDeterminazioneDaVerificare ? 'Approva istruttoria amministrativa' :
+    role === 'RI_AMM' && riAmmStaApprovandoPropostaContestazione ? 'Approva istruttoria amministrativa' :
     role === 'RI_AMM' ? `Trasmetti al ${fwdDestLabel}` :
     role === 'TI_AMM' ? 'Apponi attestazione' :
     'Approva'
@@ -4292,7 +4475,8 @@ function ActionsPanel (props: {
     role === 'RI' ? 'Approva istruttoria tecnica' :
     role === 'DT' ? 'Approva Rapporto tecnico di rilevazione' :
     role === 'DA' ? 'Approva atto amministrativo' :
-    role === 'RI_AMM' && fwdDest === 'DA' ? 'Approva istruttoria amministrativa' :
+    role === 'RI_AMM' && riAmmBozzaDeterminazioneDaVerificare ? 'Approva istruttoria amministrativa' :
+    role === 'RI_AMM' && riAmmStaApprovandoPropostaContestazione ? 'Approva istruttoria amministrativa' :
     role === 'RI_AMM' ? `Trasmetti al ${fwdDestLabel}` :
     role === 'TI_AMM' ? 'Apponi attestazione di conformità' :
     approvaBtnLabel
@@ -4304,8 +4488,9 @@ function ActionsPanel (props: {
     role === 'RI' ? `Approva l’istruttoria tecnica e la trasmette al ${getRoleLabelForForward('DT')}.` :
     role === 'DT' ? `Approva il Rapporto tecnico di rilevazione e lo trasmette al ${getRoleLabelForMenu('RI_AMM')}.` :
     role === 'DA' ? `Approva l’atto amministrativo e lo trasmette al ${getRoleLabelForMenu('TI_AMM')}.` :
-    role === 'RI_AMM' && fwdDest === 'DA' ? `Approva l’istruttoria amministrativa e la trasmette al ${getRoleLabelForForward('DA')}.` :
-    role === 'TI_AMM' ? 'Appone l’attestazione di conformità e sblocca la fase di protocollazione del fascicolo e della proposta di contestazione.' :
+    role === 'RI_AMM' && riAmmBozzaDeterminazioneDaVerificare ? 'Approva l’istruttoria amministrativa e restituisce la pratica al Tecnico Istruttore amministrativo per la protocollazione e la trasmissione al Direttore.' :
+    role === 'RI_AMM' && riAmmStaApprovandoPropostaContestazione ? 'Approva l’istruttoria amministrativa e restituisce la pratica al Tecnico istruttore amministrativo per protocollazione e predisposizione della bozza di determinazione.' :
+    role === 'TI_AMM' ? 'Appone il visto di conformità e trasmette la pratica al Responsabile dell’istruttoria amministrativa per la verifica dell’istruttoria amministrativa.' :
     fwdDestLabel ? `Invia la pratica al ${fwdDestLabel}.` :
     'Avanza la pratica al passaggio successivo.'
 
@@ -4313,7 +4498,7 @@ function ActionsPanel (props: {
 
   // RI_AMM non deve vedere contemporaneamente una trasmissione e una restituzione
   // verso lo stesso TI_AMM: per l'utente sarebbero due scelte indistinguibili.
-  const hideRiAmmForwardToTiAmm = role === 'RI_AMM' && fwdDest === 'TI_AMM'
+  const hideRiAmmForwardToTiAmm = role === 'RI_AMM' && fwdDest === 'TI_AMM' && !riAmmStaApprovandoPropostaContestazione && !riAmmBozzaDeterminazioneDaVerificare
 
   const workflowMenuSections: WorkflowMenuSection[] = hasSel ? ([
     {
@@ -4359,7 +4544,7 @@ function ActionsPanel (props: {
           label: approvaMenuLabel,
           desc: approvaMenuDesc,
           enabled: canStartApprova,
-          visible: role !== 'TI_AMM' && !hideRiAmmForwardToTiAmm,
+          visible: !hideRiAmmForwardToTiAmm && (role !== 'TI_AMM' || tiAmmPuoApporreAttestazione),
           color: (role === 'DT' || role === 'DA') ? buttonColors.approvaRapporto : buttonColors.approva,
           textColor: (role === 'DT' || role === 'DA') ? buttonColors.approvaRapportoText : buttonColors.approvaText
         }
@@ -4792,7 +4977,7 @@ function ActionsPanel (props: {
   const saveWithWorkflowLog = async (
     attributesIn: Record<string, any>,
     okText: string,
-    logOpts: { eventoChiusura: string, ruoloDestinatario?: string, utenteDestinatario?: string, noteChiusura?: string, fase?: string, informativeActivities?: InformativeActivityTarget[] }
+    logOpts: { eventoChiusura: string, ruoloDestinatario?: string, utenteDestinatario?: string, noteChiusura?: string, fase?: string, informativeActivities?: InformativeActivityTarget[], skipCurrentActivity?: boolean }
   ) => {
     const resolvedLogOpts = {
       ...logOpts,
@@ -4824,7 +5009,7 @@ function ActionsPanel (props: {
       await runApplyEdits(attributesIn, okText, { deferRefresh: true, keepLoading: true })
       await closeCycleLog({ ...resolvedLogOpts, auditOldMap: auditDelta.oldMap, auditNewMap: auditDelta.newMap })
       await deleteCurrentActivityForCurrentRole()
-      if (resolvedLogOpts?.ruoloDestinatario) await upsertCurrentActivityForDest(resolvedLogOpts, attributesIn)
+      if (resolvedLogOpts?.ruoloDestinatario && !resolvedLogOpts.skipCurrentActivity) await upsertCurrentActivityForDest(resolvedLogOpts, attributesIn)
       for (const info of (resolvedLogOpts?.informativeActivities || [])) {
         await upsertInformativeActivityForDest(info, attributesIn)
       }
@@ -5225,8 +5410,19 @@ function ActionsPanel (props: {
           if (fDtStato) upd[fDtStato] = Date.now()
           if (fPresa) upd[fPresa] = PRESA_DA_PRENDERE
           if (fDtPresa) upd[fDtPresa] = null
-          if (fEsito) upd[fEsito] = null
-          if (fDtEsito) upd[fDtEsito] = null
+          // RI_AMM -> TI_AMM dopo il visto del Tecnico istruttore amministrativo:
+          // il nuovo nodo TI_AMM viene riaperto, ma non va cancellato l'esito
+          // precedente del TI_AMM. Quel visto resta parte della verifica istruttoria
+          // e deve rimanere visibile insieme all'esito del Responsabile
+          // dell'istruttoria amministrativa, anche quando quest'ultimo richiede
+          // integrazioni o rettifiche. Il nuovo visto del TI_AMM sovrascriverà
+          // questi campi quando la pratica verrà nuovamente attestata.
+          const preserveTiAmmEsitoAfterRiAmmRimando =
+            role === 'RI_AMM' &&
+            ruoloDest === 'TI_AMM' &&
+            pending === 'INTEGRAZIONE_TI_AMM'
+          if (fEsito && !preserveTiAmmEsitoAfterRiAmmRimando) upd[fEsito] = null
+          if (fDtEsito && !preserveTiAmmEsitoAfterRiAmmRimando) upd[fDtEsito] = null
 
           // Rimando RI_AMM -> TI_AMM dopo trasmissione della bozza determinazione.
           // La bozza non deve restare nello stato operativo TRASMESSA_RI_AMM,
@@ -5286,21 +5482,16 @@ function ActionsPanel (props: {
         const fNoteAttoAmm = getSchemaFieldNameCI(schemaFields, 'note_atto_amm')
         if (fNoteAttoAmm) upd[fNoteAttoAmm] = noteTrim
       }
-      if (role === 'RI_AMM' && esito === ESITO_APPROVATA) {
-        const schemaFields: Record<string, any> = (ds as any)?.getSchema?.()?.fields || {}
-        const fIstrAmmChiusaIl = getSchemaFieldNameCI(schemaFields, 'istruttoria_amm_chiusa_il')
-        const fIstrAmmChiusaDa = getSchemaFieldNameCI(schemaFields, 'istruttoria_amm_chiusa_da')
-        const currentUserRole: any = (window as any).__giiUserRole || {}
-        const currentUserLabel = String(currentUserRole.fullName || currentUserRole.full_name || currentUserRole.username || (window as any).__giiUser?.username || '').trim()
-        if (fIstrAmmChiusaIl) upd[fIstrAmmChiusaIl] = now
-        if (fIstrAmmChiusaDa) upd[fIstrAmmChiusaDa] = currentUserLabel
+      const isRiAmmTrasmissioneBozzaAlDa = false
+      if (isRiAmmTrasmissioneBozzaAlDa) {
+        // La trasmissione al Direttore è esterna al workflow interno e non chiude
+        // l'istruttoria amministrativa nel gestionale. Il RI_AMM registra solo
+        // data/ora della trasmissione della bozza; la pratica rientra poi al TI_AMM.
       }
       if (stato != null) {
-        // L'attestazione di conformità del TI_AMM non chiude la disponibilità operativa
-        // della pratica: sblocca la protocollazione e genera solo un messaggio
-        // informativo al RI_AMM. La pratica resta in capo al TI_AMM fino alla
-        // successiva trasmissione della bozza di determinazione.
-        upd[statoField] = isTiAmmAttestazioneConformita ? STATO_PRESA_IN_CARICO : stato
+        // Il visto TI_AMM chiude il ciclo operativo TI_AMM e passa la pratica al RI_AMM.
+        // La protocollazione e la bozza determina restano bloccate fino all'approvazione RI_AMM.
+        upd[statoField] = stato
         upd[dtStatoField] = now
       }
 
@@ -5330,7 +5521,7 @@ function ActionsPanel (props: {
         }
       }
 
-      if (role === 'RI_AMM' && esito === ESITO_APPROVATA) {
+      if (isRiAmmTrasmissioneBozzaAlDa) {
         const schemaFields: Record<string, any> = (ds as any)?.getSchema?.()?.fields || {}
         const fDetStato = getSchemaFieldNameCI(schemaFields, 'determinazione_stato')
         const fDetTrasIl = getSchemaFieldNameCI(schemaFields, 'determinazione_trasmessa_firma_il')
@@ -5342,8 +5533,16 @@ function ActionsPanel (props: {
         if (fDetTrasDa) upd[fDetTrasDa] = currentUserLabel
       }
 
+      if (role === 'RI_AMM' && esito === ESITO_APPROVATA && riAmmBozzaDeterminazioneDaVerificare) {
+        const schemaFields: Record<string, any> = (ds as any)?.getSchema?.()?.fields || {}
+        const fDetStato = getSchemaFieldNameCI(schemaFields, 'determinazione_stato')
+        if (fDetStato) upd[fDetStato] = 'VALIDATA_RI_AMM'
+      }
+
       const integRequester = (esito === ESITO_APPROVATA && !isTiAmmAttestazioneConformita) ? getIntegrationRequesterForCurrentRole() : ''
-      const ruoloDest = (esito === ESITO_APPROVATA && !isTiAmmAttestazioneConformita) ? (integRequester || getNextRoleForForward()) : ''
+      const ruoloDest = esito === ESITO_APPROVATA
+        ? (isTiAmmAttestazioneConformita ? 'RI_AMM' : (isRiAmmTrasmissioneBozzaAlDa ? 'TI_AMM' : (integRequester || getNextRoleForForward())))
+        : ''
       if (ruoloDest) {
         try {
           const schemaFields: Record<string, any> = (ds as any)?.getSchema?.()?.fields || {}
@@ -5357,8 +5556,9 @@ function ActionsPanel (props: {
           if (fDtStato) upd[fDtStato] = now
           if (fPresa) upd[fPresa] = PRESA_DA_PRENDERE
           if (fDtPresa) upd[fDtPresa] = null
-          if (fEsito) upd[fEsito] = null
-          if (fDtEsito) upd[fDtEsito] = null
+          const preserveDestEsito = role === 'RI_AMM' && ruoloDest === 'TI_AMM' && esito === ESITO_APPROVATA
+          if (fEsito && !preserveDestEsito) upd[fEsito] = null
+          if (fDtEsito && !preserveDestEsito) upd[fDtEsito] = null
 
           // Se il DT rimanda la pratica a RI_AMM dopo una nuova approvazione tecnica,
           // chiudiamo solo il nodo operativo TI_AMM, ma NON cancelliamo
@@ -5395,17 +5595,23 @@ function ActionsPanel (props: {
               : isTiAmmAttestazioneConformita
                 ? {
                     eventoChiusura: 'ATTESTAZIONE_CONFORMITA',
+                    ruoloDestinatario: ruoloDest,
+                    utenteDestinatario: resolveDestUser(ruoloDest),
                     noteChiusura: noteTrim ? `Attestazione di conformità:
 ${noteTrim}` : 'Attestazione di conformità apposta.',
                     fase: role
                   }
                 : {
-                    eventoChiusura: ruoloDest
-                      ? (wasIntegResponse ? 'INTEGRAZIONE_TRASMESSA' : 'ISTRUTTORIA_TRASMESSA')
-                      : 'ISTRUTTORIA_TRASMESSA',
+                    eventoChiusura: isRiAmmTrasmissioneBozzaAlDa
+                      ? 'BOZZA_DETERMINAZIONE_TRASMESSA_DA'
+                      : (ruoloDest
+                        ? (riAmmStaApprovandoPropostaContestazione ? 'PROPOSTA_CONTESTAZIONE_APPROVATA' : (wasIntegResponse ? 'INTEGRAZIONE_TRASMESSA' : 'ISTRUTTORIA_TRASMESSA'))
+                        : 'ISTRUTTORIA_TRASMESSA'),
                     ruoloDestinatario: ruoloDest,
                     utenteDestinatario: resolveDestUser(ruoloDest),
-                    noteChiusura: noteTrim,
+                    noteChiusura: isRiAmmTrasmissioneBozzaAlDa
+                      ? (noteTrim || 'Istruttoria amministrativa approvata; pratica restituita al Tecnico istruttore amministrativo per gli adempimenti successivi.')
+                      : noteTrim,
                     fase: role
                   })
         : null
@@ -5416,19 +5622,17 @@ ${noteTrim}` : 'Attestazione di conformità apposta.',
               ? buildTechnicalChainInformativeActivities('DT_APPROVA', upd)
               : role === 'RZ'
                 ? buildTechnicalChainInformativeActivities('RZ_APPROVA', upd)
-                : isTiAmmAttestazioneConformita
-                  ? [{
-                      ruoloDestinatario: 'RI_AMM',
-                      utenteDestinatario: resolveDestUser('RI_AMM'),
-                      titolo: 'Attestazione di conformità apposta',
-                      messaggio: 'Il Tecnico Istruttore amministrativo ha apposto l’attestazione di conformità. La pratica resta in lavorazione al TI_AMM per la protocollazione del fascicolo/proposta e la predisposizione della bozza di determinazione.',
-                      sottotipo: 'ATTESTAZIONE_CONFORMITA_TI_AMM',
-                      priorita: 'INFO'
-                    }]
-                  : [])
+                : [])
           : []
-        const successText = isTiAmmAttestazioneConformita ? 'Attestazione di conformità apposta.' : `Esito salvato: ${label}.`
+        const successText = isTiAmmAttestazioneConformita
+          ? 'Attestazione di conformità apposta e trasmessa al RI_AMM.'
+          : isRiAmmTrasmissioneBozzaAlDa
+            ? 'Istruttoria amministrativa approvata e restituita al Tecnico istruttore amministrativo.'
+            : riAmmStaApprovandoPropostaContestazione
+              ? 'Istruttoria amministrativa approvata e restituita al Tecnico istruttore amministrativo.'
+              : `Esito salvato: ${label}.`
         await saveWithWorkflowLog(upd, successText, { ...logOpts, informativeActivities })
+        if (isRiAmmTrasmissioneBozzaAlDa) await triggerDaBozzaSendTo()
       } else {
         await runApplyEdits(upd, `Esito salvato: ${label}.`)
       }
@@ -5557,7 +5761,7 @@ ${noteTrim}` : 'Attestazione di conformità apposta.',
     role === 'RI' ? 'Approvazione istruttoria tecnica' :
     role === 'DT' ? 'Approvazione rapporto tecnico' :
     role === 'DA' ? 'Approvazione atto amministrativo' :
-    role === 'RI_AMM' && fwdDest === 'DA' ? 'Approvazione istruttoria amministrativa' :
+    role === 'RI_AMM' && riAmmBozzaDeterminazioneDaVerificare ? 'Approvazione istruttoria amministrativa' :
     role === 'RI_AMM' ? `Trasmissione al ${fwdDestLabel}` :
     role === 'TI_AMM' ? `Trasmissione al ${getRoleLabelForMenu('RI_AMM')}` :
     'Avanzamento pratica'
@@ -5587,9 +5791,10 @@ ${noteTrim}` : 'Attestazione di conformità apposta.',
     role === 'RI' ? `L’istruttoria tecnica verrà approvata e trasmessa al ${getRoleLabelForForward('DT')}.` :
     role === 'DT' ? `Il Rapporto tecnico di rilevazione verrà approvato e trasmesso al ${getRoleLabelForMenu('RI_AMM')}.` :
     role === 'DA' ? `L’atto amministrativo verrà approvato e trasmesso al ${getRoleLabelForMenu('TI_AMM')}.` :
-    role === 'RI_AMM' && fwdDest === 'DA' ? `L’istruttoria amministrativa verrà approvata e trasmessa al ${getRoleLabelForForward('DA')}.` :
+    role === 'RI_AMM' && riAmmBozzaDeterminazioneDaVerificare ? 'L’istruttoria amministrativa verrà approvata e la pratica tornerà al Tecnico Istruttore amministrativo per i passaggi successivi.' :
+    role === 'RI_AMM' && riAmmStaApprovandoPropostaContestazione ? 'L’istruttoria amministrativa verrà approvata e la pratica tornerà al Tecnico istruttore amministrativo per protocollazione e predisposizione della bozza di determinazione.' :
     role === 'RI_AMM' ? `L’istruttoria amministrativa verrà trasmessa al ${fwdDestLabel}.` :
-    role === 'TI_AMM' ? 'L’attestazione di conformità verrà apposta. La pratica resterà in capo al Tecnico Istruttore amministrativo e sarà sbloccata la fase di protocollazione del fascicolo/proposta.' :
+    role === 'TI_AMM' ? 'Il visto di conformità verrà apposto e la pratica sarà trasmessa al Responsabile dell’istruttoria amministrativa per la verifica dell’istruttoria amministrativa.' :
     `${subjectArticle} ${subjectNameLower} verrà ${subjectVerbTrasmessa} al passaggio successivo.`
 
   const integrazioneActionDesc = pendingRimandoTargetLabel
@@ -5672,7 +5877,10 @@ ${noteTrim}` : 'Attestazione di conformità apposta.',
 
     if (role === 'RI_AMM') {
       if (nextPending === 'APPROVA' || nextPending === 'INVIA_TI_AMM') {
-        return `A seguito della verifica svolta, si condivide l'istruttoria amministrativa proposta e se ne dispone la trasmissione al Direttore d’Area.`
+        if (riAmmBozzaDeterminazioneDaVerificare) {
+          return `A seguito della verifica svolta, si approva l’istruttoria amministrativa e si dispone la restituzione della pratica al Tecnico Istruttore amministrativo per la protocollazione e la trasmissione al Direttore.`
+        }
+        return `A seguito della verifica svolta, si approva l’istruttoria amministrativa e si dispone la restituzione della pratica al Tecnico istruttore amministrativo per la protocollazione e il completamento della bozza di determinazione.`
       }
       if (nextPending === 'INTEGRAZIONE_TI_AMM') {
         return `A seguito della verifica svolta, si rileva la necessità di integrazioni o rettifiche dell’istruttoria amministrativa e si dispone il rinvio al Tecnico Istruttore amministrativo.`

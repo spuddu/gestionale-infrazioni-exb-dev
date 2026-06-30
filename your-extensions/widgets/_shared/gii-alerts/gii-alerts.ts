@@ -661,7 +661,9 @@ function isOfficeOriginReport (data: Record<string, any>): boolean {
 
 function takeChargeTitleForMessage (label: string, row: Record<string, any>): string {
   const hay = `${label || ''} ${attr(row, ['tipo_attivita']) || ''} ${attr(row, ['sottotipo_attivita']) || ''} ${attr(row, ['titolo']) || ''} ${attr(row, ['messaggio']) || ''} ${attr(row, ['origine_evento']) || ''}`.toUpperCase()
-  if (hay.includes('BOZZA_DETERMINAZIONE')) return 'Bozza determinazione da verificare'
+  if (hay.includes('ATTESTAZIONE_CONFORMITA') || hay.includes('ATTESTAZIONE DI CONFORMIT')) return 'Attestazione di conformità apposta'
+  if (hay.includes('PROPOSTA_CONTESTAZIONE_APPROVATA') || hay.includes('PROPOSTA DI CONTESTAZIONE APPROVATA')) return 'Proposta di contestazione approvata'
+  if (hay.includes('BOZZA_DETERMINAZIONE') || hay.includes('BOZZA DETERMINAZIONE')) return 'Bozza determinazione da verificare'
   if (hay.includes('INTEGRAZ')) return 'Richiesta di integrazione ricevuta'
   return 'Nuova istruttoria ricevuta'
 }
@@ -1249,12 +1251,14 @@ function currentActivityToAlert (row: Record<string, any>): GiiAlertItem | null 
 
   const tipoAttivita = String(attr(row, ['tipo_attivita']) || '').trim().toUpperCase()
   const isInformativa = tipoAttivita === 'INFORMATIVA'
+  const titoloRecord = String(attr(row, ['titolo']) || '').trim()
+  const messageRecord = String(attr(row, ['messaggio']) || '').trim()
   const title = isInformativa
-    ? (String(attr(row, ['titolo']) || '').trim() || 'Comunicazione informativa')
-    : takeChargeTitleForMessage('', rowForDisplay)
+    ? (titoloRecord || 'Comunicazione informativa')
+    : takeChargeTitleForMessage(titoloRecord, rowForDisplay)
   const message = isInformativa
-    ? (String(attr(row, ['messaggio']) || '').trim() || reportCode)
-    : reportCode
+    ? (messageRecord || reportCode)
+    : (messageRecord || reportCode)
   const tipoAlert: GiiAlertType = isInformativa ? 'ATTIVITA_INFORMATIVA' : 'PRESA_IN_CARICO_CORRENTE'
 
   return {

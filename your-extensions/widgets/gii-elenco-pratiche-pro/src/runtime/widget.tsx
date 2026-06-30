@@ -180,6 +180,9 @@ const ALLOWED_OGGETTI = new Set([
   "TRASMISSIONE ISTRUTTORIA",
   "TRASMISSIONE BOZZA DETERMINAZIONE",
   "TRASMISSIONE PRATICA CON BOZZA DETERMINAZIONE",
+  "BOZZA DI DETERMINAZIONE TRASMESSA",
+  "ATTESTAZIONE DI CONFORMITÀ",
+  "ISTRUTTORIA AMMINISTRATIVA APPROVATA",
   "RICHIESTA DI INTEGRAZIONE",
   "TRASMISSIONE INTEGRAZIONE",
   "RILEVAZIONE RESPINTA",
@@ -202,8 +205,11 @@ const ALLOWED_LOG_EVENTI = new Set([
   "VERBALE_NOTIFICATO",
   "RESTITUZIONE_A_TI_AMM",
   "BOZZA_DETERMINAZIONE_TRASMESSA",
+  "BOZZA_DETERMINAZIONE_TRASMESSA_DA",
   "RESPINTA",
   "RIMANDA_A_DT",
+  "ATTESTAZIONE_CONFORMITA",
+  "PROPOSTA_CONTESTAZIONE_APPROVATA",
 ]);
 
 function normalizeOggettoLabel(label: any): string {
@@ -255,7 +261,10 @@ function formatCausale(evento: string): string {
   if (e === "INTEGRAZIONE_TRASMESSA") return "TRASMISSIONE INTEGRAZIONE";
   if (e === "INTEGRAZIONE_RICHIESTA") return "RICHIESTA DI INTEGRAZIONE";
   if (e === "ISTRUTTORIA_TRASMESSA") return "TRASMISSIONE ISTRUTTORIA";
+  if (e === "ATTESTAZIONE_CONFORMITA") return "ATTESTAZIONE DI CONFORMITÀ";
+  if (e === "PROPOSTA_CONTESTAZIONE_APPROVATA") return "ISTRUTTORIA AMMINISTRATIVA APPROVATA";
   if (e === "BOZZA_DETERMINAZIONE_TRASMESSA") return "TRASMISSIONE PRATICA CON BOZZA DETERMINAZIONE";
+  if (e === "BOZZA_DETERMINAZIONE_TRASMESSA_DA") return "BOZZA DI DETERMINAZIONE TRASMESSA";
   if (e === "RAPPORTO_APPROVATO") return "ISTRUTTORIA TECNICA APPROVATA";
   if (e === "SANZIONE_APPROVATA") return "SANZIONE APPROVATA";
   if (e === "SANZIONE_NOTIFICATA" || e === "VERBALE_NOTIFICATO")
@@ -273,11 +282,14 @@ function isTransmissionReturnEvent(evento: any): boolean {
   return (
     e === "ISTRUTTORIA_TRASMESSA" ||
     e === "BOZZA_DETERMINAZIONE_TRASMESSA" ||
+    e === "BOZZA_DETERMINAZIONE_TRASMESSA_DA" ||
     e === "INTEGRAZIONE_TRASMESSA" ||
     e === "RAPPORTO_APPROVATO" ||
     e === "SANZIONE_APPROVATA" ||
     e === "RESTITUZIONE_A_TI_AMM" ||
-    e === "RIMANDA_A_DT"
+    e === "RIMANDA_A_DT" ||
+    e === "ATTESTAZIONE_CONFORMITA" ||
+    e === "PROPOSTA_CONTESTAZIONE_APPROVATA"
   );
 }
 
@@ -3997,7 +4009,7 @@ export default function Widget(props: Props) {
       return txt(cfg.oggettoBadgeColorIntegrazione || CHIP_ORANGE.background);
     if (o === "ASSEGNAZIONE ISTRUTTORIA")
       return txt(cfg.oggettoBadgeColorAssegnazione || CHIP_BLUE.background);
-    if (o === "TRASMISSIONE ISTRUTTORIA" || o === "TRASMISSIONE BOZZA DETERMINAZIONE" || o === "TRASMISSIONE PRATICA CON BOZZA DETERMINAZIONE")
+    if (o === "TRASMISSIONE ISTRUTTORIA" || o === "TRASMISSIONE BOZZA DETERMINAZIONE" || o === "TRASMISSIONE PRATICA CON BOZZA DETERMINAZIONE" || o === "BOZZA DI DETERMINAZIONE TRASMESSA" || o === "ATTESTAZIONE DI CONFORMITÀ")
       return txt(cfg.oggettoBadgeColorTrasmissione || CHIP_PURPLE.background);
     if (o === "NUOVA RILEVAZIONE")
       return txt(
@@ -4018,6 +4030,12 @@ export default function Widget(props: Props) {
       return "Il colore identifica la trasmissione dell’istruttoria al ruolo successivo del procedimento.";
     if (o === "TRASMISSIONE BOZZA DETERMINAZIONE" || o === "TRASMISSIONE PRATICA CON BOZZA DETERMINAZIONE")
       return "Il colore identifica la trasmissione della pratica, contenente la bozza Word della determinazione, al Responsabile dell’istruttoria amministrativa per la verifica.";
+    if (o === "BOZZA DI DETERMINAZIONE TRASMESSA")
+      return "Il colore identifica la trasmissione della bozza di determinazione al Direttore Area AA. GG. e P.F. fuori dal flusso interno del gestionale.";
+    if (o === "ATTESTAZIONE DI CONFORMITÀ")
+      return "Il colore identifica l’apposizione del visto di conformità da parte del Tecnico istruttore amministrativo e la trasmissione della pratica al Responsabile dell’istruttoria amministrativa.";
+    if (o === "ISTRUTTORIA AMMINISTRATIVA APPROVATA")
+      return "Il colore identifica l’approvazione dell’istruttoria amministrativa da parte del Responsabile dell’istruttoria amministrativa e la restituzione della pratica al Tecnico istruttore amministrativo per protocollazione e predisposizione della bozza di determinazione.";
     if (o === "RICHIESTA DI INTEGRAZIONE")
       return "Il colore identifica una richiesta di integrazione rivolta al ruolo che deve completare o correggere la pratica.";
     if (o === "TRASMISSIONE INTEGRAZIONE")
@@ -4899,7 +4917,9 @@ export default function Widget(props: Props) {
         logEvent === "RAPPORTO_APPROVATO" ||
         logEvent === "SANZIONE_APPROVATA" ||
         logEvent === "RESTITUZIONE_A_TI_AMM" ||
-        logEvent === "RIMANDA_A_DT"
+        logEvent === "RIMANDA_A_DT" ||
+        logEvent === "ATTESTAZIONE_CONFORMITA" ||
+        logEvent === "PROPOSTA_CONTESTAZIONE_APPROVATA"
       ) {
         return getStateView(role, "Trasmesso", statoApprovata);
       }

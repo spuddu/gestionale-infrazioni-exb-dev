@@ -592,18 +592,26 @@ function dashIfEmpty (value: string): string {
   return cleanText(value || '') || '-'
 }
 
+const ADMIN_ITER_TABLE_ROW_H = 18
+const ADMIN_ITER_TABLE_HEADER_H = 12
+const ADMIN_ITER_TABLE_BOTTOM_GAP = 6
+
+function administrativeIterTableHeight (rows: AdministrativeIterRow[]): number {
+  return ADMIN_ITER_TABLE_HEADER_H + rows.length * ADMIN_ITER_TABLE_ROW_H + ADMIN_ITER_TABLE_BOTTOM_GAP
+}
+
 function drawAdministrativeIterTable (ctx: BuildCtx, rows: AdministrativeIterRow[]): void {
   const headers = ['Fase', 'Nominativo', 'Ruolo', 'Presa in carico', 'Esito', 'Data']
   const tableW = PAGE_W - M * 2
   const fixedColumnsW = 52 + 78 + 52 + 165 + 50
   const colW = [52, tableW - fixedColumnsW, 78, 52, 165, 50]
-  const rowH = 22
-  const headerH = 13
+  const rowH = ADMIN_ITER_TABLE_ROW_H
+  const headerH = ADMIN_ITER_TABLE_HEADER_H
   const startX = M
   const headerSize = 6.5
   const valueSize = 6.8
   const lineH = valueSize * 1.12
-  ensureSpace(ctx, headerH + rows.length * rowH + 12)
+  ensureSpace(ctx, administrativeIterTableHeight(rows))
 
   let y = ctx.y
   ctx.page.drawRectangle({ x: startX, y: y - headerH + 4, width: tableW, height: headerH, color: LIGHT_BLUE, borderColor: BORDER, borderWidth: 0.5 })
@@ -635,7 +643,13 @@ function drawAdministrativeIterTable (ctx: BuildCtx, rows: AdministrativeIterRow
     ctx.y -= rowH
   })
   ctx.page.drawLine({ start: { x: startX, y: ctx.y + 4 }, end: { x: startX + tableW, y: ctx.y + 4 }, thickness: 0.45, color: BORDER })
-  ctx.y -= 8
+  ctx.y -= ADMIN_ITER_TABLE_BOTTOM_GAP
+}
+
+function drawAdministrativeIterSection (ctx: BuildCtx, title: string, rows: AdministrativeIterRow[]): void {
+  ensureSpace(ctx, 28 + administrativeIterTableHeight(rows))
+  drawSectionTitle(ctx, title)
+  drawAdministrativeIterTable(ctx, rows)
 }
 
 function drawViolationsList (ctx: BuildCtx, text: string, emptyMessage = 'Nessuna violazione contestata rilevata nei dati della pratica.'): void {
@@ -975,7 +989,8 @@ export async function buildPropostaContestazionePdf (m: Record<string, string>):
 
   const meta = getAttoMeta(m)
   const approvato = ['1', 'TRUE', 'SI', 'SÌ', 'APPROVATO'].includes(v(m, 'atto_approvato').toUpperCase())
-  const isBozza = !meta.isArchiviazione && !approvato
+  const propostaApprovata = ['1', 'TRUE', 'SI', 'SÌ', 'APPROVATA', 'APPROVATO'].includes(v(m, 'proposta_approvata').toUpperCase())
+  const isBozza = !meta.isArchiviazione && !approvato && !propostaApprovata
   const title = meta.title
   const subtitle = meta.isArchiviazione ? '' : 'Scheda istruttoria di dettaglio'
   const trasgressore = v(m, 'trasgressore') || '-'
@@ -1048,31 +1063,22 @@ Ditta “${trasgressore}”.`
   }
 
   if (!meta.isArchiviazione) {
-    drawSectionTitle(ctx, 'Iter approvativo della proposta')
-    drawAdministrativeIterTable(ctx, [
+    drawAdministrativeIterSection(ctx, 'Iter approvativo della proposta', [
       {
-        fase: 'Compilazione',
+        fase: 'Attestazione',
         nominativo: v(m, 'amm_iter_compilazione_nome'),
         ruolo: 'Tecnico istruttore',
         presa: v(m, 'amm_iter_compilazione_presa'),
-        esito: 'Compilazione istruttoria amministrativa',
+        esito: 'Attestazione di conformità',
         data: v(m, 'amm_iter_compilazione_data')
       },
       {
-        fase: 'Supervisione',
+        fase: 'Approvazione',
         nominativo: v(m, 'amm_iter_supervisione_nome'),
         ruolo: 'Responsabile istruttoria',
         presa: v(m, 'amm_iter_supervisione_presa'),
-        esito: 'Verifica istruttoria amministrativa',
+        esito: 'Istruttoria amministrativa approvata',
         data: v(m, 'amm_iter_supervisione_data')
-      },
-      {
-        fase: 'Approvazione',
-        nominativo: approvato ? v(m, 'amm_iter_approvazione_nome') : '-',
-        ruolo: 'Direttore dell’Area',
-        presa: v(m, 'amm_iter_approvazione_presa'),
-        esito: 'Approvazione istruttoria amministrativa',
-        data: approvato ? (v(m, 'amm_iter_approvazione_data') || v(m, 'accertamento_data')) : '-'
       }
     ])
   }
