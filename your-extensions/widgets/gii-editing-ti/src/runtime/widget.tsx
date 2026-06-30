@@ -7,7 +7,7 @@ import { createPortal } from 'react-dom'
 import type { IMConfig, TabConfig } from '../config'
 import { defaultConfig, DEFAULT_FIELD_LAYOUTS } from '../config'
 import AnteprimaPanel, { clearEditingTiAnteprimaDocumentMemory } from './anteprima-panel'
-import GiiAttachmentViewer, { type GiiAttachmentViewerItem } from '../../../_shared/gii-anteprime/allegati/gii-attachment-viewer'
+import GiiAttachmentViewer, { type GiiAttachmentViewerItem, filterGiiAttachmentsForTechnicalRoles } from '../../../_shared/gii-anteprime/allegati/gii-attachment-viewer'
 
 type MsgKind = 'info' | 'ok' | 'err'
 type Msg = { kind: MsgKind; text: string }
@@ -6511,11 +6511,13 @@ function NuovaPraticaForm (p: {
   const createStartedAtRef = React.useRef<number>(Date.now())
   const [attachmentFiles, setAttachmentFiles] = React.useState<File[]>([])
   const [attachmentInputKey, setAttachmentInputKey] = React.useState(0)
-  const [attachments, setAttachments] = React.useState<Array<{ id: number; name?: string; size?: number; contentType?: string; url?: string }>>([])
+  const [attachments, setAttachments] = React.useState<Array<{ id: number; name?: string; size?: number; contentType?: string; url?: string; keywords?: string }>>([])
   const [attachmentsForOid, setAttachmentsForOid] = React.useState<number | null>(null)
   const [attachmentsLoading, setAttachmentsLoading] = React.useState(false)
   const [attachmentsUploading, setAttachmentsUploading] = React.useState(false)
   const [attachmentsError, setAttachmentsError] = React.useState<string | null>(null)
+  const visibleTechnicalAttachments = React.useMemo(() => filterGiiAttachmentsForTechnicalRoles((Array.isArray(attachments) ? attachments : []) as any), [attachments])
+
   const [pendingDeleteAttachmentIds, setPendingDeleteAttachmentIds] = React.useState<number[]>([])
   const [pendingReplaceAttachments, setPendingReplaceAttachments] = React.useState<Record<number, File>>({})
   const [attachmentConfirm, setAttachmentConfirm] = React.useState<null | { type: 'delete' | 'replace'; attachment: { id: number; name?: string }; file?: File }>(null)
@@ -6667,7 +6669,7 @@ function NuovaPraticaForm (p: {
   React.useEffect(() => {
     if (npTab !== 'allegati') return
     if (attachmentsLoading) return
-    const list = Array.isArray(attachments) ? attachments : []
+    const list = Array.isArray(visibleTechnicalAttachments) ? visibleTechnicalAttachments : []
     if (list.length === 0) {
       if (previewAttachment) setPreviewAttachment(null)
       return
@@ -6681,7 +6683,7 @@ function NuovaPraticaForm (p: {
       name: first.name,
       contentType: first.contentType
     })
-  }, [npTab, attachments, attachmentsLoading, previewAttachment?.id])
+  }, [npTab, visibleTechnicalAttachments, attachmentsLoading, previewAttachment?.id])
 
   // Effect anteprima allegato (richiede currentOid e currentLayerUrl)
   React.useEffect(() => {
@@ -6991,7 +6993,8 @@ React.useEffect(() => {
       name: a.name,
       size: a.size,
       contentType: a.contentType,
-      url: a.url
+      url: a.url,
+      keywords: a.keywords
     })).filter((a: any) => a && !isNaN(a.id))
   }, [])
 
@@ -7134,7 +7137,7 @@ React.useEffect(() => {
   const savePreviewRotation = React.useCallback(async () => {
     const normalizedRotation = ((Math.round(previewRotationDeg / 90) * 90) % 360 + 360) % 360
     if (!canRotateAttachments || currentOid == null || !previewAttachment || normalizedRotation === 0) return
-    const selectedAttachment = (Array.isArray(attachments) ? attachments : []).find((a: any) => Number(a?.id) === Number(previewAttachment.id)) || previewAttachment
+    const selectedAttachment = (Array.isArray(visibleTechnicalAttachments) ? visibleTechnicalAttachments : []).find((a: any) => Number(a?.id) === Number(previewAttachment.id)) || previewAttachment
     if (!isRotatableAttachment(selectedAttachment)) return
     try {
       setAttachmentsUploading(true)
@@ -7159,7 +7162,7 @@ React.useEffect(() => {
     } finally {
       setAttachmentsUploading(false)
     }
-  }, [attachments, canRotateAttachments, currentLayerUrl, currentOid, ds, getAttachmentPreferredUrl, isRotatableAttachment, previewAttachment, previewRotationDeg, refreshCurrentAttachmentsAfterUpload])
+  }, [visibleTechnicalAttachments, canRotateAttachments, currentLayerUrl, currentOid, ds, getAttachmentPreferredUrl, isRotatableAttachment, previewAttachment, previewRotationDeg, refreshCurrentAttachmentsAfterUpload])
 
   const confirmAttachmentAction = React.useCallback(async () => {
     if (!attachmentConfirm || currentOid == null) return
@@ -8410,10 +8413,10 @@ ${e?.message || String(e)}`
   }, [mode, currentOid, currentGlobalId, noteSpeseMissing.length, noteSpeseRowsLoadedKey])
   const allegatiCount = React.useMemo(() => {
     if (mode !== 'edit' || currentOid == null) return 0
-    const existingCount = attachmentsForOid === currentOid && Array.isArray(attachments) ? attachments.length : 0
+    const existingCount = attachmentsForOid === currentOid && Array.isArray(visibleTechnicalAttachments) ? visibleTechnicalAttachments.length : 0
     const pendingCount = Array.isArray(attachmentFiles) ? attachmentFiles.length : 0
     return Math.max(0, existingCount + pendingCount)
-  }, [mode, currentOid, attachmentsForOid, attachments, attachmentFiles])
+  }, [mode, currentOid, attachmentsForOid, visibleTechnicalAttachments, attachmentFiles])
 
   React.useEffect(() => {
     if (noteSpeseCasistiche.length === 0) {
@@ -10306,7 +10309,7 @@ ${e?.message || String(e)}`
     <GiiAttachmentViewer
       title='ALLEGATI'
       oidAvailable={mode === 'edit' && currentOid != null}
-      items={attachments as any}
+      items={visibleTechnicalAttachments as any}
       loading={attachmentsLoading}
       busy={attachmentsUploading}
       error={attachmentsError}
@@ -10919,7 +10922,7 @@ function DetailTabsPanel (props: {
   // Allegati (attachments) — caricati solo quando la tab "Allegati" è attiva
   const selectedOid = (hasSel && oid != null) ? Number(oid) : null
   const [attachmentsForOid, setAttachmentsForOid] = React.useState<number | null>(null)
-  const [attachments, setAttachments] = React.useState<Array<{ id: number; name?: string; size?: number; contentType?: string; url?: string }>>([])
+  const [attachments, setAttachments] = React.useState<Array<{ id: number; name?: string; size?: number; contentType?: string; url?: string; keywords?: string }>>([])
   const [attachmentsLoading, setAttachmentsLoading] = React.useState<boolean>(false)
   const [attachmentsError, setAttachmentsError] = React.useState<string | null>(null)
   const [attachmentsUploading, setAttachmentsUploading] = React.useState<boolean>(false)

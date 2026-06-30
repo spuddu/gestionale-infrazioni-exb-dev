@@ -10,6 +10,7 @@ import type { GiiDocumentPrintOptions as DocumentPrintOptions, GiiAttachmentPrin
 import { buildGiiMapLegendItemsForView, computePrintExtentForView, ensureGiiPrintableMapLayersReady, flattenGiiPrintableMapLayerTree as flattenPrintableMapLayerTree, listGiiPrintableMapLayerTree as listPrintableMapLayerTree, listGiiPrintableMapLayers as listPrintableMapLayers } from '../../../_shared/gii-anteprime/viewer-documenti/map-layers'
 import type { GiiPrintableMapLayerItem as PrintableMapLayerItem } from '../../../_shared/gii-anteprime/viewer-documenti/map-layers'
 import GiiDocumentViewer from '../../../_shared/gii-anteprime/viewer-documenti/document-viewer'
+import { filterGiiAttachmentsForTechnicalRoles } from '../../../_shared/gii-anteprime/allegati/gii-attachment-viewer'
 
 const GII_UTENTI_URL = 'https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_utenti/FeatureServer/0'
 type UtenteCached = {
@@ -1087,12 +1088,24 @@ async function queryFeatureAttachments (layer: any, oid: number, ds?: any): Prom
   return []
 }
 
+function toAttachmentPrintOption (att: any): AttachmentPrintOption {
+  return {
+    id: Number(att?.id ?? att?.attachmentId ?? att?.objectId),
+    name: att?.name,
+    size: att?.size,
+    contentType: att?.contentType,
+    url: att?.url,
+    keywords: att?.keywords
+  } as AttachmentPrintOption
+}
+
 async function hasAttachments (ds: any, oid: number): Promise<boolean> {
   if (!Number.isFinite(oid) || oid <= 0) return false
   const layer = await resolveFeatureLayerForAttachments(ds)
   if (!layer) return false
   const infos = await queryFeatureAttachments(layer, oid, ds)
-  return infos.length > 0
+  const options = (infos || []).map((att: any): AttachmentPrintOption => toAttachmentPrintOption(att))
+  return filterGiiAttachmentsForTechnicalRoles(options as any).length > 0
 }
 
 async function loadAttachmentOptions (ds: any, oid: number): Promise<AttachmentPrintOption[]> {
@@ -1100,13 +1113,9 @@ async function loadAttachmentOptions (ds: any, oid: number): Promise<AttachmentP
   const layer = await resolveFeatureLayerForAttachments(ds)
   if (!layer) return []
   const infos = await queryFeatureAttachments(layer, oid, ds)
-  return (infos || []).map((att: any) => ({
-    id: Number(att?.id ?? att?.attachmentId ?? att?.objectId),
-    name: att?.name,
-    size: att?.size,
-    contentType: att?.contentType,
-    url: att?.url
-  })).filter((att: AttachmentPrintOption) => Number.isFinite(att.id) && att.id > 0)
+  const options = (infos || []).map((att: any): AttachmentPrintOption => toAttachmentPrintOption(att))
+  return (filterGiiAttachmentsForTechnicalRoles(options as any) as AttachmentPrintOption[])
+    .filter((att: AttachmentPrintOption): boolean => Number.isFinite(att.id) && att.id > 0)
 }
 
 async function fetchAttachmentBlob (layer: any, ds: any, oid: number, att: any, index: number): Promise<{ blob: Blob; fileName: string } | null> {

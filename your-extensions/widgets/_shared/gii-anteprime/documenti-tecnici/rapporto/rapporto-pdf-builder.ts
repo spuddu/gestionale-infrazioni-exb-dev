@@ -150,12 +150,14 @@ function isRapportoApprovato (m: Record<string, string>): boolean {
 
   const statoVals = [
     m.stato_finale,
-    m.stato_dt
+    m.stato_dt,
+    m.stato_DT
   ]
 
   const esitoVals = [
     m.esito_finale,
-    m.esito_dt
+    m.esito_dt,
+    m.esito_DT
   ]
 
   if (statoVals.some(v => statusCodeIs(v, 4))) return true
@@ -167,7 +169,11 @@ function isRapportoApprovato (m: Record<string, string>): boolean {
     m.stato_finale_label,
     m.esito_finale_label,
     m.stato_dt_label,
-    m.esito_dt_label
+    m.stato_DT_label,
+    m.esito_dt_label,
+    m.esito_DT_label,
+    m.ultimo_evento,
+    m.ultimo_evento_codice
   ]
 
   return textVals.some(v => textIncludesAny(v, ['approvat']))

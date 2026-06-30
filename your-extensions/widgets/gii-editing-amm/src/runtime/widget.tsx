@@ -8,7 +8,7 @@ import { buildRapportoPdf } from '../../../_shared/gii-anteprime/documenti-tecni
 import { defaultGiiDocumentPrintOptions as defaultDocumentPrintOptions, cloneGiiDocumentPrintOptions as cloneDocumentPrintOptions, setGiiAttachmentPrintOptionVisible } from '../../../_shared/gii-anteprime/viewer-documenti/document-options'
 import type { GiiDocumentPrintOptions as DocumentPrintOptions, GiiAttachmentPrintOption as AttachmentPrintOption } from '../../../_shared/gii-anteprime/viewer-documenti/document-options'
 import GiiDocumentViewer from '../../../_shared/gii-anteprime/viewer-documenti/document-viewer'
-import GiiAttachmentViewer from '../../../_shared/gii-anteprime/allegati/gii-attachment-viewer'
+import GiiAttachmentViewer, { GII_ATTACHMENT_KEYWORDS, filterGiiAttachmentsForAdministrativeFascicolo, filterGiiAttachmentsForAdministrativeGenericSection } from '../../../_shared/gii-anteprime/allegati/gii-attachment-viewer'
 import { PDFDocument } from 'pdf-lib'
 import type { IMConfig, SummaryFieldConfig } from '../config'
 import { defaultConfig } from '../config'
@@ -6336,7 +6336,7 @@ function FascicoloAmmPreviewSection (props: {
         const layer = await resolveLayerForEdit(props.ds, layerUrl)
         const list = await queryAmmAttachments(layer, oid, layerUrl)
         if (cancelled) return
-        const printable = list.filter(att => !isBozzaDeterminazioneWordAttachment(att))
+        const printable = filterGiiAttachmentsForAdministrativeFascicolo(list as any) as AmmAttachmentInfo[]
         const selectedAttachmentIds: Record<string, boolean> = {}
         printable.forEach(att => { selectedAttachmentIds[String(att.id)] = true })
         setAttachmentOptions(printable.map(att => ({ id: Number(att.id), name: att.name, size: att.size, contentType: att.contentType, url: att.url })))
@@ -6369,7 +6369,7 @@ function FascicoloAmmPreviewSection (props: {
       if (options.includeAllegati) {
         const ids = new Set(Object.entries(options.selectedAttachmentIds || {}).filter(([, visible]) => visible !== false).map(([id]) => Number(id)))
         const all = await queryAmmAttachments(await resolveLayerForEdit(props.ds, layerUrl), oid, layerUrl)
-        const selected = all.filter(att => ids.has(Number(att.id)) && !isBozzaDeterminazioneWordAttachment(att))
+        const selected = (filterGiiAttachmentsForAdministrativeFascicolo(all as any) as AmmAttachmentInfo[]).filter(att => ids.has(Number(att.id)))
         if (selected.length === 0) throw new Error('Selezionare almeno un allegato.')
         const attPdf = await buildAmmAttachmentsPdfBlob(selected, oid, layerUrl, getReportCode(props.data || {}, oid) || String(oid))
         if (attPdf) items.push(attPdf)
@@ -6485,7 +6485,7 @@ function AllegatiAmmSection (props: {
       const { layer, layerUrl } = await resolveAttachmentLayer()
       if (!layer && !layerUrl) throw new Error('FeatureLayer non disponibile per gli allegati.')
       const list = await queryAmmAttachments(layer, oid, layerUrl)
-      setItems(list)
+      setItems(filterGiiAttachmentsForAdministrativeGenericSection(list as any) as AmmAttachmentInfo[])
       setLoadedOid(oid)
     } catch (e: any) {
       setItems([])
@@ -6506,7 +6506,7 @@ function AllegatiAmmSection (props: {
     setError(null)
     try {
       const { layer, layerUrl } = await resolveAttachmentLayer()
-      await addAmmAttachments(layer, oid, files, layerUrl)
+      await addAmmAttachments(layer, oid, files, layerUrl, `${GII_ATTACHMENT_KEYWORDS.administrative}|fileCreatedAt=${Date.now()}`)
       setInputKey(k => k + 1)
       await load()
     } catch (e: any) {
@@ -6600,7 +6600,7 @@ function AllegatiAmmSection (props: {
 
   return (
     <GiiAttachmentViewer
-      title='ALLEGATI'
+      title='ALLEGATI AMMINISTRATIVI'
       oidAvailable={!!oid}
       noOidMessage='Selezionare una pratica prima di consultare o caricare gli allegati.'
       items={items as any}

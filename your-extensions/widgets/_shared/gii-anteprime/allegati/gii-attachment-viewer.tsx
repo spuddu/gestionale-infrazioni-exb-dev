@@ -11,7 +11,68 @@ export type GiiAttachmentViewerItem = {
   url?: string
   originalUrl?: string
   previewUrl?: string
+  keywords?: string
+  created?: number
+  creationDate?: number
+  createdAt?: number
+  lastEditDate?: number
+  editDate?: number
+  uploadedAt?: number
 }
+
+export type GiiAttachmentKind = 'technical' | 'administrative' | 'bozza-determinazione' | 'proposta-contestazione'
+
+export const GII_ATTACHMENT_KEYWORDS = {
+  technical: 'GII_ALLEGATO_TECNICO',
+  administrative: 'GII_ALLEGATO_AMMINISTRATIVO',
+  bozzaDeterminazione: 'GII_BOZZA_DETERMINAZIONE_DOCX',
+  propostaContestazione: 'GII_PROPOSTA_CONTESTAZIONE_PDF'
+} as const
+
+function normalizeGiiAttachmentText (value?: string): string {
+  return String(value || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim()
+}
+
+function attachmentKeywordHas (item: GiiAttachmentViewerItem | null | undefined, token: string): boolean {
+  const haystack = String((item as any)?.keywords || '').toUpperCase()
+  return !!token && haystack.includes(String(token).toUpperCase())
+}
+
+export function getGiiAttachmentKind (item: GiiAttachmentViewerItem | null | undefined): GiiAttachmentKind {
+  const nameKey = normalizeGiiAttachmentText((item as any)?.name)
+  if (attachmentKeywordHas(item, GII_ATTACHMENT_KEYWORDS.bozzaDeterminazione) || /\bbozza\b.*\bdeterminazione\b/.test(nameKey) || /\bdeterminazione\b.*\bbozza\b/.test(nameKey)) {
+    return 'bozza-determinazione'
+  }
+  if (attachmentKeywordHas(item, GII_ATTACHMENT_KEYWORDS.propostaContestazione) || /\bproposta\b.*\bcontestazione\b/.test(nameKey)) {
+    return 'proposta-contestazione'
+  }
+  if (attachmentKeywordHas(item, GII_ATTACHMENT_KEYWORDS.administrative)) return 'administrative'
+  if (attachmentKeywordHas(item, GII_ATTACHMENT_KEYWORDS.technical)) return 'technical'
+  return 'technical'
+}
+
+export function isGiiSpecialAdministrativeAttachment (item: GiiAttachmentViewerItem | null | undefined): boolean {
+  const kind = getGiiAttachmentKind(item)
+  return kind === 'bozza-determinazione' || kind === 'proposta-contestazione'
+}
+
+export function filterGiiAttachmentsForTechnicalRoles<T extends GiiAttachmentViewerItem> (items: T[]): T[] {
+  return (Array.isArray(items) ? items : []).filter(item => getGiiAttachmentKind(item) === 'technical')
+}
+
+export function filterGiiAttachmentsForAdministrativeGenericSection<T extends GiiAttachmentViewerItem> (items: T[]): T[] {
+  return (Array.isArray(items) ? items : []).filter(item => getGiiAttachmentKind(item) === 'administrative')
+}
+
+export function filterGiiAttachmentsForAdministrativeFascicolo<T extends GiiAttachmentViewerItem> (items: T[]): T[] {
+  return (Array.isArray(items) ? items : []).filter(item => !isGiiSpecialAdministrativeAttachment(item))
+}
+
 
 export type GiiAttachmentViewerProps<T extends GiiAttachmentViewerItem = GiiAttachmentViewerItem> = {
   title?: string

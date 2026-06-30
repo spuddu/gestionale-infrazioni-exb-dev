@@ -3193,7 +3193,8 @@ export default function Widget(props: Props) {
                       backdropFilter:'blur(10px)',
                       pointerEvents:'auto'
                     }}>
-                      {(showAccountAvatar || showAccountName) && <>
+                      {(showAccountAvatar || showAccountName) && (
+                        <React.Fragment>
                         <div style={{ display:'flex', alignItems:'center', gap:10, padding:'2px 2px 8px' }}>
                           {showAccountAvatar && (
                             <div style={{ width:36,height:36,borderRadius:'50%',
@@ -3214,7 +3215,8 @@ export default function Widget(props: Props) {
                           )}
                         </div>
                         <div style={{ height:1, background:'rgba(255,255,255,0.10)', margin:'2px 0 8px' }}/>
-                      </>}
+                        </React.Fragment>
+                      )}
 
                       {showAccountProfile && (
                         <button type='button' title='Apri in una nuova finestra'

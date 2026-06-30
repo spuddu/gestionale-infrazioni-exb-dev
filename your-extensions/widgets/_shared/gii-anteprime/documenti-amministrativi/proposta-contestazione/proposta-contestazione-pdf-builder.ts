@@ -330,7 +330,7 @@ function drawHeader (ctx: BuildCtx): void {
 
   // Dalla seconda pagina in poi evita la duplicazione dell'intestazione
   // completa e usa solo una testatina compatta di continuità.
-  const compactTitle = 'PROPOSTA DI CONTESTAZIONE · Scheda istruttoria di dettaglio'
+  const compactTitle = 'PROPOSTA DI CONTESTAZIONE · ALLEGATA AL RAPPORTO TECNICO DI RILEVAZIONE'
   page.drawText(compactTitle, { x: M, y: PAGE_H - 36, size: 8.2, font: bold, color: BLUE })
   page.drawText(officeText, {
     x: PAGE_W - M - font.widthOfTextAtSize(officeText, 7.2),
@@ -992,7 +992,7 @@ export async function buildPropostaContestazionePdf (m: Record<string, string>):
   const propostaApprovata = ['1', 'TRUE', 'SI', 'SÌ', 'APPROVATA', 'APPROVATO'].includes(v(m, 'proposta_approvata').toUpperCase())
   const isBozza = !meta.isArchiviazione && !approvato && !propostaApprovata
   const title = meta.title
-  const subtitle = meta.isArchiviazione ? '' : 'Scheda istruttoria di dettaglio'
+  const subtitle = meta.isArchiviazione ? '' : `ALLEGATA AL RAPPORTO TECNICO DI RILEVAZIONE N. ${v(m, 'n_rapporto') || '-'}`
   const trasgressore = v(m, 'trasgressore') || '-'
   const object = meta.isArchiviazione
     ? (v(m, 'oggetto_atto_amm') || meta.fallbackObject)
@@ -1015,14 +1015,14 @@ Ditta “${trasgressore}”.`
   }
 
   drawSectionTitle(ctx, 'Istruttoria tecnica')
+  const settoreUfficio = [v(m, 'settore'), v(m, 'ufficio_zona')].filter(Boolean).join(' · ')
   drawKeyValueGrid(ctx, compactRows([
     ['Area', v(m, 'area')],
-    ['Settore', v(m, 'settore')],
-    ['Ufficio', v(m, 'ufficio_zona')]
+    ['Settore / Ufficio', settoreUfficio]
   ]))
   drawKeyValueGrid(ctx, [
     ['N. rilevazione', v(m, 'n_rilevazione') || '-'],
-    ['Data rilevazione', v(m, 'data_rilevazione') || '-'],
+    ['Data e ora rilevazione', v(m, 'data_rilevazione') || '-'],
     ['N. rapporto tecnico', v(m, 'n_rapporto') || '-'],
     ['Data approvazione rapporto', v(m, 'data_approvazione_rapporto') || '-']
   ])
