@@ -2033,6 +2033,9 @@ function ActionsPanel (props: {
     })()
     const area = clean(pickAttrCI(d, ['area_label', 'area_cod', 'area']))
     const settore = clean(pickAttrCI(d, ['settore_label', 'settore_cod', 'settore']))
+    const esitoTiAmmNum = Number(pickAttrCI(d, ['esito_TI_AMM', 'Esito_TI_AMM', 'ESITO_TI_AMM']))
+    const esitoRiAmmNum = Number(pickAttrCI(d, ['esito_RI_AMM', 'Esito_RI_AMM', 'ESITO_RI_AMM']))
+    const propostaApprovata = esitoTiAmmNum === 2 && esitoRiAmmNum === 2
     const map: Record<string, string> = {
       objectid: oidNum != null ? String(oidNum) : '',
       anno_corrente: String(new Date().getFullYear()),
@@ -2056,6 +2059,7 @@ function ActionsPanel (props: {
       oggetto_atto_amm: clean(pickAttrCI(d, ['oggetto_atto_amm'])),
       note_atto_amm: clean(pickAttrCI(d, ['note_atto_amm'])),
       atto_approvato: clean(pickAttrCI(d, ['determinazione_numero'])) ? '1' : '0',
+      proposta_approvata: propostaApprovata ? '1' : '0',
       protocollo_istanza_numero: clean(pickAttrCI(d, ['protocollo_istanza_numero'])),
       protocollo_istanza_data: date(pickAttrCI(d, ['protocollo_istanza_data'])),
       protocollo_fascicolo_numero: clean(pickAttrCI(d, ['protocollo_fascicolo_numero'])),
@@ -3463,17 +3467,23 @@ function ActionsPanel (props: {
     if (role === 'DT')     return 'RI_AMM'   // DT approva e trasmette direttamente a RI_AMM (fase sanzionatoria)
     if (role === 'RI_AMM') {
       const detStato = String(pickAttrCI(data, ['determinazione_stato', 'DETERMINAZIONE_STATO']) || '').trim().toUpperCase()
-      // Secondo passaggio RI_AMM: proposta e bozza determina sono state trasmesse dal TI_AMM.
-      // L'azione positiva è l'approvazione del fascicolo; la pratica rientra
-      // nella disponibilità operativa del TI_AMM per protocollazione e invio al Direttore.
+      // RI_AMM interviene solo dopo la trasmissione interna della bozza determinazione.
+      // Il solo visto di conformità TI_AMM NON apre un nodo operativo RI_AMM.
       if (detStato === 'TRASMESSA_RI_AMM' || detStato === 'BOZZA_TRASMESSA_RI_AMM') return 'TI_AMM'
-
-      // Primo passaggio RI_AMM dopo visto TI_AMM: approva la Proposta di contestazione
-      // e restituisce la pratica al TI_AMM per protocollazione e bozza determina.
+      // Fallback per viste che non espongono determinazione_stato: la trasmissione
+      // della bozza apre comunque il nodo RI_AMM con stato/presa 1 o 2.
+      const statoRiAmm = toNumOrNull(pickAttrCI(data, ['stato_RI_AMM', 'STATO_RI_AMM']))
+      const presaRiAmm = toNumOrNull(pickAttrCI(data, ['presa_in_carico_RI_AMM', 'PRESA_IN_CARICO_RI_AMM']))
+      const statoTiAmm = toNumOrNull(pickAttrCI(data, ['stato_TI_AMM', 'STATO_TI_AMM']))
       const esitoTiAmm = toNumOrNull(pickAttrCI(data, ['esito_TI_AMM', 'ESITO_TI_AMM']))
-      return esitoTiAmm === ESITO_APPROVATA ? 'TI_AMM' : ''
+      const riAmmOpen = statoRiAmm === STATO_DA_PRENDERE || statoRiAmm === STATO_PRESA_IN_CARICO || presaRiAmm === PRESA_DA_PRENDERE || presaRiAmm === PRESA_IN_CARICO
+      if (riAmmOpen && esitoTiAmm === ESITO_APPROVATA && statoTiAmm === STATO_APPROVATA) return 'TI_AMM'
+      return ''
     }
-    if (role === 'TI_AMM') return 'RI_AMM'
+    if (role === 'TI_AMM') {
+      const detStato = String(pickAttrCI(data, ['determinazione_stato', 'DETERMINAZIONE_STATO']) || '').trim().toUpperCase()
+      return (detStato === 'TRASMESSA_RI_AMM' || detStato === 'BOZZA_TRASMESSA_RI_AMM') ? 'RI_AMM' : ''
+    }
     return ''
   }
 
@@ -3534,27 +3544,85 @@ function ActionsPanel (props: {
     : (role === 'RZ' || role === 'RI' || role === 'DT' || role === 'RI_AMM' || role === 'DA')
 
   const isMeaningfulAudit = (v: any): boolean => !(v === null || v === undefined || v === '' || v === 0 || v === '0')
-  const inChargeByRole =
-    presaRoleNum === PRESA_IN_CARICO ||
-    statoRoleNum === STATO_PRESA_IN_CARICO
-
   const roleEsitoValue = pickAttrCI(data, [roleEsitoField, roleEsitoField.toUpperCase()])
   const roleEsitoNum = toNumOrNull(roleEsitoValue)
   const determinazioneStatoCorrente = String(pickAttrCI(data, ['determinazione_stato', 'DETERMINAZIONE_STATO']) || '').trim().toUpperCase()
-  const riAmmBozzaDeterminazioneDaVerificare = role === 'RI_AMM' && (
-    determinazioneStatoCorrente === 'TRASMESSA_RI_AMM' ||
-    determinazioneStatoCorrente === 'BOZZA_TRASMESSA_RI_AMM'
+  const determinazioneAdottataCorrente = determinazioneStatoCorrente === 'ADOTTATA' || (
+    !isEmptyValue(pickAttrCI(data, ['determinazione_numero', 'DETERMINAZIONE_NUMERO'])) &&
+    !isEmptyValue(pickAttrCI(data, ['determinazione_data', 'DETERMINAZIONE_DATA']))
   )
+
+  const parseTiAmmRetakeMs = (v: any): number | null => {
+    if (v == null || v === '') return null
+    if (typeof v === 'number' && Number.isFinite(v)) return v
+    const n = Number(v)
+    if (Number.isFinite(n) && n > 0) return n
+    const t = Date.parse(String(v))
+    return Number.isFinite(t) ? t : null
+  }
+
+  const tiAmmRiAmmReturnTimes = [
+    parseTiAmmRetakeMs(pickAttrCI(data, ['dt_esito_RI_AMM', 'DT_ESITO_RI_AMM'])),
+    parseTiAmmRetakeMs(pickAttrCI(data, ['dt_stato_RI_AMM', 'DT_STATO_RI_AMM']))
+  ].filter((v): v is number => v !== null)
+  const tiAmmLastRiAmmReturnMs = tiAmmRiAmmReturnTimes.length ? Math.max(...tiAmmRiAmmReturnTimes) : null
+  const tiAmmLastPresaMs = parseTiAmmRetakeMs(pickAttrCI(data, ['dt_presa_in_carico_TI_AMM', 'DT_PRESA_IN_CARICO_TI_AMM']))
+  const tiAmmRiAmmReturnEsito = toNumOrNull(pickAttrCI(data, ['esito_RI_AMM', 'ESITO_RI_AMM']))
+  const tiAmmRiAmmReturnStato = toNumOrNull(pickAttrCI(data, ['stato_RI_AMM', 'STATO_RI_AMM']))
+  const tiAmmHasReturnFromRiAmm = role === 'TI_AMM' &&
+    !determinazioneAdottataCorrente &&
+    tiAmmLastRiAmmReturnMs !== null &&
+    (
+      tiAmmRiAmmReturnEsito === ESITO_APPROVATA ||
+      tiAmmRiAmmReturnEsito === ESITO_INTEGRAZIONE ||
+      tiAmmRiAmmReturnStato === STATO_APPROVATA ||
+      tiAmmRiAmmReturnStato === STATO_INTEGRAZIONE
+    )
+  const tiAmmAwaitingRetakeFromRiAmm = tiAmmHasReturnFromRiAmm &&
+    (tiAmmLastPresaMs === null || tiAmmLastPresaMs < tiAmmLastRiAmmReturnMs!)
+  const tiAmmAvailableAfterRiAmmReturn = tiAmmHasReturnFromRiAmm && !tiAmmAwaitingRetakeFromRiAmm
+
+  const inChargeByRole =
+    !tiAmmAwaitingRetakeFromRiAmm &&
+    (
+      presaRoleNum === PRESA_IN_CARICO ||
+      statoRoleNum === STATO_PRESA_IN_CARICO
+    )
+  const statoTiAmmForBozza = toNumOrNull(pickAttrCI(data, ['stato_TI_AMM', 'STATO_TI_AMM']))
+  const esitoTiAmmForBozza = toNumOrNull(pickAttrCI(data, ['esito_TI_AMM', 'ESITO_TI_AMM']))
+  const riAmmOperationalNodeForBozza = role === 'RI_AMM' && (
+    statoRoleNum === STATO_DA_PRENDERE ||
+    statoRoleNum === STATO_PRESA_IN_CARICO ||
+    presaRoleNum === PRESA_DA_PRENDERE ||
+    presaRoleNum === PRESA_IN_CARICO
+  )
+  const riAmmBozzaDeterminazioneDaVerificare = role === 'RI_AMM' &&
+    !determinazioneAdottataCorrente &&
+    roleEsitoNum !== ESITO_APPROVATA &&
+    (
+      determinazioneStatoCorrente === 'TRASMESSA_RI_AMM' ||
+      determinazioneStatoCorrente === 'BOZZA_TRASMESSA_RI_AMM' ||
+      (riAmmOperationalNodeForBozza && esitoTiAmmForBozza === ESITO_APPROVATA)
+    )
   const tiAmmAttestazioneOperativa = role === 'TI_AMM' && roleEsitoNum === ESITO_APPROVATA && (
     !determinazioneStatoCorrente ||
     determinazioneStatoCorrente === 'BOZZA'
   )
 
   const roleClosedOrForwarded =
-    (isMeaningfulAudit(roleEsitoValue) && !tiAmmAttestazioneOperativa) ||
-    (statoRoleNum === STATO_APPROVATA && !tiAmmAttestazioneOperativa) ||
+    (isMeaningfulAudit(roleEsitoValue) && !tiAmmAttestazioneOperativa && !tiAmmAvailableAfterRiAmmReturn) ||
+    (statoRoleNum === STATO_APPROVATA && !tiAmmAttestazioneOperativa && !tiAmmAvailableAfterRiAmmReturn) ||
     (statoRoleNum === STATO_RESPINTA) ||
-    (statoRoleNum != null && statoRoleNum > STATO_PRESA_IN_CARICO && !tiAmmAttestazioneOperativa)
+    (statoRoleNum != null && statoRoleNum > STATO_PRESA_IN_CARICO && !tiAmmAttestazioneOperativa && !tiAmmAvailableAfterRiAmmReturn)
+
+  const riAmmHasOperationalNode = role === 'RI_AMM' && (
+    statoRoleNum === STATO_DA_PRENDERE ||
+    statoRoleNum === STATO_PRESA_IN_CARICO ||
+    presaRoleNum === PRESA_DA_PRENDERE ||
+    presaRoleNum === PRESA_IN_CARICO
+  )
+  const riAmmBlockedByTiAmmVistoOnly = role === 'RI_AMM' && !riAmmBozzaDeterminazioneDaVerificare && !riAmmHasOperationalNode &&
+    toNumOrNull(pickAttrCI(data, ['esito_TI_AMM', 'ESITO_TI_AMM'])) === ESITO_APPROVATA
 
   const canEdit =
     hasSel &&
@@ -3563,11 +3631,18 @@ function ActionsPanel (props: {
     canShowEdit &&
     !!isOwnedByCurrentRole &&
     inChargeByRole &&
-    !roleClosedOrForwarded
+    !roleClosedOrForwarded &&
+    !riAmmBlockedByTiAmmVistoOnly &&
+    !(role === 'RI_AMM' && determinazioneAdottataCorrente)
 
   const roleToBeTakenInCharge =
     isOwnedByCurrentRole &&
-    (statoRoleNum === STATO_DA_PRENDERE || presaRoleNum === PRESA_DA_PRENDERE)
+    !riAmmBlockedByTiAmmVistoOnly &&
+    (
+      statoRoleNum === STATO_DA_PRENDERE ||
+      presaRoleNum === PRESA_DA_PRENDERE ||
+      (riAmmBozzaDeterminazioneDaVerificare && !inChargeByRole && roleEsitoNum == null)
+    )
 
   // Tutti i ruoli abilitati alla scheda possono aprire la pratica anche quando non è
   // nella propria disponibilità: in quel caso l'apertura è sempre in sola consultazione.
@@ -3770,8 +3845,9 @@ function ActionsPanel (props: {
   }
 
   const awaitingRetakeByRz = data ? computeAwaitingRetakeByRZ(data) : false
-  const effectiveStatoNum = awaitingRetakeByRz && role === 'RZ' ? STATO_DA_PRENDERE : statoNum
-  const effectivePresaNum = awaitingRetakeByRz && role === 'RZ' ? PRESA_DA_PRENDERE : presaNum
+  const forceCurrentRoleRetake = (awaitingRetakeByRz && role === 'RZ') || tiAmmAwaitingRetakeFromRiAmm
+  const effectiveStatoNum = forceCurrentRoleRetake ? STATO_DA_PRENDERE : statoNum
+  const effectivePresaNum = forceCurrentRoleRetake ? PRESA_DA_PRENDERE : presaNum
 
   // Matrice_DT: DT trasmette al RI AMM. Nessun lock basato sul vecchio nodo DA.
   const lockedByTransmit = false
@@ -3991,11 +4067,19 @@ function ActionsPanel (props: {
         case 'DT':     return 'RI_AMM'
         case 'RI_AMM': {
           const detStato = String(pickAttrCI(d, ['determinazione_stato', 'DETERMINAZIONE_STATO']) || '').trim().toUpperCase()
-          if (detStato === 'TRASMESSA_RI_AMM' || detStato === 'BOZZA_TRASMESSA_RI_AMM') return ''
+          if (detStato === 'TRASMESSA_RI_AMM' || detStato === 'BOZZA_TRASMESSA_RI_AMM') return 'TI_AMM'
+          const statoRiAmm = toNum(pickAttrCI(d, ['stato_RI_AMM', 'STATO_RI_AMM']))
+          const presaRiAmm = toNum(pickAttrCI(d, ['presa_in_carico_RI_AMM', 'PRESA_IN_CARICO_RI_AMM']))
+          const statoTiAmm = toNum(pickAttrCI(d, ['stato_TI_AMM', 'STATO_TI_AMM']))
           const esitoTiAmm = toNum(pickAttrCI(d, ['esito_TI_AMM', 'ESITO_TI_AMM']))
-          return esitoTiAmm === ESITO_APPROVATA ? 'TI_AMM' : ''
+          const riAmmOpen = statoRiAmm === STATO_DA_PRENDERE || statoRiAmm === STATO_PRESA_IN_CARICO || presaRiAmm === PRESA_DA_PRENDERE || presaRiAmm === PRESA_IN_CARICO
+          if (riAmmOpen && esitoTiAmm === ESITO_APPROVATA && statoTiAmm === STATO_APPROVATA) return 'TI_AMM'
+          return ''
         }
-        case 'TI_AMM': return 'RI_AMM'
+        case 'TI_AMM': {
+          const detStato = String(pickAttrCI(d, ['determinazione_stato', 'DETERMINAZIONE_STATO']) || '').trim().toUpperCase()
+          return (detStato === 'TRASMESSA_RI_AMM' || detStato === 'BOZZA_TRASMESSA_RI_AMM') ? 'RI_AMM' : ''
+        }
         case 'DA':     return 'TI_AMM'
         default:       return ''
       }
@@ -4066,6 +4150,22 @@ function ActionsPanel (props: {
   const nodoAttivo = data ? computeNodoAttivo(data) : ''
   const isMyTurn = nodoAttivo === role
 
+  const parseWorkflowRoleFromRoutingText = (value: any): string => {
+    const s = String(value || '').trim().toUpperCase().replace(/[\s-]+/g, '_')
+    if (!s) return ''
+    if (s.startsWith('RI_AMM')) return 'RI_AMM'
+    if (s.startsWith('TI_AMM')) return 'TI_AMM'
+    if (s.startsWith('DIR_AMM') || s.startsWith('DA')) return 'DA'
+    if (s.startsWith('DIR') || s.startsWith('DT')) return 'DT'
+    if (s.startsWith('RI')) return 'RI'
+    if (s.startsWith('RZ')) return 'RZ'
+    if (s.startsWith('TI')) return 'TI'
+    if (s.startsWith('TR')) return 'TR'
+    return ''
+  }
+  const giiRoutingDestRole = parseWorkflowRoleFromRoutingText(pickAttrCI(data, ['GII_a', 'gii_a']))
+  const isExplicitlyRoutedToAnotherRole = !!giiRoutingDestRole && giiRoutingDestRole !== role
+
   // TI non deve poter "prendere in carico" una pratica nata da gestionale (origine=2)
   // se non ha ancora workflow: quella pratica è già sua.
   const isTiOwningOrigin2 = role === 'TI' && origineNum === 2 && presaNum == null
@@ -4093,6 +4193,7 @@ function ActionsPanel (props: {
     !loading &&
     !lockedByTransmit &&
     canChooseWorkflowAction &&
+    !isExplicitlyRoutedToAnotherRole &&
     (myStatoIsDaPrendere || (effectivePresaNum == null && effectiveStatoNum == null && !isTiOwningOrigin2 && isMyTurn)) &&
     !isTiOwningOrigin2 &&
     (effectivePresaNum == null || effectivePresaNum === PRESA_DA_PRENDERE) &&
@@ -4133,7 +4234,7 @@ function ActionsPanel (props: {
   // bloccare RI_AMM né impedire una nuova assegnazione.
   const esitoTiAmmNum = toNumOrNull(pickAttrCI(data, ['esito_TI_AMM', 'ESITO_TI_AMM']))
   const statoTiAmmNum = toNumOrNull(pickAttrCI(data, ['stato_TI_AMM', 'STATO_TI_AMM']))
-  const riAmmStaApprovandoPropostaContestazione = role === 'RI_AMM' && esitoTiAmmNum === ESITO_APPROVATA
+  const riAmmStaApprovandoPropostaContestazione = role === 'RI_AMM' && riAmmBozzaDeterminazioneDaVerificare && esitoTiAmmNum === ESITO_APPROVATA
   const tiAmmAssignmentOpen = hasTiAmmAssigned && (
     statoTiAmmNum === STATO_DA_PRENDERE ||
     statoTiAmmNum === STATO_PRESA_IN_CARICO ||
@@ -4203,9 +4304,11 @@ function ActionsPanel (props: {
     !loading &&
     !lockedByTransmit &&
     canChooseWorkflowAction &&
+    !isExplicitlyRoutedToAnotherRole &&
     myStatoIsPresaInCarico &&
     !lockRZBecauseAssignedToTi &&
     !lockRiAmmBecauseAssignedToTiAmm &&
+    !(role === 'RI_AMM' && determinazioneAdottataCorrente) &&
     effectivePresaNum === PRESA_IN_CARICO &&
     effectiveStatoNum === STATO_PRESA_IN_CARICO
 
@@ -4244,13 +4347,15 @@ function ActionsPanel (props: {
   const canStartIntegrazioneTiAmm =
     canStartEsito &&
     role === 'RI_AMM' &&
+    !determinazioneAdottataCorrente &&
     hasTiAmmAssigned &&
     !riAmmSenderIsTecnico &&
     currentIntegrationRequester !== 'TI_AMM'
 
   const canStartIntegrazioneTecnica =
     canStartEsito &&
-    role === 'RI_AMM'
+    role === 'RI_AMM' &&
+    !determinazioneAdottataCorrente
 
   const tiAmmConformitaGiaApposta = role === 'TI_AMM' && esitoTiAmmNum === ESITO_APPROVATA
   const riAmmHaRimandatoATiAmmDopoVisto = role === 'TI_AMM' && tiAmmConformitaGiaApposta && (
@@ -4264,7 +4369,7 @@ function ActionsPanel (props: {
     role !== 'TI_AMM' &&
     tiAmmPuoApporreAttestazione &&
     !(role === 'RZ' && (origineNum == null || origineNum === 1) && !hasTiAnyEvidence) &&
-    !(role === 'RI_AMM' && !currentIntegrationRequester && esitoTiAmmNum !== ESITO_APPROVATA)
+    !(role === 'RI_AMM' && !currentIntegrationRequester && !riAmmBozzaDeterminazioneDaVerificare)
 
   const canStartRespingi =
     canStartEsito &&
@@ -4544,7 +4649,7 @@ function ActionsPanel (props: {
           label: approvaMenuLabel,
           desc: approvaMenuDesc,
           enabled: canStartApprova,
-          visible: !hideRiAmmForwardToTiAmm && (role !== 'TI_AMM' || tiAmmPuoApporreAttestazione),
+          visible: !hideRiAmmForwardToTiAmm && role !== 'TI_AMM',
           color: (role === 'DT' || role === 'DA') ? buttonColors.approvaRapporto : buttonColors.approva,
           textColor: (role === 'DT' || role === 'DA') ? buttonColors.approvaRapportoText : buttonColors.approvaText
         }
@@ -4613,7 +4718,7 @@ function ActionsPanel (props: {
   const workflowMenuEnabledItems = workflowMenuEnabledSections.flatMap(section => section.items)
   const hasVisibleWorkflowMenuActions = workflowMenuSections.some(section => section.items.length > 0)
   const hasEnabledWorkflowMenuActions = workflowMenuEnabledItems.length > 0
-  const showTakeDirect = canStartTakeInCharge || !hasSel || !hasVisibleWorkflowMenuActions
+  const showTakeDirect = canStartTakeInCharge || !hasSel
 
   const integrationReasonOptions = [
     'Fatti accertati da chiarire',
@@ -5425,11 +5530,12 @@ function ActionsPanel (props: {
           if (fDtEsito && !preserveTiAmmEsitoAfterRiAmmRimando) upd[fDtEsito] = null
 
           // Rimando RI_AMM -> TI_AMM dopo trasmissione della bozza determinazione.
-          // La bozza non deve restare nello stato operativo TRASMESSA_RI_AMM,
-          // altrimenti il TI_AMM rientra in un limbo: pratica riaperta ma sezione
-          // bozza ancora bloccata come se fosse avanzata. Il rientro riporta la
-          // bozza alla lavorazione TI_AMM; la storia della trasmissione/rimando resta
-          // tracciata nel log eventi/cicli e nelle attività correnti.
+          // Il rientro apre una fase di rettifica: la vecchia verifica RI_AMM resta
+          // tracciata nello storico, ma non può sbloccare protocollazione o firma.
+          // Il TI_AMM dovrà riapporre il visto, rigenerare la Proposta e trasmettere
+          // una nuova bozza al Responsabile; il nuovo ciclo sostituisce il precedente.
+          // Il valore del campo resta BOZZA perché determinazione_stato ha un dominio
+          // codificato e non consente stati intermedi non previsti dallo schema.
           if (pending === 'INTEGRAZIONE_TI_AMM' && ruoloDest === 'TI_AMM') {
             const fDeterminaStato = getSchemaFieldNameCI(schemaFields, 'determinazione_stato')
             if (fDeterminaStato) upd[fDeterminaStato] = 'BOZZA'
@@ -5489,8 +5595,6 @@ function ActionsPanel (props: {
         // data/ora della trasmissione della bozza; la pratica rientra poi al TI_AMM.
       }
       if (stato != null) {
-        // Il visto TI_AMM chiude il ciclo operativo TI_AMM e passa la pratica al RI_AMM.
-        // La protocollazione e la bozza determina restano bloccate fino all'approvazione RI_AMM.
         upd[statoField] = stato
         upd[dtStatoField] = now
       }
@@ -5541,7 +5645,7 @@ function ActionsPanel (props: {
 
       const integRequester = (esito === ESITO_APPROVATA && !isTiAmmAttestazioneConformita) ? getIntegrationRequesterForCurrentRole() : ''
       const ruoloDest = esito === ESITO_APPROVATA
-        ? (isTiAmmAttestazioneConformita ? 'RI_AMM' : (isRiAmmTrasmissioneBozzaAlDa ? 'TI_AMM' : (integRequester || getNextRoleForForward())))
+        ? (isTiAmmAttestazioneConformita ? '' : (isRiAmmTrasmissioneBozzaAlDa ? 'TI_AMM' : (integRequester || getNextRoleForForward())))
         : ''
       if (ruoloDest) {
         try {
@@ -5595,8 +5699,8 @@ function ActionsPanel (props: {
               : isTiAmmAttestazioneConformita
                 ? {
                     eventoChiusura: 'ATTESTAZIONE_CONFORMITA',
-                    ruoloDestinatario: ruoloDest,
-                    utenteDestinatario: resolveDestUser(ruoloDest),
+                    ruoloDestinatario: '',
+                    utenteDestinatario: '',
                     noteChiusura: noteTrim ? `Attestazione di conformità:
 ${noteTrim}` : 'Attestazione di conformità apposta.',
                     fase: role
@@ -5625,7 +5729,7 @@ ${noteTrim}` : 'Attestazione di conformità apposta.',
                 : [])
           : []
         const successText = isTiAmmAttestazioneConformita
-          ? 'Attestazione di conformità apposta e trasmessa al RI_AMM.'
+          ? 'Attestazione di conformità apposta.'
           : isRiAmmTrasmissioneBozzaAlDa
             ? 'Istruttoria amministrativa approvata e restituita al Tecnico istruttore amministrativo.'
             : riAmmStaApprovandoPropostaContestazione
@@ -8239,18 +8343,40 @@ async function hasAttachmentsForActions (ds: any, oid: number): Promise<boolean>
   return infos.length > 0
 }
 
+function normalizeAttachmentTextForActions (value?: any): string {
+  return String(value || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim()
+}
+
+function isSpecialAdministrativeAttachmentForActions (att: any): boolean {
+  const keywords = String(att?.keywords || att?.Keywords || '').toUpperCase()
+  const nameKey = normalizeAttachmentTextForActions(att?.name || att?.Name || att?.ATT_NAME)
+  if (keywords.includes('GII_PROPOSTA_CONTESTAZIONE_PDF') || keywords.includes('GII_BOZZA_DETERMINAZIONE_DOCX')) return true
+  if (/\bproposta\b.*\bcontestazione\b/.test(nameKey)) return true
+  if (/\bbozza\b.*\bdeterminazione\b/.test(nameKey) || /\bdeterminazione\b.*\bbozza\b/.test(nameKey)) return true
+  if (/\bdeterminazione\b.*\bdirigenziale\b/.test(nameKey) || /\bdetermina\b/.test(nameKey)) return true
+  return false
+}
+
 async function loadAttachmentOptionsForActions (ds: any, oid: number): Promise<AttachmentPrintOption[]> {
   if (!Number.isFinite(oid) || oid <= 0) return []
   const layer = await resolveFeatureLayerForAttachments(ds)
   if (!layer) return []
   const infos = await queryFeatureAttachmentsForActions(layer, oid, ds)
-  return (infos || []).map((att: any) => ({
-    id: Number(att?.id ?? att?.attachmentId ?? att?.objectId),
-    name: att?.name,
-    size: att?.size,
-    contentType: att?.contentType,
-    url: att?.url
-  })).filter((att: AttachmentPrintOption) => Number.isFinite(att.id) && att.id > 0)
+  return (infos || [])
+    .filter((att: any) => !isSpecialAdministrativeAttachmentForActions(att))
+    .map((att: any) => ({
+      id: Number(att?.id ?? att?.attachmentId ?? att?.objectId),
+      name: att?.name,
+      size: att?.size,
+      contentType: att?.contentType,
+      url: att?.url
+    }))
+    .filter((att: AttachmentPrintOption) => Number.isFinite(att.id) && att.id > 0)
 }
 
 async function fetchAttachmentBlobForActions (layer: any, ds: any, oid: number, att: any, index: number): Promise<{ blob: Blob; fileName: string } | null> {

@@ -4193,7 +4193,57 @@ export default function Widget(props: Props) {
     const stato = String(pickField(d, "determinazione_stato") ?? "")
       .trim()
       .toUpperCase();
-    return stato === "TRASMESSA_RI_AMM" || stato === "BOZZA_TRASMESSA_RI_AMM";
+    if (stato === "TRASMESSA_RI_AMM" || stato === "BOZZA_TRASMESSA_RI_AMM") return true;
+
+    // Fallback necessario per le viste elenco che non espongono determinazione_stato:
+    // dopo "Trasmetti bozza al Responsabile" il record porta comunque lo stato
+    // operativo RI_AMM a 1/2 e chiude il nodo TI_AMM. Il solo visto di conformità,
+    // invece, lascia RI_AMM a 4/null e non deve aprire l'attesa del Responsabile.
+    const statoRiAmm = readRoleNumber(d, "RI_AMM", "stato");
+    const presaRiAmm = readRoleNumber(d, "RI_AMM", "presa");
+    const statoTiAmm = readRoleNumber(d, "TI_AMM", "stato");
+    const esitoTiAmm = readRoleNumber(d, "TI_AMM", "esito");
+    const riAmmOpen =
+      statoRiAmm === statoDaPrendere ||
+      statoRiAmm === statoPresa ||
+      presaRiAmm === presaDaPrendere ||
+      presaRiAmm === presaPresa;
+    return !!riAmmOpen && esitoTiAmm === esitoApprovata && statoTiAmm === statoApprovata;
+  };
+
+  const isDeterminazioneAdottata = (d: any): boolean => {
+    const stato = String(pickField(d, "determinazione_stato") ?? "")
+      .trim()
+      .toUpperCase();
+    if (stato === "ADOTTATA") return true;
+    const numDet = pickField(d, "determinazione_numero");
+    const dataDet = pickField(d, "determinazione_data");
+    const hasVal = (v: any) =>
+      v !== null && v !== undefined && String(v).trim() !== "" && String(v).trim() !== "0";
+    return hasVal(numDet) && hasVal(dataDet);
+  };
+
+  const isTiAmmAwaitingRetakeFromRiAmm = (d: any): boolean => {
+    if (!d || isDeterminazioneAdottata(d)) return false;
+
+    const esitoRiAmm = readRoleNumber(d, "RI_AMM", "esito");
+    const statoRiAmm = readRoleNumber(d, "RI_AMM", "stato");
+    const riAmmReturnedToTiAmm =
+      esitoRiAmm === esitoApprovata ||
+      esitoRiAmm === esitoIntegrazione ||
+      statoRiAmm === statoApprovata ||
+      statoRiAmm === statoIntegrazione;
+    if (!riAmmReturnedToTiAmm) return false;
+
+    const riAmmTimes = [
+      parseToMs(pickField(d, "dt_esito_RI_AMM")),
+      parseToMs(pickField(d, "dt_stato_RI_AMM")),
+    ].filter((v): v is number => v !== null);
+    if (!riAmmTimes.length) return false;
+
+    const lastRiAmmMs = Math.max(...riAmmTimes);
+    const tiAmmPresaMs = parseToMs(pickField(d, "dt_presa_in_carico_TI_AMM"));
+    return tiAmmPresaMs === null || tiAmmPresaMs < lastRiAmmMs;
   };
 
   const getBozzaDeterminazioneTrasmissionDisplay = (d: any) => {
@@ -4286,16 +4336,10 @@ export default function Widget(props: Props) {
         return "DT";
       case "DT":
         return "RI_AMM";
-      case "RI_AMM": {
-        const esitoTiAmm = pickField(d, "esito_TI_AMM");
-        const n =
-          esitoTiAmm !== null && esitoTiAmm !== undefined && esitoTiAmm !== ""
-            ? Number(esitoTiAmm)
-            : null;
-        return n !== null ? "DA" : "TI_AMM";
-      }
+      case "RI_AMM":
+        return isBozzaDeterminazioneTrasmessaRiAmm(d) ? "TI_AMM" : "";
       case "TI_AMM":
-        return "RI_AMM";
+        return isBozzaDeterminazioneTrasmessaRiAmm(d) ? "RI_AMM" : "";
       case "DA":
         return "TI_AMM";
       default:
@@ -4352,6 +4396,9 @@ export default function Widget(props: Props) {
           return { label: "Trasmesso", statoForChip: statoApprovata };
         if (ruolo === "DA")
           return { label: "Trasmesso", statoForChip: statoApprovata };
+        if (ruolo === "TI_AMM" && !isBozzaDeterminazioneTrasmessaRiAmm(d)) {
+          return { label: "In carico", statoForChip: statoPresa };
+        }
         const dest = getFwdDest(ruolo, d);
         if (dest) return { label: "Trasmesso", statoForChip: statoApprovata };
       }
@@ -4468,8 +4515,12 @@ export default function Widget(props: Props) {
   ): { ruolo: string; label: string; statoForChip: number | null } => {
     const bozzaTrasmessaRiAmm = isBozzaDeterminazioneTrasmessaRiAmm(d);
     const statoRiAmm = readRoleNumber(d, "RI_AMM", "stato");
-    if (bozzaTrasmessaRiAmm && (statoRiAmm === null || statoRiAmm === statoDaPrendere)) {
+    const presaRiAmm = readRoleNumber(d, "RI_AMM", "presa");
+    if (bozzaTrasmessaRiAmm && (statoRiAmm === null || statoRiAmm === statoDaPrendere || presaRiAmm === presaDaPrendere)) {
       return { ruolo: "RI_AMM", label: "Da prendere in carico", statoForChip: statoDaPrendere };
+    }
+    if (bozzaTrasmessaRiAmm && (statoRiAmm === statoPresa || presaRiAmm === presaPresa)) {
+      return { ruolo: "RI_AMM", label: "In carico", statoForChip: statoPresa };
     }
 
     const scanOrder = ["DA", "TI_AMM", "RI_AMM", "DT", "RI", "RZ", "TI", "TR"];
@@ -4554,6 +4605,20 @@ export default function Widget(props: Props) {
               label: "Trasmesso",
               statoForChip: statoApprovata,
             };
+          if (role === "TI_AMM" && !isBozzaDeterminazioneTrasmessaRiAmm(d)) {
+            // Il visto TI_AMM da solo resta sul TI_AMM. Se però la vista non
+            // espone determinazione_stato ma espone già il nodo RI_AMM aperto,
+            // non oscurare il passaggio reale "bozza trasmessa al Responsabile".
+            const riAmmStato = readRoleNumber(d, "RI_AMM", "stato");
+            const riAmmPresa = readRoleNumber(d, "RI_AMM", "presa");
+            if (riAmmStato === statoDaPrendere || riAmmPresa === presaDaPrendere) {
+              return { ruolo: "RI_AMM", label: "Da prendere in carico", statoForChip: statoDaPrendere };
+            }
+            if (riAmmStato === statoPresa || riAmmPresa === presaPresa) {
+              return { ruolo: "RI_AMM", label: "In carico", statoForChip: statoPresa };
+            }
+            return { ruolo: "TI_AMM", label: "In carico", statoForChip: statoPresa };
+          }
           const dest = getFwdDest(role, d);
           if (dest) {
             if (hasRuoloData(d, dest)) {
@@ -4885,6 +4950,22 @@ export default function Widget(props: Props) {
     const esitoNum = readRoleNumber(d, role, "esito");
 
     const bozzaTrasmessaRiAmm = isBozzaDeterminazioneTrasmessaRiAmm(d);
+    if (role === "TI_AMM" && isTiAmmAwaitingRetakeFromRiAmm(d)) {
+      return getStateView(role, "Da prendere in carico", statoDaPrendere);
+    }
+    if (role === "RI_AMM" && (statoNum === statoDaPrendere || presaNum === statoDaPrendere)) {
+      return getStateView(role, "Da prendere in carico", statoDaPrendere);
+    }
+    if (role === "RI_AMM" && (statoNum === statoPresa || presaNum === statoPresa)) {
+      return getStateView(role, "In carico", statoPresa);
+    }
+    const vistoTiAmmSenzaBozzaTrasmessa =
+      !bozzaTrasmessaRiAmm &&
+      role === "RI_AMM" &&
+      readRoleNumber(d, "TI_AMM", "esito") === esitoApprovata;
+    if (vistoTiAmmSenzaBozzaTrasmessa) {
+      return getStateView(role, "Trasmesso", statoApprovata);
+    }
     if (bozzaTrasmessaRiAmm && role === "RI_AMM" && (statoNum === null || statoNum === statoDaPrendere)) {
       return getStateView(role, "Da prendere in carico", statoDaPrendere);
     }
@@ -4894,6 +4975,11 @@ export default function Widget(props: Props) {
     // prevalere sul determinazione_stato rimasto TRASMESSA_RI_AMM.
     if (bozzaTrasmessaRiAmm && role === "TI_AMM" && statoNum !== statoDaPrendere && statoNum !== statoPresa) {
       return getStateView(role, "Trasmesso", statoApprovata);
+    }
+    // Il visto TI_AMM è un passaggio interno alla scheda amministrativa:
+    // non trasferisce la pratica al RI_AMM finché non viene trasmessa anche la bozza.
+    if (!bozzaTrasmessaRiAmm && role === "TI_AMM" && esitoNum === esitoApprovata) {
+      return getStateView(role, "In carico", statoPresa);
     }
 
     // Ultima trasmissione partita dal mio ruolo: lo stato è mio, l'oggetto

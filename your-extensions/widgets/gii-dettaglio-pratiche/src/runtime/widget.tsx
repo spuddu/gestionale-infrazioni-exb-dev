@@ -5,6 +5,7 @@ import { Button } from 'jimu-ui'
 import { createPortal } from 'react-dom'
 import type { IMConfig, TabConfig } from '../config'
 import { defaultConfig, DETAIL_DEFAULT_TAB_FIELDS, DETAIL_NEVER_SHOW_FIELDS, DETAIL_GENERAL_FIELDS } from '../config'
+import { filterGiiAttachmentsForTechnicalRoles } from '../../../_shared/gii-anteprime/allegati/gii-attachment-viewer'
 
 
 
@@ -3966,9 +3967,10 @@ function DetailTabsPanel (props: {
   // Allegati (attachments) — caricati solo quando la tab "Allegati" è attiva
   const selectedOid = (hasSel && oid != null) ? Number(oid) : null
   const [attachmentsForOid, setAttachmentsForOid] = React.useState<number | null>(null)
-  const [attachments, setAttachments] = React.useState<Array<{ id: number; name?: string; size?: number; contentType?: string; url?: string }>>([])
+  const [attachments, setAttachments] = React.useState<Array<{ id: number; name?: string; size?: number; contentType?: string; url?: string; keywords?: string }>>([])
   const [attachmentsLoading, setAttachmentsLoading] = React.useState<boolean>(false)
   const [attachmentsError, setAttachmentsError] = React.useState<string | null>(null)
+  const visibleTechnicalAttachments = React.useMemo(() => filterGiiAttachmentsForTechnicalRoles((Array.isArray(attachments) ? attachments : []) as any), [attachments])
 
   const formatBytes = React.useCallback((n?: number) => {
     if (n == null || isNaN(Number(n))) return ''
@@ -4045,7 +4047,8 @@ function DetailTabsPanel (props: {
         name: a.name,
         size: a.size,
         contentType: a.contentType,
-        url: a.url
+        url: a.url,
+        keywords: String(a.keywords ?? a.Keywords ?? a.keyword ?? '').trim()
       })).filter((a: any) => a && !isNaN(a.id))
 
       setAttachments(clean)
@@ -4770,7 +4773,7 @@ const isPgOnlyField = React.useCallback((fieldName: string) => {
     return rows
   }, [data, aliasMap, fieldTypeMap, selectedPointGeometry])
 
-  const allegatiCountForBadge = attachments.length
+  const allegatiCountForBadge = visibleTechnicalAttachments.length
   const allegatiLoadingForBadge = attachmentsLoading && attachmentsForOid !== selectedOid
 
   const TabsBar = (
@@ -4912,8 +4915,8 @@ if (!hasSel) {
 
           {hasSel && !attachmentsLoading && !attachmentsError && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-              {(attachments && attachments.length) ? (
-                attachments.map((a, idx) => {
+              {(visibleTechnicalAttachments && visibleTechnicalAttachments.length) ? (
+                visibleTechnicalAttachments.map((a, idx) => {
                   const url = getOpenUrl(a)
                   return (
                     <DetailSectionCard key={a.id} title={`Allegato ${idx + 1}`} bodyPadding={10}>

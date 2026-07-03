@@ -10927,6 +10927,7 @@ function DetailTabsPanel (props: {
   const [attachmentsError, setAttachmentsError] = React.useState<string | null>(null)
   const [attachmentsUploading, setAttachmentsUploading] = React.useState<boolean>(false)
   const [attachmentFiles, setAttachmentFiles] = React.useState<File[]>([])
+  const visibleTechnicalAttachments = React.useMemo(() => filterGiiAttachmentsForTechnicalRoles((Array.isArray(attachments) ? attachments : []) as any), [attachments])
 
   const formatBytes = React.useCallback((n?: number) => {
     if (n == null || isNaN(Number(n))) return ''
@@ -10962,7 +10963,8 @@ function DetailTabsPanel (props: {
         name: a.name,
         size: a.size,
         contentType: a.contentType,
-        url: a.url
+        url: a.url,
+        keywords: String(a.keywords ?? a.Keywords ?? a.keyword ?? '').trim()
       })).filter((a: any) => a && !isNaN(a.id))
 
       setAttachments(clean)
@@ -11344,8 +11346,8 @@ if (!hasSel) {
 
           {hasSel && !attachmentsLoading && !attachmentsError && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-              {(attachments && attachments.length) ? (
-                attachments.map((a, idx) => {
+              {(visibleTechnicalAttachments && visibleTechnicalAttachments.length) ? (
+                visibleTechnicalAttachments.map((a, idx) => {
                   const url = getOpenUrl(a)
                   const meta = [a.name, a.contentType, formatBytes(a.size)].filter(Boolean).join(' • ')
                   return (

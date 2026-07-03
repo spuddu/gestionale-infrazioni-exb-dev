@@ -4,18 +4,20 @@ import { React, jsx, type AllWidgetProps, DataSourceComponent, UrlManager, getAp
 import { buildPropostaContestazionePdf as buildVerbalePdf, getPropostaContestazionePdfFilePrefix as getVerbalePdfFilePrefix } from '../../../_shared/gii-anteprime/documenti-amministrativi/proposta-contestazione/proposta-contestazione-pdf-builder'
 import { buildBozzaDeterminazioneDocx, getBozzaDeterminazioneDocxFileName } from '../../../_shared/gii-anteprime/documenti-amministrativi/bozza-determinazione/bozza-determinazione-docx-builder'
 import { buildBozzaDeterminazionePdf } from '../../../_shared/gii-anteprime/documenti-amministrativi/bozza-determinazione/bozza-determinazione-pdf-builder'
-import { buildRapportoPdf } from '../../../_shared/gii-anteprime/documenti-tecnici/rapporto/rapporto-pdf-builder'
+import { buildRapportoPdf, buildRapportoIterPlaceholders, loadRapportoIterCicliForPdf, type RapportoIterCicloPdf, type UtenteCacheEntry } from '../../../_shared/gii-anteprime/documenti-tecnici/rapporto/rapporto-pdf-builder'
+import { buildNotaSpesePdf, type NotaSpeseData } from '../../../_shared/gii-anteprime/documenti-tecnici/rapporto/notaspese-pdf-builder'
 import { defaultGiiDocumentPrintOptions as defaultDocumentPrintOptions, cloneGiiDocumentPrintOptions as cloneDocumentPrintOptions, setGiiAttachmentPrintOptionVisible } from '../../../_shared/gii-anteprime/viewer-documenti/document-options'
-import type { GiiDocumentPrintOptions as DocumentPrintOptions, GiiAttachmentPrintOption as AttachmentPrintOption } from '../../../_shared/gii-anteprime/viewer-documenti/document-options'
+import type { GiiDocumentPrintOptions as DocumentPrintOptions, GiiAttachmentPrintOption as AttachmentPrintOption, GiiNotaSpesePrintOption as NotaSpesePrintOption } from '../../../_shared/gii-anteprime/viewer-documenti/document-options'
 import GiiDocumentViewer from '../../../_shared/gii-anteprime/viewer-documenti/document-viewer'
-import GiiAttachmentViewer, { GII_ATTACHMENT_KEYWORDS, filterGiiAttachmentsForAdministrativeFascicolo, filterGiiAttachmentsForAdministrativeGenericSection } from '../../../_shared/gii-anteprime/allegati/gii-attachment-viewer'
-import { PDFDocument } from 'pdf-lib'
+import GiiAttachmentViewer, { GII_ATTACHMENT_KEYWORDS, getGiiAttachmentKind, filterGiiAttachmentsForAdministrativeFascicolo } from '../../../_shared/gii-anteprime/allegati/gii-attachment-viewer'
+import { PDFDocument, StandardFonts, rgb } from 'pdf-lib'
 import type { IMConfig, SummaryFieldConfig } from '../config'
 import { defaultConfig } from '../config'
 import { createPortal } from 'react-dom'
 
 const LOG_EVENTI_CICLI_URL = 'https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_LOG_EVENTI_CICLI/FeatureServer/0'
 const GII_ATTIVITA_CORRENTI_URL = 'https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_ATTIVITA_CORRENTI/FeatureServer/0'
+const GII_UTENTI_URL = 'https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_utenti/FeatureServer/0'
 const NOTA_SPESE_DETTAGLIO_VIEW_URL = 'https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_VIEW_EB_NOTA_SPESE_DETTAGLIO/FeatureServer/0'
 
 function loadEsriModule<T = any> (path: string): Promise<T> {
@@ -24,6 +26,95 @@ function loadEsriModule<T = any> (path: string): Promise<T> {
     if (!req) { reject(new Error('AMD require non disponibile')); return }
     try { req([path], (mod: T) => resolve(mod), (err: any) => reject(err)) } catch (e) { reject(e) }
   })
+}
+
+
+type AmmUtenteCached = UtenteCacheEntry & { email?: string }
+let _ammUtentiCache: Map<string, AmmUtenteCached> | null = null
+let _ammUtentiCachePromise: Promise<Map<string, AmmUtenteCached> | null> | null = null
+
+const AMM_RUOLO_NUM: Record<string, number> = { TR: 1, TI: 2, RZ: 3, RI: 4, DT: 5, DA: 6, ADMIN: 7 }
+const AMM_AREA_NUM: Record<string, number> = { AMM: 1, AGR: 2, TEC: 3 }
+const AMM_SETTORE_NUM: Record<string, number> = { CR: 1, GI: 2, D1: 3, D2: 4, D3: 5, D4: 6, D5: 7, D6: 8, DS: 9, CS: 9 }
+const AMM_RUOLO_COD_FROM_NUM: Record<number, string> = { 1: 'TR', 2: 'TI', 3: 'RZ', 4: 'RI', 5: 'DT', 6: 'DA', 7: 'ADMIN' }
+const AMM_AREA_COD_FROM_NUM: Record<number, string> = { 1: 'AMM', 2: 'AGR', 3: 'TEC' }
+const AMM_SETTORE_COD_FROM_NUM: Record<number, string> = { 1: 'CR', 2: 'GI', 3: 'D1', 4: 'D2', 5: 'D3', 6: 'D4', 7: 'D5', 8: 'D6', 9: 'DS' }
+
+function normalizeAmmUtentiRuoloCod (v: any): string {
+  const s = String(v ?? '').trim().toUpperCase().replace(/[\s-]+/g, '_')
+  if (!s) return ''
+  const n = Number(s)
+  if (Number.isFinite(n) && AMM_RUOLO_COD_FROM_NUM[n]) return AMM_RUOLO_COD_FROM_NUM[n]
+  if (s === 'TI_AMM') return 'TI'
+  if (s === 'RI_AMM') return 'RI'
+  return AMM_RUOLO_NUM[s] != null ? s : s
+}
+
+function normalizeAmmUtentiAreaCod (v: any): string {
+  const s = String(v ?? '').trim().toUpperCase()
+  if (!s) return ''
+  const n = Number(s)
+  if (Number.isFinite(n) && AMM_AREA_COD_FROM_NUM[n]) return AMM_AREA_COD_FROM_NUM[n]
+  if (s.includes('AMMIN')) return 'AMM'
+  if (s.includes('AGR')) return 'AGR'
+  if (s.includes('TEC')) return 'TEC'
+  return AMM_AREA_NUM[s] != null ? s : s
+}
+
+function normalizeAmmUtentiSettoreCod (v: any): string {
+  const s = String(v ?? '').trim().toUpperCase().replace(/\s+/g, '')
+  if (!s) return ''
+  const n = Number(s)
+  if (Number.isFinite(n) && AMM_SETTORE_COD_FROM_NUM[n]) return AMM_SETTORE_COD_FROM_NUM[n]
+  if (s === 'CS') return 'DS'
+  const distretto = s.match(/DISTRETTO([1-6])/)
+  if (distretto) return `D${distretto[1]}`
+  if (s.includes('DRENO') || s.includes('SCOLO')) return 'DS'
+  if (s.includes('CATASTO') || s.includes('RUOLI')) return 'CR'
+  if (s.includes('GESTIONEIRRIGUA')) return 'GI'
+  return AMM_SETTORE_NUM[s] != null ? s : s
+}
+
+function ensureAmmUtentiCache (): Promise<Map<string, AmmUtenteCached> | null> {
+  if (_ammUtentiCache) return Promise.resolve(_ammUtentiCache)
+  if (_ammUtentiCachePromise) return _ammUtentiCachePromise
+
+  _ammUtentiCachePromise = (async () => {
+    try {
+      const FeatureLayer = await loadEsriModule<any>('esri/layers/FeatureLayer')
+      const fl = new FeatureLayer({ url: GII_UTENTI_URL })
+      if (typeof fl?.load === 'function') await fl.load()
+      const res = await fl.queryFeatures({ where: '1=1', outFields: ['*'], returnGeometry: false })
+      const map = new Map<string, AmmUtenteCached>()
+      for (const f of (res?.features || [])) {
+        const a = f?.attributes || {}
+        const username = String(a?.username || a?.Username || a?.USER_NAME || '').trim()
+        if (!username) continue
+        map.set(username.toLowerCase(), {
+          full_name: String(a.full_name || a.fullName || a.nome_completo || a.nominativo || username).trim(),
+          email: String(a.email || a.e_mail || a.mail || a.pec || '').trim(),
+          ruolo: a.ruolo ?? null,
+          area: a.area ?? null,
+          settore: a.settore ?? null,
+          ruolo_cod: normalizeAmmUtentiRuoloCod(a.ruolo_cod || a.ruoloCod || a.ruolo),
+          area_cod: normalizeAmmUtentiAreaCod(a.area_cod || a.areaCod || a.area),
+          settore_cod: normalizeAmmUtentiSettoreCod(a.settore_cod || a.settoreCod || a.settore),
+          ruoloCod: normalizeAmmUtentiRuoloCod(a.ruolo_cod || a.ruoloCod || a.ruolo),
+          areaCod: normalizeAmmUtentiAreaCod(a.area_cod || a.areaCod || a.area),
+          settoreCod: normalizeAmmUtentiSettoreCod(a.settore_cod || a.settoreCod || a.settore)
+        })
+      }
+      _ammUtentiCache = map
+      return map
+    } catch (e) {
+      console.warn('[GII-Editing-AMM] Errore caricamento cache GII_utenti per PDF rapporto:', e)
+      return _ammUtentiCache
+    } finally {
+      _ammUtentiCachePromise = null
+    }
+  })()
+
+  return _ammUtentiCachePromise
 }
 
 type RoleCode = 'TI_AMM' | 'RI_AMM' | 'ADMIN' | string
@@ -567,6 +658,116 @@ async function queryNotaSpeseDetailRowsForPractice (data: Record<string, any>): 
       importoRiga: parseNumberInput(pickAttrCI(attrs, ['importo_riga'])) || 0
     }
   }).filter((row: NotaSpeseDetailRow) => !!row.codiceCasistica)
+}
+
+type AmmNsCatPdf = 'AT' | 'PR' | 'RU' | 'SL' | 'PF'
+type AmmNsRowPdf = {
+  objectid: number
+  categoria_costo: AmmNsCatPdf
+  origine_voce_snapshot: string
+  codice_voce_snapshot: string
+  descrizione_snapshot: string
+  unita_misura_snapshot: string
+  prezzo_unitario_snapshot: number
+  quantita: number
+  importo_riga: number
+  anno_prezzario_snapshot?: number | null
+  ordine: number
+  note: string
+}
+type AmmNsSummaryPdf = {
+  totaleAT: number
+  totalePR: number
+  totaleRU: number
+  totaleSL: number
+  totalePF: number
+  percentualeSpeseGenerali: number
+  importoSpeseGenerali: number
+  totaleComplessivo: number
+}
+type AmmNotaSpesePdfGroup = { codiceCasistica: string; label: string; rows: Record<AmmNsCatPdf, AmmNsRowPdf[]>; summary: AmmNsSummaryPdf }
+const AMM_NS_PDF_CATS: AmmNsCatPdf[] = ['AT', 'PR', 'RU', 'SL', 'PF']
+const AMM_NS_PDF_CASISTICA_META: Record<string, { label: string; order: number }> = {
+  C101_DANNI_OPERE: { label: 'Danni alle opere consortili', order: 10 },
+  C102_MANOMISSIONI: { label: 'Manomissioni e alterazioni', order: 20 },
+  C103_PRELIEVI_ABUSIVI: { label: 'Prelievi non autorizzati', order: 30 },
+  C104_ATTREZZATURE_DANNEGGIATE: { label: 'Rimborso/sostituzione attrezzature', order: 40 },
+  C105_ALTRO: { label: 'Altre spese a piè di lista', order: 90 }
+}
+
+function emptyAmmNsRowsForPdf (): Record<AmmNsCatPdf, AmmNsRowPdf[]> {
+  return { AT: [], PR: [], RU: [], SL: [], PF: [] }
+}
+
+function ammNsSummaryForPdf (rows: Record<AmmNsCatPdf, AmmNsRowPdf[]>, percentualeSpeseGenerali: number): AmmNsSummaryPdf {
+  const sumCat = (cat: AmmNsCatPdf): number => (rows[cat] || []).reduce((sum, r) => sum + (Number(r.importo_riga) || 0), 0)
+  const totaleAT = sumCat('AT')
+  const totalePR = sumCat('PR')
+  const totaleRU = sumCat('RU')
+  const totaleSL = sumCat('SL')
+  const totalePF = sumCat('PF')
+  const imponibile = totaleAT + totalePR + totaleRU + totaleSL + totalePF
+  const pct = Number.isFinite(percentualeSpeseGenerali) ? percentualeSpeseGenerali : 15
+  const importoSpeseGenerali = imponibile * pct / 100
+  return { totaleAT, totalePR, totaleRU, totaleSL, totalePF, percentualeSpeseGenerali: pct, importoSpeseGenerali, totaleComplessivo: imponibile + importoSpeseGenerali }
+}
+
+function ammNotaSpeseGroupsForPdf (rawRows: any[], percentualeSpeseGenerali: number): AmmNotaSpesePdfGroup[] {
+  const byCode = new Map<string, Record<AmmNsCatPdf, AmmNsRowPdf[]>>()
+  for (const r of rawRows || []) {
+    const cat = String(pickAttrCI(r, ['categoria_costo']) || '').toUpperCase() as AmmNsCatPdf
+    if (!AMM_NS_PDF_CATS.includes(cat)) continue
+    const code = String(pickAttrCI(r, ['codice_casistica']) || '').trim() || '__NON_COLLEGATA__'
+    if (!byCode.has(code)) byCode.set(code, emptyAmmNsRowsForPdf())
+    byCode.get(code)![cat].push({
+      objectid: Number(pickAttrCI(r, ['OBJECTID', 'objectid']) || 0),
+      categoria_costo: cat,
+      origine_voce_snapshot: String(pickAttrCI(r, ['origine_voce_snapshot']) || ''),
+      codice_voce_snapshot: String(pickAttrCI(r, ['codice_voce_snapshot']) || ''),
+      descrizione_snapshot: String(pickAttrCI(r, ['descrizione_snapshot']) || ''),
+      unita_misura_snapshot: String(pickAttrCI(r, ['unita_misura_snapshot']) || ''),
+      prezzo_unitario_snapshot: Number(pickAttrCI(r, ['prezzo_unitario_snapshot']) || 0),
+      quantita: Number(pickAttrCI(r, ['quantita']) || 0),
+      importo_riga: Number(pickAttrCI(r, ['importo_riga']) || 0),
+      anno_prezzario_snapshot: pickAttrCI(r, ['anno_prezzario_snapshot']) == null ? null : Number(pickAttrCI(r, ['anno_prezzario_snapshot'])),
+      ordine: Number(pickAttrCI(r, ['ordine']) || 0),
+      note: String(pickAttrCI(r, ['note']) || '')
+    })
+  }
+  return Array.from(byCode.entries())
+    .map(([code, rows]) => ({
+      codiceCasistica: code,
+      label: AMM_NS_PDF_CASISTICA_META[code]?.label || (code === '__NON_COLLEGATA__' ? 'Nota spese non collegata a violazione' : 'Nota spese collegata'),
+      rows,
+      summary: ammNsSummaryForPdf(rows, percentualeSpeseGenerali)
+    }))
+    .filter(g => g.summary.totaleComplessivo > 0)
+    .sort((a, b) => {
+      const ao = AMM_NS_PDF_CASISTICA_META[a.codiceCasistica]?.order ?? 999
+      const bo = AMM_NS_PDF_CASISTICA_META[b.codiceCasistica]?.order ?? 999
+      if (ao !== bo) return ao - bo
+      return a.label.localeCompare(b.label, 'it')
+    })
+}
+
+async function queryNotaSpesePdfGroupsForPractice (data: Record<string, any>): Promise<AmmNotaSpesePdfGroup[]> {
+  const rawGlobalId = String(pickAttrCI(data || {}, ['GlobalID', 'globalid', 'GLOBALID']) || '').trim()
+  if (!rawGlobalId) return []
+  const cleanGlobalId = rawGlobalId.replace(/[{}]/g, '').trim()
+  const variants = Array.from(new Set([rawGlobalId, cleanGlobalId, cleanGlobalId ? `{${cleanGlobalId}}` : ''].filter(Boolean)))
+  const fl = await getLookupLayer(NOTA_SPESE_DETTAGLIO_VIEW_URL)
+  const q: any = {
+    where: variants.map(value => `parent_globalid = ${sqlQuote(value)}`).join(' OR '),
+    outFields: ['*'],
+    returnGeometry: false,
+    num: 2000,
+    orderByFields: ['ordine ASC', 'OBJECTID ASC']
+  }
+  const res = await fl.queryFeatures(q)
+  const rows = (Array.isArray(res?.features) ? res.features : []).map((f: any) => f?.attributes || {})
+  const configuredPercentage = parseNumberInput(pickAttrCI(data || {}, ['ns_spese_generali_perc']))
+  const pct = configuredPercentage != null && Number.isFinite(configuredPercentage) ? configuredPercentage : 15
+  return ammNotaSpeseGroupsForPdf(rows, pct)
 }
 
 function pickAttrCI (data: any, names: string[]): any {
@@ -1625,6 +1826,18 @@ async function replaceBozzaDeterminazioneWordAttachment (layer: any, oid: number
     .map(att => keepIds.has(Number(att.id)) && !parseBozzaAttachmentFileCreatedAt(att) ? { ...att, uploadedAt: fileCreatedAt } : att)
 }
 
+async function deleteBozzaDeterminazioneWordAttachments (layer: any, oid: number, layerUrl: string): Promise<void> {
+  if (!oid || !layerUrl) return
+  const all = await queryAmmAttachments(layer, oid, layerUrl)
+  const bozze = all.filter(isBozzaDeterminazioneWordAttachment)
+  for (const att of bozze) {
+    const id = Number(att.id)
+    if (Number.isFinite(id) && id > 0) {
+      await deleteAmmAttachment(layer, oid, id, layerUrl)
+    }
+  }
+}
+
 function canvasToBlobForAmmEdit (canvas: HTMLCanvasElement, type: string, quality?: number): Promise<Blob> {
   return new Promise((resolve, reject) => {
     try {
@@ -2039,6 +2252,102 @@ function InfoBox (props: { children: React.ReactNode, kind?: 'info' | 'warn' | '
   return <div style={{ ...st, border: '1px solid', borderRadius: Number(stCtx.formCardBorderRadius ?? 8), padding: '10px 12px', fontSize: adminFieldFontSize(stCtx), lineHeight: 1.35 }}>{props.children}</div>
 }
 
+
+type BozzaIconName = 'check' | 'edit' | 'upload' | 'send' | 'mail' | 'download' | 'trash' | 'protocol'
+
+function BozzaActionIcon (props: { name: BozzaIconName, size?: number }): React.ReactElement {
+  const size = Number(props.size || 24)
+  if (props.name === 'check') {
+    return (
+      <svg width={size} height={size} viewBox='0 0 24 24' fill='none' stroke='currentColor' strokeWidth='2' strokeLinecap='round' strokeLinejoin='round' aria-hidden='true' focusable='false'>
+        <path d='M20 6L9 17l-5-5'/>
+      </svg>
+    )
+  }
+  if (props.name === 'edit') {
+    return (
+      <svg width={size} height={size} viewBox='0 0 24 24' fill='none' stroke='currentColor' strokeWidth='2' strokeLinecap='round' strokeLinejoin='round' aria-hidden='true' focusable='false'>
+        <path d='M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7'/>
+        <path d='M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z'/>
+      </svg>
+    )
+  }
+  if (props.name === 'upload') {
+    return (
+      <svg width={size} height={size} viewBox='0 0 24 24' fill='none' stroke='currentColor' strokeWidth='2' strokeLinecap='round' strokeLinejoin='round' aria-hidden='true' focusable='false'>
+        <path d='M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4'/>
+        <path d='M17 8l-5-5-5 5'/>
+        <path d='M12 3v12'/>
+      </svg>
+    )
+  }
+  if (props.name === 'send') {
+    return (
+      <svg width={size} height={size} viewBox='0 0 24 24' fill='none' stroke='currentColor' strokeWidth='2' strokeLinecap='round' strokeLinejoin='round' aria-hidden='true' focusable='false'>
+        <path d='M22 2L11 13'/>
+        <path d='M22 2l-7 20-4-9-9-4 20-7z'/>
+      </svg>
+    )
+  }
+  if (props.name === 'protocol') {
+    return (
+      <svg width={size} height={size} viewBox='0 0 24 24' fill='none' stroke='currentColor' strokeWidth='2' strokeLinecap='round' strokeLinejoin='round' aria-hidden='true' focusable='false'>
+        <path d='M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z'/>
+        <path d='M14 2v6h6'/>
+        <path d='M8 15h8'/>
+        <path d='M13 11l4 4-4 4'/>
+      </svg>
+    )
+  }
+  if (props.name === 'mail') {
+    return (
+      <svg width={size} height={size} viewBox='0 0 24 24' fill='none' stroke='currentColor' strokeWidth='2' strokeLinecap='round' strokeLinejoin='round' aria-hidden='true' focusable='false'>
+        <path d='M4 4h16a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2z'/>
+        <path d='M22 6l-10 7L2 6'/>
+      </svg>
+    )
+  }
+  if (props.name === 'trash') {
+    return (
+      <svg width={size} height={size} viewBox='0 0 24 24' fill='none' stroke='currentColor' strokeWidth='2' strokeLinecap='round' strokeLinejoin='round' aria-hidden='true' focusable='false'>
+        <path d='M3 6h18'/>
+        <path d='M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2'/>
+        <path d='M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6'/>
+        <path d='M10 11v6'/>
+        <path d='M14 11v6'/>
+      </svg>
+    )
+  }
+  return (
+    <svg width={size} height={size} viewBox='0 0 24 24' fill='none' stroke='currentColor' strokeWidth='2' strokeLinecap='round' strokeLinejoin='round' aria-hidden='true' focusable='false'>
+      <path d='M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4'/>
+      <path d='M7 10l5 5 5-5'/>
+      <path d='M12 15V3'/>
+    </svg>
+  )
+}
+
+function bozzaIconButtonStyle (opts?: { danger?: boolean, disabled?: boolean }): React.CSSProperties {
+  const disabled = !!opts?.disabled
+  const danger = !!opts?.danger
+  return {
+    width: 40,
+    height: 40,
+    padding: 0,
+    boxSizing: 'border-box',
+    borderRadius: 8,
+    border: `2px solid ${disabled ? '#e5e7eb' : (danger ? 'rgba(185,28,28,0.72)' : '#0d3b66')}`,
+    background: disabled ? '#e5e7eb' : '#fff',
+    color: disabled ? '#9ca3af' : (danger ? '#b91c1c' : '#0d3b66'),
+    cursor: disabled ? 'not-allowed' : 'pointer',
+    display: 'inline-flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    flex: '0 0 auto',
+    lineHeight: 1
+  }
+}
+
 function SectionInfoButton (props: { text?: React.ReactNode, title?: string }) {
   const st = useAdminStyle()
   const [open, setOpen] = React.useState(false)
@@ -2187,13 +2496,13 @@ function AttestationConfirmDialog (props: { note: string, saving?: boolean, onCa
   return (
     <div style={{ position: 'fixed', zIndex: 2147483000, inset: 0, background: 'rgba(0,0,0,0.55)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24 }}>
       <div role='dialog' aria-modal='true' style={{ width: 'min(620px, 100%)', background: '#fff', borderRadius: 14, boxShadow: '0 18px 60px rgba(0,0,0,0.35)', overflow: 'hidden' }}>
-        <div style={{ background: '#eff6ff', color: '#0d3b66', padding: '14px 16px', fontWeight: 900, fontSize: Math.max(18, adminFieldFontSize(st)), borderBottom: '1px solid rgba(0,0,0,0.08)' }}>Conferma attestazione di conformità</div>
+        <div style={{ background: '#eff6ff', color: '#0d3b66', padding: '14px 16px', fontWeight: 900, fontSize: Math.max(18, adminFieldFontSize(st)), borderBottom: '1px solid rgba(0,0,0,0.08)' }}>Apponi visto di conformità</div>
         <div style={{ padding: 16, color: '#111827', fontSize: adminFieldFontSize(st), lineHeight: 1.45 }}>
           <div style={{ marginBottom: 10 }}>
-            Confermando, l’attestazione di conformità sarà registrata sulla pratica e la Proposta di contestazione sarà generata e aggiunta al fascicolo. La pratica resterà in carico al Tecnico istruttore amministrativo per la predisposizione e il caricamento della bozza di determinazione.
+            Confermando, il visto di conformità sarà registrato sulla pratica e la Proposta di contestazione sarà generata e aggiunta al fascicolo.
           </div>
           <div style={{ border: '1px solid #c5d9f1', background: '#f8fbff', borderRadius: 9, padding: 10 }}>
-            <div style={{ color: '#0d3b66', fontWeight: 900, fontSize: adminLabelFontSize(st), marginBottom: 5 }}>Testo attestazione</div>
+            <div style={{ color: '#0d3b66', fontWeight: 900, fontSize: adminLabelFontSize(st), marginBottom: 5 }}>Testo visto</div>
             <div style={{ color: '#111827', fontSize: adminFieldFontSize(st), lineHeight: 1.45, whiteSpace: 'pre-wrap' }}>{props.note || '—'}</div>
           </div>
         </div>
@@ -2250,9 +2559,9 @@ function UndoAttestationConfirmDialog (props: { saving?: boolean, onCancel: () =
   return (
     <div style={{ position: 'fixed', zIndex: 2147483000, inset: 0, background: 'rgba(0,0,0,0.55)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24 }}>
       <div role='dialog' aria-modal='true' style={{ width: 'min(620px, 100%)', background: '#fff', borderRadius: 14, boxShadow: '0 18px 60px rgba(0,0,0,0.35)', overflow: 'hidden' }}>
-        <div style={{ background: '#fff7ed', color: '#9a3412', padding: '14px 16px', fontWeight: 900, fontSize: Math.max(18, adminFieldFontSize(st)), borderBottom: '1px solid rgba(0,0,0,0.08)' }}>Annulla attestazione di conformità</div>
+        <div style={{ background: '#fff7ed', color: '#9a3412', padding: '14px 16px', fontWeight: 900, fontSize: Math.max(18, adminFieldFontSize(st)), borderBottom: '1px solid rgba(0,0,0,0.08)' }}>Annulla visto di conformità</div>
         <div style={{ padding: 16, color: '#111827', fontSize: adminFieldFontSize(st), lineHeight: 1.45 }}>
-          Confermando, l’attestazione sarà rimossa e la scheda tornerà alla fase di verifica. I successivi adempimenti amministrativi saranno nuovamente bloccati finché non verrà apposta una nuova attestazione.
+          Confermando, il visto sarà rimosso e la scheda tornerà alla fase di verifica. I successivi adempimenti amministrativi saranno nuovamente bloccati finché non verrà apposto un nuovo visto.
         </div>
         <div style={{ padding: '0 16px 16px', display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
           <button type='button' disabled={!!props.saving} onClick={props.onCancel} style={{ border: '1px solid #94a3b8', background: '#fff', color: '#334155', borderRadius: 9, padding: '8px 14px', fontWeight: 800, fontSize: adminFieldFontSize(st), cursor: props.saving ? 'not-allowed' : 'pointer' }}>Annulla</button>
@@ -2293,6 +2602,32 @@ function cleanReportCodeText (raw: any): string {
     .trim()
 }
 
+function normalizeSectorCodeForAmm (value: any): string {
+  const raw = String(value || '').trim()
+  if (!raw) return ''
+  const upper = raw.toUpperCase().replace(/[–—]/g, '-').replace(/\s+/g, ' ')
+  const direct = upper.match(/(D[1-6]|DS|CR|GI)/)
+  if (direct) return direct[1]
+  const distretto = upper.match(/DISTRETTO\s*([1-6])/) || upper.match(/D\.?\s*([1-6])/)
+  if (distretto) return `D${distretto[1]}`
+  if (/DRENO|SCOLO|TECNICO/.test(upper)) return 'DS'
+  if (/CATASTO|RUOLI|SERVIZI TERRITORIALI/.test(upper)) return 'CR'
+  if (/GESTIONE IRRIGUA/.test(upper)) return 'GI'
+  return ''
+}
+
+function settoreCodeFromUfficioAmm (value: any): string {
+  const upper = String(value || '').toUpperCase()
+  if (!upper) return ''
+  if (/QUARTU|VILLAPUTZU|MURAVERA|SAN SPERATE/.test(upper)) return 'D1'
+  if (/SERRAMANNA|PIMPISU/.test(upper)) return 'D2'
+  if (/SAN GAVINO|VILLACIDRO/.test(upper)) return 'D3'
+  if (/SAN GIOVANNI SUERGIU|MASAINAS|BASSO SULCIS/.test(upper)) return 'D4'
+  if (/SENORB/.test(upper)) return 'D5'
+  if (/IGLESIAS|SILIQUA|VILLASOR|CIXERRI/.test(upper)) return 'D6'
+  return ''
+}
+
 function normalizeRilevazioneCodeForAmm (data: any, oid: number | null): string {
   const d = data || {}
   const stored = cleanReportCodeText(pickAttrCI(d, ['numero_rilevazione', 'Numero_rilevazione', 'NUMERO_RILEVAZIONE', 'cod_pratica', 'Cod_pratica', 'COD_PRATICA', 'numero_rapporto', 'Numero_rapporto', 'NUMERO_RAPPORTO']))
@@ -2300,19 +2635,19 @@ function normalizeRilevazioneCodeForAmm (data: any, oid: number | null): string 
   const op = pickAttrCI(d, ['origine_pratica', 'Origine_pratica', 'ORIGINE_PRATICA'])
   let prefix = (op === 2 || op === '2' || String(op || '').toUpperCase() === 'TI') ? 'TI' : 'TR'
   let oidPart = oid != null && Number.isFinite(Number(oid)) ? String(Number(oid)) : ''
-  let settore = String(pickAttrCI(d, ['settore_cod', 'Settore_cod', 'SETTORE_COD', 'settore', 'Settore', 'SETTORE']) || '').trim().toUpperCase()
+  let settore = normalizeSectorCodeForAmm(pickAttrCI(d, ['settore_cod', 'Settore_cod', 'SETTORE_COD', 'settore', 'Settore', 'SETTORE'])) || settoreCodeFromUfficioAmm(pickAttrCI(d, ['ufficio_zona', 'Ufficio_zona', 'UFFICIO_ZONA']))
 
   let m = raw.match(/^(TR|TI)-?(\d+)(?:-([A-Z0-9]+))?$/i)
   if (m) {
     prefix = m[1].toUpperCase()
     oidPart = m[2]
-    if (!settore && m[3]) settore = m[3].toUpperCase()
+    if (!settore && m[3]) settore = normalizeSectorCodeForAmm(m[3]) || m[3].toUpperCase()
   } else {
     m = raw.match(/^(\d+)-?(TR|TI)(?:-([A-Z0-9]+))?$/i)
     if (m) {
       oidPart = m[1]
       prefix = m[2].toUpperCase()
-      if (!settore && m[3]) settore = m[3].toUpperCase()
+      if (!settore && m[3]) settore = normalizeSectorCodeForAmm(m[3]) || m[3].toUpperCase()
     } else if (!oidPart && /^\d+$/.test(raw)) {
       oidPart = raw
     }
@@ -3769,25 +4104,36 @@ function hasPostAttestazioneTiAmmStarted (data: Record<string, any>): boolean {
 function isPropostaContestazioneApprovedByRiAmm (data: Record<string, any>): boolean {
   const d = data || {}
   // L’approvazione del Responsabile dell’istruttoria amministrativa è valida
-  // per sbloccare la protocollazione solo se l’ultimo esito del Tecnico
-  // istruttore amministrativo è un’attestazione di conformità. In caso di
-  // rimando TI_AMM, eventuali esiti RI_AMM storici non devono riapparire come
-  // proposta approvata né sbloccare la sezione successiva.
+  // per sbloccare la protocollazione solo se si riferisce all’ultimo ciclo
+  // trasmesso dal TI_AMM. In caso di rimando, il nuovo visto del TI_AMM azzera
+  // l’esito RI_AMM storico e apre una nuova fase sostitutiva.
   return parseNumberInput(pickAttrCI(d, ['esito_TI_AMM'])) === 2 &&
     parseNumberInput(pickAttrCI(d, ['esito_RI_AMM'])) === 2
 }
 
-function isBozzaDeterminazioneRientrataDaRiAmm (data: Record<string, any>): boolean {
+function isBozzaDeterminazioneValidataDaRiAmm (data: Record<string, any>): boolean {
   const d = data || {}
   const statoBozza = String(pickAttrCI(d, ['determinazione_stato']) || '').trim().toUpperCase()
-  if (statoBozza !== 'TRASMESSA_RI_AMM' && statoBozza !== 'BOZZA_TRASMESSA_RI_AMM' && statoBozza !== 'VALIDATA_RI_AMM') return false
+  return isPropostaContestazioneApprovedByRiAmm(d) &&
+    (statoBozza === 'VALIDATA_RI_AMM' || statoBozza === 'BOZZA_VALIDATA_RI_AMM')
+}
+
+function isBozzaDeterminazioneRimandataDaRiAmm (data: Record<string, any>): boolean {
+  const d = data || {}
+  if (isDeterminazioneAdottata(d)) return false
+  if (isBozzaDeterminazioneValidataDaRiAmm(d)) return false
+  const statoBozza = String(pickAttrCI(d, ['determinazione_stato']) || '').trim().toUpperCase()
   const statoTiAmm = parseNumberInput(pickAttrCI(d, ['stato_TI_AMM']))
   const presaTiAmm = parseNumberInput(pickAttrCI(d, ['presa_in_carico_TI_AMM']))
-  const statoRiAmm = parseNumberInput(pickAttrCI(d, ['stato_RI_AMM']))
   const esitoRiAmm = parseNumberInput(pickAttrCI(d, ['esito_RI_AMM']))
   const tiAmmRiaperto = statoTiAmm === 1 || statoTiAmm === 2 || presaTiAmm === 1 || presaTiAmm === 2
-  const riAmmHaRestituito = statoRiAmm === 3 || esitoRiAmm === 1 || esitoRiAmm === 2
-  return tiAmmRiaperto && riAmmHaRestituito
+  const statoCompatibileConRimando = statoBozza === 'BOZZA_DA_RETTIFICARE' || statoBozza === 'BOZZA' || statoBozza === ''
+  return tiAmmRiaperto && esitoRiAmm === 1 && statoCompatibileConRimando
+}
+
+function isBozzaDeterminazioneRientrataDaRiAmm (data: Record<string, any>): boolean {
+  const d = data || {}
+  return isBozzaDeterminazioneValidataDaRiAmm(d) || isBozzaDeterminazioneRimandataDaRiAmm(d)
 }
 
 
@@ -3804,9 +4150,11 @@ function TiAmmVerificationSummary (props: {
   onDeleteBozzaDeterminazione: () => boolean | Promise<boolean>
   onTransmitBozzaDeterminazioneRiAmm: () => void
   onPrepareEmailDirettore: () => void
+  onPrepareEmailProtocollo: () => void
   oid: number | null
   ds: any
   layerUrl?: string
+  bozzaRefreshKey?: string
 }) {
   const st = useAdminStyle()
   const d = props.data || {}
@@ -3823,24 +4171,62 @@ function TiAmmVerificationSummary (props: {
         ? 'Respinta'
         : (hasAdminValue(esitoRaw) ? String(esitoRaw) : '')
   const note = String(pickAttrCI(d, ['note_TI_AMM', 'note_atto_amm']) || '').trim()
-  const noteLabel = esitoCode === 1 ? 'Integrazioni/rettifiche proposte' : 'Attestazione di conformità'
+  const riAmmEsitoRaw = pickAttrCI(d, ['esito_RI_AMM'])
+  const riAmmEsitoCode = parseNumberInput(riAmmEsitoRaw)
+  const riAmmNote = String(pickAttrCI(d, ['note_RI_AMM']) || '').trim()
+  const riAmmNoteClean = cleanAmmInfoText(riAmmNote)
+  const riAmmHaRimandatoProposta = isBozzaDeterminazioneRimandataDaRiAmm(d)
+  const riAmmRimandoReasonFromTiNote = (note.match(/Motivazione\s+del\s+rimando\s*:\s*([\s\S]+)$/i)?.[1] || '').trim()
+  const riAmmHaRichiestoIntegrazioni = riAmmHaRimandatoProposta || (riAmmEsitoCode === 1 && !isBozzaDeterminazioneValidataDaRiAmm(d) && !tiAmmHaAttestatoConformita)
+  const riAmmHaApprovato = !riAmmHaRichiestoIntegrazioni && (riAmmEsitoCode === 2 || isBozzaDeterminazioneValidataDaRiAmm(d))
+  const riAmmRimandoReason = riAmmHaRichiestoIntegrazioni ? (riAmmNoteClean || riAmmRimandoReasonFromTiNote) : ''
+  const riAmmApprovalNote = riAmmHaApprovato ? riAmmNoteClean : ''
+  const showRiAmmConsequenceInsideTiBox = esitoCode === 1 || riAmmHaRichiestoIntegrazioni || riAmmHaApprovato
+  const tiAmmSummaryTitle = riAmmHaRimandatoProposta
+    ? 'Rientro al Tecnico istruttore amministrativo'
+    : 'Visto di conformità del Tecnico istruttore amministrativo'
+  const noteLabel = esitoCode === 1 || riAmmHaRichiestoIntegrazioni
+    ? 'Integrazioni/rettifiche proposte'
+    : 'Visto di conformità'
+  const tiAmmNoteText = normalizeAmmWorkflowText(note) || '—'
+  const riAmmApprovalNoteIsStandard = (() => {
+    const txt = riAmmApprovalNote.toLowerCase().replace(/\s+/g, ' ').trim()
+    return !!txt && txt.includes('si approva l’istruttoria amministrativa') && txt.includes('restituzione della pratica al tecnico istruttore amministrativo')
+  })()
+  const riAmmConsequenceText = riAmmHaApprovato
+    ? 'Il Responsabile dell’istruttoria amministrativa ha approvato l’istruttoria amministrativa e ha restituito la pratica al Tecnico istruttore amministrativo per la protocollazione del fascicolo e il completamento della bozza definitiva di determinazione.'
+    : 'Il Responsabile dell’istruttoria amministrativa ha richiesto integrazioni o rettifiche e ha restituito la pratica al Tecnico istruttore amministrativo.'
+  const riAmmConsequenceAction = riAmmHaRichiestoIntegrazioni
+    ? 'Completate le correzioni, il Tecnico istruttore amministrativo deve riapporre il visto di conformità: la Proposta di contestazione verrà rigenerata e solo dopo sarà possibile predisporre una nuova bozza.'
+    : ''
+  const riAmmConsequenceDetailLabel = riAmmHaApprovato ? 'Note del Responsabile: ' : 'Motivazione del rimando: '
+  const riAmmConsequenceDetail = riAmmHaApprovato
+    ? (riAmmApprovalNoteIsStandard ? '' : riAmmApprovalNote)
+    : riAmmRimandoReason
   const tecnico = displayAdminFieldValue(d, props.fields, 'ti_amm_assegnato_nome', displayAdminFieldValue(d, props.fields, 'ti_amm_assegnato_username'))
   const dataEsitoRaw = pickAttrCI(d, ['dt_esito_TI_AMM']) || pickAttrCI(d, ['dt_stato_TI_AMM'])
   const dataEsito = formatDateTimeValue(dataEsitoRaw)
-  const riAmmEsitoRaw = pickAttrCI(d, ['esito_RI_AMM'])
-  const riAmmEsitoCode = parseNumberInput(riAmmEsitoRaw)
-  // La verifica della Proposta di contestazione si riferisce solo al ciclo
-  // successivo al visto di conformità del TI_AMM. Se il TI_AMM ha espresso
-  // un rimando/non conformità, non mostrare eventuali esiti RI_AMM storici.
-  const hasRiAmmEsito = tiAmmHaAttestatoConformita && (riAmmEsitoCode != null || hasAdminValue(riAmmEsitoRaw))
+  // La verifica del Responsabile si riferisce al ciclo amministrativo corrente.
+  // Dopo un rimando RI_AMM va ricondotta al blocco delle integrazioni/rettifiche
+  // del TI_AMM, così causa, esito e azione successiva restano nello stesso contesto.
+  const hasRiAmmEsito = !showRiAmmConsequenceInsideTiBox && (tiAmmHaAttestatoConformita || riAmmHaRimandatoProposta) && (riAmmEsitoCode != null || hasAdminValue(riAmmEsitoRaw))
   const riAmmEsitoLabel = riAmmEsitoCode === 1
-    ? 'Proposta da integrare/rettificare'
+    ? 'Integrazioni/rettifiche richieste'
     : riAmmEsitoCode === 2
-      ? 'Proposta approvata'
+      ? 'Istruttoria amministrativa approvata'
       : riAmmEsitoCode === 3
-        ? 'Proposta respinta'
+        ? 'Istruttoria amministrativa non approvata'
         : (hasAdminValue(riAmmEsitoRaw) ? String(riAmmEsitoRaw) : '')
-  const riAmmNote = String(pickAttrCI(d, ['note_RI_AMM']) || '').trim()
+  const riAmmNoteTitle = riAmmEsitoCode === 1
+    ? 'Richiesta di integrazioni/rettifiche'
+    : riAmmEsitoCode === 2
+      ? 'Approvazione dell’istruttoria amministrativa'
+      : 'Esito della verifica del Responsabile'
+  const riAmmNoteText = riAmmEsitoCode === 1
+    ? `Il Responsabile dell’istruttoria amministrativa ha restituito la pratica al Tecnico istruttore amministrativo per integrazioni o rettifiche sulla Proposta di contestazione e sulla bozza di determinazione.${riAmmNoteClean ? `\n\nMotivazione: ${riAmmNoteClean}` : ''}`
+    : riAmmEsitoCode === 3
+      ? `Il Responsabile dell’istruttoria amministrativa non ha approvato l’istruttoria amministrativa.${riAmmNoteClean ? `\n\nMotivazione: ${riAmmNoteClean}` : ''}`
+      : `Il Responsabile dell’istruttoria amministrativa ha approvato l’istruttoria amministrativa e ha restituito la pratica al Tecnico istruttore amministrativo per la protocollazione del fascicolo e il completamento della bozza di determinazione.${riAmmNoteClean ? `\n\nNote: ${riAmmNoteClean}` : ''}`
   const riAmmNomeRaw = firstTextAttr(d, [
     'ri_amm_assegnato_nome',
     'responsabile_istruttoria_amm_nome',
@@ -3854,45 +4240,84 @@ function TiAmmVerificationSummary (props: {
   const riAmmNome = cleanAmmOperatorLabel(riAmmNomeRaw)
   const riAmmDataEsitoRaw = pickAttrCI(d, ['dt_esito_RI_AMM']) || pickAttrCI(d, ['dt_stato_RI_AMM'])
   const riAmmDataEsito = formatDateTimeValue(riAmmDataEsitoRaw)
+  const showRiAmmOutcomeAsPrimary = riAmmHaRichiestoIntegrazioni || riAmmHaApprovato
+  const primarySummaryTitle = showRiAmmOutcomeAsPrimary
+    ? 'Esito del Responsabile dell’istruttoria amministrativa'
+    : tiAmmSummaryTitle
+  const primaryEsitoLabel = showRiAmmOutcomeAsPrimary
+    ? (riAmmHaApprovato ? 'Istruttoria amministrativa approvata' : 'Integrazioni/rettifiche richieste')
+    : (esitoLabel || '—')
+  const primaryOperatoreLabel = showRiAmmOutcomeAsPrimary
+    ? 'Responsabile dell’istruttoria amministrativa'
+    : 'Tecnico istruttore amministrativo'
+  const primaryOperatoreValue = showRiAmmOutcomeAsPrimary
+    ? cleanAmmOperatorLabel(riAmmNome)
+    : cleanAmmOperatorLabel(tecnico)
+  const primaryDateLabel = showRiAmmOutcomeAsPrimary
+    ? (riAmmHaApprovato ? 'Data e ora approvazione' : 'Data e ora esito')
+    : (esitoCode === 2 ? 'Data e ora visto' : 'Data e ora esito')
+  const primaryDateValue = showRiAmmOutcomeAsPrimary ? riAmmDataEsito : dataEsito
+  const primaryTone = showRiAmmOutcomeAsPrimary
+    ? (riAmmHaApprovato ? 'auto' : 'warn')
+    : (esitoCode === 1 ? 'warn' : 'auto')
   const hasTiAmmVerification = hasEsito || !!note
-  const hasVerification = hasTiAmmVerification || hasRiAmmEsito
+  const hasPrimaryVerification = hasTiAmmVerification || showRiAmmOutcomeAsPrimary
+  const hasVerification = hasPrimaryVerification || hasRiAmmEsito
+  const determinazioneAdottata = isDeterminazioneAdottata(d)
   const bozzaRientrataDaRiAmm = isBozzaDeterminazioneRientrataDaRiAmm(d)
   const showTiAmmInfo = role === 'TI_AMM' && props.canEdit
+  const attestazioneButtonTitle = riAmmHaRimandatoProposta || esitoCode === 1
+    ? 'Riappone visto di conformità e rigenera la Proposta'
+    : 'Apponi visto di conformità'
 
   return (
     <div style={{ display: 'grid', gap: 10 }}>
       {hasVerification && (
         <Section
           title='VERIFICA ISTRUTTORIA AMMINISTRATIVA'
-          right={<SectionInfoButton text={showTiAmmInfo ? 'Il visto di conformità si registra da questa scheda. Dopo la conferma, la Proposta di contestazione viene generata e si abilita la predisposizione della bozza di determinazione.' : null} title='Informazioni verifica istruttoria amministrativa' />}
+          right={<SectionInfoButton text={showTiAmmInfo ? 'Il visto di conformità si registra da questa scheda. Dopo la conferma, la Proposta di contestazione viene generata e si abilita la predisposizione della bozza di determinazione. Proposta e bozza saranno trasmesse insieme al Responsabile con il pulsante interno della sezione Bozza determinazione.' : null} title='Informazioni verifica istruttoria amministrativa' />}
           bodyStyle={{ padding: 8 }}
         >
           <div style={{ display: 'grid', gap: 10 }}>
-            {hasTiAmmVerification && (
+            {hasPrimaryVerification && (
               <div style={{ display: 'grid', gap: 8 }}>
-                <div style={{ color: st.formWorkflowBadgeTitleColor || '#0d3b66', fontWeight: 900, fontSize: Number(st.formSectionTitleSize ?? 14), textTransform: 'uppercase', letterSpacing: 0.2 }}>Attestazione di conformità del Tecnico istruttore amministrativo</div>
+                <div style={{ color: st.formWorkflowBadgeTitleColor || '#0d3b66', fontWeight: 900, fontSize: Number(st.formSectionTitleSize ?? 14), textTransform: 'uppercase', letterSpacing: 0.2 }}>{primarySummaryTitle}</div>
                 <div style={{ display: 'grid', gridTemplateColumns: ADMIN_COMPACT_GRID_COLUMNS, justifyContent: 'start', gap: 10 }}>
-                  <StatusSummaryItem label='Esito' value={esitoLabel || '—'} tone={esitoCode === 1 ? 'warn' : 'auto'} />
-                  <StatusSummaryItem label='Tecnico istruttore amministrativo' value={cleanAmmOperatorLabel(tecnico) || '—'} tone='auto' />
-                  <StatusSummaryItem label={esitoCode === 2 ? 'Data e ora attestazione' : 'Data e ora esito'} value={dataEsito || '—'} tone='auto' />
+                  <StatusSummaryItem label='Esito' value={primaryEsitoLabel || '—'} tone={primaryTone as any} />
+                  <StatusSummaryItem label={primaryOperatoreLabel} value={primaryOperatoreValue || '—'} tone='auto' />
+                  <StatusSummaryItem label={primaryDateLabel} value={primaryDateValue || '—'} tone='auto' />
                 </div>
                 <div style={{ border: `1px solid ${st.formWorkflowBadgeBorderColor || '#d8e6f7'}`, background: st.formWorkflowBadgeBg || '#ffffff', borderRadius: 9, padding: 10 }}>
-                  <div style={{ color: st.formWorkflowBadgeTitleColor || '#0d3b66', fontWeight: 900, fontSize: adminLabelFontSize(st), marginBottom: 5 }}>{noteLabel}</div>
-                  <div style={{ color: st.formWorkflowBadgeValueColor || '#111827', fontSize: Number(st.formFieldFontSize ?? 15), lineHeight: 1.45, whiteSpace: 'pre-wrap' }}>{note || '—'}</div>
+                  {!showRiAmmOutcomeAsPrimary && (
+                    <div style={{ color: st.formWorkflowBadgeTitleColor || '#0d3b66', fontWeight: 900, fontSize: adminLabelFontSize(st), marginBottom: 5 }}>{noteLabel}</div>
+                  )}
+                  {showRiAmmOutcomeAsPrimary ? (
+                    <div style={{ display: 'grid', gap: 6, color: st.formWorkflowBadgeValueColor || '#111827', fontSize: Number(st.formFieldFontSize ?? 15), lineHeight: 1.45 }}>
+                      <div style={{ whiteSpace: 'pre-wrap' }}>{riAmmConsequenceText}</div>
+                      {riAmmConsequenceDetail && (
+                        <div style={{ whiteSpace: 'pre-wrap' }}><span style={{ fontWeight: 800 }}>{riAmmConsequenceDetailLabel}</span>{riAmmConsequenceDetail}</div>
+                      )}
+                      {riAmmConsequenceAction && (
+                        <div style={{ whiteSpace: 'pre-wrap' }}><span style={{ fontWeight: 800 }}>Adempimento conseguente: </span>{riAmmConsequenceAction}</div>
+                      )}
+                    </div>
+                  ) : (
+                    <div style={{ color: st.formWorkflowBadgeValueColor || '#111827', fontSize: Number(st.formFieldFontSize ?? 15), lineHeight: 1.45, whiteSpace: 'pre-wrap' }}><AmmWorkflowText text={tiAmmNoteText} /></div>
+                  )}
                 </div>
               </div>
             )}
             {hasRiAmmEsito && (
-              <div style={{ display: 'grid', gap: 8, borderTop: hasTiAmmVerification ? `1px solid ${st.formWorkflowBadgeBorderColor || '#d8e6f7'}` : 'none', paddingTop: hasTiAmmVerification ? 10 : 0 }}>
-                <div style={{ color: st.formWorkflowBadgeTitleColor || '#0d3b66', fontWeight: 900, fontSize: Number(st.formSectionTitleSize ?? 14), textTransform: 'uppercase', letterSpacing: 0.2 }}>Verifica della Proposta di contestazione</div>
+              <div style={{ display: 'grid', gap: 8, borderTop: hasPrimaryVerification ? `1px solid ${st.formWorkflowBadgeBorderColor || '#d8e6f7'}` : 'none', paddingTop: hasPrimaryVerification ? 10 : 0 }}>
+                <div style={{ color: st.formWorkflowBadgeTitleColor || '#0d3b66', fontWeight: 900, fontSize: Number(st.formSectionTitleSize ?? 14), textTransform: 'uppercase', letterSpacing: 0.2 }}>Verifica del Responsabile istruttoria amministrativa</div>
                 <div style={{ display: 'grid', gridTemplateColumns: ADMIN_COMPACT_GRID_COLUMNS, justifyContent: 'start', gap: 10 }}>
                   <StatusSummaryItem label='Esito' value={riAmmEsitoLabel || '—'} tone={riAmmEsitoCode === 1 || riAmmEsitoCode === 3 ? 'warn' : 'auto'} />
                   <StatusSummaryItem label='Responsabile dell’istruttoria amministrativa' value={riAmmNome || '—'} tone='auto' />
                   <StatusSummaryItem label={riAmmEsitoCode === 2 ? 'Data e ora approvazione' : 'Data e ora esito'} value={riAmmDataEsito || '—'} tone='auto' />
                 </div>
                 <div style={{ border: `1px solid ${st.formWorkflowBadgeBorderColor || '#d8e6f7'}`, background: st.formWorkflowBadgeBg || '#ffffff', borderRadius: 9, padding: 10 }}>
-                  <div style={{ color: st.formWorkflowBadgeTitleColor || '#0d3b66', fontWeight: 900, fontSize: adminLabelFontSize(st), marginBottom: 5 }}>{riAmmEsitoCode === 2 ? 'Approvazione della proposta' : 'Esito della verifica'}</div>
-                  <div style={{ color: st.formWorkflowBadgeValueColor || '#111827', fontSize: Number(st.formFieldFontSize ?? 15), lineHeight: 1.45, whiteSpace: 'pre-wrap' }}>{cleanAmmInfoText(riAmmNote) || (riAmmEsitoCode === 1 ? 'Il Responsabile dell’istruttoria amministrativa ha richiesto integrazioni o rettifiche sulla Proposta di contestazione.' : riAmmEsitoCode === 3 ? 'Il Responsabile dell’istruttoria amministrativa non ha approvato la Proposta di contestazione.' : 'Il Responsabile dell’istruttoria amministrativa ha approvato la Proposta di contestazione e ha restituito la pratica al Tecnico istruttore amministrativo per la protocollazione del fascicolo e il completamento della bozza di determinazione.')}</div>
+                  <div style={{ color: st.formWorkflowBadgeTitleColor || '#0d3b66', fontWeight: 900, fontSize: adminLabelFontSize(st), marginBottom: 5 }}>{riAmmNoteTitle}</div>
+                  <div style={{ color: st.formWorkflowBadgeValueColor || '#111827', fontSize: Number(st.formFieldFontSize ?? 15), lineHeight: 1.45, whiteSpace: 'pre-wrap' }}>{riAmmNoteText}</div>
                 </div>
               </div>
             )}
@@ -3900,24 +4325,18 @@ function TiAmmVerificationSummary (props: {
         </Section>
       )}
 
-      {showTiAmmInfo && (esitoCode !== 2 || riAmmEsitoCode === 1) && (
+      {showTiAmmInfo && !determinazioneAdottata && (esitoCode !== 2 || riAmmEsitoCode === 1) && (
         <Section title='Visto di conformità'>
           <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, flexWrap: 'wrap' }}>
             <button
               type='button'
+              title={attestazioneButtonTitle}
+              aria-label={attestazioneButtonTitle}
               disabled={!!props.saving}
               onClick={() => props.onApplyAttestation(note || 'A seguito della verifica svolta, si attesta la conformità della pratica sotto il profilo istruttorio-amministrativo.')}
-              style={{
-                padding: '8px 16px',
-                borderRadius: 8,
-                border: '1px solid rgba(0,0,0,0.18)',
-                background: props.saving ? '#e5e7eb' : '#1a7f37',
-                color: props.saving ? '#9ca3af' : '#fff',
-                fontWeight: 800,
-                cursor: props.saving ? 'not-allowed' : 'pointer'
-              }}
+              style={bozzaIconButtonStyle({ disabled: !!props.saving })}
             >
-              Apponi visto di conformità
+              <BozzaActionIcon name='check' size={24} />
             </button>
           </div>
         </Section>
@@ -3926,7 +4345,7 @@ function TiAmmVerificationSummary (props: {
       <PostAttestazioneTiAmmWorkSection
         data={d}
         fields={props.fields}
-        canEdit={props.canEdit && (role === 'TI_AMM' || role === 'ADMIN')}
+        canEdit={props.canEdit && !determinazioneAdottata && (role === 'TI_AMM' || role === 'ADMIN')}
         showTiAmmInfo={showTiAmmInfo}
         saving={!!props.saving}
         onChange={props.onChange}
@@ -3934,9 +4353,19 @@ function TiAmmVerificationSummary (props: {
         onDeleteBozzaDeterminazione={props.onDeleteBozzaDeterminazione}
         onTransmitBozzaDeterminazioneRiAmm={props.onTransmitBozzaDeterminazioneRiAmm}
         onPrepareEmailDirettore={props.onPrepareEmailDirettore}
+        onPrepareEmailProtocollo={props.onPrepareEmailProtocollo}
         oid={props.oid}
         ds={props.ds}
         layerUrl={props.layerUrl}
+        bozzaRefreshKey={[
+          props.oid ?? '',
+          pickAttrCI(d, ['dt_esito_TI_AMM']) ?? '',
+          pickAttrCI(d, ['esito_RI_AMM']) ?? '',
+          pickAttrCI(d, ['dt_esito_RI_AMM']) ?? '',
+          pickAttrCI(d, ['determinazione_stato']) ?? '',
+          pickAttrCI(d, ['dt_bozza_determinazione']) ?? '',
+          pickAttrCI(d, ['bozza_determinazione_da']) ?? ''
+        ].join('|')}
       />
     </div>
   )
@@ -3955,18 +4384,24 @@ function PostAttestazioneTiAmmWorkSection (props: {
   onDeleteBozzaDeterminazione: () => boolean | Promise<boolean>
   onTransmitBozzaDeterminazioneRiAmm: () => void
   onPrepareEmailDirettore: () => void
+  onPrepareEmailProtocollo: () => void
   oid: number | null
   ds: any
   layerUrl?: string
+  bozzaRefreshKey?: string
 }) {
   const d = props.data || {}
   const oid = props.oid != null && Number.isFinite(Number(props.oid)) ? Number(props.oid) : null
-  const tiAmmHaAttestatoConformita = parseNumberInput(pickAttrCI(d, ['esito_TI_AMM'])) === 2
+  const tiAmmEsitoCode = parseNumberInput(pickAttrCI(d, ['esito_TI_AMM']))
+  const tiAmmHaAttestatoConformita = tiAmmEsitoCode === 2
+  const tiAmmHaRichiestoIntegrazioni = tiAmmEsitoCode === 1
   const riAmmHaApprovatoProposta = isPropostaContestazioneApprovedByRiAmm(d)
+  const riAmmHaRimandatoProposta = isBozzaDeterminazioneRimandataDaRiAmm(d)
+  const vistoDaRinnovareDopoRimando = tiAmmHaRichiestoIntegrazioni || riAmmHaRimandatoProposta
   const protocolloFascicoloOk = hasAdminValue(pickAttrCI(d, ['protocollo_fascicolo_numero'])) && hasAdminValue(pickAttrCI(d, ['protocollo_fascicolo_data']))
   const protocolliCompleti = protocolloFascicoloOk
-  const canEditProtocolloFascicolo = props.canEdit && riAmmHaApprovatoProposta
-  const canGenerateBozzaDeterminazione = props.canEdit && tiAmmHaAttestatoConformita && (!riAmmHaApprovatoProposta || protocolliCompleti)
+  const canEditProtocolloFascicolo = props.canEdit && riAmmHaApprovatoProposta && !vistoDaRinnovareDopoRimando
+  const canGenerateBozzaDeterminazione = props.canEdit && tiAmmHaAttestatoConformita && !vistoDaRinnovareDopoRimando && (!riAmmHaApprovatoProposta || protocolliCompleti)
   const hasBozzaGenerated = BOZZA_DETERMINAZIONE_STARTED_FIELDS.some(name => hasAdminValue(pickAttrCI(d, [name])))
   const currentStatoBozzaCode = String(pickAttrCI(d, ['determinazione_stato']) || '').trim().toUpperCase()
   const bozzaRientrataDaRiAmm = isBozzaDeterminazioneRientrataDaRiAmm(d)
@@ -4016,6 +4451,13 @@ function PostAttestazioneTiAmmWorkSection (props: {
     if (oid && attachmentsLoadedOid !== oid) void loadBozzaAttachments()
   }, [oid, attachmentsLoadedOid, loadBozzaAttachments])
 
+  React.useEffect(() => {
+    // Quando il visto viene riapposto dopo un rimando o quando cambia lo stato della bozza,
+    // il parent aggiorna i campi amministrativi ma non può accedere allo stato locale
+    // degli allegati Word. Azzerando il marker, il viewer rilegge gli allegati reali.
+    setAttachmentsLoadedOid(null)
+  }, [props.bozzaRefreshKey])
+
   const hasBozzaWordCaricata = bozzaAttachments.length > 0
   const actionDisabled = !props.canEdit || !canGenerateBozzaDeterminazione || hasBozzaWordCaricata || props.saving || attachmentsBusy || bozzaAlreadyTransmitted
 
@@ -4057,8 +4499,9 @@ function PostAttestazioneTiAmmWorkSection (props: {
 
   const canUploadBozza = props.canEdit && canGenerateBozzaDeterminazione && hasBozzaGenerated && !hasBozzaWordCaricata && !bozzaAlreadyTransmitted && !props.saving && !attachmentsBusy
   const canDeleteBozza = props.canEdit && hasBozzaGenerated && !bozzaAlreadyTransmitted && !props.saving && !attachmentsBusy
-  const canTransmitBozza = props.canEdit && tiAmmHaAttestatoConformita && !riAmmHaApprovatoProposta && hasBozzaGenerated && hasBozzaWordCaricata && !bozzaAlreadyTransmitted && !props.saving && !attachmentsBusy
-  const canPrepareEmailDirettore = props.canEdit && riAmmHaApprovatoProposta && protocolliCompleti && hasBozzaGenerated && hasBozzaWordCaricata && !props.saving && !attachmentsBusy
+  const canTransmitBozza = props.canEdit && tiAmmHaAttestatoConformita && !vistoDaRinnovareDopoRimando && !riAmmHaApprovatoProposta && hasBozzaGenerated && hasBozzaWordCaricata && !bozzaAlreadyTransmitted && !props.saving && !attachmentsBusy
+  const canPrepareEmailProtocollo = props.canEdit && riAmmHaApprovatoProposta && !vistoDaRinnovareDopoRimando && !protocolloFascicoloOk && !props.saving && !attachmentsBusy
+  const canPrepareEmailDirettore = props.canEdit && riAmmHaApprovatoProposta && !vistoDaRinnovareDopoRimando && protocolliCompleti && hasBozzaGenerated && hasBozzaWordCaricata && !props.saving && !attachmentsBusy
   const generateBozzaButtonLabel = 'Genera bozza'
 
   return (
@@ -4087,10 +4530,27 @@ function PostAttestazioneTiAmmWorkSection (props: {
         canEdit={canEditProtocolloFascicolo}
         onChange={props.onChange}
         fieldNames={PROTOCOLLO_FASCICOLO_FIELDS}
-      />
+      >
+        <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 10 }}>
+          <span
+            title={protocolloFascicoloOk ? 'Fascicolo già protocollato' : 'Trasmetti fascicolo al protocollo'}
+            style={{ display: 'inline-flex' }}
+          >
+            <button
+              type='button'
+              aria-label='Trasmetti fascicolo al protocollo'
+              disabled={!canPrepareEmailProtocollo}
+              onClick={props.onPrepareEmailProtocollo}
+              style={bozzaIconButtonStyle({ disabled: !canPrepareEmailProtocollo })}
+            >
+              <BozzaActionIcon name='mail' size={24} />
+            </button>
+          </span>
+        </div>
+      </AdminFormSection>
       <Section
         title='Bozza determinazione'
-        right={<SectionInfoButton text={props.showTiAmmInfo ? 'La bozza di determinazione può essere predisposta dopo il visto di conformità. Dopo l’approvazione del Responsabile dell’istruttoria amministrativa e la registrazione dei dati di protocollo, generare o caricare la versione definitiva da trasmettere al Direttore.' : null} title='Informazioni bozza determinazione' />}
+        right={<SectionInfoButton text={props.showTiAmmInfo ? 'La bozza di determinazione può essere predisposta dopo il visto di conformità. Prima dell’approvazione del Responsabile non richiede i dati di protocollo. Dopo l’approvazione e la registrazione del protocollo fascicolo, può essere aggiornata come versione definitiva da trasmettere al Direttore.' : null} title='Informazioni bozza determinazione' />}
         bodyStyle={{ padding: 10 }}
       >
         <div style={{ display: 'grid', gap: 10 }}>
@@ -4119,20 +4579,13 @@ function PostAttestazioneTiAmmWorkSection (props: {
                       <div style={{ display: 'flex', alignItems: 'center', gap: 6, flex: '0 0 auto' }}>
                         <button
                           type='button'
+                          title='Scarica bozza'
+                          aria-label='Scarica bozza'
                           disabled={attachmentsBusy}
                           onClick={() => { void downloadBozzaWord(att) }}
-                          style={{
-                            padding: '5px 10px',
-                            borderRadius: 7,
-                            border: '1px solid rgba(0,0,0,0.16)',
-                            background: attachmentsBusy ? '#e5e7eb' : '#fff',
-                            color: attachmentsBusy ? '#9ca3af' : '#0d3b66',
-                            fontWeight: 800,
-                            cursor: attachmentsBusy ? 'not-allowed' : 'pointer',
-                            whiteSpace: 'nowrap'
-                          }}
+                          style={bozzaIconButtonStyle({ disabled: attachmentsBusy })}
                         >
-                          Scarica
+                          <BozzaActionIcon name='download' size={24} />
                         </button>
                         <button
                           type='button'
@@ -4140,64 +4593,43 @@ function PostAttestazioneTiAmmWorkSection (props: {
                           aria-label='Elimina bozza'
                           disabled={!canDeleteBozza}
                           onClick={() => setConfirmDeleteBozza(true)}
-                          style={{
-                            padding: '5px 10px',
-                            borderRadius: 7,
-                            border: '1px solid rgba(185,28,28,0.32)',
-                            background: canDeleteBozza ? '#b91c1c' : '#e5e7eb',
-                            color: canDeleteBozza ? '#fff' : '#9ca3af',
-                            fontWeight: 850,
-                            cursor: canDeleteBozza ? 'pointer' : 'not-allowed',
-                            whiteSpace: 'nowrap'
-                          }}
+                          style={bozzaIconButtonStyle({ danger: true, disabled: !canDeleteBozza })}
                         >
-                          Elimina
+                          <BozzaActionIcon name='trash' size={24} />
                         </button>
                       </div>
                     </div>
                   ))}
                 </div>
               )}
-              {bozzaRientrataDaRiAmm && (
+              {!vistoDaRinnovareDopoRimando && riAmmHaApprovatoProposta && bozzaRientrataDaRiAmm && (
                 <InfoBox kind='warn'>
-                  La bozza è rientrata dal Responsabile dell’istruttoria amministrativa. È possibile scaricare la versione presente agli atti, correggerla o rigenerarla dopo la protocollazione, quindi caricare la versione definitiva per predisporre l’e-mail al Direttore.
+                  Il Responsabile dell’istruttoria amministrativa ha approvato la verifica. È possibile completare i dati di protocollo, aggiornare la bozza definitiva e predisporre l’e-mail al Direttore.
                 </InfoBox>
               )}
-              {bozzaAlreadyTransmitted && (
+              {!vistoDaRinnovareDopoRimando && bozzaAlreadyTransmitted && (
                 <InfoBox>
-                  La bozza risulta già trasmessa al Responsabile dell’istruttoria amministrativa. Eventuali modifiche richiedono il rientro della pratica.
+                  La bozza è già stata inviata al Responsabile dell’istruttoria amministrativa e non può essere modificata in questa fase.
                 </InfoBox>
               )}
               <div style={{ display: 'flex', justifyContent: 'flex-end', flexWrap: 'wrap', gap: 8 }}>
                 <button
                   type='button'
+                  title={props.saving ? 'Generazione in corso…' : generateBozzaButtonLabel}
+                  aria-label={props.saving ? 'Generazione in corso…' : generateBozzaButtonLabel}
                   disabled={actionDisabled}
                   onClick={props.onGenerateBozzaDeterminazioneWord}
-                  style={{
-                    padding: '8px 16px',
-                    borderRadius: 8,
-                    border: '1px solid rgba(0,0,0,0.18)',
-                    background: actionDisabled ? '#e5e7eb' : '#1a7f37',
-                    color: actionDisabled ? '#9ca3af' : '#fff',
-                    fontWeight: 800,
-                    cursor: actionDisabled ? 'not-allowed' : 'pointer'
-                  }}
+                  style={bozzaIconButtonStyle({ disabled: actionDisabled })}
                 >
-                  {props.saving ? 'Generazione in corso…' : generateBozzaButtonLabel}
+                  <BozzaActionIcon name='edit' size={24} />
                 </button>
                 <label
-                  style={{
-                    padding: '8px 16px',
-                    borderRadius: 8,
-                    border: '1px solid rgba(0,0,0,0.18)',
-                    background: canUploadBozza ? '#0d3b66' : '#e5e7eb',
-                    color: canUploadBozza ? '#fff' : '#9ca3af',
-                    fontWeight: 800,
-                    cursor: canUploadBozza ? 'pointer' : 'not-allowed',
-                    margin: 0
-                  }}
+                  title={attachmentsBusy ? 'Caricamento…' : 'Carica bozza'}
+                  aria-label={attachmentsBusy ? 'Caricamento…' : 'Carica bozza'}
+                  aria-disabled={!canUploadBozza}
+                  style={{ ...bozzaIconButtonStyle({ disabled: !canUploadBozza }), margin: 0 }}
                 >
-                  {attachmentsBusy ? 'Caricamento…' : 'Carica bozza'}
+                  <BozzaActionIcon name='upload' size={24} />
                   <input
                     key={inputKey}
                     type='file'
@@ -4212,35 +4644,23 @@ function PostAttestazioneTiAmmWorkSection (props: {
                 </label>
                 <button
                   type='button'
+                  title='Trasmetti bozza al Responsabile'
+                  aria-label='Trasmetti bozza al Responsabile'
                   disabled={!canTransmitBozza}
                   onClick={props.onTransmitBozzaDeterminazioneRiAmm}
-                  style={{
-                    padding: '8px 16px',
-                    borderRadius: 8,
-                    border: '1px solid rgba(0,0,0,0.18)',
-                    background: canTransmitBozza ? '#b45309' : '#e5e7eb',
-                    color: canTransmitBozza ? '#fff' : '#9ca3af',
-                    fontWeight: 800,
-                    cursor: canTransmitBozza ? 'pointer' : 'not-allowed'
-                  }}
+                  style={bozzaIconButtonStyle({ disabled: !canTransmitBozza })}
                 >
-                  Trasmetti bozza al Responsabile
+                  <BozzaActionIcon name='send' size={24} />
                 </button>
                 <button
                   type='button'
+                  title='Prepara e-mail al Direttore'
+                  aria-label='Prepara e-mail al Direttore'
                   disabled={!canPrepareEmailDirettore}
                   onClick={props.onPrepareEmailDirettore}
-                  style={{
-                    padding: '8px 16px',
-                    borderRadius: 8,
-                    border: '1px solid rgba(0,0,0,0.18)',
-                    background: canPrepareEmailDirettore ? '#0d3b66' : '#e5e7eb',
-                    color: canPrepareEmailDirettore ? '#fff' : '#9ca3af',
-                    fontWeight: 800,
-                    cursor: canPrepareEmailDirettore ? 'pointer' : 'not-allowed'
-                  }}
+                  style={bozzaIconButtonStyle({ disabled: !canPrepareEmailDirettore })}
                 >
-                  Prepara e-mail al Direttore
+                  <BozzaActionIcon name='mail' size={24} />
                 </button>
               </div>
             </div>
@@ -5774,6 +6194,46 @@ function pdfFieldValue (data: any, fields: LayerFieldInfo[], name: string, opts?
   return v === '—' ? '' : v
 }
 
+function pdfDomainValue (data: any, fields: LayerFieldInfo[], names: string[], fallbackFieldName: string): string {
+  for (const name of names) {
+    const raw = pickAttrCI(data, [name])
+    if (raw == null || raw === '') continue
+    const lf = getFieldInfo(fields, name) || getFieldInfo(fields, fallbackFieldName)
+    const label = domainLabel(lf, raw, fallbackFieldName)
+    if (label && label !== '—') return label
+  }
+  return ''
+}
+
+function formatPdfDateTimeValue (value: any, fallbackTimeValue?: any): string {
+  const main = toDateObj(value)
+  if (!main) return ''
+  const date = main.toLocaleDateString('it-IT', { day: '2-digit', month: '2-digit', year: 'numeric' })
+  const hasRealTime = !(main.getUTCHours() === 0 && main.getUTCMinutes() === 0 && main.getUTCSeconds() === 0 && main.getUTCMilliseconds() === 0)
+  const timeSource = hasRealTime ? main : toDateObj(fallbackTimeValue)
+  const time = timeSource && !(timeSource.getUTCHours() === 0 && timeSource.getUTCMinutes() === 0 && timeSource.getUTCSeconds() === 0 && timeSource.getUTCMilliseconds() === 0)
+    ? timeSource.toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' })
+    : ''
+  return time ? `${date}, ${time}` : date
+}
+
+function pdfDateTimeValue (data: any, names: string[], fallbackTimeNames: string[] = []): string {
+  for (const name of names) {
+    const raw = pickAttrCI(data, [name])
+    if (raw == null || raw === '') continue
+    const fallback = fallbackTimeNames.map(n => pickAttrCI(data, [n])).find(v => v != null && v !== '')
+    const formatted = formatPdfDateTimeValue(raw, fallback)
+    if (formatted) return formatted
+  }
+  return ''
+}
+
+function ammOfficeLabelForPdf (value: string): string {
+  const clean = String(value || '').trim()
+  if (!clean) return ''
+  return /^ufficio\s+di\s+/i.test(clean) ? clean : `Ufficio di ${clean}`
+}
+
 function joinParts (...parts: string[]): string {
   return parts.map(p => String(p || '').trim()).filter(Boolean).join(' ')
 }
@@ -5802,6 +6262,27 @@ function cleanAmmInfoText (value: any): string {
   s = s.replace(/\bRI[-_\s]?AMM\b/gi, 'Responsabile dell’istruttoria amministrativa')
   s = s.replace(/\bTI[-_\s]?AMM\b/gi, 'Tecnico istruttore amministrativo')
   return s
+}
+
+function normalizeAmmWorkflowText (value: any): string {
+  const s = cleanAmmInfoText(value)
+    .replace(/\r\n/g, '\n')
+    .replace(/\n[ \t]*\n[ \t]*(Motivazione\s+del\s+rimando\s*:)/gi, '\n$1')
+    .trim()
+  return s
+}
+
+function AmmWorkflowText (props: { text: string }) {
+  const text = normalizeAmmWorkflowText(props.text)
+  const match = text.match(/([\s\S]*?)(Motivazione\s+del\s+rimando\s*:)([\s\S]*)$/i)
+  if (!match) return <>{text || '—'}</>
+  return (
+    <>
+      {match[1]}
+      <span style={{ fontWeight: 800 }}>{match[2]}</span>
+      {match[3]}
+    </>
+  )
 }
 
 function buildVerbaleViolationsText (data: any, fields: LayerFieldInfo[]): string {
@@ -5837,8 +6318,8 @@ function buildVerbalePdfMap (data: any, fields: LayerFieldInfo[], profile: { use
   const indirizzo = joinParts(String(pickAttrCI(d, ['via']) || ''), String(pickAttrCI(d, ['civico']) || ''))
   const comuneCap = joinParts(String(pickAttrCI(d, ['citta', 'comune']) || ''), String(pickAttrCI(d, ['cap']) || ''))
   const contatti = [String(pickAttrCI(d, ['email']) || '').trim(), String(pickAttrCI(d, ['telefono']) || '').trim(), String(pickAttrCI(d, ['cellulare']) || '').trim()].filter(Boolean).join(' / ')
-  const area = pdfFieldValue(d, fields, 'area_cod') || String(pickAttrCI(d, ['area_label', 'area']) || '')
-  const settore = pdfFieldValue(d, fields, 'settore_cod') || String(pickAttrCI(d, ['settore_label', 'settore']) || '')
+  const area = pdfDomainValue(d, fields, ['area_cod', 'Area_cod', 'AREA_COD', 'area', 'Area'], 'area_cod') || String(pickAttrCI(d, ['area_label']) || '')
+  const settore = pdfDomainValue(d, fields, ['settore_cod', 'Settore_cod', 'SETTORE_COD', 'settore', 'Settore'], 'settore_cod') || String(pickAttrCI(d, ['settore_label']) || '')
   const rawTipoAtto = String(pickAttrCI(d, ['tipo_atto_amm']) || '').trim()
   const tipoAttoLabel = pdfFieldValue(d, fields, 'tipo_atto_amm') || rawTipoAtto
   const tiAmmNome = firstTextAttr(d, ['ti_amm_assegnato_nome', 'ti_amm_assegnato_username'])
@@ -5864,11 +6345,11 @@ function buildVerbalePdfMap (data: any, fields: LayerFieldInfo[], profile: { use
     pratica: '',
     n_rilevazione: nRilevazione,
     n_rapporto: nRapporto,
-    data_rilevazione: pdfFieldValue(d, fields, 'data_rilevazione'),
+    data_rilevazione: pdfDateTimeValue(d, ['data_rilevazione', 'data_ora_rilevazione'], ['start']) || pdfFieldValue(d, fields, 'data_rilevazione'),
     data_approvazione_rapporto: dataApprovazioneRapporto,
     area,
     settore,
-    ufficio_zona: pdfFieldValue(d, fields, 'ufficio_zona'),
+    ufficio_zona: ammOfficeLabelForPdf(pdfFieldValue(d, fields, 'ufficio_zona')),
     tecnico_rilevatore: String(pickAttrCI(d, ['tecnico_rilevatore']) || ''),
     ti_amm: String(pickAttrCI(d, ['ti_amm_assegnato_nome', 'ti_amm_assegnato_username']) || ''),
     trasgressore_tipo: isPg ? 'PG' : 'PF',
@@ -6053,6 +6534,92 @@ function downloadBlobFile (blob: Blob, fileName: string): void {
   window.setTimeout(() => { try { URL.revokeObjectURL(url) } catch {} }, 1500)
 }
 
+
+type EmailDraftAttachment = { blob: Blob; fileName: string; contentType?: string }
+
+function sanitizeEmailHeaderText (value: any): string {
+  return String(value ?? '').replace(/[\r\n]+/g, ' ').trim()
+}
+
+function sanitizeEmailFileName (value: any, fallback = 'allegato'): string {
+  const raw = sanitizeEmailHeaderText(value) || fallback
+  return raw.replace(/[\\/:*?"<>|]+/g, '_').replace(/\s+/g, ' ').trim() || fallback
+}
+
+function splitBase64Lines (value: string): string {
+  return String(value || '').replace(/(.{1,76})/g, '$1\r\n').trimEnd()
+}
+
+function utf8Base64 (value: string): string {
+  const bytes = new TextEncoder().encode(String(value ?? ''))
+  let binary = ''
+  const chunk = 0x8000
+  for (let i = 0; i < bytes.length; i += chunk) {
+    binary += String.fromCharCode(...bytes.subarray(i, i + chunk))
+  }
+  return btoa(binary)
+}
+
+async function blobBase64 (blob: Blob): Promise<string> {
+  const bytes = new Uint8Array(await blob.arrayBuffer())
+  let binary = ''
+  const chunk = 0x8000
+  for (let i = 0; i < bytes.length; i += chunk) {
+    binary += String.fromCharCode(...bytes.subarray(i, i + chunk))
+  }
+  return btoa(binary)
+}
+
+function encodeMimeHeader (value: any): string {
+  const clean = sanitizeEmailHeaderText(value)
+  if (!clean) return ''
+  return /^[ -~]*$/.test(clean) ? clean : `=?UTF-8?B?${utf8Base64(clean)}?=`
+}
+
+async function downloadEmailDraftWithAttachments (opts: { to: string, subject: string, body: string, attachments: EmailDraftAttachment[], fileName: string }): Promise<void> {
+  const to = sanitizeEmailHeaderText(opts.to)
+  const subject = sanitizeEmailHeaderText(opts.subject)
+  const boundary = `gii_${Date.now()}_${Math.random().toString(16).slice(2)}`
+  const lines: string[] = [
+    `To: ${to}`,
+    `Subject: ${encodeMimeHeader(subject)}`,
+    'MIME-Version: 1.0',
+    `Content-Type: multipart/mixed; boundary="${boundary}"`,
+    '',
+    `--${boundary}`,
+    'Content-Type: text/plain; charset="UTF-8"',
+    'Content-Transfer-Encoding: base64',
+    '',
+    splitBase64Lines(utf8Base64(String(opts.body || '')))
+  ]
+  for (const att of opts.attachments || []) {
+    if (!att?.blob) continue
+    const fileName = sanitizeEmailFileName(att.fileName, 'allegato')
+    const contentType = sanitizeEmailHeaderText(att.contentType || att.blob.type || 'application/octet-stream') || 'application/octet-stream'
+    const base64 = await blobBase64(att.blob)
+    lines.push(
+      `--${boundary}`,
+      `Content-Type: ${contentType}; name="${fileName}"`,
+      'Content-Transfer-Encoding: base64',
+      `Content-Disposition: attachment; filename="${fileName}"`,
+      '',
+      splitBase64Lines(base64)
+    )
+  }
+  lines.push(`--${boundary}--`, '')
+  const eml = new Blob([lines.join('\r\n')], { type: 'message/rfc822;charset=utf-8' })
+  downloadBlobFile(eml, sanitizeEmailFileName(opts.fileName, 'email.eml'))
+}
+
+async function buildEmailAttachmentFromAmmAttachment (att: AmmAttachmentInfo, oid: number, layerUrl: string): Promise<EmailDraftAttachment> {
+  const blob = await fetchAmmAttachmentBlobForPdf(att, oid, layerUrl)
+  return {
+    blob,
+    fileName: sanitizeEmailFileName(att.name || `allegato-${att.id}`),
+    contentType: String(att.contentType || blob.type || 'application/octet-stream')
+  }
+}
+
 function ViolationsSection (props: { data: any, layerFields: LayerFieldInfo[] }) {
   const st = useAdminStyle()
   const rows = buildViolationRows(props.data || {}, props.layerFields || [])
@@ -6153,7 +6720,13 @@ function DatiGeneraliAmmSection (props: { title: string, data: Record<string, an
 }
 
 
-function buildRapportoAmmPreviewMap (data: any, fields: LayerFieldInfo[], profile: { username: string, fullName: string }): Record<string, string> {
+function buildRapportoAmmPreviewMap (
+  data: any,
+  fields: LayerFieldInfo[],
+  profile: { username: string, fullName: string },
+  utentiCache: Map<string, AmmUtenteCached> | null = null,
+  cicli: RapportoIterCicloPdf[] = []
+): Record<string, string> {
   const d = data || {}
   const oidRaw = pickAttrCI(d, ['OBJECTID', 'objectid', 'ObjectId', 'FID'])
   const oid = oidRaw != null && Number.isFinite(Number(oidRaw)) ? Number(oidRaw) : null
@@ -6162,12 +6735,27 @@ function buildRapportoAmmPreviewMap (data: any, fields: LayerFieldInfo[], profil
   const nominativo = ragioneSociale || joinParts(String(pickAttrCI(d, ['cognome']) || ''), String(pickAttrCI(d, ['nome']) || ''))
   const area = pdfFieldValue(d, fields, 'area_cod') || String(pickAttrCI(d, ['area_label', 'area']) || '')
   const settore = pdfFieldValue(d, fields, 'settore_cod') || String(pickAttrCI(d, ['settore_label', 'settore']) || '')
+  const statoDtRaw = pickAttrCI(d, ['stato_DT', 'Stato_DT', 'STATO_DT', 'stato_dt'])
+  const esitoDtRaw = pickAttrCI(d, ['esito_DT', 'Esito_DT', 'ESITO_DT', 'esito_dt'])
+  const statoDtNum = parseNumberInput(statoDtRaw)
+  const esitoDtNum = parseNumberInput(esitoDtRaw)
+  const rapportoRespinto = esitoDtNum === 3 || statoDtNum === 5
+  const rapportoApprovato = !rapportoRespinto && (esitoDtNum === 2 || statoDtNum === 4 || hasAdminValue(pickAttrCI(d, ['dt_esito_DT'])))
+  const rapportoIstruttoria = !rapportoRespinto && !rapportoApprovato
+  const iterPlaceholders = buildRapportoIterPlaceholders({ data: d, utentiCache, cicli, rapportoApprovato, rapportoRespinto })
   return {
     objectid: oid != null ? String(oid) : '',
     cod_pratica: getReportCode(d, oid),
     n_rapporto: getReportCode(d, oid),
     numero_rapporto_tecnico: getReportCode(d, oid),
     data_rapporto_tecnico: pdfFieldValue(d, fields, 'data_rapporto_tecnico'),
+    stato_dt: statoDtRaw != null ? String(statoDtRaw) : '',
+    stato_DT: statoDtRaw != null ? String(statoDtRaw) : '',
+    esito_dt: esitoDtRaw != null ? String(esitoDtRaw) : '',
+    esito_DT: esitoDtRaw != null ? String(esitoDtRaw) : '',
+    rapporto_respinto: rapportoRespinto ? '1' : '0',
+    rapporto_approvato: rapportoApprovato ? '1' : '0',
+    rapporto_istruttoria: rapportoIstruttoria ? '1' : '0',
     data_rilevazione: pdfFieldValue(d, fields, 'data_rilevazione'),
     ora_rilevazione: String(pickAttrCI(d, ['ora_rilevazione']) || ''),
     area_cod: area,
@@ -6216,16 +6804,56 @@ function buildRapportoAmmPreviewMap (data: any, fields: LayerFieldInfo[], profil
     iter_approvazione_nome: String(pickAttrCI(d, ['dt_nome', 'dt_username']) || ''),
     iter_approvazione_presa: pdfFieldValue(d, fields, 'dt_presa_in_carico_DT'),
     iter_approvazione_data: pdfFieldValue(d, fields, 'dt_esito_DT'),
+    ...iterPlaceholders,
     data_generazione: new Date().toLocaleString('it-IT'),
     generato_da: profile.fullName || profile.username || ''
   }
 }
 
 async function buildRapportoAmmPreviewPdfBlob (data: any, fields: LayerFieldInfo[], profile: { username: string, fullName: string }): Promise<{ blob: Blob, fileName: string }> {
-  const map = buildRapportoAmmPreviewMap(data, fields, profile)
+  const iterGlobalId = pickAttrCI(data || {}, ['globalid', 'GlobalID', 'GLOBALID', 'parent_globalid'])
+  const [utentiCache, cicli] = await Promise.all([
+    ensureAmmUtentiCache(),
+    loadRapportoIterCicliForPdf(iterGlobalId)
+  ])
+  const map = buildRapportoAmmPreviewMap(data, fields, profile, utentiCache, cicli)
   const bytes = await buildRapportoPdf(map)
   const base = String(map.n_rapporto || map.objectid || 'rapporto').replace(/[^a-zA-Z0-9_-]/g, '_')
   return { blob: new Blob([bytes as any], { type: 'application/pdf' }), fileName: `rapporto_tecnico_${base}.pdf` }
+}
+
+async function buildAmmNotaSpesePdfItems (data: any, fields: LayerFieldInfo[], profile: { username: string, fullName: string }, selectedKeys?: Record<string, boolean>): Promise<Array<{ blob: Blob, fileName: string }>> {
+  const groups = await queryNotaSpesePdfGroupsForPractice(data || {})
+  const selected = groups.filter(group => (selectedKeys || {})[group.codiceCasistica] !== false)
+  if (!selected.length) return []
+  const map = buildRapportoAmmPreviewMap(data || {}, fields || [], profile || { username: '', fullName: '' })
+  const base = String(map.n_rapporto || map.objectid || 'rapporto').replace(/[^a-zA-Z0-9_-]/g, '_')
+  const luogoData = 'Cagliari, ' + (pdfFieldValue(data || {}, fields || [], 'data_firma') || new Date().toLocaleDateString('it-IT', { day: '2-digit', month: '2-digit', year: 'numeric' }))
+  const items: Array<{ blob: Blob, fileName: string }> = []
+  for (let i = 0; i < selected.length; i++) {
+    const group = selected[i]
+    const nsData: NotaSpeseData = {
+      cod_pratica: map.cod_pratica || map.n_rapporto || '',
+      area_label: map.area_label || '',
+      settore_label: map.settore_label || '',
+      area_cod: map.area_cod || '',
+      settore_cod: map.settore_cod || '',
+      numero_nota: i + 1,
+      titolo_nota: group.label,
+      rows: group.rows as any,
+      summary: group.summary as any,
+      art30: null,
+      luogo_data: luogoData,
+      firma_nome: map.iter_compilazione_nome || map.generato_da || profile.fullName || profile.username || '',
+      rapporto_respinto: map.rapporto_respinto,
+      rapporto_approvato: map.rapporto_approvato,
+      rapporto_istruttoria: map.rapporto_istruttoria
+    }
+    const bytes = await buildNotaSpesePdf(nsData)
+    const suffix = selected.length > 1 ? `_nota_${i + 1}` : ''
+    items.push({ blob: new Blob([bytes as any], { type: 'application/pdf' }), fileName: `nota_spese_${base}${suffix}.pdf` })
+  }
+  return items
 }
 
 async function buildBozzaDeterminazionePdfBlob (data: any, fields: LayerFieldInfo[], profile: { username: string, fullName: string }): Promise<{ blob: Blob, fileName: string }> {
@@ -6248,10 +6876,112 @@ async function fetchAmmAttachmentBlobForPdf (att: AmmAttachmentInfo, oid: number
   return await resp.blob()
 }
 
+
+
+const AMM_ATTACHMENT_PAGE_W = 595.28
+const AMM_ATTACHMENT_PAGE_H = 841.89
+const AMM_ATTACHMENT_PAGE_MARGIN = 42
+
+function drawAmmAttachmentPdfTextLines (page: any, font: any, text: string, x: number, y: number, size: number, maxWidth: number, color = rgb(0.12, 0.14, 0.18)): number {
+  const words = String(text || '').split(/\s+/).filter(Boolean)
+  let line = ''
+  let curY = y
+  for (const word of words) {
+    const next = line ? `${line} ${word}` : word
+    if (font.widthOfTextAtSize(next, size) > maxWidth && line) {
+      page.drawText(line, { x, y: curY, size, font, color })
+      curY -= size + 4
+      line = word
+    } else {
+      line = next
+    }
+  }
+  if (line) {
+    page.drawText(line, { x, y: curY, size, font, color })
+    curY -= size + 4
+  }
+  return curY
+}
+
+async function addAmmAttachmentPdfHeaderPage (pdf: PDFDocument, title: string, subtitle?: string): Promise<any> {
+  const page = pdf.addPage([AMM_ATTACHMENT_PAGE_W, AMM_ATTACHMENT_PAGE_H])
+  const bold = await pdf.embedFont(StandardFonts.HelveticaBold)
+  const regular = await pdf.embedFont(StandardFonts.Helvetica)
+  page.drawText(title, {
+    x: AMM_ATTACHMENT_PAGE_MARGIN,
+    y: AMM_ATTACHMENT_PAGE_H - 62,
+    size: 16,
+    font: bold,
+    color: rgb(0.05, 0.12, 0.24)
+  })
+  if (subtitle) {
+    drawAmmAttachmentPdfTextLines(page, regular, subtitle, AMM_ATTACHMENT_PAGE_MARGIN, AMM_ATTACHMENT_PAGE_H - 88, 10, AMM_ATTACHMENT_PAGE_W - AMM_ATTACHMENT_PAGE_MARGIN * 2, rgb(0.3, 0.34, 0.4))
+  }
+  page.drawLine({
+    start: { x: AMM_ATTACHMENT_PAGE_MARGIN, y: AMM_ATTACHMENT_PAGE_H - 105 },
+    end: { x: AMM_ATTACHMENT_PAGE_W - AMM_ATTACHMENT_PAGE_MARGIN, y: AMM_ATTACHMENT_PAGE_H - 105 },
+    thickness: 0.8,
+    color: rgb(0.78, 0.82, 0.88)
+  })
+  return page
+}
+
+function isAmmImageAttachmentForPdf (att: AmmAttachmentInfo): boolean {
+  const contentType = String(att?.contentType || '').toLowerCase()
+  const name = String(att?.name || '').toLowerCase()
+  return contentType.includes('png') || name.endsWith('.png') || contentType.includes('jpeg') || contentType.includes('jpg') || name.endsWith('.jpg') || name.endsWith('.jpeg')
+}
+
+async function normalizeAmmImageAttachmentBytesForPdf (blob: Blob): Promise<Uint8Array | null> {
+  if (typeof document === 'undefined' || typeof window === 'undefined') return null
+  let source: any = null
+  let sourceUrl = ''
+  let closeSource = () => {}
+  try {
+    const createBitmap = (window as any)?.createImageBitmap
+    if (typeof createBitmap === 'function') {
+      source = await createBitmap(blob, { imageOrientation: 'from-image' }).catch((): null => null)
+      if (source) closeSource = () => { try { source.close?.() } catch {} }
+    }
+    if (!source) {
+      sourceUrl = URL.createObjectURL(blob)
+      source = await new Promise<HTMLImageElement | null>(resolve => {
+        const img = new Image()
+        img.onload = () => resolve(img)
+        img.onerror = () => resolve(null)
+        img.src = sourceUrl
+      })
+      closeSource = () => { try { if (sourceUrl) URL.revokeObjectURL(sourceUrl) } catch {} }
+    }
+    if (!source) return null
+
+    const srcW = Math.max(1, Math.round(Number(source.width || source.naturalWidth) || 0))
+    const srcH = Math.max(1, Math.round(Number(source.height || source.naturalHeight) || 0))
+    if (!srcW || !srcH) return null
+
+    const maxPx = 2200
+    const scale = Math.min(1, maxPx / Math.max(srcW, srcH))
+    const outW = Math.max(1, Math.round(srcW * scale))
+    const outH = Math.max(1, Math.round(srcH * scale))
+    const canvas = document.createElement('canvas')
+    canvas.width = outW
+    canvas.height = outH
+    const ctx = canvas.getContext('2d')
+    if (!ctx) return null
+    ctx.drawImage(source, 0, 0, srcW, srcH, 0, 0, outW, outH)
+    const outBlob = await canvasToBlobForAmmEdit(canvas, 'image/png', 0.92)
+    return new Uint8Array(await outBlob.arrayBuffer())
+  } catch {
+    return null
+  } finally {
+    closeSource()
+  }
+}
+
 async function buildAmmAttachmentsPdfBlob (items: AmmAttachmentInfo[], oid: number, layerUrl: string, baseName: string): Promise<{ blob: Blob, fileName: string } | null> {
   const out = await PDFDocument.create()
-  const a4: [number, number] = [595.28, 841.89]
   let added = 0
+  let imagePageIndex = 0
   for (const att of items) {
     const contentType = String(att.contentType || '').toLowerCase()
     const name = String(att.name || '').toLowerCase()
@@ -6262,16 +6992,35 @@ async function buildAmmAttachmentsPdfBlob (items: AmmAttachmentInfo[], oid: numb
       const src = await PDFDocument.load(bytes)
       const pages = await out.copyPages(src, src.getPageIndices())
       pages.forEach(pg => { out.addPage(pg); added++ })
-    } else if (contentType.includes('png') || name.endsWith('.png') || contentType.includes('jpeg') || contentType.includes('jpg') || name.endsWith('.jpg') || name.endsWith('.jpeg')) {
-      const img = (contentType.includes('png') || name.endsWith('.png')) ? await out.embedPng(bytes) : await out.embedJpg(bytes)
-      const page = out.addPage(a4)
-      const margin = 36
-      const maxW = a4[0] - margin * 2
-      const maxH = a4[1] - margin * 2
+    } else if (isAmmImageAttachmentForPdf(att)) {
+      imagePageIndex++
+      const normalizedBytes = await normalizeAmmImageAttachmentBytesForPdf(blob)
+      const img = normalizedBytes
+        ? await out.embedPng(normalizedBytes)
+        : ((contentType.includes('png') || name.endsWith('.png')) ? await out.embedPng(bytes) : await out.embedJpg(bytes))
+      const page = await addAmmAttachmentPdfHeaderPage(
+        out,
+        `Allegato probatorio ${imagePageIndex}`,
+        String(att.name || 'Immagine allegata')
+      )
+      const regular = await out.embedFont(StandardFonts.Helvetica)
+      const margin = AMM_ATTACHMENT_PAGE_MARGIN
+      const maxW = AMM_ATTACHMENT_PAGE_W - margin * 2
+      const maxH = AMM_ATTACHMENT_PAGE_H - 185
       const scale = Math.min(maxW / img.width, maxH / img.height)
       const w = img.width * scale
       const h = img.height * scale
-      page.drawImage(img, { x: (a4[0] - w) / 2, y: (a4[1] - h) / 2, width: w, height: h })
+      const x = (AMM_ATTACHMENT_PAGE_W - w) / 2
+      const y = 50 + (maxH - h) / 2
+      page.drawRectangle({ x: x - 1, y: y - 1, width: w + 2, height: h + 2, borderColor: rgb(0.78, 0.82, 0.88), borderWidth: 0.8 })
+      page.drawImage(img, { x, y, width: w, height: h })
+      page.drawText('Orientamento immagine coerente con il viewer allegati.', {
+        x: AMM_ATTACHMENT_PAGE_MARGIN,
+        y: 34,
+        size: 8.5,
+        font: regular,
+        color: rgb(0.38, 0.42, 0.48)
+      })
       added++
     }
   }
@@ -6292,6 +7041,44 @@ async function mergeAmmPdfItems (items: Array<{ blob: Blob, fileName: string }>)
   const bytes = await merged.save()
   return new Blob([bytes as any], { type: 'application/pdf' })
 }
+
+
+async function buildProtocolloFascicoloEmailAttachment (data: any, fields: LayerFieldInfo[], profile: { username: string, fullName: string }, oid: number, ds: any, layerUrl: string): Promise<EmailDraftAttachment> {
+  const items: Array<{ blob: Blob, fileName: string }> = []
+  items.push(await buildRapportoAmmPreviewPdfBlob(data || {}, fields || [], profile || { username: '', fullName: '' }))
+
+  const nsGroups = await queryNotaSpesePdfGroupsForPractice(data || {})
+  if (nsGroups.length > 0) {
+    const selectedNotaSpeseKeys: Record<string, boolean> = {}
+    nsGroups.forEach(group => { selectedNotaSpeseKeys[group.codiceCasistica] = true })
+    const nsItems = await buildAmmNotaSpesePdfItems(data || {}, fields || [], profile || { username: '', fullName: '' }, selectedNotaSpeseKeys)
+    nsItems.forEach(item => items.push(item))
+  }
+
+  items.push(await buildVerbalePdfBlob(data || {}, fields || [], profile || { username: '', fullName: '' }))
+
+  const layer = await resolveLayerForEdit(ds, layerUrl)
+  const allAttachments = await queryAmmAttachments(layer, oid, layerUrl)
+  const printableAttachments = allAttachments.filter(att => !isBozzaDeterminazioneWordAttachment(att) && !isPropostaContestazionePdfAttachment(att))
+  const attPdf = printableAttachments.length > 0
+    ? await buildAmmAttachmentsPdfBlob(printableAttachments, oid, layerUrl, getReportCode(data || {}, oid) || String(oid))
+    : null
+  if (attPdf) items.push(attPdf)
+
+  const blob = items.length === 1 ? items[0].blob : await mergeAmmPdfItems(items)
+  const safe = String(getReportCode(data || {}, oid) || oid).replace(/[^a-zA-Z0-9_-]/g, '_')
+  return { blob, fileName: `fascicolo_protocollo_${safe}.pdf`, contentType: 'application/pdf' }
+}
+
+type AmmFascicoloPreviewCacheEntry = {
+  blob: Blob
+  fileName: string
+  options: DocumentPrintOptions
+  attachmentOptions: AttachmentPrintOption[]
+  notaSpeseOptions: NotaSpesePrintOption[]
+}
+
+const ammFascicoloPreviewCache = new Map<string, AmmFascicoloPreviewCacheEntry>()
 
 function FascicoloAmmPreviewSection (props: {
   data: Record<string, any>
@@ -6316,19 +7103,24 @@ function FascicoloAmmPreviewSection (props: {
   const [error, setError] = React.useState<string | null>(null)
   const [docOptions, setDocOptions] = React.useState<DocumentPrintOptions>(() => ({ ...defaultDocumentPrintOptions(), includeRapporto: true, includePropostaContestazione: true, includeDeterminazione: false }))
   const [attachmentOptions, setAttachmentOptions] = React.useState<AttachmentPrintOption[]>([])
+  const [notaSpeseOptions, setNotaSpeseOptions] = React.useState<NotaSpesePrintOption[]>([])
   const [expandedLayerGroups, setExpandedLayerGroups] = React.useState<Record<string, boolean>>({})
 
   const oid = props.oid != null && Number.isFinite(Number(props.oid)) ? Number(props.oid) : null
   const layerUrl = normalizeEditLayerUrl(props.layerUrl || getDataSourceUrl(props.ds))
-  const dataSignature = React.useMemo(() => {
-    try { return JSON.stringify({ data: props.data || {}, oid, user: props.profile?.username || '' }) } catch { return String(Date.now()) }
-  }, [props.data, oid, props.profile])
+  const previewCacheKey = React.useMemo(() => {
+    const stableLayerKey = String(layerUrl || '').trim() || 'layer'
+    const stableOidKey = oid != null ? String(oid) : 'no-oid'
+    const stableUserKey = String(props.profile?.username || '').trim() || 'user'
+    return `${stableLayerKey}::${stableOidKey}::${stableUserKey}`
+  }, [layerUrl, oid, props.profile?.username])
 
   React.useEffect(() => {
     let cancelled = false
     if (!props.hasSelection || !oid) {
       setAttachmentOptions([])
-      setDocOptions(prev => ({ ...prev, includeAllegati: false, selectedAttachmentIds: {} }))
+      setNotaSpeseOptions([])
+      setDocOptions(prev => ({ ...prev, includeAllegati: false, includeNotaSpese: false, selectedAttachmentIds: {}, selectedNotaSpeseKeys: {} }))
       return () => { cancelled = true }
     }
     ;(async () => {
@@ -6336,20 +7128,33 @@ function FascicoloAmmPreviewSection (props: {
         const layer = await resolveLayerForEdit(props.ds, layerUrl)
         const list = await queryAmmAttachments(layer, oid, layerUrl)
         if (cancelled) return
-        const printable = filterGiiAttachmentsForAdministrativeFascicolo(list as any) as AmmAttachmentInfo[]
-        const selectedAttachmentIds: Record<string, boolean> = {}
-        printable.forEach(att => { selectedAttachmentIds[String(att.id)] = true })
+        const printable = (filterGiiAttachmentsForAdministrativeFascicolo(list as any) as AmmAttachmentInfo[])
+        const defaultSelectedAttachmentIds: Record<string, boolean> = {}
+        printable.forEach(att => { defaultSelectedAttachmentIds[String(att.id)] = true })
+        const nsGroups = await queryNotaSpesePdfGroupsForPractice(props.data || {})
+        if (cancelled) return
+        const defaultSelectedNotaSpeseKeys: Record<string, boolean> = {}
+        nsGroups.forEach(group => { defaultSelectedNotaSpeseKeys[group.codiceCasistica] = true })
+        const cached = ammFascicoloPreviewCache.get(previewCacheKey)
         setAttachmentOptions(printable.map(att => ({ id: Number(att.id), name: att.name, size: att.size, contentType: att.contentType, url: att.url })))
-        setDocOptions(prev => ({ ...prev, selectedAttachmentIds, includeAllegati: printable.length > 0 ? prev.includeAllegati : false }))
+        setNotaSpeseOptions(nsGroups.map(group => ({ key: group.codiceCasistica, label: group.label })))
+        setDocOptions(prev => ({
+          ...prev,
+          selectedAttachmentIds: cached ? (prev.selectedAttachmentIds || {}) : defaultSelectedAttachmentIds,
+          selectedNotaSpeseKeys: cached ? (prev.selectedNotaSpeseKeys || {}) : defaultSelectedNotaSpeseKeys,
+          includeAllegati: printable.length > 0 ? prev.includeAllegati : false,
+          includeNotaSpese: nsGroups.length > 0 ? prev.includeNotaSpese : false
+        }))
       } catch {
         if (!cancelled) {
           setAttachmentOptions([])
-          setDocOptions(prev => ({ ...prev, includeAllegati: false, selectedAttachmentIds: {} }))
+          setNotaSpeseOptions([])
+          setDocOptions(prev => ({ ...prev, includeAllegati: false, includeNotaSpese: false, selectedAttachmentIds: {}, selectedNotaSpeseKeys: {} }))
         }
       }
     })()
     return () => { cancelled = true }
-  }, [props.hasSelection, oid, props.ds, layerUrl])
+  }, [props.hasSelection, oid, props.ds, layerUrl, previewCacheKey])
 
   const regenerate = React.useCallback(async (opts?: DocumentPrintOptions) => {
     if (!props.hasSelection || !oid) {
@@ -6364,12 +7169,18 @@ function FascicoloAmmPreviewSection (props: {
     try {
       const items: Array<{ blob: Blob, fileName: string }> = []
       if (options.includeRapporto) items.push(await buildRapportoAmmPreviewPdfBlob(props.data || {}, props.fields || [], props.profile || { username: '', fullName: '' }))
+      if (options.includeNotaSpese) {
+        const nsItems = await buildAmmNotaSpesePdfItems(props.data || {}, props.fields || [], props.profile || { username: '', fullName: '' }, options.selectedNotaSpeseKeys || {})
+        if (nsItems.length === 0) throw new Error('Selezionare almeno una nota spese.')
+        nsItems.forEach(item => items.push(item))
+      }
       if (options.includePropostaContestazione) items.push(await buildVerbalePdfBlob(props.data || {}, props.fields || [], props.profile || { username: '', fullName: '' }))
       if (options.includeDeterminazione) items.push(await buildBozzaDeterminazionePdfBlob(props.data || {}, props.fields || [], props.profile || { username: '', fullName: '' }))
       if (options.includeAllegati) {
         const ids = new Set(Object.entries(options.selectedAttachmentIds || {}).filter(([, visible]) => visible !== false).map(([id]) => Number(id)))
         const all = await queryAmmAttachments(await resolveLayerForEdit(props.ds, layerUrl), oid, layerUrl)
-        const selected = (filterGiiAttachmentsForAdministrativeFascicolo(all as any) as AmmAttachmentInfo[]).filter(att => ids.has(Number(att.id)))
+        const selected = (filterGiiAttachmentsForAdministrativeFascicolo(all as any) as AmmAttachmentInfo[])
+          .filter(att => ids.has(Number(att.id)))
         if (selected.length === 0) throw new Error('Selezionare almeno un allegato.')
         const attPdf = await buildAmmAttachmentsPdfBlob(selected, oid, layerUrl, getReportCode(props.data || {}, oid) || String(oid))
         if (attPdf) items.push(attPdf)
@@ -6377,6 +7188,13 @@ function FascicoloAmmPreviewSection (props: {
       if (items.length === 0) throw new Error('Selezionare almeno un documento.')
       const fileName = items.length === 1 ? items[0].fileName : `fascicolo_${String(getReportCode(props.data || {}, oid) || oid).replace(/[^a-zA-Z0-9_-]/g, '_')}.pdf`
       const blob = items.length === 1 ? items[0].blob : await mergeAmmPdfItems(items)
+      ammFascicoloPreviewCache.set(previewCacheKey, {
+        blob,
+        fileName,
+        options: cloneDocumentPrintOptions(options),
+        attachmentOptions: attachmentOptions.map(item => ({ ...item })),
+        notaSpeseOptions: notaSpeseOptions.map(item => ({ ...item }))
+      })
       const url = makePdfUrl(blob, fileName)
       setPdfFileName(fileName)
       setPdfUrl((prev): string => { revokePdfUrl(prev); return url })
@@ -6385,12 +7203,26 @@ function FascicoloAmmPreviewSection (props: {
     } finally {
       setLoading(false)
     }
-  }, [docOptions, layerUrl, oid, props.data, props.ds, props.fields, props.hasSelection, props.profile])
+  }, [attachmentOptions, previewCacheKey, docOptions, layerUrl, notaSpeseOptions, oid, props.data, props.ds, props.fields, props.hasSelection, props.profile])
 
   React.useEffect(() => {
+    const cached = ammFascicoloPreviewCache.get(previewCacheKey)
+    if (cached) {
+      setPdfFileName(cached.fileName)
+      setDocOptions(cloneDocumentPrintOptions(cached.options))
+      setAttachmentOptions((cached.attachmentOptions || []).map(item => ({ ...item })))
+      setNotaSpeseOptions((cached.notaSpeseOptions || []).map(item => ({ ...item })))
+      setError(null)
+      setLoading(false)
+      setPdfUrl((prev): string => {
+        revokePdfUrl(prev)
+        return makePdfUrl(cached.blob, cached.fileName)
+      })
+      return () => {}
+    }
     void regenerate(docOptions)
     return () => {}
-  }, [dataSignature])
+  }, [previewCacheKey])
 
   React.useEffect(() => {
     return () => { revokePdfUrl(pdfUrl) }
@@ -6401,6 +7233,15 @@ function FascicoloAmmPreviewSection (props: {
   }, [])
   const setAttachmentOptionVisible = React.useCallback((id: number, visible: boolean) => {
     setDocOptions(prev => setGiiAttachmentPrintOptionVisible(prev, id, visible))
+  }, [])
+  const setNotaSpeseOptionVisible = React.useCallback((key: string, visible: boolean) => {
+    setDocOptions(prev => ({
+      ...prev,
+      selectedNotaSpeseKeys: {
+        ...(prev.selectedNotaSpeseKeys || {}),
+        [String(key)]: visible
+      }
+    }))
   }, [])
   const noop = React.useCallback(() => {}, [])
 
@@ -6424,18 +7265,18 @@ function FascicoloAmmPreviewSection (props: {
         borderColor={props.sidebarBorderColor || '#b8c7d9'}
         borderWidth={props.sidebarBorderWidth ?? 1}
         docOptions={docOptions}
-        availability={{ notaSpese: false, mappa: false, allegati: attachmentOptions.length > 0, propostaContestazione: true, determinazione: true }}
+        availability={{ notaSpese: notaSpeseOptions.length > 0, mappa: false, allegati: attachmentOptions.length > 0, propostaContestazione: true, determinazione: true }}
         showAdminDocuments={true}
         busy={loading}
         canUseMap={false}
         mapPanelAvailable={false}
-        notaSpeseOptions={[]}
+        notaSpeseOptions={notaSpeseOptions}
         attachmentOptions={attachmentOptions}
         printableLayerTree={[]}
         expandedLayerGroups={expandedLayerGroups}
         mapEmptyText='La mappa amministrativa non è disponibile in questa scheda.'
         updateDocOption={updateDocOption}
-        setNotaSpeseOptionVisible={noop as any}
+        setNotaSpeseOptionVisible={setNotaSpeseOptionVisible}
         setAttachmentOptionVisible={setAttachmentOptionVisible}
         setMapLayerKeysVisible={noop as any}
         setExpandedLayerGroups={setExpandedLayerGroups}
@@ -6443,6 +7284,35 @@ function FascicoloAmmPreviewSection (props: {
       />
     </div>
   )
+}
+
+
+function isAdministrativeGenericAttachment (att: AmmAttachmentInfo | null | undefined): boolean {
+  return getGiiAttachmentKind(att as any) === 'administrative'
+}
+
+function decorateAmmAttachmentForAllegatiSection (att: AmmAttachmentInfo): AmmAttachmentInfo & { groupTitle?: string; readOnly?: boolean; readOnlyReason?: string } {
+  const kind = getGiiAttachmentKind(att as any)
+  if (kind === 'administrative') {
+    return {
+      ...att,
+      groupTitle: 'Allegati amministrativi'
+    }
+  }
+  return {
+    ...att,
+    groupTitle: 'Allegati tecnici',
+    readOnly: true
+  }
+}
+
+function sortAmmAttachmentForAllegatiSection (a: AmmAttachmentInfo, b: AmmAttachmentInfo): number {
+  const ka = getGiiAttachmentKind(a as any) === 'technical' ? 0 : 1
+  const kb = getGiiAttachmentKind(b as any) === 'technical' ? 0 : 1
+  if (ka !== kb) return ka - kb
+  const ca = Number((a as any)?.created ?? (a as any)?.creationDate ?? (a as any)?.uploadedAt ?? a.id) || 0
+  const cb = Number((b as any)?.created ?? (b as any)?.creationDate ?? (b as any)?.uploadedAt ?? b.id) || 0
+  return ca - cb
 }
 
 function AllegatiAmmSection (props: {
@@ -6485,7 +7355,11 @@ function AllegatiAmmSection (props: {
       const { layer, layerUrl } = await resolveAttachmentLayer()
       if (!layer && !layerUrl) throw new Error('FeatureLayer non disponibile per gli allegati.')
       const list = await queryAmmAttachments(layer, oid, layerUrl)
-      setItems(filterGiiAttachmentsForAdministrativeGenericSection(list as any) as AmmAttachmentInfo[])
+      const visible = (filterGiiAttachmentsForAdministrativeFascicolo(list as any) as AmmAttachmentInfo[])
+        .slice()
+        .sort(sortAmmAttachmentForAllegatiSection)
+        .map(decorateAmmAttachmentForAllegatiSection)
+      setItems(visible)
       setLoadedOid(oid)
     } catch (e: any) {
       setItems([])
@@ -6518,6 +7392,7 @@ function AllegatiAmmSection (props: {
 
   const replace = React.useCallback(async (att: AmmAttachmentInfo, file: File) => {
     if (!oid || !att?.id || !file || !props.canEdit) return
+    if (!isAdministrativeGenericAttachment(att)) { setError('Gli allegati tecnici sono consultabili ma non modificabili dai ruoli amministrativi.'); return }
     setBusy(true)
     setError(null)
     try {
@@ -6534,6 +7409,7 @@ function AllegatiAmmSection (props: {
 
   const remove = React.useCallback(async (att: AmmAttachmentInfo) => {
     if (!oid || !att?.id || !props.canEdit) return
+    if (!isAdministrativeGenericAttachment(att)) { setError('Gli allegati tecnici sono consultabili ma non eliminabili dai ruoli amministrativi.'); return }
     const ok = window.confirm(`Eliminare l'allegato "${att.name || att.id}"?`)
     if (!ok) return
     setBusy(true)
@@ -6577,6 +7453,7 @@ function AllegatiAmmSection (props: {
     if (!oid || !props.canEdit || props.selectedAttachmentId == null || normalizedRotation === 0) return
     const att = items.find((it: any) => String(it?.id) === String(props.selectedAttachmentId))
     if (!att || !isRotatableAmmAttachment(att)) return
+    if (!isAdministrativeGenericAttachment(att)) { setError('Gli allegati tecnici sono consultabili ma non modificabili dai ruoli amministrativi.'); return }
     setBusy(true)
     setError(null)
     try {
@@ -6600,7 +7477,6 @@ function AllegatiAmmSection (props: {
 
   return (
     <GiiAttachmentViewer
-      title='ALLEGATI AMMINISTRATIVI'
       oidAvailable={!!oid}
       noOidMessage='Selezionare una pratica prima di consultare o caricare gli allegati.'
       items={items as any}
@@ -6608,6 +7484,7 @@ function AllegatiAmmSection (props: {
       busy={busy}
       error={error}
       canEdit={props.canEdit}
+      uploadLabel='Carica allegato'
       uploadInputKey={inputKey}
       onUpload={upload}
       selectedItemId={props.selectedAttachmentId}
@@ -7162,10 +8039,16 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
   const currentRole = String(profile.role || '').toUpperCase()
   const openedInConsultation = activeSelection?.readOnly === true
   const roleCanEditData = ['TI_AMM', 'ADMIN'].includes(currentRole)
-  const currentAssigneeUsername = getAmmDataEditAssigneeUsername(data || {}, currentRole)
+  const draftOid = pickOidFromData(draft || {}, active?.idFieldName || 'OBJECTID')
+  const draftBelongsToSelection = oid != null && draftOid != null && Number(draftOid) === Number(oid)
+  const editStateData = draftBelongsToSelection && Object.keys(draft || {}).length ? draft : (data || {})
+  const currentAssigneeUsername = getAmmDataEditAssigneeUsername(editStateData || {}, currentRole)
+  const tiAmmWorkflowState = currentRole === 'TI_AMM' ? parseNumberInput(pickAttrCI(editStateData || {}, ['stato_TI_AMM', 'STATO_TI_AMM'])) : null
+  const tiAmmAssignedToCurrentUser = currentRole === 'TI_AMM' && (!currentAssigneeUsername || !profile.username || sameGiiUsername(currentAssigneeUsername, profile.username))
+  const tiAmmIsCurrentOperativeAssignee = currentRole === 'TI_AMM' && tiAmmWorkflowState === 2 && tiAmmAssignedToCurrentUser
   const assignedToOtherUser = roleCanEditData && currentRole !== 'ADMIN' && !!currentAssigneeUsername && !!profile.username && !sameGiiUsername(currentAssigneeUsername, profile.username)
   const dataEditBlockedByRole = roleAllowed && !roleCanEditData
-  const dataEditBlockedByOtherUser = roleCanEditData && (openedInConsultation || assignedToOtherUser)
+  const dataEditBlockedByOtherUser = roleCanEditData && ((openedInConsultation && !tiAmmIsCurrentOperativeAssignee) || assignedToOtherUser)
   const readOnlyBannerBaseMessage = dataEditBlockedByRole
     ? 'Modifica dati non consentita per il tuo ruolo.'
     : (dataEditBlockedByOtherUser ? 'Modifica dati non abilitata. La pratica risulta in carico presso un altro utente.' : '')
@@ -7202,6 +8085,24 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
     broadcastAmmSection(nextSection)
     clearExplicitAmmSectionRequest()
   }, [active?.sig])
+
+  React.useEffect(() => {
+    let cancelled = false
+    const refreshLiveRecord = async () => {
+      if (!active?.ds || oid == null || !Number.isFinite(Number(oid))) return
+      try {
+        const layer = await resolveLayerForEdit(active.ds, active.layerUrl || (configuredDsState as any)?.layerUrl || getDataSourceUrl(configuredDs))
+        if (!layer) return
+        const idName = String(active.idFieldName || layer.objectIdField || 'OBJECTID')
+        const liveAttrs = await queryCurrentLayerAttrsByOid(layer, idName, Number(oid))
+        if (cancelled || !liveAttrs || !Object.keys(liveAttrs).length) return
+        setDraft(prev => ({ ...(prev || {}), ...liveAttrs }))
+        setInitialDraft(prev => ({ ...(prev || {}), ...liveAttrs }))
+      } catch { }
+    }
+    void refreshLiveRecord()
+    return () => { cancelled = true }
+  }, [active?.sig, configuredDs, configuredDsState, oid])
 
   React.useEffect(() => {
     if (!hasSelection || sanzioniConsultive.loading || sanzioniConsultive.error) {
@@ -7643,6 +8544,10 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
       const fields = layer?.fields?.length ? (layer.fields as any[]).map(f => ({ name: String(f.name), type: String(f.type || ''), alias: String(f.alias || f.name), domain: f.domain || null, editable: f.editable !== false })) : layerFields
       const idName = realFieldName(fields, active.idFieldName) || active.idFieldName || 'OBJECTID'
       const base = { ...(initialDraft || {}), ...(draft || {}) }
+      if (isDeterminazioneAdottata(base)) {
+        setDialog({ kind: 'warn', title: 'Flusso bloccato', text: 'La determinazione risulta già approvata/adottata. Non è più possibile riapporre il visto o riaprire il flusso di approvazione della Proposta.' })
+        return
+      }
       const now = Date.now()
       const attrs: Record<string, any> = { [idName]: Number(oid) }
       const put = (name: string, value: any) => {
@@ -7653,6 +8558,19 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
       put('esito_TI_AMM', 2)
       put('dt_esito_TI_AMM', now)
       put('note_TI_AMM', note)
+      // Il visto del TI_AMM non apre alcun nodo operativo RI_AMM: l'unico invio
+      // al Responsabile avviene con "Trasmetti bozza al Responsabile".
+      // Chiudiamo quindi eventuali stati/attività RI_AMM residui creati da versioni
+      // precedenti o da prove intermedie del flusso.
+      put('stato_RI_AMM', 4)
+      put('dt_stato_RI_AMM', now)
+      put('dt_presa_in_carico_RI_AMM', null)
+      put('esito_RI_AMM', null)
+      put('dt_esito_RI_AMM', null)
+      // Ogni nuovo visto apre una nuova versione corrente dei documenti amministrativi speciali.
+      // La Proposta viene rigenerata sotto; l'eventuale bozza di determinazione Word
+      // già caricata in un ciclo precedente viene eliminata e i relativi campi vengono azzerati.
+      for (const name of BOZZA_DETERMINAZIONE_STARTED_FIELDS) put(name, null)
       // Il visto non trasferisce ancora la pratica: il Tecnico istruttore amministrativo
       // deve predisporre/caricare la bozza e poi trasmettere proposta e bozza
       // al Responsabile dell’istruttoria amministrativa con l’apposito pulsante interno.
@@ -7678,10 +8596,12 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
       const propostaBlob = await buildVerbalePdfBlob({ ...base, ...cleanAttrs }, fields, { username: profile.username, fullName: profile.fullName })
       const propostaFile = new File([propostaBlob.blob], propostaBlob.fileName, { type: 'application/pdf', lastModified: now })
       await replacePropostaContestazionePdfAttachment(layer, Number(oid), propostaFile, layerUrl)
+      await deleteBozzaDeterminazioneWordAttachments(layer, Number(oid), layerUrl)
 
       const changedFieldNames = Object.keys(cleanAttrs).filter(k => k !== idName)
       const nextRecordAttrs = { ...prevRecordAttrs, ...cleanAttrs }
       await upsertAmmCycleAudit(prevRecordAttrs, nextRecordAttrs, changedFieldNames)
+      await deleteCurrentAmmActivitiesForRole('RI_AMM', nextRecordAttrs)
       await refreshDs(active.ds)
       const next = { ...nextRecordAttrs }
       setInitialDraft(next)
@@ -7695,7 +8615,7 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
     } finally {
       setSaving(false)
     }
-  }, [active, canEdit, configuredDs, configuredDsState, hasSelection, initialDraft, draft, layerFields, oid, profile.fullName, profile.role, profile.username, refreshDs, upsertAmmCycleAudit])
+  }, [active, canEdit, configuredDs, configuredDsState, deleteCurrentAmmActivitiesForRole, hasSelection, initialDraft, draft, layerFields, oid, profile.fullName, profile.role, profile.username, refreshDs, upsertAmmCycleAudit])
 
   const handleUndoAttestazioneTiAmm = React.useCallback(async () => {
     setPendingUndoAttestation(false)
@@ -7826,17 +8746,18 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
       return
     }
     const base = buildBozzaDeterminazioneSource()
+    if (isDeterminazioneAdottata(base)) {
+      setDialog({ kind: 'warn', title: 'Flusso bloccato', text: 'La determinazione risulta già approvata/adottata. Non è più possibile riaprire il flusso di approvazione della Proposta di contestazione.' })
+      return
+    }
     const esitoTiAmm = parseNumberInput(pickAttrCI(base, ['esito_TI_AMM']))
     if (esitoTiAmm !== 2) {
-      setDialog({ kind: 'warn', title: 'Attestazione mancante', text: 'Apporre l’attestazione di conformità prima di generare la bozza Word della determinazione.' })
+      setDialog({ kind: 'warn', title: 'Visto mancante', text: 'Apporre il visto di conformità prima di generare la bozza di determinazione.' })
       return
     }
-    if (!isPropostaContestazioneApprovedByRiAmm(base)) {
-      setDialog({ kind: 'warn', title: 'Approvazione della proposta mancante', text: 'La bozza della determinazione può essere generata solo dopo l’approvazione della Proposta di contestazione da parte del Responsabile dell’istruttoria amministrativa.' })
-      return
-    }
-    if (!hasAdminValue(pickAttrCI(base, ['protocollo_fascicolo_numero'])) || !hasAdminValue(pickAttrCI(base, ['protocollo_fascicolo_data']))) {
-      setDialog({ kind: 'warn', title: 'Protocollo fascicolo incompleto', text: 'Registrare numero e data del protocollo fascicolo prima di generare la bozza Word della determinazione.' })
+    const propostaApprovataRiAmm = isPropostaContestazioneApprovedByRiAmm(base)
+    if (propostaApprovataRiAmm && (!hasAdminValue(pickAttrCI(base, ['protocollo_fascicolo_numero'])) || !hasAdminValue(pickAttrCI(base, ['protocollo_fascicolo_data'])))) {
+      setDialog({ kind: 'warn', title: 'Protocollo fascicolo incompleto', text: 'Dopo l’approvazione del Responsabile, registrare numero e data del protocollo fascicolo prima di generare o aggiornare la bozza Word definitiva della determinazione.' })
       return
     }
     const currentStato = String(pickAttrCI(base, ['determinazione_stato']) || '').trim().toUpperCase()
@@ -8020,9 +8941,13 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
       const fields = layer?.fields?.length ? (layer.fields as any[]).map(f => ({ name: String(f.name), type: String(f.type || ''), alias: String(f.alias || f.name), domain: f.domain || null, editable: f.editable !== false })) : layerFields
       const idName = realFieldName(fields, active.idFieldName) || active.idFieldName || 'OBJECTID'
       const base = buildBozzaDeterminazioneSource()
+      if (isDeterminazioneAdottata(base)) {
+        setDialog({ kind: 'warn', title: 'Flusso bloccato', text: 'La determinazione risulta già approvata/adottata. Non è più possibile riaprire il flusso di approvazione della Proposta.' })
+        return
+      }
       const esitoTiAmm = parseNumberInput(pickAttrCI(base, ['esito_TI_AMM']))
       if (esitoTiAmm !== 2) {
-        setDialog({ kind: 'warn', title: 'Attestazione mancante', text: 'Apporre l’attestazione di conformità prima di trasmettere la bozza al Responsabile dell’istruttoria amministrativa.' })
+        setDialog({ kind: 'warn', title: 'Visto mancante', text: 'Apporre il visto di conformità prima di trasmettere la bozza al Responsabile dell’istruttoria amministrativa.' })
         return
       }
       if (isPropostaContestazioneApprovedByRiAmm(base)) {
@@ -8120,35 +9045,67 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
   }
 
 
-  const findAttachmentForEmail = React.useCallback(async (matcher: (att: AmmAttachmentInfo) => boolean): Promise<AmmAttachmentInfo | null> => {
-    if (!active?.ds || oid == null || !Number.isFinite(Number(oid))) return null
-    try {
-      const layer = await resolveLayerForEdit(active.ds, active.layerUrl || (configuredDsState as any)?.layerUrl || getDataSourceUrl(configuredDs))
-      const layerUrl = normalizeEditLayerUrl(active.layerUrl || (configuredDsState as any)?.layerUrl || layer?.url || getDataSourceUrl(configuredDs))
-      const attachments = await queryAmmAttachments(layer, Number(oid), layerUrl)
-      return attachments.find(matcher) || null
-    } catch {
-      return null
-    }
+  const getEmailAttachmentContext = React.useCallback(async (): Promise<{ layer: any, layerUrl: string, attachments: AmmAttachmentInfo[] }> => {
+    if (!active?.ds || oid == null || !Number.isFinite(Number(oid))) throw new Error('Fonte dati o pratica non disponibile.')
+    const layer = await resolveLayerForEdit(active.ds, active.layerUrl || (configuredDsState as any)?.layerUrl || getDataSourceUrl(configuredDs))
+    const layerUrl = normalizeEditLayerUrl(active.layerUrl || (configuredDsState as any)?.layerUrl || layer?.url || getDataSourceUrl(configuredDs))
+    if (!layerUrl) throw new Error('URL del FeatureLayer non disponibile per gli allegati.')
+    const attachments = await queryAmmAttachments(layer, Number(oid), layerUrl)
+    return { layer, layerUrl, attachments }
   }, [active, configuredDs, configuredDsState, oid])
 
-  const buildAttachmentEmailUrl = React.useCallback(async (att: AmmAttachmentInfo | null): Promise<string> => {
-    if (!att || !oid || !Number.isFinite(Number(oid))) return ''
-    try {
-      const layer = await resolveLayerForEdit(active?.ds, active?.layerUrl || (configuredDsState as any)?.layerUrl || getDataSourceUrl(configuredDs))
-      const layerUrl = normalizeEditLayerUrl(active?.layerUrl || (configuredDsState as any)?.layerUrl || layer?.url || getDataSourceUrl(configuredDs))
-      if (!layerUrl) return ''
-      const raw = attachmentRawUrl(att, Number(oid), layerUrl)
-      const token = await getEsriTokenForUrl(layerUrl)
-      return `${raw}${token && !raw.includes('token=') ? `${raw.includes('?') ? '&' : '?'}token=${encodeURIComponent(token)}` : ''}`
-    } catch {
-      return String(att?.url || '')
+  const handlePrepareEmailProtocollo = React.useCallback(async () => {
+    if (!hasSelection || oid == null || !Number.isFinite(Number(oid))) {
+      setDialog({ kind: 'warn', title: 'Nessuna pratica selezionata', text: 'Selezionare una pratica prima di preparare l’e-mail.' })
+      return
     }
-  }, [active, configuredDs, configuredDsState, oid])
+    if (!canEdit) {
+      setDialog({ kind: 'warn', title: 'Scheda in sola lettura', text: 'Il profilo corrente può consultare la scheda, ma non predisporre l’e-mail di trasmissione al protocollo.' })
+      return
+    }
+    const base = buildBozzaDeterminazioneSource()
+    if (!isPropostaContestazioneApprovedByRiAmm(base)) {
+      setDialog({ kind: 'warn', title: 'Approvazione mancante', text: 'La trasmissione al protocollo è disponibile solo dopo l’approvazione della Proposta di contestazione da parte del Responsabile dell’istruttoria amministrativa.' })
+      return
+    }
+    if (hasAdminValue(pickAttrCI(base, ['protocollo_fascicolo_numero'])) && hasAdminValue(pickAttrCI(base, ['protocollo_fascicolo_data']))) {
+      setDialog({ kind: 'warn', title: 'Protocollo già registrato', text: 'Numero e data del protocollo fascicolo risultano già compilati. Non è necessario predisporre una nuova trasmissione al protocollo.' })
+      return
+    }
+
+    setSaving(true)
+    try {
+      const { layerUrl } = await getEmailAttachmentContext()
+      const numero = getReportCode(base, Number(oid))
+      const fascicolo = await buildProtocolloFascicoloEmailAttachment(base, layerFields, profile, Number(oid), active?.ds, layerUrl)
+      const subject = `Protocollazione fascicolo - Rapporto tecnico n. ${numero || '—'}`
+      const bodyLines = [
+        `Si trasmette in allegato il fascicolo relativo al Rapporto tecnico n. ${numero || '—'}, ai fini della protocollazione.`,
+        '',
+        'Cordiali saluti.'
+      ]
+      await downloadEmailDraftWithAttachments({
+        to: 'cbsm@cbsm.it',
+        subject,
+        body: bodyLines.join('\n'),
+        attachments: [fascicolo],
+        fileName: `email_protocollo_${String(numero || oid).replace(/[^a-zA-Z0-9_-]/g, '_')}.eml`
+      })
+      setDialog({ kind: 'ok', title: 'E-mail preparata', text: 'È stato generato un file .eml indirizzato a cbsm@cbsm.it con il fascicolo allegato. Aprirlo nel client di posta per verificarlo e inviarlo.' })
+    } catch (e: any) {
+      setDialog({ kind: 'err', title: 'Errore preparazione e-mail', text: e?.message || String(e) })
+    } finally {
+      setSaving(false)
+    }
+  }, [active, buildBozzaDeterminazioneSource, canEdit, getEmailAttachmentContext, hasSelection, layerFields, oid, profile])
 
   const handlePrepareEmailDirettore = React.useCallback(async () => {
     if (!hasSelection || oid == null || !Number.isFinite(Number(oid))) {
       setDialog({ kind: 'warn', title: 'Nessuna pratica selezionata', text: 'Selezionare una pratica prima di preparare l’e-mail.' })
+      return
+    }
+    if (!canEdit) {
+      setDialog({ kind: 'warn', title: 'Scheda in sola lettura', text: 'Il profilo corrente può consultare la scheda, ma non predisporre l’e-mail al Direttore.' })
       return
     }
     const base = buildBozzaDeterminazioneSource()
@@ -8160,33 +9117,44 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
       setDialog({ kind: 'warn', title: 'Protocollo fascicolo incompleto', text: 'Registrare numero e data del protocollo fascicolo prima di predisporre l’e-mail al Direttore.' })
       return
     }
-    const bozzaAtt = await findAttachmentForEmail(isBozzaDeterminazioneWordAttachment)
-    if (!bozzaAtt) {
-      setDialog({ kind: 'warn', title: 'Bozza non caricata', text: 'Caricare la bozza definitiva della determinazione prima di predisporre l’e-mail al Direttore.' })
-      return
-    }
-    const propostaAtt = await findAttachmentForEmail(isPropostaContestazionePdfAttachment)
-    const bozzaUrl = await buildAttachmentEmailUrl(bozzaAtt)
-    const propostaUrl = await buildAttachmentEmailUrl(propostaAtt)
-    const numero = getReportCode(base, Number(oid))
-    const to = String(pickAttrCI(base, ['da_email', 'direttore_area_email', 'direttore_amm_email', 'email_da']) || '').trim()
-    const subject = `Bozza di determinazione - Rapporto tecnico n. ${numero || '—'}`
-    const bodyLines = [
-      `Si trasmette, per le valutazioni di competenza, la bozza di determinazione relativa al Rapporto tecnico n. ${numero || '—'}.`,
-      '',
-      'Documenti della pratica:',
-      bozzaUrl ? `- Bozza di determinazione: ${bozzaUrl}` : `- Bozza di determinazione: ${bozzaAtt.name || 'allegata alla pratica'}`,
-      propostaUrl ? `- Proposta di contestazione: ${propostaUrl}` : '- Proposta di contestazione: allegata alla pratica',
-      '',
-      'Cordiali saluti.'
-    ]
-    const mailtoUrl = `mailto:${encodeURIComponent(to)}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(bodyLines.join('\n'))}`
+
+    setSaving(true)
     try {
-      window.location.href = mailtoUrl
+      const { layerUrl, attachments } = await getEmailAttachmentContext()
+      const bozzaAtt = attachments.find(isBozzaDeterminazioneWordAttachment) || null
+      if (!bozzaAtt) {
+        setDialog({ kind: 'warn', title: 'Bozza non caricata', text: 'Caricare la bozza definitiva della determinazione prima di predisporre l’e-mail al Direttore.' })
+        return
+      }
+      const propostaAtt = attachments.find(isPropostaContestazionePdfAttachment) || null
+      const emailAttachments: EmailDraftAttachment[] = [await buildEmailAttachmentFromAmmAttachment(bozzaAtt, Number(oid), layerUrl)]
+      if (propostaAtt) {
+        emailAttachments.push(await buildEmailAttachmentFromAmmAttachment(propostaAtt, Number(oid), layerUrl))
+      } else {
+        const proposta = await buildVerbalePdfBlob(base, layerFields, profile)
+        emailAttachments.push({ blob: proposta.blob, fileName: proposta.fileName, contentType: 'application/pdf' })
+      }
+      const numero = getReportCode(base, Number(oid))
+      const subject = `Bozza di determinazione - Rapporto tecnico n. ${numero || '—'}`
+      const bodyLines = [
+        `Si trasmette in allegato, per le valutazioni di competenza, la bozza di determinazione relativa al Rapporto tecnico n. ${numero || '—'}.`,
+        '',
+        'Cordiali saluti.'
+      ]
+      await downloadEmailDraftWithAttachments({
+        to: 'marianna.marras@cbsm.it',
+        subject,
+        body: bodyLines.join('\n'),
+        attachments: emailAttachments,
+        fileName: `email_direttore_${String(numero || oid).replace(/[^a-zA-Z0-9_-]/g, '_')}.eml`
+      })
+      setDialog({ kind: 'ok', title: 'E-mail preparata', text: 'È stato generato un file .eml indirizzato a marianna.marras@cbsm.it con gli allegati inclusi. Aprirlo nel client di posta per verificarlo e inviarlo.' })
     } catch (e: any) {
       setDialog({ kind: 'err', title: 'Errore preparazione e-mail', text: e?.message || String(e) })
+    } finally {
+      setSaving(false)
     }
-  }, [buildAttachmentEmailUrl, buildBozzaDeterminazioneSource, findAttachmentForEmail, hasSelection, oid])
+  }, [buildBozzaDeterminazioneSource, canEdit, getEmailAttachmentContext, hasSelection, layerFields, oid, profile])
 
   const handleSave = async () => {
     if (!hasSelection || oid == null || !Number.isFinite(Number(oid))) {
@@ -8588,6 +9556,7 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
                     onDeleteBozzaDeterminazione={handleDeleteBozzaDeterminazione}
                     onTransmitBozzaDeterminazioneRiAmm={handleTransmitBozzaDeterminazioneRiAmm}
                     onPrepareEmailDirettore={handlePrepareEmailDirettore}
+                    onPrepareEmailProtocollo={handlePrepareEmailProtocollo}
                     oid={oid != null && Number.isFinite(Number(oid)) ? Number(oid) : null}
                     ds={(active as any)?.ds}
                     layerUrl={(active as any)?.layerUrl || (configuredDsState as any)?.layerUrl || getDataSourceUrl(configuredDs)}

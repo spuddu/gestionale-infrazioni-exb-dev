@@ -568,43 +568,6 @@ async function addMapPage (pdf: PDFDocument, capture: MapCaptureResult, point: {
   page.drawText('Nord geografico in alto. Scala e posizione derivate dalla vista GIS al momento della generazione.', { x: MARGIN, y: 78, size: 8.5, font: regular, color: rgb(0.38, 0.42, 0.48) })
 }
 
-function readExifOrientation (bytes: Uint8Array): number {
-  try {
-    if (!bytes || bytes.length < 12 || bytes[0] !== 0xFF || bytes[1] !== 0xD8) return 1
-    let offset = 2
-    while (offset + 4 < bytes.length) {
-      if (bytes[offset] !== 0xFF) break
-      const marker = bytes[offset + 1]
-      const len = (bytes[offset + 2] << 8) + bytes[offset + 3]
-      if (marker === 0xE1 && len >= 10) {
-        const start = offset + 4
-        const exif = 'Exif\0\0'
-        let ok = true
-        for (let i = 0; i < exif.length; i++) ok = ok && bytes[start + i] === exif.charCodeAt(i)
-        if (!ok) return 1
-        const tiff = start + 6
-        const little = bytes[tiff] === 0x49 && bytes[tiff + 1] === 0x49
-        const read16 = (p: number) => little ? (bytes[p] + (bytes[p + 1] << 8)) : ((bytes[p] << 8) + bytes[p + 1])
-        const read32 = (p: number) => little
-          ? (bytes[p] + (bytes[p + 1] << 8) + (bytes[p + 2] << 16) + (bytes[p + 3] << 24))
-          : ((bytes[p] << 24) + (bytes[p + 1] << 16) + (bytes[p + 2] << 8) + bytes[p + 3])
-        const ifd = tiff + read32(tiff + 4)
-        const count = read16(ifd)
-        for (let i = 0; i < count; i++) {
-          const entry = ifd + 2 + i * 12
-          if (read16(entry) === 0x0112) {
-            const val = read16(entry + 8)
-            return val >= 1 && val <= 8 ? val : 1
-          }
-        }
-        return 1
-      }
-      offset += 2 + len
-    }
-  } catch {}
-  return 1
-}
-
 function loadHtmlImage (url: string): Promise<HTMLImageElement> {
   return new Promise((resolve, reject) => {
     const img = new Image()
@@ -623,59 +586,45 @@ function blobToBytes (blob: Blob): Promise<Uint8Array> {
   })
 }
 
-async function normalizeImageBytesForPdf (bytes: Uint8Array, mime: string, orientation: number): Promise<Uint8Array | null> {
+async function normalizeImageBytesForPdf (bytes: Uint8Array, mime: string): Promise<Uint8Array | null> {
   if (typeof document === 'undefined' || typeof URL === 'undefined') return null
+  let source: any = null
   let objectUrl = ''
+  let closeSource = () => {}
   try {
     const blob = new Blob([bytes as any], { type: mime || 'image/jpeg' })
-    objectUrl = URL.createObjectURL(blob)
-    const img = await loadHtmlImage(objectUrl)
-    const srcW = img.naturalWidth || img.width
-    const srcH = img.naturalHeight || img.height
+    const createBitmap = (window as any)?.createImageBitmap
+    if (typeof createBitmap === 'function') {
+      source = await createBitmap(blob, { imageOrientation: 'from-image' }).catch((): null => null)
+      if (source) closeSource = () => { try { source.close?.() } catch {} }
+    }
+    if (!source) {
+      objectUrl = URL.createObjectURL(blob)
+      source = await loadHtmlImage(objectUrl).catch((): null => null)
+      closeSource = () => { try { if (objectUrl) URL.revokeObjectURL(objectUrl) } catch {} }
+    }
+    if (!source) return null
+
+    const srcW = Math.max(1, Math.round(Number(source.width || source.naturalWidth) || 0))
+    const srcH = Math.max(1, Math.round(Number(source.height || source.naturalHeight) || 0))
     if (!srcW || !srcH) return null
 
-    const rotate90 = orientation === 5 || orientation === 6 || orientation === 7 || orientation === 8
-    const outW0 = rotate90 ? srcH : srcW
-    const outH0 = rotate90 ? srcW : srcH
     const maxPx = 2200
-    const scale = Math.min(1, maxPx / Math.max(outW0, outH0))
-    const outW = Math.max(1, Math.round(outW0 * scale))
-    const outH = Math.max(1, Math.round(outH0 * scale))
+    const scale = Math.min(1, maxPx / Math.max(srcW, srcH))
+    const outW = Math.max(1, Math.round(srcW * scale))
+    const outH = Math.max(1, Math.round(srcH * scale))
     const canvas = document.createElement('canvas')
     canvas.width = outW
     canvas.height = outH
     const ctx = canvas.getContext('2d')
     if (!ctx) return null
-    ctx.save()
-    ctx.scale(scale, scale)
-    switch (orientation) {
-      case 2:
-        ctx.translate(srcW, 0); ctx.scale(-1, 1); break
-      case 3:
-        ctx.translate(srcW, srcH); ctx.rotate(Math.PI); break
-      case 4:
-        ctx.translate(0, srcH); ctx.scale(1, -1); break
-      case 5:
-        ctx.rotate(0.5 * Math.PI); ctx.scale(1, -1); break
-      case 6:
-        ctx.translate(srcH, 0); ctx.rotate(0.5 * Math.PI); break
-      case 7:
-        ctx.translate(srcH, srcW); ctx.rotate(0.5 * Math.PI); ctx.scale(-1, 1); break
-      case 8:
-        ctx.translate(0, srcW); ctx.rotate(-0.5 * Math.PI); break
-      default:
-        break
-    }
-    ctx.drawImage(img, 0, 0)
-    ctx.restore()
+    ctx.drawImage(source, 0, 0, srcW, srcH, 0, 0, outW, outH)
     const outBlob: Blob | null = await new Promise(resolve => canvas.toBlob(resolve, 'image/png', 0.92))
     return outBlob ? await blobToBytes(outBlob) : null
   } catch {
     return null
   } finally {
-    if (objectUrl) {
-      try { URL.revokeObjectURL(objectUrl) } catch {}
-    }
+    closeSource()
   }
 }
 
@@ -687,8 +636,7 @@ async function addImageAttachmentPage (pdf: PDFDocument, att: AttachmentPayload,
   const ct = String(att.contentType || '').toLowerCase()
   const name = String(att.name || '').toLowerCase()
   const isJpeg = ct.includes('jpeg') || ct.includes('jpg') || /\.jpe?g$/i.test(name)
-  const orientation = isJpeg ? readExifOrientation(att.bytes) : 1
-  const normalizedBytes = await normalizeImageBytesForPdf(att.bytes, isJpeg ? 'image/jpeg' : 'image/png', orientation)
+  const normalizedBytes = await normalizeImageBytesForPdf(att.bytes, isJpeg ? 'image/jpeg' : 'image/png')
   const image = normalizedBytes
     ? await pdf.embedPng(normalizedBytes)
     : ((ct.includes('png') || name.endsWith('.png')) ? await pdf.embedPng(att.bytes) : await pdf.embedJpg(att.bytes))
@@ -701,7 +649,7 @@ async function addImageAttachmentPage (pdf: PDFDocument, att: AttachmentPayload,
   const y = 50 + (maxH - boxH) / 2
   page.drawRectangle({ x: x - 1, y: y - 1, width: boxW + 2, height: boxH + 2, borderColor: rgb(0.78, 0.82, 0.88), borderWidth: 0.8 })
   page.drawImage(image, { x, y, width: boxW, height: boxH })
-  page.drawText(orientation !== 1 ? `Orientamento EXIF normalizzato (${orientation}).` : 'Orientamento immagine: standard.', {
+  page.drawText('Orientamento immagine coerente con il viewer allegati.', {
     x: MARGIN,
     y: 34,
     size: 8.5,

@@ -18,6 +18,9 @@ export type GiiAttachmentViewerItem = {
   lastEditDate?: number
   editDate?: number
   uploadedAt?: number
+  groupTitle?: string
+  readOnly?: boolean
+  readOnlyReason?: string
 }
 
 export type GiiAttachmentKind = 'technical' | 'administrative' | 'bozza-determinazione' | 'proposta-contestazione'
@@ -350,25 +353,69 @@ function withPdfPreviewCompanions<T extends GiiAttachmentViewerItem> (items: T[]
     })
 }
 
+type AttachmentActionIconName = 'open' | 'replace' | 'delete' | 'upload'
+
+function AttachmentActionIcon (props: { name: AttachmentActionIconName, size?: number }): React.ReactElement {
+  const size = Number(props.size || 22)
+  if (props.name === 'upload') {
+    return (
+      <svg width={size} height={size} viewBox='0 0 24 24' fill='none' stroke='currentColor' strokeWidth='2' strokeLinecap='round' strokeLinejoin='round' aria-hidden='true' focusable='false'>
+        <path d='M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4'/>
+        <path d='M17 8l-5-5-5 5'/>
+        <path d='M12 3v12'/>
+      </svg>
+    )
+  }
+  if (props.name === 'delete') {
+    return (
+      <svg width={size} height={size} viewBox='0 0 24 24' fill='none' stroke='currentColor' strokeWidth='2' strokeLinecap='round' strokeLinejoin='round' aria-hidden='true' focusable='false'>
+        <path d='M3 6h18'/>
+        <path d='M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2'/>
+        <path d='M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6'/>
+        <path d='M10 11v6'/>
+        <path d='M14 11v6'/>
+      </svg>
+    )
+  }
+  if (props.name === 'replace') {
+    return (
+      <svg width={size} height={size} viewBox='0 0 24 24' fill='none' stroke='currentColor' strokeWidth='2' strokeLinecap='round' strokeLinejoin='round' aria-hidden='true' focusable='false'>
+        <polyline points='17 1 21 5 17 9'/>
+        <path d='M3 11V9a4 4 0 0 1 4-4h14'/>
+        <polyline points='7 23 3 19 7 15'/>
+        <path d='M21 13v2a4 4 0 0 1-4 4H3'/>
+      </svg>
+    )
+  }
+  return (
+    <svg width={size} height={size} viewBox='0 0 24 24' fill='none' stroke='currentColor' strokeWidth='2' strokeLinecap='round' strokeLinejoin='round' aria-hidden='true' focusable='false'>
+      <path d='M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4'/>
+      <path d='M7 10l5 5 5-5'/>
+      <path d='M12 15V3'/>
+    </svg>
+  )
+}
+
 function buttonStyle (opts?: { danger?: boolean, disabled?: boolean }): React.CSSProperties {
   const disabled = !!opts?.disabled
   const danger = !!opts?.danger
   return {
-    fontSize: 12,
-    fontWeight: 700,
-    color: disabled ? '#9ca3af' : (danger ? '#d92d20' : '#1d4ed8'),
+    width: 38,
+    height: 36,
+    padding: 0,
+    boxSizing: 'border-box',
+    color: disabled ? '#9ca3af' : (danger ? '#b91c1c' : '#2563eb'),
     whiteSpace: 'nowrap',
-    background: disabled ? '#e5e7eb' : '#f8fbff',
-    border: danger ? '1px solid rgba(217,45,32,0.24)' : '1px solid rgba(29,78,216,0.18)',
+    background: disabled ? '#e5e7eb' : '#ffffff',
+    border: disabled ? '2px solid #e5e7eb' : (danger ? '2px solid rgba(185,28,28,0.72)' : '2px solid rgba(37,99,235,0.72)'),
     borderRadius: 8,
-    padding: '6px 10px',
     cursor: disabled ? 'not-allowed' : 'pointer',
     opacity: disabled ? 0.6 : 1,
     display: 'inline-flex',
     alignItems: 'center',
     justifyContent: 'center',
-    boxSizing: 'border-box',
-    lineHeight: 'normal'
+    flex: '0 0 auto',
+    lineHeight: 1
   }
 }
 
@@ -380,7 +427,6 @@ export default function GiiAttachmentViewer<T extends GiiAttachmentViewerItem = 
   const oidAvailable = props.oidAvailable !== false
   const formatBytes = props.formatBytes || defaultFormatBytes
   const labelFontSize = Number(props.labelFontSize ?? 12)
-  const headerFontSize = Number(props.headerFontSize ?? 14)
   const borderRadius = Number(props.borderRadius ?? 10)
   const [internalSelectedId, setInternalSelectedId] = React.useState<number | string | null>(props.selectedItemId ?? null)
   const selectedId = props.selectedItemId !== undefined ? props.selectedItemId : internalSelectedId
@@ -469,14 +515,23 @@ export default function GiiAttachmentViewer<T extends GiiAttachmentViewerItem = 
   }, [])
 
   const disabledEdit = !canEdit || busy
+  const itemEditDisabled = React.useCallback((item: T | null | undefined): boolean => {
+    return disabledEdit || !!(item as any)?.readOnly
+  }, [disabledEdit])
+
+  const itemReadOnlyReason = React.useCallback((item: T | null | undefined): string => {
+    return String((item as any)?.readOnlyReason || '').trim()
+  }, [])
+
   const selectedCanRotate = !!selected && isRotatableImageAttachment(selected)
   const usesExternalRotation = props.rotationDeg !== undefined || !!props.onRotateLeft || !!props.onRotateRight || !!props.onConfirmRotation
   const effectiveRotationDeg = usesExternalRotation ? Number(props.rotationDeg || 0) : internalRotationDeg
   const normalizedRotationDeg = ((Math.round(effectiveRotationDeg / 90) * 90) % 360 + 360) % 360
   const effectiveRotationBusy = !!props.rotationBusy || internalRotationBusy
   const canConfirmExternalRotation = !!props.onConfirmRotation && !!props.canConfirmRotation
-  const canConfirmInternalRotation = !props.onConfirmRotation && !!props.onReplace && canEdit && normalizedRotationDeg !== 0
+  const canConfirmInternalRotation = !props.onConfirmRotation && !!props.onReplace && canEdit && !itemEditDisabled(selected) && normalizedRotationDeg !== 0
   const confirmRotationDisabled = effectiveRotationBusy || normalizedRotationDeg === 0 || !(canConfirmExternalRotation || canConfirmInternalRotation)
+  const uploadTitle = String(props.uploadLabel || 'Carica allegato')
 
   const rotateLeft = React.useCallback(() => {
     if (!selectedCanRotate) return
@@ -512,10 +567,6 @@ export default function GiiAttachmentViewer<T extends GiiAttachmentViewerItem = 
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', minHeight: '100%', height: '100%', border: `1px solid ${props.headerBorderColor || '#c5d9f1'}`, borderRadius, background: '#fff', overflow: 'hidden' }}>
-      <div style={{ flex: '0 0 auto', padding: '8px 12px', background: props.headerBg || '#0d3b66', color: props.headerColor || '#fff', fontWeight: 800, fontSize: headerFontSize, letterSpacing: 0.25, textTransform: 'uppercase' }}>
-        {props.title || 'ALLEGATI'}
-      </div>
-
       {!oidAvailable ? (
         <div style={{ flex: '1 1 auto', minHeight: 0, padding: 12, color: '#6b7280', fontSize: labelFontSize }}>
           {props.noOidMessage || 'Selezionare una pratica prima di consultare o caricare gli allegati.'}
@@ -526,8 +577,8 @@ export default function GiiAttachmentViewer<T extends GiiAttachmentViewerItem = 
             <div style={{ flex: '0 0 auto', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, flexWrap: 'wrap' }}>
               <div style={{ fontWeight: 800, fontSize: Math.max(13, labelFontSize), color: props.innerHeaderColor || '#0f4c81' }}>Elenco allegati</div>
               {props.onUpload && (
-                <label style={{ minHeight: 36, height: 36, boxSizing: 'border-box', padding: '0 14px', borderRadius: 10, border: '1px solid rgba(0,0,0,0.12)', background: disabledEdit ? '#e5e7eb' : '#f8fbff', color: disabledEdit ? '#9ca3af' : '#111827', fontSize: labelFontSize, fontWeight: 600, cursor: disabledEdit ? 'not-allowed' : 'pointer', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', lineHeight: 1, whiteSpace: 'nowrap' }}>
-                  {props.uploadLabel || 'Scegli file'}
+                <label title={uploadTitle} aria-label={uploadTitle} style={{ width: 38, height: 36, minHeight: 36, boxSizing: 'border-box', padding: 0, borderRadius: 8, border: disabledEdit ? '2px solid #e5e7eb' : '2px solid rgba(37,99,235,0.72)', background: disabledEdit ? '#e5e7eb' : '#ffffff', color: disabledEdit ? '#9ca3af' : '#2563eb', fontSize: labelFontSize, fontWeight: 600, cursor: disabledEdit ? 'not-allowed' : 'pointer', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', lineHeight: 1, whiteSpace: 'nowrap', flex: '0 0 auto', opacity: disabledEdit ? 0.6 : 1 }}>
+                  <AttachmentActionIcon name='upload' />
                   <input
                     key={props.uploadInputKey}
                     type='file'
@@ -588,30 +639,44 @@ export default function GiiAttachmentViewer<T extends GiiAttachmentViewerItem = 
               <div style={{ flex: '1 1 auto', minHeight: 0, overflowY: 'auto', display: 'grid', alignContent: 'start', gap: 8, paddingRight: 2, gridAutoRows: 'max-content' }}>
                 {items.map((att, idx) => {
                   const active = selected?.id != null && String(selected.id) === String(att.id)
-                  return (
+                  const itemDisabled = itemEditDisabled(att)
+                  const groupTitle = String((att as any)?.groupTitle || '').trim()
+                  const previousGroupTitle = idx > 0 ? String((items[idx - 1] as any)?.groupTitle || '').trim() : ''
+                  const showGroupTitle = !!groupTitle && groupTitle !== previousGroupTitle
+                  const row = (
                     <div key={String(att.id)} onClick={() => setSelected(att)} style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) auto', alignItems: 'start', columnGap: 10, border: `1px solid ${active ? '#2563eb' : 'rgba(0,0,0,0.08)'}`, background: active ? '#eff6ff' : '#fff', borderRadius: 10, padding: '8px 10px', cursor: 'pointer', transition: 'all 0.15s' }}>
                       <div style={{ minWidth: 0 }}>
                         <div style={{ fontWeight: 700, fontSize: labelFontSize, color: '#111827', wordBreak: 'break-word', overflowWrap: 'anywhere' }}>{att.name || `Allegato ${idx + 1}`}</div>
                         {formatBytes(att.size) && <div style={{ fontSize: Math.max(11, labelFontSize - 1), color: '#64748b' }}>{formatBytes(att.size)}</div>}
+                        {(att as any)?.readOnly && itemReadOnlyReason(att) && <div style={{ marginTop: 3, fontSize: Math.max(10, labelFontSize - 2), color: '#64748b', fontWeight: 600 }}>{itemReadOnlyReason(att)}</div>}
                       </div>
                       <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'nowrap', justifyContent: 'flex-end', alignSelf: 'start', whiteSpace: 'nowrap' }}>
                         {props.onOpen && (
-                          <button type='button' onClick={e => { e.preventDefault(); e.stopPropagation(); void props.onOpen?.(att) }} style={buttonStyle()}>
-                            Apri
+                          <button type='button' title='Apri o scarica allegato' aria-label='Apri o scarica allegato' onClick={e => { e.preventDefault(); e.stopPropagation(); void props.onOpen?.(att) }} style={buttonStyle()}>
+                            <AttachmentActionIcon name='open' />
                           </button>
                         )}
                         {props.onReplace && (
-                          <button type='button' disabled={disabledEdit} onClick={e => { e.preventDefault(); e.stopPropagation(); if (disabledEdit) return; replaceTargetRef.current = att; window.setTimeout(() => { try { replaceInputRef.current?.click() } catch {} }, 0) }} style={buttonStyle({ disabled: disabledEdit })}>
-                            Sostituisci
+                          <button type='button' title='Sostituisci allegato' aria-label='Sostituisci allegato' disabled={itemDisabled} onClick={e => { e.preventDefault(); e.stopPropagation(); if (itemDisabled) return; replaceTargetRef.current = att; window.setTimeout(() => { try { replaceInputRef.current?.click() } catch {} }, 0) }} style={buttonStyle({ disabled: itemDisabled })}>
+                            <AttachmentActionIcon name='replace' />
                           </button>
                         )}
                         {props.onDelete && (
-                          <button type='button' disabled={disabledEdit} onClick={e => { e.preventDefault(); e.stopPropagation(); if (disabledEdit) return; void props.onDelete?.(att) }} style={buttonStyle({ danger: true, disabled: disabledEdit })}>
-                            Elimina
+                          <button type='button' title='Elimina allegato' aria-label='Elimina allegato' disabled={itemDisabled} onClick={e => { e.preventDefault(); e.stopPropagation(); if (itemDisabled) return; void props.onDelete?.(att) }} style={buttonStyle({ danger: true, disabled: itemDisabled })}>
+                            <AttachmentActionIcon name='delete' />
                           </button>
                         )}
                       </div>
                     </div>
+                  )
+                  if (!showGroupTitle) return row
+                  return (
+                    <React.Fragment key={`grp-${groupTitle}-${String(att.id)}`}>
+                      <div style={{ marginTop: idx === 0 ? 0 : 6, padding: '5px 8px', borderRadius: 8, background: '#eef4fb', color: props.innerHeaderColor || '#0f4c81', fontSize: Math.max(11, labelFontSize - 1), fontWeight: 900, textTransform: 'uppercase', letterSpacing: 0.25 }}>
+                        {groupTitle}
+                      </div>
+                      {row}
+                    </React.Fragment>
                   )
                 })}
               </div>

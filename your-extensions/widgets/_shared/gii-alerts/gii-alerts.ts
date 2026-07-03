@@ -717,6 +717,40 @@ function isTakeChargeState (value: any): boolean {
   return s.includes('DA_PRENDERE_IN_CARICO') || s.includes('DA_PRENDERE') || s.includes('PRESA_DA_FARE')
 }
 
+function isBozzaDeterminazioneTrasmessaRiAmmForAlerts (data: Record<string, any>): boolean {
+  const stato = normalizeAlertCode(attr(data, ['determinazione_stato', 'DETERMINAZIONE_STATO']))
+  if (stato === 'TRASMESSA_RI_AMM' || stato === 'BOZZA_TRASMESSA_RI_AMM') return true
+
+  // Fallback per viste/allarmi che non espongono determinazione_stato: dopo la
+  // trasmissione della bozza al Responsabile il nodo RI_AMM è aperto (stato/presa
+  // 1 o 2) e il nodo TI_AMM è chiuso con esito conforme. Il solo visto TI_AMM
+  // imposta invece RI_AMM a 4/null e non deve generare attività operativa.
+  const statoRiAmm = normalizeAlertCode(attr(data, ['stato_RI_AMM', 'STATO_RI_AMM']))
+  const presaRiAmm = normalizeAlertCode(attr(data, ['presa_in_carico_RI_AMM', 'PRESA_IN_CARICO_RI_AMM']))
+  const statoTiAmm = normalizeAlertCode(attr(data, ['stato_TI_AMM', 'STATO_TI_AMM']))
+  const esitoTiAmm = normalizeAlertCode(attr(data, ['esito_TI_AMM', 'ESITO_TI_AMM']))
+  const riAmmOpen = statoRiAmm === '1' || statoRiAmm === '2' || presaRiAmm === '1' || presaRiAmm === '2'
+  const tiAmmClosedConforme = (statoTiAmm === '4' || statoTiAmm === 'APPROVATA' || statoTiAmm === 'TRASMESSO') && (esitoTiAmm === '2' || esitoTiAmm === 'APPROVATA' || esitoTiAmm === 'CONFORME')
+  return riAmmOpen && tiAmmClosedConforme
+}
+
+function isVistoTiAmmOnlyBeforeBozzaForAlerts (data: Record<string, any>): boolean {
+  const esitoTiAmm = normalizeAlertCode(attr(data, ['esito_TI_AMM', 'ESITO_TI_AMM']))
+  if (esitoTiAmm !== '2' && esitoTiAmm !== 'APPROVATA' && esitoTiAmm !== 'CONFORME') return false
+  return !isBozzaDeterminazioneTrasmessaRiAmmForAlerts(data)
+}
+
+function isStaleTiAmmAttestationCurrentActivity (row: Record<string, any>): boolean {
+  const tipo = normalizeAlertCode(attr(row, ['tipo_attivita']))
+  const dest = normalizeAlertCode(attr(row, ['destinatario_ruolo']))
+  const subtipo = normalizeAlertCode(attr(row, ['sottotipo_attivita']))
+  const origine = normalizeAlertCode(attr(row, ['origine_evento']))
+  const titolo = normalizeAlertCode(attr(row, ['titolo']))
+  return tipo === 'PRESA_IN_CARICO' &&
+    dest === 'RI_AMM' &&
+    (subtipo === 'ATTESTAZIONE_CONFORMITA_TI_AMM' || origine === 'ATTESTAZIONE_CONFORMITA' || titolo.includes('ATTESTAZIONE_DI_CONFORMITA'))
+}
+
 function takeChargeConfigForRole (roleAreaKey: string): { tipo: GiiAlertType, fieldNames: string[], title: string } | null {
   switch (roleAreaKey) {
     case 'TI_AMM': return { tipo: 'PRESA_IN_CARICO_TI_AMM', fieldNames: ['stato_TI_AMM'], title: 'Pratica da prendere in carico' }
@@ -740,6 +774,8 @@ function computeTakeChargeAlert (data: Record<string, any>, options?: { user?: G
   const roleAreaKey = roleAreaKeyForAlerts(data, options)
   const cfg = takeChargeConfigForRole(roleAreaKey)
   if (!cfg) return null
+
+  if (roleAreaKey === 'RI_AMM' && isVistoTiAmmOnlyBeforeBozzaForAlerts(data)) return null
 
   const state = attr(data, cfg.fieldNames)
   const hasExplicitState = state !== null && state !== undefined && String(state).trim() !== ''
@@ -1248,6 +1284,8 @@ function currentActivityToAlert (row: Record<string, any>): GiiAlertItem | null 
   const rawGlobalId = String(attr(row, ['GlobalID', 'globalid']) || '').trim()
   const keyBase = parentGlobalId || rawGlobalId || chiave
   if (!keyBase) return null
+
+  if (isStaleTiAmmAttestationCurrentActivity(row)) return null
 
   const tipoAttivita = String(attr(row, ['tipo_attivita']) || '').trim().toUpperCase()
   const isInformativa = tipoAttivita === 'INFORMATIVA'
