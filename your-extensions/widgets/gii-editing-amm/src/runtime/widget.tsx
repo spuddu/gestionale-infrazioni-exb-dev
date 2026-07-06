@@ -1,10 +1,12 @@
 /** @jsx jsx */
 /** @jsxFrag React.Fragment */
 import { React, jsx, type AllWidgetProps, DataSourceComponent, UrlManager, getAppStore } from 'jimu-core'
-import { buildPropostaContestazionePdf as buildVerbalePdf, getPropostaContestazionePdfFilePrefix as getVerbalePdfFilePrefix } from '../../../_shared/gii-anteprime/documenti-amministrativi/proposta-contestazione/proposta-contestazione-pdf-builder'
+import { buildVerbalePdfBlob } from '../../../_shared/gii-anteprime/documenti-amministrativi/proposta-contestazione/proposta-contestazione-data-map'
 import { buildBozzaDeterminazioneDocx, getBozzaDeterminazioneDocxFileName } from '../../../_shared/gii-anteprime/documenti-amministrativi/bozza-determinazione/bozza-determinazione-docx-builder'
 import { buildBozzaDeterminazionePdf } from '../../../_shared/gii-anteprime/documenti-amministrativi/bozza-determinazione/bozza-determinazione-pdf-builder'
 import { buildRapportoPdf, buildRapportoIterPlaceholders, loadRapportoIterCicliForPdf, type RapportoIterCicloPdf, type UtenteCacheEntry } from '../../../_shared/gii-anteprime/documenti-tecnici/rapporto/rapporto-pdf-builder'
+import { buildPlaceholderMap } from '../../../_shared/gii-anteprime/documenti-tecnici/rapporto/rapporto-placeholder-map'
+import { applyNotaSpeseToRapportoMap, buildArt30RapportoSummary } from '../../../_shared/gii-anteprime/documenti-tecnici/rapporto/rapporto-nota-spese-summary'
 import { buildNotaSpesePdf, type NotaSpeseData } from '../../../_shared/gii-anteprime/documenti-tecnici/rapporto/notaspese-pdf-builder'
 import { defaultGiiDocumentPrintOptions as defaultDocumentPrintOptions, cloneGiiDocumentPrintOptions as cloneDocumentPrintOptions, setGiiAttachmentPrintOptionVisible } from '../../../_shared/gii-anteprime/viewer-documenti/document-options'
 import type { GiiDocumentPrintOptions as DocumentPrintOptions, GiiAttachmentPrintOption as AttachmentPrintOption, GiiNotaSpesePrintOption as NotaSpesePrintOption } from '../../../_shared/gii-anteprime/viewer-documenti/document-options'
@@ -1544,6 +1546,86 @@ function normalizeEditLayerUrl (raw: any): string {
   if (!url) return ''
   if (/(\/FeatureServer|\/MapServer)$/i.test(url)) url = `${url}/0`
   return url
+}
+
+// Cache condivisa "record selezionato" (stesso pattern di gii-editing-ti / gii-azioni).
+// Necessaria perché gii-azioni, quando genera i documenti, legge da qui invece di
+// rifare sempre una query fresca: se questo widget non la aggiorna al salvataggio,
+// gli altri widget continuano a vedere la versione precedente del record.
+type SelectedFeatureCacheEntry = {
+  layerUrl: string
+  oid: number
+  idFieldName: string
+  data: any
+  ts: number
+  source: 'edit' | 'list' | 'detail' | 'azioni'
+}
+
+function getSelectedFeatureCacheBucket (): Record<string, SelectedFeatureCacheEntry> {
+  try {
+    const w: any = window as any
+    w.__giiSelectedFeatureCache = w.__giiSelectedFeatureCache || {}
+    return w.__giiSelectedFeatureCache
+  } catch {
+    return {}
+  }
+}
+
+function getSelectedFeatureCacheKey (layerUrl: string, oid: any): string {
+  return `${String(layerUrl || '').trim()}::${Number(oid)}`
+}
+
+function writeSelectedFeatureCache (
+  layerUrl: string,
+  oid: any,
+  idFieldName: string,
+  data: any,
+  source: 'edit' | 'list' | 'detail' | 'azioni'
+): SelectedFeatureCacheEntry | null {
+  try {
+    const oidNum = Number(oid)
+    const url = String(layerUrl || '').trim()
+    if (!url || !Number.isFinite(oidNum) || !data || typeof data !== 'object') return null
+    const key = getSelectedFeatureCacheKey(url, oidNum)
+    const bucket = getSelectedFeatureCacheBucket()
+    const prev: any = bucket[key]
+    const now = Date.now()
+    const holdMs = 15000
+    let nextData = { ...(data || {}) }
+    let nextSource: 'edit' | 'list' | 'detail' | 'azioni' = source
+    let nextTs = now
+    if (prev && prev.source === 'edit' && source !== 'edit' && (now - Number(prev.ts || 0) < holdMs)) {
+      nextData = { ...(data || {}), ...(prev.data || {}) }
+      nextSource = 'edit'
+      nextTs = Number(prev.ts || now)
+    }
+    const next: SelectedFeatureCacheEntry = {
+      layerUrl: url,
+      oid: oidNum,
+      idFieldName: String(idFieldName || prev?.idFieldName || 'OBJECTID') || 'OBJECTID',
+      data: nextData,
+      ts: nextTs,
+      source: nextSource
+    }
+    bucket[key] = next
+    return next
+  } catch {
+    return null
+  }
+}
+
+function invalidateRuntimeProxyCache (layerUrl?: string | null) {
+  try {
+    const url = String(layerUrl || '').trim()
+    if (!url) {
+      try { delete (window as any).__giiRuntimeDsProxyCache } catch {}
+      return
+    }
+    try {
+      const bucket = (window as any).__giiRuntimeDsProxyCache
+      if (bucket && typeof bucket === 'object') delete bucket[url]
+    } catch {}
+  } catch {}
 }
 
 const EDIT_LAYER_CACHE: Record<string, any> = {}
@@ -6285,155 +6367,6 @@ function AmmWorkflowText (props: { text: string }) {
   )
 }
 
-function buildVerbaleViolationsText (data: any, fields: LayerFieldInfo[]): string {
-  const rows = buildViolationRows(data || {}, fields || [])
-    .map((row, index) => ({ row, index }))
-    .sort((a, b) => Number(normalizeArticleNumber(a.row.label) || Number.MAX_SAFE_INTEGER) - Number(normalizeArticleNumber(b.row.label) || Number.MAX_SAFE_INTEGER) || a.index - b.index)
-    .map(item => item.row)
-  if (!rows.length) return ''
-  return rows.map(row => {
-    const lines = [row.label, ...row.details.map(d => `• ${d.label}: ${d.value}`)]
-    return lines.join('\n')
-  }).join('\n\n')
-}
-
-function buildVerbalePdfMap (data: any, fields: LayerFieldInfo[], profile: { username: string, fullName: string }): Record<string, string> {
-  const d = data || {}
-  const oid = pickAttrCI(d, ['OBJECTID', 'objectid', 'ObjectId', 'FID'])
-  const oidNumber = oid != null && Number.isFinite(Number(oid)) ? Number(oid) : null
-  const nRapporto = normalizeReportCode(pickAttrCI(d, [
-    'numero_rapporto_tecnico', 'NUMERO_RAPPORTO_TECNICO', 'Numero_rapporto_tecnico',
-    'n_rapporto', 'numero_rapporto', 'codice_rapporto'
-  ]), oidNumber)
-  const nRilevazione = normalizeRilevazioneCodeForAmm(d, oidNumber)
-  const dataApprovazioneRapporto = pdfFieldValue(d, fields, 'dt_esito_DT') || pdfFieldValue(d, fields, 'data_rapporto_tecnico')
-  const nomeTrasgressore = String(pickAttrCI(d, ['nome']) || '').trim()
-  const cognomeTrasgressore = String(pickAttrCI(d, ['cognome']) || '').trim()
-  const ragioneSociale = String(pickAttrCI(d, ['ragione_sociale']) || '').trim()
-  const isPg = String(pickAttrCI(d, ['tipologia_soggetto']) || '').toUpperCase().includes('GIUR') || !!ragioneSociale
-  const trasgressore = isPg
-    ? ragioneSociale
-    : joinParts(cognomeTrasgressore, nomeTrasgressore)
-  const cfPiva = isPg ? String(pickAttrCI(d, ['piva']) || '').trim() : String(pickAttrCI(d, ['codice_fiscale']) || '').trim()
-  const indirizzo = joinParts(String(pickAttrCI(d, ['via']) || ''), String(pickAttrCI(d, ['civico']) || ''))
-  const comuneCap = joinParts(String(pickAttrCI(d, ['citta', 'comune']) || ''), String(pickAttrCI(d, ['cap']) || ''))
-  const contatti = [String(pickAttrCI(d, ['email']) || '').trim(), String(pickAttrCI(d, ['telefono']) || '').trim(), String(pickAttrCI(d, ['cellulare']) || '').trim()].filter(Boolean).join(' / ')
-  const area = pdfDomainValue(d, fields, ['area_cod', 'Area_cod', 'AREA_COD', 'area', 'Area'], 'area_cod') || String(pickAttrCI(d, ['area_label']) || '')
-  const settore = pdfDomainValue(d, fields, ['settore_cod', 'Settore_cod', 'SETTORE_COD', 'settore', 'Settore'], 'settore_cod') || String(pickAttrCI(d, ['settore_label']) || '')
-  const rawTipoAtto = String(pickAttrCI(d, ['tipo_atto_amm']) || '').trim()
-  const tipoAttoLabel = pdfFieldValue(d, fields, 'tipo_atto_amm') || rawTipoAtto
-  const tiAmmNome = firstTextAttr(d, ['ti_amm_assegnato_nome', 'ti_amm_assegnato_username'])
-  const approvatoDa = isDeterminazioneAdottata(d)
-  const giiDaActor = firstTextAttr(d, ['GII_da', 'gii_da'])
-  const riAmmNome = firstTextAttr(d, [
-    'ri_amm_nome', 'ri_amm_username',
-    'responsabile_istruttoria_amm_nome', 'responsabile_istruttoria_amm_username',
-    'istruttoria_amm_chiusa_da'
-  ]) || (!approvatoDa && pdfFieldValue(d, fields, 'dt_esito_RI_AMM') ? giiDaActor : '')
-  const daNome = firstTextAttr(d, [
-    'da_nome', 'da_username',
-    'direttore_area_nome', 'direttore_area_username',
-    'direttore_amm_nome', 'direttore_amm_username',
-    'dt_amm_nome', 'dt_amm_username',
-    'atto_approvato_da', 'approvato_da', 'istruttoria_amm_approvata_da'
-  ]) || (approvatoDa ? giiDaActor : '')
-  const esitoTiAmmNum = parseNumberInput(pickAttrCI(d, ['esito_TI_AMM']))
-  const esitoRiAmmNum = parseNumberInput(pickAttrCI(d, ['esito_RI_AMM']))
-  const propostaApprovata = esitoTiAmmNum === 2 && esitoRiAmmNum === 2
-  return {
-    objectid: oid != null ? String(oid) : '',
-    pratica: '',
-    n_rilevazione: nRilevazione,
-    n_rapporto: nRapporto,
-    data_rilevazione: pdfDateTimeValue(d, ['data_rilevazione', 'data_ora_rilevazione'], ['start']) || pdfFieldValue(d, fields, 'data_rilevazione'),
-    data_approvazione_rapporto: dataApprovazioneRapporto,
-    area,
-    settore,
-    ufficio_zona: ammOfficeLabelForPdf(pdfFieldValue(d, fields, 'ufficio_zona')),
-    tecnico_rilevatore: String(pickAttrCI(d, ['tecnico_rilevatore']) || ''),
-    ti_amm: String(pickAttrCI(d, ['ti_amm_assegnato_nome', 'ti_amm_assegnato_username']) || ''),
-    trasgressore_tipo: isPg ? 'PG' : 'PF',
-    trasgressore,
-    cf_piva: cfPiva,
-    indirizzo,
-    comune_cap: comuneCap,
-    pec: String(pickAttrCI(d, ['pec']) || ''),
-    contatti,
-    violazioni: buildVerbaleViolationsText(d, fields),
-    descrizione_fatti: String(pickAttrCI(d, ['descrizione_fatti']) || ''),
-    tipo_atto_amm: rawTipoAtto,
-    tipo_atto_amm_label: tipoAttoLabel,
-    atto_approvato: isDeterminazioneAdottata(d) ? '1' : '0',
-    proposta_approvata: propostaApprovata ? '1' : '0',
-    protocollo_istanza_numero: String(pickAttrCI(d, ['protocollo_istanza_numero']) || ''),
-    protocollo_istanza_data: pdfFieldValue(d, fields, 'protocollo_istanza_data'),
-    oggetto_atto_amm: String(pickAttrCI(d, ['oggetto_atto_amm']) || ''),
-    note_atto_amm: String(pickAttrCI(d, ['note_atto_amm']) || ''),
-    esito_ti_amm: esitoTiAmmNum === 1 ? 'Da integrare/rettificare' : esitoTiAmmNum === 2 ? 'Conforme' : esitoTiAmmNum === 3 ? 'Respinta' : '',
-    note_ti_amm: String(pickAttrCI(d, ['note_TI_AMM', 'note_atto_amm']) || ''),
-    accertamento_numero: verbaleNumberValue(d, oid),
-    accertamento_data: hasAdminValue(pickAttrCI(d, ['accertamento_data'])) ? pdfFieldValue(d, fields, 'accertamento_data') : displayVerbaleApprovalDate(d, fields),
-    protocollo_verbale: String(pickAttrCI(d, ['protocollo_atto_accertamento_numero']) || ''),
-    protocollo_atto_accertamento_data: pdfFieldValue(d, fields, 'protocollo_atto_accertamento_data'),
-    notifica_tipo: pdfFieldValue(d, fields, 'notifica_tipo'),
-    notifica_data: pdfFieldValue(d, fields, 'notifica_data'),
-    notifica_esito: pdfFieldValue(d, fields, 'notifica_esito'),
-    notifica_estremi: String(pickAttrCI(d, ['notifica_estremi']) || ''),
-    sanzione_importo_base: pdfFieldValue(d, fields, 'sanzione_importo_base', { money: true }),
-    sanzione_importo_ridotta: pdfFieldValue(d, fields, 'sanzione_importo_ridotta', { money: true }),
-    risarcimento_danni_importo: pdfFieldValue(d, fields, 'risarcimento_danni_importo', { money: true }),
-    sanzione_spese_notifica: pdfFieldValue(d, fields, 'sanzione_spese_notifica', { money: true }),
-    attrezzature_cauzione_presente: pdfFieldValue(d, fields, 'attrezzature_cauzione_presente'),
-    attrezzature_rimborso_importo: pdfFieldValue(d, fields, 'attrezzature_rimborso_importo', { money: true }),
-    attrezzature_cauzione_decurtata: pdfFieldValue(d, fields, 'attrezzature_cauzione_decurtata', { money: true }),
-    attrezzature_importo_netto: pdfFieldValue(d, fields, 'attrezzature_importo_netto', { money: true }),
-    attrezzature_rimborso_dettaglio: String(pickAttrCI(d, ['attrezzature_rimborso_dettaglio']) || ''),
-    attrezzature_note: String(pickAttrCI(d, ['attrezzature_note']) || ''),
-    pagamento_importo_totale: pdfFieldValue(d, fields, 'pagamento_importo_totale', { money: true }),
-    pagamento_scadenza: pdfFieldValue(d, fields, 'pagamento_scadenza'),
-    pagamento_modalita: pdfFieldValue(d, fields, 'pagamento_modalita'),
-    pagamento_stato: pdfFieldValue(d, fields, 'pagamento_stato'),
-    pagamento_note: String(pickAttrCI(d, ['pagamento_note']) || ''),
-    pagopa_iuv: String(pickAttrCI(d, ['pagopa_iuv']) || ''),
-    pagopa_codice_avviso: String(pickAttrCI(d, ['pagopa_codice_avviso']) || ''),
-    bonifico_iban: String(pickAttrCI(d, ['bonifico_iban_snapshot']) || ''),
-    bonifico_intestatario: String(pickAttrCI(d, ['bonifico_intestatario_snapshot']) || ''),
-    bonifico_causale: String(pickAttrCI(d, ['bonifico_causale']) || ''),
-    bonifico_cro_trn: String(pickAttrCI(d, ['bonifico_cro_trn']) || ''),
-    bonifico_data_accredito: pdfFieldValue(d, fields, 'bonifico_data_accredito'),
-    tipo_abuso_art15: art15AbuseTypeLabel(d, fields, ''),
-    tipo_comunicazione_art17: art17CommunicationTypeLabel(d, fields, ''),
-    sanzione_dettaglio_calcolo: String(pickAttrCI(d, ['sanzione_dettaglio_calcolo']) || ''),
-    sanzione_calcolata_il: pdfFieldValue(d, fields, 'sanzione_calcolata_il'),
-    sanzione_calcolata_da: String(pickAttrCI(d, ['sanzione_calcolata_da']) || ''),
-    istruttoria_amm_chiusa_il: pdfFieldValue(d, fields, 'istruttoria_amm_chiusa_il'),
-    istruttoria_amm_chiusa_da: String(pickAttrCI(d, ['istruttoria_amm_chiusa_da']) || ''),
-    amm_iter_compilazione_nome: tiAmmNome,
-    amm_iter_compilazione_presa: pdfFieldValue(d, fields, 'dt_presa_in_carico_TI_AMM'),
-    amm_iter_compilazione_data: pdfFieldValue(d, fields, 'dt_esito_TI_AMM') || pdfFieldValue(d, fields, 'sanzione_calcolata_il'),
-    amm_iter_supervisione_nome: riAmmNome,
-    amm_iter_supervisione_presa: pdfFieldValue(d, fields, 'dt_presa_in_carico_RI_AMM'),
-    amm_iter_supervisione_data: pdfFieldValue(d, fields, 'dt_esito_RI_AMM') || pdfFieldValue(d, fields, 'istruttoria_amm_chiusa_il'),
-    amm_iter_approvazione_nome: daNome,
-    amm_iter_approvazione_presa: pdfFieldValue(d, fields, 'determinazione_trasmessa_firma_il'),
-    amm_iter_approvazione_data: isDeterminazioneAdottata(d) ? (pdfFieldValue(d, fields, 'determinazione_data') || pdfFieldValue(d, fields, 'determinazione_registrata_il')) : '',
-    data_generazione: new Date().toLocaleString('it-IT'),
-    generato_da: profile.fullName || profile.username || ''
-  }
-}
-
-function verbalePdfFileName (map: Record<string, string>): string {
-  const prefix = getVerbalePdfFilePrefix(map) || 'proposta_contestazione'
-  const base = String(map.n_rapporto || map.objectid || prefix).replace(/[^a-zA-Z0-9_-]/g, '_')
-  return `${prefix}_${base || prefix}.pdf`
-}
-
-async function buildVerbalePdfBlob (data: any, fields: LayerFieldInfo[], profile: { username: string, fullName: string }): Promise<{ blob: Blob, fileName: string }> {
-  const map = buildVerbalePdfMap(data, fields, profile)
-  const bytes = await buildVerbalePdf(map)
-  const fileName = verbalePdfFileName(map)
-  return { blob: new Blob([bytes as any], { type: 'application/pdf' }), fileName }
-}
 
 
 function joinItalianTextList (values: string[]): string {
@@ -6810,24 +6743,25 @@ function buildRapportoAmmPreviewMap (
   }
 }
 
-async function buildRapportoAmmPreviewPdfBlob (data: any, fields: LayerFieldInfo[], profile: { username: string, fullName: string }): Promise<{ blob: Blob, fileName: string }> {
+async function buildRapportoAmmPreviewPdfBlob (data: any, fields: LayerFieldInfo[], profile: { username: string, fullName: string }, nsConfig?: { detailUrl?: string, parametriUrl?: string, parametroCode?: string }): Promise<{ blob: Blob, fileName: string }> {
   const iterGlobalId = pickAttrCI(data || {}, ['globalid', 'GlobalID', 'GLOBALID', 'parent_globalid'])
   const [utentiCache, cicli] = await Promise.all([
     ensureAmmUtentiCache(),
     loadRapportoIterCicliForPdf(iterGlobalId)
   ])
-  const map = buildRapportoAmmPreviewMap(data, fields, profile, utentiCache, cicli)
+  const map = buildPlaceholderMap(data, utentiCache as any, cicli)
+  await applyNotaSpeseToRapportoMap(map, data, nsConfig, { includeNotaSpese: true })
   const bytes = await buildRapportoPdf(map)
-  const base = String(map.n_rapporto || map.objectid || 'rapporto').replace(/[^a-zA-Z0-9_-]/g, '_')
+  const base = String(map.cod_pratica || 'rapporto').replace(/[^a-zA-Z0-9_-]/g, '_')
   return { blob: new Blob([bytes as any], { type: 'application/pdf' }), fileName: `rapporto_tecnico_${base}.pdf` }
 }
 
-async function buildAmmNotaSpesePdfItems (data: any, fields: LayerFieldInfo[], profile: { username: string, fullName: string }, selectedKeys?: Record<string, boolean>): Promise<Array<{ blob: Blob, fileName: string }>> {
-  const groups = await queryNotaSpesePdfGroupsForPractice(data || {})
-  const selected = groups.filter(group => (selectedKeys || {})[group.codiceCasistica] !== false)
+async function buildAmmNotaSpesePdfItems (data: any, fields: LayerFieldInfo[], profile: { username: string, fullName: string }, selectedKeys?: Record<string, boolean>, nsConfig?: { detailUrl?: string, parametriUrl?: string, parametroCode?: string }): Promise<Array<{ blob: Blob, fileName: string }>> {
+  const map = buildPlaceholderMap(data || {}, null, [])
+  const { selectedGroups: selected } = await applyNotaSpeseToRapportoMap(map, data || {}, nsConfig, { includeNotaSpese: true, selectedNotaSpeseKeys: selectedKeys })
   if (!selected.length) return []
-  const map = buildRapportoAmmPreviewMap(data || {}, fields || [], profile || { username: '', fullName: '' })
-  const base = String(map.n_rapporto || map.objectid || 'rapporto').replace(/[^a-zA-Z0-9_-]/g, '_')
+  const art30Summary = buildArt30RapportoSummary(data || {})
+  const base = String(map.cod_pratica || 'rapporto').replace(/[^a-zA-Z0-9_-]/g, '_')
   const luogoData = 'Cagliari, ' + (pdfFieldValue(data || {}, fields || [], 'data_firma') || new Date().toLocaleDateString('it-IT', { day: '2-digit', month: '2-digit', year: 'numeric' }))
   const items: Array<{ blob: Blob, fileName: string }> = []
   for (let i = 0; i < selected.length; i++) {
@@ -6842,7 +6776,23 @@ async function buildAmmNotaSpesePdfItems (data: any, fields: LayerFieldInfo[], p
       titolo_nota: group.label,
       rows: group.rows as any,
       summary: group.summary as any,
-      art30: null,
+      art30: group.codiceCasistica === 'C104_ATTREZZATURE_DANNEGGIATE' && art30Summary.hasData
+        ? {
+            rows: art30Summary.rows.map(row => ({
+              codice: row.codice,
+              descrizione: row.descrizione,
+              quantita: row.quantita,
+              valore_unitario: row.valoreUnitario,
+              importo: row.importo ?? ((row.valoreUnitario ?? 0) * row.quantita)
+            })),
+            rimborso: art30Summary.rimborso,
+            cauzione: art30Summary.cauzione,
+            cauzione_quantita: art30Summary.cauzioneQuantita,
+            cauzione_valore_unitario: art30Summary.cauzioneValoreUnitario,
+            cauzione_unita_misura: art30Summary.cauzioneUnitaMisura,
+            netto: art30Summary.netto
+          }
+        : null,
       luogo_data: luogoData,
       firma_nome: map.iter_compilazione_nome || map.generato_da || profile.fullName || profile.username || '',
       rapporto_respinto: map.rapporto_respinto,
@@ -7043,17 +6993,12 @@ async function mergeAmmPdfItems (items: Array<{ blob: Blob, fileName: string }>)
 }
 
 
-async function buildProtocolloFascicoloEmailAttachment (data: any, fields: LayerFieldInfo[], profile: { username: string, fullName: string }, oid: number, ds: any, layerUrl: string): Promise<EmailDraftAttachment> {
+async function buildProtocolloFascicoloEmailAttachment (data: any, fields: LayerFieldInfo[], profile: { username: string, fullName: string }, oid: number, ds: any, layerUrl: string, nsConfig?: { detailUrl?: string, parametriUrl?: string, parametroCode?: string }): Promise<EmailDraftAttachment> {
   const items: Array<{ blob: Blob, fileName: string }> = []
-  items.push(await buildRapportoAmmPreviewPdfBlob(data || {}, fields || [], profile || { username: '', fullName: '' }))
+  items.push(await buildRapportoAmmPreviewPdfBlob(data || {}, fields || [], profile || { username: '', fullName: '' }, nsConfig))
 
-  const nsGroups = await queryNotaSpesePdfGroupsForPractice(data || {})
-  if (nsGroups.length > 0) {
-    const selectedNotaSpeseKeys: Record<string, boolean> = {}
-    nsGroups.forEach(group => { selectedNotaSpeseKeys[group.codiceCasistica] = true })
-    const nsItems = await buildAmmNotaSpesePdfItems(data || {}, fields || [], profile || { username: '', fullName: '' }, selectedNotaSpeseKeys)
-    nsItems.forEach(item => items.push(item))
-  }
+  const nsItems = await buildAmmNotaSpesePdfItems(data || {}, fields || [], profile || { username: '', fullName: '' }, undefined, nsConfig)
+  nsItems.forEach(item => items.push(item))
 
   items.push(await buildVerbalePdfBlob(data || {}, fields || [], profile || { username: '', fullName: '' }))
 
@@ -7082,8 +7027,10 @@ const ammFascicoloPreviewCache = new Map<string, AmmFascicoloPreviewCacheEntry>(
 
 function FascicoloAmmPreviewSection (props: {
   data: Record<string, any>
+  liveRefreshVersion?: number
   fields: LayerFieldInfo[]
   profile: { username: string, fullName: string }
+  nsConfig?: { detailUrl?: string, parametriUrl?: string, parametroCode?: string }
   hasSelection: boolean
   oid: number | null
   ds: any
@@ -7168,9 +7115,9 @@ function FascicoloAmmPreviewSection (props: {
     setError(null)
     try {
       const items: Array<{ blob: Blob, fileName: string }> = []
-      if (options.includeRapporto) items.push(await buildRapportoAmmPreviewPdfBlob(props.data || {}, props.fields || [], props.profile || { username: '', fullName: '' }))
+      if (options.includeRapporto) items.push(await buildRapportoAmmPreviewPdfBlob(props.data || {}, props.fields || [], props.profile || { username: '', fullName: '' }, props.nsConfig))
       if (options.includeNotaSpese) {
-        const nsItems = await buildAmmNotaSpesePdfItems(props.data || {}, props.fields || [], props.profile || { username: '', fullName: '' }, options.selectedNotaSpeseKeys || {})
+        const nsItems = await buildAmmNotaSpesePdfItems(props.data || {}, props.fields || [], props.profile || { username: '', fullName: '' }, options.selectedNotaSpeseKeys || {}, props.nsConfig)
         if (nsItems.length === 0) throw new Error('Selezionare almeno una nota spese.')
         nsItems.forEach(item => items.push(item))
       }
@@ -7205,8 +7152,15 @@ function FascicoloAmmPreviewSection (props: {
     }
   }, [attachmentOptions, previewCacheKey, docOptions, layerUrl, notaSpeseOptions, oid, props.data, props.ds, props.fields, props.hasSelection, props.profile])
 
+  const processedRefreshVersionRef = React.useRef<number>(-1)
+
   React.useEffect(() => {
-    const cached = ammFascicoloPreviewCache.get(previewCacheKey)
+    const currentVersion = props.liveRefreshVersion ?? 0
+    const versionChanged = processedRefreshVersionRef.current !== -1 && processedRefreshVersionRef.current !== currentVersion
+    processedRefreshVersionRef.current = currentVersion
+    if (versionChanged) ammFascicoloPreviewCache.delete(previewCacheKey)
+
+    const cached = versionChanged ? null : ammFascicoloPreviewCache.get(previewCacheKey)
     if (cached) {
       setPdfFileName(cached.fileName)
       setDocOptions(cloneDocumentPrintOptions(cached.options))
@@ -7222,7 +7176,7 @@ function FascicoloAmmPreviewSection (props: {
     }
     void regenerate(docOptions)
     return () => {}
-  }, [previewCacheKey])
+  }, [previewCacheKey, props.liveRefreshVersion])
 
   React.useEffect(() => {
     return () => { revokePdfUrl(pdfUrl) }
@@ -7940,6 +7894,7 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
   const [profile, setProfile] = React.useState(() => readUserProfile())
   const [layerFields, setLayerFields] = React.useState<LayerFieldInfo[]>([])
   const [draft, setDraft] = React.useState<Record<string, any>>({})
+  const [liveRefreshVersion, setLiveRefreshVersion] = React.useState(0)
   const [initialDraft, setInitialDraft] = React.useState<Record<string, any>>({})
   const [automaticValues, setAutomaticValues] = React.useState<Record<string, any>>({})
   const [saving, setSaving] = React.useState(false)
@@ -8098,6 +8053,7 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
         if (cancelled || !liveAttrs || !Object.keys(liveAttrs).length) return
         setDraft(prev => ({ ...(prev || {}), ...liveAttrs }))
         setInitialDraft(prev => ({ ...(prev || {}), ...liveAttrs }))
+        setLiveRefreshVersion(v => v + 1)
       } catch { }
     }
     void refreshLiveRecord()
@@ -9077,7 +9033,11 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
     try {
       const { layerUrl } = await getEmailAttachmentContext()
       const numero = getReportCode(base, Number(oid))
-      const fascicolo = await buildProtocolloFascicoloEmailAttachment(base, layerFields, profile, Number(oid), active?.ds, layerUrl)
+      const fascicolo = await buildProtocolloFascicoloEmailAttachment(base, layerFields, profile, Number(oid), active?.ds, layerUrl, {
+        detailUrl: String((cfg as any).nsNotaSpeseDettaglioUrl || ''),
+        parametriUrl: String((cfg as any).nsParametriUrl || ''),
+        parametroCode: String((cfg as any).nsParametroCode || 'SPESE_GENERALI_PERC')
+      })
       const subject = `Protocollazione fascicolo - Rapporto tecnico n. ${numero || '—'}`
       const bodyLines = [
         `Si trasmette in allegato il fascicolo relativo al Rapporto tecnico n. ${numero || '—'}, ai fini della protocollazione.`,
@@ -9212,11 +9172,17 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
       await upsertAmmCycleAudit(prevRecordAttrs, { ...prevRecordAttrs, ...attrs }, Object.keys(attrs))
       await refreshDs(active.ds)
       const next = { ...(initialDraft || {}), ...attrs }
+      const nextLayerUrl = normalizeEditLayerUrl(layer?.url || active.layerUrl || (configuredDsState as any)?.layerUrl || getDataSourceUrl(configuredDs))
+      writeSelectedFeatureCache(nextLayerUrl, Number(oid), idName, next, 'edit')
+      invalidateRuntimeProxyCache(nextLayerUrl)
       setInitialDraft(next)
       setDraft(next)
       setDialog({ kind: 'ok', title: 'Bozza salvata', text: 'Dati amministrativi salvati.' })
       try {
         window.dispatchEvent(new CustomEvent('gii:record-updated', { detail: { oid: Number(oid), source: 'gii-editing-amm' } }))
+      } catch { }
+      try {
+        window.dispatchEvent(new CustomEvent('gii-force-refresh-selection', { detail: { oid: Number(oid), layerUrl: nextLayerUrl } }))
       } catch { }
     } catch (e: any) {
       setDialog({ kind: 'err', title: 'Errore salvataggio', text: e?.message || String(e) })
@@ -9619,8 +9585,14 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
               {activeAmmSection === 'anteprima' && (
                 <FascicoloAmmPreviewSection
                   data={viewData || {}}
+                  liveRefreshVersion={liveRefreshVersion}
                   fields={layerFields}
                   profile={profile}
+                  nsConfig={{
+                    detailUrl: String((cfg as any).nsNotaSpeseDettaglioUrl || ''),
+                    parametriUrl: String((cfg as any).nsParametriUrl || ''),
+                    parametroCode: String((cfg as any).nsParametroCode || 'SPESE_GENERALI_PERC')
+                  }}
                   hasSelection={hasSelection}
                   oid={oid != null && Number.isFinite(Number(oid)) ? Number(oid) : null}
                   ds={(active as any)?.ds}

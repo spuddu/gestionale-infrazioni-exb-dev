@@ -153,6 +153,17 @@ export default function Setting (props: Props) {
         <Inp value={cfgJs.regolamentoRaccordiUrl || ''} onChange={v => patch({ regolamentoRaccordiUrl: v })} placeholder='https://.../FeatureServer/0' />
       </div>}
 
+      <Acc id='notaspese' label='🧾 Nota spese (rapporto tecnico)' open={isOpen('notaspese')} onToggle={() => toggle('notaspese')} />
+      {isOpen('notaspese') && <div>
+        <div style={P.hint}>Tabella di dettaglio nota spese usata per il riepilogo importo/dicitura nel rapporto tecnico del fascicolo.</div>
+        <label style={P.lbl}>GII_NOTA_SPESE_DETTAGLIO</label>
+        <Inp value={cfgJs.nsNotaSpeseDettaglioUrl || ''} onChange={v => patch({ nsNotaSpeseDettaglioUrl: v })} placeholder='https://.../FeatureServer/0' />
+        <label style={P.lbl}>GII_NOTA_SPESE_PARAMETRI (percentuale spese generali)</label>
+        <Inp value={cfgJs.nsParametriUrl || ''} onChange={v => patch({ nsParametriUrl: v })} placeholder='https://.../FeatureServer/0' />
+        <label style={P.lbl}>Codice parametro spese generali</label>
+        <Inp value={cfgJs.nsParametroCode || ''} onChange={v => patch({ nsParametroCode: v })} placeholder='SPESE_GENERALI_PERC' />
+      </div>}
+
       <Acc id='testi' label='📝 Testi' open={isOpen('testi')} onToggle={() => toggle('testi')} />
       {isOpen('testi') && <div>
         <label style={P.lbl}>Titolo</label>

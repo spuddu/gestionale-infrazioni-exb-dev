@@ -140,6 +140,11 @@ export interface Config {
   parametriSanzioniUrl: string
   regolamentoArticoliUrl: string
   regolamentoRaccordiUrl: string
+
+  // Tabella dettaglio nota spese (usata per il riepilogo nel rapporto tecnico del fascicolo).
+  nsNotaSpeseDettaglioUrl: string
+  nsParametriUrl: string
+  nsParametroCode: string
 }
 
 export const defaultSummaryFields: SummaryFieldConfig[] = [
@@ -286,6 +291,10 @@ export const defaultConfig: Config = {
   parametriSanzioniUrl: '',
   regolamentoArticoliUrl: '',
   regolamentoRaccordiUrl: '',
+
+  nsNotaSpeseDettaglioUrl: 'https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_VIEW_EB_NOTA_SPESE_DETTAGLIO/FeatureServer/0',
+  nsParametriUrl: '',
+  nsParametroCode: 'SPESE_GENERALI_PERC',
 }
 
 export type IMConfig = ImmutableObject<Config>

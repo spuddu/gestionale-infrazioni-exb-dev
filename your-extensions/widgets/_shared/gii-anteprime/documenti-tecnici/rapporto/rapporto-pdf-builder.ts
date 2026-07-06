@@ -274,7 +274,7 @@ const SETTORE_LABELS: Record<string, string> = {
   DS: 'MANUTENZIONE OPERE DI DRENO E DI SCOLO'
 }
 
-function normalizeAreaCode (value: any): 'AMM' | 'AGR' | 'TEC' | '' {
+export function normalizeAreaCode (value: any): 'AMM' | 'AGR' | 'TEC' | '' {
   const s = String(value ?? '').trim().toUpperCase()
   if (!s) return ''
   if (s === '1' || s === 'AMM' || s === 'AMMINISTRATIVA' || s === 'AMMINISTRAZIONE' || s.includes('AFFARI GENERALI')) return 'AMM'
@@ -283,12 +283,12 @@ function normalizeAreaCode (value: any): 'AMM' | 'AGR' | 'TEC' | '' {
   return ''
 }
 
-function normalizeSettoreCode (areaCode: string, value: any): string {
+export function normalizeSettoreCode (areaCode: string, value: any): string {
   const s = String(value ?? '').trim().toUpperCase()
   if (!s) return ''
   if (s === 'CS') return 'DS'
-  if (s === '1') return areaCode === 'AGR' ? 'D1' : 'CR'
-  if (s === '2') return areaCode === 'AGR' ? 'D2' : 'GI'
+  if (s === '1') return 'CR'
+  if (s === '2') return 'GI'
   if (s === '3') return 'D1'
   if (s === '4') return 'D2'
   if (s === '5') return 'D3'
@@ -585,8 +585,8 @@ function normalizeIterSettoreCode (area: string, v: any): string {
   const s = String(v ?? '').trim().toUpperCase().replace(/\s+/g, '')
   if (!s) return ''
   if (s === 'CS') return 'DS'
-  if (s === '1') return area === 'AGR' ? 'D1' : 'CR'
-  if (s === '2') return area === 'AGR' ? 'D2' : 'GI'
+  if (s === '1') return 'CR'
+  if (s === '2') return 'GI'
   if (s === '3') return 'D1'
   if (s === '4') return 'D2'
   if (s === '5') return 'D3'
