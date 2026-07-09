@@ -6,7 +6,7 @@ import { Button } from 'jimu-ui'
 import { createPortal } from 'react-dom'
 import type { IMConfig, TabConfig } from '../config'
 import { defaultConfig, DEFAULT_FIELD_LAYOUTS } from '../config'
-import AnteprimaPanel, { clearEditingTiAnteprimaDocumentMemory } from './anteprima-panel'
+import AnteprimaPanel, { clearEditingTiAnteprimaDocumentMemory } from '../../../_shared/gii-anteprime/anteprima-panel'
 import GiiAttachmentViewer, { type GiiAttachmentViewerItem, filterGiiAttachmentsForTechnicalRoles } from '../../../_shared/gii-anteprime/allegati/gii-attachment-viewer'
 
 type MsgKind = 'info' | 'ok' | 'err'
@@ -8612,7 +8612,7 @@ ${e?.message || String(e)}`
       minHeight: 0
     }
 
-    if (npTab === 'anteprima') {
+    if (npTab === 'anteprima' && mode === 'edit' && currentOid != null) {
       return {
         ...base,
         overflow: 'hidden',
@@ -8633,7 +8633,7 @@ ${e?.message || String(e)}`
       scrollbarGutter: 'stable',
       padding: '12px 2px 2px 2px'
     }
-  }, [npTab, anteprimaPadding])
+  }, [npTab, anteprimaPadding, mode, currentOid])
 
   // ── Layout engine ──────────────────────────────────────────────────
   type FldR = { el: React.ReactNode; label: React.ReactNode; hint?: string }
@@ -10361,6 +10361,13 @@ ${e?.message || String(e)}`
 
 {/* ANTEPRIMA */}
 {npTab === 'anteprima' && (
+  mode !== 'edit' || currentOid == null ? (
+    renderFullHeightEditCard('ANTEPRIMA', (
+      <div style={{ fontSize: formStyle.labelFontSize, color: formStyle.labelColor, lineHeight: 1.5 }}>
+        Sarà possibile generare l'anteprima del fascicolo <b>solo dopo il primo salvataggio</b> della pratica.
+      </div>
+    ))
+  ) : (
   <div style={{ width: '100%', height: '100%', minHeight: 0, borderRadius: formStyle.cardBorderRadius, overflow: 'hidden' }}>
     <AnteprimaPanel
       data={draft}
@@ -10374,6 +10381,7 @@ ${e?.message || String(e)}`
       mapConfig={p.mapConfig}
       mapTarget={p.clickedPointWgs84 || p.existingGeomWgs84 || null}
       printServiceUrl={p.printServiceUrl}
+      notaSpeseConfig={noteSpeseCfg}
       viewerBackgroundColor={String((cfg as any).anteprimaViewerBg || '#282828')}
       pdfHeaderBackgroundColor={String((cfg as any).anteprimaPdfHeaderBg || '#282828')}
       pdfPageAreaBackgroundColor={String((cfg as any).anteprimaPdfAreaBg || '#282828')}
@@ -10384,6 +10392,7 @@ ${e?.message || String(e)}`
       sidebarBorderWidth={Number((cfg as any).anteprimaSidebarBorderWidth ?? 1)}
     />
   </div>
+  )
 )}
 
       </div>

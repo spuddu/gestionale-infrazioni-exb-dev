@@ -81,6 +81,11 @@ export interface Config {
   nsNotaSpeseDettaglioUrl: string
   nsParametriUrl: string
   nsParametroCode: string
+
+  // --- Calcolo automatico sanzione (URL tabelle di consultazione)
+  parametriSanzioniUrl: string
+  regolamentoArticoliUrl: string
+  regolamentoRaccordiUrl: string
 }
 
 export const defaultConfig: Config = {
@@ -160,6 +165,10 @@ export const defaultConfig: Config = {
   nsNotaSpeseDettaglioUrl: '',
   nsParametriUrl: '',
   nsParametroCode: 'SPESE_GENERALI_PERC',
+
+  parametriSanzioniUrl: 'https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_VIEW_EB_PARAMETRI_SANZIONI_AMM/FeatureServer/0',
+  regolamentoArticoliUrl: 'https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_VIEW_EB_REGOLAMENTO_ARTICOLI/FeatureServer/0',
+  regolamentoRaccordiUrl: 'https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_VIEW_EB_REGOLAMENTO_RACCORDI_AMM/FeatureServer/0',
 }
 
 export type IMConfig = ImmutableObject<Config>

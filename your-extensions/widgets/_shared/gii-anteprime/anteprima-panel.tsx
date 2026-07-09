@@ -1,19 +1,20 @@
 /** @jsx jsx */
 /** @jsxFrag React.Fragment */
 import { React, jsx, css } from 'jimu-core'
-import { buildNotaSpesePdf, type NotaSpeseData } from '../../../_shared/gii-anteprime/documenti-tecnici/rapporto/notaspese-pdf-builder'
+import { buildNotaSpesePdf, type NotaSpeseData } from './documenti-tecnici/rapporto/notaspese-pdf-builder'
 import { PDFDocument } from 'pdf-lib'
-import { buildRapportoPdf, loadRapportoIterCicliForPdf } from '../../../_shared/gii-anteprime/documenti-tecnici/rapporto/rapporto-pdf-builder'
-import { buildPlaceholderMap, type UtenteCached } from '../../../_shared/gii-anteprime/documenti-tecnici/rapporto/rapporto-placeholder-map'
-import { drawEmbeddedPdfPageInRapportoTechnicalBody, drawRapportoTechnicalHeadersByPage, RAPPORTO_TECHNICAL_BODY_BOX, wrapMapPdfBlobWithRapportoTechnicalHeader } from '../../../_shared/gii-anteprime/documenti-tecnici/rapporto/technical-document-header'
-import { defaultGiiDocumentPrintOptions as defaultDocumentPrintOptions, cloneGiiDocumentPrintOptions as cloneDocumentPrintOptions, setGiiAttachmentPrintOptionVisible, setGiiMapLayerKeysVisible, setGiiNotaSpesePrintOptionVisible } from '../../../_shared/gii-anteprime/viewer-documenti/document-options'
-import type { GiiDocumentPrintOptions as DocumentPrintOptions, GiiAttachmentPrintOption as AttachmentPrintOption, GiiNotaSpesePrintOption as NotaSpesePrintOption } from '../../../_shared/gii-anteprime/viewer-documenti/document-options'
-import { buildGiiMapLegendItemsForView, computePrintExtentForView, ensureGiiPrintableMapLayersReady, flattenGiiPrintableMapLayerTree as flattenPrintableMapLayerTree, listGiiPrintableMapLayerTree as listPrintableMapLayerTree, listGiiPrintableMapLayers as listPrintableMapLayers } from '../../../_shared/gii-anteprime/viewer-documenti/map-layers'
-import type { GiiPrintableMapLayerItem as PrintableMapLayerItem } from '../../../_shared/gii-anteprime/viewer-documenti/map-layers'
-import GiiDocumentViewer from '../../../_shared/gii-anteprime/viewer-documenti/document-viewer'
-import { filterGiiAttachmentsForTechnicalRoles } from '../../../_shared/gii-anteprime/allegati/gii-attachment-viewer'
-import { buildFascicolo } from '../../../_shared/gii-anteprime/fascicolo-builder'
-import type { NotaSpeseConfig } from '../../../_shared/gii-anteprime/documenti-tecnici/rapporto/rapporto-nota-spese-summary'
+import { buildRapportoPdf, loadRapportoIterCicliForPdf } from './documenti-tecnici/rapporto/rapporto-pdf-builder'
+import { buildPlaceholderMap, type UtenteCached } from './documenti-tecnici/rapporto/rapporto-placeholder-map'
+import { drawEmbeddedPdfPageInRapportoTechnicalBody, drawRapportoTechnicalHeadersByPage, RAPPORTO_TECHNICAL_BODY_BOX, wrapMapPdfBlobWithRapportoTechnicalHeader } from './documenti-tecnici/rapporto/technical-document-header'
+import { defaultGiiDocumentPrintOptions as defaultDocumentPrintOptions, cloneGiiDocumentPrintOptions as cloneDocumentPrintOptions, setGiiAttachmentPrintOptionVisible, setGiiMapLayerKeysVisible, setGiiNotaSpesePrintOptionVisible } from './viewer-documenti/document-options'
+import type { GiiDocumentPrintOptions as DocumentPrintOptions, GiiAttachmentPrintOption as AttachmentPrintOption, GiiNotaSpesePrintOption as NotaSpesePrintOption } from './viewer-documenti/document-options'
+import { buildGiiMapLegendItemsForView, computePrintExtentForView, ensureGiiPrintableMapLayersReady, flattenGiiPrintableMapLayerTree as flattenPrintableMapLayerTree, listGiiPrintableMapLayerTree as listPrintableMapLayerTree, listGiiPrintableMapLayers as listPrintableMapLayers } from './viewer-documenti/map-layers'
+import type { GiiPrintableMapLayerItem as PrintableMapLayerItem } from './viewer-documenti/map-layers'
+import GiiDocumentViewer from './viewer-documenti/document-viewer'
+import { filterGiiAttachmentsForTechnicalRoles, getGiiAttachmentKind } from './allegati/gii-attachment-viewer'
+import { buildFascicolo } from './fascicolo-builder'
+import type { NotaSpeseConfig } from './documenti-tecnici/rapporto/rapporto-nota-spese-summary'
+import { queryNotaSpeseRowsForPractice } from './documenti-tecnici/rapporto/rapporto-nota-spese-summary'
 
 const GII_UTENTI_URL = 'https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_utenti/FeatureServer/0'
 
@@ -801,15 +802,15 @@ function normalizeArcgisLayerUrl (url: any): string {
   return String(url || '').trim().replace(/\/+$/, '')
 }
 
-async function resolveFeatureLayerForAttachments (ds: any): Promise<any | null> {
-  if (!ds) return null
+async function resolveFeatureLayerForAttachments (ds: any, fallbackUrl?: string): Promise<any | null> {
+  if (!ds && !fallbackUrl) return null
   try {
     const direct = await Promise.resolve(ds?.getLayer?.() || ds?.getJsApiLayer?.() || ds?.getJSAPILayer?.() || ds?.layer || null)
     const layer = direct?.layer || direct
     if (layer && typeof layer.queryFeatures === 'function') return layer
   } catch {}
   try {
-    const url = normalizeArcgisLayerUrl(ds?.getDataSourceJson?.()?.url || ds?.dataSourceJson?.url || ds?.url || '')
+    const url = normalizeArcgisLayerUrl(ds?.getDataSourceJson?.()?.url || ds?.dataSourceJson?.url || ds?.url || fallbackUrl || '')
     if (!url) return null
     const FeatureLayer = await loadEsriModule<any>('esri/layers/FeatureLayer')
     const fl = new FeatureLayer({ url })
@@ -908,14 +909,18 @@ async function hasAttachments (ds: any, oid: number): Promise<boolean> {
   return filterGiiAttachmentsForTechnicalRoles(options as any).length > 0
 }
 
-async function loadAttachmentOptions (ds: any, oid: number): Promise<AttachmentPrintOption[]> {
+async function loadAttachmentOptions (ds: any, oid: number, canSeeAmministrativi: boolean, layerUrlHint?: string): Promise<AttachmentPrintOption[]> {
   if (!Number.isFinite(oid) || oid <= 0) return []
-  const layer = await resolveFeatureLayerForAttachments(ds)
+  const layer = await resolveFeatureLayerForAttachments(ds, layerUrlHint)
   if (!layer) return []
   const infos = await queryFeatureAttachments(layer, oid, ds)
   const options = (infos || []).map((att: any): AttachmentPrintOption => toAttachmentPrintOption(att))
-  return (filterGiiAttachmentsForTechnicalRoles(options as any) as AttachmentPrintOption[])
-    .filter((att: AttachmentPrintOption): boolean => Number.isFinite(att.id) && att.id > 0)
+  // I ruoli tecnici non devono mai vedere allegati di tipo amministrativo, siano essi
+  // generati automaticamente (proposta di contestazione, ecc.) o caricati manualmente
+  // da TI_AMM/RI_AMM/DA. Chi può vedere la parte amministrativa (canSeeAmministrativi)
+  // vede invece tutti gli allegati, di qualunque tipo.
+  const filtered = canSeeAmministrativi ? options : (filterGiiAttachmentsForTechnicalRoles(options as any) as AttachmentPrintOption[])
+  return filtered.filter((att: AttachmentPrintOption): boolean => Number.isFinite(att.id) && att.id > 0)
 }
 
 async function fetchAttachmentBlob (layer: any, ds: any, oid: number, att: any, index: number): Promise<{ blob: Blob; fileName: string } | null> {
@@ -1174,12 +1179,15 @@ async function buildRapportoDocumentsPdfBlob (
   return { blob: new Blob([finalBytes as any], { type: 'application/pdf' }), fileName: outFileName }
 }
 
-export default function AnteprimaPanel (p: {
+export default function GiiAnteprimaPanel (p: {
   data: Record<string, any>
   mode: 'create' | 'edit'
   nsRows?: Record<NsCat, NsRowP[]>
   nsSummary?: NsSummaryP
   ds?: any
+  // Fallback esplicito quando ds non espone un URL layer risolvibile direttamente
+  // (stesso pattern già usato da gii-editing-amm con resolveLayerForEdit).
+  layerUrlHint?: string
   oid?: number | null
   idFieldName?: string
   mapView?: any | null
@@ -1194,7 +1202,29 @@ export default function AnteprimaPanel (p: {
   sidebarBackgroundColor?: string
   sidebarBorderColor?: string
   sidebarBorderWidth?: number
+  sidebarWidth?: number
   notaSpeseConfig?: NotaSpeseConfig
+  // Unica vera differenza funzionale tra ruoli tecnici e amministrativi: questi ultimi
+  // vedono anche le opzioni/documenti amministrativi (proposta di contestazione + determinazione,
+  // quest'ultima tramite extraDocumentBuilder — vedi sotto — dato che non è ancora costruita
+  // internamente da buildFascicolo).
+  canSeeAmministrativi?: boolean
+  profile?: { username: string, fullName: string }
+  // Se presente, il pannello mostra il pulsante di chiusura del viewer (uso in modale,
+  // es. gii-azioni). Se assente, nessun pulsante di chiusura (uso incorporato).
+  onClose?: () => void
+  // 'headless' (default): il pannello costruisce da sé una mappa indipendente e nascosta,
+  // usata una volta e distrutta — mai derivata dalla mappa live in uso (regola di sicurezza
+  // per widget dove l'utente può interagire con una mappa live mentre genera l'anteprima,
+  // es. editing-ti). 'live': usa direttamente la view esterna passata in mapView, senza
+  // costruirne una propria — per widget dove la mappa è solo di consultazione (es. azioni).
+  mapMode?: 'headless' | 'live'
+  // Punto di estensione per documenti non ancora centralizzati in buildFascicolo (oggi solo
+  // la determinazione dirigenziale). Il pannello lo chiama quando includeDeterminazione è
+  // attivo e canSeeAmministrativi è vero, e ne unisce il risultato al resto; il chiamante
+  // resta responsabile di come costruire quel documento.
+  extraDocumentBuilder?: (opts: DocumentPrintOptions) => Promise<{ blob: Blob; fileName: string } | null>
+  determinazioneAvailable?: boolean
 }): any {
   const [pdfUrl, setPdfUrl] = React.useState<string | null>(null)
   const [pdfFileName, setPdfFileName] = React.useState<string>('rapporto.pdf')
@@ -1213,7 +1243,7 @@ export default function AnteprimaPanel (p: {
   })
   const [attachmentOptions, setAttachmentOptions] = React.useState<AttachmentPrintOption[]>([])
   const [notaSpeseOptions, setNotaSpeseOptions] = React.useState<NotaSpesePrintOption[]>([])
-  const printMapView = technicalMapView || null
+  const printMapView = p.mapMode === 'live' ? (p.mapView || null) : (technicalMapView || null)
   const printableLayerTree = listPrintableMapLayerTree(printMapView)
   const printableLayerItems = flattenPrintableMapLayerTree(printableLayerTree)
   const printableLayerSignature = printableLayerItems.map(item => `${item.key}:${item.visible ? 1 : 0}`).join('|')
@@ -1245,6 +1275,38 @@ export default function AnteprimaPanel (p: {
     try { return JSON.stringify({ r: p.nsRows || {}, s: p.nsSummary || {} }) } catch { return '' }
   }, [p.nsRows, p.nsSummary])
 
+  // Modalità "query": quando il chiamante non ha righe nota spese in memoria (non è un form
+  // di editing, es. gii-azioni/gii-editing-amm), il pannello le interroga da sé sulla tabella
+  // persistita — stesso identico meccanismo già usato da quei widget prima della migrazione.
+  // Quando invece p.nsRows è fornito (es. gii-editing-ti), questa query non parte mai:
+  // restano prioritarie le righe in memoria (bozza corrente).
+  const usingDraftNotaSpese = p.nsRows !== undefined
+  const [queriedNsRows, setQueriedNsRows] = React.useState<Record<NsCat, NsRowP[]> | null>(null)
+  const [queriedNsSummary, setQueriedNsSummary] = React.useState<NsSummaryP | null>(null)
+  React.useEffect(() => {
+    if (usingDraftNotaSpese) return
+    if (!p.notaSpeseConfig || p.oid == null || !p.data) {
+      setQueriedNsRows(null)
+      setQueriedNsSummary(null)
+      return
+    }
+    let cancelled = false
+    void queryNotaSpeseRowsForPractice(p.data, p.notaSpeseConfig).then(({ rowsByCategory, percentualeSpeseGenerali }) => {
+      if (cancelled) return
+      const rows = rowsByCategory as any as Record<NsCat, NsRowP[]>
+      setQueriedNsRows(rows)
+      setQueriedNsSummary(buildNsSummaryForRows(rows, percentualeSpeseGenerali))
+    }).catch(() => {
+      if (cancelled) return
+      setQueriedNsRows(null)
+      setQueriedNsSummary(null)
+    })
+    return () => { cancelled = true }
+  }, [usingDraftNotaSpese, p.notaSpeseConfig, p.oid, dataSignature])
+
+  const effectiveNsRows = usingDraftNotaSpese ? p.nsRows : (queriedNsRows || undefined)
+  const effectiveNsSummary = usingDraftNotaSpese ? p.nsSummary : (queriedNsSummary || undefined)
+
   const mapConfigSignature = React.useMemo(() => {
     try { return JSON.stringify(p.mapConfig || {}) } catch { return '' }
   }, [p.mapConfig])
@@ -1264,18 +1326,24 @@ export default function AnteprimaPanel (p: {
   }, [dataSignature, utenti])
 
   const hasNotaSpeseLocal = React.useMemo(() => {
-    const groups = buildNotaSpeseGroups(p.nsRows, p.nsSummary)
+    const groups = buildNotaSpeseGroups(effectiveNsRows, effectiveNsSummary)
     return groups.length > 0 || buildArt30RapportoSummary(p.data || {}).hasData
-  }, [dataSignature, nsSignature])
+  }, [dataSignature, nsSignature, effectiveNsRows, effectiveNsSummary])
 
   const computedNotaSpeseOptions = React.useMemo<NotaSpesePrintOption[]>(() => {
-    return buildNotaSpesePrintGroups(p.nsRows, p.nsSummary, p.data).map(group => ({
+    return buildNotaSpesePrintGroups(effectiveNsRows, effectiveNsSummary, p.data).map(group => ({
       key: group.codiceCasistica,
       label: group.label
     }))
-  }, [dataSignature, nsSignature])
+  }, [dataSignature, nsSignature, effectiveNsRows, effectiveNsSummary])
 
   React.useEffect(() => {
+    // In modalità 'live' il pannello non costruisce nulla: usa direttamente p.mapView
+    // (vedi printMapView) e questo intero effetto è no-op.
+    if (p.mapMode === 'live') {
+      setTechnicalMapView(null)
+      return
+    }
     // IMPORTANTE: la mappa usata per generare l'elaborato cartografico NON deve mai
     // derivare da nessuna mappa in uso nel gestionale (p.mapView o qualsiasi altra view
     // visibile all'utente), in nessuna forma — né come clone, né come centro/scala di
@@ -1372,7 +1440,7 @@ export default function AnteprimaPanel (p: {
       setTechnicalMapView(null)
       if (view) { try { view.destroy() } catch {} }
     }
-  }, [mapConfigSignature, mapTargetSignature])
+  }, [mapConfigSignature, mapTargetSignature, p.mapMode])
 
   React.useEffect(() => {
     setNotaSpeseOptions(computedNotaSpeseOptions)
@@ -1415,13 +1483,15 @@ export default function AnteprimaPanel (p: {
     if (!hasNotaSpeseLocal) setDocOptions(prev => ({ ...prev, includeNotaSpese: false }))
     if (!targetAvailable) setDocOptions(prev => ({ ...prev, includeMappa: false }))
     if (!p.ds || !p.oid) {
-      setDocOptions(prev => ({ ...prev, includeAllegati: false }))
+      setDocOptions(prev => ({ ...prev, includeAllegatiTecnici: false, includeAllegatiAmministrativi: false }))
       return
     }
     let cancelled = false
-    void loadAttachmentOptions(p.ds, Number(p.oid)).then(allegatiList => {
+    void loadAttachmentOptions(p.ds, Number(p.oid), !!p.canSeeAmministrativi, p.layerUrlHint).then(allegatiList => {
       if (cancelled) return
       setAttachmentOptions(allegatiList)
+      const hasTecnici = allegatiList.some(att => getGiiAttachmentKind(att as any) === 'technical')
+      const hasAmministrativi = allegatiList.some(att => getGiiAttachmentKind(att as any) !== 'technical')
       setDocOptions(prev => {
         const previousSelected = prev.selectedAttachmentIds || {}
         const selectedAttachmentIds: Record<string, boolean> = {}
@@ -1429,19 +1499,23 @@ export default function AnteprimaPanel (p: {
           const key = String(att.id)
           selectedAttachmentIds[key] = Object.prototype.hasOwnProperty.call(previousSelected, key) ? previousSelected[key] : true
         })
-        return { ...prev, selectedAttachmentIds, includeAllegati: allegatiList.length > 0 ? prev.includeAllegati : false }
+        return {
+          ...prev,
+          selectedAttachmentIds,
+          includeAllegatiTecnici: hasTecnici ? prev.includeAllegatiTecnici : false,
+          includeAllegatiAmministrativi: hasAmministrativi ? prev.includeAllegatiAmministrativi : false
+        }
       })
       const allegati = allegatiList.length > 0
       setAvailability(prev => prev.checkedKey === checkedKey ? { ...prev, loadingAllegati: false, allegati } : prev)
-      if (!allegati) setDocOptions(prev => ({ ...prev, includeAllegati: false }))
     }).catch(() => {
       if (cancelled) return
       setAttachmentOptions([])
       setAvailability(prev => prev.checkedKey === checkedKey ? { ...prev, loadingAllegati: false, allegati: false } : prev)
-      setDocOptions(prev => ({ ...prev, includeAllegati: false }))
+      setDocOptions(prev => ({ ...prev, includeAllegatiTecnici: false, includeAllegatiAmministrativi: false }))
     })
     return () => { cancelled = true }
-  }, [p.ds, p.oid, hasNotaSpeseLocal, mapTargetSignature, printMapView])
+  }, [p.ds, p.oid, hasNotaSpeseLocal, mapTargetSignature, printMapView, p.canSeeAmministrativi, p.layerUrlHint])
 
   const updateDocOption = React.useCallback((patch: Partial<DocumentPrintOptions>) => {
     setDocOptions(prev => ({ ...prev, ...patch }))
@@ -1491,44 +1565,62 @@ export default function AnteprimaPanel (p: {
 
     const includeMappa = !!(opts.includeMappa && mapTarget && printMapView)
 
-    const selectedAttachmentIds = opts.includeAllegati
-      ? attachmentOptions
-          .filter(att => (opts.selectedAttachmentIds || {})[String(att.id)] !== false)
-          .map(att => Number(att.id))
-          .filter(id => Number.isFinite(id) && id > 0)
-      : []
-    if (opts.includeAllegati && selectedAttachmentIds.length === 0) throw new Error('Selezionare almeno un allegato.')
+    const anyAllegatiGroupOn = !!opts.includeAllegatiTecnici || !!opts.includeAllegatiAmministrativi
+    const selectedAttachmentIds = attachmentOptions
+      .filter(att => {
+        const groupOn = getGiiAttachmentKind(att as any) === 'technical' ? !!opts.includeAllegatiTecnici : !!opts.includeAllegatiAmministrativi
+        if (!groupOn) return false
+        return (opts.selectedAttachmentIds || {})[String(att.id)] !== false
+      })
+      .map(att => Number(att.id))
+      .filter(id => Number.isFinite(id) && id > 0)
+    if (anyAllegatiGroupOn && selectedAttachmentIds.length === 0) throw new Error('Selezionare almeno un allegato.')
 
-    return await buildFascicolo({
-      oid: Number(p.oid),
-      profile: { username: '', fullName: '' }, // non usato: editing-ti non include mai la parte amministrativa
-      selection: {
-        includeTecnici: true,
-        includeAmministrativi: false,
-        includeMappa,
-        includeRapporto,
-        includeNotaSpese,
-        selectedAttachmentIds,
-        selectedNotaSpeseKeys: { ...(opts.selectedNotaSpeseKeys || {}) }
-      },
-      notaSpeseConfig: p.notaSpeseConfig,
-      mapConfig: includeMappa
-        ? {
-            ...opts,
-            view: printMapView,
-            printServiceUrl: String(p.printServiceUrl || DEFAULT_PRINT_SERVICE_URL),
-            mapLocalizationLayerUrl: String(p.mapConfig?.mapLayerUrl || '')
-          }
-        : undefined,
-      fileNamePrefix: 'documenti'
-    })
-  }, [previewOptions, attachmentOptions, notaSpeseOptions, hasNotaSpeseLocal, mapTarget, p.data, p.oid, p.notaSpeseConfig, printMapView, p.mapConfig, p.printServiceUrl, mapConfigSignature])
+    const includeAmministrativi = !!p.canSeeAmministrativi && !!opts.includePropostaContestazione
+    const wantsFascicoloContent = includeRapporto || includeNotaSpese || includeMappa || anyAllegatiGroupOn || includeAmministrativi
+    const wantsDeterminazione = !!p.canSeeAmministrativi && !!opts.includeDeterminazione && !!p.extraDocumentBuilder
+
+    const items: Array<{ blob: Blob; fileName: string }> = []
+    if (wantsFascicoloContent) {
+      items.push(await buildFascicolo({
+        oid: Number(p.oid),
+        profile: p.profile || { username: '', fullName: '' },
+        selection: {
+          includeTecnici: true,
+          includeAmministrativi,
+          includeMappa,
+          includeRapporto,
+          includeNotaSpese,
+          selectedAttachmentIds,
+          selectedNotaSpeseKeys: { ...(opts.selectedNotaSpeseKeys || {}) }
+        },
+        notaSpeseConfig: p.notaSpeseConfig,
+        mapConfig: includeMappa
+          ? {
+              ...opts,
+              view: printMapView,
+              printServiceUrl: String(p.printServiceUrl || DEFAULT_PRINT_SERVICE_URL),
+              mapLocalizationLayerUrl: String(p.mapConfig?.mapLayerUrl || '')
+            }
+          : undefined,
+        fileNamePrefix: 'documenti'
+      }))
+    }
+    if (wantsDeterminazione) {
+      const extra = await p.extraDocumentBuilder!(opts)
+      if (extra) items.push(extra)
+    }
+    if (items.length === 0) throw new Error('Selezionare almeno un documento.')
+    if (items.length === 1) return items[0]
+    const safeCode = String(praticaCode || 'documenti').replace(/[^a-zA-Z0-9_-]/g, '_')
+    return { blob: await mergePdfBlobs(items), fileName: `documenti_${safeCode}.pdf` }
+  }, [previewOptions, attachmentOptions, notaSpeseOptions, hasNotaSpeseLocal, mapTarget, p.data, p.oid, p.notaSpeseConfig, printMapView, p.mapConfig, p.printServiceUrl, mapConfigSignature, p.canSeeAmministrativi, p.profile, p.extraDocumentBuilder, praticaCode])
 
   const previewCacheSignature = React.useMemo(() => {
     try {
       const includeNotaSpese = !!previewOptions.includeNotaSpese
       const includeMappa = !!previewOptions.includeMappa
-      const includeAllegati = !!previewOptions.includeAllegati
+      const includeAllegati = !!previewOptions.includeAllegatiTecnici || !!previewOptions.includeAllegatiAmministrativi
       return JSON.stringify({
         options: previewOptions,
         dataSignature,
@@ -1614,7 +1706,7 @@ export default function AnteprimaPanel (p: {
         loading={loading}
         error={error}
         emptyText='Nessun dato disponibile per l&apos;anteprima.'
-        width={270}
+        width={p.sidebarWidth ?? 270}
         viewerBackgroundColor={p.viewerBackgroundColor}
         pdfHeaderBackgroundColor={p.pdfHeaderBackgroundColor}
         pdfPageAreaBackgroundColor={p.pdfPageAreaBackgroundColor}
@@ -1624,11 +1716,13 @@ export default function AnteprimaPanel (p: {
         borderColor={p.sidebarBorderColor}
         borderWidth={p.sidebarBorderWidth}
         docOptions={docOptions}
-        availability={availability}
+        availability={{ ...availability, propostaContestazione: !!p.canSeeAmministrativi, determinazione: !!p.canSeeAmministrativi && !!p.determinazioneAvailable }}
         busy={loading}
         canUseMap={!!printMapView}
         mapPanelAvailable={!!printMapView}
-        documentUnavailableExtra={{ includeAllegati: !!availability.loadingAllegati }}
+        documentUnavailableExtra={{ includeAllegatiTecnici: !!availability.loadingAllegati, includeAllegatiAmministrativi: !!availability.loadingAllegati }}
+        showAdminDocuments={!!p.canSeeAmministrativi}
+        onClose={p.onClose}
         notaSpeseOptions={notaSpeseOptions}
         attachmentOptions={attachmentOptions}
         printableLayerTree={printableLayerTree}

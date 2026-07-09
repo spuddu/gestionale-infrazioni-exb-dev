@@ -309,3 +309,12 @@ export async function wrapMapPdfBlobWithRapportoTechnicalHeader (blob: Blob, tit
   const outBytes = await out.save()
   return new Blob([outBytes as any], { type: 'application/pdf' })
 }
+
+/**
+ * Titolo standard per le pagine "elaborato probatorio" (foto allegate) del rapporto
+ * tecnico. Unico punto: prima duplicato/divergente tra widget (es. "Allegato
+ * probatorio N" senza intestazione in un widget, vs questo titolo completo in un altro).
+ */
+export function attachmentTechnicalDocumentTitle (index: number, numeroRapportoTecnico?: string): string {
+  return `ELABORATO PROBATORIO N. ${index} ALLEGATO AL RAPPORTO TECNICO DI RILEVAZIONE N. ${String(numeroRapportoTecnico || '').trim() || '-'}`
+}

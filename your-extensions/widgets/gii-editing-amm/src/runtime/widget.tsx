@@ -5,12 +5,11 @@ import { buildVerbalePdfBlob } from '../../../_shared/gii-anteprime/documenti-am
 import { buildBozzaDeterminazioneDocx, getBozzaDeterminazioneDocxFileName } from '../../../_shared/gii-anteprime/documenti-amministrativi/bozza-determinazione/bozza-determinazione-docx-builder'
 import { buildBozzaDeterminazionePdf } from '../../../_shared/gii-anteprime/documenti-amministrativi/bozza-determinazione/bozza-determinazione-pdf-builder'
 import { buildRapportoPdf, buildRapportoIterPlaceholders, loadRapportoIterCicliForPdf, type RapportoIterCicloPdf, type UtenteCacheEntry } from '../../../_shared/gii-anteprime/documenti-tecnici/rapporto/rapporto-pdf-builder'
+import { RAPPORTO_TECHNICAL_BODY_BOX, drawRapportoTechnicalHeadersByPage, attachmentTechnicalDocumentTitle } from '../../../_shared/gii-anteprime/documenti-tecnici/rapporto/technical-document-header'
 import { buildPlaceholderMap } from '../../../_shared/gii-anteprime/documenti-tecnici/rapporto/rapporto-placeholder-map'
 import { applyNotaSpeseToRapportoMap, buildArt30RapportoSummary } from '../../../_shared/gii-anteprime/documenti-tecnici/rapporto/rapporto-nota-spese-summary'
 import { buildNotaSpesePdf, type NotaSpeseData } from '../../../_shared/gii-anteprime/documenti-tecnici/rapporto/notaspese-pdf-builder'
-import { defaultGiiDocumentPrintOptions as defaultDocumentPrintOptions, cloneGiiDocumentPrintOptions as cloneDocumentPrintOptions, setGiiAttachmentPrintOptionVisible } from '../../../_shared/gii-anteprime/viewer-documenti/document-options'
-import type { GiiDocumentPrintOptions as DocumentPrintOptions, GiiAttachmentPrintOption as AttachmentPrintOption, GiiNotaSpesePrintOption as NotaSpesePrintOption } from '../../../_shared/gii-anteprime/viewer-documenti/document-options'
-import GiiDocumentViewer from '../../../_shared/gii-anteprime/viewer-documenti/document-viewer'
+import GiiAnteprimaPanel from '../../../_shared/gii-anteprime/anteprima-panel'
 import GiiAttachmentViewer, { GII_ATTACHMENT_KEYWORDS, getGiiAttachmentKind, filterGiiAttachmentsForAdministrativeFascicolo } from '../../../_shared/gii-anteprime/allegati/gii-attachment-viewer'
 import { PDFDocument, StandardFonts, rgb } from 'pdf-lib'
 import type { IMConfig, SummaryFieldConfig } from '../config'
@@ -6932,6 +6931,7 @@ async function buildAmmAttachmentsPdfBlob (items: AmmAttachmentInfo[], oid: numb
   const out = await PDFDocument.create()
   let added = 0
   let imagePageIndex = 0
+  const pageTitles: string[] = []
   for (const att of items) {
     const contentType = String(att.contentType || '').toLowerCase()
     const name = String(att.name || '').toLowerCase()
@@ -6941,40 +6941,25 @@ async function buildAmmAttachmentsPdfBlob (items: AmmAttachmentInfo[], oid: numb
     if (contentType.includes('pdf') || name.endsWith('.pdf')) {
       const src = await PDFDocument.load(bytes)
       const pages = await out.copyPages(src, src.getPageIndices())
-      pages.forEach(pg => { out.addPage(pg); added++ })
+      pages.forEach(pg => { out.addPage(pg); added++; pageTitles.push('') })
     } else if (isAmmImageAttachmentForPdf(att)) {
       imagePageIndex++
       const normalizedBytes = await normalizeAmmImageAttachmentBytesForPdf(blob)
       const img = normalizedBytes
         ? await out.embedPng(normalizedBytes)
         : ((contentType.includes('png') || name.endsWith('.png')) ? await out.embedPng(bytes) : await out.embedJpg(bytes))
-      const page = await addAmmAttachmentPdfHeaderPage(
-        out,
-        `Allegato probatorio ${imagePageIndex}`,
-        String(att.name || 'Immagine allegata')
-      )
-      const regular = await out.embedFont(StandardFonts.Helvetica)
-      const margin = AMM_ATTACHMENT_PAGE_MARGIN
-      const maxW = AMM_ATTACHMENT_PAGE_W - margin * 2
-      const maxH = AMM_ATTACHMENT_PAGE_H - 185
-      const scale = Math.min(maxW / img.width, maxH / img.height)
+      const page = out.addPage([595.28, 841.89])
+      const box = RAPPORTO_TECHNICAL_BODY_BOX
+      const scale = Math.min(box.width / Math.max(1, img.width), box.height / Math.max(1, img.height))
       const w = img.width * scale
       const h = img.height * scale
-      const x = (AMM_ATTACHMENT_PAGE_W - w) / 2
-      const y = 50 + (maxH - h) / 2
-      page.drawRectangle({ x: x - 1, y: y - 1, width: w + 2, height: h + 2, borderColor: rgb(0.78, 0.82, 0.88), borderWidth: 0.8 })
-      page.drawImage(img, { x, y, width: w, height: h })
-      page.drawText('Orientamento immagine coerente con il viewer allegati.', {
-        x: AMM_ATTACHMENT_PAGE_MARGIN,
-        y: 34,
-        size: 8.5,
-        font: regular,
-        color: rgb(0.38, 0.42, 0.48)
-      })
+      page.drawImage(img, { x: box.x + (box.width - w) / 2, y: box.y + (box.height - h) / 2, width: w, height: h })
+      pageTitles.push(attachmentTechnicalDocumentTitle(imagePageIndex, baseName))
       added++
     }
   }
   if (!added) return null
+  await drawRapportoTechnicalHeadersByPage(out, index => pageTitles[index] || attachmentTechnicalDocumentTitle(index + 1, baseName))
   const bytes = await out.save()
   const safe = String(baseName || 'allegati').replace(/[^a-zA-Z0-9_-]/g, '_')
   return { blob: new Blob([bytes as any], { type: 'application/pdf' }), fileName: `allegati_${safe}.pdf` }
@@ -7015,16 +7000,6 @@ async function buildProtocolloFascicoloEmailAttachment (data: any, fields: Layer
   return { blob, fileName: `fascicolo_protocollo_${safe}.pdf`, contentType: 'application/pdf' }
 }
 
-type AmmFascicoloPreviewCacheEntry = {
-  blob: Blob
-  fileName: string
-  options: DocumentPrintOptions
-  attachmentOptions: AttachmentPrintOption[]
-  notaSpeseOptions: NotaSpesePrintOption[]
-}
-
-const ammFascicoloPreviewCache = new Map<string, AmmFascicoloPreviewCacheEntry>()
-
 function FascicoloAmmPreviewSection (props: {
   data: Record<string, any>
   liveRefreshVersion?: number
@@ -7044,197 +7019,36 @@ function FascicoloAmmPreviewSection (props: {
   sidebarBorderColor?: string
   sidebarBorderWidth?: number
 }) {
-  const [pdfUrl, setPdfUrl] = React.useState<string | null>(null)
-  const [pdfFileName, setPdfFileName] = React.useState('fascicolo_pratica.pdf')
-  const [loading, setLoading] = React.useState(false)
-  const [error, setError] = React.useState<string | null>(null)
-  const [docOptions, setDocOptions] = React.useState<DocumentPrintOptions>(() => ({ ...defaultDocumentPrintOptions(), includeRapporto: true, includePropostaContestazione: true, includeDeterminazione: false }))
-  const [attachmentOptions, setAttachmentOptions] = React.useState<AttachmentPrintOption[]>([])
-  const [notaSpeseOptions, setNotaSpeseOptions] = React.useState<NotaSpesePrintOption[]>([])
-  const [expandedLayerGroups, setExpandedLayerGroups] = React.useState<Record<string, boolean>>({})
-
   const oid = props.oid != null && Number.isFinite(Number(props.oid)) ? Number(props.oid) : null
   const layerUrl = normalizeEditLayerUrl(props.layerUrl || getDataSourceUrl(props.ds))
-  const previewCacheKey = React.useMemo(() => {
-    const stableLayerKey = String(layerUrl || '').trim() || 'layer'
-    const stableOidKey = oid != null ? String(oid) : 'no-oid'
-    const stableUserKey = String(props.profile?.username || '').trim() || 'user'
-    return `${stableLayerKey}::${stableOidKey}::${stableUserKey}`
-  }, [layerUrl, oid, props.profile?.username])
 
-  React.useEffect(() => {
-    let cancelled = false
-    if (!props.hasSelection || !oid) {
-      setAttachmentOptions([])
-      setNotaSpeseOptions([])
-      setDocOptions(prev => ({ ...prev, includeAllegati: false, includeNotaSpese: false, selectedAttachmentIds: {}, selectedNotaSpeseKeys: {} }))
-      return () => { cancelled = true }
-    }
-    ;(async () => {
-      try {
-        const layer = await resolveLayerForEdit(props.ds, layerUrl)
-        const list = await queryAmmAttachments(layer, oid, layerUrl)
-        if (cancelled) return
-        const printable = (filterGiiAttachmentsForAdministrativeFascicolo(list as any) as AmmAttachmentInfo[])
-        const defaultSelectedAttachmentIds: Record<string, boolean> = {}
-        printable.forEach(att => { defaultSelectedAttachmentIds[String(att.id)] = true })
-        const nsGroups = await queryNotaSpesePdfGroupsForPractice(props.data || {})
-        if (cancelled) return
-        const defaultSelectedNotaSpeseKeys: Record<string, boolean> = {}
-        nsGroups.forEach(group => { defaultSelectedNotaSpeseKeys[group.codiceCasistica] = true })
-        const cached = ammFascicoloPreviewCache.get(previewCacheKey)
-        setAttachmentOptions(printable.map(att => ({ id: Number(att.id), name: att.name, size: att.size, contentType: att.contentType, url: att.url })))
-        setNotaSpeseOptions(nsGroups.map(group => ({ key: group.codiceCasistica, label: group.label })))
-        setDocOptions(prev => ({
-          ...prev,
-          selectedAttachmentIds: cached ? (prev.selectedAttachmentIds || {}) : defaultSelectedAttachmentIds,
-          selectedNotaSpeseKeys: cached ? (prev.selectedNotaSpeseKeys || {}) : defaultSelectedNotaSpeseKeys,
-          includeAllegati: printable.length > 0 ? prev.includeAllegati : false,
-          includeNotaSpese: nsGroups.length > 0 ? prev.includeNotaSpese : false
-        }))
-      } catch {
-        if (!cancelled) {
-          setAttachmentOptions([])
-          setNotaSpeseOptions([])
-          setDocOptions(prev => ({ ...prev, includeAllegati: false, includeNotaSpese: false, selectedAttachmentIds: {}, selectedNotaSpeseKeys: {} }))
-        }
-      }
-    })()
-    return () => { cancelled = true }
-  }, [props.hasSelection, oid, props.ds, layerUrl, previewCacheKey])
-
-  const regenerate = React.useCallback(async (opts?: DocumentPrintOptions) => {
-    if (!props.hasSelection || !oid) {
-      setPdfUrl((prev): null => { revokePdfUrl(prev); return null })
-      setError(null)
-      setLoading(false)
-      return
-    }
-    const options = cloneDocumentPrintOptions(opts || docOptions)
-    setLoading(true)
-    setError(null)
-    try {
-      const items: Array<{ blob: Blob, fileName: string }> = []
-      if (options.includeRapporto) items.push(await buildRapportoAmmPreviewPdfBlob(props.data || {}, props.fields || [], props.profile || { username: '', fullName: '' }, props.nsConfig))
-      if (options.includeNotaSpese) {
-        const nsItems = await buildAmmNotaSpesePdfItems(props.data || {}, props.fields || [], props.profile || { username: '', fullName: '' }, options.selectedNotaSpeseKeys || {}, props.nsConfig)
-        if (nsItems.length === 0) throw new Error('Selezionare almeno una nota spese.')
-        nsItems.forEach(item => items.push(item))
-      }
-      if (options.includePropostaContestazione) items.push(await buildVerbalePdfBlob(props.data || {}, props.fields || [], props.profile || { username: '', fullName: '' }))
-      if (options.includeDeterminazione) items.push(await buildBozzaDeterminazionePdfBlob(props.data || {}, props.fields || [], props.profile || { username: '', fullName: '' }))
-      if (options.includeAllegati) {
-        const ids = new Set(Object.entries(options.selectedAttachmentIds || {}).filter(([, visible]) => visible !== false).map(([id]) => Number(id)))
-        const all = await queryAmmAttachments(await resolveLayerForEdit(props.ds, layerUrl), oid, layerUrl)
-        const selected = (filterGiiAttachmentsForAdministrativeFascicolo(all as any) as AmmAttachmentInfo[])
-          .filter(att => ids.has(Number(att.id)))
-        if (selected.length === 0) throw new Error('Selezionare almeno un allegato.')
-        const attPdf = await buildAmmAttachmentsPdfBlob(selected, oid, layerUrl, getReportCode(props.data || {}, oid) || String(oid))
-        if (attPdf) items.push(attPdf)
-      }
-      if (items.length === 0) throw new Error('Selezionare almeno un documento.')
-      const fileName = items.length === 1 ? items[0].fileName : `fascicolo_${String(getReportCode(props.data || {}, oid) || oid).replace(/[^a-zA-Z0-9_-]/g, '_')}.pdf`
-      const blob = items.length === 1 ? items[0].blob : await mergeAmmPdfItems(items)
-      ammFascicoloPreviewCache.set(previewCacheKey, {
-        blob,
-        fileName,
-        options: cloneDocumentPrintOptions(options),
-        attachmentOptions: attachmentOptions.map(item => ({ ...item })),
-        notaSpeseOptions: notaSpeseOptions.map(item => ({ ...item }))
-      })
-      const url = makePdfUrl(blob, fileName)
-      setPdfFileName(fileName)
-      setPdfUrl((prev): string => { revokePdfUrl(prev); return url })
-    } catch (e: any) {
-      setError(e?.message || String(e))
-    } finally {
-      setLoading(false)
-    }
-  }, [attachmentOptions, previewCacheKey, docOptions, layerUrl, notaSpeseOptions, oid, props.data, props.ds, props.fields, props.hasSelection, props.profile])
-
-  const processedRefreshVersionRef = React.useRef<number>(-1)
-
-  React.useEffect(() => {
-    const currentVersion = props.liveRefreshVersion ?? 0
-    const versionChanged = processedRefreshVersionRef.current !== -1 && processedRefreshVersionRef.current !== currentVersion
-    processedRefreshVersionRef.current = currentVersion
-    if (versionChanged) ammFascicoloPreviewCache.delete(previewCacheKey)
-
-    const cached = versionChanged ? null : ammFascicoloPreviewCache.get(previewCacheKey)
-    if (cached) {
-      setPdfFileName(cached.fileName)
-      setDocOptions(cloneDocumentPrintOptions(cached.options))
-      setAttachmentOptions((cached.attachmentOptions || []).map(item => ({ ...item })))
-      setNotaSpeseOptions((cached.notaSpeseOptions || []).map(item => ({ ...item })))
-      setError(null)
-      setLoading(false)
-      setPdfUrl((prev): string => {
-        revokePdfUrl(prev)
-        return makePdfUrl(cached.blob, cached.fileName)
-      })
-      return () => {}
-    }
-    void regenerate(docOptions)
-    return () => {}
-  }, [previewCacheKey, props.liveRefreshVersion])
-
-  React.useEffect(() => {
-    return () => { revokePdfUrl(pdfUrl) }
-  }, [pdfUrl])
-
-  const updateDocOption = React.useCallback((patch: Partial<DocumentPrintOptions>) => {
-    setDocOptions(prev => ({ ...prev, ...patch }))
-  }, [])
-  const setAttachmentOptionVisible = React.useCallback((id: number, visible: boolean) => {
-    setDocOptions(prev => setGiiAttachmentPrintOptionVisible(prev, id, visible))
-  }, [])
-  const setNotaSpeseOptionVisible = React.useCallback((key: string, visible: boolean) => {
-    setDocOptions(prev => ({
-      ...prev,
-      selectedNotaSpeseKeys: {
-        ...(prev.selectedNotaSpeseKeys || {}),
-        [String(key)]: visible
-      }
-    }))
-  }, [])
-  const noop = React.useCallback(() => {}, [])
+  // La determinazione dirigenziale non è ancora gestita da buildFascicolo: resta un
+  // documento costruito qui e passato al pannello condiviso come extraDocumentBuilder.
+  const buildDeterminazioneExtra = React.useCallback(async () => {
+    return await buildBozzaDeterminazionePdfBlob(props.data || {}, props.fields || [], props.profile || { username: '', fullName: '' })
+  }, [props.data, props.fields, props.profile])
 
   return (
     <div style={{ width: '100%', height: '100%', minHeight: 0, borderRadius: 12, overflow: 'hidden', display: 'flex', flexDirection: 'column', background: props.viewerBackgroundColor || '#282828' }}>
-      <GiiDocumentViewer
-        url={pdfUrl}
-        fileName={pdfFileName}
-        title={`Anteprima fascicolo pratica n. ${getReportCode(props.data || {}, oid) || oid || '-'}`}
-        subtitle={pdfFileName}
-        loading={loading}
-        error={error}
-        emptyText='Nessun dato disponibile per l&apos;anteprima della pratica.'
-        width={270}
-        viewerBackgroundColor={props.viewerBackgroundColor || '#282828'}
-        pdfHeaderBackgroundColor={props.pdfHeaderBackgroundColor || '#282828'}
-        pdfPageAreaBackgroundColor={props.pdfPageAreaBackgroundColor || '#282828'}
-        pdfThumbnailsBackgroundColor={props.pdfThumbnailsBackgroundColor || '#1f1f1f'}
-        pdfToolbarBackgroundColor={props.pdfToolbarBackgroundColor || '#3c3c3c'}
-        backgroundColor={props.sidebarBackgroundColor || '#eef4fb'}
-        borderColor={props.sidebarBorderColor || '#b8c7d9'}
-        borderWidth={props.sidebarBorderWidth ?? 1}
-        docOptions={docOptions}
-        availability={{ notaSpese: notaSpeseOptions.length > 0, mappa: false, allegati: attachmentOptions.length > 0, propostaContestazione: true, determinazione: true }}
-        showAdminDocuments={true}
-        busy={loading}
-        canUseMap={false}
-        mapPanelAvailable={false}
-        notaSpeseOptions={notaSpeseOptions}
-        attachmentOptions={attachmentOptions}
-        printableLayerTree={[]}
-        expandedLayerGroups={expandedLayerGroups}
-        mapEmptyText='La mappa amministrativa non è disponibile in questa scheda.'
-        updateDocOption={updateDocOption}
-        setNotaSpeseOptionVisible={setNotaSpeseOptionVisible}
-        setAttachmentOptionVisible={setAttachmentOptionVisible}
-        setMapLayerKeysVisible={noop as any}
-        setExpandedLayerGroups={setExpandedLayerGroups}
-        onRegenerate={() => { void regenerate(docOptions) }}
+      <GiiAnteprimaPanel
+        data={props.hasSelection ? (props.data || {}) : {}}
+        mode='edit'
+        ds={props.ds}
+        oid={oid}
+        layerUrlHint={layerUrl}
+        notaSpeseConfig={props.nsConfig}
+        canSeeAmministrativi={true}
+        determinazioneAvailable={true}
+        extraDocumentBuilder={buildDeterminazioneExtra}
+        profile={props.profile}
+        viewerBackgroundColor={props.viewerBackgroundColor}
+        pdfHeaderBackgroundColor={props.pdfHeaderBackgroundColor}
+        pdfPageAreaBackgroundColor={props.pdfPageAreaBackgroundColor}
+        pdfThumbnailsBackgroundColor={props.pdfThumbnailsBackgroundColor}
+        pdfToolbarBackgroundColor={props.pdfToolbarBackgroundColor}
+        sidebarBackgroundColor={props.sidebarBackgroundColor}
+        sidebarBorderColor={props.sidebarBorderColor}
+        sidebarBorderWidth={props.sidebarBorderWidth}
       />
     </div>
   )
@@ -9172,7 +8986,8 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
       await upsertAmmCycleAudit(prevRecordAttrs, { ...prevRecordAttrs, ...attrs }, Object.keys(attrs))
       await refreshDs(active.ds)
       const next = { ...(initialDraft || {}), ...attrs }
-      const nextLayerUrl = normalizeEditLayerUrl(layer?.url || active.layerUrl || (configuredDsState as any)?.layerUrl || getDataSourceUrl(configuredDs))
+      const sharedSelectionLayerUrl = String(sessionStorage.getItem('GII_SELECTED_LAYER_URL') || '').trim()
+      const nextLayerUrl = sharedSelectionLayerUrl || normalizeEditLayerUrl(layer?.url || active.layerUrl || (configuredDsState as any)?.layerUrl || getDataSourceUrl(configuredDs))
       writeSelectedFeatureCache(nextLayerUrl, Number(oid), idName, next, 'edit')
       invalidateRuntimeProxyCache(nextLayerUrl)
       setInitialDraft(next)

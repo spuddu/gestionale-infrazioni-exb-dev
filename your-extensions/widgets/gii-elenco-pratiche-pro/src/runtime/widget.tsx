@@ -5841,6 +5841,90 @@ export default function Widget(props: Props) {
     resolvedView,
   ]);
 
+  // Cambio tab manuale (non un'azione): se il record già selezionato è ancora
+  // presente tra le righe della tab corrente, ripubblica la selezione così i
+  // pulsanti in gii-azioni si riattivano — indipendentemente da un eventuale
+  // intento di ripristino post-azione (gestito dall'effect sopra).
+  const lastTabSelectionCheckedRef = React.useRef<any>(null);
+  const lastTabMergedRecsLengthRef = React.useRef<number | null>(null);
+  React.useEffect(() => {
+    if (lastTabSelectionCheckedRef.current === activeRoleTab) return;
+    const selectedPairs = Object.entries(localSelectedByDs || {});
+    if (selectedPairs.length === 0 && localSelectedOid == null) {
+      lastTabSelectionCheckedRef.current = activeRoleTab;
+      lastTabMergedRecsLengthRef.current = null;
+      return;
+    }
+
+    let found: { dsId: string; rid: string; rec: DataRecord; idFieldName: string } | null = null;
+    for (const r of mergedRecs) {
+      if (!passesRoleTab(r, activeRoleTab)) continue;
+      const dsId = recDsLookup.get(r) || "";
+      if (!dsId) continue;
+      const entry = dsDataRef.current[dsId];
+      const idFieldName =
+        String(entry?.ds?.getIdField?.() || "OBJECTID").trim() || "OBJECTID";
+      const rid = String(r.getId?.() ?? "");
+      const isSelectedPair = selectedPairs.some(
+        ([selDsId, selRid]) => dsId === selDsId && rid === String(selRid),
+      );
+      const oidMatch =
+        localSelectedOid != null &&
+        getRecordObjectIdValue(r, idFieldName, rid) === Number(localSelectedOid);
+      if (isSelectedPair || oidMatch) {
+        found = { dsId, rid, rec: r, idFieldName };
+        break;
+      }
+    }
+
+    if (!found) {
+      // mergedRecs potrebbe ancora riflettere dati transitori del refresh in corso
+      // (non ancora sostituiti da quelli veri): ci fidiamo solo se la lunghezza è
+      // rimasta stabile rispetto all'ultimo controllo per questo stesso cambio di
+      // tab — altrimenti aspettiamo il prossimo aggiornamento.
+      if (lastTabMergedRecsLengthRef.current !== mergedRecs.length) {
+        lastTabMergedRecsLengthRef.current = mergedRecs.length;
+        return;
+      }
+      lastTabSelectionCheckedRef.current = activeRoleTab;
+      lastTabMergedRecsLengthRef.current = null;
+      return;
+    }
+
+    lastTabSelectionCheckedRef.current = activeRoleTab;
+    lastTabMergedRecsLengthRef.current = null;
+
+    const data = found.rec.getData?.() || {};
+    const oidVal = Number(
+      data?.[found.idFieldName] ??
+        data?.OBJECTID ??
+        data?.objectid ??
+        data?.ObjectId ??
+        data?.objectId ??
+        found.rid,
+    );
+    if (!Number.isFinite(oidVal)) return;
+
+    publishRuntimeSelection({
+      oid: oidVal,
+      layerUrl:
+        resolvedView?.layerUrl ||
+        sessionStorage.getItem("GII_SELECTED_LAYER_URL") ||
+        found.dsId,
+      serviceUrl:
+        resolvedView?.serviceUrl ||
+        sessionStorage.getItem("GII_SELECTED_SERVICE_URL") ||
+        found.dsId,
+      idFieldName: found.idFieldName,
+      viewName:
+        resolvedView?.viewName ||
+        sessionStorage.getItem("GII_SELECTED_VIEW_NAME") ||
+        getDsLabel({ __label: "" }, "Vista runtime"),
+      data,
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeRoleTab, mergedRecs, recDsLookup, localSelectedByDs, localSelectedOid, resolvedView, passesRoleTab]);
+
   const [openPracticeIntentTick, setOpenPracticeIntentTick] = React.useState(0);
   const openPracticeIntentRefreshKeyRef = React.useRef("");
 

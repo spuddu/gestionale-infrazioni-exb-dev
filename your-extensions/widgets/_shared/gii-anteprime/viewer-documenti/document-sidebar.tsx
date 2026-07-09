@@ -2,8 +2,9 @@
 /** @jsxFrag React.Fragment */
 import { React, jsx } from 'jimu-core'
 import type { GiiAttachmentPrintOption, GiiDocumentPrintOptions, GiiNotaSpesePrintOption } from './document-options'
+import { getGiiAttachmentKind } from '../allegati/gii-attachment-viewer'
 
-type DocumentKey = keyof Pick<GiiDocumentPrintOptions, 'includeRapporto' | 'includeNotaSpese' | 'includeMappa' | 'includeAllegati' | 'includePropostaContestazione' | 'includeDeterminazione'>
+type DocumentKey = keyof Pick<GiiDocumentPrintOptions, 'includeRapporto' | 'includeNotaSpese' | 'includeMappa' | 'includeAllegatiTecnici' | 'includeAllegatiAmministrativi' | 'includePropostaContestazione' | 'includeDeterminazione'>
 
 export type GiiDocumentSidebarAvailability = {
   notaSpese: boolean
@@ -81,13 +82,16 @@ export default function GiiDocumentSidebar (props: GiiDocumentSidebarProps) {
   const safeBorderWidth = Math.max(0, Math.min(8, Number(borderWidth) || 0))
   const safeBorderColor = String(borderColor || '#dbe4ef').trim() || '#dbe4ef'
   const safeBackgroundColor = String(backgroundColor || '#eef4fb').trim() || '#eef4fb'
+  const technicalAttachments = attachmentOptions.filter(att => getGiiAttachmentKind(att as any) === 'technical')
+  const administrativeAttachments = attachmentOptions.filter(att => getGiiAttachmentKind(att as any) !== 'technical')
 
   const renderDocCheckbox = (key: DocumentKey, label: string) => {
     const checking = !!documentChecking?.[key]
     const unavailableBase = (
       key === 'includeNotaSpese' ? !availability.notaSpese :
       key === 'includeMappa' ? (!availability.mappa || !canUseMap) :
-      key === 'includeAllegati' ? !availability.allegati :
+      key === 'includeAllegatiTecnici' ? technicalAttachments.length === 0 :
+      key === 'includeAllegatiAmministrativi' ? administrativeAttachments.length === 0 :
       key === 'includePropostaContestazione' ? !availability.propostaContestazione :
       key === 'includeDeterminazione' ? !availability.determinazione :
       false
@@ -165,7 +169,7 @@ export default function GiiDocumentSidebar (props: GiiDocumentSidebarProps) {
           {renderDocCheckbox('includeRapporto', 'Rapporto tecnico')}
           {renderDocCheckbox('includeNotaSpese', 'Nota spese')}
           {renderDocCheckbox('includeMappa', 'Mappa')}
-          {renderDocCheckbox('includeAllegati', 'Allegati')}
+          {renderDocCheckbox('includeAllegatiTecnici', 'Allegati')}
         </div>
       </div>
 
@@ -175,6 +179,7 @@ export default function GiiDocumentSidebar (props: GiiDocumentSidebarProps) {
           <div style={{ display: 'grid', gap: 8 }}>
             {renderDocCheckbox('includePropostaContestazione', 'Proposta di contestazione')}
             {renderDocCheckbox('includeDeterminazione', 'Determinazione dirigenziale')}
+            {renderDocCheckbox('includeAllegatiAmministrativi', 'Allegati')}
           </div>
         </div>
       )}
@@ -204,31 +209,51 @@ export default function GiiDocumentSidebar (props: GiiDocumentSidebarProps) {
         </div>
       )}
 
-      {docOptions.includeAllegati && availability.allegati && (
-        <div style={{ display: 'grid', gap: 6, paddingTop: 8, borderTop: '1px solid #dbe4ef' }}>
-          <div style={{ fontSize: 12, fontWeight: 900, color: '#334155' }}>Allegati da aprire</div>
-          <div style={{ display: 'grid', gap: 5, maxHeight: 180, overflow: 'auto', padding: '6px 8px', border: '1px solid #e2e8f0', borderRadius: 8, background: '#fff' }}>
-            {attachmentOptions.map((att, idx) => {
-              const checked = (docOptions.selectedAttachmentIds || {})[String(att.id)] !== false
-              const meta = [att.name, att.contentType].filter(Boolean).join(' • ')
-              return (
-                <label key={att.id} style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) 18px', alignItems: 'center', gap: 8, minHeight: 28, fontSize: 12.5, color: '#334155', fontWeight: 700 }}>
-                  <span style={{ minWidth: 0 }}>
-                    <span style={{ display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{`Allegato ${idx + 1}`}</span>
-                    {meta ? <span style={{ display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: '#64748b', fontSize: 11, fontWeight: 600 }}>{meta}</span> : null}
-                  </span>
-                  <input
-                    type='checkbox'
-                    checked={checked}
-                    disabled={busy}
-                    onChange={e => setAttachmentOptionVisible(att.id, e.target.checked)}
-                  />
-                </label>
-              )
-            })}
+      {((docOptions.includeAllegatiTecnici && technicalAttachments.length > 0) || (docOptions.includeAllegatiAmministrativi && administrativeAttachments.length > 0)) && (() => {
+        const renderAttachmentRow = (att: GiiAttachmentPrintOption, idx: number) => {
+          const checked = (docOptions.selectedAttachmentIds || {})[String(att.id)] !== false
+          const meta = [att.name, att.contentType].filter(Boolean).join(' • ')
+          return (
+            <label key={att.id} style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) 18px', alignItems: 'center', gap: 8, minHeight: 28, fontSize: 12.5, color: '#334155', fontWeight: 700 }}>
+              <span style={{ minWidth: 0 }}>
+                <span style={{ display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{`Allegato ${idx + 1}`}</span>
+                {meta ? <span style={{ display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: '#64748b', fontSize: 11, fontWeight: 600 }}>{meta}</span> : null}
+              </span>
+              <input
+                type='checkbox'
+                checked={checked}
+                disabled={busy}
+                onChange={e => setAttachmentOptionVisible(att.id, e.target.checked)}
+              />
+            </label>
+          )
+        }
+        // Ogni gruppo (tecnici/amministrativi) ha il proprio checkbox master indipendente:
+        // qui si mostra solo il/i gruppo/i effettivamente attivato/i, mai insieme se uno solo è acceso.
+        const showTecnici = docOptions.includeAllegatiTecnici && technicalAttachments.length > 0
+        const showAmministrativi = docOptions.includeAllegatiAmministrativi && administrativeAttachments.length > 0
+        return (
+          <div style={{ display: 'grid', gap: 6, paddingTop: 8, borderTop: '1px solid #dbe4ef' }}>
+            <div style={{ fontSize: 12, fontWeight: 900, color: '#334155' }}>Allegati da aprire</div>
+            {showTecnici && (
+              <div style={{ display: 'grid', gap: 5 }}>
+                {showAmministrativi && <div style={{ fontSize: 11, fontWeight: 800, color: '#64748b', textTransform: 'uppercase', letterSpacing: 0.2 }}>Tecnici</div>}
+                <div style={{ display: 'grid', gap: 5, maxHeight: 180, overflow: 'auto', padding: '6px 8px', border: '1px solid #e2e8f0', borderRadius: 8, background: '#fff' }}>
+                  {technicalAttachments.map((att, idx) => renderAttachmentRow(att, idx))}
+                </div>
+              </div>
+            )}
+            {showAmministrativi && (
+              <div style={{ display: 'grid', gap: 5 }}>
+                {showTecnici && <div style={{ fontSize: 11, fontWeight: 800, color: '#64748b', textTransform: 'uppercase', letterSpacing: 0.2 }}>Amministrativi</div>}
+                <div style={{ display: 'grid', gap: 5, maxHeight: 180, overflow: 'auto', padding: '6px 8px', border: '1px solid #e2e8f0', borderRadius: 8, background: '#fff' }}>
+                  {administrativeAttachments.map((att, idx) => renderAttachmentRow(att, idx))}
+                </div>
+              </div>
+            )}
           </div>
-        </div>
-      )}
+        )
+      })()}
 
       {docOptions.includeMappa && mapPanelAvailable && (
         <div style={{ display: 'grid', gap: 9, paddingTop: 8, borderTop: '1px solid #dbe4ef' }}>

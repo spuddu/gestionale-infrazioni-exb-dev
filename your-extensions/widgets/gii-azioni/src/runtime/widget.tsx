@@ -3,21 +3,13 @@
 import { React, jsx, type AllWidgetProps, DataSourceComponent, DataSourceManager, UrlManager, getAppStore } from 'jimu-core'
 import { Button } from 'jimu-ui'
 import { createPortal } from 'react-dom'
+import { computeSanzioneAutomatica } from '../../../_shared/gii-anteprime/sanzione-automatica'
 import type { IMConfig } from '../config'
 import { defaultConfig } from '../config'
-import { buildNotaSpesePdf, type NotaSpeseData } from '../../../_shared/gii-anteprime/documenti-tecnici/rapporto/notaspese-pdf-builder'
-import { buildVerbalePdfBlob } from '../../../_shared/gii-anteprime/documenti-amministrativi/proposta-contestazione/proposta-contestazione-data-map'
 import { buildBozzaDeterminazionePdf } from '../../../_shared/gii-anteprime/documenti-amministrativi/bozza-determinazione/bozza-determinazione-pdf-builder'
 import { PDFDocument } from 'pdf-lib'
-import { buildRapportoPdf, loadRapportoIterCicliForPdf } from '../../../_shared/gii-anteprime/documenti-tecnici/rapporto/rapporto-pdf-builder'
-import { buildPlaceholderMap } from '../../../_shared/gii-anteprime/documenti-tecnici/rapporto/rapporto-placeholder-map'
-import { applyNotaSpeseToRapportoMap, buildArt30RapportoSummary } from '../../../_shared/gii-anteprime/documenti-tecnici/rapporto/rapporto-nota-spese-summary'
-import { drawEmbeddedPdfPageInRapportoTechnicalBody, drawRapportoTechnicalHeadersByPage, RAPPORTO_TECHNICAL_BODY_BOX, wrapMapPdfBlobWithRapportoTechnicalHeader } from '../../../_shared/gii-anteprime/documenti-tecnici/rapporto/technical-document-header'
-import { defaultGiiDocumentPrintOptions as defaultDocumentPrintOptions, cloneGiiDocumentPrintOptions as cloneDocumentPrintOptions, setGiiAttachmentPrintOptionVisible, setGiiMapLayerKeysVisible, setGiiNotaSpesePrintOptionVisible } from '../../../_shared/gii-anteprime/viewer-documenti/document-options'
-import type { GiiDocumentPrintOptions as DocumentPrintOptions, GiiAttachmentPrintOption as AttachmentPrintOption, GiiNotaSpesePrintOption as NotaSpesePrintOption } from '../../../_shared/gii-anteprime/viewer-documenti/document-options'
-import { buildGiiMapLegendItemsForView, computePrintExtentForView, ensureGiiPrintableMapLayersReady, flattenGiiPrintableMapLayerTree as flattenPrintableMapLayerTree, listGiiPrintableMapLayerTree as listPrintableMapLayerTree, listGiiPrintableMapLayers as listPrintableMapLayers } from '../../../_shared/gii-anteprime/viewer-documenti/map-layers'
-import type { GiiPrintableMapLayerItem as PrintableMapLayerItem } from '../../../_shared/gii-anteprime/viewer-documenti/map-layers'
-import GiiDocumentViewer from '../../../_shared/gii-anteprime/viewer-documenti/document-viewer'
+import { drawEmbeddedPdfPageInRapportoTechnicalBody, drawRapportoTechnicalHeadersByPage, RAPPORTO_TECHNICAL_BODY_BOX, attachmentTechnicalDocumentTitle } from '../../../_shared/gii-anteprime/documenti-tecnici/rapporto/technical-document-header'
+import GiiAnteprimaPanel from '../../../_shared/gii-anteprime/anteprima-panel'
 
 
 const GII_LOG_EVENTI_CICLI_URL = 'https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_LOG_EVENTI_CICLI/FeatureServer/0'
@@ -117,12 +109,8 @@ function getOfficialRapportoTecnicoNumber (data: any): string {
   return ''
 }
 
-function mapTechnicalDocumentTitleForActions (numeroRapportoTecnico?: string): string {
-  return `ELABORATO CARTOGRAFICO ALLEGATO AL RAPPORTO TECNICO DI RILEVAZIONE N. ${String(numeroRapportoTecnico || '').trim() || '-'}`
-}
-
 function attachmentTechnicalDocumentTitleForActions (index: number, numeroRapportoTecnico?: string): string {
-  return `ELABORATO PROBATORIO N. ${index} ALLEGATO AL RAPPORTO TECNICO DI RILEVAZIONE N. ${String(numeroRapportoTecnico || '').trim() || '-'}`
+  return attachmentTechnicalDocumentTitle(index, numeroRapportoTecnico)
 }
 
 function documentViewerTitleForActions (fileName: string, data: any, oid?: number | null): string {
@@ -1625,18 +1613,6 @@ function actionButtonStyle (bg: string, disabled: boolean, ui?: { btnBorderRadiu
 type Pending = null | 'TAKE' | 'ASSEGNA_TI' | 'ASSEGNA_TI_AMM' | 'INVIA_TI_AMM' | 'RESTITUISCI_TI_AMM' | 'INTEGRAZIONE' | 'INTEGRAZIONE_TI_AMM' | 'INTEGRAZIONE_TECNICA' | 'APPROVA' | 'RESPINGI' | 'TRASMETTI' | 'ELIMINA'
 
 type WorkflowEsitoChoice = '' | 'CONFORME' | 'DA_INTEGRARE' | 'RESPINTA'
-type DocumentAvailability = {
-  loading: boolean
-  loadingNotaSpese?: boolean
-  loadingMappa?: boolean
-  loadingAllegati?: boolean
-  notaSpese: boolean
-  mappa: boolean
-  allegati: boolean
-  propostaContestazione?: boolean
-  determinazione?: boolean
-  checkedKey: string
-}
 
 type InformativeActivityTarget = {
   ruoloDestinatario: string
@@ -1688,6 +1664,7 @@ function ActionsPanel (props: {
     presaRequiredVal: number
   }
   nsConfig: { detailUrl: string; parametriUrl: string; parametroCode: string }
+  sanzioneConfig: { parametriSanzioniUrl: string; regolamentoArticoliUrl: string; regolamentoRaccordiUrl: string }
   printConfig: { serviceUrl: string }
   mapView: any
 }) {
@@ -1772,14 +1749,6 @@ function ActionsPanel (props: {
   const [incompleteNotaSpeseWarning, setIncompleteNotaSpeseWarning] = React.useState<string[]>([])
 
   const [previewOpen, setPreviewOpen] = React.useState(false)
-  const [previewLoading, setPreviewLoading] = React.useState(false)
-  const [previewError, setPreviewError] = React.useState<string | null>(null)
-  const [previewUrl, setPreviewUrl] = React.useState<string | null>(null)
-  const [previewFileName, setPreviewFileName] = React.useState<string>('rapporto.pdf')
-
-  React.useEffect(() => {
-    return () => { revokeRapportoPdfUrl(previewUrl) }
-  }, [previewUrl])
 
   React.useEffect(() => {
     if (!previewOpen) return
@@ -1860,134 +1829,21 @@ function ActionsPanel (props: {
 
   const closeRapportoPreview = React.useCallback(() => {
     setPreviewOpen(false)
-    setPreviewError(null)
-    setPreviewLoading(false)
   }, [])
 
-  const [docAvailability, setDocAvailability] = React.useState<DocumentAvailability>({
-    loading: false,
-    notaSpese: false,
-    mappa: false,
-    allegati: false,
-    propostaContestazione: false,
-    determinazione: false,
-    checkedKey: ''
-  })
-  const [docNotaSpeseOptions, setDocNotaSpeseOptions] = React.useState<NotaSpesePrintOption[]>([])
-  const [docAttachmentOptions, setDocAttachmentOptions] = React.useState<AttachmentPrintOption[]>([])
-  const [docMapTarget, setDocMapTarget] = React.useState<any | null>(null)
-  const docCheckReqRef = React.useRef('')
-  const printableLayerTree = React.useMemo(() => listPrintableMapLayerTree(props.mapView), [props.mapView])
-  const [docOptions, setDocOptions] = React.useState<DocumentPrintOptions>(() => defaultDocumentPrintOptions())
   const showAdminPreviewDocuments = role === 'TI_AMM' || role === 'RI_AMM' || role === 'DA' || role === 'ADMIN'
 
-  const setNotaSpeseOptionVisible = React.useCallback((key: string, visible: boolean) => {
-    setDocOptions(prev => setGiiNotaSpesePrintOptionVisible(prev, key, visible))
-  }, [])
-
-  const setAttachmentOptionVisible = React.useCallback((id: number, visible: boolean) => {
-    setDocOptions(prev => setGiiAttachmentPrintOptionVisible(prev, id, visible))
-  }, [])
-
-  const prepareDocumentsPreview = React.useCallback((): { options: DocumentPrintOptions; mapTarget: any | null } | null => {
-    if (!hasSel || !data) return null
-    const quickMapTarget = pointGeometryFromAttrsForActions(data)
-    const quickNotaSpese = hasNotaSpeseLocalForActions(data)
-    const layerVisibility: Record<string, boolean> = {}
-    listPrintableMapLayers(props.mapView).forEach(item => { layerVisibility[item.key] = item.visible })
-    const baseOptions = defaultDocumentPrintOptions()
-    const nextOptions: DocumentPrintOptions = {
-      ...baseOptions,
-      includeRapporto: true,
-      includeNotaSpese: false,
-      includeMappa: false,
-      includeAllegati: false,
-      includePropostaContestazione: showAdminPreviewDocuments,
-      includeDeterminazione: false,
-      selectedNotaSpeseKeys: {},
-      selectedAttachmentIds: {},
-      mapBasemap: docOptions.mapBasemap || baseOptions.mapBasemap || 'satellite',
-      mapLayout: docOptions.mapLayout || baseOptions.mapLayout,
-      mapScale: docOptions.mapScale || baseOptions.mapScale,
-      mapLocalizationLayerUrl: String(active?.key || ''),
-      mapLayerVisibility: Object.keys(docOptions.mapLayerVisibility || {}).length ? docOptions.mapLayerVisibility : layerVisibility
-    }
-    setDocOptions(nextOptions)
-    const checkedKey = `${active?.key || ''}:${oid || ''}:${Date.now()}`
-    docCheckReqRef.current = checkedKey
-    setDocNotaSpeseOptions([])
-    setDocAttachmentOptions([])
-    setDocAvailability({
-      loading: false,
-      loadingNotaSpese: !quickNotaSpese,
-      loadingMappa: !quickMapTarget,
-      loadingAllegati: true,
-      notaSpese: quickNotaSpese,
-      mappa: !!quickMapTarget,
-      allegati: false,
-      propostaContestazione: showAdminPreviewDocuments,
-      determinazione: showAdminPreviewDocuments,
-      checkedKey
-    })
-    setDocMapTarget(quickMapTarget || null)
-    void loadNotaSpeseOptionsForActions(data, props.nsConfig).then(notaSpeseList => {
-      if (docCheckReqRef.current !== checkedKey) return
-      setDocNotaSpeseOptions(notaSpeseList)
-      setDocOptions(prev => {
-        const selectedNotaSpeseKeys: Record<string, boolean> = {}
-        notaSpeseList.forEach(item => {
-          selectedNotaSpeseKeys[item.key] = true
-        })
-        return { ...prev, selectedNotaSpeseKeys, includeNotaSpese: notaSpeseList.length > 0 ? prev.includeNotaSpese : false }
-      })
-      const notaSpese = notaSpeseList.length > 0
-      setDocAvailability(prev => prev.checkedKey === checkedKey ? { ...prev, loading: false, loadingNotaSpese: false, notaSpese } : prev)
-      if (!notaSpese) setDocOptions(prev => ({ ...prev, includeNotaSpese: false }))
-    }).catch(() => {
-      if (docCheckReqRef.current !== checkedKey) return
-      setDocNotaSpeseOptions([])
-      setDocAvailability(prev => prev.checkedKey === checkedKey ? { ...prev, loading: false, loadingNotaSpese: false, notaSpese: false } : prev)
-      setDocOptions(prev => ({ ...prev, includeNotaSpese: false }))
-    })
-    void resolvePointGeometryForActions(active?.state?.ds, Number(oid), active?.state?.idFieldName || idFieldNameFromSel, data, active?.key).then(mapTarget => {
-      if (docCheckReqRef.current !== checkedKey) return
-      const mappa = !!mapTarget
-      setDocMapTarget(mapTarget || null)
-      setDocAvailability(prev => prev.checkedKey === checkedKey ? { ...prev, loading: false, loadingMappa: false, mappa } : prev)
-      if (!mappa) setDocOptions(prev => ({ ...prev, includeMappa: false }))
-    }).catch(() => {
-      if (docCheckReqRef.current !== checkedKey) return
-      setDocMapTarget(null)
-      setDocAvailability(prev => prev.checkedKey === checkedKey ? { ...prev, loading: false, loadingMappa: false, mappa: false } : prev)
-      setDocOptions(prev => ({ ...prev, includeMappa: false }))
-    })
-    void loadAttachmentOptionsForActions(active?.state?.ds, Number(oid)).then(allegatiList => {
-      if (docCheckReqRef.current !== checkedKey) return
-      const selectedAttachmentIds: Record<string, boolean> = {}
-      allegatiList.forEach(att => { selectedAttachmentIds[String(att.id)] = true })
-      setDocAttachmentOptions(allegatiList)
-      setDocOptions(prev => ({ ...prev, selectedAttachmentIds, includeAllegati: allegatiList.length > 0 ? prev.includeAllegati : false }))
-      const allegati = allegatiList.length > 0
-      setDocAvailability(prev => prev.checkedKey === checkedKey ? { ...prev, loading: false, loadingAllegati: false, allegati } : prev)
-      if (!allegati) setDocOptions(prev => ({ ...prev, includeAllegati: false }))
-    }).catch(() => {
-      if (docCheckReqRef.current !== checkedKey) return
-      setDocAttachmentOptions([])
-      setDocAvailability(prev => prev.checkedKey === checkedKey ? { ...prev, loading: false, loadingAllegati: false, allegati: false } : prev)
-      setDocOptions(prev => ({ ...prev, includeAllegati: false }))
-    })
-    return { options: nextOptions, mapTarget: quickMapTarget || null }
-  }, [active, data, docOptions, hasSel, idFieldNameFromSel, oid, praticaCode, praticaLabel, props.mapView, props.nsConfig, showAdminPreviewDocuments])
-
-  const updateDocOption = React.useCallback((patch: Partial<DocumentPrintOptions>) => {
-    setDocOptions(prev => ({ ...prev, ...patch }))
-  }, [])
-
-  const setMapLayerKeysVisible = React.useCallback((keys: string[], visible: boolean) => {
-    setDocOptions(prev => setGiiMapLayerKeysVisible(prev, keys, visible))
-  }, [])
-  const [expandedLayerGroups, setExpandedLayerGroups] = React.useState<Record<string, boolean>>({})
-
+  const [modalMapTarget, setModalMapTarget] = React.useState<any | null>(null)
+  React.useEffect(() => {
+    if (!previewOpen || !hasSel || !data) { setModalMapTarget(null); return }
+    let cancelled = false
+    setModalMapTarget(pointGeometryFromAttrsForActions(data) || null)
+    void resolvePointGeometryForActions(active?.state?.ds, Number(oid), active?.state?.idFieldName || idFieldNameFromSel, data, active?.key).then(mt => {
+      if (cancelled) return
+      setModalMapTarget(mt || null)
+    }).catch(() => { if (!cancelled) setModalMapTarget(null) })
+    return () => { cancelled = true }
+  }, [previewOpen, hasSel, data, active, oid, idFieldNameFromSel])
 
   const pickAttrCI = (obj: any, keys: string[]): any => {
     if (!obj) return undefined
@@ -2100,21 +1956,6 @@ function ActionsPanel (props: {
     return map
   }, [data, oid, pickAttrCI])
 
-  const buildPropostaContestazionePdfBlobForActions = React.useCallback(async (): Promise<{ blob: Blob; fileName: string }> => {
-    const profile = {
-      username: String((window as any).__giiUserRole?.username || ''),
-      fullName: String((window as any).__giiUserRole?.fullName || (window as any).__giiUserRole?.full_name || '')
-    }
-    const schemaFields: Record<string, any> = (ds as any)?.getSchema?.()?.fields || {}
-    const fieldsForProposta = Object.keys(schemaFields).map(name => ({
-      name,
-      type: String(schemaFields[name]?.type || ''),
-      alias: schemaFields[name]?.alias,
-      domain: schemaFields[name]?.domain || null
-    }))
-    return await buildVerbalePdfBlob(data || {}, fieldsForProposta as any, profile)
-  }, [data, ds])
-
   const buildDeterminazionePdfBlobForActions = React.useCallback(async (): Promise<{ blob: Blob; fileName: string }> => {
     const map = buildAdminPreviewPdfMapForActions()
     const bytes = await buildBozzaDeterminazionePdf(map)
@@ -2122,85 +1963,10 @@ function ActionsPanel (props: {
     return { blob: new Blob([bytes as any], { type: 'application/pdf' }), fileName: `determinazione_dirigenziale_${base}.pdf` }
   }, [buildAdminPreviewPdfMapForActions])
 
-  const buildSelectedDocumentsPdfWithOptions = React.useCallback(async (options: DocumentPrintOptions, mapTargetOverride?: any | null): Promise<{ blob: Blob; fileName: string }> => {
-    if (!hasSel || !data) throw new Error('Selezionare un rapporto.')
-    const items: Array<{ blob: Blob; fileName: string }> = []
-    const opts = options || docOptions
-    const selectedMapTarget = mapTargetOverride !== undefined ? mapTargetOverride : docMapTarget
-    const selectedNotaSpeseKeys = docNotaSpeseOptions
-      .filter(item => (opts.selectedNotaSpeseKeys || {})[item.key] !== false)
-      .map(item => item.key)
-    if (opts.includeNotaSpese && selectedNotaSpeseKeys.length === 0) throw new Error('Selezionare almeno una nota spese.')
-    if (opts.includeRapporto || opts.includeNotaSpese) {
-      items.push(await buildRapportoPdfBlob(data, _utentiCache, props.nsConfig, {
-        includeRapporto: opts.includeRapporto,
-        includeNotaSpese: opts.includeNotaSpese,
-        selectedNotaSpeseKeys: { ...(opts.selectedNotaSpeseKeys || {}) }
-      }))
-    }
-    if (opts.includeMappa) {
-      if (!props.mapView || !selectedMapTarget) throw new Error('Mappa non disponibile per la pratica selezionata.')
-      items.push(await buildMapPrintPdfBlob(props.mapView, props.printConfig?.serviceUrl, { ...opts, mapTarget: selectedMapTarget }))
-    }
-    if (opts.includeAllegati) {
-      const selectedAttachmentIds = docAttachmentOptions
-        .filter(att => (opts.selectedAttachmentIds || {})[String(att.id)] !== false)
-        .map(att => Number(att.id))
-        .filter(id => Number.isFinite(id) && id > 0)
-      if (selectedAttachmentIds.length === 0) throw new Error('Selezionare almeno un allegato.')
-      const attPdf = await buildPracticeAttachmentsPdfBlob(active?.state?.ds, Number(oid), selectedAttachmentIds, getOfficialRapportoTecnicoNumber(data) || '-')
-      if (attPdf) items.push(attPdf)
-      else setMsg({ kind: 'info', text: 'Nessun allegato probatorio impaginabile trovato.' })
-    }
-    if (showAdminPreviewDocuments && opts.includePropostaContestazione) {
-      items.push(await buildPropostaContestazionePdfBlobForActions())
-    }
-    if (showAdminPreviewDocuments && opts.includeDeterminazione) {
-      items.push(await buildDeterminazionePdfBlobForActions())
-    }
-    if (items.length === 0) throw new Error('Selezionare almeno un documento.')
-    const safeCode = String(praticaCode || 'documenti').replace(/[^a-zA-Z0-9_-]/g, '_')
-    if (items.length === 1) return items[0]
-    return { blob: await mergePdfBlobs(items), fileName: `documenti_${safeCode}.pdf` }
-  }, [active, buildDeterminazionePdfBlobForActions, buildPropostaContestazionePdfBlobForActions, data, docAttachmentOptions, docMapTarget, docNotaSpeseOptions, docOptions, hasSel, oid, praticaCode, props.mapView, props.nsConfig, props.printConfig, showAdminPreviewDocuments])
-
-  const generatePreviewDocuments = React.useCallback((options: DocumentPrintOptions, mapTarget: any | null) => {
-    if (previewLoading) return
-    setPreviewOpen(true)
-    setPreviewLoading(true)
-    setPreviewError(null)
-    setPreviewFileName('')
-    setPreviewUrl(prev => {
-      revokeRapportoPdfUrl(prev)
-      return null
-    })
-    const optionsSnapshot = cloneDocumentPrintOptions(options)
-    ;(async () => {
-      try {
-        const { blob, fileName } = await buildSelectedDocumentsPdfWithOptions(optionsSnapshot, mapTarget)
-        const url = makeRapportoPdfUrl(blob, fileName)
-        setPreviewFileName(fileName)
-        setPreviewUrl(prev => {
-          revokeRapportoPdfUrl(prev)
-          return url
-        })
-      } catch (ex: any) {
-        setPreviewError('Errore generazione documenti: ' + (ex?.message || String(ex)))
-      } finally {
-        setPreviewLoading(false)
-      }
-    })()
-  }, [buildSelectedDocumentsPdfWithOptions, previewLoading])
-
   const handleRapportoPreview = React.useCallback(() => {
-    const prepared = prepareDocumentsPreview()
-    if (!prepared) return
-    generatePreviewDocuments(prepared.options, prepared.mapTarget)
-  }, [generatePreviewDocuments, prepareDocumentsPreview])
-
-  const handleRegeneratePreviewDocuments = React.useCallback(() => {
-    generatePreviewDocuments(docOptions, docMapTarget)
-  }, [docMapTarget, docOptions, generatePreviewDocuments])
+    if (!hasSel || !data) return
+    setPreviewOpen(true)
+  }, [hasSel, data])
 
 
   const sessionIdRef = React.useRef<string>(`sess-${Date.now()}-${Math.random().toString(16).slice(2)}`)
@@ -5161,7 +4927,45 @@ function ActionsPanel (props: {
         idFieldNameFromSel ||
         'OBJECTID'
 
-      const fullAttrs = { [idFieldName]: oid, ...attributesIn }
+      const fullAttrsBeforeSanzione: Record<string, any> = { [idFieldName]: oid, ...attributesIn }
+      const isRiAmmPresaInCarico = Number(fullAttrsBeforeSanzione.stato_RI_AMM) === 2
+
+      console.warn('[GII_SANZIONE_DIAG] valutazione condizione', {
+        oid,
+        stato_RI_AMM: fullAttrsBeforeSanzione.stato_RI_AMM,
+        condizioneVera: isRiAmmPresaInCarico,
+        campiInScrittura: Object.keys(attributesIn).join(', ')
+      })
+
+      let sanzioneExtra: Record<string, any> = {}
+      if (isRiAmmPresaInCarico) {
+        try {
+          const profileForSanzione = {
+            username: String((window as any).__giiUserRole?.username || ''),
+            fullName: String((window as any).__giiUserRole?.fullName || (window as any).__giiUserRole?.full_name || '')
+          }
+          const schemaFieldsForSanzione: Record<string, any> = (ds as any)?.getSchema?.()?.fields || {}
+          const fieldsForSanzione = Object.keys(schemaFieldsForSanzione).map(name => ({
+            name,
+            type: String(schemaFieldsForSanzione[name]?.type || ''),
+            alias: schemaFieldsForSanzione[name]?.alias,
+            domain: schemaFieldsForSanzione[name]?.domain || null
+          }))
+          sanzioneExtra = await computeSanzioneAutomatica(
+            props.sanzioneConfig,
+            { ...(data || {}), ...attributesIn },
+            fieldsForSanzione as any,
+            profileForSanzione,
+            data || {}
+          )
+          console.warn('[GII_SANZIONE_DIAG] calcolo completato, campi prodotti: ' + Object.keys(sanzioneExtra || {}).join(', '))
+          console.warn('[GII_SANZIONE_DIAG] sanzione_dettaglio_calcolo prodotto: ' + String((sanzioneExtra || {}).sanzione_dettaglio_calcolo || '(vuoto)'))
+        } catch (e: any) {
+          console.warn('[GII_SANZIONE] calcolo automatico fallito, salvataggio prosegue senza sanzione ricalcolata', e?.message || e)
+        }
+      }
+
+      const fullAttrs = { [idFieldName]: oid, ...attributesIn, ...sanzioneExtra }
       const attrs = filterAttrsToLayerFields(fullAttrs, layer)
 
       const res = await layer.applyEdits({ updateFeatures: [{ attributes: attrs }] })
@@ -6776,40 +6580,28 @@ ${noteTrim}` : 'Attestazione di conformità apposta.',
         onClick={(e) => { e.stopPropagation() }}
         onMouseDown={(e) => { e.stopPropagation() }}
       >
-        <GiiDocumentViewer
-          url={previewUrl}
-          fileName={previewFileName}
-          title={hasSel && oid != null ? documentViewerTitleForActions(previewFileName, data, oid) : previewFileName}
-          subtitle={undefined}
-          loading={previewLoading}
-          error={previewError}
-          emptyText='Nessun dato disponibile per l&apos;anteprima.'
-          onClose={closeRapportoPreview}
-          width={290}
-          docOptions={docOptions}
-          availability={docAvailability}
-          showAdminDocuments={showAdminPreviewDocuments}
-          busy={previewLoading}
-          canUseMap={!!props.mapView}
-          mapPanelAvailable={!!docAvailability.mappa && !!props.mapView}
-          documentChecking={{
-            includeNotaSpese: !!docAvailability.loadingNotaSpese,
-            includeMappa: !!docAvailability.loadingMappa,
-            includeAllegati: !!docAvailability.loadingAllegati,
-            includePropostaContestazione: false,
-            includeDeterminazione: false
+        <GiiAnteprimaPanel
+          data={data || {}}
+          mode='edit'
+          ds={ds}
+          oid={oid}
+          idFieldName={idFieldNameFromSel}
+          mapView={props.mapView}
+          mapMode='live'
+          mapTarget={modalMapTarget}
+          mapConfig={{ mapLayerUrl: String(active?.key || '') }}
+          printServiceUrl={props.printConfig?.serviceUrl}
+          notaSpeseConfig={props.nsConfig}
+          canSeeAmministrativi={showAdminPreviewDocuments}
+          determinazioneAvailable={showAdminPreviewDocuments}
+          extraDocumentBuilder={async () => await buildDeterminazionePdfBlobForActions()}
+          profile={{
+            username: String((window as any).__giiUserRole?.username || ''),
+            fullName: String((window as any).__giiUserRole?.fullName || (window as any).__giiUserRole?.full_name || '')
           }}
-          notaSpeseOptions={docNotaSpeseOptions}
-          attachmentOptions={docAttachmentOptions}
-          printableLayerTree={printableLayerTree}
-          expandedLayerGroups={expandedLayerGroups}
-          mapEmptyText='La mappa è agganciata, ma non espone layer stampabili leggibili.'
-          updateDocOption={updateDocOption}
-          setNotaSpeseOptionVisible={setNotaSpeseOptionVisible}
-          setAttachmentOptionVisible={setAttachmentOptionVisible}
-          setMapLayerKeysVisible={setMapLayerKeysVisible}
-          setExpandedLayerGroups={setExpandedLayerGroups}
-          onRegenerate={handleRegeneratePreviewDocuments}
+          sidebarWidth={290}
+          viewerBackgroundColor='#282828'
+          onClose={closeRapportoPreview}
         />
       </div>
     </div>,
@@ -7455,138 +7247,6 @@ function notaSpesePrintGroupsForRapportoPdf (
   return out
 }
 
-async function loadNotaSpeseOptionsForActions (
-  data: any,
-  nsConfig?: { detailUrl: string; parametriUrl: string; parametroCode: string }
-): Promise<NotaSpesePrintOption[]> {
-  let nsGroups: Array<{ codiceCasistica: string; label: string; rows: Record<NsCatPdf, NsRowPdf[]>; summary: NsSummaryPdf }> = []
-  let percSG = 15
-  const detailUrl = normalizeArcgisLayerUrl(nsConfig?.detailUrl)
-  const parametriUrl = normalizeArcgisLayerUrl(nsConfig?.parametriUrl)
-  if (detailUrl && data) {
-    try {
-      const parentGlobalId = String(data.GlobalID || data.globalid || data.GLOBALID || data.global_id || '').trim()
-      if (parentGlobalId) {
-        const FeatureLayer = await loadEsriModule<any>('esri/layers/FeatureLayer')
-        const detailPromise = (async () => {
-          const fl = new FeatureLayer({ url: detailUrl })
-          if (typeof fl.load === 'function') await fl.load()
-          const where = parentGlobalidWhereForRapportoPdf(parentGlobalId)
-          const res = await fl.queryFeatures({ where, outFields: ['*'], returnGeometry: false })
-          return (res?.features || []).map((f: any) => f.attributes || {})
-        })()
-        const percPromise = (async () => {
-          if (!parametriUrl) return 15
-          try {
-            const pCode = nsConfig?.parametroCode || 'SPESE_GENERALI_PERC'
-            const pfl = new FeatureLayer({ url: parametriUrl })
-            if (typeof pfl.load === 'function') await pfl.load()
-            const pRes = await pfl.queryFeatures({ where: `codice_parametro = '${escapeSqlStringForRapportoPdf(pCode)}'`, outFields: ['valore_num'], returnGeometry: false })
-            const pVal = pRes?.features?.[0]?.attributes?.valore_num
-            return (pVal != null) ? (Number(pVal) || 15) : 15
-          } catch { return 15 }
-        })()
-        const [rawRows, pct] = await Promise.all([detailPromise, percPromise])
-        percSG = Number(pct) || 15
-        nsGroups = notaSpeseGroupsForRapportoPdf(rawRows, percSG)
-      }
-    } catch {}
-  }
-  return notaSpesePrintGroupsForRapportoPdf(nsGroups, data, percSG).map(group => ({
-    key: group.codiceCasistica,
-    label: group.label
-  }))
-}
-
-async function buildRapportoPdfBlob (
-  data: any, utentiCache: Map<string, UtenteCached> | null,
-  nsConfig?: { detailUrl: string; parametriUrl: string; parametroCode: string },
-  docOptions?: { includeRapporto?: boolean; includeNotaSpese?: boolean; selectedNotaSpeseKeys?: Record<string, boolean> }
-): Promise<{ blob: Blob; fileName: string }> {
-  const iterGlobalId = pickRapportoAttrCI(data, ['globalid', 'GlobalID', 'GLOBALID', 'parent_globalid'])
-  const iterCicli = await loadRapportoIterCicliForPdf(iterGlobalId)
-  const map = buildPlaceholderMap(data, utentiCache as any, iterCicli)
-  const fileName = rapportoPdfFileName(map)
-
-  const includeRapporto = docOptions?.includeRapporto !== false
-  const includeNotaSpese = docOptions?.includeNotaSpese !== false
-  const { selectedGroups: reportNsGroups } = await applyNotaSpeseToRapportoMap(map, data, nsConfig, {
-    includeNotaSpese,
-    selectedNotaSpeseKeys: docOptions?.selectedNotaSpeseKeys
-  })
-  const art30Summary = buildArt30RapportoSummary(data)
-
-  const rapportoBytes = includeRapporto ? await buildRapportoPdf(map) : null
-  let finalBytes: Uint8Array = rapportoBytes || new Uint8Array()
-
-  if (includeNotaSpese && reportNsGroups.length > 0) {
-    const merged = await PDFDocument.create()
-    if (rapportoBytes) {
-      const rapDoc = await PDFDocument.load(rapportoBytes)
-      const rapPages = await merged.copyPages(rapDoc, rapDoc.getPageIndices())
-      rapPages.forEach(pg => merged.addPage(pg))
-    }
-
-    for (let i = 0; i < reportNsGroups.length; i++) {
-      const group = reportNsGroups[i]
-      const nsData: NotaSpeseData = {
-        cod_pratica: map.cod_pratica || '',
-        area_label: map.area_label || '',
-        settore_label: map.settore_label || '',
-        area_cod: map.area_cod || '',
-        numero_nota: i + 1,
-        titolo_nota: group.label,
-        rows: group.rows as any,
-        summary: group.summary as any,
-        art30: group.codiceCasistica === 'C104_ATTREZZATURE_DANNEGGIATE' && art30Summary.hasData
-          ? {
-              rows: art30Summary.rows.map(row => ({
-                codice: row.codice,
-                descrizione: row.descrizione,
-                quantita: row.quantita,
-                valore_unitario: row.valoreUnitario,
-                importo: roundMoneyRapportoPdf(row.importo ?? ((row.valoreUnitario ?? 0) * row.quantita))
-              })),
-              rimborso: art30Summary.rimborso,
-              cauzione: art30Summary.cauzione,
-              cauzione_quantita: art30Summary.cauzioneQuantita,
-              cauzione_valore_unitario: art30Summary.cauzioneValoreUnitario,
-              cauzione_unita_misura: art30Summary.cauzioneUnitaMisura,
-              netto: art30Summary.netto
-            }
-          : null,
-        luogo_data: 'Cagliari, ' + (formatDateIt(data.data_firma) || new Date().toLocaleDateString('it-IT', { day: '2-digit', month: '2-digit', year: 'numeric' })),
-        firma_nome: map.firma_ti || '',
-        rapporto_respinto: map.rapporto_respinto === '1',
-        rapporto_istruttoria: map.rapporto_istruttoria === '1'
-      }
-      const nsBytes = await buildNotaSpesePdf(nsData)
-      const nsDoc = await PDFDocument.load(nsBytes)
-      const nsPages = await merged.copyPages(nsDoc, nsDoc.getPageIndices())
-      nsPages.forEach(pg => merged.addPage(pg))
-    }
-
-
-    finalBytes = await merged.save()
-  }
-  if (!includeRapporto && (!includeNotaSpese || reportNsGroups.length === 0)) {
-    throw new Error('Nessuna nota spese allegabile trovata per il rapporto selezionato.')
-  }
-
-  const blob = new Blob([finalBytes as any], { type: 'application/pdf' })
-  const outFileName = includeRapporto ? fileName : fileName.replace(/^rapporto_/i, 'nota_spese_')
-  return { blob, fileName: outFileName }
-}
-
-function makeRapportoPdfUrl (blob: Blob, fileName: string): string {
-  return `${URL.createObjectURL(blob)}#${fileName}`
-}
-
-function revokeRapportoPdfUrl (url?: string | null): void {
-  if (!url) return
-  try { URL.revokeObjectURL(String(url).split('#')[0]) } catch {}
-}
-
 type DetailMapConfigForActions = {
   basemap: string
   centerLon: number
@@ -7598,70 +7258,6 @@ type DetailMapConfigForActions = {
   mapLayerUrl: string
   mapLayerId: string
   mapLayerLayerId: string
-}
-
-function comparableArcgisLayerUrlForActions (raw: any): string {
-  return normalizeArcgisLayerUrl(String(raw || ''))
-    .split(/[?#]/)[0]
-    .replace(/\/+$/, '')
-    .toLowerCase()
-}
-
-function sameArcgisLayerUrlForActions (a: any, b: any): boolean {
-  const aa = comparableArcgisLayerUrlForActions(a)
-  const bb = comparableArcgisLayerUrlForActions(b)
-  return !!aa && !!bb && aa === bb
-}
-
-function normalizePrintableLayerTitleForActions (raw: any): string {
-  return String(raw || '')
-    .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '')
-    .toLowerCase()
-}
-
-function printableLayerIsLocalizationForActions (item: PrintableMapLayerItem, opts: DocumentPrintOptions): boolean {
-  if (!item?.layer) return false
-  if (sameArcgisLayerUrlForActions(item.layer?.url, opts.mapLocalizationLayerUrl)) return true
-  const title = normalizePrintableLayerTitleForActions(item.title || item.layer?.title || item.layer?.id || item.layer?.name)
-  return title.includes('localizz') && title.includes('infraz')
-}
-
-function mapBasemapLabelForActions (value: any): string {
-  const key = String(value || '').trim().toLowerCase()
-  if (key === 'satellite') return 'Ortofoto'
-  if (key === 'hybrid') return 'Ortofoto con etichette'
-  if (key === 'topo-vector') return 'Topografica'
-  if (key === 'streets-vector') return 'Stradale'
-  return String(value || '').trim()
-}
-
-function mapPrintPointGeometryForActions (target: any, Point: any): any | null {
-  if (!target) return null
-  const sr = target.spatialReference || { wkid: 4326 }
-  const lon = Number(target.longitude ?? (sr?.wkid === 4326 ? target.x : NaN))
-  const lat = Number(target.latitude ?? (sr?.wkid === 4326 ? target.y : NaN))
-  if (Number.isFinite(lon) && Number.isFinite(lat) && !(lon === 0 && lat === 0)) {
-    return new Point({ longitude: lon, latitude: lat, spatialReference: { wkid: 4326 } })
-  }
-  const x = Number(target.x)
-  const y = Number(target.y)
-  if (Number.isFinite(x) && Number.isFinite(y) && !(x === 0 && y === 0)) {
-    return new Point({ x, y, spatialReference: sr })
-  }
-  return null
-}
-
-function delayForActions (ms: number): Promise<void> {
-  return new Promise(resolve => window.setTimeout(resolve, ms))
-}
-
-function currentBasemapId (view: any): string {
-  try {
-    return String(view?.map?.basemap?.id || view?.map?.basemap?.portalItem?.id || view?.map?.basemap?.title || '')
-  } catch {
-    return ''
-  }
 }
 
 function mutableForActions<T = any> (value: any): T {
@@ -7852,178 +7448,6 @@ async function hasNotaSpeseForActions (
   }
 }
 
-async function mergePdfBlobs (items: Array<{ blob: Blob; fileName: string }>): Promise<Blob> {
-  const merged = await PDFDocument.create()
-  for (const item of items) {
-    const bytes = new Uint8Array(await item.blob.arrayBuffer())
-    const src = await PDFDocument.load(bytes as any)
-    const pages = await merged.copyPages(src, src.getPageIndices())
-    pages.forEach(pg => merged.addPage(pg))
-  }
-  const out = await merged.save()
-  return new Blob([out as any], { type: 'application/pdf' })
-}
-
-async function buildMapPrintPdfBlob (view: any, printServiceUrl: string, opts: DocumentPrintOptions): Promise<{ blob: Blob; fileName: string }> {
-  if (!view) throw new Error('Map view non disponibile per la stampa.')
-  const serviceUrl = String(printServiceUrl || '').trim()
-  if (!serviceUrl) throw new Error('Servizio stampa ArcGIS non configurato.')
-
-  const print = await loadEsriModule<any>('esri/rest/print')
-  const PrintTemplate = await loadEsriModule<any>('esri/rest/support/PrintTemplate')
-  const PrintParameters = await loadEsriModule<any>('esri/rest/support/PrintParameters')
-  const Basemap = await loadEsriModule<any>('esri/Basemap').catch((): null => null)
-  const Graphic = await loadEsriModule<any>('esri/Graphic').catch((): null => null)
-  const Point = await loadEsriModule<any>('esri/geometry/Point').catch((): null => null)
-  const SimpleMarkerSymbol = await loadEsriModule<any>('esri/symbols/SimpleMarkerSymbol').catch((): null => null)
-  const symbolUtils = await loadEsriModule<any>('esri/symbols/support/symbolUtils').catch((): null => null)
-  const ExtentCtor = await loadEsriModule<any>('esri/geometry/Extent').catch((): null => null)
-
-  await ensureGiiPrintableMapLayersReady(view)
-  const layers = listPrintableMapLayers(view)
-  const localizationLayerKeys = new Set(layers.filter(item => printableLayerIsLocalizationForActions(item, opts)).map(item => item.key))
-  const hasLocalizationLayerControl = localizationLayerKeys.size > 0
-  const localizationRequested = !hasLocalizationLayerControl || layers.some(item => {
-    if (!localizationLayerKeys.has(item.key)) return false
-    return opts.mapLayerVisibility?.[item.key] !== false
-  })
-  const oldVisibilityMap = new Map<any, boolean>()
-  const oldDefinitionMap = new Map<any, any>()
-  layers.forEach(item => {
-    ;[item.layer, ...(item.ancestors || [])].forEach(layer => {
-      if (layer && !oldVisibilityMap.has(layer)) oldVisibilityMap.set(layer, layer.visible !== false)
-    })
-    if (localizationLayerKeys.has(item.key) && item.layer && !oldDefinitionMap.has(item.layer)) {
-      try { oldDefinitionMap.set(item.layer, item.layer.definitionExpression) } catch {}
-    }
-  })
-  const oldBasemap = view?.map?.basemap
-  const oldScale = Number(view?.scale)
-  const oldViewpoint = (() => { try { return view?.viewpoint?.clone ? view.viewpoint.clone() : view?.viewpoint } catch { return null } })()
-  let printMarker: any = null
-  try {
-    layers.forEach(item => {
-      if (item.layer && Object.prototype.hasOwnProperty.call(opts.mapLayerVisibility || {}, item.key)) {
-        const visible = !!opts.mapLayerVisibility[item.key]
-        const isLocalizationLayer = localizationLayerKeys.has(item.key)
-        if (visible && !isLocalizationLayer) {
-          ;(item.ancestors || []).forEach(layer => { try { layer.visible = true } catch {} })
-        }
-        item.layer.visible = isLocalizationLayer ? false : visible
-        if (isLocalizationLayer) {
-          try { item.layer.definitionExpression = '1 = 0' } catch {}
-        }
-      }
-    })
-    if (opts.mapBasemap && view?.map) {
-      try {
-        const bm = Basemap?.fromId ? Basemap.fromId(String(opts.mapBasemap)) : String(opts.mapBasemap)
-        view.map.basemap = bm || String(opts.mapBasemap)
-        if (typeof view.map.basemap?.load === 'function') await view.map.basemap.load().catch(() => {})
-        await view.when?.()
-        try {
-          const baseLayer = view.map.basemap?.baseLayers?.getItemAt?.(0)
-          if (baseLayer && typeof view.whenLayerView === 'function') await Promise.race([view.whenLayerView(baseLayer), delayForActions(300)])
-        } catch {}
-        try { view.requestRender?.() } catch {}
-      } catch {
-        try { view.map.basemap = String(opts.mapBasemap) } catch {}
-      }
-    }
-    const requestedScale = Number(opts.mapScale)
-    const printTargetGeometry = Point && opts.mapTarget ? mapPrintPointGeometryForActions(opts.mapTarget, Point) : null
-    if (typeof view.goTo === 'function') {
-      if (opts.mapTarget) {
-        try { await view.goTo({ target: printTargetGeometry || opts.mapTarget, scale: Number.isFinite(requestedScale) && requestedScale > 0 ? requestedScale : undefined }, { animate: false }) } catch {}
-      } else if (Number.isFinite(requestedScale) && requestedScale > 0) {
-        try { await view.goTo({ scale: requestedScale }, { animate: false }) } catch {}
-      }
-    }
-    // Attende che la view si sia effettivamente stabilizzata sulla nuova posizione/scala
-    // prima di leggere view.scale/view.extent per il calcolo della legenda. goTo() risolve
-    // la Promise quando la transizione è logicamente completa, ma su salti di scala ampi
-    // (da zoom iniziale di default a scala di stampa 1:1000) lo stato interno della view
-    // può non essere ancora sincronizzato nello stesso istante — causa di risultati diversi
-    // tra rigenerazioni successive della stessa anteprima.
-    try { await view.when?.() } catch {}
-    try { view.requestRender?.() } catch {}
-    if (typeof view.whenLayerView === 'function' && view.map?.layers?.length) {
-      try { await Promise.race([view.whenLayerView(view.map.layers.getItemAt(0)), delayForActions(400)]) } catch {}
-    }
-    await delayForActions(250)
-    if (localizationRequested && opts.mapTarget && Graphic && Point && SimpleMarkerSymbol && view?.graphics) {
-      try {
-        const geometry = printTargetGeometry || mapPrintPointGeometryForActions(opts.mapTarget, Point)
-        if (geometry) {
-          const symbol = new SimpleMarkerSymbol({
-            style: 'circle',
-            color: [220, 38, 38, 220],
-            size: 9,
-            xoffset: 0,
-            yoffset: 0,
-            outline: { color: [255, 255, 255, 255], width: 1.5 }
-          })
-          printMarker = new Graphic({ geometry, symbol, attributes: { source: 'gii-azioni-print-marker' } })
-          view.graphics.add(printMarker)
-          try { view.requestRender?.() } catch {}
-          await delayForActions(120)
-        }
-      } catch {}
-    }
-
-    const printScale = Number(opts.mapScale) || Number(view?.scale) || 0
-    const printExtent = (printScale > 0 ? computePrintExtentForView(view, printScale, opts.mapLayout) ?? undefined : undefined) as { xmin: number; ymin: number; xmax: number; ymax: number; spatialReference?: any } | undefined
-
-    console.warn('[GII-LEGENDA-DEBUG] gii-azioni scale=', view?.scale, 'resolution=', view?.resolution,
-      'printScale=', printScale,
-      'extent=', view?.extent ? `${view.extent.xmin.toFixed(0)},${view.extent.ymin.toFixed(0)},${view.extent.xmax.toFixed(0)},${view.extent.ymax.toFixed(0)}` : null,
-      'printExtent=', printExtent ? `${printExtent.xmin.toFixed(0)},${printExtent.ymin.toFixed(0)},${printExtent.xmax.toFixed(0)},${printExtent.ymax.toFixed(0)}` : null)
-
-    const legendItems = await buildGiiMapLegendItemsForView(view, layers, { ...opts, symbolUtils, printExtent, ExtentCtor }, localizationLayerKeys, localizationRequested)
-    const template = new PrintTemplate({
-      format: 'pdf',
-      layout: opts.mapLayout || 'A4 Portrait',
-      layoutOptions: {
-        titleText: '',
-        authorText: '',
-        copyrightText: ''
-      },
-      exportOptions: { dpi: 96 },
-      scalePreserved: true,
-      outScale: Number(opts.mapScale) || Number(view?.scale) || undefined
-    })
-    const params = new PrintParameters({ view, template })
-    const result = await print.execute(serviceUrl, params)
-    const url = String(result?.url || result?.href || '')
-    if (!url) throw new Error('Il servizio stampa non ha restituito un PDF.')
-    const resp = await fetch(url)
-    if (!resp.ok) throw new Error(`Download stampa mappa fallito (HTTP ${resp.status}).`)
-    const rawBlob = await resp.blob()
-    return {
-      blob: await wrapMapPdfBlobWithRapportoTechnicalHeader(rawBlob, mapTechnicalDocumentTitleForActions('-'), {
-        scale: Number(opts.mapScale) || Number(view?.scale) || null,
-        basemapLabel: mapBasemapLabelForActions(opts.mapBasemap || view?.map?.basemap?.title || view?.map?.basemap?.id),
-        legendItems,
-        sourceLayout: opts.mapLayout
-      }),
-      fileName: 'mappa_rapporto.pdf'
-    }
-  } finally {
-    if (printMarker && view?.graphics) {
-      try { view.graphics.remove(printMarker) } catch {}
-    }
-    oldDefinitionMap.forEach((definition, layer) => { try { layer.definitionExpression = definition } catch {} })
-    oldVisibilityMap.forEach((visible, layer) => { try { layer.visible = visible } catch {} })
-    try { if (oldBasemap && view?.map) view.map.basemap = oldBasemap } catch {}
-    if (typeof view?.goTo === 'function') {
-      if (oldViewpoint) {
-        try { await view.goTo(oldViewpoint, { animate: false }) } catch {}
-      } else if (Number.isFinite(oldScale) && oldScale > 0) {
-        try { await view.goTo({ scale: oldScale }, { animate: false }) } catch {}
-      }
-    }
-  }
-}
 
 async function queryFeatureAttachmentsForActions (layer: any, oid: number, ds?: any): Promise<any[]> {
   if (!layer || !oid) return []
@@ -8110,23 +7534,6 @@ function isSpecialAdministrativeAttachmentForActions (att: any): boolean {
   if (/\bbozza\b.*\bdeterminazione\b/.test(nameKey) || /\bdeterminazione\b.*\bbozza\b/.test(nameKey)) return true
   if (/\bdeterminazione\b.*\bdirigenziale\b/.test(nameKey) || /\bdetermina\b/.test(nameKey)) return true
   return false
-}
-
-async function loadAttachmentOptionsForActions (ds: any, oid: number): Promise<AttachmentPrintOption[]> {
-  if (!Number.isFinite(oid) || oid <= 0) return []
-  const layer = await resolveFeatureLayerForAttachments(ds)
-  if (!layer) return []
-  const infos = await queryFeatureAttachmentsForActions(layer, oid, ds)
-  return (infos || [])
-    .filter((att: any) => !isSpecialAdministrativeAttachmentForActions(att))
-    .map((att: any) => ({
-      id: Number(att?.id ?? att?.attachmentId ?? att?.objectId),
-      name: att?.name,
-      size: att?.size,
-      contentType: att?.contentType,
-      url: att?.url
-    }))
-    .filter((att: AttachmentPrintOption) => Number.isFinite(att.id) && att.id > 0)
 }
 
 async function fetchAttachmentBlobForActions (layer: any, ds: any, oid: number, att: any, index: number): Promise<{ blob: Blob; fileName: string } | null> {
@@ -8629,6 +8036,11 @@ const queryFields = React.useMemo(() => ['*'], [])
             detailUrl: String(cfg.nsNotaSpeseDettaglioUrl || ''),
             parametriUrl: String(cfg.nsParametriUrl || ''),
             parametroCode: String(cfg.nsParametroCode || 'SPESE_GENERALI_PERC')
+          }}
+          sanzioneConfig={{
+            parametriSanzioniUrl: String(cfg.parametriSanzioniUrl || ''),
+            regolamentoArticoliUrl: String(cfg.regolamentoArticoliUrl || ''),
+            regolamentoRaccordiUrl: String(cfg.regolamentoRaccordiUrl || '')
           }}
           printConfig={{
             serviceUrl: String((cfg as any).printServiceUrl || (defaultConfig as any).printServiceUrl || '')

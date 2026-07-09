@@ -130,7 +130,7 @@ export function buildArt30RapportoSummary (data: Record<string, any>): Art30Summ
   const rimborso = roundMoney(rimborsoSalvato ?? rimborsoDaRighe)
   const cauzione = roundMoney(cauzioneAttiva ? (cauzioneSalvata ?? 0) : 0)
   const netto = roundMoney(nettoSalvato ?? (rimborso - cauzione))
-  const hasData = rows.length > 0 || rimborsoSalvato != null || cauzioneSalvata != null || nettoSalvato != null || cauzioneAttiva
+  const hasData = rows.length > 0 || cauzioneAttiva || (rimborsoSalvato != null && rimborsoSalvato !== 0) || (nettoSalvato != null && nettoSalvato !== 0)
   if (!hasData) return { hasData: false, rows: [], rimborso: 0, cauzione: 0, cauzioneQuantita: null, cauzioneValoreUnitario: null, cauzioneUnitaMisura: 'n.', netto: 0, text: '' }
 
   const parts: string[] = rows.map(row => {
@@ -161,7 +161,7 @@ export function buildArt30RapportoSummary (data: Record<string, any>): Art30Summ
 function normalizeNsCasistica (v: any): string { return String(v ?? '').trim() }
 function cloneEmptyNsRows (): Record<NsCat, NsRow[]> { return { AT: [], PR: [], RU: [], SL: [], PF: [] } }
 
-function buildNsSummaryForRows (rows: Record<NsCat, NsRow[]>, percentualeSpeseGenerali: number): NsSummary {
+export function buildNsSummaryForRows (rows: Record<NsCat, NsRow[]>, percentualeSpeseGenerali: number): NsSummary {
   const sumCat = (cat: NsCat) => roundMoney((rows[cat] || []).reduce((sum, r) => sum + roundMoney(Number(r.importo_riga) || 0), 0))
   const totaleAT = sumCat('AT')
   const totalePR = sumCat('PR')
@@ -314,14 +314,14 @@ export async function applyNotaSpeseToRapportoMap (
   const art30Summary = buildArt30RapportoSummary(data || {})
   const allGroups = buildNotaSpesePrintGroups(rowsByCategory, globalSummary, data)
   const selectedNotaSpeseKeys = docOptions.selectedNotaSpeseKeys || {}
-  const selectedGroups = allGroups.filter(group => selectedNotaSpeseKeys[group.codiceCasistica] !== false)
+  const includeNotaSpese = docOptions.includeNotaSpese !== false
+  const selectedGroups = !includeNotaSpese ? [] : allGroups.filter(group => selectedNotaSpeseKeys[group.codiceCasistica] !== false)
 
   const totaleNoteSpeseDaGruppi = roundMoney(nsGroups.reduce((sum, group) => sum + roundMoney(Number(group?.summary?.totaleComplessivo) || 0), 0))
   const totaleNoteSpeseSalvato = roundMoney(parseArt30Number(pickAttrCI(data, ['ns_totale_complessivo'])) ?? 0)
   const totaleNoteSpese = nsGroups.length > 0 ? totaleNoteSpeseDaGruppi : totaleNoteSpeseSalvato
   const hasRimborso = nsGroups.length > 0 || totaleNoteSpese !== 0 || art30Summary.hasData
   const totaleRimborso = roundMoney(totaleNoteSpese + (art30Summary.hasData ? art30Summary.netto : 0))
-  const includeNotaSpese = docOptions.includeNotaSpese !== false
 
   map.importo_rimborso = hasRimborso ? moneyIt(totaleRimborso) : ''
   map.riepilogo_art30 = art30Summary.text

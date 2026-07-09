@@ -205,6 +205,18 @@ export default function Setting(props: Props) {
         <Inp value={cfgJs.nsParametroCode??'SPESE_GENERALI_PERC'} onChange={v=>patch({nsParametroCode:v})} placeholder='SPESE_GENERALI_PERC'/>
       </div>}
 
+      {/* ═══ CALCOLO AUTOMATICO SANZIONE ═══ */}
+      <Acc id='sanzione' label='⚖️ Calcolo automatico sanzione' open={isOpen('sanzione')} onToggle={()=>toggle('sanzione')}/>
+      {isOpen('sanzione') && <div>
+        <div style={P.hint}>Tabelle di consultazione usate per calcolare e salvare la sanzione all'approvazione di DT.</div>
+        <label style={P.lbl}>URL Parametri Sanzioni</label>
+        <Inp value={cfgJs.parametriSanzioniUrl??''} onChange={v=>patch({parametriSanzioniUrl:v})} placeholder='https://services2.arcgis.com/...'/>
+        <label style={P.lbl}>URL Regolamento Articoli</label>
+        <Inp value={cfgJs.regolamentoArticoliUrl??''} onChange={v=>patch({regolamentoArticoliUrl:v})} placeholder='https://services2.arcgis.com/...'/>
+        <label style={P.lbl}>URL Regolamento Raccordi</label>
+        <Inp value={cfgJs.regolamentoRaccordiUrl??''} onChange={v=>patch({regolamentoRaccordiUrl:v})} placeholder='https://services2.arcgis.com/...'/>
+      </div>}
+
       {/* ═══ STAMPA MAPPA ═══ */}
       <Acc id='stampa-mappa' label='🗺 Stampa mappa' open={isOpen('stampa-mappa')} onToggle={()=>toggle('stampa-mappa')}/>
       {isOpen('stampa-mappa') && <div>

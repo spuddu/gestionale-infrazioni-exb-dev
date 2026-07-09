@@ -2,7 +2,8 @@ export type GiiDocumentPrintOptions = {
   includeRapporto: boolean
   includeNotaSpese: boolean
   includeMappa: boolean
-  includeAllegati: boolean
+  includeAllegatiTecnici: boolean
+  includeAllegatiAmministrativi: boolean
   includePropostaContestazione?: boolean
   includeDeterminazione?: boolean
   selectedNotaSpeseKeys?: Record<string, boolean>
@@ -23,6 +24,7 @@ export type GiiAttachmentPrintOption = {
   size?: number
   contentType?: string
   url?: string
+  keywords?: string
 }
 
 export type GiiNotaSpesePrintOption = {
@@ -35,7 +37,8 @@ export function defaultGiiDocumentPrintOptions (): GiiDocumentPrintOptions {
     includeRapporto: true,
     includeNotaSpese: false,
     includeMappa: false,
-    includeAllegati: false,
+    includeAllegatiTecnici: false,
+    includeAllegatiAmministrativi: false,
     includePropostaContestazione: false,
     includeDeterminazione: false,
     mapLayout: 'A4 Portrait',
