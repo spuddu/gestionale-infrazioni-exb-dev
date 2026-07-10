@@ -4,6 +4,7 @@
 import { PDFDocument, StandardFonts, degrees, type PDFFont, type PDFPage, rgb } from 'pdf-lib'
 import fontkit from '@pdf-lib/fontkit'
 import { CALIBRI_REGULAR_B64, CALIBRI_BOLD_B64 } from './calibri-fonts'
+import { ensureCachedFeatureLayer } from '../../esri-layer-cache'
 import { BASE_PDF_B64 } from './base-pdf'
 
 // ── Costanti ──
@@ -641,14 +642,6 @@ function dateFrom (data: any, ...fields: string[]): string {
   return formatDateIt(rawFrom(data, ...fields))
 }
 
-function loadEsriModule<T = any> (path: string): Promise<T> {
-  return new Promise((resolve, reject) => {
-    const req = (window as any).require
-    if (!req) { reject(new Error('AMD require non disponibile')); return }
-    req([path], (mod: T) => resolve(mod), (err: any) => reject(err))
-  })
-}
-
 function normGlobalIdForQuery (v: any): string {
   return String(v ?? '').trim().replace(/[{}]/g, '').toLowerCase()
 }
@@ -658,9 +651,8 @@ export async function loadRapportoIterCicliForPdf (globalId: any): Promise<Rappo
   if (!gid) return []
 
   try {
-    const FeatureLayer = await loadEsriModule<any>('esri/layers/FeatureLayer')
-    const fl = new FeatureLayer({ url: GII_LOG_EVENTI_CICLI_URL })
-    if (typeof fl?.load === 'function') await fl.load()
+    const fl = await ensureCachedFeatureLayer(GII_LOG_EVENTI_CICLI_URL)
+    if (!fl) return []
 
     const res = await fl.queryFeatures({
       where: `LOWER(parent_globalid) = '${gid}' OR LOWER(parent_globalid) = '{${gid}}'`,

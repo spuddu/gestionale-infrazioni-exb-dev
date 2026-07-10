@@ -1369,15 +1369,21 @@ export default function GiiAnteprimaPanel (p: {
       setTechnicalMapView(null)
       return
     }
+    // Costruzione pigra: solo quando il checkbox "Mappa" è davvero attivo. Costruire questa
+    // mappa (WebMap + layer di riferimento) è un'operazione pesante; farlo sempre ad ogni
+    // apertura del pannello, anche quando l'utente vuole solo il rapporto tecnico, rendeva
+    // l'intera anteprima lenta senza motivo.
+    if (!docOptions.includeMappa) {
+      setTechnicalMapView(null)
+      return
+    }
     // IMPORTANTE: la mappa usata per generare l'elaborato cartografico NON deve mai
     // derivare da nessuna mappa in uso nel gestionale (p.mapView o qualsiasi altra view
     // visibile all'utente), in nessuna forma — né come clone, né come centro/scala di
     // partenza. È sempre una mappa indipendente, costruita da zero solo da configurazione
     // statica (cfg) e dal punto della pratica (mapTarget), usata una volta e poi distrutta.
     const cfg = effectiveMapConfig
-    console.log('[GII-DIAG mappa-tecnica] effetto avviato. cfg =', cfg, ' mapTarget =', mapTarget, ' containerRef presente =', !!technicalMapContainerRef.current)
     if (!technicalMapContainerRef.current) {
-      console.log('[GII-DIAG mappa-tecnica] uscita anticipata: containerRef non presente (div non montato)')
       setTechnicalMapView(null)
       return
     }
@@ -1385,7 +1391,6 @@ export default function GiiAnteprimaPanel (p: {
     let view: any = null
     ;(async () => {
       try {
-        console.log('[GII-DIAG mappa-tecnica] carico moduli esri...')
         const [MapView, Map, WebMap, FeatureLayer, Portal] = await Promise.all([
           loadEsriModule<any>('esri/views/MapView'),
           loadEsriModule<any>('esri/Map'),
@@ -1393,9 +1398,7 @@ export default function GiiAnteprimaPanel (p: {
           loadEsriModule<any>('esri/layers/FeatureLayer'),
           loadEsriModule<any>('esri/portal/Portal').catch((): null => null)
         ])
-        console.log('[GII-DIAG mappa-tecnica] moduli caricati. cancelled =', cancelled, ' containerRef ancora presente =', !!technicalMapContainerRef.current)
         if (cancelled || !technicalMapContainerRef.current) {
-          console.log('[GII-DIAG mappa-tecnica] uscita dopo il caricamento moduli: cancelled o containerRef sparito')
           return
         }
         let map: any = null
@@ -1412,14 +1415,13 @@ export default function GiiAnteprimaPanel (p: {
             })
             mapFromWebMap = true
           } catch (webMapErr) {
-            console.log('[GII-DIAG mappa-tecnica] errore creazione WebMap, fallback a Map satellite:', webMapErr)
             map = new Map({ basemap: 'satellite' })
           }
         } else {
           map = new Map({ basemap: String(cfg.basemap || '').trim() || 'satellite' })
         }
         if (mapFromWebMap) {
-          try { if (typeof map?.loadAll === 'function') await map.loadAll() } catch (loadAllErr) { console.log('[GII-DIAG mappa-tecnica] errore map.loadAll() (WebMap):', loadAllErr) }
+          try { if (typeof map?.loadAll === 'function') await map.loadAll() } catch (loadAllErr) { /* no-op */ }
         }
         const configuredLayerUrl = String(cfg.mapLayerUrl || '').trim()
         if (map && configuredLayerUrl) {
@@ -1432,14 +1434,13 @@ export default function GiiAnteprimaPanel (p: {
                 title: String(cfg.mapLayerTitle || '') || undefined
               }))
             }
-          } catch (layerErr) { console.log('[GII-DIAG mappa-tecnica] errore aggiunta layer configurato:', layerErr) }
+          } catch (layerErr) { /* no-op */ }
         }
-        try { if (typeof map?.loadAll === 'function') await map.loadAll() } catch (loadAllErr2) { console.log('[GII-DIAG mappa-tecnica] errore map.loadAll() (finale):', loadAllErr2) }
+        try { if (typeof map?.loadAll === 'function') await map.loadAll() } catch (loadAllErr2) { /* no-op */ }
         const targetLon = Number(mapTarget?.longitude ?? mapTarget?.x)
         const targetLat = Number(mapTarget?.latitude ?? mapTarget?.y)
         const officeLon = Number(cfg.officeLonWgs84) || 9.0
         const officeLat = Number(cfg.officeLatWgs84) || 39.5
-        console.log('[GII-DIAG mappa-tecnica] creo MapView. center =', Number.isFinite(targetLon) && Number.isFinite(targetLat) ? [targetLon, targetLat] : [officeLon, officeLat])
         view = new MapView({
           container: technicalMapContainerRef.current,
           map,
@@ -1448,15 +1449,12 @@ export default function GiiAnteprimaPanel (p: {
           ui: { components: [] }
         })
         await view.when()
-        console.log('[GII-DIAG mappa-tecnica] view.when() risolto con successo. cancelled =', cancelled)
         if (cancelled) {
           try { view.destroy() } catch {}
           return
         }
         setTechnicalMapView(view)
-        console.log('[GII-DIAG mappa-tecnica] setTechnicalMapView chiamato con vista valida')
       } catch (ex) {
-        console.log('[GII-DIAG mappa-tecnica] ECCEZIONE catturata nella creazione vista tecnica:', ex)
         if (!cancelled) setTechnicalMapView(null)
       }
     })()
@@ -1465,7 +1463,7 @@ export default function GiiAnteprimaPanel (p: {
       setTechnicalMapView(null)
       if (view) { try { view.destroy() } catch {} }
     }
-  }, [mapConfigSignature, mapTargetSignature, p.mapMode, effectiveMapConfig])
+  }, [mapConfigSignature, mapTargetSignature, p.mapMode, effectiveMapConfig, docOptions.includeMappa])
 
   React.useEffect(() => {
     setNotaSpeseOptions(computedNotaSpeseOptions)
@@ -1495,12 +1493,11 @@ export default function GiiAnteprimaPanel (p: {
 
   React.useEffect(() => {
     const targetAvailable = !!mapTarget
-    const viewAvailable = !!printMapView
     const checkedKey = `${p.oid || ''}:${Date.now()}`
     setAvailability({
       loadingAllegati: !!(p.ds && p.oid),
       notaSpese: hasNotaSpeseLocal,
-      mappa: targetAvailable && viewAvailable,
+      mappa: targetAvailable,
       allegati: false,
       checkedKey
     })
@@ -1755,7 +1752,7 @@ export default function GiiAnteprimaPanel (p: {
         docOptions={docOptions}
         availability={{ ...availability, propostaContestazione: !!p.canSeeAmministrativi && propostaContestazioneAvailableComputed, determinazione: !!p.canSeeAmministrativi && determinazioneAvailableComputed }}
         busy={loading}
-        canUseMap={!!printMapView}
+        canUseMap={!!mapTarget}
         mapPanelAvailable={!!printMapView}
         documentUnavailableExtra={{ includeAllegatiTecnici: !!availability.loadingAllegati, includeAllegatiAmministrativi: !!availability.loadingAllegati }}
         showAdminDocuments={!!p.canSeeAmministrativi}

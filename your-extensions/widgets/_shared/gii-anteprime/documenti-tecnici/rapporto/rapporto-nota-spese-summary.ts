@@ -7,6 +7,8 @@
 // Estratta da gii-editing-ti/gii-azioni (copie identiche, mai unificate).
 // =================================================================
 
+import { ensureCachedFeatureLayer } from '../../esri-layer-cache'
+
 export type NsCat = 'AT' | 'PR' | 'RU' | 'SL' | 'PF'
 export type NsSummary = { totaleAT: number, totalePR: number, totaleRU: number, totaleSL: number, totalePF: number, percentualeSpeseGenerali: number, importoSpeseGenerali: number, totaleComplessivo: number }
 export type NsRow = { objectid: number, categoria_costo: NsCat, origine_voce_snapshot: string, codice_voce_snapshot: string, descrizione_snapshot: string, unita_misura_snapshot: string, prezzo_unitario_snapshot: number, quantita: number, importo_riga: number, anno_prezzario_snapshot?: number | null, ordine: number, note: string, codice_casistica?: string | null }
@@ -234,14 +236,6 @@ function parentGlobalidWhere (parentGlobalId: string): string {
   return values.map(v => `parent_globalid = '${escapeSqlString(v)}'`).join(' OR ')
 }
 
-function loadEsriModule<T = any> (path: string): Promise<T> {
-  return new Promise((resolve, reject) => {
-    const req = (window as any).require
-    if (!req) { reject(new Error('AMD require non disponibile')); return }
-    req([path], (mod: T) => resolve(mod), (err: any) => reject(err))
-  })
-}
-
 /**
  * Interroga la tabella di dettaglio nota spese per il record indicato e restituisce
  * le righe raggruppate per categoria di costo, pronte per buildNotaSpeseGroups/buildNotaSpesePrintGroups.
@@ -259,10 +253,9 @@ export async function queryNotaSpeseRowsForPractice (
   if (!parentGlobalId) return empty
 
   try {
-    const FeatureLayer = await loadEsriModule<any>('esri/layers/FeatureLayer')
     const detailPromise = (async () => {
-      const fl = new FeatureLayer({ url: detailUrl })
-      if (typeof fl.load === 'function') await fl.load()
+      const fl = await ensureCachedFeatureLayer(detailUrl)
+      if (!fl) return []
       const where = parentGlobalidWhere(parentGlobalId)
       const res = await fl.queryFeatures({ where, outFields: ['*'], returnGeometry: false })
       return (res?.features || []).map((f: any) => f.attributes || {})
@@ -273,8 +266,8 @@ export async function queryNotaSpeseRowsForPractice (
       if (!parametriUrl) return 15
       try {
         const pCode = config?.parametroCode || 'SPESE_GENERALI_PERC'
-        const pfl = new FeatureLayer({ url: parametriUrl })
-        if (typeof pfl.load === 'function') await pfl.load()
+        const pfl = await ensureCachedFeatureLayer(parametriUrl)
+        if (!pfl) return 15
         const pRes = await pfl.queryFeatures({ where: `codice_parametro = '${escapeSqlString(pCode)}'`, outFields: ['valore_num'], returnGeometry: false })
         const pVal = pRes?.features?.[0]?.attributes?.valore_num
         return (pVal != null) ? (Number(pVal) || 15) : 15
@@ -302,13 +295,13 @@ export async function queryNotaSpeseRowsForPractice (
  * Il widget chiamante non decide più "come": passa solo i dati e le opzioni scelte
  * dall'utente (quali nota spese includere).
  */
-export async function applyNotaSpeseToRapportoMap (
+export function applyNotaSpeseQueryResultToRapportoMap (
   map: Record<string, string>,
   data: Record<string, any>,
-  config: NotaSpeseConfig | undefined,
+  queryResult: { rowsByCategory: Record<NsCat, NsRow[]>, percentualeSpeseGenerali: number },
   docOptions: { includeNotaSpese?: boolean, selectedNotaSpeseKeys?: Record<string, boolean> }
-): Promise<{ allGroups: NsGroup[], selectedGroups: NsGroup[] }> {
-  const { rowsByCategory, percentualeSpeseGenerali } = await queryNotaSpeseRowsForPractice(data, config)
+): { allGroups: NsGroup[], selectedGroups: NsGroup[] } {
+  const { rowsByCategory, percentualeSpeseGenerali } = queryResult
   const globalSummary = buildNsSummaryForRows(rowsByCategory, percentualeSpeseGenerali)
   const nsGroups = buildNotaSpeseGroups(rowsByCategory, globalSummary)
   const art30Summary = buildArt30RapportoSummary(data || {})
@@ -330,4 +323,14 @@ export async function applyNotaSpeseToRapportoMap (
     : (selectedGroups.length === 1 ? '(Vedi nota spese allegata)' : '')
 
   return { allGroups, selectedGroups }
+}
+
+export async function applyNotaSpeseToRapportoMap (
+  map: Record<string, string>,
+  data: Record<string, any>,
+  config: NotaSpeseConfig | undefined,
+  docOptions: { includeNotaSpese?: boolean, selectedNotaSpeseKeys?: Record<string, boolean> }
+): Promise<{ allGroups: NsGroup[], selectedGroups: NsGroup[] }> {
+  const queryResult = await queryNotaSpeseRowsForPractice(data, config)
+  return applyNotaSpeseQueryResultToRapportoMap(map, data, queryResult, docOptions)
 }

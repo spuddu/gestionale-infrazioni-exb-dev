@@ -13,7 +13,7 @@
 
 import { PDFDocument } from 'pdf-lib'
 import { buildPlaceholderMap, type UtenteCached } from './documenti-tecnici/rapporto/rapporto-placeholder-map'
-import { applyNotaSpeseToRapportoMap, buildArt30RapportoSummary, type NotaSpeseConfig } from './documenti-tecnici/rapporto/rapporto-nota-spese-summary'
+import { applyNotaSpeseQueryResultToRapportoMap, queryNotaSpeseRowsForPractice, buildArt30RapportoSummary, type NotaSpeseConfig } from './documenti-tecnici/rapporto/rapporto-nota-spese-summary'
 import { buildRapportoPdf, loadRapportoIterCicliForPdf, type RapportoIterCicloPdf } from './documenti-tecnici/rapporto/rapporto-pdf-builder'
 import { buildNotaSpesePdf, type NotaSpeseData } from './documenti-tecnici/rapporto/notaspese-pdf-builder'
 import { buildVerbalePdfBlob, type LayerFieldInfo } from './documenti-amministrativi/proposta-contestazione/proposta-contestazione-data-map'
@@ -181,12 +181,14 @@ async function ensureUtentiCache (): Promise<Map<string, UtenteCached> | null> {
 
 async function buildRapportoSection (attrs: Record<string, any>, notaSpeseConfig: NotaSpeseConfig | undefined, selection: FascicoloDocumentSelection): Promise<Array<{ blob: Blob, fileName: string }>> {
   const items: Array<{ blob: Blob, fileName: string }> = []
-  const [utentiCache, cicli] = await Promise.all([
+  const emptyNsQueryResult = { rowsByCategory: {} as any, percentualeSpeseGenerali: 15 }
+  const [utentiCache, cicli, nsQueryResult] = await Promise.all([
     ensureUtentiCache(),
-    loadRapportoIterCicliForPdf(pickAttrCI(attrs, ['globalid', 'GlobalID', 'GLOBALID'])).catch((): RapportoIterCicloPdf[] => [])
+    loadRapportoIterCicliForPdf(pickAttrCI(attrs, ['globalid', 'GlobalID', 'GLOBALID'])).catch((): RapportoIterCicloPdf[] => []),
+    queryNotaSpeseRowsForPractice(attrs, notaSpeseConfig).catch(() => emptyNsQueryResult)
   ])
   const map = buildPlaceholderMap(attrs, utentiCache, cicli)
-  const { selectedGroups } = await applyNotaSpeseToRapportoMap(map, attrs, notaSpeseConfig, {
+  const { selectedGroups } = applyNotaSpeseQueryResultToRapportoMap(map, attrs, nsQueryResult, {
     includeNotaSpese: selection.includeNotaSpese !== false,
     selectedNotaSpeseKeys: selection.selectedNotaSpeseKeys
   })
@@ -393,9 +395,7 @@ async function buildMappaSection (
   numeroRapportoTecnico: string
 ): Promise<{ blob: Blob, fileName: string } | null> {
   const serviceUrl = String(mapConfig?.printServiceUrl || '').trim()
-  console.log('[GII-DIAG mappa] view presente =', !!view, ' geometry presente =', !!geometry, ' serviceUrl =', JSON.stringify(serviceUrl))
   if (!view || !geometry || !serviceUrl) {
-    console.log('[GII-DIAG mappa] uscita anticipata: view mancante =', !view, ' geometry mancante =', !geometry, ' serviceUrl mancante =', !serviceUrl)
     return null
   }
   try {
@@ -419,10 +419,7 @@ async function buildMappaSection (
 
     await ensureGiiPrintableMapLayersReady(view)
     const layers = listGiiPrintableMapLayers(view)
-    console.log('[GII-DIAG mappa] mapLayerVisibility ricevuto:', JSON.stringify(opts.mapLayerVisibility))
-    console.log('[GII-DIAG mappa] layers da listGiiPrintableMapLayers (key/title/visible attuale):', JSON.stringify(layers.map(l => ({ key: l.key, title: l.title, visible: l.visible, hasOverride: Object.prototype.hasOwnProperty.call(opts.mapLayerVisibility || {}, l.key) }))))
     const localizationLayerKeys = new Set(layers.filter(item => printableLayerIsLocalization(item, mapConfig?.mapLocalizationLayerUrl)).map(item => item.key))
-    console.log('[GII-DIAG mappa] localizationLayerKeys:', Array.from(localizationLayerKeys))
     const hasLocalizationLayerControl = localizationLayerKeys.size > 0
     const localizationRequested = !hasLocalizationLayerControl || layers.some(item => {
       if (!localizationLayerKeys.has(item.key)) return false
@@ -456,14 +453,6 @@ async function buildMappaSection (
           }
         }
       })
-      console.log('[GII-DIAG mappa] visibilità layer DOPO il toggling:', JSON.stringify(layers.map(l => ({ key: l.key, title: l.title, layerVisible: l.layer?.visible, ancestorsVisible: (l.ancestors || []).map((a: any) => a?.visible) }))))
-      console.log('[GII-DIAG mappa] minScale/maxScale layer + antenati (printScale sarà', Number(opts.mapScale) || Number(view?.scale) || 0, '):', JSON.stringify(layers.map(l => ({
-        key: l.key,
-        title: l.title,
-        layerMinScale: l.layer?.minScale,
-        layerMaxScale: l.layer?.maxScale,
-        ancestorsScales: (l.ancestors || []).map((a: any) => ({ minScale: a?.minScale, maxScale: a?.maxScale }))
-      }))))
       if (opts.mapBasemap && view?.map) {
         try {
           const bm = Basemap?.fromId ? Basemap.fromId(String(opts.mapBasemap)) : String(opts.mapBasemap)
@@ -501,7 +490,6 @@ async function buildMappaSection (
         }
       }
       await waitForViewIdle(4000)
-      console.log('[GII-DIAG mappa] view.updating dopo attesa idle =', view?.updating)
       if (typeof view.whenLayerView === 'function' && view.map?.layers?.length) {
         try { await Promise.race([view.whenLayerView(view.map.layers.getItemAt(0)), delay(400)]) } catch {}
       }
@@ -528,15 +516,12 @@ async function buildMappaSection (
       // Seconda attesa idle dopo l'aggiunta del marker (view.graphics.add può innescare un
       // ulteriore ciclo di update) e prima del calcolo finale di extent/legenda/stampa.
       await waitForViewIdle(2000)
-      console.log('[GII-DIAG mappa] view.updating dopo seconda attesa idle =', view?.updating)
 
       const printScale = Number(opts.mapScale) || Number(view?.scale) || 0
       const printExtent = (printScale > 0 ? computePrintExtentForView(view, printScale, opts.mapLayout) ?? undefined : undefined) as { xmin: number; ymin: number; xmax: number; ymax: number; spatialReference?: any } | undefined
 
-      console.log('[GII-DIAG mappa] scale=', view?.scale, 'printScale=', printScale, 'extent=', view?.extent, 'printExtent=', printExtent)
 
       const legendItems = await buildGiiMapLegendItemsForView(view, layers, { ...opts, symbolUtils, printExtent, ExtentCtor }, localizationLayerKeys, localizationRequested)
-      console.log('[GII-DIAG mappa] legendItems costruiti:', legendItems)
 
       const template = new PrintTemplate({
         format: 'pdf',
@@ -547,16 +532,12 @@ async function buildMappaSection (
         outScale: Number(opts.mapScale) || Number(view?.scale) || undefined
       })
       const params = new PrintParameters({ view, template })
-      console.log('[GII-DIAG mappa] chiamo print.execute (con view) su', serviceUrl)
       const result = await print.execute(serviceUrl, params)
-      console.log('[GII-DIAG mappa] risultato print.execute:', result)
       const url = String(result?.url || result?.href || '')
       if (!url) {
-        console.log('[GII-DIAG mappa] nessun url nel risultato, sezione omessa')
         return null
       }
       const resp = await fetch(url)
-      console.log('[GII-DIAG mappa] fetch url risultato:', url, ' status =', resp.status, resp.ok)
       if (!resp.ok) return null
       const rawBlob = await resp.blob()
       const wrapped = await wrapMapPdfBlobWithRapportoTechnicalHeader(rawBlob, `ELABORATO CARTOGRAFICO ALLEGATO AL RAPPORTO TECNICO DI RILEVAZIONE N. ${numeroRapportoTecnico}`, {
@@ -583,7 +564,6 @@ async function buildMappaSection (
     }
   } catch (err) {
     // Non blocca il resto del fascicolo se la mappa fallisce: sezione omessa.
-    console.log('[GII-DIAG mappa] eccezione catturata:', err)
     return null
   }
 }

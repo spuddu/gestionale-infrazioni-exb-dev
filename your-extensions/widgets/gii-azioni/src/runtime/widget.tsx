@@ -10,7 +10,7 @@ import { buildBozzaDeterminazionePdf } from '../../../_shared/gii-anteprime/docu
 import { PDFDocument } from 'pdf-lib'
 import { drawEmbeddedPdfPageInRapportoTechnicalBody, drawRapportoTechnicalHeadersByPage, RAPPORTO_TECHNICAL_BODY_BOX, attachmentTechnicalDocumentTitle } from '../../../_shared/gii-anteprime/documenti-tecnici/rapporto/technical-document-header'
 import GiiAnteprimaPanel from '../../../_shared/gii-anteprime/anteprima-panel'
-import { computeReqPoint } from '../../../_shared/gii-anteprime/req-point'
+import { computeReqPoint, parseNorma3Codes } from '../../../_shared/gii-anteprime/req-point'
 
 
 const GII_LOG_EVENTI_CICLI_URL = 'https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_LOG_EVENTI_CICLI/FeatureServer/0'
@@ -3448,7 +3448,8 @@ function ActionsPanel (props: {
     hasSel &&
     !!data &&
     !loading &&
-    pending === null
+    pending === null &&
+    !roleToBeTakenInCharge
 
   const openEditPage = (requestedSection?: 'violazione') => {
     if (!canOpenEditPage) return
@@ -4653,6 +4654,24 @@ function ActionsPanel (props: {
         .map(item => item.message)
       if (msgs.length > 0) {
         setDenyPopupMessages(msgs)
+        return
+      }
+    }
+
+    // Validazione TI → RZ: "Il trasgressore era presente?" obbligatorio se è selezionata
+    // almeno una violazione — stessa regola già applicata in salvataggio da gii-editing-ti,
+    // qui rinforzata anche in fase di inoltro.
+    if (p === 'APPROVA' && role === 'TI') {
+      const norma3Selected = parseNorma3Codes(pickAttrCI(data, ['norma_violata3', 'NORMA_VIOLATA3']))
+      const hasArt15 = !!String(pickAttrCI(data, ['norma15_parziale', 'NORMA15_PARZIALE']) || '').trim() ||
+        !!String(pickAttrCI(data, ['norma15_totale', 'NORMA15_TOTALE']) || '').trim()
+      const hasArt1617 = !!String(pickAttrCI(data, ['norma16_17', 'NORMA16_17']) || '').trim()
+      const selectedViolazioniCount = norma3Selected.length + (hasArt15 ? 1 : 0) + (hasArt1617 ? 1 : 0)
+      const presenzaTrasgressore = String(pickAttrCI(data, ['presenza_trasgressore', 'PRESENZA_TRASGRESSORE']) || '').trim()
+      if (selectedViolazioniCount > 0 && !presenzaTrasgressore) {
+        setDenyPopupMessages([
+          "Impossibile trasmettere: è obbligatorio specificare se il trasgressore era presente al momento del rilevamento. Accedere alla scheda Violazione e impostare il valore."
+        ])
         return
       }
     }
@@ -6699,7 +6718,7 @@ ${noteTrim}` : 'Attestazione di conformità apposta.',
                 type='button'
                 disabled={!canUseRapportoPdf}
                 onClick={handleRapportoPreview}
-                title={canUseRapportoPdf ? 'Apri anteprima documenti' : 'Anteprima non disponibile: selezionare un rapporto.'}
+                title={canUseRapportoPdf ? 'Apri anteprima documenti' : (roleToBeTakenInCharge ? 'La pratica deve essere presa in carico prima di poter aprire l\u2019anteprima.' : 'Anteprima non disponibile: selezionare un rapporto.')}
                 style={{
                   width: ((ui?.btnPaddingY ?? 8) * 2) + (ui?.btnFontSize ?? 14) + 10,
                   height: ((ui?.btnPaddingY ?? 8) * 2) + (ui?.btnFontSize ?? 14) + 10,
