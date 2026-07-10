@@ -11,10 +11,12 @@ import type { GiiDocumentPrintOptions as DocumentPrintOptions, GiiAttachmentPrin
 import { buildGiiMapLegendItemsForView, computePrintExtentForView, ensureGiiPrintableMapLayersReady, flattenGiiPrintableMapLayerTree as flattenPrintableMapLayerTree, listGiiPrintableMapLayerTree as listPrintableMapLayerTree, listGiiPrintableMapLayers as listPrintableMapLayers } from './viewer-documenti/map-layers'
 import type { GiiPrintableMapLayerItem as PrintableMapLayerItem } from './viewer-documenti/map-layers'
 import GiiDocumentViewer from './viewer-documenti/document-viewer'
-import { filterGiiAttachmentsForTechnicalRoles, getGiiAttachmentKind } from './allegati/gii-attachment-viewer'
+import { filterGiiAttachmentsForTechnicalRoles, getGiiAttachmentKind, isGiiSpecialAdministrativeAttachment } from './allegati/gii-attachment-viewer'
+import { parseNorma3Codes } from './req-point'
 import { buildFascicolo } from './fascicolo-builder'
 import type { NotaSpeseConfig } from './documenti-tecnici/rapporto/rapporto-nota-spese-summary'
 import { queryNotaSpeseRowsForPractice } from './documenti-tecnici/rapporto/rapporto-nota-spese-summary'
+import { FASCICOLO_MAP_DEFAULTS, DEFAULT_PRINT_SERVICE_URL } from './fascicolo-map-defaults'
 
 const GII_UTENTI_URL = 'https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_utenti/FeatureServer/0'
 
@@ -254,8 +256,6 @@ type DocumentAvailability = {
   checkedKey: string
 }
 
-const DEFAULT_PRINT_SERVICE_URL = 'https://utility.arcgisonline.com/arcgis/rest/services/Utilities/PrintingTools/GPServer/Export%20Web%20Map%20Task'
-
 const editingTiAnteprimaAppliedOptionsMemory = new Map<string, DocumentPrintOptions>()
 const editingTiAnteprimaPdfMemory = new Map<string, { blob: Blob; fileName: string }>()
 
@@ -374,6 +374,13 @@ function qtyArt30It (value: number): string {
 }
 
 function buildArt30RapportoSummary (data: Record<string, any>): { hasData: boolean; rows: Art30RimborsoPdfRow[]; rimborso: number; cauzione: number; cauzioneQuantita: number | null; cauzioneValoreUnitario: number | null; cauzioneUnitaMisura: string; netto: number; text: string } {
+  // I campi attrezzature_* possono restare valorizzati sul record anche quando Art.30 non è
+  // (più) tra le violazioni selezionate (dato residuo di uno stato precedente). Si contano
+  // solo se Art.30 risulta effettivamente selezionato oggi — altrimenti "n.d.", coerentemente
+  // con quanto mostrato nella scheda Violazione.
+  const art30Selected = parseNorma3Codes(pickAttrCI(data, ['norma_violata3'])).includes('Art30')
+  if (!art30Selected) return { hasData: false, rows: [], rimborso: 0, cauzione: 0, cauzioneQuantita: null, cauzioneValoreUnitario: null, cauzioneUnitaMisura: 'n.', netto: 0, text: '' }
+
   const detailRaw = pickAttrCI(data, ['attrezzature_rimborso_dettaglio'])
   const rows = parseArt30DetailForPdf(detailRaw)
   const cauzioneDetail = parseArt30CauzioneDetailForPdf(detailRaw)
@@ -909,18 +916,26 @@ async function hasAttachments (ds: any, oid: number): Promise<boolean> {
   return filterGiiAttachmentsForTechnicalRoles(options as any).length > 0
 }
 
-async function loadAttachmentOptions (ds: any, oid: number, canSeeAmministrativi: boolean, layerUrlHint?: string): Promise<AttachmentPrintOption[]> {
-  if (!Number.isFinite(oid) || oid <= 0) return []
+async function loadAttachmentOptions (ds: any, oid: number, canSeeAmministrativi: boolean, layerUrlHint?: string): Promise<{ options: AttachmentPrintOption[]; hasBozzaDeterminazione: boolean }> {
+  if (!Number.isFinite(oid) || oid <= 0) return { options: [], hasBozzaDeterminazione: false }
   const layer = await resolveFeatureLayerForAttachments(ds, layerUrlHint)
-  if (!layer) return []
+  if (!layer) return { options: [], hasBozzaDeterminazione: false }
   const infos = await queryFeatureAttachments(layer, oid, ds)
-  const options = (infos || []).map((att: any): AttachmentPrintOption => toAttachmentPrintOption(att))
-  // I ruoli tecnici non devono mai vedere allegati di tipo amministrativo, siano essi
-  // generati automaticamente (proposta di contestazione, ecc.) o caricati manualmente
-  // da TI_AMM/RI_AMM/DA. Chi può vedere la parte amministrativa (canSeeAmministrativi)
-  // vede invece tutti gli allegati, di qualunque tipo.
+  const allOptions = (infos || []).map((att: any): AttachmentPrintOption => toAttachmentPrintOption(att))
+  const hasBozzaDeterminazione = allOptions.some(att => getGiiAttachmentKind(att as any) === 'bozza-determinazione')
+  const options = allOptions
+    // La proposta di contestazione e la bozza di determinazione sono documenti amministrativi
+    // a sé (con proprio checkbox dedicato), non allegati da spuntare: vanno sempre esclusi da
+    // questa lista, indipendentemente dal ruolo.
+    .filter((att: AttachmentPrintOption) => !isGiiSpecialAdministrativeAttachment(att as any))
+  // I ruoli tecnici non devono mai vedere allegati di tipo amministrativo caricati
+  // manualmente da TI_AMM/RI_AMM/DA. Chi può vedere la parte amministrativa
+  // (canSeeAmministrativi) vede invece tutti gli allegati, di qualunque tipo.
   const filtered = canSeeAmministrativi ? options : (filterGiiAttachmentsForTechnicalRoles(options as any) as AttachmentPrintOption[])
-  return filtered.filter((att: AttachmentPrintOption): boolean => Number.isFinite(att.id) && att.id > 0)
+  return {
+    options: filtered.filter((att: AttachmentPrintOption): boolean => Number.isFinite(att.id) && att.id > 0),
+    hasBozzaDeterminazione
+  }
 }
 
 async function fetchAttachmentBlob (layer: any, ds: any, oid: number, att: any, index: number): Promise<{ blob: Blob; fileName: string } | null> {
@@ -1224,7 +1239,6 @@ export default function GiiAnteprimaPanel (p: {
   // attivo e canSeeAmministrativi è vero, e ne unisce il risultato al resto; il chiamante
   // resta responsabile di come costruire quel documento.
   extraDocumentBuilder?: (opts: DocumentPrintOptions) => Promise<{ blob: Blob; fileName: string } | null>
-  determinazioneAvailable?: boolean
 }): any {
   const [pdfUrl, setPdfUrl] = React.useState<string | null>(null)
   const [pdfFileName, setPdfFileName] = React.useState<string>('rapporto.pdf')
@@ -1242,8 +1256,19 @@ export default function GiiAnteprimaPanel (p: {
     checkedKey: ''
   })
   const [attachmentOptions, setAttachmentOptions] = React.useState<AttachmentPrintOption[]>([])
+  const [hasBozzaDeterminazioneAttachment, setHasBozzaDeterminazioneAttachment] = React.useState(false)
   const [notaSpeseOptions, setNotaSpeseOptions] = React.useState<NotaSpesePrintOption[]>([])
   const printMapView = p.mapMode === 'live' ? (p.mapView || null) : (technicalMapView || null)
+  // Default condivisi + eventuali override espliciti (vedi anche l'uso analogo dentro
+  // l'effetto di costruzione della mappa headless più sotto). Un'unica funzione così i due
+  // punti non possono disallinearsi.
+  const effectiveMapConfig = React.useMemo(() => {
+    const merged: Record<string, any> = { ...FASCICOLO_MAP_DEFAULTS }
+    Object.entries(p.mapConfig || {}).forEach(([k, v]) => {
+      if (v !== undefined && v !== null && String(v).trim() !== '') merged[k] = v
+    })
+    return merged
+  }, [p.mapConfig])
   const printableLayerTree = listPrintableMapLayerTree(printMapView)
   const printableLayerItems = flattenPrintableMapLayerTree(printableLayerTree)
   const printableLayerSignature = printableLayerItems.map(item => `${item.key}:${item.visible ? 1 : 0}`).join('|')
@@ -1349,7 +1374,7 @@ export default function GiiAnteprimaPanel (p: {
     // visibile all'utente), in nessuna forma — né come clone, né come centro/scala di
     // partenza. È sempre una mappa indipendente, costruita da zero solo da configurazione
     // statica (cfg) e dal punto della pratica (mapTarget), usata una volta e poi distrutta.
-    const cfg = p.mapConfig || {}
+    const cfg = effectiveMapConfig
     console.log('[GII-DIAG mappa-tecnica] effetto avviato. cfg =', cfg, ' mapTarget =', mapTarget, ' containerRef presente =', !!technicalMapContainerRef.current)
     if (!technicalMapContainerRef.current) {
       console.log('[GII-DIAG mappa-tecnica] uscita anticipata: containerRef non presente (div non montato)')
@@ -1440,7 +1465,7 @@ export default function GiiAnteprimaPanel (p: {
       setTechnicalMapView(null)
       if (view) { try { view.destroy() } catch {} }
     }
-  }, [mapConfigSignature, mapTargetSignature, p.mapMode])
+  }, [mapConfigSignature, mapTargetSignature, p.mapMode, effectiveMapConfig])
 
   React.useEffect(() => {
     setNotaSpeseOptions(computedNotaSpeseOptions)
@@ -1480,6 +1505,7 @@ export default function GiiAnteprimaPanel (p: {
       checkedKey
     })
     setAttachmentOptions([])
+    setHasBozzaDeterminazioneAttachment(false)
     if (!hasNotaSpeseLocal) setDocOptions(prev => ({ ...prev, includeNotaSpese: false }))
     if (!targetAvailable) setDocOptions(prev => ({ ...prev, includeMappa: false }))
     if (!p.ds || !p.oid) {
@@ -1487,9 +1513,10 @@ export default function GiiAnteprimaPanel (p: {
       return
     }
     let cancelled = false
-    void loadAttachmentOptions(p.ds, Number(p.oid), !!p.canSeeAmministrativi, p.layerUrlHint).then(allegatiList => {
+    void loadAttachmentOptions(p.ds, Number(p.oid), !!p.canSeeAmministrativi, p.layerUrlHint).then(({ options: allegatiList, hasBozzaDeterminazione }) => {
       if (cancelled) return
       setAttachmentOptions(allegatiList)
+      setHasBozzaDeterminazioneAttachment(hasBozzaDeterminazione)
       const hasTecnici = allegatiList.some(att => getGiiAttachmentKind(att as any) === 'technical')
       const hasAmministrativi = allegatiList.some(att => getGiiAttachmentKind(att as any) !== 'technical')
       setDocOptions(prev => {
@@ -1511,6 +1538,7 @@ export default function GiiAnteprimaPanel (p: {
     }).catch(() => {
       if (cancelled) return
       setAttachmentOptions([])
+      setHasBozzaDeterminazioneAttachment(false)
       setAvailability(prev => prev.checkedKey === checkedKey ? { ...prev, loadingAllegati: false, allegati: false } : prev)
       setDocOptions(prev => ({ ...prev, includeAllegatiTecnici: false, includeAllegatiAmministrativi: false }))
     })
@@ -1600,7 +1628,7 @@ export default function GiiAnteprimaPanel (p: {
               ...opts,
               view: printMapView,
               printServiceUrl: String(p.printServiceUrl || DEFAULT_PRINT_SERVICE_URL),
-              mapLocalizationLayerUrl: String(p.mapConfig?.mapLayerUrl || '')
+              mapLocalizationLayerUrl: String(effectiveMapConfig.mapLayerUrl || '')
             }
           : undefined,
         fileNamePrefix: 'documenti'
@@ -1614,7 +1642,7 @@ export default function GiiAnteprimaPanel (p: {
     if (items.length === 1) return items[0]
     const safeCode = String(praticaCode || 'documenti').replace(/[^a-zA-Z0-9_-]/g, '_')
     return { blob: await mergePdfBlobs(items), fileName: `documenti_${safeCode}.pdf` }
-  }, [previewOptions, attachmentOptions, notaSpeseOptions, hasNotaSpeseLocal, mapTarget, p.data, p.oid, p.notaSpeseConfig, printMapView, p.mapConfig, p.printServiceUrl, mapConfigSignature, p.canSeeAmministrativi, p.profile, p.extraDocumentBuilder, praticaCode])
+  }, [previewOptions, attachmentOptions, notaSpeseOptions, hasNotaSpeseLocal, mapTarget, p.data, p.oid, p.notaSpeseConfig, printMapView, effectiveMapConfig, p.printServiceUrl, mapConfigSignature, p.canSeeAmministrativi, p.profile, p.extraDocumentBuilder, praticaCode])
 
   const previewCacheSignature = React.useMemo(() => {
     try {
@@ -1696,6 +1724,15 @@ export default function GiiAnteprimaPanel (p: {
     setPreviewRevision(v => v + 1)
   }, [docOptions, optionsMemoryKey])
 
+  // Disponibilità reale (non solo il ruolo) dei due documenti amministrativi:
+  // - proposta di contestazione: solo se TI_AMM ha effettivamente attestato conformità
+  //   (esito_TI_AMM = 2), non semplicemente perché il ruolo può vederla;
+  // - determinazione dirigenziale: solo se esiste davvero un allegato di tipo "bozza
+  //   determinazione" caricato da TI_AMM, rilevato dalla stessa lista allegati già
+  //   interrogata dal pannello per il proprio uso — nessuna query aggiuntiva.
+  const propostaContestazioneAvailableComputed = Number(pickAttrCI(p.data, ['esito_TI_AMM'])) === 2
+  const determinazioneAvailableComputed = hasBozzaDeterminazioneAttachment
+
   return (
     <div css={containerCss}>
       <GiiDocumentViewer
@@ -1716,7 +1753,7 @@ export default function GiiAnteprimaPanel (p: {
         borderColor={p.sidebarBorderColor}
         borderWidth={p.sidebarBorderWidth}
         docOptions={docOptions}
-        availability={{ ...availability, propostaContestazione: !!p.canSeeAmministrativi, determinazione: !!p.canSeeAmministrativi && !!p.determinazioneAvailable }}
+        availability={{ ...availability, propostaContestazione: !!p.canSeeAmministrativi && propostaContestazioneAvailableComputed, determinazione: !!p.canSeeAmministrativi && determinazioneAvailableComputed }}
         busy={loading}
         canUseMap={!!printMapView}
         mapPanelAvailable={!!printMapView}

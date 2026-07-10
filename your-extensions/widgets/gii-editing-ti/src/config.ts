@@ -147,7 +147,6 @@ export interface Config {
   violazioneCircostanzeRows: number
 
   // --- Anteprima PDF
-  printServiceUrl: string
   anteprimaViewerBg: string
   anteprimaPdfHeaderBg: string
   anteprimaPdfAreaBg: string
@@ -206,12 +205,6 @@ export interface Config {
   // --- Nuova pratica inline + mappa
   enableCreateWithoutSelection: boolean
   useMapWidgetIds: string[]
-  mapLayerTitle: string   // titolo del layer rapporti nella mappa (fallback)
-  mapLayerUrl: string
-  mapLayerId: string
-  mapLayerLayerId: string
-  officeLonWgs84: number
-  officeLatWgs84: number
 
   // --- Preset
   presets: FieldPreset[]
@@ -321,7 +314,6 @@ export const defaultConfig: Config = {
   violazioneDescrizioneRows: 5,
   violazioneCircostanzeRows: 4,
 
-  printServiceUrl: 'https://utility.arcgisonline.com/arcgis/rest/services/Utilities/PrintingTools/GPServer/Export%20Web%20Map%20Task',
   anteprimaViewerBg: '#282828',
   anteprimaPdfHeaderBg: '#282828',
   anteprimaPdfAreaBg: '#282828',
@@ -382,12 +374,6 @@ export const defaultConfig: Config = {
 
   enableCreateWithoutSelection: true,
   useMapWidgetIds: [],
-  mapLayerTitle: '',
-  mapLayerUrl: '',
-  mapLayerId: '',
-  mapLayerLayerId: '',
-  officeLonWgs84: 0,
-  officeLatWgs84: 0,
 
   presets: [],
   activePresetId: '',

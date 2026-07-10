@@ -7,6 +7,7 @@ import { createPortal } from 'react-dom'
 import type { IMConfig, TabConfig } from '../config'
 import { defaultConfig, DEFAULT_FIELD_LAYOUTS } from '../config'
 import AnteprimaPanel, { clearEditingTiAnteprimaDocumentMemory } from '../../../_shared/gii-anteprime/anteprima-panel'
+import { NORMA3_REQ_POINT, parseNorma3Codes, computeReqPoint } from '../../../_shared/gii-anteprime/req-point'
 import GiiAttachmentViewer, { type GiiAttachmentViewerItem, filterGiiAttachmentsForTechnicalRoles } from '../../../_shared/gii-anteprime/allegati/gii-attachment-viewer'
 
 type MsgKind = 'info' | 'ok' | 'err'
@@ -1277,62 +1278,10 @@ function normKey (v: any): string {
 }
 
 
-// Survey (XLS) — req_point
-const NORMA3_REQ_POINT = new Set([
-  'Art12','Art27','Art28','Art30','Art31','Art32','Art33','Art34','Art35','Art36','Art37','Art39'
-])
-
-function parseMultiSelect (val: any): string[] {
-  if (!val) return []
-  if (Array.isArray(val)) return val.map(String).map(s => s.trim()).filter(Boolean)
-
-  // Survey123 può salvare il select_multiple come:
-  // - stringa separata da spazio: "Art8 Art12"
-  // - stringa separata da virgola/punto e virgola: "Art8, Art12"
-  // - etichette più estese: "Art. 8 - ...; Art. 12 - ..."
-  // Qui teniamo la stringa intera e la spezziamo in modo permissivo: il filtro
-  // finale resta comunque limitato agli articoli ammessi in NORMA3_TO_VFIELD.
-  const s = String(val || '').trim()
-  if (!s) return []
-
-  const artMatches = s.match(/Art\.?\s*0?\d{1,2}/gi)
-  if (artMatches && artMatches.length > 0) return artMatches.map(x => x.trim()).filter(Boolean)
-
-  return s.split(/[\s;,|\n]+/g).map(x => x.trim()).filter(Boolean)
-}
-
-function canonicalNorma3Code (value: any): string {
-  const raw = String(value ?? '').trim()
-  if (!raw) return ''
-  const m = raw.match(/^art\.?\s*0?(\d{1,2})$/i) || raw.match(/^0?(\d{1,2})$/)
-  if (!m) return raw
-  return `Art${Number(m[1])}`
-}
-
-function parseNorma3Codes (val: any): string[] {
-  const allowed = new Set(Object.keys(NORMA3_TO_VFIELD))
-  const out: string[] = []
-  const add = (token: any): void => {
-    const code = canonicalNorma3Code(token)
-    if (code && allowed.has(code) && !out.includes(code)) out.push(code)
-  }
-  parseMultiSelect(val).forEach(add)
-  return out
-}
+// Survey (XLS) — req_point: logica centralizzata, vedi _shared/gii-anteprime/req-point.ts
 
 function normalizeNorma3Value (val: any): string {
   return parseNorma3Codes(val).join(' ')
-}
-
-function computeReqPoint (attrs: Record<string, any>): 0 | 1 {
-  const p = String(attrs?.norma15_parziale ?? '')
-  const t = String(attrs?.norma15_totale ?? '')
-  if (p === 'Art15.1' || p === 'Art15.2') return 1
-  if (t === 'Art15.3' || t === 'Art15.4') return 1
-
-  const norma3 = parseNorma3Codes(attrs?.norma_violata3)
-  if (norma3.some(v => NORMA3_REQ_POINT.has(v))) return 1
-  return 0
 }
 
 
@@ -5850,7 +5799,6 @@ function NuovaPraticaForm (p: {
   onToggleMapClick?: (on: boolean) => void
   mapView?: any | null
   mapConfig?: any
-  printServiceUrl?: string
   onSaved?: (oid: number, savedData?: any) => void
   onCloseEdit?: () => void
   mode?: 'create' | 'edit'
@@ -10380,7 +10328,6 @@ ${e?.message || String(e)}`
       mapView={p.mapView}
       mapConfig={p.mapConfig}
       mapTarget={p.clickedPointWgs84 || p.existingGeomWgs84 || null}
-      printServiceUrl={p.printServiceUrl}
       notaSpeseConfig={noteSpeseCfg}
       viewerBackgroundColor={String((cfg as any).anteprimaViewerBg || '#282828')}
       pdfHeaderBackgroundColor={String((cfg as any).anteprimaPdfHeaderBg || '#282828')}
@@ -12599,16 +12546,7 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
               mapClickEnabled={mapClickEnabled}
               onToggleMapClick={(on: boolean) => setMapClickEnabled(on)}
               mapView={mapView}
-              mapConfig={{
-                ...editingPreviewMapInfo,
-                mapLayerUrl: String((cfg as any).mapLayerUrl || ''),
-                mapLayerTitle: String((cfg as any).mapLayerTitle || ''),
-                mapLayerId: String((cfg as any).mapLayerId || ''),
-                mapLayerLayerId: String((cfg as any).mapLayerLayerId || ''),
-                officeLonWgs84: Number((cfg as any).officeLonWgs84) || 0,
-                officeLatWgs84: Number((cfg as any).officeLatWgs84) || 0
-              }}
-              printServiceUrl={String((cfg as any).printServiceUrl || '')}
+              mapConfig={editingPreviewMapInfo}
               mode={inCreateMode ? 'create' : 'edit'}
               initialData={initialEditData}
               editOid={editOid}

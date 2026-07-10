@@ -10,6 +10,7 @@ import { buildBozzaDeterminazionePdf } from '../../../_shared/gii-anteprime/docu
 import { PDFDocument } from 'pdf-lib'
 import { drawEmbeddedPdfPageInRapportoTechnicalBody, drawRapportoTechnicalHeadersByPage, RAPPORTO_TECHNICAL_BODY_BOX, attachmentTechnicalDocumentTitle } from '../../../_shared/gii-anteprime/documenti-tecnici/rapporto/technical-document-header'
 import GiiAnteprimaPanel from '../../../_shared/gii-anteprime/anteprima-panel'
+import { computeReqPoint } from '../../../_shared/gii-anteprime/req-point'
 
 
 const GII_LOG_EVENTI_CICLI_URL = 'https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_LOG_EVENTI_CICLI/FeatureServer/0'
@@ -1665,7 +1666,6 @@ function ActionsPanel (props: {
   }
   nsConfig: { detailUrl: string; parametriUrl: string; parametroCode: string }
   sanzioneConfig: { parametriSanzioniUrl: string; regolamentoArticoliUrl: string; regolamentoRaccordiUrl: string }
-  printConfig: { serviceUrl: string }
   mapView: any
 }) {
   const { active, roleCode, buttonText, buttonColors, ui } = props
@@ -1835,7 +1835,7 @@ function ActionsPanel (props: {
 
   const [modalMapTarget, setModalMapTarget] = React.useState<any | null>(null)
   React.useEffect(() => {
-    if (!previewOpen || !hasSel || !data) { setModalMapTarget(null); return }
+    if (!previewOpen || !hasSel || !data || computeReqPoint(data) !== 1) { setModalMapTarget(null); return }
     let cancelled = false
     setModalMapTarget(pointGeometryFromAttrsForActions(data) || null)
     void resolvePointGeometryForActions(active?.state?.ds, Number(oid), active?.state?.idFieldName || idFieldNameFromSel, data, active?.key).then(mt => {
@@ -6590,10 +6590,8 @@ ${noteTrim}` : 'Attestazione di conformità apposta.',
           mapMode='live'
           mapTarget={modalMapTarget}
           mapConfig={{ mapLayerUrl: String(active?.key || '') }}
-          printServiceUrl={props.printConfig?.serviceUrl}
           notaSpeseConfig={props.nsConfig}
           canSeeAmministrativi={showAdminPreviewDocuments}
-          determinazioneAvailable={showAdminPreviewDocuments}
           extraDocumentBuilder={async () => await buildDeterminazionePdfBlobForActions()}
           profile={{
             username: String((window as any).__giiUserRole?.username || ''),
@@ -8041,9 +8039,6 @@ const queryFields = React.useMemo(() => ['*'], [])
             parametriSanzioniUrl: String(cfg.parametriSanzioniUrl || ''),
             regolamentoArticoliUrl: String(cfg.regolamentoArticoliUrl || ''),
             regolamentoRaccordiUrl: String(cfg.regolamentoRaccordiUrl || '')
-          }}
-          printConfig={{
-            serviceUrl: String((cfg as any).printServiceUrl || (defaultConfig as any).printServiceUrl || '')
           }}
           mapView={mapView}
         />

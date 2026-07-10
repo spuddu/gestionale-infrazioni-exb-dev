@@ -349,14 +349,9 @@ export default function Setting(props: AllWidgetSettingProps<IMConfig>) {
         <Toggle k='showDatiGenerali' label='Mostra sezione Dati generali nel form nuova pratica'/>
         <Toggle k='enableCreateWithoutSelection' label='Abilita creazione senza selezione'/>
         <Text k='editPageId' label='Pagina Modifica / slug'/>
-        <div style={P.grid2}><Num k='officeLonWgs84' label='Lon ufficio WGS84' step={0.000001}/><Num k='officeLatWgs84' label='Lat ufficio WGS84' step={0.000001}/></div>
-        <div style={P.hint}>Puoi usare punto o virgola inserendo manualmente il valore nel JSON; qui il numero viene salvato normalizzato.</div>
       </SectionBox>
       <SectionBox title='Mappa di pagina'>
         <MapWidgetSelector onSelect={(ids:string[]) => setMany({ useMapWidgetIds: ids })} useMapWidgetIds={asJs(cfg.useMapWidgetIds || [])}/>
-        <Text k='mapLayerTitle' label='Titolo layer rapporti nella mappa'/>
-        <Text k='mapLayerUrl' label='URL layer rapporti nella mappa'/>
-        <div style={P.grid2}><Text k='mapLayerId' label='ID layer nella WebMap'/><Text k='mapLayerLayerId' label='LayerId numerico'/></div>
       </SectionBox>
     </>}
 
@@ -455,7 +450,6 @@ export default function Setting(props: AllWidgetSettingProps<IMConfig>) {
     <Acc id='anteprima' label='6. Anteprima PDF e titolo pratica' open={isOpen('anteprima')} onToggle={()=>toggle('anteprima')}/>
     {isOpen('anteprima') && <>
       <SectionBox title='Viewer PDF'>
-        <Text k='printServiceUrl' label='Servizio stampa ArcGIS' placeholder='https://.../Export%20Web%20Map%20Task'/>
         <div style={{...P.hint, marginTop: 10}}>Colori sfondo viewer</div>
         <div style={P.grid2}><Color k='anteprimaViewerBg' label='Sfondo contenitore viewer' fallback='#282828'/><Color k='anteprimaPdfHeaderBg' label='Sfondo intestazione PDF' fallback='#282828'/></div>
         <div style={P.grid2}><Color k='anteprimaPdfAreaBg' label='Sfondo area pagine PDF' fallback='#282828'/><Color k='anteprimaPdfThumbnailsBg' label='Sfondo barra miniature' fallback='#1f1f1f'/></div>

@@ -10,6 +10,7 @@ import { buildPlaceholderMap } from '../../../_shared/gii-anteprime/documenti-te
 import { applyNotaSpeseToRapportoMap, buildArt30RapportoSummary } from '../../../_shared/gii-anteprime/documenti-tecnici/rapporto/rapporto-nota-spese-summary'
 import { buildNotaSpesePdf, type NotaSpeseData } from '../../../_shared/gii-anteprime/documenti-tecnici/rapporto/notaspese-pdf-builder'
 import GiiAnteprimaPanel from '../../../_shared/gii-anteprime/anteprima-panel'
+import { computeReqPoint } from '../../../_shared/gii-anteprime/req-point'
 import GiiAttachmentViewer, { GII_ATTACHMENT_KEYWORDS, getGiiAttachmentKind, filterGiiAttachmentsForAdministrativeFascicolo } from '../../../_shared/gii-anteprime/allegati/gii-attachment-viewer'
 import { PDFDocument, StandardFonts, rgb } from 'pdf-lib'
 import type { IMConfig, SummaryFieldConfig } from '../config'
@@ -1654,6 +1655,28 @@ async function resolveLayerForEdit (ds: any, fallbackUrl?: string): Promise<any 
   } catch { }
 
   return null
+}
+
+async function queryPointGeometryForAmm (ds: any, oid: number, idFieldName: string, layerUrlHint?: string): Promise<any | null> {
+  if (!Number.isFinite(oid) || oid <= 0) return null
+  try {
+    const layer = await resolveLayerForEdit(ds, layerUrlHint)
+    if (!layer || typeof layer.queryFeatures !== 'function') return null
+    const field = String(idFieldName || 'OBJECTID').trim() || 'OBJECTID'
+    const res = await layer.queryFeatures({ where: `${field} = ${oid}`, outFields: [field], returnGeometry: true, num: 1 })
+    const feat = (res?.features || [])[0]
+    const geom = feat?.geometry
+    // Coordinate (0,0) o assenti = nessun punto per questa pratica (violazione che non lo
+    // richiede: geometria impostata automaticamente a zero). Stesso criterio già in uso in
+    // gii-azioni — non ci si basa su req_point, che per le pratiche da survey può non essere
+    // compilato pur essendoci un punto reale.
+    const gx = Number(geom?.x ?? geom?.longitude)
+    const gy = Number(geom?.y ?? geom?.latitude)
+    if (!Number.isFinite(gx) || !Number.isFinite(gy) || (gx === 0 && gy === 0)) return null
+    return geom
+  } catch {
+    return null
+  }
 }
 
 type AmmAttachmentInfo = { id: number; name?: string; size?: number; contentType?: string; url?: string; keywords?: string; created?: number; creationDate?: number; createdAt?: number; lastEditDate?: number; editDate?: number; uploadedAt?: number }
@@ -7009,6 +7032,7 @@ function FascicoloAmmPreviewSection (props: {
   hasSelection: boolean
   oid: number | null
   ds: any
+  idFieldName?: string
   layerUrl?: string
   viewerBackgroundColor?: string
   pdfHeaderBackgroundColor?: string
@@ -7028,6 +7052,25 @@ function FascicoloAmmPreviewSection (props: {
     return await buildBozzaDeterminazionePdfBlob(props.data || {}, props.fields || [], props.profile || { username: '', fullName: '' })
   }, [props.data, props.fields, props.profile])
 
+  // Editing-amm non interroga mai la geometria nelle query dei dati (returnGeometry: false
+  // ovunque): per la mappa headless serve un'interrogazione mirata sul solo punto, quando
+  // si apre l'anteprima. Nessun widget Mappa collegato — resta un'interrogazione puntuale.
+  //
+  // La disponibilità è decisa da computeReqPoint (ricalcolato dagli attributi correnti della
+  // violazione, non dal campo salvato req_point — vedi _shared/gii-anteprime/req-point.ts):
+  // per le pratiche da survey req_point può non essere compilato pur avendo coordinate reali,
+  // ma se la violazione non richiede un punto (es. Art.8) il punto non va comunque mostrato.
+  // Il filtro (0,0) dentro queryPointGeometryForAmm resta come ulteriore rete di sicurezza.
+  const [ammMapTarget, setAmmMapTarget] = React.useState<any | null>(null)
+  React.useEffect(() => {
+    if (!props.hasSelection || oid == null || computeReqPoint(props.data) !== 1) { setAmmMapTarget(null); return }
+    let cancelled = false
+    void queryPointGeometryForAmm(props.ds, oid, props.idFieldName || 'OBJECTID', layerUrl).then(geom => {
+      if (!cancelled) setAmmMapTarget(geom)
+    }).catch(() => { if (!cancelled) setAmmMapTarget(null) })
+    return () => { cancelled = true }
+  }, [props.hasSelection, oid, props.ds, props.idFieldName, layerUrl, props.data])
+
   return (
     <div style={{ width: '100%', height: '100%', minHeight: 0, borderRadius: 12, overflow: 'hidden', display: 'flex', flexDirection: 'column', background: props.viewerBackgroundColor || '#282828' }}>
       <GiiAnteprimaPanel
@@ -7036,9 +7079,10 @@ function FascicoloAmmPreviewSection (props: {
         ds={props.ds}
         oid={oid}
         layerUrlHint={layerUrl}
+        mapConfig={{}}
+        mapTarget={ammMapTarget}
         notaSpeseConfig={props.nsConfig}
         canSeeAmministrativi={true}
-        determinazioneAvailable={true}
         extraDocumentBuilder={buildDeterminazioneExtra}
         profile={props.profile}
         viewerBackgroundColor={props.viewerBackgroundColor}
@@ -7050,6 +7094,7 @@ function FascicoloAmmPreviewSection (props: {
         sidebarBorderColor={props.sidebarBorderColor}
         sidebarBorderWidth={props.sidebarBorderWidth}
       />
+
     </div>
   )
 }
@@ -9411,6 +9456,7 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
                   hasSelection={hasSelection}
                   oid={oid != null && Number.isFinite(Number(oid)) ? Number(oid) : null}
                   ds={(active as any)?.ds}
+                  idFieldName={String((active as any)?.idFieldName || 'OBJECTID')}
                   layerUrl={(active as any)?.layerUrl || (configuredDsState as any)?.layerUrl || getDataSourceUrl(configuredDs)}
                   viewerBackgroundColor={String((cfg as any).anteprimaViewerBg || '#282828')}
                   pdfHeaderBackgroundColor={String((cfg as any).anteprimaPdfHeaderBg || '#282828')}

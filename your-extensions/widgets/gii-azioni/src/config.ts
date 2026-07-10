@@ -1,9 +1,6 @@
 import { type ImmutableObject, Immutable } from 'jimu-core'
 
 export interface Config {
-  // --- Mappa / stampa ArcGIS
-  printServiceUrl: string
-
   // --- Testo pulsante
   buttonText: string
 
@@ -89,8 +86,6 @@ export interface Config {
 }
 
 export const defaultConfig: Config = {
-  printServiceUrl: 'https://utility.arcgisonline.com/arcgis/rest/services/Utilities/PrintingTools/GPServer/Export%20Web%20Map%20Task',
-
   buttonText: 'Prendi in carico',
 
   takeColor: '#feeb22',
