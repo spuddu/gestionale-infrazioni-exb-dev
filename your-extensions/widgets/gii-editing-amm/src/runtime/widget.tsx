@@ -4,6 +4,7 @@ import { React, jsx, type AllWidgetProps, DataSourceComponent, UrlManager, getAp
 import { buildVerbalePdfBlob } from '../../../_shared/gii-anteprime/documenti-amministrativi/proposta-contestazione/proposta-contestazione-data-map'
 import { buildBozzaDeterminazioneDocx, getBozzaDeterminazioneDocxFileName } from '../../../_shared/gii-anteprime/documenti-amministrativi/bozza-determinazione/bozza-determinazione-docx-builder'
 import { buildBozzaDeterminazionePdf } from '../../../_shared/gii-anteprime/documenti-amministrativi/bozza-determinazione/bozza-determinazione-pdf-builder'
+import { buildBozzaDeterminazioneMap } from '../../../_shared/gii-anteprime/documenti-amministrativi/bozza-determinazione/bozza-determinazione-map'
 import { buildRapportoPdf, buildRapportoIterPlaceholders, loadRapportoIterCicliForPdf, type RapportoIterCicloPdf, type UtenteCacheEntry } from '../../../_shared/gii-anteprime/documenti-tecnici/rapporto/rapporto-pdf-builder'
 import { RAPPORTO_TECHNICAL_BODY_BOX, drawRapportoTechnicalHeadersByPage, attachmentTechnicalDocumentTitle } from '../../../_shared/gii-anteprime/documenti-tecnici/rapporto/technical-document-header'
 import { buildPlaceholderMap } from '../../../_shared/gii-anteprime/documenti-tecnici/rapporto/rapporto-placeholder-map'
@@ -4602,7 +4603,12 @@ function PostAttestazioneTiAmmWorkSection (props: {
   }, [attachmentsBusy, oid, resolveAttachmentLayer])
 
   const canUploadBozza = props.canEdit && canGenerateBozzaDeterminazione && hasBozzaGenerated && !hasBozzaWordCaricata && !bozzaAlreadyTransmitted && !props.saving && !attachmentsBusy
-  const canDeleteBozza = props.canEdit && hasBozzaGenerated && !bozzaAlreadyTransmitted && !props.saving && !attachmentsBusy
+  // L'eliminazione, a differenza di genera/carica/trasmetti, deve restare bloccata anche dopo
+  // che RI_AMM ha approvato (validata) - solo un rimando effettivo per integrazione giustifica
+  // di poter eliminare la bozza e ripartire da zero; dopo un'approvazione, la bozza va solo
+  // aggiornata con i dati di protocollo, mai eliminata.
+  const bozzaBloccataPerEliminazione = !!currentStatoBozzaCode && currentStatoBozzaCode !== 'BOZZA' && !isBozzaDeterminazioneRimandataDaRiAmm(d)
+  const canDeleteBozza = props.canEdit && hasBozzaGenerated && !bozzaBloccataPerEliminazione && !props.saving && !attachmentsBusy
   const canTransmitBozza = props.canEdit && tiAmmHaAttestatoConformita && !vistoDaRinnovareDopoRimando && !riAmmHaApprovatoProposta && hasBozzaGenerated && hasBozzaWordCaricata && !bozzaAlreadyTransmitted && !props.saving && !attachmentsBusy
   const canPrepareEmailProtocollo = props.canEdit && riAmmHaApprovatoProposta && !vistoDaRinnovareDopoRimando && !protocolloFascicoloOk && !props.saving && !attachmentsBusy
   const canPrepareEmailDirettore = props.canEdit && riAmmHaApprovatoProposta && !vistoDaRinnovareDopoRimando && protocolliCompleti && hasBozzaGenerated && hasBozzaWordCaricata && !props.saving && !attachmentsBusy
@@ -4683,11 +4689,11 @@ function PostAttestazioneTiAmmWorkSection (props: {
                       <div style={{ display: 'flex', alignItems: 'center', gap: 6, flex: '0 0 auto' }}>
                         <button
                           type='button'
-                          title='Scarica bozza'
-                          aria-label='Scarica bozza'
-                          disabled={attachmentsBusy}
+                          title={props.saving ? 'Salvataggio in corso…' : 'Scarica bozza'}
+                          aria-label={props.saving ? 'Salvataggio in corso…' : 'Scarica bozza'}
+                          disabled={attachmentsBusy || props.saving}
                           onClick={() => { void downloadBozzaWord(att) }}
-                          style={bozzaIconButtonStyle({ disabled: attachmentsBusy })}
+                          style={bozzaIconButtonStyle({ disabled: attachmentsBusy || props.saving })}
                         >
                           <BozzaActionIcon name='download' size={24} />
                         </button>
@@ -6391,78 +6397,8 @@ function AmmWorkflowText (props: { text: string }) {
 
 
 
-function joinItalianTextList (values: string[]): string {
-  const clean = values.map(v => String(v || '').trim()).filter(Boolean)
-  if (clean.length <= 1) return clean[0] || ''
-  if (clean.length === 2) return `${clean[0]} e ${clean[1]}`
-  return `${clean.slice(0, -1).join(', ')} e ${clean[clean.length - 1]}`
-}
-
-function buildBozzaDeterminazioneArticleReference (data: any, fields: LayerFieldInfo[]): { elenco: string, riferimento: string } {
-  const rows = buildViolationRows(data || {}, fields || [])
-  const seen = new Set<string>()
-  const numbers: string[] = []
-  rows.forEach(row => {
-    const n = normalizeArticleNumber(row.label)
-    if (n && !seen.has(n)) {
-      seen.add(n)
-      numbers.push(n)
-    }
-  })
-  numbers.sort((a, b) => Number(a) - Number(b))
-  if (!numbers.length) return { elenco: '', riferimento: 'dell’art. ____' }
-  if (numbers.length === 1) return { elenco: `art. ${numbers[0]}`, riferimento: `dell’art. ${numbers[0]}` }
-  return { elenco: joinItalianTextList(numbers.map(n => `art. ${n}`)), riferimento: `degli artt. ${joinItalianTextList(numbers)}` }
-}
-
-function buildDefaultBozzaDeterminazioneOggetto (data: any, _fields: LayerFieldInfo[]): string {
-  const d = data || {}
-  const ragioneSociale = String(pickAttrCI(d, ['ragione_sociale']) || '').trim()
-  const trasgressore = ragioneSociale || joinParts(String(pickAttrCI(d, ['cognome']) || ''), String(pickAttrCI(d, ['nome']) || ''))
-  return `Contestazione di infrazione alle “Norme generali sulla distribuzione dell’acqua ad uso irriguo”, approvate con deliberazione del C.d.D. n. 016 del 02.12.2019${trasgressore ? ` – Ditta “${trasgressore}”` : ''}.`
-}
-
-function buildBozzaDeterminazioneDocxMap (data: any, fields: LayerFieldInfo[], profile: { username: string, fullName: string }): Record<string, string> {
-  const d = data || {}
-  const oid = pickAttrCI(d, ['OBJECTID', 'objectid', 'ObjectId', 'FID'])
-  const oidNumber = oid != null && Number.isFinite(Number(oid)) ? Number(oid) : null
-  const nRapporto = normalizeReportCode(pickAttrCI(d, [
-    'numero_rapporto_tecnico', 'NUMERO_RAPPORTO_TECNICO', 'Numero_rapporto_tecnico',
-    'n_rapporto', 'numero_rapporto', 'codice_rapporto'
-  ]), oidNumber)
-  const nRilevazione = normalizeRilevazioneCodeForAmm(d, oidNumber)
-  const ragioneSociale = String(pickAttrCI(d, ['ragione_sociale']) || '').trim()
-  const trasgressore = ragioneSociale || joinParts(String(pickAttrCI(d, ['cognome']) || ''), String(pickAttrCI(d, ['nome']) || ''))
-  const cfPiva = ragioneSociale ? String(pickAttrCI(d, ['piva']) || '').trim() : String(pickAttrCI(d, ['codice_fiscale']) || '').trim()
-  const oggettoBozza = buildDefaultBozzaDeterminazioneOggetto(d, fields)
-  const area = pdfFieldValue(d, fields, 'area_cod') || String(pickAttrCI(d, ['area_label', 'area']) || '')
-  const settore = pdfFieldValue(d, fields, 'settore_cod') || String(pickAttrCI(d, ['settore_label', 'settore']) || '')
-  const articleRef = buildBozzaDeterminazioneArticleReference(d, fields)
-  return {
-    objectid: oid != null ? String(oid) : '',
-    n_rilevazione: nRilevazione,
-    n_rapporto: nRapporto,
-    data_rapporto_tecnico: pdfFieldValue(d, fields, 'data_rapporto_tecnico'),
-    area,
-    settore,
-    articoli_violati_elenco: articleRef.elenco,
-    articoli_violati_riferimento: articleRef.riferimento,
-    protocollo_fascicolo_numero: String(pickAttrCI(d, ['protocollo_fascicolo_numero']) || ''),
-    protocollo_fascicolo_data: pdfFieldValue(d, fields, 'protocollo_fascicolo_data'),
-    trasgressore,
-    cf_piva: cfPiva,
-    tipo_atto_amm_label: pdfFieldValue(d, fields, 'tipo_atto_amm') || String(pickAttrCI(d, ['tipo_atto_amm']) || ''),
-    oggetto_atto_amm: String(pickAttrCI(d, ['oggetto_atto_amm']) || ''),
-    pagamento_importo_totale: pdfFieldValue(d, fields, 'pagamento_importo_totale', { money: true }),
-    bozza_determinazione_oggetto: oggettoBozza,
-    anno_corrente: String(new Date().getFullYear()),
-    data_generazione: new Date().toLocaleString('it-IT'),
-    generato_da: profile.fullName || profile.username || ''
-  }
-}
-
 async function buildBozzaDeterminazioneDocxBlob (data: any, fields: LayerFieldInfo[], profile: { username: string, fullName: string }): Promise<{ blob: Blob, fileName: string }> {
-  const map = buildBozzaDeterminazioneDocxMap(data, fields, profile)
+  const map = buildBozzaDeterminazioneMap(data, profile)
   const bytes = await buildBozzaDeterminazioneDocx(map)
   const fileName = getBozzaDeterminazioneDocxFileName(map)
   return { blob: new Blob([bytes as any], { type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' }), fileName }
@@ -6829,7 +6765,7 @@ async function buildAmmNotaSpesePdfItems (data: any, fields: LayerFieldInfo[], p
 }
 
 async function buildBozzaDeterminazionePdfBlob (data: any, fields: LayerFieldInfo[], profile: { username: string, fullName: string }): Promise<{ blob: Blob, fileName: string }> {
-  const map = buildBozzaDeterminazioneDocxMap(data, fields, profile)
+  const map = buildBozzaDeterminazioneMap(data, profile)
   const bytes = await buildBozzaDeterminazionePdf(map)
   const base = String(map.n_rapporto || map.objectid || 'pratica').replace(/[^a-zA-Z0-9_-]/g, '_')
   return { blob: new Blob([bytes as any], { type: 'application/pdf' }), fileName: `determinazione_dirigenziale_${base}.pdf` }
@@ -7028,6 +6964,7 @@ function FascicoloAmmPreviewSection (props: {
   liveRefreshVersion?: number
   fields: LayerFieldInfo[]
   profile: { username: string, fullName: string }
+  role?: string
   nsConfig?: { detailUrl?: string, parametriUrl?: string, parametroCode?: string }
   hasSelection: boolean
   oid: number | null
@@ -7083,6 +7020,7 @@ function FascicoloAmmPreviewSection (props: {
         mapTarget={ammMapTarget}
         notaSpeseConfig={props.nsConfig}
         canSeeAmministrativi={true}
+        role={props.role}
         extraDocumentBuilder={buildDeterminazioneExtra}
         profile={props.profile}
         viewerBackgroundColor={props.viewerBackgroundColor}
@@ -8378,7 +8316,7 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
       // Chiudiamo quindi eventuali stati/attività RI_AMM residui creati da versioni
       // precedenti o da prove intermedie del flusso.
       put('stato_RI_AMM', 4)
-      put('dt_stato_RI_AMM', now)
+      put('dt_stato_RI_AMM', null)
       put('dt_presa_in_carico_RI_AMM', null)
       put('esito_RI_AMM', null)
       put('dt_esito_RI_AMM', null)
@@ -8660,8 +8598,8 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
       return false
     }
     const currentStato = String(pickAttrCI(base, ['determinazione_stato']) || '').trim().toUpperCase()
-    const bozzaRientrataDaRiAmm = isBozzaDeterminazioneRientrataDaRiAmm(base)
-    if (currentStato && currentStato !== 'BOZZA' && !bozzaRientrataDaRiAmm) {
+    const bozzaRimandataDaRiAmm = isBozzaDeterminazioneRimandataDaRiAmm(base)
+    if (currentStato && currentStato !== 'BOZZA' && !bozzaRimandataDaRiAmm) {
       setDialog({ kind: 'warn', title: 'Bozza già avanzata', text: 'La bozza di determinazione risulta già trasmessa o validata. Eventuali eliminazioni dovranno rientrare nel successivo flusso di verifica/rimando.' })
       return false
     }
@@ -9448,6 +9386,7 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
                   liveRefreshVersion={liveRefreshVersion}
                   fields={layerFields}
                   profile={profile}
+                  role={currentRole}
                   nsConfig={{
                     detailUrl: String((cfg as any).nsNotaSpeseDettaglioUrl || ''),
                     parametriUrl: String((cfg as any).nsParametriUrl || ''),

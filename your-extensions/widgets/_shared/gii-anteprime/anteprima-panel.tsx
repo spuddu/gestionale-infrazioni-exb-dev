@@ -1224,6 +1224,11 @@ export default function GiiAnteprimaPanel (p: {
   // quest'ultima tramite extraDocumentBuilder — vedi sotto — dato che non è ancora costruita
   // internamente da buildFascicolo).
   canSeeAmministrativi?: boolean
+  // Ruolo corrente (es. 'TI_AMM', 'RI_AMM', 'DA'). Usato solo per determinare la reale
+  // disponibilità di proposta di contestazione e determinazione: TI_AMM, essendo l'autore,
+  // deve poter controllare cosa sta per trasmettere anche prima della trasmissione stessa;
+  // gli altri ruoli le vedono solo dopo che TI_AMM le ha effettivamente trasmesse.
+  role?: string
   profile?: { username: string, fullName: string }
   // Se presente, il pannello mostra il pulsante di chiusura del viewer (uso in modale,
   // es. gii-azioni). Se assente, nessun pulsante di chiusura (uso incorporato).
@@ -1727,8 +1732,17 @@ export default function GiiAnteprimaPanel (p: {
   // - determinazione dirigenziale: solo se esiste davvero un allegato di tipo "bozza
   //   determinazione" caricato da TI_AMM, rilevato dalla stessa lista allegati già
   //   interrogata dal pannello per il proprio uso — nessuna query aggiuntiva.
-  const propostaContestazioneAvailableComputed = Number(pickAttrCI(p.data, ['esito_TI_AMM'])) === 2
-  const determinazioneAvailableComputed = hasBozzaDeterminazioneAttachment
+  // In aggiunta, per tutti i ruoli tranne TI_AMM (che deve poter controllare cosa sta per
+  // trasmettere), entrambi i documenti sono disponibili solo dopo la trasmissione effettiva
+  // a RI_AMM (determinazione_stato diverso da BOZZA/vuoto) — altrimenti risulterebbero
+  // visibili a RI_AMM/DA prima ancora che TI_AMM li abbia inviati, e sarebbero già di nuovo
+  // visibili come "disponibili" anche dopo un rimando che li ha resi superati (che riporta
+  // determinazione_stato a BOZZA).
+  const isTiAmmRole = String(p.role || '').trim().toUpperCase() === 'TI_AMM'
+  const determinazioneStatoRaw = String(pickAttrCI(p.data, ['determinazione_stato']) || '').trim().toUpperCase()
+  const bozzaTrasmessaARiAmm = !!determinazioneStatoRaw && determinazioneStatoRaw !== 'BOZZA'
+  const propostaContestazioneAvailableComputed = Number(pickAttrCI(p.data, ['esito_TI_AMM'])) === 2 && (isTiAmmRole || bozzaTrasmessaARiAmm)
+  const determinazioneAvailableComputed = hasBozzaDeterminazioneAttachment && (isTiAmmRole || bozzaTrasmessaARiAmm)
 
   return (
     <div css={containerCss}>

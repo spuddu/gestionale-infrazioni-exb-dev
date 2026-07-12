@@ -7,6 +7,7 @@ import { computeSanzioneAutomatica } from '../../../_shared/gii-anteprime/sanzio
 import type { IMConfig } from '../config'
 import { defaultConfig } from '../config'
 import { buildBozzaDeterminazionePdf } from '../../../_shared/gii-anteprime/documenti-amministrativi/bozza-determinazione/bozza-determinazione-pdf-builder'
+import { buildBozzaDeterminazioneMap } from '../../../_shared/gii-anteprime/documenti-amministrativi/bozza-determinazione/bozza-determinazione-map'
 import { PDFDocument } from 'pdf-lib'
 import { drawEmbeddedPdfPageInRapportoTechnicalBody, drawRapportoTechnicalHeadersByPage, RAPPORTO_TECHNICAL_BODY_BOX, attachmentTechnicalDocumentTitle } from '../../../_shared/gii-anteprime/documenti-tecnici/rapporto/technical-document-header'
 import GiiAnteprimaPanel from '../../../_shared/gii-anteprime/anteprima-panel'
@@ -1863,105 +1864,17 @@ function ActionsPanel (props: {
     return undefined
   }
 
-  const buildAdminPreviewPdfMapForActions = React.useCallback((): Record<string, string> => {
-    const d = data || {}
-    const oidNum = oid != null && Number.isFinite(Number(oid)) ? Number(oid) : null
-    const clean = (value: any): string => String(value ?? '').replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim()
-    const date = (value: any): string => formatDateIt(value)
-    const money = (value: any): string => {
-      const n = Number(String(value ?? '').replace(/\./g, '').replace(',', '.'))
-      if (!Number.isFinite(n)) return clean(value)
-      return n.toLocaleString('it-IT', { style: 'currency', currency: 'EUR' })
-    }
-    const rapporto = getOfficialRapportoTecnicoNumber(d) || (oidNum != null ? `Rilevazione n. ${oidNum}` : '')
-    const ragioneSociale = clean(pickAttrCI(d, ['ragione_sociale', 'RAGIONE_SOCIALE']))
-    const trasgressore = ragioneSociale || [pickAttrCI(d, ['cognome']), pickAttrCI(d, ['nome'])].map(clean).filter(Boolean).join(' ')
-    const cfPiva = ragioneSociale ? clean(pickAttrCI(d, ['piva', 'partita_iva'])) : clean(pickAttrCI(d, ['codice_fiscale', 'cf']))
-    const importoTotale = pickAttrCI(d, ['pagamento_importo_totale', 'importo_totale', 'totale_dovuto'])
-    const articoli = (() => {
-      const out: string[] = []
-      for (let i = 1; i <= 60; i++) {
-        const n = String(i).padStart(2, '0')
-        const selected = pickAttrCI(d, [`v_art${n}`, `V_ART${n}`, `v_art${i}`, `V_ART${i}`])
-        if (selected === 1 || selected === '1' || selected === true || String(selected).toUpperCase() === 'TRUE') out.push(String(i))
-      }
-      if (!out.length) return { elenco: '', riferimento: 'dell’art. ____' }
-      if (out.length === 1) return { elenco: `art. ${out[0]}`, riferimento: `dell’art. ${out[0]}` }
-      return { elenco: out.map(n => `art. ${n}`).join(', ').replace(/, ([^,]*)$/, ' e $1'), riferimento: `degli artt. ${out.join(', ').replace(/, ([^,]*)$/, ' e $1')}` }
-    })()
-    const area = clean(pickAttrCI(d, ['area_label', 'area_cod', 'area']))
-    const settore = clean(pickAttrCI(d, ['settore_label', 'settore_cod', 'settore']))
-    const esitoTiAmmNum = Number(pickAttrCI(d, ['esito_TI_AMM', 'Esito_TI_AMM', 'ESITO_TI_AMM']))
-    const esitoRiAmmNum = Number(pickAttrCI(d, ['esito_RI_AMM', 'Esito_RI_AMM', 'ESITO_RI_AMM']))
-    const propostaApprovata = esitoTiAmmNum === 2 && esitoRiAmmNum === 2
-    const map: Record<string, string> = {
-      objectid: oidNum != null ? String(oidNum) : '',
-      anno_corrente: String(new Date().getFullYear()),
-      n_rilevazione: oidNum != null ? String(oidNum) : '',
-      n_rapporto: rapporto,
-      data_rapporto_tecnico: date(pickAttrCI(d, ['data_rapporto_tecnico'])),
-      data_approvazione_rapporto: date(pickAttrCI(d, ['dt_esito_DT', 'data_rapporto_tecnico'])),
-      area,
-      settore,
-      ufficio_zona: clean(pickAttrCI(d, ['ufficio_zona'])),
-      trasgressore_tipo: ragioneSociale ? 'PG' : 'PF',
-      trasgressore,
-      cf_piva: cfPiva,
-      indirizzo: [pickAttrCI(d, ['via', 'indirizzo']), pickAttrCI(d, ['civico'])].map(clean).filter(Boolean).join(', '),
-      comune_cap: [pickAttrCI(d, ['comune']), pickAttrCI(d, ['cap'])].map(clean).filter(Boolean).join(' '),
-      pec: clean(pickAttrCI(d, ['pec'])),
-      contatti: [pickAttrCI(d, ['telefono']), pickAttrCI(d, ['email'])].map(clean).filter(Boolean).join(' • '),
-      descrizione_fatti: clean(pickAttrCI(d, ['descrizione_fatti', 'descrizione'])) || '-',
-      tipo_atto_amm: clean(pickAttrCI(d, ['tipo_atto_amm'])),
-      tipo_atto_amm_label: clean(pickAttrCI(d, ['tipo_atto_amm_label', 'tipo_atto_amm'])),
-      oggetto_atto_amm: clean(pickAttrCI(d, ['oggetto_atto_amm'])),
-      note_atto_amm: clean(pickAttrCI(d, ['note_atto_amm'])),
-      atto_approvato: clean(pickAttrCI(d, ['determinazione_numero'])) ? '1' : '0',
-      proposta_approvata: propostaApprovata ? '1' : '0',
-      protocollo_istanza_numero: clean(pickAttrCI(d, ['protocollo_istanza_numero'])),
-      protocollo_istanza_data: date(pickAttrCI(d, ['protocollo_istanza_data'])),
-      protocollo_fascicolo_numero: clean(pickAttrCI(d, ['protocollo_fascicolo_numero'])),
-      protocollo_fascicolo_data: date(pickAttrCI(d, ['protocollo_fascicolo_data'])),
-      accertamento_data: date(pickAttrCI(d, ['accertamento_data'])),
-      protocollo_atto_accertamento_numero: clean(pickAttrCI(d, ['protocollo_atto_accertamento_numero'])),
-      protocollo_atto_accertamento_data: date(pickAttrCI(d, ['protocollo_atto_accertamento_data'])),
-      sanzione_importo_base: money(pickAttrCI(d, ['sanzione_importo_base'])),
-      sanzione_importo_ridotta: money(pickAttrCI(d, ['sanzione_importo_ridotta'])),
-      risarcimento_danni_importo: money(pickAttrCI(d, ['risarcimento_danni_importo'])),
-      sanzione_spese_notifica: money(pickAttrCI(d, ['sanzione_spese_notifica'])),
-      attrezzature_rimborso_importo: money(pickAttrCI(d, ['attrezzature_rimborso_importo'])),
-      attrezzature_cauzione_decurtata: money(pickAttrCI(d, ['attrezzature_cauzione_decurtata'])),
-      attrezzature_importo_netto: money(pickAttrCI(d, ['attrezzature_importo_netto'])),
-      attrezzature_rimborso_dettaglio: clean(pickAttrCI(d, ['attrezzature_rimborso_dettaglio'])),
-      pagamento_importo_totale: money(importoTotale),
-      pagamento_scadenza: date(pickAttrCI(d, ['pagamento_scadenza'])),
-      pagamento_modalita: clean(pickAttrCI(d, ['pagamento_modalita'])),
-      pagamento_stato: clean(pickAttrCI(d, ['pagamento_stato'])),
-      sanzione_dettaglio_calcolo: clean(pickAttrCI(d, ['sanzione_dettaglio_calcolo'])),
-      articoli_violati_elenco: articoli.elenco,
-      articoli_violati_riferimento: articoli.riferimento,
-      data_generazione: new Date().toLocaleString('it-IT'),
-      generato_da: clean((window as any).__giiUserRole?.fullName || (window as any).__giiUserRole?.full_name || (window as any).__giiUserRole?.username || (window as any).__giiUser?.username || ''),
-      amm_iter_compilazione_nome: clean(pickAttrCI(d, ['ti_amm_assegnato_nome', 'ti_amm_assegnato_username'])),
-      amm_iter_compilazione_presa: date(pickAttrCI(d, ['dt_presa_in_carico_TI_AMM'])),
-      amm_iter_compilazione_data: date(pickAttrCI(d, ['dt_esito_TI_AMM'])),
-      amm_iter_supervisione_nome: clean(pickAttrCI(d, ['ri_amm_nome', 'ri_amm_username'])),
-      amm_iter_supervisione_presa: date(pickAttrCI(d, ['dt_presa_in_carico_RI_AMM'])),
-      amm_iter_supervisione_data: date(pickAttrCI(d, ['dt_esito_RI_AMM'])),
-      amm_iter_approvazione_nome: clean(pickAttrCI(d, ['da_nome', 'da_username'])),
-      amm_iter_approvazione_presa: date(pickAttrCI(d, ['determinazione_trasmessa_firma_il'])),
-      amm_iter_approvazione_data: date(pickAttrCI(d, ['determinazione_data'])),
-      bozza_determinazione_oggetto: clean(pickAttrCI(d, ['oggetto_atto_amm']))
-    }
-    return map
-  }, [data, oid, pickAttrCI])
-
   const buildDeterminazionePdfBlobForActions = React.useCallback(async (): Promise<{ blob: Blob; fileName: string }> => {
-    const map = buildAdminPreviewPdfMapForActions()
+    const profile = {
+      username: (window as any).__giiUserRole?.username || (window as any).__giiUser?.username || '',
+      fullName: (window as any).__giiUserRole?.fullName || (window as any).__giiUserRole?.full_name || ''
+    }
+    const map = buildBozzaDeterminazioneMap(data || {}, profile)
     const bytes = await buildBozzaDeterminazionePdf(map)
     const base = String(map.n_rapporto || map.objectid || 'pratica').replace(/[^a-zA-Z0-9_-]/g, '_')
     return { blob: new Blob([bytes as any], { type: 'application/pdf' }), fileName: `determinazione_dirigenziale_${base}.pdf` }
-  }, [buildAdminPreviewPdfMapForActions])
+  }, [data])
+
 
   const handleRapportoPreview = React.useCallback(() => {
     if (!hasSel || !data) return
@@ -3416,7 +3329,8 @@ function ActionsPanel (props: {
     (
       statoRoleNum === STATO_DA_PRENDERE ||
       presaRoleNum === PRESA_DA_PRENDERE ||
-      (riAmmBozzaDeterminazioneDaVerificare && !inChargeByRole && roleEsitoNum == null)
+      (riAmmBozzaDeterminazioneDaVerificare && !inChargeByRole && roleEsitoNum == null) ||
+      tiAmmAwaitingRetakeFromRiAmm
     )
 
   // Tutti i ruoli abilitati alla scheda possono aprire la pratica anche quando non è
@@ -6611,6 +6525,7 @@ ${noteTrim}` : 'Attestazione di conformità apposta.',
           mapConfig={{ mapLayerUrl: String(active?.key || '') }}
           notaSpeseConfig={props.nsConfig}
           canSeeAmministrativi={showAdminPreviewDocuments}
+          role={role}
           extraDocumentBuilder={async () => await buildDeterminazionePdfBlobForActions()}
           profile={{
             username: String((window as any).__giiUserRole?.username || ''),
@@ -7524,199 +7439,6 @@ async function queryFeatureAttachmentsForActions (layer: any, oid: number, ds?: 
     return pullInfos(json?.[oid] || json?.[String(oid)] || json)
   } catch {}
   return []
-}
-
-async function hasAttachmentsForActions (ds: any, oid: number): Promise<boolean> {
-  if (!Number.isFinite(oid) || oid <= 0) return false
-  const layer = await resolveFeatureLayerForAttachments(ds)
-  if (!layer) return false
-  const infos = await queryFeatureAttachmentsForActions(layer, oid, ds)
-  return infos.length > 0
-}
-
-function normalizeAttachmentTextForActions (value?: any): string {
-  return String(value || '')
-    .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '')
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, ' ')
-    .trim()
-}
-
-function isSpecialAdministrativeAttachmentForActions (att: any): boolean {
-  const keywords = String(att?.keywords || att?.Keywords || '').toUpperCase()
-  const nameKey = normalizeAttachmentTextForActions(att?.name || att?.Name || att?.ATT_NAME)
-  if (keywords.includes('GII_PROPOSTA_CONTESTAZIONE_PDF') || keywords.includes('GII_BOZZA_DETERMINAZIONE_DOCX')) return true
-  if (/\bproposta\b.*\bcontestazione\b/.test(nameKey)) return true
-  if (/\bbozza\b.*\bdeterminazione\b/.test(nameKey) || /\bdeterminazione\b.*\bbozza\b/.test(nameKey)) return true
-  if (/\bdeterminazione\b.*\bdirigenziale\b/.test(nameKey) || /\bdetermina\b/.test(nameKey)) return true
-  return false
-}
-
-async function fetchAttachmentBlobForActions (layer: any, ds: any, oid: number, att: any, index: number): Promise<{ blob: Blob; fileName: string } | null> {
-  const id = Number(att?.id ?? att?.attachmentId ?? att?.objectId)
-  const layerUrl = attachmentLayerUrlForActions(layer, ds)
-  let url = String(att?.url || '').trim()
-  if (!url && layerUrl && Number.isFinite(id) && id > 0) url = `${layerUrl}/${oid}/attachments/${id}`
-  if (!url) return null
-  let token = ''
-  try {
-    const IdentityManager = await loadEsriModule<any>('esri/identity/IdentityManager')
-    const cred = IdentityManager?.findCredential?.(layerUrl || url) || IdentityManager?.findCredential?.((layerUrl || url).replace(/\/\d+$/, ''))
-    token = cred?.token ? String(cred.token) : ''
-  } catch {}
-  if (token && /^https?:/i.test(url) && !/[?&]token=/.test(url)) url = `${url}${url.includes('?') ? '&' : '?'}token=${encodeURIComponent(token)}`
-  const resp = await fetch(url, { credentials: 'same-origin' })
-  if (!resp.ok) return null
-  return { blob: await resp.blob(), fileName: String(att?.name || `allegato_${id || index + 1}`) }
-}
-
-function canvasBlobForActions (canvas: HTMLCanvasElement, type: string, quality?: number): Promise<Blob | null> {
-  return new Promise(resolve => {
-    try {
-      canvas.toBlob(blob => resolve(blob), type, quality)
-    } catch {
-      resolve(null)
-    }
-  })
-}
-
-async function normalizeRasterAttachmentForPdf (
-  blob: Blob,
-  originalBytes: Uint8Array,
-  fileName: string,
-  contentType: string
-): Promise<{ bytes: Uint8Array; contentType: string }> {
-  const lowerName = String(fileName || '').toLowerCase()
-  const isJpeg = contentType.includes('jpeg') || contentType.includes('jpg') || /\.(jpe?g)$/i.test(lowerName)
-  const isPng = contentType.includes('png') || /\.png$/i.test(lowerName)
-  if (!isJpeg && !isPng) return { bytes: originalBytes, contentType }
-  if (typeof document === 'undefined') return { bytes: originalBytes, contentType }
-
-  const outType = isJpeg ? 'image/jpeg' : 'image/png'
-  const drawToCanvas = async (source: CanvasImageSource, width: number, height: number): Promise<{ bytes: Uint8Array; contentType: string } | null> => {
-    const w = Math.max(1, Math.round(Number(width) || 0))
-    const h = Math.max(1, Math.round(Number(height) || 0))
-    if (!w || !h) return null
-    const canvas = document.createElement('canvas')
-    canvas.width = w
-    canvas.height = h
-    const ctx = canvas.getContext('2d')
-    if (!ctx) return null
-    ctx.drawImage(source, 0, 0, w, h)
-    const normalizedBlob = await canvasBlobForActions(canvas, outType, isJpeg ? 0.92 : undefined)
-    if (!normalizedBlob) return null
-    return { bytes: new Uint8Array(await normalizedBlob.arrayBuffer()), contentType: outType }
-  }
-
-  try {
-    const createBitmap = (window as any)?.createImageBitmap
-    if (typeof createBitmap === 'function') {
-      const bitmap = await createBitmap(blob, { imageOrientation: 'from-image' }).catch((): null => null)
-      if (bitmap) {
-        try {
-          const normalized = await drawToCanvas(bitmap, bitmap.width, bitmap.height)
-          if (normalized) return normalized
-        } finally {
-          try { bitmap.close?.() } catch {}
-        }
-      }
-    }
-  } catch {}
-
-  try {
-    const url = URL.createObjectURL(blob)
-    try {
-      const img = await new Promise<HTMLImageElement | null>(resolve => {
-        const el = new Image()
-        el.onload = () => resolve(el)
-        el.onerror = () => resolve(null)
-        el.src = url
-      })
-      if (img) {
-        const normalized = await drawToCanvas(img, img.naturalWidth || img.width, img.naturalHeight || img.height)
-        if (normalized) return normalized
-      }
-    } finally {
-      try { URL.revokeObjectURL(url) } catch {}
-    }
-  } catch {}
-
-  return { bytes: originalBytes, contentType }
-}
-
-async function addRasterAttachmentPageForActions (doc: PDFDocument, img: any): Promise<void> {
-  const page = doc.addPage([595.28, 841.89])
-  const box = RAPPORTO_TECHNICAL_BODY_BOX
-  const scale = Math.min(box.width / Math.max(1, img.width), box.height / Math.max(1, img.height))
-  const w = img.width * scale
-  const h = img.height * scale
-  page.drawImage(img, { x: box.x + (box.width - w) / 2, y: box.y + (box.height - h) / 2, width: w, height: h })
-}
-
-async function buildPracticeAttachmentsPdfBlob (ds: any, oid: number, selectedAttachmentIds?: number[], numeroRapportoTecnico?: string): Promise<{ blob: Blob; fileName: string } | null> {
-  const layer = await resolveFeatureLayerForAttachments(ds)
-  if (!layer) throw new Error('FeatureLayer allegati non disponibile.')
-  const selectedSet = Array.isArray(selectedAttachmentIds) && selectedAttachmentIds.length > 0
-    ? new Set(selectedAttachmentIds.map(id => Number(id)).filter(id => Number.isFinite(id) && id > 0))
-    : null
-  const infos = (await queryFeatureAttachmentsForActions(layer, oid, ds)).filter((att: any) => {
-    if (!selectedSet) return true
-    const id = Number(att?.id ?? att?.attachmentId ?? att?.objectId)
-    return selectedSet.has(id)
-  })
-  if (!infos.length) return null
-
-  const out = await PDFDocument.create()
-  let count = 0
-  let elaboratoIndex = 0
-  const pageTitles: string[] = []
-  for (let i = 0; i < infos.length; i++) {
-    const att = infos[i]
-    const fetched = await fetchAttachmentBlobForActions(layer, ds, oid, att, i)
-    if (!fetched) continue
-    const blob = fetched.blob
-    const contentType = String(blob.type || att?.contentType || '').toLowerCase()
-    const name = fetched.fileName
-    const bytes = new Uint8Array(await blob.arrayBuffer())
-    try {
-      if (contentType.includes('pdf') || /\.pdf$/i.test(name)) {
-        const src = await PDFDocument.load(bytes as any)
-        const sourcePages = src.getPages()
-        if (sourcePages.length === 0) continue
-        if (sourcePages.length > 0) elaboratoIndex++
-        const pageTitle = attachmentTechnicalDocumentTitleForActions(elaboratoIndex, numeroRapportoTecnico)
-        for (const sourcePage of sourcePages) {
-          const page = out.addPage([595.28, 841.89])
-          const embedded = await (out as any).embedPage(sourcePage)
-          const size = sourcePage.getSize()
-          drawEmbeddedPdfPageInRapportoTechnicalBody(page, embedded, size.width, size.height)
-          pageTitles.push(pageTitle)
-        }
-        count++
-      } else if (contentType.includes('jpeg') || contentType.includes('jpg') || /\.(jpe?g)$/i.test(name)) {
-        const normalized = await normalizeRasterAttachmentForPdf(blob, bytes, name, contentType)
-        const img = await out.embedJpg(normalized.bytes as any)
-        await addRasterAttachmentPageForActions(out, img)
-        elaboratoIndex++
-        pageTitles.push(attachmentTechnicalDocumentTitleForActions(elaboratoIndex, numeroRapportoTecnico))
-        count++
-      } else if (contentType.includes('png') || /\.png$/i.test(name)) {
-        const normalized = await normalizeRasterAttachmentForPdf(blob, bytes, name, contentType)
-        const img = await out.embedPng(normalized.bytes as any)
-        await addRasterAttachmentPageForActions(out, img)
-        elaboratoIndex++
-        pageTitles.push(attachmentTechnicalDocumentTitleForActions(elaboratoIndex, numeroRapportoTecnico))
-        count++
-      }
-    } catch {
-      // Allegato non impaginabile: lo si ignora nel PDF unico.
-    }
-  }
-  if (count === 0) return null
-  await drawRapportoTechnicalHeadersByPage(out, index => pageTitles[index] || attachmentTechnicalDocumentTitleForActions(index + 1, numeroRapportoTecnico))
-  const bytes = await out.save()
-  return { blob: new Blob([bytes as any], { type: 'application/pdf' }), fileName: 'allegati_probatori.pdf' }
 }
 
 
