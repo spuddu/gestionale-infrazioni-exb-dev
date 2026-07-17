@@ -31,4 +31,4 @@ export const defaultConfig: Config = {
 }
 
 export type IMConfig = ImmutableObject<Config>
-export const defaultIMConfig: IMConfig = Immutable(defaultConfig) as any
+export const defaultIMConfig: IMConfig = (Immutable as any)(defaultConfig)

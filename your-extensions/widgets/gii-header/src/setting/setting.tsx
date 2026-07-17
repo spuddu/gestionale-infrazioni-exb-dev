@@ -319,13 +319,13 @@ export default function Setting(props: AllWidgetSettingProps<IMConfig>) {
         <Check value={cfg.alertsEnabled ?? true} onChange={v=>set('alertsEnabled',v)} label='Mostra campanella allarmi fuori dalla homepage'/>
         {(cfg.alertsEnabled ?? true) && <>
           <label style={P.lbl}>URL vista pratiche AMM</label>
-          <Inp value={cfg.alertsPracticeLayerUrl ?? 'https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_VIEW_EB_AMM_ALL/FeatureServer/0'} onChange={v=>set('alertsPracticeLayerUrl',v)} placeholder='https://.../FeatureServer/0'/>
+          <Inp value={cfg.alertsPracticeLayerUrl ?? 'https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_VIEW_AMM_ALL/FeatureServer/0'} onChange={v=>set('alertsPracticeLayerUrl',v)} placeholder='https://.../FeatureServer/0'/>
           <div style={P.hint}>Vista usata per calcolare gli allarmi amministrativi.</div>
 
           <label style={P.lbl}>URL vista pratiche AGR</label>
-          <Inp value={cfg.alertsPracticeLayerUrlAgr ?? ''} onChange={v=>set('alertsPracticeLayerUrlAgr',v)} placeholder='https://.../GII_VIEW_EB_AGR_ALL/FeatureServer/0'/>
+          <Inp value={cfg.alertsPracticeLayerUrlAgr ?? ''} onChange={v=>set('alertsPracticeLayerUrlAgr',v)} placeholder='https://.../GII_VIEW_AGR_ALL/FeatureServer/0'/>
           <label style={P.lbl}>URL vista pratiche TEC</label>
-          <Inp value={cfg.alertsPracticeLayerUrlTec ?? ''} onChange={v=>set('alertsPracticeLayerUrlTec',v)} placeholder='https://.../GII_VIEW_EB_TEC_ALL/FeatureServer/0'/>
+          <Inp value={cfg.alertsPracticeLayerUrlTec ?? ''} onChange={v=>set('alertsPracticeLayerUrlTec',v)} placeholder='https://.../GII_VIEW_TEC_ALL/FeatureServer/0'/>
           <div style={P.hint}>Viste operative aggregate usate per calcolare gli allarmi tecnici e agrari, ad esempio rapporti da prendere in carico.</div>
 
           <label style={P.lbl}>URL vista allarmi amministrativi archiviati</label>

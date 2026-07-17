@@ -1166,135 +1166,135 @@ type RuntimeDsView = {
 const GII_RUNTIME_VIEWS: RuntimeDsView[] = [
   {
     key: "ADMIN",
-    // ADMIN usa l'item/vista dedicata GII_VIEW_EB_ADMIN.
-    // Nota: l'endpoint REST storico dell'item espone ancora il servizio con nome GII_VIEW_EB_BASE.
-    // Non è la vista AMM_ALL e non va sostituito con GII_VIEW_EB_AMM_ALL.
-    viewName: "GII_VIEW_EB_ADMIN",
-    itemId: "c05409cf4a86471194d6406e9b4d1c65",
+    // ADMIN usa l'item/vista dedicata GII_VIEW_ADMIN.
+    // Nota: l'endpoint REST storico dell'item espone ancora il servizio con nome GII_VIEW_ADMIN.
+    // Non è la vista AMM_ALL e non va sostituito con GII_VIEW_AMM.
+    viewName: "GII_VIEW_ADMIN",
+    itemId: "2db73574551947a8bd0a78d500d0a51a",
     serviceUrl:
-      "https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_VIEW_EB_BASE/FeatureServer",
+      "https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_VIEW_ADMIN/FeatureServer",
     layerUrl:
-      "https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_VIEW_EB_BASE/FeatureServer/0",
+      "https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_VIEW_ADMIN/FeatureServer/0",
     roles: ["ADMIN"],
     areaCode: "",
     settoreCode: "",
   },
   {
     key: "AGR_ALL",
-    viewName: "GII_VIEW_EB_AGR",
-    itemId: "777c4456f6104e779e6a02e5875f67c1",
+    viewName: "GII_VIEW_AGR",
+    itemId: "00b028433ce346159e1ea6f176133403",
     serviceUrl:
-      "https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_VIEW_EB_AGR/FeatureServer",
+      "https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_VIEW_AGR/FeatureServer",
     layerUrl:
-      "https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_VIEW_EB_AGR/FeatureServer/0",
+      "https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_VIEW_AGR/FeatureServer/0",
     roles: ["RI", "DT"],
     areaCode: "AGR",
     settoreCode: "",
   },
   {
     key: "AGR_D1",
-    viewName: "GII_VIEW_EB_AGR_D1",
-    itemId: "3d0899eb7f684698862c1bc590c19d7f",
+    viewName: "GII_VIEW_AGR_D1",
+    itemId: "5ed3330e7f65418d83337d6aa6859296",
     serviceUrl:
-      "https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_VIEW_EB_AGR_D1/FeatureServer",
+      "https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_VIEW_AGR_D1/FeatureServer",
     layerUrl:
-      "https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_VIEW_EB_AGR_D1/FeatureServer/0",
+      "https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_VIEW_AGR_D1/FeatureServer/0",
     roles: ["TI", "RZ"],
     areaCode: "AGR",
     settoreCode: "D1",
   },
   {
     key: "AGR_D2",
-    viewName: "GII_VIEW_EB_AGR_D2",
-    itemId: "f428036dac9e41458f67c1da32efddd5",
+    viewName: "GII_VIEW_AGR_D2",
+    itemId: "c7312758bd1448b9bfb61e7db4683832",
     serviceUrl:
-      "https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_VIEW_EB_AGR_D2/FeatureServer",
+      "https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_VIEW_AGR_D2/FeatureServer",
     layerUrl:
-      "https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_VIEW_EB_AGR_D2/FeatureServer/0",
+      "https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_VIEW_AGR_D2/FeatureServer/0",
     roles: ["TI", "RZ"],
     areaCode: "AGR",
     settoreCode: "D2",
   },
   {
     key: "AGR_D3",
-    viewName: "GII_VIEW_EB_AGR_D3",
-    itemId: "efc0f9aa9d0e4862a87152cd482c2722",
+    viewName: "GII_VIEW_AGR_D3",
+    itemId: "59f7e37105fe433796a699cb99716bc7",
     serviceUrl:
-      "https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_VIEW_EB_AGR_D3/FeatureServer",
+      "https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_VIEW_AGR_D3/FeatureServer",
     layerUrl:
-      "https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_VIEW_EB_AGR_D3/FeatureServer/0",
+      "https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_VIEW_AGR_D3/FeatureServer/0",
     roles: ["TI", "RZ"],
     areaCode: "AGR",
     settoreCode: "D3",
   },
   {
     key: "AGR_D4",
-    viewName: "GII_VIEW_EB_AGR_D4",
-    itemId: "c724a0cd50b14743a4595313c2afd39a",
+    viewName: "GII_VIEW_AGR_D4",
+    itemId: "e6bfbb9325c549d68b8435583d91d626",
     serviceUrl:
-      "https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_VIEW_EB_AGR_D4/FeatureServer",
+      "https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_VIEW_AGR_D4/FeatureServer",
     layerUrl:
-      "https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_VIEW_EB_AGR_D4/FeatureServer/0",
+      "https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_VIEW_AGR_D4/FeatureServer/0",
     roles: ["TI", "RZ"],
     areaCode: "AGR",
     settoreCode: "D4",
   },
   {
     key: "AGR_D5",
-    viewName: "GII_VIEW_EB_AGR_D5",
-    itemId: "b3405424a8f841648cca63a429991c03",
+    viewName: "GII_VIEW_AGR_D5",
+    itemId: "5feb425669244ae2a1d63eca065cfaba",
     serviceUrl:
-      "https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_VIEW_EB_AGR_D5/FeatureServer",
+      "https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_VIEW_AGR_D5/FeatureServer",
     layerUrl:
-      "https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_VIEW_EB_AGR_D5/FeatureServer/0",
+      "https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_VIEW_AGR_D5/FeatureServer/0",
     roles: ["TI", "RZ"],
     areaCode: "AGR",
     settoreCode: "D5",
   },
   {
     key: "AGR_D6",
-    viewName: "GII_VIEW_EB_AGR_D6",
-    itemId: "f8671e4e6d804735a5a8c0279b7396be",
+    viewName: "GII_VIEW_AGR_D6",
+    itemId: "0f55207139a2401fba3cf102147b9625",
     serviceUrl:
-      "https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_VIEW_EB_AGR_D6/FeatureServer",
+      "https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_VIEW_AGR_D6/FeatureServer",
     layerUrl:
-      "https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_VIEW_EB_AGR_D6/FeatureServer/0",
+      "https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_VIEW_AGR_D6/FeatureServer/0",
     roles: ["TI", "RZ"],
     areaCode: "AGR",
     settoreCode: "D6",
   },
   {
     key: "AMM_ALL",
-    viewName: "GII_VIEW_EB_AMM_ALL",
-    itemId: "6ffe45dac0e04905ba677e9fcd703238",
+    viewName: "GII_VIEW_AMM_ALL",
+    itemId: "a93f1deb62d343f9baa2451ed7d46b4e",
     serviceUrl:
-      "https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_VIEW_EB_AMM_ALL/FeatureServer",
+      "https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_VIEW_AMM_ALL/FeatureServer",
     layerUrl:
-      "https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_VIEW_EB_AMM_ALL/FeatureServer/0",
+      "https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_VIEW_AMM_ALL/FeatureServer/0",
     roles: ["RI", "TI", "DA", "RI_AMM", "TI_AMM"],
     areaCode: "AMM",
     settoreCode: "",
   },
   {
     key: "TEC_ALL",
-    viewName: "GII_VIEW_EB_TEC",
-    itemId: "8687bad031ef4de6bd3c8151de8f8cc6",
+    viewName: "GII_VIEW_TEC",
+    itemId: "6cbe0f0ea88a49c8ac91a76938669eea",
     serviceUrl:
-      "https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_VIEW_EB_TEC/FeatureServer",
+      "https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_VIEW_TEC/FeatureServer",
     layerUrl:
-      "https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_VIEW_EB_TEC/FeatureServer/0",
+      "https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_VIEW_TEC/FeatureServer/0",
     roles: ["RI", "DT"],
     areaCode: "TEC",
     settoreCode: "",
   },
   {
     key: "TEC_DS",
-    viewName: "GII_VIEW_EB_TEC_DS",
-    itemId: "32b0d7b27c154a969eff411826a473af",
+    viewName: "GII_VIEW_TEC_DS",
+    itemId: "2d10b592601045bdb1527fda913825d7",
     serviceUrl:
-      "https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_VIEW_EB_TEC_DS/FeatureServer",
+      "https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_VIEW_TEC_DS/FeatureServer",
     layerUrl:
-      "https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_VIEW_EB_TEC_DS/FeatureServer/0",
+      "https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_VIEW_TEC_DS/FeatureServer/0",
     roles: ["TI", "RZ"],
     areaCode: "TEC",
     settoreCode: "DS",
@@ -2458,7 +2458,7 @@ function getAllowedDataSourceIds(
     const adminMatches = useDsList.filter((u) => {
       const L = norm(getLabel(u));
       return (
-        L.includes("GII_VIEW_EB_ADMIN") ||
+        L.includes("GII_VIEW_ADMIN") ||
         L.includes("VIEW_EB_ADMIN") ||
         L.includes("_EB_ADMIN") ||
         L.includes("EB_ADMIN")
@@ -2604,7 +2604,7 @@ function pickBestUseDataSourceId(
     const dsAdmin = findBy(
       (n) =>
         n.includes("EB_ADMIN") ||
-        n.includes("GII_VIEW_EB_ADMIN") ||
+        n.includes("GII_VIEW_ADMIN") ||
         n.includes("VIEW_EB_ADMIN"),
     );
     if (dsAdmin) return dsAdmin;
@@ -2615,7 +2615,7 @@ function pickBestUseDataSourceId(
       const L = getLabelUp(u);
       return (
         L.includes("EB_ADMIN") ||
-        L.includes("GII_VIEW_EB_ADMIN") ||
+        L.includes("GII_VIEW_ADMIN") ||
         L.includes("VIEW_EB_ADMIN") ||
         L.includes("_EB_ADMIN")
       );
@@ -2653,7 +2653,7 @@ function pickBestUseDataSourceId(
     const dsAdminFallback = findBy(
       (n) =>
         n.includes("EB_ADMIN") ||
-        n.includes("GII_VIEW_EB_ADMIN") ||
+        n.includes("GII_VIEW_ADMIN") ||
         n.includes("VIEW_EB_ADMIN"),
     );
     if (dsAdminFallback) return dsAdminFallback;
@@ -2662,7 +2662,7 @@ function pickBestUseDataSourceId(
       const L = getLabelUp(u);
       return (
         L.includes("EB_ADMIN") ||
-        L.includes("GII_VIEW_EB_ADMIN") ||
+        L.includes("GII_VIEW_ADMIN") ||
         L.includes("VIEW_EB_ADMIN") ||
         L.includes("_EB_ADMIN")
       );
@@ -4226,13 +4226,25 @@ export default function Widget(props: Props) {
   const isTiAmmAwaitingRetakeFromRiAmm = (d: any): boolean => {
     if (!d || isDeterminazioneAdottata(d)) return false;
 
+    // esito/stato_RI_AMM = Integrazione è ambiguo: RI_AMM ha due percorsi
+    // distinti di richiesta integrazione che scrivono lo stesso valore
+    // (amministrativo verso il TI_AMM assegnato; tecnico verso il RI
+    // dell'area di provenienza). La destinazione reale non è deducibile dal
+    // solo record: va letta dal LOG, che registra esplicitamente il
+    // destinatario di ogni trasmissione chiusa.
+    const log = getLogForRecord(d);
+    const riAmmSentToTiAmm =
+      normalizeWorkflowRole(log?.ruolo) === "RI_AMM" &&
+      normalizeWorkflowRole(log?.ruoloDest) === "TI_AMM";
+
     const esitoRiAmm = readRoleNumber(d, "RI_AMM", "esito");
     const statoRiAmm = readRoleNumber(d, "RI_AMM", "stato");
-    const riAmmReturnedToTiAmm =
-      esitoRiAmm === esitoApprovata ||
-      esitoRiAmm === esitoIntegrazione ||
-      statoRiAmm === statoApprovata ||
-      statoRiAmm === statoIntegrazione;
+    // L'approvazione di RI_AMM non è ambigua: sblocca sempre la trasmissione
+    // del fascicolo al protocollo da parte di TI_AMM.
+    const riAmmApproved =
+      esitoRiAmm === esitoApprovata || statoRiAmm === statoApprovata;
+
+    const riAmmReturnedToTiAmm = riAmmApproved || riAmmSentToTiAmm;
     if (!riAmmReturnedToTiAmm) return false;
 
     const riAmmTimes = [
@@ -4937,6 +4949,15 @@ export default function Widget(props: Props) {
   ): { ruolo: string; label: string; statoForChip: number | null } {
     const role = normalizeWorkflowRole(roleRaw);
     if (!role) return computeSintetico(d);
+
+    // Una pratica definitivamente respinta/chiusa (da qualsiasi ruolo, anche
+    // di origine dopo un rientro dalla fase sanzionatoria) resta "Respinto"
+    // per tutti, a prescindere da valori residui nei campi del proprio ruolo
+    // rimasti dall'ultimo passaggio attivo (es. campi AMM non azzerati dopo
+    // un rientro all'origine e successivo rigetto a monte).
+    if (isRapportoRespintoChiuso(d)) {
+      return getStateView(role, "Respinto", statoRespinta);
+    }
 
     const log = getLogForRecord(d);
     const logRole = normalizeWorkflowRole(log?.ruolo);

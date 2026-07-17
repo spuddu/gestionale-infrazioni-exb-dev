@@ -106,7 +106,7 @@ export const defaultConfig: Config = {
   forceReloadAfterLogoutLogin: true,
 
   alertsEnabled: true,
-  alertsPracticeLayerUrl: 'https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_VIEW_EB_AMM_ALL/FeatureServer/0',
+  alertsPracticeLayerUrl: 'https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_VIEW_AMM_ALL/FeatureServer/0',
   alertsPracticeLayerUrlTecnici: '',
   alertsPracticeLayerUrlAgr: '',
   alertsPracticeLayerUrlTec: '',

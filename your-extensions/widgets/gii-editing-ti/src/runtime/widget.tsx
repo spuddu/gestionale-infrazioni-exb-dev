@@ -1594,11 +1594,10 @@ function parseOfficeCoord (v: any): number {
 function buildTiCreateViewServiceNames (areaRaw: any, settoreRaw: any): string[] {
   const area = normalizeAreaCode(areaRaw)
   const settore = normalizeSettoreCode(area, settoreRaw)
-  if (area === 'AGR' && /^D[1-6]$/.test(settore)) return [`GII_VIEW_EB_AGR_${settore}`]
-  if (area === 'TEC' && settore === 'DS') return ['GII_VIEW_EB_TEC_DS']
+  if (area === 'AGR' && /^D[1-6]$/.test(settore)) return [`GII_VIEW_AGR_${settore}`]
+  if (area === 'TEC' && settore === 'DS') return ['GII_VIEW_TEC_DS']
   if (area === 'AMM') {
-    if (settore === 'CR') return ['GII_VIEW_EB_AMM_CR', 'GII_VIEW_EB_AMM_ALL']
-    return ['GII_VIEW_EB_AMM_ALL']
+    return ['GII_VIEW_AMM_ALL']
   }
   return []
 }

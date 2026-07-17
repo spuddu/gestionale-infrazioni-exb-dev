@@ -5272,7 +5272,7 @@
                     {
                         "dataSourceId": "dataSource_31-0",
                         "label": "Rapporto_di_rilevazione_infrazioni_irrigue",
-                        "url": "https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_VIEW_EB_BASE/FeatureServer/0",
+                        "url": "https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_VIEW_ADMIN/FeatureServer/0",
                         "roleCode": "",
                         "areaCode": "",
                         "settoreCode": ""
@@ -5280,7 +5280,7 @@
                     {
                         "dataSourceId": "dataSource_41-0",
                         "label": "Rapporto_di_rilevazione_infrazioni_irrigue",
-                        "url": "https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_VIEW_EB_AGR/FeatureServer/0",
+                        "url": "https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_VIEW_AGR/FeatureServer/0",
                         "roleCode": "",
                         "areaCode": "",
                         "settoreCode": ""
@@ -5288,7 +5288,7 @@
                     {
                         "dataSourceId": "dataSource_39-0",
                         "label": "Rapporto_di_rilevazione_infrazioni_irrigue",
-                        "url": "https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_VIEW_EB_AGR_D1/FeatureServer/0",
+                        "url": "https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_VIEW_AGR_D1/FeatureServer/0",
                         "roleCode": "",
                         "areaCode": "",
                         "settoreCode": ""
@@ -5296,7 +5296,7 @@
                     {
                         "dataSourceId": "dataSource_38-0",
                         "label": "Rapporto_di_rilevazione_infrazioni_irrigue",
-                        "url": "https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_VIEW_EB_AGR_D2/FeatureServer/0",
+                        "url": "https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_VIEW_AGR_D2/FeatureServer/0",
                         "roleCode": "",
                         "areaCode": "",
                         "settoreCode": ""
@@ -5304,7 +5304,7 @@
                     {
                         "dataSourceId": "dataSource_37-0",
                         "label": "Rapporto_di_rilevazione_infrazioni_irrigue",
-                        "url": "https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_VIEW_EB_AGR_D3/FeatureServer/0",
+                        "url": "https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_VIEW_AGR_D3/FeatureServer/0",
                         "roleCode": "",
                         "areaCode": "",
                         "settoreCode": ""
@@ -5312,7 +5312,7 @@
                     {
                         "dataSourceId": "dataSource_36-0",
                         "label": "Rapporto_di_rilevazione_infrazioni_irrigue",
-                        "url": "https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_VIEW_EB_AGR_D4/FeatureServer/0",
+                        "url": "https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_VIEW_AGR_D4/FeatureServer/0",
                         "roleCode": "",
                         "areaCode": "",
                         "settoreCode": ""
@@ -5320,7 +5320,7 @@
                     {
                         "dataSourceId": "dataSource_35-0",
                         "label": "Rapporto_di_rilevazione_infrazioni_irrigue",
-                        "url": "https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_VIEW_EB_AGR_D5/FeatureServer/0",
+                        "url": "https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_VIEW_AGR_D5/FeatureServer/0",
                         "roleCode": "",
                         "areaCode": "",
                         "settoreCode": ""
@@ -5328,7 +5328,7 @@
                     {
                         "dataSourceId": "dataSource_34-0",
                         "label": "Rapporto_di_rilevazione_infrazioni_irrigue",
-                        "url": "https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_VIEW_EB_AGR_D6/FeatureServer/0",
+                        "url": "https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_VIEW_AGR_D6/FeatureServer/0",
                         "roleCode": "",
                         "areaCode": "",
                         "settoreCode": ""
@@ -5336,7 +5336,7 @@
                     {
                         "dataSourceId": "dataSource_32-0",
                         "label": "Rapporto_di_rilevazione_infrazioni_irrigue",
-                        "url": "https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_VIEW_EB_AMM_ALL/FeatureServer/0",
+                        "url": "https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_VIEW_AMM_ALL/FeatureServer/0",
                         "roleCode": "",
                         "areaCode": "",
                         "settoreCode": ""
@@ -5344,13 +5344,13 @@
                     {
                         "dataSourceId": "dataSource_33-0",
                         "label": "Rapporto_di_rilevazione_infrazioni_irrigue",
-                        "url": "https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_VIEW_EB_TEC_DS/FeatureServer/0",
+                        "url": "https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_VIEW_TEC_DS/FeatureServer/0",
                         "roleCode": "",
                         "areaCode": "",
                         "settoreCode": ""
                     }
                 ],
-                "schemaLayerUrl": "https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_VIEW_EB_BASE/FeatureServer/0",
+                "schemaLayerUrl": "https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_VIEW_ADMIN/FeatureServer/0",
                 "schemaLayerLabel": "Rapporto_di_rilevazione_infrazioni_irrigue",
                 "schemaFields": [
                     {
@@ -6519,10 +6519,10 @@
                 ],
                 "orgContextMaxWidth": 980,
                 "showAlerts": true,
-                "alertsPracticeLayerUrl": "https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_VIEW_EB_AMM_ALL/FeatureServer/0",
+                "alertsPracticeLayerUrl": "https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_VIEW_AMM_ALL/FeatureServer/0",
                 "alertsPracticeLayerUrlTecnici": "",
-                "alertsPracticeLayerUrlAgr": "https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_VIEW_EB_AGR_ALL/FeatureServer/0",
-                "alertsPracticeLayerUrlTec": "https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_VIEW_EB_TEC_ALL/FeatureServer/0",
+                "alertsPracticeLayerUrlAgr": "https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_VIEW_AGR_ALL/FeatureServer/0",
+                "alertsPracticeLayerUrlTec": "https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_VIEW_TEC_ALL/FeatureServer/0",
                 "alertsArchiveTableUrl": "https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_VIEW_ALLARMI_ARCHIVIATI_AMM/FeatureServer/0",
                 "alertsArchiveTableUrlTecnici": "https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_VIEW_ALLARMI_ARCHIVIATI_TEC/FeatureServer/0",
                 "alertsWarningDays": 5,
@@ -6670,10 +6670,10 @@
                 "accountMenuSettingsUrl": "https://cbsm-hub.maps.arcgis.com/home/user.html",
                 "forceReloadAfterLogoutLogin": true,
                 "alertsEnabled": true,
-                "alertsPracticeLayerUrl": "https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_VIEW_EB_AMM_ALL/FeatureServer/0",
+                "alertsPracticeLayerUrl": "https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_VIEW_AMM_ALL/FeatureServer/0",
                 "alertsPracticeLayerUrlTecnici": "",
-                "alertsPracticeLayerUrlAgr": "https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_VIEW_EB_AGR_ALL/FeatureServer/0",
-                "alertsPracticeLayerUrlTec": "https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_VIEW_EB_TEC_ALL/FeatureServer/0",
+                "alertsPracticeLayerUrlAgr": "https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_VIEW_AGR_ALL/FeatureServer/0",
+                "alertsPracticeLayerUrlTec": "https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_VIEW_TEC_ALL/FeatureServer/0",
                 "alertsArchiveTableUrl": "https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_VIEW_ALLARMI_ARCHIVIATI_AMM/FeatureServer/0",
                 "alertsArchiveTableUrlTecnici": "https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_VIEW_ALLARMI_ARCHIVIATI_TEC/FeatureServer/0",
                 "alertsWarningDays": 5,
@@ -7583,7 +7583,7 @@
                     }
                 ],
                 "activePresetId": "default",
-                "schemaLayerUrl": "https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_VIEW_EB_BASE/FeatureServer/0",
+                "schemaLayerUrl": "https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_VIEW_ADMIN/FeatureServer/0",
                 "schemaLayerLabel": "Rapporto_di_rilevazione_infrazioni_irrigue",
                 "schemaFields": [
                     {
@@ -8130,13 +8130,13 @@
                 "mapShowAttribution": false,
                 "mapUseDataSources": [
                     {
-                        "dataSourceId": "dataSource_44",
-                        "mainDataSourceId": "dataSource_44"
+                        "dataSourceId": "dataSource_45",
+                        "mainDataSourceId": "dataSource_45"
                     }
                 ],
-                "mapWebMapDataSourceId": "dataSource_44",
-                "mapWebMapItemId": "ebb5e0d0d2d649daa2e124bd96514245",
-                "mapWebMapLabel": "Rapporto di rilevazione_Editing_map",
+                "mapWebMapDataSourceId": "dataSource_45",
+                "mapWebMapItemId": "1627aecea95c40818e6c61ceade8fbae",
+                "mapWebMapLabel": "Infrazioni",
                 "mapBasemap": "satellite",
                 "mapShowLayerList": true,
                 "mapLayout": "bottom-right",
@@ -8149,9 +8149,9 @@
                 "detailTitleHeight": 40,
                 "detailTitlePaddingLeft": 10,
                 "detailTitlePaddingRight": 10,
-                "mapLayerTitle": "Localizzazione infrazioni",
-                "mapLayerUrl": "https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/service_da9d790b10de4f2c82155df52d577055_form/FeatureServer/0",
-                "mapLayerId": "dataSource_44-508bfb3780d64a92852f09236381af8f",
+                "mapLayerTitle": "Infrazioni",
+                "mapLayerUrl": "https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_VIEW_MAPPA_LOCALIZZAZIONE/FeatureServer/0",
+                "mapLayerId": "dataSource_45-19f64b5a7ba-layer-23",
                 "mapLayerLayerId": "0",
                 "maskBg": "#ffffff",
                 "nsNotaSpeseDettaglioUrl": "https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_VIEW_EB_NOTA_SPESE_DETTAGLIO/FeatureServer/0",
@@ -8192,7 +8192,7 @@
                 "panelPadding": 0,
                 "maskBorderWidth": 0,
                 "panelBorderWidth": 0,
-                "schemaLayerUrl": "https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_VIEW_EB_BASE/FeatureServer/0",
+                "schemaLayerUrl": "https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_VIEW_ADMIN/FeatureServer/0",
                 "schemaLayerLabel": "Rapporto_di_rilevazione_infrazioni_irrigue",
                 "schemaFields": [
                     {
@@ -9457,10 +9457,10 @@
                     "canSelectState": true,
                     "canExtentNavigate": true
                 },
-                "isUseCustomMapState": true,
-                "initialMapDataSourceID": "dataSource_44",
+                "isUseCustomMapState": false,
+                "initialMapDataSourceID": "dataSource_45",
                 "initialMapState": null,
-                "scaleRange": {},
+                "scaleRange": null,
                 "customLODs": null,
                 "layoutIndex": 1,
                 "popupDockPosition": "top-right",
@@ -9482,8 +9482,8 @@
             },
             "useDataSources": [
                 {
-                    "dataSourceId": "dataSource_44",
-                    "mainDataSourceId": "dataSource_44"
+                    "dataSourceId": "dataSource_45",
+                    "mainDataSourceId": "dataSource_45"
                 }
             ],
             "dataActions": {
@@ -12900,7 +12900,7 @@
                 "sectionHeaderFontSize": 14,
                 "sectionDividerWidth": 1,
                 "formLabelColor": "#202028",
-                "motherLayerUrl": "https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/service_da9d790b10de4f2c82155df52d577055/FeatureServer",
+                "motherLayerUrl": "https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_INFRAZIONI_VIEW_ALL/FeatureServer",
                 "nsImportPrezzariUrl": "https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_IMPORT_PREZZARI/FeatureServer",
                 "nsPrezzarioRegionaleArticoliUrl": "https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_PREZZARIO_REGIONALE_ARTICOLI/FeatureServer",
                 "nsPrezzarioInternoArticoliUrl": "https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_PREZZARIO_INTERNO_ARTICOLI/FeatureServer",
@@ -12911,7 +12911,7 @@
                 "anteprimaPdfPaddingBottom": 0,
                 "anteprimaPdfBottomRadius": 0,
                 "mapLayerTitle": "Localizzazione infrazioni",
-                "mapLayerUrl": "https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/service_da9d790b10de4f2c82155df52d577055_form/FeatureServer/0",
+                "mapLayerUrl": "https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_VIEW_MAPPA_LOCALIZZAZIONE/FeatureServer/0",
                 "mapLayerId": "dataSource_44-508bfb3780d64a92852f09236381af8f",
                 "mapLayerLayerId": "0",
                 "norma3FontSize": 15,
@@ -13397,35 +13397,10 @@
                     "canSelectState": true,
                     "canExtentNavigate": true
                 },
-                "isUseCustomMapState": true,
-                "initialMapDataSourceID": "dataSource_44",
-                "initialMapState": {
-                    "viewPoint": {
-                        "rotation": 0,
-                        "scale": 2311162.217155,
-                        "targetGeometry": {
-                            "spatialReference": {
-                                "latestWkid": 3857,
-                                "wkid": 102100
-                            },
-                            "x": 1024421.968721247,
-                            "y": 4879972.044810028
-                        }
-                    },
-                    "extent": {
-                        "spatialReference": {
-                            "latestWkid": 3857,
-                            "wkid": 102100
-                        },
-                        "xmin": 891421.539505047,
-                        "ymin": 4687656.481644534,
-                        "xmax": 1157422.397937447,
-                        "ymax": 5072287.607975522
-                    },
-                    "rotation": 0,
-                    "viewType": "2d"
-                },
-                "scaleRange": {},
+                "isUseCustomMapState": false,
+                "initialMapDataSourceID": "dataSource_45",
+                "initialMapState": null,
+                "scaleRange": null,
                 "customLODs": null,
                 "layoutIndex": 1,
                 "popupDockPosition": "top-right",
@@ -13447,8 +13422,8 @@
             },
             "useDataSources": [
                 {
-                    "dataSourceId": "dataSource_44",
-                    "mainDataSourceId": "dataSource_44"
+                    "dataSourceId": "dataSource_45",
+                    "mainDataSourceId": "dataSource_45"
                 }
             ],
             "style": {
@@ -14259,7 +14234,7 @@
                 "sectionHeaderFontSize": 14,
                 "sectionDividerWidth": 1,
                 "formLabelColor": "#202028",
-                "motherLayerUrl": "https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/service_da9d790b10de4f2c82155df52d577055/FeatureServer",
+                "motherLayerUrl": "https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_INFRAZIONI_VIEW_ALL/FeatureServer",
                 "nsImportPrezzariUrl": "https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_IMPORT_PREZZARI/FeatureServer",
                 "nsPrezzarioRegionaleArticoliUrl": "https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_PREZZARIO_REGIONALE_ARTICOLI/FeatureServer",
                 "nsPrezzarioInternoArticoliUrl": "https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_PREZZARIO_INTERNO_ARTICOLI/FeatureServer",
@@ -14270,7 +14245,7 @@
                 "anteprimaPdfPaddingBottom": 0,
                 "anteprimaPdfBottomRadius": 0,
                 "mapLayerTitle": "Localizzazione infrazioni",
-                "mapLayerUrl": "https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/service_da9d790b10de4f2c82155df52d577055_form/FeatureServer/0",
+                "mapLayerUrl": "https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_VIEW_MAPPA_LOCALIZZAZIONE/FeatureServer/0",
                 "mapLayerId": "dataSource_44-508bfb3780d64a92852f09236381af8f",
                 "mapLayerLayerId": "0",
                 "norma3FontSize": 15,
@@ -14888,35 +14863,10 @@
                     "canSelectState": true,
                     "canExtentNavigate": true
                 },
-                "isUseCustomMapState": true,
-                "initialMapDataSourceID": "dataSource_44",
-                "initialMapState": {
-                    "viewPoint": {
-                        "rotation": 0,
-                        "scale": 2311162.217155,
-                        "targetGeometry": {
-                            "spatialReference": {
-                                "latestWkid": 3857,
-                                "wkid": 102100
-                            },
-                            "x": 1024421.968721247,
-                            "y": 4879972.044810028
-                        }
-                    },
-                    "extent": {
-                        "spatialReference": {
-                            "latestWkid": 3857,
-                            "wkid": 102100
-                        },
-                        "xmin": 891421.539505047,
-                        "ymin": 4687656.481644534,
-                        "xmax": 1157422.397937447,
-                        "ymax": 5072287.607975522
-                    },
-                    "rotation": 0,
-                    "viewType": "2d"
-                },
-                "scaleRange": {},
+                "isUseCustomMapState": false,
+                "initialMapDataSourceID": "dataSource_45",
+                "initialMapState": null,
+                "scaleRange": null,
                 "customLODs": null,
                 "layoutIndex": 1,
                 "popupDockPosition": "top-right",
@@ -14938,8 +14888,8 @@
             },
             "useDataSources": [
                 {
-                    "dataSourceId": "dataSource_44",
-                    "mainDataSourceId": "dataSource_44"
+                    "dataSourceId": "dataSource_45",
+                    "mainDataSourceId": "dataSource_45"
                 }
             ],
             "style": {
@@ -16342,7 +16292,7 @@
                 "mapLayerTitle": "Localizzazione infrazioni",
                 "mapLayerId": "dataSource_44-508bfb3780d64a92852f09236381af8f",
                 "mapLayerLayerId": "0",
-                "mapLayerUrl": "https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/service_da9d790b10de4f2c82155df52d577055_form/FeatureServer/0"
+                "mapLayerUrl": "https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_VIEW_MAPPA_LOCALIZZAZIONE/FeatureServer/0"
             },
             "id": "widget_1424",
             "useDataSources": [
@@ -16873,7 +16823,7 @@
                         "layerKey": "",
                         "layerId": "",
                         "layerLayerId": "0",
-                        "layerUrl": "https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/service_da9d790b10de4f2c82155df52d577055_form/FeatureServer/0",
+                        "layerUrl": "https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_VIEW_MAPPA_LOCALIZZAZIONE/FeatureServer/0",
                         "layerTitle": "Localizzazione infrazioni",
                         "fields": [],
                         "searchType": "pratica"
@@ -18651,7 +18601,7 @@
         "portalUrl": "https://cbsm-hub.maps.arcgis.com",
         "enableA11yForWidgetSettings": false
     },
-    "timestamp": 1783634833697,
+    "timestamp": 1784115550348,
     "sharedThemeVariables": {
         "header": {},
         "body": {},
@@ -18665,90 +18615,90 @@
         "dataSource_31": {
             "id": "dataSource_31",
             "type": "FEATURE_SERVICE",
-            "sourceLabel": "GII_VIEW_EB_ADMIN",
-            "itemId": "c05409cf4a86471194d6406e9b4d1c65",
+            "sourceLabel": "GII_VIEW_ADMIN",
+            "itemId": "2db73574551947a8bd0a78d500d0a51a",
             "portalUrl": "https://cbsm-hub.maps.arcgis.com",
-            "url": "https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_VIEW_EB_BASE/FeatureServer"
+            "url": "https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_VIEW_ADMIN/FeatureServer"
         },
         "dataSource_32": {
             "id": "dataSource_32",
             "type": "FEATURE_SERVICE",
-            "sourceLabel": "GII_VIEW_EB_AMM_ALL",
-            "itemId": "6ffe45dac0e04905ba677e9fcd703238",
+            "sourceLabel": "GII_VIEW_AMM_ALL",
+            "itemId": "a93f1deb62d343f9baa2451ed7d46b4e",
             "portalUrl": "https://cbsm-hub.maps.arcgis.com",
-            "url": "https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_VIEW_EB_AMM_ALL/FeatureServer"
+            "url": "https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_VIEW_AMM_ALL/FeatureServer"
         },
         "dataSource_33": {
             "id": "dataSource_33",
             "type": "FEATURE_SERVICE",
-            "sourceLabel": "GII_VIEW_EB_TEC_DS",
-            "itemId": "32b0d7b27c154a969eff411826a473af",
+            "sourceLabel": "GII_VIEW_TEC_DS",
+            "itemId": "2d10b592601045bdb1527fda913825d7",
             "portalUrl": "https://cbsm-hub.maps.arcgis.com",
-            "url": "https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_VIEW_EB_TEC_DS/FeatureServer"
+            "url": "https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_VIEW_TEC_DS/FeatureServer"
         },
         "dataSource_34": {
             "id": "dataSource_34",
             "type": "FEATURE_SERVICE",
-            "sourceLabel": "GII_VIEW_EB_AGR_D6",
-            "itemId": "f8671e4e6d804735a5a8c0279b7396be",
+            "sourceLabel": "GII_VIEW_AGR_D6",
+            "itemId": "0f55207139a2401fba3cf102147b9625",
             "portalUrl": "https://cbsm-hub.maps.arcgis.com",
-            "url": "https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_VIEW_EB_AGR_D6/FeatureServer"
+            "url": "https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_VIEW_AGR_D6/FeatureServer"
         },
         "dataSource_35": {
             "id": "dataSource_35",
             "type": "FEATURE_SERVICE",
-            "sourceLabel": "GII_VIEW_EB_AGR_D5",
-            "itemId": "b3405424a8f841648cca63a429991c03",
+            "sourceLabel": "GII_VIEW_AGR_D5",
+            "itemId": "5feb425669244ae2a1d63eca065cfaba",
             "portalUrl": "https://cbsm-hub.maps.arcgis.com",
-            "url": "https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_VIEW_EB_AGR_D5/FeatureServer"
+            "url": "https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_VIEW_AGR_D5/FeatureServer"
         },
         "dataSource_36": {
             "id": "dataSource_36",
             "type": "FEATURE_SERVICE",
-            "sourceLabel": "GII_VIEW_EB_AGR_D4",
-            "itemId": "c724a0cd50b14743a4595313c2afd39a",
+            "sourceLabel": "GII_VIEW_AGR_D4",
+            "itemId": "e6bfbb9325c549d68b8435583d91d626",
             "portalUrl": "https://cbsm-hub.maps.arcgis.com",
-            "url": "https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_VIEW_EB_AGR_D4/FeatureServer"
+            "url": "https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_VIEW_AGR_D4/FeatureServer"
         },
         "dataSource_37": {
             "id": "dataSource_37",
             "type": "FEATURE_SERVICE",
-            "sourceLabel": "GII_VIEW_EB_AGR_D3",
-            "itemId": "efc0f9aa9d0e4862a87152cd482c2722",
+            "sourceLabel": "GII_VIEW_AGR_D3",
+            "itemId": "59f7e37105fe433796a699cb99716bc7",
             "portalUrl": "https://cbsm-hub.maps.arcgis.com",
-            "url": "https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_VIEW_EB_AGR_D3/FeatureServer"
+            "url": "https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_VIEW_AGR_D3/FeatureServer"
         },
         "dataSource_38": {
             "id": "dataSource_38",
             "type": "FEATURE_SERVICE",
-            "sourceLabel": "GII_VIEW_EB_AGR_D2",
-            "itemId": "f428036dac9e41458f67c1da32efddd5",
+            "sourceLabel": "GII_VIEW_AGR_D2",
+            "itemId": "c7312758bd1448b9bfb61e7db4683832",
             "portalUrl": "https://cbsm-hub.maps.arcgis.com",
-            "url": "https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_VIEW_EB_AGR_D2/FeatureServer"
+            "url": "https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_VIEW_AGR_D2/FeatureServer"
         },
         "dataSource_39": {
             "id": "dataSource_39",
             "type": "FEATURE_SERVICE",
-            "sourceLabel": "GII_VIEW_EB_AGR_D1",
-            "itemId": "3d0899eb7f684698862c1bc590c19d7f",
+            "sourceLabel": "GII_VIEW_AGR_D1",
+            "itemId": "5ed3330e7f65418d83337d6aa6859296",
             "portalUrl": "https://cbsm-hub.maps.arcgis.com",
-            "url": "https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_VIEW_EB_AGR_D1/FeatureServer"
+            "url": "https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_VIEW_AGR_D1/FeatureServer"
         },
         "dataSource_40": {
             "id": "dataSource_40",
             "type": "FEATURE_SERVICE",
-            "sourceLabel": "GII_VIEW_EB_TEC",
-            "itemId": "8687bad031ef4de6bd3c8151de8f8cc6",
+            "sourceLabel": "GII_VIEW_TEC",
+            "itemId": "6cbe0f0ea88a49c8ac91a76938669eea",
             "portalUrl": "https://cbsm-hub.maps.arcgis.com",
-            "url": "https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_VIEW_EB_TEC/FeatureServer"
+            "url": "https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_VIEW_TEC/FeatureServer"
         },
         "dataSource_41": {
             "id": "dataSource_41",
             "type": "FEATURE_SERVICE",
-            "sourceLabel": "GII_VIEW_EB_AGR",
-            "itemId": "777c4456f6104e779e6a02e5875f67c1",
+            "sourceLabel": "GII_VIEW_AGR",
+            "itemId": "00b028433ce346159e1ea6f176133403",
             "portalUrl": "https://cbsm-hub.maps.arcgis.com",
-            "url": "https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_VIEW_EB_AGR/FeatureServer"
+            "url": "https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_VIEW_AGR/FeatureServer"
         },
         "dataSource_43": {
             "id": "dataSource_43",
@@ -18817,6 +18767,13 @@
             ],
             "layerId": "131",
             "isOutputFromWidget": true
+        },
+        "dataSource_45": {
+            "id": "dataSource_45",
+            "type": "WEB_MAP",
+            "sourceLabel": "Infrazioni",
+            "itemId": "1627aecea95c40818e6c61ceade8fbae",
+            "portalUrl": "https://cbsm-hub.maps.arcgis.com"
         }
     },
     "pageStructure": [

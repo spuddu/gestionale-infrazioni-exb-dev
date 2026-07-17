@@ -18,7 +18,7 @@ export const FASCICOLO_MAP_DEFAULTS = {
   officeLonWgs84: 0,
   officeLatWgs84: 0,
   mapLayerTitle: 'Localizzazione infrazioni',
-  mapLayerUrl: 'https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/service_da9d790b10de4f2c82155df52d577055_form/FeatureServer/0',
+  mapLayerUrl: 'https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_VIEW_MAPPA_LOCALIZZAZIONE/FeatureServer/0',
   mapLayerId: 'dataSource_44-508bfb3780d64a92852f09236381af8f',
   mapLayerLayerId: '0'
 }

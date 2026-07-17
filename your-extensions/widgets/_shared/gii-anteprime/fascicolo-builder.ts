@@ -22,7 +22,7 @@ import { listGiiPrintableMapLayers, ensureGiiPrintableMapLayersReady, computePri
 
 // Mother layer: stesso URL usato da gii-editing-ti, confermato leggibile da
 // tutti i ruoli (tecnici e amministrativi). Unica fonte dati del builder.
-const FASCICOLO_MOTHER_LAYER_URL = 'https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/service_da9d790b10de4f2c82155df52d577055/FeatureServer/0'
+const FASCICOLO_MOTHER_LAYER_URL = 'https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_INFRAZIONI_VIEW_ALL/FeatureServer/0'
 
 let _cachedLayer: any = null
 
