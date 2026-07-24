@@ -302,13 +302,6 @@ type Art30RimborsoPdfRow = {
   importo: number | null
 }
 
-type Art30CauzionePdfDetail = {
-  unitaMisura: string
-  quantita: number
-  valoreUnitario: number
-  importo: number
-}
-
 function parseArt30Number (value: any): number | null {
   if (value == null || value === '') return null
   if (typeof value === 'number') return Number.isFinite(value) ? value : null
@@ -326,47 +319,34 @@ function parseArt30DetailForPdf (raw: any): Art30RimborsoPdfRow[] {
   for (const line of String(raw ?? '').split(/\r?\n/)) {
     const text = line.trim()
     if (!text) continue
-    const quantitaMatch = text.match(/\s+—\s+Quantità:\s*([0-9.,]+)/i)
-    if (!quantitaMatch || quantitaMatch.index == null) continue
-    const prefix = text.slice(0, quantitaMatch.index).trim()
+    if (/Stato:\s*Recuperabile\b/i.test(text)) continue
+    const statoMatch = text.match(/Stato:\s*(Non recuperabile|Recuperabile)/i)
+    if (!statoMatch) continue
+    const cutIdx = text.search(/\s+—\s+Valore unitario:/i)
+    const prefix = cutIdx >= 0 ? text.slice(0, cutIdx).trim() : text
     const codiceMatch = prefix.match(/^(.*?)\s+—\s+Codice:\s*(.+)$/i)
     const descrizione = String(codiceMatch?.[1] || prefix).trim()
     const codice = String(codiceMatch?.[2] || '').trim()
-    const quantita = parseArt30Number(quantitaMatch[1])
-    if (!descrizione || quantita == null || quantita <= 0) continue
+    if (!descrizione) continue
     const valoreUnitarioMatch = text.match(/Valore unitario:\s*([0-9.,]+)/i)
-    const importoMatch = text.match(/Importo:\s*([0-9.,]+)/i)
+    const valoreUnitario = parseArt30Number(valoreUnitarioMatch?.[1])
     out.push({
       codice,
       descrizione,
-      quantita,
-      valoreUnitario: parseArt30Number(valoreUnitarioMatch?.[1]),
-      importo: parseArt30Number(importoMatch?.[1])
+      quantita: 1,
+      valoreUnitario,
+      importo: valoreUnitario
     })
   }
   return out
 }
 
-function parseArt30CauzioneDetailForPdf (raw: any): Art30CauzionePdfDetail | null {
+function countCauzioneDecurtataRowsForPdf (raw: any): number {
+  let count = 0
   for (const line of String(raw ?? '').split(/\r?\n/)) {
-    const text = line.trim()
-    if (!/^Decurtazione della cauzione\b/i.test(text)) continue
-    const unitaMisuraMatch = text.match(/U\.M\.:\s*([^—|]+?)(?:\s+(?:—|\|)|$)/i)
-    const quantitaMatch = text.match(/Quantità:\s*([0-9.,]+)/i)
-    const valoreUnitarioMatch = text.match(/Valore unitario:\s*([0-9.,]+)/i)
-    const importoMatch = text.match(/Importo:\s*-?\s*([0-9.,]+)/i)
-    const quantita = parseArt30Number(quantitaMatch?.[1])
-    const valoreUnitario = parseArt30Number(valoreUnitarioMatch?.[1])
-    const importo = parseArt30Number(importoMatch?.[1])
-    if (quantita == null || quantita <= 0 || valoreUnitario == null || valoreUnitario < 0 || importo == null || importo < 0) return null
-    return {
-      unitaMisura: String(unitaMisuraMatch?.[1] || 'n.').trim() || 'n.',
-      quantita,
-      valoreUnitario,
-      importo
-    }
+    if (/Cauzione:\s*Decurtata\b/i.test(line)) count++
   }
-  return null
+  return count
 }
 
 function qtyArt30It (value: number): string {
@@ -381,10 +361,10 @@ function buildArt30RapportoSummary (data: Record<string, any>): { hasData: boole
   const art30Selected = parseNorma3Codes(pickAttrCI(data, ['norma_violata3'])).includes('Art30')
   if (!art30Selected) return { hasData: false, rows: [], rimborso: 0, cauzione: 0, cauzioneQuantita: null, cauzioneValoreUnitario: null, cauzioneUnitaMisura: 'n.', netto: 0, text: '' }
 
-  const detailRaw = pickAttrCI(data, ['attrezzature_rimborso_dettaglio'])
+  const detailRaw = pickAttrCI(data, ['attrezzature_risarcimento_dettaglio'])
   const rows = parseArt30DetailForPdf(detailRaw)
-  const cauzioneDetail = parseArt30CauzioneDetailForPdf(detailRaw)
-  const rimborsoSalvato = parseArt30Number(pickAttrCI(data, ['attrezzature_rimborso_importo']))
+  const cauzioneCount = countCauzioneDecurtataRowsForPdf(detailRaw)
+  const rimborsoSalvato = parseArt30Number(pickAttrCI(data, ['attrezzature_risarcimento_importo']))
   const cauzioneSalvata = parseArt30Number(pickAttrCI(data, ['attrezzature_cauzione_decurtata']))
   const nettoSalvato = parseArt30Number(pickAttrCI(data, ['attrezzature_importo_netto']))
   const cauzionePresente = String(pickAttrCI(data, ['attrezzature_cauzione_presente']) ?? '').trim().toLowerCase()
@@ -417,9 +397,9 @@ function buildArt30RapportoSummary (data: Record<string, any>): { hasData: boole
     rows,
     rimborso,
     cauzione,
-    cauzioneQuantita: cauzioneDetail?.quantita ?? null,
-    cauzioneValoreUnitario: cauzioneDetail?.valoreUnitario ?? null,
-    cauzioneUnitaMisura: cauzioneDetail?.unitaMisura || 'n.',
+    cauzioneQuantita: cauzioneCount > 0 ? cauzioneCount : null,
+    cauzioneValoreUnitario: cauzioneCount > 0 && cauzioneSalvata ? roundMoney(cauzioneSalvata / cauzioneCount) : null,
+    cauzioneUnitaMisura: 'n.',
     netto,
     text: `Art. 30 - ${parts.join('; ')}.`
   }

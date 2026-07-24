@@ -280,11 +280,11 @@ const ADMIN_FIELDS: AdminField[] = [
   { group: 'sanzione', name: 'sanzione_calcolata_da', label: 'Sanzione calcolata da', kind: 'readonly-text', readonly: true },
 
   { group: 'attrezzature', name: 'attrezzature_cauzione_presente', label: 'Cauzione presente', kind: 'domain' },
-  { group: 'attrezzature', name: 'attrezzature_rimborso_importo', label: 'Rimborso attrezzature', kind: 'number' },
+  { group: 'attrezzature', name: 'attrezzature_risarcimento_importo', label: 'Risarcimento attrezzatura', kind: 'number' },
   { group: 'attrezzature', name: 'attrezzature_cauzione_decurtata', label: 'Cauzione decurtata', kind: 'number' },
   { group: 'attrezzature', name: 'attrezzature_importo_netto', label: 'Importo netto attrezzature', kind: 'number' },
-  { group: 'attrezzature', name: 'attrezzature_rimborso_dettaglio', label: 'Dettaglio rimborso attrezzature', kind: 'textarea', full: true, placeholder: 'Indicare attrezzature, quantità e importi.' },
-  { group: 'attrezzature', name: 'attrezzature_note', label: 'Note rimborso attrezzature', kind: 'textarea', full: true },
+  { group: 'attrezzature', name: 'attrezzature_risarcimento_dettaglio', label: 'Dettaglio risarcimento attrezzatura', kind: 'textarea', full: true, placeholder: 'Indicare attrezzature, quantità e importi.' },
+  { group: 'attrezzature', name: 'attrezzature_note', label: 'Note risarcimento attrezzatura', kind: 'textarea', full: true },
 
   { group: 'pagamento', name: 'pagamento_modalita', label: 'Modalità pagamento', kind: 'domain' },
   { group: 'pagamento', name: 'pagamento_importo_totale', label: 'Importo totale da pagare', kind: 'number' },
@@ -420,7 +420,7 @@ const MONEY_FIELDS = new Set([
   'sanzione_importo_ridotta',
   'risarcimento_danni_importo',
   'sanzione_spese_notifica',
-  'attrezzature_rimborso_importo',
+  'attrezzature_risarcimento_importo',
   'attrezzature_cauzione_decurtata',
   'attrezzature_importo_netto',
   'pagamento_importo_totale',
@@ -453,10 +453,10 @@ const SYSTEM_CALCULATED_ADMIN_FIELDS = new Set([
   'sanzione_dettaglio_calcolo',
   'sanzione_calcolata_il',
   'sanzione_calcolata_da',
-  'attrezzature_rimborso_importo',
+  'attrezzature_risarcimento_importo',
   'attrezzature_cauzione_decurtata',
   'attrezzature_importo_netto',
-  'attrezzature_rimborso_dettaglio',
+  'attrezzature_risarcimento_dettaglio',
   'pagamento_importo_totale'
 ])
 
@@ -464,10 +464,10 @@ const SYSTEM_CALCULATED_ADMIN_FIELDS = new Set([
 // ma non devono essere risalvati dal TI_AMM: costituiscono lo snapshot tecnico
 // dell'Art. 30 già definito nella fase AGR/TEC.
 const ADMIN_AUTOMATIC_VALUES_NOT_PERSISTED_BY_TI_AMM = new Set([
-  'attrezzature_rimborso_importo',
+  'attrezzature_risarcimento_importo',
   'attrezzature_cauzione_decurtata',
   'attrezzature_importo_netto',
-  'attrezzature_rimborso_dettaglio'
+  'attrezzature_risarcimento_dettaglio'
 ])
 
 function isSystemCalculatedAdminField (name: string): boolean {
@@ -3714,54 +3714,63 @@ function isArt30CaseCode (codiceCasistica: string): boolean {
 }
 
 type Art30EquipmentSelection = {
+  kind: Art30EquipmentKind
   codice: string
   descrizione: string
-  quantita: number
   valoreUnitario: number | null
   importo: number
 }
 
 const ART30_EQUIPMENT_ORDER: Art30EquipmentKind[] = ['tessera', 'curve', 'sifoni', 'paratoie']
 
-function parseArt30EquipmentSelections (data: Record<string, any>): Map<Art30EquipmentKind, Art30EquipmentSelection> {
-  const out = new Map<Art30EquipmentKind, Art30EquipmentSelection>()
-  const raw = String(pickAttrCI(data || {}, ['attrezzature_rimborso_dettaglio']) || '')
+function parseArt30EquipmentSelections (data: Record<string, any>): Art30EquipmentSelection[] {
+  const out: Art30EquipmentSelection[] = []
+  const raw = String(pickAttrCI(data || {}, ['attrezzature_risarcimento_dettaglio']) || '')
   for (const line of raw.split(/\r?\n/)) {
     const text = line.trim()
     if (!text) continue
+    if (/Stato:\s*Recuperabile\b/i.test(text)) continue
     const kind = art30EquipmentKindFromText(text)
     if (!kind) continue
-    const quantityMarker = text.match(/\s+—\s+Quantità:\s*([0-9.,]+)/i)
-    const prefix = quantityMarker?.index != null ? text.slice(0, quantityMarker.index).trim() : text
+    const statoMatch = text.match(/Stato:\s*(Non recuperabile|Recuperabile)/i)
+    if (!statoMatch) continue
+    const cutIdx = text.search(/\s+—\s+Valore unitario:/i)
+    const prefix = cutIdx >= 0 ? text.slice(0, cutIdx).trim() : text
     const codeMatch = prefix.match(/^(.*?)\s+—\s+Codice:\s*(.+)$/i)
     const descrizione = String(codeMatch?.[1] || prefix || ART30_EQUIPMENT_META[kind].label).trim()
     const codice = String(codeMatch?.[2] || '').trim()
-    const full = text.match(/Quantità:\s*([0-9.,]+).*?Valore unitario:\s*([0-9.,]+)\s*€.*?Importo:\s*([0-9.,]+)\s*€/i)
-    if (full) {
-      // I gruppi catturati non includono il simbolo €: usare il parser numerico
-      // generico, non parseEuroTextValue (che richiede espressamente "€").
-      const quantita = parseNumberInput(full[1]) || 0
-      const valoreUnitario = parseNumberInput(full[2])
-      const importo = parseNumberInput(full[3]) || 0
-      if (quantita > 0 && importo >= 0) out.set(kind, { codice, descrizione, quantita, valoreUnitario, importo })
+    const valoreMatch = text.match(/Valore unitario:\s*([0-9.,]+)/i)
+    const valoreUnitario = parseNumberInput(valoreMatch?.[1])
+    if (valoreUnitario != null && valoreUnitario >= 0) {
+      out.push({ kind, codice, descrizione: descrizione || ART30_EQUIPMENT_META[kind].label, valoreUnitario, importo: valoreUnitario })
       continue
     }
     const legacyAmount = parseEuroTextValue(text)
     if (legacyAmount != null && legacyAmount >= 0) {
-      out.set(kind, {
-        codice,
-        descrizione: descrizione || ART30_EQUIPMENT_META[kind].label,
-        quantita: 1,
-        valoreUnitario: legacyAmount,
-        importo: legacyAmount
-      })
+      out.push({ kind, codice, descrizione: descrizione || ART30_EQUIPMENT_META[kind].label, valoreUnitario: legacyAmount, importo: legacyAmount })
     }
   }
   return out
 }
 
+// Più righe possono condividere lo stesso tipo (es. due tessere): questo aggrega per tipo,
+// sommando gli importi e contando le unità, per i riepiloghi che mostrano una riga per tipo.
+function groupArt30SelectionsByKind (selections: Art30EquipmentSelection[]): Map<Art30EquipmentKind, { codice: string, descrizione: string, quantita: number, valoreUnitario: number | null, importo: number }> {
+  const map = new Map<Art30EquipmentKind, { codice: string, descrizione: string, quantita: number, valoreUnitario: number | null, importo: number }>()
+  selections.forEach(item => {
+    const cur = map.get(item.kind)
+    if (!cur) {
+      map.set(item.kind, { codice: item.codice, descrizione: item.descrizione, quantita: 1, valoreUnitario: item.valoreUnitario, importo: item.importo })
+    } else {
+      cur.quantita += 1
+      cur.importo += item.importo
+    }
+  })
+  return map
+}
+
 function selectedArt30Equipment (data: Record<string, any>, _noteRows: NotaSpeseDetailRow[] = []): Set<Art30EquipmentKind> {
-  return new Set(parseArt30EquipmentSelections(data).keys())
+  return new Set(parseArt30EquipmentSelections(data).map(item => item.kind))
 }
 
 function notaSpeseTotalForCase (noteRows: NotaSpeseDetailRow[], codiceCasistica: string, data: Record<string, any>): number | null {
@@ -3972,14 +3981,14 @@ function buildAutomaticSanzioneCalculation (
   // definito nella fase AGR/TEC. La fase amministrativa deve applicarli senza
   // ricostruirli dai parametri correnti, che contengono valori unitari.
   const art30Snapshot = { ...(data || {}), ...(previousDraft || {}) }
-  const art30SnapshotDetail = String(pickAttrCI(art30Snapshot, ['attrezzature_rimborso_dettaglio']) || '')
-  const art30SnapshotGrossRaw = pickAttrCI(art30Snapshot, ['attrezzature_rimborso_importo'])
+  const art30SnapshotDetail = String(pickAttrCI(art30Snapshot, ['attrezzature_risarcimento_dettaglio']) || '')
+  const art30SnapshotGrossRaw = pickAttrCI(art30Snapshot, ['attrezzature_risarcimento_importo'])
   const art30SnapshotCauzioneRaw = pickAttrCI(art30Snapshot, ['attrezzature_cauzione_decurtata'])
   const art30SnapshotNettoRaw = pickAttrCI(art30Snapshot, ['attrezzature_importo_netto'])
   const art30SnapshotGross = parseNumberInput(art30SnapshotGrossRaw)
   const art30SnapshotCauzione = parseNumberInput(art30SnapshotCauzioneRaw)
   const art30Selections = parseArt30EquipmentSelections(art30Snapshot)
-  const art30DetailGross = Array.from(art30Selections.values()).reduce((sum, item) => sum + (Number(item.importo) || 0), 0)
+  const art30DetailGross = art30Selections.reduce((sum, item) => sum + (Number(item.importo) || 0), 0)
   const hasArt30Snapshot = !!art30SnapshotDetail.trim() ||
     (art30SnapshotGrossRaw != null && art30SnapshotGrossRaw !== '') ||
     (art30SnapshotCauzioneRaw != null && art30SnapshotCauzioneRaw !== '') ||
@@ -4017,10 +4026,10 @@ function buildAutomaticSanzioneCalculation (
     sanzione_importo_ridotta: sanzioneRidotta != null ? roundMoneyValue(sanzioneRidotta) : null,
     risarcimento_danni_importo: roundMoneyValue(risarcimentoDanni),
     sanzione_spese_notifica: roundMoneyValue(speseNotifica),
-    attrezzature_rimborso_importo: roundMoneyValue(rimborsoAttrezzature),
+    attrezzature_risarcimento_importo: roundMoneyValue(rimborsoAttrezzature),
     attrezzature_cauzione_decurtata: roundMoneyValue(cauzioneDecurtata),
     attrezzature_importo_netto: roundMoneyValue(importoNettoAttrezzature),
-    attrezzature_rimborso_dettaglio: art30SnapshotDetail.trim() ? art30SnapshotDetail : attrezzatureDettaglio.join('\n'),
+    attrezzature_risarcimento_dettaglio: art30SnapshotDetail.trim() ? art30SnapshotDetail : attrezzatureDettaglio.join('\n'),
     pagamento_importo_totale: roundMoneyValue(totale),
     sanzione_dettaglio_calcolo: dettaglio.join('\n'),
     sanzione_calcolata_il: currentCalcDate || Date.now(),
@@ -5440,7 +5449,7 @@ function buildSanzioneGroups (
   const selectedRaccordi = raccordi.filter(r => wanted.has(r.codice_casistica))
   const pieListaCount = selectedRaccordi.filter(r => isPieListaParametro(paramByCode.get(r.codice_parametro) || null)).length
   const art30EquipmentSelections = parseArt30EquipmentSelections(data || {})
-  const art30Equipment = new Set(art30EquipmentSelections.keys())
+  const art30Equipment = new Set(art30EquipmentSelections.map(item => item.kind))
   const art30CauzioneImporto = Math.max(0, parseNumberInput(pickAttrCI(data || {}, ['attrezzature_cauzione_decurtata'])) || 0)
   const groups = new Map<string, SanzioneConsultivaGroup>()
 
@@ -5457,17 +5466,18 @@ function buildSanzioneGroups (
     // devono provenire sempre dallo snapshot tecnico congelato dal TI, anche quando
     // ATT-001...ATT-004 esistono nella tabella dei parametri correnti.
     if (raccordoArt30Kind) {
-      const selection = art30EquipmentSelections.get(raccordoArt30Kind)
-      if (!selection) return
+      const matches = art30EquipmentSelections.filter(item => item.kind === raccordoArt30Kind)
+      if (matches.length === 0) return
+      const totalImporto = matches.reduce((sum, item) => sum + (Number(item.importo) || 0), 0)
       parametro = {
-        codice_parametro: selection.codice || r.codice_parametro,
+        codice_parametro: matches[0].codice || r.codice_parametro,
         categoria_parametro: 'ATTREZZATURA',
-        valore_num: selection.importo,
+        valore_num: totalImporto,
         valore_testo: '',
         anno_riferimento: null,
         data_validita_da: null,
         data_validita_a: null,
-        descrizione: selection.descrizione || ART30_EQUIPMENT_META[raccordoArt30Kind].label,
+        descrizione: matches[0].descrizione || ART30_EQUIPMENT_META[raccordoArt30Kind].label,
         note: 'Snapshot tecnico Art. 30'
       }
     }
@@ -5527,7 +5537,8 @@ function buildSanzioneGroups (
       const art30Kind = isArt30 && ['ATTREZZATURA', 'RIMBORSO'].includes(art30Categoria)
         ? art30EquipmentKindFromText(`${r.codice_parametro} ${r.descrizione} ${parametro?.descrizione || ''}`)
         : null
-      const art30EquipmentValue = art30Kind ? art30EquipmentSelections.get(art30Kind)?.importo : null
+      const art30EquipmentMatches = art30Kind ? art30EquipmentSelections.filter(item => item.kind === art30Kind) : []
+      const art30EquipmentValue = art30EquipmentMatches.length > 0 ? art30EquipmentMatches.reduce((sum, item) => sum + (Number(item.importo) || 0), 0) : null
       const art30CauzioneValue = isArt30 && art30Categoria === 'CAUZIONE' && art30CauzioneImporto > 0
         ? art30CauzioneImporto
         : null
@@ -6138,13 +6149,14 @@ function Art30SnapshotSummary (props: { data: Record<string, any> }) {
   const st = useAdminStyle()
   const d = props.data || {}
   const selections = parseArt30EquipmentSelections(d)
+  const groupedSelections = groupArt30SelectionsByKind(selections)
   const rows = ART30_EQUIPMENT_ORDER
-    .map(kind => ({ kind, selection: selections.get(kind) }))
-    .filter(item => !!item.selection) as Array<{ kind: Art30EquipmentKind, selection: Art30EquipmentSelection }>
-  const lordo = moneyAttr(d, 'attrezzature_rimborso_importo')
+    .map(kind => ({ kind, selection: groupedSelections.get(kind) }))
+    .filter(item => !!item.selection) as Array<{ kind: Art30EquipmentKind, selection: { codice: string, descrizione: string, quantita: number, valoreUnitario: number | null, importo: number } }>
+  const lordo = moneyAttr(d, 'attrezzature_risarcimento_importo')
   const cauzione = moneyAttr(d, 'attrezzature_cauzione_decurtata')
   const netto = moneyAttr(d, 'attrezzature_importo_netto')
-  const rawDetail = String(pickAttrCI(d, ['attrezzature_rimborso_dettaglio']) || '').trim()
+  const rawDetail = String(pickAttrCI(d, ['attrezzature_risarcimento_dettaglio']) || '').trim()
   const hasData = rows.length > 0 || !!rawDetail || lordo > 0 || cauzione > 0 || netto > 0
   if (!hasData) return null
 
@@ -6219,9 +6231,9 @@ function Art30SnapshotSummary (props: { data: Record<string, any> }) {
         )}
 
         <div style={{ display: 'grid', gridTemplateColumns: ADMIN_COMPACT_GRID_COLUMNS, gap: 10, marginTop: 10 }}>
-          <StatusSummaryItem label='Rimborso lordo' value={formatEuroAmount(lordo)} tone='auto' />
+          <StatusSummaryItem label='Risarcimento lordo' value={formatEuroAmount(lordo)} tone='auto' />
           <StatusSummaryItem label='Cauzione decurtata' value={formatEuroAmount(cauzione)} tone={cauzione > 0 ? 'warn' : 'auto'} />
-          <StatusSummaryItem label='Rimborso netto' value={formatEuroAmount(netto)} tone='total' />
+          <StatusSummaryItem label='Risarcimento netto' value={formatEuroAmount(netto)} tone='total' />
         </div>
       </div>
     </details>
@@ -6260,7 +6272,7 @@ function ParametriSanzionatoriSection (props: { loadState: SanzioneConsultivaLoa
         {urlsReady && groups.length > 0 && (
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(380px, 1fr))', gap: 10 }}>
             <StatusSummaryItem label='Sanzione dovuta' value={formatEuroAmount(sanzioneDovuta)} tone='auto' />
-            <StatusSummaryItem label='Rimborso attrezzature' value={formatEuroAmount(rimborsoNetto)} tone='auto' />
+            <StatusSummaryItem label='Risarcimento attrezzatura' value={formatEuroAmount(rimborsoNetto)} tone='auto' />
             <StatusSummaryItem label='Rimborso spese/risarcimento danni' value={formatEuroAmount(risarcimentoDanni)} tone='auto' />
             <StatusSummaryItem label='Spese di notifica' value={formatEuroAmount(speseNotifica)} tone='auto' />
             <StatusSummaryItem label='Totale da pagare' value={formatEuroAmount(totaleAtto)} tone='total' />

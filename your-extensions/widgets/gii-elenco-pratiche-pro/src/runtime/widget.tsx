@@ -3257,7 +3257,7 @@ export default function Widget(props: Props) {
         label.startsWith("respint");
 
       if (tabId === "attesa_mia") return isAttesaMia;
-      if (tabId === "attesa_altri") return !isAttesaMia && !isRespinto;
+      if (tabId === "attesa_altri") return !isAttesaMia && !isRespinto && label !== "—";
       return true;
       // eslint-disable-next-line react-hooks/exhaustive-deps
     },

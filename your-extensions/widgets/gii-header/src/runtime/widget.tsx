@@ -598,6 +598,38 @@ function selectAlertPracticeLayerUrl (cfg: any, user: any): string {
   return String(cfg.alertsPracticeLayerUrl || '').trim()
 }
 
+// Viste editabili per settore/distretto (TI/RZ), stesse URL già usate in
+// gii-elenco-pratiche-pro/runtimeDataSources. TI/RZ non hanno accesso in
+// scrittura alla vista d'area (GII_VIEW_AGR/GII_VIEW_TEC), solo alla propria.
+const GII_WRITE_VIEW_BY_SETTORE: Record<string, string> = {
+  D1: 'https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_VIEW_AGR_D1/FeatureServer/0',
+  D2: 'https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_VIEW_AGR_D2/FeatureServer/0',
+  D3: 'https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_VIEW_AGR_D3/FeatureServer/0',
+  D4: 'https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_VIEW_AGR_D4/FeatureServer/0',
+  D5: 'https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_VIEW_AGR_D5/FeatureServer/0',
+  D6: 'https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_VIEW_AGR_D6/FeatureServer/0',
+  DS: 'https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_VIEW_TEC_DS/FeatureServer/0'
+}
+
+// Vista editabile dedicata alla sola normalizzazione testi (applyEdits). Distinta
+// da selectAlertPracticeLayerUrl (che resta di sola lettura, "_ALL", condivisa con
+// tutti i sotto-ruoli). TI/RZ (ruoli di distretto) scrivono sulla vista del proprio
+// settore; RI/DT/RI_AMM/DA (ruoli d'area) sulla vista d'area; TI_AMM non ha accesso
+// in scrittura da nessuna parte, quindi non tenta nulla. Se il ruolo corrente non
+// ha comunque accesso, il tentativo fallisce silenziosamente (try/catch a monte)
+// senza impattare la lettura degli allarmi.
+function selectAlertPracticeLayerUrlWrite (cfg: any, user: any): string {
+  const key = alertRoleAreaKey(user)
+  if (key === 'RZ_AGR' || key === 'TI_AGR' || key === 'RZ_TEC' || key === 'TI_TEC') {
+    const settore = normCode(user?.settoreCod || '')
+    return GII_WRITE_VIEW_BY_SETTORE[settore] || ''
+  }
+  if (key === 'RI_AGR' || key === 'DT_AGR') return String(cfg.alertsPracticeLayerUrlWriteAgr || '').trim()
+  if (key === 'RI_TEC' || key === 'DT_TEC') return String(cfg.alertsPracticeLayerUrlWriteTec || '').trim()
+  if (key === 'RI_AMM' || key === 'DA') return String(cfg.alertsPracticeLayerUrlWrite || '').trim()
+  return ''
+}
+
 function selectAlertArchiveTableUrl (cfg: any, user: any): string {
   return String(usesTecniciAlertUrls(user) ? (cfg.alertsArchiveTableUrlTecnici || '') : (cfg.alertsArchiveTableUrl || '')).trim()
 }
@@ -2803,7 +2835,7 @@ export default function Widget(props: Props) {
         // Stesso passaggio background usato per materializzare le nuove rilevazioni TR:
         // normalizziamo i testi arrivati da Survey senza bloccare la campanella.
         const normalizedCount = await normalizeSurveyUppercaseFields({
-          practiceLayerUrl,
+          practiceLayerUrl: selectAlertPracticeLayerUrlWrite(cfg, user),
           dynamicAlerts,
           user
         })
@@ -2852,6 +2884,10 @@ export default function Widget(props: Props) {
     cfg.alertsPracticeLayerUrlTecnici,
     cfg.alertsPracticeLayerUrlAgr,
     cfg.alertsPracticeLayerUrlTec,
+    cfg.alertsPracticeLayerUrlWrite,
+    cfg.alertsPracticeLayerUrlWriteAgr,
+    cfg.alertsPracticeLayerUrlWriteTec,
+    user?.settoreCod,
     cfg.alertsArchiveTableUrl,
     cfg.alertsArchiveTableUrlTecnici,
     cfg.alertsActivityLayerUrl,

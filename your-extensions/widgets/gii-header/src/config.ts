@@ -57,6 +57,16 @@ export interface Config {
   alertsPracticeLayerUrlTecnici: string
   alertsPracticeLayerUrlAgr: string
   alertsPracticeLayerUrlTec: string
+  // URL editabili distinte da quelle di lettura sopra (che sono viste "_ALL", sola
+  // lettura, condivise con tutti i sotto-ruoli). Usate solo per la normalizzazione
+  // testi via applyEdits, e solo per i ruoli "di area" (RI/DT/RI_AMM/DA). Per i
+  // ruoli "di distretto" (TI/RZ) la vista corretta è derivata dal settore
+  // direttamente in widget.tsx (selectAlertPracticeLayerUrlWrite), non da qui.
+  // Se il ruolo corrente non ha comunque accesso in scrittura, il tentativo
+  // fallisce silenziosamente senza impattare la lettura degli allarmi.
+  alertsPracticeLayerUrlWrite: string
+  alertsPracticeLayerUrlWriteAgr: string
+  alertsPracticeLayerUrlWriteTec: string
   alertsArchiveTableUrl: string
   alertsArchiveTableUrlTecnici: string
   alertsWarningDays: number
@@ -110,6 +120,9 @@ export const defaultConfig: Config = {
   alertsPracticeLayerUrlTecnici: '',
   alertsPracticeLayerUrlAgr: '',
   alertsPracticeLayerUrlTec: '',
+  alertsPracticeLayerUrlWrite: 'https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_VIEW_AMM/FeatureServer/0',
+  alertsPracticeLayerUrlWriteAgr: 'https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_VIEW_AGR/FeatureServer/0',
+  alertsPracticeLayerUrlWriteTec: 'https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_VIEW_TEC/FeatureServer/0',
   alertsArchiveTableUrl: 'https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_VIEW_ALLARMI_AMMINISTRATIVI_ARCHIVIATI/FeatureServer/0',
   alertsArchiveTableUrlTecnici: 'https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_VIEW_ALLARMI_TECNICI_ARCHIVIATI/FeatureServer/0',
   alertsWarningDays: 5,

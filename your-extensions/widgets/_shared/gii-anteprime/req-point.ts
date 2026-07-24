@@ -13,7 +13,7 @@
 
 // Articoli (norma3) per cui è richiesta la localizzazione in mappa.
 export const NORMA3_REQ_POINT = new Set([
-  'Art12', 'Art27', 'Art28', 'Art30', 'Art31', 'Art32', 'Art33', 'Art34', 'Art35', 'Art36', 'Art37', 'Art39'
+  'Art12', 'Art27', 'Art28', 'Art31', 'Art32', 'Art33', 'Art34', 'Art35', 'Art36', 'Art37', 'Art39'
 ])
 
 // Whitelist degli articoli norma3 validi (stessa lista delle chiavi di NORMA3_TO_VFIELD in

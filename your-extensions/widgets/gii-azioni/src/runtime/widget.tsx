@@ -2142,8 +2142,23 @@ function ActionsPanel (props: {
     const code = `Art${art}`
     const norma = String(pickAttrCI(attrs, ['norma_violata3', 'NORMA_VIOLATA3']) || '')
     const multi = new Set(norma.split(/\s+/).filter(Boolean))
-    if (multi.has(code)) return true
-    return isFlagSelectedLocal(pickAttrCI(attrs, [`v_art${String(art).padStart(2, '0')}`, `V_ART${String(art).padStart(2, '0')}`, `v_art${art}`, `V_ART${art}`]))
+    if (!multi.has(code) && !isFlagSelectedLocal(pickAttrCI(attrs, [`v_art${String(art).padStart(2, '0')}`, `V_ART${String(art).padStart(2, '0')}`, `v_art${art}`, `V_ART${art}`]))) return false
+    if (art === 30) return art30HasRecuperabileForNotaSpeseCheck(attrs)
+    return true
+  }
+
+  // Art. 30 richiede la Nota spese solo se tra le attrezzature selezionate ce n'è almeno una
+  // con stato "Recuperabile" — se sono tutte "Non recuperabile" (risarcimento forfettario,
+  // già coperto dal pannello "Risarcimento attrezzatura"), non ha senso attendersi anche una
+  // nota spese. Mirror della stessa logica in gii-editing-ti.
+  const art30HasRecuperabileForNotaSpeseCheck = (attrs: any): boolean => {
+    const raw = String(pickAttrCI(attrs, ['attrezzature_risarcimento_dettaglio']) || '')
+    for (const line of raw.split(/\r?\n/)) {
+      const text = line.trim()
+      if (!text || !/Stato:/i.test(text)) continue
+      if (/Stato:\s*Recuperabile\b/i.test(text)) return true
+    }
+    return false
   }
 
   const getSelectedNotaSpeseCasisticheCheck = (attrs: any): NotaSpeseCasisticaCheck[] => {
@@ -2161,7 +2176,7 @@ function ActionsPanel (props: {
     if (typeof fl.load === 'function') { try { await fl.load() } catch {} }
     const q = fl.createQuery ? fl.createQuery() : {}
     q.where = `parent_globalid = ${sqlQuote(gid)}`
-    q.outFields = ['codice_casistica', 'importo_riga', 'quantita']
+    q.outFields = ['codice_casistica', 'importo_riga', 'quantita', 'riferimento_attrezzatura_id']
     q.returnGeometry = false
     const res = await fl.queryFeatures(q)
     const statuses: Record<string, NotaSpeseCasisticaStatus> = {}
@@ -2171,13 +2186,50 @@ function ActionsPanel (props: {
       if (!code) return
       const value = Number(a.importo_riga)
       const qty = Number(a.quantita)
-      const cur = statuses[code] || { total: 0, rows: 0, incompleteRows: 0 }
-      cur.total += Number.isFinite(value) ? value : 0
-      cur.rows += 1
-      if (!Number.isFinite(qty) || qty <= 0) cur.incompleteRows += 1
-      statuses[code] = cur
+      const ref = String(a.riferimento_attrezzatura_id || '').trim()
+      const keys = ref ? [code, `${code}::${ref}`] : [code]
+      keys.forEach(key => {
+        const cur = statuses[key] || { total: 0, rows: 0, incompleteRows: 0 }
+        cur.total += Number.isFinite(value) ? value : 0
+        cur.rows += 1
+        if (!Number.isFinite(qty) || qty <= 0) cur.incompleteRows += 1
+        statuses[key] = cur
+      })
     })
     return statuses
+  }
+
+  // Attrezzature recuperabili di Art.30 con il relativo ID persistito e un'etichetta
+  // leggibile (matricola per le tessere, "Tipo (N)" per le altre) — usate per verificare,
+  // una per una, che ciascuna abbia la propria nota spese compilata (rapporto 1 a 1).
+  const getRecuperabiliAttrezzatureRefs = (attrs: any): Array<{ id: string, label: string }> => {
+    const raw = String(pickAttrCI(attrs, ['attrezzature_risarcimento_dettaglio']) || '')
+    const out: Array<{ id: string, label: string }> = []
+    const counters: Record<string, number> = {}
+    for (const line of raw.split(/\r?\n/)) {
+      const text = line.trim()
+      if (!text) continue
+      const statoMatch = text.match(/Stato:\s*(Non recuperabile|Recuperabile)/i)
+      if (!statoMatch || !/^recuperabile$/i.test(statoMatch[1].trim())) continue
+      const idMatch = text.match(/—\s*ID:\s*([0-9]+)/i)
+      if (!idMatch) continue
+      const cutIdx = text.search(/\s+—\s+Valore unitario:/i)
+      const prefix = cutIdx >= 0 ? text.slice(0, cutIdx).trim() : text
+      const codiceMatch = prefix.match(/^(.*?)\s+—\s+Codice:\s*(.+)$/i)
+      const descrizione = String(codiceMatch?.[1] || prefix).trim()
+      const isTessera = /tessera/i.test(descrizione)
+      let label: string
+      if (isTessera) {
+        const matricolaMatch = text.match(/Matricola:\s*([^—]+?)(?=\s+—|$)/i)
+        const matricola = String(matricolaMatch?.[1] || '').trim()
+        label = matricola ? `Tessera elettronica — Matricola ${matricola}` : 'Tessera elettronica'
+      } else {
+        counters[descrizione] = (counters[descrizione] || 0) + 1
+        label = `${descrizione} (${counters[descrizione]})`
+      }
+      out.push({ id: String(idMatch[1]), label })
+    }
+    return out
   }
 
   const findNotaSpeseWarnings = async (): Promise<{ blocking: string[]; confirmable: string[] }> => {
@@ -2191,6 +2243,21 @@ function ActionsPanel (props: {
     const blocking: string[] = []
     const confirmable: string[] = []
     selected.forEach(opt => {
+      if (opt.codice === 'C104_ATTREZZATURE_DANNEGGIATE') {
+        const refs = getRecuperabiliAttrezzatureRefs(data)
+        refs.forEach(ref => {
+          const key = `${opt.codice}::${ref.id}`
+          const st = statuses[key] || { total: 0, rows: 0, incompleteRows: 0 }
+          if (st.incompleteRows > 0) {
+            blocking.push(`${opt.label} — ${ref.label}: ${st.incompleteRows} ${st.incompleteRows === 1 ? 'riga senza quantità o con quantità pari a zero' : 'righe senza quantità o con quantità pari a zero'}`)
+            return
+          }
+          if (Number(st.total || 0) <= 0) {
+            blocking.push(`${opt.label} — ${ref.label}: nota spese obbligatoria per l'attrezzatura recuperabile, ma non ancora compilata`)
+          }
+        })
+        return
+      }
       const st = statuses[opt.codice] || { total: 0, rows: 0, incompleteRows: 0 }
       if (st.incompleteRows > 0) {
         blocking.push(`${opt.label}: ${st.incompleteRows} ${st.incompleteRows === 1 ? 'riga senza quantità o con quantità pari a zero' : 'righe senza quantità o con quantità pari a zero'}`)
@@ -6970,13 +7037,6 @@ type Art30RimborsoRapportoPdfRow = {
   importo: number | null
 }
 
-type Art30CauzioneRapportoPdfDetail = {
-  unitaMisura: string
-  quantita: number
-  valoreUnitario: number
-  importo: number
-}
-
 function parseArt30NumberForRapportoPdf (value: any): number | null {
   if (value == null || value === '') return null
   if (typeof value === 'number') return Number.isFinite(value) ? value : null
@@ -6994,47 +7054,34 @@ function parseArt30DetailForRapportoPdf (raw: any): Art30RimborsoRapportoPdfRow[
   for (const line of String(raw ?? '').split(/\r?\n/)) {
     const text = line.trim()
     if (!text) continue
-    const quantitaMatch = text.match(/\s+—\s+Quantità:\s*([0-9.,]+)/i)
-    if (!quantitaMatch || quantitaMatch.index == null) continue
-    const prefix = text.slice(0, quantitaMatch.index).trim()
+    if (/Stato:\s*Recuperabile\b/i.test(text)) continue
+    const statoMatch = text.match(/Stato:\s*(Non recuperabile|Recuperabile)/i)
+    if (!statoMatch) continue
+    const cutIdx = text.search(/\s+—\s+Valore unitario:/i)
+    const prefix = cutIdx >= 0 ? text.slice(0, cutIdx).trim() : text
     const codiceMatch = prefix.match(/^(.*?)\s+—\s+Codice:\s*(.+)$/i)
     const descrizione = String(codiceMatch?.[1] || prefix).trim()
     const codice = String(codiceMatch?.[2] || '').trim()
-    const quantita = parseArt30NumberForRapportoPdf(quantitaMatch[1])
-    if (!descrizione || quantita == null || quantita <= 0) continue
+    if (!descrizione) continue
     const valoreUnitarioMatch = text.match(/Valore unitario:\s*([0-9.,]+)/i)
-    const importoMatch = text.match(/Importo:\s*([0-9.,]+)/i)
+    const valoreUnitario = parseArt30NumberForRapportoPdf(valoreUnitarioMatch?.[1])
     out.push({
       codice,
       descrizione,
-      quantita,
-      valoreUnitario: parseArt30NumberForRapportoPdf(valoreUnitarioMatch?.[1]),
-      importo: parseArt30NumberForRapportoPdf(importoMatch?.[1])
+      quantita: 1,
+      valoreUnitario,
+      importo: valoreUnitario
     })
   }
   return out
 }
 
-function parseArt30CauzioneDetailForRapportoPdf (raw: any): Art30CauzioneRapportoPdfDetail | null {
+function countCauzioneDecurtataRowsForRapportoPdf (raw: any): number {
+  let count = 0
   for (const line of String(raw ?? '').split(/\r?\n/)) {
-    const text = line.trim()
-    if (!/^Decurtazione della cauzione\b/i.test(text)) continue
-    const unitaMisuraMatch = text.match(/U\.M\.:\s*([^—|]+?)(?:\s+(?:—|\|)|$)/i)
-    const quantitaMatch = text.match(/Quantità:\s*([0-9.,]+)/i)
-    const valoreUnitarioMatch = text.match(/Valore unitario:\s*([0-9.,]+)/i)
-    const importoMatch = text.match(/Importo:\s*-?\s*([0-9.,]+)/i)
-    const quantita = parseArt30NumberForRapportoPdf(quantitaMatch?.[1])
-    const valoreUnitario = parseArt30NumberForRapportoPdf(valoreUnitarioMatch?.[1])
-    const importo = parseArt30NumberForRapportoPdf(importoMatch?.[1])
-    if (quantita == null || quantita <= 0 || valoreUnitario == null || valoreUnitario < 0 || importo == null || importo < 0) return null
-    return {
-      unitaMisura: String(unitaMisuraMatch?.[1] || 'n.').trim() || 'n.',
-      quantita,
-      valoreUnitario,
-      importo
-    }
+    if (/Cauzione:\s*Decurtata\b/i.test(line)) count++
   }
-  return null
+  return count
 }
 
 function qtyArt30ItForRapportoPdf (value: number): string {
@@ -7042,10 +7089,10 @@ function qtyArt30ItForRapportoPdf (value: number): string {
 }
 
 function buildArt30RapportoSummaryForAzioni (data: any): { hasData: boolean; rows: Art30RimborsoRapportoPdfRow[]; rimborso: number; cauzione: number; cauzioneQuantita: number | null; cauzioneValoreUnitario: number | null; cauzioneUnitaMisura: string; netto: number; text: string } {
-  const detailRaw = pickRapportoAttrCI(data, ['attrezzature_rimborso_dettaglio'])
+  const detailRaw = pickRapportoAttrCI(data, ['attrezzature_risarcimento_dettaglio'])
   const rows = parseArt30DetailForRapportoPdf(detailRaw)
-  const cauzioneDetail = parseArt30CauzioneDetailForRapportoPdf(detailRaw)
-  const rimborsoSalvato = parseArt30NumberForRapportoPdf(pickRapportoAttrCI(data, ['attrezzature_rimborso_importo']))
+  const cauzioneCount = countCauzioneDecurtataRowsForRapportoPdf(detailRaw)
+  const rimborsoSalvato = parseArt30NumberForRapportoPdf(pickRapportoAttrCI(data, ['attrezzature_risarcimento_importo']))
   const cauzioneSalvata = parseArt30NumberForRapportoPdf(pickRapportoAttrCI(data, ['attrezzature_cauzione_decurtata']))
   const nettoSalvato = parseArt30NumberForRapportoPdf(pickRapportoAttrCI(data, ['attrezzature_importo_netto']))
   const cauzionePresente = String(pickRapportoAttrCI(data, ['attrezzature_cauzione_presente']) ?? '').trim().toLowerCase()
@@ -7078,9 +7125,9 @@ function buildArt30RapportoSummaryForAzioni (data: any): { hasData: boolean; row
     rows,
     rimborso,
     cauzione,
-    cauzioneQuantita: cauzioneDetail?.quantita ?? null,
-    cauzioneValoreUnitario: cauzioneDetail?.valoreUnitario ?? null,
-    cauzioneUnitaMisura: cauzioneDetail?.unitaMisura || 'n.',
+    cauzioneQuantita: cauzioneCount > 0 ? cauzioneCount : null,
+    cauzioneValoreUnitario: cauzioneCount > 0 && cauzioneSalvata ? Math.round((cauzioneSalvata / cauzioneCount) * 100) / 100 : null,
+    cauzioneUnitaMisura: 'n.',
     netto,
     text: `Art. 30 - ${parts.join('; ')}.`
   }

@@ -3297,8 +3297,8 @@ const NSD_PARENT_SUMMARY_FIELDS = [
   'ns_importo_spese_generali',
   'ns_totale_complessivo',
   'ns_ricalcolata_il',
-  'attrezzature_rimborso_dettaglio',
-  'attrezzature_rimborso_importo',
+  'attrezzature_risarcimento_dettaglio',
+  'attrezzature_risarcimento_importo',
   'attrezzature_cauzione_presente',
   'attrezzature_cauzione_decurtata',
   'attrezzature_importo_netto'
@@ -3354,7 +3354,7 @@ function nsdParseArt30Number (value: any): number | null {
 function nsdReadArt30Equipment (data: any): NsdArt30EquipmentSummary {
   const equipmentRows: NsdArt30EquipmentRow[] = []
   let cauzioneSnapshot: NsdArt30EquipmentRow | null = null
-  const raw = String(nsdPickAttrCI(data || {}, ['attrezzature_rimborso_dettaglio']) || '')
+  const raw = String(nsdPickAttrCI(data || {}, ['attrezzature_risarcimento_dettaglio']) || '')
 
   for (const rawLine of raw.split(/\r?\n/)) {
     const line = rawLine.trim()
@@ -3377,25 +3377,24 @@ function nsdReadArt30Equipment (data: any): NsdArt30EquipmentSummary {
       continue
     }
 
-    const quantitaMatch = line.match(/\s+—\s+Quantità\s*:\s*([0-9][0-9.,]*)/i)
-    if (!quantitaMatch || quantitaMatch.index == null) continue
-    const quantita = nsdParseArt30Number(quantitaMatch[1])
-    if (quantita == null || quantita <= 0) continue
+    const statoMatch = line.match(/Stato:\s*(Non recuperabile|Recuperabile)/i)
+    if (!statoMatch) continue
+    if (/^recuperabile$/i.test(statoMatch[1].trim())) continue
 
-    const prefix = line.slice(0, quantitaMatch.index).trim()
+    const cutIdx = line.search(/\s+—\s+Valore unitario\s*:/i)
+    const prefix = cutIdx >= 0 ? line.slice(0, cutIdx).trim() : line
     const codiceMatch = prefix.match(/^(.*?)\s+—\s+Codice\s*:\s*(.+)$/i)
     const descrizione = String(codiceMatch?.[1] || prefix).trim()
     const codice = String(codiceMatch?.[2] || '').trim()
     if (!descrizione) continue
 
     const valoreUnitario = nsdParseArt30Number(line.match(/Valore unitario\s*:\s*([0-9][0-9.,]*)/i)?.[1])
-    const importoSnapshot = nsdParseArt30Number(line.match(/Importo\s*:\s*([0-9][0-9.,]*)/i)?.[1])
-    const importo = nsdRound(importoSnapshot ?? ((valoreUnitario || 0) * quantita), 2)
+    const importo = nsdRound(valoreUnitario || 0, 2)
     equipmentRows.push({
       codice,
       descrizione,
       unitaMisura: 'n.',
-      quantita,
+      quantita: 1,
       valoreUnitario,
       importo,
       isCauzione: false
@@ -3403,7 +3402,7 @@ function nsdReadArt30Equipment (data: any): NsdArt30EquipmentSummary {
   }
 
   const rimborsoDaRighe = nsdRound(equipmentRows.reduce((sum, row) => sum + nsdSafeNum(row.importo, 0), 0), 2)
-  const rimborsoSalvato = nsdParseArt30Number(nsdPickAttrCI(data || {}, ['attrezzature_rimborso_importo']))
+  const rimborsoSalvato = nsdParseArt30Number(nsdPickAttrCI(data || {}, ['attrezzature_risarcimento_importo']))
   const cauzioneSalvata = Math.abs(nsdParseArt30Number(nsdPickAttrCI(data || {}, ['attrezzature_cauzione_decurtata'])) || 0)
   const nettoSalvato = nsdParseArt30Number(nsdPickAttrCI(data || {}, ['attrezzature_importo_netto']))
   const cauzioneAttiva = nsdTruthyFlag(nsdPickAttrCI(data || {}, ['attrezzature_cauzione_presente'])) || cauzioneSalvata > 0
@@ -3718,7 +3717,7 @@ function NotaSpeseDetailPanel (props: { data: any; detailUrl: string; hasSel: bo
     return (
       <div style={{ display: 'grid', gap: 8 }}>
         <div style={{ padding: '8px 12px', borderRadius: 8, background: '#dbeafe', border: '1px solid #bfdbfe', color: '#1F4E79', fontSize: 12, fontWeight: 900, letterSpacing: 0.15, textTransform: 'uppercase' }}>
-          Rimborso attrezzature
+          Risarcimento attrezzatura
         </div>
         <div style={{ overflowX: 'auto', border: '1px solid #cbd5e1', borderRadius: 10, background: '#fff' }}>
           <table style={{ width: '100%', minWidth: 560, borderCollapse: 'collapse', fontSize: 12 }}>
@@ -3825,7 +3824,7 @@ function NotaSpeseDetailPanel (props: { data: any; detailUrl: string; hasSel: bo
           <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr)', gap: 0 }}>
             {greenSummaryCard('Totale voci per interventi', nsdRound(overallSummary.totaleAT + overallSummary.totalePR + overallSummary.totaleRU + overallSummary.totaleSL + overallSummary.totalePF, 2))}
             {greenSummaryCard(`Spese generali (${nsdMoney(overallSummary.percentualeSpeseGenerali)}%)`, overallSummary.importoSpeseGenerali)}
-            {art30Equipment.hasData && greenSummaryCard('Rimborso attrezzature', art30Equipment.netto)}
+            {art30Equipment.hasData && greenSummaryCard('Risarcimento attrezzatura', art30Equipment.netto)}
             {greenSummaryCard('Totale complessivo note spese', overallTotalWithArt30, true)}
           </div>
           {lastCalc ? <div style={{ fontSize: 11, color: '#477264', marginTop: 8 }}>Ultimo ricalcolo: {formatDateSafe(lastCalc)}</div> : null}

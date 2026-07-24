@@ -11,14 +11,14 @@
 // anteprima-panel.tsx), quindi questo file resta un default, non un vincolo rigido.
 export const FASCICOLO_MAP_DEFAULTS = {
   basemap: 'satellite',
-  // WebMap "Rapporto di rilevazione_Editing_map" — porta con sé tutti i layer di
-  // riferimento (Catasto, Schema ENAS, Schema CBSM, Comprensorio CBSM), non solo il basemap.
-  // Usata da tutti i widget, indipendentemente da un collegamento a un widget Mappa ExB.
-  webMapItemId: 'ebb5e0d0d2d649daa2e124bd96514245',
+  // WebMap "Infrazioni" — porta con sé tutti i layer di riferimento (Catasto, Schema ENAS,
+  // Schema CBSM, Comprensorio CBSM), non solo il basemap. Usata da tutti i widget,
+  // indipendentemente da un collegamento a un widget Mappa ExB.
+  webMapItemId: '1627aecea95c40818e6c61ceade8fbae',
   officeLonWgs84: 0,
   officeLatWgs84: 0,
   mapLayerTitle: 'Localizzazione infrazioni',
-  mapLayerUrl: 'https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_VIEW_MAPPA_LOCALIZZAZIONE/FeatureServer/0',
+  mapLayerUrl: 'https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_INFRAZIONI_VIEW_ALL/FeatureServer/0',
   mapLayerId: 'dataSource_44-508bfb3780d64a92852f09236381af8f',
   mapLayerLayerId: '0'
 }
