@@ -2204,8 +2204,8 @@ function ActionsPanel (props: {
   // una per una, che ciascuna abbia la propria nota spese compilata (rapporto 1 a 1).
   const getRecuperabiliAttrezzatureRefs = (attrs: any): Array<{ id: string, label: string }> => {
     const raw = String(pickAttrCI(attrs, ['attrezzature_risarcimento_dettaglio']) || '')
-    const out: Array<{ id: string, label: string }> = []
-    const counters: Record<string, number> = {}
+    type ParsedItem = { id: string, descrizione: string, isTessera: boolean, matricola: string }
+    const parsed: ParsedItem[] = []
     for (const line of raw.split(/\r?\n/)) {
       const text = line.trim()
       if (!text) continue
@@ -2218,18 +2218,24 @@ function ActionsPanel (props: {
       const codiceMatch = prefix.match(/^(.*?)\s+—\s+Codice:\s*(.+)$/i)
       const descrizione = String(codiceMatch?.[1] || prefix).trim()
       const isTessera = /tessera/i.test(descrizione)
-      let label: string
-      if (isTessera) {
-        const matricolaMatch = text.match(/Matricola:\s*([^—]+?)(?=\s+—|$)/i)
-        const matricola = String(matricolaMatch?.[1] || '').trim()
-        label = matricola ? `Tessera elettronica — Matricola ${matricola}` : 'Tessera elettronica'
-      } else {
-        counters[descrizione] = (counters[descrizione] || 0) + 1
-        label = `${descrizione} (${counters[descrizione]})`
-      }
-      out.push({ id: String(idMatch[1]), label })
+      const matricolaMatch = text.match(/Matricola:\s*([^—]+?)(?=\s+—|$)/i)
+      parsed.push({ id: String(idMatch[1]), descrizione, isTessera, matricola: String(matricolaMatch?.[1] || '').trim() })
     }
-    return out
+    const totalsByDescrizione: Record<string, number> = {}
+    parsed.forEach(item => { if (!item.isTessera) totalsByDescrizione[item.descrizione] = (totalsByDescrizione[item.descrizione] || 0) + 1 })
+    const counters: Record<string, number> = {}
+    return parsed.map(item => {
+      let label: string
+      if (item.isTessera) {
+        label = item.matricola ? `Tessera elettronica — Matricola ${item.matricola}` : 'Tessera elettronica'
+      } else if (totalsByDescrizione[item.descrizione] > 1) {
+        counters[item.descrizione] = (counters[item.descrizione] || 0) + 1
+        label = `${item.descrizione} (${counters[item.descrizione]})`
+      } else {
+        label = item.descrizione
+      }
+      return { id: item.id, label }
+    })
   }
 
   const findNotaSpeseWarnings = async (): Promise<{ blocking: string[]; confirmable: string[] }> => {
@@ -6969,262 +6975,6 @@ function normalizeArcgisLayerUrl (raw?: string | null): string {
 }
 
 
-type NsCatPdf = 'AT' | 'PR' | 'RU' | 'SL' | 'PF'
-type NsRowPdf = {
-  objectid: number
-  categoria_costo: NsCatPdf
-  origine_voce_snapshot: string
-  codice_voce_snapshot: string
-  descrizione_snapshot: string
-  unita_misura_snapshot: string
-  prezzo_unitario_snapshot: number
-  quantita: number
-  importo_riga: number
-  anno_prezzario_snapshot?: number | null
-  ordine: number
-  note: string
-  codice_casistica?: string | null
-}
-type NsSummaryPdf = {
-  totaleAT: number
-  totalePR: number
-  totaleRU: number
-  totaleSL: number
-  totalePF: number
-  percentualeSpeseGenerali: number
-  importoSpeseGenerali: number
-  totaleComplessivo: number
-}
-
-const NS_PDF_CATS: NsCatPdf[] = ['AT', 'PR', 'RU', 'SL', 'PF']
-const NS_PDF_CASISTICA_META: Record<string, { order: number; label: string }> = {
-  C100_REPERIBILITA: { order: 8, label: 'Art. 8 - Violazione servizio di reperibilità' },
-  C101_SPRECO_ACQUA: { order: 27, label: 'Art. 27 - Spreco d’acqua/uso negligente della risorsa idrica' },
-  C104_ATTREZZATURE_DANNEGGIATE: { order: 30, label: 'Art. 30 - Danneggiamento e/o perdita attrezzature' },
-  C113_DANNI_STRUTTURE_IRRIGUE: { order: 39, label: 'Art. 39 - Danni alle strutture irrigue' }
-}
-
-function escapeSqlStringForRapportoPdf (v: any): string {
-  return String(v ?? '').replace(/'/g, "''")
-}
-
-function parentGlobalidWhereForRapportoPdf (parentGlobalId: string): string {
-  const raw = String(parentGlobalId || '').trim()
-  const noBraces = raw.replace(/^\{/, '').replace(/\}$/, '')
-  const values = Array.from(new Set([raw, noBraces, `{${noBraces}}`].filter(Boolean)))
-  return values.map(v => `parent_globalid = '${escapeSqlStringForRapportoPdf(v)}'`).join(' OR ')
-}
-
-function moneyItRapportoPdf (v: number): string {
-  if (!Number.isFinite(v)) return ''
-  return v.toLocaleString('it-IT', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + ' €'
-}
-
-
-
-function roundMoneyRapportoPdf (v: number): number {
-  if (!Number.isFinite(v)) return 0
-  const sign = v < 0 ? -1 : 1
-  const abs = Math.abs(v)
-  return sign * (Math.round((abs + 1e-9) * 100) / 100)
-}
-
-type Art30RimborsoRapportoPdfRow = {
-  codice: string
-  descrizione: string
-  quantita: number
-  valoreUnitario: number | null
-  importo: number | null
-}
-
-function parseArt30NumberForRapportoPdf (value: any): number | null {
-  if (value == null || value === '') return null
-  if (typeof value === 'number') return Number.isFinite(value) ? value : null
-  const text = String(value).trim()
-  if (!text) return null
-  const normalized = text.includes(',')
-    ? text.replace(/\s/g, '').replace(/\./g, '').replace(',', '.')
-    : text.replace(/\s/g, '')
-  const parsed = Number(normalized)
-  return Number.isFinite(parsed) ? parsed : null
-}
-
-function parseArt30DetailForRapportoPdf (raw: any): Art30RimborsoRapportoPdfRow[] {
-  const out: Art30RimborsoRapportoPdfRow[] = []
-  for (const line of String(raw ?? '').split(/\r?\n/)) {
-    const text = line.trim()
-    if (!text) continue
-    if (/Stato:\s*Recuperabile\b/i.test(text)) continue
-    const statoMatch = text.match(/Stato:\s*(Non recuperabile|Recuperabile)/i)
-    if (!statoMatch) continue
-    const cutIdx = text.search(/\s+—\s+Valore unitario:/i)
-    const prefix = cutIdx >= 0 ? text.slice(0, cutIdx).trim() : text
-    const codiceMatch = prefix.match(/^(.*?)\s+—\s+Codice:\s*(.+)$/i)
-    const descrizione = String(codiceMatch?.[1] || prefix).trim()
-    const codice = String(codiceMatch?.[2] || '').trim()
-    if (!descrizione) continue
-    const valoreUnitarioMatch = text.match(/Valore unitario:\s*([0-9.,]+)/i)
-    const valoreUnitario = parseArt30NumberForRapportoPdf(valoreUnitarioMatch?.[1])
-    out.push({
-      codice,
-      descrizione,
-      quantita: 1,
-      valoreUnitario,
-      importo: valoreUnitario
-    })
-  }
-  return out
-}
-
-function countCauzioneDecurtataRowsForRapportoPdf (raw: any): number {
-  let count = 0
-  for (const line of String(raw ?? '').split(/\r?\n/)) {
-    if (/Cauzione:\s*Decurtata\b/i.test(line)) count++
-  }
-  return count
-}
-
-function qtyArt30ItForRapportoPdf (value: number): string {
-  return Number(value).toLocaleString('it-IT', { minimumFractionDigits: 0, maximumFractionDigits: 4 })
-}
-
-function buildArt30RapportoSummaryForAzioni (data: any): { hasData: boolean; rows: Art30RimborsoRapportoPdfRow[]; rimborso: number; cauzione: number; cauzioneQuantita: number | null; cauzioneValoreUnitario: number | null; cauzioneUnitaMisura: string; netto: number; text: string } {
-  const detailRaw = pickRapportoAttrCI(data, ['attrezzature_risarcimento_dettaglio'])
-  const rows = parseArt30DetailForRapportoPdf(detailRaw)
-  const cauzioneCount = countCauzioneDecurtataRowsForRapportoPdf(detailRaw)
-  const rimborsoSalvato = parseArt30NumberForRapportoPdf(pickRapportoAttrCI(data, ['attrezzature_risarcimento_importo']))
-  const cauzioneSalvata = parseArt30NumberForRapportoPdf(pickRapportoAttrCI(data, ['attrezzature_cauzione_decurtata']))
-  const nettoSalvato = parseArt30NumberForRapportoPdf(pickRapportoAttrCI(data, ['attrezzature_importo_netto']))
-  const cauzionePresente = String(pickRapportoAttrCI(data, ['attrezzature_cauzione_presente']) ?? '').trim().toLowerCase()
-  const cauzioneAttiva = cauzionePresente === '1' || cauzionePresente === 'true' || cauzionePresente === 'si' || cauzionePresente === 'sì'
-
-  const rimborsoDaRighe = roundMoneyRapportoPdf(rows.reduce((sum, row) => {
-    const importo = row.importo ?? ((row.valoreUnitario ?? 0) * row.quantita)
-    return sum + (Number.isFinite(importo) ? importo : 0)
-  }, 0))
-  const rimborso = roundMoneyRapportoPdf(rimborsoSalvato ?? rimborsoDaRighe)
-  const cauzione = roundMoneyRapportoPdf(cauzioneAttiva ? (cauzioneSalvata ?? 0) : 0)
-  const netto = roundMoneyRapportoPdf(nettoSalvato ?? (rimborso - cauzione))
-  const hasData = rows.length > 0 || rimborsoSalvato != null || cauzioneSalvata != null || nettoSalvato != null || cauzioneAttiva
-  if (!hasData) return { hasData: false, rows: [], rimborso: 0, cauzione: 0, cauzioneQuantita: null, cauzioneValoreUnitario: null, cauzioneUnitaMisura: 'n.', netto: 0, text: '' }
-
-  const parts: string[] = rows.map(row => {
-    const importo = roundMoneyRapportoPdf(row.importo ?? ((row.valoreUnitario ?? 0) * row.quantita))
-    if (row.valoreUnitario != null) {
-      return `${row.descrizione}: n. ${qtyArt30ItForRapportoPdf(row.quantita)} x ${moneyItRapportoPdf(row.valoreUnitario)} = ${moneyItRapportoPdf(importo)}`
-    }
-    return `${row.descrizione}: n. ${qtyArt30ItForRapportoPdf(row.quantita)} = ${moneyItRapportoPdf(importo)}`
-  })
-
-  if (parts.length === 0 && rimborso !== 0) parts.push(`rimborso attrezzature: ${moneyItRapportoPdf(rimborso)}`)
-  if (cauzioneAttiva || cauzione !== 0) parts.push(`cauzione: -${moneyItRapportoPdf(Math.abs(cauzione))}`)
-  parts.push(`netto Art. 30: ${moneyItRapportoPdf(netto)}`)
-
-  return {
-    hasData: true,
-    rows,
-    rimborso,
-    cauzione,
-    cauzioneQuantita: cauzioneCount > 0 ? cauzioneCount : null,
-    cauzioneValoreUnitario: cauzioneCount > 0 && cauzioneSalvata ? Math.round((cauzioneSalvata / cauzioneCount) * 100) / 100 : null,
-    cauzioneUnitaMisura: 'n.',
-    netto,
-    text: `Art. 30 - ${parts.join('; ')}.`
-  }
-}
-
-function emptyNsRowsForRapportoPdf (): Record<NsCatPdf, NsRowPdf[]> {
-  return { AT: [], PR: [], RU: [], SL: [], PF: [] }
-}
-
-function nsSummaryForRapportoPdf (rows: Record<NsCatPdf, NsRowPdf[]>, percentualeSpeseGenerali: number): NsSummaryPdf {
-  const sumCat = (cat: NsCatPdf) => (rows[cat] || []).reduce((sum, r) => sum + (Number(r.importo_riga) || 0), 0)
-  const totaleAT = sumCat('AT')
-  const totalePR = sumCat('PR')
-  const totaleRU = sumCat('RU')
-  const totaleSL = sumCat('SL')
-  const totalePF = sumCat('PF')
-  const imponibile = totaleAT + totalePR + totaleRU + totaleSL + totalePF
-  const pct = Number.isFinite(percentualeSpeseGenerali) ? percentualeSpeseGenerali : 15
-  const importoSpeseGenerali = imponibile * pct / 100
-  return {
-    totaleAT,
-    totalePR,
-    totaleRU,
-    totaleSL,
-    totalePF,
-    percentualeSpeseGenerali: pct,
-    importoSpeseGenerali,
-    totaleComplessivo: imponibile + importoSpeseGenerali
-  }
-}
-
-function notaSpeseGroupsForRapportoPdf (
-  rawRows: any[],
-  percentualeSpeseGenerali: number
-): Array<{ codiceCasistica: string; label: string; rows: Record<NsCatPdf, NsRowPdf[]>; summary: NsSummaryPdf }> {
-  const byCode = new Map<string, Record<NsCatPdf, NsRowPdf[]>>()
-
-  for (const r of rawRows || []) {
-    const cat = String(r.categoria_costo || '').toUpperCase() as NsCatPdf
-    if (!NS_PDF_CATS.includes(cat)) continue
-    const code = String(r.codice_casistica || '').trim() || '__NON_COLLEGATA__'
-    if (!byCode.has(code)) byCode.set(code, emptyNsRowsForRapportoPdf())
-    byCode.get(code)![cat].push({
-      objectid: Number(r.OBJECTID ?? r.objectid ?? 0),
-      categoria_costo: cat,
-      origine_voce_snapshot: String(r.origine_voce_snapshot || ''),
-      codice_voce_snapshot: String(r.codice_voce_snapshot || ''),
-      descrizione_snapshot: String(r.descrizione_snapshot || ''),
-      unita_misura_snapshot: String(r.unita_misura_snapshot || ''),
-      prezzo_unitario_snapshot: Number(r.prezzo_unitario_snapshot || 0),
-      quantita: Number(r.quantita || 0),
-      importo_riga: Number(r.importo_riga || 0),
-      anno_prezzario_snapshot: r.anno_prezzario_snapshot == null ? null : Number(r.anno_prezzario_snapshot),
-      ordine: Number(r.ordine || 0),
-      note: String(r.note || ''),
-      codice_casistica: code === '__NON_COLLEGATA__' ? null : code
-    })
-  }
-
-  return Array.from(byCode.entries())
-    .map(([code, rows]) => {
-      const meta = NS_PDF_CASISTICA_META[code]
-      return {
-        codiceCasistica: code,
-        label: meta?.label || (code === '__NON_COLLEGATA__' ? 'Nota spese non collegata a violazione' : 'Nota spese collegata'),
-        rows,
-        summary: nsSummaryForRapportoPdf(rows, percentualeSpeseGenerali)
-      }
-    })
-    .filter(g => g.summary.totaleComplessivo > 0)
-    .sort((a, b) => {
-      const ao = NS_PDF_CASISTICA_META[a.codiceCasistica]?.order ?? 999
-      const bo = NS_PDF_CASISTICA_META[b.codiceCasistica]?.order ?? 999
-      if (ao !== bo) return ao - bo
-      return a.label.localeCompare(b.label, 'it')
-    })
-}
-
-function notaSpesePrintGroupsForRapportoPdf (
-  nsGroups: Array<{ codiceCasistica: string; label: string; rows: Record<NsCatPdf, NsRowPdf[]>; summary: NsSummaryPdf }>,
-  data: any,
-  percentualeSpeseGenerali: number
-): Array<{ codiceCasistica: string; label: string; rows: Record<NsCatPdf, NsRowPdf[]>; summary: NsSummaryPdf }> {
-  const art30Summary = buildArt30RapportoSummaryForAzioni(data)
-  const out = nsGroups.slice()
-  if (art30Summary.hasData && !out.some(group => group.codiceCasistica === 'C104_ATTREZZATURE_DANNEGGIATE')) {
-    const emptyRows = emptyNsRowsForRapportoPdf()
-    out.push({
-      codiceCasistica: 'C104_ATTREZZATURE_DANNEGGIATE',
-      label: NS_PDF_CASISTICA_META.C104_ATTREZZATURE_DANNEGGIATE.label,
-      rows: emptyRows,
-      summary: nsSummaryForRapportoPdf(emptyRows, percentualeSpeseGenerali)
-    })
-    out.sort((a, b) => (NS_PDF_CASISTICA_META[a.codiceCasistica]?.order ?? 999) - (NS_PDF_CASISTICA_META[b.codiceCasistica]?.order ?? 999))
-  }
-  return out
-}
 
 type DetailMapConfigForActions = {
   basemap: string
@@ -7396,35 +7146,6 @@ async function resolvePointGeometryForActions (ds: any, oid: number, idFieldName
 
 async function hasPointGeometryForActions (ds: any, oid: number, idFieldName: string, attrs?: any, preferredUrl?: string | null): Promise<boolean> {
   return !!(await resolvePointGeometryForActions(ds, oid, idFieldName, attrs, preferredUrl))
-}
-
-function hasNotaSpeseLocalForActions (data: any): boolean {
-  if (buildArt30RapportoSummaryForAzioni(data).hasData) return true
-  const saved = parseArt30NumberForRapportoPdf(pickRapportoAttrCI(data, ['ns_totale_complessivo']))
-  return saved != null && saved !== 0
-}
-
-async function hasNotaSpeseForActions (
-  data: any,
-  nsConfig?: { detailUrl: string; parametriUrl: string; parametroCode: string }
-): Promise<boolean> {
-  if (hasNotaSpeseLocalForActions(data)) return true
-  const detailUrl = normalizeArcgisLayerUrl(nsConfig?.detailUrl)
-  const parentGlobalId = String(data?.GlobalID || data?.globalid || data?.GLOBALID || data?.global_id || '').trim()
-  if (!detailUrl || !parentGlobalId) return false
-  try {
-    const FeatureLayer = await loadEsriModule<any>('esri/layers/FeatureLayer')
-    const fl = new FeatureLayer({ url: detailUrl })
-    if (typeof fl.load === 'function') await fl.load()
-    if (typeof fl.queryFeatureCount === 'function') {
-      const count = await fl.queryFeatureCount({ where: parentGlobalidWhereForRapportoPdf(parentGlobalId) })
-      return Number(count) > 0
-    }
-    const res = await fl.queryFeatures({ where: parentGlobalidWhereForRapportoPdf(parentGlobalId), outFields: ['OBJECTID'], returnGeometry: false })
-    return (res?.features || []).length > 0
-  } catch {
-    return false
-  }
 }
 
 

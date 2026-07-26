@@ -4569,7 +4569,8 @@ function nsRowsByCategoryToFlat (src?: Record<NsCategory, NsDetailRow[]> | null)
 function nsRowsFromFlat (rows: NsDetailRow[]): Record<NsCategory, NsDetailRow[]> {
   const out = nsCloneRowsByCategory(EMPTY_NS_ROWS_BY_CATEGORY)
   ;(rows || []).forEach((row) => {
-    const cat = nsNormalizeCategory(row.categoria_costo) || 'PR'
+    const cat = nsNormalizeCategory(row.categoria_costo)
+    if (!cat) return // categoria non tra le 5 gestite qui (es. RA): esclusa, non forzata a PR
     out[cat].push(nsCloneRow({ ...row, categoria_costo: cat }))
   })
   NS_CATEGORIES.forEach((cat) => {
@@ -5242,22 +5243,150 @@ async function queryNotaSpeseRows (detailUrl: string, parentGlobalId: string, ca
   const clauses = [`parent_globalid = '${nsEscapeSqlString(parentGlobalId)}'`]
   if (category) clauses.push(`categoria_costo = '${nsEscapeSqlString(category)}'`)
   const rows = await queryTableAttributes(detailUrl, clauses.join(' AND '), 'ordine ASC, OBJECTID ASC')
+  return rows.map((r: any) => {
+    const cat = nsNormalizeCategory(r?.categoria_costo) || category || null
+    if (!cat) return null // categoria non tra le 5 gestite qui (es. RA): esclusa, non forzata a PR
+    return {
+      objectid: nsSafeNum(pickAttrCI(r, ['OBJECTID', 'objectid']), 0),
+      categoria_costo: cat as NsCategory,
+      origine_voce_snapshot: nsNormalizeSource(r?.origine_voce_snapshot || 'REGIONE'),
+      codice_voce_snapshot: String(r?.codice_voce_snapshot || '').trim(),
+      descrizione_snapshot: String(r?.descrizione_snapshot || '').trim(),
+      unita_misura_snapshot: String(r?.unita_misura_snapshot || '').trim(),
+      prezzo_unitario_snapshot: nsRound(nsSafeNum(r?.prezzo_unitario_snapshot ?? r?.costo_unitario_snapshot, 0), 4),
+      quantita: nsRound(nsSafeNum(r?.quantita, 0), 4),
+      importo_riga: nsRound(nsSafeNum(r?.importo_riga, 0), 2),
+      anno_prezzario_snapshot: r?.anno_prezzario_snapshot != null ? Math.trunc(nsSafeNum(r?.anno_prezzario_snapshot, 0)) : null,
+      ordine: Math.trunc(nsSafeNum(r?.ordine, 0)),
+      note: String(r?.note || '').trim(),
+      codice_casistica: String(r?.codice_casistica || '').trim() || null,
+      riferimento_attrezzatura_id: String(r?.riferimento_attrezzatura_id || '').trim() || null
+    }
+  }).filter((row) => row !== null) as NsDetailRow[]
+}
+
+// Righe di Nota spese categoria RA (Risarcimento attrezzatura Art.30, origine PARAMETRO):
+// non sono una NsCategory tra le 5 gestite dal motore generico sopra (sola lettura,
+// raggruppate, generate automaticamente dal popup "Gestisci attrezzature", mai editate a
+// mano riga per riga) — vivono quindi in uno stato e in una sync dedicati e separati.
+type Art30RaRow = {
+  objectid: number
+  descrizione_snapshot: string
+  prezzo_unitario_snapshot: number
+  quantita: number
+  importo_riga: number
+  ordine: number
+  riferimento_attrezzatura_id: string
+}
+
+const ART30_RA_CASISTICA = 'C104_ATTREZZATURE_DANNEGGIATE'
+const ART30_RA_CAUZIONE_ID = '__CAUZIONE__'
+
+async function queryArt30RaRows (detailUrl: string, parentGlobalId: string): Promise<Art30RaRow[]> {
+  const where = `parent_globalid = '${nsEscapeSqlString(parentGlobalId)}' AND categoria_costo = 'RA' AND codice_casistica = '${nsEscapeSqlString(ART30_RA_CASISTICA)}'`
+  const rows = await queryTableAttributes(detailUrl, where, 'ordine ASC, OBJECTID ASC')
   return rows.map((r: any) => ({
     objectid: nsSafeNum(pickAttrCI(r, ['OBJECTID', 'objectid']), 0),
-    categoria_costo: (nsNormalizeCategory(r?.categoria_costo) || category || 'PR') as NsCategory,
-    origine_voce_snapshot: nsNormalizeSource(r?.origine_voce_snapshot || 'REGIONE'),
-    codice_voce_snapshot: String(r?.codice_voce_snapshot || '').trim(),
     descrizione_snapshot: String(r?.descrizione_snapshot || '').trim(),
-    unita_misura_snapshot: String(r?.unita_misura_snapshot || '').trim(),
-    prezzo_unitario_snapshot: nsRound(nsSafeNum(r?.prezzo_unitario_snapshot ?? r?.costo_unitario_snapshot, 0), 4),
+    prezzo_unitario_snapshot: nsRound(nsSafeNum(r?.prezzo_unitario_snapshot, 0), 4),
     quantita: nsRound(nsSafeNum(r?.quantita, 0), 4),
     importo_riga: nsRound(nsSafeNum(r?.importo_riga, 0), 2),
-    anno_prezzario_snapshot: r?.anno_prezzario_snapshot != null ? Math.trunc(nsSafeNum(r?.anno_prezzario_snapshot, 0)) : null,
     ordine: Math.trunc(nsSafeNum(r?.ordine, 0)),
-    note: String(r?.note || '').trim(),
-    codice_casistica: String(r?.codice_casistica || '').trim() || null,
-    riferimento_attrezzatura_id: String(r?.riferimento_attrezzatura_id || '').trim() || null
-  }))
+    riferimento_attrezzatura_id: String(r?.riferimento_attrezzatura_id || '').trim()
+  })).filter(row => !!row.riferimento_attrezzatura_id)
+}
+
+// Ricostruisce l'elenco atteso di righe RA a partire dalle attrezzature "Non recuperabile"
+// del popup. Una riga per attrezzatura (persistentId = riferimento_attrezzatura_id). Se una
+// stessa attrezzatura era già presente nel baseline caricato dal server, ne riusa l'objectid
+// (diventa un update); altrimenti objectid 0 (diventa un add). Le attrezzature non più
+// presenti spariscono semplicemente dall'elenco (diventeranno un delete in sync).
+function buildArt30RaRowsDraft (attrezzatureRows: AttrezzaturaRimborsoRow[], cauzioneTotale: number, baseline: Art30RaRow[]): Art30RaRow[] {
+  const baselineById = new Map(baseline.map(row => [row.riferimento_attrezzatura_id, row]))
+  const rows = attrezzatureRows
+    .filter(row => row.esito === 'risarcimento')
+    .map((row, idx) => {
+      const existing = baselineById.get(row.persistentId)
+      const unit = Number(row.valoreUnitario) || 0
+      return {
+        objectid: existing?.objectid || 0,
+        descrizione_snapshot: row.descrizione,
+        prezzo_unitario_snapshot: unit,
+        quantita: 1,
+        importo_riga: unit,
+        ordine: idx,
+        riferimento_attrezzatura_id: row.persistentId
+      }
+    })
+  const cauzione = Math.round((Number(cauzioneTotale) || 0) * 100) / 100
+  if (cauzione > 0) {
+    // Riga aggregata (non legata a una singola attrezzatura): stesso ID sentinella ad ogni
+    // rigenerazione, cosi la sync la aggiorna invece di duplicarla.
+    const existingCauzione = baselineById.get(ART30_RA_CAUZIONE_ID)
+    rows.push({
+      objectid: existingCauzione?.objectid || 0,
+      descrizione_snapshot: 'Decurtazione della cauzione',
+      prezzo_unitario_snapshot: -cauzione,
+      quantita: 1,
+      importo_riga: -cauzione,
+      ordine: rows.length,
+      riferimento_attrezzatura_id: ART30_RA_CAUZIONE_ID
+    })
+  }
+  return rows
+}
+
+function art30RaRowsSignature (rows: Art30RaRow[]): string {
+  return rows
+    .slice()
+    .sort((a, b) => a.riferimento_attrezzatura_id.localeCompare(b.riferimento_attrezzatura_id))
+    .map(r => `${r.riferimento_attrezzatura_id}|${r.descrizione_snapshot}|${r.prezzo_unitario_snapshot}|${r.quantita}|${r.importo_riga}`)
+    .join(';;')
+}
+
+async function syncArt30RaRowsToTable (detailUrl: string, parentGlobalId: string, baseline: Art30RaRow[], draft: Art30RaRow[]): Promise<void> {
+  const fl = await getFeatureLayerByUrl(detailUrl)
+  const oidField = String(fl?.objectIdField || 'OBJECTID')
+  const fieldNames = new Set(((fl?.fields || []) as any[]).map((f: any) => String(f?.name || '')))
+  const toAttrs = (row: Art30RaRow, objectid?: number | null) => {
+    const attrs: any = {}
+    const put = (k: string, v: any) => { if (fieldNames.has(k)) attrs[k] = v }
+    if (objectid != null && objectid > 0) attrs[oidField] = Number(objectid)
+    if ((objectid == null || objectid <= 0) && parentGlobalId) put('parent_globalid', parentGlobalId)
+    put('categoria_costo', 'RA')
+    put('origine_voce_snapshot', 'PARAMETRO')
+    put('codice_casistica', ART30_RA_CASISTICA)
+    put('descrizione_snapshot', row.descrizione_snapshot)
+    put('prezzo_unitario_snapshot', nsRound(nsSafeNum(row.prezzo_unitario_snapshot, 0), 4))
+    put('quantita', nsRound(nsSafeNum(row.quantita, 0), 4))
+    put('importo_riga', nsRound(nsSafeNum(row.importo_riga, 0), 2))
+    put('ordine', Math.trunc(nsSafeNum(row.ordine, 0)))
+    put('riferimento_attrezzatura_id', row.riferimento_attrezzatura_id)
+    return attrs
+  }
+  const baselineById = new Map(baseline.map(row => [row.riferimento_attrezzatura_id, row]))
+  const draftById = new Map(draft.map(row => [row.riferimento_attrezzatura_id, row]))
+  const addFeatures = draft.filter(row => !row.objectid).map(row => ({ attributes: toAttrs(row, null) }))
+  const updateFeatures = draft.filter(row => {
+    if (!row.objectid) return false
+    const base = baselineById.get(row.riferimento_attrezzatura_id)
+    return !!base && (base.descrizione_snapshot !== row.descrizione_snapshot || base.prezzo_unitario_snapshot !== row.prezzo_unitario_snapshot || base.quantita !== row.quantita || base.importo_riga !== row.importo_riga || base.ordine !== row.ordine)
+  }).map(row => ({ attributes: toAttrs(row, row.objectid) }))
+  const deleteIds = baseline.filter(row => !draftById.has(row.riferimento_attrezzatura_id)).map(row => row.objectid).filter(oid => oid > 0)
+  const payload: any = {}
+  if (addFeatures.length > 0) payload.addFeatures = addFeatures
+  if (updateFeatures.length > 0) payload.updateFeatures = updateFeatures
+  if (deleteIds.length > 0) {
+    const Graphic = await loadEsriModule<any>('esri/Graphic')
+    payload.deleteFeatures = deleteIds.map((oid) => new Graphic({ attributes: { [oidField]: oid } }))
+  }
+  if (!payload.addFeatures && !payload.updateFeatures && !payload.deleteFeatures) return
+  const res = await fl.applyEdits(payload)
+  const errs: string[] = []
+  ;(res?.addFeatureResults || []).forEach((r: any) => { if (r?.error) errs.push(String(r.error.message || 'Errore add risarcimento attrezzature')) })
+  ;(res?.updateFeatureResults || []).forEach((r: any) => { if (r?.error) errs.push(String(r.error.message || 'Errore update risarcimento attrezzature')) })
+  ;(res?.deleteFeatureResults || []).forEach((r: any) => { if (r?.error) errs.push(String(r.error.message || 'Errore delete risarcimento attrezzature')) })
+  if (errs.length > 0) throw new Error(errs.join(' | '))
 }
 
 
@@ -6738,6 +6867,8 @@ const [activePrezzario, setActivePrezzario] = React.useState<{ codice: string; a
 const [noteSpesePercent, setNoteSpesePercent] = React.useState<number>(0)
 const [noteSpeseRowsBaseline, setNoteSpeseRowsBaseline] = React.useState<Record<NsCategory, NsDetailRow[]>>(nsCloneRowsByCategory(EMPTY_NS_ROWS_BY_CATEGORY))
 const [noteSpeseRowsDraft, setNoteSpeseRowsDraft] = React.useState<Record<NsCategory, NsDetailRow[]>>(nsCloneRowsByCategory(EMPTY_NS_ROWS_BY_CATEGORY))
+const [art30RaRowsBaseline, setArt30RaRowsBaseline] = React.useState<Art30RaRow[]>([])
+const [art30RaRowsDraft, setArt30RaRowsDraft] = React.useState<Art30RaRow[]>([])
 const [activeNotaSpeseCasistica, setActiveNotaSpeseCasistica] = React.useState<string>('')
   // Solo per la casistica Art.30 (C104_ATTREZZATURE_DANNEGGIATE): riferimento (persistentId)
   // dell'attrezzatura recuperabile per cui si sta compilando la nota spese. Ogni attrezzatura
@@ -6754,9 +6885,10 @@ const noteSpeseCfg = React.useMemo(() => ({
   internoArticoliUrl: String((cfg as any).nsPrezzarioInternoArticoliUrl || (cfg as any).nsPrezzarioInternoUrl || '').trim(),
   nuoviPrezziUrl: String((cfg as any).nsNuoviPrezziUrl || '').trim(),
   detailUrl: String(cfg.nsNotaSpeseDettaglioUrl || '').trim(),
+  detailUrlWrite: String((cfg as any).nsNotaSpeseDettaglioUrlWrite || cfg.nsNotaSpeseDettaglioUrl || '').trim(),
   parametriUrl: String(cfg.nsParametriUrl || '').trim(),
   parametroCode: String(cfg.nsParametroCode || 'SPESE_GENERALI_PERC').trim() || 'SPESE_GENERALI_PERC'
-}), [(cfg as any).nsImportPrezzariUrl, (cfg as any).nsPrezzariUrl, (cfg as any).nsPrezzarioRegionaleArticoliUrl, (cfg as any).nsPrezzarioVociUrl, (cfg as any).nsPrezzarioInternoArticoliUrl, (cfg as any).nsPrezzarioInternoUrl, (cfg as any).nsNuoviPrezziUrl, cfg.nsNotaSpeseDettaglioUrl, cfg.nsParametriUrl, cfg.nsParametroCode])
+}), [(cfg as any).nsImportPrezzariUrl, (cfg as any).nsPrezzariUrl, (cfg as any).nsPrezzarioRegionaleArticoliUrl, (cfg as any).nsPrezzarioVociUrl, (cfg as any).nsPrezzarioInternoArticoliUrl, (cfg as any).nsPrezzarioInternoUrl, (cfg as any).nsNuoviPrezziUrl, cfg.nsNotaSpeseDettaglioUrl, (cfg as any).nsNotaSpeseDettaglioUrlWrite, cfg.nsParametriUrl, cfg.nsParametroCode])
 
 const noteSpeseMissing = React.useMemo(() => {
   const missing: string[] = []
@@ -6801,10 +6933,13 @@ const loadNotaSpeseDraft = React.useCallback(async () => {
   if (mode !== 'edit' || currentOid == null || !currentGlobalId || noteSpeseMissing.length > 0) return
   setNoteSpeseBusy(true)
   try {
-    const [rows, perc] = await Promise.all([
+    const [rows, raRows, perc] = await Promise.all([
       queryNotaSpeseRows(noteSpeseCfg.detailUrl, currentGlobalId),
+      queryArt30RaRows(noteSpeseCfg.detailUrl, currentGlobalId),
       getNsPercentuale(noteSpeseCfg.parametriUrl, noteSpeseCfg.parametroCode)
     ])
+    setArt30RaRowsBaseline(raRows)
+    setArt30RaRowsDraft(raRows)
     const grouped = nsRowsFromFlat(rows)
     setNoteSpeseRowsBaseline(grouped)
     let draft = nsCloneRowsByCategory(grouped)
@@ -6994,10 +7129,36 @@ React.useEffect(() => {
 
 const noteSpeseRowsDirty = React.useMemo(() => !nsRowsByCategoryEqual(noteSpeseRowsDraft, noteSpeseRowsBaseline), [noteSpeseRowsDraft, noteSpeseRowsBaseline])
 const noteSpeseFormsDirty = React.useMemo(() => NS_CATEGORIES.some((cat) => !!noteSpeseFormDirtyByCategory[cat]), [noteSpeseFormDirtyByCategory])
+const art30RaRowsDirty = React.useMemo(() => art30RaRowsSignature(art30RaRowsDraft) !== art30RaRowsSignature(art30RaRowsBaseline), [art30RaRowsDraft, art30RaRowsBaseline])
+
+// AnteprimaPanel (e il PDF nota spese) trattano RA come una vera 6a categoria; qui in
+// editing resta separata (Opzione A, righe RA in stato indipendente). Questo adattatore
+// unisce le due viste solo al momento di passare i dati al pannello di anteprima.
+const previewNsRaRows = React.useMemo(() => art30RaRowsDraft.map(row => ({
+  objectid: row.objectid,
+  categoria_costo: 'RA',
+  origine_voce_snapshot: 'PARAMETRO',
+  codice_voce_snapshot: '',
+  descrizione_snapshot: row.descrizione_snapshot,
+  unita_misura_snapshot: '',
+  prezzo_unitario_snapshot: row.prezzo_unitario_snapshot,
+  quantita: row.quantita,
+  importo_riga: row.importo_riga,
+  anno_prezzario_snapshot: null as number | null,
+  ordine: row.ordine,
+  note: '',
+  codice_casistica: ART30_RA_CASISTICA,
+  riferimento_attrezzatura_id: row.riferimento_attrezzatura_id
+})), [art30RaRowsDraft])
+const previewNsRows = React.useMemo(() => ({ ...noteSpeseRowsDraft, RA: previewNsRaRows }), [noteSpeseRowsDraft, previewNsRaRows])
+const previewNsSummary = React.useMemo(() => {
+  const totaleRA = nsRound(art30RaRowsDraft.reduce((s: number, r: Art30RaRow) => s + (Number(r.importo_riga) || 0), 0), 2)
+  return { ...noteSpeseSummary, totaleRA, totaleComplessivo: nsRound((Number(noteSpeseSummary?.totaleComplessivo) || 0) + totaleRA, 2) }
+}, [noteSpeseSummary, art30RaRowsDraft])
 
 React.useEffect(() => {
-  setNoteSpeseDraftDirty(noteSpeseRowsDirty || noteSpeseFormsDirty)
-}, [noteSpeseRowsDirty, noteSpeseFormsDirty])
+  setNoteSpeseDraftDirty(noteSpeseRowsDirty || noteSpeseFormsDirty || art30RaRowsDirty)
+}, [noteSpeseRowsDirty, noteSpeseFormsDirty, art30RaRowsDirty])
 
 React.useEffect(() => {
   if (!noteSpeseDraftStorageKey || isReadOnly || isRiAgrTecLimitedEdit) return
@@ -7347,6 +7508,7 @@ React.useEffect(() => {
     const cauzione = attrezzatureCauzioneTotal(attrezzatureRows, attrezzatureCauzioneUnitaria)
     const totalNetto = Math.max(0, Math.round((total - cauzione) * 100) / 100)
     const detail = buildAttrezzatureDetail(attrezzatureRows)
+    setArt30RaRowsDraft(buildArt30RaRowsDraft(attrezzatureRows, cauzione, art30RaRowsBaseline))
     setDraft(prev => ({
       ...prev,
       attrezzature_risarcimento_dettaglio: detail,
@@ -7367,7 +7529,7 @@ React.useEffect(() => {
     }
     setAttrezzaturePopupOpen(false)
     setAttrezzaturePopupPendingArt30(false)
-  }, [attrezzatureRows, attrezzatureCauzioneUnitaria, attrezzaturePopupPendingArt30, draft.norma_violata3, canEditArt30Attrezzature, noteSpeseRowsDraft])
+  }, [attrezzatureRows, attrezzatureCauzioneUnitaria, attrezzaturePopupPendingArt30, draft.norma_violata3, canEditArt30Attrezzature, noteSpeseRowsDraft, art30RaRowsBaseline])
 
   const clearArt30AndAttrezzature = React.useCallback(() => {
     if (!canEditArt30Attrezzature) return
@@ -7395,24 +7557,68 @@ React.useEffect(() => {
     () => parseAttrezzatureDetail(g('attrezzature_risarcimento_dettaglio')),
     [draft.attrezzature_risarcimento_dettaglio]
   )
+  // Riepilogo raggruppato per tipo di attrezzatura ED esito (due tessere, una recuperabile e
+  // una no, restano su righe separate). Per le "Recuperabile" si raggruppa ulteriormente per
+  // stato di compilazione della nota spese: due unità dello stesso tipo, una già compilata e
+  // una ancora da predisporre, restano su righe distinte invece di sommarsi in una sola.
+  const attrezzatureGroupedRiepilogo = React.useMemo(() => {
+    const notaSpeseFlat = nsRowsByCategoryToFlat(noteSpeseRowsDraft)
+    const perUnitNotaSpeseTotal = (id: string) => notaSpeseFlat
+      .filter(r => String(r.riferimento_attrezzatura_id || '').trim() === id)
+      .reduce((s, r) => s + (Number(r.importo_riga) || 0), 0)
+
+    const map = new Map<string, { descrizione: string, esito: AttrezzaturaEsito, quantita: number, valoreUnitario: number | null, importo: number, ids: string[] }>()
+    attrezzatureRiepilogo.forEach(item => {
+      const unit = Number(item.valoreUnitario) || 0
+      const isRiparazione = item.esito === 'riparazione'
+      const compiled = isRiparazione ? perUnitNotaSpeseTotal(item.persistentId) > 0 : false
+      const key = isRiparazione ? `${item.descrizione}::riparazione::${compiled}` : `${item.descrizione}::risarcimento`
+      const cur = map.get(key)
+      if (!cur) {
+        map.set(key, {
+          descrizione: item.descrizione,
+          esito: item.esito,
+          quantita: 1,
+          valoreUnitario: isRiparazione ? null : item.valoreUnitario,
+          importo: isRiparazione ? 0 : unit,
+          ids: [item.persistentId]
+        })
+      } else {
+        cur.quantita += 1
+        if (!isRiparazione) cur.importo += unit
+        cur.ids.push(item.persistentId)
+      }
+    })
+    return Array.from(map.values()).map(group => {
+      if (group.esito !== 'riparazione') return { ...group, notaSpeseTotal: null }
+      const notaSpeseTotal = group.ids.reduce((sum, id) => sum + perUnitNotaSpeseTotal(id), 0)
+      return { ...group, notaSpeseTotal }
+    })
+  }, [attrezzatureRiepilogo, noteSpeseRowsDraft])
   // Attrezzature recuperabili disponibili per la nota spese di Art.30, con relativa etichetta:
   // matricola per le tessere, "Tipo (N)" numerata in ordine di comparsa per le altre.
   const attrezzatureRecuperabiliOptions = React.useMemo(() => {
+    const recuperabili = attrezzatureRiepilogo.filter(item => item.esito === 'riparazione')
+    const totalsByDescrizione: Record<string, number> = {}
+    recuperabili.forEach(item => {
+      const isTessera = attrezzaturaTipo(item.descrizione)?.key === 'TESSERA_ELETTRONICA'
+      if (!isTessera) totalsByDescrizione[item.descrizione] = (totalsByDescrizione[item.descrizione] || 0) + 1
+    })
     const counters: Record<string, number> = {}
-    return attrezzatureRiepilogo
-      .filter(item => item.esito === 'riparazione')
-      .map(item => {
-        const isTessera = attrezzaturaTipo(item.descrizione)?.key === 'TESSERA_ELETTRONICA'
-        let label: string
-        if (isTessera) {
-          label = item.matricola ? `Tessera elettronica — Matricola ${item.matricola}` : 'Tessera elettronica'
-        } else {
-          const key = item.descrizione
-          counters[key] = (counters[key] || 0) + 1
-          label = `${item.descrizione} (${counters[key]})`
-        }
-        return { id: item.persistentId, label }
-      })
+    return recuperabili.map(item => {
+      const isTessera = attrezzaturaTipo(item.descrizione)?.key === 'TESSERA_ELETTRONICA'
+      let label: string
+      if (isTessera) {
+        label = item.matricola ? `Tessera elettronica — Matricola ${item.matricola}` : 'Tessera elettronica'
+      } else if (totalsByDescrizione[item.descrizione] > 1) {
+        const key = item.descrizione
+        counters[key] = (counters[key] || 0) + 1
+        label = `${item.descrizione} (${counters[key]})`
+      } else {
+        label = item.descrizione
+      }
+      return { id: item.persistentId, label }
+    })
   }, [attrezzatureRiepilogo])
   const attrezzatureParametriUrl = String((cfg as any).attrezzatureParametriUrl || '').trim()
   const [attrezzatureCauzioneRiepilogo, setAttrezzatureCauzioneRiepilogo] = React.useState<{ quantita: number | null; valoreUnitario: number | null }>({ quantita: null, valoreUnitario: null })
@@ -8262,7 +8468,8 @@ React.useEffect(() => {
             await processAttachmentChanges(editOid, String(layer?.url || currentLayerUrl || ''))
           }
           if (hasNoteSpeseOps && currentGlobalId && noteSpeseMissing.length === 0) {
-            await syncNotaSpeseDraftToTable(noteSpeseCfg.detailUrl, currentGlobalId, noteSpeseRowsBaseline, noteSpeseRowsDraft)
+            await syncNotaSpeseDraftToTable(noteSpeseCfg.detailUrlWrite, currentGlobalId, noteSpeseRowsBaseline, noteSpeseRowsDraft)
+            await syncArt30RaRowsToTable(noteSpeseCfg.detailUrlWrite, currentGlobalId, art30RaRowsBaseline, art30RaRowsDraft)
             const parentUrl = currentLayerUrl || String(cfg.schemaLayerUrl || '').trim() || String(cfg.motherLayerUrl || '').trim()
             if (parentUrl) {
               const summary = await recomputeAndPersistNotaSpeseSummary({
@@ -8270,7 +8477,7 @@ React.useEffect(() => {
                 parentObjectId: Number(editOid),
                 parentIdFieldName: editIdFieldName,
                 parentGlobalId: currentGlobalId,
-                detailTableUrl: noteSpeseCfg.detailUrl,
+                detailTableUrl: noteSpeseCfg.detailUrlWrite,
                 parametriUrl: noteSpeseCfg.parametriUrl,
                 parametroCode: noteSpeseCfg.parametroCode
               })
@@ -8302,7 +8509,8 @@ React.useEffect(() => {
           await processAttachmentChanges(editOid, String(layer?.url || currentLayerUrl || ''))
         }
         if (noteSpeseDraftDirty && currentGlobalId && noteSpeseMissing.length === 0) {
-          await syncNotaSpeseDraftToTable(noteSpeseCfg.detailUrl, currentGlobalId, noteSpeseRowsBaseline, noteSpeseRowsDraft)
+          await syncNotaSpeseDraftToTable(noteSpeseCfg.detailUrlWrite, currentGlobalId, noteSpeseRowsBaseline, noteSpeseRowsDraft)
+          await syncArt30RaRowsToTable(noteSpeseCfg.detailUrlWrite, currentGlobalId, art30RaRowsBaseline, art30RaRowsDraft)
           const parentUrl = currentLayerUrl || String(cfg.schemaLayerUrl || '').trim() || String(cfg.motherLayerUrl || '').trim()
           if (parentUrl) {
             const nsSummary = await recomputeAndPersistNotaSpeseSummary({
@@ -8310,7 +8518,7 @@ React.useEffect(() => {
               parentObjectId: Number(editOid),
               parentIdFieldName: editIdFieldName,
               parentGlobalId: currentGlobalId,
-              detailTableUrl: noteSpeseCfg.detailUrl,
+              detailTableUrl: noteSpeseCfg.detailUrlWrite,
               parametriUrl: noteSpeseCfg.parametriUrl,
               parametroCode: noteSpeseCfg.parametroCode
             })
@@ -8393,12 +8601,30 @@ ${e?.message || String(e)}`
   }, [selectedViolazioniCount])
   const noteSpeseExpectedCasistiche = React.useMemo(() => getNotaSpeseCasistiche(draft), [draft])
   const noteSpeseCasistiche = React.useMemo(() => getNotaSpeseCasisticheWithExistingRows(draft, noteSpeseRowsDraft), [draft, noteSpeseRowsDraft])
-  const noteSpeseExpectedCount = React.useMemo(() => noteSpeseExpectedCasistiche.length, [noteSpeseExpectedCasistiche])
+  const noteSpeseExpectedCount = React.useMemo(() => {
+    // Per Art.30 il conteggio è per singola attrezzatura recuperabile (rapporto 1 a 1 con la
+    // nota spese), non per l'intera casistica come per le altre violazioni.
+    return noteSpeseExpectedCasistiche.reduce((sum, opt) => {
+      if (opt.codice === 'C104_ATTREZZATURE_DANNEGGIATE') return sum + Math.max(1, attrezzatureRecuperabiliOptions.length)
+      return sum + 1
+    }, 0)
+  }, [noteSpeseExpectedCasistiche, attrezzatureRecuperabiliOptions])
   const noteSpeseCompiledCount = React.useMemo(() => {
-    // Numeratore badge Nota spese: conteggia le note spese effettivamente presenti/salvate
-    // per le violazioni che le prevedono, anche se l'importo risulta pari a 0.
-    return noteSpeseExpectedCasistiche.filter(opt => hasNotaSpeseRowsForCasistica(noteSpeseRowsDraft, opt.codice)).length
-  }, [noteSpeseExpectedCasistiche, noteSpeseRowsDraft])
+    // Numeratore badge Nota spese: per Art.30 conta quante attrezzature recuperabili hanno
+    // già una propria nota spese compilata (importo > 0); per le altre violazioni conta se
+    // esiste almeno una riga per l'intera casistica, anche a importo 0.
+    const flat = nsRowsByCategoryToFlat(noteSpeseRowsDraft)
+    return noteSpeseExpectedCasistiche.reduce((sum, opt) => {
+      if (opt.codice === 'C104_ATTREZZATURE_DANNEGGIATE') {
+        const compiled = attrezzatureRecuperabiliOptions.filter(a => {
+          const total = flat.filter(r => String(r.riferimento_attrezzatura_id || '').trim() === a.id).reduce((s, r) => s + (Number(r.importo_riga) || 0), 0)
+          return total > 0
+        }).length
+        return sum + compiled
+      }
+      return sum + (hasNotaSpeseRowsForCasistica(noteSpeseRowsDraft, opt.codice) ? 1 : 0)
+    }, 0)
+  }, [noteSpeseExpectedCasistiche, noteSpeseRowsDraft, attrezzatureRecuperabiliOptions])
   const noteSpeseIncompleteCasistiche = React.useMemo(() => {
     return noteSpeseCasistiche.filter(opt => hasNotaSpeseIncompleteRowsForCasistica(noteSpeseRowsDraft, opt.codice))
   }, [noteSpeseCasistiche, noteSpeseRowsDraft])
@@ -8437,11 +8663,13 @@ ${e?.message || String(e)}`
     }
   }, [activeNotaSpeseCasistica, activeAttrezzaturaRiferimentoId, attrezzatureRecuperabiliOptions])
 
-  const activeNotaSpeseRows = React.useMemo(
-    () => filterRowsByCasistica(noteSpeseRowsDraft, activeNotaSpeseCasistica, activeNotaSpeseCasistica === 'C104_ATTREZZATURE_DANNEGGIATE' ? activeAttrezzaturaRiferimentoId : undefined),
-    [noteSpeseRowsDraft, activeNotaSpeseCasistica, activeAttrezzaturaRiferimentoId]
-  )
   const isArt30NotaSpeseCasistica = activeNotaSpeseCasistica === 'C104_ATTREZZATURE_DANNEGGIATE'
+  const activeNotaSpeseRows = React.useMemo(() => {
+    // Art.30 senza attrezzatura ancora selezionata: nessuna riga va mostrata (né sommata),
+    // altrimenti si vedrebbe erroneamente il cumulo di tutte le attrezzature insieme.
+    if (isArt30NotaSpeseCasistica && !activeAttrezzaturaRiferimentoId) return nsCloneRowsByCategory(EMPTY_NS_ROWS_BY_CATEGORY)
+    return filterRowsByCasistica(noteSpeseRowsDraft, activeNotaSpeseCasistica, isArt30NotaSpeseCasistica ? activeAttrezzaturaRiferimentoId : undefined)
+  }, [noteSpeseRowsDraft, activeNotaSpeseCasistica, activeAttrezzaturaRiferimentoId, isArt30NotaSpeseCasistica])
   const activeAttrezzaturaRiferimentoRequired = isArt30NotaSpeseCasistica && !activeAttrezzaturaRiferimentoId
   const activeNotaSpeseSummary = React.useMemo(() => nsComputeSummaryFromRows(nsRowsByCategoryToFlat(activeNotaSpeseRows), noteSpesePercent), [activeNotaSpeseRows, noteSpesePercent])
   const activeNotaSpeseOption = React.useMemo(() => noteSpeseCasistiche.find(opt => opt.codice === activeNotaSpeseCasistica) || null, [noteSpeseCasistiche, activeNotaSpeseCasistica])
@@ -9567,64 +9795,6 @@ ${e?.message || String(e)}`
             )}
 
             {renderEditCard('Altre violazioni', renderNorma3Rows())}
-            {norma3Set.has('Art30') && renderEditCard('Riepilogo costi attrezzature',
-              <div style={{ display: 'grid', gap: 9 }}>
-                <div style={{ fontSize: attrezzatureRiepilogoFontSize, color: '#475569', lineHeight: 1.45 }}>
-                  L’eventuale intervento sul campo, compresa la manodopera, deve essere quantificato separatamente nella scheda <b>Nota spese</b>.
-                </div>
-
-                {attrezzatureRiepilogo.length > 0
-                  ? <div style={{ border: '1px solid #cbd5e1', borderRadius: 8, overflow: 'hidden', background: '#fff' }}>
-                      <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) 82px 142px 104px', background: '#d8f1e7', borderBottom: '1px solid #9fd6c1', fontSize: attrezzatureRiepilogoFontSize, fontWeight: 800, color: '#334155' }}>
-                        <div style={{ padding: '7px 9px' }}>Attrezzatura</div>
-                        <div style={{ padding: '7px 6px', textAlign: 'center' }}>Quantità</div>
-                        <div style={{ padding: '7px 9px', textAlign: 'right', whiteSpace: 'nowrap' }}>Valore unitario</div>
-                        <div style={{ padding: '7px 9px', textAlign: 'right' }}>Importo</div>
-                      </div>
-                      {attrezzatureRiepilogo.map((item, index) => (
-                        <div
-                          key={`${item.descrizione}-${index}`}
-                          style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) 82px 142px 104px', alignItems: 'center', borderBottom: '1px solid #e2e8f0', background: index % 2 === 0 ? '#ffffff' : '#f8fbff', fontSize: attrezzatureRiepilogoFontSize, color: '#334155' }}
-                        >
-                          <div style={{ padding: '7px 9px', fontWeight: 600 }}>{item.descrizione}</div>
-                          <div style={{ padding: '7px 6px', textAlign: 'center' }}>{attrezzaturaQty(item.quantita)}</div>
-                          <div style={{ padding: '7px 9px', textAlign: 'right' }}>{item.valoreUnitario != null ? `${attrezzaturaMoney(item.valoreUnitario)} €` : '—'}</div>
-                          <div style={{ padding: '7px 9px', textAlign: 'right', fontWeight: 700 }}>{item.importo != null ? `${attrezzaturaMoney(item.importo)} €` : '—'}</div>
-                        </div>
-                      ))}
-                      {isSelectedFlag(g('attrezzature_cauzione_presente')) && Number(g('attrezzature_cauzione_decurtata')) > 0 && <div
-                        style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) 82px 142px 104px', alignItems: 'center', borderBottom: '1px solid #e2e8f0', background: attrezzatureRiepilogo.length % 2 === 0 ? '#ffffff' : '#f8fbff', fontSize: attrezzatureRiepilogoFontSize, color: '#334155' }}
-                      >
-                        <div style={{ padding: '7px 9px', fontWeight: 600 }}>Decurtazione della cauzione</div>
-                        <div style={{ padding: '7px 6px', textAlign: 'center' }}>{attrezzatureCauzioneRiepilogo.quantita != null ? attrezzaturaQty(attrezzatureCauzioneRiepilogo.quantita) : '—'}</div>
-                        <div style={{ padding: '7px 9px', textAlign: 'right' }}>{attrezzatureCauzioneRiepilogo.valoreUnitario != null ? `${attrezzaturaMoney(attrezzatureCauzioneRiepilogo.valoreUnitario)} €` : '—'}</div>
-                        <div style={{ padding: '7px 9px', textAlign: 'right', fontWeight: 700, color: '#d92d20' }}>- {attrezzaturaMoney(g('attrezzature_cauzione_decurtata'))} €</div>
-                      </div>}
-                      <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) 82px 142px 104px', alignItems: 'center', background: '#e2f5ed', fontSize: attrezzatureRiepilogoFontSize, color: '#176b52' }}>
-                        <div style={{ gridColumn: '1 / span 3', padding: '8px 9px', textAlign: 'right', fontWeight: 800 }}>Totale</div>
-                        <div style={{ padding: '8px 9px', textAlign: 'right', fontWeight: 800 }}>{attrezzaturaMoney(g('attrezzature_importo_netto') || g('attrezzature_risarcimento_importo'))} €</div>
-                      </div>
-                    </div>
-                  : <div style={{ padding: '9px 10px', borderRadius: 8, border: '1px solid #e2e8f0', background: '#f8fafc', color: '#64748b', fontSize: attrezzatureRiepilogoFontSize }}>
-                      Nessuna attrezzatura selezionata.
-                    </div>}
-
-                <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
-                  <button
-                    type='button'
-                    onClick={() => { void openAttrezzaturePopup(false) }}
-                    disabled={saving}
-                    style={{ ...btnBase, fontSize: attrezzatureRiepilogoFontSize, background: '#1d4ed8', color: '#fff', border: '1px solid #1d4ed8', cursor: saving ? 'not-allowed' : 'pointer' }}
-                  >
-                    {canEditArt30Attrezzature ? 'Gestisci attrezzature' : 'Consulta attrezzature'}
-                  </button>
-                </div>
-              </div>,
-              undefined,
-              { background: '#eef9f4', border: '1px solid #9fd6c1', boxShadow: '0 1px 3px rgba(23, 107, 82, 0.14)' },
-              { background: '#eef9f4' },
-              { background: 'linear-gradient(90deg, #005222, #008337)', color: '#fff' }
-            )}
           </div>
         )
 
@@ -10214,9 +10384,62 @@ ${e?.message || String(e)}`
               border: noteSpeseCasisticaDisabled ? '2px solid #cbd5e1' : '2px solid #0f7375',
               background: noteSpeseCasisticaDisabled ? '#f1f5f9' : '#f0fdfa'
             }}>
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, flexWrap: 'wrap' }}>
-                <label style={{ fontSize: 13, fontWeight: 900, color: noteSpeseCasisticaDisabled ? '#64748b' : '#0f4f50' }}>Seleziona la violazione</label>
+              <div style={{ display: 'flex', gap: 16, alignItems: 'flex-start', flexWrap: 'wrap' }}>
+                <div style={{ flex: '0 0 auto', width: 460, maxWidth: '100%' }}>
+                  <label style={{ fontSize: 13, fontWeight: 900, color: noteSpeseCasisticaDisabled ? '#64748b' : '#0f4f50' }}>Seleziona la violazione</label>
+                  <select
+                    value={activeNotaSpeseCasistica}
+                    onChange={(e) => setActiveNotaSpeseCasistica(e.target.value)}
+                    title={isReadOnly || isRiAgrTecLimitedEdit ? 'Seleziona la violazione per consultare la relativa nota spese.' : undefined}
+                    style={{
+                      ...fieldBaseStyle(formStyle, noteSpeseCasisticaDisabled),
+                      height: 38,
+                      maxWidth: 460,
+                      marginTop: 4,
+                      border: noteSpeseCasisticaDisabled ? '1px solid #cbd5e1' : '1px solid #0f7375',
+                      fontWeight: 800,
+                      color: noteSpeseCasisticaDisabled ? String(formStyle.fieldDisabledColor || '#64748b') : '#16375a',
+                      background: noteSpeseCasisticaDisabled ? String(formStyle.fieldDisabledBg || '#e7eef7') : '#fff',
+                      cursor: noteSpeseCasisticaDisabled ? 'not-allowed' : 'pointer',
+                      opacity: noteSpeseCasisticaDisabled ? 0.78 : 1,
+                      WebkitTextFillColor: noteSpeseCasisticaDisabled ? String(formStyle.fieldDisabledColor || '#64748b') : undefined
+                    }}
+                    disabled={noteSpeseCasisticaDisabled}
+                  >
+                    {noteSpeseCasistiche.map(opt => <option key={opt.codice} value={opt.codice}>{opt.label}</option>)}
+                  </select>
+                  <div style={{ fontSize: 11, color: noteSpeseCasisticaDisabled ? '#64748b' : '#336666', lineHeight: 1.35, marginTop: 4 }}>{isReadOnly || isRiAgrTecLimitedEdit ? 'Seleziona la violazione per consultare la relativa nota spese.' : 'Le voci aggiunte dal prezzario saranno collegate alla violazione selezionata.'}</div>
+                </div>
+                {isArt30NotaSpeseCasistica && (
+                  <div style={{ flex: '0 0 auto', width: 460, maxWidth: '100%' }}>
+                    <label style={{ fontSize: 13, fontWeight: 900, color: noteSpeseCasisticaDisabled ? '#64748b' : '#0f4f50' }}>Seleziona l'attrezzatura</label>
+                    <select
+                      value={activeAttrezzaturaRiferimentoId}
+                      onChange={(e) => setActiveAttrezzaturaRiferimentoId(e.target.value)}
+                      style={{
+                        ...fieldBaseStyle(formStyle, noteSpeseCasisticaDisabled),
+                        height: 38,
+                        maxWidth: 460,
+                        display: 'block',
+                        marginTop: 4,
+                        border: noteSpeseCasisticaDisabled ? '1px solid #cbd5e1' : (activeAttrezzaturaRiferimentoId ? '1px solid #0f7375' : '1px solid #b42318'),
+                        fontWeight: 800,
+                        color: noteSpeseCasisticaDisabled ? String(formStyle.fieldDisabledColor || '#64748b') : '#16375a',
+                        background: noteSpeseCasisticaDisabled ? String(formStyle.fieldDisabledBg || '#e7eef7') : '#fff',
+                        cursor: noteSpeseCasisticaDisabled ? 'not-allowed' : 'pointer',
+                        opacity: noteSpeseCasisticaDisabled ? 0.78 : 1
+                      }}
+                      disabled={noteSpeseCasisticaDisabled}
+                    >
+                      <option value='' disabled>Seleziona attrezzatura</option>
+                      {attrezzatureRecuperabiliOptions.map(opt => <option key={opt.id} value={opt.id}>{opt.label}</option>)}
+                    </select>
+                    <div style={{ fontSize: 11, color: noteSpeseCasisticaDisabled ? '#64748b' : '#336666', lineHeight: 1.35, marginTop: 4 }}>Ogni attrezzatura recuperabile ha una nota spese separata.</div>
+                  </div>
+              )}
                 <span style={{
+                  alignSelf: 'flex-start',
+                  marginLeft: 'auto',
                   fontSize: 11,
                   fontWeight: 800,
                   color: noteSpeseCasisticaDisabled ? '#64748b' : '#0f7375',
@@ -10226,54 +10449,6 @@ ${e?.message || String(e)}`
                   padding: '2px 8px'
                 }}>{isReadOnly ? 'Sola consultazione' : 'Scelta obbligatoria'}</span>
               </div>
-              <select
-                value={activeNotaSpeseCasistica}
-                onChange={(e) => setActiveNotaSpeseCasistica(e.target.value)}
-                title={isReadOnly || isRiAgrTecLimitedEdit ? 'Seleziona la violazione per consultare la relativa nota spese.' : undefined}
-                style={{
-                  ...fieldBaseStyle(formStyle, noteSpeseCasisticaDisabled),
-                  height: 38,
-                  maxWidth: 460,
-                  border: noteSpeseCasisticaDisabled ? '1px solid #cbd5e1' : '1px solid #0f7375',
-                  fontWeight: 800,
-                  color: noteSpeseCasisticaDisabled ? String(formStyle.fieldDisabledColor || '#64748b') : '#16375a',
-                  background: noteSpeseCasisticaDisabled ? String(formStyle.fieldDisabledBg || '#e7eef7') : '#fff',
-                  cursor: noteSpeseCasisticaDisabled ? 'not-allowed' : 'pointer',
-                  opacity: noteSpeseCasisticaDisabled ? 0.78 : 1,
-                  WebkitTextFillColor: noteSpeseCasisticaDisabled ? String(formStyle.fieldDisabledColor || '#64748b') : undefined
-                }}
-                disabled={noteSpeseCasisticaDisabled}
-              >
-                {noteSpeseCasistiche.map(opt => <option key={opt.codice} value={opt.codice}>{opt.label}</option>)}
-              </select>
-              <div style={{ fontSize: 11, color: noteSpeseCasisticaDisabled ? '#64748b' : '#336666', lineHeight: 1.35 }}>{isReadOnly || isRiAgrTecLimitedEdit ? 'Seleziona la violazione per consultare la relativa nota spese.' : 'Le voci aggiunte dal prezzario saranno collegate alla violazione selezionata.'}</div>
-              {isArt30NotaSpeseCasistica && (
-                <div style={{ marginTop: 8 }}>
-                  <label style={{ fontSize: 13, fontWeight: 900, color: noteSpeseCasisticaDisabled ? '#64748b' : '#0f4f50' }}>Seleziona l'attrezzatura</label>
-                  <select
-                    value={activeAttrezzaturaRiferimentoId}
-                    onChange={(e) => setActiveAttrezzaturaRiferimentoId(e.target.value)}
-                    style={{
-                      ...fieldBaseStyle(formStyle, noteSpeseCasisticaDisabled),
-                      height: 38,
-                      maxWidth: 460,
-                      display: 'block',
-                      marginTop: 4,
-                      border: noteSpeseCasisticaDisabled ? '1px solid #cbd5e1' : (activeAttrezzaturaRiferimentoId ? '1px solid #0f7375' : '1px solid #b42318'),
-                      fontWeight: 800,
-                      color: noteSpeseCasisticaDisabled ? String(formStyle.fieldDisabledColor || '#64748b') : '#16375a',
-                      background: noteSpeseCasisticaDisabled ? String(formStyle.fieldDisabledBg || '#e7eef7') : '#fff',
-                      cursor: noteSpeseCasisticaDisabled ? 'not-allowed' : 'pointer',
-                      opacity: noteSpeseCasisticaDisabled ? 0.78 : 1
-                    }}
-                    disabled={noteSpeseCasisticaDisabled}
-                  >
-                    <option value='' disabled>Seleziona attrezzatura</option>
-                    {attrezzatureRecuperabiliOptions.map(opt => <option key={opt.id} value={opt.id}>{opt.label}</option>)}
-                  </select>
-                  <div style={{ fontSize: 11, color: noteSpeseCasisticaDisabled ? '#64748b' : '#336666', lineHeight: 1.35, marginTop: 4 }}>Ogni attrezzatura recuperabile ha una nota spese separata.</div>
-                </div>
-              )}
               {activeNotaSpeseIncompleteRowsCount > 0 && (
                 <div style={{ marginTop: 4, padding: '8px 10px', borderRadius: 8, border: '1px solid #f59e0b', background: '#fffbeb', color: '#92400e', fontSize: 12, fontWeight: 700, lineHeight: 1.35 }}>
                   Nota spese incompleta: sono presenti {activeNotaSpeseIncompleteRowsCount} {activeNotaSpeseIncompleteRowsCount === 1 ? 'riga senza quantità o con quantità pari a zero' : 'righe senza quantità o con quantità pari a zero'}. Completa le quantità oppure elimina le righe non necessarie prima dell’inoltro.
@@ -10285,6 +10460,87 @@ ${e?.message || String(e)}`
               Nessuna violazione collegabile alla nota spese. Le note spese sono previste per gli artt. 8, 27, 30 e 39.
             </div>
           )}
+          {isArt30NotaSpeseCasistica && (() => {
+            const attrezzatureRiepilogoFontSize = Math.max(
+              14,
+              Number(formStyle.fieldFontSize) || 13,
+              Number(formStyle.norma3FontSize) || 12
+            )
+            return (
+            <div style={{ display: 'grid', gap: 9, padding: 10, borderRadius: 10, border: '1px solid #9fd6c1', background: '#eef9f4' }}>
+              <div style={{ fontSize: 13, fontWeight: 900, color: '#176b52' }}>Riepilogo costi attrezzature</div>
+              <div style={{ fontSize: attrezzatureRiepilogoFontSize, color: '#475569', lineHeight: 1.45 }}>
+                La spesa sostenuta per eventuali interventi di riparazione è computata nelle righe di Nota spese qui sotto.
+              </div>
+
+              {attrezzatureGroupedRiepilogo.length > 0
+                ? <div style={{ border: '1px solid #cbd5e1', borderRadius: 8, overflow: 'hidden', background: '#fff' }}>
+                    <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) 150px 70px 122px 122px', alignItems: 'center', background: '#d8f1e7', borderBottom: '1px solid #9fd6c1', fontSize: attrezzatureRiepilogoFontSize, fontWeight: 800, color: '#334155' }}>
+                      <div style={{ padding: '4px 9px' }}>Attrezzatura</div>
+                      <div style={{ padding: '4px 6px', textAlign: 'left' }}>Stato</div>
+                      <div style={{ padding: '4px 6px', textAlign: 'center' }}>Quantità</div>
+                      <div style={{ padding: '4px 9px', display: 'flex', justifyContent: 'flex-end' }}>
+                        <div style={{ textAlign: 'center', lineHeight: 1.15 }}>
+                          <div>Valore</div>
+                          <div>unitario</div>
+                        </div>
+                      </div>
+                      <div style={{ padding: '4px 9px', textAlign: 'right' }}>Importo</div>
+                    </div>
+                    {attrezzatureGroupedRiepilogo.map((item, index) => {
+                      const isRecuperabile = item.esito === 'riparazione'
+                      return <div
+                        key={`${item.descrizione}::${item.esito}::${Number(item.notaSpeseTotal) > 0}`}
+                        style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) 150px 70px 122px 122px', alignItems: 'center', borderBottom: '1px solid #e2e8f0', background: index % 2 === 0 ? '#ffffff' : '#f8fbff', fontSize: attrezzatureRiepilogoFontSize, color: '#334155' }}
+                      >
+                        <div style={{ padding: '7px 9px' }}>{item.descrizione}</div>
+                        <div style={{ padding: '7px 6px', textAlign: 'left', whiteSpace: 'nowrap', color: isRecuperabile ? '#0f4c81' : '#334155' }}>{isRecuperabile ? 'Recuperabile' : 'Non recuperabile'}</div>
+                        <div style={{ padding: '7px 6px', textAlign: 'center' }}>{attrezzaturaQty(item.quantita)}</div>
+                        {isRecuperabile
+                          ? (Number(item.notaSpeseTotal) > 0
+                              ? <div style={{ padding: '7px 9px', textAlign: 'left', color: '#64748b', fontStyle: 'italic', whiteSpace: 'nowrap' }}>{item.quantita > 1 ? 'Vedi Note spese' : 'Vedi Nota spese'}</div>
+                              : <div style={{ position: 'relative', padding: '7px 9px', height: '100%' }}>
+                                  <span style={{ position: 'absolute', left: 9, top: '50%', transform: 'translateY(-50%)', whiteSpace: 'nowrap', color: '#64748b', fontStyle: 'italic' }}>Da quantificare con Nota spese</span>
+                                </div>)
+                          : <div style={{ padding: '7px 9px', textAlign: 'right' }}>{item.valoreUnitario != null ? `${attrezzaturaMoney(item.valoreUnitario)} €` : '—'}</div>}
+                        {isRecuperabile
+                          ? (Number(item.notaSpeseTotal) > 0
+                              ? <div style={{ padding: '7px 9px', textAlign: 'right' }}>{`${attrezzaturaMoney(item.notaSpeseTotal)} €`}</div>
+                              : <div />)
+                          : <div style={{ padding: '7px 9px', textAlign: 'right' }}>{`${attrezzaturaMoney(item.importo)} €`}</div>}
+                      </div>
+                    })}
+                    {attrezzatureCauzioneRiepilogo.quantita != null && attrezzatureCauzioneRiepilogo.quantita > 0 && Number(g('attrezzature_cauzione_decurtata')) > 0 && <div
+                      style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) 150px 70px 122px 122px', alignItems: 'center', borderBottom: '1px solid #e2e8f0', background: attrezzatureGroupedRiepilogo.length % 2 === 0 ? '#ffffff' : '#f8fbff', fontSize: attrezzatureRiepilogoFontSize, color: '#334155' }}
+                    >
+                      <div style={{ padding: '7px 9px' }}>Decurtazione della cauzione</div>
+                      <div />
+                      <div style={{ padding: '7px 6px', textAlign: 'center' }}>{attrezzaturaQty(attrezzatureCauzioneRiepilogo.quantita)}</div>
+                      <div style={{ padding: '7px 9px', textAlign: 'right' }}>{attrezzatureCauzioneRiepilogo.valoreUnitario != null ? `${attrezzaturaMoney(attrezzatureCauzioneRiepilogo.valoreUnitario)} €` : '—'}</div>
+                      <div style={{ padding: '7px 9px', textAlign: 'right', color: '#d92d20' }}>-{attrezzaturaMoney(g('attrezzature_cauzione_decurtata'))} €</div>
+                    </div>}
+                    <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) 150px 70px 122px 122px', alignItems: 'center', background: '#e2f5ed', fontSize: attrezzatureRiepilogoFontSize, color: '#176b52' }}>
+                      <div style={{ gridColumn: '1 / span 4', padding: '8px 9px', textAlign: 'right', fontWeight: 800 }}>Totale</div>
+                      <div style={{ padding: '8px 9px', textAlign: 'right', fontWeight: 800 }}>{attrezzaturaMoney(g('attrezzature_importo_netto') || g('attrezzature_risarcimento_importo'))} €</div>
+                    </div>
+                  </div>
+                : <div style={{ padding: '9px 10px', borderRadius: 8, border: '1px solid #e2e8f0', background: '#f8fafc', color: '#64748b', fontSize: attrezzatureRiepilogoFontSize }}>
+                    Nessuna attrezzatura selezionata.
+                  </div>}
+
+              <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+                <button
+                  type='button'
+                  onClick={() => { void openAttrezzaturePopup(false) }}
+                  disabled={saving}
+                  style={{ ...btnBase, fontSize: attrezzatureRiepilogoFontSize, background: '#1d4ed8', color: '#fff', border: '1px solid #1d4ed8', cursor: saving ? 'not-allowed' : 'pointer' }}
+                >
+                  {canEditArt30Attrezzature ? 'Gestisci attrezzature' : 'Consulta attrezzature'}
+                </button>
+              </div>
+            </div>
+            )
+          })()}
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, minmax(0, 1fr))', gap: 6 }}>
             {([
               ['ATTREZZATURE E TRASPORTI', activeNotaSpeseSummary.totaleAT],
@@ -10413,8 +10669,8 @@ ${e?.message || String(e)}`
     <AnteprimaPanel
       data={draft}
       mode={mode}
-      nsRows={noteSpeseRowsDraft}
-      nsSummary={noteSpeseSummary}
+      nsRows={previewNsRows as any}
+      nsSummary={previewNsSummary as any}
       ds={ds}
       oid={editOid}
       idFieldName={editIdFieldName}
@@ -10526,21 +10782,21 @@ ${e?.message || String(e)}`
             {attrezzatureLoading
               ? <div style={{ padding: 18, textAlign: 'center', color: '#64748b', fontSize: popupBodyFontSize }}>Caricamento prezzi attrezzature…</div>
               : <div style={{ border: '1px solid #cbd5e1', borderRadius: 9, overflow: 'hidden', background: '#fff' }}>
-                  <div style={{ display: 'grid', gridTemplateColumns: '190px 190px 100px minmax(90px, 1fr) 100px 40px', background: '#eff6ff', borderBottom: '1px solid #cbd5e1', fontSize: popupBodyFontSize, fontWeight: 800, color: '#0f4c81' }}>
-                    <div style={{ padding: '8px 8px', textAlign: 'left' }}>Tipo</div>
-                    <div style={{ padding: '8px 6px', textAlign: 'left' }}>Stato</div>
-                    <div style={{ padding: '8px 6px', textAlign: 'center' }}>Matricola</div>
-                    <div style={{ padding: '8px 6px', textAlign: 'center' }}>
+                  <div style={{ display: 'grid', gridTemplateColumns: '190px 190px 100px minmax(90px, 1fr) 100px 40px', alignItems: 'center', background: '#eff6ff', borderBottom: '1px solid #cbd5e1', fontSize: popupBodyFontSize, fontWeight: 800, color: '#0f4c81' }}>
+                    <div style={{ padding: '4px 8px', textAlign: 'left' }}>Tipo</div>
+                    <div style={{ padding: '4px 6px', textAlign: 'left' }}>Stato</div>
+                    <div style={{ padding: '4px 6px', textAlign: 'center' }}>Matricola</div>
+                    <div style={{ padding: '4px 6px', textAlign: 'center', lineHeight: 1.15 }}>
                       Cauzione
-                      {attrezzatureCauzioneUnitaria > 0 && <div style={{ fontWeight: 700, fontSize: popupBodyFontSize - 1, color: '#334155' }}>(-{attrezzaturaMoney(attrezzatureCauzioneUnitaria)} €)</div>}
+                      {attrezzatureCauzioneUnitaria > 0 && <div style={{ fontWeight: 700, fontSize: popupBodyFontSize - 1, color: '#334155' }}>({attrezzaturaMoney(attrezzatureCauzioneUnitaria)} €)</div>}
                     </div>
-                    <div style={{ padding: '8px 10px', display: 'flex', justifyContent: 'flex-end' }}>
-                      <div style={{ textAlign: 'center' }}>
+                    <div style={{ padding: '4px 10px', display: 'flex', justifyContent: 'flex-end' }}>
+                      <div style={{ textAlign: 'center', lineHeight: 1.15 }}>
                         <div>Valore</div>
                         <div>unitario</div>
                       </div>
                     </div>
-                    <div style={{ padding: '8px 6px' }}></div>
+                    <div style={{ padding: '4px 6px' }}></div>
                   </div>
                   {attrezzatureRows.length === 0
                     ? <div style={{ padding: 16, textAlign: 'center', color: '#64748b', fontSize: popupBodyFontSize }}>Nessuna attrezzatura aggiunta.</div>
@@ -10550,6 +10806,9 @@ ${e?.message || String(e)}`
                         const isTessera = attrezzaturaTipo(row.descrizione)?.key === 'TESSERA_ELETTRONICA'
                         const currentTipoKey = attrezzaturaTipo(row.descrizione)?.key || ''
                         const catalogSorted = [...attrezzatureCatalog].sort((a, b) => (attrezzaturaTipo(a.descrizione)?.order ?? 9) - (attrezzaturaTipo(b.descrizione)?.order ?? 9))
+                        const rowNotaSpeseTotal = isRecuperabile
+                          ? nsRowsByCategoryToFlat(noteSpeseRowsDraft).filter(r => String(r.riferimento_attrezzatura_id || '').trim() === row.persistentId).reduce((s, r) => s + (Number(r.importo_riga) || 0), 0)
+                          : 0
                         return <div key={row.rowId} style={{ display: 'grid', gridTemplateColumns: '190px 190px 100px minmax(90px, 1fr) 100px 40px', alignItems: 'center', borderBottom: index === attrezzatureRows.length - 1 ? 0 : '1px solid #e2e8f0', background: index % 2 === 0 ? '#ffffff' : '#f8fbff', fontSize: popupBodyFontSize }}>
                           <div style={{ padding: '6px 8px' }}>
                             {locked
@@ -10626,7 +10885,9 @@ ${e?.message || String(e)}`
                           </div>
                           {isRecuperabile
                             ? <div style={{ position: 'relative', padding: '8px 10px', height: '100%' }}>
-                                <span style={{ position: 'absolute', right: 10, top: '50%', transform: 'translateY(-50%)', whiteSpace: 'nowrap', color: '#64748b', fontStyle: 'italic' }}>Vedi Nota spese</span>
+                                {rowNotaSpeseTotal > 0
+                                  ? <span style={{ position: 'absolute', right: 10, top: '50%', transform: 'translateY(-50%)', whiteSpace: 'nowrap', color: '#334155' }}>{attrezzaturaMoney(rowNotaSpeseTotal)} €</span>
+                                  : <span style={{ position: 'absolute', right: 10, top: '50%', transform: 'translateY(-50%)', whiteSpace: 'nowrap', color: '#64748b', fontStyle: 'italic' }}>Da quantificare con Nota spese</span>}
                               </div>
                             : <div style={{ padding: '8px 10px', textAlign: 'right', color: '#334155' }}>{attrezzaturaMoney(row.valoreUnitario)} €</div>}
                           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}>

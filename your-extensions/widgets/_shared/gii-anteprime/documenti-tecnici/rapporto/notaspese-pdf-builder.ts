@@ -14,7 +14,7 @@ import { NOTASPESE_BASE_PDF_B64 } from './notaspese-base-pdf'
 /*  Types                                                              */
 /* ------------------------------------------------------------------ */
 
-type NsCategory = 'AT' | 'PR' | 'RU' | 'SL' | 'PF'
+type NsCategory = 'AT' | 'PR' | 'RU' | 'SL' | 'PF' | 'RA'
 
 type NsSource = 'REGIONE' | 'INTERNO' | 'NUOVI PREZZI'
 
@@ -39,12 +39,14 @@ type NsSummary = {
   totaleRU: number
   totaleSL: number
   totalePF: number
+  totaleRA: number
   percentualeSpeseGenerali: number
   importoSpeseGenerali: number
   totaleComplessivo: number
 }
 
 const NS_CATEGORY_LABELS: Record<NsCategory, string> = {
+  RA: 'Risarcimento attrezzature non recuperabili',
   AT: 'Attrezzature e trasporti',
   PR: 'Materiali da costruzione',
   RU: 'Risorse umane',
@@ -52,9 +54,11 @@ const NS_CATEGORY_LABELS: Record<NsCategory, string> = {
   PF: 'Prodotti finiti'
 }
 
-const CATEGORY_ORDER: NsCategory[] = ['AT', 'PR', 'RU', 'SL', 'PF']
+// RA (risarcimento Art.30) sempre per prima, prima delle voci ordinarie dell'intervento.
+const CATEGORY_ORDER: NsCategory[] = ['RA', 'AT', 'PR', 'RU', 'SL', 'PF']
 
 const CATEGORY_TOTAL_KEY: Record<NsCategory, keyof NsSummary> = {
+  RA: 'totaleRA',
   AT: 'totaleAT',
   PR: 'totalePR',
   RU: 'totaleRU',

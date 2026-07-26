@@ -9,9 +9,9 @@
 
 import { ensureCachedFeatureLayer } from '../../esri-layer-cache'
 
-export type NsCat = 'AT' | 'PR' | 'RU' | 'SL' | 'PF'
-export type NsSummary = { totaleAT: number, totalePR: number, totaleRU: number, totaleSL: number, totalePF: number, percentualeSpeseGenerali: number, importoSpeseGenerali: number, totaleComplessivo: number }
-export type NsRow = { objectid: number, categoria_costo: NsCat, origine_voce_snapshot: string, codice_voce_snapshot: string, descrizione_snapshot: string, unita_misura_snapshot: string, prezzo_unitario_snapshot: number, quantita: number, importo_riga: number, anno_prezzario_snapshot?: number | null, ordine: number, note: string, codice_casistica?: string | null }
+export type NsCat = 'AT' | 'PR' | 'RU' | 'SL' | 'PF' | 'RA'
+export type NsSummary = { totaleAT: number, totalePR: number, totaleRU: number, totaleSL: number, totalePF: number, totaleRA: number, percentualeSpeseGenerali: number, importoSpeseGenerali: number, totaleComplessivo: number }
+export type NsRow = { objectid: number, categoria_costo: NsCat, origine_voce_snapshot: string, codice_voce_snapshot: string, descrizione_snapshot: string, unita_misura_snapshot: string, prezzo_unitario_snapshot: number, quantita: number, importo_riga: number, anno_prezzario_snapshot?: number | null, ordine: number, note: string, codice_casistica?: string | null, riferimento_attrezzatura_id?: string | null }
 export type NsGroup = { codiceCasistica: string, label: string, rows: Record<NsCat, NsRow[]>, summary: NsSummary }
 
 export type NotaSpeseConfig = {
@@ -23,9 +23,9 @@ export type NotaSpeseConfig = {
 type Art30Row = { codice: string, descrizione: string, quantita: number, valoreUnitario: number | null, importo: number | null }
 type Art30Summary = { hasData: boolean, rows: Art30Row[], rimborso: number, cauzione: number, cauzioneQuantita: number | null, cauzioneValoreUnitario: number | null, cauzioneUnitaMisura: string, netto: number, text: string }
 
-const NS_CATS: NsCat[] = ['AT', 'PR', 'RU', 'SL', 'PF']
+const NS_CATS: NsCat[] = ['AT', 'PR', 'RU', 'SL', 'PF', 'RA']
 
-const NS_CASISTICA_META: Record<string, { order: number, label: string }> = {
+export const NS_CASISTICA_META: Record<string, { order: number, label: string }> = {
   C100_REPERIBILITA: { order: 8, label: 'Art. 8 - Violazione servizio di reperibilità' },
   C101_SPRECO_ACQUA: { order: 27, label: 'Art. 27 - Spreco d\u2019acqua/uso negligente della risorsa idrica' },
   C104_ATTREZZATURE_DANNEGGIATE: { order: 30, label: 'Art. 30 - Danneggiamento e/o perdita attrezzature' },
@@ -97,6 +97,47 @@ function countCauzioneDecurtataRowsForPdf (raw: any): number {
   return count
 }
 
+// Mappa ID persistito -> etichetta leggibile (matricola per le tessere, "Tipo (N)" per le
+// altre) per le sole attrezzature "Recuperabile" — usata per etichettare nel PDF le
+// sotto-note spese di Art.30, una per attrezzatura (rapporto 1 a 1).
+function getRecuperabiliAttrezzatureLabelsById (data: any): Map<string, string> {
+  const out = new Map<string, string>()
+  const raw = String(pickAttrCI(data || {}, ['attrezzature_risarcimento_dettaglio']) || '')
+  type ParsedItem = { id: string, descrizione: string, isTessera: boolean, matricola: string }
+  const parsed: ParsedItem[] = []
+  for (const line of raw.split(/\r?\n/)) {
+    const text = line.trim()
+    if (!text) continue
+    const statoMatch = text.match(/Stato:\s*(Non recuperabile|Recuperabile)/i)
+    if (!statoMatch || !/^recuperabile$/i.test(statoMatch[1].trim())) continue
+    const idMatch = text.match(/\u2014\s*ID:\s*([0-9]+)/i)
+    if (!idMatch) continue
+    const cutIdx = text.search(/\s+\u2014\s+Valore unitario:/i)
+    const prefix = cutIdx >= 0 ? text.slice(0, cutIdx).trim() : text
+    const codiceMatch = prefix.match(/^(.*?)\s+\u2014\s+Codice:\s*(.+)$/i)
+    const descrizione = String(codiceMatch?.[1] || prefix).trim()
+    const isTessera = /tessera/i.test(descrizione)
+    const matricolaMatch = text.match(/Matricola:\s*([^\u2014]+?)(?=\s+\u2014|$)/i)
+    parsed.push({ id: String(idMatch[1]), descrizione, isTessera, matricola: String(matricolaMatch?.[1] || '').trim() })
+  }
+  const totalsByDescrizione: Record<string, number> = {}
+  parsed.forEach(item => { if (!item.isTessera) totalsByDescrizione[item.descrizione] = (totalsByDescrizione[item.descrizione] || 0) + 1 })
+  const counters: Record<string, number> = {}
+  parsed.forEach(item => {
+    let label: string
+    if (item.isTessera) {
+      label = item.matricola ? `Tessera elettronica \u2014 Matricola ${item.matricola}` : 'Tessera elettronica'
+    } else if (totalsByDescrizione[item.descrizione] > 1) {
+      counters[item.descrizione] = (counters[item.descrizione] || 0) + 1
+      label = `${item.descrizione} (${counters[item.descrizione]})`
+    } else {
+      label = item.descrizione
+    }
+    out.set(item.id, label)
+  })
+  return out
+}
+
 function qtyArt30It (value: number): string {
   return Number(value).toLocaleString('it-IT', { minimumFractionDigits: 0, maximumFractionDigits: 4 })
 }
@@ -147,7 +188,7 @@ export function buildArt30RapportoSummary (data: Record<string, any>): Art30Summ
 }
 
 function normalizeNsCasistica (v: any): string { return String(v ?? '').trim() }
-function cloneEmptyNsRows (): Record<NsCat, NsRow[]> { return { AT: [], PR: [], RU: [], SL: [], PF: [] } }
+function cloneEmptyNsRows (): Record<NsCat, NsRow[]> { return { AT: [], PR: [], RU: [], SL: [], PF: [], RA: [] } }
 
 export function buildNsSummaryForRows (rows: Record<NsCat, NsRow[]>, percentualeSpeseGenerali: number): NsSummary {
   const sumCat = (cat: NsCat) => roundMoney((rows[cat] || []).reduce((sum, r) => sum + roundMoney(Number(r.importo_riga) || 0), 0))
@@ -156,25 +197,43 @@ export function buildNsSummaryForRows (rows: Record<NsCat, NsRow[]>, percentuale
   const totaleRU = sumCat('RU')
   const totaleSL = sumCat('SL')
   const totalePF = sumCat('PF')
+  const totaleRA = sumCat('RA') // risarcimento attrezzature Art.30: non è soggetto a spese generali, si somma netto
   const imponibile = roundMoney(totaleAT + totalePR + totaleRU + totaleSL + totalePF)
   const pct = Number.isFinite(percentualeSpeseGenerali) ? roundMoney(percentualeSpeseGenerali) : 15
   const importoSpeseGenerali = roundMoney(imponibile * pct / 100)
   return {
-    totaleAT, totalePR, totaleRU, totaleSL, totalePF,
+    totaleAT, totalePR, totaleRU, totaleSL, totalePF, totaleRA,
     percentualeSpeseGenerali: pct,
     importoSpeseGenerali,
-    totaleComplessivo: roundMoney(imponibile + importoSpeseGenerali)
+    totaleComplessivo: roundMoney(imponibile + importoSpeseGenerali + totaleRA)
   }
 }
 
 export function buildNotaSpeseGroups (
   rowsByCategory: Record<NsCat, NsRow[]> | undefined,
-  globalSummary: NsSummary | undefined
+  globalSummary: NsSummary | undefined,
+  dataSnapshot?: Record<string, any>
 ): NsGroup[] {
+  const attrezzatureLabels = getRecuperabiliAttrezzatureLabelsById(dataSnapshot || {})
   const byCode = new Map<string, Record<NsCat, NsRow[]>>()
+  const labelByCode = new Map<string, string>()
   for (const cat of NS_CATS) {
     for (const row of (rowsByCategory?.[cat] || [])) {
-      const code = normalizeNsCasistica(row.codice_casistica) || '__NON_COLLEGATA__'
+      const baseCode = normalizeNsCasistica(row.codice_casistica) || '__NON_COLLEGATA__'
+      const riferimentoId = String(row.riferimento_attrezzatura_id || '').trim()
+      const isArt30 = baseCode === 'C104_ATTREZZATURE_DANNEGGIATE'
+      const code = isArt30 && riferimentoId ? `${baseCode}::${riferimentoId}` : baseCode
+      if (isArt30 && riferimentoId) {
+        const baseLabel = NS_CASISTICA_META[baseCode]?.label || baseCode
+        if (cat === 'RA') {
+          // Risarcimento (non recuperabile): l'etichetta usa la descrizione già salvata
+          // sulla riga stessa, non la mappa delle recuperabili (che non la contiene).
+          labelByCode.set(code, `${baseLabel} \u2014 Risarcimento attrezzatura non recuperabile: ${row.descrizione_snapshot}`)
+        } else if (!labelByCode.has(code)) {
+          const attrLabel = attrezzatureLabels.get(riferimentoId)
+          labelByCode.set(code, attrLabel ? `${baseLabel} \u2014 Rimborso spese riparazione ${attrLabel}` : baseLabel)
+        }
+      }
       if (!byCode.has(code)) byCode.set(code, cloneEmptyNsRows())
       byCode.get(code)![cat].push({ ...row, categoria_costo: cat })
     }
@@ -185,12 +244,22 @@ export function buildNotaSpeseGroups (
     const meta = NS_CASISTICA_META[code]
     return {
       codiceCasistica: code,
-      label: meta?.label || (code === '__NON_COLLEGATA__' ? 'Nota spese non collegata a violazione' : 'Nota spese collegata'),
+      label: labelByCode.get(code) || meta?.label || (code === '__NON_COLLEGATA__' ? 'Nota spese non collegata a violazione' : 'Nota spese collegata'),
       rows,
       summary: buildNsSummaryForRows(rows, Number.isFinite(pct) ? pct : 15)
     }
   })
-  groups.sort((a, b) => (NS_CASISTICA_META[a.codiceCasistica]?.order ?? 999) - (NS_CASISTICA_META[b.codiceCasistica]?.order ?? 999))
+  groups.sort((a, b) => {
+    // Il risarcimento attrezzature (Art.30, non recuperabili) va sempre per primo,
+    // prima di qualunque altra nota spese, indipendentemente dall'articolo di riferimento.
+    const aIsRisarcimento = (a.rows.RA || []).length > 0
+    const bIsRisarcimento = (b.rows.RA || []).length > 0
+    if (aIsRisarcimento !== bIsRisarcimento) return aIsRisarcimento ? -1 : 1
+    const codeA = a.codiceCasistica.split('::')[0]
+    const codeB = b.codiceCasistica.split('::')[0]
+    const orderDiff = (NS_CASISTICA_META[codeA]?.order ?? 999) - (NS_CASISTICA_META[codeB]?.order ?? 999)
+    return orderDiff !== 0 ? orderDiff : a.label.localeCompare(b.label, 'it')
+  })
   return groups
 }
 
@@ -199,19 +268,10 @@ export function buildNotaSpesePrintGroups (
   globalSummary: NsSummary | undefined,
   dataSnapshot: Record<string, any> | undefined
 ): NsGroup[] {
-  const groups = buildNotaSpeseGroups(rowsByCategory, globalSummary)
-  const art30Summary = buildArt30RapportoSummary(dataSnapshot || {})
-  const out = groups.slice()
-  if (art30Summary.hasData && !out.some(group => group.codiceCasistica === 'C104_ATTREZZATURE_DANNEGGIATE')) {
-    out.push({
-      codiceCasistica: 'C104_ATTREZZATURE_DANNEGGIATE',
-      label: NS_CASISTICA_META.C104_ATTREZZATURE_DANNEGGIATE.label,
-      rows: cloneEmptyNsRows(),
-      summary: buildNsSummaryForRows(cloneEmptyNsRows(), Number(globalSummary?.percentualeSpeseGenerali) || 15)
-    })
-    out.sort((a, b) => (NS_CASISTICA_META[a.codiceCasistica]?.order ?? 999) - (NS_CASISTICA_META[b.codiceCasistica]?.order ?? 999))
-  }
-  return out
+  // Il risarcimento attrezzature (RA) è ormai una categoria reale con righe vere in
+  // buildNotaSpeseGroups (ordinata sempre per prima): non serve più costruire qui un
+  // gruppo sintetico/vuoto solo per far comparire una pagina PDF.
+  return buildNotaSpeseGroups(rowsByCategory, globalSummary, dataSnapshot)
 }
 
 function escapeSqlString (v: any): string { return String(v ?? '').replace(/'/g, "''") }
@@ -289,18 +349,27 @@ export function applyNotaSpeseQueryResultToRapportoMap (
 ): { allGroups: NsGroup[], selectedGroups: NsGroup[] } {
   const { rowsByCategory, percentualeSpeseGenerali } = queryResult
   const globalSummary = buildNsSummaryForRows(rowsByCategory, percentualeSpeseGenerali)
-  const nsGroups = buildNotaSpeseGroups(rowsByCategory, globalSummary)
+  const nsGroups = buildNotaSpeseGroups(rowsByCategory, globalSummary, data)
   const art30Summary = buildArt30RapportoSummary(data || {})
   const allGroups = buildNotaSpesePrintGroups(rowsByCategory, globalSummary, data)
   const selectedNotaSpeseKeys = docOptions.selectedNotaSpeseKeys || {}
   const includeNotaSpese = docOptions.includeNotaSpese !== false
   const selectedGroups = !includeNotaSpese ? [] : allGroups.filter(group => selectedNotaSpeseKeys[group.codiceCasistica] !== false)
 
-  const totaleNoteSpeseDaGruppi = roundMoney(nsGroups.reduce((sum, group) => sum + roundMoney(Number(group?.summary?.totaleComplessivo) || 0), 0))
+  const hasRealRaRows = nsGroups.some(group => (group.rows.RA || []).length > 0)
+  const totaleNoteSpeseGrezzo = roundMoney(nsGroups.reduce((sum, group) => sum + roundMoney(Number(group?.summary?.totaleComplessivo) || 0), 0))
+  // Se esistono già righe RA reali (pratiche salvate dopo questo refactor), il totale dei
+  // gruppi è già netto: le righe RA includono anche la riga di decurtazione cauzione.
+  // Se invece la pratica è legacy (campo flat compilato ma nessuna riga RA sincronizzata
+  // ancora, es. non risalvata dopo il refactor), si ricade sul vecchio calcolo: il netto
+  // dal riepilogo narrativo si somma a parte, perché i gruppi non contengono nulla da Art.30.
+  const totaleNoteSpeseDaGruppi = hasRealRaRows
+    ? totaleNoteSpeseGrezzo
+    : roundMoney(totaleNoteSpeseGrezzo + (art30Summary.hasData ? art30Summary.netto : 0))
   const totaleNoteSpeseSalvato = roundMoney(parseArt30Number(pickAttrCI(data, ['ns_totale_complessivo'])) ?? 0)
   const totaleNoteSpese = nsGroups.length > 0 ? totaleNoteSpeseDaGruppi : totaleNoteSpeseSalvato
   const hasRimborso = nsGroups.length > 0 || totaleNoteSpese !== 0 || art30Summary.hasData
-  const totaleRimborso = roundMoney(totaleNoteSpese + (art30Summary.hasData ? art30Summary.netto : 0))
+  const totaleRimborso = totaleNoteSpese
 
   map.importo_rimborso = hasRimborso ? moneyIt(totaleRimborso) : ''
   map.riepilogo_art30 = art30Summary.text

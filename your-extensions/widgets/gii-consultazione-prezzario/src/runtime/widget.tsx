@@ -7,8 +7,8 @@ const { Fragment } = React
 const LIST_STEP = 250
 const DATI_GENERALI_URL = 'https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_DATI_GENERALI/FeatureServer/0'
 
-type SourceCode = 'REGIONALE' | 'INTERNO' | 'NUOVI_PREZZI'
-type SourceKind = 'UFFICIALE' | 'NP'
+type SourceCode = 'REGIONALE' | 'INTERNO' | 'NUOVI_PREZZI' | 'ATTREZZATURE'
+type SourceKind = 'UFFICIALE' | 'NP' | 'PARAMETRO'
 
 type PrezzarioRow = {
   objectid: number
@@ -100,10 +100,11 @@ const FAMIGLIA_LABELS: Record<string, string> = {
   RU: 'RISORSE UMANE',
   HR: 'RISORSE UMANE',
   SL: 'SEMILAVORATI',
-  PF: 'PRODOTTI FINITI'
+  PF: 'PRODOTTI FINITI',
+  RA: 'RISARCIMENTO ATTREZZATURE'
 }
 
-const FAMIGLIA_ORDER = ['AT', 'PR', 'MA', 'MT', 'RU', 'HR', 'SL', 'PF']
+const FAMIGLIA_ORDER = ['AT', 'PR', 'MA', 'MT', 'RU', 'HR', 'SL', 'PF', 'RA']
 const ORIGINE_LABELS: Record<string, string> = { '1': 'REGIONALE', '2': 'INTERNO', '3': 'NUOVO PREZZO' }
 const MODALITA_LABELS: Record<string, string> = { '1': 'ELEMENTARE', '2': 'ANALIZZATA' }
 
@@ -317,15 +318,20 @@ function buildSources(cfg: any): PrezzarioRow[] {
   if (intUrl) out.push({ objectid: 2, codice_prezzario: 'INTERNO', titolo_prezzario: 'Prezzario interno', stato_prezzario: 1, articoliUrl: intUrl, analisiUrl: normalizeUrl(cfg.internoAnalisiUrl), kind: 'UFFICIALE' })
   const npUrl = normalizeUrl(cfg.nuoviPrezziUrl)
   if (npUrl) out.push({ objectid: 3, codice_prezzario: 'NUOVI_PREZZI', titolo_prezzario: 'Nuovi prezzi', stato_prezzario: 1, articoliUrl: npUrl, analisiUrl: normalizeUrl(cfg.nuoviPrezziAnalisiUrl), kind: 'NP' })
+  const attUrl = normalizeUrl(cfg.attrezzatureParametriUrl)
+  // Nessuna tabella "analisi": il prezzo delle attrezzature è deliberato dal CDA, non scomposto.
+  if (attUrl) out.push({ objectid: 4, codice_prezzario: 'ATTREZZATURE', titolo_prezzario: 'Attrezzature (risarcimento Art.30)', stato_prezzario: 1, articoliUrl: attUrl, analisiUrl: undefined, kind: 'PARAMETRO' })
   return out
 }
 
 function getArticleFields(source: PrezzarioRow) {
   if (source.kind === 'NP') return { code: 'codice_np', year: 'anno_listino', um: 'um', price: 'prezzo', mode: 'modalita_prezzo' }
+  if (source.kind === 'PARAMETRO') return { code: 'codice_parametro', year: 'anno_riferimento', um: '', price: 'valore_num', mode: '' }
   return { code: 'codice_articolo', year: 'anno_prezzario', um: 'um', price: 'prezzo', mode: '' }
 }
 
 function buildBaseWhere(source: PrezzarioRow): string {
+  if (source.kind === 'PARAMETRO') return "categoria_parametro = 'ATTREZZATURA' AND attivo = 1"
   return '1=1'
 }
 
@@ -349,17 +355,18 @@ async function queryDescriptionsByCode(vociUrl: string, codeField: string, codes
 
 function mapVoceRow(source: PrezzarioRow, r: any): VoceRow {
   const af = getArticleFields(source)
+  const isParametro = source.kind === 'PARAMETRO'
   return {
     objectid: Number(r.objectid || r.OBJECTID || 0),
     codice_prezzario: source.codice_prezzario,
     codice_voce: String(r[af.code] || ''),
-    famiglia: trimText(r.famiglia),
-    capitolo: trimText(r.capitolo),
-    sottocapitolo: trimText(r.sottocapitolo),
+    famiglia: isParametro ? 'RA' : trimText(r.famiglia),
+    capitolo: isParametro ? '' : trimText(r.capitolo),
+    sottocapitolo: isParametro ? '' : trimText(r.sottocapitolo),
     descrizione: htmlDecode(r.descrizione),
-    unita_misura: trimText(r[af.um]),
+    unita_misura: isParametro ? 'pz' : trimText(r[af.um]),
     prezzo_unitario: num(r[af.price]),
-    categoria_default: source.kind === 'NP' ? (MODALITA_LABELS[String(r[af.mode] || '')] || '') : normalizeCategory(r.categoria_default),
+    categoria_default: source.kind === 'NP' ? (MODALITA_LABELS[String(r[af.mode] || '')] || '') : (isParametro ? '' : normalizeCategory(r.categoria_default)),
     selezionabile: 1,
     attivo: (r.attivo == null || r.attivo === '') ? 1 : num(r.attivo),
     anno_riferimento: num(r[af.year]),
@@ -383,6 +390,7 @@ function aggregateSummary(rows: Array<{ famiglia?: any, capitolo?: any, sottocap
 }
 
 async function querySummary(source: PrezzarioRow): Promise<SummaryRow[]> {
+  if (source.kind === 'PARAMETRO') return [] // catalogo piatto (4 voci, nessun capitolo): niente albero, si vede tutto in "Elenco voci"
   const fl = await getLayer(source.articoliUrl)
   const oidField = String(fl?.objectIdField || 'OBJECTID')
   const where = buildBaseWhere(source)
@@ -433,7 +441,7 @@ function buildSearchWhere(source: PrezzarioRow, search: string): string {
   const phrase = safeUpper(trimText(search).replace(/\s+/g, ' '))
   if (!phrase) return ''
   const af = getArticleFields(source)
-  const fields = [af.code, 'descrizione', 'famiglia', 'capitolo', 'sottocapitolo', af.um].filter(Boolean)
+  const fields = source.kind === 'PARAMETRO' ? [af.code, 'descrizione'] : [af.code, 'descrizione', 'famiglia', 'capitolo', 'sottocapitolo', af.um].filter(Boolean)
   const e = esc(phrase)
   return '(' + fields.map((f) => `UPPER(${f}) LIKE '%${e}%'`).join(' OR ') + ')'
 }
@@ -456,7 +464,7 @@ function buildOrderBy(source: PrezzarioRow, sortField: SortField, sortDir: SortD
   const dir = sortDir === 'DESC' ? 'DESC' : 'ASC'
   switch (sortField) {
     case 'descrizione': return `descrizione ${dir}, ${af.code} ASC`
-    case 'unita_misura': return `${af.um} ${dir}, ${af.code} ASC`
+    case 'unita_misura': return af.um ? `${af.um} ${dir}, ${af.code} ASC` : `${af.code} ${dir}`
     case 'prezzo_unitario': return `${af.price} ${dir}, ${af.code} ASC`
     case 'codice_voce':
     default: return `${af.code} ${dir}`
@@ -468,7 +476,9 @@ async function queryVociPage(source: PrezzarioRow, famiglia: string, capitolo: s
   const oidField = String(fl?.objectIdField || 'OBJECTID')
   const af = getArticleFields(source)
   const where = buildVociWhere(source, famiglia, capitolo, sottocapitolo, search)
-  const outFields = [oidField, af.code, 'famiglia', 'capitolo', 'sottocapitolo', 'descrizione', af.um, af.price, 'attivo', af.year].concat(af.mode ? [af.mode] : [])
+  const outFields = source.kind === 'PARAMETRO'
+    ? [oidField, af.code, 'descrizione', af.price, 'attivo', af.year, 'categoria_parametro']
+    : [oidField, af.code, 'famiglia', 'capitolo', 'sottocapitolo', 'descrizione', af.um, af.price, 'attivo', af.year].concat(af.mode ? [af.mode] : [])
   let total = 0
   try {
     if (typeof fl.queryFeatureCount === 'function') {

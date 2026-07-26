@@ -60,6 +60,7 @@ export interface Config {
   nsPrezzarioInternoArticoliUrl?: string
   nsNuoviPrezziUrl?: string
   nsNotaSpeseDettaglioUrl?: string
+  nsNotaSpeseDettaglioUrlWrite?: string
   nsParametriUrl?: string
   nsParametroCode?: string
   attrezzatureParametriUrl?: string
@@ -236,6 +237,7 @@ export const defaultConfig: Config = {
   nsPrezzarioInternoArticoliUrl: '',
   nsNuoviPrezziUrl: '',
   nsNotaSpeseDettaglioUrl: '',
+  nsNotaSpeseDettaglioUrlWrite: '',
   nsParametriUrl: '',
   nsParametroCode: 'SPESE_GENERALI_PERC',
   attrezzatureParametriUrl: '',

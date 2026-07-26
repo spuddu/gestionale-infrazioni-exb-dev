@@ -6731,6 +6731,7 @@ async function buildAmmNotaSpesePdfItems (data: any, fields: LayerFieldInfo[], p
   const { selectedGroups: selected } = await applyNotaSpeseToRapportoMap(map, data || {}, nsConfig, { includeNotaSpese: true, selectedNotaSpeseKeys: selectedKeys })
   if (!selected.length) return []
   const art30Summary = buildArt30RapportoSummary(data || {})
+  const hasRealRaRows = selected.some(group => ((group.rows as any)?.RA || []).length > 0)
   const base = String(map.cod_pratica || 'rapporto').replace(/[^a-zA-Z0-9_-]/g, '_')
   const luogoData = 'Cagliari, ' + (pdfFieldValue(data || {}, fields || [], 'data_firma') || new Date().toLocaleDateString('it-IT', { day: '2-digit', month: '2-digit', year: 'numeric' }))
   const items: Array<{ blob: Blob, fileName: string }> = []
@@ -6746,7 +6747,7 @@ async function buildAmmNotaSpesePdfItems (data: any, fields: LayerFieldInfo[], p
       titolo_nota: group.label,
       rows: group.rows as any,
       summary: group.summary as any,
-      art30: group.codiceCasistica === 'C104_ATTREZZATURE_DANNEGGIATE' && art30Summary.hasData
+      art30: !hasRealRaRows && group.codiceCasistica === 'C104_ATTREZZATURE_DANNEGGIATE' && art30Summary.hasData
         ? {
             rows: art30Summary.rows.map(row => ({
               codice: row.codice,

@@ -339,7 +339,8 @@ export default function Setting(props: AllWidgetSettingProps<IMConfig>) {
         <Text k='nsPrezzarioRegionaleArticoliUrl' label='Tabella articoli prezzario regionale'/>
         <Text k='nsPrezzarioInternoArticoliUrl' label='Tabella articoli prezzario interno'/>
         <Text k='nsNuoviPrezziUrl' label='Tabella Nuovi Prezzi'/>
-        <Text k='nsNotaSpeseDettaglioUrl' label='Tabella dettaglio nota spese'/>
+        <Text k='nsNotaSpeseDettaglioUrl' label='Nota spese - vista di consultazione (sola lettura)'/>
+        <Text k='nsNotaSpeseDettaglioUrlWrite' label='Nota spese - vista editabile (Create/Update, per TI)'/>
         <Text k='nsParametriUrl' label='Tabella parametri nota spese'/>
         <Text k='nsParametroCode' label='Codice parametro spese generali' placeholder='SPESE_GENERALI_PERC'/>
         <Text k='attrezzatureParametriUrl' label='Vista di consultazione parametri Art. 30 (attrezzature e cauzione)' placeholder='https://.../FeatureServer/0'/>

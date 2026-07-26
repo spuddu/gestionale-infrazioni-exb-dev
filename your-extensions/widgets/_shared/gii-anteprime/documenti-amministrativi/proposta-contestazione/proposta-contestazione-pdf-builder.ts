@@ -102,14 +102,6 @@ function compactRows (rows: Row[]): Row[] {
   return rows.filter(([, value]) => cleanText(value))
 }
 
-type Art30PdfRow = {
-  codice: string
-  descrizione: string
-  quantita: number
-  valoreUnitario: number
-  importo: number
-}
-
 function formatDecimalIt (value: number, fractionDigits = 2): string {
   const n = Number(value)
   if (!Number.isFinite(n)) return '-'
@@ -127,41 +119,6 @@ function formatMoneyIt (value: number): string {
 function formatQuantityIt (value: number): string {
   return Number(value || 0).toLocaleString('it-IT', { maximumFractionDigits: 2 })
 }
-
-function parseArt30PdfRows (raw: any): Art30PdfRow[] {
-  const rows: Art30PdfRow[] = []
-  for (const sourceLine of String(raw ?? '').split(/\r?\n/)) {
-    const text = sourceLine.trim()
-    if (!text) continue
-    const quantityMarker = text.match(/\s+—\s+Quantità:\s*([0-9.,]+)/i)
-    if (!quantityMarker || quantityMarker.index == null) continue
-    const prefix = text.slice(0, quantityMarker.index).trim()
-    const codeMatch = prefix.match(/^(.*?)\s+—\s+Codice:\s*(.+)$/i)
-    const descrizione = cleanText(codeMatch?.[1] || prefix)
-    const codice = cleanText(codeMatch?.[2] || '')
-    const valueMatch = text.match(/Valore unitario:\s*([0-9.,]+)\s*€/i)
-    const amountMatch = text.match(/Importo:\s*([0-9.,]+)\s*€/i)
-    const quantita = moneyNumber(quantityMarker[1])
-    const valoreUnitario = moneyNumber(valueMatch?.[1] || '')
-    const importo = moneyNumber(amountMatch?.[1] || '')
-    if (!descrizione || quantita <= 0) continue
-    rows.push({ codice, descrizione, quantita, valoreUnitario, importo })
-  }
-  return rows
-}
-
-function art30PdfRowsText (rows: Art30PdfRow[]): string {
-  return rows.map(row => {
-    const details = [
-      row.codice ? `• Codice: ${row.codice}` : '',
-      `• Quantità: ${formatQuantityIt(row.quantita)}`,
-      `• Valore unitario: ${formatMoneyIt(row.valoreUnitario)}`,
-      `• Importo: ${formatMoneyIt(row.importo)}`
-    ].filter(Boolean)
-    return [row.descrizione, ...details].join('\n')
-  }).join('\n\n')
-}
-
 
 function fitText (font: PDFFont, text: string, size: number, maxWidth: number): string {
   const s = cleanText(text)

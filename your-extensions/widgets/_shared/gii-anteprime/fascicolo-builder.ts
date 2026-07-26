@@ -201,8 +201,11 @@ async function buildRapportoSection (attrs: Record<string, any>, notaSpeseConfig
   if (selectedGroups.length) {
     const art30Summary = buildArt30RapportoSummary(attrs)
     const luogoData = 'Cagliari, ' + new Date().toLocaleDateString('it-IT', { day: '2-digit', month: '2-digit', year: 'numeric' })
+    const hasRealRaRows = selectedGroups.some(group => ((group.rows as any)?.RA || []).length > 0)
+
     for (let i = 0; i < selectedGroups.length; i++) {
       const group = selectedGroups[i]
+      const groupHasRealRaRows = ((group.rows as any)?.RA || []).length > 0
       const nsData: NotaSpeseData = {
         cod_pratica: map.cod_pratica || '',
         area_label: map.area_label || '',
@@ -211,7 +214,7 @@ async function buildRapportoSection (attrs: Record<string, any>, notaSpeseConfig
         titolo_nota: group.label,
         rows: group.rows,
         summary: group.summary,
-        art30: group.codiceCasistica === 'C104_ATTREZZATURE_DANNEGGIATE' && art30Summary.hasData
+        art30: !hasRealRaRows && group.codiceCasistica === 'C104_ATTREZZATURE_DANNEGGIATE' && art30Summary.hasData
           ? {
               rows: art30Summary.rows.map(row => ({
                 codice: row.codice,
@@ -235,7 +238,7 @@ async function buildRapportoSection (attrs: Record<string, any>, notaSpeseConfig
         rapporto_istruttoria: map.rapporto_istruttoria
       } as any
       const bytes = await buildNotaSpesePdf(nsData)
-      const suffix = selectedGroups.length > 1 ? `_nota_${i + 1}` : ''
+      const suffix = groupHasRealRaRows ? '_risarcimento_attrezzature' : (selectedGroups.length > 1 ? `_nota_${i + 1}` : '')
       items.push({ blob: new Blob([bytes as any], { type: 'application/pdf' }), fileName: `nota_spese_${base}${suffix}.pdf` })
     }
   }

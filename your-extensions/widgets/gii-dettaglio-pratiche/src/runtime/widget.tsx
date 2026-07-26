@@ -3198,6 +3198,7 @@ type NsdDetailRow = {
   ordine: number
   note: string
   codice_casistica: string
+  riferimento_attrezzatura_id?: string | null
 }
 type NsdSummary = {
   totaleAT: number
@@ -3401,7 +3402,21 @@ function nsdReadArt30Equipment (data: any): NsdArt30EquipmentSummary {
     })
   }
 
-  const rimborsoDaRighe = nsdRound(equipmentRows.reduce((sum, row) => sum + nsdSafeNum(row.importo, 0), 0), 2)
+  const groupedEquipmentRows: NsdArt30EquipmentRow[] = (() => {
+    const map = new Map<string, NsdArt30EquipmentRow>()
+    equipmentRows.forEach(row => {
+      const cur = map.get(row.descrizione)
+      if (!cur) {
+        map.set(row.descrizione, { ...row })
+      } else {
+        cur.quantita = (cur.quantita || 0) + (row.quantita || 0)
+        cur.importo = nsdRound((cur.importo || 0) + (row.importo || 0), 2)
+      }
+    })
+    return Array.from(map.values())
+  })()
+
+  const rimborsoDaRighe = nsdRound(groupedEquipmentRows.reduce((sum, row) => sum + nsdSafeNum(row.importo, 0), 0), 2)
   const rimborsoSalvato = nsdParseArt30Number(nsdPickAttrCI(data || {}, ['attrezzature_risarcimento_importo']))
   const cauzioneSalvata = Math.abs(nsdParseArt30Number(nsdPickAttrCI(data || {}, ['attrezzature_cauzione_decurtata'])) || 0)
   const nettoSalvato = nsdParseArt30Number(nsdPickAttrCI(data || {}, ['attrezzature_importo_netto']))
@@ -3411,7 +3426,7 @@ function nsdReadArt30Equipment (data: any): NsdArt30EquipmentSummary {
   const netto = nsdRound(nettoSalvato ?? (rimborsoLordo - cauzione), 2)
 
   if (cauzioneAttiva && cauzione > 0) {
-    equipmentRows.push({
+    groupedEquipmentRows.push({
       codice: '',
       descrizione: 'Decurtazione della cauzione',
       unitaMisura: cauzioneSnapshot?.unitaMisura || 'n.',
@@ -3423,12 +3438,53 @@ function nsdReadArt30Equipment (data: any): NsdArt30EquipmentSummary {
   }
 
   return {
-    rows: equipmentRows,
+    rows: groupedEquipmentRows,
     rimborsoLordo,
     cauzione,
     netto,
-    hasData: equipmentRows.some(row => !row.isCauzione) || rimborsoSalvato != null || nettoSalvato != null || cauzione > 0
+    hasData: groupedEquipmentRows.some(row => !row.isCauzione) || rimborsoSalvato != null || nettoSalvato != null || cauzione > 0
   }
+}
+
+// Mappa ID persistito -> etichetta leggibile (matricola per le tessere, "Tipo (N)" solo se
+// più di un'unità dello stesso tipo) per le sole attrezzature "Recuperabile" — usata per
+// suddividere nella tab Nota spese le sotto-note di Art.30, una per attrezzatura.
+function nsdGetRecuperabiliAttrezzatureLabelsById (data: any): Map<string, string> {
+  const out = new Map<string, string>()
+  const raw = String(nsdPickAttrCI(data || {}, ['attrezzature_risarcimento_dettaglio']) || '')
+  type ParsedItem = { id: string, descrizione: string, isTessera: boolean, matricola: string }
+  const parsed: ParsedItem[] = []
+  for (const line of raw.split(/\r?\n/)) {
+    const text = line.trim()
+    if (!text) continue
+    const statoMatch = text.match(/Stato:\s*(Non recuperabile|Recuperabile)/i)
+    if (!statoMatch || !/^recuperabile$/i.test(statoMatch[1].trim())) continue
+    const idMatch = text.match(/—\s*ID:\s*([0-9]+)/i)
+    if (!idMatch) continue
+    const cutIdx = text.search(/\s+—\s+Valore unitario:/i)
+    const prefix = cutIdx >= 0 ? text.slice(0, cutIdx).trim() : text
+    const codiceMatch = prefix.match(/^(.*?)\s+—\s+Codice:\s*(.+)$/i)
+    const descrizione = String(codiceMatch?.[1] || prefix).trim()
+    const isTessera = /tessera/i.test(descrizione)
+    const matricolaMatch = text.match(/Matricola:\s*([^—]+?)(?=\s+—|$)/i)
+    parsed.push({ id: String(idMatch[1]), descrizione, isTessera, matricola: String(matricolaMatch?.[1] || '').trim() })
+  }
+  const totalsByDescrizione: Record<string, number> = {}
+  parsed.forEach(item => { if (!item.isTessera) totalsByDescrizione[item.descrizione] = (totalsByDescrizione[item.descrizione] || 0) + 1 })
+  const counters: Record<string, number> = {}
+  parsed.forEach(item => {
+    let label: string
+    if (item.isTessera) {
+      label = item.matricola ? `Tessera elettronica — Matricola ${item.matricola}` : 'Tessera elettronica'
+    } else if (totalsByDescrizione[item.descrizione] > 1) {
+      counters[item.descrizione] = (counters[item.descrizione] || 0) + 1
+      label = `${item.descrizione} (${counters[item.descrizione]})`
+    } else {
+      label = item.descrizione
+    }
+    out.set(item.id, label)
+  })
+  return out
 }
 
 function nsdEscapeSqlString (v: string): string {
@@ -3582,7 +3638,7 @@ async function nsdQueryRows (detailUrl: string, parentGlobalId: string): Promise
     String(fl?.objectIdField || 'OBJECTID'), 'OBJECTID', 'categoria_costo', 'origine_voce_snapshot', 'codice_voce_snapshot',
     'descrizione_snapshot', 'unita_misura_snapshot', 'prezzo_unitario_snapshot',
     'costo_unitario_snapshot', 'quantita', 'importo_riga', 'anno_prezzario_snapshot',
-    'ordine', 'note', 'codice_casistica'
+    'ordine', 'note', 'codice_casistica', 'riferimento_attrezzatura_id'
   ]
   const realByLower = new Map<string, string>()
   ;(Array.isArray(fl?.fields) ? fl.fields : []).forEach((f: any) => {
@@ -3599,11 +3655,13 @@ async function nsdQueryRows (detailUrl: string, parentGlobalId: string): Promise
     .map((name: any) => `${name} ASC`)
   if (orderFields.length) q.orderByFields = orderFields
   const res = await fl.queryFeatures(q)
-  return (res?.features || []).map((f: any) => {
+  return ((res?.features || []).map((f: any) => {
     const r = f?.attributes || {}
+    const cat = nsdNormalizeCategory(r?.categoria_costo)
+    if (!cat) return null // categoria non tra le 5 gestite qui (es. RA): esclusa, non forzata a PR
     return {
       objectid: nsdSafeNum(nsdPickAttrCI(r, ['OBJECTID', 'objectid']), 0),
-      categoria_costo: (nsdNormalizeCategory(r?.categoria_costo) || 'PR') as NsdCategory,
+      categoria_costo: cat as NsdCategory,
       origine_voce_snapshot: nsdNormalizeSource(r?.origine_voce_snapshot || 'REGIONE'),
       codice_voce_snapshot: String(r?.codice_voce_snapshot || '').trim(),
       descrizione_snapshot: String(r?.descrizione_snapshot || '').trim(),
@@ -3614,9 +3672,10 @@ async function nsdQueryRows (detailUrl: string, parentGlobalId: string): Promise
       anno_prezzario_snapshot: r?.anno_prezzario_snapshot != null ? Math.trunc(nsdSafeNum(r?.anno_prezzario_snapshot, 0)) : null,
       ordine: Math.trunc(nsdSafeNum(r?.ordine, 0)),
       note: String(r?.note || '').trim(),
-      codice_casistica: nsdNormalizeCasistica(nsdPickAttrCI(r, ['codice_casistica']))
+      codice_casistica: nsdNormalizeCasistica(nsdPickAttrCI(r, ['codice_casistica'])),
+      riferimento_attrezzatura_id: String(nsdPickAttrCI(r, ['riferimento_attrezzatura_id']) || '').trim() || null
     }
-  }).sort((a: NsdDetailRow, b: NsdDetailRow) => {
+  }).filter((row: NsdDetailRow | null) => row !== null) as NsdDetailRow[]).sort((a: NsdDetailRow, b: NsdDetailRow) => {
     const ca = NSD_CATEGORIES.indexOf(a.categoria_costo)
     const cb = NSD_CATEGORIES.indexOf(b.categoria_costo)
     if (ca !== cb) return ca - cb
@@ -3642,9 +3701,19 @@ function NotaSpeseDetailPanel (props: { data: any; detailUrl: string; hasSel: bo
   const expectedCasistiche = React.useMemo(() => nsdExpectedCasisticheFromData(props.data || {}), [props.data])
 
   const noteGroups = React.useMemo(() => {
+    const attrezzatureLabels = nsdGetRecuperabiliAttrezzatureLabelsById(props.data || {})
     const byCode = new Map<string, NsdDetailRow[]>()
+    const labelByCode = new Map<string, string>()
     ;(rows || []).forEach(row => {
-      const code = nsdNormalizeCasistica(row.codice_casistica)
+      const baseCode = nsdNormalizeCasistica(row.codice_casistica)
+      const riferimentoId = String(row.riferimento_attrezzatura_id || '').trim()
+      const isArt30 = baseCode === 'C104_ATTREZZATURE_DANNEGGIATE'
+      const code = isArt30 && riferimentoId ? `${baseCode}::${riferimentoId}` : baseCode
+      if (isArt30 && riferimentoId) {
+        const baseLabel = nsdCasisticaInfo(baseCode).label
+        const attrLabel = attrezzatureLabels.get(riferimentoId)
+        labelByCode.set(code, attrLabel ? `${baseLabel} — Rimborso spese riparazione ${attrLabel}` : baseLabel)
+      }
       const list = byCode.get(code) || []
       list.push(row)
       byCode.set(code, list)
@@ -3652,21 +3721,24 @@ function NotaSpeseDetailPanel (props: { data: any; detailUrl: string; hasSel: bo
 
     expectedCasistiche.forEach(code => {
       const norm = nsdNormalizeCasistica(code)
-      if (!byCode.has(norm)) byCode.set(norm, [])
+      const hasAnyGroupForCode = Array.from(byCode.keys()).some(k => k.split('::')[0] === norm)
+      if (!hasAnyGroupForCode) byCode.set(norm, [])
     })
 
     return Array.from(byCode.entries()).map(([code, groupRows]) => {
-      const info = nsdCasisticaInfo(code)
+      const baseCode = code.split('::')[0]
+      const info = nsdCasisticaInfo(baseCode)
+      const label = labelByCode.get(code) || info.label
       const firstOrder = groupRows.length
         ? Math.min(...groupRows.map(r => Number.isFinite(Number(r.ordine)) ? Number(r.ordine) : 9999))
         : info.order
-      return { code, rows: groupRows, info, firstOrder, isExpectedMissing: expectedCasistiche.includes(code) && groupRows.length === 0 }
+      return { code, rows: groupRows, info: { ...info, label }, firstOrder, isExpectedMissing: expectedCasistiche.includes(baseCode) && groupRows.length === 0 }
     }).sort((a, b) => {
       if (a.info.order !== b.info.order) return a.info.order - b.info.order
       if (a.firstOrder !== b.firstOrder) return a.firstOrder - b.firstOrder
       return a.code.localeCompare(b.code)
     })
-  }, [rows, expectedCasistiche])
+  }, [rows, expectedCasistiche, props.data])
 
   const overallSummary = React.useMemo(() => nsdComputeSummaryFromRows(rows, percentualeSpeseGenerali), [rows, percentualeSpeseGenerali])
   const overallTotalWithArt30 = nsdRound(overallSummary.totaleComplessivo + (art30Equipment.hasData ? art30Equipment.netto : 0), 2)
@@ -3686,7 +3758,7 @@ function NotaSpeseDetailPanel (props: { data: any; detailUrl: string; hasSel: bo
         borderBottom: strong ? 'none' : '1px solid rgba(0,0,0,0.07)'
       }}
     >
-      <div style={{ fontSize: 12, fontWeight: strong ? 800 : 700, color: strong ? 'rgba(255,255,255,0.86)' : '#6b7280', lineHeight: 1.25 }}>{label}</div>
+      <div style={{ fontSize: strong ? 15 : 12, fontWeight: strong ? 800 : 700, color: strong ? 'rgba(255,255,255,0.86)' : '#6b7280', lineHeight: 1.25 }}>{label}</div>
       <div style={{ fontSize: strong ? 15 : 13, fontWeight: strong ? 900 : 700, color: strong ? '#fff' : '#1f2937', whiteSpace: 'nowrap', textAlign: 'right' }}>€ {nsdMoney(value)}</div>
     </div>
   )
@@ -3707,7 +3779,7 @@ function NotaSpeseDetailPanel (props: { data: any; detailUrl: string; hasSel: bo
         borderBottom: strong ? 'none' : '1px solid #cfe5dc'
       }}
     >
-      <div style={{ fontSize: 12, fontWeight: strong ? 800 : 700, color: strong ? '#fff' : '#475569', lineHeight: 1.25 }}>{label}</div>
+      <div style={{ fontSize: strong ? 15 : 12, fontWeight: strong ? 800 : 700, color: strong ? '#fff' : '#475569', lineHeight: 1.25 }}>{label}</div>
       <div style={{ fontSize: strong ? 15 : 13, fontWeight: strong ? 900 : 700, color: strong ? '#fff' : '#176b52', whiteSpace: 'nowrap', textAlign: 'right' }}>€ {nsdMoney(value)}</div>
     </div>
   )
@@ -3739,10 +3811,6 @@ function NotaSpeseDetailPanel (props: { data: any; detailUrl: string; hasSel: bo
                   <td style={{ padding: '7px 8px', borderBottom: '1px solid rgba(0,0,0,0.07)', textAlign: 'right', whiteSpace: 'nowrap', fontWeight: 800, color: row.isCauzione ? '#d92d20' : '#1f2937' }}>{row.isCauzione ? '- ' : ''}€ {nsdMoney(Math.abs(row.importo))}</td>
                 </tr>
               ))}
-              <tr style={{ background: '#eaf2ff' }}>
-                <td colSpan={5} style={{ padding: '8px', textAlign: 'right', fontWeight: 900, color: '#1F4E79' }}>Totale rimborso attrezzature</td>
-                <td style={{ padding: '8px', textAlign: 'right', fontWeight: 900, color: '#1F4E79', whiteSpace: 'nowrap' }}>€ {nsdMoney(art30Equipment.netto)}</td>
-              </tr>
             </tbody>
           </table>
         </div>
@@ -3814,7 +3882,7 @@ function NotaSpeseDetailPanel (props: { data: any; detailUrl: string; hasSel: bo
 
       {props.detailUrl && !loading && !error && (rows.length > 0 || art30Equipment.hasData) && noteGroups.length > 1 && (
         <DetailSectionCard
-          title="Riepilogo complessivo note spese"
+          title="Riepilogo complessivo"
           borderColor="#9fd6c1"
           headerBg="linear-gradient(90deg, #005222, #008337)"
           headerColor="#fff"
@@ -3822,25 +3890,37 @@ function NotaSpeseDetailPanel (props: { data: any; detailUrl: string; hasSel: bo
           boxShadow="0 1px 3px rgba(23, 107, 82, 0.14)"
         >
           <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr)', gap: 0 }}>
-            {greenSummaryCard('Totale voci per interventi', nsdRound(overallSummary.totaleAT + overallSummary.totalePR + overallSummary.totaleRU + overallSummary.totaleSL + overallSummary.totalePF, 2))}
+            {art30Equipment.hasData && greenSummaryCard('Totale risarcimento attrezzature', art30Equipment.netto)}
+            {greenSummaryCard('Totale note spese', nsdRound(overallSummary.totaleAT + overallSummary.totalePR + overallSummary.totaleRU + overallSummary.totaleSL + overallSummary.totalePF, 2))}
             {greenSummaryCard(`Spese generali (${nsdMoney(overallSummary.percentualeSpeseGenerali)}%)`, overallSummary.importoSpeseGenerali)}
-            {art30Equipment.hasData && greenSummaryCard('Risarcimento attrezzatura', art30Equipment.netto)}
-            {greenSummaryCard('Totale complessivo note spese', overallTotalWithArt30, true)}
+            {greenSummaryCard('Totale complessivo', overallTotalWithArt30, true)}
           </div>
           {lastCalc ? <div style={{ fontSize: 11, color: '#477264', marginTop: 8 }}>Ultimo ricalcolo: {formatDateSafe(lastCalc)}</div> : null}
         </DetailSectionCard>
       )}
 
+      {art30Equipment.hasData && (
+        <DetailSectionCard
+          title={`${nsdCasisticaInfo('C104_ATTREZZATURE_DANNEGGIATE').label} — Risarcimento attrezzature non recuperabili`}
+          borderColor="#c5d9f1"
+          headerBg="#eaf2ff"
+        >
+          <div style={{ display: 'grid', gap: 10 }}>
+            {renderArt30Equipment()}
+            <div style={{ border: '1px solid rgba(31,78,121,0.24)', borderRadius: 10, overflow: 'hidden', background: '#fff' }}>
+              {card('Totale risarcimento attrezzature', art30Equipment.netto, true)}
+            </div>
+          </div>
+        </DetailSectionCard>
+      )}
+
       {props.detailUrl && !loading && !error && noteGroups.map(group => {
         const groupSummary = nsdComputeSummaryFromRows(group.rows, percentualeSpeseGenerali)
-        const isArt30Group = group.code === 'C104_ATTREZZATURE_DANNEGGIATE'
-        const equipmentNet = isArt30Group && art30Equipment.hasData ? art30Equipment.netto : 0
-        const groupTotal = nsdRound(groupSummary.totaleComplessivo + equipmentNet, 2)
-        const hasGroupContent = group.rows.length > 0 || (isArt30Group && art30Equipment.hasData)
+        const hasGroupContent = group.rows.length > 0
         return (
           <DetailSectionCard
             key={group.code}
-            title={`Nota spese – ${group.info.label}`}
+            title={group.info.label}
             borderColor={group.info.isUnlinked ? '#d1d5db' : '#c5d9f1'}
             headerBg={group.info.isUnlinked ? '#f3f4f6' : '#eaf2ff'}
           >
@@ -3856,23 +3936,15 @@ function NotaSpeseDetailPanel (props: { data: any; detailUrl: string; hasSel: bo
             )}
 
             {!hasGroupContent ? null : <div style={{ display: 'grid', gap: 10 }}>
-              {isArt30Group && art30Equipment.hasData && renderArt30Equipment()}
-
-              {group.rows.length > 0 && <>
-                {isArt30Group && art30Equipment.hasData && (
-                  <div style={{ padding: '8px 12px', borderRadius: 8, background: '#dbeafe', border: '1px solid #bfdbfe', color: '#1F4E79', fontSize: 12, fontWeight: 900, letterSpacing: 0.15, textTransform: 'uppercase' }}>
-                    Rimborso spese connesse all’intervento
-                  </div>
-                )}
-
-                {NSD_CATEGORIES.map(cat => {
+              {NSD_CATEGORIES.map(cat => {
                   const catRows = group.rows.filter(row => row.categoria_costo === cat)
                   if (!catRows.length) return null
                   const total = catRows.reduce((sum, row) => sum + nsdSafeNum(row.importo_riga, 0), 0)
                   return (
                     <details key={`${group.code}-${cat}`} style={{ border: '1px solid #cbd5e1', borderRadius: 10, background: '#fff', overflow: 'hidden' }}>
-                      <summary style={{ cursor: 'pointer', fontSize: 13, fontWeight: 800, color: '#1f2937', padding: '8px 12px', background: '#e5e7eb', borderBottom: '1px solid #cbd5e1' }}>
-                        {NSD_CATEGORY_LABELS[cat]} <span style={{ color: '#4b5563', fontWeight: 700 }}>({catRows.length} voci · € {nsdMoney(total)})</span>
+                      <summary style={{ cursor: 'pointer', display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) 132px', alignItems: 'center', gap: 12, fontSize: 13, fontWeight: 800, color: '#1f2937', padding: '8px 12px', background: '#e5e7eb', borderBottom: '1px solid #cbd5e1' }}>
+                        <span>{NSD_CATEGORY_LABELS[cat]} <span style={{ color: '#4b5563', fontWeight: 700 }}>({catRows.length} {catRows.length === 1 ? 'voce' : 'voci'})</span></span>
+                        <span style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>€ {nsdMoney(total)}</span>
                       </summary>
                       <div style={{ padding: 10 }}>{renderRows(cat, group.rows)}</div>
                     </details>
@@ -3880,22 +3952,9 @@ function NotaSpeseDetailPanel (props: { data: any; detailUrl: string; hasSel: bo
                 })}
 
                 <div style={{ marginTop: 2, border: '1px solid rgba(31,78,121,0.24)', borderRadius: 10, overflow: 'hidden', background: '#fff' }}>
-                  {isArt30Group && art30Equipment.hasData && card(
-                    'Totale voci dell’intervento',
-                    nsdRound(groupSummary.totaleAT + groupSummary.totalePR + groupSummary.totaleRU + groupSummary.totaleSL + groupSummary.totalePF, 2)
-                  )}
                   {card(`Spese generali (${nsdMoney(groupSummary.percentualeSpeseGenerali)}%)`, groupSummary.importoSpeseGenerali)}
-                  {isArt30Group && art30Equipment.hasData
-                    ? card('Totale spese connesse all’intervento', groupSummary.totaleComplessivo)
-                    : card('Totale nota spese', groupSummary.totaleComplessivo, true)}
+                  {card('Totale nota spese', groupSummary.totaleComplessivo, true)}
                 </div>
-              </>}
-
-              {isArt30Group && art30Equipment.hasData && (
-                <div style={{ border: '1px solid rgba(31,78,121,0.24)', borderRadius: 10, overflow: 'hidden', background: '#fff' }}>
-                  {card('Totale nota spese Art. 30', groupTotal, true)}
-                </div>
-              )}
             </div>}
           </DetailSectionCard>
         )
@@ -4112,10 +4171,28 @@ function DetailTabsPanel (props: {
 
   const nsdExpectedCasisticheForBadge = React.useMemo(() => nsdExpectedCasisticheFromData(data || {}), [data])
   const nsdPercForBadge = React.useMemo(() => nsdReadParentSummary(data || {}).percentualeSpeseGenerali, [data])
+  const nsdAttrezzatureLabelsForBadge = React.useMemo(() => nsdGetRecuperabiliAttrezzatureLabelsById(data || {}), [data])
   const nsdDoneCountForBadge = React.useMemo(() => {
-    return nsdExpectedCasisticheForBadge.filter(code => nsdIsCasisticaCompiled(nsdRows, code, nsdPercForBadge)).length
-  }, [nsdExpectedCasisticheForBadge, nsdRows, nsdPercForBadge])
-  const nsdTotalCountForBadge = nsdExpectedCasisticheForBadge.length
+    return nsdExpectedCasisticheForBadge.reduce((sum, code) => {
+      const norm = nsdNormalizeCasistica(code)
+      if (norm === 'C104_ATTREZZATURE_DANNEGGIATE') {
+        const compiled = Array.from(nsdAttrezzatureLabelsForBadge.keys()).filter(id => {
+          const total = (nsdRows || [])
+            .filter(r => nsdNormalizeCasistica(r.codice_casistica) === norm && String(r.riferimento_attrezzatura_id || '').trim() === id)
+            .reduce((s, r) => s + nsdSafeNum(r.importo_riga, 0), 0)
+          return total > 0.004
+        }).length
+        return sum + compiled
+      }
+      return sum + (nsdIsCasisticaCompiled(nsdRows, code, nsdPercForBadge) ? 1 : 0)
+    }, 0)
+  }, [nsdExpectedCasisticheForBadge, nsdRows, nsdPercForBadge, nsdAttrezzatureLabelsForBadge])
+  const nsdTotalCountForBadge = React.useMemo(() => {
+    return nsdExpectedCasisticheForBadge.reduce((sum, code) => {
+      if (nsdNormalizeCasistica(code) === 'C104_ATTREZZATURE_DANNEGGIATE') return sum + Math.max(1, nsdAttrezzatureLabelsForBadge.size)
+      return sum + 1
+    }, 0)
+  }, [nsdExpectedCasisticheForBadge, nsdAttrezzatureLabelsForBadge])
 
   // RIMOSSO: Non resettare la tab quando cambia selezione
   // React.useEffect(() => {
