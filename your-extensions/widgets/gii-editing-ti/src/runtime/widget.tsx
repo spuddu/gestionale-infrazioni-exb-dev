@@ -4431,19 +4431,20 @@ function normalizeUppercaseTextFieldValue (fieldName: string, value: any): any {
 
 
 
-type NsCategory = 'AT' | 'PR' | 'RU' | 'SL' | 'PF'
+type NsCategory = 'AT' | 'PR' | 'RU' | 'SL' | 'PF' | 'RA'
 type NsSummary = {
   totaleAT: number
   totalePR: number
   totaleRU: number
   totaleSL: number
   totalePF: number
+  totaleRA: number
   percentualeSpeseGenerali: number
   importoSpeseGenerali: number
   totaleComplessivo: number
 }
 
-type NsSource = 'REGIONE' | 'INTERNO' | 'NUOVI PREZZI'
+type NsSource = 'REGIONE' | 'INTERNO' | 'NUOVI PREZZI' | 'PARAMETRO'
 
 type NsDetailRow = {
   objectid: number
@@ -4460,6 +4461,8 @@ type NsDetailRow = {
   note: string
   codice_casistica?: string | null
   riferimento_attrezzatura_id?: string | null
+  matricola_snapshot?: string | null
+  cauzione_decurtata?: boolean
 }
 
 type NsManagerProps = {
@@ -4470,27 +4473,33 @@ type NsManagerProps = {
   onDirtyChange?: (dirty: boolean) => void
   resetKey?: number
   readonly?: boolean
+  // Solo per category='RA': valore unitario della cauzione, per calcolare l'importo netto
+  // quando la riga è una tessera elettronica con "Cauzione decurtata" spuntata.
+  cauzioneUnitaria?: number
 }
 
-const NS_CATEGORIES: readonly NsCategory[] = ['AT', 'PR', 'RU', 'SL', 'PF'] as const
+const NS_CATEGORIES: readonly NsCategory[] = ['AT', 'PR', 'RU', 'SL', 'PF', 'RA'] as const
 const NS_CATEGORY_LABELS: Record<NsCategory, string> = {
   AT: 'Attrezzature e trasporti',
   PR: 'Materiali da costruzione',
   RU: 'Risorse umane',
   SL: 'Semilavorati',
-  PF: 'Prodotti finiti'
+  PF: 'Prodotti finiti',
+  RA: 'Risarcimento attrezzatura'
 }
 
-const NS_SOURCES: readonly NsSource[] = ['REGIONE', 'INTERNO', 'NUOVI PREZZI'] as const
+const NS_SOURCES: readonly NsSource[] = ['REGIONE', 'INTERNO', 'NUOVI PREZZI', 'PARAMETRO'] as const
 const NS_SOURCE_LABELS: Record<NsSource, string> = {
   REGIONE: 'Regionale',
   INTERNO: 'Interno',
-  'NUOVI PREZZI': 'Nuovi prezzi'
+  'NUOVI PREZZI': 'Nuovi prezzi',
+  PARAMETRO: 'Parametro'
 }
 
 function nsSourceShort (source: NsSource): string {
   if (source === 'INTERNO') return 'INT'
   if (source === 'NUOVI PREZZI') return 'NP'
+  if (source === 'PARAMETRO') return 'PAR'
   return 'REG'
 }
 
@@ -4498,6 +4507,7 @@ function nsNormalizeSource (v: any): NsSource {
   const s = String(v || '').trim().toUpperCase().replace(/_/g, ' ')
   if (s === 'INTERNO') return 'INTERNO'
   if (s === 'NUOVI PREZZI') return 'NUOVI PREZZI'
+  if (s === 'PARAMETRO') return 'PARAMETRO'
   return 'REGIONE'
 }
 
@@ -4512,6 +4522,7 @@ const EMPTY_NS_SUMMARY: NsSummary = {
   totaleRU: 0,
   totaleSL: 0,
   totalePF: 0,
+  totaleRA: 0,
   percentualeSpeseGenerali: 0,
   importoSpeseGenerali: 0,
   totaleComplessivo: 0
@@ -4522,7 +4533,8 @@ const EMPTY_NS_ROWS_BY_CATEGORY: Record<NsCategory, NsDetailRow[]> = {
   PR: [],
   RU: [],
   SL: [],
-  PF: []
+  PF: [],
+  RA: []
 }
 
 function nsCloneRow (row: NsDetailRow): NsDetailRow {
@@ -4540,7 +4552,9 @@ function nsCloneRow (row: NsDetailRow): NsDetailRow {
     ordine: Math.trunc(nsSafeNum(row.ordine, 0)),
     note: String(row.note || '').trim(),
     codice_casistica: String(row.codice_casistica || '').trim() || null,
-    riferimento_attrezzatura_id: String(row.riferimento_attrezzatura_id || '').trim() || null
+    riferimento_attrezzatura_id: String(row.riferimento_attrezzatura_id || '').trim() || null,
+    matricola_snapshot: row.matricola_snapshot != null ? String(row.matricola_snapshot).trim() || null : null,
+    cauzione_decurtata: !!row.cauzione_decurtata
   }
 }
 
@@ -4550,7 +4564,8 @@ function nsCloneRowsByCategory (src?: Record<NsCategory, NsDetailRow[]> | null):
     PR: [],
     RU: [],
     SL: [],
-    PF: []
+    PF: [],
+    RA: []
   }
   NS_CATEGORIES.forEach((cat) => {
     out[cat] = Array.isArray(src?.[cat]) ? src![cat].map(nsCloneRow) : []
@@ -4620,16 +4635,18 @@ function nsComputeSummaryFromRows (rows: NsDetailRow[], perc: number): NsSummary
   const totaleRU = sumBy('RU')
   const totaleSL = sumBy('SL')
   const totalePF = sumBy('PF')
+  const totaleRA = sumBy('RA') // risarcimento attrezzature Art.30: nessun markup spese generali, si somma netto
   const base = nsRound(totaleAT + totalePR + totaleRU + totaleSL + totalePF, 2)
   const percentualeSpeseGenerali = nsRound(nsSafeNum(perc, 0), 2)
   const importoSpeseGenerali = nsRound(base * percentualeSpeseGenerali / 100, 2)
-  const totaleComplessivo = nsRound(base + importoSpeseGenerali, 2)
+  const totaleComplessivo = nsRound(base + importoSpeseGenerali + totaleRA, 2)
   return {
     totaleAT,
     totalePR,
     totaleRU,
     totaleSL,
     totalePF,
+    totaleRA,
     percentualeSpeseGenerali,
     importoSpeseGenerali,
     totaleComplessivo
@@ -4652,24 +4669,8 @@ function hasArtSelected (attrs: Record<string, any>, art: number): boolean {
   return multi.has(code)
 }
 
-// Art. 30 richiede la Nota spese solo se tra le attrezzature selezionate ce n'è almeno una
-// con esito "Riparazione" — se sono tutte a risarcimento (valore forfettario, già coperto dal
-// pannello "Risarcimento attrezzatura"), non ha senso attendersi anche una nota spese.
-function art30HasRiparazione (attrs: Record<string, any>): boolean {
-  const raw = String(attrs?.attrezzature_risarcimento_dettaglio ?? '')
-  for (const line of raw.split(/\r?\n/)) {
-    const text = line.trim()
-    if (!text || !/Stato:/i.test(text)) continue
-    if (/Stato:\s*Recuperabile\b/i.test(text)) return true
-  }
-  return false
-}
-
 function getNotaSpeseCasistiche (attrs: Record<string, any>): NsCasisticaOption[] {
-  return NS_CASISTICHE_BY_ART.filter(opt => {
-    if (opt.art === 30) return hasArtSelected(attrs, 30) && art30HasRiparazione(attrs)
-    return hasArtSelected(attrs, opt.art)
-  }).sort((a, b) => a.art - b.art)
+  return NS_CASISTICHE_BY_ART.filter(opt => hasArtSelected(attrs, opt.art)).sort((a, b) => a.art - b.art)
 }
 
 function getNotaSpeseCasisticaByArtCode (artCode: string): NsCasisticaOption | null {
@@ -4698,12 +4699,22 @@ function getNotaSpeseFlatRowsForCasistica (rowsByCategory: Record<NsCategory, Ns
   return nsRowsByCategoryToFlat(filtered)
 }
 
+// Una riga è "incompleta" (non salvabile/da segnalare) se: per una tessera elettronica in
+// RA manca la matricola; per qualunque altra riga (incluse le altre attrezzature RA) la
+// quantità non è valorizzata.
+function nsRowIsIncomplete (row: NsDetailRow): boolean {
+  if (row.categoria_costo === 'RA' && attrezzaturaTipo(row.descrizione_snapshot)?.key === 'TESSERA_ELETTRONICA') {
+    return !String(row.matricola_snapshot || '').trim()
+  }
+  return nsSafeNum(row.quantita, 0) <= 0
+}
+
 function hasNotaSpeseIncompleteRowsForCasistica (rowsByCategory: Record<NsCategory, NsDetailRow[]> | null | undefined, codice: string): boolean {
-  return getNotaSpeseFlatRowsForCasistica(rowsByCategory, codice).some(row => nsSafeNum(row.quantita, 0) <= 0)
+  return getNotaSpeseFlatRowsForCasistica(rowsByCategory, codice).some(nsRowIsIncomplete)
 }
 
 function countNotaSpeseIncompleteRowsForCasistica (rowsByCategory: Record<NsCategory, NsDetailRow[]> | null | undefined, codice: string): number {
-  return getNotaSpeseFlatRowsForCasistica(rowsByCategory, codice).filter(row => nsSafeNum(row.quantita, 0) <= 0).length
+  return getNotaSpeseFlatRowsForCasistica(rowsByCategory, codice).filter(nsRowIsIncomplete).length
 }
 
 function isNotaSpeseCompiledForCasistica (rowsByCategory: Record<NsCategory, NsDetailRow[]> | null | undefined, codice: string, perc: number): boolean {
@@ -4777,6 +4788,7 @@ function nsNormalizeCategory (v: any): NsCategory | null {
   if (s === 'RU') return 'RU'
   if (s === 'SL') return 'SL'
   if (s === 'PF') return 'PF'
+  if (s === 'RA') return 'RA'
   return null
 }
 
@@ -4804,7 +4816,7 @@ async function getFeatureLayerByUrl (rawUrl: any): Promise<any> {
   if (__giiNsLayerCache[url]) return __giiNsLayerCache[url]
   const FeatureLayer = await loadEsriModule<any>('esri/layers/FeatureLayer')
   const fl = new FeatureLayer({ url })
-  try { if (typeof fl.load === 'function') await fl.load() } catch {}
+  if (typeof fl.load === 'function') await fl.load()
   __giiNsLayerCache[url] = fl
   return fl
 }
@@ -4891,7 +4903,10 @@ function loadArt30ParameterRows (rawUrl: any): Promise<any[]> {
       throw err
     })
   }
-  return __giiArt30ParameterRowsCache[url]
+  return __giiArt30ParameterRowsCache[url].then((rows) => {
+    if (!rows || rows.length === 0) delete __giiArt30ParameterRowsCache[url]
+    return rows
+  })
 }
 
 
@@ -4899,21 +4914,6 @@ type AttrezzaturaParametro = {
   codice: string
   descrizione: string
   valoreUnitario: number
-}
-
-type AttrezzaturaEsito = 'risarcimento' | 'riparazione'
-
-// Elenco componibile: ogni riga è una singola unità di attrezzatura (non più una quantità
-// aggregata). Più righe dello stesso tipo sono ammesse (es. due tessere con stati diversi).
-type AttrezzaturaRimborsoRow = {
-  rowId: string
-  persistentId: string // ID stabile persistito nel testo, usato per collegare le righe Nota spese
-  codice: string
-  descrizione: string
-  valoreUnitario: number
-  esito: AttrezzaturaEsito
-  matricola: string // solo tessera elettronica
-  cauzioneDecurtata: boolean // solo tessera elettronica
 }
 
 function attrezzaturaMoney (value: any): string {
@@ -4933,6 +4933,22 @@ function attrezzaturaKey (value: any): string {
     .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
     .replace(/[^A-Z0-9]+/g, '_')
     .replace(/^_+|_+$/g, '')
+}
+
+// ID di istanza di un'attrezzatura recuperabile: <codiceTipoCatalogo>::<suffisso univoco>.
+// Più istanze dello stesso tipo (es. due curve di derivazione) hanno lo stesso prefisso ma
+// suffissi diversi — così restano righe di Nota spese separate. Il suffisso NON va mai usato
+// per confronti: il matching delle righe resta sempre sull'ID intero (già garantito dagli
+// helper generici filterRowsByCasistica/mergeCategoryRowsForCasistica). Questo helper serve
+// solo a costruire un nuovo ID e a risalire al tipo per l'etichetta "Curva 1/2/..." in Combo 3.
+function buildAttrezzaturaInstanceId (tipoCode: string): string {
+  const suffix = `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`
+  return `${tipoCode}::${suffix}`
+}
+
+function attrezzaturaInstanceTipoCode (instanceId: string): string {
+  const idx = String(instanceId || '').indexOf('::')
+  return idx >= 0 ? instanceId.slice(0, idx) : String(instanceId || '')
 }
 
 type AttrezzaturaTipo = {
@@ -4967,126 +4983,6 @@ function parameterDateTs (value: any): number | null {
   if (Number.isFinite(n) && n > 0) return n
   const d = new Date(value)
   return Number.isNaN(d.getTime()) ? null : d.getTime()
-}
-
-type AttrezzaturaRimborsoDettaglio = {
-  persistentId: string
-  codice: string
-  descrizione: string
-  valoreUnitario: number | null
-  esito: AttrezzaturaEsito
-  matricola: string
-  cauzioneDecurtata: boolean
-}
-
-function parseAttrezzaturaNumber (value: any): number | null {
-  const text = String(value ?? '').trim()
-  if (!text) return null
-  const parsed = Number(text.replace(/\s/g, '').replace(/\./g, '').replace(',', '.'))
-  return Number.isFinite(parsed) ? parsed : null
-}
-
-// Retrocompatibilità: prima di questa modifica la cauzione era un'unica riga aggregata
-// "Decurtazione della cauzione | ... | Quantità: N | ...", riferita a N tessere complessive.
-// La leggiamo solo per distribuirla sulle righe tessera prive di un proprio tag Cauzione.
-function parseLegacyCauzioneQty (raw: any): number {
-  for (const line of String(raw ?? '').split(/\r?\n/)) {
-    const text = line.trim()
-    if (!/^Decurtazione della cauzione\b/i.test(text)) continue
-    const q = parseAttrezzaturaNumber(text.match(/Quantità:\s*([0-9.,]+)/i)?.[1])
-    return q != null && q > 0 ? Math.trunc(q) : 0
-  }
-  return 0
-}
-
-function parseAttrezzatureDetail (raw: any): AttrezzaturaRimborsoDettaglio[] {
-  const out: AttrezzaturaRimborsoDettaglio[] = []
-  for (const line of String(raw ?? '').split(/\r?\n/)) {
-    const text = line.trim()
-    if (!text) continue
-    if (/^Decurtazione della cauzione\b/i.test(text)) continue // riga aggregata legacy, gestita a parte
-    const statoMatch = text.match(/Stato:\s*(Non recuperabile|Recuperabile)/i)
-    if (!statoMatch) continue // non è (più) una riga attrezzatura valida
-    const esito: AttrezzaturaEsito = /^recuperabile$/i.test(String(statoMatch[1]).trim()) ? 'riparazione' : 'risarcimento'
-
-    const cutIdx = text.search(/\s+—\s+Valore unitario:/i)
-    const prefix = cutIdx >= 0 ? text.slice(0, cutIdx).trim() : text
-    const codiceMatch = prefix.match(/^(.*?)\s+—\s+Codice:\s*(.+)$/i)
-    const descrizione = String(codiceMatch?.[1] || prefix).trim()
-    const codice = String(codiceMatch?.[2] || '').trim()
-    if (!descrizione) continue
-
-    const valoreMatch = text.match(/Valore unitario:\s*([0-9.,]+)/i)
-    const matricolaMatch = text.match(/Matricola:\s*([^—]+?)(?=\s+—|$)/i)
-    const cauzioneMatch = text.match(/Cauzione:\s*(Decurtata|Non decurtata)/i)
-    const idMatch = text.match(/—\s*ID:\s*([0-9]+)/i)
-    const hasOwnCauzioneTag = !!cauzioneMatch
-
-    // Retrocompatibilità: le righe salvate prima di questa modifica potevano avere una
-    // quantità aggregata (una riga = più unità) — le espandiamo in righe singole.
-    const legacyQty = (() => {
-      const q = parseAttrezzaturaNumber(text.match(/Quantità:\s*([0-9.,]+)/i)?.[1])
-      return q != null && q > 0 ? Math.max(1, Math.trunc(q)) : 1
-    })()
-
-    for (let i = 0; i < legacyQty; i++) {
-      out.push({
-        persistentId: idMatch ? String(idMatch[1]) : '',
-        codice,
-        descrizione,
-        valoreUnitario: parseAttrezzaturaNumber(valoreMatch?.[1]),
-        esito,
-        matricola: String(matricolaMatch?.[1] || '').trim(),
-        cauzioneDecurtata: hasOwnCauzioneTag ? /^decurtata$/i.test(String(cauzioneMatch![1]).trim()) : false
-      })
-    }
-  }
-
-  // Assegno un ID fresco alle righe prive di tag ID (pratiche salvate prima di questa
-  // modifica), evitando collisioni con eventuali ID già presenti nel testo.
-  let maxId = 0
-  out.forEach(row => { const n = parseInt(row.persistentId, 10); if (Number.isFinite(n) && n > maxId) maxId = n })
-  out.forEach(row => { if (!row.persistentId) { maxId += 1; row.persistentId = String(maxId) } })
-
-  const legacyCauzioneQty = parseLegacyCauzioneQty(raw)
-  if (legacyCauzioneQty > 0) {
-    let remaining = legacyCauzioneQty
-    for (const row of out) {
-      if (remaining <= 0) break
-      if (attrezzaturaTipo(row.descrizione)?.key === 'TESSERA_ELETTRONICA' && !row.cauzioneDecurtata) {
-        row.cauzioneDecurtata = true
-        remaining--
-      }
-    }
-  }
-  return out
-}
-
-function buildAttrezzatureDetail (rows: AttrezzaturaRimborsoRow[]): string {
-  return rows.map(row => {
-    const unit = Number(row.valoreUnitario) || 0
-    const codice = String(row.codice || '').trim()
-    const statoLabel = row.esito === 'riparazione' ? 'Recuperabile' : 'Non recuperabile'
-    const isTessera = attrezzaturaTipo(row.descrizione)?.key === 'TESSERA_ELETTRONICA'
-    let line = `${row.descrizione}${codice ? ` — Codice: ${codice}` : ''} — Valore unitario: ${attrezzaturaMoney(unit)} € — Stato: ${statoLabel}`
-    if (isTessera) {
-      const matricola = String(row.matricola || '').trim()
-      line += ` — Matricola: ${matricola} — Cauzione: ${row.cauzioneDecurtata ? 'Decurtata' : 'Non decurtata'}`
-    }
-    line += ` — ID: ${row.persistentId}`
-    return line
-  }).join('\n')
-}
-
-function attrezzatureTotal (rows: AttrezzaturaRimborsoRow[]): number {
-  return Math.round(rows.reduce((sum, row) => row.esito !== 'riparazione' ? sum + (Number(row.valoreUnitario) || 0) : sum, 0) * 100) / 100
-}
-
-function attrezzatureCauzioneTotal (rows: AttrezzaturaRimborsoRow[], cauzioneUnitaria: number): number {
-  const unit = Number(cauzioneUnitaria) || 0
-  if (unit <= 0) return 0
-  const count = rows.filter(row => row.cauzioneDecurtata && attrezzaturaTipo(row.descrizione)?.key === 'TESSERA_ELETTRONICA').length
-  return Math.round(count * unit * 100) / 100
 }
 
 function buildAttrezzatureParametersFromRows (rows: any[], referenceDate?: any): AttrezzaturaParametro[] {
@@ -5265,130 +5161,6 @@ async function queryNotaSpeseRows (detailUrl: string, parentGlobalId: string, ca
   }).filter((row) => row !== null) as NsDetailRow[]
 }
 
-// Righe di Nota spese categoria RA (Risarcimento attrezzatura Art.30, origine PARAMETRO):
-// non sono una NsCategory tra le 5 gestite dal motore generico sopra (sola lettura,
-// raggruppate, generate automaticamente dal popup "Gestisci attrezzature", mai editate a
-// mano riga per riga) — vivono quindi in uno stato e in una sync dedicati e separati.
-type Art30RaRow = {
-  objectid: number
-  descrizione_snapshot: string
-  prezzo_unitario_snapshot: number
-  quantita: number
-  importo_riga: number
-  ordine: number
-  riferimento_attrezzatura_id: string
-}
-
-const ART30_RA_CASISTICA = 'C104_ATTREZZATURE_DANNEGGIATE'
-const ART30_RA_CAUZIONE_ID = '__CAUZIONE__'
-
-async function queryArt30RaRows (detailUrl: string, parentGlobalId: string): Promise<Art30RaRow[]> {
-  const where = `parent_globalid = '${nsEscapeSqlString(parentGlobalId)}' AND categoria_costo = 'RA' AND codice_casistica = '${nsEscapeSqlString(ART30_RA_CASISTICA)}'`
-  const rows = await queryTableAttributes(detailUrl, where, 'ordine ASC, OBJECTID ASC')
-  return rows.map((r: any) => ({
-    objectid: nsSafeNum(pickAttrCI(r, ['OBJECTID', 'objectid']), 0),
-    descrizione_snapshot: String(r?.descrizione_snapshot || '').trim(),
-    prezzo_unitario_snapshot: nsRound(nsSafeNum(r?.prezzo_unitario_snapshot, 0), 4),
-    quantita: nsRound(nsSafeNum(r?.quantita, 0), 4),
-    importo_riga: nsRound(nsSafeNum(r?.importo_riga, 0), 2),
-    ordine: Math.trunc(nsSafeNum(r?.ordine, 0)),
-    riferimento_attrezzatura_id: String(r?.riferimento_attrezzatura_id || '').trim()
-  })).filter(row => !!row.riferimento_attrezzatura_id)
-}
-
-// Ricostruisce l'elenco atteso di righe RA a partire dalle attrezzature "Non recuperabile"
-// del popup. Una riga per attrezzatura (persistentId = riferimento_attrezzatura_id). Se una
-// stessa attrezzatura era già presente nel baseline caricato dal server, ne riusa l'objectid
-// (diventa un update); altrimenti objectid 0 (diventa un add). Le attrezzature non più
-// presenti spariscono semplicemente dall'elenco (diventeranno un delete in sync).
-function buildArt30RaRowsDraft (attrezzatureRows: AttrezzaturaRimborsoRow[], cauzioneTotale: number, baseline: Art30RaRow[]): Art30RaRow[] {
-  const baselineById = new Map(baseline.map(row => [row.riferimento_attrezzatura_id, row]))
-  const rows = attrezzatureRows
-    .filter(row => row.esito === 'risarcimento')
-    .map((row, idx) => {
-      const existing = baselineById.get(row.persistentId)
-      const unit = Number(row.valoreUnitario) || 0
-      return {
-        objectid: existing?.objectid || 0,
-        descrizione_snapshot: row.descrizione,
-        prezzo_unitario_snapshot: unit,
-        quantita: 1,
-        importo_riga: unit,
-        ordine: idx,
-        riferimento_attrezzatura_id: row.persistentId
-      }
-    })
-  const cauzione = Math.round((Number(cauzioneTotale) || 0) * 100) / 100
-  if (cauzione > 0) {
-    // Riga aggregata (non legata a una singola attrezzatura): stesso ID sentinella ad ogni
-    // rigenerazione, cosi la sync la aggiorna invece di duplicarla.
-    const existingCauzione = baselineById.get(ART30_RA_CAUZIONE_ID)
-    rows.push({
-      objectid: existingCauzione?.objectid || 0,
-      descrizione_snapshot: 'Decurtazione della cauzione',
-      prezzo_unitario_snapshot: -cauzione,
-      quantita: 1,
-      importo_riga: -cauzione,
-      ordine: rows.length,
-      riferimento_attrezzatura_id: ART30_RA_CAUZIONE_ID
-    })
-  }
-  return rows
-}
-
-function art30RaRowsSignature (rows: Art30RaRow[]): string {
-  return rows
-    .slice()
-    .sort((a, b) => a.riferimento_attrezzatura_id.localeCompare(b.riferimento_attrezzatura_id))
-    .map(r => `${r.riferimento_attrezzatura_id}|${r.descrizione_snapshot}|${r.prezzo_unitario_snapshot}|${r.quantita}|${r.importo_riga}`)
-    .join(';;')
-}
-
-async function syncArt30RaRowsToTable (detailUrl: string, parentGlobalId: string, baseline: Art30RaRow[], draft: Art30RaRow[]): Promise<void> {
-  const fl = await getFeatureLayerByUrl(detailUrl)
-  const oidField = String(fl?.objectIdField || 'OBJECTID')
-  const fieldNames = new Set(((fl?.fields || []) as any[]).map((f: any) => String(f?.name || '')))
-  const toAttrs = (row: Art30RaRow, objectid?: number | null) => {
-    const attrs: any = {}
-    const put = (k: string, v: any) => { if (fieldNames.has(k)) attrs[k] = v }
-    if (objectid != null && objectid > 0) attrs[oidField] = Number(objectid)
-    if ((objectid == null || objectid <= 0) && parentGlobalId) put('parent_globalid', parentGlobalId)
-    put('categoria_costo', 'RA')
-    put('origine_voce_snapshot', 'PARAMETRO')
-    put('codice_casistica', ART30_RA_CASISTICA)
-    put('descrizione_snapshot', row.descrizione_snapshot)
-    put('prezzo_unitario_snapshot', nsRound(nsSafeNum(row.prezzo_unitario_snapshot, 0), 4))
-    put('quantita', nsRound(nsSafeNum(row.quantita, 0), 4))
-    put('importo_riga', nsRound(nsSafeNum(row.importo_riga, 0), 2))
-    put('ordine', Math.trunc(nsSafeNum(row.ordine, 0)))
-    put('riferimento_attrezzatura_id', row.riferimento_attrezzatura_id)
-    return attrs
-  }
-  const baselineById = new Map(baseline.map(row => [row.riferimento_attrezzatura_id, row]))
-  const draftById = new Map(draft.map(row => [row.riferimento_attrezzatura_id, row]))
-  const addFeatures = draft.filter(row => !row.objectid).map(row => ({ attributes: toAttrs(row, null) }))
-  const updateFeatures = draft.filter(row => {
-    if (!row.objectid) return false
-    const base = baselineById.get(row.riferimento_attrezzatura_id)
-    return !!base && (base.descrizione_snapshot !== row.descrizione_snapshot || base.prezzo_unitario_snapshot !== row.prezzo_unitario_snapshot || base.quantita !== row.quantita || base.importo_riga !== row.importo_riga || base.ordine !== row.ordine)
-  }).map(row => ({ attributes: toAttrs(row, row.objectid) }))
-  const deleteIds = baseline.filter(row => !draftById.has(row.riferimento_attrezzatura_id)).map(row => row.objectid).filter(oid => oid > 0)
-  const payload: any = {}
-  if (addFeatures.length > 0) payload.addFeatures = addFeatures
-  if (updateFeatures.length > 0) payload.updateFeatures = updateFeatures
-  if (deleteIds.length > 0) {
-    const Graphic = await loadEsriModule<any>('esri/Graphic')
-    payload.deleteFeatures = deleteIds.map((oid) => new Graphic({ attributes: { [oidField]: oid } }))
-  }
-  if (!payload.addFeatures && !payload.updateFeatures && !payload.deleteFeatures) return
-  const res = await fl.applyEdits(payload)
-  const errs: string[] = []
-  ;(res?.addFeatureResults || []).forEach((r: any) => { if (r?.error) errs.push(String(r.error.message || 'Errore add risarcimento attrezzature')) })
-  ;(res?.updateFeatureResults || []).forEach((r: any) => { if (r?.error) errs.push(String(r.error.message || 'Errore update risarcimento attrezzature')) })
-  ;(res?.deleteFeatureResults || []).forEach((r: any) => { if (r?.error) errs.push(String(r.error.message || 'Errore delete risarcimento attrezzature')) })
-  if (errs.length > 0) throw new Error(errs.join(' | '))
-}
-
 
 async function syncNotaSpeseDraftToTable (detailUrl: string, parentGlobalId: string, baselineRowsByCategory: Record<NsCategory, NsDetailRow[]>, draftRowsByCategory: Record<NsCategory, NsDetailRow[]>): Promise<void> {
   const fl = await getFeatureLayerByUrl(detailUrl)
@@ -5459,16 +5231,18 @@ async function recomputeAndPersistNotaSpeseSummary (opts: {
   const totaleRU = sumBy('RU')
   const totaleSL = sumBy('SL')
   const totalePF = sumBy('PF')
+  const totaleRA = sumBy('RA') // risarcimento attrezzature Art.30: nessun markup, si somma netto
   const base = nsRound(totaleAT + totalePR + totaleRU + totaleSL + totalePF, 2)
   const perc = await getNsPercentuale(opts.parametriUrl, opts.parametroCode)
   const importoSpeseGenerali = nsRound(base * nsSafeNum(perc, 0) / 100, 2)
-  const totaleComplessivo = nsRound(base + importoSpeseGenerali, 2)
+  const totaleComplessivo = nsRound(base + importoSpeseGenerali + totaleRA, 2)
   const summary: NsSummary = {
     totaleAT,
     totalePR,
     totaleRU,
     totaleSL,
     totalePF,
+    totaleRA,
     percentualeSpeseGenerali: nsRound(perc, 2),
     importoSpeseGenerali,
     totaleComplessivo
@@ -5500,10 +5274,14 @@ function NoteSpeseManager (props: NsManagerProps) {
   const [msg, setMsg] = React.useState<{ ok: boolean; text: string } | null>(null)
   const [editIdx, setEditIdx] = React.useState<number | null>(null)
   const [editQty, setEditQty] = React.useState('')
+  const [editMatricola, setEditMatricola] = React.useState('')
+  const [editCauzione, setEditCauzione] = React.useState(false)
   const [confirmDeleteIdx, setConfirmDeleteIdx] = React.useState<number | null>(null)
 
+  const isTesseraRow = (r: NsDetailRow) => props.category === 'RA' && attrezzaturaTipo(r.descrizione_snapshot)?.key === 'TESSERA_ELETTRONICA'
+
   React.useEffect(() => { if (!msg) return; const t = window.setTimeout(() => setMsg(null), 5000); return () => window.clearTimeout(t) }, [msg])
-  React.useEffect(() => { setEditIdx(null); setEditQty('') }, [props.resetKey])
+  React.useEffect(() => { setEditIdx(null); setEditQty(''); setEditMatricola(''); setEditCauzione(false) }, [props.resetKey])
 
   const money = (n: any) => nsSafeNum(n, 0).toLocaleString('it-IT', { useGrouping: true, minimumFractionDigits: 2, maximumFractionDigits: 2 })
   const categoryTotal = React.useMemo(() => nsRound(rows.reduce((s, r) => s + nsSafeNum(r.importo_riga, 0), 0), 2), [rows])
@@ -5512,25 +5290,41 @@ function NoteSpeseManager (props: NsManagerProps) {
   const startEdit = (idx: number) => {
     if (props.readonly) return
     setEditIdx(idx)
-    setEditQty(String(rows[idx]?.quantita ?? ''))
+    const r = rows[idx]
+    if (isTesseraRow(r)) {
+      setEditMatricola(String(r?.matricola_snapshot || ''))
+      setEditCauzione(!!r?.cauzione_decurtata)
+    } else {
+      setEditQty(String(r?.quantita ?? ''))
+    }
   }
 
-  const cancelEdit = () => { setEditIdx(null); setEditQty('') }
+  const cancelEdit = () => { setEditIdx(null); setEditQty(''); setEditMatricola(''); setEditCauzione(false) }
 
   const saveEdit = () => {
     if (props.readonly) return
     if (editIdx == null || editIdx < 0 || editIdx >= rows.length) return
-    const qty = nsRound(nsSafeNum(String(editQty).replace(',', '.'), 0), 4)
     const nextRows = rows.map((r, i) => {
       if (i !== editIdx) return nsCloneRow(r)
       const updated = nsCloneRow(r)
-      updated.quantita = qty
-      updated.importo_riga = nsRound(qty * nsSafeNum(r.prezzo_unitario_snapshot, 0), 2)
+      if (isTesseraRow(r)) {
+        const cauzioneUnit = Number(props.cauzioneUnitaria) || 0
+        updated.quantita = 1
+        updated.matricola_snapshot = editMatricola.trim() || null
+        updated.cauzione_decurtata = editCauzione
+        updated.importo_riga = nsRound(nsSafeNum(r.prezzo_unitario_snapshot, 0) - (editCauzione ? cauzioneUnit : 0), 2)
+      } else {
+        const qty = nsRound(nsSafeNum(String(editQty).replace(',', '.'), 0), 4)
+        updated.quantita = qty
+        updated.importo_riga = nsRound(qty * nsSafeNum(r.prezzo_unitario_snapshot, 0), 2)
+      }
       return updated
     })
     props.onRowsChange(nextRows)
     setEditIdx(null)
     setEditQty('')
+    setEditMatricola('')
+    setEditCauzione(false)
   }
 
   const onDelete = (idx: number) => {
@@ -5566,18 +5360,37 @@ function NoteSpeseManager (props: NsManagerProps) {
         )}
         {!props.readonly && editIdx != null && editIdx >= 0 && editIdx < rows.length && (
           <div style={{ margin: '8px 10px', padding: 8, border: '1px solid #aac4e0', borderRadius: 8, background: '#f5f9ff', display: 'grid', gap: 6 }}>
-            <div style={{ fontSize: 12, color: '#1F4E79', fontWeight: 700 }}>Modifica quantità — {rows[editIdx].codice_voce_snapshot}</div>
-            <div style={{ fontSize: 12, color: '#444' }}>{rows[editIdx].descrizione_snapshot}</div>
-            <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-              <input type='text' inputMode='decimal' value={editQty} onChange={(e) => setEditQty(e.target.value.replace(',', '.'))} onKeyDown={(e) => { if (e.key === 'Enter') saveEdit(); if (e.key === 'Escape') cancelEdit() }} style={{ width: 100, padding: '5px 8px', border: '1px solid #aac4e0', borderRadius: 4, fontSize: 13 }} autoFocus />
-              <span style={{ fontSize: 12, color: '#64748b' }}>{rows[editIdx].unita_misura_snapshot || 'u.m.'}</span>
-              <span style={{ fontSize: 12, color: '#64748b' }}>×</span>
-              <span style={{ fontSize: 12, color: '#375623', fontWeight: 700 }}>{money(rows[editIdx].prezzo_unitario_snapshot)}</span>
-              <span style={{ fontSize: 12, color: '#64748b' }}>=</span>
-              <span style={{ fontSize: 12, color: '#1F4E79', fontWeight: 700 }}>{money(nsRound(nsSafeNum(String(editQty).replace(',', '.'), 0) * nsSafeNum(rows[editIdx].prezzo_unitario_snapshot, 0), 2))}</span>
-              <button type='button' onClick={saveEdit} style={{ padding: '4px 14px', border: 'none', borderRadius: 4, fontSize: 12, fontWeight: 700, background: '#1F4E79', color: '#fff', cursor: 'pointer' }}>Aggiorna</button>
-              <button type='button' onClick={cancelEdit} style={{ padding: '4px 14px', border: 'none', borderRadius: 4, fontSize: 12, fontWeight: 700, background: '#e0e0e0', color: '#333', cursor: 'pointer' }}>Annulla</button>
-            </div>
+            {isTesseraRow(rows[editIdx]) ? (
+              <>
+                <div style={{ fontSize: 12, color: '#1F4E79', fontWeight: 700 }}>Tessera elettronica</div>
+                <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+                  <span style={{ fontSize: 12, color: '#444' }}>Matricola</span>
+                  <input type='text' value={editMatricola} onChange={(e) => setEditMatricola(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') saveEdit(); if (e.key === 'Escape') cancelEdit() }} style={{ width: 140, padding: '5px 8px', border: '1px solid #aac4e0', borderRadius: 4, fontSize: 13 }} autoFocus />
+                  <label style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 12, color: '#444', cursor: 'pointer' }}>
+                    <input type='checkbox' checked={editCauzione} onChange={(e) => setEditCauzione(e.target.checked)} />
+                    Cauzione decurtata
+                  </label>
+                  <span style={{ fontSize: 12, color: '#375623', fontWeight: 700 }}>{money(nsSafeNum(rows[editIdx].prezzo_unitario_snapshot, 0) - (editCauzione ? (Number(props.cauzioneUnitaria) || 0) : 0))} €</span>
+                  <button type='button' onClick={saveEdit} style={{ padding: '4px 14px', border: 'none', borderRadius: 4, fontSize: 12, fontWeight: 700, background: '#1F4E79', color: '#fff', cursor: 'pointer' }}>Aggiorna</button>
+                  <button type='button' onClick={cancelEdit} style={{ padding: '4px 14px', border: 'none', borderRadius: 4, fontSize: 12, fontWeight: 700, background: '#e0e0e0', color: '#333', cursor: 'pointer' }}>Annulla</button>
+                </div>
+              </>
+            ) : (
+              <>
+                <div style={{ fontSize: 12, color: '#1F4E79', fontWeight: 700 }}>Modifica quantità — {rows[editIdx].codice_voce_snapshot}</div>
+                <div style={{ fontSize: 12, color: '#444' }}>{rows[editIdx].descrizione_snapshot}</div>
+                <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                  <input type='text' inputMode='decimal' value={editQty} onChange={(e) => setEditQty(e.target.value.replace(',', '.'))} onKeyDown={(e) => { if (e.key === 'Enter') saveEdit(); if (e.key === 'Escape') cancelEdit() }} style={{ width: 100, padding: '5px 8px', border: '1px solid #aac4e0', borderRadius: 4, fontSize: 13 }} autoFocus />
+                  <span style={{ fontSize: 12, color: '#64748b' }}>{rows[editIdx].unita_misura_snapshot || 'u.m.'}</span>
+                  <span style={{ fontSize: 12, color: '#64748b' }}>×</span>
+                  <span style={{ fontSize: 12, color: '#375623', fontWeight: 700 }}>{money(rows[editIdx].prezzo_unitario_snapshot)}</span>
+                  <span style={{ fontSize: 12, color: '#64748b' }}>=</span>
+                  <span style={{ fontSize: 12, color: '#1F4E79', fontWeight: 700 }}>{money(nsRound(nsSafeNum(String(editQty).replace(',', '.'), 0) * nsSafeNum(rows[editIdx].prezzo_unitario_snapshot, 0), 2))}</span>
+                  <button type='button' onClick={saveEdit} style={{ padding: '4px 14px', border: 'none', borderRadius: 4, fontSize: 12, fontWeight: 700, background: '#1F4E79', color: '#fff', cursor: 'pointer' }}>Aggiorna</button>
+                  <button type='button' onClick={cancelEdit} style={{ padding: '4px 14px', border: 'none', borderRadius: 4, fontSize: 12, fontWeight: 700, background: '#e0e0e0', color: '#333', cursor: 'pointer' }}>Annulla</button>
+                </div>
+              </>
+            )}
           </div>
         )}
         <div style={{ border: 'none', borderRadius: 0, minHeight: 60, overflow: 'auto' }}>
@@ -5605,11 +5418,13 @@ function NoteSpeseManager (props: NsManagerProps) {
                 <tr><td colSpan={6} style={{ padding: 16, textAlign: 'center', color: '#64748b', fontSize: 12 }}>Nessuna riga.</td></tr>
               ) : rows.map((r, idx) => {
                 const noQty = nsSafeNum(r.quantita, 0) <= 0
+                const tessera = isTesseraRow(r)
+                const incomplete = tessera ? !String(r.matricola_snapshot || '').trim() : noQty
                 return (
                 <tr key={`${r.objectid || 'tmp'}-${idx}`}>
                   <td style={tdS(idx)}><div style={{ whiteSpace: 'pre-line', lineHeight: 1.1 }}>{`${nsSourceShort(nsNormalizeSource(r.origine_voce_snapshot))}${r.anno_prezzario_snapshot ? `\n${r.anno_prezzario_snapshot}` : ''}`}</div></td>
                   <td style={{ ...tdS(idx), overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={`${r.codice_voce_snapshot} — ${r.descrizione_snapshot}`}><b>{r.codice_voce_snapshot}</b> — {r.descrizione_snapshot}</td>
-                  <td style={{ ...tdS(idx), ...(noQty ? { background: '#fff3cd', fontWeight: 700, color: '#856404' } : {}) }}>{noQty ? '—' : `${nsSafeNum(r.quantita, 0).toLocaleString('it-IT', { minimumFractionDigits: 0, maximumFractionDigits: 4 })} ${r.unita_misura_snapshot || ''}`}</td>
+                  <td style={{ ...tdS(idx), ...(incomplete ? { background: '#fff3cd', fontWeight: 700, color: '#856404' } : {}) }}>{tessera ? (r.matricola_snapshot ? `Matricola ${r.matricola_snapshot}${r.cauzione_decurtata ? ' (cauzione decurtata)' : ''}` : 'Matricola mancante') : (noQty ? '—' : `${nsSafeNum(r.quantita, 0).toLocaleString('it-IT', { minimumFractionDigits: 0, maximumFractionDigits: 4 })} ${r.unita_misura_snapshot || ''}`)}</td>
                   <td style={{ ...tdS(idx), textAlign: 'right' }}>{money(r.prezzo_unitario_snapshot)}</td>
                   <td style={{ ...tdS(idx), textAlign: 'right' }}>{money(r.importo_riga)}</td>
                   <td style={{ ...tdS(idx), whiteSpace: 'nowrap' }}>
@@ -6074,7 +5889,6 @@ function NuovaPraticaForm (p: {
     </button>
   ) : null
   const isRiAgrTecLimitedEdit = mode === 'edit' && !isReadOnly && isCurrentRiAgrTec()
-  const canEditArt30Attrezzature = !isReadOnly && !isRiAgrTecLimitedEdit && currentProfileRole === 'TI'
   const riAgrTecEditableUiFields = React.useMemo(() => new Set(['grado', 'norma15_sel', 'occorrenza']), [])
   const riAgrTecEditableDraftFields = React.useMemo(() => new Set(['gradi_violazioni', 'occorrenza']), [])
   const riAgrTecEditableSaveFields = React.useMemo(() => new Set(['gradi_violazioni', 'occorrenza']), [])
@@ -6096,7 +5910,8 @@ function NuovaPraticaForm (p: {
     PR: false,
     RU: false,
     SL: false,
-    PF: false
+    PF: false,
+    RA: false
   })
   const [noteSpeseManagerResetKey, setNoteSpeseManagerResetKey] = React.useState(0)
   const [createSuccessPraticaCode, setCreateSuccessPraticaCode] = React.useState('')
@@ -6107,18 +5922,15 @@ function NuovaPraticaForm (p: {
   const [cancelUnsavedPopupOpen, setCancelUnsavedPopupOpen] = React.useState(false)
   const [missingMapPointPopupOpen, setMissingMapPointPopupOpen] = React.useState(false)
   const [notaSpeseLinkedViolationPopup, setNotaSpeseLinkedViolationPopup] = React.useState<null | { codice: string; art: number; label?: string }>(null)
-  const [attrezzaturePopupOpen, setAttrezzaturePopupOpen] = React.useState(false)
-  const [attrezzaturePopupPendingArt30, setAttrezzaturePopupPendingArt30] = React.useState(false)
-  const [attrezzatureRemoveConfirmOpen, setAttrezzatureRemoveConfirmOpen] = React.useState(false)
-  const [attrezzatureRows, setAttrezzatureRows] = React.useState<AttrezzaturaRimborsoRow[]>([])
-  const [attrezzatureLoading, setAttrezzatureLoading] = React.useState(false)
-  const [attrezzatureError, setAttrezzatureError] = React.useState('')
-  // Catalogo tipi attrezzatura disponibili (per il menu "Aggiungi attrezzatura"), con il
-  // relativo prezzo corrente — caricato dalla vista parametri Art. 30, solo per chi edita.
+  // Combo 2 (scheda Nota spese, casistica Art.30): recuperabile (righe AT/PR/RU/SL/PF collegate
+  // a un tipo di attrezzatura) oppure non recuperabile (righe RA dal carrello attrezzature).
+  const [art30RecuperoMode, setArt30RecuperoMode] = React.useState<'recuperabile' | 'non_recuperabile'>('recuperabile')
+  const [attrezzatureNuovoPickerOpen, setAttrezzatureNuovoPickerOpen] = React.useState(false)
+  // Catalogo tipi attrezzatura (Combo 3 in modalità recuperabile, e prezzi/cauzione per RA),
+  // caricato dalla vista parametri Art. 30 (GII_PARAMETRI_SANZIONI, categoria ATTREZZATURA/CAUZIONE).
   const [attrezzatureCatalog, setAttrezzatureCatalog] = React.useState<AttrezzaturaParametro[]>([])
   // Valore unitario della cauzione per singola tessera, letto dalla vista parametri Art. 30.
   const [attrezzatureCauzioneUnitaria, setAttrezzatureCauzioneUnitaria] = React.useState<number>(0)
-  const attrezzatureRowIdCounterRef = React.useRef(0)
   const validationPopupOkId = React.useMemo(() => `gii-val-ok-${Math.random().toString(36).slice(2)}`, [])
   const validationPopupBackdropId = React.useMemo(() => `gii-val-backdrop-${Math.random().toString(36).slice(2)}`, [])
   const successPopupOkId = React.useMemo(() => `gii-success-ok-${Math.random().toString(36).slice(2)}`, [])
@@ -6679,10 +6491,7 @@ function NuovaPraticaForm (p: {
     setArt15SelectedUi(draftHasArt15Selection(nextBase))
     setAttrezzatureCauzioneUnitaria(0)
     setAttrezzatureCatalog([])
-    setAttrezzatureRows([])
-    setAttrezzaturePopupOpen(false)
-    setAttrezzaturePopupPendingArt30(false)
-    setAttrezzatureRemoveConfirmOpen(false)
+    setArt30RecuperoMode('recuperabile')
     setAttachmentFiles([])
     setAttachmentInputKey(k => k + 1)
     setPendingDeleteAttachmentIds([])
@@ -6867,8 +6676,6 @@ const [activePrezzario, setActivePrezzario] = React.useState<{ codice: string; a
 const [noteSpesePercent, setNoteSpesePercent] = React.useState<number>(0)
 const [noteSpeseRowsBaseline, setNoteSpeseRowsBaseline] = React.useState<Record<NsCategory, NsDetailRow[]>>(nsCloneRowsByCategory(EMPTY_NS_ROWS_BY_CATEGORY))
 const [noteSpeseRowsDraft, setNoteSpeseRowsDraft] = React.useState<Record<NsCategory, NsDetailRow[]>>(nsCloneRowsByCategory(EMPTY_NS_ROWS_BY_CATEGORY))
-const [art30RaRowsBaseline, setArt30RaRowsBaseline] = React.useState<Art30RaRow[]>([])
-const [art30RaRowsDraft, setArt30RaRowsDraft] = React.useState<Art30RaRow[]>([])
 const [activeNotaSpeseCasistica, setActiveNotaSpeseCasistica] = React.useState<string>('')
   // Solo per la casistica Art.30 (C104_ATTREZZATURE_DANNEGGIATE): riferimento (persistentId)
   // dell'attrezzatura recuperabile per cui si sta compilando la nota spese. Ogni attrezzatura
@@ -6933,13 +6740,10 @@ const loadNotaSpeseDraft = React.useCallback(async () => {
   if (mode !== 'edit' || currentOid == null || !currentGlobalId || noteSpeseMissing.length > 0) return
   setNoteSpeseBusy(true)
   try {
-    const [rows, raRows, perc] = await Promise.all([
+    const [rows, perc] = await Promise.all([
       queryNotaSpeseRows(noteSpeseCfg.detailUrl, currentGlobalId),
-      queryArt30RaRows(noteSpeseCfg.detailUrl, currentGlobalId),
       getNsPercentuale(noteSpeseCfg.parametriUrl, noteSpeseCfg.parametroCode)
     ])
-    setArt30RaRowsBaseline(raRows)
-    setArt30RaRowsDraft(raRows)
     const grouped = nsRowsFromFlat(rows)
     setNoteSpeseRowsBaseline(grouped)
     let draft = nsCloneRowsByCategory(grouped)
@@ -6967,12 +6771,13 @@ const loadNotaSpeseDraft = React.useCallback(async () => {
     if (raw) {
       try { sessionStorage.removeItem(GII_NS_CART_KEY) } catch {}
       const isArt30Effective = effectiveNotaSpeseCasistica === 'C104_ATTREZZATURE_DANNEGGIATE'
+      const requiresRiferimentoEffective = isArt30Effective && art30RecuperoMode !== 'non_recuperabile'
       if (!effectiveNotaSpeseCasistica) {
         setNoteSpeseMsg({ ok: false, text: 'Le voci del prezzario non sono state aggiunte: seleziona prima una nota spese collegata a una violazione.' })
-      } else if (isArt30Effective && !activeAttrezzaturaRiferimentoId) {
+      } else if (requiresRiferimentoEffective && !activeAttrezzaturaRiferimentoId) {
         setNoteSpeseMsg({ ok: false, text: "Le voci del prezzario non sono state aggiunte: seleziona prima l'attrezzatura a cui si riferisce questa nota spese." })
       } else {
-      const effectiveRiferimentoId = isArt30Effective ? activeAttrezzaturaRiferimentoId : ''
+      const effectiveRiferimentoId = requiresRiferimentoEffective ? activeAttrezzaturaRiferimentoId : ''
       let cartItems: any[] = []
       try { cartItems = JSON.parse(raw) } catch { cartItems = [] }
       if (Array.isArray(cartItems) && cartItems.length > 0) {
@@ -6982,7 +6787,7 @@ const loadNotaSpeseDraft = React.useCallback(async () => {
           ;(draft[cat] || []).forEach((r) => {
             const codice = String(r.codice_voce_snapshot || '').trim()
             const matchesCasistica = String(r.codice_casistica || '').trim() === activeCasisticaCode
-            const matchesRiferimento = !effectiveRiferimentoId || String(r.riferimento_attrezzatura_id || '').trim() === effectiveRiferimentoId
+            const matchesRiferimento = String(r.riferimento_attrezzatura_id || '').trim() === effectiveRiferimentoId
             if (matchesCasistica && matchesRiferimento && codice) existingCodes.add(codice)
           })
         })
@@ -6995,6 +6800,8 @@ const loadNotaSpeseDraft = React.useCallback(async () => {
           if (existingCodes.has(codiceVoce)) return
           const cat = nsNormalizeCategory(item.famiglia)
           if (!cat) return
+          const isTesseraCartItem = cat === 'RA' && attrezzaturaTipo(item.descrizione)?.key === 'TESSERA_ELETTRONICA'
+          const prezzoCart = nsRound(nsSafeNum(item.prezzo_unitario, 0), 4)
           maxOrdine += 10
           draft[cat].push({
             objectid: 0,
@@ -7003,9 +6810,9 @@ const loadNotaSpeseDraft = React.useCallback(async () => {
             codice_voce_snapshot: codiceVoce,
             descrizione_snapshot: String(item.descrizione || ''),
             unita_misura_snapshot: String(item.unita_misura || ''),
-            prezzo_unitario_snapshot: nsRound(nsSafeNum(item.prezzo_unitario, 0), 4),
-            quantita: 0,
-            importo_riga: 0,
+            prezzo_unitario_snapshot: prezzoCart,
+            quantita: isTesseraCartItem ? 1 : 0,
+            importo_riga: isTesseraCartItem ? prezzoCart : 0,
             anno_prezzario_snapshot: nsSafeNum(item.anno_riferimento, 0) > 0 ? Math.trunc(nsSafeNum(item.anno_riferimento, 0)) : null,
             ordine: maxOrdine,
             note: '',
@@ -7063,11 +6870,12 @@ React.useEffect(() => {
       return
     }
     const isArt30Active = activeNotaSpeseCasistica === 'C104_ATTREZZATURE_DANNEGGIATE'
-    if (isArt30Active && !activeAttrezzaturaRiferimentoId) {
+    const requiresRiferimentoActive = isArt30Active && art30RecuperoMode !== 'non_recuperabile'
+    if (requiresRiferimentoActive && !activeAttrezzaturaRiferimentoId) {
       setNoteSpeseMsg({ ok: false, text: "Le voci del prezzario non sono state aggiunte: seleziona prima l'attrezzatura a cui si riferisce questa nota spese." })
       return
     }
-    const effectiveRiferimentoId = isArt30Active ? activeAttrezzaturaRiferimentoId : ''
+    const effectiveRiferimentoId = requiresRiferimentoActive ? activeAttrezzaturaRiferimentoId : ''
     let cartItems: any[] = []
     try { cartItems = JSON.parse(raw) } catch { return }
     if (!Array.isArray(cartItems) || cartItems.length === 0) return
@@ -7078,7 +6886,7 @@ React.useEffect(() => {
         ;(prev[cat] || []).forEach((r) => {
           const codice = String(r.codice_voce_snapshot || '').trim()
           const matchesCasistica = String(r.codice_casistica || '').trim() === activeCasisticaCode
-          const matchesRiferimento = !effectiveRiferimentoId || String(r.riferimento_attrezzatura_id || '').trim() === effectiveRiferimentoId
+          const matchesRiferimento = String(r.riferimento_attrezzatura_id || '').trim() === effectiveRiferimentoId
           if (matchesCasistica && matchesRiferimento && codice) existingCodes.add(codice)
         })
       })
@@ -7092,6 +6900,8 @@ React.useEffect(() => {
         if (existingCodes.has(codiceVoce)) return
         const cat = nsNormalizeCategory(item.famiglia)
         if (!cat) return
+        const isTesseraCartItem = cat === 'RA' && attrezzaturaTipo(item.descrizione)?.key === 'TESSERA_ELETTRONICA'
+        const prezzoCart = nsRound(nsSafeNum(item.prezzo_unitario, 0), 4)
         maxOrdine += 10
         draft[cat].push({
           objectid: 0, categoria_costo: cat,
@@ -7099,8 +6909,8 @@ React.useEffect(() => {
           codice_voce_snapshot: codiceVoce,
           descrizione_snapshot: String(item.descrizione || ''),
           unita_misura_snapshot: String(item.unita_misura || ''),
-          prezzo_unitario_snapshot: nsRound(nsSafeNum(item.prezzo_unitario, 0), 4),
-          quantita: 0, importo_riga: 0,
+          prezzo_unitario_snapshot: prezzoCart,
+          quantita: isTesseraCartItem ? 1 : 0, importo_riga: isTesseraCartItem ? prezzoCart : 0,
           anno_prezzario_snapshot: nsSafeNum(item.anno_riferimento, 0) > 0 ? Math.trunc(nsSafeNum(item.anno_riferimento, 0)) : null,
           ordine: maxOrdine, note: '',
           codice_casistica: activeNotaSpeseCasistica,
@@ -7129,36 +6939,10 @@ React.useEffect(() => {
 
 const noteSpeseRowsDirty = React.useMemo(() => !nsRowsByCategoryEqual(noteSpeseRowsDraft, noteSpeseRowsBaseline), [noteSpeseRowsDraft, noteSpeseRowsBaseline])
 const noteSpeseFormsDirty = React.useMemo(() => NS_CATEGORIES.some((cat) => !!noteSpeseFormDirtyByCategory[cat]), [noteSpeseFormDirtyByCategory])
-const art30RaRowsDirty = React.useMemo(() => art30RaRowsSignature(art30RaRowsDraft) !== art30RaRowsSignature(art30RaRowsBaseline), [art30RaRowsDraft, art30RaRowsBaseline])
-
-// AnteprimaPanel (e il PDF nota spese) trattano RA come una vera 6a categoria; qui in
-// editing resta separata (Opzione A, righe RA in stato indipendente). Questo adattatore
-// unisce le due viste solo al momento di passare i dati al pannello di anteprima.
-const previewNsRaRows = React.useMemo(() => art30RaRowsDraft.map(row => ({
-  objectid: row.objectid,
-  categoria_costo: 'RA',
-  origine_voce_snapshot: 'PARAMETRO',
-  codice_voce_snapshot: '',
-  descrizione_snapshot: row.descrizione_snapshot,
-  unita_misura_snapshot: '',
-  prezzo_unitario_snapshot: row.prezzo_unitario_snapshot,
-  quantita: row.quantita,
-  importo_riga: row.importo_riga,
-  anno_prezzario_snapshot: null as number | null,
-  ordine: row.ordine,
-  note: '',
-  codice_casistica: ART30_RA_CASISTICA,
-  riferimento_attrezzatura_id: row.riferimento_attrezzatura_id
-})), [art30RaRowsDraft])
-const previewNsRows = React.useMemo(() => ({ ...noteSpeseRowsDraft, RA: previewNsRaRows }), [noteSpeseRowsDraft, previewNsRaRows])
-const previewNsSummary = React.useMemo(() => {
-  const totaleRA = nsRound(art30RaRowsDraft.reduce((s: number, r: Art30RaRow) => s + (Number(r.importo_riga) || 0), 0), 2)
-  return { ...noteSpeseSummary, totaleRA, totaleComplessivo: nsRound((Number(noteSpeseSummary?.totaleComplessivo) || 0) + totaleRA, 2) }
-}, [noteSpeseSummary, art30RaRowsDraft])
 
 React.useEffect(() => {
-  setNoteSpeseDraftDirty(noteSpeseRowsDirty || noteSpeseFormsDirty || art30RaRowsDirty)
-}, [noteSpeseRowsDirty, noteSpeseFormsDirty, art30RaRowsDirty])
+  setNoteSpeseDraftDirty(noteSpeseRowsDirty || noteSpeseFormsDirty)
+}, [noteSpeseRowsDirty, noteSpeseFormsDirty])
 
 React.useEffect(() => {
   if (!noteSpeseDraftStorageKey || isReadOnly || isRiAgrTecLimitedEdit) return
@@ -7420,245 +7204,51 @@ React.useEffect(() => {
     }
   }, [mode, currentOid, attachmentsForOid, loadCurrentAttachments])
 
-  const openAttrezzaturePopup = React.useCallback(async (pendingArt30Selection: boolean) => {
-    setAttrezzaturePopupPendingArt30(pendingArt30Selection)
-    setAttrezzaturePopupOpen(true)
-    setAttrezzatureLoading(true)
-    setAttrezzatureError('')
-    try {
-      const detailSnapshotRaw = g('attrezzature_risarcimento_dettaglio')
-      const parsed = parseAttrezzatureDetail(detailSnapshotRaw)
-      const cauzioneSnapshotTotal = Number(g('attrezzature_cauzione_decurtata')) || 0
-      const tessereDecurtateCount = parsed.filter(item => item.cauzioneDecurtata && attrezzaturaTipo(item.descrizione)?.key === 'TESSERA_ELETTRONICA').length
-      const cauzioneUnitariaDaSnapshot = tessereDecurtateCount > 0 ? Math.round((cauzioneSnapshotTotal / tessereDecurtateCount) * 100) / 100 : 0
+  const attrezzatureParametriUrl = String((cfg as any).attrezzatureParametriUrl || '').trim()
 
-      const toRow = (item: AttrezzaturaRimborsoDettaglio, idx: number): AttrezzaturaRimborsoRow => {
-        attrezzatureRowIdCounterRef.current += 1
-        return {
-          rowId: `r${attrezzatureRowIdCounterRef.current}-${idx}`,
-          persistentId: item.persistentId,
-          codice: item.codice,
-          descrizione: item.descrizione,
-          valoreUnitario: item.valoreUnitario ?? 0,
-          esito: item.esito,
-          matricola: item.matricola,
-          cauzioneDecurtata: item.cauzioneDecurtata
+  // Catalogo attrezzature (Combo 3 in modalità recuperabile; prezzo/cauzione per le righe RA)
+  // caricato una volta quando la casistica attiva è Art.30, non all'apertura della pratica.
+  React.useEffect(() => {
+    let cancelled = false
+    if (activeNotaSpeseCasistica !== 'C104_ATTREZZATURE_DANNEGGIATE' || !attrezzatureParametriUrl) {
+      console.log('[GII-DEBUG attrezzature] skip: casistica=', activeNotaSpeseCasistica, 'url=', attrezzatureParametriUrl)
+      setAttrezzatureCatalog([])
+      setAttrezzatureCauzioneUnitaria(0)
+      return () => { cancelled = true }
+    }
+    const withTimeout = <T,>(p: Promise<T>, ms: number): Promise<T> => new Promise((resolve, reject) => {
+      const t = window.setTimeout(() => reject(new Error(`timeout dopo ${ms}ms`)), ms)
+      p.then((v) => { window.clearTimeout(t); resolve(v) }, (e) => { window.clearTimeout(t); reject(e) })
+    })
+    void (async () => {
+      const maxAttempts = 4
+      for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+        if (cancelled) return
+        console.log(`[GII-DEBUG attrezzature] tentativo ${attempt}/${maxAttempts}, url=`, attrezzatureParametriUrl)
+        try {
+          const bundle = await withTimeout(loadArt30ParametersBundle(attrezzatureParametriUrl, g('data_rilevazione')), 4000)
+          console.log(`[GII-DEBUG attrezzature] tentativo ${attempt}: bundle ricevuto:`, JSON.stringify(bundle))
+          if (cancelled) return
+          if (bundle.attrezzature.length > 0) {
+            setAttrezzatureCatalog(bundle.attrezzature)
+            setAttrezzatureCauzioneUnitaria(bundle.cauzione)
+            return
+          }
+          // Risultato vuoto: puo' essere un blocco di avvio a freddo del caricatore moduli
+          // ArcGIS (si sblocca da solo dopo un istante) — non un vero "nessun dato".
+        } catch (e: any) {
+          console.log(`[GII-DEBUG attrezzature] tentativo ${attempt}: ERRORE`, e?.message || String(e))
         }
+        if (attempt < maxAttempts) await new Promise((r) => window.setTimeout(r, 1200))
       }
-
-      // RI/RZ/DT: sola consultazione dei valori già salvati nella pratica. Non caricano il
-      // catalogo prezzi (non possono aggiungere/modificare righe).
-      if (!canEditArt30Attrezzature) {
-        setAttrezzatureCatalog([])
-        setAttrezzatureCauzioneUnitaria(cauzioneUnitariaDaSnapshot)
-        setAttrezzatureRows(parsed.map(toRow))
-        setAttrezzatureError('')
-        return
-      }
-
-      const parametersUrl = String((cfg as any).attrezzatureParametriUrl || '').trim()
-      let art30Parameters: { attrezzature: AttrezzaturaParametro[]; cauzione: number } | null = null
-      if (parametersUrl) art30Parameters = await loadArt30ParametersBundle(parametersUrl, g('data_rilevazione'))
-
-      setAttrezzatureCatalog(art30Parameters?.attrezzature || [])
-      setAttrezzatureCauzioneUnitaria(
-        art30Parameters && art30Parameters.cauzione > 0 ? art30Parameters.cauzione : cauzioneUnitariaDaSnapshot
-      )
-      setAttrezzatureRows(parsed.map(toRow))
-      if (!parametersUrl) {
-        setAttrezzatureError('Vista di consultazione parametri Art. 30 non configurata nel setting.')
-      } else if (!art30Parameters || art30Parameters.attrezzature.length === 0) {
-        setAttrezzatureError('Nessun parametro attrezzatura attivo e valido trovato nella vista configurata.')
-      } else {
-        setAttrezzatureError('')
-      }
-    } catch (e: any) {
-      setAttrezzatureRows([])
-      setAttrezzatureError(e?.message || String(e))
-    } finally {
-      setAttrezzatureLoading(false)
-    }
-  }, [cfg, draft.attrezzature_risarcimento_dettaglio, draft.data_rilevazione, draft.attrezzature_cauzione_decurtata, canEditArt30Attrezzature])
-
-  const attrezzatureTotaleLordo = React.useMemo(() => attrezzatureTotal(attrezzatureRows), [attrezzatureRows])
-  const attrezzatureCauzioneApplicata = React.useMemo(
-    () => attrezzatureCauzioneTotal(attrezzatureRows, attrezzatureCauzioneUnitaria),
-    [attrezzatureRows, attrezzatureCauzioneUnitaria]
-  )
-  const attrezzatureTotaleNetto = Math.max(0, Math.round((attrezzatureTotaleLordo - attrezzatureCauzioneApplicata) * 100) / 100)
-
-  const applyAttrezzaturePopup = React.useCallback(() => {
-    if (!canEditArt30Attrezzature) return
-    const missingTipo = attrezzatureRows.some(row => !String(row.descrizione || '').trim())
-    if (missingTipo) {
-      setAttrezzatureError('Selezionare il tipo di attrezzatura per ogni riga aggiunta, oppure rimuovere le righe non completate.')
-      return
-    }
-    const missingMatricola = attrezzatureRows.some(row => attrezzaturaTipo(row.descrizione)?.key === 'TESSERA_ELETTRONICA' && !/^\d{5}$/.test(String(row.matricola || '')))
-    if (missingMatricola) {
-      setAttrezzatureError('Inserire una matricola di 5 cifre per ciascuna tessera elettronica.')
-      return
-    }
-    const hasRecuperabile = attrezzatureRows.some(row => row.esito === 'riparazione')
-    if (!hasRecuperabile && hasNotaSpeseRowsForCasistica(noteSpeseRowsDraft, 'C104_ATTREZZATURE_DANNEGGIATE')) {
-      setAttrezzatureError("Non è possibile confermare senza almeno un'attrezzatura recuperabile: sono già presenti righe di Nota spese per Art. 30. Eliminarle prima nella scheda Nota spese, oppure mantenere almeno un'attrezzatura recuperabile.")
-      return
-    }
-    const total = attrezzatureTotal(attrezzatureRows)
-    const cauzione = attrezzatureCauzioneTotal(attrezzatureRows, attrezzatureCauzioneUnitaria)
-    const totalNetto = Math.max(0, Math.round((total - cauzione) * 100) / 100)
-    const detail = buildAttrezzatureDetail(attrezzatureRows)
-    setArt30RaRowsDraft(buildArt30RaRowsDraft(attrezzatureRows, cauzione, art30RaRowsBaseline))
-    setDraft(prev => ({
-      ...prev,
-      attrezzature_risarcimento_dettaglio: detail,
-      attrezzature_risarcimento_importo: total > 0 ? String(total) : '',
-      attrezzature_cauzione_presente: cauzione > 0 ? '1' : '0',
-      attrezzature_cauzione_decurtata: cauzione > 0 ? String(cauzione) : '',
-      attrezzature_importo_netto: total > 0 ? String(totalNetto) : ''
-    }))
-    if (attrezzatureRows.length === 0) {
-      // Nessuna attrezzatura selezionata: Art. 30 non deve restare selezionato senza dettaglio.
-      const next = new Set(parseNorma3Codes(draft.norma_violata3))
-      next.delete('Art30')
-      setDraft(prev => ({ ...prev, norma_violata3: Array.from(next).join(' '), v_art30: '0' }))
-    } else if (attrezzaturePopupPendingArt30) {
-      const next = new Set(parseNorma3Codes(draft.norma_violata3))
-      next.add('Art30')
-      setDraft(prev => ({ ...prev, norma_violata3: Array.from(next).join(' '), v_art30: '1' }))
-    }
-    setAttrezzaturePopupOpen(false)
-    setAttrezzaturePopupPendingArt30(false)
-  }, [attrezzatureRows, attrezzatureCauzioneUnitaria, attrezzaturePopupPendingArt30, draft.norma_violata3, canEditArt30Attrezzature, noteSpeseRowsDraft, art30RaRowsBaseline])
-
-  const clearArt30AndAttrezzature = React.useCallback(() => {
-    if (!canEditArt30Attrezzature) return
-    const next = new Set(parseNorma3Codes(draft.norma_violata3))
-    next.delete('Art30')
-    setDraft(prev => ({
-      ...prev,
-      norma_violata3: Array.from(next).join(' '),
-      v_art30: '0',
-      attrezzature_risarcimento_dettaglio: '',
-      attrezzature_risarcimento_importo: '',
-      attrezzature_cauzione_presente: '0',
-      attrezzature_cauzione_decurtata: '',
-      attrezzature_importo_netto: ''
-    }))
-    setAttrezzatureRows([])
-    setAttrezzatureCauzioneUnitaria(0)
-    setAttrezzatureRemoveConfirmOpen(false)
-  }, [draft.norma_violata3, canEditArt30Attrezzature])
+      if (!cancelled) { setAttrezzatureCatalog([]); setAttrezzatureCauzioneUnitaria(0) }
+    })()
+    return () => { cancelled = true }
+  }, [activeNotaSpeseCasistica, attrezzatureParametriUrl, draft.data_rilevazione])
 
   // Norma violata 3 — select_multiple come Set (stringa separata da spazio)
   const norma3Set = React.useMemo(() => new Set(parseNorma3Codes(g('norma_violata3'))), [draft.norma_violata3])
   const norma3SelectedLabels = React.useMemo(() => CHOICES.norma3.filter(o => norma3Set.has(o.v)).map(o => o.l), [norma3Set])
-  const attrezzatureRiepilogo = React.useMemo(
-    () => parseAttrezzatureDetail(g('attrezzature_risarcimento_dettaglio')),
-    [draft.attrezzature_risarcimento_dettaglio]
-  )
-  // Riepilogo raggruppato per tipo di attrezzatura ED esito (due tessere, una recuperabile e
-  // una no, restano su righe separate). Per le "Recuperabile" si raggruppa ulteriormente per
-  // stato di compilazione della nota spese: due unità dello stesso tipo, una già compilata e
-  // una ancora da predisporre, restano su righe distinte invece di sommarsi in una sola.
-  const attrezzatureGroupedRiepilogo = React.useMemo(() => {
-    const notaSpeseFlat = nsRowsByCategoryToFlat(noteSpeseRowsDraft)
-    const perUnitNotaSpeseTotal = (id: string) => notaSpeseFlat
-      .filter(r => String(r.riferimento_attrezzatura_id || '').trim() === id)
-      .reduce((s, r) => s + (Number(r.importo_riga) || 0), 0)
-
-    const map = new Map<string, { descrizione: string, esito: AttrezzaturaEsito, quantita: number, valoreUnitario: number | null, importo: number, ids: string[] }>()
-    attrezzatureRiepilogo.forEach(item => {
-      const unit = Number(item.valoreUnitario) || 0
-      const isRiparazione = item.esito === 'riparazione'
-      const compiled = isRiparazione ? perUnitNotaSpeseTotal(item.persistentId) > 0 : false
-      const key = isRiparazione ? `${item.descrizione}::riparazione::${compiled}` : `${item.descrizione}::risarcimento`
-      const cur = map.get(key)
-      if (!cur) {
-        map.set(key, {
-          descrizione: item.descrizione,
-          esito: item.esito,
-          quantita: 1,
-          valoreUnitario: isRiparazione ? null : item.valoreUnitario,
-          importo: isRiparazione ? 0 : unit,
-          ids: [item.persistentId]
-        })
-      } else {
-        cur.quantita += 1
-        if (!isRiparazione) cur.importo += unit
-        cur.ids.push(item.persistentId)
-      }
-    })
-    return Array.from(map.values()).map(group => {
-      if (group.esito !== 'riparazione') return { ...group, notaSpeseTotal: null }
-      const notaSpeseTotal = group.ids.reduce((sum, id) => sum + perUnitNotaSpeseTotal(id), 0)
-      return { ...group, notaSpeseTotal }
-    })
-  }, [attrezzatureRiepilogo, noteSpeseRowsDraft])
-  // Attrezzature recuperabili disponibili per la nota spese di Art.30, con relativa etichetta:
-  // matricola per le tessere, "Tipo (N)" numerata in ordine di comparsa per le altre.
-  const attrezzatureRecuperabiliOptions = React.useMemo(() => {
-    const recuperabili = attrezzatureRiepilogo.filter(item => item.esito === 'riparazione')
-    const totalsByDescrizione: Record<string, number> = {}
-    recuperabili.forEach(item => {
-      const isTessera = attrezzaturaTipo(item.descrizione)?.key === 'TESSERA_ELETTRONICA'
-      if (!isTessera) totalsByDescrizione[item.descrizione] = (totalsByDescrizione[item.descrizione] || 0) + 1
-    })
-    const counters: Record<string, number> = {}
-    return recuperabili.map(item => {
-      const isTessera = attrezzaturaTipo(item.descrizione)?.key === 'TESSERA_ELETTRONICA'
-      let label: string
-      if (isTessera) {
-        label = item.matricola ? `Tessera elettronica — Matricola ${item.matricola}` : 'Tessera elettronica'
-      } else if (totalsByDescrizione[item.descrizione] > 1) {
-        const key = item.descrizione
-        counters[key] = (counters[key] || 0) + 1
-        label = `${item.descrizione} (${counters[key]})`
-      } else {
-        label = item.descrizione
-      }
-      return { id: item.persistentId, label }
-    })
-  }, [attrezzatureRiepilogo])
-  const attrezzatureParametriUrl = String((cfg as any).attrezzatureParametriUrl || '').trim()
-  const [attrezzatureCauzioneRiepilogo, setAttrezzatureCauzioneRiepilogo] = React.useState<{ quantita: number | null; valoreUnitario: number | null }>({ quantita: null, valoreUnitario: null })
-
-  // I parametri Art. 30 vengono caricati solo quando servono davvero
-  // (apertura popup attrezzature o riepilogo cauzione presente), non all'apertura della pratica.
-
-  React.useEffect(() => {
-    let cancelled = false
-    const totaleCauzione = Number(g('attrezzature_cauzione_decurtata')) || 0
-    const cauzionePresente = isSelectedFlag(g('attrezzature_cauzione_presente')) && totaleCauzione > 0
-    const tessereDecurtate = attrezzatureRiepilogo.filter(item => item.cauzioneDecurtata && attrezzaturaTipo(item.descrizione)?.key === 'TESSERA_ELETTRONICA').length
-
-    if (!cauzionePresente || tessereDecurtate === 0) {
-      setAttrezzatureCauzioneRiepilogo({ quantita: null, valoreUnitario: null })
-      return () => { cancelled = true }
-    }
-
-    // RI/RZ/DT consultano i valori Art. 30 già salvati nella pratica: non devono
-    // interrogare la vista parametri solo per visualizzare un riepilogo.
-    if (!canEditArt30Attrezzature || !attrezzatureParametriUrl) {
-      setAttrezzatureCauzioneRiepilogo({
-        quantita: tessereDecurtate,
-        valoreUnitario: Math.round((totaleCauzione / tessereDecurtate) * 100) / 100
-      })
-      return () => { cancelled = true }
-    }
-
-    void (async () => {
-      try {
-        const valoreUnitario = await loadCauzioneParameter(attrezzatureParametriUrl, g('data_rilevazione'))
-        if (!Number.isFinite(valoreUnitario) || valoreUnitario <= 0) throw new Error('Valore unitario cauzione non disponibile.')
-        if (!cancelled) setAttrezzatureCauzioneRiepilogo({ quantita: tessereDecurtate, valoreUnitario })
-      } catch {
-        if (!cancelled) setAttrezzatureCauzioneRiepilogo({ quantita: tessereDecurtate, valoreUnitario: Math.round((totaleCauzione / tessereDecurtate) * 100) / 100 })
-      }
-    })()
-
-    return () => { cancelled = true }
-  }, [draft.attrezzature_cauzione_presente, draft.attrezzature_cauzione_decurtata, attrezzatureRiepilogo, draft.data_rilevazione, attrezzatureParametriUrl, canEditArt30Attrezzature])
 
   const toggleNorma3 = (v: string) => {
     const s = new Set(norma3Set)
@@ -7667,14 +7257,6 @@ React.useEffect(() => {
     if (isRemoving && nsOpt && hasNotaSpeseRowsForCasistica(noteSpeseRowsDraft, nsOpt.codice)) {
       setMsg(null)
       setNotaSpeseLinkedViolationPopup({ codice: nsOpt.codice, art: nsOpt.art, label: nsOpt.label })
-      return
-    }
-    if (v === 'Art30' && !isRemoving) {
-      void openAttrezzaturePopup(true)
-      return
-    }
-    if (v === 'Art30' && isRemoving && (String(g('attrezzature_risarcimento_dettaglio') || '').trim() || isSelectedFlag(g('attrezzature_cauzione_presente')))) {
-      setAttrezzatureRemoveConfirmOpen(true)
       return
     }
     if (isRemoving) s.delete(v); else s.add(v)
@@ -8121,7 +7703,7 @@ React.useEffect(() => {
     setArt15SelectedUi(draftHasArt15Selection(baselineDraft))
     setNoteSpeseRowsDraft(nsCloneRowsByCategory(noteSpeseRowsBaseline))
     setNoteSpeseSummary(nsComputeSummaryFromRows(nsRowsByCategoryToFlat(noteSpeseRowsBaseline), noteSpesePercent))
-    setNoteSpeseFormDirtyByCategory({ AT: false, PR: false, RU: false, SL: false, PF: false })
+    setNoteSpeseFormDirtyByCategory({ AT: false, PR: false, RU: false, SL: false, PF: false, RA: false })
     setNoteSpeseManagerResetKey(k => k + 1)
     if (noteSpeseDraftStorageKey) nsClearDraftSnapshot(noteSpeseDraftStorageKey)
     setNoteSpeseMsg(null)
@@ -8173,6 +7755,42 @@ React.useEffect(() => {
         text: `La partita IVA deve contenere 11 caratteri. Attualmente ne risultano inseriti ${pivaLen}.`
       })
       return
+    }
+
+    if (mode === 'edit' && currentOid != null && noteSpeseMissing.length === 0) {
+      for (const opt of noteSpeseExpectedCasistiche) {
+        if (!hasNotaSpeseRowsForCasistica(noteSpeseRowsDraft, opt.codice)) {
+          setValidationPopup({
+            title: 'Nota spese mancante',
+            text: `Hai selezionato la violazione "${opt.label}" ma non hai inserito nessuna nota spese collegata. Aggiungi almeno una voce dal prezzario oppure deseleziona la violazione prima di salvare.`
+          })
+          return
+        }
+      }
+      const incompleteRow = nsRowsByCategoryToFlat(noteSpeseRowsDraft).find(nsRowIsIncomplete)
+      if (incompleteRow) {
+        const isTessera = incompleteRow.categoria_costo === 'RA' && attrezzaturaTipo(incompleteRow.descrizione_snapshot)?.key === 'TESSERA_ELETTRONICA'
+        setValidationPopup({
+          title: 'Nota spese incompleta',
+          text: isTessera
+            ? `Manca la matricola per la riga "${incompleteRow.descrizione_snapshot}" nel risarcimento attrezzature (Art. 30). Completa la matricola o elimina la riga prima di salvare.`
+            : `La riga "${incompleteRow.descrizione_snapshot}" non ha una quantità valida. Completa la quantità o elimina la riga prima di salvare.`
+        })
+        return
+      }
+      if (activeNotaSpeseCasistica === 'C104_ATTREZZATURE_DANNEGGIATE' && art30RecuperoMode === 'recuperabile' && activeAttrezzaturaRiferimentoId) {
+        const hasRowsForActive = nsRowsByCategoryToFlat(noteSpeseRowsDraft).some(r =>
+          String(r.codice_casistica || '').trim() === 'C104_ATTREZZATURE_DANNEGGIATE' &&
+          String(r.riferimento_attrezzatura_id || '').trim() === activeAttrezzaturaRiferimentoId
+        )
+        if (!hasRowsForActive) {
+          setValidationPopup({
+            title: 'Attrezzatura senza nota spese',
+            text: "Hai selezionato/creato un'attrezzatura ma non hai ancora aggiunto nessuna voce di spesa dal prezzario. Aggiungi almeno una voce oppure deseleziona l'attrezzatura prima di salvare."
+          })
+          return
+        }
+      }
     }
 
     const art15HasData = !!String(n3parziale || n3totale || '').trim() ||
@@ -8469,7 +8087,6 @@ React.useEffect(() => {
           }
           if (hasNoteSpeseOps && currentGlobalId && noteSpeseMissing.length === 0) {
             await syncNotaSpeseDraftToTable(noteSpeseCfg.detailUrlWrite, currentGlobalId, noteSpeseRowsBaseline, noteSpeseRowsDraft)
-            await syncArt30RaRowsToTable(noteSpeseCfg.detailUrlWrite, currentGlobalId, art30RaRowsBaseline, art30RaRowsDraft)
             const parentUrl = currentLayerUrl || String(cfg.schemaLayerUrl || '').trim() || String(cfg.motherLayerUrl || '').trim()
             if (parentUrl) {
               const summary = await recomputeAndPersistNotaSpeseSummary({
@@ -8485,7 +8102,7 @@ React.useEffect(() => {
             }
             if (noteSpeseDraftStorageKey) nsClearDraftSnapshot(noteSpeseDraftStorageKey)
             await loadNotaSpeseDraft()
-            setNoteSpeseFormDirtyByCategory({ AT: false, PR: false, RU: false, SL: false, PF: false })
+            setNoteSpeseFormDirtyByCategory({ AT: false, PR: false, RU: false, SL: false, PF: false, RA: false })
             setNoteSpeseManagerResetKey(k => k + 1)
           }
           setBaselineDraft(draftFromRecord(p.initialData || {}))
@@ -8510,7 +8127,6 @@ React.useEffect(() => {
         }
         if (noteSpeseDraftDirty && currentGlobalId && noteSpeseMissing.length === 0) {
           await syncNotaSpeseDraftToTable(noteSpeseCfg.detailUrlWrite, currentGlobalId, noteSpeseRowsBaseline, noteSpeseRowsDraft)
-          await syncArt30RaRowsToTable(noteSpeseCfg.detailUrlWrite, currentGlobalId, art30RaRowsBaseline, art30RaRowsDraft)
           const parentUrl = currentLayerUrl || String(cfg.schemaLayerUrl || '').trim() || String(cfg.motherLayerUrl || '').trim()
           if (parentUrl) {
             const nsSummary = await recomputeAndPersistNotaSpeseSummary({
@@ -8526,7 +8142,7 @@ React.useEffect(() => {
           }
           if (noteSpeseDraftStorageKey) nsClearDraftSnapshot(noteSpeseDraftStorageKey)
           await loadNotaSpeseDraft()
-          setNoteSpeseFormDirtyByCategory({ AT: false, PR: false, RU: false, SL: false, PF: false })
+          setNoteSpeseFormDirtyByCategory({ AT: false, PR: false, RU: false, SL: false, PF: false, RA: false })
           setNoteSpeseManagerResetKey(k => k + 1)
         }
         const mapPointAuditDelta = geom ? buildMapPointAuditDelta(p.existingGeomWgs84, geomWgs84) : null
@@ -8601,30 +8217,13 @@ ${e?.message || String(e)}`
   }, [selectedViolazioniCount])
   const noteSpeseExpectedCasistiche = React.useMemo(() => getNotaSpeseCasistiche(draft), [draft])
   const noteSpeseCasistiche = React.useMemo(() => getNotaSpeseCasisticheWithExistingRows(draft, noteSpeseRowsDraft), [draft, noteSpeseRowsDraft])
-  const noteSpeseExpectedCount = React.useMemo(() => {
-    // Per Art.30 il conteggio è per singola attrezzatura recuperabile (rapporto 1 a 1 con la
-    // nota spese), non per l'intera casistica come per le altre violazioni.
-    return noteSpeseExpectedCasistiche.reduce((sum, opt) => {
-      if (opt.codice === 'C104_ATTREZZATURE_DANNEGGIATE') return sum + Math.max(1, attrezzatureRecuperabiliOptions.length)
-      return sum + 1
-    }, 0)
-  }, [noteSpeseExpectedCasistiche, attrezzatureRecuperabiliOptions])
+  const noteSpeseExpectedCount = noteSpeseExpectedCasistiche.length
   const noteSpeseCompiledCount = React.useMemo(() => {
-    // Numeratore badge Nota spese: per Art.30 conta quante attrezzature recuperabili hanno
-    // già una propria nota spese compilata (importo > 0); per le altre violazioni conta se
-    // esiste almeno una riga per l'intera casistica, anche a importo 0.
-    const flat = nsRowsByCategoryToFlat(noteSpeseRowsDraft)
-    return noteSpeseExpectedCasistiche.reduce((sum, opt) => {
-      if (opt.codice === 'C104_ATTREZZATURE_DANNEGGIATE') {
-        const compiled = attrezzatureRecuperabiliOptions.filter(a => {
-          const total = flat.filter(r => String(r.riferimento_attrezzatura_id || '').trim() === a.id).reduce((s, r) => s + (Number(r.importo_riga) || 0), 0)
-          return total > 0
-        }).length
-        return sum + compiled
-      }
-      return sum + (hasNotaSpeseRowsForCasistica(noteSpeseRowsDraft, opt.codice) ? 1 : 0)
-    }, 0)
-  }, [noteSpeseExpectedCasistiche, noteSpeseRowsDraft, attrezzatureRecuperabiliOptions])
+    // Numeratore badge Nota spese: conta, per ciascuna violazione attesa, se esiste almeno
+    // una riga collegata (Art.30 compreso: ora si comporta come le altre, niente più
+    // conteggio per singola attrezzatura dichiarata).
+    return noteSpeseExpectedCasistiche.reduce((sum, opt) => sum + (hasNotaSpeseRowsForCasistica(noteSpeseRowsDraft, opt.codice) ? 1 : 0), 0)
+  }, [noteSpeseExpectedCasistiche, noteSpeseRowsDraft])
   const noteSpeseIncompleteCasistiche = React.useMemo(() => {
     return noteSpeseCasistiche.filter(opt => hasNotaSpeseIncompleteRowsForCasistica(noteSpeseRowsDraft, opt.codice))
   }, [noteSpeseCasistiche, noteSpeseRowsDraft])
@@ -8654,30 +8253,82 @@ ${e?.message || String(e)}`
   }, [noteSpeseCasistiche, activeNotaSpeseCasistica])
 
   React.useEffect(() => {
-    if (activeNotaSpeseCasistica !== 'C104_ATTREZZATURE_DANNEGGIATE') {
+    if (activeNotaSpeseCasistica !== 'C104_ATTREZZATURE_DANNEGGIATE' || art30RecuperoMode !== 'recuperabile') {
       if (activeAttrezzaturaRiferimentoId) setActiveAttrezzaturaRiferimentoId('')
+      setAttrezzatureNuovoPickerOpen(false)
       return
     }
-    if (activeAttrezzaturaRiferimentoId && !attrezzatureRecuperabiliOptions.some(opt => opt.id === activeAttrezzaturaRiferimentoId)) {
+    if (activeAttrezzaturaRiferimentoId && !attrezzatureCatalog.some(opt => opt.codice === attrezzaturaInstanceTipoCode(activeAttrezzaturaRiferimentoId))) {
       setActiveAttrezzaturaRiferimentoId('')
     }
-  }, [activeNotaSpeseCasistica, activeAttrezzaturaRiferimentoId, attrezzatureRecuperabiliOptions])
+  }, [activeNotaSpeseCasistica, art30RecuperoMode, activeAttrezzaturaRiferimentoId, attrezzatureCatalog])
 
   const isArt30NotaSpeseCasistica = activeNotaSpeseCasistica === 'C104_ATTREZZATURE_DANNEGGIATE'
+  // Combo 3: un'opzione per ogni ISTANZA di attrezzatura recuperabile con almeno una riga
+  // reale (AT-PF, Art.30) — non per tipo: due curve di derivazione restano due voci separate
+  // ("Curva di derivazione 1", "Curva di derivazione 2"). La numerazione è dinamica: si
+  // ricalcola dalle righe presenti ad ogni render, quindi si rinumera da sola se un'istanza
+  // viene eliminata. Include anche l'istanza appena creata dal mini-selettore "+ Nuova
+  // attrezzatura" anche se non ha ancora righe (resta visibile/selezionata in coda).
+  const attrezzatureIstanzeOptions = React.useMemo(() => {
+    const instanceMinOrdine = new Map<string, number>()
+    const repairCats: NsCategory[] = ['AT', 'PR', 'RU', 'SL', 'PF']
+    repairCats.forEach((cat) => {
+      (noteSpeseRowsDraft[cat] || []).forEach((r) => {
+        if (String(r.codice_casistica || '').trim() !== 'C104_ATTREZZATURE_DANNEGGIATE') return
+        const ref = String(r.riferimento_attrezzatura_id || '').trim()
+        if (!ref) return
+        const ord = Math.trunc(nsSafeNum(r.ordine, 0))
+        const cur = instanceMinOrdine.get(ref)
+        if (cur == null || ord < cur) instanceMinOrdine.set(ref, ord)
+      })
+    })
+    if (activeAttrezzaturaRiferimentoId && !instanceMinOrdine.has(activeAttrezzaturaRiferimentoId)) {
+      instanceMinOrdine.set(activeAttrezzaturaRiferimentoId, Number.MAX_SAFE_INTEGER)
+    }
+    const catalogByCode = new Map(attrezzatureCatalog.map(c => [c.codice, c.descrizione]))
+    console.log('[GII-DEBUG combo3] attrezzatureCatalog=', JSON.stringify(attrezzatureCatalog), 'instanceIds trovati=', JSON.stringify(Array.from(instanceMinOrdine.keys())))
+    const byTipo = new Map<string, string[]>()
+    Array.from(instanceMinOrdine.entries())
+      .sort((a, b) => a[1] - b[1])
+      .forEach(([instanceId]) => {
+        const tipoCode = attrezzaturaInstanceTipoCode(instanceId)
+        console.log('[GII-DEBUG combo3] instanceId=', instanceId, '-> tipoCode estratto=', tipoCode, '-> trovato in catalogo?', catalogByCode.has(tipoCode))
+        const list = byTipo.get(tipoCode) || []
+        list.push(instanceId)
+        byTipo.set(tipoCode, list)
+      })
+    const options: Array<{ id: string; label: string }> = []
+    byTipo.forEach((instanceIds, tipoCode) => {
+      const baseLabel = catalogByCode.get(tipoCode)
+      if (!baseLabel) return // niente descrizione disponibile: mai mostrare il codice grezzo, si aspetta il catalogo
+      instanceIds.forEach((instanceId, idx) => {
+        options.push({ id: instanceId, label: `${baseLabel} ${idx + 1}` })
+      })
+    })
+    return options
+  }, [noteSpeseRowsDraft, attrezzatureCatalog, activeAttrezzaturaRiferimentoId])
+  const activeAttrezzaturaRiferimentoRequired = isArt30NotaSpeseCasistica && art30RecuperoMode === 'recuperabile' && !activeAttrezzaturaRiferimentoId
   const activeNotaSpeseRows = React.useMemo(() => {
-    // Art.30 senza attrezzatura ancora selezionata: nessuna riga va mostrata (né sommata),
-    // altrimenti si vedrebbe erroneamente il cumulo di tutte le attrezzature insieme.
-    if (isArt30NotaSpeseCasistica && !activeAttrezzaturaRiferimentoId) return nsCloneRowsByCategory(EMPTY_NS_ROWS_BY_CATEGORY)
+    // Art.30/recuperabile senza attrezzatura ancora selezionata: nessuna riga va mostrata (né
+    // sommata), altrimenti si vedrebbe erroneamente il cumulo di tutte le attrezzature insieme.
+    if (activeAttrezzaturaRiferimentoRequired) return nsCloneRowsByCategory(EMPTY_NS_ROWS_BY_CATEGORY)
+    if (isArt30NotaSpeseCasistica && art30RecuperoMode === 'non_recuperabile') {
+      // Non recuperabile: solo le righe RA, non il cumulo delle riparazioni di altri tipi.
+      const raOnly = nsCloneRowsByCategory(EMPTY_NS_ROWS_BY_CATEGORY)
+      raOnly.RA = filterRowsByCasistica(noteSpeseRowsDraft, activeNotaSpeseCasistica).RA
+      return raOnly
+    }
     return filterRowsByCasistica(noteSpeseRowsDraft, activeNotaSpeseCasistica, isArt30NotaSpeseCasistica ? activeAttrezzaturaRiferimentoId : undefined)
-  }, [noteSpeseRowsDraft, activeNotaSpeseCasistica, activeAttrezzaturaRiferimentoId, isArt30NotaSpeseCasistica])
-  const activeAttrezzaturaRiferimentoRequired = isArt30NotaSpeseCasistica && !activeAttrezzaturaRiferimentoId
+  }, [noteSpeseRowsDraft, activeNotaSpeseCasistica, activeAttrezzaturaRiferimentoId, isArt30NotaSpeseCasistica, art30RecuperoMode, activeAttrezzaturaRiferimentoRequired])
   const activeNotaSpeseSummary = React.useMemo(() => nsComputeSummaryFromRows(nsRowsByCategoryToFlat(activeNotaSpeseRows), noteSpesePercent), [activeNotaSpeseRows, noteSpesePercent])
   const activeNotaSpeseOption = React.useMemo(() => noteSpeseCasistiche.find(opt => opt.codice === activeNotaSpeseCasistica) || null, [noteSpeseCasistiche, activeNotaSpeseCasistica])
   const activeNotaSpeseIncompleteRowsCount = React.useMemo(() => {
     if (!activeNotaSpeseCasistica) return 0
     return countNotaSpeseIncompleteRowsForCasistica(noteSpeseRowsDraft, activeNotaSpeseCasistica)
   }, [noteSpeseRowsDraft, activeNotaSpeseCasistica])
-  const noteSpeseBrowseDisabled = isReadOnly || isRiAgrTecLimitedEdit || noteSpeseBusy || !activeNotaSpeseCasistica || noteSpeseCasistiche.length === 0
+  const noteSpeseBrowseDisabled = isReadOnly || isRiAgrTecLimitedEdit || noteSpeseBusy || !activeNotaSpeseCasistica || noteSpeseCasistiche.length === 0 ||
+    (activeNotaSpeseCasistica === 'C104_ATTREZZATURE_DANNEGGIATE' && art30RecuperoMode === 'recuperabile' && !activeAttrezzaturaRiferimentoId)
   // La combo seleziona soltanto quale nota spese consultare: resta attiva anche in sola consultazione.
   const noteSpeseCasisticaDisabled = noteSpeseBusy || noteSpeseCasistiche.length <= 1
 
@@ -10163,7 +9814,7 @@ ${e?.message || String(e)}`
                     }
                     return
                   }
-                  try { const pg = resolvePageId('browser-nota-spese'); if (pg) { if (noteSpeseDraftStorageKey) nsWriteDraftSnapshot(noteSpeseDraftStorageKey, noteSpeseRowsDraft, activeNotaSpeseCasistica); try { const curPage = getAppStore()?.getState()?.appRuntimeInfo?.currentPageId || ''; sessionStorage.setItem('GII_NS_RETURN_PAGE', curPage) } catch {} UrlManager.getInstance().changePage(pg) } else { setNoteSpeseMsg({ ok: false, text: 'Pagina "browser-nota-spese" non trovata. Configura una pagina ExB con il widget consultazione prezzario e il widget gii-ns-carrello.' }) } } catch (e: any) { setNoteSpeseMsg({ ok: false, text: e?.message || String(e) }) }
+                  try { const pg = resolvePageId('browser-nota-spese'); if (pg) { if (noteSpeseDraftStorageKey) nsWriteDraftSnapshot(noteSpeseDraftStorageKey, noteSpeseRowsDraft, activeNotaSpeseCasistica); try { if (isArt30NotaSpeseCasistica && art30RecuperoMode === 'non_recuperabile') { sessionStorage.setItem('GII_NS_FORCE_SOURCE', 'ATTREZZATURE'); sessionStorage.removeItem('GII_NS_EXCLUDE_SOURCE') } else { sessionStorage.removeItem('GII_NS_FORCE_SOURCE'); sessionStorage.setItem('GII_NS_EXCLUDE_SOURCE', 'ATTREZZATURE') } } catch {} try { const curPage = getAppStore()?.getState()?.appRuntimeInfo?.currentPageId || ''; sessionStorage.setItem('GII_NS_RETURN_PAGE', curPage) } catch {} UrlManager.getInstance().changePage(pg) } else { setNoteSpeseMsg({ ok: false, text: 'Pagina "browser-nota-spese" non trovata. Configura una pagina ExB con il widget consultazione prezzario e il widget gii-ns-carrello.' }) } } catch (e: any) { setNoteSpeseMsg({ ok: false, text: e?.message || String(e) }) }
                 }}
                 disabled={noteSpeseBrowseDisabled}
                 title={!activeNotaSpeseCasistica || noteSpeseCasistiche.length === 0 ? 'Seleziona prima una violazione collegabile alla nota spese.' : undefined}
@@ -10411,18 +10062,18 @@ ${e?.message || String(e)}`
                   <div style={{ fontSize: 11, color: noteSpeseCasisticaDisabled ? '#64748b' : '#336666', lineHeight: 1.35, marginTop: 4 }}>{isReadOnly || isRiAgrTecLimitedEdit ? 'Seleziona la violazione per consultare la relativa nota spese.' : 'Le voci aggiunte dal prezzario saranno collegate alla violazione selezionata.'}</div>
                 </div>
                 {isArt30NotaSpeseCasistica && (
-                  <div style={{ flex: '0 0 auto', width: 460, maxWidth: '100%' }}>
-                    <label style={{ fontSize: 13, fontWeight: 900, color: noteSpeseCasisticaDisabled ? '#64748b' : '#0f4f50' }}>Seleziona l'attrezzatura</label>
+                  <div style={{ flex: '0 0 auto', width: 220, maxWidth: '100%' }}>
+                    <label style={{ fontSize: 13, fontWeight: 900, color: noteSpeseCasisticaDisabled ? '#64748b' : '#0f4f50' }}>Attrezzatura</label>
                     <select
-                      value={activeAttrezzaturaRiferimentoId}
-                      onChange={(e) => setActiveAttrezzaturaRiferimentoId(e.target.value)}
+                      value={art30RecuperoMode}
+                      onChange={(e) => { setArt30RecuperoMode(e.target.value as 'recuperabile' | 'non_recuperabile'); setActiveAttrezzaturaRiferimentoId(''); setAttrezzatureNuovoPickerOpen(false) }}
                       style={{
                         ...fieldBaseStyle(formStyle, noteSpeseCasisticaDisabled),
                         height: 38,
-                        maxWidth: 460,
+                        maxWidth: 220,
                         display: 'block',
                         marginTop: 4,
-                        border: noteSpeseCasisticaDisabled ? '1px solid #cbd5e1' : (activeAttrezzaturaRiferimentoId ? '1px solid #0f7375' : '1px solid #b42318'),
+                        border: noteSpeseCasisticaDisabled ? '1px solid #cbd5e1' : '1px solid #0f7375',
                         fontWeight: 800,
                         color: noteSpeseCasisticaDisabled ? String(formStyle.fieldDisabledColor || '#64748b') : '#16375a',
                         background: noteSpeseCasisticaDisabled ? String(formStyle.fieldDisabledBg || '#e7eef7') : '#fff',
@@ -10431,10 +10082,67 @@ ${e?.message || String(e)}`
                       }}
                       disabled={noteSpeseCasisticaDisabled}
                     >
-                      <option value='' disabled>Seleziona attrezzatura</option>
-                      {attrezzatureRecuperabiliOptions.map(opt => <option key={opt.id} value={opt.id}>{opt.label}</option>)}
+                      <option value='recuperabile'>Recuperabile</option>
+                      <option value='non_recuperabile'>Non recuperabile</option>
                     </select>
-                    <div style={{ fontSize: 11, color: noteSpeseCasisticaDisabled ? '#64748b' : '#336666', lineHeight: 1.35, marginTop: 4 }}>Ogni attrezzatura recuperabile ha una nota spese separata.</div>
+                  </div>
+                )}
+                {isArt30NotaSpeseCasistica && art30RecuperoMode === 'recuperabile' && (
+                  <div style={{ flex: '0 0 auto', width: 460, maxWidth: '100%' }}>
+                    <label style={{ fontSize: 13, fontWeight: 900, color: noteSpeseCasisticaDisabled ? '#64748b' : '#0f4f50' }}>Seleziona l'attrezzatura</label>
+                    <div style={{ display: 'flex', gap: 8, alignItems: 'flex-start', marginTop: 4 }}>
+                      <select
+                        value={activeAttrezzaturaRiferimentoId}
+                        onChange={(e) => setActiveAttrezzaturaRiferimentoId(e.target.value)}
+                        style={{
+                          ...fieldBaseStyle(formStyle, noteSpeseCasisticaDisabled),
+                          height: 38,
+                          flex: 1,
+                          minWidth: 0,
+                          display: 'block',
+                          border: noteSpeseCasisticaDisabled ? '1px solid #cbd5e1' : (activeAttrezzaturaRiferimentoId ? '1px solid #0f7375' : '1px solid #b42318'),
+                          fontWeight: 800,
+                          color: noteSpeseCasisticaDisabled ? String(formStyle.fieldDisabledColor || '#64748b') : '#16375a',
+                          background: noteSpeseCasisticaDisabled ? String(formStyle.fieldDisabledBg || '#e7eef7') : '#fff',
+                          cursor: noteSpeseCasisticaDisabled ? 'not-allowed' : 'pointer',
+                          opacity: noteSpeseCasisticaDisabled ? 0.78 : 1
+                        }}
+                        disabled={noteSpeseCasisticaDisabled}
+                      >
+                        <option value=''>Seleziona attrezzatura</option>
+                        {attrezzatureIstanzeOptions.map(opt => <option key={opt.id} value={opt.id}>{opt.label}</option>)}
+                      </select>
+                      {!noteSpeseCasisticaDisabled && (
+                        <div style={{ position: 'relative', flex: '0 0 auto' }}>
+                          <button
+                            type='button'
+                            onClick={() => setAttrezzatureNuovoPickerOpen(v => !v)}
+                            style={{ height: 38, padding: '0 12px', borderRadius: 6, border: '1px solid #0f7375', background: '#fff', color: '#0f7375', fontWeight: 800, fontSize: 12, cursor: 'pointer', whiteSpace: 'nowrap' }}
+                          >
+                            + Nuova attrezzatura
+                          </button>
+                          {attrezzatureNuovoPickerOpen && (
+                            <div style={{ position: 'absolute', top: 42, right: 0, zIndex: 20, background: '#fff', border: '1px solid #cbd5e1', borderRadius: 8, boxShadow: '0 6px 20px rgba(0,0,0,0.18)', minWidth: 240, overflow: 'hidden' }}>
+                              {attrezzatureCatalog.map(c => (
+                                <div
+                                  key={c.codice}
+                                  onClick={() => { setActiveAttrezzaturaRiferimentoId(buildAttrezzaturaInstanceId(c.codice)); setAttrezzatureNuovoPickerOpen(false) }}
+                                  style={{ padding: '8px 12px', fontSize: 13, cursor: 'pointer', borderBottom: '1px solid #f1f5f9', color: '#16375a' }}
+                                  onMouseEnter={(e) => { e.currentTarget.style.background = '#f0fdfa' }}
+                                  onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent' }}
+                                >
+                                  {c.descrizione}
+                                </div>
+                              ))}
+                              {attrezzatureCatalog.length === 0 && (
+                                <div style={{ padding: '8px 12px', fontSize: 12, color: '#64748b' }}>Nessuna attrezzatura disponibile a catalogo.</div>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                    <div style={{ fontSize: 11, color: noteSpeseCasisticaDisabled ? '#64748b' : '#336666', lineHeight: 1.35, marginTop: 4 }}>Le spese di riparazione si raggruppano per tipo di attrezzatura.</div>
                   </div>
               )}
                 <span style={{
@@ -10460,89 +10168,9 @@ ${e?.message || String(e)}`
               Nessuna violazione collegabile alla nota spese. Le note spese sono previste per gli artt. 8, 27, 30 e 39.
             </div>
           )}
-          {isArt30NotaSpeseCasistica && (() => {
-            const attrezzatureRiepilogoFontSize = Math.max(
-              14,
-              Number(formStyle.fieldFontSize) || 13,
-              Number(formStyle.norma3FontSize) || 12
-            )
-            return (
-            <div style={{ display: 'grid', gap: 9, padding: 10, borderRadius: 10, border: '1px solid #9fd6c1', background: '#eef9f4' }}>
-              <div style={{ fontSize: 13, fontWeight: 900, color: '#176b52' }}>Riepilogo costi attrezzature</div>
-              <div style={{ fontSize: attrezzatureRiepilogoFontSize, color: '#475569', lineHeight: 1.45 }}>
-                La spesa sostenuta per eventuali interventi di riparazione è computata nelle righe di Nota spese qui sotto.
-              </div>
-
-              {attrezzatureGroupedRiepilogo.length > 0
-                ? <div style={{ border: '1px solid #cbd5e1', borderRadius: 8, overflow: 'hidden', background: '#fff' }}>
-                    <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) 150px 70px 122px 122px', alignItems: 'center', background: '#d8f1e7', borderBottom: '1px solid #9fd6c1', fontSize: attrezzatureRiepilogoFontSize, fontWeight: 800, color: '#334155' }}>
-                      <div style={{ padding: '4px 9px' }}>Attrezzatura</div>
-                      <div style={{ padding: '4px 6px', textAlign: 'left' }}>Stato</div>
-                      <div style={{ padding: '4px 6px', textAlign: 'center' }}>Quantità</div>
-                      <div style={{ padding: '4px 9px', display: 'flex', justifyContent: 'flex-end' }}>
-                        <div style={{ textAlign: 'center', lineHeight: 1.15 }}>
-                          <div>Valore</div>
-                          <div>unitario</div>
-                        </div>
-                      </div>
-                      <div style={{ padding: '4px 9px', textAlign: 'right' }}>Importo</div>
-                    </div>
-                    {attrezzatureGroupedRiepilogo.map((item, index) => {
-                      const isRecuperabile = item.esito === 'riparazione'
-                      return <div
-                        key={`${item.descrizione}::${item.esito}::${Number(item.notaSpeseTotal) > 0}`}
-                        style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) 150px 70px 122px 122px', alignItems: 'center', borderBottom: '1px solid #e2e8f0', background: index % 2 === 0 ? '#ffffff' : '#f8fbff', fontSize: attrezzatureRiepilogoFontSize, color: '#334155' }}
-                      >
-                        <div style={{ padding: '7px 9px' }}>{item.descrizione}</div>
-                        <div style={{ padding: '7px 6px', textAlign: 'left', whiteSpace: 'nowrap', color: isRecuperabile ? '#0f4c81' : '#334155' }}>{isRecuperabile ? 'Recuperabile' : 'Non recuperabile'}</div>
-                        <div style={{ padding: '7px 6px', textAlign: 'center' }}>{attrezzaturaQty(item.quantita)}</div>
-                        {isRecuperabile
-                          ? (Number(item.notaSpeseTotal) > 0
-                              ? <div style={{ padding: '7px 9px', textAlign: 'left', color: '#64748b', fontStyle: 'italic', whiteSpace: 'nowrap' }}>{item.quantita > 1 ? 'Vedi Note spese' : 'Vedi Nota spese'}</div>
-                              : <div style={{ position: 'relative', padding: '7px 9px', height: '100%' }}>
-                                  <span style={{ position: 'absolute', left: 9, top: '50%', transform: 'translateY(-50%)', whiteSpace: 'nowrap', color: '#64748b', fontStyle: 'italic' }}>Da quantificare con Nota spese</span>
-                                </div>)
-                          : <div style={{ padding: '7px 9px', textAlign: 'right' }}>{item.valoreUnitario != null ? `${attrezzaturaMoney(item.valoreUnitario)} €` : '—'}</div>}
-                        {isRecuperabile
-                          ? (Number(item.notaSpeseTotal) > 0
-                              ? <div style={{ padding: '7px 9px', textAlign: 'right' }}>{`${attrezzaturaMoney(item.notaSpeseTotal)} €`}</div>
-                              : <div />)
-                          : <div style={{ padding: '7px 9px', textAlign: 'right' }}>{`${attrezzaturaMoney(item.importo)} €`}</div>}
-                      </div>
-                    })}
-                    {attrezzatureCauzioneRiepilogo.quantita != null && attrezzatureCauzioneRiepilogo.quantita > 0 && Number(g('attrezzature_cauzione_decurtata')) > 0 && <div
-                      style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) 150px 70px 122px 122px', alignItems: 'center', borderBottom: '1px solid #e2e8f0', background: attrezzatureGroupedRiepilogo.length % 2 === 0 ? '#ffffff' : '#f8fbff', fontSize: attrezzatureRiepilogoFontSize, color: '#334155' }}
-                    >
-                      <div style={{ padding: '7px 9px' }}>Decurtazione della cauzione</div>
-                      <div />
-                      <div style={{ padding: '7px 6px', textAlign: 'center' }}>{attrezzaturaQty(attrezzatureCauzioneRiepilogo.quantita)}</div>
-                      <div style={{ padding: '7px 9px', textAlign: 'right' }}>{attrezzatureCauzioneRiepilogo.valoreUnitario != null ? `${attrezzaturaMoney(attrezzatureCauzioneRiepilogo.valoreUnitario)} €` : '—'}</div>
-                      <div style={{ padding: '7px 9px', textAlign: 'right', color: '#d92d20' }}>-{attrezzaturaMoney(g('attrezzature_cauzione_decurtata'))} €</div>
-                    </div>}
-                    <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) 150px 70px 122px 122px', alignItems: 'center', background: '#e2f5ed', fontSize: attrezzatureRiepilogoFontSize, color: '#176b52' }}>
-                      <div style={{ gridColumn: '1 / span 4', padding: '8px 9px', textAlign: 'right', fontWeight: 800 }}>Totale</div>
-                      <div style={{ padding: '8px 9px', textAlign: 'right', fontWeight: 800 }}>{attrezzaturaMoney(g('attrezzature_importo_netto') || g('attrezzature_risarcimento_importo'))} €</div>
-                    </div>
-                  </div>
-                : <div style={{ padding: '9px 10px', borderRadius: 8, border: '1px solid #e2e8f0', background: '#f8fafc', color: '#64748b', fontSize: attrezzatureRiepilogoFontSize }}>
-                    Nessuna attrezzatura selezionata.
-                  </div>}
-
-              <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
-                <button
-                  type='button'
-                  onClick={() => { void openAttrezzaturePopup(false) }}
-                  disabled={saving}
-                  style={{ ...btnBase, fontSize: attrezzatureRiepilogoFontSize, background: '#1d4ed8', color: '#fff', border: '1px solid #1d4ed8', cursor: saving ? 'not-allowed' : 'pointer' }}
-                >
-                  {canEditArt30Attrezzature ? 'Gestisci attrezzature' : 'Consulta attrezzature'}
-                </button>
-              </div>
-            </div>
-            )
-          })()}
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, minmax(0, 1fr))', gap: 6 }}>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(8, minmax(0, 1fr))', gap: 6 }}>
             {([
+              ['RISARCIMENTO ATTREZZATURA', activeNotaSpeseSummary.totaleRA],
               ['ATTREZZATURE E TRASPORTI', activeNotaSpeseSummary.totaleAT],
               ['MATERIALI DA COSTRUZIONE', activeNotaSpeseSummary.totalePR],
               ['RISORSE UMANE', activeNotaSpeseSummary.totaleRU],
@@ -10551,7 +10179,7 @@ ${e?.message || String(e)}`
               [`SPESE GENERALI (${activeNotaSpeseSummary.percentualeSpeseGenerali.toLocaleString('it-IT', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}%)`, activeNotaSpeseSummary.importoSpeseGenerali],
               ['TOTALE COMPLESSIVO', activeNotaSpeseSummary.totaleComplessivo]
             ] as [string, number][]).map(([label, value], idx) => {
-              const isTotal = idx === 6
+              const isTotal = idx === 7
               return (
                 <div key={idx} style={{
                   background: isTotal ? formStyle.cardHeaderBg : '#f5f9ff',
@@ -10584,11 +10212,18 @@ ${e?.message || String(e)}`
         </div>
       </div>
       <div style={{ display: 'grid', gap: 14 }}>
-        <NoteSpeseManager category='AT' title='Attrezzature e trasporti' rows={activeNotaSpeseRows['AT']} onRowsChange={(nextRows) => { if (isReadOnly || isRiAgrTecLimitedEdit || !activeNotaSpeseCasistica || activeAttrezzaturaRiferimentoRequired) return; setNoteSpeseRowsDraft((prev) => mergeCategoryRowsForCasistica(prev, 'AT', activeNotaSpeseCasistica, nextRows, isArt30NotaSpeseCasistica ? activeAttrezzaturaRiferimentoId : undefined)) }} onDirtyChange={(dirty) => { if (isReadOnly || isRiAgrTecLimitedEdit) return; setNoteSpeseFormDirtyByCategory((prev) => ({ ...prev, AT: dirty })) }} resetKey={noteSpeseManagerResetKey} readonly={isReadOnly || isRiAgrTecLimitedEdit || !activeNotaSpeseCasistica || activeAttrezzaturaRiferimentoRequired} />
-        <NoteSpeseManager category='PR' title='Materiali da costruzione' rows={activeNotaSpeseRows['PR']} onRowsChange={(nextRows) => { if (isReadOnly || isRiAgrTecLimitedEdit || !activeNotaSpeseCasistica || activeAttrezzaturaRiferimentoRequired) return; setNoteSpeseRowsDraft((prev) => mergeCategoryRowsForCasistica(prev, 'PR', activeNotaSpeseCasistica, nextRows, isArt30NotaSpeseCasistica ? activeAttrezzaturaRiferimentoId : undefined)) }} onDirtyChange={(dirty) => { if (isReadOnly || isRiAgrTecLimitedEdit) return; setNoteSpeseFormDirtyByCategory((prev) => ({ ...prev, PR: dirty })) }} resetKey={noteSpeseManagerResetKey} readonly={isReadOnly || isRiAgrTecLimitedEdit || !activeNotaSpeseCasistica || activeAttrezzaturaRiferimentoRequired} />
-        <NoteSpeseManager category='RU' title='Risorse umane' rows={activeNotaSpeseRows['RU']} onRowsChange={(nextRows) => { if (isReadOnly || isRiAgrTecLimitedEdit || !activeNotaSpeseCasistica || activeAttrezzaturaRiferimentoRequired) return; setNoteSpeseRowsDraft((prev) => mergeCategoryRowsForCasistica(prev, 'RU', activeNotaSpeseCasistica, nextRows, isArt30NotaSpeseCasistica ? activeAttrezzaturaRiferimentoId : undefined)) }} onDirtyChange={(dirty) => { if (isReadOnly || isRiAgrTecLimitedEdit) return; setNoteSpeseFormDirtyByCategory((prev) => ({ ...prev, RU: dirty })) }} resetKey={noteSpeseManagerResetKey} readonly={isReadOnly || isRiAgrTecLimitedEdit || !activeNotaSpeseCasistica || activeAttrezzaturaRiferimentoRequired} />
-        <NoteSpeseManager category='SL' title='Semilavorati' rows={activeNotaSpeseRows['SL']} onRowsChange={(nextRows) => { if (isReadOnly || isRiAgrTecLimitedEdit || !activeNotaSpeseCasistica || activeAttrezzaturaRiferimentoRequired) return; setNoteSpeseRowsDraft((prev) => mergeCategoryRowsForCasistica(prev, 'SL', activeNotaSpeseCasistica, nextRows, isArt30NotaSpeseCasistica ? activeAttrezzaturaRiferimentoId : undefined)) }} onDirtyChange={(dirty) => { if (isReadOnly || isRiAgrTecLimitedEdit) return; setNoteSpeseFormDirtyByCategory((prev) => ({ ...prev, SL: dirty })) }} resetKey={noteSpeseManagerResetKey} readonly={isReadOnly || isRiAgrTecLimitedEdit || !activeNotaSpeseCasistica || activeAttrezzaturaRiferimentoRequired} />
-        <NoteSpeseManager category='PF' title='Prodotti finiti' rows={activeNotaSpeseRows['PF']} onRowsChange={(nextRows) => { if (isReadOnly || isRiAgrTecLimitedEdit || !activeNotaSpeseCasistica || activeAttrezzaturaRiferimentoRequired) return; setNoteSpeseRowsDraft((prev) => mergeCategoryRowsForCasistica(prev, 'PF', activeNotaSpeseCasistica, nextRows, isArt30NotaSpeseCasistica ? activeAttrezzaturaRiferimentoId : undefined)) }} onDirtyChange={(dirty) => { if (isReadOnly || isRiAgrTecLimitedEdit) return; setNoteSpeseFormDirtyByCategory((prev) => ({ ...prev, PF: dirty })) }} resetKey={noteSpeseManagerResetKey} readonly={isReadOnly || isRiAgrTecLimitedEdit || !activeNotaSpeseCasistica || activeAttrezzaturaRiferimentoRequired} />
+        {!(isArt30NotaSpeseCasistica && art30RecuperoMode === 'non_recuperabile') && (
+          <>
+            <NoteSpeseManager category='AT' title='Attrezzature e trasporti' rows={activeNotaSpeseRows['AT']} onRowsChange={(nextRows) => { if (isReadOnly || isRiAgrTecLimitedEdit || !activeNotaSpeseCasistica || activeAttrezzaturaRiferimentoRequired) return; setNoteSpeseRowsDraft((prev) => mergeCategoryRowsForCasistica(prev, 'AT', activeNotaSpeseCasistica, nextRows, isArt30NotaSpeseCasistica ? activeAttrezzaturaRiferimentoId : undefined)) }} onDirtyChange={(dirty) => { if (isReadOnly || isRiAgrTecLimitedEdit) return; setNoteSpeseFormDirtyByCategory((prev) => ({ ...prev, AT: dirty })) }} resetKey={noteSpeseManagerResetKey} readonly={isReadOnly || isRiAgrTecLimitedEdit || !activeNotaSpeseCasistica || activeAttrezzaturaRiferimentoRequired} />
+            <NoteSpeseManager category='PR' title='Materiali da costruzione' rows={activeNotaSpeseRows['PR']} onRowsChange={(nextRows) => { if (isReadOnly || isRiAgrTecLimitedEdit || !activeNotaSpeseCasistica || activeAttrezzaturaRiferimentoRequired) return; setNoteSpeseRowsDraft((prev) => mergeCategoryRowsForCasistica(prev, 'PR', activeNotaSpeseCasistica, nextRows, isArt30NotaSpeseCasistica ? activeAttrezzaturaRiferimentoId : undefined)) }} onDirtyChange={(dirty) => { if (isReadOnly || isRiAgrTecLimitedEdit) return; setNoteSpeseFormDirtyByCategory((prev) => ({ ...prev, PR: dirty })) }} resetKey={noteSpeseManagerResetKey} readonly={isReadOnly || isRiAgrTecLimitedEdit || !activeNotaSpeseCasistica || activeAttrezzaturaRiferimentoRequired} />
+            <NoteSpeseManager category='RU' title='Risorse umane' rows={activeNotaSpeseRows['RU']} onRowsChange={(nextRows) => { if (isReadOnly || isRiAgrTecLimitedEdit || !activeNotaSpeseCasistica || activeAttrezzaturaRiferimentoRequired) return; setNoteSpeseRowsDraft((prev) => mergeCategoryRowsForCasistica(prev, 'RU', activeNotaSpeseCasistica, nextRows, isArt30NotaSpeseCasistica ? activeAttrezzaturaRiferimentoId : undefined)) }} onDirtyChange={(dirty) => { if (isReadOnly || isRiAgrTecLimitedEdit) return; setNoteSpeseFormDirtyByCategory((prev) => ({ ...prev, RU: dirty })) }} resetKey={noteSpeseManagerResetKey} readonly={isReadOnly || isRiAgrTecLimitedEdit || !activeNotaSpeseCasistica || activeAttrezzaturaRiferimentoRequired} />
+            <NoteSpeseManager category='SL' title='Semilavorati' rows={activeNotaSpeseRows['SL']} onRowsChange={(nextRows) => { if (isReadOnly || isRiAgrTecLimitedEdit || !activeNotaSpeseCasistica || activeAttrezzaturaRiferimentoRequired) return; setNoteSpeseRowsDraft((prev) => mergeCategoryRowsForCasistica(prev, 'SL', activeNotaSpeseCasistica, nextRows, isArt30NotaSpeseCasistica ? activeAttrezzaturaRiferimentoId : undefined)) }} onDirtyChange={(dirty) => { if (isReadOnly || isRiAgrTecLimitedEdit) return; setNoteSpeseFormDirtyByCategory((prev) => ({ ...prev, SL: dirty })) }} resetKey={noteSpeseManagerResetKey} readonly={isReadOnly || isRiAgrTecLimitedEdit || !activeNotaSpeseCasistica || activeAttrezzaturaRiferimentoRequired} />
+            <NoteSpeseManager category='PF' title='Prodotti finiti' rows={activeNotaSpeseRows['PF']} onRowsChange={(nextRows) => { if (isReadOnly || isRiAgrTecLimitedEdit || !activeNotaSpeseCasistica || activeAttrezzaturaRiferimentoRequired) return; setNoteSpeseRowsDraft((prev) => mergeCategoryRowsForCasistica(prev, 'PF', activeNotaSpeseCasistica, nextRows, isArt30NotaSpeseCasistica ? activeAttrezzaturaRiferimentoId : undefined)) }} onDirtyChange={(dirty) => { if (isReadOnly || isRiAgrTecLimitedEdit) return; setNoteSpeseFormDirtyByCategory((prev) => ({ ...prev, PF: dirty })) }} resetKey={noteSpeseManagerResetKey} readonly={isReadOnly || isRiAgrTecLimitedEdit || !activeNotaSpeseCasistica || activeAttrezzaturaRiferimentoRequired} />
+          </>
+        )}
+        {isArt30NotaSpeseCasistica && art30RecuperoMode === 'non_recuperabile' && (
+          <NoteSpeseManager category='RA' title='Risarcimento attrezzatura' rows={activeNotaSpeseRows['RA']} cauzioneUnitaria={attrezzatureCauzioneUnitaria} onRowsChange={(nextRows) => { if (isReadOnly || isRiAgrTecLimitedEdit || !activeNotaSpeseCasistica) return; setNoteSpeseRowsDraft((prev) => mergeCategoryRowsForCasistica(prev, 'RA', activeNotaSpeseCasistica, nextRows)) }} onDirtyChange={(dirty) => { if (isReadOnly || isRiAgrTecLimitedEdit) return; setNoteSpeseFormDirtyByCategory((prev) => ({ ...prev, RA: dirty })) }} resetKey={noteSpeseManagerResetKey} readonly={isReadOnly || isRiAgrTecLimitedEdit || !activeNotaSpeseCasistica} />
+        )}
       </div>
     </div>
   )
@@ -10669,8 +10304,8 @@ ${e?.message || String(e)}`
     <AnteprimaPanel
       data={draft}
       mode={mode}
-      nsRows={previewNsRows as any}
-      nsSummary={previewNsSummary as any}
+      nsRows={noteSpeseRowsDraft}
+      nsSummary={noteSpeseSummary}
       ds={ds}
       oid={editOid}
       idFieldName={editIdFieldName}
@@ -10751,254 +10386,6 @@ ${e?.message || String(e)}`
               >
                 Conferma
               </button>
-            </div>
-          </div>
-        </div>,
-        getGlobalOverlayHost() || document.body
-      )}
-
-      {attrezzaturePopupOpen && createPortal(
-        <div
-          data-gii-global-popup-root='1'
-          style={{ position: 'fixed', inset: 0, zIndex: 2147483646, background: 'rgba(0,0,0,0.52)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16, pointerEvents: 'auto' }}
-          onClick={(e) => { e.preventDefault(); e.stopPropagation() }}
-          onMouseDown={(e) => { e.preventDefault(); e.stopPropagation() }}
-        >
-          <div
-            role='dialog'
-            aria-modal='true'
-            data-gii-global-popup-dialog='1'
-            style={{ width: 'min(96vw, 850px)', maxHeight: '88vh', overflowY: 'auto', background: '#f8fbff', borderRadius: 14, boxShadow: '0 20px 60px rgba(0,0,0,0.28)', border: '1px solid rgba(0,0,0,0.08)', padding: 18, position: 'relative', zIndex: 2147483647 }}
-            onClick={(e) => { e.stopPropagation() }}
-            onMouseDown={(e) => { e.stopPropagation() }}
-          >
-            <div style={{ fontWeight: 800, fontSize: popupTitleFontSize, marginBottom: 4, color: '#0f4c81' }}>Computo costi attrezzature</div>
-            <div style={{ width: '100%', fontSize: popupBodyFontSize, color: '#475569', lineHeight: 1.5, marginBottom: 12, textAlign: 'justify' }}>
-              Selezionare le attrezzature danneggiate o smarrite. La spesa sostenuta per eventuali interventi di riparazione deve essere computata separatamente nella scheda <b>Nota spese</b>.
-            </div>
-
-            {attrezzatureError && <div style={{ padding: '9px 10px', borderRadius: 8, border: '1px solid #f59e0b', background: '#fff7ed', color: '#9a3412', fontSize: popupBodyFontSize, marginBottom: 10 }}>{attrezzatureError}</div>}
-
-            {attrezzatureLoading
-              ? <div style={{ padding: 18, textAlign: 'center', color: '#64748b', fontSize: popupBodyFontSize }}>Caricamento prezzi attrezzature…</div>
-              : <div style={{ border: '1px solid #cbd5e1', borderRadius: 9, overflow: 'hidden', background: '#fff' }}>
-                  <div style={{ display: 'grid', gridTemplateColumns: '190px 190px 100px minmax(90px, 1fr) 100px 40px', alignItems: 'center', background: '#eff6ff', borderBottom: '1px solid #cbd5e1', fontSize: popupBodyFontSize, fontWeight: 800, color: '#0f4c81' }}>
-                    <div style={{ padding: '4px 8px', textAlign: 'left' }}>Tipo</div>
-                    <div style={{ padding: '4px 6px', textAlign: 'left' }}>Stato</div>
-                    <div style={{ padding: '4px 6px', textAlign: 'center' }}>Matricola</div>
-                    <div style={{ padding: '4px 6px', textAlign: 'center', lineHeight: 1.15 }}>
-                      Cauzione
-                      {attrezzatureCauzioneUnitaria > 0 && <div style={{ fontWeight: 700, fontSize: popupBodyFontSize - 1, color: '#334155' }}>({attrezzaturaMoney(attrezzatureCauzioneUnitaria)} €)</div>}
-                    </div>
-                    <div style={{ padding: '4px 10px', display: 'flex', justifyContent: 'flex-end' }}>
-                      <div style={{ textAlign: 'center', lineHeight: 1.15 }}>
-                        <div>Valore</div>
-                        <div>unitario</div>
-                      </div>
-                    </div>
-                    <div style={{ padding: '4px 6px' }}></div>
-                  </div>
-                  {attrezzatureRows.length === 0
-                    ? <div style={{ padding: 16, textAlign: 'center', color: '#64748b', fontSize: popupBodyFontSize }}>Nessuna attrezzatura aggiunta.</div>
-                    : attrezzatureRows.map((row, index) => {
-                        const locked = !canEditArt30Attrezzature
-                        const isRecuperabile = row.esito === 'riparazione'
-                        const isTessera = attrezzaturaTipo(row.descrizione)?.key === 'TESSERA_ELETTRONICA'
-                        const currentTipoKey = attrezzaturaTipo(row.descrizione)?.key || ''
-                        const catalogSorted = [...attrezzatureCatalog].sort((a, b) => (attrezzaturaTipo(a.descrizione)?.order ?? 9) - (attrezzaturaTipo(b.descrizione)?.order ?? 9))
-                        const rowNotaSpeseTotal = isRecuperabile
-                          ? nsRowsByCategoryToFlat(noteSpeseRowsDraft).filter(r => String(r.riferimento_attrezzatura_id || '').trim() === row.persistentId).reduce((s, r) => s + (Number(r.importo_riga) || 0), 0)
-                          : 0
-                        return <div key={row.rowId} style={{ display: 'grid', gridTemplateColumns: '190px 190px 100px minmax(90px, 1fr) 100px 40px', alignItems: 'center', borderBottom: index === attrezzatureRows.length - 1 ? 0 : '1px solid #e2e8f0', background: index % 2 === 0 ? '#ffffff' : '#f8fbff', fontSize: popupBodyFontSize }}>
-                          <div style={{ padding: '6px 8px' }}>
-                            {locked
-                              ? <span style={{ fontWeight: 700, color: '#334155' }}>{row.descrizione}</span>
-                              : (
-                                <select
-                                  value={currentTipoKey}
-                                  onChange={e => {
-                                    const nextEntry = catalogSorted.find(c => attrezzaturaTipo(c.descrizione)?.key === e.target.value)
-                                    if (!nextEntry) return
-                                    const nextIsTessera = attrezzaturaTipo(nextEntry.descrizione)?.key === 'TESSERA_ELETTRONICA'
-                                    setAttrezzatureRows(prev => prev.map((item, i) => i === index
-                                      ? { ...item, codice: nextEntry.codice, descrizione: nextEntry.descrizione, valoreUnitario: nextEntry.valoreUnitario, matricola: nextIsTessera ? item.matricola : '', cauzioneDecurtata: nextIsTessera ? item.cauzioneDecurtata : false }
-                                      : item))
-                                  }}
-                                  style={{ width: '100%', height: formStyle.fieldHeight, boxSizing: 'border-box', border: currentTipoKey ? '1px solid #cbd5e1' : '1px solid #b42318', borderRadius: 6, background: '#fff', fontSize: popupBodyFontSize }}
-                                >
-                                  <option value='' disabled>Seleziona tipo</option>
-                                  {catalogSorted.map(c => {
-                                    const key = attrezzaturaTipo(c.descrizione)?.key || c.codice
-                                    return <option key={key} value={key}>{attrezzaturaTipo(c.descrizione)?.label || c.descrizione}</option>
-                                  })}
-                                </select>
-                                )}
-                          </div>
-                          <div style={{ padding: '6px 8px' }}>
-                            {!row.descrizione
-                              ? <span style={{ color: '#94a3b8' }}>—</span>
-                              : locked
-                              ? <span style={{ fontSize: popupBodyFontSize, color: isRecuperabile ? '#0f4c81' : '#334155' }}>{isRecuperabile ? 'Recuperabile' : 'Non recuperabile'}</span>
-                              : (
-                                <select
-                                  value={row.esito}
-                                  onChange={e => setAttrezzatureRows(prev => prev.map((item, i) => i === index ? { ...item, esito: (e.target.value === 'riparazione' ? 'riparazione' : 'risarcimento') } : item))}
-                                  title="Indicare se l'attrezzatura può essere recuperata con un intervento di riparazione (da quantificare in Nota spese) oppure va risarcita per intero perché irrecuperabile"
-                                  style={{ width: '100%', height: formStyle.fieldHeight, boxSizing: 'border-box', border: '1px solid #cbd5e1', borderRadius: 6, background: '#fff', fontSize: popupBodyFontSize }}
-                                >
-                                  <option value='risarcimento'>Non recuperabile</option>
-                                  <option value='riparazione'>Recuperabile</option>
-                                </select>
-                                )}
-                          </div>
-                          <div style={{ padding: '6px 8px', display: 'flex', justifyContent: 'flex-end' }}>
-                            {!isTessera
-                              ? <span style={{ color: '#94a3b8' }}>—</span>
-                              : locked
-                                ? <span style={{ color: '#334155' }}>{row.matricola || '—'}</span>
-                                : (
-                                  <input
-                                    type='text'
-                                    inputMode='numeric'
-                                    maxLength={5}
-                                    value={row.matricola}
-                                    placeholder='Matricola'
-                                    onChange={e => {
-                                      const digits = e.target.value.replace(/\D/g, '').slice(0, 5)
-                                      setAttrezzatureRows(prev => prev.map((item, i) => i === index ? { ...item, matricola: digits } : item))
-                                    }}
-                                    style={{ width: '100%', height: formStyle.fieldHeight, boxSizing: 'border-box', border: /^\d{5}$/.test(String(row.matricola || '')) ? '1px solid #cbd5e1' : '1px solid #b42318', borderRadius: 6, background: '#fff', fontSize: popupBodyFontSize, padding: '0 6px', textAlign: 'right' }}
-                                  />
-                                  )}
-                          </div>
-                          <div style={{ padding: 6, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                            {!isTessera
-                              ? <span style={{ color: '#94a3b8' }}>—</span>
-                              : locked ? renderReadonlyCheckboxTi(row.cauzioneDecurtata) : (
-                                <input
-                                  type='checkbox'
-                                  checked={row.cauzioneDecurtata}
-                                  onChange={e => setAttrezzatureRows(prev => prev.map((item, i) => i === index ? { ...item, cauzioneDecurtata: e.target.checked } : item))}
-                                  style={{ accentColor: '#0f4c81' }}
-                                />
-                                )}
-                          </div>
-                          {isRecuperabile
-                            ? <div style={{ position: 'relative', padding: '8px 10px', height: '100%' }}>
-                                {rowNotaSpeseTotal > 0
-                                  ? <span style={{ position: 'absolute', right: 10, top: '50%', transform: 'translateY(-50%)', whiteSpace: 'nowrap', color: '#334155' }}>{attrezzaturaMoney(rowNotaSpeseTotal)} €</span>
-                                  : <span style={{ position: 'absolute', right: 10, top: '50%', transform: 'translateY(-50%)', whiteSpace: 'nowrap', color: '#64748b', fontStyle: 'italic' }}>Da quantificare con Nota spese</span>}
-                              </div>
-                            : <div style={{ padding: '8px 10px', textAlign: 'right', color: '#334155' }}>{attrezzaturaMoney(row.valoreUnitario)} €</div>}
-                          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                            {!locked && (
-                              <button
-                                type='button'
-                                onClick={() => {
-                                  const hasLinkedNotaSpese = nsRowsByCategoryToFlat(noteSpeseRowsDraft).some(r => String(r.riferimento_attrezzatura_id || '').trim() === row.persistentId)
-                                  if (hasLinkedNotaSpese) {
-                                    setAttrezzatureError("Non è possibile rimuovere questa attrezzatura: sono già presenti righe di Nota spese collegate a lei. Eliminarle prima nella scheda Nota spese.")
-                                    return
-                                  }
-                                  setAttrezzatureRows(prev => prev.filter((_, i) => i !== index))
-                                }}
-                                title='Rimuovi attrezzatura'
-                                aria-label='Rimuovi attrezzatura'
-                                style={{ border: 'none', background: 'transparent', color: '#b42318', cursor: 'pointer', padding: 4, display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}
-                              >
-                                <svg width={18} height={18} viewBox='0 0 24 24' fill='none' stroke='currentColor' strokeWidth='2' strokeLinecap='round' strokeLinejoin='round' aria-hidden='true' focusable='false'>
-                                  <path d='M3 6h18'/>
-                                  <path d='M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2'/>
-                                  <path d='M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6'/>
-                                  <path d='M10 11v6'/>
-                                  <path d='M14 11v6'/>
-                                </svg>
-                              </button>
-                            )}
-                          </div>
-                        </div>
-                      })}
-                  {!(!canEditArt30Attrezzature) && (
-                    <div style={{ padding: '8px 10px', borderTop: attrezzatureRows.length > 0 ? '1px solid #e2e8f0' : undefined }}>
-                      <button
-                        type='button'
-                        disabled={attrezzatureCatalog.length === 0}
-                        onClick={() => {
-                          attrezzatureRowIdCounterRef.current += 1
-                          let maxPersistentId = 0
-                          attrezzatureRows.forEach(r => { const n = parseInt(r.persistentId, 10); if (Number.isFinite(n) && n > maxPersistentId) maxPersistentId = n })
-                          const newRow: AttrezzaturaRimborsoRow = {
-                            rowId: `new${attrezzatureRowIdCounterRef.current}`,
-                            persistentId: String(maxPersistentId + 1),
-                            codice: '',
-                            descrizione: '',
-                            valoreUnitario: 0,
-                            esito: 'risarcimento',
-                            matricola: '',
-                            cauzioneDecurtata: false
-                          }
-                          setAttrezzatureRows(prev => [...prev, newRow])
-                        }}
-                        style={{ padding: '7px 14px', borderRadius: 8, border: '1px solid #0f4c81', background: '#fff', color: '#0f4c81', fontWeight: 700, fontSize: popupBodyFontSize, cursor: attrezzatureCatalog.length === 0 ? 'not-allowed' : 'pointer', opacity: attrezzatureCatalog.length === 0 ? 0.5 : 1 }}
-                      >
-                        + Aggiungi attrezzatura
-                      </button>
-                    </div>
-                  )}
-                </div>}
-
-            <div style={{ marginTop: 12, borderRadius: 8, overflow: 'hidden', background: '#dbe7f6' }}>
-              {attrezzatureCauzioneApplicata > 0 && (
-                <div style={{ display: 'grid', gridTemplateColumns: '190px 190px 100px minmax(90px, 1fr) 100px 40px', alignItems: 'center' }}>
-                  <div style={{ gridColumn: '1 / span 4', padding: '6px 10px', textAlign: 'right', fontSize: popupBodyFontSize, fontWeight: 700, color: '#0f4c81' }}>Cauzione decurtata</div>
-                  <div style={{ padding: '6px 10px', textAlign: 'right', fontSize: popupBodyFontSize, fontWeight: 800, color: '#d92d18' }}>- {attrezzaturaMoney(attrezzatureCauzioneApplicata)} €</div>
-                  <div />
-                </div>
-              )}
-              <div style={{ display: 'grid', gridTemplateColumns: '190px 190px 100px minmax(90px, 1fr) 100px 40px', alignItems: 'center', minHeight: formStyle.fieldHeight + 12, borderTop: attrezzatureCauzioneApplicata > 0 ? '1px solid #c7d9ec' : undefined }}>
-                <div style={{ gridColumn: '1 / span 4', padding: '0 10px', textAlign: 'right', fontSize: popupBodyFontSize, fontWeight: 800, color: '#0f4c81' }}>Totale</div>
-                <div style={{ padding: '0 10px', textAlign: 'right', fontSize: popupBodyFontSize, fontWeight: 800, color: '#0f4c81' }}>{attrezzaturaMoney(attrezzatureTotaleNetto)} €</div>
-                <div />
-              </div>
-            </div>
-
-            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10, marginTop: 14 }}>
-              <button
-                type='button'
-                onClick={() => { setAttrezzaturePopupOpen(false); setAttrezzaturePopupPendingArt30(false) }}
-                style={{ ...popupBtnBase, border: '1px solid rgba(0,0,0,0.18)', background: !canEditArt30Attrezzature ? '#1d4ed8' : '#64748b', color: '#fff', cursor: 'pointer' }}
-              >
-                {canEditArt30Attrezzature ? 'Annulla' : 'Chiudi'}
-              </button>
-              {canEditArt30Attrezzature && <button
-                type='button'
-                onClick={applyAttrezzaturePopup}
-                disabled={attrezzatureLoading}
-                style={{ ...popupBtnBase, border: '1px solid rgba(0,0,0,0.18)', background: '#1d4ed8', color: '#fff', cursor: attrezzatureLoading ? 'not-allowed' : 'pointer' }}
-              >
-                Conferma
-              </button>}
-            </div>
-          </div>
-        </div>,
-        getGlobalOverlayHost() || document.body
-      )}
-
-      {attrezzatureRemoveConfirmOpen && createPortal(
-        <div
-          data-gii-global-popup-root='1'
-          style={{ position: 'fixed', inset: 0, zIndex: 2147483646, background: 'rgba(0,0,0,0.52)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16, pointerEvents: 'auto' }}
-          onClick={(e) => { e.preventDefault(); e.stopPropagation() }}
-          onMouseDown={(e) => { e.preventDefault(); e.stopPropagation() }}
-        >
-          <div role='dialog' aria-modal='true' data-gii-global-popup-dialog='1' style={{ width: 'min(92vw, 540px)', background: '#f8fbff', borderRadius: 14, boxShadow: '0 20px 60px rgba(0,0,0,0.28)', border: '1px solid rgba(0,0,0,0.08)', padding: 18, position: 'relative', zIndex: 2147483647 }} onClick={e => e.stopPropagation()} onMouseDown={e => e.stopPropagation()}>
-            <div style={{ fontWeight: 800, fontSize: popupTitleFontSize, marginBottom: 8, color: '#d92d20' }}>Risarcimento attrezzatura collegato</div>
-            <div style={{ fontSize: popupBodyFontSize, color: '#374151', lineHeight: 1.55, marginBottom: 14 }}>
-              Deselezionando l’Art. 30 saranno eliminati dalla pratica il dettaglio delle attrezzature selezionate e l’indicazione della cauzione. Le eventuali righe della Nota spese devono invece essere eliminate dalla relativa scheda.
-            </div>
-            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10 }}>
-              <button type='button' onClick={() => setAttrezzatureRemoveConfirmOpen(false)} style={{ ...popupBtnBase, border: '1px solid rgba(0,0,0,0.18)', background: '#64748b', color: '#fff', cursor: 'pointer' }}>Annulla</button>
-              <button type='button' onClick={clearArt30AndAttrezzature} style={{ ...popupBtnBase, border: '1px solid rgba(0,0,0,0.18)', background: '#d92d20', color: '#fff', cursor: 'pointer' }}>Conferma</button>
             </div>
           </div>
         </div>,

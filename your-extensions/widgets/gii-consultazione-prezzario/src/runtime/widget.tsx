@@ -723,7 +723,24 @@ const styles = `
 
 export default function Widget(props: AllWidgetProps<IMConfig>) {
   const cfg: any = props.config || {}
-  const sources = React.useMemo(() => buildSources(cfg), [cfg.regionaleArticoliUrl, cfg.regionaleAnalisiUrl, cfg.internoArticoliUrl, cfg.internoAnalisiUrl, cfg.nuoviPrezziUrl, cfg.nuoviPrezziAnalisiUrl])
+  // Segnali scritti da gii-editing-ti prima di navigare qui:
+  // - FORCE: si sta aggiungendo un'attrezzatura non recuperabile (Art.30) — ha senso solo il
+  //   prezzario Attrezzature, lo selezioniamo direttamente e nascondiamo la scelta sorgente.
+  // - EXCLUDE: si sta aggiungendo una nota spese per un'attrezzatura recuperabile già scelta —
+  //   non ha senso poter scegliere "Attrezzature" come sorgente (non si aggiunge un'attrezzatura
+  //   a un'attrezzatura), quindi la sorgente viene esclusa del tutto dall'elenco.
+  const [forcedSourceCode] = React.useState<string>(() => {
+    try { return sessionStorage.getItem('GII_NS_FORCE_SOURCE') || '' } catch { return '' }
+  })
+  const [excludedSourceCode] = React.useState<string>(() => {
+    try { return sessionStorage.getItem('GII_NS_EXCLUDE_SOURCE') || '' } catch { return '' }
+  })
+  const sources = React.useMemo(() => {
+    const all = buildSources(cfg)
+    if (forcedSourceCode) return all
+    if (excludedSourceCode) return all.filter((s) => s.codice_prezzario !== excludedSourceCode)
+    return all
+  }, [cfg.regionaleArticoliUrl, cfg.regionaleAnalisiUrl, cfg.internoArticoliUrl, cfg.internoAnalisiUrl, cfg.nuoviPrezziUrl, cfg.nuoviPrezziAnalisiUrl, cfg.attrezzatureParametriUrl, forcedSourceCode, excludedSourceCode])
   const title = String(cfg.title || 'GII - Consultazione Prezzario')
   const titleColor = String(cfg.titleColor || '#1F4E79')
   const titleFontSize = Number(cfg.titleFontSize || 15)
@@ -862,7 +879,9 @@ export default function Widget(props: AllWidgetProps<IMConfig>) {
       const active = sources.find((r) => num(r.stato_prezzario) === 1) || sources[0]
       const selectedExists = !!selectedCode && sources.some((s) => s.codice_prezzario === selectedCode)
       if (!didInitDefaultSourceRef.current && !selectedCode) {
-        if (active) setSelectedCode(active.codice_prezzario)
+        const forced = forcedSourceCode && sources.some((s) => s.codice_prezzario === forcedSourceCode) ? forcedSourceCode : ''
+        if (forced) setSelectedCode(forced)
+        else if (active) setSelectedCode(active.codice_prezzario)
         didInitDefaultSourceRef.current = true
       } else if (selectedCode && !selectedExists) {
         setSelectedCode(active ? active.codice_prezzario : '')
@@ -1236,12 +1255,18 @@ export default function Widget(props: AllWidgetProps<IMConfig>) {
         <div className='gcp-toolbar'>
           <div className='gcp-field gcp-grid-left'>
             <div className='gcp-label' style={labelStyle}>Prezzario</div>
-            <select className='gcp-select' value={selectedCode} onChange={(e) => { const v = e.target.value; if (!v) resetConsultatore(); else setSelectedCode(v) }}>
-              <option value=''>— seleziona —</option>
-              {prezzari.map((p) => (
-                <option key={p.objectid} value={p.codice_prezzario}>{p.titolo_prezzario || p.codice_prezzario}</option>
-              ))}
-            </select>
+            {forcedSourceCode && sources.some((s) => s.codice_prezzario === forcedSourceCode) ? (
+              <div className='gcp-select' style={{ display: 'flex', alignItems: 'center', background: '#f1f5f9', color: '#334155', fontWeight: 700 }}>
+                {sources.find((s) => s.codice_prezzario === forcedSourceCode)?.titolo_prezzario || forcedSourceCode}
+              </div>
+            ) : (
+              <select className='gcp-select' value={selectedCode} onChange={(e) => { const v = e.target.value; if (!v) resetConsultatore(); else setSelectedCode(v) }}>
+                <option value=''>— seleziona —</option>
+                {prezzari.map((p) => (
+                  <option key={p.objectid} value={p.codice_prezzario}>{p.titolo_prezzario || p.codice_prezzario}</option>
+                ))}
+              </select>
+            )}
           </div>
           <div className='gcp-split-spacer' />
           <div className='gcp-field gcp-grid-center'>
@@ -1430,7 +1455,7 @@ export default function Widget(props: AllWidgetProps<IMConfig>) {
                     const isInCart = cartCodes.has(r.codice_voce)
                     return (
                     <tr key={voceKey(r)} className={`gcp-list-row ${voceKey(selectedRow) === voceKey(r) ? 'sel' : ''} ${isInactive ? 'gcp-row-inactive' : ''} ${isInCart ? 'gcp-row-incart' : ''}`} onClick={() => setSelectedRow(r)}>
-                      <td><b>{r.codice_voce}</b><div className='gcp-muted'>{famigliaLabel(r.famiglia)}</div>{selectedCode === 'NUOVI_PREZZI' ? <div className='gcp-muted'>{formatCapitoloLabel(r.famiglia, r.capitolo, r.codice_voce)} · {formatSottocapitoloLabel(r.famiglia, r.capitolo, r.sottocapitolo, r.codice_voce)}</div> : null}</td>
+                      <td>{selectedCode === 'ATTREZZATURE' ? (<><b>{r.descrizione}</b><div className='gcp-muted'>{r.codice_voce}</div></>) : (<><b>{r.codice_voce}</b><div className='gcp-muted'>{famigliaLabel(r.famiglia)}</div>{selectedCode === 'NUOVI_PREZZI' ? <div className='gcp-muted'>{formatCapitoloLabel(r.famiglia, r.capitolo, r.codice_voce)} · {formatSottocapitoloLabel(r.famiglia, r.capitolo, r.sottocapitolo, r.codice_voce)}</div> : null}</>)}</td>
                       <td title={r.descrizione || ''}><span className='gcp-desc-short'>{shortenMiddle(r.descrizione, 108, 34)}</span></td>
                       <td>{r.unita_misura || ''}</td>
                       <td style={{ whiteSpace: 'nowrap' }}>
@@ -1463,7 +1488,8 @@ export default function Widget(props: AllWidgetProps<IMConfig>) {
               {!selectedRow ? <div className='gcp-empty'>Seleziona una voce.</div> : (
                 <div className='gcp-detail'>
                   <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-                    <span className='gcp-chip'>{selectedRow.codice_voce}</span>
+                    <span className='gcp-chip'>{selectedCode === 'ATTREZZATURE' ? selectedRow.descrizione : selectedRow.codice_voce}</span>
+                    {selectedCode === 'ATTREZZATURE' ? <span className='gcp-chip'>{selectedRow.codice_voce}</span> : null}
                     {selectedRow.famiglia ? <span className='gcp-chip'>{famigliaLabel(selectedRow.famiglia)}</span> : null}
                     {selectedRow.categoria_default ? <span className='gcp-chip'>{selectedRow.categoria_default}</span> : null}
                     {num(selectedRow.selezionabile) === 1 ? <span className='gcp-chip'>Selezionabile</span> : null}
