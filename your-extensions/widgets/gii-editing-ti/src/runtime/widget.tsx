@@ -4612,7 +4612,9 @@ function nsRowSignature (row: NsDetailRow): string {
     anno_prezzario_snapshot: row.anno_prezzario_snapshot != null ? Math.trunc(nsSafeNum(row.anno_prezzario_snapshot, 0)) : null,
     ordine: Math.trunc(nsSafeNum(row.ordine, 0)),
     codice_casistica: String(row.codice_casistica || '').trim(),
-    riferimento_attrezzatura_id: String(row.riferimento_attrezzatura_id || '').trim()
+    riferimento_attrezzatura_id: String(row.riferimento_attrezzatura_id || '').trim(),
+    matricola_snapshot: String(row.matricola_snapshot || '').trim(),
+    cauzione_decurtata: !!row.cauzione_decurtata
   })
 }
 
@@ -4685,6 +4687,19 @@ function hasNotaSpeseRowsForCasistica (rowsByCategory: Record<NsCategory, NsDeta
   return nsRowsByCategoryToFlat(rowsByCategory || EMPTY_NS_ROWS_BY_CATEGORY).some(row => String(row.codice_casistica || '').trim() === code)
 }
 
+// Conta quante note spese DISTINTE esistono davvero per una violazione, non solo se ne esiste
+// almeno una. Una nota condivisa (righe senza riferimento_attrezzatura_id — es. Art.30 "non
+// recuperabile", che può raggruppare più attrezzature in un'unica nota) conta come 1. Ogni
+// riferimento_attrezzatura_id distinto (es. Art.30 "recuperabile", una nota per attrezzatura)
+// conta come nota separata. Per le violazioni senza attrezzatura di riferimento, si riduce
+// naturalmente al vecchio comportamento binario (0 o 1).
+function countNotaSpeseEntriesForCasistica (rowsByCategory: Record<NsCategory, NsDetailRow[]> | null | undefined, codice: string): number {
+  const rows = getNotaSpeseFlatRowsForCasistica(rowsByCategory, codice)
+  const hasSharedEntry = rows.some(row => !String(row.riferimento_attrezzatura_id || '').trim())
+  const distinctRiferimenti = new Set(rows.map(row => String(row.riferimento_attrezzatura_id || '').trim()).filter(Boolean))
+  return (hasSharedEntry ? 1 : 0) + distinctRiferimenti.size
+}
+
 function getNotaSpeseTotalForCasistica (rowsByCategory: Record<NsCategory, NsDetailRow[]> | null | undefined, codice: string, perc: number): number {
   const code = String(codice || '').trim()
   if (!code) return 0
@@ -4699,14 +4714,23 @@ function getNotaSpeseFlatRowsForCasistica (rowsByCategory: Record<NsCategory, Ns
   return nsRowsByCategoryToFlat(filtered)
 }
 
+// La matricola di una tessera elettronica deve avere esattamente 5 cifre numeriche.
+function isValidTesseraMatricola (value: any): boolean {
+  return /^\d{5}$/.test(String(value || '').trim())
+}
+
 // Una riga è "incompleta" (non salvabile/da segnalare) se: per una tessera elettronica in
-// RA manca la matricola; per qualunque altra riga (incluse le altre attrezzature RA) la
-// quantità non è valorizzata.
-function nsRowIsIncomplete (row: NsDetailRow): boolean {
+// RA manca la matricola o la matricola non ha esattamente 5 cifre; per qualunque altra riga
+// (incluse le altre attrezzature RA) la quantità non è valorizzata.
+function nsRowIncompleteReason (row: NsDetailRow): 'matricola' | 'quantita' | null {
   if (row.categoria_costo === 'RA' && attrezzaturaTipo(row.descrizione_snapshot)?.key === 'TESSERA_ELETTRONICA') {
-    return !String(row.matricola_snapshot || '').trim()
+    return isValidTesseraMatricola(row.matricola_snapshot) ? null : 'matricola'
   }
-  return nsSafeNum(row.quantita, 0) <= 0
+  return nsSafeNum(row.quantita, 0) <= 0 ? 'quantita' : null
+}
+
+function nsRowIsIncomplete (row: NsDetailRow): boolean {
+  return nsRowIncompleteReason(row) != null
 }
 
 function hasNotaSpeseIncompleteRowsForCasistica (rowsByCategory: Record<NsCategory, NsDetailRow[]> | null | undefined, codice: string): boolean {
@@ -4716,6 +4740,7 @@ function hasNotaSpeseIncompleteRowsForCasistica (rowsByCategory: Record<NsCatego
 function countNotaSpeseIncompleteRowsForCasistica (rowsByCategory: Record<NsCategory, NsDetailRow[]> | null | undefined, codice: string): number {
   return getNotaSpeseFlatRowsForCasistica(rowsByCategory, codice).filter(nsRowIsIncomplete).length
 }
+
 
 function isNotaSpeseCompiledForCasistica (rowsByCategory: Record<NsCategory, NsDetailRow[]> | null | undefined, codice: string, perc: number): boolean {
   return getNotaSpeseTotalForCasistica(rowsByCategory, codice, perc) > 0.004 && !hasNotaSpeseIncompleteRowsForCasistica(rowsByCategory, codice)
@@ -5156,7 +5181,9 @@ async function queryNotaSpeseRows (detailUrl: string, parentGlobalId: string, ca
       ordine: Math.trunc(nsSafeNum(r?.ordine, 0)),
       note: String(r?.note || '').trim(),
       codice_casistica: String(r?.codice_casistica || '').trim() || null,
-      riferimento_attrezzatura_id: String(r?.riferimento_attrezzatura_id || '').trim() || null
+      riferimento_attrezzatura_id: String(r?.riferimento_attrezzatura_id || '').trim() || null,
+      matricola_snapshot: r?.matricola_snapshot != null ? String(r.matricola_snapshot).trim() || null : null,
+      cauzione_decurtata: !!r?.cauzione_decurtata
     }
   }).filter((row) => row !== null) as NsDetailRow[]
 }
@@ -5183,6 +5210,8 @@ async function syncNotaSpeseDraftToTable (detailUrl: string, parentGlobalId: str
     put('ordine', Math.trunc(nsSafeNum(row.ordine, 0)))
     put('codice_casistica', String(row.codice_casistica || '').trim() || null)
     put('riferimento_attrezzatura_id', String(row.riferimento_attrezzatura_id || '').trim() || null)
+    put('matricola_snapshot', row.matricola_snapshot != null ? String(row.matricola_snapshot).trim() || null : null)
+    put('cauzione_decurtata', row.cauzione_decurtata ? 1 : 0)
     return attrs
   }
   const baseline = nsRowsByCategoryToFlat(baselineRowsByCategory)
@@ -5279,6 +5308,16 @@ function NoteSpeseManager (props: NsManagerProps) {
   const [confirmDeleteIdx, setConfirmDeleteIdx] = React.useState<number | null>(null)
 
   const isTesseraRow = (r: NsDetailRow) => props.category === 'RA' && attrezzaturaTipo(r.descrizione_snapshot)?.key === 'TESSERA_ELETTRONICA'
+  // La colonna Matricola ha senso solo per la tabella Risarcimento attrezzatura (Art.30):
+  // nelle altre categorie di spesa non esiste alcuna tessera/matricola da mostrare.
+  const showMatricola = props.category === 'RA'
+  // Elenco ordinato per codice attrezzatura (solo per la visualizzazione): conserva l'indice
+  // originale della riga in "rows", indispensabile per Modifica/Elimina che operano su quell'array.
+  const sortedRowsForDisplay = React.useMemo(() => {
+    return rows
+      .map((row, idx) => ({ row, idx }))
+      .sort((a, b) => String(a.row.codice_voce_snapshot || '').localeCompare(String(b.row.codice_voce_snapshot || ''), 'it', { numeric: true, sensitivity: 'base' }))
+  }, [rows])
 
   React.useEffect(() => { if (!msg) return; const t = window.setTimeout(() => setMsg(null), 5000); return () => window.clearTimeout(t) }, [msg])
   React.useEffect(() => { setEditIdx(null); setEditQty(''); setEditMatricola(''); setEditCauzione(false) }, [props.resetKey])
@@ -5304,6 +5343,11 @@ function NoteSpeseManager (props: NsManagerProps) {
   const saveEdit = () => {
     if (props.readonly) return
     if (editIdx == null || editIdx < 0 || editIdx >= rows.length) return
+    const editingTessera = isTesseraRow(rows[editIdx])
+    if (editingTessera && !isValidTesseraMatricola(editMatricola)) {
+      setMsg({ ok: false, text: 'La matricola deve avere esattamente 5 cifre numeriche.' })
+      return
+    }
     const nextRows = rows.map((r, i) => {
       if (i !== editIdx) return nsCloneRow(r)
       const updated = nsCloneRow(r)
@@ -5364,11 +5408,11 @@ function NoteSpeseManager (props: NsManagerProps) {
               <>
                 <div style={{ fontSize: 12, color: '#1F4E79', fontWeight: 700 }}>Tessera elettronica</div>
                 <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
-                  <span style={{ fontSize: 12, color: '#444' }}>Matricola</span>
-                  <input type='text' value={editMatricola} onChange={(e) => setEditMatricola(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') saveEdit(); if (e.key === 'Escape') cancelEdit() }} style={{ width: 140, padding: '5px 8px', border: '1px solid #aac4e0', borderRadius: 4, fontSize: 13 }} autoFocus />
+                  <span style={{ fontSize: 12, color: '#444' }}>Matricola (5 cifre)</span>
+                  <input type='text' inputMode='numeric' value={editMatricola} onChange={(e) => setEditMatricola(e.target.value.replace(/\D/g, '').slice(0, 5))} onKeyDown={(e) => { if (e.key === 'Enter') saveEdit(); if (e.key === 'Escape') cancelEdit() }} maxLength={5} placeholder='00000' style={{ width: 70, padding: '5px 8px', border: '1px solid #aac4e0', borderRadius: 4, fontSize: 13, textAlign: 'right' }} autoFocus />
                   <label style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 12, color: '#444', cursor: 'pointer' }}>
                     <input type='checkbox' checked={editCauzione} onChange={(e) => setEditCauzione(e.target.checked)} />
-                    Cauzione decurtata
+                    Decurtazione cauzione
                   </label>
                   <span style={{ fontSize: 12, color: '#375623', fontWeight: 700 }}>{money(nsSafeNum(rows[editIdx].prezzo_unitario_snapshot, 0) - (editCauzione ? (Number(props.cauzioneUnitaria) || 0) : 0))} €</span>
                   <button type='button' onClick={saveEdit} style={{ padding: '4px 14px', border: 'none', borderRadius: 4, fontSize: 12, fontWeight: 700, background: '#1F4E79', color: '#fff', cursor: 'pointer' }}>Aggiorna</button>
@@ -5398,45 +5442,87 @@ function NoteSpeseManager (props: NsManagerProps) {
             <colgroup>
               <col style={{ width: 52 }} />
               <col />
-              <col style={{ width: 100 }} />
-              <col style={{ width: 90 }} />
-              <col style={{ width: 90 }} />
+              {showMatricola && <col style={{ width: 85 }} />}
+              {showMatricola && <col style={{ width: 70 }} />}
               <col style={{ width: 70 }} />
+              <col style={{ width: 85 }} />
+              <col style={{ width: 85 }} />
+              <col style={{ width: 85 }} />
             </colgroup>
             <thead>
               <tr>
                 <th style={thS}>Orig.</th>
                 <th style={thS}>Voce</th>
-                <th style={thS}>Q.tà</th>
+                {showMatricola && <th style={{ ...thS, textAlign: 'right' }}>Matricola</th>}
+                {showMatricola && <th style={{ ...thS, textAlign: 'center' }}>Cauzione</th>}
+                <th style={{ ...thS, textAlign: 'right' }}>Quantità</th>
                 <th style={{ ...thS, textAlign: 'right' }}>Prezzo (€)</th>
                 <th style={{ ...thS, textAlign: 'right' }}>Importo (€)</th>
-                <th style={thS}>Azioni</th>
+                <th style={{ ...thS, textAlign: 'center' }}>Azioni</th>
               </tr>
             </thead>
             <tbody>
               {rows.length === 0 ? (
-                <tr><td colSpan={6} style={{ padding: 16, textAlign: 'center', color: '#64748b', fontSize: 12 }}>Nessuna riga.</td></tr>
-              ) : rows.map((r, idx) => {
+                <tr><td colSpan={showMatricola ? 8 : 6} style={{ padding: 16, textAlign: 'center', color: '#64748b', fontSize: 12 }}>Nessuna riga.</td></tr>
+              ) : sortedRowsForDisplay.map(({ row: r, idx }, displayIdx) => {
                 const noQty = nsSafeNum(r.quantita, 0) <= 0
                 const tessera = isTesseraRow(r)
-                const incomplete = tessera ? !String(r.matricola_snapshot || '').trim() : noQty
+                const matricolaInvalid = tessera && !isValidTesseraMatricola(r.matricola_snapshot)
                 return (
                 <tr key={`${r.objectid || 'tmp'}-${idx}`}>
-                  <td style={tdS(idx)}><div style={{ whiteSpace: 'pre-line', lineHeight: 1.1 }}>{`${nsSourceShort(nsNormalizeSource(r.origine_voce_snapshot))}${r.anno_prezzario_snapshot ? `\n${r.anno_prezzario_snapshot}` : ''}`}</div></td>
-                  <td style={{ ...tdS(idx), overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={`${r.codice_voce_snapshot} — ${r.descrizione_snapshot}`}><b>{r.codice_voce_snapshot}</b> — {r.descrizione_snapshot}</td>
-                  <td style={{ ...tdS(idx), ...(incomplete ? { background: '#fff3cd', fontWeight: 700, color: '#856404' } : {}) }}>{tessera ? (r.matricola_snapshot ? `Matricola ${r.matricola_snapshot}${r.cauzione_decurtata ? ' (cauzione decurtata)' : ''}` : 'Matricola mancante') : (noQty ? '—' : `${nsSafeNum(r.quantita, 0).toLocaleString('it-IT', { minimumFractionDigits: 0, maximumFractionDigits: 4 })} ${r.unita_misura_snapshot || ''}`)}</td>
-                  <td style={{ ...tdS(idx), textAlign: 'right' }}>{money(r.prezzo_unitario_snapshot)}</td>
-                  <td style={{ ...tdS(idx), textAlign: 'right' }}>{money(r.importo_riga)}</td>
-                  <td style={{ ...tdS(idx), whiteSpace: 'nowrap' }}>
+                  <td style={tdS(displayIdx)}><div style={{ whiteSpace: 'pre-line', lineHeight: 1.1 }}>{`${nsSourceShort(nsNormalizeSource(r.origine_voce_snapshot))}${r.anno_prezzario_snapshot ? `\n${r.anno_prezzario_snapshot}` : ''}`}</div></td>
+                  <td style={{ ...tdS(displayIdx), overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={`${r.codice_voce_snapshot} — ${r.descrizione_snapshot}`}><b>{r.codice_voce_snapshot}</b> — {r.descrizione_snapshot}</td>
+                  {showMatricola && (
+                    <td style={{ ...tdS(displayIdx), textAlign: 'right', ...(matricolaInvalid ? { background: '#fff3cd', fontWeight: 700, color: '#856404' } : {}) }}>{tessera ? (r.matricola_snapshot || '—') : '—'}</td>
+                  )}
+                  {showMatricola && (
+                    <td style={{ ...tdS(displayIdx), textAlign: 'center' }}>{tessera ? (r.cauzione_decurtata ? 'Sì' : 'No') : '—'}</td>
+                  )}
+                  <td style={{ ...tdS(displayIdx), textAlign: 'right', ...((!tessera && noQty) ? { background: '#fff3cd', fontWeight: 700, color: '#856404' } : {}) }}>{noQty ? '—' : `${nsSafeNum(r.quantita, 0).toLocaleString('it-IT', { minimumFractionDigits: 0, maximumFractionDigits: 4 })} ${r.unita_misura_snapshot || ''}`}</td>
+                  <td style={{ ...tdS(displayIdx), textAlign: 'right' }}>{money(r.prezzo_unitario_snapshot)}</td>
+                  <td style={{ ...tdS(displayIdx), textAlign: 'right' }}>{money(r.importo_riga)}</td>
+                  <td style={{ ...tdS(displayIdx), whiteSpace: 'nowrap', textAlign: 'right' }}>
                     {!props.readonly ? (
                       <>
-                        <button type='button' onClick={() => startEdit(idx)} style={{ cursor: 'pointer', fontSize: 11, padding: '2px 8px', borderRadius: 3, border: 'none', marginRight: 4, fontWeight: 700, background: '#1B6584', color: '#fff' }}>✎</button>
-                        <button type='button' onClick={() => onDelete(idx)} style={{ cursor: 'pointer', fontSize: 11, padding: '2px 8px', borderRadius: 3, border: 'none', fontWeight: 700, background: '#c00', color: '#fff' }}>✕</button>
+                        <button type='button' onClick={() => startEdit(idx)} title='Modifica riga' aria-label='Modifica riga' style={{ border: 'none', background: 'transparent', color: '#1F4E79', cursor: 'pointer', padding: 4, marginRight: 4, display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>
+                          <svg width={18} height={18} viewBox='0 0 24 24' fill='none' stroke='currentColor' strokeWidth='2' strokeLinecap='round' strokeLinejoin='round' aria-hidden='true' focusable='false'>
+                            <path d='M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7'/>
+                            <path d='M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z'/>
+                          </svg>
+                        </button>
+                        <button type='button' onClick={() => onDelete(idx)} title='Elimina riga' aria-label='Elimina riga' style={{ border: 'none', background: 'transparent', color: '#b42318', cursor: 'pointer', padding: 4, display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>
+                          <svg width={18} height={18} viewBox='0 0 24 24' fill='none' stroke='currentColor' strokeWidth='2' strokeLinecap='round' strokeLinejoin='round' aria-hidden='true' focusable='false'>
+                            <path d='M3 6h18'/>
+                            <path d='M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2'/>
+                            <path d='M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6'/>
+                            <path d='M10 11v6'/>
+                            <path d='M14 11v6'/>
+                          </svg>
+                        </button>
                       </>
                     ) : <span style={{ color: '#9ca3af' }}>—</span>}
                   </td>
                 </tr>
               )})}
+              {showMatricola && (() => {
+                const cauzioneRows = rows.filter(r => isTesseraRow(r) && r.cauzione_decurtata)
+                if (cauzioneRows.length === 0) return null
+                const cauzioneUnit = Number(props.cauzioneUnitaria) || 0
+                const cauzioneTotale = cauzioneRows.reduce((sum, r) => sum + nsRound(nsSafeNum(r.prezzo_unitario_snapshot, 0) - nsSafeNum(r.importo_riga, 0), 2), 0)
+                const idx = rows.length
+                return (
+                  <tr>
+                    <td style={tdS(idx)}></td>
+                    <td style={tdS(idx)}>Decurtazione cauzione</td>
+                    <td style={{ ...tdS(idx), textAlign: 'right' }}>—</td>
+                    <td style={{ ...tdS(idx), textAlign: 'center' }}>—</td>
+                    <td style={{ ...tdS(idx), textAlign: 'right' }}>{cauzioneRows.length} pz</td>
+                    <td style={{ ...tdS(idx), textAlign: 'right' }}>{money(cauzioneUnit)}</td>
+                    <td style={{ ...tdS(idx), textAlign: 'right', color: '#b42318', fontWeight: 700 }}>{cauzioneTotale > 0 ? `- ${money(cauzioneTotale)}` : money(0)}</td>
+                    <td style={tdS(idx)}></td>
+                  </tr>
+                )
+              })()}
             </tbody>
           </table>
         </div>
@@ -6482,8 +6568,28 @@ function NuovaPraticaForm (p: {
   const [previewLoading, setPreviewLoading] = React.useState(false)
   const [previewRotationDeg, setPreviewRotationDeg] = React.useState(0)
   const prevBlobRef = React.useRef<string | null>(null)
+  const lastInitSignatureRef = React.useRef<string | null>(null)
 
   React.useEffect(() => {
+    // ExB puo' consegnare p.initialData due volte di seguito per lo stesso
+    // identico record (tipicamente dopo un F5, per via del doppio mount di
+    // mappa/datasource). Se e' lo stesso record della volta precedente non
+    // dobbiamo azzerare di nuovo il form: lo faremmo perdere dati gia'
+    // caricati nel frattempo (es. il catalogo attrezzature Art.30) senza che
+    // nulla li ricarichi.
+    // Guardia limitata alla modalita' 'edit': solo li' editOid+GlobalID
+    // identificano in modo univoco lo stesso rapporto. In 'create' l'OID e'
+    // sempre null e puo' mancare il GlobalID, quindi qui si mantiene il
+    // comportamento originale (reset sempre) per non rischiare di confondere
+    // due sessioni di creazione distinte.
+    if (mode === 'edit') {
+      const recordGlobalId = String(pickAttrCI(p.initialData || {}, ['GlobalID', 'globalid', 'GLOBALID']) || '').trim()
+      const signature = `edit|${editOid}|${recordGlobalId}`
+      if (lastInitSignatureRef.current === signature) return
+      lastInitSignatureRef.current = signature
+    } else {
+      lastInitSignatureRef.current = null
+    }
     if (mode === 'create') createStartedAtRef.current = Date.now()
     const nextBase = draftFromRecord(p.initialData || {})
     setDraft(nextBase)
@@ -6797,10 +6903,10 @@ const loadNotaSpeseDraft = React.useCallback(async () => {
         cartItems.forEach((item: any) => {
           const codiceVoce = String(item?.codice_voce || '').trim()
           if (!codiceVoce || !item?.famiglia) return
-          if (existingCodes.has(codiceVoce)) return
           const cat = nsNormalizeCategory(item.famiglia)
           if (!cat) return
           const isTesseraCartItem = cat === 'RA' && attrezzaturaTipo(item.descrizione)?.key === 'TESSERA_ELETTRONICA'
+          if (existingCodes.has(codiceVoce) && !isTesseraCartItem) return
           const prezzoCart = nsRound(nsSafeNum(item.prezzo_unitario, 0), 4)
           maxOrdine += 10
           draft[cat].push({
@@ -6819,7 +6925,7 @@ const loadNotaSpeseDraft = React.useCallback(async () => {
             riferimento_attrezzatura_id: effectiveRiferimentoId || null,
             codice_casistica: effectiveNotaSpeseCasistica
           })
-          existingCodes.add(codiceVoce)
+          if (!isTesseraCartItem) existingCodes.add(codiceVoce)
           added++
         })
         if (added > 0) {
@@ -6839,7 +6945,7 @@ const loadNotaSpeseDraft = React.useCallback(async () => {
   } finally {
     setNoteSpeseBusy(false)
   }
-}, [mode, currentOid, currentGlobalId, noteSpeseMissing.length, noteSpeseCfg, activeNotaSpeseCasistica, activeAttrezzaturaRiferimentoId, noteSpeseDraftStorageKey])
+}, [mode, currentOid, currentGlobalId, noteSpeseMissing.length, noteSpeseCfg, activeNotaSpeseCasistica, activeAttrezzaturaRiferimentoId, art30RecuperoMode, noteSpeseDraftStorageKey])
 
 const refreshNotaSpeseSummary = React.useCallback(async () => {
   const rows = nsRowsByCategoryToFlat(noteSpeseRowsDraft)
@@ -6897,10 +7003,10 @@ React.useEffect(() => {
       cartItems.forEach((item: any) => {
         const codiceVoce = String(item?.codice_voce || '').trim()
         if (!codiceVoce || !item?.famiglia) return
-        if (existingCodes.has(codiceVoce)) return
         const cat = nsNormalizeCategory(item.famiglia)
         if (!cat) return
         const isTesseraCartItem = cat === 'RA' && attrezzaturaTipo(item.descrizione)?.key === 'TESSERA_ELETTRONICA'
+        if (existingCodes.has(codiceVoce) && !isTesseraCartItem) return
         const prezzoCart = nsRound(nsSafeNum(item.prezzo_unitario, 0), 4)
         maxOrdine += 10
         draft[cat].push({
@@ -6916,7 +7022,7 @@ React.useEffect(() => {
           codice_casistica: activeNotaSpeseCasistica,
           riferimento_attrezzatura_id: effectiveRiferimentoId || null
         })
-        existingCodes.add(codiceVoce)
+        if (!isTesseraCartItem) existingCodes.add(codiceVoce)
         added++
       })
       if (added > 0) {
@@ -6927,7 +7033,7 @@ React.useEffect(() => {
     })
   }, 500)
   return () => window.clearInterval(id)
-}, [mode, currentOid, currentGlobalId, activeNotaSpeseCasistica, activeAttrezzaturaRiferimentoId])
+}, [mode, currentOid, currentGlobalId, activeNotaSpeseCasistica, activeAttrezzaturaRiferimentoId, art30RecuperoMode])
 
 React.useEffect(() => {
   setNoteSpeseSummary(nsComputeSummaryFromRows(nsRowsByCategoryToFlat(noteSpeseRowsDraft), noteSpesePercent))
@@ -7216,32 +7322,18 @@ React.useEffect(() => {
       setAttrezzatureCauzioneUnitaria(0)
       return () => { cancelled = true }
     }
-    const withTimeout = <T,>(p: Promise<T>, ms: number): Promise<T> => new Promise((resolve, reject) => {
-      const t = window.setTimeout(() => reject(new Error(`timeout dopo ${ms}ms`)), ms)
-      p.then((v) => { window.clearTimeout(t); resolve(v) }, (e) => { window.clearTimeout(t); reject(e) })
-    })
     void (async () => {
-      const maxAttempts = 4
-      for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      console.log('[GII-DEBUG attrezzature] fetch, url=', attrezzatureParametriUrl)
+      try {
+        const bundle = await loadArt30ParametersBundle(attrezzatureParametriUrl, g('data_rilevazione'))
+        console.log('[GII-DEBUG attrezzature] bundle ricevuto:', JSON.stringify(bundle))
         if (cancelled) return
-        console.log(`[GII-DEBUG attrezzature] tentativo ${attempt}/${maxAttempts}, url=`, attrezzatureParametriUrl)
-        try {
-          const bundle = await withTimeout(loadArt30ParametersBundle(attrezzatureParametriUrl, g('data_rilevazione')), 4000)
-          console.log(`[GII-DEBUG attrezzature] tentativo ${attempt}: bundle ricevuto:`, JSON.stringify(bundle))
-          if (cancelled) return
-          if (bundle.attrezzature.length > 0) {
-            setAttrezzatureCatalog(bundle.attrezzature)
-            setAttrezzatureCauzioneUnitaria(bundle.cauzione)
-            return
-          }
-          // Risultato vuoto: puo' essere un blocco di avvio a freddo del caricatore moduli
-          // ArcGIS (si sblocca da solo dopo un istante) — non un vero "nessun dato".
-        } catch (e: any) {
-          console.log(`[GII-DEBUG attrezzature] tentativo ${attempt}: ERRORE`, e?.message || String(e))
-        }
-        if (attempt < maxAttempts) await new Promise((r) => window.setTimeout(r, 1200))
+        setAttrezzatureCatalog(bundle.attrezzature)
+        setAttrezzatureCauzioneUnitaria(bundle.cauzione)
+      } catch (e: any) {
+        console.log('[GII-DEBUG attrezzature] ERRORE', e?.message || String(e))
+        if (!cancelled) { setAttrezzatureCatalog([]); setAttrezzatureCauzioneUnitaria(0) }
       }
-      if (!cancelled) { setAttrezzatureCatalog([]); setAttrezzatureCauzioneUnitaria(0) }
     })()
     return () => { cancelled = true }
   }, [activeNotaSpeseCasistica, attrezzatureParametriUrl, draft.data_rilevazione])
@@ -7770,10 +7862,13 @@ React.useEffect(() => {
       const incompleteRow = nsRowsByCategoryToFlat(noteSpeseRowsDraft).find(nsRowIsIncomplete)
       if (incompleteRow) {
         const isTessera = incompleteRow.categoria_costo === 'RA' && attrezzaturaTipo(incompleteRow.descrizione_snapshot)?.key === 'TESSERA_ELETTRONICA'
+        const matricolaVuota = isTessera && !String(incompleteRow.matricola_snapshot || '').trim()
         setValidationPopup({
           title: 'Nota spese incompleta',
           text: isTessera
-            ? `Manca la matricola per la riga "${incompleteRow.descrizione_snapshot}" nel risarcimento attrezzature (Art. 30). Completa la matricola o elimina la riga prima di salvare.`
+            ? (matricolaVuota
+              ? `Manca la matricola per la riga "${incompleteRow.descrizione_snapshot}" nel risarcimento attrezzature (Art. 30). Completa la matricola o elimina la riga prima di salvare.`
+              : `La matricola "${incompleteRow.matricola_snapshot}" per la riga "${incompleteRow.descrizione_snapshot}" non è valida: deve avere esattamente 5 cifre. Correggila o elimina la riga prima di salvare.`)
             : `La riga "${incompleteRow.descrizione_snapshot}" non ha una quantità valida. Completa la quantità o elimina la riga prima di salvare.`
         })
         return
@@ -8219,10 +8314,12 @@ ${e?.message || String(e)}`
   const noteSpeseCasistiche = React.useMemo(() => getNotaSpeseCasisticheWithExistingRows(draft, noteSpeseRowsDraft), [draft, noteSpeseRowsDraft])
   const noteSpeseExpectedCount = noteSpeseExpectedCasistiche.length
   const noteSpeseCompiledCount = React.useMemo(() => {
-    // Numeratore badge Nota spese: conta, per ciascuna violazione attesa, se esiste almeno
-    // una riga collegata (Art.30 compreso: ora si comporta come le altre, niente più
-    // conteggio per singola attrezzatura dichiarata).
-    return noteSpeseExpectedCasistiche.reduce((sum, opt) => sum + (hasNotaSpeseRowsForCasistica(noteSpeseRowsDraft, opt.codice) ? 1 : 0), 0)
+    // Numeratore badge Nota spese: somma, per ciascuna violazione attesa, il numero di note
+    // spese DISTINTE effettivamente esistenti (non solo se ne esiste almeno una). Per la
+    // maggior parte delle violazioni questo vale 0 o 1; per Art.30 può superare 1 se esistono
+    // sia la nota condivisa "non recuperabile" sia una o più note "recuperabile" (una per
+    // attrezzatura). Il numeratore può quindi legittimamente superare il denominatore.
+    return noteSpeseExpectedCasistiche.reduce((sum, opt) => sum + countNotaSpeseEntriesForCasistica(noteSpeseRowsDraft, opt.codice), 0)
   }, [noteSpeseExpectedCasistiche, noteSpeseRowsDraft])
   const noteSpeseIncompleteCasistiche = React.useMemo(() => {
     return noteSpeseCasistiche.filter(opt => hasNotaSpeseIncompleteRowsForCasistica(noteSpeseRowsDraft, opt.codice))
@@ -8323,14 +8420,22 @@ ${e?.message || String(e)}`
   }, [noteSpeseRowsDraft, activeNotaSpeseCasistica, activeAttrezzaturaRiferimentoId, isArt30NotaSpeseCasistica, art30RecuperoMode, activeAttrezzaturaRiferimentoRequired])
   const activeNotaSpeseSummary = React.useMemo(() => nsComputeSummaryFromRows(nsRowsByCategoryToFlat(activeNotaSpeseRows), noteSpesePercent), [activeNotaSpeseRows, noteSpesePercent])
   const activeNotaSpeseOption = React.useMemo(() => noteSpeseCasistiche.find(opt => opt.codice === activeNotaSpeseCasistica) || null, [noteSpeseCasistiche, activeNotaSpeseCasistica])
-  const activeNotaSpeseIncompleteRowsCount = React.useMemo(() => {
-    if (!activeNotaSpeseCasistica) return 0
-    return countNotaSpeseIncompleteRowsForCasistica(noteSpeseRowsDraft, activeNotaSpeseCasistica)
-  }, [noteSpeseRowsDraft, activeNotaSpeseCasistica])
+  const activeNotaSpeseIncompleteBreakdown = React.useMemo(() => {
+    if (!activeNotaSpeseCasistica) return { matricola: [] as NsDetailRow[], quantita: [] as NsDetailRow[] }
+    const rows = nsRowsByCategoryToFlat(activeNotaSpeseRows)
+    return {
+      matricola: rows.filter(r => nsRowIncompleteReason(r) === 'matricola'),
+      quantita: rows.filter(r => nsRowIncompleteReason(r) === 'quantita')
+    }
+  }, [activeNotaSpeseRows, activeNotaSpeseCasistica])
+  const activeNotaSpeseIncompleteRowsCount = activeNotaSpeseIncompleteBreakdown.matricola.length + activeNotaSpeseIncompleteBreakdown.quantita.length
   const noteSpeseBrowseDisabled = isReadOnly || isRiAgrTecLimitedEdit || noteSpeseBusy || !activeNotaSpeseCasistica || noteSpeseCasistiche.length === 0 ||
     (activeNotaSpeseCasistica === 'C104_ATTREZZATURE_DANNEGGIATE' && art30RecuperoMode === 'recuperabile' && !activeAttrezzaturaRiferimentoId)
   // La combo seleziona soltanto quale nota spese consultare: resta attiva anche in sola consultazione.
-  const noteSpeseCasisticaDisabled = noteSpeseBusy || noteSpeseCasistiche.length <= 1
+  // Non va disabilitata quando c'e' una sola violazione selezionabile: se quella
+  // violazione e' l'Art.30, il blocco si propagava anche alle combo attrezzatura
+  // (che leggono lo stesso flag), impedendo di scegliere tipo/attrezzatura.
+  const noteSpeseCasisticaDisabled = noteSpeseBusy
 
   React.useEffect(() => {
     // Evita il lampeggio arancione iniziale senza nascondere il badge:
@@ -10159,7 +10264,16 @@ ${e?.message || String(e)}`
               </div>
               {activeNotaSpeseIncompleteRowsCount > 0 && (
                 <div style={{ marginTop: 4, padding: '8px 10px', borderRadius: 8, border: '1px solid #f59e0b', background: '#fffbeb', color: '#92400e', fontSize: 12, fontWeight: 700, lineHeight: 1.35 }}>
-                  Nota spese incompleta: sono presenti {activeNotaSpeseIncompleteRowsCount} {activeNotaSpeseIncompleteRowsCount === 1 ? 'riga senza quantità o con quantità pari a zero' : 'righe senza quantità o con quantità pari a zero'}. Completa le quantità oppure elimina le righe non necessarie prima dell’inoltro.
+                  <div>Nota spese incompleta:</div>
+                  <ul style={{ margin: '4px 0 0', paddingLeft: 18 }}>
+                    {activeNotaSpeseIncompleteBreakdown.matricola.map((row, idx) => (
+                      <li key={`matricola-${idx}`}>{String(row.matricola_snapshot || '').trim() ? `Matricola "${row.matricola_snapshot}" non valida (deve avere 5 cifre)` : 'Manca la matricola'} — {NS_CATEGORY_LABELS[row.categoria_costo]}: "{row.descrizione_snapshot}"</li>
+                    ))}
+                    {activeNotaSpeseIncompleteBreakdown.quantita.map((row, idx) => (
+                      <li key={`quantita-${idx}`}>Manca la quantità (o è pari a zero) — {NS_CATEGORY_LABELS[row.categoria_costo]}: "{row.descrizione_snapshot}"</li>
+                    ))}
+                  </ul>
+                  <div style={{ marginTop: 4 }}>Completa i dati oppure elimina le righe non necessarie prima dell’inoltro.</div>
                 </div>
               )}
             </div>

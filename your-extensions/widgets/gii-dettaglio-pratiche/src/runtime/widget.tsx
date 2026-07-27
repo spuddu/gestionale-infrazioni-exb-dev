@@ -3182,7 +3182,7 @@ function CicliTimeline (props: { globalId: string; hasSel: boolean; sortDir: 'as
 }
 
 
-type NsdCategory = 'AT' | 'PR' | 'RU' | 'SL' | 'PF'
+type NsdCategory = 'AT' | 'PR' | 'RU' | 'SL' | 'PF' | 'RA'
 type NsdSource = 'REGIONE' | 'INTERNO' | 'NUOVI PREZZI'
 type NsdDetailRow = {
   objectid: number
@@ -3199,6 +3199,8 @@ type NsdDetailRow = {
   note: string
   codice_casistica: string
   riferimento_attrezzatura_id?: string | null
+  matricola_snapshot?: string | null
+  cauzione_decurtata?: boolean
 }
 type NsdSummary = {
   totaleAT: number
@@ -3206,18 +3208,22 @@ type NsdSummary = {
   totaleRU: number
   totaleSL: number
   totalePF: number
+  totaleRA: number
   percentualeSpeseGenerali: number
   importoSpeseGenerali: number
   totaleComplessivo: number
 }
 
+// Le 5 categorie "generiche" con lo stesso formato colonne (Origine/Codice/Descrizione/UM/Qtà/Prezzo/Importo).
+// RA (Risarcimento attrezzatura) ha colonne diverse (Matricola/Cauzione) e viene renderizzata a parte.
 const NSD_CATEGORIES: readonly NsdCategory[] = ['AT', 'PR', 'RU', 'SL', 'PF'] as const
 const NSD_CATEGORY_LABELS: Record<NsdCategory, string> = {
   AT: 'Attrezzature e trasporti',
   PR: 'Materiali da costruzione',
   RU: 'Risorse umane',
   SL: 'Semilavorati',
-  PF: 'Prodotti finiti'
+  PF: 'Prodotti finiti',
+  RA: 'Risarcimento attrezzatura'
 }
 
 const NSD_UNLINKED_CASISTICA = '__GII_NSD_NON_COLLEGATA__'
@@ -3533,6 +3539,7 @@ function nsdNormalizeCategory (v: any): NsdCategory | null {
   if (s === 'RU') return 'RU'
   if (s === 'SL') return 'SL'
   if (s === 'PF') return 'PF'
+  if (s === 'RA') return 'RA'
   return null
 }
 
@@ -3556,6 +3563,7 @@ function nsdReadParentSummary (data: any): NsdSummary {
     totaleRU: nsdSafeNum(nsdPickAttrCI(data, ['ns_totale_manodopera']), 0),
     totaleSL: nsdSafeNum(nsdPickAttrCI(data, ['ns_totale_semilavorati']), 0),
     totalePF: nsdSafeNum(nsdPickAttrCI(data, ['ns_totale_prodotti_finiti']), 0),
+    totaleRA: 0,
     percentualeSpeseGenerali: nsdSafeNum(nsdPickAttrCI(data, ['ns_spese_generali_perc']), 0),
     importoSpeseGenerali: nsdSafeNum(nsdPickAttrCI(data, ['ns_importo_spese_generali']), 0),
     totaleComplessivo: nsdSafeNum(nsdPickAttrCI(data, ['ns_totale_complessivo']), 0)
@@ -3569,6 +3577,7 @@ function nsdSummaryHasValues (summary: NsdSummary): boolean {
     summary.totaleRU,
     summary.totaleSL,
     summary.totalePF,
+    summary.totaleRA,
     summary.importoSpeseGenerali,
     summary.totaleComplessivo,
     summary.percentualeSpeseGenerali
@@ -3582,11 +3591,14 @@ function nsdComputeSummaryFromRows (rows: NsdDetailRow[], perc: number): NsdSumm
   const totaleRU = sumBy('RU')
   const totaleSL = sumBy('SL')
   const totalePF = sumBy('PF')
+  const totaleRA = sumBy('RA')
   const base = nsdRound(totaleAT + totalePR + totaleRU + totaleSL + totalePF, 2)
   const percentualeSpeseGenerali = nsdRound(nsdSafeNum(perc, 0), 2)
   const importoSpeseGenerali = nsdRound(base * percentualeSpeseGenerali / 100, 2)
-  const totaleComplessivo = nsdRound(base + importoSpeseGenerali, 2)
-  return { totaleAT, totalePR, totaleRU, totaleSL, totalePF, percentualeSpeseGenerali, importoSpeseGenerali, totaleComplessivo }
+  // RA (risarcimento attrezzatura) non concorre alla base su cui si calcolano le spese
+  // generali: si somma al netto, direttamente nel totale complessivo.
+  const totaleComplessivo = nsdRound(base + importoSpeseGenerali + totaleRA, 2)
+  return { totaleAT, totalePR, totaleRU, totaleSL, totalePF, totaleRA, percentualeSpeseGenerali, importoSpeseGenerali, totaleComplessivo }
 }
 
 function nsdMergeSummary (parent: NsdSummary, computed: NsdSummary): NsdSummary {
@@ -3597,6 +3609,7 @@ function nsdMergeSummary (parent: NsdSummary, computed: NsdSummary): NsdSummary 
       totaleRU: parent.totaleRU || computed.totaleRU,
       totaleSL: parent.totaleSL || computed.totaleSL,
       totalePF: parent.totalePF || computed.totalePF,
+      totaleRA: parent.totaleRA || computed.totaleRA,
       percentualeSpeseGenerali: parent.percentualeSpeseGenerali || computed.percentualeSpeseGenerali,
       importoSpeseGenerali: parent.importoSpeseGenerali || computed.importoSpeseGenerali,
       totaleComplessivo: parent.totaleComplessivo || computed.totaleComplessivo
@@ -3638,7 +3651,7 @@ async function nsdQueryRows (detailUrl: string, parentGlobalId: string): Promise
     String(fl?.objectIdField || 'OBJECTID'), 'OBJECTID', 'categoria_costo', 'origine_voce_snapshot', 'codice_voce_snapshot',
     'descrizione_snapshot', 'unita_misura_snapshot', 'prezzo_unitario_snapshot',
     'costo_unitario_snapshot', 'quantita', 'importo_riga', 'anno_prezzario_snapshot',
-    'ordine', 'note', 'codice_casistica', 'riferimento_attrezzatura_id'
+    'ordine', 'note', 'codice_casistica', 'riferimento_attrezzatura_id', 'matricola_snapshot', 'cauzione_decurtata'
   ]
   const realByLower = new Map<string, string>()
   ;(Array.isArray(fl?.fields) ? fl.fields : []).forEach((f: any) => {
@@ -3655,10 +3668,11 @@ async function nsdQueryRows (detailUrl: string, parentGlobalId: string): Promise
     .map((name: any) => `${name} ASC`)
   if (orderFields.length) q.orderByFields = orderFields
   const res = await fl.queryFeatures(q)
+  const NSD_SORT_CATEGORY_ORDER: readonly NsdCategory[] = ['AT', 'PR', 'RU', 'SL', 'PF', 'RA']
   return ((res?.features || []).map((f: any) => {
     const r = f?.attributes || {}
     const cat = nsdNormalizeCategory(r?.categoria_costo)
-    if (!cat) return null // categoria non tra le 5 gestite qui (es. RA): esclusa, non forzata a PR
+    if (!cat) return null // categoria non riconosciuta: esclusa, non forzata a PR
     return {
       objectid: nsdSafeNum(nsdPickAttrCI(r, ['OBJECTID', 'objectid']), 0),
       categoria_costo: cat as NsdCategory,
@@ -3673,11 +3687,13 @@ async function nsdQueryRows (detailUrl: string, parentGlobalId: string): Promise
       ordine: Math.trunc(nsdSafeNum(r?.ordine, 0)),
       note: String(r?.note || '').trim(),
       codice_casistica: nsdNormalizeCasistica(nsdPickAttrCI(r, ['codice_casistica'])),
-      riferimento_attrezzatura_id: String(nsdPickAttrCI(r, ['riferimento_attrezzatura_id']) || '').trim() || null
+      riferimento_attrezzatura_id: String(nsdPickAttrCI(r, ['riferimento_attrezzatura_id']) || '').trim() || null,
+      matricola_snapshot: r?.matricola_snapshot != null ? String(r.matricola_snapshot).trim() || null : null,
+      cauzione_decurtata: !!r?.cauzione_decurtata
     }
   }).filter((row: NsdDetailRow | null) => row !== null) as NsdDetailRow[]).sort((a: NsdDetailRow, b: NsdDetailRow) => {
-    const ca = NSD_CATEGORIES.indexOf(a.categoria_costo)
-    const cb = NSD_CATEGORIES.indexOf(b.categoria_costo)
+    const ca = NSD_SORT_CATEGORY_ORDER.indexOf(a.categoria_costo)
+    const cb = NSD_SORT_CATEGORY_ORDER.indexOf(b.categoria_costo)
     if (ca !== cb) return ca - cb
     if (a.ordine !== b.ordine) return a.ordine - b.ordine
     return a.objectid - b.objectid
@@ -3713,6 +3729,8 @@ function NotaSpeseDetailPanel (props: { data: any; detailUrl: string; hasSel: bo
         const baseLabel = nsdCasisticaInfo(baseCode).label
         const attrLabel = attrezzatureLabels.get(riferimentoId)
         labelByCode.set(code, attrLabel ? `${baseLabel} — Rimborso spese riparazione ${attrLabel}` : baseLabel)
+      } else if (isArt30 && !riferimentoId) {
+        labelByCode.set(code, `${nsdCasisticaInfo(baseCode).label} — Non recuperabile`)
       }
       const list = byCode.get(code) || []
       list.push(row)
@@ -3740,8 +3758,14 @@ function NotaSpeseDetailPanel (props: { data: any; detailUrl: string; hasSel: bo
     })
   }, [rows, expectedCasistiche, props.data])
 
+  const hasRealRaRows = rows.some(r => r.categoria_costo === 'RA')
   const overallSummary = React.useMemo(() => nsdComputeSummaryFromRows(rows, percentualeSpeseGenerali), [rows, percentualeSpeseGenerali])
-  const overallTotalWithArt30 = nsdRound(overallSummary.totaleComplessivo + (art30Equipment.hasData ? art30Equipment.netto : 0), 2)
+  const overallTotalWithArt30 = nsdRound(overallSummary.totaleComplessivo + (!hasRealRaRows && art30Equipment.hasData ? art30Equipment.netto : 0), 2)
+  // Totale "Risarcimento attrezzature" mostrato nel riepilogo: preferisce le righe RA reali
+  // (nota spese vera e propria) al vecchio campo piatto, usato solo come fallback per le
+  // pratiche non ancora migrate che non hanno righe RA reali.
+  const risarcimentoAttrezzatureTotale = hasRealRaRows ? overallSummary.totaleRA : (art30Equipment.hasData ? art30Equipment.netto : 0)
+  const showRisarcimentoAttrezzatureCard = hasRealRaRows || art30Equipment.hasData
 
   const card = (label: string, value: number, strong = false) => (
     <div
@@ -3818,6 +3842,47 @@ function NotaSpeseDetailPanel (props: { data: any; detailUrl: string; hasSel: bo
     )
   }
 
+  const renderRaRows = (sourceRows: NsdDetailRow[]) => {
+    const raRows = (sourceRows || []).filter(row => row.categoria_costo === 'RA')
+    if (!raRows.length) return <div style={{ fontSize: 12, color: '#6b7280', padding: '8px 2px' }}>Nessuna voce.</div>
+    return (
+      <div style={{ overflowX: 'auto', marginTop: 8 }}>
+        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
+          <thead>
+            <tr style={{ background: 'rgba(0,0,0,0.04)' }}>
+              {['Origine', 'Descrizione', 'Matricola', 'Cauzione', 'Q.tà', 'Prezzo unit.', 'Importo'].map(h => (
+                <th key={h} style={{ textAlign: ['Origine', 'Descrizione'].includes(h) ? 'left' : (h === 'Cauzione' ? 'center' : 'right'), padding: '6px 8px', borderBottom: '1px solid rgba(0,0,0,0.10)', color: '#374151', whiteSpace: 'nowrap' }}>{h}</th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {raRows.map((row, idx) => {
+              const isTessera = !!String(row.matricola_snapshot || '').trim() || row.cauzione_decurtata != null
+              return (
+              <React.Fragment key={`${row.objectid}-${idx}`}>
+                <tr>
+                  <td style={{ padding: '7px 8px', borderBottom: '1px solid rgba(0,0,0,0.07)', textAlign: 'left', whiteSpace: 'nowrap' }}>{nsdSourceShort(row.origine_voce_snapshot)}{row.anno_prezzario_snapshot ? ` ${row.anno_prezzario_snapshot}` : ''}</td>
+                  <td style={{ padding: '7px 8px', borderBottom: '1px solid rgba(0,0,0,0.07)', textAlign: 'left', minWidth: 220 }}><b>{row.codice_voce_snapshot}</b> — {row.descrizione_snapshot || '—'}</td>
+                  <td style={{ padding: '7px 8px', borderBottom: '1px solid rgba(0,0,0,0.07)', textAlign: 'right', whiteSpace: 'nowrap' }}>{isTessera ? (row.matricola_snapshot || '—') : '—'}</td>
+                  <td style={{ padding: '7px 8px', borderBottom: '1px solid rgba(0,0,0,0.07)', textAlign: 'center', whiteSpace: 'nowrap' }}>{isTessera ? (row.cauzione_decurtata ? 'Sì' : 'No') : '—'}</td>
+                  <td style={{ padding: '7px 8px', borderBottom: '1px solid rgba(0,0,0,0.07)', textAlign: 'right', whiteSpace: 'nowrap' }}>{nsdQty(row.quantita)} {row.unita_misura_snapshot || ''}</td>
+                  <td style={{ padding: '7px 8px', borderBottom: '1px solid rgba(0,0,0,0.07)', textAlign: 'right', whiteSpace: 'nowrap' }}>€ {nsdMoney(row.prezzo_unitario_snapshot)}</td>
+                  <td style={{ padding: '7px 8px', borderBottom: '1px solid rgba(0,0,0,0.07)', textAlign: 'right', whiteSpace: 'nowrap', fontWeight: 800 }}>€ {nsdMoney(row.importo_riga)}</td>
+                </tr>
+                {row.note && (
+                  <tr>
+                    <td colSpan={7} style={{ padding: '4px 8px 8px', borderBottom: '1px solid rgba(0,0,0,0.07)', color: '#6b7280', fontSize: 11 }}><b>Note:</b> {row.note}</td>
+                  </tr>
+                )}
+              </React.Fragment>
+              )
+            })}
+          </tbody>
+        </table>
+      </div>
+    )
+  }
+
   const renderRows = (cat: NsdCategory, sourceRows: NsdDetailRow[]) => {
     const catRows = (sourceRows || []).filter(row => row.categoria_costo === cat)
     if (!catRows.length) return <div style={{ fontSize: 12, color: '#6b7280', padding: '8px 2px' }}>Nessuna voce.</div>
@@ -3890,7 +3955,7 @@ function NotaSpeseDetailPanel (props: { data: any; detailUrl: string; hasSel: bo
           boxShadow="0 1px 3px rgba(23, 107, 82, 0.14)"
         >
           <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr)', gap: 0 }}>
-            {art30Equipment.hasData && greenSummaryCard('Totale risarcimento attrezzature', art30Equipment.netto)}
+            {showRisarcimentoAttrezzatureCard && greenSummaryCard('Totale risarcimento attrezzature', risarcimentoAttrezzatureTotale)}
             {greenSummaryCard('Totale note spese', nsdRound(overallSummary.totaleAT + overallSummary.totalePR + overallSummary.totaleRU + overallSummary.totaleSL + overallSummary.totalePF, 2))}
             {greenSummaryCard(`Spese generali (${nsdMoney(overallSummary.percentualeSpeseGenerali)}%)`, overallSummary.importoSpeseGenerali)}
             {greenSummaryCard('Totale complessivo', overallTotalWithArt30, true)}
@@ -3899,7 +3964,7 @@ function NotaSpeseDetailPanel (props: { data: any; detailUrl: string; hasSel: bo
         </DetailSectionCard>
       )}
 
-      {art30Equipment.hasData && (
+      {!hasRealRaRows && art30Equipment.hasData && (
         <DetailSectionCard
           title={`${nsdCasisticaInfo('C104_ATTREZZATURE_DANNEGGIATE').label} — Risarcimento attrezzature non recuperabili`}
           borderColor="#c5d9f1"
@@ -3950,6 +4015,21 @@ function NotaSpeseDetailPanel (props: { data: any; detailUrl: string; hasSel: bo
                     </details>
                   )
                 })}
+
+              {(() => {
+                const raRows = group.rows.filter(row => row.categoria_costo === 'RA')
+                if (!raRows.length) return null
+                const total = raRows.reduce((sum, row) => sum + nsdSafeNum(row.importo_riga, 0), 0)
+                return (
+                  <details key={`${group.code}-RA`} style={{ border: '1px solid #cbd5e1', borderRadius: 10, background: '#fff', overflow: 'hidden' }}>
+                    <summary style={{ cursor: 'pointer', display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) 132px', alignItems: 'center', gap: 12, fontSize: 13, fontWeight: 800, color: '#1f2937', padding: '8px 12px', background: '#e5e7eb', borderBottom: '1px solid #cbd5e1' }}>
+                      <span>{NSD_CATEGORY_LABELS.RA} <span style={{ color: '#4b5563', fontWeight: 700 }}>({raRows.length} {raRows.length === 1 ? 'voce' : 'voci'})</span></span>
+                      <span style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>€ {nsdMoney(total)}</span>
+                    </summary>
+                    <div style={{ padding: 10 }}>{renderRaRows(group.rows)}</div>
+                  </details>
+                )
+              })()}
 
                 <div style={{ marginTop: 2, border: '1px solid rgba(31,78,121,0.24)', borderRadius: 10, overflow: 'hidden', background: '#fff' }}>
                   {card(`Spese generali (${nsdMoney(groupSummary.percentualeSpeseGenerali)}%)`, groupSummary.importoSpeseGenerali)}
@@ -4171,28 +4251,27 @@ function DetailTabsPanel (props: {
 
   const nsdExpectedCasisticheForBadge = React.useMemo(() => nsdExpectedCasisticheFromData(data || {}), [data])
   const nsdPercForBadge = React.useMemo(() => nsdReadParentSummary(data || {}).percentualeSpeseGenerali, [data])
-  const nsdAttrezzatureLabelsForBadge = React.useMemo(() => nsdGetRecuperabiliAttrezzatureLabelsById(data || {}), [data])
   const nsdDoneCountForBadge = React.useMemo(() => {
     return nsdExpectedCasisticheForBadge.reduce((sum, code) => {
       const norm = nsdNormalizeCasistica(code)
       if (norm === 'C104_ATTREZZATURE_DANNEGGIATE') {
-        const compiled = Array.from(nsdAttrezzatureLabelsForBadge.keys()).filter(id => {
-          const total = (nsdRows || [])
-            .filter(r => nsdNormalizeCasistica(r.codice_casistica) === norm && String(r.riferimento_attrezzatura_id || '').trim() === id)
-            .reduce((s, r) => s + nsdSafeNum(r.importo_riga, 0), 0)
-          return total > 0.004
-        }).length
-        return sum + compiled
+        const groupRows = (nsdRows || []).filter(r => nsdNormalizeCasistica(r.codice_casistica) === norm)
+        const hasSharedEntry = groupRows.some(r => !String(r.riferimento_attrezzatura_id || '').trim())
+        const distinctRiferimenti = new Set(groupRows.map(r => String(r.riferimento_attrezzatura_id || '').trim()).filter(Boolean))
+        const rowBased = (hasSharedEntry ? 1 : 0) + distinctRiferimenti.size
+        // Fallback per pratiche non ancora migrate: nessuna riga RA reale ma dati nel vecchio campo piatto.
+        return sum + (rowBased > 0 ? rowBased : (nsdReadArt30Equipment(data || {}).hasData ? 1 : 0))
       }
       return sum + (nsdIsCasisticaCompiled(nsdRows, code, nsdPercForBadge) ? 1 : 0)
     }, 0)
-  }, [nsdExpectedCasisticheForBadge, nsdRows, nsdPercForBadge, nsdAttrezzatureLabelsForBadge])
+  }, [nsdExpectedCasisticheForBadge, nsdRows, nsdPercForBadge, data])
   const nsdTotalCountForBadge = React.useMemo(() => {
-    return nsdExpectedCasisticheForBadge.reduce((sum, code) => {
-      if (nsdNormalizeCasistica(code) === 'C104_ATTREZZATURE_DANNEGGIATE') return sum + Math.max(1, nsdAttrezzatureLabelsForBadge.size)
-      return sum + 1
-    }, 0)
-  }, [nsdExpectedCasisticheForBadge, nsdAttrezzatureLabelsForBadge])
+    // Denominatore: 1 per violazione attesa (anche per Art.30). Il numeratore può
+    // legittimamente superarlo se per la stessa violazione esistono più note spese distinte
+    // (es. Art.30 con sia la nota "non recuperabile" condivisa sia una o più note
+    // "recuperabile" per attrezzatura) — stessa filosofia già adottata nella tab Nota spese.
+    return nsdExpectedCasisticheForBadge.length
+  }, [nsdExpectedCasisticheForBadge])
 
   // RIMOSSO: Non resettare la tab quando cambia selezione
   // React.useEffect(() => {

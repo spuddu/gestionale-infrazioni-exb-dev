@@ -192,7 +192,7 @@ function readSectionBadgeDetails (): SectionBadgeDetails {
       const done = Math.max(0, Math.trunc(Number(value?.done || 0)))
       const warning = Math.max(0, Math.trunc(Number(value?.warning || value?.warn || value?.alert || 0)))
       const loading = value?.loading === true || value?.loading === 'true' || value?.loading === 1
-      if (k && (total > 0 || warning > 0)) out[k] = { total, done: Math.min(done, total), warning, loading }
+      if (k && (total > 0 || warning > 0)) out[k] = { total, done, warning, loading }
     })
     return out
   } catch {
@@ -680,7 +680,7 @@ function NavButton (p: { item: NavItem, cfg: any, idx: number, currentPageId: st
   const itemCount = itemSectionForCount ? Number(sectionCounts[itemSectionForCount] || 0) : 0
   const itemBadgeDetail = itemSectionForCount ? sectionBadgeDetails[itemSectionForCount] : undefined
   const itemBadgeTotal = Math.max(0, Math.trunc(Number(itemBadgeDetail?.total || 0)))
-  const itemBadgeDone = Math.max(0, Math.min(itemBadgeTotal, Math.trunc(Number(itemBadgeDetail?.done || 0))))
+  const itemBadgeDone = Math.max(0, Math.trunc(Number(itemBadgeDetail?.done || 0)))
   const itemWarningCount = Math.max(0, Math.trunc(Number(itemBadgeDetail?.warning || 0)))
   const itemBadgeLoading = !!itemBadgeDetail?.loading
   const showRatioBadge = !!itemBadgeDetail && itemBadgeTotal > 0
@@ -853,7 +853,7 @@ export default function Widget (props: Props) {
         const done = Math.max(0, Math.trunc(Number(value?.done || 0)))
         const warning = Math.max(0, Math.trunc(Number(value?.warning || value?.warn || value?.alert || 0)))
         const loading = value?.loading === true || value?.loading === 'true' || value?.loading === 1
-        if (k && (total > 0 || warning > 0)) details[k] = { total, done: Math.min(done, total), warning, loading }
+        if (k && (total > 0 || warning > 0)) details[k] = { total, done, warning, loading }
       })
       setSectionBadgeDetails(details)
     }
