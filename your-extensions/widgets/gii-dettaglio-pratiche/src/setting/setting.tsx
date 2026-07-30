@@ -791,6 +791,9 @@ export default function Setting(props: Props) {
         <label style={P.lbl}>Tabella dettaglio nota spese</label>
         <Inp value={String(cfgJs.nsNotaSpeseDettaglioUrl || '')} onChange={v=>patch({nsNotaSpeseDettaglioUrl:v})} placeholder='https://.../FeatureServer/0'/>
         <div style={P.hint}>Inserire la URL della tabella GII_NOTA_SPESE_DETTAGLIO. Può restare vuota se si vogliono mostrare solo i totali già presenti sul rapporto.</div>
+        <label style={P.lbl}>Catalogo attrezzature Art.30</label>
+        <Inp value={String(cfgJs.attrezzatureParametriUrl || '')} onChange={v=>patch({attrezzatureParametriUrl:v})} placeholder='https://.../FeatureServer/0'/>
+        <div style={P.hint}>Tabella parametri attrezzature (stessa usata in editing per il prezzario Art.30). Serve per mostrare il nome dell'attrezzatura (es. "Curva di derivazione") nelle note spese recuperabili, invece del solo titolo generico della violazione. Può restare vuota: in tal caso le note recuperabili mostreranno solo il titolo della violazione.</div>
       </div>}
 
       {/* ═══ REGOLAMENTO ═══ */}

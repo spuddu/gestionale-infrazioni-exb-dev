@@ -276,29 +276,6 @@ async function expandServiceSublayerOptions(options: MapLayerOpt[]): Promise<Map
   return uniqueMapLayerOptions(expanded)
 }
 
-async function setMapLayerOptionsExpanded(
-  opts: MapLayerOpt[],
-  apply: (items: MapLayerOpt[]) => void,
-  setLoading: (v: boolean) => void,
-  setError: (v: string) => void,
-  isCancelled: () => boolean
-): Promise<void> {
-  const base = uniqueMapLayerOptions(opts || [])
-  apply(base)
-  if (!base.length) return
-  try {
-    setLoading(true)
-    const expanded = await expandServiceSublayerOptions(base)
-    if (isCancelled()) return
-    apply(expanded)
-    setError(expanded.length ? '' : 'Nessun Feature Layer trovato nella mappa selezionata.')
-  } catch (e: any) {
-    if (!isCancelled()) setError(e?.message || String(e || 'Errore caricamento sublayer'))
-  } finally {
-    if (!isCancelled()) setLoading(false)
-  }
-}
-
 function isFeatureLayerJson(layer: any, path: string[] = []): boolean {
   if (isBasemapOrImageLayerJson(layer, path)) return false
   const layerType = String(layer?.layerType || layer?.type || '').toLowerCase()
@@ -588,31 +565,6 @@ function getFieldsFromDataSourceById(dataSourceId: string, appConfig?: any): Fie
   return []
 }
 
-function getMapInfoFromAppConfig(appConfig: any, mapWidgetId: string): { dataSourceId: string; itemId: string; label: string; portalUrl: string } {
-  const widgets = asJs<Record<string, any>>(appConfig?.widgets || {})
-  const widget = asJs<any>(widgets?.[mapWidgetId] || {})
-  const useDs = asJs<any[]>(widget?.useDataSources || widget?.config?.useDataSources || []) || []
-  const dataSourceId = String(useDs?.[0]?.dataSourceId || widget?.config?.dataSourceId || widget?.config?.webMapDataSourceId || '').trim()
-  let itemId = ''
-  let label = ''
-  let portalUrl = 'https://cbsm-hub.maps.arcgis.com'
-  try {
-    const ds: any = dataSourceId ? DataSourceManager.getInstance().getDataSource(dataSourceId) : null
-    const json = asJs<any>(ds?.getDataSourceJson?.() || ds?.dataSourceJson || {})
-    itemId = String(json?.itemId || json?.sourceItemId || ds?.itemId || '').trim()
-    label = String(ds?.getLabel?.() || json?.label || json?.sourceLabel || '').trim()
-    portalUrl = String(json?.portalUrl || json?.portal?.url || portalUrl).trim() || portalUrl
-  } catch {}
-  try {
-    const dataSources: any = asJs(appConfig?.dataSources || {})
-    const json = asJs<any>(dataSources?.[dataSourceId] || {})
-    if (!itemId) itemId = String(json?.itemId || json?.sourceItemId || '').trim()
-    if (!label) label = String(json?.label || json?.sourceLabel || json?.title || '').trim()
-    portalUrl = String(json?.portalUrl || json?.portal?.url || portalUrl).trim() || portalUrl
-  } catch {}
-  return { dataSourceId, itemId, label, portalUrl }
-}
-
 async function readWebMapFeatureLayers(portalItemId: string, portalUrl?: string): Promise<MapLayerOpt[]> {
   const itemId = String(portalItemId || '').trim()
   if (!itemId) return []
@@ -702,20 +654,6 @@ function compactFieldKey(v: any): string {
   return String(v || '').toLowerCase().replace(/[^a-z0-9]/g, '')
 }
 
-function candidateFieldKeys(kind: 'comune' | 'sezione' | 'foglio' | 'mappale'): string[] {
-  if (kind === 'comune') {
-    // Il Comune deve essere il campo descrittivo/nome, non il codice catastale, ISTAT o Belfiore.
-    return [
-      'nomecomune', 'nomcomune', 'denominazionecomune', 'denomcomune', 'descomune', 'desccomune',
-      'comunedesc', 'comunedenominazione', 'comuneamm', 'nomecom', 'nomcom', 'dencom',
-      'denominazione', 'descrizionecomune', 'descrcomune', 'comune'
-    ]
-  }
-  if (kind === 'sezione') return ['sezione', 'sez', 'sezcens', 'sezionecensuaria', 'sezionecatastale', 'codsezione', 'codsez']
-  if (kind === 'foglio') return ['foglio', 'fg', 'numfoglio', 'numerofoglio', 'fog', 'codfoglio', 'codfog']
-  return ['mappale', 'particella', 'part', 'mapp', 'numappale', 'nummappale', 'numero', 'num', 'codmappale']
-}
-
 function isComuneCodeLikeField(field: FieldOpt | undefined | null): boolean {
   const key = `${compactFieldKey(field?.name)} ${compactFieldKey(field?.alias)}`
   return /codicecatastale|codcat|belfiore|codicebelfiore|codicecomune|codcomune|codistat|istatcomune|codiceistat|codcom|istat/.test(key)
@@ -764,29 +702,6 @@ function suggestComuneNameField(fields: FieldOpt[], fallback: string): string {
 
 function fieldExists(fields: FieldOpt[], name: string): boolean {
   return !!findFieldOpt(fields, name)
-}
-
-function suggestField(fields: FieldOpt[], kind: 'comune' | 'sezione' | 'foglio' | 'mappale', fallback: string): string {
-  if (!fields.length) return fallback
-  if (kind === 'comune') return suggestComuneNameField(fields, fallback)
-  if (fieldExists(fields, fallback)) {
-    const f = findFieldOpt(fields, fallback)
-    return f?.name || fallback
-  }
-  const candidates = candidateFieldKeys(kind)
-  for (const c of candidates) {
-    const exact = fields.find(f => compactFieldKey(f.name) === c || compactFieldKey(f.alias) === c)
-    if (exact?.name) return exact.name
-  }
-  for (const c of candidates) {
-    const partial = fields.find(f => {
-      const n = compactFieldKey(f.name)
-      const a = compactFieldKey(f.alias)
-      return n.endsWith(c) || a.endsWith(c) || n.includes(c) || a.includes(c)
-    })
-    if (partial?.name) return partial.name
-  }
-  return fallback
 }
 
 const P = {
@@ -848,25 +763,6 @@ function FieldSelect(p: { label: string; value: string; fields: FieldOpt[]; onCh
       </select>
     </label>
   )
-}
-
-function buildFieldSuggestionPatch(fields: FieldOpt[], cfg: any): Record<string, any> {
-  const patch: Record<string, any> = {}
-  if (!fields.length) return patch
-  const cComune = String(cfg.fieldComune || 'COMUNE')
-  const cSezione = String(cfg.fieldSezione || 'SEZIONE')
-  const cFoglio = String(cfg.fieldFoglio || 'FOGLIO')
-  const cMappale = String(cfg.fieldMappale || 'MAPPALE')
-  const sComune = suggestField(fields, 'comune', cComune)
-  const sSezione = suggestField(fields, 'sezione', cSezione)
-  const sFoglio = suggestField(fields, 'foglio', cFoglio)
-  const sMappale = suggestField(fields, 'mappale', cMappale)
-  const currentComune = findFieldOpt(fields, cComune)
-  if ((!fieldExists(fields, cComune) || isComuneCodeLikeField(currentComune)) && sComune !== cComune) patch.fieldComune = sComune
-  if (!fieldExists(fields, cSezione) && sSezione !== cSezione) patch.fieldSezione = sSezione
-  if (!fieldExists(fields, cFoglio) && sFoglio !== cFoglio) patch.fieldFoglio = sFoglio
-  if (!fieldExists(fields, cMappale) && sMappale !== cMappale) patch.fieldMappale = sMappale
-  return patch
 }
 
 function LayerSelect(p: {

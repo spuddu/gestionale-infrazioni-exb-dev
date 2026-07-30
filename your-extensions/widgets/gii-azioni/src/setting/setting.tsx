@@ -203,6 +203,9 @@ export default function Setting(props: Props) {
         <Inp value={cfgJs.nsParametriUrl??''} onChange={v=>patch({nsParametriUrl:v})} placeholder='https://services2.arcgis.com/...'/>
         <label style={P.lbl}>Codice parametro spese generali</label>
         <Inp value={cfgJs.nsParametroCode??'SPESE_GENERALI_PERC'} onChange={v=>patch({nsParametroCode:v})} placeholder='SPESE_GENERALI_PERC'/>
+        <label style={P.lbl}>Catalogo attrezzature Art.30</label>
+        <Inp value={cfgJs.attrezzatureParametriUrl??''} onChange={v=>patch({attrezzatureParametriUrl:v})} placeholder='https://services2.arcgis.com/...'/>
+        <div style={P.hint}>Tabella parametri attrezzature (stessa usata in editing per il prezzario Art.30). Serve per mostrare il nome dell'attrezzatura (es. "Curva di derivazione") nei PDF delle note recuperabili, invece del codice tecnico. Può restare vuota: in tal caso il titolo mostrerà solo il codice.</div>
       </div>}
 
       {/* ═══ CALCOLO AUTOMATICO SANZIONE ═══ */}

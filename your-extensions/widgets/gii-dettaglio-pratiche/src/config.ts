@@ -218,6 +218,7 @@ export interface Config {
 
   // --- Nota spese
   nsNotaSpeseDettaglioUrl?: string
+  attrezzatureParametriUrl?: string
 
   // --- Regolamento
   regolamentoArticoliUrl?: string
@@ -300,6 +301,7 @@ export const defaultConfig: Config = {
   mapLayerLayerId: '',
 
   nsNotaSpeseDettaglioUrl: '',
+  attrezzatureParametriUrl: '',
 
   regolamentoArticoliUrl: '',
 

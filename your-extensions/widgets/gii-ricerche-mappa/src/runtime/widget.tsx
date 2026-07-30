@@ -376,7 +376,6 @@ async function getConfiguredLayer(mapView: any, search: MapSearchConfig): Promis
   if (search.layerUrl) return getLayer(search.layerUrl, search.layerLayerId)
   return null
 }
-function getObjectIdField(layer: any): string { return txt(layer?.objectIdField || layer?.objectIdFieldName || 'OBJECTID') || 'OBJECTID' }
 
 function colorToRgba(raw: any, transparency: number, fallback: [number, number, number]): [number, number, number, number] {
   const value = txt(raw).trim()

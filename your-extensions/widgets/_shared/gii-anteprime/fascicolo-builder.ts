@@ -212,6 +212,7 @@ async function buildRapportoSection (attrs: Record<string, any>, notaSpeseConfig
         settore_label: map.settore_label || '',
         codice_casistica: group.codiceCasistica,
         titolo_nota: group.label,
+        numero_nota: selectedGroups.length > 1 ? i + 1 : undefined,
         rows: group.rows,
         summary: group.summary,
         art30: !hasRealRaRows && group.codiceCasistica === 'C104_ATTREZZATURE_DANNEGGIATE' && art30Summary.hasData

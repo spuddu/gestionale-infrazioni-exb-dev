@@ -88,16 +88,6 @@ function moneyNumber (value: string): number {
   return Number.isFinite(n) ? n : 0
 }
 
-function hasPositiveMoney (m: Record<string, string>, key: string): boolean {
-  return moneyNumber(v(m, key)) > 0.004
-}
-
-function preferredSanzioneAmount (m: Record<string, string>): string {
-  return hasPositiveMoney(m, 'sanzione_importo_ridotta')
-    ? v(m, 'sanzione_importo_ridotta')
-    : v(m, 'sanzione_importo_base')
-}
-
 function compactRows (rows: Row[]): Row[] {
   return rows.filter(([, value]) => cleanText(value))
 }
@@ -114,10 +104,6 @@ function formatDecimalIt (value: number, fractionDigits = 2): string {
 
 function formatMoneyIt (value: number): string {
   return `${formatDecimalIt(Number(value || 0), 2)} €`
-}
-
-function formatQuantityIt (value: number): string {
-  return Number(value || 0).toLocaleString('it-IT', { maximumFractionDigits: 2 })
 }
 
 function fitText (font: PDFFont, text: string, size: number, maxWidth: number): string {
@@ -609,62 +595,6 @@ function drawAdministrativeIterSection (ctx: BuildCtx, title: string, rows: Admi
   drawAdministrativeIterTable(ctx, rows)
 }
 
-function drawViolationsList (ctx: BuildCtx, text: string, emptyMessage = 'Nessuna violazione contestata rilevata nei dati della pratica.'): void {
-  const source = cleanText(text || '')
-  if (!source) {
-    drawParagraph(ctx, emptyMessage, { size: 8.2 })
-    return
-  }
-
-  const groups = source
-    .split(/\n\s*\n+/)
-    .map(group => group.split(/\n+/).map(line => cleanText(line)).filter(Boolean))
-    .filter(group => group.length > 0)
-    .map((group, index) => ({ group, index }))
-    .sort((a, b) => articleSortKey(a.group[0]) - articleSortKey(b.group[0]) || a.index - b.index)
-    .map(item => item.group)
-
-  const titleSize = 8.7
-  const detailSize = 8.2
-  const titleLineH = titleSize * 1.34
-  const detailLineH = detailSize * 1.34
-  const detailBulletX = M + 18
-  const detailTextX = M + 31
-  const detailMaxW = PAGE_W - M - detailTextX
-  const groupGap = 7
-  const finalGap = 4
-
-  groups.forEach((group, groupIndex) => {
-    const title = group[0]
-    const details = group.slice(1).map(line => line.replace(/^[•·\-]\s*/, ''))
-    const titleLines = wrapText(ctx.bold, title, titleSize, PAGE_W - M * 2)
-    const detailLineCount = details.reduce((count, detail) => count + Math.max(1, wrapText(ctx.font, detail, detailSize, detailMaxW).length), 0)
-    const estimatedHeight = titleLines.length * titleLineH + detailLineCount * detailLineH + (details.length ? 4 : 0) + (groupIndex < groups.length - 1 ? groupGap : finalGap)
-    ensureSpace(ctx, Math.min(estimatedHeight, 90))
-
-    titleLines.forEach(line => {
-      ensureSpace(ctx, titleLineH + 3)
-      ctx.page.drawText(line, { x: M, y: ctx.y, size: titleSize, font: ctx.bold, color: BLACK })
-      ctx.y -= titleLineH
-    })
-
-    if (details.length) ctx.y -= 2
-    details.forEach(detail => {
-      const wrapped = wrapText(ctx.font, detail, detailSize, detailMaxW)
-      const rows = wrapped.length ? wrapped : ['—']
-      ensureSpace(ctx, rows.length * detailLineH + 3)
-      ctx.page.drawText('•', { x: detailBulletX, y: ctx.y, size: detailSize, font: ctx.bold, color: BLACK })
-      rows.forEach((line, lineIndex) => {
-        ctx.page.drawText(line, { x: detailTextX, y: ctx.y, size: detailSize, font: ctx.font, color: BLACK })
-        ctx.y -= detailLineH
-        if (lineIndex < rows.length - 1) ensureSpace(ctx, detailLineH + 2)
-      })
-    })
-
-    ctx.y -= groupIndex < groups.length - 1 ? groupGap : finalGap
-  })
-}
-
 function drawCalculationDetail (ctx: BuildCtx, rawText: string, m: Record<string, string>): void {
   const source = sanitizeCalculationDetailText(rawText || '').replace(/\r/g, '')
   const lines = source.split('\n').map(line => cleanText(line))
@@ -885,17 +815,6 @@ function drawCalculationDetail (ctx: BuildCtx, rawText: string, m: Record<string
     drawGroup(ordered.title, ordered.details)
   })
 }
-function drawGeneratedNotice (ctx: BuildCtx, m: Record<string, string>): void {
-  const text = [
-    v(m, 'data_generazione') ? `Documento generato il ${v(m, 'data_generazione')}` : '',
-    v(m, 'generato_da') ? `da ${v(m, 'generato_da')}` : ''
-  ].filter(Boolean).join(' ')
-  if (!text) return
-  ensureSpace(ctx, 24)
-  ctx.page.drawText(text, { x: M, y: ctx.y, size: 7.8, font: ctx.font, color: GRAY })
-  ctx.y -= 16
-}
-
 function addFooterNumbers (doc: PDFDocument, font: PDFFont): void {
   const pages = doc.getPages()
   pages.forEach((page, index) => {

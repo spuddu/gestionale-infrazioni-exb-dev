@@ -546,19 +546,6 @@ function normalizeAmmSection (raw: any): AmmSectionKey | null {
   }
 }
 
-function parseAmmSectionFromUrlPart (value: string): AmmSectionKey | null {
-  const text = String(value || '')
-  if (!text) return null
-  try {
-    const q = text.includes('?') ? text.slice(text.indexOf('?') + 1) : text
-    const clean = q.includes('#') ? q.slice(0, q.indexOf('#')) : q
-    const params = new URLSearchParams(clean)
-    return normalizeAmmSection(params.get('section') || params.get('giiSection') || '')
-  } catch {
-    return null
-  }
-}
-
 function getRequestedAmmSection (forced?: any): AmmSectionKey | null {
   // Richiesta esplicita proveniente dal nav orizzontale o da evento applicativo.
   // Questa vale solo nel momento in cui l'utente clicca/attiva una scheda.
@@ -751,26 +738,6 @@ function ammNotaSpeseGroupsForPdf (rawRows: any[], percentualeSpeseGenerali: num
       if (ao !== bo) return ao - bo
       return a.label.localeCompare(b.label, 'it')
     })
-}
-
-async function queryNotaSpesePdfGroupsForPractice (data: Record<string, any>): Promise<AmmNotaSpesePdfGroup[]> {
-  const rawGlobalId = String(pickAttrCI(data || {}, ['GlobalID', 'globalid', 'GLOBALID']) || '').trim()
-  if (!rawGlobalId) return []
-  const cleanGlobalId = rawGlobalId.replace(/[{}]/g, '').trim()
-  const variants = Array.from(new Set([rawGlobalId, cleanGlobalId, cleanGlobalId ? `{${cleanGlobalId}}` : ''].filter(Boolean)))
-  const fl = await getLookupLayer(NOTA_SPESE_DETTAGLIO_VIEW_URL)
-  const q: any = {
-    where: variants.map(value => `parent_globalid = ${sqlQuote(value)}`).join(' OR '),
-    outFields: ['*'],
-    returnGeometry: false,
-    num: 2000,
-    orderByFields: ['ordine ASC', 'OBJECTID ASC']
-  }
-  const res = await fl.queryFeatures(q)
-  const rows = (Array.isArray(res?.features) ? res.features : []).map((f: any) => f?.attributes || {})
-  const configuredPercentage = parseNumberInput(pickAttrCI(data || {}, ['ns_spese_generali_perc']))
-  const pct = configuredPercentage != null && Number.isFinite(configuredPercentage) ? configuredPercentage : 15
-  return ammNotaSpeseGroupsForPdf(rows, pct)
 }
 
 function pickAttrCI (data: any, names: string[]): any {
@@ -2677,26 +2644,6 @@ function UndoAttestationConfirmDialog (props: { saving?: boolean, onCancel: () =
   )
 }
 
-function FieldGrid (props: { fields: SummaryFieldConfig[], data: any, layerFields?: LayerFieldInfo[], labelSize: number, valueSize: number }) {
-  const fields = (Array.isArray(props.fields) ? props.fields : []).filter(f => String(f?.name || '').trim())
-  return (
-    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(230px, 1fr))', gap: 10 }}>
-      {fields.map(f => {
-        const raw = pickAttrCI(props.data, [f.name])
-        const lf = props.layerFields ? getFieldInfo(props.layerFields, f.name) : null
-        const hasDomain = !!lf?.domain?.codedValues || getFallbackDomainOptions(f.name).length > 0
-        const val = hasDomain ? domainLabel(lf, raw, f.name) : looksLikeDateField(f.name) ? formatDateValue(raw) : formatValue(raw)
-        return (
-          <div key={`${f.name}-${f.label}`} style={{ background: '#f8fbff', border: '1px solid #c5d9f1', borderRadius: 8, padding: '8px 10px', minWidth: 0 }}>
-            <div style={{ color: '#6b7280', fontSize: props.labelSize, fontWeight: 700, marginBottom: 3, overflowWrap: 'anywhere' }}>{f.label || f.name}</div>
-            <div style={{ color: '#111827', fontSize: props.valueSize, fontWeight: 600, overflowWrap: 'anywhere' }}>{val}</div>
-          </div>
-        )
-      })}
-    </div>
-  )
-}
-
 function cleanReportCodeText (raw: any): string {
   return String(raw ?? '')
     .trim()
@@ -2860,11 +2807,6 @@ function buildPracticeTitleParts (data: any, oid: number | null): { prefix: stri
     : 'Fascicolo documentale della pratica'
   return { prefix, reportCode, full: reportCode ? `${prefix}${reportCode}` : prefix }
 }
-
-function buildPracticeViewerTitleParts (data: any, oid: number | null): { prefix: string, reportCode: string, full: string } {
-  return buildPracticeTitleParts(data || {}, oid)
-}
-
 
 type ViolationRow = {
   key: string
@@ -3557,37 +3499,6 @@ function groupsAppliedTotal (groups: SanzioneConsultivaGroup[]): number {
   }, 0)
 }
 
-function voceSubtotalAmount (voce: SanzioneConsultivaVoce): number | null {
-  const amount = voceAppliedAmount(voce)
-  if (amount == null || !Number.isFinite(amount)) return null
-  const categoria = String(voce.parametro?.categoria_parametro || '').toUpperCase()
-  if (categoria === 'CAUZIONE') return -Math.abs(amount)
-  return amount
-}
-
-function SanzioniHeaderTotal (props: { groups: SanzioneConsultivaGroup[] }) {
-  const st = useAdminStyle()
-  const total = groupsAppliedTotal(props.groups || [])
-  return (
-    <span style={{
-      display: 'inline-flex',
-      alignItems: 'center',
-      gap: 6,
-      padding: '3px 8px',
-      borderRadius: 999,
-      background: 'rgba(255,255,255,0.14)',
-      border: '1px solid rgba(255,255,255,0.22)',
-      color: '#fff',
-      fontSize: adminLabelFontSize(st),
-      fontWeight: 900,
-      textTransform: 'none',
-      letterSpacing: 0
-    }}>
-      Totale importi: {formatEuroText(total)}
-    </span>
-  )
-}
-
 function formatSurfaceHaACaForCalculation (centiare: number): string {
   const total = Math.max(0, Math.round(Number(centiare) || 0))
   const ha = Math.floor(total / 10000)
@@ -3767,10 +3678,6 @@ function groupArt30SelectionsByKind (selections: Art30EquipmentSelection[]): Map
     }
   })
   return map
-}
-
-function selectedArt30Equipment (data: Record<string, any>, _noteRows: NotaSpeseDetailRow[] = []): Set<Art30EquipmentKind> {
-  return new Set(parseArt30EquipmentSelections(data).map(item => item.kind))
 }
 
 function notaSpeseTotalForCase (noteRows: NotaSpeseDetailRow[], codiceCasistica: string, data: Record<string, any>): number | null {
@@ -4063,16 +3970,6 @@ function tipoAttoAmmPrevedeVerbale (data: Record<string, any>): boolean {
   return code === 'VERBALE' || code === 'VERBALE_RISARCIMENTO'
 }
 
-function tipoAttoAmmTitolo (data: Record<string, any>): string {
-  const code = tipoAttoAmmCode(data || {})
-  if (code === 'RIMBORSO') return 'Richiesta di rimborso'
-  if (code === 'RISARCIMENTO_DANNI') return 'Richiesta di risarcimento danni'
-  if (code === 'RIMBORSO_RISARCIMENTO') return 'Richiesta di rimborso e risarcimento danni'
-  if (code === 'VERBALE_RISARCIMENTO') return 'Atto di accertamento con rimborso/risarcimento'
-  if (code === 'ARCHIVIAZIONE') return 'Archiviazione / non luogo a procedere'
-  return 'Atto di accertamento'
-}
-
 function buildAutomaticAttoAmministrativo (data: Record<string, any>): Record<string, any> {
   const d = data || {}
   const sanzioneBase = amountFromDraft(d, 'sanzione_importo_base')
@@ -4127,35 +4024,6 @@ function buildDefaultAdminNote (key: string, data: Record<string, any>): string 
   return ''
 }
 
-function NoteAmministrativeQuickActions (props: { data: Record<string, any>, canEdit: boolean, onApply: (text: string) => void }) {
-  const actions = [
-    { key: 'completezza', label: 'Rapporto completo' },
-    { key: 'notifica', label: 'Bozza e adempimenti successivi' },
-    { key: 'integrazione', label: 'Da integrare' },
-    { key: 'ri', label: 'Da verificare dal Responsabile dell’istruttoria amministrativa' }
-  ]
-  const st = useAdminStyle()
-  return (
-    <div style={{ display: 'grid', gap: 4, width: '100%' }}>
-      <label style={{ color: st.formLabelColor || '#334155', fontSize: Number(st.formLabelFontSize ?? 15), fontWeight: Number(st.formLabelFontWeight ?? 600) as any, marginBottom: Number(st.formLabelMarginBottom ?? 3) }}>Casistica note</label>
-      <select
-        disabled={!props.canEdit}
-        value=''
-        onChange={e => {
-          const key = e.target.value
-          if (!key) return
-          props.onApply(buildDefaultAdminNote(key, props.data || {}))
-        }}
-        onKeyDown={blurOnEnter}
-        style={inputStyleFrom(st, !props.canEdit)}
-      >
-        <option value=''>- Seleziona -</option>
-        {actions.map(a => <option key={a.key} value={a.key}>{a.label}</option>)}
-      </select>
-    </div>
-  )
-}
-
 function displayAdminFieldValue (data: Record<string, any>, fields: LayerFieldInfo[], fieldName: string, emptyLabel = '—'): string {
   const lf = getFieldInfo(fields, fieldName)
   const raw = pickAttrCI(data || {}, [lf?.name || fieldName, fieldName])
@@ -4194,25 +4062,6 @@ function StatusSummaryItem (props: { label: string, value: React.ReactNode, hint
       {props.hint && <div style={{ marginTop: 4, color: hintColor, fontSize: adminLabelFontSize(st), lineHeight: 1.35 }}>{props.hint}</div>}
     </div>
   )
-}
-
-function AttoAmministrativoSummary (props: { data: Record<string, any>, fields: LayerFieldInfo[] }) {
-  const d = props.data || {}
-  return (
-    <Section title='Atto amministrativo'>
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: 10 }}>
-        <StatusSummaryItem label='Tipo atto' value={displayAdminFieldValue(d, props.fields, 'tipo_atto_amm', 'Da determinare automaticamente')} tone='auto' hint='Dato calcolato dal sistema; non è un campo da compilare.' />
-        <StatusSummaryItem label='Oggetto' value={displayAdminFieldValue(d, props.fields, 'oggetto_atto_amm', 'Da determinare automaticamente')} tone='auto' hint='Sarà riportato nel documento senza digitazione manuale.' />
-      </div>
-    </Section>
-  )
-}
-
-
-
-function hasPostAttestazioneTiAmmStarted (data: Record<string, any>): boolean {
-  const d = data || {}
-  return [...PROTOCOLLO_FASCICOLO_FIELDS, ...BOZZA_DETERMINAZIONE_STARTED_FIELDS].some(name => hasAdminValue(pickAttrCI(d, [name])))
 }
 
 function isPropostaContestazioneApprovedByRiAmm (data: Record<string, any>): boolean {
@@ -4925,18 +4774,6 @@ const ANNOTAZIONI_TI_READONLY_INFO = `Le annotazioni del tecnico istruttore sono
 const PAYMENT_MODE_INFO = 'Selezionare la modalità di pagamento: pagoPA, bonifico bancario, pagamento misto o altro.'
 const PROTOCOLLO_NOTIFICA_INFO = 'Protocollo e notifica vanno compilati solo dopo la registrazione di numero e data dell’atto di accertamento e contestazione.'
 const RIAPERTURA_INFO = 'La riapertura è di competenza del Responsabile dell’istruttoria amministrativa, su indicazione del Direttore dell’Area Affari Generali e Programmazione Finanziaria a seguito della decisione del CdA. Questa scheda registra gli estremi; la nuova lavorazione sarà gestita secondo l’iter previsto.'
-
-function infoTextList (...items: Array<React.ReactNode | null | undefined | false>): React.ReactNode | null {
-  const list = items.filter(Boolean) as React.ReactNode[]
-  if (!list.length) return null
-  if (list.length === 1) return <>{list[0]}</>
-  return (
-    <div style={{ display: 'grid', gap: 8 }}>
-      {list.map((item, idx) => <div key={idx}>{item}</div>)}
-    </div>
-  )
-}
-
 
 function trasgressoreField (fields: LayerFieldInfo[], candidates: string[]): string | null {
   for (const name of candidates) {
@@ -5759,84 +5596,6 @@ function NormToggleBox (props: { title: string, variant: NormToggleVariant, chil
   )
 }
 
-function ParametriNormeTable (props: { groups: SanzioneConsultivaGroup[] }) {
-  const st = useAdminStyle()
-  const groups = Array.isArray(props.groups) ? props.groups : []
-  if (!groups.length) return null
-
-  return (
-    <div style={{ display: 'grid', gap: 10 }}>
-      {groups.map(group => {
-        const voci = group.voci.length
-          ? group.voci
-          : [{ codiceParametro: `${group.codiceCasistica}-empty`, descrizione: 'Voce applicabile', articoloSanzione: group.articoloSanzione, articoliSanzione: group.articoliSanzione, parametro: null }]
-        const sanzioneBlocks = groupVociBySanzioneArticle(group, voci)
-        return (
-          <div key={group.codiceCasistica} style={{ border: `${Number(st.normGroupBorderWidth ?? 1)}px solid ${st.normGroupBorderColor || '#93c5fd'}`, background: st.normGroupBg || '#ffffff', borderRadius: 10, padding: 10, display: 'grid', gap: 8 }}>
-            <NormToggleBox variant='violata' title={violationNormSummary(group)}>
-              {articleDetailsByRole('Norma violata', group.articoliViolati, 'violata')}
-            </NormToggleBox>
-
-            <div style={{ display: 'grid', gap: 8, padding: '2px 0 0 0' }}>
-              {sanzioneBlocks.map(block => (
-                <div key={block.key} style={{ display: 'grid', gap: 6, borderTop: `1px solid ${st.normBlockSeparatorColor || '#cbd5e1'}`, paddingTop: 8 }}>
-                  <NormToggleBox variant='sanzionatoria' title={`Norma sanzionatoria: ${articleListTitle(block.articles, block.fallback)}`}>
-                    {articleDetailsByRole('Norma sanzionatoria', block.articles, 'sanzionatoria')}
-                  </NormToggleBox>
-                </div>
-              ))}
-            </div>
-          </div>
-        )
-      })}
-    </div>
-  )
-}
-
-function BasicViolationsOnly (props: { data: any, layerFields: LayerFieldInfo[], message?: string }) {
-  const st = useAdminStyle()
-  const rows = buildViolationRows(props.data || {}, props.layerFields || [])
-  const descrizione = firstViolationValue(props.data || {}, props.layerFields || [], ['descrizione_fatti'])
-  const circostanze = firstViolationValue(props.data || {}, props.layerFields || [], ['circostanze'])
-  return (
-    <Section title='Violazioni contestate'>
-      {props.message && <InfoBox kind='warn'>{props.message}</InfoBox>}
-      {rows.length === 0 ? (
-        <InfoBox kind='warn'>Nessuna violazione contestata rilevata nei dati della pratica.</InfoBox>
-      ) : (
-        <div style={{ display: 'grid', gap: 10 }}>
-          {rows.map(row => (
-            <div key={row.key} style={{ border: '1px solid #dbeafe', background: '#f8fafc', borderRadius: 11, padding: 11, display: 'grid', gap: 8 }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-                <span style={{ background: '#0d3b66', color: '#fff', borderRadius: 999, padding: '5px 10px', fontWeight: 800, fontSize: Number(st.formFieldFontSize ?? 15) }}>{row.label}</span>
-                <span style={{ color: '#166534', fontSize: Number(st.formFieldFontSize ?? 15), fontWeight: 800 }}>Contestata</span>
-              </div>
-              {row.details.length > 0 ? (
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(210px, 1fr))', gap: 8 }}>
-                  {row.details.map((d, idx) => (
-                    <div key={`${row.key}-${d.label}-${idx}`} style={{ fontSize: Number(st.formFieldFontSize ?? 15) }}>
-                      <span style={{ color: '#6b7280', fontWeight: 800 }}>{d.label}: </span>
-                      <span style={{ color: '#111827', fontWeight: 650 }}>{d.value}</span>
-                    </div>
-                  ))}
-                </div>
-              ) : (
-                <div style={{ color: '#6b7280', fontSize: adminLabelFontSize(st) }}>Nessun dettaglio tecnico aggiuntivo valorizzato.</div>
-              )}
-            </div>
-          ))}
-        </div>
-      )}
-      {(descrizione || circostanze) && (
-        <div style={{ display: 'grid', gap: 8, marginTop: 12 }}>
-          {descrizione && <InfoBox><strong>Descrizione fatti:</strong><br />{descrizione}</InfoBox>}
-          {circostanze && <InfoBox><strong>Circostanze:</strong><br />{circostanze}</InfoBox>}
-        </div>
-      )}
-    </Section>
-  )
-}
-
 function useSanzioneConsultivaState (cfg: any, data: any, layerFields: LayerFieldInfo[]): SanzioneConsultivaLoadState {
   const parametriUrl = normalizeLookupTableUrl(cfg.parametriSanzioniUrl)
   const articoliUrl = normalizeLookupTableUrl(cfg.regolamentoArticoliUrl)
@@ -6144,102 +5903,6 @@ function DettaglioImportiContent (props: { value: any, data?: any, fields?: Laye
   )
 }
 
-
-function Art30SnapshotSummary (props: { data: Record<string, any> }) {
-  const st = useAdminStyle()
-  const d = props.data || {}
-  const selections = parseArt30EquipmentSelections(d)
-  const groupedSelections = groupArt30SelectionsByKind(selections)
-  const rows = ART30_EQUIPMENT_ORDER
-    .map(kind => ({ kind, selection: groupedSelections.get(kind) }))
-    .filter(item => !!item.selection) as Array<{ kind: Art30EquipmentKind, selection: { codice: string, descrizione: string, quantita: number, valoreUnitario: number | null, importo: number } }>
-  const lordo = moneyAttr(d, 'attrezzature_risarcimento_importo')
-  const cauzione = moneyAttr(d, 'attrezzature_cauzione_decurtata')
-  const netto = moneyAttr(d, 'attrezzature_importo_netto')
-  const rawDetail = String(pickAttrCI(d, ['attrezzature_risarcimento_dettaglio']) || '').trim()
-  const hasData = rows.length > 0 || !!rawDetail || lordo > 0 || cauzione > 0 || netto > 0
-  if (!hasData) return null
-
-  const gridColumns = 'minmax(78px, 0.75fr) minmax(190px, 1.65fr) minmax(68px, 0.55fr) minmax(105px, 0.85fr) minmax(105px, 0.85fr)'
-  const headStyle: React.CSSProperties = {
-    padding: '7px 8px',
-    fontSize: adminLabelFontSize(st),
-    fontWeight: 900,
-    color: st.formInnerHeaderColor || '#0f4c81',
-    background: st.formInnerHeaderBg || '#eaf3fb',
-    borderBottom: `1px solid ${st.formCardBorderColor || '#c6d7ea'}`,
-    minWidth: 0
-  }
-  const cellStyle: React.CSSProperties = {
-    padding: '7px 8px',
-    fontSize: Number(st.formFieldFontSize ?? 15),
-    color: '#111827',
-    minWidth: 0,
-    overflowWrap: 'anywhere',
-    borderBottom: `1px solid ${st.formCardBorderColor || '#d8e6f7'}`
-  }
-
-  return (
-    <details
-      open
-      style={{
-        border: `${Number(st.formExpandableCardBorderWidth ?? 1)}px solid ${st.formExpandableCardBorderColor || '#c6d7ea'}`,
-        borderRadius: 10,
-        background: st.formExpandableCardBg || '#f9fafb',
-        padding: 10
-      }}
-    >
-      <summary style={{ cursor: 'pointer', fontWeight: 900, color: st.formInnerHeaderColor || '#0f4c81', fontSize: Number(st.formInnerHeaderFontSize ?? 14) }}>
-        Riepilogo rimborsi attrezzature e cauzione
-      </summary>
-
-      <div style={{ marginTop: 10 }}>
-        {rows.length > 0 ? (
-          <div style={{ border: `1px solid ${st.formCardBorderColor || '#c6d7ea'}`, borderRadius: Number(st.formCardBorderRadius ?? 8), overflow: 'hidden', background: '#fff' }}>
-            <div style={{ display: 'grid', gridTemplateColumns: gridColumns }}>
-              <div style={headStyle}>Codice</div>
-              <div style={headStyle}>Attrezzatura</div>
-              <div style={{ ...headStyle, textAlign: 'right' }}>Quantità</div>
-              <div style={{ ...headStyle, textAlign: 'right' }}>Valore unitario</div>
-              <div style={{ ...headStyle, textAlign: 'right' }}>Importo</div>
-            </div>
-            {rows.map((item, index) => {
-              const row = item.selection
-              const bg = index % 2 === 0 ? '#f7fbff' : '#ffffff'
-              return (
-                <div key={item.kind} style={{ display: 'grid', gridTemplateColumns: gridColumns, background: bg }}>
-                  <div style={cellStyle}>{row.codice || '—'}</div>
-                  <div style={{ ...cellStyle, fontWeight: 700 }}>{row.descrizione || ART30_EQUIPMENT_META[item.kind].label}</div>
-                  <div style={{ ...cellStyle, textAlign: 'right' }}>{Number(row.quantita || 0).toLocaleString('it-IT', { maximumFractionDigits: 2 })}</div>
-                  <div style={{ ...cellStyle, textAlign: 'right' }}>{row.valoreUnitario != null ? formatEuroAmount(row.valoreUnitario) : '—'}</div>
-                  <div style={{ ...cellStyle, textAlign: 'right', fontWeight: 800 }}>{formatEuroAmount(row.importo)}</div>
-                </div>
-              )
-            })}
-            {cauzione > 0 && (
-              <div style={{ display: 'grid', gridTemplateColumns: gridColumns, background: rows.length % 2 === 0 ? '#f7fbff' : '#ffffff' }}>
-                <div style={cellStyle}>—</div>
-                <div style={{ ...cellStyle, fontWeight: 700 }}>Decurtazione della cauzione</div>
-                <div style={{ ...cellStyle, textAlign: 'right' }}>—</div>
-                <div style={{ ...cellStyle, textAlign: 'right' }}>—</div>
-                <div style={{ ...cellStyle, textAlign: 'right', fontWeight: 900, color: '#b42318' }}>− {formatEuroAmount(cauzione)}</div>
-              </div>
-            )}
-          </div>
-        ) : (
-          <InfoBox>{rawDetail}</InfoBox>
-        )}
-
-        <div style={{ display: 'grid', gridTemplateColumns: ADMIN_COMPACT_GRID_COLUMNS, gap: 10, marginTop: 10 }}>
-          <StatusSummaryItem label='Risarcimento lordo' value={formatEuroAmount(lordo)} tone='auto' />
-          <StatusSummaryItem label='Cauzione decurtata' value={formatEuroAmount(cauzione)} tone={cauzione > 0 ? 'warn' : 'auto'} />
-          <StatusSummaryItem label='Risarcimento netto' value={formatEuroAmount(netto)} tone='total' />
-        </div>
-      </div>
-    </details>
-  )
-}
-
 function ParametriSanzionatoriSection (props: { loadState: SanzioneConsultivaLoadState, data: Record<string, any>, fields: LayerFieldInfo[], canEdit: boolean, onChange: (name: string, value: any) => void }) {
   const st = useAdminStyle()
   const { loadState } = props
@@ -6523,49 +6186,6 @@ async function buildEmailAttachmentFromAmmAttachment (att: AmmAttachmentInfo, oi
   }
 }
 
-function ViolationsSection (props: { data: any, layerFields: LayerFieldInfo[] }) {
-  const st = useAdminStyle()
-  const rows = buildViolationRows(props.data || {}, props.layerFields || [])
-  const descrizione = firstViolationValue(props.data || {}, props.layerFields || [], ['descrizione_fatti'])
-  const circostanze = firstViolationValue(props.data || {}, props.layerFields || [], ['circostanze'])
-  return (
-    <Section title='Violazioni contestate'>
-      {rows.length === 0 ? (
-        <InfoBox kind='warn'>Nessuna violazione contestata rilevata nei dati della pratica.</InfoBox>
-      ) : (
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: 10 }}>
-          {rows.map(row => (
-            <div key={row.key} style={{ border: '1px solid #dbeafe', background: '#f8fafc', borderRadius: 11, padding: 11, display: 'grid', gap: 8 }}>
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
-                <span style={{ background: '#0d3b66', color: '#fff', borderRadius: 999, padding: '5px 10px', fontWeight: 800, fontSize: Number(st.formFieldFontSize ?? 15) }}>{row.label}</span>
-                <span style={{ color: '#166534', fontSize: Number(st.formFieldFontSize ?? 15), fontWeight: 800 }}>Contestata</span>
-              </div>
-              {row.details.length > 0 ? (
-                <div style={{ display: 'grid', gap: 6 }}>
-                  {row.details.map((d, idx) => (
-                    <div key={`${row.key}-${d.label}-${idx}`} style={{ display: 'grid', gridTemplateColumns: 'minmax(110px, 0.8fr) minmax(0, 1.2fr)', gap: 8, fontSize: Number(st.formFieldFontSize ?? 15) }}>
-                      <div style={{ color: '#6b7280', fontWeight: 800 }}>{d.label}</div>
-                      <div style={{ color: '#111827', fontWeight: 650, overflowWrap: 'anywhere' }}>{d.value}</div>
-                    </div>
-                  ))}
-                </div>
-              ) : (
-                <div style={{ color: '#6b7280', fontSize: adminLabelFontSize(st) }}>Nessun dettaglio tecnico aggiuntivo valorizzato.</div>
-              )}
-            </div>
-          ))}
-        </div>
-      )}
-      {(descrizione || circostanze) && (
-        <div style={{ display: 'grid', gap: 8, marginTop: 12 }}>
-          {descrizione && <InfoBox><strong>Descrizione fatti:</strong><br />{descrizione}</InfoBox>}
-          {circostanze && <InfoBox><strong>Circostanze:</strong><br />{circostanze}</InfoBox>}
-        </div>
-      )}
-    </Section>
-  )
-}
-
 function DatiGeneraliAmmSection (props: { title: string, data: Record<string, any>, fields: LayerFieldInfo[], profile: { role: string, label: string, fullName: string, username: string }, hasDsForSave: boolean, summaryFields: any[], labelSize: number, valueSize: number }) {
   const st = useAdminStyle()
   const d = props.data || {}
@@ -6622,96 +6242,6 @@ function DatiGeneraliAmmSection (props: { title: string, data: Record<string, an
   )
 }
 
-
-function buildRapportoAmmPreviewMap (
-  data: any,
-  fields: LayerFieldInfo[],
-  profile: { username: string, fullName: string },
-  utentiCache: Map<string, AmmUtenteCached> | null = null,
-  cicli: RapportoIterCicloPdf[] = []
-): Record<string, string> {
-  const d = data || {}
-  const oidRaw = pickAttrCI(d, ['OBJECTID', 'objectid', 'ObjectId', 'FID'])
-  const oid = oidRaw != null && Number.isFinite(Number(oidRaw)) ? Number(oidRaw) : null
-  const ragioneSociale = String(pickAttrCI(d, ['ragione_sociale']) || '').trim()
-  const isPg = !!ragioneSociale
-  const nominativo = ragioneSociale || joinParts(String(pickAttrCI(d, ['cognome']) || ''), String(pickAttrCI(d, ['nome']) || ''))
-  const area = pdfFieldValue(d, fields, 'area_cod') || String(pickAttrCI(d, ['area_label', 'area']) || '')
-  const settore = pdfFieldValue(d, fields, 'settore_cod') || String(pickAttrCI(d, ['settore_label', 'settore']) || '')
-  const statoDtRaw = pickAttrCI(d, ['stato_DT', 'Stato_DT', 'STATO_DT', 'stato_dt'])
-  const esitoDtRaw = pickAttrCI(d, ['esito_DT', 'Esito_DT', 'ESITO_DT', 'esito_dt'])
-  const statoDtNum = parseNumberInput(statoDtRaw)
-  const esitoDtNum = parseNumberInput(esitoDtRaw)
-  const rapportoRespinto = esitoDtNum === 3 || statoDtNum === 5
-  const rapportoApprovato = !rapportoRespinto && (esitoDtNum === 2 || statoDtNum === 4 || hasAdminValue(pickAttrCI(d, ['dt_esito_DT'])))
-  const rapportoIstruttoria = !rapportoRespinto && !rapportoApprovato
-  const iterPlaceholders = buildRapportoIterPlaceholders({ data: d, utentiCache, cicli, rapportoApprovato, rapportoRespinto })
-  return {
-    objectid: oid != null ? String(oid) : '',
-    cod_pratica: getReportCode(d, oid),
-    n_rapporto: getReportCode(d, oid),
-    numero_rapporto_tecnico: getReportCode(d, oid),
-    data_rapporto_tecnico: pdfFieldValue(d, fields, 'data_rapporto_tecnico'),
-    stato_dt: statoDtRaw != null ? String(statoDtRaw) : '',
-    stato_DT: statoDtRaw != null ? String(statoDtRaw) : '',
-    esito_dt: esitoDtRaw != null ? String(esitoDtRaw) : '',
-    esito_DT: esitoDtRaw != null ? String(esitoDtRaw) : '',
-    rapporto_respinto: rapportoRespinto ? '1' : '0',
-    rapporto_approvato: rapportoApprovato ? '1' : '0',
-    rapporto_istruttoria: rapportoIstruttoria ? '1' : '0',
-    data_rilevazione: pdfFieldValue(d, fields, 'data_rilevazione'),
-    ora_rilevazione: String(pickAttrCI(d, ['ora_rilevazione']) || ''),
-    area_cod: area,
-    area_label: area,
-    settore_cod: settore,
-    settore_label: settore,
-    ufficio_zona: pdfFieldValue(d, fields, 'ufficio_zona'),
-    distretto_irriguo: String(pickAttrCI(d, ['distretto_irriguo', 'distretto']) || ''),
-    distretto: String(pickAttrCI(d, ['distretto']) || ''),
-    comizio: String(pickAttrCI(d, ['comizio']) || ''),
-    idrante: String(pickAttrCI(d, ['idrante', 'idrante_numero']) || ''),
-    idrante_numero: String(pickAttrCI(d, ['idrante_numero', 'idrante']) || ''),
-    matricola_contatore: String(pickAttrCI(d, ['matricola_contatore', 'contatore_matricola']) || ''),
-    contatore_matricola: String(pickAttrCI(d, ['contatore_matricola', 'matricola_contatore']) || ''),
-    matricola_tessera: String(pickAttrCI(d, ['matricola_tessera', 'tessera_matricola']) || ''),
-    tessera_matricola: String(pickAttrCI(d, ['tessera_matricola', 'matricola_tessera']) || ''),
-    descrizione_fatti: String(pickAttrCI(d, ['descrizione_fatti']) || ''),
-    circostanze: String(pickAttrCI(d, ['circostanze']) || ''),
-    descrizione_luogo: String(pickAttrCI(d, ['descrizione_luogo']) || ''),
-    importo_rimborso: pdfFieldValue(d, fields, 'importo_rimborso', { money: true }),
-    nota_spese_label: String(pickAttrCI(d, ['nota_spese_label']) || ''),
-    tipo_soggetto: isPg ? 'PG' : 'PF',
-    denominazione: nominativo,
-    cf_piva: isPg ? String(pickAttrCI(d, ['piva']) || '') : String(pickAttrCI(d, ['codice_fiscale']) || ''),
-    via: String(pickAttrCI(d, ['via', 'indirizzo']) || ''),
-    civico: String(pickAttrCI(d, ['civico']) || ''),
-    citta: String(pickAttrCI(d, ['comune']) || ''),
-    cap: String(pickAttrCI(d, ['cap']) || ''),
-    telefono: String(pickAttrCI(d, ['telefono']) || ''),
-    cellulare: String(pickAttrCI(d, ['cellulare']) || ''),
-    email: String(pickAttrCI(d, ['email']) || ''),
-    pec: String(pickAttrCI(d, ['pec']) || ''),
-    presenza_trasgressore: pdfFieldValue(d, fields, 'presenza_trasgressore'),
-    iter_rilevazione_nome: String(pickAttrCI(d, ['tecnico_rilevatore']) || ''),
-    iter_rilevazione_presa: pdfFieldValue(d, fields, 'dt_presa_in_carico_TR'),
-    iter_rilevazione_data: pdfFieldValue(d, fields, 'data_rilevazione'),
-    iter_compilazione_nome: String(pickAttrCI(d, ['ti_assegnato_nome', 'ti_assegnato_username']) || ''),
-    iter_compilazione_presa: pdfFieldValue(d, fields, 'dt_presa_in_carico_TI'),
-    iter_compilazione_data: pdfFieldValue(d, fields, 'dt_esito_TI'),
-    iter_verifica_nome: String(pickAttrCI(d, ['rz_nome', 'rz_username']) || ''),
-    iter_verifica_presa: pdfFieldValue(d, fields, 'dt_presa_in_carico_RZ'),
-    iter_verifica_data: pdfFieldValue(d, fields, 'dt_esito_RZ'),
-    iter_supervisione_nome: String(pickAttrCI(d, ['ri_nome', 'ri_username']) || ''),
-    iter_supervisione_presa: pdfFieldValue(d, fields, 'dt_presa_in_carico_RI'),
-    iter_supervisione_data: pdfFieldValue(d, fields, 'dt_esito_RI'),
-    iter_approvazione_nome: String(pickAttrCI(d, ['dt_nome', 'dt_username']) || ''),
-    iter_approvazione_presa: pdfFieldValue(d, fields, 'dt_presa_in_carico_DT'),
-    iter_approvazione_data: pdfFieldValue(d, fields, 'dt_esito_DT'),
-    ...iterPlaceholders,
-    data_generazione: new Date().toLocaleString('it-IT'),
-    generato_da: profile.fullName || profile.username || ''
-  }
-}
 
 async function buildRapportoAmmPreviewPdfBlob (data: any, fields: LayerFieldInfo[], profile: { username: string, fullName: string }, nsConfig?: { detailUrl?: string, parametriUrl?: string, parametroCode?: string }): Promise<{ blob: Blob, fileName: string }> {
   const iterGlobalId = pickAttrCI(data || {}, ['globalid', 'GlobalID', 'GLOBALID', 'parent_globalid'])
@@ -6822,29 +6352,6 @@ function drawAmmAttachmentPdfTextLines (page: any, font: any, text: string, x: n
     curY -= size + 4
   }
   return curY
-}
-
-async function addAmmAttachmentPdfHeaderPage (pdf: PDFDocument, title: string, subtitle?: string): Promise<any> {
-  const page = pdf.addPage([AMM_ATTACHMENT_PAGE_W, AMM_ATTACHMENT_PAGE_H])
-  const bold = await pdf.embedFont(StandardFonts.HelveticaBold)
-  const regular = await pdf.embedFont(StandardFonts.Helvetica)
-  page.drawText(title, {
-    x: AMM_ATTACHMENT_PAGE_MARGIN,
-    y: AMM_ATTACHMENT_PAGE_H - 62,
-    size: 16,
-    font: bold,
-    color: rgb(0.05, 0.12, 0.24)
-  })
-  if (subtitle) {
-    drawAmmAttachmentPdfTextLines(page, regular, subtitle, AMM_ATTACHMENT_PAGE_MARGIN, AMM_ATTACHMENT_PAGE_H - 88, 10, AMM_ATTACHMENT_PAGE_W - AMM_ATTACHMENT_PAGE_MARGIN * 2, rgb(0.3, 0.34, 0.4))
-  }
-  page.drawLine({
-    start: { x: AMM_ATTACHMENT_PAGE_MARGIN, y: AMM_ATTACHMENT_PAGE_H - 105 },
-    end: { x: AMM_ATTACHMENT_PAGE_W - AMM_ATTACHMENT_PAGE_MARGIN, y: AMM_ATTACHMENT_PAGE_H - 105 },
-    thickness: 0.8,
-    color: rgb(0.78, 0.82, 0.88)
-  })
-  return page
 }
 
 function isAmmImageAttachmentForPdf (att: AmmAttachmentInfo): boolean {
@@ -7650,23 +7157,6 @@ function AdminFieldsGrid (props: {
   return (
     <AdminFieldsLayout items={items} draft={props.draft} fields={props.fields} canEdit={props.canEdit} onChange={props.onChange} />
   )
-}
-
-function PaymentModeInfo (props: { mode: PaymentMode }) {
-  const { mode } = props
-  if (!mode) {
-    return <div style={{ marginTop: 12 }}><InfoBox kind='warn'>Selezionare la modalità di pagamento per visualizzare i campi specifici.</InfoBox></div>
-  }
-  if (mode === 'PAGOPA') {
-    return <div style={{ marginTop: 12 }}><InfoBox>Modalità selezionata: pagoPA. Per ora sono visibili IUV e codice avviso; il caricamento del PDF bollettino sarà gestito come fase dedicata.</InfoBox></div>
-  }
-  if (mode === 'BONIFICO') {
-    return <div style={{ marginTop: 12 }}><InfoBox>Modalità selezionata: bonifico. Sono visibili solo i campi bancari.</InfoBox></div>
-  }
-  if (mode === 'MISTO') {
-    return <div style={{ marginTop: 12 }}><InfoBox>Modalità selezionata: misto. Sono visibili sia i campi pagoPA sia i campi bonifico.</InfoBox></div>
-  }
-  return <div style={{ marginTop: 12 }}><InfoBox>Modalità selezionata: altro. È visibile il campo note pagamento.</InfoBox></div>
 }
 
 function changedAttrs (fields: LayerFieldInfo[], initial: Record<string, any>, draft: Record<string, any>): Record<string, any> {
@@ -9429,19 +8919,6 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
     </div>
     </AdminStyleCtx.Provider>
   )
-}
-
-function primaryButtonStyle (disabled?: boolean): React.CSSProperties {
-  return {
-    border: '1px solid #0d3b66',
-    background: disabled ? '#9ca3af' : '#0d3b66',
-    color: '#fff',
-    borderRadius: 9,
-    padding: '8px 14px',
-    fontWeight: 800,
-    fontSize: 15,
-    cursor: disabled ? 'not-allowed' : 'pointer'
-  }
 }
 
 function secondaryButtonStyle (disabled?: boolean): React.CSSProperties {

@@ -760,14 +760,6 @@ function ruoloPressoLabel (d: any): string {
   return 'Non determinato'
 }
 
-function faseLabel (role: string): string {
-  const r = String(role || '').toUpperCase()
-  if (r === 'TR' || r === 'TI' || r === 'RZ' || r === 'RI') return 'Istruttoria tecnica'
-  if (r === 'DT') return 'Approvazione tecnica'
-  if (r === 'RI_AMM' || r === 'TI_AMM' || r === 'DA') return 'Istruttoria amministrativa'
-  return 'Non determinata'
-}
-
 function statoLabel (v: any): string {
   const n = v !== null && v !== undefined && v !== '' ? Number(v) : null
   if (n === 0 || n === 1) return 'Da prendere in carico'
@@ -776,10 +768,6 @@ function statoLabel (v: any): string {
   if (n === 4) return 'Trasmessa / completata'
   if (n === 5) return 'Respinta'
   return 'Non valorizzato'
-}
-
-function getStatusForRecord (d: any, user: GiiUserInfo | null): string {
-  return computeSintetico(d).label
 }
 
 function getFirst (d: any, names: string[], fallback = '—'): string {
@@ -909,81 +897,8 @@ function uniqueList (items: string[]): string[] {
   return out
 }
 
-function getViolazione (d: any): string {
-  const items: string[] = []
-
-  const artFields: Array<[string, string]> = [
-    ['v_art08', violationLabelByArticle(8)],
-    ['v_art12', violationLabelByArticle(12)],
-    ['v_art27', violationLabelByArticle(27)],
-    ['v_art28', violationLabelByArticle(28)],
-    ['v_art29', violationLabelByArticle(29)],
-    ['v_art30', violationLabelByArticle(30)],
-    ['v_art31', violationLabelByArticle(31)],
-    ['v_art32', violationLabelByArticle(32)],
-    ['v_art33', violationLabelByArticle(33)],
-    ['v_art34', violationLabelByArticle(34)],
-    ['v_art35', violationLabelByArticle(35)],
-    ['v_art36', violationLabelByArticle(36)],
-    ['v_art37', violationLabelByArticle(37)],
-    ['v_art39', violationLabelByArticle(39)]
-  ]
-  artFields.forEach(([field, label]) => {
-    if (isCheckedValue(pickField(d, field))) items.push(label)
-  })
-
-  const norma15Parziale = getFirst(d, ['norma15_parziale', 'Norma15_parziale'], '')
-  const norma15Totale = getFirst(d, ['norma15_totale', 'Norma15_totale'], '')
-  if (norma15Parziale || norma15Totale || getFirst(d, ['tipo_abuso', 'Tipo_abuso'], '')) items.push(violationLabelByArticle(15))
-
-  const norma1617 = getFirst(d, ['norma16_17', 'Norma16_17'], '')
-  const art17Tipo = getFirst(d, ['art17_tipo', 'Art17_tipo'], '')
-  if (/art\.?\s*16/i.test(norma1617)) items.push(violationLabelByArticle(16))
-  if (/art\.?\s*17/i.test(norma1617) || art17Tipo) items.push(violationLabelByArticle(17))
-
-  ;['norma_violata1', 'norma_violata2', 'norma_violata3'].forEach(field => {
-    splitMultiValue(pickField(d, field)).forEach(v => items.push(formatNormaToken(v)))
-  })
-
-  const direct = getFirst(d, [
-    'violazione', 'Violazione', 'VIOLAZIONE',
-    'tipo_violazione', 'Tipo_violazione', 'TIPO_VIOLAZIONE',
-    'infrazione', 'Infrazione', 'INFRAZIONE',
-    'descrizione_violazione', 'Descrizione_violazione'
-  ], '')
-  if (direct) items.push(direct)
-
-  const cleaned = uniqueList(items)
-  if (cleaned.length) return cleaned.join(', ')
-
-  const descr = getFirst(d, ['descrizione_fatti', 'Descrizione_fatti', 'circostanze', 'Circostanze'], '')
-  if (descr) return descr.length > 70 ? `${descr.slice(0, 67)}…` : descr
-  return '—'
-}
-
 function getComune (d: any): string {
   return getFirst(d, ['comune', 'Comune', 'COMUNE', 'comune_infrazione', 'Comune_infrazione'])
-}
-
-function getTrasgressore (d: any): string {
-  const rag = getFirst(d, ['ragione_sociale', 'Ragione_sociale', 'ditta', 'Ditta'], '')
-  if (rag) return rag
-  const nome = getFirst(d, ['nome', 'Nome'], '')
-  const cognome = getFirst(d, ['cognome', 'Cognome'], '')
-  return `${nome} ${cognome}`.trim() || '—'
-}
-
-function getCfPiva (d: any): string {
-  const cf = getFirst(d, [
-    'codice_fiscale', 'Codice_fiscale', 'CODICE_FISCALE', 'codiceFiscale',
-    'cod_fiscale', 'cod_fisc', 'cf', 'CF', 'c_f', 'cF'
-  ], '')
-  const piva = getFirst(d, [
-    'piva', 'PIVA', 'p_iva', 'P_IVA', 'partita_iva', 'Partita_iva',
-    'PARTITA_IVA', 'partitaIVA', 'partitaIva', 'iva'
-  ], '')
-  if (cf && piva && cf !== piva) return `${cf} / ${piva}`
-  return cf || piva || '—'
 }
 
 
@@ -1100,19 +1015,6 @@ async function queryLayer (view: RuntimeDsView, where: string, pageSize: number)
     num: pageSize || 2000
   })
   return (res?.features || []).map((f: any) => f?.attributes || {})
-}
-
-function Pill (props: { children: any; cfg: any }) {
-  return <span style={{ padding: '6px 10px', borderRadius: 999, background: 'rgba(255,255,255,0.08)', color: props.cfg.mutedColor, fontSize: 12 }}>{props.children}</span>
-}
-
-function Stat (props: { label: string; value: number; cfg: any }) {
-  return (
-    <div style={{ background: props.cfg.cardBg, border: `1px solid ${props.cfg.cardBorder}`, borderRadius: 14, padding: '12px 14px' }}>
-      <div style={{ color: props.cfg.mutedColor, fontSize: 11, textTransform: 'uppercase', fontWeight: 800, letterSpacing: 0.8 }}>{props.label}</div>
-      <div style={{ color: props.cfg.textColor, fontSize: 26, fontWeight: 800, marginTop: 3 }}>{props.value}</div>
-    </div>
-  )
 }
 
 function Input (props: { value: string; onChange: (v: string) => void; placeholder?: string; type?: string; cfg: any }) {

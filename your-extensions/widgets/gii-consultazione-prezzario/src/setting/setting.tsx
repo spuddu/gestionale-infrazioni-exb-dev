@@ -145,10 +145,10 @@ export default function Setting(props: AllWidgetSettingProps<IMConfig>) {
         <input style={inp} value={cfg.nuoviPrezziAnalisiUrl || ''} onChange={(e) => set('nuoviPrezziAnalisiUrl', e.target.value)} placeholder='https://services2.arcgis.com/.../FeatureServer/0' />
 
         <label style={lbl}>URL parametri attrezzature (risarcimento Art.30)</label>
-        <input style={inp} value={cfg.attrezzatureParametriUrl || ''} onChange={(e) => set('attrezzatureParametriUrl', e.target.value)} placeholder='https://services2.arcgis.com/.../GII_PARAMETRI_SANZIONI/FeatureServer/0' />
+        <input style={inp} value={cfg.attrezzatureParametriUrl || ''} onChange={(e) => set('attrezzatureParametriUrl', e.target.value)} placeholder='https://services2.arcgis.com/.../GII_VIEW_EB_PARAMETRI_ART30/FeatureServer' />
       </div>
 
-      <div style={hint}>Widget di sola consultazione con albero Capitolo / Sottocapitolo, elenco voci e scheda dettaglio. La combo del prezzario mostra automaticamente le sorgenti che hanno almeno l'URL articoli configurato. La sorgente attrezzature (GII_PARAMETRI_SANZIONI, categoria_parametro='ATTREZZATURA') è un elenco piatto senza capitoli/analisi.</div>
+      <div style={hint}>Widget di sola consultazione con albero Capitolo / Sottocapitolo, elenco voci e scheda dettaglio. La combo del prezzario mostra automaticamente le sorgenti che hanno almeno l'URL articoli configurato. La sorgente attrezzature (vista su GII_PARAMETRI_SANZIONI filtrata su categoria_parametro='ATTREZZATURA') è un elenco piatto senza capitoli/analisi.</div>
     </div>
   )
 }

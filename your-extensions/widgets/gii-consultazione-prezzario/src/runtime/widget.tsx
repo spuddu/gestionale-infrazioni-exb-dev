@@ -729,12 +729,34 @@ export default function Widget(props: AllWidgetProps<IMConfig>) {
   // - EXCLUDE: si sta aggiungendo una nota spese per un'attrezzatura recuperabile già scelta —
   //   non ha senso poter scegliere "Attrezzature" come sorgente (non si aggiunge un'attrezzatura
   //   a un'attrezzatura), quindi la sorgente viene esclusa del tutto dall'elenco.
-  const [forcedSourceCode] = React.useState<string>(() => {
+  const [forcedSourceCode, setForcedSourceCode] = React.useState<string>(() => {
     try { return sessionStorage.getItem('GII_NS_FORCE_SOURCE') || '' } catch { return '' }
   })
-  const [excludedSourceCode] = React.useState<string>(() => {
+  const [excludedSourceCode, setExcludedSourceCode] = React.useState<string>(() => {
     try { return sessionStorage.getItem('GII_NS_EXCLUDE_SOURCE') || '' } catch { return '' }
   })
+  // I widget ExB restano montati tra una navigazione di pagina e l'altra: senza questo effect,
+  // i due flag sopra resterebbero congelati al valore letto al primo mount, anche quando
+  // gii-editing-ti li aggiorna prima di rimandare qui l'utente una seconda volta (es. da "non
+  // recuperabile" a "recuperabile"). Si rileggono ad ogni segnale plausibile di cambio pagina.
+  React.useEffect(() => {
+    const reread = () => {
+      try { setForcedSourceCode(sessionStorage.getItem('GII_NS_FORCE_SOURCE') || '') } catch { setForcedSourceCode('') }
+      try { setExcludedSourceCode(sessionStorage.getItem('GII_NS_EXCLUDE_SOURCE') || '') } catch { setExcludedSourceCode('') }
+    }
+    window.addEventListener('gii:ns-source-flags-changed', reread as EventListener)
+    window.addEventListener('hashchange', reread)
+    window.addEventListener('popstate', reread)
+    window.addEventListener('focus', reread)
+    document.addEventListener('visibilitychange', reread)
+    return () => {
+      window.removeEventListener('gii:ns-source-flags-changed', reread as EventListener)
+      window.removeEventListener('hashchange', reread)
+      window.removeEventListener('popstate', reread)
+      window.removeEventListener('focus', reread)
+      document.removeEventListener('visibilitychange', reread)
+    }
+  }, [])
   const sources = React.useMemo(() => {
     const all = buildSources(cfg)
     if (forcedSourceCode) return all
@@ -816,6 +838,18 @@ export default function Widget(props: AllWidgetProps<IMConfig>) {
   const summaryReqRef = React.useRef(0)
   const rowsRef = React.useRef<VoceRow[]>([])
   const didInitDefaultSourceRef = React.useRef(false)
+  // Forza la selezione della fonte "Attrezzature" ogni volta che forcedSourceCode cambia
+  // (non solo alla primissima apertura del widget): senza questo, se l'utente aveva già una
+  // fonte selezionata da una visita precedente, la forzatura veniva ignorata perché il blocco
+  // sotto scatta solo quando "!selectedCode".
+  const prevForcedSourceRef = React.useRef<string>(forcedSourceCode)
+  React.useEffect(() => {
+    if (prevForcedSourceRef.current === forcedSourceCode) return
+    prevForcedSourceRef.current = forcedSourceCode
+    if (forcedSourceCode && sources.some((s) => s.codice_prezzario === forcedSourceCode)) {
+      setSelectedCode(forcedSourceCode)
+    }
+  }, [forcedSourceCode, sources])
 
   React.useEffect(() => {
     if (!msg) return

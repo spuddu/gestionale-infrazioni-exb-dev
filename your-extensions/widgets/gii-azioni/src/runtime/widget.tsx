@@ -10,6 +10,7 @@ import { buildBozzaDeterminazionePdf } from '../../../_shared/gii-anteprime/docu
 import { buildBozzaDeterminazioneMap } from '../../../_shared/gii-anteprime/documenti-amministrativi/bozza-determinazione/bozza-determinazione-map'
 import { PDFDocument } from 'pdf-lib'
 import { drawEmbeddedPdfPageInRapportoTechnicalBody, drawRapportoTechnicalHeadersByPage, RAPPORTO_TECHNICAL_BODY_BOX, attachmentTechnicalDocumentTitle } from '../../../_shared/gii-anteprime/documenti-tecnici/rapporto/technical-document-header'
+import { attrezzaturaInstanceTipoCodePdf, loadAttrezzatureCatalogPdf } from '../../../_shared/gii-anteprime/documenti-tecnici/rapporto/rapporto-nota-spese-summary'
 import GiiAnteprimaPanel from '../../../_shared/gii-anteprime/anteprima-panel'
 import { computeReqPoint, parseNorma3Codes } from '../../../_shared/gii-anteprime/req-point'
 
@@ -109,22 +110,6 @@ function getOfficialRapportoTecnicoNumber (data: any): string {
     if (/^R[-_\s]*\d+/i.test(text) || /^\d+\s*\/\s*\d{4}$/.test(text)) return text.replace(/\s+/g, '')
   }
   return ''
-}
-
-function attachmentTechnicalDocumentTitleForActions (index: number, numeroRapportoTecnico?: string): string {
-  return attachmentTechnicalDocumentTitle(index, numeroRapportoTecnico)
-}
-
-function documentViewerTitleForActions (fileName: string, data: any, oid?: number | null): string {
-  const lower = String(fileName || '').toLowerCase()
-  const rapporto = getOfficialRapportoTecnicoNumber(data) || '-'
-  const rilevazione = buildRilevazioneNumberFromData(data, oid)
-  const prefix = `Rapporto n. ${rapporto}`
-  if (lower.includes('mappa')) return `${prefix} • Mappa della rilevazione n. ${rilevazione || '-'}`
-  if (lower.includes('allegat')) return `${prefix} • Allegati della rilevazione n. ${rilevazione || '-'}`
-  if (lower.includes('nota')) return `${prefix} • Nota spese della rilevazione n. ${rilevazione || '-'}`
-  if (lower.includes('documenti_')) return `${prefix} • Documenti della rilevazione n. ${rilevazione || '-'}`
-  return `${prefix} • Rilevazione n. ${rilevazione || '-'}`
 }
 
 function buildRilevazioneNumberFromData (data: any, oid: number | null | undefined): string {
@@ -1665,7 +1650,7 @@ function ActionsPanel (props: {
     maxStato: number
     presaRequiredVal: number
   }
-  nsConfig: { detailUrl: string; parametriUrl: string; parametroCode: string }
+  nsConfig: { detailUrl: string; parametriUrl: string; parametroCode: string; attrezzatureParametriUrl: string }
   sanzioneConfig: { parametriSanzioniUrl: string; regolamentoArticoliUrl: string; regolamentoRaccordiUrl: string }
   mapView: any
 }) {
@@ -1890,11 +1875,6 @@ function ActionsPanel (props: {
     if (value.includes('VERBALE') && (value.includes('MIST') || value.includes('RISARC') || value.includes('RIMBORS'))) return 'VERBALE_RISARCIMENTO'
     if (value.includes('VERBALE')) return 'VERBALE'
     return value
-  }
-
-  const attoAmmPrevedeVerbale = (attrs: any): boolean => {
-    const code = normalizeTipoAttoAmmCode(pickAttrCI(attrs || {}, ['tipo_atto_amm']))
-    return code === 'VERBALE' || code === 'VERBALE_RISARCIMENTO'
   }
 
   const inferSettoreFromUsername = (u: string): string => {
@@ -2199,36 +2179,41 @@ function ActionsPanel (props: {
     return statuses
   }
 
-  // Attrezzature recuperabili di Art.30 con il relativo ID persistito e un'etichetta
-  // leggibile (matricola per le tessere, "Tipo (N)" per le altre) — usate per verificare,
-  // una per una, che ciascuna abbia la propria nota spese compilata (rapporto 1 a 1).
-  const getRecuperabiliAttrezzatureRefs = (attrs: any): Array<{ id: string, label: string }> => {
-    const raw = String(pickAttrCI(attrs, ['attrezzature_risarcimento_dettaglio']) || '')
-    type ParsedItem = { id: string, descrizione: string, isTessera: boolean, matricola: string }
-    const parsed: ParsedItem[] = []
-    for (const line of raw.split(/\r?\n/)) {
-      const text = line.trim()
-      if (!text) continue
-      const statoMatch = text.match(/Stato:\s*(Non recuperabile|Recuperabile)/i)
-      if (!statoMatch || !/^recuperabile$/i.test(statoMatch[1].trim())) continue
-      const idMatch = text.match(/—\s*ID:\s*([0-9]+)/i)
-      if (!idMatch) continue
-      const cutIdx = text.search(/\s+—\s+Valore unitario:/i)
-      const prefix = cutIdx >= 0 ? text.slice(0, cutIdx).trim() : text
-      const codiceMatch = prefix.match(/^(.*?)\s+—\s+Codice:\s*(.+)$/i)
-      const descrizione = String(codiceMatch?.[1] || prefix).trim()
-      const isTessera = /tessera/i.test(descrizione)
-      const matricolaMatch = text.match(/Matricola:\s*([^—]+?)(?=\s+—|$)/i)
-      parsed.push({ id: String(idMatch[1]), descrizione, isTessera, matricola: String(matricolaMatch?.[1] || '').trim() })
-    }
+  // Attrezzature recuperabili di Art.30 con il relativo riferimento_attrezzatura_id reale
+  // (letto dalle righe nota spese effettive, non dal vecchio campo di testo libero) e
+  // un'etichetta leggibile risolta tramite il catalogo — usate per verificare, una per una,
+  // che ciascuna abbia la propria nota spese compilata (rapporto 1 a 1).
+  const getRecuperabiliAttrezzatureRefs = async (parentGlobalId: string): Promise<Array<{ id: string, label: string }>> => {
+    const detailUrl = String(props.nsConfig?.detailUrl || '').trim()
+    const gid = String(parentGlobalId || '').trim()
+    if (!detailUrl || !gid) return []
+    const FeatureLayer = await loadEsriModule<any>('esri/layers/FeatureLayer')
+    const fl = new FeatureLayer({ url: detailUrl, outFields: ['*'] })
+    if (typeof fl.load === 'function') { try { await fl.load() } catch {} }
+    const q = fl.createQuery ? fl.createQuery() : {}
+    q.where = `parent_globalid = ${sqlQuote(gid)}`
+    q.outFields = ['codice_casistica', 'riferimento_attrezzatura_id']
+    q.returnGeometry = false
+    const res = await fl.queryFeatures(q)
+    const seen = new Set<string>()
+    const ids: string[] = []
+    ;(res?.features || []).forEach((f: any) => {
+      const a = f?.attributes || {}
+      if (String(a.codice_casistica || '').trim() !== 'C104_ATTREZZATURE_DANNEGGIATE') return
+      const id = String(a.riferimento_attrezzatura_id || '').trim()
+      if (!id || seen.has(id)) return
+      seen.add(id)
+      ids.push(id)
+    })
+    if (ids.length === 0) return []
+    const catalog = await loadAttrezzatureCatalogPdf(String(props.nsConfig?.attrezzatureParametriUrl || '').trim())
+    const items = ids.map(id => ({ id, descrizione: catalog.get(attrezzaturaInstanceTipoCodePdf(id)) || id }))
     const totalsByDescrizione: Record<string, number> = {}
-    parsed.forEach(item => { if (!item.isTessera) totalsByDescrizione[item.descrizione] = (totalsByDescrizione[item.descrizione] || 0) + 1 })
+    items.forEach(item => { totalsByDescrizione[item.descrizione] = (totalsByDescrizione[item.descrizione] || 0) + 1 })
     const counters: Record<string, number> = {}
-    return parsed.map(item => {
+    return items.map(item => {
       let label: string
-      if (item.isTessera) {
-        label = item.matricola ? `Tessera elettronica — Matricola ${item.matricola}` : 'Tessera elettronica'
-      } else if (totalsByDescrizione[item.descrizione] > 1) {
+      if (totalsByDescrizione[item.descrizione] > 1) {
         counters[item.descrizione] = (counters[item.descrizione] || 0) + 1
         label = `${item.descrizione} (${counters[item.descrizione]})`
       } else {
@@ -2248,29 +2233,25 @@ function ActionsPanel (props: {
     const statuses = await queryNotaSpeseStatusByCasistica(parentGlobalId)
     const blocking: string[] = []
     const confirmable: string[] = []
-    selected.forEach(opt => {
+    for (const opt of selected) {
       if (opt.codice === 'C104_ATTREZZATURE_DANNEGGIATE') {
-        const refs = getRecuperabiliAttrezzatureRefs(data)
+        const refs = await getRecuperabiliAttrezzatureRefs(parentGlobalId)
         refs.forEach(ref => {
           const key = `${opt.codice}::${ref.id}`
           const st = statuses[key] || { total: 0, rows: 0, incompleteRows: 0 }
           if (st.incompleteRows > 0) {
             blocking.push(`${opt.label} — ${ref.label}: ${st.incompleteRows} ${st.incompleteRows === 1 ? 'riga senza quantità o con quantità pari a zero' : 'righe senza quantità o con quantità pari a zero'}`)
-            return
-          }
-          if (Number(st.total || 0) <= 0) {
-            blocking.push(`${opt.label} — ${ref.label}: nota spese obbligatoria per l'attrezzatura recuperabile, ma non ancora compilata`)
           }
         })
-        return
+        continue
       }
       const st = statuses[opt.codice] || { total: 0, rows: 0, incompleteRows: 0 }
       if (st.incompleteRows > 0) {
         blocking.push(`${opt.label}: ${st.incompleteRows} ${st.incompleteRows === 1 ? 'riga senza quantità o con quantità pari a zero' : 'righe senza quantità o con quantità pari a zero'}`)
-        return
+        continue
       }
       if (Number(st.total || 0) <= 0) confirmable.push(`${opt.label}: 0,00 €`)
-    })
+    }
     return { blocking, confirmable }
   }
 
@@ -2444,27 +2425,6 @@ function ActionsPanel (props: {
     try { window.dispatchEvent(new CustomEvent('gii:send-to-da', { detail })) } catch {}
     try { window.dispatchEvent(new CustomEvent('gii:send-to', { detail })) } catch {}
     try { window.setTimeout(() => { window.location.href = payload.mailtoUrl }, 0) } catch {}
-  }
-
-  /**
-   * Verifica se il ruolo corrente è stato riattivato per rispondere a una richiesta di integrazione.
-   * Controlla se un ruolo "superiore" ha esito=INTEGRAZIONE nei confronti di questo ruolo.
-   */
-  const isRespondingToIntegration = (): boolean => {
-    if (!data) return false
-    const integSources: Record<string, string[]> = {
-      TI: ['RZ'], RI: ['DT'], TI_AMM: ['RI_AMM'],
-      // RI_AMM -> RI è una integrazione tecnica speciale: il RI non risponde
-      // direttamente a RI_AMM, ma deve ritrasmettere a DT. Per questo RI_AMM
-      // non va considerato qui come requester diretto del RI.
-      RZ: [], DT: [], DA: [], RI_AMM: []
-    }
-    for (const src of (integSources[role] || [])) {
-      const v = pickAttrCI(data, [`esito_${src}`, `ESITO_${src}`])
-      const n = v != null && v !== '' ? Number(v) : null
-      if (n === ESITO_INTEGRAZIONE) return true
-    }
-    return false
   }
 
   const buildCycleSummary = (eventoApertura: string, eventoChiusura: string, numCampi: number): string => {
@@ -2885,12 +2845,6 @@ function ActionsPanel (props: {
     if (typeof fl?.load === 'function') await fl.load()
     attivitaLayerRef.current = fl
     return fl
-  }
-
-  const practicePrefixForActivity = (overrideAttrs?: Record<string, any>): string => {
-    const merged = { ...(data || {}), ...(overrideAttrs || {}) }
-    const origin = pickAttrCI(merged, ['origine_pratica', 'Origine_pratica', 'ORIGINE_PRATICA'])
-    return origin === 2 || String(origin || '').trim() === '2' ? 'TI' : 'TR'
   }
 
   const shortReportNumberForActivity = (overrideAttrs?: Record<string, any>): string => {
@@ -6935,30 +6889,6 @@ function parseGradiViolazioniForRapporto (raw: any): Record<string, string> {
   return out
 }
 
-function pickRapportoAttrCI (obj: any, keys: string[]): any {
-  if (!obj) return undefined
-  const map: Record<string, string> = {}
-  try {
-    Object.keys(obj).forEach(k => { map[String(k).toLowerCase()] = k })
-  } catch {}
-  for (const k of keys) {
-    const direct = (obj as any)[k]
-    if (direct !== undefined && direct !== null && direct !== '') return direct
-    const realKey = map[String(k).toLowerCase()]
-    if (realKey) {
-      const v = (obj as any)[realKey]
-      if (v !== undefined && v !== null && v !== '') return v
-    }
-  }
-  return undefined
-}
-
-
-function rapportoPdfFileName (map: Record<string, string>): string {
-  const cp = String(map.cod_pratica || 'rapporto').replace(/[^a-zA-Z0-9_-]/g, '_')
-  return `rapporto_${cp || 'rapporto'}.pdf`
-}
-
 function normalizeArcgisLayerUrl (raw?: string | null): string {
   const url = String(raw || '').trim()
   if (!url) return ''
@@ -7119,10 +7049,6 @@ function pointGeometryFromAttrsForActions (attrs: any): any | null {
   return null
 }
 
-function hasUsablePointAttrsForActions (attrs: any): boolean {
-  return !!pointGeometryFromAttrsForActions(attrs)
-}
-
 async function resolvePointGeometryForActions (ds: any, oid: number, idFieldName: string, attrs?: any, preferredUrl?: string | null): Promise<any | null> {
   if (!Number.isFinite(oid) || oid <= 0) return null
   const fromAttrs = pointGeometryFromAttrsForActions(attrs)
@@ -7142,10 +7068,6 @@ async function resolvePointGeometryForActions (ds: any, oid: number, idFieldName
   const gy = Number(geom?.y ?? geom?.latitude ?? 0)
   if (Number.isFinite(gx) && Number.isFinite(gy) && !(gx === 0 && gy === 0)) return geom
   return pointGeometryFromAttrsForActions(feat?.attributes)
-}
-
-async function hasPointGeometryForActions (ds: any, oid: number, idFieldName: string, attrs?: any, preferredUrl?: string | null): Promise<boolean> {
-  return !!(await resolvePointGeometryForActions(ds, oid, idFieldName, attrs, preferredUrl))
 }
 
 
@@ -7542,7 +7464,8 @@ const queryFields = React.useMemo(() => ['*'], [])
           nsConfig={{
             detailUrl: String(cfg.nsNotaSpeseDettaglioUrl || ''),
             parametriUrl: String(cfg.nsParametriUrl || ''),
-            parametroCode: String(cfg.nsParametroCode || 'SPESE_GENERALI_PERC')
+            parametroCode: String(cfg.nsParametroCode || 'SPESE_GENERALI_PERC'),
+            attrezzatureParametriUrl: String((cfg as any).attrezzatureParametriUrl || '')
           }}
           sanzioneConfig={{
             parametriSanzioniUrl: String(cfg.parametriSanzioniUrl || ''),

@@ -78,6 +78,7 @@ export interface Config {
   nsNotaSpeseDettaglioUrl: string
   nsParametriUrl: string
   nsParametroCode: string
+  attrezzatureParametriUrl: string
 
   // --- Calcolo automatico sanzione (URL tabelle di consultazione)
   parametriSanzioniUrl: string
@@ -160,6 +161,7 @@ export const defaultConfig: Config = {
   nsNotaSpeseDettaglioUrl: '',
   nsParametriUrl: '',
   nsParametroCode: 'SPESE_GENERALI_PERC',
+  attrezzatureParametriUrl: '',
 
   parametriSanzioniUrl: 'https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_VIEW_EB_PARAMETRI_SANZIONI_AMM/FeatureServer/0',
   regolamentoArticoliUrl: 'https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_VIEW_EB_REGOLAMENTO_ARTICOLI/FeatureServer/0',

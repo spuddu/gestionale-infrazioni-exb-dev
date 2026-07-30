@@ -977,14 +977,6 @@ function migrateColumns(cfg: any): ColumnDef[] {
       null
     );
   };
-  const findPratica = (): ColumnDef | null => {
-    return (
-      normalized.find((c) => {
-        const f = String(c.field || "").toLowerCase();
-        return f === "objectid" || f === "oid" || f === "object_id";
-      }) || null
-    );
-  };
   const take = (
     fallback: ColumnDef,
     existing?: ColumnDef | null,
@@ -1110,46 +1102,6 @@ function migrateColumns(cfg: any): ColumnDef[] {
  * Componente figlio di DataSourceComponent — raccoglie i record e li segnala al parent.
  * Usa useEffect con signature stabile per evitare loop infiniti.
  */
-function RecordTracker(p: {
-  ds: DataSource;
-  dsId: string;
-  info: any;
-  onUpdate: (
-    dsId: string,
-    recs: DataRecord[],
-    ds: DataSource,
-    loading: boolean,
-  ) => void;
-}): null {
-  const recs: DataRecord[] = (p.ds?.getRecords?.() ?? []) as DataRecord[];
-  const status =
-    p.info?.status ?? p.ds?.getStatus?.() ?? DataSourceStatus.NotReady;
-  const isLoading = status === DataSourceStatus.Loading;
-
-  // Signature completa: status + conteggio + JSON di tutti i valori del primo record.
-  // Cattura il lazy-loading dei campi (quando i valori passano da undefined a valorizzati).
-  let dataSig = "";
-  if (recs.length > 0) {
-    try {
-      dataSig = JSON.stringify(recs[0].getData?.() || {});
-    } catch {
-      dataSig = String(recs.length);
-    }
-  }
-  const sig = `${status}:${recs.length}:${dataSig}`;
-
-  const prevSig = React.useRef("");
-  React.useEffect(() => {
-    if (sig !== prevSig.current) {
-      prevSig.current = sig;
-      p.onUpdate(p.dsId, recs, p.ds, isLoading);
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sig]);
-
-  return null;
-}
-
 const GII_PORTAL = "https://cbsm-hub.maps.arcgis.com";
 
 type RuntimeDsView = {
@@ -1819,39 +1771,6 @@ async function getLoadedFeatureLayer(
   return _loadedFeatureLayerCache[key];
 }
 
-/**
- * Formatta il prefisso ruolo nel formato standard.
- * Es: "RZ-D1", "RI-AGR", "DIR-TEC", "DIR-AMM", "TI-D1", "TI-AMM"
- */
-function formatRolePrefix(
-  roleLabel: string,
-  areaLabel: string,
-  settoreLabel: string,
-): string {
-  const r = roleLabel.toUpperCase();
-  const a = areaLabel.toUpperCase();
-  const s = settoreLabel.toUpperCase();
-  switch (r) {
-    case "TR":
-    case "RZ":
-      return s ? `${r}-${s}` : r;
-    case "TI":
-      return a === "AMM" ? "TI-AMM" : s ? `TI-${s}` : "TI";
-    case "RI":
-      return a ? `RI-${a}` : "RI";
-    case "RI_AMM":
-      return "RI-AMM";
-    case "DT":
-      return a ? `DIR-${a}` : "DIR";
-    case "DA":
-      return "DIR-AMM";
-    case "TI_AMM":
-      return "TI-AMM";
-    default:
-      return r || "?";
-  }
-}
-
 function loadEsriModule<T = any>(path: string): Promise<T> {
   return new Promise((resolve, reject) => {
     const req = (window as any).require;
@@ -2292,23 +2211,6 @@ function inferIsOrgAdminFromSession(): boolean {
   return false;
 }
 
-function computeDsMetaSig(useDsList: any[]): string {
-  try {
-    return (useDsList || [])
-      .map((u: any) => {
-        const dsId = String(u?.dataSourceId || "");
-        const ds = DataSourceManager.getInstance().getDataSource(dsId);
-        const label = String(ds?.getLabel?.() || "");
-        const j: any = ds?.getDataSourceJson?.() || (ds as any)?.dataSourceJson;
-        const url = String(j?.url || "");
-        return `${dsId}|${label}|${url}`;
-      })
-      .join("||");
-  } catch {
-    return "";
-  }
-}
-
 function getServiceKeyFromDataSourceId(dsId: string): string {
   try {
     const ds = DataSourceManager.getInstance().getDataSource(dsId);
@@ -2386,308 +2288,6 @@ const RUOLO_PRIORITY: Record<number, number> = {
   2: 60, // TI
   1: 10, // TR
 };
-
-// ── Mappa ruolo/area/settore → dataSourceId consentito ─────────────────────
-// Codici domini (numerici):
-//   AREA: AMM=1, AGR=2, TEC=3
-//   SETTORE: CR=1,GI=2,D1=3,D2=4,D3=5,D4=6,D5=7,D6=8,DS=9
-//   RUOLO: TR=1,TI=2,RZ=3,RI=4,DT=5,DA=6
-function getAllowedDataSourceIds(
-  user: {
-    ruolo: number | null;
-    ruoloCod?: string;
-    ruoloLabel?: string;
-    area: number | null;
-    areaCod?: string;
-    settore: number | null;
-    settoreCod?: string;
-    isAdmin: boolean;
-  } | null,
-  useDsList: any[],
-): string[] | null {
-  if (!user) return null;
-
-  // Helper: label (titolo) del datasource, normalizzato
-  const getLabel = (useDs: any): string => {
-    try {
-      const ds = DataSourceManager.getInstance().getDataSource(
-        String(useDs?.dataSourceId || ""),
-      );
-      const label = ds?.getLabel?.();
-      return String(label || "");
-    } catch {
-      return "";
-    }
-  };
-  const norm = (s: string) => String(s || "").toUpperCase();
-
-  const AREA_CODE: Record<number, string> = { 1: "AMM", 2: "AGR", 3: "TEC" };
-  const SETTORE_CODE: Record<number, string> = {
-    1: "CR",
-    2: "GI",
-    3: "D1",
-    4: "D2",
-    5: "D3",
-    6: "D4",
-    7: "D5",
-    8: "D6",
-    9: "DS",
-  };
-
-  const areaCode =
-    resolveAreaCode(user.area, (user as any).areaCod) ||
-    (user.area != null ? AREA_CODE[user.area] : "") ||
-    "";
-  const settoreCode =
-    resolveSettoreCode(user.settore, (user as any).settoreCod) ||
-    (user.settore != null ? SETTORE_CODE[user.settore] : "") ||
-    "";
-  const ruolo = user.ruolo;
-
-  const roots = (arr: any[]) =>
-    Array.from(
-      new Set(
-        arr
-          .map((u) => String(u?.rootDataSourceId || u?.dataSourceId || ""))
-          .filter(Boolean),
-      ),
-    );
-
-  // Admin: preferisci la vista EB_ADMIN (se presente), altrimenti non filtrare
-  if (user.isAdmin) {
-    const adminMatches = useDsList.filter((u) => {
-      const L = norm(getLabel(u));
-      return (
-        L.includes("GII_VIEW_ADMIN") ||
-        L.includes("VIEW_EB_ADMIN") ||
-        L.includes("_EB_ADMIN") ||
-        L.includes("EB_ADMIN")
-      );
-    });
-    const r = roots(adminMatches);
-    return r.length ? r : null;
-  }
-
-  const isEB = (L: string) =>
-    L.includes("GII_VIEW_EB_") || L.includes("VIEW_EB_") || L.includes("_EB_");
-
-  // Match "strict" (settore per AGR per TR/TI/RZ, e "tutte" per RI/DT/DA)
-  const matchesStrict = useDsList.filter((u) => {
-    const L = norm(getLabel(u));
-    if (!isEB(L)) return false;
-    if (L.includes("EB_ADMIN")) return false;
-    if (areaCode && !L.includes(`EB_${areaCode}`)) return false;
-
-    if (ruolo != null && ruolo >= 1 && ruolo <= 3) {
-      if (areaCode === "AGR")
-        return settoreCode ? L.includes(`_${settoreCode}`) : true;
-      return true;
-    }
-
-    if (ruolo != null && ruolo >= 4 && ruolo <= 6) {
-      if (areaCode === "AGR")
-        return (
-          L.includes("TUTTE") ||
-          L.includes("TUTTI") ||
-          (!L.includes("_D1") &&
-            !L.includes("_D2") &&
-            !L.includes("_D3") &&
-            !L.includes("_D4") &&
-            !L.includes("_D5") &&
-            !L.includes("_D6"))
-        );
-      return true;
-    }
-    return true;
-  });
-
-  // Loose fallback: qualunque vista EB della stessa area (escluso ADMIN)
-  const matchesLoose = matchesStrict.length
-    ? matchesStrict
-    : useDsList.filter((u) => {
-        const L = norm(getLabel(u));
-        if (!isEB(L)) return false;
-        if (L.includes("EB_ADMIN")) return false;
-        return areaCode ? L.includes(`EB_${areaCode}`) : true;
-      });
-
-  const ids = roots(matchesLoose);
-  // Se non riusciamo a determinare alcuna vista coerente (label non ancora pronta / nomi non standard),
-  // NON filtriamo: lasciamo che sia la condivisione AGOL a fare da guardia.
-  return ids.length ? ids : null;
-}
-
-// ── Selezione DS “singolo” (evita duplicati e mismatch) ───────────────────
-// Sceglie UNA vista tra quelle collegate, basandosi sul nome servizio nella URL
-// (più stabile del label e degli id interni dataSource_XX).
-function pickBestUseDataSourceId(
-  user: {
-    ruolo: number | null;
-    ruoloCod?: string;
-    ruoloLabel?: string;
-    area: number | null;
-    areaCod?: string;
-    settore: number | null;
-    settoreCod?: string;
-    gruppo?: string;
-    isAdmin: boolean;
-  } | null,
-  useDsList: any[],
-): string | null {
-  if (!user || !Array.isArray(useDsList) || useDsList.length === 0) return null;
-
-  const up = (s: any) => String(s || "").toUpperCase();
-  const AREA_CODE: Record<number, string> = { 1: "AMM", 2: "AGR", 3: "TEC" };
-  const SETTORE_CODE: Record<number, string> = {
-    1: "CR",
-    2: "GI",
-    3: "D1",
-    4: "D2",
-    5: "D3",
-    6: "D4",
-    7: "D5",
-    8: "D6",
-    9: "DS",
-  };
-
-  const areaCode =
-    resolveAreaCode(user.area, (user as any).areaCod) ||
-    (user.area != null ? AREA_CODE[user.area] : "") ||
-    "";
-  const settoreCode =
-    resolveSettoreCode(user.settore, (user as any).settoreCod) ||
-    (user.settore != null ? SETTORE_CODE[user.settore] : "") ||
-    "";
-  const ruolo = user.ruolo;
-  const ruoloLabel = up((user as any)?.ruoloCod || (user as any)?.ruoloLabel);
-  const gruppo = up((user as any)?.gruppo);
-
-  const getServiceName = (useDs: any): string => {
-    try {
-      const ds = DataSourceManager.getInstance().getDataSource(
-        String(useDs?.dataSourceId || ""),
-      );
-      const j: any =
-        (ds as any)?.getDataSourceJson?.() || (ds as any)?.dataSourceJson;
-      const url = String(j?.url || "");
-      const part = url.split("/rest/services/")[1] || "";
-      const name = part.split("/FeatureServer")[0] || "";
-      return up(name);
-    } catch {
-      return "";
-    }
-  };
-
-  // Fallback su label del DataSource (utile in preview/prime render quando la URL non è ancora pronta)
-  const getLabelUp = (useDs: any): string => up(getDsLabel(useDs, ""));
-
-  const items = useDsList.map((u) => ({
-    dsId: String(u?.dataSourceId || ""),
-    name: getServiceName(u),
-  }));
-  const findBy = (pred: (n: string) => boolean) => {
-    const hit = items.find((x) => x.dsId && x.name && pred(x.name));
-    return hit?.dsId || null;
-  };
-
-  // “Admin applicativo”: org_admin oppure ruolo DA/DT/RI oppure gruppo contiene ADMIN.
-  const isAppAdmin =
-    user.isAdmin ||
-    ruolo === 7 ||
-    ruoloLabel === "ADMIN" ||
-    ruoloLabel === "DA" ||
-    ruoloLabel === "DT" ||
-    ruoloLabel === "RI" ||
-    ruoloLabel === "RI_AMM" ||
-    gruppo.includes("ADMIN");
-  if (isAppAdmin) {
-    const dsAdmin = findBy(
-      (n) =>
-        n.includes("EB_ADMIN") ||
-        n.includes("GII_VIEW_ADMIN") ||
-        n.includes("VIEW_EB_ADMIN"),
-    );
-    if (dsAdmin) return dsAdmin;
-
-    // Fallback: se il serviceName non è ancora disponibile (preview/prime render),
-    // prova a riconoscere la vista ADMIN dal *label* del DataSource.
-    const hitByLabel = useDsList.find((u) => {
-      const L = getLabelUp(u);
-      return (
-        L.includes("EB_ADMIN") ||
-        L.includes("GII_VIEW_ADMIN") ||
-        L.includes("VIEW_EB_ADMIN") ||
-        L.includes("_EB_ADMIN")
-      );
-    });
-    if (hitByLabel?.dataSourceId) return String(hitByLabel.dataSourceId);
-  }
-
-  // area+settore
-  if (areaCode) {
-    if (settoreCode) {
-      const dsAreaSett = findBy(
-        (n) =>
-          n.includes(`EB_${areaCode}_${settoreCode}`) ||
-          n.includes(`_${areaCode}_${settoreCode}`),
-      );
-      if (dsAreaSett) return dsAreaSett;
-    }
-    // viste "TUTTE" per ruoli superiori
-    if (ruolo != null && ruolo >= 4 && ruolo <= 6) {
-      const dsTutte = findBy(
-        (n) =>
-          n.includes(`EB_${areaCode}_TUTTE`) ||
-          n.includes(`EB_${areaCode}_TUTTI`),
-      );
-      if (dsTutte) return dsTutte;
-    }
-    const dsArea = findBy(
-      (n) => n.includes(`EB_${areaCode}`) || n.includes(`_${areaCode}`),
-    );
-    if (dsArea) return dsArea;
-  }
-
-  // fallback admin view
-  if (isAppAdmin) {
-    const dsAdminFallback = findBy(
-      (n) =>
-        n.includes("EB_ADMIN") ||
-        n.includes("GII_VIEW_ADMIN") ||
-        n.includes("VIEW_EB_ADMIN"),
-    );
-    if (dsAdminFallback) return dsAdminFallback;
-
-    const hitByLabel = useDsList.find((u) => {
-      const L = getLabelUp(u);
-      return (
-        L.includes("EB_ADMIN") ||
-        L.includes("GII_VIEW_ADMIN") ||
-        L.includes("VIEW_EB_ADMIN") ||
-        L.includes("_EB_ADMIN")
-      );
-    });
-    if (hitByLabel?.dataSourceId) return String(hitByLabel.dataSourceId);
-  }
-
-  // Se non troviamo match affidabili, evitiamo di forzare un singolo DS “a caso”.
-  // Lasciamo al widget la gestione multi-DS (tabs) o i filtri allowedDsIds.
-  return items.length === 1 ? items[0]?.dsId || null : null;
-}
-
-interface GiiUserInfo {
-  username: string;
-  ruolo: number | null; // codice numerico legacy (1-7)
-  ruoloCod: string; // codice testuale ufficiale: TR/TI/RZ/RI/DT/DA/ADMIN
-  ruoloLabel: string; // compatibilità: coincide col codice ruolo
-  area: number | null; // codice numerico legacy
-  areaCod: "AMM" | "AGR" | "TEC" | "";
-  settore: number | null; // codice numerico legacy
-  settoreCod: string;
-  ufficio: number | null;
-  gruppo: string;
-  isAdmin: boolean; // org_admin AGOL o admin workflow
-}
 
 // Legge il profilo utente caricato dall'Header (unica fonte).
 function readGiiUserFromHeader(): GiiUserInfo | null {
@@ -2899,14 +2499,6 @@ function getStatoFieldForRuolo(ruoloLabel: string): string {
 
 // Priorità ordinamento operativo: prima ciò che devo prendere/lavorare,
 // poi ciò che ho già rimandato/trasmesso ad altri, infine chiusi/non attivi.
-function getPriorityForStato(statoVal: number | null): number {
-  if (statoVal === 1) return 0; // Da prendere in carico
-  if (statoVal === 2) return 1; // In carico
-  if (statoVal === 3 || statoVal === 4) return 2; // Rimandato / Trasmesso
-  if (statoVal === 5) return 3; // Respinto
-  return 4; // null / altri
-}
-
 export default function Widget(props: Props) {
   const cfg: any = (props.config ?? defaultConfig) as any;
 
@@ -3891,17 +3483,6 @@ export default function Widget(props: Props) {
   const esitoApprovata = num(cfg.esitoApprovataVal, 2);
   const esitoRespinta = num(cfg.esitoRespintaVal, 3);
 
-  const labelStato = (v: any): string => {
-    const n = Number(v);
-    if (!Number.isFinite(n)) return normalizeMioStatoLabel(txt(v));
-    if (n === statoDaPrendere) return "Da prendere in carico";
-    if (n === statoPresa) return "In carico";
-    if (n === statoIntegrazione) return "Rimandato";
-    if (n === statoApprovata) return "Trasmesso";
-    if (n === statoRespinta) return "Respinto";
-    return "—";
-  };
-
   const labelEsito = (v: any): string => {
     const n = Number(v);
     if (!Number.isFinite(n)) return normalizeMioStatoLabel(txt(v));
@@ -4092,15 +3673,6 @@ export default function Widget(props: Props) {
   });
 
   // Mantenuta per compatibilità con eventuali usi interni residui
-  const getChipStyle = (statoNum: number | null) => {
-    if (statoNum === statoDaPrendere) return CHIP_YELLOW;
-    if (statoNum === statoPresa) return CHIP_CELESTE;
-    if (statoNum === statoIntegrazione) return CHIP_ORANGE;
-    if (statoNum === statoApprovata) return CHIP_GREEN;
-    if (statoNum === statoRespinta) return CHIP_RED;
-    return CHIP_NEUTRAL;
-  };
-
   // converte esito (1..3) in "stato visuale" per chip (3/4/5)
   const statoNumFromEsito = (esito: number): number => {
     if (esito === esitoIntegrazione) return statoIntegrazione;

@@ -1405,11 +1405,6 @@ function sameLocalDateValue (a: any, b: any): boolean {
     da.getDate() === db.getDate()
 }
 
-function isSurveyOriginRecordForDate (data: any): boolean {
-  const op = pickAttrCI(data, ['origine_pratica', 'Origine_pratica', 'ORIGINE_PRATICA'])
-  return op === 1 || op === '1'
-}
-
 function pickSurveyRuntimeDateMs (data: any, dateOnlyValue: any): number | null {
   const candidates = ['end', 'End', 'END', 'start', 'Start', 'START', 'CreationDate', 'creationDate', 'creationdate', 'CREATIONDATE']
   for (const name of candidates) {
@@ -3223,7 +3218,7 @@ const NSD_CATEGORY_LABELS: Record<NsdCategory, string> = {
   RU: 'Risorse umane',
   SL: 'Semilavorati',
   PF: 'Prodotti finiti',
-  RA: 'Risarcimento attrezzatura'
+  RA: 'Attrezzature'
 }
 
 const NSD_UNLINKED_CASISTICA = '__GII_NSD_NON_COLLEGATA__'
@@ -3452,43 +3447,86 @@ function nsdReadArt30Equipment (data: any): NsdArt30EquipmentSummary {
   }
 }
 
-// Mappa ID persistito -> etichetta leggibile (matricola per le tessere, "Tipo (N)" solo se
-// più di un'unità dello stesso tipo) per le sole attrezzature "Recuperabile" — usata per
-// suddividere nella tab Nota spese le sotto-note di Art.30, una per attrezzatura.
-function nsdGetRecuperabiliAttrezzatureLabelsById (data: any): Map<string, string> {
-  const out = new Map<string, string>()
-  const raw = String(nsdPickAttrCI(data || {}, ['attrezzature_risarcimento_dettaglio']) || '')
-  type ParsedItem = { id: string, descrizione: string, isTessera: boolean, matricola: string }
-  const parsed: ParsedItem[] = []
-  for (const line of raw.split(/\r?\n/)) {
-    const text = line.trim()
-    if (!text) continue
-    const statoMatch = text.match(/Stato:\s*(Non recuperabile|Recuperabile)/i)
-    if (!statoMatch || !/^recuperabile$/i.test(statoMatch[1].trim())) continue
-    const idMatch = text.match(/—\s*ID:\s*([0-9]+)/i)
-    if (!idMatch) continue
-    const cutIdx = text.search(/\s+—\s+Valore unitario:/i)
-    const prefix = cutIdx >= 0 ? text.slice(0, cutIdx).trim() : text
-    const codiceMatch = prefix.match(/^(.*?)\s+—\s+Codice:\s*(.+)$/i)
-    const descrizione = String(codiceMatch?.[1] || prefix).trim()
-    const isTessera = /tessera/i.test(descrizione)
-    const matricolaMatch = text.match(/Matricola:\s*([^—]+?)(?=\s+—|$)/i)
-    parsed.push({ id: String(idMatch[1]), descrizione, isTessera, matricola: String(matricolaMatch?.[1] || '').trim() })
+// Normalizzazione chiave e riconoscimento tipo attrezzatura: stessa logica di gii-editing-ti,
+// per restare coerenti sull'etichetta mostrata (es. "Curva di derivazione") a partire dal
+// codice/descrizione letti dal catalogo parametri.
+function nsdAttrezzaturaKey (value: any): string {
+  return String(value ?? '')
+    .trim()
+    .toLocaleUpperCase('it-IT')
+    .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^A-Z0-9]+/g, '_')
+    .replace(/^_+|_+$/g, '')
+}
+
+function nsdAttrezzaturaTipoLabel (value: any): string | null {
+  const key = nsdAttrezzaturaKey(value)
+  if (!key) return null
+  if (key.includes('TESSERA')) return 'Tessera elettronica'
+  if (key.includes('CURV')) return 'Curva di derivazione'
+  if (key.includes('SIFON')) return 'Sifone'
+  if (key.includes('PARATOIA')) return 'Paratoia'
+  return null
+}
+
+// Catalogo attrezzature Art.30 (codice -> etichetta leggibile), stessa tabella parametri
+// consultata da gii-editing-ti. Cache in memoria per evitare richieste ripetute.
+const __giiNsdAttrezzatureCatalogCache: Record<string, Promise<Map<string, string>>> = {}
+
+async function nsdLoadAttrezzatureCatalog (rawUrl: any): Promise<Map<string, string>> {
+  const url = nsdEnsureLayerIndex(nsdNormalizeUrl(rawUrl))
+  if (!url) return new Map()
+  if (!__giiNsdAttrezzatureCatalogCache[url]) {
+    __giiNsdAttrezzatureCatalogCache[url] = (async () => {
+      const fl = await nsdGetFeatureLayerByUrl(url)
+      const res = await fl.queryFeatures({
+        where: '1=1',
+        outFields: ['codice_parametro', 'descrizione', 'categoria_parametro', 'attivo'],
+        returnGeometry: false
+      })
+      const out = new Map<string, string>()
+      ;(res?.features || []).forEach((f: any) => {
+        const a = f?.attributes || {}
+        const categoria = nsdAttrezzaturaKey(a?.categoria_parametro)
+        if (categoria && categoria !== 'ATTREZZATURA') return
+        if (a?.attivo != null && a?.attivo !== '' && !(a?.attivo === 1 || a?.attivo === true || /^(1|true|si|sì|yes)$/i.test(String(a?.attivo).trim()))) return
+        const codice = String(a?.codice_parametro ?? '').trim()
+        if (!codice) return
+        const descrizioneOrigine = String(a?.descrizione ?? codice).trim()
+        const label = nsdAttrezzaturaTipoLabel(`${codice} ${descrizioneOrigine}`) || descrizioneOrigine
+        out.set(codice, label)
+      })
+      return out
+    })().catch((err) => { delete __giiNsdAttrezzatureCatalogCache[url]; throw err })
   }
+  return __giiNsdAttrezzatureCatalogCache[url]
+}
+
+// Mappa riferimento_attrezzatura_id (codice catalogo, es. "ATT-002") -> etichetta leggibile
+// ("Curva di derivazione", numerata "(N)" se più unità dello stesso tipo compaiono nella
+// stessa pratica) per le sole attrezzature "recuperabile" — usata per suddividere nella tab
+// Nota spese le sotto-note di Art.30, una per attrezzatura.
+function nsdResolveRecuperabiliAttrezzatureLabels (rows: NsdDetailRow[], catalog: Map<string, string>): Map<string, string> {
+  const out = new Map<string, string>()
+  const seen = new Set<string>()
+  const items: { id: string, descrizione: string }[] = []
+  ;(rows || []).forEach(row => {
+    if (nsdNormalizeCasistica(row.codice_casistica) !== 'C104_ATTREZZATURE_DANNEGGIATE') return
+    const id = String(row.riferimento_attrezzatura_id || '').trim()
+    if (!id || seen.has(id)) return
+    seen.add(id)
+    items.push({ id, descrizione: catalog.get(id) || id })
+  })
   const totalsByDescrizione: Record<string, number> = {}
-  parsed.forEach(item => { if (!item.isTessera) totalsByDescrizione[item.descrizione] = (totalsByDescrizione[item.descrizione] || 0) + 1 })
+  items.forEach(it => { totalsByDescrizione[it.descrizione] = (totalsByDescrizione[it.descrizione] || 0) + 1 })
   const counters: Record<string, number> = {}
-  parsed.forEach(item => {
-    let label: string
-    if (item.isTessera) {
-      label = item.matricola ? `Tessera elettronica — Matricola ${item.matricola}` : 'Tessera elettronica'
-    } else if (totalsByDescrizione[item.descrizione] > 1) {
-      counters[item.descrizione] = (counters[item.descrizione] || 0) + 1
-      label = `${item.descrizione} (${counters[item.descrizione]})`
+  items.forEach(it => {
+    if (totalsByDescrizione[it.descrizione] > 1) {
+      counters[it.descrizione] = (counters[it.descrizione] || 0) + 1
+      out.set(it.id, `${it.descrizione} (${counters[it.descrizione]})`)
     } else {
-      label = item.descrizione
+      out.set(it.id, it.descrizione)
     }
-    out.set(item.id, label)
   })
   return out
 }
@@ -3570,20 +3608,6 @@ function nsdReadParentSummary (data: any): NsdSummary {
   }
 }
 
-function nsdSummaryHasValues (summary: NsdSummary): boolean {
-  return [
-    summary.totaleAT,
-    summary.totalePR,
-    summary.totaleRU,
-    summary.totaleSL,
-    summary.totalePF,
-    summary.totaleRA,
-    summary.importoSpeseGenerali,
-    summary.totaleComplessivo,
-    summary.percentualeSpeseGenerali
-  ].some(v => Number.isFinite(Number(v)) && Number(v) !== 0)
-}
-
 function nsdComputeSummaryFromRows (rows: NsdDetailRow[], perc: number): NsdSummary {
   const sumBy = (cat: NsdCategory) => nsdRound((rows || []).filter(r => r.categoria_costo === cat).reduce((s, r) => s + nsdSafeNum(r.importo_riga, 0), 0), 2)
   const totaleAT = sumBy('AT')
@@ -3599,23 +3623,6 @@ function nsdComputeSummaryFromRows (rows: NsdDetailRow[], perc: number): NsdSumm
   // generali: si somma al netto, direttamente nel totale complessivo.
   const totaleComplessivo = nsdRound(base + importoSpeseGenerali + totaleRA, 2)
   return { totaleAT, totalePR, totaleRU, totaleSL, totalePF, totaleRA, percentualeSpeseGenerali, importoSpeseGenerali, totaleComplessivo }
-}
-
-function nsdMergeSummary (parent: NsdSummary, computed: NsdSummary): NsdSummary {
-  if (nsdSummaryHasValues(parent)) {
-    return {
-      totaleAT: parent.totaleAT || computed.totaleAT,
-      totalePR: parent.totalePR || computed.totalePR,
-      totaleRU: parent.totaleRU || computed.totaleRU,
-      totaleSL: parent.totaleSL || computed.totaleSL,
-      totalePF: parent.totalePF || computed.totalePF,
-      totaleRA: parent.totaleRA || computed.totaleRA,
-      percentualeSpeseGenerali: parent.percentualeSpeseGenerali || computed.percentualeSpeseGenerali,
-      importoSpeseGenerali: parent.importoSpeseGenerali || computed.importoSpeseGenerali,
-      totaleComplessivo: parent.totaleComplessivo || computed.totaleComplessivo
-    }
-  }
-  return computed
 }
 
 // Una casistica nota spese è "compilata" se ha almeno una riga collegata, nessuna riga
@@ -3700,7 +3707,7 @@ async function nsdQueryRows (detailUrl: string, parentGlobalId: string): Promise
   })
 }
 
-function NotaSpeseDetailPanel (props: { data: any; detailUrl: string; hasSel: boolean; rows: NsdDetailRow[]; loading: boolean; error: string | null }) {
+function NotaSpeseDetailPanel (props: { data: any; detailUrl: string; hasSel: boolean; rows: NsdDetailRow[]; loading: boolean; error: string | null; attrezzatureCatalog: Map<string, string> }) {
   const parentGlobalId = String(nsdPickAttrCI(props.data, ['GlobalID', 'globalid']) || '').trim()
   // Righe e stato di caricamento arrivano ora dal parent (DetailTabsPanel), che le
   // carica eagerly ad ogni selezione record: serve per poter mostrare il numeratore
@@ -3717,7 +3724,7 @@ function NotaSpeseDetailPanel (props: { data: any; detailUrl: string; hasSel: bo
   const expectedCasistiche = React.useMemo(() => nsdExpectedCasisticheFromData(props.data || {}), [props.data])
 
   const noteGroups = React.useMemo(() => {
-    const attrezzatureLabels = nsdGetRecuperabiliAttrezzatureLabelsById(props.data || {})
+    const attrezzatureLabels = nsdResolveRecuperabiliAttrezzatureLabels(rows, props.attrezzatureCatalog || new Map())
     const byCode = new Map<string, NsdDetailRow[]>()
     const labelByCode = new Map<string, string>()
     ;(rows || []).forEach(row => {
@@ -3753,6 +3760,17 @@ function NotaSpeseDetailPanel (props: { data: any; detailUrl: string; hasSel: bo
       return { code, rows: groupRows, info: { ...info, label }, firstOrder, isExpectedMissing: expectedCasistiche.includes(baseCode) && groupRows.length === 0 }
     }).sort((a, b) => {
       if (a.info.order !== b.info.order) return a.info.order - b.info.order
+      // Entro lo stesso articolo (tipicamente Art.30): la nota condivisa "non recuperabile"
+      // (nessun suffisso ::riferimento nel code) va sempre prima delle note "recuperabile"
+      // (una per attrezzatura); tra queste ultime, ordine alfabetico per nome attrezzatura
+      // (già incluso nell'etichetta, col prefisso comune identico per ogni gruppo).
+      const aIsShared = !a.code.includes('::')
+      const bIsShared = !b.code.includes('::')
+      if (aIsShared !== bIsShared) return aIsShared ? -1 : 1
+      if (!aIsShared && !bIsShared) {
+        const labelDiff = a.info.label.localeCompare(b.info.label, 'it')
+        if (labelDiff !== 0) return labelDiff
+      }
       if (a.firstOrder !== b.firstOrder) return a.firstOrder - b.firstOrder
       return a.code.localeCompare(b.code)
     })
@@ -3813,7 +3831,7 @@ function NotaSpeseDetailPanel (props: { data: any; detailUrl: string; hasSel: bo
     return (
       <div style={{ display: 'grid', gap: 8 }}>
         <div style={{ padding: '8px 12px', borderRadius: 8, background: '#dbeafe', border: '1px solid #bfdbfe', color: '#1F4E79', fontSize: 12, fontWeight: 900, letterSpacing: 0.15, textTransform: 'uppercase' }}>
-          Risarcimento attrezzatura
+          Attrezzature
         </div>
         <div style={{ overflowX: 'auto', border: '1px solid #cbd5e1', borderRadius: 10, background: '#fff' }}>
           <table style={{ width: '100%', minWidth: 560, borderCollapse: 'collapse', fontSize: 12 }}>
@@ -4052,7 +4070,7 @@ function DetailTabsPanel (props: {
   tabs: TabConfig[]
   editConfig: any
   mapCfg: any
-  notaSpeseCfg: { detailUrl: string }
+  notaSpeseCfg: { detailUrl: string; attrezzatureParametriUrl: string }
   regolamentoCfg: { articoliUrl: string }
 }) {
   const { active, ui } = props
@@ -4248,6 +4266,22 @@ function DetailTabsPanel (props: {
     })()
     return () => { cancelled = true }
   }, [hasSel, nsdParentGlobalId, nsdDetailUrlForBadge, nsdRowsKey])
+
+  const nsdAttrezzatureParametriUrl = String(props.notaSpeseCfg?.attrezzatureParametriUrl || '')
+  const [nsdAttrezzatureCatalog, setNsdAttrezzatureCatalog] = React.useState<Map<string, string>>(new Map())
+  React.useEffect(() => {
+    if (!nsdAttrezzatureParametriUrl) { setNsdAttrezzatureCatalog(new Map()); return }
+    let cancelled = false
+    ;(async () => {
+      try {
+        const catalog = await nsdLoadAttrezzatureCatalog(nsdAttrezzatureParametriUrl)
+        if (!cancelled) setNsdAttrezzatureCatalog(catalog)
+      } catch {
+        if (!cancelled) setNsdAttrezzatureCatalog(new Map())
+      }
+    })()
+    return () => { cancelled = true }
+  }, [nsdAttrezzatureParametriUrl])
 
   const nsdExpectedCasisticheForBadge = React.useMemo(() => nsdExpectedCasisticheFromData(data || {}), [data])
   const nsdPercForBadge = React.useMemo(() => nsdReadParentSummary(data || {}).percentualeSpeseGenerali, [data])
@@ -5129,7 +5163,7 @@ if (!hasSel) {
         </div>
       )
     } else if (activeTab.id === 'nota_spese') {
-      content = <NotaSpeseDetailPanel data={data} detailUrl={String(props.notaSpeseCfg?.detailUrl || '')} hasSel={hasSel} rows={nsdRows} loading={nsdLoading} error={nsdError} />
+      content = <NotaSpeseDetailPanel data={data} detailUrl={String(props.notaSpeseCfg?.detailUrl || '')} hasSel={hasSel} rows={nsdRows} loading={nsdLoading} error={nsdError} attrezzatureCatalog={nsdAttrezzatureCatalog} />
     } else if (activeTab.id === 'mappa') {
       const dsAny: any = ds as any
       const mapLayerUrl = String(
@@ -5508,7 +5542,8 @@ const queryFields = React.useMemo(() => {
 				  tabs={detailTabs}
                   editConfig={editConfig}
                   notaSpeseCfg={{
-                    detailUrl: String((cfg as any).nsNotaSpeseDettaglioUrl || '')
+                    detailUrl: String((cfg as any).nsNotaSpeseDettaglioUrl || ''),
+                    attrezzatureParametriUrl: String((cfg as any).attrezzatureParametriUrl || '')
                   }}
                   regolamentoCfg={{
                     articoliUrl: String((cfg as any).regolamentoArticoliUrl || '')

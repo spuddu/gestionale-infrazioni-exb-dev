@@ -649,16 +649,6 @@ function baseWorkflowRoleForAlert (roleAreaKey: string): string {
   return roleAreaKey
 }
 
-function reportNumberForMessage (reportCode: string): string {
-  const raw = String(reportCode || '').trim()
-  return raw.replace(/^Rapporto\s*/i, '').trim() || raw || '—'
-}
-
-function isOfficeOriginReport (data: Record<string, any>): boolean {
-  const op = attr(data, ['origine_pratica'])
-  return String(op ?? '').trim() === '2'
-}
-
 function takeChargeTitleForMessage (label: string, row: Record<string, any>): string {
   const hay = `${label || ''} ${attr(row, ['tipo_attivita']) || ''} ${attr(row, ['sottotipo_attivita']) || ''} ${attr(row, ['titolo']) || ''} ${attr(row, ['messaggio']) || ''} ${attr(row, ['origine_evento']) || ''}`.toUpperCase()
   if (hay.includes('ATTESTAZIONE_CONFORMITA') || hay.includes('ATTESTAZIONE DI CONFORMIT')) return 'Attestazione di conformità apposta'
@@ -1003,45 +993,6 @@ function alertOutFieldsForLayer (layer: any): string[] {
   return out.length ? out : ['*']
 }
 
-function alertFieldMapForLayer (layer: any): Map<string, any> {
-  const fields = new Map<string, any>()
-  ;(Array.isArray(layer?.fields) ? layer.fields : []).forEach((f: any) => {
-    const name = String(f?.name || '').trim()
-    if (name) fields.set(name.toLowerCase(), f)
-  })
-  return fields
-}
-
-function alertRealFieldName (fields: Map<string, any>, name: string): string {
-  return String(fields.get(String(name || '').toLowerCase())?.name || '')
-}
-
-function alertIsStringField (field: any): boolean {
-  const t = String(field?.type || '').toLowerCase()
-  return t.includes('string') || t.includes('guid')
-}
-
-function alertSqlTakeChargeField (fields: Map<string, any>, name: string): string {
-  const real = alertRealFieldName(fields, name)
-  if (!real) return ''
-  const f = fields.get(real.toLowerCase())
-  if (alertIsStringField(f)) {
-    return `(${real} = '1' OR UPPER(${real}) LIKE '%DA_PRENDERE%' OR UPPER(${real}) LIKE '%PRESA_DA_FARE%')`
-  }
-  return `${real} = 1`
-}
-
-function alertTakeChargeCandidateWhere (layer: any, user?: GiiUserProfileForAlerts): string {
-  const fields = alertFieldMapForLayer(layer)
-  const roleAreaKey = roleAreaKeyForAlerts({}, { user })
-  const cfg = takeChargeConfigForRole(roleAreaKey)
-  if (!cfg) return ''
-  return cfg.fieldNames
-    .map(name => alertSqlTakeChargeField(fields, name))
-    .filter(Boolean)
-    .join(' OR ')
-}
-
 async function queryAllRows (layer: any, query: any, pageSize: number): Promise<Array<Record<string, any>>> {
   const rows: Array<Record<string, any>> = []
   let start = 0
@@ -1144,46 +1095,6 @@ export async function loadArchivedGiiAlertKeys (archiveTableUrl: string, usernam
   return keys
 }
 
-async function queryAlertCountOnly (layer: any, where: string): Promise<number> {
-  const q = {
-    where: where || '1=1',
-    returnGeometry: false
-  }
-
-  if (typeof layer.queryFeatureCount === 'function') {
-    const n = await layer.queryFeatureCount(q)
-    return Number.isFinite(Number(n)) ? Number(n) : 0
-  }
-
-  const res = await layer.queryFeatures({
-    ...q,
-    returnCountOnly: true,
-    outFields: ['OBJECTID']
-  })
-
-  const n = Number(res?.count ?? res?.features?.length ?? 0)
-  return Number.isFinite(n) ? n : 0
-}
-
-function countOnlyResult (count: number): GiiAlertQueryResult {
-  const n = Math.max(0, Number(count || 0))
-  return {
-    alerts: [],
-    archivedKeys: new Set<string>(),
-    counts: {
-      total: n,
-      red: 0,
-      orange: 0,
-      blue: n,
-      gray: 0,
-      scaduti: 0,
-      critici: 0,
-      inScadenza: 0,
-      informativi: 0
-    }
-  }
-}
-
 export interface GiiCurrentActivityQueryOptions {
   activityLayerUrl: string
   user: GiiUserProfileForAlerts
@@ -1195,10 +1106,6 @@ export interface GiiCurrentActivityQueryOptions {
 
 function giiSqlString (value: any): string {
   return String(value ?? '').replace(/'/g, "''")
-}
-
-function giiNonEmptyStringClause (field: string): string {
-  return `(${field} IS NOT NULL AND ${field} <> '')`
 }
 
 function activityRoleForUser (user?: GiiUserProfileForAlerts): string {
@@ -1365,16 +1272,6 @@ export async function queryGiiCurrentActivities (options: GiiCurrentActivityQuer
     archivedKeys,
     counts: summarizeGiiAlerts(alerts)
   }
-}
-
-export async function queryGiiTakeChargeAlertsFast (options: GiiAlertQueryOptions): Promise<GiiAlertQueryResult> {
-  const practiceLayer = await makeFeatureLayer(options.practiceLayerUrl)
-  const where = alertTakeChargeCandidateWhere(practiceLayer, options.user)
-
-  if (!where) return countOnlyResult(0)
-
-  const count = await queryAlertCountOnly(practiceLayer, where)
-  return countOnlyResult(count)
 }
 
 export async function queryGiiAlerts (options: GiiAlertQueryOptions): Promise<GiiAlertQueryResult> {

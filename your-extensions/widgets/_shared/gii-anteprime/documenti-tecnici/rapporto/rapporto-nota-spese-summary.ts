@@ -18,6 +18,7 @@ export type NotaSpeseConfig = {
   detailUrl?: string
   parametriUrl?: string
   parametroCode?: string
+  attrezzatureParametriUrl?: string
 }
 
 type Art30Row = { codice: string, descrizione: string, quantita: number, valoreUnitario: number | null, importo: number | null }
@@ -97,43 +98,88 @@ function countCauzioneDecurtataRowsForPdf (raw: any): number {
   return count
 }
 
-// Mappa ID persistito -> etichetta leggibile (matricola per le tessere, "Tipo (N)" per le
-// altre) per le sole attrezzature "Recuperabile" — usata per etichettare nel PDF le
-// sotto-note spese di Art.30, una per attrezzatura (rapporto 1 a 1).
-function getRecuperabiliAttrezzatureLabelsById (data: any): Map<string, string> {
+// Normalizzazione chiave e riconoscimento tipo attrezzatura: stessa logica di gii-editing-ti,
+// per restare coerenti sull'etichetta mostrata (es. "Curva di derivazione") a partire dal
+// codice/descrizione letti dal catalogo parametri.
+export function attrezzaturaKeyPdf (value: any): string {
+  return String(value ?? '')
+    .trim()
+    .toLocaleUpperCase('it-IT')
+    .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^A-Z0-9]+/g, '_')
+    .replace(/^_+|_+$/g, '')
+}
+
+export function attrezzaturaTipoLabelPdf (value: any): string | null {
+  const key = attrezzaturaKeyPdf(value)
+  if (!key) return null
+  if (key.includes('TESSERA')) return 'Tessera elettronica'
+  if (key.includes('CURV')) return 'Curva di derivazione'
+  if (key.includes('SIFON')) return 'Sifone'
+  if (key.includes('PARATOIA')) return 'Paratoia'
+  return null
+}
+
+// Catalogo attrezzature Art.30 (codice -> etichetta leggibile), dalla stessa tabella
+// parametri (categoria_parametro = 'ATTREZZATURA') già usata per la percentuale spese
+// generali — nessuna nuova configurazione necessaria, riusa parametriUrl.
+export async function loadAttrezzatureCatalogPdf (parametriUrl: string): Promise<Map<string, string>> {
   const out = new Map<string, string>()
-  const raw = String(pickAttrCI(data || {}, ['attrezzature_risarcimento_dettaglio']) || '')
-  type ParsedItem = { id: string, descrizione: string, isTessera: boolean, matricola: string }
-  const parsed: ParsedItem[] = []
-  for (const line of raw.split(/\r?\n/)) {
-    const text = line.trim()
-    if (!text) continue
-    const statoMatch = text.match(/Stato:\s*(Non recuperabile|Recuperabile)/i)
-    if (!statoMatch || !/^recuperabile$/i.test(statoMatch[1].trim())) continue
-    const idMatch = text.match(/\u2014\s*ID:\s*([0-9]+)/i)
-    if (!idMatch) continue
-    const cutIdx = text.search(/\s+\u2014\s+Valore unitario:/i)
-    const prefix = cutIdx >= 0 ? text.slice(0, cutIdx).trim() : text
-    const codiceMatch = prefix.match(/^(.*?)\s+\u2014\s+Codice:\s*(.+)$/i)
-    const descrizione = String(codiceMatch?.[1] || prefix).trim()
-    const isTessera = /tessera/i.test(descrizione)
-    const matricolaMatch = text.match(/Matricola:\s*([^\u2014]+?)(?=\s+\u2014|$)/i)
-    parsed.push({ id: String(idMatch[1]), descrizione, isTessera, matricola: String(matricolaMatch?.[1] || '').trim() })
+  if (!parametriUrl) return out
+  try {
+    const pfl = await ensureCachedFeatureLayer(parametriUrl)
+    if (!pfl) return out
+    const res = await pfl.queryFeatures({
+      where: "categoria_parametro = 'ATTREZZATURA'",
+      outFields: ['codice_parametro', 'descrizione', 'attivo'],
+      returnGeometry: false
+    })
+    ;(res?.features || []).forEach((f: any) => {
+      const a = f?.attributes || {}
+      if (a?.attivo != null && a?.attivo !== '' && !(a?.attivo === 1 || a?.attivo === true || /^(1|true|si|s\u00ec|yes)$/i.test(String(a?.attivo).trim()))) return
+      const codice = String(a?.codice_parametro ?? '').trim()
+      if (!codice) return
+      const descrizioneOrigine = String(a?.descrizione ?? codice).trim()
+      out.set(codice, attrezzaturaTipoLabelPdf(`${codice} ${descrizioneOrigine}`) || descrizioneOrigine)
+    })
+  } catch { /* nessun catalogo disponibile: le note recuperabili mostreranno solo il titolo generico */ }
+  return out
+}
+
+// Estrae il codice tipo (es. "ATT-003") dall'ID istanza composto (es. "ATT-003::ms488i9r2z8"),
+// stessa logica di attrezzaturaInstanceTipoCode in gii-editing-ti.
+export function attrezzaturaInstanceTipoCodePdf (instanceId: string): string {
+  const idx = String(instanceId || '').indexOf('::')
+  return idx >= 0 ? instanceId.slice(0, idx) : String(instanceId || '')
+}
+
+// Mappa riferimento_attrezzatura_id (codice catalogo) -> etichetta leggibile ("Curva di
+// derivazione", numerata "(N)" se più unità dello stesso tipo compaiono nella stessa
+// pratica) per le sole attrezzature "recuperabile" — usata per etichettare nel PDF le
+// sotto-note spese di Art.30, una per attrezzatura (rapporto 1 a 1).
+export function getRecuperabiliAttrezzatureLabelsById (rowsByCategory: Record<NsCat, NsRow[]>, catalog: Map<string, string>): Map<string, string> {
+  const out = new Map<string, string>()
+  const seen = new Set<string>()
+  const items: { id: string, descrizione: string }[] = []
+  for (const cat of NS_CATS) {
+    for (const row of (rowsByCategory?.[cat] || [])) {
+      if (normalizeNsCasistica(row.codice_casistica) !== 'C104_ATTREZZATURE_DANNEGGIATE') continue
+      const id = String(row.riferimento_attrezzatura_id || '').trim()
+      if (!id || seen.has(id)) continue
+      seen.add(id)
+      items.push({ id, descrizione: catalog.get(attrezzaturaInstanceTipoCodePdf(id)) || id })
+    }
   }
   const totalsByDescrizione: Record<string, number> = {}
-  parsed.forEach(item => { if (!item.isTessera) totalsByDescrizione[item.descrizione] = (totalsByDescrizione[item.descrizione] || 0) + 1 })
+  items.forEach(item => { totalsByDescrizione[item.descrizione] = (totalsByDescrizione[item.descrizione] || 0) + 1 })
   const counters: Record<string, number> = {}
-  parsed.forEach(item => {
-    let label: string
-    if (item.isTessera) {
-      label = item.matricola ? `Tessera elettronica \u2014 Matricola ${item.matricola}` : 'Tessera elettronica'
-    } else if (totalsByDescrizione[item.descrizione] > 1) {
+  items.forEach(item => {
+    if (totalsByDescrizione[item.descrizione] > 1) {
       counters[item.descrizione] = (counters[item.descrizione] || 0) + 1
-      label = `${item.descrizione} (${counters[item.descrizione]})`
+      out.set(item.id, `${item.descrizione} (${counters[item.descrizione]})`)
     } else {
-      label = item.descrizione
+      out.set(item.id, item.descrizione)
     }
-    out.set(item.id, label)
   })
   return out
 }
@@ -187,8 +233,8 @@ export function buildArt30RapportoSummary (data: Record<string, any>): Art30Summ
   }
 }
 
-function normalizeNsCasistica (v: any): string { return String(v ?? '').trim() }
-function cloneEmptyNsRows (): Record<NsCat, NsRow[]> { return { AT: [], PR: [], RU: [], SL: [], PF: [], RA: [] } }
+export function normalizeNsCasistica (v: any): string { return String(v ?? '').trim() }
+export function cloneEmptyNsRows (): Record<NsCat, NsRow[]> { return { AT: [], PR: [], RU: [], SL: [], PF: [], RA: [] } }
 
 export function buildNsSummaryForRows (rows: Record<NsCat, NsRow[]>, percentualeSpeseGenerali: number): NsSummary {
   const sumCat = (cat: NsCat) => roundMoney((rows[cat] || []).reduce((sum, r) => sum + roundMoney(Number(r.importo_riga) || 0), 0))
@@ -212,9 +258,9 @@ export function buildNsSummaryForRows (rows: Record<NsCat, NsRow[]>, percentuale
 export function buildNotaSpeseGroups (
   rowsByCategory: Record<NsCat, NsRow[]> | undefined,
   globalSummary: NsSummary | undefined,
-  dataSnapshot?: Record<string, any>
+  attrezzatureCatalog?: Map<string, string>
 ): NsGroup[] {
-  const attrezzatureLabels = getRecuperabiliAttrezzatureLabelsById(dataSnapshot || {})
+  const attrezzatureLabels = getRecuperabiliAttrezzatureLabelsById(rowsByCategory || cloneEmptyNsRows(), attrezzatureCatalog || new Map())
   const byCode = new Map<string, Record<NsCat, NsRow[]>>()
   const labelByCode = new Map<string, string>()
   for (const cat of NS_CATS) {
@@ -228,7 +274,7 @@ export function buildNotaSpeseGroups (
         if (cat === 'RA') {
           // Risarcimento (non recuperabile): l'etichetta usa la descrizione già salvata
           // sulla riga stessa, non la mappa delle recuperabili (che non la contiene).
-          labelByCode.set(code, `${baseLabel} \u2014 Risarcimento attrezzatura non recuperabile: ${row.descrizione_snapshot}`)
+          labelByCode.set(code, `${baseLabel} \u2014 Attrezzature: ${row.descrizione_snapshot}`)
         } else if (!labelByCode.has(code)) {
           const attrLabel = attrezzatureLabels.get(riferimentoId)
           labelByCode.set(code, attrLabel ? `${baseLabel} \u2014 Rimborso spese riparazione ${attrLabel}` : baseLabel)
@@ -250,15 +296,19 @@ export function buildNotaSpeseGroups (
     }
   })
   groups.sort((a, b) => {
-    // Il risarcimento attrezzature (Art.30, non recuperabili) va sempre per primo,
-    // prima di qualunque altra nota spese, indipendentemente dall'articolo di riferimento.
-    const aIsRisarcimento = (a.rows.RA || []).length > 0
-    const bIsRisarcimento = (b.rows.RA || []).length > 0
-    if (aIsRisarcimento !== bIsRisarcimento) return aIsRisarcimento ? -1 : 1
     const codeA = a.codiceCasistica.split('::')[0]
     const codeB = b.codiceCasistica.split('::')[0]
+    // Prima per numero di articolo, sempre — anche per Art.30, che non va mai anteposto
+    // ad articoli con numero inferiore solo perché è il risarcimento attrezzature.
     const orderDiff = (NS_CASISTICA_META[codeA]?.order ?? 999) - (NS_CASISTICA_META[codeB]?.order ?? 999)
-    return orderDiff !== 0 ? orderDiff : a.label.localeCompare(b.label, 'it')
+    if (orderDiff !== 0) return orderDiff
+    // Stesso articolo (tipicamente Art.30): la nota condivisa "non recuperabile" va prima
+    // di quelle "recuperabile"; tra le recuperabili, ordine alfabetico per nome attrezzatura
+    // (già incluso nell'etichetta, col prefisso comune identico per ogni gruppo).
+    const aIsNonRecuperabile = (a.rows.RA || []).length > 0
+    const bIsNonRecuperabile = (b.rows.RA || []).length > 0
+    if (aIsNonRecuperabile !== bIsNonRecuperabile) return aIsNonRecuperabile ? -1 : 1
+    return a.label.localeCompare(b.label, 'it')
   })
   return groups
 }
@@ -266,12 +316,12 @@ export function buildNotaSpeseGroups (
 export function buildNotaSpesePrintGroups (
   rowsByCategory: Record<NsCat, NsRow[]> | undefined,
   globalSummary: NsSummary | undefined,
-  dataSnapshot: Record<string, any> | undefined
+  attrezzatureCatalog?: Map<string, string>
 ): NsGroup[] {
   // Il risarcimento attrezzature (RA) è ormai una categoria reale con righe vere in
   // buildNotaSpeseGroups (ordinata sempre per prima): non serve più costruire qui un
   // gruppo sintetico/vuoto solo per far comparire una pagina PDF.
-  return buildNotaSpeseGroups(rowsByCategory, globalSummary, dataSnapshot)
+  return buildNotaSpeseGroups(rowsByCategory, globalSummary, attrezzatureCatalog)
 }
 
 function escapeSqlString (v: any): string { return String(v ?? '').replace(/'/g, "''") }
@@ -291,8 +341,8 @@ function parentGlobalidWhere (parentGlobalId: string): string {
 export async function queryNotaSpeseRowsForPractice (
   data: Record<string, any>,
   config?: NotaSpeseConfig
-): Promise<{ rowsByCategory: Record<NsCat, NsRow[]>, percentualeSpeseGenerali: number }> {
-  const empty = { rowsByCategory: cloneEmptyNsRows(), percentualeSpeseGenerali: 15 }
+): Promise<{ rowsByCategory: Record<NsCat, NsRow[]>, percentualeSpeseGenerali: number, attrezzatureCatalog: Map<string, string> }> {
+  const empty = { rowsByCategory: cloneEmptyNsRows(), percentualeSpeseGenerali: 15, attrezzatureCatalog: new Map<string, string>() }
   const detailUrl = String(config?.detailUrl || '').trim()
   if (!detailUrl || !data) return empty
   const parentGlobalId = String(pickAttrCI(data, ['GlobalID', 'globalid', 'GLOBALID', 'global_id']) || '').trim()
@@ -319,15 +369,16 @@ export async function queryNotaSpeseRowsForPractice (
         return (pVal != null) ? (Number(pVal) || 15) : 15
       } catch { return 15 }
     })()
+    const catalogPromise = loadAttrezzatureCatalogPdf(String(config?.attrezzatureParametriUrl || '').trim())
 
-    const [rawRows, pct] = await Promise.all([detailPromise, percPromise])
+    const [rawRows, pct, attrezzatureCatalog] = await Promise.all([detailPromise, percPromise, catalogPromise])
     const rowsByCategory = cloneEmptyNsRows()
     for (const attrs of rawRows as any[]) {
       const cat = String(pickAttrCI(attrs, ['categoria_costo']) || '').trim() as NsCat
       if (!NS_CATS.includes(cat)) continue
       rowsByCategory[cat].push(attrs as NsRow)
     }
-    return { rowsByCategory, percentualeSpeseGenerali: Number(pct) || 15 }
+    return { rowsByCategory, percentualeSpeseGenerali: Number(pct) || 15, attrezzatureCatalog }
   } catch {
     return empty
   }
@@ -344,14 +395,14 @@ export async function queryNotaSpeseRowsForPractice (
 export function applyNotaSpeseQueryResultToRapportoMap (
   map: Record<string, string>,
   data: Record<string, any>,
-  queryResult: { rowsByCategory: Record<NsCat, NsRow[]>, percentualeSpeseGenerali: number },
+  queryResult: { rowsByCategory: Record<NsCat, NsRow[]>, percentualeSpeseGenerali: number, attrezzatureCatalog?: Map<string, string> },
   docOptions: { includeNotaSpese?: boolean, selectedNotaSpeseKeys?: Record<string, boolean> }
 ): { allGroups: NsGroup[], selectedGroups: NsGroup[] } {
-  const { rowsByCategory, percentualeSpeseGenerali } = queryResult
+  const { rowsByCategory, percentualeSpeseGenerali, attrezzatureCatalog } = queryResult
   const globalSummary = buildNsSummaryForRows(rowsByCategory, percentualeSpeseGenerali)
-  const nsGroups = buildNotaSpeseGroups(rowsByCategory, globalSummary, data)
+  const nsGroups = buildNotaSpeseGroups(rowsByCategory, globalSummary, attrezzatureCatalog)
   const art30Summary = buildArt30RapportoSummary(data || {})
-  const allGroups = buildNotaSpesePrintGroups(rowsByCategory, globalSummary, data)
+  const allGroups = buildNotaSpesePrintGroups(rowsByCategory, globalSummary, attrezzatureCatalog)
   const selectedNotaSpeseKeys = docOptions.selectedNotaSpeseKeys || {}
   const includeNotaSpese = docOptions.includeNotaSpese !== false
   const selectedGroups = !includeNotaSpese ? [] : allGroups.filter(group => selectedNotaSpeseKeys[group.codiceCasistica] !== false)

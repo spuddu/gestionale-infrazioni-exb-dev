@@ -46,7 +46,7 @@ type NsSummary = {
 }
 
 const NS_CATEGORY_LABELS: Record<NsCategory, string> = {
-  RA: 'Risarcimento attrezzature non recuperabili',
+  RA: 'Attrezzature',
   AT: 'Attrezzature e trasporti',
   PR: 'Materiali da costruzione',
   RU: 'Risorse umane',
@@ -318,11 +318,6 @@ function rightAligned(
   pg.drawText(clean, { x: xLeft + colW - w - (pad ?? 4), y, size, font, color })
 }
 
-function truncate(s: string, maxChars: number): string {
-  if (!s || s.length <= maxChars) return s || ''
-  return s.substring(0, maxChars - 1) + '\u2026'
-}
-
 /** Word-wrap: spezza testo in righe che entrano nella larghezza data */
 function wrapText(s: string, font: PDFFont, size: number, maxW: number): string[] {
   const clean = cleanText(s || '')
@@ -547,9 +542,23 @@ export async function buildNotaSpesePdf(data: NotaSpeseData): Promise<Uint8Array
     top += ROW_H + 10
   }
 
+  /* ---- Attrezzature non recuperabili (RA): prezzo secco dell'attrezzatura, non un
+     intervento manutentivo — titolo dedicato, separato da quello delle voci ordinarie ---- */
+
+  const raRows = (data.rows.RA || []).slice().sort((a, b) => a.ordine - b.ordine)
+
+  if (raRows.length > 0) {
+    const firstRaRow = raRows[0]
+    const firstRaCodeLines = wrapText(firstRaRow.codice_voce_snapshot, fontR, 7.5, CW_CODICE - 6)
+    const firstRaDescLines = wrapText(firstRaRow.descrizione_snapshot, fontR, 7.5, CW_DESC - 6)
+    const firstRaRowH = Math.max(ROW_H, firstRaCodeLines.length * 10 + 6, firstRaDescLines.length * 10 + 6)
+    ensureSpace(SUPER_HDR_H + HDR_H + COL_HDR_H + firstRaRowH + ROW_H + 24)
+    drawSuperTitle('COSTO ATTREZZATURE NON RECUPERABILI')
+  }
+
   /* ---- Voci connesse all'intervento sul campo ---- */
 
-  const ordinaryCategories = CATEGORY_ORDER.filter(cat => (data.rows[cat] || []).length > 0)
+  const ordinaryCategories = CATEGORY_ORDER.filter(cat => cat !== 'RA' && (data.rows[cat] || []).length > 0)
 
   if (ordinaryCategories.length > 0) {
     const firstCatRows = (data.rows[ordinaryCategories[0]] || []).slice().sort((a, b) => a.ordine - b.ordine)

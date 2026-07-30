@@ -26,66 +26,6 @@ function normalizeUrl(raw: any): string {
   } catch { return '' }
 }
 
-const ROLE_NUM_TO_CODE: Record<number, string> = { 1: 'TR', 2: 'TI', 3: 'RZ', 4: 'RI', 5: 'DT', 6: 'DA', 7: 'ADMIN' }
-const AREA_NUM_TO_CODE: Record<number, string> = { 1: 'AMM', 2: 'AGR', 3: 'TEC' }
-const SETTORE_NUM_TO_CODE: Record<number, string> = { 1: 'CR', 2: 'GI', 3: 'D1', 4: 'D2', 5: 'D3', 6: 'D4', 7: 'D5', 8: 'D6', 9: 'DS' }
-
-function normalizeCode(raw: any): string {
-  return String(raw ?? '').trim().toUpperCase()
-}
-
-function normalizeRoleCode(...values: any[]): string {
-  for (const value of values) {
-    const code = normalizeCode(value)
-    if (!code) continue
-    if (/^\d+$/.test(code)) {
-      const mapped = ROLE_NUM_TO_CODE[Number(code)]
-      if (mapped) return mapped
-    }
-    if (['TR', 'TI', 'RZ', 'RI', 'DT', 'DA', 'ADMIN', 'RI_AMM', 'TI_AMM'].includes(code)) return code
-    if (/(^|[^A-Z])ADMIN([^A-Z]|$)/.test(code)) return 'ADMIN'
-    if (/(^|[^A-Z])RI_AMM([^A-Z]|$)/.test(code)) return 'RI_AMM'
-    if (/(^|[^A-Z])TI_AMM([^A-Z]|$)/.test(code)) return 'TI_AMM'
-    if (/(^|[^A-Z])RI([^A-Z]|$)/.test(code)) return 'RI'
-  }
-  return ''
-}
-
-function normalizeAreaCode(...values: any[]): string {
-  for (const value of values) {
-    const code = normalizeCode(value)
-    if (!code) continue
-    if (/^\d+$/.test(code)) {
-      const mapped = AREA_NUM_TO_CODE[Number(code)]
-      if (mapped) return mapped
-    }
-    if (['AMM', 'AGR', 'TEC'].includes(code)) return code
-  }
-  return ''
-}
-
-function normalizeSettoreCode(...values: any[]): string {
-  for (const value of values) {
-    const code = normalizeCode(value)
-    if (!code) continue
-    if (/^\d+$/.test(code)) {
-      const mapped = SETTORE_NUM_TO_CODE[Number(code)]
-      if (mapped) return mapped
-    }
-    if (code === 'CS') return 'DS'
-    if (['CR', 'GI', 'D1', 'D2', 'D3', 'D4', 'D5', 'D6', 'DS'].includes(code)) return code
-  }
-  return ''
-}
-
-function getNormalizedGiiUserContext(): { ruoloCod: string, areaCod: string, settoreCod: string } {
-  const u: any = (window as any).__giiUserRole || {}
-  return {
-    ruoloCod: normalizeRoleCode(u?.ruoloCod, u?.ruolo_cod, u?.ruoloLabel, u?.ruolo),
-    areaCod: normalizeAreaCode(u?.areaCod, u?.area_cod, u?.areaLabel, u?.area),
-    settoreCod: normalizeSettoreCode(u?.settoreCod, u?.settore_cod, u?.settoreLabel, u?.settore)
-  }
-}
 
 function normalizeGiiAccessCode(v: any): string {
   return String(v ?? '').trim().toUpperCase().replace(/-/g, '_')
@@ -202,7 +142,6 @@ function normalizeFamily(v: any): string {
 }
 function familyLabel(v: any): string { return normalizeFamily(v) || 'AT' }
 function familyDisplay(v: any): string { const code = familyLabel(v); return `${FAMILY_DESCRIPTIONS[code] || code} (${code})` }
-function familyOptionLabel(v: any): string { const code = familyLabel(v); return FAMILY_DESCRIPTIONS[code] || code }
 function normalizeOrigin(v: any): number {
   const s = upper(v)
   if (s === 'REGIONALE' || s === 'REGIONE' || s === '1') return 1
@@ -270,14 +209,6 @@ function parseProgressivoFromCode(code: any): string {
   return m?.[1] || ''
 }
 
-function nextCode4(values: string[]): string {
-  let maxVal = 0
-  values.forEach((v) => {
-    const n = num(pad4(v))
-    if (n > maxVal) maxVal = n
-  })
-  return pad4(maxVal + 1)
-}
 function uniqueSortedCodes(values: any[]): string[] {
   return Array.from(new Set((values || []).map((v) => pad4(v)).filter((v) => !!v && v !== '0000'))).sort()
 }

@@ -21,20 +21,6 @@ function toImmutableCfg(base:any, patch:Record<string, any>) {
   return next
 }
 
-function parseCoordInput(raw:any): number {
-  const s = String(raw ?? '').trim()
-  if (!s) return 0
-  const normalized = s.replace(/\s+/g, '').replace(',', '.')
-  const n = Number(normalized)
-  return Number.isFinite(n) ? n : 0
-}
-
-function formatCoordInput(v:any): string {
-  if (v == null) return ''
-  if (typeof v === 'number') return Number.isFinite(v) ? String(v) : ''
-  return String(v).trim()
-}
-
 function getSchemaSnapshot(dsId: string) {
   const ds: any = dsId ? DataSourceManager.getInstance().getDataSource(dsId) : null
   const url = String(ds?.getDataSourceJson?.()?.url || ds?.dataSourceJson?.url || '').trim()

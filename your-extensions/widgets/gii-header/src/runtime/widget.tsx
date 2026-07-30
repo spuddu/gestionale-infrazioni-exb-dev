@@ -295,37 +295,6 @@ function getSettoreLabel(user: GiiUserRole | null, compact = false): string {
   return SETTORE_FULL[code] || code
 }
 
-function getOrganizationalHierarchy(user: GiiUserRole | null, compact = false): string[] {
-  if (!user || user.isWorkflowAdmin) return []
-
-  const role = normCode(user.ruoloCod || user.ruoloLabel || (user.ruolo != null ? RUOLO_LABEL[user.ruolo] : ''))
-  const area = getAreaLabel(user)
-  const settore = getSettoreLabel(user, compact)
-
-  // Sintesi per menu account:
-  // - RI, DT e DA si leggono a livello di Area.
-  // - TI e RZ si leggono a livello di Settore.
-  // - Ufficio non viene mostrato nella sintesi account per evitare una gerarchia troppo lunga.
-  if (['RI', 'DT', 'DA'].includes(role)) {
-    return area ? [`Area ${area}`] : []
-  }
-
-  if (['TI', 'RZ', 'TR'].includes(role)) {
-    return settore ? [`Settore ${settore}`] : []
-  }
-
-  return area ? [`Area ${area}`] : []
-}
-
-function makeInitials(name: string): string {
-  const s = String(name || '').trim()
-  if (!s) return '?'
-  const parts = s.split(/\s+/).filter(Boolean)
-  const a = (parts[0]?.[0] || '?').toUpperCase()
-  const b = (parts.length > 1 ? parts[parts.length - 1]?.[0] : '')
-  return (a + (b ? b.toUpperCase() : '')).slice(0, 2)
-}
-
 async function loadUser(): Promise<GiiUserRole | null> {
   const cached = (window as any).__giiUserRole
   if (cached?.username) {
@@ -880,10 +849,6 @@ function normalizeUsernameLookupKey (value: any): string {
   return text.replace(/^.*\|/, '')
 }
 
-function escapeSqlLiteral (value: string): string {
-  return String(value || '').replace(/'/g, "''")
-}
-
 function alertIsTiOrigin (alert: GiiAlertItem | null | undefined): boolean {
   const values = [
     alert?.reportCode,
@@ -1283,30 +1248,6 @@ function alertSenderRoleCode (alert: GiiAlertItem | null | undefined): string {
   )
 }
 
-function alertSenderRoleContext (alert: GiiAlertItem | null | undefined): string {
-  const role = alertSenderRoleCode(alert)
-  const office = officeRefFromAlert(alert)
-  const sector = settoreFullLabelFromAlert(alert)
-  const area = areaRefFromAlert(alert)
-
-  if (role === 'TR') return office ? `Tecnico rilevatore - ${office}` : 'Tecnico rilevatore'
-  if (role === 'TI') return office ? `Tecnico istruttore - ${office}` : 'Tecnico istruttore'
-  if (role === 'RZ') return sector ? `Capo Settore ${sector}` : 'Capo Settore'
-  if (role === 'RI') return area ? `Responsabile istruttoria - ${area}` : 'Responsabile istruttoria'
-  if (role === 'DT') return area ? `Direttore - ${area}` : 'Direttore d’Area'
-  if (role === 'TI_AMM') return 'Tecnico istruttore amministrativo'
-  if (role === 'RI_AMM') return 'Responsabile istruttoria amministrativa'
-  if (role === 'DA') return 'Direttore Area AA. GG. e P.F.'
-
-  const fallback = roleLabelForBody(
-    alertSenderFromMessage(alert as any) ||
-    alertSenderFallbackFromActivitySubtype(alert as any) ||
-    alertSenderFallbackFromTitle(alert as any) ||
-    alertRoleLabelFromGiiActor(firstNonEmptyAlertRawValue(alert, ['GII_da', 'gii_da']))
-  )
-  return fallback
-}
-
 function alertActorRoleForBody (alert: GiiAlertItem | null | undefined): string {
   const role = alertSenderRoleCode(alert)
   const office = officeRefFromAlert(alert)
@@ -1328,11 +1269,6 @@ function alertActorRoleForBody (alert: GiiAlertItem | null | undefined): string 
     alertSenderFallbackFromTitle(alert as any) ||
     alertRoleLabelFromGiiActor(firstNonEmptyAlertRawValue(alert, ['GII_da', 'gii_da']))
   )
-}
-
-function alertActorPhrase (alert: GiiAlertItem | null | undefined, fallbackRole = 'mittente'): string {
-  const role = alertActorRoleForBody(alert) || fallbackRole
-  return `Il ${role}`
 }
 
 function parseUsernameFromGiiActorLabel (value: any): string {
@@ -1500,15 +1436,6 @@ function alertRoleLabelFromGiiActor (value: string): string {
   return ''
 }
 
-function alertSenderFallbackFromRoutingFields (alert: GiiAlertItem): string {
-  const giiDa = firstNonEmptyAlertRawValuePracticeFirst(alert, ['GII_da', 'gii_da'])
-  const fromGiiDa = alertRoleLabelFromGiiActor(giiDa)
-  if (fromGiiDa) return fromGiiDa
-
-  const creator = firstNonEmptyAlertRawValuePracticeFirst(alert, ['creato_da', 'aggiornato_da'])
-  return alertRoleLabelFromGiiActor(creator)
-}
-
 function alertSenderLine (alert: GiiAlertItem): string {
   if (!alertIsStandardWorkflowAlert(alert)) return 'Mittente: Sistema'
 
@@ -1636,18 +1563,6 @@ function attrValueCi (attrs: Record<string, any>, names: string[]): any {
     if (v !== undefined) return v
   }
   return null
-}
-
-function cleanUserDisplayName (value: any, username?: any): string {
-  const text = String(value ?? '').trim().replace(/\s+/g, ' ')
-  if (!text) return ''
-  if (looksLikeGiiRoleLabel(text) || looksLikeGiiRoleCode(text)) return ''
-  const user = String(username ?? '').trim()
-  if (user && normalizeUsernameLookupKey(text) === normalizeUsernameLookupKey(user)) return ''
-  const compactText = text.toLowerCase().replace(/[\s._-]+/g, '')
-  const compactUser = user.toLowerCase().replace(/[\s._-]+/g, '')
-  if (compactUser && compactText === compactUser) return ''
-  return text
 }
 
 function cleanResolvedUserFullName (value: any, username?: any): string {

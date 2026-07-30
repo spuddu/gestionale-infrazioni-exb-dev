@@ -15,8 +15,18 @@ import { filterGiiAttachmentsForTechnicalRoles, getGiiAttachmentKind, isGiiSpeci
 import { parseNorma3Codes } from './req-point'
 import { buildFascicolo } from './fascicolo-builder'
 import type { NotaSpeseConfig } from './documenti-tecnici/rapporto/rapporto-nota-spese-summary'
-import { queryNotaSpeseRowsForPractice } from './documenti-tecnici/rapporto/rapporto-nota-spese-summary'
+import {
+  queryNotaSpeseRowsForPractice,
+  buildNotaSpeseGroups,
+  buildNotaSpesePrintGroups,
+  buildNsSummaryForRows,
+  normalizeNsCasistica,
+  cloneEmptyNsRows,
+  loadAttrezzatureCatalogPdf,
+  NS_CASISTICA_META
+} from './documenti-tecnici/rapporto/rapporto-nota-spese-summary'
 import { FASCICOLO_MAP_DEFAULTS, DEFAULT_PRINT_SERVICE_URL } from './fascicolo-map-defaults'
+import { ensureCachedFeatureLayer } from './esri-layer-cache'
 
 const GII_UTENTI_URL = 'https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_utenti/FeatureServer/0'
 
@@ -275,13 +285,6 @@ function documentOptionsMemoryKey (oid?: number | null, data?: Record<string, an
 const NS_CATS: NsCat[] = ['AT', 'PR', 'RU', 'SL', 'PF', 'RA']
 const EMPTY_NS_ROWS: Record<NsCat, NsRowP[]> = { AT: [], PR: [], RU: [], SL: [], PF: [], RA: [] }
 
-const NS_CASISTICA_META: Record<string, { order: number; label: string }> = {
-  C100_REPERIBILITA: { order: 8, label: 'Art. 8 - Violazione servizio di reperibilità' },
-  C101_SPRECO_ACQUA: { order: 27, label: 'Art. 27 - Spreco d’acqua/uso negligente della risorsa idrica' },
-  C104_ATTREZZATURE_DANNEGGIATE: { order: 30, label: 'Art. 30 - Danneggiamento e/o perdita attrezzature' },
-  C113_DANNI_STRUTTURE_IRRIGUE: { order: 39, label: 'Art. 39 - Danni alle strutture irrigue' }
-}
-
 function roundMoney (v: number): number {
   if (!Number.isFinite(v)) return 0
   const sign = v < 0 ? -1 : 1
@@ -349,47 +352,6 @@ function countCauzioneDecurtataRowsForPdf (raw: any): number {
   return count
 }
 
-// Mappa ID persistito -> etichetta leggibile (matricola per le tessere, "Tipo (N)" per le
-// altre) per le sole attrezzature "Recuperabile" — usata per etichettare nel PDF le
-// sotto-note spese di Art.30, una per attrezzatura (rapporto 1 a 1).
-function getRecuperabiliAttrezzatureLabelsById (data: any): Map<string, string> {
-  const out = new Map<string, string>()
-  const raw = String(pickAttrCI(data || {}, ['attrezzature_risarcimento_dettaglio']) || '')
-  type ParsedItem = { id: string, descrizione: string, isTessera: boolean, matricola: string }
-  const parsed: ParsedItem[] = []
-  for (const line of raw.split(/\r?\n/)) {
-    const text = line.trim()
-    if (!text) continue
-    const statoMatch = text.match(/Stato:\s*(Non recuperabile|Recuperabile)/i)
-    if (!statoMatch || !/^recuperabile$/i.test(statoMatch[1].trim())) continue
-    const idMatch = text.match(/—\s*ID:\s*([0-9]+)/i)
-    if (!idMatch) continue
-    const cutIdx = text.search(/\s+—\s+Valore unitario:/i)
-    const prefix = cutIdx >= 0 ? text.slice(0, cutIdx).trim() : text
-    const codiceMatch = prefix.match(/^(.*?)\s+—\s+Codice:\s*(.+)$/i)
-    const descrizione = String(codiceMatch?.[1] || prefix).trim()
-    const isTessera = /tessera/i.test(descrizione)
-    const matricolaMatch = text.match(/Matricola:\s*([^—]+?)(?=\s+—|$)/i)
-    parsed.push({ id: String(idMatch[1]), descrizione, isTessera, matricola: String(matricolaMatch?.[1] || '').trim() })
-  }
-  const totalsByDescrizione: Record<string, number> = {}
-  parsed.forEach(item => { if (!item.isTessera) totalsByDescrizione[item.descrizione] = (totalsByDescrizione[item.descrizione] || 0) + 1 })
-  const counters: Record<string, number> = {}
-  parsed.forEach(item => {
-    let label: string
-    if (item.isTessera) {
-      label = item.matricola ? `Tessera elettronica — Matricola ${item.matricola}` : 'Tessera elettronica'
-    } else if (totalsByDescrizione[item.descrizione] > 1) {
-      counters[item.descrizione] = (counters[item.descrizione] || 0) + 1
-      label = `${item.descrizione} (${counters[item.descrizione]})`
-    } else {
-      label = item.descrizione
-    }
-    out.set(item.id, label)
-  })
-  return out
-}
-
 function qtyArt30It (value: number): string {
   return Number(value).toLocaleString('it-IT', { minimumFractionDigits: 0, maximumFractionDigits: 4 })
 }
@@ -444,109 +406,6 @@ function buildArt30RapportoSummary (data: Record<string, any>): { hasData: boole
     netto,
     text: `Art. 30 - ${parts.join('; ')}.`
   }
-}
-
-function normalizeNsCasistica (v: any): string {
-  return String(v ?? '').trim()
-}
-
-function cloneEmptyNsRows (): Record<NsCat, NsRowP[]> {
-  return { AT: [], PR: [], RU: [], SL: [], PF: [], RA: [] }
-}
-
-function buildNsSummaryForRows (rows: Record<NsCat, NsRowP[]>, percentualeSpeseGenerali: number): NsSummaryP {
-  const sumCat = (cat: NsCat) => roundMoney((rows[cat] || []).reduce((sum, r) => sum + roundMoney(Number(r.importo_riga) || 0), 0))
-  const totaleAT = sumCat('AT')
-  const totalePR = sumCat('PR')
-  const totaleRU = sumCat('RU')
-  const totaleSL = sumCat('SL')
-  const totalePF = sumCat('PF')
-  const totaleRA = sumCat('RA') // risarcimento attrezzature Art.30: nessun markup, si somma netto (include già la cauzione)
-  const imponibile = roundMoney(totaleAT + totalePR + totaleRU + totaleSL + totalePF)
-  const pct = Number.isFinite(percentualeSpeseGenerali) ? roundMoney(percentualeSpeseGenerali) : 15
-  const importoSpeseGenerali = roundMoney(imponibile * pct / 100)
-  return {
-    totaleAT,
-    totalePR,
-    totaleRU,
-    totaleSL,
-    totalePF,
-    totaleRA,
-    percentualeSpeseGenerali: pct,
-    importoSpeseGenerali,
-    totaleComplessivo: roundMoney(imponibile + importoSpeseGenerali + totaleRA)
-  }
-}
-
-function buildNotaSpeseGroups (
-  rowsByCategory: Record<NsCat, NsRowP[]> | undefined,
-  globalSummary: NsSummaryP | undefined,
-  dataSnapshot?: Record<string, any>
-): Array<{ codiceCasistica: string; label: string; rows: Record<NsCat, NsRowP[]>; summary: NsSummaryP }> {
-  const attrezzatureLabels = getRecuperabiliAttrezzatureLabelsById(dataSnapshot || {})
-  const byCode = new Map<string, Record<NsCat, NsRowP[]>>()
-  const labelByCode = new Map<string, string>()
-  for (const cat of NS_CATS) {
-    for (const row of (rowsByCategory?.[cat] || [])) {
-      const baseCode = normalizeNsCasistica(row.codice_casistica) || '__NON_COLLEGATA__'
-      const riferimentoId = String(row.riferimento_attrezzatura_id || '').trim()
-      const isArt30 = baseCode === 'C104_ATTREZZATURE_DANNEGGIATE'
-      const code = isArt30 && riferimentoId ? `${baseCode}::${riferimentoId}` : baseCode
-      if (isArt30 && riferimentoId) {
-        const baseLabel = NS_CASISTICA_META[baseCode]?.label || baseCode
-        if (cat === 'RA') {
-          // Risarcimento (non recuperabile): l'etichetta usa la descrizione già salvata
-          // sulla riga stessa, non la mappa delle recuperabili (che non la contiene).
-          labelByCode.set(code, `${baseLabel} — Risarcimento attrezzatura non recuperabile: ${row.descrizione_snapshot}`)
-        } else if (!labelByCode.has(code)) {
-          const attrLabel = attrezzatureLabels.get(riferimentoId)
-          labelByCode.set(code, attrLabel ? `${baseLabel} — Rimborso spese riparazione ${attrLabel}` : baseLabel)
-        }
-      }
-      if (!byCode.has(code)) byCode.set(code, cloneEmptyNsRows())
-      byCode.get(code)![cat].push({ ...row, categoria_costo: cat })
-    }
-  }
-
-  const pct = Number(globalSummary?.percentualeSpeseGenerali)
-  const groups = Array.from(byCode.entries()).map(([code, rows]) => {
-    const meta = NS_CASISTICA_META[code]
-    return {
-      codiceCasistica: code,
-      label: labelByCode.get(code) || meta?.label || (code === '__NON_COLLEGATA__' ? 'Nota spese non collegata a violazione' : 'Nota spese collegata'),
-      rows,
-      summary: buildNsSummaryForRows(rows, Number.isFinite(pct) ? pct : 15)
-    }
-  })
-
-  return groups
-    .filter(g => g.summary.totaleComplessivo > 0)
-    .sort((a, b) => {
-      // Il risarcimento attrezzature (Art.30, non recuperabili) va sempre per primo.
-      const aIsRisarcimento = (a.rows.RA || []).length > 0
-      const bIsRisarcimento = (b.rows.RA || []).length > 0
-      if (aIsRisarcimento !== bIsRisarcimento) return aIsRisarcimento ? -1 : 1
-      const ao = NS_CASISTICA_META[a.codiceCasistica.split('::')[0]]?.order ?? 999
-      const bo = NS_CASISTICA_META[b.codiceCasistica.split('::')[0]]?.order ?? 999
-      if (ao !== bo) return ao - bo
-      return a.label.localeCompare(b.label, 'it')
-    })
-}
-
-function buildNotaSpesePrintGroups (
-  rowsByCategory: Record<NsCat, NsRowP[]> | undefined,
-  globalSummary: NsSummaryP | undefined,
-  dataSnapshot: Record<string, any> | undefined
-): Array<{ codiceCasistica: string; label: string; rows: Record<NsCat, NsRowP[]>; summary: NsSummaryP }> {
-  // Il risarcimento attrezzature (RA) è ormai una categoria reale con righe vere in
-  // buildNotaSpeseGroups (ordinata sempre per prima): non serve più un gruppo
-  // sintetico/vuoto solo per far comparire una pagina PDF.
-  return buildNotaSpeseGroups(rowsByCategory, globalSummary, dataSnapshot)
-}
-
-function rapportoPdfFileNameForEditing (map: Record<string, string>): string {
-  const cp = map.cod_pratica || 'rapporto'
-  return `rapporto_${cp.replace(/[^a-zA-Z0-9_-]/g, '_')}.pdf`
 }
 
 function makePdfUrl (blob: Blob, fileName: string): string {
@@ -665,181 +524,6 @@ function mapPrintPointGeometry (target: any, Point: any): any | null {
   return null
 }
 
-function delay (ms: number): Promise<void> {
-  return new Promise(resolve => window.setTimeout(resolve, ms))
-}
-
-async function buildMapPrintPdfBlob (view: any, printServiceUrl: string, opts: DocumentPrintOptions): Promise<{ blob: Blob; fileName: string }> {
-  if (!view) throw new Error('Map view non disponibile per la stampa.')
-  const serviceUrl = String(printServiceUrl || DEFAULT_PRINT_SERVICE_URL).trim()
-  if (!serviceUrl) throw new Error('Servizio stampa ArcGIS non configurato.')
-
-  const print = await loadEsriModule<any>('esri/rest/print')
-  const PrintTemplate = await loadEsriModule<any>('esri/rest/support/PrintTemplate')
-  const PrintParameters = await loadEsriModule<any>('esri/rest/support/PrintParameters')
-  const Basemap = await loadEsriModule<any>('esri/Basemap').catch((): null => null)
-  const Graphic = await loadEsriModule<any>('esri/Graphic').catch((): null => null)
-  const Point = await loadEsriModule<any>('esri/geometry/Point').catch((): null => null)
-  const SimpleMarkerSymbol = await loadEsriModule<any>('esri/symbols/SimpleMarkerSymbol').catch((): null => null)
-  const symbolUtils = await loadEsriModule<any>('esri/symbols/support/symbolUtils').catch((): null => null)
-  const ExtentCtor = await loadEsriModule<any>('esri/geometry/Extent').catch((): null => null)
-
-  // La legenda usa SEMPRE e SOLO la view tecnica isolata (view), mai una mappa esistente
-  // del gestionale (p.mapView o qualsiasi altra view in uso dall'utente). Questa view è
-  // costruita da zero unicamente per questo documento di stampa.
-  await ensureGiiPrintableMapLayersReady(view)
-  const layers = listPrintableMapLayers(view)
-  const localizationLayerKeys = new Set(layers.filter(item => printableLayerIsLocalization(item, opts)).map(item => item.key))
-  const hasLocalizationLayerControl = localizationLayerKeys.size > 0
-  const localizationRequested = !hasLocalizationLayerControl || layers.some(item => {
-    if (!localizationLayerKeys.has(item.key)) return false
-    return opts.mapLayerVisibility?.[item.key] !== false
-  })
-  const oldVisibilityMap = new Map<any, boolean>()
-  const oldDefinitionMap = new Map<any, any>()
-  layers.forEach(item => {
-    ;[item.layer, ...(item.ancestors || [])].forEach(layer => {
-      if (layer && !oldVisibilityMap.has(layer)) oldVisibilityMap.set(layer, layer.visible !== false)
-    })
-    if (localizationLayerKeys.has(item.key) && item.layer && !oldDefinitionMap.has(item.layer)) {
-      try { oldDefinitionMap.set(item.layer, item.layer.definitionExpression) } catch {}
-    }
-  })
-  const oldBasemap = view?.map?.basemap
-  const oldScale = Number(view?.scale)
-  const oldViewpoint = (() => { try { return view?.viewpoint?.clone ? view.viewpoint.clone() : view?.viewpoint } catch { return null } })()
-  let printMarker: any = null
-  try {
-    layers.forEach(item => {
-      if (item.layer && Object.prototype.hasOwnProperty.call(opts.mapLayerVisibility || {}, item.key)) {
-        const visible = !!opts.mapLayerVisibility[item.key]
-        const isLocalizationLayer = localizationLayerKeys.has(item.key)
-        if (visible && !isLocalizationLayer) {
-          (item.ancestors || []).forEach(layer => { try { layer.visible = true } catch {} })
-        }
-        item.layer.visible = isLocalizationLayer ? false : visible
-        if (isLocalizationLayer) {
-          try { item.layer.definitionExpression = '1 = 0' } catch {}
-        }
-      }
-    })
-    if (opts.mapBasemap && view?.map) {
-      try {
-        const bm = Basemap?.fromId ? Basemap.fromId(String(opts.mapBasemap)) : String(opts.mapBasemap)
-        view.map.basemap = bm || String(opts.mapBasemap)
-        if (typeof view.map.basemap?.load === 'function') await view.map.basemap.load().catch(() => {})
-        await view.when?.()
-        try {
-          const baseLayer = view.map.basemap?.baseLayers?.getItemAt?.(0)
-          if (baseLayer && typeof view.whenLayerView === 'function') await Promise.race([view.whenLayerView(baseLayer), delay(300)])
-        } catch {}
-        try { view.requestRender?.() } catch {}
-      } catch {
-        try { view.map.basemap = String(opts.mapBasemap) } catch {}
-      }
-    }
-    const requestedScale = Number(opts.mapScale)
-    const printTargetGeometry = Point && opts.mapTarget ? mapPrintPointGeometry(opts.mapTarget, Point) : null
-    if (typeof view.goTo === 'function') {
-      if (opts.mapTarget) {
-        try { await view.goTo({ target: printTargetGeometry || opts.mapTarget, scale: Number.isFinite(requestedScale) && requestedScale > 0 ? requestedScale : undefined }, { animate: false }) } catch {}
-      } else if (Number.isFinite(requestedScale) && requestedScale > 0) {
-        try { await view.goTo({ scale: requestedScale }, { animate: false }) } catch {}
-      }
-    }
-    try { await view.when?.() } catch {}
-    try { view.requestRender?.() } catch {}
-    await delay(250)
-    if (localizationRequested && opts.mapTarget && Graphic && Point && SimpleMarkerSymbol && view?.graphics) {
-      try {
-        const geometry = printTargetGeometry || mapPrintPointGeometry(opts.mapTarget, Point)
-        if (geometry) {
-          const symbol = new SimpleMarkerSymbol({
-            style: 'circle',
-            color: [220, 38, 38, 220],
-            size: 9,
-            xoffset: 0,
-            yoffset: 0,
-            outline: { color: [255, 255, 255, 255], width: 1.5 }
-          })
-          printMarker = new Graphic({ geometry, symbol, attributes: { source: 'gii-editing-print-marker' } })
-          view.graphics.add(printMarker)
-          try { view.requestRender?.() } catch {}
-          await delay(120)
-        }
-      } catch {}
-    }
-
-    const printScale = Number(opts.mapScale) || Number(view?.scale) || 0
-    const rawPrintExtent = printScale > 0 ? computePrintExtentForView(view, printScale, opts.mapLayout) : null
-    const printExtent: { xmin: number; ymin: number; xmax: number; ymax: number; spatialReference?: any } | undefined = rawPrintExtent
-      ? {
-          xmin: Number((rawPrintExtent as any).xmin),
-          ymin: Number((rawPrintExtent as any).ymin),
-          xmax: Number((rawPrintExtent as any).xmax),
-          ymax: Number((rawPrintExtent as any).ymax),
-          spatialReference: (rawPrintExtent as any).spatialReference
-        }
-      : undefined
-
-    // === DIAGNOSTICA TEMPORANEA — rimuovere dopo il debug ===
-    console.warn('[GII-LEGENDA-DEBUG] scale=', view?.scale, 'resolution=', view?.resolution,
-      'extent=', view?.extent ? `${view.extent.xmin.toFixed(0)},${view.extent.ymin.toFixed(0)},${view.extent.xmax.toFixed(0)},${view.extent.ymax.toFixed(0)} wkid=${view.extent.spatialReference?.wkid}` : null,
-      'printExtent=', printExtent ? `${printExtent.xmin.toFixed(0)},${printExtent.ymin.toFixed(0)},${printExtent.xmax.toFixed(0)},${printExtent.ymax.toFixed(0)}` : null,
-      'mapLayerVisibility=', JSON.stringify(opts.mapLayerVisibility || {}))
-    console.warn('[GII-LEGENDA-DEBUG] layers=', layers.map(l =>
-      `${l.key}|visible=${l.layer?.visible}|type=${l.layer?.type||'?'}|loaded=${l.layer?.loaded}|url=${String(l.layer?.url||l.layer?.parent?.url||'').slice(-40)}`
-    ).join('\n'))
-    // === FINE DIAGNOSTICA ===
-
-    const legendItems = await buildGiiMapLegendItemsForView(view, layers, { ...opts, symbolUtils, printExtent, ExtentCtor }, localizationLayerKeys, localizationRequested)
-
-    console.warn('[GII-LEGENDA-DEBUG] legendItems=', legendItems.map(i => `${i.label}|img=${!!i.image}`).join(', '))
-    const template = new PrintTemplate({
-      format: 'pdf',
-      layout: opts.mapLayout || 'A4 Portrait',
-      layoutOptions: {
-        titleText: '',
-        authorText: '',
-        copyrightText: ''
-      },
-      exportOptions: { dpi: 96 },
-      scalePreserved: true,
-      outScale: Number(opts.mapScale) || Number(view?.scale) || undefined
-    })
-    const params = new PrintParameters({ view, template })
-    const result = await print.execute(serviceUrl, params)
-    const url = String(result?.url || result?.href || '')
-    if (!url) throw new Error('Il servizio stampa non ha restituito un PDF.')
-    const resp = await fetch(url)
-    if (!resp.ok) throw new Error(`Download stampa mappa fallito (HTTP ${resp.status}).`)
-    const rawBlob = await resp.blob()
-    return {
-      blob: await wrapMapPdfBlobWithRapportoTechnicalHeader(rawBlob, mapTechnicalDocumentTitle('-'), {
-        scale: Number(opts.mapScale) || Number(view?.scale) || null,
-        basemapLabel: mapBasemapLabel(opts.mapBasemap || view?.map?.basemap?.title || view?.map?.basemap?.id),
-        legendItems,
-        sourceLayout: opts.mapLayout
-      }),
-      fileName: 'mappa_rapporto.pdf'
-    }
-  } finally {
-    if (printMarker && view?.graphics) {
-      try { view.graphics.remove(printMarker) } catch {}
-    }
-    oldDefinitionMap.forEach((definition, layer) => { try { layer.definitionExpression = definition } catch {} })
-    oldVisibilityMap.forEach((visible, layer) => { try { layer.visible = visible } catch {} })
-    try { if (oldBasemap && view?.map) view.map.basemap = oldBasemap } catch {}
-    if (typeof view?.goTo === 'function') {
-      if (oldViewpoint) {
-        try { await view.goTo(oldViewpoint, { animate: false }) } catch {}
-      } else if (Number.isFinite(oldScale) && oldScale > 0) {
-        try { await view.goTo({ scale: oldScale }, { animate: false }) } catch {}
-      }
-    }
-  }
-}
-
 function normalizeArcgisLayerUrl (url: any): string {
   return String(url || '').trim().replace(/\/+$/, '')
 }
@@ -940,15 +624,6 @@ function toAttachmentPrintOption (att: any): AttachmentPrintOption {
     url: att?.url,
     keywords: att?.keywords
   } as AttachmentPrintOption
-}
-
-async function hasAttachments (ds: any, oid: number): Promise<boolean> {
-  if (!Number.isFinite(oid) || oid <= 0) return false
-  const layer = await resolveFeatureLayerForAttachments(ds)
-  if (!layer) return false
-  const infos = await queryFeatureAttachments(layer, oid, ds)
-  const options = (infos || []).map((att: any): AttachmentPrintOption => toAttachmentPrintOption(att))
-  return filterGiiAttachmentsForTechnicalRoles(options as any).length > 0
 }
 
 async function loadAttachmentOptions (ds: any, oid: number, canSeeAmministrativi: boolean, layerUrlHint?: string): Promise<{ options: AttachmentPrintOption[]; hasBozzaDeterminazione: boolean }> {
@@ -1074,162 +749,6 @@ async function addRasterAttachmentPage (doc: PDFDocument, img: any): Promise<voi
   page.drawImage(img, { x: box.x + (box.width - w) / 2, y: box.y + (box.height - h) / 2, width: w, height: h })
 }
 
-async function buildPracticeAttachmentsPdfBlob (ds: any, oid: number, selectedAttachmentIds?: number[], numeroRapportoTecnico?: string): Promise<{ blob: Blob; fileName: string } | null> {
-  const layer = await resolveFeatureLayerForAttachments(ds)
-  if (!layer) throw new Error('FeatureLayer allegati non disponibile.')
-  const selectedSet = Array.isArray(selectedAttachmentIds) && selectedAttachmentIds.length > 0
-    ? new Set(selectedAttachmentIds.map(id => Number(id)).filter(id => Number.isFinite(id) && id > 0))
-    : null
-  const infos = (await queryFeatureAttachments(layer, oid, ds)).filter((att: any) => {
-    if (!selectedSet) return true
-    const id = Number(att?.id ?? att?.attachmentId ?? att?.objectId)
-    return selectedSet.has(id)
-  })
-  if (!infos.length) return null
-
-  const out = await PDFDocument.create()
-  let count = 0
-  let elaboratoIndex = 0
-  const pageTitles: string[] = []
-  for (let i = 0; i < infos.length; i++) {
-    const att = infos[i]
-    const fetched = await fetchAttachmentBlob(layer, ds, oid, att, i)
-    if (!fetched) continue
-    const blob = fetched.blob
-    const contentType = String(blob.type || att?.contentType || '').toLowerCase()
-    const name = fetched.fileName
-    const bytes = new Uint8Array(await blob.arrayBuffer())
-    try {
-      if (contentType.includes('pdf') || /\.pdf$/i.test(name)) {
-        const src = await PDFDocument.load(bytes as any)
-        const sourcePages = src.getPages()
-        if (sourcePages.length === 0) continue
-        if (sourcePages.length > 0) elaboratoIndex++
-        const pageTitle = attachmentTechnicalDocumentTitle(elaboratoIndex, numeroRapportoTecnico)
-        for (const sourcePage of sourcePages) {
-          const page = out.addPage([595.28, 841.89])
-          const embedded = await (out as any).embedPage(sourcePage)
-          const size = sourcePage.getSize()
-          drawEmbeddedPdfPageInRapportoTechnicalBody(page, embedded, size.width, size.height)
-          pageTitles.push(pageTitle)
-        }
-        count++
-      } else if (contentType.includes('jpeg') || contentType.includes('jpg') || /\.(jpe?g)$/i.test(name)) {
-        const normalized = await normalizeRasterAttachmentForPdf(blob, bytes, name, contentType)
-        const img = await out.embedJpg(normalized.bytes as any)
-        await addRasterAttachmentPage(out, img)
-        elaboratoIndex++
-        pageTitles.push(attachmentTechnicalDocumentTitle(elaboratoIndex, numeroRapportoTecnico))
-        count++
-      } else if (contentType.includes('png') || /\.png$/i.test(name)) {
-        const normalized = await normalizeRasterAttachmentForPdf(blob, bytes, name, contentType)
-        const img = await out.embedPng(normalized.bytes as any)
-        await addRasterAttachmentPage(out, img)
-        elaboratoIndex++
-        pageTitles.push(attachmentTechnicalDocumentTitle(elaboratoIndex, numeroRapportoTecnico))
-        count++
-      }
-    } catch {
-      // Allegato non impaginabile: lo si ignora nel PDF unico.
-    }
-  }
-  if (count === 0) return null
-  await drawRapportoTechnicalHeadersByPage(out, index => pageTitles[index] || attachmentTechnicalDocumentTitle(index + 1, numeroRapportoTecnico))
-  const bytes = await out.save()
-  return { blob: new Blob([bytes as any], { type: 'application/pdf' }), fileName: 'allegati_probatori.pdf' }
-}
-
-async function buildRapportoDocumentsPdfBlob (
-  dataSnapshot: Record<string, any>,
-  utenti: Map<string, UtenteCached> | null,
-  nsRows: Record<NsCat, NsRowP[]> | undefined,
-  nsSummary: NsSummaryP | undefined,
-  docOptions: Pick<DocumentPrintOptions, 'includeRapporto' | 'includeNotaSpese' | 'selectedNotaSpeseKeys'>
-): Promise<{ blob: Blob; fileName: string }> {
-  const iterGlobalId = pickAttrCI(dataSnapshot, ['globalid', 'GlobalID', 'GLOBALID', 'parent_globalid'])
-  const iterCicli = await loadRapportoIterCicliForPdf(iterGlobalId)
-  const map = buildPlaceholderMap(dataSnapshot, utenti, iterCicli)
-  const nsGroups = buildNotaSpeseGroups(nsRows, nsSummary)
-  const art30Summary = buildArt30RapportoSummary(dataSnapshot)
-  const allReportNsGroups = buildNotaSpesePrintGroups(nsRows, nsSummary, dataSnapshot)
-  const selectedNotaSpeseKeys = docOptions.selectedNotaSpeseKeys || {}
-  const reportNsGroups = allReportNsGroups.filter(group => selectedNotaSpeseKeys[group.codiceCasistica] !== false)
-  const hasRealRaRows = nsGroups.some(group => (group.rows.RA || []).length > 0)
-  const totaleNoteSpeseDaGruppi = roundMoney(nsGroups.reduce((sum, group) => sum + roundMoney(Number(group?.summary?.totaleComplessivo) || 0), 0)
-    + (hasRealRaRows ? 0 : (art30Summary.hasData ? art30Summary.netto : 0)))
-  const totaleNoteSpeseSalvato = roundMoney(parseArt30Number(pickAttrCI(dataSnapshot, ['ns_totale_complessivo'])) ?? 0)
-  const totaleNoteSpese = nsGroups.length > 0 ? totaleNoteSpeseDaGruppi : totaleNoteSpeseSalvato
-  const hasRimborso = nsGroups.length > 0 || totaleNoteSpese !== 0 || art30Summary.hasData
-  const totaleRimborso = totaleNoteSpese
-  const includeRapporto = docOptions.includeRapporto !== false
-  const includeNotaSpese = docOptions.includeNotaSpese !== false
-
-  map.importo_rimborso = hasRimborso ? moneyIt(totaleRimborso) : ''
-  map.riepilogo_art30 = art30Summary.text
-  map.nota_spese_label = !includeNotaSpese ? '' : reportNsGroups.length > 1
-    ? '(Vedi note spese allegate)'
-    : (reportNsGroups.length === 1 ? '(Vedi nota spese allegata)' : '')
-
-  const rapportoBytes = includeRapporto ? await buildRapportoPdf(map) : null
-  let finalBytes: Uint8Array = rapportoBytes || new Uint8Array()
-
-  if (includeNotaSpese && reportNsGroups.length > 0) {
-    const merged = await PDFDocument.create()
-    if (rapportoBytes) {
-      const rapDoc = await PDFDocument.load(rapportoBytes)
-      const rapPages = await merged.copyPages(rapDoc, rapDoc.getPageIndices())
-      rapPages.forEach(pg => merged.addPage(pg))
-    }
-
-    for (let i = 0; i < reportNsGroups.length; i++) {
-      const group = reportNsGroups[i]
-      const nsData: NotaSpeseData = {
-        cod_pratica: map.cod_pratica || '',
-        area_label: map.area_label || '',
-        settore_label: map.settore_label || '',
-        area_cod: map.area_cod || '',
-        numero_nota: i + 1,
-        titolo_nota: group.label,
-        rows: group.rows as any,
-        summary: group.summary,
-        art30: !hasRealRaRows && group.codiceCasistica === 'C104_ATTREZZATURE_DANNEGGIATE' && art30Summary.hasData
-          ? {
-              rows: art30Summary.rows.map(row => ({
-                codice: row.codice,
-                descrizione: row.descrizione,
-                quantita: row.quantita,
-                valore_unitario: row.valoreUnitario,
-                importo: roundMoney(row.importo ?? ((row.valoreUnitario ?? 0) * row.quantita))
-              })),
-              rimborso: art30Summary.rimborso,
-              cauzione: art30Summary.cauzione,
-              cauzione_quantita: art30Summary.cauzioneQuantita,
-              cauzione_valore_unitario: art30Summary.cauzioneValoreUnitario,
-              cauzione_unita_misura: art30Summary.cauzioneUnitaMisura,
-              netto: art30Summary.netto
-            }
-          : null,
-        luogo_data: 'Cagliari, ' + (formatDateIt(dataSnapshot.data_firma) || new Date().toLocaleDateString('it-IT', { day: '2-digit', month: '2-digit', year: 'numeric' })),
-        firma_nome: map.firma_ti || '',
-        rapporto_respinto: map.rapporto_respinto === '1',
-        rapporto_istruttoria: map.rapporto_istruttoria === '1'
-      }
-      const nsBytes = await buildNotaSpesePdf(nsData)
-      const nsDoc = await PDFDocument.load(nsBytes)
-      const nsPages = await merged.copyPages(nsDoc, nsDoc.getPageIndices())
-      nsPages.forEach(pg => merged.addPage(pg))
-    }
-
-    finalBytes = await merged.save()
-  }
-  if (!includeRapporto && (!includeNotaSpese || reportNsGroups.length === 0)) {
-    throw new Error('Nessuna nota spese allegabile trovata per il rapporto selezionato.')
-  }
-
-  const fileName = rapportoPdfFileNameForEditing(map)
-  const outFileName = includeRapporto ? fileName : fileName.replace(/^rapporto_/i, 'nota_spese_')
-  return { blob: new Blob([finalBytes as any], { type: 'application/pdf' }), fileName: outFileName }
-}
 
 export default function GiiAnteprimaPanel (p: {
   data: Record<string, any>
@@ -1371,6 +890,20 @@ export default function GiiAnteprimaPanel (p: {
     return () => { cancelled = true }
   }, [usingDraftNotaSpese, p.notaSpeseConfig, p.oid, dataSignature])
 
+  // Catalogo attrezzature Art.30 (codice -> nome leggibile): caricato indipendentemente da
+  // usingDraftNotaSpese, perché serve per etichettare le note recuperabili sia quando le righe
+  // arrivano già in memoria (es. da gii-editing-ti) sia quando vengono interrogate qui.
+  const [attrezzatureCatalog, setAttrezzatureCatalog] = React.useState<Map<string, string>>(new Map())
+  React.useEffect(() => {
+    const attrezzatureParametriUrl = String(p.notaSpeseConfig?.attrezzatureParametriUrl || '').trim()
+    if (!attrezzatureParametriUrl) { setAttrezzatureCatalog(new Map()); return }
+    let cancelled = false
+    void loadAttrezzatureCatalogPdf(attrezzatureParametriUrl)
+      .then(catalog => { if (!cancelled) setAttrezzatureCatalog(catalog) })
+      .catch(() => { if (!cancelled) setAttrezzatureCatalog(new Map()) })
+    return () => { cancelled = true }
+  }, [p.notaSpeseConfig])
+
   const effectiveNsRows = usingDraftNotaSpese ? p.nsRows : (queriedNsRows || undefined)
   const effectiveNsSummary = usingDraftNotaSpese ? p.nsSummary : (queriedNsSummary || undefined)
 
@@ -1393,16 +926,16 @@ export default function GiiAnteprimaPanel (p: {
   }, [dataSignature, utenti])
 
   const hasNotaSpeseLocal = React.useMemo(() => {
-    const groups = buildNotaSpeseGroups(effectiveNsRows, effectiveNsSummary)
+    const groups = buildNotaSpeseGroups(effectiveNsRows, effectiveNsSummary, attrezzatureCatalog)
     return groups.length > 0 || buildArt30RapportoSummary(p.data || {}).hasData
-  }, [dataSignature, nsSignature, effectiveNsRows, effectiveNsSummary])
+  }, [dataSignature, nsSignature, effectiveNsRows, effectiveNsSummary, attrezzatureCatalog])
 
   const computedNotaSpeseOptions = React.useMemo<NotaSpesePrintOption[]>(() => {
-    return buildNotaSpesePrintGroups(effectiveNsRows, effectiveNsSummary, p.data).map(group => ({
+    return buildNotaSpesePrintGroups(effectiveNsRows, effectiveNsSummary, attrezzatureCatalog).map(group => ({
       key: group.codiceCasistica,
       label: group.label
     }))
-  }, [dataSignature, nsSignature, effectiveNsRows, effectiveNsSummary])
+  }, [dataSignature, nsSignature, effectiveNsRows, effectiveNsSummary, attrezzatureCatalog])
 
   React.useEffect(() => {
     // In modalità 'live' il pannello non costruisce nulla: usa direttamente p.mapView

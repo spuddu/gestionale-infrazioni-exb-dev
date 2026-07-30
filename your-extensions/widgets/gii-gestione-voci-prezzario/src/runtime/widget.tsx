@@ -131,18 +131,6 @@ async function deleteObjectIds(urlRaw: any, objectIds: number[]): Promise<void> 
     if (bad?.error) throw new Error(bad.error.message || 'Eliminazione non riuscita.')
   }
 }
-async function setOnlyOneActive(urlRaw: any, objectid: number): Promise<void> {
-  const rows = await queryRows(urlRaw, '1=1', 'OBJECTID DESC')
-  const fl = await getLayer(urlRaw)
-  const fieldNames = new Set(((fl?.fields || []) as any[]).map((f: any) => String(f?.name || '')))
-  if (!fieldNames.has('attivo')) throw new Error('Il campo attivo non esiste nella tabella.')
-  for (let i = 0; i < rows.length; i += 200) {
-    const batch = rows.slice(i, i + 200).map((r: any) => ({ attributes: { OBJECTID: r.objectid, attivo: r.objectid === objectid ? 1 : 0 } }))
-    const res = await fl.applyEdits({ updateFeatures: batch } as any)
-    const bad = (res?.updateFeatureResults || []).find((x: any) => x?.error)
-    if (bad?.error) throw new Error(bad.error.message || 'Aggiornamento attivo non riuscito.')
-  }
-}
 const CATEGORY_OPTIONS = ['MANODOPERA','NOLO','TRASPORTO','MATERIALI'] as const
 function normalizeCategory(v: any): string {
   const s = String(v || '').trim().toUpperCase()

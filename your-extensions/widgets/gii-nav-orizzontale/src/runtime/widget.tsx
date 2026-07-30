@@ -428,34 +428,10 @@ function readSidebarMetric (sidebarWidgetId: string): SidebarMetric | null {
 
 const sidebarBaselineById: Record<string, { rootWidth: number, sizedWidth: number }> = {}
 
-function resetSidebarBaseline (sidebarWidgetId: string): void {
-  try { delete sidebarBaselineById[sidebarWidgetId] } catch {}
-}
-
 function setSidebarBaselineToCurrent (sidebarWidgetId: string): void {
   const metric = readSidebarMetric(sidebarWidgetId)
   if (!metric) return
   sidebarBaselineById[sidebarWidgetId] = { rootWidth: metric.root.width, sizedWidth: metric.sizedWidth }
-}
-
-function isSidebarSizeChangedFromBaseline (sidebarWidgetId: string): boolean {
-  if (!sidebarWidgetId) return false
-  const metric = readSidebarMetric(sidebarWidgetId)
-  if (!metric) return false
-  const baseline = sidebarBaselineById[sidebarWidgetId]
-  if (!baseline || Math.abs(baseline.rootWidth - metric.root.width) > 4) {
-    setSidebarBaselineToCurrent(sidebarWidgetId)
-    return false
-  }
-  return Math.abs(metric.sizedWidth - baseline.sizedWidth) > 1
-}
-
-function navItemShowsSidebar (item: NavItem | null): boolean {
-  if (!item) return false
-  // Nel setting del nav l'opzione "Mostra pannello laterale" è salvata su collapseSidebar.
-  // Non uso eventuali vecchi campi showSidebar rimasti in config per evitare che il
-  // pulsante compaia su schede non abilitate dal setting corrente.
-  return (item as any).collapseSidebar === true
 }
 
 function isNavItemActive (item: NavItem, cfg: any, currentPageId: string | null, currentSection: string, currentViewId: string | null): boolean {
@@ -536,49 +512,6 @@ function dispatchMouseLikeEvent (target: EventTarget, type: string, x: number, y
     }
   } catch {}
   try { target.dispatchEvent(new MouseEvent(type.replace(/^pointer/, 'mouse'), common)) } catch {}
-}
-
-function resetSidebarSize (sidebarWidgetId: string): void {
-  if (!sidebarWidgetId) return
-  const metric = readSidebarMetric(sidebarWidgetId)
-  const targetX = getSidebarResetTargetX(sidebarWidgetId)
-  if (!metric || targetX == null) return
-
-  const startX = metric.boundaryX
-  if (Math.abs(startX - targetX) <= 1) {
-    setSidebarBaselineToCurrent(sidebarWidgetId)
-    return
-  }
-
-  const y = Math.max(metric.root.top + 30, Math.min(metric.root.bottom - 30, metric.root.top + metric.root.height / 2))
-  const handle = findResizeHandleAt(sidebarWidgetId, startX, y)
-  const moveTarget: EventTarget = document
-
-  try {
-    handle?.focus?.()
-  } catch {}
-
-  // Uso il ridimensionatore nativo di Experience Builder tramite eventi di drag,
-  // senza scrivere width/flex/min/max sui pannelli: così non resta nulla congelato.
-  dispatchMouseLikeEvent(handle || document, 'pointerdown', startX, y)
-  dispatchMouseLikeEvent(handle || document, 'mousedown', startX, y)
-  const steps = 6
-  for (let i = 1; i <= steps; i++) {
-    const x = startX + ((targetX - startX) * i / steps)
-    dispatchMouseLikeEvent(moveTarget, 'pointermove', x, y)
-    dispatchMouseLikeEvent(moveTarget, 'mousemove', x, y)
-  }
-  dispatchMouseLikeEvent(moveTarget, 'pointerup', targetX, y)
-  dispatchMouseLikeEvent(moveTarget, 'mouseup', targetX, y)
-  try { window.dispatchEvent(new Event('resize')) } catch {}
-
-  window.setTimeout(() => {
-    const after = readSidebarMetric(sidebarWidgetId)
-    const finalTargetX = getSidebarResetTargetX(sidebarWidgetId)
-    if (after && finalTargetX != null && Math.abs(after.boundaryX - finalTargetX) <= 4) {
-      setSidebarBaselineToCurrent(sidebarWidgetId)
-    }
-  }, 160)
 }
 
 function softColor (color: string, fallback = 'rgba(147,197,253,0.18)'): string {

@@ -106,26 +106,10 @@ function normalizeRegolamentoArticleNumber (raw: any): string {
   return m ? String(Number(m[1])) : ''
 }
 
-function splitRegolamentoArticleCodes (raw: any): string[] {
-  return String(raw || '')
-    .toUpperCase()
-    .split(/[\/;,|+]+/)
-    .map(s => s.trim())
-    .filter(Boolean)
-}
-
 function formatRegolamentoArticleCode (raw: any): string {
   const key = normalizeRegolamentoArticleKey(raw)
   const m = key.match(/^ART(\d+)$/)
   return m ? `Art. ${Number(m[1])}` : String(raw || '').trim().toUpperCase()
-}
-
-function articleTitleLineTi (article?: RegolamentoArticolo | null, fallback?: string): string {
-  if (article) {
-    const code = formatRegolamentoArticleCode(article.codice_articolo || article.numero_articolo)
-    return article.titolo_articolo ? `${code} — ${article.titolo_articolo}` : code
-  }
-  return String(fallback || '').trim() || '—'
 }
 
 function normalizeRegolamentoArticle (row: any): RegolamentoArticolo {
@@ -2096,31 +2080,6 @@ async function refreshDs(ds: any): Promise<void> {
 }
 
 
-async function trySelectOid (ds: any, oid: number): Promise<void> {
-  if (!ds || oid == null) return
-  const id = Number(oid)
-  const methods: Array<[string, any]> = [
-    ['selectRecordsByIds', [ [id] ]],
-    ['selectRecordById', [ id ]],
-    ['setSelectedRecordIds', [ [id] ]],
-    ['setSelectedIds', [ [id] ]]
-  ]
-  for (const [m, args] of methods) {
-    try {
-      if (typeof (ds as any)[m] === 'function') {
-        await (ds as any)[m](...args)
-        return
-      }
-    } catch { /* ignore */ }
-  }
-  // fallback: SelectionManager (best-effort)
-  try {
-    const sm = (DataSourceManager as any).getInstance?.()?.getSelectionManager?.()
-    if (sm?.selectRecordByIds && ds?.id) sm.selectRecordByIds(ds.id, [id])
-  } catch { /* ignore */ }
-}
-
-
 function InlineEditOverlay(props: {
   oid: number
   data: any
@@ -3724,10 +3683,6 @@ function isSelectedFlag (v: any): boolean {
   return s === '1' || s === 'true' || s === 'sì' || s === 'si' || s === 'yes'
 }
 
-function hasRiGradoTriggerViolation (attrs: Record<string, any>): boolean {
-  return getRiGradoSelectedArts(attrs).length > 0
-}
-
 function modernColor (value: any, modernFallback: string, legacyValues: string[] = []): string {
   const raw = String(value ?? '').trim()
   const normalized = raw.toLowerCase().replace(/\s+/g, '')
@@ -4399,16 +4354,6 @@ function NpSurfaceText(p: { value: string; onChange: (v: string) => void; disabl
   )
 }
 
-function NpInt(p: { value: string; onChange: (v: string) => void; disabled?: boolean }) {
-  const fs = React.useContext(FormStyleCtx)
-  return <input type='number' value={p.value} onChange={e => p.onChange(e.target.value)} style={fieldBaseStyle(fs, p.disabled)} disabled={p.disabled}/>
-}
-
-function NpDate(p: { value: string; onChange: (v: string) => void; withTime?: boolean; disabled?: boolean }) {
-  const fs = React.useContext(FormStyleCtx)
-  return <input type={p.withTime ? 'datetime-local' : 'date'} value={p.value} onChange={e => p.onChange(e.target.value)} style={fieldBaseStyle(fs, p.disabled)} disabled={p.disabled}/>
-}
-
 type NpDraft = Record<string, string>
 
 const UPPERCASE_TEXT_FIELDS = new Set([
@@ -4485,7 +4430,7 @@ const NS_CATEGORY_LABELS: Record<NsCategory, string> = {
   RU: 'Risorse umane',
   SL: 'Semilavorati',
   PF: 'Prodotti finiti',
-  RA: 'Risarcimento attrezzatura'
+  RA: 'Attrezzature'
 }
 
 const NS_SOURCES: readonly NsSource[] = ['REGIONE', 'INTERNO', 'NUOVI PREZZI', 'PARAMETRO'] as const
@@ -4509,11 +4454,6 @@ function nsNormalizeSource (v: any): NsSource {
   if (s === 'NUOVI PREZZI') return 'NUOVI PREZZI'
   if (s === 'PARAMETRO') return 'PARAMETRO'
   return 'REGIONE'
-}
-
-function nsMaybeNormalizeSource (v: any): NsSource | null {
-  const s = String(v || '').trim()
-  return s ? nsNormalizeSource(s) : null
 }
 
 const EMPTY_NS_SUMMARY: NsSummary = {
@@ -4737,15 +4677,6 @@ function hasNotaSpeseIncompleteRowsForCasistica (rowsByCategory: Record<NsCatego
   return getNotaSpeseFlatRowsForCasistica(rowsByCategory, codice).some(nsRowIsIncomplete)
 }
 
-function countNotaSpeseIncompleteRowsForCasistica (rowsByCategory: Record<NsCategory, NsDetailRow[]> | null | undefined, codice: string): number {
-  return getNotaSpeseFlatRowsForCasistica(rowsByCategory, codice).filter(nsRowIsIncomplete).length
-}
-
-
-function isNotaSpeseCompiledForCasistica (rowsByCategory: Record<NsCategory, NsDetailRow[]> | null | undefined, codice: string, perc: number): boolean {
-  return getNotaSpeseTotalForCasistica(rowsByCategory, codice, perc) > 0.004 && !hasNotaSpeseIncompleteRowsForCasistica(rowsByCategory, codice)
-}
-
 function getNotaSpeseCasisticheWithExistingRows (attrs: Record<string, any>, rowsByCategory: Record<NsCategory, NsDetailRow[]> | null | undefined): NsCasisticaOption[] {
   const byCode = new Map<string, NsCasisticaOption>()
   getNotaSpeseCasistiche(attrs).forEach(opt => byCode.set(opt.codice, opt))
@@ -4815,24 +4746,6 @@ function nsNormalizeCategory (v: any): NsCategory | null {
   if (s === 'PF') return 'PF'
   if (s === 'RA') return 'RA'
   return null
-}
-
-function nsToCategoryLabel (c: NsCategory): string {
-  return NS_CATEGORY_LABELS[c] || c
-}
-
-function nsToDateInputValue (v: any): string {
-  if (v == null || v === '') return ''
-  try {
-    const d = new Date(v)
-    if (Number.isNaN(d.getTime())) return ''
-    const y = d.getFullYear()
-    const m = String(d.getMonth() + 1).padStart(2, '0')
-    const day = String(d.getDate()).padStart(2, '0')
-    return `${y}-${m}-${day}`
-  } catch {
-    return ''
-  }
 }
 
 async function getFeatureLayerByUrl (rawUrl: any): Promise<any> {
@@ -4941,16 +4854,6 @@ type AttrezzaturaParametro = {
   valoreUnitario: number
 }
 
-function attrezzaturaMoney (value: any): string {
-  const n = Number(value)
-  return (Number.isFinite(n) ? n : 0).toLocaleString('it-IT', { useGrouping: true, minimumFractionDigits: 2, maximumFractionDigits: 2 })
-}
-
-function attrezzaturaQty (value: any): string {
-  const n = Number(value)
-  return (Number.isFinite(n) ? n : 0).toLocaleString('it-IT', { useGrouping: false, minimumFractionDigits: 0, maximumFractionDigits: 4 })
-}
-
 function attrezzaturaKey (value: any): string {
   return String(value ?? '')
     .trim()
@@ -4990,10 +4893,6 @@ function attrezzaturaTipo (value: any): AttrezzaturaTipo | null {
   if (key.includes('SIFON')) return { key: 'SIFONE', label: 'Sifone', order: 2 }
   if (key.includes('PARATOIA')) return { key: 'PARATOIA', label: 'Paratoia', order: 3 }
   return null
-}
-
-function attrezzaturaMatchKey (value: any): string {
-  return attrezzaturaTipo(value)?.key || attrezzaturaKey(value)
 }
 
 function isTruthyParameterFlag (value: any): boolean {
@@ -5081,43 +4980,6 @@ async function loadArt30ParametersBundle (rawUrl: any, referenceDate?: any): Pro
   }
 }
 
-async function loadAttrezzatureParameters (rawUrl: any, referenceDate?: any): Promise<AttrezzaturaParametro[]> {
-  const rows = await loadArt30ParameterRows(rawUrl)
-  return buildAttrezzatureParametersFromRows(rows, referenceDate)
-}
-
-async function loadCauzioneParameter (rawUrl: any, referenceDate?: any): Promise<number> {
-  const rows = await loadArt30ParameterRows(rawUrl)
-  return buildCauzioneParameterFromRows(rows, referenceDate)
-}
-
-async function saveTableAttributes (rawUrl: any, attrs: Record<string, any>, objectid?: number | null): Promise<void> {
-  const fl = await getFeatureLayerByUrl(rawUrl)
-  const oidField = String(fl?.objectIdField || 'OBJECTID')
-  const fieldNames = new Set(((fl?.fields || []) as any[]).map((f: any) => String(f?.name || '')))
-  const attributes: any = {}
-  for (const [k, v] of Object.entries(attrs || {})) {
-    if (k === oidField || fieldNames.has(k)) attributes[k] = v
-  }
-  if (objectid != null) attributes[oidField] = Number(objectid)
-  const payload = objectid != null
-    ? { updateFeatures: [{ attributes }] }
-    : { addFeatures: [{ attributes }] }
-  const res = await fl.applyEdits(payload as any)
-  const editResult = objectid != null ? res?.updateFeatureResults?.[0] : res?.addFeatureResults?.[0]
-  if (editResult?.error) throw new Error(editResult.error.message || 'Salvataggio non riuscito.')
-}
-
-async function deleteTableObjectId (rawUrl: any, objectid: number): Promise<void> {
-  const fl = await getFeatureLayerByUrl(rawUrl)
-  const oidField = String(fl?.objectIdField || 'OBJECTID')
-  const Graphic = await loadEsriModule<any>('esri/Graphic')
-  const g = new Graphic({ attributes: { [oidField]: Number(objectid) } })
-  const res = await fl.applyEdits({ deleteFeatures: [g] } as any)
-  const r = res?.deleteFeatureResults?.[0]
-  if (r?.error) throw new Error(r.error.message || 'Eliminazione non riuscita.')
-}
-
 async function loadRecordAttrsByOid (rawUrl: any, oidFieldName: string, oid: number): Promise<Record<string, any>> {
   const fl = await getFeatureLayerByUrl(rawUrl)
   const q = fl.createQuery ? fl.createQuery() : {}
@@ -5140,17 +5002,6 @@ async function getNsPercentuale (rawUrl: any, codice: string): Promise<number> {
   const rows = await queryTableAttributes(rawUrl, `codice_parametro = '${nsEscapeSqlString(code)}'`, 'attivo DESC, anno_riferimento DESC, data_validita_da DESC, OBJECTID DESC')
   const row = rows.find((r: any) => nsSafeNum(r?.attivo, 1) === 1) || rows[0] || null
   return row ? nsRound(nsSafeNum((row as any).valore_num, 0), 2) : 0
-}
-
-async function getActivePrezzario (rawUrl: any): Promise<{ codice: string; anno: number; descrizione: string } | null> {
-  const rows = await queryTableAttributes(rawUrl, `stato_prezzario = 1`, 'anno_prezzario DESC, OBJECTID DESC')
-  const row = rows[0] || null
-  if (!row) return null
-  return {
-    codice: String(row?.codice_prezzario || row?.prezzario_codice || '').trim(),
-    anno: Math.trunc(nsSafeNum(row?.anno_prezzario, 0)),
-    descrizione: String((row as any)?.titolo_prezzario || '').trim()
-  }
 }
 
 function nsMapCartOrigine (codicePrezzario: string): NsSource {
@@ -5347,6 +5198,13 @@ function NoteSpeseManager (props: NsManagerProps) {
     if (editingTessera && !isValidTesseraMatricola(editMatricola)) {
       setMsg({ ok: false, text: 'La matricola deve avere esattamente 5 cifre numeriche.' })
       return
+    }
+    if (!editingTessera) {
+      const qtyCheck = nsRound(nsSafeNum(String(editQty).replace(',', '.'), 0), 4)
+      if (qtyCheck <= 0) {
+        setMsg({ ok: false, text: 'La quantità deve essere maggiore di zero.' })
+        return
+      }
     }
     const nextRows = rows.map((r, i) => {
       if (i !== editIdx) return nsCloneRow(r)
@@ -6800,8 +6658,9 @@ const noteSpeseCfg = React.useMemo(() => ({
   detailUrl: String(cfg.nsNotaSpeseDettaglioUrl || '').trim(),
   detailUrlWrite: String((cfg as any).nsNotaSpeseDettaglioUrlWrite || cfg.nsNotaSpeseDettaglioUrl || '').trim(),
   parametriUrl: String(cfg.nsParametriUrl || '').trim(),
-  parametroCode: String(cfg.nsParametroCode || 'SPESE_GENERALI_PERC').trim() || 'SPESE_GENERALI_PERC'
-}), [(cfg as any).nsImportPrezzariUrl, (cfg as any).nsPrezzariUrl, (cfg as any).nsPrezzarioRegionaleArticoliUrl, (cfg as any).nsPrezzarioVociUrl, (cfg as any).nsPrezzarioInternoArticoliUrl, (cfg as any).nsPrezzarioInternoUrl, (cfg as any).nsNuoviPrezziUrl, cfg.nsNotaSpeseDettaglioUrl, (cfg as any).nsNotaSpeseDettaglioUrlWrite, cfg.nsParametriUrl, cfg.nsParametroCode])
+  parametroCode: String(cfg.nsParametroCode || 'SPESE_GENERALI_PERC').trim() || 'SPESE_GENERALI_PERC',
+  attrezzatureParametriUrl: String((cfg as any).attrezzatureParametriUrl || '').trim()
+}), [(cfg as any).nsImportPrezzariUrl, (cfg as any).nsPrezzariUrl, (cfg as any).nsPrezzarioRegionaleArticoliUrl, (cfg as any).nsPrezzarioVociUrl, (cfg as any).nsPrezzarioInternoArticoliUrl, (cfg as any).nsPrezzarioInternoUrl, (cfg as any).nsNuoviPrezziUrl, cfg.nsNotaSpeseDettaglioUrl, (cfg as any).nsNotaSpeseDettaglioUrlWrite, cfg.nsParametriUrl, cfg.nsParametroCode, (cfg as any).attrezzatureParametriUrl])
 
 const noteSpeseMissing = React.useMemo(() => {
   const missing: string[] = []
@@ -6853,7 +6712,7 @@ const loadNotaSpeseDraft = React.useCallback(async () => {
     const grouped = nsRowsFromFlat(rows)
     setNoteSpeseRowsBaseline(grouped)
     let draft = nsCloneRowsByCategory(grouped)
-    const savedDraftSnapshot = noteSpeseDraftStorageKey ? nsReadDraftSnapshot(noteSpeseDraftStorageKey) : null
+    const savedDraftSnapshot = (!isReadOnly && !isRiAgrTecLimitedEdit && noteSpeseDraftStorageKey) ? nsReadDraftSnapshot(noteSpeseDraftStorageKey) : null
     const effectiveNotaSpeseCasistica = activeNotaSpeseCasistica || String(savedDraftSnapshot?.activeCasistica || '').trim()
     if (savedDraftSnapshot && Array.isArray(savedDraftSnapshot.rows)) {
       // La bozza locale può essere più vecchia dei dati server: se nel frattempo
@@ -6940,12 +6799,13 @@ const loadNotaSpeseDraft = React.useCallback(async () => {
     setNoteSpeseRowsLoadedKey(`${Number(currentOid)}|${String(currentGlobalId || '').trim()}`)
     if (!raw) setNoteSpeseMsg(null)
   } catch (e: any) {
+    console.error('[GII] Errore caricamento righe nota spese:', e?.message || String(e), e)
     setNoteSpeseRowsLoadedKey(`${Number(currentOid)}|${String(currentGlobalId || '').trim()}`)
     setNoteSpeseMsg({ ok: false, text: e?.message || String(e) })
   } finally {
     setNoteSpeseBusy(false)
   }
-}, [mode, currentOid, currentGlobalId, noteSpeseMissing.length, noteSpeseCfg, activeNotaSpeseCasistica, activeAttrezzaturaRiferimentoId, art30RecuperoMode, noteSpeseDraftStorageKey])
+}, [mode, currentOid, currentGlobalId, noteSpeseMissing.length, noteSpeseCfg, activeNotaSpeseCasistica, activeAttrezzaturaRiferimentoId, art30RecuperoMode, noteSpeseDraftStorageKey, isReadOnly, isRiAgrTecLimitedEdit])
 
 const refreshNotaSpeseSummary = React.useCallback(async () => {
   const rows = nsRowsByCategoryToFlat(noteSpeseRowsDraft)
@@ -7317,21 +7177,17 @@ React.useEffect(() => {
   React.useEffect(() => {
     let cancelled = false
     if (activeNotaSpeseCasistica !== 'C104_ATTREZZATURE_DANNEGGIATE' || !attrezzatureParametriUrl) {
-      console.log('[GII-DEBUG attrezzature] skip: casistica=', activeNotaSpeseCasistica, 'url=', attrezzatureParametriUrl)
       setAttrezzatureCatalog([])
       setAttrezzatureCauzioneUnitaria(0)
       return () => { cancelled = true }
     }
     void (async () => {
-      console.log('[GII-DEBUG attrezzature] fetch, url=', attrezzatureParametriUrl)
       try {
         const bundle = await loadArt30ParametersBundle(attrezzatureParametriUrl, g('data_rilevazione'))
-        console.log('[GII-DEBUG attrezzature] bundle ricevuto:', JSON.stringify(bundle))
         if (cancelled) return
         setAttrezzatureCatalog(bundle.attrezzature)
         setAttrezzatureCauzioneUnitaria(bundle.cauzione)
-      } catch (e: any) {
-        console.log('[GII-DEBUG attrezzature] ERRORE', e?.message || String(e))
+      } catch {
         if (!cancelled) { setAttrezzatureCatalog([]); setAttrezzatureCauzioneUnitaria(0) }
       }
     })()
@@ -7380,8 +7236,6 @@ React.useEffect(() => {
   const n3parziale = g('norma15_parziale')
   const n3totale   = g('norma15_totale')
 
-  const showSup15 = (tipoAbuso === 'parziale' && (n3parziale === 'Art15.1' || n3parziale === 'Art15.2')) ||
-                    (tipoAbuso === 'totale'   && (n3totale   === 'Art15.3' || n3totale   === 'Art15.4'))
   const hasTipoAbuso15 = tipoAbuso === 'parziale' || tipoAbuso === 'totale'
   const art15Selected = art15SelectedUi || draftHasArt15Selection(draft)
 
@@ -8384,25 +8238,25 @@ ${e?.message || String(e)}`
       instanceMinOrdine.set(activeAttrezzaturaRiferimentoId, Number.MAX_SAFE_INTEGER)
     }
     const catalogByCode = new Map(attrezzatureCatalog.map(c => [c.codice, c.descrizione]))
-    console.log('[GII-DEBUG combo3] attrezzatureCatalog=', JSON.stringify(attrezzatureCatalog), 'instanceIds trovati=', JSON.stringify(Array.from(instanceMinOrdine.keys())))
     const byTipo = new Map<string, string[]>()
     Array.from(instanceMinOrdine.entries())
       .sort((a, b) => a[1] - b[1])
       .forEach(([instanceId]) => {
         const tipoCode = attrezzaturaInstanceTipoCode(instanceId)
-        console.log('[GII-DEBUG combo3] instanceId=', instanceId, '-> tipoCode estratto=', tipoCode, '-> trovato in catalogo?', catalogByCode.has(tipoCode))
         const list = byTipo.get(tipoCode) || []
         list.push(instanceId)
         byTipo.set(tipoCode, list)
       })
     const options: Array<{ id: string; label: string }> = []
-    byTipo.forEach((instanceIds, tipoCode) => {
-      const baseLabel = catalogByCode.get(tipoCode)
-      if (!baseLabel) return // niente descrizione disponibile: mai mostrare il codice grezzo, si aspetta il catalogo
-      instanceIds.forEach((instanceId, idx) => {
-        options.push({ id: instanceId, label: `${baseLabel} ${idx + 1}` })
+    Array.from(byTipo.entries())
+      .sort(([tipoA], [tipoB]) => (catalogByCode.get(tipoA) || '').localeCompare(catalogByCode.get(tipoB) || '', 'it'))
+      .forEach(([tipoCode, instanceIds]) => {
+        const baseLabel = catalogByCode.get(tipoCode)
+        if (!baseLabel) return // niente descrizione disponibile: mai mostrare il codice grezzo, si aspetta il catalogo
+        instanceIds.forEach((instanceId, idx) => {
+          options.push({ id: instanceId, label: instanceIds.length > 1 ? `${baseLabel} ${idx + 1}` : baseLabel })
+        })
       })
-    })
     return options
   }, [noteSpeseRowsDraft, attrezzatureCatalog, activeAttrezzaturaRiferimentoId])
   const activeAttrezzaturaRiferimentoRequired = isArt30NotaSpeseCasistica && art30RecuperoMode === 'recuperabile' && !activeAttrezzaturaRiferimentoId
@@ -9919,7 +9773,7 @@ ${e?.message || String(e)}`
                     }
                     return
                   }
-                  try { const pg = resolvePageId('browser-nota-spese'); if (pg) { if (noteSpeseDraftStorageKey) nsWriteDraftSnapshot(noteSpeseDraftStorageKey, noteSpeseRowsDraft, activeNotaSpeseCasistica); try { if (isArt30NotaSpeseCasistica && art30RecuperoMode === 'non_recuperabile') { sessionStorage.setItem('GII_NS_FORCE_SOURCE', 'ATTREZZATURE'); sessionStorage.removeItem('GII_NS_EXCLUDE_SOURCE') } else { sessionStorage.removeItem('GII_NS_FORCE_SOURCE'); sessionStorage.setItem('GII_NS_EXCLUDE_SOURCE', 'ATTREZZATURE') } } catch {} try { const curPage = getAppStore()?.getState()?.appRuntimeInfo?.currentPageId || ''; sessionStorage.setItem('GII_NS_RETURN_PAGE', curPage) } catch {} UrlManager.getInstance().changePage(pg) } else { setNoteSpeseMsg({ ok: false, text: 'Pagina "browser-nota-spese" non trovata. Configura una pagina ExB con il widget consultazione prezzario e il widget gii-ns-carrello.' }) } } catch (e: any) { setNoteSpeseMsg({ ok: false, text: e?.message || String(e) }) }
+                  try { const pg = resolvePageId('browser-nota-spese'); if (pg) { if (noteSpeseDraftStorageKey) nsWriteDraftSnapshot(noteSpeseDraftStorageKey, noteSpeseRowsDraft, activeNotaSpeseCasistica); try { if (isArt30NotaSpeseCasistica && art30RecuperoMode === 'non_recuperabile') { sessionStorage.setItem('GII_NS_FORCE_SOURCE', 'ATTREZZATURE'); sessionStorage.removeItem('GII_NS_EXCLUDE_SOURCE') } else { sessionStorage.removeItem('GII_NS_FORCE_SOURCE'); sessionStorage.setItem('GII_NS_EXCLUDE_SOURCE', 'ATTREZZATURE') } window.dispatchEvent(new CustomEvent('gii:ns-source-flags-changed')) } catch {} try { const curPage = getAppStore()?.getState()?.appRuntimeInfo?.currentPageId || ''; sessionStorage.setItem('GII_NS_RETURN_PAGE', curPage) } catch {} UrlManager.getInstance().changePage(pg) } else { setNoteSpeseMsg({ ok: false, text: 'Pagina "browser-nota-spese" non trovata. Configura una pagina ExB con il widget consultazione prezzario e il widget gii-ns-carrello.' }) } } catch (e: any) { setNoteSpeseMsg({ ok: false, text: e?.message || String(e) }) }
                 }}
                 disabled={noteSpeseBrowseDisabled}
                 title={!activeNotaSpeseCasistica || noteSpeseCasistiche.length === 0 ? 'Seleziona prima una violazione collegabile alla nota spese.' : undefined}
@@ -10168,7 +10022,7 @@ ${e?.message || String(e)}`
                 </div>
                 {isArt30NotaSpeseCasistica && (
                   <div style={{ flex: '0 0 auto', width: 220, maxWidth: '100%' }}>
-                    <label style={{ fontSize: 13, fontWeight: 900, color: noteSpeseCasisticaDisabled ? '#64748b' : '#0f4f50' }}>Attrezzatura</label>
+                    <label style={{ fontSize: 13, fontWeight: 900, color: noteSpeseCasisticaDisabled ? '#64748b' : '#0f4f50' }}>Seleziona lo stato</label>
                     <select
                       value={art30RecuperoMode}
                       onChange={(e) => { setArt30RecuperoMode(e.target.value as 'recuperabile' | 'non_recuperabile'); setActiveAttrezzaturaRiferimentoId(''); setAttrezzatureNuovoPickerOpen(false) }}
@@ -10192,39 +10046,43 @@ ${e?.message || String(e)}`
                     </select>
                   </div>
                 )}
-                {isArt30NotaSpeseCasistica && art30RecuperoMode === 'recuperabile' && (
+                {isArt30NotaSpeseCasistica && art30RecuperoMode === 'recuperabile' && (() => {
+                  const noAttrezzatureCreate = attrezzatureIstanzeOptions.length === 0
+                  const noteSpeseRoleReadOnly = isReadOnly || isRiAgrTecLimitedEdit
+                  const comboDisabled = noteSpeseCasisticaDisabled || noAttrezzatureCreate
+                  return (
                   <div style={{ flex: '0 0 auto', width: 460, maxWidth: '100%' }}>
-                    <label style={{ fontSize: 13, fontWeight: 900, color: noteSpeseCasisticaDisabled ? '#64748b' : '#0f4f50' }}>Seleziona l'attrezzatura</label>
+                    <label style={{ fontSize: 13, fontWeight: 900, color: comboDisabled ? '#64748b' : '#0f4f50' }}>Seleziona l'attrezzatura</label>
                     <div style={{ display: 'flex', gap: 8, alignItems: 'flex-start', marginTop: 4 }}>
                       <select
                         value={activeAttrezzaturaRiferimentoId}
                         onChange={(e) => setActiveAttrezzaturaRiferimentoId(e.target.value)}
                         style={{
-                          ...fieldBaseStyle(formStyle, noteSpeseCasisticaDisabled),
+                          ...fieldBaseStyle(formStyle, comboDisabled),
                           height: 38,
                           flex: 1,
                           minWidth: 0,
                           display: 'block',
-                          border: noteSpeseCasisticaDisabled ? '1px solid #cbd5e1' : (activeAttrezzaturaRiferimentoId ? '1px solid #0f7375' : '1px solid #b42318'),
+                          border: comboDisabled ? '1px solid #cbd5e1' : (activeAttrezzaturaRiferimentoId ? '1px solid #0f7375' : '1px solid #b42318'),
                           fontWeight: 800,
-                          color: noteSpeseCasisticaDisabled ? String(formStyle.fieldDisabledColor || '#64748b') : '#16375a',
-                          background: noteSpeseCasisticaDisabled ? String(formStyle.fieldDisabledBg || '#e7eef7') : '#fff',
-                          cursor: noteSpeseCasisticaDisabled ? 'not-allowed' : 'pointer',
-                          opacity: noteSpeseCasisticaDisabled ? 0.78 : 1
+                          color: comboDisabled ? String(formStyle.fieldDisabledColor || '#64748b') : '#16375a',
+                          background: comboDisabled ? String(formStyle.fieldDisabledBg || '#e7eef7') : '#fff',
+                          cursor: comboDisabled ? 'not-allowed' : 'pointer',
+                          opacity: comboDisabled ? 0.78 : 1
                         }}
-                        disabled={noteSpeseCasisticaDisabled}
+                        disabled={comboDisabled}
                       >
-                        <option value=''>Seleziona attrezzatura</option>
+                        <option value=''>{noAttrezzatureCreate ? 'Nessuna attrezzatura presente' : 'Seleziona attrezzatura'}</option>
                         {attrezzatureIstanzeOptions.map(opt => <option key={opt.id} value={opt.id}>{opt.label}</option>)}
                       </select>
-                      {!noteSpeseCasisticaDisabled && (
+                      {!noteSpeseCasisticaDisabled && !noteSpeseRoleReadOnly && (
                         <div style={{ position: 'relative', flex: '0 0 auto' }}>
                           <button
                             type='button'
                             onClick={() => setAttrezzatureNuovoPickerOpen(v => !v)}
                             style={{ height: 38, padding: '0 12px', borderRadius: 6, border: '1px solid #0f7375', background: '#fff', color: '#0f7375', fontWeight: 800, fontSize: 12, cursor: 'pointer', whiteSpace: 'nowrap' }}
                           >
-                            + Nuova attrezzatura
+                            + Aggiungi attrezzatura
                           </button>
                           {attrezzatureNuovoPickerOpen && (
                             <div style={{ position: 'absolute', top: 42, right: 0, zIndex: 20, background: '#fff', border: '1px solid #cbd5e1', borderRadius: 8, boxShadow: '0 6px 20px rgba(0,0,0,0.18)', minWidth: 240, overflow: 'hidden' }}>
@@ -10247,9 +10105,10 @@ ${e?.message || String(e)}`
                         </div>
                       )}
                     </div>
-                    <div style={{ fontSize: 11, color: noteSpeseCasisticaDisabled ? '#64748b' : '#336666', lineHeight: 1.35, marginTop: 4 }}>Le spese di riparazione si raggruppano per tipo di attrezzatura.</div>
+                    <div style={{ fontSize: 11, color: comboDisabled ? '#64748b' : '#336666', lineHeight: 1.35, marginTop: 4 }}>Le spese di riparazione si raggruppano per tipo di attrezzatura.</div>
                   </div>
-              )}
+                  )
+                })()}
                 <span style={{
                   alignSelf: 'flex-start',
                   marginLeft: 'auto',
@@ -10336,7 +10195,7 @@ ${e?.message || String(e)}`
           </>
         )}
         {isArt30NotaSpeseCasistica && art30RecuperoMode === 'non_recuperabile' && (
-          <NoteSpeseManager category='RA' title='Risarcimento attrezzatura' rows={activeNotaSpeseRows['RA']} cauzioneUnitaria={attrezzatureCauzioneUnitaria} onRowsChange={(nextRows) => { if (isReadOnly || isRiAgrTecLimitedEdit || !activeNotaSpeseCasistica) return; setNoteSpeseRowsDraft((prev) => mergeCategoryRowsForCasistica(prev, 'RA', activeNotaSpeseCasistica, nextRows)) }} onDirtyChange={(dirty) => { if (isReadOnly || isRiAgrTecLimitedEdit) return; setNoteSpeseFormDirtyByCategory((prev) => ({ ...prev, RA: dirty })) }} resetKey={noteSpeseManagerResetKey} readonly={isReadOnly || isRiAgrTecLimitedEdit || !activeNotaSpeseCasistica} />
+          <NoteSpeseManager category='RA' title='Attrezzature' rows={activeNotaSpeseRows['RA']} cauzioneUnitaria={attrezzatureCauzioneUnitaria} onRowsChange={(nextRows) => { if (isReadOnly || isRiAgrTecLimitedEdit || !activeNotaSpeseCasistica) return; setNoteSpeseRowsDraft((prev) => mergeCategoryRowsForCasistica(prev, 'RA', activeNotaSpeseCasistica, nextRows)) }} onDirtyChange={(dirty) => { if (isReadOnly || isRiAgrTecLimitedEdit) return; setNoteSpeseFormDirtyByCategory((prev) => ({ ...prev, RA: dirty })) }} resetKey={noteSpeseManagerResetKey} readonly={isReadOnly || isRiAgrTecLimitedEdit || !activeNotaSpeseCasistica} />
         )}
       </div>
     </div>
@@ -11519,28 +11378,6 @@ function writeEditIntent (ei: EditIntentInfo | null) {
     }
     sessionStorage.setItem('GII_EDIT_INTENT', JSON.stringify({ ...ei, ts: Date.now() }))
   } catch {}
-}
-
-function findMapHostElement (mapWidgetId?: string | null): HTMLElement | null {
-  if (typeof document === 'undefined') return null
-  const id = String(mapWidgetId || '').trim()
-  const selectors = [
-    id ? `[data-widgetid="${id}"]` : '',
-    id ? `[widgetid="${id}"]` : '',
-    id ? `#${id}` : '',
-    '.jimu-widget-map',
-    '.jimu-widget.jimu-widget-map',
-    '.esri-view-root',
-    '.esri-view',
-    '.esri-view-surface'
-  ].filter(Boolean)
-  for (const sel of selectors) {
-    const el = document.querySelector(sel) as HTMLElement | null
-    if (!el) continue
-    const host = el.closest?.('.jimu-widget-map, .jimu-widget.jimu-widget-map, [data-widgetid], [widgetid]') as HTMLElement | null
-    return host || el
-  }
-  return null
 }
 
 function normalizeLayerTitleForMatch (raw: any): string {
