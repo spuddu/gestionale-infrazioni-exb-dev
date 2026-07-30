@@ -5268,8 +5268,8 @@ function NoteSpeseManager (props: NsManagerProps) {
                 <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
                   <span style={{ fontSize: 12, color: '#444' }}>Matricola (5 cifre)</span>
                   <input type='text' inputMode='numeric' value={editMatricola} onChange={(e) => setEditMatricola(e.target.value.replace(/\D/g, '').slice(0, 5))} onKeyDown={(e) => { if (e.key === 'Enter') saveEdit(); if (e.key === 'Escape') cancelEdit() }} maxLength={5} placeholder='00000' style={{ width: 70, padding: '5px 8px', border: '1px solid #aac4e0', borderRadius: 4, fontSize: 13, textAlign: 'right' }} autoFocus />
-                  <label style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 12, color: '#444', cursor: 'pointer' }}>
-                    <input type='checkbox' checked={editCauzione} onChange={(e) => setEditCauzione(e.target.checked)} />
+                  <label style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 12, color: '#444', cursor: 'pointer', margin: 0 }}>
+                    <input type='checkbox' checked={editCauzione} onChange={(e) => setEditCauzione(e.target.checked)} style={{ margin: 0 }} />
                     Decurtazione cauzione
                   </label>
                   <span style={{ fontSize: 12, color: '#375623', fontWeight: 700 }}>{money(nsSafeNum(rows[editIdx].prezzo_unitario_snapshot, 0) - (editCauzione ? (Number(props.cauzioneUnitaria) || 0) : 0))} €</span>
@@ -6701,6 +6701,8 @@ React.useEffect(() => {
   setActivePrezzario(null)
 }, [noteSpeseCfg.importPrezzariUrl])
 
+const noteSpeseExpectedCodesKeyForRestore = React.useMemo(() => getNotaSpeseCasistiche(draft).map(c => c.codice).sort().join('|'), [draft])
+
 const loadNotaSpeseDraft = React.useCallback(async () => {
   if (mode !== 'edit' || currentOid == null || !currentGlobalId || noteSpeseMissing.length > 0) return
   setNoteSpeseBusy(true)
@@ -6729,7 +6731,8 @@ const loadNotaSpeseDraft = React.useCallback(async () => {
         ? snapshotFlat
         : [...snapshotFlat, ...serverFlat.filter(r => missingFromSnapshot.includes(String(r.codice_casistica || '').trim()))]
       draft = nsRowsFromFlat(mergedFlat)
-      if (!activeNotaSpeseCasistica && effectiveNotaSpeseCasistica) setActiveNotaSpeseCasistica(effectiveNotaSpeseCasistica)
+      const noteSpeseExpectedCodesForRestore = new Set(noteSpeseExpectedCodesKeyForRestore.split('|').filter(Boolean))
+      if (!activeNotaSpeseCasistica && effectiveNotaSpeseCasistica && noteSpeseExpectedCodesForRestore.has(effectiveNotaSpeseCasistica)) setActiveNotaSpeseCasistica(effectiveNotaSpeseCasistica)
     }
     let raw: string | null = null
     try { raw = sessionStorage.getItem(GII_NS_CART_KEY) } catch {}
@@ -6805,7 +6808,7 @@ const loadNotaSpeseDraft = React.useCallback(async () => {
   } finally {
     setNoteSpeseBusy(false)
   }
-}, [mode, currentOid, currentGlobalId, noteSpeseMissing.length, noteSpeseCfg, activeNotaSpeseCasistica, activeAttrezzaturaRiferimentoId, art30RecuperoMode, noteSpeseDraftStorageKey, isReadOnly, isRiAgrTecLimitedEdit])
+}, [mode, currentOid, currentGlobalId, noteSpeseMissing.length, noteSpeseCfg, activeNotaSpeseCasistica, activeAttrezzaturaRiferimentoId, art30RecuperoMode, noteSpeseDraftStorageKey, isReadOnly, isRiAgrTecLimitedEdit, noteSpeseExpectedCodesKeyForRestore])
 
 const refreshNotaSpeseSummary = React.useCallback(async () => {
   const rows = nsRowsByCategoryToFlat(noteSpeseRowsDraft)

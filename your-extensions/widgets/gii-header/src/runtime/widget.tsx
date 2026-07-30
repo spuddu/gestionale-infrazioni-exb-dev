@@ -1647,6 +1647,8 @@ async function loadPortalUserFullNameMap (values: string[]): Promise<Map<string,
   return out
 }
 
+const __giiUserFullNameCache = new Map<string, string | null>()
+
 async function loadGiiUserFullNameMap (values: string[]): Promise<Map<string, string>> {
   const candidates = Array.from(new Set(
     (values || [])
@@ -1657,6 +1659,21 @@ async function loadGiiUserFullNameMap (values: string[]): Promise<Map<string, st
   const wanted = new Set(candidates.map(normalizeUsernameLookupKey).filter(Boolean))
   const out = new Map<string, string>()
   if (!wanted.size) return out
+
+  // Serve dalla cache tutto ciò che è già stato tentato in questa sessione di pagina,
+  // trovato o meno: senza questo, ogni ciclo di polling (ogni 5s) rifaceva da capo sia la
+  // query completa su GII_utenti sia le chiamate individuali al profilo AGOL per ogni
+  // utente — e un utente mai risolvibile (es. per permessi) veniva ritentato all'infinito.
+  const stillWanted = new Set<string>()
+  wanted.forEach(key => {
+    if (__giiUserFullNameCache.has(key)) {
+      const cached = __giiUserFullNameCache.get(key)
+      if (cached) out.set(key, cached)
+    } else {
+      stillWanted.add(key)
+    }
+  })
+  if (!stillWanted.size) return out
 
   try {
     const FeatureLayer = await loadEsriModule<any>('esri/layers/FeatureLayer')
@@ -1694,7 +1711,7 @@ async function loadGiiUserFullNameMap (values: string[]): Promise<Map<string, st
         const username = String(attrValueCi(attrs, ['username', 'USERNAME', 'user_name', 'agol_username']) ?? '').trim()
         const fullName = fullNameFromGiiUserAttrs(attrs)
         if (!fullName) return
-        addGiiUserLookupAliases(out, wanted, attrs, username, fullName)
+        addGiiUserLookupAliases(out, stillWanted, attrs, username, fullName)
       })
 
       if (features.length < pageSize || out.size >= wanted.size) break
@@ -1706,9 +1723,13 @@ async function loadGiiUserFullNameMap (values: string[]): Promise<Map<string, st
   if (unresolvedCandidates.length) {
     const portalNames = await loadPortalUserFullNameMap(unresolvedCandidates)
     portalNames.forEach((fullName, key) => {
-      if (wanted.has(key) && !out.has(key)) out.set(key, fullName)
+      if (stillWanted.has(key) && !out.has(key)) out.set(key, fullName)
     })
   }
+
+  stillWanted.forEach(key => {
+    __giiUserFullNameCache.set(key, out.get(key) || null)
+  })
 
   return out
 }

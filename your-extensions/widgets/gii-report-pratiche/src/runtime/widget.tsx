@@ -244,12 +244,22 @@ const GII_RUNTIME_VIEWS: RuntimeDsView[] = [
     settoreCode: 'D6'
   },
   {
-    key: 'AMM_ALL',
+    key: 'AMM_RI_DA',
     viewName: 'GII_VIEW_AMM',
     itemId: 'ff666692bc8f4369aba1fbfe6c5a7dd4',
     serviceUrl: 'https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_VIEW_AMM/FeatureServer',
     layerUrl: 'https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_VIEW_AMM/FeatureServer/0',
-    roles: ['RI', 'TI', 'DA', 'RI_AMM', 'TI_AMM'],
+    roles: ['DA', 'RI_AMM'],
+    areaCode: 'AMM',
+    settoreCode: ''
+  },
+  {
+    key: 'AMM_TI',
+    viewName: 'GII_VIEW_AMM_ALL',
+    itemId: '',
+    serviceUrl: 'https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_VIEW_AMM_ALL/FeatureServer',
+    layerUrl: 'https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_VIEW_AMM_ALL/FeatureServer/0',
+    roles: ['TI_AMM'],
     areaCode: 'AMM',
     settoreCode: ''
   },
