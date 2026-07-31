@@ -484,6 +484,26 @@ async function signIn(): Promise<void> {
   window.dispatchEvent(new Event('gii:userLoaded'))
 }
 
+async function switchAccount(): Promise<void> {
+  const sm: any = SessionManager.getInstance()
+  if (typeof sm?.switchAccountByResourceUrl === 'function') {
+    try {
+      await sm.switchAccountByResourceUrl(`${GII_PORTAL}/sharing/rest`)
+    } catch {
+      // Utente ha annullato lo switch account, o non è andato a buon fine: nessuna
+      // azione, resta collegato come prima (non deve disconnettersi comunque).
+      return
+    }
+    try { delete (window as any).__giiUserRole } catch { }
+    window.dispatchEvent(new Event('gii:userLoaded'))
+    return
+  }
+  // Fallback per versioni prive di switchAccountByResourceUrl: vecchio comportamento
+  // (disconnetti e riconnetti), meno fluido ma funzionante.
+  await signOut()
+  await signIn()
+}
+
 async function signOut(): Promise<void> {
   try { delete (window as any).__giiUserRole } catch { (window as any).__giiUserRole = null }
   try {
@@ -3225,7 +3245,7 @@ export default function Widget(props: Props) {
                       <button type='button' disabled={signingIn}
                         onClick={async () => {
                           setSigning(true)
-                          try { setMenuOpen(false); await performSignOut(); await signIn() } finally { setSigning(false) }
+                          try { setMenuOpen(false); await switchAccount() } finally { setSigning(false) }
                         }}
                         style={menuItemBtnStyle}>
                         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">

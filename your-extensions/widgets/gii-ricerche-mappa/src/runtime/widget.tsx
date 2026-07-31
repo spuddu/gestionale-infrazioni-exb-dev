@@ -332,6 +332,79 @@ function collectMapLayers(view: any): any[] {
   try { view?.map?.layers?.forEach?.((l: any) => push(l)) } catch {}
   return out
 }
+function readGiiUserForMapVisibility (): { username: string; ruoloCod: string; profiloCod: string; areaCod: string; settoreCod: string; isAdmin: boolean } | null {
+  const raw: any = (window as any).__giiUserRole
+  if (!raw?.username) return null
+  return {
+    username: String(raw.username || '').trim(),
+    ruoloCod: String(raw.ruoloCod || raw.ruolo_cod || '').trim(),
+    profiloCod: String(raw.profiloCod || '').trim(),
+    areaCod: String(raw.areaCod || raw.area_cod || '').trim().toUpperCase(),
+    settoreCod: String(raw.settoreCod || raw.settore_cod || '').trim().toUpperCase(),
+    isAdmin: !!raw.isAdmin
+  }
+}
+
+function sqlQuoteMapVisibility (v: string): string {
+  return String(v || '').replace(/'/g, "''")
+}
+
+// Stessa logica di visibilità già in uso in gii-elenco-pratiche-pro/gii-dashboard/
+// gii-report-pratiche, tradotta in clausola SQL: qui serve perché il layer di base della
+// mappa (GII_INFRAZIONI_VIEW_ALL) non è già scoped per ruolo/settore come le viste usate
+// altrove — RI/DT vedono tutta la loro area, RZ solo il proprio settore, TI solo le
+// pratiche assegnate a lui nel proprio settore, DA/RI_AMM tutta l'area AMM in fase
+// sanzionatoria, TI_AMM solo le proprie pratiche assegnate in fase sanzionatoria.
+function buildRoleVisibilityWhereClause (user: ReturnType<typeof readGiiUserForMapVisibility>): string {
+  if (!user || user.isAdmin) return '1=1'
+  const role = String(user.profiloCod || user.ruoloCod || '').toUpperCase().trim()
+  const area = user.areaCod
+  const settore = user.settoreCod
+  const me = sqlQuoteMapVisibility(user.username)
+  if (!role) return '1=1'
+
+  const faseSanzionatoriaClause =
+    "((stato_RI_AMM IS NOT NULL AND stato_RI_AMM <> '') OR " +
+    "(esito_RI_AMM IS NOT NULL AND esito_RI_AMM <> '') OR " +
+    "(stato_TI_AMM IS NOT NULL AND stato_TI_AMM <> '') OR " +
+    "(esito_TI_AMM IS NOT NULL AND esito_TI_AMM <> '') OR " +
+    "(determinazione_stato IS NOT NULL AND determinazione_stato <> '') OR " +
+    "(determinazione_numero IS NOT NULL AND determinazione_numero <> ''))"
+
+  if (role === 'DA' || role === 'RI_AMM') {
+    return `area_cod = 'AMM' AND ${faseSanzionatoriaClause}`
+  }
+
+  if (role === 'TI_AMM') {
+    return `area_cod = 'AMM' AND ${faseSanzionatoriaClause} AND (UPPER(ti_amm_assegnato_username) = UPPER('${me}') OR UPPER(ti_amm_assegnato_nome) = UPPER('${me}'))`
+  }
+
+  if ((role === 'RI' || role === 'DT') && (area === 'AGR' || area === 'TEC')) {
+    return `area_cod = '${area}'`
+  }
+
+  if (role === 'RZ' && (area === 'AGR' || area === 'TEC') && settore) {
+    return `area_cod = '${area}' AND settore_cod = '${settore}'`
+  }
+
+  if (role === 'TI' && (area === 'AGR' || area === 'TEC')) {
+    const settoreClause = settore ? ` AND settore_cod = '${settore}'` : ''
+    return `area_cod = '${area}'${settoreClause} AND (UPPER(ti_assegnato_username) = UPPER('${me}') OR ((ti_assegnato_username IS NULL OR ti_assegnato_username = '') AND (UPPER(created_user) = UPPER('${me}') OR UPPER(Creator) = UPPER('${me}'))))`
+  }
+
+  // Ruolo non riconosciuto/non gestito qui: nessuna restrizione, per evitare di nascondere
+  // per errore pratiche che dovrebbero essere visibili.
+  return '1=1'
+}
+
+function findGiiInfrazioniBaseLayer (view: any): any {
+  const layers = collectMapLayers(view)
+  return layers.find((l: any) => {
+    const u = txt(l?.url || l?.sourceJSON?.url || '').toUpperCase()
+    return u.includes('GII_INFRAZIONI_VIEW_ALL')
+  }) || null
+}
+
 function findMapLayer(view: any, search: MapSearchConfig): any {
   const url = normalizeLayerUrl(search.layerUrl, search.layerLayerId)
   const rawTitle = txt(search.layerTitle).trim().toLowerCase()
@@ -549,6 +622,22 @@ export default function Widget(props: Props) {
   }, [mapView])
 
   React.useEffect(() => () => { try { highlightRef.current?.remove?.() } catch {} }, [])
+
+  React.useEffect(() => {
+    if (!mapView) return
+    let cancelled = false
+    ;(async () => {
+      try {
+        const baseLayer = findGiiInfrazioniBaseLayer(mapView)
+        if (!baseLayer) return
+        if (typeof baseLayer.load === 'function') { try { await baseLayer.load() } catch {} }
+        if (cancelled) return
+        const user = readGiiUserForMapVisibility()
+        baseLayer.definitionExpression = buildRoleVisibilityWhereClause(user)
+      } catch { /* nessun layer di base trovato o utente non ancora disponibile: nessuna restrizione applicata */ }
+    })()
+    return () => { cancelled = true }
+  }, [mapView])
 
   React.useEffect(() => {
     let cancelled = false
