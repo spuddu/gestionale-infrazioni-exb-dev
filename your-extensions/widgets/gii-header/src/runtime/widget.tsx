@@ -484,26 +484,6 @@ async function signIn(): Promise<void> {
   window.dispatchEvent(new Event('gii:userLoaded'))
 }
 
-async function switchAccount(): Promise<void> {
-  const sm: any = SessionManager.getInstance()
-  if (typeof sm?.switchAccountByResourceUrl === 'function') {
-    try {
-      await sm.switchAccountByResourceUrl(`${GII_PORTAL}/sharing/rest`)
-    } catch {
-      // Utente ha annullato lo switch account, o non è andato a buon fine: nessuna
-      // azione, resta collegato come prima (non deve disconnettersi comunque).
-      return
-    }
-    try { delete (window as any).__giiUserRole } catch { }
-    window.dispatchEvent(new Event('gii:userLoaded'))
-    return
-  }
-  // Fallback per versioni prive di switchAccountByResourceUrl: vecchio comportamento
-  // (disconnetti e riconnetti), meno fluido ma funzionante.
-  await signOut()
-  await signIn()
-}
-
 async function signOut(): Promise<void> {
   try { delete (window as any).__giiUserRole } catch { (window as any).__giiUserRole = null }
   try {
@@ -2541,6 +2521,7 @@ export default function Widget(props: Props) {
   // Flag per forzare il reset dei datasource dopo un ciclo logout→login.
   // In alcuni casi (ExB 1.19) l'Elenco può restare in loading infinito se non si reinizializza l'app.
   const NEEDS_DS_RESET_KEY = '__giiNeedsDsReset'
+  const SWITCH_ACCOUNT_PENDING_KEY = '__giiSwitchAccountPending'
 
   // ── Refs configurazione (per usare i valori aggiornati negli handler registrati una sola volta)
   const afterInRef  = React.useRef<string>(String(cfg.redirectAfterSignIn ?? ''))
@@ -2604,6 +2585,22 @@ export default function Widget(props: Props) {
     // Primo bootstrap (mount)
     refresh('mount')
     window.addEventListener('gii:userLoaded', onExternal)
+
+    // Se arriviamo qui da un reload forzato per "Cambia account" (memoria JS
+    // completamente fresca, IdentityManager mai toccato in questa pagina), completa
+    // il login ora: evita così il crash interno di ExB che si presenta quando si fa
+    // disconnetti+riconnetti nella stessa sessione di pagina senza un vero reload.
+    try {
+      const pending = sessionStorage.getItem(SWITCH_ACCOUNT_PENDING_KEY)
+      console.log('[GII-DEBUG switch] mount, flag pendente=', pending)
+      if (pending === '1') {
+        sessionStorage.removeItem(SWITCH_ACCOUNT_PENDING_KEY)
+        console.log('[GII-DEBUG switch] chiamo signIn()')
+        signIn().then(() => console.log('[GII-DEBUG switch] signIn() completata')).catch((e) => console.log('[GII-DEBUG switch] signIn() ERRORE', e?.message || String(e)))
+      }
+    } catch (e) {
+      console.log('[GII-DEBUG switch] ERRORE nel controllo flag', e)
+    }
 
     // Login/logout tramite widget standard: ascoltiamo IdentityManager
     loadEsriModule<any>('esri/identity/IdentityManager')
@@ -3245,7 +3242,19 @@ export default function Widget(props: Props) {
                       <button type='button' disabled={signingIn}
                         onClick={async () => {
                           setSigning(true)
-                          try { setMenuOpen(false); await switchAccount() } finally { setSigning(false) }
+                          try {
+                            setMenuOpen(false)
+                            try { sessionStorage.setItem(SWITCH_ACCOUNT_PENDING_KEY, '1') } catch { }
+                            await performSignOut()
+                            // Ricarico davvero il browser (non solo navigo nella SPA): il
+                            // login viene ripreso al mount, su una pagina fresca, per
+                            // evitare un crash interno noto di ExB che si presenta quando
+                            // si fa disconnetti+riconnetti nella stessa sessione di pagina.
+                            window.location.reload()
+                          } catch {
+                            try { sessionStorage.removeItem(SWITCH_ACCOUNT_PENDING_KEY) } catch { }
+                            setSigning(false)
+                          }
                         }}
                         style={menuItemBtnStyle}>
                         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
