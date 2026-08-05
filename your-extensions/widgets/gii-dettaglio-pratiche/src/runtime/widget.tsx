@@ -8,6 +8,7 @@ import { defaultConfig, DETAIL_DEFAULT_TAB_FIELDS, DETAIL_NEVER_SHOW_FIELDS, DET
 import { filterGiiAttachmentsForTechnicalRoles } from '../../../_shared/gii-anteprime/allegati/gii-attachment-viewer'
 import { ensureNsdJsonOnlyQueryFormat } from '../../../_shared/gii-anteprime/nsd-query-format-fix'
 import { isGiiTiAmmUser, isPracticeAssignedToCurrentTiAmm } from '../../../_shared/gii-access/ti-amm-assignment'
+import { isGiiPracticePayloadCurrent, isGiiPracticeSelectionContextCurrent } from '../../../_shared/gii-selection/practice-context'
 
 
 
@@ -291,13 +292,23 @@ function writeSelectedFeatureCache (
   }
 }
 
+let runtimeDsProxyGlobalEpoch = 0
+const runtimeDsProxyUrlEpoch: Record<string, number> = {}
+
 function invalidateRuntimeProxyCache (layerUrl?: string | null) {
   try {
     const url = String(layerUrl || '').trim()
     if (!url) {
+      runtimeDsProxyGlobalEpoch += 1
+      for (const key of Object.keys(runtimeDsProxyPromises)) {
+        try { delete runtimeDsProxyPromises[key] } catch {}
+      }
       try { delete (window as any).__giiRuntimeDsProxyCache } catch {}
       return
     }
+
+    runtimeDsProxyUrlEpoch[url] = Number(runtimeDsProxyUrlEpoch[url] || 0) + 1
+    try { delete runtimeDsProxyPromises[url] } catch {}
     try {
       const bucket = (window as any).__giiRuntimeDsProxyCache
       if (bucket && typeof bucket === 'object') delete bucket[url]
@@ -316,7 +327,7 @@ type RuntimeSelection = {
 function readRuntimeSelection (): RuntimeSelection | null {
   try {
     const mem = (window as any)?.__giiSelection
-    if (mem && mem.layerUrl && Number.isFinite(Number(mem.oid))) {
+    if (mem && isGiiPracticePayloadCurrent(mem) && mem.layerUrl && Number.isFinite(Number(mem.oid))) {
       const oid = Number(mem.oid)
       const layerUrl = String(mem.layerUrl || '').trim()
       const idFieldName = String(mem.idFieldName || 'OBJECTID').trim() || 'OBJECTID'
@@ -331,6 +342,7 @@ function readRuntimeSelection (): RuntimeSelection | null {
       }
     }
 
+    if (!isGiiPracticeSelectionContextCurrent()) return null
     const oidRaw = sessionStorage.getItem('GII_SELECTED_OID')
     const layerUrl = String(sessionStorage.getItem('GII_SELECTED_LAYER_URL') || '').trim()
     const serviceUrl = String(sessionStorage.getItem('GII_SELECTED_SERVICE_URL') || '').trim()
@@ -383,6 +395,9 @@ async function createRuntimeDsProxyFromLayerUrl (layerUrl: string, label?: strin
   } catch {}
   if (runtimeDsProxyPromises[layerUrl]) return runtimeDsProxyPromises[layerUrl]
 
+  const capturedGlobalEpoch = runtimeDsProxyGlobalEpoch
+  const capturedUrlEpoch = Number(runtimeDsProxyUrlEpoch[layerUrl] || 0)
+
   runtimeDsProxyPromises[layerUrl] = (async () => {
     const FeatureLayer = await loadEsriModule<any>('esri/layers/FeatureLayer')
     const layer = new FeatureLayer({ url: layerUrl, outFields: ['*'] })
@@ -415,11 +430,17 @@ async function createRuntimeDsProxyFromLayerUrl (layerUrl: string, label?: strin
         return { records: (res?.features || []).map((f: any) => makeRuntimeRecord(f?.attributes || {}, idFieldName, layerUrl, f?.geometry)) }
       }
     }
-    try {
-      const w = window as any
-      w.__giiRuntimeDsProxyCache = w.__giiRuntimeDsProxyCache || {}
-      w.__giiRuntimeDsProxyCache[layerUrl] = proxy
-    } catch {}
+    const cacheIsStillCurrent =
+      capturedGlobalEpoch === runtimeDsProxyGlobalEpoch &&
+      capturedUrlEpoch === Number(runtimeDsProxyUrlEpoch[layerUrl] || 0)
+
+    if (cacheIsStillCurrent) {
+      try {
+        const w = window as any
+        w.__giiRuntimeDsProxyCache = w.__giiRuntimeDsProxyCache || {}
+        w.__giiRuntimeDsProxyCache[layerUrl] = proxy
+      } catch {}
+    }
     return proxy
   })()
 
@@ -5460,23 +5481,32 @@ const queryFields = React.useMemo(() => {
     return () => window.removeEventListener('gii-selection-changed', handler as any)
   }, [])
 
+  const [forcedActive, setForcedActive] = React.useState<{ key: string; state: SelState; ownerUserKey: string } | null>(null)
+  const forcedReqRef = React.useRef(0)
+  const [detailAccessState, setDetailAccessState] = React.useState<'idle' | 'checking' | 'allowed' | 'denied' | 'error'>('idle')
+
   const [selRefreshNonce, setSelRefreshNonce] = React.useState<number>(0)
   React.useEffect(() => {
     const h = (evt?: any) => {
+      forcedReqRef.current += 1
       const cur = readRuntimeSelection()
       const detailLayerUrl = String(evt?.detail?.layerUrl || cur?.layerUrl || '').trim()
       invalidateRuntimeProxyCache(detailLayerUrl)
-      try { delete runtimeDsProxyPromises[detailLayerUrl] } catch {}
       setSelRefreshNonce(n => n + 1)
     }
     window.addEventListener('gii-force-refresh-selection', h as any)
     return () => window.removeEventListener('gii-force-refresh-selection', h as any)
   }, [])
 
-  const [forcedActive, setForcedActive] = React.useState<{ key: string; state: SelState } | null>(null)
-  const forcedReqRef = React.useRef(0)
-
-  const [detailAccessState, setDetailAccessState] = React.useState<'idle' | 'checking' | 'allowed' | 'denied'>('idle')
+  React.useEffect(() => {
+    const reset = () => {
+      forcedReqRef.current += 1
+      setForcedActive(null)
+      setDetailAccessState('idle')
+    }
+    window.addEventListener('gii-practice-context-reset', reset as EventListener)
+    return () => window.removeEventListener('gii-practice-context-reset', reset as EventListener)
+  }, [])
 
   React.useEffect(() => {
     const req = ++forcedReqRef.current
@@ -5505,7 +5535,7 @@ const queryFields = React.useMemo(() => {
         if (!currentUserIsTiAmm && baseData && Number.isFinite(baseOid) && baseOid === selection.oid) {
           const quickDs = syncCachedProxy || createRuntimeDsStubFromData(selection.layerUrl, selection.viewName, idFieldName, baseData)
           const quickState: SelState = { ds: quickDs, oid: selection.oid, idFieldName, data: mergeSelectionDataKeepingRealGeometry(baseData, null, false), sig: stateKey }
-          setForcedActive({ key: selection.layerUrl, state: quickState })
+          setForcedActive({ key: selection.layerUrl, state: quickState, ownerUserKey: currentUserKey })
           setDetailAccessState('allowed')
         } else if (currentUserIsTiAmm) {
           // Mai mostrare dati memorizzati prima di aver verificato l'assegnazione.
@@ -5523,7 +5553,7 @@ const queryFields = React.useMemo(() => {
         const recs: any[] = res?.records || []
         if (!recs.length) {
           setForcedActive(null)
-          setDetailAccessState('idle')
+          setDetailAccessState(currentUserIsTiAmm ? 'error' : 'idle')
           return
         }
         const r0 = recs[0]
@@ -5545,21 +5575,33 @@ const queryFields = React.useMemo(() => {
         setDetailAccessState('allowed')
         writeSelectedFeatureCache(selection.layerUrl, selection.oid, idFieldName, d0, 'detail')
         const st: SelState = { ds: dsTry, oid: selection.oid, idFieldName, data: d0, sig: stateKey }
-        setForcedActive({ key: selection.layerUrl, state: st })
+        setForcedActive({ key: selection.layerUrl, state: st, ownerUserKey: currentUserKey })
       } catch {
         if (req === forcedReqRef.current) {
           setForcedActive(null)
-          setDetailAccessState('idle')
+          setDetailAccessState(currentUserIsTiAmm ? 'error' : 'idle')
         }
       }
     })()
   }, [selection?.layerUrl, selection?.oid, selection?.idFieldName, selection?.viewName, queryFields.join('|'), selRefreshNonce, currentUserKey, currentUserReady, currentUserIsTiAmm])
 
-  const activeGate = forcedActive
+  const currentSelectionSig = selection?.layerUrl && selection.oid != null
+    ? `${selection.layerUrl}:${selection.oid}:${selRefreshNonce}`
+    : ''
+
+  const activeGate =
+    currentUserReady &&
+    detailAccessState === 'allowed' &&
+    forcedActive?.ownerUserKey === currentUserKey &&
+    forcedActive?.state?.sig === currentSelectionSig
+      ? forcedActive
+      : null
 
   const detailAccessMessage = detailAccessState === 'denied'
     ? 'Accesso alla pratica non consentito.'
-    : (detailAccessState === 'checking' ? 'Verifica accesso alla pratica…' : '')
+    : (detailAccessState === 'checking'
+        ? 'Verifica accesso alla pratica…'
+        : (detailAccessState === 'error' ? 'Impossibile verificare l’accesso alla pratica.' : ''))
 
   const detailMapCfg = React.useMemo(() => ({
     basemap: String(cfg.mapBasemap || 'topo-vector'),

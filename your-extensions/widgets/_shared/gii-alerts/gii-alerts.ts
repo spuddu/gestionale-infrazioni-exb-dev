@@ -1260,10 +1260,6 @@ function severityFromActivityPriority (value: any): GiiAlertSeverity {
   return 'blue'
 }
 
-function dateMsOrNull (value: any): number | null {
-  const ms = asDateMs(value)
-  return ms == null ? null : ms
-}
 
 function currentActivityToAlert (row: Record<string, any>): GiiAlertItem | null {
   const parentGlobalId = String(attr(row, ['parent_globalid']) || '').trim()

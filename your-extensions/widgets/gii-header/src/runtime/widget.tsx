@@ -5,6 +5,8 @@ import type { IMConfig } from '../config'
 import { defaultConfig } from '../config'
 import { queryGiiAlerts, queryGiiCurrentActivities, archiveGiiAlert, getGiiAlertBellTone, isGiiTakeChargeAlert, summarizeGiiAlerts, type GiiAlertItem, type GiiAlertQueryResult } from '../../../_shared/gii-alerts/gii-alerts'
 import { ensureAttivitaCorrentiJsonOnlyQueryFormat } from '../../../_shared/gii-alerts/attivita-correnti-query-format-fix'
+import { stampGiiPracticePayload, syncGiiPracticeContextUsername, writeGiiPracticeSelectionContext } from '../../../_shared/gii-selection/practice-context'
+import { pickGiiRuntimeView } from '../../../_shared/gii-runtime/runtime-views'
 
 const GII_PORTAL     = 'https://cbsm-hub.maps.arcgis.com'
 const GII_UTENTI_URL = 'https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_utenti/FeatureServer/0'
@@ -582,6 +584,21 @@ function selectCurrentActivityLayerUrl (cfg: any, user: any): string {
 }
 
 function selectAlertPracticeLayerUrl (cfg: any, user: any): string {
+  // La vista delle pratiche deve rispettare lo stesso perimetro autorizzativo
+  // usato da elenco, dashboard e report. Una scelta basata sulla sola area
+  // farebbe tentare a TI/RZ l'apertura delle viste aggregate AGR/TEC, alle quali
+  // quei ruoli non sono autorizzati, provocando il banner credenziali di ExB.
+  const runtimeView = pickGiiRuntimeView({
+    roleCode: user?.profiloCod || user?.ruoloCod || user?.role,
+    areaCode: user?.areaCod || user?.area_cod || user?.area,
+    settoreCode: user?.settoreCod || user?.settore_cod || user?.settore,
+    isAdmin: !!user?.isAdmin,
+    isWorkflowAdmin: !!user?.isWorkflowAdmin
+  })
+  if (runtimeView?.layerUrl) return runtimeView.layerUrl
+
+  // Fallback di compatibilità per eventuali profili non ancora censiti nel
+  // catalogo condiviso. I profili ordinari GII non passano da questo ramo.
   const area = alertAreaForUrls(user)
   if (area === 'AGR') return String(cfg.alertsPracticeLayerUrlAgr || cfg.alertsPracticeLayerUrlTecnici || '').trim()
   if (area === 'TEC') return String(cfg.alertsPracticeLayerUrlTec || cfg.alertsPracticeLayerUrlTecnici || '').trim()
@@ -2407,7 +2424,7 @@ function storeAlertEditIntent (alert: GiiAlertItem, layerUrl: string): void {
   const requestedBySettore = normCode(currentUser?.settoreCod || currentUser?.settore_cod || '')
   const requestedByUfficio = currentUser?.ufficio != null && currentUser?.ufficio !== '' ? String(currentUser.ufficio).trim() : ''
 
-  const intent = {
+  const intent = stampGiiPracticePayload({
     oid: alert.parentObjectId,
     parentObjectId: alert.parentObjectId,
     parentGlobalId: alert.parentGlobalId || '',
@@ -2424,8 +2441,9 @@ function storeAlertEditIntent (alert: GiiAlertItem, layerUrl: string): void {
     requestedByArea,
     requestedBySettore,
     requestedByUfficio
-  }
+  })
 
+  writeGiiPracticeSelectionContext()
   try { (window as any).__giiEdit = intent } catch {}
   try { window.sessionStorage.setItem('GII_EDIT_INTENT', JSON.stringify(intent)) } catch {}
   try { window.sessionStorage.setItem('GII_OPEN_PRACTICE_INTENT', JSON.stringify(intent)) } catch {}
@@ -2794,6 +2812,11 @@ export default function Widget(props: Props) {
     }
   }, [])
   React.useEffect(() => { if (!user) setMenuOpen(false) }, [user])
+  React.useEffect(() => {
+    const username = String(user?.username || '').trim()
+    if (!username) return
+    syncGiiPracticeContextUsername(username)
+  }, [user?.username])
   React.useEffect(() => {
     const username = String(user?.username || '').trim().toLowerCase()
     const shouldLoadAlerts = !!username && (cfg.alertsEnabled ?? true) && canUseGiiAlerts(user)
@@ -3584,8 +3607,29 @@ export default function Widget(props: Props) {
         const tok = String(afterInRef.current || '').trim()
         if (tok) gotoPage(tok)
       } catch { }
-      // Il useEffect dipendente da user crea il nuovo AbortController e sblocca
-      // gli allarmi soltanto dopo che ruolo, area e username sono coerenti.
+
+      // Un cambio account effettivo sostituisce la resource session ArcGIS mentre
+      // l'app corrente può avere ancora FeatureLayer, WebMap, datasource e promise
+      // creati con il profilo precedente. AbortController e reset React impediscono
+      // l'aggiornamento dello stato, ma non possono annullare in modo affidabile il
+      // caricamento/autenticazione interno già avviato dall'SDK. Se quelle risorse
+      // proseguono con il token del nuovo account, ExB apre il banner credenziali
+      // sulla vista autorizzata al vecchio ruolo.
+      //
+      // La configurazione prevedeva già il reload dopo logout/login, ma non veniva
+      // applicata al cambio account. Ora il confine di sessione è reale: dopo aver
+      // confermato il nuovo profilo e aver navigato alla pagina operativa, ricarichiamo
+      // l'app. Il ramo Annulla/stesso account resta invece non distruttivo e non passa
+      // mai da qui.
+      if (cfg.forceReloadAfterLogoutLogin !== false) {
+        window.setTimeout(() => {
+          try { window.location.reload() } catch { }
+        }, 0)
+        return
+      }
+
+      // Solo quando il reload è esplicitamente disabilitato, il useEffect dipendente
+      // da user crea il nuovo AbortController e sblocca gli allarmi in-place.
     } catch {
       alertsAuthTransitionRef.current = false
       alertsAbortControllerRef.current = new AbortController()

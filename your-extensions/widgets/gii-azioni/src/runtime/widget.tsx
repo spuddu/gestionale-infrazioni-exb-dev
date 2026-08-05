@@ -15,6 +15,7 @@ import GiiAnteprimaPanel from '../../../_shared/gii-anteprime/anteprima-panel'
 import { computeReqPoint, parseNorma3Codes } from '../../../_shared/gii-anteprime/req-point'
 import { ensureAttivitaCorrentiJsonOnlyQueryFormat } from '../../../_shared/gii-alerts/attivita-correnti-query-format-fix'
 import { getTiAmmAssignment, hasTiAmmAssignment, isPracticeAssignedToCurrentTiAmm } from '../../../_shared/gii-access/ti-amm-assignment'
+import { clearGiiPracticeSelectionContext, getGiiPracticeContextStamp, isGiiPracticeContextStampCurrent, isGiiPracticePayloadCurrent, isGiiPracticeSelectionContextCurrent, stampGiiPracticePayload, type GiiPracticeContextStamp } from '../../../_shared/gii-selection/practice-context'
 
 
 const GII_LOG_EVENTI_CICLI_URL = 'https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_LOG_EVENTI_CICLI/FeatureServer/0'
@@ -502,6 +503,7 @@ function clearRuntimeSelection (reason = 'azioni'): void {
     sessionStorage.removeItem('GII_SELECTED_IDFIELD')
     sessionStorage.removeItem('GII_SELECTED_VIEW_NAME')
     sessionStorage.removeItem('GII_SELECTED_DATA')
+    clearGiiPracticeSelectionContext()
     try { delete (window as any).__giiSelection } catch {}
     window.dispatchEvent(new CustomEvent('gii-selection-changed', { detail: null }))
     window.dispatchEvent(new CustomEvent('gii-selection-cleared', { detail: { source: reason, ts: Date.now() } }))
@@ -511,7 +513,7 @@ function clearRuntimeSelection (reason = 'azioni'): void {
 function readRuntimeSelection (): RuntimeSelection | null {
   try {
     const mem = (window as any)?.__giiSelection
-    if (mem && mem.layerUrl && Number.isFinite(Number(mem.oid))) {
+    if (mem && isGiiPracticePayloadCurrent(mem) && mem.layerUrl && Number.isFinite(Number(mem.oid))) {
       const oid = Number(mem.oid)
       const layerUrl = String(mem.layerUrl || '').trim()
       const idFieldName = String(mem.idFieldName || 'OBJECTID').trim() || 'OBJECTID'
@@ -526,6 +528,7 @@ function readRuntimeSelection (): RuntimeSelection | null {
       }
     }
 
+    if (!isGiiPracticeSelectionContextCurrent()) return null
     const oidRaw = sessionStorage.getItem('GII_SELECTED_OID')
     const layerUrl = String(sessionStorage.getItem('GII_SELECTED_LAYER_URL') || '').trim()
     const serviceUrl = String(sessionStorage.getItem('GII_SELECTED_SERVICE_URL') || '').trim()
@@ -3487,7 +3490,7 @@ function ActionsPanel (props: {
   const openEditPage = (requestedSection?: 'violazione') => {
     if (!canOpenEditPage) return
     try {
-      const payload = {
+      const payload = stampGiiPracticePayload({
         oid,
         data: { ...data },
         idFieldName: active?.state?.idFieldName || 'OBJECTID',
@@ -3498,7 +3501,7 @@ function ActionsPanel (props: {
           ? 'Pratica aperta in consultazione. Le modifiche sono consentite solo nei casi previsti dal ruolo e dallo stato istruttorio.'
           : '',
         ts: Date.now()
-      }
+      })
       ;(window as any).__giiEdit = payload
       try { sessionStorage.setItem('GII_EDIT_INTENT', JSON.stringify(payload)) } catch {}
       try { window.dispatchEvent(new CustomEvent('gii-edit-intent-changed')) } catch {}
@@ -4769,6 +4772,7 @@ function ActionsPanel (props: {
   type RunApplyEditsOptions = {
     deferRefresh?: boolean
     keepLoading?: boolean
+    operationContextStamp?: GiiPracticeContextStamp
   }
 
   const markRestoreSelectionAfterAction = React.useCallback((source = 'azioni') => {
@@ -4791,25 +4795,25 @@ function ActionsPanel (props: {
         sessionStorage.getItem('GII_SELECTED_IDFIELD') ||
         'OBJECTID'
       ).trim() || 'OBJECTID'
-      sessionStorage.setItem('GII_RESTORE_SELECTION_AFTER_EDIT', JSON.stringify({
+      sessionStorage.setItem('GII_RESTORE_SELECTION_AFTER_EDIT', JSON.stringify(stampGiiPracticePayload({
         oid: Number(oid),
         layerUrl,
         idFieldName,
         source,
         ts: Date.now()
-      }))
+      })))
     } catch {}
   }, [active, hasSel, idFieldNameFromSel, oid])
 
   const markAfterWorkflowListNavigation = React.useCallback((source = 'workflow') => {
     try {
       if (!hasSel || oid == null || !Number.isFinite(Number(oid))) return
-      sessionStorage.setItem('GII_AFTER_WORKFLOW_NAV', JSON.stringify({
+      sessionStorage.setItem('GII_AFTER_WORKFLOW_NAV', JSON.stringify(stampGiiPracticePayload({
         oid: Number(oid),
         source,
         targetRoleTab: 'attesa_altri',
         ts: Date.now()
-      }))
+      })))
     } catch {}
   }, [hasSel, oid])
 
@@ -4911,6 +4915,8 @@ function ActionsPanel (props: {
     okText: string,
     logOpts: { eventoChiusura: string, ruoloDestinatario?: string, utenteDestinatario?: string, noteChiusura?: string, fase?: string, informativeActivities?: InformativeActivityTarget[], skipCurrentActivity?: boolean }
   ) => {
+    const operationContextStamp = getGiiPracticeContextStamp()
+    const operationContextIsCurrent = () => isGiiPracticeContextStampCurrent(operationContextStamp)
     const resolvedLogOpts = {
       ...logOpts,
       informativeActivities: (logOpts?.informativeActivities || []).map((info) => ({ ...info }))
@@ -4923,6 +4929,8 @@ function ActionsPanel (props: {
         info.utenteDestinatario = await resolveDestUserAsync(info.ruoloDestinatario)
       }
     }
+
+    if (!operationContextIsCurrent()) return
 
     // Le azioni di workflow possono lasciare il rapporto visibile nella scheda corrente
     // (es. tab "Tutte le pratiche") oppure farlo uscire dalla coda corrente
@@ -4938,16 +4946,17 @@ function ActionsPanel (props: {
     }
     const auditDelta = buildWorkflowActionAuditDelta(attributesIn)
     try {
-      await runApplyEdits(attributesIn, okText, { deferRefresh: true, keepLoading: true })
+      const committed = await runApplyEdits(attributesIn, okText, { deferRefresh: true, keepLoading: true, operationContextStamp })
+      if (!committed) return
       await closeCycleLog({ ...resolvedLogOpts, auditOldMap: auditDelta.oldMap, auditNewMap: auditDelta.newMap })
       await deleteCurrentActivityForCurrentRole()
       if (resolvedLogOpts?.ruoloDestinatario && !resolvedLogOpts.skipCurrentActivity) await upsertCurrentActivityForDest(resolvedLogOpts, attributesIn)
       for (const info of (resolvedLogOpts?.informativeActivities || [])) {
         await upsertInformativeActivityForDest(info, attributesIn)
       }
-      await refreshAfterWorkflowSave('azioni-post-log')
+      if (operationContextIsCurrent()) await refreshAfterWorkflowSave('azioni-post-log')
     } finally {
-      setLoading(false)
+      if (operationContextIsCurrent()) setLoading(false)
     }
   }
 
@@ -4956,6 +4965,9 @@ function ActionsPanel (props: {
     if (!hasSel || oid == null) throw new Error('Selezione non valida.')
 
     const startKey = selectionKeyRef.current
+    const operationContextStamp = options?.operationContextStamp || getGiiPracticeContextStamp()
+    const operationContextIsCurrent = () => isGiiPracticeContextStampCurrent(operationContextStamp)
+    if (!operationContextIsCurrent()) return false
     setLoading(true)
     setMsg({ kind: 'info', text: 'Aggiorno…' })
 
@@ -4982,13 +4994,6 @@ function ActionsPanel (props: {
       const fullAttrsBeforeSanzione: Record<string, any> = { [idFieldName]: oid, ...attributesIn }
       const isRiAmmPresaInCarico = Number(fullAttrsBeforeSanzione.stato_RI_AMM) === 2
 
-      console.warn('[GII_SANZIONE_DIAG] valutazione condizione', {
-        oid,
-        stato_RI_AMM: fullAttrsBeforeSanzione.stato_RI_AMM,
-        condizioneVera: isRiAmmPresaInCarico,
-        campiInScrittura: Object.keys(attributesIn).join(', ')
-      })
-
       let sanzioneExtra: Record<string, any> = {}
       if (isRiAmmPresaInCarico) {
         try {
@@ -5010,8 +5015,6 @@ function ActionsPanel (props: {
             profileForSanzione,
             data || {}
           )
-          console.warn('[GII_SANZIONE_DIAG] calcolo completato, campi prodotti: ' + Object.keys(sanzioneExtra || {}).join(', '))
-          console.warn('[GII_SANZIONE_DIAG] sanzione_dettaglio_calcolo prodotto: ' + String((sanzioneExtra || {}).sanzione_dettaglio_calcolo || '(vuoto)'))
         } catch (e: any) {
           console.warn('[GII_SANZIONE] calcolo automatico fallito, salvataggio prosegue senza sanzione ricalcolata', e?.message || e)
         }
@@ -5020,6 +5023,7 @@ function ActionsPanel (props: {
       const fullAttrs = { [idFieldName]: oid, ...attributesIn, ...sanzioneExtra }
       const attrs = filterAttrsToLayerFields(fullAttrs, layer)
 
+      if (!operationContextIsCurrent()) return false
       const res = await layer.applyEdits({ updateFeatures: [{ attributes: attrs }] })
 
       const upd = res?.updateFeatureResults?.[0] || res?.updateResults?.[0] || null
@@ -5034,6 +5038,10 @@ function ActionsPanel (props: {
           : JSON.stringify(res || upd)
         throw new Error(detail)
       }
+
+      // La scrittura può essere già stata accettata dal servizio mentre l'account
+      // cambia. In tal caso non applichiamo alcun effetto locale al nuovo contesto.
+      if (!operationContextIsCurrent()) return true
 
       // se la selezione è cambiata nel frattempo: niente messaggi “appesi”
       if (selectionKeyRef.current !== startKey) {
@@ -5088,8 +5096,9 @@ function ActionsPanel (props: {
       }, 4500)
 
       if (!options?.keepLoading) setLoading(false)
+      return true
     } catch (e) {
-      setLoading(false)
+      if (operationContextIsCurrent()) setLoading(false)
       throw e
     }
   }

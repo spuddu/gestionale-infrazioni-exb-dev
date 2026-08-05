@@ -20,6 +20,7 @@ import { defaultConfig } from '../config'
 import { createPortal } from 'react-dom'
 import { ensureAttivitaCorrentiJsonOnlyQueryFormat } from '../../../_shared/gii-alerts/attivita-correnti-query-format-fix'
 import { isPracticeAssignedToCurrentTiAmm } from '../../../_shared/gii-access/ti-amm-assignment'
+import { getGiiPracticeContextStamp, isGiiPracticeContextStampCurrent, isGiiPracticePayloadCurrent, isGiiPracticeSelectionContextCurrent, stampGiiPracticePayload } from '../../../_shared/gii-selection/practice-context'
 
 const LOG_EVENTI_CICLI_URL = 'https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_LOG_EVENTI_CICLI/FeatureServer/0'
 const GII_ATTIVITA_CORRENTI_URL = 'https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_ATTIVITA_CORRENTI/FeatureServer/0'
@@ -147,6 +148,16 @@ type EditIntentInfo = {
   readOnly?: boolean
   readOnlyMessage?: string
   ts?: number
+}
+
+type TiAmmAccessStatus = 'idle' | 'checking' | 'allowed' | 'denied' | 'error'
+
+type TiAmmAccessState = {
+  status: TiAmmAccessStatus
+  selectionKey: string
+  data: any | null
+  message: string
+  checkedAt: number
 }
 
 type LayerFieldInfo = {
@@ -561,7 +572,8 @@ function getRequestedAmmSection (forced?: any): AmmSectionKey | null {
     const fromRequested = normalizeAmmSection(window.sessionStorage.getItem('GII_REQUESTED_EDIT_SECTION'))
     if (fromRequested) {
       const rawIntent = window.sessionStorage.getItem('GII_EDIT_INTENT') || ''
-      const source = rawIntent ? String(JSON.parse(rawIntent)?.source || '') : ''
+      const parsedIntent = rawIntent ? JSON.parse(rawIntent) : null
+      const source = parsedIntent && isGiiPracticePayloadCurrent(parsedIntent) ? String(parsedIntent?.source || '') : ''
       if (source === 'gii-alerts' || source === 'gii-alerts-homepage') return fromRequested
     }
   } catch {}
@@ -996,10 +1008,16 @@ function resolvePageId (label: string): string | null {
 
 function readEditIntent (): EditIntentInfo | null {
   try {
-    const fromWindow: any = (window as any).__giiEdit || null
-    const fromStorage: any = safeJsonParse(sessionStorage.getItem('GII_EDIT_INTENT'))
+    const fromWindowRaw: any = (window as any).__giiEdit || null
+    const fromStorageRaw: any = safeJsonParse(sessionStorage.getItem('GII_EDIT_INTENT'))
+    const fromWindow: any = fromWindowRaw && isGiiPracticePayloadCurrent(fromWindowRaw) ? fromWindowRaw : null
+    const fromStorage: any = fromStorageRaw && isGiiPracticePayloadCurrent(fromStorageRaw) ? fromStorageRaw : null
     const j: any = fromWindow || fromStorage || null
-    if (!j) return null
+    if (!j) {
+      try { delete (window as any).__giiEdit } catch {}
+      try { sessionStorage.removeItem('GII_EDIT_INTENT') } catch {}
+      return null
+    }
     const oid = j?.oid != null && j?.oid !== '' ? Number(j.oid) : NaN
     const idFieldName = String(j?.idFieldName || 'OBJECTID').trim() || 'OBJECTID'
     const layerUrl = normalizeFeatureLayerUrl(j?.layerUrl || '')
@@ -1024,7 +1042,9 @@ function readEditIntent (): EditIntentInfo | null {
 
 function readSelectionIntent (): EditIntentInfo | null {
   try {
-    const sel: any = (window as any).__giiSelection || null
+    const mem: any = (window as any).__giiSelection || null
+    const sel: any = mem && isGiiPracticePayloadCurrent(mem) ? mem : null
+    if (!sel && !isGiiPracticeSelectionContextCurrent()) return null
     const oidRaw = sel?.oid ?? sessionStorage.getItem('GII_SELECTED_OID')
     const oid = oidRaw != null && oidRaw !== '' ? Number(oidRaw) : NaN
     const layerUrl = normalizeFeatureLayerUrl(sel?.layerUrl || sessionStorage.getItem('GII_SELECTED_LAYER_URL') || '')
@@ -1041,7 +1061,7 @@ function readSelectionIntent (): EditIntentInfo | null {
       data,
       readOnly: sel?.readOnly === true || String(sel?.readOnly || '').toLowerCase() === 'true',
       readOnlyMessage: String(sel?.readOnlyMessage || '').trim(),
-      ts: Date.now()
+      ts: Number(sel?.ts || 0)
     }
   } catch {
     return null
@@ -1102,6 +1122,36 @@ function readUserProfile (): { role: RoleCode, username: string, fullName: strin
   } catch {
     return { role: '', username: '', fullName: '', label: '' }
   }
+}
+
+function userProfileIdentityKey (profile: { role?: any, username?: any, fullName?: any, label?: any }): string {
+  return [
+    String(profile?.username || '').trim().toLowerCase(),
+    String(profile?.role || '').trim().toUpperCase(),
+    String(profile?.fullName || '').trim().toLowerCase(),
+    String(profile?.label || '').trim().toLowerCase()
+  ].join('|')
+}
+
+function emptySelectedState (): SelectedState {
+  return {
+    ds: null,
+    oid: null,
+    idFieldName: 'OBJECTID',
+    layerUrl: '',
+    data: null,
+    readOnly: false,
+    readOnlyMessage: '',
+    source: 'none',
+    sig: 'none'
+  }
+}
+
+function clearDataSourceSelection (ds: any): void {
+  if (!ds) return
+  try { ds.clearSelection?.() } catch {}
+  try { ds.selectRecordsByIds?.([]) } catch {}
+  try { ds.setSelectedRecords?.([]) } catch {}
 }
 
 function isAllowedAdminRole (role: string): boolean {
@@ -1576,6 +1626,14 @@ function invalidateRuntimeProxyCache (layerUrl?: string | null) {
 }
 
 const EDIT_LAYER_CACHE: Record<string, any> = {}
+
+function clearEditingAmmSessionCaches (): void {
+  for (const key of Object.keys(EDIT_LAYER_CACHE)) {
+    const layer = EDIT_LAYER_CACHE[key]
+    try { layer?.destroy?.() } catch {}
+    delete EDIT_LAYER_CACHE[key]
+  }
+}
 
 async function resolveLayerForEdit (ds: any, fallbackUrl?: string): Promise<any | null> {
   if (!ds && !fallbackUrl) return null
@@ -6575,7 +6633,8 @@ function AllegatiAmmSection (props: {
   rotationDeg: number,
   onRotateLeft: () => void,
   onRotateRight: () => void,
-  onRotationConfirmed: () => void
+  onRotationConfirmed: () => void,
+  practiceContextRevision: number
 }) {
   const st = useAdminStyle()
   const oid = props.oid != null && Number.isFinite(Number(props.oid)) ? Number(props.oid) : null
@@ -6585,6 +6644,19 @@ function AllegatiAmmSection (props: {
   const [busy, setBusy] = React.useState(false)
   const [error, setError] = React.useState<string | null>(null)
   const [inputKey, setInputKey] = React.useState(0)
+  const loadSeqRef = React.useRef(0)
+
+  React.useEffect(() => {
+    loadSeqRef.current += 1
+    setItems([])
+    setLoadedOid(null)
+    setLoading(false)
+    setBusy(false)
+    setError(null)
+    setInputKey(k => k + 1)
+    props.onSelectedAttachmentChange(null)
+    props.onRotationConfirmed()
+  }, [oid, props.practiceContextRevision])
 
   const resolveAttachmentLayer = React.useCallback(async () => {
     const layer = await resolveLayerForEdit(props.ds, props.layerUrl)
@@ -6593,104 +6665,136 @@ function AllegatiAmmSection (props: {
   }, [props.ds, props.layerUrl])
 
   const load = React.useCallback(async () => {
-    if (!oid) {
-      setItems([])
-      setLoadedOid(null)
-      setError(null)
+    const targetOid = oid
+    const operationContextStamp = getGiiPracticeContextStamp()
+    const loadSeq = ++loadSeqRef.current
+    const isCurrent = () => loadSeq === loadSeqRef.current && isGiiPracticeContextStampCurrent(operationContextStamp)
+    if (!targetOid) {
+      if (isCurrent()) {
+        setItems([])
+        setLoadedOid(null)
+        setError(null)
+      }
       return
     }
+    if (!isCurrent()) return
     setLoading(true)
     setError(null)
     try {
       const { layer, layerUrl } = await resolveAttachmentLayer()
+      if (!isCurrent()) return
       if (!layer && !layerUrl) throw new Error('FeatureLayer non disponibile per gli allegati.')
-      const list = await queryAmmAttachments(layer, oid, layerUrl)
+      const list = await queryAmmAttachments(layer, targetOid, layerUrl)
+      if (!isCurrent()) return
       const visible = (filterGiiAttachmentsForAdministrativeFascicolo(list as any) as AmmAttachmentInfo[])
         .slice()
         .sort(sortAmmAttachmentForAllegatiSection)
         .map(decorateAmmAttachmentForAllegatiSection)
       setItems(visible)
-      setLoadedOid(oid)
+      setLoadedOid(targetOid)
     } catch (e: any) {
+      if (!isCurrent()) return
       setItems([])
-      setLoadedOid(oid)
+      setLoadedOid(targetOid)
       setError(e?.message || String(e))
     } finally {
-      setLoading(false)
+      if (isCurrent()) setLoading(false)
     }
-  }, [oid, resolveAttachmentLayer])
+  }, [oid, resolveAttachmentLayer, props.practiceContextRevision])
 
   React.useEffect(() => {
     if (oid && loadedOid !== oid) void load()
   }, [oid, loadedOid, load])
 
   const upload = React.useCallback(async (files: File[]) => {
-    if (!oid || !files.length || !props.canEdit) return
+    const targetOid = oid
+    const operationContextStamp = getGiiPracticeContextStamp()
+    const isCurrent = () => isGiiPracticeContextStampCurrent(operationContextStamp)
+    if (!targetOid || !files.length || !props.canEdit || !isCurrent()) return
     setBusy(true)
     setError(null)
     try {
       const { layer, layerUrl } = await resolveAttachmentLayer()
-      await addAmmAttachments(layer, oid, files, layerUrl, `${GII_ATTACHMENT_KEYWORDS.administrative}|fileCreatedAt=${Date.now()}`)
+      if (!isCurrent()) return
+      await addAmmAttachments(layer, targetOid, files, layerUrl, `${GII_ATTACHMENT_KEYWORDS.administrative}|fileCreatedAt=${Date.now()}`)
+      if (!isCurrent()) return
       setInputKey(k => k + 1)
       await load()
     } catch (e: any) {
-      setError(e?.message || String(e))
+      if (isCurrent()) setError(e?.message || String(e))
     } finally {
-      setBusy(false)
+      if (isCurrent()) setBusy(false)
     }
-  }, [oid, props.canEdit, resolveAttachmentLayer, load])
+  }, [oid, props.canEdit, resolveAttachmentLayer, load, props.practiceContextRevision])
 
   const replace = React.useCallback(async (att: AmmAttachmentInfo, file: File) => {
-    if (!oid || !att?.id || !file || !props.canEdit) return
+    const targetOid = oid
+    const operationContextStamp = getGiiPracticeContextStamp()
+    const isCurrent = () => isGiiPracticeContextStampCurrent(operationContextStamp)
+    if (!targetOid || !att?.id || !file || !props.canEdit || !isCurrent()) return
     if (!isAdministrativeGenericAttachment(att)) { setError('Gli allegati tecnici sono consultabili ma non modificabili dai ruoli amministrativi.'); return }
     setBusy(true)
     setError(null)
     try {
       const { layerUrl } = await resolveAttachmentLayer()
-      await updateAmmAttachment(oid, Number(att.id), file, layerUrl)
+      if (!isCurrent()) return
+      await updateAmmAttachment(targetOid, Number(att.id), file, layerUrl)
+      if (!isCurrent()) return
       setInputKey(k => k + 1)
       await load()
     } catch (e: any) {
-      setError(e?.message || String(e))
+      if (isCurrent()) setError(e?.message || String(e))
     } finally {
-      setBusy(false)
+      if (isCurrent()) setBusy(false)
     }
-  }, [oid, props.canEdit, resolveAttachmentLayer, load])
+  }, [oid, props.canEdit, resolveAttachmentLayer, load, props.practiceContextRevision])
 
   const remove = React.useCallback(async (att: AmmAttachmentInfo) => {
-    if (!oid || !att?.id || !props.canEdit) return
+    const targetOid = oid
+    const operationContextStamp = getGiiPracticeContextStamp()
+    const isCurrent = () => isGiiPracticeContextStampCurrent(operationContextStamp)
+    if (!targetOid || !att?.id || !props.canEdit || !isCurrent()) return
     if (!isAdministrativeGenericAttachment(att)) { setError('Gli allegati tecnici sono consultabili ma non eliminabili dai ruoli amministrativi.'); return }
     const ok = window.confirm(`Eliminare l'allegato "${att.name || att.id}"?`)
-    if (!ok) return
+    if (!ok || !isCurrent()) return
     setBusy(true)
     setError(null)
     try {
       const { layer, layerUrl } = await resolveAttachmentLayer()
-      await deleteAmmAttachment(layer, oid, Number(att.id), layerUrl)
+      if (!isCurrent()) return
+      await deleteAmmAttachment(layer, targetOid, Number(att.id), layerUrl)
+      if (!isCurrent()) return
       await load()
     } catch (e: any) {
-      setError(e?.message || String(e))
+      if (isCurrent()) setError(e?.message || String(e))
     } finally {
-      setBusy(false)
+      if (isCurrent()) setBusy(false)
     }
-  }, [oid, props.canEdit, resolveAttachmentLayer, load])
+  }, [oid, props.canEdit, resolveAttachmentLayer, load, props.practiceContextRevision])
 
   const open = React.useCallback(async (att: AmmAttachmentInfo) => {
-    if (!oid || !att?.id) return
+    const targetOid = oid
+    const operationContextStamp = getGiiPracticeContextStamp()
+    const isCurrent = () => isGiiPracticeContextStampCurrent(operationContextStamp)
+    if (!targetOid || !att?.id || !isCurrent()) return
     setError(null)
     try {
       const { layerUrl } = await resolveAttachmentLayer()
-      await openAmmAttachmentInNewTab(att, oid, layerUrl)
+      if (!isCurrent()) return
+      await openAmmAttachmentInNewTab(att, targetOid, layerUrl)
     } catch (e: any) {
-      setError(e?.message || String(e))
+      if (isCurrent()) setError(e?.message || String(e))
     }
-  }, [oid, resolveAttachmentLayer])
+  }, [oid, resolveAttachmentLayer, props.practiceContextRevision])
 
   const buildPreview = React.useCallback(async (att: AmmAttachmentInfo): Promise<string | null> => {
-    if (!oid || !att?.id) return null
+    const targetOid = oid
+    const operationContextStamp = getGiiPracticeContextStamp()
+    if (!targetOid || !att?.id || !isGiiPracticeContextStampCurrent(operationContextStamp)) return null
     const { layerUrl } = await resolveAttachmentLayer()
-    return await buildAttachmentPreviewUrl(att, oid, layerUrl)
-  }, [oid, resolveAttachmentLayer])
+    if (!isGiiPracticeContextStampCurrent(operationContextStamp)) return null
+    return await buildAttachmentPreviewUrl(att, targetOid, layerUrl)
+  }, [oid, resolveAttachmentLayer, props.practiceContextRevision])
 
   const isRotatableAmmAttachment = React.useCallback((att: { name?: string; contentType?: string }) => {
     const ct = String(att?.contentType || '').toLowerCase()
@@ -6699,8 +6803,11 @@ function AllegatiAmmSection (props: {
   }, [])
 
   const confirmAmmRotation = React.useCallback(async () => {
+    const targetOid = oid
+    const operationContextStamp = getGiiPracticeContextStamp()
+    const isCurrent = () => isGiiPracticeContextStampCurrent(operationContextStamp)
     const normalizedRotation = ((Math.round(props.rotationDeg / 90) * 90) % 360 + 360) % 360
-    if (!oid || !props.canEdit || props.selectedAttachmentId == null || normalizedRotation === 0) return
+    if (!targetOid || !props.canEdit || props.selectedAttachmentId == null || normalizedRotation === 0 || !isCurrent()) return
     const att = items.find((it: any) => String(it?.id) === String(props.selectedAttachmentId))
     if (!att || !isRotatableAmmAttachment(att)) return
     if (!isAdministrativeGenericAttachment(att)) { setError('Gli allegati tecnici sono consultabili ma non modificabili dai ruoli amministrativi.'); return }
@@ -6708,22 +6815,28 @@ function AllegatiAmmSection (props: {
     setError(null)
     try {
       const previewBlobUrl = await buildPreview(att)
+      if (!isCurrent()) return
       if (!previewBlobUrl) throw new Error('Anteprima non disponibile per la rotazione.')
       const resp = await fetch(String(previewBlobUrl).split('#')[0])
+      if (!isCurrent()) return
       if (!resp.ok) throw new Error(`Caricamento immagine fallito (HTTP ${resp.status}).`)
       const blob = await resp.blob()
+      if (!isCurrent()) return
       const file = await rotateImageAttachmentFile(blob, att.name || `allegato_${att.id}.jpg`, normalizedRotation)
+      if (!isCurrent()) return
       const { layerUrl } = await resolveAttachmentLayer()
-      await updateAmmAttachment(oid, Number(att.id), file, layerUrl)
+      if (!isCurrent()) return
+      await updateAmmAttachment(targetOid, Number(att.id), file, layerUrl)
+      if (!isCurrent()) return
       setInputKey(k => k + 1)
       await load()
-      props.onRotationConfirmed()
+      if (isCurrent()) props.onRotationConfirmed()
     } catch (e: any) {
-      setError(e?.message || String(e))
+      if (isCurrent()) setError(e?.message || String(e))
     } finally {
-      setBusy(false)
+      if (isCurrent()) setBusy(false)
     }
-  }, [oid, props.canEdit, props.selectedAttachmentId, props.rotationDeg, props.onRotationConfirmed, items, isRotatableAmmAttachment, buildPreview, resolveAttachmentLayer, load])
+  }, [oid, props.canEdit, props.selectedAttachmentId, props.rotationDeg, props.onRotationConfirmed, props.practiceContextRevision, items, isRotatableAmmAttachment, buildPreview, resolveAttachmentLayer, load])
 
   return (
     <GiiAttachmentViewer
@@ -6786,14 +6899,31 @@ function SelectionWatcher (props: {
     try { ds?.setListenSelection?.(true) } catch {}
   }, [ds])
 
+  const idFieldName = String(ds?.getIdField?.() || 'OBJECTID')
   let selected = ds?.getSelectedRecords?.() || []
   if (!selected || selected.length === 0) {
+    // Non assumere mai che il primo record caricato sia quello scelto. Dopo un
+    // cambio account il datasource può conservare per qualche istante i record
+    // della sessione precedente. Il fallback è ammesso soltanto se esiste un OID
+    // esplicito nel contesto corrente e il record coincide realmente.
+    const expectedIntent = readEditIntent() || readSelectionIntent()
+    const expectedOid = expectedIntent?.oid != null && Number.isFinite(Number(expectedIntent.oid))
+      ? Number(expectedIntent.oid)
+      : null
     const recs = ds?.getRecords?.() || []
-    if (recs && recs.length) selected = recs
+    if (expectedOid != null && Array.isArray(recs)) {
+      const matching = recs.find((record: any) => {
+        const recordData = record?.getData ? record.getData() : (record?.data || record?.attributes || null)
+        const recordOid = pickOidFromData(recordData, idFieldName)
+        return recordOid != null && Number(recordOid) === expectedOid
+      })
+      selected = matching ? [matching] : []
+    } else {
+      selected = []
+    }
   }
 
   const r0 = selected.length ? selected[0] : null
-  const idFieldName = String(ds?.getIdField?.() || 'OBJECTID')
   const baseData = r0?.getData ? r0.getData() : null
   const oid = pickOidFromData(baseData, idFieldName)
   const layerUrl = getDataSourceUrl(ds)
@@ -7171,6 +7301,16 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
     return selectionStateFromIntent(readSelectionIntent(), 'selection')
   })
   const [profile, setProfile] = React.useState(() => readUserProfile())
+  const [practiceContextRevision, setPracticeContextRevision] = React.useState(0)
+  const [tiAmmAccess, setTiAmmAccess] = React.useState<TiAmmAccessState>({
+    status: 'idle',
+    selectionKey: '',
+    data: null,
+    message: '',
+    checkedAt: 0
+  })
+  const tiAmmAccessSeqRef = React.useRef(0)
+  const statesRef = React.useRef<Record<string, SelectedState>>({})
   const [layerFields, setLayerFields] = React.useState<LayerFieldInfo[]>([])
   const [draft, setDraft] = React.useState<Record<string, any>>({})
   const [liveRefreshVersion, setLiveRefreshVersion] = React.useState(0)
@@ -7200,6 +7340,10 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
 
 
   React.useEffect(() => {
+    statesRef.current = states
+  }, [states])
+
+  React.useEffect(() => {
     if (!pageVisible) return
     if (!VALID_AMM_SECTIONS.has(activeAmmSection)) return
     persistAmmSection(activeAmmSection)
@@ -7207,11 +7351,38 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
   }, [pageVisible, activeAmmSection])
 
   React.useEffect(() => {
+    const onPracticeContextReset = () => {
+      tiAmmAccessSeqRef.current += 1
+      for (const state of Object.values(statesRef.current || {})) clearDataSourceSelection(state?.ds)
+      clearEditingAmmSessionCaches()
+      setPracticeContextRevision(value => value + 1)
+      setStates({})
+      setIntentState(emptySelectedState())
+      setProfile(readUserProfile())
+      setTiAmmAccess({ status: 'idle', selectionKey: '', data: null, message: '', checkedAt: 0 })
+      setLayerFields([])
+      setDraft({})
+      setInitialDraft({})
+      setAutomaticValues({})
+      setLiveRefreshVersion(0)
+      setDialog(null)
+      setPendingAttestationText(null)
+      setPendingUndoAttestation(false)
+      setConfirmTransmitBozza(false)
+      setAmmPreviewAttachment(null)
+      setAmmPreviewRotationDeg(0)
+    }
+    window.addEventListener('gii-practice-context-reset', onPracticeContextReset)
+    return () => window.removeEventListener('gii-practice-context-reset', onPracticeContextReset)
+  }, [])
+
+  React.useEffect(() => {
     const sync = () => {
       const editIntent = readEditIntent()
       if (editIntent) setIntentState(selectionStateFromIntent(editIntent, 'editIntent'))
       else setIntentState(selectionStateFromIntent(readSelectionIntent(), 'selection'))
-      setProfile(readUserProfile())
+      const nextProfile = readUserProfile()
+      setProfile(prev => userProfileIdentityKey(prev) === userProfileIdentityKey(nextProfile) ? prev : nextProfile)
     }
     sync()
     window.addEventListener('gii-edit-intent-changed', sync as EventListener)
@@ -7257,10 +7428,103 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
   const configuredDsState = dsStatesAll[0] || null
   const configuredDs = configuredDsState?.ds || null
 
-  // La pratica da mostrare arriva prima di tutto dall'intent impostato da gii-azioni.
-  // La fonte dati usata per salvare deve invece essere solo quella collegata esplicitamente in Builder.
-  const activeSelection = (intentState?.oid != null || intentState?.data) ? intentState : (dsStatesWithSelection[0] || null)
-  const active = activeSelection ? { ...activeSelection, ds: activeSelection.ds || configuredDs } : (configuredDsState || null)
+  // La pratica candidata arriva prima di tutto dall'intent impostato da gii-azioni.
+  // Per il TI_AMM i dati candidati servono soltanto a localizzare il record: nessun
+  // contenuto viene mostrato prima della verifica aggiornata sul servizio.
+  const candidateSelection = (intentState?.oid != null || intentState?.data) ? intentState : (dsStatesWithSelection[0] || null)
+  const candidateDs = candidateSelection?.ds || configuredDs
+  const candidateData = candidateSelection?.data || null
+  const candidateOid = candidateSelection?.oid ?? (candidateData ? pickOidFromData(candidateData, candidateSelection?.idFieldName || 'OBJECTID') : null)
+  const candidateHasSelection = !!candidateData || (candidateOid != null && Number.isFinite(Number(candidateOid)))
+  const currentRole = String(profile.role || '').toUpperCase()
+  const isTiAmmProfile = currentRole === 'TI_AMM'
+  const profileIdentity = userProfileIdentityKey(profile)
+  const candidateLayerUrl = normalizeEditLayerUrl(candidateSelection?.layerUrl || (configuredDsState as any)?.layerUrl || getDataSourceUrl(configuredDs))
+  const candidateVerificationDs = candidateLayerUrl ? null : candidateDs
+  const candidateSelectionKey = candidateHasSelection
+    ? [profileIdentity, candidateSelection?.sig || '', candidateLayerUrl, Number(candidateOid), practiceContextRevision].join('|')
+    : ''
+
+  React.useEffect(() => {
+    const seq = ++tiAmmAccessSeqRef.current
+    if (!isTiAmmProfile || !candidateHasSelection || candidateOid == null || !Number.isFinite(Number(candidateOid))) {
+      setTiAmmAccess(prev => prev.status === 'idle' && !prev.selectionKey
+        ? prev
+        : { status: 'idle', selectionKey: '', data: null, message: '', checkedAt: 0 })
+      return
+    }
+
+    setTiAmmAccess({
+      status: 'checking',
+      selectionKey: candidateSelectionKey,
+      data: null,
+      message: '',
+      checkedAt: 0
+    })
+
+    let cancelled = false
+    const verify = async () => {
+      try {
+        const layer = await resolveLayerForEdit(candidateVerificationDs, candidateLayerUrl)
+        if (!layer) throw new Error('Layer della pratica non disponibile.')
+        const idFieldName = String(layer.objectIdField || candidateSelection?.idFieldName || 'OBJECTID').trim() || 'OBJECTID'
+        const liveAttrs = await queryCurrentLayerAttrsByOid(layer, idFieldName, Number(candidateOid))
+        if (cancelled || seq !== tiAmmAccessSeqRef.current) return
+        if (!liveAttrs || !Object.keys(liveAttrs).length) {
+          setTiAmmAccess({
+            status: 'error',
+            selectionKey: candidateSelectionKey,
+            data: null,
+            message: 'La pratica non è più disponibile.',
+            checkedAt: Date.now()
+          })
+          return
+        }
+        if (!isPracticeAssignedToCurrentTiAmm(liveAttrs, profile)) {
+          setTiAmmAccess({
+            status: 'denied',
+            selectionKey: candidateSelectionKey,
+            data: null,
+            message: 'Accesso alla pratica non consentito.',
+            checkedAt: Date.now()
+          })
+          return
+        }
+        writeSelectedFeatureCache(candidateLayerUrl, candidateOid, idFieldName, liveAttrs, 'detail')
+        setTiAmmAccess({
+          status: 'allowed',
+          selectionKey: candidateSelectionKey,
+          data: liveAttrs,
+          message: '',
+          checkedAt: Date.now()
+        })
+      } catch {
+        if (cancelled || seq !== tiAmmAccessSeqRef.current) return
+        setTiAmmAccess({
+          status: 'error',
+          selectionKey: candidateSelectionKey,
+          data: null,
+          message: 'Impossibile verificare l’accesso alla pratica.',
+          checkedAt: Date.now()
+        })
+      }
+    }
+    void verify()
+    return () => { cancelled = true }
+  }, [candidateHasSelection, candidateLayerUrl, candidateOid, candidateSelection?.idFieldName, candidateSelectionKey, candidateVerificationDs, isTiAmmProfile, practiceContextRevision, profileIdentity])
+
+  const tiAmmAccessRequired = isTiAmmProfile && candidateHasSelection
+  const tiAmmAccessAllowed = !tiAmmAccessRequired || (
+    tiAmmAccess.status === 'allowed' &&
+    tiAmmAccess.selectionKey === candidateSelectionKey &&
+    !!tiAmmAccess.data
+  )
+  const activeSelection = isTiAmmProfile
+    ? (tiAmmAccessAllowed && candidateSelection
+        ? { ...candidateSelection, data: tiAmmAccess.data, sig: `${candidateSelection.sig}|verified:${tiAmmAccess.checkedAt}` }
+        : null)
+    : candidateSelection
+  const active = activeSelection ? { ...activeSelection, ds: activeSelection.ds || configuredDs } : (isTiAmmProfile ? null : (configuredDsState || null))
   const data = activeSelection?.data || null
   const oid = activeSelection?.oid ?? (data ? pickOidFromData(data, activeSelection?.idFieldName || 'OBJECTID') : null)
   const hasSelection = !!data || (oid != null && Number.isFinite(Number(oid)))
@@ -7270,7 +7534,6 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
   const headerTitleParts = titleParts
   const showHeaderProcedureNote = activeAmmSection !== 'anteprima'
   const hasDsForSave = !!configuredDs
-  const currentRole = String(profile.role || '').toUpperCase()
   const openedInConsultation = activeSelection?.readOnly === true
   const roleCanEditData = ['TI_AMM', 'ADMIN'].includes(currentRole)
   const draftOid = pickOidFromData(draft || {}, active?.idFieldName || 'OBJECTID')
@@ -7279,7 +7542,6 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
   const tiAmmWorkflowState = currentRole === 'TI_AMM' ? parseNumberInput(pickAttrCI(editStateData || {}, ['stato_TI_AMM', 'STATO_TI_AMM'])) : null
   const tiAmmAssignedToCurrentUser = currentRole === 'TI_AMM' && isPracticeAssignedToCurrentTiAmm(editStateData || {}, profile)
   const tiAmmIsCurrentOperativeAssignee = currentRole === 'TI_AMM' && tiAmmWorkflowState === 2 && tiAmmAssignedToCurrentUser
-  const tiAmmAccessDenied = currentRole === 'TI_AMM' && hasSelection && !tiAmmAssignedToCurrentUser
   const assignedToOtherUser = currentRole === 'TI_AMM' && !tiAmmAssignedToCurrentUser
   const dataEditBlockedByRole = roleAllowed && !roleCanEditData
   const dataEditBlockedByOtherUser = roleCanEditData && ((openedInConsultation && !tiAmmIsCurrentOperativeAssignee) || assignedToOtherUser)
@@ -7323,6 +7585,7 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
   React.useEffect(() => {
     let cancelled = false
     const refreshLiveRecord = async () => {
+      if (currentRole === 'TI_AMM') return
       if (!active?.ds || oid == null || !Number.isFinite(Number(oid))) return
       try {
         const layer = await resolveLayerForEdit(active.ds, active.layerUrl || (configuredDsState as any)?.layerUrl || getDataSourceUrl(configuredDs))
@@ -7337,7 +7600,7 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
     }
     void refreshLiveRecord()
     return () => { cancelled = true }
-  }, [active?.sig, configuredDs, configuredDsState, oid])
+  }, [active?.sig, configuredDs, configuredDsState, currentRole, oid])
 
   React.useEffect(() => {
     if (!hasSelection || sanzioniConsultive.loading || sanzioniConsultive.error) {
@@ -7409,6 +7672,11 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
 
   const logLayerRef = React.useRef<any | null>(null)
   const attivitaLayerRef = React.useRef<any | null>(null)
+
+  React.useEffect(() => {
+    logLayerRef.current = null
+    attivitaLayerRef.current = null
+  }, [practiceContextRevision])
 
   const getAttivitaLayer = React.useCallback(async () => {
     if (attivitaLayerRef.current?.applyEdits) return attivitaLayerRef.current
@@ -7771,6 +8039,9 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
       return
     }
 
+    const operationContextStamp = getGiiPracticeContextStamp()
+    const operationContextIsCurrent = () => isGiiPracticeContextStampCurrent(operationContextStamp)
+    if (!operationContextIsCurrent()) return false
     setSaving(true)
     try {
       const layer = await resolveLayerForEdit(active.ds, active.layerUrl || (configuredDsState as any)?.layerUrl || getDataSourceUrl(configuredDs))
@@ -7820,6 +8091,7 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
       }
 
       const cleanAttrs = filterAttrsForLayer(attrs, fields)
+      if (!operationContextIsCurrent()) return
       const res = await layer.applyEdits({ updateFeatures: [{ attributes: cleanAttrs }] })
       const upd = res?.updateFeatureResults?.[0] || res?.updateResults?.[0] || null
       const err = upd?.error
@@ -7838,7 +8110,8 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
       const nextRecordAttrs = { ...prevRecordAttrs, ...cleanAttrs }
       await upsertAmmCycleAudit(prevRecordAttrs, nextRecordAttrs, changedFieldNames)
       await deleteCurrentAmmActivitiesForRole('RI_AMM', nextRecordAttrs)
-      await refreshDs(active.ds)
+      if (operationContextIsCurrent()) await refreshDs(active.ds)
+      if (!operationContextIsCurrent()) return
       const next = { ...nextRecordAttrs }
       setInitialDraft(next)
       setDraft(next)
@@ -7847,9 +8120,9 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
       try { window.dispatchEvent(new CustomEvent('gii-force-refresh-selection', { detail: { oid: Number(oid), source: 'gii-editing-amm-attestazione-conformita', ts: Date.now() } })) } catch {}
       try { window.dispatchEvent(new CustomEvent('gii-alerts-refresh', { detail: { oid: Number(oid), source: 'gii-editing-amm-attestazione-conformita', ts: Date.now() } })) } catch {}
     } catch (e: any) {
-      setDialog({ kind: 'err', title: 'Errore visto di conformità', text: e?.message || String(e) })
+      if (operationContextIsCurrent()) setDialog({ kind: 'err', title: 'Errore visto di conformità', text: e?.message || String(e) })
     } finally {
-      setSaving(false)
+      if (operationContextIsCurrent()) setSaving(false)
     }
   }, [active, canEdit, configuredDs, configuredDsState, deleteCurrentAmmActivitiesForRole, hasSelection, initialDraft, draft, layerFields, oid, profile.fullName, profile.role, profile.username, refreshDs, upsertAmmCycleAudit])
 
@@ -8003,9 +8276,13 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
       return
     }
 
+    const operationContextStamp = getGiiPracticeContextStamp()
+    const operationContextIsCurrent = () => isGiiPracticeContextStampCurrent(operationContextStamp)
+    if (!operationContextIsCurrent()) return
     setSaving(true)
     try {
       const { blob, fileName } = await buildBozzaDeterminazioneDocxBlob(base, layerFields, profile)
+      if (!operationContextIsCurrent()) return
       downloadBlobFile(blob, fileName)
 
       const layer = await resolveLayerForEdit(active.ds, active.layerUrl || (configuredDsState as any)?.layerUrl || getDataSourceUrl(configuredDs))
@@ -8032,6 +8309,7 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
       }
       const cleanAttrs = filterAttrsForLayer({ [idName]: Number(oid), ...attrs }, fields)
       if (Object.keys(cleanAttrs).some(k => k !== idName)) {
+        if (!operationContextIsCurrent()) return
         const res = await layer.applyEdits({ updateFeatures: [{ attributes: cleanAttrs }] })
         const upd = res?.updateFeatureResults?.[0] || res?.updateResults?.[0] || null
         const err = upd?.error
@@ -8042,7 +8320,8 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
         }
         const changedFieldNames = Object.keys(cleanAttrs).filter(k => k !== idName)
         await upsertAmmCycleAudit(prevRecordAttrs, { ...prevRecordAttrs, ...cleanAttrs }, changedFieldNames)
-        await refreshDs(active.ds)
+        if (operationContextIsCurrent()) await refreshDs(active.ds)
+        if (!operationContextIsCurrent()) return
         const savedAttrs = { ...cleanAttrs }
         delete savedAttrs[idName]
         setInitialDraft(prev => ({ ...(prev || {}), ...savedAttrs }))
@@ -8051,9 +8330,9 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
       setDialog({ kind: 'ok', title: 'Bozza Word generata', text: 'La bozza Word della determinazione è stata scaricata come copia di lavoro della pratica. Il template base non è stato modificato.' })
       try { window.dispatchEvent(new CustomEvent('gii:record-updated', { detail: { oid: Number(oid), source: 'gii-editing-amm-bozza-determinazione-word' } })) } catch {}
     } catch (e: any) {
-      setDialog({ kind: 'err', title: 'Errore generazione bozza Word', text: e?.message || String(e) })
+      if (operationContextIsCurrent()) setDialog({ kind: 'err', title: 'Errore generazione bozza Word', text: e?.message || String(e) })
     } finally {
-      setSaving(false)
+      if (operationContextIsCurrent()) setSaving(false)
     }
   }
 
@@ -8086,6 +8365,9 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
       setDialog({ kind: 'warn', title: 'Bozza già avanzata', text: 'La bozza di determinazione risulta già trasmessa o validata. Eventuali eliminazioni dovranno rientrare nel successivo flusso di verifica/rimando.' })
       return false
     }
+    const operationContextStamp = getGiiPracticeContextStamp()
+    const operationContextIsCurrent = () => isGiiPracticeContextStampCurrent(operationContextStamp)
+    if (!operationContextIsCurrent()) return false
     setSaving(true)
     try {
       const layer = await resolveLayerForEdit(active.ds, active.layerUrl || (configuredDsState as any)?.layerUrl || getDataSourceUrl(configuredDs))
@@ -8107,6 +8389,7 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
       }
       const cleanAttrs = filterAttrsForLayer({ [idName]: Number(oid), ...attrs }, fields)
       if (Object.keys(cleanAttrs).some(k => k !== idName)) {
+        if (!operationContextIsCurrent()) return false
         const res = await layer.applyEdits({ updateFeatures: [{ attributes: cleanAttrs }] })
         const upd = res?.updateFeatureResults?.[0] || res?.updateResults?.[0] || null
         const err = upd?.error
@@ -8119,6 +8402,7 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
 
       const layerUrl = normalizeEditLayerUrl(active.layerUrl || (configuredDsState as any)?.layerUrl || layer?.url || getDataSourceUrl(active.ds) || getDataSourceUrl(configuredDs))
       if (layerUrl) {
+        if (!operationContextIsCurrent()) return false
         const allAttachments = await queryAmmAttachments(layer, Number(oid), layerUrl)
         const bozzaWords = allAttachments.filter(isBozzaDeterminazioneWordAttachment)
         for (const att of bozzaWords) {
@@ -8129,7 +8413,8 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
 
       const changedFieldNames = Object.keys(cleanAttrs).filter(k => k !== idName)
       if (changedFieldNames.length) await upsertAmmCycleAudit(prevRecordAttrs, { ...prevRecordAttrs, ...cleanAttrs }, changedFieldNames)
-      await refreshDs(active.ds)
+      if (operationContextIsCurrent()) await refreshDs(active.ds)
+      if (!operationContextIsCurrent()) return true
       const savedAttrs = { ...cleanAttrs }
       delete savedAttrs[idName]
       setInitialDraft(prev => ({ ...(prev || {}), ...savedAttrs }))
@@ -8138,10 +8423,10 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
       try { window.dispatchEvent(new CustomEvent('gii:record-updated', { detail: { oid: Number(oid), source: 'gii-editing-amm-bozza-determinazione-eliminata' } })) } catch {}
       return true
     } catch (e: any) {
-      setDialog({ kind: 'err', title: 'Errore eliminazione bozza', text: e?.message || String(e) })
+      if (operationContextIsCurrent()) setDialog({ kind: 'err', title: 'Errore eliminazione bozza', text: e?.message || String(e) })
       return false
     } finally {
-      setSaving(false)
+      if (operationContextIsCurrent()) setSaving(false)
     }
   }
 
@@ -8168,6 +8453,7 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
       return
     }
 
+    const operationContextStamp = getGiiPracticeContextStamp()
     setSaving(true)
     try {
       const layer = await resolveLayerForEdit(active.ds, active.layerUrl || (configuredDsState as any)?.layerUrl || getDataSourceUrl(configuredDs))
@@ -8198,6 +8484,7 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
       }
 
       const attachments = await queryAmmAttachments(layer, Number(oid), layerUrl)
+      if (!isGiiPracticeContextStampCurrent(operationContextStamp)) return
       const bozzaWords = attachments.filter(isBozzaDeterminazioneWordAttachment)
       if (!bozzaWords.length) {
         setDialog({ kind: 'warn', title: 'Bozza Word non caricata', text: 'Caricare la bozza Word definitiva prima di trasmetterla al Responsabile dell’istruttoria amministrativa.' })
@@ -8243,6 +8530,7 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
       }
 
       const cleanAttrs = filterAttrsForLayer(attrs, fields)
+      if (!isGiiPracticeContextStampCurrent(operationContextStamp)) return
       const res = await layer.applyEdits({ updateFeatures: [{ attributes: cleanAttrs }] })
       const upd = res?.updateFeatureResults?.[0] || res?.updateResults?.[0] || null
       const err = upd?.error
@@ -8257,15 +8545,17 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
       await upsertAmmCycleAudit(prevRecordAttrs, nextRecordAttrs, changedFieldNames)
       await closeTiAmmBozzaDeterminazioneCycle(prevRecordAttrs, nextRecordAttrs, changedFieldNames)
       await createRiAmmBozzaDeterminazioneActivity(nextRecordAttrs)
+      if (!isGiiPracticeContextStampCurrent(operationContextStamp)) return
       try {
-        sessionStorage.setItem('GII_AFTER_WORKFLOW_NAV', JSON.stringify({
+        sessionStorage.setItem('GII_AFTER_WORKFLOW_NAV', JSON.stringify(stampGiiPracticePayload({
           oid: Number(oid),
           source: 'BOZZA_DETERMINAZIONE_TRASMESSA',
           targetRoleTab: 'attesa_altri',
           ts: Date.now()
-        }))
+        }, operationContextStamp)))
       } catch {}
       await refreshDs(active.ds)
+      if (!isGiiPracticeContextStampCurrent(operationContextStamp)) return
       const next = { ...nextRecordAttrs }
       setInitialDraft(next)
       setDraft(next)
@@ -8274,9 +8564,9 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
       try { window.dispatchEvent(new CustomEvent('gii-force-refresh-selection', { detail: { oid: Number(oid), source: 'gii-editing-amm-bozza-determinazione-trasmessa', ts: Date.now() } })) } catch {}
       try { window.dispatchEvent(new CustomEvent('gii-alerts-refresh', { detail: { oid: Number(oid), source: 'gii-editing-amm-bozza-determinazione-trasmessa', ts: Date.now() } })) } catch {}
     } catch (e: any) {
-      setDialog({ kind: 'err', title: 'Errore trasmissione bozza', text: e?.message || String(e) })
+      if (isGiiPracticeContextStampCurrent(operationContextStamp)) setDialog({ kind: 'err', title: 'Errore trasmissione bozza', text: e?.message || String(e) })
     } finally {
-      setSaving(false)
+      if (isGiiPracticeContextStampCurrent(operationContextStamp)) setSaving(false)
     }
   }
 
@@ -8426,6 +8716,9 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
       return
     }
 
+    const operationContextStamp = getGiiPracticeContextStamp()
+    const operationContextIsCurrent = () => isGiiPracticeContextStampCurrent(operationContextStamp)
+    if (!operationContextIsCurrent()) return
     setSaving(true)
     try {
       const layer = await resolveLayerForEdit(active.ds, active.layerUrl || (configuredDsState as any)?.layerUrl || getDataSourceUrl(configuredDs))
@@ -8441,6 +8734,7 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
         console.warn('[GII_LOG_EVENTI_CICLI] Impossibile rileggere il record amministrativo prima del salvataggio:', e)
       }
       const cleanAttrs = filterAttrsForLayer({ [idName]: Number(oid), ...attrs }, fields)
+      if (!operationContextIsCurrent()) return
       const res = await layer.applyEdits({ updateFeatures: [{ attributes: cleanAttrs }] })
       const upd = res?.updateFeatureResults?.[0] || res?.updateResults?.[0] || null
       const err = upd?.error
@@ -8450,7 +8744,8 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
         throw new Error(detail)
       }
       await upsertAmmCycleAudit(prevRecordAttrs, { ...prevRecordAttrs, ...attrs }, Object.keys(attrs))
-      await refreshDs(active.ds)
+      if (operationContextIsCurrent()) await refreshDs(active.ds)
+      if (!operationContextIsCurrent()) return
       const next = { ...(initialDraft || {}), ...attrs }
       const sharedSelectionLayerUrl = String(sessionStorage.getItem('GII_SELECTED_LAYER_URL') || '').trim()
       const nextLayerUrl = sharedSelectionLayerUrl || normalizeEditLayerUrl(layer?.url || active.layerUrl || (configuredDsState as any)?.layerUrl || getDataSourceUrl(configuredDs))
@@ -8466,9 +8761,9 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
         window.dispatchEvent(new CustomEvent('gii-force-refresh-selection', { detail: { oid: Number(oid), layerUrl: nextLayerUrl } }))
       } catch { }
     } catch (e: any) {
-      setDialog({ kind: 'err', title: 'Errore salvataggio', text: e?.message || String(e) })
+      if (operationContextIsCurrent()) setDialog({ kind: 'err', title: 'Errore salvataggio', text: e?.message || String(e) })
     } finally {
-      setSaving(false)
+      if (operationContextIsCurrent()) setSaving(false)
     }
   }
 
@@ -8606,13 +8901,19 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
   // visivamente più vicino al bordo superiore della card che a quello inferiore.
   const toolbarBottomPad = Math.max(0, Number(adminStyle.maskBorderWidth ?? 1) + Number(adminStyle.maskInnerPadding ?? 12) - 1)
 
-  if (tiAmmAccessDenied) {
+  if (tiAmmAccessRequired && !tiAmmAccessAllowed) {
+    const accessMessage = tiAmmAccess.status === 'denied'
+      ? 'Accesso alla pratica non consentito.'
+      : (tiAmmAccess.status === 'error'
+          ? (tiAmmAccess.message || 'Impossibile verificare l’accesso alla pratica.')
+          : 'Verifica accesso alla pratica…')
+    const accessColor = tiAmmAccess.status === 'checking' || tiAmmAccess.status === 'idle' ? '#334155' : '#7a1c1c'
     return (
       <AdminStyleCtx.Provider value={adminStyle}>
         <div ref={rootRef} data-gii-editing-amm-root='1' style={wrapperStyle}>
           {useDs.map((uds: any, idx: number) => {
             const dsKey = String(uds?.dataSourceId || uds?.mainDataSourceId || `ds_${idx}`)
-            return <DataSourceSelectionBridge key={dsKey} widgetId={props.id} uds={uds} dsKey={dsKey} onUpdate={onDsUpdate} />
+            return <DataSourceSelectionBridge key={`${dsKey}:${practiceContextRevision}`} widgetId={props.id} uds={uds} dsKey={dsKey} onUpdate={onDsUpdate} />
           })}
           <div style={{
             flex: '1 1 auto',
@@ -8623,11 +8924,11 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
             textAlign: 'center',
             padding: 24,
             boxSizing: 'border-box',
-            color: '#7a1c1c',
+            color: accessColor,
             fontSize: 14,
             fontWeight: 700
           }}>
-            Accesso alla pratica non consentito.
+            {accessMessage}
           </div>
         </div>
       </AdminStyleCtx.Provider>
@@ -8639,7 +8940,7 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
     <div ref={rootRef} data-gii-editing-amm-root='1' style={wrapperStyle}>
       {useDs.map((uds: any, idx: number) => {
         const dsKey = String(uds?.dataSourceId || uds?.mainDataSourceId || `ds_${idx}`)
-        return <DataSourceSelectionBridge key={dsKey} widgetId={props.id} uds={uds} dsKey={dsKey} onUpdate={onDsUpdate} />
+        return <DataSourceSelectionBridge key={`${dsKey}:${practiceContextRevision}`} widgetId={props.id} uds={uds} dsKey={dsKey} onUpdate={onDsUpdate} />
       })}
 
       {dialog && <BlockingDialog kind={dialog.kind} title={dialog.title} text={dialog.text} onClose={() => setDialog(null)} />}
@@ -8888,6 +9189,7 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
                   onRotateLeft={() => setAmmPreviewRotationDeg(v => v - 90)}
                   onRotateRight={() => setAmmPreviewRotationDeg(v => v + 90)}
                   onRotationConfirmed={() => setAmmPreviewRotationDeg(0)}
+                  practiceContextRevision={practiceContextRevision}
                 />
               )}
 

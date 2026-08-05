@@ -4,8 +4,6 @@ import {
   React,
   jsx,
   css,
-  DataSourceComponent,
-  DataSourceStatus,
   type DataRecord,
   type DataSource,
   DataSourceManager,
@@ -17,6 +15,7 @@ import type { AllWidgetProps } from "jimu-core";
 import type { IMConfig, ColumnDef } from "../config";
 import { defaultConfig, DEFAULT_COLUMNS } from "../config";
 import { isPracticeAssignedToCurrentTiAmm } from "../../../_shared/gii-access/ti-amm-assignment";
+import { clearGiiPracticeSelectionContext, isGiiPracticePayloadCurrent, stampGiiPracticePayload, writeGiiPracticeSelectionContext } from "../../../_shared/gii-selection/practice-context";
 import {
   pickGiiRuntimeView,
   type GiiRuntimeView as RuntimeDsView,
@@ -518,21 +517,6 @@ function getSelectedFeatureCacheKey(layerUrl: string, oid: any): string {
   return `${String(layerUrl || "").trim()}::${Number(oid)}`;
 }
 
-function readSelectedFeatureCache(
-  layerUrl: string,
-  oid: any,
-): SelectedFeatureCacheEntry | null {
-  try {
-    const key = getSelectedFeatureCacheKey(layerUrl, oid);
-    const bucket = getSelectedFeatureCacheBucket();
-    const e: any = bucket[key];
-    if (!e || !e.layerUrl || !Number.isFinite(Number(e.oid))) return null;
-    return e as SelectedFeatureCacheEntry;
-  } catch {
-    return null;
-  }
-}
-
 function writeSelectedFeatureCache(
   layerUrl: string,
   oid: any,
@@ -640,6 +624,7 @@ function notifySelectionCleared() {
     sessionStorage.removeItem("GII_SELECTED_IDFIELD");
     sessionStorage.removeItem("GII_SELECTED_VIEW_NAME");
     sessionStorage.removeItem("GII_SELECTED_DATA");
+    clearGiiPracticeSelectionContext();
     try {
       delete (window as any).__giiSelection;
     } catch {}
@@ -658,6 +643,10 @@ function readRestoreSelectionAfterEdit(): {
     const raw = sessionStorage.getItem("GII_RESTORE_SELECTION_AFTER_EDIT");
     if (!raw) return null;
     const j: any = JSON.parse(raw);
+    if (!isGiiPracticePayloadCurrent(j)) {
+      try { sessionStorage.removeItem("GII_RESTORE_SELECTION_AFTER_EDIT"); } catch {}
+      return null;
+    }
     const oidNum = j?.oid != null && j?.oid !== "" ? Number(j.oid) : NaN;
     if (!Number.isFinite(oidNum)) return null;
     const ts = Number(j?.ts || 0);
@@ -696,6 +685,10 @@ function readAfterWorkflowNav(): GiiAfterWorkflowNav | null {
     const raw = sessionStorage.getItem("GII_AFTER_WORKFLOW_NAV");
     if (!raw) return null;
     const j: any = JSON.parse(raw);
+    if (!isGiiPracticePayloadCurrent(j)) {
+      try { sessionStorage.removeItem("GII_AFTER_WORKFLOW_NAV"); } catch {}
+      return null;
+    }
     const oidNum = Number(j?.oid);
     if (!Number.isFinite(oidNum)) return null;
     const ts = Number(j?.ts || 0);
@@ -838,6 +831,10 @@ function readOpenPracticeIntent(
     const raw = sessionStorage.getItem("GII_OPEN_PRACTICE_INTENT");
     if (!raw) return null;
     const j: any = JSON.parse(raw);
+    if (!isGiiPracticePayloadCurrent(j)) {
+      clearOpenPracticeIntent();
+      return null;
+    }
     if (clearOpenPracticeIntentIfStaleForUser(j, currentUser)) return null;
 
     const ts = Number(j?.ts || 0);
@@ -1145,18 +1142,6 @@ type UtentiEntry = {
   settoreCod: string;
 };
 
-const AREA_FROM_CODE: Record<number, string> = { 1: "AMM", 2: "AGR", 3: "TEC" };
-const SETTORE_FROM_CODE: Record<number, string> = {
-  1: "CR",
-  2: "GI",
-  3: "D1",
-  4: "D2",
-  5: "D3",
-  6: "D4",
-  7: "D5",
-  8: "D6",
-  9: "DS",
-};
 const AREA_LABELS: Record<string, string> = {
   AMM: "Amministrativa",
   AGR: "Agraria",
@@ -1972,6 +1957,7 @@ function publishRuntimeSelection(p: {
   data?: any;
 }) {
   try {
+    writeGiiPracticeSelectionContext();
     sessionStorage.setItem("GII_SELECTED_OID", String(p.oid));
     sessionStorage.setItem("GII_SELECTED_LAYER_URL", p.layerUrl);
     sessionStorage.setItem("GII_SELECTED_SERVICE_URL", p.serviceUrl);
@@ -1991,14 +1977,14 @@ function publishRuntimeSelection(p: {
         );
       } catch {}
     }
-    const nextSel: any = {
+    const nextSel: any = stampGiiPracticePayload({
       oid: p.oid,
       layerUrl: p.layerUrl,
       serviceUrl: p.serviceUrl,
       idFieldName: p.idFieldName,
       viewName: p.viewName,
       ts: Date.now(),
-    };
+    });
     try {
       (window as any).__giiSelection = nextSel;
     } catch {}

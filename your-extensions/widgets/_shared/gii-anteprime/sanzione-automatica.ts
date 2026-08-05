@@ -1554,15 +1554,6 @@ async function computeSanzioneConsultivaGroups (cfg: any, data: any, layerFields
   const raccordiUrl = normalizeLookupTableUrl(cfg.regolamentoRaccordiUrl)
   const urlsReady = !!parametriUrl && !!articoliUrl && !!raccordiUrl
   const casistiche = deriveSanzioneCasistiche(data || {}, layerFields || [])
-  console.warn('[GII_SANZIONE_DIAG] computeSanzioneConsultivaGroups', {
-    urlsReady, parametriUrl, articoliUrl, raccordiUrl,
-    casistiche,
-    campiRilevantiNelRecord: {
-      v_art08: data?.v_art08, v_art12: data?.v_art12, v_art27: data?.v_art27, v_art28: data?.v_art28,
-      v_art30: data?.v_art30, norma15_parziale: data?.norma15_parziale, norma15_totale: data?.norma15_totale,
-      norma16_17: data?.norma16_17, tipo_abuso: data?.tipo_abuso, art17_tipo: data?.art17_tipo
-    }
-  })
   if (!urlsReady || !casistiche.length) {
     return { groups: [], urlsReady, casistiche }
   }
@@ -1576,11 +1567,6 @@ async function computeSanzioneConsultivaGroups (cfg: any, data: any, layerFields
   const parametri = paramRows.map(normalizeParam).filter(p => p.codice_parametro && isRowValidAt(p, refMs))
   const articoli = artRows.map(normalizeArticle).filter(a => a.codice_articolo && isRowValidAt(a, refMs))
   const raccordi = raccordiRows.map(normalizeRaccordo).filter(r => r.codice_casistica && isRowValidAt(r, refMs))
-  console.warn('[GII_SANZIONE_DIAG] righe caricate dalle tabelle', {
-    paramRowsTotali: paramRows.length, parametriValidi: parametri.length,
-    artRowsTotali: artRows.length, articoliValidi: articoli.length,
-    raccordiRowsTotali: raccordiRows.length, raccordiValidi: raccordi.length
-  })
   const groups = buildSanzioneGroups(casistiche, raccordi, parametri, articoli, data || {}, noteRows)
   return { groups, urlsReady, casistiche }
 }
