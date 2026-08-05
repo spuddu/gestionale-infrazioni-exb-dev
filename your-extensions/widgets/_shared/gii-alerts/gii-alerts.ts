@@ -9,6 +9,9 @@
  * Il modulo non monta UI e non dipende da un widget specifico.
  */
 
+import { ensureAttivitaCorrentiJsonOnlyQueryFormat } from './attivita-correnti-query-format-fix'
+import { isPracticeAssignedToCurrentTiAmm } from '../gii-access/ti-amm-assignment'
+
 export type GiiAlertType =
   | 'PAGAMENTO_SCADUTO'
   | 'RICORSO_SCADUTO'
@@ -85,6 +88,7 @@ export interface GiiAlertQueryOptions {
   where?: string
   pageSize?: number
   includeArchived?: boolean
+  signal?: AbortSignal
 }
 
 export interface GiiAlertQueryResult {
@@ -128,6 +132,14 @@ export const GII_ALERT_FIELDS = [
   'rapporto',
   'num_rapporto',
   'origine_pratica',
+  'ti_amm_assegnato_username',
+  'ti_amm_assegnato_user',
+  'ti_amm_assegnato',
+  'ti_amm_assegnato_nome',
+  'ti_amm_assegnato_name',
+  'ti_amm_username',
+  'utente_TI_AMM',
+  'utente_ti_amm',
   'stato_TI_AMM',
   'stato_RI_AMM',
   'determinazione_stato',
@@ -797,6 +809,9 @@ export function computeGiiAlertsFromPractice (data: Record<string, any>, options
   const warningDays = Number.isFinite(Number(options?.warningDays)) ? Number(options?.warningDays) : 5
   const alerts: GiiAlertItem[] = []
 
+  const roleAreaKeyForGate = roleAreaKeyForAlerts(data, options)
+  if (roleAreaKeyForGate === 'TI_AMM' && !isPracticeAssignedToCurrentTiAmm(data, options?.user)) return alerts
+
   const takeChargeAlert = computeTakeChargeAlert(data, { user: options?.user, log: options?.log || null })
   if (takeChargeAlert) alerts.push(takeChargeAlert)
 
@@ -970,12 +985,30 @@ function normalizeLayerUrlForAlerts (url: string): string {
   return s
 }
 
-async function makeFeatureLayer (url: string): Promise<any> {
+function isGiiAbortError (error: any): boolean {
+  return String(error?.name || '').toLowerCase() === 'aborterror' ||
+    String(error?.message || '').toLowerCase().includes('abort')
+}
+
+function throwIfGiiAborted (signal?: AbortSignal): void {
+  if (!signal?.aborted) return
+  const error = new Error('Operazione annullata.')
+  ;(error as any).name = 'AbortError'
+  throw error
+}
+
+async function makeFeatureLayer (url: string, signal?: AbortSignal): Promise<any> {
   const normalizedUrl = normalizeLayerUrlForAlerts(url)
   if (!normalizedUrl) throw new Error('URL layer/tabella non configurato.')
+  throwIfGiiAborted(signal)
   const FeatureLayer = await loadEsriModule<any>('esri/layers/FeatureLayer')
+  throwIfGiiAborted(signal)
   const layer = new FeatureLayer({ url: normalizedUrl })
-  if (typeof layer.load === 'function') await layer.load()
+
+  if (typeof layer.load === 'function') {
+    await layer.load(signal ? { signal } : undefined)
+  }
+  throwIfGiiAborted(signal)
   return layer
 }
 
@@ -993,12 +1026,13 @@ function alertOutFieldsForLayer (layer: any): string[] {
   return out.length ? out : ['*']
 }
 
-async function queryAllRows (layer: any, query: any, pageSize: number): Promise<Array<Record<string, any>>> {
+async function queryAllRows (layer: any, query: any, pageSize: number, signal?: AbortSignal): Promise<Array<Record<string, any>>> {
   const rows: Array<Record<string, any>> = []
   let start = 0
   const size = Number.isFinite(Number(pageSize)) && Number(pageSize) > 0 ? Number(pageSize) : 1000
 
   while (true) {
+    throwIfGiiAborted(signal)
     const q = {
       where: '1=1',
       outFields: ['*'],
@@ -1007,7 +1041,8 @@ async function queryAllRows (layer: any, query: any, pageSize: number): Promise<
       resultOffset: start,
       resultRecordCount: size
     }
-    const res = await layer.queryFeatures(q)
+    const res = await layer.queryFeatures(q, signal ? { signal } : undefined)
+    throwIfGiiAborted(signal)
     const features = Array.isArray(res?.features) ? res.features : []
     features.forEach((f: any) => rows.push({ ...(f?.attributes || {}) }))
     if (features.length < size) break
@@ -1018,13 +1053,13 @@ async function queryAllRows (layer: any, query: any, pageSize: number): Promise<
 }
 
 
-async function loadAlertLogMap (rows: Array<Record<string, any>>): Promise<Map<string, LogEntry>> {
+async function loadAlertLogMap (rows: Array<Record<string, any>>, signal?: AbortSignal): Promise<Map<string, LogEntry>> {
   const gids = Array.from(new Set((rows || []).map(row => normGid(getParentGlobalId(row))).filter(Boolean)))
   const map = new Map<string, LogEntry>()
   if (!gids.length) return map
 
   try {
-    const layer = await makeFeatureLayer(LOG_TABLE_URL)
+    const layer = await makeFeatureLayer(LOG_TABLE_URL, signal)
     const chunks: string[][] = []
     for (let i = 0; i < gids.length; i += 50) chunks.push(gids.slice(i, i + 50))
 
@@ -1035,7 +1070,7 @@ async function loadAlertLogMap (rows: Array<Record<string, any>>): Promise<Map<s
         outFields: ['parent_globalid', 'utente_operatore', 'ruolo_competente', 'area', 'settore', 'evento_chiusura', 'dt_chiusura', 'ruolo_destinatario', 'utente_destinatario'],
         orderByFields: ['dt_chiusura DESC'],
         returnGeometry: false
-      }, 1000)
+      }, 1000, signal)
 
       for (const a of logRows) {
         const pgid = normGid(a?.parent_globalid)
@@ -1073,21 +1108,22 @@ async function loadAlertLogMap (rows: Array<Record<string, any>>): Promise<Map<s
       }
     }
   } catch (e) {
+    if (isGiiAbortError(e)) throw e
     console.warn('[GII-Alerts] Errore caricamento GII_LOG_EVENTI_CICLI:', e)
   }
 
   return map
 }
 
-export async function loadArchivedGiiAlertKeys (archiveTableUrl: string, username: string): Promise<Set<string>> {
+export async function loadArchivedGiiAlertKeys (archiveTableUrl: string, username: string, signal?: AbortSignal): Promise<Set<string>> {
   const keys = new Set<string>()
   if (!archiveTableUrl || !String(username || '').trim()) return keys
-  const table = await makeFeatureLayer(archiveTableUrl)
+  const table = await makeFeatureLayer(archiveTableUrl, signal)
   const rows = await queryAllRows(table, {
     where: `username='${escapeSqlString(username)}'`,
     outFields: ['*'],
     returnGeometry: false
-  }, 1000)
+  }, 1000, signal)
   rows.forEach(r => {
     const key = String(attr(r, ['alert_key']) || '').trim()
     if (key) keys.add(key)
@@ -1102,10 +1138,60 @@ export interface GiiCurrentActivityQueryOptions {
   where?: string
   pageSize?: number
   includeArchived?: boolean
+  signal?: AbortSignal
 }
 
 function giiSqlString (value: any): string {
   return String(value ?? '').replace(/'/g, "''")
+}
+
+type GiiLatestQuerySlot<T> = {
+  requestId: number
+  promise: Promise<T>
+}
+
+let giiLatestQueryRequestId = 0
+
+const giiCurrentActivityQuerySlots = new Map<string, GiiLatestQuerySlot<GiiAlertQueryResult>>()
+const giiPracticeAlertQuerySlots = new Map<string, GiiLatestQuerySlot<GiiAlertQueryResult>>()
+
+function buildGiiLatestQueryScope (parts: any[]): string {
+  return JSON.stringify((parts || []).map(value => value ?? null))
+}
+
+/**
+ * Garantisce che, per la stessa sorgente di allarmi, prevalga sempre la richiesta
+ * avviata più di recente. È fondamentale durante il cambio account: una query
+ * ancora pendente del vecchio utente non deve poter ripubblicare i suoi allarmi
+ * dopo che è già iniziato il caricamento del nuovo profilo.
+ *
+ * Le richieste superate non restituiscono il proprio risultato (né il proprio
+ * errore), ma si allineano alla promise più recente dello stesso ambito. In questo
+ * modo anche un chiamante non dotato di AbortController applica soltanto dati
+ * coerenti con l'ultimo caricamento richiesto.
+ */
+function runLatestGiiQuery<T> (
+  slots: Map<string, GiiLatestQuerySlot<T>>,
+  scope: string,
+  task: () => Promise<T>
+): Promise<T> {
+  const requestId = ++giiLatestQueryRequestId
+
+  const promise = (async (): Promise<T> => {
+    try {
+      const result = await task()
+      const latest = slots.get(scope)
+      if (latest && latest.requestId !== requestId) return await latest.promise
+      return result
+    } catch (error) {
+      const latest = slots.get(scope)
+      if (latest && latest.requestId !== requestId) return await latest.promise
+      throw error
+    }
+  })()
+
+  slots.set(scope, { requestId, promise })
+  return promise
 }
 
 function activityRoleForUser (user?: GiiUserProfileForAlerts): string {
@@ -1225,89 +1311,120 @@ function currentActivityToAlert (row: Record<string, any>): GiiAlertItem | null 
 }
 
 export async function queryGiiCurrentActivities (options: GiiCurrentActivityQueryOptions): Promise<GiiAlertQueryResult> {
-  const activityLayer = await makeFeatureLayer(options.activityLayerUrl)
-  const pageSize = Number.isFinite(Number(options.pageSize)) && Number(options.pageSize) > 0 ? Number(options.pageSize) : 100
-  const rows = await queryAllRows(activityLayer, {
-    where: buildCurrentActivityWhere(options.user, options.where),
-    outFields: [
-      'OBJECTID',
-      'GlobalID',
-      'chiave_attivita',
-      'parent_globalid',
-      'parent_objectid',
-      'numero_rapporto',
-      'tipo_attivita',
-      'sottotipo_attivita',
-      'titolo',
-      'messaggio',
-      'destinatario_ruolo',
-      'destinatario_area',
-      'destinatario_settore',
-      'destinatario_ufficio_id',
-      'destinatario_ufficio_zona',
-      'destinatario_username',
-      'origine_evento',
-      'priorita',
-      'data_attivazione',
-      'creato_il',
-      'creato_da',
-      'aggiornato_il',
-      'aggiornato_da'
-    ],
-    orderByFields: ['data_attivazione DESC', 'OBJECTID DESC'],
-    returnGeometry: false
-  }, pageSize)
+  const scope = buildGiiLatestQueryScope([
+    'CURRENT_ACTIVITIES',
+    normalizeLayerUrlForAlerts(options.activityLayerUrl),
+    normalizeLayerUrlForAlerts(options.archiveTableUrl || ''),
+    String(options.where || '').trim(),
+    Number(options.pageSize) || 100,
+    !!options.includeArchived,
+    String(options.user?.username || '').trim().toLowerCase(),
+    String(options.user?.roleCod || options.user?.role || '').trim().toUpperCase(),
+    String(options.user?.areaCod || '').trim().toUpperCase(),
+    String(options.user?.settoreCod || '').trim().toUpperCase()
+  ])
 
-  const computed = rows
-    .map(row => currentActivityToAlert(row))
-    .filter((a): a is GiiAlertItem => !!a)
+  return await runLatestGiiQuery(giiCurrentActivityQuerySlots, scope, async () => {
+    await ensureAttivitaCorrentiJsonOnlyQueryFormat()
+    const activityLayer = await makeFeatureLayer(options.activityLayerUrl, options.signal)
+    const pageSize = Number.isFinite(Number(options.pageSize)) && Number(options.pageSize) > 0 ? Number(options.pageSize) : 100
+    const rows = await queryAllRows(activityLayer, {
+      where: buildCurrentActivityWhere(options.user, options.where),
+      outFields: [
+        'OBJECTID',
+        'GlobalID',
+        'chiave_attivita',
+        'parent_globalid',
+        'parent_objectid',
+        'numero_rapporto',
+        'tipo_attivita',
+        'sottotipo_attivita',
+        'titolo',
+        'messaggio',
+        'destinatario_ruolo',
+        'destinatario_area',
+        'destinatario_settore',
+        'destinatario_ufficio_id',
+        'destinatario_ufficio_zona',
+        'destinatario_username',
+        'origine_evento',
+        'priorita',
+        'data_attivazione',
+        'creato_il',
+        'creato_da',
+        'aggiornato_il',
+        'aggiornato_da'
+      ],
+      orderByFields: ['data_attivazione DESC', 'OBJECTID DESC'],
+      returnGeometry: false
+    }, pageSize, options.signal)
 
-  const archivedKeys = options.archiveTableUrl
-    ? await loadArchivedGiiAlertKeys(options.archiveTableUrl, options.user?.username)
-    : new Set<string>()
-  const alerts = filterArchivedGiiAlerts(computed, archivedKeys, options.includeArchived)
+    const computed = rows
+      .map(row => currentActivityToAlert(row))
+      .filter((a): a is GiiAlertItem => !!a)
 
-  return {
-    alerts,
-    archivedKeys,
-    counts: summarizeGiiAlerts(alerts)
-  }
+    const archivedKeys = options.archiveTableUrl
+      ? await loadArchivedGiiAlertKeys(options.archiveTableUrl, options.user?.username, options.signal)
+      : new Set<string>()
+    const alerts = filterArchivedGiiAlerts(computed, archivedKeys, options.includeArchived)
+
+    return {
+      alerts,
+      archivedKeys,
+      counts: summarizeGiiAlerts(alerts)
+    }
+  })
 }
 
 export async function queryGiiAlerts (options: GiiAlertQueryOptions): Promise<GiiAlertQueryResult> {
-  const user = options.user || { username: '' }
-  const practiceLayer = await makeFeatureLayer(options.practiceLayerUrl)
-  const pageSize = Number.isFinite(Number(options.pageSize)) && Number(options.pageSize) > 0 ? Number(options.pageSize) : 1000
-  const rows = await queryAllRows(practiceLayer, {
-    where: options.where || '1=1',
-    outFields: alertOutFieldsForLayer(practiceLayer),
-    returnGeometry: false
-  }, pageSize)
+  const scope = buildGiiLatestQueryScope([
+    'PRACTICE_ALERTS',
+    normalizeLayerUrlForAlerts(options.practiceLayerUrl),
+    normalizeLayerUrlForAlerts(options.archiveTableUrl),
+    String(options.where || '1=1').trim(),
+    Number(options.pageSize) || 1000,
+    !!options.includeArchived,
+    String(options.user?.username || '').trim().toLowerCase(),
+    String(options.user?.roleCod || options.user?.role || '').trim().toUpperCase(),
+    String(options.user?.areaCod || '').trim().toUpperCase(),
+    String(options.user?.settoreCod || '').trim().toUpperCase()
+  ])
 
-  const logMap = await loadAlertLogMap(rows)
-  const computed = computeGiiAlertsFromPractices(rows, {
-    now: options.now,
-    warningDays: options.warningDays,
-    user: options.user,
-    logMap
-  })
+  return await runLatestGiiQuery(giiPracticeAlertQuerySlots, scope, async () => {
+    const user = options.user || { username: '' }
+    const practiceLayer = await makeFeatureLayer(options.practiceLayerUrl, options.signal)
+    const pageSize = Number.isFinite(Number(options.pageSize)) && Number(options.pageSize) > 0 ? Number(options.pageSize) : 1000
+    const rows = await queryAllRows(practiceLayer, {
+      where: options.where || '1=1',
+      outFields: alertOutFieldsForLayer(practiceLayer),
+      returnGeometry: false
+    }, pageSize, options.signal)
 
-  const archivedKeys = await loadArchivedGiiAlertKeys(options.archiveTableUrl, user.username)
-  const alerts = filterArchivedGiiAlerts(computed, archivedKeys, options.includeArchived)
-    .sort((a, b) => {
-      const sevRank: Record<GiiAlertSeverity, number> = { red: 0, orange: 1, blue: 2, gray: 3 }
-      const sr = (sevRank[a.severity] ?? 9) - (sevRank[b.severity] ?? 9)
-      if (sr) return sr
-      const da = a.termineData ?? Number.MAX_SAFE_INTEGER
-      const db = b.termineData ?? Number.MAX_SAFE_INTEGER
-      return da - db
+    const logMap = await loadAlertLogMap(rows, options.signal)
+    const computed = computeGiiAlertsFromPractices(rows, {
+      now: options.now,
+      warningDays: options.warningDays,
+      user: options.user,
+      logMap
     })
 
-  return {
-    alerts,
-    archivedKeys,
-    counts: summarizeGiiAlerts(alerts)
-  }
+    const archivedKeys = await loadArchivedGiiAlertKeys(options.archiveTableUrl, user.username, options.signal)
+    const alerts = filterArchivedGiiAlerts(computed, archivedKeys, options.includeArchived)
+      .sort((a, b) => {
+        const sevRank: Record<GiiAlertSeverity, number> = { red: 0, orange: 1, blue: 2, gray: 3 }
+        const sr = (sevRank[a.severity] ?? 9) - (sevRank[b.severity] ?? 9)
+        if (sr) return sr
+        const da = a.termineData ?? Number.MAX_SAFE_INTEGER
+        const db = b.termineData ?? Number.MAX_SAFE_INTEGER
+        return da - db
+      })
+
+    return {
+      alerts,
+      archivedKeys,
+      counts: summarizeGiiAlerts(alerts)
+    }
+  })
 }
 
 function filterArchiveAttrs (attrs: Record<string, any>, fields: any[]): Record<string, any> {

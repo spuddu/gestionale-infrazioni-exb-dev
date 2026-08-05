@@ -2,17 +2,11 @@
 /** @jsxFrag React.Fragment */
 import { React, jsx, type AllWidgetProps } from 'jimu-core'
 import { defaultConfig, type IMConfig } from '../config'
-
-type RuntimeDsView = {
-  key: string
-  viewName: string
-  itemId: string
-  serviceUrl: string
-  layerUrl: string
-  roles: string[]
-  areaCode: 'AMM' | 'AGR' | 'TEC' | ''
-  settoreCode: string
-}
+import { isPracticeAssignedToCurrentTiAmm } from '../../../_shared/gii-access/ti-amm-assignment'
+import {
+  pickGiiRuntimeView,
+  type GiiRuntimeView as RuntimeDsView
+} from '../../../_shared/gii-runtime/runtime-views'
 
 type GiiUserInfo = {
   username: string
@@ -64,129 +58,6 @@ const DEFAULT_RECENT_SORT_RULES: RecentSortRule[] = [{ key: 'lastUpdate', dir: '
 const RUOLO_LABEL: Record<number, string> = { 1: 'TR', 2: 'TI', 3: 'RZ', 4: 'RI', 5: 'DT', 6: 'DA', 7: 'ADMIN' }
 const AREA_FROM_CODE: Record<number, string> = { 1: 'AMM', 2: 'AGR', 3: 'TEC' }
 const SETTORE_FROM_CODE: Record<number, string> = { 1: 'CR', 2: 'GI', 3: 'D1', 4: 'D2', 5: 'D3', 6: 'D4', 7: 'D5', 8: 'D6', 9: 'DS' }
-
-const GII_RUNTIME_VIEWS: RuntimeDsView[] = [
-  {
-    key: 'ADMIN',
-    viewName: 'GII_VIEW_ADMIN',
-    itemId: '2db73574551947a8bd0a78d500d0a51a',
-    serviceUrl: 'https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_VIEW_ADMIN/FeatureServer',
-    layerUrl: 'https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_VIEW_ADMIN/FeatureServer/0',
-    roles: ['ADMIN'],
-    areaCode: '',
-    settoreCode: ''
-  },
-  {
-    key: 'AGR_ALL',
-    viewName: 'GII_VIEW_AGR',
-    itemId: '00b028433ce346159e1ea6f176133403',
-    serviceUrl: 'https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_VIEW_AGR/FeatureServer',
-    layerUrl: 'https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_VIEW_AGR/FeatureServer/0',
-    roles: ['RI', 'DT'],
-    areaCode: 'AGR',
-    settoreCode: ''
-  },
-  {
-    key: 'AGR_D1',
-    viewName: 'GII_VIEW_AGR_D1',
-    itemId: '5ed3330e7f65418d83337d6aa6859296',
-    serviceUrl: 'https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_VIEW_AGR_D1/FeatureServer',
-    layerUrl: 'https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_VIEW_AGR_D1/FeatureServer/0',
-    roles: ['TI', 'RZ'],
-    areaCode: 'AGR',
-    settoreCode: 'D1'
-  },
-  {
-    key: 'AGR_D2',
-    viewName: 'GII_VIEW_AGR_D2',
-    itemId: 'c7312758bd1448b9bfb61e7db4683832',
-    serviceUrl: 'https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_VIEW_AGR_D2/FeatureServer',
-    layerUrl: 'https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_VIEW_AGR_D2/FeatureServer/0',
-    roles: ['TI', 'RZ'],
-    areaCode: 'AGR',
-    settoreCode: 'D2'
-  },
-  {
-    key: 'AGR_D3',
-    viewName: 'GII_VIEW_AGR_D3',
-    itemId: '59f7e37105fe433796a699cb99716bc7',
-    serviceUrl: 'https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_VIEW_AGR_D3/FeatureServer',
-    layerUrl: 'https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_VIEW_AGR_D3/FeatureServer/0',
-    roles: ['TI', 'RZ'],
-    areaCode: 'AGR',
-    settoreCode: 'D3'
-  },
-  {
-    key: 'AGR_D4',
-    viewName: 'GII_VIEW_AGR_D4',
-    itemId: 'e6bfbb9325c549d68b8435583d91d626',
-    serviceUrl: 'https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_VIEW_AGR_D4/FeatureServer',
-    layerUrl: 'https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_VIEW_AGR_D4/FeatureServer/0',
-    roles: ['TI', 'RZ'],
-    areaCode: 'AGR',
-    settoreCode: 'D4'
-  },
-  {
-    key: 'AGR_D5',
-    viewName: 'GII_VIEW_AGR_D5',
-    itemId: '5feb425669244ae2a1d63eca065cfaba',
-    serviceUrl: 'https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_VIEW_AGR_D5/FeatureServer',
-    layerUrl: 'https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_VIEW_AGR_D5/FeatureServer/0',
-    roles: ['TI', 'RZ'],
-    areaCode: 'AGR',
-    settoreCode: 'D5'
-  },
-  {
-    key: 'AGR_D6',
-    viewName: 'GII_VIEW_AGR_D6',
-    itemId: '0f55207139a2401fba3cf102147b9625',
-    serviceUrl: 'https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_VIEW_AGR_D6/FeatureServer',
-    layerUrl: 'https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_VIEW_AGR_D6/FeatureServer/0',
-    roles: ['TI', 'RZ'],
-    areaCode: 'AGR',
-    settoreCode: 'D6'
-  },
-  {
-    key: 'AMM_RI_DA',
-    viewName: 'GII_VIEW_AMM',
-    itemId: 'ff666692bc8f4369aba1fbfe6c5a7dd4',
-    serviceUrl: 'https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_VIEW_AMM/FeatureServer',
-    layerUrl: 'https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_VIEW_AMM/FeatureServer/0',
-    roles: ['DA', 'RI_AMM'],
-    areaCode: 'AMM',
-    settoreCode: ''
-  },
-  {
-    key: 'AMM_TI',
-    viewName: 'GII_VIEW_AMM_ALL',
-    itemId: '',
-    serviceUrl: 'https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_VIEW_AMM_ALL/FeatureServer',
-    layerUrl: 'https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_VIEW_AMM_ALL/FeatureServer/0',
-    roles: ['TI_AMM'],
-    areaCode: 'AMM',
-    settoreCode: ''
-  },
-  {
-    key: 'TEC_ALL',
-    viewName: 'GII_VIEW_TEC',
-    itemId: '6cbe0f0ea88a49c8ac91a76938669eea',
-    serviceUrl: 'https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_VIEW_TEC/FeatureServer',
-    layerUrl: 'https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_VIEW_TEC/FeatureServer/0',
-    roles: ['RI', 'DT'],
-    areaCode: 'TEC',
-    settoreCode: ''
-  },
-  {
-    key: 'TEC_DS',
-    viewName: 'GII_VIEW_TEC_DS',
-    itemId: '2d10b592601045bdb1527fda913825d7',
-    serviceUrl: 'https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_VIEW_TEC_DS/FeatureServer',
-    layerUrl: 'https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_VIEW_TEC_DS/FeatureServer/0',
-    roles: ['TI', 'RZ'],
-    areaCode: 'TEC',
-    settoreCode: 'DS'
-  }
-]
 
 function loadEsriModule<T = any> (path: string): Promise<T> {
   return new Promise((resolve, reject) => {
@@ -243,17 +114,13 @@ function pickRuntimeViewForUser (user: GiiUserInfo | null): RuntimeDsView | null
   const role = cleanCode(user.ruoloCod || user.ruoloLabel)
   const areaCode = user.areaCod || normalizeAreaCode('', user.area)
   const settoreCode = user.settoreCod || normalizeSettoreCode('', user.settore)
-  if (user.isAdmin || user.isWorkflowAdmin || role === 'ADMIN') {
-    return GII_RUNTIME_VIEWS.find(v => v.key === 'ADMIN') || null
-  }
-  const effective = getEffectiveRole(role, areaCode)
-  const strict = GII_RUNTIME_VIEWS.find(v =>
-    v.roles.includes(effective) &&
-    v.areaCode === areaCode &&
-    (v.settoreCode ? v.settoreCode === settoreCode : true)
-  )
-  if (strict) return strict
-  return GII_RUNTIME_VIEWS.find(v => v.roles.includes(effective) && v.areaCode === areaCode && !v.settoreCode) || null
+  return pickGiiRuntimeView({
+    roleCode: role,
+    areaCode,
+    settoreCode,
+    isAdmin: user.isAdmin,
+    isWorkflowAdmin: user.isWorkflowAdmin
+  })
 }
 
 function readGiiUser (): GiiUserInfo | null {
@@ -383,12 +250,7 @@ function isRecordVisibleForCurrentUser (d: any, user: GiiUserInfo | null): boole
   if (role === 'DA' || role === 'RI_AMM' || role === 'TI_AMM' || (isAmmArea && (role === 'RI' || role === 'TI'))) {
     if (!isInFaseSanzionatoria(d)) return false
     if (role === 'TI_AMM') {
-      const meUser = String(user.username || '').trim()
-      const meName = String(user.fullName ?? user.nome ?? user.displayName ?? '').trim()
-      const tiAmmUser = String(d['ti_amm_assegnato_username'] ?? d['ti_amm_assegnato_user'] ?? d['ti_amm_assegnato'] ?? '').trim()
-      const tiAmmName = String(d['ti_amm_assegnato_nome'] ?? d['ti_amm_assegnato_name'] ?? '').trim()
-      if (!tiAmmUser && !tiAmmName) return false
-      return equalsUser(tiAmmUser, meUser) || equalsUser(tiAmmName, meUser) || (meName ? equalsUser(tiAmmName, meName) : false)
+      return isPracticeAssignedToCurrentTiAmm(d, user)
     }
     return true
   }
@@ -440,14 +302,11 @@ function isAttesaMia (d: any, user: GiiUserInfo | null): boolean {
   if ((role === 'DT' || role === 'DA') && n === 2) return true
 
   if ((role === 'TI' || role === 'TI_AMM') && n === 2) {
+    if (role === 'TI_AMM') return isPracticeAssignedToCurrentTiAmm(d, user)
     const meUser = String(user.username || '').trim()
     const meName = String(user.fullName ?? user.nome ?? user.displayName ?? '').trim()
-    const tiUser = role === 'TI_AMM'
-      ? String(d['ti_amm_assegnato_username'] ?? d['ti_amm_assegnato_user'] ?? d['ti_amm_assegnato'] ?? '').trim()
-      : String(d['ti_assegnato_username'] ?? d['ti_assegnato_user'] ?? d['ti_assegnato'] ?? '').trim()
-    const tiName = role === 'TI_AMM'
-      ? String(d['ti_amm_assegnato_nome'] ?? d['ti_amm_assegnato_name'] ?? '').trim()
-      : String(d['ti_assegnato_nome'] ?? d['ti_assegnato_name'] ?? '').trim()
+    const tiUser = String(d['ti_assegnato_username'] ?? d['ti_assegnato_user'] ?? d['ti_assegnato'] ?? '').trim()
+    const tiName = String(d['ti_assegnato_nome'] ?? d['ti_assegnato_name'] ?? '').trim()
     return equalsUser(tiUser, meUser) || equalsUser(tiName, meUser) || (meName ? equalsUser(tiName, meName) : false)
   }
 

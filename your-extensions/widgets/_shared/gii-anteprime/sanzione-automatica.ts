@@ -8,6 +8,8 @@
 // con la stessa identica logica di business al suo interno.
 // =================================================================
 
+import { ensureNsdJsonOnlyQueryFormat } from './nsd-query-format-fix'
+
 function loadEsriModule<T = any> (path: string): Promise<T> {
   return new Promise((resolve, reject) => {
     const req = (window as any).require
@@ -139,6 +141,7 @@ async function queryNotaSpeseDetailRowsForPractice (data: Record<string, any>): 
   if (!rawGlobalId) return []
   const cleanGlobalId = rawGlobalId.replace(/[{}]/g, '').trim()
   const variants = Array.from(new Set([rawGlobalId, cleanGlobalId, cleanGlobalId ? `{${cleanGlobalId}}` : ''].filter(Boolean)))
+  await ensureNsdJsonOnlyQueryFormat()
   const fl = await getLookupLayer(NOTA_SPESE_DETTAGLIO_VIEW_URL)
   const q: any = {
     where: variants.map(value => `parent_globalid = ${sqlQuote(value)}`).join(' OR '),

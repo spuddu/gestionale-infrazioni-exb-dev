@@ -5,6 +5,7 @@ import { createPortal } from 'react-dom'
 import { JimuMapViewComponent, type JimuMapView } from 'jimu-arcgis'
 import type { IMConfig } from '../config'
 import { defaultConfig, type MapSearchConfig, type SearchFieldConfig } from '../config'
+import { buildTiAmmAssignmentWhereClause } from '../../../_shared/gii-access/ti-amm-assignment'
 
 type Props = AllWidgetProps<IMConfig>
 type Option = { value: string; label: string; raw: any }
@@ -332,11 +333,12 @@ function collectMapLayers(view: any): any[] {
   try { view?.map?.layers?.forEach?.((l: any) => push(l)) } catch {}
   return out
 }
-function readGiiUserForMapVisibility (): { username: string; ruoloCod: string; profiloCod: string; areaCod: string; settoreCod: string; isAdmin: boolean } | null {
+function readGiiUserForMapVisibility (): { username: string; fullName: string; ruoloCod: string; profiloCod: string; areaCod: string; settoreCod: string; isAdmin: boolean } | null {
   const raw: any = (window as any).__giiUserRole
   if (!raw?.username) return null
   return {
     username: String(raw.username || '').trim(),
+    fullName: String(raw.fullName || raw.full_name || raw.nome || raw.displayName || '').trim(),
     ruoloCod: String(raw.ruoloCod || raw.ruolo_cod || '').trim(),
     profiloCod: String(raw.profiloCod || '').trim(),
     areaCod: String(raw.areaCod || raw.area_cod || '').trim().toUpperCase(),
@@ -376,7 +378,7 @@ function buildRoleVisibilityWhereClause (user: ReturnType<typeof readGiiUserForM
   }
 
   if (role === 'TI_AMM') {
-    return `area_cod = 'AMM' AND ${faseSanzionatoriaClause} AND (UPPER(ti_amm_assegnato_username) = UPPER('${me}') OR UPPER(ti_amm_assegnato_nome) = UPPER('${me}'))`
+    return `area_cod = 'AMM' AND ${faseSanzionatoriaClause} AND ${buildTiAmmAssignmentWhereClause(user)}`
   }
 
   if ((role === 'RI' || role === 'DT') && (area === 'AGR' || area === 'TEC')) {

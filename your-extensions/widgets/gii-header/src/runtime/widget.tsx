@@ -4,6 +4,7 @@ import { createPortal } from 'react-dom'
 import type { IMConfig } from '../config'
 import { defaultConfig } from '../config'
 import { queryGiiAlerts, queryGiiCurrentActivities, archiveGiiAlert, getGiiAlertBellTone, isGiiTakeChargeAlert, summarizeGiiAlerts, type GiiAlertItem, type GiiAlertQueryResult } from '../../../_shared/gii-alerts/gii-alerts'
+import { ensureAttivitaCorrentiJsonOnlyQueryFormat } from '../../../_shared/gii-alerts/attivita-correnti-query-format-fix'
 
 const GII_PORTAL     = 'https://cbsm-hub.maps.arcgis.com'
 const GII_UTENTI_URL = 'https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_utenti/FeatureServer/0'
@@ -134,6 +135,7 @@ function loadEsriModule<T = any>(path: string): Promise<T> {
   })
 }
 
+
 async function getToken(): Promise<string> {
   try {
     const sm = SessionManager.getInstance()
@@ -151,6 +153,37 @@ async function getToken(): Promise<string> {
     if (best?.token) return best.token
   } catch { }
   return ''
+}
+
+function normalizeAuthUsername (value: any): string {
+  return String(value || '').trim().toLowerCase()
+}
+
+function getActiveSessionUsername (): string {
+  try {
+    const sm: any = SessionManager.getInstance()
+    const session: any = sm?.getMainSession?.()
+    const username = normalizeAuthUsername(session?.username || session?.user?.username)
+    if (username) return username
+  } catch { }
+
+  try {
+    return normalizeAuthUsername(getAppStore()?.getState?.()?.user?.username)
+  } catch { }
+
+  return ''
+}
+
+function clearGiiUserRoleCache (): void {
+  try { delete (window as any).__giiUserRole } catch { (window as any).__giiUserRole = null }
+}
+
+function dispatchGiiUserLoaded (detail: any): void {
+  try {
+    window.dispatchEvent(new (window as any).CustomEvent('gii:userLoaded', { detail }))
+  } catch {
+    try { window.dispatchEvent(new Event('gii:userLoaded')) } catch { }
+  }
 }
 
 interface GiiUserRole {
@@ -464,48 +497,36 @@ async function loadUser(): Promise<GiiUserRole | null> {
 async function signIn(): Promise<void> {
   try {
     const sm: any = SessionManager.getInstance()
-    if (typeof sm?.signInByResourceUrl === 'function') {
-      if (typeof sm?.isSignInPromptBlocked === 'function' && sm.isSignInPromptBlocked()) {
-        const returnUrl = encodeURIComponent(window.location.href)
-        window.location.href = `${GII_PORTAL}/home/signin.html?returnUrl=${returnUrl}`
-        return
-      }
-      await sm.signInByResourceUrl(`${GII_PORTAL}/sharing/rest`, undefined, false)
-      try { delete (window as any).__giiUserRole } catch { }
-      window.dispatchEvent(new Event('gii:userLoaded'))
-      return
+    if (typeof sm?.signIn === 'function') {
+      await sm.signIn({})
     }
-  } catch { }
-  try {
-    const id = await loadEsriModule<any>('esri/identity/IdentityManager')
-    await id.getCredential(`${GII_PORTAL}/sharing/rest`)
   } catch { }
   try { delete (window as any).__giiUserRole } catch { }
   window.dispatchEvent(new Event('gii:userLoaded'))
 }
 
-async function signOut(): Promise<void> {
-  try { delete (window as any).__giiUserRole } catch { (window as any).__giiUserRole = null }
-  try {
-    const sm: any = SessionManager.getInstance()
-    let handled = false
-    if (typeof sm?.signOutByResourceUrl === 'function') {
-      try { await sm.signOutByResourceUrl(`${GII_PORTAL}/sharing/rest`) } catch { }
-      handled = true
-    } else if (typeof sm?.signOut === 'function') {
-      try { sm.signOut({}) } catch { }
-      handled = true
-    }
-    // Rimozione manuale DOPO la pulizia ufficiale (non prima: altrimenti signOutByResourceUrl
-    // trova la sessione già nulla e crasha internamente leggendo i suoi dati di portale).
-    // Resta comunque utile come garanzia ulteriore (es. browser chiuso senza logout esplicito).
-    try { const main: any = sm?.getMainSession?.(); if (main && typeof sm?.removeSession === 'function') sm.removeSession(main) } catch { }
-    if (!handled && typeof sm?.clearSessions === 'function') { try { sm.clearSessions() } catch { } }
-  } catch { }
-  try { const id = await loadEsriModule<any>('esri/identity/IdentityManager'); if (typeof id?.destroyCredentials === 'function') id.destroyCredentials() } catch { }
-  try { window.dispatchEvent(new Event('gii:userLoaded')) } catch { }
+function switchAccountLikeStandardWidget(): Promise<any> | null {
+  if (window.jimuConfig.isInBuilder) return null
+
+  const sm: any = SessionManager.getInstance()
+  if (!sm?.getMainSession?.() || typeof sm?.switchAccount !== 'function') return null
+
+  // Stesso flusso del widget Login standard di Experience Builder 1.19.
+  // La Promise viene osservata soltanto per riallineare il profilo GII dopo
+  // che il popup nativo ha concluso il cambio o è stato annullato.
+  return Promise.resolve(sm.switchAccount())
 }
 
+async function signOut(): Promise<void> {
+  try {
+    const sm: any = SessionManager.getInstance()
+    if (typeof sm?.signOut === 'function') {
+      sm.signOut({})
+    }
+  } catch { }
+  try { delete (window as any).__giiUserRole } catch { (window as any).__giiUserRole = null }
+  window.dispatchEvent(new Event('gii:userLoaded'))
+}
 
 
 function alertRoleAreaKey (user: any): string {
@@ -701,9 +722,39 @@ function alertPopupVisualSignature (items: GiiAlertItem[]): string {
 
 function alertPopupKeysSignature (items: GiiAlertItem[]): string {
   return (Array.isArray(items) ? items : [])
-    .map(a => alertPracticeMergeKey(a) || String(a?.alertKey || ''))
+    .map(a => {
+      const practiceKey = alertPracticeMergeKey(a)
+      const alertKey = normalizeGiiAlertKey(a?.alertKey)
+      return alertKey ? `${practiceKey || 'alert'}::${alertKey}` : practiceKey
+    })
     .filter(Boolean)
     .join('¶')
+}
+
+type GiiTakeChargeTombstone = {
+  deletedAlertKeys: Set<string>
+  suppressAllPreviousActivities: boolean
+  resolvedAt: number
+  currentAbsentConfirmations: number
+  expiresAt: number
+}
+
+type GiiAlertRefreshOptions = {
+  includeBackground?: boolean
+}
+
+function normalizeGiiAlertKey (value: any): string {
+  return String(value ?? '').trim().toLowerCase()
+}
+
+function giiPracticeKeyFromIdentity (parentGlobalId: any, parentObjectId: any): string {
+  const gid = String(parentGlobalId ?? '').trim().replace(/^\{|\}$/g, '').toUpperCase()
+  if (gid) return `practice:${gid}`
+
+  const oid = Number(parentObjectId)
+  if (Number.isFinite(oid)) return `parent-oid:${oid}`
+
+  return ''
 }
 
 function withGiiTimeout<T> (promise: Promise<T>, ms: number, message: string): Promise<T> {
@@ -716,8 +767,16 @@ function withGiiTimeout<T> (promise: Promise<T>, ms: number, message: string): P
   })
 }
 
-function emptyAlertCounts (): GiiAlertQueryResult['counts'] {
-  return { total: 0, red: 0, orange: 0, blue: 0, gray: 0, scaduti: 0, inScadenza: 0, critici: 0, informativi: 0 }
+function isGiiAbortError (error: any): boolean {
+  return String(error?.name || '').toLowerCase() === 'aborterror' ||
+    String(error?.message || '').toLowerCase().includes('abort')
+}
+
+function throwIfHeaderAborted (signal?: AbortSignal): void {
+  if (!signal?.aborted) return
+  const error = new Error('Operazione annullata.')
+  ;(error as any).name = 'AbortError'
+  throw error
 }
 
 function formatAlertDate (ms: number | null): string {
@@ -1620,7 +1679,7 @@ function addGiiUserLookupAliases (out: Map<string, string>, wanted: Set<string>,
   addRoleAreaAliases(area)
 }
 
-async function loadPortalUserFullNameMap (values: string[]): Promise<Map<string, string>> {
+async function loadPortalUserFullNameMap (values: string[], signal?: AbortSignal): Promise<Map<string, string>> {
   const candidates = Array.from(new Set(
     (values || [])
       .map(v => String(v ?? '').trim())
@@ -1628,28 +1687,36 @@ async function loadPortalUserFullNameMap (values: string[]): Promise<Map<string,
   ))
   const out = new Map<string, string>()
   if (!candidates.length) return out
+  throwIfHeaderAborted(signal)
 
   try {
     const token = await getToken()
+    throwIfHeaderAborted(signal)
     if (!token) return out
 
     for (const username of candidates.slice(0, 60)) {
+      throwIfHeaderAborted(signal)
       try {
         const url = `${GII_PORTAL}/sharing/rest/community/users/${encodeURIComponent(username)}?f=json&token=${encodeURIComponent(token)}`
-        const res = await fetch(url)
+        const res = await fetch(url, signal ? { signal } : undefined)
+        throwIfHeaderAborted(signal)
         const json = await res.json()
         const fullName = cleanResolvedUserFullName(json?.fullName || json?.full_name || json?.name, username)
         if (fullName) out.set(normalizeUsernameLookupKey(username), fullName)
-      } catch { }
+      } catch (e) {
+        if (isGiiAbortError(e)) throw e
+      }
     }
-  } catch { }
+  } catch (e) {
+    if (isGiiAbortError(e)) throw e
+  }
 
   return out
 }
 
 const __giiUserFullNameCache = new Map<string, string | null>()
 
-async function loadGiiUserFullNameMap (values: string[]): Promise<Map<string, string>> {
+async function loadGiiUserFullNameMap (values: string[], signal?: AbortSignal): Promise<Map<string, string>> {
   const candidates = Array.from(new Set(
     (values || [])
       .map(v => String(v ?? '').trim())
@@ -1659,9 +1726,10 @@ async function loadGiiUserFullNameMap (values: string[]): Promise<Map<string, st
   const wanted = new Set(candidates.map(normalizeUsernameLookupKey).filter(Boolean))
   const out = new Map<string, string>()
   if (!wanted.size) return out
+  throwIfHeaderAborted(signal)
 
   // Serve dalla cache tutto ciò che è già stato tentato in questa sessione di pagina,
-  // trovato o meno: senza questo, ogni ciclo di polling (ogni 5s) rifaceva da capo sia la
+  // trovato o meno: senza questo, ogni riconciliazione periodica rifarebbe da capo sia la
   // query completa su GII_utenti sia le chiamate individuali al profilo AGOL per ogni
   // utente — e un utente mai risolvibile (es. per permessi) veniva ritentato all'infinito.
   const stillWanted = new Set<string>()
@@ -1677,8 +1745,10 @@ async function loadGiiUserFullNameMap (values: string[]): Promise<Map<string, st
 
   try {
     const FeatureLayer = await loadEsriModule<any>('esri/layers/FeatureLayer')
+    throwIfHeaderAborted(signal)
     const layer = new FeatureLayer({ url: GII_UTENTI_URL })
-    if (typeof layer.load === 'function') await layer.load()
+    if (typeof layer.load === 'function') await layer.load(signal ? { signal } : undefined)
+    throwIfHeaderAborted(signal)
 
     const fieldNameByLower = new Map<string, string>()
     ;(Array.isArray(layer?.fields) ? layer.fields : [])
@@ -1703,7 +1773,7 @@ async function loadGiiUserFullNameMap (values: string[]): Promise<Map<string, st
       q.returnGeometry = false
       q.resultOffset = offset
       q.resultRecordCount = pageSize
-      const res = await layer.queryFeatures(q)
+      const res = await layer.queryFeatures(q, signal ? { signal } : undefined)
       const features = Array.isArray(res?.features) ? res.features : []
 
       features.forEach((f: any) => {
@@ -1717,11 +1787,14 @@ async function loadGiiUserFullNameMap (values: string[]): Promise<Map<string, st
       if (features.length < pageSize || out.size >= wanted.size) break
       offset += features.length
     }
-  } catch { }
+  } catch (e) {
+    if (isGiiAbortError(e)) throw e
+  }
 
+  throwIfHeaderAborted(signal)
   const unresolvedCandidates = candidates.filter(v => !out.has(normalizeUsernameLookupKey(v)))
   if (unresolvedCandidates.length) {
-    const portalNames = await loadPortalUserFullNameMap(unresolvedCandidates)
+    const portalNames = await loadPortalUserFullNameMap(unresolvedCandidates, signal)
     portalNames.forEach((fullName, key) => {
       if (stillWanted.has(key) && !out.has(key)) out.set(key, fullName)
     })
@@ -1774,7 +1847,7 @@ function technicianUserCandidates (alert: GiiAlertItem, isTi: boolean): string[]
   ].map(v => parseUsernameFromGiiActorLabel(v)).filter(Boolean)
 }
 
-async function enrichAlertsWithActorFullNames (alerts: GiiAlertItem[]): Promise<GiiAlertItem[]> {
+async function enrichAlertsWithActorFullNames (alerts: GiiAlertItem[], signal?: AbortSignal): Promise<GiiAlertItem[]> {
   const list = Array.isArray(alerts) ? alerts : []
   if (!list.length) return list
 
@@ -1785,7 +1858,7 @@ async function enrichAlertsWithActorFullNames (alerts: GiiAlertItem[]): Promise<
     technicianUserCandidates(alert, isTi).forEach(v => allCandidates.push(v))
   })
 
-  const fullNameByUsername = await loadGiiUserFullNameMap(allCandidates)
+  const fullNameByUsername = await loadGiiUserFullNameMap(allCandidates, signal)
   if (!fullNameByUsername.size) return list
 
   return list.map(alert => {
@@ -1833,7 +1906,7 @@ function alertDisplayPracticeLine (alert: GiiAlertItem): string {
   return line
 }
 
-async function enrichAlertsWithPracticeMeta (alerts: GiiAlertItem[], practiceLayerUrl: string): Promise<GiiAlertItem[]> {
+async function enrichAlertsWithPracticeMeta (alerts: GiiAlertItem[], practiceLayerUrl: string, signal?: AbortSignal): Promise<GiiAlertItem[]> {
   const list = Array.isArray(alerts) ? alerts : []
   const url = normalizeGiiFeatureLayerUrl(practiceLayerUrl)
   if (!list.length) return list
@@ -1845,21 +1918,24 @@ async function enrichAlertsWithPracticeMeta (alerts: GiiAlertItem[], practiceLay
       .filter(n => Number.isFinite(n))
   ))
   if (!objectIds.length) return list
+  throwIfHeaderAborted(signal)
 
   try {
     const FeatureLayer = await loadEsriModule<any>('esri/layers/FeatureLayer')
     const layer = new FeatureLayer({ url })
-    if (typeof layer.load === 'function') await layer.load()
+    if (typeof layer.load === 'function') await layer.load(signal ? { signal } : undefined)
+    throwIfHeaderAborted(signal)
     const oidField = String(layer?.objectIdField || 'OBJECTID')
     const byOid = new Map<number, Record<string, any>>()
 
     for (let i = 0; i < objectIds.length; i += 50) {
+      throwIfHeaderAborted(signal)
       const chunk = objectIds.slice(i, i + 50)
       const q = layer.createQuery ? layer.createQuery() : {}
       q.where = `${oidField} IN (${chunk.join(',')})`
       q.outFields = ['*']
       q.returnGeometry = false
-      const res = await layer.queryFeatures(q)
+      const res = await layer.queryFeatures(q, signal ? { signal } : undefined)
       ;(Array.isArray(res?.features) ? res.features : []).forEach((f: any) => {
         const attrs = { ...(f?.attributes || {}) }
         const oid = Number(attrs[oidField] ?? attrs.OBJECTID ?? attrs.objectid)
@@ -1884,7 +1960,8 @@ async function enrichAlertsWithPracticeMeta (alerts: GiiAlertItem[], practiceLay
     })
 
     return enriched
-  } catch {
+  } catch (e) {
+    if (isGiiAbortError(e)) throw e
     return list
   }
 }
@@ -2011,10 +2088,12 @@ async function normalizeSurveyUppercaseFields (args: {
   practiceLayerUrl: string
   dynamicAlerts: GiiAlertItem[]
   user: any
+  signal?: AbortSignal
 }): Promise<number> {
   const url = normalizeGiiFeatureLayerUrl(args.practiceLayerUrl)
   const alerts = Array.isArray(args.dynamicAlerts) ? args.dynamicAlerts : []
   if (!url || !alerts.length) return 0
+  throwIfHeaderAborted(args.signal)
 
   const objectIds = Array.from(new Set(
     alerts
@@ -2027,7 +2106,8 @@ async function normalizeSurveyUppercaseFields (args: {
   try {
     const FeatureLayer = await loadEsriModule<any>('esri/layers/FeatureLayer')
     const layer = new FeatureLayer({ url, outFields: ['*'] })
-    if (typeof layer.load === 'function') await layer.load()
+    if (typeof layer.load === 'function') await layer.load(args.signal ? { signal: args.signal } : undefined)
+    throwIfHeaderAborted(args.signal)
 
     const fieldMap = new Map<string, string>()
     ;(Array.isArray(layer?.fields) ? layer.fields : []).forEach((f: any) => {
@@ -2056,12 +2136,13 @@ async function normalizeSurveyUppercaseFields (args: {
     let changed = 0
     const chunkSize = 80
     for (let i = 0; i < objectIds.length; i += chunkSize) {
+      throwIfHeaderAborted(args.signal)
       const chunk = objectIds.slice(i, i + chunkSize)
       const q = layer.createQuery ? layer.createQuery() : {}
       q.objectIds = chunk
       q.outFields = Array.from(new Set([oidField, originField, flagField, dateField, userField, ...uppercaseFields, ...lowercaseFields].filter(Boolean)))
       q.returnGeometry = false
-      const res = await layer.queryFeatures(q)
+      const res = await layer.queryFeatures(q, args.signal ? { signal: args.signal } : undefined)
       const features = Array.isArray(res?.features) ? res.features : []
       if (!features.length) continue
 
@@ -2112,13 +2193,16 @@ async function normalizeSurveyUppercaseFields (args: {
       }
 
       if (updates.length) {
-        await layer.applyEdits({ updateFeatures: updates })
+        throwIfHeaderAborted(args.signal)
+        await layer.applyEdits({ updateFeatures: updates }, args.signal ? { signal: args.signal } : undefined)
+        throwIfHeaderAborted(args.signal)
         changed += updates.length
       }
     }
 
     return changed
   } catch (e) {
+    if (isGiiAbortError(e)) throw e
     console.warn('[GII] Normalizzazione testi Survey non riuscita:', e)
     return 0
   }
@@ -2128,6 +2212,7 @@ async function materializeMissingTakeChargeActivities (args: {
   currentActivities: GiiAlertItem[]
   dynamicAlerts: GiiAlertItem[]
   user: any
+  signal?: AbortSignal
 }): Promise<number> {
   const currentKeys = new Set((args.currentActivities || []).map(a => giiAlertPracticeIdentityKey(a)).filter(Boolean))
   const missing = (args.dynamicAlerts || [])
@@ -2138,11 +2223,14 @@ async function materializeMissingTakeChargeActivities (args: {
     })
 
   if (!missing.length) return 0
+  throwIfHeaderAborted(args.signal)
 
   try {
+    await ensureAttivitaCorrentiJsonOnlyQueryFormat()
     const FeatureLayer = await loadEsriModule<any>('esri/layers/FeatureLayer')
     const layer = new FeatureLayer({ url: GII_ATTIVITA_CORRENTI_WRITE_URL, outFields: ['*'] })
-    if (typeof layer.load === 'function') await layer.load()
+    if (typeof layer.load === 'function') await layer.load(args.signal ? { signal: args.signal } : undefined)
+    throwIfHeaderAborted(args.signal)
 
     const fieldMap = new Map<string, string>()
     ;(Array.isArray(layer?.fields) ? layer.fields : []).forEach((f: any) => {
@@ -2163,6 +2251,7 @@ async function materializeMissingTakeChargeActivities (args: {
     let changed = 0
 
     for (const alert of missing) {
+      throwIfHeaderAborted(args.signal)
       const parentGlobalId = String(alert.parentGlobalId || materializeAlertPick(alert, ['globalid', 'GlobalID', 'parent_globalid']) || '').trim()
       if (!parentGlobalId) continue
 
@@ -2220,19 +2309,22 @@ async function materializeMissingTakeChargeActivities (args: {
       q.outFields = [oidField]
       q.returnGeometry = false
       q.num = 1
-      const found = await layer.queryFeatures(q)
+      const found = await layer.queryFeatures(q, args.signal ? { signal: args.signal } : undefined)
       const existing = found?.features?.[0]?.attributes || null
       const existingOid = existing?.[oidField] ?? existing?.OBJECTID ?? existing?.objectid
+      throwIfHeaderAborted(args.signal)
       if (existingOid != null) {
-        await layer.applyEdits({ updateFeatures: [{ attributes: { [oidField]: existingOid, ...attrs } }] })
+        await layer.applyEdits({ updateFeatures: [{ attributes: { [oidField]: existingOid, ...attrs } }] }, args.signal ? { signal: args.signal } : undefined)
       } else {
-        await layer.applyEdits({ addFeatures: [{ attributes: attrs }] })
+        await layer.applyEdits({ addFeatures: [{ attributes: attrs }] }, args.signal ? { signal: args.signal } : undefined)
       }
+      throwIfHeaderAborted(args.signal)
       changed += 1
     }
 
     return changed
   } catch (e) {
+    if (isGiiAbortError(e)) throw e
     console.warn('[GII_ATTIVITA_CORRENTI] Materializzazione allarmi da FL non riuscita:', e)
     return 0
   }
@@ -2359,7 +2451,10 @@ function storeAlertEditIntent (alert: GiiAlertItem, layerUrl: string): void {
 function AlertBellButton (props: { counts: GiiAlertQueryResult['counts'], loading: boolean, error: string, onClick: () => void }) {
   const tone = getGiiAlertBellTone(props.counts)
   const total = props.counts?.total || 0
-  if (total <= 0 && !props.error) return null
+  // Durante il cambio account la campanella deve restare nascosta finché gli
+  // allarmi del nuovo profilo non sono stati caricati. In caso contrario React
+  // continuerebbe a mostrare per qualche istante il conteggio dell'utente precedente.
+  if (props.loading || (total <= 0 && !props.error)) return null
   const color = props.error ? '#dc2626' : alertToneColor(tone)
   return (
     <button
@@ -2383,7 +2478,17 @@ function AlertBellButton (props: { counts: GiiAlertQueryResult['counts'], loadin
         flex: '0 0 auto'
       }}
     >
-      <span aria-hidden='true'>🔔</span>
+      <span
+        aria-hidden='true'
+        style={{
+          display: 'inline-block',
+          transformOrigin: '50% 12%',
+          animationName: !props.error && total > 0 ? 'gii-alert-bell-ring' : undefined,
+          animationDuration: '3s',
+          animationIterationCount: 'infinite',
+          animationTimingFunction: 'ease-in-out'
+        }}
+      >🔔</span>
       {total > 0 && (
         <span style={{
           position: 'absolute',
@@ -2518,23 +2623,14 @@ type Props = AllWidgetProps<IMConfig>
 export default function Widget(props: Props) {
   const cfg: any = { ...defaultConfig, ...(props.config as any) }
 
-  // Flag per forzare il reset dei datasource dopo un ciclo logout→login.
-  // In alcuni casi (ExB 1.19) l'Elenco può restare in loading infinito se non si reinizializza l'app.
-  const NEEDS_DS_RESET_KEY = '__giiNeedsDsReset'
-  const SWITCH_ACCOUNT_PENDING_KEY = '__giiSwitchAccountPending'
-
   // ── Refs configurazione (per usare i valori aggiornati negli handler registrati una sola volta)
   const afterInRef  = React.useRef<string>(String(cfg.redirectAfterSignIn ?? ''))
   const afterOutRef = React.useRef<string>(String(cfg.redirectAfterSignOut ?? ''))
-  const loginViewRef = React.useRef<'popup'|'redirect'>((cfg.loginView ?? 'popup') as any)
   const signedInClickRef = React.useRef<'signout'|'menu'>((cfg.signedInClick ?? 'signout') as any)
-  const forceReloadRef = React.useRef<boolean>((cfg.forceReloadAfterLogoutLogin ?? true) as any)
 
   React.useEffect(() => { afterInRef.current  = String(cfg.redirectAfterSignIn ?? '') }, [cfg.redirectAfterSignIn])
   React.useEffect(() => { afterOutRef.current = String(cfg.redirectAfterSignOut ?? '') }, [cfg.redirectAfterSignOut])
-  React.useEffect(() => { loginViewRef.current = (cfg.loginView ?? 'popup') as any }, [cfg.loginView])
   React.useEffect(() => { signedInClickRef.current = (cfg.signedInClick ?? 'signout') as any }, [cfg.signedInClick])
-  React.useEffect(() => { forceReloadRef.current = (cfg.forceReloadAfterLogoutLogin ?? true) as any }, [cfg.forceReloadAfterLogoutLogin])
 
 
   const [user,     setUser]    = React.useState<GiiUserRole | null>(null)
@@ -2545,36 +2641,101 @@ export default function Widget(props: Props) {
   const [accountMenuPos, setAccountMenuPos] = React.useState<{ top: number, right: number }>({ top: 0, right: 0 })
   const [urlTick, setUrlTick] = React.useState(0)
   const [alerts, setAlerts] = React.useState<GiiAlertItem[]>([])
-  const [alertCounts, setAlertCounts] = React.useState<GiiAlertQueryResult['counts']>(() => emptyAlertCounts())
+  const alertCounts = React.useMemo(() => summarizeGiiAlerts(alerts), [alerts])
   const [alertsLoading, setAlertsLoading] = React.useState(false)
   const [alertsError, setAlertsError] = React.useState('')
+  const [profileSyncError, setProfileSyncError] = React.useState('')
   const [alertsOpen, setAlertsOpen] = React.useState(false)
   const [archivingAlertKey, setArchivingAlertKey] = React.useState('')
   const guardLockRef = React.useRef(false)
-  const alertsBackgroundRefreshInFlightRef = React.useRef(false)
+  const alertsAccountGenerationRef = React.useRef(0)
+  const alertsCurrentUsernameRef = React.useRef('')
+  const alertsLoadedGenerationRef = React.useRef(-1)
+  const alertsBackgroundRefreshRef = React.useRef<{ generation: number, username: string } | null>(null)
+  const alertsAbortControllerRef = React.useRef<AbortController | null>(null)
+  const alertsRef = React.useRef<GiiAlertItem[]>([])
+  const alertsOptimisticRevisionRef = React.useRef(0)
+  const alertsLightSequenceRef = React.useRef(0)
+  const alertsCurrentActivitiesSignatureRef = React.useRef('')
+  const alertsLastBackgroundStartRef = React.useRef(0)
+  const takeChargeTombstonesRef = React.useRef<Map<string, GiiTakeChargeTombstone>>(new Map())
+  const locallyArchivedAlertKeysRef = React.useRef<Set<string>>(new Set())
+  const alertsAuthTransitionRef = React.useRef(false)
+  const profileSyncRetryTimerRef = React.useRef<number | null>(null)
+  const accountSwitchInProgressRef = React.useRef(false)
+  const userRef = React.useRef<GiiUserRole | null>(null)
+
+  React.useEffect(() => {
+    userRef.current = user
+  }, [user])
+
+  React.useEffect(() => {
+    alertsRef.current = alerts
+  }, [alerts])
 
   React.useEffect(() => {
     let cancelled = false
     let hCreate: any = null
-    let hDestroy: any = null
 
-    const dispatchBoot = (detail: any) => {
-      try { window.dispatchEvent(new (window as any).CustomEvent('gii:userLoaded', { detail })) } catch {
-        try { window.dispatchEvent(new Event('gii:userLoaded')) } catch { }
+    let refreshSequence = 0
+
+    const clearProfileSyncRetryTimer = () => {
+      if (profileSyncRetryTimerRef.current != null) {
+        window.clearTimeout(profileSyncRetryTimerRef.current)
+        profileSyncRetryTimerRef.current = null
       }
     }
 
-    const clearCache = () => {
-      try { delete (window as any).__giiUserRole } catch { (window as any).__giiUserRole = null }
-    }
+    const refresh = async (reason: string, attempt = 0) => {
+      const sequence = ++refreshSequence
+      const isFallbackRetry = reason === 'profile-sync-fallback'
+      if (!isFallbackRetry) setULoad(true)
 
-    const refresh = async (reason: string) => {
-      setULoad(true)
       const u = await loadUser()
-      if (cancelled) return
+      if (cancelled || sequence !== refreshSequence) return
+
+      const activeUsername = getActiveSessionUsername()
+      const loadedUsername = normalizeAuthUsername(u?.username)
+      const profileMatchesSession = !activeUsername || (!!u && loadedUsername === activeUsername)
+
+      // Durante il cambio account la sessione OAuth e il profilo GII non diventano
+      // disponibili nello stesso istante. Non pubblichiamo mai un profilo appartenente
+      // a un username diverso dalla sessione principale, perché selezionerebbe i layer
+      // AGR/TEC/AMM sbagliati con il token del nuovo utente.
+      if (!profileMatchesSession) {
+        clearGiiUserRoleCache()
+
+        if (attempt < 20) {
+          clearProfileSyncRetryTimer()
+          profileSyncRetryTimerRef.current = window.setTimeout(() => refresh(reason, attempt + 1), 100)
+        } else {
+          // Fallimento esplicito e recuperabile: non lasciamo il precedente profilo
+          // associato alla nuova sessione e non riattiviamo gli allarmi con ruolo/area
+          // non coerenti. Un solo retry differito riparte autonomamente ogni 5 secondi.
+          alertsAuthTransitionRef.current = true
+          try { alertsAbortControllerRef.current?.abort() } catch { }
+          alertsAbortControllerRef.current = null
+          alertsBackgroundRefreshRef.current = null
+
+          setUser(null)
+          setAlerts([])
+          setAlertsError('')
+          setAlertsOpen(false)
+          setAlertsLoading(false)
+          setULoad(false)
+          setProfileSyncError('Impossibile completare il caricamento del profilo utente. Gli allarmi sono temporaneamente sospesi; il sistema riproverà automaticamente.')
+
+          clearProfileSyncRetryTimer()
+          profileSyncRetryTimerRef.current = window.setTimeout(() => refresh('profile-sync-fallback', 0), 5000)
+        }
+        return
+      }
+
+      clearProfileSyncRetryTimer()
+      setProfileSyncError('')
       setUser(u)
       setULoad(false)
-      dispatchBoot({ source: 'header-boot', reason, username: u?.username || '' })
+      dispatchGiiUserLoaded({ source: 'header-boot', reason, username: u?.username || '' })
     }
 
     const onExternal = (ev: any) => {
@@ -2586,21 +2747,6 @@ export default function Widget(props: Props) {
     refresh('mount')
     window.addEventListener('gii:userLoaded', onExternal)
 
-    // Se arriviamo qui da un reload forzato per "Cambia account" (memoria JS
-    // completamente fresca, IdentityManager mai toccato in questa pagina), completa
-    // il login ora: evita così il crash interno di ExB che si presenta quando si fa
-    // disconnetti+riconnetti nella stessa sessione di pagina senza un vero reload.
-    try {
-      const pending = sessionStorage.getItem(SWITCH_ACCOUNT_PENDING_KEY)
-      console.log('[GII-DEBUG switch] mount, flag pendente=', pending)
-      if (pending === '1') {
-        sessionStorage.removeItem(SWITCH_ACCOUNT_PENDING_KEY)
-        console.log('[GII-DEBUG switch] chiamo signIn()')
-        signIn().then(() => console.log('[GII-DEBUG switch] signIn() completata')).catch((e) => console.log('[GII-DEBUG switch] signIn() ERRORE', e?.message || String(e)))
-      }
-    } catch (e) {
-      console.log('[GII-DEBUG switch] ERRORE nel controllo flag', e)
-    }
 
     // Login/logout tramite widget standard: ascoltiamo IdentityManager
     loadEsriModule<any>('esri/identity/IdentityManager')
@@ -2608,55 +2754,32 @@ export default function Widget(props: Props) {
         if (cancelled || !esriId?.on) return
         try {
           hCreate = esriId.on('credential-create', () => {
-            clearCache()
+            // switchAccount() è gestito dal relativo handler: durante quel flusso
+            // IdentityManager può creare più credenziali intermedie.
+            if (accountSwitchInProgressRef.current) return
+
+            const activeUsername = getActiveSessionUsername()
+            const currentUsername = normalizeAuthUsername(userRef.current?.username)
+
+            // Le credenziali dei singoli servizi vengono create anche durante il
+            // normale utilizzo. Se l'identità principale non è cambiata, non dobbiamo
+            // ricaricare il profilo né interrompere gli allarmi.
+            if (!activeUsername || activeUsername === currentUsername) return
+
+            alertsAuthTransitionRef.current = true
+            try { alertsAbortControllerRef.current?.abort() } catch { }
+            alertsAbortControllerRef.current = null
+            alertsBackgroundRefreshRef.current = null
+
+            clearGiiUserRoleCache()
             refresh('credential-create')
+
             try {
               const tok = String(afterInRef.current || '').trim()
               if (tok) gotoPage(tok)
             } catch { }
-
-            // Se provengo da un logout nella stessa sessione, ricarico la pagina 1 volta
-            // per resettare i datasource e sbloccare eventuali spinner infiniti.
-            try {
-              const needs = sessionStorage.getItem(NEEDS_DS_RESET_KEY) === '1'
-              const enabled = !!forceReloadRef.current
-              if (needs) {
-                sessionStorage.removeItem(NEEDS_DS_RESET_KEY)
-                if (enabled) {
-                  // Attendo che il nuovo token sia davvero disponibile prima di ricaricare:
-                  // un reload troppo anticipato (subito dopo credential-create) può avvenire
-                  // prima che la sessione sia assestata, facendo ripartire l'app come non
-                  // autenticata anche se il login è appena riuscito (si rientra su "Accesso").
-                  ;(async () => {
-                    const maxWaitMs = 2000
-                    const stepMs = 100
-                    let waited = 0
-                    while (waited < maxWaitMs) {
-                      try { if (await getToken()) break } catch { }
-                      await new Promise(r => setTimeout(r, stepMs))
-                      waited += stepMs
-                    }
-                    try { window.location.reload() } catch { }
-                  })()
-                }
-              }
-            } catch { }
           })
-          hDestroy = esriId.on('credentials-destroy', () => {
-            clearCache()
-            if (cancelled) return
-            setUser(null)
-            setULoad(false)
-            dispatchBoot({ source: 'header-boot', reason: 'credentials-destroy' })
-            try {
-              const tok = String(afterOutRef.current || '').trim()
-              if (tok) gotoPage(tok)
-            } catch { }
 
-            // Segna che al prossimo login serve un reset dei datasource
-            // (risolve Elenco che gira a vuoto dopo logout/login).
-            try { sessionStorage.setItem(NEEDS_DS_RESET_KEY, '1') } catch { }
-          })
         } catch { }
       })
       .catch(() => {})
@@ -2664,14 +2787,64 @@ export default function Widget(props: Props) {
     return () => {
       cancelled = true
       window.removeEventListener('gii:userLoaded', onExternal)
+      clearProfileSyncRetryTimer()
       try { hCreate?.remove?.() } catch { }
-      try { hDestroy?.remove?.() } catch { }
+      try { alertsAbortControllerRef.current?.abort() } catch { }
+      alertsAbortControllerRef.current = null
     }
   }, [])
   React.useEffect(() => { if (!user) setMenuOpen(false) }, [user])
+  React.useEffect(() => {
+    const username = String(user?.username || '').trim().toLowerCase()
+    const shouldLoadAlerts = !!username && (cfg.alertsEnabled ?? true) && canUseGiiAlerts(user)
+
+    // Ogni cambio identità annulla realmente le richieste del profilo precedente.
+    // Ignorare soltanto il loro risultato non basta: una richiesta AGR rimasta viva,
+    // quando subentra un account AMM, può far registrare a ExB una falsa risorsa
+    // priva di credenziali e mostrare il relativo banner.
+    try { alertsAbortControllerRef.current?.abort() } catch { }
+    const controller = shouldLoadAlerts ? new AbortController() : null
+    alertsAbortControllerRef.current = controller
+    alertsAuthTransitionRef.current = !!profileSyncError
+
+    alertsCurrentUsernameRef.current = username
+    alertsAccountGenerationRef.current += 1
+    alertsLoadedGenerationRef.current = -1
+    alertsBackgroundRefreshRef.current = null
+    alertsOptimisticRevisionRef.current += 1
+    alertsLightSequenceRef.current += 1
+    alertsCurrentActivitiesSignatureRef.current = ''
+    alertsLastBackgroundStartRef.current = 0
+    takeChargeTombstonesRef.current.clear()
+    locallyArchivedAlertKeysRef.current.clear()
+    alertsRef.current = []
+    setAlerts([])
+    setAlertsError('')
+    setAlertsOpen(false)
+    setAlertsLoading(shouldLoadAlerts)
+
+    return () => {
+      if (alertsAbortControllerRef.current === controller) {
+        try { controller?.abort() } catch { }
+        alertsAbortControllerRef.current = null
+      }
+    }
+  }, [
+    cfg.alertsEnabled,
+    user?.username,
+    user?.profiloCod,
+    user?.ruoloCod,
+    user?.areaCod,
+    user?.settoreCod,
+    user?.ufficio,
+    user?.isWorkflowAdmin,
+    profileSyncError
+  ])
 
   React.useEffect(() => {
-    const onUrl = () => setUrlTick(t => t + 1)
+    const onUrl = () => {
+      setUrlTick(t => t + 1)
+    }
     window.addEventListener('hashchange', onUrl)
     window.addEventListener('popstate', onUrl)
     return () => {
@@ -2687,21 +2860,215 @@ export default function Widget(props: Props) {
   const canReadGiiAlerts = canUseGiiAlerts(user)
   const showHeaderAlertBell = (cfg.alertsEnabled ?? true) && !!user && canReadGiiAlerts
 
+  const filterAlertsWithLocalGuards = React.useCallback((
+    items: GiiAlertItem[],
+    source: 'current' | 'dynamic'
+  ): GiiAlertItem[] => {
+    const now = Date.now()
+    const tombstones = takeChargeTombstonesRef.current
+    const archivedKeys = locallyArchivedAlertKeysRef.current
 
-  const refreshAlerts = React.useCallback(async () => {
+    for (const [practiceKey, tombstone] of Array.from(tombstones.entries())) {
+      if (tombstone.expiresAt <= now) tombstones.delete(practiceKey)
+    }
+
+    let filtered = (Array.isArray(items) ? items : []).filter(alert => {
+      const key = normalizeGiiAlertKey(alert?.alertKey)
+      return !key || !archivedKeys.has(key)
+    })
+
+    const mustSuppressForTombstone = (alert: GiiAlertItem, practiceKey: string, tombstone: GiiTakeChargeTombstone): boolean => {
+      if (!isGiiTakeChargeAlert(alert) || alertPracticeMergeKey(alert) !== practiceKey) return false
+
+      const key = normalizeGiiAlertKey(alert?.alertKey)
+      if (!tombstone.suppressAllPreviousActivities) {
+        // Se conosciamo le chiavi eliminate, proteggiamo soltanto quelle. Una
+        // nuova attività della stessa pratica, con chiave diversa, resta visibile.
+        return !key || tombstone.deletedAlertKeys.has(key)
+      }
+
+      // Fallback usato solo quando la cancellazione non ha restituito la chiave.
+      // Un'attività attivata dopo la mutazione locale è sicuramente un nuovo nodo
+      // del workflow e non deve essere nascosta insieme a quella precedente.
+      const activationMs = alertEventDateMs(alert)
+      return activationMs == null || activationMs <= tombstone.resolvedAt
+    }
+
+    for (const [practiceKey, tombstone] of Array.from(tombstones.entries())) {
+      const suppressedMatches = filtered.filter(alert =>
+        mustSuppressForTombstone(alert, practiceKey, tombstone)
+      )
+
+      if (source === 'current') {
+        if (suppressedMatches.length === 0) {
+          tombstone.currentAbsentConfirmations += 1
+        } else {
+          tombstone.currentAbsentConfirmations = 0
+        }
+
+        filtered = filtered.filter(alert =>
+          !mustSuppressForTombstone(alert, practiceKey, tombstone)
+        )
+        continue
+      }
+
+      // Il fallback dinamico puo' produrre una nuova attività della stessa pratica:
+      // anche qui vengono soppresse soltanto la vecchia chiave (o le attività nate
+      // prima della risoluzione quando la chiave non era disponibile).
+      filtered = filtered.filter(alert =>
+        !mustSuppressForTombstone(alert, practiceKey, tombstone)
+      )
+
+      if (tombstone.currentAbsentConfirmations >= 2 && suppressedMatches.length === 0) {
+        tombstones.delete(practiceKey)
+      }
+    }
+
+    return sortAlertsForPopup(filtered)
+  }, [])
+
+  const registerTakeChargeResolution = React.useCallback((detail: any) => {
+    const deletedActivities = Array.isArray(detail?.deletedActivities)
+      ? detail.deletedActivities
+      : []
+    const candidates = new Map<string, Set<string>>()
+
+    const addCandidate = (practiceKey: string, alertKey: any) => {
+      if (!practiceKey) return
+      const keys = candidates.get(practiceKey) || new Set<string>()
+      const normalizedKey = normalizeGiiAlertKey(alertKey)
+      if (normalizedKey) keys.add(normalizedKey)
+      candidates.set(practiceKey, keys)
+    }
+
+    for (const item of deletedActivities) {
+      addCandidate(
+        giiPracticeKeyFromIdentity(item?.parentGlobalId, item?.parentObjectId),
+        item?.alertKey
+      )
+    }
+
+    for (const alert of alertsRef.current) {
+      if (!isGiiTakeChargeAlert(alert)) continue
+      const sameOid = detail?.oid != null && String(alert?.parentObjectId) === String(detail.oid)
+      const detailGid = String(detail?.parentGlobalId || '').trim().replace(/^\{|\}$/g, '').toLowerCase()
+      const alertGid = String(alert?.parentGlobalId || '').trim().replace(/^\{|\}$/g, '').toLowerCase()
+      if (!sameOid && (!detailGid || detailGid !== alertGid)) continue
+      addCandidate(alertPracticeMergeKey(alert), alert?.alertKey)
+    }
+
+    // Solo una cancellazione integralmente confermata può attivare il fallback
+    // per pratica quando non è disponibile alcuna chiave. In caso di esito
+    // parziale vengono protette esclusivamente le righe realmente eliminate.
+    if (detail?.deletionConfirmed !== false) {
+      const fallbackPracticeKey = giiPracticeKeyFromIdentity(detail?.parentGlobalId, detail?.oid)
+      if (fallbackPracticeKey && !candidates.has(fallbackPracticeKey)) {
+        candidates.set(fallbackPracticeKey, new Set<string>())
+      }
+    }
+
+    if (!candidates.size) return
+
+    const now = Date.now()
+    const tombstones = takeChargeTombstonesRef.current
+    for (const [practiceKey, candidateKeys] of candidates.entries()) {
+      const current = tombstones.get(practiceKey)
+      const deletedAlertKeys = current?.deletedAlertKeys || new Set<string>()
+      candidateKeys.forEach(key => deletedAlertKeys.add(key))
+      tombstones.set(practiceKey, {
+        deletedAlertKeys,
+        suppressAllPreviousActivities: (current?.suppressAllPreviousActivities || false) || deletedAlertKeys.size === 0,
+        resolvedAt: Math.max(current?.resolvedAt || 0, Number(detail?.ts) || now),
+        currentAbsentConfirmations: 0,
+        expiresAt: now + (5 * 60 * 1000)
+      })
+    }
+
+    alertsOptimisticRevisionRef.current += 1
+    alertsCurrentActivitiesSignatureRef.current = ''
+    setAlerts(previous => previous.filter(alert => {
+      if (!isGiiTakeChargeAlert(alert)) return true
+      const practiceKey = alertPracticeMergeKey(alert)
+      const tombstone = tombstones.get(practiceKey)
+      if (!tombstone) return true
+      const key = normalizeGiiAlertKey(alert?.alertKey)
+      if (!tombstone.suppressAllPreviousActivities) {
+        return !!key && !tombstone.deletedAlertKeys.has(key)
+      }
+      const activationMs = alertEventDateMs(alert)
+      return activationMs != null && activationMs > tombstone.resolvedAt
+    }))
+  }, [])
+
+
+  const registerLocalArchive = React.useCallback((alertKey: any) => {
+    const key = normalizeGiiAlertKey(alertKey)
+    if (!key || locallyArchivedAlertKeysRef.current.has(key)) return
+    locallyArchivedAlertKeysRef.current.add(key)
+    alertsOptimisticRevisionRef.current += 1
+    setAlerts(previous => previous.filter(alert => normalizeGiiAlertKey(alert?.alertKey) !== key))
+  }, [])
+
+
+  const refreshAlerts = React.useCallback(async (options: GiiAlertRefreshOptions = {}) => {
+    if (alertsAuthTransitionRef.current) return
+
+    const usernameAtStart = normalizeAuthUsername(user?.username)
+    const activeSessionUsername = getActiveSessionUsername()
+
+    // Fail-safe fondamentale: non selezioniamo né interroghiamo alcun layer finché
+    // il profilo GII locale non appartiene alla stessa identità della sessione OAuth.
+    // È la finestra che, nel passaggio TI_D1 ↔ DA_AMM, produceva il banner credenziali.
+    if (!usernameAtStart || !activeSessionUsername || usernameAtStart !== activeSessionUsername) {
+      return
+    }
+
     const enabled = cfg.alertsEnabled ?? true
     const practiceLayerUrl = selectAlertPracticeLayerUrl(cfg, user)
     const activityLayerUrl = selectCurrentActivityLayerUrl(cfg, user)
     const archiveTableUrl = selectAlertArchiveTableUrl(cfg, user)
+    const generationAtStart = alertsAccountGenerationRef.current
+    const lightSequenceAtStart = ++alertsLightSequenceRef.current
+    const optimisticRevisionAtStart = alertsOptimisticRevisionRef.current
+    const includeBackground = options.includeBackground === true
+    let controller = alertsAbortControllerRef.current
+    if (!controller || controller.signal.aborted) {
+      controller = new AbortController()
+      alertsAbortControllerRef.current = controller
+    }
+    const signal = controller.signal
+    const isCurrentAccount = () => (
+      !signal.aborted &&
+      !alertsAuthTransitionRef.current &&
+      alertsAccountGenerationRef.current === generationAtStart &&
+      alertsCurrentUsernameRef.current === usernameAtStart &&
+      getActiveSessionUsername() === usernameAtStart
+    )
+    const isCurrentLightRequest = () => (
+      isCurrentAccount() &&
+      alertsLightSequenceRef.current === lightSequenceAtStart &&
+      alertsOptimisticRevisionRef.current === optimisticRevisionAtStart
+    )
+    const isCurrentBackgroundRequest = () => (
+      isCurrentAccount() &&
+      alertsOptimisticRevisionRef.current === optimisticRevisionAtStart
+    )
 
     if (!enabled || !user?.username || !canUseGiiAlerts(user) || !activityLayerUrl) {
+      if (!isCurrentLightRequest()) return
+      alertsLoadedGenerationRef.current = generationAtStart
       setAlerts([])
-      setAlertCounts(emptyAlertCounts())
       setAlertsError('')
+      setAlertsLoading(false)
       return
     }
 
-    setAlertsLoading(true)
+    if (!isCurrentLightRequest()) return
+    // La campanella viene nascosta solo durante il primo caricamento del profilo
+    // corrente. I refresh periodici mantengono visibile l'ultimo risultato valido.
+    if (alertsLoadedGenerationRef.current !== generationAtStart) {
+      setAlertsLoading(true)
+    }
 
     const alertUser = {
       username: user.username,
@@ -2721,7 +3088,8 @@ export default function Widget(props: Props) {
         activityLayerUrl,
         archiveTableUrl,
         user: alertUser,
-        pageSize: 100
+        pageSize: 100,
+        signal
       }), 8000, 'Timeout caricamento attività correnti.')
 
       const annotated = (current.alerts || []).map(alert => ({
@@ -2738,7 +3106,13 @@ export default function Widget(props: Props) {
     }
 
     const enrichAlertsForPopup = async (items: GiiAlertItem[]): Promise<GiiAlertItem[]> => {
-      return sortAlertsForPopup(await enrichAlertsWithActorFullNames(await enrichAlertsWithPracticeMeta(items, practiceLayerUrl)))
+      throwIfHeaderAborted(signal)
+      return sortAlertsForPopup(
+        await enrichAlertsWithActorFullNames(
+          await enrichAlertsWithPracticeMeta(items, practiceLayerUrl, signal),
+          signal
+        )
+      )
     }
 
     let popupCurrentActivities: GiiAlertItem[] = []
@@ -2749,29 +3123,42 @@ export default function Widget(props: Props) {
       // campi destinatario_* dell'attività corrente, senza attendere il recupero
       // completo della pratica. L'arricchimento successivo può integrare dati,
       // ma non deve ritardare l'allarme.
-      currentActivities = await readCurrentActivities()
+      const rawCurrentActivities = await readCurrentActivities()
+      if (!isCurrentLightRequest()) return
+      currentActivities = filterAlertsWithLocalGuards(rawCurrentActivities, 'current')
       popupCurrentActivities = sortAlertsForPopup(currentActivities)
+      alertsCurrentActivitiesSignatureRef.current = alertPopupKeysSignature(popupCurrentActivities)
+      alertsLoadedGenerationRef.current = generationAtStart
       setAlerts(popupCurrentActivities)
-      setAlertCounts(summarizeGiiAlerts(popupCurrentActivities))
       setAlertsError('')
       setAlertsLoading(false)
     } catch (e: any) {
+      if (isGiiAbortError(e) || !isCurrentLightRequest()) return
+      alertsLoadedGenerationRef.current = generationAtStart
       setAlerts([])
-      setAlertCounts(emptyAlertCounts())
       setAlertsError(e?.message || String(e))
       setAlertsLoading(false)
       return
     }
 
-    if (!practiceLayerUrl || !archiveTableUrl) return
+    if (!includeBackground || !practiceLayerUrl || !archiveTableUrl) return
 
     // Il controllo sul FL madre resta necessario per intercettare le rilevazioni TR
     // appena arrivate, ma non deve più bloccare la comparsa della campanella. Lo
     // eseguiamo in background: se materializza nuove attività, rilegge la vista e
     // aggiorna la lista una sola volta. Il polling rapido non deve però accumulare
     // più controlli pesanti contemporaneamente.
-    if (alertsBackgroundRefreshInFlightRef.current) return
-    alertsBackgroundRefreshInFlightRef.current = true
+    const activeBackground = alertsBackgroundRefreshRef.current
+    if (
+      activeBackground &&
+      activeBackground.generation === generationAtStart &&
+      activeBackground.username === usernameAtStart
+    ) return
+
+    const backgroundToken = { generation: generationAtStart, username: usernameAtStart }
+    const currentSignatureAtBackgroundStart = alertPopupKeysSignature(popupCurrentActivities)
+    alertsLastBackgroundStartRef.current = Date.now()
+    alertsBackgroundRefreshRef.current = backgroundToken
     ;(async () => {
       try {
 
@@ -2779,56 +3166,86 @@ export default function Widget(props: Props) {
           practiceLayerUrl,
           archiveTableUrl,
           user: alertUser,
-          warningDays: Number(cfg.alertsWarningDays ?? 5)
+          warningDays: Number(cfg.alertsWarningDays ?? 5),
+          signal
         }), 25000, 'Timeout caricamento scadenze e anomalie.')
+        if (!isCurrentBackgroundRequest()) return
 
         const enrichedCurrentActivities = await enrichAlertsForPopup(currentActivities)
-        const dynamicAlerts = await enrichAlertsForPopup(res.alerts || [])
+        if (!isCurrentBackgroundRequest()) return
+        const dynamicAlerts = await enrichAlertsForPopup(
+          filterAlertsWithLocalGuards(res.alerts || [], 'dynamic')
+        )
+        if (!isCurrentBackgroundRequest()) return
 
         // Stesso passaggio background usato per materializzare le nuove rilevazioni TR:
         // normalizziamo i testi arrivati da Survey senza bloccare la campanella.
         const normalizedCount = await normalizeSurveyUppercaseFields({
           practiceLayerUrl: selectAlertPracticeLayerUrlWrite(cfg, user),
           dynamicAlerts,
-          user
+          user,
+          signal
         })
+        if (!isCurrentBackgroundRequest()) return
 
         const materializedCount = await materializeMissingTakeChargeActivities({
           currentActivities,
           dynamicAlerts,
-          user
+          user,
+          signal
         })
+        if (!isCurrentBackgroundRequest()) return
 
-        const refreshedActivities = (materializedCount > 0 || normalizedCount > 0) ? await enrichAlertsForPopup(await readCurrentActivities()) : enrichedCurrentActivities
-        const finalAlerts = sortAlertsForPopup(mergeCurrentAndFallbackGiiAlerts(refreshedActivities, dynamicAlerts))
-
-        // Il controllo in background non deve produrre una seconda versione visibile
-        // della stessa card (es. prima Test_RZ_D1 e poi RZ D1). Aggiorniamo la UI
-        // solo se cambiano effettivamente le card da mostrare; non per un semplice
-        // arricchimento metadati della stessa attività già visibile.
-        const currentKeys = alertPopupKeysSignature(popupCurrentActivities)
-        const finalKeys = alertPopupKeysSignature(finalAlerts)
-        const currentVisual = alertPopupVisualSignature(popupCurrentActivities)
-        const finalVisual = alertPopupVisualSignature(finalAlerts)
-        const hasDifferentCards = finalKeys !== currentKeys
         const hasMaterializedChanges = materializedCount > 0 || normalizedCount > 0
+        let refreshedActivities = enrichedCurrentActivities
+        if (hasMaterializedChanges) {
+          const rawRefreshedActivities = await readCurrentActivities()
+          if (!isCurrentBackgroundRequest()) return
+          refreshedActivities = await enrichAlertsForPopup(
+            filterAlertsWithLocalGuards(rawRefreshedActivities, 'current')
+          )
+        }
+        if (!isCurrentBackgroundRequest()) return
 
-        if (hasDifferentCards || (hasMaterializedChanges && finalVisual !== currentVisual)) {
+        const refreshedCurrentSignature = alertPopupKeysSignature(refreshedActivities)
+        const liveCurrentSignature = alertsCurrentActivitiesSignatureRef.current
+
+        // Una riconciliazione iniziata su una coda precedente non può sovrascrivere
+        // una lettura leggera che nel frattempo ha rilevato attività diverse.
+        if (
+          liveCurrentSignature &&
+          liveCurrentSignature !== currentSignatureAtBackgroundStart &&
+          liveCurrentSignature !== refreshedCurrentSignature
+        ) return
+
+        const finalAlerts = sortAlertsForPopup(
+          mergeCurrentAndFallbackGiiAlerts(refreshedActivities, dynamicAlerts)
+        )
+        if (!isCurrentBackgroundRequest()) return
+
+        const visibleAlerts = alertsRef.current
+        const visibleKeys = alertPopupKeysSignature(visibleAlerts)
+        const finalKeys = alertPopupKeysSignature(finalAlerts)
+        const visibleVisual = alertPopupVisualSignature(visibleAlerts)
+        const finalVisual = alertPopupVisualSignature(finalAlerts)
+
+        if (finalKeys !== visibleKeys || finalVisual !== visibleVisual) {
+          alertsCurrentActivitiesSignatureRef.current = refreshedCurrentSignature
           setAlerts(finalAlerts)
-          setAlertCounts(summarizeGiiAlerts(finalAlerts))
-        } else {
-          setAlertCounts(summarizeGiiAlerts(popupCurrentActivities))
         }
         setAlertsError('')
       } catch (e: any) {
+        if (isGiiAbortError(e)) return
         // Se fallisce solo il controllo del FL/scadenze, lasciamo visibili le
         // attività correnti già caricate: non oscuriamo la campanella e non
         // mostriamo errori se l'utente ha comunque attività correnti valide.
-        if (currentActivities.length === 0) {
+        if (isCurrentAccount() && currentActivities.length === 0) {
           setAlertsError(e?.message || String(e))
         }
       } finally {
-        alertsBackgroundRefreshInFlightRef.current = false
+        if (alertsBackgroundRefreshRef.current === backgroundToken) {
+          alertsBackgroundRefreshRef.current = null
+        }
       }
     })()
   }, [
@@ -2859,24 +3276,78 @@ export default function Widget(props: Props) {
     user?.areaCod,
     user?.settoreCod,
     user?.ufficio,
-    user?.isWorkflowAdmin
+    user?.isWorkflowAdmin,
+    filterAlertsWithLocalGuards
   ])
 
   React.useEffect(() => {
     if (!(cfg.alertsEnabled ?? true) || !user?.username) return
-    refreshAlerts()
-    // Gli allarmi operativi devono essere quasi immediati: la configurazione
-    // storica a 60 secondi è troppo lenta. Manteniamo un polling leggero sulle
-    // attività correnti ogni 5 secondi; il controllo pesante sul FL madre è
-    // protetto da lock per evitare sovrapposizioni.
-    const secs = 5
-    const id = window.setInterval(refreshAlerts, secs * 1000)
-    const onChanged = () => {
-      // Qualsiasi azione operativa sulla pratica deve chiudere il popup allarmi:
-      // il refresh può svuotare o cambiare la lista e lasciarla aperta crea ambiguità.
-      setAlertsOpen(false)
+
+    refreshAlerts({ includeBackground: true })
+
+    // Due cadenze distinte:
+    // - attività correnti: lettura leggera e frequente;
+    // - layer delle pratiche: riconciliazione più costosa e non sovrapposta.
+    const lightPollMs = 5000
+    const backgroundPollMs = 30000
+    let pendingBackgroundTimer: number | null = null
+
+    const requestLightRefresh = () => {
       refreshAlerts()
     }
+
+    const requestBackgroundRefresh = () => {
+      refreshAlerts({ includeBackground: true })
+    }
+
+    const requestBackgroundSoon = () => {
+      if (pendingBackgroundTimer != null) window.clearTimeout(pendingBackgroundTimer)
+      pendingBackgroundTimer = window.setTimeout(() => {
+        pendingBackgroundTimer = null
+        requestBackgroundRefresh()
+      }, 750)
+    }
+
+    const lightPollId = window.setInterval(requestLightRefresh, lightPollMs)
+    const backgroundPollId = window.setInterval(requestBackgroundRefresh, backgroundPollMs)
+
+    const onChanged = (evt?: Event) => {
+      setAlertsOpen(false)
+
+      const detail: any = (evt as CustomEvent | undefined)?.detail
+      const source = String(detail?.source || '').trim()
+
+      if (
+        source === 'gii-azioni-delete-attivita' &&
+        (detail?.deletionConfirmed !== false || (Array.isArray(detail?.deletedActivities) && detail.deletedActivities.length > 0))
+      ) {
+        // Una cancellazione completa abilita anche il fallback per pratica; in caso
+        // di esito parziale vengono protette soltanto le attività effettivamente
+        // eliminate. Le richieste nate prima della mutazione non possono applicarsi.
+        try { alertsAbortControllerRef.current?.abort() } catch { }
+        alertsAbortControllerRef.current = null
+        alertsBackgroundRefreshRef.current = null
+        registerTakeChargeResolution(detail)
+      } else if (detail?.alertKey && (source === 'gii-header-archive' || (evt as any)?.type === 'gii-alerts-archived')) {
+        registerLocalArchive(detail.alertKey)
+      }
+
+      requestLightRefresh()
+
+      // Le modifiche ai dati della pratica possono cambiare scadenze o fallback
+      // dinamici. Le raggruppiamo in una sola riconciliazione breve, senza bloccare
+      // il polling e senza finestre temporali globali.
+      const eventType = String((evt as any)?.type || '')
+      const needsBackground =
+        eventType !== 'gii-alerts-archived' &&
+        (
+          eventType !== 'gii-alerts-refresh' ||
+          (!source.startsWith('gii-azioni-') && source !== 'gii-header-archive')
+        )
+
+      if (needsBackground) requestBackgroundSoon()
+    }
+
     const refreshEvents = [
       'gii:record-updated',
       'gii-record-updated',
@@ -2887,10 +3358,16 @@ export default function Widget(props: Props) {
       'gii-alerts-refresh',
       'gii-alerts-archived'
     ]
-    const onFocus = () => refreshAlerts()
+
+    const refreshAfterReturn = () => {
+      const backgroundDue = Date.now() - alertsLastBackgroundStartRef.current >= backgroundPollMs
+      refreshAlerts({ includeBackground: backgroundDue })
+    }
+
+    const onFocus = () => refreshAfterReturn()
     const onVisibility = () => {
       try {
-        if (document.visibilityState === 'visible') refreshAlerts()
+        if (document.visibilityState === 'visible') refreshAfterReturn()
       } catch { }
     }
 
@@ -2899,12 +3376,20 @@ export default function Widget(props: Props) {
     try { document.addEventListener('visibilitychange', onVisibility) } catch { }
 
     return () => {
-      window.clearInterval(id)
+      window.clearInterval(lightPollId)
+      window.clearInterval(backgroundPollId)
+      if (pendingBackgroundTimer != null) window.clearTimeout(pendingBackgroundTimer)
       refreshEvents.forEach(evt => window.removeEventListener(evt, onChanged as EventListener))
       window.removeEventListener('focus', onFocus)
       try { document.removeEventListener('visibilitychange', onVisibility) } catch { }
     }
-  }, [cfg.alertsEnabled, user?.username, refreshAlerts])
+  }, [
+    cfg.alertsEnabled,
+    user?.username,
+    refreshAlerts,
+    registerTakeChargeResolution,
+    registerLocalArchive
+  ])
 
   const openAlertPractice = React.useCallback((alert: GiiAlertItem) => {
     const layerUrl = selectAlertPracticeLayerUrl(cfg, user)
@@ -2927,14 +3412,22 @@ export default function Widget(props: Props) {
         user: { username: user.username, fullName: user.fullName },
         now: Date.now()
       })
-      try { window.dispatchEvent(new CustomEvent('gii-alerts-archived', { detail: { alertKey: alert.alertKey } })) } catch {}
+      try { alertsAbortControllerRef.current?.abort() } catch { }
+      alertsAbortControllerRef.current = null
+      alertsBackgroundRefreshRef.current = null
+      registerLocalArchive(alert.alertKey)
+      try {
+        window.dispatchEvent(new CustomEvent('gii-alerts-archived', {
+          detail: { source: 'gii-header-archive', alertKey: alert.alertKey }
+        }))
+      } catch {}
       await refreshAlerts()
     } catch (e: any) {
       setAlertsError(e?.message || String(e))
     } finally {
       setArchivingAlertKey('')
     }
-  }, [cfg.alertsArchiveTableUrl, cfg.alertsArchiveTableUrlTecnici, user?.username, user?.fullName, user?.profiloCod, user?.ruoloCod, user?.areaCod, refreshAlerts])
+  }, [cfg.alertsArchiveTableUrl, cfg.alertsArchiveTableUrlTecnici, user?.username, user?.fullName, user?.profiloCod, user?.ruoloCod, user?.areaCod, refreshAlerts, registerLocalArchive])
 
 
   // Auth-guard: se non autenticato → pagina Accesso; se autenticato e sei su Accesso → pagina Home
@@ -2965,22 +3458,15 @@ export default function Widget(props: Props) {
 
     // 1) Non autenticato: forza Accesso
     if (!user) {
-      if (outTok) {
-        if (!curId || !outId || curId !== outId) {
-          safeGoto(outTok)
-        }
-      }
+      if (outTok && (!curId || !outId || curId !== outId)) safeGoto(outTok)
       return
     }
 
     // 2) Autenticato: se sei su Accesso (pagina post-logout), vai alla home operativa
-    if (user && outTok && inTok) {
-      if (outId && curId && curId === outId) {
-        safeGoto(inTok)
-      }
+    if (user && outTok && inTok && outId && curId && curId === outId) {
+      safeGoto(inTok)
     }
   }, [user, uLoad, urlTick])
-
 
 
   const logoBg = cfg.logoBgGradient
@@ -3009,12 +3495,118 @@ export default function Widget(props: Props) {
     marginBottom:6
   }
 
+  const performSwitchAccount = async () => {
+    setMenuOpen(false)
+    if (accountSwitchInProgressRef.current) return
+
+    const previousUsername = normalizeAuthUsername(userRef.current?.username)
+    if (profileSyncRetryTimerRef.current != null) {
+      window.clearTimeout(profileSyncRetryTimerRef.current)
+      profileSyncRetryTimerRef.current = null
+    }
+    setProfileSyncError('')
+    accountSwitchInProgressRef.current = true
+    alertsAuthTransitionRef.current = true
+    const switchPromise = switchAccountLikeStandardWidget()
+    if (!switchPromise) {
+      accountSwitchInProgressRef.current = false
+      alertsAuthTransitionRef.current = false
+      return
+    }
+
+    try { alertsAbortControllerRef.current?.abort() } catch { }
+    alertsAbortControllerRef.current = null
+    alertsBackgroundRefreshRef.current = null
+    setAlerts([])
+    setAlertsError('')
+    setAlertsOpen(false)
+    setAlertsLoading(false)
+
+    try {
+      await switchPromise
+
+      // Alla chiusura del popup il metodo nativo risolve anche in caso di Annulla.
+      // Attendiamo brevemente che SessionManager esponga l'identità definitiva.
+      let activeUsername = getActiveSessionUsername()
+      for (let i = 0; i < 20 && !activeUsername; i++) {
+        await new Promise(resolve => window.setTimeout(resolve, 50))
+        activeUsername = getActiveSessionUsername()
+      }
+
+      if (!activeUsername || activeUsername === previousUsername) {
+        // Annulla o stesso account: nessuna modifica al profilo corrente.
+        alertsAuthTransitionRef.current = false
+        alertsAbortControllerRef.current = new AbortController()
+        refreshAlerts()
+        return
+      }
+
+      setULoad(true)
+      let nextUser: GiiUserRole | null = null
+
+      for (let i = 0; i < 20; i++) {
+        clearGiiUserRoleCache()
+        const candidate = await loadUser()
+        const confirmedUsername = getActiveSessionUsername()
+        if (
+          candidate &&
+          confirmedUsername === activeUsername &&
+          normalizeAuthUsername(candidate.username) === activeUsername
+        ) {
+          nextUser = candidate
+          break
+        }
+        await new Promise(resolve => window.setTimeout(resolve, 100))
+        activeUsername = confirmedUsername || activeUsername
+      }
+
+      if (!nextUser) {
+        // Deleghiamo il recupero al refresh centralizzato, che applica i retry brevi,
+        // mostra l'errore esplicito e programma il fallback autonomo senza F5.
+        clearGiiUserRoleCache()
+        dispatchGiiUserLoaded({
+          source: 'header-switch-profile-retry',
+          reason: 'switch-account-profile-not-ready',
+          username: activeUsername
+        })
+        return
+      }
+
+      setUser(nextUser)
+      setULoad(false)
+      dispatchGiiUserLoaded({
+        source: 'header-boot',
+        reason: 'switch-account',
+        username: nextUser.username
+      })
+
+      try {
+        const tok = String(afterInRef.current || '').trim()
+        if (tok) gotoPage(tok)
+      } catch { }
+      // Il useEffect dipendente da user crea il nuovo AbortController e sblocca
+      // gli allarmi soltanto dopo che ruolo, area e username sono coerenti.
+    } catch {
+      alertsAuthTransitionRef.current = false
+      alertsAbortControllerRef.current = new AbortController()
+      setULoad(false)
+      refreshAlerts()
+    } finally {
+      accountSwitchInProgressRef.current = false
+    }
+  }
+
   // Disconnessione "pulita": se è configurata una pagina di destinazione diversa da
   // quella corrente, naviga PRIMA di distruggere le credenziali. Così i widget dati
   // della pagina corrente (elenco/mappa) si smontano e non restano agganciati a un
   // layer protetto proprio mentre la sessione viene invalidata — evento che fa scattare
   // un tentativo di ri-autenticazione automatica (il prompt "Eseguire l'accesso a ArcGIS Online").
   const performSignOut = async () => {
+    if (profileSyncRetryTimerRef.current != null) {
+      window.clearTimeout(profileSyncRetryTimerRef.current)
+      profileSyncRetryTimerRef.current = null
+    }
+    setProfileSyncError('')
     const tok = String(afterOutRef.current || '').trim()
     if (tok) {
       const targetId = resolvePageId(tok)
@@ -3062,6 +3654,14 @@ export default function Widget(props: Props) {
           0%   { box-shadow: 0 0 0 0 rgba(59,130,246,0.45); }
           70%  { box-shadow: 0 0 0 8px rgba(59,130,246,0); }
           100% { box-shadow: 0 0 0 0 rgba(59,130,246,0); }
+        }
+        @keyframes gii-alert-bell-ring {
+          0%, 72%, 100% { transform: rotate(0deg) scale(1); }
+          77% { transform: rotate(10deg) scale(1.06); }
+          82% { transform: rotate(-9deg) scale(1.06); }
+          87% { transform: rotate(6deg) scale(1.03); }
+          92% { transform: rotate(-4deg) scale(1.02); }
+          96% { transform: rotate(0deg) scale(1); }
         }
       `}</style>
 
@@ -3115,7 +3715,12 @@ export default function Widget(props: Props) {
         )}
         {(cfg.showUserBanner ?? true) && (
           <div style={{ ...off('offsetBanner') }}>
-            {uLoad ? (
+            {profileSyncError ? (
+            <div title={profileSyncError} style={{ display:'inline-flex',alignItems:'center',gap:10,background:'rgba(239,68,68,0.09)',border:'1px solid rgba(248,113,113,0.30)',borderRadius:10,padding:'9px 14px',maxWidth:520 }}>
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#fca5a5" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+              <span style={{ fontSize:12.5,color:'rgba(254,202,202,0.95)',whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis' }}>{profileSyncError}</span>
+            </div>
+          ) : uLoad ? (
             <div style={{ display:'flex',alignItems:'center',gap:10 }}>
               <div style={{ width:16,height:16,borderRadius:'50%',border:'2px solid rgba(147,197,253,0.2)',borderTopColor:'#60a5fa',animationName:'spin',animationDuration:'0.8s',animationIterationCount:'infinite',animationTimingFunction:'linear' }} />
               <span style={{ fontSize:12,color:'rgba(147,197,253,0.6)' }}>Caricamento profilo…</span>
@@ -3148,7 +3753,7 @@ export default function Widget(props: Props) {
           </div>
         )}
 
-        <div style={{ ...off('offsetLogin') }}>{cfg.showSignIn && !uLoad && (
+        <div style={{ ...off('offsetLogin') }}>{cfg.showSignIn && !uLoad && !profileSyncError && (
           user ? (
             signedInClickRef.current === 'menu' ? (
               <div style={{ position:'relative' }}>
@@ -3242,19 +3847,7 @@ export default function Widget(props: Props) {
                       <button type='button' disabled={signingIn}
                         onClick={async () => {
                           setSigning(true)
-                          try {
-                            setMenuOpen(false)
-                            try { sessionStorage.setItem(SWITCH_ACCOUNT_PENDING_KEY, '1') } catch { }
-                            await performSignOut()
-                            // Ricarico davvero il browser (non solo navigo nella SPA): il
-                            // login viene ripreso al mount, su una pagina fresca, per
-                            // evitare un crash interno noto di ExB che si presenta quando
-                            // si fa disconnetti+riconnetti nella stessa sessione di pagina.
-                            window.location.reload()
-                          } catch {
-                            try { sessionStorage.removeItem(SWITCH_ACCOUNT_PENDING_KEY) } catch { }
-                            setSigning(false)
-                          }
+                          try { setMenuOpen(false); await performSwitchAccount() } finally { setSigning(false) }
                         }}
                         style={menuItemBtnStyle}>
                         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -3293,19 +3886,7 @@ export default function Widget(props: Props) {
             <button type='button' disabled={signingIn}
               onClick={async () => {
                 setSigning(true)
-                try {
-                  if (loginViewRef.current === 'redirect') {
-                    const tok = String(afterOutRef.current || '').trim()
-                    if (tok) {
-                      const targetId = resolvePageId(tok)
-                      const curId = resolvePageId(getCurrentPageToken() || '')
-                      if (!targetId || !curId || curId !== targetId) { gotoPage(tok); return }
-                    }
-                  }
-                  await signIn()
-                } finally {
-                  setSigning(false)
-                }
+                try { await signIn() } finally { setSigning(false) }
               }}
               style={{ ...btnStyle, padding:'7px 18px', fontWeight:700, letterSpacing:0.3 }}>
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">

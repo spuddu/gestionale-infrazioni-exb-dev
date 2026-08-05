@@ -13,6 +13,8 @@ import { drawEmbeddedPdfPageInRapportoTechnicalBody, drawRapportoTechnicalHeader
 import { attrezzaturaInstanceTipoCodePdf, loadAttrezzatureCatalogPdf } from '../../../_shared/gii-anteprime/documenti-tecnici/rapporto/rapporto-nota-spese-summary'
 import GiiAnteprimaPanel from '../../../_shared/gii-anteprime/anteprima-panel'
 import { computeReqPoint, parseNorma3Codes } from '../../../_shared/gii-anteprime/req-point'
+import { ensureAttivitaCorrentiJsonOnlyQueryFormat } from '../../../_shared/gii-alerts/attivita-correnti-query-format-fix'
+import { getTiAmmAssignment, hasTiAmmAssignment, isPracticeAssignedToCurrentTiAmm } from '../../../_shared/gii-access/ti-amm-assignment'
 
 
 const GII_LOG_EVENTI_CICLI_URL = 'https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_LOG_EVENTI_CICLI/FeatureServer/0'
@@ -1610,6 +1612,10 @@ type InformativeActivityTarget = {
   priorita?: string
 }
 
+type DirectPracticeAccessGate = {
+  status: 'idle' | 'checking' | 'allowed' | 'denied' | 'unavailable'
+}
+
 function ActionsPanel (props: {
   active: { key: string; state: SelState } | null
   roleCode: string
@@ -1653,6 +1659,7 @@ function ActionsPanel (props: {
   nsConfig: { detailUrl: string; parametriUrl: string; parametroCode: string; attrezzatureParametriUrl: string }
   sanzioneConfig: { parametriSanzioniUrl: string; regolamentoArticoliUrl: string; regolamentoRaccordiUrl: string }
   mapView: any
+  accessGate?: DirectPracticeAccessGate
 }) {
   const { active, roleCode, buttonText, buttonColors, ui } = props
   const role = String(roleCode || 'DT').trim().toUpperCase()
@@ -2840,6 +2847,7 @@ function ActionsPanel (props: {
 
   const getAttivitaLayer = async (): Promise<any> => {
     if (attivitaLayerRef.current?.applyEdits) return attivitaLayerRef.current
+    await ensureAttivitaCorrentiJsonOnlyQueryFormat()
     const FeatureLayer = await loadEsriModule<any>('esri/layers/FeatureLayer')
     const fl = new FeatureLayer({ url: GII_ATTIVITA_CORRENTI_URL, outFields: ['*'] })
     if (typeof fl?.load === 'function') await fl.load()
@@ -2974,16 +2982,30 @@ function ActionsPanel (props: {
     return rr
   }
 
-  const deleteCurrentActivitiesForDestRole = async (ruoloDestRaw: string, excludeKey?: string) => {
+  type DeletedCurrentActivity = {
+    alertKey: string
+    parentGlobalId: string
+    parentObjectId: number | null
+  }
+
+  type DeleteCurrentActivitiesResult = {
+    deletedActivities: DeletedCurrentActivity[]
+    confirmed: boolean
+  }
+
+  const deleteCurrentActivitiesForDestRole = async (
+    ruoloDestRaw: string,
+    excludeKey?: string
+  ): Promise<DeleteCurrentActivitiesResult> => {
     const ruoloDest = normalizeActivityDestRole(String(ruoloDestRaw || ''))
-    if (!ruoloDest || !hasSel || oid == null) return
+    if (!ruoloDest || !hasSel || oid == null) return { deletedActivities: [], confirmed: false }
     try {
       const layer = await getAttivitaLayer()
       const parentGlobalId = await getActivityParentGlobalId()
       const targetParts: string[] = []
       if (parentGlobalId) targetParts.push(`(${parentGlobalIdWhere('parent_globalid', parentGlobalId)})`)
       if (oid != null && Number.isFinite(Number(oid))) targetParts.push(`parent_objectid = ${Number(oid)}`)
-      if (!targetParts.length) return
+      if (!targetParts.length) return { deletedActivities: [], confirmed: false }
 
       const parts: string[] = [
         `tipo_attivita = 'PRESA_IN_CARICO'`,
@@ -2995,16 +3017,60 @@ function ActionsPanel (props: {
 
       const q = layer.createQuery ? layer.createQuery() : {}
       q.where = parts.join(' AND ')
-      q.outFields = ['OBJECTID']
+      q.outFields = ['OBJECTID', 'chiave_attivita', 'parent_globalid', 'parent_objectid']
       q.returnGeometry = false
       const res = await layer.queryFeatures(q)
-      const deletes = (res?.features || [])
-        .map((f: any) => f?.attributes?.OBJECTID)
-        .filter((v: any) => v != null)
-        .map((objectId: any) => ({ objectId }))
-      if (deletes.length) await layer.applyEdits({ deleteFeatures: deletes })
+      const features = Array.isArray(res?.features) ? res.features : []
+      const deletableRows = features
+        .map((feature: any) => ({
+          objectId: feature?.attributes?.OBJECTID,
+          attributes: feature?.attributes || {}
+        }))
+        .filter((row: any) => row.objectId != null)
+
+      const deletes = deletableRows.map((row: any) => ({ objectId: row.objectId }))
+
+      const deletedActivities: DeletedCurrentActivity[] = deletableRows.map((row: any) => {
+        const attrs = row.attributes || {}
+        const parentObjectIdNum = Number(attrs.parent_objectid)
+        return {
+          alertKey: String(attrs.chiave_attivita || '').trim(),
+          parentGlobalId: String(attrs.parent_globalid || parentGlobalId || '').trim(),
+          parentObjectId: Number.isFinite(parentObjectIdNum)
+            ? parentObjectIdNum
+            : (oid != null && Number.isFinite(Number(oid)) ? Number(oid) : null)
+        }
+      })
+
+      if (!deletes.length) return { deletedActivities: [], confirmed: true }
+
+      const editResult = await layer.applyEdits({ deleteFeatures: deletes })
+      const deleteResults = Array.isArray(editResult?.deleteFeatureResults)
+        ? editResult.deleteFeatureResults
+        : []
+
+      if (!deleteResults.length) {
+        return { deletedActivities, confirmed: true }
+      }
+
+      const successfulActivities = deletedActivities.filter((_, index) => {
+        const result = deleteResults[index]
+        return !result?.error && result?.success !== false
+      })
+      const confirmed = successfulActivities.length === deletedActivities.length
+
+      if (!confirmed) {
+        console.warn('[GII_ATTIVITA_CORRENTI] Alcune attività correnti non sono state eliminate.', {
+          ruoloDest,
+          oid,
+          deleteResults
+        })
+      }
+
+      return { deletedActivities: successfulActivities, confirmed }
     } catch (e) {
       console.warn('[GII_ATTIVITA_CORRENTI] Errore eliminazione attività corrente per ruolo:', e)
+      return { deletedActivities: [], confirmed: false }
     }
   }
 
@@ -3144,8 +3210,25 @@ function ActionsPanel (props: {
     if (!hasSel || oid == null) return
     const currentRole = normalizeActivityDestRole(role)
     if (!currentRole) return
-    await deleteCurrentActivitiesForDestRole(currentRole)
-    try { window.dispatchEvent(new CustomEvent('gii-alerts-refresh', { detail: { source: 'gii-azioni-delete-attivita', oid, ts: Date.now() } })) } catch {}
+    const deletion = await deleteCurrentActivitiesForDestRole(currentRole)
+    const deletedActivities = deletion.deletedActivities
+    const parentGlobalId = String(
+      deletedActivities.find(item => item.parentGlobalId)?.parentGlobalId ||
+      await getActivityParentGlobalId() ||
+      ''
+    ).trim()
+    try {
+      window.dispatchEvent(new CustomEvent('gii-alerts-refresh', {
+        detail: {
+          source: 'gii-azioni-delete-attivita',
+          oid,
+          parentGlobalId,
+          deletedActivities,
+          deletionConfirmed: deletion.confirmed,
+          ts: Date.now()
+        }
+      }))
+    } catch {}
   }
 
 
@@ -3250,13 +3333,22 @@ function ActionsPanel (props: {
   const presaRoleVal = data ? pickAttrCI(data, [rolePresaField, rolePresaField.toUpperCase()]) : null
   const statoRoleNum = toNumOrNull(statoRoleVal)
   const presaRoleNum = toNumOrNull(presaRoleVal)
-  const currentTiUsername = String((window as any).__giiUserRole?.username || (window as any).__giiUser?.username || '').trim().toLowerCase()
-  const assignedTiUsername = role === 'TI_AMM'
-    ? String(pickAttrCI(data, ['ti_amm_assegnato_username', 'ti_amm_assegnato_user', 'ti_amm_assegnato']) || '').trim().toLowerCase()
-    : String(pickAttrCI(data, ['ti_assegnato_username', 'ti_assegnato_user', 'ti_assegnato']) || '').trim().toLowerCase()
-  const isOwnedByCurrentRole = (role === 'TI' || role === 'TI_AMM')
-    ? (!!currentTiUsername && !!assignedTiUsername && currentTiUsername === assignedTiUsername)
-    : (role === 'RZ' || role === 'RI' || role === 'DT' || role === 'RI_AMM' || role === 'DA')
+  const currentGiiUser: any = (window as any).__giiUserRole || (window as any).__giiUser || {}
+  const currentTiUsername = String(currentGiiUser?.username || '').trim().toLowerCase()
+  const assignedTiUsername = role === 'TI'
+    ? String(pickAttrCI(data, ['ti_assegnato_username', 'ti_assegnato_user', 'ti_assegnato']) || '').trim().toLowerCase()
+    : ''
+  const isOwnedByCurrentRole = role === 'TI_AMM'
+    ? isPracticeAssignedToCurrentTiAmm(data, currentGiiUser)
+    : role === 'TI'
+      ? (!!currentTiUsername && !!assignedTiUsername && currentTiUsername === assignedTiUsername)
+      : (role === 'RZ' || role === 'RI' || role === 'DT' || role === 'RI_AMM' || role === 'DA')
+
+  const tiAmmGateStatus = props.accessGate?.status || 'idle'
+  const tiAmmAccessDenied = role === 'TI_AMM' && (
+    tiAmmGateStatus === 'denied' ||
+    (hasSel && tiAmmGateStatus !== 'allowed' && !isOwnedByCurrentRole)
+  )
 
   const isMeaningfulAudit = (v: any): boolean => !(v === null || v === undefined || v === '' || v === 0 || v === '0')
   const roleEsitoValue = pickAttrCI(data, [roleEsitoField, roleEsitoField.toUpperCase()])
@@ -3943,7 +4035,7 @@ function ActionsPanel (props: {
 
   // TI_AMM già assegnato?
   const tiAmmUserRaw = pickAttrCI(data, ['ti_amm_assegnato_username'])
-  const hasTiAmmAssigned = !isEmptyValue(tiAmmUserRaw)
+  const hasTiAmmAssigned = hasTiAmmAssignment(data)
 
   // Nodo TI_AMM: distinguere assegnazione STORICA da assegnazione APERTA.
   // Dopo una richiesta integrazione RI_AMM→RI→DT→RI_AMM può rimanere valorizzato
@@ -6579,6 +6671,75 @@ ${noteTrim}` : 'Attestazione di conformità apposta.',
   minHeight: 0
 }
 
+  if (role === 'TI_AMM' && props.accessGate?.status === 'checking') {
+    return (
+      <div style={panelStyle}>
+        <div style={{ fontSize: titleFontSize, fontWeight: 700 }}>Azioni</div>
+        <div style={{
+          flex: '1 1 auto',
+          minHeight: 120,
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          textAlign: 'center',
+          padding: 16,
+          boxSizing: 'border-box',
+          color: '#4b5563',
+          fontSize: 13,
+          fontWeight: 700
+        }}>
+          Verifica accesso alla pratica…
+        </div>
+      </div>
+    )
+  }
+
+  if (role === 'TI_AMM' && props.accessGate?.status === 'unavailable') {
+    return (
+      <div style={panelStyle}>
+        <div style={{ fontSize: titleFontSize, fontWeight: 700 }}>Azioni</div>
+        <div style={{
+          flex: '1 1 auto',
+          minHeight: 120,
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          textAlign: 'center',
+          padding: 16,
+          boxSizing: 'border-box',
+          color: '#7a1c1c',
+          fontSize: 13,
+          fontWeight: 700
+        }}>
+          Impossibile verificare l’accesso alla pratica.
+        </div>
+      </div>
+    )
+  }
+
+  if (tiAmmAccessDenied) {
+    return (
+      <div style={panelStyle}>
+        <div style={{ fontSize: titleFontSize, fontWeight: 700 }}>Azioni</div>
+        <div style={{
+          flex: '1 1 auto',
+          minHeight: 120,
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          textAlign: 'center',
+          padding: 16,
+          boxSizing: 'border-box',
+          color: '#7a1c1c',
+          fontSize: 13,
+          fontWeight: 700
+        }}>
+          Accesso alla pratica non consentito.
+        </div>
+      </div>
+    )
+  }
+
   return (
     <div>
       <style>{'@keyframes gii-spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }'}</style>
@@ -7203,21 +7364,32 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
   }, [detailMapConfigKey])
   const mapView = technicalMapView || null
 
-  // ── Ruolo utente: letto da window.__giiUserRole (scritto dal widget Header) ──
+  // ── Profilo utente: letto da window.__giiUserRole (scritto dal widget Header) ──
+  // Conserviamo anche l'identità, non soltanto il ruolo: due TI_AMM diversi possono
+  // avere lo stesso ruolo ma autorizzazioni differenti sulla selezione corrente.
   const [detectedRole, setDetectedRole] = React.useState<string>('')
+  const [profileReady, setProfileReady] = React.useState(false)
+  const [detectedUser, setDetectedUser] = React.useState<any>(() => {
+    try { return { ...((window as any).__giiUserRole || {}) } } catch { return {} }
+  })
 
   React.useEffect(() => {
     const readRole = () => {
       try {
-        const info = (window as any).__giiUserRole || {}
+        const info = { ...((window as any).__giiUserRole || {}) }
         let role = normalizeRuoloCod(info?.ruoloCod || info?.ruolo_cod || info?.ruoloLabel || info?.ruolo)
-        if (!role || role === 'ADMIN') { setDetectedRole(''); return }
-        // RI con area=AMM → RI_AMM, TI con area=AMM → TI_AMM
         const areaCod = normalizeAreaCod(info?.areaCod || info?.area_cod || info?.areaLabel || info?.area)
         if (role === 'RI' && areaCod === 'AMM') role = 'RI_AMM'
         if (role === 'TI' && areaCod === 'AMM') role = 'TI_AMM'
-        setDetectedRole(role)
-      } catch { }
+        const username = String(info?.username || '').trim()
+        setDetectedUser(info)
+        setDetectedRole(!role || role === 'ADMIN' ? '' : role)
+        setProfileReady(!!username && !!role)
+      } catch {
+        setDetectedUser({})
+        setDetectedRole('')
+        setProfileReady(false)
+      }
     }
     readRole()
     window.addEventListener('gii:userLoaded', readRole)
@@ -7225,6 +7397,12 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
   }, [])
 
   const roleCode = detectedRole
+  const detectedUserKey = [
+    String(detectedUser?.username || '').trim().toLowerCase(),
+    String(detectedUser?.fullName || detectedUser?.full_name || '').trim().toLowerCase(),
+    roleCode,
+    normalizeAreaCod(detectedUser?.areaCod || detectedUser?.area_cod || detectedUser?.areaLabel || detectedUser?.area)
+  ].join('|')
   const buttonText = String(cfg.buttonText || 'Prendi in carico')
 
   const dc = defaultConfig as any
@@ -7390,58 +7568,134 @@ const queryFields = React.useMemo(() => ['*'], [])
   }, [])
 
   const [forcedActive, setForcedActive] = React.useState<{ key: string; state: SelState } | null>(null)
+  const [directAccessGate, setDirectAccessGate] = React.useState<DirectPracticeAccessGate>({ status: 'idle' })
   const forcedReqRef = React.useRef(0)
+  const forcedContextRef = React.useRef('')
 
   React.useEffect(() => {
     const req = ++forcedReqRef.current
-    if (!selection?.layerUrl || selection.oid == null) {
+    const isTiAmmSelection = roleCode === 'TI_AMM'
+
+    if (!profileReady) {
+      forcedContextRef.current = ''
       setForcedActive(null)
+      setDirectAccessGate({ status: 'idle' })
       return
     }
+
+    if (!selection?.layerUrl || selection.oid == null) {
+      forcedContextRef.current = ''
+      setForcedActive(null)
+      setDirectAccessGate({ status: 'idle' })
+      return
+    }
+
+    const contextKey = [
+      selection.layerUrl,
+      selection.oid,
+      roleCode,
+      isTiAmmSelection ? detectedUserKey : ''
+    ].join('|')
+    const contextChanged = forcedContextRef.current !== contextKey
+    forcedContextRef.current = contextKey
+
+    // Non mantenere visibile la pratica precedente quando cambia selezione o
+    // account. Per il TI_AMM la pratica resta nascosta durante ogni nuova
+    // verifica autorizzativa; per gli altri ruoli un refresh della stessa
+    // selezione non provoca lampeggi inutili.
+    if (contextChanged || isTiAmmSelection) setForcedActive(null)
+
+    setDirectAccessGate({ status: isTiAmmSelection ? 'checking' : 'idle' })
+
     ;(async () => {
       try {
+        if (isTiAmmSelection && contextChanged) {
+          // Il proxy può essere stato creato nella sessione di un altro account.
+          // Al cambio di selezione o identità la verifica autorizzativa ricostruisce
+          // il proxy nel contesto corrente; i refresh successivi possono riusarlo.
+          invalidateRuntimeProxyCache(selection.layerUrl)
+          try { delete runtimeDsProxyPromises[selection.layerUrl] } catch {}
+        }
+
         const dsTry = await createRuntimeDsProxyFromLayerUrl(selection.layerUrl, selection.viewName)
+        if (req !== forcedReqRef.current) return
+
         const idFieldName = String(selection.idFieldName || dsTry.getIdField?.() || 'OBJECTID')
         const stateKey = `${selection.layerUrl}:${selection.oid}`
         const cacheEntry = readSelectedFeatureCache(selection.layerUrl, selection.oid)
         const baseData = cacheEntry?.data && typeof cacheEntry.data === 'object' ? cacheEntry.data : null
         const baseOid = baseData ? Number(baseData[idFieldName] ?? baseData.OBJECTID ?? selection.oid) : NaN
 
-        if (baseData && Number.isFinite(baseOid) && baseOid === selection.oid) {
+        if (!isTiAmmSelection && baseData && Number.isFinite(baseOid) && baseOid === selection.oid) {
           const quickState: SelState = { ds: dsTry, oid: selection.oid, idFieldName, data: baseData, sig: stateKey }
           setForcedActive({ key: selection.layerUrl, state: quickState })
         }
 
         const wantsAll = queryFields.includes('*')
-        const needsQuery = !baseData || wantsAll || queryFields.some(f => f && f !== '*' && !Object.prototype.hasOwnProperty.call(baseData, f)) || selRefreshNonce > 0
+        const needsQuery = isTiAmmSelection || !baseData || wantsAll || queryFields.some(f => f && f !== '*' && !Object.prototype.hasOwnProperty.call(baseData, f)) || selRefreshNonce > 0
         if (!needsQuery) return
 
         const where = `${idFieldName}=${selection.oid}`
         const res: any = await dsTry.query({ where, outFields: queryFields, returnGeometry: true } as any)
         if (req !== forcedReqRef.current) return
+
         const recs: any[] = res?.records || []
         if (!recs.length) {
           setForcedActive(null)
+          setDirectAccessGate({ status: isTiAmmSelection ? 'unavailable' : 'idle' })
           return
         }
+
         const r0 = recs[0]
         const fetched = r0?.getData?.() || {}
+
+        if (isTiAmmSelection && !isPracticeAssignedToCurrentTiAmm(fetched, detectedUser)) {
+          setForcedActive(null)
+          setDirectAccessGate({ status: 'denied' })
+          return
+        }
+
         const cached = readSelectedFeatureCache(selection.layerUrl, selection.oid)
         const freshEdit = cached && cached.source === 'edit' && (Date.now() - Number(cached.ts || 0) < 15000)
-        const d0 = freshEdit ? { ...(fetched || {}), ...((cached?.data || {}) as any) } : { ...((baseData || {}) as any), ...(fetched || {}) }
+        const d0: any = freshEdit
+          ? { ...(fetched || {}), ...((cached?.data || {}) as any) }
+          : { ...((baseData || {}) as any), ...(fetched || {}) }
+
+        if (isTiAmmSelection) {
+          // Le informazioni di assegnazione usate dal pannello restano quelle
+          // appena verificate sul servizio, anche quando si recuperano altri
+          // campi da una cache recente dell'editing.
+          const assignment = getTiAmmAssignment(fetched)
+          const assignmentAliases = new Set([
+            'ti_amm_assegnato_username', 'ti_amm_assegnato_user', 'ti_amm_assegnato',
+            'ti_amm_username', 'utente_ti_amm', 'ti_amm_assegnato_nome', 'ti_amm_assegnato_name'
+          ])
+          Object.keys(d0).forEach(key => {
+            if (assignmentAliases.has(String(key).toLowerCase())) delete d0[key]
+          })
+          d0.ti_amm_assegnato_username = assignment.username
+          d0.ti_amm_assegnato_nome = assignment.name
+        }
+
         const oid0 = Number(d0[idFieldName] ?? d0.OBJECTID ?? selection.oid)
         if (!Number.isFinite(oid0) || oid0 !== selection.oid) {
           setForcedActive(null)
+          setDirectAccessGate({ status: isTiAmmSelection ? 'unavailable' : 'idle' })
           return
         }
+
         writeSelectedFeatureCache(selection.layerUrl, selection.oid, idFieldName, d0, 'azioni')
         const st: SelState = { ds: dsTry, oid: selection.oid, idFieldName, data: d0, sig: stateKey }
         setForcedActive({ key: selection.layerUrl, state: st })
+        setDirectAccessGate({ status: isTiAmmSelection ? 'allowed' : 'idle' })
       } catch {
-        if (req === forcedReqRef.current) setForcedActive(null)
+        if (req !== forcedReqRef.current) return
+        setForcedActive(null)
+        setDirectAccessGate({ status: isTiAmmSelection ? 'unavailable' : 'idle' })
       }
     })()
-  }, [selection?.layerUrl, selection?.oid, selection?.idFieldName, selection?.viewName, queryFields.join('|'), selRefreshNonce])
+  }, [selection?.layerUrl, selection?.oid, selection?.idFieldName, selection?.viewName, queryFields.join('|'), selRefreshNonce, roleCode, detectedUserKey, profileReady])
+
 
   const activeGate = forcedActive
 
@@ -7473,6 +7727,7 @@ const queryFields = React.useMemo(() => ['*'], [])
             regolamentoRaccordiUrl: String(cfg.regolamentoRaccordiUrl || '')
           }}
           mapView={mapView}
+          accessGate={directAccessGate}
         />
       </>
     </div>

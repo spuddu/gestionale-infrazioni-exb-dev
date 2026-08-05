@@ -6,6 +6,8 @@ import { createPortal } from 'react-dom'
 import type { IMConfig, TabConfig } from '../config'
 import { defaultConfig, DETAIL_DEFAULT_TAB_FIELDS, DETAIL_NEVER_SHOW_FIELDS, DETAIL_GENERAL_FIELDS } from '../config'
 import { filterGiiAttachmentsForTechnicalRoles } from '../../../_shared/gii-anteprime/allegati/gii-attachment-viewer'
+import { ensureNsdJsonOnlyQueryFormat } from '../../../_shared/gii-anteprime/nsd-query-format-fix'
+import { isGiiTiAmmUser, isPracticeAssignedToCurrentTiAmm } from '../../../_shared/gii-access/ti-amm-assignment'
 
 
 
@@ -15,6 +17,25 @@ type Msg = { kind: MsgKind; text: string }
 
 const GII_LOG_EVENTI_CICLI_URL = 'https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_LOG_EVENTI_CICLI/FeatureServer/0'
 const GII_UTENTI_URL = 'https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_utenti/FeatureServer/0'
+
+
+type DetailCurrentUser = Record<string, any>
+
+function readDetailCurrentUser (): DetailCurrentUser | null {
+  try {
+    const roleInfo: any = (window as any).__giiUserRole
+    if (!roleInfo || typeof roleInfo !== 'object') return null
+    const baseInfo: any = (window as any).__giiUser || {}
+    return {
+      ...baseInfo,
+      ...roleInfo,
+      username: String(roleInfo?.username || baseInfo?.username || '').trim(),
+      fullName: String(roleInfo?.fullName || roleInfo?.full_name || baseInfo?.fullName || baseInfo?.full_name || '').trim()
+    }
+  } catch {
+    return null
+  }
+}
 
 const RUOLO_NUM: Record<string, number> = { TR: 1, TI: 2, RZ: 3, RI: 4, DT: 5, DA: 6, ADMIN: 7 }
 const AREA_NUM: Record<string, number> = { AMM: 1, AGR: 2, TEC: 3 }
@@ -3641,6 +3662,7 @@ async function nsdGetFeatureLayerByUrl (rawUrl: any): Promise<any> {
   const url = nsdEnsureLayerIndex(nsdNormalizeUrl(rawUrl))
   if (!url) throw new Error('URL tabella dettaglio nota spese non configurata.')
   if (__giiNsdLayerCache[url]) return __giiNsdLayerCache[url]
+  await ensureNsdJsonOnlyQueryFormat()
   const FeatureLayer = await loadEsriModule<any>('esri/layers/FeatureLayer')
   const fl = new FeatureLayer({ url })
   try { if (typeof fl?.load === 'function') await fl.load() } catch {}
@@ -4072,6 +4094,7 @@ function DetailTabsPanel (props: {
   mapCfg: any
   notaSpeseCfg: { detailUrl: string; attrezzatureParametriUrl: string }
   regolamentoCfg: { articoliUrl: string }
+  emptyMessage?: string
 }) {
   const { active, ui } = props
 
@@ -5050,7 +5073,7 @@ let content: React.ReactNode = null
 if (!hasSel) {
   content = (
     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', minHeight: 200, fontWeight: 700, fontSize: 14, color: 'rgba(0,0,0,0.6)' }}>
-      Selezionare una pratica nell’elenco
+      {props.emptyMessage || 'Selezionare una pratica nell’elenco'}
     </div>
   )
 } else {
@@ -5241,7 +5264,7 @@ return (
     <div style={frameStyle}>
       {!hasSel ? (
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', minHeight: 200, fontWeight: 700, fontSize: 14, color: 'rgba(0,0,0,0.6)' }}>
-          Selezionare una pratica nell'elenco
+          {props.emptyMessage || "Selezionare una pratica nell'elenco"}
         </div>
       ) : (
         <>
@@ -5338,6 +5361,8 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
     'CreationDate', 'creationdate', 'created_date', 'created_user', 'Creator', 'creator',
     'start', 'end', 'data_firma',
     'ti_assegnato_username', 'ti_assegnato_nome', 'dt_assegnazione_ti', 'ti_assegnato_da',
+    'ti_amm_assegnato_username', 'ti_amm_assegnato_user', 'ti_amm_assegnato',
+    'ti_amm_assegnato_nome', 'ti_amm_assegnato_name',
 
     'presa_in_carico_TR', 'dt_presa_in_carico_TR',
     'stato_TR', 'dt_stato_TR',
@@ -5402,6 +5427,31 @@ const queryFields = React.useMemo(() => {
   return needsAll ? ['*'] : arr
 }, [migratedTabs, watchFields.join('|')])
 
+
+  const [currentUser, setCurrentUser] = React.useState<DetailCurrentUser | null>(() => readDetailCurrentUser())
+  React.useEffect(() => {
+    const syncUser = () => setCurrentUser(readDetailCurrentUser())
+    syncUser()
+    window.addEventListener('gii:userLoaded', syncUser as EventListener)
+    window.addEventListener('focus', syncUser as EventListener)
+    return () => {
+      window.removeEventListener('gii:userLoaded', syncUser as EventListener)
+      window.removeEventListener('focus', syncUser as EventListener)
+    }
+  }, [])
+
+  const currentUserKey = React.useMemo(() => {
+    if (!currentUser) return ''
+    return [
+      currentUser.username,
+      currentUser.profiloCod ?? currentUser.profilo_cod,
+      currentUser.ruoloCod ?? currentUser.ruolo_cod ?? currentUser.ruoloLabel ?? currentUser.ruolo,
+      currentUser.areaCod ?? currentUser.area_cod ?? currentUser.areaLabel ?? currentUser.area
+    ].map(v => String(v ?? '').trim().toLowerCase()).join('|')
+  }, [currentUser])
+  const currentUserReady = !!currentUser && !!String(currentUser.username || '').trim()
+  const currentUserIsTiAmm = currentUserReady && isGiiTiAmmUser(currentUser)
+
   const [selection, setSelection] = React.useState<RuntimeSelection | null>(() => readRuntimeSelection())
   React.useEffect(() => {
     const handler = () => setSelection(readRuntimeSelection())
@@ -5426,12 +5476,21 @@ const queryFields = React.useMemo(() => {
   const [forcedActive, setForcedActive] = React.useState<{ key: string; state: SelState } | null>(null)
   const forcedReqRef = React.useRef(0)
 
+  const [detailAccessState, setDetailAccessState] = React.useState<'idle' | 'checking' | 'allowed' | 'denied'>('idle')
+
   React.useEffect(() => {
     const req = ++forcedReqRef.current
     if (!selection?.layerUrl || selection.oid == null) {
       setForcedActive(null)
+      setDetailAccessState('idle')
       return
     }
+    if (!currentUserReady) {
+      setForcedActive(null)
+      setDetailAccessState('checking')
+      return
+    }
+    setDetailAccessState(currentUserIsTiAmm ? 'checking' : 'allowed')
     ;(async () => {
       try {
         const stateKey = `${selection.layerUrl}:${selection.oid}:${selRefreshNonce}`
@@ -5443,15 +5502,19 @@ const queryFields = React.useMemo(() => {
         const baseData = cacheEntry?.data && typeof cacheEntry.data === 'object' ? cacheEntry.data : null
         const baseOid = baseData ? Number(baseData[idFieldName] ?? baseData.OBJECTID ?? selection.oid) : NaN
 
-        if (baseData && Number.isFinite(baseOid) && baseOid === selection.oid) {
+        if (!currentUserIsTiAmm && baseData && Number.isFinite(baseOid) && baseOid === selection.oid) {
           const quickDs = syncCachedProxy || createRuntimeDsStubFromData(selection.layerUrl, selection.viewName, idFieldName, baseData)
           const quickState: SelState = { ds: quickDs, oid: selection.oid, idFieldName, data: mergeSelectionDataKeepingRealGeometry(baseData, null, false), sig: stateKey }
           setForcedActive({ key: selection.layerUrl, state: quickState })
+          setDetailAccessState('allowed')
+        } else if (currentUserIsTiAmm) {
+          // Mai mostrare dati memorizzati prima di aver verificato l'assegnazione.
+          setForcedActive(null)
         }
 
         const dsTry = syncCachedProxy || await createRuntimeDsProxyFromLayerUrl(selection.layerUrl, selection.viewName)
         const wantsAll = queryFields.includes('*')
-        const needsQuery = !baseData || wantsAll || queryFields.some(f => f && f !== '*' && !Object.prototype.hasOwnProperty.call(baseData, f)) || !hasUsableDataGeometry(baseData) || selRefreshNonce > 0
+        const needsQuery = currentUserIsTiAmm || !baseData || wantsAll || queryFields.some(f => f && f !== '*' && !Object.prototype.hasOwnProperty.call(baseData, f)) || !hasUsableDataGeometry(baseData) || selRefreshNonce > 0
         if (!needsQuery) return
 
         const where = `${idFieldName}=${selection.oid}`
@@ -5460,6 +5523,7 @@ const queryFields = React.useMemo(() => {
         const recs: any[] = res?.records || []
         if (!recs.length) {
           setForcedActive(null)
+          setDetailAccessState('idle')
           return
         }
         const r0 = recs[0]
@@ -5470,18 +5534,32 @@ const queryFields = React.useMemo(() => {
         const oid0 = Number(d0[idFieldName] ?? d0.OBJECTID ?? selection.oid)
         if (!Number.isFinite(oid0) || oid0 !== selection.oid) {
           setForcedActive(null)
+          setDetailAccessState('idle')
           return
         }
+        if (currentUserIsTiAmm && !isPracticeAssignedToCurrentTiAmm(d0, currentUser)) {
+          setForcedActive(null)
+          setDetailAccessState('denied')
+          return
+        }
+        setDetailAccessState('allowed')
         writeSelectedFeatureCache(selection.layerUrl, selection.oid, idFieldName, d0, 'detail')
         const st: SelState = { ds: dsTry, oid: selection.oid, idFieldName, data: d0, sig: stateKey }
         setForcedActive({ key: selection.layerUrl, state: st })
       } catch {
-        if (req === forcedReqRef.current) setForcedActive(null)
+        if (req === forcedReqRef.current) {
+          setForcedActive(null)
+          setDetailAccessState('idle')
+        }
       }
     })()
-  }, [selection?.layerUrl, selection?.oid, selection?.idFieldName, selection?.viewName, queryFields.join('|'), selRefreshNonce])
+  }, [selection?.layerUrl, selection?.oid, selection?.idFieldName, selection?.viewName, queryFields.join('|'), selRefreshNonce, currentUserKey, currentUserReady, currentUserIsTiAmm])
 
   const activeGate = forcedActive
+
+  const detailAccessMessage = detailAccessState === 'denied'
+    ? 'Accesso alla pratica non consentito.'
+    : (detailAccessState === 'checking' ? 'Verifica accesso alla pratica…' : '')
 
   const detailMapCfg = React.useMemo(() => ({
     basemap: String(cfg.mapBasemap || 'topo-vector'),
@@ -5548,6 +5626,7 @@ const queryFields = React.useMemo(() => {
                   regolamentoCfg={{
                     articoliUrl: String((cfg as any).regolamentoArticoliUrl || '')
                   }}
+                  emptyMessage={detailAccessMessage}
                   mapCfg={detailMapCfg}
                 />
         </>

@@ -10,6 +10,7 @@ import { RAPPORTO_TECHNICAL_BODY_BOX, drawRapportoTechnicalHeadersByPage, attach
 import { buildPlaceholderMap } from '../../../_shared/gii-anteprime/documenti-tecnici/rapporto/rapporto-placeholder-map'
 import { applyNotaSpeseToRapportoMap, buildArt30RapportoSummary } from '../../../_shared/gii-anteprime/documenti-tecnici/rapporto/rapporto-nota-spese-summary'
 import { buildNotaSpesePdf, type NotaSpeseData } from '../../../_shared/gii-anteprime/documenti-tecnici/rapporto/notaspese-pdf-builder'
+import { ensureNsdJsonOnlyQueryFormat } from '../../../_shared/gii-anteprime/nsd-query-format-fix'
 import GiiAnteprimaPanel from '../../../_shared/gii-anteprime/anteprima-panel'
 import { computeReqPoint } from '../../../_shared/gii-anteprime/req-point'
 import GiiAttachmentViewer, { GII_ATTACHMENT_KEYWORDS, getGiiAttachmentKind, filterGiiAttachmentsForAdministrativeFascicolo } from '../../../_shared/gii-anteprime/allegati/gii-attachment-viewer'
@@ -17,6 +18,8 @@ import { PDFDocument, StandardFonts, rgb } from 'pdf-lib'
 import type { IMConfig, SummaryFieldConfig } from '../config'
 import { defaultConfig } from '../config'
 import { createPortal } from 'react-dom'
+import { ensureAttivitaCorrentiJsonOnlyQueryFormat } from '../../../_shared/gii-alerts/attivita-correnti-query-format-fix'
+import { isPracticeAssignedToCurrentTiAmm } from '../../../_shared/gii-access/ti-amm-assignment'
 
 const LOG_EVENTI_CICLI_URL = 'https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_LOG_EVENTI_CICLI/FeatureServer/0'
 const GII_ATTIVITA_CORRENTI_URL = 'https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_ATTIVITA_CORRENTI/FeatureServer/0'
@@ -629,6 +632,7 @@ async function queryNotaSpeseDetailRowsForPractice (data: Record<string, any>): 
   if (!rawGlobalId) return []
   const cleanGlobalId = rawGlobalId.replace(/[{}]/g, '').trim()
   const variants = Array.from(new Set([rawGlobalId, cleanGlobalId, cleanGlobalId ? `{${cleanGlobalId}}` : ''].filter(Boolean)))
+  await ensureNsdJsonOnlyQueryFormat()
   const fl = await getLookupLayer(NOTA_SPESE_DETTAGLIO_VIEW_URL)
   const q: any = {
     where: variants.map(value => `parent_globalid = ${sqlQuote(value)}`).join(' OR '),
@@ -1102,31 +1106,6 @@ function readUserProfile (): { role: RoleCode, username: string, fullName: strin
 
 function isAllowedAdminRole (role: string): boolean {
   return ['TI_AMM', 'RI_AMM', 'DA', 'ADMIN'].includes(String(role || '').toUpperCase())
-}
-
-function normalizeGiiUsernameForCompare (v: any): string {
-  return String(v ?? '').trim().toLowerCase()
-}
-
-function sameGiiUsername (a: any, b: any): boolean {
-  const aa = normalizeGiiUsernameForCompare(a)
-  const bb = normalizeGiiUsernameForCompare(b)
-  return !!aa && !!bb && aa === bb
-}
-
-function getAmmDataEditAssigneeUsername (data: Record<string, any>, role: string): string {
-  const r = String(role || '').toUpperCase()
-  if (r === 'TI_AMM') {
-    return String(pickAttrCI(data || {}, [
-      'ti_amm_assegnato_username',
-      'TI_AMM_assegnato_username',
-      'ti_amm_username',
-      'TI_AMM_username',
-      'utente_TI_AMM',
-      'utente_ti_amm'
-    ]) || '').trim()
-  }
-  return ''
 }
 
 function toDateObj (v: any): Date | null {
@@ -7297,11 +7276,11 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
   const draftOid = pickOidFromData(draft || {}, active?.idFieldName || 'OBJECTID')
   const draftBelongsToSelection = oid != null && draftOid != null && Number(draftOid) === Number(oid)
   const editStateData = draftBelongsToSelection && Object.keys(draft || {}).length ? draft : (data || {})
-  const currentAssigneeUsername = getAmmDataEditAssigneeUsername(editStateData || {}, currentRole)
   const tiAmmWorkflowState = currentRole === 'TI_AMM' ? parseNumberInput(pickAttrCI(editStateData || {}, ['stato_TI_AMM', 'STATO_TI_AMM'])) : null
-  const tiAmmAssignedToCurrentUser = currentRole === 'TI_AMM' && (!currentAssigneeUsername || !profile.username || sameGiiUsername(currentAssigneeUsername, profile.username))
+  const tiAmmAssignedToCurrentUser = currentRole === 'TI_AMM' && isPracticeAssignedToCurrentTiAmm(editStateData || {}, profile)
   const tiAmmIsCurrentOperativeAssignee = currentRole === 'TI_AMM' && tiAmmWorkflowState === 2 && tiAmmAssignedToCurrentUser
-  const assignedToOtherUser = roleCanEditData && currentRole !== 'ADMIN' && !!currentAssigneeUsername && !!profile.username && !sameGiiUsername(currentAssigneeUsername, profile.username)
+  const tiAmmAccessDenied = currentRole === 'TI_AMM' && hasSelection && !tiAmmAssignedToCurrentUser
+  const assignedToOtherUser = currentRole === 'TI_AMM' && !tiAmmAssignedToCurrentUser
   const dataEditBlockedByRole = roleAllowed && !roleCanEditData
   const dataEditBlockedByOtherUser = roleCanEditData && ((openedInConsultation && !tiAmmIsCurrentOperativeAssignee) || assignedToOtherUser)
   const readOnlyBannerBaseMessage = dataEditBlockedByRole
@@ -7434,6 +7413,7 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
   const getAttivitaLayer = React.useCallback(async () => {
     if (attivitaLayerRef.current?.applyEdits) return attivitaLayerRef.current
     try {
+      await ensureAttivitaCorrentiJsonOnlyQueryFormat()
       const FeatureLayer = await loadEsriModule<any>('esri/layers/FeatureLayer')
       const fl = new FeatureLayer({ url: GII_ATTIVITA_CORRENTI_URL, outFields: ['*'] })
       if (typeof fl?.load === 'function') { try { await fl.load() } catch {} }
@@ -8625,6 +8605,34 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
   // con quello sopra (border + padding del contenitore esterno), così il blocco non risulta
   // visivamente più vicino al bordo superiore della card che a quello inferiore.
   const toolbarBottomPad = Math.max(0, Number(adminStyle.maskBorderWidth ?? 1) + Number(adminStyle.maskInnerPadding ?? 12) - 1)
+
+  if (tiAmmAccessDenied) {
+    return (
+      <AdminStyleCtx.Provider value={adminStyle}>
+        <div ref={rootRef} data-gii-editing-amm-root='1' style={wrapperStyle}>
+          {useDs.map((uds: any, idx: number) => {
+            const dsKey = String(uds?.dataSourceId || uds?.mainDataSourceId || `ds_${idx}`)
+            return <DataSourceSelectionBridge key={dsKey} widgetId={props.id} uds={uds} dsKey={dsKey} onUpdate={onDsUpdate} />
+          })}
+          <div style={{
+            flex: '1 1 auto',
+            minHeight: 220,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            textAlign: 'center',
+            padding: 24,
+            boxSizing: 'border-box',
+            color: '#7a1c1c',
+            fontSize: 14,
+            fontWeight: 700
+          }}>
+            Accesso alla pratica non consentito.
+          </div>
+        </div>
+      </AdminStyleCtx.Provider>
+    )
+  }
 
   return (
     <AdminStyleCtx.Provider value={adminStyle}>

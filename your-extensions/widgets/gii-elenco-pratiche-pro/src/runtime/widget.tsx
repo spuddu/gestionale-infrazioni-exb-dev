@@ -16,6 +16,11 @@ import { Loading } from "jimu-ui";
 import type { AllWidgetProps } from "jimu-core";
 import type { IMConfig, ColumnDef } from "../config";
 import { defaultConfig, DEFAULT_COLUMNS } from "../config";
+import { isPracticeAssignedToCurrentTiAmm } from "../../../_shared/gii-access/ti-amm-assignment";
+import {
+  pickGiiRuntimeView,
+  type GiiRuntimeView as RuntimeDsView,
+} from "../../../_shared/gii-runtime/runtime-views";
 
 type Props = AllWidgetProps<IMConfig>;
 
@@ -1104,155 +1109,6 @@ function migrateColumns(cfg: any): ColumnDef[] {
  */
 const GII_PORTAL = "https://cbsm-hub.maps.arcgis.com";
 
-type RuntimeDsView = {
-  key: string;
-  viewName: string;
-  itemId: string;
-  serviceUrl: string;
-  layerUrl: string;
-  roles: string[];
-  areaCode: "AMM" | "AGR" | "TEC" | "";
-  settoreCode: string;
-};
-
-const GII_RUNTIME_VIEWS: RuntimeDsView[] = [
-  {
-    key: "ADMIN",
-    // ADMIN usa l'item/vista dedicata GII_VIEW_ADMIN.
-    // Nota: l'endpoint REST storico dell'item espone ancora il servizio con nome GII_VIEW_ADMIN.
-    // Non è la vista AMM_ALL e non va sostituito con GII_VIEW_AMM.
-    viewName: "GII_VIEW_ADMIN",
-    itemId: "2db73574551947a8bd0a78d500d0a51a",
-    serviceUrl:
-      "https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_VIEW_ADMIN/FeatureServer",
-    layerUrl:
-      "https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_VIEW_ADMIN/FeatureServer/0",
-    roles: ["ADMIN"],
-    areaCode: "",
-    settoreCode: "",
-  },
-  {
-    key: "AGR_ALL",
-    viewName: "GII_VIEW_AGR",
-    itemId: "00b028433ce346159e1ea6f176133403",
-    serviceUrl:
-      "https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_VIEW_AGR/FeatureServer",
-    layerUrl:
-      "https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_VIEW_AGR/FeatureServer/0",
-    roles: ["RI", "DT"],
-    areaCode: "AGR",
-    settoreCode: "",
-  },
-  {
-    key: "AGR_D1",
-    viewName: "GII_VIEW_AGR_D1",
-    itemId: "5ed3330e7f65418d83337d6aa6859296",
-    serviceUrl:
-      "https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_VIEW_AGR_D1/FeatureServer",
-    layerUrl:
-      "https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_VIEW_AGR_D1/FeatureServer/0",
-    roles: ["TI", "RZ"],
-    areaCode: "AGR",
-    settoreCode: "D1",
-  },
-  {
-    key: "AGR_D2",
-    viewName: "GII_VIEW_AGR_D2",
-    itemId: "c7312758bd1448b9bfb61e7db4683832",
-    serviceUrl:
-      "https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_VIEW_AGR_D2/FeatureServer",
-    layerUrl:
-      "https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_VIEW_AGR_D2/FeatureServer/0",
-    roles: ["TI", "RZ"],
-    areaCode: "AGR",
-    settoreCode: "D2",
-  },
-  {
-    key: "AGR_D3",
-    viewName: "GII_VIEW_AGR_D3",
-    itemId: "59f7e37105fe433796a699cb99716bc7",
-    serviceUrl:
-      "https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_VIEW_AGR_D3/FeatureServer",
-    layerUrl:
-      "https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_VIEW_AGR_D3/FeatureServer/0",
-    roles: ["TI", "RZ"],
-    areaCode: "AGR",
-    settoreCode: "D3",
-  },
-  {
-    key: "AGR_D4",
-    viewName: "GII_VIEW_AGR_D4",
-    itemId: "e6bfbb9325c549d68b8435583d91d626",
-    serviceUrl:
-      "https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_VIEW_AGR_D4/FeatureServer",
-    layerUrl:
-      "https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_VIEW_AGR_D4/FeatureServer/0",
-    roles: ["TI", "RZ"],
-    areaCode: "AGR",
-    settoreCode: "D4",
-  },
-  {
-    key: "AGR_D5",
-    viewName: "GII_VIEW_AGR_D5",
-    itemId: "5feb425669244ae2a1d63eca065cfaba",
-    serviceUrl:
-      "https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_VIEW_AGR_D5/FeatureServer",
-    layerUrl:
-      "https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_VIEW_AGR_D5/FeatureServer/0",
-    roles: ["TI", "RZ"],
-    areaCode: "AGR",
-    settoreCode: "D5",
-  },
-  {
-    key: "AGR_D6",
-    viewName: "GII_VIEW_AGR_D6",
-    itemId: "0f55207139a2401fba3cf102147b9625",
-    serviceUrl:
-      "https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_VIEW_AGR_D6/FeatureServer",
-    layerUrl:
-      "https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_VIEW_AGR_D6/FeatureServer/0",
-    roles: ["TI", "RZ"],
-    areaCode: "AGR",
-    settoreCode: "D6",
-  },
-  {
-    key: "AMM_ALL",
-    viewName: "GII_VIEW_AMM_ALL",
-    itemId: "a93f1deb62d343f9baa2451ed7d46b4e",
-    serviceUrl:
-      "https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_VIEW_AMM_ALL/FeatureServer",
-    layerUrl:
-      "https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_VIEW_AMM_ALL/FeatureServer/0",
-    roles: ["RI", "TI", "DA", "RI_AMM", "TI_AMM"],
-    areaCode: "AMM",
-    settoreCode: "",
-  },
-  {
-    key: "TEC_ALL",
-    viewName: "GII_VIEW_TEC",
-    itemId: "6cbe0f0ea88a49c8ac91a76938669eea",
-    serviceUrl:
-      "https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_VIEW_TEC/FeatureServer",
-    layerUrl:
-      "https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_VIEW_TEC/FeatureServer/0",
-    roles: ["RI", "DT"],
-    areaCode: "TEC",
-    settoreCode: "",
-  },
-  {
-    key: "TEC_DS",
-    viewName: "GII_VIEW_TEC_DS",
-    itemId: "2d10b592601045bdb1527fda913825d7",
-    serviceUrl:
-      "https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_VIEW_TEC_DS/FeatureServer",
-    layerUrl:
-      "https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_VIEW_TEC_DS/FeatureServer/0",
-    roles: ["TI", "RZ"],
-    areaCode: "TEC",
-    settoreCode: "DS",
-  },
-];
-
 // ── LOG + Utenti: tabelle per colonne virtuali Mittente/Causale/Data msg ────
 const LOG_TABLE_URL =
   "https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_LOG_EVENTI_CICLI/FeatureServer/0";
@@ -2017,22 +1873,12 @@ function pickRuntimeViewForUser(
   );
   const areaCode = resolveAreaCode(user.area, user.areaCod);
   const settoreCode = resolveSettoreCode(user.settore, user.settoreCod);
-  if (user.isAdmin || role === "ADMIN") {
-    return GII_RUNTIME_VIEWS.find((v) => v.key === "ADMIN") || null;
-  }
-  const strict = GII_RUNTIME_VIEWS.find(
-    (v) =>
-      v.roles.includes(role) &&
-      v.areaCode === areaCode &&
-      (v.settoreCode ? v.settoreCode === settoreCode : true),
-  );
-  if (strict) return strict;
-  return (
-    GII_RUNTIME_VIEWS.find(
-      (v) =>
-        v.roles.includes(role) && v.areaCode === areaCode && !v.settoreCode,
-    ) || null
-  );
+  return pickGiiRuntimeView({
+    roleCode: role,
+    areaCode,
+    settoreCode,
+    isAdmin: user.isAdmin,
+  });
 }
 
 function makeRuntimeRecord(
@@ -2904,11 +2750,7 @@ export default function Widget(props: Props) {
         if (!isInFaseSanzionatoria(d)) return false;
         // TI_AMM: vede solo le pratiche a lui assegnate (come TI vede solo le sue)
         if (role === "TI_AMM") {
-          const meUser = String(giiUser?.username || "").trim();
-          const tiAmmUser = String(d["ti_amm_assegnato_username"] ?? "").trim();
-          const tiAmmName = String(d["ti_amm_assegnato_nome"] ?? "").trim();
-          if (!tiAmmUser && !tiAmmName) return false; // non ancora assegnata
-          return equalsUser(tiAmmUser, meUser) || equalsUser(tiAmmName, meUser);
+          return isPracticeAssignedToCurrentTiAmm(d, giiUser as any);
         }
         return true;
       }
@@ -3050,18 +2892,49 @@ export default function Widget(props: Props) {
   const runtimeRecordsRef = React.useRef<DataRecord[]>([]);
   const prevUserRef = React.useRef<string>("");
   const [dsDataVer, setDsDataVer] = React.useState(0);
+  // Incrementato solo dopo il reset completo del contesto utente. In questo
+  // modo il caricamento riparte nel render successivo anche quando due ruoli
+  // usano la stessa vista runtime (es. TI_D1 e RZ_D1), senza sovrapporsi al reset.
+  const [accountDataEpoch, setAccountDataEpoch] = React.useState(0);
 
   React.useEffect(() => {
     const cur = giiUser?.username || "";
     const prev = prevUserRef.current;
     if (cur === prev) return;
     prevUserRef.current = cur;
+
+    const nextKey = resolvedView?.layerUrl || "__none__";
+    const nextIsLoading = !!cur && !!resolvedView;
+
     runtimeRecordsRef.current = [];
-    dsDataRef.current = {};
+    dsDataRef.current = {
+      [nextKey]: {
+        recs: [],
+        ds: null as any,
+        loading: nextIsLoading,
+      },
+    };
+
+    // Record, proxy e FeatureLayer caricati prima del cambio account non devono
+    // sopravvivere alla nuova identità, anche se la URL della vista resta uguale.
+    invalidateRuntimeProxyCache();
+    for (const key of Object.keys(_loadedFeatureLayerCache)) {
+      delete _loadedFeatureLayerCache[key];
+    }
+
+    // Azzera anche lo stato derivato del LOG: in caso contrario mergedRecs e
+    // classificazione per ruolo possono continuare a usare lo snapshot precedente.
+    logMapRef.current = new Map();
+    lastLogGidSigRef.current = "";
+    logLoadedRef.current = !nextIsLoading;
+
     setLocalSelectedByDs({});
     setLocalSelectedOid(null);
+    setDsDataVer((v) => v + 1);
+    setLogVer((v) => v + 1);
+    setAccountDataEpoch((v) => v + 1);
     notifySelectionCleared();
-  }, [giiUser?.username]);
+  }, [giiUser?.username, resolvedView?.layerUrl]);
 
   const whereClause = txt(cfg.whereClause || "1=1");
   const pageSize = num(cfg.pageSize, 200);
@@ -3146,6 +3019,7 @@ export default function Widget(props: Props) {
     let cancelled = false;
     const load = async () => {
       const key = resolvedView?.layerUrl || "__none__";
+      const loadUsername = giiUser?.username || "";
       if (!resolvedView || !isReady) {
         runtimeRecordsRef.current = [];
         dsDataRef.current[key] = { recs: [], ds: null as any, loading: false };
@@ -3172,7 +3046,7 @@ export default function Widget(props: Props) {
           returnGeometry: false,
           pageSize,
         });
-        if (cancelled) return;
+        if (cancelled || prevUserRef.current !== loadUsername) return;
         const recs: DataRecord[] = (res?.records || []) as DataRecord[];
         dsDataRef.current[key] = { recs, ds: proxy, loading: false };
         // Se sono arrivati record, la classificazione per ruolo resta sospesa
@@ -3195,7 +3069,7 @@ export default function Widget(props: Props) {
           w.__giiRuntimeDsProxyCache[resolvedView.layerUrl] = proxy;
         } catch {}
       } catch {
-        if (cancelled) return;
+        if (cancelled || prevUserRef.current !== loadUsername) return;
         dsDataRef.current[key] = { recs: [], ds: null as any, loading: false };
         logLoadedRef.current = true;
         setLastListRefreshAt(Date.now());
@@ -3213,6 +3087,7 @@ export default function Widget(props: Props) {
     whereClause,
     pageSize,
     listRefreshNonce,
+    accountDataEpoch,
   ]);
 
   // ── Enrichment: carica GII_LOG_EVENTI_CICLI + GII_utenti ──
