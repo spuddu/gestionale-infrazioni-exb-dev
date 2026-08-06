@@ -6,7 +6,6 @@ import { defaultConfig } from '../config'
 import { queryGiiAlerts, queryGiiCurrentActivities, archiveGiiAlert, getGiiAlertBellTone, isGiiTakeChargeAlert, summarizeGiiAlerts, type GiiAlertItem, type GiiAlertQueryResult } from '../../../_shared/gii-alerts/gii-alerts'
 import { ensureAttivitaCorrentiJsonOnlyQueryFormat } from '../../../_shared/gii-alerts/attivita-correnti-query-format-fix'
 import { stampGiiPracticePayload, syncGiiPracticeContextUsername, writeGiiPracticeSelectionContext } from '../../../_shared/gii-selection/practice-context'
-import { pickGiiRuntimeView } from '../../../_shared/gii-runtime/runtime-views'
 
 const GII_PORTAL     = 'https://cbsm-hub.maps.arcgis.com'
 const GII_UTENTI_URL = 'https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_utenti/FeatureServer/0'
@@ -507,16 +506,20 @@ async function signIn(): Promise<void> {
   window.dispatchEvent(new Event('gii:userLoaded'))
 }
 
-function switchAccountLikeStandardWidget(): void {
-  if (window.jimuConfig.isInBuilder) return
+function switchAccountWithoutRevokingCurrentSession(): Promise<any> | null {
+  if (window.jimuConfig.isInBuilder) return null
 
   const sm: any = SessionManager.getInstance()
-  if (!sm?.getMainSession?.() || typeof sm?.switchAccount !== 'function') return
+  if (!sm?.getMainSession?.() || typeof sm?.signIn !== 'function') return null
 
-  // Comportamento identico al widget Login standard di Experience Builder 1.19:
-  // il clic apre soltanto il selettore nativo. La Promise non viene osservata e
-  // nessuno stato GII viene modificato prima della scelta effettiva dell'utente.
-  sm.switchAccount()
+  // Non usare SessionManager.switchAccount(): in ExB 1.19 revoca il token
+  // corrente appena il flusso viene avviato, quindi anche Annulla lascia
+  // l'app senza una sessione valida. Un nuovo sign-in forzato in popup
+  // conserva invece la sessione corrente fino al completamento dell'OAuth.
+  return Promise.resolve(sm.signIn({
+    popup: true,
+    forceLogin: true
+  }))
 }
 
 async function signOut(): Promise<void> {
@@ -584,21 +587,6 @@ function selectCurrentActivityLayerUrl (cfg: any, user: any): string {
 }
 
 function selectAlertPracticeLayerUrl (cfg: any, user: any): string {
-  // La vista delle pratiche deve rispettare lo stesso perimetro autorizzativo
-  // usato da elenco, dashboard e report. Una scelta basata sulla sola area
-  // farebbe tentare a TI/RZ l'apertura delle viste aggregate AGR/TEC, alle quali
-  // quei ruoli non sono autorizzati, provocando il banner credenziali di ExB.
-  const runtimeView = pickGiiRuntimeView({
-    roleCode: user?.profiloCod || user?.ruoloCod || user?.role,
-    areaCode: user?.areaCod || user?.area_cod || user?.area,
-    settoreCode: user?.settoreCod || user?.settore_cod || user?.settore,
-    isAdmin: !!user?.isAdmin,
-    isWorkflowAdmin: !!user?.isWorkflowAdmin
-  })
-  if (runtimeView?.layerUrl) return runtimeView.layerUrl
-
-  // Fallback di compatibilità per eventuali profili non ancora censiti nel
-  // catalogo condiviso. I profili ordinari GII non passano da questo ramo.
   const area = alertAreaForUrls(user)
   if (area === 'AGR') return String(cfg.alertsPracticeLayerUrlAgr || cfg.alertsPracticeLayerUrlTecnici || '').trim()
   if (area === 'TEC') return String(cfg.alertsPracticeLayerUrlTec || cfg.alertsPracticeLayerUrlTecnici || '').trim()
@@ -2680,6 +2668,7 @@ export default function Widget(props: Props) {
   const locallyArchivedAlertKeysRef = React.useRef<Set<string>>(new Set())
   const alertsAuthTransitionRef = React.useRef(false)
   const profileSyncRetryTimerRef = React.useRef<number | null>(null)
+  const accountSwitchInProgressRef = React.useRef(false)
   const userRef = React.useRef<GiiUserRole | null>(null)
 
   React.useEffect(() => {
@@ -2771,6 +2760,10 @@ export default function Widget(props: Props) {
         if (cancelled || !esriId?.on) return
         try {
           hCreate = esriId.on('credential-create', () => {
+            // switchAccount() è gestito dal relativo handler: durante quel flusso
+            // IdentityManager può creare più credenziali intermedie.
+            if (accountSwitchInProgressRef.current) return
+
             const activeUsername = getActiveSessionUsername()
             const currentUsername = normalizeAuthUsername(userRef.current?.username)
 
@@ -3513,15 +3506,105 @@ export default function Widget(props: Props) {
     marginBottom:6
   }
 
-  const performSwitchAccount = () => {
+  const performSwitchAccount = async () => {
     setMenuOpen(false)
+    if (accountSwitchInProgressRef.current) return
 
-    // Il clic non avvia alcuna transizione GII: niente reset, abort, refresh,
-    // navigazione o modifica del profilo. Se il popup viene annullato, lo stato
-    // dell'app resta quindi esattamente quello precedente. Il cambio reale viene
-    // rilevato esclusivamente dal listener credential-create già registrato,
-    // quando la sessione principale espone uno username effettivamente diverso.
-    switchAccountLikeStandardWidget()
+    const previousUsername = normalizeAuthUsername(userRef.current?.username)
+    if (profileSyncRetryTimerRef.current != null) {
+      window.clearTimeout(profileSyncRetryTimerRef.current)
+      profileSyncRetryTimerRef.current = null
+    }
+    setProfileSyncError('')
+    accountSwitchInProgressRef.current = true
+    alertsAuthTransitionRef.current = true
+    const switchPromise = switchAccountWithoutRevokingCurrentSession()
+    if (!switchPromise) {
+      accountSwitchInProgressRef.current = false
+      alertsAuthTransitionRef.current = false
+      return
+    }
+
+    try { alertsAbortControllerRef.current?.abort() } catch { }
+    alertsAbortControllerRef.current = null
+    alertsBackgroundRefreshRef.current = null
+    setAlerts([])
+    setAlertsError('')
+    setAlertsOpen(false)
+    setAlertsLoading(false)
+
+    try {
+      await switchPromise
+
+      // Alla chiusura del popup il metodo nativo risolve anche in caso di Annulla.
+      // Attendiamo brevemente che SessionManager esponga l'identità definitiva.
+      let activeUsername = getActiveSessionUsername()
+      for (let i = 0; i < 20 && !activeUsername; i++) {
+        await new Promise(resolve => window.setTimeout(resolve, 50))
+        activeUsername = getActiveSessionUsername()
+      }
+
+      if (!activeUsername || activeUsername === previousUsername) {
+        // Annulla o stesso account: nessuna modifica al profilo corrente.
+        alertsAuthTransitionRef.current = false
+        alertsAbortControllerRef.current = new AbortController()
+        refreshAlerts()
+        return
+      }
+
+      setULoad(true)
+      let nextUser: GiiUserRole | null = null
+
+      for (let i = 0; i < 20; i++) {
+        clearGiiUserRoleCache()
+        const candidate = await loadUser()
+        const confirmedUsername = getActiveSessionUsername()
+        if (
+          candidate &&
+          confirmedUsername === activeUsername &&
+          normalizeAuthUsername(candidate.username) === activeUsername
+        ) {
+          nextUser = candidate
+          break
+        }
+        await new Promise(resolve => window.setTimeout(resolve, 100))
+        activeUsername = confirmedUsername || activeUsername
+      }
+
+      if (!nextUser) {
+        // Deleghiamo il recupero al refresh centralizzato, che applica i retry brevi,
+        // mostra l'errore esplicito e programma il fallback autonomo senza F5.
+        clearGiiUserRoleCache()
+        dispatchGiiUserLoaded({
+          source: 'header-switch-profile-retry',
+          reason: 'switch-account-profile-not-ready',
+          username: activeUsername
+        })
+        return
+      }
+
+      setUser(nextUser)
+      setULoad(false)
+      dispatchGiiUserLoaded({
+        source: 'header-boot',
+        reason: 'switch-account',
+        username: nextUser.username
+      })
+
+      try {
+        const tok = String(afterInRef.current || '').trim()
+        if (tok) gotoPage(tok)
+      } catch { }
+      // Il useEffect dipendente da user crea il nuovo AbortController e sblocca
+      // gli allarmi soltanto dopo che ruolo, area e username sono coerenti.
+    } catch {
+      alertsAuthTransitionRef.current = false
+      alertsAbortControllerRef.current = new AbortController()
+      setULoad(false)
+      refreshAlerts()
+    } finally {
+      accountSwitchInProgressRef.current = false
+    }
   }
 
   // Disconnessione "pulita": se è configurata una pagina di destinazione diversa da
@@ -3773,7 +3856,10 @@ export default function Widget(props: Props) {
                       )}
 
                       <button type='button' disabled={signingIn}
-                        onClick={performSwitchAccount}
+                        onClick={async () => {
+                          setSigning(true)
+                          try { setMenuOpen(false); await performSwitchAccount() } finally { setSigning(false) }
+                        }}
                         style={menuItemBtnStyle}>
                         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                           <polyline points="17 1 21 5 17 9"/><path d="M3 11V9a4 4 0 0 1 4-4h14"/><polyline points="7 23 3 19 7 15"/><path d="M21 13v2a4 4 0 0 1-4 4H3"/>

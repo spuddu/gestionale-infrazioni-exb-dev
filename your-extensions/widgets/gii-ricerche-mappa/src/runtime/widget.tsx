@@ -358,18 +358,23 @@ function sqlQuoteMapVisibility (v: string): string {
 // pratiche assegnate a lui nel proprio settore, DA/RI_AMM tutta l'area AMM in fase
 // sanzionatoria, TI_AMM solo le proprie pratiche assegnate in fase sanzionatoria.
 function buildRoleVisibilityWhereClause (user: ReturnType<typeof readGiiUserForMapVisibility>): string {
-  if (!user || user.isAdmin) return '1=1'
+  if (!user) return '1=0'
+  if (user.isAdmin) return '1=1'
   const role = String(user.profiloCod || user.ruoloCod || '').toUpperCase().trim()
   const area = user.areaCod
   const settore = user.settoreCod
   const me = sqlQuoteMapVisibility(user.username)
-  if (!role) return '1=1'
+  if (!role) return '1=0'
 
+  // I campi stato_*/esito_* sono interi: confrontarli con la stringa vuota
+  // produce query 400 (in particolare nel formato PBF usato dal MapView).
+  // Per i campi numerici è sufficiente IS NOT NULL; i due campi della
+  // determinazione sono stringhe e mantengono anche il controllo <> ''.
   const faseSanzionatoriaClause =
-    "((stato_RI_AMM IS NOT NULL AND stato_RI_AMM <> '') OR " +
-    "(esito_RI_AMM IS NOT NULL AND esito_RI_AMM <> '') OR " +
-    "(stato_TI_AMM IS NOT NULL AND stato_TI_AMM <> '') OR " +
-    "(esito_TI_AMM IS NOT NULL AND esito_TI_AMM <> '') OR " +
+    "(stato_RI_AMM IS NOT NULL OR " +
+    "esito_RI_AMM IS NOT NULL OR " +
+    "stato_TI_AMM IS NOT NULL OR " +
+    "esito_TI_AMM IS NOT NULL OR " +
     "(determinazione_stato IS NOT NULL AND determinazione_stato <> '') OR " +
     "(determinazione_numero IS NOT NULL AND determinazione_numero <> ''))"
 
@@ -394,9 +399,48 @@ function buildRoleVisibilityWhereClause (user: ReturnType<typeof readGiiUserForM
     return `area_cod = '${area}'${settoreClause} AND (UPPER(ti_assegnato_username) = UPPER('${me}') OR ((ti_assegnato_username IS NULL OR ti_assegnato_username = '') AND (UPPER(created_user) = UPPER('${me}') OR UPPER(Creator) = UPPER('${me}'))))`
   }
 
-  // Ruolo non riconosciuto/non gestito qui: nessuna restrizione, per evitare di nascondere
-  // per errore pratiche che dovrebbero essere visibili.
-  return '1=1'
+  // Profilo non riconosciuto: fail closed. Finché lo Header non pubblica un profilo
+  // valido, la mappa non deve mostrare pratiche appartenenti ad altri ruoli.
+  return '1=0'
+}
+
+
+const giiMapBaseDefinitionExpressions = new WeakMap<object, string>()
+
+function getGiiMapBaseDefinitionExpression (layer: any): string {
+  if (!layer || (typeof layer !== 'object' && typeof layer !== 'function')) return ''
+  const cached = giiMapBaseDefinitionExpressions.get(layer)
+  if (cached !== undefined) return cached
+  const sourceExpression = txt(
+    layer?.sourceJSON?.layerDefinition?.definitionExpression ||
+    layer?.sourceJSON?.definitionExpression ||
+    layer?.layerDefinition?.definitionExpression ||
+    layer?.definitionExpression ||
+    ''
+  ).trim()
+  giiMapBaseDefinitionExpressions.set(layer, sourceExpression)
+  return sourceExpression
+}
+
+function combineGiiMapVisibilityWhere (baseWhere: string, roleWhere: string): string {
+  const base = txt(baseWhere).trim()
+  const role = txt(roleWhere).trim() || '1=0'
+  if (!base || base === '1=1') return role
+  if (role === '1=1') return base
+  return `(${base}) AND (${role})`
+}
+
+function getGiiMapVisibilityUserKey (): string {
+  const user = readGiiUserForMapVisibility()
+  if (!user) return ''
+  return [
+    user.username.toLowerCase(),
+    user.profiloCod.toUpperCase(),
+    user.ruoloCod.toUpperCase(),
+    user.areaCod.toUpperCase(),
+    user.settoreCod.toUpperCase(),
+    user.isAdmin ? '1' : '0'
+  ].join('|')
 }
 
 function findGiiInfrazioniBaseLayer (view: any): any {
@@ -625,21 +669,28 @@ export default function Widget(props: Props) {
 
   React.useEffect(() => () => { try { highlightRef.current?.remove?.() } catch {} }, [])
 
+  const [mapVisibilityUserKey, setMapVisibilityUserKey] = React.useState(() => getGiiMapVisibilityUserKey())
+
+  React.useEffect(() => {
+    const syncVisibilityUser = () => setMapVisibilityUserKey(getGiiMapVisibilityUserKey())
+    syncVisibilityUser()
+    window.addEventListener('gii:userLoaded', syncVisibilityUser)
+    return () => window.removeEventListener('gii:userLoaded', syncVisibilityUser)
+  }, [])
+
   React.useEffect(() => {
     if (!mapView) return
-    let cancelled = false
-    ;(async () => {
-      try {
-        const baseLayer = findGiiInfrazioniBaseLayer(mapView)
-        if (!baseLayer) return
-        if (typeof baseLayer.load === 'function') { try { await baseLayer.load() } catch {} }
-        if (cancelled) return
-        const user = readGiiUserForMapVisibility()
-        baseLayer.definitionExpression = buildRoleVisibilityWhereClause(user)
-      } catch { /* nessun layer di base trovato o utente non ancora disponibile: nessuna restrizione applicata */ }
-    })()
-    return () => { cancelled = true }
-  }, [mapView])
+    try {
+      const baseLayer = findGiiInfrazioniBaseLayer(mapView)
+      if (!baseLayer) return
+      const baseWhere = getGiiMapBaseDefinitionExpression(baseLayer)
+      const roleWhere = buildRoleVisibilityWhereClause(readGiiUserForMapVisibility())
+      const nextWhere = combineGiiMapVisibilityWhere(baseWhere, roleWhere)
+      if (txt(baseLayer.definitionExpression).trim() !== nextWhere) {
+        baseLayer.definitionExpression = nextWhere
+      }
+    } catch { /* nessun layer di base trovato: nessuna modifica */ }
+  }, [mapView, mapVisibilityUserKey])
 
   React.useEffect(() => {
     let cancelled = false
