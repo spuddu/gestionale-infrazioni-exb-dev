@@ -507,16 +507,16 @@ async function signIn(): Promise<void> {
   window.dispatchEvent(new Event('gii:userLoaded'))
 }
 
-function switchAccountLikeStandardWidget(): Promise<any> | null {
-  if (window.jimuConfig.isInBuilder) return null
+function switchAccountLikeStandardWidget(): void {
+  if (window.jimuConfig.isInBuilder) return
 
   const sm: any = SessionManager.getInstance()
-  if (!sm?.getMainSession?.() || typeof sm?.switchAccount !== 'function') return null
+  if (!sm?.getMainSession?.() || typeof sm?.switchAccount !== 'function') return
 
-  // Stesso flusso del widget Login standard di Experience Builder 1.19.
-  // La Promise viene osservata soltanto per riallineare il profilo GII dopo
-  // che il popup nativo ha concluso il cambio o è stato annullato.
-  return Promise.resolve(sm.switchAccount())
+  // Comportamento identico al widget Login standard di Experience Builder 1.19:
+  // il clic apre soltanto il selettore nativo. La Promise non viene osservata e
+  // nessuno stato GII viene modificato prima della scelta effettiva dell'utente.
+  sm.switchAccount()
 }
 
 async function signOut(): Promise<void> {
@@ -2680,7 +2680,6 @@ export default function Widget(props: Props) {
   const locallyArchivedAlertKeysRef = React.useRef<Set<string>>(new Set())
   const alertsAuthTransitionRef = React.useRef(false)
   const profileSyncRetryTimerRef = React.useRef<number | null>(null)
-  const accountSwitchInProgressRef = React.useRef(false)
   const userRef = React.useRef<GiiUserRole | null>(null)
 
   React.useEffect(() => {
@@ -2772,10 +2771,6 @@ export default function Widget(props: Props) {
         if (cancelled || !esriId?.on) return
         try {
           hCreate = esriId.on('credential-create', () => {
-            // switchAccount() è gestito dal relativo handler: durante quel flusso
-            // IdentityManager può creare più credenziali intermedie.
-            if (accountSwitchInProgressRef.current) return
-
             const activeUsername = getActiveSessionUsername()
             const currentUsername = normalizeAuthUsername(userRef.current?.username)
 
@@ -3518,126 +3513,15 @@ export default function Widget(props: Props) {
     marginBottom:6
   }
 
-  const performSwitchAccount = async () => {
+  const performSwitchAccount = () => {
     setMenuOpen(false)
-    if (accountSwitchInProgressRef.current) return
 
-    const previousUsername = normalizeAuthUsername(userRef.current?.username)
-    if (profileSyncRetryTimerRef.current != null) {
-      window.clearTimeout(profileSyncRetryTimerRef.current)
-      profileSyncRetryTimerRef.current = null
-    }
-    setProfileSyncError('')
-    accountSwitchInProgressRef.current = true
-    alertsAuthTransitionRef.current = true
-    const switchPromise = switchAccountLikeStandardWidget()
-    if (!switchPromise) {
-      accountSwitchInProgressRef.current = false
-      alertsAuthTransitionRef.current = false
-      return
-    }
-
-    try { alertsAbortControllerRef.current?.abort() } catch { }
-    alertsAbortControllerRef.current = null
-    alertsBackgroundRefreshRef.current = null
-    setAlerts([])
-    setAlertsError('')
-    setAlertsOpen(false)
-    setAlertsLoading(false)
-
-    try {
-      await switchPromise
-
-      // Alla chiusura del popup il metodo nativo risolve anche in caso di Annulla.
-      // Attendiamo brevemente che SessionManager esponga l'identità definitiva.
-      let activeUsername = getActiveSessionUsername()
-      for (let i = 0; i < 20 && !activeUsername; i++) {
-        await new Promise(resolve => window.setTimeout(resolve, 50))
-        activeUsername = getActiveSessionUsername()
-      }
-
-      if (!activeUsername || activeUsername === previousUsername) {
-        // Annulla o stesso account: nessuna modifica al profilo corrente.
-        alertsAuthTransitionRef.current = false
-        alertsAbortControllerRef.current = new AbortController()
-        refreshAlerts()
-        return
-      }
-
-      setULoad(true)
-      let nextUser: GiiUserRole | null = null
-
-      for (let i = 0; i < 20; i++) {
-        clearGiiUserRoleCache()
-        const candidate = await loadUser()
-        const confirmedUsername = getActiveSessionUsername()
-        if (
-          candidate &&
-          confirmedUsername === activeUsername &&
-          normalizeAuthUsername(candidate.username) === activeUsername
-        ) {
-          nextUser = candidate
-          break
-        }
-        await new Promise(resolve => window.setTimeout(resolve, 100))
-        activeUsername = confirmedUsername || activeUsername
-      }
-
-      if (!nextUser) {
-        // Deleghiamo il recupero al refresh centralizzato, che applica i retry brevi,
-        // mostra l'errore esplicito e programma il fallback autonomo senza F5.
-        clearGiiUserRoleCache()
-        dispatchGiiUserLoaded({
-          source: 'header-switch-profile-retry',
-          reason: 'switch-account-profile-not-ready',
-          username: activeUsername
-        })
-        return
-      }
-
-      setUser(nextUser)
-      setULoad(false)
-      dispatchGiiUserLoaded({
-        source: 'header-boot',
-        reason: 'switch-account',
-        username: nextUser.username
-      })
-
-      try {
-        const tok = String(afterInRef.current || '').trim()
-        if (tok) gotoPage(tok)
-      } catch { }
-
-      // Un cambio account effettivo sostituisce la resource session ArcGIS mentre
-      // l'app corrente può avere ancora FeatureLayer, WebMap, datasource e promise
-      // creati con il profilo precedente. AbortController e reset React impediscono
-      // l'aggiornamento dello stato, ma non possono annullare in modo affidabile il
-      // caricamento/autenticazione interno già avviato dall'SDK. Se quelle risorse
-      // proseguono con il token del nuovo account, ExB apre il banner credenziali
-      // sulla vista autorizzata al vecchio ruolo.
-      //
-      // La configurazione prevedeva già il reload dopo logout/login, ma non veniva
-      // applicata al cambio account. Ora il confine di sessione è reale: dopo aver
-      // confermato il nuovo profilo e aver navigato alla pagina operativa, ricarichiamo
-      // l'app. Il ramo Annulla/stesso account resta invece non distruttivo e non passa
-      // mai da qui.
-      if (cfg.forceReloadAfterLogoutLogin !== false) {
-        window.setTimeout(() => {
-          try { window.location.reload() } catch { }
-        }, 0)
-        return
-      }
-
-      // Solo quando il reload è esplicitamente disabilitato, il useEffect dipendente
-      // da user crea il nuovo AbortController e sblocca gli allarmi in-place.
-    } catch {
-      alertsAuthTransitionRef.current = false
-      alertsAbortControllerRef.current = new AbortController()
-      setULoad(false)
-      refreshAlerts()
-    } finally {
-      accountSwitchInProgressRef.current = false
-    }
+    // Il clic non avvia alcuna transizione GII: niente reset, abort, refresh,
+    // navigazione o modifica del profilo. Se il popup viene annullato, lo stato
+    // dell'app resta quindi esattamente quello precedente. Il cambio reale viene
+    // rilevato esclusivamente dal listener credential-create già registrato,
+    // quando la sessione principale espone uno username effettivamente diverso.
+    switchAccountLikeStandardWidget()
   }
 
   // Disconnessione "pulita": se è configurata una pagina di destinazione diversa da
@@ -3889,10 +3773,7 @@ export default function Widget(props: Props) {
                       )}
 
                       <button type='button' disabled={signingIn}
-                        onClick={async () => {
-                          setSigning(true)
-                          try { setMenuOpen(false); await performSwitchAccount() } finally { setSigning(false) }
-                        }}
+                        onClick={performSwitchAccount}
                         style={menuItemBtnStyle}>
                         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                           <polyline points="17 1 21 5 17 9"/><path d="M3 11V9a4 4 0 0 1 4-4h14"/><polyline points="7 23 3 19 7 15"/><path d="M21 13v2a4 4 0 0 1-4 4H3"/>
