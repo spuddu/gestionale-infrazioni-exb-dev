@@ -16,6 +16,30 @@ export const NORMA3_REQ_POINT = new Set([
   'Art12', 'Art27', 'Art28', 'Art31', 'Art32', 'Art33', 'Art34', 'Art35', 'Art36', 'Art37', 'Art39'
 ])
 
+// Campi normalizzati esposti da GII_INFRAZIONI_VIEW_ALL per gli stessi articoli.
+// Questa lista deriva dalla stessa regola di NORMA3_REQ_POINT: non va mantenuta
+// separatamente dentro i widget cartografici.
+export const REQ_POINT_VIEW_FLAG_FIELDS = Array.from(NORMA3_REQ_POINT).map(code => {
+  const n = code.replace(/^Art/i, '')
+  return `v_art${n.padStart(2, '0')}`
+})
+
+/**
+ * Equivalente SQL di computeReqPoint() per GII_INFRAZIONI_VIEW_ALL.
+ *
+ * Nella vista gli articoli di norma_violata3 sono gia' normalizzati nei campi
+ * v_artXX; le quattro fattispecie dell'art. 15 restano invece nei due campi
+ * dedicati. Il campo persistito req_point non viene usato come fonte di verita'.
+ */
+export function buildReqPointSqlWhereClause (): string {
+  const norma3 = REQ_POINT_VIEW_FLAG_FIELDS.map(field => `${field} = 1`)
+  const art15 = [
+    `norma15_parziale IN ('Art15.1','Art15.2')`,
+    `norma15_totale IN ('Art15.3','Art15.4')`
+  ]
+  return `(${[...art15, ...norma3].join(' OR ')})`
+}
+
 // Whitelist degli articoli norma3 validi (stessa lista delle chiavi di NORMA3_TO_VFIELD in
 // gii-editing-ti — qui riportata a parte perché quella mappa serve anche ad altro, specifico
 // di editing-ti, e non va spostata per intero).

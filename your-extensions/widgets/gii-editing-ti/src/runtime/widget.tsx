@@ -4012,6 +4012,8 @@ function giiReadLayoutSidebarDefaultBoundaryX (host: HTMLElement | null): number
 function giiMoveNearestLayoutSidebarToX (host: HTMLElement | null, targetX: number | null): void {
   if (!host || targetX == null || !Number.isFinite(Number(targetX))) return
   try {
+    const currentX = giiReadLayoutSidebarBoundaryX(host)
+    if (currentX != null && Number.isFinite(Number(currentX)) && Math.abs(Number(currentX) - Number(targetX)) <= 2) return
     let cur: HTMLElement | null = host.parentElement
     while (cur && cur !== document.body) {
       if ((cur.className || '').includes('widget-sidebar-layout')) {
@@ -4026,16 +4028,24 @@ function giiMoveNearestLayoutSidebarToX (host: HTMLElement | null, targetX: numb
         const y = dr.top + dr.height / 2
         const fire = (target: EventTarget, type: string, x: number, buttons: number) => {
           const opts = { bubbles: true, cancelable: true, clientX: x, clientY: y, screenX: x, screenY: y, button: 0, buttons }
-          try { target.dispatchEvent(new PointerEvent(type, { ...opts, pointerId: 1, pointerType: 'mouse', isPrimary: true })) } catch {}
-          try { target.dispatchEvent(new MouseEvent(type.replace('pointer', 'mouse'), opts)) } catch {}
+          try {
+            if (typeof PointerEvent !== 'undefined') {
+              target.dispatchEvent(new PointerEvent(type, { ...opts, pointerId: 1, pointerType: 'mouse', isPrimary: true }))
+            } else {
+              target.dispatchEvent(new MouseEvent(type.replace('pointer', 'mouse'), opts))
+            }
+          } catch {}
         }
         fire(divider, 'pointerdown', startX, 1)
         const steps = 12
         for (let i = 1; i <= steps; i++) {
           const x = startX + ((Number(targetX) - startX) * i / steps)
-          fire(document, 'pointermove', x, 1)
+          // L'evento deve avere come target il divisore reale. Facendolo partire da
+          // document, il DnD di ExB riceve un target privo di rettangolo e può
+          // fallire con "Cannot read properties of undefined (reading 'left')".
+          fire(divider, 'pointermove', x, 1)
         }
-        fire(document, 'pointerup', Number(targetX), 0)
+        fire(divider, 'pointerup', Number(targetX), 0)
         return
       }
       cur = cur.parentElement
@@ -8372,16 +8382,21 @@ ${e?.message || String(e)}`
           datiTecniciUserDraggingRef.current = true
           const fire = (target: EventTarget, type: string, x: number, y: number, buttons: number): void => {
             const opts = { bubbles: true, cancelable: true, clientX: x, clientY: y, screenX: x, screenY: y, button: 0, buttons }
-            try { target.dispatchEvent(new PointerEvent(type, { ...opts, pointerId: 1, pointerType: 'mouse', isPrimary: true })) } catch {}
-            try { target.dispatchEvent(new MouseEvent(type.replace('pointer', 'mouse'), opts)) } catch {}
+            try {
+              if (typeof PointerEvent !== 'undefined') {
+                target.dispatchEvent(new PointerEvent(type, { ...opts, pointerId: 1, pointerType: 'mouse', isPrimary: true }))
+              } else {
+                target.dispatchEvent(new MouseEvent(type.replace('pointer', 'mouse'), opts))
+              }
+            } catch {}
           }
           // Pointerdown sul divisore ExB con le coordinate reali del mouse
           fire(divider, 'pointerdown', e.clientX, e.clientY, 1)
           const onMove = (me: MouseEvent): void => {
-            fire(document, 'pointermove', me.clientX, me.clientY, 1)
+            fire(divider, 'pointermove', me.clientX, me.clientY, 1)
           }
           const onUp = (me: MouseEvent): void => {
-            fire(document, 'pointerup', me.clientX, me.clientY, 0)
+            fire(divider, 'pointerup', me.clientX, me.clientY, 0)
             datiTecniciUserDraggingRef.current = false
             window.removeEventListener('mousemove', onMove)
             window.removeEventListener('mouseup', onUp)

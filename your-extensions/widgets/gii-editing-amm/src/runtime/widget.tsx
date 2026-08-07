@@ -2168,7 +2168,7 @@ async function readLayerFields (ds: any): Promise<LayerFieldInfo[]> {
 }
 
 
-async function refreshDs (ds: any): Promise<void> {
+async function refreshDs (ds: any, widgetId: string): Promise<void> {
   if (!ds) return
   let root = ds
   try { while (root?.belongToDataSource) root = root.belongToDataSource } catch { }
@@ -2179,10 +2179,10 @@ async function refreshDs (ds: any): Promise<void> {
   } catch { }
   for (const d of list) {
     try {
-      const q = d.getCurrentQueryParams?.() || null
+      const q = d.getCurrentQueryParams?.() || {}
       if (d.clearSourceRecords) d.clearSourceRecords()
       if (d.addVersion) d.addVersion()
-      if (d.load) { if (q) await d.load(q); else await d.load() }
+      if (d.load) await d.load(q, { widgetId, refresh: true })
     } catch { }
   }
 }
@@ -8110,7 +8110,7 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
       const nextRecordAttrs = { ...prevRecordAttrs, ...cleanAttrs }
       await upsertAmmCycleAudit(prevRecordAttrs, nextRecordAttrs, changedFieldNames)
       await deleteCurrentAmmActivitiesForRole('RI_AMM', nextRecordAttrs)
-      if (operationContextIsCurrent()) await refreshDs(active.ds)
+      if (operationContextIsCurrent()) await refreshDs(active.ds, props.id)
       if (!operationContextIsCurrent()) return
       const next = { ...nextRecordAttrs }
       setInitialDraft(next)
@@ -8320,7 +8320,7 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
         }
         const changedFieldNames = Object.keys(cleanAttrs).filter(k => k !== idName)
         await upsertAmmCycleAudit(prevRecordAttrs, { ...prevRecordAttrs, ...cleanAttrs }, changedFieldNames)
-        if (operationContextIsCurrent()) await refreshDs(active.ds)
+        if (operationContextIsCurrent()) await refreshDs(active.ds, props.id)
         if (!operationContextIsCurrent()) return
         const savedAttrs = { ...cleanAttrs }
         delete savedAttrs[idName]
@@ -8413,7 +8413,7 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
 
       const changedFieldNames = Object.keys(cleanAttrs).filter(k => k !== idName)
       if (changedFieldNames.length) await upsertAmmCycleAudit(prevRecordAttrs, { ...prevRecordAttrs, ...cleanAttrs }, changedFieldNames)
-      if (operationContextIsCurrent()) await refreshDs(active.ds)
+      if (operationContextIsCurrent()) await refreshDs(active.ds, props.id)
       if (!operationContextIsCurrent()) return true
       const savedAttrs = { ...cleanAttrs }
       delete savedAttrs[idName]
@@ -8554,7 +8554,7 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
           ts: Date.now()
         }, operationContextStamp)))
       } catch {}
-      await refreshDs(active.ds)
+      await refreshDs(active.ds, props.id)
       if (!isGiiPracticeContextStampCurrent(operationContextStamp)) return
       const next = { ...nextRecordAttrs }
       setInitialDraft(next)
@@ -8744,7 +8744,7 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
         throw new Error(detail)
       }
       await upsertAmmCycleAudit(prevRecordAttrs, { ...prevRecordAttrs, ...attrs }, Object.keys(attrs))
-      if (operationContextIsCurrent()) await refreshDs(active.ds)
+      if (operationContextIsCurrent()) await refreshDs(active.ds, props.id)
       if (!operationContextIsCurrent()) return
       const next = { ...(initialDraft || {}), ...attrs }
       const sharedSelectionLayerUrl = String(sessionStorage.getItem('GII_SELECTED_LAYER_URL') || '').trim()

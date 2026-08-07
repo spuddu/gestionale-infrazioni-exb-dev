@@ -26,6 +26,8 @@ export interface JsonOnlyQueryFormatOptions {
   urls: RegExp
   /** Etichetta leggibile usata esclusivamente nel warning diagnostico. */
   label: string
+  /** Correzione opzionale dei parametri prima che esri/request costruisca la richiesta. */
+  beforeRequest?: (params: any) => void
 }
 
 const REGISTRY_KEY = '__giiJsonOnlyQueryFormatInstallations'
@@ -66,14 +68,16 @@ export async function ensureJsonOnlyQueryFormat (
 
     // Deve precedere gli interceptor registrati da Experience Builder: inserire
     // in coda con push() rende inefficace la modifica dei metadati della risposta.
-    interceptors.splice(0, 0, {
+    const interceptor: any = {
       urls: options.urls,
       after: (response: any) => {
         if (response?.data?.supportedQueryFormats) {
           response.data.supportedQueryFormats = 'JSON'
         }
       }
-    })
+    }
+    if (options.beforeRequest) interceptor.before = options.beforeRequest
+    interceptors.splice(0, 0, interceptor)
   })().catch((error) => {
     // La Promise registrata non propaga l'errore ai chiamanti: il workaround non
     // deve impedire il normale flusso applicativo. La voce viene rimossa per
