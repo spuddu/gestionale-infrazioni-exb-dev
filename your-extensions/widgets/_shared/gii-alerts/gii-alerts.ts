@@ -10,7 +10,7 @@
  */
 
 import { ensureAttivitaCorrentiJsonOnlyQueryFormat } from './attivita-correnti-query-format-fix'
-import { isPracticeAssignedToCurrentTiAmm } from '../gii-access/ti-amm-assignment'
+import { buildTiAmmAssignmentWhereClause, isPracticeAssignedToCurrentTiAmm } from '../gii-access/ti-amm-assignment'
 
 export type GiiAlertType =
   | 'PAGAMENTO_SCADUTO'
@@ -132,6 +132,21 @@ export const GII_ALERT_FIELDS = [
   'rapporto',
   'num_rapporto',
   'origine_pratica',
+  'ti_assegnato_username',
+  'ti_assegnato_user',
+  'ti_assegnato',
+  'ti_assegnato_nome',
+  'ti_assegnato_name',
+  'created_user',
+  'Creator',
+  'creator',
+  'username',
+  'user_name',
+  'utente',
+  'utente_ins',
+  'created_by',
+  'submitter',
+  'owner',
   'ti_amm_assegnato_username',
   'ti_amm_assegnato_user',
   'ti_amm_assegnato',
@@ -810,6 +825,7 @@ export function computeGiiAlertsFromPractice (data: Record<string, any>, options
   const alerts: GiiAlertItem[] = []
 
   const roleAreaKeyForGate = roleAreaKeyForAlerts(data, options)
+  if (!practiceMatchesAlertUserScope(data, options?.user)) return alerts
   if (roleAreaKeyForGate === 'TI_AMM' && !isPracticeAssignedToCurrentTiAmm(data, options?.user)) return alerts
 
   const takeChargeAlert = computeTakeChargeAlert(data, { user: options?.user, log: options?.log || null })
@@ -1012,6 +1028,65 @@ async function makeFeatureLayer (url: string, signal?: AbortSignal): Promise<any
   return layer
 }
 
+/**
+ * Query REST diretta in JSON per le tabelle/viste leggere degli allarmi.
+ *
+ * Durante il cambio della resource session ExB 1.19 / JS API 4.34 puo' tentare
+ * di inizializzare un FeatureLayer mentre il registro delle credenziali e' in
+ * assestamento. Sulle viste delle ATTIVITA_CORRENTI questo puo' produrre
+ * internamente `_sanitizeUrl(null)` e quindi `toLowerCase` su null, pur con un
+ * URL applicativo corretto. Per le sole letture tabellari non serve costruire
+ * un FeatureLayer: interroghiamo direttamente l'endpoint /query tramite
+ * esri/request, forzando f=json e lasciando a ExB la gestione del token.
+ */
+async function queryAllRowsRest (
+  layerUrl: string,
+  query: any,
+  pageSize: number,
+  signal?: AbortSignal
+): Promise<Array<Record<string, any>>> {
+  const normalizedUrl = normalizeLayerUrlForAlerts(layerUrl)
+  if (!normalizedUrl) throw new Error('URL layer/tabella non configurato.')
+
+  throwIfGiiAborted(signal)
+  const esriRequest = await loadEsriModule<any>('esri/request')
+  throwIfGiiAborted(signal)
+
+  const rows: Array<Record<string, any>> = []
+  let start = 0
+  const size = Number.isFinite(Number(pageSize)) && Number(pageSize) > 0 ? Number(pageSize) : 1000
+
+  while (true) {
+    throwIfGiiAborted(signal)
+    const q: any = {
+      f: 'json',
+      where: '1=1',
+      outFields: '*',
+      returnGeometry: false,
+      ...query,
+      resultOffset: start,
+      resultRecordCount: size
+    }
+
+    if (Array.isArray(q.outFields)) q.outFields = q.outFields.join(',')
+    if (Array.isArray(q.orderByFields)) q.orderByFields = q.orderByFields.join(',')
+
+    const response = await esriRequest(`${normalizedUrl}/query`, {
+      query: q,
+      responseType: 'json',
+      ...(signal ? { signal } : {})
+    })
+    throwIfGiiAborted(signal)
+
+    const features = Array.isArray(response?.data?.features) ? response.data.features : []
+    features.forEach((feature: any) => rows.push({ ...(feature?.attributes || {}) }))
+    if (features.length < size) break
+    start += size
+  }
+
+  return rows
+}
+
 function alertOutFieldsForLayer (layer: any): string[] {
   const available = new Map<string, string>()
   ;(Array.isArray(layer?.fields) ? layer.fields : []).forEach((f: any) => {
@@ -1118,10 +1193,9 @@ async function loadAlertLogMap (rows: Array<Record<string, any>>, signal?: Abort
 export async function loadArchivedGiiAlertKeys (archiveTableUrl: string, username: string, signal?: AbortSignal): Promise<Set<string>> {
   const keys = new Set<string>()
   if (!archiveTableUrl || !String(username || '').trim()) return keys
-  const table = await makeFeatureLayer(archiveTableUrl, signal)
-  const rows = await queryAllRows(table, {
+  const rows = await queryAllRowsRest(archiveTableUrl, {
     where: `username='${escapeSqlString(username)}'`,
-    outFields: ['*'],
+    outFields: '*',
     returnGeometry: false
   }, 1000, signal)
   rows.forEach(r => {
@@ -1239,7 +1313,11 @@ function buildCurrentActivityWhere (user?: GiiUserProfileForAlerts, extraWhere?:
     const roleForSectorFilter = String(role || '').trim().toUpperCase()
     const mustMatchSector = roleForSectorFilter === 'TI' || roleForSectorFilter === 'RZ' || roleForSectorFilter === 'TR'
     if (settore && mustMatchSector) {
-      clauses.push(`(destinatario_settore IS NULL OR destinatario_settore = '' OR destinatario_settore = '${giiSqlString(settore)}')`)
+      // TI/RZ/TR sono ruoli settoriali: una riga senza destinatario_settore non
+      // può essere trattata come attività valida per qualunque distretto. Il
+      // precedente fallback NULL/vuoto faceva arrivare, ad esempio, attività di
+      // RZ_D1 anche a RZ_D2 durante il polling.
+      clauses.push(`UPPER(destinatario_settore) = '${giiSqlString(settore.toUpperCase())}'`)
     }
 
     if (Number.isFinite(ufficioNum)) {
@@ -1251,6 +1329,106 @@ function buildCurrentActivityWhere (user?: GiiUserProfileForAlerts, extraWhere?:
   if (extra) clauses.push(`(${extra})`)
 
   return clauses.length ? clauses.join(' AND ') : '1=1'
+}
+
+function buildPracticeAlertWhere (user?: GiiUserProfileForAlerts, extraWhere?: string): string {
+  const clauses: string[] = []
+  const key = roleAreaKeyForAlerts({}, { user })
+  const area = activityAreaForUser(user)
+  const settore = String(user?.settoreCod || '').trim().toUpperCase()
+  const username = String(user?.username || '').trim()
+
+  if (key === 'RZ_AGR' || key === 'RZ_TEC') {
+    // Le viste *_ALL sono d'area: il ruolo RZ deve essere ulteriormente chiuso
+    // sul proprio distretto/settore, altrimenti la riconciliazione background
+    // genera allarmi delle altre zone ogni ~30 secondi.
+    if (!area || !settore) clauses.push('1=0')
+    else clauses.push(`area_cod = '${giiSqlString(area)}' AND settore_cod = '${giiSqlString(settore)}'`)
+  } else if (key === 'TI_AGR' || key === 'TI_TEC') {
+    if (!area || !settore || !username) {
+      clauses.push('1=0')
+    } else {
+      // La vista *_ALL deve essere chiusa server-side almeno su area e settore.
+      // L'assegnazione al singolo TI viene verificata client-side sui campi che
+      // la vista espone realmente. Non inseriamo qui ti_assegnato_*/Creator:
+      // non tutte le viste tecniche espongono gli stessi alias e un solo nome
+      // campo assente fa fallire l'intera query periodica con HTTP 400, facendo
+      // comparire la campanella rossa a ogni riconciliazione background.
+      clauses.push(`area_cod = '${giiSqlString(area)}' AND settore_cod = '${giiSqlString(settore)}'`)
+    }
+  } else if (key === 'RI_AGR' || key === 'DT_AGR' || key === 'RI_TEC' || key === 'DT_TEC') {
+    if (!area) clauses.push('1=0')
+    else clauses.push(`area_cod = '${giiSqlString(area)}'`)
+  } else if (key === 'TI_AMM') {
+    clauses.push(buildTiAmmAssignmentWhereClause(user))
+  }
+
+  const extra = String(extraWhere || '').trim()
+  if (extra) clauses.push(`(${extra})`)
+  return clauses.length ? clauses.map(c => `(${c})`).join(' AND ') : '1=1'
+}
+
+function practiceMatchesAlertUserScope (data: Record<string, any>, user?: GiiUserProfileForAlerts): boolean {
+  const key = roleAreaKeyForAlerts(data, { user })
+  const userArea = activityAreaForUser(user)
+  const userSector = String(user?.settoreCod || '').trim().toUpperCase()
+  const practiceArea = normalizeAlertCode(attr(data, ['area_cod', 'area']))
+  const practiceSector = normalizeAlertCode(attr(data, ['settore_cod', 'settore']))
+
+  if (key === 'RZ_AGR' || key === 'RZ_TEC') {
+    return !!userArea && !!userSector && practiceArea === userArea && practiceSector === userSector
+  }
+
+  if (key === 'TI_AGR' || key === 'TI_TEC') {
+    if (!userArea || !userSector || practiceArea !== userArea || practiceSector !== userSector) return false
+
+    const meUser = String(user?.username || '').trim().toLowerCase()
+    const meName = String(user?.fullName || '').trim().toLowerCase()
+    if (!meUser && !meName) return false
+
+    const sameCurrentTi = (value: any): boolean => {
+      const candidate = String(value ?? '').trim().toLowerCase()
+      if (!candidate) return false
+      return (!!meUser && candidate === meUser) || (!!meName && candidate === meName)
+    }
+
+    // Le viste non sono perfettamente uniformi nei nomi dei campi di
+    // assegnazione. Usiamo gli stessi alias tollerati da elenco/dashboard.
+    const assignedValues = [
+      attr(data, ['ti_assegnato_username']),
+      attr(data, ['ti_assegnato_user']),
+      attr(data, ['ti_assegnato']),
+      attr(data, ['ti_assegnato_nome']),
+      attr(data, ['ti_assegnato_name'])
+    ]
+    const hasExplicitAssignment = assignedValues.some(v => String(v ?? '').trim() !== '')
+    if (hasExplicitAssignment) return assignedValues.some(sameCurrentTi)
+
+    // Per le pratiche originate direttamente dal TI, prima dell'eventuale
+    // valorizzazione dei campi ti_assegnato_* l'identità è ricavabile dai
+    // campi creator. Se nessuno di questi è esposto/valorizzato non allarghiamo
+    // la visibilità: fail-closed, così un TI non riceve allarmi di un collega.
+    const creatorValues = [
+      attr(data, ['created_user']),
+      attr(data, ['Creator']),
+      attr(data, ['creator']),
+      attr(data, ['username']),
+      attr(data, ['user_name']),
+      attr(data, ['utente']),
+      attr(data, ['utente_ins']),
+      attr(data, ['created_by']),
+      attr(data, ['submitter']),
+      attr(data, ['owner'])
+    ]
+    return creatorValues.some(sameCurrentTi)
+  }
+
+  if (key === 'RI_AGR' || key === 'DT_AGR' || key === 'RI_TEC' || key === 'DT_TEC') {
+    return !!userArea && practiceArea === userArea
+  }
+
+  if (key === 'TI_AMM') return isPracticeAssignedToCurrentTiAmm(data, user)
+  return true
 }
 
 function severityFromActivityPriority (value: any): GiiAlertSeverity {
@@ -1322,35 +1500,12 @@ export async function queryGiiCurrentActivities (options: GiiCurrentActivityQuer
 
   return await runLatestGiiQuery(giiCurrentActivityQuerySlots, scope, async () => {
     await ensureAttivitaCorrentiJsonOnlyQueryFormat()
-    const activityLayer = await makeFeatureLayer(options.activityLayerUrl, options.signal)
     const pageSize = Number.isFinite(Number(options.pageSize)) && Number(options.pageSize) > 0 ? Number(options.pageSize) : 100
-    const rows = await queryAllRows(activityLayer, {
+    const rows = await queryAllRowsRest(options.activityLayerUrl, {
       where: buildCurrentActivityWhere(options.user, options.where),
-      outFields: [
-        'OBJECTID',
-        'GlobalID',
-        'chiave_attivita',
-        'parent_globalid',
-        'parent_objectid',
-        'numero_rapporto',
-        'tipo_attivita',
-        'sottotipo_attivita',
-        'titolo',
-        'messaggio',
-        'destinatario_ruolo',
-        'destinatario_area',
-        'destinatario_settore',
-        'destinatario_ufficio_id',
-        'destinatario_ufficio_zona',
-        'destinatario_username',
-        'origine_evento',
-        'priorita',
-        'data_attivazione',
-        'creato_il',
-        'creato_da',
-        'aggiornato_il',
-        'aggiornato_da'
-      ],
+      // Usiamo * intenzionalmente: le viste per area non devono essere rese
+      // fragili da differenze marginali di schema tra AGR/TEC/AMM.
+      outFields: '*',
       orderByFields: ['data_attivazione DESC', 'OBJECTID DESC'],
       returnGeometry: false
     }, pageSize, options.signal)
@@ -1391,7 +1546,7 @@ export async function queryGiiAlerts (options: GiiAlertQueryOptions): Promise<Gi
     const practiceLayer = await makeFeatureLayer(options.practiceLayerUrl, options.signal)
     const pageSize = Number.isFinite(Number(options.pageSize)) && Number(options.pageSize) > 0 ? Number(options.pageSize) : 1000
     const rows = await queryAllRows(practiceLayer, {
-      where: options.where || '1=1',
+      where: buildPracticeAlertWhere(options.user, options.where),
       outFields: alertOutFieldsForLayer(practiceLayer),
       returnGeometry: false
     }, pageSize, options.signal)

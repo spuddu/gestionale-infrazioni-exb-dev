@@ -1,6 +1,6 @@
 /** @jsx jsx */
 /** @jsxFrag React.Fragment */
-import { React, jsx, css, type AllWidgetProps } from 'jimu-core'
+import { React, jsx, css, DataSourceManager, type AllWidgetProps } from 'jimu-core'
 import { createPortal } from 'react-dom'
 import { JimuMapViewComponent, type JimuMapView } from 'jimu-arcgis'
 import type { IMConfig } from '../config'
@@ -99,7 +99,10 @@ function buildWherePratica(pv: PraticaValues): { where: string | null; hasUserCr
   if (numClause) clauses.push(numClause)
   if (pv.articolo) { const art = ARTICOLI_PRATICA.find(a => a.id === pv.articolo); if (art) clauses.push(`(${art.whereClause})`) }
   if (!clauses.length) return { where: null, hasUserCriteria: false }
-  return { where: ['req_point = 1', ...clauses].join(' AND '), hasUserCriteria: true }
+  // req_point non e' una fonte di verita' affidabile per le pratiche Survey: puo'
+  // essere vuoto/non aggiornato fino alla prima modifica del TI. La ricerca in mappa
+  // non deve quindi escludere una pratica sulla base del solo campo salvato.
+  return { where: clauses.join(' AND '), hasUserCriteria: true }
 }
 const COLLATOR = new Intl.Collator('it', { numeric: true, sensitivity: 'base' })
 
@@ -368,35 +371,48 @@ function buildRoleVisibilityWhereClause (user: ReturnType<typeof readGiiUserForM
 
   // I campi stato_*/esito_* sono interi: confrontarli con la stringa vuota
   // produce query 400 (in particolare nel formato PBF usato dal MapView).
-  // Per i campi numerici è sufficiente IS NOT NULL; i due campi della
-  // determinazione sono stringhe e mantengono anche il controllo <> ''.
+  // I campi numerici non vanno confrontati con la stringa vuota, ma il solo
+  // IS NOT NULL non basta: il valore 0 indica nodo non attivo. I campi della
+  // determinazione sono testuali e mantengono invece il controllo <> ''.
   const faseSanzionatoriaClause =
-    "(stato_RI_AMM IS NOT NULL OR " +
-    "esito_RI_AMM IS NOT NULL OR " +
-    "stato_TI_AMM IS NOT NULL OR " +
-    "esito_TI_AMM IS NOT NULL OR " +
+    "((stato_RI_AMM IS NOT NULL AND stato_RI_AMM <> 0) OR " +
+    "(esito_RI_AMM IS NOT NULL AND esito_RI_AMM <> 0) OR " +
+    "(stato_TI_AMM IS NOT NULL AND stato_TI_AMM <> 0) OR " +
+    "(esito_TI_AMM IS NOT NULL AND esito_TI_AMM <> 0) OR " +
     "(determinazione_stato IS NOT NULL AND determinazione_stato <> '') OR " +
     "(determinazione_numero IS NOT NULL AND determinazione_numero <> ''))"
 
+  // area_cod identifica l'area tecnica originaria della pratica e non viene
+  // trasformato in AMM al passaggio alla fase sanzionatoria. Per i ruoli AMM
+  // il gate corretto è quindi la presenza di dati amministrativi significativi.
   if (role === 'DA' || role === 'RI_AMM') {
-    return `area_cod = 'AMM' AND ${faseSanzionatoriaClause}`
+    return faseSanzionatoriaClause
   }
 
   if (role === 'TI_AMM') {
-    return `area_cod = 'AMM' AND ${faseSanzionatoriaClause} AND ${buildTiAmmAssignmentWhereClause(user)}`
+    return `${faseSanzionatoriaClause} AND ${buildTiAmmAssignmentWhereClause(user)}`
   }
 
   if ((role === 'RI' || role === 'DT') && (area === 'AGR' || area === 'TEC')) {
-    return `area_cod = '${area}'`
+    return `UPPER(area_cod) = '${area}'`
   }
 
   if (role === 'RZ' && (area === 'AGR' || area === 'TEC') && settore) {
-    return `area_cod = '${area}' AND settore_cod = '${settore}'`
+    return `UPPER(area_cod) = '${area}' AND UPPER(settore_cod) = '${settore}'`
   }
 
-  if (role === 'TI' && (area === 'AGR' || area === 'TEC')) {
-    const settoreClause = settore ? ` AND settore_cod = '${settore}'` : ''
-    return `area_cod = '${area}'${settoreClause} AND (UPPER(ti_assegnato_username) = UPPER('${me}') OR ((ti_assegnato_username IS NULL OR ti_assegnato_username = '') AND (UPPER(created_user) = UPPER('${me}') OR UPPER(Creator) = UPPER('${me}'))))`
+  if (role === 'TI' && (area === 'AGR' || area === 'TEC') && settore) {
+    // GII_INFRAZIONI_VIEW_ALL espone Creator ma non created_user. Inoltre la
+    // visibilità deve replicare l'elenco: una rilevazione TR è visibile al TI
+    // soltanto dopo assegnazione nominativa; una rilevazione nata dal TI resta
+    // al suo autore finché non esiste un'assegnazione esplicita, che prevale.
+    const assigned = `UPPER(ti_assegnato_username) = UPPER('${me}')`
+    const notAssigned = `(ti_assegnato_username IS NULL OR ti_assegnato_username = '')`
+    const createdByMe = `UPPER(Creator) = UPPER('${me}')`
+    const tiScope =
+      `((origine_pratica = 1 AND ${assigned}) OR ` +
+      `(origine_pratica = 2 AND (${assigned} OR (${notAssigned} AND ${createdByMe}))))`
+    return `UPPER(area_cod) = '${area}' AND UPPER(settore_cod) = '${settore}' AND ${tiScope}`
   }
 
   // Profilo non riconosciuto: fail closed. Finché lo Header non pubblica un profilo
@@ -404,23 +420,6 @@ function buildRoleVisibilityWhereClause (user: ReturnType<typeof readGiiUserForM
   return '1=0'
 }
 
-
-const giiMapBaseDefinitionExpressions = new WeakMap<object, string>()
-
-function getGiiMapBaseDefinitionExpression (layer: any): string {
-  if (!layer || (typeof layer !== 'object' && typeof layer !== 'function')) return ''
-  const cached = giiMapBaseDefinitionExpressions.get(layer)
-  if (cached !== undefined) return cached
-  const sourceExpression = txt(
-    layer?.sourceJSON?.layerDefinition?.definitionExpression ||
-    layer?.sourceJSON?.definitionExpression ||
-    layer?.layerDefinition?.definitionExpression ||
-    layer?.definitionExpression ||
-    ''
-  ).trim()
-  giiMapBaseDefinitionExpressions.set(layer, sourceExpression)
-  return sourceExpression
-}
 
 function combineGiiMapVisibilityWhere (baseWhere: string, roleWhere: string): string {
   const base = txt(baseWhere).trim()
@@ -443,12 +442,65 @@ function getGiiMapVisibilityUserKey (): string {
   ].join('|')
 }
 
+function isGiiInfrazioniBaseLayer (layer: any): boolean {
+  const u = txt(layer?.url || layer?.sourceJSON?.url || '').toUpperCase()
+  return u.includes('GII_INFRAZIONI_VIEW_ALL')
+}
+
 function findGiiInfrazioniBaseLayer (view: any): any {
   const layers = collectMapLayers(view)
-  return layers.find((l: any) => {
-    const u = txt(l?.url || l?.sourceJSON?.url || '').toUpperCase()
-    return u.includes('GII_INFRAZIONI_VIEW_ALL')
-  }) || null
+  return layers.find((l: any) => isGiiInfrazioniBaseLayer(l)) || null
+}
+
+function clearGiiInfrazioniLegacyDisplayFilter (layer: any): void {
+  if (!layer) return
+  // Il WebMap puo' conservare un displayFilter basato su `req_point <> 0`. Quel
+  // campo non e' affidabile per le pratiche appena arrivate da Survey e, inoltre,
+  // il filtro non deve sovrapporsi al perimetro applicativo gestito dal widget.
+  try {
+    if ('displayFilterInfo' in layer && layer.displayFilterInfo) layer.displayFilterInfo = null
+  } catch {}
+}
+
+async function getGiiInfrazioniLayerDataSource (jimuMapView: JimuMapView | null | undefined, baseLayer: any): Promise<any | null> {
+  if (!jimuMapView || !baseLayer) return null
+  try { await (jimuMapView as any).whenAllJimuLayerViewLoaded?.() } catch {}
+  try {
+    if ((jimuMapView as any).isDestroyed?.()) return null
+    const allJimuLayerViews: any[] = (jimuMapView as any).getAllJimuLayerViews?.() || []
+    const jimuLayerView = allJimuLayerViews.find((jlv: any) =>
+      jlv?.layer === baseLayer || isGiiInfrazioniBaseLayer(jlv?.layer)
+    )
+    const dataSourceId = txt(jimuLayerView?.layerDataSourceId).trim()
+    if (!dataSourceId) return null
+
+    const dsm: any = DataSourceManager.getInstance()
+    let ds: any = dsm.getDataSource?.(dataSourceId) || null
+    if (!ds) {
+      const mapDs: any = (jimuMapView as any).getMapDataSource?.()
+      try { await mapDs?.childDataSourcesReady?.() } catch {}
+      ds = dsm.getDataSource?.(dataSourceId) || null
+      if (!ds && typeof mapDs?.createDataSourceById === 'function') {
+        try { ds = await mapDs.createDataSourceById(dataSourceId) } catch {}
+      }
+    }
+    return ds || null
+  } catch {
+    return null
+  }
+}
+
+function clearGiiMapDataSourceSelection (ds: any): void {
+  if (!ds) return
+  try { ds.selectRecordsByIds?.([]) } catch {}
+  try { ds.clearSelection?.() } catch {}
+  try {
+    const mainDs = ds.getMainDataSource?.()
+    if (mainDs && mainDs !== ds) {
+      try { mainDs.selectRecordsByIds?.([]) } catch {}
+      try { mainDs.clearSelection?.() } catch {}
+    }
+  } catch {}
 }
 
 function findMapLayer(view: any, search: MapSearchConfig): any {
@@ -636,6 +688,7 @@ export default function Widget(props: Props) {
 
   const [activeSearchId, setActiveSearchId] = React.useState(selectedInitial)
   const activeSearch = searches.find(s => s.id === activeSearchId) || searches[0] || null
+  const [jimuMapView, setJimuMapView] = React.useState<JimuMapView | null>(null)
   const [mapView, setMapView] = React.useState<any>(null)
   const [layer, setLayer] = React.useState<any>(null)
   const [layerForSearchId, setLayerForSearchId] = React.useState<string>('')
@@ -647,6 +700,7 @@ export default function Widget(props: Props) {
   const requestRef = React.useRef(0)
   const highlightRef = React.useRef<any>(null)
   const graphicIdsRef = React.useRef<any[]>([])
+  const mapVisibilityApplyRef = React.useRef(0)
 
   React.useEffect(() => {
     if (!activeSearchId && searches[0]?.id) setActiveSearchId(searches[0].id)
@@ -672,25 +726,63 @@ export default function Widget(props: Props) {
   const [mapVisibilityUserKey, setMapVisibilityUserKey] = React.useState(() => getGiiMapVisibilityUserKey())
 
   React.useEffect(() => {
-    const syncVisibilityUser = () => setMapVisibilityUserKey(getGiiMapVisibilityUserKey())
+    const syncVisibilityUser = () => {
+      // Al cambio profilo la selezione del precedente account non deve sopravvivere
+      // né nella mappa né nella FeatureTable collegata allo stesso DataSource.
+      try { (jimuMapView as any)?.clearSelectedFeatures?.() } catch {}
+      setMapVisibilityUserKey(getGiiMapVisibilityUserKey())
+    }
     syncVisibilityUser()
     window.addEventListener('gii:userLoaded', syncVisibilityUser)
     return () => window.removeEventListener('gii:userLoaded', syncVisibilityUser)
-  }, [])
+  }, [jimuMapView])
 
   React.useEffect(() => {
-    if (!mapView) return
-    try {
-      const baseLayer = findGiiInfrazioniBaseLayer(mapView)
-      if (!baseLayer) return
-      const baseWhere = getGiiMapBaseDefinitionExpression(baseLayer)
-      const roleWhere = buildRoleVisibilityWhereClause(readGiiUserForMapVisibility())
-      const nextWhere = combineGiiMapVisibilityWhere(baseWhere, roleWhere)
-      if (txt(baseLayer.definitionExpression).trim() !== nextWhere) {
-        baseLayer.definitionExpression = nextWhere
+    const currentApply = ++mapVisibilityApplyRef.current
+    const roleWhere = buildRoleVisibilityWhereClause(readGiiUserForMapVisibility())
+    let cancelled = false
+
+    const applyVisibility = async () => {
+      const jmv = jimuMapView
+      if (!jmv || (jmv as any).isDestroyed?.()) return
+
+      try { (jmv as any).clearSelectedFeatures?.() } catch {}
+
+      // Applica subito il filtro al layer cartografico, quando già disponibile.
+      // Questo evita che durante il cambio account restino visibili feature del
+      // profilo precedente mentre Experience Builder ricrea la resource session.
+      let baseLayer = findGiiInfrazioniBaseLayer((jmv as any).view)
+      if (baseLayer) {
+        clearGiiInfrazioniLegacyDisplayFilter(baseLayer)
+        // La WebMap "Infrazioni" può conservare una definitionExpression salvata
+        // durante precedenti prove/configurazioni. Non va ereditata: il perimetro
+        // visibile deve essere determinato esclusivamente dal profilo GII corrente.
+        if (txt(baseLayer.definitionExpression).trim() !== roleWhere) baseLayer.definitionExpression = roleWhere
       }
-    } catch { /* nessun layer di base trovato: nessuna modifica */ }
-  }, [mapView, mapVisibilityUserKey])
+
+      // La Table standard non legge layer.definitionExpression: usa il child
+      // FeatureLayerDataSource del WebMap. Per questo lo stesso filtro deve essere
+      // pubblicato anche sul DataSource ExB tramite updateQueryParams().
+      try { await (jmv as any).whenAllJimuLayerViewLoaded?.() } catch {}
+      if (cancelled || currentApply !== mapVisibilityApplyRef.current || (jmv as any).isDestroyed?.()) return
+
+      baseLayer = findGiiInfrazioniBaseLayer((jmv as any).view)
+      if (!baseLayer) return
+
+      clearGiiInfrazioniLegacyDisplayFilter(baseLayer)
+      if (txt(baseLayer.definitionExpression).trim() !== roleWhere) baseLayer.definitionExpression = roleWhere
+
+      const ds = await getGiiInfrazioniLayerDataSource(jmv, baseLayer)
+      if (cancelled || currentApply !== mapVisibilityApplyRef.current || (jmv as any).isDestroyed?.()) return
+      if (!ds) return
+
+      clearGiiMapDataSourceSelection(ds)
+      try { ds.updateQueryParams?.({ where: roleWhere }, props.id) } catch {}
+    }
+
+    void applyVisibility()
+    return () => { cancelled = true }
+  }, [jimuMapView, mapView, mapVisibilityUserKey, props.id])
 
   React.useEffect(() => {
     let cancelled = false
@@ -801,7 +893,10 @@ export default function Widget(props: Props) {
     if (isPratica) {
       const result = buildWherePratica(praticaValues)
       if (!result.hasUserCriteria) { setStatus({ kind: 'warn', text: 'Impostare almeno un criterio di ricerca.' }); return }
-      where = result.where!
+      // Anche la ricerca libera deve rispettare il perimetro del profilo corrente:
+      // se durante la ricostruzione del MapView si usa temporaneamente un FeatureLayer
+      // creato dall'URL, la query non deve poter restituire pratiche fuori competenza.
+      where = combineGiiMapVisibilityWhere(result.where!, buildRoleVisibilityWhereClause(readGiiUserForMapVisibility()))
     } else {
     const invalidFields = missingConfiguredFields(layer, activeSearch)
     if (invalidFields.length) {
@@ -940,7 +1035,7 @@ export default function Widget(props: Props) {
   return (
     <div css={styles}>
       <div className='giiMapSearchWrap'>
-        {mapWidgetId && <JimuMapViewComponent useMapWidgetId={mapWidgetId} onActiveViewChange={(jmv: JimuMapView) => setMapView(jmv?.view || null)} />}
+        {mapWidgetId && <JimuMapViewComponent useMapWidgetId={mapWidgetId} onActiveViewChange={(jmv: JimuMapView) => { setJimuMapView(jmv || null); setMapView(jmv?.view || null) }} />}
         {searches.length === 0 && <div style={{ fontSize: 12, color: c.label, padding: '8px' }}>Nessuna ricerca configurata</div>}
         {activeSearch && isPratica && (
           <React.Fragment>

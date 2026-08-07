@@ -5,6 +5,7 @@ import type { IMConfig } from '../config'
 import { defaultConfig } from '../config'
 import { queryGiiAlerts, queryGiiCurrentActivities, archiveGiiAlert, getGiiAlertBellTone, isGiiTakeChargeAlert, summarizeGiiAlerts, type GiiAlertItem, type GiiAlertQueryResult } from '../../../_shared/gii-alerts/gii-alerts'
 import { ensureAttivitaCorrentiJsonOnlyQueryFormat } from '../../../_shared/gii-alerts/attivita-correnti-query-format-fix'
+import { ensureInfrazioniViewAllJsonOnlyQueryFormat } from '../../../_shared/gii-map/infrazioni-query-format-fix'
 import { stampGiiPracticePayload, syncGiiPracticeContextUsername, writeGiiPracticeSelectionContext } from '../../../_shared/gii-selection/practice-context'
 
 const GII_PORTAL     = 'https://cbsm-hub.maps.arcgis.com'
@@ -174,6 +175,199 @@ function getActiveSessionUsername (): string {
 
   return ''
 }
+
+function decodeBase64Vlq (segment: string): number[] {
+  const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/'
+  const out: number[] = []
+  let value = 0
+  let shift = 0
+  for (let i = 0; i < segment.length; i++) {
+    const digit = chars.indexOf(segment[i])
+    if (digit < 0) continue
+    const continuation = (digit & 32) !== 0
+    const payload = digit & 31
+    value += payload << shift
+    if (continuation) {
+      shift += 5
+      continue
+    }
+    const negative = (value & 1) === 1
+    const decoded = value >> 1
+    out.push(negative ? -decoded : decoded)
+    value = 0
+    shift = 0
+  }
+  return out
+}
+
+function resolveSourceMapPosition (map: any, generatedLine1: number, generatedColumn: number): any {
+  try {
+    const mappings = String(map?.mappings || '')
+    if (!mappings) return null
+    const lines = mappings.split(';')
+    const targetLine = Math.max(0, generatedLine1 - 1)
+    let sourceIndex = 0
+    let originalLine = 0
+    let originalColumn = 0
+    let nameIndex = 0
+    let best: any = null
+
+    for (let lineIndex = 0; lineIndex <= targetLine && lineIndex < lines.length; lineIndex++) {
+      let generatedCol = 0
+      const segments = lines[lineIndex] ? lines[lineIndex].split(',') : []
+      for (const seg of segments) {
+        if (!seg) continue
+        const vals = decodeBase64Vlq(seg)
+        if (!vals.length) continue
+        generatedCol += vals[0]
+        if (vals.length >= 4) {
+          sourceIndex += vals[1]
+          originalLine += vals[2]
+          originalColumn += vals[3]
+          if (vals.length >= 5) nameIndex += vals[4]
+          if (lineIndex === targetLine && generatedCol <= generatedColumn) {
+            best = {
+              generatedLine: lineIndex + 1,
+              generatedColumn: generatedCol,
+              sourceIndex,
+              originalLine: originalLine + 1,
+              originalColumn,
+              nameIndex
+            }
+          }
+        }
+        if (lineIndex === targetLine && generatedCol > generatedColumn) break
+      }
+    }
+    return best
+  } catch {
+    return null
+  }
+}
+
+async function inspectGiiWidthErrorSource (filename: string, lineno: number, colno: number): Promise<void> {
+  try {
+    if (!filename) return
+    const response = await fetch(filename, { cache: 'no-store' })
+    const sourceText = await response.text()
+    const lines = sourceText.split(/\r?\n/)
+    const line = lines[Math.max(0, lineno - 1)] || ''
+    const zeroCol = Math.max(0, (colno || 1) - 1)
+    const from = Math.max(0, zeroCol - 900)
+    const to = Math.min(line.length, zeroCol + 900)
+    const generatedContext = line.slice(from, to)
+    console.error('[GII-WIDTH-SOURCE-GENERATED] ' + JSON.stringify({
+      filename,
+      lineno,
+      colno,
+      lineLength: line.length,
+      sliceFrom: from,
+      sliceTo: to,
+      context: generatedContext
+    }))
+
+    const tail = sourceText.slice(-5000)
+    const smMatch = tail.match(/(?:\/\/#|\/\*#)\s*sourceMappingURL\s*=\s*([^\s*]+)(?:\s*\*\/)?/)
+    if (!smMatch?.[1]) {
+      console.error('[GII-WIDTH-SOURCEMAP] sourceMappingURL non trovato')
+      return
+    }
+
+    const mapUrl = new URL(smMatch[1], filename).href
+    const mapResponse = await fetch(mapUrl, { cache: 'no-store' })
+    const map = await mapResponse.json()
+    const pos = resolveSourceMapPosition(map, lineno, zeroCol)
+    if (!pos) {
+      console.error('[GII-WIDTH-SOURCEMAP] ' + JSON.stringify({ mapUrl, resolved: false }))
+      return
+    }
+
+    const sourceName = Array.isArray(map.sources) ? map.sources[pos.sourceIndex] : ''
+    const sourceContent = Array.isArray(map.sourcesContent) ? map.sourcesContent[pos.sourceIndex] : ''
+    const names = Array.isArray(map.names) ? map.names : []
+    const name = names[pos.nameIndex] || ''
+    const originalLines = String(sourceContent || '').split(/\r?\n/)
+    const firstLine = Math.max(1, pos.originalLine - 12)
+    const lastLine = Math.min(originalLines.length, pos.originalLine + 12)
+    const contextLines: string[] = []
+    for (let i = firstLine; i <= lastLine; i++) {
+      contextLines.push(`${i}${i === pos.originalLine ? ' >>> ' : '     '}${originalLines[i - 1] || ''}`)
+    }
+
+    console.error('[GII-WIDTH-SOURCEMAP] ' + JSON.stringify({
+      mapUrl,
+      resolved: true,
+      sourceName,
+      name,
+      generatedLine: lineno,
+      generatedColumn: zeroCol,
+      originalLine: pos.originalLine,
+      originalColumn: pos.originalColumn,
+      context: contextLines.join('\n')
+    }))
+  } catch (e) {
+    console.error('[GII-WIDTH-SOURCE-ERROR] ' + String(e))
+  }
+}
+
+function installGiiWidthErrorTrace (): void {
+  try {
+    const w: any = window as any
+    if (w.__giiWidthErrorTraceInstalled) return
+    w.__giiWidthErrorTraceInstalled = true
+
+    const describeElement = (id: string): any => {
+      try {
+        const el = (document.getElementById(id) || document.querySelector(`[data-widgetid="${id}"]`)) as HTMLElement | null
+        if (!el) return { id, found: false }
+        const rect = el.getBoundingClientRect()
+        const cs = window.getComputedStyle(el)
+        return {
+          id,
+          found: true,
+          tag: el.tagName,
+          className: String(el.className || ''),
+          rect: {
+            x: Math.round(rect.x), y: Math.round(rect.y),
+            width: Math.round(rect.width), height: Math.round(rect.height)
+          },
+          display: cs.display,
+          visibility: cs.visibility,
+          overflow: cs.overflow,
+          position: cs.position
+        }
+      } catch (e) {
+        return { id, found: false, error: String(e) }
+      }
+    }
+
+    window.addEventListener('error', (ev: ErrorEvent) => {
+      try {
+        const message = String(ev?.message || ev?.error?.message || '')
+        if (!message.includes("setting 'width'") && !message.includes('setting "width"')) return
+        const payload = {
+          at: new Date().toISOString(),
+          message,
+          filename: ev.filename || '',
+          lineno: ev.lineno || 0,
+          colno: ev.colno || 0,
+          stack: String(ev?.error?.stack || ''),
+          href: window.location.href,
+          widgets: [
+            describeElement('widget_1435'),
+            describeElement('widget_1445'),
+            describeElement('widget_1446'),
+            describeElement('widget_1018')
+          ]
+        }
+        console.error('[GII-WIDTH-TRACE-JSON] ' + JSON.stringify(payload))
+        void inspectGiiWidthErrorSource(payload.filename, payload.lineno, payload.colno)
+      } catch { }
+    }, true)
+  } catch { }
+}
+
+installGiiWidthErrorTrace()
 
 function clearGiiUserRoleCache (): void {
   try { delete (window as any).__giiUserRole } catch { (window as any).__giiUserRole = null }
@@ -506,7 +700,11 @@ async function signIn(): Promise<void> {
   window.dispatchEvent(new Event('gii:userLoaded'))
 }
 
-function switchAccountWithoutRevokingCurrentSession(): Promise<any> | null {
+function switchAccountWithoutRevokingCurrentSession(
+  previousUsername: string,
+  beforeDifferentSessionInstall?: () => Promise<void>,
+  afterDifferentSessionInstalled?: (incomingUsername: string) => Promise<void>
+): Promise<any> | null {
   if (window.jimuConfig.isInBuilder) return null
 
   const sm: any = SessionManager.getInstance()
@@ -516,10 +714,64 @@ function switchAccountWithoutRevokingCurrentSession(): Promise<any> | null {
   // corrente appena il flusso viene avviato, quindi anche Annulla lascia
   // l'app senza una sessione valida. Un nuovo sign-in forzato in popup
   // conserva invece la sessione corrente fino al completamento dell'OAuth.
-  return Promise.resolve(sm.signIn({
-    popup: true,
-    forceLogin: true
-  }))
+  //
+  // IMPORTANTE: signIn() registra la nuova resource session PRIMA di risolvere
+  // la Promise. Per poter smontare Mappa/Tabella soltanto quando l'utente ha
+  // davvero scelto un account differente, intercettiamo temporaneamente
+  // addOrReplaceSession(): se lo username in arrivo cambia, eseguiamo prima il
+  // callback (navigazione alla Home + attesa smontaggio) e soltanto dopo
+  // permettiamo a SessionManager di installare la nuova sessione.
+  const originalAddOrReplaceSession = typeof sm?.addOrReplaceSession === 'function'
+    ? sm.addOrReplaceSession
+    : null
+  let wrappedAddOrReplaceSession: any = null
+  let beforeInstallPromise: Promise<void> | null = null
+
+  if (originalAddOrReplaceSession && beforeDifferentSessionInstall) {
+    wrappedAddOrReplaceSession = function (session: any, ...args: any[]) {
+      const incomingUsername = normalizeAuthUsername(
+        session?.username || session?.user?.username || session?.portalUser?.username
+      )
+      const isDifferentAccount = !!incomingUsername && !!previousUsername && incomingUsername !== previousUsername
+
+      if (!isDifferentAccount) {
+        return originalAddOrReplaceSession.apply(this, [session, ...args])
+      }
+
+      if (!beforeInstallPromise) {
+        beforeInstallPromise = Promise.resolve().then(() => beforeDifferentSessionInstall())
+      }
+
+      return beforeInstallPromise.then(() => {
+        const nativeResult = originalAddOrReplaceSession.apply(this, [session, ...args])
+        return Promise.resolve(nativeResult).then(async (nativeValue: any) => {
+          if (afterDifferentSessionInstalled) {
+            await afterDifferentSessionInstalled(incomingUsername)
+          }
+          return nativeValue
+        })
+      })
+    }
+    sm.addOrReplaceSession = wrappedAddOrReplaceSession
+  }
+
+  const restoreInterceptor = () => {
+    try {
+      if (wrappedAddOrReplaceSession && sm.addOrReplaceSession === wrappedAddOrReplaceSession) {
+        sm.addOrReplaceSession = originalAddOrReplaceSession
+      }
+    } catch { }
+  }
+
+  try {
+    return Promise.resolve(sm.signIn({
+      popup: true,
+      forceLogin: true
+    })).finally(restoreInterceptor)
+  } catch (e) {
+    restoreInterceptor()
+    return Promise.reject(e)
+  }
 }
 
 async function signOut(): Promise<void> {
@@ -2638,6 +2890,13 @@ export default function Widget(props: Props) {
   React.useEffect(() => { afterOutRef.current = String(cfg.redirectAfterSignOut ?? '') }, [cfg.redirectAfterSignOut])
   React.useEffect(() => { signedInClickRef.current = (cfg.signedInClick ?? 'signout') as any }, [cfg.signedInClick])
 
+  // Il layer operativo della Mappa deve usare JSON: con PBF la vista
+  // GII_INFRAZIONI_VIEW_ALL puo' restituire HTTP 400, lasciando vuota anche
+  // la FeatureTable collegata allo stesso DataSource.
+  React.useEffect(() => {
+    void ensureInfrazioniViewAllJsonOnlyQueryFormat()
+  }, [])
+
 
   const [user,     setUser]    = React.useState<GiiUserRole | null>(null)
   const [uLoad,    setULoad]   = React.useState(true)
@@ -3511,6 +3770,42 @@ export default function Widget(props: Props) {
     if (accountSwitchInProgressRef.current) return
 
     const previousUsername = normalizeAuthUsername(userRef.current?.username)
+
+    // Memorizziamo la pagina di partenza, ma NON navighiamo ancora.
+    // La Home deve essere aperta soltanto se l'OAuth restituisce davvero un
+    // account diverso e, soprattutto, PRIMA che SessionManager installi la
+    // nuova resource session. In caso di Annulla o stesso account non cambia
+    // quindi mai la pagina corrente.
+    const switchOriginPageToken = getCurrentPageToken() || ''
+    const switchOriginPageId = switchOriginPageToken ? resolvePageId(switchOriginPageToken) : null
+    const neutralPageToken = String(afterInRef.current || cfg.alertsHomePage || '').trim()
+    const neutralPageId = neutralPageToken ? resolvePageId(neutralPageToken) : null
+    let movedToNeutralPage = false
+
+    const moveToNeutralPageBeforeCredentialInstall = async () => {
+      if (movedToNeutralPage) return
+      if (!neutralPageToken || !neutralPageId || !switchOriginPageId || switchOriginPageId === neutralPageId) return
+
+      gotoPage(neutralPageToken)
+      movedToNeutralPage = true
+
+      // Attendiamo che il router abbia effettivamente sostituito la pagina e
+      // concediamo a ExB un breve ciclo aggiuntivo per distruggere MapView,
+      // DataSource e FeatureTable prima della sostituzione della credenziale.
+      for (let i = 0; i < 24; i++) {
+        await new Promise(resolve => window.setTimeout(resolve, 25))
+        const cur = getCurrentPageToken() || ''
+        const curId = cur ? resolvePageId(cur) : null
+        if (curId === neutralPageId) break
+      }
+      await new Promise(resolve => window.setTimeout(resolve, 175))
+    }
+
+    const restoreOriginPageAfterFailedSwitch = () => {
+      if (!movedToNeutralPage || !switchOriginPageToken) return
+      try { gotoPage(switchOriginPageToken) } catch { }
+    }
+
     if (profileSyncRetryTimerRef.current != null) {
       window.clearTimeout(profileSyncRetryTimerRef.current)
       profileSyncRetryTimerRef.current = null
@@ -3518,7 +3813,42 @@ export default function Widget(props: Props) {
     setProfileSyncError('')
     accountSwitchInProgressRef.current = true
     alertsAuthTransitionRef.current = true
-    const switchPromise = switchAccountWithoutRevokingCurrentSession()
+
+    const reloadAfterDifferentSessionInstall = async (incomingUsernameRaw: string) => {
+      const incomingUsername = normalizeAuthUsername(incomingUsernameRaw)
+      let mainUsername = ''
+      let appStoreUsername = ''
+      let converged = false
+
+      // Il cambio è realmente consolidato solo quando sia SessionManager sia
+      // lo store principale di Experience Builder espongono il nuovo username.
+      for (let i = 0; i < 120; i++) {
+        mainUsername = getActiveSessionUsername()
+        try {
+          appStoreUsername = normalizeAuthUsername(getAppStore()?.getState?.()?.user?.username)
+        } catch {
+          appStoreUsername = ''
+        }
+
+        if (mainUsername === incomingUsername && appStoreUsername === incomingUsername) {
+          converged = true
+          break
+        }
+        await new Promise(resolve => window.setTimeout(resolve, 50))
+      }
+
+      if (!converged) return
+
+      clearGiiUserRoleCache()
+      await new Promise(resolve => window.setTimeout(resolve, 100))
+      window.location.reload()
+    }
+
+    const switchPromise = switchAccountWithoutRevokingCurrentSession(
+      previousUsername,
+      moveToNeutralPageBeforeCredentialInstall,
+      reloadAfterDifferentSessionInstall
+    )
     if (!switchPromise) {
       accountSwitchInProgressRef.current = false
       alertsAuthTransitionRef.current = false
@@ -3536,8 +3866,10 @@ export default function Widget(props: Props) {
     try {
       await switchPromise
 
-      // Alla chiusura del popup il metodo nativo risolve anche in caso di Annulla.
-      // Attendiamo brevemente che SessionManager esponga l'identità definitiva.
+      // Alla chiusura del popup il metodo nativo può risolvere anche in caso di
+      // Annulla. Poiché la navigazione preventiva scatta solo dentro
+      // addOrReplaceSession() per uno username diverso, Annulla e stesso account
+      // lasciano già la pagina esattamente dov'era.
       let activeUsername = getActiveSessionUsername()
       for (let i = 0; i < 20 && !activeUsername; i++) {
         await new Promise(resolve => window.setTimeout(resolve, 50))
@@ -3545,62 +3877,25 @@ export default function Widget(props: Props) {
       }
 
       if (!activeUsername || activeUsername === previousUsername) {
-        // Annulla o stesso account: nessuna modifica al profilo corrente.
         alertsAuthTransitionRef.current = false
         alertsAbortControllerRef.current = new AbortController()
         refreshAlerts()
         return
       }
 
-      setULoad(true)
-      let nextUser: GiiUserRole | null = null
-
-      for (let i = 0; i < 20; i++) {
-        clearGiiUserRoleCache()
-        const candidate = await loadUser()
-        const confirmedUsername = getActiveSessionUsername()
-        if (
-          candidate &&
-          confirmedUsername === activeUsername &&
-          normalizeAuthUsername(candidate.username) === activeUsername
-        ) {
-          nextUser = candidate
-          break
-        }
-        await new Promise(resolve => window.setTimeout(resolve, 100))
-        activeUsername = confirmedUsername || activeUsername
-      }
-
-      if (!nextUser) {
-        // Deleghiamo il recupero al refresh centralizzato, che applica i retry brevi,
-        // mostra l'errore esplicito e programma il fallback autonomo senza F5.
-        clearGiiUserRoleCache()
-        dispatchGiiUserLoaded({
-          source: 'header-switch-profile-retry',
-          reason: 'switch-account-profile-not-ready',
-          username: activeUsername
-        })
-        return
-      }
-
-      setUser(nextUser)
-      setULoad(false)
-      dispatchGiiUserLoaded({
-        source: 'header-boot',
-        reason: 'switch-account',
-        username: nextUser.username
-      })
-
-      try {
-        const tok = String(afterInRef.current || '').trim()
-        if (tok) gotoPage(tok)
-      } catch { }
-      // Il useEffect dipendente da user crea il nuovo AbortController e sblocca
-      // gli allarmi soltanto dopo che ruolo, area e username sono coerenti.
+      // Il vero cambio account viene completato nel ramo intercettato di
+      // addOrReplaceSession(), che attende la convergenza di SessionManager e
+      // dello store ExB e poi ricarica completamente l'app.
+      return
     } catch {
+      // Se il flusso fallisce DOPO aver individuato un account differente ma
+      // PRIMA di completarne l'installazione, ripristiniamo la pagina iniziale.
+      // Con Annulla normale il callback non viene mai eseguito e non c'è nulla
+      // da ripristinare.
       alertsAuthTransitionRef.current = false
       alertsAbortControllerRef.current = new AbortController()
       setULoad(false)
+      restoreOriginPageAfterFailedSwitch()
       refreshAlerts()
     } finally {
       accountSwitchInProgressRef.current = false
