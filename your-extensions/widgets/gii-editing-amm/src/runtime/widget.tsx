@@ -2,19 +2,15 @@
 /** @jsxFrag React.Fragment */
 import { React, jsx, type AllWidgetProps, DataSourceComponent, UrlManager, getAppStore } from 'jimu-core'
 import { buildVerbalePdfBlob } from '../../../_shared/gii-anteprime/documenti-amministrativi/proposta-contestazione/proposta-contestazione-data-map'
+import { replacePropostaContestazionePdfAttachment } from '../../../_shared/gii-anteprime/documenti-amministrativi/proposta-contestazione/proposta-contestazione-attachment-store'
 import { buildBozzaDeterminazioneDocx, getBozzaDeterminazioneDocxFileName } from '../../../_shared/gii-anteprime/documenti-amministrativi/bozza-determinazione/bozza-determinazione-docx-builder'
-import { buildBozzaDeterminazionePdf } from '../../../_shared/gii-anteprime/documenti-amministrativi/bozza-determinazione/bozza-determinazione-pdf-builder'
 import { buildBozzaDeterminazioneMap } from '../../../_shared/gii-anteprime/documenti-amministrativi/bozza-determinazione/bozza-determinazione-map'
-import { buildRapportoPdf, buildRapportoIterPlaceholders, loadRapportoIterCicliForPdf, type RapportoIterCicloPdf, type UtenteCacheEntry } from '../../../_shared/gii-anteprime/documenti-tecnici/rapporto/rapporto-pdf-builder'
-import { RAPPORTO_TECHNICAL_BODY_BOX, drawRapportoTechnicalHeadersByPage, attachmentTechnicalDocumentTitle } from '../../../_shared/gii-anteprime/documenti-tecnici/rapporto/technical-document-header'
-import { buildPlaceholderMap } from '../../../_shared/gii-anteprime/documenti-tecnici/rapporto/rapporto-placeholder-map'
-import { applyNotaSpeseToRapportoMap, buildArt30RapportoSummary } from '../../../_shared/gii-anteprime/documenti-tecnici/rapporto/rapporto-nota-spese-summary'
-import { buildNotaSpesePdf, type NotaSpeseData } from '../../../_shared/gii-anteprime/documenti-tecnici/rapporto/notaspese-pdf-builder'
+import type { UtenteCacheEntry } from '../../../_shared/gii-anteprime/documenti-tecnici/rapporto/rapporto-pdf-builder'
 import { ensureNsdJsonOnlyQueryFormat } from '../../../_shared/gii-anteprime/nsd-query-format-fix'
 import GiiAnteprimaPanel from '../../../_shared/gii-anteprime/anteprima-panel'
+import { buildFascicolo, mergeFascicoloPdfItems } from '../../../_shared/gii-anteprime/fascicolo-builder'
 import { computeReqPoint } from '../../../_shared/gii-anteprime/req-point'
-import GiiAttachmentViewer, { GII_ATTACHMENT_KEYWORDS, getGiiAttachmentKind, filterGiiAttachmentsForAdministrativeFascicolo } from '../../../_shared/gii-anteprime/allegati/gii-attachment-viewer'
-import { PDFDocument, StandardFonts, rgb } from 'pdf-lib'
+import GiiAttachmentViewer, { GII_ATTACHMENT_KEYWORDS, getGiiAttachmentKind, filterGiiAttachmentsForAdministrativeFascicolo, isGiiApprovedBozzaReferenceAttachment, isGiiBozzaDeterminazionePdfAttachment, isGiiLegacyBozzaDeterminazioneWordAttachment, isGiiPropostaContestazionePdfAttachment, pickLatestGiiAttachment } from '../../../_shared/gii-anteprime/allegati/gii-attachment-viewer'
 import type { IMConfig, SummaryFieldConfig } from '../config'
 import { defaultConfig } from '../config'
 import { createPortal } from 'react-dom'
@@ -122,6 +118,55 @@ function ensureAmmUtentiCache (): Promise<Map<string, AmmUtenteCached> | null> {
   })()
 
   return _ammUtentiCachePromise
+}
+
+
+type AmmDeterminaEmailRecipients = { to: string, cc: string[] }
+
+function isValidAmmEmailAddress (value: any): boolean {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(value ?? '').trim())
+}
+
+/**
+ * Legge i destinatari della determina direttamente dalla Rubrica in GII_utenti.
+ * Non usa cache: una modifica effettuata da RI_AMM deve essere efficace già alla
+ * successiva generazione del file .eml, senza refresh o ripubblicazioni.
+ */
+async function loadAmmDeterminaEmailRecipients (): Promise<AmmDeterminaEmailRecipients> {
+  const FeatureLayer = await loadEsriModule<any>('esri/layers/FeatureLayer')
+  const fl = new FeatureLayer({ url: GII_UTENTI_URL })
+  if (typeof fl?.load === 'function') await fl.load()
+  const res = await fl.queryFeatures({
+    where: `tipo_record = 'RUBRICA'`,
+    outFields: ['OBJECTID', 'full_name', 'email', 'uso_email'],
+    returnGeometry: false
+  })
+  const rows = (res?.features || []).map((f: any) => f?.attributes || {})
+  const main = rows.filter((a: any) => String(a?.uso_email || '').trim().toUpperCase() === 'DETERMINA_A')
+  if (main.length === 0) {
+    throw new Error('Destinatario della determina non configurato. Inserirlo nella Rubrica prima di predisporre l’e-mail.')
+  }
+  if (main.length > 1) {
+    throw new Error('Configurazione del destinatario non univoca: nella Rubrica risultano più destinatari principali della determina.')
+  }
+  const to = String(main[0]?.email || '').trim().toLowerCase()
+  if (!isValidAmmEmailAddress(to)) {
+    throw new Error('L’indirizzo e-mail del destinatario principale configurato nella Rubrica non è valido.')
+  }
+  const seen = new Set<string>([to])
+  const cc: string[] = []
+  for (const a of rows) {
+    if (String(a?.uso_email || '').trim().toUpperCase() !== 'DETERMINA_CC') continue
+    const email = String(a?.email || '').trim().toLowerCase()
+    if (!email || seen.has(email)) continue
+    if (!isValidAmmEmailAddress(email)) {
+      const name = String(a?.full_name || '').trim()
+      throw new Error(`L’indirizzo e-mail${name ? ` di “${name}”` : ''} configurato in copia conoscenza nella Rubrica non è valido.`)
+    }
+    seen.add(email)
+    cc.push(email)
+  }
+  return { to, cc }
 }
 
 type RoleCode = 'TI_AMM' | 'RI_AMM' | 'ADMIN' | string
@@ -450,10 +495,9 @@ const BONIFICO_FIELDS = ['bonifico_conto_cod', 'bonifico_iban_snapshot', 'bonifi
 const PROTOCOLLO_ATTO_FIELDS = ['protocollo_atto_accertamento_numero', 'protocollo_atto_accertamento_data']
 const PROTOCOLLO_FASCICOLO_FIELDS = ['protocollo_fascicolo_numero', 'protocollo_fascicolo_data']
 const BOZZA_DETERMINAZIONE_STARTED_FIELDS = ['determinazione_stato', 'dt_bozza_determinazione', 'bozza_determinazione_da']
-const BOZZA_DETERMINAZIONE_WORD_NAME_RE = /bozza[_\s-]*determinazione.*\.docx?$/i
-const BOZZA_DETERMINAZIONE_WORD_KEYWORD = 'GII_BOZZA_DETERMINAZIONE_DOCX'
-const PROPOSTA_CONTESTAZIONE_PDF_NAME_RE = /proposta[_\s-]*contestazione.*\.pdf$/i
-const PROPOSTA_CONTESTAZIONE_PDF_KEYWORD = 'GII_PROPOSTA_CONTESTAZIONE_PDF'
+// Il DOCX generato dal gestionale è una copia di lavoro locale e non viene più
+// caricato nel fascicolo. Il riconoscimento di bozza/proposta è centralizzato nello
+// shared attachment viewer, così editor e viewer usano la stessa regola.
 const NOTIFICA_ATTO_FIELDS = ['notifica_tipo', 'notifica_data', 'notifica_esito', 'notifica_estremi']
 
 const SYSTEM_CALCULATED_ADMIN_FIELDS = new Set([
@@ -1545,10 +1589,9 @@ function normalizeEditLayerUrl (raw: any): string {
   return url
 }
 
-// Cache condivisa "record selezionato" (stesso pattern di gii-editing-ti / gii-azioni).
-// Necessaria perché gii-azioni, quando genera i documenti, legge da qui invece di
-// rifare sempre una query fresca: se questo widget non la aggiorna al salvataggio,
-// gli altri widget continuano a vedere la versione precedente del record.
+// Cache condivisa del record selezionato, usata dai widget di elenco/azioni/editing
+// per mantenere coerenti selezione e dati subito dopo un salvataggio. Non contiene
+// logica di anteprima: il fascicolo viene gestito esclusivamente dagli editor.
 type SelectedFeatureCacheEntry = {
   layerUrl: string
   oid: number
@@ -1727,22 +1770,14 @@ function formatBozzaAttachmentFileCreatedAt (att: AmmAttachmentInfo | null | und
   return ts ? formatDateTimeValue(ts) : '—'
 }
 
-function bozzaAttachmentKeywords (fileCreatedAt = Date.now()): string {
-  return `${BOZZA_DETERMINAZIONE_WORD_KEYWORD}|fileCreatedAt=${fileCreatedAt}`
+function bozzaPdfAttachmentKeywords (fileCreatedAt = Date.now(), extraKeywords = ''): string {
+  const base = `${GII_ATTACHMENT_KEYWORDS.bozzaDeterminazione}|fileCreatedAt=${fileCreatedAt}`
+  const extra = String(extraKeywords || '').trim().replace(/^\|+|\|+$/g, '')
+  return extra ? `${base}|${extra}` : base
 }
 
-function hasBozzaAttachmentKeyword (att: AmmAttachmentInfo | null | undefined): boolean {
-  const kw = String(att?.keywords || '').trim().toUpperCase()
-  return !!kw && kw.includes(BOZZA_DETERMINAZIONE_WORD_KEYWORD)
-}
-
-function propostaContestazioneAttachmentKeywords (fileCreatedAt = Date.now()): string {
-  return `${PROPOSTA_CONTESTAZIONE_PDF_KEYWORD}|fileCreatedAt=${fileCreatedAt}`
-}
-
-function hasPropostaContestazioneAttachmentKeyword (att: AmmAttachmentInfo | null | undefined): boolean {
-  const kw = String(att?.keywords || '').trim().toUpperCase()
-  return !!kw && kw.includes(PROPOSTA_CONTESTAZIONE_PDF_KEYWORD)
+function isVerifiedFinalBozzaAttachment (att: AmmAttachmentInfo | null | undefined): boolean {
+  return /(?:^|\|)finalVerifiedAgainstApproved=1(?:\||$)/i.test(String(att?.keywords || ''))
 }
 
 function normalizeAttachmentInfos (raw: any): AmmAttachmentInfo[] {
@@ -1771,17 +1806,18 @@ function normalizeAttachmentInfos (raw: any): AmmAttachmentInfo[] {
     .filter(a => Number.isFinite(a.id) && a.id > 0)
 }
 
-function isBozzaDeterminazioneWordAttachment (att: AmmAttachmentInfo | null | undefined): boolean {
-  if (hasBozzaAttachmentKeyword(att)) return true
-  const name = String(att?.name || '').trim()
-  // Fallback per le bozze caricate prima dell'introduzione del marker gestionale.
-  return !!name && BOZZA_DETERMINAZIONE_WORD_NAME_RE.test(name)
+function isBozzaDeterminazioneSpecialAttachment (att: AmmAttachmentInfo | null | undefined): boolean {
+  return isGiiBozzaDeterminazionePdfAttachment(att as any) || isGiiLegacyBozzaDeterminazioneWordAttachment(att as any)
 }
 
-function isPropostaContestazionePdfAttachment (att: AmmAttachmentInfo | null | undefined): boolean {
-  if (hasPropostaContestazioneAttachmentKeyword(att)) return true
-  const name = String(att?.name || '').trim()
-  return !!name && PROPOSTA_CONTESTAZIONE_PDF_NAME_RE.test(name)
+async function deleteBozzaDeterminazioneAttachments (layer: any, oid: number, layerUrl: string): Promise<void> {
+  if (!oid || !layerUrl) return
+  const all = await queryAmmAttachments(layer, oid, layerUrl)
+  const bozze = all.filter(isBozzaDeterminazioneSpecialAttachment)
+  for (const att of bozze) {
+    const id = Number(att.id)
+    if (Number.isFinite(id) && id > 0) await deleteAmmAttachment(layer, oid, id, layerUrl)
+  }
 }
 
 async function getEsriTokenForUrl (url: string): Promise<string> {
@@ -1897,54 +1933,47 @@ async function deleteAmmAttachment (layer: any, oid: number, attachmentId: numbe
 }
 
 
-async function replaceBozzaDeterminazioneWordAttachment (layer: any, oid: number, file: File, layerUrl: string): Promise<AmmAttachmentInfo[]> {
+async function replaceBozzaDeterminazionePdfAttachment (layer: any, oid: number, file: File, layerUrl: string, extraKeywords = ''): Promise<AmmAttachmentInfo[]> {
   if (!oid || !file) return []
-  if (!layerUrl) throw new Error('URL del FeatureLayer non disponibile per sostituire la bozza Word.')
+  if (!layerUrl) throw new Error('URL del FeatureLayer non disponibile per sostituire la bozza PDF.')
 
   const before = await queryAmmAttachments(layer, oid, layerUrl)
   const beforeIds = new Set(before.map(att => Number(att.id)).filter(id => Number.isFinite(id) && id > 0))
   const fileCreatedAt = Number((file as any)?.lastModified) || Date.now()
-  const addedIds = await addAmmAttachments(layer, oid, [file], layerUrl, bozzaAttachmentKeywords(fileCreatedAt))
+  const addedIds = await addAmmAttachments(layer, oid, [file], layerUrl, bozzaPdfAttachmentKeywords(fileCreatedAt, extraKeywords))
   const after = await queryAmmAttachments(layer, oid, layerUrl)
-  const bozzaAfter = after.filter(isBozzaDeterminazioneWordAttachment)
+  const pdfAfter = after.filter(isGiiBozzaDeterminazionePdfAttachment)
   const addedIdSet = new Set(addedIds.filter(id => Number.isFinite(Number(id)) && Number(id) > 0).map(id => Number(id)))
   let keepIds = new Set<number>(Array.from(addedIdSet))
 
   if (keepIds.size === 0) {
-    const newIds = bozzaAfter
+    const newIds = pdfAfter
       .map(att => Number(att.id))
       .filter(id => Number.isFinite(id) && id > 0 && !beforeIds.has(id))
     keepIds = new Set(newIds)
   }
 
-  if (keepIds.size === 0 && bozzaAfter.length > 0) {
-    const maxId = Math.max(...bozzaAfter.map(att => Number(att.id)).filter(id => Number.isFinite(id) && id > 0))
+  if (keepIds.size === 0 && pdfAfter.length > 0) {
+    const maxId = Math.max(...pdfAfter.map(att => Number(att.id)).filter(id => Number.isFinite(id) && id > 0))
     if (Number.isFinite(maxId) && maxId > 0) keepIds.add(maxId)
   }
 
-  for (const att of bozzaAfter) {
+  // Una nuova bozza PDF sostituisce sempre la precedente. Eliminiamo inoltre
+  // eventuali DOCX residui del vecchio flusso, che non fanno più parte del fascicolo.
+  for (const att of after) {
     const id = Number(att.id)
-    if (Number.isFinite(id) && id > 0 && !keepIds.has(id)) {
+    if (!Number.isFinite(id) || id <= 0) continue
+    if (isGiiBozzaDeterminazionePdfAttachment(att) && !keepIds.has(id)) {
+      await deleteAmmAttachment(layer, oid, id, layerUrl)
+    } else if (isGiiLegacyBozzaDeterminazioneWordAttachment(att)) {
       await deleteAmmAttachment(layer, oid, id, layerUrl)
     }
   }
 
   const finalList = await queryAmmAttachments(layer, oid, layerUrl)
   return finalList
-    .filter(isBozzaDeterminazioneWordAttachment)
+    .filter(isGiiBozzaDeterminazionePdfAttachment)
     .map(att => keepIds.has(Number(att.id)) && !parseBozzaAttachmentFileCreatedAt(att) ? { ...att, uploadedAt: fileCreatedAt } : att)
-}
-
-async function deleteBozzaDeterminazioneWordAttachments (layer: any, oid: number, layerUrl: string): Promise<void> {
-  if (!oid || !layerUrl) return
-  const all = await queryAmmAttachments(layer, oid, layerUrl)
-  const bozze = all.filter(isBozzaDeterminazioneWordAttachment)
-  for (const att of bozze) {
-    const id = Number(att.id)
-    if (Number.isFinite(id) && id > 0) {
-      await deleteAmmAttachment(layer, oid, id, layerUrl)
-    }
-  }
 }
 
 function canvasToBlobForAmmEdit (canvas: HTMLCanvasElement, type: string, quality?: number): Promise<Blob> {
@@ -2024,42 +2053,6 @@ async function rotateImageAttachmentFile (blob: Blob, fileName: string, rotation
   }
 }
 
-
-async function replacePropostaContestazionePdfAttachment (layer: any, oid: number, file: File, layerUrl: string): Promise<AmmAttachmentInfo[]> {
-  if (!oid || !file) return []
-  if (!layerUrl) throw new Error('URL del FeatureLayer non disponibile per caricare la Proposta di contestazione.')
-
-  const before = await queryAmmAttachments(layer, oid, layerUrl)
-  const beforeIds = new Set(before.map(att => Number(att.id)).filter(id => Number.isFinite(id) && id > 0))
-  const fileCreatedAt = Number((file as any)?.lastModified) || Date.now()
-  const addedIds = await addAmmAttachments(layer, oid, [file], layerUrl, propostaContestazioneAttachmentKeywords(fileCreatedAt))
-  const after = await queryAmmAttachments(layer, oid, layerUrl)
-  const propostaAfter = after.filter(isPropostaContestazionePdfAttachment)
-  const addedIdSet = new Set(addedIds.filter(id => Number.isFinite(Number(id)) && Number(id) > 0).map(id => Number(id)))
-  let keepIds = new Set<number>(Array.from(addedIdSet))
-
-  if (keepIds.size === 0) {
-    const newIds = propostaAfter
-      .map(att => Number(att.id))
-      .filter(id => Number.isFinite(id) && id > 0 && !beforeIds.has(id))
-    keepIds = new Set(newIds)
-  }
-
-  if (keepIds.size === 0 && propostaAfter.length > 0) {
-    const maxId = Math.max(...propostaAfter.map(att => Number(att.id)).filter(id => Number.isFinite(id) && id > 0))
-    if (Number.isFinite(maxId) && maxId > 0) keepIds.add(maxId)
-  }
-
-  for (const att of propostaAfter) {
-    const id = Number(att.id)
-    if (Number.isFinite(id) && id > 0 && !keepIds.has(id)) {
-      await deleteAmmAttachment(layer, oid, id, layerUrl)
-    }
-  }
-
-  const finalList = await queryAmmAttachments(layer, oid, layerUrl)
-  return finalList.filter(isPropostaContestazionePdfAttachment)
-}
 
 async function buildAttachmentPreviewUrl (att: AmmAttachmentInfo, oid: number, layerUrl: string): Promise<string | null> {
   const ct = String(att?.contentType || '').toLowerCase()
@@ -2626,18 +2619,22 @@ function AttestationConfirmDialog (props: { note: string, saving?: boolean, onCa
 
 
 
-function TransmitBozzaConfirmDialog (props: { saving?: boolean, onCancel: () => void, onConfirm: () => void }) {
+function TransmitBozzaConfirmDialog (props: { saving?: boolean, reopenCycle?: boolean, onCancel: () => void, onConfirm: () => void }) {
   const st = useAdminStyle()
   return (
     <div style={{ position: 'fixed', zIndex: 2147483000, inset: 0, background: 'rgba(0,0,0,0.55)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24 }}>
       <div role='dialog' aria-modal='true' style={{ width: 'min(620px, 100%)', background: '#fff', borderRadius: 14, boxShadow: '0 18px 60px rgba(0,0,0,0.35)', overflow: 'hidden' }}>
-        <div style={{ background: '#eff6ff', color: '#0d3b66', padding: '14px 16px', fontWeight: 900, fontSize: Math.max(18, adminFieldFontSize(st)), borderBottom: '1px solid rgba(0,0,0,0.08)' }}>Conferma trasmissione bozza</div>
+        <div style={{ background: props.reopenCycle ? '#fff7ed' : '#eff6ff', color: props.reopenCycle ? '#9a3412' : '#0d3b66', padding: '14px 16px', fontWeight: 900, fontSize: Math.max(18, adminFieldFontSize(st)), borderBottom: '1px solid rgba(0,0,0,0.08)' }}>
+          {props.reopenCycle ? 'Apri un nuovo ciclo di verifica' : 'Conferma trasmissione bozza'}
+        </div>
         <div style={{ padding: 16, color: '#111827', fontSize: adminFieldFontSize(st), lineHeight: 1.45 }}>
-          Confermando, la bozza Word della determinazione sarà trasmessa al Responsabile dell’istruttoria amministrativa per la verifica. Dopo la trasmissione la bozza non sarà più liberamente modificabile dal Tecnico istruttore, salvo rimando o riapertura dedicata.
+          {props.reopenCycle
+            ? 'La pratica risulta già approvata dal Responsabile e il protocollo del fascicolo è stato registrato. Confermando verrà aperto un nuovo ciclo di verifica: l’approvazione RI_AMM corrente e i dati di protocollo del fascicolo saranno invalidati. La bozza PDF corrente sarà trasmessa nuovamente al Responsabile.'
+            : 'Confermando, la bozza PDF della determinazione sarà trasmessa al Responsabile dell’istruttoria amministrativa per la verifica. Dopo la trasmissione la bozza non sarà più liberamente modificabile dal Tecnico istruttore, salvo rimando.'}
         </div>
         <div style={{ padding: '0 16px 16px', display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
           <button type='button' disabled={!!props.saving} onClick={props.onCancel} style={{ border: '1px solid #94a3b8', background: '#fff', color: '#334155', borderRadius: 9, padding: '8px 14px', fontWeight: 800, fontSize: adminFieldFontSize(st), cursor: props.saving ? 'not-allowed' : 'pointer' }}>Annulla</button>
-          <button type='button' disabled={!!props.saving} onClick={props.onConfirm} style={{ border: '1px solid #1a7f37', background: props.saving ? '#e5e7eb' : '#1a7f37', color: props.saving ? '#9ca3af' : '#fff', borderRadius: 9, padding: '8px 14px', fontWeight: 800, fontSize: adminFieldFontSize(st), cursor: props.saving ? 'not-allowed' : 'pointer' }}>{props.saving ? 'Trasmissione in corso…' : 'Conferma trasmissione'}</button>
+          <button type='button' disabled={!!props.saving} onClick={props.onConfirm} style={{ border: `1px solid ${props.reopenCycle ? '#c2410c' : '#1a7f37'}`, background: props.saving ? '#e5e7eb' : (props.reopenCycle ? '#c2410c' : '#1a7f37'), color: props.saving ? '#9ca3af' : '#fff', borderRadius: 9, padding: '8px 14px', fontWeight: 800, fontSize: adminFieldFontSize(st), cursor: props.saving ? 'not-allowed' : 'pointer' }}>{props.saving ? 'Trasmissione in corso…' : (props.reopenCycle ? 'Apri nuovo ciclo e trasmetti' : 'Conferma trasmissione')}</button>
         </div>
       </div>
     </div>
@@ -2645,18 +2642,22 @@ function TransmitBozzaConfirmDialog (props: { saving?: boolean, onCancel: () => 
 }
 
 
-function DeleteBozzaConfirmDialog (props: { saving?: boolean, onCancel: () => void, onConfirm: () => void }) {
+function DeleteBozzaConfirmDialog (props: { saving?: boolean, finalPdf?: boolean, onCancel: () => void, onConfirm: () => void }) {
   const st = useAdminStyle()
   return (
     <div style={{ position: 'fixed', zIndex: 2147483000, inset: 0, background: 'rgba(0,0,0,0.55)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24 }}>
-      <div role='dialog' aria-modal='true' style={{ width: 'min(560px, 100%)', background: '#fff', borderRadius: 14, boxShadow: '0 18px 60px rgba(0,0,0,0.35)', overflow: 'hidden' }}>
-        <div style={{ background: '#fef2f2', color: '#991b1b', padding: '14px 16px', fontWeight: 900, fontSize: Math.max(18, adminFieldFontSize(st)), borderBottom: '1px solid rgba(0,0,0,0.08)' }}>Elimina bozza di determinazione</div>
+      <div role='dialog' aria-modal='true' style={{ width: 'min(600px, 100%)', background: '#fff', borderRadius: 14, boxShadow: '0 18px 60px rgba(0,0,0,0.35)', overflow: 'hidden' }}>
+        <div style={{ background: '#fef2f2', color: '#991b1b', padding: '14px 16px', fontWeight: 900, fontSize: Math.max(18, adminFieldFontSize(st)), borderBottom: '1px solid rgba(0,0,0,0.08)' }}>
+          {props.finalPdf ? 'Elimina PDF definitivo' : 'Elimina bozza PDF'}
+        </div>
         <div style={{ padding: 16, color: '#111827', fontSize: adminFieldFontSize(st), lineHeight: 1.45 }}>
-          Confermando, la bozza di determinazione predisposta sarà eliminata. I dati di protocollo del fascicolo resteranno invariati.
+          {props.finalPdf
+            ? 'Confermando verrà eliminato esclusivamente il PDF definitivo attualmente caricato. L’approvazione del Responsabile dell’istruttoria amministrativa, i dati di protocollo e il riferimento interno della versione approvata resteranno invariati. La predisposizione dell’e-mail al Direttore verrà nuovamente bloccata finché non sarà caricato e verificato un nuovo PDF definitivo.'
+            : 'Confermando verrà eliminato esclusivamente il PDF attualmente caricato. Il Word di lavoro, il visto e lo stato della pratica resteranno invariati. Sarà quindi possibile generare nuovamente il Word oppure caricare un nuovo PDF.'}
         </div>
         <div style={{ padding: '0 16px 16px', display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
           <button type='button' disabled={!!props.saving} onClick={props.onCancel} style={{ border: '1px solid #94a3b8', background: '#fff', color: '#334155', borderRadius: 9, padding: '8px 14px', fontWeight: 800, fontSize: adminFieldFontSize(st), cursor: props.saving ? 'not-allowed' : 'pointer' }}>Annulla</button>
-          <button type='button' disabled={!!props.saving} onClick={props.onConfirm} style={{ border: '1px solid #b91c1c', background: props.saving ? '#e5e7eb' : '#b91c1c', color: props.saving ? '#9ca3af' : '#fff', borderRadius: 9, padding: '8px 14px', fontWeight: 800, fontSize: adminFieldFontSize(st), cursor: props.saving ? 'not-allowed' : 'pointer' }}>{props.saving ? 'Eliminazione in corso…' : 'Elimina bozza'}</button>
+          <button type='button' disabled={!!props.saving} onClick={props.onConfirm} style={{ border: '1px solid #b91c1c', background: props.saving ? '#e5e7eb' : '#b91c1c', color: props.saving ? '#9ca3af' : '#fff', borderRadius: 9, padding: '8px 14px', fontWeight: 800, fontSize: adminFieldFontSize(st), cursor: props.saving ? 'not-allowed' : 'pointer' }}>{props.saving ? 'Eliminazione in corso…' : 'Elimina PDF'}</button>
         </div>
       </div>
     </div>
@@ -4103,19 +4104,21 @@ function StatusSummaryItem (props: { label: string, value: React.ReactNode, hint
 
 function isPropostaContestazioneApprovedByRiAmm (data: Record<string, any>): boolean {
   const d = data || {}
-  // L’approvazione del Responsabile dell’istruttoria amministrativa è valida
-  // per sbloccare la protocollazione solo se si riferisce all’ultimo ciclo
-  // trasmesso dal TI_AMM. In caso di rimando, il nuovo visto del TI_AMM azzera
-  // l’esito RI_AMM storico e apre una nuova fase sostitutiva.
-  return parseNumberInput(pickAttrCI(d, ['esito_TI_AMM'])) === 2 &&
-    parseNumberInput(pickAttrCI(d, ['esito_RI_AMM'])) === 2
+  // L'esito RI_AMM appartiene sempre al ciclo corrente: ogni nuova trasmissione
+  // TI_AMM → RI_AMM lo azzera prima di rigenerare la Proposta in stato BOZZA.
+  // Per questo l'approvazione corrente è identificata direttamente da esito_RI_AMM = 2.
+  return parseNumberInput(pickAttrCI(d, ['esito_RI_AMM'])) === 2
 }
 
 function isBozzaDeterminazioneValidataDaRiAmm (data: Record<string, any>): boolean {
   const d = data || {}
   const statoBozza = String(pickAttrCI(d, ['determinazione_stato']) || '').trim().toUpperCase()
   return isPropostaContestazioneApprovedByRiAmm(d) &&
-    (statoBozza === 'VALIDATA_RI_AMM' || statoBozza === 'BOZZA_VALIDATA_RI_AMM')
+    (
+      statoBozza === 'VALIDATA_RI_AMM' ||
+      statoBozza === 'BOZZA_VALIDATA_RI_AMM' ||
+      statoBozza === 'FASCICOLO_TRASMESSO_PROTOCOLLO'
+    )
 }
 
 function isBozzaDeterminazioneRimandataDaRiAmm (data: Record<string, any>): boolean {
@@ -4139,6 +4142,7 @@ function isBozzaDeterminazioneRientrataDaRiAmm (data: Record<string, any>): bool
 
 function TiAmmVerificationSummary (props: {
   data: Record<string, any>
+  savedData: Record<string, any>
   fields: LayerFieldInfo[]
   canEdit: boolean
   role: string
@@ -4193,11 +4197,14 @@ function TiAmmVerificationSummary (props: {
     const txt = riAmmApprovalNote.toLowerCase().replace(/\s+/g, ' ').trim()
     return !!txt && txt.includes('si approva l’istruttoria amministrativa') && txt.includes('restituzione della pratica al tecnico istruttore amministrativo')
   })()
+  const riAmmApprovalOutcomeText = 'Istruttoria amministrativa approvata. Pratica restituita per la protocollazione del fascicolo e il completamento della bozza definitiva di determinazione.'
+  const riAmmReturnOutcomeText = 'Richieste integrazioni o rettifiche alla Proposta di contestazione e/o alla bozza di determinazione. Pratica restituita per le modifiche necessarie.'
+  const riAmmRejectedOutcomeText = 'Istruttoria amministrativa non approvata. Pratica restituita per i conseguenti adempimenti.'
   const riAmmConsequenceText = riAmmHaApprovato
-    ? 'Il Responsabile dell’istruttoria amministrativa ha approvato l’istruttoria amministrativa e ha restituito la pratica al Tecnico istruttore amministrativo per la protocollazione del fascicolo e il completamento della bozza definitiva di determinazione.'
-    : 'Il Responsabile dell’istruttoria amministrativa ha richiesto integrazioni o rettifiche e ha restituito la pratica al Tecnico istruttore amministrativo.'
+    ? riAmmApprovalOutcomeText
+    : riAmmReturnOutcomeText
   const riAmmConsequenceAction = riAmmHaRichiestoIntegrazioni
-    ? 'Completate le correzioni, il Tecnico istruttore amministrativo deve riapporre il visto di conformità: la Proposta di contestazione verrà rigenerata e solo dopo sarà possibile predisporre una nuova bozza.'
+    ? 'A seguito delle modifiche è necessario apporre un nuovo visto di conformità; la Proposta di contestazione sarà rigenerata prima della predisposizione della nuova bozza.'
     : ''
   const riAmmConsequenceDetailLabel = riAmmHaApprovato ? 'Note del Responsabile: ' : 'Motivazione del rimando: '
   const riAmmConsequenceDetail = riAmmHaApprovato
@@ -4223,10 +4230,10 @@ function TiAmmVerificationSummary (props: {
       ? 'Approvazione dell’istruttoria amministrativa'
       : 'Esito della verifica del Responsabile'
   const riAmmNoteText = riAmmEsitoCode === 1
-    ? `Il Responsabile dell’istruttoria amministrativa ha restituito la pratica al Tecnico istruttore amministrativo per integrazioni o rettifiche sulla Proposta di contestazione e sulla bozza di determinazione.${riAmmNoteClean ? `\n\nMotivazione: ${riAmmNoteClean}` : ''}`
+    ? `${riAmmReturnOutcomeText}${riAmmNoteClean ? `\n\nMotivazione: ${riAmmNoteClean}` : ''}`
     : riAmmEsitoCode === 3
-      ? `Il Responsabile dell’istruttoria amministrativa non ha approvato l’istruttoria amministrativa.${riAmmNoteClean ? `\n\nMotivazione: ${riAmmNoteClean}` : ''}`
-      : `Il Responsabile dell’istruttoria amministrativa ha approvato l’istruttoria amministrativa e ha restituito la pratica al Tecnico istruttore amministrativo per la protocollazione del fascicolo e il completamento della bozza di determinazione.${riAmmNoteClean ? `\n\nNote: ${riAmmNoteClean}` : ''}`
+      ? `${riAmmRejectedOutcomeText}${riAmmNoteClean ? `\n\nMotivazione: ${riAmmNoteClean}` : ''}`
+      : `${riAmmApprovalOutcomeText}${riAmmNoteClean ? `\n\nNote: ${riAmmNoteClean}` : ''}`
   const riAmmNomeRaw = firstTextAttr(d, [
     'ri_amm_assegnato_nome',
     'responsabile_istruttoria_amm_nome',
@@ -4344,8 +4351,10 @@ function TiAmmVerificationSummary (props: {
 
       <PostAttestazioneTiAmmWorkSection
         data={d}
+        savedData={props.savedData}
         fields={props.fields}
         canEdit={props.canEdit && !determinazioneAdottata && (role === 'TI_AMM' || role === 'ADMIN')}
+        role={role}
         showTiAmmInfo={showTiAmmInfo}
         saving={!!props.saving}
         onChange={props.onChange}
@@ -4373,10 +4382,29 @@ function TiAmmVerificationSummary (props: {
 
 
 
+type AdminBozzaWorkflowMessageKind = 'RI_AMM_APPROVED' | 'RI_AMM_VERIFYING'
+
+function adminBozzaWorkflowMessageForRole (kind: AdminBozzaWorkflowMessageKind, roleRaw: string): string {
+  const role = String(roleRaw || '').trim().toUpperCase()
+  const isTiAmm = role === 'TI_AMM'
+
+  if (kind === 'RI_AMM_APPROVED') {
+    return isTiAmm
+      ? 'La verifica amministrativa è stata approvata. È possibile procedere alla trasmissione del fascicolo al protocollo; dopo la trasmissione saranno disponibili i campi per la registrazione del numero e della data di protocollo.'
+      : 'La verifica amministrativa è stata approvata. La pratica è stata restituita al Tecnico istruttore amministrativo per il completamento degli adempimenti successivi.'
+  }
+
+  return isTiAmm
+    ? 'La bozza è stata trasmessa al Responsabile dell’istruttoria amministrativa per la verifica e non può essere modificata in questa fase.'
+    : 'La bozza è in fase di verifica amministrativa e non può essere modificata in questa fase.'
+}
+
 function PostAttestazioneTiAmmWorkSection (props: {
   data: Record<string, any>
+  savedData: Record<string, any>
   fields: LayerFieldInfo[]
   canEdit: boolean
+  role: string
   showTiAmmInfo?: boolean
   saving: boolean
   onChange: (name: string, value: any) => void
@@ -4391,7 +4419,10 @@ function PostAttestazioneTiAmmWorkSection (props: {
   bozzaRefreshKey?: string
 }) {
   const d = props.data || {}
+  const saved = props.savedData || {}
   const oid = props.oid != null && Number.isFinite(Number(props.oid)) ? Number(props.oid) : null
+  const riAmmApprovedMessage = adminBozzaWorkflowMessageForRole('RI_AMM_APPROVED', props.role)
+  const riAmmVerifyingMessage = adminBozzaWorkflowMessageForRole('RI_AMM_VERIFYING', props.role)
   const tiAmmEsitoCode = parseNumberInput(pickAttrCI(d, ['esito_TI_AMM']))
   const tiAmmHaAttestatoConformita = tiAmmEsitoCode === 2
   const tiAmmHaRichiestoIntegrazioni = tiAmmEsitoCode === 1
@@ -4399,13 +4430,35 @@ function PostAttestazioneTiAmmWorkSection (props: {
   const riAmmHaRimandatoProposta = isBozzaDeterminazioneRimandataDaRiAmm(d)
   const vistoDaRinnovareDopoRimando = tiAmmHaRichiestoIntegrazioni || riAmmHaRimandatoProposta
   const protocolloFascicoloOk = hasAdminValue(pickAttrCI(d, ['protocollo_fascicolo_numero'])) && hasAdminValue(pickAttrCI(d, ['protocollo_fascicolo_data']))
-  const protocolliCompleti = protocolloFascicoloOk
-  const canEditProtocolloFascicolo = props.canEdit && riAmmHaApprovatoProposta && !vistoDaRinnovareDopoRimando
-  const canGenerateBozzaDeterminazione = props.canEdit && tiAmmHaAttestatoConformita && !vistoDaRinnovareDopoRimando && (!riAmmHaApprovatoProposta || protocolliCompleti)
-  const hasBozzaGenerated = BOZZA_DETERMINAZIONE_STARTED_FIELDS.some(name => hasAdminValue(pickAttrCI(d, [name])))
+  const protocolloFascicoloSalvatoOk =
+    hasAdminValue(pickAttrCI(saved, ['protocollo_fascicolo_numero'])) &&
+    hasAdminValue(pickAttrCI(saved, ['protocollo_fascicolo_data']))
   const currentStatoBozzaCode = String(pickAttrCI(d, ['determinazione_stato']) || '').trim().toUpperCase()
-  const bozzaRientrataDaRiAmm = isBozzaDeterminazioneRientrataDaRiAmm(d)
-  const bozzaAlreadyTransmitted = currentStatoBozzaCode && currentStatoBozzaCode !== 'BOZZA' && !bozzaRientrataDaRiAmm
+  const fascicoloTrasmessoAlProtocollo = currentStatoBozzaCode === 'FASCICOLO_TRASMESSO_PROTOCOLLO'
+  const canEditProtocolloFascicolo =
+    props.canEdit &&
+    riAmmHaApprovatoProposta &&
+    !vistoDaRinnovareDopoRimando &&
+    fascicoloTrasmessoAlProtocollo &&
+    !protocolloFascicoloSalvatoOk
+  const hasBozzaGenerated = BOZZA_DETERMINAZIONE_STARTED_FIELDS.some(name => hasAdminValue(pickAttrCI(d, [name])))
+  const bozzaRimandataDaRiAmm = isBozzaDeterminazioneRimandataDaRiAmm(d)
+  const bozzaValidataDaRiAmm = isBozzaDeterminazioneValidataDaRiAmm(d)
+  const bozzaRientrataDaRiAmm = bozzaValidataDaRiAmm || bozzaRimandataDaRiAmm
+
+  // Una bozza approvata non è una bozza "riaperta": dopo l'approvazione RI_AMM
+  // genera/carica/trasmetti al RI_AMM devono restare bloccati. Si riaprono
+  // automaticamente soltanto dopo un vero rimando. Un nuovo ciclo volontario
+  // può essere avviato con "Rigenera bozza" solo dopo che il protocollo del
+  // ciclo corrente è stato effettivamente registrato e salvato.
+  const bozzaInLavorazioneTiAmm = currentStatoBozzaCode === 'BOZZA' || bozzaRimandataDaRiAmm
+  const postApprovalProtocolSaved = bozzaValidataDaRiAmm && protocolloFascicoloSalvatoOk
+  const canGenerateBozzaDeterminazione =
+    props.canEdit &&
+    tiAmmHaAttestatoConformita &&
+    !vistoDaRinnovareDopoRimando &&
+    (bozzaInLavorazioneTiAmm || postApprovalProtocolSaved)
+  const bozzaAlreadyTransmitted = !!currentStatoBozzaCode && !bozzaInLavorazioneTiAmm
   const statoBozza = displayAdminFieldValue(d, props.fields, 'determinazione_stato', hasBozzaGenerated ? 'Bozza generata' : 'Non generata')
   const dataGenerazione = displayAdminFieldValue(d, props.fields, 'dt_bozza_determinazione')
   const generataDa = displayAdminFieldValue(d, props.fields, 'bozza_determinazione_da')
@@ -4414,6 +4467,7 @@ function PostAttestazioneTiAmmWorkSection (props: {
   const [attachmentsLoading, setAttachmentsLoading] = React.useState(false)
   const [attachmentsBusy, setAttachmentsBusy] = React.useState(false)
   const [attachmentsError, setAttachmentsError] = React.useState<string | null>(null)
+  const [attachmentsInfo, setAttachmentsInfo] = React.useState<string | null>(null)
   const [inputKey, setInputKey] = React.useState(0)
   const [confirmDeleteBozza, setConfirmDeleteBozza] = React.useState(false)
 
@@ -4432,11 +4486,12 @@ function PostAttestazioneTiAmmWorkSection (props: {
     }
     setAttachmentsLoading(true)
     setAttachmentsError(null)
+    setAttachmentsInfo(null)
     try {
       const { layer, layerUrl } = await resolveAttachmentLayer()
       if (!layer && !layerUrl) throw new Error('FeatureLayer non disponibile per gli allegati.')
       const all = await queryAmmAttachments(layer, oid, layerUrl)
-      setBozzaAttachments(all.filter(isBozzaDeterminazioneWordAttachment))
+      setBozzaAttachments(all.filter(isGiiBozzaDeterminazionePdfAttachment))
       setAttachmentsLoadedOid(oid)
     } catch (e: any) {
       setBozzaAttachments([])
@@ -4454,36 +4509,95 @@ function PostAttestazioneTiAmmWorkSection (props: {
   React.useEffect(() => {
     // Quando il visto viene riapposto dopo un rimando o quando cambia lo stato della bozza,
     // il parent aggiorna i campi amministrativi ma non può accedere allo stato locale
-    // degli allegati Word. Azzerando il marker, il viewer rilegge gli allegati reali.
+    // della bozza PDF. Azzerando il marker, il viewer rilegge gli allegati reali.
     setAttachmentsLoadedOid(null)
   }, [props.bozzaRefreshKey])
 
-  const hasBozzaWordCaricata = bozzaAttachments.length > 0
-  const actionDisabled = !props.canEdit || !canGenerateBozzaDeterminazione || hasBozzaWordCaricata || props.saving || attachmentsBusy || bozzaAlreadyTransmitted
+  const hasBozzaPdfCaricata = bozzaAttachments.length > 0
+  const verifiedFinalPdfCaricato = bozzaAttachments.some(isVerifiedFinalBozzaAttachment)
 
-  const uploadBozzaWord = React.useCallback(async (file: File | null) => {
-    if (!file || !oid || !props.canEdit || props.saving || attachmentsBusy || !canGenerateBozzaDeterminazione || !hasBozzaGenerated || hasBozzaWordCaricata || bozzaAlreadyTransmitted) return
+  // Un PDF già caricato chiude la fase di preparazione manuale:
+  // prima dell'approvazione restano solo Trasmetti/Elimina;
+  // dopo il protocollo, il PDF approvato può ancora essere sostituito dal definitivo,
+  // ma una volta caricato e verificato il definitivo restano solo Elimina/e-mail Direttore.
+  const canPreparePdfSlot =
+    !hasBozzaPdfCaricata ||
+    (postApprovalProtocolSaved && !verifiedFinalPdfCaricato)
+
+  const actionDisabled =
+    !props.canEdit ||
+    !canGenerateBozzaDeterminazione ||
+    !canPreparePdfSlot ||
+    props.saving ||
+    attachmentsBusy
+
+  const uploadBozzaPdf = React.useCallback(async (file: File | null) => {
+    if (!file || !oid || !props.canEdit || props.saving || attachmentsBusy || !canGenerateBozzaDeterminazione || !hasBozzaGenerated) return
     const originalName = String(file.name || '').trim()
-    if (!/\.docx?$/i.test(originalName)) {
-      setAttachmentsError('Caricare un file Word in formato .doc o .docx.')
+    if (!/\.pdf$/i.test(originalName)) {
+      setAttachmentsError('Caricare la bozza in formato PDF.')
       return
     }
     setAttachmentsBusy(true)
     setAttachmentsError(null)
+    setAttachmentsInfo(null)
     try {
       const { layer, layerUrl } = await resolveAttachmentLayer()
-      const updatedBozzaAttachments = await replaceBozzaDeterminazioneWordAttachment(layer, oid, file, layerUrl)
+      let extraKeywords = ''
+
+      if (postApprovalProtocolSaved) {
+        // Il confronto usa il riferimento interno acquisito al momento della
+        // trasmissione a RI_AMM, non dipende più dalla presenza del vecchio PDF.
+        let approvedReference = await loadApprovedBozzaReferencePayload(layer, oid, layerUrl)
+
+        // Migrazione delle pratiche approvate prima della patch 103:
+        // se il vecchio PDF approvato è ancora materialmente presente, ne creiamo
+        // una volta sola il riferimento interno. Se è già stato rimosso non è
+        // possibile ricostruire in modo affidabile ciò che RI_AMM aveva approvato.
+        if (!approvedReference) {
+          const freshAttachments = await queryAmmAttachments(layer, oid, layerUrl)
+          const legacyCandidates = freshAttachments.filter(isGiiBozzaDeterminazionePdfAttachment)
+          const legacyApproved = pickLatestGiiAttachment(legacyCandidates as any[]) as AmmAttachmentInfo | null
+          if (legacyApproved) {
+            const legacyBlob = await fetchAmmAttachmentBlobForPdf(legacyApproved, oid, layerUrl)
+            approvedReference = await replaceApprovedBozzaReferenceAttachment(layer, oid, layerUrl, legacyBlob)
+          }
+        }
+
+        if (!approvedReference) {
+          throw new Error(
+            'Riferimento della versione approvata dal Responsabile dell’istruttoria amministrativa non disponibile. Questa pratica è stata approvata prima dell’introduzione del riferimento automatico e il precedente PDF approvato non è più presente. Per questa sola pratica è necessario utilizzare Rimanda, predisporre una nuova bozza e sottoporla nuovamente al Responsabile dell’istruttoria amministrativa; dai cicli successivi il riferimento verrà conservato automaticamente.'
+          )
+        }
+
+        const protocolNumber = pickAttrCI(saved, ['protocollo_fascicolo_numero'])
+        const protocolDate = pickAttrCI(saved, ['protocollo_fascicolo_data'])
+        const verified = await verifyFinalPdfAgainstApprovedReference(approvedReference, file, protocolNumber, protocolDate)
+
+        extraKeywords = [
+          'finalVerifiedAgainstApproved=1',
+          `verifiedAt=${Date.now()}`,
+          verified.approvedTextSha256 ? `approvedTextSha256=${verified.approvedTextSha256}` : ''
+        ].filter(Boolean).join('|')
+      }
+
+      const updatedBozzaAttachments = await replaceBozzaDeterminazionePdfAttachment(layer, oid, file, layerUrl, extraKeywords)
       setBozzaAttachments(updatedBozzaAttachments)
       setAttachmentsLoadedOid(oid)
       setInputKey(k => k + 1)
+
+      if (postApprovalProtocolSaved) {
+        setAttachmentsInfo('PDF definitivo verificato: il contenuto corrisponde alla versione approvata dal Responsabile dell’istruttoria amministrativa; sono state ammesse esclusivamente le variazioni del numero e della data di protocollo.')
+      }
     } catch (e: any) {
       setAttachmentsError(e?.message || String(e))
     } finally {
       setAttachmentsBusy(false)
     }
-  }, [attachmentsBusy, bozzaAlreadyTransmitted, canGenerateBozzaDeterminazione, hasBozzaGenerated, hasBozzaWordCaricata, oid, props.canEdit, props.saving, resolveAttachmentLayer])
+  }, [attachmentsBusy, canGenerateBozzaDeterminazione, hasBozzaGenerated, oid, postApprovalProtocolSaved, props.canEdit, props.saving, resolveAttachmentLayer, saved])
 
-  const downloadBozzaWord = React.useCallback(async (att: AmmAttachmentInfo) => {
+
+  const downloadBozzaPdf = React.useCallback(async (att: AmmAttachmentInfo) => {
     if (!att || !oid || attachmentsBusy) return
     setAttachmentsBusy(true)
     setAttachmentsError(null)
@@ -4497,30 +4611,60 @@ function PostAttestazioneTiAmmWorkSection (props: {
     }
   }, [attachmentsBusy, oid, resolveAttachmentLayer])
 
-  const canUploadBozza = props.canEdit && canGenerateBozzaDeterminazione && hasBozzaGenerated && !hasBozzaWordCaricata && !bozzaAlreadyTransmitted && !props.saving && !attachmentsBusy
-  // L'eliminazione, a differenza di genera/carica/trasmetti, deve restare bloccata anche dopo
-  // che RI_AMM ha approvato (validata) - solo un rimando effettivo per integrazione giustifica
-  // di poter eliminare la bozza e ripartire da zero; dopo un'approvazione, la bozza va solo
-  // aggiornata con i dati di protocollo, mai eliminata.
-  const bozzaBloccataPerEliminazione = !!currentStatoBozzaCode && currentStatoBozzaCode !== 'BOZZA' && !isBozzaDeterminazioneRimandataDaRiAmm(d)
-  const canDeleteBozza = props.canEdit && hasBozzaGenerated && !bozzaBloccataPerEliminazione && !props.saving && !attachmentsBusy
-  const canTransmitBozza = props.canEdit && tiAmmHaAttestatoConformita && !vistoDaRinnovareDopoRimando && !riAmmHaApprovatoProposta && hasBozzaGenerated && hasBozzaWordCaricata && !bozzaAlreadyTransmitted && !props.saving && !attachmentsBusy
-  const canPrepareEmailProtocollo = props.canEdit && riAmmHaApprovatoProposta && !vistoDaRinnovareDopoRimando && !protocolloFascicoloOk && !props.saving && !attachmentsBusy
-  const canPrepareEmailDirettore = props.canEdit && riAmmHaApprovatoProposta && !vistoDaRinnovareDopoRimando && protocolliCompleti && hasBozzaGenerated && hasBozzaWordCaricata && !props.saving && !attachmentsBusy
-  const generateBozzaButtonLabel = 'Genera bozza'
+  const canUploadBozza =
+    props.canEdit &&
+    (bozzaInLavorazioneTiAmm || postApprovalProtocolSaved) &&
+    canGenerateBozzaDeterminazione &&
+    hasBozzaGenerated &&
+    canPreparePdfSlot &&
+    !props.saving &&
+    !attachmentsBusy
+
+  const canDeleteWorkingPdf =
+    bozzaInLavorazioneTiAmm &&
+    !riAmmHaApprovatoProposta
+
+  const canDeleteVerifiedFinalPdf =
+    postApprovalProtocolSaved &&
+    verifiedFinalPdfCaricato
+
+  const canDeleteBozza =
+    props.canEdit &&
+    hasBozzaPdfCaricata &&
+    (canDeleteWorkingPdf || canDeleteVerifiedFinalPdf) &&
+    !props.saving &&
+    !attachmentsBusy
+  const canTransmitBozza =
+    props.canEdit &&
+    bozzaInLavorazioneTiAmm &&
+    !riAmmHaApprovatoProposta &&
+    tiAmmHaAttestatoConformita &&
+    !vistoDaRinnovareDopoRimando &&
+    hasBozzaGenerated &&
+    hasBozzaPdfCaricata &&
+    !props.saving &&
+    !attachmentsBusy
+  const canPrepareEmailProtocollo = props.canEdit && riAmmHaApprovatoProposta && !vistoDaRinnovareDopoRimando && !protocolloFascicoloOk && !fascicoloTrasmessoAlProtocollo && !props.saving && !attachmentsBusy
+  const canPrepareEmailDirettore = props.canEdit && riAmmHaApprovatoProposta && !vistoDaRinnovareDopoRimando && protocolloFascicoloSalvatoOk && hasBozzaGenerated && hasBozzaPdfCaricata && verifiedFinalPdfCaricato && !props.saving && !attachmentsBusy
+  const generateBozzaButtonLabel = postApprovalProtocolSaved
+    ? 'Aggiorna bozza definitiva'
+    : (hasBozzaGenerated ? 'Rigenera bozza' : 'Genera bozza')
 
   return (
     <div style={{ display: 'grid', gap: 10 }}>
       {confirmDeleteBozza && (
         <DeleteBozzaConfirmDialog
           saving={props.saving || attachmentsBusy}
+          finalPdf={verifiedFinalPdfCaricato}
           onCancel={() => setConfirmDeleteBozza(false)}
           onConfirm={async () => {
             const deleted = await props.onDeleteBozzaDeterminazione()
             setConfirmDeleteBozza(false)
             if (deleted) {
               setBozzaAttachments([])
-              setAttachmentsLoadedOid(null)
+              setAttachmentsLoadedOid(oid)
+              setAttachmentsError(null)
+              setAttachmentsInfo(null)
               setInputKey(k => k + 1)
             }
           }}
@@ -4528,7 +4672,7 @@ function PostAttestazioneTiAmmWorkSection (props: {
       )}
       <AdminFormSection
         title='Protocollazione fascicolo'
-        right={<SectionInfoButton text={props.showTiAmmInfo ? 'I campi di protocollo sono editabili solo dopo l’approvazione della Proposta di contestazione da parte del Responsabile dell’istruttoria amministrativa.' : null} title='Informazioni protocollazione fascicolo' />}
+        right={<SectionInfoButton text={props.showTiAmmInfo ? 'Dopo l’approvazione della verifica amministrativa è necessario trasmettere il fascicolo al protocollo. Numero e data diventano editabili dopo la trasmissione e tornano bloccati non appena vengono salvati.' : null} title='Informazioni protocollazione fascicolo' />}
         group='verbale'
         draft={d}
         fields={props.fields}
@@ -4538,7 +4682,7 @@ function PostAttestazioneTiAmmWorkSection (props: {
       >
         <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 10 }}>
           <span
-            title={protocolloFascicoloOk ? 'Fascicolo già protocollato' : 'Trasmetti fascicolo al protocollo'}
+            title={protocolloFascicoloOk ? 'Fascicolo già protocollato' : (fascicoloTrasmessoAlProtocollo ? 'Fascicolo già trasmesso al protocollo' : 'Trasmetti fascicolo al protocollo')}
             style={{ display: 'inline-flex' }}
           >
             <button
@@ -4555,7 +4699,7 @@ function PostAttestazioneTiAmmWorkSection (props: {
       </AdminFormSection>
       <Section
         title='Bozza determinazione'
-        right={<SectionInfoButton text={props.showTiAmmInfo ? 'La bozza di determinazione può essere predisposta dopo il visto di conformità. Prima dell’approvazione del Responsabile non richiede i dati di protocollo. Dopo l’approvazione e la registrazione del protocollo fascicolo, può essere aggiornata come versione definitiva da trasmettere al Direttore.' : null} title='Informazioni bozza determinazione' />}
+        right={<SectionInfoButton text={props.showTiAmmInfo ? 'Il Word resta una copia di lavoro. Prima della trasmissione al Responsabile dell’istruttoria amministrativa, quando è presente un PDF i comandi di generazione e caricamento restano bloccati finché il PDF non viene eliminato. Dopo l’approvazione e il salvataggio del protocollo fascicolo, il PDF definitivo viene accettato solo se corrisponde alla versione approvata, salvo numero e data di protocollo. Una volta verificato, Genera e Carica restano bloccati finché il PDF definitivo non viene eliminato.' : null} title='Informazioni bozza determinazione' />}
         bodyStyle={{ padding: 10 }}
       >
         <div style={{ display: 'grid', gap: 10 }}>
@@ -4565,12 +4709,20 @@ function PostAttestazioneTiAmmWorkSection (props: {
                 <StatusSummaryItem label='Protocollo fascicolo' value={`${displayAdminFieldValue(d, props.fields, 'protocollo_fascicolo_numero')} del ${displayAdminFieldValue(d, props.fields, 'protocollo_fascicolo_data')}`} tone='auto' />
                 {hasBozzaGenerated && <StatusSummaryItem label='Generata il' value={dataGenerazione || '—'} tone='auto' />}
                 {hasBozzaGenerated && <StatusSummaryItem label='Generata da' value={generataDa || '—'} tone='auto' />}
-                {hasBozzaGenerated && <StatusSummaryItem label='Word definitivo' value={attachmentsLoading ? 'Verifica allegati…' : (hasBozzaWordCaricata ? 'Caricato' : 'Da caricare')} tone={hasBozzaWordCaricata ? 'auto' : 'warn'} />}
+                {hasBozzaGenerated && <StatusSummaryItem
+                  label={postApprovalProtocolSaved ? 'PDF definitivo' : 'Bozza PDF'}
+                  value={attachmentsLoading
+                    ? 'Verifica allegati…'
+                    : (postApprovalProtocolSaved
+                        ? (verifiedFinalPdfCaricato ? 'Verificato' : (hasBozzaPdfCaricata ? 'Da verificare' : 'Da caricare'))
+                        : (hasBozzaPdfCaricata ? 'Caricata' : 'Da caricare'))}
+                  tone={(postApprovalProtocolSaved ? verifiedFinalPdfCaricato : hasBozzaPdfCaricata) ? 'auto' : 'warn'}
+                />}
               </div>
               {attachmentsError && <InfoBox kind='warn'>{attachmentsError}</InfoBox>}
-              {hasBozzaGenerated && hasBozzaWordCaricata && (
+              {hasBozzaGenerated && hasBozzaPdfCaricata && (
                 <div style={{ border: '1px solid #d8e6f7', borderRadius: 8, padding: 8, background: '#f8fbff', display: 'grid', gap: 6 }}>
-                  <div style={{ fontWeight: 800, color: '#0d3b66', fontSize: 13 }}>Bozza Word corrente</div>
+                  <div style={{ fontWeight: 800, color: '#0d3b66', fontSize: 13 }}>Bozza PDF corrente</div>
                   {bozzaAttachments.map(att => (
                     <div key={att.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, fontSize: 13, color: '#334155', border: '1px solid #e5edf7', borderRadius: 7, background: '#fff', padding: '7px 8px' }}>
                       <div style={{ minWidth: 0, display: 'grid', gap: 2 }}>
@@ -4587,15 +4739,15 @@ function PostAttestazioneTiAmmWorkSection (props: {
                           title={props.saving ? 'Salvataggio in corso…' : 'Scarica bozza'}
                           aria-label={props.saving ? 'Salvataggio in corso…' : 'Scarica bozza'}
                           disabled={attachmentsBusy || props.saving}
-                          onClick={() => { void downloadBozzaWord(att) }}
+                          onClick={() => { void downloadBozzaPdf(att) }}
                           style={bozzaIconButtonStyle({ disabled: attachmentsBusy || props.saving })}
                         >
                           <BozzaActionIcon name='download' size={24} />
                         </button>
                         <button
                           type='button'
-                          title='Elimina bozza'
-                          aria-label='Elimina bozza'
+                          title={verifiedFinalPdfCaricato ? 'Elimina PDF definitivo' : 'Elimina bozza PDF'}
+                          aria-label={verifiedFinalPdfCaricato ? 'Elimina PDF definitivo' : 'Elimina bozza PDF'}
                           disabled={!canDeleteBozza}
                           onClick={() => setConfirmDeleteBozza(true)}
                           style={bozzaIconButtonStyle({ danger: true, disabled: !canDeleteBozza })}
@@ -4607,16 +4759,19 @@ function PostAttestazioneTiAmmWorkSection (props: {
                   ))}
                 </div>
               )}
-              {!vistoDaRinnovareDopoRimando && riAmmHaApprovatoProposta && bozzaRientrataDaRiAmm && (
+              {verifiedFinalPdfCaricato ? (
+                <InfoBox kind='ok'>
+                  {attachmentsInfo || 'PDF definitivo verificato: il contenuto corrisponde alla versione approvata dal Responsabile dell’istruttoria amministrativa; sono state ammesse esclusivamente le variazioni del numero e della data di protocollo.'}
+                </InfoBox>
+              ) : (!vistoDaRinnovareDopoRimando && riAmmHaApprovatoProposta && bozzaRientrataDaRiAmm) ? (
                 <InfoBox kind='warn'>
-                  Il Responsabile dell’istruttoria amministrativa ha approvato la verifica. È possibile completare i dati di protocollo, aggiornare la bozza definitiva e predisporre l’e-mail al Direttore.
+                  {riAmmApprovedMessage}
                 </InfoBox>
-              )}
-              {!vistoDaRinnovareDopoRimando && bozzaAlreadyTransmitted && (
+              ) : (!vistoDaRinnovareDopoRimando && bozzaAlreadyTransmitted && !riAmmHaApprovatoProposta) ? (
                 <InfoBox>
-                  La bozza è già stata inviata al Responsabile dell’istruttoria amministrativa e non può essere modificata in questa fase.
+                  {riAmmVerifyingMessage}
                 </InfoBox>
-              )}
+              ) : null}
               <div style={{ display: 'flex', justifyContent: 'flex-end', flexWrap: 'wrap', gap: 8 }}>
                 <button
                   type='button'
@@ -4629,8 +4784,8 @@ function PostAttestazioneTiAmmWorkSection (props: {
                   <BozzaActionIcon name='edit' size={24} />
                 </button>
                 <label
-                  title={attachmentsBusy ? 'Caricamento…' : 'Carica bozza'}
-                  aria-label={attachmentsBusy ? 'Caricamento…' : 'Carica bozza'}
+                  title={attachmentsBusy ? 'Caricamento…' : (postApprovalProtocolSaved ? 'Carica PDF definitivo e verifica corrispondenza' : 'Carica bozza PDF')}
+                  aria-label={attachmentsBusy ? 'Caricamento…' : (postApprovalProtocolSaved ? 'Carica PDF definitivo e verifica corrispondenza' : 'Carica bozza PDF')}
                   aria-disabled={!canUploadBozza}
                   style={{ ...bozzaIconButtonStyle({ disabled: !canUploadBozza }), margin: 0 }}
                 >
@@ -4639,18 +4794,18 @@ function PostAttestazioneTiAmmWorkSection (props: {
                     key={inputKey}
                     type='file'
                     disabled={!canUploadBozza}
-                    accept='.doc,.docx,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+                    accept='.pdf,application/pdf'
                     style={{ display: 'none' }}
                     onChange={e => {
                       const file = e.target.files?.[0] || null
-                      void uploadBozzaWord(file)
+                      void uploadBozzaPdf(file)
                     }}
                   />
                 </label>
                 <button
                   type='button'
-                  title='Trasmetti bozza al Responsabile'
-                  aria-label='Trasmetti bozza al Responsabile'
+                  title={riAmmHaApprovatoProposta ? 'Verifica già approvata. Per modificare il contenuto utilizzare Rimanda.' : 'Trasmetti bozza al Responsabile'}
+                  aria-label={riAmmHaApprovatoProposta ? 'Verifica già approvata. Per modificare il contenuto utilizzare Rimanda.' : 'Trasmetti bozza al Responsabile'}
                   disabled={!canTransmitBozza}
                   onClick={props.onTransmitBozzaDeterminazioneRiAmm}
                   style={bozzaIconButtonStyle({ disabled: !canTransmitBozza })}
@@ -4659,8 +4814,8 @@ function PostAttestazioneTiAmmWorkSection (props: {
                 </button>
                 <button
                   type='button'
-                  title='Prepara e-mail al Direttore'
-                  aria-label='Prepara e-mail al Direttore'
+                  title={protocolloFascicoloSalvatoOk && !verifiedFinalPdfCaricato ? 'Caricare e verificare il PDF definitivo prima di predisporre l’e-mail al Direttore' : 'Prepara e-mail al Direttore'}
+                  aria-label={protocolloFascicoloSalvatoOk && !verifiedFinalPdfCaricato ? 'Caricare e verificare il PDF definitivo prima di predisporre l’e-mail al Direttore' : 'Prepara e-mail al Direttore'}
                   disabled={!canPrepareEmailDirettore}
                   onClick={props.onPrepareEmailDirettore}
                   style={bozzaIconButtonStyle({ disabled: !canPrepareEmailDirettore })}
@@ -4799,7 +4954,7 @@ function CompactPracticeHeader (props: { title: string, data: Record<string, any
   )
 }
 
-const POST_APPROVAL_INFO = 'La compilazione di questa scheda sarà disponibile dopo l’approvazione del Direttore d’Area.'
+const POST_APPROVAL_INFO = 'La compilazione di questa scheda sarà disponibile dopo la registrazione di numero e data dell’atto di accertamento e contestazione.'
 const POST_NOTIFICATION_INFO = 'La compilazione di questa scheda sarà disponibile solo dopo che la notifica risulta perfezionata con esito “Notificata” o “Compiuta giacenza”.'
 const READONLY_RECTIFICATION_SUFFIX = 'Eventuali inesattezze devono essere segnalate al Responsabile istruttoria amministrativa, affinché sia valutato il rimando all’Area di provenienza per la rettifica.'
 const TRASGRESSORE_ANAGRAFICA_READONLY_INFO = `I dati anagrafici del trasgressore sono riportati in sola lettura. ${READONLY_RECTIFICATION_SUFFIX}`
@@ -5118,7 +5273,7 @@ function PagamentoGuidatoSection (props: { data: Record<string, any>, fields: La
           />
         </div>
 
-        {snapshot.total > 0 && !notificationComplete && <InfoBox>Le istruzioni possono essere predisposte dopo l’approvazione dell’atto. Il termine di pagamento diventa operativo dopo il perfezionamento della notifica.</InfoBox>}
+        {snapshot.total > 0 && !notificationComplete && <InfoBox>Le istruzioni possono essere predisposte dopo la registrazione dell’atto di accertamento e contestazione. Il termine di pagamento diventa operativo dopo il perfezionamento della notifica.</InfoBox>}
         {notificationComplete && snapshot.residual > 0 && <InfoBox kind='ok'>Notifica perfezionata. Il pagamento è in monitoraggio fino all’incasso integrale o alla scadenza del termine.</InfoBox>}
         {statusMismatch && <InfoBox kind='warn'>Lo stato registrato non è coerente con i dati disponibili. Stato coerente: <strong>{paymentStatusDisplay(snapshot.suggestedStatus, props.fields)}</strong>.</InfoBox>}
       </div>
@@ -5996,70 +6151,6 @@ function SanzioniConsultiveSection (props: { loadState: SanzioneConsultivaLoadSt
   return <ParametriSanzionatoriSection loadState={props.loadState} data={props.data} fields={props.fields} canEdit={props.canEdit} onChange={props.onChange} />
 }
 
-function pdfFieldValue (data: any, fields: LayerFieldInfo[], name: string, opts?: { money?: boolean }): string {
-  const raw = pickAttrCI(data, [name])
-  if (raw == null || raw === '') return ''
-  if (opts?.money) {
-    const n = typeof raw === 'number' ? raw : parseNumberInput(raw)
-    return n != null ? formatEuroText(n) : String(raw)
-  }
-  const lf = getFieldInfo(fields, name)
-  if (lf?.domain?.codedValues) {
-    const label = domainLabel(lf, raw)
-    return label === '—' ? '' : label
-  }
-  if (looksLikeDateField(name)) {
-    const d = formatDateValue(raw)
-    return d === '—' ? '' : d
-  }
-  const v = formatValue(raw)
-  return v === '—' ? '' : v
-}
-
-function pdfDomainValue (data: any, fields: LayerFieldInfo[], names: string[], fallbackFieldName: string): string {
-  for (const name of names) {
-    const raw = pickAttrCI(data, [name])
-    if (raw == null || raw === '') continue
-    const lf = getFieldInfo(fields, name) || getFieldInfo(fields, fallbackFieldName)
-    const label = domainLabel(lf, raw, fallbackFieldName)
-    if (label && label !== '—') return label
-  }
-  return ''
-}
-
-function formatPdfDateTimeValue (value: any, fallbackTimeValue?: any): string {
-  const main = toDateObj(value)
-  if (!main) return ''
-  const date = main.toLocaleDateString('it-IT', { day: '2-digit', month: '2-digit', year: 'numeric' })
-  const hasRealTime = !(main.getUTCHours() === 0 && main.getUTCMinutes() === 0 && main.getUTCSeconds() === 0 && main.getUTCMilliseconds() === 0)
-  const timeSource = hasRealTime ? main : toDateObj(fallbackTimeValue)
-  const time = timeSource && !(timeSource.getUTCHours() === 0 && timeSource.getUTCMinutes() === 0 && timeSource.getUTCSeconds() === 0 && timeSource.getUTCMilliseconds() === 0)
-    ? timeSource.toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' })
-    : ''
-  return time ? `${date}, ${time}` : date
-}
-
-function pdfDateTimeValue (data: any, names: string[], fallbackTimeNames: string[] = []): string {
-  for (const name of names) {
-    const raw = pickAttrCI(data, [name])
-    if (raw == null || raw === '') continue
-    const fallback = fallbackTimeNames.map(n => pickAttrCI(data, [n])).find(v => v != null && v !== '')
-    const formatted = formatPdfDateTimeValue(raw, fallback)
-    if (formatted) return formatted
-  }
-  return ''
-}
-
-function ammOfficeLabelForPdf (value: string): string {
-  const clean = String(value || '').trim()
-  if (!clean) return ''
-  return /^ufficio\s+di\s+/i.test(clean) ? clean : `Ufficio di ${clean}`
-}
-
-function joinParts (...parts: string[]): string {
-  return parts.map(p => String(p || '').trim()).filter(Boolean).join(' ')
-}
-
 function firstTextAttr (data: any, names: string[]): string {
   for (const name of names) {
     const value = String(pickAttrCI(data || {}, [name]) || '').trim()
@@ -6116,13 +6207,309 @@ async function buildBozzaDeterminazioneDocxBlob (data: any, fields: LayerFieldIn
   return { blob: new Blob([bytes as any], { type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' }), fileName }
 }
 
-function makePdfUrl (blob: Blob, fileName: string): string {
-  return `${URL.createObjectURL(blob)}#${fileName}`
+
+let _ammPdfJsVerificationPromise: Promise<any> | null = null
+
+function loadAmmPdfJsForVerification (): Promise<any> {
+  if (!_ammPdfJsVerificationPromise) {
+    // Experience Builder: includiamo il worker nel bundle principale, come il viewer condiviso.
+    _ammPdfJsVerificationPromise = Promise.all([
+      // @ts-ignore - dichiarazioni legacy pdfjs non sempre risolte dal TS di ExB.
+      import('pdfjs-dist/legacy/build/pdf.js'),
+      // @ts-ignore - dichiarazioni legacy pdfjs non sempre risolte dal TS di ExB.
+      import('pdfjs-dist/legacy/build/pdf.worker.entry.js')
+    ]).then(([pdfjs]) => pdfjs)
+  }
+  return _ammPdfJsVerificationPromise
 }
 
-function revokePdfUrl (url?: string | null): void {
-  if (!url) return
-  try { URL.revokeObjectURL(String(url).split('#')[0]) } catch {}
+type PdfVerificationContent = {
+  text: string
+  protocolReferences: Array<{ numero: string, data: string }>
+}
+
+function normalizePdfVerificationText (value: any): string {
+  let s = String(value ?? '')
+  try { s = s.normalize('NFKC') } catch {}
+  return s
+    .replace(/\u00ad/g, '')
+    .replace(/\u00a0/g, ' ')
+    .replace(/[“”]/g, '"')
+    .replace(/[‘’]/g, "'")
+    .replace(/\s+/g, ' ')
+    .trim()
+}
+
+const PROPOSTA_PROTOCOL_REF_RE = /(Proposta\s+di\s+contestazione(?:(?!Proposta\s+di\s+contestazione).){0,320}?\bprot\.?\s*n\.?\s*)([^\s,;]+)(\s+del\s+)([^\s,;]+)/gi
+
+function canonicalizeApprovedDeterminationText (value: string): string {
+  const normalized = normalizePdfVerificationText(value)
+  return normalized.replace(
+    PROPOSTA_PROTOCOL_REF_RE,
+    (_all, prefix, _numero, separator, _data) => `${prefix}§PROTOCOLLO_FASCICOLO§${separator}§DATA_PROTOCOLLO_FASCICOLO§`
+  )
+}
+
+function extractPropostaProtocolReferences (value: string): Array<{ numero: string, data: string }> {
+  const normalized = normalizePdfVerificationText(value)
+  const refs: Array<{ numero: string, data: string }> = []
+  const re = new RegExp(PROPOSTA_PROTOCOL_REF_RE.source, PROPOSTA_PROTOCOL_REF_RE.flags)
+  let match: RegExpExecArray | null = null
+  while ((match = re.exec(normalized)) != null) {
+    refs.push({
+      numero: String(match[2] || '').replace(/[.,;:]+$/g, '').trim(),
+      data: String(match[4] || '').replace(/[.,;:]+$/g, '').trim()
+    })
+    if (match.index === re.lastIndex) re.lastIndex++
+  }
+  return refs
+}
+
+async function extractPdfVerificationContent (blob: Blob): Promise<PdfVerificationContent> {
+  const pdfjs = await loadAmmPdfJsForVerification()
+  const bytes = new Uint8Array(await blob.arrayBuffer())
+  const loadingTask = pdfjs.getDocument({ data: bytes })
+  const pdf = await loadingTask.promise
+  const pages: string[] = []
+  try {
+    for (let pageNo = 1; pageNo <= Number(pdf?.numPages || 0); pageNo++) {
+      const page = await pdf.getPage(pageNo)
+      const content = await page.getTextContent()
+      const parts: string[] = []
+      for (const item of (content?.items || [])) {
+        const str = String((item as any)?.str || '')
+        if (str) parts.push(str)
+        if ((item as any)?.hasEOL) parts.push(' ')
+      }
+      pages.push(parts.join(' '))
+    }
+  } finally {
+    try { await loadingTask.destroy?.() } catch {}
+    try { await pdf.destroy?.() } catch {}
+  }
+  const text = normalizePdfVerificationText(pages.join(' '))
+  return { text, protocolReferences: extractPropostaProtocolReferences(text) }
+}
+
+async function sha256Hex (value: string): Promise<string> {
+  try {
+    const bytes = new TextEncoder().encode(String(value || ''))
+    const digest = await crypto.subtle.digest('SHA-256', bytes)
+    return Array.from(new Uint8Array(digest)).map(b => b.toString(16).padStart(2, '0')).join('')
+  } catch {
+    return ''
+  }
+}
+
+function normalizeProtocolVerificationValue (value: any): string {
+  return normalizePdfVerificationText(value).replace(/\s+/g, '').replace(/[.,;:]+$/g, '').toLowerCase()
+}
+
+function protocolDateForVerification (value: any): string {
+  const d = toDateObj(value)
+  return d ? d.toLocaleDateString('it-IT') : String(value ?? '').trim()
+}
+
+function firstPdfTextDifference (approvedCanonical: string, candidateCanonical: string): string {
+  const a = normalizePdfVerificationText(approvedCanonical)
+  const b = normalizePdfVerificationText(candidateCanonical)
+  const max = Math.min(a.length, b.length)
+  let at = 0
+  while (at < max && a.charCodeAt(at) === b.charCodeAt(at)) at++
+  const start = Math.max(0, at - 70)
+  const endA = Math.min(a.length, at + 120)
+  const endB = Math.min(b.length, at + 120)
+  const approvedExcerpt = a.slice(start, endA)
+  const candidateExcerpt = b.slice(start, endB)
+  return `Versione approvata: “…${approvedExcerpt}…”\nPDF caricato: “…${candidateExcerpt}…”`
+}
+
+
+type ApprovedBozzaReferencePayload = {
+  version: 1
+  oid: number
+  canonicalTextSha256: string
+  capturedAt: number
+}
+
+function approvedBozzaReferenceKeywords (capturedAt = Date.now()): string {
+  return `${GII_ATTACHMENT_KEYWORDS.approvedBozzaReference}|capturedAt=${capturedAt}`
+}
+
+async function buildApprovedBozzaReferencePayload (blob: Blob, oid: number): Promise<ApprovedBozzaReferencePayload> {
+  const extracted = await extractPdfVerificationContent(blob)
+  if (!extracted.text) throw new Error('Non è stato possibile estrarre il testo del PDF trasmesso a RI_AMM.')
+  const canonical = canonicalizeApprovedDeterminationText(extracted.text)
+  const canonicalTextSha256 = await sha256Hex(canonical)
+  if (!canonicalTextSha256) throw new Error('Non è stato possibile calcolare l’impronta della bozza trasmessa a RI_AMM.')
+  return {
+    version: 1,
+    oid: Number(oid),
+    canonicalTextSha256,
+    capturedAt: Date.now()
+  }
+}
+
+async function replaceApprovedBozzaReferenceAttachment (
+  layer: any,
+  oid: number,
+  layerUrl: string,
+  approvedPdfBlob: Blob
+): Promise<ApprovedBozzaReferencePayload> {
+  const payload = await buildApprovedBozzaReferencePayload(approvedPdfBlob, oid)
+  const before = await queryAmmAttachments(layer, oid, layerUrl)
+  const oldRefs = before.filter(isGiiApprovedBozzaReferenceAttachment)
+  const file = new File(
+    [JSON.stringify(payload)],
+    `gii_riferimento_bozza_ri_amm_${Number(oid)}.json`,
+    { type: 'application/json', lastModified: payload.capturedAt }
+  )
+  const ids = await addAmmAttachments(layer, oid, [file], layerUrl, approvedBozzaReferenceKeywords(payload.capturedAt))
+  const keepId = Number(ids?.[0])
+  if (!Number.isFinite(keepId) || keepId <= 0) {
+    throw new Error('Impossibile registrare il riferimento interno della bozza trasmessa a RI_AMM.')
+  }
+
+  // Rimuove soltanto riferimenti interni precedenti. I documenti del fascicolo
+  // non vengono mai toccati da questa operazione.
+  for (const att of oldRefs) {
+    const id = Number(att.id)
+    if (Number.isFinite(id) && id > 0 && id !== keepId) {
+      try { await deleteAmmAttachment(layer, oid, id, layerUrl) } catch {}
+    }
+  }
+  return payload
+}
+
+async function loadApprovedBozzaReferencePayload (
+  layer: any,
+  oid: number,
+  layerUrl: string
+): Promise<ApprovedBozzaReferencePayload | null> {
+  const all = await queryAmmAttachments(layer, oid, layerUrl)
+  const refs = all.filter(isGiiApprovedBozzaReferenceAttachment)
+  const latest = pickLatestGiiAttachment(refs as any[]) as AmmAttachmentInfo | null
+  if (!latest) return null
+  try {
+    const blob = await fetchAmmAttachmentBlobForPdf(latest, oid, layerUrl)
+    const raw = await blob.text()
+    const parsed: any = JSON.parse(raw)
+    const hash = String(parsed?.canonicalTextSha256 || '').trim().toLowerCase()
+    if (!/^[a-f0-9]{64}$/.test(hash)) return null
+    return {
+      version: 1,
+      oid: Number(parsed?.oid || oid),
+      canonicalTextSha256: hash,
+      capturedAt: Number(parsed?.capturedAt || 0)
+    }
+  } catch {
+    return null
+  }
+}
+
+async function verifyFinalPdfAgainstApprovedReference (
+  approvedReference: ApprovedBozzaReferencePayload,
+  candidateFile: File,
+  protocolNumber: any,
+  protocolDate: any
+): Promise<{ approvedTextSha256: string }> {
+  const candidate = await extractPdfVerificationContent(candidateFile)
+  if (!candidate.text) {
+    throw new Error('Non è stato possibile estrarre il testo necessario per verificare il PDF definitivo.')
+  }
+
+  const expectedNumber = normalizeProtocolVerificationValue(protocolNumber)
+  const expectedDate = normalizeProtocolVerificationValue(protocolDateForVerification(protocolDate))
+  if (!expectedNumber || !expectedDate) {
+    throw new Error('Numero e data del protocollo fascicolo devono essere salvati prima della verifica del PDF definitivo.')
+  }
+
+  if (candidate.protocolReferences.length === 0) {
+    throw new Error('Nel PDF definitivo non è stato individuato il riferimento al protocollo della Proposta di contestazione.')
+  }
+
+  const invalidReference = candidate.protocolReferences.find(ref =>
+    normalizeProtocolVerificationValue(ref.numero) !== expectedNumber ||
+    normalizeProtocolVerificationValue(ref.data) !== expectedDate
+  )
+  if (invalidReference) {
+    throw new Error(
+      `Il PDF definitivo non riporta correttamente il protocollo fascicolo. Atteso: n. ${String(protocolNumber || '').trim()} del ${protocolDateForVerification(protocolDate)}.`
+    )
+  }
+
+  const candidateCanonical = canonicalizeApprovedDeterminationText(candidate.text)
+  const candidateHash = await sha256Hex(candidateCanonical)
+  const approvedHash = String(approvedReference?.canonicalTextSha256 || '').trim().toLowerCase()
+
+  if (!candidateHash || candidateHash.toLowerCase() !== approvedHash) {
+    throw new Error(
+      'Il PDF definitivo contiene differenze rispetto alla versione approvata dal Responsabile dell’istruttoria amministrativa diverse dal numero e dalla data di protocollo. Il file non è stato caricato. Per modificare il contenuto approvato utilizzare Rimanda e predisporre una nuova bozza da sottoporre a verifica.'
+    )
+  }
+
+  return { approvedTextSha256: approvedHash }
+}
+
+async function verifyFinalPdfAgainstApproved (
+  approvedBlob: Blob,
+  candidateFile: File,
+  protocolNumber: any,
+  protocolDate: any
+): Promise<{ approvedTextSha256: string }> {
+  const [approved, candidate] = await Promise.all([
+    extractPdfVerificationContent(approvedBlob),
+    extractPdfVerificationContent(candidateFile)
+  ])
+
+  if (!approved.text || !candidate.text) {
+    throw new Error('Non è stato possibile estrarre il testo necessario per verificare i due PDF.')
+  }
+
+  const expectedNumber = normalizeProtocolVerificationValue(protocolNumber)
+  const expectedDate = normalizeProtocolVerificationValue(protocolDateForVerification(protocolDate))
+  if (!expectedNumber || !expectedDate) {
+    throw new Error('Numero e data del protocollo fascicolo devono essere salvati prima della verifica del PDF definitivo.')
+  }
+
+  if (candidate.protocolReferences.length === 0) {
+    throw new Error('Nel PDF definitivo non è stato individuato il riferimento al protocollo della Proposta di contestazione.')
+  }
+
+  const invalidReference = candidate.protocolReferences.find(ref =>
+    normalizeProtocolVerificationValue(ref.numero) !== expectedNumber ||
+    normalizeProtocolVerificationValue(ref.data) !== expectedDate
+  )
+  if (invalidReference) {
+    throw new Error(
+      `Il PDF definitivo non riporta correttamente il protocollo fascicolo. Atteso: n. ${String(protocolNumber || '').trim()} del ${protocolDateForVerification(protocolDate)}.`
+    )
+  }
+
+  const approvedCanonical = canonicalizeApprovedDeterminationText(approved.text)
+  const candidateCanonical = canonicalizeApprovedDeterminationText(candidate.text)
+
+  if (approvedCanonical !== candidateCanonical) {
+    throw new Error(
+      'Il PDF definitivo contiene differenze rispetto alla versione approvata dal Responsabile dell’istruttoria amministrativa diverse dal numero e dalla data di protocollo. Il file non è stato caricato. Per modificare il contenuto approvato utilizzare Rimanda e predisporre una nuova bozza da sottoporre a verifica.\n' +
+      firstPdfTextDifference(approvedCanonical, candidateCanonical)
+    )
+  }
+
+  return { approvedTextSha256: await sha256Hex(approvedCanonical) }
+}
+
+async function fetchAmmAttachmentBlobForPdf (att: AmmAttachmentInfo, oid: number, layerUrl: string): Promise<Blob> {
+  const raw = attachmentRawUrl(att, oid, layerUrl)
+  if (!raw) throw new Error('URL allegato non disponibile.')
+  const token = await getEsriTokenForUrl(layerUrl || raw)
+  let url = raw
+  if (token && /^https?:/i.test(url) && !/[?&]token=/.test(url)) {
+    url = `${url}${url.includes('?') ? '&' : '?'}token=${encodeURIComponent(token)}`
+  }
+  const resp = await fetch(url, { credentials: 'same-origin' })
+  if (!resp.ok) throw new Error(`Caricamento allegato fallito (HTTP ${resp.status}).`)
+  return await resp.blob()
 }
 
 function downloadBlobFile (blob: Blob, fileName: string): void {
@@ -6179,12 +6566,14 @@ function encodeMimeHeader (value: any): string {
   return /^[ -~]*$/.test(clean) ? clean : `=?UTF-8?B?${utf8Base64(clean)}?=`
 }
 
-async function downloadEmailDraftWithAttachments (opts: { to: string, subject: string, body: string, attachments: EmailDraftAttachment[], fileName: string }): Promise<void> {
+async function downloadEmailDraftWithAttachments (opts: { to: string, cc?: string[], subject: string, body: string, attachments: EmailDraftAttachment[], fileName: string }): Promise<void> {
   const to = sanitizeEmailHeaderText(opts.to)
   const subject = sanitizeEmailHeaderText(opts.subject)
   const boundary = `gii_${Date.now()}_${Math.random().toString(16).slice(2)}`
+  const cc = Array.from(new Set((opts.cc || []).map(v => sanitizeEmailHeaderText(v)).filter(Boolean)))
   const lines: string[] = [
     `To: ${to}`,
+    ...(cc.length ? [`Cc: ${cc.join(', ')}`] : []),
     `Subject: ${encodeMimeHeader(subject)}`,
     'MIME-Version: 1.0',
     `Content-Type: multipart/mixed; boundary="${boundary}"`,
@@ -6280,247 +6669,47 @@ function DatiGeneraliAmmSection (props: { title: string, data: Record<string, an
 }
 
 
-async function buildRapportoAmmPreviewPdfBlob (data: any, fields: LayerFieldInfo[], profile: { username: string, fullName: string }, nsConfig?: { detailUrl?: string, parametriUrl?: string, parametroCode?: string }): Promise<{ blob: Blob, fileName: string }> {
-  const iterGlobalId = pickAttrCI(data || {}, ['globalid', 'GlobalID', 'GLOBALID', 'parent_globalid'])
-  const [utentiCache, cicli] = await Promise.all([
-    ensureAmmUtentiCache(),
-    loadRapportoIterCicliForPdf(iterGlobalId)
-  ])
-  const map = buildPlaceholderMap(data, utentiCache as any, cicli)
-  await applyNotaSpeseToRapportoMap(map, data, nsConfig, { includeNotaSpese: true })
-  const bytes = await buildRapportoPdf(map)
-  const base = String(map.cod_pratica || 'rapporto').replace(/[^a-zA-Z0-9_-]/g, '_')
-  return { blob: new Blob([bytes as any], { type: 'application/pdf' }), fileName: `rapporto_tecnico_${base}.pdf` }
-}
-
-async function buildAmmNotaSpesePdfItems (data: any, fields: LayerFieldInfo[], profile: { username: string, fullName: string }, selectedKeys?: Record<string, boolean>, nsConfig?: { detailUrl?: string, parametriUrl?: string, parametroCode?: string }): Promise<Array<{ blob: Blob, fileName: string }>> {
-  const map = buildPlaceholderMap(data || {}, null, [])
-  const { selectedGroups: selected } = await applyNotaSpeseToRapportoMap(map, data || {}, nsConfig, { includeNotaSpese: true, selectedNotaSpeseKeys: selectedKeys })
-  if (!selected.length) return []
-  const art30Summary = buildArt30RapportoSummary(data || {})
-  const hasRealRaRows = selected.some(group => ((group.rows as any)?.RA || []).length > 0)
-  const base = String(map.cod_pratica || 'rapporto').replace(/[^a-zA-Z0-9_-]/g, '_')
-  const luogoData = 'Cagliari, ' + (pdfFieldValue(data || {}, fields || [], 'data_firma') || new Date().toLocaleDateString('it-IT', { day: '2-digit', month: '2-digit', year: 'numeric' }))
+async function buildProtocolloFascicoloEmailAttachment (
+  oid: number,
+  ds: any,
+  layerUrl: string,
+  nsConfig?: { detailUrl?: string, parametriUrl?: string, parametroCode?: string }
+): Promise<EmailDraftAttachment> {
+  // Rapporto, nota spese e allegati generici passano dallo stesso builder condiviso
+  // del viewer. Proposta e bozza non vengono mai ricostruite: qui si usa il PDF
+  // della Proposta realmente allegato e già verificato nel workflow amministrativo.
   const items: Array<{ blob: Blob, fileName: string }> = []
-  for (let i = 0; i < selected.length; i++) {
-    const group = selected[i]
-    const nsData: NotaSpeseData = {
-      cod_pratica: map.cod_pratica || map.n_rapporto || '',
-      area_label: map.area_label || '',
-      settore_label: map.settore_label || '',
-      area_cod: map.area_cod || '',
-      settore_cod: map.settore_cod || '',
-      numero_nota: i + 1,
-      titolo_nota: group.label,
-      rows: group.rows as any,
-      summary: group.summary as any,
-      art30: !hasRealRaRows && group.codiceCasistica === 'C104_ATTREZZATURE_DANNEGGIATE' && art30Summary.hasData
-        ? {
-            rows: art30Summary.rows.map(row => ({
-              codice: row.codice,
-              descrizione: row.descrizione,
-              quantita: row.quantita,
-              valore_unitario: row.valoreUnitario,
-              importo: row.importo ?? ((row.valoreUnitario ?? 0) * row.quantita)
-            })),
-            rimborso: art30Summary.rimborso,
-            cauzione: art30Summary.cauzione,
-            cauzione_quantita: art30Summary.cauzioneQuantita,
-            cauzione_valore_unitario: art30Summary.cauzioneValoreUnitario,
-            cauzione_unita_misura: art30Summary.cauzioneUnitaMisura,
-            netto: art30Summary.netto
-          }
-        : null,
-      luogo_data: luogoData,
-      firma_nome: map.iter_compilazione_nome || map.generato_da || profile.fullName || profile.username || '',
-      rapporto_respinto: map.rapporto_respinto,
-      rapporto_approvato: map.rapporto_approvato,
-      rapporto_istruttoria: map.rapporto_istruttoria
-    }
-    const bytes = await buildNotaSpesePdf(nsData)
-    const suffix = selected.length > 1 ? `_nota_${i + 1}` : ''
-    items.push({ blob: new Blob([bytes as any], { type: 'application/pdf' }), fileName: `nota_spese_${base}${suffix}.pdf` })
-  }
-  return items
-}
-
-async function buildBozzaDeterminazionePdfBlob (data: any, fields: LayerFieldInfo[], profile: { username: string, fullName: string }): Promise<{ blob: Blob, fileName: string }> {
-  const map = buildBozzaDeterminazioneMap(data, profile)
-  const bytes = await buildBozzaDeterminazionePdf(map)
-  const base = String(map.n_rapporto || map.objectid || 'pratica').replace(/[^a-zA-Z0-9_-]/g, '_')
-  return { blob: new Blob([bytes as any], { type: 'application/pdf' }), fileName: `determinazione_dirigenziale_${base}.pdf` }
-}
-
-async function fetchAmmAttachmentBlobForPdf (att: AmmAttachmentInfo, oid: number, layerUrl: string): Promise<Blob> {
-  const raw = attachmentRawUrl(att, oid, layerUrl)
-  if (!raw) throw new Error('URL allegato non disponibile.')
-  const token = await getEsriTokenForUrl(layerUrl || raw)
-  let url = raw
-  if (token && /^https?:/i.test(url) && !/[?&]token=/.test(url)) {
-    url = `${url}${url.includes('?') ? '&' : '?'}token=${encodeURIComponent(token)}`
-  }
-  const resp = await fetch(url, { credentials: 'same-origin' })
-  if (!resp.ok) throw new Error(`Caricamento allegato fallito (HTTP ${resp.status}).`)
-  return await resp.blob()
-}
-
-
-
-const AMM_ATTACHMENT_PAGE_W = 595.28
-const AMM_ATTACHMENT_PAGE_H = 841.89
-const AMM_ATTACHMENT_PAGE_MARGIN = 42
-
-function drawAmmAttachmentPdfTextLines (page: any, font: any, text: string, x: number, y: number, size: number, maxWidth: number, color = rgb(0.12, 0.14, 0.18)): number {
-  const words = String(text || '').split(/\s+/).filter(Boolean)
-  let line = ''
-  let curY = y
-  for (const word of words) {
-    const next = line ? `${line} ${word}` : word
-    if (font.widthOfTextAtSize(next, size) > maxWidth && line) {
-      page.drawText(line, { x, y: curY, size, font, color })
-      curY -= size + 4
-      line = word
-    } else {
-      line = next
-    }
-  }
-  if (line) {
-    page.drawText(line, { x, y: curY, size, font, color })
-    curY -= size + 4
-  }
-  return curY
-}
-
-function isAmmImageAttachmentForPdf (att: AmmAttachmentInfo): boolean {
-  const contentType = String(att?.contentType || '').toLowerCase()
-  const name = String(att?.name || '').toLowerCase()
-  return contentType.includes('png') || name.endsWith('.png') || contentType.includes('jpeg') || contentType.includes('jpg') || name.endsWith('.jpg') || name.endsWith('.jpeg')
-}
-
-async function normalizeAmmImageAttachmentBytesForPdf (blob: Blob): Promise<Uint8Array | null> {
-  if (typeof document === 'undefined' || typeof window === 'undefined') return null
-  let source: any = null
-  let sourceUrl = ''
-  let closeSource = () => {}
-  try {
-    const createBitmap = (window as any)?.createImageBitmap
-    if (typeof createBitmap === 'function') {
-      source = await createBitmap(blob, { imageOrientation: 'from-image' }).catch((): null => null)
-      if (source) closeSource = () => { try { source.close?.() } catch {} }
-    }
-    if (!source) {
-      sourceUrl = URL.createObjectURL(blob)
-      source = await new Promise<HTMLImageElement | null>(resolve => {
-        const img = new Image()
-        img.onload = () => resolve(img)
-        img.onerror = () => resolve(null)
-        img.src = sourceUrl
-      })
-      closeSource = () => { try { if (sourceUrl) URL.revokeObjectURL(sourceUrl) } catch {} }
-    }
-    if (!source) return null
-
-    const srcW = Math.max(1, Math.round(Number(source.width || source.naturalWidth) || 0))
-    const srcH = Math.max(1, Math.round(Number(source.height || source.naturalHeight) || 0))
-    if (!srcW || !srcH) return null
-
-    const maxPx = 2200
-    const scale = Math.min(1, maxPx / Math.max(srcW, srcH))
-    const outW = Math.max(1, Math.round(srcW * scale))
-    const outH = Math.max(1, Math.round(srcH * scale))
-    const canvas = document.createElement('canvas')
-    canvas.width = outW
-    canvas.height = outH
-    const ctx = canvas.getContext('2d')
-    if (!ctx) return null
-    ctx.drawImage(source, 0, 0, srcW, srcH, 0, 0, outW, outH)
-    const outBlob = await canvasToBlobForAmmEdit(canvas, 'image/png', 0.92)
-    return new Uint8Array(await outBlob.arrayBuffer())
-  } catch {
-    return null
-  } finally {
-    closeSource()
-  }
-}
-
-async function buildAmmAttachmentsPdfBlob (items: AmmAttachmentInfo[], oid: number, layerUrl: string, baseName: string): Promise<{ blob: Blob, fileName: string } | null> {
-  const out = await PDFDocument.create()
-  let added = 0
-  let imagePageIndex = 0
-  const pageTitles: string[] = []
-  for (const att of items) {
-    const contentType = String(att.contentType || '').toLowerCase()
-    const name = String(att.name || '').toLowerCase()
-    if (isBozzaDeterminazioneWordAttachment(att)) continue
-    const blob = await fetchAmmAttachmentBlobForPdf(att, oid, layerUrl)
-    const bytes = new Uint8Array(await blob.arrayBuffer())
-    if (contentType.includes('pdf') || name.endsWith('.pdf')) {
-      const src = await PDFDocument.load(bytes)
-      const pages = await out.copyPages(src, src.getPageIndices())
-      pages.forEach(pg => { out.addPage(pg); added++; pageTitles.push('') })
-    } else if (isAmmImageAttachmentForPdf(att)) {
-      imagePageIndex++
-      const normalizedBytes = await normalizeAmmImageAttachmentBytesForPdf(blob)
-      const img = normalizedBytes
-        ? await out.embedPng(normalizedBytes)
-        : ((contentType.includes('png') || name.endsWith('.png')) ? await out.embedPng(bytes) : await out.embedJpg(bytes))
-      const page = out.addPage([595.28, 841.89])
-      const box = RAPPORTO_TECHNICAL_BODY_BOX
-      const scale = Math.min(box.width / Math.max(1, img.width), box.height / Math.max(1, img.height))
-      const w = img.width * scale
-      const h = img.height * scale
-      page.drawImage(img, { x: box.x + (box.width - w) / 2, y: box.y + (box.height - h) / 2, width: w, height: h })
-      pageTitles.push(attachmentTechnicalDocumentTitle(imagePageIndex, baseName))
-      added++
-    }
-  }
-  if (!added) return null
-  await drawRapportoTechnicalHeadersByPage(out, index => pageTitles[index] || attachmentTechnicalDocumentTitle(index + 1, baseName))
-  const bytes = await out.save()
-  const safe = String(baseName || 'allegati').replace(/[^a-zA-Z0-9_-]/g, '_')
-  return { blob: new Blob([bytes as any], { type: 'application/pdf' }), fileName: `allegati_${safe}.pdf` }
-}
-
-async function mergeAmmPdfItems (items: Array<{ blob: Blob, fileName: string }>): Promise<Blob> {
-  if (items.length === 1) return items[0].blob
-  const merged = await PDFDocument.create()
-  for (const item of items) {
-    const src = await PDFDocument.load(new Uint8Array(await item.blob.arrayBuffer()))
-    const pages = await merged.copyPages(src, src.getPageIndices())
-    pages.forEach(pg => merged.addPage(pg))
-  }
-  const bytes = await merged.save()
-  return new Blob([bytes as any], { type: 'application/pdf' })
-}
-
-
-async function buildProtocolloFascicoloEmailAttachment (data: any, fields: LayerFieldInfo[], profile: { username: string, fullName: string }, oid: number, ds: any, layerUrl: string, nsConfig?: { detailUrl?: string, parametriUrl?: string, parametroCode?: string }): Promise<EmailDraftAttachment> {
-  const items: Array<{ blob: Blob, fileName: string }> = []
-  items.push(await buildRapportoAmmPreviewPdfBlob(data || {}, fields || [], profile || { username: '', fullName: '' }, nsConfig))
-
-  const nsItems = await buildAmmNotaSpesePdfItems(data || {}, fields || [], profile || { username: '', fullName: '' }, undefined, nsConfig)
-  nsItems.forEach(item => items.push(item))
-
-  items.push(await buildVerbalePdfBlob(data || {}, fields || [], profile || { username: '', fullName: '' }))
+  const fascicoloTecnico = await buildFascicolo({
+    oid,
+    selection: {
+      includeTecnici: true,
+      includeMappa: false,
+      includeRapporto: true,
+      includeNotaSpese: true
+    },
+    notaSpeseConfig: nsConfig,
+    fileNamePrefix: 'fascicolo_protocollo'
+  })
+  items.push(fascicoloTecnico)
 
   const layer = await resolveLayerForEdit(ds, layerUrl)
-  const allAttachments = await queryAmmAttachments(layer, oid, layerUrl)
-  const printableAttachments = allAttachments.filter(att => !isBozzaDeterminazioneWordAttachment(att) && !isPropostaContestazionePdfAttachment(att))
-  const attPdf = printableAttachments.length > 0
-    ? await buildAmmAttachmentsPdfBlob(printableAttachments, oid, layerUrl, getReportCode(data || {}, oid) || String(oid))
-    : null
-  if (attPdf) items.push(attPdf)
+  const attachments = await queryAmmAttachments(layer, oid, layerUrl)
+  const propostaAtt = pickLatestGiiAttachment<AmmAttachmentInfo>(attachments.filter(att => isGiiPropostaContestazionePdfAttachment(att as any)))
+  if (!propostaAtt) {
+    throw new Error('PDF della Proposta di contestazione non disponibile. Impossibile predisporre il fascicolo da protocollare.')
+  }
+  items.push({
+    blob: await fetchAmmAttachmentBlobForPdf(propostaAtt, oid, layerUrl),
+    fileName: String(propostaAtt.name || 'proposta_contestazione.pdf')
+  })
 
-  const blob = items.length === 1 ? items[0].blob : await mergeAmmPdfItems(items)
-  const safe = String(getReportCode(data || {}, oid) || oid).replace(/[^a-zA-Z0-9_-]/g, '_')
-  return { blob, fileName: `fascicolo_protocollo_${safe}.pdf`, contentType: 'application/pdf' }
+  const blob = items.length === 1 ? items[0].blob : await mergeFascicoloPdfItems(items)
+  return { blob, fileName: fascicoloTecnico.fileName, contentType: 'application/pdf' }
 }
 
 function FascicoloAmmPreviewSection (props: {
   data: Record<string, any>
   liveRefreshVersion?: number
-  fields: LayerFieldInfo[]
-  profile: { username: string, fullName: string }
   role?: string
   nsConfig?: { detailUrl?: string, parametriUrl?: string, parametroCode?: string }
   hasSelection: boolean
@@ -6540,11 +6729,6 @@ function FascicoloAmmPreviewSection (props: {
   const oid = props.oid != null && Number.isFinite(Number(props.oid)) ? Number(props.oid) : null
   const layerUrl = normalizeEditLayerUrl(props.layerUrl || getDataSourceUrl(props.ds))
 
-  // La determinazione dirigenziale non è ancora gestita da buildFascicolo: resta un
-  // documento costruito qui e passato al pannello condiviso come extraDocumentBuilder.
-  const buildDeterminazioneExtra = React.useCallback(async () => {
-    return await buildBozzaDeterminazionePdfBlob(props.data || {}, props.fields || [], props.profile || { username: '', fullName: '' })
-  }, [props.data, props.fields, props.profile])
 
   // Editing-amm non interroga mai la geometria nelle query dei dati (returnGeometry: false
   // ovunque): per la mappa headless serve un'interrogazione mirata sul solo punto, quando
@@ -6578,8 +6762,7 @@ function FascicoloAmmPreviewSection (props: {
         notaSpeseConfig={props.nsConfig}
         canSeeAmministrativi={true}
         role={props.role}
-        extraDocumentBuilder={buildDeterminazioneExtra}
-        profile={props.profile}
+        refreshKey={props.liveRefreshVersion}
         viewerBackgroundColor={props.viewerBackgroundColor}
         pdfHeaderBackgroundColor={props.pdfHeaderBackgroundColor}
         pdfPageAreaBackgroundColor={props.pdfPageAreaBackgroundColor}
@@ -7321,6 +7504,7 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
   const [pendingAttestationText, setPendingAttestationText] = React.useState<string | null>(null)
   const [pendingUndoAttestation, setPendingUndoAttestation] = React.useState(false)
   const [confirmTransmitBozza, setConfirmTransmitBozza] = React.useState(false)
+  const [confirmTransmitReopensCycle, setConfirmTransmitReopensCycle] = React.useState(false)
   const [ammPreviewAttachment, setAmmPreviewAttachment] = React.useState<{ id: number; name?: string; contentType?: string } | null>(null)
   const [ammPreviewRotationDeg, setAmmPreviewRotationDeg] = React.useState(0)
   const [activeAmmSection, setActiveAmmSection] = React.useState<AmmSectionKey>(() => getRequestedAmmSection() || AMM_DEFAULT_SECTION)
@@ -7863,7 +8047,7 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
       fase: roleForLog,
       ruolo_destinatario: 'RI_AMM',
       utente_destinatario: destUsername,
-      note_chiusura: 'Bozza Word della determinazione trasmessa al Responsabile dell’istruttoria amministrativa per la verifica.',
+      note_chiusura: 'Bozza PDF della determinazione trasmessa al Responsabile dell’istruttoria amministrativa per la verifica.',
       num_campi_modificati: num,
       campi_modificati: num > 0 ? Object.keys(delta.oldMap).join(', ') : '',
       valori_prima_json: num > 0 ? JSON.stringify(delta.oldMap) : '',
@@ -8065,6 +8249,13 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
       put('esito_TI_AMM', 2)
       put('dt_esito_TI_AMM', now)
       put('note_TI_AMM', note)
+
+      // Ogni nuovo visto apre la fase di predisposizione della bozza del ciclo
+      // corrente. È indispensabile riportare esplicitamente lo stato a BOZZA:
+      // altrimenti può sopravvivere VALIDATA_RI_AMM/FASCICOLO_TRASMESSO_PROTOCOLLO
+      // dal ciclo precedente e tutti i comandi TI_AMM restano erroneamente bloccati.
+      put('determinazione_stato', 'BOZZA')
+
       // Il visto del TI_AMM non apre alcun nodo operativo RI_AMM: l'unico invio
       // al Responsabile avviene con "Trasmetti bozza al Responsabile".
       // Chiudiamo quindi eventuali stati/attività RI_AMM residui creati da versioni
@@ -8074,10 +8265,20 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
       put('dt_presa_in_carico_RI_AMM', null)
       put('esito_RI_AMM', null)
       put('dt_esito_RI_AMM', null)
-      // Ogni nuovo visto apre una nuova versione corrente dei documenti amministrativi speciali.
-      // La Proposta viene rigenerata sotto; l'eventuale bozza di determinazione Word
-      // già caricata in un ciclo precedente viene eliminata e i relativi campi vengono azzerati.
-      for (const name of BOZZA_DETERMINAZIONE_STARTED_FIELDS) put(name, null)
+      put('note_RI_AMM', null)
+
+      // Il nuovo visto apre un nuovo ciclo: il protocollo del fascicolo precedente
+      // non può restare valido nella nuova versione.
+      put('protocollo_fascicolo_numero', null)
+      put('protocollo_fascicolo_data', null)
+
+      // Si azzerano soltanto i metadati della vecchia bozza. NON va azzerato
+      // determinazione_stato, che poche righe sopra è stato impostato a BOZZA.
+      // BOZZA_DETERMINAZIONE_STARTED_FIELDS contiene anche determinazione_stato:
+      // usarlo qui annullerebbe il nuovo stato e bloccherebbe tutti i comandi TI_AMM.
+      put('dt_bozza_determinazione', null)
+      put('bozza_determinazione_da', null)
+
       // Il visto non trasferisce ancora la pratica: il Tecnico istruttore amministrativo
       // deve predisporre/caricare la bozza e poi trasmettere proposta e bozza
       // al Responsabile dell’istruttoria amministrativa con l’apposito pulsante interno.
@@ -8103,8 +8304,8 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
 
       const propostaBlob = await buildVerbalePdfBlob({ ...base, ...cleanAttrs }, fields, { username: profile.username, fullName: profile.fullName })
       const propostaFile = new File([propostaBlob.blob], propostaBlob.fileName, { type: 'application/pdf', lastModified: now })
-      await replacePropostaContestazionePdfAttachment(layer, Number(oid), propostaFile, layerUrl)
-      await deleteBozzaDeterminazioneWordAttachments(layer, Number(oid), layerUrl)
+      await replacePropostaContestazionePdfAttachment(layer, Number(oid), propostaFile, layerUrl, 'DRAFT')
+      await deleteBozzaDeterminazioneAttachments(layer, Number(oid), layerUrl)
 
       const changedFieldNames = Object.keys(cleanAttrs).filter(k => k !== idName)
       const nextRecordAttrs = { ...prevRecordAttrs, ...cleanAttrs }
@@ -8172,7 +8373,7 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
     const approvalMs = dateMsOrNull(verbaleApprovalDateValue(current))
     const protocolloMs = dateMsOrNull(protocolloData)
     const notificaMs = dateMsOrNull(notificaData)
-    if (approvalMs != null && protocolloMs != null && protocolloMs < approvalMs) issues.push('Protocollo: la data non può precedere l’approvazione dell’atto.')
+    if (approvalMs != null && protocolloMs != null && protocolloMs < approvalMs) issues.push('Protocollo: la data non può precedere la data dell’atto di accertamento e contestazione.')
     if (protocolloMs != null && notificaMs != null && notificaMs < protocolloMs) issues.push('Notifica: la data non può precedere la data di protocollo dell’atto.')
     const totale = parseNumberInput(pickAttrCI(current, ['pagamento_importo_totale'])) || 0
     if (totale > 0) {
@@ -8290,11 +8491,26 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
       if (typeof layer.load === 'function') { try { await layer.load() } catch { } }
       const fields = layer?.fields?.length ? (layer.fields as any[]).map(f => ({ name: String(f.name), type: String(f.type || ''), alias: String(f.alias || f.name), domain: f.domain || null, editable: f.editable !== false })) : layerFields
       const idName = realFieldName(fields, active.idFieldName) || active.idFieldName || 'OBJECTID'
-      const nextDraft: Record<string, any> = { ...(draft || {}), determinazione_stato: 'BOZZA' }
+      const currentDeterminationState = String(pickAttrCI(base, ['determinazione_stato']) || '').trim().toUpperCase()
+      const postApprovalDefinitiveUpdate =
+        isPropostaContestazioneApprovedByRiAmm(base) &&
+        hasAdminValue(pickAttrCI(base, ['protocollo_fascicolo_numero'])) &&
+        hasAdminValue(pickAttrCI(base, ['protocollo_fascicolo_data']))
+
+      const nextDraft: Record<string, any> = {
+        ...(draft || {}),
+
+        // Generare/aggiornare il Word non apre un nuovo ciclo.
+        // Dopo l'approvazione e il protocollo si conserva integralmente lo stato
+        // corrente; nelle fasi di lavorazione iniziali/rimandate si mantiene BOZZA.
+        determinazione_stato: postApprovalDefinitiveUpdate
+          ? (currentDeterminationState || pickAttrCI(base, ['determinazione_stato']) || 'FASCICOLO_TRASMESSO_PROTOCOLLO')
+          : 'BOZZA'
+      }
       if (realFieldName(fields, 'dt_bozza_determinazione')) nextDraft.dt_bozza_determinazione = Date.now()
       if (realFieldName(fields, 'bozza_determinazione_da')) nextDraft.bozza_determinazione_da = profile.fullName || profile.username || ''
       const attrs: Record<string, any> = {}
-      ;['protocollo_fascicolo_numero', 'protocollo_fascicolo_data', 'determinazione_stato', 'dt_bozza_determinazione', 'bozza_determinazione_da'].forEach(name => {
+      ;['determinazione_stato', 'dt_bozza_determinazione', 'bozza_determinazione_da'].forEach(name => {
         const real = realFieldName(fields, name)
         if (!real) return
         const value = pickAttrCI(nextDraft, [real, name])
@@ -8327,7 +8543,17 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
         setInitialDraft(prev => ({ ...(prev || {}), ...savedAttrs }))
         setDraft(prev => ({ ...(prev || {}), ...savedAttrs }))
       }
-      setDialog({ kind: 'ok', title: 'Bozza Word generata', text: 'La bozza Word della determinazione è stata scaricata come copia di lavoro della pratica. Il template base non è stato modificato.' })
+
+      // La generazione del Word è deliberatamente non distruttiva:
+      // il PDF già presente resta nel fascicolo finché il TI_AMM non carica
+      // esplicitamente una nuova versione.
+      setDialog({
+        kind: 'ok',
+        title: postApprovalDefinitiveUpdate ? 'Bozza Word definitiva aggiornata' : 'Bozza Word generata',
+        text: postApprovalDefinitiveUpdate
+          ? 'È stata generata la copia Word aggiornata con i dati correnti della pratica. L’approvazione RI_AMM, il protocollo del fascicolo e il PDF già caricato restano invariati. Caricare un nuovo PDF solo se si intende sostituire il documento corrente.'
+          : 'È stata generata la copia Word di lavoro. Il PDF eventualmente già caricato resta invariato finché non viene sostituito esplicitamente con un nuovo PDF.'
+      })
       try { window.dispatchEvent(new CustomEvent('gii:record-updated', { detail: { oid: Number(oid), source: 'gii-editing-amm-bozza-determinazione-word' } })) } catch {}
     } catch (e: any) {
       if (operationContextIsCurrent()) setDialog({ kind: 'err', title: 'Errore generazione bozza Word', text: e?.message || String(e) })
@@ -8338,11 +8564,11 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
 
   const handleDeleteBozzaDeterminazione = async () => {
     if (!hasSelection || oid == null || !Number.isFinite(Number(oid))) {
-      setDialog({ kind: 'warn', title: 'Nessuna pratica selezionata', text: 'Selezionare una pratica prima di eliminare la bozza.' })
+      setDialog({ kind: 'warn', title: 'Nessuna pratica selezionata', text: 'Selezionare una pratica prima di eliminare il PDF.' })
       return false
     }
     if (!active?.ds) {
-      setDialog({ kind: 'err', title: 'Fonte dati non disponibile', text: 'Collegare al widget la vista amministrativa in Builder prima di eliminare la bozza.' })
+      setDialog({ kind: 'err', title: 'Fonte dati non disponibile', text: 'Collegare al widget la vista amministrativa in Builder prima di eliminare il PDF.' })
       return false
     }
     if (!roleAllowed) {
@@ -8350,80 +8576,94 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
       return false
     }
     if (!canEdit) {
-      setDialog({ kind: 'warn', title: 'Scheda in sola lettura', text: 'Il profilo corrente può consultare la scheda, ma non eliminare la bozza.' })
+      setDialog({ kind: 'warn', title: 'Scheda in sola lettura', text: 'Il profilo corrente può consultare la scheda, ma non eliminare il PDF.' })
       return false
     }
+
     const base = buildBozzaDeterminazioneSource()
-    const hasBozza = BOZZA_DETERMINAZIONE_STARTED_FIELDS.some(name => hasAdminValue(pickAttrCI(base, [name])))
-    if (!hasBozza) {
-      setDialog({ kind: 'warn', title: 'Bozza non presente', text: 'Non risulta alcuna bozza di determinazione da eliminare.' })
-      return false
-    }
     const currentStato = String(pickAttrCI(base, ['determinazione_stato']) || '').trim().toUpperCase()
-    const bozzaRimandataDaRiAmm = isBozzaDeterminazioneRimandataDaRiAmm(base)
-    if (currentStato && currentStato !== 'BOZZA' && !bozzaRimandataDaRiAmm) {
-      setDialog({ kind: 'warn', title: 'Bozza già avanzata', text: 'La bozza di determinazione risulta già trasmessa o validata. Eventuali eliminazioni dovranno rientrare nel successivo flusso di verifica/rimando.' })
-      return false
-    }
+    const bozzaRimandataDaResponsabile = isBozzaDeterminazioneRimandataDaRiAmm(base)
+    const bozzaInLavorazione =
+      currentStato === 'BOZZA' ||
+      bozzaRimandataDaResponsabile
+
+    const protocolloSalvato =
+      hasAdminValue(pickAttrCI(initialDraft, ['protocollo_fascicolo_numero'])) &&
+      hasAdminValue(pickAttrCI(initialDraft, ['protocollo_fascicolo_data']))
+
     const operationContextStamp = getGiiPracticeContextStamp()
     const operationContextIsCurrent = () => isGiiPracticeContextStampCurrent(operationContextStamp)
     if (!operationContextIsCurrent()) return false
+
     setSaving(true)
     try {
-      const layer = await resolveLayerForEdit(active.ds, active.layerUrl || (configuredDsState as any)?.layerUrl || getDataSourceUrl(configuredDs))
-      if (!layer?.applyEdits) throw new Error('Layer non disponibile per applyEdits. Verificare che la vista amministrativa collegata al widget abbia un URL FeatureServer valido e consenta l’editing.')
-      if (typeof layer.load === 'function') { try { await layer.load() } catch { } }
-      const fields = layer?.fields?.length ? (layer.fields as any[]).map(f => ({ name: String(f.name), type: String(f.type || ''), alias: String(f.alias || f.name), domain: f.domain || null, editable: f.editable !== false })) : layerFields
-      const idName = realFieldName(fields, active.idFieldName) || active.idFieldName || 'OBJECTID'
-      const attrs: Record<string, any> = {}
-      ;['determinazione_stato', 'dt_bozza_determinazione', 'bozza_determinazione_da'].forEach(name => {
-        const real = realFieldName(fields, name)
-        if (real) attrs[real] = null
-      })
-      let prevRecordAttrs = { ...(initialDraft || {}) }
-      try {
-        const liveAttrs = await queryCurrentLayerAttrsByOid(layer, idName, Number(oid))
-        if (liveAttrs && Object.keys(liveAttrs).length) prevRecordAttrs = liveAttrs
-      } catch (e) {
-        console.warn('[GII_LOG_EVENTI_CICLI] Impossibile rileggere il record amministrativo prima dell’eliminazione bozza determinazione:', e)
+      const layer = await resolveLayerForEdit(
+        active.ds,
+        active.layerUrl || (configuredDsState as any)?.layerUrl || getDataSourceUrl(configuredDs)
+      )
+      const layerUrl = normalizeEditLayerUrl(
+        active.layerUrl ||
+        (configuredDsState as any)?.layerUrl ||
+        layer?.url ||
+        getDataSourceUrl(active.ds) ||
+        getDataSourceUrl(configuredDs)
+      )
+      if (!layerUrl) throw new Error('URL del FeatureLayer non disponibile per eliminare il PDF.')
+
+      const allAttachments = await queryAmmAttachments(layer, Number(oid), layerUrl)
+      const pdfs = allAttachments.filter(att => isGiiBozzaDeterminazionePdfAttachment(att as any))
+      if (!pdfs.length) {
+        setDialog({ kind: 'warn', title: 'PDF non presente', text: 'Non risulta alcun PDF della determinazione da eliminare.' })
+        return false
       }
-      const cleanAttrs = filterAttrsForLayer({ [idName]: Number(oid), ...attrs }, fields)
-      if (Object.keys(cleanAttrs).some(k => k !== idName)) {
-        if (!operationContextIsCurrent()) return false
-        const res = await layer.applyEdits({ updateFeatures: [{ attributes: cleanAttrs }] })
-        const upd = res?.updateFeatureResults?.[0] || res?.updateResults?.[0] || null
-        const err = upd?.error
-        const okUpdate = !err && (upd?.success === true || upd?.objectId != null || upd?.success == null)
-        if (!okUpdate) {
-          const detail = err ? `${err.code ?? ''}: ${err.message ?? ''}` : JSON.stringify(res)
-          throw new Error(detail)
+
+      const verifiedFinalPresent = pdfs.some(isVerifiedFinalBozzaAttachment)
+      const approved = isPropostaContestazioneApprovedByRiAmm(base)
+      const canDeleteCurrentPdf =
+        (bozzaInLavorazione && !approved) ||
+        (approved && protocolloSalvato && verifiedFinalPresent)
+
+      if (!canDeleteCurrentPdf) {
+        setDialog({
+          kind: 'warn',
+          title: 'PDF non eliminabile in questa fase',
+          text: approved
+            ? 'Il PDF approvato non può essere eliminato durante la fase di protocollazione. Dopo il caricamento del PDF definitivo verificato sarà possibile eliminare esclusivamente quest’ultimo.'
+            : 'Il PDF non può essere eliminato mentre la pratica è in verifica presso il Responsabile dell’istruttoria amministrativa.'
+        })
+        return false
+      }
+
+      if (!operationContextIsCurrent()) return false
+      for (const att of pdfs) {
+        const attId = Number(att.id)
+        if (Number.isFinite(attId) && attId > 0) {
+          await deleteAmmAttachment(layer, Number(oid), attId, layerUrl)
         }
       }
 
-      const layerUrl = normalizeEditLayerUrl(active.layerUrl || (configuredDsState as any)?.layerUrl || layer?.url || getDataSourceUrl(active.ds) || getDataSourceUrl(configuredDs))
-      if (layerUrl) {
-        if (!operationContextIsCurrent()) return false
-        const allAttachments = await queryAmmAttachments(layer, Number(oid), layerUrl)
-        const bozzaWords = allAttachments.filter(isBozzaDeterminazioneWordAttachment)
-        for (const att of bozzaWords) {
-          const attId = Number(att.id)
-          if (Number.isFinite(attId) && attId > 0) await deleteAmmAttachment(layer, Number(oid), attId, layerUrl)
-        }
-      }
-
-      const changedFieldNames = Object.keys(cleanAttrs).filter(k => k !== idName)
-      if (changedFieldNames.length) await upsertAmmCycleAudit(prevRecordAttrs, { ...prevRecordAttrs, ...cleanAttrs }, changedFieldNames)
-      if (operationContextIsCurrent()) await refreshDs(active.ds, props.id)
       if (!operationContextIsCurrent()) return true
-      const savedAttrs = { ...cleanAttrs }
-      delete savedAttrs[idName]
-      setInitialDraft(prev => ({ ...(prev || {}), ...savedAttrs }))
-      setDraft(prev => ({ ...(prev || {}), ...savedAttrs }))
-      setDialog({ kind: 'ok', title: 'Bozza eliminata', text: 'La bozza di determinazione predisposta è stata eliminata. I dati di protocollo del fascicolo sono rimasti invariati.' })
-      try { window.dispatchEvent(new CustomEvent('gii:record-updated', { detail: { oid: Number(oid), source: 'gii-editing-amm-bozza-determinazione-eliminata' } })) } catch {}
+      setDialog({
+        kind: 'ok',
+        title: verifiedFinalPresent ? 'PDF definitivo eliminato' : 'Bozza PDF eliminata',
+        text: verifiedFinalPresent
+          ? 'Il PDF definitivo è stato eliminato. L’approvazione, i dati di protocollo e il riferimento interno della versione approvata restano invariati. La predisposizione dell’e-mail al Direttore è nuovamente bloccata finché non verrà caricato e verificato un nuovo PDF definitivo.'
+          : 'Il PDF è stato eliminato. Il Word di lavoro, il visto e lo stato della pratica restano invariati; è possibile generare nuovamente il Word oppure caricare un nuovo PDF.'
+      })
+      try {
+        window.dispatchEvent(new CustomEvent('gii:record-updated', {
+          detail: {
+            oid: Number(oid),
+            source: 'gii-editing-amm-pdf-determinazione-eliminato',
+            ts: Date.now()
+          }
+        }))
+      } catch {}
       return true
     } catch (e: any) {
-      if (operationContextIsCurrent()) setDialog({ kind: 'err', title: 'Errore eliminazione bozza', text: e?.message || String(e) })
+      if (operationContextIsCurrent()) {
+        setDialog({ kind: 'err', title: 'Errore eliminazione PDF', text: e?.message || String(e) })
+      }
       return false
     } finally {
       if (operationContextIsCurrent()) setSaving(false)
@@ -8448,7 +8688,18 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
       return
     }
 
+    const previewBase = buildBozzaDeterminazioneSource()
+    if (isPropostaContestazioneApprovedByRiAmm(previewBase)) {
+      setDialog({
+        kind: 'warn',
+        title: 'Verifica amministrativa già approvata',
+        text: 'La verifica amministrativa è già conclusa. Per modificare il contenuto approvato utilizzare Rimanda; la pratica tornerà quindi nella fase di predisposizione della nuova bozza.'
+      })
+      return
+    }
+
     if (!confirmed) {
+      setConfirmTransmitReopensCycle(false)
       setConfirmTransmitBozza(true)
       return
     }
@@ -8472,8 +8723,13 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
         setDialog({ kind: 'warn', title: 'Visto mancante', text: 'Apporre il visto di conformità prima di trasmettere la bozza al Responsabile dell’istruttoria amministrativa.' })
         return
       }
-      if (isPropostaContestazioneApprovedByRiAmm(base)) {
-        setDialog({ kind: 'warn', title: 'Proposta già approvata', text: 'La proposta è già stata approvata dal Responsabile dell’istruttoria amministrativa. Procedere con la protocollazione e con la preparazione dell’e-mail al Direttore.' })
+      const propostaGiaApprovataRiAmm = isPropostaContestazioneApprovedByRiAmm(base)
+      if (propostaGiaApprovataRiAmm) {
+        setDialog({
+          kind: 'warn',
+          title: 'Verifica amministrativa già approvata',
+          text: 'La verifica amministrativa è già conclusa. Per modificare il contenuto approvato utilizzare Rimanda.'
+        })
         return
       }
       const statoCorrente = String(pickAttrCI(base, ['determinazione_stato']) || '').trim().toUpperCase()
@@ -8485,11 +8741,19 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
 
       const attachments = await queryAmmAttachments(layer, Number(oid), layerUrl)
       if (!isGiiPracticeContextStampCurrent(operationContextStamp)) return
-      const bozzaWords = attachments.filter(isBozzaDeterminazioneWordAttachment)
-      if (!bozzaWords.length) {
-        setDialog({ kind: 'warn', title: 'Bozza Word non caricata', text: 'Caricare la bozza Word definitiva prima di trasmetterla al Responsabile dell’istruttoria amministrativa.' })
+      const bozzaPdfs = attachments.filter(isGiiBozzaDeterminazionePdfAttachment)
+      if (!bozzaPdfs.length) {
+        setDialog({ kind: 'warn', title: 'Bozza PDF non caricata', text: 'Caricare la bozza PDF prima di trasmetterla al Responsabile dell’istruttoria amministrativa.' })
         return
       }
+
+      // Il riferimento di verifica viene acquisito dall'esatto PDF che sta per
+      // essere trasmesso a RI_AMM. In questo modo l'approvazione successiva è
+      // verificabile anche se il PDF materiale verrà poi sostituito dal definitivo.
+      const bozzaTrasmessa = pickLatestGiiAttachment(bozzaPdfs as any[]) as AmmAttachmentInfo | null
+      if (!bozzaTrasmessa) throw new Error('Bozza PDF da trasmettere non identificabile.')
+      const bozzaTrasmessaBlob = await fetchAmmAttachmentBlobForPdf(bozzaTrasmessa, Number(oid), layerUrl)
+      await replaceApprovedBozzaReferenceAttachment(layer, Number(oid), layerUrl, bozzaTrasmessaBlob)
 
       const now = Date.now()
       const attrs: Record<string, any> = { [idName]: Number(oid) }
@@ -8507,6 +8771,7 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
       put('dt_esito_RI_AMM', null)
       put('note_RI_AMM', null)
 
+
       // La trasmissione della bozza al Responsabile dell’istruttoria amministrativa
       // è un vero passaggio operativo: dopo il salvataggio la pratica deve uscire
       // dalla scheda “In attesa mia” del Tecnico istruttore amministrativo e
@@ -8520,6 +8785,12 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
       put('GII_trasm', 1)
       put('GII_rim', 0)
       put('GII_arch', 0)
+
+      // Ogni trasmissione a RI_AMM apre un nuovo ciclo di verifica della versione corrente.
+      // La Proposta deve quindi tornare sempre allo stato BOZZA: gli esiti RI_AMM appena
+      // azzerati vengono inclusi nella mappa dati usata dallo stesso builder condiviso.
+      const propostaDraftBlob = await buildVerbalePdfBlob({ ...base, ...attrs }, fields, { username: profile.username, fullName: profile.fullName })
+      const propostaDraftFile = new File([propostaDraftBlob.blob], propostaDraftBlob.fileName, { type: 'application/pdf', lastModified: now })
 
       let prevRecordAttrs = { ...(initialDraft || {}) }
       try {
@@ -8540,6 +8811,8 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
         throw new Error(detail)
       }
 
+      await replacePropostaContestazionePdfAttachment(layer, Number(oid), propostaDraftFile, layerUrl, 'DRAFT')
+
       const changedFieldNames = Object.keys(cleanAttrs).filter(k => k !== idName)
       const nextRecordAttrs = { ...prevRecordAttrs, ...cleanAttrs }
       await upsertAmmCycleAudit(prevRecordAttrs, nextRecordAttrs, changedFieldNames)
@@ -8559,7 +8832,7 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
       const next = { ...nextRecordAttrs }
       setInitialDraft(next)
       setDraft(next)
-      setDialog({ kind: 'ok', title: 'Bozza trasmessa', text: 'La bozza Word della determinazione è stata trasmessa al Responsabile dell’istruttoria amministrativa per la verifica.' })
+      setDialog({ kind: 'ok', title: 'Bozza trasmessa', text: 'La bozza PDF della determinazione è stata trasmessa al Responsabile dell’istruttoria amministrativa per la verifica.' })
       try { window.dispatchEvent(new CustomEvent('gii:record-updated', { detail: { oid: Number(oid), source: 'gii-editing-amm-bozza-determinazione-trasmessa' } })) } catch {}
       try { window.dispatchEvent(new CustomEvent('gii-force-refresh-selection', { detail: { oid: Number(oid), source: 'gii-editing-amm-bozza-determinazione-trasmessa', ts: Date.now() } })) } catch {}
       try { window.dispatchEvent(new CustomEvent('gii-alerts-refresh', { detail: { oid: Number(oid), source: 'gii-editing-amm-bozza-determinazione-trasmessa', ts: Date.now() } })) } catch {}
@@ -8598,12 +8871,17 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
       setDialog({ kind: 'warn', title: 'Protocollo già registrato', text: 'Numero e data del protocollo fascicolo risultano già compilati. Non è necessario predisporre una nuova trasmissione al protocollo.' })
       return
     }
+    const statoDeterminazione = String(pickAttrCI(base, ['determinazione_stato']) || '').trim().toUpperCase()
+    if (statoDeterminazione === 'FASCICOLO_TRASMESSO_PROTOCOLLO') {
+      setDialog({ kind: 'warn', title: 'Fascicolo già trasmesso', text: 'Il fascicolo risulta già trasmesso al protocollo per il ciclo corrente. È possibile registrare numero e data di protocollo.' })
+      return
+    }
 
     setSaving(true)
     try {
-      const { layerUrl } = await getEmailAttachmentContext()
+      const { layer, layerUrl } = await getEmailAttachmentContext()
       const numero = getReportCode(base, Number(oid))
-      const fascicolo = await buildProtocolloFascicoloEmailAttachment(base, layerFields, profile, Number(oid), active?.ds, layerUrl, {
+      const fascicolo = await buildProtocolloFascicoloEmailAttachment(Number(oid), active?.ds, layerUrl, {
         detailUrl: String((cfg as any).nsNotaSpeseDettaglioUrl || ''),
         parametriUrl: String((cfg as any).nsParametriUrl || ''),
         parametroCode: String((cfg as any).nsParametroCode || 'SPESE_GENERALI_PERC')
@@ -8621,13 +8899,54 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
         attachments: [fascicolo],
         fileName: `email_protocollo_${String(numero || oid).replace(/[^a-zA-Z0-9_-]/g, '_')}.eml`
       })
-      setDialog({ kind: 'ok', title: 'E-mail preparata', text: 'È stato generato un file .eml indirizzato a cbsm@cbsm.it con il fascicolo allegato. Aprirlo nel client di posta per verificarlo e inviarlo.' })
+
+      // La trasmissione al protocollo è uno stato persistente del ciclo corrente:
+      // solo dopo la predisposizione della nuova e-mail si sbloccano numero e data.
+      if (!layer?.applyEdits) throw new Error('Layer non disponibile per registrare la trasmissione del fascicolo al protocollo.')
+      if (typeof layer.load === 'function') { try { await layer.load() } catch {} }
+      const editFields = layer?.fields?.length
+        ? (layer.fields as any[]).map(f => ({ name: String(f.name), type: String(f.type || ''), alias: String(f.alias || f.name), domain: f.domain || null, editable: f.editable !== false }))
+        : layerFields
+      const idName = realFieldName(editFields, active?.idFieldName) || active?.idFieldName || 'OBJECTID'
+      const statoField = realFieldName(editFields, 'determinazione_stato')
+      if (!statoField) throw new Error('Campo determinazione_stato non disponibile per registrare la trasmissione del fascicolo al protocollo.')
+
+      let prevRecordAttrs = { ...(initialDraft || {}) }
+      try {
+        const liveAttrs = await queryCurrentLayerAttrsByOid(layer, idName, Number(oid))
+        if (liveAttrs && Object.keys(liveAttrs).length) prevRecordAttrs = liveAttrs
+      } catch {}
+
+      const updateAttrs = filterAttrsForLayer({
+        [idName]: Number(oid),
+        [statoField]: 'FASCICOLO_TRASMESSO_PROTOCOLLO'
+      }, editFields)
+      const editResult = await layer.applyEdits({ updateFeatures: [{ attributes: updateAttrs }] })
+      const upd = editResult?.updateFeatureResults?.[0] || editResult?.updateResults?.[0] || null
+      const updErr = upd?.error
+      const updOk = !updErr && (upd?.success === true || upd?.objectId != null || upd?.success == null)
+      if (!updOk) {
+        const detail = updErr ? `${updErr.code ?? ''}: ${updErr.message ?? ''}` : JSON.stringify(editResult)
+        throw new Error(`E-mail generata, ma registrazione della trasmissione al protocollo non riuscita: ${detail}`)
+      }
+
+      await upsertAmmCycleAudit(
+        prevRecordAttrs,
+        { ...prevRecordAttrs, [statoField]: 'FASCICOLO_TRASMESSO_PROTOCOLLO' },
+        [statoField]
+      )
+      await refreshDs(active.ds, props.id)
+      setInitialDraft(prev => ({ ...(prev || {}), [statoField]: 'FASCICOLO_TRASMESSO_PROTOCOLLO' }))
+      setDraft(prev => ({ ...(prev || {}), [statoField]: 'FASCICOLO_TRASMESSO_PROTOCOLLO' }))
+      try { window.dispatchEvent(new CustomEvent('gii:record-updated', { detail: { oid: Number(oid), source: 'gii-editing-amm-fascicolo-trasmesso-protocollo', ts: Date.now() } })) } catch {}
+
+      setDialog({ kind: 'ok', title: 'E-mail preparata', text: 'È stato generato un file .eml indirizzato a cbsm@cbsm.it con il fascicolo allegato. I campi numero e data di protocollo sono ora disponibili per la registrazione.' })
     } catch (e: any) {
       setDialog({ kind: 'err', title: 'Errore preparazione e-mail', text: e?.message || String(e) })
     } finally {
       setSaving(false)
     }
-  }, [active, buildBozzaDeterminazioneSource, canEdit, getEmailAttachmentContext, hasSelection, layerFields, oid, profile])
+  }, [active, buildBozzaDeterminazioneSource, canEdit, getEmailAttachmentContext, hasSelection, initialDraft, layerFields, oid, profile, props.id])
 
   const handlePrepareEmailDirettore = React.useCallback(async () => {
     if (!hasSelection || oid == null || !Number.isFinite(Number(oid))) {
@@ -8647,23 +8966,35 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
       setDialog({ kind: 'warn', title: 'Protocollo fascicolo incompleto', text: 'Registrare numero e data del protocollo fascicolo prima di predisporre l’e-mail al Direttore.' })
       return
     }
+    const protocolloFascicoloSalvato =
+      hasAdminValue(pickAttrCI(initialDraft, ['protocollo_fascicolo_numero'])) &&
+      hasAdminValue(pickAttrCI(initialDraft, ['protocollo_fascicolo_data']))
+    if (!protocolloFascicoloSalvato) {
+      setDialog({ kind: 'warn', title: 'Protocollo fascicolo non salvato', text: 'Salvare numero e data del protocollo fascicolo prima di predisporre l’e-mail al Direttore.' })
+      return
+    }
 
     setSaving(true)
     try {
       const { layerUrl, attachments } = await getEmailAttachmentContext()
-      const bozzaAtt = attachments.find(isBozzaDeterminazioneWordAttachment) || null
+      const bozzaAtt = pickLatestGiiAttachment<AmmAttachmentInfo>(attachments.filter(att => isGiiBozzaDeterminazionePdfAttachment(att as any)))
       if (!bozzaAtt) {
-        setDialog({ kind: 'warn', title: 'Bozza non caricata', text: 'Caricare la bozza definitiva della determinazione prima di predisporre l’e-mail al Direttore.' })
+        setDialog({ kind: 'warn', title: 'PDF definitivo non caricato', text: 'Caricare e verificare il PDF definitivo della determinazione prima di predisporre l’e-mail al Direttore.' })
         return
       }
-      const propostaAtt = attachments.find(isPropostaContestazionePdfAttachment) || null
-      const emailAttachments: EmailDraftAttachment[] = [await buildEmailAttachmentFromAmmAttachment(bozzaAtt, Number(oid), layerUrl)]
-      if (propostaAtt) {
-        emailAttachments.push(await buildEmailAttachmentFromAmmAttachment(propostaAtt, Number(oid), layerUrl))
-      } else {
-        const proposta = await buildVerbalePdfBlob(base, layerFields, profile)
-        emailAttachments.push({ blob: proposta.blob, fileName: proposta.fileName, contentType: 'application/pdf' })
+      if (!isVerifiedFinalBozzaAttachment(bozzaAtt)) {
+        setDialog({ kind: 'warn', title: 'PDF definitivo non verificato', text: 'La predisposizione dell’e-mail al Direttore richiede un PDF definitivo verificato rispetto alla versione approvata dal Responsabile dell’istruttoria amministrativa.' })
+        return
       }
+      const propostaAtt = pickLatestGiiAttachment<AmmAttachmentInfo>(attachments.filter(att => isGiiPropostaContestazionePdfAttachment(att as any)))
+      if (!propostaAtt) {
+        setDialog({ kind: 'warn', title: 'Proposta di contestazione non disponibile', text: 'La Proposta di contestazione PDF allegata alla pratica non è disponibile. Non è possibile predisporre l’e-mail al Direttore.' })
+        return
+      }
+      const emailAttachments: EmailDraftAttachment[] = [
+        await buildEmailAttachmentFromAmmAttachment(bozzaAtt, Number(oid), layerUrl),
+        await buildEmailAttachmentFromAmmAttachment(propostaAtt, Number(oid), layerUrl)
+      ]
       const numero = getReportCode(base, Number(oid))
       const subject = `Bozza di determinazione - Rapporto tecnico n. ${numero || '—'}`
       const bodyLines = [
@@ -8671,20 +9002,22 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
         '',
         'Cordiali saluti.'
       ]
+      const recipients = await loadAmmDeterminaEmailRecipients()
       await downloadEmailDraftWithAttachments({
-        to: 'marianna.marras@cbsm.it',
+        to: recipients.to,
+        cc: recipients.cc,
         subject,
         body: bodyLines.join('\n'),
         attachments: emailAttachments,
         fileName: `email_direttore_${String(numero || oid).replace(/[^a-zA-Z0-9_-]/g, '_')}.eml`
       })
-      setDialog({ kind: 'ok', title: 'E-mail preparata', text: 'È stato generato un file .eml indirizzato a marianna.marras@cbsm.it con gli allegati inclusi. Aprirlo nel client di posta per verificarlo e inviarlo.' })
+      setDialog({ kind: 'ok', title: 'E-mail preparata', text: 'Il file .eml è stato generato correttamente.' })
     } catch (e: any) {
       setDialog({ kind: 'err', title: 'Errore preparazione e-mail', text: e?.message || String(e) })
     } finally {
       setSaving(false)
     }
-  }, [buildBozzaDeterminazioneSource, canEdit, getEmailAttachmentContext, hasSelection, layerFields, oid, profile])
+  }, [buildBozzaDeterminazioneSource, canEdit, getEmailAttachmentContext, hasSelection, initialDraft, layerFields, oid, profile])
 
   const handleSave = async () => {
     if (!hasSelection || oid == null || !Number.isFinite(Number(oid))) {
@@ -8966,8 +9299,16 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
       {confirmTransmitBozza && (
         <TransmitBozzaConfirmDialog
           saving={saving}
-          onCancel={() => setConfirmTransmitBozza(false)}
-          onConfirm={() => { setConfirmTransmitBozza(false); void handleTransmitBozzaDeterminazioneRiAmm(true) }}
+          reopenCycle={confirmTransmitReopensCycle}
+          onCancel={() => {
+            setConfirmTransmitBozza(false)
+            setConfirmTransmitReopensCycle(false)
+          }}
+          onConfirm={() => {
+            setConfirmTransmitBozza(false)
+            setConfirmTransmitReopensCycle(false)
+            void handleTransmitBozzaDeterminazioneRiAmm(true)
+          }}
         />
       )}
         <div style={{
@@ -9121,6 +9462,7 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
                 <>
                   <TiAmmVerificationSummary
                     data={viewData || {}}
+                    savedData={initialDraft || {}}
                     fields={layerFields}
                     canEdit={canEdit}
                     role={currentRole}
@@ -9197,8 +9539,6 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
                 <FascicoloAmmPreviewSection
                   data={viewData || {}}
                   liveRefreshVersion={liveRefreshVersion}
-                  fields={layerFields}
-                  profile={profile}
                   role={currentRole}
                   nsConfig={{
                     detailUrl: String((cfg as any).nsNotaSpeseDettaglioUrl || ''),

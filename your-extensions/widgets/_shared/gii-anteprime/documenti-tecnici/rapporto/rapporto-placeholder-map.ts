@@ -1,8 +1,8 @@
 // =================================================================
 // rapporto-placeholder-map.ts
 // Mappa dati condivisa per il documento "Rapporto tecnico di rilevazione".
-// Estratta da gii-editing-ti (versione completa) per essere l'unico punto
-// da cui gii-editing-ti e gii-azioni costruiscono i placeholder del PDF.
+// È la sorgente comune usata dal viewer/fascicolo condiviso per costruire
+// i placeholder del PDF del rapporto.
 // =================================================================
 import { buildRapportoIterPlaceholders, normalizeAreaCode, normalizeSettoreCode, type RapportoIterCicloPdf } from './rapporto-pdf-builder'
 

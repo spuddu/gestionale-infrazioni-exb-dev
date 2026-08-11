@@ -169,11 +169,16 @@ export default function Setting(props: AllWidgetSettingProps<IMConfig>) {
     props.onSettingChange({ id:props.id, config:{ ...cfg, [key]:value } as any })
   const setItem = (idx:number, patch:Partial<NavItem>) =>
     set('items', items.map((it,i)=>i===idx?{...it,...patch}:it))
-  const moveItem = (idx:number, dir:-1|1) => {
-    const next=items.map(i=>({...i})); const t=idx+dir
-    if(t<0||t>=next.length) return
-    ;[next[idx].order,next[t].order]=[next[t].order,next[idx].order]
-    set('items',next)
+  const moveItem = (id:string, dir:-1|1) => {
+    const ordered = items
+      .map((it, originalIndex) => ({ ...it, originalIndex }))
+      .sort((a,b) => (a.order - b.order) || (a.originalIndex - b.originalIndex))
+    const idx = ordered.findIndex(it=>it.id===id)
+    const t = idx + dir
+    if(idx<0||t<0||t>=ordered.length) return
+    ;[ordered[idx], ordered[t]] = [ordered[t], ordered[idx]]
+    const orderById = new Map(ordered.map((it, index)=>[it.id, index + 1]))
+    set('items', items.map(it=>({...it,order:orderById.get(it.id) ?? it.order})))
   }
   const addItem = () => {
     const maxOrder = items.reduce((m, it) => Math.max(m, it.order), 0)
@@ -239,8 +244,8 @@ export default function Setting(props: AllWidgetSettingProps<IMConfig>) {
                 {isCustom && <span style={{fontSize:9,color:'#6b7280',fontStyle:'italic',flexShrink:0}}>custom</span>}
               </div>
               <div style={{display:'flex',alignItems:'center',gap:3,flexShrink:0}}>
-                {si>0 && <button type='button' onClick={e=>{e.stopPropagation();moveItem(ri,-1)}} style={{padding:'1px 5px',fontSize:11,border:'1px solid rgba(255,255,255,0.15)',borderRadius:4,background:'rgba(255,255,255,0.05)',color:'#d1d5db',cursor:'pointer'}}>↑</button>}
-                {si<sorted.length-1 && <button type='button' onClick={e=>{e.stopPropagation();moveItem(ri,1)}} style={{padding:'1px 5px',fontSize:11,border:'1px solid rgba(255,255,255,0.15)',borderRadius:4,background:'rgba(255,255,255,0.05)',color:'#d1d5db',cursor:'pointer'}}>↓</button>}
+                {si>0 && <button type='button' onClick={e=>{e.stopPropagation();moveItem(item.id,-1)}} style={{padding:'1px 5px',fontSize:11,border:'1px solid rgba(255,255,255,0.15)',borderRadius:4,background:'rgba(255,255,255,0.05)',color:'#d1d5db',cursor:'pointer'}}>↑</button>}
+                {si<sorted.length-1 && <button type='button' onClick={e=>{e.stopPropagation();moveItem(item.id,1)}} style={{padding:'1px 5px',fontSize:11,border:'1px solid rgba(255,255,255,0.15)',borderRadius:4,background:'rgba(255,255,255,0.05)',color:'#d1d5db',cursor:'pointer'}}>↓</button>}
                 <span style={{fontSize:10,color:'#a0aec0',marginLeft:2}}>{isO?'▲':'▼'}</span>
               </div>
             </div>

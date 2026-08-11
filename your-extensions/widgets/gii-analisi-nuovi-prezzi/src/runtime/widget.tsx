@@ -2,8 +2,119 @@
 /** @jsxFrag React.Fragment */
 import { React, jsx, type AllWidgetProps } from 'jimu-core'
 import type { IMConfig } from '../config'
+import GiiActiveToggle from '../../../_shared/gii-ui/active-toggle'
 
 const { Fragment } = React
+
+
+
+
+type NewRecordButtonProps = {
+  onClick: (event: any) => void
+  disabled?: boolean
+  title: string
+}
+
+function NewRecordButton (props: NewRecordButtonProps) {
+  const disabled = !!props.disabled
+  return (
+    <button
+      type='button'
+      disabled={disabled}
+      onClick={props.onClick}
+      title={props.title}
+      aria-label={props.title}
+      style={{
+        width: 32,
+        height: 32,
+        minHeight: 32,
+        boxSizing: 'border-box',
+        padding: 0,
+        borderRadius: 7,
+        border: disabled ? '1.5px solid #e5e7eb' : '1.5px solid rgba(37,99,235,0.72)',
+        background: disabled ? '#e5e7eb' : '#ffffff',
+        color: disabled ? '#9ca3af' : '#2563eb',
+        cursor: disabled ? 'not-allowed' : 'pointer',
+        display: 'inline-flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        lineHeight: 1,
+        whiteSpace: 'nowrap',
+        flex: '0 0 auto',
+        opacity: disabled ? 0.6 : 1
+      }}
+    >
+      <svg width={19} height={19} viewBox='0 0 24 24' fill='none' stroke='currentColor' strokeWidth='2' strokeLinecap='round' strokeLinejoin='round' aria-hidden='true' focusable='false'>
+        <path d='M21 13.1v5.9c0 1.1-.9 2-2 2H5c-1.1 0-2-.9-2-2v-4'/>
+        <path d='M3 15V5c0-1.1.9-2 2-2h5.9'/>
+        <path d='M16.5 3v9'/>
+        <path d='M12 7.5h9'/>
+      </svg>
+    </button>
+  )
+}
+
+type RecordActionButtonProps = {
+  onClick: (event: any) => void
+  disabled?: boolean
+  title?: string
+  ariaLabel?: string
+  marginRight?: number
+}
+
+function recordActionStyle (color: string, disabled: boolean, marginRight = 0): React.CSSProperties {
+  return {
+    border: disabled ? '1.5px solid #e5e7eb' : `1.5px solid ${color}`,
+    borderRadius: 7,
+    background: disabled ? '#e5e7eb' : '#ffffff',
+    color: disabled ? '#9ca3af' : color,
+    cursor: disabled ? 'not-allowed' : 'pointer',
+    width: 32,
+    height: 32,
+    minHeight: 32,
+    padding: 0,
+    boxSizing: 'border-box',
+    marginRight,
+    display: 'inline-flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    lineHeight: 1,
+    whiteSpace: 'nowrap',
+    flex: '0 0 auto',
+    opacity: disabled ? 0.6 : 1
+  }
+}
+
+function RecordEditButton (props: RecordActionButtonProps) {
+  const disabled = !!props.disabled
+  const title = props.title || 'Modifica'
+  const ariaLabel = props.ariaLabel || title
+  return (
+    <button type='button' disabled={disabled} onClick={props.onClick} title={title} aria-label={ariaLabel} style={recordActionStyle('#1F4E79', disabled, props.marginRight ?? 4)}>
+      <svg width={19} height={19} viewBox='0 0 24 24' fill='none' stroke='currentColor' strokeWidth='2' strokeLinecap='round' strokeLinejoin='round' aria-hidden='true' focusable='false'>
+        <path d='M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7'/>
+        <path d='M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z'/>
+      </svg>
+    </button>
+  )
+}
+
+function RecordDeleteButton (props: RecordActionButtonProps) {
+  const disabled = !!props.disabled
+  const title = props.title || 'Elimina'
+  const ariaLabel = props.ariaLabel || title
+  return (
+    <button type='button' disabled={disabled} onClick={props.onClick} title={title} aria-label={ariaLabel} style={recordActionStyle('#b42318', disabled, props.marginRight ?? 0)}>
+      <svg width={19} height={19} viewBox='0 0 24 24' fill='none' stroke='currentColor' strokeWidth='2' strokeLinecap='round' strokeLinejoin='round' aria-hidden='true' focusable='false'>
+        <path d='M3 6h18'/>
+        <path d='M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2'/>
+        <path d='M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6'/>
+        <path d='M10 11v6'/>
+        <path d='M14 11v6'/>
+      </svg>
+    </button>
+  )
+}
 
 function loadEsriModule<T = any>(path: string): Promise<T> {
   return new Promise((resolve, reject) => {
@@ -480,7 +591,7 @@ const styles = `
 .gap-kpi { white-space:nowrap; font-weight:700; color:#1F4E79; }
 .gap-inline { display:flex; gap:6px; align-items:center; }
 .gap-field-grow { flex:1 1 auto; min-width:0; }
-.gap-btn-icon { min-width:32px; width:32px; height:32px; padding:0; display:inline-flex; align-items:center; justify-content:center; font-size:16px; line-height:1; }
+.gap-btn-icon { min-width:30px; width:30px; height:30px; padding:0; display:inline-flex; align-items:center; justify-content:center; font-size:15px; line-height:1; }
 .gap-confirm-backdrop { position:fixed; inset:0; background:rgba(0,0,0,.28); display:flex; align-items:center; justify-content:center; z-index:9999; }
 .gap-confirm-modal { width:min(560px, calc(100vw - 32px)); background:#fff; border:1px solid #c5d9f1; border-radius:6px; box-shadow:0 12px 28px rgba(0,0,0,.18); padding:16px; }
 .gap-confirm-title { font-size:18px; font-weight:700; color:#1F4E79; margin-bottom:8px; }
@@ -1450,12 +1561,23 @@ ${r.codice_riferimento} — ${r.descrizione}`,
           </div>
         </div>
 
-        <div className='gap-toolbar'>
-          <div><button className='gap-btn gap-success' onClick={onNewParent} disabled={!!selectedParent || parentEditing || saving || confirmBusy}>+ Nuovo prezzo</button></div>
-          <div><button className='gap-btn gap-primary' onClick={onEditParent} disabled={!selectedParentRow || !selectedParentActive || parentEditing || lineEditing || saving || confirmBusy}>Modifica testata</button></div>
-          {selectedParentRow && selectedParentActive ? <div><button className='gap-btn gap-danger-outline' onClick={() => void onToggleActiveParent(false)} disabled={parentEditing || lineEditing || saving || confirmBusy}>Disattiva</button></div> : null}
-          {selectedParentRow && !selectedParentActive ? <div><button className='gap-btn gap-success-outline' onClick={() => void onToggleActiveParent(true)} disabled={parentEditing || lineEditing || saving || confirmBusy}>Riattiva</button></div> : null}
-          <div><button className='gap-btn gap-danger' onClick={() => void onDeleteParent()} disabled={!selectedParentRow || !selectedParentActive || parentEditing || lineEditing || saving || confirmBusy}>Elimina voce</button></div>
+        <div className='gap-toolbar' style={{ alignItems: 'center' }}>
+          <div><NewRecordButton onClick={onNewParent} disabled={!!selectedParent || parentEditing || saving || confirmBusy} title='Nuovo prezzo' /></div>
+          <div><RecordEditButton onClick={onEditParent} disabled={!selectedParentRow || !selectedParentActive || parentEditing || lineEditing || saving || confirmBusy} title='Modifica testata' ariaLabel='Modifica testata' /></div>
+          {selectedParentRow ? (
+            <div style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+              <span style={{ fontSize: 12, fontWeight: 700, color: '#374151' }}>Stato</span>
+              <GiiActiveToggle
+                checked={selectedParentActive}
+                disabled={parentEditing || lineEditing || saving || confirmBusy}
+                onChange={(next) => void onToggleActiveParent(next)}
+                ariaLabel='Stato del Nuovo Prezzo selezionato'
+                activeLabel='Attivo'
+                inactiveLabel='Disattivato'
+              />
+            </div>
+          ) : null}
+          <div><RecordDeleteButton onClick={() => void onDeleteParent()} disabled={!selectedParentRow || !selectedParentActive || parentEditing || lineEditing || saving || confirmBusy} title='Elimina voce' ariaLabel='Elimina voce' /></div>
         </div>
 
         {parentEditing && (
@@ -1591,9 +1713,9 @@ ${r.codice_riferimento} — ${r.descrizione}`,
               <div className='gap-label' style={{ color: toolbarLabelColor, fontSize: toolbarLabelFontSize }}>Righe di analisi</div>
             </div>
             <div className='gap-subtoolbar' style={{ alignItems: 'center', flexWrap: 'wrap', gap: 10 }}>
-              <div><button className='gap-btn gap-success' onClick={onNewLine} disabled={lineEditing || parentEditing || saving || confirmBusy || !selectedParentActive}>+ Nuova riga</button></div>
-              <div><button className='gap-btn gap-primary' onClick={() => selectedLineRow && onEditLine(selectedLineRow)} disabled={!selectedLineRow || lineEditing || parentEditing || saving || confirmBusy || !selectedParentActive}>Modifica riga</button></div>
-              <div><button className='gap-btn gap-danger' onClick={() => selectedLineRow && void onDeleteLine(selectedLineRow)} disabled={!selectedLineRow || lineEditing || parentEditing || saving || confirmBusy || !selectedParentActive}>Elimina riga</button></div>
+              <div><NewRecordButton onClick={onNewLine} disabled={lineEditing || parentEditing || saving || confirmBusy || !selectedParentActive} title='Nuova riga' /></div>
+              <div><RecordEditButton onClick={() => selectedLineRow && onEditLine(selectedLineRow)} disabled={!selectedLineRow || lineEditing || parentEditing || saving || confirmBusy || !selectedParentActive} title='Modifica riga' ariaLabel='Modifica riga' /></div>
+              <div><RecordDeleteButton onClick={() => selectedLineRow && void onDeleteLine(selectedLineRow)} disabled={!selectedLineRow || lineEditing || parentEditing || saving || confirmBusy || !selectedParentActive} title='Elimina riga' ariaLabel='Elimina riga' /></div>
             </div>
 
             {lineEditing && (

@@ -2,8 +2,159 @@
 /** @jsxFrag React.Fragment */
 import { React, jsx, type AllWidgetProps } from 'jimu-core'
 import type { IMConfig } from '../config'
+import GiiActiveToggle from '../../../_shared/gii-ui/active-toggle'
 
 const { Fragment } = React
+
+
+type TransferActionIconName = 'import' | 'export'
+
+function TransferActionIcon (props: { name: TransferActionIconName, size?: number }): React.ReactElement {
+  const size = Number(props.size || 18)
+  if (props.name === 'import') {
+    return (
+      <svg width={size} height={size} viewBox='0 0 24 24' fill='none' stroke='currentColor' strokeWidth='2' strokeLinecap='round' strokeLinejoin='round' aria-hidden='true' focusable='false'>
+        <path d='M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4'/>
+        <path d='M17 8l-5-5-5 5'/>
+        <path d='M12 3v12'/>
+      </svg>
+    )
+  }
+  return (
+    <svg width={size} height={size} viewBox='0 0 24 24' fill='none' stroke='currentColor' strokeWidth='2' strokeLinecap='round' strokeLinejoin='round' aria-hidden='true' focusable='false'>
+      <path d='M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4'/>
+      <path d='M7 10l5 5 5-5'/>
+      <path d='M12 15V3'/>
+    </svg>
+  )
+}
+
+function transferActionButtonStyle (disabled: boolean): React.CSSProperties {
+  return {
+    width: 32,
+    height: 32,
+    padding: 0,
+    boxSizing: 'border-box',
+    borderRadius: 7,
+    border: `1.5px solid ${disabled ? '#e5e7eb' : '#0d3b66'}`,
+    background: disabled ? '#e5e7eb' : '#ffffff',
+    color: disabled ? '#9ca3af' : '#0d3b66',
+    cursor: disabled ? 'not-allowed' : 'pointer',
+    display: 'inline-flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    lineHeight: 1,
+    flex: '0 0 auto',
+    opacity: disabled ? 0.6 : 1
+  }
+}
+
+
+
+
+
+type NewRecordButtonProps = {
+  onClick: (event: any) => void
+  disabled?: boolean
+  title: string
+}
+
+function NewRecordButton (props: NewRecordButtonProps) {
+  const disabled = !!props.disabled
+  return (
+    <button
+      type='button'
+      disabled={disabled}
+      onClick={props.onClick}
+      title={props.title}
+      aria-label={props.title}
+      style={{
+        width: 32,
+        height: 32,
+        minHeight: 32,
+        boxSizing: 'border-box',
+        padding: 0,
+        borderRadius: 7,
+        border: disabled ? '1.5px solid #e5e7eb' : '1.5px solid rgba(37,99,235,0.72)',
+        background: disabled ? '#e5e7eb' : '#ffffff',
+        color: disabled ? '#9ca3af' : '#2563eb',
+        cursor: disabled ? 'not-allowed' : 'pointer',
+        display: 'inline-flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        lineHeight: 1,
+        whiteSpace: 'nowrap',
+        flex: '0 0 auto',
+        opacity: disabled ? 0.6 : 1
+      }}
+    >
+      <svg width={19} height={19} viewBox='0 0 24 24' fill='none' stroke='currentColor' strokeWidth='2' strokeLinecap='round' strokeLinejoin='round' aria-hidden='true' focusable='false'>
+        <path d='M21 13.1v5.9c0 1.1-.9 2-2 2H5c-1.1 0-2-.9-2-2v-4'/>
+        <path d='M3 15V5c0-1.1.9-2 2-2h5.9'/>
+        <path d='M16.5 3v9'/>
+        <path d='M12 7.5h9'/>
+      </svg>
+    </button>
+  )
+}
+
+type RecordActionButtonProps = {
+  onClick: (event: any) => void
+  disabled?: boolean
+  title?: string
+  ariaLabel?: string
+  marginRight?: number
+}
+
+function recordActionStyle (color: string, disabled: boolean, marginRight = 0): React.CSSProperties {
+  return {
+    border: 'none',
+    background: 'transparent',
+    color,
+    cursor: disabled ? 'not-allowed' : 'pointer',
+    width: 30,
+    height: 30,
+    padding: 0,
+    boxSizing: 'border-box',
+    marginRight,
+    display: 'inline-flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    lineHeight: 1,
+    opacity: disabled ? 0.45 : 1
+  }
+}
+
+function RecordEditButton (props: RecordActionButtonProps) {
+  const disabled = !!props.disabled
+  const title = props.title || 'Modifica'
+  const ariaLabel = props.ariaLabel || title
+  return (
+    <button type='button' disabled={disabled} onClick={props.onClick} title={title} aria-label={ariaLabel} style={recordActionStyle('#1F4E79', disabled, props.marginRight ?? 4)}>
+      <svg width={18} height={18} viewBox='0 0 24 24' fill='none' stroke='currentColor' strokeWidth='2' strokeLinecap='round' strokeLinejoin='round' aria-hidden='true' focusable='false'>
+        <path d='M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7'/>
+        <path d='M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z'/>
+      </svg>
+    </button>
+  )
+}
+
+function RecordDeleteButton (props: RecordActionButtonProps) {
+  const disabled = !!props.disabled
+  const title = props.title || 'Elimina'
+  const ariaLabel = props.ariaLabel || title
+  return (
+    <button type='button' disabled={disabled} onClick={props.onClick} title={title} aria-label={ariaLabel} style={recordActionStyle('#b42318', disabled, props.marginRight ?? 0)}>
+      <svg width={18} height={18} viewBox='0 0 24 24' fill='none' stroke='currentColor' strokeWidth='2' strokeLinecap='round' strokeLinejoin='round' aria-hidden='true' focusable='false'>
+        <path d='M3 6h18'/>
+        <path d='M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2'/>
+        <path d='M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6'/>
+        <path d='M10 11v6'/>
+        <path d='M14 11v6'/>
+      </svg>
+    </button>
+  )
+}
 
 type DatasetKey = 'notaSpese' | 'sanzioniAmm' | 'attrezzature'
 
@@ -672,8 +823,8 @@ export default function Widget(props: AllWidgetProps<IMConfig>) {
 
         {!editing && (
           <div style={{ display: 'flex', gap: 8 }}>
-            <button className="gns-btn gns-btn-new" onClick={onNew} disabled={!resolvedUrl}>+ Nuovo parametro</button>
-            <button className="gns-btn gns-btn-export" onClick={() => exportCsv(rows, `${title}_${definition.shortLabel}`, definition, showParameterCode)} disabled={rows.length === 0}>⬇ Esporta CSV</button>
+            <NewRecordButton onClick={onNew} disabled={!resolvedUrl} title='Nuovo parametro' />
+            <button type='button' onClick={() => exportCsv(rows, `${title}_${definition.shortLabel}`, definition, showParameterCode)} disabled={rows.length === 0} title='Esporta CSV' aria-label='Esporta CSV' style={transferActionButtonStyle(rows.length === 0)}><TransferActionIcon name='export' /></button>
           </div>
         )}
 
@@ -748,10 +899,11 @@ export default function Widget(props: AllWidgetProps<IMConfig>) {
             )}
             <div className="gns-field">
               <div className="gns-label">Attivo</div>
-              <select className="gns-select" value={String(form.attivo ?? '1')} onChange={(e) => setForm((current: any) => ({ ...current, attivo: e.target.value }))}>
-                <option value="1">Sì</option>
-                <option value="0">No</option>
-              </select>
+              <GiiActiveToggle
+                checked={String(form.attivo ?? '1') === '1'}
+                onChange={(next) => setForm((current: any) => ({ ...current, attivo: next ? '1' : '0' }))}
+                ariaLabel='Stato del parametro'
+              />
             </div>
             <div className="gns-field">
               <div className="gns-label">Valido da</div>
@@ -805,8 +957,8 @@ export default function Widget(props: AllWidgetProps<IMConfig>) {
                     <td>{formatCell(row.data_validita_a, 'date')}</td>
                     <td>{formatCell(row.note, 'text')}</td>
                     <td>
-                      <button className="gns-act gns-act-edit" onClick={() => onEdit(row)} title="Modifica">✎</button>
-                      <button className="gns-act gns-act-del" onClick={() => void onDelete(row)} title="Elimina">✕</button>
+                      <RecordEditButton onClick={() => onEdit(row)} title='Modifica parametro' ariaLabel='Modifica parametro' />
+                      <RecordDeleteButton onClick={() => void onDelete(row)} title='Elimina parametro' ariaLabel='Elimina parametro' />
                     </td>
                   </tr>
                 ))}

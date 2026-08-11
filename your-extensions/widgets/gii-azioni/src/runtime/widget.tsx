@@ -4,15 +4,12 @@ import { React, jsx, type AllWidgetProps, DataSourceComponent, DataSourceManager
 import { Button } from 'jimu-ui'
 import { createPortal } from 'react-dom'
 import { computeSanzioneAutomatica } from '../../../_shared/gii-anteprime/sanzione-automatica'
+import { buildVerbalePdfBlob } from '../../../_shared/gii-anteprime/documenti-amministrativi/proposta-contestazione/proposta-contestazione-data-map'
+import { replacePropostaContestazionePdfAttachment } from '../../../_shared/gii-anteprime/documenti-amministrativi/proposta-contestazione/proposta-contestazione-attachment-store'
 import type { IMConfig } from '../config'
 import { defaultConfig } from '../config'
-import { buildBozzaDeterminazionePdf } from '../../../_shared/gii-anteprime/documenti-amministrativi/bozza-determinazione/bozza-determinazione-pdf-builder'
-import { buildBozzaDeterminazioneMap } from '../../../_shared/gii-anteprime/documenti-amministrativi/bozza-determinazione/bozza-determinazione-map'
-import { PDFDocument } from 'pdf-lib'
-import { drawEmbeddedPdfPageInRapportoTechnicalBody, drawRapportoTechnicalHeadersByPage, RAPPORTO_TECHNICAL_BODY_BOX, attachmentTechnicalDocumentTitle } from '../../../_shared/gii-anteprime/documenti-tecnici/rapporto/technical-document-header'
 import { attrezzaturaInstanceTipoCodePdf, loadAttrezzatureCatalogPdf } from '../../../_shared/gii-anteprime/documenti-tecnici/rapporto/rapporto-nota-spese-summary'
-import GiiAnteprimaPanel from '../../../_shared/gii-anteprime/anteprima-panel'
-import { computeReqPoint, parseNorma3Codes } from '../../../_shared/gii-anteprime/req-point'
+import { parseNorma3Codes } from '../../../_shared/gii-anteprime/req-point'
 import { ensureAttivitaCorrentiJsonOnlyQueryFormat } from '../../../_shared/gii-alerts/attivita-correnti-query-format-fix'
 import { getTiAmmAssignment, hasTiAmmAssignment, isPracticeAssignedToCurrentTiAmm } from '../../../_shared/gii-access/ti-amm-assignment'
 import { clearGiiPracticeSelectionContext, getGiiPracticeContextStamp, isGiiPracticeContextStampCurrent, isGiiPracticePayloadCurrent, isGiiPracticeSelectionContextCurrent, stampGiiPracticePayload, type GiiPracticeContextStamp } from '../../../_shared/gii-selection/practice-context'
@@ -343,58 +340,6 @@ function loadEsriModule<T = any> (path: string): Promise<T> {
   })
 }
 
-// In Experience Builder, una Data View / Output Data Source può non esporre direttamente un FeatureLayer.
-// Questa funzione prova più strade (DS corrente, DS da manager, DS padre) e, se serve, crea un FeatureLayer dal URL.
-async function resolveFeatureLayerForAttachments (ds: any): Promise<any | null> {
-  if (!ds) return null
-
-  const candidates: any[] = []
-  const push = (x: any) => {
-    if (x && !candidates.includes(x)) candidates.push(x)
-  }
-
-  push(ds)
-
-  try {
-    const dm = DataSourceManager.getInstance()
-    const byId = ds?.id ? dm.getDataSource(ds.id) : null
-    push(byId)
-    const belongId = ds?.belongToDataSource
-    if (typeof belongId === 'string' && belongId) {
-      push(dm.getDataSource(belongId))
-    }
-  } catch {
-    // ignore
-  }
-
-  for (const c of candidates) {
-    const cAny: any = c
-    const l = unwrapJsapiLayer(
-      (typeof cAny.getLayer === 'function' ? cAny.getLayer() : null) ??
-      (typeof cAny.getJsApiLayer === 'function' ? cAny.getJsApiLayer() : null) ??
-      (typeof cAny.getJSAPILayer === 'function' ? cAny.getJSAPILayer() : null) ??
-      cAny.layer
-    ) as any
-    if (l && typeof l.queryAttachments === 'function') return l
-  }
-
-  // Fallback: crea un FeatureLayer a partire dal URL del DS (se presente)
-  try {
-    const dsAny: any = ds
-    const url: any = dsAny?.getDataSourceJson?.()?.url ?? dsAny?.dataSourceJson?.url
-    if (!url || typeof url !== 'string') return null
-    const FeatureLayer = await loadEsriModule<any>('esri/layers/FeatureLayer')
-    const fl = new FeatureLayer({ url })
-    if (typeof fl?.load === 'function') await fl.load().catch(() => {})
-    if (fl && typeof fl.queryAttachments === 'function') return fl
-  } catch {
-    // ignore
-  }
-
-  return null
-}
-
-
 
 
 
@@ -636,7 +581,6 @@ function norm (v: any): string {
 }
 
 
-
 function normKey (v: any): string {
   // lowercase + remove diacritics + replace non-alphanum with spaces
   return String(v ?? '')
@@ -647,7 +591,6 @@ function normKey (v: any): string {
     .trim()
     .replace(/\s+/g, ' ')
 }
-
 
 
 function isEmptyValue (v: any): boolean {
@@ -1661,7 +1604,6 @@ function ActionsPanel (props: {
   }
   nsConfig: { detailUrl: string; parametriUrl: string; parametroCode: string; attrezzatureParametriUrl: string }
   sanzioneConfig: { parametriSanzioniUrl: string; regolamentoArticoliUrl: string; regolamentoRaccordiUrl: string }
-  mapView: any
   accessGate?: DirectPracticeAccessGate
 }) {
   const { active, roleCode, buttonText, buttonColors, ui } = props
@@ -1744,19 +1686,6 @@ function ActionsPanel (props: {
   const [zeroNotaSpeseWarning, setZeroNotaSpeseWarning] = React.useState<string[]>([])
   const [incompleteNotaSpeseWarning, setIncompleteNotaSpeseWarning] = React.useState<string[]>([])
 
-  const [previewOpen, setPreviewOpen] = React.useState(false)
-
-  React.useEffect(() => {
-    if (!previewOpen) return
-    const protectBrowserWindow = (event: BeforeUnloadEvent) => {
-      event.preventDefault()
-      event.returnValue = ''
-      return ''
-    }
-    window.addEventListener('beforeunload', protectBrowserWindow)
-    return () => { window.removeEventListener('beforeunload', protectBrowserWindow) }
-  }, [previewOpen])
-
   // ── Cache GII_utenti (per risolvere utente_destinatario) ──
   React.useEffect(() => {
     void ensureUtentiCache()
@@ -1823,24 +1752,6 @@ function ActionsPanel (props: {
     return ufficiale ? 'Rapporto tecnico' : 'Rilevazione'
   })()
 
-  const closeRapportoPreview = React.useCallback(() => {
-    setPreviewOpen(false)
-  }, [])
-
-  const showAdminPreviewDocuments = role === 'TI_AMM' || role === 'RI_AMM' || role === 'DA' || role === 'ADMIN'
-
-  const [modalMapTarget, setModalMapTarget] = React.useState<any | null>(null)
-  React.useEffect(() => {
-    if (!previewOpen || !hasSel || !data || computeReqPoint(data) !== 1) { setModalMapTarget(null); return }
-    let cancelled = false
-    setModalMapTarget(pointGeometryFromAttrsForActions(data) || null)
-    void resolvePointGeometryForActions(active?.state?.ds, Number(oid), active?.state?.idFieldName || idFieldNameFromSel, data, active?.key).then(mt => {
-      if (cancelled) return
-      setModalMapTarget(mt || null)
-    }).catch(() => { if (!cancelled) setModalMapTarget(null) })
-    return () => { cancelled = true }
-  }, [previewOpen, hasSel, data, active, oid, idFieldNameFromSel])
-
   const pickAttrCI = (obj: any, keys: string[]): any => {
     if (!obj) return undefined
     const map: Record<string, string> = {}
@@ -1858,24 +1769,6 @@ function ActionsPanel (props: {
     }
     return undefined
   }
-
-  const buildDeterminazionePdfBlobForActions = React.useCallback(async (): Promise<{ blob: Blob; fileName: string }> => {
-    const profile = {
-      username: (window as any).__giiUserRole?.username || (window as any).__giiUser?.username || '',
-      fullName: (window as any).__giiUserRole?.fullName || (window as any).__giiUserRole?.full_name || ''
-    }
-    const map = buildBozzaDeterminazioneMap(data || {}, profile)
-    const bytes = await buildBozzaDeterminazionePdf(map)
-    const base = String(map.n_rapporto || map.objectid || 'pratica').replace(/[^a-zA-Z0-9_-]/g, '_')
-    return { blob: new Blob([bytes as any], { type: 'application/pdf' }), fileName: `determinazione_dirigenziale_${base}.pdf` }
-  }, [data])
-
-
-  const handleRapportoPreview = React.useCallback(() => {
-    if (!hasSel || !data) return
-    setPreviewOpen(true)
-  }, [hasSel, data])
-
 
   const sessionIdRef = React.useRef<string>(`sess-${Date.now()}-${Math.random().toString(16).slice(2)}`)
 
@@ -1932,7 +1825,6 @@ function ActionsPanel (props: {
     riaperturaAmmAutorizzazione &&
     riaperturaAmmMotivo
   )
-
 
 
   const sqlQuote = (v: any): string => `'${String(v ?? '').replace(/'/g, "''")}'`
@@ -2335,107 +2227,7 @@ function ActionsPanel (props: {
   }
 
 
-  const resolveDestEmailAsync = async (destRole: string): Promise<string> => {
-    await ensureUtentiCache()
-    const r = String(destRole || '').trim().toUpperCase()
-    if (!r) return ''
-    if (r === 'DA') return findDestEmail(_utentiCache, 'DA', 'AMM', '')
-    if (r === 'TI_AMM') return findDestEmail(_utentiCache, 'TI_AMM', 'AMM', '')
-    if (r === 'RI_AMM') return findDestEmail(_utentiCache, 'RI_AMM', 'AMM', '')
-    const { area, settore } = getCurrentCycleContext()
-    return findDestEmail(_utentiCache, destRole, area, settore)
-  }
 
-  const findBozzaDeterminazioneAttachmentForSendTo = async (): Promise<{ name: string, url: string } | null> => {
-    try {
-      if (!ds || !Number.isFinite(oid as any) || Number(oid) <= 0) return null
-      const layer = await resolveFeatureLayerForAttachments(ds)
-      if (!layer) return null
-      const infos = await queryFeatureAttachmentsForActions(layer, Number(oid), ds)
-      const normalized = (infos || [])
-        .map((att: any) => {
-          const name = String(att?.name || att?.attName || att?.fileName || '').trim()
-          const url = String(att?.url || '').trim()
-          const id = Number(att?.id ?? att?.attachmentId ?? att?.objectId)
-          return { name, url, id, raw: att }
-        })
-        .filter((att: any) => att.name)
-      const candidates = normalized.filter((att: any) => {
-        const n = String(att.name || '').toLowerCase()
-        return (n.includes('bozza') || n.includes('determina')) && (n.includes('determinaz') || n.includes('determina')) && /\.docx?$/i.test(att.name)
-      })
-      const chosen = (candidates[0] || normalized.find((att: any) => /\.docx?$/i.test(att.name) && String(att.name || '').toLowerCase().includes('bozza')) || null)
-      if (!chosen) return null
-      let url = String(chosen.url || '').trim()
-      if (!url && Number.isFinite(chosen.id) && chosen.id > 0) {
-        const layerUrl = attachmentLayerUrlForActions(layer, ds)
-        if (layerUrl) {
-          let token = ''
-          try {
-            const IdentityManager = await loadEsriModule<any>('esri/identity/IdentityManager')
-            const cred = IdentityManager?.findCredential?.(layerUrl) || IdentityManager?.findCredential?.(layerUrl.replace(/\/\d+$/, ''))
-            token = cred?.token ? String(cred.token) : ''
-          } catch {}
-          url = `${layerUrl}/${Number(oid)}/attachments/${chosen.id}${token ? `?token=${encodeURIComponent(token)}` : ''}`
-        }
-      }
-      return url ? { name: chosen.name, url } : null
-    } catch {
-      return null
-    }
-  }
-
-  const buildDaBozzaSendToMailtoPayload = async (): Promise<{ mailtoUrl: string, to: string, subject: string, body: string, attachmentName: string, attachmentUrl: string }> => {
-    const daEmail = await resolveDestEmailAsync('DA')
-    const numero = buildPracticeCodeFromData(data, oid)
-    const attachment = await findBozzaDeterminazioneAttachmentForSendTo()
-    const subject = `Bozza di determinazione - Rapporto tecnico n. ${numero || '—'}`
-    const bodyLines = [
-      `Si trasmette, per le valutazioni di competenza, la bozza di determinazione relativa al Rapporto tecnico n. ${numero || '—'}.`,
-      ''
-    ]
-    if (attachment?.url) {
-      bodyLines.push(`Collegamento alla bozza di determinazione: ${attachment.url}`)
-      bodyLines.push('')
-    } else {
-      bodyLines.push('La bozza definitiva è allegata alla pratica nel gestionale.')
-      bodyLines.push('')
-    }
-    bodyLines.push('Cordiali saluti.')
-    const body = bodyLines.join('\n')
-    const to = String(daEmail || '').trim()
-    const mailtoUrl = `mailto:${encodeURIComponent(to)}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`
-    return {
-      mailtoUrl,
-      to,
-      subject,
-      body,
-      attachmentName: attachment?.name || '',
-      attachmentUrl: attachment?.url || ''
-    }
-  }
-
-  const triggerDaBozzaSendTo = async (): Promise<void> => {
-    const numero = buildPracticeCodeFromData(data, oid)
-    const payload = await buildDaBozzaSendToMailtoPayload()
-    const detail = {
-      source: 'gii-azioni',
-      type: 'BOZZA_DETERMINAZIONE_DA',
-      oid,
-      numeroRapporto: numero,
-      destinatario: 'Direttore Area AA. GG. e P.F.',
-      to: payload.to,
-      subject: payload.subject,
-      body: payload.body,
-      attachmentName: payload.attachmentName,
-      attachmentUrl: payload.attachmentUrl,
-      mailtoUrl: payload.mailtoUrl,
-      ts: Date.now()
-    }
-    try { window.dispatchEvent(new CustomEvent('gii:send-to-da', { detail })) } catch {}
-    try { window.dispatchEvent(new CustomEvent('gii:send-to', { detail })) } catch {}
-    try { window.setTimeout(() => { window.location.href = payload.mailtoUrl }, 0) } catch {}
-  }
 
   const buildCycleSummary = (eventoApertura: string, eventoChiusura: string, numCampi: number): string => {
     const parts = [String(eventoApertura || 'PRESA_IN_CARICO').trim()]
@@ -2760,7 +2552,6 @@ function ActionsPanel (props: {
 
     if (rr === 'RI_AMM') return 'RI-AMM'
     if (rr === 'TI_AMM') return 'TI-AMM'
-    if (rr === 'DA') return 'DIR-AMM'
     if (rr === 'DT') return area ? `DIR-${area}` : 'DIR'
     if (rr === 'RI') return area ? `RI-${area}` : 'RI'
     if (rr === 'RZ') return settore ? `RZ-${settore}` : 'RZ'
@@ -2879,16 +2670,11 @@ function ActionsPanel (props: {
     if (ev === 'ATTESTAZIONE_CONFORMITA') return 'ATTESTAZIONE_CONFORMITA_TI_AMM'
     if (ev === 'PROPOSTA_CONTESTAZIONE_APPROVATA') return 'PROPOSTA_CONTESTAZIONE_APPROVATA'
     if (ev === 'RAPPORTO_APPROVATO') return 'RAPPORTO_APPROVATO'
-    if (ev === 'SANZIONE_APPROVATA') return 'VERBALE_APPROVATO'
     if (ev === 'INTEGRAZIONE_RICHIESTA') return 'RICHIESTA_INTEGRAZIONE'
     if (ev === 'INTEGRAZIONE_TRASMESSA') return 'INTEGRAZIONE_TRASMESSA'
-    if (ev === 'INVIO_A_TI_AMM' || ev === 'RESTITUZIONE_A_TI_AMM') return 'NUOVA_ASSEGNAZIONE'
-    if (ev === 'ISTRUTTORIA_TRASMESSA') {
-      if (dst === 'DA') return 'PROPOSTA_VERBALE'
-      return 'NUOVA_ASSEGNAZIONE'
-    }
+    if (ev === 'INVIO_A_TI_AMM') return 'NUOVA_ASSEGNAZIONE'
+    if (ev === 'ISTRUTTORIA_TRASMESSA') return 'NUOVA_ASSEGNAZIONE'
     if (ev === 'RESPINTA') {
-      if (src === 'DA') return 'VERBALE_RESPINTO'
       if (src === 'DT') return 'ISTRUTTORIA_TECNICA_RESPINTA'
       return 'RILEVAZIONE_RESPINTA'
     }
@@ -2905,11 +2691,8 @@ function ActionsPanel (props: {
     if (st === 'RICHIESTA_INTEGRAZIONE') return 'Integrazione richiesta'
     if (st === 'INTEGRAZIONE_TRASMESSA') return 'Integrazione trasmessa'
     if (st === 'RAPPORTO_APPROVATO') return 'Pratica approvata'
-    if (st === 'PROPOSTA_VERBALE') return 'Proposta di contestazione'
-    if (st === 'VERBALE_APPROVATO') return 'Atto di accertamento approvato'
     if (st === 'RILEVAZIONE_RESPINTA') return 'Rilevazione respinta'
     if (st === 'ISTRUTTORIA_TECNICA_RESPINTA') return 'Istruttoria tecnica respinta'
-    if (st === 'VERBALE_RESPINTO') return 'Atto di accertamento respinto'
     return 'Attività da prendere in carico'
   }
 
@@ -2924,11 +2707,8 @@ function ActionsPanel (props: {
     if (st === 'RICHIESTA_INTEGRAZIONE') return `Integrazione n. ${n} da prendere in carico.`
     if (st === 'INTEGRAZIONE_TRASMESSA') return `Integrazione n. ${n} da prendere in carico.`
     if (st === 'RAPPORTO_APPROVATO') return `Pratica approvata n. ${n} da prendere in carico.`
-    if (st === 'PROPOSTA_VERBALE') return `Proposta di contestazione sulla pratica n. ${n} da prendere in carico.`
-    if (st === 'VERBALE_APPROVATO') return `Atto di accertamento della pratica n. ${n} da prendere in carico.`
     if (st === 'RILEVAZIONE_RESPINTA') return `Rilevazione respinta sulla pratica n. ${n}.`
     if (st === 'ISTRUTTORIA_TECNICA_RESPINTA') return `Istruttoria tecnica respinta sulla pratica n. ${n}.`
-    if (st === 'VERBALE_RESPINTO') return `Atto di accertamento respinto sulla pratica n. ${n}.`
     return `Pratica n. ${n} da prendere in carico.`
   }
 
@@ -2942,13 +2722,11 @@ function ActionsPanel (props: {
       if (src === 'RZ' && dst === 'RI') return praticaLabel === 'Rapporto tecnico' ? 'Rapporto tecnico trasmesso' : 'Rilevazione approvata'
       if (src === 'RI' && dst === 'DT') return 'Istruttoria tecnica approvata'
       if (src === 'TI_AMM' && dst === 'RI_AMM') return 'Istruttoria amministrativa trasmessa'
-      if (src === 'RI_AMM' && dst === 'DA') return 'Istruttoria amministrativa approvata'
     }
 
     if (ev === 'PROPOSTA_CONTESTAZIONE_APPROVATA' && src === 'RI_AMM' && dst === 'TI_AMM') return 'Istruttoria amministrativa approvata'
     if (ev === 'ATTESTAZIONE_CONFORMITA' && src === 'TI_AMM' && dst === 'RI_AMM') return 'Attestazione di conformità apposta'
     if (ev === 'INVIO_A_TI_AMM') return 'Istruttoria amministrativa trasmessa'
-    if (ev === 'RESTITUZIONE_A_TI_AMM') return 'Pratica restituita'
 
     return activityTitleForSubtype(subtipo)
   }
@@ -2964,13 +2742,11 @@ function ActionsPanel (props: {
       if (src === 'RZ' && dst === 'RI') return `Istruttoria tecnica n. ${n} da prendere in carico.`
       if (src === 'RI' && dst === 'DT') return `Rapporto tecnico n. ${n} da prendere in carico.`
       if (src === 'TI_AMM' && dst === 'RI_AMM') return `Istruttoria amministrativa n. ${n} da prendere in carico.`
-      if (src === 'RI_AMM' && dst === 'DA') return `Proposta di contestazione sulla pratica n. ${n} da prendere in carico.`
     }
 
     if (ev === 'PROPOSTA_CONTESTAZIONE_APPROVATA' && src === 'RI_AMM' && dst === 'TI_AMM') return `Il Responsabile dell’istruttoria amministrativa ha approvato l’istruttoria amministrativa della pratica n. ${n}. La pratica può essere presa in carico per protocollazione del fascicolo e predisposizione della bozza di determinazione.`
     if (ev === 'ATTESTAZIONE_CONFORMITA' && src === 'TI_AMM' && dst === 'RI_AMM') return `Il Tecnico Istruttore amministrativo ha apposto il visto di conformità sulla pratica n. ${n}.`
     if (ev === 'INVIO_A_TI_AMM') return `Istruttoria amministrativa n. ${n} da prendere in carico.`
-    if (ev === 'RESTITUZIONE_A_TI_AMM') return `Pratica n. ${n} restituita al Tecnico Istruttore amministrativo.`
 
     return activityMessageForSubtype(subtipo, n)
   }
@@ -3257,7 +3033,6 @@ function ActionsPanel (props: {
     // TI_AMM: sia il visto positivo sia il rimando/non conformità rientrano al RI_AMM.
     // Il TI_AMM non gestisce più un invio separato dalla maschera amministrativa.
     if (role === 'TI_AMM') return 'RI_AMM'
-    if (role === 'DA')     return 'RI_AMM'
     return ''
   }
 
@@ -3435,6 +3210,7 @@ function ActionsPanel (props: {
     toNumOrNull(pickAttrCI(data, ['esito_TI_AMM', 'ESITO_TI_AMM'])) === ESITO_APPROVATA
 
   const canEdit =
+    role !== 'DA' &&
     hasSel &&
     !loading &&
     pending === null &&
@@ -3446,6 +3222,7 @@ function ActionsPanel (props: {
     !(role === 'RI_AMM' && determinazioneAdottataCorrente)
 
   const roleToBeTakenInCharge =
+    role !== 'DA' &&
     isOwnedByCurrentRole &&
     !riAmmBlockedByTiAmmVistoOnly &&
     (
@@ -3479,13 +3256,6 @@ function ActionsPanel (props: {
       : (roleToBeTakenInCharge
         ? 'La pratica deve essere presa in carico prima di poter essere aperta.'
         : 'Apertura gestione pratica non disponibile: selezionare una pratica.'))
-
-  const canUseRapportoPdf =
-    hasSel &&
-    !!data &&
-    !loading &&
-    pending === null &&
-    !roleToBeTakenInCharge
 
   const openEditPage = (requestedSection?: 'violazione') => {
     if (!canOpenEditPage) return
@@ -3823,7 +3593,7 @@ function ActionsPanel (props: {
 
   // ── computeNodoAttivo: determina quale ruolo deve agire ora sulla pratica ───
   // Replica la logica di computeSintetico del widget Elenco.
-  // Scansiona i ruoli dal più avanzato (DA) al meno avanzato (TR) e
+  // Scansiona i ruoli operativi dal più avanzato (TI_AMM) al meno avanzato (TR) e
   // restituisce il primo con dati valorizzati → quello è il nodo corrente.
   // Se nessuno ha dati, usa origine_pratica: 1→'RZ', 2→'TI'.
     const computeNodoAttivo = (d: any): string => {
@@ -3861,7 +3631,7 @@ function ActionsPanel (props: {
       if (!higherTouched && !tiReturnedLocal) return 'TI'
     }
 
-    const scanOrder = ['DA', 'TI_AMM', 'RI_AMM', 'DT', 'RI', 'RZ', 'TI', 'TR']
+    const scanOrder = ['TI_AMM', 'RI_AMM', 'DT', 'RI', 'RZ', 'TI', 'TR']
 
     const hasData = (r: string) => {
       const p = hasDedicatedPresaField(r) ? d[`presa_in_carico_${r}`] : null
@@ -3892,7 +3662,6 @@ function ActionsPanel (props: {
           const detStato = String(pickAttrCI(d, ['determinazione_stato', 'DETERMINAZIONE_STATO']) || '').trim().toUpperCase()
           return (detStato === 'TRASMESSA_RI_AMM' || detStato === 'BOZZA_TRASMESSA_RI_AMM') ? 'RI_AMM' : ''
         }
-        case 'DA':     return 'TI_AMM'
         default:       return ''
       }
     }
@@ -3905,7 +3674,6 @@ function ActionsPanel (props: {
         case 'DT':     return 'RI'
         case 'RI_AMM': return 'RI'
         case 'TI_AMM': return 'RI_AMM'
-        case 'DA':     return 'RI_AMM'
         default:       return ''
       }
     }
@@ -3967,7 +3735,9 @@ function ActionsPanel (props: {
     if (!s) return ''
     if (s.startsWith('RI_AMM')) return 'RI_AMM'
     if (s.startsWith('TI_AMM')) return 'TI_AMM'
-    if (s.startsWith('DIR_AMM') || s.startsWith('DA')) return 'DA'
+    // Il Direttore dell'Area amministrativa è fuori dal workflow interno: eventuali
+    // vecchi instradamenti DIR_AMM/DA non devono più bloccare le azioni dei nodi operativi.
+    if (s.startsWith('DIR_AMM') || s.startsWith('DA')) return ''
     if (s.startsWith('DIR') || s.startsWith('DT')) return 'DT'
     if (s.startsWith('RI')) return 'RI'
     if (s.startsWith('RZ')) return 'RZ'
@@ -4001,6 +3771,7 @@ function ActionsPanel (props: {
   const canChooseWorkflowAction = pending === null || actionsMenuOpen
 
   const canStartTakeInCharge =
+    role !== 'DA' &&
     hasSel &&
     !loading &&
     !lockedByTransmit &&
@@ -4112,6 +3883,7 @@ function ActionsPanel (props: {
     !riAmmSenderIsTecnico
 
   const canStartEsito =
+    role !== 'DA' &&
     hasSel &&
     !loading &&
     !lockedByTransmit &&
@@ -4189,7 +3961,7 @@ function ActionsPanel (props: {
     role !== 'RI' &&
     role !== 'TI_AMM' &&  // TI_AMM non può respingere
     role !== 'RI_AMM' &&  // il RI-AMM rimanda o trasmette, non respinge
-    role !== 'DA' &&      // DA non respinge: può approvare o rimandare per chiarimenti/integrazioni
+    role !== 'DA' &&      // DA è consultivo: nessuna azione di workflow interno
     rzCanRejectOnlyFirstEvaluation
 
   // Label dinamiche (inoltro vs approva)
@@ -4239,7 +4011,6 @@ function ActionsPanel (props: {
     role === 'RZ' ? (praticaLabel === 'Rapporto tecnico' ? 'Valida integrazione' : 'Approva rilevazione') :
     role === 'RI' ? 'Approva istruttoria tecnica' :
     role === 'DT' ? 'Approva Rapporto tecnico di rilevazione' :
-    role === 'DA' ? 'Approva atto amministrativo' :
     role === 'RI_AMM' && riAmmBozzaDeterminazioneDaVerificare ? 'Approva istruttoria amministrativa' :
     role === 'RI_AMM' && riAmmStaApprovandoPropostaContestazione ? 'Approva istruttoria amministrativa' :
     role === 'RI_AMM' ? `Trasmetti al ${fwdDestLabel}` :
@@ -4252,7 +4023,6 @@ function ActionsPanel (props: {
     role === 'RZ' ? (praticaLabel === 'Rapporto tecnico' ? `Integrazione validata e trasmessa al ${getRoleLabelForMenu('RI')}` : `Rilevazione approvata e trasmessa al ${getRoleLabelForMenu('RI')}`) :
     role === 'RI' ? `Istruttoria tecnica approvata e trasmessa al ${getRoleLabelForForward('DT')}` :
     role === 'DT' ? `Rapporto tecnico di rilevazione approvato e trasmesso al ${getRoleLabelForMenu('RI_AMM')}` :
-    role === 'DA' ? `Atto amministrativo approvato e trasmesso al ${getRoleLabelForMenu('TI_AMM')}` :
     role === 'RI_AMM' && riAmmBozzaDeterminazioneDaVerificare ? 'Istruttoria amministrativa approvata' :
     role === 'RI_AMM' && riAmmStaApprovandoPropostaContestazione ? 'Istruttoria amministrativa approvata' :
     role === 'RI_AMM' ? `Trasmessa al ${fwdDestLabel}` :
@@ -4265,7 +4035,6 @@ function ActionsPanel (props: {
     role === 'RZ' ? (praticaLabel === 'Rapporto tecnico' ? 'Valida integrazione' : 'Approva rilevazione') :
     role === 'RI' ? 'Approva istruttoria tecnica' :
     role === 'DT' ? 'Approva rapporto tecnico' :
-    role === 'DA' ? 'Approva atto amministrativo' :
     role === 'RI_AMM' && riAmmBozzaDeterminazioneDaVerificare ? 'Approva istruttoria amministrativa' :
     role === 'RI_AMM' && riAmmStaApprovandoPropostaContestazione ? 'Approva istruttoria amministrativa' :
     role === 'RI_AMM' ? `Trasmetti al ${fwdDestLabel}` :
@@ -4391,7 +4160,6 @@ function ActionsPanel (props: {
     role === 'RZ' ? (praticaLabel === 'Rapporto tecnico' ? 'Valida integrazione' : 'Approva rilevazione') :
     role === 'RI' ? 'Approva istruttoria tecnica' :
     role === 'DT' ? 'Approva Rapporto tecnico di rilevazione' :
-    role === 'DA' ? 'Approva atto amministrativo' :
     role === 'RI_AMM' && riAmmBozzaDeterminazioneDaVerificare ? 'Approva istruttoria amministrativa' :
     role === 'RI_AMM' && riAmmStaApprovandoPropostaContestazione ? 'Approva istruttoria amministrativa' :
     role === 'RI_AMM' ? `Trasmetti al ${fwdDestLabel}` :
@@ -4404,7 +4172,6 @@ function ActionsPanel (props: {
     role === 'RZ' ? (praticaLabel === 'Rapporto tecnico' ? `Valida l’integrazione e trasmette il rapporto tecnico al ${getRoleLabelForMenu('RI')}.` : `Approva la rilevazione e la trasmette al ${getRoleLabelForMenu('RI')}.`) :
     role === 'RI' ? `Approva l’istruttoria tecnica e la trasmette al ${getRoleLabelForForward('DT')}.` :
     role === 'DT' ? `Approva il Rapporto tecnico di rilevazione e lo trasmette al ${getRoleLabelForMenu('RI_AMM')}.` :
-    role === 'DA' ? `Approva l’atto amministrativo e lo trasmette al ${getRoleLabelForMenu('TI_AMM')}.` :
     role === 'RI_AMM' && riAmmBozzaDeterminazioneDaVerificare ? 'Approva l’istruttoria amministrativa e restituisce la pratica al Tecnico Istruttore amministrativo per la protocollazione e la trasmissione al Direttore.' :
     role === 'RI_AMM' && riAmmStaApprovandoPropostaContestazione ? 'Approva l’istruttoria amministrativa e restituisce la pratica al Tecnico istruttore amministrativo per protocollazione e predisposizione della bozza di determinazione.' :
     role === 'TI_AMM' ? 'Appone il visto di conformità e trasmette la pratica al Responsabile dell’istruttoria amministrativa per la verifica dell’istruttoria amministrativa.' :
@@ -4417,7 +4184,7 @@ function ActionsPanel (props: {
   // verso lo stesso TI_AMM: per l'utente sarebbero due scelte indistinguibili.
   const hideRiAmmForwardToTiAmm = role === 'RI_AMM' && fwdDest === 'TI_AMM' && !riAmmStaApprovandoPropostaContestazione && !riAmmBozzaDeterminazioneDaVerificare
 
-  const workflowMenuSections: WorkflowMenuSection[] = hasSel ? ([
+  const workflowMenuSections: WorkflowMenuSection[] = hasSel && role !== 'DA' ? ([
     {
       title: 'Avanzamento',
       items: [
@@ -4462,8 +4229,8 @@ function ActionsPanel (props: {
           desc: approvaMenuDesc,
           enabled: canStartApprova,
           visible: !hideRiAmmForwardToTiAmm && role !== 'TI_AMM',
-          color: (role === 'DT' || role === 'DA') ? buttonColors.approvaRapporto : buttonColors.approva,
-          textColor: (role === 'DT' || role === 'DA') ? buttonColors.approvaRapportoText : buttonColors.approvaText
+          color: role === 'DT' ? buttonColors.approvaRapporto : buttonColors.approva,
+          textColor: role === 'DT' ? buttonColors.approvaRapportoText : buttonColors.approvaText
         }
       ].filter(i => i.visible)
     },
@@ -4537,6 +4304,14 @@ function ActionsPanel (props: {
     'Incongruenza tra violazioni rilevate e descrizione dei fatti accertati',
     'Necessità di integrazione o rettifica'
   ]
+  const administrativeReturnTargetOptions = [
+    'Proposta di contestazione',
+    'Bozza di determinazione',
+    'Contestazioni e importi',
+    'Dati del trasgressore',
+    'Allegati',
+    'Altro'
+  ]
   const integrationTargetOptionsBase = [
     'Trasgressore',
     'Violazione',
@@ -4583,31 +4358,37 @@ function ActionsPanel (props: {
   const integrationReasonTrim = String(integrationReason ?? '').trim()
   const integrationOtherTextTrim = String(integrationOtherText ?? '').trim()
   const isWorkflowRimandoPendingForValidation = pending === 'INTEGRAZIONE' || pending === 'INTEGRAZIONE_TI_AMM' || pending === 'INTEGRAZIONE_TECNICA'
-  const isIntegrationNeedsDetail = integrationReasonTrim === 'Necessità di integrazione o rettifica'
+  const isAdministrativeRiAmmReturn = role === 'RI_AMM' && pending === 'INTEGRAZIONE_TI_AMM'
+  const isIntegrationNeedsDetail = !isAdministrativeRiAmmReturn && integrationReasonTrim === 'Necessità di integrazione o rettifica'
   const integrationOtherSelected = integrationTargets.includes('Altro')
   const isAltro = /\baltro\b/i.test(reasonTrim)
-  const hasOtherMotivation = (pending === 'RESPINGI' && isAltro) || (isWorkflowRimandoPendingForValidation && isIntegrationNeedsDetail && integrationOtherSelected)
+  const hasOtherMotivation = (pending === 'RESPINGI' && isAltro) || (!isAdministrativeRiAmmReturn && isWorkflowRimandoPendingForValidation && isIntegrationNeedsDetail && integrationOtherSelected)
   const freeNotePrefix = hasOtherMotivation ? 'Altre motivazioni e ulteriori annotazioni' : 'Ulteriori annotazioni'
-  const integrationReasonBlock = isWorkflowRimandoPendingForValidation && integrationReasonTrim
-    ? [
-        `Motivazione del rimando: ${integrationReasonTrim}`,
-        isIntegrationNeedsDetail && integrationTargets.length > 0 ? `Dati da integrare o rettificare: ${integrationTargets.join(', ')}` : ''
-      ].filter(Boolean).join('\n')
-    : ''
+  const integrationReasonBlock = isAdministrativeRiAmmReturn
+    ? (integrationTargets.length > 0 ? `Oggetto del rimando: ${integrationTargets.join(', ')}` : '')
+    : (isWorkflowRimandoPendingForValidation && integrationReasonTrim
+        ? [
+            `Motivazione del rimando: ${integrationReasonTrim}`,
+            isIntegrationNeedsDetail && integrationTargets.length > 0 ? `Dati da integrare o rettificare: ${integrationTargets.join(', ')}` : ''
+          ].filter(Boolean).join('\n')
+        : '')
   const noteTrim = [
     fixedWorkflowNoteTrim,
     integrationReasonBlock,
-    noteDraftTrim ? `${freeNotePrefix}:\n${noteDraftTrim}` : ''
+    noteDraftTrim
+      ? (isAdministrativeRiAmmReturn ? `Motivazione del rimando:\n${noteDraftTrim}` : `${freeNotePrefix}:\n${noteDraftTrim}`)
+      : ''
   ].filter(Boolean).join('\n\n')
 
   // obblighi:
   const noteIsRequired =
     hasOtherMotivation ||
+    isAdministrativeRiAmmReturn ||
     (pending === 'ELIMINA')  // Matrice_TI caso 1/b: note obbligatoria per eliminazione
 
   const reasonIsRequired = pending === 'RESPINGI'
-  const integrationReasonIsRequired = isWorkflowRimandoPendingForValidation
-  const integrationTargetsIsRequired = isWorkflowRimandoPendingForValidation && isIntegrationNeedsDetail
+  const integrationReasonIsRequired = isWorkflowRimandoPendingForValidation && !isAdministrativeRiAmmReturn
+  const integrationTargetsIsRequired = isAdministrativeRiAmmReturn || (isWorkflowRimandoPendingForValidation && isIntegrationNeedsDetail)
   const integrationOtherTextIsRequired = false
 
   const reasonInvalid = reasonIsRequired && !reasonTrim
@@ -5357,7 +5138,7 @@ function ActionsPanel (props: {
 
   const onConfirmIntegrazione = async () => {
     setConfirmAttempted(true)
-    if (integrationReasonInvalid || integrationTargetsInvalid || (hasOtherMotivation && !noteDraftTrim)) return
+    if (integrationReasonInvalid || integrationTargetsInvalid || noteInvalid || (hasOtherMotivation && !noteDraftTrim)) return
     setLoading(true)
     setMsg(null)
 
@@ -5406,8 +5187,8 @@ function ActionsPanel (props: {
           // Rimando RI_AMM -> TI_AMM dopo trasmissione della bozza determinazione.
           // Il rientro apre una fase di rettifica: la vecchia verifica RI_AMM resta
           // tracciata nello storico, ma non può sbloccare protocollazione o firma.
-          // Il TI_AMM dovrà riapporre il visto, rigenerare la Proposta e trasmettere
-          // una nuova bozza al Responsabile; il nuovo ciclo sostituisce il precedente.
+          // Oggetto e motivazione del rimando sono registrati nelle note RI_AMM; il TI_AMM
+          // predisporrà e caricherà una nuova bozza PDF prima della nuova trasmissione.
           // Il valore del campo resta BOZZA perché determinazione_stato ha un dominio
           // codificato e non consente stati intermedi non previsti dallo schema.
           if (pending === 'INTEGRAZIONE_TI_AMM' && ruoloDest === 'TI_AMM') {
@@ -5453,6 +5234,7 @@ function ActionsPanel (props: {
         [esitoField]: esito,
         [dtEsitoField]: now
       }
+      let riAmmApprovedProposalSync: { layer: any, layerUrl: string, file: File } | null = null
       if (esito === ESITO_APPROVATA && noteTrim) {
         upd[noteField] = noteTrim
       }
@@ -5461,12 +5243,6 @@ function ActionsPanel (props: {
         const schemaFields: Record<string, any> = (ds as any)?.getSchema?.()?.fields || {}
         const fNoteAttoAmm = getSchemaFieldNameCI(schemaFields, 'note_atto_amm')
         if (fNoteAttoAmm) upd[fNoteAttoAmm] = noteTrim
-      }
-      const isRiAmmTrasmissioneBozzaAlDa = false
-      if (isRiAmmTrasmissioneBozzaAlDa) {
-        // La trasmissione al Direttore è esterna al workflow interno e non chiude
-        // l'istruttoria amministrativa nel gestionale. Il RI_AMM registra solo
-        // data/ora della trasmissione della bozza; la pratica rientra poi al TI_AMM.
       }
       if (stato != null) {
         upd[statoField] = stato
@@ -5499,27 +5275,26 @@ function ActionsPanel (props: {
         }
       }
 
-      if (isRiAmmTrasmissioneBozzaAlDa) {
-        const schemaFields: Record<string, any> = (ds as any)?.getSchema?.()?.fields || {}
-        const fDetStato = getSchemaFieldNameCI(schemaFields, 'determinazione_stato')
-        const fDetTrasIl = getSchemaFieldNameCI(schemaFields, 'determinazione_trasmessa_firma_il')
-        const fDetTrasDa = getSchemaFieldNameCI(schemaFields, 'determinazione_trasmessa_firma_da')
-        const currentUserRole: any = (window as any).__giiUserRole || {}
-        const currentUserLabel = String(currentUserRole.fullName || currentUserRole.full_name || currentUserRole.username || (window as any).__giiUser?.username || '').trim()
-        if (fDetStato) upd[fDetStato] = 'TRASMESSA_FIRMA_DA'
-        if (fDetTrasIl) upd[fDetTrasIl] = now
-        if (fDetTrasDa) upd[fDetTrasDa] = currentUserLabel
-      }
+
 
       if (role === 'RI_AMM' && esito === ESITO_APPROVATA && riAmmBozzaDeterminazioneDaVerificare) {
         const schemaFields: Record<string, any> = (ds as any)?.getSchema?.()?.fields || {}
         const fDetStato = getSchemaFieldNameCI(schemaFields, 'determinazione_stato')
+        const fProtocolloFascicoloNumero = getSchemaFieldNameCI(schemaFields, 'protocollo_fascicolo_numero')
+        const fProtocolloFascicoloData = getSchemaFieldNameCI(schemaFields, 'protocollo_fascicolo_data')
+
+        // Ogni approvazione RI_AMM valida una nuova versione del fascicolo.
+        // Un protocollo eventualmente registrato in un ciclo precedente non può
+        // essere riutilizzato: viene invalidato e i campi resteranno bloccati
+        // fino alla nuova trasmissione al protocollo da parte del TI_AMM.
         if (fDetStato) upd[fDetStato] = 'VALIDATA_RI_AMM'
+        if (fProtocolloFascicoloNumero) upd[fProtocolloFascicoloNumero] = null
+        if (fProtocolloFascicoloData) upd[fProtocolloFascicoloData] = null
       }
 
       const integRequester = (esito === ESITO_APPROVATA && !isTiAmmAttestazioneConformita) ? getIntegrationRequesterForCurrentRole() : ''
       const ruoloDest = esito === ESITO_APPROVATA
-        ? (isTiAmmAttestazioneConformita ? '' : (isRiAmmTrasmissioneBozzaAlDa ? 'TI_AMM' : (integRequester || getNextRoleForForward())))
+        ? (isTiAmmAttestazioneConformita ? '' : (integRequester || getNextRoleForForward()))
         : ''
       if (ruoloDest) {
         try {
@@ -5561,6 +5336,47 @@ function ActionsPanel (props: {
         addGiiRoutingFields(upd, ruoloDest, 'TRASMISSIONE')
       }
 
+      // A ogni nuova approvazione RI_AMM la Proposta corrente viene rigenerata dallo
+      // stesso builder condiviso, usando già l'esito del ciclo che si sta chiudendo.
+      // In questo modo il PDF approvato perde la filigrana BOZZA e sostituisce sempre
+      // la versione provvisoria del ciclo precedente.
+      if (role === 'RI_AMM' && esito === ESITO_APPROVATA && riAmmBozzaDeterminazioneDaVerificare) {
+        const { layer } = await resolveLayer(ds)
+        if (!layer) throw new Error('Layer non disponibile per aggiornare la Proposta di contestazione approvata.')
+        if (typeof layer.load === 'function') { try { await layer.load() } catch {} }
+        const layerUrl = String(
+          layer?.url ||
+          active?.state?.ds?.getDataSourceJson?.()?.url ||
+          active?.state?.ds?.dataSourceJson?.url ||
+          active?.state?.ds?.layer?.url ||
+          active?.key ||
+          ''
+        ).trim().replace(/\/+$/, '')
+        if (!layerUrl) throw new Error('URL del FeatureLayer non disponibile per aggiornare la Proposta di contestazione approvata.')
+        const schemaFields: Record<string, any> = (ds as any)?.getSchema?.()?.fields || {}
+        const proposalFields = Array.isArray(layer?.fields) && layer.fields.length
+          ? layer.fields.map((f: any) => ({ name: String(f.name), type: String(f.type || ''), alias: String(f.alias || f.name), domain: f.domain || null, editable: f.editable !== false }))
+          : Object.keys(schemaFields).map(name => ({ name, type: String(schemaFields[name]?.type || ''), alias: String(schemaFields[name]?.alias || name), domain: schemaFields[name]?.domain || null, editable: schemaFields[name]?.editable !== false }))
+        const currentProfile: any = (window as any).__giiUserRole || {}
+        let liveProposalAttrs: Record<string, any> | null = null
+        try {
+          liveProposalAttrs = await queryCurrentRecordAttrs()
+        } catch {}
+        const propostaBlob = await buildVerbalePdfBlob(
+          { ...(liveProposalAttrs || data || {}), ...upd },
+          proposalFields as any,
+          {
+            username: String(currentProfile?.username || ''),
+            fullName: String(currentProfile?.fullName || currentProfile?.full_name || currentProfile?.username || '')
+          }
+        )
+        riAmmApprovedProposalSync = {
+          layer,
+          layerUrl,
+          file: new File([propostaBlob.blob], propostaBlob.fileName, { type: 'application/pdf', lastModified: now })
+        }
+      }
+
       // La risposta a integrazione è solo quella diretta al ruolo che ha chiesto
       // l'integrazione. Non usare una scansione globale degli esiti=1, perché dopo
       // molti avanti/indietro possono rimanere stati storici non pertinenti.
@@ -5580,16 +5396,12 @@ ${noteTrim}` : 'Attestazione di conformità apposta.',
                     fase: role
                   }
                 : {
-                    eventoChiusura: isRiAmmTrasmissioneBozzaAlDa
-                      ? 'BOZZA_DETERMINAZIONE_TRASMESSA_DA'
-                      : (ruoloDest
-                        ? (riAmmStaApprovandoPropostaContestazione ? 'PROPOSTA_CONTESTAZIONE_APPROVATA' : (wasIntegResponse ? 'INTEGRAZIONE_TRASMESSA' : 'ISTRUTTORIA_TRASMESSA'))
-                        : 'ISTRUTTORIA_TRASMESSA'),
+                    eventoChiusura: ruoloDest
+                      ? (riAmmStaApprovandoPropostaContestazione ? 'PROPOSTA_CONTESTAZIONE_APPROVATA' : (wasIntegResponse ? 'INTEGRAZIONE_TRASMESSA' : 'ISTRUTTORIA_TRASMESSA'))
+                      : 'ISTRUTTORIA_TRASMESSA',
                     ruoloDestinatario: ruoloDest,
                     utenteDestinatario: resolveDestUser(ruoloDest),
-                    noteChiusura: isRiAmmTrasmissioneBozzaAlDa
-                      ? (noteTrim || 'Istruttoria amministrativa approvata; pratica restituita al Tecnico istruttore amministrativo per gli adempimenti successivi.')
-                      : noteTrim,
+                    noteChiusura: noteTrim,
                     fase: role
                   })
         : null
@@ -5604,15 +5416,37 @@ ${noteTrim}` : 'Attestazione di conformità apposta.',
           : []
         const successText = isTiAmmAttestazioneConformita
           ? 'Attestazione di conformità apposta.'
-          : isRiAmmTrasmissioneBozzaAlDa
+          : riAmmStaApprovandoPropostaContestazione
             ? 'Istruttoria amministrativa approvata e restituita al Tecnico istruttore amministrativo.'
-            : riAmmStaApprovandoPropostaContestazione
-              ? 'Istruttoria amministrativa approvata e restituita al Tecnico istruttore amministrativo.'
-              : `Esito salvato: ${label}.`
+            : `Esito salvato: ${label}.`
         await saveWithWorkflowLog(upd, successText, { ...logOpts, informativeActivities })
-        if (isRiAmmTrasmissioneBozzaAlDa) await triggerDaBozzaSendTo()
       } else {
         await runApplyEdits(upd, `Esito salvato: ${label}.`)
+      }
+
+      if (riAmmApprovedProposalSync) {
+        try {
+          await replacePropostaContestazionePdfAttachment(
+            riAmmApprovedProposalSync.layer,
+            Number(oid),
+            riAmmApprovedProposalSync.file,
+            riAmmApprovedProposalSync.layerUrl,
+            'APPROVED'
+          )
+          try { window.dispatchEvent(new CustomEvent('gii:record-updated', { detail: { oid: Number(oid), source: 'gii-azioni-ri-amm-proposta-approvata', ts: Date.now() } })) } catch {}
+        } catch (syncError: any) {
+          try {
+            console.error('[GII][RI_AMM][PROPOSTA_APPROVATA] Aggiornamento PDF non riuscito', {
+              oid: Number(oid),
+              message: syncError?.message || String(syncError),
+              error: syncError
+            })
+          } catch {}
+          setPending(null)
+          setConfirmAttempted(false)
+          setMsg({ kind: 'err', text: `Istruttoria amministrativa approvata, ma aggiornamento della Proposta PDF non riuscito: ${syncError?.message || String(syncError)}` })
+          return
+        }
       }
       setPending(null)
       setConfirmAttempted(false)
@@ -5738,7 +5572,6 @@ ${noteTrim}` : 'Attestazione di conformità apposta.',
     role === 'RZ' ? (praticaLabel === 'Rapporto tecnico' ? 'Validazione integrazione' : 'Approvazione rilevazione') :
     role === 'RI' ? 'Approvazione istruttoria tecnica' :
     role === 'DT' ? 'Approvazione rapporto tecnico' :
-    role === 'DA' ? 'Approvazione atto amministrativo' :
     role === 'RI_AMM' && riAmmBozzaDeterminazioneDaVerificare ? 'Approvazione istruttoria amministrativa' :
     role === 'RI_AMM' ? `Trasmissione al ${fwdDestLabel}` :
     role === 'TI_AMM' ? `Trasmissione al ${getRoleLabelForMenu('RI_AMM')}` :
@@ -5768,7 +5601,6 @@ ${noteTrim}` : 'Attestazione di conformità apposta.',
     role === 'RZ' ? (praticaLabel === 'Rapporto tecnico' ? `L’integrazione verrà validata e il rapporto tecnico verrà trasmesso al ${getRoleLabelForMenu('RI')}.` : `La rilevazione verrà approvata e trasmessa al ${getRoleLabelForMenu('RI')}.`) :
     role === 'RI' ? `L’istruttoria tecnica verrà approvata e trasmessa al ${getRoleLabelForForward('DT')}.` :
     role === 'DT' ? `Il Rapporto tecnico di rilevazione verrà approvato e trasmesso al ${getRoleLabelForMenu('RI_AMM')}.` :
-    role === 'DA' ? `L’atto amministrativo verrà approvato e trasmesso al ${getRoleLabelForMenu('TI_AMM')}.` :
     role === 'RI_AMM' && riAmmBozzaDeterminazioneDaVerificare ? 'L’istruttoria amministrativa verrà approvata e la pratica tornerà al Tecnico Istruttore amministrativo per i passaggi successivi.' :
     role === 'RI_AMM' && riAmmStaApprovandoPropostaContestazione ? 'L’istruttoria amministrativa verrà approvata e la pratica tornerà al Tecnico istruttore amministrativo per protocollazione e predisposizione della bozza di determinazione.' :
     role === 'RI_AMM' ? `L’istruttoria amministrativa verrà trasmessa al ${fwdDestLabel}.` :
@@ -5784,7 +5616,7 @@ ${noteTrim}` : 'Attestazione di conformità apposta.',
         : 'La rilevazione verrà rimandata per integrazione.')
 
   const pendingTheme: Record<string, PendingTheme> = {
-    TAKE:           { icon: '✓', color: '#2563eb', bg: '#eff6ff', border: '#bfdbfe', buttonBg: '#2563eb', buttonBorder: '#1d4ed8', desc: riAmmBozzaDeterminazioneDaVerificare ? 'La pratica contenente la bozza Word della determinazione verrà presa in carico per la verifica.' : (praticaLabel === 'Rapporto tecnico' ? 'Il rapporto tecnico verrà preso in carico.' : 'La rilevazione verrà presa in carico.') },
+    TAKE:           { icon: '✓', color: '#2563eb', bg: '#eff6ff', border: '#bfdbfe', buttonBg: '#2563eb', buttonBorder: '#1d4ed8', desc: riAmmBozzaDeterminazioneDaVerificare ? 'La pratica contenente la bozza di determinazione verrà presa in carico per la verifica.' : (praticaLabel === 'Rapporto tecnico' ? 'Il rapporto tecnico verrà preso in carico.' : 'La rilevazione verrà presa in carico.') },
     ASSEGNA_TI:     { icon: '✓', color: '#2563eb', bg: '#eff6ff', border: '#bfdbfe', buttonBg: '#2563eb', buttonBorder: '#1d4ed8', desc: `${subjectArticle} ${subjectNameLower} verrà ${subjectVerbAssegnata} al ${getRoleLabelForMenu('TI')} selezionato.` },
     ASSEGNA_TI_AMM: { icon: '✓', color: '#2563eb', bg: '#eff6ff', border: '#bfdbfe', buttonBg: '#2563eb', buttonBorder: '#1d4ed8', desc: riaperturaWorkflowDaAvviare
       ? `Verrà aperto il nuovo ciclo di riapertura n. ${riaperturaAmmNumero} e la pratica sarà assegnata al ${getRoleLabelForMenu('TI_AMM')} selezionato.`
@@ -5829,16 +5661,6 @@ ${noteTrim}` : 'Attestazione di conformità apposta.',
       if (nextPending === 'RESPINGI') {
         return `A seguito della valutazione di competenza, non si ravvisano i presupposti per l’approvazione dell’istruttoria tecnica e si dispone il respingimento della pratica.`
       }
-    }
-
-    if (role === 'DA') {
-      if (nextPending === 'APPROVA' || nextPending === 'INVIA_TI_AMM') {
-        return `A seguito della valutazione di competenza, si approva l'istruttoria amministrativa proposta e si dispone la prosecuzione della pratica alla fase conclusiva.`
-      }
-      if (nextPending === 'INTEGRAZIONE' || nextPending === 'INTEGRAZIONE_TI_AMM' || nextPending === 'INTEGRAZIONE_TECNICA') {
-        return `A seguito della valutazione di competenza, non si approva l'istruttoria amministrativa proposta e si dispone il rinvio al Responsabile istruttoria amministrativa per le necessarie verifiche, integrazioni o rettifiche.`
-      }
-      return ''
     }
 
     if (role === 'RZ') {
@@ -5953,66 +5775,86 @@ ${noteTrim}` : 'Attestazione di conformità apposta.',
   const selectedWorkflowMenuKey = selectedWorkflowMenuItem?.key || ''
   const isWorkflowRimandoPending = pending === 'INTEGRAZIONE' || pending === 'INTEGRAZIONE_TI_AMM' || pending === 'INTEGRAZIONE_TECNICA'
   const isAttestazioneConformitaPending = pending === 'APPROVA' || pending === 'INVIA_TI_AMM'
-  const workflowNoteLabel = isAttestazioneConformitaPending ? 'Attestazione di conformità' : (isWorkflowRimandoPending ? 'Integrazioni/rettifiche proposte' : 'Note')
+  const workflowNoteLabel = isAdministrativeRiAmmReturn
+    ? 'Esito della verifica'
+    : (isAttestazioneConformitaPending ? 'Attestazione di conformità' : (isWorkflowRimandoPending ? 'Integrazioni/rettifiche proposte' : 'Note'))
   const hasFixedWorkflowNote = Boolean(fixedWorkflowNoteTrim)
-  const workflowFreeNoteLabel = hasFixedWorkflowNote
-    ? (hasOtherMotivation ? 'Altre motivazioni e ulteriori annotazioni' : 'Ulteriori annotazioni')
-    : workflowNoteLabel
+  const workflowFreeNoteLabel = isAdministrativeRiAmmReturn
+    ? 'Motivazione del rimando'
+    : (hasFixedWorkflowNote
+        ? (hasOtherMotivation ? 'Altre motivazioni e ulteriori annotazioni' : 'Ulteriori annotazioni')
+        : workflowNoteLabel)
   const workflowNoteTextAreaRequired = noteIsRequired
-  const workflowNotePlaceholder = hasFixedWorkflowNote
-    ? (hasOtherMotivation ? 'Inserire altre motivazioni ed eventuali ulteriori annotazioni…' : 'Inserire eventuali ulteriori annotazioni…')
-    : isAttestazioneConformitaPending
-      ? 'Attestare la conformità della pratica agli elementi verificati…'
-      : isWorkflowRimandoPending
+  const workflowNotePlaceholder = isAdministrativeRiAmmReturn
+    ? 'Indicare le modifiche, integrazioni o rettifiche richieste…'
+    : (hasFixedWorkflowNote
         ? (hasOtherMotivation ? 'Inserire altre motivazioni ed eventuali ulteriori annotazioni…' : 'Inserire eventuali ulteriori annotazioni…')
-        : (noteIsRequired ? 'Specifica il motivo…' : 'Nota facoltativa…')
+        : isAttestazioneConformitaPending
+          ? 'Attestare la conformità della pratica agli elementi verificati…'
+          : isWorkflowRimandoPending
+            ? (hasOtherMotivation ? 'Inserire altre motivazioni ed eventuali ulteriori annotazioni…' : 'Inserire eventuali ulteriori annotazioni…')
+            : (noteIsRequired ? 'Specifica il motivo…' : 'Nota facoltativa…'))
 
   const integrationMotivationControls = isWorkflowRimandoPending ? (
-    <div style={{ display: 'grid', gap: 8 }}>
-      <div style={{ display: 'grid', gap: 6 }}>
+    isAdministrativeRiAmmReturn ? (
+      <div style={{ display: 'grid', gap: 7 }}>
         <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
-          <div style={{ fontSize: Math.max(15, Number(titleFontSize) || 15), fontWeight: 700 }}>Motivazione del rimando</div>
-          <div style={labelReqStyle(true, integrationReasonReqErr)}>(obbligatoria)</div>
+          <div style={{ fontSize: Math.max(15, Number(titleFontSize) || 15), fontWeight: 700 }}>Oggetto del rimando</div>
+          <div style={labelReqStyle(true, integrationTargetsReqErr)}>(obbligatorio)</div>
         </div>
-        <select
-          value={integrationReason}
-          onChange={(e) => {
-            const v = String(e.target.value || '')
-            setIntegrationReason(v)
-            setIntegrationTargets([])
-            setIntegrationOtherText('')
-            if (confirmAttempted) setConfirmAttempted(false)
-          }}
-          disabled={loading || !hasSel || lockedByTransmit}
-          style={{ width: '100%', padding: '9px 10px', borderRadius: 8, border: `1px solid ${integrationReasonReqErr ? '#dc2626' : 'rgba(0,0,0,0.18)'}`, outline: 'none', fontSize: Math.max(15, Number(ui.statusFontSize) || 15), background: '#fff' }}
-        >
-          <option value=''>— Seleziona —</option>
-          {integrationReasonOptions.map(opt => <option key={opt} value={opt}>{opt}</option>)}
-        </select>
-      </div>
-
-      {isIntegrationNeedsDetail && (
-        <div style={{ display: 'grid', gap: 7 }}>
-          <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
-            <div style={{ fontSize: Math.max(15, Number(titleFontSize) || 15), fontWeight: 700 }}>Dati da integrare o rettificare</div>
-            <div style={labelReqStyle(true, integrationTargetsReqErr)}>(obbligatoria)</div>
+        <div style={{ border: `1px solid ${integrationTargetsReqErr ? '#fecaca' : '#e5e7eb'}`, borderRadius: 8, padding: '6px 8px', background: '#fff' }}>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(190px, 1fr))', columnGap: 10, rowGap: 2 }}>
+            {administrativeReturnTargetOptions.map(opt => renderIntegrationTargetCheckbox(opt))}
           </div>
-          {role === 'DT' ? (
-            <div style={{ border: `1px solid ${integrationTargetsReqErr ? '#fecaca' : '#e5e7eb'}`, borderRadius: 8, padding: '6px 8px', background: '#fff' }}>
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', columnGap: 10, rowGap: 2 }}>
-                {integrationTargetOptions.map(opt => renderIntegrationTargetCheckbox(opt))}
-              </div>
-            </div>
-          ) : (
-            <div style={{ border: `1px solid ${integrationTargetsReqErr ? '#fecaca' : '#e5e7eb'}`, borderRadius: 8, padding: '6px 8px', background: '#fff' }}>
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(190px, 1fr))', columnGap: 10, rowGap: 2 }}>
-                {integrationTargetOptions.map(opt => renderIntegrationTargetCheckbox(opt))}
-              </div>
-            </div>
-          )}
         </div>
-      )}
-    </div>
+      </div>
+    ) : (
+      <div style={{ display: 'grid', gap: 8 }}>
+        <div style={{ display: 'grid', gap: 6 }}>
+          <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
+            <div style={{ fontSize: Math.max(15, Number(titleFontSize) || 15), fontWeight: 700 }}>Motivazione del rimando</div>
+            <div style={labelReqStyle(true, integrationReasonReqErr)}>(obbligatoria)</div>
+          </div>
+          <select
+            value={integrationReason}
+            onChange={(e) => {
+              const v = String(e.target.value || '')
+              setIntegrationReason(v)
+              setIntegrationTargets([])
+              setIntegrationOtherText('')
+              if (confirmAttempted) setConfirmAttempted(false)
+            }}
+            disabled={loading || !hasSel || lockedByTransmit}
+            style={{ width: '100%', padding: '9px 10px', borderRadius: 8, border: `1px solid ${integrationReasonReqErr ? '#dc2626' : 'rgba(0,0,0,0.18)'}`, outline: 'none', fontSize: Math.max(15, Number(ui.statusFontSize) || 15), background: '#fff' }}
+          >
+            <option value=''>— Seleziona —</option>
+            {integrationReasonOptions.map(opt => <option key={opt} value={opt}>{opt}</option>)}
+          </select>
+        </div>
+
+        {isIntegrationNeedsDetail && (
+          <div style={{ display: 'grid', gap: 7 }}>
+            <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
+              <div style={{ fontSize: Math.max(15, Number(titleFontSize) || 15), fontWeight: 700 }}>Dati da integrare o rettificare</div>
+              <div style={labelReqStyle(true, integrationTargetsReqErr)}>(obbligatoria)</div>
+            </div>
+            {role === 'DT' ? (
+              <div style={{ border: `1px solid ${integrationTargetsReqErr ? '#fecaca' : '#e5e7eb'}`, borderRadius: 8, padding: '6px 8px', background: '#fff' }}>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', columnGap: 10, rowGap: 2 }}>
+                  {integrationTargetOptions.map(opt => renderIntegrationTargetCheckbox(opt))}
+                </div>
+              </div>
+            ) : (
+              <div style={{ border: `1px solid ${integrationTargetsReqErr ? '#fecaca' : '#e5e7eb'}`, borderRadius: 8, padding: '6px 8px', background: '#fff' }}>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(190px, 1fr))', columnGap: 10, rowGap: 2 }}>
+                  {integrationTargetOptions.map(opt => renderIntegrationTargetCheckbox(opt))}
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+    )
   ) : null
 
   const rejectReasonControls = pending === 'RESPINGI' ? (
@@ -6080,7 +5922,7 @@ ${noteTrim}` : 'Attestazione di conformità apposta.',
     if (!pending || loading || !selectedWorkflowMenuItem) return false
     if (pending === 'ASSEGNA_TI') return !!tiSelected
     if (pending === 'ASSEGNA_TI_AMM') return !!tiAmmSelected
-    if (pending === 'INTEGRAZIONE' || pending === 'INTEGRAZIONE_TI_AMM' || pending === 'INTEGRAZIONE_TECNICA') return !integrationReasonInvalid && !integrationTargetsInvalid && (!hasOtherMotivation || !!noteDraftTrim)
+    if (pending === 'INTEGRAZIONE' || pending === 'INTEGRAZIONE_TI_AMM' || pending === 'INTEGRAZIONE_TECNICA') return !integrationReasonInvalid && !integrationTargetsInvalid && !noteInvalid && (!hasOtherMotivation || !!noteDraftTrim)
     if (pending === 'APPROVA' || pending === 'INVIA_TI_AMM') return !!noteTrim
     if (pending === 'RESPINGI') return !!reasonTrim && (!isAltro || !!noteDraftTrim)
     if (pending === 'ELIMINA') return !!noteTrim
@@ -6626,48 +6468,6 @@ ${noteTrim}` : 'Attestazione di conformità apposta.',
     document.body
   ) : null
 
-  const reportPreviewModal = previewOpen ? createPortal(
-    <div
-      data-gii-global-popup-root='1'
-      style={{ position: 'fixed', inset: 0, zIndex: 2147483646, background: 'rgba(0,0,0,0.58)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 14, pointerEvents: 'auto' }}
-      onClick={(e) => { e.preventDefault(); e.stopPropagation() }}
-      onMouseDown={(e) => { e.preventDefault(); e.stopPropagation() }}
-    >
-      <div
-        role='dialog'
-        aria-modal='true'
-        data-gii-global-popup-dialog='1'
-        style={{ width: 'calc(100vw - 28px)', height: 'calc(100vh - 28px)', maxWidth: 2180, maxHeight: 1200, borderRadius: 14, boxShadow: '0 20px 70px rgba(0,0,0,0.32)', overflow: 'hidden', position: 'relative', zIndex: 2147483647, display: 'flex', alignItems: 'stretch', background: '#282828' }}
-        onClick={(e) => { e.stopPropagation() }}
-        onMouseDown={(e) => { e.stopPropagation() }}
-      >
-        <GiiAnteprimaPanel
-          data={data || {}}
-          mode='edit'
-          ds={ds}
-          oid={oid}
-          idFieldName={idFieldNameFromSel}
-          mapView={props.mapView}
-          mapMode='live'
-          mapTarget={modalMapTarget}
-          mapConfig={{ mapLayerUrl: String(active?.key || '') }}
-          notaSpeseConfig={props.nsConfig}
-          canSeeAmministrativi={showAdminPreviewDocuments}
-          role={role}
-          extraDocumentBuilder={async () => await buildDeterminazionePdfBlobForActions()}
-          profile={{
-            username: String((window as any).__giiUserRole?.username || ''),
-            fullName: String((window as any).__giiUserRole?.fullName || (window as any).__giiUserRole?.full_name || '')
-          }}
-          sidebarWidth={290}
-          viewerBackgroundColor='#282828'
-          onClose={closeRapportoPreview}
-        />
-      </div>
-    </div>,
-    document.body
-  ) : null
-
   const panelStyle: React.CSSProperties = {
   position: 'relative',
   zIndex: 1001,
@@ -6797,7 +6597,7 @@ ${noteTrim}` : 'Attestazione di conformità apposta.',
             {/* Spacer per separare azioni (sx) da utilità (dx) */}
             <div style={{ flex: 1 }}/>
 
-            {/* GRUPPO DESTRO — Modifica, Anteprima, Download */}
+            {/* GRUPPO DESTRO — Apertura gestione pratica */}
             <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
               {/* PULSANTE MODIFICA — rapporto tecnico o verbale amministrativo */}
               {canShowEdit && (
@@ -6825,33 +6625,6 @@ ${noteTrim}` : 'Attestazione di conformità apposta.',
                 </button>
               )}
 
-              {/* PULSANTE ANTEPRIMA PDF — sempre visibile, disabilitato senza selezione */}
-              <button
-                type='button'
-                disabled={!canUseRapportoPdf}
-                onClick={handleRapportoPreview}
-                title={canUseRapportoPdf ? 'Apri anteprima documenti' : (roleToBeTakenInCharge ? 'La pratica deve essere presa in carico prima di poter aprire l\u2019anteprima.' : 'Anteprima non disponibile: selezionare un rapporto.')}
-                style={{
-                  width: ((ui?.btnPaddingY ?? 8) * 2) + (ui?.btnFontSize ?? 14) + 10,
-                  height: ((ui?.btnPaddingY ?? 8) * 2) + (ui?.btnFontSize ?? 14) + 10,
-                  padding: 0,
-                  boxSizing: 'border-box',
-                  borderRadius: 8,
-                  border: `2px solid ${canUseRapportoPdf ? '#2563eb' : '#e5e7eb'}`,
-                  background: '#fff',
-                  color: canUseRapportoPdf ? '#2563eb' : '#9ca3af',
-                  cursor: canUseRapportoPdf ? 'pointer' : 'not-allowed',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center'
-                }}
-              >
-                <svg width='24' height='24' viewBox='0 0 18 18' fill='none' stroke='currentColor' strokeWidth='1.5' strokeLinecap='round' strokeLinejoin='round' aria-hidden='true' focusable='false'>
-                  <path d='M16.5,8.9V3.1c0-.9-.7-1.7-1.7-1.7H3.2c-.9,0-1.7.7-1.7,1.7v11.6c0,.9.7,1.7,1.7,1.7h5.8'/>
-                  <path d='M10.8,12.2l3.7,3.7c.5.5,1.1.7,1.6.2.5-.6.3-1-.3-1.5l-3.7-3.7'/>
-                  <circle cx='9' cy='8.9' r='3.7'/>
-                </svg>
-              </button>
 
             </div>
           </div>
@@ -6861,7 +6634,6 @@ ${noteTrim}` : 'Attestazione di conformità apposta.',
         {pendingModal}
         {incompleteNotaSpeseWarningModal}
         {zeroNotaSpeseWarningModal}
-        {reportPreviewModal}
 
         {denyPopupMessages.length > 0 && createPortal(
           <div
@@ -6917,134 +6689,9 @@ ${noteTrim}` : 'Attestazione di conformità apposta.',
 }
 
 
-function formatDateSafe (v: any): string {
-  if (v == null || v === '') return '—'
-  try {
-    // ArcGIS può restituire epoch ms o ISO
-    const n = Number(v)
-    const d = Number.isFinite(n) && n > 0 ? new Date(n) : new Date(String(v))
-    if (Number.isNaN(d.getTime())) return String(v)
-    // formato IT: gg/mm/aaaa hh:mm
-    const dd = String(d.getDate()).padStart(2, '0')
-    const mm = String(d.getMonth() + 1).padStart(2, '0')
-    const yy = String(d.getFullYear())
-    const hh = String(d.getHours()).padStart(2, '0')
-    const mi = String(d.getMinutes()).padStart(2, '0')
-    return `${dd}/${mm}/${yy} ${hh}:${mi}`
-  } catch {
-    return String(v)
-  }
-}
 
-function normalizeFieldList (arr: any): string[] {
-  if (!arr) return []
-  const js = (arr as any)?.asMutable ? (arr as any).asMutable({ deep: true }) : arr
-  const a = Array.isArray(js) ? js : []
-  return a.map(x => String(x)).filter(Boolean)
-}
+// ── Supporto alla validazione dei gradi delle violazioni ────────────────────
 
-function autoPickFields (data: any, kind: string): string[] {
-  if (!data) return []
-  const keys = Object.keys(data).filter(k => !/^objectid$/i.test(k) && !/^globalid$/i.test(k) && !/^shape/i.test(k))
-  const pickBy = (re: RegExp) => keys.filter(k => re.test(k))
-  if (kind === 'ANAGRAFICA') {
-    const a = pickBy(/ditta|denom|ragione|nome|cognome|cf|cod.*fisc|piva|partita|indir|via|cap|comune|prov|telefono|cell|mail|pec/i)
-    return a.slice(0, 16)
-  }
-  if (kind === 'VIOLAZIONE') {
-    const a = pickBy(/viol|infraz|descr|art|norm|tipo|sanz|import|acqua|volume|turno|utenza|contatore/i)
-    return a.slice(0, 16)
-  }
-  if (kind === 'ALLEGATI') {
-    const a = pickBy(/alleg|foto|doc|file|url|link|pdf|jpg|png/i)
-    return a.slice(0, 16)
-  }
-  // ITER: lasciamo vuoto, perché ha già blocchi DT/DA
-  return []
-}
-
-
-function TabButton (props: { active: boolean; label: string; onClick: () => void; disabled?: boolean }) {
-  const bg = props.active ? '#eaf2ff' : 'rgba(0,0,0,0.02)'
-  const bd = props.active ? '#2f6fed' : 'rgba(0,0,0,0.12)'
-  const col = props.active ? '#1d4ed8' : '#111827'
-  return (
-    <button
-      type='button'
-      disabled={!!props.disabled}
-      onClick={props.onClick}
-      style={{
-        padding: '8px 10px',
-        borderRadius: 10,
-        border: `1px solid ${bd}`,
-        background: bg,
-        color: col,
-        fontWeight: 700,
-        fontSize: 12,
-        cursor: props.disabled ? 'not-allowed' : 'pointer',
-        opacity: props.disabled ? 0.55 : 1
-      }}
-    >
-      {props.label}
-    </button>
-  )
-}
-
-function ReadOnlyPanel (props: {
-  title: string
-  ui?: any
-  rows: Array<{ label: string; value: any }>
-  emptyText?: string
-}) {
-    const ui = props.ui ?? {}
-    const titleFontSize = Number.isFinite(Number(ui.titleFontSize)) ? Number(ui.titleFontSize) : 14
-    const msgFontSize = Number.isFinite(Number(ui.msgFontSize)) ? Number(ui.msgFontSize) : 12
-    const statusFontSize = Number.isFinite(Number(ui.statusFontSize)) ? Number(ui.statusFontSize) : 12
-  return (
-    <div
-      style={{
-        width: '100%',
-        height: '100%',
-        boxSizing: 'border-box',
-        display: 'flex',
-        flexDirection: 'column',
-        minHeight: 0
-      }}
-    >
-      <div style={{ fontWeight: 800, fontSize: titleFontSize, marginBottom: 10 }}>
-        {props.title}
-      </div>
-
-      {!props.rows.length
-        ? <div style={{ ...msgStyle('info', msgFontSize) }}>{props.emptyText || 'Configura i campi nelle impostazioni.'}</div>
-        : (
-          <div style={{ display: 'grid', gap: 8 }}>
-            {props.rows.map((r, i) => (
-              <DetailRow
-                key={i}
-                label={r.label}
-                value={r.value}
-                labelSize={12}
-                valueSize={13}
-              />
-            ))}
-          </div>
-          )}
-    </div>
-  )
-}
-
-
-// ── Rapporto PDF — sostituzione placeholder nel template ────────────────────
-
-function formatDateIt (v: any): string {
-  if (!v) return ''
-  try {
-    const d = new Date(typeof v === 'number' ? v : String(v))
-    if (isNaN(d.getTime())) return String(v)
-    return d.toLocaleDateString('it-IT', { day: '2-digit', month: '2-digit', year: 'numeric' })
-  } catch { return String(v) }
-}
 
 function parseGradiViolazioniForRapporto (raw: any): Record<string, string> {
   const out: Record<string, string> = {}
@@ -7059,247 +6706,10 @@ function parseGradiViolazioniForRapporto (raw: any): Record<string, string> {
   return out
 }
 
-function normalizeArcgisLayerUrl (raw?: string | null): string {
-  const url = String(raw || '').trim()
-  if (!url) return ''
-
-  const match = url.match(/^([^?#]*)([?#].*)?$/)
-  const base = String(match?.[1] || '').replace(/\/+$/, '')
-  const suffix = String(match?.[2] || '')
-
-  // Le configurazioni possono arrivare dal service root (.../FeatureServer).
-  // Per le query via FeatureLayer serve invece la URL del layer/table (.../FeatureServer/0).
-  if (/\/(FeatureServer|MapServer)$/i.test(base)) return `${base}/0${suffix}`
-
-  return `${base}${suffix}`
-}
 
 
 
-type DetailMapConfigForActions = {
-  basemap: string
-  centerLon: number
-  centerLat: number
-  initZoom: number
-  pointZoom: number
-  webMapItemId: string
-  mapLayerTitle: string
-  mapLayerUrl: string
-  mapLayerId: string
-  mapLayerLayerId: string
-}
 
-function mutableForActions<T = any> (value: any): T {
-  return value?.asMutable ? value.asMutable({ deep: true }) : (value?.toJS ? value.toJS() : value)
-}
-
-function detailMapConfigFromWidgetConfigForActions (cfg: any): DetailMapConfigForActions {
-  return {
-    basemap: String(cfg?.basemap || cfg?.mapBasemap || 'topo-vector'),
-    centerLon: Number(cfg?.centerLon ?? cfg?.mapCenterLon) || 9.0,
-    centerLat: Number(cfg?.centerLat ?? cfg?.mapCenterLat) || 39.5,
-    initZoom: Number(cfg?.initZoom ?? cfg?.mapInitZoom) || 8,
-    pointZoom: Number(cfg?.pointZoom ?? cfg?.mapPointZoom) || 19,
-    webMapItemId: String(cfg?.webMapItemId || cfg?.mapWebMapItemId || ''),
-    mapLayerTitle: String(cfg?.mapLayerTitle || ''),
-    mapLayerUrl: String(cfg?.mapLayerUrl || ''),
-    mapLayerId: String(cfg?.mapLayerId || ''),
-    mapLayerLayerId: String(cfg?.mapLayerLayerId || '')
-  }
-}
-
-function discoverDetailMapConfigForActions (): DetailMapConfigForActions | null {
-  try {
-    const fromWindow = (window as any).__giiDetailMapConfig
-    if (fromWindow) return detailMapConfigFromWidgetConfigForActions(fromWindow)
-  } catch {}
-  try {
-    const state: any = getAppStore?.()?.getState?.()
-    const widgets = mutableForActions<Record<string, any>>(state?.appConfig?.widgets || {})
-    const entries = Object.entries(widgets || {}) as Array<[string, any]>
-    const found = entries.find(([, w]) => String(w?.uri || '').toLowerCase() === 'widgets/gii-dettaglio-pratiche/')
-    if (found) return detailMapConfigFromWidgetConfigForActions(found[1]?.config || {})
-  } catch {}
-  return null
-}
-
-function getAttachmentOidFieldNameForActions (layer: any, ds?: any): string {
-  const fromLayer = layer?.objectIdField ? String(layer.objectIdField) : ''
-  const fromDs = (typeof ds?.getIdField === 'function' ? String(ds.getIdField() || '') : '')
-  return fromLayer || fromDs || 'OBJECTID'
-}
-
-function attachmentLayerUrlForActions (layer: any, ds?: any): string {
-  return normalizeArcgisLayerUrl(layer?.url || ds?.getDataSourceJson?.()?.url || ds?.dataSourceJson?.url || '')
-}
-
-async function resolveFeatureLayerForActionsQuery (ds: any, preferredUrl?: string | null): Promise<any | null> {
-  if (!ds && !preferredUrl) return null
-  const candidates: any[] = []
-  const push = (x: any) => { if (x && !candidates.includes(x)) candidates.push(x) }
-  push(ds)
-  try {
-    const dm = DataSourceManager.getInstance()
-    const byId = ds?.id ? dm.getDataSource(ds.id) : null
-    push(byId)
-    const belongId = ds?.belongToDataSource
-    if (typeof belongId === 'string' && belongId) push(dm.getDataSource(belongId))
-  } catch {}
-  for (const c of candidates) {
-    const cAny: any = c
-    const l = unwrapJsapiLayer(
-      (typeof cAny.getLayer === 'function' ? cAny.getLayer() : null) ??
-      (typeof cAny.getJsApiLayer === 'function' ? cAny.getJsApiLayer() : null) ??
-      (typeof cAny.getJSAPILayer === 'function' ? cAny.getJSAPILayer() : null) ??
-      cAny.layer
-    ) as any
-    if (l && typeof l.queryFeatures === 'function') return l
-  }
-  try {
-    const url = normalizeArcgisLayerUrl(preferredUrl || ds?.getDataSourceJson?.()?.url || ds?.dataSourceJson?.url || '')
-    if (!url) return null
-    const FeatureLayer = await loadEsriModule<any>('esri/layers/FeatureLayer')
-    const fl = new FeatureLayer({ url })
-    if (typeof fl?.load === 'function') await fl.load().catch(() => {})
-    return fl && typeof fl.queryFeatures === 'function' ? fl : null
-  } catch {
-    return null
-  }
-}
-
-function parseCoordinatePairForActions (raw: any): { x: number; y: number } | null {
-  const text = String(raw ?? '').trim()
-  if (!text) return null
-  const nums = text.match(/-?\d+(?:[.,]\d+)?/g)
-  if (!nums || nums.length < 2) return null
-  const a = Number(String(nums[0]).replace(',', '.'))
-  const b = Number(String(nums[1]).replace(',', '.'))
-  if (!Number.isFinite(a) || !Number.isFinite(b)) return null
-  if (a === 0 && b === 0) return null
-  const looksLatLon = Math.abs(a) <= 90 && Math.abs(b) <= 180
-  const looksLonLat = Math.abs(a) <= 180 && Math.abs(b) <= 90
-  if (looksLonLat) return { x: a, y: b }
-  if (looksLatLon) return { x: b, y: a }
-  return { x: a, y: b }
-}
-
-function pointGeometryFromAttrsForActions (attrs: any): any | null {
-  if (!attrs) return null
-  const g = attrs.geometry || attrs
-  if (g && (g.type === 'point' || g.x != null || g.longitude != null) && (g.y != null || g.latitude != null)) {
-    const gx = Number(g.x ?? g.longitude)
-    const gy = Number(g.y ?? g.latitude)
-    if (Number.isFinite(gx) && Number.isFinite(gy) && !(gx === 0 && gy === 0)) {
-      if (attrs.geometry || g.type === 'point') return g
-      return { type: 'point', x: gx, y: gy, spatialReference: g.spatialReference || attrs.spatialReference || { wkid: 4326 } }
-    }
-  }
-  const directPairs: Array<[any, any, any]> = [
-    [g?.x ?? g?.longitude ?? attrs.longitude ?? attrs.lon ?? attrs.x, g?.y ?? g?.latitude ?? attrs.latitude ?? attrs.lat ?? attrs.y, g?.spatialReference],
-    [attrs.Longitude ?? attrs.LONGITUDE ?? attrs.LON ?? attrs.lon_wgs84 ?? attrs.x_wgs84, attrs.Latitude ?? attrs.LATITUDE ?? attrs.LAT ?? attrs.lat_wgs84 ?? attrs.y_wgs84, { wkid: 4326 }],
-    [attrs.coord_x ?? attrs.coordX ?? attrs.x_coord ?? attrs.X, attrs.coord_y ?? attrs.coordY ?? attrs.y_coord ?? attrs.Y, attrs.spatialReference]
-  ]
-  for (const [rawX, rawY, sr] of directPairs) {
-    const gx = Number(rawX)
-    const gy = Number(rawY)
-    if (Number.isFinite(gx) && Number.isFinite(gy) && !(gx === 0 && gy === 0)) {
-      return { type: 'point', x: gx, y: gy, spatialReference: sr || { wkid: 4326 } }
-    }
-  }
-  const textKeys = [
-    'coordinate_punto_mappa', 'Coordinate_punto_mappa', 'COORDINATE_PUNTO_MAPPA',
-    'coordinate', 'Coordinate', 'COORDINATE',
-    'coords', 'Coords', 'COORDS',
-    'punto_mappa', 'Punto_mappa', 'PUNTO_MAPPA'
-  ]
-  for (const key of textKeys) {
-    const pair = parseCoordinatePairForActions(attrs?.[key])
-    if (pair) return { type: 'point', longitude: pair.x, latitude: pair.y, spatialReference: { wkid: 4326 } }
-  }
-  return null
-}
-
-async function resolvePointGeometryForActions (ds: any, oid: number, idFieldName: string, attrs?: any, preferredUrl?: string | null): Promise<any | null> {
-  if (!Number.isFinite(oid) || oid <= 0) return null
-  const fromAttrs = pointGeometryFromAttrsForActions(attrs)
-  if (fromAttrs) return fromAttrs
-  const layer = await resolveFeatureLayerForActionsQuery(ds, preferredUrl)
-  if (!layer || typeof layer.queryFeatures !== 'function') return null
-  if (typeof layer.load === 'function') { try { await layer.load() } catch {} }
-  const idField = String(layer.objectIdField || idFieldName || 'OBJECTID')
-  const q = layer.createQuery ? layer.createQuery() : {}
-  q.where = `${idField} = ${Number(oid)}`
-  q.outFields = ['*']
-  q.returnGeometry = true
-  const res = await layer.queryFeatures(q)
-  const feat = Array.isArray(res?.features) ? res.features[0] : null
-  const geom = feat?.geometry
-  const gx = Number(geom?.x ?? geom?.longitude ?? 0)
-  const gy = Number(geom?.y ?? geom?.latitude ?? 0)
-  if (Number.isFinite(gx) && Number.isFinite(gy) && !(gx === 0 && gy === 0)) return geom
-  return pointGeometryFromAttrsForActions(feat?.attributes)
-}
-
-
-async function queryFeatureAttachmentsForActions (layer: any, oid: number, ds?: any): Promise<any[]> {
-  if (!layer || !oid) return []
-  const pullInfos = (obj: any): any[] => {
-    if (!obj) return []
-    if (Array.isArray(obj)) return obj
-    if (Array.isArray(obj.attachmentInfos)) return obj.attachmentInfos
-    if (Array.isArray(obj.attachments)) return obj.attachments
-    return []
-  }
-  const oidField = getAttachmentOidFieldNameForActions(layer, ds)
-  try {
-    if (typeof layer.queryAttachments === 'function') {
-      let res: any = null
-      try {
-        res = await layer.queryAttachments({ attributes: { [oidField]: oid } }, { returnMetadata: true, returnUrl: true })
-      } catch {
-        res = await layer.queryAttachments({ objectIds: [oid], returnMetadata: true, returnUrl: true })
-      }
-      if (Array.isArray(res)) {
-        for (const g of res) {
-          const pid = Number(g?.parentObjectId ?? g?.objectId)
-          if (pid === oid) return pullInfos(g)
-        }
-      }
-      if (res && typeof res === 'object') {
-        if (Array.isArray(res.attachmentGroups)) {
-          for (const g of res.attachmentGroups) {
-            const pid = Number(g?.parentObjectId ?? g?.objectId)
-            if (pid === oid) return pullInfos(g)
-          }
-        }
-        return pullInfos(res[oid] || res[String(oid)] || res)
-      }
-    }
-  } catch {}
-  const layerUrl = attachmentLayerUrlForActions(layer, ds)
-  if (!layerUrl) return []
-  let token = ''
-  try {
-    const IdentityManager = await loadEsriModule<any>('esri/identity/IdentityManager')
-    const cred = IdentityManager?.findCredential?.(layerUrl) || IdentityManager?.findCredential?.(layerUrl.replace(/\/\d+$/, ''))
-    token = cred?.token ? String(cred.token) : ''
-  } catch {}
-  try {
-    const qs = new URLSearchParams({ f: 'json', objectIds: String(oid), returnMetadata: 'true', returnUrl: 'true' })
-    if (token) qs.set('token', token)
-    const resp = await fetch(`${layerUrl}/queryAttachments?${qs.toString()}`)
-    if (!resp.ok) return []
-    const json: any = await resp.json()
-    if (Array.isArray(json?.attachmentGroups)) {
-      for (const g of json.attachmentGroups) {
-        const pid = Number(g?.parentObjectId ?? g?.objectId)
-        if (pid === oid) return pullInfos(g)
-      }
-    }
-    return pullInfos(json?.[oid] || json?.[String(oid)] || json)
-  } catch {}
-  return []
-}
 
 
 export default function Widget (props: AllWidgetProps<IMConfig>) {
@@ -7307,72 +6717,6 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
     ? (props.config as any).asMutable({ deep: true })
     : (props.config as any || {})
   const cfg: any = { ...defaultConfig, ...cfgMutable }
-  const technicalMapContainerRef = React.useRef<HTMLDivElement | null>(null)
-  const [detailMapConfig, setDetailMapConfig] = React.useState<DetailMapConfigForActions | null>(() => discoverDetailMapConfigForActions())
-  const [technicalMapView, setTechnicalMapView] = React.useState<any>(null)
-  React.useEffect(() => {
-    const read = (evt?: any) => {
-      const next = evt?.detail?.config ? detailMapConfigFromWidgetConfigForActions(evt.detail.config) : discoverDetailMapConfigForActions()
-      setDetailMapConfig(next || null)
-    }
-    read()
-    window.addEventListener('gii:detail-map-config-change', read as any)
-    return () => window.removeEventListener('gii:detail-map-config-change', read as any)
-  }, [])
-  const detailMapConfigKey = React.useMemo(() => JSON.stringify(detailMapConfig || {}), [detailMapConfig])
-  React.useEffect(() => {
-    if (!detailMapConfig || !technicalMapContainerRef.current) return
-    let cancelled = false
-    let view: any = null
-    ;(async () => {
-      try {
-        const [MapView, Map, WebMap, FeatureLayer] = await Promise.all([
-          loadEsriModule<any>('esri/views/MapView'),
-          loadEsriModule<any>('esri/Map'),
-          loadEsriModule<any>('esri/WebMap'),
-          loadEsriModule<any>('esri/layers/FeatureLayer')
-        ])
-        if (cancelled || !technicalMapContainerRef.current) return
-        const mc = detailMapConfig
-        const map = mc.webMapItemId
-          ? new WebMap({ portalItem: { id: String(mc.webMapItemId) } })
-          : new Map({ basemap: mc.basemap || 'topo-vector' })
-        try { if (typeof map?.load === 'function') await map.load() } catch {}
-        if (!mc.webMapItemId && mc.mapLayerUrl) {
-          try {
-            const fl = new FeatureLayer({
-              url: mc.mapLayerUrl,
-              id: mc.mapLayerId || undefined,
-              title: mc.mapLayerTitle || undefined
-            })
-            map.layers?.add?.(fl)
-          } catch {}
-        }
-        view = new MapView({
-          container: technicalMapContainerRef.current,
-          map,
-          center: [mc.centerLon || 9.0, mc.centerLat || 39.5],
-          zoom: mc.initZoom || 8,
-          ui: { components: [] }
-        })
-        await view.when()
-        if (cancelled) {
-          try { view.destroy() } catch {}
-          return
-        }
-        setTechnicalMapView(view)
-      } catch {
-        if (!cancelled) setTechnicalMapView(null)
-      }
-    })()
-    return () => {
-      cancelled = true
-      setTechnicalMapView(null)
-      if (view) { try { view.destroy() } catch {} }
-    }
-  }, [detailMapConfigKey])
-  const mapView = technicalMapView || null
-
   // ── Profilo utente: letto da window.__giiUserRole (scritto dal widget Header) ──
   // Conserviamo anche l'identità, non soltanto il ruolo: due TI_AMM diversi possono
   // avere lo stesso ruolo ma autorizzazioni differenti sulla selezione corrente.
@@ -7711,13 +7055,7 @@ const queryFields = React.useMemo(() => ['*'], [])
 
   return (
     <div style={{ width: '100%', height: '100%', display: 'flex', flexDirection: 'column', minHeight: 0, boxSizing: 'border-box', padding: Number.isFinite(Number((cfg as any).maskOuterOffset ?? 0)) ? Number((cfg as any).maskOuterOffset) : 0 }}>
-      <>
-        <div
-          ref={technicalMapContainerRef}
-          aria-hidden='true'
-          style={{ position: 'fixed', left: -12000, top: 0, width: 1024, height: 768, pointerEvents: 'none' }}
-        />
-        <ActionsPanel
+      <ActionsPanel
           active={activeGate}
           roleCode={roleCode}
           buttonText={buttonText}
@@ -7735,10 +7073,8 @@ const queryFields = React.useMemo(() => ['*'], [])
             regolamentoArticoliUrl: String(cfg.regolamentoArticoliUrl || ''),
             regolamentoRaccordiUrl: String(cfg.regolamentoRaccordiUrl || '')
           }}
-          mapView={mapView}
           accessGate={directAccessGate}
         />
-      </>
     </div>
   )
 }

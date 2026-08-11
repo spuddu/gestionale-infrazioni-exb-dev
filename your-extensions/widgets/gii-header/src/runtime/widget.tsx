@@ -1140,7 +1140,7 @@ function roleLabelForBody (value: string): string {
   if (tag === 'RI-AMM') return 'Responsabile istruttoria amministrativa'
   if (tag === 'RI' || tag.startsWith('RI-')) return 'Responsabile istruttoria'
   if (tag === 'RZ' || tag.startsWith('RZ-')) return 'Capo Settore'
-  if (tag === 'DA' || tag === 'DIR-AMM') return 'Direttore Area AA. GG. e P.F.'
+  if (tag === 'DA') return 'Direttore Area AA. GG. e P.F.'
   if (tag === 'DT' || tag.startsWith('DT-') || tag === 'DIR' || tag.startsWith('DIR-')) return 'Direttore d’Area'
 
   return raw
@@ -1305,7 +1305,7 @@ function roleCodeFromGiiActor (value: string): string {
   if (!raw) return ''
   const tag = raw.split(/\s+-\s+/)[0].trim().toUpperCase().replace(/_/g, '-').replace(/\s+/g, '-')
 
-  if (tag === 'DIR-AMM' || tag === 'DA') return 'DA'
+  if (tag === 'DA') return 'DA'
   if (tag === 'RI-AMM') return 'RI_AMM'
   if (tag === 'TI-AMM') return 'TI_AMM'
   if (tag === 'DIR' || tag.startsWith('DIR-') || tag === 'DT' || tag.startsWith('DT-')) return 'DT'
@@ -1346,7 +1346,6 @@ function alertSenderRoleCode (alert: GiiAlertItem | null | undefined): string {
   if (subtype === 'DT_APPROVA_RAPPORTO' || subtype === 'DT_RESPINGE_RAPPORTO' || subtype === 'DT_RIMANDA_A_TI') return 'DT'
   if (subtype === 'RI_RIMANDA_A_TI') return 'RI'
 
-  if (subtype.startsWith('DA_')) return 'DA'
   if (subtype.startsWith('RI_AMM_')) return 'RI_AMM'
   if (subtype.startsWith('TI_AMM_')) return 'TI_AMM'
   if (subtype.startsWith('DT_')) return 'DT'
@@ -1360,7 +1359,6 @@ function alertSenderRoleCode (alert: GiiAlertItem | null | undefined): string {
     if (destRole === 'RI') return 'RZ'
     if (destRole === 'DT') return 'RI'
     if (destRole === 'RI_AMM') return 'TI_AMM'
-    if (destRole === 'DA') return 'RI_AMM'
   }
 
   return roleCodeFromGiiActor(
@@ -1525,7 +1523,6 @@ function alertSenderFallbackFromActivitySubtype (alert: GiiAlertItem): string {
   if (subtype.startsWith('RI_')) return 'Responsabile Istruttoria'
   if (subtype.startsWith('RZ_')) return 'Capo Settore'
   if (subtype.startsWith('TI_AMM_')) return 'Tecnico Istruttore amministrativo'
-  if (subtype.startsWith('DA_')) return 'Direttore Area AA. GG. e P.F.'
   if (subtype.startsWith('TI_')) return 'Tecnico istruttore'
   if (subtype.startsWith('TR_')) return 'Tecnico rilevatore'
   return ''
@@ -1547,7 +1544,7 @@ function alertRoleLabelFromGiiActor (value: string): string {
   if (looksLikeGiiRoleLabel(raw)) return raw
   const tag = raw.split(/\s+-\s+/)[0].trim().toUpperCase().replace(/_/g, '-').replace(/\s+/g, '-')
 
-  if (tag === 'DIR-AMM' || tag === 'DA') return 'Direttore Area AA. GG. e P.F.'
+  if (tag === 'DA') return 'Direttore Area AA. GG. e P.F.'
   if (tag === 'RI-AMM') return 'Responsabile Istruttoria amministrativa'
   if (tag === 'TI-AMM') return 'Tecnico Istruttore amministrativo'
   if (tag === 'DIR' || tag.startsWith('DIR-') || tag === 'DT' || tag.startsWith('DT-')) return 'Direttore d’Area'

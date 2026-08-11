@@ -5,7 +5,7 @@ import { JimuMapViewComponent, type JimuMapView } from 'jimu-arcgis'
 import { createPortal } from 'react-dom'
 import type { IMConfig, TabConfig } from '../config'
 import { defaultConfig, DEFAULT_FIELD_LAYOUTS } from '../config'
-import AnteprimaPanel, { clearEditingTiAnteprimaDocumentMemory } from '../../../_shared/gii-anteprime/anteprima-panel'
+import AnteprimaPanel, { clearGiiAnteprimaDocumentMemory } from '../../../_shared/gii-anteprime/anteprima-panel'
 import { NORMA3_REQ_POINT, parseNorma3Codes, computeReqPoint } from '../../../_shared/gii-anteprime/req-point'
 import GiiAttachmentViewer, { type GiiAttachmentViewerItem, filterGiiAttachmentsForTechnicalRoles } from '../../../_shared/gii-anteprime/allegati/gii-attachment-viewer'
 import { getGiiPracticeContextStamp, isGiiPracticeContextStampCurrent, isGiiPracticePayloadCurrent, isGiiPracticeSelectionContextCurrent, stampGiiPracticePayload, writeGiiPracticeSelectionContext, type GiiPracticeContextStamp } from '../../../_shared/gii-selection/practice-context'
@@ -8793,7 +8793,6 @@ ${e?.message || String(e)}`
       ds={ds}
       oid={editOid}
       idFieldName={editIdFieldName}
-      mapView={p.mapView}
       mapConfig={p.mapConfig}
       mapTarget={p.clickedPointWgs84 || p.existingGeomWgs84 || null}
       notaSpeseConfig={noteSpeseCfg}
@@ -9686,14 +9685,14 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
       setEditRecordData(null)
       setSelectionIntent(null)
       try { delete (window as any).__giiEdit } catch { try { ;(window as any).__giiEdit = null } catch {} }
-      clearEditingTiAnteprimaDocumentMemory()
+      clearGiiAnteprimaDocumentMemory()
     }
     window.addEventListener('gii-practice-context-reset', onPracticeContextReset)
     return () => window.removeEventListener('gii-practice-context-reset', onPracticeContextReset)
   }, [])
 
   React.useEffect(() => {
-    return () => { clearEditingTiAnteprimaDocumentMemory() }
+    return () => { clearGiiAnteprimaDocumentMemory() }
   }, [])
 
   React.useEffect(() => {
@@ -9760,7 +9759,7 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
   const effectiveIntent = !isCreatePage ? (editIntent || selectionIntent) : null
 
   React.useEffect(() => {
-    if (!effectiveIntent && !isCreatePage) clearEditingTiAnteprimaDocumentMemory()
+    if (!effectiveIntent && !isCreatePage) clearGiiAnteprimaDocumentMemory()
   }, [effectiveIntent, isCreatePage])
 
   React.useEffect(() => {

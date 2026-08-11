@@ -1,9 +1,10 @@
 // =================================================================
 // fascicolo-builder.ts
-// PUNTO UNICO di costruzione del fascicolo documentale. Nessun widget deve
-// costruire il PDF autonomamente: azioni, editing-ti ed editing-amm chiamano
-// tutti buildFascicolo(...) con lo stesso oid e le stesse opzioni, e ottengono
-// lo stesso identico risultato — a prescindere da dove è stato aperto.
+// PUNTO UNICO di costruzione del fascicolo documentale usato dal viewer condiviso
+// incorporato in gii-editing-ti e gii-editing-amm. gii-azioni non costruisce e non
+// visualizza più il fascicolo. I documenti amministrativi speciali (Proposta di
+// contestazione e bozza di determinazione) non vengono ricostruiti qui: il viewer
+// usa esclusivamente i PDF realmente allegati alla pratica.
 //
 // Principio: il builder non riceve mai 'data' da un widget. Fa lui stesso una
 // query fresca e completa (con geometria) sul mother layer — confermato
@@ -16,7 +17,7 @@ import { buildPlaceholderMap, type UtenteCached } from './documenti-tecnici/rapp
 import { applyNotaSpeseQueryResultToRapportoMap, queryNotaSpeseRowsForPractice, buildArt30RapportoSummary, type NotaSpeseConfig } from './documenti-tecnici/rapporto/rapporto-nota-spese-summary'
 import { buildRapportoPdf, loadRapportoIterCicliForPdf, type RapportoIterCicloPdf } from './documenti-tecnici/rapporto/rapporto-pdf-builder'
 import { buildNotaSpesePdf, type NotaSpeseData } from './documenti-tecnici/rapporto/notaspese-pdf-builder'
-import { buildVerbalePdfBlob, type LayerFieldInfo } from './documenti-amministrativi/proposta-contestazione/proposta-contestazione-data-map'
+import { isGiiSpecialAdministrativeAttachment } from './allegati/gii-attachment-viewer'
 import { RAPPORTO_TECHNICAL_BODY_BOX, drawRapportoTechnicalHeadersByPage, attachmentTechnicalDocumentTitle, wrapMapPdfBlobWithRapportoTechnicalHeader } from './documenti-tecnici/rapporto/technical-document-header'
 import { listGiiPrintableMapLayers, ensureGiiPrintableMapLayersReady, computePrintExtentForView, buildGiiMapLegendItemsForView, type GiiPrintableMapLayerItem } from './viewer-documenti/map-layers'
 
@@ -37,8 +38,7 @@ async function resolveReadableLayer (): Promise<{ layer: any, url: string }> {
 }
 
 export type FascicoloDocumentSelection = {
-  includeTecnici: boolean           // rapporto tecnico + mappa (se disponibile) + allegati
-  includeAmministrativi: boolean    // proposta di contestazione (+ determinazione, quando implementata qui)
+  includeTecnici: boolean           // rapporto tecnico + mappa (se disponibile) + allegati generici
   includeMappa?: boolean            // default: true se includeTecnici e la geometria è disponibile
   includeRapporto?: boolean         // default: true — se false, la pagina del rapporto tecnico non viene inclusa (anche se nota spese/allegati sì)
   includeNotaSpese?: boolean        // default: true — se false, nessuna nota spesa viene inclusa
@@ -48,12 +48,11 @@ export type FascicoloDocumentSelection = {
 
 export type FascicoloBuildParams = {
   oid: number
-  profile: { username: string, fullName: string }
   selection: FascicoloDocumentSelection
   notaSpeseConfig?: NotaSpeseConfig
-  // 'view' è una MapView live, già montata dal widget chiamante (es. gii-azioni la riceve
-  // come prop da un map widget ExB collegato). Se assente, la sezione mappa viene omessa:
-  // senza una view reale non è possibile leggere layer/legenda (vedi buildMappaSection).
+  // 'view' è la MapView headless costruita internamente dal viewer condiviso.
+  // Se assente, la sezione mappa viene omessa: senza una view reale non è possibile
+  // leggere layer e legenda (vedi buildMappaSection).
   mapConfig?: {
     printServiceUrl?: string
     basemapId?: string
@@ -102,16 +101,13 @@ async function withToken (url: string): Promise<string> {
 }
 
 /** Query fresca e completa del record, con geometria e definizione campi (per alias/domini). Unica fonte dati per tutto il builder. */
-async function queryFascicoloRecord (oid: number): Promise<{ attrs: Record<string, any>, geometry: any | null, fields: LayerFieldInfo[], resolvedUrl: string }> {
+async function queryFascicoloRecord (oid: number): Promise<{ attrs: Record<string, any>, geometry: any | null, resolvedUrl: string }> {
   const { layer, url } = await resolveReadableLayer()
   const idField = String(layer.objectIdField || 'OBJECTID')
   const res = await layer.queryFeatures({ where: `${idField} = ${Number(oid)}`, outFields: ['*'], returnGeometry: true, num: 1 })
   const feature = res?.features?.[0]
   if (!feature) throw new Error(`Pratica con OID ${oid} non trovata su ${url}.`)
-  const fields: LayerFieldInfo[] = (layer.fields || []).map((f: any) => ({
-    name: String(f.name), type: String(f.type || ''), alias: String(f.alias || f.name), domain: f.domain || null, editable: f.editable !== false
-  }))
-  return { attrs: feature.attributes || {}, geometry: feature.geometry || null, fields, resolvedUrl: url }
+  return { attrs: feature.attributes || {}, geometry: feature.geometry || null, resolvedUrl: url }
 }
 
 async function queryFascicoloAttachments (oid: number): Promise<{ attachments: AttachmentInfo[], resolvedUrl: string }> {
@@ -247,8 +243,7 @@ async function buildRapportoSection (attrs: Record<string, any>, notaSpeseConfig
 }
 
 function isGeneratedAdminDocument (att: AttachmentInfo): boolean {
-  const kw = (att.keywords || '').toUpperCase()
-  return kw.includes('GII_PROPOSTA_CONTESTAZIONE') || kw.includes('GII_BOZZA_DETERMINAZIONE')
+  return isGiiSpecialAdministrativeAttachment(att as any)
 }
 
 /**
@@ -379,14 +374,14 @@ function delay (ms: number): Promise<void> {
 }
 
 /**
- * Esporta la pagina mappa usando una MapView live fornita dal widget chiamante
- * (es. gii-azioni la riceve come prop da un map widget ExB collegato). Riusa
+ * Esporta la pagina mappa usando la MapView headless costruita dal viewer condiviso.
+ * Riusa
  * integralmente la logica di lettura layer/legenda già collaudata in map-layers.ts
  * (listGiiPrintableMapLayers, buildGiiMapLegendItemsForView, ecc.) — nessuna
  * duplicazione, nessuna reinvenzione.
  *
- * Non è possibile fare questa esportazione in modo puramente headless (senza
- * nessuna view): il servizio di stampa ArcGIS richiede una view reale da cui
+ * Non è possibile fare questa esportazione senza una MapView: il servizio di stampa
+ * ArcGIS richiede una view reale da cui
  * derivare spatialReference/extent, e la lettura di layer/legenda in questo
  * codebase è strutturalmente legata a oggetti Esri live (view.map.layers), non
  * a una configurazione statica serializzabile. Se manca la view, la sezione
@@ -577,12 +572,12 @@ function getNumeroRapportoTecnico (attrs: Record<string, any>): string {
 }
 
 /**
- * Punto unico di generazione del fascicolo documentale. Chiamato identicamente
- * da editing-ti, editing-amm e azioni: nessuno di loro passa dati propri, solo
- * l'OID e le opzioni scelte dall'utente (selezione documenti/allegati/nota spese).
+ * Punto unico di generazione del fascicolo documentale, richiamato dal viewer
+ * condiviso dei due editor. Il builder riceve l'OID e le opzioni selezionate,
+ * mentre i dati della pratica vengono riletti dalla fonte unica.
  */
 export async function buildFascicolo (params: FascicoloBuildParams): Promise<{ blob: Blob, fileName: string }> {
-  const { attrs, geometry, fields } = await queryFascicoloRecord(params.oid)
+  const { attrs, geometry } = await queryFascicoloRecord(params.oid)
   const numeroRapportoTecnico = getNumeroRapportoTecnico(attrs)
   const items: Array<{ blob: Blob, fileName: string }> = []
 
@@ -600,19 +595,15 @@ export async function buildFascicolo (params: FascicoloBuildParams): Promise<{ b
     if (allegatiItem) items.push(allegatiItem)
   }
 
-  if (params.selection.includeAmministrativi) {
-    items.push(await buildVerbalePdfBlob(attrs, fields, params.profile))
-  }
-
   if (!items.length) throw new Error('Nessun documento selezionato da includere nel fascicolo.')
 
-  const blob = items.length === 1 ? items[0].blob : await mergePdfItems(items)
+  const blob = items.length === 1 ? items[0].blob : await mergeFascicoloPdfItems(items)
   const prefix = params.fileNamePrefix || 'fascicolo'
   const safe = String(numeroRapportoTecnico || params.oid).replace(/[^a-zA-Z0-9_-]/g, '_')
   return { blob, fileName: `${prefix}_${safe}.pdf` }
 }
 
-async function mergePdfItems (items: Array<{ blob: Blob, fileName: string }>): Promise<Blob> {
+export async function mergeFascicoloPdfItems (items: Array<{ blob: Blob, fileName: string }>): Promise<Blob> {
   const merged = await PDFDocument.create()
   for (const item of items) {
     const src = await PDFDocument.load(new Uint8Array(await item.blob.arrayBuffer()))

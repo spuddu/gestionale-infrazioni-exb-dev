@@ -23,13 +23,15 @@ export type GiiAttachmentViewerItem = {
   readOnlyReason?: string
 }
 
-export type GiiAttachmentKind = 'technical' | 'administrative' | 'bozza-determinazione' | 'proposta-contestazione'
+export type GiiAttachmentKind = 'technical' | 'administrative' | 'bozza-determinazione' | 'proposta-contestazione' | 'internal-reference'
 
 export const GII_ATTACHMENT_KEYWORDS = {
   technical: 'GII_ALLEGATO_TECNICO',
   administrative: 'GII_ALLEGATO_AMMINISTRATIVO',
-  bozzaDeterminazione: 'GII_BOZZA_DETERMINAZIONE_DOCX',
-  propostaContestazione: 'GII_PROPOSTA_CONTESTAZIONE_PDF'
+  bozzaDeterminazione: 'GII_BOZZA_DETERMINAZIONE_PDF',
+  legacyBozzaDeterminazioneWord: 'GII_BOZZA_DETERMINAZIONE_DOCX',
+  propostaContestazione: 'GII_PROPOSTA_CONTESTAZIONE_PDF',
+  approvedBozzaReference: 'GII_BOZZA_APPROVATA_RI_AMM_REFERENCE'
 } as const
 
 function normalizeGiiAttachmentText (value?: string): string {
@@ -48,7 +50,16 @@ function attachmentKeywordHas (item: GiiAttachmentViewerItem | null | undefined,
 
 export function getGiiAttachmentKind (item: GiiAttachmentViewerItem | null | undefined): GiiAttachmentKind {
   const nameKey = normalizeGiiAttachmentText((item as any)?.name)
-  if (attachmentKeywordHas(item, GII_ATTACHMENT_KEYWORDS.bozzaDeterminazione) || /\bbozza\b.*\bdeterminazione\b/.test(nameKey) || /\bdeterminazione\b.*\bbozza\b/.test(nameKey)) {
+  if (attachmentKeywordHas(item, GII_ATTACHMENT_KEYWORDS.approvedBozzaReference)) {
+    return 'internal-reference'
+  }
+  if (
+    attachmentKeywordHas(item, GII_ATTACHMENT_KEYWORDS.bozzaDeterminazione) ||
+    attachmentKeywordHas(item, GII_ATTACHMENT_KEYWORDS.legacyBozzaDeterminazioneWord) ||
+    /\bbozza\b.*\bdeterminazione\b/.test(nameKey) ||
+    /\bdeterminazione\b.*\bbozza\b/.test(nameKey) ||
+    /\bdeterminazione\b.*\bdirigenziale\b/.test(nameKey)
+  ) {
     return 'bozza-determinazione'
   }
   if (attachmentKeywordHas(item, GII_ATTACHMENT_KEYWORDS.propostaContestazione) || /\bproposta\b.*\bcontestazione\b/.test(nameKey)) {
@@ -59,17 +70,84 @@ export function getGiiAttachmentKind (item: GiiAttachmentViewerItem | null | und
   return 'technical'
 }
 
+export function isGiiApprovedBozzaReferenceAttachment (item: GiiAttachmentViewerItem | null | undefined): boolean {
+  return !!item && getGiiAttachmentKind(item) === 'internal-reference'
+}
+
 export function isGiiSpecialAdministrativeAttachment (item: GiiAttachmentViewerItem | null | undefined): boolean {
   const kind = getGiiAttachmentKind(item)
-  return kind === 'bozza-determinazione' || kind === 'proposta-contestazione'
+  return kind === 'bozza-determinazione' || kind === 'proposta-contestazione' || kind === 'internal-reference'
+}
+
+export function isGiiBozzaDeterminazionePdfAttachment (item: GiiAttachmentViewerItem | null | undefined): boolean {
+  return getGiiAttachmentKind(item) === 'bozza-determinazione' && !!item && isPdfAttachment(item)
+}
+
+export function isGiiLegacyBozzaDeterminazioneWordAttachment (item: GiiAttachmentViewerItem | null | undefined): boolean {
+  if (!item || getGiiAttachmentKind(item) !== 'bozza-determinazione') return false
+  if (attachmentKeywordHas(item, GII_ATTACHMENT_KEYWORDS.legacyBozzaDeterminazioneWord)) return true
+  const name = String(item.name || '').trim().toLowerCase()
+  const ct = String(item.contentType || '').trim().toLowerCase()
+  return /\.docx?$/.test(name) || ct.includes('msword') || ct.includes('wordprocessingml')
+}
+
+export function isGiiPropostaContestazionePdfAttachment (item: GiiAttachmentViewerItem | null | undefined): boolean {
+  return getGiiAttachmentKind(item) === 'proposta-contestazione' && !!item && isPdfAttachment(item)
+}
+
+function giiAttachmentRecencyValue (item: GiiAttachmentViewerItem | null | undefined): number {
+  if (!item) return 0
+  for (const value of [item.uploadedAt, item.created, item.creationDate, item.createdAt, item.lastEditDate, item.editDate]) {
+    const direct = Number(value)
+    if (Number.isFinite(direct) && direct > 0) return direct
+  }
+  const kw = String(item.keywords || '')
+  const m = kw.match(/(?:^|[|;\s])(?:fileCreatedAt|uploadedAt)=(\d{10,})/i)
+  if (m) {
+    const n = Number(m[1])
+    if (Number.isFinite(n) && n > 0) return n
+  }
+  const id = Number(item.id)
+  return Number.isFinite(id) && id > 0 ? id : 0
+}
+
+export function pickLatestGiiAttachment<T extends GiiAttachmentViewerItem> (items: T[]): T | null {
+  const list = Array.isArray(items) ? items.filter(Boolean) : []
+  if (!list.length) return null
+  return list.reduce((latest, current) => {
+    const a = giiAttachmentRecencyValue(latest)
+    const b = giiAttachmentRecencyValue(current)
+    if (b > a) return current
+    if (b < a) return latest
+    const aid = Number(latest?.id)
+    const bid = Number(current?.id)
+    return Number.isFinite(bid) && (!Number.isFinite(aid) || bid > aid) ? current : latest
+  })
+}
+
+export function giiAttachmentIdentityKey (item: GiiAttachmentViewerItem | null | undefined): string {
+  if (!item) return ''
+  return [
+    item.id,
+    item.name || '',
+    item.size ?? '',
+    item.contentType || '',
+    item.keywords || '',
+    item.uploadedAt ?? '',
+    item.created ?? '',
+    item.creationDate ?? '',
+    item.createdAt ?? '',
+    item.lastEditDate ?? '',
+    item.editDate ?? ''
+  ].join('|')
 }
 
 export function filterGiiAttachmentsForTechnicalRoles<T extends GiiAttachmentViewerItem> (items: T[]): T[] {
-  return (Array.isArray(items) ? items : []).filter(item => getGiiAttachmentKind(item) === 'technical')
+  return (Array.isArray(items) ? items : []).filter(item => !isGiiApprovedBozzaReferenceAttachment(item) && getGiiAttachmentKind(item) === 'technical')
 }
 
 export function filterGiiAttachmentsForAdministrativeGenericSection<T extends GiiAttachmentViewerItem> (items: T[]): T[] {
-  return (Array.isArray(items) ? items : []).filter(item => getGiiAttachmentKind(item) === 'administrative')
+  return (Array.isArray(items) ? items : []).filter(item => !isGiiApprovedBozzaReferenceAttachment(item) && getGiiAttachmentKind(item) === 'administrative')
 }
 
 export function filterGiiAttachmentsForAdministrativeFascicolo<T extends GiiAttachmentViewerItem> (items: T[]): T[] {

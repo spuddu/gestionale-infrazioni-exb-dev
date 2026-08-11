@@ -520,8 +520,6 @@ const ALLOWED_OGGETTI = new Set([
   'RILEVAZIONE RESPINTA',
   'ISTRUTTORIA TECNICA RESPINTA',
   'ISTRUTTORIA TECNICA APPROVATA',
-  'SANZIONE APPROVATA',
-  'SANZIONE RESPINTA',
   'SANZIONE NOTIFICATA'
 ])
 
@@ -532,12 +530,9 @@ const ALLOWED_LOG_EVENTI = new Set([
   'INTEGRAZIONE_RICHIESTA',
   'ISTRUTTORIA_TRASMESSA',
   'RAPPORTO_APPROVATO',
-  'SANZIONE_APPROVATA',
   'SANZIONE_NOTIFICATA',
   'VERBALE_NOTIFICATO',
-  'RESTITUZIONE_A_TI_AMM',
   'RESPINTA',
-  'RIMANDA_A_DT'
 ])
 
 function normGid (v: any): string {
@@ -580,11 +575,8 @@ function formatCausale (evento: string): string {
   if (e === 'INTEGRAZIONE_RICHIESTA') return 'RICHIESTA DI INTEGRAZIONE'
   if (e === 'ISTRUTTORIA_TRASMESSA') return 'TRASMISSIONE ISTRUTTORIA'
   if (e === 'RAPPORTO_APPROVATO') return 'ISTRUTTORIA TECNICA APPROVATA'
-  if (e === 'SANZIONE_APPROVATA') return 'SANZIONE APPROVATA'
   if (e === 'SANZIONE_NOTIFICATA' || e === 'VERBALE_NOTIFICATO') return 'SANZIONE NOTIFICATA'
-  if (e === 'RESTITUZIONE_A_TI_AMM') return 'TRASMISSIONE INTEGRAZIONE'
   if (e === 'RESPINTA') return 'ISTRUTTORIA TECNICA RESPINTA'
-  if (e === 'RIMANDA_A_DT') return 'TRASMISSIONE INTEGRAZIONE'
   return '—'
 }
 
@@ -592,10 +584,7 @@ function isTransmissionReturnEvent (evento: any): boolean {
   const e = String(evento || '').trim().toUpperCase()
   return e === 'ISTRUTTORIA_TRASMESSA' ||
     e === 'INTEGRAZIONE_TRASMESSA' ||
-    e === 'RAPPORTO_APPROVATO' ||
-    e === 'SANZIONE_APPROVATA' ||
-    e === 'RESTITUZIONE_A_TI_AMM' ||
-    e === 'RIMANDA_A_DT'
+    e === 'RAPPORTO_APPROVATO'
 }
 
 function transmissionAnswersIntegration (log: LogEntry): boolean {
@@ -648,8 +637,7 @@ function formatCausaleForLog (log: LogEntry | null, d: any): string {
   let label = ''
   if (evento === 'RESPINTA') {
     const ruolo = normalizeLogRole(log.ruolo)
-    if (ruolo === 'DA') label = 'SANZIONE RESPINTA'
-    else if (ruolo === 'DT') label = 'ISTRUTTORIA TECNICA RESPINTA'
+    if (ruolo === 'DT') label = 'ISTRUTTORIA TECNICA RESPINTA'
     else if (ruolo === 'RZ') {
       const tiAssigned = String(
         attr(d, ['ti_assegnato_username']) ??

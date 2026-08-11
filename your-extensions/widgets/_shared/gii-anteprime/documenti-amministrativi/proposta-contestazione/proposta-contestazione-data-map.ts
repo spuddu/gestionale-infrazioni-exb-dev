@@ -1,11 +1,9 @@
 // =================================================================
 // proposta-contestazione-data-map.ts
 // Mappa dati condivisa per il documento "Proposta di contestazione".
-// Estratta da gii-editing-amm (versione completa e di riferimento) per
-// essere l'unico punto da cui gii-editing-amm e gii-azioni generano
-// questo documento. Le funzioni qui contenute sono copie: gli originali
-// restano in gii-editing-amm perché riusati anche dalla sua interfaccia
-// (badge di stato, tabella violazioni, ecc.) e non vanno rimossi da lì.
+// È usata da gii-editing-amm e dal builder condiviso del fascicolo.
+// Le funzioni equivalenti presenti nell'editor restano dove servono
+// all'interfaccia amministrativa (badge, tabella violazioni, ecc.).
 // =================================================================
 import { buildPropostaContestazionePdf as buildVerbalePdf, getPropostaContestazionePdfFilePrefix as getVerbalePdfFilePrefix } from '../proposta-contestazione/proposta-contestazione-pdf-builder'
 
@@ -759,7 +757,11 @@ export function buildVerbalePdfMap (data: any, fields: LayerFieldInfo[], profile
   ]) || (approvatoDa ? giiDaActor : '')
   const esitoTiAmmNum = parseNumberInput(pickAttrCI(d, ['esito_TI_AMM']))
   const esitoRiAmmNum = parseNumberInput(pickAttrCI(d, ['esito_RI_AMM']))
-  const propostaApprovata = esitoTiAmmNum === 2 && esitoRiAmmNum === 2
+  // L'esito RI_AMM è il riferimento autorevole per la versione corrente della
+  // Proposta. A ogni nuova trasmissione TI_AMM → RI_AMM questo esito viene
+  // azzerato, quindi un valore 2 identifica necessariamente l'approvazione
+  // dell'ultimo ciclo e non deve dipendere da una copia locale di esito_TI_AMM.
+  const propostaApprovata = esitoRiAmmNum === 2
   return {
     objectid: oid != null ? String(oid) : '',
     pratica: '',

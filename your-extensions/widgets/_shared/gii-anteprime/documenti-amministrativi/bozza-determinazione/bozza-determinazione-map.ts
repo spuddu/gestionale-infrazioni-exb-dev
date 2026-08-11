@@ -1,11 +1,8 @@
 // _shared/gii-anteprime/documenti-amministrativi/bozza-determinazione/bozza-determinazione-map.ts
 //
-// Unica fonte di verità per la mappatura dati -> segnaposto usata dalla bozza di
-// determinazione dirigenziale (DOCX e PDF di anteprima). Prima di questo modulo,
-// la stessa logica era duplicata in modo indipendente in gii-editing-amm e in
-// gii-azioni, con divergenze concrete (gii-azioni non rilevava affatto le
-// violazioni degli artt. 15/16/17, riconoscendo solo gli articoli a checkbox
-// diretta 08/12/27-37/39).
+// Unica fonte di verità per la mappatura dati -> segnaposto usata per generare
+// il DOCX di lavoro della determinazione dirigenziale. Il PDF verificato nel
+// fascicolo non viene costruito da questo modulo: è il PDF caricato dal TI_AMM.
 //
 // Deliberatamente autonomo: non dipende dal livello di formattazione campi di
 // gii-editing-amm (pdfFieldValue/getFieldInfo/domainLabel), che è generico e

@@ -1,7 +1,6 @@
 // Logica centralizzata per decidere se una pratica GII richiede (e quindi deve mostrare)
-// un punto in mappa — usata da tutti i widget/viewer che decidono se mostrare il punto in
-// mappa o la mappa nel fascicolo: gii-editing-ti (scheda "Luoghi e dati tecnici"), gii-azioni
-// e gii-editing-amm (anteprima fascicolo), e in prospettiva gii-dettaglio-pratiche.
+// un punto in mappa. È usata dagli editor e dalla logica cartografica condivisa.
+// Il viewer del fascicolo è accessibile soltanto da gii-editing-ti e gii-editing-amm.
 //
 // Estratta da gii-editing-ti (unica copia originale, non duplicata altrove prima d'ora).
 //

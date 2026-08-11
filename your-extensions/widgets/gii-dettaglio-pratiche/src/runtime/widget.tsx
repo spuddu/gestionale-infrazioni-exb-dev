@@ -2623,7 +2623,6 @@ const EVENTO_LABELS: Record<string, string> = {
   INTEGRAZIONE_TRASMESSA: 'Integrazione trasmessa',
   INTEGRAZIONE: 'Richiesta integrazione',
   RAPPORTO_APPROVATO: 'Rapporto approvato',
-  SANZIONE_APPROVATA: 'Sanzione approvata',
   PRESA_IN_CARICO: 'Presa in carico',
   ASSEGNAZIONE_TI: 'Assegnazione TI',
   ASSEGNAZIONE_TI_AMM: 'Assegnazione TI AMM',

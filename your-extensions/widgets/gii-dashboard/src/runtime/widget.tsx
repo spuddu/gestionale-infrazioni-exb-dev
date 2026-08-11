@@ -292,13 +292,13 @@ function isWaitingForTiAmmAfterRiAmm (d: any): boolean {
 function isAttesaMia (d: any, user: GiiUserInfo | null): boolean {
   if (!user || user.isAdmin || user.isWorkflowAdmin) return false
   const role = getEffectiveRole(user.ruoloCod || user.ruoloLabel || '', user.areaCod)
+  if (role === 'DA') return false
   const statoField = getStatoFieldForRuolo(role)
   const val = d[statoField]
   const n = val != null && val !== '' ? Number(val) : null
 
-  // DT/DA: dopo la presa in carico (n===2) la pratica e' ancora da gestire dal ruolo corrente.
-  // Deve poter approvare, richiedere integrazioni o respingere: non va conteggiata come "attesa altri".
-  if ((role === 'DT' || role === 'DA') && n === 2) return true
+  // DT: dopo la presa in carico (n===2) la pratica è ancora da gestire dal ruolo corrente.
+  if (role === 'DT' && n === 2) return true
 
   if ((role === 'TI' || role === 'TI_AMM') && n === 2) {
     if (role === 'TI_AMM') return isPracticeAssignedToCurrentTiAmm(d, user)
@@ -317,18 +317,19 @@ function isAttesaMia (d: any, user: GiiUserInfo | null): boolean {
 function isAttesaAltri (d: any, user: GiiUserInfo | null): boolean {
   if (!user || user.isAdmin || user.isWorkflowAdmin) return false
   const role = getEffectiveRole(user.ruoloCod || user.ruoloLabel || '', user.areaCod)
+  if (role === 'DA') return false
   const statoField = getStatoFieldForRuolo(role)
   const val = d[statoField]
   const n = val != null && val !== '' ? Number(val) : null
   if (role === 'RZ' && getTiIstruttoriaInfo(d).isInTiIstruttoria) return true
-  if ((role === 'DT' || role === 'DA') && n === 2) return false
+  if (role === 'DT' && n === 2) return false
   if ((role === 'TI' || role === 'TI_AMM') && n === 2) return !isAttesaMia(d, user)
   if (role === 'RI_AMM' && n === 2) return isWaitingForTiAmmAfterRiAmm(d)
   return n === 2 || n === 4
 }
 
 function getActiveRole (d: any): string {
-  const roles = ['DA', 'TI_AMM', 'RI_AMM', 'DT', 'RI', 'RZ', 'TI', 'TR']
+  const roles = ['TI_AMM', 'RI_AMM', 'DT', 'RI', 'RZ', 'TI', 'TR']
   for (const r of roles) if (hasRuoloData(d, r)) return r
   return 'N/D'
 }
@@ -1168,7 +1169,7 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
     const last = getLastTouchMs(r)
     return last !== null && (now - last) > staleMs
   }).length
-  const daPrendere = displayRecords.filter(r => {
+  const daPrendere = effectiveRole === 'DA' ? 0 : displayRecords.filter(r => {
     const statoField = user ? getStatoFieldForRuolo(effectiveRole) : ''
     const v = statoField ? r[statoField] : null
     const n = v !== null && v !== undefined && v !== '' ? Number(v) : null
@@ -1194,7 +1195,7 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
   }, [displayRecords])
 
   const byStatus = React.useMemo(() => {
-    if (!user || user.isAdmin || user.isWorkflowAdmin) return [] as ChartItem[]
+    if (!user || user.isAdmin || user.isWorkflowAdmin || effectiveRole === 'DA') return [] as ChartItem[]
     const statoField = getStatoFieldForRuolo(effectiveRole)
     const map = new Map<string, number>()
     for (const r of displayRecords) {

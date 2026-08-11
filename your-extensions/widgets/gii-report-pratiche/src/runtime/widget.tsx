@@ -8,6 +8,48 @@ import {
   type GiiRuntimeView as RuntimeDsView
 } from '../../../_shared/gii-runtime/runtime-views'
 
+type TransferActionIconName = 'import' | 'export'
+
+function TransferActionIcon (props: { name: TransferActionIconName, size?: number }): React.ReactElement {
+  const size = Number(props.size || 18)
+  if (props.name === 'import') {
+    return (
+      <svg width={size} height={size} viewBox='0 0 24 24' fill='none' stroke='currentColor' strokeWidth='2' strokeLinecap='round' strokeLinejoin='round' aria-hidden='true' focusable='false'>
+        <path d='M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4'/>
+        <path d='M17 8l-5-5-5 5'/>
+        <path d='M12 3v12'/>
+      </svg>
+    )
+  }
+  return (
+    <svg width={size} height={size} viewBox='0 0 24 24' fill='none' stroke='currentColor' strokeWidth='2' strokeLinecap='round' strokeLinejoin='round' aria-hidden='true' focusable='false'>
+      <path d='M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4'/>
+      <path d='M7 10l5 5 5-5'/>
+      <path d='M12 15V3'/>
+    </svg>
+  )
+}
+
+function transferActionButtonStyle (disabled: boolean): React.CSSProperties {
+  return {
+    width: 30,
+    height: 30,
+    padding: 0,
+    boxSizing: 'border-box',
+    borderRadius: 7,
+    border: `1.5px solid ${disabled ? '#e5e7eb' : '#0d3b66'}`,
+    background: disabled ? '#e5e7eb' : '#ffffff',
+    color: disabled ? '#9ca3af' : '#0d3b66',
+    cursor: disabled ? 'not-allowed' : 'pointer',
+    display: 'inline-flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    lineHeight: 1,
+    flex: '0 0 auto',
+    opacity: disabled ? 0.6 : 1
+  }
+}
+
 type GiiUserInfo = {
   username: string
   fullName?: string
@@ -384,13 +426,13 @@ function isWaitingForTiAmmAfterRiAmm (d: any): boolean {
 function isAttesaMia (d: any, user: GiiUserInfo | null): boolean {
   if (!user || user.isAdmin || user.isWorkflowAdmin) return false
   const role = getEffectiveRole(user.ruoloLabel || '', user.area, user.areaCod)
+  if (role === 'DA') return false
   const statoField = getStatoFieldForRuolo(role)
   const val = d[statoField]
   const n = val != null && val !== '' ? Number(val) : null
 
-  // DT/DA: dopo la presa in carico (n===2) la pratica e' ancora da gestire dal ruolo corrente.
-  // Deve poter approvare, richiedere integrazioni o respingere: non va conteggiata come "attesa altri".
-  if ((role === 'DT' || role === 'DA') && n === 2) return true
+  // DT: dopo la presa in carico (n===2) la pratica è ancora da gestire dal ruolo corrente.
+  if (role === 'DT' && n === 2) return true
 
   if ((role === 'TI' || role === 'TI_AMM') && n === 2) {
     if (role === 'TI_AMM') return isPracticeAssignedToCurrentTiAmm(d, user)
@@ -409,11 +451,12 @@ function isAttesaMia (d: any, user: GiiUserInfo | null): boolean {
 function isAttesaAltri (d: any, user: GiiUserInfo | null): boolean {
   if (!user || user.isAdmin || user.isWorkflowAdmin) return false
   const role = getEffectiveRole(user.ruoloLabel || '', user.area, user.areaCod)
+  if (role === 'DA') return false
   const statoField = getStatoFieldForRuolo(role)
   const val = d[statoField]
   const n = val != null && val !== '' ? Number(val) : null
   if (role === 'RZ' && getTiIstruttoriaInfo(d).isInTiIstruttoria) return true
-  if ((role === 'DT' || role === 'DA') && n === 2) return false
+  if (role === 'DT' && n === 2) return false
   if ((role === 'TI' || role === 'TI_AMM') && n === 2) return !isAttesaMia(d, user)
   if (role === 'RI_AMM' && n === 2) return isWaitingForTiAmmAfterRiAmm(d)
   return n === 2 || n === 4
@@ -434,19 +477,25 @@ function statoNumFromEsito (esito: number): number {
   return 4
 }
 
+function isBozzaDeterminazioneTrasmessaRiAmmReport (d: any): boolean {
+  const stato = String(pickField(d, 'determinazione_stato') || '').trim().toUpperCase()
+  if (stato === 'TRASMESSA_RI_AMM' || stato === 'BOZZA_TRASMESSA_RI_AMM') return true
+  const statoRiAmm = roleNumValue(d, 'RI_AMM', 'stato')
+  const presaRiAmm = roleNumValue(d, 'RI_AMM', 'presa_in_carico')
+  const statoTiAmm = roleNumValue(d, 'TI_AMM', 'stato')
+  const esitoTiAmm = roleNumValue(d, 'TI_AMM', 'esito')
+  const riAmmOpen = statoRiAmm === 1 || statoRiAmm === 2 || presaRiAmm === 1 || presaRiAmm === 2
+  return riAmmOpen && esitoTiAmm === 2 && statoTiAmm === 4
+}
+
 function getFwdDest (role: string, d: any): string {
   switch (role) {
     case 'TI': return 'RZ'
     case 'RZ': return 'RI'
     case 'RI': return 'DT'
     case 'DT': return 'RI_AMM'
-    case 'RI_AMM': {
-      const esitoTiAmm = pickField(d, 'esito_TI_AMM')
-      const n = esitoTiAmm !== null && esitoTiAmm !== undefined && esitoTiAmm !== '' ? Number(esitoTiAmm) : null
-      return (n !== null && Number.isFinite(n)) ? 'DA' : 'TI_AMM'
-    }
-    case 'TI_AMM': return 'RI_AMM'
-    case 'DA': return 'TI_AMM'
+    case 'RI_AMM': return isBozzaDeterminazioneTrasmessaRiAmmReport(d) ? 'TI_AMM' : ''
+    case 'TI_AMM': return isBozzaDeterminazioneTrasmessaRiAmmReport(d) ? 'RI_AMM' : ''
     default: return ''
   }
 }
@@ -458,13 +507,12 @@ function getIntegDest (role: string): string {
     case 'DT': return 'RI'
     case 'RI_AMM': return 'RI'
     case 'TI_AMM': return 'RI_AMM'
-    case 'DA': return 'RI_AMM'
     default: return ''
   }
 }
 
 function computeSintetico (d: any): { ruolo: string; label: string; statoForChip: number | null } {
-  const scanOrder = ['DA', 'TI_AMM', 'RI_AMM', 'DT', 'RI', 'RZ', 'TI', 'TR']
+  const scanOrder = ['TI_AMM', 'RI_AMM', 'DT', 'RI', 'RZ', 'TI', 'TR']
   const statoDaPrendere = 1
   const statoPresa = 2
   const statoIntegrazione = 3
@@ -509,7 +557,6 @@ function computeSintetico (d: any): { ruolo: string; label: string; statoForChip
     if (esitoNum !== null && Number.isFinite(esitoNum)) {
       if (esitoNum === esitoApprovata) {
         if (role === 'DT') return { ruolo: 'DT', label: 'Approvato', statoForChip: statoApprovata }
-        if (role === 'DA') return { ruolo: 'DA', label: 'Sanzione approvata', statoForChip: statoApprovata }
         const dest = getFwdDest(role, d)
         if (dest) {
           if (hasRuoloData(d, dest)) {
@@ -586,30 +633,28 @@ function isRoleApproved (d: any, role: string): boolean {
   return roleNumValue(d, role, 'esito') === 2 || roleNumValue(d, role, 'stato') === 4
 }
 
-function getRoleApprovalMs (d: any, role: string): number | null {
-  return parseToMs(pickField(d, `dt_esito_${role}`)) || parseToMs(pickField(d, `dt_stato_${role}`)) || getRoleLastTouchMs(d, role)
+function isNotificaPerfezionataReport (d: any): boolean {
+  const esito = String(pickField(d, 'notifica_esito') || '').trim().toUpperCase()
+  return (esito === 'NOTIFICATA' || esito === 'COMPIUTA_GIACENZA') && meaningful(pickField(d, 'notifica_data'))
 }
 
-function isSanzioneTrasmessa (d: any): boolean {
-  if (!isRoleApproved(d, 'DA')) return false
-  const daApprovalMs = getRoleApprovalMs(d, 'DA')
-  if (daApprovalMs === null) return false
-  const tiAmmEsito = roleNumValue(d, 'TI_AMM', 'esito')
-  const tiAmmStato = roleNumValue(d, 'TI_AMM', 'stato')
-  if (tiAmmEsito !== 2 && tiAmmStato !== 4) return false
-  const tiAmmLastMs = getRoleLastTouchMs(d, 'TI_AMM')
-  return tiAmmLastMs !== null && tiAmmLastMs > daApprovalMs
+function isAttoAccertamentoDefinitivoReport (d: any): boolean {
+  return meaningful(pickField(d, 'accertamento_numero')) && meaningful(pickField(d, 'accertamento_data'))
+}
+
+function isDeterminazioneAdottataReport (d: any): boolean {
+  const stato = String(pickField(d, 'determinazione_stato') || '').trim().toUpperCase()
+  return stato === 'ADOTTATA' || (meaningful(pickField(d, 'determinazione_numero')) && meaningful(pickField(d, 'determinazione_data')))
 }
 
 function getRuoloPressoCuiSiTrova (d: any): string {
-  if (isRoleApproved(d, 'DA')) return 'TI_AMM'
   return getActiveRole(d)
 }
 
 function faseProcedimentaleLabel (d: any): string {
-  if (isSanzioneTrasmessa(d)) return 'Sanzione notificata'
-  if (isRoleApproved(d, 'DA')) return 'Fase sanzionatoria'
-  if (isRoleApproved(d, 'DT')) return 'Istruttoria amministrativa'
+  if (isNotificaPerfezionataReport(d)) return 'Sanzione notificata'
+  if (isAttoAccertamentoDefinitivoReport(d) || isDeterminazioneAdottataReport(d)) return 'Fase sanzionatoria'
+  if (isInFaseSanzionatoria(d) || isRoleApproved(d, 'DT')) return 'Istruttoria amministrativa'
   const ruolo = getRuoloPressoCuiSiTrova(d)
   if (ruolo === 'DT' || hasRuoloData(d, 'DT')) return 'Approvazione tecnica'
   return 'Istruttoria tecnica'

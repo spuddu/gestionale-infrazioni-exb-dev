@@ -2,8 +2,112 @@
 /** @jsxFrag React.Fragment */
 import { React, jsx, type AllWidgetProps } from 'jimu-core'
 import type { IMConfig } from '../config'
+import GiiActiveToggle from '../../../_shared/gii-ui/active-toggle'
 
 const { Fragment } = React
+
+
+type TransferActionIconName = 'import' | 'export'
+
+function TransferActionIcon (props: { name: TransferActionIconName, size?: number }): React.ReactElement {
+  const size = Number(props.size || 18)
+  if (props.name === 'import') {
+    return (
+      <svg width={size} height={size} viewBox='0 0 24 24' fill='none' stroke='currentColor' strokeWidth='2' strokeLinecap='round' strokeLinejoin='round' aria-hidden='true' focusable='false'>
+        <path d='M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4'/>
+        <path d='M17 8l-5-5-5 5'/>
+        <path d='M12 3v12'/>
+      </svg>
+    )
+  }
+  return (
+    <svg width={size} height={size} viewBox='0 0 24 24' fill='none' stroke='currentColor' strokeWidth='2' strokeLinecap='round' strokeLinejoin='round' aria-hidden='true' focusable='false'>
+      <path d='M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4'/>
+      <path d='M7 10l5 5 5-5'/>
+      <path d='M12 15V3'/>
+    </svg>
+  )
+}
+
+function transferActionButtonStyle (disabled: boolean): React.CSSProperties {
+  return {
+    width: 30,
+    height: 30,
+    padding: 0,
+    boxSizing: 'border-box',
+    borderRadius: 7,
+    border: `1.5px solid ${disabled ? '#e5e7eb' : '#0d3b66'}`,
+    background: disabled ? '#e5e7eb' : '#ffffff',
+    color: disabled ? '#9ca3af' : '#0d3b66',
+    cursor: disabled ? 'not-allowed' : 'pointer',
+    display: 'inline-flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    lineHeight: 1,
+    flex: '0 0 auto',
+    opacity: disabled ? 0.6 : 1
+  }
+}
+
+
+
+type RecordActionButtonProps = {
+  onClick: (event: any) => void
+  disabled?: boolean
+  title?: string
+  ariaLabel?: string
+  marginRight?: number
+}
+
+function recordActionStyle (color: string, disabled: boolean, marginRight = 0): React.CSSProperties {
+  return {
+    border: 'none',
+    background: 'transparent',
+    color,
+    cursor: disabled ? 'not-allowed' : 'pointer',
+    width: 28,
+    height: 28,
+    padding: 0,
+    boxSizing: 'border-box',
+    marginRight,
+    display: 'inline-flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    lineHeight: 1,
+    opacity: disabled ? 0.45 : 1
+  }
+}
+
+function RecordEditButton (props: RecordActionButtonProps) {
+  const disabled = !!props.disabled
+  const title = props.title || 'Modifica'
+  const ariaLabel = props.ariaLabel || title
+  return (
+    <button type='button' disabled={disabled} onClick={props.onClick} title={title} aria-label={ariaLabel} style={recordActionStyle('#1F4E79', disabled, props.marginRight ?? 4)}>
+      <svg width={18} height={18} viewBox='0 0 24 24' fill='none' stroke='currentColor' strokeWidth='2' strokeLinecap='round' strokeLinejoin='round' aria-hidden='true' focusable='false'>
+        <path d='M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7'/>
+        <path d='M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z'/>
+      </svg>
+    </button>
+  )
+}
+
+function RecordDeleteButton (props: RecordActionButtonProps) {
+  const disabled = !!props.disabled
+  const title = props.title || 'Elimina'
+  const ariaLabel = props.ariaLabel || title
+  return (
+    <button type='button' disabled={disabled} onClick={props.onClick} title={title} aria-label={ariaLabel} style={recordActionStyle('#b42318', disabled, props.marginRight ?? 0)}>
+      <svg width={18} height={18} viewBox='0 0 24 24' fill='none' stroke='currentColor' strokeWidth='2' strokeLinecap='round' strokeLinejoin='round' aria-hidden='true' focusable='false'>
+        <path d='M3 6h18'/>
+        <path d='M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2'/>
+        <path d='M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6'/>
+        <path d='M10 11v6'/>
+        <path d='M14 11v6'/>
+      </svg>
+    </button>
+  )
+}
 
 function loadEsriModule<T = any>(path: string): Promise<T> {
   return new Promise((resolve, reject) => {
@@ -752,9 +856,12 @@ export default function Widget(props: AllWidgetProps<IMConfig>) {
           </div>
 
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, marginTop: 10, flexWrap: 'wrap' }}>
-            <label style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}><input type='checkbox' checked={activateAfterImport} onChange={(e) => setActivateAfterImport((e.target as HTMLInputElement).checked)} /> Attiva subito dopo l'import</label>
+            <label style={{ display: 'inline-flex', alignItems: 'center', gap: 8, fontWeight: 600, color: '#374151' }}>
+              <GiiActiveToggle checked={activateAfterImport} onChange={setActivateAfterImport} ariaLabel="Attiva subito dopo l'import" />
+              <span>Attiva subito dopo l'import</span>
+            </label>
             <div className='gpw-btns'>
-              <button className='gpw-btn gpw-primary' disabled={saving || !file} onClick={onImport}>{saving ? 'Import in corso…' : 'Importa prezzario'}</button>
+              <button type='button' disabled={saving || !file} onClick={onImport} title={saving ? 'Import in corso…' : 'Importa prezzario'} aria-label={saving ? 'Import in corso…' : 'Importa prezzario'} style={transferActionButtonStyle(saving || !file)}><TransferActionIcon name='import' /></button>
             </div>
           </div>
           {progress ? <div style={{ marginTop: 8, fontSize: sectionTitleFontSize, color: sectionTitleColor, fontWeight: 700 }}>{progress}</div> : null}
@@ -776,8 +883,13 @@ export default function Widget(props: AllWidgetProps<IMConfig>) {
                   <td>{toDateLabel(r.data_import)}</td>
                   <td>
                     <div className='gpw-btns-inline'>
-                      <button className={`gpw-btn ${boolLike(r.attivo) ? 'gpw-warning' : 'gpw-secondary'}`} disabled={saving} onClick={() => void onToggleActive(r)}>{boolLike(r.attivo) ? 'Disattiva' : 'Attiva'}</button>
-                      <button className='gpw-btn gpw-danger' disabled={saving} onClick={() => void onDelete(r)}>Elimina</button>
+                      <GiiActiveToggle
+                        checked={boolLike(r.attivo)}
+                        disabled={saving}
+                        onChange={() => void onToggleActive(r)}
+                        ariaLabel={`Stato import ${importTypeLabel(r.tipo_prezzario)} ${num(r.anno_prezzario)}`}
+                      />
+                      <RecordDeleteButton disabled={saving} onClick={() => void onDelete(r)} title='Elimina import' ariaLabel='Elimina import' />
                     </div>
                   </td>
                 </tr>

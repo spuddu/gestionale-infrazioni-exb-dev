@@ -23,6 +23,21 @@ import {
 
 type Props = AllWidgetProps<IMConfig>;
 
+type GiiUserInfo = {
+  username: string;
+  ruolo: number | null;
+  ruoloCod: string;
+  ruoloLabel: string;
+  area: number | null;
+  areaCod: "AMM" | "AGR" | "TEC" | "";
+  settore: number | null;
+  settoreCod: string;
+  ufficio: number | null;
+  gruppo?: string;
+  isAdmin: boolean;
+  isWorkflowAdmin?: boolean;
+};
+
 type OggettoLegendInfo = {
   label: string;
   description: string;
@@ -192,8 +207,6 @@ const ALLOWED_OGGETTI = new Set([
   "RILEVAZIONE RESPINTA",
   "ISTRUTTORIA TECNICA RESPINTA",
   "ISTRUTTORIA TECNICA APPROVATA",
-  "SANZIONE APPROVATA",
-  "SANZIONE RESPINTA",
   "SANZIONE NOTIFICATA",
 ]);
 
@@ -204,14 +217,10 @@ const ALLOWED_LOG_EVENTI = new Set([
   "INTEGRAZIONE_RICHIESTA",
   "ISTRUTTORIA_TRASMESSA",
   "RAPPORTO_APPROVATO",
-  "SANZIONE_APPROVATA",
   "SANZIONE_NOTIFICATA",
   "VERBALE_NOTIFICATO",
-  "RESTITUZIONE_A_TI_AMM",
   "BOZZA_DETERMINAZIONE_TRASMESSA",
-  "BOZZA_DETERMINAZIONE_TRASMESSA_DA",
   "RESPINTA",
-  "RIMANDA_A_DT",
   "ATTESTAZIONE_CONFORMITA",
   "PROPOSTA_CONTESTAZIONE_APPROVATA",
 ]);
@@ -268,14 +277,10 @@ function formatCausale(evento: string): string {
   if (e === "ATTESTAZIONE_CONFORMITA") return "ATTESTAZIONE DI CONFORMITÀ";
   if (e === "PROPOSTA_CONTESTAZIONE_APPROVATA") return "ISTRUTTORIA AMMINISTRATIVA APPROVATA";
   if (e === "BOZZA_DETERMINAZIONE_TRASMESSA") return "TRASMISSIONE PRATICA CON BOZZA DETERMINAZIONE";
-  if (e === "BOZZA_DETERMINAZIONE_TRASMESSA_DA") return "BOZZA DI DETERMINAZIONE TRASMESSA";
   if (e === "RAPPORTO_APPROVATO") return "ISTRUTTORIA TECNICA APPROVATA";
-  if (e === "SANZIONE_APPROVATA") return "SANZIONE APPROVATA";
   if (e === "SANZIONE_NOTIFICATA" || e === "VERBALE_NOTIFICATO")
     return "SANZIONE NOTIFICATA";
-  if (e === "RESTITUZIONE_A_TI_AMM") return "TRASMISSIONE INTEGRAZIONE";
   if (e === "RESPINTA") return "ISTRUTTORIA TECNICA RESPINTA";
-  if (e === "RIMANDA_A_DT") return "TRASMISSIONE INTEGRAZIONE";
   return "—";
 }
 
@@ -286,12 +291,8 @@ function isTransmissionReturnEvent(evento: any): boolean {
   return (
     e === "ISTRUTTORIA_TRASMESSA" ||
     e === "BOZZA_DETERMINAZIONE_TRASMESSA" ||
-    e === "BOZZA_DETERMINAZIONE_TRASMESSA_DA" ||
     e === "INTEGRAZIONE_TRASMESSA" ||
     e === "RAPPORTO_APPROVATO" ||
-    e === "SANZIONE_APPROVATA" ||
-    e === "RESTITUZIONE_A_TI_AMM" ||
-    e === "RIMANDA_A_DT" ||
     e === "ATTESTAZIONE_CONFORMITA" ||
     e === "PROPOSTA_CONTESTAZIONE_APPROVATA"
   );
@@ -3432,10 +3433,7 @@ export default function Widget(props: Props) {
           cfg.oggettoBadgeColorApprovazione ||
           CHIP_GREEN.background,
       );
-    if (
-      o.includes("SANZIONE APPROVATA") ||
-      o.includes("ISTRUTTORIA AMMINISTRATIVA APPROVATA")
-    )
+    if (o.includes("ISTRUTTORIA AMMINISTRATIVA APPROVATA"))
       return txt(
         cfg.oggettoBadgeColorApprovazioneAmministrativa ||
           cfg.oggettoBadgeColorApprovazione ||
@@ -3471,9 +3469,7 @@ export default function Widget(props: Props) {
     if (o === "TRASMISSIONE ISTRUTTORIA")
       return "Il colore identifica la trasmissione dell’istruttoria al ruolo successivo del procedimento.";
     if (o === "TRASMISSIONE BOZZA DETERMINAZIONE" || o === "TRASMISSIONE PRATICA CON BOZZA DETERMINAZIONE")
-      return "Il colore identifica la trasmissione della pratica, contenente la bozza Word della determinazione, al Responsabile dell’istruttoria amministrativa per la verifica.";
-    if (o === "BOZZA DI DETERMINAZIONE TRASMESSA")
-      return "Il colore identifica la trasmissione della bozza di determinazione al Direttore Area AA. GG. e P.F. fuori dal flusso interno del gestionale.";
+      return "Il colore identifica la trasmissione della pratica, contenente la bozza di determinazione, al Responsabile dell’istruttoria amministrativa per la verifica.";
     if (o === "ATTESTAZIONE DI CONFORMITÀ")
       return "Il colore identifica l’apposizione del visto di conformità da parte del Tecnico istruttore amministrativo e la trasmissione della pratica al Responsabile dell’istruttoria amministrativa.";
     if (o === "ISTRUTTORIA AMMINISTRATIVA APPROVATA")
@@ -3484,7 +3480,7 @@ export default function Widget(props: Props) {
       return "Il colore identifica la ritrasmissione della pratica dopo il completamento dell’integrazione richiesta.";
     if (o.includes("ISTRUTTORIA TECNICA APPROVATA"))
       return "Il colore identifica l’approvazione dell’istruttoria tecnica da parte del Direttore dell’Area tecnica competente.";
-    if (o.includes("SANZIONE APPROVATA") || o.includes("ISTRUTTORIA AMMINISTRATIVA APPROVATA"))
+    if (o.includes("ISTRUTTORIA AMMINISTRATIVA APPROVATA"))
       return "Il colore identifica l’approvazione della fase amministrativa o della sanzione.";
     if (o.includes("NOTIFIC"))
       return "Il colore identifica l’avvenuta notifica dell’atto amministrativo.";
@@ -3767,10 +3763,9 @@ export default function Widget(props: Props) {
   };
 
   // Destinatario di trasmissione positiva per ruolo — dipende dal contesto del record.
-  // DT approva e trasmette direttamente a RI_AMM (attiva fase sanzionatoria).
-  // RI_AMM punta a TI_AMM in prima assegnazione, a DA dopo che TI_AMM ha restituito.
-  // DT approva e trasmette direttamente a RI_AMM (avvia fase sanzionatoria).
-  // DA approva e trasmette a TI_AMM (per verbale/PEC).
+  // DT approva e trasmette direttamente a RI_AMM; RI_AMM e TI_AMM si scambiano
+  // la pratica solo nei passaggi interni previsti. Il DA è consultivo e resta fuori
+  // dal workflow interno del gestionale.
   const getFwdDest = (role: string, d: any): string => {
     switch (role) {
       case "TI":
@@ -3785,8 +3780,6 @@ export default function Widget(props: Props) {
         return isBozzaDeterminazioneTrasmessaRiAmm(d) ? "TI_AMM" : "";
       case "TI_AMM":
         return isBozzaDeterminazioneTrasmessaRiAmm(d) ? "RI_AMM" : "";
-      case "DA":
-        return "TI_AMM";
       default:
         return "";
     }
@@ -3804,8 +3797,6 @@ export default function Widget(props: Props) {
       case "RI_AMM":
         return "RI";
       case "TI_AMM":
-        return "RI_AMM";
-      case "DA":
         return "RI_AMM";
       default:
         return "";
@@ -3944,7 +3935,7 @@ export default function Widget(props: Props) {
   // ── computeSintetico: workflow-aware su tutti i ruoli ──────────────────────
   //
   // Logica:
-  //   - Scansiona i ruoli dal più avanzato (DA) al meno avanzato (TR)
+  //   - Scansiona i ruoli operativi dal più avanzato (TI_AMM) al meno avanzato (TR)
   //   - Il primo ruolo con dati valorizzati è il "nodo corrente"
   //   - presa=1 (DA PRENDERE) → il Rapporto è stato trasmesso ma non ancora preso in carico
   //     → "Trasmesso a [ruolo]"  chip arancio
@@ -3968,7 +3959,7 @@ export default function Widget(props: Props) {
       return { ruolo: "RI_AMM", label: "In carico", statoForChip: statoPresa };
     }
 
-    const scanOrder = ["DA", "TI_AMM", "RI_AMM", "DT", "RI", "RZ", "TI", "TR"];
+    const scanOrder = ["TI_AMM", "RI_AMM", "DT", "RI", "RZ", "TI", "TR"];
 
     // Caso speciale: assegnazione RZ -> TI.
     // Finche' TI non "restituisce" la pratica, lo stato sintetico segue
@@ -4041,12 +4032,6 @@ export default function Widget(props: Props) {
           if (role === "DT")
             return {
               ruolo: "DT",
-              label: "Trasmesso",
-              statoForChip: statoApprovata,
-            };
-          if (role === "DA")
-            return {
-              ruolo: "DA",
               label: "Trasmesso",
               statoForChip: statoApprovata,
             };
@@ -4302,8 +4287,7 @@ export default function Widget(props: Props) {
     let label = "";
     if (evento === "RESPINTA") {
       const ruolo = normalizeWorkflowRole(log.ruolo);
-      if (ruolo === "DA") label = "SANZIONE RESPINTA";
-      else if (ruolo === "DT") label = "ISTRUTTORIA TECNICA RESPINTA";
+      if (ruolo === "DT") label = "ISTRUTTORIA TECNICA RESPINTA";
       else if (ruolo === "RZ") {
         const tiAssigned = String(
           pickField(d, "ti_assegnato_username") ??
@@ -4382,6 +4366,7 @@ export default function Widget(props: Props) {
   ): { ruolo: string; label: string; statoForChip: number | null } {
     const role = normalizeWorkflowRole(roleRaw);
     if (!role) return computeSintetico(d);
+    if (role === "DA") return computeSintetico(d);
 
     // Una pratica definitivamente respinta/chiusa (da qualsiasi ruolo, anche
     // di origine dopo un rientro dalla fase sanzionatoria) resta "Respinto"
@@ -4455,9 +4440,6 @@ export default function Widget(props: Props) {
         logEvent === "ISTRUTTORIA_TRASMESSA" ||
         logEvent === "INTEGRAZIONE_TRASMESSA" ||
         logEvent === "RAPPORTO_APPROVATO" ||
-        logEvent === "SANZIONE_APPROVATA" ||
-        logEvent === "RESTITUZIONE_A_TI_AMM" ||
-        logEvent === "RIMANDA_A_DT" ||
         logEvent === "ATTESTAZIONE_CONFORMITA" ||
         logEvent === "PROPOSTA_CONTESTAZIONE_APPROVATA"
       ) {

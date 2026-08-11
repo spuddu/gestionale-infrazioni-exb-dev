@@ -11,9 +11,9 @@ import type { GiiDocumentPrintOptions as DocumentPrintOptions, GiiAttachmentPrin
 import { buildGiiMapLegendItemsForView, computePrintExtentForView, ensureGiiPrintableMapLayersReady, flattenGiiPrintableMapLayerTree as flattenPrintableMapLayerTree, listGiiPrintableMapLayerTree as listPrintableMapLayerTree, listGiiPrintableMapLayers as listPrintableMapLayers } from './viewer-documenti/map-layers'
 import type { GiiPrintableMapLayerItem as PrintableMapLayerItem } from './viewer-documenti/map-layers'
 import GiiDocumentViewer from './viewer-documenti/document-viewer'
-import { filterGiiAttachmentsForTechnicalRoles, getGiiAttachmentKind, isGiiSpecialAdministrativeAttachment } from './allegati/gii-attachment-viewer'
+import { filterGiiAttachmentsForTechnicalRoles, getGiiAttachmentKind, isGiiSpecialAdministrativeAttachment, isGiiBozzaDeterminazionePdfAttachment, isGiiPropostaContestazionePdfAttachment, pickLatestGiiAttachment, giiAttachmentIdentityKey } from './allegati/gii-attachment-viewer'
 import { parseNorma3Codes } from './req-point'
-import { buildFascicolo } from './fascicolo-builder'
+import { buildFascicolo, mergeFascicoloPdfItems } from './fascicolo-builder'
 import type { NotaSpeseConfig } from './documenti-tecnici/rapporto/rapporto-nota-spese-summary'
 import {
   queryNotaSpeseRowsForPractice,
@@ -237,6 +237,8 @@ function documentViewerTitleForEditing (fileName: string, data: any, oid?: numbe
   const rapporto = officialRapportoTecnicoNumberForEditing(data)
   const rilevazione = viewerRilevazioneNumberForEditing(data, oid)
   const prefix = `Rapporto n. ${rapporto || '-'}`
+  if (lower.includes('determinaz')) return `${prefix} • Bozza di determinazione`
+  if (lower.includes('proposta') && lower.includes('contestaz')) return `${prefix} • Proposta di contestazione`
   if (lower.includes('mappa')) return `${prefix} • Mappa della rilevazione n. ${rilevazione || '-'}`
   if (lower.includes('allegat')) return `${prefix} • Allegati della rilevazione n. ${rilevazione || '-'}`
   if (lower.includes('nota')) return `${prefix} • Nota spese della rilevazione n. ${rilevazione || '-'}`
@@ -266,12 +268,10 @@ type DocumentAvailability = {
   checkedKey: string
 }
 
-const editingTiAnteprimaAppliedOptionsMemory = new Map<string, DocumentPrintOptions>()
-const editingTiAnteprimaPdfMemory = new Map<string, { blob: Blob; fileName: string }>()
+const giiAnteprimaPdfMemory = new Map<string, { blob: Blob; fileName: string }>()
 
-export function clearEditingTiAnteprimaDocumentMemory (): void {
-  editingTiAnteprimaAppliedOptionsMemory.clear()
-  editingTiAnteprimaPdfMemory.clear()
+export function clearGiiAnteprimaDocumentMemory (): void {
+  giiAnteprimaPdfMemory.clear()
 }
 
 function documentOptionsMemoryKey (oid?: number | null, data?: Record<string, any> | null): string {
@@ -415,18 +415,6 @@ function makePdfUrl (blob: Blob, fileName: string): string {
 function revokePdfUrl (url?: string | null): void {
   if (!url) return
   try { URL.revokeObjectURL(String(url).split('#')[0]) } catch {}
-}
-
-async function mergePdfBlobs (items: Array<{ blob: Blob; fileName: string }>): Promise<Blob> {
-  const merged = await PDFDocument.create()
-  for (const item of items) {
-    const bytes = new Uint8Array(await item.blob.arrayBuffer())
-    const src = await PDFDocument.load(bytes as any)
-    const pages = await merged.copyPages(src, src.getPageIndices())
-    pages.forEach(pg => merged.addPage(pg))
-  }
-  const out = await merged.save()
-  return new Blob([out as any], { type: 'application/pdf' })
 }
 
 function normalizePrintableLayerTitle (raw: any): string {
@@ -626,25 +614,26 @@ function toAttachmentPrintOption (att: any): AttachmentPrintOption {
   } as AttachmentPrintOption
 }
 
-async function loadAttachmentOptions (ds: any, oid: number, canSeeAmministrativi: boolean, layerUrlHint?: string): Promise<{ options: AttachmentPrintOption[]; hasBozzaDeterminazione: boolean }> {
-  if (!Number.isFinite(oid) || oid <= 0) return { options: [], hasBozzaDeterminazione: false }
+async function loadAttachmentOptions (ds: any, oid: number, canSeeAmministrativi: boolean, layerUrlHint?: string): Promise<{ options: AttachmentPrintOption[]; bozzaDeterminazione: AttachmentPrintOption | null; propostaContestazione: AttachmentPrintOption | null }> {
+  if (!Number.isFinite(oid) || oid <= 0) return { options: [], bozzaDeterminazione: null, propostaContestazione: null }
   const layer = await resolveFeatureLayerForAttachments(ds, layerUrlHint)
-  if (!layer) return { options: [], hasBozzaDeterminazione: false }
+  if (!layer) return { options: [], bozzaDeterminazione: null, propostaContestazione: null }
   const infos = await queryFeatureAttachments(layer, oid, ds)
   const allOptions = (infos || []).map((att: any): AttachmentPrintOption => toAttachmentPrintOption(att))
-  const hasBozzaDeterminazione = allOptions.some(att => getGiiAttachmentKind(att as any) === 'bozza-determinazione')
+  const bozzaDeterminazione = pickLatestGiiAttachment(allOptions.filter(att => isGiiBozzaDeterminazionePdfAttachment(att as any)))
+  const propostaContestazione = pickLatestGiiAttachment(allOptions.filter(att => isGiiPropostaContestazionePdfAttachment(att as any)))
   const options = allOptions
-    // La proposta di contestazione e la bozza di determinazione sono documenti amministrativi
-    // a sé (con proprio checkbox dedicato), non allegati da spuntare: vanno sempre esclusi da
-    // questa lista, indipendentemente dal ruolo.
+    // Proposta di contestazione e bozza di determinazione sono documenti amministrativi
+    // speciali: il viewer li carica come PDF reali, separatamente dagli allegati generici.
     .filter((att: AttachmentPrintOption) => !isGiiSpecialAdministrativeAttachment(att as any))
   // I ruoli tecnici non devono mai vedere allegati di tipo amministrativo caricati
   // manualmente da TI_AMM/RI_AMM/DA. Chi può vedere la parte amministrativa
-  // (canSeeAmministrativi) vede invece tutti gli allegati, di qualunque tipo.
+  // (canSeeAmministrativi) vede invece tutti gli allegati generici.
   const filtered = canSeeAmministrativi ? options : (filterGiiAttachmentsForTechnicalRoles(options as any) as AttachmentPrintOption[])
   return {
     options: filtered.filter((att: AttachmentPrintOption): boolean => Number.isFinite(att.id) && att.id > 0),
-    hasBozzaDeterminazione
+    bozzaDeterminazione,
+    propostaContestazione
   }
 }
 
@@ -661,7 +650,7 @@ async function fetchAttachmentBlob (layer: any, ds: any, oid: number, att: any, 
     token = cred?.token ? String(cred.token) : ''
   } catch {}
   if (token && /^https?:/i.test(url) && !/[?&]token=/.test(url)) url = `${url}${url.includes('?') ? '&' : '?'}token=${encodeURIComponent(token)}`
-  const resp = await fetch(url, { credentials: 'same-origin' })
+  const resp = await fetch(url, { credentials: 'same-origin', cache: 'no-store' })
   if (!resp.ok) return null
   return { blob: await resp.blob(), fileName: String(att?.name || `allegato_${id || index + 1}`) }
 }
@@ -761,7 +750,6 @@ export default function GiiAnteprimaPanel (p: {
   layerUrlHint?: string
   oid?: number | null
   idFieldName?: string
-  mapView?: any | null
   mapConfig?: any
   mapTarget?: any | null
   printServiceUrl?: string
@@ -776,30 +764,19 @@ export default function GiiAnteprimaPanel (p: {
   sidebarWidth?: number
   notaSpeseConfig?: NotaSpeseConfig
   // Unica vera differenza funzionale tra ruoli tecnici e amministrativi: questi ultimi
-  // vedono anche le opzioni/documenti amministrativi (proposta di contestazione + determinazione,
-  // quest'ultima tramite extraDocumentBuilder — vedi sotto — dato che non è ancora costruita
-  // internamente da buildFascicolo).
+  // vedono anche le opzioni/documenti amministrativi (proposta di contestazione +
+  // determinazione). La bozza di determinazione è sempre il PDF realmente allegato alla pratica.
   canSeeAmministrativi?: boolean
   // Ruolo corrente (es. 'TI_AMM', 'RI_AMM', 'DA'). Usato solo per determinare la reale
   // disponibilità di proposta di contestazione e determinazione: TI_AMM, essendo l'autore,
   // deve poter controllare cosa sta per trasmettere anche prima della trasmissione stessa;
   // gli altri ruoli le vedono solo dopo che TI_AMM le ha effettivamente trasmesse.
   role?: string
-  profile?: { username: string, fullName: string }
-  // Se presente, il pannello mostra il pulsante di chiusura del viewer (uso in modale,
-  // es. gii-azioni). Se assente, nessun pulsante di chiusura (uso incorporato).
-  onClose?: () => void
-  // 'headless' (default): il pannello costruisce da sé una mappa indipendente e nascosta,
-  // usata una volta e distrutta — mai derivata dalla mappa live in uso (regola di sicurezza
-  // per widget dove l'utente può interagire con una mappa live mentre genera l'anteprima,
-  // es. editing-ti). 'live': usa direttamente la view esterna passata in mapView, senza
-  // costruirne una propria — per widget dove la mappa è solo di consultazione (es. azioni).
-  mapMode?: 'headless' | 'live'
-  // Punto di estensione per documenti non ancora centralizzati in buildFascicolo (oggi solo
-  // la determinazione dirigenziale). Il pannello lo chiama quando includeDeterminazione è
-  // attivo e canSeeAmministrativi è vero, e ne unisce il risultato al resto; il chiamante
-  // resta responsabile di come costruire quel documento.
-  extraDocumentBuilder?: (opts: DocumentPrintOptions) => Promise<{ blob: Blob; fileName: string } | null>
+  // Chiave opzionale per forzare la rilettura degli allegati senza cambiare pratica.
+  refreshKey?: string | number
+  // Il pannello è sempre incorporato nei due editor (tecnico e amministrativo).
+  // La mappa del fascicolo è sempre headless e indipendente dalla UI corrente.
+  // I documenti amministrativi vengono risolti qui, senza callback/builder esterni.
 }): any {
   const [pdfUrl, setPdfUrl] = React.useState<string | null>(null)
   const [pdfFileName, setPdfFileName] = React.useState<string>('rapporto.pdf')
@@ -817,9 +794,10 @@ export default function GiiAnteprimaPanel (p: {
     checkedKey: ''
   })
   const [attachmentOptions, setAttachmentOptions] = React.useState<AttachmentPrintOption[]>([])
-  const [hasBozzaDeterminazioneAttachment, setHasBozzaDeterminazioneAttachment] = React.useState(false)
+  const [propostaContestazioneAttachment, setPropostaContestazioneAttachment] = React.useState<AttachmentPrintOption | null>(null)
+  const [bozzaDeterminazioneAttachment, setBozzaDeterminazioneAttachment] = React.useState<AttachmentPrintOption | null>(null)
   const [notaSpeseOptions, setNotaSpeseOptions] = React.useState<NotaSpesePrintOption[]>([])
-  const printMapView = p.mapMode === 'live' ? (p.mapView || null) : (technicalMapView || null)
+  const printMapView = technicalMapView || null
   // Default condivisi + eventuali override espliciti (vedi anche l'uso analogo dentro
   // l'effetto di costruzione della mappa headless più sotto). Un'unica funzione così i due
   // punti non possono disallinearsi.
@@ -837,17 +815,25 @@ export default function GiiAnteprimaPanel (p: {
   const [docOptions, setDocOptions] = React.useState<DocumentPrintOptions>(() => cloneDocumentPrintOptions(defaultDocumentPrintOptions()))
   const [previewOptions, setPreviewOptions] = React.useState<DocumentPrintOptions>(() => cloneDocumentPrintOptions(defaultDocumentPrintOptions()))
   const [previewRevision, setPreviewRevision] = React.useState(0)
-  const loadedOptionsKeyRef = React.useRef(optionsMemoryKey)
+  const [externalDocumentRefreshRevision, setExternalDocumentRefreshRevision] = React.useState(0)
   const forceNextPreviewRegenerateRef = React.useRef(false)
 
   React.useEffect(() => {
-    if (loadedOptionsKeyRef.current !== optionsMemoryKey) return
-    editingTiAnteprimaAppliedOptionsMemory.set(optionsMemoryKey, cloneDocumentPrintOptions(previewOptions))
-  }, [optionsMemoryKey, previewOptions])
+    const onRecordUpdated = (event: Event) => {
+      const detail = (event as CustomEvent<any>)?.detail || {}
+      const eventOid = Number(detail?.oid)
+      const currentOid = Number(p.oid)
+      if (Number.isFinite(eventOid) && Number.isFinite(currentOid) && eventOid !== currentOid) return
+      clearGiiAnteprimaDocumentMemory()
+      forceNextPreviewRegenerateRef.current = true
+      setExternalDocumentRefreshRevision(v => v + 1)
+    }
+    window.addEventListener('gii:record-updated', onRecordUpdated as EventListener)
+    return () => window.removeEventListener('gii:record-updated', onRecordUpdated as EventListener)
+  }, [p.oid])
 
   React.useEffect(() => {
     const freshOptions = cloneDocumentPrintOptions(defaultDocumentPrintOptions())
-    loadedOptionsKeyRef.current = optionsMemoryKey
     forceNextPreviewRegenerateRef.current = true
     setDocOptions(freshOptions)
     setPreviewOptions(freshOptions)
@@ -861,10 +847,9 @@ export default function GiiAnteprimaPanel (p: {
     try { return JSON.stringify({ r: p.nsRows || {}, s: p.nsSummary || {} }) } catch { return '' }
   }, [p.nsRows, p.nsSummary])
 
-  // Modalità "query": quando il chiamante non ha righe nota spese in memoria (non è un form
-  // di editing, es. gii-azioni/gii-editing-amm), il pannello le interroga da sé sulla tabella
-  // persistita — stesso identico meccanismo già usato da quei widget prima della migrazione.
-  // Quando invece p.nsRows è fornito (es. gii-editing-ti), questa query non parte mai:
+  // Modalità "query": quando il chiamante non ha righe nota spese in memoria
+  // (gii-editing-amm), il pannello le interroga da sé sulla tabella persistita.
+  // Quando invece p.nsRows è fornito (gii-editing-ti), questa query non parte mai:
   // restano prioritarie le righe in memoria (bozza corrente).
   const usingDraftNotaSpese = p.nsRows !== undefined
   const [queriedNsRows, setQueriedNsRows] = React.useState<Record<NsCat, NsRowP[]> | null>(null)
@@ -938,12 +923,6 @@ export default function GiiAnteprimaPanel (p: {
   }, [dataSignature, nsSignature, effectiveNsRows, effectiveNsSummary, attrezzatureCatalog])
 
   React.useEffect(() => {
-    // In modalità 'live' il pannello non costruisce nulla: usa direttamente p.mapView
-    // (vedi printMapView) e questo intero effetto è no-op.
-    if (p.mapMode === 'live') {
-      setTechnicalMapView(null)
-      return
-    }
     // Costruzione pigra: solo quando il checkbox "Mappa" è davvero attivo. Costruire questa
     // mappa (WebMap + layer di riferimento) è un'operazione pesante; farlo sempre ad ogni
     // apertura del pannello, anche quando l'utente vuole solo il rapporto tecnico, rendeva
@@ -953,8 +932,8 @@ export default function GiiAnteprimaPanel (p: {
       return
     }
     // IMPORTANTE: la mappa usata per generare l'elaborato cartografico NON deve mai
-    // derivare da nessuna mappa in uso nel gestionale (p.mapView o qualsiasi altra view
-    // visibile all'utente), in nessuna forma — né come clone, né come centro/scala di
+    // derivare da una mappa visibile in uso nel gestionale, in nessuna forma — né come
+    // clone, né come centro/scala di
     // partenza. È sempre una mappa indipendente, costruita da zero solo da configurazione
     // statica (cfg) e dal punto della pratica (mapTarget), usata una volta e poi distrutta.
     const cfg = effectiveMapConfig
@@ -1038,7 +1017,7 @@ export default function GiiAnteprimaPanel (p: {
       setTechnicalMapView(null)
       if (view) { try { view.destroy() } catch {} }
     }
-  }, [mapConfigSignature, mapTargetSignature, p.mapMode, effectiveMapConfig, docOptions.includeMappa])
+  }, [mapConfigSignature, mapTargetSignature, effectiveMapConfig, docOptions.includeMappa])
 
   React.useEffect(() => {
     setNotaSpeseOptions(computedNotaSpeseOptions)
@@ -1077,7 +1056,8 @@ export default function GiiAnteprimaPanel (p: {
       checkedKey
     })
     setAttachmentOptions([])
-    setHasBozzaDeterminazioneAttachment(false)
+    setPropostaContestazioneAttachment(null)
+    setBozzaDeterminazioneAttachment(null)
     if (!hasNotaSpeseLocal) setDocOptions(prev => ({ ...prev, includeNotaSpese: false }))
     if (!targetAvailable) setDocOptions(prev => ({ ...prev, includeMappa: false }))
     if (!p.ds || !p.oid) {
@@ -1085,10 +1065,11 @@ export default function GiiAnteprimaPanel (p: {
       return
     }
     let cancelled = false
-    void loadAttachmentOptions(p.ds, Number(p.oid), !!p.canSeeAmministrativi, p.layerUrlHint).then(({ options: allegatiList, hasBozzaDeterminazione }) => {
+    void loadAttachmentOptions(p.ds, Number(p.oid), !!p.canSeeAmministrativi, p.layerUrlHint).then(({ options: allegatiList, bozzaDeterminazione, propostaContestazione }) => {
       if (cancelled) return
       setAttachmentOptions(allegatiList)
-      setHasBozzaDeterminazioneAttachment(hasBozzaDeterminazione)
+      setPropostaContestazioneAttachment(propostaContestazione)
+      setBozzaDeterminazioneAttachment(bozzaDeterminazione)
       const hasTecnici = allegatiList.some(att => getGiiAttachmentKind(att as any) === 'technical')
       const hasAmministrativi = allegatiList.some(att => getGiiAttachmentKind(att as any) !== 'technical')
       setDocOptions(prev => {
@@ -1110,12 +1091,13 @@ export default function GiiAnteprimaPanel (p: {
     }).catch(() => {
       if (cancelled) return
       setAttachmentOptions([])
-      setHasBozzaDeterminazioneAttachment(false)
+      setPropostaContestazioneAttachment(null)
+      setBozzaDeterminazioneAttachment(null)
       setAvailability(prev => prev.checkedKey === checkedKey ? { ...prev, loadingAllegati: false, allegati: false } : prev)
       setDocOptions(prev => ({ ...prev, includeAllegatiTecnici: false, includeAllegatiAmministrativi: false }))
     })
     return () => { cancelled = true }
-  }, [p.ds, p.oid, hasNotaSpeseLocal, mapTargetSignature, printMapView, p.canSeeAmministrativi, p.layerUrlHint])
+  }, [p.ds, p.oid, hasNotaSpeseLocal, mapTargetSignature, printMapView, p.canSeeAmministrativi, p.layerUrlHint, p.refreshKey, externalDocumentRefreshRevision])
 
   const updateDocOption = React.useCallback((patch: Partial<DocumentPrintOptions>) => {
     setDocOptions(prev => ({ ...prev, ...patch }))
@@ -1176,18 +1158,19 @@ export default function GiiAnteprimaPanel (p: {
       .filter(id => Number.isFinite(id) && id > 0)
     if (anyAllegatiGroupOn && selectedAttachmentIds.length === 0) throw new Error('Selezionare almeno un allegato.')
 
-    const includeAmministrativi = !!p.canSeeAmministrativi && !!opts.includePropostaContestazione
-    const wantsFascicoloContent = includeRapporto || includeNotaSpese || includeMappa || anyAllegatiGroupOn || includeAmministrativi
-    const wantsDeterminazione = !!p.canSeeAmministrativi && !!opts.includeDeterminazione && !!p.extraDocumentBuilder
+    const wantsFascicoloContent = includeRapporto || includeNotaSpese || includeMappa || anyAllegatiGroupOn
+    const wantsProposta = !!p.canSeeAmministrativi && !!opts.includePropostaContestazione
+    const wantsDeterminazione = !!p.canSeeAmministrativi && !!opts.includeDeterminazione
+
+    if (wantsProposta && !propostaContestazioneAttachment) throw new Error('PDF della Proposta di contestazione non disponibile.')
+    if (wantsDeterminazione && !bozzaDeterminazioneAttachment) throw new Error('PDF della bozza di determinazione non disponibile.')
 
     const items: Array<{ blob: Blob; fileName: string }> = []
     if (wantsFascicoloContent) {
       items.push(await buildFascicolo({
         oid: Number(p.oid),
-        profile: p.profile || { username: '', fullName: '' },
         selection: {
           includeTecnici: true,
-          includeAmministrativi,
           includeMappa,
           includeRapporto,
           includeNotaSpese,
@@ -1206,15 +1189,28 @@ export default function GiiAnteprimaPanel (p: {
         fileNamePrefix: 'documenti'
       }))
     }
-    if (wantsDeterminazione) {
-      const extra = await p.extraDocumentBuilder!(opts)
-      if (extra) items.push(extra)
+
+    if (wantsProposta && propostaContestazioneAttachment) {
+      const layer = await resolveFeatureLayerForAttachments(p.ds, p.layerUrlHint)
+      if (!layer) throw new Error('FeatureLayer non disponibile per la Proposta di contestazione.')
+      const proposta = await fetchAttachmentBlob(layer, p.ds, Number(p.oid), propostaContestazioneAttachment, 0)
+      if (!proposta) throw new Error('PDF della Proposta di contestazione non disponibile.')
+      items.push(proposta)
     }
+
+    if (wantsDeterminazione && bozzaDeterminazioneAttachment) {
+      const layer = await resolveFeatureLayerForAttachments(p.ds, p.layerUrlHint)
+      if (!layer) throw new Error('FeatureLayer non disponibile per la bozza di determinazione.')
+      const determinazione = await fetchAttachmentBlob(layer, p.ds, Number(p.oid), bozzaDeterminazioneAttachment, 1)
+      if (!determinazione) throw new Error('PDF della bozza di determinazione non disponibile.')
+      items.push(determinazione)
+    }
+
     if (items.length === 0) throw new Error('Selezionare almeno un documento.')
     if (items.length === 1) return items[0]
     const safeCode = String(praticaCode || 'documenti').replace(/[^a-zA-Z0-9_-]/g, '_')
-    return { blob: await mergePdfBlobs(items), fileName: `documenti_${safeCode}.pdf` }
-  }, [previewOptions, attachmentOptions, notaSpeseOptions, hasNotaSpeseLocal, mapTarget, p.data, p.oid, p.notaSpeseConfig, printMapView, effectiveMapConfig, p.printServiceUrl, mapConfigSignature, p.canSeeAmministrativi, p.profile, p.extraDocumentBuilder, praticaCode])
+    return { blob: await mergeFascicoloPdfItems(items), fileName: `documenti_${safeCode}.pdf` }
+  }, [previewOptions, attachmentOptions, notaSpeseOptions, hasNotaSpeseLocal, mapTarget, p.data, p.oid, p.notaSpeseConfig, printMapView, effectiveMapConfig, p.printServiceUrl, p.canSeeAmministrativi, propostaContestazioneAttachment, bozzaDeterminazioneAttachment, p.ds, p.layerUrlHint, praticaCode])
 
   const previewCacheSignature = React.useMemo(() => {
     try {
@@ -1230,13 +1226,15 @@ export default function GiiAnteprimaPanel (p: {
         oid: p.oid || null,
         idFieldName: includeMappa ? (p.idFieldName || '') : '',
         printServiceUrl: includeMappa ? (p.printServiceUrl || '') : '',
-        attachmentOptions: includeAllegati ? attachmentOptions.map(att => ({ id: att.id, name: att.name, contentType: att.contentType })) : [],
+        attachmentOptions: includeAllegati ? attachmentOptions.map(att => giiAttachmentIdentityKey(att as any)) : [],
+        propostaContestazione: previewOptions.includePropostaContestazione ? giiAttachmentIdentityKey(propostaContestazioneAttachment as any) : '',
+        bozzaDeterminazione: previewOptions.includeDeterminazione ? giiAttachmentIdentityKey(bozzaDeterminazioneAttachment as any) : '',
         notaSpeseOptions: includeNotaSpese ? notaSpeseOptions : []
       })
     } catch {
       return `${Date.now()}`
     }
-  }, [previewOptions, dataSignature, nsSignature, mapTargetSignature, mapConfigSignature, p.oid, p.idFieldName, p.printServiceUrl, attachmentOptions, notaSpeseOptions])
+  }, [previewOptions, dataSignature, nsSignature, mapTargetSignature, mapConfigSignature, p.oid, p.idFieldName, p.printServiceUrl, attachmentOptions, propostaContestazioneAttachment, bozzaDeterminazioneAttachment, notaSpeseOptions])
 
   const regeneratePreview = React.useCallback(() => {
     if (!p.data || Object.keys(p.data).length === 0) {
@@ -1247,7 +1245,7 @@ export default function GiiAnteprimaPanel (p: {
     }
 
     const cacheKey = `${optionsMemoryKey}:${previewCacheSignature}`
-    const cached = forceNextPreviewRegenerateRef.current ? null : editingTiAnteprimaPdfMemory.get(cacheKey)
+    const cached = forceNextPreviewRegenerateRef.current ? null : giiAnteprimaPdfMemory.get(cacheKey)
     if (cached) {
       const url = makePdfUrl(cached.blob, cached.fileName)
       setPdfFileName(cached.fileName)
@@ -1271,7 +1269,7 @@ export default function GiiAnteprimaPanel (p: {
       try {
         const { blob, fileName } = await buildSelectedDocumentsPdf()
         if (cancelled) return
-        editingTiAnteprimaPdfMemory.set(cacheKey, { blob, fileName })
+        giiAnteprimaPdfMemory.set(cacheKey, { blob, fileName })
         const url = makePdfUrl(blob, fileName)
         setPdfFileName(fileName)
         setPdfUrl(prev => { revokePdfUrl(prev); return url })
@@ -1290,17 +1288,16 @@ export default function GiiAnteprimaPanel (p: {
 
   const applyDocumentOptionsAndRegenerate = React.useCallback(() => {
     const nextOptions = cloneDocumentPrintOptions(docOptions)
-    editingTiAnteprimaAppliedOptionsMemory.set(optionsMemoryKey, nextOptions)
     forceNextPreviewRegenerateRef.current = true
     setPreviewOptions(nextOptions)
     setPreviewRevision(v => v + 1)
-  }, [docOptions, optionsMemoryKey])
+  }, [docOptions])
 
   // Disponibilità reale (non solo il ruolo) dei due documenti amministrativi:
-  // - proposta di contestazione: solo se TI_AMM ha effettivamente attestato conformità
-  //   (esito_TI_AMM = 2), non semplicemente perché il ruolo può vederla;
+  // - proposta di contestazione: solo se esiste davvero il PDF allegato e TI_AMM ha
+  //   effettivamente attestato conformità (esito_TI_AMM = 2);
   // - determinazione dirigenziale: solo se esiste davvero un allegato di tipo "bozza
-  //   determinazione" caricato da TI_AMM, rilevato dalla stessa lista allegati già
+  //   determinazione" in formato PDF caricato da TI_AMM, rilevato dalla stessa lista allegati già
   //   interrogata dal pannello per il proprio uso — nessuna query aggiuntiva.
   // In aggiunta, per tutti i ruoli tranne TI_AMM (che deve poter controllare cosa sta per
   // trasmettere), entrambi i documenti sono disponibili solo dopo la trasmissione effettiva
@@ -1311,8 +1308,8 @@ export default function GiiAnteprimaPanel (p: {
   const isTiAmmRole = String(p.role || '').trim().toUpperCase() === 'TI_AMM'
   const determinazioneStatoRaw = String(pickAttrCI(p.data, ['determinazione_stato']) || '').trim().toUpperCase()
   const bozzaTrasmessaARiAmm = !!determinazioneStatoRaw && determinazioneStatoRaw !== 'BOZZA'
-  const propostaContestazioneAvailableComputed = Number(pickAttrCI(p.data, ['esito_TI_AMM'])) === 2 && (isTiAmmRole || bozzaTrasmessaARiAmm)
-  const determinazioneAvailableComputed = hasBozzaDeterminazioneAttachment && (isTiAmmRole || bozzaTrasmessaARiAmm)
+  const propostaContestazioneAvailableComputed = !!propostaContestazioneAttachment && Number(pickAttrCI(p.data, ['esito_TI_AMM'])) === 2 && (isTiAmmRole || bozzaTrasmessaARiAmm)
+  const determinazioneAvailableComputed = !!bozzaDeterminazioneAttachment && (isTiAmmRole || bozzaTrasmessaARiAmm)
 
   return (
     <div css={containerCss}>
@@ -1340,7 +1337,6 @@ export default function GiiAnteprimaPanel (p: {
         mapPanelAvailable={!!printMapView}
         documentUnavailableExtra={{ includeAllegatiTecnici: !!availability.loadingAllegati, includeAllegatiAmministrativi: !!availability.loadingAllegati }}
         showAdminDocuments={!!p.canSeeAmministrativi}
-        onClose={p.onClose}
         notaSpeseOptions={notaSpeseOptions}
         attachmentOptions={attachmentOptions}
         printableLayerTree={printableLayerTree}

@@ -7,6 +7,156 @@ import { createPortal } from 'react-dom'
 
 const { Fragment } = React
 
+
+type TransferActionIconName = 'import' | 'export'
+
+function TransferActionIcon (props: { name: TransferActionIconName, size?: number }): React.ReactElement {
+  const size = Number(props.size || 18)
+  if (props.name === 'import') {
+    return (
+      <svg width={size} height={size} viewBox='0 0 24 24' fill='none' stroke='currentColor' strokeWidth='2' strokeLinecap='round' strokeLinejoin='round' aria-hidden='true' focusable='false'>
+        <path d='M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4'/>
+        <path d='M17 8l-5-5-5 5'/>
+        <path d='M12 3v12'/>
+      </svg>
+    )
+  }
+  return (
+    <svg width={size} height={size} viewBox='0 0 24 24' fill='none' stroke='currentColor' strokeWidth='2' strokeLinecap='round' strokeLinejoin='round' aria-hidden='true' focusable='false'>
+      <path d='M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4'/>
+      <path d='M7 10l5 5 5-5'/>
+      <path d='M12 15V3'/>
+    </svg>
+  )
+}
+
+function transferActionButtonStyle (disabled: boolean): React.CSSProperties {
+  return {
+    width: 32,
+    height: 32,
+    padding: 0,
+    boxSizing: 'border-box',
+    borderRadius: 7,
+    border: `1.5px solid ${disabled ? '#e5e7eb' : '#0d3b66'}`,
+    background: disabled ? '#e5e7eb' : '#ffffff',
+    color: disabled ? '#9ca3af' : '#0d3b66',
+    cursor: disabled ? 'not-allowed' : 'pointer',
+    display: 'inline-flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    lineHeight: 1,
+    flex: '0 0 auto',
+    opacity: disabled ? 0.6 : 1
+  }
+}
+
+
+
+
+
+type NewRecordButtonProps = {
+  onClick: (event: any) => void
+  disabled?: boolean
+  title: string
+}
+
+function NewRecordButton (props: NewRecordButtonProps) {
+  const disabled = !!props.disabled
+  return (
+    <button
+      type='button'
+      disabled={disabled}
+      onClick={props.onClick}
+      title={props.title}
+      aria-label={props.title}
+      style={{
+        width: 32,
+        height: 32,
+        minHeight: 32,
+        boxSizing: 'border-box',
+        padding: 0,
+        borderRadius: 7,
+        border: disabled ? '1.5px solid #e5e7eb' : '1.5px solid rgba(37,99,235,0.72)',
+        background: disabled ? '#e5e7eb' : '#ffffff',
+        color: disabled ? '#9ca3af' : '#2563eb',
+        cursor: disabled ? 'not-allowed' : 'pointer',
+        display: 'inline-flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        lineHeight: 1,
+        whiteSpace: 'nowrap',
+        flex: '0 0 auto',
+        opacity: disabled ? 0.6 : 1
+      }}
+    >
+      <svg width={19} height={19} viewBox='0 0 24 24' fill='none' stroke='currentColor' strokeWidth='2' strokeLinecap='round' strokeLinejoin='round' aria-hidden='true' focusable='false'>
+        <path d='M21 13.1v5.9c0 1.1-.9 2-2 2H5c-1.1 0-2-.9-2-2v-4'/>
+        <path d='M3 15V5c0-1.1.9-2 2-2h5.9'/>
+        <path d='M16.5 3v9'/>
+        <path d='M12 7.5h9'/>
+      </svg>
+    </button>
+  )
+}
+
+type RecordActionButtonProps = {
+  onClick: (event: any) => void
+  disabled?: boolean
+  title?: string
+  ariaLabel?: string
+  marginRight?: number
+}
+
+function recordActionStyle (color: string, disabled: boolean, marginRight = 0): React.CSSProperties {
+  return {
+    border: 'none',
+    background: 'transparent',
+    color,
+    cursor: disabled ? 'not-allowed' : 'pointer',
+    width: 30,
+    height: 30,
+    padding: 0,
+    boxSizing: 'border-box',
+    marginRight,
+    display: 'inline-flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    lineHeight: 1,
+    opacity: disabled ? 0.45 : 1
+  }
+}
+
+function RecordEditButton (props: RecordActionButtonProps) {
+  const disabled = !!props.disabled
+  const title = props.title || 'Modifica'
+  const ariaLabel = props.ariaLabel || title
+  return (
+    <button type='button' disabled={disabled} onClick={props.onClick} title={title} aria-label={ariaLabel} style={recordActionStyle('#1F4E79', disabled, props.marginRight ?? 4)}>
+      <svg width={18} height={18} viewBox='0 0 24 24' fill='none' stroke='currentColor' strokeWidth='2' strokeLinecap='round' strokeLinejoin='round' aria-hidden='true' focusable='false'>
+        <path d='M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7'/>
+        <path d='M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z'/>
+      </svg>
+    </button>
+  )
+}
+
+function RecordDeleteButton (props: RecordActionButtonProps) {
+  const disabled = !!props.disabled
+  const title = props.title || 'Elimina'
+  const ariaLabel = props.ariaLabel || title
+  return (
+    <button type='button' disabled={disabled} onClick={props.onClick} title={title} aria-label={ariaLabel} style={recordActionStyle('#b42318', disabled, props.marginRight ?? 0)}>
+      <svg width={18} height={18} viewBox='0 0 24 24' fill='none' stroke='currentColor' strokeWidth='2' strokeLinecap='round' strokeLinejoin='round' aria-hidden='true' focusable='false'>
+        <path d='M3 6h18'/>
+        <path d='M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2'/>
+        <path d='M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6'/>
+        <path d='M10 11v6'/>
+        <path d='M14 11v6'/>
+      </svg>
+    </button>
+  )
+}
+
 const DEFAULT_SERVICE_URL =
   'https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_utenti/FeatureServer/0'
 
@@ -559,8 +709,12 @@ async function getFL(serviceUrl: string): Promise<any> {
 async function fetchUtenti(serviceUrl: string): Promise<UtenteRecord[]> {
   const fl = await getFL(serviceUrl)
   const res = await fl.queryFeatures({
-    where: '1=1',
-    outFields: ['OBJECTID','username','full_name','ruolo','area','settore','ufficio','ruolo_cod','area_cod','settore_cod','gruppo','gruppo_precedente'],
+    // La stessa tabella contiene anche i contatti della Rubrica.
+    // Gestione Utenti deve mostrare esclusivamente i profili applicativi: i record
+    // storici restano con tipo_record NULL; l'eventuale codice UTENTE è accettato
+    // per compatibilità, mentre RUBRICA viene sempre escluso.
+    where: `(tipo_record IS NULL OR tipo_record = 'UTENTE')`,
+    outFields: ['OBJECTID','username','full_name','ruolo','area','settore','ufficio','ruolo_cod','area_cod','settore_cod','gruppo','gruppo_precedente','tipo_record'],
     returnGeometry: false,
   })
   return (res.features ?? []).map((f: any) => {
@@ -596,6 +750,10 @@ async function saveUtente(form: UtenteForm, serviceUrl: string): Promise<void> {
     settore_cod:       codeOf(SETTORI, form.settore),
     gruppo:            form.gruppo || null,
     gruppo_precedente: form.gruppo_precedente || null,
+    // Gli utenti del gestionale restano distinti dalla Rubrica senza valorizzare
+    // il nuovo campo: è il comportamento richiesto anche per i nuovi profili.
+    tipo_record:       null,
+    uso_email:         null,
   }
   if (form.objectid != null) {
     attrs.OBJECTID = form.objectid
@@ -726,6 +884,8 @@ const styles = `
   .ggu-table th { background: var(--ggu-table-header-background, #1F4E79); color: var(--ggu-table-header-text, #fff); padding: 7px 8px; text-align: left; position: sticky; top: 0; z-index: 1; white-space: nowrap; }
   .ggu-table th.ggu-sortable { cursor: pointer; user-select: none; }
   .ggu-table th.ggu-sortable:hover { filter: brightness(0.9); }
+  .ggu-actions-col { width: 1%; white-space: nowrap; text-align: right !important; }
+  .ggu-actions-head { text-align: left !important; }
   .ggu-sort-ind { display: inline-flex; align-items: center; gap: 2px; margin-left: 6px; font-size: 10px; opacity: 0.95; }
   .ggu-sort-order { background: rgba(255,255,255,0.18); border-radius: 999px; padding: 0 4px; font-size: 9px; }
   .ggu-table td { padding: 6px 8px; border-bottom: 1px solid #e0eaf4; vertical-align: middle; }
@@ -760,8 +920,380 @@ const styles = `
   .ggu-empty { text-align: center; color: #888; padding: 20px; font-style: italic; }
 `
 
+
+// ── Modalità Rubrica ────────────────────────────────────────────────────────
+type RubricaUsoOption = { code: string; label: string }
+type RubricaRecord = { objectid: number; full_name: string; email: string; uso_email: string }
+type RubricaForm = { objectid?: number; full_name: string; email: string; uso_email: string }
+
+const RUBRICA_TIPO = 'RUBRICA'
+const RUBRICA_DETERMINA_A = 'DETERMINA_A'
+const RUBRICA_DETERMINA_CC = 'DETERMINA_CC'
+
+function rubricaClean(value: any): string { return String(value ?? '').trim() }
+function rubricaEmailValida(value: string): boolean { return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(rubricaClean(value)) }
+function rubricaEmptyForm(): RubricaForm { return { full_name: '', email: '', uso_email: '' } }
+
+function rubricaWorkflowRole(): string {
+  try {
+    const c: any = (window as any).__giiUserRole || {}
+    const directRole = rubricaClean(c.profiloCod ?? c.profilo_cod ?? c.ruoloCod ?? c.ruolo_cod ?? c.ruoloLabel).toUpperCase()
+    const numericRole = ({ 1:'TR', 2:'TI', 3:'RZ', 4:'RI', 5:'DT', 6:'DA', 7:'ADMIN' } as any)[Number(c.ruolo)] || ''
+    let role = directRole || numericRole
+    const directArea = rubricaClean(c.areaCod ?? c.area_cod ?? c.areaLabel).toUpperCase()
+    const numericArea = ({ 1:'AMM', 2:'AGR', 3:'TEC' } as any)[Number(c.area)] || ''
+    const area = directArea || numericArea
+    if (role === 'RI' && area === 'AMM') role = 'RI_AMM'
+    if (role === 'TI' && area === 'AMM') role = 'TI_AMM'
+    return role
+  } catch { return '' }
+}
+
+function rubricaUsoOptions(fl: any): RubricaUsoOption[] {
+  const field = (fl?.fields || []).find((f: any) => rubricaClean(f?.name).toLowerCase() === 'uso_email')
+  const coded = field?.domain?.codedValues
+  if (Array.isArray(coded) && coded.length) {
+    return coded
+      .map((x: any) => ({ code: rubricaClean(x.code), label: rubricaClean(x.name) || rubricaClean(x.code) }))
+      .filter((x: RubricaUsoOption) => !!x.code)
+  }
+  return [
+    { code: RUBRICA_DETERMINA_A, label: 'Destinatario determina' },
+    { code: RUBRICA_DETERMINA_CC, label: 'Copia conoscenza determina' }
+  ]
+}
+
+async function fetchRubrica(serviceUrl: string): Promise<{ records: RubricaRecord[]; usages: RubricaUsoOption[] }> {
+  const fl = await getFL(serviceUrl)
+  const res = await fl.queryFeatures({
+    where: `tipo_record = '${RUBRICA_TIPO}'`,
+    outFields: ['OBJECTID', 'full_name', 'email', 'uso_email'],
+    returnGeometry: false,
+    orderByFields: ['uso_email ASC', 'full_name ASC']
+  })
+  const records = (res?.features || []).map((f: any) => {
+    const a = f?.attributes || {}
+    return {
+      objectid: Number(a.OBJECTID ?? a.objectid),
+      full_name: rubricaClean(a.full_name),
+      email: rubricaClean(a.email),
+      uso_email: rubricaClean(a.uso_email)
+    }
+  }) as RubricaRecord[]
+  return { records, usages: rubricaUsoOptions(fl) }
+}
+
+async function saveRubricaRecord(serviceUrl: string, form: RubricaForm): Promise<void> {
+  const fl = await getFL(serviceUrl)
+  const attrs: any = {
+    full_name: rubricaClean(form.full_name),
+    email: rubricaClean(form.email).toLowerCase(),
+    tipo_record: RUBRICA_TIPO,
+    uso_email: rubricaClean(form.uso_email),
+    username: null,
+    ruolo: null,
+    area: null,
+    settore: null,
+    ufficio: null,
+    gruppo: null,
+    gruppo_precedente: null,
+    ruolo_cod: null,
+    area_cod: null,
+    settore_cod: null
+  }
+  if (form.objectid != null) attrs.OBJECTID = form.objectid
+  const res = form.objectid != null
+    ? await fl.applyEdits({ updateFeatures: [{ attributes: attrs }] })
+    : await fl.applyEdits({ addFeatures: [{ attributes: attrs }] })
+  const err = form.objectid != null ? res?.updateFeatureResults?.[0]?.error : res?.addFeatureResults?.[0]?.error
+  if (err) throw new Error(err.description || err.message || 'Salvataggio non completato')
+}
+
+async function deleteRubricaRecord(serviceUrl: string, objectid: number): Promise<void> {
+  const fl = await getFL(serviceUrl)
+  const Graphic = await loadEsriModule<any>('esri/Graphic')
+  const res = await fl.applyEdits({ deleteFeatures: [new Graphic({ attributes: { OBJECTID: objectid } })] })
+  const err = res?.deleteFeatureResults?.[0]?.error
+  if (err) throw new Error(err.description || err.message || 'Eliminazione non completata')
+}
+
+function RubricaWidget(props: AllWidgetProps<IMConfig>) {
+  const cfg: any = props.config || {}
+  const serviceUrl = rubricaClean(cfg.serviceUrl || DEFAULT_SERVICE_URL) || DEFAULT_SERVICE_URL
+  const title = rubricaClean(cfg.title || 'Rubrica') || 'Rubrica'
+  const titleColor = String(cfg.titleColor || '#93c5fd')
+  const titleFontSize = Number(cfg.titleFontSize || 15)
+  const fieldLabelColor = String(cfg.fieldLabelColor || '#1F4E79')
+  const fieldLabelFontSize = Number(cfg.fieldLabelFontSize || 11)
+  const detailCardBackgroundColor = String(cfg.detailCardBackgroundColor || '#f5f9ff')
+  const recordsCardBackgroundColor = String(cfg.recordsCardBackgroundColor || '#f5f9ff')
+  const tableHeaderBackgroundColor = String(cfg.tableHeaderBackgroundColor || '#1F4E79')
+  const tableHeaderTextColor = String(cfg.tableHeaderTextColor || '#ffffff')
+  const tableFontSize = Number(cfg.tableFontSize || 12)
+
+  const [records, setRecords] = useState<RubricaRecord[]>([])
+  const [usages, setUsages] = useState<RubricaUsoOption[]>([])
+  const [form, setForm] = useState<RubricaForm>(rubricaEmptyForm())
+  const [editing, setEditing] = useState(false)
+  const [loading, setLoading] = useState(false)
+  const [saving, setSaving] = useState(false)
+  const [msg, setMsg] = useState<{ text: string; ok: boolean } | null>(null)
+  const [errorPopup, setErrorPopup] = useState<string | null>(null)
+  const [deleteItem, setDeleteItem] = useState<RubricaRecord | null>(null)
+  const [selectedObjectId, setSelectedObjectId] = useState<number | null>(null)
+  const popupCloseRef = useRef<HTMLButtonElement | null>(null)
+  const confirmCancelRef = useRef<HTMLButtonElement | null>(null)
+  const role = rubricaWorkflowRole()
+  const allowed = !role || role === 'RI_AMM' || role === 'ADMIN'
+
+  const showMsg = (text: string, ok: boolean) => {
+    if (!ok) {
+      setMsg(null)
+      setDeleteItem(null)
+      setErrorPopup(text.replace(/^Errore:\s*/i, ''))
+      return
+    }
+    setErrorPopup(null)
+    setDeleteItem(null)
+    setMsg({ text, ok })
+    window.setTimeout(() => setMsg(null), 4000)
+  }
+
+  const loadRubrica = React.useCallback(async () => {
+    setLoading(true)
+    try {
+      const data = await fetchRubrica(serviceUrl)
+      setRecords(data.records)
+      setUsages(data.usages)
+      setSelectedObjectId(sel => data.records.some(r => r.objectid === sel) ? sel : null)
+    } catch (e: any) { showMsg(`Errore caricamento: ${e?.message || e}`, false) }
+    finally { setLoading(false) }
+  }, [serviceUrl])
+
+  useEffect(() => { if (allowed) void loadRubrica() }, [allowed, loadRubrica])
+
+  useEffect(() => {
+    if (!errorPopup && !deleteItem) return
+    const previousActive = document.activeElement as HTMLElement | null
+    const previousOverflow = document.body.style.overflow
+    document.body.style.overflow = 'hidden'
+    window.setTimeout(() => {
+      if (deleteItem) confirmCancelRef.current?.focus()
+      else popupCloseRef.current?.focus()
+    }, 0)
+    const blockEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        event.preventDefault()
+        event.stopPropagation()
+      }
+    }
+    document.addEventListener('keydown', blockEscape, true)
+    return () => {
+      document.removeEventListener('keydown', blockEscape, true)
+      document.body.style.overflow = previousOverflow
+      previousActive?.focus?.()
+    }
+  }, [errorPopup, deleteItem])
+
+  const handlePopupKeyDown = (event: any) => {
+    if (event.key === 'Escape') {
+      event.preventDefault()
+      event.stopPropagation()
+      return
+    }
+    if (event.key === 'Tab') {
+      event.preventDefault()
+      if (deleteItem) confirmCancelRef.current?.focus()
+      else popupCloseRef.current?.focus()
+    }
+  }
+
+  const usageLabel = (code: string) => usages.find(x => x.code === code)?.label || code || '—'
+  const onNew = () => {
+    setSelectedObjectId(null)
+    setForm({ ...rubricaEmptyForm(), uso_email: usages[0]?.code || RUBRICA_DETERMINA_A })
+    setMsg(null)
+    setEditing(true)
+  }
+  const onEdit = (r: RubricaRecord) => {
+    setSelectedObjectId(r.objectid)
+    setForm({ objectid:r.objectid, full_name:r.full_name, email:r.email, uso_email:r.uso_email })
+    setMsg(null)
+    setEditing(true)
+  }
+  const onCancel = () => { setEditing(false); setForm(rubricaEmptyForm()) }
+
+  const onSaveRubrica = async () => {
+    const name = rubricaClean(form.full_name)
+    const email = rubricaClean(form.email).toLowerCase()
+    const usage = rubricaClean(form.uso_email)
+    if (!name) { showMsg('Nominativo obbligatorio.', false); return }
+    if (!rubricaEmailValida(email)) { showMsg('Inserire un indirizzo e-mail valido.', false); return }
+    if (!usage) { showMsg('Selezionare l’utilizzo dell’indirizzo e-mail.', false); return }
+    if (usage === RUBRICA_DETERMINA_A) {
+      const otherMain = records.find(r => r.uso_email === RUBRICA_DETERMINA_A && r.objectid !== form.objectid)
+      if (otherMain) { showMsg(`Esiste già il destinatario principale “${otherMain.full_name || otherMain.email}”.`, false); return }
+    }
+    setSaving(true)
+    try {
+      await saveRubricaRecord(serviceUrl, { ...form, full_name:name, email, uso_email:usage })
+      setEditing(false)
+      setForm(rubricaEmptyForm())
+      await loadRubrica()
+      showMsg(form.objectid != null ? 'Contatto aggiornato' : 'Contatto aggiunto', true)
+    } catch (e: any) { showMsg(`Errore: ${e?.message || e}`, false) }
+    finally { setSaving(false) }
+  }
+
+  const confirmDeleteRubrica = async () => {
+    if (!deleteItem) return
+    const oid = deleteItem.objectid
+    setDeleteItem(null)
+    setSaving(true)
+    try {
+      await deleteRubricaRecord(serviceUrl, oid)
+      setSelectedObjectId(sel => sel === oid ? null : sel)
+      await loadRubrica()
+      showMsg('Contatto eliminato', true)
+    } catch (e: any) { showMsg(`Errore: ${e?.message || e}`, false) }
+    finally { setSaving(false) }
+  }
+
+  const errorPopupPortal = errorPopup && typeof document !== 'undefined'
+    ? createPortal(
+      <div className="ggu-modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="ggu-rubrica-error-title"
+        onClick={(event) => { event.preventDefault(); event.stopPropagation() }}
+        onMouseDown={(event) => { event.preventDefault(); event.stopPropagation() }}
+        onWheel={(event) => { event.preventDefault(); event.stopPropagation() }}
+        onTouchMove={(event) => { event.preventDefault(); event.stopPropagation() }}
+        onKeyDown={handlePopupKeyDown} tabIndex={-1}>
+        <div className="ggu-modal" onClick={(event) => event.stopPropagation()} onMouseDown={(event) => event.stopPropagation()}>
+          <div className="ggu-modal-head" id="ggu-rubrica-error-title">Operazione non completata</div>
+          <div className="ggu-modal-body">{errorPopup}</div>
+          <div className="ggu-modal-actions">
+            <button ref={popupCloseRef} className="ggu-modal-close" onClick={() => setErrorPopup(null)}>Ho capito</button>
+          </div>
+        </div>
+      </div>, document.body
+    ) : null
+
+  const deleteConfirmPortal = deleteItem && typeof document !== 'undefined'
+    ? createPortal(
+      <div className="ggu-modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="ggu-rubrica-delete-title"
+        onClick={(event) => { event.preventDefault(); event.stopPropagation() }}
+        onMouseDown={(event) => { event.preventDefault(); event.stopPropagation() }}
+        onWheel={(event) => { event.preventDefault(); event.stopPropagation() }}
+        onTouchMove={(event) => { event.preventDefault(); event.stopPropagation() }}
+        onKeyDown={handlePopupKeyDown} tabIndex={-1}>
+        <div className="ggu-modal" onClick={(event) => event.stopPropagation()} onMouseDown={(event) => event.stopPropagation()}>
+          <div className="ggu-modal-head" id="ggu-rubrica-delete-title">Conferma eliminazione</div>
+          <div className="ggu-modal-body">Eliminare il contatto “{deleteItem.full_name || deleteItem.email}” dalla Rubrica?</div>
+          <div className="ggu-modal-actions">
+            <button ref={confirmCancelRef} className="ggu-modal-cancel" onClick={() => setDeleteItem(null)}>Annulla</button>
+            <button className="ggu-modal-danger" onClick={confirmDeleteRubrica}>Elimina</button>
+          </div>
+        </div>
+      </div>, document.body
+    ) : null
+
+  return (
+    <Fragment>
+      <style>{styles}</style>
+      {errorPopupPortal}
+      {deleteConfirmPortal}
+      <div className="ggu" style={{
+        '--ggu-title-color': titleColor,
+        '--ggu-title-font-size': `${titleFontSize}px`,
+        '--ggu-field-label-color': fieldLabelColor,
+        '--ggu-field-label-font-size': `${fieldLabelFontSize}px`,
+        '--ggu-detail-card-background': detailCardBackgroundColor,
+        '--ggu-records-card-background': recordsCardBackgroundColor,
+        '--ggu-table-header-background': tableHeaderBackgroundColor,
+        '--ggu-table-header-text': tableHeaderTextColor,
+        '--ggu-table-font-size': `${tableFontSize}px`
+      } as React.CSSProperties}>
+        <div className="ggu-title">{title}</div>
+
+        {!allowed ? (
+          <div className="ggu-msg ggu-msg-err">Il profilo corrente non è abilitato alla gestione della Rubrica.</div>
+        ) : (
+          <Fragment>
+            {msg && <div className={`ggu-msg ${msg.ok ? 'ggu-msg-ok' : 'ggu-msg-err'}`}>{msg.text}</div>}
+
+            {!editing && (
+              <div className="ggu-toolbar">
+                <NewRecordButton onClick={onNew} disabled={loading || saving} title='Nuovo contatto' />
+              </div>
+            )}
+
+            {editing && (
+              <div className="ggu-form">
+                <div className="ggu-field">
+                  <div className="ggu-label">Nominativo *</div>
+                  <input className="ggu-input" value={form.full_name}
+                    onChange={e => setForm(f => ({ ...f, full_name:e.target.value }))} />
+                </div>
+                <div className="ggu-field">
+                  <div className="ggu-label">E-mail *</div>
+                  <input className="ggu-input" type="email" value={form.email}
+                    onChange={e => setForm(f => ({ ...f, email:e.target.value }))} />
+                </div>
+                <div className="ggu-field">
+                  <div className="ggu-label">Utilizzo *</div>
+                  <select className="ggu-select" value={form.uso_email}
+                    onChange={e => setForm(f => ({ ...f, uso_email:e.target.value }))}>
+                    <option value="">— seleziona —</option>
+                    {usages.map(u => <option key={u.code} value={u.code}>{u.label}</option>)}
+                  </select>
+                </div>
+                <div className="ggu-btns">
+                  <button className="ggu-btn ggu-btn-save" onClick={onSaveRubrica} disabled={saving}>
+                    {saving ? 'Salvataggio...' : form.objectid ? 'Aggiorna' : 'Salva'}
+                  </button>
+                  <button className="ggu-btn ggu-btn-cancel" onClick={onCancel} disabled={saving}>Annulla</button>
+                </div>
+              </div>
+            )}
+
+            <div className="ggu-table-wrap">
+              {loading
+                ? <div className="ggu-empty">Caricamento...</div>
+                : (
+                  <table className="ggu-table">
+                    <thead>
+                      <tr><th>Nominativo</th><th>E-mail</th><th>Utilizzo</th><th className="ggu-actions-col ggu-actions-head">Azioni</th></tr>
+                    </thead>
+                    <tbody>
+                      {records.length === 0 && (
+                        <tr><td colSpan={4} className="ggu-empty">Nessun contatto presente</td></tr>
+                      )}
+                      {records.map(r => (
+                        <tr key={r.objectid}
+                          className={selectedObjectId === r.objectid || form.objectid === r.objectid ? 'ggu-sel' : ''}
+                          onClick={() => setSelectedObjectId(r.objectid)}
+                          onDoubleClick={() => onEdit(r)}>
+                          <td>{r.full_name || '—'}</td>
+                          <td>{r.email || '—'}</td>
+                          <td>{usageLabel(r.uso_email)}</td>
+                          <td className="ggu-actions-col">
+                            <RecordEditButton onClick={(e) => { e.stopPropagation(); onEdit(r) }} title='Modifica contatto' ariaLabel='Modifica contatto' />
+                            <RecordDeleteButton onClick={(e) => { e.stopPropagation(); setDeleteItem(r) }} title='Elimina contatto' ariaLabel='Elimina contatto' />
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                )}
+            </div>
+          </Fragment>
+        )}
+      </div>
+    </Fragment>
+  )
+}
+
 // ── Widget ─────────────────────────────────────────────────────────────────
-export default function Widget(props: AllWidgetProps<IMConfig>) {
+function UtentiWidget(props: AllWidgetProps<IMConfig>) {
   const cfg: any = props.config || {}
   const serviceUrl = String(cfg.serviceUrl || DEFAULT_SERVICE_URL).trim() || DEFAULT_SERVICE_URL
   const title = String(cfg.title || 'GII – Gestione Utenti')
@@ -1246,9 +1778,8 @@ export default function Widget(props: AllWidgetProps<IMConfig>) {
 
         {!editing && (
           <div className="ggu-toolbar">
-            <button className="ggu-btn ggu-btn-new" onClick={onNew}>+ Nuovo utente</button>
-            <button className="ggu-btn ggu-btn-export" onClick={() => exportCSV(sortedUtenti, domainLabels)}
-              disabled={utenti.length === 0}>⬇ Esporta utenti.csv</button>
+            <NewRecordButton onClick={onNew} title='Nuovo utente' />
+            <button type='button' onClick={() => exportCSV(sortedUtenti, domainLabels)} disabled={utenti.length === 0} title='Esporta utenti.csv' aria-label='Esporta utenti.csv' style={transferActionButtonStyle(utenti.length === 0)}><TransferActionIcon name='export' /></button>
             <button className="ggu-btn ggu-btn-reset-sort" onClick={resetSort}
               disabled={sortRules.length === 0} title="Reset ordinamento" aria-label="Reset ordinamento">↺</button>
           </div>
@@ -1341,7 +1872,7 @@ export default function Widget(props: AllWidgetProps<IMConfig>) {
                         {col.label}{sortBadge(col.field)}
                       </th>
                     ))}
-                    <th></th>
+                    <th className="ggu-actions-col ggu-actions-head">Azioni</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -1360,9 +1891,9 @@ export default function Widget(props: AllWidgetProps<IMConfig>) {
                       <td>{dash(labelSettore(u.settore))}</td>
                       <td>{dash(labelUfficio(u.ufficio))}</td>
                       <td><span className="ggu-gruppo">{dash(u.gruppo)}</span></td>
-                      <td>
-                        <button className="ggu-act ggu-act-edit" onClick={(e) => { e.stopPropagation(); onEdit(u) }}>✎</button>
-                        <button className="ggu-act ggu-act-del" onClick={(e) => { e.stopPropagation(); onDelete(u) }}>✕</button>
+                      <td className="ggu-actions-col">
+                        <RecordEditButton onClick={(e) => { e.stopPropagation(); onEdit(u) }} title='Modifica utente' ariaLabel='Modifica utente' />
+                        <RecordDeleteButton onClick={(e) => { e.stopPropagation(); onDelete(u) }} title='Elimina utente' ariaLabel='Elimina utente' />
                       </td>
                     </tr>
                   ))}
@@ -1374,4 +1905,10 @@ export default function Widget(props: AllWidgetProps<IMConfig>) {
       </div>
     </Fragment>
   )
+}
+
+
+export default function Widget(props: AllWidgetProps<IMConfig>) {
+  const mode = String((props.config as any)?.mode || 'utenti').trim().toLowerCase()
+  return mode === 'rubrica' ? <RubricaWidget {...props} /> : <UtentiWidget {...props} />
 }

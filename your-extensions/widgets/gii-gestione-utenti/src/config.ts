@@ -1,6 +1,8 @@
 import { type ImmutableObject } from 'jimu-core'
 
 export interface Config {
+  /** Modalità del widget: gestione utenti standard oppure Rubrica di servizio. */
+  mode?: 'utenti' | 'rubrica'
   /** URL del layer/tabella GII_utenti. */
   serviceUrl?: string
   /** Segreto OAuth dell'applicazione AGOL usato come fallback quando la sessione ExB non espone un token. */

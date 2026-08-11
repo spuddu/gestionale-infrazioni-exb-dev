@@ -2,8 +2,68 @@
 /** @jsxFrag React.Fragment */
 import { React, jsx, type AllWidgetProps } from 'jimu-core'
 import type { IMConfig } from '../config'
+import GiiActiveToggle from '../../../_shared/gii-ui/active-toggle'
 
 const { Fragment } = React
+
+
+type RecordActionButtonProps = {
+  onClick: (event: any) => void
+  disabled?: boolean
+  title?: string
+  ariaLabel?: string
+  marginRight?: number
+}
+
+function recordActionStyle (color: string, disabled: boolean, marginRight = 0): React.CSSProperties {
+  return {
+    border: 'none',
+    background: 'transparent',
+    color,
+    cursor: disabled ? 'not-allowed' : 'pointer',
+    width: 28,
+    height: 28,
+    padding: 0,
+    boxSizing: 'border-box',
+    marginRight,
+    display: 'inline-flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    lineHeight: 1,
+    opacity: disabled ? 0.45 : 1
+  }
+}
+
+function RecordEditButton (props: RecordActionButtonProps) {
+  const disabled = !!props.disabled
+  const title = props.title || 'Modifica'
+  const ariaLabel = props.ariaLabel || title
+  return (
+    <button type='button' disabled={disabled} onClick={props.onClick} title={title} aria-label={ariaLabel} style={recordActionStyle('#1F4E79', disabled, props.marginRight ?? 4)}>
+      <svg width={18} height={18} viewBox='0 0 24 24' fill='none' stroke='currentColor' strokeWidth='2' strokeLinecap='round' strokeLinejoin='round' aria-hidden='true' focusable='false'>
+        <path d='M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7'/>
+        <path d='M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z'/>
+      </svg>
+    </button>
+  )
+}
+
+function RecordDeleteButton (props: RecordActionButtonProps) {
+  const disabled = !!props.disabled
+  const title = props.title || 'Elimina'
+  const ariaLabel = props.ariaLabel || title
+  return (
+    <button type='button' disabled={disabled} onClick={props.onClick} title={title} aria-label={ariaLabel} style={recordActionStyle('#b42318', disabled, props.marginRight ?? 0)}>
+      <svg width={18} height={18} viewBox='0 0 24 24' fill='none' stroke='currentColor' strokeWidth='2' strokeLinecap='round' strokeLinejoin='round' aria-hidden='true' focusable='false'>
+        <path d='M3 6h18'/>
+        <path d='M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2'/>
+        <path d='M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6'/>
+        <path d='M10 11v6'/>
+        <path d='M14 11v6'/>
+      </svg>
+    </button>
+  )
+}
 
 function loadEsriModule<T = any>(path: string): Promise<T> {
   return new Promise((resolve, reject) => {
@@ -344,10 +404,11 @@ export default function Widget(props: AllWidgetProps<IMConfig>) {
               </div>
               <div className='giw-field'>
                 <div className='giw-label'>Attivo</div>
-                <select className='giw-select' value={String(form.attivo ?? '1')} onChange={(e) => setForm((f: any) => ({ ...f, attivo: e.target.value }))}>
-                  <option value='1'>Sì</option>
-                  <option value='0'>No</option>
-                </select>
+                <GiiActiveToggle
+                  checked={String(form.attivo ?? '1') === '1'}
+                  onChange={(next) => setForm((f: any) => ({ ...f, attivo: next ? '1' : '0' }))}
+                  ariaLabel='Stato della voce interna'
+                />
               </div>
               <div className='giw-field' style={{ gridColumn: '1 / -1' }}>
                 <div className='giw-label'>Note</div>
@@ -390,8 +451,8 @@ export default function Widget(props: AllWidgetProps<IMConfig>) {
                   <td>{normalizeCategory(r.categoria_default)}</td>
                   <td>{num(r.attivo) === 1 ? 'Sì' : 'No'}</td>
                   <td style={{ whiteSpace: 'nowrap' }}>
-                    <button className='giw-btn giw-save' onClick={() => onEdit(r)}>Modifica</button>
-                    <button className='giw-btn giw-danger' onClick={() => void onDelete(r)}>Elimina</button>
+                    <RecordEditButton onClick={() => onEdit(r)} title='Modifica voce interna' ariaLabel='Modifica voce interna' />
+                    <RecordDeleteButton onClick={() => void onDelete(r)} title='Elimina voce interna' ariaLabel='Elimina voce interna' />
                   </td>
                 </tr>
               ))}
