@@ -494,7 +494,7 @@ const PAGOPA_FIELDS = ['pagopa_iuv', 'pagopa_codice_avviso']
 const BONIFICO_FIELDS = ['bonifico_conto_cod', 'bonifico_iban_snapshot', 'bonifico_intestatario_snapshot', 'bonifico_causale', 'bonifico_cro_trn', 'bonifico_data_accredito']
 const PROTOCOLLO_ATTO_FIELDS = ['protocollo_atto_accertamento_numero', 'protocollo_atto_accertamento_data']
 const PROTOCOLLO_FASCICOLO_FIELDS = ['protocollo_fascicolo_numero', 'protocollo_fascicolo_data']
-const BOZZA_DETERMINAZIONE_STARTED_FIELDS = ['determinazione_stato', 'dt_bozza_determinazione', 'bozza_determinazione_da']
+const EMAIL_DIRETTORE_PREPARATA_STATE = 'EMAIL_DIRETTORE_PREPARATA'
 // Il DOCX generato dal gestionale è una copia di lavoro locale e non viene più
 // caricato nel fascicolo. Il riconoscimento di bozza/proposta è centralizzato nello
 // shared attachment viewer, così editor e viewer usano la stessa regola.
@@ -2278,6 +2278,15 @@ const ADMIN_STYLE_DEFAULTS: Record<string, any> = {
   formCardHeaderPaddingX: 10,
   formCardHeaderPaddingY: 7,
   formCardBodyPadding: 10,
+  actionBarBg: '#ffffff',
+  actionBarBorderColor: '#e5e7eb',
+  actionBarBorderWidth: 1,
+  actionBarBorderRadius: 10,
+  actionBarPaddingX: 12,
+  actionBarPaddingY: 10,
+  actionBarTitleColor: '#111827',
+  actionBarTitleFontSize: 14,
+  actionBarButtonGap: 10,
   amountFontSize: 16,
   titleFontSize: 18,
   subtitleFontSize: 13,
@@ -2394,10 +2403,10 @@ function BozzaActionIcon (props: { name: BozzaIconName, size?: number }): React.
   if (props.name === 'protocol') {
     return (
       <svg width={size} height={size} viewBox='0 0 24 24' fill='none' stroke='currentColor' strokeWidth='2' strokeLinecap='round' strokeLinejoin='round' aria-hidden='true' focusable='false'>
-        <path d='M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z'/>
-        <path d='M14 2v6h6'/>
-        <path d='M8 15h8'/>
-        <path d='M13 11l4 4-4 4'/>
+        <path d='M8 2h7l5 5v11a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2z'/>
+        <path d='M15 2v5h5'/>
+        <rect x='11' y='13' width='11' height='7' rx='1.8'/>
+        <text x='16.5' y='18.1' textAnchor='middle' fontSize='5.4' fontWeight='700' fontFamily='Arial, Helvetica, sans-serif' fill='currentColor' stroke='none'>N°</text>
       </svg>
     )
   }
@@ -2450,11 +2459,43 @@ function bozzaIconButtonStyle (opts?: { danger?: boolean, disabled?: boolean }):
   }
 }
 
+function NextActionPulse (props?: { floating?: boolean, title?: string }) {
+  const floating = !!props?.floating
+  return (
+    <>
+      <style>{`
+        @keyframes gii-next-action-pulse {
+          0%, 100% { transform: scale(0.82); opacity: 0.58; box-shadow: 0 0 0 0 rgba(220, 38, 38, 0.24); }
+          50% { transform: scale(1); opacity: 1; box-shadow: 0 0 0 6px rgba(220, 38, 38, 0.18); }
+        }
+        @media (prefers-reduced-motion: reduce) {
+          .gii-next-action-pulse { animation: none !important; opacity: 1 !important; transform: none !important; }
+        }
+      `}</style>
+      <span
+        className='gii-next-action-pulse'
+        title={props?.title || 'Azione successiva'}
+        aria-hidden='true'
+        style={{
+          width: 9,
+          height: 9,
+          borderRadius: 999,
+          background: '#dc2626',
+          border: '2px solid #fff',
+          boxSizing: 'content-box',
+          flex: '0 0 auto',
+          ...(floating ? { position: 'absolute', top: -4, right: -4, zIndex: 4 } : {}),
+          animation: 'gii-next-action-pulse 1.65s ease-in-out infinite'
+        }}
+      />
+    </>
+  )
+}
+
 function SectionInfoButton (props: { text?: React.ReactNode, title?: string }) {
   const st = useAdminStyle()
   const [open, setOpen] = React.useState(false)
   const buttonRef = React.useRef<HTMLButtonElement | null>(null)
-  const autoCloseTimerRef = React.useRef<number | null>(null)
   const [popupPos, setPopupPos] = React.useState<{ top: number, left: number, width: number } | null>(null)
 
   const updatePopupPosition = React.useCallback(() => {
@@ -2472,24 +2513,12 @@ function SectionInfoButton (props: { text?: React.ReactNode, title?: string }) {
 
   React.useEffect(() => {
     if (typeof window === 'undefined') return
-    if (autoCloseTimerRef.current !== null) {
-      window.clearTimeout(autoCloseTimerRef.current)
-      autoCloseTimerRef.current = null
-    }
     if (!open || !props.text) return
     updatePopupPosition()
-    autoCloseTimerRef.current = window.setTimeout(() => {
-      setOpen(false)
-      autoCloseTimerRef.current = null
-    }, 4000)
     const onMove = () => updatePopupPosition()
     window.addEventListener('resize', onMove)
     window.addEventListener('scroll', onMove, true)
     return () => {
-      if (autoCloseTimerRef.current !== null) {
-        window.clearTimeout(autoCloseTimerRef.current)
-        autoCloseTimerRef.current = null
-      }
       window.removeEventListener('resize', onMove)
       window.removeEventListener('scroll', onMove, true)
     }
@@ -2625,12 +2654,12 @@ function TransmitBozzaConfirmDialog (props: { saving?: boolean, reopenCycle?: bo
     <div style={{ position: 'fixed', zIndex: 2147483000, inset: 0, background: 'rgba(0,0,0,0.55)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24 }}>
       <div role='dialog' aria-modal='true' style={{ width: 'min(620px, 100%)', background: '#fff', borderRadius: 14, boxShadow: '0 18px 60px rgba(0,0,0,0.35)', overflow: 'hidden' }}>
         <div style={{ background: props.reopenCycle ? '#fff7ed' : '#eff6ff', color: props.reopenCycle ? '#9a3412' : '#0d3b66', padding: '14px 16px', fontWeight: 900, fontSize: Math.max(18, adminFieldFontSize(st)), borderBottom: '1px solid rgba(0,0,0,0.08)' }}>
-          {props.reopenCycle ? 'Apri un nuovo ciclo di verifica' : 'Conferma trasmissione bozza'}
+          {props.reopenCycle ? 'Apri un nuovo ciclo di verifica' : 'Conferma trasmissione fascicolo'}
         </div>
         <div style={{ padding: 16, color: '#111827', fontSize: adminFieldFontSize(st), lineHeight: 1.45 }}>
           {props.reopenCycle
-            ? 'La pratica risulta già approvata dal Responsabile e il protocollo del fascicolo è stato registrato. Confermando verrà aperto un nuovo ciclo di verifica: l’approvazione RI_AMM corrente e i dati di protocollo del fascicolo saranno invalidati. La bozza PDF corrente sarà trasmessa nuovamente al Responsabile.'
-            : 'Confermando, la bozza PDF della determinazione sarà trasmessa al Responsabile dell’istruttoria amministrativa per la verifica. Dopo la trasmissione la bozza non sarà più liberamente modificabile dal Tecnico istruttore, salvo rimando.'}
+            ? 'La pratica risulta già approvata dal Responsabile e il protocollo del fascicolo è stato registrato. Confermando verrà aperto un nuovo ciclo di verifica: l’approvazione corrente del Responsabile dell’istruttoria amministrativa e i dati di protocollo del fascicolo saranno invalidati. La bozza PDF corrente sarà trasmessa nuovamente al Responsabile.'
+            : 'Confermando, il fascicolo istruttorio contenente la Proposta di contestazione e la bozza PDF della determinazione sarà trasmesso al Responsabile dell’istruttoria amministrativa per la verifica. Dopo la trasmissione la bozza non sarà più liberamente modificabile dal Tecnico istruttore, salvo rimando.'}
         </div>
         <div style={{ padding: '0 16px 16px', display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
           <button type='button' disabled={!!props.saving} onClick={props.onCancel} style={{ border: '1px solid #94a3b8', background: '#fff', color: '#334155', borderRadius: 9, padding: '8px 14px', fontWeight: 800, fontSize: adminFieldFontSize(st), cursor: props.saving ? 'not-allowed' : 'pointer' }}>Annulla</button>
@@ -2773,6 +2802,18 @@ function isDeterminazioneAdottata (data: Record<string, any>): boolean {
   const d = data || {}
   const stato = String(pickAttrCI(d, ['determinazione_stato']) || '').trim().toUpperCase()
   return stato === 'ADOTTATA' || (hasAdminValue(pickAttrCI(d, ['determinazione_numero'])) && hasAdminValue(pickAttrCI(d, ['determinazione_data'])))
+}
+
+function isTiAmmVistoActionPending (data: Record<string, any>): boolean {
+  const d = data || {}
+  if (isDeterminazioneAdottata(d)) return false
+  const esitoTiAmm = parseNumberInput(pickAttrCI(d, ['esito_TI_AMM']))
+  const esitoRiAmm = parseNumberInput(pickAttrCI(d, ['esito_RI_AMM']))
+  // Il nuovo ciclo riparte dal visto quando il TI_AMM non ha ancora attestato
+  // la conformità oppure quando il RI_AMM ha richiesto una nuova verifica.
+  // Finché questo passaggio è pendente nessun indicatore delle fasi successive
+  // deve sopravvivere dal ciclo precedente.
+  return esitoTiAmm !== 2 || esitoRiAmm === 1
 }
 
 function verbaleApprovalDateValue (data: Record<string, any>): any {
@@ -4117,7 +4158,8 @@ function isBozzaDeterminazioneValidataDaRiAmm (data: Record<string, any>): boole
     (
       statoBozza === 'VALIDATA_RI_AMM' ||
       statoBozza === 'BOZZA_VALIDATA_RI_AMM' ||
-      statoBozza === 'FASCICOLO_TRASMESSO_PROTOCOLLO'
+      statoBozza === 'FASCICOLO_TRASMESSO_PROTOCOLLO' ||
+      statoBozza === EMAIL_DIRETTORE_PREPARATA_STATE
     )
 }
 
@@ -4159,6 +4201,7 @@ function TiAmmVerificationSummary (props: {
   ds: any
   layerUrl?: string
   bozzaRefreshKey?: string
+  actionBarTarget?: HTMLElement | null
 }) {
   const st = useAdminStyle()
   const d = props.data || {}
@@ -4273,6 +4316,7 @@ function TiAmmVerificationSummary (props: {
   const determinazioneAdottata = isDeterminazioneAdottata(d)
   const bozzaRientrataDaRiAmm = isBozzaDeterminazioneRientrataDaRiAmm(d)
   const showTiAmmInfo = role === 'TI_AMM' && props.canEdit
+  const vistoActionPending = showTiAmmInfo && isTiAmmVistoActionPending(d)
   const attestazioneButtonTitle = riAmmHaRimandatoProposta || esitoCode === 1
     ? 'Riappone visto di conformità e rigenera la Proposta'
     : 'Apponi visto di conformità'
@@ -4332,23 +4376,6 @@ function TiAmmVerificationSummary (props: {
         </Section>
       )}
 
-      {showTiAmmInfo && !determinazioneAdottata && (esitoCode !== 2 || riAmmEsitoCode === 1) && (
-        <Section title='Visto di conformità'>
-          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, flexWrap: 'wrap' }}>
-            <button
-              type='button'
-              title={attestazioneButtonTitle}
-              aria-label={attestazioneButtonTitle}
-              disabled={!!props.saving}
-              onClick={() => props.onApplyAttestation(note || 'A seguito della verifica svolta, si attesta la conformità della pratica sotto il profilo istruttorio-amministrativo.')}
-              style={bozzaIconButtonStyle({ disabled: !!props.saving })}
-            >
-              <BozzaActionIcon name='check' size={24} />
-            </button>
-          </div>
-        </Section>
-      )}
-
       <PostAttestazioneTiAmmWorkSection
         data={d}
         savedData={props.savedData}
@@ -4358,6 +4385,10 @@ function TiAmmVerificationSummary (props: {
         showTiAmmInfo={showTiAmmInfo}
         saving={!!props.saving}
         onChange={props.onChange}
+        actionBarTarget={props.actionBarTarget}
+        vistoActionPending={vistoActionPending}
+        attestazioneButtonTitle={attestazioneButtonTitle}
+        onApplyAttestation={props.onApplyAttestation}
         onGenerateBozzaDeterminazioneWord={props.onGenerateBozzaDeterminazioneWord}
         onDeleteBozzaDeterminazione={props.onDeleteBozzaDeterminazione}
         onTransmitBozzaDeterminazioneRiAmm={props.onTransmitBozzaDeterminazioneRiAmm}
@@ -4366,6 +4397,7 @@ function TiAmmVerificationSummary (props: {
         oid={props.oid}
         ds={props.ds}
         layerUrl={props.layerUrl}
+        suppressActionGuide={vistoActionPending}
         bozzaRefreshKey={[
           props.oid ?? '',
           pickAttrCI(d, ['dt_esito_TI_AMM']) ?? '',
@@ -4382,6 +4414,15 @@ function TiAmmVerificationSummary (props: {
 
 
 
+function workflowTimestamp (value: any): number {
+  if (value == null || value === '') return 0
+  if (typeof value === 'number' && Number.isFinite(value)) return value
+  const numeric = Number(value)
+  if (Number.isFinite(numeric) && numeric > 0) return numeric
+  const parsed = Date.parse(String(value))
+  return Number.isFinite(parsed) ? parsed : 0
+}
+
 type AdminBozzaWorkflowMessageKind = 'RI_AMM_APPROVED' | 'RI_AMM_VERIFYING'
 
 function adminBozzaWorkflowMessageForRole (kind: AdminBozzaWorkflowMessageKind, roleRaw: string): string {
@@ -4395,8 +4436,8 @@ function adminBozzaWorkflowMessageForRole (kind: AdminBozzaWorkflowMessageKind, 
   }
 
   return isTiAmm
-    ? 'La bozza è stata trasmessa al Responsabile dell’istruttoria amministrativa per la verifica e non può essere modificata in questa fase.'
-    : 'La bozza è in fase di verifica amministrativa e non può essere modificata in questa fase.'
+    ? 'Il fascicolo istruttorio è stato trasmesso al Responsabile dell’istruttoria amministrativa per la verifica e non può essere modificato in questa fase.'
+    : 'Il fascicolo istruttorio è in fase di verifica amministrativa e non può essere modificato in questa fase.'
 }
 
 function PostAttestazioneTiAmmWorkSection (props: {
@@ -4408,6 +4449,10 @@ function PostAttestazioneTiAmmWorkSection (props: {
   showTiAmmInfo?: boolean
   saving: boolean
   onChange: (name: string, value: any) => void
+  actionBarTarget?: HTMLElement | null
+  vistoActionPending?: boolean
+  attestazioneButtonTitle?: string
+  onApplyAttestation: (note: string) => void
   onGenerateBozzaDeterminazioneWord: () => void
   onDeleteBozzaDeterminazione: () => boolean | Promise<boolean>
   onTransmitBozzaDeterminazioneRiAmm: () => void
@@ -4417,11 +4462,12 @@ function PostAttestazioneTiAmmWorkSection (props: {
   ds: any
   layerUrl?: string
   bozzaRefreshKey?: string
+  suppressActionGuide?: boolean
 }) {
+  const st = useAdminStyle()
   const d = props.data || {}
   const saved = props.savedData || {}
   const oid = props.oid != null && Number.isFinite(Number(props.oid)) ? Number(props.oid) : null
-  const riAmmApprovedMessage = adminBozzaWorkflowMessageForRole('RI_AMM_APPROVED', props.role)
   const riAmmVerifyingMessage = adminBozzaWorkflowMessageForRole('RI_AMM_VERIFYING', props.role)
   const tiAmmEsitoCode = parseNumberInput(pickAttrCI(d, ['esito_TI_AMM']))
   const tiAmmHaAttestatoConformita = tiAmmEsitoCode === 2
@@ -4434,6 +4480,7 @@ function PostAttestazioneTiAmmWorkSection (props: {
     hasAdminValue(pickAttrCI(saved, ['protocollo_fascicolo_numero'])) &&
     hasAdminValue(pickAttrCI(saved, ['protocollo_fascicolo_data']))
   const currentStatoBozzaCode = String(pickAttrCI(d, ['determinazione_stato']) || '').trim().toUpperCase()
+  const emailDirettorePreparata = currentStatoBozzaCode === EMAIL_DIRETTORE_PREPARATA_STATE
   const fascicoloTrasmessoAlProtocollo = currentStatoBozzaCode === 'FASCICOLO_TRASMESSO_PROTOCOLLO'
   const canEditProtocolloFascicolo =
     props.canEdit &&
@@ -4441,7 +4488,21 @@ function PostAttestazioneTiAmmWorkSection (props: {
     !vistoDaRinnovareDopoRimando &&
     fascicoloTrasmessoAlProtocollo &&
     !protocolloFascicoloSalvatoOk
-  const hasBozzaGenerated = BOZZA_DETERMINAZIONE_STARTED_FIELDS.some(name => hasAdminValue(pickAttrCI(d, [name])))
+  const roleCode = String(props.role || '').trim().toUpperCase()
+  const riAmmApprovedMessage = roleCode === 'TI_AMM'
+    ? (protocolloFascicoloSalvatoOk
+        ? 'I dati di protocollo del fascicolo sono stati registrati. È possibile procedere all’aggiornamento della bozza definitiva della determinazione.'
+        : (fascicoloTrasmessoAlProtocollo
+            ? 'Il fascicolo è stato trasmesso al protocollo. Inserire il numero e la data di protocollo e salvare i dati per proseguire.'
+            : 'La verifica amministrativa è stata approvata. È possibile procedere alla trasmissione del fascicolo al protocollo; dopo la trasmissione saranno disponibili i campi per la registrazione del numero e della data di protocollo.'))
+    : adminBozzaWorkflowMessageForRole('RI_AMM_APPROVED', props.role)
+  // Una bozza è realmente generata solo dopo la produzione del Word.
+  // Lo stato BOZZA viene impostato già al momento del visto e indica soltanto
+  // l'apertura del ciclo: non deve quindi sbloccare prematuramente il caricamento PDF.
+  const tiAmmVistoAt = workflowTimestamp(pickAttrCI(d, ['dt_esito_TI_AMM']))
+  const wordGeneratedAt = workflowTimestamp(pickAttrCI(d, ['dt_bozza_determinazione']))
+  const approvalAt = workflowTimestamp(pickAttrCI(d, ['dt_esito_RI_AMM']))
+  const hasBozzaGenerated = wordGeneratedAt > 0 && (tiAmmVistoAt <= 0 || wordGeneratedAt >= tiAmmVistoAt)
   const bozzaRimandataDaRiAmm = isBozzaDeterminazioneRimandataDaRiAmm(d)
   const bozzaValidataDaRiAmm = isBozzaDeterminazioneValidataDaRiAmm(d)
   const bozzaRientrataDaRiAmm = bozzaValidataDaRiAmm || bozzaRimandataDaRiAmm
@@ -4459,7 +4520,9 @@ function PostAttestazioneTiAmmWorkSection (props: {
     !vistoDaRinnovareDopoRimando &&
     (bozzaInLavorazioneTiAmm || postApprovalProtocolSaved)
   const bozzaAlreadyTransmitted = !!currentStatoBozzaCode && !bozzaInLavorazioneTiAmm
-  const statoBozza = displayAdminFieldValue(d, props.fields, 'determinazione_stato', hasBozzaGenerated ? 'Bozza generata' : 'Non generata')
+  const statoBozza = emailDirettorePreparata
+    ? 'E-mail al Direttore predisposta'
+    : displayAdminFieldValue(d, props.fields, 'determinazione_stato', hasBozzaGenerated ? 'Bozza generata' : 'Non generata')
   const dataGenerazione = displayAdminFieldValue(d, props.fields, 'dt_bozza_determinazione')
   const generataDa = displayAdminFieldValue(d, props.fields, 'bozza_determinazione_da')
   const [bozzaAttachments, setBozzaAttachments] = React.useState<AmmAttachmentInfo[]>([])
@@ -4516,10 +4579,11 @@ function PostAttestazioneTiAmmWorkSection (props: {
   const hasBozzaPdfCaricata = bozzaAttachments.length > 0
   const verifiedFinalPdfCaricato = bozzaAttachments.some(isVerifiedFinalBozzaAttachment)
 
-  // Un PDF già caricato chiude la fase di preparazione manuale:
-  // prima dell'approvazione restano solo Trasmetti/Elimina;
-  // dopo il protocollo, il PDF approvato può ancora essere sostituito dal definitivo,
-  // ma una volta caricato e verificato il definitivo restano solo Elimina/e-mail Direttore.
+  // Un PDF già caricato chiude la fase di preparazione manuale.
+  // Prima dell'approvazione restano solo Trasmetti/Elimina. Dopo l'approvazione
+  // la versione verificata dal RI_AMM è cristallizzata: il successivo PDF definitivo
+  // può essere prodotto soltanto dal flusso controllato post-protocollo e, una volta
+  // verificato, non può più essere eliminato o sostituito liberamente.
   const canPreparePdfSlot =
     !hasBozzaPdfCaricata ||
     (postApprovalProtocolSaved && !verifiedFinalPdfCaricato)
@@ -4531,8 +4595,15 @@ function PostAttestazioneTiAmmWorkSection (props: {
     props.saving ||
     attachmentsBusy
 
+  // Il PDF può essere caricato solo dopo la generazione del Word della fase corrente.
+  // Prima dell'approvazione deve essere successivo al visto TI_AMM; dopo
+  // l'approvazione deve essere una nuova generazione successiva all'esito RI_AMM.
+  const wordReadyForPdf = postApprovalProtocolSaved
+    ? (approvalAt > 0 && wordGeneratedAt > approvalAt)
+    : hasBozzaGenerated
+
   const uploadBozzaPdf = React.useCallback(async (file: File | null) => {
-    if (!file || !oid || !props.canEdit || props.saving || attachmentsBusy || !canGenerateBozzaDeterminazione || !hasBozzaGenerated) return
+    if (!file || !oid || !props.canEdit || props.saving || attachmentsBusy || !canGenerateBozzaDeterminazione || !wordReadyForPdf) return
     const originalName = String(file.name || '').trim()
     if (!/\.pdf$/i.test(originalName)) {
       setAttachmentsError('Caricare la bozza in formato PDF.')
@@ -4594,7 +4665,7 @@ function PostAttestazioneTiAmmWorkSection (props: {
     } finally {
       setAttachmentsBusy(false)
     }
-  }, [attachmentsBusy, canGenerateBozzaDeterminazione, hasBozzaGenerated, oid, postApprovalProtocolSaved, props.canEdit, props.saving, resolveAttachmentLayer, saved])
+  }, [attachmentsBusy, canGenerateBozzaDeterminazione, oid, postApprovalProtocolSaved, props.canEdit, props.saving, resolveAttachmentLayer, saved, wordReadyForPdf])
 
 
   const downloadBozzaPdf = React.useCallback(async (att: AmmAttachmentInfo) => {
@@ -4615,7 +4686,7 @@ function PostAttestazioneTiAmmWorkSection (props: {
     props.canEdit &&
     (bozzaInLavorazioneTiAmm || postApprovalProtocolSaved) &&
     canGenerateBozzaDeterminazione &&
-    hasBozzaGenerated &&
+    wordReadyForPdf &&
     canPreparePdfSlot &&
     !props.saving &&
     !attachmentsBusy
@@ -4624,14 +4695,14 @@ function PostAttestazioneTiAmmWorkSection (props: {
     bozzaInLavorazioneTiAmm &&
     !riAmmHaApprovatoProposta
 
-  const canDeleteVerifiedFinalPdf =
-    postApprovalProtocolSaved &&
-    verifiedFinalPdfCaricato
-
+  // L'eliminazione manuale è consentita esclusivamente mentre il PDF è ancora
+  // una bozza di lavoro del TI_AMM e non è stato approvato dal RI_AMM. Dopo la
+  // trasmissione al Responsabile e, a maggior ragione, dopo l'approvazione, il PDF
+  // resta cristallizzato. Un contenuto diverso richiede un nuovo ciclo di verifica.
   const canDeleteBozza =
     props.canEdit &&
     hasBozzaPdfCaricata &&
-    (canDeleteWorkingPdf || canDeleteVerifiedFinalPdf) &&
+    canDeleteWorkingPdf &&
     !props.saving &&
     !attachmentsBusy
   const canTransmitBozza =
@@ -4646,6 +4717,57 @@ function PostAttestazioneTiAmmWorkSection (props: {
     !attachmentsBusy
   const canPrepareEmailProtocollo = props.canEdit && riAmmHaApprovatoProposta && !vistoDaRinnovareDopoRimando && !protocolloFascicoloOk && !fascicoloTrasmessoAlProtocollo && !props.saving && !attachmentsBusy
   const canPrepareEmailDirettore = props.canEdit && riAmmHaApprovatoProposta && !vistoDaRinnovareDopoRimando && protocolloFascicoloSalvatoOk && hasBozzaGenerated && hasBozzaPdfCaricata && verifiedFinalPdfCaricato && !props.saving && !attachmentsBusy
+
+  // Un solo comando e-mail nella barra Azioni: prima serve per trasmettere il fascicolo
+  // al protocollo, poi (dopo la protocollazione) per predisporre l'e-mail al Direttore.
+  const emailActionIsProtocollo = !fascicoloTrasmessoAlProtocollo && !protocolloFascicoloOk && !protocolloFascicoloSalvatoOk && !emailDirettorePreparata
+  const emailActionDisabled = emailActionIsProtocollo ? !canPrepareEmailProtocollo : !canPrepareEmailDirettore
+  const emailActionTitle = emailActionIsProtocollo
+    ? (protocolloFascicoloOk ? 'Fascicolo già protocollato' : (fascicoloTrasmessoAlProtocollo ? 'Fascicolo già trasmesso al protocollo' : 'Trasmetti fascicolo al protocollo'))
+    : (!protocolloFascicoloSalvatoOk
+        ? 'Registrare e salvare numero e data di protocollo prima di predisporre l’e-mail al Direttore'
+        : (!verifiedFinalPdfCaricato
+            ? 'Caricare e verificare il PDF definitivo prima di predisporre l’e-mail al Direttore'
+            : (emailDirettorePreparata ? 'Prepara nuovamente l’e-mail al Direttore' : 'Prepara e-mail al Direttore')))
+  const emailActionPulseTitle = emailActionIsProtocollo
+    ? 'Azione successiva: trasmetti il fascicolo al protocollo'
+    : 'Azione successiva: prepara l’e-mail al Direttore'
+
+  // Guida TI_AMM: una sola indicazione alla volta, sempre derivata dalle stesse
+  // condizioni che abilitano realmente i comandi della fase corrente.
+  const guideEnabled = String(props.role || '').toUpperCase() === 'TI_AMM' && props.canEdit && !props.saving && !attachmentsBusy && !attachmentsLoading && !props.suppressActionGuide
+  const protocolNumberDraftPresent = hasAdminValue(pickAttrCI(d, ['protocollo_fascicolo_numero']))
+  const protocolDateDraftPresent = hasAdminValue(pickAttrCI(d, ['protocollo_fascicolo_data']))
+  const protocolAttentionField = guideEnabled && riAmmHaApprovatoProposta && fascicoloTrasmessoAlProtocollo && !protocolloFascicoloSalvatoOk
+    ? (!protocolNumberDraftPresent ? 'protocollo_fascicolo_numero' : (!protocolDateDraftPresent ? 'protocollo_fascicolo_data' : null))
+    : null
+  const definitiveWordGeneratedAfterApproval = postApprovalProtocolSaved && approvalAt > 0 && wordGeneratedAt > approvalAt
+
+  type TiAmmNextAction = 'GENERATE_WORD' | 'UPLOAD_PDF' | 'TRANSMIT_RI_AMM' | 'SEND_PROTOCOLLO' | 'EMAIL_DIRETTORE' | null
+  let nextTiAmmAction: TiAmmNextAction = null
+  if (guideEnabled && tiAmmHaAttestatoConformita && !vistoDaRinnovareDopoRimando) {
+    if (!riAmmHaApprovatoProposta && bozzaInLavorazioneTiAmm) {
+      if (!hasBozzaGenerated) nextTiAmmAction = 'GENERATE_WORD'
+      else if (!hasBozzaPdfCaricata) nextTiAmmAction = 'UPLOAD_PDF'
+      else if (canTransmitBozza) nextTiAmmAction = 'TRANSMIT_RI_AMM'
+    } else if (riAmmHaApprovatoProposta) {
+      if (canPrepareEmailProtocollo) nextTiAmmAction = 'SEND_PROTOCOLLO'
+      else if (postApprovalProtocolSaved) {
+        if (!definitiveWordGeneratedAfterApproval) nextTiAmmAction = 'GENERATE_WORD'
+        else if (!verifiedFinalPdfCaricato) nextTiAmmAction = 'UPLOAD_PDF'
+        else if (canPrepareEmailDirettore && !emailDirettorePreparata) nextTiAmmAction = 'EMAIL_DIRETTORE'
+      }
+    }
+  }
+
+  const preApprovalGuideText = nextTiAmmAction === 'GENERATE_WORD' && !riAmmHaApprovatoProposta
+    ? 'Il visto di conformità è stato apposto. Generare la bozza Word della determinazione.'
+    : nextTiAmmAction === 'UPLOAD_PDF' && !riAmmHaApprovatoProposta
+      ? 'La bozza Word è stata generata. Predisporre il PDF e caricarlo nella pratica.'
+      : nextTiAmmAction === 'TRANSMIT_RI_AMM'
+        ? 'La bozza PDF è pronta. Trasmettere il fascicolo istruttorio al Responsabile dell’istruttoria amministrativa per la verifica.'
+        : ''
+
   const generateBozzaButtonLabel = postApprovalProtocolSaved
     ? 'Aggiorna bozza definitiva'
     : (hasBozzaGenerated ? 'Rigenera bozza' : 'Genera bozza')
@@ -4679,31 +4801,17 @@ function PostAttestazioneTiAmmWorkSection (props: {
         canEdit={canEditProtocolloFascicolo}
         onChange={props.onChange}
         fieldNames={PROTOCOLLO_FASCICOLO_FIELDS}
+        attentionFieldName={protocolAttentionField}
       >
-        <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 10 }}>
-          <span
-            title={protocolloFascicoloOk ? 'Fascicolo già protocollato' : (fascicoloTrasmessoAlProtocollo ? 'Fascicolo già trasmesso al protocollo' : 'Trasmetti fascicolo al protocollo')}
-            style={{ display: 'inline-flex' }}
-          >
-            <button
-              type='button'
-              aria-label='Trasmetti fascicolo al protocollo'
-              disabled={!canPrepareEmailProtocollo}
-              onClick={props.onPrepareEmailProtocollo}
-              style={bozzaIconButtonStyle({ disabled: !canPrepareEmailProtocollo })}
-            >
-              <BozzaActionIcon name='mail' size={24} />
-            </button>
-          </span>
-        </div>
       </AdminFormSection>
       <Section
         title='Bozza determinazione'
-        right={<SectionInfoButton text={props.showTiAmmInfo ? 'Il Word resta una copia di lavoro. Prima della trasmissione al Responsabile dell’istruttoria amministrativa, quando è presente un PDF i comandi di generazione e caricamento restano bloccati finché il PDF non viene eliminato. Dopo l’approvazione e il salvataggio del protocollo fascicolo, il PDF definitivo viene accettato solo se corrisponde alla versione approvata, salvo numero e data di protocollo. Una volta verificato, Genera e Carica restano bloccati finché il PDF definitivo non viene eliminato.' : null} title='Informazioni bozza determinazione' />}
+        right={<SectionInfoButton text={props.showTiAmmInfo ? 'Il Word resta una copia di lavoro. Prima della trasmissione al Responsabile dell’istruttoria amministrativa, quando è presente un PDF i comandi di generazione e caricamento restano bloccati finché il PDF non viene eliminato. Dopo la trasmissione al Responsabile il PDF non è più eliminabile. Dopo l’approvazione e il salvataggio del protocollo fascicolo, il PDF definitivo viene accettato solo se corrisponde alla versione approvata, salvo numero e data di protocollo. Una volta verificato, resta cristallizzato; per modificare il contenuto approvato è necessario aprire un nuovo ciclo di verifica con il Responsabile dell’istruttoria amministrativa.' : null} title='Informazioni bozza determinazione' />}
         bodyStyle={{ padding: 10 }}
       >
         <div style={{ display: 'grid', gap: 10 }}>
           <div style={{ display: 'grid', gap: 10 }}>
+              {preApprovalGuideText && <InfoBox>{preApprovalGuideText}</InfoBox>}
               <div style={{ display: 'grid', gridTemplateColumns: ADMIN_COMPACT_GRID_COLUMNS, justifyContent: 'start', gap: 10 }}>
                 <StatusSummaryItem label='Stato bozza' value={statoBozza} tone={hasBozzaGenerated ? 'auto' : 'warn'} />
                 <StatusSummaryItem label='Protocollo fascicolo' value={`${displayAdminFieldValue(d, props.fields, 'protocollo_fascicolo_numero')} del ${displayAdminFieldValue(d, props.fields, 'protocollo_fascicolo_data')}`} tone='auto' />
@@ -4746,8 +4854,14 @@ function PostAttestazioneTiAmmWorkSection (props: {
                         </button>
                         <button
                           type='button'
-                          title={verifiedFinalPdfCaricato ? 'Elimina PDF definitivo' : 'Elimina bozza PDF'}
-                          aria-label={verifiedFinalPdfCaricato ? 'Elimina PDF definitivo' : 'Elimina bozza PDF'}
+                          title={canDeleteBozza
+                            ? 'Elimina bozza PDF'
+                            : (riAmmHaApprovatoProposta
+                                ? 'PDF cristallizzato dopo l’approvazione del Responsabile dell’istruttoria amministrativa'
+                                : (bozzaAlreadyTransmitted
+                                    ? 'PDF non eliminabile durante la verifica del Responsabile dell’istruttoria amministrativa'
+                                    : 'Elimina bozza PDF'))}
+                          aria-label={canDeleteBozza ? 'Elimina bozza PDF' : 'PDF non eliminabile in questa fase'}
                           disabled={!canDeleteBozza}
                           onClick={() => setConfirmDeleteBozza(true)}
                           style={bozzaIconButtonStyle({ danger: true, disabled: !canDeleteBozza })}
@@ -4761,7 +4875,9 @@ function PostAttestazioneTiAmmWorkSection (props: {
               )}
               {verifiedFinalPdfCaricato ? (
                 <InfoBox kind='ok'>
-                  {attachmentsInfo || 'PDF definitivo verificato: il contenuto corrisponde alla versione approvata dal Responsabile dell’istruttoria amministrativa; sono state ammesse esclusivamente le variazioni del numero e della data di protocollo.'}
+                  {emailDirettorePreparata
+                    ? 'E-mail al Direttore predisposta. In attesa dell’esito della determinazione.'
+                    : (attachmentsInfo || 'PDF definitivo verificato: il contenuto corrisponde alla versione approvata dal Responsabile dell’istruttoria amministrativa; sono state ammesse esclusivamente le variazioni del numero e della data di protocollo.')}
                 </InfoBox>
               ) : (!vistoDaRinnovareDopoRimando && riAmmHaApprovatoProposta && bozzaRientrataDaRiAmm) ? (
                 <InfoBox kind='warn'>
@@ -4772,60 +4888,113 @@ function PostAttestazioneTiAmmWorkSection (props: {
                   {riAmmVerifyingMessage}
                 </InfoBox>
               ) : null}
-              <div style={{ display: 'flex', justifyContent: 'flex-end', flexWrap: 'wrap', gap: 8 }}>
-                <button
-                  type='button'
-                  title={props.saving ? 'Generazione in corso…' : generateBozzaButtonLabel}
-                  aria-label={props.saving ? 'Generazione in corso…' : generateBozzaButtonLabel}
-                  disabled={actionDisabled}
-                  onClick={props.onGenerateBozzaDeterminazioneWord}
-                  style={bozzaIconButtonStyle({ disabled: actionDisabled })}
-                >
-                  <BozzaActionIcon name='edit' size={24} />
-                </button>
-                <label
-                  title={attachmentsBusy ? 'Caricamento…' : (postApprovalProtocolSaved ? 'Carica PDF definitivo e verifica corrispondenza' : 'Carica bozza PDF')}
-                  aria-label={attachmentsBusy ? 'Caricamento…' : (postApprovalProtocolSaved ? 'Carica PDF definitivo e verifica corrispondenza' : 'Carica bozza PDF')}
-                  aria-disabled={!canUploadBozza}
-                  style={{ ...bozzaIconButtonStyle({ disabled: !canUploadBozza }), margin: 0 }}
-                >
-                  <BozzaActionIcon name='upload' size={24} />
-                  <input
-                    key={inputKey}
-                    type='file'
-                    disabled={!canUploadBozza}
-                    accept='.pdf,application/pdf'
-                    style={{ display: 'none' }}
-                    onChange={e => {
-                      const file = e.target.files?.[0] || null
-                      void uploadBozzaPdf(file)
-                    }}
-                  />
-                </label>
-                <button
-                  type='button'
-                  title={riAmmHaApprovatoProposta ? 'Verifica già approvata. Per modificare il contenuto utilizzare Rimanda.' : 'Trasmetti bozza al Responsabile'}
-                  aria-label={riAmmHaApprovatoProposta ? 'Verifica già approvata. Per modificare il contenuto utilizzare Rimanda.' : 'Trasmetti bozza al Responsabile'}
-                  disabled={!canTransmitBozza}
-                  onClick={props.onTransmitBozzaDeterminazioneRiAmm}
-                  style={bozzaIconButtonStyle({ disabled: !canTransmitBozza })}
-                >
-                  <BozzaActionIcon name='send' size={24} />
-                </button>
-                <button
-                  type='button'
-                  title={protocolloFascicoloSalvatoOk && !verifiedFinalPdfCaricato ? 'Caricare e verificare il PDF definitivo prima di predisporre l’e-mail al Direttore' : 'Prepara e-mail al Direttore'}
-                  aria-label={protocolloFascicoloSalvatoOk && !verifiedFinalPdfCaricato ? 'Caricare e verificare il PDF definitivo prima di predisporre l’e-mail al Direttore' : 'Prepara e-mail al Direttore'}
-                  disabled={!canPrepareEmailDirettore}
-                  onClick={props.onPrepareEmailDirettore}
-                  style={bozzaIconButtonStyle({ disabled: !canPrepareEmailDirettore })}
-                >
-                  <BozzaActionIcon name='mail' size={24} />
-                </button>
-              </div>
             </div>
         </div>
       </Section>
+
+      {props.actionBarTarget && createPortal(
+        <div style={{
+          position: 'relative',
+          zIndex: 1001,
+          display: 'flex',
+          flexDirection: 'column',
+          gap: 12,
+          boxSizing: 'border-box',
+          width: '100%',
+          minHeight: 0,
+          background: String(st.actionBarBg || '#ffffff'),
+          border: `${Number(st.actionBarBorderWidth ?? 1)}px solid ${String(st.actionBarBorderColor || '#e5e7eb')}`,
+          borderRadius: Number(st.actionBarBorderRadius ?? 10),
+          padding: `${Number(st.actionBarPaddingY ?? 10)}px ${Number(st.actionBarPaddingX ?? 12)}px`
+        }}>
+          <div style={{ fontSize: Number(st.actionBarTitleFontSize ?? 14), fontWeight: 700, color: String(st.actionBarTitleColor || '#111827') }}>Azioni</div>
+          <div style={{ display: 'flex', gap: Number(st.actionBarButtonGap ?? 10), flexWrap: 'wrap', alignItems: 'center', justifyContent: 'flex-end' }}>
+            {props.vistoActionPending && (
+              <span style={{ position: 'relative', display: 'inline-flex' }}>
+                {!props.saving && <NextActionPulse floating title='Azione successiva: apponi il visto di conformità' />}
+                <button
+                  type='button'
+                  title={props.attestazioneButtonTitle || 'Apponi visto di conformità'}
+                  aria-label={props.attestazioneButtonTitle || 'Apponi visto di conformità'}
+                  disabled={!!props.saving}
+                  onClick={() => props.onApplyAttestation('A seguito della verifica svolta, si attesta la conformità della pratica sotto il profilo istruttorio-amministrativo.')}
+                  style={bozzaIconButtonStyle({ disabled: !!props.saving })}
+                >
+                  <BozzaActionIcon name='check' size={24} />
+                </button>
+              </span>
+            )}
+
+            <span style={{ position: 'relative', display: 'inline-flex' }}>
+              {nextTiAmmAction === 'GENERATE_WORD' && <NextActionPulse floating title={`Azione successiva: ${generateBozzaButtonLabel}`} />}
+              <button
+                type='button'
+                title={props.saving ? 'Generazione in corso…' : generateBozzaButtonLabel}
+                aria-label={props.saving ? 'Generazione in corso…' : generateBozzaButtonLabel}
+                disabled={actionDisabled}
+                onClick={props.onGenerateBozzaDeterminazioneWord}
+                style={bozzaIconButtonStyle({ disabled: actionDisabled })}
+              >
+                <BozzaActionIcon name='edit' size={24} />
+              </button>
+            </span>
+
+            <span style={{ position: 'relative', display: 'inline-flex' }}>
+              {nextTiAmmAction === 'UPLOAD_PDF' && <NextActionPulse floating title={postApprovalProtocolSaved ? 'Azione successiva: carica il PDF definitivo' : 'Azione successiva: carica la bozza PDF'} />}
+              <label
+                title={attachmentsBusy ? 'Caricamento…' : (postApprovalProtocolSaved ? 'Carica PDF definitivo e verifica corrispondenza' : 'Carica bozza PDF')}
+                aria-label={attachmentsBusy ? 'Caricamento…' : (postApprovalProtocolSaved ? 'Carica PDF definitivo e verifica corrispondenza' : 'Carica bozza PDF')}
+                aria-disabled={!canUploadBozza}
+                style={{ ...bozzaIconButtonStyle({ disabled: !canUploadBozza }), margin: 0 }}
+              >
+                <BozzaActionIcon name='upload' size={24} />
+                <input
+                  key={inputKey}
+                  type='file'
+                  disabled={!canUploadBozza}
+                  accept='.pdf,application/pdf'
+                  style={{ display: 'none' }}
+                  onChange={e => {
+                    const file = e.target.files?.[0] || null
+                    void uploadBozzaPdf(file)
+                  }}
+                />
+              </label>
+            </span>
+
+            <span style={{ position: 'relative', display: 'inline-flex' }}>
+              {nextTiAmmAction === 'TRANSMIT_RI_AMM' && <NextActionPulse floating title='Azione successiva: trasmetti il fascicolo al Responsabile' />}
+              <button
+                type='button'
+                title={riAmmHaApprovatoProposta ? 'Verifica già approvata. Per modificare il contenuto utilizzare Rimanda.' : 'Trasmetti fascicolo al Responsabile'}
+                aria-label={riAmmHaApprovatoProposta ? 'Verifica già approvata. Per modificare il contenuto utilizzare Rimanda.' : 'Trasmetti fascicolo al Responsabile'}
+                disabled={!canTransmitBozza}
+                onClick={props.onTransmitBozzaDeterminazioneRiAmm}
+                style={bozzaIconButtonStyle({ disabled: !canTransmitBozza })}
+              >
+                <BozzaActionIcon name='send' size={24} />
+              </button>
+            </span>
+
+            <span style={{ position: 'relative', display: 'inline-flex' }}>
+              {(nextTiAmmAction === 'SEND_PROTOCOLLO' || nextTiAmmAction === 'EMAIL_DIRETTORE') && (
+                <NextActionPulse floating title={emailActionPulseTitle} />
+              )}
+              <button
+                type='button'
+                title={emailActionTitle}
+                aria-label={emailActionTitle}
+                disabled={emailActionDisabled}
+                onClick={emailActionIsProtocollo ? props.onPrepareEmailProtocollo : props.onPrepareEmailDirettore}
+                style={bozzaIconButtonStyle({ disabled: emailActionDisabled })}
+              >
+                <BozzaActionIcon name='mail' size={24} />
+              </button>
+            </span>
+          </div>
+        </div>,
+        props.actionBarTarget
+      )}
     </div>
   )
 }
@@ -6202,7 +6371,10 @@ function AmmWorkflowText (props: { text: string }) {
 
 async function buildBozzaDeterminazioneDocxBlob (data: any, fields: LayerFieldInfo[], profile: { username: string, fullName: string }): Promise<{ blob: Blob, fileName: string }> {
   const map = buildBozzaDeterminazioneMap(data, profile)
-  const bytes = await buildBozzaDeterminazioneDocx(map)
+  // La filigrana BOZZA segue il ciclo amministrativo reale: resta presente
+  // fino all'approvazione RI_AMM e ricompare automaticamente dopo un rimando.
+  const watermarkBozza = !isPropostaContestazioneApprovedByRiAmm(data)
+  const bytes = await buildBozzaDeterminazioneDocx(map, { watermarkBozza })
   const fileName = getBozzaDeterminazioneDocxFileName(map)
   return { blob: new Blob([bytes as any], { type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' }), fileName }
 }
@@ -6338,10 +6510,10 @@ function approvedBozzaReferenceKeywords (capturedAt = Date.now()): string {
 
 async function buildApprovedBozzaReferencePayload (blob: Blob, oid: number): Promise<ApprovedBozzaReferencePayload> {
   const extracted = await extractPdfVerificationContent(blob)
-  if (!extracted.text) throw new Error('Non è stato possibile estrarre il testo del PDF trasmesso a RI_AMM.')
+  if (!extracted.text) throw new Error('Non è stato possibile estrarre il testo del PDF trasmesso al Responsabile dell’istruttoria amministrativa.')
   const canonical = canonicalizeApprovedDeterminationText(extracted.text)
   const canonicalTextSha256 = await sha256Hex(canonical)
-  if (!canonicalTextSha256) throw new Error('Non è stato possibile calcolare l’impronta della bozza trasmessa a RI_AMM.')
+  if (!canonicalTextSha256) throw new Error('Non è stato possibile calcolare l’impronta della bozza trasmessa al Responsabile dell’istruttoria amministrativa.')
   return {
     version: 1,
     oid: Number(oid),
@@ -6367,7 +6539,7 @@ async function replaceApprovedBozzaReferenceAttachment (
   const ids = await addAmmAttachments(layer, oid, [file], layerUrl, approvedBozzaReferenceKeywords(payload.capturedAt))
   const keepId = Number(ids?.[0])
   if (!Number.isFinite(keepId) || keepId <= 0) {
-    throw new Error('Impossibile registrare il riferimento interno della bozza trasmessa a RI_AMM.')
+    throw new Error('Impossibile registrare il riferimento interno della bozza trasmessa al Responsabile dell’istruttoria amministrativa.')
   }
 
   // Rimuove soltanto riferimenti interni precedenti. I documenti del fascicolo
@@ -7314,6 +7486,7 @@ function FieldEditor (props: {
   fields: LayerFieldInfo[]
   canEdit: boolean
   onChange: (name: string, value: any) => void
+  attention?: boolean
 }) {
   const { field, draft, fields, canEdit, onChange } = props
   const st = useAdminStyle()
@@ -7329,7 +7502,10 @@ function FieldEditor (props: {
 
   const label = (
     <div style={{ color: st.formLabelColor || '#334155', fontSize: Number(st.formLabelFontSize ?? 15), fontWeight: Number(st.formLabelFontWeight ?? 600) as any, marginBottom: Number(st.formLabelMarginBottom ?? 3), display: 'flex', gap: 6, alignItems: 'center', justifyContent: 'space-between' }}>
-      <span>{field.label}</span>
+      <span style={{ display: 'inline-flex', alignItems: 'center', gap: 7 }}>
+        <span>{field.label}</span>
+        {props.attention && <NextActionPulse title='Dato da compilare' />}
+      </span>
       {systemCalculated && !miss && <span style={{ color: '#1d4ed8', fontWeight: 800, fontSize: Math.max(13, adminLabelFontSize(st) - 2) }}>automatico</span>}
       {miss && <span style={{ color: '#b45309', fontWeight: 700, fontSize: Math.max(13, adminLabelFontSize(st) - 2) }}>campo assente</span>}
     </div>
@@ -7382,6 +7558,7 @@ function AdminFieldsLayout (props: {
   fields: LayerFieldInfo[]
   canEdit: boolean
   onChange: (name: string, value: any) => void
+  attentionFieldName?: string | null
 }) {
   const rows: React.ReactNode[] = []
   let compact: AdminField[] = []
@@ -7393,7 +7570,7 @@ function AdminFieldsLayout (props: {
     compact = []
     rows.push(
       <div key={key} style={{ display: 'grid', gridTemplateColumns: ADMIN_COMPACT_GRID_COLUMNS, justifyContent: 'start', alignItems: 'start', gap: 12 }}>
-        {fields.map(f => <FieldEditor key={f.name} field={f} draft={props.draft} fields={props.fields} canEdit={props.canEdit} onChange={props.onChange} />)}
+        {fields.map(f => <FieldEditor key={f.name} field={f} draft={props.draft} fields={props.fields} canEdit={props.canEdit} onChange={props.onChange} attention={props.attentionFieldName === f.name} />)}
       </div>
     )
   }
@@ -7402,7 +7579,7 @@ function AdminFieldsLayout (props: {
     if (f.full || f.kind === 'textarea') {
       flushCompact()
       rows.push(
-        <FieldEditor key={f.name} field={f} draft={props.draft} fields={props.fields} canEdit={props.canEdit} onChange={props.onChange} />
+        <FieldEditor key={f.name} field={f} draft={props.draft} fields={props.fields} canEdit={props.canEdit} onChange={props.onChange} attention={props.attentionFieldName === f.name} />
       )
     } else {
       compact.push(f)
@@ -7424,13 +7601,14 @@ function AdminFormSection (props: {
   intro?: React.ReactNode
   right?: React.ReactNode
   children?: React.ReactNode
+  attentionFieldName?: string | null
 }) {
   const wanted = Array.isArray(props.fieldNames) && props.fieldNames.length ? new Set(props.fieldNames.map(String)) : null
   const items = ADMIN_FIELDS.filter(f => f.group === props.group && (!wanted || wanted.has(f.name)))
   return (
     <Section title={props.title} right={props.right}>
       {props.intro && <div style={{ marginBottom: 10 }}>{props.intro}</div>}
-      <AdminFieldsLayout items={items} draft={props.draft} fields={props.fields} canEdit={props.canEdit} onChange={props.onChange} />
+      <AdminFieldsLayout items={items} draft={props.draft} fields={props.fields} canEdit={props.canEdit} onChange={props.onChange} attentionFieldName={props.attentionFieldName} />
       {props.children}
     </Section>
   )
@@ -7508,6 +7686,7 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
   const [ammPreviewAttachment, setAmmPreviewAttachment] = React.useState<{ id: number; name?: string; contentType?: string } | null>(null)
   const [ammPreviewRotationDeg, setAmmPreviewRotationDeg] = React.useState(0)
   const [activeAmmSection, setActiveAmmSection] = React.useState<AmmSectionKey>(() => getRequestedAmmSection() || AMM_DEFAULT_SECTION)
+  const [verificationActionBarTarget, setVerificationActionBarTarget] = React.useState<HTMLDivElement | null>(null)
   const rootRef = React.useRef<HTMLDivElement | null>(null)
   const [pageVisible, setPageVisible] = React.useState(false)
 
@@ -8157,8 +8336,8 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
         numero_rapporto: numeroRapporto,
         tipo_attivita: 'PRESA_IN_CARICO',
         sottotipo_attivita: 'BOZZA_DETERMINAZIONE',
-        titolo: 'Bozza determinazione da verificare',
-        messaggio: `Bozza determinazione sulla pratica n. ${numeroRapporto || '—'} da prendere in carico.\nMittente: ${mittente}`,
+        titolo: 'Fascicolo istruttorio da verificare',
+        messaggio: `Fascicolo istruttorio della pratica n. ${numeroRapporto || '—'} da prendere in carico per la verifica.\nMittente: ${mittente}`,
         destinatario_ruolo: 'RI_AMM',
         destinatario_area: 'AMM',
         destinatario_settore: 'CR',
@@ -8245,7 +8424,11 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
         const real = realFieldName(fields, name)
         if (real) attrs[real] = value
       }
-      const note = String(noteInput || 'A seguito della verifica svolta, si attesta la conformità della pratica sotto il profilo istruttorio-amministrativo.').trim()
+      const defaultAttestationNote = 'A seguito della verifica svolta, si attesta la conformità della pratica sotto il profilo istruttorio-amministrativo.'
+      const requestedAttestationNote = String(noteInput || '').trim()
+      const note = /motivazione\s+del\s+rimando|integrazion|rettific/i.test(requestedAttestationNote)
+        ? defaultAttestationNote
+        : (requestedAttestationNote || defaultAttestationNote)
       put('esito_TI_AMM', 2)
       put('dt_esito_TI_AMM', now)
       put('note_TI_AMM', note)
@@ -8257,7 +8440,7 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
       put('determinazione_stato', 'BOZZA')
 
       // Il visto del TI_AMM non apre alcun nodo operativo RI_AMM: l'unico invio
-      // al Responsabile avviene con "Trasmetti bozza al Responsabile".
+      // al Responsabile avviene con "Trasmetti fascicolo al Responsabile".
       // Chiudiamo quindi eventuali stati/attività RI_AMM residui creati da versioni
       // precedenti o da prove intermedie del flusso.
       put('stato_RI_AMM', 4)
@@ -8274,13 +8457,13 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
 
       // Si azzerano soltanto i metadati della vecchia bozza. NON va azzerato
       // determinazione_stato, che poche righe sopra è stato impostato a BOZZA.
-      // BOZZA_DETERMINAZIONE_STARTED_FIELDS contiene anche determinazione_stato:
-      // usarlo qui annullerebbe il nuovo stato e bloccherebbe tutti i comandi TI_AMM.
+      // Lo stato apre il nuovo ciclo, mentre data/autore verranno valorizzati soltanto
+      // dalla successiva generazione effettiva del Word.
       put('dt_bozza_determinazione', null)
       put('bozza_determinazione_da', null)
 
       // Il visto non trasferisce ancora la pratica: il Tecnico istruttore amministrativo
-      // deve predisporre/caricare la bozza e poi trasmettere proposta e bozza
+      // deve predisporre/caricare la bozza e poi trasmettere il fascicolo istruttorio
       // al Responsabile dell’istruttoria amministrativa con l’apposito pulsante interno.
 
       let prevRecordAttrs = { ...(initialDraft || {}) }
@@ -8316,7 +8499,7 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
       const next = { ...nextRecordAttrs }
       setInitialDraft(next)
       setDraft(next)
-      setDialog({ kind: 'ok', title: 'Visto apposto', text: 'Il visto di conformità è stato registrato. La Proposta di contestazione è stata aggiunta al fascicolo; ora è possibile predisporre e caricare la bozza di determinazione.' })
+      setDialog({ kind: 'ok', title: 'Visto apposto', text: 'Il visto di conformità è stato registrato e la Proposta di contestazione è stata aggiunta al fascicolo. Generare la bozza Word della determinazione, predisporre e caricare il relativo PDF e quindi trasmettere il fascicolo al Responsabile dell’istruttoria amministrativa.' })
       try { window.dispatchEvent(new CustomEvent('gii:record-updated', { detail: { oid: Number(oid), source: 'gii-editing-amm-attestazione-conformita' } })) } catch {}
       try { window.dispatchEvent(new CustomEvent('gii-force-refresh-selection', { detail: { oid: Number(oid), source: 'gii-editing-amm-attestazione-conformita', ts: Date.now() } })) } catch {}
       try { window.dispatchEvent(new CustomEvent('gii-alerts-refresh', { detail: { oid: Number(oid), source: 'gii-editing-amm-attestazione-conformita', ts: Date.now() } })) } catch {}
@@ -8551,7 +8734,7 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
         kind: 'ok',
         title: postApprovalDefinitiveUpdate ? 'Bozza Word definitiva aggiornata' : 'Bozza Word generata',
         text: postApprovalDefinitiveUpdate
-          ? 'È stata generata la copia Word aggiornata con i dati correnti della pratica. L’approvazione RI_AMM, il protocollo del fascicolo e il PDF già caricato restano invariati. Caricare un nuovo PDF solo se si intende sostituire il documento corrente.'
+          ? 'È stata generata la copia Word aggiornata con i dati correnti della pratica. L’approvazione del Responsabile dell’istruttoria amministrativa, il protocollo del fascicolo e il PDF già caricato restano invariati. Caricare un nuovo PDF solo se si intende sostituire il documento corrente.'
           : 'È stata generata la copia Word di lavoro. Il PDF eventualmente già caricato resta invariato finché non viene sostituito esplicitamente con un nuovo PDF.'
       })
       try { window.dispatchEvent(new CustomEvent('gii:record-updated', { detail: { oid: Number(oid), source: 'gii-editing-amm-bozza-determinazione-word' } })) } catch {}
@@ -8587,10 +8770,6 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
       currentStato === 'BOZZA' ||
       bozzaRimandataDaResponsabile
 
-    const protocolloSalvato =
-      hasAdminValue(pickAttrCI(initialDraft, ['protocollo_fascicolo_numero'])) &&
-      hasAdminValue(pickAttrCI(initialDraft, ['protocollo_fascicolo_data']))
-
     const operationContextStamp = getGiiPracticeContextStamp()
     const operationContextIsCurrent = () => isGiiPracticeContextStampCurrent(operationContextStamp)
     if (!operationContextIsCurrent()) return false
@@ -8617,19 +8796,16 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
         return false
       }
 
-      const verifiedFinalPresent = pdfs.some(isVerifiedFinalBozzaAttachment)
       const approved = isPropostaContestazioneApprovedByRiAmm(base)
-      const canDeleteCurrentPdf =
-        (bozzaInLavorazione && !approved) ||
-        (approved && protocolloSalvato && verifiedFinalPresent)
+      const canDeleteCurrentPdf = bozzaInLavorazione && !approved
 
       if (!canDeleteCurrentPdf) {
         setDialog({
           kind: 'warn',
           title: 'PDF non eliminabile in questa fase',
           text: approved
-            ? 'Il PDF approvato non può essere eliminato durante la fase di protocollazione. Dopo il caricamento del PDF definitivo verificato sarà possibile eliminare esclusivamente quest’ultimo.'
-            : 'Il PDF non può essere eliminato mentre la pratica è in verifica presso il Responsabile dell’istruttoria amministrativa.'
+            ? 'Il PDF è cristallizzato dopo l’approvazione del Responsabile dell’istruttoria amministrativa e non può essere eliminato o sostituito liberamente. Il PDF definitivo può essere prodotto esclusivamente dal flusso controllato post-protocollo; per modificare il contenuto approvato è necessario aprire un nuovo ciclo di verifica con il Responsabile dell’istruttoria amministrativa.'
+            : 'Il PDF non può essere eliminato mentre la pratica è in verifica presso il Responsabile dell’istruttoria amministrativa. Se il Responsabile rimanda la pratica, il nuovo ciclo tornerà modificabile.'
         })
         return false
       }
@@ -8645,10 +8821,8 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
       if (!operationContextIsCurrent()) return true
       setDialog({
         kind: 'ok',
-        title: verifiedFinalPresent ? 'PDF definitivo eliminato' : 'Bozza PDF eliminata',
-        text: verifiedFinalPresent
-          ? 'Il PDF definitivo è stato eliminato. L’approvazione, i dati di protocollo e il riferimento interno della versione approvata restano invariati. La predisposizione dell’e-mail al Direttore è nuovamente bloccata finché non verrà caricato e verificato un nuovo PDF definitivo.'
-          : 'Il PDF è stato eliminato. Il Word di lavoro, il visto e lo stato della pratica restano invariati; è possibile generare nuovamente il Word oppure caricare un nuovo PDF.'
+        title: 'Bozza PDF eliminata',
+        text: 'Il PDF è stato eliminato. Il Word di lavoro, il visto e lo stato della pratica restano invariati; è possibile generare nuovamente il Word oppure caricare un nuovo PDF.'
       })
       try {
         window.dispatchEvent(new CustomEvent('gii:record-updated', {
@@ -8672,11 +8846,11 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
 
   const handleTransmitBozzaDeterminazioneRiAmm = async (confirmed = false) => {
     if (!hasSelection || oid == null || !Number.isFinite(Number(oid))) {
-      setDialog({ kind: 'warn', title: 'Nessuna pratica selezionata', text: 'Selezionare una pratica prima di trasmettere la bozza.' })
+      setDialog({ kind: 'warn', title: 'Nessuna pratica selezionata', text: 'Selezionare una pratica prima di trasmettere il fascicolo.' })
       return
     }
     if (!active?.ds) {
-      setDialog({ kind: 'err', title: 'Fonte dati non disponibile', text: 'Collegare al widget la vista amministrativa in Builder prima di trasmettere la bozza.' })
+      setDialog({ kind: 'err', title: 'Fonte dati non disponibile', text: 'Collegare al widget la vista amministrativa in Builder prima di trasmettere il fascicolo.' })
       return
     }
     if (!roleAllowed) {
@@ -8684,7 +8858,7 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
       return
     }
     if (!canEdit) {
-      setDialog({ kind: 'warn', title: 'Scheda in sola lettura', text: 'Il profilo corrente può consultare la scheda, ma non trasmettere la bozza.' })
+      setDialog({ kind: 'warn', title: 'Scheda in sola lettura', text: 'Il profilo corrente può consultare la scheda, ma non trasmettere il fascicolo.' })
       return
     }
 
@@ -8720,7 +8894,7 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
       }
       const esitoTiAmm = parseNumberInput(pickAttrCI(base, ['esito_TI_AMM']))
       if (esitoTiAmm !== 2) {
-        setDialog({ kind: 'warn', title: 'Visto mancante', text: 'Apporre il visto di conformità prima di trasmettere la bozza al Responsabile dell’istruttoria amministrativa.' })
+        setDialog({ kind: 'warn', title: 'Visto mancante', text: 'Apporre il visto di conformità prima di trasmettere il fascicolo al Responsabile dell’istruttoria amministrativa.' })
         return
       }
       const propostaGiaApprovataRiAmm = isPropostaContestazioneApprovedByRiAmm(base)
@@ -8735,7 +8909,7 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
       const statoCorrente = String(pickAttrCI(base, ['determinazione_stato']) || '').trim().toUpperCase()
       const bozzaRientrataDaRiAmm = isBozzaDeterminazioneRientrataDaRiAmm(base)
       if (statoCorrente && statoCorrente !== 'BOZZA' && !bozzaRientrataDaRiAmm) {
-        setDialog({ kind: 'warn', title: 'Bozza già trasmessa', text: 'La bozza di determinazione risulta già trasmessa o avanzata.' })
+        setDialog({ kind: 'warn', title: 'Fascicolo già trasmesso', text: 'Il fascicolo istruttorio risulta già trasmesso o avanzato nella fase successiva.' })
         return
       }
 
@@ -8743,7 +8917,7 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
       if (!isGiiPracticeContextStampCurrent(operationContextStamp)) return
       const bozzaPdfs = attachments.filter(isGiiBozzaDeterminazionePdfAttachment)
       if (!bozzaPdfs.length) {
-        setDialog({ kind: 'warn', title: 'Bozza PDF non caricata', text: 'Caricare la bozza PDF prima di trasmetterla al Responsabile dell’istruttoria amministrativa.' })
+        setDialog({ kind: 'warn', title: 'Bozza PDF non caricata', text: 'Caricare la bozza PDF prima di trasmettere il fascicolo al Responsabile dell’istruttoria amministrativa.' })
         return
       }
 
@@ -8772,7 +8946,7 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
       put('note_RI_AMM', null)
 
 
-      // La trasmissione della bozza al Responsabile dell’istruttoria amministrativa
+      // La trasmissione del fascicolo al Responsabile dell’istruttoria amministrativa
       // è un vero passaggio operativo: dopo il salvataggio la pratica deve uscire
       // dalla scheda “In attesa mia” del Tecnico istruttore amministrativo e
       // comparire tra quelle in attesa di altri. Aggiorniamo anche i campi di
@@ -8832,12 +9006,12 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
       const next = { ...nextRecordAttrs }
       setInitialDraft(next)
       setDraft(next)
-      setDialog({ kind: 'ok', title: 'Bozza trasmessa', text: 'La bozza PDF della determinazione è stata trasmessa al Responsabile dell’istruttoria amministrativa per la verifica.' })
+      setDialog({ kind: 'ok', title: 'Fascicolo trasmesso', text: 'Il fascicolo istruttorio è stato trasmesso al Responsabile dell’istruttoria amministrativa per la verifica.' })
       try { window.dispatchEvent(new CustomEvent('gii:record-updated', { detail: { oid: Number(oid), source: 'gii-editing-amm-bozza-determinazione-trasmessa' } })) } catch {}
       try { window.dispatchEvent(new CustomEvent('gii-force-refresh-selection', { detail: { oid: Number(oid), source: 'gii-editing-amm-bozza-determinazione-trasmessa', ts: Date.now() } })) } catch {}
       try { window.dispatchEvent(new CustomEvent('gii-alerts-refresh', { detail: { oid: Number(oid), source: 'gii-editing-amm-bozza-determinazione-trasmessa', ts: Date.now() } })) } catch {}
     } catch (e: any) {
-      if (isGiiPracticeContextStampCurrent(operationContextStamp)) setDialog({ kind: 'err', title: 'Errore trasmissione bozza', text: e?.message || String(e) })
+      if (isGiiPracticeContextStampCurrent(operationContextStamp)) setDialog({ kind: 'err', title: 'Errore trasmissione fascicolo', text: e?.message || String(e) })
     } finally {
       if (isGiiPracticeContextStampCurrent(operationContextStamp)) setSaving(false)
     }
@@ -8976,7 +9150,7 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
 
     setSaving(true)
     try {
-      const { layerUrl, attachments } = await getEmailAttachmentContext()
+      const { layer, layerUrl, attachments } = await getEmailAttachmentContext()
       const bozzaAtt = pickLatestGiiAttachment<AmmAttachmentInfo>(attachments.filter(att => isGiiBozzaDeterminazionePdfAttachment(att as any)))
       if (!bozzaAtt) {
         setDialog({ kind: 'warn', title: 'PDF definitivo non caricato', text: 'Caricare e verificare il PDF definitivo della determinazione prima di predisporre l’e-mail al Direttore.' })
@@ -9011,13 +9185,55 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
         attachments: emailAttachments,
         fileName: `email_direttore_${String(numero || oid).replace(/[^a-zA-Z0-9_-]/g, '_')}.eml`
       })
-      setDialog({ kind: 'ok', title: 'E-mail preparata', text: 'Il file .eml è stato generato correttamente.' })
+
+      // La generazione del .eml è l'ultimo evento verificabile internamente prima
+      // dell'esito esterno della determinazione. Registriamo quindi soltanto che
+      // l'e-mail è stata predisposta: non assumiamo che sia stata effettivamente inviata.
+      if (!layer?.applyEdits) throw new Error('E-mail generata, ma layer non disponibile per registrare la predisposizione al Direttore.')
+      if (typeof layer.load === 'function') { try { await layer.load() } catch {} }
+      const editFields = layer?.fields?.length
+        ? (layer.fields as any[]).map(f => ({ name: String(f.name), type: String(f.type || ''), alias: String(f.alias || f.name), domain: f.domain || null, editable: f.editable !== false }))
+        : layerFields
+      const idName = realFieldName(editFields, active?.idFieldName) || active?.idFieldName || 'OBJECTID'
+      const statoField = realFieldName(editFields, 'determinazione_stato')
+      if (!statoField) throw new Error('E-mail generata, ma campo determinazione_stato non disponibile per registrare la predisposizione al Direttore.')
+
+      let prevRecordAttrs = { ...(initialDraft || {}) }
+      try {
+        const liveAttrs = await queryCurrentLayerAttrsByOid(layer, idName, Number(oid))
+        if (liveAttrs && Object.keys(liveAttrs).length) prevRecordAttrs = liveAttrs
+      } catch {}
+
+      const updateAttrs = filterAttrsForLayer({
+        [idName]: Number(oid),
+        [statoField]: EMAIL_DIRETTORE_PREPARATA_STATE
+      }, editFields)
+      const editResult = await layer.applyEdits({ updateFeatures: [{ attributes: updateAttrs }] })
+      const upd = editResult?.updateFeatureResults?.[0] || editResult?.updateResults?.[0] || null
+      const updErr = upd?.error
+      const updOk = !updErr && (upd?.success === true || upd?.objectId != null || upd?.success == null)
+      if (!updOk) {
+        const detail = updErr ? `${updErr.code ?? ''}: ${updErr.message ?? ''}` : JSON.stringify(editResult)
+        throw new Error(`E-mail generata, ma registrazione della predisposizione al Direttore non riuscita: ${detail}`)
+      }
+
+      await upsertAmmCycleAudit(
+        prevRecordAttrs,
+        { ...prevRecordAttrs, [statoField]: EMAIL_DIRETTORE_PREPARATA_STATE },
+        [statoField]
+      )
+      await refreshDs(active.ds, props.id)
+      setInitialDraft(prev => ({ ...(prev || {}), [statoField]: EMAIL_DIRETTORE_PREPARATA_STATE }))
+      setDraft(prev => ({ ...(prev || {}), [statoField]: EMAIL_DIRETTORE_PREPARATA_STATE }))
+      try { window.dispatchEvent(new CustomEvent('gii:record-updated', { detail: { oid: Number(oid), source: 'gii-editing-amm-email-direttore-preparata', ts: Date.now() } })) } catch {}
+
+      setDialog({ kind: 'ok', title: 'E-mail preparata', text: 'Il file .eml è stato generato correttamente. La pratica resta in attesa dell’esito della determinazione.' })
     } catch (e: any) {
       setDialog({ kind: 'err', title: 'Errore preparazione e-mail', text: e?.message || String(e) })
     } finally {
       setSaving(false)
     }
-  }, [buildBozzaDeterminazioneSource, canEdit, getEmailAttachmentContext, hasSelection, initialDraft, layerFields, oid, profile])
+  }, [active, buildBozzaDeterminazioneSource, canEdit, getEmailAttachmentContext, hasSelection, initialDraft, layerFields, oid, profile, props.id])
 
   const handleSave = async () => {
     if (!hasSelection || oid == null || !Number.isFinite(Number(oid))) {
@@ -9129,6 +9345,8 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
     }
   }, [cfg])
 
+  const verificationHasSeparateActionPanel = hasSelection && activeAmmSection === 'verifica_istruttoria'
+
   const wrapperStyle: React.CSSProperties = {
     width: '100%',
     height: '100%',
@@ -9136,16 +9354,29 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
     flexDirection: 'column',
     minHeight: 0,
     boxSizing: 'border-box',
-    background: String(adminStyle.maskBg || '#eef4fb'),
-    border: `${Number(adminStyle.maskBorderWidth ?? 1)}px solid ${adminStyle.maskBorderColor || '#cbd8e6'}`,
-    borderRadius: Number(adminStyle.maskBorderRadius ?? 10),
-    padding: Number(adminStyle.maskInnerPadding ?? 12),
+    background: verificationHasSeparateActionPanel ? 'transparent' : String(adminStyle.maskBg || '#eef4fb'),
+    border: verificationHasSeparateActionPanel ? 'none' : `${Number(adminStyle.maskBorderWidth ?? 1)}px solid ${adminStyle.maskBorderColor || '#cbd8e6'}`,
+    borderRadius: verificationHasSeparateActionPanel ? 0 : Number(adminStyle.maskBorderRadius ?? 10),
+    padding: verificationHasSeparateActionPanel ? 0 : Number(adminStyle.maskInnerPadding ?? 12),
     overflow: 'hidden',
     color: '#111827',
     fontFamily: 'inherit',
     fontSize: Number(adminStyle.formFieldFontSize ?? 15),
     position: 'relative',
     zIndex: hasSelection ? 1001 : 'auto'
+  }
+
+  const verificationMainPanelStyle: React.CSSProperties = {
+    flex: '1 1 auto',
+    minHeight: 0,
+    display: 'flex',
+    flexDirection: 'column',
+    boxSizing: 'border-box',
+    background: String(adminStyle.maskBg || '#eef4fb'),
+    border: `${Number(adminStyle.maskBorderWidth ?? 1)}px solid ${adminStyle.maskBorderColor || '#cbd8e6'}`,
+    borderRadius: Number(adminStyle.maskBorderRadius ?? 10),
+    padding: Number(adminStyle.maskInnerPadding ?? 12),
+    overflow: 'hidden'
   }
 
   // Stesso schema del gii-editing-ti:
@@ -9192,6 +9423,11 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
   const saveDisabled = saving || !isDirty || !canEdit
   const cancelDisabled = saving || !isDirty
   const closeDisabled = saving || isDirty
+  const toolbarDeterminationState = String(pickAttrCI(draft, ['determinazione_stato']) || pickAttrCI(initialDraft, ['determinazione_stato']) || '').trim().toUpperCase()
+  const protocolDraftComplete = hasAdminValue(pickAttrCI(draft, ['protocollo_fascicolo_numero'])) && hasAdminValue(pickAttrCI(draft, ['protocollo_fascicolo_data']))
+  const protocolSavedComplete = hasAdminValue(pickAttrCI(initialDraft, ['protocollo_fascicolo_numero'])) && hasAdminValue(pickAttrCI(initialDraft, ['protocollo_fascicolo_data']))
+  const tiAmmVistoGuidePending = currentRole === 'TI_AMM' && canEdit && isTiAmmVistoActionPending(viewData || {})
+  const pulseSaveProtocol = currentRole === 'TI_AMM' && !tiAmmVistoGuidePending && !saveDisabled && toolbarDeterminationState === 'FASCICOLO_TRASMESSO_PROTOCOLLO' && protocolDraftComplete && !protocolSavedComplete
 
   const readOnlyInfoButton = readOnlyBannerMessage ? (
     <button
@@ -9311,6 +9547,7 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
           }}
         />
       )}
+      <div style={verificationHasSeparateActionPanel ? verificationMainPanelStyle : { display: 'contents' }}>
         <div style={{
           flex: '0 0 auto',
           position: 'relative',
@@ -9375,16 +9612,19 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
               </div>
             </div>
             <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
-              <button type='button' disabled={saveDisabled} onClick={handleSave}
-                style={{
-                  ...editBtnBase,
-                  border: '1px solid rgba(0,0,0,0.18)',
-                  background: saveDisabled ? '#e5e7eb' : '#1a7f37',
-                  color: saveDisabled ? '#9ca3af' : '#fff',
-                  cursor: saveDisabled ? 'not-allowed' : 'pointer'
-                }}>
-                {saving ? 'Salvataggio bozza…' : 'Salva bozza'}
-              </button>
+              <span style={{ position: 'relative', display: 'inline-flex' }}>
+                {pulseSaveProtocol && <NextActionPulse floating title='Azione successiva: salva numero e data di protocollo' />}
+                <button type='button' disabled={saveDisabled} onClick={handleSave}
+                  style={{
+                    ...editBtnBase,
+                    border: '1px solid rgba(0,0,0,0.18)',
+                    background: saveDisabled ? '#e5e7eb' : '#1a7f37',
+                    color: saveDisabled ? '#9ca3af' : '#fff',
+                    cursor: saveDisabled ? 'not-allowed' : 'pointer'
+                  }}>
+                  {saving ? 'Salvataggio bozza…' : 'Salva bozza'}
+                </button>
+              </span>
               <button type='button' disabled={cancelDisabled} onClick={handleReset}
                 style={{
                   ...editBtnBase,
@@ -9478,6 +9718,7 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
                     oid={oid != null && Number.isFinite(Number(oid)) ? Number(oid) : null}
                     ds={(active as any)?.ds}
                     layerUrl={(active as any)?.layerUrl || (configuredDsState as any)?.layerUrl || getDataSourceUrl(configuredDs)}
+                    actionBarTarget={verificationActionBarTarget}
                   />
                 </>
               )}
@@ -9565,6 +9806,22 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
           </>
         )}
       </div>
+      </div>
+
+      {hasSelection && activeAmmSection === 'verifica_istruttoria' && (
+        <div
+          data-gii-editing-amm-verifica-actions-footer='1'
+          style={{
+            flex: '0 0 auto',
+            width: '100%',
+            boxSizing: 'border-box',
+            padding: '8px 0 0 0'
+          }}
+        >
+          <div ref={setVerificationActionBarTarget} />
+        </div>
+      )}
+
       <DirtyNavigationLockOverlay active={pageVisible && hasSelection} targetRef={rootRef} />
     </div>
     </AdminStyleCtx.Provider>

@@ -668,7 +668,7 @@ function takeChargeTitleForMessage (label: string, row: Record<string, any>): st
   const hay = `${label || ''} ${attr(row, ['tipo_attivita']) || ''} ${attr(row, ['sottotipo_attivita']) || ''} ${attr(row, ['titolo']) || ''} ${attr(row, ['messaggio']) || ''} ${attr(row, ['origine_evento']) || ''}`.toUpperCase()
   if (hay.includes('ATTESTAZIONE_CONFORMITA') || hay.includes('ATTESTAZIONE DI CONFORMIT')) return 'Attestazione di conformità apposta'
   if (hay.includes('PROPOSTA_CONTESTAZIONE_APPROVATA') || hay.includes('PROPOSTA DI CONTESTAZIONE APPROVATA')) return 'Proposta di contestazione approvata'
-  if (hay.includes('BOZZA_DETERMINAZIONE') || hay.includes('BOZZA DETERMINAZIONE')) return 'Bozza determinazione da verificare'
+  if (hay.includes('BOZZA_DETERMINAZIONE') || hay.includes('BOZZA DETERMINAZIONE') || hay.includes('FASCICOLO ISTRUTTORIO')) return 'Fascicolo istruttorio da verificare'
   if (hay.includes('INTEGRAZ')) return 'Richiesta di integrazione ricevuta'
   return 'Nuova istruttoria ricevuta'
 }

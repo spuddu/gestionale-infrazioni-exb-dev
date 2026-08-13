@@ -3749,6 +3749,41 @@ async function nsdQueryRows (detailUrl: string, parentGlobalId: string): Promise
   })
 }
 
+function NsdExpandableCostSection (props: { title: React.ReactNode; total: string; children: React.ReactNode }) {
+  const [open, setOpen] = React.useState(false)
+  return (
+    <details
+      open={open}
+      onToggle={(e: any) => setOpen(!!e.currentTarget.open)}
+      style={{ border: '1px solid #cbd5e1', borderRadius: 10, background: '#fff', overflow: 'hidden' }}
+    >
+      <summary
+        style={{
+          cursor: 'pointer',
+          display: 'grid',
+          gridTemplateColumns: '12px minmax(0, 1fr) 132px',
+          alignItems: 'center',
+          columnGap: 8,
+          fontSize: 13,
+          fontWeight: 800,
+          color: '#1f2937',
+          padding: '8px 12px',
+          background: '#e5e7eb',
+          borderBottom: '1px solid #cbd5e1',
+          listStyle: 'none'
+        }}
+      >
+        <span aria-hidden='true' style={{ color: '#1d4ed8', fontSize: 10, fontWeight: 900, width: 12, display: 'inline-flex', justifyContent: 'center', flexShrink: 0 }}>
+          {open ? '▼' : '▶'}
+        </span>
+        <span>{props.title}</span>
+        <span style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>{props.total}</span>
+      </summary>
+      <div style={{ padding: 10 }}>{props.children}</div>
+    </details>
+  )
+}
+
 function NotaSpeseDetailPanel (props: { data: any; detailUrl: string; hasSel: boolean; rows: NsdDetailRow[]; loading: boolean; error: string | null; attrezzatureCatalog: Map<string, string> }) {
   const parentGlobalId = String(nsdPickAttrCI(props.data, ['GlobalID', 'globalid']) || '').trim()
   // Righe e stato di caricamento arrivano ora dal parent (DetailTabsPanel), che le
@@ -4066,13 +4101,13 @@ function NotaSpeseDetailPanel (props: { data: any; detailUrl: string; hasSel: bo
                   if (!catRows.length) return null
                   const total = catRows.reduce((sum, row) => sum + nsdSafeNum(row.importo_riga, 0), 0)
                   return (
-                    <details key={`${group.code}-${cat}`} style={{ border: '1px solid #cbd5e1', borderRadius: 10, background: '#fff', overflow: 'hidden' }}>
-                      <summary style={{ cursor: 'pointer', display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) 132px', alignItems: 'center', gap: 12, fontSize: 13, fontWeight: 800, color: '#1f2937', padding: '8px 12px', background: '#e5e7eb', borderBottom: '1px solid #cbd5e1' }}>
-                        <span>{NSD_CATEGORY_LABELS[cat]} <span style={{ color: '#4b5563', fontWeight: 700 }}>({catRows.length} {catRows.length === 1 ? 'voce' : 'voci'})</span></span>
-                        <span style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>€ {nsdMoney(total)}</span>
-                      </summary>
-                      <div style={{ padding: 10 }}>{renderRows(cat, group.rows)}</div>
-                    </details>
+                    <NsdExpandableCostSection
+                      key={`${group.code}-${cat}`}
+                      title={<>{NSD_CATEGORY_LABELS[cat]} <span style={{ color: '#4b5563', fontWeight: 700 }}>({catRows.length} {catRows.length === 1 ? 'voce' : 'voci'})</span></>}
+                      total={`€ ${nsdMoney(total)}`}
+                    >
+                      {renderRows(cat, group.rows)}
+                    </NsdExpandableCostSection>
                   )
                 })}
 
@@ -4081,13 +4116,13 @@ function NotaSpeseDetailPanel (props: { data: any; detailUrl: string; hasSel: bo
                 if (!raRows.length) return null
                 const total = raRows.reduce((sum, row) => sum + nsdSafeNum(row.importo_riga, 0), 0)
                 return (
-                  <details key={`${group.code}-RA`} style={{ border: '1px solid #cbd5e1', borderRadius: 10, background: '#fff', overflow: 'hidden' }}>
-                    <summary style={{ cursor: 'pointer', display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) 132px', alignItems: 'center', gap: 12, fontSize: 13, fontWeight: 800, color: '#1f2937', padding: '8px 12px', background: '#e5e7eb', borderBottom: '1px solid #cbd5e1' }}>
-                      <span>{NSD_CATEGORY_LABELS.RA} <span style={{ color: '#4b5563', fontWeight: 700 }}>({raRows.length} {raRows.length === 1 ? 'voce' : 'voci'})</span></span>
-                      <span style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>€ {nsdMoney(total)}</span>
-                    </summary>
-                    <div style={{ padding: 10 }}>{renderRaRows(group.rows)}</div>
-                  </details>
+                  <NsdExpandableCostSection
+                    key={`${group.code}-RA`}
+                    title={<>{NSD_CATEGORY_LABELS.RA} <span style={{ color: '#4b5563', fontWeight: 700 }}>({raRows.length} {raRows.length === 1 ? 'voce' : 'voci'})</span></>}
+                    total={`€ ${nsdMoney(total)}`}
+                  >
+                    {renderRaRows(group.rows)}
+                  </NsdExpandableCostSection>
                 )
               })()}
 

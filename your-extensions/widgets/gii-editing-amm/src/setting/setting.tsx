@@ -3,8 +3,8 @@
 import { React, jsx, Immutable, DataSourceTypes, type UseDataSource } from 'jimu-core'
 import type { AllWidgetSettingProps } from 'jimu-for-builder'
 import { DataSourceSelector } from 'jimu-ui/advanced/data-source-selector'
-import type { IMConfig, SummaryFieldConfig } from '../config'
-import { defaultConfig, defaultSummaryFields } from '../config'
+import type { IMConfig } from '../config'
+import { defaultConfig } from '../config'
 
 type Props = AllWidgetSettingProps<IMConfig>
 
@@ -46,15 +46,6 @@ function ColInp (p: { value: string, onChange: (v: string) => void }) {
   )
 }
 
-function Check (p: { value: boolean, onChange: (v: boolean) => void, label: string }) {
-  return (
-    <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, color: '#d1d5db', cursor: 'pointer', marginTop: 8 }}>
-      <input type='checkbox' checked={!!p.value} onChange={e => p.onChange(e.target.checked)} />
-      {p.label}
-    </label>
-  )
-}
-
 function Acc (p: { id: string, label: string, open: boolean, onToggle: () => void }) {
   return (
     <div style={P.sec} onClick={p.onToggle}>
@@ -79,23 +70,14 @@ function parseNum (v: any, fb: number): number {
   return Number.isFinite(n) ? n : fb
 }
 
-function normalizeFields (v: any): SummaryFieldConfig[] {
-  const arr = Array.isArray(asJs(v)) ? asJs<any[]>(v) : []
-  return arr.map((x: any) => ({ name: String(x?.name || '').trim(), label: String(x?.label || x?.name || '').trim() }))
-}
-
 export default function Setting (props: Props) {
   const [openSec, setOpenSec] = React.useState<string>('datasource')
   const cfgJs: any = { ...defaultConfig, ...asJs(props.config) }
-  const fields = normalizeFields(cfgJs.summaryFields)
   const baseCfg = props.config || ((Immutable as any)(defaultConfig) as any)
 
   const patch = (obj: Record<string, any>) => {
     let next = baseCfg
-    Object.entries(obj).forEach(([k, v]) => {
-      if (k === 'summaryFields') next = next.set(k, (Immutable as any)((v || []) as any) as any)
-      else next = next.set(k, v)
-    })
+    Object.entries(obj).forEach(([k, v]) => { next = next.set(k, v) })
     props.onSettingChange({ id: props.id, config: next })
   }
 
@@ -110,17 +92,7 @@ export default function Setting (props: Props) {
   const isOpen = (id: string) => openSec === id
   const toggle = (id: string) => setOpenSec(s => s === id ? '' : id)
 
-  const setField = (idx: number, key: keyof SummaryFieldConfig, value: string) => {
-    const next = fields.slice()
-    next[idx] = { ...(next[idx] || { name: '', label: '' }), [key]: value }
-    patch({ summaryFields: next })
-  }
 
-  const removeField = (idx: number) => {
-    const next = fields.slice()
-    next.splice(idx, 1)
-    patch({ summaryFields: next })
-  }
 
   return (
     <div style={P.wrap}>
@@ -141,6 +113,10 @@ export default function Setting (props: Props) {
         </div>
       </div>}
 
+
+      <div style={{ ...P.hint, marginTop: 14, padding: '8px 10px', border: '1px solid rgba(147,197,253,0.20)', borderRadius: 8, background: 'rgba(59,130,246,0.06)' }}>
+        Il pannello espone solo impostazioni effettivamente collegate agli elementi attuali di gii-editing-amm. Le impostazioni condivise indicano esplicitamente le schede interessate.
+      </div>
 
       <Acc id='sanzioni' label='⚖️ Parametri sanzionatori' open={isOpen('sanzioni')} onToggle={() => toggle('sanzioni')} />
       {isOpen('sanzioni') && <div>
@@ -164,43 +140,9 @@ export default function Setting (props: Props) {
         <Inp value={cfgJs.nsParametroCode || ''} onChange={v => patch({ nsParametroCode: v })} placeholder='SPESE_GENERALI_PERC' />
       </div>}
 
-      <Acc id='testi' label='📝 Testi' open={isOpen('testi')} onToggle={() => toggle('testi')} />
-      {isOpen('testi') && <div>
-        <label style={P.lbl}>Titolo</label>
-        <Inp value={cfgJs.title} onChange={v => patch({ title: v })} />
-        <label style={P.lbl}>Sottotitolo</label>
-        <Inp value={cfgJs.subtitle} onChange={v => patch({ subtitle: v })} />
-        <label style={P.lbl}>Prefisso titolo pratica</label>
-        <Inp value={cfgJs.detailTitlePrefix} onChange={v => patch({ detailTitlePrefix: v })} />
-      </div>}
-
-      <Acc id='riepilogo' label='🧾 Campi riepilogo' open={isOpen('riepilogo')} onToggle={() => toggle('riepilogo')} />
-      {isOpen('riepilogo') && <div>
-        <div style={P.hint}>Campi mostrati in sola lettura nella scheda amministrativa. I campi non presenti nel record compariranno come “—”.</div>
-        <div style={{ marginTop: 8 }}>
-          {fields.map((f, idx) => (
-            <div key={`${idx}-${f.name}`} style={P.card}>
-              <div style={P.row2}>
-                <div>
-                  <label style={P.lbl}>Nome campo</label>
-                  <Inp value={f.name} onChange={v => setField(idx, 'name', v)} />
-                </div>
-                <div>
-                  <label style={P.lbl}>Etichetta</label>
-                  <Inp value={f.label} onChange={v => setField(idx, 'label', v)} />
-                </div>
-              </div>
-              <button type='button' onClick={() => removeField(idx)} style={{ marginTop: 8, padding: '5px 9px', borderRadius: 7, border: '1px solid rgba(252,165,165,0.4)', background: 'rgba(239,68,68,0.10)', color: '#fca5a5', fontSize: 12, cursor: 'pointer' }}>Rimuovi</button>
-            </div>
-          ))}
-        </div>
-        <button type='button' onClick={() => patch({ summaryFields: [...fields, { name: '', label: '' }] })} style={{ marginTop: 8, width: '100%', padding: '7px', borderRadius: 8, border: '1px dashed rgba(147,197,253,0.4)', background: 'rgba(59,130,246,0.08)', color: '#93c5fd', cursor: 'pointer', fontSize: 12, fontWeight: 600 }}>＋ Aggiungi campo</button>
-        <button type='button' onClick={() => patch({ summaryFields: defaultSummaryFields })} style={{ marginTop: 8, width: '100%', padding: '7px', borderRadius: 8, border: '1px solid rgba(255,255,255,0.14)', background: 'rgba(255,255,255,0.05)', color: '#e5e7eb', cursor: 'pointer', fontSize: 12, fontWeight: 600 }}>Ripristina campi base</button>
-      </div>}
-
       <Acc id='stile-maschera' label='🎨 Maschera generale' open={isOpen('stile-maschera')} onToggle={() => toggle('stile-maschera')} />
       {isOpen('stile-maschera') && <div>
-        <SectionBox title='Contenitore maschera' hint='Aspetto del pannello generale del verbale.'>
+        <SectionBox title='Contenitore maschera' hint='Aspetto del pannello generale di gii-editing-amm.'>
           <div style={P.row2}><div><label style={P.lbl}>Sfondo maschera</label><ColInp value={cfgJs.maskBg || defaultConfig.maskBg} onChange={v => patch({ maskBg: v })} /></div><div><label style={P.lbl}>Colore bordo</label><ColInp value={cfgJs.maskBorderColor || defaultConfig.maskBorderColor} onChange={v => patch({ maskBorderColor: v })} /></div></div>
           <div style={P.row3}>
             <div><label style={P.lbl}>Spessore bordo</label><NumInp value={parseNum(cfgJs.maskBorderWidth, defaultConfig.maskBorderWidth)} onChange={n => patch({ maskBorderWidth: n })} min={0} max={8} unit='px' /></div>
@@ -208,14 +150,12 @@ export default function Setting (props: Props) {
             <div><label style={P.lbl}>Padding interno</label><NumInp value={parseNum(cfgJs.maskInnerPadding, defaultConfig.maskInnerPadding)} onChange={n => patch({ maskInnerPadding: n })} min={0} max={40} unit='px' /></div>
           </div>
         </SectionBox>
-        <SectionBox title='Barra superiore e messaggi' hint='Titolo del verbale, sottotitolo e messaggi di stato.'>
-          <div style={P.row3}>
-            <div><label style={P.lbl}>Titolo</label><NumInp value={parseNum(cfgJs.titleFontSize, defaultConfig.titleFontSize)} onChange={n => patch({ titleFontSize: n })} min={10} max={28} unit='px' /></div>
-            <div><label style={P.lbl}>Sottotitolo</label><NumInp value={parseNum(cfgJs.subtitleFontSize, defaultConfig.subtitleFontSize)} onChange={n => patch({ subtitleFontSize: n })} min={9} max={24} unit='px' /></div>
-            <div><label style={P.lbl}>Messaggi</label><NumInp value={parseNum(cfgJs.msgFontSize, defaultConfig.msgFontSize)} onChange={n => patch({ msgFontSize: n })} min={9} max={24} unit='px' /></div>
+        <SectionBox title='Titolo della pratica' hint='Dimensione del titolo principale visualizzato nella barra superiore del widget.'>
+          <div style={P.row2}>
+            <div><label style={P.lbl}>Dimensione titolo</label><NumInp value={parseNum(cfgJs.titleFontSize, defaultConfig.titleFontSize)} onChange={n => patch({ titleFontSize: n })} min={18} max={28} unit='px' /></div>
           </div>
         </SectionBox>
-        <SectionBox title='Card principali con intestazione blu' hint='Aspetto delle sezioni principali della maschera: Istruttoria amministrativa, Verifica dati automatici, Predisposizione verbale, Pagamento, Protocollo e chiusura.'>
+        <SectionBox title='Card principali con intestazione blu' hint='Aspetto condiviso delle sezioni principali presenti nelle schede amministrative: Verifica istruttoria, Dati generali, Pagamento, Notifica e fasi successive.'>
           <div style={P.row2}><div><label style={P.lbl}>Sfondo corpo card</label><ColInp value={cfgJs.formCardBg || defaultConfig.formCardBg} onChange={v => patch({ formCardBg: v })} /></div><div><label style={P.lbl}>Bordo card</label><ColInp value={cfgJs.formCardBorderColor || defaultConfig.formCardBorderColor} onChange={v => patch({ formCardBorderColor: v })} /></div></div>
           <div style={P.row3}>
             <div><label style={P.lbl}>Spessore bordo</label><NumInp value={parseNum(cfgJs.formCardBorderWidth, defaultConfig.formCardBorderWidth)} onChange={n => patch({ formCardBorderWidth: n })} min={0} max={8} unit='px' /></div>
@@ -226,7 +166,7 @@ export default function Setting (props: Props) {
         </SectionBox>
         <SectionBox title='Intestazioni delle card principali' hint='Barre blu con il titolo della sezione.'>
           <label style={P.lbl}>Sfondo intestazione card</label><Inp value={cfgJs.formCardHeaderBg || defaultConfig.formCardHeaderBg} onChange={v => patch({ formCardHeaderBg: v })} placeholder='linear-gradient(90deg, #0d3b66, #155e9d)' />
-          <div style={P.row2}><div><label style={P.lbl}>Colore testo intestazione</label><ColInp value={cfgJs.formCardHeaderColor || defaultConfig.formCardHeaderColor} onChange={v => patch({ formCardHeaderColor: v })} /></div><div><label style={P.lbl}>Dimensione testo</label><NumInp value={parseNum(cfgJs.formCardHeaderFontSize, defaultConfig.formCardHeaderFontSize)} onChange={n => patch({ formCardHeaderFontSize: n })} min={8} max={24} unit='px' /></div></div>
+          <div style={P.row2}><div><label style={P.lbl}>Colore testo intestazione</label><ColInp value={cfgJs.formCardHeaderColor || defaultConfig.formCardHeaderColor} onChange={v => patch({ formCardHeaderColor: v })} /></div><div><label style={P.lbl}>Dimensione testo</label><NumInp value={parseNum(cfgJs.formCardHeaderFontSize, defaultConfig.formCardHeaderFontSize)} onChange={n => patch({ formCardHeaderFontSize: n })} min={14} max={24} unit='px' /></div></div>
           <div style={P.row3}>
             <div><label style={P.lbl}>Peso testo</label><NumInp value={parseNum(cfgJs.formCardHeaderFontWeight, defaultConfig.formCardHeaderFontWeight)} onChange={n => patch({ formCardHeaderFontWeight: n })} min={300} max={900} step={100} /></div>
             <div><label style={P.lbl}>Padding X intestazione</label><NumInp value={parseNum(cfgJs.formCardHeaderPaddingX, defaultConfig.formCardHeaderPaddingX)} onChange={n => patch({ formCardHeaderPaddingX: n })} min={0} max={30} unit='px' /></div>
@@ -239,7 +179,7 @@ export default function Setting (props: Props) {
       <Acc id='stile-campi' label='🎨 Campi input e testi' open={isOpen('stile-campi')} onToggle={() => toggle('stile-campi')} />
       {isOpen('stile-campi') && <div>
         <SectionBox title='Etichette dei campi' hint='Etichette sopra input, combo e textarea.'>
-          <div style={P.row2}><div><label style={P.lbl}>Colore etichette</label><ColInp value={cfgJs.formLabelColor || defaultConfig.formLabelColor} onChange={v => patch({ formLabelColor: v })} /></div><div><label style={P.lbl}>Dimensione testo</label><NumInp value={parseNum(cfgJs.formLabelFontSize, defaultConfig.formLabelFontSize)} onChange={n => patch({ formLabelFontSize: n })} min={8} max={24} unit='px' /></div></div>
+          <div style={P.row2}><div><label style={P.lbl}>Colore etichette</label><ColInp value={cfgJs.formLabelColor || defaultConfig.formLabelColor} onChange={v => patch({ formLabelColor: v })} /></div><div><label style={P.lbl}>Dimensione testo</label><NumInp value={parseNum(cfgJs.formLabelFontSize, defaultConfig.formLabelFontSize)} onChange={n => patch({ formLabelFontSize: n })} min={15} max={24} unit='px' /></div></div>
           <div style={P.row2}><div><label style={P.lbl}>Peso testo</label><NumInp value={parseNum(cfgJs.formLabelFontWeight, defaultConfig.formLabelFontWeight)} onChange={n => patch({ formLabelFontWeight: n })} min={300} max={900} step={100} /></div><div><label style={P.lbl}>Distanza da campo</label><NumInp value={parseNum(cfgJs.formLabelMarginBottom, defaultConfig.formLabelMarginBottom)} onChange={n => patch({ formLabelMarginBottom: n })} min={0} max={20} unit='px' /></div></div>
         </SectionBox>
         <SectionBox title='Input / combo / textarea' hint='Campi compilabili e campi bloccati.'>
@@ -247,7 +187,7 @@ export default function Setting (props: Props) {
           <div style={P.row2}><div><label style={P.lbl}>Colore bordo</label><ColInp value={cfgJs.formFieldBorderColor || defaultConfig.formFieldBorderColor} onChange={v => patch({ formFieldBorderColor: v })} /></div><div><label style={P.lbl}>Sfondo campo bloccato</label><ColInp value={cfgJs.formFieldDisabledBg || defaultConfig.formFieldDisabledBg} onChange={v => patch({ formFieldDisabledBg: v })} /></div></div>
           <div style={P.row2}><div><label style={P.lbl}>Colore testo campo bloccato</label><ColInp value={cfgJs.formFieldDisabledColor || defaultConfig.formFieldDisabledColor} onChange={v => patch({ formFieldDisabledColor: v })} /></div><div /></div>
           <div style={P.row3}>
-            <div><label style={P.lbl}>Dimensione testo</label><NumInp value={parseNum(cfgJs.formFieldFontSize, defaultConfig.formFieldFontSize)} onChange={n => patch({ formFieldFontSize: n })} min={8} max={24} unit='px' /></div>
+            <div><label style={P.lbl}>Dimensione testo</label><NumInp value={parseNum(cfgJs.formFieldFontSize, defaultConfig.formFieldFontSize)} onChange={n => patch({ formFieldFontSize: n })} min={15} max={24} unit='px' /></div>
             <div><label style={P.lbl}>Altezza campo</label><NumInp value={parseNum(cfgJs.formFieldHeight, defaultConfig.formFieldHeight)} onChange={n => patch({ formFieldHeight: n })} min={24} max={60} unit='px' /></div>
             <div><label style={P.lbl}>Padding orizzontale</label><NumInp value={parseNum(cfgJs.formFieldPaddingX, defaultConfig.formFieldPaddingX)} onChange={n => patch({ formFieldPaddingX: n })} min={0} max={30} unit='px' /></div>
           </div>
@@ -258,16 +198,16 @@ export default function Setting (props: Props) {
         </SectionBox>
       </div>}
 
-      <Acc id='stile-istruttoria' label='🎨 Istruttoria amministrativa' open={isOpen('stile-istruttoria')} onToggle={() => toggle('stile-istruttoria')} />
-      {isOpen('stile-istruttoria') && <div>
-        <SectionBox title='Dettagli pratica e workflow' hint='Card espandibile che contiene il riepilogo delle fasi.'>
+      <Acc id='stile-dati-generali' label='🎨 Dati generali — Dettagli pratica e iter' open={isOpen('stile-dati-generali')} onToggle={() => toggle('stile-dati-generali')} />
+      {isOpen('stile-dati-generali') && <div>
+        <SectionBox title='Card espandibile “Dettagli pratica e iter”' hint='Questi stessi valori sono condivisi anche dalle card espandibili Dati pagoPA e Dati bonifico della scheda Pagamento.'>
           <div style={P.row2}>
             <div><label style={P.lbl}>Sfondo card espandibile</label><ColInp value={cfgJs.formExpandableCardBg || defaultConfig.formExpandableCardBg} onChange={v => patch({ formExpandableCardBg: v })} /></div>
             <div><label style={P.lbl}>Bordo card espandibile</label><ColInp value={cfgJs.formExpandableCardBorderColor || defaultConfig.formExpandableCardBorderColor} onChange={v => patch({ formExpandableCardBorderColor: v })} /></div>
           </div>
           <div style={P.row2}><div><label style={P.lbl}>Spessore bordo</label><NumInp value={parseNum(cfgJs.formExpandableCardBorderWidth, defaultConfig.formExpandableCardBorderWidth)} onChange={n => patch({ formExpandableCardBorderWidth: n })} min={0} max={8} unit='px' /></div></div>
         </SectionBox>
-        <SectionBox title='Fase tecnica / Fase amministrativa' hint='Riquadri interni al workflow.'>
+        <SectionBox title='Fase tecnica / Fase amministrativa' hint='Riquadri interni al blocco Dettagli pratica e iter della scheda Dati generali.'>
           <div style={P.row2}>
             <div><label style={P.lbl}>Sfondo card fasi</label><ColInp value={cfgJs.formPhaseCardBg || defaultConfig.formPhaseCardBg} onChange={v => patch({ formPhaseCardBg: v })} /></div>
             <div><label style={P.lbl}>Bordo card fasi</label><ColInp value={cfgJs.formPhaseCardBorderColor || defaultConfig.formPhaseCardBorderColor} onChange={v => patch({ formPhaseCardBorderColor: v })} /></div>
@@ -277,7 +217,7 @@ export default function Setting (props: Props) {
             <div><label style={P.lbl}>Colore titolo fase</label><ColInp value={cfgJs.formPhaseCardTitleColor || defaultConfig.formPhaseCardTitleColor} onChange={v => patch({ formPhaseCardTitleColor: v })} /></div>
           </div>
         </SectionBox>
-        <SectionBox title='Rapporto / Competenza / Istruttoria tecnica / Stati amministrativi' hint='Sottocard interne ai riquadri Fase tecnica e Fase amministrativa.'>
+        <SectionBox title='Rapporto / Competenza / Istruttoria tecnica / Stati amministrativi' hint='Sottocard interne ai riquadri Fase tecnica e Fase amministrativa della scheda Dati generali.'>
           <div style={P.row2}>
             <div><label style={P.lbl}>Sfondo sottocard</label><ColInp value={cfgJs.formWorkflowBadgeBg || defaultConfig.formWorkflowBadgeBg} onChange={v => patch({ formWorkflowBadgeBg: v })} /></div>
             <div><label style={P.lbl}>Bordo sottocard</label><ColInp value={cfgJs.formWorkflowBadgeBorderColor || defaultConfig.formWorkflowBadgeBorderColor} onChange={v => patch({ formWorkflowBadgeBorderColor: v })} /></div>
@@ -294,9 +234,33 @@ export default function Setting (props: Props) {
         </SectionBox>
       </div>}
 
-      <Acc id='stile-verifica' label='🎨 1. Verifica dati automatici' open={isOpen('stile-verifica')} onToggle={() => toggle('stile-verifica')} />
-      {isOpen('stile-verifica') && <div>
-        <SectionBox title='Atto amministrativo e riepilogo economico' hint='Riquadri automatici: Tipo atto, Oggetto, importi, dettaglio calcolo, stati e totali.'>
+      <Acc id='stile-verifica-istruttoria' label='🎨 Verifica istruttoria' open={isOpen('stile-verifica-istruttoria')} onToggle={() => toggle('stile-verifica-istruttoria')} />
+      {isOpen('stile-verifica-istruttoria') && <div>
+        <SectionBox title='Barra Azioni' hint='Aspetto della barra mostrata esclusivamente nella scheda Verifica istruttoria.'>
+          <div style={P.row2}>
+            <div><label style={P.lbl}>Colore di sfondo</label><ColInp value={cfgJs.actionBarBg || defaultConfig.actionBarBg} onChange={v => patch({ actionBarBg: v })} /></div>
+            <div><label style={P.lbl}>Colore bordo</label><ColInp value={cfgJs.actionBarBorderColor || defaultConfig.actionBarBorderColor} onChange={v => patch({ actionBarBorderColor: v })} /></div>
+          </div>
+          <div style={P.row3}>
+            <div><label style={P.lbl}>Spessore bordo</label><NumInp value={parseNum(cfgJs.actionBarBorderWidth, defaultConfig.actionBarBorderWidth)} onChange={n => patch({ actionBarBorderWidth: n })} min={0} max={8} unit='px' /></div>
+            <div><label style={P.lbl}>Arrotondamento</label><NumInp value={parseNum(cfgJs.actionBarBorderRadius, defaultConfig.actionBarBorderRadius)} onChange={n => patch({ actionBarBorderRadius: n })} min={0} max={40} unit='px' /></div>
+            <div><label style={P.lbl}>Spazio tra pulsanti</label><NumInp value={parseNum(cfgJs.actionBarButtonGap, defaultConfig.actionBarButtonGap)} onChange={n => patch({ actionBarButtonGap: n })} min={0} max={40} unit='px' /></div>
+          </div>
+          <div style={P.row2}>
+            <div><label style={P.lbl}>Padding orizzontale</label><NumInp value={parseNum(cfgJs.actionBarPaddingX, defaultConfig.actionBarPaddingX)} onChange={n => patch({ actionBarPaddingX: n })} min={0} max={40} unit='px' /></div>
+            <div><label style={P.lbl}>Padding verticale</label><NumInp value={parseNum(cfgJs.actionBarPaddingY, defaultConfig.actionBarPaddingY)} onChange={n => patch({ actionBarPaddingY: n })} min={0} max={30} unit='px' /></div>
+          </div>
+          <div style={P.row2}>
+            <div><label style={P.lbl}>Colore titolo “Azioni”</label><ColInp value={cfgJs.actionBarTitleColor || defaultConfig.actionBarTitleColor} onChange={v => patch({ actionBarTitleColor: v })} /></div>
+            <div><label style={P.lbl}>Dimensione titolo</label><NumInp value={parseNum(cfgJs.actionBarTitleFontSize, defaultConfig.actionBarTitleFontSize)} onChange={n => patch({ actionBarTitleFontSize: n })} min={8} max={24} unit='px' /></div>
+          </div>
+        </SectionBox>
+        <SectionBox title='Riquadri di stato' hint='I riquadri Esito, Operatore, Date e Stato bozza usano lo stile condiviso configurabile nella sezione “Riquadri riepilogativi condivisi”.' />
+      </div>}
+
+      <Acc id='stile-riepiloghi' label='🎨 Riquadri riepilogativi condivisi' open={isOpen('stile-riepiloghi')} onToggle={() => toggle('stile-riepiloghi')} />
+      {isOpen('stile-riepiloghi') && <div>
+        <SectionBox title='Riquadri di stato e importi' hint='Stile condiviso dai riepiloghi presenti in Verifica istruttoria, Dati generali, Pagamento, Notifica, Definizione e altre sezioni amministrative.'>
           <div style={P.row2}>
             <div><label style={P.lbl}>Sfondo riquadro normale</label><ColInp value={cfgJs.statusSummaryNormalBg || defaultConfig.statusSummaryNormalBg} onChange={v => patch({ statusSummaryNormalBg: v })} /></div>
             <div><label style={P.lbl}>Bordo riquadro normale</label><ColInp value={cfgJs.statusSummaryNormalBorderColor || defaultConfig.statusSummaryNormalBorderColor} onChange={v => patch({ statusSummaryNormalBorderColor: v })} /></div>
@@ -327,53 +291,13 @@ export default function Setting (props: Props) {
         </SectionBox>
       </div>}
 
-      <Acc id='stile-verbale' label='🎨 2. Predisposizione verbale' open={isOpen('stile-verbale')} onToggle={() => toggle('stile-verbale')} />
-      {isOpen('stile-verbale') && <div>
-        <SectionBox title='Riquadro Tipo atto / Oggetto' hint='Card interna azzurrina all’inizio della sezione Predisposizione verbale.'>
-          <div style={P.row2}>
-            <div><label style={P.lbl}>Sfondo card</label><ColInp value={cfgJs.verbaleInfoCardBg || defaultConfig.verbaleInfoCardBg} onChange={v => patch({ verbaleInfoCardBg: v })} /></div>
-            <div><label style={P.lbl}>Bordo card</label><ColInp value={cfgJs.verbaleInfoCardBorderColor || defaultConfig.verbaleInfoCardBorderColor} onChange={v => patch({ verbaleInfoCardBorderColor: v })} /></div>
-          </div>
-          <div style={P.row3}>
-            <div><label style={P.lbl}>Spessore bordo</label><NumInp value={parseNum(cfgJs.verbaleInfoCardBorderWidth, defaultConfig.verbaleInfoCardBorderWidth)} onChange={n => patch({ verbaleInfoCardBorderWidth: n })} min={0} max={8} unit='px' /></div>
-            <div><label style={P.lbl}>Etichette TIPO/OGGETTO</label><ColInp value={cfgJs.verbaleInfoLabelColor || defaultConfig.verbaleInfoLabelColor} onChange={v => patch({ verbaleInfoLabelColor: v })} /></div>
-            <div><label style={P.lbl}>Testo Tipo atto</label><ColInp value={cfgJs.verbaleInfoTipoTextColor || defaultConfig.verbaleInfoTipoTextColor} onChange={v => patch({ verbaleInfoTipoTextColor: v })} /></div>
-          </div>
-          <div style={P.row2}><div><label style={P.lbl}>Testo Oggetto</label><ColInp value={cfgJs.verbaleInfoOggettoTextColor || defaultConfig.verbaleInfoOggettoTextColor} onChange={v => patch({ verbaleInfoOggettoTextColor: v })} /></div></div>
-        </SectionBox>
-        <SectionBox title='Stato verbale / Numero / Data' hint='Usa gli stessi riquadri configurati in “1. Verifica dati automatici”.' />
-        <SectionBox title='Note amministrative' hint='Textarea e campi usano i colori della sezione “Campi input e testi”.' />
-      </div>}
-
-      <Acc id='stile-pagamento' label='🎨 3. Pagamento' open={isOpen('stile-pagamento')} onToggle={() => toggle('stile-pagamento')} />
-      {isOpen('stile-pagamento') && <div>
-        <SectionBox title='Importo / scadenza / stato pagamento' hint='Usa i riquadri automatici configurati in “1. Verifica dati automatici”.' />
-        <SectionBox title='Dati pagoPA e dati bonifico' hint='Card espandibili: usano le impostazioni di “Istruttoria amministrativa → Dettagli pratica e workflow”.' />
-        <SectionBox title='Campi di pagamento' hint='Le combo Modalità pagamento e Stato pagamento usano le impostazioni di “Campi input e testi”.' />
-      </div>}
-
-      <Acc id='stile-notifica' label='🎨 4-5. Protocollo e chiusura' open={isOpen('stile-notifica')} onToggle={() => toggle('stile-notifica')} />
-      {isOpen('stile-notifica') && <div>
-        <SectionBox title='Protocollo e notifica' hint='Input, date, combo e textarea usano le impostazioni di “Campi input e testi”.' />
-        <SectionBox title='Completamento istruttoria amministrativa' hint='I riquadri riepilogativi usano le impostazioni di “1. Verifica dati automatici”.' />
-      </div>}
-
       <Acc id='stile-norme' label='🎨 Norme e calcolo' open={isOpen('stile-norme')} onToggle={() => toggle('stile-norme')} />
       {isOpen('stile-norme') && <div>
-        <SectionBox title='Contenitore casistica e parametri' hint='Aspetto del contenitore delle casistiche, dei separatori e dei valori dei parametri.'>
+        <SectionBox title='Contenitore casistica' hint='Aspetto del contenitore esterno delle casistiche sanzionatorie.'>
           <div style={P.row3}>
             <div><label style={P.lbl}>Sfondo gruppo casistica</label><ColInp value={cfgJs.normGroupBg || defaultConfig.normGroupBg} onChange={v => patch({ normGroupBg: v })} /></div>
             <div><label style={P.lbl}>Bordo gruppo casistica</label><ColInp value={cfgJs.normGroupBorderColor || defaultConfig.normGroupBorderColor} onChange={v => patch({ normGroupBorderColor: v })} /></div>
             <div><label style={P.lbl}>Spessore bordo gruppo</label><NumInp value={parseNum(cfgJs.normGroupBorderWidth, defaultConfig.normGroupBorderWidth)} onChange={n => patch({ normGroupBorderWidth: n })} min={0} max={8} unit='px' /></div>
-          </div>
-          <div style={P.row2}>
-            <div><label style={P.lbl}>Separatore blocchi sanzione</label><ColInp value={cfgJs.normBlockSeparatorColor || defaultConfig.normBlockSeparatorColor} onChange={v => patch({ normBlockSeparatorColor: v })} /></div>
-            <div><label style={P.lbl}>Separatore voci parametro</label><ColInp value={cfgJs.normVoceSeparatorColor || defaultConfig.normVoceSeparatorColor} onChange={v => patch({ normVoceSeparatorColor: v })} /></div>
-          </div>
-          <div style={P.row3}>
-            <div><label style={P.lbl}>Testo voce parametro</label><ColInp value={cfgJs.normVoceLabelColor || defaultConfig.normVoceLabelColor} onChange={v => patch({ normVoceLabelColor: v })} /></div>
-            <div><label style={P.lbl}>Valore parametro trovato</label><ColInp value={cfgJs.normParametroOkColor || defaultConfig.normParametroOkColor} onChange={v => patch({ normParametroOkColor: v })} /></div>
-            <div><label style={P.lbl}>Valore parametro mancante</label><ColInp value={cfgJs.normParametroMissingColor || defaultConfig.normParametroMissingColor} onChange={v => patch({ normParametroMissingColor: v })} /></div>
           </div>
         </SectionBox>
         <SectionBox title='Norme violate' hint='Aspetto dedicato alle card apribili delle norme violate.'>
@@ -416,12 +340,6 @@ export default function Setting (props: Props) {
             <div><label style={P.lbl}>Meta articolo</label><ColInp value={cfgJs.normSanzionatoriaArticleMetaColor || defaultConfig.normSanzionatoriaArticleMetaColor} onChange={v => patch({ normSanzionatoriaArticleMetaColor: v })} /></div>
           </div>
         </SectionBox>
-      </div>}
-
-      <Acc id='opzioni' label='⚙️ Opzioni' open={isOpen('opzioni')} onToggle={() => toggle('opzioni')} />
-      {isOpen('opzioni') && <div>
-        <Check value={cfgJs.showRoleBox !== false} onChange={v => patch({ showRoleBox: v })} label='Mostra profilo operativo' />
-        <Check value={cfgJs.showWorkflowBox !== false} onChange={v => patch({ showWorkflowBox: v })} label='Mostra stato workflow amministrativo' />
       </div>}
 
       <div style={{ marginTop: 24, paddingTop: 14, borderTop: '1px solid rgba(255,255,255,0.08)' }}>

@@ -1,4 +1,5 @@
 export type BozzaDeterminazioneDocxMap = Record<string, string>
+export type BozzaDeterminazioneDocxOptions = { watermarkBozza?: boolean }
 
 type ZipEntry = { name: string, data: Uint8Array }
 type TextToken = { start: number, end: number, textStart: number, textEnd: number, fullStart: number, fullEnd: number, text: string }
@@ -608,6 +609,21 @@ function replaceTextAcrossRunsWithBold (xml: string, needle: string, replacement
   return out
 }
 
+function addBozzaWatermarkToHeader (xml: string): string {
+  if (!xml || xml.includes('GII_BOZZA_WATERMARK')) return xml
+  const watermark = `<w:p><w:pPr><w:jc w:val="center"/></w:pPr><w:r><w:pict>
+<v:shapetype id="_x0000_t136" coordsize="21600,21600" o:spt="136" adj="10800" path="m@7,l@8,m@5,21600l@6,21600e">
+  <v:formulas><v:f eqn="sum #0 0 10800"/><v:f eqn="prod #0 2 1"/><v:f eqn="sum 21600 0 @1"/><v:f eqn="sum 0 0 @2"/><v:f eqn="sum 21600 0 @3"/><v:f eqn="if @0 @3 0"/><v:f eqn="if @0 21600 @1"/><v:f eqn="if @0 0 @2"/><v:f eqn="if @0 @4 21600"/><v:f eqn="mid @5 @6"/><v:f eqn="mid @8 @5"/><v:f eqn="mid @7 @8"/><v:f eqn="mid @6 @7"/><v:f eqn="sum @6 0 @5"/></v:formulas>
+  <v:path textpathok="t" o:connecttype="custom" o:connectlocs="@9,0;@10,10800;@11,21600;@12,10800" o:connectangles="270,180,90,0"/>
+  <v:textpath on="t" fitshape="t"/><v:handles><v:h position="#0,bottomRight" xrange="6629,14971"/></v:handles><o:lock v:ext="edit" text="t" shapetype="t"/>
+</v:shapetype>
+<v:shape id="GII_BOZZA_WATERMARK" o:spid="_x0000_s2049" type="#_x0000_t136" style="position:absolute;margin-left:0;margin-top:0;width:350pt;height:130pt;rotation:326;z-index:-251654144;mso-position-horizontal:center;mso-position-horizontal-relative:page;mso-position-vertical:center;mso-position-vertical-relative:page" o:allowincell="f" fillcolor="#C0C0C0" stroked="f">
+  <v:fill opacity="0.50"/><v:textpath style="font-family:&quot;Calibri&quot;;font-size:1pt;font-weight:normal;letter-spacing:0" string="BOZZA"/><w10:wrap anchorx="page" anchory="page"/>
+</v:shape>
+</w:pict></w:r></w:p>`
+  return xml.replace('</w:hdr>', `${watermark}</w:hdr>`)
+}
+
 function patchCoreProps (xml: string, generatedBy: string): string {
   const by = clean(generatedBy) || 'Gestionale Infrazioni Irrigue'
   const now = new Date().toISOString()
@@ -645,12 +661,14 @@ export function getBozzaDeterminazioneDocxFileName (m: BozzaDeterminazioneDocxMa
   return `bozza_determinazione_${base}.docx`
 }
 
-export async function buildBozzaDeterminazioneDocx (m: BozzaDeterminazioneDocxMap): Promise<Uint8Array> {
+export async function buildBozzaDeterminazioneDocx (m: BozzaDeterminazioneDocxMap, options?: BozzaDeterminazioneDocxOptions): Promise<Uint8Array> {
   const entries = readZipStored(base64ToBytes(TEMPLATE_DOCX_B64))
   const generatedBy = clean(m.generato_da) || 'Gestionale Infrazioni Irrigue'
+  const watermarkBozza = options?.watermarkBozza !== false
   const patched = entries.map(entry => {
     if (entry.name === 'word/document.xml') return { name: entry.name, data: utf8(buildDocumentXmlFromTemplate(readUtf8(entry.data), m)) }
     if (entry.name === 'docProps/core.xml') return { name: entry.name, data: utf8(patchCoreProps(readUtf8(entry.data), generatedBy)) }
+    if (watermarkBozza && /^word\/header\d+\.xml$/i.test(entry.name)) return { name: entry.name, data: utf8(addBozzaWatermarkToHeader(readUtf8(entry.data))) }
     return entry
   })
   return buildZipStored(patched)

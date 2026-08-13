@@ -127,6 +127,17 @@ export interface Config {
   formCardHeaderPaddingY: number
   formCardBodyPadding: number
 
+  // Barra Azioni della scheda Verifica istruttoria.
+  actionBarBg: string
+  actionBarBorderColor: string
+  actionBarBorderWidth: number
+  actionBarBorderRadius: number
+  actionBarPaddingX: number
+  actionBarPaddingY: number
+  actionBarTitleColor: string
+  actionBarTitleFontSize: number
+  actionBarButtonGap: number
+
   primaryColor: string
   primaryTextColor: string
   mutedBg: string
@@ -278,6 +289,16 @@ export const defaultConfig: Config = {
   formCardHeaderPaddingX: 10,
   formCardHeaderPaddingY: 7,
   formCardBodyPadding: 10,
+
+  actionBarBg: '#ffffff',
+  actionBarBorderColor: '#e5e7eb',
+  actionBarBorderWidth: 1,
+  actionBarBorderRadius: 10,
+  actionBarPaddingX: 12,
+  actionBarPaddingY: 10,
+  actionBarTitleColor: '#111827',
+  actionBarTitleFontSize: 14,
+  actionBarButtonGap: 10,
 
   primaryColor: '#0d3b66',
   primaryTextColor: '#ffffff',

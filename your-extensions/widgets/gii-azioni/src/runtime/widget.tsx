@@ -6,6 +6,7 @@ import { createPortal } from 'react-dom'
 import { computeSanzioneAutomatica } from '../../../_shared/gii-anteprime/sanzione-automatica'
 import { buildVerbalePdfBlob } from '../../../_shared/gii-anteprime/documenti-amministrativi/proposta-contestazione/proposta-contestazione-data-map'
 import { replacePropostaContestazionePdfAttachment } from '../../../_shared/gii-anteprime/documenti-amministrativi/proposta-contestazione/proposta-contestazione-attachment-store'
+import { deleteBozzaDeterminazionePdfAttachments } from '../../../_shared/gii-anteprime/documenti-amministrativi/bozza-determinazione/bozza-determinazione-attachment-store'
 import type { IMConfig } from '../config'
 import { defaultConfig } from '../config'
 import { attrezzaturaInstanceTipoCodePdf, loadAttrezzatureCatalogPdf } from '../../../_shared/gii-anteprime/documenti-tecnici/rapporto/rapporto-nota-spese-summary'
@@ -4013,7 +4014,7 @@ function ActionsPanel (props: {
     role === 'DT' ? 'Approva Rapporto tecnico di rilevazione' :
     role === 'RI_AMM' && riAmmBozzaDeterminazioneDaVerificare ? 'Approva istruttoria amministrativa' :
     role === 'RI_AMM' && riAmmStaApprovandoPropostaContestazione ? 'Approva istruttoria amministrativa' :
-    role === 'RI_AMM' ? `Trasmetti al ${fwdDestLabel}` :
+    role === 'RI_AMM' ? 'Approva istruttoria amministrativa' :
     role === 'TI_AMM' ? 'Apponi attestazione di conformità' :
     'Approva'
 
@@ -4025,7 +4026,7 @@ function ActionsPanel (props: {
     role === 'DT' ? `Rapporto tecnico di rilevazione approvato e trasmesso al ${getRoleLabelForMenu('RI_AMM')}` :
     role === 'RI_AMM' && riAmmBozzaDeterminazioneDaVerificare ? 'Istruttoria amministrativa approvata' :
     role === 'RI_AMM' && riAmmStaApprovandoPropostaContestazione ? 'Istruttoria amministrativa approvata' :
-    role === 'RI_AMM' ? `Trasmessa al ${fwdDestLabel}` :
+    role === 'RI_AMM' ? 'Istruttoria amministrativa approvata' :
     role === 'TI_AMM' ? 'Attestazione di conformità apposta' :
     'Approvata'
 
@@ -4037,7 +4038,7 @@ function ActionsPanel (props: {
     role === 'DT' ? 'Approva rapporto tecnico' :
     role === 'RI_AMM' && riAmmBozzaDeterminazioneDaVerificare ? 'Approva istruttoria amministrativa' :
     role === 'RI_AMM' && riAmmStaApprovandoPropostaContestazione ? 'Approva istruttoria amministrativa' :
-    role === 'RI_AMM' ? `Trasmetti al ${fwdDestLabel}` :
+    role === 'RI_AMM' ? 'Approva istruttoria amministrativa' :
     role === 'TI_AMM' ? 'Apponi attestazione' :
     'Approva'
 
@@ -4162,7 +4163,7 @@ function ActionsPanel (props: {
     role === 'DT' ? 'Approva Rapporto tecnico di rilevazione' :
     role === 'RI_AMM' && riAmmBozzaDeterminazioneDaVerificare ? 'Approva istruttoria amministrativa' :
     role === 'RI_AMM' && riAmmStaApprovandoPropostaContestazione ? 'Approva istruttoria amministrativa' :
-    role === 'RI_AMM' ? `Trasmetti al ${fwdDestLabel}` :
+    role === 'RI_AMM' ? 'Approva istruttoria amministrativa' :
     role === 'TI_AMM' ? 'Apponi attestazione di conformità' :
     approvaBtnLabel
 
@@ -4174,7 +4175,7 @@ function ActionsPanel (props: {
     role === 'DT' ? `Approva il Rapporto tecnico di rilevazione e lo trasmette al ${getRoleLabelForMenu('RI_AMM')}.` :
     role === 'RI_AMM' && riAmmBozzaDeterminazioneDaVerificare ? 'Approva l’istruttoria amministrativa e restituisce la pratica al Tecnico Istruttore amministrativo per la protocollazione e la trasmissione al Direttore.' :
     role === 'RI_AMM' && riAmmStaApprovandoPropostaContestazione ? 'Approva l’istruttoria amministrativa e restituisce la pratica al Tecnico istruttore amministrativo per protocollazione e predisposizione della bozza di determinazione.' :
-    role === 'TI_AMM' ? 'Appone il visto di conformità e trasmette la pratica al Responsabile dell’istruttoria amministrativa per la verifica dell’istruttoria amministrativa.' :
+    role === 'TI_AMM' ? 'Appone il visto di conformità. La pratica resta al Tecnico Istruttore amministrativo per la predisposizione della bozza di determinazione e la successiva trasmissione del fascicolo al Responsabile.' :
     fwdDestLabel ? `Invia la pratica al ${fwdDestLabel}.` :
     'Avanza la pratica al passaggio successivo.'
 
@@ -5235,14 +5236,77 @@ function ActionsPanel (props: {
         [dtEsitoField]: now
       }
       let riAmmApprovedProposalSync: { layer: any, layerUrl: string, file: File } | null = null
+      let tiAmmAttestationProposalSync: { layer: any, layerUrl: string, file: File } | null = null
       if (esito === ESITO_APPROVATA && noteTrim) {
         upd[noteField] = noteTrim
       }
       const isTiAmmAttestazioneConformita = role === 'TI_AMM' && esito === ESITO_APPROVATA
       if (isTiAmmAttestazioneConformita) {
         const schemaFields: Record<string, any> = (ds as any)?.getSchema?.()?.fields || {}
-        const fNoteAttoAmm = getSchemaFieldNameCI(schemaFields, 'note_atto_amm')
-        if (fNoteAttoAmm) upd[fNoteAttoAmm] = noteTrim
+        const setIfPresent = (logicalName: string, value: any) => {
+          const real = getSchemaFieldNameCI(schemaFields, logicalName)
+          if (real) upd[real] = value
+        }
+
+        // Il visto eseguito dal CW Azioni deve aprire esattamente lo stesso ciclo
+        // creato da editing-amm. In particolare non deve riutilizzare la motivazione
+        // di un precedente rimando e non deve aprire ancora il nodo RI_AMM.
+        const defaultAttestationNote = 'A seguito della verifica svolta, si attesta la conformità della pratica sotto il profilo istruttorio-amministrativo.'
+        const requestedAttestationNote = String(noteTrim || '').trim()
+        const attestationNote = /motivazione\s+del\s+rimando|integrazion|rettific/i.test(requestedAttestationNote)
+          ? defaultAttestationNote
+          : (requestedAttestationNote || defaultAttestationNote)
+        upd[noteField] = attestationNote
+        setIfPresent('note_atto_amm', attestationNote)
+
+        setIfPresent('determinazione_stato', 'BOZZA')
+        setIfPresent('stato_RI_AMM', 4)
+        setIfPresent('dt_stato_RI_AMM', null)
+        setIfPresent('dt_presa_in_carico_RI_AMM', null)
+        setIfPresent('esito_RI_AMM', null)
+        setIfPresent('dt_esito_RI_AMM', null)
+        setIfPresent('note_RI_AMM', null)
+        setIfPresent('protocollo_fascicolo_numero', null)
+        setIfPresent('protocollo_fascicolo_data', null)
+        setIfPresent('dt_bozza_determinazione', null)
+        setIfPresent('bozza_determinazione_da', null)
+
+        // Stesso builder e stessa funzione di sostituzione usati da editing-amm:
+        // il visto genera la Proposta DRAFT, ma la pratica resta al TI_AMM finché
+        // non viene usato "Trasmetti fascicolo al Responsabile".
+        const { layer } = await resolveLayer(ds)
+        if (!layer) throw new Error('Layer non disponibile per generare la Proposta di contestazione.')
+        if (typeof layer.load === 'function') { try { await layer.load() } catch {} }
+        const layerUrl = String(
+          layer?.url ||
+          active?.state?.ds?.getDataSourceJson?.()?.url ||
+          active?.state?.ds?.dataSourceJson?.url ||
+          active?.state?.ds?.layer?.url ||
+          active?.key ||
+          ''
+        ).trim().replace(/\/+$/, '')
+        if (!layerUrl) throw new Error('URL del FeatureLayer non disponibile per generare la Proposta di contestazione.')
+        const proposalFields = Array.isArray(layer?.fields) && layer.fields.length
+          ? layer.fields.map((f: any) => ({ name: String(f.name), type: String(f.type || ''), alias: String(f.alias || f.name), domain: f.domain || null, editable: f.editable !== false }))
+          : Object.keys(schemaFields).map(name => ({ name, type: String(schemaFields[name]?.type || ''), alias: String(schemaFields[name]?.alias || name), domain: schemaFields[name]?.domain || null, editable: schemaFields[name]?.editable !== false }))
+        const currentProfile: any = (window as any).__giiUserRole || {}
+        let liveProposalAttrs: Record<string, any> | null = null
+        try {
+          liveProposalAttrs = await queryCurrentRecordAttrs()
+        } catch {}
+        const propostaBlob = await buildVerbalePdfBlob(
+          { ...(liveProposalAttrs || data || {}), ...upd },
+          proposalFields as any,
+          {
+            username: String(currentProfile?.username || ''),
+            fullName: String(currentProfile?.fullName || currentProfile?.full_name || currentProfile?.username || '')
+          }
+        )
+        tiAmmAttestationProposalSync = {
+          layer,
+          layerUrl,
+          file: new File([propostaBlob.blob], propostaBlob.fileName, { type: 'application/pdf', lastModified: now })
+        }
       }
       if (stato != null) {
         upd[statoField] = stato
@@ -5294,7 +5358,7 @@ function ActionsPanel (props: {
 
       const integRequester = (esito === ESITO_APPROVATA && !isTiAmmAttestazioneConformita) ? getIntegrationRequesterForCurrentRole() : ''
       const ruoloDest = esito === ESITO_APPROVATA
-        ? (isTiAmmAttestazioneConformita ? '' : (integRequester || getNextRoleForForward()))
+        ? (isTiAmmAttestazioneConformita ? '' : (integRequester || (role === 'RI_AMM' ? 'TI_AMM' : getNextRoleForForward())))
         : ''
       if (ruoloDest) {
         try {
@@ -5424,6 +5488,43 @@ ${noteTrim}` : 'Attestazione di conformità apposta.',
         await runApplyEdits(upd, `Esito salvato: ${label}.`)
       }
 
+      if (tiAmmAttestationProposalSync) {
+        try {
+          await replacePropostaContestazionePdfAttachment(
+            tiAmmAttestationProposalSync.layer,
+            Number(oid),
+            tiAmmAttestationProposalSync.file,
+            tiAmmAttestationProposalSync.layerUrl,
+            'DRAFT'
+          )
+          // Un nuovo visto apre una nuova versione: eventuali PDF di determinazione
+          // del ciclo precedente non devono rimanere insieme alla nuova Proposta.
+          await deleteBozzaDeterminazionePdfAttachments(
+            tiAmmAttestationProposalSync.layer,
+            Number(oid),
+            tiAmmAttestationProposalSync.layerUrl
+          )
+          // Il visto, da solo, non crea un'attività RI_AMM. Eliminiamo anche eventuali
+          // residui lasciati da versioni precedenti del workflow.
+          await deleteCurrentActivitiesForDestRole('RI_AMM')
+          try { window.dispatchEvent(new CustomEvent('gii:record-updated', { detail: { oid: Number(oid), source: 'gii-azioni-ti-amm-attestazione-conformita', ts: Date.now() } })) } catch {}
+          try { window.dispatchEvent(new CustomEvent('gii-alerts-refresh', { detail: { oid: Number(oid), source: 'gii-azioni-ti-amm-attestazione-conformita', ts: Date.now() } })) } catch {}
+          setMsg({ kind: 'ok', text: 'Attestazione di conformità apposta. La Proposta di contestazione è stata aggiunta al fascicolo; predisporre ora la bozza di determinazione e trasmettere successivamente il fascicolo al Responsabile.' })
+        } catch (syncError: any) {
+          try {
+            console.error('[GII][TI_AMM][ATTESTAZIONE] Aggiornamento fascicolo non riuscito', {
+              oid: Number(oid),
+              message: syncError?.message || String(syncError),
+              error: syncError
+            })
+          } catch {}
+          setPending(null)
+          setConfirmAttempted(false)
+          setMsg({ kind: 'err', text: `Attestazione registrata, ma aggiornamento della Proposta PDF non riuscito: ${syncError?.message || String(syncError)}` })
+          return
+        }
+      }
+
       if (riAmmApprovedProposalSync) {
         try {
           await replacePropostaContestazionePdfAttachment(
@@ -5432,6 +5533,15 @@ ${noteTrim}` : 'Attestazione di conformità apposta.',
             riAmmApprovedProposalSync.file,
             riAmmApprovedProposalSync.layerUrl,
             'APPROVED'
+          )
+          // La versione approvata della bozza è già conservata nel riferimento interno
+          // creato al momento della trasmissione a RI_AMM. Dopo l'approvazione il PDF
+          // materiale di lavorazione non deve restare nel fascicolo: il TI_AMM caricherà
+          // successivamente un solo PDF definitivo, verificato dopo la protocollazione.
+          await deleteBozzaDeterminazionePdfAttachments(
+            riAmmApprovedProposalSync.layer,
+            Number(oid),
+            riAmmApprovedProposalSync.layerUrl
           )
           try { window.dispatchEvent(new CustomEvent('gii:record-updated', { detail: { oid: Number(oid), source: 'gii-azioni-ri-amm-proposta-approvata', ts: Date.now() } })) } catch {}
         } catch (syncError: any) {
@@ -5573,7 +5683,7 @@ ${noteTrim}` : 'Attestazione di conformità apposta.',
     role === 'RI' ? 'Approvazione istruttoria tecnica' :
     role === 'DT' ? 'Approvazione rapporto tecnico' :
     role === 'RI_AMM' && riAmmBozzaDeterminazioneDaVerificare ? 'Approvazione istruttoria amministrativa' :
-    role === 'RI_AMM' ? `Trasmissione al ${fwdDestLabel}` :
+    role === 'RI_AMM' ? 'Approvazione istruttoria amministrativa' :
     role === 'TI_AMM' ? `Trasmissione al ${getRoleLabelForMenu('RI_AMM')}` :
     'Avanzamento pratica'
 
@@ -5603,8 +5713,8 @@ ${noteTrim}` : 'Attestazione di conformità apposta.',
     role === 'DT' ? `Il Rapporto tecnico di rilevazione verrà approvato e trasmesso al ${getRoleLabelForMenu('RI_AMM')}.` :
     role === 'RI_AMM' && riAmmBozzaDeterminazioneDaVerificare ? 'L’istruttoria amministrativa verrà approvata e la pratica tornerà al Tecnico Istruttore amministrativo per i passaggi successivi.' :
     role === 'RI_AMM' && riAmmStaApprovandoPropostaContestazione ? 'L’istruttoria amministrativa verrà approvata e la pratica tornerà al Tecnico istruttore amministrativo per protocollazione e predisposizione della bozza di determinazione.' :
-    role === 'RI_AMM' ? `L’istruttoria amministrativa verrà trasmessa al ${fwdDestLabel}.` :
-    role === 'TI_AMM' ? 'Il visto di conformità verrà apposto e la pratica sarà trasmessa al Responsabile dell’istruttoria amministrativa per la verifica dell’istruttoria amministrativa.' :
+    role === 'RI_AMM' ? 'L’istruttoria amministrativa verrà approvata e la pratica verrà restituita al Tecnico Istruttore amministrativo per i passaggi successivi.' :
+    role === 'TI_AMM' ? 'Il visto di conformità verrà apposto. La pratica resterà al Tecnico Istruttore amministrativo per predisporre la bozza di determinazione e trasmettere successivamente il fascicolo al Responsabile.' :
     `${subjectArticle} ${subjectNameLower} verrà ${subjectVerbTrasmessa} al passaggio successivo.`
 
   const integrazioneActionDesc = pendingRimandoTargetLabel
@@ -5616,17 +5726,17 @@ ${noteTrim}` : 'Attestazione di conformità apposta.',
         : 'La rilevazione verrà rimandata per integrazione.')
 
   const pendingTheme: Record<string, PendingTheme> = {
-    TAKE:           { icon: '✓', color: '#2563eb', bg: '#eff6ff', border: '#bfdbfe', buttonBg: '#2563eb', buttonBorder: '#1d4ed8', desc: riAmmBozzaDeterminazioneDaVerificare ? 'La pratica contenente la bozza di determinazione verrà presa in carico per la verifica.' : (praticaLabel === 'Rapporto tecnico' ? 'Il rapporto tecnico verrà preso in carico.' : 'La rilevazione verrà presa in carico.') },
+    TAKE:           { icon: '✓', color: '#2563eb', bg: '#eff6ff', border: '#bfdbfe', buttonBg: '#2563eb', buttonBorder: '#1d4ed8', desc: riAmmBozzaDeterminazioneDaVerificare ? 'La pratica contenente la bozza di determinazione verrà presa in carico per la verifica.' : ((role === 'RI_AMM' || role === 'TI_AMM') ? 'La pratica verrà presa in carico.' : (praticaLabel === 'Rapporto tecnico' ? 'Il rapporto tecnico verrà preso in carico.' : 'La rilevazione verrà presa in carico.')) },
     ASSEGNA_TI:     { icon: '✓', color: '#2563eb', bg: '#eff6ff', border: '#bfdbfe', buttonBg: '#2563eb', buttonBorder: '#1d4ed8', desc: `${subjectArticle} ${subjectNameLower} verrà ${subjectVerbAssegnata} al ${getRoleLabelForMenu('TI')} selezionato.` },
     ASSEGNA_TI_AMM: { icon: '✓', color: '#2563eb', bg: '#eff6ff', border: '#bfdbfe', buttonBg: '#2563eb', buttonBorder: '#1d4ed8', desc: riaperturaWorkflowDaAvviare
       ? `Verrà aperto il nuovo ciclo di riapertura n. ${riaperturaAmmNumero} e la pratica sarà assegnata al ${getRoleLabelForMenu('TI_AMM')} selezionato.`
-      : `${subjectArticle} ${subjectNameLower} verrà ${subjectVerbAssegnata} al ${getRoleLabelForMenu('TI_AMM')} selezionato.` },
-    INVIA_TI_AMM: { icon: '✓', color: '#2563eb', bg: '#eff6ff', border: '#bfdbfe', buttonBg: '#2563eb', buttonBorder: '#1d4ed8', desc: `L’istruttoria amministrativa verrà trasmessa al ${getRoleLabelForMenu('TI_AMM')} già assegnato.` },
-    RESTITUISCI_TI_AMM: { icon: '✓', color: '#2563eb', bg: '#eff6ff', border: '#bfdbfe', buttonBg: '#2563eb', buttonBorder: '#1d4ed8', desc: `L’istruttoria amministrativa verrà restituita al ${getRoleLabelForMenu('TI_AMM')} già assegnato.` },
+      : `La pratica verrà assegnata al ${getRoleLabelForMenu('TI_AMM')} selezionato.` },
+    INVIA_TI_AMM: { icon: '✓', color: '#2563eb', bg: '#eff6ff', border: '#bfdbfe', buttonBg: '#2563eb', buttonBorder: '#1d4ed8', desc: 'La pratica verrà trasmessa al Tecnico Istruttore amministrativo.' },
+    RESTITUISCI_TI_AMM: { icon: '✓', color: '#2563eb', bg: '#eff6ff', border: '#bfdbfe', buttonBg: '#2563eb', buttonBorder: '#1d4ed8', desc: `La pratica verrà restituita al ${getRoleLabelForMenu('TI_AMM')} già assegnato.` },
     APPROVA:        { icon: '✓', color: '#2563eb', bg: '#eff6ff', border: '#bfdbfe', buttonBg: '#2563eb', buttonBorder: '#1d4ed8', desc: approvaActionDesc },
     INTEGRAZIONE:   { icon: '↩', color: '#b45309', bg: '#fffbeb', border: '#fde68a', buttonBg: '#d97706', buttonBorder: '#b45309', desc: integrazioneActionDesc },
-    INTEGRAZIONE_TI_AMM: { icon: '↩', color: '#b45309', bg: '#fffbeb', border: '#fde68a', buttonBg: '#d97706', buttonBorder: '#b45309', desc: `L’istruttoria amministrativa verrà rimandata al ${getRoleLabelForMenu('TI_AMM')} assegnato.` },
-    INTEGRAZIONE_TECNICA: { icon: '↩', color: '#b45309', bg: '#fffbeb', border: '#fde68a', buttonBg: '#d97706', buttonBorder: '#b45309', desc: `L’istruttoria amministrativa verrà rimandata al ${rimandoTecnicaTargetLabel}.` },
+    INTEGRAZIONE_TI_AMM: { icon: '↩', color: '#b45309', bg: '#fffbeb', border: '#fde68a', buttonBg: '#d97706', buttonBorder: '#b45309', desc: `La pratica verrà rimandata al ${getRoleLabelForMenu('TI_AMM')} assegnato.` },
+    INTEGRAZIONE_TECNICA: { icon: '↩', color: '#b45309', bg: '#fffbeb', border: '#fde68a', buttonBg: '#d97706', buttonBorder: '#b45309', desc: `La pratica verrà rimandata al ${rimandoTecnicaTargetLabel}.` },
     RESPINGI:       { icon: '✕', color: '#b42318', bg: '#fef2f2', border: '#fecaca', buttonBg: '#dc2626', buttonBorder: '#b42318', desc: `${subjectArticle} ${subjectNameLower} verrà ${subjectVerbRespinta}.` },
     ELIMINA:        { icon: '✕', color: '#b42318', bg: '#fef2f2', border: '#fecaca', buttonBg: '#dc2626', buttonBorder: '#b42318', desc: `${subjectArticle} ${subjectNameLower} verrà ${subjectVerbArchiviata} e non sarà più visibile nell'elenco.` },
   }
@@ -6811,7 +6921,7 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
   const editConfig = {
     show: cfg.showEditButtons !== false,
     overlayColor: normalizeHexColor(cfg.editOverlayColor, '#7c3aed'),
-    pageColor: normalizeHexColor(cfg.editPageColor, '#5b21b6'),
+    pageColor: normalizeHexColor(cfg.editPageColor, '#0d3b66'),
     pageId: String(cfg.editPageId || 'page_45'),
     ammPageId: String((cfg as any).editAmmPageId || 'page_48'),
     fieldStatoTI: String(cfg.fieldStatoTI || 'stato_TI'),

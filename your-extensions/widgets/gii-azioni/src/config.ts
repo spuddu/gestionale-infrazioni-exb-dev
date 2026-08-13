@@ -149,7 +149,7 @@ export const defaultConfig: Config = {
 
   showEditButtons: true,
   editOverlayColor: '#7c3aed',
-  editPageColor: '#5b21b6',
+  editPageColor: '#0d3b66',
   editPageId: 'page_45',
   editAmmPageId: 'page_48',
   fieldStatoTI: 'stato_TI',
