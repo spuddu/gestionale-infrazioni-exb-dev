@@ -64,6 +64,7 @@ type RegolamentoRaccordo = {
 
 type NotaSpeseDetailRow = {
   codiceCasistica: string
+  categoriaCosto: string
   codiceVoce: string
   descrizione: string
   importoRiga: number
@@ -145,7 +146,7 @@ async function queryNotaSpeseDetailRowsForPractice (data: Record<string, any>): 
   const fl = await getLookupLayer(NOTA_SPESE_DETTAGLIO_VIEW_URL)
   const q: any = {
     where: variants.map(value => `parent_globalid = ${sqlQuote(value)}`).join(' OR '),
-    outFields: ['OBJECTID', 'ordine', 'codice_casistica', 'codice_voce_snapshot', 'descrizione_snapshot', 'importo_riga'],
+    outFields: ['OBJECTID', 'ordine', 'codice_casistica', 'categoria_costo', 'codice_voce_snapshot', 'descrizione_snapshot', 'importo_riga'],
     returnGeometry: false,
     num: 2000,
     orderByFields: ['ordine ASC', 'OBJECTID ASC']
@@ -156,6 +157,7 @@ async function queryNotaSpeseDetailRowsForPractice (data: Record<string, any>): 
     const attrs = feature?.attributes || {}
     return {
       codiceCasistica: String(pickAttrCI(attrs, ['codice_casistica']) || '').trim(),
+      categoriaCosto: String(pickAttrCI(attrs, ['categoria_costo']) || '').trim().toUpperCase(),
       codiceVoce: String(pickAttrCI(attrs, ['codice_voce_snapshot']) || '').trim(),
       descrizione: String(pickAttrCI(attrs, ['descrizione_snapshot']) || '').trim(),
       importoRiga: parseNumberInput(pickAttrCI(attrs, ['importo_riga'])) || 0
@@ -1062,14 +1064,49 @@ function parseArt30EquipmentSelections (data: Record<string, any>): Art30Equipme
   return out
 }
 
-function notaSpeseTotalForCase (noteRows: NotaSpeseDetailRow[], codiceCasistica: string, data: Record<string, any>): number | null {
+type NotaSpeseCaseSummary = {
+  baseSpese: number
+  speseGenerali: number
+  risarcimentoAttrezzature: number
+  totale: number
+  rows: number
+}
+
+function notaSpeseSummaryForCase (noteRows: NotaSpeseDetailRow[], codiceCasistica: string, data: Record<string, any>): NotaSpeseCaseSummary | null {
   const acceptedCodes = normalizedCaseCodes(codiceCasistica)
   const rows = (noteRows || []).filter(row => acceptedCodes.has(String(row.codiceCasistica || '').trim().toUpperCase()))
   if (!rows.length) return null
-  const imponibile = rows.reduce((sum, row) => sum + (Number.isFinite(row.importoRiga) ? row.importoRiga : 0), 0)
+
+  // Le righe RA (risarcimento attrezzature Art. 30) sono già nette e non
+  // concorrono alla base delle spese generali. È la stessa regola usata nella
+  // Nota spese tecnica e nel dettaglio pratica.
+  const baseSpese = rows
+    .filter(row => String(row.categoriaCosto || '').toUpperCase() !== 'RA')
+    .reduce((sum, row) => sum + (Number.isFinite(row.importoRiga) ? row.importoRiga : 0), 0)
+  const risarcimentoAttrezzature = rows
+    .filter(row => String(row.categoriaCosto || '').toUpperCase() === 'RA')
+    .reduce((sum, row) => sum + (Number.isFinite(row.importoRiga) ? row.importoRiga : 0), 0)
+
   const configuredPercentage = parseNumberInput(pickAttrCI(data || {}, ['ns_spese_generali_perc']))
   const percentage = configuredPercentage != null && Number.isFinite(configuredPercentage) ? configuredPercentage : 15
-  return roundMoneyValue(imponibile + (imponibile * percentage / 100))
+  const speseGenerali = baseSpese * percentage / 100
+  return {
+    baseSpese: roundMoneyValue(baseSpese),
+    speseGenerali: roundMoneyValue(speseGenerali),
+    risarcimentoAttrezzature: roundMoneyValue(risarcimentoAttrezzature),
+    totale: roundMoneyValue(baseSpese + speseGenerali + risarcimentoAttrezzature),
+    rows: rows.length
+  }
+}
+
+function notaSpeseTotalForCase (noteRows: NotaSpeseDetailRow[], codiceCasistica: string, data: Record<string, any>): number | null {
+  const summary = notaSpeseSummaryForCase(noteRows, codiceCasistica, data)
+  if (!summary) return null
+  // Per l'Art. 30 le righe RA vengono esposte e conteggiate separatamente come
+  // risarcimento attrezzature; la voce a piè di lista comprende soltanto le
+  // altre spese e le relative spese generali.
+  if (isArt30CaseCode(codiceCasistica)) return roundMoneyValue(summary.baseSpese + summary.speseGenerali)
+  return summary.totale
 }
 
 function art30CauzioneSelected (data: Record<string, any>): boolean {
@@ -1109,7 +1146,8 @@ function calculationDetailLinesForVoce (
 
   if (categoria === 'RISARCIMENTO' || isPieListaParametro(parametro)) {
     const value = amount != null && Number.isFinite(amount) ? amount : 0
-    if (article === '8' || article === '30') lines.push(`Rimborso spese a piè di lista: ${formatEuroText(value)}`)
+    if (codice === 'NOTA_SPESE.C104') lines.push(`Nota spese: ${formatEuroText(value)}`)
+    else if (article === '8' || article === '30') lines.push(`Rimborso spese a piè di lista: ${formatEuroText(value)}`)
     else lines.push(`Importo a piè di lista: ${formatEuroText(value)}`)
     return lines
   }
@@ -1151,7 +1189,8 @@ function calculationDetailLinesForVoce (
 
   if (article === '30' && (categoria === 'ATTREZZATURA' || categoria === 'RIMBORSO')) {
     const value = amount != null && Number.isFinite(amount) ? amount : base
-    if (value != null && Number.isFinite(value)) lines.push(`${art30EquipmentLineLabel(voce)}: ${formatEuroText(value)}`)
+    const label = codice === 'NOTA_SPESE.C104.RA' ? 'Risarcimento attrezzature' : art30EquipmentLineLabel(voce)
+    if (value != null && Number.isFinite(value)) lines.push(`${label}: ${formatEuroText(value)}`)
     return lines
   }
 
@@ -1271,8 +1310,12 @@ function buildAutomaticSanzioneCalculation (
     (art30SnapshotGrossRaw != null && art30SnapshotGrossRaw !== '') ||
     (art30SnapshotCauzioneRaw != null && art30SnapshotCauzioneRaw !== '') ||
     (art30SnapshotNettoRaw != null && art30SnapshotNettoRaw !== '')
+  const hasArt30RealRaRowsInGroups = validGroups.some(group =>
+    isArt30CaseCode(group.codiceCasistica) &&
+    (group.voci || []).some(voce => String(voce.codiceParametro || '').toUpperCase() === 'NOTA_SPESE.C104.RA')
+  )
 
-  if (hasArt30Snapshot) {
+  if (hasArt30Snapshot && !hasArt30RealRaRowsInGroups) {
     const calculatedRimborsoAttrezzature = rimborsoAttrezzature
     const calculatedCauzioneDecurtata = cauzioneDecurtata
     rimborsoAttrezzature = art30SnapshotGross != null && Number.isFinite(art30SnapshotGross)
@@ -1381,6 +1424,8 @@ function buildSanzioneGroups (
   const art30EquipmentSelections = parseArt30EquipmentSelections(data || {})
   const art30Equipment = new Set(art30EquipmentSelections.map(item => item.kind))
   const art30CauzioneImporto = Math.max(0, parseNumberInput(pickAttrCI(data || {}, ['attrezzature_cauzione_decurtata'])) || 0)
+  const art30NoteSummary = notaSpeseSummaryForCase(noteRows, 'C104_DANNEGGIAMENTO_PERDITA_ATTREZZATURE', data || {})
+  const hasArt30RealRaRows = (art30NoteSummary?.risarcimentoAttrezzature || 0) > 0
   const groups = new Map<string, SanzioneConsultivaGroup>()
 
   selectedRaccordi.forEach(r => {
@@ -1395,7 +1440,8 @@ function buildSanzioneGroups (
     // riferimento normativo. Codice, descrizione e importo applicati alla pratica
     // devono provenire sempre dallo snapshot tecnico congelato dal TI, anche quando
     // ATT-001...ATT-004 esistono nella tabella dei parametri correnti.
-    if (raccordoArt30Kind) {
+    const suppressArt30SnapshotVoce = !!raccordoArt30Kind && hasArt30RealRaRows
+    if (raccordoArt30Kind && !hasArt30RealRaRows) {
       const matches = art30EquipmentSelections.filter(item => item.kind === raccordoArt30Kind)
       if (matches.length === 0) return
       const totalImporto = matches.reduce((sum, item) => sum + (Number(item.importo) || 0), 0)
@@ -1442,13 +1488,19 @@ function buildSanzioneGroups (
       groups.set(r.codice_casistica, g)
     }
 
+    // Il gruppo deve comunque esistere per mostrare l'Art. 30; si sopprime solo
+    // la vecchia voce economica ricostruita dallo snapshot quando sono presenti
+    // righe RA reali nella Nota spese.
+    if (suppressArt30SnapshotVoce) return
+
     if (isArt30CaseCode(r.codice_casistica)) {
       const categoria = String(parametro?.categoria_parametro || '').toUpperCase()
+      if (isPieListaParametro(parametro) && art30NoteSummary && roundMoneyValue(art30NoteSummary.baseSpese + art30NoteSummary.speseGenerali) <= 0) return
       if (categoria === 'ATTREZZATURA' || categoria === 'RIMBORSO') {
         const kind = art30EquipmentKindFromText(`${r.codice_parametro} ${r.descrizione} ${parametro?.descrizione || ''}`)
         if (!kind || !art30Equipment.has(kind)) return
       }
-      if (categoria === 'CAUZIONE' && !art30CauzioneSelected(data || {})) return
+      if (categoria === 'CAUZIONE' && (hasArt30RealRaRows || !art30CauzioneSelected(data || {}))) return
     }
 
     const voceLabel = buildVoceLabel(r, parametro)
@@ -1484,29 +1536,68 @@ function buildSanzioneGroups (
   })
 
   const art30Group = Array.from(groups.values()).find(group => isArt30CaseCode(group.codiceCasistica))
-  const art30NoteTotal = art30Group ? notaSpeseTotalForCase(noteRows, art30Group.codiceCasistica, data || {}) : null
-  if (art30Group && art30NoteTotal != null && Number.isFinite(art30NoteTotal)) {
-    const alreadyPresent = art30Group.voci.some(voce => isPieListaParametro(voce.parametro) || String(voce.codiceParametro || '').toUpperCase() === 'NOTA_SPESE.C104')
-    if (!alreadyPresent) {
-      const syntheticParam: SanzioneParametro = {
-        codice_parametro: 'NOTA_SPESE.C104',
-        categoria_parametro: 'RISARCIMENTO',
+  if (art30Group) {
+    const exactSummary = notaSpeseSummaryForCase(noteRows, art30Group.codiceCasistica, data || {})
+    const eligibleNotaSpeseGroups = Array.from(groups.values()).filter(group => ['8', '27', '30', '39'].includes(normalizeArticleNumber(group.articoloViolato)))
+    const overallFallback = eligibleNotaSpeseGroups.length === 1 && normalizeArticleNumber(eligibleNotaSpeseGroups[0].articoloViolato) === '30'
+      ? normalizeNotaSpeseAmount(numericAttr(data || {}, ['ns_totale_complessivo']))
+      : null
+
+    // Righe RA reali: importo già netto (eventuale cauzione già decurtata) e
+    // senza maggiorazione per spese generali. Vengono esposte esplicitamente.
+    if (exactSummary && exactSummary.risarcimentoAttrezzature > 0) {
+      const syntheticRa: SanzioneParametro = {
+        codice_parametro: 'NOTA_SPESE.C104.RA',
+        categoria_parametro: 'ATTREZZATURA',
         valore_num: null,
-        valore_testo: 'A piè di lista',
+        valore_testo: '',
         anno_riferimento: null,
         data_validita_da: null,
         data_validita_a: null,
-        descrizione: 'Rimborso spese a piè di lista',
+        descrizione: 'Risarcimento attrezzature da Nota spese',
         note: ''
       }
       art30Group.voci.push({
-        codiceParametro: syntheticParam.codice_parametro,
-        descrizione: 'Rimborso spese a piè di lista',
+        codiceParametro: syntheticRa.codice_parametro,
+        descrizione: syntheticRa.descrizione,
         articoloSanzione: art30Group.articoloSanzione,
         articoliSanzione: art30Group.articoliSanzione,
-        parametro: syntheticParam,
-        valueOverride: formatEuroText(art30NoteTotal)
+        parametro: syntheticRa,
+        valueOverride: formatEuroText(exactSummary.risarcimentoAttrezzature)
       })
+    }
+
+    // Le altre voci di Nota spese (AT/PR/RU/SL/PF) concorrono con le spese
+    // generali. Se il dettaglio non è leggibile ma l'Art. 30 è l'unica violazione
+    // della pratica che può avere Nota spese, usa in sicurezza il totale salvato
+    // sul rapporto come fallback, evitando che l'importo scompaia dall'istruttoria.
+    const nonRaTotal = exactSummary
+      ? roundMoneyValue(exactSummary.baseSpese + exactSummary.speseGenerali)
+      : (overallFallback != null && Number.isFinite(overallFallback) && !hasArt30RealRaRows ? roundMoneyValue(overallFallback) : null)
+
+    if (nonRaTotal != null && nonRaTotal > 0) {
+      const alreadyPresent = art30Group.voci.some(voce => isPieListaParametro(voce.parametro) || String(voce.codiceParametro || '').toUpperCase() === 'NOTA_SPESE.C104')
+      if (!alreadyPresent) {
+        const syntheticParam: SanzioneParametro = {
+          codice_parametro: 'NOTA_SPESE.C104',
+          categoria_parametro: 'RISARCIMENTO',
+          valore_num: null,
+          valore_testo: 'A piè di lista',
+          anno_riferimento: null,
+          data_validita_da: null,
+          data_validita_a: null,
+          descrizione: 'Nota spese',
+          note: ''
+        }
+        art30Group.voci.push({
+          codiceParametro: syntheticParam.codice_parametro,
+          descrizione: 'Nota spese',
+          articoloSanzione: art30Group.articoloSanzione,
+          articoliSanzione: art30Group.articoliSanzione,
+          parametro: syntheticParam,
+          valueOverride: formatEuroText(nonRaTotal)
+        })
+      }
     }
   }
 

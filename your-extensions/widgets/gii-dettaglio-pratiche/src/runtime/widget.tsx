@@ -4841,7 +4841,13 @@ const isPgOnlyField = React.useCallback((fieldName: string) => {
         })()
       : renderDash('—')
 
-    const altreCodes = splitMultiValues(getRawField('norma_violata3'))
+    const altreCodes = splitMultiValues(getRawField('norma_violata3')).sort((a, b) => {
+      const articleNumber = (value: string): number => {
+        const match = String(value || '').match(/Art\s*0*(\d+)/i)
+        return match ? Number(match[1]) : Number.MAX_SAFE_INTEGER
+      }
+      return articleNumber(a) - articleNumber(b)
+    })
     const altreBody = altreCodes.length
       ? (
         <div style={{ display: 'grid', gap: 0 }}>

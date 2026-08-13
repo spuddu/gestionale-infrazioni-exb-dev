@@ -283,11 +283,9 @@ export default function Setting (props: Props) {
             <div><label style={P.lbl}>Valore riquadro</label><ColInp value={cfgJs.statusSummaryValueColor || defaultConfig.statusSummaryValueColor} onChange={v => patch({ statusSummaryValueColor: v })} /></div>
           </div>
           <div style={P.row3}>
-            <div><label style={P.lbl}>Nota riquadro</label><ColInp value={cfgJs.statusSummaryHintColor || defaultConfig.statusSummaryHintColor} onChange={v => patch({ statusSummaryHintColor: v })} /></div>
             <div><label style={P.lbl}>Etichetta totale</label><Inp value={cfgJs.statusSummaryTotalLabelColor || defaultConfig.statusSummaryTotalLabelColor} onChange={v => patch({ statusSummaryTotalLabelColor: v })} placeholder='rgba(...) oppure #rrggbb' /></div>
             <div><label style={P.lbl}>Valore totale</label><ColInp value={cfgJs.statusSummaryTotalValueColor || defaultConfig.statusSummaryTotalValueColor} onChange={v => patch({ statusSummaryTotalValueColor: v })} /></div>
           </div>
-          <label style={P.lbl}>Nota totale</label><Inp value={cfgJs.statusSummaryTotalHintColor || defaultConfig.statusSummaryTotalHintColor} onChange={v => patch({ statusSummaryTotalHintColor: v })} placeholder='rgba(...) oppure #rrggbb' />
         </SectionBox>
       </div>}
 
@@ -300,9 +298,8 @@ export default function Setting (props: Props) {
             <div><label style={P.lbl}>Spessore bordo gruppo</label><NumInp value={parseNum(cfgJs.normGroupBorderWidth, defaultConfig.normGroupBorderWidth)} onChange={n => patch({ normGroupBorderWidth: n })} min={0} max={8} unit='px' /></div>
           </div>
         </SectionBox>
-        <SectionBox title='Norme violate' hint='Aspetto dedicato alle card apribili delle norme violate.'>
+        <SectionBox title='Norme violate' hint='Aspetto delle card apribili. Lo sfondo visibile è distinto tra intestazione e corpo; il contenitore esterno non ha un proprio sfondo visibile.'>
           <div style={P.row3}>
-            <div><label style={P.lbl}>Sfondo card</label><ColInp value={cfgJs.normViolataCardBg || defaultConfig.normViolataCardBg} onChange={v => patch({ normViolataCardBg: v })} /></div>
             <div><label style={P.lbl}>Bordo card</label><ColInp value={cfgJs.normViolataBorderColor || defaultConfig.normViolataBorderColor} onChange={v => patch({ normViolataBorderColor: v })} /></div>
             <div><label style={P.lbl}>Spessore bordo</label><NumInp value={parseNum(cfgJs.normViolataBorderWidth, defaultConfig.normViolataBorderWidth)} onChange={n => patch({ normViolataBorderWidth: n })} min={0} max={8} unit='px' /></div>
           </div>
@@ -313,16 +310,14 @@ export default function Setting (props: Props) {
           </div>
           <div style={P.row2}>
             <div><label style={P.lbl}>Sfondo corpo</label><ColInp value={cfgJs.normViolataBodyBg || defaultConfig.normViolataBodyBg} onChange={v => patch({ normViolataBodyBg: v })} /></div>
-            <div><label style={P.lbl}>Titolo articolo</label><ColInp value={cfgJs.normViolataArticleTitleColor || defaultConfig.normViolataArticleTitleColor} onChange={v => patch({ normViolataArticleTitleColor: v })} /></div>
           </div>
           <div style={P.row2}>
             <div><label style={P.lbl}>Testo articolo</label><ColInp value={cfgJs.normViolataArticleTextColor || defaultConfig.normViolataArticleTextColor} onChange={v => patch({ normViolataArticleTextColor: v })} /></div>
             <div><label style={P.lbl}>Meta articolo</label><ColInp value={cfgJs.normViolataArticleMetaColor || defaultConfig.normViolataArticleMetaColor} onChange={v => patch({ normViolataArticleMetaColor: v })} /></div>
           </div>
         </SectionBox>
-        <SectionBox title='Norme sanzionatorie' hint='Aspetto dedicato alle card apribili delle norme sanzionatorie.'>
+        <SectionBox title='Norme sanzionatorie' hint='Aspetto delle card apribili. Lo sfondo visibile è distinto tra intestazione e corpo; il contenitore esterno non ha un proprio sfondo visibile.'>
           <div style={P.row3}>
-            <div><label style={P.lbl}>Sfondo card</label><ColInp value={cfgJs.normSanzionatoriaCardBg || defaultConfig.normSanzionatoriaCardBg} onChange={v => patch({ normSanzionatoriaCardBg: v })} /></div>
             <div><label style={P.lbl}>Bordo card</label><ColInp value={cfgJs.normSanzionatoriaBorderColor || defaultConfig.normSanzionatoriaBorderColor} onChange={v => patch({ normSanzionatoriaBorderColor: v })} /></div>
             <div><label style={P.lbl}>Spessore bordo</label><NumInp value={parseNum(cfgJs.normSanzionatoriaBorderWidth, defaultConfig.normSanzionatoriaBorderWidth)} onChange={n => patch({ normSanzionatoriaBorderWidth: n })} min={0} max={8} unit='px' /></div>
           </div>
@@ -333,7 +328,6 @@ export default function Setting (props: Props) {
           </div>
           <div style={P.row2}>
             <div><label style={P.lbl}>Sfondo corpo</label><ColInp value={cfgJs.normSanzionatoriaBodyBg || defaultConfig.normSanzionatoriaBodyBg} onChange={v => patch({ normSanzionatoriaBodyBg: v })} /></div>
-            <div><label style={P.lbl}>Titolo articolo</label><ColInp value={cfgJs.normSanzionatoriaArticleTitleColor || defaultConfig.normSanzionatoriaArticleTitleColor} onChange={v => patch({ normSanzionatoriaArticleTitleColor: v })} /></div>
           </div>
           <div style={P.row2}>
             <div><label style={P.lbl}>Testo articolo</label><ColInp value={cfgJs.normSanzionatoriaArticleTextColor || defaultConfig.normSanzionatoriaArticleTextColor} onChange={v => patch({ normSanzionatoriaArticleTextColor: v })} /></div>
