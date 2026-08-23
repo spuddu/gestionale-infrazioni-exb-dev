@@ -23,6 +23,8 @@ const DETAIL_AMOUNT_RIGHT_X = PAGE_W - M
 
 type Row = [string, string]
 
+type AdministrativeDocumentMode = 'PROPOSTA' | 'ATTO_FINALE'
+
 type AttoMeta = {
   code: string
   label: string
@@ -147,7 +149,7 @@ function normalizeAttoCode (raw: string, label: string): string {
   return s || 'VERBALE'
 }
 
-function getAttoMeta (m: Record<string, string>): AttoMeta {
+function getAttoMeta (m: Record<string, string>, mode: AdministrativeDocumentMode = 'PROPOSTA'): AttoMeta {
   const code = normalizeAttoCode(v(m, 'tipo_atto_amm'), v(m, 'tipo_atto_amm_label'))
   if (code === 'ARCHIVIAZIONE') {
     return {
@@ -206,12 +208,15 @@ function getAttoMeta (m: Record<string, string>): AttoMeta {
     }
   }
   if (code === 'VERBALE_RISARCIMENTO') {
+    const finale = mode === 'ATTO_FINALE'
     return {
       code,
-      label: 'Proposta di contestazione',
-      title: 'PROPOSTA DI CONTESTAZIONE',
-      fallbackObject: 'Proposta di contestazione conseguente al rapporto tecnico',
-      filePrefix: 'proposta_contestazione',
+      label: finale ? 'Atto di accertamento e contestazione' : 'Proposta di contestazione',
+      title: finale ? 'ATTO DI ACCERTAMENTO E CONTESTAZIONE' : 'PROPOSTA DI CONTESTAZIONE',
+      fallbackObject: finale
+        ? 'Atto di accertamento e contestazione con richiesta di rimborso e/o risarcimento danni conseguente al rapporto tecnico'
+        : 'Proposta di contestazione conseguente al rapporto tecnico',
+      filePrefix: finale ? 'atto_accertamento_contestazione' : 'proposta_contestazione',
       hasVerbale: true,
       hasSanzione: true,
       hasRimborso: true,
@@ -219,12 +224,15 @@ function getAttoMeta (m: Record<string, string>): AttoMeta {
       isArchiviazione: false
     }
   }
+  const finale = mode === 'ATTO_FINALE'
   return {
     code: 'VERBALE',
-    label: 'Proposta di contestazione',
-    title: 'PROPOSTA DI CONTESTAZIONE',
-    fallbackObject: 'Proposta di contestazione conseguente al rapporto tecnico',
-    filePrefix: 'proposta_contestazione',
+    label: finale ? 'Atto di accertamento e contestazione' : 'Proposta di contestazione',
+    title: finale ? 'ATTO DI ACCERTAMENTO E CONTESTAZIONE' : 'PROPOSTA DI CONTESTAZIONE',
+    fallbackObject: finale
+      ? 'Atto di accertamento e contestazione conseguente al rapporto tecnico'
+      : 'Proposta di contestazione conseguente al rapporto tecnico',
+    filePrefix: finale ? 'atto_accertamento_contestazione' : 'proposta_contestazione',
     hasVerbale: true,
     hasSanzione: true,
     hasRimborso: false,
@@ -851,10 +859,14 @@ function addBozzaWatermark (doc: PDFDocument, bold: PDFFont): void {
 }
 
 export function getPropostaContestazionePdfFilePrefix (m: Record<string, string>): string {
-  return getAttoMeta(m).filePrefix
+  return getAttoMeta(m, 'PROPOSTA').filePrefix
 }
 
-export async function buildPropostaContestazionePdf (m: Record<string, string>): Promise<Uint8Array> {
+export function getAttoFinalePdfFilePrefix (m: Record<string, string>): string {
+  return getAttoMeta(m, 'ATTO_FINALE').filePrefix
+}
+
+async function buildAdministrativeDocumentPdf (m: Record<string, string>, mode: AdministrativeDocumentMode): Promise<Uint8Array> {
   const doc = await PDFDocument.create()
   doc.registerFontkit(fontkit)
   const font = await doc.embedFont(b64ToBytes(CALIBRI_REGULAR_B64), { subset: false })
@@ -863,23 +875,41 @@ export async function buildPropostaContestazionePdf (m: Record<string, string>):
   const ctx: BuildCtx = { doc, font, bold, headerImage, page: doc.addPage([PAGE_W, PAGE_H]), y: 0, pageNo: 1 }
   drawHeader(ctx)
 
-  const meta = getAttoMeta(m)
+  const meta = getAttoMeta(m, mode)
+  const isFinal = mode === 'ATTO_FINALE'
   const approvato = ['1', 'TRUE', 'SI', 'SÌ', 'APPROVATO'].includes(v(m, 'atto_approvato').toUpperCase())
   const propostaApprovata = ['1', 'TRUE', 'SI', 'SÌ', 'APPROVATA', 'APPROVATO'].includes(v(m, 'proposta_approvata').toUpperCase())
-  const isBozza = !meta.isArchiviazione && !approvato && !propostaApprovata
-  const title = meta.title
-  const subtitle = meta.isArchiviazione ? '' : `ALLEGATA AL RAPPORTO TECNICO DI RILEVAZIONE N. ${v(m, 'n_rapporto') || '-'}`
+  const isBozza = !isFinal && !meta.isArchiviazione && !approvato && !propostaApprovata
+  const numeroAtto = v(m, 'accertamento_numero')
+  const title = isFinal && numeroAtto ? `${meta.title} N. ${numeroAtto}` : meta.title
+  const subtitle = meta.isArchiviazione
+    ? ''
+    : (isFinal
+        ? `RELATIVO AL RAPPORTO TECNICO DI RILEVAZIONE N. ${v(m, 'n_rapporto') || '-'}`
+        : `ALLEGATA AL RAPPORTO TECNICO DI RILEVAZIONE N. ${v(m, 'n_rapporto') || '-'}`)
   const trasgressore = v(m, 'trasgressore') || '-'
-  const object = meta.isArchiviazione
+  const object = isFinal
     ? (v(m, 'oggetto_atto_amm') || meta.fallbackObject)
-    : `Sanzione pecuniaria e richiesta di rimborso/risarcimento danni.
-Ditta “${trasgressore}”.`
+    : (meta.isArchiviazione
+        ? (v(m, 'oggetto_atto_amm') || meta.fallbackObject)
+        : `Sanzione pecuniaria e richiesta di rimborso/risarcimento danni.
+Ditta “${trasgressore}”.`)
   doc.setTitle(subtitle ? `${meta.title} - ${subtitle}` : meta.title)
 
   drawTitle(ctx, title, subtitle)
   drawProminentObject(ctx, object)
 
-  if (meta.isArchiviazione) {
+  if (isFinal) {
+    drawSectionTitle(ctx, "Dati dell'atto amministrativo")
+    drawKeyValueGrid(ctx, compactRows([
+      ['Numero atto', v(m, 'accertamento_numero')],
+      ['Data atto', v(m, 'accertamento_data')],
+      ['Determinazione', v(m, 'determinazione_numero') ? `n. ${v(m, 'determinazione_numero')}` : ''],
+      ['Data determinazione', v(m, 'determinazione_data')],
+      ['Protocollo', v(m, 'protocollo_atto_accertamento_numero') || v(m, 'protocollo_verbale')],
+      ['Data protocollo', v(m, 'protocollo_atto_accertamento_data')]
+    ]))
+  } else if (meta.isArchiviazione) {
     drawSectionTitle(ctx, "Dati dell'atto amministrativo")
     drawKeyValueGrid(ctx, compactRows([
       ['Protocollo istanza', v(m, 'protocollo_istanza_numero')],
@@ -938,8 +968,8 @@ Ditta “${trasgressore}”.`
     ]))
   }
 
-  if (!meta.isArchiviazione) {
-    drawAdministrativeIterSection(ctx, 'Iter approvativo della proposta', [
+  if (!meta.isArchiviazione || isFinal) {
+    const iterRows = [
       {
         fase: 'Attestazione',
         nominativo: v(m, 'amm_iter_compilazione_nome'),
@@ -956,13 +986,32 @@ Ditta “${trasgressore}”.`
         esito: 'Istruttoria amministrativa approvata',
         data: v(m, 'amm_iter_supervisione_data')
       }
-    ])
+    ]
+    if (isFinal) {
+      iterRows.push({
+        fase: 'Determinazione',
+        nominativo: v(m, 'amm_iter_approvazione_nome'),
+        ruolo: 'Direttore AA.GG. e P.F.',
+        presa: v(m, 'amm_iter_approvazione_presa'),
+        esito: v(m, 'determinazione_numero') ? `Determinazione n. ${v(m, 'determinazione_numero')}` : 'Determinazione adottata',
+        data: v(m, 'amm_iter_approvazione_data') || v(m, 'determinazione_data')
+      })
+    }
+    drawAdministrativeIterSection(ctx, isFinal ? 'Iter approvativo' : 'Iter approvativo della proposta', iterRows)
   }
 
 
   if (isBozza) addBozzaWatermark(doc, bold)
   addFooterNumbers(doc, font)
   return await doc.save()
+}
+
+export async function buildPropostaContestazionePdf (m: Record<string, string>): Promise<Uint8Array> {
+  return await buildAdministrativeDocumentPdf(m, 'PROPOSTA')
+}
+
+export async function buildAttoFinalePdf (m: Record<string, string>): Promise<Uint8Array> {
+  return await buildAdministrativeDocumentPdf(m, 'ATTO_FINALE')
 }
 
 

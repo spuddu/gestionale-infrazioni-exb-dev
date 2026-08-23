@@ -3133,10 +3133,13 @@ function ActionsPanel (props: {
   const roleEsitoValue = pickAttrCI(data, [roleEsitoField, roleEsitoField.toUpperCase()])
   const roleEsitoNum = toNumOrNull(roleEsitoValue)
   const determinazioneStatoCorrente = String(pickAttrCI(data, ['determinazione_stato', 'DETERMINAZIONE_STATO']) || '').trim().toUpperCase()
-  const determinazioneAdottataCorrente = determinazioneStatoCorrente === 'ADOTTATA' || (
+  const determinazioneRegistrataCorrente =
     !isEmptyValue(pickAttrCI(data, ['determinazione_numero', 'DETERMINAZIONE_NUMERO'])) &&
     !isEmptyValue(pickAttrCI(data, ['determinazione_data', 'DETERMINAZIONE_DATA']))
-  )
+  const determinazioneAdottataCorrente = determinazioneStatoCorrente === 'ADOTTATA' || determinazioneRegistrataCorrente
+  const attoContestazioneWorkflowAttivo = determinazioneRegistrataCorrente &&
+    !isEmptyValue(pickAttrCI(data, ['accertamento_numero', 'ACCERTAMENTO_NUMERO'])) &&
+    ['BOZZA', 'TRASMESSA_RI_AMM', 'VALIDATA_RI_AMM', 'EMAIL_DIRETTORE_PREPARATA'].includes(determinazioneStatoCorrente)
 
   const parseTiAmmRetakeMs = (v: any): number | null => {
     if (v == null || v === '') return null
@@ -3156,7 +3159,7 @@ function ActionsPanel (props: {
   const tiAmmRiAmmReturnEsito = toNumOrNull(pickAttrCI(data, ['esito_RI_AMM', 'ESITO_RI_AMM']))
   const tiAmmRiAmmReturnStato = toNumOrNull(pickAttrCI(data, ['stato_RI_AMM', 'STATO_RI_AMM']))
   const tiAmmHasReturnFromRiAmm = role === 'TI_AMM' &&
-    !determinazioneAdottataCorrente &&
+    (!determinazioneAdottataCorrente || attoContestazioneWorkflowAttivo) &&
     tiAmmLastRiAmmReturnMs !== null &&
     (
       tiAmmRiAmmReturnEsito === ESITO_APPROVATA ||
@@ -3190,6 +3193,10 @@ function ActionsPanel (props: {
       determinazioneStatoCorrente === 'BOZZA_TRASMESSA_RI_AMM' ||
       (riAmmOperationalNodeForBozza && esitoTiAmmForBozza === ESITO_APPROVATA)
     )
+  const riAmmAttoContestazioneDaVerificare = role === 'RI_AMM' &&
+    determinazioneRegistrataCorrente &&
+    determinazioneStatoCorrente === 'TRASMESSA_RI_AMM' &&
+    roleEsitoNum !== ESITO_APPROVATA
   const tiAmmAttestazioneOperativa = role === 'TI_AMM' && roleEsitoNum === ESITO_APPROVATA && (
     !determinazioneStatoCorrente ||
     determinazioneStatoCorrente === 'BOZZA'
@@ -3207,7 +3214,7 @@ function ActionsPanel (props: {
     presaRoleNum === PRESA_DA_PRENDERE ||
     presaRoleNum === PRESA_IN_CARICO
   )
-  const riAmmBlockedByTiAmmVistoOnly = role === 'RI_AMM' && !riAmmBozzaDeterminazioneDaVerificare && !riAmmHasOperationalNode &&
+  const riAmmBlockedByTiAmmVistoOnly = role === 'RI_AMM' && !riAmmBozzaDeterminazioneDaVerificare && !riAmmAttoContestazioneDaVerificare && !riAmmHasOperationalNode &&
     toNumOrNull(pickAttrCI(data, ['esito_TI_AMM', 'ESITO_TI_AMM'])) === ESITO_APPROVATA
 
   const canEdit =
@@ -3220,7 +3227,7 @@ function ActionsPanel (props: {
     inChargeByRole &&
     !roleClosedOrForwarded &&
     !riAmmBlockedByTiAmmVistoOnly &&
-    !(role === 'RI_AMM' && determinazioneAdottataCorrente)
+    !(role === 'RI_AMM' && determinazioneAdottataCorrente && !riAmmAttoContestazioneDaVerificare)
 
   const roleToBeTakenInCharge =
     role !== 'DA' &&
@@ -3229,7 +3236,7 @@ function ActionsPanel (props: {
     (
       statoRoleNum === STATO_DA_PRENDERE ||
       presaRoleNum === PRESA_DA_PRENDERE ||
-      (riAmmBozzaDeterminazioneDaVerificare && !inChargeByRole && roleEsitoNum == null) ||
+      ((riAmmBozzaDeterminazioneDaVerificare || riAmmAttoContestazioneDaVerificare) && !inChargeByRole && roleEsitoNum == null) ||
       tiAmmAwaitingRetakeFromRiAmm
     )
 
@@ -3883,6 +3890,22 @@ function ActionsPanel (props: {
     !tiAmmReturned &&
     !riAmmSenderIsTecnico
 
+  const currentIntegrationRequester = getIntegrationRequesterForCurrentRole()
+
+  // Il rimando generico TI_AMM → RI_AMM appartiene al ciclo istruttorio della determina.
+  // Dopo la predisposizione dell'e-mail al Direttore quel ciclo è chiuso e non deve
+  // più essere riaperto con un rimando generico. La fonte stabile è il milestone
+  // `determinazione_trasmessa_firma_*`, che viene registrato dalla stessa azione che
+  // prepara l'e-mail. I fallback coprono le pratiche già avanzate con versioni precedenti.
+  const determinazioneTrasmessaFirmaCorrente =
+    !isEmptyValue(pickAttrCI(data, ['determinazione_trasmessa_firma_il', 'DETERMINAZIONE_TRASMESSA_FIRMA_IL']))
+  const determinazioneHaSuperatoInvioDirettore =
+    determinazioneTrasmessaFirmaCorrente ||
+    determinazioneAdottataCorrente ||
+    determinazioneStatoCorrente === 'EMAIL_DIRETTORE_PREPARATA'
+  const tiAmmRimandoRiAmmInibitoDopoEmailDirettore =
+    role === 'TI_AMM' && determinazioneHaSuperatoInvioDirettore
+
   const canStartEsito =
     role !== 'DA' &&
     hasSel &&
@@ -3893,18 +3916,17 @@ function ActionsPanel (props: {
     myStatoIsPresaInCarico &&
     !lockRZBecauseAssignedToTi &&
     !lockRiAmmBecauseAssignedToTiAmm &&
-    !(role === 'RI_AMM' && determinazioneAdottataCorrente) &&
+    !(role === 'RI_AMM' && determinazioneAdottataCorrente && !riAmmAttoContestazioneDaVerificare) &&
     effectivePresaNum === PRESA_IN_CARICO &&
     effectiveStatoNum === STATO_PRESA_IN_CARICO
 
   // Regola RZ: prima di assegnare a TI, può solo "Assegna TI" oppure "Respingi".
   const canStartIntegrazione =
     canStartEsito &&
+    !tiAmmRimandoRiAmmInibitoDopoEmailDirettore &&
     role !== 'RI_AMM' &&
     !(role === 'RZ' && (origineNum == null || origineNum === 1) && !hasTiAnyEvidence) &&
     role !== 'TI'
-
-  const currentIntegrationRequester = getIntegrationRequesterForCurrentRole()
 
   // RI_AMM → TI_AMM: la destinazione verso TI_AMM ha tre significati distinti.
   // - prima ricezione tecnica: Assegna al TI_AMM;
@@ -3932,7 +3954,7 @@ function ActionsPanel (props: {
   const canStartIntegrazioneTiAmm =
     canStartEsito &&
     role === 'RI_AMM' &&
-    !determinazioneAdottataCorrente &&
+    (!determinazioneAdottataCorrente || riAmmAttoContestazioneDaVerificare) &&
     hasTiAmmAssigned &&
     !riAmmSenderIsTecnico &&
     currentIntegrationRequester !== 'TI_AMM'
@@ -3954,7 +3976,7 @@ function ActionsPanel (props: {
     role !== 'TI_AMM' &&
     tiAmmPuoApporreAttestazione &&
     !(role === 'RZ' && (origineNum == null || origineNum === 1) && !hasTiAnyEvidence) &&
-    !(role === 'RI_AMM' && !currentIntegrationRequester && !riAmmBozzaDeterminazioneDaVerificare)
+    !(role === 'RI_AMM' && !currentIntegrationRequester && !riAmmBozzaDeterminazioneDaVerificare && !riAmmAttoContestazioneDaVerificare)
 
   const canStartRespingi =
     canStartEsito &&
@@ -4012,6 +4034,7 @@ function ActionsPanel (props: {
     role === 'RZ' ? (praticaLabel === 'Rapporto tecnico' ? 'Valida integrazione' : 'Approva rilevazione') :
     role === 'RI' ? 'Approva istruttoria tecnica' :
     role === 'DT' ? 'Approva Rapporto tecnico di rilevazione' :
+    role === 'RI_AMM' && riAmmAttoContestazioneDaVerificare ? 'Approva Atto di contestazione' :
     role === 'RI_AMM' && riAmmBozzaDeterminazioneDaVerificare ? 'Approva istruttoria amministrativa' :
     role === 'RI_AMM' && riAmmStaApprovandoPropostaContestazione ? 'Approva istruttoria amministrativa' :
     role === 'RI_AMM' ? 'Approva istruttoria amministrativa' :
@@ -4024,6 +4047,7 @@ function ActionsPanel (props: {
     role === 'RZ' ? (praticaLabel === 'Rapporto tecnico' ? `Integrazione validata e trasmessa al ${getRoleLabelForMenu('RI')}` : `Rilevazione approvata e trasmessa al ${getRoleLabelForMenu('RI')}`) :
     role === 'RI' ? `Istruttoria tecnica approvata e trasmessa al ${getRoleLabelForForward('DT')}` :
     role === 'DT' ? `Rapporto tecnico di rilevazione approvato e trasmesso al ${getRoleLabelForMenu('RI_AMM')}` :
+    role === 'RI_AMM' && riAmmAttoContestazioneDaVerificare ? 'Atto di contestazione approvato' :
     role === 'RI_AMM' && riAmmBozzaDeterminazioneDaVerificare ? 'Istruttoria amministrativa approvata' :
     role === 'RI_AMM' && riAmmStaApprovandoPropostaContestazione ? 'Istruttoria amministrativa approvata' :
     role === 'RI_AMM' ? 'Istruttoria amministrativa approvata' :
@@ -4036,6 +4060,7 @@ function ActionsPanel (props: {
     role === 'RZ' ? (praticaLabel === 'Rapporto tecnico' ? 'Valida integrazione' : 'Approva rilevazione') :
     role === 'RI' ? 'Approva istruttoria tecnica' :
     role === 'DT' ? 'Approva rapporto tecnico' :
+    role === 'RI_AMM' && riAmmAttoContestazioneDaVerificare ? 'Approva Atto di contestazione' :
     role === 'RI_AMM' && riAmmBozzaDeterminazioneDaVerificare ? 'Approva istruttoria amministrativa' :
     role === 'RI_AMM' && riAmmStaApprovandoPropostaContestazione ? 'Approva istruttoria amministrativa' :
     role === 'RI_AMM' ? 'Approva istruttoria amministrativa' :
@@ -4161,6 +4186,7 @@ function ActionsPanel (props: {
     role === 'RZ' ? (praticaLabel === 'Rapporto tecnico' ? 'Valida integrazione' : 'Approva rilevazione') :
     role === 'RI' ? 'Approva istruttoria tecnica' :
     role === 'DT' ? 'Approva Rapporto tecnico di rilevazione' :
+    role === 'RI_AMM' && riAmmAttoContestazioneDaVerificare ? 'Approva Atto di contestazione' :
     role === 'RI_AMM' && riAmmBozzaDeterminazioneDaVerificare ? 'Approva istruttoria amministrativa' :
     role === 'RI_AMM' && riAmmStaApprovandoPropostaContestazione ? 'Approva istruttoria amministrativa' :
     role === 'RI_AMM' ? 'Approva istruttoria amministrativa' :
@@ -4173,6 +4199,7 @@ function ActionsPanel (props: {
     role === 'RZ' ? (praticaLabel === 'Rapporto tecnico' ? `Valida l’integrazione e trasmette il rapporto tecnico al ${getRoleLabelForMenu('RI')}.` : `Approva la rilevazione e la trasmette al ${getRoleLabelForMenu('RI')}.`) :
     role === 'RI' ? `Approva l’istruttoria tecnica e la trasmette al ${getRoleLabelForForward('DT')}.` :
     role === 'DT' ? `Approva il Rapporto tecnico di rilevazione e lo trasmette al ${getRoleLabelForMenu('RI_AMM')}.` :
+    role === 'RI_AMM' && riAmmAttoContestazioneDaVerificare ? 'Approva l’Atto e restituisce la pratica al Tecnico Istruttore amministrativo per la trasmissione al Direttore.' :
     role === 'RI_AMM' && riAmmBozzaDeterminazioneDaVerificare ? 'Approva l’istruttoria amministrativa e restituisce la pratica al Tecnico Istruttore amministrativo per la protocollazione e la trasmissione al Direttore.' :
     role === 'RI_AMM' && riAmmStaApprovandoPropostaContestazione ? 'Approva l’istruttoria amministrativa e restituisce la pratica al Tecnico istruttore amministrativo per protocollazione e predisposizione della bozza di determinazione.' :
     role === 'TI_AMM' ? 'Appone il visto di conformità. La pratica resta al Tecnico Istruttore amministrativo per la predisposizione della bozza di determinazione e la successiva trasmissione del fascicolo al Responsabile.' :
@@ -4183,7 +4210,7 @@ function ActionsPanel (props: {
 
   // RI_AMM non deve vedere contemporaneamente una trasmissione e una restituzione
   // verso lo stesso TI_AMM: per l'utente sarebbero due scelte indistinguibili.
-  const hideRiAmmForwardToTiAmm = role === 'RI_AMM' && fwdDest === 'TI_AMM' && !riAmmStaApprovandoPropostaContestazione && !riAmmBozzaDeterminazioneDaVerificare
+  const hideRiAmmForwardToTiAmm = role === 'RI_AMM' && fwdDest === 'TI_AMM' && !riAmmStaApprovandoPropostaContestazione && !riAmmBozzaDeterminazioneDaVerificare && !riAmmAttoContestazioneDaVerificare
 
   const workflowMenuSections: WorkflowMenuSection[] = hasSel && role !== 'DA' ? ([
     {
@@ -4261,7 +4288,7 @@ function ActionsPanel (props: {
           label: rimandoGenericButtonLabel,
           desc: rimandoGenericTargetLabel ? `${praticaLabel === 'Rapporto tecnico' ? 'Il rapporto tecnico verrà rimandato' : 'La rilevazione verrà rimandata'} al ${rimandoGenericTargetLabel}.` : 'Rimando per integrazione.',
           enabled: canStartIntegrazione,
-          visible: role !== 'TI' && role !== 'RI_AMM',
+          visible: role !== 'TI' && role !== 'RI_AMM' && !tiAmmRimandoRiAmmInibitoDopoEmailDirettore,
           color: buttonColors.integrazione,
           textColor: buttonColors.integrazioneText
         }
@@ -4308,7 +4335,7 @@ function ActionsPanel (props: {
   const administrativeReturnTargetOptions = [
     'Proposta di contestazione',
     'Bozza di determinazione',
-    'Contestazioni e importi',
+    'Contestazioni',
     'Dati del trasgressore',
     'Allegati',
     'Altro'
@@ -5341,6 +5368,12 @@ function ActionsPanel (props: {
 
 
 
+      if (role === 'RI_AMM' && esito === ESITO_APPROVATA && riAmmAttoContestazioneDaVerificare) {
+        const schemaFields: Record<string, any> = (ds as any)?.getSchema?.()?.fields || {}
+        const fDetStato = getSchemaFieldNameCI(schemaFields, 'determinazione_stato')
+        if (fDetStato) upd[fDetStato] = 'VALIDATA_RI_AMM'
+      }
+
       if (role === 'RI_AMM' && esito === ESITO_APPROVATA && riAmmBozzaDeterminazioneDaVerificare) {
         const schemaFields: Record<string, any> = (ds as any)?.getSchema?.()?.fields || {}
         const fDetStato = getSchemaFieldNameCI(schemaFields, 'determinazione_stato')
@@ -5682,13 +5715,14 @@ ${noteTrim}` : 'Attestazione di conformità apposta.',
     role === 'RZ' ? (praticaLabel === 'Rapporto tecnico' ? 'Validazione integrazione' : 'Approvazione rilevazione') :
     role === 'RI' ? 'Approvazione istruttoria tecnica' :
     role === 'DT' ? 'Approvazione rapporto tecnico' :
+    role === 'RI_AMM' && riAmmAttoContestazioneDaVerificare ? 'Approvazione Atto di contestazione' :
     role === 'RI_AMM' && riAmmBozzaDeterminazioneDaVerificare ? 'Approvazione istruttoria amministrativa' :
     role === 'RI_AMM' ? 'Approvazione istruttoria amministrativa' :
     role === 'TI_AMM' ? `Trasmissione al ${getRoleLabelForMenu('RI_AMM')}` :
     'Avanzamento pratica'
 
   const pendingTitle = pending === 'TAKE'
-    ? (riAmmBozzaDeterminazioneDaVerificare ? 'Presa in carico pratica' : 'Presa in carico')
+    ? ((riAmmBozzaDeterminazioneDaVerificare || riAmmAttoContestazioneDaVerificare) ? 'Presa in carico pratica' : 'Presa in carico')
     : pending === 'ASSEGNA_TI'
       ? `Assegnazione al ${getRoleLabelForMenu('TI')}`
       : pending === 'ASSEGNA_TI_AMM'
@@ -5711,6 +5745,7 @@ ${noteTrim}` : 'Attestazione di conformità apposta.',
     role === 'RZ' ? (praticaLabel === 'Rapporto tecnico' ? `L’integrazione verrà validata e il rapporto tecnico verrà trasmesso al ${getRoleLabelForMenu('RI')}.` : `La rilevazione verrà approvata e trasmessa al ${getRoleLabelForMenu('RI')}.`) :
     role === 'RI' ? `L’istruttoria tecnica verrà approvata e trasmessa al ${getRoleLabelForForward('DT')}.` :
     role === 'DT' ? `Il Rapporto tecnico di rilevazione verrà approvato e trasmesso al ${getRoleLabelForMenu('RI_AMM')}.` :
+    role === 'RI_AMM' && riAmmAttoContestazioneDaVerificare ? 'L’Atto di contestazione verrà approvato e la pratica tornerà al Tecnico Istruttore amministrativo per la trasmissione al Direttore.' :
     role === 'RI_AMM' && riAmmBozzaDeterminazioneDaVerificare ? 'L’istruttoria amministrativa verrà approvata e la pratica tornerà al Tecnico Istruttore amministrativo per i passaggi successivi.' :
     role === 'RI_AMM' && riAmmStaApprovandoPropostaContestazione ? 'L’istruttoria amministrativa verrà approvata e la pratica tornerà al Tecnico istruttore amministrativo per protocollazione e predisposizione della bozza di determinazione.' :
     role === 'RI_AMM' ? 'L’istruttoria amministrativa verrà approvata e la pratica verrà restituita al Tecnico Istruttore amministrativo per i passaggi successivi.' :
@@ -5726,7 +5761,7 @@ ${noteTrim}` : 'Attestazione di conformità apposta.',
         : 'La rilevazione verrà rimandata per integrazione.')
 
   const pendingTheme: Record<string, PendingTheme> = {
-    TAKE:           { icon: '✓', color: '#2563eb', bg: '#eff6ff', border: '#bfdbfe', buttonBg: '#2563eb', buttonBorder: '#1d4ed8', desc: riAmmBozzaDeterminazioneDaVerificare ? 'La pratica contenente la bozza di determinazione verrà presa in carico per la verifica.' : ((role === 'RI_AMM' || role === 'TI_AMM') ? 'La pratica verrà presa in carico.' : (praticaLabel === 'Rapporto tecnico' ? 'Il rapporto tecnico verrà preso in carico.' : 'La rilevazione verrà presa in carico.')) },
+    TAKE:           { icon: '✓', color: '#2563eb', bg: '#eff6ff', border: '#bfdbfe', buttonBg: '#2563eb', buttonBorder: '#1d4ed8', desc: riAmmAttoContestazioneDaVerificare ? 'La pratica contenente la bozza dell’Atto di contestazione verrà presa in carico per la verifica.' : (riAmmBozzaDeterminazioneDaVerificare ? 'La pratica contenente la bozza di determinazione verrà presa in carico per la verifica.' : ((role === 'RI_AMM' || role === 'TI_AMM') ? 'La pratica verrà presa in carico.' : (praticaLabel === 'Rapporto tecnico' ? 'Il rapporto tecnico verrà preso in carico.' : 'La rilevazione verrà presa in carico.'))) },
     ASSEGNA_TI:     { icon: '✓', color: '#2563eb', bg: '#eff6ff', border: '#bfdbfe', buttonBg: '#2563eb', buttonBorder: '#1d4ed8', desc: `${subjectArticle} ${subjectNameLower} verrà ${subjectVerbAssegnata} al ${getRoleLabelForMenu('TI')} selezionato.` },
     ASSEGNA_TI_AMM: { icon: '✓', color: '#2563eb', bg: '#eff6ff', border: '#bfdbfe', buttonBg: '#2563eb', buttonBorder: '#1d4ed8', desc: riaperturaWorkflowDaAvviare
       ? `Verrà aperto il nuovo ciclo di riapertura n. ${riaperturaAmmNumero} e la pratica sarà assegnata al ${getRoleLabelForMenu('TI_AMM')} selezionato.`

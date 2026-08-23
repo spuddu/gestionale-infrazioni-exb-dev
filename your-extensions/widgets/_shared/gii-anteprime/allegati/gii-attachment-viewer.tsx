@@ -23,7 +23,7 @@ export type GiiAttachmentViewerItem = {
   readOnlyReason?: string
 }
 
-export type GiiAttachmentKind = 'technical' | 'administrative' | 'bozza-determinazione' | 'proposta-contestazione' | 'internal-reference'
+export type GiiAttachmentKind = 'technical' | 'administrative' | 'bozza-determinazione' | 'proposta-contestazione' | 'atto-contestazione' | 'internal-reference'
 
 export const GII_ATTACHMENT_KEYWORDS = {
   technical: 'GII_ALLEGATO_TECNICO',
@@ -31,6 +31,8 @@ export const GII_ATTACHMENT_KEYWORDS = {
   bozzaDeterminazione: 'GII_BOZZA_DETERMINAZIONE_PDF',
   legacyBozzaDeterminazioneWord: 'GII_BOZZA_DETERMINAZIONE_DOCX',
   propostaContestazione: 'GII_PROPOSTA_CONTESTAZIONE_PDF',
+  attoFinale: 'GII_ATTO_FINALE_PDF', // compatibilità con le patch sperimentali 141-144
+  attoContestazione: 'GII_ATTO_CONTESTAZIONE_PDF',
   approvedBozzaReference: 'GII_BOZZA_APPROVATA_RI_AMM_REFERENCE'
 } as const
 
@@ -65,6 +67,9 @@ export function getGiiAttachmentKind (item: GiiAttachmentViewerItem | null | und
   if (attachmentKeywordHas(item, GII_ATTACHMENT_KEYWORDS.propostaContestazione) || /\bproposta\b.*\bcontestazione\b/.test(nameKey)) {
     return 'proposta-contestazione'
   }
+  if (attachmentKeywordHas(item, GII_ATTACHMENT_KEYWORDS.attoContestazione) || attachmentKeywordHas(item, GII_ATTACHMENT_KEYWORDS.attoFinale) || /\batto\b.*\baccertamento\b/.test(nameKey)) {
+    return 'atto-contestazione'
+  }
   if (attachmentKeywordHas(item, GII_ATTACHMENT_KEYWORDS.administrative)) return 'administrative'
   if (attachmentKeywordHas(item, GII_ATTACHMENT_KEYWORDS.technical)) return 'technical'
   return 'technical'
@@ -76,7 +81,7 @@ export function isGiiApprovedBozzaReferenceAttachment (item: GiiAttachmentViewer
 
 export function isGiiSpecialAdministrativeAttachment (item: GiiAttachmentViewerItem | null | undefined): boolean {
   const kind = getGiiAttachmentKind(item)
-  return kind === 'bozza-determinazione' || kind === 'proposta-contestazione' || kind === 'internal-reference'
+  return kind === 'bozza-determinazione' || kind === 'proposta-contestazione' || kind === 'atto-contestazione' || kind === 'internal-reference'
 }
 
 export function isGiiBozzaDeterminazionePdfAttachment (item: GiiAttachmentViewerItem | null | undefined): boolean {
@@ -94,6 +99,13 @@ export function isGiiLegacyBozzaDeterminazioneWordAttachment (item: GiiAttachmen
 export function isGiiPropostaContestazionePdfAttachment (item: GiiAttachmentViewerItem | null | undefined): boolean {
   return getGiiAttachmentKind(item) === 'proposta-contestazione' && !!item && isPdfAttachment(item)
 }
+
+export function isGiiAttoContestazionePdfAttachment (item: GiiAttachmentViewerItem | null | undefined): boolean {
+  return getGiiAttachmentKind(item) === 'atto-contestazione' && !!item && isPdfAttachment(item)
+}
+
+export const isGiiAttoFinalePdfAttachment = isGiiAttoContestazionePdfAttachment
+
 
 function giiAttachmentRecencyValue (item: GiiAttachmentViewerItem | null | undefined): number {
   if (!item) return 0
@@ -151,6 +163,8 @@ export function filterGiiAttachmentsForAdministrativeGenericSection<T extends Gi
 }
 
 export function filterGiiAttachmentsForAdministrativeFascicolo<T extends GiiAttachmentViewerItem> (items: T[]): T[] {
+  // I documenti di procedimento (Proposta, Determinazione, Atto) sono gestiti
+  // separatamente dal viewer e non devono comparire nella scheda Allegati.
   return (Array.isArray(items) ? items : []).filter(item => !isGiiSpecialAdministrativeAttachment(item))
 }
 

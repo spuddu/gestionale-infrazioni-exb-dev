@@ -4,7 +4,7 @@ import { React, jsx } from 'jimu-core'
 import type { GiiAttachmentPrintOption, GiiDocumentPrintOptions, GiiNotaSpesePrintOption } from './document-options'
 import { getGiiAttachmentKind } from '../allegati/gii-attachment-viewer'
 
-type DocumentKey = keyof Pick<GiiDocumentPrintOptions, 'includeRapporto' | 'includeNotaSpese' | 'includeMappa' | 'includeAllegatiTecnici' | 'includeAllegatiAmministrativi' | 'includePropostaContestazione' | 'includeDeterminazione'>
+type DocumentKey = keyof Pick<GiiDocumentPrintOptions, 'includeRapporto' | 'includeNotaSpese' | 'includeMappa' | 'includeAllegatiTecnici' | 'includeAllegatiAmministrativi' | 'includePropostaContestazione' | 'includeDeterminazione' | 'includeAttoContestazione'>
 
 export type GiiDocumentSidebarAvailability = {
   notaSpese: boolean
@@ -12,6 +12,7 @@ export type GiiDocumentSidebarAvailability = {
   allegati: boolean
   propostaContestazione?: boolean
   determinazione?: boolean
+  attoContestazione?: boolean
 }
 
 export type GiiDocumentSidebarProps = {
@@ -94,6 +95,7 @@ export default function GiiDocumentSidebar (props: GiiDocumentSidebarProps) {
       key === 'includeAllegatiAmministrativi' ? administrativeAttachments.length === 0 :
       key === 'includePropostaContestazione' ? !availability.propostaContestazione :
       key === 'includeDeterminazione' ? !availability.determinazione :
+      key === 'includeAttoContestazione' ? !availability.attoContestazione :
       false
     )
     const unavailable = unavailableBase || !!documentUnavailableExtra?.[key]
@@ -179,6 +181,7 @@ export default function GiiDocumentSidebar (props: GiiDocumentSidebarProps) {
           <div style={{ display: 'grid', gap: 8 }}>
             {renderDocCheckbox('includePropostaContestazione', 'Proposta di contestazione')}
             {renderDocCheckbox('includeDeterminazione', 'Determinazione dirigenziale')}
+            {renderDocCheckbox('includeAttoContestazione', 'Atto di accertamento/contestazione')}
             {renderDocCheckbox('includeAllegatiAmministrativi', 'Allegati')}
           </div>
         </div>

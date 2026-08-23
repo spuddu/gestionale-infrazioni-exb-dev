@@ -6,6 +6,7 @@
 // all'interfaccia amministrativa (badge, tabella violazioni, ecc.).
 // =================================================================
 import { buildPropostaContestazionePdf as buildVerbalePdf, getPropostaContestazionePdfFilePrefix as getVerbalePdfFilePrefix } from '../proposta-contestazione/proposta-contestazione-pdf-builder'
+import { buildAttoFinalePdf, getAttoFinalePdfFilePrefix } from '../verbale-contestazione/verbale-pdf-builder'
 
 export type LayerFieldInfo = {
   name: string
@@ -735,6 +736,16 @@ export function buildVerbalePdfMap (data: any, fields: LayerFieldInfo[], profile
   const cfPiva = isPg ? String(pickAttrCI(d, ['piva']) || '').trim() : String(pickAttrCI(d, ['codice_fiscale']) || '').trim()
   const indirizzo = joinParts(String(pickAttrCI(d, ['via']) || ''), String(pickAttrCI(d, ['civico']) || ''))
   const comuneCap = joinParts(String(pickAttrCI(d, ['citta', 'comune']) || ''), String(pickAttrCI(d, ['cap']) || ''))
+  const domRaw = pickAttrCI(d, ['dom_notifica_uguale'])
+  const domicilioCoincide = domRaw == null || domRaw === '' || String(domRaw) === '1' || ['SI', 'SÌ', 'TRUE'].includes(String(domRaw).trim().toUpperCase())
+  const destinatarioVia = domicilioCoincide ? String(pickAttrCI(d, ['via']) || '') : String(pickAttrCI(d, ['dom_notifica_via']) || '')
+  const destinatarioCivico = domicilioCoincide ? String(pickAttrCI(d, ['civico']) || '') : String(pickAttrCI(d, ['dom_notifica_civico']) || '')
+  const destinatarioCitta = (domicilioCoincide ? String(pickAttrCI(d, ['citta', 'comune']) || '') : String(pickAttrCI(d, ['dom_notifica_citta']) || '')).trim()
+  const destinatarioCap = (domicilioCoincide ? String(pickAttrCI(d, ['cap']) || '') : String(pickAttrCI(d, ['dom_notifica_cap']) || '')).trim()
+  const destinatarioProvincia = (domicilioCoincide ? String(pickAttrCI(d, ['provincia']) || '') : String(pickAttrCI(d, ['dom_notifica_provincia']) || '')).trim()
+  const destinatarioStato = (domicilioCoincide ? String(pickAttrCI(d, ['stato']) || '') : String(pickAttrCI(d, ['dom_notifica_stato']) || '')).trim()
+  const destinatarioIndirizzo = joinParts(destinatarioVia, destinatarioCivico)
+  const destinatarioComuneCap = [destinatarioCap, destinatarioCitta ? `${destinatarioCitta}${destinatarioProvincia ? ` (${destinatarioProvincia})` : ''}` : ''].filter(Boolean).join(' - ')
   const contatti = [String(pickAttrCI(d, ['email']) || '').trim(), String(pickAttrCI(d, ['telefono']) || '').trim(), String(pickAttrCI(d, ['cellulare']) || '').trim()].filter(Boolean).join(' / ')
   const area = pdfDomainValue(d, fields, ['area_cod', 'Area_cod', 'AREA_COD', 'area', 'Area'], 'area_cod') || String(pickAttrCI(d, ['area_label']) || '')
   const settore = pdfDomainValue(d, fields, ['settore_cod', 'Settore_cod', 'SETTORE_COD', 'settore', 'Settore'], 'settore_cod') || String(pickAttrCI(d, ['settore_label']) || '')
@@ -748,6 +759,12 @@ export function buildVerbalePdfMap (data: any, fields: LayerFieldInfo[], profile
     'responsabile_istruttoria_amm_nome', 'responsabile_istruttoria_amm_username',
     'istruttoria_amm_chiusa_da'
   ]) || (!approvatoDa && pdfFieldValue(d, fields, 'dt_esito_RI_AMM') ? giiDaActor : '')
+  const direttoreNomeUfficiale = firstTextAttr(d, [
+    'da_nome',
+    'direttore_area_nome',
+    'direttore_amm_nome',
+    'dt_amm_nome'
+  ])
   const daNome = firstTextAttr(d, [
     'da_nome', 'da_username',
     'direttore_area_nome', 'direttore_area_username',
@@ -779,6 +796,10 @@ export function buildVerbalePdfMap (data: any, fields: LayerFieldInfo[], profile
     cf_piva: cfPiva,
     indirizzo,
     comune_cap: comuneCap,
+    destinatario_indirizzo: destinatarioIndirizzo,
+    destinatario_comune_cap: destinatarioComuneCap,
+    destinatario_provincia: destinatarioProvincia,
+    destinatario_stato: destinatarioStato,
     pec: String(pickAttrCI(d, ['pec']) || ''),
     contatti,
     violazioni: buildVerbaleViolationsText(d, fields),
@@ -793,6 +814,8 @@ export function buildVerbalePdfMap (data: any, fields: LayerFieldInfo[], profile
     note_atto_amm: String(pickAttrCI(d, ['note_atto_amm']) || ''),
     esito_ti_amm: esitoTiAmmNum === 1 ? 'Da integrare/rettificare' : esitoTiAmmNum === 2 ? 'Conforme' : esitoTiAmmNum === 3 ? 'Respinta' : '',
     note_ti_amm: String(pickAttrCI(d, ['note_TI_AMM', 'note_atto_amm']) || ''),
+    determinazione_numero: String(pickAttrCI(d, ['determinazione_numero']) || ''),
+    determinazione_data: pdfFieldValue(d, fields, 'determinazione_data'),
     accertamento_numero: verbaleNumberValue(d, oid),
     accertamento_data: hasAdminValue(pickAttrCI(d, ['accertamento_data'])) ? pdfFieldValue(d, fields, 'accertamento_data') : displayVerbaleApprovalDate(d, fields),
     protocollo_verbale: String(pickAttrCI(d, ['protocollo_atto_accertamento_numero']) || ''),
@@ -837,6 +860,7 @@ export function buildVerbalePdfMap (data: any, fields: LayerFieldInfo[], profile
     amm_iter_supervisione_presa: pdfFieldValue(d, fields, 'dt_presa_in_carico_RI_AMM'),
     amm_iter_supervisione_data: pdfFieldValue(d, fields, 'dt_esito_RI_AMM') || pdfFieldValue(d, fields, 'istruttoria_amm_chiusa_il'),
     amm_iter_approvazione_nome: daNome,
+    amm_direttore_nome: direttoreNomeUfficiale,
     amm_iter_approvazione_presa: pdfFieldValue(d, fields, 'determinazione_trasmessa_firma_il'),
     amm_iter_approvazione_data: isDeterminazioneAdottata(d) ? (pdfFieldValue(d, fields, 'determinazione_data') || pdfFieldValue(d, fields, 'determinazione_registrata_il')) : '',
     data_generazione: new Date().toLocaleString('it-IT'),
@@ -854,5 +878,20 @@ export async function buildVerbalePdfBlob (data: any, fields: LayerFieldInfo[], 
   const map = buildVerbalePdfMap(data, fields, profile)
   const bytes = await buildVerbalePdf(map)
   const fileName = verbalePdfFileName(map)
+  return { blob: new Blob([bytes as any], { type: 'application/pdf' }), fileName }
+}
+
+export function attoFinalePdfFileName (map: Record<string, string>): string {
+  const prefix = getAttoFinalePdfFilePrefix(map) || 'atto_finale'
+  const numero = String(map.accertamento_numero || '').trim().replace(/[^a-zA-Z0-9_-]/g, '_')
+  const rapporto = String(map.n_rapporto || map.objectid || '').trim().replace(/[^a-zA-Z0-9_-]/g, '_')
+  const base = numero || rapporto || prefix
+  return `${prefix}_${base}.pdf`
+}
+
+export async function buildAttoFinalePdfBlob (data: any, fields: LayerFieldInfo[], profile: { username: string, fullName: string }): Promise<{ blob: Blob, fileName: string }> {
+  const map = buildVerbalePdfMap(data, fields, profile)
+  const bytes = await buildAttoFinalePdf(map)
+  const fileName = attoFinalePdfFileName(map)
   return { blob: new Blob([bytes as any], { type: 'application/pdf' }), fileName }
 }

@@ -229,7 +229,7 @@ async function drawMapLegend (doc: PDFDocument, page: PDFPage, font: any, boldFo
   }
 }
 
-export async function drawRapportoTechnicalHeadersByPage (doc: PDFDocument, titleForPage: (pageIndex: number) => string, subtitle?: string): Promise<void> {
+export async function drawRapportoTechnicalHeadersByPage (doc: PDFDocument, titleForPage: (pageIndex: number) => string, subtitle?: string, includePage?: (pageIndex: number) => boolean): Promise<void> {
   const source = await PDFDocument.load(b64ToBytes(BASE_PDF_B64) as any)
   const sourcePage = source.getPages()[0]
   const logoHeaderTemplate = await (doc as any).embedPage(sourcePage, {
@@ -241,8 +241,12 @@ export async function drawRapportoTechnicalHeadersByPage (doc: PDFDocument, titl
   const bold = await doc.embedFont(StandardFonts.HelveticaBold)
   const regular = await doc.embedFont(StandardFonts.Helvetica)
   const pages = doc.getPages()
-  const total = pages.length
-  pages.forEach((page, index) => {
+  const selected = pages
+    .map((_, index) => index)
+    .filter(index => includePage ? !!includePage(index) : true)
+  const total = selected.length
+  selected.forEach((index, selectedIndex) => {
+    const page = pages[index]
     page.drawRectangle({
       x: 0,
       y: RAPPORTO_TECHNICAL_PAGE_H - RAPPORTO_TECHNICAL_BODY_TOP,
@@ -258,7 +262,7 @@ export async function drawRapportoTechnicalHeadersByPage (doc: PDFDocument, titl
     })
     centered(page, String(titleForPage(index) || '').toUpperCase(), bold, 9, 42, RAPPORTO_TECHNICAL_PAGE_W - 42, bY(98, 9))
     if (subtitle) centered(page, subtitle, regular, 8.5, 42, RAPPORTO_TECHNICAL_PAGE_W - 42, bY(112, 8.5))
-    rightText(page, `Pag. ${index + 1} di ${total}`, regular, 7, 532.6, bY(818, 7))
+    rightText(page, `Pag. ${selectedIndex + 1} di ${total}`, regular, 7, 532.6, bY(818, 7))
   })
 }
 

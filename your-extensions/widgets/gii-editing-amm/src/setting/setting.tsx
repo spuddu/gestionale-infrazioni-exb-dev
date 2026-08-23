@@ -155,7 +155,7 @@ export default function Setting (props: Props) {
             <div><label style={P.lbl}>Dimensione titolo</label><NumInp value={parseNum(cfgJs.titleFontSize, defaultConfig.titleFontSize)} onChange={n => patch({ titleFontSize: n })} min={18} max={28} unit='px' /></div>
           </div>
         </SectionBox>
-        <SectionBox title='Card principali con intestazione blu' hint='Aspetto condiviso delle sezioni principali presenti nelle schede amministrative: Verifica istruttoria, Dati generali, Pagamento, Notifica e fasi successive.'>
+        <SectionBox title='Card principali con intestazione blu' hint='Aspetto condiviso delle sezioni principali presenti nelle schede amministrative: Iter approvativo, Dati generali, Pagamento, Notifica e fasi successive.'>
           <div style={P.row2}><div><label style={P.lbl}>Sfondo corpo card</label><ColInp value={cfgJs.formCardBg || defaultConfig.formCardBg} onChange={v => patch({ formCardBg: v })} /></div><div><label style={P.lbl}>Bordo card</label><ColInp value={cfgJs.formCardBorderColor || defaultConfig.formCardBorderColor} onChange={v => patch({ formCardBorderColor: v })} /></div></div>
           <div style={P.row3}>
             <div><label style={P.lbl}>Spessore bordo</label><NumInp value={parseNum(cfgJs.formCardBorderWidth, defaultConfig.formCardBorderWidth)} onChange={n => patch({ formCardBorderWidth: n })} min={0} max={8} unit='px' /></div>
@@ -234,9 +234,9 @@ export default function Setting (props: Props) {
         </SectionBox>
       </div>}
 
-      <Acc id='stile-verifica-istruttoria' label='🎨 Verifica istruttoria' open={isOpen('stile-verifica-istruttoria')} onToggle={() => toggle('stile-verifica-istruttoria')} />
+      <Acc id='stile-verifica-istruttoria' label='🎨 Iter approvativo' open={isOpen('stile-verifica-istruttoria')} onToggle={() => toggle('stile-verifica-istruttoria')} />
       {isOpen('stile-verifica-istruttoria') && <div>
-        <SectionBox title='Barra Azioni' hint='Aspetto della barra mostrata esclusivamente nella scheda Verifica istruttoria.'>
+        <SectionBox title='Barra Azioni' hint='Aspetto della barra mostrata esclusivamente nella scheda Iter approvativo.'>
           <div style={P.row2}>
             <div><label style={P.lbl}>Colore di sfondo</label><ColInp value={cfgJs.actionBarBg || defaultConfig.actionBarBg} onChange={v => patch({ actionBarBg: v })} /></div>
             <div><label style={P.lbl}>Colore bordo</label><ColInp value={cfgJs.actionBarBorderColor || defaultConfig.actionBarBorderColor} onChange={v => patch({ actionBarBorderColor: v })} /></div>
@@ -260,7 +260,7 @@ export default function Setting (props: Props) {
 
       <Acc id='stile-riepiloghi' label='🎨 Riquadri riepilogativi condivisi' open={isOpen('stile-riepiloghi')} onToggle={() => toggle('stile-riepiloghi')} />
       {isOpen('stile-riepiloghi') && <div>
-        <SectionBox title='Riquadri di stato e importi' hint='Stile condiviso dai riepiloghi presenti in Verifica istruttoria, Dati generali, Pagamento, Notifica, Definizione e altre sezioni amministrative.'>
+        <SectionBox title='Riquadri di stato e importi' hint='Stile condiviso dai riepiloghi presenti in Iter approvativo, Dati generali, Pagamento, Notifica, Definizione e altre sezioni amministrative.'>
           <div style={P.row2}>
             <div><label style={P.lbl}>Sfondo riquadro normale</label><ColInp value={cfgJs.statusSummaryNormalBg || defaultConfig.statusSummaryNormalBg} onChange={v => patch({ statusSummaryNormalBg: v })} /></div>
             <div><label style={P.lbl}>Bordo riquadro normale</label><ColInp value={cfgJs.statusSummaryNormalBorderColor || defaultConfig.statusSummaryNormalBorderColor} onChange={v => patch({ statusSummaryNormalBorderColor: v })} /></div>

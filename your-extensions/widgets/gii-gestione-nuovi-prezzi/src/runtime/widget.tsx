@@ -1,10 +1,69 @@
 /** @jsx jsx */
 /** @jsxFrag React.Fragment */
 import { React, jsx, type AllWidgetProps } from 'jimu-core'
+import { createPortal } from 'react-dom'
 import type { IMConfig } from '../config'
 import GiiActiveToggle from '../../../_shared/gii-ui/active-toggle'
 
 const { Fragment } = React
+
+
+type GiiEditLockRect = {
+  key: string
+  left: number
+  top: number
+  width: number
+  height: number
+}
+
+function getGiiGlobalOverlayHost (): HTMLElement | null {
+  try {
+    const doc = (window as any)?.top?.document || document
+    return doc?.body || document.body
+  } catch {
+    return typeof document !== 'undefined' ? document.body : null
+  }
+}
+
+function isGiiBuilderMode (): boolean {
+  try {
+    const doc = (window as any)?.top?.document || document
+    const classes = doc?.body?.classList ? Array.from(doc.body.classList).join(' ').toLowerCase() : ''
+    if (classes.includes('builder') || classes.includes('jimu-builder')) return true
+    if (doc?.querySelector?.('[data-testid="builder"], .builder-header, .jimu-builder')) return true
+  } catch {}
+  return false
+}
+
+function findGiiWidgetElement (doc: Document, widgetId: string): HTMLElement | null {
+  const id = String(widgetId || '').trim()
+  if (!id) return null
+  for (const selector of [`[data-widgetid="${id}"]`, `[data-widget-id="${id}"]`, `[widgetid="${id}"]`, `[id="${id}"]`, `#${id}`]) {
+    try {
+      const el = doc.querySelector(selector) as HTMLElement | null
+      if (el) return el
+    } catch {}
+  }
+  return null
+}
+
+function getGiiVisibleLockRect (el: HTMLElement, key: string, viewW: number, viewH: number, win: Window): GiiEditLockRect | null {
+  try {
+    if (!el || !el.isConnected) return null
+    const computed = win.getComputedStyle?.(el)
+    if (computed && (computed.display === 'none' || computed.visibility === 'hidden' || computed.opacity === '0')) return null
+    const r = el.getBoundingClientRect()
+    const left = Math.max(0, Math.floor(r.left))
+    const top = Math.max(0, Math.floor(r.top))
+    const right = Math.min(viewW, Math.ceil(r.right))
+    const bottom = Math.min(viewH, Math.ceil(r.bottom))
+    const width = Math.max(0, right - left)
+    const height = Math.max(0, bottom - top)
+    return width >= 2 && height >= 2 ? { key, left, top, width, height } : null
+  } catch {
+    return null
+  }
+}
 
 
 type RecordActionButtonProps = {
@@ -224,6 +283,10 @@ const styles = `
 .gnp-table td { padding:6px 8px; border-bottom:1px solid #e0eaf4; vertical-align:top; }
 .gnp-table tbody tr:nth-child(odd) td { background:var(--gnp-records-card-background, #f5f9ff); }
 .gnp-table tbody tr:nth-child(even) td { background:linear-gradient(rgba(255,255,255,0.55), rgba(255,255,255,0.55)), var(--gnp-records-card-background, #f5f9ff); }
+
+  .gnp.gnp-editing-lock { position: relative; }
+  .gnp.gnp-editing-lock::before { content: ''; position: absolute; inset: 0; z-index: 5; background: rgba(15, 23, 42, 0.22); border-radius: 6px; pointer-events: auto; }
+  .gnp.gnp-editing-lock .gnp-panel { position: relative; z-index: 10; pointer-events: auto; }
 .gnp-msg { padding:7px 12px; border-radius:4px; font-size:12px; font-weight:700; }
 .gnp-ok { background:#e2efda; color:#375623; border:1px solid #b8d4b0; }
 .gnp-err { background:#fce4e4; color:#c00; border:1px solid #f5b8b8; }
@@ -279,6 +342,99 @@ export default function Widget(props: AllWidgetProps<IMConfig>) {
   const [filterText, setFilterText] = React.useState('')
   const [form, setForm] = React.useState<any>(emptyForm())
   const [editing, setEditing] = React.useState(false)
+
+  const rootRef = React.useRef<HTMLDivElement | null>(null)
+  const [editLockRects, setEditLockRects] = React.useState<GiiEditLockRect[]>([])
+
+  React.useEffect(() => {
+    if (!editing || isGiiBuilderMode()) { setEditLockRects([]); return }
+    const host = getGiiGlobalOverlayHost()
+    if (!host) { setEditLockRects([]); return }
+    const doc = host.ownerDocument || document
+    const win = doc.defaultView || window
+
+    const computeRects = () => {
+      const viewW = Math.max(0, win.innerWidth || doc.documentElement?.clientWidth || 0)
+      const viewH = Math.max(0, win.innerHeight || doc.documentElement?.clientHeight || 0)
+      const next: GiiEditLockRect[] = []
+      for (const id of ['widget_840', 'widget_1056', 'widget_1115']) {
+        const el = findGiiWidgetElement(doc, id)
+        const rect = el ? getGiiVisibleLockRect(el, id, viewW, viewH, win) : null
+        if (rect) next.push(rect)
+      }
+      if (next.length === 0 && rootRef.current) {
+        try {
+          const r = rootRef.current.getBoundingClientRect()
+          const headerH = Math.max(0, Math.floor(r.top))
+          const leftW = Math.max(0, Math.floor(r.left))
+          if (headerH > 0) next.push({ key: 'fallback-header', left: 0, top: 0, width: viewW, height: headerH })
+          if (leftW > 0) next.push({ key: 'fallback-left', left: 0, top: headerH, width: leftW, height: Math.max(0, viewH - headerH) })
+        } catch {}
+      }
+      setEditLockRects(next)
+    }
+
+    let raf = 0
+    const schedule = () => {
+      try { if (raf) win.cancelAnimationFrame(raf) } catch {}
+      try { raf = win.requestAnimationFrame(computeRects) } catch { computeRects() }
+    }
+    schedule()
+
+    let ro: ResizeObserver | null = null
+    try {
+      if (typeof ResizeObserver !== 'undefined') {
+        ro = new ResizeObserver(schedule)
+        const observed = new Set<Element>()
+        for (const id of ['widget_840', 'widget_1056', 'widget_1115']) {
+          const el = findGiiWidgetElement(doc, id)
+          if (el && !observed.has(el)) { observed.add(el); ro.observe(el) }
+        }
+        if (rootRef.current && !observed.has(rootRef.current)) ro.observe(rootRef.current)
+      }
+    } catch { ro = null }
+
+    const blockEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        event.preventDefault(); event.stopPropagation()
+        if (typeof (event as any).stopImmediatePropagation === 'function') (event as any).stopImmediatePropagation()
+      }
+    }
+    win.addEventListener('resize', schedule, true)
+    win.addEventListener('scroll', schedule, true)
+    doc.addEventListener('keydown', blockEscape, true)
+    const intervalId = win.setInterval(schedule, 300)
+    return () => {
+      try { if (raf) win.cancelAnimationFrame(raf) } catch {}
+      try { ro?.disconnect() } catch {}
+      try { win.removeEventListener('resize', schedule, true) } catch {}
+      try { win.removeEventListener('scroll', schedule, true) } catch {}
+      try { doc.removeEventListener('keydown', blockEscape, true) } catch {}
+      try { win.clearInterval(intervalId) } catch {}
+      setEditLockRects([])
+    }
+  }, [editing])
+
+  const editLockPortal = editing && editLockRects.length > 0 && typeof document !== 'undefined'
+    ? createPortal(
+      <Fragment>
+        {editLockRects.map(rect => (
+          <div
+            key={rect.key}
+            aria-hidden='true'
+            style={{ position: 'fixed', zIndex: 2147483000, background: 'rgba(0,0,0,0.52)', pointerEvents: 'auto', touchAction: 'none', left: rect.left, top: rect.top, width: rect.width, height: rect.height }}
+            onPointerDown={(e) => { e.preventDefault(); e.stopPropagation() }}
+            onMouseDown={(e) => { e.preventDefault(); e.stopPropagation() }}
+            onClick={(e) => { e.preventDefault(); e.stopPropagation() }}
+            onDoubleClick={(e) => { e.preventDefault(); e.stopPropagation() }}
+            onWheel={(e) => { e.preventDefault(); e.stopPropagation() }}
+            onTouchStart={(e) => { e.preventDefault(); e.stopPropagation() }}
+          />
+        ))}
+      </Fragment>,
+      getGiiGlobalOverlayHost() || document.body
+    )
+    : null
   const [loading, setLoading] = React.useState(false)
   const [saving, setSaving] = React.useState(false)
   const [msg, setMsg] = React.useState<{ text: string, ok: boolean } | null>(null)
@@ -366,7 +522,7 @@ export default function Widget(props: AllWidgetProps<IMConfig>) {
   return (
     <Fragment>
       <style>{styles}</style>
-      <div className='gnp' style={{ '--gnp-title-color': titleColor, '--gnp-toolbar-label-color': toolbarLabelColor, '--gnp-toolbar-label-font-size': `${toolbarLabelFontSize}px`, '--gnp-section-title-color': sectionTitleColor, '--gnp-section-title-font-size': `${sectionTitleFontSize}px`, '--gnp-detail-card-background': detailCardBackgroundColor, '--gnp-records-card-background': recordsCardBackgroundColor, '--gnp-panel-border-color': panelBorderColor, '--gnp-control-background': controlBackgroundColor, '--gnp-control-text-color': controlTextColor, '--gnp-control-border-color': controlBorderColor, '--gnp-control-font-size': `${controlFontSize}px`, '--gnp-readonly-background': readonlyBackgroundColor, '--gnp-readonly-text-color': readonlyTextColor, '--gnp-table-header-background': tableHeaderBackgroundColor, '--gnp-table-header-text': tableHeaderTextColor, '--gnp-table-text-color': tableTextColor, '--gnp-table-font-size': `${tableFontSize}px`, '--gnp-primary-button-background': primaryButtonBackgroundColor, '--gnp-primary-button-text': primaryButtonTextColor, '--gnp-secondary-button-background': secondaryButtonBackgroundColor, '--gnp-secondary-button-text': secondaryButtonTextColor, '--gnp-danger-button-background': dangerButtonBackgroundColor, '--gnp-danger-button-text': dangerButtonTextColor } as React.CSSProperties}>
+      <div ref={rootRef} className={`gnp${editing ? ' gnp-editing-lock' : ''}`} style={{ '--gnp-title-color': titleColor, '--gnp-toolbar-label-color': toolbarLabelColor, '--gnp-toolbar-label-font-size': `${toolbarLabelFontSize}px`, '--gnp-section-title-color': sectionTitleColor, '--gnp-section-title-font-size': `${sectionTitleFontSize}px`, '--gnp-detail-card-background': detailCardBackgroundColor, '--gnp-records-card-background': recordsCardBackgroundColor, '--gnp-panel-border-color': panelBorderColor, '--gnp-control-background': controlBackgroundColor, '--gnp-control-text-color': controlTextColor, '--gnp-control-border-color': controlBorderColor, '--gnp-control-font-size': `${controlFontSize}px`, '--gnp-readonly-background': readonlyBackgroundColor, '--gnp-readonly-text-color': readonlyTextColor, '--gnp-table-header-background': tableHeaderBackgroundColor, '--gnp-table-header-text': tableHeaderTextColor, '--gnp-table-text-color': tableTextColor, '--gnp-table-font-size': `${tableFontSize}px`, '--gnp-primary-button-background': primaryButtonBackgroundColor, '--gnp-primary-button-text': primaryButtonTextColor, '--gnp-secondary-button-background': secondaryButtonBackgroundColor, '--gnp-secondary-button-text': secondaryButtonTextColor, '--gnp-danger-button-background': dangerButtonBackgroundColor, '--gnp-danger-button-text': dangerButtonTextColor } as React.CSSProperties}>
         <div className='gnp-title' style={{ color: titleColor, fontSize: titleFontSize }}>{title}</div>
         {!serviceUrl ? <div className='gnp-msg gnp-err'>Configura l'URL della tabella nel setting del widget.</div> : null}
         {msg && <div className={`gnp-msg ${msg.ok ? 'gnp-ok' : 'gnp-err'}`}>{msg.text}</div>}
@@ -477,6 +633,7 @@ export default function Widget(props: AllWidgetProps<IMConfig>) {
           </table>
         </div>
       </div>
+      {editLockPortal}
     </Fragment>
   )
 }

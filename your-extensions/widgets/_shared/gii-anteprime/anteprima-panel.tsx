@@ -11,7 +11,7 @@ import type { GiiDocumentPrintOptions as DocumentPrintOptions, GiiAttachmentPrin
 import { buildGiiMapLegendItemsForView, computePrintExtentForView, ensureGiiPrintableMapLayersReady, flattenGiiPrintableMapLayerTree as flattenPrintableMapLayerTree, listGiiPrintableMapLayerTree as listPrintableMapLayerTree, listGiiPrintableMapLayers as listPrintableMapLayers } from './viewer-documenti/map-layers'
 import type { GiiPrintableMapLayerItem as PrintableMapLayerItem } from './viewer-documenti/map-layers'
 import GiiDocumentViewer from './viewer-documenti/document-viewer'
-import { filterGiiAttachmentsForTechnicalRoles, getGiiAttachmentKind, isGiiSpecialAdministrativeAttachment, isGiiBozzaDeterminazionePdfAttachment, isGiiPropostaContestazionePdfAttachment, pickLatestGiiAttachment, giiAttachmentIdentityKey } from './allegati/gii-attachment-viewer'
+import { filterGiiAttachmentsForTechnicalRoles, getGiiAttachmentKind, isGiiSpecialAdministrativeAttachment, isGiiBozzaDeterminazionePdfAttachment, isGiiPropostaContestazionePdfAttachment, isGiiAttoContestazionePdfAttachment, pickLatestGiiAttachment, giiAttachmentIdentityKey } from './allegati/gii-attachment-viewer'
 import { parseNorma3Codes } from './req-point'
 import { buildFascicolo, mergeFascicoloPdfItems } from './fascicolo-builder'
 import type { NotaSpeseConfig } from './documenti-tecnici/rapporto/rapporto-nota-spese-summary'
@@ -239,6 +239,7 @@ function documentViewerTitleForEditing (fileName: string, data: any, oid?: numbe
   const prefix = `Rapporto n. ${rapporto || '-'}`
   if (lower.includes('determinaz')) return `${prefix} • Bozza di determinazione`
   if (lower.includes('proposta') && lower.includes('contestaz')) return `${prefix} • Proposta di contestazione`
+  if (lower.includes('atto') && (lower.includes('accert') || lower.includes('contestaz'))) return `${prefix} • Atto di accertamento/contestazione`
   if (lower.includes('mappa')) return `${prefix} • Mappa della rilevazione n. ${rilevazione || '-'}`
   if (lower.includes('allegat')) return `${prefix} • Allegati della rilevazione n. ${rilevazione || '-'}`
   if (lower.includes('nota')) return `${prefix} • Nota spese della rilevazione n. ${rilevazione || '-'}`
@@ -614,17 +615,18 @@ function toAttachmentPrintOption (att: any): AttachmentPrintOption {
   } as AttachmentPrintOption
 }
 
-async function loadAttachmentOptions (ds: any, oid: number, canSeeAmministrativi: boolean, layerUrlHint?: string): Promise<{ options: AttachmentPrintOption[]; bozzaDeterminazione: AttachmentPrintOption | null; propostaContestazione: AttachmentPrintOption | null }> {
-  if (!Number.isFinite(oid) || oid <= 0) return { options: [], bozzaDeterminazione: null, propostaContestazione: null }
+async function loadAttachmentOptions (ds: any, oid: number, canSeeAmministrativi: boolean, layerUrlHint?: string): Promise<{ options: AttachmentPrintOption[]; bozzaDeterminazione: AttachmentPrintOption | null; propostaContestazione: AttachmentPrintOption | null; attoContestazione: AttachmentPrintOption | null }> {
+  if (!Number.isFinite(oid) || oid <= 0) return { options: [], bozzaDeterminazione: null, propostaContestazione: null, attoContestazione: null }
   const layer = await resolveFeatureLayerForAttachments(ds, layerUrlHint)
-  if (!layer) return { options: [], bozzaDeterminazione: null, propostaContestazione: null }
+  if (!layer) return { options: [], bozzaDeterminazione: null, propostaContestazione: null, attoContestazione: null }
   const infos = await queryFeatureAttachments(layer, oid, ds)
   const allOptions = (infos || []).map((att: any): AttachmentPrintOption => toAttachmentPrintOption(att))
   const bozzaDeterminazione = pickLatestGiiAttachment(allOptions.filter(att => isGiiBozzaDeterminazionePdfAttachment(att as any)))
   const propostaContestazione = pickLatestGiiAttachment(allOptions.filter(att => isGiiPropostaContestazionePdfAttachment(att as any)))
+  const attoContestazione = pickLatestGiiAttachment(allOptions.filter(att => isGiiAttoContestazionePdfAttachment(att as any)))
   const options = allOptions
-    // Proposta di contestazione e bozza di determinazione sono documenti amministrativi
-    // speciali: il viewer li carica come PDF reali, separatamente dagli allegati generici.
+    // Proposta, determinazione e Atto di contestazione sono documenti amministrativi
+    // di procedimento: il viewer li carica come PDF reali, separatamente dagli allegati generici.
     .filter((att: AttachmentPrintOption) => !isGiiSpecialAdministrativeAttachment(att as any))
   // I ruoli tecnici non devono mai vedere allegati di tipo amministrativo caricati
   // manualmente da TI_AMM/RI_AMM/DA. Chi può vedere la parte amministrativa
@@ -633,7 +635,8 @@ async function loadAttachmentOptions (ds: any, oid: number, canSeeAmministrativi
   return {
     options: filtered.filter((att: AttachmentPrintOption): boolean => Number.isFinite(att.id) && att.id > 0),
     bozzaDeterminazione,
-    propostaContestazione
+    propostaContestazione,
+    attoContestazione
   }
 }
 
@@ -796,6 +799,7 @@ export default function GiiAnteprimaPanel (p: {
   const [attachmentOptions, setAttachmentOptions] = React.useState<AttachmentPrintOption[]>([])
   const [propostaContestazioneAttachment, setPropostaContestazioneAttachment] = React.useState<AttachmentPrintOption | null>(null)
   const [bozzaDeterminazioneAttachment, setBozzaDeterminazioneAttachment] = React.useState<AttachmentPrintOption | null>(null)
+  const [attoContestazioneAttachment, setAttoContestazioneAttachment] = React.useState<AttachmentPrintOption | null>(null)
   const [notaSpeseOptions, setNotaSpeseOptions] = React.useState<NotaSpesePrintOption[]>([])
   const printMapView = technicalMapView || null
   // Default condivisi + eventuali override espliciti (vedi anche l'uso analogo dentro
@@ -1065,11 +1069,12 @@ export default function GiiAnteprimaPanel (p: {
       return
     }
     let cancelled = false
-    void loadAttachmentOptions(p.ds, Number(p.oid), !!p.canSeeAmministrativi, p.layerUrlHint).then(({ options: allegatiList, bozzaDeterminazione, propostaContestazione }) => {
+    void loadAttachmentOptions(p.ds, Number(p.oid), !!p.canSeeAmministrativi, p.layerUrlHint).then(({ options: allegatiList, bozzaDeterminazione, propostaContestazione, attoContestazione }) => {
       if (cancelled) return
       setAttachmentOptions(allegatiList)
       setPropostaContestazioneAttachment(propostaContestazione)
       setBozzaDeterminazioneAttachment(bozzaDeterminazione)
+      setAttoContestazioneAttachment(attoContestazione)
       const hasTecnici = allegatiList.some(att => getGiiAttachmentKind(att as any) === 'technical')
       const hasAmministrativi = allegatiList.some(att => getGiiAttachmentKind(att as any) !== 'technical')
       setDocOptions(prev => {
@@ -1161,9 +1166,11 @@ export default function GiiAnteprimaPanel (p: {
     const wantsFascicoloContent = includeRapporto || includeNotaSpese || includeMappa || anyAllegatiGroupOn
     const wantsProposta = !!p.canSeeAmministrativi && !!opts.includePropostaContestazione
     const wantsDeterminazione = !!p.canSeeAmministrativi && !!opts.includeDeterminazione
+    const wantsAttoContestazione = !!p.canSeeAmministrativi && !!opts.includeAttoContestazione
 
     if (wantsProposta && !propostaContestazioneAttachment) throw new Error('PDF della Proposta di contestazione non disponibile.')
     if (wantsDeterminazione && !bozzaDeterminazioneAttachment) throw new Error('PDF della bozza di determinazione non disponibile.')
+    if (wantsAttoContestazione && !attoContestazioneAttachment) throw new Error('PDF dell’Atto di accertamento/contestazione non disponibile.')
 
     const items: Array<{ blob: Blob; fileName: string }> = []
     if (wantsFascicoloContent) {
@@ -1206,11 +1213,19 @@ export default function GiiAnteprimaPanel (p: {
       items.push(determinazione)
     }
 
+    if (wantsAttoContestazione && attoContestazioneAttachment) {
+      const layer = await resolveFeatureLayerForAttachments(p.ds, p.layerUrlHint)
+      if (!layer) throw new Error('FeatureLayer non disponibile per l’Atto di accertamento/contestazione.')
+      const atto = await fetchAttachmentBlob(layer, p.ds, Number(p.oid), attoContestazioneAttachment, 2)
+      if (!atto) throw new Error('PDF dell’Atto di accertamento/contestazione non disponibile.')
+      items.push(atto)
+    }
+
     if (items.length === 0) throw new Error('Selezionare almeno un documento.')
     if (items.length === 1) return items[0]
     const safeCode = String(praticaCode || 'documenti').replace(/[^a-zA-Z0-9_-]/g, '_')
     return { blob: await mergeFascicoloPdfItems(items), fileName: `documenti_${safeCode}.pdf` }
-  }, [previewOptions, attachmentOptions, notaSpeseOptions, hasNotaSpeseLocal, mapTarget, p.data, p.oid, p.notaSpeseConfig, printMapView, effectiveMapConfig, p.printServiceUrl, p.canSeeAmministrativi, propostaContestazioneAttachment, bozzaDeterminazioneAttachment, p.ds, p.layerUrlHint, praticaCode])
+  }, [previewOptions, attachmentOptions, notaSpeseOptions, hasNotaSpeseLocal, mapTarget, p.data, p.oid, p.notaSpeseConfig, printMapView, effectiveMapConfig, p.printServiceUrl, p.canSeeAmministrativi, propostaContestazioneAttachment, bozzaDeterminazioneAttachment, attoContestazioneAttachment, p.ds, p.layerUrlHint, praticaCode])
 
   const previewCacheSignature = React.useMemo(() => {
     try {
@@ -1229,12 +1244,13 @@ export default function GiiAnteprimaPanel (p: {
         attachmentOptions: includeAllegati ? attachmentOptions.map(att => giiAttachmentIdentityKey(att as any)) : [],
         propostaContestazione: previewOptions.includePropostaContestazione ? giiAttachmentIdentityKey(propostaContestazioneAttachment as any) : '',
         bozzaDeterminazione: previewOptions.includeDeterminazione ? giiAttachmentIdentityKey(bozzaDeterminazioneAttachment as any) : '',
+        attoContestazione: previewOptions.includeAttoContestazione ? giiAttachmentIdentityKey(attoContestazioneAttachment as any) : '',
         notaSpeseOptions: includeNotaSpese ? notaSpeseOptions : []
       })
     } catch {
       return `${Date.now()}`
     }
-  }, [previewOptions, dataSignature, nsSignature, mapTargetSignature, mapConfigSignature, p.oid, p.idFieldName, p.printServiceUrl, attachmentOptions, propostaContestazioneAttachment, bozzaDeterminazioneAttachment, notaSpeseOptions])
+  }, [previewOptions, dataSignature, nsSignature, mapTargetSignature, mapConfigSignature, p.oid, p.idFieldName, p.printServiceUrl, attachmentOptions, propostaContestazioneAttachment, bozzaDeterminazioneAttachment, attoContestazioneAttachment, notaSpeseOptions])
 
   const regeneratePreview = React.useCallback(() => {
     if (!p.data || Object.keys(p.data).length === 0) {
@@ -1310,6 +1326,7 @@ export default function GiiAnteprimaPanel (p: {
   const bozzaTrasmessaARiAmm = !!determinazioneStatoRaw && determinazioneStatoRaw !== 'BOZZA'
   const propostaContestazioneAvailableComputed = !!propostaContestazioneAttachment && Number(pickAttrCI(p.data, ['esito_TI_AMM'])) === 2 && (isTiAmmRole || bozzaTrasmessaARiAmm)
   const determinazioneAvailableComputed = !!bozzaDeterminazioneAttachment && (isTiAmmRole || bozzaTrasmessaARiAmm)
+  const attoContestazioneAvailableComputed = !!attoContestazioneAttachment && (isTiAmmRole || ['TRASMESSA_RI_AMM', 'VALIDATA_RI_AMM', 'EMAIL_DIRETTORE_PREPARATA'].includes(determinazioneStatoRaw))
 
   return (
     <div css={containerCss}>
@@ -1331,7 +1348,7 @@ export default function GiiAnteprimaPanel (p: {
         borderColor={p.sidebarBorderColor}
         borderWidth={p.sidebarBorderWidth}
         docOptions={docOptions}
-        availability={{ ...availability, propostaContestazione: !!p.canSeeAmministrativi && propostaContestazioneAvailableComputed, determinazione: !!p.canSeeAmministrativi && determinazioneAvailableComputed }}
+        availability={{ ...availability, propostaContestazione: !!p.canSeeAmministrativi && propostaContestazioneAvailableComputed, determinazione: !!p.canSeeAmministrativi && determinazioneAvailableComputed, attoContestazione: !!p.canSeeAmministrativi && attoContestazioneAvailableComputed }}
         busy={loading}
         canUseMap={!!mapTarget}
         mapPanelAvailable={!!printMapView}

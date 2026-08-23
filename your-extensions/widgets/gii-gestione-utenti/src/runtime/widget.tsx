@@ -1,6 +1,6 @@
 /** @jsx jsx */
 /** @jsxFrag React.Fragment */
-import { React, jsx, type AllWidgetProps } from 'jimu-core'
+import { React, jsx, type AllWidgetProps, SessionManager } from 'jimu-core'
 import type { IMConfig } from '../config'
 import { useState, useEffect, useMemo, useRef } from 'react'
 import { createPortal } from 'react-dom'
@@ -76,9 +76,9 @@ function NewRecordButton (props: NewRecordButtonProps) {
         boxSizing: 'border-box',
         padding: 0,
         borderRadius: 7,
-        border: disabled ? '1.5px solid #e5e7eb' : '1.5px solid rgba(37,99,235,0.72)',
+        border: disabled ? '1.5px solid #e5e7eb' : '1.5px solid #0d3b66',
         background: disabled ? '#e5e7eb' : '#ffffff',
-        color: disabled ? '#9ca3af' : '#2563eb',
+        color: disabled ? '#9ca3af' : '#0d3b66',
         cursor: disabled ? 'not-allowed' : 'pointer',
         display: 'inline-flex',
         alignItems: 'center',
@@ -135,6 +135,22 @@ function RecordEditButton (props: RecordActionButtonProps) {
       <svg width={18} height={18} viewBox='0 0 24 24' fill='none' stroke='currentColor' strokeWidth='2' strokeLinecap='round' strokeLinejoin='round' aria-hidden='true' focusable='false'>
         <path d='M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7'/>
         <path d='M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z'/>
+      </svg>
+    </button>
+  )
+}
+
+function RecordDuplicateButton (props: RecordActionButtonProps) {
+  const disabled = !!props.disabled
+  const title = props.title || 'Nuova assegnazione'
+  const ariaLabel = props.ariaLabel || title
+  return (
+    <button type='button' disabled={disabled} onClick={props.onClick} title={title} aria-label={ariaLabel} style={recordActionStyle('#1F4E79', disabled, props.marginRight ?? 4)}>
+      <svg width={18} height={18} viewBox='0 0 24 24' fill='none' stroke='currentColor' strokeWidth='2' strokeLinecap='round' strokeLinejoin='round' aria-hidden='true' focusable='false'>
+        <rect x='9' y='9' width='11' height='11' rx='2'/>
+        <path d='M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1'/>
+        <path d='M14.5 12v5'/>
+        <path d='M12 14.5h5'/>
       </svg>
     </button>
   )
@@ -213,20 +229,40 @@ const MSG_UTENTE_AGOL_VALIDO =
 ` +
   `Se l'utente non esiste ancora, crearlo o invitarlo prima su ArcGIS Online, quindi riprovare.`
 
-// Ottieni token dalla sessione ExB tramite esriId
+// Ottieni anzitutto il token UTENTE della sessione ExB: le operazioni di
+// amministrazione dell'organizzazione devono ereditare identità e privilegi
+// dell'utente autenticato. Il token applicativo resta solo un fallback.
 async function getAGOLToken(clientSecret: string): Promise<string> {
   try {
-    // Prova prima con esriId (IdentityManager) già autenticato in ExB
-    const esriId = await loadEsriModule<any>('esri/identity/IdentityManager')
-    const creds = esriId.credentials as any[]
-    if (creds?.length) {
-      // Cerca credenziale per il portale
-      const cred = creds.find((c: any) =>
-        c.server && c.server.includes('cbsm-hub.maps.arcgis.com')
-      ) ?? creds[0]
-      if (cred?.token) return cred.token
+    const sm: any = SessionManager.getInstance()
+    const session: any = sm?.getMainSession?.() || sm?.getSessionByUrl?.(AGOL_PORTAL)
+    if (session) {
+      if (typeof session.token === 'string' && session.token) return session.token
+      if (typeof session.getToken === 'function') {
+        const token = String(await session.getToken(`${AGOL_PORTAL}/sharing/rest`) || '')
+        if (token) return token
+      }
     }
-    // Fallback: genera token con client credentials OAuth2
+  } catch (e) {
+    console.warn('getAGOLToken SessionManager fallback:', e)
+  }
+
+  try {
+    const esriId = await loadEsriModule<any>('esri/identity/IdentityManager')
+    const creds = (esriId.credentials || []) as any[]
+    const matching = creds
+      .filter((c: any) => {
+        const server = String(c?.server || '').toLowerCase()
+        return server.includes('cbsm-hub.maps.arcgis.com') || server.includes('arcgis.com/sharing/rest')
+      })
+      .sort((a: any, b: any) => Number(b?.expires || 0) - Number(a?.expires || 0))
+    if (matching[0]?.token) return matching[0].token
+  } catch (e) {
+    console.warn('getAGOLToken IdentityManager fallback:', e)
+  }
+
+  try {
+    if (!clientSecret) return ''
     const body = new URLSearchParams({
       client_id:     CLIENT_ID,
       client_secret: clientSecret,
@@ -235,10 +271,117 @@ async function getAGOLToken(clientSecret: string): Promise<string> {
     })
     const res  = await fetch(`${AGOL_PORTAL}/sharing/rest/oauth2/token`, { method: 'POST', body })
     const json = await res.json()
-    return json.access_token ?? ''
+    if (!res.ok || json?.error) return ''
+    return String(json?.access_token || '')
   } catch (e) {
     console.error('getAGOLToken error:', e)
     return ''
+  }
+}
+
+type AgolOrganizationMember = {
+  username: string
+  firstName: string
+  lastName: string
+  fullName: string
+  email: string
+  disabled: boolean
+}
+
+async function fetchAgolOrganizationMembers(token: string): Promise<AgolOrganizationMember[]> {
+  if (!token) throw new Error('Token AGOL non disponibile')
+
+  const selfParams = new URLSearchParams({ f: 'json', token })
+  const selfRes = await fetch(`${AGOL_PORTAL}/sharing/rest/portals/self?${selfParams.toString()}`)
+  const selfJson = await selfRes.json()
+  if (!selfRes.ok || selfJson?.error || !selfJson?.id) throw new Error('Organizzazione AGOL non disponibile')
+
+  // Elenco ufficiale dei membri dell'organizzazione. Questo endpoint restituisce
+  // direttamente gli utenti dell'ORG e supporta start/num per la paginazione;
+  // non dipende dall'indice della ricerca utenti.
+  const usernames = new Map<string, any>()
+  let start = 1
+  let guard = 0
+  while (start > 0 && guard < 500) {
+    guard += 1
+    const params = new URLSearchParams({
+      f: 'json', token, start: String(start), num: '100', sortField: 'fullName', sortOrder: 'asc'
+    })
+    const res = await fetch(`${AGOL_PORTAL}/sharing/rest/portals/${encodeURIComponent(selfJson.id)}/users?${params.toString()}`)
+    const json = await res.json()
+    const rows = Array.isArray(json?.users) ? json.users : null
+    if (!res.ok || json?.error || !rows) {
+      const detail = String(json?.error?.message || json?.message || '').trim()
+      throw new Error(detail ? `Elenco membri AGOL non disponibile: ${detail}` : 'Elenco membri AGOL non disponibile')
+    }
+
+    for (const u of rows) {
+      const username = String(u?.username || '').trim()
+      if (username) usernames.set(username.toLowerCase(), u)
+    }
+
+    const nextStart = Number(json?.nextStart)
+    if (!Number.isFinite(nextStart) || nextStart <= 0 || nextStart === start) break
+    start = nextStart
+  }
+
+  // La risposta della ricerca non espone sempre e-mail e stato del membro.
+  // Completo quindi ogni voce interrogando il profilo AGOL del singolo utente.
+  const rawUsers = Array.from(usernames.values())
+  const members: AgolOrganizationMember[] = []
+  const batchSize = 20
+  for (let i = 0; i < rawUsers.length; i += batchSize) {
+    const batch = rawUsers.slice(i, i + batchSize)
+    const details = await Promise.all(batch.map(async (u: any) => {
+      const username = String(u?.username || '').trim()
+      try {
+        const params = new URLSearchParams({ f: 'json', token })
+        const res = await fetch(`${AGOL_PORTAL}/sharing/rest/community/users/${encodeURIComponent(username)}?${params.toString()}`)
+        const json = await res.json()
+        if (res.ok && !json?.error) return json
+      } catch (_) {}
+      return u
+    }))
+
+    for (const u of details) {
+      const username = String(u?.username || '').trim()
+      if (!username) continue
+      members.push({
+        username,
+        firstName: String(u?.firstName || '').trim(),
+        lastName: String(u?.lastName || '').trim(),
+        fullName: String(u?.fullName || '').trim(),
+        email: String(u?.email || '').trim().toLowerCase(),
+        disabled: !!u?.disabled
+      })
+    }
+  }
+
+  return members.sort((a, b) => {
+    const an = (a.fullName || composeFullName(a.firstName, a.lastName) || a.username).toLocaleLowerCase('it')
+    const bn = (b.fullName || composeFullName(b.firstName, b.lastName) || b.username).toLocaleLowerCase('it')
+    return an.localeCompare(bn, 'it')
+  })
+}
+
+async function fetchAgolUserProfile(username: string, token: string): Promise<AgolOrganizationMember> {
+  const cleanUsername = String(username || '').trim()
+  if (!cleanUsername) throw new Error('Username AGOL non disponibile')
+  if (!token) throw new Error('Token AGOL non disponibile')
+  const params = new URLSearchParams({ f: 'json', token })
+  const res = await fetch(`${AGOL_PORTAL}/sharing/rest/community/users/${encodeURIComponent(cleanUsername)}?${params.toString()}`)
+  const json = await res.json()
+  if (!res.ok || json?.error || !json?.username) {
+    const detail = String(json?.error?.message || json?.message || '').trim()
+    throw new Error(detail ? `Profilo AGOL non disponibile: ${detail}` : 'Profilo AGOL non disponibile')
+  }
+  return {
+    username: String(json.username || '').trim(),
+    firstName: String(json.firstName || '').trim(),
+    lastName: String(json.lastName || '').trim(),
+    fullName: String(json.fullName || '').trim(),
+    email: String(json.email || '').trim().toLowerCase(),
+    disabled: !!json.disabled
   }
 }
 
@@ -640,10 +783,116 @@ function dash(value: string): string {
   return String(value || '').trim() || '—'
 }
 
+const TITOLI_UTENTE: Array<{ code: string; label: string }> = [
+  { code: 'SIG', label: 'Sig.' },
+  { code: 'SIGRA', label: 'Sig.ra' },
+  { code: 'DOTT', label: 'Dott.' },
+  { code: 'DOTTSSA', label: 'Dott.ssa' },
+  { code: 'ING', label: 'Ing.' },
+  { code: 'ARCH', label: 'Arch.' },
+  { code: 'GEOM', label: 'Geom.' },
+  { code: 'RAG', label: 'Rag.' },
+  { code: 'AVV', label: 'Avv.' },
+  { code: 'PROF', label: 'Prof.' },
+  { code: 'PROFSSA', label: 'Prof.ssa' },
+  { code: 'PER_AGR', label: 'Per. Agr.' },
+  { code: 'PER_IND', label: 'Per. Ind.' }
+]
+
+function normalizePersonPart(value: any): string {
+  return String(value ?? '').trim().replace(/\s+/g, ' ')
+}
+
+function composeFullName(nome: any, cognome: any): string {
+  return [normalizePersonPart(nome), normalizePersonPart(cognome)].filter(Boolean).join(' ')
+}
+
+function personNameKey(nome: any, cognome: any): string {
+  const n = normalizePersonPart(nome).toLocaleLowerCase('it')
+  const c = normalizePersonPart(cognome).toLocaleLowerCase('it')
+  return n && c ? `${n}|${c}` : ''
+}
+
+function dateToYmd(value: any): string {
+  if (value == null || value === '') return ''
+  try {
+    const d = value instanceof Date ? value : (typeof value === 'number' ? new Date(value) : new Date(String(value)))
+    if (Number.isNaN(d.getTime())) return ''
+    const y = d.getFullYear()
+    const m = String(d.getMonth() + 1).padStart(2, '0')
+    const day = String(d.getDate()).padStart(2, '0')
+    return `${y}-${m}-${day}`
+  } catch { return '' }
+}
+
+function ymdToTimestamp(value: any): number | null {
+  const ymd = String(value || '').trim()
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(ymd)) return null
+  const [y,m,d] = ymd.split('-').map(Number)
+  const dt = new Date(y, m - 1, d, 12, 0, 0, 0)
+  return Number.isNaN(dt.getTime()) ? null : dt.getTime()
+}
+
+function formatBirthDate(value: any): string {
+  const ymd = dateToYmd(value)
+  if (!ymd) return ''
+  const [y,m,d] = ymd.split('-')
+  return `${d}/${m}/${y}`
+}
+
+function hasBirthDateField(fl: any): boolean {
+  return Array.isArray(fl?.fields) && fl.fields.some((f: any) => String(f?.name || '').toLowerCase() === 'data_nascita')
+}
+
+async function updatePersonBirthDates(serviceUrl: string, values: Record<number, string>): Promise<void> {
+  const entries = Object.entries(values || {}).filter(([oid, value]) => Number(oid) > 0 && /^\d{4}-\d{2}-\d{2}$/.test(String(value || '')))
+  if (entries.length === 0) return
+  const fl = await getFL(serviceUrl)
+  if (!hasBirthDateField(fl)) throw new Error('Campo data di nascita non disponibile')
+  const updateFeatures = entries.map(([oid, value]) => ({ attributes: { OBJECTID: Number(oid), data_nascita: ymdToTimestamp(value) } }))
+  const res = await fl.applyEdits({ updateFeatures })
+  const err = (res?.updateFeatureResults || []).find((r: any) => r?.error)?.error
+  if (err) throw new Error(err.description || err.message || 'Aggiornamento non completato')
+}
+
+async function updateAgolIdentityForUsername(serviceUrl: string, username: string, member: AgolOrganizationMember): Promise<void> {
+  const cleanUsername = String(username || '').trim()
+  if (!cleanUsername) throw new Error('Username AGOL non disponibile')
+  const fl = await getFL(serviceUrl)
+  const escapedUsername = cleanUsername.replace(/'/g, "''")
+  const result = await fl.queryFeatures({
+    where: `username = '${escapedUsername}'`,
+    outFields: ['OBJECTID','username'],
+    returnGeometry: false
+  })
+  const features = Array.isArray(result?.features) ? result.features : []
+  if (features.length === 0) throw new Error('Nessun utente gestionale corrispondente allo username AGOL')
+  const nome = normalizePersonPart(member.firstName)
+  const cognome = normalizePersonPart(member.lastName)
+  const fullName = composeFullName(nome, cognome) || String(member.fullName || '').trim()
+  const email = String(member.email || '').trim().toLowerCase()
+  const updateFeatures = features.map((feature: any) => ({ attributes: {
+    OBJECTID: Number(feature?.attributes?.OBJECTID),
+    nome,
+    cognome,
+    full_name: fullName,
+    email: email || null
+  }}))
+  const res = await fl.applyEdits({ updateFeatures })
+  const err = (res?.updateFeatureResults || []).find((r: any) => r?.error)?.error
+  if (err) throw new Error(err.description || err.message || 'Aggiornamento dati AGOL non completato')
+}
+
 // ── Tipi ───────────────────────────────────────────────────────────────────
 interface UtenteForm {
   objectid?: number
+  existingObjectId?: number | null
   username: string
+  nome: string
+  cognome: string
+  titolo: string
+  email: string
+  data_nascita: string
   full_name: string
   ruolo: number | null
   area: number | null
@@ -659,6 +908,11 @@ interface UtenteForm {
 interface UtenteRecord {
   objectid: number
   username: string
+  nome: string
+  cognome: string
+  titolo: string
+  email: string
+  data_nascita: string
   full_name: string
   ruolo: number | null
   area: number | null
@@ -671,13 +925,16 @@ interface UtenteRecord {
   gruppo_precedente: string
 }
 
-type SortField = 'username' | 'full_name' | 'ruolo' | 'area' | 'settore' | 'ufficio' | 'gruppo'
+type SortField = 'username' | 'full_name' | 'email' | 'ruolo' | 'area' | 'settore' | 'ufficio' | 'gruppo'
 type SortDirection = 'asc' | 'desc'
 interface SortRule { field: SortField; dir: SortDirection }
+type AgolSortField = 'fullName' | 'username' | 'email'
+interface AgolSortRule { field: AgolSortField; dir: SortDirection }
 
 const SORTABLE_COLUMNS: Array<{ field: SortField; label: string }> = [
   { field: 'username', label: 'Username' },
-  { field: 'full_name', label: 'Nome' },
+  { field: 'full_name', label: 'Nome completo' },
+  { field: 'email', label: 'E-mail' },
   { field: 'ruolo', label: 'Ruolo' },
   { field: 'area', label: 'Area' },
   { field: 'settore', label: 'Settore' },
@@ -686,7 +943,7 @@ const SORTABLE_COLUMNS: Array<{ field: SortField; label: string }> = [
 ]
 
 const emptyForm = (): UtenteForm => ({
-  username: '', full_name: '',
+  existingObjectId: null, username: '', nome: '', cognome: '', titolo: '', email: '', data_nascita: '', full_name: '',
   ruolo: null, area: null, settore: null, ufficio: null,
   ruolo_cod: null, area_cod: null, settore_cod: null,
   gruppo: '', gruppo_precedente: '',
@@ -708,13 +965,15 @@ async function getFL(serviceUrl: string): Promise<any> {
 
 async function fetchUtenti(serviceUrl: string): Promise<UtenteRecord[]> {
   const fl = await getFL(serviceUrl)
+  const outFields = ['OBJECTID','username','nome','cognome','titolo','email','full_name','ruolo','area','settore','ufficio','ruolo_cod','area_cod','settore_cod','gruppo','gruppo_precedente','tipo_record']
+  if (hasBirthDateField(fl)) outFields.push('data_nascita')
   const res = await fl.queryFeatures({
     // La stessa tabella contiene anche i contatti della Rubrica.
     // Gestione Utenti deve mostrare esclusivamente i profili applicativi: i record
     // storici restano con tipo_record NULL; l'eventuale codice UTENTE è accettato
     // per compatibilità, mentre RUBRICA viene sempre escluso.
     where: `(tipo_record IS NULL OR tipo_record = 'UTENTE')`,
-    outFields: ['OBJECTID','username','full_name','ruolo','area','settore','ufficio','ruolo_cod','area_cod','settore_cod','gruppo','gruppo_precedente','tipo_record'],
+    outFields,
     returnGeometry: false,
   })
   return (res.features ?? []).map((f: any) => {
@@ -722,7 +981,12 @@ async function fetchUtenti(serviceUrl: string): Promise<UtenteRecord[]> {
     return {
       objectid:  a.OBJECTID ?? a.objectid,
       username:  a.username  ?? '',
-      full_name: a.full_name ?? '',
+      nome:      a.nome      ?? '',
+      cognome:   a.cognome   ?? '',
+      titolo:    a.titolo    ?? '',
+      email:     a.email     ?? '',
+      data_nascita: dateToYmd(a.data_nascita),
+      full_name: a.full_name ?? composeFullName(a.nome, a.cognome),
       ruolo:       a.ruolo   != null ? Number(a.ruolo)   : valueOf(RUOLI, a.ruolo_cod),
       area:        a.area    != null ? Number(a.area)    : valueOf(AREE, a.area_cod),
       settore:     a.settore != null ? Number(a.settore) : valueOf(SETTORI, a.settore_cod),
@@ -736,11 +1000,66 @@ async function fetchUtenti(serviceUrl: string): Promise<UtenteRecord[]> {
   })
 }
 
+function sameUsername(a: any, b: any): boolean {
+  return String(a || '').trim().toLowerCase() === String(b || '').trim().toLowerCase()
+}
+
+function sameAssignment(a: Pick<UtenteRecord, 'username' | 'ruolo' | 'area' | 'settore' | 'ufficio'>, b: Pick<UtenteForm, 'username' | 'ruolo' | 'area' | 'settore' | 'ufficio'>): boolean {
+  const n = (v: any) => v == null || v === '' ? null : Number(v)
+  return sameUsername(a.username, b.username) &&
+    n(a.ruolo) === n(b.ruolo) &&
+    n(a.area) === n(b.area) &&
+    n(a.settore) === n(b.settore) &&
+    n(a.ufficio) === n(b.ufficio)
+}
+
+function sameUserFormValues(a: UtenteRecord, b: UtenteForm): boolean {
+  const text = (v: any) => String(v ?? '').trim().replace(/\s+/g, ' ')
+  const email = (v: any) => text(v).toLowerCase()
+  const n = (v: any) => v == null || v === '' ? null : Number(v)
+  return sameUsername(a.username, b.username) &&
+    text(a.nome) === text(b.nome) &&
+    text(a.cognome) === text(b.cognome) &&
+    text(a.titolo) === text(b.titolo) &&
+    email(a.email) === email(b.email) &&
+    text(a.data_nascita) === text(b.data_nascita) &&
+    n(a.ruolo) === n(b.ruolo) &&
+    n(a.area) === n(b.area) &&
+    n(a.settore) === n(b.settore) &&
+    n(a.ufficio) === n(b.ufficio) &&
+    text(a.gruppo) === text(b.gruppo)
+}
+
+async function otherAssignmentRequiresGroup(serviceUrl: string, username: string, gruppo: string, excludeObjectId?: number | null): Promise<boolean> {
+  const cleanUsername = String(username || '').trim()
+  const cleanGroup = String(gruppo || '').trim()
+  if (!cleanUsername || !cleanGroup) return false
+  const fl = await getFL(serviceUrl)
+  const escapedUsername = cleanUsername.replace(/'/g, "''")
+  const res = await fl.queryFeatures({
+    where: `username = '${escapedUsername}'`,
+    outFields: ['OBJECTID','username','gruppo','tipo_record'],
+    returnGeometry: false,
+  })
+  return (res.features || []).some((f: any) => {
+    const a = f?.attributes || {}
+    const oid = Number(a.OBJECTID ?? a.objectid ?? 0)
+    if (excludeObjectId != null && oid === Number(excludeObjectId)) return false
+    if (!sameUsername(a.username, cleanUsername)) return false
+    return String(a.gruppo || '').trim() === cleanGroup
+  })
+}
+
 async function saveUtente(form: UtenteForm, serviceUrl: string): Promise<void> {
   const fl = await getFL(serviceUrl)
+  const fullName = composeFullName(form.nome, form.cognome)
   const attrs: any = {
     username:          form.username,
-    full_name:         form.full_name,
+    nome:              normalizePersonPart(form.nome),
+    cognome:           normalizePersonPart(form.cognome),
+    titolo:            String(form.titolo || '').trim() || null,
+    email:             String(form.email || '').trim().toLowerCase() || null,
+    full_name:         fullName,
     ruolo:             form.ruolo,
     area:              form.area,
     settore:           form.settore,
@@ -750,21 +1069,28 @@ async function saveUtente(form: UtenteForm, serviceUrl: string): Promise<void> {
     settore_cod:       codeOf(SETTORI, form.settore),
     gruppo:            form.gruppo || null,
     gruppo_precedente: form.gruppo_precedente || null,
-    // Gli utenti del gestionale restano distinti dalla Rubrica senza valorizzare
-    // il nuovo campo: è il comportamento richiesto anche per i nuovi profili.
-    tipo_record:       null,
-    uso_email:         null,
   }
-  if (form.objectid != null) {
-    attrs.OBJECTID = form.objectid
+  // Le funzioni anagrafiche (destinatario e-mail / firmatario) sono indipendenti
+  // dall'accesso al gestionale: in modifica non vanno mai azzerate.
+  if (hasBirthDateField(fl)) attrs.data_nascita = ymdToTimestamp(form.data_nascita)
+  if (form.objectid == null) attrs.tipo_record = 'UTENTE'
+
+  const targetObjectId = form.objectid ?? form.existingObjectId ?? null
+  if (targetObjectId != null) {
+    attrs.OBJECTID = targetObjectId
     const res = await fl.applyEdits({ updateFeatures: [{ attributes: attrs }] })
     if (res.updateFeatureResults?.[0]?.error)
       throw new Error(res.updateFeatureResults[0].error.description)
-  } else {
-    const res = await fl.applyEdits({ addFeatures: [{ attributes: attrs }] })
-    if (res.addFeatureResults?.[0]?.error)
-      throw new Error(res.addFeatureResults[0].error.description)
+    return
   }
+
+  // Un nominativo già presente viene riutilizzato solo se l'operatore lo ha
+  // selezionato esplicitamente. La sola coincidenza di nome e cognome non basta:
+  // potrebbe trattarsi di un omonimo.
+  const res = await fl.applyEdits({ addFeatures: [{ attributes: attrs }] })
+  if (res.addFeatureResults?.[0]?.error)
+    throw new Error(res.addFeatureResults[0].error.description)
+
 }
 
 function friendlyDeleteErrorMessage(error: any): string {
@@ -780,28 +1106,50 @@ function friendlyDeleteErrorMessage(error: any): string {
 }
 
 async function deleteUtente(objectid: number, token: string, serviceUrl: string): Promise<void> {
-  if (!objectid) throw new Error('OBJECTID utente non valido')
-  if (!token) throw new Error('Token AGOL non disponibile: impossibile eliminare il record utente')
+  if (!objectid) throw new Error('Profilo utente non valido')
+  if (!token) throw new Error('Sessione non disponibile')
 
-  // Uso diretto dell'operazione REST deleteFeatures: evita che il client FeatureLayer
-  // blocchi preventivamente la cancellazione in base alle capabilities lette nello schema.
-  const body = new URLSearchParams({
-    f: 'json',
-    token,
-    objectIds: String(objectid),
+  const fl = await getFL(serviceUrl)
+  const current = await fl.queryFeatures({
+    where: `OBJECTID = ${Number(objectid)}`,
+    outFields: ['OBJECTID','uso_email','firmatario'],
+    returnGeometry: false
   })
+  const attrs = current?.features?.[0]?.attributes || {}
+  const hasEmailUse = !!String(attrs.uso_email ?? '').trim()
+  const isSigner = Number(attrs.firmatario ?? 0) === 1
+
+  // Se la stessa persona svolge anche altre funzioni anagrafiche, viene rimosso
+  // soltanto il profilo applicativo. Il record resta unico e continua a essere
+  // usato come destinatario e/o firmatario.
+  if (hasEmailUse || isSigner) {
+    const res = await fl.applyEdits({ updateFeatures: [{ attributes: {
+      OBJECTID: objectid,
+      username: null,
+      ruolo: null,
+      area: null,
+      settore: null,
+      ufficio: null,
+      gruppo: null,
+      gruppo_precedente: null,
+      ruolo_cod: null,
+      area_cod: null,
+      settore_cod: null,
+      tipo_record: 'RUBRICA'
+    } }] })
+    const err = res?.updateFeatureResults?.[0]?.error
+    if (err) throw new Error(err.description || err.message || 'Operazione non completata')
+    return
+  }
+
+  // Nessun altro utilizzo: elimina il record anagrafico.
+  const body = new URLSearchParams({ f: 'json', token, objectIds: String(objectid) })
   const cleanUrl = String(serviceUrl || DEFAULT_SERVICE_URL).trim().replace(/\/$/, '')
   const res = await fetch(`${cleanUrl}/deleteFeatures`, { method: 'POST', body })
   const json = await res.json()
-
-  if (!res.ok || json?.error) {
-    throw new Error(friendlyDeleteErrorMessage(json?.error ?? json))
-  }
-
+  if (!res.ok || json?.error) throw new Error(friendlyDeleteErrorMessage(json?.error ?? json))
   const del = Array.isArray(json?.deleteResults) ? json.deleteResults[0] : null
-  if (!del || del.success !== true) {
-    throw new Error(friendlyDeleteErrorMessage(del?.error ?? json))
-  }
+  if (!del || del.success !== true) throw new Error(friendlyDeleteErrorMessage(del?.error ?? json))
 }
 
 // ── Export CSV ────────────────────────────────────────────────────────────
@@ -820,11 +1168,11 @@ function exportCSV(utenti: UtenteRecord[], domainLabels?: DomainLabelMap): void 
       return s.includes(',') || s.includes('"') || s.includes('\n')
         ? `"${s.replace(/"/g, '""')}"` : s
     }
-    return [u.username, u.full_name, area, settore, ufficio, ruolo, id_uff, gruppo]
+    return [u.username, u.nome, u.cognome, u.titolo, u.email, formatBirthDate(u.data_nascita), u.full_name, area, settore, ufficio, ruolo, id_uff, gruppo]
       .map(esc).join(',')
   })
 
-  const csv = ['username,full_name,area_cod,settore_cod,ufficio,ruolo,id_ufficio,gruppo', ...rows].join('\n')
+  const csv = ['username,nome,cognome,titolo,email,data_nascita,full_name,area_cod,settore_cod,ufficio,ruolo,id_ufficio,gruppo', ...rows].join('\n')
   const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' })
   const url  = URL.createObjectURL(blob)
   const a    = document.createElement('a')
@@ -836,6 +1184,7 @@ function sortValue(u: UtenteRecord, field: SortField, domainLabels?: DomainLabel
   switch (field) {
     case 'username': return u.username ?? ''
     case 'full_name': return u.full_name ?? ''
+    case 'email': return u.email ?? ''
     case 'ruolo': return labelForDomainItem(RUOLI, u.ruolo, domainLabels, 'ruolo_cod', 'ruolo') || u.ruolo_cod || ''
     case 'area': return labelForDomainItem(AREE, u.area, domainLabels, 'area_cod', 'area') || u.area_cod || ''
     case 'settore': return labelForDomainItem(SETTORI, u.settore, domainLabels, 'settore_cod', 'settore') || u.settore_cod || ''
@@ -859,32 +1208,134 @@ const styles = `
   .ggu { font-family: Arial, sans-serif; font-size: 13px; padding: 12px; height: 100%; display: flex; flex-direction: column; gap: 10px; box-sizing: border-box; }
   .ggu-title { font-size: var(--ggu-title-font-size, 15px); font-weight: bold; color: var(--ggu-title-color, #93c5fd); border-bottom: 2px solid var(--ggu-title-color, #93c5fd); padding-bottom: 6px; margin: 0; }
   .ggu-form { background: var(--ggu-detail-card-background, #f5f9ff); border: 1px solid #c5d9f1; border-radius: 6px; padding: 14px; display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
-  .ggu-field { display: flex; flex-direction: column; gap: 3px; }
+  .ggu-form-users {
+    grid-template-columns: repeat(12, minmax(0, 1fr));
+    align-items: end;
+  }
+  .ggu-user-section { grid-column: 1 / -1; display: grid; grid-template-columns: repeat(12, minmax(0, 1fr)); gap: 10px; align-items: end; padding: 12px; border: 1px solid #c5d9f1; border-radius: 6px; background: #fff; }
+  .ggu-user-section-title { grid-column: 1 / -1; font-size: 12px; font-weight: 700; color: #0d3b66; padding-bottom: 4px; border-bottom: 1px solid #dbe7f3; }
+  .ggu-agol-account-row { grid-template-columns: repeat(20, minmax(0, 1fr)); }
+  .ggu-agol-account-row .ggu-user-username { grid-column: span 3; }
+  .ggu-agol-account-row .ggu-user-name { grid-column: span 3; }
+  .ggu-agol-account-row .ggu-user-surname { grid-column: span 3; }
+  .ggu-agol-account-row .ggu-user-email { grid-column: span 3; }
+  .ggu-agol-account-actions { grid-column: 18 / span 3; display: flex; justify-content: flex-end; align-items: end; }
+  .ggu-agol-account-actions .ggu-btn { white-space: nowrap; width: calc((100% - 8px) / 2); min-width: 0; display: inline-flex; align-items: center; justify-content: center; text-align: center; }
+  .ggu-management-section { grid-template-columns: repeat(20, minmax(0, 1fr)); }
+  .ggu-management-section .ggu-user-role { grid-column: span 3; }
+  .ggu-management-section .ggu-user-area { grid-column: span 3; }
+  .ggu-management-section .ggu-user-sector { grid-column: span 6; }
+  .ggu-management-section .ggu-user-office { grid-column: span 3; }
+  .ggu-management-section .ggu-user-group { grid-column: span 2; }
+  .ggu-management-section > .ggu-btns { grid-column: span 3; display: flex; gap: 8px; padding-top: 0; align-items: end; justify-content: stretch; }
+  .ggu-management-section > .ggu-btns .ggu-btn { flex: 1 1 0; min-width: 0; padding-left: 6px; padding-right: 6px; white-space: nowrap; }
+  .ggu-management-section .ggu-user-birth-slot { grid-column: 1 / -1; min-height: 0; }
+  .ggu-form-users .ggu-user-birth-slot .ggu-birth-field { width: 160px; }
+  .ggu-form-directory { grid-template-columns: repeat(20, minmax(0, 1fr)); justify-content: stretch; align-items: end; column-gap: 8px; row-gap: 8px; }
+  .ggu-form-directory .ggu-dir-person { grid-column: span 3; }
+  .ggu-form-directory .ggu-dir-kind { grid-column: span 2; }
+  .ggu-form-directory .ggu-dir-title { grid-column: span 2; }
+  .ggu-form-directory .ggu-dir-name { grid-column: span 3; }
+  .ggu-form-directory .ggu-dir-surname { grid-column: span 3; }
+  .ggu-form-directory .ggu-dir-birth { grid-column: span 2; }
+  .ggu-form-directory .ggu-dir-email { grid-column: span 3; }
+  .ggu-form-directory .ggu-dir-usage { grid-column: span 3; }
+  .ggu-form-directory.ggu-dir-email-new.ggu-dir-altro .ggu-dir-name { grid-column: span 5; }
+  .ggu-form-directory.ggu-dir-email-edit.ggu-dir-altro .ggu-dir-name { grid-column: span 5; }
+  .ggu-form-directory.ggu-dir-firm-new .ggu-dir-person { grid-column: span 3; }
+  .ggu-form-directory.ggu-dir-firm-new .ggu-dir-name,
+  .ggu-form-directory.ggu-dir-firm-new .ggu-dir-surname,
+  .ggu-form-directory.ggu-dir-firm-edit .ggu-dir-name,
+  .ggu-form-directory.ggu-dir-firm-edit .ggu-dir-surname { grid-column: span 3; }
+  .ggu-form-directory > .ggu-btns { grid-column: -4 / -1; grid-row: 1; display: flex; gap: 8px; padding-top: 0; align-items: end; justify-content: stretch; }
+  .ggu-form-directory > .ggu-btns .ggu-btn { flex: 1 1 0; min-width: 0; white-space: nowrap; }
+  .ggu-directory-table th, .ggu-directory-table td { padding-left: 4px; padding-right: 4px; }
+  .ggu-directory-table .ggu-col-denomination { width: 23%; }
+  .ggu-directory-table .ggu-col-email { width: 22%; }
+  .ggu-directory-table .ggu-col-usage { width: 18%; }
+  .ggu-directory-table .ggu-col-title { width: 10%; }
+  .ggu-directory-table .ggu-col-name { width: 18%; }
+  .ggu-directory-table .ggu-col-surname { width: 20%; }
+  .ggu-directory-table .ggu-col-birth { width: 13%; white-space: nowrap; }
+  .ggu-directory-table .ggu-directory-spacer { width: auto; }
+  .ggu-directory-table .ggu-actions-col { width: 1%; }
+  .ggu-directory-table.ggu-directory-firm-table .ggu-actions-head { text-align: left !important; }
+  .ggu-required-note { grid-column: 1 / -1; font-size: 11px; color: #64748b; font-style: italic; margin-top: -2px; }
+  .ggu-homonym-dates { grid-column: 1 / -1; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; padding: 10px; border: 1px solid #c5d9f1; border-radius: 5px; background: #ffffff; }
+  .ggu-homonym-dates-title { grid-column: 1 / -1; font-size: 12px; font-weight: 700; color: #1F4E79; }
+  .ggu-modal-head.ggu-modal-head-info { background: #1F4E79; }
+  .ggu-modal.ggu-agol-modal { width: min(1180px, calc(100vw - 48px)); max-width: 1180px; }
+  .ggu-agol-search { margin-bottom: 6px; }
+  .ggu-agol-count { margin: 0 0 8px; font-size: 12px; color: #64748b; }
+  .ggu-agol-list { max-height: min(68vh, 680px); overflow: auto; border: 1px solid #d6e2ef; border-radius: 5px; }
+  .ggu-agol-row { display: grid; grid-template-columns: minmax(260px, 1.35fr) minmax(220px, 1fr) minmax(300px, 1.45fr) 118px; gap: 14px; align-items: center; padding: 8px 12px; border-bottom: 1px solid #e6edf5; }
+  .ggu-agol-row:last-child { border-bottom: none; }
+  .ggu-agol-row-head { font-size: 11px; font-weight: 700; color: #1F4E79; background: #f5f9ff; position: sticky; top: 0; z-index: 1; }
+  .ggu-agol-sortable { cursor: pointer; user-select: none; }
+  .ggu-agol-sortable:hover { filter: brightness(0.9); }
+  .ggu-agol-cell { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .ggu-agol-member-disabled { opacity: 0.55; }
+  .ggu-agol-select { padding: 5px 12px; white-space: nowrap; width: 100%; }
+  .ggu-agol-loading, .ggu-agol-empty { padding: 18px; text-align: center; color: #64748b; }
+  .ggu-homonym-choice { display: flex; flex-direction: column; gap: 10px; }
+  .ggu-homonym-choice .ggu-select { margin-top: 2px; }
+  .ggu-homonym-note { font-size: 12px; color: #526579; line-height: 1.35; }
+  .ggu-homonym-selected { padding: 8px 10px; border: 1px solid #d6e2ef; border-radius: 4px; background: #f8fbff; font-size: 12px; line-height: 1.35; }
+  .ggu-homonym-warning { color: #8a4b08; font-weight: 700; }
+  .ggu-field { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+  .ggu-birth-field { width: 160px; max-width: 100%; justify-self: start; }
+  .ggu-birth-field .ggu-input { width: 160px; max-width: 100%; }
+  @media (max-width: 1100px) {
+    .ggu-form-users { grid-template-columns: 1fr 1fr; }
+    .ggu-user-section { grid-template-columns: 1fr 1fr; }
+    .ggu-agol-account-row .ggu-user-username, .ggu-agol-account-row .ggu-user-name, .ggu-agol-account-row .ggu-user-surname,
+    .ggu-agol-account-row .ggu-user-email, .ggu-agol-account-actions, .ggu-management-section .ggu-user-role,
+    .ggu-management-section .ggu-user-area, .ggu-management-section .ggu-user-sector, .ggu-management-section .ggu-user-office,
+    .ggu-management-section .ggu-user-group, .ggu-management-section .ggu-user-birth-slot { grid-column: span 1; }
+    .ggu-user-section-title, .ggu-homonym-dates, .ggu-required-note, .ggu-btns { grid-column: 1 / -1; }
+    .ggu-form-directory, .ggu-form-directory.ggu-dir-email-new, .ggu-form-directory.ggu-dir-email-edit, .ggu-form-directory.ggu-dir-firm-new, .ggu-form-directory.ggu-dir-firm-edit { grid-template-columns: 1fr 1fr; }
+    .ggu-form-directory .ggu-dir-person, .ggu-form-directory .ggu-dir-kind, .ggu-form-directory .ggu-dir-title, .ggu-form-directory .ggu-dir-name, .ggu-form-directory .ggu-dir-surname, .ggu-form-directory .ggu-dir-email, .ggu-form-directory .ggu-dir-usage, .ggu-form-directory .ggu-dir-birth,
+    .ggu-form-directory.ggu-dir-email-new.ggu-dir-altro .ggu-dir-name, .ggu-form-directory.ggu-dir-email-edit.ggu-dir-altro .ggu-dir-name,
+    .ggu-form-directory.ggu-dir-firm-new .ggu-dir-person, .ggu-form-directory.ggu-dir-firm-new .ggu-dir-name, .ggu-form-directory.ggu-dir-firm-new .ggu-dir-surname,
+    .ggu-form-directory.ggu-dir-firm-edit .ggu-dir-name, .ggu-form-directory.ggu-dir-firm-edit .ggu-dir-surname { grid-column: span 1; }
+    .ggu-form-directory .ggu-dir-person { grid-column: span 1; }
+    .ggu-form-directory > .ggu-btns { grid-column: 1 / -1; grid-row: auto; }
+  }
   .ggu-label { font-size: var(--ggu-field-label-font-size, 11px); font-weight: bold; color: var(--ggu-field-label-color, #1F4E79); }
   .ggu-input, .ggu-select { width: 100%; padding: 5px 8px; border: 1px solid #aac4e0; border-radius: 4px; font-size: 13px; box-sizing: border-box; background: #fff; }
   .ggu-input:focus, .ggu-select:focus { outline: none; border-color: #1F4E79; }
+  .ggu-input.ggu-required-missing:not(:disabled), .ggu-select.ggu-required-missing:not(:disabled) { border: 1px solid #dc2626; background: #fff; color: #7f1d1d; }
   .ggu-input:disabled, .ggu-select:disabled { background: #e8f0e9; color: #375623; font-style: italic; border-color: #b8d4b0; }
   .ggu-btns { display: flex; gap: 8px; grid-column: 1 / -1; padding-top: 4px; }
   .ggu-btn { padding: 6px 18px; border: none; border-radius: 4px; font-size: 13px; cursor: pointer; font-weight: bold; }
   .ggu-btn:disabled { opacity: 0.6; cursor: not-allowed; }
   .ggu-btn-save { background: #1F4E79; color: #fff; }
   .ggu-btn-save:hover:not(:disabled) { background: #16375a; }
+  .ggu-btn-outline { background: #fff; color: #0d3b66; border: 1px solid #0d3b66; }
+  .ggu-btn-outline:hover:not(:disabled) { background: #f5f9ff; }
+  .ggu-sync-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+  .ggu-sync-table th, .ggu-sync-table td { padding: 7px 8px; border-bottom: 1px solid #e5e7eb; text-align: left; vertical-align: top; }
+  .ggu-sync-table th { color: #0d3b66; font-weight: 700; }
   .ggu-btn-cancel { background: #e0e0e0; color: #333; }
   .ggu-btn-cancel:hover:not(:disabled) { background: #ccc; }
   .ggu-btn-new { background: #375623; color: #fff; }
   .ggu-btn-new:hover { background: #264018; }
   .ggu-btn-export { background: #1B6584; color: #fff; }
   .ggu-btn-export:hover:not(:disabled) { background: #134d63; }
-  .ggu-btn-reset-sort { width: 30px; height: 30px; padding: 0; display: inline-flex; align-items: center; justify-content: center; border-radius: 6px; border: 1px solid #6fa3d3; background: #1F4E79; color: #fff; font-size: 16px; line-height: 1; }
+  .ggu-btn-reset-sort { width: 32px; height: 32px; min-width: 32px; min-height: 32px; padding: 0; box-sizing: border-box; display: inline-flex; align-items: center; justify-content: center; border-radius: 7px; border: 1px solid #6fa3d3; background: #1F4E79; color: #fff; font-size: 18px; line-height: 1; }
   .ggu-btn-reset-sort:hover:not(:disabled) { background: #16375a; border-color: #93c5fd; }
   .ggu-btn-reset-sort:disabled { background: #e5e7eb; color: #94a3b8; border-color: #cbd5e1; opacity: 1; }
-  .ggu-toolbar { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  .ggu-toolbar { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; width: 100%; }
+  .ggu-toolbar-left { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  .ggu-toolbar-reset-right { margin-left: auto; }
   .ggu-table-wrap { flex: 1; overflow-y: auto; border: 1px solid #c5d9f1; border-radius: 6px; min-height: 0; background: var(--ggu-records-card-background, #f5f9ff); }
   .ggu-table { width: 100%; border-collapse: collapse; font-size: var(--ggu-table-font-size, 12px); }
   .ggu-table th { background: var(--ggu-table-header-background, #1F4E79); color: var(--ggu-table-header-text, #fff); padding: 7px 8px; text-align: left; position: sticky; top: 0; z-index: 1; white-space: nowrap; }
   .ggu-table th.ggu-sortable { cursor: pointer; user-select: none; }
   .ggu-table th.ggu-sortable:hover { filter: brightness(0.9); }
   .ggu-actions-col { width: 1%; white-space: nowrap; text-align: right !important; }
+  .ggu-users-fullname-col { width: 15%; min-width: 160px; }
+  .ggu-users-role-col { white-space: nowrap; min-width: 125px; }
   .ggu-actions-head { text-align: left !important; }
   .ggu-sort-ind { display: inline-flex; align-items: center; gap: 2px; margin-left: 6px; font-size: 10px; opacity: 0.95; }
   .ggu-sort-order { background: rgba(255,255,255,0.18); border-radius: 999px; padding: 0 4px; font-size: 9px; }
@@ -918,21 +1369,72 @@ const styles = `
   .ggu.ggu-editing-global-lock .ggu-form { position: relative; z-index: 10; pointer-events: auto; }
   .ggu-gruppo { font-family: monospace; font-size: 11px; background: #e2efda; padding: 2px 6px; border-radius: 3px; color: #375623; white-space: nowrap; }
   .ggu-empty { text-align: center; color: #888; padding: 20px; font-style: italic; }
+  .ggu-dir-tabs { display: flex; gap: 6px; border-bottom: 1px solid #c5d9f1; margin-bottom: 8px; }
+  .ggu-dir-tab { border: none; border-bottom: 3px solid transparent; background: transparent; color: #526579; font-size: 12px; font-weight: 700; padding: 7px 11px 6px; cursor: pointer; }
+  .ggu-dir-tab:hover { color: #1F4E79; }
+  .ggu-dir-tab:disabled { cursor: default; opacity: 0.55; }
+  .ggu-dir-tab-active { color: #1F4E79; border-bottom-color: #1F4E79; }
 `
 
 
-// ── Modalità Rubrica ────────────────────────────────────────────────────────
+// ── Anagrafica: destinatari e-mail e firmatari ──────────────────────────────
 type RubricaUsoOption = { code: string; label: string }
-type RubricaRecord = { objectid: number; full_name: string; email: string; uso_email: string }
-type RubricaForm = { objectid?: number; full_name: string; email: string; uso_email: string }
+type DirectoryTab = 'email' | 'firmatari'
+type DirectorySortField = 'denomination' | 'email' | 'birth' | 'usage' | 'title' | 'name' | 'surname'
+interface DirectorySortRule { field: DirectorySortField; dir: SortDirection }
+type DirectoryRecord = {
+  objectid: number
+  username: string
+  nome: string
+  cognome: string
+  titolo: string
+  full_name: string
+  email: string
+  data_nascita: string
+  uso_email: string
+  firmatario: number
+  tipo_record: string
+  tipo_soggetto: string
+}
+type DirectoryForm = {
+  objectid?: number
+  existingObjectId?: number | null
+  nome: string
+  cognome: string
+  titolo: string
+  full_name: string
+  email: string
+  data_nascita: string
+  uso_email: string
+  tipo_soggetto: string
+}
 
 const RUBRICA_TIPO = 'RUBRICA'
 const RUBRICA_DETERMINA_A = 'DETERMINA_A'
 const RUBRICA_DETERMINA_CC = 'DETERMINA_CC'
+const RUBRICA_PROTOCOLLO_A = 'PROTOCOLLO_A'
+const RUBRICA_PERSONA_FISICA = 'PERSONA_FISICA'
+const RUBRICA_ALTRO = 'ALTRO'
 
 function rubricaClean(value: any): string { return String(value ?? '').trim() }
 function rubricaEmailValida(value: string): boolean { return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(rubricaClean(value)) }
-function rubricaEmptyForm(): RubricaForm { return { full_name: '', email: '', uso_email: '' } }
+function directoryEmptyForm(): DirectoryForm { return { existingObjectId: null, nome: '', cognome: '', titolo: '', full_name: '', email: '', data_nascita: '', uso_email: '', tipo_soggetto: '' } }
+function directoryDisplayName(r: Partial<DirectoryRecord>): string {
+  return rubricaClean(r.full_name) || composeFullName(r.nome, r.cognome) || rubricaClean(r.username) || rubricaClean(r.email) || 'Nominativo senza nome'
+}
+function directoryDisplayLabel(r: DirectoryRecord, records: DirectoryRecord[]): string {
+  const base = composeFullName(r.nome, r.cognome) || directoryDisplayName(r)
+  const key = personNameKey(r.nome, r.cognome)
+  if (!key) return base
+  const omonimi = records.filter(x => personNameKey(x.nome, x.cognome) === key)
+  const birth = formatBirthDate(r.data_nascita)
+  return omonimi.length > 1 && birth ? `${base} — ${birth}` : base
+}
+function splitLegacyFullName(value: string): { nome: string; cognome: string } {
+  const parts = rubricaClean(value).split(/\s+/).filter(Boolean)
+  if (parts.length < 2) return { nome: parts[0] || '', cognome: '' }
+  return { nome: parts.slice(0, -1).join(' '), cognome: parts[parts.length - 1] }
+}
 
 function rubricaWorkflowRole(): string {
   try {
@@ -959,37 +1461,75 @@ function rubricaUsoOptions(fl: any): RubricaUsoOption[] {
   }
   return [
     { code: RUBRICA_DETERMINA_A, label: 'Destinatario determina' },
-    { code: RUBRICA_DETERMINA_CC, label: 'Copia conoscenza determina' }
+    { code: RUBRICA_DETERMINA_CC, label: 'Copia conoscenza determina' },
+    { code: RUBRICA_PROTOCOLLO_A, label: 'Destinatario protocollo' }
   ]
 }
 
-async function fetchRubrica(serviceUrl: string): Promise<{ records: RubricaRecord[]; usages: RubricaUsoOption[] }> {
+async function fetchDirectory(serviceUrl: string): Promise<{ records: DirectoryRecord[]; usages: RubricaUsoOption[] }> {
   const fl = await getFL(serviceUrl)
+  const outFields = ['OBJECTID','username','nome','cognome','titolo','full_name','email','uso_email','firmatario','tipo_record','tipo_soggetto']
+  if (hasBirthDateField(fl)) outFields.push('data_nascita')
   const res = await fl.queryFeatures({
-    where: `tipo_record = '${RUBRICA_TIPO}'`,
-    outFields: ['OBJECTID', 'full_name', 'email', 'uso_email'],
+    where: '1=1',
+    outFields,
     returnGeometry: false,
-    orderByFields: ['uso_email ASC', 'full_name ASC']
+    orderByFields: ['full_name ASC']
   })
   const records = (res?.features || []).map((f: any) => {
     const a = f?.attributes || {}
+    const legacy = splitLegacyFullName(a.full_name)
     return {
       objectid: Number(a.OBJECTID ?? a.objectid),
-      full_name: rubricaClean(a.full_name),
+      username: rubricaClean(a.username),
+      nome: rubricaClean(a.nome) || legacy.nome,
+      cognome: rubricaClean(a.cognome) || legacy.cognome,
+      titolo: rubricaClean(a.titolo),
+      full_name: rubricaClean(a.full_name) || composeFullName(a.nome, a.cognome),
       email: rubricaClean(a.email),
-      uso_email: rubricaClean(a.uso_email)
+      data_nascita: dateToYmd(a.data_nascita),
+      uso_email: rubricaClean(a.uso_email),
+      firmatario: Number(a.firmatario ?? 0),
+      tipo_record: rubricaClean(a.tipo_record),
+      tipo_soggetto: rubricaClean(a.tipo_soggetto) || (rubricaClean(a.cognome) || rubricaClean(a.username) ? RUBRICA_PERSONA_FISICA : RUBRICA_ALTRO)
     }
-  }) as RubricaRecord[]
+  }) as DirectoryRecord[]
   return { records, usages: rubricaUsoOptions(fl) }
 }
 
-async function saveRubricaRecord(serviceUrl: string, form: RubricaForm): Promise<void> {
+async function saveDirectoryFunction(serviceUrl: string, tab: DirectoryTab, form: DirectoryForm, writeBirthDate: boolean, preserveUserData: boolean): Promise<void> {
   const fl = await getFL(serviceUrl)
-  const attrs: any = {
-    full_name: rubricaClean(form.full_name),
-    email: rubricaClean(form.email).toLowerCase(),
+  const nome = normalizePersonPart(form.nome)
+  const cognome = normalizePersonPart(form.cognome)
+  const isPerson = tab === 'firmatari' || rubricaClean(form.tipo_soggetto) === RUBRICA_PERSONA_FISICA
+  const fullName = isPerson ? (composeFullName(nome, cognome) || rubricaClean(form.full_name)) : (nome || rubricaClean(form.full_name))
+  const targetObjectId = form.objectid ?? form.existingObjectId ?? null
+  const attrs: any = {}
+  if (!preserveUserData) {
+    attrs.nome = nome || null
+    attrs.cognome = cognome || null
+    attrs.titolo = rubricaClean(form.titolo) || null
+    attrs.full_name = fullName || null
+    attrs.tipo_soggetto = tab === 'firmatari' ? RUBRICA_PERSONA_FISICA : (rubricaClean(form.tipo_soggetto) || null)
+    if (writeBirthDate && hasBirthDateField(fl)) attrs.data_nascita = ymdToTimestamp(form.data_nascita)
+  }
+  if (tab === 'email') {
+    if (!preserveUserData) attrs.email = rubricaClean(form.email).toLowerCase() || null
+    attrs.uso_email = rubricaClean(form.uso_email) || null
+  } else {
+    attrs.firmatario = 1
+  }
+
+  if (targetObjectId != null) {
+    attrs.OBJECTID = targetObjectId
+    const res = await fl.applyEdits({ updateFeatures: [{ attributes: attrs }] })
+    const err = res?.updateFeatureResults?.[0]?.error
+    if (err) throw new Error(err.description || err.message || 'Salvataggio non completato')
+    return
+  }
+
+  Object.assign(attrs, {
     tipo_record: RUBRICA_TIPO,
-    uso_email: rubricaClean(form.uso_email),
     username: null,
     ruolo: null,
     area: null,
@@ -999,22 +1539,34 @@ async function saveRubricaRecord(serviceUrl: string, form: RubricaForm): Promise
     gruppo_precedente: null,
     ruolo_cod: null,
     area_cod: null,
-    settore_cod: null
-  }
-  if (form.objectid != null) attrs.OBJECTID = form.objectid
-  const res = form.objectid != null
-    ? await fl.applyEdits({ updateFeatures: [{ attributes: attrs }] })
-    : await fl.applyEdits({ addFeatures: [{ attributes: attrs }] })
-  const err = form.objectid != null ? res?.updateFeatureResults?.[0]?.error : res?.addFeatureResults?.[0]?.error
+    settore_cod: null,
+    tipo_soggetto: tab === 'firmatari' ? RUBRICA_PERSONA_FISICA : (rubricaClean(form.tipo_soggetto) || null),
+    firmatario: tab === 'firmatari' ? 1 : 0,
+    uso_email: tab === 'email' ? rubricaClean(form.uso_email) : null,
+    email: tab === 'email' ? rubricaClean(form.email).toLowerCase() : null
+  })
+  const res = await fl.applyEdits({ addFeatures: [{ attributes: attrs }] })
+  const err = res?.addFeatureResults?.[0]?.error
   if (err) throw new Error(err.description || err.message || 'Salvataggio non completato')
 }
 
-async function deleteRubricaRecord(serviceUrl: string, objectid: number): Promise<void> {
+async function removeDirectoryFunction(serviceUrl: string, tab: DirectoryTab, record: DirectoryRecord): Promise<void> {
   const fl = await getFL(serviceUrl)
-  const Graphic = await loadEsriModule<any>('esri/Graphic')
-  const res = await fl.applyEdits({ deleteFeatures: [new Graphic({ attributes: { OBJECTID: objectid } })] })
-  const err = res?.deleteFeatureResults?.[0]?.error
-  if (err) throw new Error(err.description || err.message || 'Eliminazione non completata')
+  const hasUserProfile = !!rubricaClean(record.username)
+  const hasOtherFunction = tab === 'email' ? record.firmatario === 1 : !!rubricaClean(record.uso_email)
+  if (!hasUserProfile && !hasOtherFunction && record.tipo_record === RUBRICA_TIPO) {
+    const Graphic = await loadEsriModule<any>('esri/Graphic')
+    const res = await fl.applyEdits({ deleteFeatures: [new Graphic({ attributes: { OBJECTID: record.objectid } })] })
+    const err = res?.deleteFeatureResults?.[0]?.error
+    if (err) throw new Error(err.description || err.message || 'Operazione non completata')
+    return
+  }
+  const attrs: any = { OBJECTID: record.objectid }
+  if (tab === 'email') attrs.uso_email = null
+  else attrs.firmatario = 0
+  const res = await fl.applyEdits({ updateFeatures: [{ attributes: attrs }] })
+  const err = res?.updateFeatureResults?.[0]?.error
+  if (err) throw new Error(err.description || err.message || 'Operazione non completata')
 }
 
 function RubricaWidget(props: AllWidgetProps<IMConfig>) {
@@ -1031,262 +1583,453 @@ function RubricaWidget(props: AllWidgetProps<IMConfig>) {
   const tableHeaderTextColor = String(cfg.tableHeaderTextColor || '#ffffff')
   const tableFontSize = Number(cfg.tableFontSize || 12)
 
-  const [records, setRecords] = useState<RubricaRecord[]>([])
+  const [tab, setTab] = useState<DirectoryTab>('email')
+  const [records, setRecords] = useState<DirectoryRecord[]>([])
   const [usages, setUsages] = useState<RubricaUsoOption[]>([])
-  const [form, setForm] = useState<RubricaForm>(rubricaEmptyForm())
+  const [form, setForm] = useState<DirectoryForm>(directoryEmptyForm())
+  const [initialEditForm, setInitialEditForm] = useState<DirectoryForm | null>(null)
   const [editing, setEditing] = useState(false)
   const [loading, setLoading] = useState(false)
   const [saving, setSaving] = useState(false)
   const [msg, setMsg] = useState<{ text: string; ok: boolean } | null>(null)
   const [errorPopup, setErrorPopup] = useState<string | null>(null)
-  const [deleteItem, setDeleteItem] = useState<RubricaRecord | null>(null)
+  const [deleteItem, setDeleteItem] = useState<DirectoryRecord | null>(null)
   const [selectedObjectId, setSelectedObjectId] = useState<number | null>(null)
+  const [birthDateSupported, setBirthDateSupported] = useState(false)
+  const [homonymPromptOpen, setHomonymPromptOpen] = useState(false)
+  const [homonymConfirmedKey, setHomonymConfirmedKey] = useState('')
+  const [homonymReuseId, setHomonymReuseId] = useState<number | null>(null)
+  const [pendingBirthDates, setPendingBirthDates] = useState<Record<number, string>>({})
+  const [validationAttempted, setValidationAttempted] = useState(false)
+  const [directorySortRules, setDirectorySortRules] = useState<DirectorySortRule[]>([])
   const popupCloseRef = useRef<HTMLButtonElement | null>(null)
   const confirmCancelRef = useRef<HTMLButtonElement | null>(null)
+  const rootRef = useRef<HTMLDivElement | null>(null)
+  const [editLockRects, setEditLockRects] = useState<GguLockRect[]>([])
   const role = rubricaWorkflowRole()
   const allowed = !role || role === 'RI_AMM' || role === 'ADMIN'
 
+  const visibleRecords = useMemo(() => {
+    return records.filter(r => tab === 'email' ? !!r.uso_email : r.firmatario === 1)
+  }, [records, tab])
+  const selectableExisting = useMemo(() => {
+    return records.filter(r => tab === 'email' ? !r.uso_email : r.firmatario !== 1)
+      .sort((a,b) => directoryDisplayName(a).localeCompare(directoryDisplayName(b), 'it'))
+  }, [records, tab])
+
   const showMsg = (text: string, ok: boolean) => {
-    if (!ok) {
-      setMsg(null)
-      setDeleteItem(null)
-      setErrorPopup(text.replace(/^Errore:\s*/i, ''))
-      return
-    }
-    setErrorPopup(null)
-    setDeleteItem(null)
-    setMsg({ text, ok })
-    window.setTimeout(() => setMsg(null), 4000)
+    if (!ok) { setMsg(null); setDeleteItem(null); setErrorPopup(text.replace(/^Errore:\s*/i, '')); return }
+    setErrorPopup(null); setDeleteItem(null); setMsg({ text, ok })
+    window.setTimeout(() => setMsg(null), 3500)
   }
 
-  const loadRubrica = React.useCallback(async () => {
+  const loadDirectory = React.useCallback(async () => {
     setLoading(true)
     try {
-      const data = await fetchRubrica(serviceUrl)
-      setRecords(data.records)
-      setUsages(data.usages)
+      const fl = await getFL(serviceUrl)
+      setBirthDateSupported(hasBirthDateField(fl))
+      const data = await fetchDirectory(serviceUrl)
+      setRecords(data.records); setUsages(data.usages)
       setSelectedObjectId(sel => data.records.some(r => r.objectid === sel) ? sel : null)
-    } catch (e: any) { showMsg(`Errore caricamento: ${e?.message || e}`, false) }
+    } catch (e: any) { showMsg(`Caricamento non riuscito: ${e?.message || e}`, false) }
     finally { setLoading(false) }
   }, [serviceUrl])
 
-  useEffect(() => { if (allowed) void loadRubrica() }, [allowed, loadRubrica])
+  useEffect(() => { if (allowed) void loadDirectory() }, [allowed, loadDirectory])
+  useEffect(() => { setEditing(false); setForm(directoryEmptyForm()); setInitialEditForm(null); setDeleteItem(null); setSelectedObjectId(null); setMsg(null); setHomonymPromptOpen(false); setHomonymConfirmedKey(''); setHomonymReuseId(null); setPendingBirthDates({}); setValidationAttempted(false); setDirectorySortRules([]) }, [tab])
+
+  useEffect(() => {
+    if (!editing) {
+      setEditLockRects([])
+      return
+    }
+
+    const host = getGlobalOverlayHost()
+    const doc = host?.ownerDocument || document
+    const win = doc.defaultView || window
+
+    const computeRects = () => {
+      const viewW = Math.max(0, win.innerWidth || doc.documentElement?.clientWidth || 0)
+      const viewH = Math.max(0, win.innerHeight || doc.documentElement?.clientHeight || 0)
+      const idsToMask = [
+        'widget_840', // GII Header
+        'widget_1454' // GII Navigazione - Rubrica
+      ]
+      const next: GguLockRect[] = []
+      for (const id of idsToMask) {
+        const el = findGguWidgetElement(doc, id)
+        const rect = el ? getVisibleGguLockRect(el, id, viewW, viewH, win) : null
+        if (rect) next.push(rect)
+      }
+      if (next.length === 0 && rootRef.current) {
+        try {
+          const r = rootRef.current.getBoundingClientRect()
+          const headerH = Math.max(0, Math.floor(r.top))
+          const leftW = Math.max(0, Math.floor(r.left))
+          if (headerH > 0) next.push({ key: 'fallback-header', left: 0, top: 0, width: viewW, height: headerH })
+          if (leftW > 0) next.push({ key: 'fallback-left', left: 0, top: headerH, width: leftW, height: Math.max(0, viewH - headerH) })
+        } catch {}
+      }
+      setEditLockRects(next)
+    }
+
+    let raf = 0
+    const schedule = () => {
+      try { if (raf) win.cancelAnimationFrame(raf) } catch {}
+      try { raf = win.requestAnimationFrame(computeRects) } catch { computeRects() }
+    }
+    schedule()
+
+    let ro: ResizeObserver | null = null
+    try {
+      if (typeof ResizeObserver !== 'undefined') {
+        ro = new ResizeObserver(schedule)
+        const observed = new Set<Element>()
+        for (const id of ['widget_840', 'widget_1454']) {
+          const el = findGguWidgetElement(doc, id)
+          if (el && !observed.has(el)) { observed.add(el); ro.observe(el) }
+        }
+        if (rootRef.current && !observed.has(rootRef.current)) ro.observe(rootRef.current)
+      }
+    } catch { ro = null }
+
+    const blockEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        event.preventDefault(); event.stopPropagation()
+        if (typeof (event as any).stopImmediatePropagation === 'function') (event as any).stopImmediatePropagation()
+      }
+    }
+    win.addEventListener('resize', schedule, true)
+    win.addEventListener('scroll', schedule, true)
+    document.addEventListener('keydown', blockEscape, true)
+    const intervalId = win.setInterval(schedule, 300)
+    return () => {
+      try { if (raf) win.cancelAnimationFrame(raf) } catch {}
+      try { ro?.disconnect() } catch {}
+      try { win.removeEventListener('resize', schedule, true) } catch {}
+      try { win.removeEventListener('scroll', schedule, true) } catch {}
+      try { document.removeEventListener('keydown', blockEscape, true) } catch {}
+      try { win.clearInterval(intervalId) } catch {}
+      setEditLockRects([])
+    }
+  }, [editing])
 
   useEffect(() => {
     if (!errorPopup && !deleteItem) return
     const previousActive = document.activeElement as HTMLElement | null
     const previousOverflow = document.body.style.overflow
     document.body.style.overflow = 'hidden'
-    window.setTimeout(() => {
-      if (deleteItem) confirmCancelRef.current?.focus()
-      else popupCloseRef.current?.focus()
-    }, 0)
-    const blockEscape = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') {
-        event.preventDefault()
-        event.stopPropagation()
-      }
-    }
+    window.setTimeout(() => { if (deleteItem) confirmCancelRef.current?.focus(); else popupCloseRef.current?.focus() }, 0)
+    const blockEscape = (event: KeyboardEvent) => { if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation() } }
     document.addEventListener('keydown', blockEscape, true)
-    return () => {
-      document.removeEventListener('keydown', blockEscape, true)
-      document.body.style.overflow = previousOverflow
-      previousActive?.focus?.()
-    }
+    return () => { document.removeEventListener('keydown', blockEscape, true); document.body.style.overflow = previousOverflow; previousActive?.focus?.() }
   }, [errorPopup, deleteItem])
 
   const handlePopupKeyDown = (event: any) => {
-    if (event.key === 'Escape') {
-      event.preventDefault()
-      event.stopPropagation()
-      return
-    }
-    if (event.key === 'Tab') {
-      event.preventDefault()
-      if (deleteItem) confirmCancelRef.current?.focus()
-      else popupCloseRef.current?.focus()
-    }
+    if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); return }
+    if (event.key === 'Tab') { event.preventDefault(); if (deleteItem) confirmCancelRef.current?.focus(); else popupCloseRef.current?.focus() }
   }
 
   const usageLabel = (code: string) => usages.find(x => x.code === code)?.label || code || '—'
+
+  const directorySortValue = (r: DirectoryRecord, field: DirectorySortField): string => {
+    switch (field) {
+      case 'denomination': return r.tipo_soggetto === RUBRICA_ALTRO ? (r.nome || directoryDisplayName(r)) : (composeFullName(r.nome, r.cognome) || directoryDisplayName(r))
+      case 'email': return r.email
+      case 'birth': return r.data_nascita
+      case 'usage': return usageLabel(r.uso_email)
+      case 'title': return TITOLI_UTENTE.find(t => t.code === r.titolo)?.label || r.titolo
+      case 'name': return r.nome
+      case 'surname': return r.cognome
+      default: return ''
+    }
+  }
+
+  const sortedVisibleRecords = useMemo(() => {
+    if (directorySortRules.length === 0) return visibleRecords
+    const arr = [...visibleRecords]
+    arr.sort((a, b) => {
+      for (const rule of directorySortRules) {
+        const cmp = compareText(directorySortValue(a, rule.field), directorySortValue(b, rule.field))
+        if (cmp !== 0) return rule.dir === 'asc' ? cmp : -cmp
+      }
+      return a.objectid - b.objectid
+    })
+    return arr
+  }, [visibleRecords, directorySortRules, usages])
+
+  const toggleDirectorySort = (field: DirectorySortField) => {
+    setDirectorySortRules(prev => {
+      const idx = prev.findIndex(r => r.field === field)
+      if (idx < 0) return [...prev, { field, dir: 'asc' }]
+      const next = [...prev]
+      if (next[idx].dir === 'asc') { next[idx] = { field, dir: 'desc' }; return next }
+      next.splice(idx, 1)
+      return next
+    })
+  }
+
+  const directorySortBadge = (field: DirectorySortField) => {
+    const idx = directorySortRules.findIndex(r => r.field === field)
+    if (idx < 0) return null
+    const rule = directorySortRules[idx]
+    return <span className="ggu-sort-ind"><span>{rule.dir === 'asc' ? '▲' : '▼'}</span><span className="ggu-sort-order">{idx + 1}</span></span>
+  }
+
+  const resetDirectorySort = () => setDirectorySortRules([])
   const onNew = () => {
     setSelectedObjectId(null)
-    setForm({ ...rubricaEmptyForm(), uso_email: usages[0]?.code || RUBRICA_DETERMINA_A })
-    setMsg(null)
-    setEditing(true)
+    setInitialEditForm(null)
+    setForm({ ...directoryEmptyForm(), uso_email: tab === 'email' ? (usages[0]?.code || RUBRICA_DETERMINA_A) : '', tipo_soggetto: tab === 'firmatari' ? RUBRICA_PERSONA_FISICA : '' })
+    setHomonymPromptOpen(false); setHomonymConfirmedKey(''); setHomonymReuseId(null); setPendingBirthDates({}); setValidationAttempted(false)
+    setMsg(null); setEditing(true)
   }
-  const onEdit = (r: RubricaRecord) => {
+  const onEdit = (r: DirectoryRecord) => {
     setSelectedObjectId(r.objectid)
-    setForm({ objectid:r.objectid, full_name:r.full_name, email:r.email, uso_email:r.uso_email })
-    setMsg(null)
-    setEditing(true)
+    const nextForm: DirectoryForm = { objectid:r.objectid, existingObjectId:null, nome:r.nome, cognome:r.cognome, titolo:r.titolo, full_name:r.full_name, email:r.email, data_nascita:r.data_nascita, uso_email:r.uso_email, tipo_soggetto:r.tipo_soggetto || (r.cognome || r.username ? RUBRICA_PERSONA_FISICA : RUBRICA_ALTRO) }
+    setForm(nextForm)
+    setInitialEditForm(nextForm)
+    setHomonymPromptOpen(false); setHomonymConfirmedKey(''); setHomonymReuseId(null); setPendingBirthDates({}); setValidationAttempted(false)
+    setMsg(null); setEditing(true)
   }
-  const onCancel = () => { setEditing(false); setForm(rubricaEmptyForm()) }
+  const onChooseExisting = (value: string) => {
+    const oid = Number(value) || 0
+    setHomonymPromptOpen(false); setHomonymConfirmedKey(''); setHomonymReuseId(null); setPendingBirthDates({})
+    if (!oid) { setForm(f => ({ ...directoryEmptyForm(), uso_email: f.uso_email })); return }
+    const r = records.find(x => x.objectid === oid)
+    if (!r) return
+    setForm(f => ({ ...f, existingObjectId:r.objectid, nome:r.nome, cognome:r.cognome, titolo:r.titolo, full_name:r.full_name, email:r.email, data_nascita:r.data_nascita, tipo_soggetto:r.tipo_soggetto || (r.cognome || r.username ? RUBRICA_PERSONA_FISICA : RUBRICA_ALTRO) }))
+  }
+  const onCancel = () => { setEditing(false); setForm(directoryEmptyForm()); setInitialEditForm(null); setHomonymPromptOpen(false); setHomonymConfirmedKey(''); setHomonymReuseId(null); setPendingBirthDates({}); setValidationAttempted(false) }
 
-  const onSaveRubrica = async () => {
-    const name = rubricaClean(form.full_name)
-    const email = rubricaClean(form.email).toLowerCase()
-    const usage = rubricaClean(form.uso_email)
-    if (!name) { showMsg('Nominativo obbligatorio.', false); return }
-    if (!rubricaEmailValida(email)) { showMsg('Inserire un indirizzo e-mail valido.', false); return }
-    if (!usage) { showMsg('Selezionare l’utilizzo dell’indirizzo e-mail.', false); return }
-    if (usage === RUBRICA_DETERMINA_A) {
-      const otherMain = records.find(r => r.uso_email === RUBRICA_DETERMINA_A && r.objectid !== form.objectid)
-      if (otherMain) { showMsg(`Esiste già il destinatario principale “${otherMain.full_name || otherMain.email}”.`, false); return }
+  const rubricaEditDirty = useMemo(() => {
+    if (!editing || form.objectid == null || !initialEditForm) return false
+    const fields: Array<keyof DirectoryForm> = ['nome','cognome','titolo','full_name','email','data_nascita','uso_email','tipo_soggetto']
+    return fields.some(field => rubricaClean(form[field]) !== rubricaClean(initialEditForm[field]))
+  }, [editing, form, initialEditForm])
+
+  const rubricaTargetId = form.objectid ?? form.existingObjectId ?? null
+  const rubricaIsPerson = tab === 'firmatari' || form.tipo_soggetto === RUBRICA_PERSONA_FISICA
+  const rubricaNameKey = rubricaIsPerson ? personNameKey(form.nome, form.cognome) : ''
+  const rubricaHomonyms = rubricaNameKey ? records.filter(r => r.objectid !== rubricaTargetId && personNameKey(r.nome, r.cognome) === rubricaNameKey) : []
+  const rubricaReusableHomonyms = tab === 'firmatari' ? rubricaHomonyms.filter(r => r.firmatario !== 1) : rubricaHomonyms
+  const rubricaExistingSigners = tab === 'firmatari' ? rubricaHomonyms.filter(r => r.firmatario === 1) : []
+  const rubricaCurrentRecord = rubricaTargetId != null ? records.find(r => r.objectid === rubricaTargetId) : null
+  const rubricaBirthEditable = !rubricaCurrentRecord?.username
+  const creatingRubricaHomonym = form.objectid == null && form.existingObjectId == null && rubricaHomonyms.length > 0
+  const rubricaHomonymConfirmed = creatingRubricaHomonym && homonymConfirmedKey === rubricaNameKey
+  useEffect(() => {
+    if (homonymConfirmedKey && rubricaNameKey !== homonymConfirmedKey) {
+      setHomonymConfirmedKey('')
+      setHomonymReuseId(null)
+      setPendingBirthDates({})
     }
+  }, [rubricaNameKey, homonymConfirmedKey])
+  const showRubricaBirthDate = !!form.data_nascita || (rubricaHomonyms.length > 0 && rubricaBirthEditable && form.existingObjectId == null && (form.objectid != null || rubricaHomonymConfirmed))
+  const rubricaManagedMissingBirth = rubricaHomonymConfirmed ? rubricaHomonyms.filter(r => !r.username && !r.data_nascita) : []
+  const promptRubricaHomonym = () => {
+    if (!creatingRubricaHomonym || rubricaHomonymConfirmed) return
+    const reusePool = tab === 'firmatari' ? rubricaReusableHomonyms : rubricaHomonyms
+    setHomonymReuseId(prev => reusePool.some(r => r.objectid === prev) ? prev : (reusePool[0]?.objectid ?? null))
+    setHomonymPromptOpen(true)
+  }
+
+  const onSave = async () => {
+    setValidationAttempted(true)
+    const nome = normalizePersonPart(form.nome)
+    const cognome = normalizePersonPart(form.cognome)
+    const tipoSoggetto = tab === 'firmatari' ? RUBRICA_PERSONA_FISICA : rubricaClean(form.tipo_soggetto)
+    const isPerson = tipoSoggetto === RUBRICA_PERSONA_FISICA
+    const fullName = isPerson ? (composeFullName(nome, cognome) || rubricaClean(form.full_name)) : (nome || rubricaClean(form.full_name))
+    if (tab === 'email' && !tipoSoggetto) { showMsg('Selezionare il tipo di destinatario.', false); return }
+    if (isPerson && (!nome || !cognome)) { showMsg('Inserire nome e cognome del nominativo.', false); return }
+    if (!isPerson && !nome) { showMsg('Inserire la denominazione del destinatario.', false); return }
+    if (tab === 'firmatari' && !rubricaClean(form.titolo)) { showMsg('Selezionare il titolo del firmatario.', false); return }
+    const targetId = form.objectid ?? form.existingObjectId ?? null
+    const nameKey = isPerson ? personNameKey(nome, cognome) : ''
+    const homonyms = nameKey ? records.filter(r => r.objectid !== targetId && personNameKey(r.nome, r.cognome) === nameKey) : []
+    const currentRecord = targetId != null ? records.find(r => r.objectid === targetId) : null
+    const canEditBirthDate = !currentRecord?.username
+    const originalKey = currentRecord ? personNameKey(currentRecord.nome, currentRecord.cognome) : ''
+    const creatingHomonym = targetId == null && homonyms.length > 0
+    const editingIntoHomonym = targetId != null && homonyms.length > 0 && canEditBirthDate && originalKey !== nameKey
+    const homonymOperation = creatingHomonym || editingIntoHomonym
+    if (creatingHomonym && homonymConfirmedKey !== nameKey) {
+      const reusePool = tab === 'firmatari' ? homonyms.filter(r => r.firmatario !== 1) : homonyms
+      setHomonymReuseId(prev => reusePool.some(r => r.objectid === prev) ? prev : (reusePool[0]?.objectid ?? null))
+      setHomonymPromptOpen(true)
+      return
+    }
+    const managedMissingBirth = homonymOperation ? homonyms.filter(r => !r.username && !r.data_nascita) : []
+    if (homonymOperation && (!form.data_nascita || managedMissingBirth.some(r => !pendingBirthDates[r.objectid]))) {
+      showMsg('Per distinguere correttamente gli omonimi, è necessario indicare la data di nascita di tutti i nominativi.', false)
+      return
+    }
+    if (homonymOperation && !birthDateSupported) { showMsg('La gestione degli omonimi richiede il campo data di nascita, non disponibile nella configurazione corrente. Contattare l’amministratore.', false); return }
+    const datesToCheck = [form.data_nascita, ...homonyms.map(r => r.data_nascita).filter(Boolean), ...managedMissingBirth.map(r => pendingBirthDates[r.objectid]).filter(Boolean)].filter(Boolean)
+    if (new Set(datesToCheck).size !== datesToCheck.length) { showMsg('Le date di nascita indicate coincidono. Verificare i nominativi omonimi e inserire date diverse.', false); return }
+
+    if (tab === 'email') {
+      const email = rubricaClean(form.email).toLowerCase()
+      const usage = rubricaClean(form.uso_email)
+      if (!rubricaEmailValida(email)) { showMsg('Inserire un indirizzo e-mail valido per il destinatario.', false); return }
+      if (!usage) { showMsg('Selezionare l’utilizzo previsto per l’indirizzo e-mail.', false); return }
+      if (usage === RUBRICA_DETERMINA_A || usage === RUBRICA_PROTOCOLLO_A) {
+        const otherMain = records.find(r => r.uso_email === usage && r.objectid !== targetId)
+        if (otherMain) { showMsg(`È già configurato un ${usageLabel(usage)}: “${directoryDisplayName(otherMain)}”. Per questo utilizzo è consentito un solo destinatario.`, false); return }
+      }
+    }
+
+    if (targetId == null && tab === 'email') {
+      const normEmail = rubricaClean(form.email).toLowerCase()
+      const existingByEmail = normEmail ? records.find(r => r.email.toLowerCase() === normEmail) : null
+      if (existingByEmail && personNameKey(existingByEmail.nome, existingByEmail.cognome) !== nameKey) {
+        showMsg('L’indirizzo e-mail inserito è già associato a un altro nominativo. Verificare il destinatario selezionato.', false); return
+      }
+    }
+
     setSaving(true)
     try {
-      await saveRubricaRecord(serviceUrl, { ...form, full_name:name, email, uso_email:usage })
-      setEditing(false)
-      setForm(rubricaEmptyForm())
-      await loadRubrica()
-      showMsg(form.objectid != null ? 'Contatto aggiornato' : 'Contatto aggiunto', true)
+      if (managedMissingBirth.length > 0) {
+        const values: Record<number, string> = {}
+        managedMissingBirth.forEach(r => { values[r.objectid] = pendingBirthDates[r.objectid] })
+        await updatePersonBirthDates(serviceUrl, values)
+      }
+      await saveDirectoryFunction(serviceUrl, tab, { ...form, nome, cognome: isPerson ? cognome : '', full_name: fullName, tipo_soggetto: tipoSoggetto }, targetId == null || canEditBirthDate, !!currentRecord?.username)
+      setEditing(false); setForm(directoryEmptyForm()); setInitialEditForm(null); setValidationAttempted(false); await loadDirectory()
+      showMsg(form.objectid != null ? (tab === 'email' ? 'Destinatario aggiornato.' : 'Firmatario aggiornato.') : (tab === 'email' ? 'Destinatario salvato.' : 'Firmatario salvato.'), true)
     } catch (e: any) { showMsg(`Errore: ${e?.message || e}`, false) }
     finally { setSaving(false) }
   }
 
-  const confirmDeleteRubrica = async () => {
+  const confirmRemove = async () => {
     if (!deleteItem) return
-    const oid = deleteItem.objectid
-    setDeleteItem(null)
-    setSaving(true)
+    const record = deleteItem
+    setDeleteItem(null); setSaving(true)
     try {
-      await deleteRubricaRecord(serviceUrl, oid)
-      setSelectedObjectId(sel => sel === oid ? null : sel)
-      await loadRubrica()
-      showMsg('Contatto eliminato', true)
+      await removeDirectoryFunction(serviceUrl, tab, record)
+      setSelectedObjectId(sel => sel === record.objectid ? null : sel)
+      await loadDirectory()
+      showMsg(tab === 'email' ? 'Destinatario rimosso.' : 'Firmatario rimosso.', true)
     } catch (e: any) { showMsg(`Errore: ${e?.message || e}`, false) }
     finally { setSaving(false) }
   }
 
-  const errorPopupPortal = errorPopup && typeof document !== 'undefined'
-    ? createPortal(
-      <div className="ggu-modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="ggu-rubrica-error-title"
-        onClick={(event) => { event.preventDefault(); event.stopPropagation() }}
-        onMouseDown={(event) => { event.preventDefault(); event.stopPropagation() }}
-        onWheel={(event) => { event.preventDefault(); event.stopPropagation() }}
-        onTouchMove={(event) => { event.preventDefault(); event.stopPropagation() }}
-        onKeyDown={handlePopupKeyDown} tabIndex={-1}>
-        <div className="ggu-modal" onClick={(event) => event.stopPropagation()} onMouseDown={(event) => event.stopPropagation()}>
-          <div className="ggu-modal-head" id="ggu-rubrica-error-title">Operazione non completata</div>
-          <div className="ggu-modal-body">{errorPopup}</div>
-          <div className="ggu-modal-actions">
-            <button ref={popupCloseRef} className="ggu-modal-close" onClick={() => setErrorPopup(null)}>Ho capito</button>
-          </div>
-        </div>
-      </div>, document.body
-    ) : null
+  const editLockPortal = editing && !errorPopup && !deleteItem && editLockRects.length > 0 && typeof document !== 'undefined' ? createPortal(
+    <Fragment>
+      {editLockRects.map(rect => <div key={rect.key} className="ggu-edit-lock-zone" aria-hidden="true"
+        style={{ left: rect.left, top: rect.top, width: rect.width, height: rect.height }}
+        onPointerDown={(e) => { e.preventDefault(); e.stopPropagation() }} onMouseDown={(e) => { e.preventDefault(); e.stopPropagation() }}
+        onClick={(e) => { e.preventDefault(); e.stopPropagation() }} onDoubleClick={(e) => { e.preventDefault(); e.stopPropagation() }}
+        onWheel={(e) => { e.preventDefault(); e.stopPropagation() }} onTouchStart={(e) => { e.preventDefault(); e.stopPropagation() }} />)}
+    </Fragment>, getGlobalOverlayHost() || document.body) : null
 
-  const deleteConfirmPortal = deleteItem && typeof document !== 'undefined'
-    ? createPortal(
-      <div className="ggu-modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="ggu-rubrica-delete-title"
-        onClick={(event) => { event.preventDefault(); event.stopPropagation() }}
-        onMouseDown={(event) => { event.preventDefault(); event.stopPropagation() }}
-        onWheel={(event) => { event.preventDefault(); event.stopPropagation() }}
-        onTouchMove={(event) => { event.preventDefault(); event.stopPropagation() }}
-        onKeyDown={handlePopupKeyDown} tabIndex={-1}>
-        <div className="ggu-modal" onClick={(event) => event.stopPropagation()} onMouseDown={(event) => event.stopPropagation()}>
-          <div className="ggu-modal-head" id="ggu-rubrica-delete-title">Conferma eliminazione</div>
-          <div className="ggu-modal-body">Eliminare il contatto “{deleteItem.full_name || deleteItem.email}” dalla Rubrica?</div>
-          <div className="ggu-modal-actions">
-            <button ref={confirmCancelRef} className="ggu-modal-cancel" onClick={() => setDeleteItem(null)}>Annulla</button>
-            <button className="ggu-modal-danger" onClick={confirmDeleteRubrica}>Elimina</button>
-          </div>
+  const homonymPromptPortal = homonymPromptOpen && typeof document !== 'undefined' ? createPortal(
+    <div className="ggu-modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="ggu-directory-homonym-title"
+      onClick={(e) => { e.preventDefault(); e.stopPropagation() }} onMouseDown={(e) => { e.preventDefault(); e.stopPropagation() }}>
+      <div className="ggu-modal" onClick={(e) => e.stopPropagation()} onMouseDown={(e) => e.stopPropagation()}>
+        <div className="ggu-modal-head ggu-modal-head-info" id="ggu-directory-homonym-title">Nominativo già presente</div>
+        <div className="ggu-modal-body ggu-homonym-choice">
+          {tab === 'firmatari' && rubricaExistingSigners.length > 0 && rubricaReusableHomonyms.length === 0 ? (
+            <div>{rubricaExistingSigners.length > 1 ? 'Esistono già firmatari con lo stesso nome e cognome.' : 'Esiste già un firmatario con lo stesso nome e cognome.'} Se si tratta della stessa persona, non è necessario aggiungerla nuovamente. Se invece è un omonimo distinto, registralo come omonimo.</div>
+          ) : (
+            <>
+              <div>{rubricaHomonyms.length > 1 ? 'Esistono già nominativi con lo stesso nome e cognome.' : 'Esiste già un nominativo con lo stesso nome e cognome.'} È la stessa persona?</div>
+              {rubricaReusableHomonyms.length > 1 && <select className="ggu-select" value={homonymReuseId || ''} onChange={e => setHomonymReuseId(Number(e.target.value) || null)}>
+                {rubricaReusableHomonyms.map(r => <option key={r.objectid} value={r.objectid}>{directoryDisplayLabel(r, records)}</option>)}
+              </select>}
+            </>
+          )}
         </div>
-      </div>, document.body
-    ) : null
+        <div className="ggu-modal-actions">
+          <button className="ggu-modal-cancel" onClick={() => setHomonymPromptOpen(false)}>Correggi dati</button>
+          {rubricaReusableHomonyms.length > 0 && <button className="ggu-modal-close" onClick={() => { const oid = homonymReuseId || rubricaReusableHomonyms[0]?.objectid; if (oid) onChooseExisting(String(oid)); setHomonymPromptOpen(false) }}>Riutilizza nominativo</button>}
+          <button className="ggu-modal-close" onClick={() => { setHomonymConfirmedKey(rubricaNameKey); setHomonymPromptOpen(false) }}>Registra omonimo</button>
+        </div>
+      </div>
+    </div>, getGlobalOverlayHost() || document.body) : null
+
+  const errorPopupPortal = errorPopup && typeof document !== 'undefined' ? createPortal(
+    <div className="ggu-modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="ggu-directory-error-title"
+      onClick={(e) => { e.preventDefault(); e.stopPropagation() }} onMouseDown={(e) => { e.preventDefault(); e.stopPropagation() }}
+      onWheel={(e) => { e.preventDefault(); e.stopPropagation() }} onTouchMove={(e) => { e.preventDefault(); e.stopPropagation() }}
+      onKeyDown={handlePopupKeyDown} tabIndex={-1}>
+      <div className="ggu-modal" onClick={(e) => e.stopPropagation()} onMouseDown={(e) => e.stopPropagation()}>
+        <div className="ggu-modal-head" id="ggu-directory-error-title">Operazione non completata</div>
+        <div className="ggu-modal-body">{errorPopup}</div>
+        <div className="ggu-modal-actions"><button ref={popupCloseRef} className="ggu-modal-close" onClick={() => setErrorPopup(null)}>Ho capito</button></div>
+      </div>
+    </div>, document.body) : null
+
+  const deleteConfirmPortal = deleteItem && typeof document !== 'undefined' ? createPortal(
+    <div className="ggu-modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="ggu-directory-delete-title"
+      onClick={(e) => { e.preventDefault(); e.stopPropagation() }} onMouseDown={(e) => { e.preventDefault(); e.stopPropagation() }}
+      onWheel={(e) => { e.preventDefault(); e.stopPropagation() }} onTouchMove={(e) => { e.preventDefault(); e.stopPropagation() }}
+      onKeyDown={handlePopupKeyDown} tabIndex={-1}>
+      <div className="ggu-modal" onClick={(e) => e.stopPropagation()} onMouseDown={(e) => e.stopPropagation()}>
+        <div className="ggu-modal-head" id="ggu-directory-delete-title">Conferma</div>
+        <div className="ggu-modal-body">{tab === 'email' ? `Rimuovere “${directoryDisplayName(deleteItem)}” dai destinatari e-mail?` : `Rimuovere “${directoryDisplayName(deleteItem)}” dai firmatari?`}</div>
+        <div className="ggu-modal-actions">
+          <button ref={confirmCancelRef} className="ggu-modal-cancel" onClick={() => setDeleteItem(null)}>Annulla</button>
+          <button className="ggu-modal-danger" onClick={confirmRemove}>Rimuovi</button>
+        </div>
+      </div>
+    </div>, document.body) : null
 
   return (
     <Fragment>
-      <style>{styles}</style>
-      {errorPopupPortal}
-      {deleteConfirmPortal}
-      <div className="ggu" style={{
-        '--ggu-title-color': titleColor,
-        '--ggu-title-font-size': `${titleFontSize}px`,
-        '--ggu-field-label-color': fieldLabelColor,
-        '--ggu-field-label-font-size': `${fieldLabelFontSize}px`,
-        '--ggu-detail-card-background': detailCardBackgroundColor,
-        '--ggu-records-card-background': recordsCardBackgroundColor,
-        '--ggu-table-header-background': tableHeaderBackgroundColor,
-        '--ggu-table-header-text': tableHeaderTextColor,
-        '--ggu-table-font-size': `${tableFontSize}px`
+      <style>{styles}</style>{editLockPortal}{homonymPromptPortal}{errorPopupPortal}{deleteConfirmPortal}
+      <div ref={rootRef} className={`ggu ${editing ? 'ggu-editing-global-lock' : ''}`} style={{
+        '--ggu-title-color': titleColor, '--ggu-title-font-size': `${titleFontSize}px`, '--ggu-field-label-color': fieldLabelColor,
+        '--ggu-field-label-font-size': `${fieldLabelFontSize}px`, '--ggu-detail-card-background': detailCardBackgroundColor,
+        '--ggu-records-card-background': recordsCardBackgroundColor, '--ggu-table-header-background': tableHeaderBackgroundColor,
+        '--ggu-table-header-text': tableHeaderTextColor, '--ggu-table-font-size': `${tableFontSize}px`
       } as React.CSSProperties}>
         <div className="ggu-title">{title}</div>
+        {!allowed ? <div className="ggu-msg ggu-msg-err">Il profilo corrente non è abilitato a questa gestione.</div> : <Fragment>
+          <div className="ggu-dir-tabs">
+            <button className={`ggu-dir-tab ${tab === 'email' ? 'ggu-dir-tab-active' : ''}`} disabled={editing} onClick={() => setTab('email')}>Destinatari e-mail</button>
+            <button className={`ggu-dir-tab ${tab === 'firmatari' ? 'ggu-dir-tab-active' : ''}`} disabled={editing} onClick={() => setTab('firmatari')}>Firmatari</button>
+          </div>
+          {msg && <div className={`ggu-msg ${msg.ok ? 'ggu-msg-ok' : 'ggu-msg-err'}`}>{msg.text}</div>}
+          {!editing && <div className="ggu-toolbar"><div className="ggu-toolbar-left"><NewRecordButton onClick={onNew} disabled={loading || saving} title={tab === 'email' ? 'Aggiungi destinatario' : 'Aggiungi firmatario'} /></div><button className="ggu-btn ggu-btn-reset-sort ggu-toolbar-reset-right" onClick={resetDirectorySort} disabled={directorySortRules.length === 0} title="Reset ordinamento" aria-label="Reset ordinamento">↺</button></div>}
 
-        {!allowed ? (
-          <div className="ggu-msg ggu-msg-err">Il profilo corrente non è abilitato alla gestione della Rubrica.</div>
-        ) : (
-          <Fragment>
-            {msg && <div className={`ggu-msg ${msg.ok ? 'ggu-msg-ok' : 'ggu-msg-err'}`}>{msg.text}</div>}
+          {editing && <div className={`ggu-form ggu-form-directory ${tab === 'email' ? (form.objectid ? 'ggu-dir-email-edit' : 'ggu-dir-email-new') : (form.objectid ? 'ggu-dir-firm-edit' : 'ggu-dir-firm-new')} ${showRubricaBirthDate ? 'ggu-has-birth' : ''} ${tab === 'email' && form.tipo_soggetto === RUBRICA_ALTRO ? 'ggu-dir-altro' : ''}`}>
+            {!form.objectid && <div className="ggu-field ggu-dir-person">
+              <div className="ggu-label">Nominativo già presente</div>
+              <select className="ggu-select" value={form.existingObjectId || ''} onChange={e => onChooseExisting(e.target.value)}>
+                <option value="">— nuovo nominativo —</option>
+                {selectableExisting.map(r => <option key={r.objectid} value={r.objectid}>{directoryDisplayLabel(r, records)}</option>)}
+              </select>
+            </div>}
+            {tab === 'email' && <div className="ggu-field ggu-dir-kind"><div className="ggu-label">Tipo{!rubricaCurrentRecord?.username ? ' *' : ''}</div><select className={`ggu-select${validationAttempted && !rubricaCurrentRecord?.username && !form.tipo_soggetto ? ' ggu-required-missing' : ''}`} value={form.tipo_soggetto} disabled={!!rubricaCurrentRecord?.username} onChange={e => setForm(f => ({...f,tipo_soggetto:e.target.value,cognome:e.target.value === RUBRICA_ALTRO ? '' : f.cognome,titolo:e.target.value === RUBRICA_ALTRO ? '' : f.titolo,data_nascita:e.target.value === RUBRICA_ALTRO ? '' : f.data_nascita,full_name:e.target.value === RUBRICA_ALTRO ? f.nome : composeFullName(f.nome,f.cognome)}))}><option value="">— seleziona —</option><option value={RUBRICA_PERSONA_FISICA}>Persona fisica</option><option value={RUBRICA_ALTRO}>Altro</option></select></div>}
+            {tab === 'firmatari' && <div className="ggu-field ggu-dir-title"><div className="ggu-label">Titolo{!rubricaCurrentRecord?.username ? ' *' : ''}</div><select className={`ggu-select${validationAttempted && !rubricaCurrentRecord?.username && !rubricaClean(form.titolo) ? ' ggu-required-missing' : ''}`} value={form.titolo} disabled={!!rubricaCurrentRecord?.username} onChange={e => setForm(f => ({...f,titolo:e.target.value}))}><option value="">—</option>{TITOLI_UTENTE.map(t => <option key={t.code} value={t.code}>{t.label}</option>)}</select></div>}
+            <div className="ggu-field ggu-dir-name"><div className="ggu-label">{tab === 'email' && form.tipo_soggetto === RUBRICA_ALTRO ? `Denominazione${!rubricaCurrentRecord?.username ? ' *' : ''}` : `Nome${!rubricaCurrentRecord?.username ? ' *' : ''}`}</div><input className={`ggu-input${validationAttempted && !rubricaCurrentRecord?.username && !normalizePersonPart(form.nome) ? ' ggu-required-missing' : ''}`} value={form.nome} disabled={!!rubricaCurrentRecord?.username} onChange={e => setForm(f => ({...f,nome:e.target.value,full_name:(tab === 'email' && f.tipo_soggetto === RUBRICA_ALTRO) ? e.target.value : composeFullName(e.target.value,f.cognome)}))} onBlur={form.tipo_soggetto === RUBRICA_ALTRO ? undefined : promptRubricaHomonym} /></div>
+            {(tab === 'firmatari' || form.tipo_soggetto !== RUBRICA_ALTRO) && <div className="ggu-field ggu-dir-surname"><div className="ggu-label">Cognome{!rubricaCurrentRecord?.username ? ' *' : ''}</div><input className={`ggu-input${validationAttempted && !rubricaCurrentRecord?.username && !normalizePersonPart(form.cognome) ? ' ggu-required-missing' : ''}`} value={form.cognome} disabled={!!rubricaCurrentRecord?.username} onChange={e => setForm(f => ({...f,cognome:e.target.value,full_name:composeFullName(f.nome,e.target.value)}))} onBlur={promptRubricaHomonym} /></div>}
+            {showRubricaBirthDate && rubricaIsPerson && <div className="ggu-field ggu-dir-birth ggu-birth-field"><div className="ggu-label">Data di nascita{rubricaHomonyms.length > 0 && rubricaBirthEditable ? ' *' : ''}</div><input className={`ggu-input${validationAttempted && rubricaBirthEditable && rubricaHomonyms.length > 0 && !form.data_nascita ? ' ggu-required-missing' : ''}`} type="date" value={form.data_nascita} disabled={!rubricaBirthEditable} onChange={e => setForm(f => ({...f,data_nascita:e.target.value}))} /></div>}
+            {tab === 'email' && <Fragment>
+              <div className="ggu-field ggu-dir-email"><div className="ggu-label">E-mail{!rubricaCurrentRecord?.username ? ' *' : ''}</div><input className={`ggu-input${validationAttempted && !rubricaCurrentRecord?.username && !rubricaEmailValida(rubricaClean(form.email).toLowerCase()) ? ' ggu-required-missing' : ''}`} type="email" value={form.email} disabled={!!rubricaCurrentRecord?.username} onChange={e => setForm(f => ({...f,email:e.target.value}))} /></div>
+              <div className="ggu-field ggu-dir-usage"><div className="ggu-label">Utilizzo *</div><select className={`ggu-select${validationAttempted && !rubricaClean(form.uso_email) ? ' ggu-required-missing' : ''}`} value={form.uso_email} onChange={e => setForm(f => ({...f,uso_email:e.target.value}))}><option value="">— seleziona —</option>{usages.map(u => <option key={u.code} value={u.code}>{u.label}</option>)}</select></div>
+            </Fragment>}
+            {rubricaManagedMissingBirth.length > 0 && <div className="ggu-homonym-dates">
+              <div className="ggu-homonym-dates-title">Per distinguere correttamente gli omonimi, completare anche la data di nascita {rubricaManagedMissingBirth.length > 1 ? 'dei nominativi già presenti' : 'del nominativo già presente'}.</div>
+              {rubricaManagedMissingBirth.map((r, i) => <div className="ggu-field ggu-birth-field" key={r.objectid}><div className="ggu-label">{directoryDisplayName(r)}{rubricaManagedMissingBirth.length > 1 ? ` (${i + 1})` : ''} *</div><input className={`ggu-input${validationAttempted && !pendingBirthDates[r.objectid] ? ' ggu-required-missing' : ''}`} type="date" value={pendingBirthDates[r.objectid] || ''} onChange={e => setPendingBirthDates(v => ({ ...v, [r.objectid]: e.target.value }))} /></div>)}
+            </div>}
+            <div className="ggu-required-note">* campo obbligatorio</div>
+            <div className="ggu-btns"><button className="ggu-btn ggu-btn-save" onClick={onSave} disabled={saving || (form.objectid != null && !rubricaEditDirty)} title={form.objectid != null && !rubricaEditDirty ? 'Nessuna modifica da salvare' : undefined}>{saving ? (form.objectid != null ? 'Aggiornamento...' : 'Salvataggio...') : (form.objectid != null ? 'Aggiorna' : 'Salva')}</button><button className="ggu-btn ggu-btn-cancel" onClick={onCancel} disabled={saving}>Annulla</button></div>
+          </div>}
 
-            {!editing && (
-              <div className="ggu-toolbar">
-                <NewRecordButton onClick={onNew} disabled={loading || saving} title='Nuovo contatto' />
-              </div>
-            )}
-
-            {editing && (
-              <div className="ggu-form">
-                <div className="ggu-field">
-                  <div className="ggu-label">Nominativo *</div>
-                  <input className="ggu-input" value={form.full_name}
-                    onChange={e => setForm(f => ({ ...f, full_name:e.target.value }))} />
-                </div>
-                <div className="ggu-field">
-                  <div className="ggu-label">E-mail *</div>
-                  <input className="ggu-input" type="email" value={form.email}
-                    onChange={e => setForm(f => ({ ...f, email:e.target.value }))} />
-                </div>
-                <div className="ggu-field">
-                  <div className="ggu-label">Utilizzo *</div>
-                  <select className="ggu-select" value={form.uso_email}
-                    onChange={e => setForm(f => ({ ...f, uso_email:e.target.value }))}>
-                    <option value="">— seleziona —</option>
-                    {usages.map(u => <option key={u.code} value={u.code}>{u.label}</option>)}
-                  </select>
-                </div>
-                <div className="ggu-btns">
-                  <button className="ggu-btn ggu-btn-save" onClick={onSaveRubrica} disabled={saving}>
-                    {saving ? 'Salvataggio...' : form.objectid ? 'Aggiorna' : 'Salva'}
-                  </button>
-                  <button className="ggu-btn ggu-btn-cancel" onClick={onCancel} disabled={saving}>Annulla</button>
-                </div>
-              </div>
-            )}
-
-            <div className="ggu-table-wrap">
-              {loading
-                ? <div className="ggu-empty">Caricamento...</div>
-                : (
-                  <table className="ggu-table">
-                    <thead>
-                      <tr><th>Nominativo</th><th>E-mail</th><th>Utilizzo</th><th className="ggu-actions-col ggu-actions-head">Azioni</th></tr>
-                    </thead>
-                    <tbody>
-                      {records.length === 0 && (
-                        <tr><td colSpan={4} className="ggu-empty">Nessun contatto presente</td></tr>
-                      )}
-                      {records.map(r => (
-                        <tr key={r.objectid}
-                          className={selectedObjectId === r.objectid || form.objectid === r.objectid ? 'ggu-sel' : ''}
-                          onClick={() => setSelectedObjectId(r.objectid)}
-                          onDoubleClick={() => onEdit(r)}>
-                          <td>{r.full_name || '—'}</td>
-                          <td>{r.email || '—'}</td>
-                          <td>{usageLabel(r.uso_email)}</td>
-                          <td className="ggu-actions-col">
-                            <RecordEditButton onClick={(e) => { e.stopPropagation(); onEdit(r) }} title='Modifica contatto' ariaLabel='Modifica contatto' />
-                            <RecordDeleteButton onClick={(e) => { e.stopPropagation(); setDeleteItem(r) }} title='Elimina contatto' ariaLabel='Elimina contatto' />
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                )}
-            </div>
-          </Fragment>
-        )}
+          <div className="ggu-table-wrap">{loading ? <div className="ggu-empty">Caricamento...</div> : <table className={`ggu-table ggu-directory-table ${tab === 'firmatari' ? 'ggu-directory-firm-table' : 'ggu-directory-email-table'}`}>
+            <thead>{tab === 'email' ? <tr><th className="ggu-col-denomination ggu-sortable" onClick={() => toggleDirectorySort('denomination')} title="Clic: aggiungi/inverti/rimuovi ordinamento">Denominazione{directorySortBadge('denomination')}</th><th className="ggu-col-email ggu-sortable" onClick={() => toggleDirectorySort('email')} title="Clic: aggiungi/inverti/rimuovi ordinamento">E-mail{directorySortBadge('email')}</th><th className="ggu-col-birth ggu-sortable" onClick={() => toggleDirectorySort('birth')} title="Clic: aggiungi/inverti/rimuovi ordinamento">Data di nascita{directorySortBadge('birth')}</th><th className="ggu-col-usage ggu-sortable" onClick={() => toggleDirectorySort('usage')} title="Clic: aggiungi/inverti/rimuovi ordinamento">Utilizzo{directorySortBadge('usage')}</th><th className="ggu-directory-spacer"></th><th className="ggu-actions-col ggu-actions-head">Azioni</th></tr> : <tr><th className="ggu-col-title ggu-sortable" onClick={() => toggleDirectorySort('title')} title="Clic: aggiungi/inverti/rimuovi ordinamento">Titolo{directorySortBadge('title')}</th><th className="ggu-col-name ggu-sortable" onClick={() => toggleDirectorySort('name')} title="Clic: aggiungi/inverti/rimuovi ordinamento">Nome{directorySortBadge('name')}</th><th className="ggu-col-surname ggu-sortable" onClick={() => toggleDirectorySort('surname')} title="Clic: aggiungi/inverti/rimuovi ordinamento">Cognome{directorySortBadge('surname')}</th><th className="ggu-col-birth ggu-sortable" onClick={() => toggleDirectorySort('birth')} title="Clic: aggiungi/inverti/rimuovi ordinamento">Data di nascita{directorySortBadge('birth')}</th><th className="ggu-directory-spacer"></th><th className="ggu-actions-col ggu-actions-head">Azioni</th></tr>}</thead>
+            <tbody>
+              {sortedVisibleRecords.length === 0 && <tr><td colSpan={6} className="ggu-empty">{tab === 'email' ? 'Nessun destinatario presente' : 'Nessun firmatario presente'}</td></tr>}
+              {sortedVisibleRecords.map(r => <tr key={r.objectid} className={selectedObjectId === r.objectid || form.objectid === r.objectid ? 'ggu-sel' : ''} onClick={() => setSelectedObjectId(r.objectid)} onDoubleClick={() => onEdit(r)}>
+                {tab === 'email' ? <Fragment><td>{r.tipo_soggetto === RUBRICA_ALTRO ? (r.nome || directoryDisplayName(r) || '—') : (composeFullName(r.nome, r.cognome) || directoryDisplayName(r) || '—')}</td><td>{r.email || '—'}</td><td>{r.data_nascita ? formatBirthDate(r.data_nascita) : '—'}</td><td>{usageLabel(r.uso_email)}</td></Fragment> : <Fragment><td>{TITOLI_UTENTE.find(t => t.code === r.titolo)?.label || r.titolo || '—'}</td><td>{r.nome || '—'}</td><td>{r.cognome || '—'}</td><td>{r.data_nascita ? formatBirthDate(r.data_nascita) : '—'}</td></Fragment>}
+                <td className="ggu-directory-spacer"></td><td className="ggu-actions-col"><RecordEditButton onClick={(e) => {e.stopPropagation();onEdit(r)}} title="Modifica" ariaLabel="Modifica"/><RecordDeleteButton onClick={(e) => {e.stopPropagation();setDeleteItem(r)}} title="Rimuovi" ariaLabel="Rimuovi"/></td>
+              </tr>)}
+            </tbody>
+          </table>}</div>
+        </Fragment>}
       </div>
     </Fragment>
   )
@@ -1314,14 +2057,41 @@ function UtentiWidget(props: AllWidgetProps<IMConfig>) {
   const [saving, setSaving]   = useState(false)
   const [msg, setMsg]         = useState<{ text: string; ok: boolean } | null>(null)
   const [errorPopup, setErrorPopup] = useState<string | null>(null)
+  const [noticePopup, setNoticePopup] = useState<string | null>(null)
   const [deleteConfirm, setDeleteConfirm] = useState<UtenteRecord | null>(null)
   const popupCloseRef = useRef<HTMLButtonElement | null>(null)
   const confirmCancelRef = useRef<HTMLButtonElement | null>(null)
   const rootRef = useRef<HTMLDivElement | null>(null)
   const [editLockRects, setEditLockRects] = useState<GguLockRect[]>([])
   const [selectedObjectId, setSelectedObjectId] = useState<number | null>(null)
+  const [people, setPeople] = useState<DirectoryRecord[]>([])
+  const [birthDateSupported, setBirthDateSupported] = useState(false)
+  const [homonymPromptOpen, setHomonymPromptOpen] = useState(false)
+  const [homonymConfirmedKey, setHomonymConfirmedKey] = useState('')
+  const [homonymReuseId, setHomonymReuseId] = useState<number | null>(null)
+  const [pendingBirthDates, setPendingBirthDates] = useState<Record<number, string>>({})
+  const [userValidationAttempted, setUserValidationAttempted] = useState(false)
   const [sortRules, setSortRules] = useState<SortRule[]>([])
   const [domainLabels, setDomainLabels] = useState<DomainLabelMap>({})
+  const [agolMemberPickerOpen, setAgolMemberPickerOpen] = useState(false)
+  const [agolMembersLoading, setAgolMembersLoading] = useState(false)
+  const [agolMembers, setAgolMembers] = useState<AgolOrganizationMember[]>([])
+  const [agolMemberSearch, setAgolMemberSearch] = useState('')
+  const [agolSortRules, setAgolSortRules] = useState<AgolSortRule[]>([])
+  const [selectedAgolUsername, setSelectedAgolUsername] = useState('')
+  const [assignmentSourceObjectId, setAssignmentSourceObjectId] = useState<number | null>(null)
+  const [agolSyncPreview, setAgolSyncPreview] = useState<{ member: AgolOrganizationMember; changes: Array<{ field: string; current: string; agol: string }> } | null>(null)
+  const [agolSyncLoading, setAgolSyncLoading] = useState(false)
+
+  const originalEditedUser = useMemo(() => (
+    form.objectid != null ? utenti.find(u => u.objectid === form.objectid) ?? null : null
+  ), [form.objectid, utenti])
+
+  const hasEffectiveEditChanges = useMemo(() => {
+    if (form.objectid == null) return true
+    if (!originalEditedUser) return false
+    return !sameUserFormValues(originalEditedUser, form)
+  }, [form, originalEditedUser])
 
   useEffect(() => { load() }, [])
 
@@ -1420,7 +2190,7 @@ function UtentiWidget(props: AllWidgetProps<IMConfig>) {
   }, [editing])
 
   useEffect(() => {
-    if (!errorPopup && !deleteConfirm) return
+    if (!errorPopup && !deleteConfirm && !agolMemberPickerOpen && !agolSyncPreview) return
 
     const previousActive = document.activeElement as HTMLElement | null
     const previousOverflow = document.body.style.overflow
@@ -1444,7 +2214,7 @@ function UtentiWidget(props: AllWidgetProps<IMConfig>) {
       document.body.style.overflow = previousOverflow
       previousActive?.focus?.()
     }
-  }, [errorPopup, deleteConfirm])
+  }, [errorPopup, deleteConfirm, agolMemberPickerOpen, agolSyncPreview])
 
   const handlePopupKeyDown = (event: any) => {
     if (event.key === 'Escape') {
@@ -1467,8 +2237,10 @@ function UtentiWidget(props: AllWidgetProps<IMConfig>) {
     try {
       const fl = await getFL(serviceUrl)
       setDomainLabels(buildDomainLabelMap(fl.fields))
-      const rows = await fetchUtenti(serviceUrl)
+      setBirthDateSupported(hasBirthDateField(fl))
+      const [rows, directory] = await Promise.all([fetchUtenti(serviceUrl), fetchDirectory(serviceUrl)])
       setUtenti(rows)
+      setPeople(directory.records)
       setSelectedObjectId(sel => rows.some(r => r.objectid === sel) ? sel : null)
     }
     catch (e: any) { showMsg('Errore caricamento: ' + (e?.message ?? e), false) }
@@ -1531,6 +2303,25 @@ function UtentiWidget(props: AllWidgetProps<IMConfig>) {
 
   // ── Cascata ───────────────────────────────────────────────────────────────
   const onRuoloChange = (val: number | null) => {
+    // In modifica, se si torna esattamente al ruolo originario, ripristina anche
+    // l'intera cascata originaria. In questo modo il form torna realmente
+    // identico allo stato iniziale e il pulsante Aggiorna si disabilita.
+    if (form.objectid != null && originalEditedUser && Number(val) === Number(originalEditedUser.ruolo)) {
+      const isAdminOriginale = originalEditedUser.ruolo === 7
+      setForm(f => ({
+        ...f,
+        ruolo: originalEditedUser.ruolo,
+        area: isAdminOriginale ? null : originalEditedUser.area,
+        settore: isAdminOriginale ? null : originalEditedUser.settore,
+        ufficio: isAdminOriginale ? null : originalEditedUser.ufficio,
+        ruolo_cod: isAdminOriginale ? 'ADMIN' : (originalEditedUser.ruolo_cod ?? codeOf(RUOLI, originalEditedUser.ruolo)),
+        area_cod: isAdminOriginale ? null : (originalEditedUser.area_cod ?? codeOf(AREE, originalEditedUser.area)),
+        settore_cod: isAdminOriginale ? null : (originalEditedUser.settore_cod ?? codeOf(SETTORI, originalEditedUser.settore)),
+        gruppo: isAdminOriginale ? '' : originalEditedUser.gruppo
+      }))
+      return
+    }
+
     // ADMIN: non assegnare automaticamente area/settore/ufficio né gruppi.
     // L'utente admin (owner) ha già privilegi nativi e, se serve, può essere messo manualmente nei gruppi AGOL.
     if (val === 7) {
@@ -1549,6 +2340,25 @@ function UtentiWidget(props: AllWidgetProps<IMConfig>) {
 
   const onAreaChange = (val: number | null) => {
     if (!form.ruolo) return
+
+    // Se si torna all'area iniziale (con lo stesso ruolo iniziale), ripristina
+    // anche settore, ufficio e gruppo originali invece di lasciare la cascata
+    // ricalcolata/azzerata dal cambio precedente.
+    if (form.objectid != null && originalEditedUser &&
+        Number(form.ruolo) === Number(originalEditedUser.ruolo) &&
+        Number(val) === Number(originalEditedUser.area)) {
+      setForm(f => ({
+        ...f,
+        area: originalEditedUser.area,
+        settore: originalEditedUser.settore,
+        ufficio: originalEditedUser.ufficio,
+        area_cod: originalEditedUser.area_cod ?? codeOf(AREE, originalEditedUser.area),
+        settore_cod: originalEditedUser.settore_cod ?? codeOf(SETTORI, originalEditedUser.settore),
+        gruppo: originalEditedUser.gruppo
+      }))
+      return
+    }
+
     const settori = val ? getSettoriPerRuoloArea(form.ruolo, val) : []
     const settoreAuto = settori.length === 1 ? settori[0] : null
     const isCagliari = form.ruolo === 4 || form.ruolo === 5 || form.ruolo === 6 || (form.ruolo === 2 && val === 1)
@@ -1559,6 +2369,23 @@ function UtentiWidget(props: AllWidgetProps<IMConfig>) {
 
   const onSettoreChange = (val: number | null) => {
     if (!form.ruolo || !form.area) return
+
+    // Stesso principio per il settore: tornando al valore iniziale, ripristina
+    // l'ufficio e il gruppo originari se ruolo e area sono quelli iniziali.
+    if (form.objectid != null && originalEditedUser &&
+        Number(form.ruolo) === Number(originalEditedUser.ruolo) &&
+        Number(form.area) === Number(originalEditedUser.area) &&
+        Number(val) === Number(originalEditedUser.settore)) {
+      setForm(f => ({
+        ...f,
+        settore: originalEditedUser.settore,
+        ufficio: originalEditedUser.ufficio,
+        settore_cod: originalEditedUser.settore_cod ?? codeOf(SETTORI, originalEditedUser.settore),
+        gruppo: originalEditedUser.gruppo
+      }))
+      return
+    }
+
     const uffici = val ? getUfficiPerAreaSettore(form.area, val) : []
     const ufficioAuto = uffici.length === 1 ? uffici[0].value : null
     const gr = form.ruolo && form.area && val ? calcolaGruppo(form.ruolo, form.area, val) : ''
@@ -1570,15 +2397,162 @@ function UtentiWidget(props: AllWidgetProps<IMConfig>) {
   }
 
   // ── CRUD ──────────────────────────────────────────────────────────────────
-  const onNew = () => { setSelectedObjectId(null); setForm(emptyForm()); setEditing(true) }
+  const registeredAgolUsernames = useMemo(() => (
+    new Set(utenti.map(u => String(u.username || '').trim().toLowerCase()).filter(Boolean))
+  ), [utenti])
+
+  const visibleAgolMembers = useMemo(() => {
+    const term = agolMemberSearch.trim().toLocaleLowerCase('it')
+    const arr = agolMembers.filter(m => {
+      if (!term) return true
+      return [m.fullName, m.firstName, m.lastName, m.username, m.email].some(v => String(v || '').toLocaleLowerCase('it').includes(term))
+    })
+    if (agolSortRules.length === 0) return arr
+    arr.sort((a, b) => {
+      for (const rule of agolSortRules) {
+        const av = rule.field === 'fullName' ? (a.fullName || composeFullName(a.firstName, a.lastName)) : (a[rule.field] || '')
+        const bv = rule.field === 'fullName' ? (b.fullName || composeFullName(b.firstName, b.lastName)) : (b[rule.field] || '')
+        const cmp = compareText(String(av), String(bv))
+        if (cmp !== 0) return rule.dir === 'asc' ? cmp : -cmp
+      }
+      return compareText(a.username, b.username)
+    })
+    return arr
+  }, [agolMembers, agolMemberSearch, agolSortRules])
+
+  const toggleAgolSort = (field: AgolSortField) => {
+    setAgolSortRules(prev => {
+      const idx = prev.findIndex(r => r.field === field)
+      if (idx < 0) return [...prev, { field, dir: 'asc' }]
+      const next = [...prev]
+      if (next[idx].dir === 'asc') {
+        next[idx] = { field, dir: 'desc' }
+        return next
+      }
+      next.splice(idx, 1)
+      return next
+    })
+  }
+
+  const agolSortBadge = (field: AgolSortField) => {
+    const idx = agolSortRules.findIndex(r => r.field === field)
+    if (idx < 0) return null
+    const rule = agolSortRules[idx]
+    return (
+      <span className="ggu-sort-ind">
+        <span>{rule.dir === 'asc' ? '▲' : '▼'}</span>
+        <span className="ggu-sort-order">{idx + 1}</span>
+      </span>
+    )
+  }
+
+  const registeredAgolCount = useMemo(() => (
+    agolMembers.filter(m => registeredAgolUsernames.has(m.username.toLowerCase())).length
+  ), [agolMembers, registeredAgolUsernames])
+
+  const availableAgolCount = Math.max(0, agolMembers.length - registeredAgolCount)
+
+  const onNew = async () => {
+    setSelectedObjectId(null)
+    setForm(emptyForm())
+    setSelectedAgolUsername('')
+    setAssignmentSourceObjectId(null)
+    setHomonymPromptOpen(false)
+    setHomonymConfirmedKey('')
+    setHomonymReuseId(null)
+    setPendingBirthDates({})
+    setUserValidationAttempted(false)
+    setAgolMemberSearch('')
+    setAgolSortRules([])
+    setAgolMemberPickerOpen(true)
+    setAgolMembersLoading(true)
+    try {
+      const token = await getAGOLToken(props.config?.clientSecret ?? '')
+      const members = await fetchAgolOrganizationMembers(token)
+      setAgolMembers(members)
+    } catch (e) {
+      console.error('fetchAgolOrganizationMembers error:', e)
+      setAgolMemberPickerOpen(false)
+      showMsg('Impossibile caricare i membri AGOL.', false)
+    } finally {
+      setAgolMembersLoading(false)
+    }
+  }
+
+  const chooseAgolMember = (member: AgolOrganizationMember) => {
+    if (member.disabled) return
+    const nome = normalizePersonPart(member.firstName)
+    const cognome = normalizePersonPart(member.lastName)
+    const nextForm = {
+      ...emptyForm(),
+      username: member.username,
+      nome,
+      cognome,
+      email: member.email,
+      full_name: composeFullName(nome, cognome) || member.fullName
+    }
+    setForm(nextForm)
+    setSelectedAgolUsername(member.username)
+    setAssignmentSourceObjectId(null)
+    setUserValidationAttempted(false)
+    setAgolMemberPickerOpen(false)
+    setEditing(true)
+
+    // Dopo la selezione AGOL verifica subito i possibili omonimi/duplicati
+    // esclusivamente per coincidenza di nome + cognome normalizzati. L'e-mail
+    // non è una chiave di identità: può essere condivisa da più membri AGOL.
+    const key = personNameKey(nome, cognome)
+    const matches = key ? people.filter(r => personNameKey(r.nome, r.cognome) === key) : []
+    if (matches.length > 0) {
+      const firstAssociable = matches.find(r => !rubricaClean(r.username)) || matches[0]
+      setHomonymReuseId(firstAssociable?.objectid ?? null)
+      setHomonymConfirmedKey('')
+      setPendingBirthDates({})
+      setHomonymPromptOpen(true)
+    }
+  }
+
+  const onDuplicateAssignment = (u: UtenteRecord) => {
+    setSelectedObjectId(u.objectid)
+    const isAdmin = u.ruolo === 7
+    setForm({
+      ...emptyForm(),
+      username:          u.username,
+      nome:              u.nome,
+      cognome:           u.cognome,
+      titolo:            u.titolo,
+      email:             u.email,
+      data_nascita:      u.data_nascita,
+      full_name:         composeFullName(u.nome, u.cognome),
+      ruolo:             u.ruolo,
+      area:              isAdmin ? null : u.area,
+      settore:           isAdmin ? null : u.settore,
+      ufficio:           isAdmin ? null : u.ufficio,
+      ruolo_cod:         isAdmin ? 'ADMIN' : (u.ruolo_cod ?? codeOf(RUOLI, u.ruolo)),
+      area_cod:          isAdmin ? null : (u.area_cod ?? codeOf(AREE, u.area)),
+      settore_cod:       isAdmin ? null : (u.settore_cod ?? codeOf(SETTORI, u.settore)),
+      gruppo:            isAdmin ? '' : u.gruppo,
+      gruppo_precedente: '',
+    })
+    setAssignmentSourceObjectId(u.objectid)
+    setSelectedAgolUsername(u.username)
+    setHomonymPromptOpen(false); setHomonymConfirmedKey(''); setHomonymReuseId(null); setPendingBirthDates({}); setUserValidationAttempted(false)
+    setEditing(true)
+  }
 
   const onEdit = (u: UtenteRecord) => {
     setSelectedObjectId(u.objectid)
     const isAdmin = u.ruolo === 7
     setForm({
       objectid:          u.objectid,
+      existingObjectId:  null,
       username:          u.username,
-      full_name:         u.full_name,
+      nome:              u.nome,
+      cognome:           u.cognome,
+      titolo:            u.titolo,
+      email:             u.email,
+      data_nascita:      u.data_nascita,
+      full_name:         composeFullName(u.nome, u.cognome),
       ruolo:             u.ruolo,
       area:              isAdmin ? null : u.area,
       settore:           isAdmin ? null : u.settore,
@@ -1589,15 +2563,98 @@ function UtentiWidget(props: AllWidgetProps<IMConfig>) {
       gruppo:            isAdmin ? ''   : u.gruppo,
       gruppo_precedente: isAdmin ? ''   : u.gruppo,  // salva il gruppo attuale → PA lo userà per la rimozione
     })
+    setHomonymPromptOpen(false); setHomonymConfirmedKey(''); setHomonymReuseId(null); setPendingBirthDates({}); setUserValidationAttempted(false); setSelectedAgolUsername(''); setAssignmentSourceObjectId(null)
     setEditing(true)
   }
 
-  const onCancel = () => { setForm(emptyForm()); setEditing(false) }
+  const onChooseExistingUser = (value: string) => {
+    const oid = Number(value) || 0
+    setHomonymPromptOpen(false); setHomonymConfirmedKey(''); setHomonymReuseId(null); setPendingBirthDates({})
+    if (!oid) { setForm(f => ({ ...emptyForm(), username: f.username, ruolo: f.ruolo, area: f.area, settore: f.settore, ufficio: f.ufficio, ruolo_cod: f.ruolo_cod, area_cod: f.area_cod, settore_cod: f.settore_cod, gruppo: f.gruppo, gruppo_precedente: f.gruppo_precedente })); return }
+    const r = people.find(x => x.objectid === oid)
+    if (!r) return
+    setForm(f => ({ ...f, existingObjectId: r.objectid, nome: r.nome, cognome: r.cognome, titolo: r.titolo, full_name: r.full_name, email: r.email || f.email, data_nascita: r.data_nascita }))
+  }
+
+  const userTargetId = form.objectid ?? form.existingObjectId ?? null
+  const userNameKey = personNameKey(form.nome, form.cognome)
+  const userHomonyms = userNameKey ? people.filter(r => r.objectid !== userTargetId && personNameKey(r.nome, r.cognome) === userNameKey) : []
+  const creatingUserHomonym = assignmentSourceObjectId == null && form.objectid == null && form.existingObjectId == null && userHomonyms.length > 0
+  const userHomonymConfirmed = creatingUserHomonym && homonymConfirmedKey === userNameKey
+  useEffect(() => {
+    if (homonymConfirmedKey && userNameKey !== homonymConfirmedKey) {
+      setHomonymConfirmedKey('')
+      setHomonymReuseId(null)
+      setPendingBirthDates({})
+    }
+  }, [userNameKey, homonymConfirmedKey])
+  const showUserBirthDate = !!form.data_nascita || (userHomonyms.length > 0 && form.existingObjectId == null && (form.objectid != null || userHomonymConfirmed))
+  const userManagedMissingBirth = userHomonymConfirmed ? userHomonyms.filter(r => !r.data_nascita) : []
+  const selectedHomonymRecord = homonymReuseId != null ? userHomonyms.find(r => r.objectid === homonymReuseId) : null
+  const selectedHomonymAssociable = !!selectedHomonymRecord && !rubricaClean(selectedHomonymRecord.username)
+  const promptUserHomonym = () => {
+    if (!creatingUserHomonym || userHomonymConfirmed) return
+    setHomonymReuseId(prev => userHomonyms.some(r => r.objectid === prev) ? prev : (userHomonyms[0]?.objectid ?? null))
+    setHomonymPromptOpen(true)
+  }
+
+  const onCheckAgolSync = async () => {
+    if (!form.objectid || !form.username.trim()) return
+    setAgolSyncLoading(true)
+    try {
+      const token = await getAGOLToken(props.config?.clientSecret ?? '')
+      const member = await fetchAgolUserProfile(form.username, token)
+      const agolNome = normalizePersonPart(member.firstName)
+      const agolCognome = normalizePersonPart(member.lastName)
+      const agolEmail = String(member.email || '').trim().toLowerCase()
+      const changes: Array<{ field: string; current: string; agol: string }> = []
+      if (normalizePersonPart(form.nome) !== agolNome) changes.push({ field: 'Nome', current: normalizePersonPart(form.nome), agol: agolNome })
+      if (normalizePersonPart(form.cognome) !== agolCognome) changes.push({ field: 'Cognome', current: normalizePersonPart(form.cognome), agol: agolCognome })
+      if (String(form.email || '').trim().toLowerCase() !== agolEmail) changes.push({ field: 'E-mail', current: String(form.email || '').trim(), agol: member.email || '' })
+      if (changes.length === 0) {
+        setNoticePopup('I dati dell’utente coincidono già con quelli presenti in AGOL. Non è necessario alcun aggiornamento.')
+      } else {
+        setAgolSyncPreview({ member, changes })
+      }
+    } catch (e: any) {
+      showMsg('Impossibile verificare i dati AGOL: ' + (e?.message ?? e), false)
+    } finally {
+      setAgolSyncLoading(false)
+    }
+  }
+
+  const confirmAgolSync = async () => {
+    const preview = agolSyncPreview
+    if (!preview || !form.username.trim()) return
+    setAgolSyncPreview(null)
+    setAgolSyncLoading(true)
+    try {
+      await updateAgolIdentityForUsername(serviceUrl, form.username, preview.member)
+      const nome = normalizePersonPart(preview.member.firstName)
+      const cognome = normalizePersonPart(preview.member.lastName)
+      const email = String(preview.member.email || '').trim().toLowerCase()
+      setForm(f => ({ ...f, nome, cognome, email, full_name: composeFullName(nome, cognome) || preview.member.fullName }))
+      await load()
+      showMsg('Dati account AGOL sincronizzati.', true)
+    } catch (e: any) {
+      showMsg('Impossibile sincronizzare i dati AGOL: ' + (e?.message ?? e), false)
+    } finally {
+      setAgolSyncLoading(false)
+    }
+  }
+
+  const onCancel = () => { setSelectedAgolUsername(''); setAssignmentSourceObjectId(null); setForm(emptyForm()); setHomonymPromptOpen(false); setHomonymConfirmedKey(''); setHomonymReuseId(null); setPendingBirthDates({}); setUserValidationAttempted(false); setEditing(false) }
 
   const onSave = async () => {
-    if (!form.username.trim())  { showMsg('Username AGOL obbligatorio', false); return }
-    if (!form.full_name.trim()) { showMsg('Nome completo obbligatorio', false); return }
+    setUserValidationAttempted(true)
+    if (!form.username.trim())       { showMsg('Username AGOL obbligatorio', false); return }
+    if (!normalizePersonPart(form.nome))    { showMsg('Nome obbligatorio', false); return }
+    if (!normalizePersonPart(form.cognome)) { showMsg('Cognome obbligatorio', false); return }
     if (!form.ruolo)            { showMsg('Ruolo obbligatorio', false); return }
+    const normalizedEmail = String(form.email || '').trim().toLowerCase()
+    const isTiAmm = form.ruolo === 2 && form.area === 1
+    if (isTiAmm && !normalizedEmail) { showMsg('Per il Tecnico istruttore dell’Area amministrativa è necessario indicare l’indirizzo e-mail.', false); return }
+    if (normalizedEmail && !rubricaEmailValida(normalizedEmail)) { showMsg('Inserire un indirizzo e-mail valido per il destinatario.', false); return }
     // ADMIN: non richiede area/settore/ufficio e non gestisce gruppi (ha privilegi nativi AGOL).
     if (form.ruolo !== 7) {
       if (!form.area)             { showMsg('Area obbligatoria', false); return }
@@ -1605,12 +2662,55 @@ function UtentiWidget(props: AllWidgetProps<IMConfig>) {
       if (settoriPrevisti.length > 0 && !form.settore) { showMsg('Settore obbligatorio', false); return }
       if (!form.ufficio)          { showMsg('Ufficio obbligatorio', false); return }
     }
+    const duplicateAssignment = utenti.find(u =>
+      u.objectid !== form.objectid &&
+      u.objectid !== assignmentSourceObjectId &&
+      sameAssignment(u, form)
+    )
+    // In modalità Nuova assegnazione il record sorgente va incluso nel controllo:
+    // se non è stata modificata alcuna funzione, la copia è identica e va bloccata.
+    const sourceAssignment = assignmentSourceObjectId != null ? utenti.find(u => u.objectid === assignmentSourceObjectId) : null
+    if (duplicateAssignment || (sourceAssignment && sameAssignment(sourceAssignment, form))) {
+      showMsg('Assegnazione già presente. L’utente risulta già registrato con la medesima funzione e il medesimo ambito organizzativo.', false)
+      return
+    }
+    const targetId = form.objectid ?? form.existingObjectId ?? null
+    const nameKey = personNameKey(form.nome, form.cognome)
+    const homonyms = nameKey ? people.filter(r => r.objectid !== targetId && personNameKey(r.nome, r.cognome) === nameKey) : []
+    const currentPerson = form.objectid != null ? people.find(r => r.objectid === form.objectid) : null
+    const originalKey = currentPerson ? personNameKey(currentPerson.nome, currentPerson.cognome) : ''
+    const creatingHomonym = assignmentSourceObjectId == null && form.objectid == null && form.existingObjectId == null && homonyms.length > 0
+    const editingIntoHomonym = form.objectid != null && homonyms.length > 0 && originalKey !== nameKey
+    const homonymOperation = creatingHomonym || editingIntoHomonym
+    if (creatingHomonym && homonymConfirmedKey !== nameKey) {
+      const reusePool = homonyms
+      setHomonymReuseId(prev => reusePool.some(r => r.objectid === prev) ? prev : (reusePool[0]?.objectid ?? null))
+      setHomonymPromptOpen(true)
+      return
+    }
+    const managedMissingBirth = homonymOperation ? homonyms.filter(r => !r.data_nascita) : []
+    if (homonymOperation && (!form.data_nascita || managedMissingBirth.some(r => !pendingBirthDates[r.objectid]))) {
+      showMsg('Per distinguere correttamente gli omonimi, è necessario indicare la data di nascita di tutti i nominativi.', false)
+      return
+    }
+    if (homonymOperation && !birthDateSupported) { showMsg('La gestione degli omonimi richiede il campo data di nascita, non disponibile nella configurazione corrente. Contattare l’amministratore.', false); return }
+    const datesToCheck = [form.data_nascita, ...homonyms.map(r => r.data_nascita).filter(Boolean), ...managedMissingBirth.map(r => pendingBirthDates[r.objectid]).filter(Boolean)].filter(Boolean)
+    if (new Set(datesToCheck).size !== datesToCheck.length) { showMsg('Le date di nascita indicate coincidono. Verificare i nominativi omonimi e inserire date diverse.', false); return }
     setSaving(true)
     try {
+      if (managedMissingBirth.length > 0) {
+        const values: Record<number, string> = {}
+        managedMissingBirth.forEach(r => { values[r.objectid] = pendingBirthDates[r.objectid] })
+        await updatePersonBirthDates(serviceUrl, values)
+      }
       // Sanitize: ADMIN è trasversale (mai area/settore/ufficio/gruppo)
+      const normalizedNome = normalizePersonPart(form.nome)
+      const normalizedCognome = normalizePersonPart(form.cognome)
+      const computedFullName = composeFullName(normalizedNome, normalizedCognome)
+      const normalizedEmail = String(form.email || '').trim().toLowerCase()
       const formSan = form.ruolo === 7
-        ? { ...form, username: form.username.trim(), area: null, settore: null, ufficio: null, ruolo_cod: 'ADMIN', area_cod: null, settore_cod: null, gruppo: '', gruppo_precedente: '' }
-        : { ...form, username: form.username.trim() }
+        ? { ...form, username: form.username.trim(), nome: normalizedNome, cognome: normalizedCognome, email: normalizedEmail, full_name: computedFullName, area: null, settore: null, ufficio: null, ruolo_cod: 'ADMIN', area_cod: null, settore_cod: null, gruppo: '', gruppo_precedente: '' }
+        : { ...form, username: form.username.trim(), nome: normalizedNome, cognome: normalizedCognome, email: normalizedEmail, full_name: computedFullName }
 
       const token = await getAGOLToken(props.config?.clientSecret ?? '')
       const isUpdate = formSan.objectid != null
@@ -1620,17 +2720,27 @@ function UtentiWidget(props: AllWidgetProps<IMConfig>) {
       // addUsers viene trattato come operazione idempotente; se non è membro, viene aggiunto.
       if (isUpdate) {
         if (formSan.gruppo_precedente && formSan.gruppo_precedente !== formSan.gruppo) {
-          await removeUserFromGroup(formSan.username, formSan.gruppo_precedente, token)
+          const stillRequired = await otherAssignmentRequiresGroup(serviceUrl, formSan.username, formSan.gruppo_precedente, formSan.objectid)
+          if (!stillRequired) await removeUserFromGroup(formSan.username, formSan.gruppo_precedente, token)
         }
         if (formSan.gruppo) await addUserToGroup(formSan.username, formSan.gruppo, token)
       } else {
-        // Nuovo record: aggiungi al gruppo
-        if (formSan.gruppo) await addUserToGroup(formSan.username, formSan.gruppo, token)
+        // Nuovo utente o nuova assegnazione. Se il medesimo gruppo è già richiesto
+        // da un'altra assegnazione dello stesso username, l'appartenenza AGOL esiste
+        // già e non viene ripetuta. Un gruppo diverso viene invece assegnato come al
+        // primo inserimento.
+        if (formSan.gruppo) {
+          const alreadyRequired = await otherAssignmentRequiresGroup(serviceUrl, formSan.username, formSan.gruppo)
+          if (!alreadyRequired) await addUserToGroup(formSan.username, formSan.gruppo, token)
+        }
       }
 
       await saveUtente(formSan, serviceUrl)
-      showMsg(formSan.objectid ? 'Utente aggiornato' : 'Utente aggiunto', true)
-      setEditing(false); setForm(emptyForm()); await load()
+      // Il riallineamento AGOL resta una modifica in sospeso finché l'utente non
+      // conferma il normale salvataggio del form. Solo a questo punto i dati
+      // identificativi vengono propagati a tutte le assegnazioni dello username.
+      showMsg(formSan.objectid ? 'Utente aggiornato' : (assignmentSourceObjectId != null ? 'Nuova assegnazione aggiunta' : 'Utente aggiunto'), true)
+      setSelectedAgolUsername(''); setAssignmentSourceObjectId(null); setEditing(false); setUserValidationAttempted(false); setForm(emptyForm()); await load()
     } catch (e: any) { showMsg('Errore: ' + (e?.message ?? e), false) }
     setSaving(false)
   }
@@ -1646,7 +2756,10 @@ function UtentiWidget(props: AllWidgetProps<IMConfig>) {
     setSaving(true)
     try {
       const token = await getAGOLToken(props.config?.clientSecret ?? '')
-      if (u.gruppo) await removeUserFromGroup(u.username, u.gruppo, token)
+      if (u.gruppo) {
+        const stillRequired = await otherAssignmentRequiresGroup(serviceUrl, u.username, u.gruppo, u.objectid)
+        if (!stillRequired) await removeUserFromGroup(u.username, u.gruppo, token)
+      }
       await deleteUtente(u.objectid, token, serviceUrl)
       setSelectedObjectId(sel => sel === u.objectid ? null : sel)
       showMsg('Utente eliminato', true)
@@ -1675,6 +2788,46 @@ function UtentiWidget(props: AllWidgetProps<IMConfig>) {
   const labelArea = (val: number | null | undefined) => labelForDomainItem(AREE, val, domainLabels, 'area_cod', 'area')
   const labelSettore = (val: number | null | undefined) => labelForDomainItem(SETTORI, val, domainLabels, 'settore_cod', 'settore')
   const labelUfficio = (val: number | null | undefined) => labelForUfficio(val, domainLabels)
+  const isNewAgolRegistration = !!selectedAgolUsername && form.objectid == null
+  const agolIdentityReadOnly = !!selectedAgolUsername || !!form.objectid || assignmentSourceObjectId != null
+
+  const homonymPromptPortal = homonymPromptOpen && typeof document !== 'undefined'
+    ? createPortal(
+      <div className="ggu-modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="ggu-user-homonym-title"
+        onClick={(event) => { event.preventDefault(); event.stopPropagation() }} onMouseDown={(event) => { event.preventDefault(); event.stopPropagation() }}>
+        <div className="ggu-modal" onClick={(event) => event.stopPropagation()} onMouseDown={(event) => event.stopPropagation()}>
+          <div className="ggu-modal-head ggu-modal-head-info" id="ggu-user-homonym-title">Possibile nominativo già presente</div>
+          <div className="ggu-modal-body ggu-homonym-choice">
+            <div>{isNewAgolRegistration
+              ? (userHomonyms.length > 1 ? 'Sono presenti più nominativi con lo stesso nome e cognome del membro AGOL selezionato.' : 'È già presente un nominativo con lo stesso nome e cognome del membro AGOL selezionato.')
+              : (userHomonyms.length > 1 ? 'Sono già presenti più nominativi con lo stesso nome e cognome.' : 'È già presente un nominativo con lo stesso nome e cognome.')}</div>
+            {isNewAgolRegistration && <div className="ggu-homonym-note">Verificare se si tratta della stessa persona. L'indirizzo e-mail è mostrato solo come informazione e non viene utilizzato per stabilire la corrispondenza.</div>}
+            {userHomonyms.length > 1 && <select className="ggu-select" value={homonymReuseId || ''} onChange={e => setHomonymReuseId(Number(e.target.value) || null)}>
+              {userHomonyms.map(r => <option key={r.objectid} value={r.objectid}>{`${directoryDisplayLabel(r, people)} — ${r.username ? `Utente: ${r.username}` : 'Rubrica'}${r.email ? ` — ${r.email}` : ''}`}</option>)}
+            </select>}
+            {selectedHomonymRecord && <div className="ggu-homonym-selected">
+              <div><strong>{directoryDisplayName(selectedHomonymRecord)}</strong></div>
+              {selectedHomonymRecord.data_nascita && <div>Data di nascita: {formatBirthDate(selectedHomonymRecord.data_nascita)}</div>}
+              <div>{selectedHomonymRecord.username ? `Utente gestionale: ${selectedHomonymRecord.username}` : 'Nominativo presente in Rubrica'}</div>
+              {selectedHomonymRecord.email && <div>E-mail: {selectedHomonymRecord.email}</div>}
+              {isNewAgolRegistration && !selectedHomonymAssociable && <div className="ggu-homonym-warning">Questo nominativo è già associato a un altro account AGOL e non può essere riutilizzato.</div>}
+            </div>}
+          </div>
+          <div className="ggu-modal-actions">
+            {isNewAgolRegistration ? <>
+              <button className="ggu-modal-cancel" onClick={() => { setHomonymPromptOpen(false); setHomonymConfirmedKey(''); setHomonymReuseId(null); setPendingBirthDates({}); setSelectedAgolUsername(''); setForm(emptyForm()); setEditing(false); setAgolMemberPickerOpen(true) }}>Torna ai membri AGOL</button>
+              <button className="ggu-modal-close" disabled={!selectedHomonymAssociable} title={selectedHomonymAssociable ? 'Associa il membro AGOL al nominativo selezionato' : 'Il nominativo selezionato è già associato a un altro account AGOL'} onClick={() => { const oid = homonymReuseId || userHomonyms.find(r => !r.username)?.objectid; if (oid) onChooseExistingUser(String(oid)); setHomonymPromptOpen(false) }}>Associa al nominativo</button>
+              <button className="ggu-modal-close" onClick={() => { setHomonymConfirmedKey(userNameKey); setHomonymReuseId(null); setHomonymPromptOpen(false) }}>Crea nuovo nominativo</button>
+            </> : <>
+              <button className="ggu-modal-cancel" onClick={() => setHomonymPromptOpen(false)}>Correggi dati</button>
+              <button className="ggu-modal-close" onClick={() => { setHomonymConfirmedKey(userNameKey); setHomonymReuseId(null); setHomonymPromptOpen(false) }}>Registra omonimo</button>
+            </>}
+          </div>
+        </div>
+      </div>,
+      getGlobalOverlayHost() || document.body
+    )
+    : null
 
   const errorPopupPortal = errorPopup && typeof document !== 'undefined'
     ? createPortal(
@@ -1702,7 +2855,7 @@ function UtentiWidget(props: AllWidgetProps<IMConfig>) {
     )
     : null
 
-  const editLockPortal = editing && !errorPopup && !deleteConfirm && editLockRects.length > 0 && typeof document !== 'undefined'
+  const editLockPortal = editing && !errorPopup && !deleteConfirm && !agolSyncPreview && editLockRects.length > 0 && typeof document !== 'undefined'
     ? createPortal(
       <Fragment>
         {editLockRects.map(rect => (
@@ -1724,6 +2877,81 @@ function UtentiWidget(props: AllWidgetProps<IMConfig>) {
     )
     : null
 
+  const agolMemberPickerPortal = agolMemberPickerOpen && typeof document !== 'undefined'
+    ? createPortal(
+      <div className="ggu-modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="ggu-agol-picker-title" onClick={(event) => { event.preventDefault(); event.stopPropagation() }}>
+        <div className="ggu-modal ggu-agol-modal" onClick={(event) => event.stopPropagation()}>
+          <div className="ggu-modal-head ggu-modal-head-info" id="ggu-agol-picker-title">Seleziona membro AGOL</div>
+          <div className="ggu-modal-body">
+            <input className="ggu-input ggu-agol-search" value={agolMemberSearch} onChange={e => setAgolMemberSearch(e.target.value)} placeholder="Cerca per nome, cognome, username o e-mail" autoFocus />
+            {!agolMembersLoading && <div className="ggu-agol-count">{agolMembers.length} membri AGOL · {registeredAgolCount} già registrati · {availableAgolCount} disponibili</div>}
+            <div className="ggu-agol-list">
+              <div className="ggu-agol-row ggu-agol-row-head">
+                <div className="ggu-agol-sortable" onClick={() => toggleAgolSort('fullName')} title="Clic: aggiungi/inverti/rimuovi ordinamento">Nome{agolSortBadge('fullName')}</div>
+                <div className="ggu-agol-sortable" onClick={() => toggleAgolSort('username')} title="Clic: aggiungi/inverti/rimuovi ordinamento">Username{agolSortBadge('username')}</div>
+                <div className="ggu-agol-sortable" onClick={() => toggleAgolSort('email')} title="Clic: aggiungi/inverti/rimuovi ordinamento">E-mail{agolSortBadge('email')}</div>
+                <div></div>
+              </div>
+              {agolMembersLoading && <div className="ggu-agol-loading">Caricamento membri...</div>}
+              {!agolMembersLoading && visibleAgolMembers.length === 0 && <div className="ggu-agol-empty">Nessun membro corrispondente.</div>}
+              {!agolMembersLoading && visibleAgolMembers.map(member => {
+                const alreadyRegistered = registeredAgolUsernames.has(member.username.toLowerCase())
+                const notSelectable = member.disabled || alreadyRegistered
+                return (
+                  <div className={`ggu-agol-row ${notSelectable ? 'ggu-agol-member-disabled' : ''}`} key={member.username}>
+                    <div className="ggu-agol-cell" title={member.fullName || composeFullName(member.firstName, member.lastName)}>{member.fullName || composeFullName(member.firstName, member.lastName) || '—'}</div>
+                    <div className="ggu-agol-cell" title={member.username}>{member.username}</div>
+                    <div className="ggu-agol-cell" title={member.email}>{member.email || '—'}</div>
+                    <button className="ggu-btn ggu-btn-save ggu-agol-select" disabled={notSelectable} onClick={() => chooseAgolMember(member)}>{alreadyRegistered ? 'Già registrato' : (member.disabled ? 'Disabilitato' : 'Seleziona')}</button>
+                  </div>
+                )
+              })}
+            </div>
+          </div>
+          <div className="ggu-modal-actions"><button className="ggu-modal-cancel" onClick={() => setAgolMemberPickerOpen(false)}>Annulla</button></div>
+        </div>
+      </div>,
+      document.body
+    )
+    : null
+
+  const agolSyncPreviewPortal = agolSyncPreview && typeof document !== 'undefined'
+    ? createPortal(
+      <div className="ggu-modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="ggu-agol-sync-title"
+        onClick={(event) => { event.preventDefault(); event.stopPropagation() }} onMouseDown={(event) => { event.preventDefault(); event.stopPropagation() }}>
+        <div className="ggu-modal" onClick={(event) => event.stopPropagation()} onMouseDown={(event) => event.stopPropagation()}>
+          <div className="ggu-modal-head ggu-modal-head-info" id="ggu-agol-sync-title">Sincronizza da AGOL</div>
+          <div className="ggu-modal-body">
+            <div style={{ marginBottom: 10 }}>Sono state rilevate differenze nei dati identificativi. Aggiornare tutte le assegnazioni dello stesso account?</div>
+            <table className="ggu-sync-table">
+              <thead><tr><th>Campo</th><th>Gestionale</th><th>AGOL</th></tr></thead>
+              <tbody>{agolSyncPreview.changes.map(c => <tr key={c.field}><td>{c.field}</td><td>{c.current || '—'}</td><td>{c.agol || '—'}</td></tr>)}</tbody>
+            </table>
+          </div>
+          <div className="ggu-modal-actions">
+            <button className="ggu-modal-cancel" onClick={() => setAgolSyncPreview(null)}>Annulla</button>
+            <button className="ggu-btn ggu-btn-save" onClick={confirmAgolSync}>Sincronizza</button>
+          </div>
+        </div>
+      </div>,
+      document.body
+    )
+    : null
+
+  const noticePopupPortal = noticePopup && typeof document !== 'undefined'
+    ? createPortal(
+      <div className="ggu-modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="ggu-notice-title"
+        onClick={(event) => { event.preventDefault(); event.stopPropagation() }} onMouseDown={(event) => { event.preventDefault(); event.stopPropagation() }}>
+        <div className="ggu-modal" onClick={(event) => event.stopPropagation()} onMouseDown={(event) => event.stopPropagation()}>
+          <div className="ggu-modal-head ggu-modal-head-info" id="ggu-notice-title">Dati già aggiornati</div>
+          <div className="ggu-modal-body">{noticePopup}</div>
+          <div className="ggu-modal-actions"><button className="ggu-modal-close" onClick={() => setNoticePopup(null)}>Ho capito</button></div>
+        </div>
+      </div>,
+      document.body
+    )
+    : null
+
   const deleteConfirmPortal = deleteConfirm && typeof document !== 'undefined'
     ? createPortal(
       <div
@@ -1740,7 +2968,7 @@ function UtentiWidget(props: AllWidgetProps<IMConfig>) {
       >
         <div className="ggu-modal" onClick={(event) => event.stopPropagation()} onMouseDown={(event) => event.stopPropagation()}>
           <div className="ggu-modal-head" id="ggu-delete-title">Conferma eliminazione</div>
-          <div className="ggu-modal-body">{`Eliminare il profilo utente "${deleteConfirm.username}" dal gestionale?\n\nVerrà eliminato solo il record selezionato dalla tabella GII_utenti e l'utente sarà rimosso solo dal gruppo AGOL associato a questo profilo, se presente. Eventuali altri profili dello stesso username resteranno invariati.`}</div>
+          <div className="ggu-modal-body">{`Rimuovere il profilo utente "${deleteConfirm.username}" dal gestionale?\n\nIl nominativo resterà disponibile se è utilizzato anche come destinatario e-mail o firmatario.`}</div>
           <div className="ggu-modal-actions">
             <button ref={confirmCancelRef} className="ggu-modal-cancel" onClick={closeDeleteConfirm}>Annulla</button>
             <button className="ggu-modal-danger" onClick={confirmDeleteUtente}>Elimina</button>
@@ -1755,8 +2983,12 @@ function UtentiWidget(props: AllWidgetProps<IMConfig>) {
     <Fragment>
       <style>{styles}</style>
       {editLockPortal}
+      {homonymPromptPortal}
       {errorPopupPortal}
       {deleteConfirmPortal}
+      {agolMemberPickerPortal}
+      {agolSyncPreviewPortal}
+      {noticePopupPortal}
       <div
         ref={rootRef}
         className={`ggu ${editing ? 'ggu-editing-global-lock' : ''}`}
@@ -1778,83 +3010,118 @@ function UtentiWidget(props: AllWidgetProps<IMConfig>) {
 
         {!editing && (
           <div className="ggu-toolbar">
-            <NewRecordButton onClick={onNew} title='Nuovo utente' />
-            <button type='button' onClick={() => exportCSV(sortedUtenti, domainLabels)} disabled={utenti.length === 0} title='Esporta utenti.csv' aria-label='Esporta utenti.csv' style={transferActionButtonStyle(utenti.length === 0)}><TransferActionIcon name='export' /></button>
-            <button className="ggu-btn ggu-btn-reset-sort" onClick={resetSort}
+            <div className="ggu-toolbar-left">
+              <NewRecordButton onClick={onNew} title='Nuovo utente' />
+              <button type='button' onClick={() => exportCSV(sortedUtenti, domainLabels)} disabled={utenti.length === 0} title='Esporta utenti.csv' aria-label='Esporta utenti.csv' style={transferActionButtonStyle(utenti.length === 0)}><TransferActionIcon name='export' /></button>
+            </div>
+            <button className="ggu-btn ggu-btn-reset-sort ggu-toolbar-reset-right" onClick={resetSort}
               disabled={sortRules.length === 0} title="Reset ordinamento" aria-label="Reset ordinamento">↺</button>
           </div>
         )}
 
         {editing && (
-          <div className="ggu-form">
-            <div className="ggu-field">
-              <div className="ggu-label">Username AGOL *</div>
-              <input className="ggu-input" value={form.username}
-                placeholder="username AGOL valido"
-                title="Inserire lo username di un utente AGOL già presente e validato nell\'organizzazione cbsm-hub"
-                onChange={e => setForm(f => ({ ...f, username: e.target.value.trim() }))} />
+          <div className="ggu-form ggu-form-users">
+            <div className="ggu-user-section ggu-agol-account-row">
+              <div className="ggu-user-section-title">Dati account AGOL</div>
+              <div className="ggu-field ggu-user-username">
+                <div className="ggu-label">Username AGOL</div>
+                <input className="ggu-input" value={form.username} disabled={agolIdentityReadOnly}
+                  title="Username del membro selezionato in ArcGIS Online"
+                  onChange={e => setForm(f => ({ ...f, username: e.target.value.trim() }))} />
+              </div>
+              <div className="ggu-field ggu-user-name">
+                <div className="ggu-label">Nome</div>
+                <input className="ggu-input" value={form.nome} disabled={agolIdentityReadOnly}
+                  onChange={e => setForm(f => ({ ...f, nome: e.target.value }))} onBlur={promptUserHomonym} />
+              </div>
+              <div className="ggu-field ggu-user-surname">
+                <div className="ggu-label">Cognome</div>
+                <input className="ggu-input" value={form.cognome} disabled={agolIdentityReadOnly}
+                  onChange={e => setForm(f => ({ ...f, cognome: e.target.value }))} onBlur={promptUserHomonym} />
+              </div>
+              <div className="ggu-field ggu-user-email">
+                <div className="ggu-label">E-mail</div>
+                <input className="ggu-input" type="email" value={form.email} disabled={agolIdentityReadOnly}
+                  placeholder="nome.cognome@dominio.it"
+                  onChange={e => setForm(f => ({ ...f, email: e.target.value }))} />
+              </div>
+              <div className="ggu-agol-account-actions">
+                {form.objectid != null && <button className="ggu-btn ggu-btn-outline" onClick={onCheckAgolSync} disabled={saving || agolSyncLoading}>{agolSyncLoading ? 'Sincronizzo...' : 'Sincronizza'}</button>}
+              </div>
             </div>
-            <div className="ggu-field">
-              <div className="ggu-label">Nome completo *</div>
-              <input className="ggu-input" value={form.full_name}
-                onChange={e => setForm(f => ({ ...f, full_name: e.target.value }))} />
-            </div>
-            <div className="ggu-field">
-              <div className="ggu-label">Ruolo *</div>
-              <select className="ggu-select" value={form.ruolo ?? ''}
-                onChange={e => onRuoloChange(e.target.value ? Number(e.target.value) : null)}>
-                <option value="">— seleziona —</option>
-                {RUOLI.map(r => <option key={r.value} value={r.value}>{optionLabelForDomainItem(r, domainLabels, 'ruolo_cod', 'ruolo')}</option>)}
-              </select>
-            </div>
-            <div className="ggu-field">
-              <div className="ggu-label">Area *</div>
-              {form.ruolo === 7
-                ? <input className="ggu-input" disabled value="—" />
-                : <select className="ggu-select" value={form.area ?? ''}
-                    disabled={!form.ruolo || isAreaAuto}
-                    onChange={e => onAreaChange(e.target.value ? Number(e.target.value) : null)}>
-                    <option value="">— seleziona —</option>
-                    {areeDisp.map(a => <option key={a.value} value={a.value}>{optionLabelForDomainItem(a, domainLabels, 'area_cod', 'area')}</option>)}
-                  </select>
-              }
-            </div>
-            <div className="ggu-field">
-              <div className="ggu-label">Settore</div>
-              {isSettoreFisso
-                ? <input className="ggu-input" disabled value={dash(labelSettore(form.settore))} />
-                : <select className="ggu-select" value={form.settore ?? ''}
-                    disabled={!form.area || settoriDisp.length === 0}
-                    onChange={e => onSettoreChange(e.target.value ? Number(e.target.value) : null)}>
-                    <option value="">— seleziona —</option>
-                    {settoriDisp.map(s => <option key={s.value} value={s.value}>{optionLabelForDomainItem(s, domainLabels, 'settore_cod', 'settore')}</option>)}
-                  </select>
-              }
-            </div>
-            <div className="ggu-field">
-              <div className="ggu-label">Ufficio *</div>
-              {form.ruolo === 7
-                ? <input className="ggu-input" disabled value="—" />
-                : (isUfficioFisso
-                  ? <input className="ggu-input" disabled value={labelUfficio(form.ufficio) || 'Cagliari'} />
-                  : <select className="ggu-select" value={form.ufficio ?? ''}
-                      disabled={!form.settore || ufficiDisp.length === 0}
-                      onChange={e => onUfficioChange(e.target.value ? Number(e.target.value) : null)}>
+
+            <div className="ggu-user-section ggu-management-section">
+              <div className="ggu-user-section-title">Assegnazione gestionale</div>
+              {showUserBirthDate && <div className="ggu-user-birth-slot">
+                <div className="ggu-field ggu-birth-field">
+                  <div className="ggu-label">Data di nascita{userHomonyms.length > 0 ? ' *' : ''}</div>
+                  <input className={`ggu-input${userValidationAttempted && userHomonyms.length > 0 && !form.data_nascita ? ' ggu-required-missing' : ''}`} type="date" value={form.data_nascita} onChange={e => setForm(f => ({ ...f, data_nascita: e.target.value }))} />
+                </div>
+              </div>}
+              {userManagedMissingBirth.length > 0 && <div className="ggu-homonym-dates">
+                <div className="ggu-homonym-dates-title">Completare anche la data di nascita {userManagedMissingBirth.length > 1 ? 'dei nominativi già presenti' : 'del nominativo già presente'}.</div>
+                {userManagedMissingBirth.map((r, i) => <div className="ggu-field ggu-birth-field" key={r.objectid}><div className="ggu-label">{directoryDisplayName(r)}{userManagedMissingBirth.length > 1 ? ` (${i + 1})` : ''} *</div><input className={`ggu-input${userValidationAttempted && !pendingBirthDates[r.objectid] ? ' ggu-required-missing' : ''}`} type="date" value={pendingBirthDates[r.objectid] || ''} onChange={e => setPendingBirthDates(v => ({ ...v, [r.objectid]: e.target.value }))} /></div>)}
+              </div>}
+              <div className="ggu-field ggu-user-role">
+                <div className="ggu-label">Ruolo *</div>
+                <select className={`ggu-select${userValidationAttempted && !form.ruolo ? ' ggu-required-missing' : ''}`} value={form.ruolo ?? ''}
+                  onChange={e => onRuoloChange(e.target.value ? Number(e.target.value) : null)}>
+                  <option value="">— seleziona —</option>
+                  {RUOLI.map(r => <option key={r.value} value={r.value}>{optionLabelForDomainItem(r, domainLabels, 'ruolo_cod', 'ruolo')}</option>)}
+                </select>
+              </div>
+              <div className="ggu-field ggu-user-area">
+                <div className="ggu-label">Area{form.ruolo && form.ruolo !== 7 && !isAreaAuto ? ' *' : ''}</div>
+                {form.ruolo === 7
+                  ? <input className="ggu-input" disabled value="—" />
+                  : <select className={`ggu-select${userValidationAttempted && form.ruolo != null && form.ruolo !== 7 && !isAreaAuto && !form.area ? ' ggu-required-missing' : ''}`} value={form.area ?? ''}
+                      disabled={!form.ruolo || isAreaAuto}
+                      onChange={e => onAreaChange(e.target.value ? Number(e.target.value) : null)}>
                       <option value="">— seleziona —</option>
-                      {ufficiDisp.map(u => <option key={u.value} value={u.value}>{labelUfficio(u.value) || u.label}</option>)}
+                      {areeDisp.map(a => <option key={a.value} value={a.value}>{optionLabelForDomainItem(a, domainLabels, 'area_cod', 'area')}</option>)}
                     </select>
-                )
-              }
-            </div>
-            <div className="ggu-field">
-              <div className="ggu-label">Gruppo</div>
-              <input className="ggu-input" disabled value={form.gruppo} />
-            </div>
-            <div className="ggu-btns">
-              <button className="ggu-btn ggu-btn-save" onClick={onSave} disabled={saving}>
-                {saving ? 'Salvataggio...' : form.objectid ? 'Aggiorna' : 'Salva'}
-              </button>
-              <button className="ggu-btn ggu-btn-cancel" onClick={onCancel} disabled={saving}>Annulla</button>
+                }
+              </div>
+              <div className="ggu-field ggu-user-sector">
+                <div className="ggu-label">Settore{form.ruolo && form.area && getSettoriPerRuoloArea(form.ruolo, form.area).length > 0 && !isSettoreFisso ? ' *' : ''}</div>
+                {isSettoreFisso
+                  ? <input className="ggu-input" disabled value={dash(labelSettore(form.settore))} />
+                  : <select className={`ggu-select${userValidationAttempted && form.ruolo != null && form.area != null && settoriDisp.length > 0 && !isSettoreFisso && !form.settore ? ' ggu-required-missing' : ''}`} value={form.settore ?? ''}
+                      disabled={!form.area || settoriDisp.length === 0}
+                      onChange={e => onSettoreChange(e.target.value ? Number(e.target.value) : null)}>
+                      <option value="">— seleziona —</option>
+                      {settoriDisp.map(s => <option key={s.value} value={s.value}>{optionLabelForDomainItem(s, domainLabels, 'settore_cod', 'settore')}</option>)}
+                    </select>
+                }
+              </div>
+              <div className="ggu-field ggu-user-office">
+                <div className="ggu-label">Ufficio{form.ruolo && form.ruolo !== 7 && !isUfficioFisso ? ' *' : ''}</div>
+                {form.ruolo === 7
+                  ? <input className="ggu-input" disabled value="—" />
+                  : (isUfficioFisso
+                    ? <input className="ggu-input" disabled value={labelUfficio(form.ufficio) || 'Cagliari'} />
+                    : <select className={`ggu-select${userValidationAttempted && form.ruolo != null && form.ruolo !== 7 && !isUfficioFisso && !form.ufficio ? ' ggu-required-missing' : ''}`} value={form.ufficio ?? ''}
+                        disabled={!form.settore || ufficiDisp.length === 0}
+                        onChange={e => onUfficioChange(e.target.value ? Number(e.target.value) : null)}>
+                        <option value="">— seleziona —</option>
+                        {ufficiDisp.map(u => <option key={u.value} value={u.value}>{labelUfficio(u.value) || u.label}</option>)}
+                      </select>
+                  )
+                }
+              </div>
+              <div className="ggu-field ggu-user-group">
+                <div className="ggu-label">Gruppo</div>
+                <input className="ggu-input" disabled value={form.gruppo} />
+              </div>
+              <div className="ggu-btns">
+                <button className="ggu-btn ggu-btn-save" onClick={onSave}
+                  disabled={saving || agolSyncLoading || (form.objectid != null && !hasEffectiveEditChanges)}
+                  title={form.objectid != null && !hasEffectiveEditChanges ? 'Nessuna modifica da salvare' : undefined}>
+                  {saving ? 'Salvataggio...' : form.objectid ? 'Aggiorna' : assignmentSourceObjectId != null ? 'Salva nuova assegnazione' : 'Salva'}
+                </button>
+                <button className="ggu-btn ggu-btn-cancel" onClick={onCancel} disabled={saving || agolSyncLoading}>Annulla</button>
+              </div>
+              <div className="ggu-required-note">* campo obbligatorio</div>
             </div>
           </div>
         )}
@@ -1867,7 +3134,7 @@ function UtentiWidget(props: AllWidgetProps<IMConfig>) {
                 <thead>
                   <tr>
                     {SORTABLE_COLUMNS.map(col => (
-                      <th key={col.field} className="ggu-sortable" onClick={() => toggleSort(col.field)}
+                      <th key={col.field} className={`ggu-sortable${col.field === 'full_name' ? ' ggu-users-fullname-col' : ''}${col.field === 'ruolo' ? ' ggu-users-role-col' : ''}`} onClick={() => toggleSort(col.field)}
                         title="Clic: aggiungi/inverti/rimuovi ordinamento">
                         {col.label}{sortBadge(col.field)}
                       </th>
@@ -1877,7 +3144,7 @@ function UtentiWidget(props: AllWidgetProps<IMConfig>) {
                 </thead>
                 <tbody>
                   {utenti.length === 0 && (
-                    <tr><td colSpan={8} className="ggu-empty">Nessun utente presente</td></tr>
+                    <tr><td colSpan={9} className="ggu-empty">Nessun utente presente</td></tr>
                   )}
                   {sortedUtenti.map(u => (
                     <tr key={u.objectid}
@@ -1885,13 +3152,15 @@ function UtentiWidget(props: AllWidgetProps<IMConfig>) {
                       onClick={() => setSelectedObjectId(u.objectid)}
                       onDoubleClick={() => onEdit(u)}>
                       <td>{u.username}</td>
-                      <td>{u.full_name}</td>
-                      <td>{dash(labelRuolo(u.ruolo))}</td>
+                      <td className="ggu-users-fullname-col">{directoryDisplayLabel(({...u, uso_email:'', firmatario:0, tipo_record:'UTENTE'} as any), people)}</td>
+                      <td>{u.email || '—'}</td>
+                      <td className="ggu-users-role-col">{dash(labelRuolo(u.ruolo))}</td>
                       <td>{dash(labelArea(u.area))}</td>
                       <td>{dash(labelSettore(u.settore))}</td>
                       <td>{dash(labelUfficio(u.ufficio))}</td>
                       <td><span className="ggu-gruppo">{dash(u.gruppo)}</span></td>
                       <td className="ggu-actions-col">
+                        <RecordDuplicateButton onClick={(e) => { e.stopPropagation(); onDuplicateAssignment(u) }} title='Nuova assegnazione' ariaLabel='Nuova assegnazione' />
                         <RecordEditButton onClick={(e) => { e.stopPropagation(); onEdit(u) }} title='Modifica utente' ariaLabel='Modifica utente' />
                         <RecordDeleteButton onClick={(e) => { e.stopPropagation(); onDelete(u) }} title='Elimina utente' ariaLabel='Elimina utente' />
                       </td>

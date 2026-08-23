@@ -17,7 +17,7 @@ import { buildPlaceholderMap, type UtenteCached } from './documenti-tecnici/rapp
 import { applyNotaSpeseQueryResultToRapportoMap, queryNotaSpeseRowsForPractice, buildArt30RapportoSummary, type NotaSpeseConfig } from './documenti-tecnici/rapporto/rapporto-nota-spese-summary'
 import { buildRapportoPdf, loadRapportoIterCicliForPdf, type RapportoIterCicloPdf } from './documenti-tecnici/rapporto/rapporto-pdf-builder'
 import { buildNotaSpesePdf, type NotaSpeseData } from './documenti-tecnici/rapporto/notaspese-pdf-builder'
-import { isGiiSpecialAdministrativeAttachment } from './allegati/gii-attachment-viewer'
+import { getGiiAttachmentKind, isGiiSpecialAdministrativeAttachment } from './allegati/gii-attachment-viewer'
 import { RAPPORTO_TECHNICAL_BODY_BOX, drawRapportoTechnicalHeadersByPage, attachmentTechnicalDocumentTitle, wrapMapPdfBlobWithRapportoTechnicalHeader } from './documenti-tecnici/rapporto/technical-document-header'
 import { listGiiPrintableMapLayers, ensureGiiPrintableMapLayersReady, computePrintExtentForView, buildGiiMapLegendItemsForView, type GiiPrintableMapLayerItem } from './viewer-documenti/map-layers'
 
@@ -283,13 +283,21 @@ async function buildAllegatiSection (oid: number, selection: FascicoloDocumentSe
   let added = 0
   let imageIndex = 0
   const pageTitles: string[] = []
+  const technicalPageIndexes = new Set<number>()
   for (const att of selected) {
     const blob = await fetchAttachmentBlob(att, oid, resolvedUrl)
     const bytes = new Uint8Array(await blob.arrayBuffer())
+    const attachmentKind = getGiiAttachmentKind(att as any)
+    const isTechnicalAttachment = attachmentKind === 'technical'
     if (att.contentType.toLowerCase().includes('pdf') || att.name.toLowerCase().endsWith('.pdf')) {
       const src = await PDFDocument.load(bytes)
       const pages = await out.copyPages(src, src.getPageIndices())
-      pages.forEach(pg => { out.addPage(pg); added++; pageTitles.push('') })
+      pages.forEach(pg => {
+        out.addPage(pg)
+        if (isTechnicalAttachment) technicalPageIndexes.add(added)
+        added++
+        pageTitles.push('')
+      })
     } else if (isImageAttachment(att)) {
       imageIndex++
       const isPng = att.contentType.toLowerCase().includes('png') || att.name.toLowerCase().endsWith('.png')
@@ -303,12 +311,20 @@ async function buildAllegatiSection (oid: number, selection: FascicoloDocumentSe
       const w = img.width * scale
       const h = img.height * scale
       page.drawImage(img, { x: box.x + (box.width - w) / 2, y: box.y + (box.height - h) / 2, width: w, height: h })
-      pageTitles.push(attachmentTechnicalDocumentTitle(imageIndex, numeroRapportoTecnico))
+      if (isTechnicalAttachment) technicalPageIndexes.add(added)
+      pageTitles.push(isTechnicalAttachment ? attachmentTechnicalDocumentTitle(imageIndex, numeroRapportoTecnico) : '')
       added++
     }
   }
   if (!added) return null
-  await drawRapportoTechnicalHeadersByPage(out, index => pageTitles[index] || attachmentTechnicalDocumentTitle(index + 1, numeroRapportoTecnico))
+  if (technicalPageIndexes.size) {
+    await drawRapportoTechnicalHeadersByPage(
+      out,
+      index => pageTitles[index] || attachmentTechnicalDocumentTitle(index + 1, numeroRapportoTecnico),
+      undefined,
+      index => technicalPageIndexes.has(index)
+    )
+  }
   const bytes = await out.save()
   return { blob: new Blob([bytes as any], { type: 'application/pdf' }), fileName: `allegati_${numeroRapportoTecnico}.pdf`.replace(/[^a-zA-Z0-9_.-]/g, '_') }
 }
