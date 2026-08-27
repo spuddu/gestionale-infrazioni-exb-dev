@@ -59,8 +59,8 @@ export interface Config {
   alertsPracticeLayerUrlTec: string
   // URL editabili distinte da quelle di lettura sopra (che sono viste "_ALL", sola
   // lettura, condivise con tutti i sotto-ruoli). Usate solo per la normalizzazione
-  // testi via applyEdits, e solo per i ruoli "di area" (RI/DT/RI_AMM/DA). Per i
-  // ruoli "di distretto" (TI/RZ) la vista corretta è derivata dal settore
+  // testi via applyEdits, e solo per i ruoli "di area" (RIT/DT/RIA/DA). Per i
+  // ruoli "di distretto" (IT/CS) la vista corretta è derivata dal settore
   // direttamente in widget.tsx (selectAlertPracticeLayerUrlWrite), non da qui.
   // Se il ruolo corrente non ha comunque accesso in scrittura, il tentativo
   // fallisce silenziosamente senza impattare la lettura degli allarmi.

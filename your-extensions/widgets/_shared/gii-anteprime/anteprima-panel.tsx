@@ -63,16 +63,16 @@ function firstMeaningfulValue (...vals: any[]): any {
   return undefined
 }
 
-function normalizeRoleCode (v: any): 'TR' | 'TI' | 'RZ' | 'RI' | 'DT' | 'DA' | 'ADMIN' | '' {
-  const s = String(v ?? '').trim().toUpperCase()
+function normalizeRoleCode (v: any): 'TR' | 'IT' | 'CS' | 'RIT' | 'DT' | 'DA' | 'ADMIN' | '' {
+  const s = String(v ?? '').trim().toUpperCase().replace(/[\s-]+/g, '_')
   if (!s) return ''
-  if (s === '1' || s === 'TR' || s.includes('TECNICO RILEVATORE')) return 'TR'
-  if (s === '2' || s === 'TI' || s.includes('TECNICO ISTRUTTORE')) return 'TI'
-  if (s === '3' || s === 'RZ' || s.includes('RESPONSABILE DI ZONA')) return 'RZ'
-  if (s === '4' || s === 'RI' || s.includes('RESPONSABILE ISTRUTTORIA')) return 'RI'
-  if (s === '5' || s === 'DT' || s.includes('DIRETTORE TECNICO')) return 'DT'
-  if (s === '6' || s === 'DA' || s.includes('DIRETTORE AMMINISTRATIVO')) return 'DA'
-  if (s === '7' || s === 'ADMIN' || s.includes('AMMINISTRATORE')) return 'ADMIN'
+  if (s === 'TR' || s === 'TECNICO_RILEVATORE') return 'TR'
+  if (s === 'IT' || s === 'ISTRUTTORE_TECNICO') return 'IT'
+  if (s === 'CS' || s === 'CAPO_SETTORE') return 'CS'
+  if (s === 'RIT' || s === 'RESPONSABILE_ISTRUTTORIA_TECNICA') return 'RIT'
+  if (s === 'DT' || s === 'DIRETTORE_TECNICO') return 'DT'
+  if (s === 'DA' || s === 'DIRETTORE_AMMINISTRATIVO') return 'DA'
+  if (s === 'ADMIN' || s === 'AMMINISTRATORE') return 'ADMIN'
   return ''
 }
 
@@ -88,7 +88,6 @@ function normalizeAreaCode (v: any): 'AGR' | 'TEC' | 'AMM' | '' {
 function normalizeSettoreCode (area: string, v: any): string {
   const s = String(v ?? '').trim().toUpperCase()
   if (!s) return ''
-  if (s === 'CS') return 'DS'
   if (s === '1') return 'CR'
   if (s === '2') return 'GI'
   if (s === '3') return 'D1'
@@ -130,7 +129,7 @@ async function ensureUtentiCache (): Promise<Map<string, UtenteCached> | null> {
     const FeatureLayer = await loadEsriModule<any>('esri/layers/FeatureLayer')
     const fl = new FeatureLayer({ url: GII_UTENTI_URL })
     if (typeof fl.load === 'function') await fl.load()
-    const res = await fl.queryFeatures({ where: '1=1', outFields: ['username', 'full_name', 'ruolo', 'area', 'settore', 'ruolo_cod', 'area_cod', 'settore_cod'], returnGeometry: false })
+    const res = await fl.queryFeatures({ where: '1=1', outFields: ['username', 'full_name', 'area', 'settore', 'ruolo_cod', 'area_cod', 'settore_cod'], returnGeometry: false })
     const map = new Map<string, UtenteCached>()
     for (const f of (res.features || [])) {
       const a = f.attributes || {}
@@ -139,10 +138,9 @@ async function ensureUtentiCache (): Promise<Map<string, UtenteCached> | null> {
       const areaCod = normalizeAreaCode(firstMeaningfulValue(a.area_cod, a.area))
       map.set(uname, {
         full_name: a.full_name || uname,
-        ruolo: a.ruolo != null ? Number(a.ruolo) : null,
         area: a.area != null ? Number(a.area) : null,
         settore: a.settore != null ? Number(a.settore) : null,
-        ruolo_cod: normalizeRoleCode(firstMeaningfulValue(a.ruolo_cod, a.ruolo)),
+        ruolo_cod: normalizeRoleCode(a.ruolo_cod),
         area_cod: areaCod,
         settore_cod: normalizeSettoreCode(areaCod, firstMeaningfulValue(a.settore_cod, a.settore))
       })
@@ -213,7 +211,7 @@ function cleanViewerCodeTextForEditing (value: any): string {
 
 function isViewerRilevazioneCodeForEditing (value: any): boolean {
   const s = cleanViewerCodeTextForEditing(value).toUpperCase().replace(/_/g, '-').replace(/\s+/g, '-')
-  return /^(TR|TI)-\d+(?:-[A-Z0-9]+)?$/.test(s) || /^\d+-(TR|TI)(?:-[A-Z0-9]+)?$/.test(s)
+  return /^(TR|IT)-\d+(?:-[A-Z0-9]+)?$/.test(s) || /^\d+-(TR|IT)(?:-[A-Z0-9]+)?$/.test(s)
 }
 
 function viewerRilevazioneNumberForEditing (data: any, oid?: number | null): string {
@@ -226,7 +224,7 @@ function viewerRilevazioneNumberForEditing (data: any, oid?: number | null): str
   const oidPart = oid != null && Number.isFinite(Number(oid)) ? String(Number(oid)) : ''
   if (!oidPart) return '-'
   const op = pickAttrCI(d, ['origine_pratica', 'Origine_pratica', 'ORIGINE_PRATICA'])
-  const prefix = (op === 2 || op === '2' || String(op || '').toUpperCase() === 'TI') ? 'TI' : 'TR'
+  const prefix = (op === 2 || op === '2' || String(op || '').toUpperCase() === 'IT') ? 'IT' : 'TR'
   const area = normalizeAreaCode(firstMeaningfulValue(d.area_cod, d.area))
   const settore = normalizeSettoreCode(area, firstMeaningfulValue(d.settore_cod, d.settore))
   return `${oidPart}-${prefix}${settore ? `-${settore}` : ''}`
@@ -629,7 +627,7 @@ async function loadAttachmentOptions (ds: any, oid: number, canSeeAmministrativi
     // di procedimento: il viewer li carica come PDF reali, separatamente dagli allegati generici.
     .filter((att: AttachmentPrintOption) => !isGiiSpecialAdministrativeAttachment(att as any))
   // I ruoli tecnici non devono mai vedere allegati di tipo amministrativo caricati
-  // manualmente da TI_AMM/RI_AMM/DA. Chi può vedere la parte amministrativa
+  // manualmente da IA/RIA/DA. Chi può vedere la parte amministrativa
   // (canSeeAmministrativi) vede invece tutti gli allegati generici.
   const filtered = canSeeAmministrativi ? options : (filterGiiAttachmentsForTechnicalRoles(options as any) as AttachmentPrintOption[])
   return {
@@ -770,10 +768,10 @@ export default function GiiAnteprimaPanel (p: {
   // vedono anche le opzioni/documenti amministrativi (proposta di contestazione +
   // determinazione). La bozza di determinazione è sempre il PDF realmente allegato alla pratica.
   canSeeAmministrativi?: boolean
-  // Ruolo corrente (es. 'TI_AMM', 'RI_AMM', 'DA'). Usato solo per determinare la reale
-  // disponibilità di proposta di contestazione e determinazione: TI_AMM, essendo l'autore,
+  // Ruolo corrente (es. 'IA', 'RIA', 'DA'). Usato solo per determinare la reale
+  // disponibilità di proposta di contestazione e determinazione: IA, essendo l'autore,
   // deve poter controllare cosa sta per trasmettere anche prima della trasmissione stessa;
-  // gli altri ruoli le vedono solo dopo che TI_AMM le ha effettivamente trasmesse.
+  // gli altri ruoli le vedono solo dopo che IA le ha effettivamente trasmesse.
   role?: string
   // Chiave opzionale per forzare la rilettura degli allegati senza cambiare pratica.
   refreshKey?: string | number
@@ -853,7 +851,7 @@ export default function GiiAnteprimaPanel (p: {
 
   // Modalità "query": quando il chiamante non ha righe nota spese in memoria
   // (gii-editing-amm), il pannello le interroga da sé sulla tabella persistita.
-  // Quando invece p.nsRows è fornito (gii-editing-ti), questa query non parte mai:
+  // Quando invece p.nsRows è fornito (gii-editing-tec), questa query non parte mai:
   // restano prioritarie le righe in memoria (bozza corrente).
   const usingDraftNotaSpese = p.nsRows !== undefined
   const [queriedNsRows, setQueriedNsRows] = React.useState<Record<NsCat, NsRowP[]> | null>(null)
@@ -881,7 +879,7 @@ export default function GiiAnteprimaPanel (p: {
 
   // Catalogo attrezzature Art.30 (codice -> nome leggibile): caricato indipendentemente da
   // usingDraftNotaSpese, perché serve per etichettare le note recuperabili sia quando le righe
-  // arrivano già in memoria (es. da gii-editing-ti) sia quando vengono interrogate qui.
+  // arrivano già in memoria (es. da gii-editing-tec) sia quando vengono interrogate qui.
   const [attrezzatureCatalog, setAttrezzatureCatalog] = React.useState<Map<string, string>>(new Map())
   React.useEffect(() => {
     const attrezzatureParametriUrl = String(p.notaSpeseConfig?.attrezzatureParametriUrl || '').trim()
@@ -1065,7 +1063,7 @@ export default function GiiAnteprimaPanel (p: {
     if (!hasNotaSpeseLocal) setDocOptions(prev => ({ ...prev, includeNotaSpese: false }))
     if (!targetAvailable) setDocOptions(prev => ({ ...prev, includeMappa: false }))
     if (!p.ds || !p.oid) {
-      setDocOptions(prev => ({ ...prev, includeAllegatiTecnici: false, includeAllegatiAmministrativi: false }))
+      setDocOptions(prev => ({ ...prev, includeAllegatiTecnici: false, includeAllegaiainistrativi: false }))
       return
     }
     let cancelled = false
@@ -1088,7 +1086,7 @@ export default function GiiAnteprimaPanel (p: {
           ...prev,
           selectedAttachmentIds,
           includeAllegatiTecnici: hasTecnici ? prev.includeAllegatiTecnici : false,
-          includeAllegatiAmministrativi: hasAmministrativi ? prev.includeAllegatiAmministrativi : false
+          includeAllegaiainistrativi: hasAmministrativi ? prev.includeAllegaiainistrativi : false
         }
       })
       const allegati = allegatiList.length > 0
@@ -1099,7 +1097,7 @@ export default function GiiAnteprimaPanel (p: {
       setPropostaContestazioneAttachment(null)
       setBozzaDeterminazioneAttachment(null)
       setAvailability(prev => prev.checkedKey === checkedKey ? { ...prev, loadingAllegati: false, allegati: false } : prev)
-      setDocOptions(prev => ({ ...prev, includeAllegatiTecnici: false, includeAllegatiAmministrativi: false }))
+      setDocOptions(prev => ({ ...prev, includeAllegatiTecnici: false, includeAllegaiainistrativi: false }))
     })
     return () => { cancelled = true }
   }, [p.ds, p.oid, hasNotaSpeseLocal, mapTargetSignature, printMapView, p.canSeeAmministrativi, p.layerUrlHint, p.refreshKey, externalDocumentRefreshRevision])
@@ -1152,10 +1150,10 @@ export default function GiiAnteprimaPanel (p: {
 
     const includeMappa = !!(opts.includeMappa && mapTarget && printMapView)
 
-    const anyAllegatiGroupOn = !!opts.includeAllegatiTecnici || !!opts.includeAllegatiAmministrativi
+    const anyAllegatiGroupOn = !!opts.includeAllegatiTecnici || !!opts.includeAllegaiainistrativi
     const selectedAttachmentIds = attachmentOptions
       .filter(att => {
-        const groupOn = getGiiAttachmentKind(att as any) === 'technical' ? !!opts.includeAllegatiTecnici : !!opts.includeAllegatiAmministrativi
+        const groupOn = getGiiAttachmentKind(att as any) === 'technical' ? !!opts.includeAllegatiTecnici : !!opts.includeAllegaiainistrativi
         if (!groupOn) return false
         return (opts.selectedAttachmentIds || {})[String(att.id)] !== false
       })
@@ -1231,7 +1229,7 @@ export default function GiiAnteprimaPanel (p: {
     try {
       const includeNotaSpese = !!previewOptions.includeNotaSpese
       const includeMappa = !!previewOptions.includeMappa
-      const includeAllegati = !!previewOptions.includeAllegatiTecnici || !!previewOptions.includeAllegatiAmministrativi
+      const includeAllegati = !!previewOptions.includeAllegatiTecnici || !!previewOptions.includeAllegaiainistrativi
       return JSON.stringify({
         options: previewOptions,
         dataSignature,
@@ -1310,23 +1308,23 @@ export default function GiiAnteprimaPanel (p: {
   }, [docOptions])
 
   // Disponibilità reale (non solo il ruolo) dei due documenti amministrativi:
-  // - proposta di contestazione: solo se esiste davvero il PDF allegato e TI_AMM ha
-  //   effettivamente attestato conformità (esito_TI_AMM = 2);
+  // - proposta di contestazione: solo se esiste davvero il PDF allegato e IA ha
+  //   effettivamente attestato conformità (esito_IA = 2);
   // - determinazione dirigenziale: solo se esiste davvero un allegato di tipo "bozza
-  //   determinazione" in formato PDF caricato da TI_AMM, rilevato dalla stessa lista allegati già
+  //   determinazione" in formato PDF caricato da IA, rilevato dalla stessa lista allegati già
   //   interrogata dal pannello per il proprio uso — nessuna query aggiuntiva.
-  // In aggiunta, per tutti i ruoli tranne TI_AMM (che deve poter controllare cosa sta per
+  // In aggiunta, per tutti i ruoli tranne IA (che deve poter controllare cosa sta per
   // trasmettere), entrambi i documenti sono disponibili solo dopo la trasmissione effettiva
-  // a RI_AMM (determinazione_stato diverso da BOZZA/vuoto) — altrimenti risulterebbero
-  // visibili a RI_AMM/DA prima ancora che TI_AMM li abbia inviati, e sarebbero già di nuovo
+  // a RIA (determinazione_stato diverso da BOZZA/vuoto) — altrimenti risulterebbero
+  // visibili a RIA/DA prima ancora che IA li abbia inviati, e sarebbero già di nuovo
   // visibili come "disponibili" anche dopo un rimando che li ha resi superati (che riporta
   // determinazione_stato a BOZZA).
-  const isTiAmmRole = String(p.role || '').trim().toUpperCase() === 'TI_AMM'
+  const isIaRole = String(p.role || '').trim().toUpperCase() === 'IA'
   const determinazioneStatoRaw = String(pickAttrCI(p.data, ['determinazione_stato']) || '').trim().toUpperCase()
-  const bozzaTrasmessaARiAmm = !!determinazioneStatoRaw && determinazioneStatoRaw !== 'BOZZA'
-  const propostaContestazioneAvailableComputed = !!propostaContestazioneAttachment && Number(pickAttrCI(p.data, ['esito_TI_AMM'])) === 2 && (isTiAmmRole || bozzaTrasmessaARiAmm)
-  const determinazioneAvailableComputed = !!bozzaDeterminazioneAttachment && (isTiAmmRole || bozzaTrasmessaARiAmm)
-  const attoContestazioneAvailableComputed = !!attoContestazioneAttachment && (isTiAmmRole || ['TRASMESSA_RI_AMM', 'VALIDATA_RI_AMM', 'EMAIL_DIRETTORE_PREPARATA'].includes(determinazioneStatoRaw))
+  const bozzaTrasmessaARia = !!determinazioneStatoRaw && determinazioneStatoRaw !== 'BOZZA'
+  const propostaContestazioneAvailableComputed = !!propostaContestazioneAttachment && Number(pickAttrCI(p.data, ['esito_IA'])) === 2 && (isIaRole || bozzaTrasmessaARia)
+  const determinazioneAvailableComputed = !!bozzaDeterminazioneAttachment && (isIaRole || bozzaTrasmessaARia)
+  const attoContestazioneAvailableComputed = !!attoContestazioneAttachment && (isIaRole || ['TRASMESSA_RIA', 'VALIDATA_RIA', 'EMAIL_DIRETTORE_PREPARATA'].includes(determinazioneStatoRaw))
 
   return (
     <div css={containerCss}>
@@ -1352,7 +1350,7 @@ export default function GiiAnteprimaPanel (p: {
         busy={loading}
         canUseMap={!!mapTarget}
         mapPanelAvailable={!!printMapView}
-        documentUnavailableExtra={{ includeAllegatiTecnici: !!availability.loadingAllegati, includeAllegatiAmministrativi: !!availability.loadingAllegati }}
+        documentUnavailableExtra={{ includeAllegatiTecnici: !!availability.loadingAllegati, includeAllegaiainistrativi: !!availability.loadingAllegati }}
         showAdminDocuments={!!p.canSeeAmministrativi}
         notaSpeseOptions={notaSpeseOptions}
         attachmentOptions={attachmentOptions}

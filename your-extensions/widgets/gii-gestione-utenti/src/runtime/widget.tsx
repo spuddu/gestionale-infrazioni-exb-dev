@@ -190,33 +190,33 @@ function loadEsriModule<T = any>(path: string): Promise<T> {
 // ── Mappa gruppo → Group ID AGOL ──────────────────────────────────────────
 const GROUP_MAP: Record<string, string> = {
   'GII_AGR_D1_TR': '5f7a1c6083024ed6912642dea33df836',
-  'GII_AGR_D1_TI': 'd2538065685a4e278418d9d4ee63b4f5',
-  'GII_AGR_D1_RZ': '77e930cf78684ec28554cb47e09de22c',
+  'GII_AGR_D1_IT': 'd2538065685a4e278418d9d4ee63b4f5',
+  'GII_AGR_D1_CS': '77e930cf78684ec28554cb47e09de22c',
   'GII_AGR_D2_TR': 'be5397892089463f9de53c39bfe867d5',
-  'GII_AGR_D2_TI': 'b69f51f2b4dc48e5bcd945a0e006a521',
-  'GII_AGR_D2_RZ': '80a5260795cf43cca065815fe6e868ab',
+  'GII_AGR_D2_IT': 'b69f51f2b4dc48e5bcd945a0e006a521',
+  'GII_AGR_D2_CS': '80a5260795cf43cca065815fe6e868ab',
   'GII_AGR_D3_TR': 'e8b70407a2cd4f79936d95e4ee2d66d8',
-  'GII_AGR_D3_TI': 'd9df51a9ad09458cb7d6677101f8a64c',
-  'GII_AGR_D3_RZ': '6bc744628d2742e082d319d302cae2ef',
+  'GII_AGR_D3_IT': 'd9df51a9ad09458cb7d6677101f8a64c',
+  'GII_AGR_D3_CS': '6bc744628d2742e082d319d302cae2ef',
   'GII_AGR_D4_TR': '98a0edc68f1e4eb3ac06991862407082',
-  'GII_AGR_D4_TI': '56a0e66617cc4bbb9415e520f503ad32',
-  'GII_AGR_D4_RZ': '40c17e737f5d40cbbdfe0fe28f702446',
+  'GII_AGR_D4_IT': '56a0e66617cc4bbb9415e520f503ad32',
+  'GII_AGR_D4_CS': '40c17e737f5d40cbbdfe0fe28f702446',
   'GII_AGR_D5_TR': 'd0b21d5c77d54f71a951162c102337bf',
-  'GII_AGR_D5_TI': '8c201a0905ff4cb7999f375d21962acb',
-  'GII_AGR_D5_RZ': '29c74c75fe724258809b2bcaf27d7e21',
+  'GII_AGR_D5_IT': '8c201a0905ff4cb7999f375d21962acb',
+  'GII_AGR_D5_CS': '29c74c75fe724258809b2bcaf27d7e21',
   'GII_AGR_D6_TR': 'd4f997fcc65140b585f9784f36b82efb',
-  'GII_AGR_D6_TI': 'f82bc26c62cf49328fc101f83121d1a7',
-  'GII_AGR_D6_RZ': '62e5ca9cb9e04de7b446cf97d287b815',
+  'GII_AGR_D6_IT': 'f82bc26c62cf49328fc101f83121d1a7',
+  'GII_AGR_D6_CS': '62e5ca9cb9e04de7b446cf97d287b815',
   'GII_AGR_DIR': 'efd1d706a54249c785fc2d85fa8a672b',
-  'GII_AGR_RI': '4eb266a8da414fe6a47bc16f66c58e6a',
+  'GII_AGR_RIT': '4eb266a8da414fe6a47bc16f66c58e6a',
   'GII_AMM_DIR': '317c399ad1984c4392a6341d129fda89',
-  'GII_AMM_RI': '73ab7007181c447a89ba5a91f417acb0',
-  'GII_AMM_TI': '51d72060aa0540ab9b707fadb2dcca50',
+  'GII_AMM_RIA': '73ab7007181c447a89ba5a91f417acb0',
+  'GII_AMM_IA': '51d72060aa0540ab9b707fadb2dcca50',
   'GII_TEC_DIR': '720b7ca166d5465e884ea3ad684029b8',
-  'GII_TEC_DS_RZ': '7ff515bb66894ee79ce70a9b8f248b94',
-  'GII_TEC_DS_TI': 'f204e16c17ff47a3984bedd5b6d4a6d9',
+  'GII_TEC_DS_CS': '7ff515bb66894ee79ce70a9b8f248b94',
+  'GII_TEC_DS_IT': 'f204e16c17ff47a3984bedd5b6d4a6d9',
   'GII_TEC_DS_TR': 'ca0fd1f481014871bee270a89bf53bcb',
-  'GII_TEC_RI': 'e0cde3526baf4215811c211c7fda43fb',
+  'GII_TEC_RIT': 'e0cde3526baf4215811c211c7fda43fb',
 }
 
 const AGOL_PORTAL = 'https://cbsm-hub.maps.arcgis.com'
@@ -538,16 +538,31 @@ async function removeUserFromGroup(username: string, gruppo: string, token: stri
   }
 }
 
-// ── Domini legacy numerici + codici testuali ───────────────────────────────
+// ── Ruoli applicativi: il codice testuale è l'unica chiave del ruolo ─────────
 const RUOLI = [
-  { label: 'TR',    code: 'TR',    value: 1, desc: 'Tecnico rilevatore' },
-  { label: 'TI',    code: 'TI',    value: 2, desc: 'Tecnico istruttore' },
-  { label: 'RZ',    code: 'RZ',    value: 3, desc: 'Responsabile di zona' },
-  { label: 'RI',    code: 'RI',    value: 4, desc: 'Responsabile istruttoria' },
-  { label: 'DT',    code: 'DT',    value: 5, desc: 'Direttore tecnico' },
-  { label: 'DA',    code: 'DA',    value: 6, desc: 'Direttore amministrativo' },
-  { label: 'ADMIN', code: 'ADMIN', value: 7, desc: 'Amministratore' },
-]
+  { code: 'TR',    desc: 'Tecnico rilevatore' },
+  { code: 'IT',    desc: 'Istruttore tecnico' },
+  { code: 'IA',    desc: 'Istruttore amministrativo' },
+  { code: 'CS',    desc: 'Capo Settore' },
+  { code: 'RIT',   desc: 'Responsabile istruttoria tecnica' },
+  { code: 'RIA',   desc: 'Responsabile istruttoria amministrativa' },
+  { code: 'DT',    desc: 'Direttore tecnico' },
+  { code: 'DA',    desc: 'Direttore amministrativo' },
+  { code: 'ADMIN', desc: 'Amministratore' },
+] as const
+
+type RuoloCod = typeof RUOLI[number]['code']
+
+function normalizeRuoloCod(value: any): RuoloCod | null {
+  const code = String(value ?? '').trim().toUpperCase()
+  if (!code) return null
+  return RUOLI.some(item => item.code === code) ? code as RuoloCod : null
+}
+
+function ruoloItem(code: any): (typeof RUOLI)[number] | undefined {
+  const normalized = normalizeRuoloCod(code)
+  return normalized ? RUOLI.find(item => item.code === normalized) : undefined
+}
 
 const AREE = [
   { label: 'AMM', code: 'AMM', value: 1, desc: 'Amministrativa' },
@@ -588,30 +603,33 @@ const UFFICI: Ufficio[] = [
 ]
 
 // ── Regole cascata ─────────────────────────────────────────────────────────
-function getAreePerRuolo(ruolo: number): number[] {
-  switch (ruolo) {
-    case 1: return [2, 3]        // TR
-    case 2: return [1, 2, 3]     // TI
-    case 3: return [2, 3]        // RZ
-    case 4: return [1, 2, 3]     // RI
-    case 5: return [2, 3]        // DT
-    case 6: return [1]           // DA
-    case 7: return []            // ADMIN (trasversale) → nessuna area
+function getAreePerRuolo(ruoloCod: string | null | undefined): number[] {
+  switch (normalizeRuoloCod(ruoloCod)) {
+    case 'TR': return [2, 3]
+    case 'IT': return [2, 3]
+    case 'IA': return [1]
+    case 'CS': return [2, 3]
+    case 'RIT': return [2, 3]
+    case 'RIA': return [1]
+    case 'DT': return [2, 3]
+    case 'DA': return [1]
+    case 'ADMIN': return []
     default: return []
   }
 }
 
-function getSettoriPerRuoloArea(ruolo: number, area: number): number[] {
-  if (ruolo === 5 || ruolo === 6 || ruolo === 7) return []          // DT, DA, ADMIN → nessun settore
-  if (ruolo === 4) {                                  // RI → settore fisso per area
-    if (area === 1) return [1]                        // AMM → CR
-    if (area === 2) return [2]                        // AGR → GI
-    if (area === 3) return [9]                        // TEC → DS
+function getSettoriPerRuoloArea(ruoloCod: string | null | undefined, area: number): number[] {
+  const ruolo = normalizeRuoloCod(ruoloCod)
+  if (ruolo === 'DT' || ruolo === 'DA' || ruolo === 'ADMIN') return []
+  if (ruolo === 'RIT') {                             // RIT → settore fisso per area tecnica
+    if (area === 2) return [2]                         // AGR → GI
+    if (area === 3) return [9]                         // TEC → DS
     return []
   }
-  if (ruolo === 2 && area === 1) return [1]           // TI + AMM → CR
-  if (area === 2) return [3, 4, 5, 6, 7, 8]          // AGR → D1-D6
-  if (area === 3) return [9]                          // TEC → DS
+  if (ruolo === 'RIA') return area === 1 ? [1] : []    // RIA → CR
+  if (ruolo === 'IA' && area === 1) return [1]         // IA → CR
+  if (area === 2) return [3, 4, 5, 6, 7, 8]           // AGR → D1-D6
+  if (area === 3) return [9]                           // TEC → DS
   return []
 }
 
@@ -619,25 +637,25 @@ function getUfficiPerAreaSettore(area: number, settore: number): Ufficio[] {
   return UFFICI.filter(u => u.aree.includes(area) && u.settori.includes(settore))
 }
 
-function calcolaGruppo(ruolo: number, area: number, settore: number): string {
-  const r = RUOLI.find(x => x.value === ruolo)?.label ?? ''
+function calcolaGruppo(ruoloCod: string | null | undefined, area: number, settore: number): string {
+  const r = normalizeRuoloCod(ruoloCod) || ''
   if (r === 'ADMIN') return ''
   const a = AREE.find(x => x.value === area)?.label ?? ''
   const s = SETTORI.find(x => x.value === settore)?.label ?? ''
   if (a === 'AGR') {
-    if (['TR','TI','RZ'].includes(r)) return `GII_AGR_${s}_${r}`
-    if (r === 'RI') return 'GII_AGR_RI'
+    if (['TR','IT','CS'].includes(r)) return `GII_AGR_${s}_${r}`
+    if (r === 'RIT') return 'GII_AGR_RIT'
     if (r === 'DT') return 'GII_AGR_DIR'
   }
   if (a === 'TEC') {
-    if (['TR','TI','RZ'].includes(r)) return `GII_TEC_${s}_${r}`
-    if (r === 'RI') return 'GII_TEC_RI'
+    if (['TR','IT','CS'].includes(r)) return `GII_TEC_${s}_${r}`
+    if (r === 'RIT') return 'GII_TEC_RIT'
     if (r === 'DT') return 'GII_TEC_DIR'
   }
   if (a === 'AMM') {
     if (r === 'DA') return 'GII_AMM_DIR'
-    if (r === 'TI') return 'GII_AMM_TI'
-    if (r === 'RI') return 'GII_AMM_RI'
+    if (r === 'IA') return 'GII_AMM_IA'
+    if (r === 'RIA') return 'GII_AMM_RIA'
   }
   return ''
 }
@@ -648,16 +666,14 @@ function codeOf(list: Array<{ value: number; code: string }>, value: number | nu
 }
 
 function normalizeSettoreCod(value: any): string | null {
-  const c = String(value ?? '').trim().toUpperCase()
-  if (!c) return null
-  return c === 'CS' ? 'DS' : c
+  const code = String(value ?? '').trim().toUpperCase()
+  return code || null
 }
 
 function valueOf(list: Array<{ value: number; code: string }>, code: any): number | null {
-  const c0 = String(code ?? '').trim().toUpperCase()
-  if (!c0) return null
-  const c = list === SETTORI ? (normalizeSettoreCod(c0) ?? c0) : c0
-  return list.find(x => x.code === c)?.value ?? null
+  const normalized = String(code ?? '').trim().toUpperCase()
+  if (!normalized) return null
+  return list.find(x => x.code === normalized)?.value ?? null
 }
 
 function textOrNull(value: string | null | undefined): string | null {
@@ -779,6 +795,17 @@ function optionLabelForDomainItem(
   return label === item.label ? item.label : `${item.label} – ${label}`
 }
 
+function labelForRuoloCod(code: any, domainMap?: DomainLabelMap | null): string {
+  const normalized = normalizeRuoloCod(code)
+  if (!normalized) return ''
+  const item = ruoloItem(normalized)
+  return getDomainLabel(domainMap, 'ruolo_cod', normalized) || item?.desc || normalized
+}
+
+function optionLabelForRuolo(item: (typeof RUOLI)[number], domainMap?: DomainLabelMap | null): string {
+  return getDomainLabel(domainMap, 'ruolo_cod', item.code) || item.desc || item.code
+}
+
 function dash(value: string): string {
   return String(value || '').trim() || '—'
 }
@@ -894,7 +921,6 @@ interface UtenteForm {
   email: string
   data_nascita: string
   full_name: string
-  ruolo: number | null
   area: number | null
   settore: number | null
   ufficio: number | null
@@ -914,7 +940,6 @@ interface UtenteRecord {
   email: string
   data_nascita: string
   full_name: string
-  ruolo: number | null
   area: number | null
   settore: number | null
   ufficio: number | null
@@ -925,7 +950,7 @@ interface UtenteRecord {
   gruppo_precedente: string
 }
 
-type SortField = 'username' | 'full_name' | 'email' | 'ruolo' | 'area' | 'settore' | 'ufficio' | 'gruppo'
+type SortField = 'username' | 'full_name' | 'email' | 'ruolo_cod' | 'area' | 'settore' | 'ufficio' | 'gruppo'
 type SortDirection = 'asc' | 'desc'
 interface SortRule { field: SortField; dir: SortDirection }
 type AgolSortField = 'fullName' | 'username' | 'email'
@@ -935,7 +960,7 @@ const SORTABLE_COLUMNS: Array<{ field: SortField; label: string }> = [
   { field: 'username', label: 'Username' },
   { field: 'full_name', label: 'Nome completo' },
   { field: 'email', label: 'E-mail' },
-  { field: 'ruolo', label: 'Ruolo' },
+  { field: 'ruolo_cod', label: 'Ruolo' },
   { field: 'area', label: 'Area' },
   { field: 'settore', label: 'Settore' },
   { field: 'ufficio', label: 'Ufficio' },
@@ -944,7 +969,7 @@ const SORTABLE_COLUMNS: Array<{ field: SortField; label: string }> = [
 
 const emptyForm = (): UtenteForm => ({
   existingObjectId: null, username: '', nome: '', cognome: '', titolo: '', email: '', data_nascita: '', full_name: '',
-  ruolo: null, area: null, settore: null, ufficio: null,
+  area: null, settore: null, ufficio: null,
   ruolo_cod: null, area_cod: null, settore_cod: null,
   gruppo: '', gruppo_precedente: '',
 })
@@ -952,6 +977,15 @@ const emptyForm = (): UtenteForm => ({
 // ── FeatureLayer ───────────────────────────────────────────────────────────
 let _fl: any = null
 let _flUrl = ''
+
+function disposeFL(): void {
+  const fl = _fl
+  _fl = null
+  _flUrl = ''
+  try {
+    if (fl && typeof fl.destroy === 'function') fl.destroy()
+  } catch {}
+}
 
 async function getFL(serviceUrl: string): Promise<any> {
   const cleanUrl = String(serviceUrl || DEFAULT_SERVICE_URL).trim().replace(/\/$/, '')
@@ -965,7 +999,7 @@ async function getFL(serviceUrl: string): Promise<any> {
 
 async function fetchUtenti(serviceUrl: string): Promise<UtenteRecord[]> {
   const fl = await getFL(serviceUrl)
-  const outFields = ['OBJECTID','username','nome','cognome','titolo','email','full_name','ruolo','area','settore','ufficio','ruolo_cod','area_cod','settore_cod','gruppo','gruppo_precedente','tipo_record']
+  const outFields = ['OBJECTID','username','nome','cognome','titolo','email','full_name','area','settore','ufficio','ruolo_cod','area_cod','settore_cod','gruppo','gruppo_precedente','tipo_record']
   if (hasBirthDateField(fl)) outFields.push('data_nascita')
   const res = await fl.queryFeatures({
     // La stessa tabella contiene anche i contatti della Rubrica.
@@ -987,11 +1021,10 @@ async function fetchUtenti(serviceUrl: string): Promise<UtenteRecord[]> {
       email:     a.email     ?? '',
       data_nascita: dateToYmd(a.data_nascita),
       full_name: a.full_name ?? composeFullName(a.nome, a.cognome),
-      ruolo:       a.ruolo   != null ? Number(a.ruolo)   : valueOf(RUOLI, a.ruolo_cod),
       area:        a.area    != null ? Number(a.area)    : valueOf(AREE, a.area_cod),
       settore:     a.settore != null ? Number(a.settore) : valueOf(SETTORI, a.settore_cod),
       ufficio:     a.ufficio != null ? Number(a.ufficio) : null,
-      ruolo_cod:   textOrNull(a.ruolo_cod)   ?? codeOf(RUOLI,   a.ruolo),
+      ruolo_cod:   normalizeRuoloCod(a.ruolo_cod),
       area_cod:    textOrNull(a.area_cod)    ?? codeOf(AREE,    a.area),
       settore_cod: normalizeSettoreCod(a.settore_cod) ?? codeOf(SETTORI, a.settore),
       gruppo:      a.gruppo  ?? '',
@@ -1004,10 +1037,10 @@ function sameUsername(a: any, b: any): boolean {
   return String(a || '').trim().toLowerCase() === String(b || '').trim().toLowerCase()
 }
 
-function sameAssignment(a: Pick<UtenteRecord, 'username' | 'ruolo' | 'area' | 'settore' | 'ufficio'>, b: Pick<UtenteForm, 'username' | 'ruolo' | 'area' | 'settore' | 'ufficio'>): boolean {
+function sameAssignment(a: Pick<UtenteRecord, 'username' | 'ruolo_cod' | 'area' | 'settore' | 'ufficio'>, b: Pick<UtenteForm, 'username' | 'ruolo_cod' | 'area' | 'settore' | 'ufficio'>): boolean {
   const n = (v: any) => v == null || v === '' ? null : Number(v)
   return sameUsername(a.username, b.username) &&
-    n(a.ruolo) === n(b.ruolo) &&
+    normalizeRuoloCod(a.ruolo_cod) === normalizeRuoloCod(b.ruolo_cod) &&
     n(a.area) === n(b.area) &&
     n(a.settore) === n(b.settore) &&
     n(a.ufficio) === n(b.ufficio)
@@ -1023,11 +1056,78 @@ function sameUserFormValues(a: UtenteRecord, b: UtenteForm): boolean {
     text(a.titolo) === text(b.titolo) &&
     email(a.email) === email(b.email) &&
     text(a.data_nascita) === text(b.data_nascita) &&
-    n(a.ruolo) === n(b.ruolo) &&
+    normalizeRuoloCod(a.ruolo_cod) === normalizeRuoloCod(b.ruolo_cod) &&
     n(a.area) === n(b.area) &&
     n(a.settore) === n(b.settore) &&
     n(a.ufficio) === n(b.ufficio) &&
     text(a.gruppo) === text(b.gruppo)
+}
+
+type ExclusiveRoleConflict = {
+  objectid: number
+  username: string
+  full_name: string
+  nome: string
+  cognome: string
+}
+
+function exclusiveRoleWhere(form: Pick<UtenteForm, 'ruolo_cod' | 'area' | 'settore'>): string | null {
+  const ruolo = normalizeRuoloCod(form.ruolo_cod)
+  const area = Number(form.area ?? 0)
+  const settore = Number(form.settore ?? 0)
+
+  // I ruoli apicali sono titolarità organizzative esclusive.
+  // CS: esclusivo per area + settore; RIT: per area tecnica; RIA: per area;
+  // DT: per area; DA: unico nell'intero gestionale.
+  if (ruolo === 'CS' && area && settore) {
+    return `UPPER(ruolo_cod) = 'CS' AND ((area = ${area}) OR UPPER(area_cod) = '${codeOf(AREE, area) || ''}') AND ((settore = ${settore}) OR UPPER(settore_cod) = '${codeOf(SETTORI, settore) || ''}')`
+  }
+  if ((ruolo === 'RIT' || ruolo === 'RIA') && area) {
+    return `UPPER(ruolo_cod) = '${ruolo}' AND ((area = ${area}) OR UPPER(area_cod) = '${codeOf(AREE, area) || ''}')`
+  }
+  if (ruolo === 'DT' && area) {
+    return `UPPER(ruolo_cod) = 'DT' AND ((area = ${area}) OR UPPER(area_cod) = '${codeOf(AREE, area) || ''}')`
+  }
+  if (ruolo === 'DA') {
+    return `UPPER(ruolo_cod) = 'DA'`
+  }
+  return null
+}
+
+async function findExclusiveRoleConflict(serviceUrl: string, form: Pick<UtenteForm, 'ruolo_cod' | 'area' | 'settore'>, excludeObjectId?: number | null): Promise<ExclusiveRoleConflict | null> {
+  const scopeWhere = exclusiveRoleWhere(form)
+  if (!scopeWhere) return null
+
+  const fl = await getFL(serviceUrl)
+  const exclude = excludeObjectId != null ? ` AND OBJECTID <> ${Number(excludeObjectId)}` : ''
+  const res = await fl.queryFeatures({
+    where: `(tipo_record IS NULL OR tipo_record = 'UTENTE') AND (${scopeWhere})${exclude}`,
+    outFields: ['OBJECTID','username','full_name','nome','cognome','area','settore','ruolo_cod','area_cod','settore_cod'],
+    returnGeometry: false,
+    num: 5,
+  })
+  const f = (res.features || [])[0]
+  if (!f) return null
+  const a = f.attributes || {}
+  return {
+    objectid: Number(a.OBJECTID ?? a.objectid ?? 0),
+    username: String(a.username || '').trim(),
+    full_name: String(a.full_name || '').trim(),
+    nome: String(a.nome || '').trim(),
+    cognome: String(a.cognome || '').trim(),
+  }
+}
+
+function exclusiveRoleConflictMessage(conflict: ExclusiveRoleConflict): string {
+  const fullName = conflict.full_name || composeFullName(conflict.nome, conflict.cognome) || conflict.username || 'un altro utente'
+  const account = conflict.username && conflict.username.toLowerCase() !== fullName.toLowerCase() ? ` (${conflict.username})` : ''
+  return (
+    `Ruolo apicale già assegnato.\n\n` +
+    `La medesima funzione, nello stesso ambito organizzativo, risulta già attribuita a ${fullName}${account}. ` +
+    `I ruoli apicali devono avere un unico titolare.\n\n` +
+    `Prima di assegnare questa funzione a un altro utente è necessario revocarla al titolare corrente. ` +
+    `La revoca provvederà anche al riallineamento dei relativi gruppi AGOL.`
+  )
 }
 
 async function otherAssignmentRequiresGroup(serviceUrl: string, username: string, gruppo: string, excludeObjectId?: number | null): Promise<boolean> {
@@ -1060,11 +1160,10 @@ async function saveUtente(form: UtenteForm, serviceUrl: string): Promise<void> {
     titolo:            String(form.titolo || '').trim() || null,
     email:             String(form.email || '').trim().toLowerCase() || null,
     full_name:         fullName,
-    ruolo:             form.ruolo,
     area:              form.area,
     settore:           form.settore,
     ufficio:           form.ufficio,
-    ruolo_cod:         codeOf(RUOLI, form.ruolo),
+    ruolo_cod:         normalizeRuoloCod(form.ruolo_cod),
     area_cod:          codeOf(AREE, form.area),
     settore_cod:       codeOf(SETTORI, form.settore),
     gruppo:            form.gruppo || null,
@@ -1126,7 +1225,6 @@ async function deleteUtente(objectid: number, token: string, serviceUrl: string)
     const res = await fl.applyEdits({ updateFeatures: [{ attributes: {
       OBJECTID: objectid,
       username: null,
-      ruolo: null,
       area: null,
       settore: null,
       ufficio: null,
@@ -1158,7 +1256,7 @@ function exportCSV(utenti: UtenteRecord[], domainLabels?: DomainLabelMap): void 
     const area    = u.area_cod    ?? codeOf(AREE, u.area) ?? labelForDomainItem(AREE, u.area, domainLabels, 'area_cod', 'area')
     const settore = u.settore_cod ?? codeOf(SETTORI, u.settore) ?? labelForDomainItem(SETTORI, u.settore, domainLabels, 'settore_cod', 'settore')
     const ufficio = labelForUfficio(u.ufficio, domainLabels)
-    const ruolo   = u.ruolo_cod   ?? codeOf(RUOLI, u.ruolo) ?? labelForDomainItem(RUOLI, u.ruolo, domainLabels, 'ruolo_cod', 'ruolo')
+    const ruolo   = normalizeRuoloCod(u.ruolo_cod) || ''
     // id_ufficio: valore numerico (codice ufficio)
     const id_uff  = u.ufficio ?? ''
     const gruppo  = u.gruppo ?? ''
@@ -1172,7 +1270,7 @@ function exportCSV(utenti: UtenteRecord[], domainLabels?: DomainLabelMap): void 
       .map(esc).join(',')
   })
 
-  const csv = ['username,nome,cognome,titolo,email,data_nascita,full_name,area_cod,settore_cod,ufficio,ruolo,id_ufficio,gruppo', ...rows].join('\n')
+  const csv = ['username,nome,cognome,titolo,email,data_nascita,full_name,area_cod,settore_cod,ufficio,ruolo_cod,id_ufficio,gruppo', ...rows].join('\n')
   const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' })
   const url  = URL.createObjectURL(blob)
   const a    = document.createElement('a')
@@ -1185,7 +1283,7 @@ function sortValue(u: UtenteRecord, field: SortField, domainLabels?: DomainLabel
     case 'username': return u.username ?? ''
     case 'full_name': return u.full_name ?? ''
     case 'email': return u.email ?? ''
-    case 'ruolo': return labelForDomainItem(RUOLI, u.ruolo, domainLabels, 'ruolo_cod', 'ruolo') || u.ruolo_cod || ''
+    case 'ruolo_cod': return labelForRuoloCod(u.ruolo_cod, domainLabels)
     case 'area': return labelForDomainItem(AREE, u.area, domainLabels, 'area_cod', 'area') || u.area_cod || ''
     case 'settore': return labelForDomainItem(SETTORI, u.settore, domainLabels, 'settore_cod', 'settore') || u.settore_cod || ''
     case 'ufficio': return labelForUfficio(u.ufficio, domainLabels)
@@ -1220,7 +1318,7 @@ const styles = `
   .ggu-agol-account-row .ggu-user-surname { grid-column: span 3; }
   .ggu-agol-account-row .ggu-user-email { grid-column: span 3; }
   .ggu-agol-account-actions { grid-column: 18 / span 3; display: flex; justify-content: flex-end; align-items: end; }
-  .ggu-agol-account-actions .ggu-btn { white-space: nowrap; width: calc((100% - 8px) / 2); min-width: 0; display: inline-flex; align-items: center; justify-content: center; text-align: center; }
+  .ggu-agol-account-actions .ggu-btn { white-space: nowrap; width: calc((100% - 8px) / 2); min-width: 0; padding-left: 6px; padding-right: 6px; display: inline-flex; align-items: center; justify-content: center; text-align: center; }
   .ggu-management-section { grid-template-columns: repeat(20, minmax(0, 1fr)); }
   .ggu-management-section .ggu-user-role { grid-column: span 3; }
   .ggu-management-section .ggu-user-area { grid-column: span 3; }
@@ -1307,7 +1405,7 @@ const styles = `
   .ggu-input.ggu-required-missing:not(:disabled), .ggu-select.ggu-required-missing:not(:disabled) { border: 1px solid #dc2626; background: #fff; color: #7f1d1d; }
   .ggu-input:disabled, .ggu-select:disabled { background: #e8f0e9; color: #375623; font-style: italic; border-color: #b8d4b0; }
   .ggu-btns { display: flex; gap: 8px; grid-column: 1 / -1; padding-top: 4px; }
-  .ggu-btn { padding: 6px 18px; border: none; border-radius: 4px; font-size: 13px; cursor: pointer; font-weight: bold; }
+  .ggu-btn { padding: 6px 18px; border: none; border-radius: 4px; font-size: clamp(9px, calc(0.6vw + 4px), 13px); cursor: pointer; font-weight: bold; }
   .ggu-btn:disabled { opacity: 0.6; cursor: not-allowed; }
   .ggu-btn-save { background: #1F4E79; color: #fff; }
   .ggu-btn-save:hover:not(:disabled) { background: #16375a; }
@@ -1439,14 +1537,10 @@ function splitLegacyFullName(value: string): { nome: string; cognome: string } {
 function rubricaWorkflowRole(): string {
   try {
     const c: any = (window as any).__giiUserRole || {}
-    const directRole = rubricaClean(c.profiloCod ?? c.profilo_cod ?? c.ruoloCod ?? c.ruolo_cod ?? c.ruoloLabel).toUpperCase()
-    const numericRole = ({ 1:'TR', 2:'TI', 3:'RZ', 4:'RI', 5:'DT', 6:'DA', 7:'ADMIN' } as any)[Number(c.ruolo)] || ''
-    let role = directRole || numericRole
+    let role = rubricaClean(c.profiloCod ?? c.profilo_cod ?? c.ruoloCod ?? c.ruolo_cod).toUpperCase()
     const directArea = rubricaClean(c.areaCod ?? c.area_cod ?? c.areaLabel).toUpperCase()
     const numericArea = ({ 1:'AMM', 2:'AGR', 3:'TEC' } as any)[Number(c.area)] || ''
     const area = directArea || numericArea
-    if (role === 'RI' && area === 'AMM') role = 'RI_AMM'
-    if (role === 'TI' && area === 'AMM') role = 'TI_AMM'
     return role
   } catch { return '' }
 }
@@ -1531,7 +1625,6 @@ async function saveDirectoryFunction(serviceUrl: string, tab: DirectoryTab, form
   Object.assign(attrs, {
     tipo_record: RUBRICA_TIPO,
     username: null,
-    ruolo: null,
     area: null,
     settore: null,
     ufficio: null,
@@ -1607,7 +1700,7 @@ function RubricaWidget(props: AllWidgetProps<IMConfig>) {
   const rootRef = useRef<HTMLDivElement | null>(null)
   const [editLockRects, setEditLockRects] = useState<GguLockRect[]>([])
   const role = rubricaWorkflowRole()
-  const allowed = !role || role === 'RI_AMM' || role === 'ADMIN'
+  const allowed = !role || role === 'RIA' || role === 'ADMIN'
 
   const visibleRecords = useMemo(() => {
     return records.filter(r => tab === 'email' ? !!r.uso_email : r.firmatario === 1)
@@ -2302,19 +2395,20 @@ function UtentiWidget(props: AllWidgetProps<IMConfig>) {
   const resetSort = () => setSortRules([])
 
   // ── Cascata ───────────────────────────────────────────────────────────────
-  const onRuoloChange = (val: number | null) => {
+  const onRuoloChange = (val: string | null) => {
+    const ruoloCod = normalizeRuoloCod(val)
+
     // In modifica, se si torna esattamente al ruolo originario, ripristina anche
     // l'intera cascata originaria. In questo modo il form torna realmente
     // identico allo stato iniziale e il pulsante Aggiorna si disabilita.
-    if (form.objectid != null && originalEditedUser && Number(val) === Number(originalEditedUser.ruolo)) {
-      const isAdminOriginale = originalEditedUser.ruolo === 7
+    if (form.objectid != null && originalEditedUser && ruoloCod === normalizeRuoloCod(originalEditedUser.ruolo_cod)) {
+      const isAdminOriginale = normalizeRuoloCod(originalEditedUser.ruolo_cod) === 'ADMIN'
       setForm(f => ({
         ...f,
-        ruolo: originalEditedUser.ruolo,
+        ruolo_cod: normalizeRuoloCod(originalEditedUser.ruolo_cod),
         area: isAdminOriginale ? null : originalEditedUser.area,
         settore: isAdminOriginale ? null : originalEditedUser.settore,
         ufficio: isAdminOriginale ? null : originalEditedUser.ufficio,
-        ruolo_cod: isAdminOriginale ? 'ADMIN' : (originalEditedUser.ruolo_cod ?? codeOf(RUOLI, originalEditedUser.ruolo)),
         area_cod: isAdminOriginale ? null : (originalEditedUser.area_cod ?? codeOf(AREE, originalEditedUser.area)),
         settore_cod: isAdminOriginale ? null : (originalEditedUser.settore_cod ?? codeOf(SETTORI, originalEditedUser.settore)),
         gruppo: isAdminOriginale ? '' : originalEditedUser.gruppo
@@ -2324,28 +2418,29 @@ function UtentiWidget(props: AllWidgetProps<IMConfig>) {
 
     // ADMIN: non assegnare automaticamente area/settore/ufficio né gruppi.
     // L'utente admin (owner) ha già privilegi nativi e, se serve, può essere messo manualmente nei gruppi AGOL.
-    if (val === 7) {
-      setForm(f => ({ ...f, ruolo: 7, area: null, settore: null, ufficio: null, ruolo_cod: 'ADMIN', area_cod: null, settore_cod: null, gruppo: '' }))
+    if (ruoloCod === 'ADMIN') {
+      setForm(f => ({ ...f, ruolo_cod: 'ADMIN', area: null, settore: null, ufficio: null, area_cod: null, settore_cod: null, gruppo: '' }))
       return
     }
-    const aree = val ? getAreePerRuolo(val) : []
+    const aree = ruoloCod ? getAreePerRuolo(ruoloCod) : []
     const areaAuto = aree.length === 1 ? aree[0] : null
-    const settori = val && areaAuto ? getSettoriPerRuoloArea(val, areaAuto) : []
+    const settori = ruoloCod && areaAuto ? getSettoriPerRuoloArea(ruoloCod, areaAuto) : []
     const settoreAuto = settori.length === 1 ? settori[0] : null
-    const isCalgliari = val && (val === 4 || val === 5 || val === 6 || (val === 2 && areaAuto === 1))
-    const ufficioAuto = isCalgliari ? 1 : null
-    const gr = val && areaAuto ? calcolaGruppo(val, areaAuto, settoreAuto ?? 0) : ''
-    setForm(f => ({ ...f, ruolo: val, area: areaAuto, settore: settoreAuto, ufficio: ufficioAuto, ruolo_cod: codeOf(RUOLI, val), area_cod: codeOf(AREE, areaAuto), settore_cod: codeOf(SETTORI, settoreAuto), gruppo: gr }))
+    const isCagliari = !!ruoloCod && (['RIT','RIA','DT','DA'].includes(ruoloCod) || (ruoloCod === 'IA' && areaAuto === 1))
+    const ufficioAuto = isCagliari ? 1 : null
+    const gr = ruoloCod && areaAuto ? calcolaGruppo(ruoloCod, areaAuto, settoreAuto ?? 0) : ''
+    setForm(f => ({ ...f, ruolo_cod: ruoloCod, area: areaAuto, settore: settoreAuto, ufficio: ufficioAuto, area_cod: codeOf(AREE, areaAuto), settore_cod: codeOf(SETTORI, settoreAuto), gruppo: gr }))
   }
 
   const onAreaChange = (val: number | null) => {
-    if (!form.ruolo) return
+    const ruoloCod = normalizeRuoloCod(form.ruolo_cod)
+    if (!ruoloCod) return
 
     // Se si torna all'area iniziale (con lo stesso ruolo iniziale), ripristina
     // anche settore, ufficio e gruppo originali invece di lasciare la cascata
     // ricalcolata/azzerata dal cambio precedente.
     if (form.objectid != null && originalEditedUser &&
-        Number(form.ruolo) === Number(originalEditedUser.ruolo) &&
+        ruoloCod === normalizeRuoloCod(originalEditedUser.ruolo_cod) &&
         Number(val) === Number(originalEditedUser.area)) {
       setForm(f => ({
         ...f,
@@ -2359,21 +2454,22 @@ function UtentiWidget(props: AllWidgetProps<IMConfig>) {
       return
     }
 
-    const settori = val ? getSettoriPerRuoloArea(form.ruolo, val) : []
+    const settori = val ? getSettoriPerRuoloArea(ruoloCod, val) : []
     const settoreAuto = settori.length === 1 ? settori[0] : null
-    const isCagliari = form.ruolo === 4 || form.ruolo === 5 || form.ruolo === 6 || (form.ruolo === 2 && val === 1)
+    const isCagliari = ['RIT','RIA','DT','DA'].includes(ruoloCod) || (ruoloCod === 'IA' && val === 1)
     const ufficioAuto = isCagliari ? 1 : null
-    const gr = form.ruolo && val ? calcolaGruppo(form.ruolo, val, settoreAuto ?? 0) : ''
+    const gr = val ? calcolaGruppo(ruoloCod, val, settoreAuto ?? 0) : ''
     setForm(f => ({ ...f, area: val, settore: settoreAuto, ufficio: ufficioAuto, area_cod: codeOf(AREE, val), settore_cod: codeOf(SETTORI, settoreAuto), gruppo: gr }))
   }
 
   const onSettoreChange = (val: number | null) => {
-    if (!form.ruolo || !form.area) return
+    const ruoloCod = normalizeRuoloCod(form.ruolo_cod)
+    if (!ruoloCod || !form.area) return
 
     // Stesso principio per il settore: tornando al valore iniziale, ripristina
     // l'ufficio e il gruppo originari se ruolo e area sono quelli iniziali.
     if (form.objectid != null && originalEditedUser &&
-        Number(form.ruolo) === Number(originalEditedUser.ruolo) &&
+        ruoloCod === normalizeRuoloCod(originalEditedUser.ruolo_cod) &&
         Number(form.area) === Number(originalEditedUser.area) &&
         Number(val) === Number(originalEditedUser.settore)) {
       setForm(f => ({
@@ -2388,7 +2484,7 @@ function UtentiWidget(props: AllWidgetProps<IMConfig>) {
 
     const uffici = val ? getUfficiPerAreaSettore(form.area, val) : []
     const ufficioAuto = uffici.length === 1 ? uffici[0].value : null
-    const gr = form.ruolo && form.area && val ? calcolaGruppo(form.ruolo, form.area, val) : ''
+    const gr = val ? calcolaGruppo(ruoloCod, form.area, val) : ''
     setForm(f => ({ ...f, settore: val, ufficio: ufficioAuto, settore_cod: codeOf(SETTORI, val), gruppo: gr }))
   }
 
@@ -2514,7 +2610,7 @@ function UtentiWidget(props: AllWidgetProps<IMConfig>) {
 
   const onDuplicateAssignment = (u: UtenteRecord) => {
     setSelectedObjectId(u.objectid)
-    const isAdmin = u.ruolo === 7
+    const isAdmin = normalizeRuoloCod(u.ruolo_cod) === 'ADMIN'
     setForm({
       ...emptyForm(),
       username:          u.username,
@@ -2524,11 +2620,10 @@ function UtentiWidget(props: AllWidgetProps<IMConfig>) {
       email:             u.email,
       data_nascita:      u.data_nascita,
       full_name:         composeFullName(u.nome, u.cognome),
-      ruolo:             u.ruolo,
       area:              isAdmin ? null : u.area,
       settore:           isAdmin ? null : u.settore,
       ufficio:           isAdmin ? null : u.ufficio,
-      ruolo_cod:         isAdmin ? 'ADMIN' : (u.ruolo_cod ?? codeOf(RUOLI, u.ruolo)),
+      ruolo_cod:         normalizeRuoloCod(u.ruolo_cod),
       area_cod:          isAdmin ? null : (u.area_cod ?? codeOf(AREE, u.area)),
       settore_cod:       isAdmin ? null : (u.settore_cod ?? codeOf(SETTORI, u.settore)),
       gruppo:            isAdmin ? '' : u.gruppo,
@@ -2542,7 +2637,7 @@ function UtentiWidget(props: AllWidgetProps<IMConfig>) {
 
   const onEdit = (u: UtenteRecord) => {
     setSelectedObjectId(u.objectid)
-    const isAdmin = u.ruolo === 7
+    const isAdmin = normalizeRuoloCod(u.ruolo_cod) === 'ADMIN'
     setForm({
       objectid:          u.objectid,
       existingObjectId:  null,
@@ -2553,11 +2648,10 @@ function UtentiWidget(props: AllWidgetProps<IMConfig>) {
       email:             u.email,
       data_nascita:      u.data_nascita,
       full_name:         composeFullName(u.nome, u.cognome),
-      ruolo:             u.ruolo,
       area:              isAdmin ? null : u.area,
       settore:           isAdmin ? null : u.settore,
       ufficio:           isAdmin ? null : u.ufficio,
-      ruolo_cod:         isAdmin ? 'ADMIN' : (u.ruolo_cod ?? codeOf(RUOLI, u.ruolo)),
+      ruolo_cod:         normalizeRuoloCod(u.ruolo_cod),
       area_cod:          isAdmin ? null    : (u.area_cod ?? codeOf(AREE, u.area)),
       settore_cod:       isAdmin ? null    : (u.settore_cod ?? codeOf(SETTORI, u.settore)),
       gruppo:            isAdmin ? ''   : u.gruppo,
@@ -2570,7 +2664,7 @@ function UtentiWidget(props: AllWidgetProps<IMConfig>) {
   const onChooseExistingUser = (value: string) => {
     const oid = Number(value) || 0
     setHomonymPromptOpen(false); setHomonymConfirmedKey(''); setHomonymReuseId(null); setPendingBirthDates({})
-    if (!oid) { setForm(f => ({ ...emptyForm(), username: f.username, ruolo: f.ruolo, area: f.area, settore: f.settore, ufficio: f.ufficio, ruolo_cod: f.ruolo_cod, area_cod: f.area_cod, settore_cod: f.settore_cod, gruppo: f.gruppo, gruppo_precedente: f.gruppo_precedente })); return }
+    if (!oid) { setForm(f => ({ ...emptyForm(), username: f.username, area: f.area, settore: f.settore, ufficio: f.ufficio, ruolo_cod: f.ruolo_cod, area_cod: f.area_cod, settore_cod: f.settore_cod, gruppo: f.gruppo, gruppo_precedente: f.gruppo_precedente })); return }
     const r = people.find(x => x.objectid === oid)
     if (!r) return
     setForm(f => ({ ...f, existingObjectId: r.objectid, nome: r.nome, cognome: r.cognome, titolo: r.titolo, full_name: r.full_name, email: r.email || f.email, data_nascita: r.data_nascita }))
@@ -2650,15 +2744,15 @@ function UtentiWidget(props: AllWidgetProps<IMConfig>) {
     if (!form.username.trim())       { showMsg('Username AGOL obbligatorio', false); return }
     if (!normalizePersonPart(form.nome))    { showMsg('Nome obbligatorio', false); return }
     if (!normalizePersonPart(form.cognome)) { showMsg('Cognome obbligatorio', false); return }
-    if (!form.ruolo)            { showMsg('Ruolo obbligatorio', false); return }
+    if (!normalizeRuoloCod(form.ruolo_cod)) { showMsg('Ruolo obbligatorio', false); return }
     const normalizedEmail = String(form.email || '').trim().toLowerCase()
-    const isTiAmm = form.ruolo === 2 && form.area === 1
-    if (isTiAmm && !normalizedEmail) { showMsg('Per il Tecnico istruttore dell’Area amministrativa è necessario indicare l’indirizzo e-mail.', false); return }
+    const isIa = normalizeRuoloCod(form.ruolo_cod) === 'IA' && form.area === 1
+    if (isIa && !normalizedEmail) { showMsg('Per l’Istruttore amministrativo è necessario indicare l’indirizzo e-mail.', false); return }
     if (normalizedEmail && !rubricaEmailValida(normalizedEmail)) { showMsg('Inserire un indirizzo e-mail valido per il destinatario.', false); return }
     // ADMIN: non richiede area/settore/ufficio e non gestisce gruppi (ha privilegi nativi AGOL).
-    if (form.ruolo !== 7) {
+    if (normalizeRuoloCod(form.ruolo_cod) !== 'ADMIN') {
       if (!form.area)             { showMsg('Area obbligatoria', false); return }
-      const settoriPrevisti = getSettoriPerRuoloArea(form.ruolo, form.area)
+      const settoriPrevisti = getSettoriPerRuoloArea(form.ruolo_cod, form.area)
       if (settoriPrevisti.length > 0 && !form.settore) { showMsg('Settore obbligatorio', false); return }
       if (!form.ufficio)          { showMsg('Ufficio obbligatorio', false); return }
     }
@@ -2674,6 +2768,22 @@ function UtentiWidget(props: AllWidgetProps<IMConfig>) {
       showMsg('Assegnazione già presente. L’utente risulta già registrato con la medesima funzione e il medesimo ambito organizzativo.', false)
       return
     }
+
+    // I ruoli apicali (CS, RIT, RIA, DT, DA) sono responsabilità esclusive
+    // nel rispettivo ambito. Il controllo è live sul layer e precede qualsiasi
+    // side effect sui gruppi AGOL, così un tentativo non valido non modifica
+    // né GII_utenti né le appartenenze ai gruppi.
+    try {
+      const exclusiveConflict = await findExclusiveRoleConflict(serviceUrl, form, form.objectid)
+      if (exclusiveConflict) {
+        showMsg(exclusiveRoleConflictMessage(exclusiveConflict), false)
+        return
+      }
+    } catch (e: any) {
+      showMsg("Impossibile verificare l'esclusività del ruolo apicale: " + (e?.message ?? e), false)
+      return
+    }
+
     const targetId = form.objectid ?? form.existingObjectId ?? null
     const nameKey = personNameKey(form.nome, form.cognome)
     const homonyms = nameKey ? people.filter(r => r.objectid !== targetId && personNameKey(r.nome, r.cognome) === nameKey) : []
@@ -2708,7 +2818,7 @@ function UtentiWidget(props: AllWidgetProps<IMConfig>) {
       const normalizedCognome = normalizePersonPart(form.cognome)
       const computedFullName = composeFullName(normalizedNome, normalizedCognome)
       const normalizedEmail = String(form.email || '').trim().toLowerCase()
-      const formSan = form.ruolo === 7
+      const formSan = normalizeRuoloCod(form.ruolo_cod) === 'ADMIN'
         ? { ...form, username: form.username.trim(), nome: normalizedNome, cognome: normalizedCognome, email: normalizedEmail, full_name: computedFullName, area: null, settore: null, ufficio: null, ruolo_cod: 'ADMIN', area_cod: null, settore_cod: null, gruppo: '', gruppo_precedente: '' }
         : { ...form, username: form.username.trim(), nome: normalizedNome, cognome: normalizedCognome, email: normalizedEmail, full_name: computedFullName }
 
@@ -2769,22 +2879,23 @@ function UtentiWidget(props: AllWidgetProps<IMConfig>) {
   }
 
   // ── Opzioni combo filtrate ────────────────────────────────────────────────
-  const areeDisp    = form.ruolo ? AREE.filter(a => getAreePerRuolo(form.ruolo!).includes(a.value)) : []
-  const settoriDisp = form.ruolo && form.area ? SETTORI.filter(s => getSettoriPerRuoloArea(form.ruolo!, form.area!).includes(s.value)) : []
+  const areeDisp    = form.ruolo_cod ? AREE.filter(a => getAreePerRuolo(form.ruolo_cod).includes(a.value)) : []
+  const settoriDisp = form.ruolo_cod && form.area ? SETTORI.filter(s => getSettoriPerRuoloArea(form.ruolo_cod, form.area!).includes(s.value)) : []
   const ufficiDisp  = form.area && form.settore ? getUfficiPerAreaSettore(form.area, form.settore) : []
 
   const isAreaAuto     = areeDisp.length === 1
-  const isSettoreFisso = !!form.ruolo && (
-    form.ruolo === 5 || form.ruolo === 6 || form.ruolo === 7 ||
-    form.ruolo === 4 ||
-    (form.ruolo === 2 && form.area === 1)
+  const currentRole = normalizeRuoloCod(form.ruolo_cod)
+  const isSettoreFisso = !!currentRole && (
+    currentRole === 'DT' || currentRole === 'DA' || currentRole === 'ADMIN' ||
+    (currentRole === 'RIT' || currentRole === 'RIA') ||
+    (currentRole === 'IA' && form.area === 1)
   )
-  const isUfficioFisso = !!form.ruolo && (
-    form.ruolo === 4 || form.ruolo === 5 || form.ruolo === 6 ||
-    (form.ruolo === 2 && form.area === 1)
+  const isUfficioFisso = !!currentRole && (
+    (currentRole === 'RIT' || currentRole === 'RIA') || currentRole === 'DT' || currentRole === 'DA' ||
+    (currentRole === 'IA' && form.area === 1)
   )
 
-  const labelRuolo = (val: number | null | undefined) => labelForDomainItem(RUOLI, val, domainLabels, 'ruolo_cod', 'ruolo')
+  const labelRuolo = (code: any) => labelForRuoloCod(code, domainLabels)
   const labelArea = (val: number | null | undefined) => labelForDomainItem(AREE, val, domainLabels, 'area_cod', 'area')
   const labelSettore = (val: number | null | undefined) => labelForDomainItem(SETTORI, val, domainLabels, 'settore_cod', 'settore')
   const labelUfficio = (val: number | null | undefined) => labelForUfficio(val, domainLabels)
@@ -3064,18 +3175,18 @@ function UtentiWidget(props: AllWidgetProps<IMConfig>) {
               </div>}
               <div className="ggu-field ggu-user-role">
                 <div className="ggu-label">Ruolo *</div>
-                <select className={`ggu-select${userValidationAttempted && !form.ruolo ? ' ggu-required-missing' : ''}`} value={form.ruolo ?? ''}
-                  onChange={e => onRuoloChange(e.target.value ? Number(e.target.value) : null)}>
+                <select className={`ggu-select${userValidationAttempted && !form.ruolo_cod ? ' ggu-required-missing' : ''}`} value={form.ruolo_cod ?? ''}
+                  onChange={e => onRuoloChange(e.target.value || null)}>
                   <option value="">— seleziona —</option>
-                  {RUOLI.map(r => <option key={r.value} value={r.value}>{optionLabelForDomainItem(r, domainLabels, 'ruolo_cod', 'ruolo')}</option>)}
+                  {RUOLI.map(r => <option key={r.code} value={r.code}>{optionLabelForRuolo(r, domainLabels)}</option>)}
                 </select>
               </div>
               <div className="ggu-field ggu-user-area">
-                <div className="ggu-label">Area{form.ruolo && form.ruolo !== 7 && !isAreaAuto ? ' *' : ''}</div>
-                {form.ruolo === 7
+                <div className="ggu-label">Area{currentRole && currentRole !== 'ADMIN' && !isAreaAuto ? ' *' : ''}</div>
+                {currentRole === 'ADMIN'
                   ? <input className="ggu-input" disabled value="—" />
-                  : <select className={`ggu-select${userValidationAttempted && form.ruolo != null && form.ruolo !== 7 && !isAreaAuto && !form.area ? ' ggu-required-missing' : ''}`} value={form.area ?? ''}
-                      disabled={!form.ruolo || isAreaAuto}
+                  : <select className={`ggu-select${userValidationAttempted && currentRole != null && !isAreaAuto && !form.area ? ' ggu-required-missing' : ''}`} value={form.area ?? ''}
+                      disabled={!currentRole || isAreaAuto}
                       onChange={e => onAreaChange(e.target.value ? Number(e.target.value) : null)}>
                       <option value="">— seleziona —</option>
                       {areeDisp.map(a => <option key={a.value} value={a.value}>{optionLabelForDomainItem(a, domainLabels, 'area_cod', 'area')}</option>)}
@@ -3083,10 +3194,10 @@ function UtentiWidget(props: AllWidgetProps<IMConfig>) {
                 }
               </div>
               <div className="ggu-field ggu-user-sector">
-                <div className="ggu-label">Settore{form.ruolo && form.area && getSettoriPerRuoloArea(form.ruolo, form.area).length > 0 && !isSettoreFisso ? ' *' : ''}</div>
+                <div className="ggu-label">Settore{currentRole && form.area && getSettoriPerRuoloArea(currentRole, form.area).length > 0 && !isSettoreFisso ? ' *' : ''}</div>
                 {isSettoreFisso
                   ? <input className="ggu-input" disabled value={dash(labelSettore(form.settore))} />
-                  : <select className={`ggu-select${userValidationAttempted && form.ruolo != null && form.area != null && settoriDisp.length > 0 && !isSettoreFisso && !form.settore ? ' ggu-required-missing' : ''}`} value={form.settore ?? ''}
+                  : <select className={`ggu-select${userValidationAttempted && currentRole != null && form.area != null && settoriDisp.length > 0 && !isSettoreFisso && !form.settore ? ' ggu-required-missing' : ''}`} value={form.settore ?? ''}
                       disabled={!form.area || settoriDisp.length === 0}
                       onChange={e => onSettoreChange(e.target.value ? Number(e.target.value) : null)}>
                       <option value="">— seleziona —</option>
@@ -3095,12 +3206,12 @@ function UtentiWidget(props: AllWidgetProps<IMConfig>) {
                 }
               </div>
               <div className="ggu-field ggu-user-office">
-                <div className="ggu-label">Ufficio{form.ruolo && form.ruolo !== 7 && !isUfficioFisso ? ' *' : ''}</div>
-                {form.ruolo === 7
+                <div className="ggu-label">Ufficio{currentRole && currentRole !== 'ADMIN' && !isUfficioFisso ? ' *' : ''}</div>
+                {currentRole === 'ADMIN'
                   ? <input className="ggu-input" disabled value="—" />
                   : (isUfficioFisso
                     ? <input className="ggu-input" disabled value={labelUfficio(form.ufficio) || 'Cagliari'} />
-                    : <select className={`ggu-select${userValidationAttempted && form.ruolo != null && form.ruolo !== 7 && !isUfficioFisso && !form.ufficio ? ' ggu-required-missing' : ''}`} value={form.ufficio ?? ''}
+                    : <select className={`ggu-select${userValidationAttempted && currentRole != null && !isUfficioFisso && !form.ufficio ? ' ggu-required-missing' : ''}`} value={form.ufficio ?? ''}
                         disabled={!form.settore || ufficiDisp.length === 0}
                         onChange={e => onUfficioChange(e.target.value ? Number(e.target.value) : null)}>
                         <option value="">— seleziona —</option>
@@ -3117,7 +3228,7 @@ function UtentiWidget(props: AllWidgetProps<IMConfig>) {
                 <button className="ggu-btn ggu-btn-save" onClick={onSave}
                   disabled={saving || agolSyncLoading || (form.objectid != null && !hasEffectiveEditChanges)}
                   title={form.objectid != null && !hasEffectiveEditChanges ? 'Nessuna modifica da salvare' : undefined}>
-                  {saving ? 'Salvataggio...' : form.objectid ? 'Aggiorna' : assignmentSourceObjectId != null ? 'Salva nuova assegnazione' : 'Salva'}
+                  {saving ? 'Salvataggio...' : form.objectid ? 'Aggiorna' : 'Salva'}
                 </button>
                 <button className="ggu-btn ggu-btn-cancel" onClick={onCancel} disabled={saving || agolSyncLoading}>Annulla</button>
               </div>
@@ -3134,7 +3245,7 @@ function UtentiWidget(props: AllWidgetProps<IMConfig>) {
                 <thead>
                   <tr>
                     {SORTABLE_COLUMNS.map(col => (
-                      <th key={col.field} className={`ggu-sortable${col.field === 'full_name' ? ' ggu-users-fullname-col' : ''}${col.field === 'ruolo' ? ' ggu-users-role-col' : ''}`} onClick={() => toggleSort(col.field)}
+                      <th key={col.field} className={`ggu-sortable${col.field === 'full_name' ? ' ggu-users-fullname-col' : ''}${col.field === 'ruolo_cod' ? ' ggu-users-role-col' : ''}`} onClick={() => toggleSort(col.field)}
                         title="Clic: aggiungi/inverti/rimuovi ordinamento">
                         {col.label}{sortBadge(col.field)}
                       </th>
@@ -3154,7 +3265,7 @@ function UtentiWidget(props: AllWidgetProps<IMConfig>) {
                       <td>{u.username}</td>
                       <td className="ggu-users-fullname-col">{directoryDisplayLabel(({...u, uso_email:'', firmatario:0, tipo_record:'UTENTE'} as any), people)}</td>
                       <td>{u.email || '—'}</td>
-                      <td className="ggu-users-role-col">{dash(labelRuolo(u.ruolo))}</td>
+                      <td className="ggu-users-role-col">{dash(labelRuolo(u.ruolo_cod))}</td>
                       <td>{dash(labelArea(u.area))}</td>
                       <td>{dash(labelSettore(u.settore))}</td>
                       <td>{dash(labelUfficio(u.ufficio))}</td>
@@ -3178,6 +3289,14 @@ function UtentiWidget(props: AllWidgetProps<IMConfig>) {
 
 
 export default function Widget(props: AllWidgetProps<IMConfig>) {
+  useEffect(() => {
+    // Il cambio account dell'Header porta prima a una pagina neutra, così i widget
+    // della pagina corrente possono rilasciare le risorse ArcGIS ancora legate alla
+    // sessione precedente. Il FeatureLayer di GII_utenti è una cache di modulo e
+    // sopravviverebbe allo smontaggio React se non venisse distrutto esplicitamente.
+    return () => { disposeFL() }
+  }, [])
+
   const mode = String((props.config as any)?.mode || 'utenti').trim().toLowerCase()
   return mode === 'rubrica' ? <RubricaWidget {...props} /> : <UtentiWidget {...props} />
 }

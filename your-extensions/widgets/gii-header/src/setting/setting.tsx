@@ -219,16 +219,15 @@ export default function Setting(props: AllWidgetSettingProps<IMConfig>) {
       <Acc id='posizione' label='🧭 Posizione elementi'/>
       {openSec==='posizione' && <div>
         <div style={{ fontSize:11, color:'#4b9dd4', lineHeight:1.5, background:'rgba(59,130,246,0.08)', borderRadius:8, padding:'7px 10px', marginBottom:4 }}>
-          <strong>Riga:</strong> Logo · Titoli · Campanella allarmi · Banner utente · Login/Esci
+          <strong>Riga:</strong> Logo · Titoli · Campanella allarmi · Banner utente
         </div>
         <Nudge label='Logo' icon='🖼' value={getOffset('offsetLogo')} onChange={v=>set('offsetLogo',v)}/>
         <Nudge label='Testi (ente + titolo)' icon='📝' value={getOffset('offsetTitoli')} onChange={v=>set('offsetTitoli',v)}/>
         <Nudge label='Campanella allarmi' icon='🔔' value={getOffset('offsetAlertBell')} onChange={v=>set('offsetAlertBell',v)}/>
         <Nudge label='Banner utente' icon='👤' value={getOffset('offsetBanner')} onChange={v=>set('offsetBanner',v)}/>
-        <Nudge label='Login / Esci'  icon='🔐' value={getOffset('offsetLogin')} onChange={v=>set('offsetLogin',v)}/>
         <div style={{ marginTop:10 }}>
           <button type='button'
-            onClick={()=>['offsetLogo','offsetTitoli','offsetAlertBell','offsetBanner','offsetLogin'].forEach(k=>set(k,{x:0,y:0}))}
+            onClick={()=>['offsetLogo','offsetTitoli','offsetAlertBell','offsetBanner'].forEach(k=>set(k,{x:0,y:0}))}
             style={{ padding:'4px 12px', borderRadius:6, border:'1px solid rgba(255,255,255,0.15)', background:'rgba(255,255,255,0.05)', color:'#9ca3af', fontSize:11, cursor:'pointer' }}>
             ↺ Azzera tutti
           </button>

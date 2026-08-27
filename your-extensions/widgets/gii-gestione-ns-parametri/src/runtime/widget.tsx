@@ -222,6 +222,7 @@ type AccessContext = {
   areaCod: string
   profiloCod: string
   allowedDatasets: DatasetKey[]
+  isAdmin: boolean
 }
 
 type DatasetDefinition = {
@@ -492,25 +493,15 @@ function exportCsv(rows: any[], title: string, definition: DatasetDefinition, in
   URL.revokeObjectURL(url)
 }
 
-const ROLE_CODE_BY_NUM: Record<number, string> = { 1: 'TR', 2: 'TI', 3: 'RZ', 4: 'RI', 5: 'DT', 6: 'DA', 7: 'ADMIN' }
 const AREA_CODE_BY_NUM: Record<number, string> = { 1: 'AMM', 2: 'AGR', 3: 'TEC' }
 
 function cleanCode(v: any): string { return String(v ?? '').trim().toUpperCase() }
 
 function normalizeRoleCode(...values: any[]): string {
   for (const value of values) {
-    const s = cleanCode(value)
+    const s = normalizeGiiAccessCode(value)
     if (!s) continue
-    const n = Number(s)
-    if (Number.isFinite(n) && ROLE_CODE_BY_NUM[n]) return ROLE_CODE_BY_NUM[n]
-    if (['TR', 'TI', 'RZ', 'RI', 'DT', 'DA', 'ADMIN'].includes(s)) return s
-    if (/(^|[^A-Z])ADMIN([^A-Z]|$)/.test(s) || s.includes('AMMINISTRATORE')) return 'ADMIN'
-    if (/(^|[^A-Z])RI([^A-Z]|$)/.test(s) || s.includes('RESPONSABILE ISTRUTTORIA')) return 'RI'
-    if (/(^|[^A-Z])RZ([^A-Z]|$)/.test(s) || s.includes('RESPONSABILE DI ZONA')) return 'RZ'
-    if (/(^|[^A-Z])TI([^A-Z]|$)/.test(s) || s.includes('TECNICO ISTRUTTORE')) return 'TI'
-    if (/(^|[^A-Z])TR([^A-Z]|$)/.test(s) || s.includes('TECNICO RILEVATORE')) return 'TR'
-    if (/(^|[^A-Z])DT([^A-Z]|$)/.test(s) || s.includes('DIRETTORE TECNICO')) return 'DT'
-    if (/(^|[^A-Z])DA([^A-Z]|$)/.test(s) || s.includes('DIRETTORE AMMINISTRATIVO')) return 'DA'
+    if (['TR', 'IT', 'CS', 'RIT', 'DT', 'DA', 'ADMIN', 'IA', 'RIA'].includes(s)) return s
   }
   return ''
 }
@@ -531,42 +522,44 @@ function normalizeAreaCode(...values: any[]): string {
 
 function normalizeGiiAccessCode(v: any): string { return String(v ?? '').trim().toUpperCase().replace(/-/g, '_') }
 
-function getGiiOperationalProfileCode(): string {
-  const user: any = (window as any).__giiUserRole || {}
-  const direct = normalizeGiiAccessCode(user?.profiloCod ?? user?.profilo_cod ?? user?.profileCode ?? user?.profile_code)
-  if (direct) return direct
-
-  const role = normalizeGiiAccessCode(user?.ruoloCod ?? user?.ruolo_cod ?? user?.roleCod ?? user?.roleCode ?? user?.role_code)
-  const area = normalizeGiiAccessCode(user?.areaCod ?? user?.area_cod ?? user?.areaCode ?? user?.area_code)
-  if (role === 'TI' && area === 'AMM') return 'TI_AMM'
-  if (role === 'RI' && area === 'AMM') return 'RI_AMM'
-  if (role) return role
-
-  const roleNum = Number(user?.ruolo)
-  const areaNum = Number(user?.area)
-  if (roleNum === 7) return 'ADMIN'
-  if (roleNum === 4 && areaNum === 1) return 'RI_AMM'
-  if (roleNum === 2 && areaNum === 1) return 'TI_AMM'
-  if (ROLE_CODE_BY_NUM[roleNum]) return ROLE_CODE_BY_NUM[roleNum]
-  return ''
-}
-
 function getAccessContext(): AccessContext {
   const user: any = (window as any).__giiUserRole || {}
-  const profiloCod = getGiiOperationalProfileCode()
-  const ruoloCod = normalizeRoleCode(user?.ruoloCod, user?.ruolo_cod, user?.roleCod, user?.role_code, user?.ruolo, profiloCod)
-  const areaCod = normalizeAreaCode(user?.areaCod, user?.area_cod, user?.areaCode, user?.area, user?.areaLabel)
+  const profiloCod = normalizeGiiAccessCode(user?.profiloCod ?? user?.profilo_cod ?? user?.profileCode ?? user?.profile_code)
+  const ruoloCod = normalizeRoleCode(user?.ruoloCod, user?.ruolo_cod, user?.roleCod, user?.roleCode, user?.role_code, profiloCod)
+  const areaCod = normalizeAreaCode(user?.areaCod, user?.area_cod, user?.areaCode, user?.area_code, user?.area, user?.areaLabel)
 
-  let allowedDatasets: DatasetKey[] = []
-  if (profiloCod === 'ADMIN' || ruoloCod === 'ADMIN') {
-    allowedDatasets = ['notaSpese', 'sanzioniAmm', 'attrezzature']
-  } else if ((profiloCod === 'RI_AMM') || (ruoloCod === 'RI' && areaCod === 'AMM')) {
-    allowedDatasets = ['sanzioniAmm']
-  } else if (ruoloCod === 'RI' && (areaCod === 'AGR' || areaCod === 'TEC')) {
-    allowedDatasets = ['notaSpese', 'attrezzature']
+  const allowed = new Set<DatasetKey>()
+  let isAdmin = user?.isAdmin === true || profiloCod === 'ADMIN' || ruoloCod === 'ADMIN'
+
+  const applyAssignment = (raw: any) => {
+    const assignmentProfile = normalizeGiiAccessCode(raw?.profiloCod ?? raw?.profilo_cod ?? raw?.profileCode ?? raw?.profile_code)
+    const assignmentRole = normalizeRoleCode(
+      raw?.ruoloCod, raw?.ruolo_cod, raw?.roleCod, raw?.roleCode, raw?.role_code, assignmentProfile
+    )
+    const assignmentArea = normalizeAreaCode(
+      raw?.areaCod, raw?.area_cod, raw?.areaCode, raw?.area_code, raw?.area, raw?.areaLabel
+    )
+
+    if (assignmentProfile === 'ADMIN' || assignmentRole === 'ADMIN') {
+      isAdmin = true
+      allowed.add('notaSpese')
+      allowed.add('sanzioniAmm')
+      allowed.add('attrezzature')
+      return
+    }
+    if (assignmentProfile === 'RIA' || assignmentRole === 'RIA') allowed.add('sanzioniAmm')
+    if (assignmentRole === 'RIT' && (assignmentArea === 'AGR' || assignmentArea === 'TEC')) {
+      allowed.add('notaSpese')
+      allowed.add('attrezzature')
+    }
   }
 
-  return { ruoloCod, areaCod, profiloCod, allowedDatasets }
+  applyAssignment(user)
+  const assignments = Array.isArray(user?.assignments) ? user.assignments : []
+  assignments.forEach(applyAssignment)
+
+  const allowedDatasets: DatasetKey[] = ['notaSpese', 'sanzioniAmm', 'attrezzature'].filter((key) => allowed.has(key as DatasetKey)) as DatasetKey[]
+  return { ruoloCod, areaCod, profiloCod, allowedDatasets, isAdmin }
 }
 
 function categoryLabel(value: any): string {
@@ -784,7 +777,7 @@ export default function Widget(props: AllWidgetProps<IMConfig>) {
   const [msg, setMsg] = React.useState<{ text: string; ok: boolean } | null>(null)
 
   const definition = activeDataset ? DATASETS[activeDataset] : null
-  const isAdmin = access.profiloCod === 'ADMIN' || access.ruoloCod === 'ADMIN'
+  const isAdmin = access.isAdmin
   const showParameterCode = isAdmin || definition?.key === 'attrezzature'
   const serviceUrlByDataset: Record<DatasetKey, string> = {
     notaSpese: String(cfg.serviceUrl || '').trim(),
@@ -945,7 +938,7 @@ export default function Widget(props: AllWidgetProps<IMConfig>) {
   }
 
   if (access.allowedDatasets.length === 0) {
-    return <div style={{ padding: 12, fontFamily: 'Arial, sans-serif', color: '#7a1c1c', background: '#fce4e4', border: '1px solid #f5b8b8', borderRadius: 6 }}>Widget riservato al Responsabile Istruttore competente o all'Amministratore.</div>
+    return <div style={{ padding: 12, fontFamily: 'Arial, sans-serif', color: '#7a1c1c', background: '#fce4e4', border: '1px solid #f5b8b8', borderRadius: 6 }}>Funzione riservata ai ruoli Responsabile istruttoria tecnica, Responsabile istruttoria amministrativa o Amministratore.</div>
   }
 
   if (!definition) return null

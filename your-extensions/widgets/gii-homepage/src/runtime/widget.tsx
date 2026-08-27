@@ -5,8 +5,7 @@ import type { IMConfig, CardConfig, GroupOffset } from '../config'
 import { defaultConfig } from '../config'
 
 const GII_PORTAL = 'https://cbsm-hub.maps.arcgis.com'
-const RUOLO_LABEL: Record<number, string> = { 1:'TR', 2:'TI', 3:'RZ', 4:'RI', 5:'DT', 6:'DA', 7:'ADMIN' }
-const ROLE_CODES = new Set(['TR', 'TI', 'RZ', 'RI', 'DT', 'DA', 'RI_AMM', 'TI_AMM', 'ADMIN'])
+const ROLE_CODES = new Set(['TR', 'IT', 'CS', 'RIT', 'DT', 'DA', 'RIA', 'IA', 'ADMIN'])
 const AREA_CODES = new Set(['AMM', 'AGR', 'TEC'])
 const SETTORE_CODES = new Set(['CR', 'GI', 'D1', 'D2', 'D3', 'D4', 'D5', 'D6', 'DS'])
 const AREA_FROM_NUM: Record<number, string> = { 1:'AMM', 2:'AGR', 3:'TEC' }
@@ -117,6 +116,7 @@ interface UserInfo {
   settoreFull: string
   ufficio: number | null
   ufficioLabel: string
+  roleCodes: string[]
   isAdmin: boolean
 }
 
@@ -124,14 +124,9 @@ function cleanCode(value: any): string {
   return String(value ?? '').trim().toUpperCase()
 }
 
-function normalizeRoleCode(value: any, numericFallback?: any): string {
-  const direct = cleanCode(value)
-  if (ROLE_CODES.has(direct)) return direct
-
-  const n = numericFallback != null && numericFallback !== '' ? Number(numericFallback) : Number(value)
-  if (Number.isFinite(n) && RUOLO_LABEL[n]) return RUOLO_LABEL[n]
-
-  return ''
+function normalizeRoleCode(value: any): string {
+  const direct = cleanCode(value).replace(/[\s-]+/g, '_')
+  return ROLE_CODES.has(direct) ? direct : ''
 }
 
 function normalizeAreaCode(value: any, numericFallback?: any): string {
@@ -146,8 +141,7 @@ function normalizeAreaCode(value: any, numericFallback?: any): string {
 
 function normalizeSettoreCode(value: any, numericFallback?: any): string {
   const direct = cleanCode(value)
-  const fixed = direct === 'CS' ? 'DS' : direct
-  if (SETTORE_CODES.has(fixed)) return fixed
+  if (SETTORE_CODES.has(direct)) return direct
 
   const n = numericFallback != null && numericFallback !== '' ? Number(numericFallback) : Number(value)
   if (Number.isFinite(n) && SETTORE_FROM_NUM[n]) return SETTORE_FROM_NUM[n]
@@ -161,16 +155,25 @@ async function loadUser(): Promise<UserInfo | null> {
 
   const areaCod = normalizeAreaCode(cached.areaCod ?? cached.area_cod ?? cached.areaLabel, cached.area)
   const baseRuoloCod = normalizeRoleCode(
-    cached.profiloCod ?? cached.profilo_cod ?? cached.ruoloCod ?? cached.ruolo_cod ?? cached.ruoloLabel,
-    cached.ruolo
+    cached.profiloCod ?? cached.profilo_cod ?? cached.ruoloCod ?? cached.ruolo_cod
   ) || (cached.isAdmin ? 'ADMIN' : '')
   const ruoloCod =
-    baseRuoloCod === 'RI_AMM' || (areaCod === 'AMM' && baseRuoloCod === 'RI') ? 'RI_AMM' :
-    baseRuoloCod === 'TI_AMM' || (areaCod === 'AMM' && baseRuoloCod === 'TI') ? 'TI_AMM' :
+    baseRuoloCod === 'RIA' ? 'RIA' :
     baseRuoloCod
   const settoreCod = normalizeSettoreCode(cached.settoreCod ?? cached.settore_cod ?? cached.settoreLabel, cached.settore)
   const ufficioRaw = cached.ufficio ?? cached.id_ufficio ?? cached.ufficio_id
   const ufficio = ufficioRaw != null && ufficioRaw !== '' ? Number(ufficioRaw) : null
+  const roleCodes = new Set<string>()
+  if (ruoloCod) roleCodes.add(ruoloCod)
+  const assignments = Array.isArray(cached.assignments) ? cached.assignments : []
+  assignments.forEach((assignment: any) => {
+    const assignmentArea = normalizeAreaCode(assignment?.areaCod ?? assignment?.area_cod, assignment?.area)
+    const assignmentBaseRole = normalizeRoleCode(assignment?.profiloCod ?? assignment?.profilo_cod ?? assignment?.ruoloCod ?? assignment?.ruolo_cod)
+    const assignmentRole =
+      assignmentBaseRole === 'RIA' ? 'RIA' :
+      assignmentBaseRole
+    if (assignmentRole) roleCodes.add(assignmentRole)
+  })
 
   return {
     username: String(cached.username),
@@ -183,6 +186,7 @@ async function loadUser(): Promise<UserInfo | null> {
     settoreFull: String(cached.settoreFull || cached.settore_full || (settoreCod ? SETTORE_FULL[settoreCod] || settoreCod : '')),
     ufficio: Number.isFinite(ufficio) ? ufficio : null,
     ufficioLabel: String(cached.ufficioLabel || cached.ufficio_label || cached.ufficioZona || cached.ufficio_zona || ''),
+    roleCodes: Array.from(roleCodes),
     isAdmin: ruoloCod === 'ADMIN' || !!cached.isAdmin
   }
 }
@@ -516,17 +520,20 @@ export default function Widget(props: Props) {
     if (user.isAdmin) return true
 
     const effectiveRole =
-      user.ruoloCod === 'RI_AMM' || (user.areaCod === 'AMM' && user.ruoloCod === 'RI') ? 'RI_AMM' :
-      user.ruoloCod === 'TI_AMM' || (user.areaCod === 'AMM' && user.ruoloCod === 'TI') ? 'TI_AMM' :
+      user.ruoloCod === 'RIA' ? 'RIA' :
       user.ruoloCod
 
-    // RI_AMM e TI_AMM sono profili distinti dai rispettivi RI/TI tecnici.
-    // Una card assegnata solo a TI non deve comparire anche per TI_AMM, e viceversa.
-    return c.roles.some(role => role === effectiveRole)
+    // Le pagine globali seguono l'insieme delle assegnazioni operative dell'utente:
+    // un utente RIT+IT vede sia le funzioni RIT sia quelle IT, senza dipendere dal
+    // primo record restituito da GII_utenti. RIA/IA restano profili distinti.
+    const effectiveRoles = user.roleCodes?.length ? user.roleCodes : [effectiveRole]
+    return c.roles.some(role => effectiveRoles.includes(role))
   }
 
   const visibleCards = effCards.slice().sort((a,b) => a.order - b.order).filter(isVisible)
   const orgContext = getOrgContext(user)
+  const cachedAssignments = (window as any).__giiUserRole?.assignments
+  const hasMultipleAssignments = Array.isArray(cachedAssignments) && cachedAssignments.length > 1
 
   return (
     <div style={{ width:'100%',height:'100%',minHeight:500,
@@ -605,7 +612,7 @@ export default function Widget(props: Props) {
             </div>
           )}
 
-          {(cfg.showOrgContext ?? true) && orgContext.title && (
+          {(cfg.showOrgContext ?? true) && !hasMultipleAssignments && orgContext.title && (
             <div style={{
               display:'flex',
               justifyContent:

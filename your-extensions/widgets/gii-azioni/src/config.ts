@@ -54,17 +54,12 @@ export interface Config {
   btnPaddingX: number
   btnPaddingY: number
 
-  // --- Pulsanti editing TI
+  // --- Pulsanti editing tecnico
   showEditButtons: boolean
   editOverlayColor: string
   editPageColor: string
   editPageId: string
   editAmmPageId: string
-  fieldStatoTI: string
-  fieldPresaTI: string
-  editMinStato: number
-  editMaxStato: number
-  editPresaRequiredVal: number
 
   // --- Motivazioni respinta
   rejectReasons: string[]
@@ -152,11 +147,6 @@ export const defaultConfig: Config = {
   editPageColor: '#0d3b66',
   editPageId: 'page_45',
   editAmmPageId: 'page_48',
-  fieldStatoTI: 'stato_TI',
-  fieldPresaTI: 'presa_in_carico_TI',
-  editMinStato: 2,
-  editMaxStato: 2,
-  editPresaRequiredVal: 2,
 
   nsNotaSpeseDettaglioUrl: '',
   nsParametriUrl: '',

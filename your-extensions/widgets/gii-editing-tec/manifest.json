@@ -1,0 +1,12 @@
+{
+  "name": "gii-editing-tec",
+  "label": "GII Editing TEC",
+  "type": "widget",
+  "version": "1.0.0",
+  "exbVersion": "1.19.0",
+  "author": "CBSM",
+  "description": "Creazione e modifica pratiche lato tecnico. Supporta modalità pagina e overlay, geometria condizionale, audit log e trasmissione a CS.",
+  "dependency": ["jimu-arcgis"],
+  "translatedLocales": ["it"],
+  "defaultSize": { "width": 900, "height": 700 }
+}

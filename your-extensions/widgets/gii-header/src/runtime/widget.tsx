@@ -10,16 +10,14 @@ import { stampGiiPracticePayload, syncGiiPracticeContextUsername, writeGiiPracti
 
 const GII_PORTAL     = 'https://cbsm-hub.maps.arcgis.com'
 const GII_UTENTI_URL = 'https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_utenti/FeatureServer/0'
-const RUOLO_LABEL: Record<number, string> = { 1:'TR', 2:'TI', 3:'RZ', 4:'RI', 5:'DT', 6:'DA', 7:'ADMIN' }
-const RUOLO_NUM: Record<string, number> = { TR:1, TI:2, RZ:3, RI:4, DT:5, DA:6, ADMIN:7 }
 const RUOLO_FULL:  Record<string, string> = {
-  TR:'Tecnico rilevatore', TI:'Tecnico istruttore', RZ:'Capo Settore',
-  RI:'Responsabile istruttoria', DT:'Direttore d\'area', DA:'Direttore Area AA. GG. e P.F.', ADMIN:'Amministratore'
+  TR:'Tecnico rilevatore', IT:'Istruttore tecnico', IA:'Istruttore amministrativo', CS:'Capo Settore',
+  RIT:'Responsabile istruttoria tecnica', RIA:'Responsabile istruttoria amministrativa', DT:'Direttore d\'area', DA:'Direttore Area AA. GG. e P.F.', ADMIN:'Amministratore'
 }
 const PROFILO_FULL: Record<string, string> = {
   ...RUOLO_FULL,
-  TI_AMM: 'Tecnico istruttore amministrativo',
-  RI_AMM: 'Responsabile istruttoria amministrativa'
+  IA: 'Istruttore amministrativo',
+  RIA: 'Responsabile istruttoria amministrativa'
 }
 const AREA_LABEL: Record<number, string> = { 1:'AMM', 2:'AGR', 3:'TEC' }
 const AREA_NUM: Record<string, number> = { AMM:1, AGR:2, TEC:3 }
@@ -109,6 +107,17 @@ function gotoPage(pageToken: string): void {
 }
 
 
+function getRuntimeCurrentPageId(): string | null {
+  try {
+    const state: any = getAppStore()?.getState?.()
+    const pageId = String(state?.appRuntimeInfo?.currentPageId || '').trim()
+    return pageId || null
+  } catch {
+    return null
+  }
+}
+
+
 function getCurrentPageToken(): string | null {
   try {
     const h = window.location.hash || ''
@@ -188,18 +197,38 @@ function dispatchGiiUserLoaded (detail: any): void {
   }
 }
 
+interface GiiUserAssignment {
+  ruoloCod: string
+  ruolo_cod?: string
+  ruoloLabel: string
+  ruoloFull: string
+  profiloCod: string
+  profiloLabel: string
+  area: number | null
+  areaCod: string
+  area_cod?: string
+  areaFull?: string
+  settore: number | null
+  settoreCod: string
+  settore_cod?: string
+  settoreFull?: string
+  ufficio: number | null
+  ufficioLabel?: string
+  gruppo: string
+  isWorkflowAdmin: boolean
+}
+
 interface GiiUserRole {
   username: string
   fullName: string
-  ruolo: number | null
-  /** Codice ruolo testuale ufficiale (TR/TI/RZ/RI/DT/DA/ADMIN). */
+  /** Codice ruolo testuale ufficiale (TR/IT/IA/CS/RIT/DT/DA/ADMIN). */
   ruoloCod: string
   /** Alias snake_case per compatibilità con vecchi widget. */
   ruolo_cod?: string
   /** Backward-compat: coincide con ruoloCod. */
   ruoloLabel: string
   ruoloFull: string
-  /** Profilo operativo sintetico per i ruoli amministrativi: TI_AMM / RI_AMM. */
+  /** Profilo operativo sintetico per i ruoli amministrativi: IA / RIA. */
   profiloCod: string
   profiloLabel: string
   area: number | null
@@ -224,8 +253,10 @@ interface GiiUserRole {
   isAdmin: boolean
   /** Flag esplicito: admin dell'organizzazione AGOL (org_admin/owner) */
   isOrgAdmin: boolean
-  /** TRUE se ruolo workflow è ADMIN (ruolo=7 o label=ADMIN) */
+  /** TRUE se il codice ruolo workflow è ADMIN. */
   isWorkflowAdmin: boolean
+  /** Tutte le assegnazioni operative associate allo stesso username AGOL. */
+  assignments: GiiUserAssignment[]
 }
 
 function toNum(v: any): number | null {
@@ -234,17 +265,12 @@ function toNum(v: any): number | null {
 }
 
 function normCode(v: any): string {
-  const code = String(v ?? '').trim().toUpperCase()
-  // Vecchia codifica errata del settore n. 9: CS va trattato come DS, mai come CR.
-  if (code === 'CS') return 'DS'
-  return code
+  return String(v ?? '').trim().toUpperCase()
 }
 
 function getProfiloCod(ruoloCod: string, areaCod: string): string {
   const role = normCode(ruoloCod)
   const area = normCode(areaCod)
-  if (role === 'TI' && area === 'AMM') return 'TI_AMM'
-  if (role === 'RI' && area === 'AMM') return 'RI_AMM'
   return role
 }
 
@@ -330,19 +356,56 @@ function getSettoreLabel(user: GiiUserRole | null, compact = false): string {
   return SETTORE_FULL[code] || code
 }
 
+function normalizeAssignmentFromValues(values: any, domainLabels?: DomainLabelMap | null): GiiUserAssignment {
+  const ruoloCod = normCode(values?.ruolo_cod ?? values?.ruoloCod)
+  const isWorkflowAdmin = ruoloCod === 'ADMIN'
+  const areaResolved = resolveCodeAndNum(values?.area_cod ?? values?.areaCod, values?.area, AREA_LABEL, AREA_NUM)
+  const settoreResolved = resolveCodeAndNum(values?.settore_cod ?? values?.settoreCod, values?.settore, SETTORE_LABEL, SETTORE_NUM)
+  const area = isWorkflowAdmin ? null : areaResolved.num
+  const areaCod = isWorkflowAdmin ? '' : areaResolved.code
+  const settore = isWorkflowAdmin ? null : settoreResolved.num
+  const settoreCod = isWorkflowAdmin ? '' : settoreResolved.code
+  const ufficio = isWorkflowAdmin ? null : toNum(values?.ufficio)
+
+  const ruoloFull = String(
+    values?.ruoloFull || values?.ruolo_full ||
+    getDomainLabel(domainLabels, 'ruolo_cod', ruoloCod) ||
+    RUOLO_FULL[ruoloCod] || ruoloCod || ''
+  )
+  const areaFull = isWorkflowAdmin ? '' : String(
+    values?.areaFull || values?.area_full ||
+    getDomainLabelFromCandidates(domainLabels, 'area_cod', areaCod, 'area', area) ||
+    AREA_FULL[areaCod] || areaCod || ''
+  )
+  const settoreFull = isWorkflowAdmin ? '' : String(
+    values?.settoreFull || values?.settore_full ||
+    getDomainLabelFromCandidates(domainLabels, 'settore_cod', settoreCod, 'settore', settore) ||
+    SETTORE_FULL[settoreCod] || settoreCod || ''
+  )
+  const ufficioLabel = isWorkflowAdmin ? '' : String(
+    values?.ufficioLabel || values?.ufficio_label ||
+    getDomainLabel(domainLabels, 'ufficio', ufficio) ||
+    getDomainLabel(domainLabels, 'id_ufficio', ufficio) ||
+    (ufficio != null ? UFFICIO_LABEL[ufficio] || String(ufficio) : '')
+  )
+  const profiloCod = getProfiloCod(ruoloCod, areaCod)
+
+  return {
+    ruoloCod, ruolo_cod: ruoloCod, ruoloLabel: ruoloCod, ruoloFull,
+    profiloCod, profiloLabel: getProfiloLabel(profiloCod, ruoloFull, ruoloCod, areaCod),
+    area, areaCod, area_cod: areaCod, areaFull,
+    settore, settoreCod, settore_cod: settoreCod, settoreFull,
+    ufficio, ufficioLabel, gruppo: String(values?.gruppo || ''), isWorkflowAdmin
+  }
+}
+
 async function loadUser(): Promise<GiiUserRole | null> {
   const cached = (window as any).__giiUserRole
   if (cached?.username) {
     const isOrgAdmin = !!(cached.isOrgAdmin ?? cached.isAdmin)
 
-    const roleResolved = resolveCodeAndNum(cached.ruolo_cod ?? cached.ruoloCod ?? cached.ruoloLabel, cached.ruolo, RUOLO_LABEL, RUOLO_NUM)
-    let ruolo = roleResolved.num
-    let ruoloCod = roleResolved.code || (isOrgAdmin ? 'ADMIN' : '')
-
-    // Normalizza il ruolo workflow per ADMIN (7) quando è un fallback (org_admin senza record)
-    if ((ruolo == null || ruolo === 0) && ruoloCod === 'ADMIN') ruolo = 7
-
-    const isWorkflowAdmin = (ruolo === 7) || ruoloCod === 'ADMIN'
+    const ruoloCod = normCode(cached.ruolo_cod ?? cached.ruoloCod) || (isOrgAdmin ? 'ADMIN' : '')
+    const isWorkflowAdmin = ruoloCod === 'ADMIN'
 
     const areaResolved = resolveCodeAndNum(cached.area_cod ?? cached.areaCod, cached.area, AREA_LABEL, AREA_NUM)
     const settoreResolved = resolveCodeAndNum(cached.settore_cod ?? cached.settoreCod, cached.settore, SETTORE_LABEL, SETTORE_NUM)
@@ -357,10 +420,13 @@ async function loadUser(): Promise<GiiUserRole | null> {
     const fullName = String(cached.fullName || cached.full_name || cached.username)
     const profiloCod = getProfiloCod(ruoloCod, areaCod)
     const ruoloFull = String(cached.ruoloFull || RUOLO_FULL[ruoloCod] || ruoloCod || '')
+    const cachedAssignmentsRaw = Array.isArray(cached.assignments) ? cached.assignments : []
+    const assignments = cachedAssignmentsRaw.length
+      ? cachedAssignmentsRaw.map((assignment: any) => normalizeAssignmentFromValues(assignment))
+      : [normalizeAssignmentFromValues(cached)]
     const u: GiiUserRole = {
       username: String(cached.username),
       fullName,
-      ruolo,
       ruoloCod,
       ruolo_cod: ruoloCod,
       ruoloLabel: ruoloCod,
@@ -381,7 +447,8 @@ async function loadUser(): Promise<GiiUserRole | null> {
       // Backward-compat GII: i vecchi widget che leggono isAdmin devono intendere ADMIN workflow.
       isAdmin: isWorkflowAdmin,
       isOrgAdmin,
-      isWorkflowAdmin
+      isWorkflowAdmin,
+      assignments
     }
     try { (window as any).__giiUserRole = u } catch { }
     return u
@@ -403,24 +470,26 @@ async function loadUser(): Promise<GiiUserRole | null> {
     const domainLabels = buildDomainLabelMap((fl as any)?.fields || [])
     const qr = await fl.queryFeatures({
       where: `username = '${username.replace(/'/g,"''")}'`,
-      outFields: ['ruolo','ruolo_cod','area','area_cod','settore','settore_cod','ufficio','gruppo','full_name'],
+      outFields: ['ruolo_cod','area','area_cod','settore','settore_cod','ufficio','gruppo','full_name'],
       returnGeometry: false
     })
-    const f = qr?.features?.[0]
+    const features: any[] = Array.isArray(qr?.features) ? qr.features : []
+    const f = features[0]
 
     // Fallback robusto: se sei org_admin/owner ma non hai record (o campi incompleti) in GII_utenti
     // → contesto coerente "ADMIN trasversale" (mai DA)
     if (!f) {
       if (isOrgAdmin) {
-        const ruoloFull = getDomainLabelFromCandidates(domainLabels, 'ruolo_cod', 'ADMIN', 'ruolo', 7) || RUOLO_FULL.ADMIN || 'Amministratore'
+        const ruoloFull = getDomainLabel(domainLabels, 'ruolo_cod', 'ADMIN') || RUOLO_FULL.ADMIN || 'Amministratore'
         const u: GiiUserRole = {
           username, fullName,
-          ruolo: 7, ruoloCod: 'ADMIN', ruolo_cod: 'ADMIN', ruoloLabel: 'ADMIN', ruoloFull,
+          ruoloCod: 'ADMIN', ruolo_cod: 'ADMIN', ruoloLabel: 'ADMIN', ruoloFull,
           profiloCod: 'ADMIN', profiloLabel: getProfiloLabel('ADMIN', ruoloFull, 'ADMIN', ''),
           area: null, areaCod: '', area_cod: '', areaFull: '', settore: null, settoreCod: '', settore_cod: '', settoreFull: '', ufficio: null, ufficioLabel: '', gruppo: '',
           isAdmin: true,
           isOrgAdmin: true,
-          isWorkflowAdmin: true
+          isWorkflowAdmin: true,
+          assignments: [normalizeAssignmentFromValues({ ruolo_cod: 'ADMIN' }, domainLabels)]
         }
         try { (window as any).__giiUserRole = u } catch { }
         return u
@@ -428,27 +497,26 @@ async function loadUser(): Promise<GiiUserRole | null> {
 
       const u: GiiUserRole = {
         username, fullName,
-        ruolo: null, ruoloCod: '', ruolo_cod: '', ruoloLabel: '', ruoloFull: '',
+        ruoloCod: '', ruolo_cod: '', ruoloLabel: '', ruoloFull: '',
         profiloCod: '', profiloLabel: '',
         area: null, areaCod: '', area_cod: '', areaFull: '', settore: null, settoreCod: '', settore_cod: '', settoreFull: '', ufficio: null, ufficioLabel: '', gruppo: '',
         isAdmin: false,
         isOrgAdmin: false,
-        isWorkflowAdmin: false
+        isWorkflowAdmin: false,
+        assignments: []
       }
       try { (window as any).__giiUserRole = u } catch { }
       return u
     }
 
     const a = f.attributes
-    const roleResolved = resolveCodeAndNum(a.ruolo_cod, a.ruolo, RUOLO_LABEL, RUOLO_NUM)
-    let rn = roleResolved.num
-    let ruoloCod = roleResolved.code
+    let ruoloCod = normCode(a.ruolo_cod)
 
     // Se l'utente è org_admin/owner ma il ruolo workflow non è valorizzato/riconosciuto
-    // → usa workflow ADMIN (7) senza trasformarlo in DA
-    if ((!ruoloCod || ruoloCod === '') && isOrgAdmin) { rn = 7; ruoloCod = 'ADMIN' }
+    // → usa workflow ADMIN senza trasformarlo in DA.
+    if (!ruoloCod && isOrgAdmin) ruoloCod = 'ADMIN'
 
-    const isWorkflowAdmin = (rn === 7) || ruoloCod === 'ADMIN'
+    const isWorkflowAdmin = ruoloCod === 'ADMIN'
     const areaResolved = resolveCodeAndNum(a.area_cod, a.area, AREA_LABEL, AREA_NUM)
     const settoreResolved = resolveCodeAndNum(a.settore_cod, a.settore, SETTORE_LABEL, SETTORE_NUM)
 
@@ -457,17 +525,17 @@ async function loadUser(): Promise<GiiUserRole | null> {
     const settore = isWorkflowAdmin ? null : settoreResolved.num
     const settoreCod = isWorkflowAdmin ? '' : settoreResolved.code
     const ufficio = isWorkflowAdmin ? null : toNum(a.ufficio)
-    const ruoloFull = getDomainLabelFromCandidates(domainLabels, 'ruolo_cod', ruoloCod, 'ruolo', rn) || RUOLO_FULL[ruoloCod] || ruoloCod
+    const ruoloFull = getDomainLabel(domainLabels, 'ruolo_cod', ruoloCod) || RUOLO_FULL[ruoloCod] || ruoloCod
     const areaFull = isWorkflowAdmin ? '' : (getDomainLabelFromCandidates(domainLabels, 'area_cod', areaCod, 'area', area) || AREA_FULL[areaCod] || areaCod)
     const settoreFull = isWorkflowAdmin ? '' : (getDomainLabelFromCandidates(domainLabels, 'settore_cod', settoreCod, 'settore', settore) || SETTORE_FULL[settoreCod] || settoreCod)
     const ufficioLabel = isWorkflowAdmin ? '' : (getDomainLabel(domainLabels, 'ufficio', ufficio) || getDomainLabel(domainLabels, 'id_ufficio', ufficio) || (ufficio != null ? UFFICIO_LABEL[ufficio] || String(ufficio) : ''))
     const profiloCod = getProfiloCod(ruoloCod, areaCod)
     const profiloLabel = getProfiloLabel(profiloCod, ruoloFull, ruoloCod, areaCod)
+    const assignments = features.map((feature: any) => normalizeAssignmentFromValues(feature?.attributes || {}, domainLabels))
 
     const u: GiiUserRole = {
       username,
       fullName: String(a.full_name || fullName),
-      ruolo: rn,
       ruoloCod,
       ruolo_cod: ruoloCod,
       ruoloLabel: ruoloCod,
@@ -489,7 +557,8 @@ async function loadUser(): Promise<GiiUserRole | null> {
       // Backward-compat GII: i vecchi widget che leggono isAdmin devono intendere ADMIN workflow.
       isAdmin: isWorkflowAdmin,
       isOrgAdmin,
-      isWorkflowAdmin
+      isWorkflowAdmin,
+      assignments
     }
     try { (window as any).__giiUserRole = u } catch { }
     return u
@@ -598,16 +667,14 @@ function alertRoleAreaKey (user: any): string {
   const area = String(user?.areaCod || user?.area || '').trim().toUpperCase()
   if (role === 'ADMIN') return 'ADMIN'
   if (role === 'DA') return 'DA'
-  if (role === 'TI_AMM' || role === 'RI_AMM') return role
-  if (role === 'TI' && area === 'AMM') return 'TI_AMM'
-  if (role === 'RI' && area === 'AMM') return 'RI_AMM'
-  if (role === 'RZ' && area === 'TEC') return 'RZ_TEC'
-  if (role === 'TI' && area === 'TEC') return 'TI_TEC'
-  if (role === 'RI' && area === 'TEC') return 'RI_TEC'
+  if (role === 'IA' || role === 'RIA') return role
+  if (role === 'CS' && area === 'TEC') return 'CS_TEC'
+  if (role === 'IT' && area === 'TEC') return 'IT_TEC'
+  if (role === 'RIT' && area === 'TEC') return 'RIT_TEC'
   if (role === 'DT' && area === 'TEC') return 'DT_TEC'
-  if (role === 'RZ' && area === 'AGR') return 'RZ_AGR'
-  if (role === 'TI' && area === 'AGR') return 'TI_AGR'
-  if (role === 'RI' && area === 'AGR') return 'RI_AGR'
+  if (role === 'CS' && area === 'AGR') return 'CS_AGR'
+  if (role === 'IT' && area === 'AGR') return 'IT_AGR'
+  if (role === 'RIT' && area === 'AGR') return 'RIT_AGR'
   if (role === 'DT' && area === 'AGR') return 'DT_AGR'
   if (role.endsWith('_TEC') || role.endsWith('_AGR')) return role
   return role
@@ -615,7 +682,7 @@ function alertRoleAreaKey (user: any): string {
 
 function canUseGiiAlerts (user: any): boolean {
   const k = alertRoleAreaKey(user)
-  return ['ADMIN', 'TI_AMM', 'RI_AMM', 'DA', 'RZ_TEC', 'TI_TEC', 'RI_TEC', 'DT_TEC', 'RZ_AGR', 'TI_AGR', 'RI_AGR', 'DT_AGR'].includes(k)
+  return ['ADMIN', 'IA', 'RIA', 'DA', 'CS_TEC', 'IT_TEC', 'RIT_TEC', 'DT_TEC', 'CS_AGR', 'IT_AGR', 'RIT_AGR', 'DT_AGR'].includes(k)
 }
 
 function alertAreaForUrls (user: any): 'AMM' | 'AGR' | 'TEC' {
@@ -652,8 +719,8 @@ function selectAlertPracticeLayerUrl (cfg: any, user: any): string {
   return String(cfg.alertsPracticeLayerUrl || '').trim()
 }
 
-// Viste editabili per settore/distretto (TI/RZ), stesse URL già usate in
-// gii-elenco-pratiche-pro/runtimeDataSources. TI/RZ non hanno accesso in
+// Viste editabili per settore/distretto (IT/CS), stesse URL già usate in
+// gii-elenco-pratiche-pro/runtimeDataSources. IT/CS non hanno accesso in
 // scrittura alla vista d'area (GII_VIEW_AGR/GII_VIEW_TEC), solo alla propria.
 const GII_WRITE_VIEW_BY_SETTORE: Record<string, string> = {
   D1: 'https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_VIEW_AGR_D1/FeatureServer/0',
@@ -667,20 +734,20 @@ const GII_WRITE_VIEW_BY_SETTORE: Record<string, string> = {
 
 // Vista editabile dedicata alla sola normalizzazione testi (applyEdits). Distinta
 // da selectAlertPracticeLayerUrl (che resta di sola lettura, "_ALL", condivisa con
-// tutti i sotto-ruoli). TI/RZ (ruoli di distretto) scrivono sulla vista del proprio
-// settore; RI/DT/RI_AMM/DA (ruoli d'area) sulla vista d'area; TI_AMM non ha accesso
+// tutti i sotto-ruoli). IT/CS (ruoli di distretto) scrivono sulla vista del proprio
+// settore; RIT/DT/RIA/DA (ruoli d'area) sulla vista d'area; IA non ha accesso
 // in scrittura da nessuna parte, quindi non tenta nulla. Se il ruolo corrente non
 // ha comunque accesso, il tentativo fallisce silenziosamente (try/catch a monte)
 // senza impattare la lettura degli allarmi.
 function selectAlertPracticeLayerUrlWrite (cfg: any, user: any): string {
   const key = alertRoleAreaKey(user)
-  if (key === 'RZ_AGR' || key === 'TI_AGR' || key === 'RZ_TEC' || key === 'TI_TEC') {
+  if (key === 'CS_AGR' || key === 'IT_AGR' || key === 'CS_TEC' || key === 'IT_TEC') {
     const settore = normCode(user?.settoreCod || '')
     return GII_WRITE_VIEW_BY_SETTORE[settore] || ''
   }
-  if (key === 'RI_AGR' || key === 'DT_AGR') return String(cfg.alertsPracticeLayerUrlWriteAgr || '').trim()
-  if (key === 'RI_TEC' || key === 'DT_TEC') return String(cfg.alertsPracticeLayerUrlWriteTec || '').trim()
-  if (key === 'RI_AMM' || key === 'DA') return String(cfg.alertsPracticeLayerUrlWrite || '').trim()
+  if (key === 'RIT_AGR' || key === 'DT_AGR') return String(cfg.alertsPracticeLayerUrlWriteAgr || '').trim()
+  if (key === 'RIT_TEC' || key === 'DT_TEC') return String(cfg.alertsPracticeLayerUrlWriteTec || '').trim()
+  if (key === 'RIA' || key === 'DA') return String(cfg.alertsPracticeLayerUrlWrite || '').trim()
   return ''
 }
 
@@ -762,7 +829,7 @@ function mergeCurrentAndFallbackGiiAlerts (currentActivities: GiiAlertItem[], dy
       const key = alertPracticeMergeKey(a)
       // Le attività correnti sono la fonte autorevole per gli allarmi di workflow.
       // Il controllo dinamico sul FL madre può integrare scadenze/fallback, ma non
-      // deve reintrodurre card equivalenti con mittenti sintetici tipo "RZ D1".
+      // deve reintrodurre card equivalenti con mittenti sintetici tipo "CS D1".
       if (key && currentWorkflowKeys.has(key) && alertIsStandardWorkflowAlert(a)) return false
       return true
     })
@@ -876,7 +943,7 @@ function alertEventDateMs (alert: GiiAlertItem | null | undefined): number | nul
 
   // Le attività correnti espongono normalmente data_attivazione/creato_il.
   // Gli allarmi di presa in carico ricavati come fallback dal layer pratica, invece,
-  // possono avere solo la data di stato del ruolo destinatario (es. dt_stato_RZ per
+  // possono avere solo la data di stato del ruolo destinatario (es. dt_stato_CS per
   // le rilevazioni TR). Usiamo quindi una lista ampia di fallback, mantenendo prima
   // i campi specifici dell'attività e poi le date di workflow della pratica.
   return asAlertDateMs(raw.data_attivazione) ??
@@ -884,20 +951,14 @@ function alertEventDateMs (alert: GiiAlertItem | null | undefined): number | nul
     asAlertDateMs(raw.data_evento) ??
     asAlertDateMs(raw.dt_evento) ??
     asAlertDateMs(raw.dt_chiusura) ??
-    asAlertDateMs(raw.dt_stato_RZ_AGR) ??
-    asAlertDateMs(raw.dt_stato_RZ_TEC) ??
-    asAlertDateMs(raw.dt_stato_RZ) ??
-    asAlertDateMs(raw.dt_stato_TI_AGR) ??
-    asAlertDateMs(raw.dt_stato_TI_TEC) ??
-    asAlertDateMs(raw.dt_stato_TI) ??
-    asAlertDateMs(raw.dt_stato_RI_AGR) ??
-    asAlertDateMs(raw.dt_stato_RI_TEC) ??
-    asAlertDateMs(raw.dt_stato_RI) ??
+    asAlertDateMs(raw.dt_stato_CS) ??
+    asAlertDateMs(raw.dt_stato_IT) ??
+    asAlertDateMs(raw.dt_stato_RIT) ??
     asAlertDateMs(raw.dt_stato_DT_AGR) ??
     asAlertDateMs(raw.dt_stato_DT_TEC) ??
     asAlertDateMs(raw.dt_stato_DT) ??
-    asAlertDateMs(raw.dt_stato_TI_AMM) ??
-    asAlertDateMs(raw.dt_stato_RI_AMM) ??
+    asAlertDateMs(raw.dt_stato_IA) ??
+    asAlertDateMs(raw.dt_stato_RIA) ??
     asAlertDateMs(raw.determinazione_data) ??
     asAlertDateMs(raw.determinazione_trasmessa_firma_il) ??
     asAlertDateMs(raw.EditDate) ??
@@ -972,7 +1033,7 @@ function normalizeUsernameLookupKey (value: any): string {
   return text.replace(/^.*\|/, '')
 }
 
-function alertIsTiOrigin (alert: GiiAlertItem | null | undefined): boolean {
+function alertIsItOrigin (alert: GiiAlertItem | null | undefined): boolean {
   const values = [
     alert?.reportCode,
     alert?.message,
@@ -980,7 +1041,7 @@ function alertIsTiOrigin (alert: GiiAlertItem | null | undefined): boolean {
     alertRawValue(alert, ['origine_pratica'])
   ].map(v => String(v ?? '').trim().toUpperCase()).filter(Boolean)
 
-  return values.some(v => /(^|[-_\s])TI([-_\s]|$)/.test(v) || v === '2' || v === 'TI')
+  return values.some(v => /(^|[-_\s])IT([-_\s]|$)/.test(v) || v === '2' || v === 'IT')
 }
 
 function alertRawValuesPracticeFirst (alert: GiiAlertItem | null | undefined, names: string[]): string[] {
@@ -1064,10 +1125,10 @@ function alertIsNewAssignmentReceived (alert: GiiAlertItem | null | undefined): 
   if (!isNewAssignment) return false
 
   // Nel flusso tecnico questa casistica corrisponde alla normale assegnazione
-  // RZ → TI della rilevazione appena ricevuta. Manteniamo incluso TI_AMM per
+  // CS → IT della rilevazione appena ricevuta. Manteniamo incluso IA per
   // la stessa semantica nella fase amministrativa, senza cambiare gli altri
   // passaggi di trasmissione/rimando.
-  return destRole === 'TI' || destRole === 'TI_AMM'
+  return destRole === 'IT' || destRole === 'IA'
 }
 
 function alertSubtypeCode (alert: GiiAlertItem | null | undefined): string {
@@ -1104,16 +1165,16 @@ function alertDisplayTitle (alert: GiiAlertItem): string {
   const rawTitleUpper = rawTitle.toUpperCase()
 
   if (alertIsNewRilevazione(alert)) return 'Nuova rilevazione ricevuta'
-  if (event === 'ISTRUTTORIA_TRASMESSA' && destRole === 'RZ' && alertIsTiOrigin(alert)) return 'Nuova rilevazione ricevuta'
-  if (subtype === 'ATTESTAZIONE_CONFORMITA_TI_AMM' || event === 'ATTESTAZIONE_CONFORMITA') return 'Attestazione di conformità apposta'
+  if (event === 'ISTRUTTORIA_TRASMESSA' && destRole === 'CS' && alertIsItOrigin(alert)) return 'Nuova rilevazione ricevuta'
+  if (subtype === 'ATTESTAZIONE_CONFORMITA_IA' || event === 'ATTESTAZIONE_CONFORMITA') return 'Attestazione di conformità apposta'
   if (subtype === 'PROPOSTA_CONTESTAZIONE_APPROVATA' || event === 'PROPOSTA_CONTESTAZIONE_APPROVATA') return 'Proposta di contestazione approvata'
   if (alertIsNewAssignmentReceived(alert)) return 'Nuova istruttoria assegnata'
-  if (subtype === 'RILEVAZIONE_RESPINTA' || subtype === 'RZ_RESPINGE_RILEVAZIONE') return 'Nuova rilevazione respinta'
-  if (subtype === 'RZ_APPROVA_RILEVAZIONE') return rawTitleUpper.includes('INTEGRAZIONE') ? 'Integrazione validata' : 'Istruttoria approvata'
+  if (subtype === 'RILEVAZIONE_RESPINTA' || subtype === 'CS_RESPINGE_RILEVAZIONE') return 'Nuova rilevazione respinta'
+  if (subtype === 'CS_APPROVA_RILEVAZIONE') return rawTitleUpper.includes('INTEGRAZIONE') ? 'Integrazione validata' : 'Istruttoria approvata'
   if (subtype === 'DT_APPROVA_RAPPORTO') return 'Rapporto tecnico approvato'
   if (subtype === 'DT_RESPINGE_RAPPORTO') return 'Rapporto tecnico respinto'
-  if (subtype === 'DT_RIMANDA_A_TI' || subtype === 'RI_RIMANDA_A_TI') return 'Rimando al Tecnico istruttore'
-  if (subtype === 'BOZZA_DETERMINAZIONE' || event === 'TI_AMM_TRASMETTE_BOZZA_DETERMINAZIONE') return 'Bozza determinazione da verificare'
+  if (subtype === 'DT_RIMANDA_A_IT' || subtype === 'RIT_RIMANDA_A_IT') return 'Rimando all’Istruttore tecnico'
+  if (subtype === 'BOZZA_DETERMINAZIONE' || event === 'IA_TRASMETTE_BOZZA_DETERMINAZIONE') return 'Bozza determinazione da verificare'
 
   return String(alert?.title || '').trim() || 'Allarme'
 }
@@ -1124,22 +1185,20 @@ function roleLabelForBody (value: string): string {
   if (!n) return ''
 
   if (n.includes('TECNICO RILEVATORE')) return 'tecnico rilevatore'
-  if (n.includes('TECNICO ISTRUTTORE AMMINISTRATIVO')) return 'tecnico istruttore amministrativo'
-  if (n.includes('TECNICO ISTRUTTORE')) return 'tecnico istruttore'
+  if (n.includes('ISTRUTTORE AMMINISTRATIVO')) return 'Istruttore amministrativo'
+  if (n.includes('ISTRUTTORE TECNICO')) return 'istruttore tecnico'
   if (n.includes('RESPONSABILE ISTRUTTORIA AMMINISTRATIVA')) return 'Responsabile istruttoria amministrativa'
-  if (n.includes('RESPONSABILE ISTRUTTORIA')) return 'Responsabile istruttoria'
   if (n.includes('CAPO SETTORE')) return 'Capo Settore'
-  if (n.includes('RESPONSABILE DI ZONA')) return 'Capo Settore'
   if (n.includes('DIRETTORE AREA AMMINISTRATIVA') || n.includes('DIRETTORE AREA AA')) return 'Direttore Area AA. GG. e P.F.'
   if (n.includes('DIRETTORE D’AREA') || n.includes("DIRETTORE D'AREA")) return 'Direttore d’Area'
 
   const tag = raw.split(/\s+-\s+/)[0].trim().toUpperCase().replace(/_/g, '-')
   if (tag === 'TR' || tag.startsWith('TR-')) return 'tecnico rilevatore'
-  if (tag === 'TI-AMM') return 'tecnico istruttore amministrativo'
-  if (tag === 'TI' || tag.startsWith('TI-')) return 'tecnico istruttore'
-  if (tag === 'RI-AMM') return 'Responsabile istruttoria amministrativa'
-  if (tag === 'RI' || tag.startsWith('RI-')) return 'Responsabile istruttoria'
-  if (tag === 'RZ' || tag.startsWith('RZ-')) return 'Capo Settore'
+  if (tag === 'IA-AMM') return 'Istruttore amministrativo'
+  if (tag === 'IT' || tag.startsWith('IT-')) return 'istruttore tecnico'
+  if (tag === 'RIA') return 'Responsabile istruttoria amministrativa'
+  if (tag === 'RIT' || tag.startsWith('RIT-')) return 'Responsabile istruttoria tecnica'
+  if (tag === 'CS' || tag.startsWith('CS-')) return 'Capo Settore'
   if (tag === 'DA') return 'Direttore Area AA. GG. e P.F.'
   if (tag === 'DT' || tag.startsWith('DT-') || tag === 'DIR' || tag.startsWith('DIR-')) return 'Direttore d’Area'
 
@@ -1185,15 +1244,14 @@ function parseSectorCodeCandidate (value: any): string {
   if (!raw) return ''
 
   const compact = raw.toUpperCase().replace(/_/g, '-').replace(/\s+/g, '')
-  if (compact === 'CS') return 'DS'
   if (/^D[1-6]$/.test(compact)) return compact
   if (compact === 'DS' || compact === 'CR' || compact === 'GI') return compact
 
   const n = Number(compact)
   if (Number.isFinite(n)) return String(SETTORE_LABEL[n] || '').trim().toUpperCase()
 
-  // Fallback per valori compositi, ad esempio username/chiavi tipo Test_RZ_D1 o RZ-D1.
-  // Serve solo a ricavare il riferimento organizzativo, non il nominativo del mittente.
+  // Fallback solo per valori strutturati/compositi di workflow (es. CS-D1).
+  // Gli username sono identificativi opachi e non devono determinare il settore.
   const spaced = raw.toUpperCase().replace(/_/g, ' ').replace(/-/g, ' ').replace(/\s+/g, ' ').trim()
   const d = spaced.match(/(?:^|\s)D([1-6])(?:\s|$)/)
   if (d) return `D${d[1]}`
@@ -1205,10 +1263,7 @@ function parseSectorCodeCandidate (value: any): string {
 }
 
 function sectorCodeFromAlert (alert: GiiAlertItem | null | undefined): string {
-  const actorValues = [
-    ...alertSenderUserCandidates(alert),
-    ...alertRawValuesPracticeFirst(alert, ['creato_da', 'aggiornato_da', 'GII_da', 'gii_da', 'chiave_attivita'])
-  ]
+  const actorValues = alertRawValuesPracticeFirst(alert, ['GII_da', 'gii_da', 'chiave_attivita'])
 
   const actorCodes = actorValues
     .map(value => parseSectorCodeCandidate(value))
@@ -1217,8 +1272,8 @@ function sectorCodeFromAlert (alert: GiiAlertItem | null | undefined): string {
   // Nei messaggi di workflow il settore deve riferirsi alla pratica/mittente reale.
   // Alcune attività correnti possono avere campi diretti valorizzati con GI
   // (Gestione irrigua), che è una categoria organizzativa generica e non il
-  // distretto della pratica. Se dal mittente reale si ricava un distretto
-  // (es. Test_RZ_D1 -> D1), quel valore deve prevalere su GI.
+  // distretto della pratica. Un distretto ricavato da un valore strutturato
+  // di workflow può prevalere su GI; mai da uno username.
   const actorDistrict = actorCodes.find(code => /^D[1-6]$/.test(code) || code === 'DS' || code === 'CR') || ''
 
   const directValues = alertRawValuesPracticeFirst(alert, [
@@ -1250,10 +1305,8 @@ function parseAreaCodeCandidate (value: any): string {
   const n = Number(compact)
   if (Number.isFinite(n)) return String(AREA_LABEL[n] || '').trim().toUpperCase()
 
-  // Fallback per valori compositi, ad esempio username/chiavi tipo
-  // Test_DT_AGR, Test_RI_TEC, RI-AMM o TI_AMM. Nei messaggi di
-  // workflow la riga Area deve riferirsi al mittente reale, non al
-  // destinatario dell'attività corrente.
+  // Fallback solo per valori strutturati/compositi di workflow (es. RIA).
+  // Gli username sono identificativi opachi e non devono determinare l'area.
   const spaced = raw.toUpperCase().replace(/_/g, ' ').replace(/-/g, ' ').replace(/\s+/g, ' ').trim()
   if (/(?:^|\s)AGR(?:\s|$)/.test(spaced)) return 'AGR'
   if (/(?:^|\s)TEC(?:\s|$)/.test(spaced)) return 'TEC'
@@ -1263,10 +1316,7 @@ function parseAreaCodeCandidate (value: any): string {
 }
 
 function areaCodeFromAlert (alert: GiiAlertItem | null | undefined): string {
-  const actorValues = [
-    ...alertSenderUserCandidates(alert),
-    ...alertRawValuesPracticeFirst(alert, ['creato_da', 'aggiornato_da', 'GII_da', 'gii_da', 'chiave_attivita'])
-  ]
+  const actorValues = alertRawValuesPracticeFirst(alert, ['GII_da', 'gii_da', 'chiave_attivita'])
 
   const actorArea = actorValues
     .map(value => parseAreaCodeCandidate(value))
@@ -1306,22 +1356,20 @@ function roleCodeFromGiiActor (value: string): string {
   const tag = raw.split(/\s+-\s+/)[0].trim().toUpperCase().replace(/_/g, '-').replace(/\s+/g, '-')
 
   if (tag === 'DA') return 'DA'
-  if (tag === 'RI-AMM') return 'RI_AMM'
-  if (tag === 'TI-AMM') return 'TI_AMM'
+  if (tag === 'RIA') return 'RIA'
+  if (tag === 'IA-AMM') return 'IA'
   if (tag === 'DIR' || tag.startsWith('DIR-') || tag === 'DT' || tag.startsWith('DT-')) return 'DT'
-  if (tag === 'RI' || /^RI-(AGR|TEC|D\d|DS|CR)$/.test(tag)) return 'RI'
-  if (tag === 'RZ' || tag.startsWith('RZ-')) return 'RZ'
-  if (tag === 'TI' || tag.startsWith('TI-')) return 'TI'
+  if (tag === 'RIT' || /^RIT-(AGR|TEC|D\d|DS|CR)$/.test(tag)) return 'RIT'
+  if (tag === 'CS' || tag.startsWith('CS-')) return 'CS'
+  if (tag === 'IT' || tag.startsWith('IT-')) return 'IT'
   if (tag === 'TR' || tag.startsWith('TR-')) return 'TR'
 
   const label = roleLabelForBody(raw).toUpperCase()
   if (label.includes('TECNICO RILEVATORE')) return 'TR'
-  if (label.includes('TECNICO ISTRUTTORE AMMINISTRATIVO')) return 'TI_AMM'
-  if (label.includes('TECNICO ISTRUTTORE')) return 'TI'
-  if (label.includes('RESPONSABILE ISTRUTTORIA AMMINISTRATIVA')) return 'RI_AMM'
-  if (label.includes('RESPONSABILE ISTRUTTORIA')) return 'RI'
-  if (label.includes('CAPO SETTORE')) return 'RZ'
-  if (label.includes('RESPONSABILE DI ZONA')) return 'RZ'
+  if (label.includes('ISTRUTTORE AMMINISTRATIVO')) return 'IA'
+  if (label.includes('ISTRUTTORE TECNICO')) return 'IT'
+  if (label.includes('RESPONSABILE ISTRUTTORIA AMMINISTRATIVA')) return 'RIA'
+  if (label.includes('CAPO SETTORE')) return 'CS'
   if (label.includes('DIRETTORE AREA AMMINISTRATIVA')) return 'DA'
   if (label.includes('DIRETTORE D’AREA') || label.includes("DIRETTORE D'AREA")) return 'DT'
 
@@ -1333,32 +1381,32 @@ function alertSenderRoleCode (alert: GiiAlertItem | null | undefined): string {
   const event = alertOriginEventCode(alert as any)
   const destRole = alertDestRoleCode(alert as any)
 
-  if (alertIsNewRilevazione(alert)) return alertIsTiOrigin(alert) ? 'TI' : 'TR'
-  if (subtype === 'BOZZA_DETERMINAZIONE' || event === 'TI_AMM_TRASMETTE_BOZZA_DETERMINAZIONE') return 'TI_AMM'
-  if (event === 'ISTRUTTORIA_TRASMESSA' && destRole === 'RZ') return 'TI'
+  if (alertIsNewRilevazione(alert)) return alertIsItOrigin(alert) ? 'IT' : 'TR'
+  if (subtype === 'BOZZA_DETERMINAZIONE' || event === 'IA_TRASMETTE_BOZZA_DETERMINAZIONE') return 'IA'
+  if (event === 'ISTRUTTORIA_TRASMESSA' && destRole === 'CS') return 'IT'
 
   if (alertIsNewAssignmentReceived(alert)) {
-    if (destRole === 'TI_AMM') return 'RI_AMM'
-    if (destRole === 'TI') return 'RZ'
+    if (destRole === 'IA') return 'RIA'
+    if (destRole === 'IT') return 'CS'
   }
 
-  if (subtype === 'RILEVAZIONE_RESPINTA' || subtype === 'RZ_RESPINGE_RILEVAZIONE' || subtype === 'RZ_APPROVA_RILEVAZIONE') return 'RZ'
-  if (subtype === 'DT_APPROVA_RAPPORTO' || subtype === 'DT_RESPINGE_RAPPORTO' || subtype === 'DT_RIMANDA_A_TI') return 'DT'
-  if (subtype === 'RI_RIMANDA_A_TI') return 'RI'
+  if (subtype === 'RILEVAZIONE_RESPINTA' || subtype === 'CS_RESPINGE_RILEVAZIONE' || subtype === 'CS_APPROVA_RILEVAZIONE') return 'CS'
+  if (subtype === 'DT_APPROVA_RAPPORTO' || subtype === 'DT_RESPINGE_RAPPORTO' || subtype === 'DT_RIMANDA_A_IT') return 'DT'
+  if (subtype === 'RIT_RIMANDA_A_IT') return 'RIT'
 
-  if (subtype.startsWith('RI_AMM_')) return 'RI_AMM'
-  if (subtype.startsWith('TI_AMM_')) return 'TI_AMM'
+  if (subtype.startsWith('RIA_')) return 'RIA'
+  if (subtype.startsWith('IA_')) return 'IA'
   if (subtype.startsWith('DT_')) return 'DT'
-  if (subtype.startsWith('RI_')) return 'RI'
-  if (subtype.startsWith('RZ_')) return 'RZ'
-  if (subtype.startsWith('TI_')) return 'TI'
+  if (subtype.startsWith('RIT_')) return 'RIT'
+  if (subtype.startsWith('CS_')) return 'CS'
+  if (subtype.startsWith('IT_')) return 'IT'
   if (subtype.startsWith('TR_')) return 'TR'
 
-  if (event === 'INVIO_A_TI_AMM') return 'DT'
+  if (event === 'INVIO_A_IA') return 'DT'
   if (event === 'ISTRUTTORIA_TRASMESSA') {
-    if (destRole === 'RI') return 'RZ'
-    if (destRole === 'DT') return 'RI'
-    if (destRole === 'RI_AMM') return 'TI_AMM'
+    if (destRole === 'RIT') return 'CS'
+    if (destRole === 'DT') return 'RIT'
+    if (destRole === 'RIA') return 'IA'
   }
 
   return roleCodeFromGiiActor(
@@ -1376,12 +1424,12 @@ function alertActorRoleForBody (alert: GiiAlertItem | null | undefined): string 
   const area = areaRefFromAlert(alert)
 
   if (role === 'TR') return office ? `tecnico rilevatore dell’${office}` : 'tecnico rilevatore'
-  if (role === 'TI') return office ? `tecnico istruttore dell’${office}` : 'tecnico istruttore'
-  if (role === 'RZ') return sector ? `Capo Settore ${sector}` : 'Capo Settore'
-  if (role === 'RI') return area ? `Responsabile istruttoria dell’${area}` : 'Responsabile istruttoria'
+  if (role === 'IT') return office ? `istruttore tecnico dell’${office}` : 'istruttore tecnico'
+  if (role === 'CS') return sector ? `Capo Settore ${sector}` : 'Capo Settore'
+  if (role === 'RIT') return area ? `Responsabile istruttoria tecnica dell’${area}` : 'Responsabile istruttoria tecnica'
   if (role === 'DT') return area ? `Direttore dell’${area}` : 'Direttore d’Area'
-  if (role === 'TI_AMM') return 'tecnico istruttore amministrativo'
-  if (role === 'RI_AMM') return 'Responsabile istruttoria amministrativa'
+  if (role === 'IA') return 'Istruttore amministrativo'
+  if (role === 'RIA') return 'Responsabile istruttoria amministrativa'
   if (role === 'DA') return 'Direttore Area AA. GG. e P.F.'
 
   return roleLabelForBody(
@@ -1392,12 +1440,8 @@ function alertActorRoleForBody (alert: GiiAlertItem | null | undefined): string 
   )
 }
 
-function parseUsernameFromGiiActorLabel (value: any): string {
-  const text = String(value ?? '').trim()
-  if (!text) return ''
-  const parts = text.split(/\s+-\s+/)
-  if (parts.length > 1) return String(parts.slice(1).join(' - ') || '').trim()
-  return text
+function normalizeUsernameCandidate (value: any): string {
+  return String(value ?? '').trim()
 }
 
 function isSenderDisplayNoise (value: any): boolean {
@@ -1411,15 +1455,14 @@ function isSenderDisplayNoise (value: any): boolean {
 function looksLikeGiiRoleCode (value: any): boolean {
   const text = String(value ?? '').trim().toUpperCase().replace(/_/g, '-').replace(/\s+/g, ' ')
   if (!text) return false
-  if (/^(TR|TI|RZ|RI|DT|DA|DIR)$/.test(text)) return true
-  if (/^(TI|RI)[\s-]+AMM$/.test(text)) return true
-  if (/^(TR|TI|RZ|RI|DT|DIR)[\s-]*(AGR|TEC|AMM|D[1-6]|DS|CR)$/.test(text)) return true
+  if (/^(TR|IT|IA|CS|RIT|RIA|DT|DA|DIR)$/.test(text)) return true
+  if (/^(TR|IT|IA|CS|RIT|RIA|DT|DIR)[\s-]*(AGR|TEC|AMM|D[1-6]|DS|CR)$/.test(text)) return true
   return false
 }
 
 function looksLikeGiiRoleLabel (value: any): boolean {
   const norm = String(value ?? '').trim().replace(/\s+/g, ' ').toUpperCase()
-  return /^(TECNICO RILEVATORE|TECNICO ISTRUTTORE|TECNICO ISTRUTTORE AMMINISTRATIVO|RESPONSABILE DI ZONA|CAPO SETTORE(?:\s+(?:D[1-6]|DS|CR))?|RESPONSABILE ISTRUTTORIA|RESPONSABILE ISTRUTTORIA AMMINISTRATIVA|DIRETTORE D[’']AREA|DIRETTORE AREA AMMINISTRATIVA)$/.test(norm)
+  return /^(TECNICO RILEVATORE|ISTRUTTORE TECNICO|ISTRUTTORE AMMINISTRATIVO|CAPO SETTORE(?:\s+(?:D[1-6]|DS|CR))?|RESPONSABILE ISTRUTTORIA TECNICA|RESPONSABILE ISTRUTTORIA AMMINISTRATIVA|DIRETTORE D[’']AREA|DIRETTORE AREA AMMINISTRATIVA)$/.test(norm)
 }
 
 function maybePersonDisplayName (value: any): string {
@@ -1433,7 +1476,7 @@ function maybePersonDisplayName (value: any): string {
 }
 
 function maybeSenderUsernameDisplay (value: any): string {
-  const text = parseUsernameFromGiiActorLabel(value).trim()
+  const text = normalizeUsernameCandidate(value).trim()
   if (!text || isSenderDisplayNoise(text)) return ''
   if (looksLikeGiiRoleLabel(text)) return ''
   if (looksLikeGiiRoleCode(text)) return ''
@@ -1442,8 +1485,8 @@ function maybeSenderUsernameDisplay (value: any): string {
 }
 
 function alertTechnicianDisplayName (alert: GiiAlertItem | null | undefined): string {
-  const isTi = alertIsTiOrigin(alert)
-  const resolved = firstNonEmptyAlertRawValue(alert, [isTi ? '__gii_tecnico_istruttore_full_name' : '__gii_tecnico_rilevatore_full_name'])
+  const isIt = alertIsItOrigin(alert)
+  const resolved = firstNonEmptyAlertRawValue(alert, [isIt ? '__gii_istruttore_tecnico_full_name' : '__gii_tecnico_rilevatore_full_name'])
   if (resolved) return resolved
 
   return alertRawValuesPracticeFirst(alert, [
@@ -1458,7 +1501,7 @@ function alertTechnicianDisplayName (alert: GiiAlertItem | null | undefined): st
 function alertSenderUserCandidates (alert: GiiAlertItem | null | undefined): string[] {
   const out: string[] = []
   const push = (value: any) => {
-    const text = parseUsernameFromGiiActorLabel(value)
+    const text = normalizeUsernameCandidate(value)
     if (text && !isSenderDisplayNoise(text) && !out.some(v => normalizeUsernameLookupKey(v) === normalizeUsernameLookupKey(text))) out.push(text)
   }
 
@@ -1473,7 +1516,6 @@ function alertSenderUserCandidates (alert: GiiAlertItem | null | undefined): str
     'created_user'
   ]).forEach(push)
 
-  alertRawValues(alert, ['GII_da', 'gii_da']).forEach(push)
 
   return out
 }
@@ -1519,11 +1561,11 @@ function alertSenderFallbackFromActivitySubtype (alert: GiiAlertItem): string {
   ).trim().toUpperCase()
 
   if (subtype.startsWith('DT_')) return 'Direttore d’Area'
-  if (subtype.startsWith('RI_AMM_')) return 'Responsabile Istruttoria amministrativa'
-  if (subtype.startsWith('RI_')) return 'Responsabile Istruttoria'
-  if (subtype.startsWith('RZ_')) return 'Capo Settore'
-  if (subtype.startsWith('TI_AMM_')) return 'Tecnico Istruttore amministrativo'
-  if (subtype.startsWith('TI_')) return 'Tecnico istruttore'
+  if (subtype.startsWith('RIA_')) return 'Responsabile Istruttoria amministrativa'
+  if (subtype.startsWith('RIT_')) return 'Responsabile istruttoria tecnica'
+  if (subtype.startsWith('CS_')) return 'Capo Settore'
+  if (subtype.startsWith('IA_')) return 'Istruttore amministrativo'
+  if (subtype.startsWith('IT_')) return 'Istruttore tecnico'
   if (subtype.startsWith('TR_')) return 'Tecnico rilevatore'
   return ''
 }
@@ -1531,10 +1573,8 @@ function alertSenderFallbackFromActivitySubtype (alert: GiiAlertItem): string {
 function alertSenderFallbackFromTitle (alert: GiiAlertItem): string {
   const title = String(alert?.title || '').trim().toUpperCase()
   if (title.includes('DIRETTORE D’AREA') || title.includes("DIRETTORE D'AREA")) return 'Direttore d’Area'
-  if (title.includes('TECNICO ISTRUTTORE AMMINISTRATIVO')) return 'Tecnico Istruttore amministrativo'
+  if (title.includes('ISTRUTTORE AMMINISTRATIVO')) return 'Istruttore amministrativo'
   if (title.includes('RESPONSABILE ISTRUTTORIA AMMINISTRATIVA')) return 'Responsabile Istruttoria amministrativa'
-  if (title.includes('RESPONSABILE ISTRUTTORIA')) return 'Responsabile Istruttoria'
-  if (title.includes('RESPONSABILE DI ZONA')) return 'Capo Settore'
   return ''
 }
 
@@ -1545,12 +1585,12 @@ function alertRoleLabelFromGiiActor (value: string): string {
   const tag = raw.split(/\s+-\s+/)[0].trim().toUpperCase().replace(/_/g, '-').replace(/\s+/g, '-')
 
   if (tag === 'DA') return 'Direttore Area AA. GG. e P.F.'
-  if (tag === 'RI-AMM') return 'Responsabile Istruttoria amministrativa'
-  if (tag === 'TI-AMM') return 'Tecnico Istruttore amministrativo'
+  if (tag === 'RIA') return 'Responsabile Istruttoria amministrativa'
+  if (tag === 'IA-AMM') return 'Istruttore amministrativo'
   if (tag === 'DIR' || tag.startsWith('DIR-') || tag === 'DT' || tag.startsWith('DT-')) return 'Direttore d’Area'
-  if (tag === 'RI' || /^RI-(AGR|TEC|D\d|DS|CR)$/.test(tag)) return 'Responsabile Istruttoria'
-  if (tag === 'RZ' || tag.startsWith('RZ-')) return 'Capo Settore'
-  if (tag === 'TI' || tag.startsWith('TI-')) return 'Tecnico istruttore'
+  if (tag === 'RIT' || /^RIT-(AGR|TEC|D\d|DS|CR)$/.test(tag)) return 'Responsabile istruttoria tecnica'
+  if (tag === 'CS' || tag.startsWith('CS-')) return 'Capo Settore'
+  if (tag === 'IT' || tag.startsWith('IT-')) return 'Istruttore tecnico'
   if (tag === 'TR' || tag.startsWith('TR-')) return 'Tecnico rilevatore'
 
   return ''
@@ -1575,18 +1615,12 @@ function alertSenderQualificaLine (alert: GiiAlertItem): string {
   let label = ''
 
   if (role === 'TR') label = 'Tecnico rilevatore'
-  else if (role === 'TI') label = 'Tecnico istruttore'
-  else if (role === 'RZ') label = 'Capo Settore'
-  else if (role === 'RI') label = 'Responsabile istruttoria'
+  else if (role === 'IT') label = 'Istruttore tecnico'
+  else if (role === 'CS') label = 'Capo Settore'
+  else if (role === 'RIT') label = 'Responsabile istruttoria tecnica'
   else if (role === 'DT') label = 'Direttore d’Area'
-  else if (role === 'TI_AMM') {
-    const subtype = alertSubtypeCode(alert as any)
-    const event = alertOriginEventCode(alert as any)
-    label = subtype === 'BOZZA_DETERMINAZIONE' || event === 'TI_AMM_TRASMETTE_BOZZA_DETERMINAZIONE'
-      ? 'Tecnico istruttore'
-      : 'Tecnico istruttore amministrativo'
-  }
-  else if (role === 'RI_AMM') label = 'Responsabile istruttoria amministrativa'
+  else if (role === 'IA') label = 'Istruttore amministrativo'
+  else if (role === 'RIA') label = 'Responsabile istruttoria amministrativa'
   else if (role === 'DA') label = 'Direttore Area AA. GG. e P.F.'
 
   if (!label) {
@@ -1609,23 +1643,22 @@ function alertSenderOrgLine (alert: GiiAlertItem): string {
   const sector = settoreFullLabelFromAlert(alert)
   const area = areaShortLabelFromAlert(alert)
 
-  if (role === 'TR' || role === 'TI') {
+  if (role === 'TR' || role === 'IT') {
     if (sector && office) return `Settore - Ufficio: ${sector} - ${office}`
     if (sector) return `Settore: ${sector}`
     if (office) return `Ufficio: ${office}`
   }
 
-  if (role === 'RZ') {
+  if (role === 'CS') {
     return sector ? `Settore: ${sector}` : ''
   }
 
-  if (role === 'RI' || role === 'DT') {
+  if (role === 'RIT' || role === 'DT') {
     return area ? `Area: ${area}` : ''
   }
 
-  if (role === 'TI_AMM' || role === 'RI_AMM') {
-    const settore = settoreFullLabelFromAlert(alert) || 'Catasto, Ruoli e Servizi Territoriali'
-    return `Settore: ${settore}`
+  if (role === 'IA' || role === 'RIA') {
+    return 'Settore: Catasto, Ruoli e Servizi Territoriali'
   }
 
   if (role === 'DA') {
@@ -1645,18 +1678,18 @@ function alertIsStandardWorkflowAlert (alert: GiiAlertItem): boolean {
 
   if ([
     'RILEVAZIONE_RESPINTA',
-    'RZ_RESPINGE_RILEVAZIONE',
-    'RZ_APPROVA_RILEVAZIONE',
+    'CS_RESPINGE_RILEVAZIONE',
+    'CS_APPROVA_RILEVAZIONE',
     'RICHIESTA_INTEGRAZIONE',
     'INTEGRAZIONE_TRASMESSA',
     'DT_APPROVA_RAPPORTO',
     'DT_RESPINGE_RAPPORTO',
-    'DT_RIMANDA_A_TI',
-    'RI_RIMANDA_A_TI',
+    'DT_RIMANDA_A_IT',
+    'RIT_RIMANDA_A_IT',
     'BOZZA_DETERMINAZIONE'
   ].includes(subtype)) return true
 
-  if (event === 'ISTRUTTORIA_TRASMESSA' || event === 'INVIO_A_TI_AMM' || event === 'TI_AMM_TRASMETTE_BOZZA_DETERMINAZIONE') return true
+  if (event === 'ISTRUTTORIA_TRASMESSA' || event === 'INVIO_A_IA' || event === 'IA_TRASMETTE_BOZZA_DETERMINAZIONE') return true
 
   return false
 }
@@ -1715,6 +1748,11 @@ function codeFromGiiUserAttrs (attrs: Record<string, any>, codNames: string[], n
   return Number.isFinite(n) ? String(labelMap[n] || '').trim().toUpperCase() : ''
 }
 
+function roleCodeFromGiiUserAttrs (attrs: Record<string, any>): string {
+  const rawCode = String(attrValueCi(attrs, ['ruolo_cod', 'ruoloCod', 'role_cod']) ?? '').trim()
+  return rawCode ? rawCode.toUpperCase().replace(/_/g, '-').replace(/\s+/g, '-') : ''
+}
+
 function addLookupAliasIfWanted (out: Map<string, string>, wanted: Set<string>, alias: any, fullName: string): void {
   const text = String(alias ?? '').trim()
   if (!text || !fullName) return
@@ -1725,7 +1763,7 @@ function addLookupAliasIfWanted (out: Map<string, string>, wanted: Set<string>, 
 function addGiiUserLookupAliases (out: Map<string, string>, wanted: Set<string>, attrs: Record<string, any>, username: string, fullName: string): void {
   addLookupAliasIfWanted(out, wanted, username, fullName)
 
-  const role = codeFromGiiUserAttrs(attrs, ['ruolo_cod', 'ruoloCod', 'role_cod'], ['ruolo', 'role'], RUOLO_LABEL)
+  const role = roleCodeFromGiiUserAttrs(attrs)
   const area = codeFromGiiUserAttrs(attrs, ['area_cod', 'areaCod'], ['area'], AREA_LABEL)
   const settore = codeFromGiiUserAttrs(attrs, ['settore_cod', 'settoreCod'], ['settore'], SETTORE_LABEL)
 
@@ -1819,7 +1857,7 @@ async function loadGiiUserFullNameMap (values: string[], signal?: AbortSignal): 
     const pickFields = [
       'username', 'user_name', 'agol_username',
       'full_name', 'nome', 'cognome', 'fullName', 'nome_cognome', 'nomeCompleto', 'nominativo', 'display_name', 'displayName', 'name',
-      'ruolo', 'ruolo_cod', 'ruoloCod', 'area', 'area_cod', 'areaCod', 'settore', 'settore_cod', 'settoreCod', 'ufficio', 'id_ufficio'
+      'ruolo_cod', 'ruoloCod', 'area', 'area_cod', 'areaCod', 'settore', 'settore_cod', 'settoreCod', 'ufficio', 'id_ufficio'
     ]
       .map(f => fieldNameByLower.get(f.toLowerCase()))
       .filter((f): f is string => !!f)
@@ -1868,13 +1906,11 @@ async function loadGiiUserFullNameMap (values: string[], signal?: AbortSignal): 
   return out
 }
 
-function technicianUserCandidates (alert: GiiAlertItem, isTi: boolean): string[] {
-  const usernameFields = isTi
+function technicianUserCandidates (alert: GiiAlertItem, isIt: boolean): string[] {
+  const usernameFields = isIt
     ? [
-      'ti_assegnato_username',
-      'TI_ASSEGNATO_USERNAME',
-      'tecnico_istruttore_username',
-      'username_tecnico_istruttore',
+      'it_assegnato_username',
+      'IT_ASSEGNATO_USERNAME',
       'utente_loggato',
       'Creator',
       'created_user',
@@ -1889,12 +1925,10 @@ function technicianUserCandidates (alert: GiiAlertItem, isTi: boolean): string[]
       'username_tecnico_rilevatore'
     ]
 
-  const fallbackFields = isTi
+  const fallbackFields = isIt
     ? [
-      'ti_assegnato_nome',
-      'TI_ASSEGNATO_NOME',
-      'responsabile_istruttore',
-      'Responsabile_istruttore'
+      'it_assegnato_nome',
+      'IT_ASSEGNATO_NOME',
     ]
     : [
       'tecnico_rilevatore',
@@ -1905,7 +1939,7 @@ function technicianUserCandidates (alert: GiiAlertItem, isTi: boolean): string[]
   return [
     ...alertRawValuesPracticeFirst(alert, usernameFields),
     ...alertRawValuesPracticeFirst(alert, fallbackFields)
-  ].map(v => parseUsernameFromGiiActorLabel(v)).filter(Boolean)
+  ].map(v => normalizeUsernameCandidate(v)).filter(Boolean)
 }
 
 async function enrichAlertsWithActorFullNames (alerts: GiiAlertItem[], signal?: AbortSignal): Promise<GiiAlertItem[]> {
@@ -1915,19 +1949,19 @@ async function enrichAlertsWithActorFullNames (alerts: GiiAlertItem[], signal?: 
   const allCandidates: string[] = []
   list.forEach(alert => {
     alertSenderUserCandidates(alert).forEach(v => allCandidates.push(v))
-    const isTi = alertIsTiOrigin(alert)
-    technicianUserCandidates(alert, isTi).forEach(v => allCandidates.push(v))
+    const isIt = alertIsItOrigin(alert)
+    technicianUserCandidates(alert, isIt).forEach(v => allCandidates.push(v))
   })
 
   const fullNameByUsername = await loadGiiUserFullNameMap(allCandidates, signal)
   if (!fullNameByUsername.size) return list
 
   return list.map(alert => {
-    const isTi = alertIsTiOrigin(alert)
+    const isIt = alertIsItOrigin(alert)
     const actorResolved = alertSenderUserCandidates(alert)
       .map(v => fullNameByUsername.get(normalizeUsernameLookupKey(v)))
       .find(v => !!String(v || '').trim())
-    const technicianResolved = technicianUserCandidates(alert, isTi)
+    const technicianResolved = technicianUserCandidates(alert, isIt)
       .map(v => fullNameByUsername.get(normalizeUsernameLookupKey(v)))
       .find(v => !!String(v || '').trim())
 
@@ -1938,7 +1972,7 @@ async function enrichAlertsWithActorFullNames (alerts: GiiAlertItem[], signal?: 
       raw: {
         ...(alert.raw || {}),
         ...(actorResolved ? { __gii_actor_full_name: actorResolved } : {}),
-        ...(technicianResolved ? { [isTi ? '__gii_tecnico_istruttore_full_name' : '__gii_tecnico_rilevatore_full_name']: technicianResolved } : {})
+        ...(technicianResolved ? { [isIt ? '__gii_istruttore_tecnico_full_name' : '__gii_tecnico_rilevatore_full_name']: technicianResolved } : {})
       }
     }
   })
@@ -1950,21 +1984,29 @@ function alertPracticeLine (alert: GiiAlertItem): string {
 }
 
 function alertDisplayPracticeLine (alert: GiiAlertItem): string {
-  const line = alertPracticeLine(alert)
-  const clean = String(line || '').replace(/^Pratica\s*:\s*/i, '').trim()
+  // Il riferimento alla pratica deve essere sempre autonomo dal messaggio
+  // dell'allarme (es. motivazione di un rimando). Preferiamo il reportCode
+  // già formattato; in fallback leggiamo i campi della pratica arricchita.
+  const candidates = [
+    alert?.reportCode,
+    firstNonEmptyAlertRawValuePracticeFirst(alert, [
+      'numero_rapporto_tecnico',
+      'numero_rapporto',
+      'numero_rilevazione',
+      'cod_pratica',
+      'n_rapporto'
+    ])
+  ]
+    .map(v => String(v ?? '').trim())
+    .filter(Boolean)
 
-  if (alertIsNewRilevazione(alert)) return clean ? `Pratica: ${clean}` : ''
+  const raw = candidates[0] || ''
+  const clean = raw.replace(/^Pratica\s*:\s*/i, '').trim()
+  if (clean) return `Pratica: ${clean}`
 
-  if (isGiiTakeChargeAlert(alert)) {
-    // Per le attività operative il corpo mostrato dal pannello è in realtà
-    // l'identificativo della pratica da prendere in carico. Lo rendiamo
-    // coerente con le informative: “Pratica: Rilevazione n. ...”.
-    if (/^(Rilevazione|Rapporto\s+tecnico|Rapporto)\s+n\.?\s+/i.test(clean)) {
-      return `Pratica: ${clean}`
-    }
-  }
-
-  return line
+  // Manteniamo comunque esplicita la riga anche nelle rare casistiche in cui
+  // l'identificativo non sia disponibile, anziché lasciare il contesto ambiguo.
+  return 'Pratica: —'
 }
 
 async function enrichAlertsWithPracticeMeta (alerts: GiiAlertItem[], practiceLayerUrl: string, signal?: AbortSignal): Promise<GiiAlertItem[]> {
@@ -2053,7 +2095,6 @@ function materializeAlertArea (alert: GiiAlertItem, user: any): string {
 
 function materializeAlertSector (alert: GiiAlertItem, user: any): string {
   const raw = String(materializeAlertPick(alert, ['settore_cod', 'settore', 'destinatario_settore']) ?? user?.settoreCod ?? user?.settore_cod ?? '').trim().toUpperCase()
-  if (raw === 'CS') return 'DS'
   const m = raw.match(/^D\s*([1-6])$/)
   if (m) return `D${m[1]}`
   return raw
@@ -2062,12 +2103,12 @@ function materializeAlertSector (alert: GiiAlertItem, user: any): string {
 
 function materializeAlertDestRole (user: any): string {
   const role = String(user?.profiloCod || user?.ruoloCod || user?.role || '').trim().toUpperCase()
-  if (role === 'TI_AMM' || role === 'RI_AMM' || role === 'DA') return role
+  if (role === 'IA' || role === 'RIA' || role === 'DA') return role
   if (role === 'ADMIN') return ''
   if (role.startsWith('DT')) return 'DT'
-  if (role.startsWith('RI') && role !== 'RI_AMM') return 'RI'
-  if (role.startsWith('RZ')) return 'RZ'
-  if (role.startsWith('TI') && role !== 'TI_AMM') return 'TI'
+  if (role.startsWith('RIT') && role !== 'RIA') return 'RIT'
+  if (role.startsWith('CS')) return 'CS'
+  if (role.startsWith('IT')) return 'IT'
   return role.replace(/_(AGR|TEC|AMM)$/i, '')
 }
 
@@ -2092,7 +2133,7 @@ function materializeAlertTitle (alert: GiiAlertItem): string {
   const subtype = alertSubtypeCode(alert)
   const event = alertOriginEventCode(alert)
   if (alertIsNewRilevazione(alert)) return 'Nuova rilevazione ricevuta'
-  if (subtype === 'ATTESTAZIONE_CONFORMITA_TI_AMM' || event === 'ATTESTAZIONE_CONFORMITA') return 'Attestazione di conformità apposta'
+  if (subtype === 'ATTESTAZIONE_CONFORMITA_IA' || event === 'ATTESTAZIONE_CONFORMITA') return 'Attestazione di conformità apposta'
   if (subtype === 'PROPOSTA_CONTESTAZIONE_APPROVATA' || event === 'PROPOSTA_CONTESTAZIONE_APPROVATA') return 'Proposta di contestazione approvata'
   if (alertIsNewAssignmentReceived(alert)) return 'Nuova istruttoria assegnata'
   const t = String(alert?.title || '').trim()
@@ -2106,7 +2147,7 @@ function materializeAlertMessage (alert: GiiAlertItem): string {
 
 
 // Normalizzazione limitata alle sole rilevazioni create da TR tramite Survey.
-// Il TI compila dal gestionale e ha già i controlli uppercase lato interfaccia.
+// L’IT compila dal gestionale e ha già i controlli uppercase lato interfaccia.
 // Qui trattiamo solo i campi testuali effettivamente presenti nel Survey TR
 // per i quali il formato è funzionale: maiuscolo per anagrafica/indirizzi, minuscolo per email/PEC.
 const GII_SURVEY_TR_UPPERCASE_ORIGIN_FIELD = 'origine_pratica'
@@ -2214,7 +2255,7 @@ async function normalizeSurveyUppercaseFields (args: {
         if (oid === null || oid === undefined) continue
 
         // La normalizzazione uppercase riguarda esclusivamente le rilevazioni Survey/TR.
-        // I record creati da TI non devono essere ripassati qui perché sono già vincolati
+        // I record creati da IT non devono essere ripassati qui perché sono già vincolati
         // dal gestionale.
         const origin = Number(attrs[originField])
         if (origin !== GII_SURVEY_TR_UPPERCASE_ORIGIN_VALUE) continue
@@ -2321,10 +2362,10 @@ async function materializeMissingTakeChargeActivities (args: {
       const settore = materializeAlertSector(alert, args.user)
       const ufficioId = materializeAlertOfficeId(alert, args.user)
       const role = materializeAlertDestRole(args.user)
-      // La materializzazione serve per le nuove rilevazioni Survey/TR dirette al RZ.
+      // La materializzazione serve per le nuove rilevazioni Survey/TR dirette al CS.
       // Per gli altri ruoli le attività correnti devono continuare a essere generate
       // dai widget operativi che chiudono/aprono i cicli.
-      if (role !== 'RZ') continue
+      if (role !== 'CS') continue
       const eventMs = alertEventDateMs(alert) ?? Date.now()
       const numero = materializeAlertNumber(alert)
       const key = `${materializeAlertNormGid(parentGlobalId)}|PRESA_IN_CARICO|NUOVA_RILEVAZIONE|${role}|${area}|${settore}|${ufficioId ?? ''}`
@@ -2463,7 +2504,7 @@ function storeAlertEditIntent (alert: GiiAlertItem, layerUrl: string): void {
   const isPracticeRaw = (!!rawGid && !!alertGid && rawGid === alertGid) || (Number.isFinite(rawOid) && alert.parentObjectId != null && rawOid === Number(alert.parentObjectId))
   const currentUser: any = (window as any).__giiUserRole || {}
   const requestedByUsername = String(currentUser?.username || '').trim().toLowerCase()
-  const requestedByRole = normCode(currentUser?.profiloCod || currentUser?.ruoloCod || currentUser?.ruolo_cod || currentUser?.ruoloLabel || '')
+  const requestedByRole = normCode(currentUser?.profiloCod || currentUser?.ruoloCod || currentUser?.ruolo_cod || '')
   const requestedByArea = normCode(currentUser?.areaCod || currentUser?.area_cod || '')
   const requestedBySettore = normCode(currentUser?.settoreCod || currentUser?.settore_cod || '')
   const requestedByUfficio = currentUser?.ufficio != null && currentUser?.ufficio !== '' ? String(currentUser.ufficio).trim() : ''
@@ -2580,18 +2621,20 @@ function HeaderAlertsPopup (props: {
   loading: boolean
   error: string
   archivingKey: string
+  right: number
   homeMode?: boolean
   onClose: () => void
   onOpenPractice: (alert: GiiAlertItem) => void
   onArchive: (alert: GiiAlertItem) => void
 }) {
   const popupAlerts = sortAlertsForPopup(props.alerts || [])
+  const [priorityLegendKey, setPriorityLegendKey] = React.useState<string>('')
   const popup = (
     <div
       data-gii-global-alert-popup='1'
       style={{ position: 'fixed', inset: 0, zIndex: 2147483646, pointerEvents: 'none' }}
     >
-      <div style={{ position: 'absolute', right: 18, top: 82, width: 430, maxWidth: 'calc(100vw - 28px)', maxHeight: 'calc(100vh - 110px)', overflow: 'hidden', borderRadius: 16, background: 'rgba(15,23,42,0.97)', border: '1px solid rgba(255,255,255,0.14)', boxShadow: '0 24px 70px rgba(0,0,0,0.45)', color: '#e5e7eb', backdropFilter: 'blur(14px)', pointerEvents: 'auto' }}>
+      <div style={{ position: 'absolute', right: props.right, top: 82, width: 430, maxWidth: 'calc(100vw - 28px)', maxHeight: 'calc(100vh - 110px)', overflow: 'hidden', borderRadius: 16, background: 'rgba(15,23,42,0.97)', border: '1px solid rgba(255,255,255,0.14)', boxShadow: '0 24px 70px rgba(0,0,0,0.45)', color: '#e5e7eb', backdropFilter: 'blur(14px)', pointerEvents: 'auto' }}>
         <div style={{ padding: '14px 16px', borderBottom: '1px solid rgba(255,255,255,0.10)', display: 'flex', justifyContent: 'space-between', gap: 10, alignItems: 'center' }}>
           <div>
             <div style={{ fontWeight: 900, fontSize: 18 }}>Allarmi e scadenze</div>
@@ -2615,24 +2658,62 @@ function HeaderAlertsPopup (props: {
             const orgLine = alertSenderOrgLine(alert)
             const practiceLine = alertDisplayPracticeLine(alert)
             const isStandardWorkflow = alertIsStandardWorkflowAlert(alert)
-            const showMeta = (!isGiiTakeChargeAlert(alert) || alert.termineData != null) && !isStandardWorkflow
-            const showPracticeAsOwnLine = !!practiceLine && (!showMeta || !bodyLine)
+            const showMeta = alert.termineData != null && !isStandardWorkflow
             const metaLineStyle: React.CSSProperties = { fontSize: 14, color: '#cbd5e1', lineHeight: 1.35, marginTop: 3, whiteSpace: 'normal', overflowWrap: 'anywhere', wordBreak: 'normal' }
             return (
               <div key={alert.alertKey} style={{ border: `1px solid ${color}66`, background: `${color}16`, borderRadius: 12, padding: 11 }}>
                 <div style={{ display: 'flex', gap: 8, alignItems: 'start' }}>
-                  <div style={{ width: 10, height: 10, borderRadius: '50%', background: color, marginTop: 4, flex: '0 0 auto' }} />
+                  <div
+                    style={{ position: 'relative', marginTop: 4, flex: '0 0 auto', width: 10, height: 10 }}
+                    onMouseEnter={() => setPriorityLegendKey(alert.alertKey)}
+                    onMouseLeave={() => setPriorityLegendKey('')}
+                    aria-label='Legenda priorità allarme'
+                  >
+                    <div style={{ width: 10, height: 10, borderRadius: '50%', background: color, boxShadow: `0 0 0 2px ${color}22`, cursor: 'help' }} />
+                    {priorityLegendKey === alert.alertKey && (
+                      <div
+                        role='tooltip'
+                        style={{
+                          position: 'absolute',
+                          left: 18,
+                          top: -9,
+                          width: 188,
+                          padding: '10px 11px',
+                          borderRadius: 10,
+                          background: 'rgba(15,23,42,0.985)',
+                          border: '1px solid rgba(255,255,255,0.16)',
+                          boxShadow: '0 12px 30px rgba(0,0,0,0.38)',
+                          color: '#e5e7eb',
+                          zIndex: 30,
+                          pointerEvents: 'none'
+                        }}
+                      >
+                        <div style={{ fontSize: 12, fontWeight: 900, color: '#fff', marginBottom: 7, letterSpacing: 0.1 }}>Priorità allarme</div>
+                        {[
+                          { tone: 'blue', label: 'Informativo' },
+                          { tone: 'orange', label: 'Attenzione' },
+                          { tone: 'red', label: 'Criticità' }
+                        ].map(item => {
+                          const itemColor = alertToneColor(item.tone)
+                          return (
+                            <div key={item.tone} style={{ display: 'flex', alignItems: 'center', gap: 8, minHeight: 20, fontSize: 12.5, color: '#cbd5e1' }}>
+                              <span style={{ width: 8, height: 8, borderRadius: '50%', background: itemColor, flex: '0 0 auto' }} />
+                              <span>{item.label}</span>
+                            </div>
+                          )
+                        })}
+                      </div>
+                    )}
+                  </div>
                   <div style={{ minWidth: 0, flex: 1 }}>
                     <div style={{ fontSize: 15, fontWeight: 900, color: '#fff', whiteSpace: 'normal', overflowWrap: 'anywhere', wordBreak: 'normal', lineHeight: 1.25 }}>{alertDisplayTitle(alert)}</div>
+                    <div style={metaLineStyle}>{practiceLine}</div>
                     {bodyLine && (
                       <div style={{ fontSize: 14, color: '#cbd5e1', lineHeight: 1.35, marginTop: 3, whiteSpace: 'normal', overflowWrap: 'anywhere', wordBreak: 'normal' }}>{bodyLine}</div>
                     )}
-                    {showPracticeAsOwnLine && (
-                      <div style={metaLineStyle}>{practiceLine}</div>
-                    )}
                     {showMeta && (
                       <div style={metaLineStyle}>
-                        Pratica: {alert.reportCode}{alert.termineData != null ? ` · Termine: ${formatAlertDate(alert.termineData)}` : ''}
+                        Termine: {formatAlertDate(alert.termineData)}
                       </div>
                     )}
                     {senderLine && (
@@ -2706,8 +2787,20 @@ export default function Widget(props: Props) {
   const [uLoad,    setULoad]   = React.useState(true)
   const [signingIn,setSigning] = React.useState(false)
   const [menuOpen, setMenuOpen] = React.useState(false)
+  const [assignmentsOpen, setAssignmentsOpen] = React.useState(false)
   const accountBtnRef = React.useRef<HTMLButtonElement>(null)
+  const accountMenuRef = React.useRef<HTMLDivElement>(null)
+  const roleBtnRef = React.useRef<HTMLButtonElement>(null)
+  const assignmentsMenuRef = React.useRef<HTMLDivElement>(null)
+  const userBannerRef = React.useRef<HTMLDivElement>(null)
   const [accountMenuPos, setAccountMenuPos] = React.useState<{ top: number, right: number }>({ top: 0, right: 0 })
+  const [assignmentsMenuPos, setAssignmentsMenuPos] = React.useState<{ top: number, right: number }>({ top: 0, right: 0 })
+  const [alertsPanelRight, setAlertsPanelRight] = React.useState(18)
+
+  const getUserBannerRightOffset = React.useCallback(() => {
+    const bannerRect = userBannerRef.current?.getBoundingClientRect()
+    return bannerRect ? Math.max(8, window.innerWidth - bannerRect.right) : 18
+  }, [])
   const [urlTick, setUrlTick] = React.useState(0)
   const [alerts, setAlerts] = React.useState<GiiAlertItem[]>([])
   const alertCounts = React.useMemo(() => summarizeGiiAlerts(alerts), [alerts])
@@ -2862,7 +2955,38 @@ export default function Widget(props: Props) {
       alertsAbortControllerRef.current = null
     }
   }, [])
-  React.useEffect(() => { if (!user) setMenuOpen(false) }, [user])
+  React.useEffect(() => {
+    if (!user) {
+      setMenuOpen(false)
+      setAssignmentsOpen(false)
+    }
+  }, [user])
+
+  React.useEffect(() => {
+    if (!menuOpen && !assignmentsOpen) return
+    const onPointerDown = (ev: PointerEvent) => {
+      const target = ev.target as Node | null
+      if (!target) return
+      if (accountBtnRef.current?.contains(target)) return
+      if (roleBtnRef.current?.contains(target)) return
+      if (accountMenuRef.current?.contains(target)) return
+      if (assignmentsMenuRef.current?.contains(target)) return
+      setMenuOpen(false)
+      setAssignmentsOpen(false)
+    }
+    const onKeyDown = (ev: KeyboardEvent) => {
+      if (ev.key === 'Escape') {
+        setMenuOpen(false)
+        setAssignmentsOpen(false)
+      }
+    }
+    document.addEventListener('pointerdown', onPointerDown, true)
+    document.addEventListener('keydown', onKeyDown)
+    return () => {
+      document.removeEventListener('pointerdown', onPointerDown, true)
+      document.removeEventListener('keydown', onKeyDown)
+    }
+  }, [menuOpen, assignmentsOpen])
   React.useEffect(() => {
     const username = String(user?.username || '').trim()
     if (!username) return
@@ -2908,6 +3032,7 @@ export default function Widget(props: Props) {
     user?.username,
     user?.profiloCod,
     user?.ruoloCod,
+    JSON.stringify((user?.assignments || []).map((a: any) => [a.profiloCod, a.ruoloCod, a.areaCod, a.settoreCod, a.ufficio])),
     user?.areaCod,
     user?.settoreCod,
     user?.ufficio,
@@ -3092,12 +3217,42 @@ export default function Widget(props: Props) {
 
     // Fail-safe fondamentale: non selezioniamo né interroghiamo alcun layer finché
     // il profilo GII locale non appartiene alla stessa identità della sessione OAuth.
-    // È la finestra che, nel passaggio TI_D1 ↔ DA_AMM, produceva il banner credenziali.
+    // È la finestra che, nel passaggio IT_D1 ↔ DA_AMM, produceva il banner credenziali.
     if (!usernameAtStart || !activeSessionUsername || usernameAtStart !== activeSessionUsername) {
       return
     }
 
     const enabled = cfg.alertsEnabled ?? true
+    const rawAssignments = Array.isArray(user?.assignments) && user.assignments.length
+      ? user.assignments
+      : [user]
+    const alertContexts = rawAssignments
+      .map((assignment: any) => ({
+        ...user,
+        ...assignment,
+        username: user?.username,
+        fullName: user?.fullName,
+        assignments: user?.assignments || [],
+        isAdmin: !!(assignment?.isWorkflowAdmin || user?.isOrgAdmin),
+        isOrgAdmin: !!user?.isOrgAdmin,
+        isWorkflowAdmin: !!assignment?.isWorkflowAdmin
+      }))
+      .filter((contextUser: any) => canUseGiiAlerts(contextUser))
+      .filter((contextUser: any, index: number, all: any[]) => {
+        const key = [
+          alertRoleAreaKey(contextUser),
+          String(contextUser?.areaCod || ''),
+          String(contextUser?.settoreCod || ''),
+          String(contextUser?.ufficio ?? '')
+        ].join('|')
+        return all.findIndex((other: any) => [
+          alertRoleAreaKey(other),
+          String(other?.areaCod || ''),
+          String(other?.settoreCod || ''),
+          String(other?.ufficio ?? '')
+        ].join('|') === key) === index
+      })
+
     const practiceLayerUrl = selectAlertPracticeLayerUrl(cfg, user)
     const activityLayerUrl = selectCurrentActivityLayerUrl(cfg, user)
     const archiveTableUrl = selectAlertArchiveTableUrl(cfg, user)
@@ -3128,7 +3283,7 @@ export default function Widget(props: Props) {
       alertsOptimisticRevisionRef.current === optimisticRevisionAtStart
     )
 
-    if (!enabled || !user?.username || !canUseGiiAlerts(user) || !activityLayerUrl) {
+    if (!enabled || !user?.username || alertContexts.length === 0) {
       if (!isCurrentLightRequest()) return
       alertsLoadedGenerationRef.current = generationAtStart
       setAlerts([])
@@ -3144,49 +3299,81 @@ export default function Widget(props: Props) {
       setAlertsLoading(true)
     }
 
-    const alertUser = {
-      username: user.username,
-      fullName: user.fullName,
-      role: user.profiloCod || user.ruoloCod,
-      roleCod: user.profiloCod || user.ruoloCod,
-      areaCod: user.areaCod,
-      settoreCod: user.settoreCod,
-      ufficio: user.ufficio,
-      isAdmin: !!user.isWorkflowAdmin
+    const toAlertUser = (contextUser: any) => ({
+      username: contextUser.username,
+      fullName: contextUser.fullName,
+      role: contextUser.profiloCod || contextUser.ruoloCod,
+      roleCod: contextUser.profiloCod || contextUser.ruoloCod,
+      areaCod: contextUser.areaCod,
+      settoreCod: contextUser.settoreCod,
+      ufficio: contextUser.ufficio,
+      isAdmin: !!contextUser.isWorkflowAdmin
+    })
+
+    const dedupeAlerts = (items: GiiAlertItem[]): GiiAlertItem[] => {
+      const seen = new Set<string>()
+      const result: GiiAlertItem[] = []
+      for (const alert of Array.isArray(items) ? items : []) {
+        const practiceKey = alertPracticeMergeKey(alert)
+        const alertKey = normalizeGiiAlertKey(alert?.alertKey)
+        const key = alertKey ? `${practiceKey || 'alert'}::${alertKey}` : practiceKey
+        if (key && seen.has(key)) continue
+        if (key) seen.add(key)
+        result.push(alert)
+      }
+      return result
     }
 
     let currentActivities: GiiAlertItem[] = []
 
     const readCurrentActivities = async (): Promise<GiiAlertItem[]> => {
-      const current = await withGiiTimeout(queryGiiCurrentActivities({
-        activityLayerUrl,
-        archiveTableUrl,
-        user: alertUser,
-        pageSize: 100,
-        signal
-      }), 8000, 'Timeout caricamento attività correnti.')
+      const batches = await Promise.all(alertContexts.map(async (contextUser: any) => {
+        const contextAlertUser = toAlertUser(contextUser)
+        const contextActivityLayerUrl = selectCurrentActivityLayerUrl(cfg, contextUser)
+        const contextArchiveTableUrl = selectAlertArchiveTableUrl(cfg, contextUser)
+        if (!contextActivityLayerUrl) return [] as GiiAlertItem[]
 
-      const annotated = (current.alerts || []).map(alert => ({
-        ...alert,
-        raw: {
-          ...(alert.raw || {}),
-          __gii_current_user_settore_cod: alertUser.settoreCod || '',
-          __gii_current_user_area_cod: alertUser.areaCod || '',
-          __gii_current_user_ufficio_id: alertUser.ufficio ?? null
-        }
+        const current = await withGiiTimeout(queryGiiCurrentActivities({
+          activityLayerUrl: contextActivityLayerUrl,
+          archiveTableUrl: contextArchiveTableUrl,
+          user: contextAlertUser,
+          pageSize: 100,
+          signal
+        }), 8000, 'Timeout caricamento attività correnti.')
+
+        return (current.alerts || []).map(alert => ({
+          ...alert,
+          raw: {
+            ...(alert.raw || {}),
+            __gii_current_user_role_cod: contextAlertUser.roleCod || '',
+            __gii_context_practice_layer_url: selectAlertPracticeLayerUrl(cfg, contextUser),
+            __gii_current_user_settore_cod: contextAlertUser.settoreCod || '',
+            __gii_current_user_area_cod: contextAlertUser.areaCod || '',
+            __gii_current_user_ufficio_id: contextAlertUser.ufficio ?? null
+          }
+        }))
       }))
 
-      return sortAlertsForPopup(annotated)
+      return sortAlertsForPopup(dedupeAlerts(batches.flat()))
     }
 
     const enrichAlertsForPopup = async (items: GiiAlertItem[]): Promise<GiiAlertItem[]> => {
       throwIfHeaderAborted(signal)
-      return sortAlertsForPopup(
-        await enrichAlertsWithActorFullNames(
-          await enrichAlertsWithPracticeMeta(items, practiceLayerUrl, signal),
-          signal
-        )
-      )
+      const groups = new Map<string, GiiAlertItem[]>()
+      for (const item of Array.isArray(items) ? items : []) {
+        const contextPracticeLayerUrl = String((item?.raw as any)?.__gii_context_practice_layer_url || practiceLayerUrl || '').trim()
+        const group = groups.get(contextPracticeLayerUrl) || []
+        group.push(item)
+        groups.set(contextPracticeLayerUrl, group)
+      }
+
+      const enrichedGroups = await Promise.all(Array.from(groups.entries()).map(async ([contextPracticeLayerUrl, group]) => {
+        const withPractice = contextPracticeLayerUrl
+          ? await enrichAlertsWithPracticeMeta(group, contextPracticeLayerUrl, signal)
+          : group
+        return enrichAlertsWithActorFullNames(withPractice, signal)
+      }))
+      return sortAlertsForPopup(dedupeAlerts(enrichedGroups.flat()))
     }
 
     let popupCurrentActivities: GiiAlertItem[] = []
@@ -3215,7 +3402,7 @@ export default function Widget(props: Props) {
       return
     }
 
-    if (!includeBackground || !practiceLayerUrl || !archiveTableUrl) return
+    if (!includeBackground) return
 
     // Il controllo sul FL madre resta necessario per intercettare le rilevazioni TR
     // appena arrivate, ma non deve più bloccare la comparsa della campanella. Lo
@@ -3236,19 +3423,31 @@ export default function Widget(props: Props) {
     ;(async () => {
       try {
 
-        const res = await withGiiTimeout(queryGiiAlerts({
-          practiceLayerUrl,
-          archiveTableUrl,
-          user: alertUser,
-          warningDays: Number(cfg.alertsWarningDays ?? 5),
-          signal
-        }), 25000, 'Timeout caricamento scadenze e anomalie.')
+        const dynamicBatches = await Promise.all(alertContexts.map(async (contextUser: any) => {
+          const contextPracticeLayerUrl = selectAlertPracticeLayerUrl(cfg, contextUser)
+          const contextArchiveTableUrl = selectAlertArchiveTableUrl(cfg, contextUser)
+          if (!contextPracticeLayerUrl || !contextArchiveTableUrl) return [] as GiiAlertItem[]
+          const res = await withGiiTimeout(queryGiiAlerts({
+            practiceLayerUrl: contextPracticeLayerUrl,
+            archiveTableUrl: contextArchiveTableUrl,
+            user: toAlertUser(contextUser),
+            warningDays: Number(cfg.alertsWarningDays ?? 5),
+            signal
+          }), 25000, 'Timeout caricamento scadenze e anomalie.')
+          return (res.alerts || []).map(alert => ({
+            ...alert,
+            raw: {
+              ...(alert.raw || {}),
+              __gii_context_practice_layer_url: contextPracticeLayerUrl
+            }
+          }))
+        }))
         if (!isCurrentBackgroundRequest()) return
 
         const enrichedCurrentActivities = await enrichAlertsForPopup(currentActivities)
         if (!isCurrentBackgroundRequest()) return
         const dynamicAlerts = await enrichAlertsForPopup(
-          filterAlertsWithLocalGuards(res.alerts || [], 'dynamic')
+          filterAlertsWithLocalGuards(dedupeAlerts(dynamicBatches.flat()), 'dynamic')
         )
         if (!isCurrentBackgroundRequest()) return
 
@@ -3347,6 +3546,7 @@ export default function Widget(props: Props) {
     user?.fullName,
     user?.profiloCod,
     user?.ruoloCod,
+    JSON.stringify((user?.assignments || []).map((a: any) => [a.profiloCod, a.ruoloCod, a.areaCod, a.settoreCod, a.ufficio])),
     user?.areaCod,
     user?.settoreCod,
     user?.ufficio,
@@ -3386,10 +3586,15 @@ export default function Widget(props: Props) {
     const backgroundPollId = window.setInterval(requestBackgroundRefresh, backgroundPollMs)
 
     const onChanged = (evt?: Event) => {
-      setAlertsOpen(false)
-
       const detail: any = (evt as CustomEvent | undefined)?.detail
       const source = String(detail?.source || '').trim()
+      const eventType = String((evt as any)?.type || '')
+      const isArchiveEvent = eventType === 'gii-alerts-archived' || source === 'gii-header-archive'
+
+      // L'archiviazione aggiorna la lista in-place: il pannello resta aperto
+      // anche quando l'ultimo allarme viene rimosso. Le altre mutazioni
+      // continuano a mantenere il comportamento precedente.
+      if (!isArchiveEvent) setAlertsOpen(false)
 
       if (
         source === 'gii-azioni-delete-attivita' &&
@@ -3411,7 +3616,6 @@ export default function Widget(props: Props) {
       // Le modifiche ai dati della pratica possono cambiare scadenze o fallback
       // dinamici. Le raggruppiamo in una sola riconciliazione breve, senza bloccare
       // il polling e senza finestre temporali globali.
-      const eventType = String((evt as any)?.type || '')
       const needsBackground =
         eventType !== 'gii-alerts-archived' &&
         (
@@ -3569,6 +3773,16 @@ export default function Widget(props: Props) {
     marginBottom:6
   }
 
+  const userInitials = (() => {
+    const label = String(user?.fullName || user?.username || '').trim()
+    const parts = label.split(/\s+/).filter(Boolean)
+    if (parts.length >= 2) {
+      return `${parts[0].charAt(0)}${parts[parts.length - 1].charAt(0)}`.toUpperCase()
+    }
+    return (parts[0] || '').slice(0, 2).toUpperCase() || '?'
+  })()
+  const bannerOpensAccountMenu = !!cfg.showSignIn && (cfg.signedInClick ?? 'signout') === 'menu'
+
   const performSwitchAccount = async () => {
     setMenuOpen(false)
     if (accountSwitchInProgressRef.current) return
@@ -3580,7 +3794,7 @@ export default function Widget(props: Props) {
     // account diverso e, soprattutto, PRIMA che SessionManager installi la
     // nuova resource session. In caso di Annulla o stesso account non cambia
     // quindi mai la pagina corrente.
-    const switchOriginPageToken = getCurrentPageToken() || ''
+    const switchOriginPageToken = getRuntimeCurrentPageId() || getCurrentPageToken() || ''
     const switchOriginPageId = switchOriginPageToken ? resolvePageId(switchOriginPageToken) : null
     const neutralPageToken = String(afterInRef.current || cfg.alertsHomePage || '').trim()
     const neutralPageId = neutralPageToken ? resolvePageId(neutralPageToken) : null
@@ -3593,16 +3807,30 @@ export default function Widget(props: Props) {
       gotoPage(neutralPageToken)
       movedToNeutralPage = true
 
-      // Attendiamo che il router abbia effettivamente sostituito la pagina e
-      // concediamo a ExB un breve ciclo aggiuntivo per distruggere MapView,
-      // DataSource e FeatureTable prima della sostituzione della credenziale.
-      for (let i = 0; i < 24; i++) {
+      // Non basta che cambi l'URL: sulle pagine con restriction nativa ExB
+      // continua a proteggere la pagina finché appRuntimeInfo.currentPageId non
+      // è realmente passato alla Home. Installare la nuova sessione prima di
+      // quel momento fa scattare il guard org_admin di Gestione utenti.
+      // Attendiamo quindi due conferme runtime consecutive della pagina neutra.
+      let runtimeConfirmations = 0
+      for (let i = 0; i < 60; i++) {
         await new Promise(resolve => window.setTimeout(resolve, 25))
-        const cur = getCurrentPageToken() || ''
-        const curId = cur ? resolvePageId(cur) : null
-        if (curId === neutralPageId) break
+        const runtimePageId = getRuntimeCurrentPageId()
+        if (runtimePageId === neutralPageId) {
+          runtimeConfirmations += 1
+          if (runtimeConfirmations >= 2) break
+        } else {
+          runtimeConfirmations = 0
+        }
       }
-      await new Promise(resolve => window.setTimeout(resolve, 175))
+
+      if (runtimeConfirmations < 2) {
+        throw new Error('Pagina Home non confermata prima del cambio account.')
+      }
+
+      // Un ultimo ciclo lascia terminare lo smontaggio dei widget della pagina
+      // precedente mantenendo ancora valida la vecchia identità.
+      await new Promise(resolve => window.setTimeout(resolve, 100))
     }
 
     const restoreOriginPageAfterFailedSwitch = () => {
@@ -3740,9 +3968,64 @@ export default function Widget(props: Props) {
     return (o.x || o.y) ? { position:'relative', left:o.x, top:o.y } : {}
   }
 
-  const displayRoleCode = user?.profiloCod || user?.ruoloLabel || ''
-  const displayRoleLabel = user?.profiloLabel || user?.ruoloFull || ''
+  const roleRank = (a: GiiUserAssignment): number => {
+    const code = String(a?.profiloCod || a?.ruoloCod || '').toUpperCase()
+    if (code === 'ADMIN') return 7
+    if (code === 'DA') return 6
+    if (code === 'DT') return 5
+    if (code === 'RIT' || code === 'RIA') return 4
+    if (code === 'CS') return 3
+    if (code === 'IT' || code === 'IA') return 2
+    if (code === 'TR') return 1
+    return 0
+  }
+  const readOperationalSelection = React.useCallback(() => {
+    try {
+      const sel: any = (window as any).__giiSelection || null
+      return {
+        role: String(sel?.operationalRole || '').trim().toUpperCase(),
+        label: String(sel?.operationalRoleLabel || '').trim(),
+      }
+    } catch {
+      return { role: '', label: '' }
+    }
+  }, [])
+  const [operationalSelection, setOperationalSelection] = React.useState<{ role: string; label: string }>(() => readOperationalSelection())
+  React.useEffect(() => {
+    const syncOperationalSelection = () => setOperationalSelection(readOperationalSelection())
+    syncOperationalSelection()
+    window.addEventListener('gii-selection-changed', syncOperationalSelection as EventListener)
+    window.addEventListener('gii-selection-cleared', syncOperationalSelection as EventListener)
+    return () => {
+      window.removeEventListener('gii-selection-changed', syncOperationalSelection as EventListener)
+      window.removeEventListener('gii-selection-cleared', syncOperationalSelection as EventListener)
+    }
+  }, [readOperationalSelection])
+
+  const assignments = Array.isArray(user?.assignments) ? user!.assignments : []
+  const primaryAssignment = assignments.reduce<GiiUserAssignment | null>((best, current) => {
+    if (!best) return current
+    return roleRank(current) > roleRank(best) ? current : best
+  }, null)
+  const displayRoleCode = operationalSelection.role || primaryAssignment?.profiloCod || primaryAssignment?.ruoloCod || user?.profiloCod || user?.ruoloCod || user?.ruolo_cod || ''
+  const displayRoleLabel = operationalSelection.label || primaryAssignment?.profiloLabel || primaryAssignment?.ruoloFull || user?.profiloLabel || user?.ruoloFull || ''
   const displayRoleBadge = displayRoleLabel || displayRoleCode
+  const hasMultipleAssignments = assignments.length > 1
+  const assignmentLabel = (a: GiiUserAssignment): string => {
+    const role = String(a?.profiloLabel || a?.ruoloFull || a?.profiloCod || a?.ruoloCod || '').trim()
+    const parts: string[] = [role]
+    const area = String(a?.areaFull || a?.areaCod || '').trim()
+    const settore = String(a?.settoreFull || a?.settoreCod || '').trim()
+    const ufficio = String(a?.ufficioLabel || '').trim()
+    const roleUpper = role.toUpperCase()
+    const roleCode = String(a?.profiloCod || a?.ruoloCod || '').trim().toUpperCase()
+    const isAreaDirector = roleCode === 'DT' || roleCode === 'DA' || roleUpper.includes('DIRETTORE AREA')
+    if (area && !isAreaDirector && !roleUpper.includes(area.toUpperCase())) parts.push(`Area ${area}`)
+    if (settore) parts.push(/^Settore\b/i.test(settore) ? settore : `Settore ${settore}`)
+    if (ufficio) parts.push(/^Ufficio\b/i.test(ufficio) ? ufficio : `Ufficio di ${ufficio}`)
+    return parts.filter(Boolean).join(' · ')
+  }
+  const orderedAssignments = assignments.slice().sort((a, b) => roleRank(b) - roleRank(a))
 
   return (
     <div style={{
@@ -3765,6 +4048,10 @@ export default function Widget(props: Props) {
           70%  { box-shadow: 0 0 0 8px rgba(59,130,246,0); }
           100% { box-shadow: 0 0 0 0 rgba(59,130,246,0); }
         }
+        .gii-user-account-trigger:focus-visible {
+          outline: 2px solid ${cfg.signInBorderColor};
+          outline-offset: 1px;
+        }
         @keyframes gii-alert-bell-ring {
           0%, 72%, 100% { transform: rotate(0deg) scale(1); }
           77% { transform: rotate(10deg) scale(1.06); }
@@ -3782,6 +4069,7 @@ export default function Widget(props: Props) {
           loading={alertsLoading}
           error={alertsError}
           archivingKey={archivingAlertKey}
+          right={alertsPanelRight}
           homeMode={isAlertsHomePage}
           onClose={() => setAlertsOpen(false)}
           onOpenPractice={openAlertPractice}
@@ -3820,7 +4108,11 @@ export default function Widget(props: Props) {
       <div style={{ display:'flex', alignItems:'center', gap:12 }}>
         {showHeaderAlertBell && (
           <div style={{ ...off('offsetAlertBell') }}>
-            <AlertBellButton counts={alertCounts} loading={alertsLoading} error={alertsError} onClick={() => { if (showHeaderAlertBell) setAlertsOpen(true) }} />
+            <AlertBellButton counts={alertCounts} loading={alertsLoading} error={alertsError} onClick={() => {
+              if (!showHeaderAlertBell) return
+              setAlertsPanelRight(getUserBannerRightOffset())
+              setAlertsOpen(true)
+            }} />
           </div>
         )}
         {(cfg.showUserBanner ?? true) && (
@@ -3836,20 +4128,85 @@ export default function Widget(props: Props) {
               <span style={{ fontSize:12,color:'rgba(147,197,253,0.6)' }}>Caricamento profilo…</span>
             </div>
           ) : user ? (
-            <div style={{ display:'inline-flex',alignItems:'center',gap:14,background:cfg.userBannerBg,
-              backdropFilter:'blur(8px)',border:`1px solid ${cfg.userBannerBorderColor}`,borderRadius:14,padding:'10px 18px',maxWidth:560 }}>
+            <div ref={userBannerRef} style={{ display:'inline-flex',alignItems:'center',gap:14,background:cfg.userBannerBg,
+              backdropFilter:'blur(8px)',border:`1px solid ${cfg.userBannerBorderColor}`,borderRadius:14,padding:'10px 14px 10px 18px',width:'max-content',maxWidth:'none' }}>
               <div style={{ width:38,height:38,borderRadius:'50%',
                 background:`linear-gradient(135deg,${cfg.userAvatarBg1},${cfg.userAvatarBg2})`,
-                display:'flex',alignItems:'center',justifyContent:'center',fontSize:15,fontWeight:700,color:'#fff',flexShrink:0 }}>
-                {(user.fullName||user.username).charAt(0).toUpperCase()}
+                display:'flex',alignItems:'center',justifyContent:'center',fontSize:13.5,lineHeight:1,fontWeight:700,letterSpacing:0.3,color:'#fff',flexShrink:0,textAlign:'center' }}>
+                {userInitials}
               </div>
-              <div style={{ minWidth:0, maxWidth:'100%' }}>
-                <div style={{ fontSize:cfg.userNameSize,fontWeight:600,color:cfg.userNameColor,whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis',minWidth:0 }}>
-                  Benvenuto, {user.fullName||user.username}
-                </div>
+              <div style={{ minWidth:0, flex:'0 0 auto', width:'max-content', display:'flex', flexDirection:'column', alignItems:'stretch' }}>
+                <button type='button'
+                  className='gii-user-account-trigger'
+                  ref={bannerOpensAccountMenu ? accountBtnRef : undefined}
+                  disabled={bannerOpensAccountMenu ? signingIn : true}
+                  title={bannerOpensAccountMenu ? 'Account' : undefined}
+                  onClick={() => {
+                    if (!bannerOpensAccountMenu) return
+                    setAssignmentsOpen(false)
+                    if (!menuOpen) {
+                      const triggerRect = accountBtnRef.current?.getBoundingClientRect()
+                      const bannerRect = userBannerRef.current?.getBoundingClientRect()
+                      if (triggerRect || bannerRect) {
+                        setAccountMenuPos({
+                          top: (triggerRect?.bottom ?? bannerRect!.bottom) + 8,
+                          right: getUserBannerRightOffset()
+                        })
+                      }
+                    }
+                    setMenuOpen(v => !v)
+                  }}
+                  style={{
+                    display:'flex',alignItems:'center',width:'auto',minWidth:0,alignSelf:'stretch',
+                    margin:'-3px -7px 0',padding:'3px 7px',borderRadius:7,
+                    border:'1px solid transparent',background:'transparent',
+                    color:cfg.userNameColor,font:'inherit',textAlign:'left',appearance:'none',WebkitAppearance:'none',
+                    cursor:bannerOpensAccountMenu ? 'pointer' : 'default'
+                  }}>
+                  <span style={{ fontSize:cfg.userNameSize,fontWeight:600,color:cfg.userNameColor,whiteSpace:'nowrap',flexShrink:0 }}>
+                    Benvenuto, {user.fullName||user.username}
+                  </span>
+                  {bannerOpensAccountMenu && (
+                    <>
+                      <span aria-hidden='true' style={{ flex:'1 1 auto',minWidth:14 }} />
+                      <span aria-hidden='true' style={{ width:12,height:16,display:'inline-flex',alignItems:'center',justifyContent:'center',color:cfg.signInColor,opacity:0.8,fontSize:12,fontWeight:700,letterSpacing:0.2,flex:'0 0 auto' }}>
+                        <span style={{ display:'inline-block',transformOrigin:'50% 50%',transform:menuOpen ? 'rotate(180deg)' : 'rotate(0deg)',transition:'transform 0.18s ease' }}>▾</span>
+                      </span>
+                    </>
+                  )}
+                </button>
                 {displayRoleBadge && (
-                  <div title={[displayRoleLabel, displayRoleCode].filter(Boolean).join(' · ')} style={{ fontSize:11.5,color:cfg.userInfoColor,marginTop:2,whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis',display:'flex',alignItems:'center',gap:7,minWidth:0 }}>
-                    <span style={{ background:cfg.userBadgeBg,border:`1px solid ${cfg.userBadgeColor}44`,borderRadius:6,padding:'1px 8px',fontSize:11.5,fontWeight:600,color:cfg.userBadgeColor,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap',maxWidth:260 }}>{displayRoleBadge}</span>
+                  <div style={{ fontSize:11.5,color:cfg.userInfoColor,marginTop:2,whiteSpace:'nowrap',display:'flex',alignItems:'center',gap:7,minWidth:0 }}>
+                    <button
+                      ref={hasMultipleAssignments ? roleBtnRef : undefined}
+                      type='button'
+                      disabled={!hasMultipleAssignments}
+                      title={hasMultipleAssignments ? 'Mostra tutte le assegnazioni operative' : [displayRoleLabel, displayRoleCode].filter(Boolean).join(' · ')}
+                      onClick={() => {
+                        if (!hasMultipleAssignments) return
+                        setMenuOpen(false)
+                        if (!assignmentsOpen) {
+                          const rect = roleBtnRef.current?.getBoundingClientRect()
+                          if (rect) {
+                            setAssignmentsMenuPos({
+                              top: rect.bottom + 8,
+                              right: getUserBannerRightOffset()
+                            })
+                          }
+                        }
+                        setAssignmentsOpen(v => !v)
+                      }}
+                      style={{
+                        display:'inline-flex',alignItems:'center',gap:7,
+                        background:cfg.userBadgeBg,border:`1px solid ${cfg.userBadgeColor}44`,borderRadius:6,padding:'1px 8px',
+                        fontSize:11.5,fontWeight:600,color:cfg.userBadgeColor,fontFamily:'inherit',lineHeight:'inherit',
+                        whiteSpace:'nowrap',maxWidth:320,appearance:'none',WebkitAppearance:'none',
+                        cursor:hasMultipleAssignments ? 'pointer' : 'default'
+                      }}
+                    >
+                      <span>{displayRoleBadge}</span>
+                      {hasMultipleAssignments && <span aria-hidden='true' style={{ fontSize:13,fontWeight:700,lineHeight:1 }}>+</span>}
+                    </button>
                   </div>
                 )}
               </div>
@@ -3863,30 +4220,47 @@ export default function Widget(props: Props) {
           </div>
         )}
 
+        {assignmentsOpen && hasMultipleAssignments && createPortal(
+          <div style={{ position:'fixed', inset:0, zIndex:2147483646, pointerEvents:'none' }}>
+            <div
+              ref={assignmentsMenuRef}
+              style={{
+                position:'fixed', top:assignmentsMenuPos.top, right:assignmentsMenuPos.right,
+                minWidth:310, maxWidth:460, zIndex:9999,
+                background:'rgba(17,24,39,0.96)',
+                border:'1px solid rgba(255,255,255,0.12)',
+                borderRadius:10, boxShadow:'0 18px 40px rgba(0,0,0,0.35)',
+                padding:10, backdropFilter:'blur(10px)', pointerEvents:'auto'
+              }}
+            >
+              <div style={{ padding:'2px 4px 8px',fontSize:11,fontWeight:700,letterSpacing:0.7,textTransform:'uppercase',color:'rgba(191,219,254,0.72)' }}>
+                Assegnazioni operative
+              </div>
+              <div style={{ display:'flex',flexDirection:'column',gap:6 }}>
+                {orderedAssignments.map((a, index) => (
+                  <div key={`${a.profiloCod || a.ruoloCod}-${a.areaCod}-${a.settoreCod}-${a.ufficio}-${index}`} style={{
+                    padding:'7px 9px',borderRadius:7,background:index === 0 ? 'rgba(59,130,246,0.12)' : 'rgba(255,255,255,0.045)',
+                    border:index === 0 ? '1px solid rgba(96,165,250,0.24)' : '1px solid rgba(255,255,255,0.06)',
+                    fontSize:12,color:'rgba(226,232,240,0.96)',lineHeight:1.35
+                  }}>
+                    {assignmentLabel(a)}
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>,
+          document.body
+        )}
+
         <div style={{ ...off('offsetLogin') }}>{cfg.showSignIn && !uLoad && !profileSyncError && (
           user ? (
             signedInClickRef.current === 'menu' ? (
               <div style={{ position:'relative' }}>
-                <button type='button' disabled={signingIn}
-                  ref={accountBtnRef}
-                  onClick={() => {
-                    if (!menuOpen) {
-                      const rect = accountBtnRef.current?.getBoundingClientRect()
-                      if (rect) setAccountMenuPos({ top: rect.bottom + 8, right: Math.max(8, window.innerWidth - rect.right) })
-                    }
-                    setMenuOpen(v => !v)
-                  }}
-                  style={{ ...btnStyle, padding:'7px 14px', fontWeight:700, letterSpacing:0.2 }}>
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                    <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/>
-                  </svg>
-                  Account
-                  <span style={{ marginLeft:2, opacity:0.8 }}>▾</span>
-                </button>
+                {/* Il menu Account è aperto dal banner utente; nessun pulsante separato. */}
 
                 {menuOpen && createPortal(
                   <div style={{ position:'fixed', inset:0, zIndex:2147483646, pointerEvents:'none' }}>
-                    <div style={{
+                    <div ref={accountMenuRef} style={{
                       position:'fixed', top: accountMenuPos.top, right: accountMenuPos.right,
                       minWidth:230, zIndex:9999,
                       background:'rgba(17,24,39,0.92)',
@@ -3904,7 +4278,7 @@ export default function Widget(props: Props) {
                             <div style={{ width:36,height:36,borderRadius:'50%',
                               background:`linear-gradient(135deg,${cfg.userAvatarBg1},${cfg.userAvatarBg2})`,
                               display:'flex',alignItems:'center',justifyContent:'center',fontSize:14,fontWeight:700,color:'#fff',flexShrink:0 }}>
-                              {(user.fullName||user.username).charAt(0).toUpperCase()}
+                              {userInitials}
                             </div>
                           )}
                           {showAccountName && (

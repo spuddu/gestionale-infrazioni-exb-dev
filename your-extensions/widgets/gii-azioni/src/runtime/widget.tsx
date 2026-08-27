@@ -12,7 +12,7 @@ import { defaultConfig } from '../config'
 import { attrezzaturaInstanceTipoCodePdf, loadAttrezzatureCatalogPdf } from '../../../_shared/gii-anteprime/documenti-tecnici/rapporto/rapporto-nota-spese-summary'
 import { parseNorma3Codes } from '../../../_shared/gii-anteprime/req-point'
 import { ensureAttivitaCorrentiJsonOnlyQueryFormat } from '../../../_shared/gii-alerts/attivita-correnti-query-format-fix'
-import { getTiAmmAssignment, hasTiAmmAssignment, isPracticeAssignedToCurrentTiAmm } from '../../../_shared/gii-access/ti-amm-assignment'
+import { getIaAssignment, hasIaAssignment, isPracticeAssignedToCurrentIa } from '../../../_shared/gii-access/ia-assignment'
 import { clearGiiPracticeSelectionContext, getGiiPracticeContextStamp, isGiiPracticeContextStampCurrent, isGiiPracticePayloadCurrent, isGiiPracticeSelectionContextCurrent, stampGiiPracticePayload, type GiiPracticeContextStamp } from '../../../_shared/gii-selection/practice-context'
 
 
@@ -22,9 +22,9 @@ const GII_ATTIVITA_CORRENTI_URL = 'https://services2.arcgis.com/vH5RykSdaAwiEGOJ
 
 // ── Cache GII_utenti per risolvere utente_destinatario ──────────────────────
 type UtenteCached = {
+  username: string
   full_name: string
   email?: string
-  ruolo: number | null
   area: number | null
   settore: number | null
   ruoloCod: string
@@ -35,21 +35,24 @@ let _utentiCache: Map<string, UtenteCached> | null = null
 let _utentiLoading = false
 let _utentiCachePromise: Promise<Map<string, UtenteCached> | null> | null = null
 
-const RUOLO_NUM: Record<string, number> = { TR:1, TI:2, RZ:3, RI:4, DT:5, DA:6, ADMIN:7 }
 const AREA_NUM: Record<string, number> = { AMM:1, AGR:2, TEC:3 }
 const SETTORE_NUM: Record<string, number> = { CR:1, GI:2, D1:3, D2:4, D3:5, D4:6, D5:7, D6:8, DS:9 }
-const RUOLO_COD_FROM_NUM: Record<number, string> = { 1:'TR', 2:'TI', 3:'RZ', 4:'RI', 5:'DT', 6:'DA', 7:'ADMIN' }
 const AREA_COD_FROM_NUM: Record<number, string> = { 1:'AMM', 2:'AGR', 3:'TEC' }
 const SETTORE_COD_FROM_NUM: Record<number, string> = { 1:'CR', 2:'GI', 3:'D1', 4:'D2', 5:'D3', 6:'D4', 7:'D5', 8:'D6', 9:'DS' }
+
+const WORKFLOW_ROLE_CODES = new Set(['TR','IT','CS','RIT','DT','DA','ADMIN','RIA','IA'])
 
 function normalizeRuoloCod (v: any): string {
   const s = String(v ?? '').trim().toUpperCase().replace(/[\s-]+/g, '_')
   if (!s) return ''
-  const n = Number(s)
-  if (Number.isFinite(n) && RUOLO_COD_FROM_NUM[n]) return RUOLO_COD_FROM_NUM[n]
-  if (s === 'RI_AMM') return 'RI'
-  if (s === 'TI_AMM') return 'TI'
-  return RUOLO_NUM[s] != null ? s : s
+  return WORKFLOW_ROLE_CODES.has(s) ? s : ''
+}
+
+function canonicalWorkflowRole (roleValue: any, areaValue?: any): string {
+  const role = normalizeRuoloCod(roleValue)
+  const area = normalizeAreaCod(areaValue)
+  if (role === 'RIA' || role === 'IA') return role
+  return role
 }
 
 function normalizeAreaCod (v: any): string {
@@ -68,7 +71,6 @@ function normalizeSettoreCod (v: any): string {
   if (!s) return ''
   const n = Number(s)
   if (Number.isFinite(n) && SETTORE_COD_FROM_NUM[n]) return SETTORE_COD_FROM_NUM[n]
-  if (s === 'CS') return 'DS'
   const distretto = s.match(/DISTRETTO([1-6])/)
   if (distretto) return `D${distretto[1]}`
   if (s.includes('DRENO') || s.includes('SCOLO')) return 'DS'
@@ -91,7 +93,7 @@ function cleanPracticeCodeText (value: any): string {
 
 function isRilevazioneCodeText (value: any): boolean {
   const s = cleanPracticeCodeText(value).toUpperCase().replace(/_/g, '-').replace(/\s+/g, '-')
-  return /^(TR|TI)-\d+(?:-[A-Z0-9]+)?$/.test(s) || /^\d+-(TR|TI)(?:-[A-Z0-9]+)?$/.test(s)
+  return /^(TR|IT)-\d+(?:-[A-Z0-9]+)?$/.test(s) || /^\d+-(TR|IT)(?:-[A-Z0-9]+)?$/.test(s)
 }
 
 function getOfficialRapportoTecnicoNumber (data: any): string {
@@ -123,20 +125,20 @@ function buildRilevazioneNumberFromData (data: any, oid: number | null | undefin
   )
   const raw = rawCandidate.toUpperCase().replace(/_/g, '-').replace(/\s+/g, '-')
   const op = d?.origine_pratica ?? d?.Origine_pratica ?? d?.ORIGINE_PRATICA
-  let prefix: 'TR' | 'TI' = (op === 2 || op === '2' || String(op || '').toUpperCase() === 'TI') ? 'TI' : 'TR'
+  let prefix: 'TR' | 'IT' = (op === 2 || op === '2' || String(op || '').toUpperCase() === 'IT') ? 'IT' : 'TR'
   let oidPart = oid != null && Number.isFinite(Number(oid)) ? String(Number(oid)) : ''
   let sectorPart = normalizeSettoreCod(d?.settore_cod ?? d?.Settore_cod ?? d?.SETTORE_COD ?? d?.settore ?? d?.Settore ?? d?.SETTORE ?? '')
 
-  let m = raw.match(/^(TR|TI)-?(\d+)(?:-([A-Z0-9]+))?$/i)
+  let m = raw.match(/^(TR|IT)-?(\d+)(?:-([A-Z0-9]+))?$/i)
   if (m) {
-    prefix = m[1].toUpperCase() as 'TR' | 'TI'
+    prefix = m[1].toUpperCase() as 'TR' | 'IT'
     oidPart = m[2]
     if (!sectorPart && m[3]) sectorPart = normalizeSettoreCod(m[3])
   } else {
-    m = raw.match(/^(\d+)-?(TR|TI)(?:-([A-Z0-9]+))?$/i)
+    m = raw.match(/^(\d+)-?(TR|IT)(?:-([A-Z0-9]+))?$/i)
     if (m) {
       oidPart = m[1]
-      prefix = m[2].toUpperCase() as 'TR' | 'TI'
+      prefix = m[2].toUpperCase() as 'TR' | 'IT'
       if (!sectorPart && m[3]) sectorPart = normalizeSettoreCod(m[3])
     } else if (!oidPart && /^\d+$/.test(raw)) {
       oidPart = raw
@@ -156,7 +158,7 @@ function buildPracticeCodeFromData (data: any, oid: number | null | undefined): 
 
 /**
  * Cerca lo username di una persona in GII_utenti per ruolo+area(+settore).
- * Per TI usare ti_assegnato_username — non questa funzione.
+ * Per IT usare it_assegnato_username — non questa funzione.
  */
 function findDestUsername (
   cache: Map<string, UtenteCached> | null,
@@ -167,33 +169,32 @@ function findDestUsername (
   if (!cache) return ''
   const rRaw = String(roleLabel || '').trim().toUpperCase()
 
-  let ruoloCod = normalizeRuoloCod(rRaw)
   let areaCod = normalizeAreaCod(areaLabel)
   let settoreCod = normalizeSettoreCod(settoreLabel)
+  const ruoloCod = canonicalWorkflowRole(rRaw, areaCod)
 
-  if (rRaw === 'RI_AMM')       { ruoloCod = 'RI'; areaCod = 'AMM'; settoreCod = '' }
-  else if (rRaw === 'TI_AMM')  { ruoloCod = 'TI'; areaCod = 'AMM'; settoreCod = '' }
-  else if (rRaw === 'DA')      { ruoloCod = 'DA'; areaCod = 'AMM'; settoreCod = '' }
+  if (ruoloCod === 'RIA' || ruoloCod === 'IA' || ruoloCod === 'DA') {
+    areaCod = 'AMM'
+    settoreCod = ''
+  }
 
-  const ruoloCode = RUOLO_NUM[ruoloCod]
   const areaCode = areaCod ? AREA_NUM[areaCod] : undefined
   const settoreCode = settoreCod ? SETTORE_NUM[settoreCod] : undefined
-  if (!ruoloCod && !ruoloCode) return ''
+  if (!ruoloCod) return ''
 
-  const needsSettore = (ruoloCod === 'TR' || ruoloCod === 'RZ') && areaCod !== 'AMM'
+  const needsSettore = (ruoloCod === 'TR' || ruoloCod === 'CS') && areaCod !== 'AMM'
 
-  for (const [username, entry] of cache) {
-    const entryRuoloCod = normalizeRuoloCod(entry.ruoloCod || entry.ruolo)
+  for (const [, entry] of cache) {
+    const entryRuoloCod = canonicalWorkflowRole(entry.ruoloCod, entry.areaCod || entry.area)
     const entryAreaCod = normalizeAreaCod(entry.areaCod || entry.area)
     const entrySettoreCod = normalizeSettoreCod(entry.settoreCod || entry.settore)
 
-    if (ruoloCod && entryRuoloCod !== ruoloCod) continue
-    if (!ruoloCod && ruoloCode != null && entry.ruolo !== ruoloCode) continue
+    if (entryRuoloCod !== ruoloCod) continue
     if (areaCod && entryAreaCod !== areaCod) continue
     if (!areaCod && areaCode != null && entry.area !== areaCode) continue
     if (needsSettore && settoreCod && entrySettoreCod !== settoreCod) continue
     if (needsSettore && !settoreCod && settoreCode != null && entry.settore !== settoreCode) continue
-    return username
+    return String(entry.username || '').trim()
   }
   return ''
 }
@@ -207,28 +208,27 @@ function findDestEmail (
   if (!cache) return ''
   const rRaw = String(roleLabel || '').trim().toUpperCase()
 
-  let ruoloCod = normalizeRuoloCod(rRaw)
   let areaCod = normalizeAreaCod(areaLabel)
   let settoreCod = normalizeSettoreCod(settoreLabel)
+  const ruoloCod = canonicalWorkflowRole(rRaw, areaCod)
 
-  if (rRaw === 'RI_AMM')       { ruoloCod = 'RI'; areaCod = 'AMM'; settoreCod = '' }
-  else if (rRaw === 'TI_AMM')  { ruoloCod = 'TI'; areaCod = 'AMM'; settoreCod = '' }
-  else if (rRaw === 'DA')      { ruoloCod = 'DA'; areaCod = 'AMM'; settoreCod = '' }
+  if (ruoloCod === 'RIA' || ruoloCod === 'IA' || ruoloCod === 'DA') {
+    areaCod = 'AMM'
+    settoreCod = ''
+  }
 
-  const ruoloCode = RUOLO_NUM[ruoloCod]
   const areaCode = areaCod ? AREA_NUM[areaCod] : undefined
   const settoreCode = settoreCod ? SETTORE_NUM[settoreCod] : undefined
-  if (!ruoloCod && !ruoloCode) return ''
+  if (!ruoloCod) return ''
 
-  const needsSettore = (ruoloCod === 'TR' || ruoloCod === 'RZ') && areaCod !== 'AMM'
+  const needsSettore = (ruoloCod === 'TR' || ruoloCod === 'CS') && areaCod !== 'AMM'
 
   for (const [, entry] of cache) {
-    const entryRuoloCod = normalizeRuoloCod(entry.ruoloCod || entry.ruolo)
+    const entryRuoloCod = canonicalWorkflowRole(entry.ruoloCod, entry.areaCod || entry.area)
     const entryAreaCod = normalizeAreaCod(entry.areaCod || entry.area)
     const entrySettoreCod = normalizeSettoreCod(entry.settoreCod || entry.settore)
 
-    if (ruoloCod && entryRuoloCod !== ruoloCod) continue
-    if (!ruoloCod && ruoloCode != null && entry.ruolo !== ruoloCode) continue
+    if (entryRuoloCod !== ruoloCod) continue
     if (areaCod && entryAreaCod !== areaCod) continue
     if (!areaCod && areaCode != null && entry.area !== areaCode) continue
     if (needsSettore && settoreCod && entrySettoreCod !== settoreCod) continue
@@ -254,18 +254,25 @@ function ensureUtentiCache (): Promise<Map<string, UtenteCached> | null> {
         returnGeometry: false
       })
       const map = new Map<string, UtenteCached>()
+      let assignmentIndex = 0
       for (const f of (res?.features || [])) {
         const a = f?.attributes
         if (a?.username) {
-          map.set(String(a.username).trim().toLowerCase(), {
+          const username = String(a.username).trim()
+          const areaCod = normalizeAreaCod(a.area_cod || a.area)
+          const ruoloCod = canonicalWorkflowRole(a.ruolo_cod, areaCod)
+          const settoreCod = normalizeSettoreCod(a.settore_cod || a.settore)
+          // Uno stesso username può avere più assegnazioni: non collassarle in cache.
+          const assignmentKey = `${username.toLowerCase()}|${ruoloCod}|${areaCod}|${settoreCod}|${assignmentIndex++}`
+          map.set(assignmentKey, {
+            username,
             full_name: String(a.full_name || ''),
             email: String(a.email || a.e_mail || a.mail || a.pec || '').trim(),
-            ruolo: a.ruolo ?? null,
             area: a.area ?? null,
             settore: a.settore ?? null,
-            ruoloCod: normalizeRuoloCod(a.ruolo_cod || a.ruolo),
-            areaCod: normalizeAreaCod(a.area_cod || a.area),
-            settoreCod: normalizeSettoreCod(a.settore_cod || a.settore)
+            ruoloCod,
+            areaCod,
+            settoreCod
           })
         }
       }
@@ -438,6 +445,8 @@ type RuntimeSelection = {
   idFieldName: string
   viewName: string
   data?: any
+  operationalRole?: string
+  operationalRoleLabel?: string
 }
 
 
@@ -448,6 +457,8 @@ function clearRuntimeSelection (reason = 'azioni'): void {
     sessionStorage.removeItem('GII_SELECTED_SERVICE_URL')
     sessionStorage.removeItem('GII_SELECTED_IDFIELD')
     sessionStorage.removeItem('GII_SELECTED_VIEW_NAME')
+    sessionStorage.removeItem('GII_SELECTED_OPERATIONAL_ROLE')
+    sessionStorage.removeItem('GII_SELECTED_OPERATIONAL_ROLE_LABEL')
     sessionStorage.removeItem('GII_SELECTED_DATA')
     clearGiiPracticeSelectionContext()
     try { delete (window as any).__giiSelection } catch {}
@@ -470,6 +481,8 @@ function readRuntimeSelection (): RuntimeSelection | null {
         serviceUrl: String(mem.serviceUrl || '').trim(),
         idFieldName,
         viewName: String(mem.viewName || '').trim(),
+        operationalRole: String(mem.operationalRole || '').trim(),
+        operationalRoleLabel: String(mem.operationalRoleLabel || '').trim(),
         data: cache?.data
       }
     }
@@ -480,10 +493,12 @@ function readRuntimeSelection (): RuntimeSelection | null {
     const serviceUrl = String(sessionStorage.getItem('GII_SELECTED_SERVICE_URL') || '').trim()
     const idFieldName = String(sessionStorage.getItem('GII_SELECTED_IDFIELD') || 'OBJECTID').trim() || 'OBJECTID'
     const viewName = String(sessionStorage.getItem('GII_SELECTED_VIEW_NAME') || '').trim()
+    const operationalRole = String(sessionStorage.getItem('GII_SELECTED_OPERATIONAL_ROLE') || '').trim()
+    const operationalRoleLabel = String(sessionStorage.getItem('GII_SELECTED_OPERATIONAL_ROLE_LABEL') || '').trim()
     const oid = oidRaw != null ? Number(oidRaw) : NaN
     if (!layerUrl || !Number.isFinite(oid)) return null
     const cache = readSelectedFeatureCache(layerUrl, oid)
-    return { oid, layerUrl, serviceUrl, idFieldName, viewName, data: cache?.data }
+    return { oid, layerUrl, serviceUrl, idFieldName, viewName, operationalRole, operationalRoleLabel, data: cache?.data }
   } catch {
     return null
   }
@@ -1137,7 +1152,7 @@ const PRESA_DA_PRENDERE = 1
 
 // ─────────────────────────── OVERLAY EDITING INLINE ──────────────────────────
 // Versione semplificata dell'overlay di editing che vive dentro il widget Azioni.
-// Per la versione completa (con mappa e tutte le tab) usare il widget gii-editing-ti
+// Per la versione completa (con mappa e tutte le tab) usare il widget gii-editing-tec
 // sulla pagina dedicata.
 
 function filterAttrsForLayer(attrs: Record<string, any>, layer: any): Record<string, any> {
@@ -1546,7 +1561,7 @@ function actionButtonStyle (bg: string, disabled: boolean, ui?: { btnBorderRadiu
   return { ...base, backgroundColor: bg, borderColor: bg, color: textColor || '#ffffff' }
 }
 
-type Pending = null | 'TAKE' | 'ASSEGNA_TI' | 'ASSEGNA_TI_AMM' | 'INVIA_TI_AMM' | 'RESTITUISCI_TI_AMM' | 'INTEGRAZIONE' | 'INTEGRAZIONE_TI_AMM' | 'INTEGRAZIONE_TECNICA' | 'APPROVA' | 'RESPINGI' | 'TRASMETTI' | 'ELIMINA'
+type Pending = null | 'TAKE' | 'ASSEGNA_IT' | 'ASSEGNA_IA' | 'INVIA_IA' | 'RESTITUISCI_IA' | 'INTEGRAZIONE' | 'INTEGRAZIONE_IA' | 'INTEGRAZIONE_TECNICA' | 'APPROVA' | 'RESPINGI' | 'TRASMETTI' | 'ELIMINA'
 
 type WorkflowEsitoChoice = '' | 'CONFORME' | 'DA_INTEGRARE' | 'RESPINTA'
 
@@ -1597,11 +1612,6 @@ function ActionsPanel (props: {
     pageColor: string
     pageId: string
     ammPageId: string
-    fieldStatoTI: string
-    fieldPresaTI: string
-    minStato: number
-    maxStato: number
-    presaRequiredVal: number
   }
   nsConfig: { detailUrl: string; parametriUrl: string; parametroCode: string; attrezzatureParametriUrl: string }
   sanzioneConfig: { parametriSanzioniUrl: string; regolamentoArticoliUrl: string; regolamentoRaccordiUrl: string }
@@ -1609,25 +1619,19 @@ function ActionsPanel (props: {
 }) {
   const { active, roleCode, buttonText, buttonColors, ui } = props
   const role = String(roleCode || 'DT').trim().toUpperCase()
-  const hasDedicatedPresaField = React.useCallback((r: string) => {
-    const rr = String(r || '').trim().toUpperCase()
-    // DT e DA non usano più i campi ridondanti presa_in_carico_DT/DA:
-    // la presa in carico è rappresentata da stato_* e dt_presa_in_carico_*.
-    return rr !== 'DT' && rr !== 'DA'
-  }, [])
-
+  const usesStateOnlyWorkflow = (r: string): boolean => ['IT', 'CS', 'RIT'].includes(String(r || '').trim().toUpperCase())
+  const roleUsesStateOnlyWorkflow = usesStateOnlyWorkflow(role)
   // scorciatoie (usate spesso nel render)
   const titleFontSize = ui.titleFontSize
   const msgFontSize = ui.msgFontSize
 
-  const presaField = `presa_in_carico_${role}`
   const dtPresaField = `dt_presa_in_carico_${role}`
 
   const statoField = `stato_${role}`
   const dtStatoField = `dt_stato_${role}`
 
-  const esitoField = `esito_${role}`
-  const dtEsitoField = `dt_esito_${role}`
+  const esitoField = roleUsesStateOnlyWorkflow ? '' : `esito_${role}`
+  const dtEsitoField = roleUsesStateOnlyWorkflow ? '' : `dt_esito_${role}`
 
   const noteField = `note_${role}`
 
@@ -1663,22 +1667,22 @@ function ActionsPanel (props: {
     setIntegrationOtherText('')
   }, [])
 
-  // Assegna TI (solo RZ)
+  // Assegna IT (solo CS)
   type TiOpt = { username: string; fullName: string }
   const [tiOptions, setTiOptions] = React.useState<TiOpt[]>([])
   const [tiSelected, setTiSelected] = React.useState<string>('')
   const [tiLoading, setTiLoading] = React.useState(false)
   const [tiLoadErr, setTiLoadErr] = React.useState<string>('')
 
-  // Assegna TI_AMM (solo RI_AMM)
-  const [tiAmmOptions, setTiAmmOptions] = React.useState<TiOpt[]>([])
-  const [tiAmmSelected, setTiAmmSelected] = React.useState<string>('')
-  const [tiAmmLoading, setTiAmmLoading] = React.useState(false)
-  const tiAmmLoadingRef = React.useRef(false)
-  const [tiAmmLoadErr, setTiAmmLoadErr] = React.useState<string>('')
+  // Assegna IA (solo RIA)
+  const [iaOptions, setIaOptions] = React.useState<TiOpt[]>([])
+  const [iaSelected, setIaSelected] = React.useState<string>('')
+  const [iaLoading, setIaLoading] = React.useState(false)
+  const iaLoadingRef = React.useRef(false)
+  const [iaLoadErr, setIaLoadErr] = React.useState<string>('')
 
   // Riapertura amministrativa: evita che lo stesso numero di riapertura
-  // possa avviare più volte un nuovo ciclo TI_AMM.
+  // possa avviare più volte un nuovo ciclo IA.
   const [riaperturaWorkflowStarted, setRiaperturaWorkflowStarted] = React.useState(false)
   const [riaperturaWorkflowCheckLoading, setRiaperturaWorkflowCheckLoading] = React.useState(false)
 
@@ -1712,8 +1716,7 @@ function ActionsPanel (props: {
 
   // ── Field existence helpers (schema-aware) ────────────────────────────────
   // La fonte primaria della presa in carico è stato_*; dt_presa_in_carico_* registra la data.
-  // I vecchi campi presa_in_carico_DT/DA sono ridondanti e vengono ignorati anche se ancora presenti nello schema.
-  // Per eventuali altri ruoli, usiamo presa_in_carico_* solo se il campo esiste davvero.
+  // La presa in carico è rappresentata da stato_* e dt_presa_in_carico_* per tutti i ruoli.
   const schemaFieldsCI = React.useMemo(() => {
     try {
       const fields: Record<string, any> = (ds as any)?.getSchema?.()?.fields || {}
@@ -1781,12 +1784,6 @@ function ActionsPanel (props: {
     return value
   }
 
-  const inferSettoreFromUsername = (u: string): string => {
-    const up = String(u || '').toUpperCase()
-    const m = up.match(/(D[1-6]|DS|CR)/)
-    return m ? m[1] : ''
-  }
-
   const logCycleLayerRef = React.useRef<any | null>(null)
 
   const normalizeAreaLabel = (v: any): string => {
@@ -1852,7 +1849,7 @@ function ActionsPanel (props: {
   React.useEffect(() => {
     let cancelled = false
     setRiaperturaWorkflowStarted(false)
-    if (role !== 'RI_AMM' || !riaperturaAmmCompleta || !riaperturaAmmNumero || !data) {
+    if (role !== 'RIA' || !riaperturaAmmCompleta || !riaperturaAmmNumero || !data) {
       setRiaperturaWorkflowCheckLoading(false)
       return () => { cancelled = true }
     }
@@ -1870,7 +1867,7 @@ function ActionsPanel (props: {
         if (!logLayer?.queryFeatures) return
         const q = logLayer.createQuery ? logLayer.createQuery() : {}
         const marker = `Riapertura amministrativa n. ${riaperturaAmmNumero}`
-        q.where = `(${parentGlobalIdWhere('parent_globalid', parentGlobalId)}) AND ruolo_competente = 'RI_AMM' AND evento_chiusura = 'NUOVA_ASSEGNAZIONE' AND ruolo_destinatario = 'TI_AMM' AND note_chiusura LIKE ${sqlQuote(`%${marker}%`)}`
+        q.where = `(${parentGlobalIdWhere('parent_globalid', parentGlobalId)}) AND ruolo_competente = 'RIA' AND evento_chiusura = 'NUOVA_ASSEGNAZIONE' AND ruolo_destinatario = 'IA' AND note_chiusura LIKE ${sqlQuote(`%${marker}%`)}`
         q.outFields = [String(logLayer.objectIdField || 'OBJECTID')]
         q.returnGeometry = false
         q.num = 1
@@ -2033,7 +2030,7 @@ function ActionsPanel (props: {
   // Art. 30 richiede la Nota spese solo se tra le attrezzature selezionate ce n'è almeno una
   // con stato "Recuperabile" — se sono tutte "Non recuperabile" (risarcimento forfettario,
   // già coperto dal pannello "Risarcimento attrezzatura"), non ha senso attendersi anche una
-  // nota spese. Mirror della stessa logica in gii-editing-ti.
+  // nota spese. Mirror della stessa logica in gii-editing-tec.
   const art30HasRecuperabileForNotaSpeseCheck = (attrs: any): boolean => {
     const raw = String(pickAttrCI(attrs, ['attrezzature_risarcimento_dettaglio']) || '')
     for (const line of raw.split(/\r?\n/)) {
@@ -2128,8 +2125,8 @@ function ActionsPanel (props: {
 
   const findNotaSpeseWarnings = async (): Promise<{ blocking: string[]; confirmable: string[] }> => {
     // Avvisi persistenti anche negli inoltri successivi del flusso tecnico:
-    // TI → RZ, RZ → RI e RI → DT.
-    if (!(role === 'TI' || role === 'RZ' || role === 'RI')) return { blocking: [], confirmable: [] }
+    // IT → CS, CS → RIT e RIT → DT.
+    if (!(role === 'IT' || role === 'CS' || role === 'RIT')) return { blocking: [], confirmable: [] }
     const selected = getSelectedNotaSpeseCasisticheCheck(data)
     if (selected.length === 0) return { blocking: [], confirmable: [] }
     const parentGlobalId = String(pickAttrCI(data, ['GlobalID', 'globalid', 'GLOBALID']) || '').trim()
@@ -2162,17 +2159,21 @@ function ActionsPanel (props: {
 
   const isAreaScopedCycleRole = (r: string): boolean => {
     const rr = String(r || '').trim().toUpperCase()
-    return rr === 'RI' || rr === 'DT' || rr === 'TI_AMM' || rr === 'RI_AMM' || rr === 'DA'
+    return rr === 'RIT' || rr === 'DT' || rr === 'IA' || rr === 'RIA' || rr === 'DA'
   }
 
   const getCurrentCycleContext = (): CycleContext => {
     const giiRole: any = (window as any).__giiUserRole || {}
     const parentGlobalId = String(pickAttrCI(data, ['globalid', 'global_id', 'GlobalID', 'GLOBALID', 'parent_globalid']) || '')
-    const area = normalizeAreaLabel(giiRole.areaCod || giiRole.area_cod || giiRole.areaLabel || giiRole.area || pickAttrCI(data, ['area_cod', 'area', 'cod_area']))
-    const settore = isAreaScopedCycleRole(role) ? '' : normalizeSettoreLabel(
-      area,
-      giiRole.settoreCod || giiRole.settore_cod || giiRole.settoreLabel || giiRole.settore || pickAttrCI(data, ['settore_cod', 'settore', 'cod_settore']) || inferSettoreFromUsername(String(giiRole.username || pickAttrCI(data, ['creator', 'Creator', 'editor', 'Editor']) || ''))
-    )
+    // Per una pratica già inizializzata, area e settore del ciclo/routing devono provenire
+    // prima di tutto dai campi strutturati della pratica. Il profilo dell'utente può avere
+    // più assegnazioni IT e non identifica necessariamente il settore della pratica aperta.
+    const practiceArea = normalizeAreaLabel(pickAttrCI(data, ['area_cod', 'area', 'cod_area']))
+    const userArea = normalizeAreaLabel(giiRole.areaCod || giiRole.area_cod || giiRole.areaLabel || giiRole.area)
+    const area = practiceArea || userArea
+    const practiceSettore = normalizeSettoreLabel(area, pickAttrCI(data, ['settore_cod', 'settore', 'cod_settore']))
+    const userSettore = normalizeSettoreLabel(area, giiRole.settoreCod || giiRole.settore_cod || giiRole.settore)
+    const settore = isAreaScopedCycleRole(role) ? '' : (practiceSettore || userSettore)
     const username = String(giiRole.username || (window as any).__giiUser?.username || '').trim()
     return { parentGlobalId, area, settore, username }
   }
@@ -2186,33 +2187,42 @@ function ActionsPanel (props: {
 
     const giiRole: any = (window as any).__giiUserRole || {}
     const parentGlobalId = String(pickAttrCI(attrs, ['globalid', 'global_id', 'GlobalID', 'GLOBALID', 'parent_globalid']) || '')
-    const area = base.area || normalizeAreaLabel(giiRole.areaCod || giiRole.area_cod || giiRole.areaLabel || giiRole.area || pickAttrCI(attrs, ['area_cod', 'area', 'cod_area']))
-    const settore = isAreaScopedCycleRole(role) ? '' : (base.settore || normalizeSettoreLabel(
-      area,
-      giiRole.settoreCod || giiRole.settore_cod || giiRole.settoreLabel || giiRole.settore || pickAttrCI(attrs, ['settore_cod', 'settore', 'cod_settore']) || inferSettoreFromUsername(String(giiRole.username || pickAttrCI(attrs, ['creator', 'Creator', 'editor', 'Editor']) || ''))
-    ))
+    const attrsArea = normalizeAreaLabel(pickAttrCI(attrs, ['area_cod', 'area', 'cod_area']))
+    const userArea = normalizeAreaLabel(giiRole.areaCod || giiRole.area_cod || giiRole.areaLabel || giiRole.area)
+    const area = attrsArea || base.area || userArea
+    const attrsSettore = normalizeSettoreLabel(area, pickAttrCI(attrs, ['settore_cod', 'settore', 'cod_settore']))
+    const userSettore = normalizeSettoreLabel(area, giiRole.settoreCod || giiRole.settore_cod || giiRole.settore)
+    const settore = isAreaScopedCycleRole(role) ? '' : (attrsSettore || base.settore || userSettore)
     return { ...base, parentGlobalId, area, settore }
   }
 
   /**
    * Risolve lo username del destinatario dato il codice ruolo.
-   * TI → ti_assegnato_username, TI_AMM → ti_amm_assegnato_username.
+   * IT → it_assegnato_username, IA → ia_assegnato_username.
    * Altri ruoli → lookup in GII_utenti per ruolo+area+settore.
    */
   const resolveDestUser = (destRole: string): string => {
     if (!destRole) return ''
     const r = destRole.toUpperCase()
-    if (r === 'TI') {
-      return String(pickAttrCI(data, ['ti_assegnato_username', 'ti_assegnato_user', 'ti_assegnato']) || '').trim()
+    if (r === 'IT') {
+      return String(pickAttrCI(data, ['it_assegnato_username']) || '').trim()
     }
-    if (r === 'TI_AMM') {
-      return String(pickAttrCI(data, ['ti_amm_assegnato_username']) || '').trim()
+    if (r === 'IA') {
+      return String(pickAttrCI(data, ['ia_assegnato_username']) || '').trim()
     }
 
-    // Caso speciale: RI_AMM che chiede integrazione tecnica.
-    // Il destinatario non è il RI dell'Area Amministrativa, ma il RI
+    // Il Capo Settore destinatario dipende sempre dall'area/settore della pratica,
+    // non dal profilo legacy o dal contesto generale dell'utente corrente.
+    if (r === 'CS') {
+      const areaPratica = getPracticeAreaForRouting()
+      const settorePratica = getPracticeSettoreForRouting()
+      return findDestUsername(_utentiCache, destRole, areaPratica, settorePratica)
+    }
+
+    // Caso speciale: RIA che chiede integrazione tecnica.
+    // Il destinatario non è il Responsabile dell’istruttoria amministrativa, ma il RIT
     // dell'area tecnica di provenienza della pratica (AGR o TEC).
-    if (role === 'RI_AMM' && r === 'RI') {
+    if (role === 'RIA' && r === 'RIT') {
       const areaPratica = normalizeAreaLabel(pickAttrCI(data, ['area_cod', 'area', 'cod_area']))
       const settorePratica = normalizeSettoreLabel(areaPratica, pickAttrCI(data, ['settore_cod', 'settore', 'cod_settore']))
       return findDestUsername(_utentiCache, destRole, areaPratica, settorePratica)
@@ -2398,7 +2408,7 @@ function ActionsPanel (props: {
     if (k.startsWith('stato_') || k.startsWith('dt_stato_')) return false
     if (k.startsWith('presa_in_carico_') || k.startsWith('dt_presa_in_carico_')) return false
     if (k.startsWith('esito_') || k.startsWith('dt_esito_')) return false
-    if (k.startsWith('ti_assegnato_') || k.startsWith('ri_assegnato_')) return false
+    if (k.startsWith('it_assegnato_') || k.startsWith('ri_assegnato_')) return false
     if (k.startsWith('dt_assegnazione_')) return false
     if (k.startsWith('note_')) return false
     if (k.startsWith('ns_')) return false
@@ -2454,10 +2464,19 @@ function ActionsPanel (props: {
           console.warn('[GII_LOG_EVENTI_CICLI] Nessun ciclo aperto trovato e parent_globalid non disponibile: creazione record chiuso saltata.', { oid, role })
           return
         }
-        // Nessun ciclo APERTO trovato (es. TI origine=2 che non passa dalla presa in carico).
+        // Nessun ciclo APERTO trovato (es. IT origine=2 che non passa dalla presa in carico).
         // Creo un record completo direttamente come CHIUSO (apertura + chiusura in un colpo).
         const nextNum = await getNextCycleNumber(parentGlobalId, role)
         const now = Date.now()
+        let itOpenRaw: any = role === 'IT'
+          ? pickAttrCI(data, ['dt_presa_in_carico_IT', 'DT_PRESA_IN_CARICO_IT', 'dt_stato_IT', 'DT_STATO_IT'])
+          : null
+        if (role === 'IT' && (itOpenRaw == null || itOpenRaw === '')) {
+          const currentAttrs = await queryCurrentRecordAttrs()
+          itOpenRaw = pickAttrCI(currentAttrs || {}, ['dt_presa_in_carico_IT', 'DT_PRESA_IN_CARICO_IT', 'dt_stato_IT', 'DT_STATO_IT'])
+        }
+        const itOpenNum = itOpenRaw != null && itOpenRaw !== '' ? Number(itOpenRaw) : NaN
+        const syntheticOpenTs = role === 'IT' && Number.isFinite(itOpenNum) && itOpenNum > 0 ? itOpenNum : now
         const auditDelta = mergeWorkflowActionAuditMaps({}, {}, opts.auditOldMap || {}, opts.auditNewMap || {})
         const numCampi = auditDelta.fields.length
         const summary = buildCycleSummary('CREAZIONE', opts.eventoChiusura, numCampi)
@@ -2469,7 +2488,7 @@ function ActionsPanel (props: {
           utente_operatore: username,
           stato_record: 'CHIUSO',
           evento_apertura: 'CREAZIONE',
-          dt_apertura: now,
+          dt_apertura: syntheticOpenTs,
           evento_chiusura: opts.eventoChiusura,
           dt_chiusura: now,
           ruolo_destinatario: opts.ruoloDestinatario || '',
@@ -2551,33 +2570,31 @@ function ActionsPanel (props: {
     const area = normalizeAreaLabel(opts?.area || '')
     const settore = normalizeSettoreCod(opts?.settore || '')
 
-    if (rr === 'RI_AMM') return 'RI-AMM'
-    if (rr === 'TI_AMM') return 'TI-AMM'
+    if (rr === 'RIA') return 'RIA'
+    if (rr === 'IA') return 'IA-AMM'
     if (rr === 'DT') return area ? `DIR-${area}` : 'DIR'
-    if (rr === 'RI') return area ? `RI-${area}` : 'RI'
-    if (rr === 'RZ') return settore ? `RZ-${settore}` : 'RZ'
-    if (rr === 'TI') return settore ? `TI-${settore}` : 'TI'
+    if (rr === 'RIT') return area ? `RIT-${area}` : 'RIT'
+    if (rr === 'CS') return settore ? `CS-${settore}` : 'CS'
+    if (rr === 'IT') return settore ? `IT-${settore}` : 'IT'
     if (rr === 'TR') return settore ? `TR-${settore}` : 'TR'
     return rr
   }
 
-  const makeGiiActorLabel = (r: string, username: string, opts?: { area?: string, settore?: string }): string => {
-    const tag = makeGiiRoleTag(r, opts)
-    const user = String(username || '').trim()
-    const label = user ? `${tag} - ${user}` : tag
-    // I campi GII_da/GII_a sono stringhe brevi; evitiamo errori su username lunghi.
-    return label.length > 30 ? label.slice(0, 30) : label
+  const makeGiiActorLabel = (r: string, _username: string, opts?: { area?: string, settore?: string }): string => {
+    // GII_da/GII_a contengono solo il tag strutturato di routing.
+    // L'identità dell'utente resta nei campi di assegnazione e nel log eventi.
+    return makeGiiRoleTag(r, opts)
   }
 
   const makeGiiSenderRoleLabel = (r: string): string => {
     const rr = String(r || '').trim().toUpperCase()
     if (rr === 'TR') return 'Tecnico rilevatore'
-    if (rr === 'TI') return 'Tecnico istruttore'
-    if (rr === 'RZ') return 'Capo Settore'
-    if (rr === 'RI') return 'Responsabile Istruttoria'
+    if (rr === 'IT') return 'Istruttore tecnico'
+    if (rr === 'CS') return 'Capo Settore'
+    if (rr === 'RIT') return 'Responsabile istruttoria tecnica'
     if (rr === 'DT') return 'Direttore d’Area'
-    if (rr === 'TI_AMM') return 'Tecnico Istruttore amministrativo'
-    if (rr === 'RI_AMM') return 'Responsabile Istruttoria amministrativa'
+    if (rr === 'IA') return 'Istruttore amministrativo'
+    if (rr === 'RIA') return 'Responsabile Istruttoria amministrativa'
     if (rr === 'DA') return 'Direttore Area AA. GG. e P.F.'
     return rr || '—'
   }
@@ -2588,24 +2605,24 @@ function ActionsPanel (props: {
     const areaPratica = getPracticeAreaForRouting()
     const settorePratica = getPracticeSettoreForRouting()
 
-    if (rr === 'RI_AMM' || rr === 'TI_AMM' || rr === 'DA') {
+    if (rr === 'RIA' || rr === 'IA' || rr === 'DA') {
       return { area: 'AMM', settore: '' }
     }
 
-    // Caso importante: integrazione tecnica chiesta da RI_AMM.
-    // Il destinatario è il RI dell'area tecnica di provenienza della pratica,
-    // non l'RI dell'Area Amministrativa.
-    if (opts?.technicalIntegration && rr === 'RI') {
+    // Caso importante: integrazione tecnica chiesta da RIA.
+    // Il destinatario è il RIT dell'area tecnica di provenienza della pratica,
+    // non il Responsabile dell’istruttoria amministrativa.
+    if (opts?.technicalIntegration && rr === 'RIT') {
       return { area: areaPratica || ctx.area, settore: '' }
     }
 
-    if (rr === 'RI' || rr === 'DT') {
+    if (rr === 'RIT' || rr === 'DT') {
       return { area: areaPratica || ctx.area, settore: '' }
     }
 
-    // Per i destinatari settoriali (RZ/TI/TR) va usato il settore della pratica,
+    // Per i destinatari settoriali (CS/IT/TR) va usato il settore della pratica,
     // non il settore del ruolo che sta eseguendo l'azione. Altrimenti, ad esempio,
-    // un rimando RI -> RZ finisce sul settore del RI e non sul distretto RZ corretto.
+    // un rimando RIT -> CS finisce sul settore del RIT e non sul distretto CS corretto.
     return { area: areaPratica || ctx.area, settore: settorePratica || ctx.settore }
   }
 
@@ -2668,12 +2685,12 @@ function ActionsPanel (props: {
     const dst = String(ruoloDest || '').trim().toUpperCase()
 
     if (ev === 'NUOVA_ASSEGNAZIONE') return 'NUOVA_ASSEGNAZIONE'
-    if (ev === 'ATTESTAZIONE_CONFORMITA') return 'ATTESTAZIONE_CONFORMITA_TI_AMM'
+    if (ev === 'ATTESTAZIONE_CONFORMITA') return 'ATTESTAZIONE_CONFORMITA_IA'
     if (ev === 'PROPOSTA_CONTESTAZIONE_APPROVATA') return 'PROPOSTA_CONTESTAZIONE_APPROVATA'
     if (ev === 'RAPPORTO_APPROVATO') return 'RAPPORTO_APPROVATO'
     if (ev === 'INTEGRAZIONE_RICHIESTA') return 'RICHIESTA_INTEGRAZIONE'
     if (ev === 'INTEGRAZIONE_TRASMESSA') return 'INTEGRAZIONE_TRASMESSA'
-    if (ev === 'INVIO_A_TI_AMM') return 'NUOVA_ASSEGNAZIONE'
+    if (ev === 'INVIO_A_IA') return 'NUOVA_ASSEGNAZIONE'
     if (ev === 'ISTRUTTORIA_TRASMESSA') return 'NUOVA_ASSEGNAZIONE'
     if (ev === 'RESPINTA') {
       if (src === 'DT') return 'ISTRUTTORIA_TECNICA_RESPINTA'
@@ -2687,7 +2704,7 @@ function ActionsPanel (props: {
     if (st === 'NUOVO_RAPPORTO') return 'Nuova rilevazione'
     if (st === 'RAPPORTO_UFFICIO') return 'Rilevazione'
     if (st === 'NUOVA_ASSEGNAZIONE') return 'Nuova assegnazione'
-    if (st === 'ATTESTAZIONE_CONFORMITA_TI_AMM') return 'Attestazione di conformità apposta'
+    if (st === 'ATTESTAZIONE_CONFORMITA_IA') return 'Attestazione di conformità apposta'
     if (st === 'PROPOSTA_CONTESTAZIONE_APPROVATA') return 'Istruttoria amministrativa approvata'
     if (st === 'RICHIESTA_INTEGRAZIONE') return 'Integrazione richiesta'
     if (st === 'INTEGRAZIONE_TRASMESSA') return 'Integrazione trasmessa'
@@ -2703,7 +2720,7 @@ function ActionsPanel (props: {
     if (st === 'NUOVO_RAPPORTO') return `Rilevazione n. ${n} da prendere in carico.`
     if (st === 'RAPPORTO_UFFICIO') return `Rilevazione n. ${n} da prendere in carico.`
     if (st === 'NUOVA_ASSEGNAZIONE') return `Pratica n. ${n} da prendere in carico.`
-    if (st === 'ATTESTAZIONE_CONFORMITA_TI_AMM') return `Attestazione di conformità sulla pratica n. ${n} da prendere in carico.`
+    if (st === 'ATTESTAZIONE_CONFORMITA_IA') return `Attestazione di conformità sulla pratica n. ${n} da prendere in carico.`
     if (st === 'PROPOSTA_CONTESTAZIONE_APPROVATA') return `Istruttoria amministrativa della pratica n. ${n} approvata dal Responsabile dell’istruttoria amministrativa. Pratica da prendere in carico per protocollazione e predisposizione della bozza di determinazione.`
     if (st === 'RICHIESTA_INTEGRAZIONE') return `Integrazione n. ${n} da prendere in carico.`
     if (st === 'INTEGRAZIONE_TRASMESSA') return `Integrazione n. ${n} da prendere in carico.`
@@ -2719,15 +2736,15 @@ function ActionsPanel (props: {
     const dst = String(ruoloDest || '').trim().toUpperCase()
 
     if (ev === 'ISTRUTTORIA_TRASMESSA') {
-      if ((src === 'TI' || src === 'TR') && dst === 'RZ') return 'Rilevazione trasmessa'
-      if (src === 'RZ' && dst === 'RI') return praticaLabel === 'Rapporto tecnico' ? 'Rapporto tecnico trasmesso' : 'Rilevazione approvata'
-      if (src === 'RI' && dst === 'DT') return 'Istruttoria tecnica approvata'
-      if (src === 'TI_AMM' && dst === 'RI_AMM') return 'Istruttoria amministrativa trasmessa'
+      if ((src === 'IT' || src === 'TR') && dst === 'CS') return 'Rilevazione trasmessa'
+      if (src === 'CS' && dst === 'RIT') return praticaLabel === 'Rapporto tecnico' ? 'Rapporto tecnico trasmesso' : 'Rilevazione approvata'
+      if (src === 'RIT' && dst === 'DT') return 'Istruttoria tecnica approvata'
+      if (src === 'IA' && dst === 'RIA') return 'Istruttoria amministrativa trasmessa'
     }
 
-    if (ev === 'PROPOSTA_CONTESTAZIONE_APPROVATA' && src === 'RI_AMM' && dst === 'TI_AMM') return 'Istruttoria amministrativa approvata'
-    if (ev === 'ATTESTAZIONE_CONFORMITA' && src === 'TI_AMM' && dst === 'RI_AMM') return 'Attestazione di conformità apposta'
-    if (ev === 'INVIO_A_TI_AMM') return 'Istruttoria amministrativa trasmessa'
+    if (ev === 'PROPOSTA_CONTESTAZIONE_APPROVATA' && src === 'RIA' && dst === 'IA') return 'Istruttoria amministrativa approvata'
+    if (ev === 'ATTESTAZIONE_CONFORMITA' && src === 'IA' && dst === 'RIA') return 'Attestazione di conformità apposta'
+    if (ev === 'INVIO_A_IA') return 'Istruttoria amministrativa trasmessa'
 
     return activityTitleForSubtype(subtipo)
   }
@@ -2739,26 +2756,26 @@ function ActionsPanel (props: {
     const n = String(numeroRapporto || '').trim() || '—'
 
     if (ev === 'ISTRUTTORIA_TRASMESSA') {
-      if ((src === 'TI' || src === 'TR') && dst === 'RZ') return `Rilevazione n. ${n} da prendere in carico.`
-      if (src === 'RZ' && dst === 'RI') return `Istruttoria tecnica n. ${n} da prendere in carico.`
-      if (src === 'RI' && dst === 'DT') return `Rapporto tecnico n. ${n} da prendere in carico.`
-      if (src === 'TI_AMM' && dst === 'RI_AMM') return `Istruttoria amministrativa n. ${n} da prendere in carico.`
+      if ((src === 'IT' || src === 'TR') && dst === 'CS') return `Rilevazione n. ${n} da prendere in carico.`
+      if (src === 'CS' && dst === 'RIT') return `Istruttoria tecnica n. ${n} da prendere in carico.`
+      if (src === 'RIT' && dst === 'DT') return `Rapporto tecnico n. ${n} da prendere in carico.`
+      if (src === 'IA' && dst === 'RIA') return `Istruttoria amministrativa n. ${n} da prendere in carico.`
     }
 
-    if (ev === 'PROPOSTA_CONTESTAZIONE_APPROVATA' && src === 'RI_AMM' && dst === 'TI_AMM') return `Il Responsabile dell’istruttoria amministrativa ha approvato l’istruttoria amministrativa della pratica n. ${n}. La pratica può essere presa in carico per protocollazione del fascicolo e predisposizione della bozza di determinazione.`
-    if (ev === 'ATTESTAZIONE_CONFORMITA' && src === 'TI_AMM' && dst === 'RI_AMM') return `Il Tecnico Istruttore amministrativo ha apposto il visto di conformità sulla pratica n. ${n}.`
-    if (ev === 'INVIO_A_TI_AMM') return `Istruttoria amministrativa n. ${n} da prendere in carico.`
+    if (ev === 'PROPOSTA_CONTESTAZIONE_APPROVATA' && src === 'RIA' && dst === 'IA') return `Il Responsabile dell’istruttoria amministrativa ha approvato l’istruttoria amministrativa della pratica n. ${n}. La pratica può essere presa in carico per protocollazione del fascicolo e predisposizione della bozza di determinazione.`
+    if (ev === 'ATTESTAZIONE_CONFORMITA' && src === 'IA' && dst === 'RIA') return `L’Istruttore amministrativo ha apposto il visto di conformità sulla pratica n. ${n}.`
+    if (ev === 'INVIO_A_IA') return `Istruttoria amministrativa n. ${n} da prendere in carico.`
 
     return activityMessageForSubtype(subtipo, n)
   }
 
   const normalizeActivityDestRole = (r: string): string => {
     const rr = String(r || '').trim().toUpperCase()
-    if (rr === 'TI_AMM' || rr === 'RI_AMM' || rr === 'DA') return rr
+    if (rr === 'IA' || rr === 'RIA' || rr === 'DA') return rr
     if (rr.startsWith('DT')) return 'DT'
-    if (rr.startsWith('RI') && rr !== 'RI_AMM') return 'RI'
-    if (rr.startsWith('RZ')) return 'RZ'
-    if (rr.startsWith('TI') && rr !== 'TI_AMM') return 'TI'
+    if (rr.startsWith('RIT') && rr !== 'RIA') return 'RIT'
+    if (rr.startsWith('CS')) return 'CS'
+    if (rr.startsWith('IT') && rr !== 'IA') return 'IT'
     return rr
   }
 
@@ -2869,10 +2886,10 @@ function ActionsPanel (props: {
     try {
       const layer = await getAttivitaLayer()
       const numeroRapporto = shortReportNumberForActivity(overrideAttrs)
-      const destMeta = getRoutingMetaForRole(ruoloDest, { technicalIntegration: logOpts?.eventoChiusura === 'INTEGRAZIONE_RICHIESTA' && ruoloDest === 'RI' && role === 'RI_AMM' })
-      const areaDest = normalizeAreaLabel(destMeta.area || (ruoloDest === 'DA' || ruoloDest === 'RI_AMM' || ruoloDest === 'TI_AMM' ? 'AMM' : ''))
+      const destMeta = getRoutingMetaForRole(ruoloDest, { technicalIntegration: logOpts?.eventoChiusura === 'INTEGRAZIONE_RICHIESTA' && ruoloDest === 'RIT' && role === 'RIA' })
+      const areaDest = normalizeAreaLabel(destMeta.area || (ruoloDest === 'DA' || ruoloDest === 'RIA' || ruoloDest === 'IA' ? 'AMM' : ''))
       // Manteniamo il settore di provenienza nel record dell'attività corrente.
-      // La visibilità area-level per RI/DT viene gestita dalla query degli allarmi,
+      // La visibilità area-level per RIT/DT viene gestita dalla query degli allarmi,
       // non svuotando il dato sul record.
       const settoreDest = normalizeSettoreCod(destMeta.settore || '')
       const subtipo = activitySubTypeFromEvent(logOpts?.eventoChiusura, role, ruoloDest)
@@ -2948,7 +2965,7 @@ function ActionsPanel (props: {
       const now = Date.now()
       const numeroRapporto = shortReportNumberForActivity(overrideAttrs)
       const destMeta = getRoutingMetaForRole(ruoloDest)
-      const areaDest = normalizeAreaLabel(destMeta.area || (ruoloDest === 'DA' || ruoloDest === 'RI_AMM' || ruoloDest === 'TI_AMM' ? 'AMM' : ''))
+      const areaDest = normalizeAreaLabel(destMeta.area || (ruoloDest === 'DA' || ruoloDest === 'RIA' || ruoloDest === 'IA' ? 'AMM' : ''))
       const settoreDest = normalizeSettoreCod(destMeta.settore || '')
       const destUsername = String(info?.utenteDestinatario || resolveDestUser(ruoloDest) || '').trim()
       // Le informative devono restare archiviabili per singolo destinatario/evento:
@@ -3020,46 +3037,45 @@ function ActionsPanel (props: {
     return selected.length > 0 && selected.every(v => dtRiOnlyIntegrationTargets.includes(v))
   }
 
-  const getPrevRoleForIntegration = (target?: 'TI_AMM' | 'TECNICA'): string => {
-    if (role === 'RZ')     return 'TI'
-    if (role === 'RI')     return 'TI'
-    if (role === 'DT')     return isDtIntegrationOnlyRiCompetence() ? 'RI' : 'TI'
-    if (role === 'RI_AMM') {
-      // RI_AMM ha due percorsi distinti di richiesta integrazione:
-      // - amministrativa verso il TI_AMM assegnato;
-      // - tecnica verso il RI dell'area di provenienza (AGR o TEC).
-      if (target === 'TI_AMM') return 'TI_AMM'
-      return 'RI'
+  const getPrevRoleForIntegration = (target?: 'IA' | 'TECNICA'): string => {
+    if (role === 'CS')     return 'IT'
+    if (role === 'RIT')     return 'IT'
+    if (role === 'DT')     return isDtIntegrationOnlyRiCompetence() ? 'RIT' : 'IT'
+    if (role === 'RIA') {
+      // RIA ha due percorsi distinti di richiesta integrazione:
+      // - amministrativa verso il IA assegnato;
+      // - tecnica verso il RIT dell'area di provenienza (AGR o TEC).
+      if (target === 'IA') return 'IA'
+      return 'RIT'
     }
-    // TI_AMM: sia il visto positivo sia il rimando/non conformità rientrano al RI_AMM.
-    // Il TI_AMM non gestisce più un invio separato dalla maschera amministrativa.
-    if (role === 'TI_AMM') return 'RI_AMM'
+    // IA: sia il visto positivo sia il rimando/non conformità rientrano al RIA.
+    // Il IA non gestisce più un invio separato dalla maschera amministrativa.
+    if (role === 'IA') return 'RIA'
     return ''
   }
 
   const getNextRoleForForward = (): string => {
-    if (role === 'TI')     return 'RZ'
-    if (role === 'RZ')     return 'RI'
-    if (role === 'RI')     return 'DT'
-    if (role === 'DT')     return 'RI_AMM'   // DT approva e trasmette direttamente a RI_AMM (fase sanzionatoria)
-    if (role === 'RI_AMM') {
+    if (role === 'IT')     return 'CS'
+    if (role === 'CS')     return 'RIT'
+    if (role === 'RIT')     return 'DT'
+    if (role === 'DT')     return 'RIA'   // DT approva e trasmette direttamente a RIA (fase sanzionatoria)
+    if (role === 'RIA') {
       const detStato = String(pickAttrCI(data, ['determinazione_stato', 'DETERMINAZIONE_STATO']) || '').trim().toUpperCase()
-      // RI_AMM interviene solo dopo la trasmissione interna della bozza determinazione.
-      // Il solo visto di conformità TI_AMM NON apre un nodo operativo RI_AMM.
-      if (detStato === 'TRASMESSA_RI_AMM' || detStato === 'BOZZA_TRASMESSA_RI_AMM') return 'TI_AMM'
+      // RIA interviene solo dopo la trasmissione interna della bozza determinazione.
+      // Il solo visto di conformità IA NON apre un nodo operativo RIA.
+      if (detStato === 'TRASMESSA_RIA' || detStato === 'BOZZA_TRASMESSA_RIA') return 'IA'
       // Fallback per viste che non espongono determinazione_stato: la trasmissione
-      // della bozza apre comunque il nodo RI_AMM con stato/presa 1 o 2.
-      const statoRiAmm = toNumOrNull(pickAttrCI(data, ['stato_RI_AMM', 'STATO_RI_AMM']))
-      const presaRiAmm = toNumOrNull(pickAttrCI(data, ['presa_in_carico_RI_AMM', 'PRESA_IN_CARICO_RI_AMM']))
-      const statoTiAmm = toNumOrNull(pickAttrCI(data, ['stato_TI_AMM', 'STATO_TI_AMM']))
-      const esitoTiAmm = toNumOrNull(pickAttrCI(data, ['esito_TI_AMM', 'ESITO_TI_AMM']))
-      const riAmmOpen = statoRiAmm === STATO_DA_PRENDERE || statoRiAmm === STATO_PRESA_IN_CARICO || presaRiAmm === PRESA_DA_PRENDERE || presaRiAmm === PRESA_IN_CARICO
-      if (riAmmOpen && esitoTiAmm === ESITO_APPROVATA && statoTiAmm === STATO_APPROVATA) return 'TI_AMM'
+      // della bozza apre comunque il nodo RIA con stato 1 o 2.
+      const statoRia = toNumOrNull(pickAttrCI(data, ['stato_RIA', 'STATO_RIA']))
+      const statoIa = toNumOrNull(pickAttrCI(data, ['stato_IA', 'STATO_IA']))
+      const esitoIa = toNumOrNull(pickAttrCI(data, ['esito_IA', 'ESITO_IA']))
+      const riaOpen = statoRia === STATO_DA_PRENDERE || statoRia === STATO_PRESA_IN_CARICO
+      if (riaOpen && esitoIa === ESITO_APPROVATA && statoIa === STATO_APPROVATA) return 'IA'
       return ''
     }
-    if (role === 'TI_AMM') {
+    if (role === 'IA') {
       const detStato = String(pickAttrCI(data, ['determinazione_stato', 'DETERMINAZIONE_STATO']) || '').trim().toUpperCase()
-      return (detStato === 'TRASMESSA_RI_AMM' || detStato === 'BOZZA_TRASMESSA_RI_AMM') ? 'RI_AMM' : ''
+      return (detStato === 'TRASMESSA_RIA' || detStato === 'BOZZA_TRASMESSA_RIA') ? 'RIA' : ''
     }
     return ''
   }
@@ -3069,27 +3085,33 @@ function ActionsPanel (props: {
    * deve ritrasmettere direttamente al ruolo che l'ha richiesta, non al normale
    * destinatario della catena ordinaria.
    * Esempi:
-   * - RI_AMM chiede integrazione a RI → RI risponde direttamente a RI_AMM
-   * - DT chiede integrazione a RI → RI risponde direttamente a DT
-   * - RI chiede integrazione a TI → TI integra, ma ritrasmette comunque al RZ
+   * - RIA chiede integrazione a RIT → RIT risponde nel percorso tecnico
+   * - DT chiede integrazione a RIT → RIT risponde direttamente a DT
+   * - RIT chiede integrazione a IT → IT integra, ma ritrasmette comunque al CS
    */
   const getIntegrationRequesterForCurrentRole = (): string => {
     if (!data) return ''
     const requesterByResponder: Record<string, string[]> = {
-      // Il TI ritrasmette sempre al RZ, anche quando l'integrazione è stata richiesta dal RI:
-      // il workflow tecnico non prevede il bypass TI → RI.
-      TI: ['RZ'],
-      // Caso speciale: RI_AMM -> RI è integrazione tecnica.
-      // Il RI, dopo l'integrazione, NON deve tornare direttamente a RI_AMM:
-      // deve ritrasmettere a DT, che poi approverà e rimanderà a RI_AMM.
-      // Per questo qui il requester diretto del RI resta solo DT.
-      RI: ['DT'],
-      RI_AMM: ['TI_AMM']
+      // Il IT ritrasmette sempre al CS, anche quando l'integrazione è stata richiesta dal RIT:
+      // il workflow tecnico non prevede il bypass IT → RIT.
+      IT: ['CS'],
+      // Caso speciale: RIA -> RIT è integrazione tecnica.
+      // Il RIT, dopo l'integrazione, NON deve tornare direttamente a RIA:
+      // deve ritrasmettere a DT, che poi approverà e rimanderà a RIA.
+      // Per questo qui il requester diretto del RIT resta solo DT.
+      RIT: ['DT'],
+      RIA: ['IA']
     }
     const candidates = requesterByResponder[role] || []
     for (const requester of candidates) {
-      const esitoReq = toNumOrNull(pickAttrCI(data, [`esito_${requester}`, `ESITO_${requester}`]))
-      if (esitoReq === ESITO_INTEGRAZIONE) return requester
+      const requesterUsesStateOnlyWorkflow = usesStateOnlyWorkflow(requester)
+      const requesterOutcome = toNumOrNull(pickAttrCI(
+        data,
+        requesterUsesStateOnlyWorkflow
+          ? [`stato_${requester}`, `STATO_${requester}`]
+          : [`esito_${requester}`, `ESITO_${requester}`]
+      ))
+      if (requesterOutcome === (requesterUsesStateOnlyWorkflow ? STATO_INTEGRAZIONE : ESITO_INTEGRAZIONE)) return requester
     }
     return ''
   }
@@ -3101,36 +3123,31 @@ function ActionsPanel (props: {
   // - se è nella disponibilità del ruolo corrente, si apre in gestione;
   // - in tutti gli altri casi si apre in sola consultazione.
   const ec = props.editConfig
-  const isTechEditRole = role === 'TI' || role === 'RZ' || role === 'RI' || role === 'DT'
-  const isAmmEditRole = role === 'TI_AMM' || role === 'RI_AMM' || role === 'DA'
+  const isTechEditRole = role === 'IT' || role === 'CS' || role === 'RIT' || role === 'DT'
+  const isAmmEditRole = role === 'IA' || role === 'RIA' || role === 'DA'
   const canShowEdit = ec.show && (isTechEditRole || isAmmEditRole)
   const roleStatoField = `stato_${role}`
-  const rolePresaField = `presa_in_carico_${role}`
-  const roleEsitoField = `esito_${role}`
+  const roleEsitoField = roleUsesStateOnlyWorkflow ? '' : `esito_${role}`
 
   const statoRoleVal = data ? pickAttrCI(data, [roleStatoField, roleStatoField.toUpperCase()]) : null
-  const presaRoleVal = data ? pickAttrCI(data, [rolePresaField, rolePresaField.toUpperCase()]) : null
   const statoRoleNum = toNumOrNull(statoRoleVal)
-  const presaRoleNum = toNumOrNull(presaRoleVal)
+  const presaRoleNum = statoRoleNum
   const currentGiiUser: any = (window as any).__giiUserRole || (window as any).__giiUser || {}
   const currentTiUsername = String(currentGiiUser?.username || '').trim().toLowerCase()
-  const assignedTiUsername = role === 'TI'
-    ? String(pickAttrCI(data, ['ti_assegnato_username', 'ti_assegnato_user', 'ti_assegnato']) || '').trim().toLowerCase()
+  const assignedTiUsername = role === 'IT'
+    ? String(pickAttrCI(data, ['it_assegnato_username']) || '').trim().toLowerCase()
     : ''
-  const isOwnedByCurrentRole = role === 'TI_AMM'
-    ? isPracticeAssignedToCurrentTiAmm(data, currentGiiUser)
-    : role === 'TI'
+  const isOwnedByCurrentRole = role === 'IA'
+    ? isPracticeAssignedToCurrentIa(data, currentGiiUser)
+    : role === 'IT'
       ? (!!currentTiUsername && !!assignedTiUsername && currentTiUsername === assignedTiUsername)
-      : (role === 'RZ' || role === 'RI' || role === 'DT' || role === 'RI_AMM' || role === 'DA')
+      : (role === 'CS' || role === 'RIT' || role === 'DT' || role === 'RIA' || role === 'DA')
 
-  const tiAmmGateStatus = props.accessGate?.status || 'idle'
-  const tiAmmAccessDenied = role === 'TI_AMM' && (
-    tiAmmGateStatus === 'denied' ||
-    (hasSel && tiAmmGateStatus !== 'allowed' && !isOwnedByCurrentRole)
-  )
+  const iaGateStatus = props.accessGate?.status || 'idle'
+  const iaAccessDenied = role === 'IA' && iaGateStatus === 'denied'
 
   const isMeaningfulAudit = (v: any): boolean => !(v === null || v === undefined || v === '' || v === 0 || v === '0')
-  const roleEsitoValue = pickAttrCI(data, [roleEsitoField, roleEsitoField.toUpperCase()])
+  const roleEsitoValue = data && roleEsitoField ? pickAttrCI(data, [roleEsitoField, roleEsitoField.toUpperCase()]) : null
   const roleEsitoNum = toNumOrNull(roleEsitoValue)
   const determinazioneStatoCorrente = String(pickAttrCI(data, ['determinazione_stato', 'DETERMINAZIONE_STATO']) || '').trim().toUpperCase()
   const determinazioneRegistrataCorrente =
@@ -3139,9 +3156,9 @@ function ActionsPanel (props: {
   const determinazioneAdottataCorrente = determinazioneStatoCorrente === 'ADOTTATA' || determinazioneRegistrataCorrente
   const attoContestazioneWorkflowAttivo = determinazioneRegistrataCorrente &&
     !isEmptyValue(pickAttrCI(data, ['accertamento_numero', 'ACCERTAMENTO_NUMERO'])) &&
-    ['BOZZA', 'TRASMESSA_RI_AMM', 'VALIDATA_RI_AMM', 'EMAIL_DIRETTORE_PREPARATA'].includes(determinazioneStatoCorrente)
+    ['BOZZA', 'TRASMESSA_RIA', 'VALIDATA_RIA', 'EMAIL_DIRETTORE_PREPARATA'].includes(determinazioneStatoCorrente)
 
-  const parseTiAmmRetakeMs = (v: any): number | null => {
+  const parseIaRetakeMs = (v: any): number | null => {
     if (v == null || v === '') return null
     if (typeof v === 'number' && Number.isFinite(v)) return v
     const n = Number(v)
@@ -3150,72 +3167,72 @@ function ActionsPanel (props: {
     return Number.isFinite(t) ? t : null
   }
 
-  const tiAmmRiAmmReturnTimes = [
-    parseTiAmmRetakeMs(pickAttrCI(data, ['dt_esito_RI_AMM', 'DT_ESITO_RI_AMM'])),
-    parseTiAmmRetakeMs(pickAttrCI(data, ['dt_stato_RI_AMM', 'DT_STATO_RI_AMM']))
+  const iaRiaReturnTimes = [
+    parseIaRetakeMs(pickAttrCI(data, ['dt_esito_RIA', 'DT_ESITO_RIA'])),
+    parseIaRetakeMs(pickAttrCI(data, ['dt_stato_RIA', 'DT_STATO_RIA']))
   ].filter((v): v is number => v !== null)
-  const tiAmmLastRiAmmReturnMs = tiAmmRiAmmReturnTimes.length ? Math.max(...tiAmmRiAmmReturnTimes) : null
-  const tiAmmLastPresaMs = parseTiAmmRetakeMs(pickAttrCI(data, ['dt_presa_in_carico_TI_AMM', 'DT_PRESA_IN_CARICO_TI_AMM']))
-  const tiAmmRiAmmReturnEsito = toNumOrNull(pickAttrCI(data, ['esito_RI_AMM', 'ESITO_RI_AMM']))
-  const tiAmmRiAmmReturnStato = toNumOrNull(pickAttrCI(data, ['stato_RI_AMM', 'STATO_RI_AMM']))
-  const tiAmmHasReturnFromRiAmm = role === 'TI_AMM' &&
+  const iaLastRiaReturnMs = iaRiaReturnTimes.length ? Math.max(...iaRiaReturnTimes) : null
+  const iaLastPresaMs = parseIaRetakeMs(pickAttrCI(data, ['dt_presa_in_carico_IA', 'DT_PRESA_IN_CARICO_IA']))
+  const iaRiaReturnEsito = toNumOrNull(pickAttrCI(data, ['esito_RIA', 'ESITO_RIA']))
+  const iaRiaReturnStato = toNumOrNull(pickAttrCI(data, ['stato_RIA', 'STATO_RIA']))
+  const iaHasReturnFromRia = role === 'IA' &&
     (!determinazioneAdottataCorrente || attoContestazioneWorkflowAttivo) &&
-    tiAmmLastRiAmmReturnMs !== null &&
+    iaLastRiaReturnMs !== null &&
     (
-      tiAmmRiAmmReturnEsito === ESITO_APPROVATA ||
-      tiAmmRiAmmReturnEsito === ESITO_INTEGRAZIONE ||
-      tiAmmRiAmmReturnStato === STATO_APPROVATA ||
-      tiAmmRiAmmReturnStato === STATO_INTEGRAZIONE
+      iaRiaReturnEsito === ESITO_APPROVATA ||
+      iaRiaReturnEsito === ESITO_INTEGRAZIONE ||
+      iaRiaReturnStato === STATO_APPROVATA ||
+      iaRiaReturnStato === STATO_INTEGRAZIONE
     )
-  const tiAmmAwaitingRetakeFromRiAmm = tiAmmHasReturnFromRiAmm &&
-    (tiAmmLastPresaMs === null || tiAmmLastPresaMs < tiAmmLastRiAmmReturnMs!)
-  const tiAmmAvailableAfterRiAmmReturn = tiAmmHasReturnFromRiAmm && !tiAmmAwaitingRetakeFromRiAmm
+  const iaAwaitingRetakeFromRia = iaHasReturnFromRia &&
+    (iaLastPresaMs === null || iaLastPresaMs < iaLastRiaReturnMs!)
+  const iaAvailableAfterRiaReturn = iaHasReturnFromRia && !iaAwaitingRetakeFromRia
 
   const inChargeByRole =
-    !tiAmmAwaitingRetakeFromRiAmm &&
+    !iaAwaitingRetakeFromRia &&
     (
       presaRoleNum === PRESA_IN_CARICO ||
       statoRoleNum === STATO_PRESA_IN_CARICO
     )
-  const statoTiAmmForBozza = toNumOrNull(pickAttrCI(data, ['stato_TI_AMM', 'STATO_TI_AMM']))
-  const esitoTiAmmForBozza = toNumOrNull(pickAttrCI(data, ['esito_TI_AMM', 'ESITO_TI_AMM']))
-  const riAmmOperationalNodeForBozza = role === 'RI_AMM' && (
+  const statoIaForBozza = toNumOrNull(pickAttrCI(data, ['stato_IA', 'STATO_IA']))
+  const esitoIaForBozza = toNumOrNull(pickAttrCI(data, ['esito_IA', 'ESITO_IA']))
+  const riaOperationalNodeForBozza = role === 'RIA' && (
     statoRoleNum === STATO_DA_PRENDERE ||
     statoRoleNum === STATO_PRESA_IN_CARICO ||
     presaRoleNum === PRESA_DA_PRENDERE ||
     presaRoleNum === PRESA_IN_CARICO
   )
-  const riAmmBozzaDeterminazioneDaVerificare = role === 'RI_AMM' &&
+  const riaBozzaDeterminazioneDaVerificare = role === 'RIA' &&
     !determinazioneAdottataCorrente &&
     roleEsitoNum !== ESITO_APPROVATA &&
     (
-      determinazioneStatoCorrente === 'TRASMESSA_RI_AMM' ||
-      determinazioneStatoCorrente === 'BOZZA_TRASMESSA_RI_AMM' ||
-      (riAmmOperationalNodeForBozza && esitoTiAmmForBozza === ESITO_APPROVATA)
+      determinazioneStatoCorrente === 'TRASMESSA_RIA' ||
+      determinazioneStatoCorrente === 'BOZZA_TRASMESSA_RIA' ||
+      (riaOperationalNodeForBozza && esitoIaForBozza === ESITO_APPROVATA)
     )
-  const riAmmAttoContestazioneDaVerificare = role === 'RI_AMM' &&
+  const riaAttoContestazioneDaVerificare = role === 'RIA' &&
     determinazioneRegistrataCorrente &&
-    determinazioneStatoCorrente === 'TRASMESSA_RI_AMM' &&
+    determinazioneStatoCorrente === 'TRASMESSA_RIA' &&
     roleEsitoNum !== ESITO_APPROVATA
-  const tiAmmAttestazioneOperativa = role === 'TI_AMM' && roleEsitoNum === ESITO_APPROVATA && (
+  const iaAttestazioneOperativa = role === 'IA' && roleEsitoNum === ESITO_APPROVATA && (
     !determinazioneStatoCorrente ||
     determinazioneStatoCorrente === 'BOZZA'
   )
 
   const roleClosedOrForwarded =
-    (isMeaningfulAudit(roleEsitoValue) && !tiAmmAttestazioneOperativa && !tiAmmAvailableAfterRiAmmReturn) ||
-    (statoRoleNum === STATO_APPROVATA && !tiAmmAttestazioneOperativa && !tiAmmAvailableAfterRiAmmReturn) ||
+    (isMeaningfulAudit(roleEsitoValue) && !iaAttestazioneOperativa && !iaAvailableAfterRiaReturn) ||
+    (statoRoleNum === STATO_APPROVATA && !iaAttestazioneOperativa && !iaAvailableAfterRiaReturn) ||
     (statoRoleNum === STATO_RESPINTA) ||
-    (statoRoleNum != null && statoRoleNum > STATO_PRESA_IN_CARICO && !tiAmmAttestazioneOperativa && !tiAmmAvailableAfterRiAmmReturn)
+    (statoRoleNum != null && statoRoleNum > STATO_PRESA_IN_CARICO && !iaAttestazioneOperativa && !iaAvailableAfterRiaReturn)
 
-  const riAmmHasOperationalNode = role === 'RI_AMM' && (
+  const riaHasOperationalNode = role === 'RIA' && (
     statoRoleNum === STATO_DA_PRENDERE ||
     statoRoleNum === STATO_PRESA_IN_CARICO ||
     presaRoleNum === PRESA_DA_PRENDERE ||
     presaRoleNum === PRESA_IN_CARICO
   )
-  const riAmmBlockedByTiAmmVistoOnly = role === 'RI_AMM' && !riAmmBozzaDeterminazioneDaVerificare && !riAmmAttoContestazioneDaVerificare && !riAmmHasOperationalNode &&
-    toNumOrNull(pickAttrCI(data, ['esito_TI_AMM', 'ESITO_TI_AMM'])) === ESITO_APPROVATA
+  const riaBlockedByIaVistoOnly = role === 'RIA' && !riaBozzaDeterminazioneDaVerificare && !riaAttoContestazioneDaVerificare && !riaHasOperationalNode &&
+    toNumOrNull(pickAttrCI(data, ['esito_IA', 'ESITO_IA'])) === ESITO_APPROVATA
 
   const canEdit =
     role !== 'DA' &&
@@ -3226,18 +3243,18 @@ function ActionsPanel (props: {
     !!isOwnedByCurrentRole &&
     inChargeByRole &&
     !roleClosedOrForwarded &&
-    !riAmmBlockedByTiAmmVistoOnly &&
-    !(role === 'RI_AMM' && determinazioneAdottataCorrente && !riAmmAttoContestazioneDaVerificare)
+    !riaBlockedByIaVistoOnly &&
+    !(role === 'RIA' && determinazioneAdottataCorrente && !riaAttoContestazioneDaVerificare)
 
   const roleToBeTakenInCharge =
     role !== 'DA' &&
     isOwnedByCurrentRole &&
-    !riAmmBlockedByTiAmmVistoOnly &&
+    !riaBlockedByIaVistoOnly &&
     (
       statoRoleNum === STATO_DA_PRENDERE ||
       presaRoleNum === PRESA_DA_PRENDERE ||
-      ((riAmmBozzaDeterminazioneDaVerificare || riAmmAttoContestazioneDaVerificare) && !inChargeByRole && roleEsitoNum == null) ||
-      tiAmmAwaitingRetakeFromRiAmm
+      ((riaBozzaDeterminazioneDaVerificare || riaAttoContestazioneDaVerificare) && !inChargeByRole && roleEsitoNum == null) ||
+      iaAwaitingRetakeFromRia
     )
 
   // Tutti i ruoli abilitati alla scheda possono aprire la pratica anche quando non è
@@ -3278,6 +3295,7 @@ function ActionsPanel (props: {
         readOnlyMessage: openInReadOnly
           ? 'Pratica aperta in consultazione. Le modifiche sono consentite solo nei casi previsti dal ruolo e dallo stato istruttorio.'
           : '',
+        operationalRole: roleCode,
         ts: Date.now()
       })
       ;(window as any).__giiEdit = payload
@@ -3347,24 +3365,16 @@ function ActionsPanel (props: {
     openEditPage('violazione')
   }
 
-  // Leggi i valori in modo robusto:
-  // - se il campo non esiste nello schema, non usarlo
-  // - se esiste ma arriva con case diversa, risolvi tramite schema CI
-  const presaFieldExists = hasDedicatedPresaField(role) && hasField(presaField)
+  // stato_* è il campo portante del workflow; dt_presa_in_carico_* registra
+  // il momento della presa in carico senza duplicare lo stato.
   const dtPresaFieldExists = hasField(dtPresaField)
   const statoFieldExists = hasField(statoField)
 
-  const presaVal = (data && presaFieldExists) ? data[realFieldName(presaField)] : null
   const statoVal = (data && statoFieldExists) ? data[realFieldName(statoField)] : (data ? data[statoField] : null)
-  const esitoVal = data ? data[realFieldName(esitoField)] : null
-
-  const presaNumRaw = toNumOrNull(presaVal)
   const statoNum = toNumOrNull(statoVal)
-  // Se il campo presa_in_carico_* non esiste (molto comune per RZ/TI in alcune viste),
-  // interpretiamo "presa" = stato (stato=2 significa presa in carico).
-  const presaNum = presaFieldExists ? presaNumRaw : statoNum
+  const presaNum = statoNum
   const origineVal = data ? data['origine_pratica'] : null
-  // origine_pratica può arrivare come codice numerico (1/2) oppure come label ("TR"/"TI").
+  // origine_pratica può arrivare come codice numerico (1/2) oppure come label ("TR"/"IT").
   let origineNum: number | null = null
   if (origineVal != null && String(origineVal) !== '') {
     const n = Number(origineVal)
@@ -3372,7 +3382,7 @@ function ActionsPanel (props: {
     else {
       const s = String(origineVal).trim().toUpperCase()
       if (s === 'TR') origineNum = 1
-      else if (s === 'TI') origineNum = 2
+      else if (s === 'IT') origineNum = 2
     }
   }
 
@@ -3387,15 +3397,16 @@ function ActionsPanel (props: {
 
   const getRoleLastTouchMs = (d: any, r: string): number | null => {
     if (!d) return null
+    const rr = String(r || '').trim().toUpperCase()
     const vals = [
       parseMsAny(pickAttrCI(d, [`dt_presa_in_carico_${r}`, `DT_PRESA_IN_CARICO_${r}`])),
       parseMsAny(pickAttrCI(d, [`dt_stato_${r}`, `DT_STATO_${r}`])),
-      parseMsAny(pickAttrCI(d, [`dt_esito_${r}`, `DT_ESITO_${r}`]))
+      ...(['IT', 'CS', 'RIT'].includes(rr) ? [] : [parseMsAny(pickAttrCI(d, [`dt_esito_${r}`, `DT_ESITO_${r}`]))])
     ].filter((v): v is number => v !== null)
     return vals.length ? Math.max(...vals) : null
   }
 
-  const computeAwaitingRetakeByRZ = (d: any): boolean => {
+  const computeAwaitingRetakeByCS = (d: any): boolean => {
     if (!d) return false
     const opVal = pickAttrCI(d, ['origine_pratica', 'ORIGINE_PRATICA'])
     let opNum: number | null = null
@@ -3405,41 +3416,39 @@ function ActionsPanel (props: {
       else {
         const s = String(opVal).trim().toUpperCase()
         if (s === 'TR') opNum = 1
-        else if (s === 'TI') opNum = 2
+        else if (s === 'IT') opNum = 2
       }
     }
     if (!(opNum == null || opNum === 1)) return false
 
-    const tiUserRaw = pickAttrCI(d, ['ti_assegnato_username', 'ti_assegnato_user', 'ti_assegnato'])
-    const tiNameRaw = pickAttrCI(d, ['ti_assegnato_nome', 'ti_assegnatoName', 'TI_ASSEGNATO_NOME'])
-    const dtAssegnaRaw = pickAttrCI(d, ['dt_assegnazione_ti', 'dt_assegnazione_TI', 'DT_ASSEGNAZIONE_TI'])
+    const tiUserRaw = pickAttrCI(d, ['it_assegnato_username'])
+    const tiNameRaw = pickAttrCI(d, ['it_assegnato_nome', 'IT_ASSEGNATO_NOME'])
+    const dtAssegnaRaw = pickAttrCI(d, ['dt_assegnazione_it', 'DT_ASSEGNAZIONE_IT'])
     const hasTiAssignedLocal = !isEmptyValue(tiUserRaw) || !isEmptyValue(tiNameRaw) || !isEmptyValue(dtAssegnaRaw)
     if (!hasTiAssignedLocal) return false
 
     const higherTouchedLocal =
-      (toNumOrNull(pickAttrCI(d, ['presa_in_carico_RI', 'PRESA_IN_CARICO_RI'])) != null) ||
-      (toNumOrNull(pickAttrCI(d, ['stato_RI', 'STATO_RI'])) != null) ||
-      (toNumOrNull(pickAttrCI(d, ['esito_RI', 'ESITO_RI'])) != null) ||
+      (toNumOrNull(pickAttrCI(d, ['dt_presa_in_carico_RIT'])) != null) ||
+      (toNumOrNull(pickAttrCI(d, ['stato_RIT'])) != null) ||
       (toNumOrNull(pickAttrCI(d, ['stato_DT', 'STATO_DT'])) != null) ||
       (toNumOrNull(pickAttrCI(d, ['esito_DT', 'ESITO_DT'])) != null)
     if (higherTouchedLocal) return false
 
-    const statoTiLocal = toNumOrNull(pickAttrCI(d, ['stato_TI', 'stato_ti', 'STATO_TI']))
-    const esitoTiLocal = toNumOrNull(pickAttrCI(d, ['esito_TI', 'esito_ti', 'ESITO_TI']))
-    const tiReturnedLocal = (esitoTiLocal != null) || (statoTiLocal === STATO_APPROVATA) || (statoTiLocal === STATO_RESPINTA)
+    const statoTiLocal = toNumOrNull(pickAttrCI(d, ['stato_IT', 'STATO_IT']))
+    const tiReturnedLocal = (statoTiLocal === STATO_APPROVATA) || (statoTiLocal === STATO_RESPINTA)
     if (!tiReturnedLocal) return false
 
-    const tiLast = getRoleLastTouchMs(d, 'TI')
-    const rzLast = getRoleLastTouchMs(d, 'RZ')
-    return tiLast != null && (rzLast == null || rzLast <= tiLast)
+    const tiLast = getRoleLastTouchMs(d, 'IT')
+    const csLast = getRoleLastTouchMs(d, 'CS')
+    return tiLast != null && (csLast == null || csLast <= tiLast)
   }
 
-  const awaitingRetakeByRz = data ? computeAwaitingRetakeByRZ(data) : false
-  const forceCurrentRoleRetake = (awaitingRetakeByRz && role === 'RZ') || tiAmmAwaitingRetakeFromRiAmm
+  const awaitingRetakeByCs = data ? computeAwaitingRetakeByCS(data) : false
+  const forceCurrentRoleRetake = (awaitingRetakeByCs && role === 'CS') || iaAwaitingRetakeFromRia
   const effectiveStatoNum = forceCurrentRoleRetake ? STATO_DA_PRENDERE : statoNum
   const effectivePresaNum = forceCurrentRoleRetake ? PRESA_DA_PRENDERE : presaNum
 
-  // Matrice_DT: DT trasmette al RI AMM. Nessun lock basato sul vecchio nodo DA.
+  // Matrice_DT: DT trasmette al RIA. Nessun lock basato sul nodo DA.
   const lockedByTransmit = false
 
   // quando cambio selezione: torno libero (nessuna memoria)
@@ -3482,7 +3491,7 @@ function ActionsPanel (props: {
     return () => window.clearTimeout(t)
   }, [noteDraft, autoResizeNote])
 
-  // Carica elenco TI da GII_utenti (ruolo=2). Filtra per area/settore se disponibili.
+  // Carica elenco IT da GII_utenti tramite ruolo_cod. Filtra per area/settore se disponibili.
   const loadTiOptions = React.useCallback(async () => {
     if (tiLoading) return
     setTiLoading(true)
@@ -3495,8 +3504,14 @@ function ActionsPanel (props: {
       }
 
       const u: any = (window as any).__giiUserRole || {}
-      const areaCod = normalizeAreaLabel(u?.areaCod || u?.area_cod || u?.areaLabel || u?.area)
-      const settoreCod = normalizeSettoreLabel(areaCod, u?.settoreCod || u?.settore_cod || u?.settoreLabel || u?.settore)
+      // Per l'assegnazione CS → IT il contesto deve essere quello della pratica
+      // selezionata, non quello del profilo legacy dell'utente corrente.
+      // Il fallback al profilo legacy resta solo per compatibilità con casi in cui
+      // la pratica non esponga ancora area/settore.
+      const practiceAreaRaw = pickAttrCI(data, ['area_cod', 'area', 'cod_area'])
+      const areaCod = normalizeAreaLabel(practiceAreaRaw || u?.areaCod || u?.area_cod || u?.areaLabel || u?.area)
+      const practiceSettoreRaw = pickAttrCI(data, ['settore_cod', 'settore', 'cod_settore'])
+      const settoreCod = normalizeSettoreLabel(areaCod, practiceSettoreRaw || u?.settoreCod || u?.settore_cod || u?.settoreLabel || u?.settore)
       const area = areaCod ? AREA_NUM[areaCod] : null
       const settore = settoreCod ? SETTORE_NUM[settoreCod] : null
 
@@ -3504,12 +3519,11 @@ function ActionsPanel (props: {
         const parts: string[] = []
         if (cod) {
           parts.push(`${codField} = ${sqlQuote(cod)}`)
-          if (codField === 'settore_cod' && cod === 'DS') parts.push(`${codField} = ${sqlQuote('CS')}`)
         }
         if (num != null) parts.push(`${numField} = ${num}`)
         return parts.length ? `(${parts.join(' OR ')})` : '1=1'
       }
-      const tiRoleWhere = codNumWhere('ruolo_cod', 'TI', 'ruolo', RUOLO_NUM.TI)
+      const tiRoleWhere = `ruolo_cod = ${sqlQuote('IT')}`
       const areaWhere = codNumWhere('area_cod', areaCod, 'area', area)
       const settoreWhere = codNumWhere('settore_cod', settoreCod, 'settore', settore)
 
@@ -3521,12 +3535,16 @@ function ActionsPanel (props: {
         q.num = 2000
         const res: any = await fl.queryFeatures(q)
         const feats: any[] = res?.features || []
-        const opts: TiOpt[] = feats.map((f: any) => {
+        const byUsername = new Map<string, TiOpt>()
+        for (const f of feats) {
           const a: any = f?.attributes || {}
           const username = String(a.username || '').trim()
+          if (!username) continue
           const fullName = String(a.full_name || a.fullName || a.nome || '').trim()
-          return { username, fullName: (fullName || username) }
-        }).filter(o => !!o.username)
+          const key = username.toLowerCase()
+          if (!byUsername.has(key)) byUsername.set(key, { username, fullName: (fullName || username) })
+        }
+        const opts = Array.from(byUsername.values())
         opts.sort((a, b) => (a.fullName || a.username).localeCompare((b.fullName || b.username), 'it', { sensitivity: 'base' }))
         return opts
       }
@@ -3550,23 +3568,23 @@ function ActionsPanel (props: {
   }, [tiLoading])
 
   React.useEffect(() => {
-    if (pending !== 'ASSEGNA_TI') return
-    if (role !== 'RZ') return
+    if (pending !== 'ASSEGNA_IT') return
+    if (role !== 'CS') return
     void loadTiOptions()
   }, [pending, role, loadTiOptions])
 
-  // ── Carica opzioni TI_AMM (per RI_AMM) ──
-  const loadTiAmmOptions = React.useCallback(async () => {
-    if (tiAmmLoadingRef.current) return
-    tiAmmLoadingRef.current = true
-    setTiAmmLoading(true)
-    setTiAmmLoadErr('')
+  // ── Carica opzioni IA (per RIA) ──
+  const loadIaOptions = React.useCallback(async () => {
+    if (iaLoadingRef.current) return
+    iaLoadingRef.current = true
+    setIaLoading(true)
+    setIaLoadErr('')
     try {
       const FeatureLayer = await loadEsriModule<any>('esri/layers/FeatureLayer')
       const fl = new FeatureLayer({ url: GII_UTENTI_URL })
       if (typeof fl?.load === 'function') { try { await fl.load() } catch {} }
       const q: any = (typeof fl.createQuery === 'function') ? fl.createQuery() : {}
-      q.where = `(ruolo_cod = ${sqlQuote('TI')} OR ruolo = ${RUOLO_NUM.TI}) AND (area_cod = ${sqlQuote('AMM')} OR area = ${AREA_NUM.AMM})`  // TI con area AMM
+      q.where = `ruolo_cod = ${sqlQuote('IA')} AND (area_cod = ${sqlQuote('AMM')} OR area = ${AREA_NUM.AMM})`
       q.outFields = ['username', 'full_name', 'area', 'settore', 'ruolo_cod', 'area_cod', 'settore_cod']
       q.returnGeometry = false
       q.num = 2000
@@ -3579,19 +3597,19 @@ function ActionsPanel (props: {
         return { username, fullName: (fullName || username) }
       }).filter(o => !!o.username)
       opts.sort((a, b) => (a.fullName || a.username).localeCompare((b.fullName || b.username), 'it', { sensitivity: 'base' }))
-      setTiAmmOptions(opts)
+      setIaOptions(opts)
     } catch (e: any) {
-      setTiAmmLoadErr(e?.message ? String(e.message) : String(e))
+      setIaLoadErr(e?.message ? String(e.message) : String(e))
     } finally {
-      tiAmmLoadingRef.current = false
-      setTiAmmLoading(false)
+      iaLoadingRef.current = false
+      setIaLoading(false)
     }
   }, [])
 
   React.useEffect(() => {
-    if (pending !== 'ASSEGNA_TI_AMM') return
-    if (role !== 'RI_AMM') return
-    void loadTiAmmOptions()
+    if (pending !== 'ASSEGNA_IA') return
+    if (role !== 'RIA') return
+    void loadIaOptions()
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pending, role])
 
@@ -3601,9 +3619,9 @@ function ActionsPanel (props: {
 
   // ── computeNodoAttivo: determina quale ruolo deve agire ora sulla pratica ───
   // Replica la logica di computeSintetico del widget Elenco.
-  // Scansiona i ruoli operativi dal più avanzato (TI_AMM) al meno avanzato (TR) e
+  // Scansiona i ruoli operativi dal più avanzato (IA) al meno avanzato (TR) e
   // restituisce il primo con dati valorizzati → quello è il nodo corrente.
-  // Se nessuno ha dati, usa origine_pratica: 1→'RZ', 2→'TI'.
+  // Se nessuno ha dati, usa origine_pratica: 1→'CS', 2→'IT'.
     const computeNodoAttivo = (d: any): string => {
     if (!d) return ''
 
@@ -3616,59 +3634,59 @@ function ActionsPanel (props: {
       return toNumOrNull(v)
     }
 
-    if (computeAwaitingRetakeByRZ(d)) return 'RZ'
+    if (computeAwaitingRetakeByCS(d)) return 'CS'
 
-    // Caso speciale: assegnazione RZ → TI.
-    // Finché TI non "restituisce" la pratica (esito_TI o stato_TI finale),
-    // consideriamo TI come nodo attivo (così TI può prendere in carico/lavorare).
+    // Caso speciale: assegnazione CS → IT.
+    // Finché IT non "restituisce" la pratica (stato_IT finale),
+    // consideriamo IT come nodo attivo (così IT può prendere in carico/lavorare).
     // NB: su alcune Data View possono mancare i campi username; usiamo fallback su nome/data assegnazione.
-    const tiUserRaw = pickAttrCI(d, ['ti_assegnato_username', 'ti_assegnato_user', 'ti_assegnato'])
-    const tiNameRaw = pickAttrCI(d, ['ti_assegnato_nome', 'ti_assegnatoName', 'TI_ASSEGNATO_NOME'])
-    const dtAssegnaRaw = pickAttrCI(d, ['dt_assegnazione_ti', 'dt_assegnazione_TI', 'DT_ASSEGNAZIONE_TI'])
+    const tiUserRaw = pickAttrCI(d, ['it_assegnato_username'])
+    const tiNameRaw = pickAttrCI(d, ['it_assegnato_nome', 'IT_ASSEGNATO_NOME'])
+    const dtAssegnaRaw = pickAttrCI(d, ['dt_assegnazione_it', 'DT_ASSEGNAZIONE_IT'])
     const tiAssigned = isMeaningful(tiUserRaw) || isMeaningful(tiNameRaw) || isMeaningful(dtAssegnaRaw)
     if (tiAssigned) {
-      const higherTouched = ['DA', 'DT', 'RI'].some(r => {
-        const p = hasDedicatedPresaField(r) ? d[`presa_in_carico_${r}`] : null
-        const s = d[`stato_${r}`]
+      const higherTouched = ['DA', 'DT', 'RIT'].some(r => {
+        const rr = String(r || '').trim().toUpperCase()
+        const st = d[`stato_${r}`]
+        if (['IT', 'CS', 'RIT'].includes(rr)) return isMeaningful(st)
         const e = d[`esito_${r}`]
-        return isMeaningful(p) || isMeaningful(s) || isMeaningful(e)
+        return isMeaningful(st) || isMeaningful(e)
       })
-      const statoTi = toNum(pickAttrCI(d, ['stato_TI', 'stato_ti', 'STATO_TI']))
-      const esitoTi = toNum(pickAttrCI(d, ['esito_TI', 'esito_ti', 'ESITO_TI']))
-      const tiReturnedLocal = (esitoTi != null) || (statoTi === STATO_APPROVATA) || (statoTi === STATO_RESPINTA)
-      if (!higherTouched && !tiReturnedLocal) return 'TI'
+      const statoTi = toNum(pickAttrCI(d, ['stato_IT', 'STATO_IT']))
+      const tiReturnedLocal = (statoTi === STATO_APPROVATA) || (statoTi === STATO_RESPINTA)
+      if (!higherTouched && !tiReturnedLocal) return 'IT'
     }
 
-    const scanOrder = ['TI_AMM', 'RI_AMM', 'DT', 'RI', 'RZ', 'TI', 'TR']
+    const scanOrder = ['IA', 'RIA', 'DT', 'RIT', 'CS', 'IT', 'TR']
 
     const hasData = (r: string) => {
-      const p = hasDedicatedPresaField(r) ? d[`presa_in_carico_${r}`] : null
-      const s = d[`stato_${r}`]
+      const rr = String(r || '').trim().toUpperCase()
+      const st = d[`stato_${r}`]
+      if (['IT', 'CS', 'RIT'].includes(rr)) return isMeaningful(st)
       const e = d[`esito_${r}`]
-      return isMeaningful(p) || isMeaningful(s) || isMeaningful(e)
+      return isMeaningful(st) || isMeaningful(e)
     }
 
-    // fwdDest dinamico: DT→RI_AMM diretto; RI_AMM non apre più un nodo DA interno.
+    // fwdDest dinamico: DT→RIA diretto; RIA non apre più un nodo DA interno.
     const getFwdDestLocal = (r: string): string => {
       switch (r) {
-        case 'TI':     return 'RZ'
-        case 'RZ':     return 'RI'
-        case 'RI':     return 'DT'
-        case 'DT':     return 'RI_AMM'
-        case 'RI_AMM': {
+        case 'IT':     return 'CS'
+        case 'CS':     return 'RIT'
+        case 'RIT':     return 'DT'
+        case 'DT':     return 'RIA'
+        case 'RIA': {
           const detStato = String(pickAttrCI(d, ['determinazione_stato', 'DETERMINAZIONE_STATO']) || '').trim().toUpperCase()
-          if (detStato === 'TRASMESSA_RI_AMM' || detStato === 'BOZZA_TRASMESSA_RI_AMM') return 'TI_AMM'
-          const statoRiAmm = toNum(pickAttrCI(d, ['stato_RI_AMM', 'STATO_RI_AMM']))
-          const presaRiAmm = toNum(pickAttrCI(d, ['presa_in_carico_RI_AMM', 'PRESA_IN_CARICO_RI_AMM']))
-          const statoTiAmm = toNum(pickAttrCI(d, ['stato_TI_AMM', 'STATO_TI_AMM']))
-          const esitoTiAmm = toNum(pickAttrCI(d, ['esito_TI_AMM', 'ESITO_TI_AMM']))
-          const riAmmOpen = statoRiAmm === STATO_DA_PRENDERE || statoRiAmm === STATO_PRESA_IN_CARICO || presaRiAmm === PRESA_DA_PRENDERE || presaRiAmm === PRESA_IN_CARICO
-          if (riAmmOpen && esitoTiAmm === ESITO_APPROVATA && statoTiAmm === STATO_APPROVATA) return 'TI_AMM'
+          if (detStato === 'TRASMESSA_RIA' || detStato === 'BOZZA_TRASMESSA_RIA') return 'IA'
+          const statoRia = toNum(pickAttrCI(d, ['stato_RIA', 'STATO_RIA']))
+          const statoIa = toNum(pickAttrCI(d, ['stato_IA', 'STATO_IA']))
+          const esitoIa = toNum(pickAttrCI(d, ['esito_IA', 'ESITO_IA']))
+          const riaOpen = statoRia === STATO_DA_PRENDERE || statoRia === STATO_PRESA_IN_CARICO
+          if (riaOpen && esitoIa === ESITO_APPROVATA && statoIa === STATO_APPROVATA) return 'IA'
           return ''
         }
-        case 'TI_AMM': {
+        case 'IA': {
           const detStato = String(pickAttrCI(d, ['determinazione_stato', 'DETERMINAZIONE_STATO']) || '').trim().toUpperCase()
-          return (detStato === 'TRASMESSA_RI_AMM' || detStato === 'BOZZA_TRASMESSA_RI_AMM') ? 'RI_AMM' : ''
+          return (detStato === 'TRASMESSA_RIA' || detStato === 'BOZZA_TRASMESSA_RIA') ? 'RIA' : ''
         }
         default:       return ''
       }
@@ -3677,11 +3695,11 @@ function ActionsPanel (props: {
     // integDest: destinatario richiesta integrazioni
     const getIntegDestLocal = (r: string): string => {
       switch (r) {
-        case 'RZ':     return 'TI'
-        case 'RI':     return 'TI'
-        case 'DT':     return 'RI'
-        case 'RI_AMM': return 'RI'
-        case 'TI_AMM': return 'RI_AMM'
+        case 'CS':     return 'IT'
+        case 'RIT':     return 'IT'
+        case 'DT':     return 'RIT'
+        case 'RIA': return 'RIT'
+        case 'IA': return 'RIA'
         default:       return ''
       }
     }
@@ -3689,9 +3707,8 @@ function ActionsPanel (props: {
     for (const r of scanOrder) {
       if (!hasData(r)) continue
 
-      const presaNum = hasDedicatedPresaField(r) ? toNum(d[`presa_in_carico_${r}`]) : null
       const statoNum = toNum(d[`stato_${r}`])
-      const esitoNum = toNum(d[`esito_${r}`])
+      const esitoNum = usesStateOnlyWorkflow(r) ? null : toNum(d[`esito_${r}`])
 
       if (esitoNum != null) {
         if (esitoNum === ESITO_APPROVATA) {
@@ -3704,7 +3721,7 @@ function ActionsPanel (props: {
         if (esitoNum === ESITO_INTEGRAZIONE) {
           const dest = getIntegDestLocal(r)
           if (dest) {
-            const destEsito = toNum(d[`esito_${dest}`])
+            const destEsito = usesStateOnlyWorkflow(dest) ? null : toNum(d[`esito_${dest}`])
             if (destEsito == null) return dest
             continue
           }
@@ -3712,7 +3729,7 @@ function ActionsPanel (props: {
         return r
       }
 
-      if (presaNum != null || statoNum != null) return r
+      if (statoNum != null) return r
 
       return r
     }
@@ -3725,11 +3742,11 @@ function ActionsPanel (props: {
       if (opNum == null) {
         const s = String(op).trim().toUpperCase()
         if (s === 'TR') opNum = 1
-        else if (s === 'TI') opNum = 2
+        else if (s === 'IT') opNum = 2
       }
     }
 
-    return opNum === 2 ? 'TI' : 'RZ'
+    return opNum === 2 ? 'IT' : 'CS'
   }
 
   // Il ruolo che deve agire ORA sulla pratica selezionata.
@@ -3741,24 +3758,24 @@ function ActionsPanel (props: {
   const parseWorkflowRoleFromRoutingText = (value: any): string => {
     const s = String(value || '').trim().toUpperCase().replace(/[\s-]+/g, '_')
     if (!s) return ''
-    if (s.startsWith('RI_AMM')) return 'RI_AMM'
-    if (s.startsWith('TI_AMM')) return 'TI_AMM'
+    if (s.startsWith('RIA')) return 'RIA'
+    if (s.startsWith('IA')) return 'IA'
     // Il Direttore dell'Area amministrativa è fuori dal workflow interno: eventuali
     // vecchi instradamenti DIR_AMM/DA non devono più bloccare le azioni dei nodi operativi.
     if (s.startsWith('DIR_AMM') || s.startsWith('DA')) return ''
     if (s.startsWith('DIR') || s.startsWith('DT')) return 'DT'
-    if (s.startsWith('RI')) return 'RI'
-    if (s.startsWith('RZ')) return 'RZ'
-    if (s.startsWith('TI')) return 'TI'
+    if (s.startsWith('RIT')) return 'RIT'
+    if (s.startsWith('CS')) return 'CS'
+    if (s.startsWith('IT')) return 'IT'
     if (s.startsWith('TR')) return 'TR'
     return ''
   }
   const giiRoutingDestRole = parseWorkflowRoleFromRoutingText(pickAttrCI(data, ['GII_a', 'gii_a']))
   const isExplicitlyRoutedToAnotherRole = !!giiRoutingDestRole && giiRoutingDestRole !== role
 
-  // TI non deve poter "prendere in carico" una pratica nata da gestionale (origine=2)
+  // IT non deve poter "prendere in carico" una pratica nata da gestionale (origine=2)
   // se non ha ancora workflow: quella pratica è già sua.
-  const isTiOwningOrigin2 = role === 'TI' && origineNum === 2 && presaNum == null
+  const isTiOwningOrigin2 = role === 'IT' && origineNum === 2 && presaNum == null
 
   // ── Guardiani pulsanti: basati SOLO su stato_[myRole] ───────────────────────
   // La fonte di verità è il valore del campo stato del ruolo corrente nel record.
@@ -3791,53 +3808,51 @@ function ActionsPanel (props: {
     (effectiveStatoNum == null || effectiveStatoNum === STATO_DA_PRENDERE)
 
 
-  // TI assignment (RZ → TI): se la pratica è assegnata a TI e TI non l'ha ancora "restituita",
-  // RZ non deve poter esprimere esito/integrazione/approvazione/respinta.
+  // IT assignment (CS → IT): se la pratica è assegnata a IT e IT non l'ha ancora "restituita",
+  // CS non deve poter esprimere esito/integrazione/approvazione/respinta.
   // Su alcune Data View i campi di assegnazione possono mancare: quindi consideriamo anche
-  // l'eventuale workflow TI già presente sulla pratica.
-  const tiUserRaw = pickAttrCI(data, ['ti_assegnato_username', 'ti_assegnato_user', 'ti_assegnato'])
-  const tiNameRaw = pickAttrCI(data, ['ti_assegnato_nome', 'ti_assegnatoName', 'TI_ASSEGNATO_NOME'])
-  const dtAssegnaRaw = pickAttrCI(data, ['dt_assegnazione_ti', 'dt_assegnazione_TI', 'DT_ASSEGNAZIONE_TI'])
+  // l'eventuale workflow IT già presente sulla pratica.
+  const tiUserRaw = pickAttrCI(data, ['it_assegnato_username'])
+  const tiNameRaw = pickAttrCI(data, ['it_assegnato_nome', 'IT_ASSEGNATO_NOME'])
+  const dtAssegnaRaw = pickAttrCI(data, ['dt_assegnazione_it', 'DT_ASSEGNAZIONE_IT'])
   const hasTiAssigned = !isEmptyValue(tiUserRaw) || !isEmptyValue(tiNameRaw) || !isEmptyValue(dtAssegnaRaw)
-  const statoTiNum = toNumOrNull(pickAttrCI(data, ['stato_TI', 'stato_ti', 'STATO_TI']))
-  const presaTiNum = toNumOrNull(pickAttrCI(data, ['presa_in_carico_TI', 'presa_in_carico_ti', 'PRESA_IN_CARICO_TI']))
-  const esitoTiNum = toNumOrNull(pickAttrCI(data, ['esito_TI', 'esito_ti', 'ESITO_TI']))
-  const hasTiWorkflowTouched = (presaTiNum != null) || (statoTiNum != null) || (esitoTiNum != null)
+  const statoTiNum = toNumOrNull(pickAttrCI(data, ['stato_IT', 'STATO_IT']))
+  const dtPresaTiMs = parseMsAny(pickAttrCI(data, ['dt_presa_in_carico_IT', 'DT_PRESA_IN_CARICO_IT']))
+  const hasTiWorkflowTouched = (dtPresaTiMs != null) || (statoTiNum != null)
   const hasHigherWorkflowTouched =
-    (toNumOrNull(pickAttrCI(data, ['presa_in_carico_RI', 'PRESA_IN_CARICO_RI'])) != null) ||
-    (toNumOrNull(pickAttrCI(data, ['stato_RI', 'STATO_RI'])) != null) ||
-    (toNumOrNull(pickAttrCI(data, ['esito_RI', 'ESITO_RI'])) != null) ||
+    (toNumOrNull(pickAttrCI(data, ['dt_presa_in_carico_RIT'])) != null) ||
+    (toNumOrNull(pickAttrCI(data, ['stato_RIT'])) != null) ||
     (toNumOrNull(pickAttrCI(data, ['stato_DT', 'STATO_DT'])) != null) ||
     (toNumOrNull(pickAttrCI(data, ['esito_DT', 'ESITO_DT'])) != null)
   const hasTiAnyEvidence = hasTiAssigned || hasTiWorkflowTouched
-  const tiReturned = (esitoTiNum != null) || (statoTiNum === STATO_APPROVATA) || (statoTiNum === STATO_RESPINTA) || hasHigherWorkflowTouched
-  const lockRZBecauseAssignedToTi = role === 'RZ' && (origineNum == null || origineNum === 1) && hasTiAnyEvidence && !tiReturned && !awaitingRetakeByRz
+  const tiReturned = (statoTiNum === STATO_APPROVATA) || (statoTiNum === STATO_RESPINTA) || hasHigherWorkflowTouched
+  const lockCSBecauseAssignedToTi = role === 'CS' && (origineNum == null || origineNum === 1) && hasTiAnyEvidence && !tiReturned && !awaitingRetakeByCs
   const numeroRapportoTecnicoCorrente = String(pickAttrCI(data, ['numero_rapporto_tecnico', 'NUMERO_RAPPORTO_TECNICO']) || '').trim()
-  const rzCanRejectOnlyFirstEvaluation = role !== 'RZ' || !numeroRapportoTecnicoCorrente
+  const csCanRejectOnlyFirstEvaluation = role !== 'CS' || !numeroRapportoTecnicoCorrente
 
-  // TI_AMM già assegnato?
-  const tiAmmUserRaw = pickAttrCI(data, ['ti_amm_assegnato_username'])
-  const hasTiAmmAssigned = hasTiAmmAssignment(data)
+  // IA già assegnato?
+  const iaUserRaw = pickAttrCI(data, ['ia_assegnato_username'])
+  const hasIaAssigned = hasIaAssignment(data)
 
-  // Nodo TI_AMM: distinguere assegnazione STORICA da assegnazione APERTA.
-  // Dopo una richiesta integrazione RI_AMM→RI→DT→RI_AMM può rimanere valorizzato
-  // ti_amm_assegnato_username dal ciclo precedente; se stato_TI_AMM è 0/null non deve
-  // bloccare RI_AMM né impedire una nuova assegnazione.
-  const esitoTiAmmNum = toNumOrNull(pickAttrCI(data, ['esito_TI_AMM', 'ESITO_TI_AMM']))
-  const statoTiAmmNum = toNumOrNull(pickAttrCI(data, ['stato_TI_AMM', 'STATO_TI_AMM']))
-  const riAmmStaApprovandoPropostaContestazione = role === 'RI_AMM' && riAmmBozzaDeterminazioneDaVerificare && esitoTiAmmNum === ESITO_APPROVATA
-  const tiAmmAssignmentOpen = hasTiAmmAssigned && (
-    statoTiAmmNum === STATO_DA_PRENDERE ||
-    statoTiAmmNum === STATO_PRESA_IN_CARICO ||
-    statoTiAmmNum === STATO_INTEGRAZIONE
+  // Nodo IA: distinguere assegnazione STORICA da assegnazione APERTA.
+  // Dopo una richiesta integrazione RIA→RIT→DT→RIA può rimanere valorizzato
+  // ia_assegnato_username dal ciclo precedente; se stato_IA è 0/null non deve
+  // bloccare RIA né impedire una nuova assegnazione.
+  const esitoIaNum = toNumOrNull(pickAttrCI(data, ['esito_IA', 'ESITO_IA']))
+  const statoIaNum = toNumOrNull(pickAttrCI(data, ['stato_IA', 'STATO_IA']))
+  const riaStaApprovandoPropostaContestazione = role === 'RIA' && riaBozzaDeterminazioneDaVerificare && esitoIaNum === ESITO_APPROVATA
+  const iaAssignmentOpen = hasIaAssigned && (
+    statoIaNum === STATO_DA_PRENDERE ||
+    statoIaNum === STATO_PRESA_IN_CARICO ||
+    statoIaNum === STATO_INTEGRAZIONE
   )
-  const tiAmmReturned = (esitoTiAmmNum != null) || (statoTiAmmNum === STATO_APPROVATA) || (statoTiAmmNum === STATO_RESPINTA)
+  const iaReturned = (esitoIaNum != null) || (statoIaNum === STATO_APPROVATA) || (statoIaNum === STATO_RESPINTA)
 
   const riaperturaWorkflowCandidate =
-    role === 'RI_AMM' &&
+    role === 'RIA' &&
     riaperturaAmmFlag &&
     !riaperturaWorkflowStarted &&
-    !tiAmmAssignmentOpen
+    !iaAssignmentOpen
 
   const riaperturaWorkflowDaAvviare =
     riaperturaWorkflowCandidate &&
@@ -3848,51 +3863,44 @@ function ActionsPanel (props: {
     riaperturaWorkflowCandidate &&
     !riaperturaAmmCompleta
 
-  // Caso specifico RI_AMM: rientro da integrazione tecnica.
-  // Dopo il giro RI_AMM → RI_AGR o RI_TEC → DT_AGR o DT_TEC → RI_AMM, il rientro
-  // verso il TI_AMM originario è una restituzione/trasmissione (blu).
-  // Dopo una normale trasmissione TI_AMM → RI_AMM, invece, RI_AMM deve poter
-  // chiedere una vera integrazione amministrativa al TI_AMM (arancio).
-  // Per distinguere i due casi usiamo il mittente tecnico del routing GII_da.
+  // Caso specifico RIA: rientro da integrazione tecnica.
+  // Dopo il giro RIA → RIT_AGR o RIT_TEC → DT_AGR o DT_TEC → RIA, il rientro
+  // verso il IA originario è una restituzione/trasmissione (blu).
+  // Dopo una normale trasmissione IA → RIA, invece, RIA deve poter
+  // chiedere una vera integrazione amministrativa all’IA (arancio).
+  // Per distinguere i due casi usiamo esclusivamente il tag strutturato di routing GII_da.
+  // Nessun significato viene ricavato dallo username dell'operatore.
   const giiDaRaw = String(pickAttrCI(data, ['GII_da', 'gii_da', 'Da', 'DA']) || '').trim()
-  const giiDaNorm = giiDaRaw.toUpperCase().replace(/\s+/g, ' ')
-  const riAmmSenderIsTecnico = role === 'RI_AMM' && (
-    /(^|[^A-Z0-9])(DT|DIR)[-_ ]?(AGR|TEC)([^A-Z0-9]|$)/.test(giiDaNorm) ||
-    /(^|[^A-Z0-9])TEST_DT_(AGR|TEC)([^A-Z0-9]|$)/.test(giiDaNorm) ||
-    /(^|[^A-Z0-9])DT_(AGR|TEC)([^A-Z0-9]|$)/.test(giiDaNorm) ||
-    // fallback prudente: se il mittente è un DT generico è comunque un direttore tecnico,
-    // mentre il direttore amministrativo è DA e non deve entrare in questa regola.
-    /(^|[^A-Z0-9])DT([^A-Z0-9]|$)/.test(giiDaNorm) ||
-    /(^|[^A-Z0-9])DIR([^A-Z0-9]|$)/.test(giiDaNorm)
-  )
+  const giiDaNorm = giiDaRaw.toUpperCase().replace(/_/g, '-').replace(/\s+/g, '')
+  const riaSenderIsTecnico = role === 'RIA' && ['DIR-AGR', 'DIR-TEC', 'DT-AGR', 'DT-TEC'].includes(giiDaNorm)
 
-  const statoRiAmmNum = toNumOrNull(pickAttrCI(data, ['stato_RI_AMM', 'STATO_RI_AMM']))
-  const esitoRiAmmNum = toNumOrNull(pickAttrCI(data, ['esito_RI_AMM', 'ESITO_RI_AMM']))
+  const statoRiaNum = toNumOrNull(pickAttrCI(data, ['stato_RIA', 'STATO_RIA']))
+  const esitoRiaNum = toNumOrNull(pickAttrCI(data, ['esito_RIA', 'ESITO_RIA']))
 
-  // RI_AMM: un rientro da DT/DIR tecnico non significa automaticamente
-  // “restituisci al TI_AMM”. È un rientro tecnico solo se RI_AMM aveva
+  // RIA: un rientro da DT/DIR tecnico non significa automaticamente
+  // “restituisci all’IA”. È un rientro tecnico solo se RIA aveva
   // effettivamente aperto un rimando tecnico nel ciclo amministrativo.
-  const riAmmHaChiestoIntegrazioneTecnica =
-    role === 'RI_AMM' && (esitoRiAmmNum === ESITO_INTEGRAZIONE || statoRiAmmNum === STATO_INTEGRAZIONE)
+  const riaHaChiestoIntegrazioneTecnica =
+    role === 'RIA' && (esitoRiaNum === ESITO_INTEGRAZIONE || statoRiaNum === STATO_INTEGRAZIONE)
 
   const isRientroTecnicoDaDt =
-    role === 'RI_AMM' &&
-    hasTiAmmAssigned &&
-    riAmmSenderIsTecnico &&
-    riAmmHaChiestoIntegrazioneTecnica
+    role === 'RIA' &&
+    hasIaAssigned &&
+    riaSenderIsTecnico &&
+    riaHaChiestoIntegrazioneTecnica
 
-  // Se RI_AMM riceve per la prima volta da DT/DIR tecnico, o riceve il
+  // Se RIA riceve per la prima volta da DT/DIR tecnico, o riceve il
   // rientro da una propria integrazione tecnica, non va bloccato solo perché
-  // esiste uno storico TI_AMM. Quello storico non è la causa procedurale attuale.
-  const lockRiAmmBecauseAssignedToTiAmm =
-    role === 'RI_AMM' &&
-    tiAmmAssignmentOpen &&
-    !tiAmmReturned &&
-    !riAmmSenderIsTecnico
+  // esiste uno storico IA. Quello storico non è la causa procedurale attuale.
+  const lockRiaBecauseAssignedToIa =
+    role === 'RIA' &&
+    iaAssignmentOpen &&
+    !iaReturned &&
+    !riaSenderIsTecnico
 
   const currentIntegrationRequester = getIntegrationRequesterForCurrentRole()
 
-  // Il rimando generico TI_AMM → RI_AMM appartiene al ciclo istruttorio della determina.
+  // Il rimando generico IA → RIA appartiene al ciclo istruttorio della determina.
   // Dopo la predisposizione dell'e-mail al Direttore quel ciclo è chiuso e non deve
   // più essere riaperto con un rimando generico. La fonte stabile è il milestone
   // `determinazione_trasmessa_firma_*`, che viene registrato dalla stessa azione che
@@ -3903,8 +3911,8 @@ function ActionsPanel (props: {
     determinazioneTrasmessaFirmaCorrente ||
     determinazioneAdottataCorrente ||
     determinazioneStatoCorrente === 'EMAIL_DIRETTORE_PREPARATA'
-  const tiAmmRimandoRiAmmInibitoDopoEmailDirettore =
-    role === 'TI_AMM' && determinazioneHaSuperatoInvioDirettore
+  const iaRimandoRiaInibitoDopoEmailDirettore =
+    role === 'IA' && determinazioneHaSuperatoInvioDirettore
 
   const canStartEsito =
     role !== 'DA' &&
@@ -3914,78 +3922,78 @@ function ActionsPanel (props: {
     canChooseWorkflowAction &&
     !isExplicitlyRoutedToAnotherRole &&
     myStatoIsPresaInCarico &&
-    !lockRZBecauseAssignedToTi &&
-    !lockRiAmmBecauseAssignedToTiAmm &&
-    !(role === 'RI_AMM' && determinazioneAdottataCorrente && !riAmmAttoContestazioneDaVerificare) &&
+    !lockCSBecauseAssignedToTi &&
+    !lockRiaBecauseAssignedToIa &&
+    !(role === 'RIA' && determinazioneAdottataCorrente && !riaAttoContestazioneDaVerificare) &&
     effectivePresaNum === PRESA_IN_CARICO &&
     effectiveStatoNum === STATO_PRESA_IN_CARICO
 
-  // Regola RZ: prima di assegnare a TI, può solo "Assegna TI" oppure "Respingi".
+  // Regola CS: prima di assegnare a IT, può solo "Assegna IT" oppure "Respingi".
   const canStartIntegrazione =
     canStartEsito &&
-    !tiAmmRimandoRiAmmInibitoDopoEmailDirettore &&
-    role !== 'RI_AMM' &&
-    !(role === 'RZ' && (origineNum == null || origineNum === 1) && !hasTiAnyEvidence) &&
-    role !== 'TI'
+    !iaRimandoRiaInibitoDopoEmailDirettore &&
+    role !== 'RIA' &&
+    !(role === 'CS' && (origineNum == null || origineNum === 1) && !hasTiAnyEvidence) &&
+    role !== 'IT'
 
-  // RI_AMM → TI_AMM: la destinazione verso TI_AMM ha tre significati distinti.
-  // - prima ricezione tecnica: Assegna al TI_AMM;
-  // - rientro da integrazione tecnica già richiesta da RI_AMM: Invia al TI_AMM;
-  // - controllo dell'istruttoria del TI_AMM: Rimanda al TI_AMM con motivazione.
-  const riAmmShouldAssignTiAmm =
-    role === 'RI_AMM' &&
+  // RIA → IA: la destinazione verso IA ha tre significati distinti.
+  // - prima ricezione tecnica: Assegna all’IA;
+  // - rientro da integrazione tecnica già richiesta da RIA: Invia all’IA;
+  // - controllo dell'istruttoria dell’IA: Rimanda all’IA con motivazione.
+  const riaShouldAssignIa =
+    role === 'RIA' &&
     (
       riaperturaWorkflowDaAvviare ||
-      !hasTiAmmAssigned ||
-      (riAmmSenderIsTecnico && !riAmmHaChiestoIntegrazioneTecnica)
+      !hasIaAssigned ||
+      (riaSenderIsTecnico && !riaHaChiestoIntegrazioneTecnica)
     )
 
-  const canStartInviaTiAmm =
+  const canStartInviaIa =
     canStartEsito &&
-    role === 'RI_AMM' &&
-    hasTiAmmAssigned &&
+    role === 'RIA' &&
+    hasIaAssigned &&
     isRientroTecnicoDaDt
 
-  // Compatibilità interna: il vecchio pending RESTITUISCI_TI_AMM non viene più
+  // Compatibilità interna: il vecchio pending RESTITUISCI_IA non viene più
   // proposto all'utente, ma resta gestito per evitare rotture se qualche stato
   // precedente lo avesse ancora in memoria durante hot reload.
-  const canStartRestituisciTiAmm = canStartInviaTiAmm
+  const canStartRestituisciIa = canStartInviaIa
 
-  const canStartIntegrazioneTiAmm =
+  const canStartIntegrazioneIa =
     canStartEsito &&
-    role === 'RI_AMM' &&
-    (!determinazioneAdottataCorrente || riAmmAttoContestazioneDaVerificare) &&
-    hasTiAmmAssigned &&
-    !riAmmSenderIsTecnico &&
-    currentIntegrationRequester !== 'TI_AMM'
+    role === 'RIA' &&
+    (!determinazioneAdottataCorrente || riaAttoContestazioneDaVerificare) &&
+    hasIaAssigned &&
+    !riaSenderIsTecnico &&
+    currentIntegrationRequester !== 'IA'
 
   const canStartIntegrazioneTecnica =
     canStartEsito &&
-    role === 'RI_AMM' &&
+    role === 'RIA' &&
     !determinazioneAdottataCorrente
 
-  const tiAmmConformitaGiaApposta = role === 'TI_AMM' && esitoTiAmmNum === ESITO_APPROVATA
-  const riAmmHaRimandatoATiAmmDopoVisto = role === 'TI_AMM' && tiAmmConformitaGiaApposta && (
-    esitoRiAmmNum === ESITO_INTEGRAZIONE ||
-    statoRiAmmNum === STATO_INTEGRAZIONE
+  const iaConformitaGiaApposta = role === 'IA' && esitoIaNum === ESITO_APPROVATA
+  const riaHaRimandatoAIaDopoVisto = role === 'IA' && iaConformitaGiaApposta && (
+    esitoRiaNum === ESITO_INTEGRAZIONE ||
+    statoRiaNum === STATO_INTEGRAZIONE
   )
-  const tiAmmPuoApporreAttestazione = role !== 'TI_AMM' || !tiAmmConformitaGiaApposta || riAmmHaRimandatoATiAmmDopoVisto
+  const iaPuoApporreAttestazione = role !== 'IA' || !iaConformitaGiaApposta || riaHaRimandatoAIaDopoVisto
 
   const canStartApprova =
     canStartEsito &&
-    role !== 'TI_AMM' &&
-    tiAmmPuoApporreAttestazione &&
-    !(role === 'RZ' && (origineNum == null || origineNum === 1) && !hasTiAnyEvidence) &&
-    !(role === 'RI_AMM' && !currentIntegrationRequester && !riAmmBozzaDeterminazioneDaVerificare && !riAmmAttoContestazioneDaVerificare)
+    role !== 'IA' &&
+    iaPuoApporreAttestazione &&
+    !(role === 'CS' && (origineNum == null || origineNum === 1) && !hasTiAnyEvidence) &&
+    !(role === 'RIA' && !currentIntegrationRequester && !riaBozzaDeterminazioneDaVerificare && !riaAttoContestazioneDaVerificare)
 
   const canStartRespingi =
     canStartEsito &&
-    role !== 'TI' &&
-    role !== 'RI' &&
-    role !== 'TI_AMM' &&  // TI_AMM non può respingere
-    role !== 'RI_AMM' &&  // il RI-AMM rimanda o trasmette, non respinge
+    role !== 'IT' &&
+    role !== 'RIT' &&
+    role !== 'IA' &&  // IA non può respingere
+    role !== 'RIA' &&  // il RIA rimanda o trasmette, non respinge
     role !== 'DA' &&      // DA è consultivo: nessuna azione di workflow interno
-    rzCanRejectOnlyFirstEvaluation
+    csCanRejectOnlyFirstEvaluation
 
   // Label dinamiche (inoltro vs approva)
   // Destinazione forward risolta (usata anche per le label)
@@ -4002,18 +4010,18 @@ function ActionsPanel (props: {
   const getRoleLabelForMenu = (destRole: string, opts?: { technicalIntegration?: boolean }): string => {
     const dest = String(destRole || '').trim().toUpperCase()
     if (!dest) return ''
-    if (dest === 'RI_AMM') return 'Responsabile Istruttoria amministrativa'
-    if (dest === 'TI_AMM') return 'Tecnico Istruttore amministrativo'
+    if (dest === 'RIA') return 'Responsabile Istruttoria amministrativa'
+    if (dest === 'IA') return 'Istruttore amministrativo'
     if (dest === 'DA') return 'Direttore Area AA. GG. e P.F.'
 
     const meta = getRoutingMetaForRole(dest, opts)
     const areaCode = normalizeAreaLabel(meta.area || getPracticeAreaForRouting())
     const areaName = areaNameForRoleLabel(areaCode)
 
-    if (dest === 'RI') return 'Responsabile Istruttoria'
-    if (dest === 'TI') return 'Tecnico Istruttore'
+    if (dest === 'RIT') return 'Responsabile istruttoria tecnica'
+    if (dest === 'IT') return 'Istruttore tecnico'
     if (dest === 'DT') return areaName ? `Direttore dell’Area ${areaName}` : 'Direttore dell’Area Tecnica'
-    if (dest === 'RZ') return 'Capo Settore'
+    if (dest === 'CS') return 'Capo Settore'
     return dest.replace(/_/g, ' ')
   }
 
@@ -4030,108 +4038,107 @@ function ActionsPanel (props: {
     : ''
 
   const approvaBtnLabel =
-    role === 'TI' ? `Trasmetti ${praticaLabel === 'Rapporto tecnico' ? 'rapporto tecnico' : 'rilevazione'} al ${getRoleLabelForMenu('RZ')}` :
-    role === 'RZ' ? (praticaLabel === 'Rapporto tecnico' ? 'Valida integrazione' : 'Approva rilevazione') :
-    role === 'RI' ? 'Approva istruttoria tecnica' :
+    role === 'IT' ? `Trasmetti ${praticaLabel === 'Rapporto tecnico' ? 'rapporto tecnico' : 'rilevazione'} al ${getRoleLabelForMenu('CS')}` :
+    role === 'CS' ? (praticaLabel === 'Rapporto tecnico' ? 'Valida integrazione' : 'Approva rilevazione') :
+    role === 'RIT' ? 'Approva istruttoria tecnica' :
     role === 'DT' ? 'Approva Rapporto tecnico di rilevazione' :
-    role === 'RI_AMM' && riAmmAttoContestazioneDaVerificare ? 'Approva Atto di contestazione' :
-    role === 'RI_AMM' && riAmmBozzaDeterminazioneDaVerificare ? 'Approva istruttoria amministrativa' :
-    role === 'RI_AMM' && riAmmStaApprovandoPropostaContestazione ? 'Approva istruttoria amministrativa' :
-    role === 'RI_AMM' ? 'Approva istruttoria amministrativa' :
-    role === 'TI_AMM' ? 'Apponi attestazione di conformità' :
+    role === 'RIA' && riaAttoContestazioneDaVerificare ? 'Approva Atto di contestazione' :
+    role === 'RIA' && riaBozzaDeterminazioneDaVerificare ? 'Approva istruttoria amministrativa' :
+    role === 'RIA' && riaStaApprovandoPropostaContestazione ? 'Approva istruttoria amministrativa' :
+    role === 'RIA' ? 'Approva istruttoria amministrativa' :
+    role === 'IA' ? 'Apponi attestazione di conformità' :
     'Approva'
 
   const approvaDoneLabel = currentIntegrationRequesterLabel
     ? `Trasmessa al ${currentIntegrationRequesterLabel}`
-    : role === 'TI' ? `${praticaLabel === 'Rapporto tecnico' ? 'Rapporto tecnico' : 'Rilevazione'} trasmessa al ${getRoleLabelForMenu('RZ')}` :
-    role === 'RZ' ? (praticaLabel === 'Rapporto tecnico' ? `Integrazione validata e trasmessa al ${getRoleLabelForMenu('RI')}` : `Rilevazione approvata e trasmessa al ${getRoleLabelForMenu('RI')}`) :
-    role === 'RI' ? `Istruttoria tecnica approvata e trasmessa al ${getRoleLabelForForward('DT')}` :
-    role === 'DT' ? `Rapporto tecnico di rilevazione approvato e trasmesso al ${getRoleLabelForMenu('RI_AMM')}` :
-    role === 'RI_AMM' && riAmmAttoContestazioneDaVerificare ? 'Atto di contestazione approvato' :
-    role === 'RI_AMM' && riAmmBozzaDeterminazioneDaVerificare ? 'Istruttoria amministrativa approvata' :
-    role === 'RI_AMM' && riAmmStaApprovandoPropostaContestazione ? 'Istruttoria amministrativa approvata' :
-    role === 'RI_AMM' ? 'Istruttoria amministrativa approvata' :
-    role === 'TI_AMM' ? 'Attestazione di conformità apposta' :
+    : role === 'IT' ? `${praticaLabel === 'Rapporto tecnico' ? 'Rapporto tecnico' : 'Rilevazione'} trasmessa al ${getRoleLabelForMenu('CS')}` :
+    role === 'CS' ? (praticaLabel === 'Rapporto tecnico' ? `Integrazione validata e trasmessa al ${getRoleLabelForMenu('RIT')}` : `Rilevazione approvata e trasmessa al ${getRoleLabelForMenu('RIT')}`) :
+    role === 'RIT' ? `Istruttoria tecnica approvata e trasmessa al ${getRoleLabelForForward('DT')}` :
+    role === 'DT' ? `Rapporto tecnico di rilevazione approvato e trasmesso al ${getRoleLabelForMenu('RIA')}` :
+    role === 'RIA' && riaAttoContestazioneDaVerificare ? 'Atto di contestazione approvato' :
+    role === 'RIA' && riaBozzaDeterminazioneDaVerificare ? 'Istruttoria amministrativa approvata' :
+    role === 'RIA' && riaStaApprovandoPropostaContestazione ? 'Istruttoria amministrativa approvata' :
+    role === 'RIA' ? 'Istruttoria amministrativa approvata' :
+    role === 'IA' ? 'Attestazione di conformità apposta' :
     'Approvata'
 
   const approvaConfirmLabel = currentIntegrationRequesterLabel
     ? `Trasmetti al ${currentIntegrationRequesterLabel}`
-    : role === 'TI' ? `Trasmetti al ${getRoleLabelForMenu('RZ')}` :
-    role === 'RZ' ? (praticaLabel === 'Rapporto tecnico' ? 'Valida integrazione' : 'Approva rilevazione') :
-    role === 'RI' ? 'Approva istruttoria tecnica' :
+    : role === 'IT' ? `Trasmetti al ${getRoleLabelForMenu('CS')}` :
+    role === 'CS' ? (praticaLabel === 'Rapporto tecnico' ? 'Valida integrazione' : 'Approva rilevazione') :
+    role === 'RIT' ? 'Approva istruttoria tecnica' :
     role === 'DT' ? 'Approva rapporto tecnico' :
-    role === 'RI_AMM' && riAmmAttoContestazioneDaVerificare ? 'Approva Atto di contestazione' :
-    role === 'RI_AMM' && riAmmBozzaDeterminazioneDaVerificare ? 'Approva istruttoria amministrativa' :
-    role === 'RI_AMM' && riAmmStaApprovandoPropostaContestazione ? 'Approva istruttoria amministrativa' :
-    role === 'RI_AMM' ? 'Approva istruttoria amministrativa' :
-    role === 'TI_AMM' ? 'Apponi attestazione' :
+    role === 'RIA' && riaAttoContestazioneDaVerificare ? 'Approva Atto di contestazione' :
+    role === 'RIA' && riaBozzaDeterminazioneDaVerificare ? 'Approva istruttoria amministrativa' :
+    role === 'RIA' && riaStaApprovandoPropostaContestazione ? 'Approva istruttoria amministrativa' :
+    role === 'RIA' ? 'Approva istruttoria amministrativa' :
+    role === 'IA' ? 'Apponi attestazione' :
     'Approva'
 
   const getRiTecnicoTargetLabel = (): string => {
     const areaPratica = normalizeAreaLabel(pickAttrCI(data, ['area_cod', 'area', 'cod_area']))
     const areaName = areaNameForRoleLabel(areaPratica)
-    if ((areaPratica === 'AGR' || areaPratica === 'TEC') && areaName) return `Responsabile Istruttoria dell’Area ${areaName}`
-    return 'Responsabile Istruttoria'
+    if ((areaPratica === 'AGR' || areaPratica === 'TEC') && areaName) return `Responsabile istruttoria tecnica dell’Area ${areaName}`
+    return 'Responsabile istruttoria tecnica'
   }
 
   const formatRimandoRoleLabel = (destRole: string): string => {
     const dest = String(destRole || '').trim().toUpperCase()
     if (!dest) return ''
-    if (role === 'RI_AMM' && dest === 'RI') return getRiTecnicoTargetLabel()
+    if (role === 'RIA' && dest === 'RIT') return getRiTecnicoTargetLabel()
     return getRoleLabelForMenu(dest)
   }
 
   const rimandoGenericDest = getPrevRoleForIntegration()
   const rimandoGenericTargetLabel = formatRimandoRoleLabel(rimandoGenericDest)
   const rimandoGenericButtonLabel = rimandoGenericTargetLabel ? `Rimanda al ${rimandoGenericTargetLabel}` : 'Rimanda'
-  const rimandoTiAmmButtonLabel = `Rimanda al ${getRoleLabelForMenu('TI_AMM')}`
+  const rimandoIaButtonLabel = `Rimanda al ${getRoleLabelForMenu('IA')}`
   const rimandoTecnicaTargetLabel = getRiTecnicoTargetLabel()
   const rimandoTecnicaButtonLabel = `Rimanda al ${rimandoTecnicaTargetLabel}`
-  const pendingRimandoTargetLabel = role === 'RI_AMM' && pending === 'INTEGRAZIONE_TI_AMM'
-    ? getRoleLabelForMenu('TI_AMM')
-    : role === 'RI_AMM' && pending === 'INTEGRAZIONE_TECNICA'
+  const pendingRimandoTargetLabel = role === 'RIA' && pending === 'INTEGRAZIONE_IA'
+    ? getRoleLabelForMenu('IA')
+    : role === 'RIA' && pending === 'INTEGRAZIONE_TECNICA'
       ? rimandoTecnicaTargetLabel
       : pending === 'INTEGRAZIONE'
         ? rimandoGenericTargetLabel
         : ''
 
-  // TI: eliminazione consentita solo per pratiche originate da sé (origine=TI) e mai inoltrate a RZ.
+  // IT: eliminazione consentita solo per pratiche originate da sé (origine=IT) e mai inoltrate a CS.
   const currentUsername = String((window as any).__giiUserRole?.username || (window as any).__giiUser?.username || '').trim()
   const creatorUsername = String(pickAttrCI(data, ['creator', 'Creator', 'created_user', 'created_by', 'CreatedUser', 'CREATOR', 'utente_ins', 'utente']) || '').trim()
   // Se il campo creator non è esposto dalla vista, assumiamo ownership:
-  // isRecordVisibleForCurrentUser ha già filtrato i record di TI garantendo visibilità solo sui propri.
+  // isRecordVisibleForCurrentUser ha già filtrato i record di IT garantendo visibilità solo sui propri.
   const isOwner = !creatorUsername || (!!currentUsername && currentUsername.toLowerCase() === creatorUsername.toLowerCase())
 
   const hasRoleTouched = (r: string): boolean => {
-    const p = toNumOrNull(pickAttrCI(data, [`presa_in_carico_${r}`, `PRESA_IN_CARICO_${r}`]))
+    const stateOnly = usesStateOnlyWorkflow(r)
     const s = toNumOrNull(pickAttrCI(data, [`stato_${r}`, `STATO_${r}`]))
-    const e = toNumOrNull(pickAttrCI(data, [`esito_${r}`, `ESITO_${r}`]))
-    return (p != null) || (s != null) || (e != null)
+    const e = stateOnly ? null : toNumOrNull(pickAttrCI(data, [`esito_${r}`, `ESITO_${r}`]))
+    return (s != null) || (e != null)
   }
 
   const canStartElimina =
-    role === 'TI' &&
+    role === 'IT' &&
     hasSel &&
     !loading &&
     !lockedByTransmit &&
     canChooseWorkflowAction &&
     isMyTurn &&
     origineNum === 2 &&
-    !hasRoleTouched('RZ') &&
-    !hasRoleTouched('RI') &&
+    !hasRoleTouched('CS') &&
+    !hasRoleTouched('RIT') &&
     !hasRoleTouched('DT') &&
     !hasRoleTouched('DA') &&
-    (esitoTiNum == null) &&
     isOwner
 
 
   // Nota: Matrice_DT non prevede "Trasmetti a DA". Il pulsante è stato rimosso.
 
-  // Assegna TI: solo RZ, dopo presa in carico, pratiche da TR.
+  // Assegna IT: solo CS, dopo presa in carico, pratiche da TR.
   // NOTA: non dipendiamo da computeNodoAttivo perché su alcune Output DS ExB
   // può arrivare un subset di campi che falsano `isMyTurn` dopo un reselect.
   const canStartAssegnaTi =
-    role === 'RZ' &&
+    role === 'CS' &&
     hasSel &&
     !loading &&
     !lockedByTransmit &&
@@ -4141,29 +4148,29 @@ function ActionsPanel (props: {
     effectivePresaNum === PRESA_IN_CARICO &&
     effectiveStatoNum === STATO_PRESA_IN_CARICO
 
-  // Assegna TI_AMM: solo RI_AMM, dopo presa in carico.
-  // Non dipende più dalla sola presenza storica di ti_amm_assegnato_username:
+  // Assegna l’Istruttore amministrativo: solo RIA, dopo presa in carico.
+  // Non dipende più dalla sola presenza storica di ia_assegnato_username:
   // se la pratica arriva ora da DT/DIR tecnico per la prima fase amministrativa,
-  // RI_AMM deve poter assegnare anche se nel record esiste uno storico TI_AMM.
-  const canStartAssegnaTiAmmStandard =
-    role === 'RI_AMM' &&
+  // RIA deve poter assegnare anche se nel record esiste uno storico IA.
+  const canStartAssegnaIaStandard =
+    role === 'RIA' &&
     hasSel &&
     !loading &&
     !lockedByTransmit &&
     canChooseWorkflowAction &&
-    riAmmShouldAssignTiAmm &&
+    riaShouldAssignIa &&
     effectivePresaNum === PRESA_IN_CARICO &&
     effectiveStatoNum === STATO_PRESA_IN_CARICO
 
-  const canStartAssegnaTiAmmRiapertura =
-    role === 'RI_AMM' &&
+  const canStartAssegnaIaRiapertura =
+    role === 'RIA' &&
     hasSel &&
     !loading &&
     !lockedByTransmit &&
     canChooseWorkflowAction &&
     riaperturaWorkflowDaAvviare
 
-  const canStartAssegnaTiAmm = canStartAssegnaTiAmmStandard || canStartAssegnaTiAmmRiapertura
+  const canStartAssegnaIa = canStartAssegnaIaStandard || canStartAssegnaIaRiapertura
 
   type WorkflowMenuItem = {
     key: Exclude<Pending, null | 'TAKE'>
@@ -4182,72 +4189,72 @@ function ActionsPanel (props: {
 
   const approvaMenuLabel = currentIntegrationRequesterLabel
     ? `Trasmetti al ${currentIntegrationRequesterLabel}`
-    : role === 'TI' ? `Trasmetti ${praticaLabel === 'Rapporto tecnico' ? 'rapporto tecnico' : 'rilevazione'} al ${getRoleLabelForMenu('RZ')}` :
-    role === 'RZ' ? (praticaLabel === 'Rapporto tecnico' ? 'Valida integrazione' : 'Approva rilevazione') :
-    role === 'RI' ? 'Approva istruttoria tecnica' :
+    : role === 'IT' ? `Trasmetti ${praticaLabel === 'Rapporto tecnico' ? 'rapporto tecnico' : 'rilevazione'} al ${getRoleLabelForMenu('CS')}` :
+    role === 'CS' ? (praticaLabel === 'Rapporto tecnico' ? 'Valida integrazione' : 'Approva rilevazione') :
+    role === 'RIT' ? 'Approva istruttoria tecnica' :
     role === 'DT' ? 'Approva Rapporto tecnico di rilevazione' :
-    role === 'RI_AMM' && riAmmAttoContestazioneDaVerificare ? 'Approva Atto di contestazione' :
-    role === 'RI_AMM' && riAmmBozzaDeterminazioneDaVerificare ? 'Approva istruttoria amministrativa' :
-    role === 'RI_AMM' && riAmmStaApprovandoPropostaContestazione ? 'Approva istruttoria amministrativa' :
-    role === 'RI_AMM' ? 'Approva istruttoria amministrativa' :
-    role === 'TI_AMM' ? 'Apponi attestazione di conformità' :
+    role === 'RIA' && riaAttoContestazioneDaVerificare ? 'Approva Atto di contestazione' :
+    role === 'RIA' && riaBozzaDeterminazioneDaVerificare ? 'Approva istruttoria amministrativa' :
+    role === 'RIA' && riaStaApprovandoPropostaContestazione ? 'Approva istruttoria amministrativa' :
+    role === 'RIA' ? 'Approva istruttoria amministrativa' :
+    role === 'IA' ? 'Apponi attestazione di conformità' :
     approvaBtnLabel
 
   const approvaMenuDesc = currentIntegrationRequesterLabel
     ? `Invia la risposta al ${currentIntegrationRequesterLabel}.`
-    : role === 'TI' ? `${praticaLabel === 'Rapporto tecnico' ? 'Invia il rapporto tecnico' : 'Invia la rilevazione'} al ${getRoleLabelForMenu('RZ')}.` :
-    role === 'RZ' ? (praticaLabel === 'Rapporto tecnico' ? `Valida l’integrazione e trasmette il rapporto tecnico al ${getRoleLabelForMenu('RI')}.` : `Approva la rilevazione e la trasmette al ${getRoleLabelForMenu('RI')}.`) :
-    role === 'RI' ? `Approva l’istruttoria tecnica e la trasmette al ${getRoleLabelForForward('DT')}.` :
-    role === 'DT' ? `Approva il Rapporto tecnico di rilevazione e lo trasmette al ${getRoleLabelForMenu('RI_AMM')}.` :
-    role === 'RI_AMM' && riAmmAttoContestazioneDaVerificare ? 'Approva l’Atto e restituisce la pratica al Tecnico Istruttore amministrativo per la trasmissione al Direttore.' :
-    role === 'RI_AMM' && riAmmBozzaDeterminazioneDaVerificare ? 'Approva l’istruttoria amministrativa e restituisce la pratica al Tecnico Istruttore amministrativo per la protocollazione e la trasmissione al Direttore.' :
-    role === 'RI_AMM' && riAmmStaApprovandoPropostaContestazione ? 'Approva l’istruttoria amministrativa e restituisce la pratica al Tecnico istruttore amministrativo per protocollazione e predisposizione della bozza di determinazione.' :
-    role === 'TI_AMM' ? 'Appone il visto di conformità. La pratica resta al Tecnico Istruttore amministrativo per la predisposizione della bozza di determinazione e la successiva trasmissione del fascicolo al Responsabile.' :
+    : role === 'IT' ? `${praticaLabel === 'Rapporto tecnico' ? 'Invia il rapporto tecnico' : 'Invia la rilevazione'} al ${getRoleLabelForMenu('CS')}.` :
+    role === 'CS' ? (praticaLabel === 'Rapporto tecnico' ? `Valida l’integrazione e trasmette il rapporto tecnico al ${getRoleLabelForMenu('RIT')}.` : `Approva la rilevazione e la trasmette al ${getRoleLabelForMenu('RIT')}.`) :
+    role === 'RIT' ? `Approva l’istruttoria tecnica e la trasmette al ${getRoleLabelForForward('DT')}.` :
+    role === 'DT' ? `Approva il Rapporto tecnico di rilevazione e lo trasmette al ${getRoleLabelForMenu('RIA')}.` :
+    role === 'RIA' && riaAttoContestazioneDaVerificare ? 'Approva l’Atto e restituisce la pratica all’Istruttore amministrativo per la trasmissione al Direttore.' :
+    role === 'RIA' && riaBozzaDeterminazioneDaVerificare ? 'Approva l’istruttoria amministrativa e restituisce la pratica all’Istruttore amministrativo per la protocollazione e la trasmissione al Direttore.' :
+    role === 'RIA' && riaStaApprovandoPropostaContestazione ? 'Approva l’istruttoria amministrativa e restituisce la pratica all’Istruttore amministrativo per protocollazione e predisposizione della bozza di determinazione.' :
+    role === 'IA' ? 'Appone il visto di conformità. La pratica resta all’Istruttore amministrativo per la predisposizione della bozza di determinazione e la successiva trasmissione del fascicolo al Responsabile.' :
     fwdDestLabel ? `Invia la pratica al ${fwdDestLabel}.` :
     'Avanza la pratica al passaggio successivo.'
 
   const rimandoTecnicaMenuDesc = 'Rimando all’istruttoria tecnica.'
 
-  // RI_AMM non deve vedere contemporaneamente una trasmissione e una restituzione
-  // verso lo stesso TI_AMM: per l'utente sarebbero due scelte indistinguibili.
-  const hideRiAmmForwardToTiAmm = role === 'RI_AMM' && fwdDest === 'TI_AMM' && !riAmmStaApprovandoPropostaContestazione && !riAmmBozzaDeterminazioneDaVerificare && !riAmmAttoContestazioneDaVerificare
+  // RIA non deve vedere contemporaneamente una trasmissione e una restituzione
+  // verso lo stesso IA: per l'utente sarebbero due scelte indistinguibili.
+  const hideRiaForwardToIa = role === 'RIA' && fwdDest === 'IA' && !riaStaApprovandoPropostaContestazione && !riaBozzaDeterminazioneDaVerificare && !riaAttoContestazioneDaVerificare
 
   const workflowMenuSections: WorkflowMenuSection[] = hasSel && role !== 'DA' ? ([
     {
       title: 'Avanzamento',
       items: [
         {
-          key: 'ASSEGNA_TI',
-          label: `Assegna al ${getRoleLabelForMenu('TI')}`,
-          desc: 'Assegna la pratica al Tecnico Istruttore.',
+          key: 'ASSEGNA_IT',
+          label: `Assegna al ${getRoleLabelForMenu('IT')}`,
+          desc: 'Assegna la pratica all’Istruttore tecnico.',
           enabled: canStartAssegnaTi,
-          visible: role === 'RZ',
+          visible: role === 'CS',
           color: buttonColors.take,
           textColor: buttonColors.takeText
         },
         {
-          key: 'ASSEGNA_TI_AMM',
+          key: 'ASSEGNA_IA',
           label: riaperturaWorkflowCandidate
             ? 'Avvia nuova istruttoria amministrativa'
-            : `Assegna al ${getRoleLabelForMenu('TI_AMM')}`,
+            : `Assegna al ${getRoleLabelForMenu('IA')}`,
           desc: riaperturaWorkflowDaCompletare
             ? 'Completare e salvare tutti i dati della scheda Riapertura prima di avviare il nuovo ciclo.'
             : riaperturaWorkflowCheckLoading
               ? 'Verifica del ciclo di riapertura in corso.'
               : riaperturaWorkflowDaAvviare
-                ? `Apre il nuovo ciclo di riapertura n. ${riaperturaAmmNumero} e assegna la pratica al Tecnico Istruttore amministrativo.`
-                : 'Assegna la pratica al Tecnico Istruttore amministrativo.',
-          enabled: canStartAssegnaTiAmm,
-          visible: role === 'RI_AMM' && (riAmmShouldAssignTiAmm || riaperturaWorkflowCandidate),
+                ? `Apre il nuovo ciclo di riapertura n. ${riaperturaAmmNumero} e assegna la pratica all’Istruttore amministrativo.`
+                : 'Assegna la pratica all’Istruttore amministrativo.',
+          enabled: canStartAssegnaIa,
+          visible: role === 'RIA' && (riaShouldAssignIa || riaperturaWorkflowCandidate),
           color: buttonColors.approva,
           textColor: buttonColors.approvaText
         },
         {
-          key: 'INVIA_TI_AMM',
-          label: `Trasmetti al ${getRoleLabelForMenu('TI_AMM')}`,
-          desc: 'Invia la pratica al Tecnico Istruttore amministrativo già assegnato.',
-          enabled: canStartInviaTiAmm,
-          visible: role === 'RI_AMM' && isRientroTecnicoDaDt,
+          key: 'INVIA_IA',
+          label: `Trasmetti al ${getRoleLabelForMenu('IA')}`,
+          desc: 'Invia la pratica all’Istruttore amministrativo già assegnato.',
+          enabled: canStartInviaIa,
+          visible: role === 'RIA' && isRientroTecnicoDaDt,
           color: buttonColors.approva,
           textColor: buttonColors.approvaText
         },
@@ -4256,7 +4263,7 @@ function ActionsPanel (props: {
           label: approvaMenuLabel,
           desc: approvaMenuDesc,
           enabled: canStartApprova,
-          visible: !hideRiAmmForwardToTiAmm && role !== 'TI_AMM',
+          visible: !hideRiaForwardToIa && role !== 'IA',
           color: role === 'DT' ? buttonColors.approvaRapporto : buttonColors.approva,
           textColor: role === 'DT' ? buttonColors.approvaRapportoText : buttonColors.approvaText
         }
@@ -4266,11 +4273,11 @@ function ActionsPanel (props: {
       title: 'Rimandi',
       items: [
         {
-          key: 'INTEGRAZIONE_TI_AMM',
-          label: rimandoTiAmmButtonLabel,
+          key: 'INTEGRAZIONE_IA',
+          label: rimandoIaButtonLabel,
           desc: 'Rimando all’istruttoria amministrativa.',
-          enabled: canStartIntegrazioneTiAmm,
-          visible: role === 'RI_AMM' && hasTiAmmAssigned && !isRientroTecnicoDaDt,
+          enabled: canStartIntegrazioneIa,
+          visible: role === 'RIA' && hasIaAssigned && !isRientroTecnicoDaDt,
           color: buttonColors.integrazione,
           textColor: buttonColors.integrazioneText
         },
@@ -4279,7 +4286,7 @@ function ActionsPanel (props: {
           label: rimandoTecnicaButtonLabel,
           desc: rimandoTecnicaMenuDesc,
           enabled: canStartIntegrazioneTecnica,
-          visible: role === 'RI_AMM',
+          visible: role === 'RIA',
           color: buttonColors.integrazione,
           textColor: buttonColors.integrazioneText
         },
@@ -4288,7 +4295,7 @@ function ActionsPanel (props: {
           label: rimandoGenericButtonLabel,
           desc: rimandoGenericTargetLabel ? `${praticaLabel === 'Rapporto tecnico' ? 'Il rapporto tecnico verrà rimandato' : 'La rilevazione verrà rimandata'} al ${rimandoGenericTargetLabel}.` : 'Rimando per integrazione.',
           enabled: canStartIntegrazione,
-          visible: role !== 'TI' && role !== 'RI_AMM' && !tiAmmRimandoRiAmmInibitoDopoEmailDirettore,
+          visible: role !== 'IT' && role !== 'RIA' && !iaRimandoRiaInibitoDopoEmailDirettore,
           color: buttonColors.integrazione,
           textColor: buttonColors.integrazioneText
         }
@@ -4302,7 +4309,7 @@ function ActionsPanel (props: {
           label: 'Elimina',
           desc: 'Archivia la pratica.',
           enabled: canStartElimina,
-          visible: role === 'TI',
+          visible: role === 'IT',
           color: buttonColors.respingi,
           textColor: buttonColors.respingiText
         },
@@ -4311,7 +4318,7 @@ function ActionsPanel (props: {
           label: 'Respingi',
           desc: 'Respinge la pratica.',
           enabled: canStartRespingi,
-          visible: role !== 'RI_AMM' && role !== 'TI' && role !== 'DA',
+          visible: role !== 'RIA' && role !== 'IT' && role !== 'DA',
           color: buttonColors.respingi,
           textColor: buttonColors.respingiText
         }
@@ -4325,7 +4332,7 @@ function ActionsPanel (props: {
   const workflowMenuEnabledItems = workflowMenuEnabledSections.flatMap(section => section.items)
   const hasVisibleWorkflowMenuActions = workflowMenuSections.some(section => section.items.length > 0)
   const hasEnabledWorkflowMenuActions = workflowMenuEnabledItems.length > 0
-  const showTakeDirect = canStartTakeInCharge || !hasSel
+  const showTakeDirect = canStartTakeInCharge
 
   const integrationReasonOptions = [
     'Fatti accertati da chiarire',
@@ -4377,7 +4384,7 @@ function ActionsPanel (props: {
   )
 
   // NOTE: compare per esito conforme/non conforme, respinta e — Matrice_TI caso 1/b — anche per eliminazione (obbligatoria)
-  const showNote = pending === 'APPROVA' || pending === 'INVIA_TI_AMM' || pending === 'INTEGRAZIONE' || pending === 'INTEGRAZIONE_TI_AMM' || pending === 'INTEGRAZIONE_TECNICA' || pending === 'RESPINGI' || pending === 'ELIMINA'
+  const showNote = pending === 'APPROVA' || pending === 'INVIA_IA' || pending === 'INTEGRAZIONE' || pending === 'INTEGRAZIONE_IA' || pending === 'INTEGRAZIONE_TECNICA' || pending === 'RESPINGI' || pending === 'ELIMINA'
   const noteEnabled = showNote && hasSel && !loading && !lockedByTransmit
 
   const noteDraftTrim = String(noteDraft ?? '').trim()
@@ -4385,14 +4392,14 @@ function ActionsPanel (props: {
   const reasonTrim = String(rejectReason ?? '').trim()
   const integrationReasonTrim = String(integrationReason ?? '').trim()
   const integrationOtherTextTrim = String(integrationOtherText ?? '').trim()
-  const isWorkflowRimandoPendingForValidation = pending === 'INTEGRAZIONE' || pending === 'INTEGRAZIONE_TI_AMM' || pending === 'INTEGRAZIONE_TECNICA'
-  const isAdministrativeRiAmmReturn = role === 'RI_AMM' && pending === 'INTEGRAZIONE_TI_AMM'
-  const isIntegrationNeedsDetail = !isAdministrativeRiAmmReturn && integrationReasonTrim === 'Necessità di integrazione o rettifica'
+  const isWorkflowRimandoPendingForValidation = pending === 'INTEGRAZIONE' || pending === 'INTEGRAZIONE_IA' || pending === 'INTEGRAZIONE_TECNICA'
+  const isAdministrativeRiaReturn = role === 'RIA' && pending === 'INTEGRAZIONE_IA'
+  const isIntegrationNeedsDetail = !isAdministrativeRiaReturn && integrationReasonTrim === 'Necessità di integrazione o rettifica'
   const integrationOtherSelected = integrationTargets.includes('Altro')
   const isAltro = /\baltro\b/i.test(reasonTrim)
-  const hasOtherMotivation = (pending === 'RESPINGI' && isAltro) || (!isAdministrativeRiAmmReturn && isWorkflowRimandoPendingForValidation && isIntegrationNeedsDetail && integrationOtherSelected)
+  const hasOtherMotivation = (pending === 'RESPINGI' && isAltro) || (!isAdministrativeRiaReturn && isWorkflowRimandoPendingForValidation && isIntegrationNeedsDetail && integrationOtherSelected)
   const freeNotePrefix = hasOtherMotivation ? 'Altre motivazioni e ulteriori annotazioni' : 'Ulteriori annotazioni'
-  const integrationReasonBlock = isAdministrativeRiAmmReturn
+  const integrationReasonBlock = isAdministrativeRiaReturn
     ? (integrationTargets.length > 0 ? `Oggetto del rimando: ${integrationTargets.join(', ')}` : '')
     : (isWorkflowRimandoPendingForValidation && integrationReasonTrim
         ? [
@@ -4404,19 +4411,19 @@ function ActionsPanel (props: {
     fixedWorkflowNoteTrim,
     integrationReasonBlock,
     noteDraftTrim
-      ? (isAdministrativeRiAmmReturn ? `Motivazione del rimando:\n${noteDraftTrim}` : `${freeNotePrefix}:\n${noteDraftTrim}`)
+      ? (isAdministrativeRiaReturn ? `Motivazione del rimando:\n${noteDraftTrim}` : `${freeNotePrefix}:\n${noteDraftTrim}`)
       : ''
   ].filter(Boolean).join('\n\n')
 
   // obblighi:
   const noteIsRequired =
     hasOtherMotivation ||
-    isAdministrativeRiAmmReturn ||
+    isAdministrativeRiaReturn ||
     (pending === 'ELIMINA')  // Matrice_TI caso 1/b: note obbligatoria per eliminazione
 
   const reasonIsRequired = pending === 'RESPINGI'
-  const integrationReasonIsRequired = isWorkflowRimandoPendingForValidation && !isAdministrativeRiAmmReturn
-  const integrationTargetsIsRequired = isAdministrativeRiAmmReturn || (isWorkflowRimandoPendingForValidation && isIntegrationNeedsDetail)
+  const integrationReasonIsRequired = isWorkflowRimandoPendingForValidation && !isAdministrativeRiaReturn
+  const integrationTargetsIsRequired = isAdministrativeRiaReturn || (isWorkflowRimandoPendingForValidation && isIntegrationNeedsDetail)
   const integrationOtherTextIsRequired = false
 
   const reasonInvalid = reasonIsRequired && !reasonTrim
@@ -4431,8 +4438,8 @@ function ActionsPanel (props: {
   const integrationOtherTextReqErr = confirmAttempted && integrationOtherTextInvalid
   const noteReqErr = confirmAttempted && noteInvalid
 
-  const tiReqErr = confirmAttempted && pending === 'ASSEGNA_TI' && !tiSelected
-  const tiAmmReqErr = confirmAttempted && pending === 'ASSEGNA_TI_AMM' && !tiAmmSelected
+  const tiReqErr = confirmAttempted && pending === 'ASSEGNA_IT' && !tiSelected
+  const iaReqErr = confirmAttempted && pending === 'ASSEGNA_IA' && !iaSelected
 
   const onAnnulla = () => {
     if (loading) return
@@ -4454,19 +4461,19 @@ function ActionsPanel (props: {
     if (!hasSel) return
     if (lockedByTransmit) return
     if (p === 'TAKE' && !canStartTakeInCharge) return
-    if (p === 'ASSEGNA_TI' && !canStartAssegnaTi) return
-    if (p === 'ASSEGNA_TI_AMM' && !canStartAssegnaTiAmm) return
-    if (p === 'INVIA_TI_AMM' && !canStartInviaTiAmm) return
-    if (p === 'RESTITUISCI_TI_AMM' && !canStartRestituisciTiAmm) return
+    if (p === 'ASSEGNA_IT' && !canStartAssegnaTi) return
+    if (p === 'ASSEGNA_IA' && !canStartAssegnaIa) return
+    if (p === 'INVIA_IA' && !canStartInviaIa) return
+    if (p === 'RESTITUISCI_IA' && !canStartRestituisciIa) return
     if (p === 'INTEGRAZIONE' && !canStartIntegrazione) return
-    if (p === 'INTEGRAZIONE_TI_AMM' && !canStartIntegrazioneTiAmm) return
+    if (p === 'INTEGRAZIONE_IA' && !canStartIntegrazioneIa) return
     if (p === 'INTEGRAZIONE_TECNICA' && !canStartIntegrazioneTecnica) return
     if (p === 'APPROVA' && !canStartApprova) return
     if (p === 'RESPINGI' && !canStartRespingi) return
     if (p === 'ELIMINA' && !canStartElimina) return
 
-    // Validazione RI → DT: grado obbligatorio per ciascun articolo interessato, occorrenza obbligatoria solo per Art. 15
-    if (p === 'APPROVA' && role === 'RI') {
+    // Validazione RIT → DT: grado obbligatorio per ciascun articolo interessato, occorrenza obbligatoria solo per Art. 15
+    if (p === 'APPROVA' && role === 'RIT') {
       const missingItems: Array<{ art: number; message: string }> = []
       const artGradoMap: Array<[string, string]> = [
         ['12', 'v_art12'], ['27', 'v_art27'], ['28', 'v_art28'], ['31', 'v_art31'], ['32', 'v_art32'],
@@ -4503,12 +4510,12 @@ function ActionsPanel (props: {
       }
     }
 
-    // Validazione TI → RZ: "Il trasgressore era presente?" obbligatorio se è selezionata
-    // almeno una violazione — stessa regola già applicata in salvataggio da gii-editing-ti,
+    // Validazione IT → CS: "Il trasgressore era presente?" obbligatorio se è selezionata
+    // almeno una violazione — stessa regola già applicata in salvataggio da gii-editing-tec,
     // qui rinforzata anche in fase di inoltro.
-    if (p === 'APPROVA' && role === 'TI') {
+    if (p === 'APPROVA' && role === 'IT') {
       const norma3Selected = parseNorma3Codes(pickAttrCI(data, ['norma_violata3', 'NORMA_VIOLATA3']))
-      const hasArt15 = !!String(pickAttrCI(data, ['norma15_parziale', 'NORMA15_PARZIALE']) || '').trim() ||
+      const hasArt15 = !!String(pickAttrCI(data, ['norma15_parziale', 'NORMA15_PACSIALE']) || '').trim() ||
         !!String(pickAttrCI(data, ['norma15_totale', 'NORMA15_TOTALE']) || '').trim()
       const hasArt1617 = !!String(pickAttrCI(data, ['norma16_17', 'NORMA16_17']) || '').trim()
       const selectedViolazioniCount = norma3Selected.length + (hasArt15 ? 1 : 0) + (hasArt1617 ? 1 : 0)
@@ -4528,8 +4535,8 @@ function ActionsPanel (props: {
     resetStructuredReasons()
     setTiLoadErr('')
 
-    if (p === 'ASSEGNA_TI') {
-      // La scelta del TI deve essere esplicita: non preselezioniamo l'eventuale
+    if (p === 'ASSEGNA_IT') {
+      // La scelta del IT deve essere esplicita: non preselezioniamo l'eventuale
       // valore storico già presente sul record.
       setTiSelected('')
       window.setTimeout(() => { void loadTiOptions() }, 0)
@@ -4537,17 +4544,17 @@ function ActionsPanel (props: {
       setTiSelected('')
     }
 
-    if (p === 'ASSEGNA_TI_AMM') {
-      // La scelta del TI AMM deve essere esplicita: non preselezioniamo l'eventuale
+    if (p === 'ASSEGNA_IA') {
+      // La scelta dell’Istruttore amministrativo deve essere esplicita: non preselezioniamo l'eventuale
       // valore storico già presente sul record.
-      setTiAmmSelected('')
-      setTiAmmLoadErr('')
-      window.setTimeout(() => { void loadTiAmmOptions() }, 0)
+      setIaSelected('')
+      setIaLoadErr('')
+      window.setTimeout(() => { void loadIaOptions() }, 0)
     } else {
-      setTiAmmSelected('')
+      setIaSelected('')
     }
 
-    if (p === 'INTEGRAZIONE' || p === 'INTEGRAZIONE_TI_AMM' || p === 'INTEGRAZIONE_TECNICA' || p === 'RESPINGI') {
+    if (p === 'INTEGRAZIONE' || p === 'INTEGRAZIONE_IA' || p === 'INTEGRAZIONE_TECNICA' || p === 'RESPINGI') {
       setNoteDraft('')  // Pulisci note/motivazioni per una nuova azione distinta
       window.setTimeout(() => {
         try { noteRef.current?.focus?.() } catch {}
@@ -4661,59 +4668,59 @@ function ActionsPanel (props: {
     }
   }
 
-  const buildTechnicalChainInformativeActivities = (kind: 'DT_APPROVA' | 'DT_RESPINGE' | 'DT_RIMANDA_TI' | 'RI_RIMANDA_TI' | 'RZ_APPROVA' | 'RZ_RESPINGE', _overrideAttrs?: Record<string, any>): InformativeActivityTarget[] => {
-    const tiUser = resolveDestUser('TI')
+  const buildTechnicalChainInformativeActivities = (kind: 'DT_APPROVA' | 'DT_RESPINGE' | 'DT_RIMANDA_IT' | 'RIT_RIMANDA_IT' | 'CS_APPROVA' | 'CS_RESPINGE', _overrideAttrs?: Record<string, any>): InformativeActivityTarget[] => {
+    const tiUser = resolveDestUser('IT')
     const hasTiDest = !!String(tiUser || '').trim()
     const out: InformativeActivityTarget[] = []
     const add = (ruoloDestinatario: string, titolo: string, messaggio: string, sottotipo: string, utenteDestinatario?: string) => {
       out.push({ ruoloDestinatario, utenteDestinatario, titolo, messaggio, sottotipo, priorita: 'INFO' })
     }
     const addTiIfPresent = (titolo: string, messaggio: string, sottotipo: string) => {
-      // Il TI va avvisato solo quando esiste davvero un TI assegnato alla pratica
-      // (origine TI oppure rilevazione già assegnata a TI). Per le rilevazioni TR
-      // non va creato un avviso generico rivolto a tutti i TI del settore.
-      if (hasTiDest) add('TI', titolo, messaggio, sottotipo, tiUser)
+      // Il IT va avvisato solo quando esiste davvero un IT assegnato alla pratica
+      // (origine IT oppure rilevazione già assegnata a IT). Per le rilevazioni TR
+      // non va creato un avviso generico rivolto a tutti i IT del settore.
+      if (hasTiDest) add('IT', titolo, messaggio, sottotipo, tiUser)
     }
 
     if (kind === 'DT_APPROVA') {
       const titolo = 'Rapporto tecnico approvato'
       const messaggio = 'Trasmesso all’Area Amministrativa.'
-      add('RI', titolo, messaggio, 'DT_APPROVA_RAPPORTO')
-      add('RZ', titolo, messaggio, 'DT_APPROVA_RAPPORTO')
+      add('RIT', titolo, messaggio, 'DT_APPROVA_RAPPORTO')
+      add('CS', titolo, messaggio, 'DT_APPROVA_RAPPORTO')
       addTiIfPresent(titolo, messaggio, 'DT_APPROVA_RAPPORTO')
     }
 
     if (kind === 'DT_RESPINGE') {
       const titolo = 'Rapporto tecnico respinto'
       const messaggio = 'Esito registrato.'
-      add('RI', titolo, messaggio, 'DT_RESPINGE_RAPPORTO')
-      add('RZ', titolo, messaggio, 'DT_RESPINGE_RAPPORTO')
+      add('RIT', titolo, messaggio, 'DT_RESPINGE_RAPPORTO')
+      add('CS', titolo, messaggio, 'DT_RESPINGE_RAPPORTO')
       addTiIfPresent(titolo, messaggio, 'DT_RESPINGE_RAPPORTO')
     }
 
-    if (kind === 'DT_RIMANDA_TI') {
-      const titolo = 'Rimando al Tecnico istruttore'
+    if (kind === 'DT_RIMANDA_IT') {
+      const titolo = 'Rimando all’Istruttore tecnico'
       const messaggio = 'Richieste integrazioni o rettifiche.'
-      add('RI', titolo, messaggio, 'DT_RIMANDA_A_TI')
-      add('RZ', titolo, messaggio, 'DT_RIMANDA_A_TI')
+      add('RIT', titolo, messaggio, 'DT_RIMANDA_A_IT')
+      add('CS', titolo, messaggio, 'DT_RIMANDA_A_IT')
     }
 
-    if (kind === 'RI_RIMANDA_TI') {
-      const titolo = 'Rimando al Tecnico istruttore'
+    if (kind === 'RIT_RIMANDA_IT') {
+      const titolo = 'Rimando all’Istruttore tecnico'
       const messaggio = 'Richieste integrazioni o rettifiche.'
-      add('RZ', titolo, messaggio, 'RI_RIMANDA_A_TI')
+      add('CS', titolo, messaggio, 'RIT_RIMANDA_A_IT')
     }
 
-    if (kind === 'RZ_APPROVA') {
+    if (kind === 'CS_APPROVA') {
       const titolo = praticaLabel === 'Rapporto tecnico' ? 'Integrazione validata' : 'Rilevazione approvata'
-      const messaggio = 'Trasmessa al Responsabile istruttoria.'
-      addTiIfPresent(titolo, messaggio, 'RZ_APPROVA_RILEVAZIONE')
+      const messaggio = 'Trasmessa al Responsabile istruttoria tecnica.'
+      addTiIfPresent(titolo, messaggio, 'CS_APPROVA_RILEVAZIONE')
     }
 
-    if (kind === 'RZ_RESPINGE') {
+    if (kind === 'CS_RESPINGE') {
       const titolo = 'Rilevazione respinta'
       const messaggio = 'Esito registrato.'
-      addTiIfPresent(titolo, messaggio, 'RZ_RESPINGE_RILEVAZIONE')
+      addTiIfPresent(titolo, messaggio, 'CS_RESPINGE_RILEVAZIONE')
     }
 
     return out
@@ -4801,10 +4808,10 @@ function ActionsPanel (props: {
         'OBJECTID'
 
       const fullAttrsBeforeSanzione: Record<string, any> = { [idFieldName]: oid, ...attributesIn }
-      const isRiAmmPresaInCarico = Number(fullAttrsBeforeSanzione.stato_RI_AMM) === 2
+      const isRiaPresaInCarico = Number(fullAttrsBeforeSanzione.stato_RIA) === 2
 
       let sanzioneExtra: Record<string, any> = {}
-      if (isRiAmmPresaInCarico) {
+      if (isRiaPresaInCarico) {
         try {
           const profileForSanzione = {
             username: String((window as any).__giiUserRole?.username || ''),
@@ -4921,7 +4928,6 @@ function ActionsPanel (props: {
       // Costruisci l'update SOLO con i campi che esistono nello schema.
       // Questo evita patch ottimistici su campi inesistenti che poi "spariscono" al reselect.
       const upd: Record<string, any> = {}
-      if (presaFieldExists) upd[realFieldName(presaField)] = PRESA_IN_CARICO
       if (dtPresaFieldExists) upd[realFieldName(dtPresaField)] = Date.now()
 
       // stato_* è il campo realmente "portante" nel workflow: aggiorniamolo sempre.
@@ -4935,7 +4941,7 @@ function ActionsPanel (props: {
       clearAfterWorkflowListNavigation()
       markRestoreSelectionAfterAction('presa-in-carico')
       const cycleContextBeforeSave = await getCurrentCycleContextAsync()
-      await runApplyEdits(upd, riAmmBozzaDeterminazioneDaVerificare ? 'Presa in carico della pratica salvata.' : 'Presa in carico salvata.', { deferRefresh: true, keepLoading: true })
+      await runApplyEdits(upd, riaBozzaDeterminazioneDaVerificare ? 'Presa in carico della pratica salvata.' : 'Presa in carico salvata.', { deferRefresh: true, keepLoading: true })
       await openCycleLog({ eventoApertura: 'PRESA_IN_CARICO', fase: role, context: cycleContextBeforeSave, forceNew: true })
       await deleteCurrentActivityForCurrentRole()
       await refreshAfterWorkflowSave('azioni-presa-in-carico-post-log')
@@ -4960,18 +4966,18 @@ function ActionsPanel (props: {
 
     try {
       const u: any = (window as any).__giiUserRole || {}
-      const rzUser = String(u?.username || '').trim()
+      const csUser = String(u?.username || '').trim()
       const ti = tiOptions.find(o => o.username === tiSelected) || null
       const tiName = String(ti?.fullName || tiSelected).trim()
 
       const upd: Record<string, any> = {
-        ti_assegnato_username: tiSelected,
-        ti_assegnato_nome: tiName,
-        dt_assegnazione_ti: Date.now(),
-        ti_assegnato_da: rzUser
+        it_assegnato_username: tiSelected,
+        it_assegnato_nome: tiName,
+        dt_assegnazione_it: Date.now(),
+        it_assegnato_da: csUser
       }
 
-      // opzionale: inizializza la "coda TI" se i campi esistono nel layer
+      // opzionale: inizializza la "coda IT" se i campi esistono nel layer
       try {
         const schemaFields: Record<string, any> = (ds as any)?.getSchema?.()?.fields || {}
         const keys = Object.keys(schemaFields || {})
@@ -4979,25 +4985,19 @@ function ActionsPanel (props: {
         keys.forEach(k => { ci[String(k).toLowerCase()] = k })
         const pick = (name: string) => ci[String(name).toLowerCase()] || null
 
-        const fStatoTI = pick('stato_TI')
-        const fDtStatoTI = pick('dt_stato_TI')
-        const fPresaTI = pick('presa_in_carico_TI')
-        const fDtPresaTI = pick('dt_presa_in_carico_TI')
-        const fEsitoTI = pick('esito_TI')
-        const fDtEsitoTI = pick('dt_esito_TI')
+        const fStatoIT = pick('stato_IT')
+        const fDtStatoIT = pick('dt_stato_IT')
+        const fDtPresaIT = pick('dt_presa_in_carico_IT')
 
-        if (fStatoTI) upd[fStatoTI] = STATO_DA_PRENDERE
-        if (fDtStatoTI) upd[fDtStatoTI] = Date.now()
-        if (fPresaTI) upd[fPresaTI] = PRESA_DA_PRENDERE
-        if (fDtPresaTI) upd[fDtPresaTI] = null
-        if (fEsitoTI) upd[fEsitoTI] = null
-        if (fDtEsitoTI) upd[fDtEsitoTI] = null
+        if (fStatoIT) upd[fStatoIT] = STATO_DA_PRENDERE
+        if (fDtStatoIT) upd[fDtStatoIT] = Date.now()
+        if (fDtPresaIT) upd[fDtPresaIT] = null
       } catch {}
 
 
-      addGiiRoutingFields(upd, 'TI', 'TRASMISSIONE', { destUsername: tiSelected })
+      addGiiRoutingFields(upd, 'IT', 'TRASMISSIONE', { destUsername: tiSelected })
 
-      await saveWithWorkflowLog(upd, `Tecnico Istruttore assegnato: ${tiName}.`, { eventoChiusura: 'NUOVA_ASSEGNAZIONE', ruoloDestinatario: 'TI', utenteDestinatario: tiSelected, noteChiusura: `Assegna Tecnico Istruttore: ${tiName} (${tiSelected})`, fase: role })
+      await saveWithWorkflowLog(upd, `Istruttore tecnico assegnato: ${tiName}.`, { eventoChiusura: 'NUOVA_ASSEGNAZIONE', ruoloDestinatario: 'IT', utenteDestinatario: tiSelected, noteChiusura: `Assegna Istruttore tecnico: ${tiName} (${tiSelected})`, fase: role })
 
       setPending(null)
       setConfirmAttempted(false)
@@ -5008,27 +5008,26 @@ function ActionsPanel (props: {
     }
   }
 
-  const onConfirmAssegnaTiAmm = async () => {
+  const onConfirmAssegnaIa = async () => {
     setConfirmAttempted(true)
-    if (!tiAmmSelected) return
+    if (!iaSelected) return
     setLoading(true)
     setMsg(null)
 
     try {
       const u: any = (window as any).__giiUserRole || {}
-      const riAmmUser = String(u?.username || '').trim()
-      const tiAmm = tiAmmOptions.find(o => o.username === tiAmmSelected) || null
-      const tiAmmName = String(tiAmm?.fullName || tiAmmSelected).trim()
+      const riaUser = String(u?.username || '').trim()
+      const ia = iaOptions.find(o => o.username === iaSelected) || null
+      const iaName = String(ia?.fullName || iaSelected).trim()
       const isRiaperturaAssignment = riaperturaWorkflowDaAvviare
 
       const upd: Record<string, any> = {
-        ti_amm_assegnato_username: tiAmmSelected,
-        ti_amm_assegnato_nome: tiAmmName,
-        ti_amm_assegnato_da: riAmmUser,
-        dt_assegnazione_ti_amm: Date.now()
+        ia_assegnato_username: iaSelected,
+        ia_assegnato_nome: iaName,
+        ia_assegnato_da: riaUser
       }
 
-      // Inizializza nodo TI_AMM
+      // Inizializza nodo IA
       try {
         const schemaFields: Record<string, any> = (ds as any)?.getSchema?.()?.fields || {}
         const keys = Object.keys(schemaFields || {})
@@ -5038,36 +5037,34 @@ function ActionsPanel (props: {
 
         const now = Date.now()
 
-        const fStato = pick('stato_TI_AMM')
-        const fDtStato = pick('dt_stato_TI_AMM')
-        const fPresa = pick('presa_in_carico_TI_AMM')
-        const fDtPresa = pick('dt_presa_in_carico_TI_AMM')
-        const fEsito = pick('esito_TI_AMM')
-        const fDtEsito = pick('dt_esito_TI_AMM')
+        const fStato = pick('stato_IA')
+        const fDtStato = pick('dt_stato_IA')
+        const fDtPresa = pick('dt_presa_in_carico_IA')
+        const fEsito = pick('esito_IA')
+        const fDtEsito = pick('dt_esito_IA')
 
         if (fStato) upd[fStato] = STATO_DA_PRENDERE
         if (fDtStato) upd[fDtStato] = now
-        if (fPresa) upd[fPresa] = PRESA_DA_PRENDERE
         if (fDtPresa) upd[fDtPresa] = null
         if (fEsito) upd[fEsito] = null
         if (fDtEsito) upd[fDtEsito] = null
 
-        // Chiusura pulita del nodo RI_AMM dopo assegnazione al TI_AMM.
-        // Se RI_AMM proveniva da un precedente giro di integrazione tecnica,
-        // può avere ancora esito_RI_AMM = 1; lasciarlo valorizzato fa comparire
+        // Chiusura pulita del nodo RIA dopo assegnazione all’IA.
+        // Se RIA proveniva da un precedente giro di integrazione tecnica,
+        // può avere ancora esito_RIA = 1; lasciarlo valorizzato fa comparire
         // l'elenco come "Integrazione richiesta" anche dopo una normale assegnazione.
-        const fStatoRiAmm = pick('stato_RI_AMM')
-        const fDtStatoRiAmm = pick('dt_stato_RI_AMM')
-        const fEsitoRiAmm = pick('esito_RI_AMM')
-        const fDtEsitoRiAmm = pick('dt_esito_RI_AMM')
-        if (fStatoRiAmm) upd[fStatoRiAmm] = STATO_APPROVATA // dominio stato: 4 = Trasmesso
-        if (fDtStatoRiAmm) upd[fDtStatoRiAmm] = now
-        if (fEsitoRiAmm) upd[fEsitoRiAmm] = null
-        if (fDtEsitoRiAmm) upd[fDtEsitoRiAmm] = null
+        const fStatoRia = pick('stato_RIA')
+        const fDtStatoRia = pick('dt_stato_RIA')
+        const fEsitoRia = pick('esito_RIA')
+        const fDtEsitoRia = pick('dt_esito_RIA')
+        if (fStatoRia) upd[fStatoRia] = STATO_APPROVATA // dominio stato: 4 = Trasmesso
+        if (fDtStatoRia) upd[fDtStatoRia] = now
+        if (fEsitoRia) upd[fEsitoRia] = null
+        if (fDtEsitoRia) upd[fDtEsitoRia] = null
 
         if (isRiaperturaAssignment) {
-          // La nuova istruttoria riparte dal TI_AMM e dovrà essere nuovamente
-          // verificata da RI_AMM. I dati sostanziali del ricorso/CdA restano
+          // La nuova istruttoria riparte dall’IA e dovrà essere nuovamente
+          // verificata da RIA. I dati sostanziali del ricorso/CdA restano
           // storicizzati nel record e nel log.
           const fChiusuraIl = pick('istruttoria_amm_chiusa_il')
           const fChiusuraDa = pick('istruttoria_amm_chiusa_da')
@@ -5099,13 +5096,13 @@ function ActionsPanel (props: {
         }
       } catch {}
 
-      addGiiRoutingFields(upd, 'TI_AMM', 'TRASMISSIONE', { destUsername: tiAmmSelected })
+      addGiiRoutingFields(upd, 'IA', 'TRASMISSIONE', { destUsername: iaSelected })
 
       const reopenMarker = isRiaperturaAssignment ? `Riapertura amministrativa n. ${riaperturaAmmNumero}. ` : ''
       const successMessage = isRiaperturaAssignment
-        ? `Nuova istruttoria amministrativa avviata e assegnata a ${tiAmmName}.`
-        : `Tecnico Istruttore amministrativo assegnato: ${tiAmmName}.`
-      await saveWithWorkflowLog(upd, successMessage, { eventoChiusura: 'NUOVA_ASSEGNAZIONE', ruoloDestinatario: 'TI_AMM', utenteDestinatario: tiAmmSelected, noteChiusura: `${reopenMarker}Assegna Tecnico Istruttore amministrativo: ${tiAmmName} (${tiAmmSelected})`, fase: role })
+        ? `Nuova istruttoria amministrativa avviata e assegnata a ${iaName}.`
+        : `Istruttore amministrativo assegnato: ${iaName}.`
+      await saveWithWorkflowLog(upd, successMessage, { eventoChiusura: 'NUOVA_ASSEGNAZIONE', ruoloDestinatario: 'IA', utenteDestinatario: iaSelected, noteChiusura: `${reopenMarker}Assegna Istruttore amministrativo: ${iaName} (${iaSelected})`, fase: role })
       if (isRiaperturaAssignment) setRiaperturaWorkflowStarted(true)
 
       setPending(null)
@@ -5117,7 +5114,7 @@ function ActionsPanel (props: {
     }
   }
 
-  const onConfirmRestituisciTiAmm = async () => {
+  const onConfirmRestituisciIa = async () => {
     setConfirmAttempted(true)
     setLoading(true)
     setMsg(null)
@@ -5127,34 +5124,34 @@ function ActionsPanel (props: {
       const upd: Record<string, any> = {}
       const schemaFields: Record<string, any> = (ds as any)?.getSchema?.()?.fields || {}
 
-      // Chiude il ciclo RI_AMM come trasmissione/restituzione, non come integrazione.
-      const fStatoRiAmm = getSchemaFieldNameCI(schemaFields, 'stato_RI_AMM')
-      const fDtStatoRiAmm = getSchemaFieldNameCI(schemaFields, 'dt_stato_RI_AMM')
-      const fEsitoRiAmm = getSchemaFieldNameCI(schemaFields, 'esito_RI_AMM')
-      const fDtEsitoRiAmm = getSchemaFieldNameCI(schemaFields, 'dt_esito_RI_AMM')
-      if (fStatoRiAmm) upd[fStatoRiAmm] = STATO_APPROVATA
-      if (fDtStatoRiAmm) upd[fDtStatoRiAmm] = now
-      if (fEsitoRiAmm) upd[fEsitoRiAmm] = null
-      if (fDtEsitoRiAmm) upd[fDtEsitoRiAmm] = null
+      // Chiude il ciclo RIA come trasmissione/restituzione, non come integrazione.
+      const fStatoRia = getSchemaFieldNameCI(schemaFields, 'stato_RIA')
+      const fDtStatoRia = getSchemaFieldNameCI(schemaFields, 'dt_stato_RIA')
+      const fEsitoRia = getSchemaFieldNameCI(schemaFields, 'esito_RIA')
+      const fDtEsitoRia = getSchemaFieldNameCI(schemaFields, 'dt_esito_RIA')
+      if (fStatoRia) upd[fStatoRia] = STATO_APPROVATA
+      if (fDtStatoRia) upd[fDtStatoRia] = now
+      if (fEsitoRia) upd[fEsitoRia] = null
+      if (fDtEsitoRia) upd[fDtEsitoRia] = null
 
-      // Riapre il TI_AMM originario come destinatario operativo.
-      const fStatoTiAmm = getSchemaFieldNameCI(schemaFields, 'stato_TI_AMM')
-      const fDtStatoTiAmm = getSchemaFieldNameCI(schemaFields, 'dt_stato_TI_AMM')
-      const fDtPresaTiAmm = getSchemaFieldNameCI(schemaFields, 'dt_presa_in_carico_TI_AMM')
-      const fEsitoTiAmm = getSchemaFieldNameCI(schemaFields, 'esito_TI_AMM')
-      const fDtEsitoTiAmm = getSchemaFieldNameCI(schemaFields, 'dt_esito_TI_AMM')
-      if (fStatoTiAmm) upd[fStatoTiAmm] = STATO_DA_PRENDERE
-      if (fDtStatoTiAmm) upd[fDtStatoTiAmm] = now
-      if (fDtPresaTiAmm) upd[fDtPresaTiAmm] = null
-      if (fEsitoTiAmm) upd[fEsitoTiAmm] = null
-      if (fDtEsitoTiAmm) upd[fDtEsitoTiAmm] = null
+      // Riapre il IA originario come destinatario operativo.
+      const fStatoIa = getSchemaFieldNameCI(schemaFields, 'stato_IA')
+      const fDtStatoIa = getSchemaFieldNameCI(schemaFields, 'dt_stato_IA')
+      const fDtPresaIa = getSchemaFieldNameCI(schemaFields, 'dt_presa_in_carico_IA')
+      const fEsitoIa = getSchemaFieldNameCI(schemaFields, 'esito_IA')
+      const fDtEsitoIa = getSchemaFieldNameCI(schemaFields, 'dt_esito_IA')
+      if (fStatoIa) upd[fStatoIa] = STATO_DA_PRENDERE
+      if (fDtStatoIa) upd[fDtStatoIa] = now
+      if (fDtPresaIa) upd[fDtPresaIa] = null
+      if (fEsitoIa) upd[fEsitoIa] = null
+      if (fDtEsitoIa) upd[fDtEsitoIa] = null
 
-      addGiiRoutingFields(upd, 'TI_AMM', 'TRASMISSIONE', { destUsername: String(tiAmmUserRaw || '') })
+      addGiiRoutingFields(upd, 'IA', 'TRASMISSIONE', { destUsername: String(iaUserRaw || '') })
 
-      const noteInvioTiAmm = noteTrim || (isRientroTecnicoDaDt
-        ? 'Invio al Tecnico Istruttore amministrativo dopo rientro da integrazione tecnica.'
-        : 'Invio al Tecnico Istruttore amministrativo.')
-      await saveWithWorkflowLog(upd, 'Pratica inviata al Tecnico Istruttore amministrativo.', { eventoChiusura: 'INVIO_A_TI_AMM', ruoloDestinatario: 'TI_AMM', utenteDestinatario: String(tiAmmUserRaw || resolveDestUser('TI_AMM')), noteChiusura: noteInvioTiAmm, fase: role })
+      const noteInvioIa = noteTrim || (isRientroTecnicoDaDt
+        ? 'Invio all’Istruttore amministrativo dopo rientro da integrazione tecnica.'
+        : 'Invio all’Istruttore amministrativo.')
+      await saveWithWorkflowLog(upd, 'Pratica inviata all’Istruttore amministrativo.', { eventoChiusura: 'INVIO_A_IA', ruoloDestinatario: 'IA', utenteDestinatario: String(iaUserRaw || resolveDestUser('IA')), noteChiusura: noteInvioIa, fase: role })
       setPending(null)
       setConfirmAttempted(false)
     } catch (e: any) {
@@ -5173,15 +5170,14 @@ function ActionsPanel (props: {
     try {
       const stato = mapEsitoToStato(ESITO_INTEGRAZIONE) // => 3
       const upd: Record<string, any> = {
-        [esitoField]: ESITO_INTEGRAZIONE,
-        [dtEsitoField]: Date.now(),
+        ...(roleUsesStateOnlyWorkflow ? {} : { [esitoField]: ESITO_INTEGRAZIONE, [dtEsitoField]: Date.now() }),
         [statoField]: stato ?? STATO_INTEGRAZIONE,
         [dtStatoField]: Date.now(),
         [noteField]: noteTrim
       }
 
       const ruoloDest = getPrevRoleForIntegration(
-        pending === 'INTEGRAZIONE_TI_AMM' ? 'TI_AMM' :
+        pending === 'INTEGRAZIONE_IA' ? 'IA' :
         pending === 'INTEGRAZIONE_TECNICA' ? 'TECNICA' :
         undefined
       )
@@ -5190,36 +5186,34 @@ function ActionsPanel (props: {
           const schemaFields: Record<string, any> = (ds as any)?.getSchema?.()?.fields || {}
           const fStato = getSchemaFieldNameCI(schemaFields, `stato_${ruoloDest}`)
           const fDtStato = getSchemaFieldNameCI(schemaFields, `dt_stato_${ruoloDest}`)
-          const fPresa = hasDedicatedPresaField(ruoloDest) ? getSchemaFieldNameCI(schemaFields, `presa_in_carico_${ruoloDest}`) : null
           const fDtPresa = getSchemaFieldNameCI(schemaFields, `dt_presa_in_carico_${ruoloDest}`)
-          const fEsito = getSchemaFieldNameCI(schemaFields, `esito_${ruoloDest}`)
-          const fDtEsito = getSchemaFieldNameCI(schemaFields, `dt_esito_${ruoloDest}`)
+          const fEsito = usesStateOnlyWorkflow(ruoloDest) ? null : getSchemaFieldNameCI(schemaFields, `esito_${ruoloDest}`)
+          const fDtEsito = usesStateOnlyWorkflow(ruoloDest) ? null : getSchemaFieldNameCI(schemaFields, `dt_esito_${ruoloDest}`)
           if (fStato) upd[fStato] = STATO_DA_PRENDERE
           if (fDtStato) upd[fDtStato] = Date.now()
-          if (fPresa) upd[fPresa] = PRESA_DA_PRENDERE
-          if (fDtPresa) upd[fDtPresa] = null
-          // RI_AMM -> TI_AMM dopo il visto del Tecnico istruttore amministrativo:
-          // il nuovo nodo TI_AMM viene riaperto, ma non va cancellato l'esito
-          // precedente del TI_AMM. Quel visto resta parte della verifica istruttoria
+            if (fDtPresa) upd[fDtPresa] = null
+          // RIA -> IA dopo il visto dell’Istruttore amministrativo:
+          // il nuovo nodo IA viene riaperto, ma non va cancellato l'esito
+          // precedente dell’IA. Quel visto resta parte della verifica istruttoria
           // e deve rimanere visibile insieme all'esito del Responsabile
           // dell'istruttoria amministrativa, anche quando quest'ultimo richiede
-          // integrazioni o rettifiche. Il nuovo visto del TI_AMM sovrascriverà
+          // integrazioni o rettifiche. Il nuovo visto dell’IA sovrascriverà
           // questi campi quando la pratica verrà nuovamente attestata.
-          const preserveTiAmmEsitoAfterRiAmmRimando =
-            role === 'RI_AMM' &&
-            ruoloDest === 'TI_AMM' &&
-            pending === 'INTEGRAZIONE_TI_AMM'
-          if (fEsito && !preserveTiAmmEsitoAfterRiAmmRimando) upd[fEsito] = null
-          if (fDtEsito && !preserveTiAmmEsitoAfterRiAmmRimando) upd[fDtEsito] = null
+          const preserveIaEsitoAfterRiaRimando =
+            role === 'RIA' &&
+            ruoloDest === 'IA' &&
+            pending === 'INTEGRAZIONE_IA'
+          if (fEsito && !preserveIaEsitoAfterRiaRimando) upd[fEsito] = null
+          if (fDtEsito && !preserveIaEsitoAfterRiaRimando) upd[fDtEsito] = null
 
-          // Rimando RI_AMM -> TI_AMM dopo trasmissione della bozza determinazione.
-          // Il rientro apre una fase di rettifica: la vecchia verifica RI_AMM resta
+          // Rimando RIA -> IA dopo trasmissione della bozza determinazione.
+          // Il rientro apre una fase di rettifica: la vecchia verifica RIA resta
           // tracciata nello storico, ma non può sbloccare protocollazione o firma.
-          // Oggetto e motivazione del rimando sono registrati nelle note RI_AMM; il TI_AMM
+          // Oggetto e motivazione del rimando sono registrati nelle note RIA; il IA
           // predisporrà e caricherà una nuova bozza PDF prima della nuova trasmissione.
           // Il valore del campo resta BOZZA perché determinazione_stato ha un dominio
           // codificato e non consente stati intermedi non previsti dallo schema.
-          if (pending === 'INTEGRAZIONE_TI_AMM' && ruoloDest === 'TI_AMM') {
+          if (pending === 'INTEGRAZIONE_IA' && ruoloDest === 'IA') {
             const fDeterminaStato = getSchemaFieldNameCI(schemaFields, 'determinazione_stato')
             if (fDeterminaStato) upd[fDeterminaStato] = 'BOZZA'
           }
@@ -5232,10 +5226,10 @@ function ActionsPanel (props: {
 
       if (ruoloDest) {
         const successMsg = pending === 'INTEGRAZIONE' ? 'Pratica rimandata per integrazione.' : 'Integrazione richiesta salvata.'
-        const informativeActivities = role === 'DT' && ruoloDest === 'TI'
-          ? buildTechnicalChainInformativeActivities('DT_RIMANDA_TI', upd)
-          : role === 'RI' && ruoloDest === 'TI'
-            ? buildTechnicalChainInformativeActivities('RI_RIMANDA_TI', upd)
+        const informativeActivities = role === 'DT' && ruoloDest === 'IT'
+          ? buildTechnicalChainInformativeActivities('DT_RIMANDA_IT', upd)
+          : role === 'RIT' && ruoloDest === 'IT'
+            ? buildTechnicalChainInformativeActivities('RIT_RIMANDA_IT', upd)
             : []
         await saveWithWorkflowLog(upd, successMsg, { eventoChiusura: 'INTEGRAZIONE_RICHIESTA', ruoloDestinatario: ruoloDest, utenteDestinatario: resolveDestUser(ruoloDest), noteChiusura: noteTrim, fase: role, informativeActivities })
       } else {
@@ -5258,17 +5252,16 @@ function ActionsPanel (props: {
     try {
       const now = Date.now()
       const stato = mapEsitoToStato(esito)
-      const upd: Record<string, any> = {
-        [esitoField]: esito,
-        [dtEsitoField]: now
-      }
-      let riAmmApprovedProposalSync: { layer: any, layerUrl: string, file: File } | null = null
-      let tiAmmAttestationProposalSync: { layer: any, layerUrl: string, file: File } | null = null
+      const upd: Record<string, any> = roleUsesStateOnlyWorkflow
+        ? {}
+        : { [esitoField]: esito, [dtEsitoField]: now }
+      let riaApprovedProposalSync: { layer: any, layerUrl: string, file: File } | null = null
+      let iaAttestationProposalSync: { layer: any, layerUrl: string, file: File } | null = null
       if (esito === ESITO_APPROVATA && noteTrim) {
         upd[noteField] = noteTrim
       }
-      const isTiAmmAttestazioneConformita = role === 'TI_AMM' && esito === ESITO_APPROVATA
-      if (isTiAmmAttestazioneConformita) {
+      const isIaAttestazioneConformita = role === 'IA' && esito === ESITO_APPROVATA
+      if (isIaAttestazioneConformita) {
         const schemaFields: Record<string, any> = (ds as any)?.getSchema?.()?.fields || {}
         const setIfPresent = (logicalName: string, value: any) => {
           const real = getSchemaFieldNameCI(schemaFields, logicalName)
@@ -5277,7 +5270,7 @@ function ActionsPanel (props: {
 
         // Il visto eseguito dal CW Azioni deve aprire esattamente lo stesso ciclo
         // creato da editing-amm. In particolare non deve riutilizzare la motivazione
-        // di un precedente rimando e non deve aprire ancora il nodo RI_AMM.
+        // di un precedente rimando e non deve aprire ancora il nodo RIA.
         const defaultAttestationNote = 'A seguito della verifica svolta, si attesta la conformità della pratica sotto il profilo istruttorio-amministrativo.'
         const requestedAttestationNote = String(noteTrim || '').trim()
         const attestationNote = /motivazione\s+del\s+rimando|integrazion|rettific/i.test(requestedAttestationNote)
@@ -5287,19 +5280,19 @@ function ActionsPanel (props: {
         setIfPresent('note_atto_amm', attestationNote)
 
         setIfPresent('determinazione_stato', 'BOZZA')
-        setIfPresent('stato_RI_AMM', 4)
-        setIfPresent('dt_stato_RI_AMM', null)
-        setIfPresent('dt_presa_in_carico_RI_AMM', null)
-        setIfPresent('esito_RI_AMM', null)
-        setIfPresent('dt_esito_RI_AMM', null)
-        setIfPresent('note_RI_AMM', null)
+        setIfPresent('stato_RIA', 4)
+        setIfPresent('dt_stato_RIA', null)
+        setIfPresent('dt_presa_in_carico_RIA', null)
+        setIfPresent('esito_RIA', null)
+        setIfPresent('dt_esito_RIA', null)
+        setIfPresent('note_RIA', null)
         setIfPresent('protocollo_fascicolo_numero', null)
         setIfPresent('protocollo_fascicolo_data', null)
         setIfPresent('dt_bozza_determinazione', null)
         setIfPresent('bozza_determinazione_da', null)
 
         // Stesso builder e stessa funzione di sostituzione usati da editing-amm:
-        // il visto genera la Proposta DRAFT, ma la pratica resta al TI_AMM finché
+        // il visto genera la Proposta DRAFT, ma la pratica resta all’IA finché
         // non viene usato "Trasmetti fascicolo al Responsabile".
         const { layer } = await resolveLayer(ds)
         if (!layer) throw new Error('Layer non disponibile per generare la Proposta di contestazione.')
@@ -5329,7 +5322,7 @@ function ActionsPanel (props: {
             fullName: String(currentProfile?.fullName || currentProfile?.full_name || currentProfile?.username || '')
           }
         )
-        tiAmmAttestationProposalSync = {
+        iaAttestationProposalSync = {
           layer,
           layerUrl,
           file: new File([propostaBlob.blob], propostaBlob.fileName, { type: 'application/pdf', lastModified: now })
@@ -5340,7 +5333,7 @@ function ActionsPanel (props: {
         upd[dtStatoField] = now
       }
 
-      if (role === 'RZ' && esito === ESITO_APPROVATA) {
+      if (role === 'CS' && esito === ESITO_APPROVATA) {
         const schemaFields: Record<string, any> = (ds as any)?.getSchema?.()?.fields || {}
         const fNumeroRapportoTecnico = getSchemaFieldNameCI(schemaFields, 'numero_rapporto_tecnico')
         const fDataRapportoTecnico = getSchemaFieldNameCI(schemaFields, 'data_rapporto_tecnico')
@@ -5368,63 +5361,61 @@ function ActionsPanel (props: {
 
 
 
-      if (role === 'RI_AMM' && esito === ESITO_APPROVATA && riAmmAttoContestazioneDaVerificare) {
+      if (role === 'RIA' && esito === ESITO_APPROVATA && riaAttoContestazioneDaVerificare) {
         const schemaFields: Record<string, any> = (ds as any)?.getSchema?.()?.fields || {}
         const fDetStato = getSchemaFieldNameCI(schemaFields, 'determinazione_stato')
-        if (fDetStato) upd[fDetStato] = 'VALIDATA_RI_AMM'
+        if (fDetStato) upd[fDetStato] = 'VALIDATA_RIA'
       }
 
-      if (role === 'RI_AMM' && esito === ESITO_APPROVATA && riAmmBozzaDeterminazioneDaVerificare) {
+      if (role === 'RIA' && esito === ESITO_APPROVATA && riaBozzaDeterminazioneDaVerificare) {
         const schemaFields: Record<string, any> = (ds as any)?.getSchema?.()?.fields || {}
         const fDetStato = getSchemaFieldNameCI(schemaFields, 'determinazione_stato')
         const fProtocolloFascicoloNumero = getSchemaFieldNameCI(schemaFields, 'protocollo_fascicolo_numero')
         const fProtocolloFascicoloData = getSchemaFieldNameCI(schemaFields, 'protocollo_fascicolo_data')
 
-        // Ogni approvazione RI_AMM valida una nuova versione del fascicolo.
+        // Ogni approvazione RIA valida una nuova versione del fascicolo.
         // Un protocollo eventualmente registrato in un ciclo precedente non può
         // essere riutilizzato: viene invalidato e i campi resteranno bloccati
-        // fino alla nuova trasmissione al protocollo da parte del TI_AMM.
-        if (fDetStato) upd[fDetStato] = 'VALIDATA_RI_AMM'
+        // fino alla nuova trasmissione al protocollo da parte dell’IA.
+        if (fDetStato) upd[fDetStato] = 'VALIDATA_RIA'
         if (fProtocolloFascicoloNumero) upd[fProtocolloFascicoloNumero] = null
         if (fProtocolloFascicoloData) upd[fProtocolloFascicoloData] = null
       }
 
-      const integRequester = (esito === ESITO_APPROVATA && !isTiAmmAttestazioneConformita) ? getIntegrationRequesterForCurrentRole() : ''
+      const integRequester = (esito === ESITO_APPROVATA && !isIaAttestazioneConformita) ? getIntegrationRequesterForCurrentRole() : ''
       const ruoloDest = esito === ESITO_APPROVATA
-        ? (isTiAmmAttestazioneConformita ? '' : (integRequester || (role === 'RI_AMM' ? 'TI_AMM' : getNextRoleForForward())))
+        ? (isIaAttestazioneConformita ? '' : (integRequester || (role === 'RIA' ? 'IA' : getNextRoleForForward())))
         : ''
       if (ruoloDest) {
         try {
           const schemaFields: Record<string, any> = (ds as any)?.getSchema?.()?.fields || {}
           const fStato = getSchemaFieldNameCI(schemaFields, `stato_${ruoloDest}`)
           const fDtStato = getSchemaFieldNameCI(schemaFields, `dt_stato_${ruoloDest}`)
-          const fPresa = hasDedicatedPresaField(ruoloDest) ? getSchemaFieldNameCI(schemaFields, `presa_in_carico_${ruoloDest}`) : null
           const fDtPresa = getSchemaFieldNameCI(schemaFields, `dt_presa_in_carico_${ruoloDest}`)
-          const fEsito = getSchemaFieldNameCI(schemaFields, `esito_${ruoloDest}`)
-          const fDtEsito = getSchemaFieldNameCI(schemaFields, `dt_esito_${ruoloDest}`)
+          const fEsito = usesStateOnlyWorkflow(ruoloDest) ? null : getSchemaFieldNameCI(schemaFields, `esito_${ruoloDest}`)
+          const fDtEsito = usesStateOnlyWorkflow(ruoloDest) ? null : getSchemaFieldNameCI(schemaFields, `dt_esito_${ruoloDest}`)
           if (fStato) upd[fStato] = STATO_DA_PRENDERE
           if (fDtStato) upd[fDtStato] = now
-          if (fPresa) upd[fPresa] = PRESA_DA_PRENDERE
-          if (fDtPresa) upd[fDtPresa] = null
-          const preserveDestEsito = role === 'RI_AMM' && ruoloDest === 'TI_AMM' && esito === ESITO_APPROVATA
+            if (fDtPresa) upd[fDtPresa] = null
+          const preserveDestEsito = role === 'RIA' && ruoloDest === 'IA' && esito === ESITO_APPROVATA
           if (fEsito && !preserveDestEsito) upd[fEsito] = null
           if (fDtEsito && !preserveDestEsito) upd[fDtEsito] = null
 
-          // Se il DT rimanda la pratica a RI_AMM dopo una nuova approvazione tecnica,
-          // chiudiamo solo il nodo operativo TI_AMM, ma NON cancelliamo
-          // ti_amm_assegnato_*: quei campi identificano il TI_AMM originario a cui RI_AMM
+          // Se il DT rimanda la pratica a RIA dopo una nuova approvazione tecnica,
+          // chiudiamo solo il nodo operativo IA, ma NON cancelliamo
+          // ia_assegnato_*: quei campi identificano il IA originario a cui RIA
           // dovrà restituire la pratica dopo il rientro tecnico.
-          if (role === 'DT' && ruoloDest === 'RI_AMM') {
-            const fStatoTiAmm = getSchemaFieldNameCI(schemaFields, 'stato_TI_AMM')
-            const fDtStatoTiAmm = getSchemaFieldNameCI(schemaFields, 'dt_stato_TI_AMM')
-            const fDtPresaTiAmm = getSchemaFieldNameCI(schemaFields, 'dt_presa_in_carico_TI_AMM')
-            const fEsitoTiAmm = getSchemaFieldNameCI(schemaFields, 'esito_TI_AMM')
-            const fDtEsitoTiAmm = getSchemaFieldNameCI(schemaFields, 'dt_esito_TI_AMM')
-            if (fStatoTiAmm) upd[fStatoTiAmm] = 0
-            if (fDtStatoTiAmm) upd[fDtStatoTiAmm] = null
-            if (fDtPresaTiAmm) upd[fDtPresaTiAmm] = null
-            if (fEsitoTiAmm) upd[fEsitoTiAmm] = null
-            if (fDtEsitoTiAmm) upd[fDtEsitoTiAmm] = null
+          if (role === 'DT' && ruoloDest === 'RIA') {
+            const fStatoIa = getSchemaFieldNameCI(schemaFields, 'stato_IA')
+            const fDtStatoIa = getSchemaFieldNameCI(schemaFields, 'dt_stato_IA')
+            const fDtPresaIa = getSchemaFieldNameCI(schemaFields, 'dt_presa_in_carico_IA')
+            const fEsitoIa = getSchemaFieldNameCI(schemaFields, 'esito_IA')
+            const fDtEsitoIa = getSchemaFieldNameCI(schemaFields, 'dt_esito_IA')
+            if (fStatoIa) upd[fStatoIa] = 0
+            if (fDtStatoIa) upd[fDtStatoIa] = null
+            if (fDtPresaIa) upd[fDtPresaIa] = null
+            if (fEsitoIa) upd[fEsitoIa] = null
+            if (fDtEsitoIa) upd[fDtEsitoIa] = null
           }
         } catch {}
       }
@@ -5433,11 +5424,11 @@ function ActionsPanel (props: {
         addGiiRoutingFields(upd, ruoloDest, 'TRASMISSIONE')
       }
 
-      // A ogni nuova approvazione RI_AMM la Proposta corrente viene rigenerata dallo
+      // A ogni nuova approvazione RIA la Proposta corrente viene rigenerata dallo
       // stesso builder condiviso, usando già l'esito del ciclo che si sta chiudendo.
       // In questo modo il PDF approvato perde la filigrana BOZZA e sostituisce sempre
       // la versione provvisoria del ciclo precedente.
-      if (role === 'RI_AMM' && esito === ESITO_APPROVATA && riAmmBozzaDeterminazioneDaVerificare) {
+      if (role === 'RIA' && esito === ESITO_APPROVATA && riaBozzaDeterminazioneDaVerificare) {
         const { layer } = await resolveLayer(ds)
         if (!layer) throw new Error('Layer non disponibile per aggiornare la Proposta di contestazione approvata.')
         if (typeof layer.load === 'function') { try { await layer.load() } catch {} }
@@ -5467,7 +5458,7 @@ function ActionsPanel (props: {
             fullName: String(currentProfile?.fullName || currentProfile?.full_name || currentProfile?.username || '')
           }
         )
-        riAmmApprovedProposalSync = {
+        riaApprovedProposalSync = {
           layer,
           layerUrl,
           file: new File([propostaBlob.blob], propostaBlob.fileName, { type: 'application/pdf', lastModified: now })
@@ -5481,9 +5472,9 @@ function ActionsPanel (props: {
 
       const logOpts = esito === ESITO_APPROVATA
         ? (role === 'DT'
-              // DT approva il rapporto tecnico → destinatario è RI
+              // DT approva il rapporto tecnico → destinatario è RIT
               ? { eventoChiusura: 'RAPPORTO_APPROVATO', ruoloDestinatario: ruoloDest, utenteDestinatario: resolveDestUser(ruoloDest), fase: role }
-              : isTiAmmAttestazioneConformita
+              : isIaAttestazioneConformita
                 ? {
                     eventoChiusura: 'ATTESTAZIONE_CONFORMITA',
                     ruoloDestinatario: '',
@@ -5494,7 +5485,7 @@ ${noteTrim}` : 'Attestazione di conformità apposta.',
                   }
                 : {
                     eventoChiusura: ruoloDest
-                      ? (riAmmStaApprovandoPropostaContestazione ? 'PROPOSTA_CONTESTAZIONE_APPROVATA' : (wasIntegResponse ? 'INTEGRAZIONE_TRASMESSA' : 'ISTRUTTORIA_TRASMESSA'))
+                      ? (riaStaApprovandoPropostaContestazione ? 'PROPOSTA_CONTESTAZIONE_APPROVATA' : (wasIntegResponse ? 'INTEGRAZIONE_TRASMESSA' : 'ISTRUTTORIA_TRASMESSA'))
                       : 'ISTRUTTORIA_TRASMESSA',
                     ruoloDestinatario: ruoloDest,
                     utenteDestinatario: resolveDestUser(ruoloDest),
@@ -5507,45 +5498,45 @@ ${noteTrim}` : 'Attestazione di conformità apposta.',
         const informativeActivities = esito === ESITO_APPROVATA
           ? (role === 'DT'
               ? buildTechnicalChainInformativeActivities('DT_APPROVA', upd)
-              : role === 'RZ'
-                ? buildTechnicalChainInformativeActivities('RZ_APPROVA', upd)
+              : role === 'CS'
+                ? buildTechnicalChainInformativeActivities('CS_APPROVA', upd)
                 : [])
           : []
-        const successText = isTiAmmAttestazioneConformita
+        const successText = isIaAttestazioneConformita
           ? 'Attestazione di conformità apposta.'
-          : riAmmStaApprovandoPropostaContestazione
-            ? 'Istruttoria amministrativa approvata e restituita al Tecnico istruttore amministrativo.'
+          : riaStaApprovandoPropostaContestazione
+            ? 'Istruttoria amministrativa approvata e restituita all’Istruttore amministrativo.'
             : `Esito salvato: ${label}.`
         await saveWithWorkflowLog(upd, successText, { ...logOpts, informativeActivities })
       } else {
         await runApplyEdits(upd, `Esito salvato: ${label}.`)
       }
 
-      if (tiAmmAttestationProposalSync) {
+      if (iaAttestationProposalSync) {
         try {
           await replacePropostaContestazionePdfAttachment(
-            tiAmmAttestationProposalSync.layer,
+            iaAttestationProposalSync.layer,
             Number(oid),
-            tiAmmAttestationProposalSync.file,
-            tiAmmAttestationProposalSync.layerUrl,
+            iaAttestationProposalSync.file,
+            iaAttestationProposalSync.layerUrl,
             'DRAFT'
           )
           // Un nuovo visto apre una nuova versione: eventuali PDF di determinazione
           // del ciclo precedente non devono rimanere insieme alla nuova Proposta.
           await deleteBozzaDeterminazionePdfAttachments(
-            tiAmmAttestationProposalSync.layer,
+            iaAttestationProposalSync.layer,
             Number(oid),
-            tiAmmAttestationProposalSync.layerUrl
+            iaAttestationProposalSync.layerUrl
           )
-          // Il visto, da solo, non crea un'attività RI_AMM. Eliminiamo anche eventuali
+          // Il visto, da solo, non crea un'attività RIA. Eliminiamo anche eventuali
           // residui lasciati da versioni precedenti del workflow.
-          await deleteCurrentActivitiesForDestRole('RI_AMM')
-          try { window.dispatchEvent(new CustomEvent('gii:record-updated', { detail: { oid: Number(oid), source: 'gii-azioni-ti-amm-attestazione-conformita', ts: Date.now() } })) } catch {}
-          try { window.dispatchEvent(new CustomEvent('gii-alerts-refresh', { detail: { oid: Number(oid), source: 'gii-azioni-ti-amm-attestazione-conformita', ts: Date.now() } })) } catch {}
+          await deleteCurrentActivitiesForDestRole('RIA')
+          try { window.dispatchEvent(new CustomEvent('gii:record-updated', { detail: { oid: Number(oid), source: 'gii-azioni-ia-attestazione-conformita', ts: Date.now() } })) } catch {}
+          try { window.dispatchEvent(new CustomEvent('gii-alerts-refresh', { detail: { oid: Number(oid), source: 'gii-azioni-ia-attestazione-conformita', ts: Date.now() } })) } catch {}
           setMsg({ kind: 'ok', text: 'Attestazione di conformità apposta. La Proposta di contestazione è stata aggiunta al fascicolo; predisporre ora la bozza di determinazione e trasmettere successivamente il fascicolo al Responsabile.' })
         } catch (syncError: any) {
           try {
-            console.error('[GII][TI_AMM][ATTESTAZIONE] Aggiornamento fascicolo non riuscito', {
+            console.error('[GII][IA][ATTESTAZIONE] Aggiornamento fascicolo non riuscito', {
               oid: Number(oid),
               message: syncError?.message || String(syncError),
               error: syncError
@@ -5558,28 +5549,28 @@ ${noteTrim}` : 'Attestazione di conformità apposta.',
         }
       }
 
-      if (riAmmApprovedProposalSync) {
+      if (riaApprovedProposalSync) {
         try {
           await replacePropostaContestazionePdfAttachment(
-            riAmmApprovedProposalSync.layer,
+            riaApprovedProposalSync.layer,
             Number(oid),
-            riAmmApprovedProposalSync.file,
-            riAmmApprovedProposalSync.layerUrl,
+            riaApprovedProposalSync.file,
+            riaApprovedProposalSync.layerUrl,
             'APPROVED'
           )
           // La versione approvata della bozza è già conservata nel riferimento interno
-          // creato al momento della trasmissione a RI_AMM. Dopo l'approvazione il PDF
-          // materiale di lavorazione non deve restare nel fascicolo: il TI_AMM caricherà
+          // creato al momento della trasmissione a RIA. Dopo l'approvazione il PDF
+          // materiale di lavorazione non deve restare nel fascicolo: il IA caricherà
           // successivamente un solo PDF definitivo, verificato dopo la protocollazione.
           await deleteBozzaDeterminazionePdfAttachments(
-            riAmmApprovedProposalSync.layer,
+            riaApprovedProposalSync.layer,
             Number(oid),
-            riAmmApprovedProposalSync.layerUrl
+            riaApprovedProposalSync.layerUrl
           )
-          try { window.dispatchEvent(new CustomEvent('gii:record-updated', { detail: { oid: Number(oid), source: 'gii-azioni-ri-amm-proposta-approvata', ts: Date.now() } })) } catch {}
+          try { window.dispatchEvent(new CustomEvent('gii:record-updated', { detail: { oid: Number(oid), source: 'gii-azioni-ria-proposta-approvata', ts: Date.now() } })) } catch {}
         } catch (syncError: any) {
           try {
-            console.error('[GII][RI_AMM][PROPOSTA_APPROVATA] Aggiornamento PDF non riuscito', {
+            console.error('[GII][RIA][PROPOSTA_APPROVATA] Aggiornamento PDF non riuscito', {
               oid: Number(oid),
               message: syncError?.message || String(syncError),
               error: syncError
@@ -5613,10 +5604,9 @@ ${noteTrim}` : 'Attestazione di conformità apposta.',
         ? `Motivazione: ${reasonTrim}\n\n${noteTrim}`
         : `Motivazione: ${reasonTrim}` + (noteTrim ? `\n\n${noteTrim}` : '')
 
-      const upd: Record<string, any> = {
-        [esitoField]: ESITO_RESPINTA,
-        [dtEsitoField]: Date.now()
-      }
+      const upd: Record<string, any> = roleUsesStateOnlyWorkflow
+        ? {}
+        : { [esitoField]: ESITO_RESPINTA, [dtEsitoField]: Date.now() }
 
       if (stato != null) {
         upd[statoField] = stato
@@ -5625,8 +5615,8 @@ ${noteTrim}` : 'Attestazione di conformità apposta.',
 
       const informativeActivities = role === 'DT'
         ? buildTechnicalChainInformativeActivities('DT_RESPINGE', upd)
-        : role === 'RZ'
-          ? buildTechnicalChainInformativeActivities('RZ_RESPINGE', upd)
+        : role === 'CS'
+          ? buildTechnicalChainInformativeActivities('CS_RESPINGE', upd)
           : []
       await saveWithWorkflowLog(upd, 'Esito salvato: Respinta.', { eventoChiusura: 'RESPINTA', noteChiusura: finalNote, fase: role, informativeActivities })
       setPending(null)
@@ -5645,20 +5635,13 @@ ${noteTrim}` : 'Attestazione di conformità apposta.',
     setMsg(null)
 
     try {
-      // Archiviazione logica: GII_arch = 1, nota nel campo note_TI.
+      // Archiviazione logica: GII_arch = 1, nota nel campo note_IT.
       // Non si esegue delete fisico (le viste non lo supportano).
       // Il record viene escluso dagli elenchi ordinari tramite filtro su GII_arch.
       const upd: Record<string, any> = {
         GII_arch: 1,
         [noteField]: noteTrim
       }
-      // Campi opzionali di tracciabilità (scritti solo se presenti nello schema)
-      const schemaFields: Record<string, any> = (ds as any)?.getSchema?.()?.fields || {}
-      const fDt  = getSchemaFieldNameCI(schemaFields, 'dt_archiviazione_TI')
-      const fDa  = getSchemaFieldNameCI(schemaFields, 'archiviato_da')
-      if (fDt) upd[fDt] = Date.now()
-      if (fDa) upd[fDa] = String((window as any).__giiUserRole?.username || '').trim() || undefined
-
       await saveWithWorkflowLog(upd, 'Pratica archiviata.', { eventoChiusura: 'ARCHIVIAZIONE', noteChiusura: noteTrim, fase: role })
       setPending(null)
       setConfirmAttempted(false)
@@ -5711,25 +5694,25 @@ ${noteTrim}` : 'Attestazione di conformità apposta.',
 
   const approvaPendingTitle = currentIntegrationRequesterLabel
     ? `Trasmissione al ${currentIntegrationRequesterLabel}`
-    : role === 'TI' ? `Trasmissione ${subjectNameLower} al ${getRoleLabelForMenu('RZ')}` :
-    role === 'RZ' ? (praticaLabel === 'Rapporto tecnico' ? 'Validazione integrazione' : 'Approvazione rilevazione') :
-    role === 'RI' ? 'Approvazione istruttoria tecnica' :
+    : role === 'IT' ? `Trasmissione ${subjectNameLower} al ${getRoleLabelForMenu('CS')}` :
+    role === 'CS' ? (praticaLabel === 'Rapporto tecnico' ? 'Validazione integrazione' : 'Approvazione rilevazione') :
+    role === 'RIT' ? 'Approvazione istruttoria tecnica' :
     role === 'DT' ? 'Approvazione rapporto tecnico' :
-    role === 'RI_AMM' && riAmmAttoContestazioneDaVerificare ? 'Approvazione Atto di contestazione' :
-    role === 'RI_AMM' && riAmmBozzaDeterminazioneDaVerificare ? 'Approvazione istruttoria amministrativa' :
-    role === 'RI_AMM' ? 'Approvazione istruttoria amministrativa' :
-    role === 'TI_AMM' ? `Trasmissione al ${getRoleLabelForMenu('RI_AMM')}` :
+    role === 'RIA' && riaAttoContestazioneDaVerificare ? 'Approvazione Atto di contestazione' :
+    role === 'RIA' && riaBozzaDeterminazioneDaVerificare ? 'Approvazione istruttoria amministrativa' :
+    role === 'RIA' ? 'Approvazione istruttoria amministrativa' :
+    role === 'IA' ? `Trasmissione al ${getRoleLabelForMenu('RIA')}` :
     'Avanzamento pratica'
 
   const pendingTitle = pending === 'TAKE'
-    ? ((riAmmBozzaDeterminazioneDaVerificare || riAmmAttoContestazioneDaVerificare) ? 'Presa in carico pratica' : 'Presa in carico')
-    : pending === 'ASSEGNA_TI'
-      ? `Assegnazione al ${getRoleLabelForMenu('TI')}`
-      : pending === 'ASSEGNA_TI_AMM'
-        ? `Assegnazione al ${getRoleLabelForMenu('TI_AMM')}`
-        : pending === 'RESTITUISCI_TI_AMM'
-          ? `Restituzione al ${getRoleLabelForMenu('TI_AMM')}`
-          : (pending === 'INTEGRAZIONE' || pending === 'INTEGRAZIONE_TI_AMM' || pending === 'INTEGRAZIONE_TECNICA')
+    ? ((riaBozzaDeterminazioneDaVerificare || riaAttoContestazioneDaVerificare) ? 'Presa in carico pratica' : 'Presa in carico')
+    : pending === 'ASSEGNA_IT'
+      ? `Assegnazione al ${getRoleLabelForMenu('IT')}`
+      : pending === 'ASSEGNA_IA'
+        ? `Assegnazione al ${getRoleLabelForMenu('IA')}`
+        : pending === 'RESTITUISCI_IA'
+          ? `Restituzione al ${getRoleLabelForMenu('IA')}`
+          : (pending === 'INTEGRAZIONE' || pending === 'INTEGRAZIONE_IA' || pending === 'INTEGRAZIONE_TECNICA')
           ? (pendingRimandoTargetLabel ? `Rimando al ${pendingRimandoTargetLabel}` : 'Rimando')
           : pending === 'APPROVA'
             ? approvaPendingTitle
@@ -5741,15 +5724,15 @@ ${noteTrim}` : 'Attestazione di conformità apposta.',
 
   const approvaActionDesc = currentIntegrationRequesterLabel
     ? `${subjectArticle} ${subjectNameLower} verrà ${subjectVerbTrasmessa} al ${currentIntegrationRequesterLabel}.`
-    : role === 'TI' ? `${subjectArticle} ${subjectNameLower} verrà ${subjectVerbTrasmessa} al ${getRoleLabelForMenu('RZ')}.` :
-    role === 'RZ' ? (praticaLabel === 'Rapporto tecnico' ? `L’integrazione verrà validata e il rapporto tecnico verrà trasmesso al ${getRoleLabelForMenu('RI')}.` : `La rilevazione verrà approvata e trasmessa al ${getRoleLabelForMenu('RI')}.`) :
-    role === 'RI' ? `L’istruttoria tecnica verrà approvata e trasmessa al ${getRoleLabelForForward('DT')}.` :
-    role === 'DT' ? `Il Rapporto tecnico di rilevazione verrà approvato e trasmesso al ${getRoleLabelForMenu('RI_AMM')}.` :
-    role === 'RI_AMM' && riAmmAttoContestazioneDaVerificare ? 'L’Atto di contestazione verrà approvato e la pratica tornerà al Tecnico Istruttore amministrativo per la trasmissione al Direttore.' :
-    role === 'RI_AMM' && riAmmBozzaDeterminazioneDaVerificare ? 'L’istruttoria amministrativa verrà approvata e la pratica tornerà al Tecnico Istruttore amministrativo per i passaggi successivi.' :
-    role === 'RI_AMM' && riAmmStaApprovandoPropostaContestazione ? 'L’istruttoria amministrativa verrà approvata e la pratica tornerà al Tecnico istruttore amministrativo per protocollazione e predisposizione della bozza di determinazione.' :
-    role === 'RI_AMM' ? 'L’istruttoria amministrativa verrà approvata e la pratica verrà restituita al Tecnico Istruttore amministrativo per i passaggi successivi.' :
-    role === 'TI_AMM' ? 'Il visto di conformità verrà apposto. La pratica resterà al Tecnico Istruttore amministrativo per predisporre la bozza di determinazione e trasmettere successivamente il fascicolo al Responsabile.' :
+    : role === 'IT' ? `${subjectArticle} ${subjectNameLower} verrà ${subjectVerbTrasmessa} al ${getRoleLabelForMenu('CS')}.` :
+    role === 'CS' ? (praticaLabel === 'Rapporto tecnico' ? `L’integrazione verrà validata e il rapporto tecnico verrà trasmesso al ${getRoleLabelForMenu('RIT')}.` : `La rilevazione verrà approvata e trasmessa al ${getRoleLabelForMenu('RIT')}.`) :
+    role === 'RIT' ? `L’istruttoria tecnica verrà approvata e trasmessa al ${getRoleLabelForForward('DT')}.` :
+    role === 'DT' ? `Il Rapporto tecnico di rilevazione verrà approvato e trasmesso al ${getRoleLabelForMenu('RIA')}.` :
+    role === 'RIA' && riaAttoContestazioneDaVerificare ? 'L’Atto di contestazione verrà approvato e la pratica tornerà all’Istruttore amministrativo per la trasmissione al Direttore.' :
+    role === 'RIA' && riaBozzaDeterminazioneDaVerificare ? 'L’istruttoria amministrativa verrà approvata e la pratica tornerà all’Istruttore amministrativo per i passaggi successivi.' :
+    role === 'RIA' && riaStaApprovandoPropostaContestazione ? 'L’istruttoria amministrativa verrà approvata e la pratica tornerà all’Istruttore amministrativo per protocollazione e predisposizione della bozza di determinazione.' :
+    role === 'RIA' ? 'L’istruttoria amministrativa verrà approvata e la pratica verrà restituita all’Istruttore amministrativo per i passaggi successivi.' :
+    role === 'IA' ? 'Il visto di conformità verrà apposto. La pratica resterà all’Istruttore amministrativo per predisporre la bozza di determinazione e trasmettere successivamente il fascicolo al Responsabile.' :
     `${subjectArticle} ${subjectNameLower} verrà ${subjectVerbTrasmessa} al passaggio successivo.`
 
   const integrazioneActionDesc = pendingRimandoTargetLabel
@@ -5761,16 +5744,16 @@ ${noteTrim}` : 'Attestazione di conformità apposta.',
         : 'La rilevazione verrà rimandata per integrazione.')
 
   const pendingTheme: Record<string, PendingTheme> = {
-    TAKE:           { icon: '✓', color: '#2563eb', bg: '#eff6ff', border: '#bfdbfe', buttonBg: '#2563eb', buttonBorder: '#1d4ed8', desc: riAmmAttoContestazioneDaVerificare ? 'La pratica contenente la bozza dell’Atto di contestazione verrà presa in carico per la verifica.' : (riAmmBozzaDeterminazioneDaVerificare ? 'La pratica contenente la bozza di determinazione verrà presa in carico per la verifica.' : ((role === 'RI_AMM' || role === 'TI_AMM') ? 'La pratica verrà presa in carico.' : (praticaLabel === 'Rapporto tecnico' ? 'Il rapporto tecnico verrà preso in carico.' : 'La rilevazione verrà presa in carico.'))) },
-    ASSEGNA_TI:     { icon: '✓', color: '#2563eb', bg: '#eff6ff', border: '#bfdbfe', buttonBg: '#2563eb', buttonBorder: '#1d4ed8', desc: `${subjectArticle} ${subjectNameLower} verrà ${subjectVerbAssegnata} al ${getRoleLabelForMenu('TI')} selezionato.` },
-    ASSEGNA_TI_AMM: { icon: '✓', color: '#2563eb', bg: '#eff6ff', border: '#bfdbfe', buttonBg: '#2563eb', buttonBorder: '#1d4ed8', desc: riaperturaWorkflowDaAvviare
-      ? `Verrà aperto il nuovo ciclo di riapertura n. ${riaperturaAmmNumero} e la pratica sarà assegnata al ${getRoleLabelForMenu('TI_AMM')} selezionato.`
-      : `La pratica verrà assegnata al ${getRoleLabelForMenu('TI_AMM')} selezionato.` },
-    INVIA_TI_AMM: { icon: '✓', color: '#2563eb', bg: '#eff6ff', border: '#bfdbfe', buttonBg: '#2563eb', buttonBorder: '#1d4ed8', desc: 'La pratica verrà trasmessa al Tecnico Istruttore amministrativo.' },
-    RESTITUISCI_TI_AMM: { icon: '✓', color: '#2563eb', bg: '#eff6ff', border: '#bfdbfe', buttonBg: '#2563eb', buttonBorder: '#1d4ed8', desc: `La pratica verrà restituita al ${getRoleLabelForMenu('TI_AMM')} già assegnato.` },
+    TAKE:           { icon: '✓', color: '#2563eb', bg: '#eff6ff', border: '#bfdbfe', buttonBg: '#2563eb', buttonBorder: '#1d4ed8', desc: riaAttoContestazioneDaVerificare ? 'La pratica contenente la bozza dell’Atto di contestazione verrà presa in carico per la verifica.' : (riaBozzaDeterminazioneDaVerificare ? 'La pratica contenente la bozza di determinazione verrà presa in carico per la verifica.' : ((role === 'RIA' || role === 'IA') ? 'La pratica verrà presa in carico.' : (praticaLabel === 'Rapporto tecnico' ? 'Il rapporto tecnico verrà preso in carico.' : 'La rilevazione verrà presa in carico.'))) },
+    ASSEGNA_IT:     { icon: '✓', color: '#2563eb', bg: '#eff6ff', border: '#bfdbfe', buttonBg: '#2563eb', buttonBorder: '#1d4ed8', desc: `${subjectArticle} ${subjectNameLower} verrà ${subjectVerbAssegnata} al ${getRoleLabelForMenu('IT')} selezionato.` },
+    ASSEGNA_IA: { icon: '✓', color: '#2563eb', bg: '#eff6ff', border: '#bfdbfe', buttonBg: '#2563eb', buttonBorder: '#1d4ed8', desc: riaperturaWorkflowDaAvviare
+      ? `Verrà aperto il nuovo ciclo di riapertura n. ${riaperturaAmmNumero} e la pratica sarà assegnata al ${getRoleLabelForMenu('IA')} selezionato.`
+      : `La pratica verrà assegnata al ${getRoleLabelForMenu('IA')} selezionato.` },
+    INVIA_IA: { icon: '✓', color: '#2563eb', bg: '#eff6ff', border: '#bfdbfe', buttonBg: '#2563eb', buttonBorder: '#1d4ed8', desc: 'La pratica verrà trasmessa all’Istruttore amministrativo.' },
+    RESTITUISCI_IA: { icon: '✓', color: '#2563eb', bg: '#eff6ff', border: '#bfdbfe', buttonBg: '#2563eb', buttonBorder: '#1d4ed8', desc: `La pratica verrà restituita al ${getRoleLabelForMenu('IA')} già assegnato.` },
     APPROVA:        { icon: '✓', color: '#2563eb', bg: '#eff6ff', border: '#bfdbfe', buttonBg: '#2563eb', buttonBorder: '#1d4ed8', desc: approvaActionDesc },
     INTEGRAZIONE:   { icon: '↩', color: '#b45309', bg: '#fffbeb', border: '#fde68a', buttonBg: '#d97706', buttonBorder: '#b45309', desc: integrazioneActionDesc },
-    INTEGRAZIONE_TI_AMM: { icon: '↩', color: '#b45309', bg: '#fffbeb', border: '#fde68a', buttonBg: '#d97706', buttonBorder: '#b45309', desc: `La pratica verrà rimandata al ${getRoleLabelForMenu('TI_AMM')} assegnato.` },
+    INTEGRAZIONE_IA: { icon: '↩', color: '#b45309', bg: '#fffbeb', border: '#fde68a', buttonBg: '#d97706', buttonBorder: '#b45309', desc: `La pratica verrà rimandata al ${getRoleLabelForMenu('IA')} assegnato.` },
     INTEGRAZIONE_TECNICA: { icon: '↩', color: '#b45309', bg: '#fffbeb', border: '#fde68a', buttonBg: '#d97706', buttonBorder: '#b45309', desc: `La pratica verrà rimandata al ${rimandoTecnicaTargetLabel}.` },
     RESPINGI:       { icon: '✕', color: '#b42318', bg: '#fef2f2', border: '#fecaca', buttonBg: '#dc2626', buttonBorder: '#b42318', desc: `${subjectArticle} ${subjectNameLower} verrà ${subjectVerbRespinta}.` },
     ELIMINA:        { icon: '✕', color: '#b42318', bg: '#fef2f2', border: '#fecaca', buttonBg: '#dc2626', buttonBorder: '#b42318', desc: `${subjectArticle} ${subjectNameLower} verrà ${subjectVerbArchiviata} e non sarà più visibile nell'elenco.` },
@@ -5785,22 +5768,22 @@ ${noteTrim}` : 'Attestazione di conformità apposta.',
   )
 
   const isWorkflowEsitoPendingKey = (key: any): boolean =>
-    key === 'APPROVA' || key === 'INVIA_TI_AMM' || key === 'INTEGRAZIONE' || key === 'INTEGRAZIONE_TI_AMM' || key === 'INTEGRAZIONE_TECNICA' || key === 'RESPINGI'
+    key === 'APPROVA' || key === 'INVIA_IA' || key === 'INTEGRAZIONE' || key === 'INTEGRAZIONE_IA' || key === 'INTEGRAZIONE_TECNICA' || key === 'RESPINGI'
 
-  const workflowConformeItem = workflowMenuEnabledItems.find(item => item.key === 'APPROVA' || item.key === 'INVIA_TI_AMM') || null
-  const workflowIntegrationItems = workflowMenuEnabledItems.filter(item => item.key === 'INTEGRAZIONE' || item.key === 'INTEGRAZIONE_TI_AMM' || item.key === 'INTEGRAZIONE_TECNICA')
+  const workflowConformeItem = workflowMenuEnabledItems.find(item => item.key === 'APPROVA' || item.key === 'INVIA_IA') || null
+  const workflowIntegrationItems = workflowMenuEnabledItems.filter(item => item.key === 'INTEGRAZIONE' || item.key === 'INTEGRAZIONE_IA' || item.key === 'INTEGRAZIONE_TECNICA')
   const workflowRespintaItem = workflowMenuEnabledItems.find(item => item.key === 'RESPINGI') || null
   const workflowDirectActionItems = workflowMenuEnabledItems.filter(item => !isWorkflowEsitoPendingKey(item.key))
   const showEsitoDrivenWorkflow = Boolean(workflowConformeItem || workflowIntegrationItems.length > 0 || workflowRespintaItem)
-  const useUnifiedWorkflowActionSelect = role === 'RZ' || role === 'RI_AMM' || role === 'TI_AMM'
+  const useUnifiedWorkflowActionSelect = role === 'CS' || role === 'RIA' || role === 'IA'
   const unifiedWorkflowActionItems = useUnifiedWorkflowActionSelect ? workflowMenuEnabledItems : []
 
   function buildDefaultWorkflowNote (nextPending: Pending): string {
     if (role === 'DT') {
-      if (nextPending === 'APPROVA' || nextPending === 'INVIA_TI_AMM') {
+      if (nextPending === 'APPROVA' || nextPending === 'INVIA_IA') {
         return `A seguito della valutazione di competenza, si approva l’istruttoria tecnica e se ne dispone la trasmissione all’Area Amministrativa.`
       }
-      if (nextPending === 'INTEGRAZIONE' || nextPending === 'INTEGRAZIONE_TI_AMM' || nextPending === 'INTEGRAZIONE_TECNICA') {
+      if (nextPending === 'INTEGRAZIONE' || nextPending === 'INTEGRAZIONE_IA' || nextPending === 'INTEGRAZIONE_TECNICA') {
         return `A seguito della valutazione di competenza, non si approva l’istruttoria tecnica e si dispone il rinvio per le necessarie integrazioni o rettifiche.`
       }
       if (nextPending === 'RESPINGI') {
@@ -5808,43 +5791,43 @@ ${noteTrim}` : 'Attestazione di conformità apposta.',
       }
     }
 
-    if (role === 'RZ') {
-      if (nextPending === 'APPROVA' || nextPending === 'INVIA_TI_AMM') {
-        return `A seguito della verifica svolta, si attesta la conformità della pratica sotto il profilo tecnico-istruttorio e se ne dispone la trasmissione al Responsabile istruttoria.`
+    if (role === 'CS') {
+      if (nextPending === 'APPROVA' || nextPending === 'INVIA_IA') {
+        return `A seguito della verifica svolta, si attesta la conformità della pratica sotto il profilo tecnico-istruttorio e se ne dispone la trasmissione al Responsabile istruttoria tecnica.`
       }
-      if (nextPending === 'INTEGRAZIONE' || nextPending === 'INTEGRAZIONE_TI_AMM' || nextPending === 'INTEGRAZIONE_TECNICA') {
-        return `A seguito della verifica svolta, si rileva la necessità di integrazioni o rettifiche tecnico-istruttorie e si dispone il rinvio al Tecnico istruttore competente.`
+      if (nextPending === 'INTEGRAZIONE' || nextPending === 'INTEGRAZIONE_IA' || nextPending === 'INTEGRAZIONE_TECNICA') {
+        return `A seguito della verifica svolta, si rileva la necessità di integrazioni o rettifiche tecnico-istruttorie e si dispone il rinvio all’Istruttore tecnico competente.`
       }
       if (nextPending === 'RESPINGI') {
         return `A seguito della verifica svolta, non si ravvisano i presupposti per la prosecuzione dell’istruttoria tecnica e si dispone il respingimento della pratica.`
       }
     }
 
-    if (role === 'RI_AMM') {
-      if (nextPending === 'APPROVA' || nextPending === 'INVIA_TI_AMM') {
-        if (riAmmBozzaDeterminazioneDaVerificare) {
-          return `A seguito della verifica svolta, si approva l’istruttoria amministrativa e si dispone la restituzione della pratica al Tecnico Istruttore amministrativo per la protocollazione e la trasmissione al Direttore.`
+    if (role === 'RIA') {
+      if (nextPending === 'APPROVA' || nextPending === 'INVIA_IA') {
+        if (riaBozzaDeterminazioneDaVerificare) {
+          return `A seguito della verifica svolta, si approva l’istruttoria amministrativa e si dispone la restituzione della pratica all’Istruttore amministrativo per la protocollazione e la trasmissione al Direttore.`
         }
-        return `A seguito della verifica svolta, si approva l’istruttoria amministrativa e si dispone la restituzione della pratica al Tecnico istruttore amministrativo per la protocollazione e il completamento della bozza di determinazione.`
+        return `A seguito della verifica svolta, si approva l’istruttoria amministrativa e si dispone la restituzione della pratica all’Istruttore amministrativo per la protocollazione e il completamento della bozza di determinazione.`
       }
-      if (nextPending === 'INTEGRAZIONE_TI_AMM') {
-        return `A seguito della verifica svolta, si rileva la necessità di integrazioni o rettifiche dell’istruttoria amministrativa e si dispone il rinvio al Tecnico Istruttore amministrativo.`
+      if (nextPending === 'INTEGRAZIONE_IA') {
+        return `A seguito della verifica svolta, si rileva la necessità di integrazioni o rettifiche dell’istruttoria amministrativa e si dispone il rinvio all’Istruttore amministrativo.`
       }
       if (nextPending === 'INTEGRAZIONE_TECNICA') {
-        return `A seguito della verifica svolta, si rileva la necessità di chiarimenti o integrazioni sugli elementi tecnici posti a base dell’istruttoria amministrativa e si dispone il rinvio al Responsabile istruttoria dell’area di provenienza.`
+        return `A seguito della verifica svolta, si rileva la necessità di chiarimenti o integrazioni sugli elementi tecnici posti a base dell’istruttoria amministrativa e si dispone il rinvio al Responsabile istruttoria tecnica dell’area di provenienza.`
       }
       if (nextPending === 'INTEGRAZIONE') {
         return `A seguito della verifica svolta, si rileva la necessità di integrazioni o rettifiche sotto il profilo istruttorio-amministrativo.`
       }
     }
 
-    const isAmmWorkflowRole = role === 'TI_AMM'
+    const isAmmWorkflowRole = role === 'IA'
     const profiloVerifica = isAmmWorkflowRole ? 'istruttorio-amministrativo' : 'tecnico-istruttorio'
 
-    if (nextPending === 'APPROVA' || nextPending === 'INVIA_TI_AMM') {
+    if (nextPending === 'APPROVA' || nextPending === 'INVIA_IA') {
       return `A seguito della verifica svolta, si attesta la conformità della pratica sotto il profilo ${profiloVerifica}.`
     }
-    if (nextPending === 'INTEGRAZIONE' || nextPending === 'INTEGRAZIONE_TI_AMM' || nextPending === 'INTEGRAZIONE_TECNICA') {
+    if (nextPending === 'INTEGRAZIONE' || nextPending === 'INTEGRAZIONE_IA' || nextPending === 'INTEGRAZIONE_TECNICA') {
       return `A seguito della verifica svolta, si segnala la necessità di integrazioni o rettifiche sotto il profilo ${profiloVerifica}.`
     }
     if (nextPending === 'RESPINGI') {
@@ -5918,19 +5901,19 @@ ${noteTrim}` : 'Attestazione di conformità apposta.',
   )
   const workflowOperationalDesc = hideWorkflowOperationalDesc ? '' : actionMenuTheme.desc
   const selectedWorkflowMenuKey = selectedWorkflowMenuItem?.key || ''
-  const isWorkflowRimandoPending = pending === 'INTEGRAZIONE' || pending === 'INTEGRAZIONE_TI_AMM' || pending === 'INTEGRAZIONE_TECNICA'
-  const isAttestazioneConformitaPending = pending === 'APPROVA' || pending === 'INVIA_TI_AMM'
-  const workflowNoteLabel = isAdministrativeRiAmmReturn
+  const isWorkflowRimandoPending = pending === 'INTEGRAZIONE' || pending === 'INTEGRAZIONE_IA' || pending === 'INTEGRAZIONE_TECNICA'
+  const isAttestazioneConformitaPending = pending === 'APPROVA' || pending === 'INVIA_IA'
+  const workflowNoteLabel = isAdministrativeRiaReturn
     ? 'Esito della verifica'
     : (isAttestazioneConformitaPending ? 'Attestazione di conformità' : (isWorkflowRimandoPending ? 'Integrazioni/rettifiche proposte' : 'Note'))
   const hasFixedWorkflowNote = Boolean(fixedWorkflowNoteTrim)
-  const workflowFreeNoteLabel = isAdministrativeRiAmmReturn
+  const workflowFreeNoteLabel = isAdministrativeRiaReturn
     ? 'Motivazione del rimando'
     : (hasFixedWorkflowNote
         ? (hasOtherMotivation ? 'Altre motivazioni e ulteriori annotazioni' : 'Ulteriori annotazioni')
         : workflowNoteLabel)
   const workflowNoteTextAreaRequired = noteIsRequired
-  const workflowNotePlaceholder = isAdministrativeRiAmmReturn
+  const workflowNotePlaceholder = isAdministrativeRiaReturn
     ? 'Indicare le modifiche, integrazioni o rettifiche richieste…'
     : (hasFixedWorkflowNote
         ? (hasOtherMotivation ? 'Inserire altre motivazioni ed eventuali ulteriori annotazioni…' : 'Inserire eventuali ulteriori annotazioni…')
@@ -5941,7 +5924,7 @@ ${noteTrim}` : 'Attestazione di conformità apposta.',
             : (noteIsRequired ? 'Specifica il motivo…' : 'Nota facoltativa…'))
 
   const integrationMotivationControls = isWorkflowRimandoPending ? (
-    isAdministrativeRiAmmReturn ? (
+    isAdministrativeRiaReturn ? (
       <div style={{ display: 'grid', gap: 7 }}>
         <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
           <div style={{ fontSize: Math.max(15, Number(titleFontSize) || 15), fontWeight: 700 }}>Oggetto del rimando</div>
@@ -6038,9 +6021,9 @@ ${noteTrim}` : 'Attestazione di conformità apposta.',
     setNoteDraft(noteOrigRef.current)
     resetStructuredReasons()
     setTiSelected('')
-    setTiAmmSelected('')
+    setIaSelected('')
     setTiLoadErr('')
-    setTiAmmLoadErr('')
+    setIaLoadErr('')
     setZeroNotaSpeseWarning([])
     setIncompleteNotaSpeseWarning([])
   }
@@ -6056,19 +6039,19 @@ ${noteTrim}` : 'Attestazione di conformità apposta.',
     setNoteDraft(noteOrigRef.current)
     resetStructuredReasons()
     setTiSelected('')
-    setTiAmmSelected('')
+    setIaSelected('')
     setTiLoadErr('')
-    setTiAmmLoadErr('')
+    setIaLoadErr('')
     setZeroNotaSpeseWarning([])
     setIncompleteNotaSpeseWarning([])
   }
 
   const canConfirmWorkflowAction = (() => {
     if (!pending || loading || !selectedWorkflowMenuItem) return false
-    if (pending === 'ASSEGNA_TI') return !!tiSelected
-    if (pending === 'ASSEGNA_TI_AMM') return !!tiAmmSelected
-    if (pending === 'INTEGRAZIONE' || pending === 'INTEGRAZIONE_TI_AMM' || pending === 'INTEGRAZIONE_TECNICA') return !integrationReasonInvalid && !integrationTargetsInvalid && !noteInvalid && (!hasOtherMotivation || !!noteDraftTrim)
-    if (pending === 'APPROVA' || pending === 'INVIA_TI_AMM') return !!noteTrim
+    if (pending === 'ASSEGNA_IT') return !!tiSelected
+    if (pending === 'ASSEGNA_IA') return !!iaSelected
+    if (pending === 'INTEGRAZIONE' || pending === 'INTEGRAZIONE_IA' || pending === 'INTEGRAZIONE_TECNICA') return !integrationReasonInvalid && !integrationTargetsInvalid && !noteInvalid && (!hasOtherMotivation || !!noteDraftTrim)
+    if (pending === 'APPROVA' || pending === 'INVIA_IA') return !!noteTrim
     if (pending === 'RESPINGI') return !!reasonTrim && (!isAltro || !!noteDraftTrim)
     if (pending === 'ELIMINA') return !!noteTrim
     return true
@@ -6078,7 +6061,7 @@ ${noteTrim}` : 'Attestazione di conformità apposta.',
     setLoading(true)
     setMsg(null)
 
-    if (role === 'TI' || role === 'RZ' || role === 'RI') {
+    if (role === 'IT' || role === 'CS' || role === 'RIT') {
       try {
         const warnings = await findNotaSpeseWarnings()
         if (warnings.blocking.length > 0) {
@@ -6109,10 +6092,10 @@ ${noteTrim}` : 'Attestazione di conformità apposta.',
     setMsg(null)
 
     try {
-      if (pending === 'ASSEGNA_TI') await onConfirmAssegnaTi()
-      else if (pending === 'ASSEGNA_TI_AMM') await onConfirmAssegnaTiAmm()
-      else if (pending === 'INVIA_TI_AMM' || pending === 'RESTITUISCI_TI_AMM') await onConfirmRestituisciTiAmm()
-      else if (pending === 'INTEGRAZIONE' || pending === 'INTEGRAZIONE_TI_AMM' || pending === 'INTEGRAZIONE_TECNICA') await onConfirmIntegrazione()
+      if (pending === 'ASSEGNA_IT') await onConfirmAssegnaTi()
+      else if (pending === 'ASSEGNA_IA') await onConfirmAssegnaIa()
+      else if (pending === 'INVIA_IA' || pending === 'RESTITUISCI_IA') await onConfirmRestituisciIa()
+      else if (pending === 'INTEGRAZIONE' || pending === 'INTEGRAZIONE_IA' || pending === 'INTEGRAZIONE_TECNICA') await onConfirmIntegrazione()
       else if (pending === 'APPROVA') await confirmApprovaWithNotaSpeseWarning()
       else if (pending === 'RESPINGI') await onConfirmRespinta()
       else if (pending === 'ELIMINA') await onConfirmElimina()
@@ -6187,9 +6170,9 @@ ${noteTrim}` : 'Attestazione di conformità apposta.',
                       setNoteDraft(noteOrigRef.current)
                       resetStructuredReasons()
                       setTiSelected('')
-                      setTiAmmSelected('')
+                      setIaSelected('')
                       setTiLoadErr('')
-                      setTiAmmLoadErr('')
+                      setIaLoadErr('')
                       return
                     }
                     const key = raw as Exclude<Pending, null | 'TAKE'>
@@ -6228,9 +6211,9 @@ ${noteTrim}` : 'Attestazione di conformità apposta.',
                       setNoteDraft(noteOrigRef.current)
                       resetStructuredReasons()
                       setTiSelected('')
-                      setTiAmmSelected('')
+                      setIaSelected('')
                       setTiLoadErr('')
-                      setTiAmmLoadErr('')
+                      setIaLoadErr('')
                       return
                     }
                     const key = raw as Exclude<Pending, null | 'TAKE'>
@@ -6288,10 +6271,10 @@ ${noteTrim}` : 'Attestazione di conformità apposta.',
               </div>
             )}
 
-            {pending === 'ASSEGNA_TI' && role === 'RZ' && (
+            {pending === 'ASSEGNA_IT' && role === 'CS' && (
               <div style={{ display: 'grid', gap: 6 }}>
                 <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
-                  <div style={{ fontSize: Math.max(15, Number(titleFontSize) || 15), fontWeight: 700 }}>Tecnico istruttore</div>
+                  <div style={{ fontSize: Math.max(15, Number(titleFontSize) || 15), fontWeight: 700 }}>Istruttore tecnico</div>
                   <div style={labelReqStyle(true, tiReqErr)}>Scelta obbligatoria</div>
                 </div>
                 <select
@@ -6300,35 +6283,35 @@ ${noteTrim}` : 'Attestazione di conformità apposta.',
                   disabled={loading}
                   style={{ width: '100%', padding: '8px 10px', borderRadius: 8, border: `1px solid ${tiReqErr ? '#dc2626' : 'rgba(0,0,0,0.15)'}`, outline: 'none', fontSize: 15 }}
                 >
-                  <option value=''>— Seleziona Tecnico Istruttore —</option>
+                  <option value=''>— Seleziona Istruttore tecnico —</option>
                   {tiOptions.map(o => (
                     <option key={o.username} value={o.username}>{(o.fullName || o.username)} ({o.username})</option>
                   ))}
                 </select>
-                {!tiLoading && !tiLoadErr && tiOptions.length === 0 && <div style={{ fontSize: 14, opacity: 0.75 }}>Nessun Tecnico Istruttore trovato.</div>}
-                {!!tiLoadErr && <div style={{ fontSize: 14, color: '#dc2626' }}>Errore elenco Tecnici Istruttori: {tiLoadErr}</div>}
+                {!tiLoading && !tiLoadErr && tiOptions.length === 0 && <div style={{ fontSize: 14, opacity: 0.75 }}>Nessun Istruttore tecnico trovato.</div>}
+                {!!tiLoadErr && <div style={{ fontSize: 14, color: '#dc2626' }}>Errore elenco Istruttori tecnici: {tiLoadErr}</div>}
               </div>
             )}
 
-            {pending === 'ASSEGNA_TI_AMM' && role === 'RI_AMM' && (
+            {pending === 'ASSEGNA_IA' && role === 'RIA' && (
               <div style={{ display: 'grid', gap: 6 }}>
                 <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
-                  <div style={{ fontSize: Math.max(15, Number(titleFontSize) || 15), fontWeight: 700 }}>Tecnico Istruttore amministrativo</div>
-                  <div style={labelReqStyle(true, tiAmmReqErr)}>Scelta obbligatoria</div>
+                  <div style={{ fontSize: Math.max(15, Number(titleFontSize) || 15), fontWeight: 700 }}>Istruttore amministrativo</div>
+                  <div style={labelReqStyle(true, iaReqErr)}>Scelta obbligatoria</div>
                 </div>
                 <select
-                  value={tiAmmSelected}
-                  onChange={(e) => { setTiAmmSelected(e.target.value); if (confirmAttempted) setConfirmAttempted(false) }}
+                  value={iaSelected}
+                  onChange={(e) => { setIaSelected(e.target.value); if (confirmAttempted) setConfirmAttempted(false) }}
                   disabled={loading}
-                  style={{ width: '100%', padding: '8px 10px', borderRadius: 8, border: `1px solid ${tiAmmReqErr ? '#dc2626' : 'rgba(0,0,0,0.15)'}`, outline: 'none', fontSize: 15 }}
+                  style={{ width: '100%', padding: '8px 10px', borderRadius: 8, border: `1px solid ${iaReqErr ? '#dc2626' : 'rgba(0,0,0,0.15)'}`, outline: 'none', fontSize: 15 }}
                 >
-                  <option value=''>— Seleziona Tecnico Istruttore amministrativo —</option>
-                  {tiAmmOptions.map(o => (
+                  <option value=''>— Seleziona Istruttore amministrativo —</option>
+                  {iaOptions.map(o => (
                     <option key={o.username} value={o.username}>{(o.fullName || o.username)} ({o.username})</option>
                   ))}
                 </select>
-                {!tiAmmLoading && !tiAmmLoadErr && tiAmmOptions.length === 0 && <div style={{ fontSize: 14, opacity: 0.75 }}>Nessun Tecnico Istruttore amministrativo trovato.</div>}
-                {!!tiAmmLoadErr && <div style={{ fontSize: 14, color: '#dc2626' }}>Errore elenco Tecnici Istruttori amministrativi: {tiAmmLoadErr}</div>}
+                {!iaLoading && !iaLoadErr && iaOptions.length === 0 && <div style={{ fontSize: 14, opacity: 0.75 }}>Nessun Istruttore amministrativo trovato.</div>}
+                {!!iaLoadErr && <div style={{ fontSize: 14, color: '#dc2626' }}>Errore elenco Istruttori amministrativi: {iaLoadErr}</div>}
               </div>
             )}
 
@@ -6418,7 +6401,7 @@ ${noteTrim}` : 'Attestazione di conformità apposta.',
         {/* Box numero rilevazione / rapporto tecnico */}
         {hasSel && oid != null && (
           <div style={{ fontWeight: 600, color: '#1f2937', padding: 10, background: theme.bg, border: `1px solid ${theme.border}`, borderRadius: 6, fontSize: 15 }}>
-            {(pending === 'TAKE' && riAmmBozzaDeterminazioneDaVerificare) ? 'Pratica: Rapporto tecnico n.' : `${praticaLabel}:`} <span style={{ color: theme.color, fontSize: 15, fontFamily: 'monospace' }}>{praticaCode}</span>
+            {(pending === 'TAKE' && riaBozzaDeterminazioneDaVerificare) ? 'Pratica: Rapporto tecnico n.' : `${praticaLabel}:`} <span style={{ color: theme.color, fontSize: 15, fontFamily: 'monospace' }}>{praticaCode}</span>
           </div>
         )}
 
@@ -6429,8 +6412,8 @@ ${noteTrim}` : 'Attestazione di conformità apposta.',
           </div>
         )}
 
-        {/* Selezione TI */}
-        {pending === 'ASSEGNA_TI' && role === 'RZ' && (
+        {/* Selezione IT */}
+        {pending === 'ASSEGNA_IT' && role === 'CS' && (
           <div style={{ display: 'grid', gap: 6 }}>
             <div style={labelReqStyle(true, tiReqErr)}>Scelta obbligatoria</div>
             <select
@@ -6439,32 +6422,32 @@ ${noteTrim}` : 'Attestazione di conformità apposta.',
               disabled={loading}
               style={{ width: 'auto', minWidth: 280, maxWidth: '100%', padding: '8px 10px', borderRadius: 8, border: `1px solid ${tiReqErr ? '#dc2626' : 'rgba(0,0,0,0.15)'}`, outline: 'none', fontSize: 15 }}
             >
-              <option value=''>— Seleziona Tecnico Istruttore —</option>
+              <option value=''>— Seleziona Istruttore tecnico —</option>
               {tiOptions.map(o => (
                 <option key={o.username} value={o.username}>{(o.fullName || o.username)} ({o.username})</option>
               ))}
             </select>
-            {!tiLoading && !tiLoadErr && tiOptions.length === 0 && <div style={{ fontSize: 14, opacity: 0.75 }}>Nessun Tecnico Istruttore trovato.</div>}
-            {!!tiLoadErr && <div style={{ fontSize: 14, color: '#dc2626' }}>Errore elenco Tecnici Istruttori: {tiLoadErr}</div>}
+            {!tiLoading && !tiLoadErr && tiOptions.length === 0 && <div style={{ fontSize: 14, opacity: 0.75 }}>Nessun Istruttore tecnico trovato.</div>}
+            {!!tiLoadErr && <div style={{ fontSize: 14, color: '#dc2626' }}>Errore elenco Istruttori tecnici: {tiLoadErr}</div>}
           </div>
         )}
 
-        {pending === 'ASSEGNA_TI_AMM' && role === 'RI_AMM' && (
+        {pending === 'ASSEGNA_IA' && role === 'RIA' && (
           <div style={{ display: 'grid', gap: 6 }}>
-            <div style={labelReqStyle(true, tiAmmReqErr)}>Scelta obbligatoria</div>
+            <div style={labelReqStyle(true, iaReqErr)}>Scelta obbligatoria</div>
             <select
-              value={tiAmmSelected}
-              onChange={(e) => { setTiAmmSelected(e.target.value); if (confirmAttempted) setConfirmAttempted(false) }}
+              value={iaSelected}
+              onChange={(e) => { setIaSelected(e.target.value); if (confirmAttempted) setConfirmAttempted(false) }}
               disabled={loading}
-              style={{ width: 'auto', minWidth: 280, maxWidth: '100%', padding: '8px 10px', borderRadius: 8, border: `1px solid ${tiAmmReqErr ? '#dc2626' : 'rgba(0,0,0,0.15)'}`, outline: 'none', fontSize: 15 }}
+              style={{ width: 'auto', minWidth: 280, maxWidth: '100%', padding: '8px 10px', borderRadius: 8, border: `1px solid ${iaReqErr ? '#dc2626' : 'rgba(0,0,0,0.15)'}`, outline: 'none', fontSize: 15 }}
             >
-              <option value=''>— Seleziona Tecnico Istruttore amministrativo —</option>
-              {tiAmmOptions.map(o => (
+              <option value=''>— Seleziona Istruttore amministrativo —</option>
+              {iaOptions.map(o => (
                 <option key={o.username} value={o.username}>{(o.fullName || o.username)} ({o.username})</option>
               ))}
             </select>
-            {!tiAmmLoading && !tiAmmLoadErr && tiAmmOptions.length === 0 && <div style={{ fontSize: 14, opacity: 0.75 }}>Nessun Tecnico Istruttore amministrativo trovato.</div>}
-            {!!tiAmmLoadErr && <div style={{ fontSize: 14, color: '#dc2626' }}>Errore elenco Tecnici Istruttori amministrativi: {tiAmmLoadErr}</div>}
+            {!iaLoading && !iaLoadErr && iaOptions.length === 0 && <div style={{ fontSize: 14, opacity: 0.75 }}>Nessun Istruttore amministrativo trovato.</div>}
+            {!!iaLoadErr && <div style={{ fontSize: 14, color: '#dc2626' }}>Errore elenco Istruttori amministrativi: {iaLoadErr}</div>}
           </div>
         )}
 
@@ -6515,10 +6498,10 @@ ${noteTrim}` : 'Attestazione di conformità apposta.',
               Annulla
             </button>
             {pending === 'TAKE' && <button type='button' onClick={onConfirmTakeInCharge} style={{ padding: '8px 18px', borderRadius: 8, border: `1px solid ${theme.buttonBorder}`, background: theme.buttonBg, color: '#fff', fontWeight: 700, fontSize: 15, cursor: 'pointer' }}>Conferma</button>}
-            {pending === 'ASSEGNA_TI' && <button type='button' onClick={onConfirmAssegnaTi} disabled={!tiSelected} style={{ padding: '8px 18px', borderRadius: 8, border: `1px solid ${theme.buttonBorder}`, background: theme.buttonBg, color: '#fff', fontWeight: 700, fontSize: 15, cursor: !tiSelected ? 'not-allowed' : 'pointer', opacity: !tiSelected ? 0.6 : 1 }}>Conferma</button>}
-            {pending === 'ASSEGNA_TI_AMM' && <button type='button' onClick={onConfirmAssegnaTiAmm} disabled={!tiAmmSelected} style={{ padding: '8px 18px', borderRadius: 8, border: `1px solid ${theme.buttonBorder}`, background: theme.buttonBg, color: '#fff', fontWeight: 700, fontSize: 15, cursor: !tiAmmSelected ? 'not-allowed' : 'pointer', opacity: !tiAmmSelected ? 0.6 : 1 }}>Conferma</button>}
-            {(pending === 'INVIA_TI_AMM' || pending === 'RESTITUISCI_TI_AMM') && <button type='button' onClick={onConfirmRestituisciTiAmm} style={{ padding: '8px 18px', borderRadius: 8, border: `1px solid ${theme.buttonBorder}`, background: theme.buttonBg, color: '#fff', fontWeight: 700, fontSize: 15, cursor: 'pointer' }}>Conferma</button>}
-            {(pending === 'INTEGRAZIONE' || pending === 'INTEGRAZIONE_TI_AMM' || pending === 'INTEGRAZIONE_TECNICA') && <button type='button' onClick={onConfirmIntegrazione} style={{ padding: '8px 18px', borderRadius: 8, border: `1px solid ${theme.buttonBorder}`, background: theme.buttonBg, color: '#fff', fontWeight: 700, fontSize: 15, cursor: 'pointer' }}>Conferma</button>}
+            {pending === 'ASSEGNA_IT' && <button type='button' onClick={onConfirmAssegnaTi} disabled={!tiSelected} style={{ padding: '8px 18px', borderRadius: 8, border: `1px solid ${theme.buttonBorder}`, background: theme.buttonBg, color: '#fff', fontWeight: 700, fontSize: 15, cursor: !tiSelected ? 'not-allowed' : 'pointer', opacity: !tiSelected ? 0.6 : 1 }}>Conferma</button>}
+            {pending === 'ASSEGNA_IA' && <button type='button' onClick={onConfirmAssegnaIa} disabled={!iaSelected} style={{ padding: '8px 18px', borderRadius: 8, border: `1px solid ${theme.buttonBorder}`, background: theme.buttonBg, color: '#fff', fontWeight: 700, fontSize: 15, cursor: !iaSelected ? 'not-allowed' : 'pointer', opacity: !iaSelected ? 0.6 : 1 }}>Conferma</button>}
+            {(pending === 'INVIA_IA' || pending === 'RESTITUISCI_IA') && <button type='button' onClick={onConfirmRestituisciIa} style={{ padding: '8px 18px', borderRadius: 8, border: `1px solid ${theme.buttonBorder}`, background: theme.buttonBg, color: '#fff', fontWeight: 700, fontSize: 15, cursor: 'pointer' }}>Conferma</button>}
+            {(pending === 'INTEGRAZIONE' || pending === 'INTEGRAZIONE_IA' || pending === 'INTEGRAZIONE_TECNICA') && <button type='button' onClick={onConfirmIntegrazione} style={{ padding: '8px 18px', borderRadius: 8, border: `1px solid ${theme.buttonBorder}`, background: theme.buttonBg, color: '#fff', fontWeight: 700, fontSize: 15, cursor: 'pointer' }}>Conferma</button>}
             {pending === 'APPROVA' && <button type='button' onClick={() => { void confirmApprovaWithNotaSpeseWarning() }} style={{ padding: '8px 18px', borderRadius: 8, border: `1px solid ${theme.buttonBorder}`, background: theme.buttonBg, color: '#fff', fontWeight: 700, fontSize: 15, cursor: 'pointer' }}>Conferma</button>}
             {pending === 'RESPINGI' && <button type='button' onClick={onConfirmRespinta} style={{ padding: '8px 18px', borderRadius: 8, border: `1px solid ${theme.buttonBorder}`, background: theme.buttonBg, color: '#fff', fontWeight: 700, fontSize: 15, cursor: 'pointer' }}>Conferma</button>}
             {pending === 'ELIMINA' && <button type='button' onClick={onConfirmElimina} style={{ padding: '8px 18px', borderRadius: 8, border: `1px solid ${theme.buttonBorder}`, background: theme.buttonBg, color: '#fff', fontWeight: 700, fontSize: 15, cursor: 'pointer' }}>Conferma</button>}
@@ -6625,30 +6608,27 @@ ${noteTrim}` : 'Attestazione di conformità apposta.',
   minHeight: 0
 }
 
-  if (role === 'TI_AMM' && props.accessGate?.status === 'checking') {
+  if (role === 'IA' && hasSel && (iaGateStatus === 'idle' || iaGateStatus === 'checking')) {
     return (
       <div style={panelStyle}>
-        <div style={{ fontSize: titleFontSize, fontWeight: 700 }}>Azioni</div>
-        <div style={{
-          flex: '1 1 auto',
-          minHeight: 120,
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          textAlign: 'center',
-          padding: 16,
-          boxSizing: 'border-box',
-          color: '#4b5563',
-          fontSize: 13,
-          fontWeight: 700
-        }}>
-          Verifica accesso alla pratica…
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
+          <div style={{ fontSize: titleFontSize, fontWeight: 700 }}>Azioni</div>
+          <div style={{ ...msgStyle('info', msgFontSize), whiteSpace: 'nowrap' }}>Verifica accesso alla pratica…</div>
+        </div>
+        <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center' }}>
+          <Button
+            type='primary'
+            disabled
+            style={actionButtonStyle(buttonColors.approva, true, ui, buttonColors.approvaText)}
+          >
+            Gestisci istruttoria
+          </Button>
         </div>
       </div>
     )
   }
 
-  if (role === 'TI_AMM' && props.accessGate?.status === 'unavailable') {
+  if (role === 'IA' && props.accessGate?.status === 'unavailable') {
     return (
       <div style={panelStyle}>
         <div style={{ fontSize: titleFontSize, fontWeight: 700 }}>Azioni</div>
@@ -6671,7 +6651,7 @@ ${noteTrim}` : 'Attestazione di conformità apposta.',
     )
   }
 
-  if (tiAmmAccessDenied) {
+  if (iaAccessDenied) {
     return (
       <div style={panelStyle}>
         <div style={{ fontSize: titleFontSize, fontWeight: 700 }}>Azioni</div>
@@ -6737,7 +6717,7 @@ ${noteTrim}` : 'Attestazione di conformità apposta.',
             )}
 
             {/* Matrice_DT: il pulsante "Trasmetti a DA" è stato rimosso.
-                DT approva e trasmette a RI tramite il pulsante "Approva e trasmetti a RI". */}
+                DT approva e trasmette al Responsabile istruttoria amministrativa tramite il relativo comando. */}
 
             {/* Spacer per separare azioni (sx) da utilità (dx) */}
             <div style={{ flex: 1 }}/>
@@ -6863,7 +6843,7 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
     : (props.config as any || {})
   const cfg: any = { ...defaultConfig, ...cfgMutable }
   // ── Profilo utente: letto da window.__giiUserRole (scritto dal widget Header) ──
-  // Conserviamo anche l'identità, non soltanto il ruolo: due TI_AMM diversi possono
+  // Conserviamo anche l'identità, non soltanto il ruolo: due IA diversi possono
   // avere lo stesso ruolo ma autorizzazioni differenti sulla selezione corrente.
   const [detectedRole, setDetectedRole] = React.useState<string>('')
   const [profileReady, setProfileReady] = React.useState(false)
@@ -6875,10 +6855,8 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
     const readRole = () => {
       try {
         const info = { ...((window as any).__giiUserRole || {}) }
-        let role = normalizeRuoloCod(info?.ruoloCod || info?.ruolo_cod || info?.ruoloLabel || info?.ruolo)
         const areaCod = normalizeAreaCod(info?.areaCod || info?.area_cod || info?.areaLabel || info?.area)
-        if (role === 'RI' && areaCod === 'AMM') role = 'RI_AMM'
-        if (role === 'TI' && areaCod === 'AMM') role = 'TI_AMM'
+        const role = canonicalWorkflowRole(info?.ruoloCod || info?.ruolo_cod, areaCod)
         const username = String(info?.username || '').trim()
         setDetectedUser(info)
         setDetectedRole(!role || role === 'ADMIN' ? '' : role)
@@ -6894,7 +6872,24 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
     return () => window.removeEventListener('gii:userLoaded', readRole)
   }, [])
 
-  const roleCode = detectedRole
+  const [detectedOperationalRole, setDetectedOperationalRole] = React.useState<string>(() => {
+    try { return canonicalWorkflowRole((window as any).__giiSelection?.operationalRole || '') } catch { return '' }
+  })
+  React.useEffect(() => {
+    const syncOperationalRole = () => {
+      try { setDetectedOperationalRole(canonicalWorkflowRole((window as any).__giiSelection?.operationalRole || '')) }
+      catch { setDetectedOperationalRole('') }
+    }
+    syncOperationalRole()
+    window.addEventListener('gii-selection-changed', syncOperationalRole as EventListener)
+    window.addEventListener('gii-selection-cleared', syncOperationalRole as EventListener)
+    return () => {
+      window.removeEventListener('gii-selection-changed', syncOperationalRole as EventListener)
+      window.removeEventListener('gii-selection-cleared', syncOperationalRole as EventListener)
+    }
+  }, [])
+
+  const roleCode = detectedOperationalRole || detectedRole
   const detectedUserKey = [
     String(detectedUser?.username || '').trim().toLowerCase(),
     String(detectedUser?.fullName || detectedUser?.full_name || '').trim().toLowerCase(),
@@ -6952,18 +6947,13 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
     btnPaddingY: Number.isFinite(Number((cfg as any).btnPaddingY)) ? Number((cfg as any).btnPaddingY) : 8
   }
 
-  // --- Editing TI config
+  // --- Editing IT config
   const editConfig = {
     show: cfg.showEditButtons !== false,
     overlayColor: normalizeHexColor(cfg.editOverlayColor, '#7c3aed'),
     pageColor: normalizeHexColor(cfg.editPageColor, '#0d3b66'),
     pageId: String(cfg.editPageId || 'page_45'),
-    ammPageId: String((cfg as any).editAmmPageId || 'page_48'),
-    fieldStatoTI: String(cfg.fieldStatoTI || 'stato_TI'),
-    fieldPresaTI: String(cfg.fieldPresaTI || 'presa_in_carico_TI'),
-    minStato: Number.isFinite(Number(cfg.editMinStato)) ? Number(cfg.editMinStato) : 2,
-    maxStato: Number.isFinite(Number(cfg.editMaxStato)) ? Number(cfg.editMaxStato) : 2,
-    presaRequiredVal: Number.isFinite(Number(cfg.editPresaRequiredVal)) ? Number(cfg.editPresaRequiredVal) : 2
+    ammPageId: String((cfg as any).editAmmPageId || 'page_48')
   }
 
 
@@ -6972,32 +6962,29 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
   // Campi minimi necessari per:
   // - gating dei pulsanti (presa/stato/esito per ruolo)
   // - computeNodoAttivo (serve vedere quali nodi hanno già dati)
-  // - assegnazione TI (ti_assegnato_*)
+  // - assegnazione IT (it_assegnato_*)
   const watchFields = [
     'origine_pratica',
-    'ti_assegnato_username', 'ti_assegnato_nome', 'dt_assegnazione_ti', 'ti_assegnato_da',
+    'it_assegnato_username', 'it_assegnato_nome', 'dt_assegnazione_it', 'it_assegnato_da',
 
     'presa_in_carico_TR', 'dt_presa_in_carico_TR',
     'stato_TR', 'dt_stato_TR',
     'esito_TR', 'dt_esito_TR',
     'note_TR',
 
-    'presa_in_carico_TI', 'dt_presa_in_carico_TI',
-    'stato_TI', 'dt_stato_TI',
-    'esito_TI', 'dt_esito_TI',
-    'note_TI',
+    'dt_presa_in_carico_IT',
+    'stato_IT', 'dt_stato_IT',
+    'note_IT',
 
-    'GII_arch', 'dt_archiviazione_TI', 'archiviato_da',
+    'GII_arch',
 
-    'presa_in_carico_RZ', 'dt_presa_in_carico_RZ',
-    'stato_RZ', 'dt_stato_RZ',
-    'esito_RZ', 'dt_esito_RZ',
-    'note_RZ',
+    'dt_presa_in_carico_CS',
+    'stato_CS', 'dt_stato_CS',
+    'note_CS',
 
-    'presa_in_carico_RI', 'dt_presa_in_carico_RI',
-    'stato_RI', 'dt_stato_RI',
-    'esito_RI', 'dt_esito_RI',
-    'note_RI',
+    'dt_presa_in_carico_RIT',
+    'stato_RIT', 'dt_stato_RIT',
+    'note_RIT',
 
     'dt_presa_in_carico_DT',
     'stato_DT', 'dt_stato_DT',
@@ -7009,15 +6996,15 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
     'determinazione_registrata_il', 'determinazione_registrata_da',
     'determinazione_mancata_firma_protocollo', 'determinazione_mancata_firma_data', 'determinazione_mancata_firma_motivo',
 
-    'dt_presa_in_carico_RI_AMM',
-    'stato_RI_AMM', 'dt_stato_RI_AMM',
-    'esito_RI_AMM', 'dt_esito_RI_AMM',
-    'note_RI_AMM',
+    'dt_presa_in_carico_RIA',
+    'stato_RIA', 'dt_stato_RIA',
+    'esito_RIA', 'dt_esito_RIA',
+    'note_RIA',
 
-    'dt_presa_in_carico_TI_AMM',
-    'stato_TI_AMM', 'dt_stato_TI_AMM',
-    'esito_TI_AMM', 'dt_esito_TI_AMM',
-    'note_TI_AMM'
+    'dt_presa_in_carico_IA',
+    'stato_IA', 'dt_stato_IA',
+    'esito_IA', 'dt_esito_IA',
+    'note_IA'
   ]
 
 const queryFields = React.useMemo(() => ['*'], [])
@@ -7072,7 +7059,7 @@ const queryFields = React.useMemo(() => ['*'], [])
 
   React.useEffect(() => {
     const req = ++forcedReqRef.current
-    const isTiAmmSelection = roleCode === 'TI_AMM'
+    const isIaSelection = roleCode === 'IA'
 
     if (!profileReady) {
       forcedContextRef.current = ''
@@ -7092,22 +7079,22 @@ const queryFields = React.useMemo(() => ['*'], [])
       selection.layerUrl,
       selection.oid,
       roleCode,
-      isTiAmmSelection ? detectedUserKey : ''
+      isIaSelection ? detectedUserKey : ''
     ].join('|')
     const contextChanged = forcedContextRef.current !== contextKey
     forcedContextRef.current = contextKey
 
     // Non mantenere visibile la pratica precedente quando cambia selezione o
-    // account. Per il TI_AMM la pratica resta nascosta durante ogni nuova
+    // account. Per il IA la pratica resta nascosta durante ogni nuova
     // verifica autorizzativa; per gli altri ruoli un refresh della stessa
     // selezione non provoca lampeggi inutili.
-    if (contextChanged || isTiAmmSelection) setForcedActive(null)
+    if (contextChanged || isIaSelection) setForcedActive(null)
 
-    setDirectAccessGate({ status: isTiAmmSelection ? 'checking' : 'idle' })
+    setDirectAccessGate({ status: isIaSelection ? 'checking' : 'idle' })
 
     ;(async () => {
       try {
-        if (isTiAmmSelection && contextChanged) {
+        if (isIaSelection && contextChanged) {
           // Il proxy può essere stato creato nella sessione di un altro account.
           // Al cambio di selezione o identità la verifica autorizzativa ricostruisce
           // il proxy nel contesto corrente; i refresh successivi possono riusarlo.
@@ -7124,13 +7111,13 @@ const queryFields = React.useMemo(() => ['*'], [])
         const baseData = cacheEntry?.data && typeof cacheEntry.data === 'object' ? cacheEntry.data : null
         const baseOid = baseData ? Number(baseData[idFieldName] ?? baseData.OBJECTID ?? selection.oid) : NaN
 
-        if (!isTiAmmSelection && baseData && Number.isFinite(baseOid) && baseOid === selection.oid) {
+        if (!isIaSelection && baseData && Number.isFinite(baseOid) && baseOid === selection.oid) {
           const quickState: SelState = { ds: dsTry, oid: selection.oid, idFieldName, data: baseData, sig: stateKey }
           setForcedActive({ key: selection.layerUrl, state: quickState })
         }
 
         const wantsAll = queryFields.includes('*')
-        const needsQuery = isTiAmmSelection || !baseData || wantsAll || queryFields.some(f => f && f !== '*' && !Object.prototype.hasOwnProperty.call(baseData, f)) || selRefreshNonce > 0
+        const needsQuery = isIaSelection || !baseData || wantsAll || queryFields.some(f => f && f !== '*' && !Object.prototype.hasOwnProperty.call(baseData, f)) || selRefreshNonce > 0
         if (!needsQuery) return
 
         const where = `${idFieldName}=${selection.oid}`
@@ -7140,14 +7127,14 @@ const queryFields = React.useMemo(() => ['*'], [])
         const recs: any[] = res?.records || []
         if (!recs.length) {
           setForcedActive(null)
-          setDirectAccessGate({ status: isTiAmmSelection ? 'unavailable' : 'idle' })
+          setDirectAccessGate({ status: isIaSelection ? 'unavailable' : 'idle' })
           return
         }
 
         const r0 = recs[0]
         const fetched = r0?.getData?.() || {}
 
-        if (isTiAmmSelection && !isPracticeAssignedToCurrentTiAmm(fetched, detectedUser)) {
+        if (isIaSelection && !isPracticeAssignedToCurrentIa(fetched, detectedUser)) {
           setForcedActive(null)
           setDirectAccessGate({ status: 'denied' })
           return
@@ -7159,37 +7146,34 @@ const queryFields = React.useMemo(() => ['*'], [])
           ? { ...(fetched || {}), ...((cached?.data || {}) as any) }
           : { ...((baseData || {}) as any), ...(fetched || {}) }
 
-        if (isTiAmmSelection) {
+        if (isIaSelection) {
           // Le informazioni di assegnazione usate dal pannello restano quelle
           // appena verificate sul servizio, anche quando si recuperano altri
           // campi da una cache recente dell'editing.
-          const assignment = getTiAmmAssignment(fetched)
-          const assignmentAliases = new Set([
-            'ti_amm_assegnato_username', 'ti_amm_assegnato_user', 'ti_amm_assegnato',
-            'ti_amm_username', 'utente_ti_amm', 'ti_amm_assegnato_nome', 'ti_amm_assegnato_name'
-          ])
+          const assignment = getIaAssignment(fetched)
+          const assignmentAliases = new Set(['ia_assegnato_username', 'ia_assegnato_nome'])
           Object.keys(d0).forEach(key => {
             if (assignmentAliases.has(String(key).toLowerCase())) delete d0[key]
           })
-          d0.ti_amm_assegnato_username = assignment.username
-          d0.ti_amm_assegnato_nome = assignment.name
+          d0.ia_assegnato_username = assignment.username
+          d0.ia_assegnato_nome = assignment.name
         }
 
         const oid0 = Number(d0[idFieldName] ?? d0.OBJECTID ?? selection.oid)
         if (!Number.isFinite(oid0) || oid0 !== selection.oid) {
           setForcedActive(null)
-          setDirectAccessGate({ status: isTiAmmSelection ? 'unavailable' : 'idle' })
+          setDirectAccessGate({ status: isIaSelection ? 'unavailable' : 'idle' })
           return
         }
 
         writeSelectedFeatureCache(selection.layerUrl, selection.oid, idFieldName, d0, 'azioni')
         const st: SelState = { ds: dsTry, oid: selection.oid, idFieldName, data: d0, sig: stateKey }
         setForcedActive({ key: selection.layerUrl, state: st })
-        setDirectAccessGate({ status: isTiAmmSelection ? 'allowed' : 'idle' })
+        setDirectAccessGate({ status: isIaSelection ? 'allowed' : 'idle' })
       } catch {
         if (req !== forcedReqRef.current) return
         setForcedActive(null)
-        setDirectAccessGate({ status: isTiAmmSelection ? 'unavailable' : 'idle' })
+        setDirectAccessGate({ status: isIaSelection ? 'unavailable' : 'idle' })
       }
     })()
   }, [selection?.layerUrl, selection?.oid, selection?.idFieldName, selection?.viewName, queryFields.join('|'), selRefreshNonce, roleCode, detectedUserKey, profileReady])

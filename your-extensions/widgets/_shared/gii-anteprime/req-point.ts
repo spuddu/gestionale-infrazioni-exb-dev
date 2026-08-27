@@ -1,12 +1,12 @@
 // Logica centralizzata per decidere se una pratica GII richiede (e quindi deve mostrare)
 // un punto in mappa. È usata dagli editor e dalla logica cartografica condivisa.
-// Il viewer del fascicolo è accessibile soltanto da gii-editing-ti e gii-editing-amm.
+// Il viewer del fascicolo è accessibile soltanto da gii-editing-tec e gii-editing-amm.
 //
-// Estratta da gii-editing-ti (unica copia originale, non duplicata altrove prima d'ora).
+// Estratta da gii-editing-tec (unica copia originale, non duplicata altrove prima d'ora).
 //
 // IMPORTANTE: il campo salvato `req_point` (0/1) NON è la fonte di verità da leggere qui.
-// Viene scritto solo al salvataggio da gii-editing-ti, quindi per le pratiche appena arrivate
-// da survey (TR) e mai ancora modificate da un TI può restare vuoto/non significativo pur
+// Viene scritto solo al salvataggio da gii-editing-tec, quindi per le pratiche appena arrivate
+// da survey (TR) e mai ancora modificate da un IT può restare vuoto/non significativo pur
 // avendo coordinate reali. La fonte di verità è invece SEMPRE il ricalcolo di questa funzione
 // a partire dal tipo di violazione presente negli attributi correnti del record.
 
@@ -40,8 +40,8 @@ export function buildReqPointSqlWhereClause (): string {
 }
 
 // Whitelist degli articoli norma3 validi (stessa lista delle chiavi di NORMA3_TO_VFIELD in
-// gii-editing-ti — qui riportata a parte perché quella mappa serve anche ad altro, specifico
-// di editing-ti, e non va spostata per intero).
+// gii-editing-tec — qui riportata a parte perché quella mappa serve anche ad altro, specifico
+// di editing-tec, e non va spostata per intero).
 const NORMA3_VALID_CODES = new Set([
   'Art8', 'Art12', 'Art27', 'Art28', 'Art29', 'Art30', 'Art31', 'Art32',
   'Art33', 'Art34', 'Art35', 'Art36', 'Art37', 'Art39'

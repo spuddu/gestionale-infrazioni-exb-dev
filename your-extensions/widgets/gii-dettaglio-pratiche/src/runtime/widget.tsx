@@ -7,7 +7,7 @@ import type { IMConfig, TabConfig } from '../config'
 import { defaultConfig, DETAIL_DEFAULT_TAB_FIELDS, DETAIL_NEVER_SHOW_FIELDS, DETAIL_GENERAL_FIELDS } from '../config'
 import { filterGiiAttachmentsForTechnicalRoles } from '../../../_shared/gii-anteprime/allegati/gii-attachment-viewer'
 import { ensureNsdJsonOnlyQueryFormat } from '../../../_shared/gii-anteprime/nsd-query-format-fix'
-import { isGiiTiAmmUser, isPracticeAssignedToCurrentTiAmm } from '../../../_shared/gii-access/ti-amm-assignment'
+import { isGiiIaUser, isPracticeAssignedToCurrentIa } from '../../../_shared/gii-access/ia-assignment'
 import { isGiiPracticePayloadCurrent, isGiiPracticeSelectionContextCurrent } from '../../../_shared/gii-selection/practice-context'
 
 
@@ -38,27 +38,24 @@ function readDetailCurrentUser (): DetailCurrentUser | null {
   }
 }
 
-const RUOLO_NUM: Record<string, number> = { TR: 1, TI: 2, RZ: 3, RI: 4, DT: 5, DA: 6, ADMIN: 7 }
+const RUOLO_CODES = new Set(['TR', 'IT', 'CS', 'RIT', 'DT', 'DA', 'ADMIN', 'IA', 'RIA'])
 const AREA_NUM: Record<string, number> = { AMM: 1, AGR: 2, TEC: 3 }
 const SETTORE_NUM: Record<string, number> = { CR: 1, GI: 2, D1: 3, D2: 4, D3: 5, D4: 6, D5: 7, D6: 8, DS: 9 }
-const RUOLO_COD_FROM_NUM: Record<number, string> = { 1: 'TR', 2: 'TI', 3: 'RZ', 4: 'RI', 5: 'DT', 6: 'DA', 7: 'ADMIN' }
 const AREA_COD_FROM_NUM: Record<number, string> = { 1: 'AMM', 2: 'AGR', 3: 'TEC' }
 const SETTORE_COD_FROM_NUM: Record<number, string> = { 1: 'CR', 2: 'GI', 3: 'D1', 4: 'D2', 5: 'D3', 6: 'D4', 7: 'D5', 8: 'D6', 9: 'DS' }
 
 function normalizeRuoloCod (v: any): string {
   const s = String(v ?? '').trim().toUpperCase().replace(/[\s-]+/g, '_')
   if (!s) return ''
-  const n = Number(s)
-  if (Number.isFinite(n) && RUOLO_COD_FROM_NUM[n]) return RUOLO_COD_FROM_NUM[n]
-  if (s === 'RI_AMM') return 'RI'
-  if (s === 'TI_AMM') return 'TI'
-  if (s === 'CAPO_SETTORE' || s.includes('RESPONSABILE_DI_ZONA')) return 'RZ'
+  if (s === 'CAPO_SETTORE') return 'CS'
   if (s.includes('TECNICO_RILEVATORE')) return 'TR'
-  if (s.includes('TECNICO_ISTRUTTORE')) return 'TI'
-  if (s.includes('RESPONSABILE_ISTRUTTORIA')) return 'RI'
+  if (s.includes('ISTRUTTORE_AMMINISTRATIVO')) return 'IA'
+  if (s.includes('ISTRUTTORE_TECNICO')) return 'IT'
+  if (s.includes('RESPONSABILE_ISTRUTTORIA_TECNICA')) return 'RIT'
+  if (s.includes('RESPONSABILE_ISTRUTTORIA_AMMINISTRATIVA')) return 'RIA'
   if (s.includes('DIRETTORE')) return 'DT'
   if (s.includes('AMMINISTRATORE')) return 'ADMIN'
-  return RUOLO_NUM[s] != null ? s : s
+  return RUOLO_CODES.has(s) ? s : s
 }
 
 function normalizeAreaCod (v: any): string {
@@ -77,7 +74,6 @@ function normalizeSettoreCod (v: any): string {
   if (!s) return ''
   const n = Number(s)
   if (Number.isFinite(n) && SETTORE_COD_FROM_NUM[n]) return SETTORE_COD_FROM_NUM[n]
-  if (s === 'CS') return 'DS'
   const distretto = s.match(/DISTRETTO([1-6])/)
   if (distretto) return `D${distretto[1]}`
   if (s.includes('DRENO') || s.includes('SCOLO')) return 'DS'
@@ -912,7 +908,7 @@ function DetailSectionCard (props: {
 /**
  * Regolamento articoli — testo regolamentare delle violazioni, mostrato cliccando
  * sulla riga della violazione nella scheda Violazione (stesso comportamento di
- * gii-editing-ti). Tabella opzionale: se l'URL non è configurato la riga resta
+ * gii-editing-tec). Tabella opzionale: se l'URL non è configurato la riga resta
  * statica come prima, senza freccia né possibilità di espansione.
  */
 type RegolamentoArticolo = {
@@ -1078,7 +1074,7 @@ function RegolamentoArticleDetails (props: { articleState: RegolamentoArticoliSt
 // Riga di una violazione nella scheda Violazione. Se è disponibile un codice
 // articolo (e quindi la tabella regolamento), la riga è cliccabile ed espande
 // il testo dell'articolo — stesso comportamento della scheda Violazione di
-// gii-editing-ti. Deve essere un componente React vero (non una semplice
+// gii-editing-tec. Deve essere un componente React vero (non una semplice
 // funzione di rendering) perché tiene uno stato "aperto/chiuso" proprio.
 function ViolationArticleLine (props: { artLabel: string; description: string; grado?: string; articleCode?: string; articleState: RegolamentoArticoliState }) {
   const [open, setOpen] = React.useState(false)
@@ -2519,20 +2515,11 @@ function buildIterFullNameFromAttrs (attrs: any): string {
   return [nome, cognome].filter(Boolean).join(' ').trim()
 }
 
-function isLikelyTechnicalUsername (raw: any): boolean {
-  const s = String(raw ?? '').trim()
-  if (!s) return false
-  if (s.includes('@') || s.includes('\\')) return true
-  if (/[_]/.test(s)) return true
-  if (/^(TEST|TR|TI|RZ|RI|DT|DA|ADMIN)([\s_-]|$)/i.test(s)) return true
-  return false
-}
-
 function isIterRoleSectorPlaceholder (raw: any): boolean {
   const s = String(raw ?? '').trim().toUpperCase().replace(/[\s_-]+/g, ' ')
   if (!s) return false
-  if (/^(TR|TI|RZ|RI|DT|DA|ADMIN)(?: (?:D[1-6]|DS|CR|GI|AGR|TEC|AMM))?$/.test(s)) return true
-  if (/^(TECNICO RILEVATORE|TECNICO ISTRUTTORE|CAPO SETTORE|RESPONSABILE ISTRUTTORIA|DIRETTORE D AREA|DIRETTORE AREA)$/.test(s)) return true
+  if (/^(TR|IT|IA|CS|RIT|RIA|DT|DA|ADMIN)(?: (?:D[1-6]|DS|CR|GI|AGR|TEC|AMM))?$/.test(s)) return true
+  if (/^(TECNICO RILEVATORE|ISTRUTTORE TECNICO|CAPO SETTORE|RESPONSABILE ISTRUTTORIA TECNICA|RESPONSABILE ISTRUTTORIA AMMINISTRATIVA|DIRETTORE D AREA|DIRETTORE AREA)$/.test(s)) return true
   return false
 }
 
@@ -2542,7 +2529,7 @@ function resolveIterPersonName (raw: any, utentiMap?: Map<string, IterUtenteEntr
   const entry = utentiMap?.get(normalizeIterUsernameKey(text))
   const fullName = String(entry?.fullName || '').trim()
   if (fullName) return fullName
-  return isLikelyTechnicalUsername(text) ? '' : text
+  return isIterRoleSectorPlaceholder(text) ? '' : text
 }
 
 
@@ -2571,7 +2558,7 @@ function findIterRecipientNameByRole (roleRaw: any, areaRaw: any, settoreRaw: an
     const entrySettore = normalizeSettoreCod(entry.settoreCod)
 
     if (area && entryArea && entryArea !== area) return
-    if ((role === 'TR' || role === 'TI' || role === 'RZ') && settore && entrySettore && entrySettore !== settore) return
+    if ((role === 'TR' || role === 'IT' || role === 'CS') && settore && entrySettore && entrySettore !== settore) return
 
     const label = String(entry.fullName || entry.username || '').trim()
     if (label && !matches.includes(label)) matches.push(label)
@@ -2584,13 +2571,14 @@ function formatIterQualificaLabel (raw: any): string {
   const original = String(raw ?? '').trim()
   const s = original.toUpperCase().replace(/[\s-]+/g, '_')
   if (!s) return ''
-  if (s === 'TI_AMM' || s.includes('TECNICO_ISTRUTTORE_AMMINISTRATIVO')) return 'Tecnico istruttore amministrativo'
-  if (s === 'RI_AMM' || s.includes('RESPONSABILE_ISTRUTTORIA_AMMINISTRATIVA')) return 'Responsabile istruttoria amministrativa'
+  if (s === 'IA' || s.includes('ISTRUTTORE_AMMINISTRATIVO')) return 'Istruttore amministrativo'
+  if (s === 'RIA' || s.includes('RESPONSABILE_ISTRUTTORIA_AMMINISTRATIVA')) return 'Responsabile istruttoria amministrativa'
   if (s === 'DA' || s.includes('AA_GG') || s.includes('PROGRAMMAZIONE_FINANZIARIA')) return 'Direttore Area AA. GG. e P.F.'
   if (s === 'TR' || s.includes('TECNICO_RILEVATORE')) return 'Tecnico rilevatore'
-  if (s === 'TI' || s.includes('TECNICO_ISTRUTTORE')) return 'Tecnico istruttore'
-  if (s === 'RZ' || s.includes('RESPONSABILE_DI_ZONA') || s.includes('CAPO_SETTORE')) return 'Capo Settore'
-  if (s === 'RI' || s.includes('RESPONSABILE_ISTRUTTORIA')) return 'Responsabile istruttoria'
+  if (s === 'IT' || s.includes('ISTRUTTORE_TECNICO')) return 'Istruttore tecnico'
+  if (s === 'CS' || s.includes('CAPO_SETTORE')) return 'Capo Settore'
+  if (s === 'RIT' || s.includes('RESPONSABILE_ISTRUTTORIA_TECNICA')) return 'Responsabile istruttoria tecnica'
+  if (s === 'RIA' || s.includes('RESPONSABILE_ISTRUTTORIA_AMMINISTRATIVA')) return 'Responsabile istruttoria amministrativa'
   if (s === 'DT' || s.includes('DIRETTORE')) return 'Direttore d’Area'
   if (s === 'ADMIN' || s.includes('AMMINISTRATORE')) return 'Amministratore'
   return original
@@ -2624,8 +2612,8 @@ const EVENTO_LABELS: Record<string, string> = {
   INTEGRAZIONE: 'Richiesta integrazione',
   RAPPORTO_APPROVATO: 'Rapporto approvato',
   PRESA_IN_CARICO: 'Presa in carico',
-  ASSEGNAZIONE_TI: 'Assegnazione TI',
-  ASSEGNAZIONE_TI_AMM: 'Assegnazione TI AMM',
+  ASSEGNAZIONE_IT: 'Assegnazione IT',
+  ASSEGNAZIONE_IA: 'Assegnazione Istruttore amministrativo',
   RESPINTA: 'Respinta',
   ELIMINAZIONE: 'Eliminazione'
 }
@@ -2656,7 +2644,7 @@ function formatCycleTitleEvento (c: CicloRecord, cycleLabelNumber: number): stri
     cycleLabelNumber === 1 &&
     apertura === 'CREAZIONE' &&
     chiusura === 'ISTRUTTORIA_TRASMESSA' &&
-    (ruolo === 'TR' || ruolo === 'TI')
+    (ruolo === 'TR' || ruolo === 'IT')
   ) {
     return 'Nuova rilevazione trasmessa'
   }
@@ -2670,8 +2658,8 @@ function cleanIterNoteForDisplay (raw: any): string {
 
   // Le assegnazioni sono già rappresentate da titolo ciclo e destinatario.
   // Nel log storico possono però contenere note automatiche tipo:
-  // "Assegna Tecnico Istruttore: Test_TI_D1 (Test_TI_D1)".
-  const assignmentOnly = text.match(/^\s*(Riapertura amministrativa n\.\s*\d+\.\s*)?(?:(?:Assegna|Assegnazione)\s+Tecnico\s+Istruttore(?:\s+amministrativo)?|Tecnico\s+Istruttore(?:\s+amministrativo)?\s+assegnato)\s*[:.-]/i)
+  // "Assegna Istruttore tecnico: <nominativo> (<username>)".
+  const assignmentOnly = text.match(/^\s*(Riapertura amministrativa n\.\s*\d+\.\s*)?(?:(?:Assegna|Assegnazione)\s+(?:Istruttore\s+tecnico|Tecnico\s+Istruttore\s+amministrativo)|(?:Istruttore\s+tecnico|Tecnico\s+Istruttore\s+amministrativo)\s+assegnato)\s*[:.-]/i)
   if (assignmentOnly) {
     return String(assignmentOnly[1] || '').trim()
   }
@@ -2707,11 +2695,11 @@ function formatSettoreIter (raw: any): string {
   return code || String(raw || '')
 }
 
-function normalizeOriginePraticaCod (raw: any): 'TR' | 'TI' | '' {
+function normalizeOriginePraticaCod (raw: any): 'TR' | 'IT' | '' {
   const s = String(raw ?? '').trim().toUpperCase()
   if (!s) return ''
   if (s === '1' || s === 'TR' || s.includes('TECNICO RILEVATORE')) return 'TR'
-  if (s === '2' || s === 'TI' || s.includes('TECNICO ISTRUTTORE')) return 'TI'
+  if (s === '2' || s === 'IT' || s.includes('ISTRUTTORE TECNICO')) return 'IT'
   return ''
 }
 
@@ -2725,14 +2713,13 @@ const ITER_TECHNICAL_MODIFIED_FIELDS = new Set([
 
   // Metadati automatici di assegnazione: sono già rappresentati da evento/destinatario
   // dell'iter e non devono comparire tra i campi effettivamente modificati dall'operatore.
-  'ti_assegnato_username',
-  'ti_assegnato_nome',
-  'ti_assegnato_da',
-  'dt_assegnazione_ti',
-  'ti_amm_assegnato_username',
-  'ti_amm_assegnato_nome',
-  'ti_amm_assegnato_da',
-  'dt_assegnazione_ti_amm',
+  'it_assegnato_username',
+  'it_assegnato_nome',
+  'it_assegnato_da',
+  'dt_assegnazione_it',
+  'ia_assegnato_username',
+  'ia_assegnato_nome',
+  'ia_assegnato_da',
 
   // Numerazioni e date formali assegnate automaticamente dalle azioni di workflow:
   // restano visibili nei Dati generali / nell'evento di iter, ma non sono campi
@@ -2744,24 +2731,24 @@ const ITER_TECHNICAL_MODIFIED_FIELDS = new Set([
 
   // Campi automatici di stato/esito/presa in carico del workflow.
   'stato_TR',
-  'stato_TI',
-  'stato_RZ',
-  'stato_RI',
+  'stato_IT',
+  'stato_CS',
+  'stato_RIT',
   'stato_DT',
   'determinazione_stato',
   'dt_stato_TR',
-  'dt_stato_TI',
-  'dt_stato_RZ',
-  'dt_stato_RI',
+  'dt_stato_IT',
+  'dt_stato_CS',
+  'dt_stato_RIT',
   'dt_stato_DT',
   'determinazione_data',
   'esito_DT',
   'determinazione_numero',
   'dt_esito_DT',
   'determinazione_trasmessa_firma_il',
-  'dt_presa_in_carico_TI',
-  'dt_presa_in_carico_RZ',
-  'dt_presa_in_carico_RI',
+  'dt_presa_in_carico_IT',
+  'dt_presa_in_carico_CS',
+  'dt_presa_in_carico_RIT',
   'dt_presa_in_carico_DT',
   'determinazione_registrata_il',
 
@@ -2779,20 +2766,15 @@ const ITER_TECHNICAL_MODIFIED_FIELDS = new Set([
 const ITER_TECHNICAL_MODIFIED_ALIASES = new Set([
   'Rim.',
   'Trasm.',
-  'TI assegnato da',
-  'TI AMM assegnato da',
-  'Assegnazione TI effettuata da',
-  'Assegnazione TI AMM effettuata da',
+  'IT assegnato da',
+  'Assegnazione IT effettuata da',
   'Numero rapporto tecnico',
   'Data rapporto tecnico',
   'Numero atto',
   'Data atto',
-  'Username TI assegnato',
-  'Username TI AMM assegnato',
-  'TI assegnato',
-  'TI AMM assegnato',
-  'Data assegnazione TI',
-  'Data assegnazione TI AMM'
+  'Username IT assegnato',
+  'IT assegnato',
+  'Data assegnazione IT',
 ].map(normKey))
 
 function isTechnicalIterModifiedField (raw: any, alias?: any): boolean {
@@ -2870,12 +2852,12 @@ function buildSyntheticCreationCycle (data: any, loggedCicli: CicloRecord[]): Ci
   if (!origin) return null
 
   const hasLogged = (loggedCicli || []).length > 0
-  const isOpenTiCreation = origin === 'TI' && !hasLogged
+  const isOpenTiCreation = origin === 'IT' && !hasLogged
   const dt = origin === 'TR'
     ? (pickRilevazioneDateValueForDisplay(data) ?? firstNonEmptyAttr(data, ['data_rilevazione', 'CreationDate', 'creationdate', 'created_date', 'start', 'end', 'data_firma']))
-    : firstNonEmptyAttr(data, ['dt_presa_in_carico_TI', 'dt_stato_TI', 'data_firma', 'data_rilevazione', 'CreationDate', 'creationdate', 'created_date', 'start', 'end'])
-  const user = firstNonEmptyAttr(data, origin === 'TI'
-    ? ['ti_assegnato_username', 'created_user', 'Creator', 'creator', 'utente_loggato', 'ti_assegnato_nome']
+    : firstNonEmptyAttr(data, ['dt_presa_in_carico_IT', 'dt_stato_IT', 'data_firma', 'data_rilevazione', 'CreationDate', 'creationdate', 'created_date', 'start', 'end'])
+  const user = firstNonEmptyAttr(data, origin === 'IT'
+    ? ['it_assegnato_username', 'created_user', 'Creator', 'creator', 'utente_loggato', 'it_assegnato_nome']
     : ['created_user', 'Creator', 'creator', 'tecnico_rilevatore']
   )
   const areaRaw = firstNonEmptyAttr(data, ['area_cod', 'area', 'cod_area'])
@@ -2890,7 +2872,7 @@ function buildSyntheticCreationCycle (data: any, loggedCicli: CicloRecord[]): Ci
     dt_apertura: dt ?? null,
     evento_chiusura: isOpenTiCreation ? '' : 'ISTRUTTORIA_TRASMESSA',
     dt_chiusura: isOpenTiCreation ? null : (dt ?? null),
-    ruolo_destinatario: isOpenTiCreation ? '' : 'RZ',
+    ruolo_destinatario: isOpenTiCreation ? '' : 'CS',
     utente_destinatario: '',
     note_chiusura: '',
     area: formatAreaIter(areaRaw),
@@ -2905,7 +2887,7 @@ function buildSyntheticCreationCycle (data: any, loggedCicli: CicloRecord[]): Ci
 function isInitialCreationCycleForDisplay (c: CicloRecord, cycleLabelNumber: number): boolean {
   const apertura = String(c?.evento_apertura || '').trim().toUpperCase()
   const ruolo = normalizeRuoloCod(c?.ruolo_competente)
-  return cycleLabelNumber === 1 && apertura === 'CREAZIONE' && (ruolo === 'TR' || ruolo === 'TI')
+  return cycleLabelNumber === 1 && apertura === 'CREAZIONE' && (ruolo === 'TR' || ruolo === 'IT')
 }
 
 function getInitialCreationOperatorRawForDisplay (data: any, c: CicloRecord, cycleLabelNumber: number): any {
@@ -2914,7 +2896,7 @@ function getInitialCreationOperatorRawForDisplay (data: any, c: CicloRecord, cyc
   const ruolo = normalizeRuoloCod(c?.ruolo_competente) || normalizeOriginePraticaCod(pickAttrCI(data, ['origine_pratica', 'Origine_pratica', 'ORIGINE_PRATICA']))
 
   // Il primo ciclo rappresenta l'autore originario della rilevazione.
-  // Non deve usare l'eventuale TI assegnato successivamente dal Capo Settore.
+  // Non deve usare l'eventuale IT assegnato successivamente dal Capo Settore.
   if (ruolo === 'TR') {
     // Per le pratiche nate da TR il nominativo dell'operatore deve arrivare
     // dall'autore reale della feature/log originario, non dal campo descrittivo
@@ -2922,8 +2904,8 @@ function getInitialCreationOperatorRawForDisplay (data: any, c: CicloRecord, cyc
     return firstNonEmptyAttr(data, ['created_user', 'Creator', 'creator', 'tecnico_rilevatore'])
   }
 
-  if (ruolo === 'TI') {
-    return firstNonEmptyAttr(data, ['ti_assegnato_username', 'created_user', 'Creator', 'creator', 'utente_loggato', 'tecnico_rilevatore', 'ti_assegnato_nome'])
+  if (ruolo === 'IT') {
+    return firstNonEmptyAttr(data, ['it_assegnato_username', 'created_user', 'Creator', 'creator', 'utente_loggato', 'tecnico_rilevatore', 'it_assegnato_nome'])
   }
 
   return null
@@ -2974,7 +2956,7 @@ function CicliTimeline (props: { globalId: string; hasSel: boolean; sortDir: 'as
         const availableFields = normalizeLogFieldNameSet(userFields)
         const outFields = pickLogOutFields(availableFields, [
           'username', 'full_name', 'nome', 'cognome', 'nome_completo', 'nominativo',
-          'ruolo', 'ruolo_cod', 'ruoloCod',
+          'ruolo_cod', 'ruoloCod',
           'area', 'area_cod', 'areaCod',
           'settore', 'settore_cod', 'settoreCod'
         ])
@@ -2988,7 +2970,7 @@ function CicliTimeline (props: { globalId: string; hasSel: boolean; sortDir: 'as
           const a = f?.attributes || {}
           const username = String(pickAttrCI(a, ['username']) || '').trim()
           const fullName = buildIterFullNameFromAttrs(a)
-          const ruoloCod = normalizeRuoloCod(pickAttrCI(a, ['ruolo_cod', 'ruoloCod', 'ruolo']))
+          const ruoloCod = normalizeRuoloCod(pickAttrCI(a, ['ruolo_cod', 'ruoloCod']))
           const areaCod = normalizeAreaCod(pickAttrCI(a, ['area_cod', 'areaCod', 'area']))
           const settoreCod = normalizeSettoreCod(pickAttrCI(a, ['settore_cod', 'settoreCod', 'settore']))
           if (username) map.set(normalizeIterUsernameKey(username), { username, fullName, ruoloCod, areaCod, settoreCod })
@@ -3039,14 +3021,14 @@ function CicliTimeline (props: { globalId: string; hasSel: boolean; sortDir: 'as
           const settoreRaw = a.settore_cod || a.settore
           return {
             numero_ciclo_ruolo: a.numero_ciclo_ruolo ?? null,
-            ruolo_competente: resolveCodedValueLabelFromFieldNames(logFields, ['ruolo_competente', 'ruolo_cod', 'ruolo'], ruoloCompetenteRaw) || formatRuoloIter(ruoloCompetenteRaw),
+            ruolo_competente: resolveCodedValueLabelFromFieldNames(logFields, ['ruolo_competente', 'ruolo_cod'], ruoloCompetenteRaw) || formatRuoloIter(ruoloCompetenteRaw),
             utente_operatore: String(a.utente_operatore || ''),
             stato_record: String(a.stato_record || ''),
             evento_apertura: String(a.evento_apertura || ''),
             dt_apertura: a.dt_apertura ?? null,
             evento_chiusura: String(a.evento_chiusura || ''),
             dt_chiusura: a.dt_chiusura ?? null,
-            ruolo_destinatario: resolveCodedValueLabelFromFieldNames(logFields, ['ruolo_destinatario', 'ruolo_cod', 'ruolo'], ruoloDestinatarioRaw) || formatRuoloIter(ruoloDestinatarioRaw),
+            ruolo_destinatario: resolveCodedValueLabelFromFieldNames(logFields, ['ruolo_destinatario', 'ruolo_cod'], ruoloDestinatarioRaw) || formatRuoloIter(ruoloDestinatarioRaw),
             utente_destinatario: String(a.utente_destinatario || ''),
             note_chiusura: String(a.note_chiusura || ''),
             area: resolveCodedValueLabelFromFieldNames(logFields, ['area_cod', 'area'], areaRaw) || formatAreaIter(areaRaw),
@@ -3488,7 +3470,7 @@ function nsdReadArt30Equipment (data: any): NsdArt30EquipmentSummary {
   }
 }
 
-// Normalizzazione chiave e riconoscimento tipo attrezzatura: stessa logica di gii-editing-ti,
+// Normalizzazione chiave e riconoscimento tipo attrezzatura: stessa logica di gii-editing-tec,
 // per restare coerenti sull'etichetta mostrata (es. "Curva di derivazione") a partire dal
 // codice/descrizione letti dal catalogo parametri.
 function nsdAttrezzaturaKey (value: any): string {
@@ -3511,7 +3493,7 @@ function nsdAttrezzaturaTipoLabel (value: any): string | null {
 }
 
 // Catalogo attrezzature Art.30 (codice -> etichetta leggibile), stessa tabella parametri
-// consultata da gii-editing-ti. Cache in memoria per evitare richieste ripetute.
+// consultata da gii-editing-tec. Cache in memoria per evitare richieste ripetute.
 const __giiNsdAttrezzatureCatalogCache: Record<string, Promise<Map<string, string>>> = {}
 
 async function nsdLoadAttrezzatureCatalog (rawUrl: any): Promise<Map<string, string>> {
@@ -3668,7 +3650,7 @@ function nsdComputeSummaryFromRows (rows: NsdDetailRow[], perc: number): NsdSumm
 
 // Una casistica nota spese è "compilata" se ha almeno una riga collegata, nessuna riga
 // con quantità non valorizzata (<=0) e un totale economico non nullo. Stessa soglia
-// (0.004) usata in gii-editing-ti per evitare falsi "compilato" su importi arrotondati a zero.
+// (0.004) usata in gii-editing-tec per evitare falsi "compilato" su importi arrotondati a zero.
 function nsdIsCasisticaCompiled (rows: NsdDetailRow[], codice: string, percentualeSpeseGenerali: number): boolean {
   const norm = nsdNormalizeCasistica(codice)
   const groupRows = (rows || []).filter(r => nsdNormalizeCasistica(r.codice_casistica) === norm)
@@ -4145,7 +4127,6 @@ function DetailTabsPanel (props: {
   ui: any
   tabFields: TabFields
   tabs: TabConfig[]
-  editConfig: any
   mapCfg: any
   notaSpeseCfg: { detailUrl: string; attrezzatureParametriUrl: string }
   regolamentoCfg: { articoliUrl: string }
@@ -5401,19 +5382,6 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
     return (Array.isArray(tabsJs) ? tabsJs : []).filter(t => t && t.id !== 'azioni')
   }, [migratedTabs])
 
-  // --- Editing TI config
-  const editConfig = {
-    show: cfg.showEditButtons !== false,
-    overlayColor: normalizeHexColor(cfg.editOverlayColor, '#7c3aed'),
-    pageColor: normalizeHexColor(cfg.editPageColor, '#5b21b6'),
-    pageId: String(cfg.editPageId || 'editing-ti'),
-    fieldStatoTI: String(cfg.fieldStatoTI || 'stato_TI'),
-    fieldPresaTI: String(cfg.fieldPresaTI || 'presa_in_carico_TI'),
-    minStato: Number.isFinite(Number(cfg.editMinStato)) ? Number(cfg.editMinStato) : 2,
-    maxStato: Number.isFinite(Number(cfg.editMaxStato)) ? Number(cfg.editMaxStato) : 2,
-    presaRequiredVal: Number.isFinite(Number(cfg.editPresaRequiredVal)) ? Number(cfg.editPresaRequiredVal) : 2
-  }
-
 
   // Datasource risolta dinamicamente dal widget Elenco: una sola vista effettiva per sessione.
   // Nessun DataSourceComponent / multi-view dichiarata qui.
@@ -5421,29 +5389,25 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
     'origine_pratica',
     'CreationDate', 'creationdate', 'created_date', 'created_user', 'Creator', 'creator',
     'start', 'end', 'data_firma',
-    'ti_assegnato_username', 'ti_assegnato_nome', 'dt_assegnazione_ti', 'ti_assegnato_da',
-    'ti_amm_assegnato_username', 'ti_amm_assegnato_user', 'ti_amm_assegnato',
-    'ti_amm_assegnato_nome', 'ti_amm_assegnato_name',
+    'it_assegnato_username', 'it_assegnato_nome', 'dt_assegnazione_it', 'it_assegnato_da',
+    'ia_assegnato_username', 'ia_assegnato_nome',
 
     'presa_in_carico_TR', 'dt_presa_in_carico_TR',
     'stato_TR', 'dt_stato_TR',
     'esito_TR', 'dt_esito_TR',
     'note_TR',
 
-    'presa_in_carico_TI', 'dt_presa_in_carico_TI',
-    'stato_TI', 'dt_stato_TI',
-    'esito_TI', 'dt_esito_TI',
-    'note_TI',
+    'dt_presa_in_carico_IT',
+    'stato_IT', 'dt_stato_IT',
+    'note_IT',
 
-    'presa_in_carico_RZ', 'dt_presa_in_carico_RZ',
-    'stato_RZ', 'dt_stato_RZ',
-    'esito_RZ', 'dt_esito_RZ',
-    'note_RZ',
+    'dt_presa_in_carico_CS',
+    'stato_CS', 'dt_stato_CS',
+    'note_CS',
 
-    'presa_in_carico_RI', 'dt_presa_in_carico_RI',
-    'stato_RI', 'dt_stato_RI',
-    'esito_RI', 'dt_esito_RI',
-    'note_RI',
+    'dt_presa_in_carico_RIT',
+    'stato_RIT', 'dt_stato_RIT',
+    'note_RIT',
 
     'dt_presa_in_carico_DT',
     'stato_DT', 'dt_stato_DT',
@@ -5506,12 +5470,12 @@ const queryFields = React.useMemo(() => {
     return [
       currentUser.username,
       currentUser.profiloCod ?? currentUser.profilo_cod,
-      currentUser.ruoloCod ?? currentUser.ruolo_cod ?? currentUser.ruoloLabel ?? currentUser.ruolo,
+      currentUser.ruoloCod ?? currentUser.ruolo_cod,
       currentUser.areaCod ?? currentUser.area_cod ?? currentUser.areaLabel ?? currentUser.area
     ].map(v => String(v ?? '').trim().toLowerCase()).join('|')
   }, [currentUser])
   const currentUserReady = !!currentUser && !!String(currentUser.username || '').trim()
-  const currentUserIsTiAmm = currentUserReady && isGiiTiAmmUser(currentUser)
+  const currentUserIsIa = currentUserReady && isGiiIaUser(currentUser)
 
   const [selection, setSelection] = React.useState<RuntimeSelection | null>(() => readRuntimeSelection())
   React.useEffect(() => {
@@ -5560,7 +5524,7 @@ const queryFields = React.useMemo(() => {
       setDetailAccessState('checking')
       return
     }
-    setDetailAccessState(currentUserIsTiAmm ? 'checking' : 'allowed')
+    setDetailAccessState(currentUserIsIa ? 'checking' : 'allowed')
     ;(async () => {
       try {
         const stateKey = `${selection.layerUrl}:${selection.oid}:${selRefreshNonce}`
@@ -5572,19 +5536,19 @@ const queryFields = React.useMemo(() => {
         const baseData = cacheEntry?.data && typeof cacheEntry.data === 'object' ? cacheEntry.data : null
         const baseOid = baseData ? Number(baseData[idFieldName] ?? baseData.OBJECTID ?? selection.oid) : NaN
 
-        if (!currentUserIsTiAmm && baseData && Number.isFinite(baseOid) && baseOid === selection.oid) {
+        if (!currentUserIsIa && baseData && Number.isFinite(baseOid) && baseOid === selection.oid) {
           const quickDs = syncCachedProxy || createRuntimeDsStubFromData(selection.layerUrl, selection.viewName, idFieldName, baseData)
           const quickState: SelState = { ds: quickDs, oid: selection.oid, idFieldName, data: mergeSelectionDataKeepingRealGeometry(baseData, null, false), sig: stateKey }
           setForcedActive({ key: selection.layerUrl, state: quickState, ownerUserKey: currentUserKey })
           setDetailAccessState('allowed')
-        } else if (currentUserIsTiAmm) {
+        } else if (currentUserIsIa) {
           // Mai mostrare dati memorizzati prima di aver verificato l'assegnazione.
           setForcedActive(null)
         }
 
         const dsTry = syncCachedProxy || await createRuntimeDsProxyFromLayerUrl(selection.layerUrl, selection.viewName)
         const wantsAll = queryFields.includes('*')
-        const needsQuery = currentUserIsTiAmm || !baseData || wantsAll || queryFields.some(f => f && f !== '*' && !Object.prototype.hasOwnProperty.call(baseData, f)) || !hasUsableDataGeometry(baseData) || selRefreshNonce > 0
+        const needsQuery = currentUserIsIa || !baseData || wantsAll || queryFields.some(f => f && f !== '*' && !Object.prototype.hasOwnProperty.call(baseData, f)) || !hasUsableDataGeometry(baseData) || selRefreshNonce > 0
         if (!needsQuery) return
 
         const where = `${idFieldName}=${selection.oid}`
@@ -5593,7 +5557,7 @@ const queryFields = React.useMemo(() => {
         const recs: any[] = res?.records || []
         if (!recs.length) {
           setForcedActive(null)
-          setDetailAccessState(currentUserIsTiAmm ? 'error' : 'idle')
+          setDetailAccessState(currentUserIsIa ? 'error' : 'idle')
           return
         }
         const r0 = recs[0]
@@ -5607,7 +5571,7 @@ const queryFields = React.useMemo(() => {
           setDetailAccessState('idle')
           return
         }
-        if (currentUserIsTiAmm && !isPracticeAssignedToCurrentTiAmm(d0, currentUser)) {
+        if (currentUserIsIa && !isPracticeAssignedToCurrentIa(d0, currentUser)) {
           setForcedActive(null)
           setDetailAccessState('denied')
           return
@@ -5619,11 +5583,11 @@ const queryFields = React.useMemo(() => {
       } catch {
         if (req === forcedReqRef.current) {
           setForcedActive(null)
-          setDetailAccessState(currentUserIsTiAmm ? 'error' : 'idle')
+          setDetailAccessState(currentUserIsIa ? 'error' : 'idle')
         }
       }
     })()
-  }, [selection?.layerUrl, selection?.oid, selection?.idFieldName, selection?.viewName, queryFields.join('|'), selRefreshNonce, currentUserKey, currentUserReady, currentUserIsTiAmm])
+  }, [selection?.layerUrl, selection?.oid, selection?.idFieldName, selection?.viewName, queryFields.join('|'), selRefreshNonce, currentUserKey, currentUserReady, currentUserIsIa])
 
   const currentSelectionSig = selection?.layerUrl && selection.oid != null
     ? `${selection.layerUrl}:${selection.oid}:${selRefreshNonce}`
@@ -5700,7 +5664,6 @@ const queryFields = React.useMemo(() => {
                   ui={ui}
                   tabFields={tabFields}
 				  tabs={detailTabs}
-                  editConfig={editConfig}
                   notaSpeseCfg={{
                     detailUrl: String((cfg as any).nsNotaSpeseDettaglioUrl || ''),
                     attrezzatureParametriUrl: String((cfg as any).attrezzatureParametriUrl || '')

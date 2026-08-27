@@ -4,7 +4,7 @@
 // sintesi Art.30 (da campi diretti sul record, non da righe di dettaglio),
 // raggruppamento delle righe di dettaglio per casistica, calcolo del
 // totale reale e della dicitura "(Vedi nota/note spese allegata/e)".
-// Estratta da gii-editing-ti/gii-azioni (copie identiche, mai unificate).
+// Estratta da gii-editing-tec/gii-azioni (copie identiche, mai unificate).
 // =================================================================
 
 import { ensureCachedFeatureLayer } from '../../esri-layer-cache'
@@ -98,7 +98,7 @@ function countCauzioneDecurtataRowsForPdf (raw: any): number {
   return count
 }
 
-// Normalizzazione chiave e riconoscimento tipo attrezzatura: stessa logica di gii-editing-ti,
+// Normalizzazione chiave e riconoscimento tipo attrezzatura: stessa logica di gii-editing-tec,
 // per restare coerenti sull'etichetta mostrata (es. "Curva di derivazione") a partire dal
 // codice/descrizione letti dal catalogo parametri.
 export function attrezzaturaKeyPdf (value: any): string {
@@ -147,7 +147,7 @@ export async function loadAttrezzatureCatalogPdf (parametriUrl: string): Promise
 }
 
 // Estrae il codice tipo (es. "ATT-003") dall'ID istanza composto (es. "ATT-003::ms488i9r2z8"),
-// stessa logica di attrezzaturaInstanceTipoCode in gii-editing-ti.
+// stessa logica di attrezzaturaInstanceTipoCode in gii-editing-tec.
 export function attrezzaturaInstanceTipoCodePdf (instanceId: string): string {
   const idx = String(instanceId || '').indexOf('::')
   return idx >= 0 ? instanceId.slice(0, idx) : String(instanceId || '')

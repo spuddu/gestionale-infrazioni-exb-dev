@@ -5,7 +5,7 @@ import { createPortal } from 'react-dom'
 import { JimuMapViewComponent, type JimuMapView } from 'jimu-arcgis'
 import type { IMConfig } from '../config'
 import { defaultConfig, type MapSearchConfig, type SearchFieldConfig } from '../config'
-import { buildTiAmmAssignmentWhereClause } from '../../../_shared/gii-access/ti-amm-assignment'
+import { buildIaAssignmentWhereClause } from '../../../_shared/gii-access/ia-assignment'
 
 type Props = AllWidgetProps<IMConfig>
 type Option = { value: string; label: string; raw: any }
@@ -68,7 +68,7 @@ function parseRilevazioneCode(raw: string): { oid: number | null; origine: numbe
   const oid = !isNaN(oidN) ? oidN : null
   let origine: number | null = null
   let settore: string | null = null
-  if (parts[1]) { const r = parts[1].toUpperCase(); if (r === 'TR') origine = 1; else if (r === 'TI') origine = 2 }
+  if (parts[1]) { const r = parts[1].toUpperCase(); if (r === 'TR') origine = 1; else if (r === 'IT') origine = 2 }
   if (parts[2]) settore = parts[2].toUpperCase()
   return { oid, origine, settore }
 }
@@ -100,7 +100,7 @@ function buildWherePratica(pv: PraticaValues): { where: string | null; hasUserCr
   if (pv.articolo) { const art = ARTICOLI_PRATICA.find(a => a.id === pv.articolo); if (art) clauses.push(`(${art.whereClause})`) }
   if (!clauses.length) return { where: null, hasUserCriteria: false }
   // req_point non e' una fonte di verita' affidabile per le pratiche Survey: puo'
-  // essere vuoto/non aggiornato fino alla prima modifica del TI. La ricerca in mappa
+  // essere vuoto/non aggiornato fino alla prima modifica dell'IT. La ricerca in mappa
   // non deve quindi escludere una pratica sulla base del solo campo salvato.
   return { where: clauses.join(' AND '), hasUserCriteria: true }
 }
@@ -357,9 +357,9 @@ function sqlQuoteMapVisibility (v: string): string {
 // Stessa logica di visibilità già in uso in gii-elenco-pratiche-pro/gii-dashboard/
 // gii-report-pratiche, tradotta in clausola SQL: qui serve perché il layer di base della
 // mappa (GII_INFRAZIONI_VIEW_ALL) non è già scoped per ruolo/settore come le viste usate
-// altrove — RI/DT vedono tutta la loro area, RZ solo il proprio settore, TI solo le
-// pratiche assegnate a lui nel proprio settore, DA/RI_AMM tutta l'area AMM in fase
-// sanzionatoria, TI_AMM solo le proprie pratiche assegnate in fase sanzionatoria.
+// altrove — RIT/DT vedono tutta la loro area, CS solo il proprio settore, IT solo le
+// pratiche assegnate a lui nel proprio settore, DA/RIA tutta l'area AMM in fase
+// sanzionatoria, IA solo le proprie pratiche assegnate in fase sanzionatoria.
 function buildRoleVisibilityWhereClause (user: ReturnType<typeof readGiiUserForMapVisibility>): string {
   if (!user) return '1=0'
   if (user.isAdmin) return '1=1'
@@ -375,44 +375,44 @@ function buildRoleVisibilityWhereClause (user: ReturnType<typeof readGiiUserForM
   // IS NOT NULL non basta: il valore 0 indica nodo non attivo. I campi della
   // determinazione sono testuali e mantengono invece il controllo <> ''.
   const faseSanzionatoriaClause =
-    "((stato_RI_AMM IS NOT NULL AND stato_RI_AMM <> 0) OR " +
-    "(esito_RI_AMM IS NOT NULL AND esito_RI_AMM <> 0) OR " +
-    "(stato_TI_AMM IS NOT NULL AND stato_TI_AMM <> 0) OR " +
-    "(esito_TI_AMM IS NOT NULL AND esito_TI_AMM <> 0) OR " +
+    "((stato_RIA IS NOT NULL AND stato_RIA <> 0) OR " +
+    "(esito_RIA IS NOT NULL AND esito_RIA <> 0) OR " +
+    "(stato_IA IS NOT NULL AND stato_IA <> 0) OR " +
+    "(esito_IA IS NOT NULL AND esito_IA <> 0) OR " +
     "(determinazione_stato IS NOT NULL AND determinazione_stato <> '') OR " +
     "(determinazione_numero IS NOT NULL AND determinazione_numero <> ''))"
 
   // area_cod identifica l'area tecnica originaria della pratica e non viene
   // trasformato in AMM al passaggio alla fase sanzionatoria. Per i ruoli AMM
   // il gate corretto è quindi la presenza di dati amministrativi significativi.
-  if (role === 'DA' || role === 'RI_AMM') {
+  if (role === 'DA' || role === 'RIA') {
     return faseSanzionatoriaClause
   }
 
-  if (role === 'TI_AMM') {
-    return `${faseSanzionatoriaClause} AND ${buildTiAmmAssignmentWhereClause(user)}`
+  if (role === 'IA') {
+    return `${faseSanzionatoriaClause} AND ${buildIaAssignmentWhereClause(user)}`
   }
 
-  if ((role === 'RI' || role === 'DT') && (area === 'AGR' || area === 'TEC')) {
+  if ((role === 'RIT' || role === 'DT') && (area === 'AGR' || area === 'TEC')) {
     return `UPPER(area_cod) = '${area}'`
   }
 
-  if (role === 'RZ' && (area === 'AGR' || area === 'TEC') && settore) {
+  if (role === 'CS' && (area === 'AGR' || area === 'TEC') && settore) {
     return `UPPER(area_cod) = '${area}' AND UPPER(settore_cod) = '${settore}'`
   }
 
-  if (role === 'TI' && (area === 'AGR' || area === 'TEC') && settore) {
+  if (role === 'IT' && (area === 'AGR' || area === 'TEC') && settore) {
     // GII_INFRAZIONI_VIEW_ALL espone Creator ma non created_user. Inoltre la
-    // visibilità deve replicare l'elenco: una rilevazione TR è visibile al TI
-    // soltanto dopo assegnazione nominativa; una rilevazione nata dal TI resta
+    // visibilità deve replicare l'elenco: una rilevazione TR è visibile all'IT
+    // soltanto dopo assegnazione nominativa; una rilevazione nata dall'IT resta
     // al suo autore finché non esiste un'assegnazione esplicita, che prevale.
-    const assigned = `UPPER(ti_assegnato_username) = UPPER('${me}')`
-    const notAssigned = `(ti_assegnato_username IS NULL OR ti_assegnato_username = '')`
+    const assigned = `UPPER(it_assegnato_username) = UPPER('${me}')`
+    const notAssigned = `(it_assegnato_username IS NULL OR it_assegnato_username = '')`
     const createdByMe = `UPPER(Creator) = UPPER('${me}')`
-    const tiScope =
+    const itScope =
       `((origine_pratica = 1 AND ${assigned}) OR ` +
       `(origine_pratica = 2 AND (${assigned} OR (${notAssigned} AND ${createdByMe}))))`
-    return `UPPER(area_cod) = '${area}' AND UPPER(settore_cod) = '${settore}' AND ${tiScope}`
+    return `UPPER(area_cod) = '${area}' AND UPPER(settore_cod) = '${settore}' AND ${itScope}`
   }
 
   // Profilo non riconosciuto: fail closed. Finché lo Header non pubblica un profilo
@@ -1078,7 +1078,7 @@ export default function Widget(props: Props) {
               <div className='fieldBlock' style={{ width: 160, flex: '0 1 160px' }}>
                 <label className='filterLabel'>Numero pratica</label>
                 <input className='filterInput' type='text' value={praticaValues.numeroPratica} disabled={busy || !layer || !praticaValues.tipoPratica}
-                  placeholder={praticaValues.tipoPratica === 'rilevazione' ? 'Es. 411-TI-D1' : praticaValues.tipoPratica === 'rapporto' ? 'Es. R-25/2026' : (praticaValues.tipoPratica === 'accertamento' || praticaValues.tipoPratica === 'verbale') ? 'Es. A-1/2026' : '— seleziona tipo —'}
+                  placeholder={praticaValues.tipoPratica === 'rilevazione' ? 'Es. 411-IT-D1' : praticaValues.tipoPratica === 'rapporto' ? 'Es. R-25/2026' : (praticaValues.tipoPratica === 'accertamento' || praticaValues.tipoPratica === 'verbale') ? 'Es. A-1/2026' : '— seleziona tipo —'}
                   onChange={e => setPraticaValues(prev => ({ ...prev, numeroPratica: e.target.value }))} />
               </div>
               <div className='fieldBlock' style={{ width: 200, flex: '0 1 200px' }}>

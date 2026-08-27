@@ -69,7 +69,7 @@ export default function Setting(props: AllWidgetSettingProps<IMConfig>) {
       </div>
 
 
-      <div style={hint}>Qui il RI gestisce le voci interne del Consorzio, da usare solo quando il prezzario regionale non contiene la voce necessaria.</div>
+      <div style={hint}>Qui il Responsabile istruttoria tecnica gestisce le voci interne del Consorzio, da usare solo quando il prezzario regionale non contiene la voce necessaria.</div>
 
     </div>
   )

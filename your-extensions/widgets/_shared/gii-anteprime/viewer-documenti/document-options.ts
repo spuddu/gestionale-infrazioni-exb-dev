@@ -3,7 +3,7 @@ export type GiiDocumentPrintOptions = {
   includeNotaSpese: boolean
   includeMappa: boolean
   includeAllegatiTecnici: boolean
-  includeAllegatiAmministrativi: boolean
+  includeAllegaiainistrativi: boolean
   includePropostaContestazione?: boolean
   includeDeterminazione?: boolean
   includeAttoContestazione?: boolean
@@ -39,7 +39,7 @@ export function defaultGiiDocumentPrintOptions (): GiiDocumentPrintOptions {
     includeNotaSpese: false,
     includeMappa: false,
     includeAllegatiTecnici: false,
-    includeAllegatiAmministrativi: false,
+    includeAllegaiainistrativi: false,
     includePropostaContestazione: false,
     includeDeterminazione: false,
     includeAttoContestazione: false,

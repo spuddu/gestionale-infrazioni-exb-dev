@@ -149,7 +149,7 @@ export default function Setting(props: AllWidgetSettingProps<IMConfig>) {
   const FIELD_OPTS: Record<string, Opt[]> = {
     dati_generali: [
       {v:'area_cod',l:'Area'}, {v:'settore_cod',l:'Settore'}, {v:'ufficio_zona',l:'Ufficio di zona'},
-      {v:'tecnico_rilevatore',l:'Tecnico rilevatore'}, {v:'data_rilevazione',l:'Data rilevazione'}, {v:'ti_assegnato_nome',l:'Tecnico istruttore'}, {v:'data_firma',l:'Data compilazione'}
+      {v:'tecnico_rilevatore',l:'Tecnico rilevatore'}, {v:'data_rilevazione',l:'Data rilevazione'}, {v:'it_assegnato_nome',l:'Istruttore tecnico'}, {v:'data_firma',l:'Data compilazione'}
     ],
     trasgressore: [
       {v:'tipologia_soggetto',l:'Tipologia soggetto'}, {v:'qualifica_fondo',l:'Qualifica fondo'},
@@ -326,7 +326,7 @@ export default function Setting(props: AllWidgetSettingProps<IMConfig>) {
         <Text k='nsPrezzarioInternoArticoliUrl' label='Tabella articoli prezzario interno'/>
         <Text k='nsNuoviPrezziUrl' label='Tabella Nuovi Prezzi'/>
         <Text k='nsNotaSpeseDettaglioUrl' label='Nota spese - vista di consultazione (sola lettura)'/>
-        <Text k='nsNotaSpeseDettaglioUrlWrite' label='Nota spese - vista editabile (Create/Update, per TI)'/>
+        <Text k='nsNotaSpeseDettaglioUrlWrite' label='Nota spese - vista editabile (Create/Update, per IT)'/>
         <Text k='nsParametriUrl' label='Tabella parametri nota spese'/>
         <Text k='nsParametroCode' label='Codice parametro spese generali' placeholder='SPESE_GENERALI_PERC'/>
         <Text k='attrezzatureParametriUrl' label='Vista di consultazione parametri Art. 30 (attrezzature e cauzione)' placeholder='https://.../FeatureServer/0'/>
@@ -420,7 +420,7 @@ export default function Setting(props: AllWidgetSettingProps<IMConfig>) {
         {(['dati_generali','trasgressore','violazione','dati_tecnici'] as const).map(t => <button key={t} type='button' onClick={()=>setLayoutTab(t)} style={{...P.btn, borderColor:layoutTab===t?'#60a5fa':'rgba(96,165,250,0.25)', background:layoutTab===t?'rgba(96,165,250,0.20)':'rgba(96,165,250,0.08)'}}>{t.replace(/_/g,' ')}</button>)}
       </div>
       {layoutTab === 'violazione' ? <>
-        <SectionBox title='Scheda Violazione — gruppi reali del form' hint='Queste impostazioni regolano la scheda Violazione così come viene renderizzata: gruppo sinistro “Violazioni e valutazione RI” e gruppo destro “Descrizione e circostanze”.'>
+        <SectionBox title='Scheda Violazione — gruppi reali del form' hint='Queste impostazioni regolano la scheda Violazione così come viene renderizzata: gruppo sinistro “Violazioni e valutazione RIT” e gruppo destro “Descrizione e circostanze”.'>
           <div style={P.grid3}><Num k='violazioneLayoutLeftPercent' label='Larghezza iniziale gruppo sinistro (%)' min={30} max={80}/><Num k='violazioneLayoutMinLeftPx' label='Min gruppo sinistro (px)' min={260} max={900}/><Num k='violazioneLayoutMinRightPx' label='Min gruppo destro (px)' min={220} max={800}/></div>
           <div style={P.grid2}><Num k='violazioneSplitterWidth' label='Larghezza separatore (px)' min={6} max={40}/><Color k='violazioneSplitterColor' label='Colore separatore' fallback='#94a3b8'/></div>
           <div style={P.grid2}><Num k='violazioneDescrizioneRows' label='Righe descrizione dettagliata' min={2} max={12}/><Num k='violazioneCircostanzeRows' label='Righe circostanze rilevanti' min={2} max={12}/></div>

@@ -2,7 +2,7 @@
 //
 // Unica fonte di verità per la mappatura dati -> segnaposto usata per generare
 // il DOCX di lavoro della determinazione dirigenziale. Il PDF verificato nel
-// fascicolo non viene costruito da questo modulo: è il PDF caricato dal TI_AMM.
+// fascicolo non viene costruito da questo modulo: è il PDF caricato dal IA.
 //
 // Deliberatamente autonomo: non dipende dal livello di formattazione campi di
 // gii-editing-amm (pdfFieldValue/getFieldInfo/domainLabel), che è generico e
@@ -145,17 +145,17 @@ function normalizeRilevazioneCodeForAmm (data: any, oid: number | null): string 
   const stored = cleanReportCodeText(pickAttrCI(d, ['numero_rilevazione', 'Numero_rilevazione', 'NUMERO_RILEVAZIONE', 'cod_pratica', 'Cod_pratica', 'COD_PRATICA', 'numero_rapporto', 'Numero_rapporto', 'NUMERO_RAPPORTO']))
   const raw = stored.toUpperCase().replace(/_/g, '-').replace(/\s+/g, '-')
   const op = pickAttrCI(d, ['origine_pratica', 'Origine_pratica', 'ORIGINE_PRATICA'])
-  let prefix = (op === 2 || op === '2' || String(op || '').toUpperCase() === 'TI') ? 'TI' : 'TR'
+  let prefix = (op === 2 || op === '2' || String(op || '').toUpperCase() === 'IT') ? 'IT' : 'TR'
   let oidPart = oid != null && Number.isFinite(Number(oid)) ? String(Number(oid)) : ''
   let settore = normalizeSectorCodeForAmm(pickAttrCI(d, ['settore_cod', 'Settore_cod', 'SETTORE_COD', 'settore', 'Settore', 'SETTORE'])) || settoreCodeFromUfficioAmm(pickAttrCI(d, ['ufficio_zona', 'Ufficio_zona', 'UFFICIO_ZONA']))
 
-  let m = raw.match(/^(TR|TI)-?(\d+)(?:-([A-Z0-9]+))?$/i)
+  let m = raw.match(/^(TR|IT)-?(\d+)(?:-([A-Z0-9]+))?$/i)
   if (m) {
     prefix = m[1].toUpperCase()
     oidPart = m[2]
     if (!settore && m[3]) settore = normalizeSectorCodeForAmm(m[3]) || m[3].toUpperCase()
   } else {
-    m = raw.match(/^(\d+)-?(TR|TI)(?:-([A-Z0-9]+))?$/i)
+    m = raw.match(/^(\d+)-?(TR|IT)(?:-([A-Z0-9]+))?$/i)
     if (m) {
       oidPart = m[1]
       prefix = m[2].toUpperCase()
@@ -174,7 +174,7 @@ function normalizeReportCode (raw: any, oid: number | null): string {
   const code = cleanReportCodeText(raw)
   if (code) {
     const normalized = code.toUpperCase().replace(/_/g, '-').replace(/\s+/g, '-')
-    if (/^(TR|TI)-?\d+(?:-[A-Z0-9]+)?$/.test(normalized) || /^\d+-?(TR|TI)(?:-[A-Z0-9]+)?$/.test(normalized)) return ''
+    if (/^(TR|IT)-?\d+(?:-[A-Z0-9]+)?$/.test(normalized) || /^\d+-?(TR|IT)(?:-[A-Z0-9]+)?$/.test(normalized)) return ''
     return /^\d+$/.test(code) ? `R-${code}` : code
   }
   return ''

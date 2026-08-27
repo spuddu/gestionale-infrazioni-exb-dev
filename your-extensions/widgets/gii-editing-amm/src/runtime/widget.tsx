@@ -14,7 +14,7 @@ import type { IMConfig, SummaryFieldConfig } from '../config'
 import { defaultConfig } from '../config'
 import { createPortal } from 'react-dom'
 import { ensureAttivitaCorrentiJsonOnlyQueryFormat } from '../../../_shared/gii-alerts/attivita-correnti-query-format-fix'
-import { isPracticeAssignedToCurrentTiAmm } from '../../../_shared/gii-access/ti-amm-assignment'
+import { isPracticeAssignedToCurrentIa } from '../../../_shared/gii-access/ia-assignment'
 import { getGiiPracticeContextStamp, isGiiPracticeContextStampCurrent, isGiiPracticePayloadCurrent, isGiiPracticeSelectionContextCurrent, stampGiiPracticePayload } from '../../../_shared/gii-selection/practice-context'
 
 const LOG_EVENTI_CICLI_URL = 'https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_LOG_EVENTI_CICLI/FeatureServer/0'
@@ -36,7 +36,6 @@ type AmmUtenteCached = {
   nome: string
   cognome: string
   titolo: string
-  ruolo?: number | null
   area?: number | null
   settore?: number | null
   ruolo_cod?: string
@@ -45,21 +44,15 @@ type AmmUtenteCached = {
 }
 type AttoParticipantIdentity = { nome: string; cognome: string; titolo: string }
 
-const AMM_RUOLO_NUM: Record<string, number> = { TR: 1, TI: 2, RZ: 3, RI: 4, DT: 5, DA: 6, ADMIN: 7 }
 const AMM_AREA_NUM: Record<string, number> = { AMM: 1, AGR: 2, TEC: 3 }
-const AMM_SETTORE_NUM: Record<string, number> = { CR: 1, GI: 2, D1: 3, D2: 4, D3: 5, D4: 6, D5: 7, D6: 8, DS: 9, CS: 9 }
-const AMM_RUOLO_COD_FROM_NUM: Record<number, string> = { 1: 'TR', 2: 'TI', 3: 'RZ', 4: 'RI', 5: 'DT', 6: 'DA', 7: 'ADMIN' }
+const AMM_SETTORE_NUM: Record<string, number> = { CR: 1, GI: 2, D1: 3, D2: 4, D3: 5, D4: 6, D5: 7, D6: 8, DS: 9 }
 const AMM_AREA_COD_FROM_NUM: Record<number, string> = { 1: 'AMM', 2: 'AGR', 3: 'TEC' }
 const AMM_SETTORE_COD_FROM_NUM: Record<number, string> = { 1: 'CR', 2: 'GI', 3: 'D1', 4: 'D2', 5: 'D3', 6: 'D4', 7: 'D5', 8: 'D6', 9: 'DS' }
 
 function normalizeAmmUtentiRuoloCod (v: any): string {
   const s = String(v ?? '').trim().toUpperCase().replace(/[\s-]+/g, '_')
   if (!s) return ''
-  const n = Number(s)
-  if (Number.isFinite(n) && AMM_RUOLO_COD_FROM_NUM[n]) return AMM_RUOLO_COD_FROM_NUM[n]
-  if (s === 'TI_AMM') return 'TI'
-  if (s === 'RI_AMM') return 'RI'
-  return AMM_RUOLO_NUM[s] != null ? s : s
+  return s
 }
 
 function normalizeAmmUtentiAreaCod (v: any): string {
@@ -78,7 +71,6 @@ function normalizeAmmUtentiSettoreCod (v: any): string {
   if (!s) return ''
   const n = Number(s)
   if (Number.isFinite(n) && AMM_SETTORE_COD_FROM_NUM[n]) return AMM_SETTORE_COD_FROM_NUM[n]
-  if (s === 'CS') return 'DS'
   const distretto = s.match(/DISTRETTO([1-6])/)
   if (distretto) return `D${distretto[1]}`
   if (s.includes('DRENO') || s.includes('SCOLO')) return 'DS'
@@ -94,7 +86,7 @@ async function loadAmmUtentiRowsForAtto (): Promise<AmmUtenteCached[]> {
     if (typeof fl?.load === 'function') await fl.load()
     const res = await fl.queryFeatures({
       where: `(tipo_record IS NULL OR tipo_record = 'UTENTE')`,
-      outFields: ['username', 'nome', 'cognome', 'titolo', 'ruolo', 'area', 'settore', 'ruolo_cod', 'area_cod', 'settore_cod'],
+      outFields: ['username', 'nome', 'cognome', 'titolo', 'area', 'settore', 'ruolo_cod', 'area_cod', 'settore_cod'],
       returnGeometry: false
     })
     return (res?.features || []).map((f: any) => {
@@ -104,10 +96,9 @@ async function loadAmmUtentiRowsForAtto (): Promise<AmmUtenteCached[]> {
         nome: String(a.nome || '').trim(),
         cognome: String(a.cognome || '').trim(),
         titolo: String(a.titolo || '').trim(),
-        ruolo: a.ruolo ?? null,
         area: a.area ?? null,
         settore: a.settore ?? null,
-        ruolo_cod: normalizeAmmUtentiRuoloCod(a.ruolo_cod || a.ruolo),
+        ruolo_cod: normalizeAmmUtentiRuoloCod(a.ruolo_cod),
         area_cod: normalizeAmmUtentiAreaCod(a.area_cod || a.area),
         settore_cod: normalizeAmmUtentiSettoreCod(a.settore_cod || a.settore)
       }
@@ -116,6 +107,19 @@ async function loadAmmUtentiRowsForAtto (): Promise<AmmUtenteCached[]> {
     console.warn('[GII-Editing-AMM] Errore lettura anagrafica GII_utenti per Atto:', e)
     return []
   }
+}
+
+async function loadUniqueAmmRoleUsername (roleRaw: string, areaRaw = 'AMM'): Promise<string> {
+  const role = normalizeAmmUtentiRuoloCod(roleRaw)
+  const area = normalizeAmmUtentiAreaCod(areaRaw)
+  const rows = await loadAmmUtentiRowsForAtto()
+  const usernames = Array.from(new Set(
+    rows
+      .filter(row => normalizeAmmUtentiRuoloCod(row.ruolo_cod) === role && (!area || normalizeAmmUtentiAreaCod(row.area_cod ?? row.area) === area))
+      .map(row => String(row.username || '').trim())
+      .filter(Boolean)
+  ))
+  return usernames.length === 1 ? usernames[0] : ''
 }
 
 function attoParticipantIdentity (entry: AmmUtenteCached | null | undefined): AttoParticipantIdentity {
@@ -130,22 +134,12 @@ function hasAttoParticipantName (entry: AttoParticipantIdentity): boolean {
   return !!entry.nome && !!entry.cognome
 }
 
-function usernameFromGiiActorLabel (value: any, expectedRoleTag?: string): string {
-  const raw = String(value ?? '').trim()
-  if (!raw) return ''
-  const parts = raw.split(/\s+-\s+/)
-  if (parts.length < 2) return ''
-  const tag = String(parts[0] || '').trim().toUpperCase()
-  if (expectedRoleTag && tag !== String(expectedRoleTag).trim().toUpperCase()) return ''
-  return String(parts.slice(1).join(' - ') || '').trim()
-}
-
 async function resolveAttoParticipants (
   attrs: Record<string, any>,
   profile: { username: string }
-): Promise<{ da: AttoParticipantIdentity; riAmm: AttoParticipantIdentity; tiAmm: AttoParticipantIdentity }> {
+): Promise<{ da: AttoParticipantIdentity; ria: AttoParticipantIdentity; ia: AttoParticipantIdentity }> {
   // Si legge sempre l'anagrafica corrente dalla tabella utenti: le sigle e la
-  // firma devono riflettere immediatamente eventuali cambi di DA/RI_AMM/TI_AMM.
+  // firma devono riflettere immediatamente eventuali cambi di DA/RIA/IA.
   // La tabella può contenere più profili per lo stesso username, quindi si
   // lavora sull'elenco dei record e non su una mappa username -> singolo profilo.
   const rows = await loadAmmUtentiRowsForAtto()
@@ -161,7 +155,7 @@ async function resolveAttoParticipants (
 
   const uniqueByRole = (role: string, area = 'AMM'): AttoParticipantIdentity => {
     const matches = rows.filter(row => {
-      const r = normalizeAmmUtentiRuoloCod(row.ruolo_cod ?? row.ruolo)
+      const r = normalizeAmmUtentiRuoloCod(row.ruolo_cod)
       const a = normalizeAmmUtentiAreaCod(row.area_cod ?? row.area)
       return r === role && (!area || a === area) && !!row.nome && !!row.cognome
     })
@@ -175,37 +169,18 @@ async function resolveAttoParticipants (
     return unique.length === 1 ? unique[0] : empty()
   }
 
-  const tiUsername = String(pickAttrCI(attrs, [
-    'ti_amm_assegnato_username', 'TI_AMM_assegnato_username',
-    'ti_amm_username', 'TI_AMM_username'
-  ]) || profile.username || '').trim()
+  const iaUsername = String(pickAttrCI(attrs, ['ia_assegnato_username']) || profile.username || '').trim()
 
-  let riUsername = String(pickAttrCI(attrs, [
-    'ri_amm_assegnato_username', 'RI_AMM_assegnato_username',
-    'ri_amm_username', 'RI_AMM_username',
-    'responsabile_istruttoria_amm_username'
-  ]) || '').trim()
-  if (!riUsername) {
-    riUsername = usernameFromGiiActorLabel(pickAttrCI(attrs, ['GII_da', 'gii_da']), 'RI-AMM') ||
-      usernameFromGiiActorLabel(pickAttrCI(attrs, ['GII_a', 'gii_a']), 'RI-AMM')
-  }
-
-  let daUsername = String(pickAttrCI(attrs, [
+  const daUsername = String(pickAttrCI(attrs, [
     'da_username', 'direttore_area_username', 'direttore_amm_username', 'dt_amm_username'
   ]) || '').trim()
-  if (!daUsername) {
-    daUsername = usernameFromGiiActorLabel(pickAttrCI(attrs, ['GII_da', 'gii_da']), 'DA') ||
-      usernameFromGiiActorLabel(pickAttrCI(attrs, ['GII_a', 'gii_a']), 'DA')
-  }
-
   const directDa = byUsername(daUsername)
-  const directRi = byUsername(riUsername)
-  const directTi = byUsername(tiUsername)
+  const directIa = byUsername(iaUsername)
 
   return {
     da: hasAttoParticipantName(directDa) ? directDa : uniqueByRole('DA', 'AMM'),
-    riAmm: hasAttoParticipantName(directRi) ? directRi : uniqueByRole('RI', 'AMM'),
-    tiAmm: directTi
+    ria: uniqueByRole('RIA', 'AMM'),
+    ia: directIa
   }
 }
 
@@ -216,22 +191,21 @@ function isValidAmmEmailAddress (value: any): boolean {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(value ?? '').trim())
 }
 
-function assignedTiAmmUsername (attrs: Record<string, any>): string {
+function assignedIaUsername (attrs: Record<string, any>): string {
   return String(pickAttrCI(attrs || {}, [
-    'ti_amm_assegnato_username', 'TI_AMM_assegnato_username',
-    'ti_amm_username', 'TI_AMM_username'
+    'ia_assegnato_username'
   ]) || '').trim()
 }
 
 /**
- * Restituisce l'indirizzo e-mail del TI_AMM assegnato alla pratica.
+ * Restituisce l'indirizzo e-mail dell'Istruttore amministrativo assegnato alla pratica.
  * Il mittente non viene mai ricavato dall'utente attualmente collegato: anche un
- * ADMIN che prepara il file deve usare l'indirizzo del TI_AMM assegnato.
+ * ADMIN che prepara il file deve usare l'indirizzo dell'Istruttore amministrativo assegnato.
  */
-async function loadAssignedTiAmmSenderEmail (attrs: Record<string, any>): Promise<string> {
-  const username = assignedTiAmmUsername(attrs)
+async function loadAssignedIaSenderEmail (attrs: Record<string, any>): Promise<string> {
+  const username = assignedIaUsername(attrs)
   if (!username) {
-    console.warn('[GII_EMAIL] Mittente non risolvibile: alla pratica non risulta assegnato alcun TI_AMM.')
+    console.warn('[GII_EMAIL] Mittente non risolvibile: alla pratica non risulta assegnato alcun IA.')
     throw new Error('L’indirizzo e-mail del mittente non è disponibile. Contattare l’amministratore del sistema.')
   }
 
@@ -240,7 +214,7 @@ async function loadAssignedTiAmmSenderEmail (attrs: Record<string, any>): Promis
   if (typeof fl?.load === 'function') await fl.load()
   const res = await fl.queryFeatures({
     where: `(tipo_record IS NULL OR tipo_record = 'UTENTE')`,
-    outFields: ['OBJECTID', 'username', 'email', 'ruolo', 'area', 'ruolo_cod', 'area_cod'],
+    outFields: ['OBJECTID', 'username', 'email', 'area', 'ruolo_cod', 'area_cod'],
     returnGeometry: false
   })
   const key = username.toLowerCase()
@@ -253,10 +227,10 @@ async function loadAssignedTiAmmSenderEmail (attrs: Record<string, any>): Promis
     throw new Error('L’indirizzo e-mail del mittente non è disponibile. Contattare l’amministratore del sistema.')
   }
 
-  // Se lo stesso account ha più profili, privilegiamo quello TI dell'Area
-  // amministrativa; l'indirizzo, comunque, deve essere univoco per l'account.
+  // Se lo stesso account ha più profili, privilegiamo quello di Istruttore amministrativo;
+  // l'indirizzo, comunque, deve essere univoco per l'account.
   const preferred = rows.filter((a: any) =>
-    normalizeAmmUtentiRuoloCod(a?.ruolo_cod ?? a?.ruolo) === 'TI' &&
+    normalizeAmmUtentiRuoloCod(a?.ruolo_cod) === 'IA' &&
     normalizeAmmUtentiAreaCod(a?.area_cod ?? a?.area) === 'AMM'
   )
   const candidates = preferred.length ? preferred : rows
@@ -312,7 +286,7 @@ async function loadAmmProtocolloEmailRecipient (): Promise<string> {
 
 /**
  * Legge i destinatari della determina direttamente dalla Rubrica in GII_utenti.
- * Non usa cache: una modifica effettuata da RI_AMM deve essere efficace già alla
+ * Non usa cache: una modifica effettuata da RIA deve essere efficace già alla
  * successiva generazione del file .eml, senza refresh o ripubblicazioni.
  */
 async function loadAmmDeterminaEmailRecipients (): Promise<AmmDeterminaEmailRecipients> {
@@ -356,7 +330,7 @@ async function loadAmmDeterminaEmailRecipients (): Promise<AmmDeterminaEmailReci
   return { to, cc }
 }
 
-type RoleCode = 'TI_AMM' | 'RI_AMM' | 'ADMIN' | string
+type RoleCode = 'IA' | 'RIA' | 'ADMIN' | string
 
 type SelectedState = {
   ds?: any | null
@@ -379,13 +353,14 @@ type EditIntentInfo = {
   data?: any | null
   readOnly?: boolean
   readOnlyMessage?: string
+  operationalRole?: string
   ts?: number
 }
 
-type TiAmmAccessStatus = 'idle' | 'checking' | 'allowed' | 'denied' | 'error'
+type IaAccessStatus = 'idle' | 'checking' | 'allowed' | 'denied' | 'error'
 
-type TiAmmAccessState = {
-  status: TiAmmAccessStatus
+type IaAccessState = {
+  status: IaAccessStatus
   selectionKey: string
   data: any | null
   message: string
@@ -597,12 +572,12 @@ const ADMIN_FIELDS: AdminField[] = [
 ]
 
 const ADMIN_WORKFLOW_SAVE_FIELDS = [
-  'esito_TI_AMM',
-  'dt_esito_TI_AMM',
-  'note_TI_AMM',
+  'esito_IA',
+  'dt_esito_IA',
+  'note_IA',
   'note_atto_amm',
-  'stato_TI_AMM',
-  'dt_stato_TI_AMM',
+  'stato_IA',
+  'dt_stato_IA',
   'determinazione_stato'
 ]
 
@@ -707,9 +682,9 @@ const SYSTEM_CALCULATED_ADMIN_FIELDS = new Set([
 ])
 
 // Questi valori restano consultabili/calcolati nella scheda amministrativa,
-// ma non devono essere risalvati dal TI_AMM: costituiscono lo snapshot tecnico
+// ma non devono essere risalvati dall’IA: costituiscono lo snapshot tecnico
 // dell'Art. 30 già definito nella fase AGR/TEC.
-const ADMIN_AUTOMATIC_VALUES_NOT_PERSISTED_BY_TI_AMM = new Set([
+const ADMIN_AUTOMATIC_VALUES_NOT_PERSISTED_BY_IA = new Set([
   'attrezzature_risarcimento_importo',
   'attrezzature_cauzione_decurtata',
   'attrezzature_importo_netto',
@@ -721,7 +696,7 @@ function isSystemCalculatedAdminField (name: string): boolean {
 }
 
 function shouldPersistAutomaticAdminValue (name: string): boolean {
-  return !ADMIN_AUTOMATIC_VALUES_NOT_PERSISTED_BY_TI_AMM.has(String(name || ''))
+  return !ADMIN_AUTOMATIC_VALUES_NOT_PERSISTED_BY_IA.has(String(name || ''))
 }
 
 type PaymentMode = '' | 'PAGOPA' | 'BONIFICO' | 'MISTO' | 'ALTRO'
@@ -1266,6 +1241,7 @@ function readEditIntent (): EditIntentInfo | null {
       data,
       readOnly: j?.readOnly === true || String(j?.readOnly || '').toLowerCase() === 'true',
       readOnlyMessage: String(j?.readOnlyMessage || '').trim(),
+      operationalRole: String(j?.operationalRole || '').trim(),
       ts: Number(j?.ts || Date.now())
     }
   } catch {
@@ -1321,12 +1297,7 @@ function selectionStateFromIntent (intent: EditIntentInfo | null, source: 'editI
 }
 
 function normalizeRole (v: any): string {
-  const s = String(v ?? '').trim().toUpperCase().replace(/[\s-]+/g, '_')
-  if (s === '7') return 'ADMIN'
-  if (s === '6') return 'DA'
-  if (s === '4') return 'RI'
-  if (s === '2') return 'TI'
-  return s
+  return String(v ?? '').trim().toUpperCase().replace(/[\s-]+/g, '_')
 }
 
 function normalizeArea (v: any): string {
@@ -1343,10 +1314,30 @@ function normalizeArea (v: any): string {
 function readUserProfile (): { role: RoleCode, username: string, fullName: string, label: string } {
   try {
     const info: any = (window as any).__giiUserRole || {}
-    let role = normalizeRole(info?.profiloCod || info?.profilo_cod || info?.ruoloCod || info?.ruolo_cod || info?.ruoloLabel || info?.ruolo)
+    const editCtx: any = (() => {
+      try {
+        const mem: any = (window as any).__giiEdit || null
+        if (mem && isGiiPracticePayloadCurrent(mem)) return mem
+        const stored: any = safeJsonParse(sessionStorage.getItem('GII_EDIT_INTENT'))
+        return stored && isGiiPracticePayloadCurrent(stored) ? stored : null
+      } catch { return null }
+    })()
+    const selectionCtx: any = (() => {
+      try {
+        const mem: any = (window as any).__giiSelection || null
+        return mem && isGiiPracticePayloadCurrent(mem) ? mem : null
+      } catch { return null }
+    })()
+    const contextualRole = normalizeRole(
+      editCtx?.operationalRole ||
+      selectionCtx?.operationalRole ||
+      sessionStorage.getItem('GII_SELECTED_OPERATIONAL_ROLE') ||
+      ''
+    )
+    let role = ['IA', 'RIA', 'DA', 'ADMIN'].includes(contextualRole)
+      ? contextualRole
+      : normalizeRole(info?.profiloCod || info?.profilo_cod || info?.ruoloCod || info?.ruolo_cod)
     const area = normalizeArea(info?.areaCod || info?.area_cod || info?.areaLabel || info?.area)
-    if (role === 'TI' && area === 'AMM') role = 'TI_AMM'
-    if (role === 'RI' && area === 'AMM') role = 'RI_AMM'
     if (!role && (info?.isWorkflowAdmin || info?.isAdmin)) role = 'ADMIN'
     const username = String(info?.username || (window as any).__giiUser?.username || '').trim()
     const fullName = String(info?.fullName || info?.full_name || username || '').trim()
@@ -1388,7 +1379,7 @@ function clearDataSourceSelection (ds: any): void {
 }
 
 function isAllowedAdminRole (role: string): boolean {
-  return ['TI_AMM', 'RI_AMM', 'DA', 'ADMIN'].includes(String(role || '').toUpperCase())
+  return ['IA', 'RIA', 'DA', 'ADMIN'].includes(String(role || '').toUpperCase())
 }
 
 function toDateObj (v: any): Date | null {
@@ -1587,7 +1578,7 @@ function getFallbackDomainOptions (fieldName: string): Array<{ code: any, name: 
       { code: 'DS', name: 'Manutenzione opere di dreno e di scolo' }
     ]
   }
-  if (/^stato_(TI_AMM|RI_AMM|DA)$/i.test(fieldName)) {
+  if (/^stato_(IA|RIA|DA)$/i.test(fieldName)) {
     return [
       { code: 0, name: 'Non attivo' },
       { code: 1, name: 'Da prendere in carico' },
@@ -1597,7 +1588,7 @@ function getFallbackDomainOptions (fieldName: string): Array<{ code: any, name: 
       { code: 5, name: 'Respinto' }
     ]
   }
-  if (/^esito_(TI_AMM|RI_AMM|DA|DT)$/i.test(fieldName)) {
+  if (/^esito_(IA|RIA|DA|DT)$/i.test(fieldName)) {
     return [
       { code: 1, name: 'Integrazione richiesta' },
       { code: 2, name: 'Approvata' },
@@ -1985,14 +1976,14 @@ function isSignedAttoContestazioneAttachment (att: AmmAttachmentInfo | null | un
 }
 
 function isAttoDaFirmareAttachment (att: AmmAttachmentInfo | null | undefined): boolean {
-  // La versione da inviare al Direttore non coincide con la bozza approvata dal RI_AMM:
-  // deve essere il PDF pulito, rigenerato dal TI_AMM senza filigrana e verificato
+  // La versione da inviare al Direttore non coincide con la bozza approvata dal RIA:
+  // deve essere il PDF pulito, rigenerato dall’IA senza filigrana e verificato
   // automaticamente contro il contenuto approvato.
   return !!att &&
     isGiiAttoContestazionePdfAttachment(att) &&
     !isSignedAttoContestazioneAttachment(att) &&
     hasAmmAttachmentKeywordFlag(att, 'attoDaFirmare') &&
-    hasAmmAttachmentKeywordFlag(att, 'verifiedAgainstRiAmm')
+    hasAmmAttachmentKeywordFlag(att, 'verifiedAgainstRia')
 }
 
 function normalizeAttachmentInfos (raw: any): AmmAttachmentInfo[] {
@@ -2874,7 +2865,7 @@ function TransmitBozzaConfirmDialog (props: { saving?: boolean, reopenCycle?: bo
         <div style={{ padding: 16, color: '#111827', fontSize: adminFieldFontSize(st), lineHeight: 1.45 }}>
           {props.reopenCycle
             ? 'La pratica risulta già approvata dal Responsabile e il protocollo del fascicolo è stato registrato. Confermando verrà aperto un nuovo ciclo di verifica: l’approvazione corrente del Responsabile dell’istruttoria amministrativa e i dati di protocollo del fascicolo saranno invalidati. La bozza PDF corrente sarà trasmessa nuovamente al Responsabile.'
-            : 'Confermando, il fascicolo istruttorio contenente la Proposta di contestazione e la bozza PDF della determinazione sarà trasmesso al Responsabile dell’istruttoria amministrativa per la verifica. Dopo la trasmissione la bozza non sarà più liberamente modificabile dal Tecnico istruttore, salvo rimando.'}
+            : 'Confermando, il fascicolo istruttorio contenente la Proposta di contestazione e la bozza PDF della determinazione sarà trasmesso al Responsabile dell’istruttoria amministrativa per la verifica. Dopo la trasmissione la bozza non sarà più liberamente modificabile dall’Istruttore amministrativo, salvo rimando.'}
         </div>
         <div style={{ padding: '0 16px 16px', display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
           <button type='button' disabled={!!props.saving} onClick={props.onCancel} style={{ border: '1px solid #94a3b8', background: '#fff', color: '#334155', borderRadius: 9, padding: '8px 14px', fontWeight: 800, fontSize: adminFieldFontSize(st), cursor: props.saving ? 'not-allowed' : 'pointer' }}>Annulla</button>
@@ -2967,17 +2958,17 @@ function normalizeRilevazioneCodeForAmm (data: any, oid: number | null): string 
   const stored = cleanReportCodeText(pickAttrCI(d, ['numero_rilevazione', 'Numero_rilevazione', 'NUMERO_RILEVAZIONE', 'cod_pratica', 'Cod_pratica', 'COD_PRATICA', 'numero_rapporto', 'Numero_rapporto', 'NUMERO_RAPPORTO']))
   const raw = stored.toUpperCase().replace(/_/g, '-').replace(/\s+/g, '-')
   const op = pickAttrCI(d, ['origine_pratica', 'Origine_pratica', 'ORIGINE_PRATICA'])
-  let prefix = (op === 2 || op === '2' || String(op || '').toUpperCase() === 'TI') ? 'TI' : 'TR'
+  let prefix = (op === 2 || op === '2' || String(op || '').toUpperCase() === 'IT') ? 'IT' : 'TR'
   let oidPart = oid != null && Number.isFinite(Number(oid)) ? String(Number(oid)) : ''
   let settore = normalizeSectorCodeForAmm(pickAttrCI(d, ['settore_cod', 'Settore_cod', 'SETTORE_COD', 'settore', 'Settore', 'SETTORE'])) || settoreCodeFromUfficioAmm(pickAttrCI(d, ['ufficio_zona', 'Ufficio_zona', 'UFFICIO_ZONA']))
 
-  let m = raw.match(/^(TR|TI)-?(\d+)(?:-([A-Z0-9]+))?$/i)
+  let m = raw.match(/^(TR|IT)-?(\d+)(?:-([A-Z0-9]+))?$/i)
   if (m) {
     prefix = m[1].toUpperCase()
     oidPart = m[2]
     if (!settore && m[3]) settore = normalizeSectorCodeForAmm(m[3]) || m[3].toUpperCase()
   } else {
-    m = raw.match(/^(\d+)-?(TR|TI)(?:-([A-Z0-9]+))?$/i)
+    m = raw.match(/^(\d+)-?(TR|IT)(?:-([A-Z0-9]+))?$/i)
     if (m) {
       oidPart = m[1]
       prefix = m[2].toUpperCase()
@@ -2996,7 +2987,7 @@ function normalizeReportCode (raw: any, oid: number | null): string {
   const code = cleanReportCodeText(raw)
   if (code) {
     const normalized = code.toUpperCase().replace(/_/g, '-').replace(/\s+/g, '-')
-    if (/^(TR|TI)-?\d+(?:-[A-Z0-9]+)?$/.test(normalized) || /^\d+-?(TR|TI)(?:-[A-Z0-9]+)?$/.test(normalized)) return ''
+    if (/^(TR|IT)-?\d+(?:-[A-Z0-9]+)?$/.test(normalized) || /^\d+-?(TR|IT)(?:-[A-Z0-9]+)?$/.test(normalized)) return ''
     return /^\d+$/.test(code) ? `R-${code}` : code
   }
   return ''
@@ -3019,16 +3010,16 @@ function isDeterminazioneAdottata (data: Record<string, any>): boolean {
   return stato === 'ADOTTATA' || (hasAdminValue(pickAttrCI(d, ['determinazione_numero'])) && hasAdminValue(pickAttrCI(d, ['determinazione_data'])))
 }
 
-function isTiAmmVistoActionPending (data: Record<string, any>): boolean {
+function isIaVistoActionPending (data: Record<string, any>): boolean {
   const d = data || {}
   if (isDeterminazioneAdottata(d)) return false
-  const esitoTiAmm = parseNumberInput(pickAttrCI(d, ['esito_TI_AMM']))
-  const esitoRiAmm = parseNumberInput(pickAttrCI(d, ['esito_RI_AMM']))
-  // Il nuovo ciclo riparte dal visto quando il TI_AMM non ha ancora attestato
-  // la conformità oppure quando il RI_AMM ha richiesto una nuova verifica.
+  const esitoIa = parseNumberInput(pickAttrCI(d, ['esito_IA']))
+  const esitoRia = parseNumberInput(pickAttrCI(d, ['esito_RIA']))
+  // Il nuovo ciclo riparte dal visto quando il IA non ha ancora attestato
+  // la conformità oppure quando il RIA ha richiesto una nuova verifica.
   // Finché questo passaggio è pendente nessun indicatore delle fasi successive
   // deve sopravvivere dal ciclo precedente.
-  return esitoTiAmm !== 2 || esitoRiAmm === 1
+  return esitoIa !== 2 || esitoRia === 1
 }
 
 function verbaleApprovalDateValue (data: Record<string, any>): any {
@@ -4399,46 +4390,45 @@ function StatusSummaryItem (props: { label: string, value: React.ReactNode, hint
   )
 }
 
-function isPropostaContestazioneApprovedByRiAmm (data: Record<string, any>): boolean {
+function isPropostaContestazioneApprovedByRia (data: Record<string, any>): boolean {
   const d = data || {}
-  // L'esito RI_AMM appartiene sempre al ciclo corrente: ogni nuova trasmissione
-  // TI_AMM → RI_AMM lo azzera prima di rigenerare la Proposta in stato BOZZA.
-  // Per questo l'approvazione corrente è identificata direttamente da esito_RI_AMM = 2.
-  return parseNumberInput(pickAttrCI(d, ['esito_RI_AMM'])) === 2
+  // L'esito RIA appartiene sempre al ciclo corrente: ogni nuova trasmissione
+  // IA → RIA lo azzera prima di rigenerare la Proposta in stato BOZZA.
+  // Per questo l'approvazione corrente è identificata direttamente da esito_RIA = 2.
+  return parseNumberInput(pickAttrCI(d, ['esito_RIA'])) === 2
 }
 
-function isBozzaDeterminazioneValidataDaRiAmm (data: Record<string, any>): boolean {
+function isBozzaDeterminazioneValidataDaRia (data: Record<string, any>): boolean {
   const d = data || {}
   const statoBozza = String(pickAttrCI(d, ['determinazione_stato']) || '').trim().toUpperCase()
-  return isPropostaContestazioneApprovedByRiAmm(d) &&
+  return isPropostaContestazioneApprovedByRia(d) &&
     (
-      statoBozza === 'VALIDATA_RI_AMM' ||
-      statoBozza === 'BOZZA_VALIDATA_RI_AMM' ||
+      statoBozza === 'VALIDATA_RIA' ||
+      statoBozza === 'BOZZA_VALIDATA_RIA' ||
       statoBozza === 'FASCICOLO_TRASMESSO_PROTOCOLLO' ||
       statoBozza === EMAIL_DIRETTORE_PREPARATA_STATE
     )
 }
 
-function isBozzaDeterminazioneRimandataDaRiAmm (data: Record<string, any>): boolean {
+function isBozzaDeterminazioneRimandataDaRia (data: Record<string, any>): boolean {
   const d = data || {}
   if (isDeterminazioneAdottata(d)) return false
-  if (isBozzaDeterminazioneValidataDaRiAmm(d)) return false
+  if (isBozzaDeterminazioneValidataDaRia(d)) return false
   const statoBozza = String(pickAttrCI(d, ['determinazione_stato']) || '').trim().toUpperCase()
-  const statoTiAmm = parseNumberInput(pickAttrCI(d, ['stato_TI_AMM']))
-  const presaTiAmm = parseNumberInput(pickAttrCI(d, ['presa_in_carico_TI_AMM']))
-  const esitoRiAmm = parseNumberInput(pickAttrCI(d, ['esito_RI_AMM']))
-  const tiAmmRiaperto = statoTiAmm === 1 || statoTiAmm === 2 || presaTiAmm === 1 || presaTiAmm === 2
+  const statoIa = parseNumberInput(pickAttrCI(d, ['stato_IA']))
+  const esitoRia = parseNumberInput(pickAttrCI(d, ['esito_RIA']))
+  const iaRiaperto = statoIa === 1 || statoIa === 2
   const statoCompatibileConRimando = statoBozza === 'BOZZA_DA_RETTIFICARE' || statoBozza === 'BOZZA' || statoBozza === ''
-  return tiAmmRiaperto && esitoRiAmm === 1 && statoCompatibileConRimando
+  return iaRiaperto && esitoRia === 1 && statoCompatibileConRimando
 }
 
-function isBozzaDeterminazioneRientrataDaRiAmm (data: Record<string, any>): boolean {
+function isBozzaDeterminazioneRientrataDaRia (data: Record<string, any>): boolean {
   const d = data || {}
-  return isBozzaDeterminazioneValidataDaRiAmm(d) || isBozzaDeterminazioneRimandataDaRiAmm(d)
+  return isBozzaDeterminazioneValidataDaRia(d) || isBozzaDeterminazioneRimandataDaRia(d)
 }
 
 
-function TiAmmVerificationSummary (props: {
+function IaVerificationSummary (props: {
   data: Record<string, any>
   savedData: Record<string, any>
   fields: LayerFieldInfo[]
@@ -4450,11 +4440,11 @@ function TiAmmVerificationSummary (props: {
   onUndoAttestation: () => void
   onGenerateBozzaDeterminazioneWord: () => void
   onDeleteBozzaDeterminazione: () => boolean | Promise<boolean>
-  onTransmitBozzaDeterminazioneRiAmm: () => void
+  onTransmitBozzaDeterminazioneRia: () => void
   onPrepareEmailDirettore: () => void
   onPrepareEmailProtocollo: () => void
   onGenerateAttoContestazioneWord: () => void
-  onTransmitAttoContestazioneRiAmm: () => void
+  onTransmitAttoContestazioneRia: () => void
   onPrepareEmailAttoDirettore: () => void
   onPrepareEmailAttoProtocollo: () => void
   oid: number | null
@@ -4466,10 +4456,10 @@ function TiAmmVerificationSummary (props: {
   const st = useAdminStyle()
   const d = props.data || {}
   const role = String(props.role || '').toUpperCase()
-  const esitoRaw = pickAttrCI(d, ['esito_TI_AMM'])
+  const esitoRaw = pickAttrCI(d, ['esito_IA'])
   const esitoCode = parseNumberInput(esitoRaw)
   const hasEsito = esitoCode != null
-  const tiAmmHaAttestatoConformita = esitoCode === 2
+  const iaHaAttestatoConformita = esitoCode === 2
   const esitoLabel = esitoCode === 1
     ? 'Da integrare/rettificare'
     : esitoCode === 2
@@ -4477,126 +4467,116 @@ function TiAmmVerificationSummary (props: {
       : esitoCode === 3
         ? 'Respinta'
         : (hasAdminValue(esitoRaw) ? String(esitoRaw) : '')
-  const note = String(pickAttrCI(d, ['note_TI_AMM', 'note_atto_amm']) || '').trim()
-  const riAmmEsitoRaw = pickAttrCI(d, ['esito_RI_AMM'])
-  const riAmmEsitoCode = parseNumberInput(riAmmEsitoRaw)
-  const riAmmNote = String(pickAttrCI(d, ['note_RI_AMM']) || '').trim()
-  const riAmmNoteClean = cleanAmmInfoText(riAmmNote)
-  const riAmmHaRimandatoProposta = isBozzaDeterminazioneRimandataDaRiAmm(d)
-  const riAmmRimandoReasonFromTiNote = (note.match(/Motivazione\s+del\s+rimando\s*:\s*([\s\S]+)$/i)?.[1] || '').trim()
-  const riAmmHaRichiestoIntegrazioni = riAmmHaRimandatoProposta || (riAmmEsitoCode === 1 && !isBozzaDeterminazioneValidataDaRiAmm(d) && !tiAmmHaAttestatoConformita)
-  const riAmmHaApprovato = !riAmmHaRichiestoIntegrazioni && (riAmmEsitoCode === 2 || isBozzaDeterminazioneValidataDaRiAmm(d))
-  const riAmmRimandoReason = riAmmHaRichiestoIntegrazioni ? (riAmmNoteClean || riAmmRimandoReasonFromTiNote) : ''
-  const riAmmApprovalNote = riAmmHaApprovato ? riAmmNoteClean : ''
-  const showRiAmmConsequenceInsideTiBox = esitoCode === 1 || riAmmHaRichiestoIntegrazioni || riAmmHaApprovato
-  const tiAmmSummaryTitle = riAmmHaRimandatoProposta
-    ? 'Rientro al Tecnico istruttore amministrativo'
-    : 'Visto di conformità del Tecnico istruttore amministrativo'
-  const noteLabel = esitoCode === 1 || riAmmHaRichiestoIntegrazioni
+  const note = String(pickAttrCI(d, ['note_IA', 'note_atto_amm']) || '').trim()
+  const riaEsitoRaw = pickAttrCI(d, ['esito_RIA'])
+  const riaEsitoCode = parseNumberInput(riaEsitoRaw)
+  const riaNote = String(pickAttrCI(d, ['note_RIA']) || '').trim()
+  const riaNoteClean = cleanAmmInfoText(riaNote)
+  const riaHaRimandatoProposta = isBozzaDeterminazioneRimandataDaRia(d)
+  const riaRimandoReasonFromTiNote = (note.match(/Motivazione\s+del\s+rimando\s*:\s*([\s\S]+)$/i)?.[1] || '').trim()
+  const riaHaRichiestoIntegrazioni = riaHaRimandatoProposta || (riaEsitoCode === 1 && !isBozzaDeterminazioneValidataDaRia(d) && !iaHaAttestatoConformita)
+  const riaHaApprovato = !riaHaRichiestoIntegrazioni && (riaEsitoCode === 2 || isBozzaDeterminazioneValidataDaRia(d))
+  const riaRimandoReason = riaHaRichiestoIntegrazioni ? (riaNoteClean || riaRimandoReasonFromTiNote) : ''
+  const riaApprovalNote = riaHaApprovato ? riaNoteClean : ''
+  const showRiaConsequenceInsideTiBox = esitoCode === 1 || riaHaRichiestoIntegrazioni || riaHaApprovato
+  const iaSummaryTitle = riaHaRimandatoProposta
+    ? 'Rientro all’Istruttore amministrativo'
+    : 'Visto di conformità dell’Istruttore amministrativo'
+  const noteLabel = esitoCode === 1 || riaHaRichiestoIntegrazioni
     ? 'Integrazioni/rettifiche proposte'
     : 'Visto di conformità'
-  const tiAmmNoteText = normalizeAmmWorkflowText(note) || '—'
-  const riAmmApprovalNoteIsStandard = (() => {
-    const txt = riAmmApprovalNote.toLowerCase().replace(/\s+/g, ' ').trim()
-    return !!txt && txt.includes('si approva l’istruttoria amministrativa') && txt.includes('restituzione della pratica al tecnico istruttore amministrativo')
+  const iaNoteText = normalizeAmmWorkflowText(note) || '—'
+  const riaApprovalNoteIsStandard = (() => {
+    const txt = riaApprovalNote.toLowerCase().replace(/\s+/g, ' ').trim()
+    return !!txt && txt.includes('si approva l’istruttoria amministrativa') && txt.includes('restituzione della pratica all’istruttore amministrativo')
   })()
   const summaryDeterminationState = String(pickAttrCI(d, ['determinazione_stato']) || '').trim().toUpperCase()
-  const attoContestazioneOutcomeCycle = isDeterminazioneAdottata(d) && ['BOZZA', 'TRASMESSA_RI_AMM', 'VALIDATA_RI_AMM', EMAIL_DIRETTORE_PREPARATA_STATE].includes(summaryDeterminationState)
-  const riAmmApprovalOutcomeText = attoContestazioneOutcomeCycle
-    ? 'Atto di contestazione approvato. Pratica restituita al Tecnico istruttore amministrativo per la trasmissione al Direttore.'
+  const attoContestazioneOutcomeCycle = isDeterminazioneAdottata(d) && ['BOZZA', 'TRASMESSA_RIA', 'VALIDATA_RIA', EMAIL_DIRETTORE_PREPARATA_STATE].includes(summaryDeterminationState)
+  const riaApprovalOutcomeText = attoContestazioneOutcomeCycle
+    ? 'Atto di contestazione approvato. Pratica restituita all’Istruttore amministrativo per la trasmissione al Direttore.'
     : 'Istruttoria amministrativa approvata. Pratica restituita per la protocollazione del fascicolo e il completamento della bozza definitiva di determinazione.'
-  const riAmmReturnOutcomeText = attoContestazioneOutcomeCycle
-    ? 'Richieste integrazioni o rettifiche all’Atto di contestazione. Pratica restituita al Tecnico istruttore amministrativo per le modifiche necessarie.'
+  const riaReturnOutcomeText = attoContestazioneOutcomeCycle
+    ? 'Richieste integrazioni o rettifiche all’Atto di contestazione. Pratica restituita all’Istruttore amministrativo per le modifiche necessarie.'
     : 'Richieste integrazioni o rettifiche alla Proposta di contestazione e/o alla bozza di determinazione. Pratica restituita per le modifiche necessarie.'
-  const riAmmRejectedOutcomeText = attoContestazioneOutcomeCycle
+  const riaRejectedOutcomeText = attoContestazioneOutcomeCycle
     ? 'Atto di contestazione non approvato. Pratica restituita per i conseguenti adempimenti.'
     : 'Istruttoria amministrativa non approvata. Pratica restituita per i conseguenti adempimenti.'
-  const riAmmConsequenceText = riAmmHaApprovato
-    ? riAmmApprovalOutcomeText
-    : riAmmReturnOutcomeText
-  const riAmmConsequenceAction = riAmmHaRichiestoIntegrazioni
+  const riaConsequenceText = riaHaApprovato
+    ? riaApprovalOutcomeText
+    : riaReturnOutcomeText
+  const riaConsequenceAction = riaHaRichiestoIntegrazioni
     ? (attoContestazioneOutcomeCycle
         ? 'Apportare le modifiche richieste alla bozza dell’Atto e predisporre il nuovo PDF prima di ritrasmetterlo al Responsabile.'
         : 'A seguito delle modifiche è necessario apporre un nuovo visto di conformità; la Proposta di contestazione sarà rigenerata prima della predisposizione della nuova bozza.')
     : ''
-  const riAmmConsequenceDetailLabel = riAmmHaApprovato ? 'Note del Responsabile: ' : 'Motivazione del rimando: '
-  const riAmmConsequenceDetail = riAmmHaApprovato
-    ? (riAmmApprovalNoteIsStandard ? '' : riAmmApprovalNote)
-    : riAmmRimandoReason
-  const tecnico = displayAdminFieldValue(d, props.fields, 'ti_amm_assegnato_nome', displayAdminFieldValue(d, props.fields, 'ti_amm_assegnato_username'))
-  const dataEsitoRaw = pickAttrCI(d, ['dt_esito_TI_AMM']) || pickAttrCI(d, ['dt_stato_TI_AMM'])
+  const riaConsequenceDetailLabel = riaHaApprovato ? 'Note del Responsabile: ' : 'Motivazione del rimando: '
+  const riaConsequenceDetail = riaHaApprovato
+    ? (riaApprovalNoteIsStandard ? '' : riaApprovalNote)
+    : riaRimandoReason
+  const tecnico = displayAdminFieldValue(d, props.fields, 'ia_assegnato_nome', displayAdminFieldValue(d, props.fields, 'ia_assegnato_username'))
+  const dataEsitoRaw = pickAttrCI(d, ['dt_esito_IA']) || pickAttrCI(d, ['dt_stato_IA'])
   const dataEsito = formatDateTimeValue(dataEsitoRaw)
   // La verifica del Responsabile si riferisce al ciclo amministrativo corrente.
-  // Dopo un rimando RI_AMM va ricondotta al blocco delle integrazioni/rettifiche
-  // del TI_AMM, così causa, esito e azione successiva restano nello stesso contesto.
-  const hasRiAmmEsito = !showRiAmmConsequenceInsideTiBox && (tiAmmHaAttestatoConformita || riAmmHaRimandatoProposta) && (riAmmEsitoCode != null || hasAdminValue(riAmmEsitoRaw))
-  const riAmmEsitoLabel = riAmmEsitoCode === 1
+  // Dopo un rimando RIA va ricondotta al blocco delle integrazioni/rettifiche
+  // dell’IA, così causa, esito e azione successiva restano nello stesso contesto.
+  const hasRiaEsito = !showRiaConsequenceInsideTiBox && (iaHaAttestatoConformita || riaHaRimandatoProposta) && (riaEsitoCode != null || hasAdminValue(riaEsitoRaw))
+  const riaEsitoLabel = riaEsitoCode === 1
     ? 'Integrazioni/rettifiche richieste'
-    : riAmmEsitoCode === 2
+    : riaEsitoCode === 2
       ? (attoContestazioneOutcomeCycle ? 'Atto di contestazione approvato' : 'Istruttoria amministrativa approvata')
-      : riAmmEsitoCode === 3
+      : riaEsitoCode === 3
         ? (attoContestazioneOutcomeCycle ? 'Atto di contestazione non approvato' : 'Istruttoria amministrativa non approvata')
-        : (hasAdminValue(riAmmEsitoRaw) ? String(riAmmEsitoRaw) : '')
-  const riAmmNoteTitle = riAmmEsitoCode === 1
+        : (hasAdminValue(riaEsitoRaw) ? String(riaEsitoRaw) : '')
+  const riaNoteTitle = riaEsitoCode === 1
     ? (attoContestazioneOutcomeCycle ? 'Richiesta di integrazioni/rettifiche dell’Atto' : 'Richiesta di integrazioni/rettifiche')
-    : riAmmEsitoCode === 2
+    : riaEsitoCode === 2
       ? (attoContestazioneOutcomeCycle ? 'Approvazione dell’Atto di contestazione' : 'Approvazione dell’istruttoria amministrativa')
       : 'Esito della verifica del Responsabile'
-  const riAmmNoteText = riAmmEsitoCode === 1
-    ? `${riAmmReturnOutcomeText}${riAmmNoteClean ? `\n\nMotivazione: ${riAmmNoteClean}` : ''}`
-    : riAmmEsitoCode === 3
-      ? `${riAmmRejectedOutcomeText}${riAmmNoteClean ? `\n\nMotivazione: ${riAmmNoteClean}` : ''}`
-      : `${riAmmApprovalOutcomeText}${riAmmNoteClean ? `\n\nNote: ${riAmmNoteClean}` : ''}`
-  const riAmmNomeRaw = firstTextAttr(d, [
-    'ri_amm_assegnato_nome',
-    'responsabile_istruttoria_amm_nome',
-    'ri_amm_nome',
-    'ri_amm_assegnato_username',
-    'responsabile_istruttoria_amm_username',
-    'ri_amm_username',
-    'GII_da',
-    'gii_da'
-  ])
-  const riAmmNome = cleanAmmOperatorLabel(riAmmNomeRaw)
-  const riAmmDataEsitoRaw = pickAttrCI(d, ['dt_esito_RI_AMM']) || pickAttrCI(d, ['dt_stato_RI_AMM'])
-  const riAmmDataEsito = formatDateTimeValue(riAmmDataEsitoRaw)
-  const showRiAmmOutcomeAsPrimary = riAmmHaRichiestoIntegrazioni || riAmmHaApprovato
-  const primarySummaryTitle = showRiAmmOutcomeAsPrimary
+  const riaNoteText = riaEsitoCode === 1
+    ? `${riaReturnOutcomeText}${riaNoteClean ? `\n\nMotivazione: ${riaNoteClean}` : ''}`
+    : riaEsitoCode === 3
+      ? `${riaRejectedOutcomeText}${riaNoteClean ? `\n\nMotivazione: ${riaNoteClean}` : ''}`
+      : `${riaApprovalOutcomeText}${riaNoteClean ? `\n\nNote: ${riaNoteClean}` : ''}`
+  const riaNome = ''
+  const riaDataEsitoRaw = pickAttrCI(d, ['dt_esito_RIA']) || pickAttrCI(d, ['dt_stato_RIA'])
+  const riaDataEsito = formatDateTimeValue(riaDataEsitoRaw)
+  const showRiaOutcomeAsPrimary = riaHaRichiestoIntegrazioni || riaHaApprovato
+  const primarySummaryTitle = showRiaOutcomeAsPrimary
     ? 'Esito del Responsabile dell’istruttoria amministrativa'
-    : tiAmmSummaryTitle
-  const primaryEsitoLabel = showRiAmmOutcomeAsPrimary
-    ? (riAmmHaApprovato ? (attoContestazioneOutcomeCycle ? 'Atto di contestazione approvato' : 'Istruttoria amministrativa approvata') : 'Integrazioni/rettifiche richieste')
+    : iaSummaryTitle
+  const primaryEsitoLabel = showRiaOutcomeAsPrimary
+    ? (riaHaApprovato ? (attoContestazioneOutcomeCycle ? 'Atto di contestazione approvato' : 'Istruttoria amministrativa approvata') : 'Integrazioni/rettifiche richieste')
     : (esitoLabel || '—')
-  const primaryOperatoreLabel = showRiAmmOutcomeAsPrimary
+  const primaryOperatoreLabel = showRiaOutcomeAsPrimary
     ? 'Responsabile dell’istruttoria amministrativa'
-    : 'Tecnico istruttore amministrativo'
-  const primaryOperatoreValue = showRiAmmOutcomeAsPrimary
-    ? cleanAmmOperatorLabel(riAmmNome)
+    : 'Istruttore amministrativo'
+  const primaryOperatoreValue = showRiaOutcomeAsPrimary
+    ? cleanAmmOperatorLabel(riaNome)
     : cleanAmmOperatorLabel(tecnico)
-  const primaryDateLabel = showRiAmmOutcomeAsPrimary
-    ? (riAmmHaApprovato ? 'Data e ora approvazione' : 'Data e ora esito')
+  const primaryDateLabel = showRiaOutcomeAsPrimary
+    ? (riaHaApprovato ? 'Data e ora approvazione' : 'Data e ora esito')
     : (esitoCode === 2 ? 'Data e ora visto' : 'Data e ora esito')
-  const primaryDateValue = showRiAmmOutcomeAsPrimary ? riAmmDataEsito : dataEsito
-  const primaryTone = showRiAmmOutcomeAsPrimary
-    ? (riAmmHaApprovato ? 'auto' : 'warn')
+  const primaryDateValue = showRiaOutcomeAsPrimary ? riaDataEsito : dataEsito
+  const primaryTone = showRiaOutcomeAsPrimary
+    ? (riaHaApprovato ? 'auto' : 'warn')
     : (esitoCode === 1 ? 'warn' : 'auto')
-  const hasTiAmmVerification = hasEsito || !!note
-  const hasPrimaryVerification = hasTiAmmVerification || showRiAmmOutcomeAsPrimary
-  const hasVerification = hasPrimaryVerification || hasRiAmmEsito
+  const hasIaVerification = hasEsito || !!note
+  const hasPrimaryVerification = hasIaVerification || showRiaOutcomeAsPrimary
+  const hasVerification = hasPrimaryVerification || hasRiaEsito
   const determinazioneAdottata = isDeterminazioneAdottata(props.savedData || d)
   const savedDeterminationWorkflowState = String(pickAttrCI(props.savedData || {}, ['determinazione_stato']) || '').trim().toUpperCase()
-  const attoCycleStartedForDetermination = isDeterminazioneAdottata(props.savedData || d) && ['BOZZA', 'TRASMESSA_RI_AMM', 'VALIDATA_RI_AMM', EMAIL_DIRETTORE_PREPARATA_STATE].includes(savedDeterminationWorkflowState)
+  const attoCycleStartedForDetermination = isDeterminazioneAdottata(props.savedData || d) && ['BOZZA', 'TRASMESSA_RIA', 'VALIDATA_RIA', EMAIL_DIRETTORE_PREPARATA_STATE].includes(savedDeterminationWorkflowState)
   const determinazioneCorrectionLocked =
     attoCycleStartedForDetermination ||
     hasAdminValue(pickAttrCI(props.savedData || {}, ['accertamento_data'])) ||
     hasAdminValue(pickAttrCI(props.savedData || {}, ['protocollo_atto_accertamento_numero'])) ||
     hasAdminValue(pickAttrCI(props.savedData || {}, ['protocollo_atto_accertamento_data'])) ||
     hasAdminValue(pickAttrCI(props.savedData || {}, ['notifica_data']))
-  const canEditDetermination = props.canEdit && (role === 'TI_AMM' || role === 'ADMIN') && !determinazioneCorrectionLocked
-  const bozzaRientrataDaRiAmm = isBozzaDeterminazioneRientrataDaRiAmm(d)
-  const showTiAmmInfo = role === 'TI_AMM' && props.canEdit
-  const vistoActionPending = showTiAmmInfo && isTiAmmVistoActionPending(d)
-  const attestazioneButtonTitle = riAmmHaRimandatoProposta || esitoCode === 1
+  const canEditDetermination = props.canEdit && (role === 'IA' || role === 'ADMIN') && !determinazioneCorrectionLocked
+  const bozzaRientrataDaRia = isBozzaDeterminazioneRientrataDaRia(d)
+  const showIaInfo = role === 'IA' && props.canEdit
+  const vistoActionPending = showIaInfo && isIaVistoActionPending(d)
+  const attestazioneButtonTitle = riaHaRimandatoProposta || esitoCode === 1
     ? 'Riappone visto di conformità e rigenera la Proposta'
     : 'Apponi visto di conformità'
 
@@ -4605,7 +4585,7 @@ function TiAmmVerificationSummary (props: {
       {hasVerification && (
         <Section
           title='VERIFICA ISTRUTTORIA AMMINISTRATIVA'
-          right={<SectionInfoButton text={showTiAmmInfo ? 'Il visto avvia la predisposizione della determinazione.' : null} title='Informazioni verifica istruttoria amministrativa' />}
+          right={<SectionInfoButton text={showIaInfo ? 'Il visto avvia la predisposizione della determinazione.' : null} title='Informazioni verifica istruttoria amministrativa' />}
           bodyStyle={{ padding: 8 }}
         >
           <div style={{ display: 'grid', gap: 10 }}>
@@ -4618,36 +4598,36 @@ function TiAmmVerificationSummary (props: {
                   <StatusSummaryItem label={primaryDateLabel} value={primaryDateValue || '—'} tone='auto' />
                 </div>
                 <div style={{ border: `1px solid ${st.formWorkflowBadgeBorderColor || '#d8e6f7'}`, background: st.formWorkflowBadgeBg || '#ffffff', borderRadius: 9, padding: 10 }}>
-                  {!showRiAmmOutcomeAsPrimary && (
+                  {!showRiaOutcomeAsPrimary && (
                     <div style={{ color: st.formWorkflowBadgeTitleColor || '#0d3b66', fontWeight: 900, fontSize: adminLabelFontSize(st), marginBottom: 5 }}>{noteLabel}</div>
                   )}
-                  {showRiAmmOutcomeAsPrimary ? (
+                  {showRiaOutcomeAsPrimary ? (
                     <div style={{ display: 'grid', gap: 6, color: st.formWorkflowBadgeValueColor || '#111827', fontSize: Number(st.formFieldFontSize ?? 15), lineHeight: 1.45 }}>
-                      <div style={{ whiteSpace: 'pre-wrap' }}>{riAmmConsequenceText}</div>
-                      {riAmmConsequenceDetail && (
-                        <div style={{ whiteSpace: 'pre-wrap' }}><span style={{ fontWeight: 800 }}>{riAmmConsequenceDetailLabel}</span>{riAmmConsequenceDetail}</div>
+                      <div style={{ whiteSpace: 'pre-wrap' }}>{riaConsequenceText}</div>
+                      {riaConsequenceDetail && (
+                        <div style={{ whiteSpace: 'pre-wrap' }}><span style={{ fontWeight: 800 }}>{riaConsequenceDetailLabel}</span>{riaConsequenceDetail}</div>
                       )}
-                      {riAmmConsequenceAction && (
-                        <div style={{ whiteSpace: 'pre-wrap' }}><span style={{ fontWeight: 800 }}>Adempimento conseguente: </span>{riAmmConsequenceAction}</div>
+                      {riaConsequenceAction && (
+                        <div style={{ whiteSpace: 'pre-wrap' }}><span style={{ fontWeight: 800 }}>Adempimento conseguente: </span>{riaConsequenceAction}</div>
                       )}
                     </div>
                   ) : (
-                    <div style={{ color: st.formWorkflowBadgeValueColor || '#111827', fontSize: Number(st.formFieldFontSize ?? 15), lineHeight: 1.45, whiteSpace: 'pre-wrap' }}><AmmWorkflowText text={tiAmmNoteText} /></div>
+                    <div style={{ color: st.formWorkflowBadgeValueColor || '#111827', fontSize: Number(st.formFieldFontSize ?? 15), lineHeight: 1.45, whiteSpace: 'pre-wrap' }}><AmmWorkflowText text={iaNoteText} /></div>
                   )}
                 </div>
               </div>
             )}
-            {hasRiAmmEsito && (
+            {hasRiaEsito && (
               <div style={{ display: 'grid', gap: 8, borderTop: hasPrimaryVerification ? `1px solid ${st.formWorkflowBadgeBorderColor || '#d8e6f7'}` : 'none', paddingTop: hasPrimaryVerification ? 10 : 0 }}>
                 <div style={{ color: st.formWorkflowBadgeTitleColor || '#0d3b66', fontWeight: 900, fontSize: Number(st.formSectionTitleSize ?? 14), textTransform: 'uppercase', letterSpacing: 0.2 }}>Verifica del Responsabile istruttoria amministrativa</div>
                 <div style={{ display: 'grid', gridTemplateColumns: ADMIN_COMPACT_GRID_COLUMNS, justifyContent: 'start', gap: 10 }}>
-                  <StatusSummaryItem label='Esito' value={riAmmEsitoLabel || '—'} tone={riAmmEsitoCode === 1 || riAmmEsitoCode === 3 ? 'warn' : 'auto'} />
-                  <StatusSummaryItem label='Responsabile dell’istruttoria amministrativa' value={riAmmNome || '—'} tone='auto' />
-                  <StatusSummaryItem label={riAmmEsitoCode === 2 ? 'Data e ora approvazione' : 'Data e ora esito'} value={riAmmDataEsito || '—'} tone='auto' />
+                  <StatusSummaryItem label='Esito' value={riaEsitoLabel || '—'} tone={riaEsitoCode === 1 || riaEsitoCode === 3 ? 'warn' : 'auto'} />
+                  <StatusSummaryItem label='Responsabile dell’istruttoria amministrativa' value={riaNome || '—'} tone='auto' />
+                  <StatusSummaryItem label={riaEsitoCode === 2 ? 'Data e ora approvazione' : 'Data e ora esito'} value={riaDataEsito || '—'} tone='auto' />
                 </div>
                 <div style={{ border: `1px solid ${st.formWorkflowBadgeBorderColor || '#d8e6f7'}`, background: st.formWorkflowBadgeBg || '#ffffff', borderRadius: 9, padding: 10 }}>
-                  <div style={{ color: st.formWorkflowBadgeTitleColor || '#0d3b66', fontWeight: 900, fontSize: adminLabelFontSize(st), marginBottom: 5 }}>{riAmmNoteTitle}</div>
-                  <div style={{ color: st.formWorkflowBadgeValueColor || '#111827', fontSize: Number(st.formFieldFontSize ?? 15), lineHeight: 1.45, whiteSpace: 'pre-wrap' }}>{riAmmNoteText}</div>
+                  <div style={{ color: st.formWorkflowBadgeTitleColor || '#0d3b66', fontWeight: 900, fontSize: adminLabelFontSize(st), marginBottom: 5 }}>{riaNoteTitle}</div>
+                  <div style={{ color: st.formWorkflowBadgeValueColor || '#111827', fontSize: Number(st.formFieldFontSize ?? 15), lineHeight: 1.45, whiteSpace: 'pre-wrap' }}>{riaNoteText}</div>
                 </div>
               </div>
             )}
@@ -4655,13 +4635,13 @@ function TiAmmVerificationSummary (props: {
         </Section>
       )}
 
-      <PostAttestazioneTiAmmWorkSection
+      <PostAttestazioneIaWorkSection
         data={d}
         savedData={props.savedData}
         fields={props.fields}
-        canEdit={props.canEdit && (role === 'TI_AMM' || role === 'ADMIN')}
+        canEdit={props.canEdit && (role === 'IA' || role === 'ADMIN')}
         role={role}
-        showTiAmmInfo={showTiAmmInfo}
+        showIaInfo={showIaInfo}
         saving={!!props.saving}
         onChange={props.onChange}
         actionBarTarget={props.actionBarTarget}
@@ -4670,11 +4650,11 @@ function TiAmmVerificationSummary (props: {
         onApplyAttestation={props.onApplyAttestation}
         onGenerateBozzaDeterminazioneWord={props.onGenerateBozzaDeterminazioneWord}
         onDeleteBozzaDeterminazione={props.onDeleteBozzaDeterminazione}
-        onTransmitBozzaDeterminazioneRiAmm={props.onTransmitBozzaDeterminazioneRiAmm}
+        onTransmitBozzaDeterminazioneRia={props.onTransmitBozzaDeterminazioneRia}
         onPrepareEmailDirettore={props.onPrepareEmailDirettore}
         onPrepareEmailProtocollo={props.onPrepareEmailProtocollo}
         onGenerateAttoContestazioneWord={props.onGenerateAttoContestazioneWord}
-        onTransmitAttoContestazioneRiAmm={props.onTransmitAttoContestazioneRiAmm}
+        onTransmitAttoContestazioneRia={props.onTransmitAttoContestazioneRia}
         onPrepareEmailAttoDirettore={props.onPrepareEmailAttoDirettore}
         onPrepareEmailAttoProtocollo={props.onPrepareEmailAttoProtocollo}
         canEditDetermination={canEditDetermination}
@@ -4684,9 +4664,9 @@ function TiAmmVerificationSummary (props: {
         suppressActionGuide={vistoActionPending}
         bozzaRefreshKey={[
           props.oid ?? '',
-          pickAttrCI(d, ['dt_esito_TI_AMM']) ?? '',
-          pickAttrCI(d, ['esito_RI_AMM']) ?? '',
-          pickAttrCI(d, ['dt_esito_RI_AMM']) ?? '',
+          pickAttrCI(d, ['dt_esito_IA']) ?? '',
+          pickAttrCI(d, ['esito_RIA']) ?? '',
+          pickAttrCI(d, ['dt_esito_RIA']) ?? '',
           pickAttrCI(d, ['determinazione_stato']) ?? '',
           pickAttrCI(d, ['dt_bozza_determinazione']) ?? '',
           pickAttrCI(d, ['bozza_determinazione_da']) ?? ''
@@ -4707,30 +4687,30 @@ function workflowTimestamp (value: any): number {
   return Number.isFinite(parsed) ? parsed : 0
 }
 
-type AdminBozzaWorkflowMessageKind = 'RI_AMM_APPROVED' | 'RI_AMM_VERIFYING'
+type AdminBozzaWorkflowMessageKind = 'RIA_APPROVED' | 'RIA_VERIFYING'
 
 function adminBozzaWorkflowMessageForRole (kind: AdminBozzaWorkflowMessageKind, roleRaw: string): string {
   const role = String(roleRaw || '').trim().toUpperCase()
-  const isTiAmm = role === 'TI_AMM'
+  const isIa = role === 'IA'
 
-  if (kind === 'RI_AMM_APPROVED') {
-    return isTiAmm
+  if (kind === 'RIA_APPROVED') {
+    return isIa
       ? 'La verifica amministrativa è stata approvata. Trasmettere il fascicolo al protocollo; quando rientra la Proposta protocollata, caricarla con l’azione di caricamento. Il gestionale leggerà automaticamente numero e data di protocollo e sostituirà la versione precedente.'
-      : 'La verifica amministrativa è stata approvata. La pratica è stata restituita al Tecnico istruttore amministrativo per il completamento degli adempimenti successivi.'
+      : 'La verifica amministrativa è stata approvata. La pratica è stata restituita all’Istruttore amministrativo per il completamento degli adempimenti successivi.'
   }
 
-  return isTiAmm
+  return isIa
     ? 'Il fascicolo istruttorio è stato trasmesso al Responsabile dell’istruttoria amministrativa per la verifica e non può essere modificato in questa fase.'
     : 'Il fascicolo istruttorio è in fase di verifica amministrativa e non può essere modificato in questa fase.'
 }
 
-function PostAttestazioneTiAmmWorkSection (props: {
+function PostAttestazioneIaWorkSection (props: {
   data: Record<string, any>
   savedData: Record<string, any>
   fields: LayerFieldInfo[]
   canEdit: boolean
   role: string
-  showTiAmmInfo?: boolean
+  showIaInfo?: boolean
   saving: boolean
   onChange: (name: string, value: any) => void
   actionBarTarget?: HTMLElement | null
@@ -4739,11 +4719,11 @@ function PostAttestazioneTiAmmWorkSection (props: {
   onApplyAttestation: (note: string) => void
   onGenerateBozzaDeterminazioneWord: () => void
   onDeleteBozzaDeterminazione: () => boolean | Promise<boolean>
-  onTransmitBozzaDeterminazioneRiAmm: () => void
+  onTransmitBozzaDeterminazioneRia: () => void
   onPrepareEmailDirettore: () => void
   onPrepareEmailProtocollo: () => void
   onGenerateAttoContestazioneWord: () => void
-  onTransmitAttoContestazioneRiAmm: () => void
+  onTransmitAttoContestazioneRia: () => void
   onPrepareEmailAttoDirettore: () => void
   onPrepareEmailAttoProtocollo: () => void
   canEditDetermination?: boolean
@@ -4757,13 +4737,13 @@ function PostAttestazioneTiAmmWorkSection (props: {
   const d = props.data || {}
   const saved = props.savedData || {}
   const oid = props.oid != null && Number.isFinite(Number(props.oid)) ? Number(props.oid) : null
-  const riAmmVerifyingMessage = adminBozzaWorkflowMessageForRole('RI_AMM_VERIFYING', props.role)
-  const tiAmmEsitoCode = parseNumberInput(pickAttrCI(d, ['esito_TI_AMM']))
-  const tiAmmHaAttestatoConformita = tiAmmEsitoCode === 2
-  const tiAmmHaRichiestoIntegrazioni = tiAmmEsitoCode === 1
-  const riAmmHaApprovatoProposta = isPropostaContestazioneApprovedByRiAmm(d) || isDeterminazioneAdottata(d)
-  const riAmmHaRimandatoProposta = isBozzaDeterminazioneRimandataDaRiAmm(d)
-  const vistoDaRinnovareDopoRimando = tiAmmHaRichiestoIntegrazioni || riAmmHaRimandatoProposta
+  const riaVerifyingMessage = adminBozzaWorkflowMessageForRole('RIA_VERIFYING', props.role)
+  const iaEsitoCode = parseNumberInput(pickAttrCI(d, ['esito_IA']))
+  const iaHaAttestatoConformita = iaEsitoCode === 2
+  const iaHaRichiestoIntegrazioni = iaEsitoCode === 1
+  const riaHaApprovatoProposta = isPropostaContestazioneApprovedByRia(d) || isDeterminazioneAdottata(d)
+  const riaHaRimandatoProposta = isBozzaDeterminazioneRimandataDaRia(d)
+  const vistoDaRinnovareDopoRimando = iaHaRichiestoIntegrazioni || riaHaRimandatoProposta
   const protocolloFascicoloOk = hasAdminValue(pickAttrCI(d, ['protocollo_fascicolo_numero'])) && hasAdminValue(pickAttrCI(d, ['protocollo_fascicolo_data']))
   const protocolloFascicoloSalvatoOk =
     hasAdminValue(pickAttrCI(saved, ['protocollo_fascicolo_numero'])) &&
@@ -4789,7 +4769,7 @@ function PostAttestazioneTiAmmWorkSection (props: {
     : ''
   const savedDeterminationState = String(pickAttrCI(saved, ['determinazione_stato']) || '').trim().toUpperCase()
   const determinationLocked =
-    (isDeterminazioneAdottata(saved) && ['BOZZA', 'TRASMESSA_RI_AMM', 'VALIDATA_RI_AMM', EMAIL_DIRETTORE_PREPARATA_STATE].includes(savedDeterminationState)) ||
+    (isDeterminazioneAdottata(saved) && ['BOZZA', 'TRASMESSA_RIA', 'VALIDATA_RIA', EMAIL_DIRETTORE_PREPARATA_STATE].includes(savedDeterminationState)) ||
     hasAdminValue(pickAttrCI(saved, ['accertamento_data'])) ||
     hasAdminValue(pickAttrCI(saved, ['protocollo_atto_accertamento_numero'])) ||
     hasAdminValue(pickAttrCI(saved, ['protocollo_atto_accertamento_data'])) ||
@@ -4803,56 +4783,56 @@ function PostAttestazioneTiAmmWorkSection (props: {
     hasAdminValue(pickAttrCI(saved, ['protocollo_atto_accertamento_data'])) ||
     hasAdminValue(pickAttrCI(saved, ['notifica_data']))
   const attoState = attoWorkflow ? currentStatoBozzaCode : ''
-  const attoWordGenerated = attoWorkflow && ['BOZZA', 'TRASMESSA_RI_AMM', 'VALIDATA_RI_AMM', EMAIL_DIRETTORE_PREPARATA_STATE].includes(attoState)
-  const attoTransmittedRiAmm = attoWorkflow && attoState === 'TRASMESSA_RI_AMM'
-  const attoApprovedRiAmm = attoWorkflow && attoState === 'VALIDATA_RI_AMM'
+  const attoWordGenerated = attoWorkflow && ['BOZZA', 'TRASMESSA_RIA', 'VALIDATA_RIA', EMAIL_DIRETTORE_PREPARATA_STATE].includes(attoState)
+  const attoTransmittedRia = attoWorkflow && attoState === 'TRASMESSA_RIA'
+  const attoApprovedRia = attoWorkflow && attoState === 'VALIDATA_RIA'
   const attoEmailDirettorePreparata = attoWorkflow && attoState === EMAIL_DIRETTORE_PREPARATA_STATE
   const tipoAttoFinaleLabel = displayAdminFieldValue(d, props.fields, 'tipo_atto_amm')
   const fascicoloTrasmessoAlProtocollo = currentStatoBozzaCode === 'FASCICOLO_TRASMESSO_PROTOCOLLO'
   // Dopo la trasmissione al protocollo, la normale azione di caricamento acquisisce
   // la Proposta ufficiale protocollata e ne legge automaticamente gli estremi.
-  const propostaUfficialeDaAcquisire = riAmmHaApprovatoProposta && fascicoloTrasmessoAlProtocollo && !protocolloFascicoloSalvatoOk
+  const propostaUfficialeDaAcquisire = riaHaApprovatoProposta && fascicoloTrasmessoAlProtocollo && !protocolloFascicoloSalvatoOk
   // Dopo la predisposizione dell'e-mail al DA, la stessa azione acquisisce la
   // determinazione ufficiale firmata, legge numero/data e sostituisce la bozza.
   const determinazioneUfficialeDaAcquisire = emailDirettorePreparata && !determinazioneAdottata
   const canEditProtocolloFascicolo =
     props.canEdit &&
-    riAmmHaApprovatoProposta &&
+    riaHaApprovatoProposta &&
     !vistoDaRinnovareDopoRimando &&
     fascicoloTrasmessoAlProtocollo &&
     !protocolloFascicoloSalvatoOk
   const roleCode = String(props.role || '').trim().toUpperCase()
-  const riAmmApprovedMessage = roleCode === 'TI_AMM'
+  const riaApprovedMessage = roleCode === 'IA'
     ? (protocolloFascicoloSalvatoOk
         ? 'I dati di protocollo del fascicolo sono stati registrati. È possibile procedere all’aggiornamento della bozza definitiva della determinazione.'
         : (fascicoloTrasmessoAlProtocollo
             ? 'Il fascicolo è stato trasmesso al protocollo. Caricare la Proposta ufficiale protocollata: numero e data saranno letti automaticamente. Salvare quindi i dati per proseguire.'
             : 'La verifica amministrativa è stata approvata. Trasmettere il fascicolo al protocollo; quando rientra la Proposta protocollata, caricarla con l’azione di caricamento. Il gestionale leggerà automaticamente numero e data di protocollo e sostituirà la versione precedente.'))
-    : adminBozzaWorkflowMessageForRole('RI_AMM_APPROVED', props.role)
+    : adminBozzaWorkflowMessageForRole('RIA_APPROVED', props.role)
   // Una bozza è realmente generata solo dopo la produzione del Word.
   // Lo stato BOZZA viene impostato già al momento del visto e indica soltanto
   // l'apertura del ciclo: non deve quindi sbloccare prematuramente il caricamento PDF.
-  const tiAmmVistoAt = workflowTimestamp(pickAttrCI(d, ['dt_esito_TI_AMM']))
+  const iaVistoAt = workflowTimestamp(pickAttrCI(d, ['dt_esito_IA']))
   const wordGeneratedAt = workflowTimestamp(pickAttrCI(d, ['dt_bozza_determinazione']))
-  const approvalAt = workflowTimestamp(pickAttrCI(d, ['dt_esito_RI_AMM']))
-  const hasBozzaGenerated = wordGeneratedAt > 0 && (tiAmmVistoAt <= 0 || wordGeneratedAt >= tiAmmVistoAt)
-  const bozzaRimandataDaRiAmm = isBozzaDeterminazioneRimandataDaRiAmm(d)
-  const bozzaValidataDaRiAmm = isBozzaDeterminazioneValidataDaRiAmm(d)
-  const bozzaRientrataDaRiAmm = bozzaValidataDaRiAmm || bozzaRimandataDaRiAmm
+  const approvalAt = workflowTimestamp(pickAttrCI(d, ['dt_esito_RIA']))
+  const hasBozzaGenerated = wordGeneratedAt > 0 && (iaVistoAt <= 0 || wordGeneratedAt >= iaVistoAt)
+  const bozzaRimandataDaRia = isBozzaDeterminazioneRimandataDaRia(d)
+  const bozzaValidataDaRia = isBozzaDeterminazioneValidataDaRia(d)
+  const bozzaRientrataDaRia = bozzaValidataDaRia || bozzaRimandataDaRia
 
-  // Una bozza approvata non è una bozza "riaperta": dopo l'approvazione RI_AMM
-  // genera/carica/trasmetti al RI_AMM devono restare bloccati. Si riaprono
+  // Una bozza approvata non è una bozza "riaperta": dopo l'approvazione RIA
+  // genera/carica/trasmetti al RIA devono restare bloccati. Si riaprono
   // automaticamente soltanto dopo un vero rimando. Un nuovo ciclo volontario
   // può essere avviato con "Rigenera bozza" solo dopo che il protocollo del
   // ciclo corrente è stato effettivamente registrato e salvato.
-  const bozzaInLavorazioneTiAmm = !attoWorkflow && (currentStatoBozzaCode === 'BOZZA' || bozzaRimandataDaRiAmm)
-  const postApprovalProtocolSaved = bozzaValidataDaRiAmm && protocolloFascicoloSalvatoOk
+  const bozzaInLavorazioneIa = !attoWorkflow && (currentStatoBozzaCode === 'BOZZA' || bozzaRimandataDaRia)
+  const postApprovalProtocolSaved = bozzaValidataDaRia && protocolloFascicoloSalvatoOk
   const canGenerateBozzaDeterminazione =
     props.canEdit &&
-    tiAmmHaAttestatoConformita &&
+    iaHaAttestatoConformita &&
     !vistoDaRinnovareDopoRimando &&
-    (bozzaInLavorazioneTiAmm || postApprovalProtocolSaved)
-  const bozzaAlreadyTransmitted = !!currentStatoBozzaCode && !bozzaInLavorazioneTiAmm
+    (bozzaInLavorazioneIa || postApprovalProtocolSaved)
+  const bozzaAlreadyTransmitted = !!currentStatoBozzaCode && !bozzaInLavorazioneIa
   const statoBozza = attoWorkflow
     ? 'Determina adottata'
     : (emailDirettorePreparata
@@ -4915,12 +4895,13 @@ function PostAttestazioneTiAmmWorkSection (props: {
     setAttachmentsLoadedOid(null)
   }, [props.bozzaRefreshKey])
 
+  const attachmentsResolved = !oid || (attachmentsLoadedOid === oid && !attachmentsLoading)
   const hasBozzaPdfCaricata = bozzaAttachments.length > 0
   const verifiedFinalPdfCaricato = bozzaAttachments.some(isVerifiedFinalBozzaAttachment)
 
   // Un PDF già caricato chiude la fase di preparazione manuale.
   // Prima dell'approvazione restano solo Trasmetti/Elimina. Dopo l'approvazione
-  // la versione verificata dal RI_AMM è cristallizzata: il successivo PDF definitivo
+  // la versione verificata dal RIA è cristallizzata: il successivo PDF definitivo
   // può essere prodotto soltanto dal flusso controllato post-protocollo e, una volta
   // verificato, non può più essere eliminato o sostituito liberamente.
   const canPreparePdfSlot =
@@ -4928,6 +4909,7 @@ function PostAttestazioneTiAmmWorkSection (props: {
     (postApprovalProtocolSaved && !verifiedFinalPdfCaricato)
 
   const actionDisabled =
+    !attachmentsResolved ||
     !props.canEdit ||
     !canGenerateBozzaDeterminazione ||
     !canPreparePdfSlot ||
@@ -4935,8 +4917,8 @@ function PostAttestazioneTiAmmWorkSection (props: {
     attachmentsBusy
 
   // Il PDF può essere caricato solo dopo la generazione del Word della fase corrente.
-  // Prima dell'approvazione deve essere successivo al visto TI_AMM; dopo
-  // l'approvazione deve essere una nuova generazione successiva all'esito RI_AMM.
+  // Prima dell'approvazione deve essere successivo al visto IA; dopo
+  // l'approvazione deve essere una nuova generazione successiva all'esito RIA.
   const wordReadyForPdf = postApprovalProtocolSaved
     ? (approvalAt > 0 && wordGeneratedAt > approvalAt)
     : hasBozzaGenerated
@@ -4957,13 +4939,13 @@ function PostAttestazioneTiAmmWorkSection (props: {
 
       if (postApprovalProtocolSaved) {
         // Il confronto usa il riferimento interno acquisito al momento della
-        // trasmissione a RI_AMM, non dipende più dalla presenza del vecchio PDF.
+        // trasmissione a RIA, non dipende più dalla presenza del vecchio PDF.
         let approvedReference = await loadApprovedBozzaReferencePayload(layer, oid, layerUrl)
 
         // Migrazione delle pratiche approvate prima della patch 103:
         // se il vecchio PDF approvato è ancora materialmente presente, ne creiamo
         // una volta sola il riferimento interno. Se è già stato rimosso non è
-        // possibile ricostruire in modo affidabile ciò che RI_AMM aveva approvato.
+        // possibile ricostruire in modo affidabile ciò che RIA aveva approvato.
         if (!approvedReference) {
           const freshAttachments = await queryAmmAttachments(layer, oid, layerUrl)
           const legacyCandidates = freshAttachments.filter(isGiiBozzaDeterminazionePdfAttachment)
@@ -5115,13 +5097,13 @@ function PostAttestazioneTiAmmWorkSection (props: {
     hasAdminValue(pickAttrCI(saved, ['protocollo_atto_accertamento_numero'])) &&
     hasAdminValue(pickAttrCI(saved, ['protocollo_atto_accertamento_data']))
   const legacyAttoDirectPdf = attoWorkflow && attoState === 'ADOTTATA' && hasAttoPdfCaricato && hasAdminValue(pickAttrCI(saved, ['accertamento_data'])) && !attoWorkflowLocked
-  const attoInLavorazioneTiAmm = attoWorkflow && (attoState === 'ADOTTATA' || attoState === 'BOZZA')
-  const attoRichiedeVersionePulita = attoApprovedRiAmm && !attoEmailDirettorePreparata && !hasAttoDaFirmare
+  const attoInLavorazioneIa = attoWorkflow && (attoState === 'ADOTTATA' || attoState === 'BOZZA')
+  const attoRichiedeVersionePulita = attoApprovedRia && !attoEmailDirettorePreparata && !hasAttoDaFirmare
   const canGenerateAttoContestazioneWord =
     props.canEdit &&
     attoWorkflow &&
     !attoWorkflowLocked &&
-    (attoInLavorazioneTiAmm || attoRichiedeVersionePulita) &&
+    (attoInLavorazioneIa || attoRichiedeVersionePulita) &&
     (attoRichiedeVersionePulita || !hasAttoPdfCaricato || legacyAttoDirectPdf) &&
     !determinationDraftDirty &&
     !props.saving &&
@@ -5136,7 +5118,7 @@ function PostAttestazioneTiAmmWorkSection (props: {
     !attoWorkflowLocked &&
     (
       (attoState === 'BOZZA' && attoWordGenerated && !hasAttoPdfCaricato) ||
-      (attoApprovedRiAmm && hasAttoPdfCaricato && !hasAttoDaFirmare && !attoEmailDirettorePreparata) ||
+      (attoApprovedRia && hasAttoPdfCaricato && !hasAttoDaFirmare && !attoEmailDirettorePreparata) ||
       canUploadSignedAtto
     ) &&
     !props.saving &&
@@ -5160,7 +5142,7 @@ function PostAttestazioneTiAmmWorkSection (props: {
   const canPrepareEmailAttoDirettore =
     props.canEdit &&
     attoWorkflow &&
-    attoApprovedRiAmm &&
+    attoApprovedRia &&
     hasAttoDaFirmare &&
     !hasAttoFirmato &&
     !attoWorkflowLocked &&
@@ -5238,7 +5220,7 @@ function PostAttestazioneTiAmmWorkSection (props: {
         }
         const allAfter = await queryAmmAttachments(layer, oid, layerUrl)
         setAttoAttachments(allAfter.filter(isGiiAttoContestazionePdfAttachment))
-      } else if (attoApprovedRiAmm) {
+      } else if (attoApprovedRia) {
         // Dopo l'approvazione del Responsabile il PDF può essere sostituito soltanto
         // per eliminare una vecchia filigrana BOZZA. Il contenuto deve rimanere
         // identico a quello effettivamente approvato.
@@ -5260,7 +5242,7 @@ function PostAttestazioneTiAmmWorkSection (props: {
         }
         const fileName = originalName || `atto_accertamento_${String(attoFinaleNumero || oid).replace(/[^a-zA-Z0-9_-]/g, '_')}.pdf`
         const uploadFile = file.name === fileName ? file : new File([file], fileName, { type: file.type || 'application/pdf', lastModified: file.lastModified || now })
-        const ids = await addAmmAttachments(layer, oid, [uploadFile], layerUrl, `${GII_ATTACHMENT_KEYWORDS.attoContestazione}|attoDaFirmare=1|verifiedAgainstRiAmm=1|fileCreatedAt=${now}`)
+        const ids = await addAmmAttachments(layer, oid, [uploadFile], layerUrl, `${GII_ATTACHMENT_KEYWORDS.attoContestazione}|attoDaFirmare=1|verifiedAgainstRia=1|fileCreatedAt=${now}`)
         const keepId = Number(ids?.[0])
         if (!Number.isFinite(keepId) || keepId <= 0) throw new Error('PDF caricato, ma documento non identificabile.')
         for (const oldAtt of allBefore.filter(isGiiAttoContestazionePdfAttachment)) {
@@ -5288,7 +5270,7 @@ function PostAttestazioneTiAmmWorkSection (props: {
     } finally {
       setAttachmentsBusy(false)
     }
-  }, [attoApprovedRiAmm, attoEmailDirettorePreparata, attoFinaleNumero, canUploadAttoContestazione, oid, props, resolveAttachmentLayer])
+  }, [attoApprovedRia, attoEmailDirettorePreparata, attoFinaleNumero, canUploadAttoContestazione, oid, props, resolveAttachmentLayer])
 
   const downloadAttoContestazionePdf = React.useCallback(async (att: AmmAttachmentInfo) => {
     if (!att || !oid || attachmentsBusy) return
@@ -5323,22 +5305,23 @@ function PostAttestazioneTiAmmWorkSection (props: {
   }, [canDeleteAttoContestazione, oid, resolveAttachmentLayer])
 
   const canUploadBozza =
+    attachmentsResolved &&
     props.canEdit &&
     (
       propostaUfficialeDaAcquisire ||
       determinazioneUfficialeDaAcquisire ||
-      ((bozzaInLavorazioneTiAmm || postApprovalProtocolSaved) && canGenerateBozzaDeterminazione && wordReadyForPdf && canPreparePdfSlot)
+      ((bozzaInLavorazioneIa || postApprovalProtocolSaved) && canGenerateBozzaDeterminazione && wordReadyForPdf && canPreparePdfSlot)
     ) &&
     !props.saving &&
     !attachmentsBusy
 
   const canDeleteWorkingPdf =
     !attoWorkflow &&
-    bozzaInLavorazioneTiAmm &&
-    !riAmmHaApprovatoProposta
+    bozzaInLavorazioneIa &&
+    !riaHaApprovatoProposta
 
   // L'eliminazione manuale è consentita esclusivamente mentre il PDF è ancora
-  // una bozza di lavoro del TI_AMM e non è stato approvato dal RI_AMM. Dopo la
+  // una bozza di lavoro dell’IA e non è stato approvato dal RIA. Dopo la
   // trasmissione al Responsabile e, a maggior ragione, dopo l'approvazione, il PDF
   // resta cristallizzato. Un contenuto diverso richiede un nuovo ciclo di verifica.
   const canDeleteBozza =
@@ -5348,17 +5331,18 @@ function PostAttestazioneTiAmmWorkSection (props: {
     !props.saving &&
     !attachmentsBusy
   const canTransmitBozza =
+    attachmentsResolved &&
     props.canEdit &&
-    bozzaInLavorazioneTiAmm &&
-    !riAmmHaApprovatoProposta &&
-    tiAmmHaAttestatoConformita &&
+    bozzaInLavorazioneIa &&
+    !riaHaApprovatoProposta &&
+    iaHaAttestatoConformita &&
     !vistoDaRinnovareDopoRimando &&
     hasBozzaGenerated &&
     hasBozzaPdfCaricata &&
     !props.saving &&
     !attachmentsBusy
-  const canPrepareEmailProtocollo = props.canEdit && riAmmHaApprovatoProposta && !vistoDaRinnovareDopoRimando && !protocolloFascicoloOk && !fascicoloTrasmessoAlProtocollo && !props.saving && !attachmentsBusy
-  const canPrepareEmailDirettore = props.canEdit && riAmmHaApprovatoProposta && !vistoDaRinnovareDopoRimando && protocolloFascicoloSalvatoOk && hasBozzaGenerated && hasBozzaPdfCaricata && verifiedFinalPdfCaricato && !props.saving && !attachmentsBusy
+  const canPrepareEmailProtocollo = props.canEdit && riaHaApprovatoProposta && !vistoDaRinnovareDopoRimando && !protocolloFascicoloOk && !fascicoloTrasmessoAlProtocollo && !props.saving && !attachmentsBusy
+  const canPrepareEmailDirettore = props.canEdit && riaHaApprovatoProposta && !vistoDaRinnovareDopoRimando && protocolloFascicoloSalvatoOk && hasBozzaGenerated && hasBozzaPdfCaricata && verifiedFinalPdfCaricato && !props.saving && !attachmentsBusy
 
   // Un solo comando e-mail nella barra Azioni: prima serve per trasmettere il fascicolo
   // al protocollo, poi (dopo la protocollazione) per predisporre l'e-mail al Direttore.
@@ -5381,52 +5365,52 @@ function PostAttestazioneTiAmmWorkSection (props: {
     ? 'Azione successiva: trasmetti il fascicolo al protocollo'
     : 'Azione successiva: prepara l’e-mail al Direttore'
 
-  // Guida TI_AMM: una sola indicazione alla volta, sempre derivata dalle stesse
+  // Guida IA: una sola indicazione alla volta, sempre derivata dalle stesse
   // condizioni che abilitano realmente i comandi della fase corrente.
-  const guideEnabled = String(props.role || '').toUpperCase() === 'TI_AMM' && props.canEdit && !props.saving && !attachmentsBusy && !attachmentsLoading && !props.suppressActionGuide
+  const guideEnabled = String(props.role || '').toUpperCase() === 'IA' && props.canEdit && !props.saving && !attachmentsBusy && attachmentsResolved && !props.suppressActionGuide
   const protocolNumberDraftPresent = hasAdminValue(pickAttrCI(d, ['protocollo_fascicolo_numero']))
   const protocolDateDraftPresent = hasAdminValue(pickAttrCI(d, ['protocollo_fascicolo_data']))
-  const protocolAttentionField = guideEnabled && riAmmHaApprovatoProposta && fascicoloTrasmessoAlProtocollo && !protocolloFascicoloSalvatoOk
+  const protocolAttentionField = guideEnabled && riaHaApprovatoProposta && fascicoloTrasmessoAlProtocollo && !protocolloFascicoloSalvatoOk
     ? (!protocolNumberDraftPresent ? 'protocollo_fascicolo_numero' : (!protocolDateDraftPresent ? 'protocollo_fascicolo_data' : null))
     : null
   const definitiveWordGeneratedAfterApproval = postApprovalProtocolSaved && approvalAt > 0 && wordGeneratedAt > approvalAt
 
-  type TiAmmNextAction = 'GENERATE_WORD' | 'UPLOAD_PDF' | 'TRANSMIT_RI_AMM' | 'SEND_PROTOCOLLO' | 'EMAIL_DIRETTORE' | null
-  let nextTiAmmAction: TiAmmNextAction = null
+  type IaNextAction = 'GENERATE_WORD' | 'UPLOAD_PDF' | 'TRANSMIT_RIA' | 'SEND_PROTOCOLLO' | 'EMAIL_DIRETTORE' | null
+  let nextIaAction: IaNextAction = null
   if (guideEnabled && attoWorkflow) {
-    if (attoInLavorazioneTiAmm) {
-      if (!attoWordGenerated || legacyAttoDirectPdf) nextTiAmmAction = 'GENERATE_WORD'
-      else if (!hasAttoPdfCaricato) nextTiAmmAction = 'UPLOAD_PDF'
-      else if (canTransmitAttoContestazione) nextTiAmmAction = 'TRANSMIT_RI_AMM'
-    } else if (attoApprovedRiAmm && !attoEmailDirettorePreparata) {
-      if (!hasAttoDaFirmare) nextTiAmmAction = canGenerateAttoContestazioneWord ? 'GENERATE_WORD' : (canUploadAttoContestazione ? 'UPLOAD_PDF' : null)
-      else if (canPrepareEmailAttoDirettore) nextTiAmmAction = 'EMAIL_DIRETTORE'
+    if (attoInLavorazioneIa) {
+      if (!attoWordGenerated || legacyAttoDirectPdf) nextIaAction = 'GENERATE_WORD'
+      else if (!hasAttoPdfCaricato) nextIaAction = 'UPLOAD_PDF'
+      else if (canTransmitAttoContestazione) nextIaAction = 'TRANSMIT_RIA'
+    } else if (attoApprovedRia && !attoEmailDirettorePreparata) {
+      if (!hasAttoDaFirmare) nextIaAction = canGenerateAttoContestazioneWord ? 'GENERATE_WORD' : (canUploadAttoContestazione ? 'UPLOAD_PDF' : null)
+      else if (canPrepareEmailAttoDirettore) nextIaAction = 'EMAIL_DIRETTORE'
     } else if (attoEmailDirettorePreparata) {
-      if (!hasAttoFirmato && canUploadSignedAtto) nextTiAmmAction = 'UPLOAD_PDF'
-      else if (hasAttoFirmato && canPrepareEmailAttoProtocollo) nextTiAmmAction = 'SEND_PROTOCOLLO'
+      if (!hasAttoFirmato && canUploadSignedAtto) nextIaAction = 'UPLOAD_PDF'
+      else if (hasAttoFirmato && canPrepareEmailAttoProtocollo) nextIaAction = 'SEND_PROTOCOLLO'
     }
-  } else if (guideEnabled && tiAmmHaAttestatoConformita && !vistoDaRinnovareDopoRimando) {
+  } else if (guideEnabled && iaHaAttestatoConformita && !vistoDaRinnovareDopoRimando) {
     if (propostaUfficialeDaAcquisire || determinazioneUfficialeDaAcquisire) {
-      nextTiAmmAction = 'UPLOAD_PDF'
-    } else if (!riAmmHaApprovatoProposta && bozzaInLavorazioneTiAmm) {
-      if (!hasBozzaGenerated) nextTiAmmAction = 'GENERATE_WORD'
-      else if (!hasBozzaPdfCaricata) nextTiAmmAction = 'UPLOAD_PDF'
-      else if (canTransmitBozza) nextTiAmmAction = 'TRANSMIT_RI_AMM'
-    } else if (riAmmHaApprovatoProposta) {
-      if (canPrepareEmailProtocollo) nextTiAmmAction = 'SEND_PROTOCOLLO'
+      nextIaAction = 'UPLOAD_PDF'
+    } else if (!riaHaApprovatoProposta && bozzaInLavorazioneIa) {
+      if (!hasBozzaGenerated) nextIaAction = 'GENERATE_WORD'
+      else if (!hasBozzaPdfCaricata) nextIaAction = 'UPLOAD_PDF'
+      else if (canTransmitBozza) nextIaAction = 'TRANSMIT_RIA'
+    } else if (riaHaApprovatoProposta) {
+      if (canPrepareEmailProtocollo) nextIaAction = 'SEND_PROTOCOLLO'
       else if (postApprovalProtocolSaved) {
-        if (!definitiveWordGeneratedAfterApproval) nextTiAmmAction = 'GENERATE_WORD'
-        else if (!verifiedFinalPdfCaricato) nextTiAmmAction = 'UPLOAD_PDF'
-        else if (canPrepareEmailDirettore && !emailDirettorePreparata) nextTiAmmAction = 'EMAIL_DIRETTORE'
+        if (!definitiveWordGeneratedAfterApproval) nextIaAction = 'GENERATE_WORD'
+        else if (!verifiedFinalPdfCaricato) nextIaAction = 'UPLOAD_PDF'
+        else if (canPrepareEmailDirettore && !emailDirettorePreparata) nextIaAction = 'EMAIL_DIRETTORE'
       }
     }
   }
 
-  const preApprovalGuideText = nextTiAmmAction === 'GENERATE_WORD' && !riAmmHaApprovatoProposta
+  const preApprovalGuideText = nextIaAction === 'GENERATE_WORD' && !riaHaApprovatoProposta
     ? 'Il visto di conformità è stato apposto. Generare la bozza Word della determinazione.'
-    : nextTiAmmAction === 'UPLOAD_PDF' && !riAmmHaApprovatoProposta
+    : nextIaAction === 'UPLOAD_PDF' && !riaHaApprovatoProposta
       ? 'La bozza Word è stata generata. Predisporre il PDF e caricarlo nella pratica.'
-      : nextTiAmmAction === 'TRANSMIT_RI_AMM'
+      : nextIaAction === 'TRANSMIT_RIA'
         ? 'PDF pronto. Trasmettere il fascicolo per la verifica.'
         : ''
 
@@ -5450,12 +5434,12 @@ function PostAttestazioneTiAmmWorkSection (props: {
             : (hasBozzaPdfCaricata ? 'PDF definitivo già caricato' : 'Carica PDF definitivo e verifica corrispondenza'))
         : (hasBozzaPdfCaricata ? 'Bozza PDF già caricata' : 'Carica bozza PDF'))
   const transmitBozzaActionTitle = bozzaAlreadyTransmitted && !vistoDaRinnovareDopoRimando
-    ? (riAmmHaApprovatoProposta
+    ? (riaHaApprovatoProposta
         ? 'Fascicolo già approvato'
         : 'Fascicolo già trasmesso per la verifica')
     : 'Trasmetti fascicolo al Responsabile'
 
-  const generateActionDisabled = attoWorkflow ? !canGenerateAttoContestazioneWord : actionDisabled
+  const generateActionDisabled = !attachmentsResolved || (attoWorkflow ? !canGenerateAttoContestazioneWord : actionDisabled)
   const generateActionTitle = attoWorkflow
     ? (attoWorkflowLocked
         ? 'Atto non modificabile in questa fase'
@@ -5463,11 +5447,11 @@ function PostAttestazioneTiAmmWorkSection (props: {
             ? 'Genera Atto senza filigrana'
             : (hasAttoPdfCaricato && !legacyAttoDirectPdf ? 'Bozza PDF dell’Atto già caricata' : (attoWordGenerated && !legacyAttoDirectPdf ? 'Rigenera bozza Word dell’Atto' : 'Genera bozza Word dell’Atto'))))
     : generateBozzaActionTitle
-  const uploadActionDisabled = attoWorkflow ? !canUploadAttoContestazione : !canUploadBozza
+  const uploadActionDisabled = !attachmentsResolved || (attoWorkflow ? !canUploadAttoContestazione : !canUploadBozza)
   const uploadActionTitle = attoWorkflow
     ? (attoEmailDirettorePreparata
         ? (hasAttoFirmato ? 'Carica Atto protocollato' : 'Carica il PDF firmato digitalmente dal Direttore')
-        : (attoApprovedRiAmm
+        : (attoApprovedRia
             ? (hasAttoDaFirmare
                 ? 'PDF pronto per la firma'
                 : 'Carica PDF senza filigrana')
@@ -5477,9 +5461,9 @@ function PostAttestazioneTiAmmWorkSection (props: {
         : (determinazioneUfficialeDaAcquisire
             ? 'Carica determinazione firmata'
             : uploadBozzaActionTitle))
-  const transmitActionDisabled = attoWorkflow ? !canTransmitAttoContestazione : !canTransmitBozza
+  const transmitActionDisabled = !attachmentsResolved || (attoWorkflow ? !canTransmitAttoContestazione : !canTransmitBozza)
   const transmitActionTitle = attoWorkflow
-    ? (attoTransmittedRiAmm ? 'Atto già trasmesso per la verifica' : (attoApprovedRiAmm ? 'Atto già approvato' : 'Trasmetti Atto per la verifica'))
+    ? (attoTransmittedRia ? 'Atto già trasmesso per la verifica' : (attoApprovedRia ? 'Atto già approvato' : 'Trasmetti Atto per la verifica'))
     : transmitBozzaActionTitle
   const contextualEmailIsProtocollo = !attoWorkflow && emailActionIsProtocollo
   const contextualEmailIsAttoProtocollo = attoWorkflow && attoEmailDirettorePreparata
@@ -5491,7 +5475,7 @@ function PostAttestazioneTiAmmWorkSection (props: {
         ? (!hasAttoFirmato
             ? 'Caricare prima l’Atto firmato digitalmente dal Direttore'
             : (protocolloAttoCompleto ? 'Protocollo dell’Atto già registrato' : 'Trasmetti l’Atto firmato al protocollo'))
-        : (attoApprovedRiAmm
+        : (attoApprovedRia
             ? (hasAttoDaFirmare ? 'Prepara e-mail dell’Atto di accertamento al Direttore' : 'Caricare prima la versione senza filigrana')
             : 'L’Atto deve essere approvato prima dell’invio al Direttore'))
     : emailActionTitle
@@ -5521,7 +5505,7 @@ function PostAttestazioneTiAmmWorkSection (props: {
       )}
       <AdminFormSection
         title='Protocollazione fascicolo'
-        right={<SectionInfoButton text={props.showTiAmmInfo ? 'Acquisire la Proposta protocollata per registrarne gli estremi.' : null} title='Informazioni protocollazione fascicolo' />}
+        right={<SectionInfoButton text={props.showIaInfo ? 'Acquisire la Proposta protocollata per registrarne gli estremi.' : null} title='Informazioni protocollazione fascicolo' />}
         group='verbale'
         draft={d}
         fields={props.fields}
@@ -5533,7 +5517,7 @@ function PostAttestazioneTiAmmWorkSection (props: {
       </AdminFormSection>
       <Section
         title='Bozza determinazione'
-        right={<SectionInfoButton text={props.showTiAmmInfo ? 'Il documento approvato può essere sostituito solo dalla versione definitiva.' : null} title='Informazioni bozza determinazione' />}
+        right={<SectionInfoButton text={props.showIaInfo ? 'Il documento approvato può essere sostituito solo dalla versione definitiva.' : null} title='Informazioni bozza determinazione' />}
         bodyStyle={{ padding: 10 }}
       >
         <div style={{ display: 'grid', gap: 10 }}>
@@ -5583,7 +5567,7 @@ function PostAttestazioneTiAmmWorkSection (props: {
                           type='button'
                           title={canDeleteBozza
                             ? 'Elimina bozza PDF'
-                            : (riAmmHaApprovatoProposta
+                            : (riaHaApprovatoProposta
                                 ? 'PDF cristallizzato dopo l’approvazione del Responsabile dell’istruttoria amministrativa'
                                 : (bozzaAlreadyTransmitted
                                     ? 'PDF non eliminabile durante la verifica del Responsabile dell’istruttoria amministrativa'
@@ -5606,13 +5590,13 @@ function PostAttestazioneTiAmmWorkSection (props: {
                     ? 'E-mail al Direttore predisposta. In attesa dell’esito della determinazione.'
                     : (attachmentsInfo || 'PDF definitivo verificato: il contenuto corrisponde alla versione approvata dal Responsabile dell’istruttoria amministrativa; sono state ammesse esclusivamente le variazioni del numero e della data di protocollo.')}
                 </InfoBox>
-              ) : (!vistoDaRinnovareDopoRimando && riAmmHaApprovatoProposta && bozzaRientrataDaRiAmm) ? (
+              ) : (!vistoDaRinnovareDopoRimando && riaHaApprovatoProposta && bozzaRientrataDaRia) ? (
                 <InfoBox kind='warn'>
-                  {riAmmApprovedMessage}
+                  {riaApprovedMessage}
                 </InfoBox>
-              ) : (!vistoDaRinnovareDopoRimando && bozzaAlreadyTransmitted && !riAmmHaApprovatoProposta) ? (
+              ) : (!vistoDaRinnovareDopoRimando && bozzaAlreadyTransmitted && !riaHaApprovatoProposta) ? (
                 <InfoBox>
-                  {riAmmVerifyingMessage}
+                  {riaVerifyingMessage}
                 </InfoBox>
               ) : null}
             </div>
@@ -5622,7 +5606,7 @@ function PostAttestazioneTiAmmWorkSection (props: {
       {determinationSectionVisible && (
         <Section
           title='Esito determinazione'
-          right={<SectionInfoButton text={props.showTiAmmInfo ? 'Acquisire la determinazione ufficiale firmata per registrarne gli estremi.' : null} title='Informazioni esito determinazione' />}
+          right={<SectionInfoButton text={props.showIaInfo ? 'Acquisire la determinazione ufficiale firmata per registrarne gli estremi.' : null} title='Informazioni esito determinazione' />}
           bodyStyle={{ padding: 10 }}
         >
           <div style={{ display: 'grid', gap: 10 }}>
@@ -5669,7 +5653,7 @@ function PostAttestazioneTiAmmWorkSection (props: {
       {attoWorkflow && (
         <Section
           title='Atto di accertamento'
-          right={<SectionInfoButton text={props.showTiAmmInfo ? 'Dopo l’approvazione, predisporre e caricare la versione senza filigrana per l’invio al Direttore.' : null} title='Informazioni Atto di accertamento' />}
+          right={<SectionInfoButton text={props.showIaInfo ? 'Dopo l’approvazione, predisporre e caricare la versione senza filigrana per l’invio al Direttore.' : null} title='Informazioni Atto di accertamento' />}
           bodyStyle={{ padding: 10 }}
         >
           <div style={{ display: 'grid', gap: 10 }}>
@@ -5685,10 +5669,10 @@ function PostAttestazioneTiAmmWorkSection (props: {
             {attoState === 'BOZZA' && hasAttoPdfCaricato && (
               <InfoBox>Atto pronto per la verifica.</InfoBox>
             )}
-            {attoTransmittedRiAmm && (
+            {attoTransmittedRia && (
               <InfoBox>Atto in verifica.</InfoBox>
             )}
-            {attoApprovedRiAmm && (
+            {attoApprovedRia && (
               <InfoBox kind='ok'>Atto approvato. Predisporre e caricare la versione senza filigrana.</InfoBox>
             )}
             {attoEmailDirettorePreparata && !hasAttoFirmato && (
@@ -5714,16 +5698,16 @@ function PostAttestazioneTiAmmWorkSection (props: {
                     ? 'Firmato dal Direttore - da protocollare'
                     : attoEmailDirettorePreparata
                       ? 'In attesa della firma del Direttore'
-                      : attoApprovedRiAmm
+                      : attoApprovedRia
                         ? (hasAttoDaFirmare ? 'Approvato - versione senza filigrana pronta' : 'Approvato - da predisporre versione senza filigrana')
-                        : attoTransmittedRiAmm
+                        : attoTransmittedRia
                           ? 'In verifica dal Responsabile'
                           : hasAttoPdfCaricato
                             ? 'PDF caricato'
                             : attoWordGenerated
                               ? 'Word generato'
                               : 'Da predisporre'}
-                tone={(attoApprovedRiAmm || attoEmailDirettorePreparata || hasAttoFirmato || protocolloAttoCompleto) ? 'auto' : 'warn'}
+                tone={(attoApprovedRia || attoEmailDirettorePreparata || hasAttoFirmato || protocolloAttoCompleto) ? 'auto' : 'warn'}
               />
             </div>
             {attachmentsError && <InfoBox kind='warn'>{attachmentsError}</InfoBox>}
@@ -5790,7 +5774,7 @@ function PostAttestazioneTiAmmWorkSection (props: {
         }}>
           <div style={{ fontSize: Number(st.actionBarTitleFontSize ?? 14), fontWeight: 700, color: String(st.actionBarTitleColor || '#111827') }}>Azioni</div>
           <div style={{ display: 'flex', gap: Number(st.actionBarButtonGap ?? 10), flexWrap: 'wrap', alignItems: 'center', justifyContent: 'flex-end' }}>
-            {props.showTiAmmInfo && (
+            {props.showIaInfo && (
               <span style={{ position: 'relative', display: 'inline-flex' }}>
                 {props.vistoActionPending && !props.saving && <NextActionPulse floating title='Azione successiva: apponi il visto di conformità' />}
                 <button
@@ -5811,7 +5795,7 @@ function PostAttestazioneTiAmmWorkSection (props: {
             )}
 
             <span style={{ position: 'relative', display: 'inline-flex' }}>
-              {nextTiAmmAction === 'GENERATE_WORD' && <NextActionPulse floating title={attoWorkflow ? 'Azione successiva: genera la bozza Word dell’Atto' : `Azione successiva: ${generateBozzaButtonLabel}`} />}
+              {nextIaAction === 'GENERATE_WORD' && <NextActionPulse floating title={attoWorkflow ? 'Azione successiva: genera la bozza Word dell’Atto' : `Azione successiva: ${generateBozzaButtonLabel}`} />}
               <button
                 type='button'
                 title={generateActionTitle}
@@ -5825,7 +5809,7 @@ function PostAttestazioneTiAmmWorkSection (props: {
             </span>
 
             <span style={{ position: 'relative', display: 'inline-flex' }}>
-              {nextTiAmmAction === 'UPLOAD_PDF' && <NextActionPulse floating title={attoWorkflow ? (attoEmailDirettorePreparata ? 'Azione successiva: carica l’Atto firmato digitalmente dal Direttore' : 'Azione successiva: carica il PDF dell’Atto') : (postApprovalProtocolSaved ? 'Azione successiva: carica il PDF definitivo' : 'Azione successiva: carica la bozza PDF')} />}
+              {nextIaAction === 'UPLOAD_PDF' && <NextActionPulse floating title={attoWorkflow ? (attoEmailDirettorePreparata ? 'Azione successiva: carica l’Atto firmato digitalmente dal Direttore' : 'Azione successiva: carica il PDF dell’Atto') : (postApprovalProtocolSaved ? 'Azione successiva: carica il PDF definitivo' : 'Azione successiva: carica la bozza PDF')} />}
               <label
                 title={uploadActionTitle}
                 aria-label={uploadActionTitle}
@@ -5851,13 +5835,13 @@ function PostAttestazioneTiAmmWorkSection (props: {
             </span>
 
             <span style={{ position: 'relative', display: 'inline-flex' }}>
-              {nextTiAmmAction === 'TRANSMIT_RI_AMM' && <NextActionPulse floating title={attoWorkflow ? 'Azione successiva: trasmetti l’Atto al Responsabile' : 'Azione successiva: trasmetti il fascicolo al Responsabile'} />}
+              {nextIaAction === 'TRANSMIT_RIA' && <NextActionPulse floating title={attoWorkflow ? 'Azione successiva: trasmetti l’Atto al Responsabile' : 'Azione successiva: trasmetti il fascicolo al Responsabile'} />}
               <button
                 type='button'
                 title={transmitActionTitle}
                 aria-label={transmitActionTitle}
                 disabled={transmitActionDisabled}
-                onClick={attoWorkflow ? props.onTransmitAttoContestazioneRiAmm : props.onTransmitBozzaDeterminazioneRiAmm}
+                onClick={attoWorkflow ? props.onTransmitAttoContestazioneRia : props.onTransmitBozzaDeterminazioneRia}
                 style={bozzaIconButtonStyle({ disabled: transmitActionDisabled })}
               >
                 <BozzaActionIcon name='send' size={24} />
@@ -5865,7 +5849,7 @@ function PostAttestazioneTiAmmWorkSection (props: {
             </span>
 
             <span style={{ position: 'relative', display: 'inline-flex' }}>
-              {(nextTiAmmAction === 'SEND_PROTOCOLLO' || nextTiAmmAction === 'EMAIL_DIRETTORE') && (
+              {(nextIaAction === 'SEND_PROTOCOLLO' || nextIaAction === 'EMAIL_DIRETTORE') && (
                 <NextActionPulse floating title={contextualEmailPulseTitle} />
               )}
               <button
@@ -5948,7 +5932,7 @@ function CompactPracticeHeader (props: { title: string, data: Record<string, any
   const d = props.data || {}
   const oid = pickOidFromData(d, 'OBJECTID')
   const rapporto = getReportCode(d, oid != null ? Number(oid) : null)
-  const tiAmmAssegnato = String(pickAttrCI(d, ['ti_amm_assegnato_nome', 'ti_amm_assegnato_username']) || '—')
+  const iaAssegnato = String(pickAttrCI(d, ['ia_assegnato_nome', 'ia_assegnato_username']) || '—')
   const faseTecnicaDetails = [
     {
       title: 'Rapporto',
@@ -5975,18 +5959,18 @@ function CompactPracticeHeader (props: { title: string, data: Record<string, any
   ]
   const faseAmministrativaDetails = [
     {
-      title: 'Stato Tecnico istruttore amministrativo',
+      title: 'Stato Istruttore amministrativo',
       rows: [
-        { label: 'Stato', value: compactValue(d, props.fields, 'stato_TI_AMM') },
-        { label: 'Data', value: compactValue(d, props.fields, 'dt_presa_in_carico_TI_AMM') },
-        { label: 'Assegnato a', value: tiAmmAssegnato }
+        { label: 'Stato', value: compactValue(d, props.fields, 'stato_IA') },
+        { label: 'Data', value: compactValue(d, props.fields, 'dt_presa_in_carico_IA') },
+        { label: 'Assegnato a', value: iaAssegnato }
       ]
     },
     {
       title: 'Stato Responsabile istruttoria amministrativa',
       rows: [
-        { label: 'Stato', value: compactValue(d, props.fields, 'stato_RI_AMM') },
-        { label: 'Data', value: compactValue(d, props.fields, 'dt_stato_RI_AMM') }
+        { label: 'Stato', value: compactValue(d, props.fields, 'stato_RIA') },
+        { label: 'Data', value: compactValue(d, props.fields, 'dt_stato_RIA') }
       ]
     },
     {
@@ -6020,7 +6004,7 @@ const RESIDENZA_READONLY_INFO = `I dati della residenza sono riportati in sola l
 const SEDE_LEGALE_READONLY_INFO = `I dati della sede legale sono riportati in sola lettura. ${READONLY_RECTIFICATION_SUFFIX}`
 const DOMICILIO_NOTIFICA_READONLY_INFO = `I dati del domicilio per le notifiche sono riportati in sola lettura. ${READONLY_RECTIFICATION_SUFFIX}`
 const RAPPRESENTANTE_LEGALE_READONLY_INFO = `I dati del rappresentante legale sono riportati in sola lettura. ${READONLY_RECTIFICATION_SUFFIX}`
-const ANNOTAZIONI_TI_READONLY_INFO = `Le annotazioni del tecnico istruttore sono riportate in sola lettura. ${READONLY_RECTIFICATION_SUFFIX}`
+const ANNOTAZIONI_TI_READONLY_INFO = `Le annotazioni dell’istruttore tecnico sono riportate in sola lettura. ${READONLY_RECTIFICATION_SUFFIX}`
 const PAYMENT_MODE_INFO = 'Selezionare la modalità di pagamento: pagoPA, bonifico bancario, pagamento misto o altro.'
 const PROTOCOLLO_NOTIFICA_INFO = 'Protocollo e notifica vanno compilati solo dopo la registrazione di numero e data dell’atto di accertamento e contestazione.'
 const RIAPERTURA_INFO = 'La riapertura è di competenza del Responsabile dell’istruttoria amministrativa, su indicazione del Direttore dell’Area Affari Generali e Programmazione Finanziaria a seguito della decisione del CdA. Questa scheda registra gli estremi; la nuova lavorazione sarà gestita secondo l’iter previsto.'
@@ -6059,9 +6043,10 @@ function TrasgressoreAmmSection (props: { data: Record<string, any>, fields: Lay
     lineHeight: 1.2
   }
   const valueStyle: React.CSSProperties = {
-    color: st.formFieldColor || '#0f172a',
+    color: '#375623',
     fontSize: Number(st.formFieldFontSize ?? 15),
     fontWeight: 400,
+    fontStyle: 'italic',
     lineHeight: 1.2,
     minHeight: 0,
     overflowWrap: 'anywhere',
@@ -6069,15 +6054,16 @@ function TrasgressoreAmmSection (props: { data: Record<string, any>, fields: Lay
   }
   const fieldHeight = Math.max(24, Number(st.formFieldHeight ?? 32) || 32)
   const valueBoxStyle: React.CSSProperties = {
-    border: `${Number(st.formFieldBorderWidth ?? 1)}px solid ${st.formFieldBorderColor || '#bfcede'}`,
-    background: st.formFieldBg || '#f8fbff',
+    border: `${Number(st.formFieldBorderWidth ?? 1)}px solid #b8d4b0`,
+    background: '#e8f0e9',
     borderRadius: Number(st.formFieldBorderRadius ?? 7),
     padding: `0 ${Number(st.formFieldPaddingX ?? 9)}px`,
     minHeight: fieldHeight,
     minWidth: 0,
     boxSizing: 'border-box',
     display: 'flex',
-    alignItems: 'center'
+    alignItems: 'center',
+    cursor: 'default'
   }
   const noteBoxStyle: React.CSSProperties = {
     ...valueBoxStyle,
@@ -6173,7 +6159,7 @@ function TrasgressoreAmmSection (props: { data: Record<string, any>, fields: Lay
     }
   }
 
-  const noteField = existingField(['note_anagrafica'], 'Annotazioni del tecnico istruttore', 'textarea', true)
+  const noteField = existingField(['note_anagrafica'], 'Annotazioni dell’istruttore tecnico', 'textarea', true)
   const showReadOnlyInfo = props.showReadOnlyInfo !== false
   const sectionInfoButton = (text: React.ReactNode, title: string) => (
     showReadOnlyInfo ? <SectionInfoButton text={text} title={title} /> : null
@@ -6182,8 +6168,8 @@ function TrasgressoreAmmSection (props: { data: Record<string, any>, fields: Lay
 
   const rightColumn = noteField ? (
     <Section
-      title='Annotazioni del tecnico istruttore'
-      right={sectionInfoButton(ANNOTAZIONI_TI_READONLY_INFO, 'Informazioni annotazioni del tecnico istruttore')}
+      title='Annotazioni dell’istruttore tecnico'
+      right={sectionInfoButton(ANNOTAZIONI_TI_READONLY_INFO, 'Informazioni annotazioni dell’istruttore tecnico')}
       cardStyle={{ minHeight: '100%', display: 'flex', flexDirection: 'column' }}
       bodyStyle={{ flex: '1 1 auto', display: 'flex', flexDirection: 'column' }}
     >
@@ -6404,7 +6390,7 @@ function EsitoCdaSection (props: { data: Record<string, any>, fields: LayerField
 function RiaperturaAmmSection (props: { data: Record<string, any>, fields: LayerFieldInfo[], canEdit: boolean, showContextualInfo?: boolean, sectionInfo?: React.ReactNode, onChange: (name: string, value: any) => void, role: string }) {
   const d = props.data || {}
   const role = String(props.role || '').toUpperCase()
-  const canCompile = props.canEdit && (role === 'RI_AMM' || role === 'ADMIN')
+  const canCompile = props.canEdit && (role === 'RIA' || role === 'ADMIN')
   return (
     <Section title='Riapertura amministrativa' right={<SectionInfoButton text={props.showContextualInfo ? RIAPERTURA_INFO : null} title='Informazioni riapertura' />}>
       <div style={{ marginTop: 12 }}>
@@ -6552,7 +6538,7 @@ function buildSanzioneGroups (
 
     // Per l'Art. 30 i raccordi identificano esclusivamente la tipologia e il
     // riferimento normativo. Codice, descrizione e importo applicati alla pratica
-    // devono provenire sempre dallo snapshot tecnico congelato dal TI, anche quando
+    // devono provenire sempre dallo snapshot tecnico congelato dall'IT, anche quando
     // ATT-001...ATT-004 esistono nella tabella dei parametri correnti.
     const suppressArt30SnapshotVoce = !!raccordoArt30Kind && hasArt30RealRaRows
     if (raccordoArt30Kind && !hasArt30RealRaRows) {
@@ -7284,9 +7270,7 @@ function firstTextAttr (data: any, names: string[]): string {
 function cleanAmmOperatorLabel (value: any): string {
   let s = String(value || '').trim()
   if (!s) return ''
-  s = s.replace(/^\s*(TI[-_\s]?AMM|RI[-_\s]?AMM|DA|RI[-_\s]?(AGR|TEC)|TI[-_\s]?(AGR|TEC))\s*[-–—:]\s*/i, '')
-  s = s.replace(/\bRI[-_\s]?AMM\b/gi, 'Responsabile dell’istruttoria amministrativa')
-  s = s.replace(/\bTI[-_\s]?AMM\b/gi, 'Tecnico istruttore amministrativo')
+  s = s.replace(/^\s*(IA|RIA|DA|RIT[-_\s]?(AGR|TEC)|IT[-_\s]?(AGR|TEC))\s*[-–—:]\s*/i, '')
   s = s.replace(/\s+/g, ' ').trim()
   return s
 }
@@ -7294,8 +7278,6 @@ function cleanAmmOperatorLabel (value: any): string {
 function cleanAmmInfoText (value: any): string {
   let s = String(value || '').trim()
   if (!s) return ''
-  s = s.replace(/\bRI[-_\s]?AMM\b/gi, 'Responsabile dell’istruttoria amministrativa')
-  s = s.replace(/\bTI[-_\s]?AMM\b/gi, 'Tecnico istruttore amministrativo')
   return s
 }
 
@@ -7325,8 +7307,8 @@ function AmmWorkflowText (props: { text: string }) {
 async function buildBozzaDeterminazioneDocxBlob (data: any, fields: LayerFieldInfo[], profile: { username: string, fullName: string }): Promise<{ blob: Blob, fileName: string }> {
   const map = buildBozzaDeterminazioneMap(data, profile)
   // La filigrana BOZZA segue il ciclo amministrativo reale: resta presente
-  // fino all'approvazione RI_AMM e ricompare automaticamente dopo un rimando.
-  const watermarkBozza = !isPropostaContestazioneApprovedByRiAmm(data)
+  // fino all'approvazione RIA e ricompare automaticamente dopo un rimando.
+  const watermarkBozza = !isPropostaContestazioneApprovedByRia(data)
   const bytes = await buildBozzaDeterminazioneDocx(map, { watermarkBozza })
   const fileName = getBozzaDeterminazioneDocxFileName(map)
   return { blob: new Blob([bytes as any], { type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' }), fileName }
@@ -7368,7 +7350,7 @@ function normalizePdfVerificationText (value: any): string {
 const PROPOSTA_PROTOCOL_REF_RE = /(Proposta\s+di\s+contestazione(?:(?!Proposta\s+di\s+contestazione).){0,320}?\bprot\.?\s*n\.?\s*)([^\s,;]+)(\s+del\s+)([^\s,;]+)/gi
 
 function canonicalizeApprovedDeterminationText (value: string): string {
-  // La filigrana BOZZA è una protezione visiva della copia sottoposta al RI_AMM e
+  // La filigrana BOZZA è una protezione visiva della copia sottoposta al RIA e
   // non fa parte del contenuto amministrativo approvato. La ignoriamo quindi nel
   // confronto tra la bozza approvata e il successivo PDF pulito.
   const normalized = normalizePdfVerificationText(value).replace(/\bBOZZA\b/gi, '').replace(/\s+/g, ' ').trim()
@@ -7677,7 +7659,7 @@ async function replaceApprovedBozzaReferenceAttachment (
   const oldRefs = before.filter(isGiiApprovedBozzaReferenceAttachment)
   const file = new File(
     [JSON.stringify(payload)],
-    `gii_riferimento_bozza_ri_amm_${Number(oid)}.json`,
+    `gii_riferimento_bozza_ria_${Number(oid)}.json`,
     { type: 'application/json', lastModified: payload.capturedAt }
   )
   const ids = await addAmmAttachments(layer, oid, [file], layerUrl, approvedBozzaReferenceKeywords(payload.capturedAt))
@@ -7945,7 +7927,7 @@ function DatiGeneraliAmmSection (props: { title: string, data: Record<string, an
   const verbaleDefinitivo = isVerbaleDefinitivo(d)
   const hasVerbale = tipoAttoAmmPrevedeVerbale(d)
   const verbaleNotificato = isVerbaleNotificato(d)
-  const tecnicoIstruttoreTecnico = String(pickAttrCI(d, ['ti_assegnato_nome', 'ti_assegnato_username', 'tecnico_istruttore_nome', 'tecnico_istruttore', 'istruttore_tecnico_nome', 'istruttore_tecnico']) || '—')
+  const istruttoreTecnico = String(pickAttrCI(d, ['it_assegnato_nome', 'it_assegnato_username']) || '—')
   const panelStyle: React.CSSProperties = { border: '1px solid #dbeafe', background: '#f8fafc', borderRadius: 12, padding: 12, display: 'grid', gap: 10 }
   const panelTitleStyle: React.CSSProperties = { color: st.formInnerHeaderColor || '#0f4c81', fontSize: Number(st.formInnerHeaderFontSize ?? 14), fontWeight: 900, letterSpacing: 0.2, textTransform: 'uppercase' }
   const gridStyle: React.CSSProperties = { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(210px, 1fr))', gap: 10 }
@@ -7973,7 +7955,7 @@ function DatiGeneraliAmmSection (props: { title: string, data: Record<string, an
               <StatusSummaryItem label='Area tecnica di provenienza' value={displayAdminFieldValue(d, props.fields, 'area_cod')} tone='auto' />
               <StatusSummaryItem label='Settore' value={displayAdminFieldValue(d, props.fields, 'settore_cod')} tone='auto' />
               <StatusSummaryItem label='Ufficio di zona' value={displayAdminFieldValue(d, props.fields, 'ufficio_zona')} tone='auto' />
-              <StatusSummaryItem label='Tecnico istruttore' value={tecnicoIstruttoreTecnico} tone='auto' />
+              <StatusSummaryItem label='Istruttore tecnico' value={istruttoreTecnico} tone='auto' />
             </div>
           </div>
 
@@ -7984,7 +7966,7 @@ function DatiGeneraliAmmSection (props: { title: string, data: Record<string, an
               <StatusSummaryItem label='Data approvazione' value={displayVerbaleApprovalDate(d, props.fields)} tone={hasAdminValue(verbaleApprovalDateValue(d)) ? 'auto' : 'warn'} />
               <StatusSummaryItem label='Stato' value={verbaleDefinitivo ? 'Definitivo' : 'In corso di istruttoria'} tone={verbaleDefinitivo ? 'auto' : 'warn'} />
               <StatusSummaryItem label='Notifica' value={verbaleNotificato ? displayAdminFieldValue(d, props.fields, 'notifica_data') : 'Non registrata'} tone={verbaleNotificato ? 'auto' : 'warn'} />
-              <StatusSummaryItem label='Tecnico istruttore' value={displayAdminFieldValue(d, props.fields, 'ti_amm_assegnato_nome', displayAdminFieldValue(d, props.fields, 'ti_amm_assegnato_username'))} tone='auto' />
+              <StatusSummaryItem label='Istruttore amministrativo' value={displayAdminFieldValue(d, props.fields, 'ia_assegnato_nome', displayAdminFieldValue(d, props.fields, 'ia_assegnato_username'))} tone='auto' />
             </div>
           </div>
         </div>
@@ -8128,7 +8110,7 @@ function sortAmmAttachmentForAllegatiSection (a: AmmAttachmentInfo, b: AmmAttach
   return ca - cb
 }
 
-function AllegatiAmmSection (props: {
+function AllegaiaSection (props: {
   oid: number | null,
   ds: any,
   layerUrl?: string,
@@ -8813,14 +8795,14 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
   })
   const [profile, setProfile] = React.useState(() => readUserProfile())
   const [practiceContextRevision, setPracticeContextRevision] = React.useState(0)
-  const [tiAmmAccess, setTiAmmAccess] = React.useState<TiAmmAccessState>({
+  const [iaAccess, setIaAccess] = React.useState<IaAccessState>({
     status: 'idle',
     selectionKey: '',
     data: null,
     message: '',
     checkedAt: 0
   })
-  const tiAmmAccessSeqRef = React.useRef(0)
+  const iaAccessSeqRef = React.useRef(0)
   const statesRef = React.useRef<Record<string, SelectedState>>({})
   const [layerFields, setLayerFields] = React.useState<LayerFieldInfo[]>([])
   const [draft, setDraft] = React.useState<Record<string, any>>({})
@@ -8865,14 +8847,14 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
 
   React.useEffect(() => {
     const onPracticeContextReset = () => {
-      tiAmmAccessSeqRef.current += 1
+      iaAccessSeqRef.current += 1
       for (const state of Object.values(statesRef.current || {})) clearDataSourceSelection(state?.ds)
       clearEditingAmmSessionCaches()
       setPracticeContextRevision(value => value + 1)
       setStates({})
       setIntentState(emptySelectedState())
       setProfile(readUserProfile())
-      setTiAmmAccess({ status: 'idle', selectionKey: '', data: null, message: '', checkedAt: 0 })
+      setIaAccess({ status: 'idle', selectionKey: '', data: null, message: '', checkedAt: 0 })
       setLayerFields([])
       setDraft({})
       setInitialDraft({})
@@ -8942,7 +8924,7 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
   const configuredDs = configuredDsState?.ds || null
 
   // La pratica candidata arriva prima di tutto dall'intent impostato da gii-azioni.
-  // Per il TI_AMM i dati candidati servono soltanto a localizzare il record: nessun
+  // Per il IA i dati candidati servono soltanto a localizzare il record: nessun
   // contenuto viene mostrato prima della verifica aggiornata sul servizio.
   const candidateSelection = (intentState?.oid != null || intentState?.data) ? intentState : (dsStatesWithSelection[0] || null)
   const candidateDs = candidateSelection?.ds || configuredDs
@@ -8950,7 +8932,7 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
   const candidateOid = candidateSelection?.oid ?? (candidateData ? pickOidFromData(candidateData, candidateSelection?.idFieldName || 'OBJECTID') : null)
   const candidateHasSelection = !!candidateData || (candidateOid != null && Number.isFinite(Number(candidateOid)))
   const currentRole = String(profile.role || '').toUpperCase()
-  const isTiAmmProfile = currentRole === 'TI_AMM'
+  const isIaProfile = currentRole === 'IA'
   const profileIdentity = userProfileIdentityKey(profile)
   const candidateLayerUrl = normalizeEditLayerUrl(candidateSelection?.layerUrl || (configuredDsState as any)?.layerUrl || getDataSourceUrl(configuredDs))
   const candidateVerificationDs = candidateLayerUrl ? null : candidateDs
@@ -8959,15 +8941,15 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
     : ''
 
   React.useEffect(() => {
-    const seq = ++tiAmmAccessSeqRef.current
-    if (!isTiAmmProfile || !candidateHasSelection || candidateOid == null || !Number.isFinite(Number(candidateOid))) {
-      setTiAmmAccess(prev => prev.status === 'idle' && !prev.selectionKey
+    const seq = ++iaAccessSeqRef.current
+    if (!isIaProfile || !candidateHasSelection || candidateOid == null || !Number.isFinite(Number(candidateOid))) {
+      setIaAccess(prev => prev.status === 'idle' && !prev.selectionKey
         ? prev
         : { status: 'idle', selectionKey: '', data: null, message: '', checkedAt: 0 })
       return
     }
 
-    setTiAmmAccess({
+    setIaAccess({
       status: 'checking',
       selectionKey: candidateSelectionKey,
       data: null,
@@ -8982,9 +8964,9 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
         if (!layer) throw new Error('Pratica non disponibile.')
         const idFieldName = String(layer.objectIdField || candidateSelection?.idFieldName || 'OBJECTID').trim() || 'OBJECTID'
         const liveAttrs = await queryCurrentLayerAttrsByOid(layer, idFieldName, Number(candidateOid))
-        if (cancelled || seq !== tiAmmAccessSeqRef.current) return
+        if (cancelled || seq !== iaAccessSeqRef.current) return
         if (!liveAttrs || !Object.keys(liveAttrs).length) {
-          setTiAmmAccess({
+          setIaAccess({
             status: 'error',
             selectionKey: candidateSelectionKey,
             data: null,
@@ -8993,8 +8975,8 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
           })
           return
         }
-        if (!isPracticeAssignedToCurrentTiAmm(liveAttrs, profile)) {
-          setTiAmmAccess({
+        if (!isPracticeAssignedToCurrentIa(liveAttrs, profile)) {
+          setIaAccess({
             status: 'denied',
             selectionKey: candidateSelectionKey,
             data: null,
@@ -9004,7 +8986,7 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
           return
         }
         writeSelectedFeatureCache(candidateLayerUrl, candidateOid, idFieldName, liveAttrs, 'detail')
-        setTiAmmAccess({
+        setIaAccess({
           status: 'allowed',
           selectionKey: candidateSelectionKey,
           data: liveAttrs,
@@ -9012,8 +8994,8 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
           checkedAt: Date.now()
         })
       } catch {
-        if (cancelled || seq !== tiAmmAccessSeqRef.current) return
-        setTiAmmAccess({
+        if (cancelled || seq !== iaAccessSeqRef.current) return
+        setIaAccess({
           status: 'error',
           selectionKey: candidateSelectionKey,
           data: null,
@@ -9024,20 +9006,20 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
     }
     void verify()
     return () => { cancelled = true }
-  }, [candidateHasSelection, candidateLayerUrl, candidateOid, candidateSelection?.idFieldName, candidateSelectionKey, candidateVerificationDs, isTiAmmProfile, practiceContextRevision, profileIdentity])
+  }, [candidateHasSelection, candidateLayerUrl, candidateOid, candidateSelection?.idFieldName, candidateSelectionKey, candidateVerificationDs, isIaProfile, practiceContextRevision, profileIdentity])
 
-  const tiAmmAccessRequired = isTiAmmProfile && candidateHasSelection
-  const tiAmmAccessAllowed = !tiAmmAccessRequired || (
-    tiAmmAccess.status === 'allowed' &&
-    tiAmmAccess.selectionKey === candidateSelectionKey &&
-    !!tiAmmAccess.data
+  const iaAccessRequired = isIaProfile && candidateHasSelection
+  const iaAccessAllowed = !iaAccessRequired || (
+    iaAccess.status === 'allowed' &&
+    iaAccess.selectionKey === candidateSelectionKey &&
+    !!iaAccess.data
   )
-  const activeSelection = isTiAmmProfile
-    ? (tiAmmAccessAllowed && candidateSelection
-        ? { ...candidateSelection, data: tiAmmAccess.data, sig: `${candidateSelection.sig}|verified:${tiAmmAccess.checkedAt}` }
+  const activeSelection = isIaProfile
+    ? (iaAccessAllowed && candidateSelection
+        ? { ...candidateSelection, data: iaAccess.data, sig: `${candidateSelection.sig}|verified:${iaAccess.checkedAt}` }
         : null)
     : candidateSelection
-  const active = activeSelection ? { ...activeSelection, ds: activeSelection.ds || configuredDs } : (isTiAmmProfile ? null : (configuredDsState || null))
+  const active = activeSelection ? { ...activeSelection, ds: activeSelection.ds || configuredDs } : (isIaProfile ? null : (configuredDsState || null))
   const data = activeSelection?.data || null
   const oid = activeSelection?.oid ?? (data ? pickOidFromData(data, activeSelection?.idFieldName || 'OBJECTID') : null)
   const hasSelection = !!data || (oid != null && Number.isFinite(Number(oid)))
@@ -9048,16 +9030,16 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
   const showHeaderProcedureNote = activeAmmSection !== 'anteprima'
   const hasDsForSave = !!configuredDs
   const openedInConsultation = activeSelection?.readOnly === true
-  const roleCanEditData = ['TI_AMM', 'ADMIN'].includes(currentRole)
+  const roleCanEditData = ['IA', 'ADMIN'].includes(currentRole)
   const draftOid = pickOidFromData(draft || {}, active?.idFieldName || 'OBJECTID')
   const draftBelongsToSelection = oid != null && draftOid != null && Number(draftOid) === Number(oid)
   const editStateData = draftBelongsToSelection && Object.keys(draft || {}).length ? draft : (data || {})
-  const tiAmmWorkflowState = currentRole === 'TI_AMM' ? parseNumberInput(pickAttrCI(editStateData || {}, ['stato_TI_AMM', 'STATO_TI_AMM'])) : null
-  const tiAmmAssignedToCurrentUser = currentRole === 'TI_AMM' && isPracticeAssignedToCurrentTiAmm(editStateData || {}, profile)
-  const tiAmmIsCurrentOperativeAssignee = currentRole === 'TI_AMM' && tiAmmWorkflowState === 2 && tiAmmAssignedToCurrentUser
-  const assignedToOtherUser = currentRole === 'TI_AMM' && !tiAmmAssignedToCurrentUser
+  const iaWorkflowState = currentRole === 'IA' ? parseNumberInput(pickAttrCI(editStateData || {}, ['stato_IA', 'STATO_IA'])) : null
+  const iaAssignedToCurrentUser = currentRole === 'IA' && isPracticeAssignedToCurrentIa(editStateData || {}, profile)
+  const iaIsCurrentOperativeAssignee = currentRole === 'IA' && iaWorkflowState === 2 && iaAssignedToCurrentUser
+  const assignedToOtherUser = currentRole === 'IA' && !iaAssignedToCurrentUser
   const dataEditBlockedByRole = roleAllowed && !roleCanEditData
-  const dataEditBlockedByOtherUser = roleCanEditData && ((openedInConsultation && !tiAmmIsCurrentOperativeAssignee) || assignedToOtherUser)
+  const dataEditBlockedByOtherUser = roleCanEditData && ((openedInConsultation && !iaIsCurrentOperativeAssignee) || assignedToOtherUser)
   const readOnlyBannerBaseMessage = dataEditBlockedByRole
     ? 'Modifica dati non consentita per il tuo ruolo.'
     : (dataEditBlockedByOtherUser ? 'Modifica dati non abilitata. La pratica risulta in carico presso un altro utente.' : '')
@@ -9098,7 +9080,7 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
   React.useEffect(() => {
     let cancelled = false
     const refreshLiveRecord = async () => {
-      if (currentRole === 'TI_AMM') return
+      if (currentRole === 'IA') return
       if (!active?.ds || oid == null || !Number.isFinite(Number(oid))) return
       try {
         const layer = await resolveLayerForEdit(active.ds, active.layerUrl || (configuredDsState as any)?.layerUrl || getDataSourceUrl(configuredDs))
@@ -9259,7 +9241,7 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
 
   const upsertAmmCycleAudit = React.useCallback(async (prevAttrs: Record<string, any>, nextAttrs: Record<string, any>, changedFieldNames: string[]) => {
     const roleForLog = String(profile.role || '').trim().toUpperCase()
-    if (roleForLog !== 'TI_AMM' && roleForLog !== 'RI_AMM') return 0
+    if (roleForLog !== 'IA' && roleForLog !== 'RIA') return 0
 
     const parentGlobalId = String(
       pickAttrCI(nextAttrs, ['GlobalID', 'globalid', 'GLOBALID']) ||
@@ -9344,7 +9326,7 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
   }, [data, findOpenAmmCycle, getLogLayer, getNextAmmCycleNumber, oid, profile.role, profile.username])
 
 
-  const closeTiAmmBozzaDeterminazioneCycle = React.useCallback(async (prevAttrs: Record<string, any>, nextAttrs: Record<string, any>, changedFieldNames: string[]) => {
+  const closeIaBozzaDeterminazioneCycle = React.useCallback(async (prevAttrs: Record<string, any>, nextAttrs: Record<string, any>, changedFieldNames: string[]) => {
     const parentGlobalId = String(
       pickAttrCI(nextAttrs, ['GlobalID', 'globalid', 'GLOBALID']) ||
       pickAttrCI(prevAttrs, ['GlobalID', 'globalid', 'GLOBALID']) ||
@@ -9352,7 +9334,7 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
       ''
     ).trim()
     if (!parentGlobalId || oid == null) {
-      console.warn('[GII_LOG_EVENTI_CICLI] Chiusura ciclo TI_AMM bozza determinazione saltata: parent_globalid non disponibile.', { oid })
+      console.warn('[GII_LOG_EVENTI_CICLI] Chiusura ciclo IA bozza determinazione saltata: parent_globalid non disponibile.', { oid })
       return 0
     }
 
@@ -9360,9 +9342,9 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
     if (!logLayer?.applyEdits) return 0
 
     const now = Date.now()
-    const roleForLog = 'TI_AMM'
+    const roleForLog = 'IA'
     const username = String(profile.username || pickAttrCI(nextAttrs, ['bozza_determinazione_da']) || '').trim()
-    const destUsername = String(pickAttrCI(nextAttrs, ['ri_amm_assegnato_username', 'RI_AMM_assegnato_username', 'ri_amm_username', 'RI_AMM_username']) || '').trim()
+    const destUsername = await loadUniqueAmmRoleUsername('RIA', 'AMM')
     const logFields = (logLayer.fields || []).map((f: any) => ({ name: String(f.name), type: String(f.type || ''), alias: String(f.alias || f.name), domain: f.domain || null, editable: f.editable !== false }))
     const delta = buildAuditDeltaMaps(prevAttrs, nextAttrs, changedFieldNames)
     const num = Object.keys(delta.oldMap).length
@@ -9378,7 +9360,7 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
       area: 'AMM',
       settore: 'CR',
       fase: roleForLog,
-      ruolo_destinatario: 'RI_AMM',
+      ruolo_destinatario: 'RIA',
       utente_destinatario: destUsername,
       note_chiusura: 'Bozza PDF della determinazione trasmessa al Responsabile dell’istruttoria amministrativa per la verifica.',
       num_campi_modificati: num,
@@ -9397,7 +9379,7 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
           utente_operatore: username || openFeature.attributes.utente_operatore || '',
           dt_apertura: openFeature.attributes.dt_apertura || null,
           numero_ciclo_ruolo: openFeature.attributes.numero_ciclo_ruolo || null,
-          session_id: openFeature.attributes.session_id || `ti_amm-bozza-${now}`
+          session_id: openFeature.attributes.session_id || `ia-bozza-${now}`
         }, logFields)
         const res = await logLayer.applyEdits({ updateFeatures: [{ attributes: updateAttrs }] })
         const upd = res?.updateFeatureResults?.[0] || res?.updateResults?.[0] || null
@@ -9407,8 +9389,8 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
         const addAttrs = filterAttrsForLayer({
           ...baseAttrs,
           numero_ciclo_ruolo: nextNum,
-          dt_apertura: Number(pickAttrCI(nextAttrs, ['dt_presa_in_carico_TI_AMM', 'dt_stato_TI_AMM'])) || now,
-          session_id: `ti_amm-bozza-${now}-${Math.random().toString(36).slice(2, 8)}`
+          dt_apertura: Number(pickAttrCI(nextAttrs, ['dt_presa_in_carico_IA', 'dt_stato_IA'])) || now,
+          session_id: `ia-bozza-${now}-${Math.random().toString(36).slice(2, 8)}`
         }, logFields)
         const res = await logLayer.applyEdits({ addFeatures: [{ attributes: addAttrs }] })
         const add = res?.addFeatureResults?.[0] || res?.addResults?.[0] || null
@@ -9417,7 +9399,7 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
       try { window.dispatchEvent(new CustomEvent('gii-log-eventi-cicli-changed', { detail: { source: 'gii-editing-amm-bozza-determinazione-trasmessa', oid, role: roleForLog, ts: now } })) } catch {}
       return 1
     } catch (e) {
-      console.warn('[GII_LOG_EVENTI_CICLI] Errore chiusura ciclo TI_AMM bozza determinazione:', e)
+      console.warn('[GII_LOG_EVENTI_CICLI] Errore chiusura ciclo IA bozza determinazione:', e)
       return 0
     }
   }, [data, findOpenAmmCycle, getLogLayer, getNextAmmCycleNumber, oid, profile.username])
@@ -9465,7 +9447,7 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
   }, [data, getAttivitaLayer, oid])
 
 
-  const createRiAmmBozzaDeterminazioneActivity = React.useCallback(async (overrideAttrs: Record<string, any>) => {
+  const createRiaBozzaDeterminazioneActivity = React.useCallback(async (overrideAttrs: Record<string, any>) => {
     try {
       const layer = await getAttivitaLayer()
       if (!layer?.applyEdits) return
@@ -9480,9 +9462,9 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
       const oidFromMerged = pickAttrCI(merged, ['OBJECTID', 'ObjectID', 'ObjectId', 'objectId', 'objectid'])
       const oidNumber = Number.isFinite(Number(oidFromMerged)) ? Number(oidFromMerged) : (oid != null && Number.isFinite(Number(oid)) ? Number(oid) : null)
       const numeroRapporto = getReportCode(merged, oidNumber)
-      const destUsername = String(pickAttrCI(merged, ['ri_amm_assegnato_username', 'RI_AMM_assegnato_username', 'ri_amm_username', 'RI_AMM_username']) || '').trim()
-      const mittente = String(profile.fullName || profile.username || 'Tecnico istruttore').trim()
-      const key = `${parentGlobalId}|PRESA_IN_CARICO|BOZZA_DETERMINAZIONE|RI_AMM|AMM||${destUsername}`
+      const destUsername = await loadUniqueAmmRoleUsername('RIA', 'AMM')
+      const mittente = String(profile.fullName || profile.username || 'Istruttore amministrativo').trim()
+      const key = `${parentGlobalId}|PRESA_IN_CARICO|BOZZA_DETERMINAZIONE|RIA|AMM||${destUsername}`
       const attrs: Record<string, any> = {
         chiave_attivita: key,
         parent_globalid: parentGlobalId,
@@ -9492,13 +9474,13 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
         sottotipo_attivita: 'BOZZA_DETERMINAZIONE',
         titolo: 'Fascicolo istruttorio da verificare',
         messaggio: `Fascicolo istruttorio della pratica n. ${numeroRapporto || '—'} da prendere in carico per la verifica.\nMittente: ${mittente}`,
-        destinatario_ruolo: 'RI_AMM',
+        destinatario_ruolo: 'RIA',
         destinatario_area: 'AMM',
         destinatario_settore: 'CR',
         destinatario_ufficio_id: null,
         destinatario_ufficio_zona: null,
         destinatario_username: destUsername || null,
-        origine_evento: 'TI_AMM_TRASMETTE_BOZZA_DETERMINAZIONE',
+        origine_evento: 'IA_TRASMETTE_BOZZA_DETERMINAZIONE',
         priorita: 'INFO',
         data_attivazione: now,
         creato_il: now,
@@ -9508,8 +9490,8 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
       }
       const activityFields = (layer.fields || []).map((f: any) => ({ name: String(f.name), type: String(f.type || ''), alias: String(f.alias || f.name), domain: f.domain || null, editable: f.editable !== false }))
       const cleanAttrs = filterAttrsForLayer(attrs, activityFields)
-      await deleteCurrentAmmActivitiesForRole('TI_AMM', merged)
-      await deleteCurrentAmmActivitiesForRole('RI_AMM', merged, key)
+      await deleteCurrentAmmActivitiesForRole('IA', merged)
+      await deleteCurrentAmmActivitiesForRole('RIA', merged, key)
       const chiaveField = realFieldName(activityFields, 'chiave_attivita') || 'chiave_attivita'
       const chiaveValue = cleanAttrs[chiaveField]
       let existingOid: any = null
@@ -9531,13 +9513,13 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
       } else {
         await layer.applyEdits({ addFeatures: [{ attributes: cleanAttrs }] })
       }
-      try { window.dispatchEvent(new CustomEvent('gii-alerts-refresh', { detail: { source: 'gii-editing-amm-bozza-ri-amm', key, oid, ts: now } })) } catch {}
+      try { window.dispatchEvent(new CustomEvent('gii-alerts-refresh', { detail: { source: 'gii-editing-amm-bozza-ria', key, oid, ts: now } })) } catch {}
     } catch (e) {
       console.warn('[GII_ATTIVITA_CORRENTI] Errore creazione attività bozza determinazione:', e)
     }
   }, [data, deleteCurrentAmmActivitiesForRole, getAttivitaLayer, oid, profile.fullName, profile.username])
 
-  const createRiAmmAttoContestazioneActivity = React.useCallback(async (overrideAttrs: Record<string, any>) => {
+  const createRiaAttoContestazioneActivity = React.useCallback(async (overrideAttrs: Record<string, any>) => {
     try {
       const layer = await getAttivitaLayer()
       if (!layer?.applyEdits) return
@@ -9552,9 +9534,9 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
       const oidFromMerged = pickAttrCI(merged, ['OBJECTID', 'ObjectID', 'ObjectId', 'objectId', 'objectid'])
       const oidNumber = Number.isFinite(Number(oidFromMerged)) ? Number(oidFromMerged) : (oid != null && Number.isFinite(Number(oid)) ? Number(oid) : null)
       const numeroRapporto = getReportCode(merged, oidNumber)
-      const destUsername = String(pickAttrCI(merged, ['ri_amm_assegnato_username', 'RI_AMM_assegnato_username', 'ri_amm_username', 'RI_AMM_username']) || '').trim()
-      const mittente = String(profile.fullName || profile.username || 'Tecnico istruttore').trim()
-      const key = `${parentGlobalId}|PRESA_IN_CARICO|ATTO_CONTESTAZIONE|RI_AMM|AMM||${destUsername}`
+      const destUsername = await loadUniqueAmmRoleUsername('RIA', 'AMM')
+      const mittente = String(profile.fullName || profile.username || 'Istruttore amministrativo').trim()
+      const key = `${parentGlobalId}|PRESA_IN_CARICO|ATTO_CONTESTAZIONE|RIA|AMM||${destUsername}`
       const attrs: Record<string, any> = {
         chiave_attivita: key,
         parent_globalid: parentGlobalId,
@@ -9564,13 +9546,13 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
         sottotipo_attivita: 'ATTO_CONTESTAZIONE',
         titolo: 'Atto di contestazione da verificare',
         messaggio: `Atto di contestazione della pratica n. ${numeroRapporto || '—'} da prendere in carico per la verifica.\nMittente: ${mittente}`,
-        destinatario_ruolo: 'RI_AMM',
+        destinatario_ruolo: 'RIA',
         destinatario_area: 'AMM',
         destinatario_settore: 'CR',
         destinatario_ufficio_id: null,
         destinatario_ufficio_zona: null,
         destinatario_username: destUsername || null,
-        origine_evento: 'TI_AMM_TRASMETTE_ATTO_CONTESTAZIONE',
+        origine_evento: 'IA_TRASMETTE_ATTO_CONTESTAZIONE',
         priorita: 'INFO',
         data_attivazione: now,
         creato_il: now,
@@ -9580,8 +9562,8 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
       }
       const activityFields = (layer.fields || []).map((f: any) => ({ name: String(f.name), type: String(f.type || ''), alias: String(f.alias || f.name), domain: f.domain || null, editable: f.editable !== false }))
       const cleanAttrs = filterAttrsForLayer(attrs, activityFields)
-      await deleteCurrentAmmActivitiesForRole('TI_AMM', merged)
-      await deleteCurrentAmmActivitiesForRole('RI_AMM', merged, key)
+      await deleteCurrentAmmActivitiesForRole('IA', merged)
+      await deleteCurrentAmmActivitiesForRole('RIA', merged, key)
       const chiaveField = realFieldName(activityFields, 'chiave_attivita') || 'chiave_attivita'
       const chiaveValue = cleanAttrs[chiaveField]
       let existingOid: any = null
@@ -9603,13 +9585,13 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
       } else {
         await layer.applyEdits({ addFeatures: [{ attributes: cleanAttrs }] })
       }
-      try { window.dispatchEvent(new CustomEvent('gii-alerts-refresh', { detail: { source: 'gii-editing-amm-atto-ri-amm', key, oid, ts: now } })) } catch {}
+      try { window.dispatchEvent(new CustomEvent('gii-alerts-refresh', { detail: { source: 'gii-editing-amm-atto-ria', key, oid, ts: now } })) } catch {}
     } catch (e) {
       console.warn('[GII_ATTIVITA_CORRENTI] Errore creazione attività Atto di contestazione:', e)
     }
   }, [data, deleteCurrentAmmActivitiesForRole, getAttivitaLayer, oid, profile.fullName, profile.username])
 
-  const handleApponiAttestazioneTiAmm = React.useCallback(async (noteInput: string) => {
+  const handleApponiAttestazioneIa = React.useCallback(async (noteInput: string) => {
     setPendingAttestationText(null)
     if (!hasSelection || oid == null || !Number.isFinite(Number(oid))) {
       setDialog({ kind: 'warn', title: 'Nessuna pratica selezionata', text: 'Selezionare una pratica prima di apporre il visto di conformità.' })
@@ -9619,7 +9601,7 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
       setDialog({ kind: 'err', title: 'Operazione non disponibile', text: 'Configurazione non disponibile. Contattare l’amministratore.' })
       return
     }
-    if (String(profile.role || '').toUpperCase() !== 'TI_AMM') {
+    if (String(profile.role || '').toUpperCase() !== 'IA') {
       setDialog({ kind: 'warn', title: 'Profilo non abilitato', text: 'Operazione non consentita per il profilo corrente.' })
       return
     }
@@ -9655,26 +9637,26 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
       const note = /motivazione\s+del\s+rimando|integrazion|rettific/i.test(requestedAttestationNote)
         ? defaultAttestationNote
         : (requestedAttestationNote || defaultAttestationNote)
-      put('esito_TI_AMM', 2)
-      put('dt_esito_TI_AMM', now)
-      put('note_TI_AMM', note)
+      put('esito_IA', 2)
+      put('dt_esito_IA', now)
+      put('note_IA', note)
 
       // Ogni nuovo visto apre la fase di predisposizione della bozza del ciclo
       // corrente. È indispensabile riportare esplicitamente lo stato a BOZZA:
-      // altrimenti può sopravvivere VALIDATA_RI_AMM/FASCICOLO_TRASMESSO_PROTOCOLLO
-      // dal ciclo precedente e tutti i comandi TI_AMM restano erroneamente bloccati.
+      // altrimenti può sopravvivere VALIDATA_RIA/FASCICOLO_TRASMESSO_PROTOCOLLO
+      // dal ciclo precedente e tutti i comandi IA restano erroneamente bloccati.
       put('determinazione_stato', 'BOZZA')
 
-      // Il visto del TI_AMM non apre alcun nodo operativo RI_AMM: l'unico invio
+      // Il visto dell’IA non apre alcun nodo operativo RIA: l'unico invio
       // al Responsabile avviene con "Trasmetti fascicolo al Responsabile".
-      // Chiudiamo quindi eventuali stati/attività RI_AMM residui creati da versioni
+      // Chiudiamo quindi eventuali stati/attività RIA residui creati da versioni
       // precedenti o da prove intermedie del flusso.
-      put('stato_RI_AMM', 4)
-      put('dt_stato_RI_AMM', null)
-      put('dt_presa_in_carico_RI_AMM', null)
-      put('esito_RI_AMM', null)
-      put('dt_esito_RI_AMM', null)
-      put('note_RI_AMM', null)
+      put('stato_RIA', 4)
+      put('dt_stato_RIA', null)
+      put('dt_presa_in_carico_RIA', null)
+      put('esito_RIA', null)
+      put('dt_esito_RIA', null)
+      put('note_RIA', null)
 
       // Il nuovo visto apre un nuovo ciclo: il protocollo del fascicolo precedente
       // non può restare valido nella nuova versione.
@@ -9688,7 +9670,7 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
       put('dt_bozza_determinazione', null)
       put('bozza_determinazione_da', null)
 
-      // Il visto non trasferisce ancora la pratica: il Tecnico istruttore amministrativo
+      // Il visto non trasferisce ancora la pratica: il Istruttore amministrativo
       // deve predisporre/caricare la bozza e poi trasmettere il fascicolo istruttorio
       // al Responsabile dell’istruttoria amministrativa con l’apposito pulsante interno.
 
@@ -9719,7 +9701,7 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
       const changedFieldNames = Object.keys(cleanAttrs).filter(k => k !== idName)
       const nextRecordAttrs = { ...prevRecordAttrs, ...cleanAttrs }
       await upsertAmmCycleAudit(prevRecordAttrs, nextRecordAttrs, changedFieldNames)
-      await deleteCurrentAmmActivitiesForRole('RI_AMM', nextRecordAttrs)
+      await deleteCurrentAmmActivitiesForRole('RIA', nextRecordAttrs)
       if (operationContextIsCurrent()) await refreshDs(active.ds, props.id)
       if (!operationContextIsCurrent()) return
       const next = { ...nextRecordAttrs }
@@ -9736,7 +9718,7 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
     }
   }, [active, canEdit, configuredDs, configuredDsState, deleteCurrentAmmActivitiesForRole, hasSelection, initialDraft, draft, layerFields, oid, profile.fullName, profile.role, profile.username, refreshDs, upsertAmmCycleAudit])
 
-  const handleUndoAttestazioneTiAmm = React.useCallback(async () => {
+  const handleUndoAttestazioneIa = React.useCallback(async () => {
     setPendingUndoAttestation(false)
     setDialog({
       kind: 'warn',
@@ -9756,7 +9738,7 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
     if (!isVerbaleDefinitivo(current)) issues.push(tipoAttoAmmPrevedeVerbale(current)
       ? 'Atto di accertamento: numero e data non ancora registrati.'
       : 'Atto amministrativo: numero e data non ancora registrati.')
-    if (!hasAdminValue(pickAttrCI(current, ['esito_TI_AMM'])) || !hasAdminValue(pickAttrCI(current, ['note_TI_AMM', 'note_atto_amm']))) issues.push('Esito verifica del Tecnico istruttore amministrativo: esito o note non ancora acquisiti.')
+    if (!hasAdminValue(pickAttrCI(current, ['esito_IA'])) || !hasAdminValue(pickAttrCI(current, ['note_IA', 'note_atto_amm']))) issues.push('Esito verifica dell’Istruttore amministrativo: esito o note non ancora acquisiti.')
     const protocolloNumero = pickAttrCI(current, ['protocollo_atto_accertamento_numero'])
     const protocolloData = pickAttrCI(current, ['protocollo_atto_accertamento_data'])
     const notificaTipo = pickAttrCI(current, ['notifica_tipo'])
@@ -9869,19 +9851,19 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
       setDialog({ kind: 'warn', title: 'Flusso bloccato', text: 'La determinazione è già approvata o adottata.' })
       return
     }
-    const esitoTiAmm = parseNumberInput(pickAttrCI(base, ['esito_TI_AMM']))
-    if (esitoTiAmm !== 2) {
+    const esitoIa = parseNumberInput(pickAttrCI(base, ['esito_IA']))
+    if (esitoIa !== 2) {
       setDialog({ kind: 'warn', title: 'Visto mancante', text: 'Apporre il visto di conformità prima di generare la bozza di determinazione.' })
       return
     }
-    const propostaApprovataRiAmm = isPropostaContestazioneApprovedByRiAmm(base)
-    if (propostaApprovataRiAmm && (!hasAdminValue(pickAttrCI(base, ['protocollo_fascicolo_numero'])) || !hasAdminValue(pickAttrCI(base, ['protocollo_fascicolo_data'])))) {
+    const propostaApprovataRia = isPropostaContestazioneApprovedByRia(base)
+    if (propostaApprovataRia && (!hasAdminValue(pickAttrCI(base, ['protocollo_fascicolo_numero'])) || !hasAdminValue(pickAttrCI(base, ['protocollo_fascicolo_data'])))) {
       setDialog({ kind: 'warn', title: 'Protocollo fascicolo incompleto', text: 'Acquisire prima la Proposta protocollata.' })
       return
     }
     const currentStato = String(pickAttrCI(base, ['determinazione_stato']) || '').trim().toUpperCase()
-    const bozzaRientrataDaRiAmm = isBozzaDeterminazioneRientrataDaRiAmm(base)
-    if (currentStato && currentStato !== 'BOZZA' && !bozzaRientrataDaRiAmm) {
+    const bozzaRientrataDaRia = isBozzaDeterminazioneRientrataDaRia(base)
+    if (currentStato && currentStato !== 'BOZZA' && !bozzaRientrataDaRia) {
       setDialog({ kind: 'warn', title: 'Bozza già avanzata', text: 'La determinazione non è modificabile nella fase corrente.' })
       return
     }
@@ -9902,7 +9884,7 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
       const idName = realFieldName(fields, active.idFieldName) || active.idFieldName || 'OBJECTID'
       const currentDeterminationState = String(pickAttrCI(base, ['determinazione_stato']) || '').trim().toUpperCase()
       const postApprovalDefinitiveUpdate =
-        isPropostaContestazioneApprovedByRiAmm(base) &&
+        isPropostaContestazioneApprovedByRia(base) &&
         hasAdminValue(pickAttrCI(base, ['protocollo_fascicolo_numero'])) &&
         hasAdminValue(pickAttrCI(base, ['protocollo_fascicolo_data']))
 
@@ -9954,7 +9936,7 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
       }
 
       // La generazione del Word è deliberatamente non distruttiva:
-      // il PDF già presente resta nel fascicolo finché il TI_AMM non carica
+      // il PDF già presente resta nel fascicolo finché il IA non carica
       // esplicitamente una nuova versione.
       setDialog({
         kind: 'ok',
@@ -9991,7 +9973,7 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
 
     const base = buildBozzaDeterminazioneSource()
     const currentStato = String(pickAttrCI(base, ['determinazione_stato']) || '').trim().toUpperCase()
-    const bozzaRimandataDaResponsabile = isBozzaDeterminazioneRimandataDaRiAmm(base)
+    const bozzaRimandataDaResponsabile = isBozzaDeterminazioneRimandataDaRia(base)
     const bozzaInLavorazione =
       currentStato === 'BOZZA' ||
       bozzaRimandataDaResponsabile
@@ -10022,7 +10004,7 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
         return false
       }
 
-      const approved = isPropostaContestazioneApprovedByRiAmm(base)
+      const approved = isPropostaContestazioneApprovedByRia(base)
       const canDeleteCurrentPdf = bozzaInLavorazione && !approved
 
       if (!canDeleteCurrentPdf) {
@@ -10070,7 +10052,7 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
     }
   }
 
-  const handleTransmitBozzaDeterminazioneRiAmm = async (confirmed = false) => {
+  const handleTransmitBozzaDeterminazioneRia = async (confirmed = false) => {
     if (!hasSelection || oid == null || !Number.isFinite(Number(oid))) {
       setDialog({ kind: 'warn', title: 'Nessuna pratica selezionata', text: 'Selezionare una pratica prima di trasmettere il fascicolo.' })
       return
@@ -10089,7 +10071,7 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
     }
 
     const previewBase = buildBozzaDeterminazioneSource()
-    if (isPropostaContestazioneApprovedByRiAmm(previewBase)) {
+    if (isPropostaContestazioneApprovedByRia(previewBase)) {
       setDialog({
         kind: 'warn',
         title: 'Verifica amministrativa già approvata',
@@ -10118,13 +10100,13 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
         setDialog({ kind: 'warn', title: 'Flusso bloccato', text: 'La determinazione risulta già approvata/adottata. Non è più possibile riaprire il flusso di approvazione della Proposta.' })
         return
       }
-      const esitoTiAmm = parseNumberInput(pickAttrCI(base, ['esito_TI_AMM']))
-      if (esitoTiAmm !== 2) {
+      const esitoIa = parseNumberInput(pickAttrCI(base, ['esito_IA']))
+      if (esitoIa !== 2) {
         setDialog({ kind: 'warn', title: 'Visto mancante', text: 'Apporre il visto di conformità prima di trasmettere il fascicolo al Responsabile dell’istruttoria amministrativa.' })
         return
       }
-      const propostaGiaApprovataRiAmm = isPropostaContestazioneApprovedByRiAmm(base)
-      if (propostaGiaApprovataRiAmm) {
+      const propostaGiaApprovataRia = isPropostaContestazioneApprovedByRia(base)
+      if (propostaGiaApprovataRia) {
         setDialog({
           kind: 'warn',
           title: 'Verifica amministrativa già approvata',
@@ -10133,8 +10115,8 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
         return
       }
       const statoCorrente = String(pickAttrCI(base, ['determinazione_stato']) || '').trim().toUpperCase()
-      const bozzaRientrataDaRiAmm = isBozzaDeterminazioneRientrataDaRiAmm(base)
-      if (statoCorrente && statoCorrente !== 'BOZZA' && !bozzaRientrataDaRiAmm) {
+      const bozzaRientrataDaRia = isBozzaDeterminazioneRientrataDaRia(base)
+      if (statoCorrente && statoCorrente !== 'BOZZA' && !bozzaRientrataDaRia) {
         setDialog({ kind: 'warn', title: 'Fascicolo già trasmesso', text: 'Il fascicolo istruttorio risulta già trasmesso o avanzato nella fase successiva.' })
         return
       }
@@ -10148,7 +10130,7 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
       }
 
       // Il riferimento di verifica viene acquisito dall'esatto PDF che sta per
-      // essere trasmesso a RI_AMM. In questo modo l'approvazione successiva è
+      // essere trasmesso a RIA. In questo modo l'approvazione successiva è
       // verificabile anche se il PDF materiale verrà poi sostituito dal definitivo.
       const bozzaTrasmessa = pickLatestGiiAttachment(bozzaPdfs as any[]) as AmmAttachmentInfo | null
       if (!bozzaTrasmessa) throw new Error('Bozza PDF da trasmettere non identificabile.')
@@ -10161,33 +10143,31 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
         const real = realFieldName(fields, name)
         if (real) attrs[real] = value
       }
-      put('determinazione_stato', 'TRASMESSA_RI_AMM')
-      put('stato_TI_AMM', 4)
-      put('dt_stato_TI_AMM', now)
-      put('stato_RI_AMM', 1)
-      put('dt_stato_RI_AMM', now)
-      put('dt_presa_in_carico_RI_AMM', null)
-      put('esito_RI_AMM', null)
-      put('dt_esito_RI_AMM', null)
-      put('note_RI_AMM', null)
+      put('determinazione_stato', 'TRASMESSA_RIA')
+      put('stato_IA', 4)
+      put('dt_stato_IA', now)
+      put('stato_RIA', 1)
+      put('dt_stato_RIA', now)
+      put('dt_presa_in_carico_RIA', null)
+      put('esito_RIA', null)
+      put('dt_esito_RIA', null)
+      put('note_RIA', null)
 
 
       // La trasmissione del fascicolo al Responsabile dell’istruttoria amministrativa
       // è un vero passaggio operativo: dopo il salvataggio la pratica deve uscire
-      // dalla scheda “In attesa mia” del Tecnico istruttore amministrativo e
+      // dalla scheda “In attesa mia” dell’Istruttore amministrativo e
       // comparire tra quelle in attesa di altri. Aggiorniamo anche i campi di
       // routing sintetico letti dall’elenco, senza introdurre un invio separato.
-      const riAmmDestUsername = String(pickAttrCI(base, ['ri_amm_assegnato_username', 'RI_AMM_assegnato_username', 'ri_amm_username', 'RI_AMM_username']) || '').trim()
-      const tiAmmSenderUsername = String(profile.username || pickAttrCI(base, ['ti_amm_assegnato_username', 'TI_AMM_assegnato_username']) || '').trim()
-      put('GII_da', `TI-AMM${tiAmmSenderUsername ? ` - ${tiAmmSenderUsername}` : ''}`)
-      put('GII_a', `RI-AMM${riAmmDestUsername ? ` - ${riAmmDestUsername}` : ''}`)
+      put('GII_da', 'IA-AMM')
+      put('GII_a', 'RIA')
       put('GII_dt', now)
       put('GII_trasm', 1)
       put('GII_rim', 0)
       put('GII_arch', 0)
 
-      // Ogni trasmissione a RI_AMM apre un nuovo ciclo di verifica della versione corrente.
-      // La Proposta deve quindi tornare sempre allo stato BOZZA: gli esiti RI_AMM appena
+      // Ogni trasmissione a RIA apre un nuovo ciclo di verifica della versione corrente.
+      // La Proposta deve quindi tornare sempre allo stato BOZZA: gli esiti RIA appena
       // azzerati vengono inclusi nella mappa dati usata dallo stesso builder condiviso.
       const propostaDraftBlob = await buildVerbalePdfBlob({ ...base, ...attrs }, fields, { username: profile.username, fullName: profile.fullName })
       const propostaDraftFile = new File([propostaDraftBlob.blob], propostaDraftBlob.fileName, { type: 'application/pdf', lastModified: now })
@@ -10216,8 +10196,8 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
       const changedFieldNames = Object.keys(cleanAttrs).filter(k => k !== idName)
       const nextRecordAttrs = { ...prevRecordAttrs, ...cleanAttrs }
       await upsertAmmCycleAudit(prevRecordAttrs, nextRecordAttrs, changedFieldNames)
-      await closeTiAmmBozzaDeterminazioneCycle(prevRecordAttrs, nextRecordAttrs, changedFieldNames)
-      await createRiAmmBozzaDeterminazioneActivity(nextRecordAttrs)
+      await closeIaBozzaDeterminazioneCycle(prevRecordAttrs, nextRecordAttrs, changedFieldNames)
+      await createRiaBozzaDeterminazioneActivity(nextRecordAttrs)
       if (!isGiiPracticeContextStampCurrent(operationContextStamp)) return
       try {
         sessionStorage.setItem('GII_AFTER_WORKFLOW_NAV', JSON.stringify(stampGiiPracticePayload({
@@ -10263,7 +10243,7 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
       return
     }
     const base = buildBozzaDeterminazioneSource()
-    if (!isPropostaContestazioneApprovedByRiAmm(base)) {
+    if (!isPropostaContestazioneApprovedByRia(base)) {
       setDialog({ kind: 'warn', title: 'Approvazione mancante', text: 'La Proposta deve essere approvata prima dell’invio al protocollo.' })
       return
     }
@@ -10293,7 +10273,7 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
         'Cordiali saluti.'
       ]
       const protocolloTo = await loadAmmProtocolloEmailRecipient()
-      const senderEmail = await loadAssignedTiAmmSenderEmail(base)
+      const senderEmail = await loadAssignedIaSenderEmail(base)
       await downloadEmailDraftWithAttachments({
         from: senderEmail,
         to: protocolloTo,
@@ -10361,7 +10341,7 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
       return
     }
     const base = buildBozzaDeterminazioneSource()
-    if (!isPropostaContestazioneApprovedByRiAmm(base)) {
+    if (!isPropostaContestazioneApprovedByRia(base)) {
       setDialog({ kind: 'warn', title: 'Approvazione mancante', text: 'La Proposta deve essere approvata prima dell’invio al Direttore.' })
       return
     }
@@ -10406,7 +10386,7 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
         'Cordiali saluti.'
       ]
       const recipients = await loadAmmDeterminaEmailRecipients()
-      const senderEmail = await loadAssignedTiAmmSenderEmail(base)
+      const senderEmail = await loadAssignedIaSenderEmail(base)
       await downloadEmailDraftWithAttachments({
         from: senderEmail,
         to: recipients.to,
@@ -10479,7 +10459,7 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
       setDialog({ kind: 'warn', title: 'Nessuna pratica selezionata', text: 'Selezionare una pratica prima di generare la bozza Word dell’Atto.' })
       return
     }
-    if (!canEdit || !(currentRole === 'TI_AMM' || currentRole === 'ADMIN')) {
+    if (!canEdit || !(currentRole === 'IA' || currentRole === 'ADMIN')) {
       setDialog({ kind: 'warn', title: 'Operazione non consentita', text: 'Operazione non consentita per il profilo corrente.' })
       return
     }
@@ -10516,9 +10496,9 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
       ) throw new Error('L’Atto non può essere modificato dopo l’avvio della protocollazione o della notifica.')
 
       const statoCorrente = String(pickAttrCI(liveAttrs, ['determinazione_stato']) || '').trim().toUpperCase()
-      const postRiApproved = statoCorrente === 'VALIDATA_RI_AMM'
-      if (!['ADOTTATA', 'BOZZA', 'VALIDATA_RI_AMM'].includes(statoCorrente)) {
-        throw new Error(statoCorrente === 'TRASMESSA_RI_AMM'
+      const postRiApproved = statoCorrente === 'VALIDATA_RIA'
+      if (!['ADOTTATA', 'BOZZA', 'VALIDATA_RIA'].includes(statoCorrente)) {
+        throw new Error(statoCorrente === 'TRASMESSA_RIA'
           ? 'L’Atto è in verifica.'
           : 'L’Atto non è modificabile nella fase corrente.')
       }
@@ -10542,9 +10522,9 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
         liveAttrs,
         fields,
         { username: profile.username, fullName: profile.fullName },
-        // Prima della verifica RI_AMM la filigrana identifica inequivocabilmente la
+        // Prima della verifica RIA la filigrana identifica inequivocabilmente la
         // copia di lavoro. Dopo l'approvazione generiamo invece lo stesso Word pulito,
-        // che il TI_AMM convertirà esternamente in PDF per la fase successiva.
+        // che il IA convertirà esternamente in PDF per la fase successiva.
         { watermarkBozza: !postRiApproved, participants }
       )
       if (!operationContextIsCurrent()) return
@@ -10562,9 +10542,9 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
         // Le patch sperimentali 141-144 valorizzavano accertamento_data al semplice
         // generarsi del PDF. Nel nuovo flusso quella data nascerà solo dopo la firma del DA.
         if (legacyDirectPdf) put('accertamento_data', null)
-        put('esito_RI_AMM', null)
-        put('dt_esito_RI_AMM', null)
-        put('note_RI_AMM', null)
+        put('esito_RIA', null)
+        put('dt_esito_RIA', null)
+        put('note_RIA', null)
       }
 
       const cleanAttrs = filterAttrsForLayer(attrs, fields)
@@ -10608,12 +10588,12 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
     }
   }, [active, canEdit, configuredDs, configuredDsState, currentRole, hasSelection, initialDraft, isDirty, layerFields, oid, profile.fullName, profile.username, props.id, refreshDs, upsertAmmCycleAudit])
 
-  const handleTransmitAttoContestazioneRiAmm = React.useCallback(async () => {
+  const handleTransmitAttoContestazioneRia = React.useCallback(async () => {
     if (!hasSelection || oid == null || !Number.isFinite(Number(oid))) {
       setDialog({ kind: 'warn', title: 'Nessuna pratica selezionata', text: 'Selezionare una pratica prima di trasmettere l’Atto.' })
       return
     }
-    if (!canEdit || !(currentRole === 'TI_AMM' || currentRole === 'ADMIN')) {
+    if (!canEdit || !(currentRole === 'IA' || currentRole === 'ADMIN')) {
       setDialog({ kind: 'warn', title: 'Operazione non consentita', text: 'Operazione non consentita per il profilo corrente.' })
       return
     }
@@ -10653,20 +10633,17 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
         const real = realFieldName(fields, name)
         if (real) attrs[real] = value
       }
-      put('determinazione_stato', 'TRASMESSA_RI_AMM')
-      put('stato_TI_AMM', 4)
-      put('dt_stato_TI_AMM', now)
-      put('stato_RI_AMM', 1)
-      put('dt_stato_RI_AMM', now)
-      put('presa_in_carico_RI_AMM', 0)
-      put('dt_presa_in_carico_RI_AMM', null)
-      put('esito_RI_AMM', null)
-      put('dt_esito_RI_AMM', null)
-      put('note_RI_AMM', null)
-      const riAmmDestUsername = String(pickAttrCI(liveAttrs, ['ri_amm_assegnato_username', 'RI_AMM_assegnato_username', 'ri_amm_username', 'RI_AMM_username']) || '').trim()
-      const tiAmmSenderUsername = String(profile.username || pickAttrCI(liveAttrs, ['ti_amm_assegnato_username', 'TI_AMM_assegnato_username']) || '').trim()
-      put('GII_da', `TI-AMM${tiAmmSenderUsername ? ` - ${tiAmmSenderUsername}` : ''}`)
-      put('GII_a', `RI-AMM${riAmmDestUsername ? ` - ${riAmmDestUsername}` : ''}`)
+      put('determinazione_stato', 'TRASMESSA_RIA')
+      put('stato_IA', 4)
+      put('dt_stato_IA', now)
+      put('stato_RIA', 1)
+      put('dt_stato_RIA', now)
+      put('dt_presa_in_carico_RIA', null)
+      put('esito_RIA', null)
+      put('dt_esito_RIA', null)
+      put('note_RIA', null)
+      put('GII_da', 'IA-AMM')
+      put('GII_a', 'RIA')
       put('GII_dt', now)
       put('GII_trasm', 1)
       put('GII_rim', 0)
@@ -10684,7 +10661,7 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
       const next = { ...liveAttrs, ...cleanAttrs }
       const changed = Object.keys(cleanAttrs).filter(k => k !== idName)
       await upsertAmmCycleAudit(liveAttrs, next, changed)
-      await createRiAmmAttoContestazioneActivity(next)
+      await createRiaAttoContestazioneActivity(next)
       if (!operationContextIsCurrent()) return
       try {
         sessionStorage.setItem('GII_AFTER_WORKFLOW_NAV', JSON.stringify(stampGiiPracticePayload({
@@ -10707,14 +10684,14 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
     } finally {
       if (operationContextIsCurrent()) setSaving(false)
     }
-  }, [active, canEdit, configuredDs, configuredDsState, createRiAmmAttoContestazioneActivity, currentRole, hasSelection, initialDraft, isDirty, layerFields, oid, profile.username, props.id, refreshDs, upsertAmmCycleAudit])
+  }, [active, canEdit, configuredDs, configuredDsState, createRiaAttoContestazioneActivity, currentRole, hasSelection, initialDraft, isDirty, layerFields, oid, profile.username, props.id, refreshDs, upsertAmmCycleAudit])
 
   const handlePrepareEmailAttoDirettore = React.useCallback(async () => {
     if (!hasSelection || oid == null || !Number.isFinite(Number(oid))) {
       setDialog({ kind: 'warn', title: 'Nessuna pratica selezionata', text: 'Selezionare una pratica prima di predisporre l’e-mail dell’Atto di accertamento.' })
       return
     }
-    if (!canEdit || !(currentRole === 'TI_AMM' || currentRole === 'ADMIN')) {
+    if (!canEdit || !(currentRole === 'IA' || currentRole === 'ADMIN')) {
       setDialog({ kind: 'warn', title: 'Operazione non consentita', text: 'Operazione non consentita per il profilo corrente.' })
       return
     }
@@ -10737,7 +10714,7 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
         if (current && Object.keys(current).length) liveAttrs = current
       } catch {}
       const stato = String(pickAttrCI(liveAttrs, ['determinazione_stato']) || '').trim().toUpperCase()
-      if (stato !== 'VALIDATA_RI_AMM') throw new Error('L’Atto deve essere approvato prima dell’invio al Direttore.')
+      if (stato !== 'VALIDATA_RIA') throw new Error('L’Atto deve essere approvato prima dell’invio al Direttore.')
       const attoAtt = pickLatestGiiAttachment(attachments.filter(isGiiAttoContestazionePdfAttachment) as any[]) as AmmAttachmentInfo | null
       if (!attoAtt) throw new Error('PDF dell’Atto di accertamento non disponibile.')
       if (!isAttoDaFirmareAttachment(attoAtt)) {
@@ -10759,7 +10736,7 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
         'Cordiali saluti.'
       ].join('\n')
       const recipients = await loadAmmDeterminaEmailRecipients()
-      const senderEmail = await loadAssignedTiAmmSenderEmail(liveAttrs)
+      const senderEmail = await loadAssignedIaSenderEmail(liveAttrs)
       await downloadEmailDraftWithAttachments({
         from: senderEmail,
         to: recipients.to,
@@ -10802,7 +10779,7 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
       setDialog({ kind: 'warn', title: 'Nessuna pratica selezionata', text: 'Selezionare una pratica prima di predisporre l’e-mail al protocollo.' })
       return
     }
-    if (!canEdit || !(currentRole === 'TI_AMM' || currentRole === 'ADMIN')) {
+    if (!canEdit || !(currentRole === 'IA' || currentRole === 'ADMIN')) {
       setDialog({ kind: 'warn', title: 'Operazione non consentita', text: 'Operazione non consentita per il profilo corrente.' })
       return
     }
@@ -10853,7 +10830,7 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
         'Cordiali saluti.'
       ].join('\n')
       const protocolloTo = await loadAmmProtocolloEmailRecipient()
-      const senderEmail = await loadAssignedTiAmmSenderEmail(liveAttrs)
+      const senderEmail = await loadAssignedIaSenderEmail(liveAttrs)
       await downloadEmailDraftWithAttachments({
         from: senderEmail,
         to: protocolloTo,
@@ -10917,7 +10894,7 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
       const idName = realFieldName(fields, active.idFieldName) || active.idFieldName || 'OBJECTID'
       let determinationSaveMeta: { derivedAccertamentoNumber: string, wasAlreadyAdopted: boolean } | null = null
       if (determinationIsDirty) {
-        if (!(currentRole === 'TI_AMM' || currentRole === 'ADMIN')) {
+        if (!(currentRole === 'IA' || currentRole === 'ADMIN')) {
           throw new Error('Operazione non consentita per il profilo corrente.')
         }
         const statoCorrente = String(pickAttrCI(initialDraft, ['determinazione_stato']) || '').trim().toUpperCase()
@@ -11096,7 +11073,7 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
     overflow: 'hidden'
   }
 
-  // Stesso schema del gii-editing-ti:
+  // Stesso schema del gii-editing-tec:
   // - contenitore tab = flex child a tutta altezza disponibile;
   // - schede ordinarie = scroll verticale interno;
   // - schede full-height, come Anteprima e Allegati = nessuno scroll generale, layout interno a tutta altezza.
@@ -11146,9 +11123,9 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
   const determinationToolbarNumberText = String(pickAttrCI(draft, ['determinazione_numero']) ?? '').trim()
   const determinationToolbarDateMs = dateMsOrNull(pickAttrCI(draft, ['determinazione_data']))
   const determinationToolbarComplete = /^\d+$/.test(determinationToolbarNumberText) && determinationToolbarDateMs != null
-  const tiAmmVistoGuidePending = currentRole === 'TI_AMM' && canEdit && isTiAmmVistoActionPending(viewData || {})
-  const pulseSaveProtocol = currentRole === 'TI_AMM' && !tiAmmVistoGuidePending && !saveDisabled && toolbarDeterminationState === 'FASCICOLO_TRASMESSO_PROTOCOLLO' && protocolDraftComplete && !protocolSavedComplete
-  const pulseSaveDetermination = currentRole === 'TI_AMM' && !tiAmmVistoGuidePending && !saveDisabled && determinationIsDirty && determinationToolbarComplete && (toolbarDeterminationState === EMAIL_DIRETTORE_PREPARATA_STATE || toolbarDeterminationState === 'ADOTTATA')
+  const iaVistoGuidePending = currentRole === 'IA' && canEdit && isIaVistoActionPending(viewData || {})
+  const pulseSaveProtocol = currentRole === 'IA' && !iaVistoGuidePending && !saveDisabled && toolbarDeterminationState === 'FASCICOLO_TRASMESSO_PROTOCOLLO' && protocolDraftComplete && !protocolSavedComplete
+  const pulseSaveDetermination = currentRole === 'IA' && !iaVistoGuidePending && !saveDisabled && determinationIsDirty && determinationToolbarComplete && (toolbarDeterminationState === EMAIL_DIRETTORE_PREPARATA_STATE || toolbarDeterminationState === 'ADOTTATA')
   const pulseSave = pulseSaveDetermination || pulseSaveProtocol
   const pulseSaveTitle = pulseSaveDetermination ? 'Azione successiva: salva numero e data della determina' : 'Azione successiva: salva numero e data di protocollo'
 
@@ -11193,13 +11170,13 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
   // visivamente più vicino al bordo superiore della card che a quello inferiore.
   const toolbarBottomPad = Math.max(0, Number(adminStyle.maskBorderWidth ?? 1) + Number(adminStyle.maskInnerPadding ?? 12) - 1)
 
-  if (tiAmmAccessRequired && !tiAmmAccessAllowed) {
-    const accessMessage = tiAmmAccess.status === 'denied'
+  if (iaAccessRequired && !iaAccessAllowed) {
+    const accessMessage = iaAccess.status === 'denied'
       ? 'Accesso alla pratica non consentito.'
-      : (tiAmmAccess.status === 'error'
-          ? (tiAmmAccess.message || 'Impossibile verificare l’accesso alla pratica.')
+      : (iaAccess.status === 'error'
+          ? (iaAccess.message || 'Impossibile verificare l’accesso alla pratica.')
           : 'Verifica accesso alla pratica…')
-    const accessColor = tiAmmAccess.status === 'checking' || tiAmmAccess.status === 'idle' ? '#334155' : '#7a1c1c'
+    const accessColor = iaAccess.status === 'checking' || iaAccess.status === 'idle' ? '#334155' : '#7a1c1c'
     return (
       <AdminStyleCtx.Provider value={adminStyle}>
         <div ref={rootRef} data-gii-editing-amm-root='1' style={wrapperStyle}>
@@ -11244,7 +11221,7 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
           onConfirm={() => {
             const note = pendingAttestationText
             setPendingAttestationText(null)
-            handleApponiAttestazioneTiAmm(note)
+            handleApponiAttestazioneIa(note)
           }}
         />
       )}
@@ -11252,7 +11229,7 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
         <UndoAttestationConfirmDialog
           saving={saving}
           onCancel={() => setPendingUndoAttestation(false)}
-          onConfirm={handleUndoAttestazioneTiAmm}
+          onConfirm={handleUndoAttestazioneIa}
         />
       )}
       {confirmTransmitBozza && (
@@ -11266,7 +11243,7 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
           onConfirm={() => {
             setConfirmTransmitBozza(false)
             setConfirmTransmitReopensCycle(false)
-            void handleTransmitBozzaDeterminazioneRiAmm(true)
+            void handleTransmitBozzaDeterminazioneRia(true)
           }}
         />
       )}
@@ -11423,7 +11400,7 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
 
               {activeAmmSection === 'verifica_istruttoria' && (
                 <>
-                  <TiAmmVerificationSummary
+                  <IaVerificationSummary
                     data={viewData || {}}
                     savedData={initialDraft || {}}
                     fields={layerFields}
@@ -11435,11 +11412,11 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
                     onUndoAttestation={() => setPendingUndoAttestation(true)}
                     onGenerateBozzaDeterminazioneWord={handleGenerateBozzaDeterminazioneWord}
                     onDeleteBozzaDeterminazione={handleDeleteBozzaDeterminazione}
-                    onTransmitBozzaDeterminazioneRiAmm={handleTransmitBozzaDeterminazioneRiAmm}
+                    onTransmitBozzaDeterminazioneRia={handleTransmitBozzaDeterminazioneRia}
                     onPrepareEmailDirettore={handlePrepareEmailDirettore}
                     onPrepareEmailProtocollo={handlePrepareEmailProtocollo}
                     onGenerateAttoContestazioneWord={handleGenerateAttoContestazioneWord}
-                    onTransmitAttoContestazioneRiAmm={handleTransmitAttoContestazioneRiAmm}
+                    onTransmitAttoContestazioneRia={handleTransmitAttoContestazioneRia}
                     onPrepareEmailAttoDirettore={handlePrepareEmailAttoDirettore}
                     onPrepareEmailAttoProtocollo={handlePrepareEmailAttoProtocollo}
                     oid={oid != null && Number.isFinite(Number(oid)) ? Number(oid) : null}
@@ -11485,7 +11462,7 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
               )}
 
               {activeAmmSection === 'allegati' && (
-                <AllegatiAmmSection
+                <AllegaiaSection
                   oid={oid != null && Number.isFinite(Number(oid)) ? Number(oid) : null}
                   ds={(active as any)?.ds}
                   layerUrl={(active as any)?.layerUrl || (configuredDsState as any)?.layerUrl || getDataSourceUrl(configuredDs)}

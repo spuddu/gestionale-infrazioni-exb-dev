@@ -10,7 +10,7 @@
  */
 
 import { ensureAttivitaCorrentiJsonOnlyQueryFormat } from './attivita-correnti-query-format-fix'
-import { buildTiAmmAssignmentWhereClause, isPracticeAssignedToCurrentTiAmm } from '../gii-access/ti-amm-assignment'
+import { buildIaAssignmentWhereClause, isPracticeAssignedToCurrentIa } from '../gii-access/ia-assignment'
 
 export type GiiAlertType =
   | 'PAGAMENTO_SCADUTO'
@@ -19,16 +19,16 @@ export type GiiAlertType =
   | 'PAGAMENTO_RIDETERMINATO_SCADUTO'
   | 'PRATICA_DA_DEFINIRE'
   | 'PRATICA_DA_PRENDERE_IN_CARICO'
-  | 'PRESA_IN_CARICO_TI_AMM'
-  | 'PRESA_IN_CARICO_RI_AMM'
+  | 'PRESA_IN_CARICO_IA'
+  | 'PRESA_IN_CARICO_RIA'
   | 'PRESA_IN_CARICO_DA'
-  | 'PRESA_IN_CARICO_RZ_TEC'
-  | 'PRESA_IN_CARICO_RZ_AGR'
-  | 'PRESA_IN_CARICO_TI_TEC'
-  | 'PRESA_IN_CARICO_RI_TEC'
+  | 'PRESA_IN_CARICO_CS_TEC'
+  | 'PRESA_IN_CARICO_CS_AGR'
+  | 'PRESA_IN_CARICO_IT_TEC'
+  | 'PRESA_IN_CARICO_RIT_TEC'
   | 'PRESA_IN_CARICO_DT_TEC'
-  | 'PRESA_IN_CARICO_TI_AGR'
-  | 'PRESA_IN_CARICO_RI_AGR'
+  | 'PRESA_IN_CARICO_IT_AGR'
+  | 'PRESA_IN_CARICO_RIT_AGR'
   | 'PRESA_IN_CARICO_DT_AGR'
   | 'PRESA_IN_CARICO_CORRENTE'
   | 'ATTIVITA_INFORMATIVA'
@@ -132,11 +132,11 @@ export const GII_ALERT_FIELDS = [
   'rapporto',
   'num_rapporto',
   'origine_pratica',
-  'ti_assegnato_username',
-  'ti_assegnato_user',
-  'ti_assegnato',
-  'ti_assegnato_nome',
-  'ti_assegnato_name',
+  'it_assegnato_username',
+  'it_assegnato_user',
+  'it_assegnato',
+  'it_assegnato_nome',
+  'it_assegnato_name',
   'created_user',
   'Creator',
   'creator',
@@ -147,43 +147,24 @@ export const GII_ALERT_FIELDS = [
   'created_by',
   'submitter',
   'owner',
-  'ti_amm_assegnato_username',
-  'ti_amm_assegnato_user',
-  'ti_amm_assegnato',
-  'ti_amm_assegnato_nome',
-  'ti_amm_assegnato_name',
-  'ti_amm_username',
-  'utente_TI_AMM',
-  'utente_ti_amm',
-  'stato_TI_AMM',
-  'stato_RI_AMM',
+  'ia_assegnato_username',
+  'ia_assegnato_nome',
+  'stato_IA',
+  'stato_RIA',
   'determinazione_stato',
-  'stato_RZ_TEC',
-  'stato_RZ_AGR',
-  'stato_RZ',
-  'presa_in_carico_RZ_TEC',
-  'presa_in_carico_RZ_AGR',
-  'presa_in_carico_RZ',
-  'stato_TI_TEC',
-  'stato_RI_TEC',
+  'stato_CS',
+  'stato_IT',
+  'stato_RIT',
   'stato_DT_TEC',
-  'stato_TI_AGR',
-  'stato_RI_AGR',
   'stato_DT_AGR',
-  'stato_TI',
-  'stato_RI',
   'stato_DT',
-  'dt_stato_TI_AMM',
-  'dt_stato_RI_AMM',
+  'dt_stato_IA',
+  'dt_stato_RIA',
   'determinazione_data',
-  'dt_stato_RZ_TEC',
-  'dt_stato_RZ_AGR',
-  'dt_stato_RZ',
-  'dt_stato_TI_TEC',
-  'dt_stato_RI_TEC',
+  'dt_stato_CS',
+  'dt_stato_IT',
+  'dt_stato_RIT',
   'dt_stato_DT_TEC',
-  'dt_stato_TI_AGR',
-  'dt_stato_RI_AGR',
   'dt_stato_DT_AGR',
   'tipo_atto_amm',
   'accertamento_numero',
@@ -305,7 +286,6 @@ function cleanPracticeNumberText (value: any): string {
 function normalizePracticeSectorCode (value: any): string {
   const s = String(value ?? '').trim().toUpperCase()
   if (!s) return ''
-  if (s === 'CS') return 'DS'
   const mDist = s.match(/^D\s*([1-6])$/)
   if (mDist) return `D${mDist[1]}`
   if (s === 'DS' || s === 'CR' || s === 'GI') return s
@@ -321,12 +301,12 @@ function practiceSectorForMessage (data: Record<string, any>): string {
   ]))
 }
 
-function practicePrefixForMessage (data: Record<string, any>, rawCode?: any): 'TR' | 'TI' {
+function practicePrefixForMessage (data: Record<string, any>, rawCode?: any): 'TR' | 'IT' {
   const raw = String(rawCode ?? '').trim().toUpperCase()
-  if (/(^|[-_\s])TI([-_\s]|$)/.test(raw) || /^TI[-_\s]/.test(raw)) return 'TI'
+  if (/(^|[-_\s])IT([-_\s]|$)/.test(raw) || /^IT[-_\s]/.test(raw)) return 'IT'
   if (/(^|[-_\s])TR([-_\s]|$)/.test(raw) || /^TR[-_\s]/.test(raw)) return 'TR'
   const op = String(attr(data, ['origine_pratica']) ?? '').trim().toUpperCase()
-  return (op === '2' || op === 'TI') ? 'TI' : 'TR'
+  return (op === '2' || op === 'IT') ? 'IT' : 'TR'
 }
 
 function officialReportNumberForMessage (data: Record<string, any>): string {
@@ -343,8 +323,8 @@ function officialReportNumberForMessage (data: Record<string, any>): string {
     if (!text || /^[-–—]+$/.test(text)) continue
     // I numeri provvisori di rilevazione non sono numeri ufficiali di rapporto.
     if (/^RILEVAZIONE\b/i.test(String(candidate ?? '').trim())) continue
-    if (/^(TR|TI)[-_\s]*\d+/i.test(text)) continue
-    if (/^\d+[-_\s]*(TR|TI)\b/i.test(text)) continue
+    if (/^(TR|IT)[-_\s]*\d+/i.test(text)) continue
+    if (/^\d+[-_\s]*(TR|IT)\b/i.test(text)) continue
     if (/^R[-_\s]*\d+/i.test(text) || /^\d+\s*\/\s*\d{4}$/.test(text)) return text.replace(/\s+/g, '')
   }
   return ''
@@ -365,16 +345,16 @@ function rilevazioneNumberForMessage (data: Record<string, any>, oid: number | n
   let prefix = practicePrefixForMessage(data, raw)
   let sectorPart = settore
 
-  let m = raw.match(/^(TR|TI)-?(\d+)(?:-([A-Z0-9]+))?$/i)
+  let m = raw.match(/^(TR|IT)-?(\d+)(?:-([A-Z0-9]+))?$/i)
   if (m) {
-    prefix = m[1].toUpperCase() as 'TR' | 'TI'
+    prefix = m[1].toUpperCase() as 'TR' | 'IT'
     oidPart = m[2]
     if (!sectorPart && m[3]) sectorPart = normalizePracticeSectorCode(m[3])
   } else {
-    m = raw.match(/^(\d+)-?(TR|TI)(?:-([A-Z0-9]+))?$/i)
+    m = raw.match(/^(\d+)-?(TR|IT)(?:-([A-Z0-9]+))?$/i)
     if (m) {
       oidPart = m[1]
-      prefix = m[2].toUpperCase() as 'TR' | 'TI'
+      prefix = m[2].toUpperCase() as 'TR' | 'IT'
       if (!sectorPart && m[3]) sectorPart = normalizePracticeSectorCode(m[3])
     } else if (/^\d+$/.test(raw)) {
       oidPart = raw
@@ -555,12 +535,12 @@ function isOggettoLogEvent (evento: any): boolean {
 
 function normalizeLogRole (role: any): string {
   const r = String(role || '').trim().toUpperCase().replace(/[\s-]+/g, '_')
-  if (r === 'RI_AMM' || r === 'TI_AMM') return r
+  if (r === 'RIA' || r === 'IA') return r
   if (r === 'DA_AMM') return 'DA'
   if (r.startsWith('DT')) return 'DT'
-  if (r.startsWith('RI') && r !== 'RI_AMM') return 'RI'
-  if (r.startsWith('RZ')) return 'RZ'
-  if (r.startsWith('TI') && r !== 'TI_AMM') return 'TI'
+  if (r.startsWith('RIT')) return 'RIT'
+  if (r.startsWith('CS')) return 'CS'
+  if (r.startsWith('IT')) return 'IT'
   if (r.startsWith('TR')) return 'TR'
   if (r.startsWith('DA')) return 'DA'
   return r
@@ -623,9 +603,8 @@ function transmissionAnswersIntegration (log: LogEntry): boolean {
   return false
 }
 
-function readAlertRoleNumber (d: any, role: string, kind: 'presa' | 'stato' | 'esito'): number | null {
-  const field = kind === 'presa' ? `presa_in_carico_${role}` : `${kind}_${role}`
-  const v = attr(d, [field])
+function readAlertRoleNumber (d: any, role: string, kind: 'stato' | 'esito'): number | null {
+  const v = attr(d, [`${kind}_${role}`])
   if (v === null || v === undefined || v === '') return null
   const n = Number(v)
   return Number.isFinite(n) ? n : null
@@ -638,15 +617,15 @@ function formatCausaleForLog (log: LogEntry | null, d: any): string {
   if (evento === 'RESPINTA') {
     const ruolo = normalizeLogRole(log.ruolo)
     if (ruolo === 'DT') label = 'ISTRUTTORIA TECNICA RESPINTA'
-    else if (ruolo === 'RZ') {
-      const tiAssigned = String(
-        attr(d, ['ti_assegnato_username']) ??
-        attr(d, ['ti_assegnato_user']) ??
-        attr(d, ['ti_assegnato']) ??
+    else if (ruolo === 'CS') {
+      const itAssigned = String(
+        attr(d, ['it_assegnato_username']) ??
+        attr(d, ['it_assegnato_user']) ??
+        attr(d, ['it_assegnato']) ??
         ''
       ).trim()
-      const tiEsito = readAlertRoleNumber(d, 'TI', 'esito')
-      label = (tiAssigned || tiEsito !== null) ? 'ISTRUTTORIA TECNICA RESPINTA' : 'RILEVAZIONE RESPINTA'
+      const itStato = readAlertRoleNumber(d, 'IT', 'stato')
+      label = (itAssigned || itStato !== null) ? 'ISTRUTTORIA TECNICA RESPINTA' : 'RILEVAZIONE RESPINTA'
     } else {
       label = 'ISTRUTTORIA TECNICA RESPINTA'
     }
@@ -659,7 +638,7 @@ function formatCausaleForLog (log: LogEntry | null, d: any): string {
 }
 
 function baseWorkflowRoleForAlert (roleAreaKey: string): string {
-  if (roleAreaKey === 'TI_AMM' || roleAreaKey === 'RI_AMM' || roleAreaKey === 'DA') return roleAreaKey
+  if (roleAreaKey === 'IA' || roleAreaKey === 'RIA' || roleAreaKey === 'DA') return roleAreaKey
   if (roleAreaKey.endsWith('_TEC') || roleAreaKey.endsWith('_AGR')) return roleAreaKey.replace(/_(TEC|AGR)$/i, '')
   return roleAreaKey
 }
@@ -700,16 +679,14 @@ function roleAreaKeyForAlerts (data: Record<string, any>, options?: { user?: Gii
   const area = normalizeAlertCode(options?.user?.areaCod || (options?.user as any)?.area)
   if (role === 'ADMIN') return 'ADMIN'
   if (role === 'DA') return 'DA'
-  if (role === 'TI_AMM' || role === 'RI_AMM') return role
-  if (role === 'TI' && area === 'AMM') return 'TI_AMM'
-  if (role === 'RI' && area === 'AMM') return 'RI_AMM'
-  if (role === 'RZ' && area === 'TEC') return 'RZ_TEC'
-  if (role === 'TI' && area === 'TEC') return 'TI_TEC'
-  if (role === 'RI' && area === 'TEC') return 'RI_TEC'
+  if (role === 'IA' || role === 'RIA') return role
+  if (role === 'CS' && area === 'TEC') return 'CS_TEC'
+  if (role === 'IT' && area === 'TEC') return 'IT_TEC'
+  if (role === 'RIT' && area === 'TEC') return 'RIT_TEC'
   if (role === 'DT' && area === 'TEC') return 'DT_TEC'
-  if (role === 'RZ' && area === 'AGR') return 'RZ_AGR'
-  if (role === 'TI' && area === 'AGR') return 'TI_AGR'
-  if (role === 'RI' && area === 'AGR') return 'RI_AGR'
+  if (role === 'CS' && area === 'AGR') return 'CS_AGR'
+  if (role === 'IT' && area === 'AGR') return 'IT_AGR'
+  if (role === 'RIT' && area === 'AGR') return 'RIT_AGR'
   if (role === 'DT' && area === 'AGR') return 'DT_AGR'
   if (role.endsWith('_TEC') || role.endsWith('_AGR')) return role
   return role
@@ -722,53 +699,52 @@ function isTakeChargeState (value: any): boolean {
   return s.includes('DA_PRENDERE_IN_CARICO') || s.includes('DA_PRENDERE') || s.includes('PRESA_DA_FARE')
 }
 
-function isBozzaDeterminazioneTrasmessaRiAmmForAlerts (data: Record<string, any>): boolean {
+function isBozzaDeterminazioneTrasmessaRiaForAlerts (data: Record<string, any>): boolean {
   const stato = normalizeAlertCode(attr(data, ['determinazione_stato', 'DETERMINAZIONE_STATO']))
-  if (stato === 'TRASMESSA_RI_AMM' || stato === 'BOZZA_TRASMESSA_RI_AMM') return true
+  if (stato === 'TRASMESSA_RIA' || stato === 'BOZZA_TRASMESSA_RIA') return true
 
   // Fallback per viste/allarmi che non espongono determinazione_stato: dopo la
-  // trasmissione della bozza al Responsabile il nodo RI_AMM è aperto (stato/presa
-  // 1 o 2) e il nodo TI_AMM è chiuso con esito conforme. Il solo visto TI_AMM
-  // imposta invece RI_AMM a 4/null e non deve generare attività operativa.
-  const statoRiAmm = normalizeAlertCode(attr(data, ['stato_RI_AMM', 'STATO_RI_AMM']))
-  const presaRiAmm = normalizeAlertCode(attr(data, ['presa_in_carico_RI_AMM', 'PRESA_IN_CARICO_RI_AMM']))
-  const statoTiAmm = normalizeAlertCode(attr(data, ['stato_TI_AMM', 'STATO_TI_AMM']))
-  const esitoTiAmm = normalizeAlertCode(attr(data, ['esito_TI_AMM', 'ESITO_TI_AMM']))
-  const riAmmOpen = statoRiAmm === '1' || statoRiAmm === '2' || presaRiAmm === '1' || presaRiAmm === '2'
-  const tiAmmClosedConforme = (statoTiAmm === '4' || statoTiAmm === 'APPROVATA' || statoTiAmm === 'TRASMESSO') && (esitoTiAmm === '2' || esitoTiAmm === 'APPROVATA' || esitoTiAmm === 'CONFORME')
-  return riAmmOpen && tiAmmClosedConforme
+  // trasmissione della bozza il nodo RIA è aperto con stato 1/2 e il nodo IA
+  // è chiuso con esito conforme. Il solo visto IA imposta invece RIA a 4/null
+  // e non deve generare attività operativa.
+  const statoRia = normalizeAlertCode(attr(data, ['stato_RIA', 'STATO_RIA']))
+  const statoIa = normalizeAlertCode(attr(data, ['stato_IA', 'STATO_IA']))
+  const esitoIa = normalizeAlertCode(attr(data, ['esito_IA', 'ESITO_IA']))
+  const riaOpen = statoRia === '1' || statoRia === '2'
+  const iaClosedConforme = (statoIa === '4' || statoIa === 'APPROVATA' || statoIa === 'TRASMESSO') && (esitoIa === '2' || esitoIa === 'APPROVATA' || esitoIa === 'CONFORME')
+  return riaOpen && iaClosedConforme
 }
 
-function isVistoTiAmmOnlyBeforeBozzaForAlerts (data: Record<string, any>): boolean {
-  const esitoTiAmm = normalizeAlertCode(attr(data, ['esito_TI_AMM', 'ESITO_TI_AMM']))
-  if (esitoTiAmm !== '2' && esitoTiAmm !== 'APPROVATA' && esitoTiAmm !== 'CONFORME') return false
-  return !isBozzaDeterminazioneTrasmessaRiAmmForAlerts(data)
+function isVistoIaOnlyBeforeBozzaForAlerts (data: Record<string, any>): boolean {
+  const esitoIa = normalizeAlertCode(attr(data, ['esito_IA', 'ESITO_IA']))
+  if (esitoIa !== '2' && esitoIa !== 'APPROVATA' && esitoIa !== 'CONFORME') return false
+  return !isBozzaDeterminazioneTrasmessaRiaForAlerts(data)
 }
 
-function isStaleTiAmmAttestationCurrentActivity (row: Record<string, any>): boolean {
+function isStaleIaAttestationCurrentActivity (row: Record<string, any>): boolean {
   const tipo = normalizeAlertCode(attr(row, ['tipo_attivita']))
   const dest = normalizeAlertCode(attr(row, ['destinatario_ruolo']))
   const subtipo = normalizeAlertCode(attr(row, ['sottotipo_attivita']))
   const origine = normalizeAlertCode(attr(row, ['origine_evento']))
   const titolo = normalizeAlertCode(attr(row, ['titolo']))
   return tipo === 'PRESA_IN_CARICO' &&
-    dest === 'RI_AMM' &&
-    (subtipo === 'ATTESTAZIONE_CONFORMITA_TI_AMM' || origine === 'ATTESTAZIONE_CONFORMITA' || titolo.includes('ATTESTAZIONE_DI_CONFORMITA'))
+    dest === 'RIA' &&
+    (subtipo === 'ATTESTAZIONE_CONFORMITA_IA' || origine === 'ATTESTAZIONE_CONFORMITA' || titolo.includes('ATTESTAZIONE_DI_CONFORMITA'))
 }
 
 function takeChargeConfigForRole (roleAreaKey: string): { tipo: GiiAlertType, fieldNames: string[], title: string } | null {
   switch (roleAreaKey) {
-    case 'TI_AMM': return { tipo: 'PRESA_IN_CARICO_TI_AMM', fieldNames: ['stato_TI_AMM'], title: 'Pratica da prendere in carico' }
-    case 'RI_AMM': return { tipo: 'PRESA_IN_CARICO_RI_AMM', fieldNames: ['stato_RI_AMM'], title: 'Pratica da prendere in carico' }
+    case 'IA': return { tipo: 'PRESA_IN_CARICO_IA', fieldNames: ['stato_IA'], title: 'Pratica da prendere in carico' }
+    case 'RIA': return { tipo: 'PRESA_IN_CARICO_RIA', fieldNames: ['stato_RIA'], title: 'Pratica da prendere in carico' }
 
-    case 'RZ_TEC': return { tipo: 'PRESA_IN_CARICO_RZ_TEC', fieldNames: ['stato_RZ_TEC', 'stato_RZ', 'presa_in_carico_RZ_TEC', 'presa_in_carico_RZ'], title: 'Rapporto da prendere in carico' }
-    case 'RZ_AGR': return { tipo: 'PRESA_IN_CARICO_RZ_AGR', fieldNames: ['stato_RZ_AGR', 'stato_RZ', 'presa_in_carico_RZ_AGR', 'presa_in_carico_RZ'], title: 'Rapporto da prendere in carico' }
-    case 'TI_TEC': return { tipo: 'PRESA_IN_CARICO_TI_TEC', fieldNames: ['stato_TI_TEC', 'stato_TI'], title: 'Rapporto da prendere in carico' }
-    case 'RI_TEC': return { tipo: 'PRESA_IN_CARICO_RI_TEC', fieldNames: ['stato_RI_TEC', 'stato_RI'], title: 'Rapporto da prendere in carico' }
+    case 'CS_TEC': return { tipo: 'PRESA_IN_CARICO_CS_TEC', fieldNames: ['stato_CS'], title: 'Rapporto da prendere in carico' }
+    case 'CS_AGR': return { tipo: 'PRESA_IN_CARICO_CS_AGR', fieldNames: ['stato_CS'], title: 'Rapporto da prendere in carico' }
+    case 'IT_TEC': return { tipo: 'PRESA_IN_CARICO_IT_TEC', fieldNames: ['stato_IT'], title: 'Rapporto da prendere in carico' }
+    case 'RIT_TEC': return { tipo: 'PRESA_IN_CARICO_RIT_TEC', fieldNames: ['stato_RIT'], title: 'Rapporto da prendere in carico' }
     case 'DT_TEC': return { tipo: 'PRESA_IN_CARICO_DT_TEC', fieldNames: ['stato_DT_TEC', 'stato_DT'], title: 'Rapporto da prendere in carico' }
 
-    case 'TI_AGR': return { tipo: 'PRESA_IN_CARICO_TI_AGR', fieldNames: ['stato_TI_AGR', 'stato_TI'], title: 'Rapporto da prendere in carico' }
-    case 'RI_AGR': return { tipo: 'PRESA_IN_CARICO_RI_AGR', fieldNames: ['stato_RI_AGR', 'stato_RI'], title: 'Rapporto da prendere in carico' }
+    case 'IT_AGR': return { tipo: 'PRESA_IN_CARICO_IT_AGR', fieldNames: ['stato_IT'], title: 'Rapporto da prendere in carico' }
+    case 'RIT_AGR': return { tipo: 'PRESA_IN_CARICO_RIT_AGR', fieldNames: ['stato_RIT'], title: 'Rapporto da prendere in carico' }
     case 'DT_AGR': return { tipo: 'PRESA_IN_CARICO_DT_AGR', fieldNames: ['stato_DT_AGR', 'stato_DT'], title: 'Rapporto da prendere in carico' }
 
     default: return null
@@ -780,7 +756,7 @@ function computeTakeChargeAlert (data: Record<string, any>, options?: { user?: G
   const cfg = takeChargeConfigForRole(roleAreaKey)
   if (!cfg) return null
 
-  if (roleAreaKey === 'RI_AMM' && isVistoTiAmmOnlyBeforeBozzaForAlerts(data)) return null
+  if (roleAreaKey === 'RIA' && isVistoIaOnlyBeforeBozzaForAlerts(data)) return null
 
   const state = attr(data, cfg.fieldNames)
   const hasExplicitState = state !== null && state !== undefined && String(state).trim() !== ''
@@ -814,7 +790,7 @@ export function computeGiiAlertsFromPractice (data: Record<string, any>, options
 
   const roleAreaKeyForGate = roleAreaKeyForAlerts(data, options)
   if (!practiceMatchesAlertUserScope(data, options?.user)) return alerts
-  if (roleAreaKeyForGate === 'TI_AMM' && !isPracticeAssignedToCurrentTiAmm(data, options?.user)) return alerts
+  if (roleAreaKeyForGate === 'IA' && !isPracticeAssignedToCurrentIa(data, options?.user)) return alerts
 
   const takeChargeAlert = computeTakeChargeAlert(data, { user: options?.user, log: options?.log || null })
   if (takeChargeAlert) alerts.push(takeChargeAlert)
@@ -1265,7 +1241,7 @@ function activityAreaForUser (user?: GiiUserProfileForAlerts): string {
   const key = roleAreaKeyForAlerts({}, { user })
   if (key.endsWith('_AGR')) return 'AGR'
   if (key.endsWith('_TEC')) return 'TEC'
-  if (key === 'TI_AMM' || key === 'RI_AMM' || key === 'DA') return 'AMM'
+  if (key === 'IA' || key === 'RIA' || key === 'DA') return 'AMM'
   return normalizeAlertCode(user?.areaCod || '')
 }
 
@@ -1295,16 +1271,16 @@ function buildCurrentActivityWhere (user?: GiiUserProfileForAlerts, extraWhere?:
       clauses.push(`(destinatario_username IS NULL OR destinatario_username = '' OR UPPER(destinatario_username) = '${giiSqlString(username.toUpperCase())}')`)
     }
 
-    // Il filtro per settore serve per ruoli effettivamente settoriali (TI/RZ/TR).
-    // RI e DT sono ruoli d'area: devono vedere tutte le attività della propria area,
+    // Il filtro per settore serve per ruoli effettivamente settoriali (IT/CS/TR).
+    // RIT e DT sono ruoli d'area: devono vedere tutte le attività della propria area,
     // anche se il record conserva il settore/distretto di provenienza della rilevazione.
     const roleForSectorFilter = String(role || '').trim().toUpperCase()
-    const mustMatchSector = roleForSectorFilter === 'TI' || roleForSectorFilter === 'RZ' || roleForSectorFilter === 'TR'
+    const mustMatchSector = roleForSectorFilter === 'IT' || roleForSectorFilter === 'CS' || roleForSectorFilter === 'TR'
     if (settore && mustMatchSector) {
-      // TI/RZ/TR sono ruoli settoriali: una riga senza destinatario_settore non
+      // IT/CS/TR sono ruoli settoriali: una riga senza destinatario_settore non
       // può essere trattata come attività valida per qualunque distretto. Il
       // precedente fallback NULL/vuoto faceva arrivare, ad esempio, attività di
-      // RZ_D1 anche a RZ_D2 durante il polling.
+      // CS_D1 anche a CS_D2 durante il polling.
       clauses.push(`UPPER(destinatario_settore) = '${giiSqlString(settore.toUpperCase())}'`)
     }
 
@@ -1326,29 +1302,29 @@ function buildPracticeAlertWhere (user?: GiiUserProfileForAlerts, extraWhere?: s
   const settore = String(user?.settoreCod || '').trim().toUpperCase()
   const username = String(user?.username || '').trim()
 
-  if (key === 'RZ_AGR' || key === 'RZ_TEC') {
-    // Le viste *_ALL sono d'area: il ruolo RZ deve essere ulteriormente chiuso
+  if (key === 'CS_AGR' || key === 'CS_TEC') {
+    // Le viste *_ALL sono d'area: il ruolo CS deve essere ulteriormente chiuso
     // sul proprio distretto/settore, altrimenti la riconciliazione background
     // genera allarmi delle altre zone ogni ~30 secondi.
     if (!area || !settore) clauses.push('1=0')
     else clauses.push(`area_cod = '${giiSqlString(area)}' AND settore_cod = '${giiSqlString(settore)}'`)
-  } else if (key === 'TI_AGR' || key === 'TI_TEC') {
+  } else if (key === 'IT_AGR' || key === 'IT_TEC') {
     if (!area || !settore || !username) {
       clauses.push('1=0')
     } else {
       // La vista *_ALL deve essere chiusa server-side almeno su area e settore.
-      // L'assegnazione al singolo TI viene verificata client-side sui campi che
-      // la vista espone realmente. Non inseriamo qui ti_assegnato_*/Creator:
+      // L'assegnazione al singolo IT viene verificata client-side sui campi che
+      // la vista espone realmente. Non inseriamo qui it_assegnato_*/Creator:
       // non tutte le viste tecniche espongono gli stessi alias e un solo nome
       // campo assente fa fallire l'intera query periodica con HTTP 400, facendo
       // comparire la campanella rossa a ogni riconciliazione background.
       clauses.push(`area_cod = '${giiSqlString(area)}' AND settore_cod = '${giiSqlString(settore)}'`)
     }
-  } else if (key === 'RI_AGR' || key === 'DT_AGR' || key === 'RI_TEC' || key === 'DT_TEC') {
+  } else if (key === 'RIT_AGR' || key === 'DT_AGR' || key === 'RIT_TEC' || key === 'DT_TEC') {
     if (!area) clauses.push('1=0')
     else clauses.push(`area_cod = '${giiSqlString(area)}'`)
-  } else if (key === 'TI_AMM') {
-    clauses.push(buildTiAmmAssignmentWhereClause(user))
+  } else if (key === 'IA') {
+    clauses.push(buildIaAssignmentWhereClause(user))
   }
 
   const extra = String(extraWhere || '').trim()
@@ -1363,18 +1339,18 @@ function practiceMatchesAlertUserScope (data: Record<string, any>, user?: GiiUse
   const practiceArea = normalizeAlertCode(attr(data, ['area_cod', 'area']))
   const practiceSector = normalizeAlertCode(attr(data, ['settore_cod', 'settore']))
 
-  if (key === 'RZ_AGR' || key === 'RZ_TEC') {
+  if (key === 'CS_AGR' || key === 'CS_TEC') {
     return !!userArea && !!userSector && practiceArea === userArea && practiceSector === userSector
   }
 
-  if (key === 'TI_AGR' || key === 'TI_TEC') {
+  if (key === 'IT_AGR' || key === 'IT_TEC') {
     if (!userArea || !userSector || practiceArea !== userArea || practiceSector !== userSector) return false
 
     const meUser = String(user?.username || '').trim().toLowerCase()
     const meName = String(user?.fullName || '').trim().toLowerCase()
     if (!meUser && !meName) return false
 
-    const sameCurrentTi = (value: any): boolean => {
+    const sameCurrentIt = (value: any): boolean => {
       const candidate = String(value ?? '').trim().toLowerCase()
       if (!candidate) return false
       return (!!meUser && candidate === meUser) || (!!meName && candidate === meName)
@@ -1383,19 +1359,19 @@ function practiceMatchesAlertUserScope (data: Record<string, any>, user?: GiiUse
     // Le viste non sono perfettamente uniformi nei nomi dei campi di
     // assegnazione. Usiamo gli stessi alias tollerati da elenco/dashboard.
     const assignedValues = [
-      attr(data, ['ti_assegnato_username']),
-      attr(data, ['ti_assegnato_user']),
-      attr(data, ['ti_assegnato']),
-      attr(data, ['ti_assegnato_nome']),
-      attr(data, ['ti_assegnato_name'])
+      attr(data, ['it_assegnato_username']),
+      attr(data, ['it_assegnato_user']),
+      attr(data, ['it_assegnato']),
+      attr(data, ['it_assegnato_nome']),
+      attr(data, ['it_assegnato_name'])
     ]
     const hasExplicitAssignment = assignedValues.some(v => String(v ?? '').trim() !== '')
-    if (hasExplicitAssignment) return assignedValues.some(sameCurrentTi)
+    if (hasExplicitAssignment) return assignedValues.some(sameCurrentIt)
 
-    // Per le pratiche originate direttamente dal TI, prima dell'eventuale
-    // valorizzazione dei campi ti_assegnato_* l'identità è ricavabile dai
+    // Per le pratiche originate direttamente dall’IT, prima dell'eventuale
+    // valorizzazione dei campi it_assegnato_* l'identità è ricavabile dai
     // campi creator. Se nessuno di questi è esposto/valorizzato non allarghiamo
-    // la visibilità: fail-closed, così un TI non riceve allarmi di un collega.
+    // la visibilità: fail-closed, così un IT non riceve allarmi di un collega.
     const creatorValues = [
       attr(data, ['created_user']),
       attr(data, ['Creator']),
@@ -1408,14 +1384,14 @@ function practiceMatchesAlertUserScope (data: Record<string, any>, user?: GiiUse
       attr(data, ['submitter']),
       attr(data, ['owner'])
     ]
-    return creatorValues.some(sameCurrentTi)
+    return creatorValues.some(sameCurrentIt)
   }
 
-  if (key === 'RI_AGR' || key === 'DT_AGR' || key === 'RI_TEC' || key === 'DT_TEC') {
+  if (key === 'RIT_AGR' || key === 'DT_AGR' || key === 'RIT_TEC' || key === 'DT_TEC') {
     return !!userArea && practiceArea === userArea
   }
 
-  if (key === 'TI_AMM') return isPracticeAssignedToCurrentTiAmm(data, user)
+  if (key === 'IA') return isPracticeAssignedToCurrentIa(data, user)
   return true
 }
 
@@ -1440,7 +1416,7 @@ function currentActivityToAlert (row: Record<string, any>): GiiAlertItem | null 
   const keyBase = parentGlobalId || rawGlobalId || chiave
   if (!keyBase) return null
 
-  if (isStaleTiAmmAttestationCurrentActivity(row)) return null
+  if (isStaleIaAttestationCurrentActivity(row)) return null
 
   const tipoAttivita = String(attr(row, ['tipo_attivita']) || '').trim().toUpperCase()
   const isInformativa = tipoAttivita === 'INFORMATIVA'

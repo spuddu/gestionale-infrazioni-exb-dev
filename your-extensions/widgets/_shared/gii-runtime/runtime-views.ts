@@ -20,10 +20,6 @@ export type GiiRuntimeViewContext = {
 
 const SERVICE_ROOT = 'https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services'
 
-const ROLE_FROM_NUMERIC_CODE: Record<number, string> = {
-  1: 'TR', 2: 'TI', 3: 'RZ', 4: 'RI', 5: 'DT', 6: 'DA', 7: 'ADMIN'
-}
-
 const SETTORE_FROM_NUMERIC_CODE: Record<number, string> = {
   1: 'CR', 2: 'GI', 3: 'D1', 4: 'D2', 5: 'D3', 6: 'D4', 7: 'D5', 8: 'D6', 9: 'DS'
 }
@@ -42,22 +38,22 @@ function makeRuntimeView (
 /**
  * Catalogo unico delle viste runtime usate da elenco, dashboard e report.
  * GII_VIEW_AMM e GII_VIEW_AMM_ALL espongono soltanto pratiche già entrate
- * nella fase sanzionatoria; per TI_AMM resta inoltre obbligatorio il filtro
+ * nella fase sanzionatoria; per IA resta inoltre obbligatorio il filtro
  * applicativo condiviso sull'assegnatario.
  */
 export const GII_RUNTIME_VIEWS: GiiRuntimeView[] = [
   makeRuntimeView('ADMIN', 'GII_VIEW_ADMIN', ['ADMIN'], ''),
-  makeRuntimeView('AGR_ALL', 'GII_VIEW_AGR', ['RI', 'DT'], 'AGR'),
-  makeRuntimeView('AGR_D1', 'GII_VIEW_AGR_D1', ['TI', 'RZ'], 'AGR', 'D1'),
-  makeRuntimeView('AGR_D2', 'GII_VIEW_AGR_D2', ['TI', 'RZ'], 'AGR', 'D2'),
-  makeRuntimeView('AGR_D3', 'GII_VIEW_AGR_D3', ['TI', 'RZ'], 'AGR', 'D3'),
-  makeRuntimeView('AGR_D4', 'GII_VIEW_AGR_D4', ['TI', 'RZ'], 'AGR', 'D4'),
-  makeRuntimeView('AGR_D5', 'GII_VIEW_AGR_D5', ['TI', 'RZ'], 'AGR', 'D5'),
-  makeRuntimeView('AGR_D6', 'GII_VIEW_AGR_D6', ['TI', 'RZ'], 'AGR', 'D6'),
-  makeRuntimeView('AMM_RI_DA', 'GII_VIEW_AMM', ['DA', 'RI_AMM'], 'AMM'),
-  makeRuntimeView('AMM_TI', 'GII_VIEW_AMM_ALL', ['TI_AMM'], 'AMM'),
-  makeRuntimeView('TEC_ALL', 'GII_VIEW_TEC', ['RI', 'DT'], 'TEC'),
-  makeRuntimeView('TEC_DS', 'GII_VIEW_TEC_DS', ['TI', 'RZ'], 'TEC', 'DS')
+  makeRuntimeView('AGR_ALL', 'GII_VIEW_AGR', ['RIT', 'DT'], 'AGR'),
+  makeRuntimeView('AGR_D1', 'GII_VIEW_AGR_D1', ['IT', 'CS'], 'AGR', 'D1'),
+  makeRuntimeView('AGR_D2', 'GII_VIEW_AGR_D2', ['IT', 'CS'], 'AGR', 'D2'),
+  makeRuntimeView('AGR_D3', 'GII_VIEW_AGR_D3', ['IT', 'CS'], 'AGR', 'D3'),
+  makeRuntimeView('AGR_D4', 'GII_VIEW_AGR_D4', ['IT', 'CS'], 'AGR', 'D4'),
+  makeRuntimeView('AGR_D5', 'GII_VIEW_AGR_D5', ['IT', 'CS'], 'AGR', 'D5'),
+  makeRuntimeView('AGR_D6', 'GII_VIEW_AGR_D6', ['IT', 'CS'], 'AGR', 'D6'),
+  makeRuntimeView('AMM_RIA_DA', 'GII_VIEW_AMM', ['DA', 'RIA'], 'AMM'),
+  makeRuntimeView('AMM_IA', 'GII_VIEW_AMM_ALL', ['IA'], 'AMM'),
+  makeRuntimeView('TEC_ALL', 'GII_VIEW_TEC', ['RIT', 'DT'], 'TEC'),
+  makeRuntimeView('TEC_DS', 'GII_VIEW_TEC_DS', ['IT', 'CS'], 'TEC', 'DS')
 ]
 
 function normalizeTextCode (value: any): string {
@@ -67,9 +63,7 @@ function normalizeTextCode (value: any): string {
 export function normalizeGiiRuntimeRole (value: any): string {
   const raw = normalizeTextCode(value)
   if (!raw) return ''
-  if (/^\d+$/.test(raw)) return ROLE_FROM_NUMERIC_CODE[Number(raw)] || raw
-  if (raw === 'RIAMM') return 'RI_AMM'
-  if (raw === 'TIAMM') return 'TI_AMM'
+  if (raw === 'RIA') return 'RIA'
   return raw
 }
 
@@ -84,7 +78,6 @@ export function normalizeGiiRuntimeArea (value: any): GiiRuntimeAreaCode {
 export function normalizeGiiRuntimeSettore (value: any): string {
   const raw = normalizeTextCode(value)
   if (!raw) return ''
-  if (raw === 'CS') return 'DS'
   if (/^\d+$/.test(raw)) return SETTORE_FROM_NUMERIC_CODE[Number(raw)] || raw
   return raw
 }
@@ -92,8 +85,6 @@ export function normalizeGiiRuntimeSettore (value: any): string {
 export function getEffectiveGiiRuntimeRole (roleCode: any, areaCode: any): string {
   const role = normalizeGiiRuntimeRole(roleCode)
   const area = normalizeGiiRuntimeArea(areaCode)
-  if (role === 'RI' && area === 'AMM') return 'RI_AMM'
-  if (role === 'TI' && area === 'AMM') return 'TI_AMM'
   return role
 }
 

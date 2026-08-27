@@ -14,7 +14,7 @@ import { Loading } from "jimu-ui";
 import type { AllWidgetProps } from "jimu-core";
 import type { IMConfig, ColumnDef } from "../config";
 import { defaultConfig, DEFAULT_COLUMNS } from "../config";
-import { isPracticeAssignedToCurrentTiAmm } from "../../../_shared/gii-access/ti-amm-assignment";
+import { isPracticeAssignedToCurrentIa } from "../../../_shared/gii-access/ia-assignment";
 import { clearGiiPracticeSelectionContext, isGiiPracticePayloadCurrent, stampGiiPracticePayload, writeGiiPracticeSelectionContext } from "../../../_shared/gii-selection/practice-context";
 import {
   pickGiiRuntimeView,
@@ -23,9 +23,24 @@ import {
 
 type Props = AllWidgetProps<IMConfig>;
 
+type GiiAssignment = {
+  ruoloCod: string;
+  ruoloLabel: string;
+  ruoloFull?: string;
+  profiloLabel?: string;
+  area: number | null;
+  areaCod: "AMM" | "AGR" | "TEC" | "";
+  areaFull?: string;
+  settore: number | null;
+  settoreCod: string;
+  settoreFull?: string;
+  ufficio: number | null;
+  ufficioLabel?: string;
+  gruppo?: string;
+};
+
 type GiiUserInfo = {
   username: string;
-  ruolo: number | null;
   ruoloCod: string;
   ruoloLabel: string;
   area: number | null;
@@ -36,6 +51,7 @@ type GiiUserInfo = {
   gruppo?: string;
   isAdmin: boolean;
   isWorkflowAdmin?: boolean;
+  assignments: GiiAssignment[];
 };
 
 type OggettoLegendInfo = {
@@ -46,19 +62,11 @@ type OggettoLegendInfo = {
   y: number;
 };
 
-function getOriginePraticaPrefix(d: any, rec?: DataRecord): "TR" | "TI" {
+function getOriginePraticaPrefix(d: any, rec?: DataRecord): "TR" | "IT" {
   const op = pickField(d, "origine_pratica");
-  if (op === 2 || op === "2") return "TI";
+  if (op === 2 || op === "2") return "IT";
   if (op === 1 || op === "1") return "TR";
 
-  // Fallback prudente per vecchi record/configurazioni prive di origine_pratica.
-  const dsId = String((rec as any)?.dataSource?.id || "").toLowerCase();
-  if (
-    dsId.includes("gii_pratiche") ||
-    dsId.includes("schema") ||
-    dsId.includes("ti")
-  )
-    return "TI";
   return "TR";
 }
 
@@ -118,6 +126,7 @@ type SortItem = { field: string; dir: SortDir };
 
 // Campi virtuali (ordinamento su campi calcolati)
 const V_STATO = "__stato_sint__";
+const V_RUOLO_OPERATIVO = "__ruolo_operativo__";
 const V_FASE = "__fase_istruttoria__";
 const V_TIPO_PRATICA = "__tipo_pratica__";
 const V_NUMERO_RILEVAZIONE = "__numero_rilevazione__";
@@ -150,11 +159,11 @@ function pickField(d: any, name: string): any {
   return undefined;
 }
 
-/** Normalizza label ruolo: RI_AMM → RI-AMM, TI_AMM → TI-AMM */
+/** Normalizza i codici ruolo eventualmente presenti nelle etichette visibili. */
 function labelNorm(s: string): string {
   return String(s || "")
-    .replace(/RI_AMM/g, "RI-AMM")
-    .replace(/TI_AMM/g, "TI-AMM");
+    .replace(/\bRIA\b/g, "Responsabile istruttoria amministrativa")
+    .replace(/\bIA\b/g, "Istruttore amministrativo");
 }
 
 function normalizeMioStatoLabel(label: any): string {
@@ -179,10 +188,11 @@ function normalizeMioStatoLabel(label: any): string {
     l === "sanzione approvata"
   )
     return "Trasmesso";
-  if (l === "assegnato a ti-amm" || l === "assegnato a ti amm")
-    return "Assegnato a TI-AMM";
-  if (l === "assegnato a ti" || l.startsWith("assegnato"))
-    return "Assegnato a TI";
+  if (l === "assegnato a istruttore amministrativo" || l === "assegnato all’istruttore amministrativo")
+    return "Assegnato all’Istruttore amministrativo";
+  if (l === "assegnato a istruttore tecnico" || l === "assegnato all’istruttore tecnico")
+    return "Assegnato all’Istruttore tecnico";
+  if (l.startsWith("assegnato")) return raw;
   if (l === "respinto" || l.startsWith("respint")) return "Respinto";
 
   // Nessun fallback descrittivo: lo schema Excel ammette solo gli stati sopra.
@@ -249,12 +259,12 @@ function normalizeLogRole(role: any): string {
     .trim()
     .toUpperCase()
     .replace(/[\s-]+/g, "_");
-  if (r === "RI_AMM" || r === "TI_AMM") return r;
+  if (r === "RIA" || r === "IA") return r;
   if (r === "DA_AMM") return "DA";
   if (r.startsWith("DT")) return "DT";
-  if (r.startsWith("RI") && r !== "RI_AMM") return "RI";
-  if (r.startsWith("RZ")) return "RZ";
-  if (r.startsWith("TI") && r !== "TI_AMM") return "TI";
+  if (r.startsWith("RIT") && r !== "RIA") return "RIT";
+  if (r.startsWith("CS")) return "CS";
+  if (r.startsWith("IT") && r !== "IA") return "IT";
   if (r.startsWith("TR")) return "TR";
   if (r.startsWith("DA")) return "DA";
   return r;
@@ -310,8 +320,8 @@ function transmissionAnswersIntegration(log: LogEntry): boolean {
   if (!isTransmissionReturnEvent(currentEvent)) return false;
 
   // Ricostruisce le richieste di integrazione aperte come stack cronologico.
-  // Le richieste possono essere annidate: ad esempio DT -> RI resta aperta
-  // anche se RI -> TI e poi RZ -> TI aprono ulteriori richieste sotto di essa.
+  // Le richieste possono essere annidate: ad esempio DT -> RIT resta aperta
+  // anche se RIT -> IT e poi CS -> IT aprono ulteriori richieste sotto di essa.
   // Una trasmissione di ritorno è integrazione finché almeno una richiesta resta
   // aperta; ogni richiesta si chiude solo quando la pratica rientra al ruolo che
   // l'aveva aperta.
@@ -624,6 +634,8 @@ function notifySelectionCleared() {
     sessionStorage.removeItem("GII_SELECTED_SERVICE_URL");
     sessionStorage.removeItem("GII_SELECTED_IDFIELD");
     sessionStorage.removeItem("GII_SELECTED_VIEW_NAME");
+    sessionStorage.removeItem("GII_SELECTED_OPERATIONAL_ROLE");
+    sessionStorage.removeItem("GII_SELECTED_OPERATIONAL_ROLE_LABEL");
     sessionStorage.removeItem("GII_SELECTED_DATA");
     clearGiiPracticeSelectionContext();
     try {
@@ -754,13 +766,13 @@ function buildOpenPracticeScopeFromUser(user: any): {
   ufficio: string;
 } {
   const role = getEffectiveRole(
-    String(user?.ruoloCod || user?.ruoloLabel || "").trim(),
+    String(user?.ruoloCod || "").trim(),
     user?.area,
   );
   return {
     username: normalizeOpenPracticeScopeUsername(user?.username),
     role: normalizeOpenPracticeScopeValue(
-      role || user?.ruoloCod || user?.ruoloLabel,
+      role || user?.ruoloCod,
     ),
     area: normalizeOpenPracticeScopeValue(
       user?.areaCod || normalizeAreaCode(user?.area),
@@ -1054,7 +1066,7 @@ function migrateColumns(cfg: any): ColumnDef[] {
     }),
     take({
       id: "col_stato",
-      label: "Il mio stato",
+      label: "Il mio stato e il mio ruolo operativo",
       field: V_STATO,
       width: 170,
     }),
@@ -1121,12 +1133,12 @@ type LogHistoryItem = {
 
 type LogEntry = {
   utente: string; // utente_operatore (mittente)
-  ruolo: string; // ruolo_competente (es. "RZ") (mittente)
+  ruolo: string; // ruolo_competente (es. "CS") (mittente)
   area: string; // area (es. "AGR")
   settore: string; // settore (es. "D1")
   evento: string; // evento_chiusura (causale)
   dt: number | null; // dt_chiusura (epoch ms)
-  ruoloDest: string; // ruolo_destinatario (es. "RI")
+  ruoloDest: string; // ruolo_destinatario (es. "RIT")
   utenteDest: string; // utente_destinatario (username)
   history?: LogHistoryItem[]; // eventi utili precedenti, ordinati dal più recente al più vecchio
 };
@@ -1135,7 +1147,6 @@ type UtentiEntry = {
   full_name: string;
   nome: string;
   cognome: string;
-  ruolo: number | null;
   ruoloCod: string;
   area: number | null;
   areaCod: string;
@@ -1210,7 +1221,7 @@ function getDomainGroupFromFieldName(
     f === "id_settore"
   )
     return "settore";
-  if (f === "ruolo" || f === "ruolo_cod" || f === "ruolocod") return "ruolo";
+  if (f === "ruolo_cod" || f === "ruolocod") return "ruolo";
   return null;
 }
 
@@ -1223,16 +1234,14 @@ function normalizeDomainLookupKey(group: DomainLabelGroup, value: any): string {
     return Number.isFinite(n) ? normalizeAreaCode(n) : text;
   }
   if (group === "settore") {
-    if (text === "CS") return "DS";
     if (SETTORE_TEXT_CODES.has(text)) return text;
     const n = Number(value);
     return Number.isFinite(n) ? normalizeSettoreCode(n) : text;
   }
   if (group === "ruolo") {
-    if (text === "RI AMM" || text === "RI-AMM") return "RI_AMM";
-    if (text === "TI AMM" || text === "TI-AMM") return "TI_AMM";
-    const n = Number(value);
-    return Number.isFinite(n) && RUOLO_LABEL[n] ? RUOLO_LABEL[n] : text;
+    if (text === "RIA") return "RIA";
+    if (text === "Istruttore amministrativo" || text === "IA-AMM") return "IA";
+    return text;
   }
   return text;
 }
@@ -1315,21 +1324,20 @@ function resolveSettoreCode(
   settoreCod?: any,
 ): string {
   const code = normalizeTextCode(settoreCod);
-  if (code === "CS") return "DS";
   if (code && SETTORE_TEXT_CODES.has(code)) return code;
   return normalizeSettoreCode(settore);
 }
 
+const WORKFLOW_ROLE_CODES = new Set([
+  "TR", "IT", "CS", "RIT", "DT", "DA", "ADMIN", "RIA", "IA",
+]);
+
 function resolveRoleCode(
-  ruolo: number | null | undefined,
   ruoloCod?: any,
-  ruoloLabel?: any,
   isAdmin?: boolean,
 ): string {
-  const code = normalizeTextCode(ruoloCod || ruoloLabel);
-  if (code) return code;
-  if (ruolo != null && RUOLO_LABEL[Number(ruolo)])
-    return RUOLO_LABEL[Number(ruolo)];
+  const code = normalizeRoleDisplayCode(ruoloCod);
+  if (code && WORKFLOW_ROLE_CODES.has(code)) return code;
   return isAdmin ? "ADMIN" : "";
 }
 
@@ -1338,12 +1346,12 @@ function normalizeRoleDisplayCode(role: any): string {
     .trim()
     .toUpperCase()
     .replace(/[\s-]+/g, "_");
-  if (raw === "RI_AMM" || raw === "RIAMM") return "RI_AMM";
-  if (raw === "TI_AMM" || raw === "TIAMM") return "TI_AMM";
-  if (raw.startsWith("RZ")) return "RZ";
+  if (raw === "RIA") return "RIA";
+  if (raw === "IA") return "IA";
+  if (raw.startsWith("CS")) return "CS";
   if (raw.startsWith("TR")) return "TR";
-  if (raw.startsWith("TI") && raw !== "TI_AMM") return "TI";
-  if (raw.startsWith("RI") && raw !== "RI_AMM") return "RI";
+  if (raw.startsWith("IT") && raw !== "IA") return "IT";
+  if (raw.startsWith("RIT") && raw !== "RIA") return "RIT";
   if (raw.startsWith("DT") || raw.startsWith("DIR")) return "DT";
   if (raw.startsWith("DA")) return "DA";
   if (raw.startsWith("ADMIN")) return "ADMIN";
@@ -1354,17 +1362,17 @@ function getQualificaLabel(role: any): string {
   switch (normalizeRoleDisplayCode(role)) {
     case "TR":
       return "Tecnico rilevatore";
-    case "TI":
-      return "Tecnico istruttore";
-    case "RZ":
+    case "IT":
+      return "Istruttore tecnico";
+    case "CS":
       return "Capo Settore";
-    case "RI":
-      return "Responsabile istruttoria";
+    case "RIT":
+      return "Responsabile istruttoria tecnica";
     case "DT":
       return "Direttore d’Area";
-    case "TI_AMM":
-      return "Tecnico istruttore amministrativo";
-    case "RI_AMM":
+    case "IA":
+      return "Istruttore amministrativo";
+    case "RIA":
       return "Responsabile istruttoria amministrativa";
     case "DA":
       return "Direttore Area AA. GG. e P.F.";
@@ -1389,16 +1397,16 @@ function getUtenteNomeCognome(utente?: UtentiEntry | null): string {
   return cleanNomeCognome(utente?.full_name || "");
 }
 
-function normalizePersonaRoleForMatch(role: any): string {
+function normalizePersonaRoleForMatch(role: any, area?: any): string {
   const r = normalizeRoleDisplayCode(role);
-  if (r === "RI_AMM") return "RI";
-  if (r === "TI_AMM") return "TI";
+  if (r === "RIA" || r === "IA") return r;
+  const a = normalizePersonaAreaForMatch(area, r);
   return r;
 }
 
 function normalizePersonaAreaForMatch(area: any, role?: any): string {
   const roleCode = normalizeRoleDisplayCode(role);
-  if (roleCode === "RI_AMM" || roleCode === "TI_AMM" || roleCode === "DA")
+  if (roleCode === "RIA" || roleCode === "IA" || roleCode === "DA")
     return "AMM";
 
   const text = normalizeTextCode(area);
@@ -1410,7 +1418,6 @@ function normalizePersonaAreaForMatch(area: any, role?: any): string {
 
 function normalizePersonaSettoreForMatch(settore: any): string {
   const text = normalizeTextCode(settore);
-  if (text === "CS") return "DS";
   if (SETTORE_TEXT_CODES.has(text)) return text;
 
   const n = Number(settore);
@@ -1420,10 +1427,8 @@ function normalizePersonaSettoreForMatch(settore: any): string {
 function getUtenteEntryRoleCode(utente?: UtentiEntry | null): string {
   if (!utente) return "";
   return normalizePersonaRoleForMatch(
-    utente.ruoloCod ||
-      (utente.ruolo != null && RUOLO_LABEL[Number(utente.ruolo)]
-        ? RUOLO_LABEL[Number(utente.ruolo)]
-        : ""),
+    utente.ruoloCod,
+    utente.areaCod || utente.area,
   );
 }
 
@@ -1441,15 +1446,8 @@ function getDisplayRoleFromUtente(
   utente: UtentiEntry | null | undefined,
   fallbackRole: any,
 ): string {
-  const role = normalizeRoleDisplayCode(
-    utente?.ruoloCod ||
-      (utente?.ruolo != null && RUOLO_LABEL[Number(utente.ruolo)]
-        ? RUOLO_LABEL[Number(utente.ruolo)]
-        : fallbackRole),
-  );
+  const role = normalizeRoleDisplayCode(utente?.ruoloCod || fallbackRole);
   const area = getUtenteEntryAreaCode(utente) || normalizePersonaAreaForMatch("", fallbackRole);
-  if (role === "RI" && area === "AMM") return "RI_AMM";
-  if (role === "TI" && area === "AMM") return "TI_AMM";
   return role || normalizeRoleDisplayCode(fallbackRole);
 }
 
@@ -1464,9 +1462,34 @@ function resolveUtenteForPersona(
 
   const rawUser = String(usernameOrName || "").trim();
   const uname = rawUser.toLowerCase();
-  const direct = uname ? utentiMap.get(uname) : null;
-  if (direct) return direct;
+  const targetRole = normalizePersonaRoleForMatch(ruolo, area);
+  const targetArea = normalizePersonaAreaForMatch(area, ruolo);
+  const targetSettore = normalizePersonaSettoreForMatch(settore);
+  const needsSettore =
+    (targetRole === "TR" || targetRole === "IT" || targetRole === "CS") && targetArea !== "AMM";
 
+  const matchesContext = (entry: UtentiEntry | null | undefined): boolean => {
+    if (!entry) return false;
+    if (targetRole && getUtenteEntryRoleCode(entry) !== targetRole) return false;
+    if (targetArea && getUtenteEntryAreaCode(entry) !== targetArea) return false;
+    if (needsSettore && targetSettore && getUtenteEntrySettoreCode(entry) !== targetSettore) return false;
+    return true;
+  };
+
+  const direct = uname ? utentiMap.get(uname) : null;
+  if (direct && matchesContext(direct)) return direct;
+
+  // Con assegnazioni multiple lo stesso username può comparire più volte: si cerca
+  // prima la riga che coincide con ruolo/area/settore del LOG.
+  if (targetRole) {
+    for (const entry of utentiMap.values()) {
+      if (uname && String(entry.username || "").trim().toLowerCase() !== uname) continue;
+      if (matchesContext(entry)) return entry;
+    }
+    for (const entry of utentiMap.values()) if (matchesContext(entry)) return entry;
+  }
+
+  if (direct) return direct; // fallback anagrafico: nome/cognome restano comunque corretti
   const cleanCandidate = cleanNomeCognome(rawUser).toLowerCase();
   if (cleanCandidate && cleanCandidate !== "—") {
     for (const entry of utentiMap.values()) {
@@ -1474,27 +1497,6 @@ function resolveUtenteForPersona(
       if (entryName && entryName === cleanCandidate) return entry;
     }
   }
-
-  const targetRole = normalizePersonaRoleForMatch(ruolo);
-  if (!targetRole) return null;
-
-  const targetArea = normalizePersonaAreaForMatch(area, ruolo);
-  const targetSettore = normalizePersonaSettoreForMatch(settore);
-  const needsSettore =
-    (targetRole === "TR" || targetRole === "TI" || targetRole === "RZ") &&
-    targetArea !== "AMM";
-
-  for (const entry of utentiMap.values()) {
-    const entryRole = getUtenteEntryRoleCode(entry);
-    const entryArea = getUtenteEntryAreaCode(entry);
-    const entrySettore = getUtenteEntrySettoreCode(entry);
-
-    if (entryRole !== targetRole) continue;
-    if (targetArea && entryArea !== targetArea) continue;
-    if (needsSettore && targetSettore && entrySettore !== targetSettore) continue;
-    return entry;
-  }
-
   return null;
 }
 
@@ -1641,14 +1643,12 @@ function normalizeAreaCode(
   return "";
 }
 
-/** RI con area=AMM → RI_AMM, TI con area=AMM → TI_AMM, altrimenti invariato */
+/** Restituisce il codice ruolo corrente. */
 function getEffectiveRole(
   ruoloLabel: string,
   area: number | null | undefined,
 ): string {
   const r = String(ruoloLabel || "").toUpperCase();
-  if (r === "RI" && area === 1) return "RI_AMM";
-  if (r === "TI" && area === 1) return "TI_AMM";
   return r;
 }
 
@@ -1719,7 +1719,6 @@ function getSettoreCodeFromRecord(d: any, fallbackSettore?: any): string {
     "id_settore",
   ]);
   const text = normalizeTextCode(raw || fallbackSettore);
-  if (text === "CS") return "DS";
   if (SETTORE_TEXT_CODES.has(text)) return text;
   const n = Number(raw || fallbackSettore);
   return Number.isFinite(n) ? normalizeSettoreCode(n) : "";
@@ -1764,15 +1763,8 @@ function pickReportDateMs(d: any, configuredField?: string): number | null {
 function pickTecnicoIstruttore(d: any): string {
   return String(
     getFirstValue(d, [
-      "ti_assegnato_nome",
-      "ti_assegnato_name",
-      "tecnico_istruttore",
-      "Tecnico_istruttore",
-      "istruttore",
-      "Istruttore",
-      "ti_assegnato_username",
-      "ti_assegnato_user",
-      "ti_assegnato",
+      "it_assegnato_nome",
+      "it_assegnato_username",
     ]) || "",
   );
 }
@@ -1852,9 +1844,7 @@ function pickRuntimeViewForUser(
 ): RuntimeDsView | null {
   if (!user) return null;
   const role = resolveRoleCode(
-    user.ruolo,
     user.ruoloCod,
-    user.ruoloLabel,
     user.isAdmin,
   );
   const areaCode = resolveAreaCode(user.area, user.areaCod);
@@ -1956,6 +1946,8 @@ function publishRuntimeSelection(p: {
   idFieldName: string;
   viewName: string;
   data?: any;
+  operationalRole?: string;
+  operationalRoleLabel?: string;
 }) {
   try {
     writeGiiPracticeSelectionContext();
@@ -1964,6 +1956,10 @@ function publishRuntimeSelection(p: {
     sessionStorage.setItem("GII_SELECTED_SERVICE_URL", p.serviceUrl);
     sessionStorage.setItem("GII_SELECTED_IDFIELD", p.idFieldName);
     sessionStorage.setItem("GII_SELECTED_VIEW_NAME", p.viewName);
+    if (p.operationalRole) sessionStorage.setItem("GII_SELECTED_OPERATIONAL_ROLE", p.operationalRole);
+    else sessionStorage.removeItem("GII_SELECTED_OPERATIONAL_ROLE");
+    if (p.operationalRoleLabel) sessionStorage.setItem("GII_SELECTED_OPERATIONAL_ROLE_LABEL", p.operationalRoleLabel);
+    else sessionStorage.removeItem("GII_SELECTED_OPERATIONAL_ROLE_LABEL");
     try {
       sessionStorage.removeItem("GII_SELECTED_DATA");
     } catch {}
@@ -1984,6 +1980,8 @@ function publishRuntimeSelection(p: {
       serviceUrl: p.serviceUrl,
       idFieldName: p.idFieldName,
       viewName: p.viewName,
+      operationalRole: p.operationalRole || '',
+      operationalRoleLabel: p.operationalRoleLabel || '',
       ts: Date.now(),
     });
     try {
@@ -2101,42 +2099,22 @@ function getRecordObjectIdValue(
   }
 }
 
-// Mappa codice ruolo numerico → label (dal widget gestione utenti)
-const RUOLO_LABEL: Record<number, string> = {
-  1: "TR",
-  2: "TI",
-  3: "RZ",
-  4: "RI",
-  5: "DT",
-  6: "DA",
-  7: "ADMIN",
-};
-
-// Gerarchia priorità per utenti con gruppi multipli (es. admin)
-const RUOLO_PRIORITY: Record<number, number> = {
-  6: 100, // DA  (massima priorità)
-  5: 90, // DT
-  4: 80, // RI
-  3: 70, // RZ
-  2: 60, // TI
-  1: 10, // TR
-};
-
 // Legge il profilo utente caricato dall'Header (unica fonte).
 function readGiiUserFromHeader(): GiiUserInfo | null {
   const cached: any = (window as any).__giiUserRole;
   if (!cached?.username) return null;
 
-  const ruolo = cached.ruolo != null ? Number(cached.ruolo) : null;
   const gruppo = String(cached.gruppo || "");
   const inferredAdmin = inferIsOrgAdminFromSession();
-  const inferredAppAdmin = gruppo.toUpperCase().includes("ADMIN");
+  const cachedRoleCode = resolveRoleCode(
+    cached.ruoloCod ?? cached.ruolo_cod,
+    false,
+  );
   const isWorkflowAdmin =
-    ruolo === 7 ||
-    String(cached.ruoloLabel || "").toUpperCase() === "ADMIN" ||
+    cachedRoleCode === "ADMIN" ||
     !!cached.isWorkflowAdmin;
   const isAdmin =
-    !!cached.isAdmin || inferredAdmin || inferredAppAdmin || isWorkflowAdmin;
+    !!cached.isAdmin || inferredAdmin || isWorkflowAdmin;
 
   const area = cached.area != null ? Number(cached.area) : null;
   const settore = cached.settore != null ? Number(cached.settore) : null;
@@ -2146,21 +2124,35 @@ function readGiiUserFromHeader(): GiiUserInfo | null {
     cached.settoreCod ?? cached.settore_cod,
   );
   const ruoloCod = resolveRoleCode(
-    ruolo,
     cached.ruoloCod ?? cached.ruolo_cod,
-    cached.ruoloLabel,
     isAdmin,
   );
-  let ruoloLabel = ruoloCod || String(cached.ruoloLabel || "");
+  const ruoloLabel = ruoloCod || (isAdmin ? "ADMIN" : "");
 
-  // Non forziamo più 'AMM': il ruolo workflow resta quello reale.
-  // Se è un admin (org_admin o workflow admin) senza ruolo esplicito, mostriamo 'ADMIN'.
-  if ((!ruoloLabel || !ruoloLabel.trim()) && isAdmin) ruoloLabel = "ADMIN";
+  const rawAssignments = Array.isArray(cached.assignments) ? cached.assignments : [];
+  const assignments: GiiAssignment[] = rawAssignments.map((a: any) => {
+    const aArea = a?.area != null ? Number(a.area) : null;
+    const aSettore = a?.settore != null ? Number(a.settore) : null;
+    const aAreaCod = resolveAreaCode(aArea, a?.areaCod ?? a?.area_cod);
+    const aRuoloCod = resolveRoleCode(a?.ruoloCod ?? a?.ruolo_cod, false);
+    return {
+      ruoloCod: aRuoloCod, ruoloLabel: aRuoloCod,
+      ruoloFull: String(a?.ruoloFull || a?.profiloLabel || aRuoloCod),
+      profiloLabel: String(a?.profiloLabel || a?.ruoloFull || aRuoloCod),
+      area: aArea, areaCod: aAreaCod, areaFull: String(a?.areaFull || ""),
+      settore: aSettore, settoreCod: resolveSettoreCode(aSettore, a?.settoreCod ?? a?.settore_cod), settoreFull: String(a?.settoreFull || ""),
+      ufficio: a?.ufficio != null ? Number(a.ufficio) : null, ufficioLabel: String(a?.ufficioLabel || ""),
+      gruppo: String(a?.gruppo || ""),
+    };
+  });
+  if (!assignments.length) assignments.push({
+    ruoloCod, ruoloLabel, area, areaCod, settore, settoreCod,
+    ufficio: cached.ufficio != null ? Number(cached.ufficio) : null, gruppo
+  });
 
   return {
     username: String(cached.username),
-    ruolo,
-    ruoloCod: ruoloCod || ruoloLabel,
+    ruoloCod,
     ruoloLabel,
     area,
     areaCod,
@@ -2169,6 +2161,7 @@ function readGiiUserFromHeader(): GiiUserInfo | null {
     ufficio: cached.ufficio != null ? Number(cached.ufficio) : null,
     gruppo,
     isAdmin,
+    assignments,
   };
 }
 
@@ -2320,13 +2313,13 @@ function giiMoveNearestLayoutSidebarToX(
 function getStatoFieldForRuolo(ruoloLabel: string): string {
   const r = ruoloLabel.toUpperCase();
   if (r === "TR") return "stato_TR";
-  if (r === "TI") return "stato_TI";
-  if (r === "RZ") return "stato_RZ";
-  if (r === "RI") return "stato_RI";
+  if (r === "IT") return "stato_IT";
+  if (r === "CS") return "stato_CS";
+  if (r === "RIT") return "stato_RIT";
   if (r === "DT") return "stato_DT";
   if (r === "DA") return "determinazione_stato";
-  if (r === "RI_AMM") return "stato_RI_AMM";
-  if (r === "TI_AMM") return "stato_TI_AMM";
+  if (r === "RIA") return "stato_RIA";
+  if (r === "IA") return "stato_IA";
   return "stato_DT"; // fallback
 }
 
@@ -2579,40 +2572,45 @@ export default function Widget(props: Props) {
     };
   }, []);
 
-  // Vista runtime effettiva per la sessione corrente
-  const resolvedView = React.useMemo(
-    () => (giiUser ? pickRuntimeViewForUser(giiUser) : null),
-    [
-      giiUser?.username,
-      giiUser?.ruoloLabel,
-      giiUser?.area,
-      giiUser?.settore,
-      giiUser?.isAdmin,
-    ],
+  // Viste runtime effettive: una per ogni assegnazione, deduplicate per layer.
+  const resolvedViews = React.useMemo(() => {
+    if (!giiUser) return [] as RuntimeDsView[];
+    if (giiUser.isAdmin) {
+      const v = pickRuntimeViewForUser(giiUser);
+      return v ? [v] : [];
+    }
+    const uniq = new Map<string, RuntimeDsView>();
+    for (const a of giiUser.assignments || []) {
+      const v = pickGiiRuntimeView({ roleCode: a.ruoloCod, areaCode: a.areaCod, settoreCode: a.settoreCod });
+      if (v && !uniq.has(v.layerUrl)) uniq.set(v.layerUrl, v);
+    }
+    return Array.from(uniq.values());
+  }, [giiUser]);
+  const resolvedView = resolvedViews[0] || null; // compatibilità per i fallback non ancora migrati
+  const getRuntimeViewForLayer = React.useCallback(
+    (layerUrl?: string | null) => {
+      const key = String(layerUrl || "").trim().toLowerCase();
+      if (!key) return null;
+      return (
+        resolvedViews.find(
+          (v) => String(v.layerUrl || "").trim().toLowerCase() === key,
+        ) || null
+      );
+    },
+    [resolvedViews],
   );
 
-  const filteredUseDsJs: any[] = React.useMemo(() => {
-    if (!resolvedView) return [];
-    return [
-      {
-        dataSourceId: resolvedView.layerUrl,
-        mainDataSourceId: resolvedView.layerUrl,
-        rootDataSourceId: resolvedView.serviceUrl,
-        __label: resolvedView.viewName,
-      },
-    ];
-  }, [
-    resolvedView?.layerUrl,
-    resolvedView?.serviceUrl,
-    resolvedView?.viewName,
-  ]);
+  const filteredUseDsJs: any[] = React.useMemo(() =>
+    resolvedViews.map((v) => ({ dataSourceId: v.layerUrl, mainDataSourceId: v.layerUrl, rootDataSourceId: v.serviceUrl, __label: v.viewName })),
+    [resolvedViews],
+  );
 
   // Domini ufficiali AGOL del layer/vista runtime: fonte primaria per label Area/Settore.
   // I record continuano a determinare quali opzioni mostrare; i domini determinano come chiamarle.
   React.useEffect(() => {
     let cancelled = false;
-    const layerUrl = String(resolvedView?.layerUrl || "").trim();
-    if (!layerUrl) {
+    const layerUrls = resolvedViews.map(v => String(v.layerUrl || "").trim()).filter(Boolean);
+    if (!layerUrls.length) {
       setDomainLabels(EMPTY_DOMAIN_LABELS);
       return () => {
         cancelled = true;
@@ -2620,8 +2618,12 @@ export default function Widget(props: Props) {
     }
     (async () => {
       try {
-        const labels = await loadDomainLabelMaps(layerUrl);
-        if (!cancelled) setDomainLabels(labels);
+        const merged = cloneEmptyDomainLabels();
+        for (const layerUrl of layerUrls) {
+          const labels = await loadDomainLabelMaps(layerUrl);
+          for (const group of ["area", "settore", "ruolo"] as DomainLabelGroup[]) Object.assign(merged[group], labels[group]);
+        }
+        if (!cancelled) setDomainLabels(merged);
       } catch (ex) {
         console.warn(
           "[GII-Elenco] Domini AGOL non disponibili, uso fallback locale:",
@@ -2633,15 +2635,9 @@ export default function Widget(props: Props) {
     return () => {
       cancelled = true;
     };
-  }, [resolvedView?.layerUrl]);
+  }, [resolvedViews]);
 
-  const statoRuoloField = giiUser?.isAdmin
-    ? null
-    : giiUser?.ruoloLabel
-      ? getStatoFieldForRuolo(
-          getEffectiveRole(giiUser.ruoloLabel, giiUser.area),
-        )
-      : null;
+  const statoRuoloField = giiUser?.isAdmin ? null : ((giiUser?.assignments?.length || 0) > 0 ? "__multi__" : null);
 
   // ── Enrichment: GII_LOG_EVENTI_CICLI + GII_utenti (colonne virtuali Mittente/Causale/Data) ──
   const logMapRef = React.useRef<Map<string, LogEntry>>(new Map());
@@ -2705,110 +2701,65 @@ export default function Widget(props: Props) {
     return !!sa && !!sb && sa == sb;
   }, []);
 
+  const getAssignmentRole = React.useCallback((a: GiiAssignment): string =>
+    getEffectiveRole(a?.ruoloCod || "", a?.area), []);
+
+  const assignmentAppliesToRecord = React.useCallback((a: GiiAssignment, d: any): boolean => {
+    const role = getAssignmentRole(a);
+    if (!role) return false;
+    if (role === "DA" || role === "RIA" || role === "IA") return isInFaseSanzionatoria(d);
+    const recArea = getAreaCodeFromRecord(d);
+    if (a.areaCod && recArea && a.areaCod !== recArea) return false;
+    if (role === "IT" || role === "CS") {
+      const recSettore = getSettoreCodeFromRecord(d);
+      if (a.settoreCod && recSettore && a.settoreCod !== recSettore) return false;
+    }
+    return true;
+  }, [getAssignmentRole]);
+
+  const isVisibleUnderAssignment = React.useCallback((a: GiiAssignment, d: any): boolean => {
+    if (!assignmentAppliesToRecord(a, d)) return false;
+    const role = getAssignmentRole(a);
+    if (role === "IA") return isPracticeAssignedToCurrentIa(d, { ...(giiUser as any), ruoloCod: a.ruoloCod, area: a.area, areaCod: a.areaCod, settore: a.settore, settoreCod: a.settoreCod, ufficio: a.ufficio } as any);
+    if (role !== "IT") return true;
+
+    const meUser = String(giiUser?.username || "").trim();
+    const meName = String((giiUser as any)?.fullName ?? (giiUser as any)?.nome ?? (giiUser as any)?.displayName ?? "").trim();
+    const opRaw = d["origine_pratica"];
+    const opNum = opRaw !== null && opRaw !== undefined && opRaw !== "" ? Number(opRaw) : null;
+    const tiUser = String(d["it_assegnato_username"] ?? "").trim();
+    const tiName = String(d["it_assegnato_nome"] ?? "").trim();
+    const assignedToMe = equalsUser(tiUser, meUser) || equalsUser(tiName, meUser) || (meName ? equalsUser(tiName, meName) : false);
+    const creatorVals = [d["created_user"], d["Creator"], d["creator"], d["username"], d["user_name"], d["utente"], d["utente_ins"], d["created_by"], d["submitter"], d["owner"]];
+    const createdByMe = creatorVals.some((v) => equalsUser(v, meUser) || (meName ? equalsUser(v, meName) : false));
+    const hasTiWorkflow = hasRuoloData(d, "IT");
+    if (opNum === 1) {
+      if (!tiUser && !tiName && !hasTiWorkflow) return false;
+      if (tiUser || tiName) return assignedToMe;
+      return false;
+    }
+    if (opNum === 2) {
+      if (tiUser || tiName) return assignedToMe;
+      if (createdByMe) return true;
+      return hasTiWorkflow;
+    }
+    return true;
+  }, [assignmentAppliesToRecord, getAssignmentRole, giiUser, equalsUser]);
+
+  const getVisibleAssignmentsForRecord = React.useCallback((d: any): GiiAssignment[] => {
+    if (!giiUser || giiUser.isAdmin) return [];
+    return (giiUser.assignments || []).filter((a) => isVisibleUnderAssignment(a, d));
+  }, [giiUser, isVisibleUnderAssignment]);
+
   const isRecordVisibleForCurrentUser = React.useCallback(
     (r: DataRecord): boolean => {
       if (giiUser?.isAdmin) return true;
-      const role = getEffectiveRole(giiUser?.ruoloLabel || "", giiUser?.area);
-      if (!role) return true;
-
       const d: any = r.getData?.() || {};
-
-      // Rapporti archiviati (GII_arch = 1) non visibili negli elenchi ordinari
       const archVal = d["GII_arch"] ?? d["gii_arch"] ?? d["GII_ARCH"];
-      if (
-        archVal !== null &&
-        archVal !== undefined &&
-        archVal !== "" &&
-        Number(archVal) === 1
-      )
-        return false;
-
-      // DA e ruoli AMM (RI AMM, TI AMM): vedono solo i Rapporti entrati in fase sanzionatoria.
-      // area=1 → AMM
-      const areaNum = giiUser?.area ?? null;
-      const isAmmArea = areaNum === 1;
-      // DA, RI_AMM, TI_AMM: vedono solo i Rapporti entrati in fase sanzionatoria.
-      if (
-        role === "DA" ||
-        role === "RI_AMM" ||
-        role === "TI_AMM" ||
-        (isAmmArea && (role === "RI" || role === "TI"))
-      ) {
-        if (!isInFaseSanzionatoria(d)) return false;
-        // TI_AMM: vede solo le pratiche a lui assegnate (come TI vede solo le sue)
-        if (role === "TI_AMM") {
-          return isPracticeAssignedToCurrentTiAmm(d, giiUser as any);
-        }
-        return true;
-      }
-
-      if (role === "TI") {
-        const meUser = String(giiUser?.username || "").trim();
-        const meName = String(
-          (giiUser as any)?.fullName ??
-            (giiUser as any)?.nome ??
-            (giiUser as any)?.displayName ??
-            "",
-        ).trim();
-        const opRaw = d["origine_pratica"];
-        const opNum =
-          opRaw !== null && opRaw !== undefined && opRaw !== ""
-            ? Number(opRaw)
-            : null;
-
-        const tiUser = String(
-          d["ti_assegnato_username"] ??
-            d["ti_assegnato_user"] ??
-            d["ti_assegnato"] ??
-            "",
-        ).trim();
-        const tiName = String(
-          d["ti_assegnato_nome"] ?? d["ti_assegnato_name"] ?? "",
-        ).trim();
-        const assignedToMe =
-          equalsUser(tiUser, meUser) ||
-          equalsUser(tiName, meUser) ||
-          (meName ? equalsUser(tiName, meName) : false);
-
-        const creatorVals = [
-          d["created_user"],
-          d["Creator"],
-          d["creator"],
-          d["username"],
-          d["user_name"],
-          d["utente"],
-          d["utente_ins"],
-          d["created_by"],
-          d["submitter"],
-          d["owner"],
-        ];
-        const createdByMe = creatorVals.some(
-          (v) =>
-            equalsUser(v, meUser) || (meName ? equalsUser(v, meName) : false),
-        );
-
-        const hasTiWorkflow = hasRuoloData(d, "TI");
-
-        // Origine TR: i TI non devono vedere la pratica finché RZ non assegna.
-        // E dopo l'assegnazione la vede solo il TI assegnatario.
-        if (opNum === 1) {
-          if (!tiUser && !tiName && !hasTiWorkflow) return false;
-          if (tiUser || tiName) return assignedToMe;
-          return false;
-        }
-
-        // Origine TI: la vede il TI originatore; se poi viene esplicitamente assegnata,
-        // prevale comunque l'assegnazione nominativa.
-        if (opNum === 2) {
-          if (tiUser || tiName) return assignedToMe;
-          if (createdByMe) return true;
-          return hasTiWorkflow;
-        }
-      }
-
-      return true;
+      if (archVal !== null && archVal !== undefined && archVal !== "" && Number(archVal) === 1) return false;
+      return getVisibleAssignmentsForRecord(d).length > 0;
     },
-    [giiUser, equalsUser],
+    [giiUser, getVisibleAssignmentsForRecord],
   );
 
   const filterByRoleTab = React.useCallback(
@@ -2858,9 +2809,9 @@ export default function Widget(props: Props) {
 
   // ── Un solo tab effettivo per sessione: la vista runtime scelta dal contesto utente ──
   const tabGroups = React.useMemo(() => {
-    if (!resolvedView) return [] as { label: string; dsIndices: number[] }[];
-    return [{ label: resolvedView.viewName, dsIndices: [0] }];
-  }, [resolvedView?.viewName]);
+    if (!resolvedViews.length) return [] as { label: string; dsIndices: number[] }[];
+    return [{ label: "Tutte le assegnazioni", dsIndices: resolvedViews.map((_, i) => i) }];
+  }, [resolvedViews]);
 
   const hasTabs = false;
   const [activeTab, setActiveTab] = React.useState<number>(0);
@@ -2881,7 +2832,7 @@ export default function Widget(props: Props) {
   const [dsDataVer, setDsDataVer] = React.useState(0);
   // Incrementato solo dopo il reset completo del contesto utente. In questo
   // modo il caricamento riparte nel render successivo anche quando due ruoli
-  // usano la stessa vista runtime (es. TI_D1 e RZ_D1), senza sovrapporsi al reset.
+  // usano la stessa vista runtime (es. TI_D1 e CS_D1), senza sovrapporsi al reset.
   const [accountDataEpoch, setAccountDataEpoch] = React.useState(0);
 
   React.useEffect(() => {
@@ -2890,17 +2841,13 @@ export default function Widget(props: Props) {
     if (cur === prev) return;
     prevUserRef.current = cur;
 
-    const nextKey = resolvedView?.layerUrl || "__none__";
-    const nextIsLoading = !!cur && !!resolvedView;
+    const nextIsLoading = !!cur && resolvedViews.length > 0;
 
     runtimeRecordsRef.current = [];
-    dsDataRef.current = {
-      [nextKey]: {
-        recs: [],
-        ds: null as any,
-        loading: nextIsLoading,
-      },
-    };
+    dsDataRef.current = {};
+    if (resolvedViews.length) {
+      for (const v of resolvedViews) dsDataRef.current[v.layerUrl] = { recs: [], ds: null as any, loading: nextIsLoading };
+    } else dsDataRef.current["__none__"] = { recs: [], ds: null as any, loading: false };
 
     // Record, proxy e FeatureLayer caricati prima del cambio account non devono
     // sopravvivere alla nuova identità, anche se la URL della vista resta uguale.
@@ -2921,7 +2868,7 @@ export default function Widget(props: Props) {
     setLogVer((v) => v + 1);
     setAccountDataEpoch((v) => v + 1);
     notifySelectionCleared();
-  }, [giiUser?.username, resolvedView?.layerUrl]);
+  }, [giiUser?.username, resolvedViews]);
 
   const whereClause = txt(cfg.whereClause || "1=1");
   const pageSize = num(cfg.pageSize, 200);
@@ -2939,7 +2886,7 @@ export default function Widget(props: Props) {
         preserveSelectionRefreshUntilRef.current = Date.now() + 10000;
       }
       // Forza anche il ricaricamento del LOG: il set dei GlobalID puo' restare
-      // identico dopo un'azione (es. RZ assegna a TI), ma l'ultimo evento cambia.
+      // identico dopo un'azione (es. CS assegna a IT), ma l'ultimo evento cambia.
       // Senza azzerare questa firma l'elenco continua a mostrare l'oggetto vecchio
       // fino al refresh manuale della pagina/lista.
       lastLogGidSigRef.current = "";
@@ -3005,77 +2952,39 @@ export default function Widget(props: Props) {
   React.useEffect(() => {
     let cancelled = false;
     const load = async () => {
-      const key = resolvedView?.layerUrl || "__none__";
       const loadUsername = giiUser?.username || "";
-      if (!resolvedView || !isReady) {
+      if (!resolvedViews.length || !isReady) {
         runtimeRecordsRef.current = [];
-        dsDataRef.current[key] = { recs: [], ds: null as any, loading: false };
-        setDsDataVer((v) => v + 1);
+        if (!cancelled) setDsDataVer((v) => v + 1);
         return;
       }
-
-      dsDataRef.current[key] = { recs: [], ds: null as any, loading: true };
-      // La query runtime e il LOG devono avanzare insieme: durante la
-      // rilettura del Feature Layer non va riutilizzato il LOG dello stato
-      // precedente, altrimenti la pratica puo' comparire per un frame nella
-      // scheda operativa sbagliata prima della nuova query LOG.
       logLoadedRef.current = false;
+      for (const v of resolvedViews) dsDataRef.current[v.layerUrl] = { recs: [], ds: null as any, loading: true };
       setDsDataVer((v) => v + 1);
-
-      try {
-        const proxy = await createRuntimeFeatureLayerProxy(
-          resolvedView,
-          runtimeRecordsRef as any,
-        );
-        const res: any = await proxy.query({
-          where: whereClause,
-          outFields: ["*"],
-          returnGeometry: false,
-          pageSize,
-        });
-        if (cancelled || prevUserRef.current !== loadUsername) return;
-        const recs: DataRecord[] = (res?.records || []) as DataRecord[];
-        dsDataRef.current[key] = { recs, ds: proxy, loading: false };
-        // Se sono arrivati record, la classificazione per ruolo resta sospesa
-        // fino al completamento della query su GII_LOG_EVENTI_CICLI relativa a
-        // quei record. Se invece non ci sono record, il caricamento log puo'
-        // considerarsi concluso e i contatori restano a zero senza flicker.
-        const loadedGids = recs
-          .map((r) => {
-            const d: any = r.getData?.() || {};
-            return d.GlobalID ?? d.globalid ?? d.globalId ?? d.GLOBALID;
-          })
-          .filter((gid) => !!gid)
-          .map((gid) => normGid(gid));
-        const nextLogSig = `${loadedGids.sort().join(",")}::${listRefreshNonce}`;
-        logLoadedRef.current = !loadedGids.length || nextLogSig === lastLogGidSigRef.current;
-        setLastListRefreshAt(Date.now());
+      await Promise.all(resolvedViews.map(async (view) => {
         try {
-          const w = window as any;
-          w.__giiRuntimeDsProxyCache = w.__giiRuntimeDsProxyCache || {};
-          w.__giiRuntimeDsProxyCache[resolvedView.layerUrl] = proxy;
-        } catch {}
-      } catch {
-        if (cancelled || prevUserRef.current !== loadUsername) return;
-        dsDataRef.current[key] = { recs: [], ds: null as any, loading: false };
-        logLoadedRef.current = true;
-        setLastListRefreshAt(Date.now());
-      }
-      if (!cancelled) setDsDataVer((v) => v + 1);
+          const recordsHolder = { current: [] as DataRecord[] };
+          const proxy = await createRuntimeFeatureLayerProxy(view, recordsHolder);
+          const res: any = await proxy.query({ where: whereClause, outFields: ["*"], returnGeometry: false, pageSize });
+          if (cancelled || prevUserRef.current !== loadUsername) return;
+          const recs = (res?.records || []) as DataRecord[];
+          dsDataRef.current[view.layerUrl] = { recs, ds: proxy, loading: false };
+          try { const w = window as any; w.__giiRuntimeDsProxyCache = w.__giiRuntimeDsProxyCache || {}; w.__giiRuntimeDsProxyCache[view.layerUrl] = proxy; } catch {}
+        } catch {
+          if (!cancelled) dsDataRef.current[view.layerUrl] = { recs: [], ds: null as any, loading: false };
+        }
+      }));
+      if (cancelled || prevUserRef.current !== loadUsername) return;
+      const gids: string[] = [];
+      for (const e of Object.values(dsDataRef.current) as Array<{ recs: DataRecord[] }>) for (const r of e.recs || []) { const d:any=r.getData?.()||{}; const gid=d.GlobalID??d.globalid??d.globalId??d.GLOBALID; if(gid) gids.push(normGid(gid)); }
+      const nextLogSig = `${Array.from(new Set(gids)).sort().join(",")}::${listRefreshNonce}`;
+      logLoadedRef.current = !gids.length || nextLogSig === lastLogGidSigRef.current;
+      setLastListRefreshAt(Date.now());
+      setDsDataVer((v) => v + 1);
     };
     load();
-    return () => {
-      cancelled = true;
-    };
-  }, [
-    resolvedView?.layerUrl,
-    resolvedView?.viewName,
-    isReady,
-    whereClause,
-    pageSize,
-    listRefreshNonce,
-    accountDataEpoch,
-  ]);
+    return () => { cancelled = true; };
+  }, [resolvedViews, isReady, whereClause, pageSize, listRefreshNonce, accountDataEpoch]);
 
   // ── Enrichment: carica GII_LOG_EVENTI_CICLI + GII_utenti ──
 
@@ -3107,27 +3016,17 @@ export default function Widget(props: Props) {
               cleanNomeCognome(pickField(a, "full_name")) ||
               cleanNomeCognome(pickField(a, "nome_cognome")) ||
               cleanNomeCognome(pickField(a, "nominativo"));
-            map.set(username.toLowerCase(), {
-              username,
-              full_name: fullName,
-              nome,
-              cognome,
-              ruolo: pickField(a, "ruolo") ?? null,
-              ruoloCod: resolveRoleCode(
-                pickField(a, "ruolo") ?? null,
-                pickField(a, "ruolo_cod"),
-              ),
+            const entry: UtentiEntry = {
+              username, full_name: fullName, nome, cognome,
+              ruoloCod: resolveRoleCode(pickField(a, "ruolo_cod")),
               area: pickField(a, "area") ?? null,
-              areaCod: resolveAreaCode(
-                pickField(a, "area") ?? null,
-                pickField(a, "area_cod"),
-              ),
+              areaCod: resolveAreaCode(pickField(a, "area") ?? null, pickField(a, "area_cod")),
               settore: pickField(a, "settore") ?? null,
-              settoreCod: resolveSettoreCode(
-                pickField(a, "settore") ?? null,
-                pickField(a, "settore_cod"),
-              ),
-            });
+              settoreCod: resolveSettoreCode(pickField(a, "settore") ?? null, pickField(a, "settore_cod")),
+            };
+            const baseKey = username.toLowerCase();
+            if (!map.has(baseKey)) map.set(baseKey, entry);
+            map.set(`${baseKey}::${map.size}`, entry);
           }
         }
         _utentiMapCache = map;
@@ -3304,6 +3203,15 @@ export default function Widget(props: Props) {
   }, [cfg.orderByField, cfg.orderByDir]);
 
   const [sortState, setSortState] = React.useState<SortItem[]>(defaultSort);
+  const showOperationalRole = !giiUser?.isAdmin && (giiUser?.assignments?.length || 0) > 1;
+
+  React.useEffect(() => {
+    if (showOperationalRole) return;
+    setSortState((prev) => {
+      const next = prev.filter((item) => item.field !== V_RUOLO_OPERATIVO);
+      return next.length === prev.length ? prev : (next.length ? next : defaultSort);
+    });
+  }, [showOperationalRole, defaultSort]);
 
   // ── Filtri integrati nell'elenco ─────────────────────────────────────────────
   const [searchFilter, setSearchFilter] = React.useState("");
@@ -3330,10 +3238,7 @@ export default function Widget(props: Props) {
   const fieldUfficio = txt(cfg.fieldUfficio || "ufficio_zona");
 
   // Nota: per DT/DA la presa in carico è derivata da stato_* e dt_presa_in_carico_*.
-  // I vecchi campi presa_in_carico_DT/DA non sono più usati.
 
-  const presaDaPrendere = num(cfg.presaDaPrendereVal, 1);
-  const presaPresa = num(cfg.presaPresaVal, 2);
 
   const statoDaPrendere = num(cfg.statoDaPrendereVal, 1);
   const statoPresa = num(cfg.statoPresaVal, 2);
@@ -3463,17 +3368,17 @@ export default function Widget(props: Props) {
   const getOggettoLegendDescription = (oggetto: string): string => {
     const o = normalizeOggettoLabel(oggetto);
     if (o === "NUOVA RILEVAZIONE")
-      return "Il colore identifica una nuova rilevazione, creata dal Tecnico istruttore o inviata dal Tecnico rilevatore, non ancora trasformata in rapporto tecnico ufficiale.";
+      return "Il colore identifica una nuova rilevazione, creata dall’Istruttore tecnico o inviata dal Tecnico rilevatore, non ancora trasformata in rapporto tecnico ufficiale.";
     if (o === "ASSEGNAZIONE ISTRUTTORIA")
-      return "Il colore identifica l’assegnazione della pratica al Tecnico istruttore incaricato della compilazione.";
+      return "Il colore identifica l’assegnazione della pratica all’Istruttore tecnico incaricato della compilazione.";
     if (o === "TRASMISSIONE ISTRUTTORIA")
       return "Il colore identifica la trasmissione dell’istruttoria al ruolo successivo del procedimento.";
     if (o === "TRASMISSIONE BOZZA DETERMINAZIONE" || o === "TRASMISSIONE PRATICA CON BOZZA DETERMINAZIONE")
       return "Il colore identifica la trasmissione della pratica, contenente la bozza di determinazione, al Responsabile dell’istruttoria amministrativa per la verifica.";
     if (o === "ATTESTAZIONE DI CONFORMITÀ")
-      return "Il colore identifica l’apposizione del visto di conformità da parte del Tecnico istruttore amministrativo e la trasmissione della pratica al Responsabile dell’istruttoria amministrativa.";
+      return "Il colore identifica l’apposizione del visto di conformità da parte del Istruttore amministrativo e la trasmissione della pratica al Responsabile dell’istruttoria amministrativa.";
     if (o === "ISTRUTTORIA AMMINISTRATIVA APPROVATA")
-      return "Il colore identifica l’approvazione dell’istruttoria amministrativa da parte del Responsabile dell’istruttoria amministrativa e la restituzione della pratica al Tecnico istruttore amministrativo per protocollazione e predisposizione della bozza di determinazione.";
+      return "Il colore identifica l’approvazione dell’istruttoria amministrativa da parte del Responsabile dell’istruttoria amministrativa e la restituzione della pratica all’Istruttore amministrativo per protocollazione e predisposizione della bozza di determinazione.";
     if (o === "RICHIESTA DI INTEGRAZIONE")
       return "Il colore identifica una richiesta di integrazione rivolta al ruolo che deve completare o correggere la pratica.";
     if (o === "TRASMISSIONE INTEGRAZIONE")
@@ -3541,8 +3446,8 @@ export default function Widget(props: Props) {
   // Verifica se un ruolo ha dati workflow realmente attivi.
   // Attenzione: nei campi stato_* il valore 0 significa "Non attivo" e non deve
   // far considerare quel ruolo come nodo corrente. Questo era il motivo per cui,
-  // dopo la presa in carico di RI_AMM, un vecchio stato_TI_AMM = 0 veniva comunque
-  // letto come presenza del nodo TI_AMM e mostrava "In attesa di istruttoria".
+  // dopo la presa in carico di RIA, un vecchio stato_IA = 0 veniva comunque
+  // letto come presenza del nodo IA e mostrava "In attesa di istruttoria".
   const hasWorkflowValue = (v: any): boolean => {
     if (v === null || v === undefined || v === "") return false;
     if (v === 0 || v === "0") return false;
@@ -3550,32 +3455,25 @@ export default function Widget(props: Props) {
   };
 
   const hasRuoloData = (d: any, role: string): boolean => {
-    const p = d[`presa_in_carico_${role}`];
     const s = d[`stato_${role}`];
+    if (['CS', 'IT', 'RIT'].includes(String(role || '').toUpperCase())) return hasWorkflowValue(s);
     const e = d[`esito_${role}`];
-    return hasWorkflowValue(p) || hasWorkflowValue(s) || hasWorkflowValue(e);
+    return hasWorkflowValue(s) || hasWorkflowValue(e);
   };
 
   const hasTransmissionProgressWithoutLog = (d: any): boolean => {
     const fields = [
-      "ti_assegnato_username",
-      "ti_assegnato_user",
-      "ti_assegnato",
-      "ti_amm_assegnato_username",
-      "ti_amm_assegnato_user",
-      "ti_amm_assegnato",
-      "esito_TI",
-      "esito_RZ",
-      "esito_RI",
+      "it_assegnato_username",
+      "ia_assegnato_username",
+      "stato_RIT",
       "esito_DT",
-      "esito_RI_AMM",
-      "esito_TI_AMM",
+      "esito_RIA",
+      "esito_IA",
       "determinazione_numero",
-      "stato_TI",
-      "stato_RI",
+      "stato_IT",
       "stato_DT",
-      "stato_RI_AMM",
-      "stato_TI_AMM",
+      "stato_RIA",
+      "stato_IA",
       "determinazione_stato",
     ];
     return fields.some((f) => hasWorkflowValue(pickField(d, f)));
@@ -3594,50 +3492,45 @@ export default function Widget(props: Props) {
     const vals = [
       parseToMs(d[`dt_presa_in_carico_${role}`]),
       parseToMs(d[`dt_stato_${role}`]),
-      parseToMs(d[`dt_esito_${role}`]),
+      ...(['IT', 'CS', 'RIT'].includes(String(role || '').toUpperCase()) ? [] : [parseToMs(d[`dt_esito_${role}`])]),
     ].filter((v): v is number => v !== null);
     return vals.length ? Math.max(...vals) : null;
   };
 
   // ── Determina se il Rapporto è entrato in fase sanzionatoria ─────────────
-  // Indicatore: DT ha approvato e rimandato a RI (esito_DT = ESITO_APPROVATA),
+  // Indicatore: DT ha approvato e trasmesso alla fase amministrativa (esito_DT = ESITO_APPROVATA),
   // oppure il DA ha già ricevuto il verbale.
   // NB: questo threshold è l'unico rilevabile in modo affidabile nel modello dati
-  // corrente, dove RI_AMM e TI_AMM condividono i campi nominali con RI e TI.
+  // corrente; RIA è un ruolo autonomo dell’area amministrativa.
   const isInFaseSanzionatoria = (d: any): boolean => {
     const meaningful = (v: any) =>
       v !== null && v !== undefined && v !== "" && v !== 0 && v !== "0";
     // Fase sanzionatoria = qualsiasi campo AMM valorizzato
     return (
-      meaningful(d["stato_RI_AMM"]) ||
-      meaningful(d["esito_RI_AMM"]) ||
-      meaningful(d["stato_TI_AMM"]) ||
-      meaningful(d["esito_TI_AMM"]) ||
+      meaningful(d["stato_RIA"]) ||
+      meaningful(d["esito_RIA"]) ||
+      meaningful(d["stato_IA"]) ||
+      meaningful(d["esito_IA"]) ||
       meaningful(d["determinazione_stato"]) ||
       meaningful(d["determinazione_numero"])
     );
   };
 
-  const isBozzaDeterminazioneTrasmessaRiAmm = (d: any): boolean => {
+  const isBozzaDeterminazioneTrasmessaRia = (d: any): boolean => {
     const stato = String(pickField(d, "determinazione_stato") ?? "")
       .trim()
       .toUpperCase();
-    if (stato === "TRASMESSA_RI_AMM" || stato === "BOZZA_TRASMESSA_RI_AMM") return true;
+    if (stato === "TRASMESSA_RIA" || stato === "BOZZA_TRASMESSA_RIA") return true;
 
     // Fallback necessario per le viste elenco che non espongono determinazione_stato:
-    // dopo "Trasmetti bozza al Responsabile" il record porta comunque lo stato
-    // operativo RI_AMM a 1/2 e chiude il nodo TI_AMM. Il solo visto di conformità,
-    // invece, lascia RI_AMM a 4/null e non deve aprire l'attesa del Responsabile.
-    const statoRiAmm = readRoleNumber(d, "RI_AMM", "stato");
-    const presaRiAmm = readRoleNumber(d, "RI_AMM", "presa");
-    const statoTiAmm = readRoleNumber(d, "TI_AMM", "stato");
-    const esitoTiAmm = readRoleNumber(d, "TI_AMM", "esito");
-    const riAmmOpen =
-      statoRiAmm === statoDaPrendere ||
-      statoRiAmm === statoPresa ||
-      presaRiAmm === presaDaPrendere ||
-      presaRiAmm === presaPresa;
-    return !!riAmmOpen && esitoTiAmm === esitoApprovata && statoTiAmm === statoApprovata;
+    // dopo "Trasmetti bozza al Responsabile" il record porta comunque stato_RIA
+    // a 1/2 e chiude il nodo IA. Il solo visto di conformità lascia invece RIA
+    // a 4/null e non deve aprire l'attesa del Responsabile.
+    const statoRia = readRoleNumber(d, "RIA", "stato");
+    const statoIa = readRoleNumber(d, "IA", "stato");
+    const esitoIa = readRoleNumber(d, "IA", "esito");
+    const riaOpen = statoRia === statoDaPrendere || statoRia === statoPresa;
+    return !!riaOpen && esitoIa === esitoApprovata && statoIa === statoApprovata;
   };
 
   const isDeterminazioneAdottata = (d: any): boolean => {
@@ -3652,64 +3545,56 @@ export default function Widget(props: Props) {
     return hasVal(numDet) && hasVal(dataDet);
   };
 
-  const isTiAmmAwaitingRetakeFromRiAmm = (d: any): boolean => {
+  const isIaAwaitingRetakeFromRia = (d: any): boolean => {
     if (!d || isDeterminazioneAdottata(d)) return false;
 
-    // esito/stato_RI_AMM = Integrazione è ambiguo: RI_AMM ha due percorsi
+    // esito/stato_RIA = Integrazione è ambiguo: RIA ha due percorsi
     // distinti di richiesta integrazione che scrivono lo stesso valore
-    // (amministrativo verso il TI_AMM assegnato; tecnico verso il RI
+    // (amministrativo verso il IA assegnato; tecnico verso il RIT
     // dell'area di provenienza). La destinazione reale non è deducibile dal
     // solo record: va letta dal LOG, che registra esplicitamente il
     // destinatario di ogni trasmissione chiusa.
     const log = getLogForRecord(d);
-    const riAmmSentToTiAmm =
-      normalizeWorkflowRole(log?.ruolo) === "RI_AMM" &&
-      normalizeWorkflowRole(log?.ruoloDest) === "TI_AMM";
+    const riaSentToIa =
+      normalizeWorkflowRole(log?.ruolo) === "RIA" &&
+      normalizeWorkflowRole(log?.ruoloDest) === "IA";
 
-    const esitoRiAmm = readRoleNumber(d, "RI_AMM", "esito");
-    const statoRiAmm = readRoleNumber(d, "RI_AMM", "stato");
-    // L'approvazione di RI_AMM non è ambigua: sblocca sempre la trasmissione
-    // del fascicolo al protocollo da parte di TI_AMM.
-    const riAmmApproved =
-      esitoRiAmm === esitoApprovata || statoRiAmm === statoApprovata;
+    const esitoRia = readRoleNumber(d, "RIA", "esito");
+    const statoRia = readRoleNumber(d, "RIA", "stato");
+    // L'approvazione di RIA non è ambigua: sblocca sempre la trasmissione
+    // del fascicolo al protocollo da parte di IA.
+    const riaApproved =
+      esitoRia === esitoApprovata || statoRia === statoApprovata;
 
-    const riAmmReturnedToTiAmm = riAmmApproved || riAmmSentToTiAmm;
-    if (!riAmmReturnedToTiAmm) return false;
+    const riaReturnedToIa = riaApproved || riaSentToIa;
+    if (!riaReturnedToIa) return false;
 
-    const riAmmTimes = [
-      parseToMs(pickField(d, "dt_esito_RI_AMM")),
-      parseToMs(pickField(d, "dt_stato_RI_AMM")),
+    const riaTimes = [
+      parseToMs(pickField(d, "dt_esito_RIA")),
+      parseToMs(pickField(d, "dt_stato_RIA")),
     ].filter((v): v is number => v !== null);
-    if (!riAmmTimes.length) return false;
+    if (!riaTimes.length) return false;
 
-    const lastRiAmmMs = Math.max(...riAmmTimes);
-    const tiAmmPresaMs = parseToMs(pickField(d, "dt_presa_in_carico_TI_AMM"));
-    return tiAmmPresaMs === null || tiAmmPresaMs < lastRiAmmMs;
+    const lastRiaMs = Math.max(...riaTimes);
+    const iaPresaMs = parseToMs(pickField(d, "dt_presa_in_carico_IA"));
+    return iaPresaMs === null || iaPresaMs < lastRiaMs;
   };
 
   const getBozzaDeterminazioneTrasmissionDisplay = (d: any) => {
-    const tiAmmUser = String(
+    const iaUser = String(
       pickField(d, "bozza_determinazione_da") ??
-      pickField(d, "ti_amm_assegnato_username") ??
-      pickField(d, "ti_amm_assegnato_user") ??
-      pickField(d, "ti_amm_assegnato") ??
+      pickField(d, "ia_assegnato_username") ??
       "",
     ).trim();
-    const riAmmUser = String(
-      pickField(d, "ri_amm_assegnato_username") ??
-      pickField(d, "RI_AMM_assegnato_username") ??
-      pickField(d, "ri_amm_username") ??
-      pickField(d, "RI_AMM_username") ??
-      "",
-    ).trim();
+    const riaUser = "";
     const dt =
-      parseToMs(pickField(d, "dt_stato_RI_AMM")) ??
-      parseToMs(pickField(d, "dt_stato_TI_AMM")) ??
+      parseToMs(pickField(d, "dt_stato_RIA")) ??
+      parseToMs(pickField(d, "dt_stato_IA")) ??
       parseToMs(pickField(d, "dt_bozza_determinazione")) ??
       computeUltimoAggMs(d);
     return {
-      mittente: formatPersona("TI_AMM", "AMM", "CR", tiAmmUser, utentiMapRef.current),
-      destinatario: formatPersonaDest("RI_AMM", "AMM", "CR", riAmmUser, utentiMapRef.current),
+      mittente: formatPersona("IA", "AMM", "CR", iaUser, utentiMapRef.current),
+      destinatario: formatPersonaDest("RIA", "AMM", "CR", riaUser, utentiMapRef.current),
       causale: "TRASMISSIONE PRATICA CON BOZZA DETERMINAZIONE",
       dataMs: dt,
       data: dt ? formatDateIt(dt) : "—",
@@ -3720,7 +3605,7 @@ export default function Widget(props: Props) {
     // La fase deve rappresentare il nodo operativo CORRENTE, non il punto piu' avanzato
     // raggiunto storicamente dalla pratica. Quindi, se un rapporto gia' passato dalla
     // fase amministrativa viene rimandato all'area tecnica, deve tornare a risultare
-    // in fase Tecnica finche' e' in carico a TI/RZ/RI/DT AGR/TEC.
+    // in fase Tecnica finche' e' in carico a IT/CS/RIT/DT AGR/TEC.
     const log = getLogForRecord(d);
     const destRole = normalizeWorkflowRole(log?.ruoloDest);
     if (destRole) {
@@ -3736,8 +3621,8 @@ export default function Widget(props: Props) {
       );
 
       if (
-        destRole === "TI_AMM" ||
-        destRole === "RI_AMM" ||
+        destRole === "IA" ||
+        destRole === "RIA" ||
         destRole === "DA" ||
         destArea === "AMM"
       ) {
@@ -3745,9 +3630,9 @@ export default function Widget(props: Props) {
       }
       if (
         destRole === "TR" ||
-        destRole === "TI" ||
-        destRole === "RZ" ||
-        destRole === "RI" ||
+        destRole === "IT" ||
+        destRole === "CS" ||
+        destRole === "RIT" ||
         destRole === "DT"
       ) {
         return "Tecnica";
@@ -3755,31 +3640,31 @@ export default function Widget(props: Props) {
     }
 
     const currentRole = normalizeWorkflowRole(computeSintetico(d)?.ruolo);
-    return currentRole === "TI_AMM" ||
-      currentRole === "RI_AMM" ||
+    return currentRole === "IA" ||
+      currentRole === "RIA" ||
       currentRole === "DA"
       ? "Amministrativa"
       : "Tecnica";
   };
 
   // Destinatario di trasmissione positiva per ruolo — dipende dal contesto del record.
-  // DT approva e trasmette direttamente a RI_AMM; RI_AMM e TI_AMM si scambiano
+  // DT approva e trasmette direttamente a RIA; RIA e IA si scambiano
   // la pratica solo nei passaggi interni previsti. Il DA è consultivo e resta fuori
   // dal workflow interno del gestionale.
   const getFwdDest = (role: string, d: any): string => {
     switch (role) {
-      case "TI":
-        return "RZ";
-      case "RZ":
-        return "RI";
-      case "RI":
+      case "IT":
+        return "CS";
+      case "CS":
+        return "RIT";
+      case "RIT":
         return "DT";
       case "DT":
-        return "RI_AMM";
-      case "RI_AMM":
-        return isBozzaDeterminazioneTrasmessaRiAmm(d) ? "TI_AMM" : "";
-      case "TI_AMM":
-        return isBozzaDeterminazioneTrasmessaRiAmm(d) ? "RI_AMM" : "";
+        return "RIA";
+      case "RIA":
+        return isBozzaDeterminazioneTrasmessaRia(d) ? "IA" : "";
+      case "IA":
+        return isBozzaDeterminazioneTrasmessaRia(d) ? "RIA" : "";
       default:
         return "";
     }
@@ -3788,16 +3673,16 @@ export default function Widget(props: Props) {
   // Destinatario di richiesta integrazioni per ruolo
   const getIntegDest = (role: string): string => {
     switch (role) {
-      case "RZ":
-        return "TI";
-      case "RI":
-        return "TI";
+      case "CS":
+        return "IT";
+      case "RIT":
+        return "IT";
       case "DT":
-        return "RI";
-      case "RI_AMM":
-        return "RI";
-      case "TI_AMM":
-        return "RI_AMM";
+        return "RIT";
+      case "RIA":
+        return "RIT";
+      case "IA":
+        return "RIA";
       default:
         return "";
     }
@@ -3805,18 +3690,17 @@ export default function Widget(props: Props) {
 
   // Calcola lo stato storico di un ruolo specifico su questo record.
   // Restituisce null se il ruolo non ha ancora dati (non è ancora stato coinvolto).
+  const isStateOnlyWorkflowRole = (role: string): boolean =>
+    ["IT", "CS", "RIT"].includes(String(role || "").trim().toUpperCase());
+
   const computeStatoStorico = (
     d: any,
     ruolo: string,
   ): { label: string; statoForChip: number | null } | null => {
     if (!hasRuoloData(d, ruolo)) return null;
-    const presaRaw = d[`presa_in_carico_${ruolo}`];
+    const stateOnly = isStateOnlyWorkflowRole(ruolo);
     const statoRaw = d[`stato_${ruolo}`];
-    const esitoRaw = d[`esito_${ruolo}`];
-    const presaNum =
-      presaRaw !== null && presaRaw !== undefined && presaRaw !== ""
-        ? Number(presaRaw)
-        : null;
+    const esitoRaw = stateOnly ? null : d[`esito_${ruolo}`];
     const statoNum =
       statoRaw !== null && statoRaw !== undefined && statoRaw !== ""
         ? Number(statoRaw)
@@ -3832,7 +3716,7 @@ export default function Widget(props: Props) {
           return { label: "Trasmesso", statoForChip: statoApprovata };
         if (ruolo === "DA")
           return { label: "Trasmesso", statoForChip: statoApprovata };
-        if (ruolo === "TI_AMM" && !isBozzaDeterminazioneTrasmessaRiAmm(d)) {
+        if (ruolo === "IA" && !isBozzaDeterminazioneTrasmessaRia(d)) {
           return { label: "In carico", statoForChip: statoPresa };
         }
         const dest = getFwdDest(ruolo, d);
@@ -3867,67 +3751,42 @@ export default function Widget(props: Props) {
         return { label: "Respinto", statoForChip: statoRespinta };
       return { label: "—", statoForChip: null };
     }
-    if (presaNum !== null && Number.isFinite(presaNum)) {
-      if (presaNum === presaDaPrendere)
-        return { label: "Trasmesso", statoForChip: statoDaPrendere };
-      if (presaNum === presaPresa)
-        return { label: "In carico", statoForChip: statoPresa };
-    }
     return { label: "In carico", statoForChip: null };
   };
 
   const getTiIstruttoriaInfo = (d: any) => {
-    const tiUser = String(
-      d["ti_assegnato_username"] ??
-        d["ti_assegnato_user"] ??
-        d["ti_assegnato"] ??
-        "",
-    ).trim();
+    const tiUser = String(d["it_assegnato_username"] ?? "").trim();
     const higherTouched =
-      hasRuoloData(d, "RI") || hasRuoloData(d, "DT") || hasRuoloData(d, "DA");
+      hasRuoloData(d, "RIT") || hasRuoloData(d, "DT") || hasRuoloData(d, "DA");
 
-    const statoTiRaw = d["stato_TI"] ?? d["stato_ti"];
-    const presaTiRaw = d["presa_in_carico_TI"] ?? d["presa_in_carico_ti"];
-    const esitoTiRaw = d["esito_TI"] ?? d["esito_ti"];
-
+    const statoTiRaw = d["stato_IT"];
     const statoTiNum =
       statoTiRaw !== null && statoTiRaw !== undefined && statoTiRaw !== ""
         ? Number(statoTiRaw)
         : null;
-    const presaTiNum =
-      presaTiRaw !== null && presaTiRaw !== undefined && presaTiRaw !== ""
-        ? Number(presaTiRaw)
-        : null;
-    const esitoTiNum =
-      esitoTiRaw !== null && esitoTiRaw !== undefined && esitoTiRaw !== ""
-        ? Number(esitoTiRaw)
-        : null;
 
     const tiReturned =
-      (esitoTiNum !== null && Number.isFinite(esitoTiNum)) ||
       statoTiNum === statoApprovata ||
       statoTiNum === statoRespinta;
 
-    const tiLastTouchMs = getRoleLastTouchMs(d, "TI");
-    const rzLastTouchMs = getRoleLastTouchMs(d, "RZ");
-    const awaitingRetakeByRz =
+    const tiLastTouchMs = getRoleLastTouchMs(d, "IT");
+    const csLastTouchMs = getRoleLastTouchMs(d, "CS");
+    const awaitingRetakeByCs =
       !!tiUser &&
       tiReturned &&
       !higherTouched &&
       tiLastTouchMs !== null &&
-      (rzLastTouchMs === null || rzLastTouchMs <= tiLastTouchMs);
+      (csLastTouchMs === null || csLastTouchMs <= tiLastTouchMs);
 
     return {
       hasAssignedTi: !!tiUser,
       tiUser,
       higherTouched,
       statoTiNum,
-      presaTiNum,
-      esitoTiNum,
       tiReturned,
       tiLastTouchMs,
-      rzLastTouchMs,
-      awaitingRetakeByRz,
+      csLastTouchMs,
+      awaitingRetakeByCs,
       isInTiIstruttoria: !!tiUser && !higherTouched && !tiReturned,
     };
   };
@@ -3935,7 +3794,7 @@ export default function Widget(props: Props) {
   // ── computeSintetico: workflow-aware su tutti i ruoli ──────────────────────
   //
   // Logica:
-  //   - Scansiona i ruoli operativi dal più avanzato (TI_AMM) al meno avanzato (TR)
+  //   - Scansiona i ruoli operativi dal più avanzato (IA) al meno avanzato (TR)
   //   - Il primo ruolo con dati valorizzati è il "nodo corrente"
   //   - presa=1 (DA PRENDERE) → il Rapporto è stato trasmesso ma non ancora preso in carico
   //     → "Trasmesso a [ruolo]"  chip arancio
@@ -3943,65 +3802,52 @@ export default function Widget(props: Props) {
   //     → "Preso in carico [ruolo]"  chip verde
   //
   // Rapporti senza nessun campo workflow:
-  //   origine=1 (TR) → implicitamente trasmesso a RZ → "Da prendere in carico RZ"  chip arancio
-  //   origine=2 (TI) → TI l'ha creato, non ancora trasmesso → "Da trasmettere a RZ"  chip verde
+  //   origine=1 (TR) → implicitamente trasmesso a CS → "Da prendere in carico CS"  chip arancio
+  //   origine=2 (IT) → IT l'ha creato, non ancora trasmesso → "Da trasmettere a CS"  chip verde
 
   const computeSintetico = (
     d: any,
   ): { ruolo: string; label: string; statoForChip: number | null } => {
-    const bozzaTrasmessaRiAmm = isBozzaDeterminazioneTrasmessaRiAmm(d);
-    const statoRiAmm = readRoleNumber(d, "RI_AMM", "stato");
-    const presaRiAmm = readRoleNumber(d, "RI_AMM", "presa");
-    if (bozzaTrasmessaRiAmm && (statoRiAmm === null || statoRiAmm === statoDaPrendere || presaRiAmm === presaDaPrendere)) {
-      return { ruolo: "RI_AMM", label: "Da prendere in carico", statoForChip: statoDaPrendere };
+    const bozzaTrasmessaRia = isBozzaDeterminazioneTrasmessaRia(d);
+    const statoRia = readRoleNumber(d, "RIA", "stato");
+    if (bozzaTrasmessaRia && (statoRia === null || statoRia === statoDaPrendere)) {
+      return { ruolo: "RIA", label: "Da prendere in carico", statoForChip: statoDaPrendere };
     }
-    if (bozzaTrasmessaRiAmm && (statoRiAmm === statoPresa || presaRiAmm === presaPresa)) {
-      return { ruolo: "RI_AMM", label: "In carico", statoForChip: statoPresa };
+    if (bozzaTrasmessaRia && statoRia === statoPresa) {
+      return { ruolo: "RIA", label: "In carico", statoForChip: statoPresa };
     }
 
-    const scanOrder = ["TI_AMM", "RI_AMM", "DT", "RI", "RZ", "TI", "TR"];
+    const scanOrder = ["IA", "RIA", "DT", "RIT", "CS", "IT", "TR"];
 
-    // Caso speciale: assegnazione RZ -> TI.
-    // Finche' TI non "restituisce" la pratica, lo stato sintetico segue
-    // le voci del file xlsx sul tratto RZ -> TI.
+    // Caso speciale: assegnazione CS -> IT.
+    // Finche' IT non "restituisce" la pratica, lo stato sintetico segue
+    // le voci del file xlsx sul tratto CS -> IT.
     const tiInfo = getTiIstruttoriaInfo(d);
-    if (tiInfo.awaitingRetakeByRz) {
-      return { ruolo: "RZ", label: "Trasmesso", statoForChip: statoDaPrendere };
+    if (tiInfo.awaitingRetakeByCs) {
+      return { ruolo: "CS", label: "Trasmesso", statoForChip: statoDaPrendere };
     }
     if (tiInfo.hasAssignedTi && tiInfo.isInTiIstruttoria) {
-      // TI origine=2 che non ha ancora trasmesso a RZ → "Da trasmettere"
+      // IT origine=2 che non ha ancora trasmesso a CS → "Da trasmettere"
       const opRaw = d["origine_pratica"];
       const isOrigineTi = opRaw === 2 || opRaw === "2";
-      const rzNeverTouched = !hasRuoloData(d, "RZ");
-      if (isOrigineTi && rzNeverTouched) {
-        return { ruolo: "TI", label: "In carico", statoForChip: statoPresa };
+      const csNeverTouched = !hasRuoloData(d, "CS");
+      if (isOrigineTi && csNeverTouched) {
+        return { ruolo: "IT", label: "In carico", statoForChip: statoPresa };
       }
       if (tiInfo.statoTiNum !== null && Number.isFinite(tiInfo.statoTiNum)) {
         if (tiInfo.statoTiNum === statoDaPrendere) {
           return {
-            ruolo: "TI",
+            ruolo: "IT",
             label: "Da prendere in carico",
             statoForChip: statoDaPrendere,
           };
         }
         if (tiInfo.statoTiNum === statoPresa) {
-          return { ruolo: "TI", label: "In carico", statoForChip: statoPresa };
+          return { ruolo: "IT", label: "In carico", statoForChip: statoPresa };
         }
-        return { ruolo: "TI", label: "In carico", statoForChip: null };
+        return { ruolo: "IT", label: "In carico", statoForChip: null };
       }
-      if (tiInfo.presaTiNum !== null && Number.isFinite(tiInfo.presaTiNum)) {
-        if (tiInfo.presaTiNum === presaDaPrendere) {
-          return {
-            ruolo: "TI",
-            label: "Da prendere in carico",
-            statoForChip: statoDaPrendere,
-          };
-        }
-        if (tiInfo.presaTiNum === presaPresa) {
-          return { ruolo: "TI", label: "In carico", statoForChip: statoPresa };
-        }
-      }
-      return { ruolo: "TI", label: "Trasmesso", statoForChip: statoDaPrendere };
+      return { ruolo: "IT", label: "Trasmesso", statoForChip: statoDaPrendere };
     }
 
     // fwdDest e integDest sono ora funzioni dinamiche (dipendono dal record d)
@@ -4009,14 +3855,9 @@ export default function Widget(props: Props) {
     for (const role of scanOrder) {
       if (!hasRuoloData(d, role)) continue;
 
-      const presaRaw = d[`presa_in_carico_${role}`];
+      const stateOnly = isStateOnlyWorkflowRole(role);
       const statoRaw = d[`stato_${role}`];
-      const esitoRaw = d[`esito_${role}`];
-
-      const presaNum =
-        presaRaw !== null && presaRaw !== undefined && presaRaw !== ""
-          ? Number(presaRaw)
-          : null;
+      const esitoRaw = stateOnly ? null : d[`esito_${role}`];
       const statoNum =
         statoRaw !== null && statoRaw !== undefined && statoRaw !== ""
           ? Number(statoRaw)
@@ -4035,19 +3876,18 @@ export default function Widget(props: Props) {
               label: "Trasmesso",
               statoForChip: statoApprovata,
             };
-          if (role === "TI_AMM" && !isBozzaDeterminazioneTrasmessaRiAmm(d)) {
-            // Il visto TI_AMM da solo resta sul TI_AMM. Se però la vista non
-            // espone determinazione_stato ma espone già il nodo RI_AMM aperto,
+          if (role === "IA" && !isBozzaDeterminazioneTrasmessaRia(d)) {
+            // Il visto IA da solo resta sul IA. Se però la vista non
+            // espone determinazione_stato ma espone già il nodo RIA aperto,
             // non oscurare il passaggio reale "bozza trasmessa al Responsabile".
-            const riAmmStato = readRoleNumber(d, "RI_AMM", "stato");
-            const riAmmPresa = readRoleNumber(d, "RI_AMM", "presa");
-            if (riAmmStato === statoDaPrendere || riAmmPresa === presaDaPrendere) {
-              return { ruolo: "RI_AMM", label: "Da prendere in carico", statoForChip: statoDaPrendere };
+            const riaStato = readRoleNumber(d, "RIA", "stato");
+            if (riaStato === statoDaPrendere) {
+              return { ruolo: "RIA", label: "Da prendere in carico", statoForChip: statoDaPrendere };
             }
-            if (riAmmStato === statoPresa || riAmmPresa === presaPresa) {
-              return { ruolo: "RI_AMM", label: "In carico", statoForChip: statoPresa };
+            if (riaStato === statoPresa) {
+              return { ruolo: "RIA", label: "In carico", statoForChip: statoPresa };
             }
-            return { ruolo: "TI_AMM", label: "In carico", statoForChip: statoPresa };
+            return { ruolo: "IA", label: "In carico", statoForChip: statoPresa };
           }
           const dest = getFwdDest(role, d);
           if (dest) {
@@ -4078,7 +3918,7 @@ export default function Widget(props: Props) {
         if (esitoNum === esitoIntegrazione) {
           const dest = getIntegDest(role);
           if (dest) {
-            const destEsitoRaw = d[`esito_${dest}`];
+            const destEsitoRaw = isStateOnlyWorkflowRole(dest) ? null : d[`esito_${dest}`];
             const destEsitoNum =
               destEsitoRaw !== null &&
               destEsitoRaw !== undefined &&
@@ -4171,19 +4011,6 @@ export default function Widget(props: Props) {
         return { ruolo: role, label: "—", statoForChip: null };
       }
 
-      if (presaNum !== null && Number.isFinite(presaNum)) {
-        if (presaNum === presaDaPrendere) {
-          return {
-            ruolo: role,
-            label: "Trasmesso",
-            statoForChip: statoDaPrendere,
-          };
-        }
-        if (presaNum === presaPresa) {
-          return { ruolo: role, label: "In carico", statoForChip: statoPresa };
-        }
-      }
-
       // Ha dati ma valore non riconosciuto
       return { ruolo: role, label: "In carico", statoForChip: null };
     }
@@ -4193,12 +4020,12 @@ export default function Widget(props: Props) {
     const opNum =
       op !== null && op !== undefined && op !== "" ? Number(op) : null;
     if (opNum === 2) {
-      // TI ha creato il Rapporto, non ancora trasmesso a RZ
-      return { ruolo: "TI", label: "In carico", statoForChip: statoPresa };
+      // IT ha creato il Rapporto, non ancora trasmesso a CS
+      return { ruolo: "IT", label: "In carico", statoForChip: statoPresa };
     }
-    // origine=1 (TR) o non valorizzato: implicitamente trasmesso a RZ
+    // origine=1 (TR) o non valorizzato: implicitamente trasmesso a CS
     return {
-      ruolo: "RZ",
+      ruolo: "CS",
       label: "Da prendere in carico",
       statoForChip: statoDaPrendere,
     };
@@ -4209,12 +4036,12 @@ export default function Widget(props: Props) {
       .trim()
       .toUpperCase()
       .replace(/[\s-]+/g, "_");
-    if (r === "RI_AMM" || r === "TI_AMM") return r;
+    if (r === "RIA" || r === "IA") return r;
     if (r === "DA_AMM") return "DA";
     if (r.startsWith("DT")) return "DT";
-    if (r.startsWith("RI") && r !== "RI_AMM") return "RI";
-    if (r.startsWith("RZ")) return "RZ";
-    if (r.startsWith("TI") && r !== "TI_AMM") return "TI";
+    if (r.startsWith("RIT") && r !== "RIA") return "RIT";
+    if (r.startsWith("CS")) return "CS";
+    if (r.startsWith("IT") && r !== "IA") return "IT";
     if (r.startsWith("TR")) return "TR";
     if (r.startsWith("DA")) return "DA";
     return r;
@@ -4223,11 +4050,10 @@ export default function Widget(props: Props) {
   function readRoleNumber(
     d: any,
     role: string,
-    kind: "presa" | "stato" | "esito",
+    kind: "stato" | "esito",
   ): number | null {
-    const field =
-      kind === "presa" ? `presa_in_carico_${role}` : `${kind}_${role}`;
-    const v = pickField(d, field);
+    if (isStateOnlyWorkflowRole(role) && kind !== "stato") return null;
+    const v = pickField(d, `${kind}_${role}`);
     if (v === null || v === undefined || v === "") return null;
     const n = Number(v);
     return Number.isFinite(n) ? n : null;
@@ -4239,7 +4065,7 @@ export default function Widget(props: Props) {
       .toUpperCase();
     if (logEvent === "RESPINTA") return true;
 
-    const roles = ["RZ", "DT", "RI", "DA", "RI_AMM", "TI_AMM", "TI", "TR"];
+    const roles = ["CS", "DT", "RIT", "DA", "RIA", "IA", "IT", "TR"];
     return roles.some((role) => {
       const statoNum = readRoleNumber(d, role, "stato");
       const esitoNum = readRoleNumber(d, role, "esito");
@@ -4247,7 +4073,7 @@ export default function Widget(props: Props) {
     });
   }
 
-  function isPrimoInvioRilevazioneAlRz(log: LogEntry | null, d: any): boolean {
+  function isPrimoInvioRilevazioneAlCs(log: LogEntry | null, d: any): boolean {
     if (!log) return false;
 
     const evento = String(log.evento || "")
@@ -4257,19 +4083,19 @@ export default function Widget(props: Props) {
 
     const ruolo = normalizeWorkflowRole(log.ruolo);
     const ruoloDest = normalizeWorkflowRole(log.ruoloDest);
-    if (ruolo !== "TI" || ruoloDest !== "RZ") return false;
+    if (ruolo !== "IT" || ruoloDest !== "CS") return false;
 
     // Se esiste già il numero ufficiale, la pratica non è più una rilevazione
-    // provvisoria e l'invio TI -> RZ va trattato come trasmissione istruttoria.
+    // provvisoria e l'invio IT -> CS va trattato come trasmissione istruttoria.
     if (pickOfficialRapportoNumber(d)) return false;
 
     // Se l'invio chiude una richiesta di integrazione, deve restare
     // "TRASMISSIONE INTEGRAZIONE", non diventare una nuova rilevazione.
     if (transmissionAnswersIntegration(log)) return false;
 
-    // Il primo invio di una rilevazione creata da TI può avere in storico solo
+    // Il primo invio di una rilevazione creata da IT può avere in storico solo
     // l'eventuale ciclo di CREAZIONE. Se sono presenti assegnazioni, richieste
-    // di integrazione o precedenti trasmissioni, non è più il primo arrivo al RZ.
+    // di integrazione o precedenti trasmissioni, non è più il primo arrivo al CS.
     const history = log.history || [];
     return !history.some((h) => {
       const e = String(h?.evento || "")
@@ -4288,19 +4114,14 @@ export default function Widget(props: Props) {
     if (evento === "RESPINTA") {
       const ruolo = normalizeWorkflowRole(log.ruolo);
       if (ruolo === "DT") label = "ISTRUTTORIA TECNICA RESPINTA";
-      else if (ruolo === "RZ") {
-        const tiAssigned = String(
-          pickField(d, "ti_assegnato_username") ??
-            pickField(d, "ti_assegnato_user") ??
-            pickField(d, "ti_assegnato") ??
-            "",
-        ).trim();
-        const tiEsito = readRoleNumber(d, "TI", "esito");
-        // RZ può respingere sia una nuova rilevazione sia una istruttoria già
-        // rientrata da TI. L'oggetto deve distinguere i due casi: non usare
+      else if (ruolo === "CS") {
+        const tiAssigned = String(pickField(d, "it_assegnato_username") ?? "").trim();
+        const tiWorkflowTouched = hasRuoloData(d, "IT");
+        // CS può respingere sia una nuova rilevazione sia una istruttoria già
+        // rientrata da IT. L'oggetto deve distinguere i due casi: non usare
         // mai la causale grezza "RESPINTA".
         label =
-          tiAssigned || tiEsito !== null
+          tiAssigned || tiWorkflowTouched
             ? "ISTRUTTORIA TECNICA RESPINTA"
             : "RILEVAZIONE RESPINTA";
       } else {
@@ -4311,7 +4132,7 @@ export default function Widget(props: Props) {
       transmissionAnswersIntegration(log)
     ) {
       label = "TRASMISSIONE INTEGRAZIONE";
-    } else if (isPrimoInvioRilevazioneAlRz(log, d)) {
+    } else if (isPrimoInvioRilevazioneAlCs(log, d)) {
       label = "NUOVA RILEVAZIONE";
     } else {
       label = formatCausale(evento);
@@ -4330,11 +4151,9 @@ export default function Widget(props: Props) {
   function mapOperationalState(
     role: string,
     statoNum: number | null,
-    presaNum: number | null,
     esitoNum: number | null,
   ): { ruolo: string; label: string; statoForChip: number | null } | null {
     // stato_* è il campo portante: se valorizzato a 3/4/5 non deve essere
-    // oscurato da una vecchia presa_in_carico_* = 2 rimasta storicamente attiva.
     if (statoNum === statoDaPrendere)
       return getStateView(role, "Da prendere in carico", statoDaPrendere);
     if (statoNum === statoPresa)
@@ -4353,10 +4172,6 @@ export default function Widget(props: Props) {
     if (esitoNum === esitoRespinta)
       return getStateView(role, "Respinto", statoRespinta);
 
-    if (presaNum === presaDaPrendere)
-      return getStateView(role, "Da prendere in carico", statoDaPrendere);
-    if (presaNum === presaPresa)
-      return getStateView(role, "In carico", statoPresa);
     return null;
   }
 
@@ -4385,39 +4200,38 @@ export default function Widget(props: Props) {
       .toUpperCase();
 
     const statoNum = readRoleNumber(d, role, "stato");
-    const presaNum = readRoleNumber(d, role, "presa");
     const esitoNum = readRoleNumber(d, role, "esito");
 
-    const bozzaTrasmessaRiAmm = isBozzaDeterminazioneTrasmessaRiAmm(d);
-    if (role === "TI_AMM" && isTiAmmAwaitingRetakeFromRiAmm(d)) {
+    const bozzaTrasmessaRia = isBozzaDeterminazioneTrasmessaRia(d);
+    if (role === "IA" && isIaAwaitingRetakeFromRia(d)) {
       return getStateView(role, "Da prendere in carico", statoDaPrendere);
     }
-    if (role === "RI_AMM" && (statoNum === statoDaPrendere || presaNum === statoDaPrendere)) {
+    if (role === "RIA" && statoNum === statoDaPrendere) {
       return getStateView(role, "Da prendere in carico", statoDaPrendere);
     }
-    if (role === "RI_AMM" && (statoNum === statoPresa || presaNum === statoPresa)) {
+    if (role === "RIA" && statoNum === statoPresa) {
       return getStateView(role, "In carico", statoPresa);
     }
-    const vistoTiAmmSenzaBozzaTrasmessa =
-      !bozzaTrasmessaRiAmm &&
-      role === "RI_AMM" &&
-      readRoleNumber(d, "TI_AMM", "esito") === esitoApprovata;
-    if (vistoTiAmmSenzaBozzaTrasmessa) {
+    const vistoIaSenzaBozzaTrasmessa =
+      !bozzaTrasmessaRia &&
+      role === "RIA" &&
+      readRoleNumber(d, "IA", "esito") === esitoApprovata;
+    if (vistoIaSenzaBozzaTrasmessa) {
       return getStateView(role, "Trasmesso", statoApprovata);
     }
-    if (bozzaTrasmessaRiAmm && role === "RI_AMM" && (statoNum === null || statoNum === statoDaPrendere)) {
+    if (bozzaTrasmessaRia && role === "RIA" && (statoNum === null || statoNum === statoDaPrendere)) {
       return getStateView(role, "Da prendere in carico", statoDaPrendere);
     }
     // La bozza trasmessa al Responsabile dell'istruttoria amministrativa vale come
-    // stato storico del TI_AMM solo finché il nodo TI_AMM non viene riaperto.
-    // Dopo un rimando RI_AMM → TI_AMM, infatti, stato_TI_AMM torna a 1/2 e deve
-    // prevalere sul determinazione_stato rimasto TRASMESSA_RI_AMM.
-    if (bozzaTrasmessaRiAmm && role === "TI_AMM" && statoNum !== statoDaPrendere && statoNum !== statoPresa) {
+    // stato precedente dell’Istruttore amministrativo solo finché il nodo IA non viene riaperto.
+    // Dopo un rimando RIA → IA, infatti, stato_IA torna a 1/2 e deve
+    // prevalere sul determinazione_stato rimasto TRASMESSA_RIA.
+    if (bozzaTrasmessaRia && role === "IA" && statoNum !== statoDaPrendere && statoNum !== statoPresa) {
       return getStateView(role, "Trasmesso", statoApprovata);
     }
-    // Il visto TI_AMM è un passaggio interno alla scheda amministrativa:
-    // non trasferisce la pratica al RI_AMM finché non viene trasmessa anche la bozza.
-    if (!bozzaTrasmessaRiAmm && role === "TI_AMM" && esitoNum === esitoApprovata) {
+    // Il visto IA è un passaggio interno alla scheda amministrativa:
+    // non trasferisce la pratica al RIA finché non viene trasmessa anche la bozza.
+    if (!bozzaTrasmessaRia && role === "IA" && esitoNum === esitoApprovata) {
       return getStateView(role, "In carico", statoPresa);
     }
 
@@ -4426,11 +4240,11 @@ export default function Widget(props: Props) {
     if (log && logRole === role && logDest && logDest !== role) {
       if (
         logEvent === "NUOVA_ASSEGNAZIONE" &&
-        (logDest === "TI" || logDest === "TI_AMM")
+        (logDest === "IT" || logDest === "IA")
       ) {
         return getStateView(
           role,
-          logDest === "TI_AMM" ? "Assegnato a TI-AMM" : "Assegnato a TI",
+          logDest === "IA" ? "Assegnato all’Istruttore amministrativo" : "Assegnato all’Istruttore tecnico",
           statoApprovata,
         );
       }
@@ -4449,22 +4263,22 @@ export default function Widget(props: Props) {
         return getStateView(role, "Respinto", statoRespinta);
     }
 
-    // Casi di assegnazione RZ → TI senza esito_RZ: il nodo TI è attivo ma
-    // per RZ deve leggersi come "Assegnato a TI", non come "In carico".
-    if (role === "RZ") {
+    // Casi di assegnazione CS → IT: il nodo IT è attivo ma CS non ha un campo esito dedicato,
+    // per CS deve leggersi come "Assegnato all’Istruttore tecnico", non come "In carico".
+    if (role === "CS") {
       const tiInfo = getTiIstruttoriaInfo(d);
       if (
         tiInfo.hasAssignedTi &&
         tiInfo.isInTiIstruttoria &&
-        !hasRuoloData(d, "RI") &&
+        !hasRuoloData(d, "RIT") &&
         !hasRuoloData(d, "DT") &&
         !hasRuoloData(d, "DA")
       ) {
-        return getStateView("RZ", "Assegnato a TI", statoApprovata);
+        return getStateView("CS", "Assegnato all’Istruttore tecnico", statoApprovata);
       }
     }
 
-    const mapped = mapOperationalState(role, statoNum, presaNum, esitoNum);
+    const mapped = mapOperationalState(role, statoNum, esitoNum);
     if (mapped) return mapped;
 
     // Se l'ultimo messaggio è diretto al mio ruolo ma i campi stato/presa non
@@ -4515,28 +4329,62 @@ export default function Widget(props: Props) {
     ruolo: string;
     label: string;
     statoForChip: number | null;
+    ruoloOperativoLabel?: string;
   } {
-    const view =
-      !giiUser || giiUser.isAdmin
-        ? computeSintetico(d)
-        : (() => {
-            const myRole = getEffectiveRole(
-              giiUser.ruoloLabel || "",
-              giiUser.area,
-            );
-            return myRole ? computeMioStato(d, myRole) : computeSintetico(d);
-          })();
-    return normalizeMioStatoView(view);
+    if (!giiUser || giiUser.isAdmin) return normalizeMioStatoView(computeSintetico(d));
+    const candidates = getVisibleAssignmentsForRecord(d);
+    if (!candidates.length) return normalizeMioStatoView(computeSintetico(d));
+    const sintRole = normalizeWorkflowRole(computeSintetico(d).ruolo);
+    const log = getLogForRecord(d);
+    const logRole = normalizeWorkflowRole(log?.ruolo);
+    const logDest = normalizeWorkflowRole(log?.ruoloDest);
+    const ranked = candidates.map((a, idx) => {
+      const role = getAssignmentRole(a);
+      const state = normalizeMioStatoView(computeMioStato(d, role));
+      const label = normalizeMioStatoLabel(String(state.label || "")).toLowerCase();
+      let rank = 50;
+      if (label === "da prendere in carico" || label === "in carico") rank = 0;
+      else if (role === sintRole) rank = 10;
+      else if (role === logDest || role === logRole) rank = 20;
+      else if (label && label !== "—") rank = 30;
+      const last = getRoleLastTouchMs(d, role) || 0;
+      return { a, role, state, rank, last, idx };
+    }).sort((x, y) => x.rank - y.rank || y.last - x.last || x.idx - y.idx);
+    const best = ranked[0];
+    const bestLabel = normalizeMioStatoLabel(String(best.state?.label || "")).toLowerCase();
+    const hasCurrentOperationalRole =
+      bestLabel === "da prendere in carico" || bestLabel === "in carico";
+    return {
+      ...best.state,
+      ruolo: best.role || best.state.ruolo,
+      ruoloOperativoLabel: hasCurrentOperationalRole
+        ? String(best.a.profiloLabel || best.a.ruoloFull || best.a.ruoloLabel || best.role || "")
+        : "",
+    };
+  }
+
+  function getOperationalSelectionMeta(d: any): { operationalRole: string; operationalRoleLabel: string } {
+    const view = computeDisplaySintetico(d || {});
+    const label = normalizeMioStatoLabel(String(view?.label || "")).toLowerCase();
+    const hasCurrentOperationalRole =
+      label === "da prendere in carico" || label === "in carico";
+    if (!hasCurrentOperationalRole) {
+      return { operationalRole: "", operationalRoleLabel: "" };
+    }
+    return {
+      operationalRole: normalizeWorkflowRole(view?.ruolo),
+      operationalRoleLabel: String(view?.ruoloOperativoLabel || view?.ruolo || '').trim(),
+    };
   }
 
   // ── computeUltimoAggMs: considera timestamp workflow/log e, per le nuove rilevazioni, la data di invio ──────────────
   const computeUltimoAggMs = (d: any): number | null => {
-    const roles = ["TR", "TI", "RZ", "RI", "DT", "DA", "RI_AMM", "TI_AMM"];
+    const roles = ["TR", "IT", "CS", "RIT", "DT", "DA", "RIA", "IA"];
     const candidates: number[] = [];
     for (const role of roles) {
       const p = parseToMs(pickField(d, `dt_presa_in_carico_${role}`));
       const s = parseToMs(pickField(d, `dt_stato_${role}`));
-      const e = parseToMs(pickField(d, `dt_esito_${role}`));
+      const e = isStateOnlyWorkflowRole(role) ? null : parseToMs(pickField(d, `dt_esito_${role}`));
       if (p !== null) candidates.push(p);
       if (s !== null) candidates.push(s);
       if (e !== null) candidates.push(e);
@@ -4585,6 +4433,7 @@ export default function Widget(props: Props) {
   const getSortValue = (r: DataRecord, field: string): any => {
     const d = r.getData?.() || {};
     if (field === V_STATO) return computeDisplaySintetico(d).label;
+    if (field === V_RUOLO_OPERATIVO) return computeDisplaySintetico(d).ruoloOperativoLabel || "";
     if (field === V_FASE) return computeFaseIstruttoria(d);
     if (field === V_TIPO_PRATICA) return getTipoPraticaDisplay(r);
     if (field === V_NUMERO_RILEVAZIONE) return getRilevazioneDisplay(r);
@@ -4592,7 +4441,7 @@ export default function Widget(props: Props) {
     if (isNumeroAttoVirtualField(field)) return getNumeroVerbaleDisplay(r);
     if (field === V_ULTIMO) return computeUltimoAggMs(d);
     if (field === V_PROSSIMA) {
-      if (isBozzaDeterminazioneTrasmessaRiAmm(d)) return getBozzaDeterminazioneTrasmissionDisplay(d).destinatario;
+      if (isBozzaDeterminazioneTrasmessaRia(d)) return getBozzaDeterminazioneTrasmissionDisplay(d).destinatario;
       const log = getLogForRecord(d);
       return log?.ruoloDest
         ? formatPersonaDest(
@@ -4605,7 +4454,7 @@ export default function Widget(props: Props) {
         : "";
     }
     if (field === V_MITTENTE) {
-      if (isBozzaDeterminazioneTrasmessaRiAmm(d)) return getBozzaDeterminazioneTrasmissionDisplay(d).mittente;
+      if (isBozzaDeterminazioneTrasmessaRia(d)) return getBozzaDeterminazioneTrasmissionDisplay(d).mittente;
       const log = getLogForRecord(d);
       return log
         ? formatPersona(
@@ -4618,7 +4467,7 @@ export default function Widget(props: Props) {
         : "";
     }
     if (field === V_CAUSALE) {
-      if (isBozzaDeterminazioneTrasmessaRiAmm(d)) return getBozzaDeterminazioneTrasmissionDisplay(d).causale;
+      if (isBozzaDeterminazioneTrasmessaRia(d)) return getBozzaDeterminazioneTrasmissionDisplay(d).causale;
       const log = getLogForRecord(d);
       return log ? formatCausaleForLog(log, d) : "";
     }
@@ -4627,7 +4476,7 @@ export default function Widget(props: Props) {
       // (presa in carico, rimando, trasmissione, esito), non solo la data del LOG
       // usato per le colonne Stato/Mittente/Destinatario. Altrimenti, se il LOG
       // informativo resta quello di un ciclo precedente, l'ordinamento rimane congelato.
-      if (isBozzaDeterminazioneTrasmessaRiAmm(d)) return getBozzaDeterminazioneTrasmissionDisplay(d).dataMs ?? computeUltimoAggMs(d) ?? 0;
+      if (isBozzaDeterminazioneTrasmessaRia(d)) return getBozzaDeterminazioneTrasmissionDisplay(d).dataMs ?? computeUltimoAggMs(d) ?? 0;
       return computeUltimoAggMs(d) ?? 0;
     }
     return d[field];
@@ -5103,22 +4952,24 @@ export default function Widget(props: Props) {
     }
 
     const selectedData = found.rec.getData?.() || {};
+    const selectedView = getRuntimeViewForLayer(found.dsId);
     publishRuntimeSelection({
       oid: Number(pending.oid),
       layerUrl:
-        resolvedView?.layerUrl ||
+        selectedView?.layerUrl ||
         sessionStorage.getItem("GII_SELECTED_LAYER_URL") ||
         found.dsId,
       serviceUrl:
-        resolvedView?.serviceUrl ||
+        selectedView?.serviceUrl ||
         sessionStorage.getItem("GII_SELECTED_SERVICE_URL") ||
         found.dsId,
       idFieldName: found.idFieldName,
       viewName:
-        resolvedView?.viewName ||
+        selectedView?.viewName ||
         sessionStorage.getItem("GII_SELECTED_VIEW_NAME") ||
         getDsLabel({ __label: "" }, "Vista runtime"),
       data: selectedData,
+      ...getOperationalSelectionMeta(selectedData),
     });
 
     clearAfterWorkflowNav();
@@ -5246,23 +5097,25 @@ export default function Widget(props: Props) {
     }
 
     const restoredData = found.rec.getData?.() || {};
+    const restoredView = getRuntimeViewForLayer(found.dsId);
     publishRuntimeSelection({
       oid: Number(oidNum),
       layerUrl:
-        resolvedView?.layerUrl ||
+        restoredView?.layerUrl ||
         restoreInfo.layerUrl ||
         sessionStorage.getItem("GII_SELECTED_LAYER_URL") ||
         found.dsId,
       serviceUrl:
-        resolvedView?.serviceUrl ||
+        restoredView?.serviceUrl ||
         sessionStorage.getItem("GII_SELECTED_SERVICE_URL") ||
         found.dsId,
       idFieldName: found.idFieldName,
       viewName:
-        resolvedView?.viewName ||
+        restoredView?.viewName ||
         sessionStorage.getItem("GII_SELECTED_VIEW_NAME") ||
         getDsLabel({ __label: "" }, "Vista runtime"),
       data: restoredData,
+      ...getOperationalSelectionMeta(restoredData),
     });
     clearRestoreSelectionAfterEdit();
     preserveSelectionRefreshUntilRef.current = 0;
@@ -5341,22 +5194,24 @@ export default function Widget(props: Props) {
     );
     if (!Number.isFinite(oidVal)) return;
 
+    const tabSelectionView = getRuntimeViewForLayer(found.dsId);
     publishRuntimeSelection({
       oid: oidVal,
       layerUrl:
-        resolvedView?.layerUrl ||
+        tabSelectionView?.layerUrl ||
         sessionStorage.getItem("GII_SELECTED_LAYER_URL") ||
         found.dsId,
       serviceUrl:
-        resolvedView?.serviceUrl ||
+        tabSelectionView?.serviceUrl ||
         sessionStorage.getItem("GII_SELECTED_SERVICE_URL") ||
         found.dsId,
       idFieldName: found.idFieldName,
       viewName:
-        resolvedView?.viewName ||
+        tabSelectionView?.viewName ||
         sessionStorage.getItem("GII_SELECTED_VIEW_NAME") ||
         getDsLabel({ __label: "" }, "Vista runtime"),
       data,
+      ...getOperationalSelectionMeta(data),
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeRoleTab, mergedRecs, recDsLookup, localSelectedByDs, localSelectedOid, resolvedView, passesRoleTab]);
@@ -5531,25 +5386,27 @@ export default function Widget(props: Props) {
         : Number(intent.parentObjectId || intent.oid || 0),
     );
 
+    const intentSelectionView = getRuntimeViewForLayer(found.dsId);
     publishRuntimeSelection({
       oid: Number.isFinite(oidVal)
         ? oidVal
         : Number(intent.parentObjectId || intent.oid || 0),
       layerUrl:
-        resolvedView?.layerUrl ||
+        intentSelectionView?.layerUrl ||
         intent.layerUrl ||
         sessionStorage.getItem("GII_SELECTED_LAYER_URL") ||
         found.dsId,
       serviceUrl:
-        resolvedView?.serviceUrl ||
+        intentSelectionView?.serviceUrl ||
         sessionStorage.getItem("GII_SELECTED_SERVICE_URL") ||
         found.dsId,
       idFieldName: found.idFieldName,
       viewName:
-        resolvedView?.viewName ||
+        intentSelectionView?.viewName ||
         sessionStorage.getItem("GII_SELECTED_VIEW_NAME") ||
         getDsLabel({ __label: "" }, "Vista runtime"),
       data: selectedData,
+      ...getOperationalSelectionMeta(selectedData),
     });
 
     clearOpenPracticeIntent();
@@ -5901,6 +5758,59 @@ export default function Widget(props: Props) {
       color: rgba(0, 0, 0, 0.9);
     }
 
+    .hdrBtnMyState {
+      align-items: stretch;
+    }
+    .myStateHeaderLabels {
+      display: flex;
+      flex: 1 1 auto;
+      min-width: 0;
+      flex-direction: column;
+      align-items: flex-start;
+      gap: 4px;
+      line-height: 1.15;
+    }
+    .myStateSeparator {
+      display: block;
+      width: 100%;
+      border-top: 1px solid rgba(0, 0, 0, 0.16);
+    }
+    .myStateCellContent {
+      display: flex;
+      flex-direction: column;
+      align-items: flex-start;
+      gap: 4px;
+      min-width: 0;
+      width: 100%;
+      margin-bottom: 0;
+    }
+    .myStateHeaderSorts {
+      display: flex;
+      flex-direction: column;
+      align-items: stretch;
+      width: 100%;
+      min-width: 0;
+    }
+    .hdrBtnMyStatePart {
+      width: 100%;
+      min-height: 22px;
+      justify-content: space-between;
+      padding-top: 2px;
+      padding-bottom: 2px;
+    }
+
+    .myStateCellSeparator {
+      display: block;
+      width: 100%;
+      border-top: 1px solid rgba(0, 0, 0, 0.12);
+    }
+    .myStateRoleLabel {
+      font-size: 11px;
+      line-height: 1.15;
+      color: var(--ref-palette-neutral-700, #555);
+      white-space: normal;
+    }
+
     .sortBadge {
       display: inline-flex;
       align-items: center;
@@ -5977,7 +5887,7 @@ export default function Widget(props: Props) {
       column-gap: ${gap}px;
       align-items: center;
 
-      padding: ${rowPaddingY}px ${rowPaddingX}px;
+      padding: ${rowPaddingY}px ${rowPaddingX}px ${Math.max(0, rowPaddingY - 4)}px;
       min-height: ${rowMinHeight}px;
 
       border-radius: ${rowRadius}px;
@@ -6092,28 +6002,67 @@ export default function Widget(props: Props) {
   `;
 
   const Header = (p: { label: string; field: string; first?: boolean }) => {
-    const idx = sortState.findIndex((x) => x.field === p.field);
-    const item = idx >= 0 ? sortState[idx] : null;
-    const dir = item?.dir;
+    const renderSortBadge = (field: string) => {
+      const idx = sortState.findIndex((x) => x.field === field);
+      const item = idx >= 0 ? sortState[idx] : null;
+      if (!item) return null;
+      return (
+        <span className="sortBadge" aria-hidden>
+          <span className="sortTri">{item.dir === "ASC" ? "▲" : "▼"}</span>
+          <span className="sortPri">{idx + 1}</span>
+        </span>
+      );
+    };
 
-    const badge = item ? (
-      <span className="sortBadge" aria-hidden>
-        <span className="sortTri">{dir === "ASC" ? "▲" : "▼"}</span>
-        <span className="sortPri">{idx + 1}</span>
-      </span>
-    ) : null;
+    const isMyState = p.field === V_STATO;
 
     return (
       <div className={`headerCell ${p.first ? "first" : ""}`}>
-        <button
-          type="button"
-          className="hdrBtn"
-          onClick={() => toggleSort(p.field)}
-          title="Click: ordina in modalità multipla. Terzo clic: rimuove ordinamento."
-        >
-          <span>{p.label}</span>
-          {badge}
-        </button>
+        {isMyState ? (
+          showOperationalRole ? (
+            <div className="myStateHeaderSorts">
+              <button
+                type="button"
+                className="hdrBtn hdrBtnMyStatePart"
+                onClick={() => toggleSort(V_STATO)}
+                title="Ordina per Il mio stato. Click successivi: crescente, decrescente, rimuovi ordinamento."
+              >
+                <span>Il mio stato</span>
+                {renderSortBadge(V_STATO)}
+              </button>
+              <span className="myStateSeparator" aria-hidden />
+              <button
+                type="button"
+                className="hdrBtn hdrBtnMyStatePart"
+                onClick={() => toggleSort(V_RUOLO_OPERATIVO)}
+                title="Ordina per Il mio ruolo operativo. Click successivi: crescente, decrescente, rimuovi ordinamento."
+              >
+                <span>Il mio ruolo operativo</span>
+                {renderSortBadge(V_RUOLO_OPERATIVO)}
+              </button>
+            </div>
+          ) : (
+            <button
+              type="button"
+              className="hdrBtn"
+              onClick={() => toggleSort(V_STATO)}
+              title="Ordina per Il mio stato. Click successivi: crescente, decrescente, rimuovi ordinamento."
+            >
+              <span>Il mio stato</span>
+              {renderSortBadge(V_STATO)}
+            </button>
+          )
+        ) : (
+          <button
+            type="button"
+            className="hdrBtn"
+            onClick={() => toggleSort(p.field)}
+            title="Click: ordina in modalità multipla. Terzo clic: rimuove ordinamento."
+          >
+            <span>{p.label}</span>
+            {renderSortBadge(p.field)}
+          </button>
+        )}
       </div>
     );
   };
@@ -6707,7 +6656,7 @@ export default function Widget(props: Props) {
                       const isNewTiDetection =
                         originePraticaNum === 2 &&
                         !pickOfficialRapportoNumber(d) &&
-                        normalizeWorkflowRole(displaySintetico.ruolo) === "TI" &&
+                        normalizeWorkflowRole(displaySintetico.ruolo) === "IT" &&
                         (statoInizialeTi.startsWith("in carico") ||
                           statoInizialeTi.startsWith("da prendere"));
 
@@ -6723,7 +6672,7 @@ export default function Widget(props: Props) {
                       let destinatario: string;
                       let causaleVal: string;
                       let dataMsgVal: string;
-                      if (isBozzaDeterminazioneTrasmessaRiAmm(d)) {
+                      if (isBozzaDeterminazioneTrasmessaRia(d)) {
                         const bozzaDisplay = getBozzaDeterminazioneTrasmissionDisplay(d);
                         mittenteVal = bozzaDisplay.mittente;
                         destinatario = bozzaDisplay.destinatario;
@@ -6753,7 +6702,7 @@ export default function Widget(props: Props) {
                         // dopo quel LOG ci sono state prese in carico o nuove trasmissioni.
                         dataMsgVal = ultimoMs ? formatDateIt(ultimoMs) : "—";
                       } else if (!logLoadedRef.current) {
-                        // Per una rilevazione appena creata dal TI il significato è già
+                        // Per una rilevazione appena creata dal IT il significato è già
                         // certo anche prima del caricamento del LOG: mostra subito il
                         // badge giallo, evitando una riga temporaneamente priva di colore.
                         const fallbackMs = computeUltimoAggMs(d);
@@ -6769,7 +6718,7 @@ export default function Widget(props: Props) {
                         shouldUseInitialOggettoFallback(d) ||
                         isNewTiDetection
                       ) {
-                        // Nessun record LOG e pratica realmente iniziale: TI auto-assegnato o TR da survey.
+                        // Nessun record LOG e pratica realmente iniziale: IT auto-assegnato o TR da survey.
                         causaleVal = "NUOVA RILEVAZIONE";
                         const creator = String(
                           d.Creator ?? d.creator ?? d.CREATOR ?? "",
@@ -6803,20 +6752,7 @@ export default function Widget(props: Props) {
                               } as Record<number, string>
                             )[creatorEntry.settore ?? 0] ||
                             "";
-                          const rLbl =
-                            creatorEntry.ruoloCod ||
-                            (
-                              {
-                                1: "TR",
-                                2: "TI",
-                                3: "RZ",
-                                4: "RI",
-                                5: "DT",
-                                6: "DA",
-                                7: "ADMIN",
-                              } as Record<number, string>
-                            )[creatorEntry.ruolo ?? 0] ||
-                            "";
+                          const rLbl = creatorEntry.ruoloCod || "";
                           mittenteVal = formatPersona(
                             rLbl,
                             aLbl,
@@ -6829,8 +6765,8 @@ export default function Widget(props: Props) {
                         }
                         const initialMs = computeUltimoAggMs(d);
                         dataMsgVal = initialMs ? formatDateIt(initialMs) : "—";
-                        // Destinatario: TR (origine=1) → RZ del settore con nome.
-                        // TI (origine=2) appena creato e non ancora trasmesso → resta presso il TI.
+                        // Destinatario: TR (origine=1) → CS del settore con nome.
+                        // IT (origine=2) appena creato e non ancora trasmesso → resta presso il IT.
                         const opRaw = d.origine_pratica ?? d.ORIGINE_PRATICA;
                         const opN =
                           opRaw != null && opRaw !== "" ? Number(opRaw) : null;
@@ -6864,24 +6800,24 @@ export default function Widget(props: Props) {
                               } as Record<number, string>
                             )[creatorEntry.settore ?? 0] ||
                             "";
-                          let rzUsername = "";
+                          let csUsername = "";
                           if (utentiMapRef.current) {
                             for (const [uname, ue] of utentiMapRef.current) {
                               if (
-                                ue.ruolo === 3 &&
-                                ue.area === creatorEntry.area &&
-                                ue.settore === creatorEntry.settore
+                                getUtenteEntryRoleCode(ue) === "CS" &&
+                                getUtenteEntryAreaCode(ue) === getUtenteEntryAreaCode(creatorEntry) &&
+                                getUtenteEntrySettoreCode(ue) === getUtenteEntrySettoreCode(creatorEntry)
                               ) {
-                                rzUsername = uname;
+                                csUsername = uname;
                                 break;
                               }
                             }
                           }
                           destinatario = formatPersona(
-                            "RZ",
+                            "CS",
                             aLbl,
                             sLbl,
-                            rzUsername,
+                            csUsername,
                             utentiMapRef.current,
                           );
                         } else if (opN === 2) {
@@ -6971,19 +6907,23 @@ export default function Widget(props: Props) {
                                   getRecordObjectIdValue(r, idFieldName, rid) ?? rid,
                                 );
                                 if (Number.isFinite(oidVal)) {
+                                  const recordView =
+                                    getRuntimeViewForLayer(recDsId);
                                   publishRuntimeSelection({
                                     oid: oidVal,
-                                    layerUrl: resolvedView?.layerUrl || recDsId,
+                                    layerUrl:
+                                      recordView?.layerUrl || recDsId,
                                     serviceUrl:
-                                      resolvedView?.serviceUrl || recDsId,
+                                      recordView?.serviceUrl || recDsId,
                                     idFieldName,
                                     viewName:
-                                      resolvedView?.viewName ||
+                                      recordView?.viewName ||
                                       getDsLabel(
                                         { __label: "" },
                                         "Vista runtime",
                                       ),
                                     data: r.getData?.() || {},
+                                    ...getOperationalSelectionMeta(r.getData?.() || {}),
                                   });
                                 } else {
                                   notifySelectionCleared();
@@ -7081,12 +7021,21 @@ export default function Widget(props: Props) {
                                   className={ci === 0 ? "cell first" : "cell"}
                                   title={statoLabel}
                                 >
-                                  <span
-                                    className="chip"
-                                    style={getChipStyleByLabel(statoLabel)}
-                                  >
-                                    {statoLabel}
-                                  </span>
+                                  <div className="myStateCellContent">
+                                    {statoLabel === "—" ? (
+                                      <span className="myStateRoleLabel">—</span>
+                                    ) : (
+                                      <span className="chip" style={getChipStyleByLabel(statoLabel)}>{statoLabel}</span>
+                                    )}
+                                    {showOperationalRole && (
+                                      <>
+                                        <span className="myStateCellSeparator" aria-hidden />
+                                        <span className="myStateRoleLabel">
+                                          {displaySintetico.ruoloOperativoLabel || "—"}
+                                        </span>
+                                      </>
+                                    )}
+                                  </div>
                                 </div>
                               );
                             }

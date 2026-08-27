@@ -2,7 +2,7 @@
 /** @jsxFrag React.Fragment */
 import { React, jsx, type AllWidgetProps } from 'jimu-core'
 import { defaultConfig, type IMConfig } from '../config'
-import { isPracticeAssignedToCurrentTiAmm } from '../../../_shared/gii-access/ti-amm-assignment'
+import { isPracticeAssignedToCurrentIa } from '../../../_shared/gii-access/ia-assignment'
 import {
   pickGiiRuntimeView,
   type GiiRuntimeView as RuntimeDsView
@@ -14,7 +14,6 @@ type GiiUserInfo = {
   full_name?: string
   nome?: string
   displayName?: string
-  ruolo: number | null
   ruoloLabel: string
   ruoloCod: string
   ruoloFull?: string
@@ -55,7 +54,6 @@ type InfrazioneSortBy = 'article' | 'count'
 
 const DEFAULT_RECENT_SORT_RULES: RecentSortRule[] = [{ key: 'lastUpdate', dir: 'desc' }]
 
-const RUOLO_LABEL: Record<number, string> = { 1: 'TR', 2: 'TI', 3: 'RZ', 4: 'RI', 5: 'DT', 6: 'DA', 7: 'ADMIN' }
 const SETTORE_FROM_CODE: Record<number, string> = { 1: 'CR', 2: 'GI', 3: 'D1', 4: 'D2', 5: 'D3', 6: 'D4', 7: 'D5', 8: 'D6', 9: 'DS' }
 
 function loadEsriModule<T = any> (path: string): Promise<T> {
@@ -70,13 +68,11 @@ function cleanCode (v: any): string {
   return String(v ?? '').trim().toUpperCase()
 }
 
-function normalizeRuoloCode (ruoloCod: any, ruolo: number | null | undefined, isAdmin?: boolean): string {
-  const raw = cleanCode(ruoloCod)
-  if (raw) {
-    if (/^\d+$/.test(raw)) return RUOLO_LABEL[Number(raw)] || raw
-    return raw
-  }
-  if (ruolo != null && Number.isFinite(Number(ruolo))) return RUOLO_LABEL[Number(ruolo)] || ''
+const WORKFLOW_ROLE_CODES = new Set(['TR', 'IT', 'CS', 'RIT', 'DT', 'DA', 'ADMIN', 'RIA', 'IA'])
+
+function normalizeRuoloCode (ruoloCod: any, isAdmin?: boolean): string {
+  const raw = cleanCode(ruoloCod).replace(/[\s-]+/g, '_')
+  if (raw && WORKFLOW_ROLE_CODES.has(raw)) return raw
   return isAdmin ? 'ADMIN' : ''
 }
 
@@ -93,7 +89,6 @@ function normalizeAreaCode (areaCod: any, area?: number | null | undefined): 'AM
 function normalizeSettoreCode (settoreCod: any, settore?: number | null | undefined): string {
   const raw = cleanCode(settoreCod)
   if (raw) {
-    if (raw === 'CS') return 'DS'
     if (/^\d+$/.test(raw)) return SETTORE_FROM_CODE[Number(raw)] || raw
     return raw
   }
@@ -103,14 +98,12 @@ function normalizeSettoreCode (settoreCod: any, settore?: number | null | undefi
 
 function getEffectiveRole (ruoloLabel: string, areaCode: 'AMM' | 'AGR' | 'TEC' | ''): string {
   const r = cleanCode(ruoloLabel)
-  if (r === 'RI' && areaCode === 'AMM') return 'RI_AMM'
-  if (r === 'TI' && areaCode === 'AMM') return 'TI_AMM'
   return r
 }
 
 function pickRuntimeViewForUser (user: GiiUserInfo | null): RuntimeDsView | null {
   if (!user) return null
-  const role = cleanCode(user.ruoloCod || user.ruoloLabel)
+  const role = cleanCode(user.ruoloCod)
   const areaCode = user.areaCod || normalizeAreaCode('', user.area)
   const settoreCode = user.settoreCod || normalizeSettoreCode('', user.settore)
   return pickGiiRuntimeView({
@@ -125,9 +118,8 @@ function pickRuntimeViewForUser (user: GiiUserInfo | null): RuntimeDsView | null
 function readGiiUser (): GiiUserInfo | null {
   const cached: any = (window as any).__giiUserRole
   if (!cached?.username) return null
-  const ruolo = cached.ruolo != null && cached.ruolo !== '' ? Number(cached.ruolo) : null
-  const isAdminRaw = !!cached.isAdmin || !!cached.isWorkflowAdmin || ruolo === 7 || cleanCode(cached.ruoloCod || cached.ruolo_cod || cached.ruoloLabel) === 'ADMIN'
-  const ruoloCod = normalizeRuoloCode(cached.ruoloCod ?? cached.ruolo_cod ?? cached.ruoloLabel, ruolo, isAdminRaw)
+  const isAdminRaw = !!cached.isAdmin || !!cached.isWorkflowAdmin || cleanCode(cached.ruoloCod || cached.ruolo_cod) === 'ADMIN'
+  const ruoloCod = normalizeRuoloCode(cached.ruoloCod ?? cached.ruolo_cod, isAdminRaw)
   const isAdmin = isAdminRaw || ruoloCod === 'ADMIN'
   const area = cached.area != null && cached.area !== '' ? Number(cached.area) : null
   const settore = cached.settore != null && cached.settore !== '' ? Number(cached.settore) : null
@@ -139,7 +131,6 @@ function readGiiUser (): GiiUserInfo | null {
     full_name: String(cached.full_name || cached.fullName || '').trim(),
     nome: String(cached.nome || '').trim(),
     displayName: String(cached.displayName || '').trim(),
-    ruolo,
     ruoloLabel: ruoloCod,
     ruoloCod,
     ruoloFull: String(cached.ruoloFull || cached.ruolo_full || '').trim(),
@@ -161,13 +152,13 @@ function readGiiUser (): GiiUserInfo | null {
 function getStatoFieldForRuolo (ruoloLabel: string): string {
   const r = ruoloLabel.toUpperCase()
   if (r === 'TR') return 'stato_TR'
-  if (r === 'TI') return 'stato_TI'
-  if (r === 'RZ') return 'stato_RZ'
-  if (r === 'RI') return 'stato_RI'
+  if (r === 'IT') return 'stato_IT'
+  if (r === 'CS') return 'stato_CS'
+  if (r === 'RIT') return 'stato_RIT'
   if (r === 'DT') return 'stato_DT'
   if (r === 'DA') return 'determinazione_stato'
-  if (r === 'RI_AMM') return 'stato_RI_AMM'
-  if (r === 'TI_AMM') return 'stato_TI_AMM'
+  if (r === 'RIA') return 'stato_RIA'
+  if (r === 'IA') return 'stato_IA'
   return 'stato_DT'
 }
 
@@ -181,17 +172,21 @@ function meaningful (v: any): boolean {
   return v !== null && v !== undefined && v !== '' && v !== 0 && v !== '0'
 }
 
+function isStateOnlyWorkflowRole (role: string): boolean {
+  return ['IT', 'CS', 'RIT'].includes(String(role || '').trim().toUpperCase())
+}
+
 function hasRuoloData (d: any, role: string): boolean {
   // stato_* = 0 significa "Non attivo": non deve far risultare il ruolo come nodo corrente.
-  const p = d[`presa_in_carico_${role}`]
   const s = d[`stato_${role}`]
+  if (isStateOnlyWorkflowRole(role)) return meaningful(s)
   const e = d[`esito_${role}`]
-  return meaningful(p) || meaningful(s) || meaningful(e)
+  return meaningful(s) || meaningful(e)
 }
 
 function isInFaseSanzionatoria (d: any): boolean {
-  return meaningful(d['stato_RI_AMM']) || meaningful(d['esito_RI_AMM']) ||
-    meaningful(d['stato_TI_AMM']) || meaningful(d['esito_TI_AMM']) ||
+  return meaningful(d['stato_RIA']) || meaningful(d['esito_RIA']) ||
+    meaningful(d['stato_IA']) || meaningful(d['esito_IA']) ||
     meaningful(d['determinazione_stato']) || meaningful(d['determinazione_numero'])
 }
 
@@ -206,7 +201,7 @@ function getRoleLastTouchMs (d: any, role: string): number | null {
   const vals = [
     parseToMs(d[`dt_presa_in_carico_${role}`]),
     parseToMs(d[`dt_stato_${role}`]),
-    parseToMs(d[`dt_esito_${role}`])
+    ...(['IT', 'CS', 'RIT'].includes(String(role || '').toUpperCase()) ? [] : [parseToMs(d[`dt_esito_${role}`])])
   ].filter((v): v is number => v !== null)
   return vals.length ? Math.max(...vals) : null
 }
@@ -219,19 +214,17 @@ function getLastTouchMs (d: any): number | null {
     parseToMs(d['CreationDate_1']),
     parseToMs(d['CreationDate'])
   ]
-  ;['DA', 'TI_AMM', 'RI_AMM', 'DT', 'RI', 'RZ', 'TI', 'TR'].forEach(r => candidates.push(getRoleLastTouchMs(d, r)))
+  ;['DA', 'IA', 'RIA', 'DT', 'RIT', 'CS', 'IT', 'TR'].forEach(r => candidates.push(getRoleLastTouchMs(d, r)))
   const vals = candidates.filter((v): v is number => v !== null)
   return vals.length ? Math.max(...vals) : null
 }
 
 function getTiIstruttoriaInfo (d: any) {
-  const tiUser = String(d['ti_assegnato_username'] ?? d['ti_assegnato_user'] ?? d['ti_assegnato'] ?? '').trim()
-  const higherTouched = hasRuoloData(d, 'RI') || hasRuoloData(d, 'DT') || hasRuoloData(d, 'DA')
-  const statoTiRaw = d['stato_TI'] ?? d['stato_ti']
-  const esitoTiRaw = d['esito_TI'] ?? d['esito_ti']
+  const tiUser = String(d['it_assegnato_username'] ?? '').trim()
+  const higherTouched = hasRuoloData(d, 'RIT') || hasRuoloData(d, 'DT') || hasRuoloData(d, 'DA')
+  const statoTiRaw = d['stato_IT']
   const statoTiNum = statoTiRaw !== null && statoTiRaw !== undefined && statoTiRaw !== '' ? Number(statoTiRaw) : null
-  const esitoTiNum = esitoTiRaw !== null && esitoTiRaw !== undefined && esitoTiRaw !== '' ? Number(esitoTiRaw) : null
-  const tiReturned = (esitoTiNum !== null && Number.isFinite(esitoTiNum)) || statoTiNum === 4 || statoTiNum === 5
+  const tiReturned = statoTiNum === 4 || statoTiNum === 5
   return { isInTiIstruttoria: !!tiUser && !higherTouched && !tiReturned }
 }
 
@@ -239,32 +232,32 @@ function isRecordVisibleForCurrentUser (d: any, user: GiiUserInfo | null): boole
   if (!user) return false
   if (user.isAdmin || user.isWorkflowAdmin) return true
 
-  const role = getEffectiveRole(user.ruoloCod || user.ruoloLabel || '', user.areaCod)
+  const role = getEffectiveRole(user.ruoloCod || '', user.areaCod)
   if (!role) return true
 
   const archVal = d['GII_arch'] ?? d['gii_arch'] ?? d['GII_ARCH']
   if (archVal !== null && archVal !== undefined && archVal !== '' && Number(archVal) === 1) return false
 
   const isAmmArea = user.areaCod === 'AMM'
-  if (role === 'DA' || role === 'RI_AMM' || role === 'TI_AMM' || (isAmmArea && (role === 'RI' || role === 'TI'))) {
+  if (role === 'DA' || role === 'RIA' || role === 'IA') {
     if (!isInFaseSanzionatoria(d)) return false
-    if (role === 'TI_AMM') {
-      return isPracticeAssignedToCurrentTiAmm(d, user)
+    if (role === 'IA') {
+      return isPracticeAssignedToCurrentIa(d, user)
     }
     return true
   }
 
-  if (role === 'TI') {
+  if (role === 'IT') {
     const meUser = String(user.username || '').trim()
     const meName = String(user.fullName ?? user.nome ?? user.displayName ?? '').trim()
     const opRaw = d['origine_pratica']
     const opNum = opRaw !== null && opRaw !== undefined && opRaw !== '' ? Number(opRaw) : null
-    const tiUser = String(d['ti_assegnato_username'] ?? d['ti_assegnato_user'] ?? d['ti_assegnato'] ?? '').trim()
-    const tiName = String(d['ti_assegnato_nome'] ?? d['ti_assegnato_name'] ?? '').trim()
+    const tiUser = String(d['it_assegnato_username'] ?? '').trim()
+    const tiName = String(d['it_assegnato_nome'] ?? '').trim()
     const assignedToMe = equalsUser(tiUser, meUser) || equalsUser(tiName, meUser) || (meName ? equalsUser(tiName, meName) : false)
     const creatorVals = [d['created_user'], d['Creator'], d['creator'], d['username'], d['user_name'], d['utente'], d['utente_ins'], d['created_by'], d['submitter'], d['owner']]
     const createdByMe = creatorVals.some(v => equalsUser(v, meUser) || (meName ? equalsUser(v, meName) : false))
-    const hasTiWorkflow = hasRuoloData(d, 'TI')
+    const hasTiWorkflow = hasRuoloData(d, 'IT')
 
     if (opNum === 1) {
       if (!tiUser && !tiName && !hasTiWorkflow) return false
@@ -281,17 +274,17 @@ function isRecordVisibleForCurrentUser (d: any, user: GiiUserInfo | null): boole
   return true
 }
 
-function isWaitingForTiAmmAfterRiAmm (d: any): boolean {
-  const riAmmLast = getRoleLastTouchMs(d, 'RI_AMM')
-  const tiAmmLast = getRoleLastTouchMs(d, 'TI_AMM')
-  return hasRuoloData(d, 'TI_AMM') && (
-    tiAmmLast === null || riAmmLast === null || tiAmmLast > riAmmLast
+function isWaitingForIaAfterRia (d: any): boolean {
+  const riaLast = getRoleLastTouchMs(d, 'RIA')
+  const iaLast = getRoleLastTouchMs(d, 'IA')
+  return hasRuoloData(d, 'IA') && (
+    iaLast === null || riaLast === null || iaLast > riaLast
   )
 }
 
 function isAttesaMia (d: any, user: GiiUserInfo | null): boolean {
   if (!user || user.isAdmin || user.isWorkflowAdmin) return false
-  const role = getEffectiveRole(user.ruoloCod || user.ruoloLabel || '', user.areaCod)
+  const role = getEffectiveRole(user.ruoloCod || '', user.areaCod)
   if (role === 'DA') return false
   const statoField = getStatoFieldForRuolo(role)
   const val = d[statoField]
@@ -300,57 +293,57 @@ function isAttesaMia (d: any, user: GiiUserInfo | null): boolean {
   // DT: dopo la presa in carico (n===2) la pratica è ancora da gestire dal ruolo corrente.
   if (role === 'DT' && n === 2) return true
 
-  if ((role === 'TI' || role === 'TI_AMM') && n === 2) {
-    if (role === 'TI_AMM') return isPracticeAssignedToCurrentTiAmm(d, user)
+  if ((role === 'IT' || role === 'IA') && n === 2) {
+    if (role === 'IA') return isPracticeAssignedToCurrentIa(d, user)
     const meUser = String(user.username || '').trim()
     const meName = String(user.fullName ?? user.nome ?? user.displayName ?? '').trim()
-    const tiUser = String(d['ti_assegnato_username'] ?? d['ti_assegnato_user'] ?? d['ti_assegnato'] ?? '').trim()
-    const tiName = String(d['ti_assegnato_nome'] ?? d['ti_assegnato_name'] ?? '').trim()
+    const tiUser = String(d['it_assegnato_username'] ?? '').trim()
+    const tiName = String(d['it_assegnato_nome'] ?? '').trim()
     return equalsUser(tiUser, meUser) || equalsUser(tiName, meUser) || (meName ? equalsUser(tiName, meName) : false)
   }
 
-  if (role === 'RI_AMM' && n === 2) return !isWaitingForTiAmmAfterRiAmm(d)
-  if (role === 'RZ' && getTiIstruttoriaInfo(d).isInTiIstruttoria) return false
+  if (role === 'RIA' && n === 2) return !isWaitingForIaAfterRia(d)
+  if (role === 'CS' && getTiIstruttoriaInfo(d).isInTiIstruttoria) return false
   return n === 0 || n === 1 || n === 3
 }
 
 function isAttesaAltri (d: any, user: GiiUserInfo | null): boolean {
   if (!user || user.isAdmin || user.isWorkflowAdmin) return false
-  const role = getEffectiveRole(user.ruoloCod || user.ruoloLabel || '', user.areaCod)
+  const role = getEffectiveRole(user.ruoloCod || '', user.areaCod)
   if (role === 'DA') return false
   const statoField = getStatoFieldForRuolo(role)
   const val = d[statoField]
   const n = val != null && val !== '' ? Number(val) : null
-  if (role === 'RZ' && getTiIstruttoriaInfo(d).isInTiIstruttoria) return true
+  if (role === 'CS' && getTiIstruttoriaInfo(d).isInTiIstruttoria) return true
   if (role === 'DT' && n === 2) return false
-  if ((role === 'TI' || role === 'TI_AMM') && n === 2) return !isAttesaMia(d, user)
-  if (role === 'RI_AMM' && n === 2) return isWaitingForTiAmmAfterRiAmm(d)
+  if ((role === 'IT' || role === 'IA') && n === 2) return !isAttesaMia(d, user)
+  if (role === 'RIA' && n === 2) return isWaitingForIaAfterRia(d)
   return n === 2 || n === 4
 }
 
 function getActiveRole (d: any): string {
-  const roles = ['TI_AMM', 'RI_AMM', 'DT', 'RI', 'RZ', 'TI', 'TR']
+  const roles = ['IA', 'RIA', 'DT', 'RIT', 'CS', 'IT', 'TR']
   for (const r of roles) if (hasRuoloData(d, r)) return r
   return 'N/D'
 }
 
 function faseLabel (role: string): string {
   const r = String(role || '').trim().toUpperCase()
-  if (r === 'TR' || r === 'TI' || r === 'RZ' || r === 'RI') return 'Istruttoria tecnica'
+  if (r === 'TR' || r === 'IT' || r === 'CS' || r === 'RIT') return 'Istruttoria tecnica'
   if (r === 'DT') return 'Approvazione tecnica'
-  if (r === 'RI_AMM' || r === 'TI_AMM' || r === 'DA') return 'Istruttoria amministrativa'
+  if (r === 'RIA' || r === 'IA' || r === 'DA') return 'Istruttoria amministrativa'
   return 'Non determinata'
 }
 
 function ruoloOperativoLabel (role: string): string {
   const r = String(role || '').trim().toUpperCase()
   if (r === 'TR') return 'Tecnico rilevatore'
-  if (r === 'TI') return 'Tecnico istruttore'
-  if (r === 'RZ') return 'Capo Settore'
-  if (r === 'RI') return 'Responsabile istruttoria'
+  if (r === 'IT') return 'Istruttore tecnico'
+  if (r === 'CS') return 'Capo Settore'
+  if (r === 'RIT') return 'Responsabile istruttoria tecnica'
   if (r === 'DT') return 'Direttore tecnico'
-  if (r === 'TI_AMM') return 'Tecnico istruttore amministrativo'
-  if (r === 'RI_AMM') return 'Responsabile istruttoria amministrativo'
+  if (r === 'IA') return 'Istruttore amministrativo'
+  if (r === 'RIA') return 'Responsabile istruttoria amministrativa'
   if (r === 'DA') return 'Direttore Area AA. GG. e P.F.'
   if (r === 'ADMIN') return 'Amministratore'
   return 'Non determinato'
@@ -381,7 +374,7 @@ function getNumeroRapporto (d: any): string {
   const opRaw = d['origine_pratica'] ?? d['Origine_pratica'] ?? d['ORIGINE_PRATICA']
   const op = String(opRaw ?? '').trim().toUpperCase()
   let prefix = 'TR'
-  if (op === '2' || op === 'TI') prefix = 'TI'
+  if (op === '2' || op === 'IT') prefix = 'IT'
   else if (op === '1' || op === 'TR') prefix = 'TR'
   return `${prefix}-${oid}`
 }
@@ -1109,7 +1102,7 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
   }, [])
 
   const view = React.useMemo(() => pickRuntimeViewForUser(user), [user?.username, user?.ruoloCod, user?.areaCod, user?.settoreCod, user?.ruoloLabel, user?.area, user?.settore, user?.isAdmin, user?.isWorkflowAdmin])
-  const effectiveRole = getEffectiveRole(user?.ruoloCod || user?.ruoloLabel || '', user?.areaCod || '')
+  const effectiveRole = getEffectiveRole(user?.ruoloCod || '', user?.areaCod || '')
 
   React.useEffect(() => {
     let cancelled = false

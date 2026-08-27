@@ -68,8 +68,8 @@ export const DETAIL_DEFAULT_TAB_FIELDS: TabFields = {
     'data_firma'
   ],
   iterExtra: [
-    'stato_TI',
-    'dt_stato_TI'
+    'stato_IT',
+    'dt_stato_IT'
   ]
 }
 
@@ -163,18 +163,12 @@ export interface Config {
   // --- Sfondo titolo pratica
   detailTitleBg: string
 
-  // --- Pulsanti editing TI
+  // --- Pulsanti editing tecnico
   showEditButtons: boolean          // mostra/nasconde i pulsanti modifica
   editOverlayColor: string          // colore pulsante "Modifica (overlay)"
   editPageColor: string             // colore pulsante "Modifica (pagina)"
   editPageId: string                // ID pagina ExB destinazione navigazione
   // Logica abilitazione: il pulsante è attivo solo se
-  // stato_TI >= editMinStato E stato_TI <= editMaxStato
-  fieldStatoTI: string              // nome campo stato TI (es. stato_TI)
-  fieldPresaTI: string              // nome campo presa in carico TI (es. presa_in_carico_TI)
-  editMinStato: number              // valore minimo stato_TI per consentire editing
-  editMaxStato: number              // valore massimo stato_TI per consentire editing
-  editPresaRequiredVal: number      // valore presa_in_carico_TI richiesto (es. 2 = presa)
 
   // --- TAB CONFIGURABILI
   tabs: TabConfig[]
@@ -267,16 +261,11 @@ export const defaultConfig: Config = {
     { id: 'mappa', label: 'Mappa', fields: [], locked: true }
   ],
 
-  // Editing TI
+  // Editing tecnico
   showEditButtons: true,
   editOverlayColor: '#7c3aed',
   editPageColor: '#5b21b6',
-  editPageId: 'editing-ti',
-  fieldStatoTI: 'stato_TI',
-  fieldPresaTI: 'presa_in_carico_TI',
-  editMinStato: 2,
-  editMaxStato: 2,
-  editPresaRequiredVal: 2,
+  editPageId: 'editing-tec',
 
   presets: [
     {

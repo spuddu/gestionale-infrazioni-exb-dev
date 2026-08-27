@@ -973,7 +973,7 @@ Ditta “${trasgressore}”.`)
       {
         fase: 'Attestazione',
         nominativo: v(m, 'amm_iter_compilazione_nome'),
-        ruolo: 'Tecnico istruttore',
+        ruolo: 'Istruttore amministrativo',
         presa: v(m, 'amm_iter_compilazione_presa'),
         esito: 'Attestazione di conformità',
         data: v(m, 'amm_iter_compilazione_data')
@@ -981,7 +981,7 @@ Ditta “${trasgressore}”.`)
       {
         fase: 'Approvazione',
         nominativo: v(m, 'amm_iter_supervisione_nome'),
-        ruolo: 'Responsabile istruttoria',
+        ruolo: 'Responsabile istruttoria amministrativa',
         presa: v(m, 'amm_iter_supervisione_presa'),
         esito: 'Istruttoria amministrativa approvata',
         data: v(m, 'amm_iter_supervisione_data')

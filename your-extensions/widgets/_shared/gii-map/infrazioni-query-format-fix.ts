@@ -3,7 +3,7 @@
 // 1) La vista puo' restituire HTTP 400 alle query PBF usate da FeatureLayerView2D
 //    e FeatureTable: si forza quindi JSON.
 // 2) La WebMap storica contiene il filtro `req_point <> 0`. Il campo req_point,
-//    pero', viene scritto solo al salvataggio di gii-editing-ti e puo' essere NULL
+//    pero', viene scritto solo al salvataggio di gii-editing-tec e puo' essere NULL
 //    nelle nuove rilevazioni Survey123. La finalita' del filtro resta corretta
 //    (mostrare solo pratiche che richiedono un punto), ma il criterio deve essere
 //    ricalcolato dalle violazioni correnti, come fa computeReqPoint().

@@ -314,7 +314,7 @@ function getFallbackDomainOptions (fieldName: string): Array<{ code: any, name: 
       { code: 'DS', name: 'Manutenzione opere di dreno e di scolo' }
     ]
   }
-  if (/^stato_(TI_AMM|RI_AMM|DA)$/i.test(fieldName)) {
+  if (/^stato_(IA|RIA|DA)$/i.test(fieldName)) {
     return [
       { code: 0, name: 'Non attivo' },
       { code: 1, name: 'Da prendere in carico' },
@@ -324,7 +324,7 @@ function getFallbackDomainOptions (fieldName: string): Array<{ code: any, name: 
       { code: 5, name: 'Respinto' }
     ]
   }
-  if (/^esito_(TI_AMM|RI_AMM|DA|DT)$/i.test(fieldName)) {
+  if (/^esito_(IA|RIA|DA|DT)$/i.test(fieldName)) {
     return [
       { code: 1, name: 'Integrazione richiesta' },
       { code: 2, name: 'Approvata' },
@@ -1438,7 +1438,7 @@ function buildSanzioneGroups (
 
     // Per l'Art. 30 i raccordi identificano esclusivamente la tipologia e il
     // riferimento normativo. Codice, descrizione e importo applicati alla pratica
-    // devono provenire sempre dallo snapshot tecnico congelato dal TI, anche quando
+    // devono provenire sempre dallo snapshot tecnico congelato dall'IT, anche quando
     // ATT-001...ATT-004 esistono nella tabella dei parametri correnti.
     const suppressArt30SnapshotVoce = !!raccordoArt30Kind && hasArt30RealRaRows
     if (raccordoArt30Kind && !hasArt30RealRaRows) {

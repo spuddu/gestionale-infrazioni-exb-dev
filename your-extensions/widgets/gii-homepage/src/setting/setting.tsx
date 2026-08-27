@@ -519,10 +519,10 @@ function TextStyleControls(p: {
   )
 }
 const ROLE_OPTIONS = [
-  {value:'*',label:'Tutti'},{value:'TR',label:'TR'},{value:'TI',label:'TI'},
-  {value:'RZ',label:'RZ'},{value:'RI',label:'RI'},{value:'DT',label:'DT'},
-  {value:'DA',label:'DA'},{value:'RI_AMM',label:'RI_AMM'},
-  {value:'TI_AMM',label:'TI_AMM'},{value:'ADMIN',label:'ADMIN'}
+  {value:'*',label:'Tutti'},{value:'TR',label:'Tecnico rilevatore'},{value:'IT',label:'Istruttore tecnico'},
+  {value:'CS',label:'Capo Settore'},{value:'RIT',label:'Responsabile istruttoria tecnica'},{value:'RIA',label:'Responsabile istruttoria amministrativa'},{value:'DT',label:'Direttore tecnico'},
+  {value:'DA',label:'Direttore amministrativo'},{value:'RIA',label:'Responsabile istruttoria amministrativa'},
+  {value:'IA',label:'Istruttore amministrativo'},{value:'ADMIN',label:'Amministratore'}
 ]
 const ICON_OPTIONS = [
   {value:'home',        label:'🏠 Home'},

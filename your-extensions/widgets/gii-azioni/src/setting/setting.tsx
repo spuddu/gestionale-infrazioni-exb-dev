@@ -112,7 +112,7 @@ export default function Setting(props: Props) {
       <Acc id='colori' label='🎨 Colori pulsanti' open={isOpen('colori')} onToggle={()=>toggle('colori')}/>
       {isOpen('colori') && <div>
         {([
-          ['takeColor','takeTextColor','Prendi in carico / Assegna TI'],
+          ['takeColor','takeTextColor','Prendi in carico / Assegna Istruttore tecnico'],
           ['approvaColor','approvaTextColor','Trasmetti a …'],
           ['approvaRapportoColor','approvaRapportoTextColor','Approva Rapporto / Sanzione'],
           ['integrazioneColor','integrazioneTextColor','Integrazione / Rimanda a DT'],
@@ -178,20 +178,10 @@ export default function Setting(props: Props) {
         </div>
         <label style={P.lbl}>Pagina modifica tecnica (ID ExB)</label>
         <Inp value={cfgJs.editPageId??defaultConfig.editPageId} onChange={v=>patch({editPageId:v})} placeholder='page_45'/>
-        <label style={P.lbl}>Pagina modifica amministrativa TI_AMM (ID ExB)</label>
+        <label style={P.lbl}>Pagina modifica amministrativa — Istruttore amministrativo (ID ExB)</label>
         <Inp value={cfgJs.editAmmPageId??defaultConfig.editAmmPageId} onChange={v=>patch({editAmmPageId:v})} placeholder='page_48'/>
         <div style={P.hint}>Default: page_48. Usare l'ID ExB esatto della pagina; se l'ID è errato, il widget segnala l'errore senza applicare fallback.</div>
-        <div style={P.grp}>Campi e condizioni</div>
-        <div style={P.row2}>
-          <div><label style={P.lbl}>Campo stato TI</label><Inp value={cfgJs.fieldStatoTI??defaultConfig.fieldStatoTI} onChange={v=>patch({fieldStatoTI:v})}/></div>
-          <div><label style={P.lbl}>Campo presa TI</label><Inp value={cfgJs.fieldPresaTI??defaultConfig.fieldPresaTI} onChange={v=>patch({fieldPresaTI:v})}/></div>
-        </div>
-        <div style={P.row3}>
-          <div><label style={P.lbl}>Val. presa req.</label><NumInp value={parseNum(cfgJs.editPresaRequiredVal,defaultConfig.editPresaRequiredVal)} onChange={n=>patch({editPresaRequiredVal:n})} min={0}/></div>
-          <div><label style={P.lbl}>Stato min</label><NumInp value={parseNum(cfgJs.editMinStato,defaultConfig.editMinStato)} onChange={n=>patch({editMinStato:n})} min={0}/></div>
-          <div><label style={P.lbl}>Stato max</label><NumInp value={parseNum(cfgJs.editMaxStato,defaultConfig.editMaxStato)} onChange={n=>patch({editMaxStato:n})} min={0}/></div>
-        </div>
-        <div style={P.hint}>Per TI/TI_AMM il pulsante Modifica richiede assegnazione al profilo corrente, presa in carico e nodo non ancora chiuso/trasmesso.</div>
+        <div style={P.hint}>Per Istruttore tecnico e Istruttore amministrativo il pulsante Modifica richiede assegnazione al profilo corrente, presa in carico e nodo non ancora chiuso/trasmesso.</div>
       </div>}
 
       {/* ═══ NOTA SPESE ═══ */}

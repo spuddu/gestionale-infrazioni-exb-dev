@@ -6,28 +6,22 @@ import { defaultConfig } from '../config'
 
 
 const GII_PORTAL     = 'https://cbsm-hub.maps.arcgis.com'
-const RUOLO_LABEL: Record<number, string> = { 1:'TR', 2:'TI', 3:'RZ', 4:'RI', 5:'DT', 6:'DA', 7:'ADMIN' }
 const RUOLO_FULL:  Record<string, string> = {
-  TR:'Tecnico Rilevatore', TI:'Tecnico Istruttore', RZ:'Responsabile di Zona',
-  RI:'Responsabile Istruttoria', TI_AMM:'Tecnico Istruttore Amministrativo',
-  RI_AMM:'Responsabile Istruttoria Amministrativo', DT:'Direttore Tecnico',
+  TR:'Tecnico Rilevatore', IT:'Istruttore tecnico', IA:'Istruttore amministrativo', CS:'Capo Settore',
+  RIT:'Responsabile istruttoria tecnica', RIA:'Responsabile istruttoria amministrativa', DT:'Direttore Tecnico',
   DA:'Direttore Amministrativo', ADMIN:'Amministratore'
 }
 const AREA_LABEL: Record<number, string> = { 1:'AMM', 2:'AGR', 3:'TEC' }
-const RUOLI_VALIDI = new Set(['TR', 'TI', 'TI_AMM', 'RZ', 'RI', 'RI_AMM', 'DT', 'DA', 'ADMIN'])
+const RUOLI_VALIDI = new Set(['TR', 'IT', 'IA', 'CS', 'RIT', 'RIA', 'DT', 'DA', 'ADMIN'])
 const AREE_VALIDE = new Set(['AMM', 'AGR', 'TEC'])
 
 function normCode(value: any): string {
   return String(value ?? '').trim().toUpperCase()
 }
 
-function normalizeRoleCode(value: any, numericFallback: any, isAdmin?: boolean): string {
-  const direct = normCode(value)
+function normalizeRoleCode(value: any, isAdmin?: boolean): string {
+  const direct = normCode(value).replace(/[\s-]+/g, '_')
   if (RUOLI_VALIDI.has(direct)) return direct
-
-  const legacy = numericFallback != null && numericFallback !== '' ? Number(numericFallback) : NaN
-  if (Number.isFinite(legacy) && RUOLO_LABEL[legacy]) return RUOLO_LABEL[legacy]
-
   if (isAdmin) return 'ADMIN'
   return ''
 }
@@ -45,14 +39,13 @@ function normalizeAreaCode(value: any, numericFallback: any): string {
 function resolveWorkflowRole(ruoloLabel: string, area: string): string {
   const role = normCode(ruoloLabel)
   const areaCode = normCode(area)
-  if (role === 'TI_AMM' || (role === 'TI' && areaCode === 'AMM')) return 'TI_AMM'
-  if (role === 'RI_AMM' || (role === 'RI' && areaCode === 'AMM')) return 'RI_AMM'
+  if (role === 'IA') return 'IA'
+  if (role === 'RIA') return 'RIA'
   return role
 }
 
 function normalizeSectorCode(value: any, numericFallback: any): string {
-  const directRaw = normCode(value)
-  const direct = directRaw === 'CS' ? 'DS' : directRaw
+  const direct = normCode(value)
   if (direct) return direct
 
   const legacy = numericFallback != null && numericFallback !== '' ? Number(numericFallback) : NaN
@@ -69,21 +62,29 @@ function isSignedIn(): boolean {
   } catch { return false }
 }
 
-interface UserInfo { username: string; fullName: string; ruoloLabel: string; ruoloFull: string; area: string; settore: string; isAdmin: boolean }
+interface UserInfo { username: string; fullName: string; ruoloLabel: string; ruoloFull: string; area: string; settore: string; roleCodes: string[]; isAdmin: boolean }
 
 async function loadUser(): Promise<UserInfo | null> {
   const cached: any = (window as any).__giiUserRole
   if (cached?.username) {
     const area = normalizeAreaCode(cached.areaCod ?? cached.area_cod ?? cached.areaLabel, cached.area)
     const rawRole = normalizeRoleCode(
-      cached.profiloCod ?? cached.profilo_cod ?? cached.ruoloCod ?? cached.ruolo_cod ?? cached.ruoloLabel,
-      cached.ruolo,
+      cached.profiloCod ?? cached.profilo_cod ?? cached.ruoloCod ?? cached.ruolo_cod,
       cached.isAdmin
     )
     const ruoloLabel = resolveWorkflowRole(rawRole, area)
     const settore = normalizeSectorCode(cached.settoreCod ?? cached.settore_cod ?? cached.settoreLabel, cached.settore)
     const isAdmin = cached.isAdmin === true || ruoloLabel === 'ADMIN'
     const profiloLabel = String(cached.profiloLabel || cached.profilo_label || '').trim()
+    const roleCodes = new Set<string>()
+    if (ruoloLabel) roleCodes.add(ruoloLabel)
+    const assignments = Array.isArray(cached.assignments) ? cached.assignments : []
+    assignments.forEach((assignment: any) => {
+      const assignmentArea = normalizeAreaCode(assignment?.areaCod ?? assignment?.area_cod, assignment?.area)
+      const assignmentRawRole = normalizeRoleCode(assignment?.profiloCod ?? assignment?.profilo_cod ?? assignment?.ruoloCod ?? assignment?.ruolo_cod, false)
+      const assignmentRole = resolveWorkflowRole(assignmentRawRole, assignmentArea)
+      if (assignmentRole) roleCodes.add(assignmentRole)
+    })
 
     return {
       username: String(cached.username),
@@ -92,6 +93,7 @@ async function loadUser(): Promise<UserInfo | null> {
       ruoloFull: profiloLabel || RUOLO_FULL[ruoloLabel] || ruoloLabel,
       area,
       settore,
+      roleCodes: Array.from(roleCodes),
       isAdmin
     }
   }
@@ -301,7 +303,8 @@ export default function Widget(props: Props) {
     if (uLoad) return false
     if (!user) return false
     if (user.isAdmin) return true
-    return item.roles.includes(user.ruoloLabel)
+    const effectiveRoles = user.roleCodes?.length ? user.roleCodes : [user.ruoloLabel]
+    return item.roles.some(role => effectiveRoles.includes(role))
   }
 
   const visibleItems = [...items].sort((a, b) => a.order - b.order).filter(isVisible)

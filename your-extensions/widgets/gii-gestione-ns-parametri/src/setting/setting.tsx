@@ -115,15 +115,15 @@ export default function Setting(props: AllWidgetSettingProps<IMConfig>) {
 
         <label style={lbl}>URL tabella parametri nota spese</label>
         <input style={inp} value={cfg.serviceUrl || ''} onChange={(e) => set('serviceUrl', e.target.value)} placeholder="https://services2.arcgis.com/.../FeatureServer/0" />
-        <div style={hint}>Utilizzata dai RI delle Aree Agraria e Tecnica e dall'ADMIN.</div>
+        <div style={hint}>Utilizzata dai Responsabili istruttoria tecnica delle Aree Agraria e Tecnica e dall'Amministratore.</div>
 
         <label style={lbl}>URL vista editabile sanzioni, riduzioni e cauzione (AMM)</label>
         <input style={inp} value={cfg.serviceUrlSanzioniAmm || ''} onChange={(e) => set('serviceUrlSanzioniAmm', e.target.value)} placeholder="https://services2.arcgis.com/.../FeatureServer/0" />
-        <div style={hint}>Vista filtrata sulle categorie SANZIONE, RIDUZIONE e CAUZIONE. Utilizzata dal RI_AMM e dall'ADMIN.</div>
+        <div style={hint}>Vista filtrata sulle categorie SANZIONE, RIDUZIONE e CAUZIONE. Utilizzata dal RIA e dall'ADMIN.</div>
 
         <label style={lbl}>URL vista editabile attrezzature (AGR/TEC)</label>
         <input style={inp} value={cfg.serviceUrlAttrezzatureAgrTec || ''} onChange={(e) => set('serviceUrlAttrezzatureAgrTec', e.target.value)} placeholder="https://services2.arcgis.com/.../FeatureServer/0" />
-        <div style={hint}>Vista filtrata sulla categoria ATTREZZATURA. Utilizzata dai RI delle Aree Agraria e Tecnica e dall'ADMIN.</div>
+        <div style={hint}>Vista filtrata sulla categoria ATTREZZATURA. Utilizzata dai Responsabili istruttoria tecnica delle Aree Agraria e Tecnica e dall'Amministratore.</div>
       </div>
 
       <div style={hint}>Il profilo corrente è sempre letto dal cw header. Codice e categoria del parametro restano bloccati durante la modifica di un record esistente.</div>

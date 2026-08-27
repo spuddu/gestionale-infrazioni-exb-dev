@@ -33,7 +33,7 @@ export const GII_ATTACHMENT_KEYWORDS = {
   propostaContestazione: 'GII_PROPOSTA_CONTESTAZIONE_PDF',
   attoFinale: 'GII_ATTO_FINALE_PDF', // compatibilità con le patch sperimentali 141-144
   attoContestazione: 'GII_ATTO_CONTESTAZIONE_PDF',
-  approvedBozzaReference: 'GII_BOZZA_APPROVATA_RI_AMM_REFERENCE'
+  approvedBozzaReference: 'GII_BOZZA_APPROVATA_RIA_REFERENCE'
 } as const
 
 function normalizeGiiAttachmentText (value?: string): string {

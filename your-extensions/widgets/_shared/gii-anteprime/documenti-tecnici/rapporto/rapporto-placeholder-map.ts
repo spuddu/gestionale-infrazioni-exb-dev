@@ -8,7 +8,6 @@ import { buildRapportoIterPlaceholders, normalizeAreaCode, normalizeSettoreCode,
 
 export type UtenteCached = {
   full_name: string
-  ruolo: number | null
   area: number | null
   settore: number | null
   ruolo_cod?: string
@@ -139,9 +138,9 @@ function isRapportoRespintoForPdf (data: any): boolean {
 
   // La filigrana RESPINTO deve dipendere dall'esito/evento conclusivo.
   // Alcune viste espongono però lo stato conclusivo e non l'esito: per
-  // questo intercetto anche stato_rz/stato_dt = STATO_RESPINTA.
+  // questo intercetto anche stato_cs/stato_dt = STATO_RESPINTA.
   const statoVals = [
-    pickAttrCI(d, ['stato_rz', 'STATO_RZ']),
+    pickAttrCI(d, ['stato_cs', 'STATO_CS']),
     pickAttrCI(d, ['stato_dt', 'STATO_DT'])
   ].map(v => {
     const n = Number(v)
@@ -151,7 +150,6 @@ function isRapportoRespintoForPdf (data: any): boolean {
   if (statoVals.includes(STATO_RESPINTA)) return true
 
   const esitoVals = [
-    pickAttrCI(d, ['esito_rz', 'ESITO_RZ']),
     pickAttrCI(d, ['esito_dt', 'ESITO_DT'])
   ].map(v => {
     const n = Number(v)
@@ -161,9 +159,8 @@ function isRapportoRespintoForPdf (data: any): boolean {
   if (esitoVals.includes(ESITO_RESPINTA)) return true
 
   const txtVals = [
-    pickAttrCI(d, ['stato_rz_label', 'STATO_RZ_LABEL', 'stato_rz', 'STATO_RZ']),
+    pickAttrCI(d, ['stato_cs_label', 'STATO_CS_LABEL', 'stato_cs', 'STATO_CS']),
     pickAttrCI(d, ['stato_dt_label', 'STATO_DT_LABEL', 'stato_dt', 'STATO_DT']),
-    pickAttrCI(d, ['esito_rz_label', 'ESITO_RZ_LABEL', 'esito_rz', 'ESITO_RZ']),
     pickAttrCI(d, ['esito_dt_label', 'ESITO_DT_LABEL', 'esito_dt', 'ESITO_DT']),
     pickAttrCI(d, ['ultimo_evento', 'ULTIMO_EVENTO', 'ultimo_evento_codice', 'ULTIMO_EVENTO_CODICE'])
   ]

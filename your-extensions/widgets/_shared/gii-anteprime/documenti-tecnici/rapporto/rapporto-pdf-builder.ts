@@ -44,7 +44,7 @@ function firstMeaningfulValue (...vals: any[]): any {
 function isRoleSectorSyntheticLabel (value: any): boolean {
   const s = String(value ?? '').trim().toUpperCase().replace(/[\s_\-]+/g, ' ')
   if (!s) return false
-  return /^(TR|TI|RZ|RI|DT)\s+(D[1-6]|DS|CR|GI|AGR|TEC|AMM)$/.test(s)
+  return /^(TR|IT|CS|RIT|DT)\s+(D[1-6]|DS|CR|GI|AGR|TEC|AMM)$/.test(s)
 }
 
 function firstPersonLikeValue (...vals: any[]): string {
@@ -113,18 +113,14 @@ function isRapportoRespinto (m: Record<string, string>): boolean {
 
   const statoVals = [
     m.stato_finale,
-    m.stato_rz,
-    m.stato_dt,
-    m.stato_ri,
-    m.stato_ti
+    m.stato_cs,
+    m.stato_dt
   ]
 
   const esitoVals = [
     m.esito_finale,
-    m.esito_rz,
-    m.esito_dt,
-    m.esito_ri,
-    m.esito_ti
+    m.esito_cs,
+    m.esito_dt
   ]
 
   if (statoVals.some(v => statusCodeIs(v, 5))) return true
@@ -137,9 +133,9 @@ function isRapportoRespinto (m: Record<string, string>): boolean {
     m.ultimo_evento_codice,
     m.stato_finale_label,
     m.esito_finale_label,
-    m.stato_rz_label,
+    m.stato_cs_label,
     m.stato_dt_label,
-    m.esito_rz_label,
+    m.esito_cs_label,
     m.esito_dt_label
   ]
 
@@ -287,7 +283,6 @@ export function normalizeAreaCode (value: any): 'AMM' | 'AGR' | 'TEC' | '' {
 export function normalizeSettoreCode (areaCode: string, value: any): string {
   const s = String(value ?? '').trim().toUpperCase()
   if (!s) return ''
-  if (s === 'CS') return 'DS'
   if (s === '1') return 'CR'
   if (s === '2') return 'GI'
   if (s === '3') return 'D1'
@@ -312,7 +307,7 @@ function isRawAreaCodeLabel (label: string): boolean {
 
 function isRawSettoreCodeLabel (label: string): boolean {
   const s = String(label ?? '').trim().toUpperCase().replace(/\s+/g, '')
-  return s === 'CR' || s === 'GI' || s === 'DS' || s === 'CS' || /^D[1-6]$/.test(s) || /^[1-9]$/.test(s)
+  return s === 'CR' || s === 'GI' || s === 'DS' || /^D[1-6]$/.test(s) || /^[1-9]$/.test(s)
 }
 
 function resolveAreaLabel (areaCode: string, labelValue: any): string {
@@ -332,7 +327,6 @@ function resolveSettoreLabel (areaCode: string, settoreCode: string, labelValue:
   // Se il chiamante passa una label già risolta da dominio AGOL, preservala.
   if (code && label && labelCode === code && !isRawSettoreCodeLabel(label)) return label
   if (code && (!label || labelCode === code)) return SETTORE_LABELS[code] || code
-  if (labelCode === 'DS' && /\bCS\b/i.test(label)) return SETTORE_LABELS.DS
   return label
 }
 
@@ -490,7 +484,6 @@ const ROWS: Array<{ art: string; top: number }> = [
 // resta accanto al builder del rapporto e non viene duplicata nei runtime.
 export type UtenteCacheEntry = {
   full_name?: string
-  ruolo?: number | null
   area?: number | null
   settore?: number | null
   ruolo_cod?: string
@@ -514,7 +507,7 @@ export type RapportoIterCicloPdf = {
 export type RapportoIterPlaceholders = {
   firma_tr: string
   firma_ti: string
-  firma_rz: string
+  firma_cs: string
   firma_ri: string
   firma_dt: string
   iter_rilevazione_nome: string
@@ -538,7 +531,7 @@ export type RapportoIterPlaceholders = {
 const GII_LOG_EVENTI_CICLI_URL = 'https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_LOG_EVENTI_CICLI/FeatureServer/0'
 
 const AREA_NUM: Record<string, number> = { AMM: 1, AGR: 2, TEC: 3 }
-const SETTORE_NUM: Record<string, number> = { CR: 1, GI: 2, D1: 3, D2: 4, D3: 5, D4: 6, D5: 7, D6: 8, DS: 9, CS: 9 }
+const SETTORE_NUM: Record<string, number> = { CR: 1, GI: 2, D1: 3, D2: 4, D3: 5, D4: 6, D5: 7, D6: 8, DS: 9 }
 
 function esc (s: any): string {
   return String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
@@ -560,16 +553,16 @@ function pickAttrCI (obj: any, keys: string[]): any {
   return undefined
 }
 
-function normalizeRoleCode (v: any): 'TR' | 'TI' | 'RZ' | 'RI' | 'DT' | 'DA' | 'ADMIN' | '' {
+function normalizeRoleCode (v: any): 'TR' | 'IT' | 'CS' | 'RIT' | 'DT' | 'DA' | 'ADMIN' | '' {
   const s = String(v ?? '').trim().toUpperCase().replace(/[\s-]+/g, '_')
   if (!s) return ''
-  if (s === '1' || s === 'TR' || s.startsWith('TR_') || s.includes('TECNICO_RILEVATORE')) return 'TR'
-  if (s === '2' || s === 'TI' || s === 'TI_AMM' || s.startsWith('TI_') || s.includes('TECNICO_ISTRUTTORE')) return 'TI'
-  if (s === '3' || s === 'RZ' || s.startsWith('RZ_') || s.includes('RESPONSABILE_DI_ZONA')) return 'RZ'
-  if (s === '4' || s === 'RI' || s === 'RI_AMM' || s.startsWith('RI_') || s.includes('RESPONSABILE_ISTRUTTORIA')) return 'RI'
-  if (s === '5' || s === 'DT' || s.startsWith('DT_') || s.includes('DIRETTORE_TECNICO')) return 'DT'
-  if (s === '6' || s === 'DA' || s.startsWith('DA_') || s.includes('DIRETTORE_AMMINISTRATIVO')) return 'DA'
-  if (s === '7' || s === 'ADMIN' || s.includes('AMMINISTRATORE')) return 'ADMIN'
+  if (s === 'TR' || s.startsWith('TR_') || s.includes('TECNICO_RILEVATORE')) return 'TR'
+  if (s === 'IT' || s.startsWith('IT_') || s.includes('ISTRUTTORE_TECNICO')) return 'IT'
+  if (s === 'CS' || s.startsWith('CS_') || s.includes('CAPO_SETTORE')) return 'CS'
+  if (s === 'RIT' || s.startsWith('RIT_') || s.includes('RESPONSABILE_ISTRUTTORIA_TECNICA')) return 'RIT'
+  if (s === 'DT' || s.startsWith('DT_') || s.includes('DIRETTORE_TECNICO')) return 'DT'
+  if (s === 'DA' || s.startsWith('DA_') || s.includes('DIRETTORE_AMMINISTRATIVO')) return 'DA'
+  if (s === 'ADMIN' || s.includes('AMMINISTRATORE')) return 'ADMIN'
   return ''
 }
 
@@ -585,7 +578,6 @@ function normalizeIterAreaCode (v: any): 'AGR' | 'TEC' | 'AMM' | '' {
 function normalizeIterSettoreCode (area: string, v: any): string {
   const s = String(v ?? '').trim().toUpperCase().replace(/\s+/g, '')
   if (!s) return ''
-  if (s === 'CS') return 'DS'
   if (s === '1') return 'CR'
   if (s === '2') return 'GI'
   if (s === '3') return 'D1'
@@ -683,7 +675,7 @@ export async function loadRapportoIterCicliForPdf (globalId: any): Promise<Rappo
   }
 }
 
-function findFirstPresaInCaricoFromCicli (cicli: RapportoIterCicloPdf[], ruolo: 'TI' | 'RZ' | 'RI' | 'DT'): string {
+function findFirstPresaInCaricoFromCicli (cicli: RapportoIterCicloPdf[], ruolo: 'IT' | 'CS' | 'RIT' | 'DT'): string {
   const role = ruolo.toUpperCase()
   const found = sortIterCicliAsc(cicli).find(c => {
     const r = normalizeRoleCode(c.ruolo_competente)
@@ -695,7 +687,7 @@ function findFirstPresaInCaricoFromCicli (cicli: RapportoIterCicloPdf[], ruolo: 
 
 function findLastChiusuraFromCicli (
   cicli: RapportoIterCicloPdf[],
-  ruolo: 'TI' | 'RZ' | 'RI' | 'DT',
+  ruolo: 'IT' | 'CS' | 'RIT' | 'DT',
   eventi: string[],
   destinatari?: string[]
 ): string {
@@ -716,7 +708,7 @@ function findLastChiusuraFromCicli (
 }
 
 function entryRole (entry: UtenteCacheEntry): string {
-  return normalizeRoleCode(firstMeaningfulValue(entry.ruolo_cod, entry.ruoloCod, entry.ruolo))
+  return normalizeRoleCode(firstMeaningfulValue(entry.ruolo_cod, entry.ruoloCod))
 }
 
 function entryArea (entry: UtenteCacheEntry): string {
@@ -728,9 +720,9 @@ function entrySettore (entry: UtenteCacheEntry): string {
   return normalizeIterSettoreCode(area, firstMeaningfulValue(entry.settore_cod, entry.settoreCod, entry.settore))
 }
 
-function findUserFullName (cache: Map<string, any> | null, ruoloNum: number, areaNum?: number, settoreNum?: number): string {
+function findUserFullName (cache: Map<string, any> | null, ruoloCod: string, areaNum?: number, settoreNum?: number): string {
   if (!cache) return ''
-  const targetRole = normalizeRoleCode(ruoloNum)
+  const targetRole = normalizeRoleCode(ruoloCod)
   const targetArea = areaNum != null ? normalizeIterAreaCode(areaNum) : ''
   const targetSettore = settoreNum != null ? normalizeIterSettoreCode(targetArea, settoreNum) : ''
   for (const [, entry] of cache) {
@@ -770,22 +762,22 @@ export function buildRapportoIterPlaceholders (opts: {
   const areaN = AREA_NUM[areaCod] ?? null
   const settoreN = SETTORE_NUM[settoreCod] ?? null
 
-  const presaDateFromFieldIfTaken = (ruolo: 'TI' | 'RZ' | 'RI' | 'DT'): string => {
+  const presaDateFromFieldIfTaken = (ruolo: 'IT' | 'CS' | 'RIT' | 'DT'): string => {
     const stato = Number(rawFrom(d, `stato_${ruolo}`))
     if (!Number.isFinite(stato) || stato <= 1) return ''
     return dateFrom(d, `dt_presa_in_carico_${ruolo}`)
   }
 
-  const iterTiPresa = findFirstPresaInCaricoFromCicli(cicli, 'TI') || (!hasIterCicli ? presaDateFromFieldIfTaken('TI') : '')
-  const iterRzPresa = findFirstPresaInCaricoFromCicli(cicli, 'RZ') || (!hasIterCicli ? presaDateFromFieldIfTaken('RZ') : '')
-  const iterRiPresa = findFirstPresaInCaricoFromCicli(cicli, 'RI') || (!hasIterCicli ? presaDateFromFieldIfTaken('RI') : '')
+  const iterItPresa = findFirstPresaInCaricoFromCicli(cicli, 'IT') || (!hasIterCicli ? presaDateFromFieldIfTaken('IT') : '')
+  const iterCsPresa = findFirstPresaInCaricoFromCicli(cicli, 'CS') || (!hasIterCicli ? presaDateFromFieldIfTaken('CS') : '')
+  const iterRitPresa = findFirstPresaInCaricoFromCicli(cicli, 'RIT') || (!hasIterCicli ? presaDateFromFieldIfTaken('RIT') : '')
   const iterDtPresa = findFirstPresaInCaricoFromCicli(cicli, 'DT') || (!hasIterCicli ? presaDateFromFieldIfTaken('DT') : '')
 
   // Le date di chiusura fase arrivano dai cicli effettivi, non da stato_*/dt_stato_*.
-  // In particolare, un rimando RZ→TI non è una verifica RZ e non deve valorizzare la riga Verifica.
-  const iterTiCompilazione = findLastChiusuraFromCicli(cicli, 'TI', ['ISTRUTTORIA_TRASMESSA', 'INTEGRAZIONE_TRASMESSA'], ['RZ']) || (!hasIterCicli ? dateFrom(d, 'dt_esito_TI') : '')
-  const iterRzVerifica = findLastChiusuraFromCicli(cicli, 'RZ', ['ISTRUTTORIA_TRASMESSA'], ['RI']) || (!hasIterCicli ? dateFrom(d, 'dt_esito_RZ') : '')
-  const iterRiSupervisione = findLastChiusuraFromCicli(cicli, 'RI', ['ISTRUTTORIA_TRASMESSA'], ['DT']) || (!hasIterCicli ? dateFrom(d, 'dt_esito_RI') : '')
+  // In particolare, un rimando CS→IT non è una verifica CS e non deve valorizzare la riga Verifica.
+  const iterItCompilazione = findLastChiusuraFromCicli(cicli, 'IT', ['ISTRUTTORIA_TRASMESSA', 'INTEGRAZIONE_TRASMESSA'], ['CS'])
+  const iterCsVerifica = findLastChiusuraFromCicli(cicli, 'CS', ['ISTRUTTORIA_TRASMESSA'], ['RIT']) || ''
+  const iterRitSupervisione = findLastChiusuraFromCicli(cicli, 'RIT', ['ISTRUTTORIA_TRASMESSA'], ['DT']) || (!hasIterCicli ? dateFrom(d, 'dt_stato_RIT') : '')
   const iterDtApprovazione = findLastChiusuraFromCicli(cicli, 'DT', ['RAPPORTO_APPROVATO']) || (!hasIterCicli ? dateFrom(d, 'dt_esito_DT') : '')
 
   const tecnicoRilevatoreRaw = firstMeaningfulValue(pickAttrCI(d, ['tecnico_rilevatore']), pickAttrCI(d, ['TECNICO_RILEVATORE']))
@@ -795,38 +787,38 @@ export function buildRapportoIterPlaceholders (opts: {
   )
   const nomeTRDaUtente = findFullNameByUsername(opts.utentiCache, firstPersonLikeValue(creatoreRilevazioneRaw, tecnicoRilevatoreRaw))
   const nomeTRDaRuoloSettore = isRoleSectorSyntheticLabel(tecnicoRilevatoreRaw)
-    ? findUserFullName(opts.utentiCache, 1, areaN ?? undefined, settoreN ?? undefined)
+    ? findUserFullName(opts.utentiCache, 'TR', areaN ?? undefined, settoreN ?? undefined)
     : ''
   const nomeTR = firstPersonLikeValue(nomeTRDaUtente, nomeTRDaRuoloSettore, tecnicoRilevatoreRaw)
-  const nomeTI = firstMeaningfulValue(
-    pickAttrCI(d, ['ti_assegnato_nome']),
-    findFullNameByUsername(opts.utentiCache, pickAttrCI(d, ['ti_assegnato_username']) || ''),
+  const nomeIT = firstMeaningfulValue(
+    pickAttrCI(d, ['it_assegnato_nome']),
+    findFullNameByUsername(opts.utentiCache, pickAttrCI(d, ['it_assegnato_username']) || ''),
     findFullNameByUsername(opts.utentiCache, pickAttrCI(d, ['tecnico_rilevatore']) || '')
   ) || ''
-  const nomeRZ = findUserFullName(opts.utentiCache, 3, areaN ?? undefined, settoreN ?? undefined)
-  const nomeRI = findUserFullName(opts.utentiCache, 4, areaN ?? undefined)
-  const nomeDT = findUserFullName(opts.utentiCache, 5, areaN ?? undefined)
+  const nomeCS = findUserFullName(opts.utentiCache, 'CS', areaN ?? undefined, settoreN ?? undefined)
+  const nomeRIT = findUserFullName(opts.utentiCache, 'RIT', areaN ?? undefined)
+  const nomeDT = findUserFullName(opts.utentiCache, 'DT', areaN ?? undefined)
 
   const dataApprovazioneRapporto = opts.rapportoApprovato ? iterDtApprovazione : ''
 
   return {
     firma_tr: esc(nomeTR),
-    firma_ti: esc(nomeTI),
-    firma_rz: esc(nomeRZ),
-    firma_ri: esc(nomeRI),
+    firma_ti: esc(nomeIT),
+    firma_cs: esc(nomeCS),
+    firma_ri: esc(nomeRIT),
     firma_dt: esc(nomeDT),
     iter_rilevazione_nome: esc(nomeTR),
     iter_rilevazione_presa: '-',
     iter_rilevazione_data: formatDateIt(pickAttrCI(d, ['data_rilevazione', 'DATA_RILEVAZIONE'])),
-    iter_compilazione_nome: esc(nomeTI),
-    iter_compilazione_presa: iterTiPresa,
-    iter_compilazione_data: iterTiCompilazione,
-    iter_verifica_nome: esc(nomeRZ),
-    iter_verifica_presa: iterRzPresa,
-    iter_verifica_data: iterRzVerifica,
-    iter_supervisione_nome: esc(nomeRI),
-    iter_supervisione_presa: iterRiPresa,
-    iter_supervisione_data: iterRiSupervisione,
+    iter_compilazione_nome: esc(nomeIT),
+    iter_compilazione_presa: iterItPresa,
+    iter_compilazione_data: iterItCompilazione,
+    iter_verifica_nome: esc(nomeCS),
+    iter_verifica_presa: iterCsPresa,
+    iter_verifica_data: iterCsVerifica,
+    iter_supervisione_nome: esc(nomeRIT),
+    iter_supervisione_presa: iterRitPresa,
+    iter_supervisione_data: iterRitSupervisione,
     iter_approvazione_nome: esc(nomeDT),
     iter_approvazione_presa: iterDtPresa,
     iter_approvazione_data: dataApprovazioneRapporto,
@@ -1012,7 +1004,7 @@ export async function buildRapportoPdf (m: Record<string, string>): Promise<Uint
   const iterRows: Array<{ top: number; nome: string; presa: string; data: string }> = [
     { top: 703.36, nome: v('iter_rilevazione_nome') || v('firma_tr'), presa: v('iter_rilevazione_presa'), data: v('iter_rilevazione_data') || v('data_rilevazione') },
     { top: 720.88, nome: v('iter_compilazione_nome') || v('firma_ti'), presa: v('iter_compilazione_presa'), data: v('iter_compilazione_data') },
-    { top: 738.34, nome: v('iter_verifica_nome') || v('firma_rz'), presa: v('iter_verifica_presa'), data: v('iter_verifica_data') },
+    { top: 738.34, nome: v('iter_verifica_nome') || v('firma_cs'), presa: v('iter_verifica_presa'), data: v('iter_verifica_data') },
     { top: 755.80, nome: v('iter_supervisione_nome') || v('firma_ri'), presa: v('iter_supervisione_presa'), data: v('iter_supervisione_data') },
     { top: 773.32, nome: v('iter_approvazione_nome') || v('firma_dt'), presa: v('iter_approvazione_presa'), data: v('iter_approvazione_data') }
   ]

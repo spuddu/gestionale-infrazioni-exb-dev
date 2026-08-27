@@ -723,7 +723,7 @@ const styles = `
 
 export default function Widget(props: AllWidgetProps<IMConfig>) {
   const cfg: any = props.config || {}
-  // Segnali scritti da gii-editing-ti prima di navigare qui:
+  // Segnali scritti da gii-editing-tec prima di navigare qui:
   // - FORCE: si sta aggiungendo un'attrezzatura non recuperabile (Art.30) — ha senso solo il
   //   prezzario Attrezzature, lo selezioniamo direttamente e nascondiamo la scelta sorgente.
   // - EXCLUDE: si sta aggiungendo una nota spese per un'attrezzatura recuperabile già scelta —
@@ -737,7 +737,7 @@ export default function Widget(props: AllWidgetProps<IMConfig>) {
   })
   // I widget ExB restano montati tra una navigazione di pagina e l'altra: senza questo effect,
   // i due flag sopra resterebbero congelati al valore letto al primo mount, anche quando
-  // gii-editing-ti li aggiorna prima di rimandare qui l'utente una seconda volta (es. da "non
+  // gii-editing-tec li aggiorna prima di rimandare qui l'utente una seconda volta (es. da "non
   // recuperabile" a "recuperabile"). Si rileggono ad ogni segnale plausibile di cambio pagina.
   React.useEffect(() => {
     const reread = () => {

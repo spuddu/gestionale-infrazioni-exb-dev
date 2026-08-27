@@ -1,7 +1,7 @@
 // =================================================================
 // fascicolo-builder.ts
 // PUNTO UNICO di costruzione del fascicolo documentale usato dal viewer condiviso
-// incorporato in gii-editing-ti e gii-editing-amm. gii-azioni non costruisce e non
+// incorporato in gii-editing-tec e gii-editing-amm. gii-azioni non costruisce e non
 // visualizza più il fascicolo. I documenti amministrativi speciali (Proposta di
 // contestazione e bozza di determinazione) non vengono ricostruiti qui: il viewer
 // usa esclusivamente i PDF realmente allegati alla pratica.
@@ -21,7 +21,7 @@ import { getGiiAttachmentKind, isGiiSpecialAdministrativeAttachment } from './al
 import { RAPPORTO_TECHNICAL_BODY_BOX, drawRapportoTechnicalHeadersByPage, attachmentTechnicalDocumentTitle, wrapMapPdfBlobWithRapportoTechnicalHeader } from './documenti-tecnici/rapporto/technical-document-header'
 import { listGiiPrintableMapLayers, ensureGiiPrintableMapLayersReady, computePrintExtentForView, buildGiiMapLegendItemsForView, type GiiPrintableMapLayerItem } from './viewer-documenti/map-layers'
 
-// Mother layer: stesso URL usato da gii-editing-ti, confermato leggibile da
+// Mother layer: stesso URL usato da gii-editing-tec, confermato leggibile da
 // tutti i ruoli (tecnici e amministrativi). Unica fonte dati del builder.
 const FASCICOLO_MOTHER_LAYER_URL = 'https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_INFRAZIONI_VIEW_ALL/FeatureServer/0'
 

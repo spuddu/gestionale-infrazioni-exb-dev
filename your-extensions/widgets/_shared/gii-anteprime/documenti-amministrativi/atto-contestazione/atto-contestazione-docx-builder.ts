@@ -12,8 +12,8 @@ export type AttoContestazioneDocxOptions = {
   watermarkBozza?: boolean
   participants?: {
     da?: AttoParticipantIdentity
-    riAmm?: AttoParticipantIdentity
-    tiAmm?: AttoParticipantIdentity
+    ria?: AttoParticipantIdentity
+    ia?: AttoParticipantIdentity
   }
 }
 
@@ -212,8 +212,8 @@ function conditionalLastPageField (text: string, bold = false): string {
 }
 function buildLastPageFooter (tokens: Record<string, string>): string {
   const da = clean(tokens['{{SIGLA_DA}}'])
-  const ri = clean(tokens['{{SIGLA_RI_AMM}}'])
-  const ti = clean(tokens['{{SIGLA_TI_AMM}}'])
+  const ria = clean(tokens['{{SIGLA_RIA}}'])
+  const ia = clean(tokens['{{SIGLA_IA}}'])
   const areaLine = 'AREA AA.GG. e PROGRAMMAZIONE FINANZIARIA'
   const mailLine = 'cbsm@cbsm.it  –  cbsm@pec.cbsm.it'
   const tab = '<w:r><w:tab/></w:r>'
@@ -233,11 +233,11 @@ function buildLastPageFooter (tokens: Record<string, string>): string {
       `${tab}${tab}${tab}${conditionalLastPageField(areaLine, true)}` +
     `</w:p>` +
     `<w:p><w:pPr><w:spacing w:before="0" w:after="0"/></w:pPr>` +
-      `${conditionalLastPageField('C.Sett.', false)}${space}${tab}${conditionalLastPageField(ri, true)}${space}` +
+      `${conditionalLastPageField('C.Sett.', false)}${space}${tab}${conditionalLastPageField(ria, true)}${space}` +
       `${tab}${tab}${tab}${spaces12}${conditionalLastPageField(mailLine, true)}` +
     `</w:p>` +
     `<w:p><w:pPr><w:spacing w:before="0" w:after="0"/></w:pPr>` +
-      `${conditionalLastPageField('Coll.       ', false)}${conditionalLastPageField(ti, true)}` +
+      `${conditionalLastPageField('Coll.       ', false)}${conditionalLastPageField(ia, true)}` +
     `</w:p>` +
     `</w:ftr>`
 }
@@ -255,8 +255,8 @@ function buildTokens (data: any, fields: any[], profile: { username: string, ful
   // nome/cognome/titolo della tabella GII_utenti. Non si usa mai full_name,
   // username, ruolo o altre etichette come fonte delle iniziali.
   const da = options?.participants?.da
-  const riAmm = options?.participants?.riAmm
-  const tiAmm = options?.participants?.tiAmm
+  const ria = options?.participants?.ria
+  const ia = options?.participants?.ia
   const daDisplayName = personDisplayName(da, true)
   return {
     '{{DEST_FORMULA}}': isPg ? 'Spett.le' : 'Egr. Sig.',
@@ -274,8 +274,8 @@ function buildTokens (data: any, fields: any[], profile: { username: string, ful
     '{{PAGAMENTO}}': paymentText(m),
     '{{AVVERTENZE}}': 'Avvertenze e strumenti di tutela\n[DA COMPLETARE/VERIFICARE PRIMA DELLA NOTIFICA]',
     '{{SIGLA_DA}}': personInitials(da),
-    '{{SIGLA_RI_AMM}}': personInitials(riAmm),
-    '{{SIGLA_TI_AMM}}': personInitials(tiAmm),
+    '{{SIGLA_RIA}}': personInitials(ria),
+    '{{SIGLA_IA}}': personInitials(ia),
     '{{DA_NOME}}': daDisplayName ? `(${daDisplayName})` : '(________________________)'
   }
 }

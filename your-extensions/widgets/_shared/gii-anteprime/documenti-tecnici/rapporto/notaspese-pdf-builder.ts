@@ -210,7 +210,6 @@ function normalizeAreaCode(value: any): 'AMM' | 'AGR' | 'TEC' | '' {
 function normalizeSettoreCode(areaCode: string, value: any): string {
   const s = String(value ?? '').trim().toUpperCase()
   if (!s) return ''
-  if (s === 'CS') return 'DS'
   if (s === '1') return areaCode === 'AGR' ? 'D1' : 'CR'
   if (s === '2') return areaCode === 'AGR' ? 'D2' : 'GI'
   if (s === '3') return 'D1'
@@ -235,7 +234,7 @@ function isRawAreaCodeLabel(label: string): boolean {
 
 function isRawSettoreCodeLabel(label: string): boolean {
   const s = String(label ?? '').trim().toUpperCase().replace(/\s+/g, '')
-  return s === 'CR' || s === 'GI' || s === 'DS' || s === 'CS' || /^D[1-6]$/.test(s) || /^[1-9]$/.test(s)
+  return s === 'CR' || s === 'GI' || s === 'DS' || /^D[1-6]$/.test(s) || /^[1-9]$/.test(s)
 }
 
 function resolveAreaLabel(areaCode: string, labelValue: any): string {
@@ -255,7 +254,6 @@ function resolveSettoreLabel(areaCode: string, settoreCode: string, labelValue: 
   // Se il chiamante passa una label già risolta da dominio AGOL, preservala.
   if (code && label && labelCode === code && !isRawSettoreCodeLabel(label)) return label
   if (code && (!label || labelCode === code)) return SETTORE_LABELS[code] || code
-  if (labelCode === 'DS' && /\bCS\b/i.test(label)) return SETTORE_LABELS.DS
   return label
 }
 
@@ -694,7 +692,7 @@ export async function buildNotaSpesePdf(data: NotaSpeseData): Promise<Uint8Array
 
   ensureSpace(50)
   txt(pg, data.luogo_data || '', fontR, 9, ML, centeredY(top, 14, 9), CLR_BLACK)
-  rightAligned(pg, 'Il tecnico istruttore', fontR, 9, ML, TW, centeredY(top, 14, 9), CLR_BLACK, 0)
+  rightAligned(pg, 'L’istruttore tecnico', fontR, 9, ML, TW, centeredY(top, 14, 9), CLR_BLACK, 0)
   top += 20
   rightAligned(pg, data.firma_nome || '', fontB, 9, ML, TW, centeredY(top, 14, 9), CLR_BLACK, 0)
 

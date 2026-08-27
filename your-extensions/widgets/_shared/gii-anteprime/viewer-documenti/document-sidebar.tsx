@@ -4,7 +4,7 @@ import { React, jsx } from 'jimu-core'
 import type { GiiAttachmentPrintOption, GiiDocumentPrintOptions, GiiNotaSpesePrintOption } from './document-options'
 import { getGiiAttachmentKind } from '../allegati/gii-attachment-viewer'
 
-type DocumentKey = keyof Pick<GiiDocumentPrintOptions, 'includeRapporto' | 'includeNotaSpese' | 'includeMappa' | 'includeAllegatiTecnici' | 'includeAllegatiAmministrativi' | 'includePropostaContestazione' | 'includeDeterminazione' | 'includeAttoContestazione'>
+type DocumentKey = keyof Pick<GiiDocumentPrintOptions, 'includeRapporto' | 'includeNotaSpese' | 'includeMappa' | 'includeAllegatiTecnici' | 'includeAllegaiainistrativi' | 'includePropostaContestazione' | 'includeDeterminazione' | 'includeAttoContestazione'>
 
 export type GiiDocumentSidebarAvailability = {
   notaSpese: boolean
@@ -92,7 +92,7 @@ export default function GiiDocumentSidebar (props: GiiDocumentSidebarProps) {
       key === 'includeNotaSpese' ? !availability.notaSpese :
       key === 'includeMappa' ? (!availability.mappa || !canUseMap) :
       key === 'includeAllegatiTecnici' ? technicalAttachments.length === 0 :
-      key === 'includeAllegatiAmministrativi' ? administrativeAttachments.length === 0 :
+      key === 'includeAllegaiainistrativi' ? administrativeAttachments.length === 0 :
       key === 'includePropostaContestazione' ? !availability.propostaContestazione :
       key === 'includeDeterminazione' ? !availability.determinazione :
       key === 'includeAttoContestazione' ? !availability.attoContestazione :
@@ -182,7 +182,7 @@ export default function GiiDocumentSidebar (props: GiiDocumentSidebarProps) {
             {renderDocCheckbox('includePropostaContestazione', 'Proposta di contestazione')}
             {renderDocCheckbox('includeDeterminazione', 'Determinazione dirigenziale')}
             {renderDocCheckbox('includeAttoContestazione', 'Atto di accertamento/contestazione')}
-            {renderDocCheckbox('includeAllegatiAmministrativi', 'Allegati')}
+            {renderDocCheckbox('includeAllegaiainistrativi', 'Allegati')}
           </div>
         </div>
       )}
@@ -212,7 +212,7 @@ export default function GiiDocumentSidebar (props: GiiDocumentSidebarProps) {
         </div>
       )}
 
-      {((docOptions.includeAllegatiTecnici && technicalAttachments.length > 0) || (docOptions.includeAllegatiAmministrativi && administrativeAttachments.length > 0)) && (() => {
+      {((docOptions.includeAllegatiTecnici && technicalAttachments.length > 0) || (docOptions.includeAllegaiainistrativi && administrativeAttachments.length > 0)) && (() => {
         const renderAttachmentRow = (att: GiiAttachmentPrintOption, idx: number) => {
           const checked = (docOptions.selectedAttachmentIds || {})[String(att.id)] !== false
           const meta = [att.name, att.contentType].filter(Boolean).join(' • ')
@@ -234,7 +234,7 @@ export default function GiiDocumentSidebar (props: GiiDocumentSidebarProps) {
         // Ogni gruppo (tecnici/amministrativi) ha il proprio checkbox master indipendente:
         // qui si mostra solo il/i gruppo/i effettivamente attivato/i, mai insieme se uno solo è acceso.
         const showTecnici = docOptions.includeAllegatiTecnici && technicalAttachments.length > 0
-        const showAmministrativi = docOptions.includeAllegatiAmministrativi && administrativeAttachments.length > 0
+        const showAmministrativi = docOptions.includeAllegaiainistrativi && administrativeAttachments.length > 0
         return (
           <div style={{ display: 'grid', gap: 6, paddingTop: 8, borderTop: '1px solid #dbe4ef' }}>
             <div style={{ fontSize: 12, fontWeight: 900, color: '#334155' }}>Allegati da aprire</div>

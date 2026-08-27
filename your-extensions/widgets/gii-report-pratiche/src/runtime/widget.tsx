@@ -2,7 +2,7 @@
 /** @jsxFrag React.Fragment */
 import { React, jsx, type AllWidgetProps } from 'jimu-core'
 import { defaultConfig, type IMConfig } from '../config'
-import { isPracticeAssignedToCurrentTiAmm } from '../../../_shared/gii-access/ti-amm-assignment'
+import { isPracticeAssignedToCurrentIa } from '../../../_shared/gii-access/ia-assignment'
 import {
   pickGiiRuntimeView,
   type GiiRuntimeView as RuntimeDsView
@@ -56,7 +56,6 @@ type GiiUserInfo = {
   full_name?: string
   nome?: string
   displayName?: string
-  ruolo: number | null
   ruoloCod: string
   ruoloLabel: string
   area: number | null
@@ -76,7 +75,6 @@ type SortRule = { key: SortKey; dir: SortDir }
 
 const DEFAULT_SORT_RULES: SortRule[] = [{ key: 'lastUpdate', dir: 'desc' }]
 
-const RUOLO_LABEL: Record<number, string> = { 1: 'TR', 2: 'TI', 3: 'RZ', 4: 'RI', 5: 'DT', 6: 'DA', 7: 'ADMIN' }
 const SETTORE_FROM_CODE: Record<number, string> = { 1: 'CR', 2: 'GI', 3: 'D1', 4: 'D2', 5: 'D3', 6: 'D4', 7: 'D5', 8: 'D6', 9: 'DS' }
 const AREA_LABELS: Record<string, string> = { AGR: 'Agraria', TEC: 'Tecnica', AMM: 'Amministrativa' }
 const SETTORE_LABELS: Record<string, string> = {
@@ -109,7 +107,7 @@ function getDomainGroupFromFieldName (fieldName: string): DomainLabelGroup | nul
   const f = String(fieldName || '').trim().toLowerCase()
   if (f === 'area' || f === 'area_cod' || f === 'areacod') return 'area'
   if (f === 'settore' || f === 'settore_cod' || f === 'settorecod' || f === 'id_settore') return 'settore'
-  if (f === 'ruolo' || f === 'ruolo_cod' || f === 'ruolocod') return 'ruolo'
+  if (f === 'ruolo_cod' || f === 'ruolocod') return 'ruolo'
   return null
 }
 
@@ -121,16 +119,14 @@ function normalizeDomainLookupKey (group: DomainLabelGroup, value: any): string 
     return area || text
   }
   if (group === 'settore') {
-    if (text === 'CS') return 'DS'
     if (SETTORE_TEXT_CODES.has(text)) return text
     const n = Number(value)
     return Number.isFinite(n) ? normalizeSettoreCode(n) : text
   }
   if (group === 'ruolo') {
-    if (text === 'RI AMM' || text === 'RI-AMM') return 'RI_AMM'
-    if (text === 'TI AMM' || text === 'TI-AMM') return 'TI_AMM'
-    const n = Number(value)
-    return Number.isFinite(n) && RUOLO_LABEL[n] ? RUOLO_LABEL[n] : text
+    if (text === 'RIA') return 'RIA'
+    if (text === 'Istruttore amministrativo' || text === 'IA-AMM') return 'IA'
+    return text
   }
   return text
 }
@@ -205,12 +201,12 @@ function loadEsriModule<T = any> (path: string): Promise<T> {
   })
 }
 
+const WORKFLOW_ROLE_CODES = new Set(['TR', 'IT', 'CS', 'RIT', 'DT', 'DA', 'ADMIN', 'RIA', 'IA'])
+
 function normalizeRoleCode (ruolo: any): string {
-  const raw = String(ruolo ?? '').trim().toUpperCase()
+  const raw = String(ruolo ?? '').trim().toUpperCase().replace(/[\s-]+/g, '_')
   if (!raw) return ''
-  const n = Number(raw)
-  if (Number.isFinite(n) && RUOLO_LABEL[n]) return RUOLO_LABEL[n]
-  return raw
+  return WORKFLOW_ROLE_CODES.has(raw) ? raw : ''
 }
 
 function normalizeAreaCode (area: any): 'AMM' | 'AGR' | 'TEC' | '' {
@@ -226,7 +222,6 @@ function normalizeAreaCode (area: any): 'AMM' | 'AGR' | 'TEC' | '' {
 function normalizeSettoreCode (settore: any): string {
   const raw = String(settore ?? '').trim().toUpperCase()
   if (!raw) return ''
-  if (raw === 'CS') return 'DS'
   const n = Number(raw)
   if (Number.isFinite(n) && SETTORE_FROM_CODE[n]) return SETTORE_FROM_CODE[n]
   return raw
@@ -235,14 +230,12 @@ function normalizeSettoreCode (settore: any): string {
 function getEffectiveRole (ruoloLabel: string, area: any, areaCod?: any): string {
   const r = normalizeRoleCode(ruoloLabel)
   const a = normalizeAreaCode(areaCod || area)
-  if (r === 'RI' && a === 'AMM') return 'RI_AMM'
-  if (r === 'TI' && a === 'AMM') return 'TI_AMM'
   return r
 }
 
 function pickRuntimeViewForUser (user: GiiUserInfo | null): RuntimeDsView | null {
   if (!user) return null
-  const role = normalizeRoleCode(user.ruoloCod || user.ruoloLabel)
+  const role = normalizeRoleCode(user.ruoloCod)
   const areaCode = normalizeAreaCode(user.areaCod || user.area)
   const settoreCode = normalizeSettoreCode(user.settoreCod || user.settore)
   return pickGiiRuntimeView({
@@ -257,19 +250,17 @@ function pickRuntimeViewForUser (user: GiiUserInfo | null): RuntimeDsView | null
 function readGiiUser (): GiiUserInfo | null {
   const cached: any = (window as any).__giiUserRole
   if (!cached?.username) return null
-  const ruolo = toNumberOrNull(cached.ruolo)
-  const ruoloCod = normalizeRoleCode(cached.ruoloCod ?? cached.ruolo_cod ?? cached.ruoloLabel ?? cached.ruolo)
+  const ruoloCod = normalizeRoleCode(cached.ruoloCod ?? cached.ruolo_cod)
   const areaCod = normalizeAreaCode(cached.areaCod ?? cached.area_cod ?? cached.area)
   const settoreCod = normalizeSettoreCode(cached.settoreCod ?? cached.settore_cod ?? cached.settore)
-  const isAdmin = !!cached.isAdmin || !!cached.isWorkflowAdmin || ruoloCod === 'ADMIN' || ruolo === 7
-  const ruoloLabel = ruoloCod || (ruolo != null ? (RUOLO_LABEL[ruolo] || '') : (isAdmin ? 'ADMIN' : ''))
+  const isAdmin = !!cached.isAdmin || !!cached.isWorkflowAdmin || ruoloCod === 'ADMIN'
+  const ruoloLabel = ruoloCod || (isAdmin ? 'ADMIN' : '')
   return {
     username: String(cached.username || '').trim(),
     fullName: String(cached.fullName || cached.full_name || cached.nome || cached.displayName || cached.username || '').trim(),
     full_name: String(cached.full_name || cached.fullName || '').trim(),
     nome: String(cached.nome || '').trim(),
     displayName: String(cached.displayName || '').trim(),
-    ruolo,
     ruoloCod: ruoloLabel,
     ruoloLabel,
     area: toNumberOrNull(cached.area),
@@ -285,13 +276,13 @@ function readGiiUser (): GiiUserInfo | null {
 function getStatoFieldForRuolo (ruoloLabel: string): string {
   const r = ruoloLabel.toUpperCase()
   if (r === 'TR') return 'stato_TR'
-  if (r === 'TI') return 'stato_TI'
-  if (r === 'RZ') return 'stato_RZ'
-  if (r === 'RI') return 'stato_RI'
+  if (r === 'IT') return 'stato_IT'
+  if (r === 'CS') return 'stato_CS'
+  if (r === 'RIT') return 'stato_RIT'
   if (r === 'DT') return 'stato_DT'
   if (r === 'DA') return 'determinazione_stato'
-  if (r === 'RI_AMM') return 'stato_RI_AMM'
-  if (r === 'TI_AMM') return 'stato_TI_AMM'
+  if (r === 'RIA') return 'stato_RIA'
+  if (r === 'IA') return 'stato_IA'
   return 'stato_DT'
 }
 
@@ -305,17 +296,21 @@ function meaningful (v: any): boolean {
   return v !== null && v !== undefined && v !== '' && v !== 0 && v !== '0'
 }
 
+function isStateOnlyWorkflowRole (role: string): boolean {
+  return ['IT', 'CS', 'RIT'].includes(String(role || '').trim().toUpperCase())
+}
+
 function hasRuoloData (d: any, role: string): boolean {
   // stato_* = 0 significa "Non attivo": non deve far risultare il ruolo come nodo corrente.
-  const p = pickField(d, `presa_in_carico_${role}`)
   const s = pickField(d, `stato_${role}`)
+  if (isStateOnlyWorkflowRole(role)) return meaningful(s)
   const e = pickField(d, `esito_${role}`)
-  return meaningful(p) || meaningful(s) || meaningful(e)
+  return meaningful(s) || meaningful(e)
 }
 
 function isInFaseSanzionatoria (d: any): boolean {
-  return meaningful(pickField(d, 'stato_RI_AMM')) || meaningful(pickField(d, 'esito_RI_AMM')) ||
-    meaningful(pickField(d, 'stato_TI_AMM')) || meaningful(pickField(d, 'esito_TI_AMM')) ||
+  return meaningful(pickField(d, 'stato_RIA')) || meaningful(pickField(d, 'esito_RIA')) ||
+    meaningful(pickField(d, 'stato_IA')) || meaningful(pickField(d, 'esito_IA')) ||
     meaningful(pickField(d, 'determinazione_stato')) || meaningful(pickField(d, 'determinazione_numero'))
 }
 
@@ -330,7 +325,7 @@ function getRoleLastTouchMs (d: any, role: string): number | null {
   const vals = [
     parseToMs(pickField(d, `dt_presa_in_carico_${role}`)),
     parseToMs(pickField(d, `dt_stato_${role}`)),
-    parseToMs(pickField(d, `dt_esito_${role}`))
+    ...(['IT', 'CS', 'RIT'].includes(String(role || '').toUpperCase()) ? [] : [parseToMs(pickField(d, `dt_esito_${role}`))])
   ].filter((v): v is number => v !== null)
   return vals.length ? Math.max(...vals) : null
 }
@@ -343,7 +338,7 @@ function getLastTouchMs (d: any): number | null {
     parseToMs(d['CreationDate_1']),
     parseToMs(d['CreationDate'])
   ]
-  ;['DA', 'TI_AMM', 'RI_AMM', 'DT', 'RI', 'RZ', 'TI', 'TR'].forEach(r => candidates.push(getRoleLastTouchMs(d, r)))
+  ;['DA', 'IA', 'RIA', 'DT', 'RIT', 'CS', 'IT', 'TR'].forEach(r => candidates.push(getRoleLastTouchMs(d, r)))
   const vals = candidates.filter((v): v is number => v !== null)
   return vals.length ? Math.max(...vals) : null
 }
@@ -353,26 +348,22 @@ function getCreatedMs (d: any): number | null {
 }
 
 function getTiIstruttoriaInfo (d: any) {
-  const tiUser = String(pickField(d, 'ti_assegnato_username') ?? pickField(d, 'ti_assegnato_user') ?? pickField(d, 'ti_assegnato') ?? '').trim()
-  const higherTouched = hasRuoloData(d, 'RI') || hasRuoloData(d, 'DT') || hasRuoloData(d, 'DA')
-  const statoTiRaw = pickField(d, 'stato_TI')
-  const presaTiRaw = pickField(d, 'presa_in_carico_TI')
-  const esitoTiRaw = pickField(d, 'esito_TI')
+  const tiUser = String(pickField(d, 'it_assegnato_username') ?? '').trim()
+  const higherTouched = hasRuoloData(d, 'RIT') || hasRuoloData(d, 'DT') || hasRuoloData(d, 'DA')
+  const statoTiRaw = pickField(d, 'stato_IT')
   const statoTiNum = statoTiRaw !== null && statoTiRaw !== undefined && statoTiRaw !== '' ? Number(statoTiRaw) : null
-  const presaTiNum = presaTiRaw !== null && presaTiRaw !== undefined && presaTiRaw !== '' ? Number(presaTiRaw) : null
-  const esitoTiNum = esitoTiRaw !== null && esitoTiRaw !== undefined && esitoTiRaw !== '' ? Number(esitoTiRaw) : null
-  const tiReturned = (esitoTiNum !== null && Number.isFinite(esitoTiNum)) || statoTiNum === 4 || statoTiNum === 5
-  const tiLastTouchMs = getRoleLastTouchMs(d, 'TI')
-  const rzLastTouchMs = getRoleLastTouchMs(d, 'RZ')
-  const awaitingRetakeByRz = !!tiUser && tiReturned && !higherTouched && tiLastTouchMs !== null && (rzLastTouchMs === null || rzLastTouchMs <= tiLastTouchMs)
-  return { hasAssignedTi: !!tiUser, tiUser, higherTouched, statoTiNum, presaTiNum, esitoTiNum, tiReturned, tiLastTouchMs, rzLastTouchMs, awaitingRetakeByRz, isInTiIstruttoria: !!tiUser && !higherTouched && !tiReturned }
+  const tiReturned = statoTiNum === 4 || statoTiNum === 5
+  const tiLastTouchMs = getRoleLastTouchMs(d, 'IT')
+  const csLastTouchMs = getRoleLastTouchMs(d, 'CS')
+  const awaitingRetakeByCs = !!tiUser && tiReturned && !higherTouched && tiLastTouchMs !== null && (csLastTouchMs === null || csLastTouchMs <= tiLastTouchMs)
+  return { hasAssignedTi: !!tiUser, tiUser, higherTouched, statoTiNum, tiReturned, tiLastTouchMs, csLastTouchMs, awaitingRetakeByCs, isInTiIstruttoria: !!tiUser && !higherTouched && !tiReturned }
 }
 
 function isRecordVisibleForCurrentUser (d: any, user: GiiUserInfo | null): boolean {
   if (!user) return false
   if (user.isAdmin || user.isWorkflowAdmin) return true
 
-  const role = getEffectiveRole(user.ruoloLabel || '', user.area, user.areaCod)
+  const role = getEffectiveRole(user.ruoloCod || '', user.area, user.areaCod)
   if (!role) return true
 
   const archVal = d['GII_arch'] ?? d['gii_arch'] ?? d['GII_ARCH']
@@ -380,25 +371,25 @@ function isRecordVisibleForCurrentUser (d: any, user: GiiUserInfo | null): boole
 
   const areaCode = normalizeAreaCode(user.areaCod || user.area)
   const isAmmArea = areaCode === 'AMM'
-  if (role === 'DA' || role === 'RI_AMM' || role === 'TI_AMM' || (isAmmArea && (role === 'RI' || role === 'TI'))) {
+  if (role === 'DA' || role === 'RIA' || role === 'IA') {
     if (!isInFaseSanzionatoria(d)) return false
-    if (role === 'TI_AMM') {
-      return isPracticeAssignedToCurrentTiAmm(d, user)
+    if (role === 'IA') {
+      return isPracticeAssignedToCurrentIa(d, user)
     }
     return true
   }
 
-  if (role === 'TI') {
+  if (role === 'IT') {
     const meUser = String(user.username || '').trim()
     const meName = String(user.fullName ?? user.nome ?? user.displayName ?? '').trim()
     const opRaw = d['origine_pratica']
     const opNum = opRaw !== null && opRaw !== undefined && opRaw !== '' ? Number(opRaw) : null
-    const tiUser = String(pickField(d, 'ti_assegnato_username') ?? pickField(d, 'ti_assegnato_user') ?? pickField(d, 'ti_assegnato') ?? '').trim()
-    const tiName = String(d['ti_assegnato_nome'] ?? d['ti_assegnato_name'] ?? '').trim()
+    const tiUser = String(pickField(d, 'it_assegnato_username') ?? '').trim()
+    const tiName = String(d['it_assegnato_nome'] ?? '').trim()
     const assignedToMe = equalsUser(tiUser, meUser) || equalsUser(tiName, meUser) || (meName ? equalsUser(tiName, meName) : false)
     const creatorVals = [d['created_user'], d['Creator'], d['creator'], d['username'], d['user_name'], d['utente'], d['utente_ins'], d['created_by'], d['submitter'], d['owner']]
     const createdByMe = creatorVals.some(v => equalsUser(v, meUser) || (meName ? equalsUser(v, meName) : false))
-    const hasTiWorkflow = hasRuoloData(d, 'TI')
+    const hasTiWorkflow = hasRuoloData(d, 'IT')
 
     if (opNum === 1) {
       if (!tiUser && !tiName && !hasTiWorkflow) return false
@@ -415,17 +406,17 @@ function isRecordVisibleForCurrentUser (d: any, user: GiiUserInfo | null): boole
   return true
 }
 
-function isWaitingForTiAmmAfterRiAmm (d: any): boolean {
-  const riAmmLast = getRoleLastTouchMs(d, 'RI_AMM')
-  const tiAmmLast = getRoleLastTouchMs(d, 'TI_AMM')
-  return hasRuoloData(d, 'TI_AMM') && (
-    tiAmmLast === null || riAmmLast === null || tiAmmLast > riAmmLast
+function isWaitingForIaAfterRia (d: any): boolean {
+  const riaLast = getRoleLastTouchMs(d, 'RIA')
+  const iaLast = getRoleLastTouchMs(d, 'IA')
+  return hasRuoloData(d, 'IA') && (
+    iaLast === null || riaLast === null || iaLast > riaLast
   )
 }
 
 function isAttesaMia (d: any, user: GiiUserInfo | null): boolean {
   if (!user || user.isAdmin || user.isWorkflowAdmin) return false
-  const role = getEffectiveRole(user.ruoloLabel || '', user.area, user.areaCod)
+  const role = getEffectiveRole(user.ruoloCod || '', user.area, user.areaCod)
   if (role === 'DA') return false
   const statoField = getStatoFieldForRuolo(role)
   const val = d[statoField]
@@ -434,31 +425,31 @@ function isAttesaMia (d: any, user: GiiUserInfo | null): boolean {
   // DT: dopo la presa in carico (n===2) la pratica è ancora da gestire dal ruolo corrente.
   if (role === 'DT' && n === 2) return true
 
-  if ((role === 'TI' || role === 'TI_AMM') && n === 2) {
-    if (role === 'TI_AMM') return isPracticeAssignedToCurrentTiAmm(d, user)
+  if ((role === 'IT' || role === 'IA') && n === 2) {
+    if (role === 'IA') return isPracticeAssignedToCurrentIa(d, user)
     const meUser = String(user.username || '').trim()
     const meName = String(user.fullName ?? user.nome ?? user.displayName ?? '').trim()
-    const tiUser = String(pickField(d, 'ti_assegnato_username') ?? pickField(d, 'ti_assegnato_user') ?? pickField(d, 'ti_assegnato') ?? '').trim()
-    const tiName = String(d['ti_assegnato_nome'] ?? d['ti_assegnato_name'] ?? '').trim()
+    const tiUser = String(pickField(d, 'it_assegnato_username') ?? '').trim()
+    const tiName = String(d['it_assegnato_nome'] ?? '').trim()
     return equalsUser(tiUser, meUser) || equalsUser(tiName, meUser) || (meName ? equalsUser(tiName, meName) : false)
   }
 
-  if (role === 'RI_AMM' && n === 2) return !isWaitingForTiAmmAfterRiAmm(d)
-  if (role === 'RZ' && getTiIstruttoriaInfo(d).isInTiIstruttoria) return false
+  if (role === 'RIA' && n === 2) return !isWaitingForIaAfterRia(d)
+  if (role === 'CS' && getTiIstruttoriaInfo(d).isInTiIstruttoria) return false
   return n === 0 || n === 1 || n === 3
 }
 
 function isAttesaAltri (d: any, user: GiiUserInfo | null): boolean {
   if (!user || user.isAdmin || user.isWorkflowAdmin) return false
-  const role = getEffectiveRole(user.ruoloLabel || '', user.area, user.areaCod)
+  const role = getEffectiveRole(user.ruoloCod || '', user.area, user.areaCod)
   if (role === 'DA') return false
   const statoField = getStatoFieldForRuolo(role)
   const val = d[statoField]
   const n = val != null && val !== '' ? Number(val) : null
-  if (role === 'RZ' && getTiIstruttoriaInfo(d).isInTiIstruttoria) return true
+  if (role === 'CS' && getTiIstruttoriaInfo(d).isInTiIstruttoria) return true
   if (role === 'DT' && n === 2) return false
-  if ((role === 'TI' || role === 'TI_AMM') && n === 2) return !isAttesaMia(d, user)
-  if (role === 'RI_AMM' && n === 2) return isWaitingForTiAmmAfterRiAmm(d)
+  if ((role === 'IT' || role === 'IA') && n === 2) return !isAttesaMia(d, user)
+  if (role === 'RIA' && n === 2) return isWaitingForIaAfterRia(d)
   return n === 2 || n === 4
 }
 
@@ -477,80 +468,71 @@ function statoNumFromEsito (esito: number): number {
   return 4
 }
 
-function isBozzaDeterminazioneTrasmessaRiAmmReport (d: any): boolean {
+function isBozzaDeterminazioneTrasmessaRiaReport (d: any): boolean {
   const stato = String(pickField(d, 'determinazione_stato') || '').trim().toUpperCase()
-  if (stato === 'TRASMESSA_RI_AMM' || stato === 'BOZZA_TRASMESSA_RI_AMM') return true
-  const statoRiAmm = roleNumValue(d, 'RI_AMM', 'stato')
-  const presaRiAmm = roleNumValue(d, 'RI_AMM', 'presa_in_carico')
-  const statoTiAmm = roleNumValue(d, 'TI_AMM', 'stato')
-  const esitoTiAmm = roleNumValue(d, 'TI_AMM', 'esito')
-  const riAmmOpen = statoRiAmm === 1 || statoRiAmm === 2 || presaRiAmm === 1 || presaRiAmm === 2
-  return riAmmOpen && esitoTiAmm === 2 && statoTiAmm === 4
+  if (stato === 'TRASMESSA_RIA' || stato === 'BOZZA_TRASMESSA_RIA') return true
+  const statoRia = roleNumValue(d, 'RIA', 'stato')
+  const statoIa = roleNumValue(d, 'IA', 'stato')
+  const esitoIa = roleNumValue(d, 'IA', 'esito')
+  const riaOpen = statoRia === 1 || statoRia === 2
+  return riaOpen && esitoIa === 2 && statoIa === 4
 }
 
 function getFwdDest (role: string, d: any): string {
   switch (role) {
-    case 'TI': return 'RZ'
-    case 'RZ': return 'RI'
-    case 'RI': return 'DT'
-    case 'DT': return 'RI_AMM'
-    case 'RI_AMM': return isBozzaDeterminazioneTrasmessaRiAmmReport(d) ? 'TI_AMM' : ''
-    case 'TI_AMM': return isBozzaDeterminazioneTrasmessaRiAmmReport(d) ? 'RI_AMM' : ''
+    case 'IT': return 'CS'
+    case 'CS': return 'RIT'
+    case 'RIT': return 'DT'
+    case 'DT': return 'RIA'
+    case 'RIA': return isBozzaDeterminazioneTrasmessaRiaReport(d) ? 'IA' : ''
+    case 'IA': return isBozzaDeterminazioneTrasmessaRiaReport(d) ? 'RIA' : ''
     default: return ''
   }
 }
 
 function getIntegDest (role: string): string {
   switch (role) {
-    case 'RZ': return 'TI'
-    case 'RI': return 'TI'
-    case 'DT': return 'RI'
-    case 'RI_AMM': return 'RI'
-    case 'TI_AMM': return 'RI_AMM'
+    case 'CS': return 'IT'
+    case 'RIT': return 'IT'
+    case 'DT': return 'RIT'
+    case 'RIA': return 'RIT'
+    case 'IA': return 'RIA'
     default: return ''
   }
 }
 
 function computeSintetico (d: any): { ruolo: string; label: string; statoForChip: number | null } {
-  const scanOrder = ['TI_AMM', 'RI_AMM', 'DT', 'RI', 'RZ', 'TI', 'TR']
+  const scanOrder = ['IA', 'RIA', 'DT', 'RIT', 'CS', 'IT', 'TR']
   const statoDaPrendere = 1
   const statoPresa = 2
   const statoIntegrazione = 3
   const statoApprovata = 4
   const statoRespinta = 5
-  const presaDaPrendere = 1
-  const presaPresa = 2
   const esitoIntegrazione = 1
   const esitoApprovata = 2
   const esitoRespinta = 3
 
   const tiInfo = getTiIstruttoriaInfo(d)
-  if ((tiInfo as any).awaitingRetakeByRz) return { ruolo: 'RZ', label: 'Trasmesso', statoForChip: statoDaPrendere }
+  if ((tiInfo as any).awaitingRetakeByCs) return { ruolo: 'CS', label: 'Trasmesso', statoForChip: statoDaPrendere }
   if ((tiInfo as any).hasAssignedTi && tiInfo.isInTiIstruttoria) {
     const opRaw = pickField(d, 'origine_pratica')
     const isOrigineTi = (opRaw === 2 || opRaw === '2')
-    const rzNeverTouched = !hasRuoloData(d, 'RZ')
-    if (isOrigineTi && rzNeverTouched) return { ruolo: 'TI', label: 'In carico', statoForChip: statoPresa }
+    const csNeverTouched = !hasRuoloData(d, 'CS')
+    if (isOrigineTi && csNeverTouched) return { ruolo: 'IT', label: 'In carico', statoForChip: statoPresa }
     const statoTiNum = (tiInfo as any).statoTiNum
-    const presaTiNum = (tiInfo as any).presaTiNum
     if (statoTiNum !== null && Number.isFinite(statoTiNum)) {
-      if (statoTiNum === statoDaPrendere) return { ruolo: 'TI', label: 'Da prendere in carico', statoForChip: statoDaPrendere }
-      if (statoTiNum === statoPresa) return { ruolo: 'TI', label: 'In carico', statoForChip: statoPresa }
-      return { ruolo: 'TI', label: 'In carico', statoForChip: null }
+      if (statoTiNum === statoDaPrendere) return { ruolo: 'IT', label: 'Da prendere in carico', statoForChip: statoDaPrendere }
+      if (statoTiNum === statoPresa) return { ruolo: 'IT', label: 'In carico', statoForChip: statoPresa }
+      return { ruolo: 'IT', label: 'In carico', statoForChip: null }
     }
-    if (presaTiNum !== null && Number.isFinite(presaTiNum)) {
-      if (presaTiNum === presaDaPrendere) return { ruolo: 'TI', label: 'Da prendere in carico', statoForChip: statoDaPrendere }
-      if (presaTiNum === presaPresa) return { ruolo: 'TI', label: 'In carico', statoForChip: statoPresa }
-    }
-    return { ruolo: 'TI', label: 'Trasmesso', statoForChip: statoDaPrendere }
+    return { ruolo: 'IT', label: 'Trasmesso', statoForChip: statoDaPrendere }
   }
 
   for (const role of scanOrder) {
     if (!hasRuoloData(d, role)) continue
-    const presaRaw = pickField(d, `presa_in_carico_${role}`)
+    const stateOnly = isStateOnlyWorkflowRole(role)
     const statoRaw = pickField(d, `stato_${role}`)
-    const esitoRaw = pickField(d, `esito_${role}`)
-    const presaNum = presaRaw !== null && presaRaw !== undefined && presaRaw !== '' ? Number(presaRaw) : null
+    const esitoRaw = stateOnly ? null : pickField(d, `esito_${role}`)
     const statoNum = statoRaw !== null && statoRaw !== undefined && statoRaw !== '' ? Number(statoRaw) : null
     const esitoNum = esitoRaw !== null && esitoRaw !== undefined && esitoRaw !== '' ? Number(esitoRaw) : null
 
@@ -570,7 +552,7 @@ function computeSintetico (d: any): { ruolo: string; label: string; statoForChip
       if (esitoNum === esitoIntegrazione) {
         const dest = getIntegDest(role)
         if (dest) {
-          const destEsitoRaw = pickField(d, `esito_${dest}`)
+          const destEsitoRaw = isStateOnlyWorkflowRole(dest) ? null : pickField(d, `esito_${dest}`)
           const destEsitoNum = destEsitoRaw !== null && destEsitoRaw !== undefined && destEsitoRaw !== '' ? Number(destEsitoRaw) : null
           if (destEsitoNum == null) {
             if (hasRuoloData(d, dest)) {
@@ -605,24 +587,20 @@ function computeSintetico (d: any): { ruolo: string; label: string; statoForChip
       return { ruolo: role, label: statoLabel(statoNum), statoForChip: statoNum }
     }
 
-    if (presaNum !== null && Number.isFinite(presaNum)) {
-      if (presaNum === presaDaPrendere) return { ruolo: role, label: 'Trasmesso', statoForChip: statoDaPrendere }
-      if (presaNum === presaPresa) return { ruolo: role, label: 'In carico', statoForChip: statoPresa }
-    }
     return { ruolo: role, label: 'In carico', statoForChip: null }
   }
 
   const op = pickField(d, 'origine_pratica')
   const opNum = op !== null && op !== undefined && op !== '' ? Number(op) : null
-  if (opNum === 2) return { ruolo: 'TI', label: 'In carico', statoForChip: statoPresa }
-  return { ruolo: 'RZ', label: 'Da prendere in carico', statoForChip: statoDaPrendere }
+  if (opNum === 2) return { ruolo: 'IT', label: 'In carico', statoForChip: statoPresa }
+  return { ruolo: 'CS', label: 'Da prendere in carico', statoForChip: statoDaPrendere }
 }
 
 function getActiveRole (d: any): string {
   return computeSintetico(d).ruolo
 }
 
-function roleNumValue (d: any, role: string, field: 'stato' | 'esito' | 'presa_in_carico'): number | null {
+function roleNumValue (d: any, role: string, field: 'stato' | 'esito'): number | null {
   const v = pickField(d, `${field}_${role}`)
   if (v === null || v === undefined || v === '') return null
   const n = Number(v)
@@ -663,12 +641,12 @@ function faseProcedimentaleLabel (d: any): string {
 function ruoloPressoLabel (d: any): string {
   const r = String(getRuoloPressoCuiSiTrova(d) || '').toUpperCase()
   if (r === 'TR') return 'Tecnico rilevatore'
-  if (r === 'TI') return 'Tecnico istruttore'
-  if (r === 'RZ') return 'Responsabile di zona'
-  if (r === 'RI') return 'Responsabile istruttoria'
+  if (r === 'IT') return 'Istruttore tecnico'
+  if (r === 'CS') return 'Capo Settore'
+  if (r === 'RIT') return 'Responsabile istruttoria tecnica'
   if (r === 'DT') return 'Direttore tecnico'
-  if (r === 'RI_AMM') return 'Responsabile istruttoria amministrativa'
-  if (r === 'TI_AMM') return 'Tecnico istruttore amministrativo'
+  if (r === 'RIA') return 'Responsabile istruttoria amministrativa'
+  if (r === 'IA') return 'Istruttore amministrativo'
   if (r === 'DA') return 'Direttore amministrativo'
   return 'Non determinato'
 }
@@ -710,17 +688,17 @@ function buildNumeroRilevazioneReport (d: any): string {
   const raw = stored.toUpperCase().replace(/_/g, '-').replace(/\s+/g, '-')
   const oid = getObjectId(d)
   const op = pickField(d, 'origine_pratica')
-  let prefix = (op === 2 || op === '2' || String(op).toUpperCase() === 'TI') ? 'TI' : 'TR'
+  let prefix = (op === 2 || op === '2' || String(op).toUpperCase() === 'IT') ? 'IT' : 'TR'
   let oidPart = oid && oid !== '—' ? oid : ''
   let settore = getSettoreCodeFromRecord(d)
 
-  let m = raw.match(/^(TR|TI)-?(\d+)(?:-([A-Z0-9]+))?$/i)
+  let m = raw.match(/^(TR|IT)-?(\d+)(?:-([A-Z0-9]+))?$/i)
   if (m) {
     prefix = m[1].toUpperCase()
     oidPart = m[2]
     if (!settore && m[3]) settore = normalizeSettoreCode(m[3])
   } else {
-    m = raw.match(/^(\d+)-?(TR|TI)(?:-([A-Z0-9]+))?$/i)
+    m = raw.match(/^(\d+)-?(TR|IT)(?:-([A-Z0-9]+))?$/i)
     if (m) {
       oidPart = m[1]
       prefix = m[2].toUpperCase()
@@ -887,11 +865,8 @@ function getRecordSearchText (d: any, user: GiiUserInfo | null, domainLabels?: D
 
 function getIstruttore (d: any): string {
   return getFirst(d, [
-    'ti_assegnato_nome', 'ti_assegnato_name',
-    'responsabile_istruttore', 'Responsabile_istruttore', 'RESPONSABILE_ISTRUTTORE',
-    'tecnico_istruttore', 'Tecnico_istruttore', 'istruttore', 'Istruttore',
-    'ti_assegnato_username', 'ti_assegnato_user', 'ti_assegnato',
-    'ti_amm_assegnato_nome', 'ti_amm_assegnato_username'
+    'it_assegnato_nome', 'it_assegnato_username',
+    'ia_assegnato_nome', 'ia_assegnato_username'
   ])
 }
 
@@ -1012,7 +987,7 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
   }, [])
 
   const view = React.useMemo(() => pickRuntimeViewForUser(user), [user?.username, user?.ruoloLabel, user?.areaCod, user?.settoreCod, user?.isAdmin, user?.isWorkflowAdmin])
-  const effectiveRole = getEffectiveRole(user?.ruoloLabel || '', user?.area, user?.areaCod)
+  const effectiveRole = getEffectiveRole(user?.ruoloCod || '', user?.area, user?.areaCod)
 
   // Domini ufficiali AGOL del layer/vista runtime: fonte primaria per label Area/Settore.
   // I record continuano a determinare quali opzioni mostrare; i domini determinano come chiamarle.
@@ -1277,7 +1252,7 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
       'N. atto',
       'Data rilevazione',
       'Tecnico rilevatore',
-      'Tecnico istruttore',
+      'Istruttore tecnico',
       'Area',
       'Settore',
       'Fase procedimentale',
@@ -1446,7 +1421,7 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
                   {th('N. atto', 'verbaleNumber')}
                   {th('Data rilevazione', 'reportDate')}
                   {th('Tecnico rilevatore', 'rilevatore')}
-                  {th('Tecnico istruttore', 'istruttore')}
+                  {th('Istruttore tecnico', 'istruttore')}
                   {th('Area', 'area')}
                   {th('Settore', 'settore')}
                   {th('Fase procedimentale', 'faseProcedimentale')}

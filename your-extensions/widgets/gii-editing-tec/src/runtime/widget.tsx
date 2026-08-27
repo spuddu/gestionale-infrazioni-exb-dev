@@ -1265,16 +1265,18 @@ function normalizeNorma3Value (val: any): string {
   return parseNorma3Codes(val).join(' ')
 }
 
-function normalizeRoleCode (v: any): 'TR' | 'TI' | 'RZ' | 'RI' | 'DT' | 'DA' | 'ADMIN' | '' {
-  const s = String(v ?? '').trim().toUpperCase()
+function normalizeRoleCode (v: any): 'TR' | 'IT' | 'CS' | 'RIT' | 'DT' | 'DA' | 'ADMIN' | '' {
+  const s = String(v ?? '').trim().toUpperCase().replace(/[\s-]+/g, '_')
   if (!s) return ''
-  if (s === '1' || s === 'TR' || s.includes('TECNICO RILEVATORE')) return 'TR'
-  if (s === '2' || s === 'TI' || s.includes('TECNICO ISTRUTTORE')) return 'TI'
-  if (s === '3' || s === 'RZ' || s.includes('RESPONSABILE DI ZONA') || s.includes('CAPO SETTORE')) return 'RZ'
-  if (s === '4' || s === 'RI' || s.includes('RESPONSABILE ISTRUTTORIA')) return 'RI'
-  if (s === '5' || s === 'DT' || s.includes('DIRETTORE TECNICO')) return 'DT'
-  if (s === '6' || s === 'DA' || s.includes('DIRETTORE AMMINISTRATIVO')) return 'DA'
-  if (s === '7' || s === 'ADMIN' || s.includes('AMMINISTRATORE')) return 'ADMIN'
+  // Questo widget è tecnico: i ruoli amministrativi non devono mai ricadere nei match generici IT/RIT.
+  if (s === 'IA' || s === 'RIA') return ''
+  if (s === 'TR' || s === 'TECNICO_RILEVATORE') return 'TR'
+  if (s === 'IT' || s === 'ISTRUTTORE_TECNICO') return 'IT'
+  if (s === 'CS' || s === 'CAPO_SETTORE') return 'CS'
+  if (s === 'RIT' || s === 'RESPONSABILE_ISTRUTTORIA_TECNICA') return 'RIT'
+  if (s === 'DT' || s === 'DIRETTORE_TECNICO') return 'DT'
+  if (s === 'DA' || s === 'DIRETTORE_AMMINISTRATIVO') return 'DA'
+  if (s === 'ADMIN' || s === 'AMMINISTRATORE') return 'ADMIN'
   return ''
 }
 
@@ -1290,7 +1292,6 @@ function normalizeAreaCode (v: any): 'AGR' | 'TEC' | 'AMM' | '' {
 function normalizeSettoreCode (area: string, v: any): string {
   const s = String(v ?? '').trim().toUpperCase()
   if (!s) return ''
-  if (s === 'CS') return 'DS'
   if (area === 'AGR') {
     if (/^[1-6]$/.test(s)) return `D${s}`
     const m = s.match(/^D?\s*([1-6])$/)
@@ -1325,23 +1326,18 @@ function firstMeaningfulValue (...vals: any[]): any {
   return undefined
 }
 
-function inferSettoreCodeFromUsername (area: string, usernameRaw: any): string {
-  const u = String(usernameRaw ?? '').trim().toUpperCase()
-  if (!u) return ''
-  if (area === 'AGR') {
-    const m = u.match(/(?:^|[_\-\s])D([1-6])(?:$|[_\-\s])/)
-    if (m) return `D${m[1]}`
-  }
-  if (area === 'TEC') {
-    if (/(?:^|[_\-\s])DS(?:$|[_\-\s])/.test(u)) return 'DS'
-  }
-  if (area === 'AMM') {
-    if (/(?:^|[_\-\s])CR(?:$|[_\-\s])/.test(u)) return 'CR'
-  }
+function readSelectedOperationalRole (): string {
+  try {
+    const w: any = window as any
+    const fromMemory = normalizeRoleCode(w.__giiSelection?.operationalRole)
+    if (fromMemory) return fromMemory
+    const fromStorage = normalizeRoleCode(sessionStorage.getItem('GII_SELECTED_OPERATIONAL_ROLE'))
+    if (fromStorage) return fromStorage
+  } catch {}
   return ''
 }
 
-function readGiiUserContext (): { username: string, role: string, area: string, settore: string, areaRaw: any, settoreRaw: any } {
+function readGiiUserContext (useOperationalRole = false): { username: string, role: string, area: string, settore: string, areaRaw: any, settoreRaw: any, ufficio: number | null, ufficioLabel: string, gruppo: string } {
   const w: any = window as any
   const roleObj: any = w.__giiUserRole || {}
   const userObj: any = w.__giiUser || {}
@@ -1355,14 +1351,15 @@ function readGiiUserContext (): { username: string, role: string, area: string, 
   ) || '').trim()
 
   const roleRaw = firstMeaningfulValue(
+    roleObj.profiloCod, roleObj.profilo_cod,
     roleObj.ruoloCod, roleObj.ruolo_cod, roleObj.ruoloCode,
+    userObj.profiloCod, userObj.profilo_cod,
     userObj.ruoloCod, userObj.ruolo_cod, userObj.ruoloCode,
-    w.__giiRuoloCod, w.__giiRoleCode,
-    roleObj.ruolo, userObj.ruolo,
-    w.__giiRuolo, w.__giiRole,
-    roleObj.ruoloLabel, userObj.ruoloLabel
+    w.__giiRuoloCod, w.__giiRoleCode
   )
-  const role = normalizeRoleCode(roleRaw) || String(roleRaw || '').trim()
+  const profileRole = normalizeRoleCode(roleRaw) || String(roleRaw || '').trim()
+  const operationalRole = useOperationalRole ? readSelectedOperationalRole() : ''
+  const role = operationalRole || profileRole
 
   const areaRaw = firstMeaningfulValue(
     roleObj.areaCod, roleObj.area_cod, roleObj.areaCode,
@@ -1387,33 +1384,90 @@ function readGiiUserContext (): { username: string, role: string, area: string, 
     typeof settoreObj === 'string' ? settoreObj : undefined
   )
   const settoreFromPrimary = normalizeSettoreCode(area, settoreRawPrimary)
-  const settoreFromUsername = inferSettoreCodeFromUsername(area, username)
-  const settore = settoreFromPrimary || settoreFromUsername
-  const settoreRaw = settoreFromPrimary || settoreRawPrimary || settoreFromUsername
+  const settore = settoreFromPrimary
+  const settoreRaw = settoreFromPrimary || settoreRawPrimary
 
-  return { username, role, area, settore, areaRaw, settoreRaw }
+  const ufficio = normalizeIntOrNull(firstMeaningfulValue(
+    roleObj.ufficio, roleObj.id_ufficio, roleObj.ufficio_id,
+    userObj.ufficio, userObj.id_ufficio, userObj.ufficio_id
+  ))
+  const ufficioLabel = String(firstMeaningfulValue(
+    roleObj.ufficioLabel, roleObj.ufficio_label, roleObj.ufficioZona, roleObj.ufficio_zona,
+    userObj.ufficioLabel, userObj.ufficio_label, userObj.ufficioZona, userObj.ufficio_zona
+  ) || '').trim()
+  const gruppo = String(firstMeaningfulValue(roleObj.gruppo, userObj.gruppo) || '').trim()
+
+  return { username, role, area, settore, areaRaw, settoreRaw, ufficio, ufficioLabel, gruppo }
 }
 
 type GiiUserContext = ReturnType<typeof readGiiUserContext>
 
-function giiUserContextIdentityKey (ctx: GiiUserContext): string {
-  return [
-    String(ctx?.username || '').trim().toLowerCase(),
-    String(normalizeRoleCode(ctx?.role) || ctx?.role || '').trim().toUpperCase(),
-    String(ctx?.area || '').trim().toUpperCase(),
-    String(ctx?.settore || '').trim().toUpperCase(),
-    String(ctx?.areaRaw ?? '').trim().toUpperCase(),
-    String(ctx?.settoreRaw ?? '').trim().toUpperCase()
-  ].join('|')
+type CreateItAssignment = {
+  key: string
+  area: string
+  areaFull: string
+  settore: string
+  settoreFull: string
+  ufficio: number | null
+  ufficioLabel: string
+  gruppo: string
 }
 
-function useReactiveGiiUserContext (): GiiUserContext {
-  const [ctx, setCtx] = React.useState<GiiUserContext>(() => readGiiUserContext())
+function readCreateItAssignments (): CreateItAssignment[] {
+  try {
+    const cached: any = (window as any).__giiUserRole || {}
+    const rawAssignments = Array.isArray(cached.assignments) && cached.assignments.length
+      ? cached.assignments
+      : [cached]
+    const out: CreateItAssignment[] = []
+    const seen = new Set<string>()
 
+    for (const assignment of rawAssignments) {
+      const role = normalizeRoleCode(firstMeaningfulValue(
+        assignment?.profiloCod, assignment?.profilo_cod,
+        assignment?.ruoloCod, assignment?.ruolo_cod
+      ))
+      if (role !== 'IT') continue
+
+      const area = normalizeAreaCode(firstMeaningfulValue(assignment?.areaCod, assignment?.area_cod, assignment?.area))
+      const settore = normalizeSettoreCode(area, firstMeaningfulValue(assignment?.settoreCod, assignment?.settore_cod, assignment?.settore))
+      if (!area || !settore) continue
+
+      const ufficio = normalizeIntOrNull(firstMeaningfulValue(assignment?.ufficio, assignment?.id_ufficio, assignment?.ufficio_id))
+      const ufficioLabel = String(firstMeaningfulValue(
+        assignment?.ufficioLabel, assignment?.ufficio_label, assignment?.ufficioZona, assignment?.ufficio_zona
+      ) || '').trim()
+      const gruppo = String(assignment?.gruppo || '').trim()
+      const areaFull = String(firstMeaningfulValue(assignment?.areaFull, assignment?.area_full, area) || area).trim()
+      const settoreFull = String(firstMeaningfulValue(assignment?.settoreFull, assignment?.settore_full, settore) || settore).trim()
+      const key = [area, settore, ufficio ?? '', gruppo].join('|')
+      if (seen.has(key)) continue
+      seen.add(key)
+      out.push({ key, area, areaFull, settore, settoreFull, ufficio, ufficioLabel, gruppo })
+    }
+
+    return out.sort((a, b) => {
+      const byArea = a.area.localeCompare(b.area)
+      if (byArea) return byArea
+      const bySector = a.settore.localeCompare(b.settore, undefined, { numeric: true })
+      if (bySector) return bySector
+      return String(a.ufficioLabel || '').localeCompare(String(b.ufficioLabel || ''))
+    })
+  } catch {
+    return []
+  }
+}
+
+function createItAssignmentsIdentityKey (items: CreateItAssignment[]): string {
+  return (items || []).map(item => item.key).join('||')
+}
+
+function useReactiveCreateItAssignments (): CreateItAssignment[] {
+  const [items, setItems] = React.useState<CreateItAssignment[]>(() => readCreateItAssignments())
   React.useEffect(() => {
     const refresh = () => {
-      const next = readGiiUserContext()
-      setCtx((prev) => giiUserContextIdentityKey(prev) === giiUserContextIdentityKey(next) ? prev : next)
+      const next = readCreateItAssignments()
+      setItems(prev => createItAssignmentsIdentityKey(prev) === createItAssignmentsIdentityKey(next) ? prev : next)
     }
     refresh()
     window.addEventListener('gii:userLoaded', refresh)
@@ -1423,14 +1477,57 @@ function useReactiveGiiUserContext (): GiiUserContext {
       window.removeEventListener('gii-practice-context-reset', refresh)
     }
   }, [])
+  return items
+}
+
+function giiUserContextIdentityKey (ctx: GiiUserContext): string {
+  return [
+    String(ctx?.username || '').trim().toLowerCase(),
+    String(normalizeRoleCode(ctx?.role) || ctx?.role || '').trim().toUpperCase(),
+    String(ctx?.area || '').trim().toUpperCase(),
+    String(ctx?.settore || '').trim().toUpperCase(),
+    String(ctx?.areaRaw ?? '').trim().toUpperCase(),
+    String(ctx?.settoreRaw ?? '').trim().toUpperCase(),
+    String(ctx?.ufficio ?? ''),
+    String(ctx?.ufficioLabel || '').trim().toUpperCase(),
+    String(ctx?.gruppo || '').trim().toUpperCase()
+  ].join('|')
+}
+
+function useReactiveGiiUserContext (useOperationalRole = false): GiiUserContext {
+  const [ctx, setCtx] = React.useState<GiiUserContext>(() => readGiiUserContext(useOperationalRole))
+
+  React.useEffect(() => {
+    const refresh = () => {
+      const next = readGiiUserContext(useOperationalRole)
+      setCtx((prev) => giiUserContextIdentityKey(prev) === giiUserContextIdentityKey(next) ? prev : next)
+    }
+    refresh()
+    window.addEventListener('gii:userLoaded', refresh)
+    window.addEventListener('gii-practice-context-reset', refresh)
+    if (useOperationalRole) {
+      window.addEventListener('gii-selection-changed', refresh as EventListener)
+      window.addEventListener('gii-selection-cleared', refresh as EventListener)
+      window.addEventListener('gii-force-refresh-selection', refresh as EventListener)
+    }
+    return () => {
+      window.removeEventListener('gii:userLoaded', refresh)
+      window.removeEventListener('gii-practice-context-reset', refresh)
+      if (useOperationalRole) {
+        window.removeEventListener('gii-selection-changed', refresh as EventListener)
+        window.removeEventListener('gii-selection-cleared', refresh as EventListener)
+        window.removeEventListener('gii-force-refresh-selection', refresh as EventListener)
+      }
+    }
+  }, [useOperationalRole])
 
   return ctx
 }
 
-function isRiAgrTecContext (ctx: GiiUserContext): boolean {
+function isRitAgrTecContext (ctx: GiiUserContext): boolean {
   const role = normalizeRoleCode(ctx?.role)
   const area = normalizeAreaCode(ctx?.area || ctx?.areaRaw)
-  return role === 'RI' && (area === 'AGR' || area === 'TEC')
+  return role === 'RIT' && (area === 'AGR' || area === 'TEC')
 }
 
 function normalizeIntOrNull (v: any): number | null {
@@ -1439,21 +1536,16 @@ function normalizeIntOrNull (v: any): number | null {
   return Number.isFinite(n) ? Math.trunc(n) : null
 }
 
-function shortRoleLabel (roleRaw: any, usernameRaw?: any): string {
+function shortRoleLabel (roleRaw: any): string {
   const normalizedRole = normalizeRoleCode(roleRaw)
   if (normalizedRole) return normalizedRole === 'ADMIN' ? '' : normalizedRole
   const role = String(roleRaw ?? '').trim().toUpperCase()
-  if (/(^|[^A-Z])TI([^A-Z]|$)/.test(role)) return 'TI'
+  if (/(^|[^A-Z])IT([^A-Z]|$)/.test(role)) return 'IT'
   if (/(^|[^A-Z])TR([^A-Z]|$)/.test(role)) return 'TR'
-  if (/(^|[^A-Z])RZ([^A-Z]|$)/.test(role)) return 'RZ'
-  if (/(^|[^A-Z])RI([^A-Z]|$)/.test(role)) return 'RI'
+  if (/(^|[^A-Z])CS([^A-Z]|$)/.test(role)) return 'CS'
+  if (/(^|[^A-Z])RIT([^A-Z]|$)/.test(role)) return 'RIT'
   if (/(^|[^A-Z])DT([^A-Z]|$)/.test(role)) return 'DT'
   if (/(^|[^A-Z])DA([^A-Z]|$)/.test(role)) return 'DA'
-  const username = String(usernameRaw ?? '').trim().toUpperCase()
-  if (/(^|[_\-\s])TI([_\-\s]|$)/.test(username)) return 'TI'
-  if (/(^|[_\-\s])TR([_\-\s]|$)/.test(username)) return 'TR'
-  if (/(^|[_\-\s])RZ([_\-\s]|$)/.test(username)) return 'RZ'
-  if (/(^|[_\-\s])RI([_\-\s]|$)/.test(username)) return 'RI'
   return ''
 }
 
@@ -1510,19 +1602,21 @@ function getCurrentGiiUserDisplayName (usernameFallback: any): string {
   ) || '').trim()
 }
 
-async function resolveCreateSurveyLikeDefaults (layer: any, ctx: { username: string, role: string, area: string, settore: string }): Promise<{ tecnicoRilevatore: string, ufficioZona: string, idUfficio: number | null }> {
+async function resolveCreateSurveyLikeDefaults (layer: any, ctx: GiiUserContext): Promise<{ tecnicoRilevatore: string, ufficioZona: string, idUfficio: number | null }> {
   const w: any = window as any
-  const roleShort = shortRoleLabel(ctx.role, ctx.username)
+  const roleShort = shortRoleLabel(ctx.role)
   const tecnicoFromRole = roleShort && ctx.settore ? `${roleShort} ${ctx.settore}` : (roleShort || String(ctx.username || '').trim())
   let tecnicoRilevatore = getCurrentGiiUserDisplayName(ctx.username) || String(ctx.username || '').trim() || tecnicoFromRole
 
   let ufficioZona = String(firstMeaningfulValue(
+    ctx.ufficioLabel,
     w.__giiUfficioLabel, w.__giiOfficeLabel,
     w.__giiUser?.ufficio_zona, w.__giiUser?.ufficioZona, w.__giiUser?.ufficio,
     w.__giiUserRole?.ufficio_zona, w.__giiUserRole?.ufficioZona, w.__giiUserRole?.ufficio
   ) || '').trim()
 
   let idUfficio = normalizeIntOrNull(firstMeaningfulValue(
+    ctx.ufficio,
     w.__giiUfficioId, w.__giiOfficeId,
     w.__giiUser?.id_ufficio, w.__giiUser?.ufficio_id,
     w.__giiUserRole?.id_ufficio, w.__giiUserRole?.ufficio_id
@@ -1584,7 +1678,7 @@ function parseOfficeCoord (v: any): number {
   return Number.isFinite(n) ? n : 0
 }
 
-function buildTiCreateViewServiceNames (areaRaw: any, settoreRaw: any): string[] {
+function buildItCreateViewServiceNames (areaRaw: any, settoreRaw: any): string[] {
   const area = normalizeAreaCode(areaRaw)
   const settore = normalizeSettoreCode(area, settoreRaw)
   if (area === 'AGR' && /^D[1-6]$/.test(settore)) return [`GII_VIEW_AGR_${settore}`]
@@ -1787,7 +1881,7 @@ const PRESA_DA_PRENDERE = 1
 
 // ─────────────────────────── OVERLAY EDITING INLINE ──────────────────────────
 // Versione semplificata dell'overlay di editing che vive dentro il widget Azioni.
-// Per la versione completa (con mappa e tutte le tab) usare il widget gii-editing-ti
+// Per la versione completa (con mappa e tutte le tab) usare il widget gii-editing-tec
 // sulla pagina dedicata.
 
 function filterAttrsForLayer(attrs: Record<string, any>, layer: any): Record<string, any> {
@@ -1940,7 +2034,7 @@ function migrateTabs(tabFields: TabFields, tabs: TabConfig[] | undefined): TabCo
   // Normalizza hideEmpty per tab (retrocompatibilità)
   // Inietta dati_generali come primo tab se mancante
   if (!result.find(t => t.id === 'dati_generali')) {
-    result = [{ id: 'dati_generali', label: 'Dati generali', fields: ['area_cod', 'settore_cod', 'ufficio_zona', 'tecnico_rilevatore', 'data_rilevazione', 'ti_assegnato_nome', 'dt_trasmissione_capo_settore'], hideEmpty: false }, ...result]
+    result = [{ id: 'dati_generali', label: 'Dati generali', fields: ['area_cod', 'settore_cod', 'ufficio_zona', 'tecnico_rilevatore', 'data_rilevazione', 'it_assegnato_nome', 'dt_trasmissione_capo_settore'], hideEmpty: false }, ...result]
   }
   return result.map(tab => {
     const normalizedHideEmpty =
@@ -1958,7 +2052,7 @@ function migrateTabs(tabFields: TabFields, tabs: TabConfig[] | undefined): TabCo
 
 
 // ══════════════════════════════════════════════════════════════════════════════
-// NUOVA PRATICA TI — form che segue la struttura del survey XLS
+// NUOVA PRATICA IT — form che segue la struttura del survey XLS
 // Mostrato quando nessun record è selezionato (hasSel=false).
 // ══════════════════════════════════════════════════════════════════════════════
 
@@ -2019,7 +2113,7 @@ const NORMA3_TO_VFIELD: Record<string, string> = {
   Art37: 'v_art37', Art39: 'v_art39'
 }
 
-const RI_GRADO_ART_CODES = ['12', '27', '28', '31', '32', '33', '34', '35', '36', '37'] as const
+const RIT_GRADO_ART_CODES = ['12', '27', '28', '31', '32', '33', '34', '35', '36', '37'] as const
 function normalizeArtCode (raw: any): string {
   const s = String(raw ?? '').trim().replace(/^art\.?\s*/i, '').replace(/^0+/, '')
   return s
@@ -2034,7 +2128,7 @@ function parseGradiViolazioni (raw: any): Record<string, string> {
     if (!m) continue
     const art = normalizeArtCode(m[1])
     const grado = String(m[2])
-    if (RI_GRADO_ART_CODES.includes(art as any)) out[art] = grado
+    if (RIT_GRADO_ART_CODES.includes(art as any)) out[art] = grado
   }
   return out
 }
@@ -2050,10 +2144,10 @@ function buildGradiViolazioni (map: Record<string, string>, selectedArts: string
     .join(';')
 }
 
-function getRiGradoSelectedArts (attrs: Record<string, any>): string[] {
+function getRitGradoSelectedArts (attrs: Record<string, any>): string[] {
   const selected = new Set(parseNorma3Codes(attrs?.norma_violata3))
   const out: string[] = []
-  for (const artCode of RI_GRADO_ART_CODES) {
+  for (const artCode of RIT_GRADO_ART_CODES) {
     const art = `Art${artCode}`
     if (selected.has(art)) out.push(artCode)
   }
@@ -3937,7 +4031,7 @@ function buildPraticaCodeFromData (data: any, oid: number | null | undefined): s
   if (oid == null || !Number.isFinite(Number(oid))) return ''
   const op = data?.origine_pratica ?? data?.Origine_pratica ?? data?.ORIGINE_PRATICA
   let prefix = 'TR'
-  if (op === 2 || op === '2' || String(op || '').toUpperCase() === 'TI') prefix = 'TI'
+  if (op === 2 || op === '2' || String(op || '').toUpperCase() === 'IT') prefix = 'IT'
   else if (op === 1 || op === '1' || String(op || '').toUpperCase() === 'TR') prefix = 'TR'
 
   const settoreRaw = data?.settore_cod ?? data?.Settore_cod ?? data?.SETTORE_COD ?? data?.settore ?? data?.Settore ?? data?.SETTORE
@@ -4187,7 +4281,7 @@ function NuovaPraticaForm (p: {
   const currentUserContext = p.userContext
   const currentUserContextKey = giiUserContextIdentityKey(currentUserContext)
   const currentProfileRole = normalizeRoleCode(currentUserContext.role)
-  const isPureConsultationRole = mode === 'edit' && (currentProfileRole === 'RZ' || currentProfileRole === 'DT')
+  const isPureConsultationRole = mode === 'edit' && (currentProfileRole === 'CS' || currentProfileRole === 'DT')
   const isReadOnly = mode === 'edit' && (p.readOnly === true || isPureConsultationRole)
   const readOnlyBannerText = String(p.readOnlyMessage || 'Pratica aperta in consultazione. Le modifiche sono consentite solo nei casi previsti dal ruolo e dallo stato istruttorio.')
   const [readOnlyBannerMounted, setReadOnlyBannerMounted] = React.useState(false)
@@ -4252,15 +4346,15 @@ function NuovaPraticaForm (p: {
       </svg>
     </button>
   ) : null
-  const isRiAgrTecLimitedEdit = mode === 'edit' && !isReadOnly && isRiAgrTecContext(currentUserContext)
-  const riAgrTecEditableUiFields = React.useMemo(() => new Set(['grado', 'norma15_sel', 'occorrenza']), [])
-  const riAgrTecEditableDraftFields = React.useMemo(() => new Set(['gradi_violazioni', 'occorrenza']), [])
-  const riAgrTecEditableSaveFields = React.useMemo(() => new Set(['gradi_violazioni', 'occorrenza']), [])
+  const isRitAgrTecLimitedEdit = mode === 'edit' && !isReadOnly && isRitAgrTecContext(currentUserContext)
+  const ritAgrTecEditableUiFields = React.useMemo(() => new Set(['grado', 'norma15_sel', 'occorrenza']), [])
+  const ritAgrTecEditableDraftFields = React.useMemo(() => new Set(['gradi_violazioni', 'occorrenza']), [])
+  const ritAgrTecEditableSaveFields = React.useMemo(() => new Set(['gradi_violazioni', 'occorrenza']), [])
   const canEditFieldForCurrentProfile = React.useCallback((fieldName: string): boolean => {
     if (isReadOnly) return false
-    if (!isRiAgrTecLimitedEdit) return true
-    return riAgrTecEditableUiFields.has(fieldName)
-  }, [isReadOnly, isRiAgrTecLimitedEdit, riAgrTecEditableUiFields])
+    if (!isRitAgrTecLimitedEdit) return true
+    return ritAgrTecEditableUiFields.has(fieldName)
+  }, [isReadOnly, isRitAgrTecLimitedEdit, ritAgrTecEditableUiFields])
 
   const [draft, setDraft] = React.useState<NpDraft>(() => draftFromRecord(p.initialData || {}))
   const [baselineDraft, setBaselineDraft] = React.useState<NpDraft>(() => draftFromRecord(p.initialData || {}))
@@ -4940,17 +5034,22 @@ function NuovaPraticaForm (p: {
   React.useEffect(() => {
     if (mode !== 'create') return
     const giiCtx = currentUserContext
-    const roleShort = shortRoleLabel(giiCtx.role, giiCtx.username)
+    const roleShort = shortRoleLabel(giiCtx.role)
     const officeFallback = getCreateOfficeFallback(giiCtx.area, giiCtx.settore)
+    const createOfficeLabel = String(giiCtx.ufficioLabel || officeFallback.label || '').trim()
+    const currentUserDisplayName = getCurrentGiiUserDisplayName(giiCtx.username)
     const today = toDraftDate(Date.now())
     const withCreateDefaults = (prev: NpDraft): NpDraft => {
       const next: NpDraft = { ...prev }
+      if (!String(next.area_cod || '').trim() && giiCtx.area) next.area_cod = giiCtx.area
+      if (!String(next.settore_cod || '').trim() && giiCtx.settore) next.settore_cod = giiCtx.settore
+      if (!String(next.it_assegnato_nome || '').trim() && currentUserDisplayName) next.it_assegnato_nome = currentUserDisplayName
       if (!String(next.tecnico_rilevatore || '').trim()) {
         const label = roleShort && giiCtx.settore ? `${roleShort} ${giiCtx.settore}` : (roleShort || String(giiCtx.username || '').trim())
         if (label) next.tecnico_rilevatore = label
       }
-      if (!String(next.ufficio_zona || '').trim() && officeFallback.label) {
-        next.ufficio_zona = officeFallback.label
+      if (!String(next.ufficio_zona || '').trim() && createOfficeLabel) {
+        next.ufficio_zona = createOfficeLabel
       }
       if (!String(next.data_rilevazione || '').trim()) {
         next.data_rilevazione = today
@@ -4972,16 +5071,16 @@ function NuovaPraticaForm (p: {
   const isDirty = React.useMemo(() => {
     if (isReadOnly) return false
     const draftDirty = !draftsEqual(draft, baselineDraft)
-    if (isRiAgrTecLimitedEdit) return draftDirty
+    if (isRitAgrTecLimitedEdit) return draftDirty
     return draftDirty || art15SelectionDirty || !!p.clickedPointWgs84 || hasPendingAttachments || hasPendingAttachmentDeletes || hasPendingAttachmentReplacements || noteSpeseDraftDirty
-  }, [isReadOnly, draft, baselineDraft, art15SelectionDirty, isRiAgrTecLimitedEdit, p.clickedPointWgs84, hasPendingAttachments, hasPendingAttachmentDeletes, hasPendingAttachmentReplacements, noteSpeseDraftDirty])
+  }, [isReadOnly, draft, baselineDraft, art15SelectionDirty, isRitAgrTecLimitedEdit, p.clickedPointWgs84, hasPendingAttachments, hasPendingAttachmentDeletes, hasPendingAttachmentReplacements, noteSpeseDraftDirty])
   React.useEffect(() => {
     p.onDirtyChange?.(isDirty)
   }, [isDirty, p.onDirtyChange])
 
   const set = (k: string, v: any) => {
     if (isReadOnly) return
-    if (isRiAgrTecLimitedEdit && !riAgrTecEditableDraftFields.has(k.toLowerCase())) return
+    if (isRitAgrTecLimitedEdit && !ritAgrTecEditableDraftFields.has(k.toLowerCase())) return
     setDraft(prev => ({ ...prev, [k]: normalizeUppercaseTextFieldValue(k, v) }))
   }
   const g = (k: string) => draft[k] ?? ''
@@ -5155,7 +5254,7 @@ const loadNotaSpeseDraft = React.useCallback(async () => {
     const grouped = nsRowsFromFlat(rows)
     setNoteSpeseRowsBaseline(grouped)
     let draft = nsCloneRowsByCategory(grouped)
-    const savedDraftSnapshot = (!isReadOnly && !isRiAgrTecLimitedEdit && noteSpeseDraftStorageKey) ? nsReadDraftSnapshot(noteSpeseDraftStorageKey) : null
+    const savedDraftSnapshot = (!isReadOnly && !isRitAgrTecLimitedEdit && noteSpeseDraftStorageKey) ? nsReadDraftSnapshot(noteSpeseDraftStorageKey) : null
     const effectiveNotaSpeseCasistica = activeNotaSpeseCasistica || String(savedDraftSnapshot?.activeCasistica || '').trim()
     if (savedDraftSnapshot && Array.isArray(savedDraftSnapshot.rows)) {
       // La bozza locale può essere più vecchia dei dati server: se nel frattempo
@@ -5249,7 +5348,7 @@ const loadNotaSpeseDraft = React.useCallback(async () => {
   } finally {
     setNoteSpeseBusy(false)
   }
-}, [mode, currentOid, currentGlobalId, noteSpeseMissing.length, noteSpeseCfg, activeNotaSpeseCasistica, activeAttrezzaturaRiferimentoId, art30RecuperoMode, noteSpeseDraftStorageKey, isReadOnly, isRiAgrTecLimitedEdit, noteSpeseExpectedCodesKeyForRestore])
+}, [mode, currentOid, currentGlobalId, noteSpeseMissing.length, noteSpeseCfg, activeNotaSpeseCasistica, activeAttrezzaturaRiferimentoId, art30RecuperoMode, noteSpeseDraftStorageKey, isReadOnly, isRitAgrTecLimitedEdit, noteSpeseExpectedCodesKeyForRestore])
 
 const refreshNotaSpeseSummary = React.useCallback(async () => {
   const rows = nsRowsByCategoryToFlat(noteSpeseRowsDraft)
@@ -5355,10 +5454,10 @@ React.useEffect(() => {
 }, [noteSpeseRowsDirty, noteSpeseFormsDirty])
 
 React.useEffect(() => {
-  if (!noteSpeseDraftStorageKey || isReadOnly || isRiAgrTecLimitedEdit) return
+  if (!noteSpeseDraftStorageKey || isReadOnly || isRitAgrTecLimitedEdit) return
   if (!noteSpeseDraftDirty) return
   nsWriteDraftSnapshot(noteSpeseDraftStorageKey, noteSpeseRowsDraft, activeNotaSpeseCasistica)
-}, [noteSpeseDraftStorageKey, noteSpeseDraftDirty, noteSpeseRowsDraft, activeNotaSpeseCasistica, isReadOnly, isRiAgrTecLimitedEdit])
+}, [noteSpeseDraftStorageKey, noteSpeseDraftDirty, noteSpeseRowsDraft, activeNotaSpeseCasistica, isReadOnly, isRitAgrTecLimitedEdit])
 
 
   React.useEffect(() => {
@@ -5537,9 +5636,9 @@ React.useEffect(() => {
     }, 0)
   }, [captureAttachmentOperation, isAttachmentOperationCurrent])
 
-  const canRotateAttachments = mode === 'edit' && currentProfileRole === 'TI' && !isReadOnly && !isRiAgrTecLimitedEdit
+  const canRotateAttachments = mode === 'edit' && currentProfileRole === 'IT' && !isReadOnly && !isRitAgrTecLimitedEdit
 
-  const buildTiAttachmentPreviewUrl = React.useCallback(async (att: GiiAttachmentViewerItem): Promise<string | null> => {
+  const buildItAttachmentPreviewUrl = React.useCallback(async (att: GiiAttachmentViewerItem): Promise<string | null> => {
     const origin = captureAttachmentOperation()
     if (!att || origin.oid == null || !isAttachmentOperationCurrent(origin)) return null
     const ct = String(att.contentType || '').toLowerCase()
@@ -5712,7 +5811,7 @@ React.useEffect(() => {
     const vField = NORMA3_TO_VFIELD[v]
     const artCode = normalizeArtCode(v)
     setDraft(prev => {
-      if (isRiAgrTecLimitedEdit && !riAgrTecEditableDraftFields.has('norma_violata3')) return prev
+      if (isRitAgrTecLimitedEdit && !ritAgrTecEditableDraftFields.has('norma_violata3')) return prev
       const next: any = { ...prev, norma_violata3: nextNorma3 }
       // Mantiene sincronizzati anche i campi flag v_artXX del FL madre: senza questo
       // il badge Violazione restava agganciato al valore salvato fino al successivo salvataggio.
@@ -5721,7 +5820,7 @@ React.useEffect(() => {
         const gradi = parseGradiViolazioni(next.gradi_violazioni)
         if (gradi[artCode] != null) {
           delete gradi[artCode]
-          next.gradi_violazioni = buildGradiViolazioni(gradi, Array.from(s).map(normalizeArtCode).filter(code => RI_GRADO_ART_CODES.includes(code as any)))
+          next.gradi_violazioni = buildGradiViolazioni(gradi, Array.from(s).map(normalizeArtCode).filter(code => RIT_GRADO_ART_CODES.includes(code as any)))
         }
       }
       return next
@@ -5746,16 +5845,16 @@ React.useEffect(() => {
     attrezzature_risarcimento_dettaglio: g('attrezzature_risarcimento_dettaglio')
   }), [n3parziale, n3totale, draft.norma_violata3, draft.attrezzature_risarcimento_dettaglio])
 
-  const riGradoSelectedArts = React.useMemo(() => getRiGradoSelectedArts(draft), [draft])
-  const riGradiViolazioniMap = React.useMemo(() => parseGradiViolazioni(g('gradi_violazioni')), [draft.gradi_violazioni])
-  const riGradoTriggerViolations = riGradoSelectedArts.length > 0
-  const setRiGradoForArt = React.useCallback((art: string, grado: string) => {
+  const ritGradoSelectedArts = React.useMemo(() => getRitGradoSelectedArts(draft), [draft])
+  const ritGradiViolazioniMap = React.useMemo(() => parseGradiViolazioni(g('gradi_violazioni')), [draft.gradi_violazioni])
+  const ritGradoTriggerViolations = ritGradoSelectedArts.length > 0
+  const setRitGradoForArt = React.useCallback((art: string, grado: string) => {
     const next = parseGradiViolazioni(draft.gradi_violazioni)
     const artCode = normalizeArtCode(art)
     if (/^[1-4]$/.test(String(grado || '').trim())) next[artCode] = String(grado).trim()
     else delete next[artCode]
-    set('gradi_violazioni', buildGradiViolazioni(next, riGradoSelectedArts))
-  }, [draft.gradi_violazioni, riGradoSelectedArts])
+    set('gradi_violazioni', buildGradiViolazioni(next, ritGradoSelectedArts))
+  }, [draft.gradi_violazioni, ritGradoSelectedArts])
 
   // Quando la violazione cambia e reqPoint passa a 0, cancella il punto cliccato manualmente
   const prevReqPointRef = React.useRef(reqPoint)
@@ -5771,16 +5870,16 @@ React.useEffect(() => {
   const officeLat = parseOfficeCoord(cfg.officeLatWgs84)
   const hasOffice = isValidOfficePoint(officeLon, officeLat)
 
-  // View editabile TI/RZ per la creazione (mai layer madre)
+  // View editabile IT/CS per la creazione (mai layer madre)
   const motherRef = React.useRef<any | null>(null)
   const getLayerForCreate = React.useCallback(async () => {
     const schemaUrl = ensureLayerIndex(normalizeFeatureLayerUrl(String(cfg.schemaLayerUrl || '').trim() || String(cfg.motherLayerUrl || '').trim()))
     const dsUrl = ensureLayerIndex(normalizeFeatureLayerUrl((ds as any)?.getDataSourceJson?.()?.url || (ds as any)?.dataSourceJson?.url || (ds as any)?.layer?.url || (ds as any)?.url || ''))
     const ctx = currentUserContext
-    const serviceNames = buildTiCreateViewServiceNames(ctx.areaRaw, ctx.settoreRaw)
+    const serviceNames = buildItCreateViewServiceNames(ctx.areaRaw, ctx.settoreRaw)
 
     if (!serviceNames.length) {
-      throw new Error(`View editabile TI non risolta dal contesto utente (utente=${ctx.username || '∅'}; area=${String(ctx.areaRaw ?? '') || '∅'}; settore=${String(ctx.settoreRaw ?? '') || '∅'}).`)
+      throw new Error(`View di creazione non risolta dal contesto utente (utente=${ctx.username || '∅'}; area=${String(ctx.areaRaw ?? '') || '∅'}; settore=${String(ctx.settoreRaw ?? '') || '∅'}).`)
     }
 
     const baseUrl = dsUrl || schemaUrl
@@ -5810,7 +5909,7 @@ React.useEffect(() => {
       }
     }
 
-    throw new Error(`View editabile TI non disponibile per il contesto utente corrente (${candidateUrls.join(', ')}).`)
+    throw new Error(`View di creazione non disponibile per il contesto utente corrente (${candidateUrls.join(', ')}).`)
   }, [cfg.schemaLayerUrl, cfg.motherLayerUrl, ds, currentUserContextKey])
 
   const toTs = (v: string) => {
@@ -5852,7 +5951,7 @@ React.useEffect(() => {
     if (k.startsWith('stato_') || k.startsWith('dt_stato_')) return false
     if (k.startsWith('presa_in_carico_') || k.startsWith('dt_presa_in_carico_')) return false
     if (k.startsWith('esito_') || k.startsWith('dt_esito_')) return false
-    if (k.startsWith('ti_assegnato_') || k.startsWith('dt_assegnazione_')) return false
+    if (k.startsWith('it_assegnato_') || k.startsWith('dt_assegnazione_')) return false
     if (k.startsWith('ri_assegnato_') || k.startsWith('dt_assegnazione_ri')) return false
     if (k.startsWith('note_')) return false
     if (k.startsWith('ns_')) return false
@@ -6015,7 +6114,7 @@ React.useEffect(() => {
 
   const getAuditRole = React.useCallback((): string => {
     const r = String(currentUserContext.role || '').trim().toUpperCase()
-    return (r === 'TI' || r === 'RI') ? r : ''
+    return (r === 'IT' || r === 'RIT') ? r : ''
   }, [currentUserContext.role])
 
   const findOpenRoleCycle = React.useCallback(async (parentGlobalId: string, ruoloCompetente: string) => {
@@ -6066,8 +6165,10 @@ React.useEffect(() => {
     const logLayer = await getLogLayer()
     if (!logLayer?.applyEdits) return 0
     const giiCtx = currentUserContext
-    const area = giiCtx.area
-    const settore = giiCtx.settore
+    const practiceArea = normalizeAreaCode(pickAttrCI(p.initialData || {}, ['area_cod', 'AREA_COD', 'area']))
+    const area = practiceArea || giiCtx.area
+    const practiceSettore = normalizeSettoreCode(area, pickAttrCI(p.initialData || {}, ['settore_cod', 'SETTORE_COD', 'settore']))
+    const settore = practiceSettore || giiCtx.settore
     const username = String(giiCtx.username || '').trim()
     const sessionId = `${roleForLog.toLowerCase()}-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`
 
@@ -6124,7 +6225,7 @@ React.useEffect(() => {
       const updRes = await logLayer.applyEdits({ updateFeatures: [{ attributes: updAttrs }] })
       const upd = updRes?.updateFeatureResults?.[0] || updRes?.updateResults?.[0] || null
       if (upd?.error) throw new Error(upd.error.message || JSON.stringify(upd.error))
-      try { window.dispatchEvent(new CustomEvent('gii-log-eventi-cicli-changed', { detail: { source: 'gii-editing-ti', oid: editOid, role: roleForLog, ts: Date.now() } })) } catch {}
+      try { window.dispatchEvent(new CustomEvent('gii-log-eventi-cicli-changed', { detail: { source: 'gii-editing-tec', oid: editOid, role: roleForLog, ts: Date.now() } })) } catch {}
       return num
     } catch (e) {
       console.warn('[GII_LOG_EVENTI_CICLI] Errore aggiornamento audit ciclo:', e)
@@ -6383,7 +6484,7 @@ React.useEffect(() => {
       }
 
       // Converte il plain WGS84 in un vero esri/geometry/Point nella SR del layer
-      const geom = isRiAgrTecLimitedEdit ? null : (geomWgs84 ? await toLayerPoint(geomWgs84, layer) : null)
+      const geom = isRitAgrTecLimitedEdit ? null : (geomWgs84 ? await toLayerPoint(geomWgs84, layer) : null)
 
       const normaV1 = tipoAbuso === 'parziale' ? n3parziale : (tipoAbuso === 'totale' ? n3totale : '')
       const normaV2 = norma1516 === 'Art16' ? 'Art16' : (norma1516 === 'Art17' && art17tipo ? art17tipo : norma1516)
@@ -6408,14 +6509,13 @@ React.useEffect(() => {
         start: mode === 'create' ? (createStartTs || nowTs) : (p.initialData?.start ?? p.initialData?.Start ?? p.initialData?.START ?? null),
         end: mode === 'create' ? nowTs : (p.initialData?.end ?? p.initialData?.End ?? p.initialData?.END ?? null),
         origine_pratica: mode === 'create' ? 2 : (p.initialData?.origine_pratica ?? p.initialData?.Origine_pratica ?? p.initialData?.ORIGINE_PRATICA ?? 2),
-        stato_TI: mode === 'create' ? STATO_PRESA_IN_CARICO : (p.initialData?.stato_TI ?? p.initialData?.Stato_TI ?? p.initialData?.STATO_TI ?? null),
-        presa_in_carico_TI: mode === 'create' ? PRESA_IN_CARICO : (p.initialData?.presa_in_carico_TI ?? p.initialData?.Presa_in_carico_TI ?? p.initialData?.PRESA_IN_CARICO_TI ?? null),
-        dt_stato_TI: mode === 'create' ? nowTs : (p.initialData?.dt_stato_TI ?? p.initialData?.Dt_stato_TI ?? p.initialData?.DT_STATO_TI ?? null),
-        dt_presa_in_carico_TI: mode === 'create' ? nowTs : (p.initialData?.dt_presa_in_carico_TI ?? p.initialData?.Dt_presa_in_carico_TI ?? p.initialData?.DT_PRESA_IN_CARICO_TI ?? null),
-        ti_assegnato_username: mode === 'create' ? String(giiCtx.username || '') : (p.initialData?.ti_assegnato_username ?? p.initialData?.Ti_assegnato_username ?? p.initialData?.TI_ASSEGNATO_USERNAME ?? null),
-        ti_assegnato_nome: mode === 'create' ? currentGiiUserDisplayName : (p.initialData?.ti_assegnato_nome ?? p.initialData?.Ti_assegnato_nome ?? p.initialData?.TI_ASSEGNATO_NOME ?? null),
-        dt_assegnazione_ti: mode === 'create' ? nowTs : (p.initialData?.dt_assegnazione_ti ?? p.initialData?.Dt_assegnazione_ti ?? p.initialData?.DT_ASSEGNAZIONE_TI ?? null),
-        ti_assegnato_da: mode === 'create' ? String(giiCtx.username || '') : (p.initialData?.ti_assegnato_da ?? p.initialData?.Ti_assegnato_da ?? p.initialData?.TI_ASSEGNATO_DA ?? null),
+        stato_IT: mode === 'create' ? STATO_PRESA_IN_CARICO : (p.initialData?.stato_IT ?? p.initialData?.Stato_IT ?? p.initialData?.STATO_IT ?? null),
+        dt_stato_IT: mode === 'create' ? nowTs : (p.initialData?.dt_stato_IT ?? p.initialData?.Dt_stato_IT ?? p.initialData?.DT_STATO_IT ?? null),
+        dt_presa_in_carico_IT: mode === 'create' ? nowTs : (p.initialData?.dt_presa_in_carico_IT ?? p.initialData?.Dt_presa_in_carico_IT ?? p.initialData?.DT_PRESA_IN_CARICO_IT ?? null),
+        it_assegnato_username: mode === 'create' ? String(giiCtx.username || '') : (p.initialData?.it_assegnato_username ?? p.initialData?.It_assegnato_username ?? p.initialData?.IT_ASSEGNATO_USERNAME ?? null),
+        it_assegnato_nome: mode === 'create' ? currentGiiUserDisplayName : (p.initialData?.it_assegnato_nome ?? p.initialData?.It_assegnato_nome ?? p.initialData?.IT_ASSEGNATO_NOME ?? null),
+        dt_assegnazione_it: mode === 'create' ? nowTs : (p.initialData?.dt_assegnazione_it ?? p.initialData?.Dt_assegnazione_it ?? p.initialData?.DT_ASSEGNAZIONE_IT ?? null),
+        it_assegnato_da: mode === 'create' ? String(giiCtx.username || '') : (p.initialData?.it_assegnato_da ?? p.initialData?.It_assegnato_da ?? p.initialData?.IT_ASSEGNATO_DA ?? null),
         utente_loggato: String(giiCtx.username || p.initialData?.utente_loggato || ''),
         area_cod: String((mode === 'create' ? roleAreaLabel : (initialAreaLabel || roleAreaLabel)) || ''),
         settore_cod: String((mode === 'create' ? roleSettoreLabel : (initialSettoreLabel || roleSettoreLabel)) || ''),
@@ -6484,7 +6584,7 @@ React.useEffect(() => {
         rl_dom_cap: (tipoSogg === 'PG' && String(g('rl_dom_notifica')) === '1' ? g('rl_dom_cap') : null) || null,
         rl_dom_stato: tipoSogg === 'PG' && String(g('rl_dom_notifica')) === '1' ? (g('rl_dom_stato') || 'ITALIA') : null,
         note_anagrafica: g('note_anagrafica') || null,
-        // Valutazione RI: gradi puntuali per articolo e occorrenza Art. 15
+        // Valutazione RIT: gradi puntuali per articolo e occorrenza Art. 15
         gradi_violazioni: g('gradi_violazioni') || null,
         occorrenza: toInt(g('occorrenza')),
         // Dati tecnici (erano mancanti)
@@ -6493,7 +6593,7 @@ React.useEffect(() => {
         idrante: toInt(g('idrante')),
         matricola_contatore: g('matricola_contatore') || null,
         matricola_tessera: g('matricola_tessera') || null,
-        // Art. 30 — snapshot del rimborso attrezzature selezionato dal TI AGR/TEC.
+        // Art. 30 — snapshot del rimborso attrezzature selezionato dall'IT AGR/TEC.
         // Il rimborso spese per manodopera/mezzi/materiali resta invece nella Nota spese.
         attrezzature_risarcimento_dettaglio: g('attrezzature_risarcimento_dettaglio') || null,
         attrezzature_risarcimento_importo: String(g('attrezzature_risarcimento_importo') || '').trim() ? Number(g('attrezzature_risarcimento_importo')) : null,
@@ -6503,11 +6603,11 @@ React.useEffect(() => {
       }
 
       const cleanAttrsAll = filterAttrsForLayer(attrs, layer)
-      const riAgrTecEffectiveSaveFields = new Set(Array.from(riAgrTecEditableSaveFields).map(k => String(k).toLowerCase()))
-      if (!riGradoTriggerViolations) riAgrTecEffectiveSaveFields.delete('gradi_violazioni')
-      if (!hasTipoAbuso15) riAgrTecEffectiveSaveFields.delete('occorrenza')
-      const cleanAttrs = (mode === 'edit' && isRiAgrTecLimitedEdit)
-        ? Object.fromEntries(Object.entries(cleanAttrsAll).filter(([k]) => riAgrTecEffectiveSaveFields.has(String(k).toLowerCase())))
+      const ritAgrTecEffectiveSaveFields = new Set(Array.from(ritAgrTecEditableSaveFields).map(k => String(k).toLowerCase()))
+      if (!ritGradoTriggerViolations) ritAgrTecEffectiveSaveFields.delete('gradi_violazioni')
+      if (!hasTipoAbuso15) ritAgrTecEffectiveSaveFields.delete('occorrenza')
+      const cleanAttrs = (mode === 'edit' && isRitAgrTecLimitedEdit)
+        ? Object.fromEntries(Object.entries(cleanAttrsAll).filter(([k]) => ritAgrTecEffectiveSaveFields.has(String(k).toLowerCase())))
         : cleanAttrsAll
 
       if (mode === 'edit') {
@@ -6523,8 +6623,8 @@ React.useEffect(() => {
           }
         }
         const changedFields = Object.keys(cleanAttrs).filter((k) => normalizeLogValue(prevAttrs?.[k]) !== normalizeLogValue(cleanAttrs[k]))
-        const hasAttachmentOps = !isRiAgrTecLimitedEdit && (attachmentFiles.length > 0 || pendingDeleteAttachmentIds.length > 0 || Object.keys(pendingReplaceAttachments).length > 0)
-        const hasNoteSpeseOps = !isRiAgrTecLimitedEdit && noteSpeseDraftDirty
+        const hasAttachmentOps = !isRitAgrTecLimitedEdit && (attachmentFiles.length > 0 || pendingDeleteAttachmentIds.length > 0 || Object.keys(pendingReplaceAttachments).length > 0)
+        const hasNoteSpeseOps = !isRitAgrTecLimitedEdit && noteSpeseDraftDirty
         if (changedFields.length === 0 && !geom && !hasAttachmentOps && !hasNoteSpeseOps) {
           setSaving(false)
           setMsg({ kind: 'ok', text: 'Nessuna modifica da salvare.' })
@@ -6632,7 +6732,7 @@ React.useEffect(() => {
       const newOid = Number(added.objectId)
       if (!isGiiPracticeContextStampCurrent(saveContextStamp)) { setSaving(false); return }
       
-      // Numero della rilevazione: OBJECTID-TR/TI-settore.
+      // Numero della rilevazione: OBJECTID-TR/IT-settore.
       const newPraticaCode = buildPraticaCodeFromData(cleanAttrs, newOid)
 
       // In create mode NON aggiornare la datasource schema/base e NON provare a selezionare il nuovo OID:
@@ -6666,7 +6766,7 @@ ${e?.message || String(e)}`
   React.useEffect(() => {
     const prev = prevSelectedViolazioniCountRef.current
     prevSelectedViolazioniCountRef.current = selectedViolazioniCount
-    if (!isRiAgrTecLimitedEdit && prev > 0 && selectedViolazioniCount === 0 && String(g('presenza_trasgressore') || '').trim()) {
+    if (!isRitAgrTecLimitedEdit && prev > 0 && selectedViolazioniCount === 0 && String(g('presenza_trasgressore') || '').trim()) {
       set('presenza_trasgressore', '')
     }
   }, [selectedViolazioniCount])
@@ -6789,7 +6889,7 @@ ${e?.message || String(e)}`
     }
   }, [activeNotaSpeseRows, activeNotaSpeseCasistica])
   const activeNotaSpeseIncompleteRowsCount = activeNotaSpeseIncompleteBreakdown.matricola.length + activeNotaSpeseIncompleteBreakdown.quantita.length
-  const noteSpeseBrowseDisabled = isReadOnly || isRiAgrTecLimitedEdit || noteSpeseBusy || !activeNotaSpeseCasistica || noteSpeseCasistiche.length === 0 ||
+  const noteSpeseBrowseDisabled = isReadOnly || isRitAgrTecLimitedEdit || noteSpeseBusy || !activeNotaSpeseCasistica || noteSpeseCasistiche.length === 0 ||
     (activeNotaSpeseCasistica === 'C104_ATTREZZATURE_DANNEGGIATE' && art30RecuperoMode === 'recuperabile' && !activeAttrezzaturaRiferimentoId)
   // La combo seleziona soltanto quale nota spese consultare: resta attiva anche in sola consultazione.
   // Non va disabilitata quando c'e' una sola violazione selezionabile: se quella
@@ -7009,26 +7109,16 @@ ${e?.message || String(e)}`
     return d.toLocaleDateString('it-IT', { day: '2-digit', month: '2-digit', year: 'numeric' })
   }
 
-  const getTiTransmissionToCapoSettoreDate = (): any => {
+  const getItTransmissionToCapoSettoreDate = (): any => {
     const src = p.initialData || {}
-    const statoTi = normalizeIntOrNull(firstMeaningfulValue(
-      pickAttrCI(src, ['stato_TI', 'stato_ti', 'STATO_TI']),
-      g('stato_ti'),
-      g('stato_TI')
+    const statoIt = normalizeIntOrNull(firstMeaningfulValue(
+      pickAttrCI(src, ['stato_IT', 'stato_it', 'STATO_IT']),
+      g('stato_IT')
     ))
-    const esitoTi = normalizeIntOrNull(firstMeaningfulValue(
-      pickAttrCI(src, ['esito_TI', 'esito_ti', 'ESITO_TI']),
-      g('esito_ti'),
-      g('esito_TI')
-    ))
-    if (statoTi !== STATO_APPROVATA && esitoTi !== ESITO_APPROVATA) return null
+    if (statoIt !== STATO_APPROVATA) return null
     return firstMeaningfulValue(
-      pickAttrCI(src, ['dt_stato_TI', 'dt_stato_ti', 'DT_STATO_TI']),
-      pickAttrCI(src, ['dt_esito_TI', 'dt_esito_ti', 'DT_ESITO_TI']),
-      g('dt_stato_ti'),
-      g('dt_stato_TI'),
-      g('dt_esito_ti'),
-      g('dt_esito_TI')
+      pickAttrCI(src, ['dt_stato_IT', 'dt_stato_it', 'DT_STATO_IT']),
+      g('dt_stato_IT')
     )
   }
 
@@ -7040,8 +7130,8 @@ ${e?.message || String(e)}`
       case 'tecnico_rilevatore': return { label: 'Tecnico rilevatore', el: <NpText value={g('tecnico_rilevatore')} onChange={() => {}} disabled/> }
       case 'ufficio_zona': return { label: 'Ufficio di zona', el: <NpText value={g('ufficio_zona')} onChange={() => {}} disabled/> }
       case 'data_rilevazione': return { label: 'Data rilevazione', el: <NpText value={fmtDateDMY(g('data_rilevazione'))} onChange={() => {}} disabled/> }
-      case 'ti_assegnato_nome': return { label: 'Tecnico istruttore', el: <NpText value={g('ti_assegnato_nome')} onChange={() => {}} disabled/> }
-      case 'dt_trasmissione_capo_settore': return { label: 'Data trasmissione al Capo Settore', el: <NpText value={fmtDateDMY(getTiTransmissionToCapoSettoreDate()) || '—'} onChange={() => {}} disabled/> }
+      case 'it_assegnato_nome': return { label: 'Istruttore tecnico', el: <NpText value={g('it_assegnato_nome')} onChange={() => {}} disabled/> }
+      case 'dt_trasmissione_capo_settore': return { label: 'Data trasmissione al Capo Settore', el: <NpText value={fmtDateDMY(getItTransmissionToCapoSettoreDate()) || '—'} onChange={() => {}} disabled/> }
       // Trasgressore — dati principali
       case 'tipologia_soggetto': return { label: 'Tipologia soggetto', el: <NpSel value={tipoSogg} onChange={v => {
         set('tipologia_soggetto', v)
@@ -7091,7 +7181,7 @@ ${e?.message || String(e)}`
       // Violazione — Art. 15
       case 'tipo_abuso': return { label: 'Tipo di abuso', el: <NpSel value={tipoAbuso} onChange={v => { set('tipo_abuso', v); set('norma15_parziale', ''); set('norma15_totale', '') }} options={CHOICES.tipo_abuso} disabled={saving || !art15Selected}/> }
       case 'norma15_sel': {
-        const canEdit = isRiAgrTecContext(currentUserContext) && hasTipoAbuso15 && !saving
+        const canEdit = isRitAgrTecContext(currentUserContext) && hasTipoAbuso15 && !saving
         const occurrencePending = canEdit && !String(g('occorrenza') || '').trim()
         return { label: 'Occorrenza', el: <NpSel value={g('occorrenza')} onChange={v => set('occorrenza', v)} options={CHOICES.occorrenza} disabled={!canEdit} attention={occurrencePending} attentionTitle='Occorrenza da valorizzare'/> }
       }
@@ -7118,20 +7208,20 @@ ${e?.message || String(e)}`
       case 'sup_irrigata_art17_2': return (norma1516 === 'Art17' && art17tipo === 'Art17.2') ? { label: 'Superficie irrigata (ha.a.ca)', el: <NpSurfaceText value={'0'} onChange={() => {}} disabled/> } : null
       // Violazione — Gravità
       case 'grado': {
-        const en = isRiAgrTecContext(currentUserContext) && riGradoTriggerViolations
-        const el = !riGradoTriggerViolations
+        const en = isRitAgrTecContext(currentUserContext) && ritGradoTriggerViolations
+        const el = !ritGradoTriggerViolations
           ? <NpSel value={''} onChange={() => {}} options={CHOICES.grado} disabled/>
           : (
             <div style={{ display: 'grid', gap: 8 }}>
-              {riGradoSelectedArts.map(art => {
-                const gradeValue = riGradiViolazioniMap[art] || ''
+              {ritGradoSelectedArts.map(art => {
+                const gradeValue = ritGradiViolazioniMap[art] || ''
                 const gradePending = en && !gradeValue
                 return (
                   <div key={art} style={{ display: 'grid', gridTemplateColumns: '90px 1fr', gap: 8, alignItems: 'center' }}>
                     <div style={{ fontSize: 12, fontWeight: 700, color: '#374151' }}>Art. {art}</div>
                     <NpSel
                       value={gradeValue}
-                      onChange={v => setRiGradoForArt(art, v)}
+                      onChange={v => setRitGradoForArt(art, v)}
                       options={CHOICES.grado}
                       centerText
                       disabled={saving || !en}
@@ -7263,7 +7353,7 @@ ${e?.message || String(e)}`
 
   const selectedNorma3TextStyle: React.CSSProperties = { color: '#374151', fontWeight: 400, opacity: 1 }
 
-  const mapPointEditDisabled = saving || isReadOnly || isRiAgrTecLimitedEdit
+  const mapPointEditDisabled = saving || isReadOnly || isRitAgrTecLimitedEdit
 
   const renderReadonlyCheckboxTi = (selected: boolean, style?: React.CSSProperties): React.ReactNode => {
     const disabledTextColor = String(formStyle.fieldDisabledColor || '#1f2937')
@@ -7307,7 +7397,7 @@ ${e?.message || String(e)}`
   }
 
   const renderNorma3Checkbox = (selected: boolean, onChange: () => void, style?: React.CSSProperties): React.ReactNode => {
-    const disabled = saving || isReadOnly || isRiAgrTecLimitedEdit
+    const disabled = saving || isReadOnly || isRitAgrTecLimitedEdit
     if (disabled) return renderReadonlyCheckboxTi(selected, style)
     return (
       <input
@@ -7321,7 +7411,7 @@ ${e?.message || String(e)}`
   }
 
   const norma3ReadonlyTextStyle = (selected: boolean): React.CSSProperties => {
-    if (isReadOnly || isRiAgrTecLimitedEdit) {
+    if (isReadOnly || isRitAgrTecLimitedEdit) {
       return { color: String(formStyle.fieldDisabledColor || '#1f2937'), fontWeight: 400, opacity: 1 }
     }
     return {
@@ -7373,7 +7463,7 @@ ${e?.message || String(e)}`
                 ) : (
                   <>
                     <span style={{ fontSize: 12, fontWeight: 700, color: '#2563eb' }}>⏳ Clicca sulla mappa per impostare il punto…</span>
-                    <button type='button' disabled={isRiAgrTecLimitedEdit} onClick={() => { if (isRiAgrTecLimitedEdit) return; p.onToggleMapClick?.(false) }} style={{
+                    <button type='button' disabled={isRitAgrTecLimitedEdit} onClick={() => { if (isRitAgrTecLimitedEdit) return; p.onToggleMapClick?.(false) }} style={{
                       padding: '5px 12px', borderRadius: 8, border: '1px solid rgba(0,0,0,0.14)', background: '#f8fbff', color: '#374151',
                       fontSize: 11, fontWeight: 700, cursor: mapPointEditDisabled ? 'not-allowed' : 'pointer', opacity: mapPointEditDisabled ? 0.5 : 1
                     }}>Annulla</button>
@@ -7492,7 +7582,7 @@ ${e?.message || String(e)}`
 
         const rightColumn = (
           <section style={{ ...editCardStyle, minHeight: '100%', display: 'flex', flexDirection: 'column', minWidth: 0 }}>
-            <div style={editCardHeaderStyle}><span>Annotazioni del tecnico istruttore</span></div>
+            <div style={editCardHeaderStyle}><span>Annotazioni dell’istruttore tecnico</span></div>
             <div style={{ ...editCardBodyStyle, flex: '1 1 auto', minHeight: 0 }}>{noteBody}</div>
           </section>
         )
@@ -7600,7 +7690,7 @@ ${e?.message || String(e)}`
           if (!nodes.length) return null
           return <div style={{ display: 'grid', gridTemplateColumns: columns, gap }}>{nodes}</div>
         }
-        const canEditRegularField = (fieldName: string, enabled = true) => enabled && !saving && !isRiAgrTecLimitedEdit && canEditFieldForCurrentProfile(fieldName)
+        const canEditRegularField = (fieldName: string, enabled = true) => enabled && !saving && !isRitAgrTecLimitedEdit && canEditFieldForCurrentProfile(fieldName)
         const surfaceTextField = (fieldName: string, label: string, value: string, onChange: (v: string) => void, enabled: boolean, lockedValue?: string, attentionTitle?: string) => {
           const editable = canEditRegularField(fieldName, enabled) && lockedValue == null
           const pending = !!attentionTitle && editable && surfaceToCentiareNumber(value) <= 0
@@ -7623,7 +7713,7 @@ ${e?.message || String(e)}`
         )
         const choiceBox = (value: 'Art16' | 'Art17', title: string) => {
           const active = norma1516 === value
-          const disabled = saving || isRiAgrTecLimitedEdit || !canEditFieldForCurrentProfile('norma16_17')
+          const disabled = saving || isRitAgrTecLimitedEdit || !canEditFieldForCurrentProfile('norma16_17')
           const checkbox = disabled ? renderReadonlyCheckboxTi(active) : (
             <input
               type='checkbox'
@@ -7752,15 +7842,15 @@ ${e?.message || String(e)}`
                 const art = normalizeArtCode(o.v)
                 const selected = norma3Set.has(o.v)
                 const requiresPoint = NORMA3_REQ_POINT.has(o.v)
-                const hasGrade = RI_GRADO_ART_CODES.includes(art as any)
+                const hasGrade = RIT_GRADO_ART_CODES.includes(art as any)
                 const hasNotaSpese = getNotaSpeseCasisticaByArtCode(o.v) != null
-                const canEditGrade = !isReadOnly && isRiAgrTecContext(currentUserContext) && selected && hasGrade && !saving
-                const gradeValue = riGradiViolazioniMap[art] || ''
+                const canEditGrade = !isReadOnly && isRitAgrTecContext(currentUserContext) && selected && hasGrade && !saving
+                const gradeValue = ritGradiViolazioniMap[art] || ''
                 const gradePending = canEditGrade && !gradeValue
                 const gradeNode = selected && hasGrade
                   ? <NpSel
                       value={gradeValue}
-                      onChange={v => setRiGradoForArt(art, v)}
+                      onChange={v => setRitGradoForArt(art, v)}
                       options={CHOICES.grado}
                       centerText
                       disabled={!canEditGrade}
@@ -7783,8 +7873,8 @@ ${e?.message || String(e)}`
                         articleState={regolamentoArticoliState}
                         articleCode={o.v}
                         title={o.l}
-                        checkbox={renderNorma3Checkbox(selected, () => !(saving || isRiAgrTecLimitedEdit) && toggleNorma3(o.v))}
-                        disabled={saving || isReadOnly || isRiAgrTecLimitedEdit}
+                        checkbox={renderNorma3Checkbox(selected, () => !(saving || isRitAgrTecLimitedEdit) && toggleNorma3(o.v))}
+                        disabled={saving || isReadOnly || isRitAgrTecLimitedEdit}
                         textStyle={norma3ReadonlyTextStyle(selected)}
                       />
                     </div>
@@ -7827,7 +7917,7 @@ ${e?.message || String(e)}`
 
         const art15ChoiceBox = () => {
           const active = art15Selected
-          const disabled = saving || isRiAgrTecLimitedEdit || !canEditFieldForCurrentProfile('tipo_abuso')
+          const disabled = saving || isRitAgrTecLimitedEdit || !canEditFieldForCurrentProfile('tipo_abuso')
           const checkbox = disabled ? renderReadonlyCheckboxTi(active) : (
             <input
               type='checkbox'
@@ -8022,8 +8112,8 @@ ${e?.message || String(e)}`
                       articleState={regolamentoArticoliState}
                     articleCode={o.v}
                     title={o.l}
-                    checkbox={renderNorma3Checkbox(selected, () => !(saving || isRiAgrTecLimitedEdit) && toggleNorma3(o.v))}
-                    disabled={saving || isReadOnly || isRiAgrTecLimitedEdit}
+                    checkbox={renderNorma3Checkbox(selected, () => !(saving || isRitAgrTecLimitedEdit) && toggleNorma3(o.v))}
+                    disabled={saving || isReadOnly || isRitAgrTecLimitedEdit}
                     textStyle={norma3ReadonlyTextStyle(selected)}
                     />
                   </React.Fragment>
@@ -8511,7 +8601,7 @@ ${e?.message || String(e)}`
                   <select
                     value={activeNotaSpeseCasistica}
                     onChange={(e) => setActiveNotaSpeseCasistica(e.target.value)}
-                    title={isReadOnly || isRiAgrTecLimitedEdit ? 'Seleziona la violazione per consultare la relativa nota spese.' : undefined}
+                    title={isReadOnly || isRitAgrTecLimitedEdit ? 'Seleziona la violazione per consultare la relativa nota spese.' : undefined}
                     style={{
                       ...fieldBaseStyle(formStyle, noteSpeseCasisticaDisabled),
                       height: 38,
@@ -8529,7 +8619,7 @@ ${e?.message || String(e)}`
                   >
                     {noteSpeseCasistiche.map(opt => <option key={opt.codice} value={opt.codice}>{opt.label}</option>)}
                   </select>
-                  <div style={{ fontSize: 11, color: noteSpeseCasisticaDisabled ? '#64748b' : '#336666', lineHeight: 1.35, marginTop: 4 }}>{isReadOnly || isRiAgrTecLimitedEdit ? 'Seleziona la violazione per consultare la relativa nota spese.' : 'Le voci aggiunte dal prezzario saranno collegate alla violazione selezionata.'}</div>
+                  <div style={{ fontSize: 11, color: noteSpeseCasisticaDisabled ? '#64748b' : '#336666', lineHeight: 1.35, marginTop: 4 }}>{isReadOnly || isRitAgrTecLimitedEdit ? 'Seleziona la violazione per consultare la relativa nota spese.' : 'Le voci aggiunte dal prezzario saranno collegate alla violazione selezionata.'}</div>
                 </div>
                 {isArt30NotaSpeseCasistica && (
                   <div style={{ flex: '0 0 auto', width: 220, maxWidth: '100%' }}>
@@ -8559,7 +8649,7 @@ ${e?.message || String(e)}`
                 )}
                 {isArt30NotaSpeseCasistica && art30RecuperoMode === 'recuperabile' && (() => {
                   const noAttrezzatureCreate = attrezzatureIstanzeOptions.length === 0
-                  const noteSpeseRoleReadOnly = isReadOnly || isRiAgrTecLimitedEdit
+                  const noteSpeseRoleReadOnly = isReadOnly || isRitAgrTecLimitedEdit
                   const comboDisabled = noteSpeseCasisticaDisabled || noAttrezzatureCreate
                   return (
                   <div style={{ flex: '0 0 auto', width: 460, maxWidth: '100%' }}>
@@ -8698,15 +8788,15 @@ ${e?.message || String(e)}`
       <div style={{ display: 'grid', gap: 14 }}>
         {!(isArt30NotaSpeseCasistica && art30RecuperoMode === 'non_recuperabile') && (
           <>
-            <NoteSpeseManager category='AT' title='Attrezzature e trasporti' rows={activeNotaSpeseRows['AT']} onRowsChange={(nextRows) => { if (isReadOnly || isRiAgrTecLimitedEdit || !activeNotaSpeseCasistica || activeAttrezzaturaRiferimentoRequired) return; setNoteSpeseRowsDraft((prev) => mergeCategoryRowsForCasistica(prev, 'AT', activeNotaSpeseCasistica, nextRows, isArt30NotaSpeseCasistica ? activeAttrezzaturaRiferimentoId : undefined)) }} onDirtyChange={(dirty) => { if (isReadOnly || isRiAgrTecLimitedEdit) return; setNoteSpeseFormDirtyByCategory((prev) => ({ ...prev, AT: dirty })) }} resetKey={noteSpeseManagerResetKey} readonly={isReadOnly || isRiAgrTecLimitedEdit || !activeNotaSpeseCasistica || activeAttrezzaturaRiferimentoRequired} />
-            <NoteSpeseManager category='PR' title='Materiali da costruzione' rows={activeNotaSpeseRows['PR']} onRowsChange={(nextRows) => { if (isReadOnly || isRiAgrTecLimitedEdit || !activeNotaSpeseCasistica || activeAttrezzaturaRiferimentoRequired) return; setNoteSpeseRowsDraft((prev) => mergeCategoryRowsForCasistica(prev, 'PR', activeNotaSpeseCasistica, nextRows, isArt30NotaSpeseCasistica ? activeAttrezzaturaRiferimentoId : undefined)) }} onDirtyChange={(dirty) => { if (isReadOnly || isRiAgrTecLimitedEdit) return; setNoteSpeseFormDirtyByCategory((prev) => ({ ...prev, PR: dirty })) }} resetKey={noteSpeseManagerResetKey} readonly={isReadOnly || isRiAgrTecLimitedEdit || !activeNotaSpeseCasistica || activeAttrezzaturaRiferimentoRequired} />
-            <NoteSpeseManager category='RU' title='Risorse umane' rows={activeNotaSpeseRows['RU']} onRowsChange={(nextRows) => { if (isReadOnly || isRiAgrTecLimitedEdit || !activeNotaSpeseCasistica || activeAttrezzaturaRiferimentoRequired) return; setNoteSpeseRowsDraft((prev) => mergeCategoryRowsForCasistica(prev, 'RU', activeNotaSpeseCasistica, nextRows, isArt30NotaSpeseCasistica ? activeAttrezzaturaRiferimentoId : undefined)) }} onDirtyChange={(dirty) => { if (isReadOnly || isRiAgrTecLimitedEdit) return; setNoteSpeseFormDirtyByCategory((prev) => ({ ...prev, RU: dirty })) }} resetKey={noteSpeseManagerResetKey} readonly={isReadOnly || isRiAgrTecLimitedEdit || !activeNotaSpeseCasistica || activeAttrezzaturaRiferimentoRequired} />
-            <NoteSpeseManager category='SL' title='Semilavorati' rows={activeNotaSpeseRows['SL']} onRowsChange={(nextRows) => { if (isReadOnly || isRiAgrTecLimitedEdit || !activeNotaSpeseCasistica || activeAttrezzaturaRiferimentoRequired) return; setNoteSpeseRowsDraft((prev) => mergeCategoryRowsForCasistica(prev, 'SL', activeNotaSpeseCasistica, nextRows, isArt30NotaSpeseCasistica ? activeAttrezzaturaRiferimentoId : undefined)) }} onDirtyChange={(dirty) => { if (isReadOnly || isRiAgrTecLimitedEdit) return; setNoteSpeseFormDirtyByCategory((prev) => ({ ...prev, SL: dirty })) }} resetKey={noteSpeseManagerResetKey} readonly={isReadOnly || isRiAgrTecLimitedEdit || !activeNotaSpeseCasistica || activeAttrezzaturaRiferimentoRequired} />
-            <NoteSpeseManager category='PF' title='Prodotti finiti' rows={activeNotaSpeseRows['PF']} onRowsChange={(nextRows) => { if (isReadOnly || isRiAgrTecLimitedEdit || !activeNotaSpeseCasistica || activeAttrezzaturaRiferimentoRequired) return; setNoteSpeseRowsDraft((prev) => mergeCategoryRowsForCasistica(prev, 'PF', activeNotaSpeseCasistica, nextRows, isArt30NotaSpeseCasistica ? activeAttrezzaturaRiferimentoId : undefined)) }} onDirtyChange={(dirty) => { if (isReadOnly || isRiAgrTecLimitedEdit) return; setNoteSpeseFormDirtyByCategory((prev) => ({ ...prev, PF: dirty })) }} resetKey={noteSpeseManagerResetKey} readonly={isReadOnly || isRiAgrTecLimitedEdit || !activeNotaSpeseCasistica || activeAttrezzaturaRiferimentoRequired} />
+            <NoteSpeseManager category='AT' title='Attrezzature e trasporti' rows={activeNotaSpeseRows['AT']} onRowsChange={(nextRows) => { if (isReadOnly || isRitAgrTecLimitedEdit || !activeNotaSpeseCasistica || activeAttrezzaturaRiferimentoRequired) return; setNoteSpeseRowsDraft((prev) => mergeCategoryRowsForCasistica(prev, 'AT', activeNotaSpeseCasistica, nextRows, isArt30NotaSpeseCasistica ? activeAttrezzaturaRiferimentoId : undefined)) }} onDirtyChange={(dirty) => { if (isReadOnly || isRitAgrTecLimitedEdit) return; setNoteSpeseFormDirtyByCategory((prev) => ({ ...prev, AT: dirty })) }} resetKey={noteSpeseManagerResetKey} readonly={isReadOnly || isRitAgrTecLimitedEdit || !activeNotaSpeseCasistica || activeAttrezzaturaRiferimentoRequired} />
+            <NoteSpeseManager category='PR' title='Materiali da costruzione' rows={activeNotaSpeseRows['PR']} onRowsChange={(nextRows) => { if (isReadOnly || isRitAgrTecLimitedEdit || !activeNotaSpeseCasistica || activeAttrezzaturaRiferimentoRequired) return; setNoteSpeseRowsDraft((prev) => mergeCategoryRowsForCasistica(prev, 'PR', activeNotaSpeseCasistica, nextRows, isArt30NotaSpeseCasistica ? activeAttrezzaturaRiferimentoId : undefined)) }} onDirtyChange={(dirty) => { if (isReadOnly || isRitAgrTecLimitedEdit) return; setNoteSpeseFormDirtyByCategory((prev) => ({ ...prev, PR: dirty })) }} resetKey={noteSpeseManagerResetKey} readonly={isReadOnly || isRitAgrTecLimitedEdit || !activeNotaSpeseCasistica || activeAttrezzaturaRiferimentoRequired} />
+            <NoteSpeseManager category='RU' title='Risorse umane' rows={activeNotaSpeseRows['RU']} onRowsChange={(nextRows) => { if (isReadOnly || isRitAgrTecLimitedEdit || !activeNotaSpeseCasistica || activeAttrezzaturaRiferimentoRequired) return; setNoteSpeseRowsDraft((prev) => mergeCategoryRowsForCasistica(prev, 'RU', activeNotaSpeseCasistica, nextRows, isArt30NotaSpeseCasistica ? activeAttrezzaturaRiferimentoId : undefined)) }} onDirtyChange={(dirty) => { if (isReadOnly || isRitAgrTecLimitedEdit) return; setNoteSpeseFormDirtyByCategory((prev) => ({ ...prev, RU: dirty })) }} resetKey={noteSpeseManagerResetKey} readonly={isReadOnly || isRitAgrTecLimitedEdit || !activeNotaSpeseCasistica || activeAttrezzaturaRiferimentoRequired} />
+            <NoteSpeseManager category='SL' title='Semilavorati' rows={activeNotaSpeseRows['SL']} onRowsChange={(nextRows) => { if (isReadOnly || isRitAgrTecLimitedEdit || !activeNotaSpeseCasistica || activeAttrezzaturaRiferimentoRequired) return; setNoteSpeseRowsDraft((prev) => mergeCategoryRowsForCasistica(prev, 'SL', activeNotaSpeseCasistica, nextRows, isArt30NotaSpeseCasistica ? activeAttrezzaturaRiferimentoId : undefined)) }} onDirtyChange={(dirty) => { if (isReadOnly || isRitAgrTecLimitedEdit) return; setNoteSpeseFormDirtyByCategory((prev) => ({ ...prev, SL: dirty })) }} resetKey={noteSpeseManagerResetKey} readonly={isReadOnly || isRitAgrTecLimitedEdit || !activeNotaSpeseCasistica || activeAttrezzaturaRiferimentoRequired} />
+            <NoteSpeseManager category='PF' title='Prodotti finiti' rows={activeNotaSpeseRows['PF']} onRowsChange={(nextRows) => { if (isReadOnly || isRitAgrTecLimitedEdit || !activeNotaSpeseCasistica || activeAttrezzaturaRiferimentoRequired) return; setNoteSpeseRowsDraft((prev) => mergeCategoryRowsForCasistica(prev, 'PF', activeNotaSpeseCasistica, nextRows, isArt30NotaSpeseCasistica ? activeAttrezzaturaRiferimentoId : undefined)) }} onDirtyChange={(dirty) => { if (isReadOnly || isRitAgrTecLimitedEdit) return; setNoteSpeseFormDirtyByCategory((prev) => ({ ...prev, PF: dirty })) }} resetKey={noteSpeseManagerResetKey} readonly={isReadOnly || isRitAgrTecLimitedEdit || !activeNotaSpeseCasistica || activeAttrezzaturaRiferimentoRequired} />
           </>
         )}
         {isArt30NotaSpeseCasistica && art30RecuperoMode === 'non_recuperabile' && (
-          <NoteSpeseManager category='RA' title='Attrezzature' rows={activeNotaSpeseRows['RA']} cauzioneUnitaria={attrezzatureCauzioneUnitaria} onRowsChange={(nextRows) => { if (isReadOnly || isRiAgrTecLimitedEdit || !activeNotaSpeseCasistica) return; setNoteSpeseRowsDraft((prev) => mergeCategoryRowsForCasistica(prev, 'RA', activeNotaSpeseCasistica, nextRows)) }} onDirtyChange={(dirty) => { if (isReadOnly || isRiAgrTecLimitedEdit) return; setNoteSpeseFormDirtyByCategory((prev) => ({ ...prev, RA: dirty })) }} resetKey={noteSpeseManagerResetKey} readonly={isReadOnly || isRiAgrTecLimitedEdit || !activeNotaSpeseCasistica} />
+          <NoteSpeseManager category='RA' title='Attrezzature' rows={activeNotaSpeseRows['RA']} cauzioneUnitaria={attrezzatureCauzioneUnitaria} onRowsChange={(nextRows) => { if (isReadOnly || isRitAgrTecLimitedEdit || !activeNotaSpeseCasistica) return; setNoteSpeseRowsDraft((prev) => mergeCategoryRowsForCasistica(prev, 'RA', activeNotaSpeseCasistica, nextRows)) }} onDirtyChange={(dirty) => { if (isReadOnly || isRitAgrTecLimitedEdit) return; setNoteSpeseFormDirtyByCategory((prev) => ({ ...prev, RA: dirty })) }} resetKey={noteSpeseManagerResetKey} readonly={isReadOnly || isRitAgrTecLimitedEdit || !activeNotaSpeseCasistica} />
         )}
       </div>
     </div>
@@ -8729,10 +8819,10 @@ ${e?.message || String(e)}`
       loading={attachmentsLoading}
       busy={attachmentsUploading}
       error={attachmentsError}
-      canEdit={!isReadOnly && !isRiAgrTecLimitedEdit}
+      canEdit={!isReadOnly && !isRitAgrTecLimitedEdit}
       uploadInputKey={attachmentInputKey}
       onUpload={(files) => {
-        if (isReadOnly || isRiAgrTecLimitedEdit) return
+        if (isReadOnly || isRitAgrTecLimitedEdit) return
         setAttachmentsError(null)
         setAttachmentFiles(files)
         if (files.length > 0) void uploadCurrentAttachments(files)
@@ -8743,18 +8833,18 @@ ${e?.message || String(e)}`
         if (!item) { setPreviewAttachment(null); return }
         setPreviewAttachment({ id: Number(item.id), name: item.name, contentType: item.contentType })
       }}
-      buildPreviewUrl={buildTiAttachmentPreviewUrl as any}
+      buildPreviewUrl={buildItAttachmentPreviewUrl as any}
       onOpen={(item) => {
         void openAttachmentInNewTab(item, Number(currentOid), currentLayerUrl).catch((err: any) => {
           setAttachmentsError(err?.message || String(err))
         })
       }}
       onReplace={(item, file) => {
-        if (isReadOnly || isRiAgrTecLimitedEdit) return
+        if (isReadOnly || isRitAgrTecLimitedEdit) return
         setAttachmentConfirm({ type: 'replace', attachment: { id: Number(item.id), name: item.name }, file })
       }}
       onDelete={(item) => {
-        if (isReadOnly || isRiAgrTecLimitedEdit) return
+        if (isReadOnly || isRitAgrTecLimitedEdit) return
         setAttachmentConfirm({ type: 'delete', attachment: { id: Number(item.id), name: item.name } })
       }}
       rotationDeg={previewRotationDeg}
@@ -9590,9 +9680,37 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
     ? (props.config as any).asMutable({ deep: true })
     : (props.config as any || {})
   const cfg: any = { ...defaultConfig, ...cfgMutable }
+  const isCreatePage = cfg.enableCreateWithoutSelection === true
 
-  const currentUserContext = useReactiveGiiUserContext()
+  const baseUserContext = useReactiveGiiUserContext(!isCreatePage)
+  const createItAssignments = useReactiveCreateItAssignments()
+  const createItAssignmentsKey = createItAssignmentsIdentityKey(createItAssignments)
+  const [selectedCreateItAssignmentKey, setSelectedCreateItAssignmentKey] = React.useState('')
+  const baseProfileRole = normalizeRoleCode(baseUserContext.role)
+  const createAsAdmin = isCreatePage && baseProfileRole === 'ADMIN'
+  const selectedCreateItAssignment = React.useMemo(() => {
+    if (!isCreatePage || createAsAdmin) return null
+    const explicit = createItAssignments.find(item => item.key === selectedCreateItAssignmentKey) || null
+    if (explicit) return explicit
+    return createItAssignments.length === 1 ? createItAssignments[0] : null
+  }, [isCreatePage, createAsAdmin, createItAssignmentsKey, selectedCreateItAssignmentKey])
+  const currentUserContext = React.useMemo<GiiUserContext>(() => {
+    if (!isCreatePage || createAsAdmin || !selectedCreateItAssignment) return baseUserContext
+    return {
+      ...baseUserContext,
+      role: 'IT',
+      area: selectedCreateItAssignment.area,
+      settore: selectedCreateItAssignment.settore,
+      areaRaw: selectedCreateItAssignment.area,
+      settoreRaw: selectedCreateItAssignment.settore,
+      ufficio: selectedCreateItAssignment.ufficio,
+      ufficioLabel: selectedCreateItAssignment.ufficioLabel,
+      gruppo: selectedCreateItAssignment.gruppo
+    }
+  }, [isCreatePage, createAsAdmin, selectedCreateItAssignment?.key, giiUserContextIdentityKey(baseUserContext)])
   const currentUserContextKey = giiUserContextIdentityKey(currentUserContext)
+  const createAssignmentMissing = isCreatePage && !createAsAdmin && createItAssignments.length === 0
+  const createAssignmentRequired = isCreatePage && !createAsAdmin && createItAssignments.length > 1 && !selectedCreateItAssignment
   const detectedRoleRaw = normalizeRoleCode(currentUserContext.role) || String(currentUserContext.role || '').trim().toUpperCase()
   const detectedRole = detectedRoleRaw && detectedRoleRaw !== 'ADMIN' ? detectedRoleRaw : ''
 
@@ -9653,24 +9771,11 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
     iterExtra: normalizeFieldList((cfg as any).iterExtraFields)
   }
   const migratedTabs = migrateTabs(tabFields, cfg.tabs || [])
-  const editConfig = {
-    show: cfg.showEditButtons !== false,
-    overlayColor: normalizeHexColor(cfg.editOverlayColor, '#7c3aed'),
-    pageColor: normalizeHexColor(cfg.editPageColor, '#5b21b6'),
-    pageId: String(cfg.editPageId || 'editing-ti'),
-    fieldStatoTI: String(cfg.fieldStatoTI || 'stato_TI'),
-    fieldPresaTI: String(cfg.fieldPresaTI || 'presa_in_carico_TI'),
-    minStato: Number.isFinite(Number(cfg.editMinStato)) ? Number(cfg.editMinStato) : 2,
-    maxStato: Number.isFinite(Number(cfg.editMaxStato)) ? Number(cfg.editMaxStato) : 2,
-    presaRequiredVal: Number.isFinite(Number(cfg.editPresaRequiredVal)) ? Number(cfg.editPresaRequiredVal) : 2
-  }
-
   const watchFields = [
     'dt_presa_in_carico_DT', 'stato_DT', 'dt_stato_DT', 'esito_DT', 'dt_esito_DT', 'note_DT',
     'determinazione_stato', 'determinazione_numero', 'determinazione_data', 'determinazione_trasmessa_firma_il'
   ]
 
-  const isCreatePage = cfg.enableCreateWithoutSelection === true
   const [editIntent, setEditIntent] = React.useState<EditIntentInfo | null>(null)
   const [editDs, setEditDs] = React.useState<any | null>(null)
   const [editRecordData, setEditRecordData] = React.useState<any | null>(null)
@@ -9788,7 +9893,7 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
       }
     })().catch(() => {})
     return () => { cancelled = true }
-  }, [effectiveIntent?.oid, effectiveIntent?.layerUrl, effectiveIntent?.idFieldName, isCreatePage])
+  }, [effectiveIntent?.oid, effectiveIntent?.layerUrl, effectiveIntent?.idFieldName, effectiveIntent?.ts, isCreatePage])
 
   const activeGate = useDynamicActiveSelection(['*'], 'GII view dinamica', !isCreatePage && !!effectiveIntent)
   const [intentEditDs, setIntentEditDs] = React.useState<any | null>(null)
@@ -9946,6 +10051,7 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
         // restano montate anche quando sono nascoste, quindi i contatori globali possono
         // altrimenti conservare quelli pubblicati dall'ultima pratica aperta in modifica.
         if (isCreatePage) {
+          if (createItAssignments.length > 1) setSelectedCreateItAssignmentKey('')
           const emptyCounts = { violazione: 0, 'nota-spese': 0, nota_spese: 0, allegati: 0 }
           const emptyBadgeDetails = {}
           try { ;(window as any).__giiEditSectionCounts = emptyCounts } catch {}
@@ -9978,7 +10084,7 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
     const id = setInterval(check, 300)
     check()
     return () => clearInterval(id)
-  }, [isCreatePage])
+  }, [isCreatePage, createItAssignmentsKey])
   const [formDirty, setFormDirty] = React.useState(false)
   React.useEffect(() => {
     if (practiceContextRevision <= 0) return
@@ -10010,19 +10116,15 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
     if (inCreateMode) return null
     const ctx = currentUserContext
     const currentRole = normalizeRoleCode(ctx.role)
-    if (currentRole !== 'TI' && currentRole !== 'RI') return null
+    if (currentRole !== 'IT' && currentRole !== 'RIT') return null
     const d: any = initialEditData || {}
     const stato = normalizeIntOrNull(pickAttrCI(d, [`stato_${currentRole}`, `STATO_${currentRole}`]))
-    const presa = normalizeIntOrNull(pickAttrCI(d, [`presa_in_carico_${currentRole}`, `PRESA_IN_CARICO_${currentRole}`]))
-    const esito = pickAttrCI(d, [`esito_${currentRole}`, `ESITO_${currentRole}`])
-    const inCharge = stato === STATO_PRESA_IN_CARICO || presa === PRESA_IN_CARICO
-    const closedOrForwarded =
-      (esito !== null && esito !== undefined && String(esito).trim() !== '' && String(esito) !== '0') ||
-      (stato != null && stato > STATO_PRESA_IN_CARICO)
+    const inCharge = stato === STATO_PRESA_IN_CARICO
+    const closedOrForwarded = stato != null && stato > STATO_PRESA_IN_CARICO
     let owned = true
-    if (currentRole === 'TI') {
+    if (currentRole === 'IT') {
       const currentUsername = String(ctx.username || '').trim().toLowerCase()
-      const assignedUsername = String(pickAttrCI(d, ['ti_assegnato_username', 'ti_assegnato_user', 'ti_assegnato']) || '').trim().toLowerCase()
+      const assignedUsername = String(pickAttrCI(d, ['it_assegnato_username']) || '').trim().toLowerCase()
       owned = !!currentUsername && !!assignedUsername && currentUsername === assignedUsername
     }
     return owned && inCharge && !closedOrForwarded
@@ -10034,19 +10136,19 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
     const currentRole = normalizeRoleCode(ctx.role)
     const openedInConsultation = effectiveIntent?.readOnly === true
 
-    if (currentRole && currentRole !== 'TI' && currentRole !== 'RI' && currentRole !== 'ADMIN') {
+    if (currentRole && currentRole !== 'IT' && currentRole !== 'RIT' && currentRole !== 'ADMIN') {
       return 'role'
     }
 
-    if (currentRole === 'TI') {
+    if (currentRole === 'IT') {
       const d: any = initialEditData || {}
       const currentUsername = String(ctx.username || '').trim().toLowerCase()
-      const assignedUsername = String(pickAttrCI(d, ['ti_assegnato_username', 'ti_assegnato_user', 'ti_assegnato']) || '').trim().toLowerCase()
+      const assignedUsername = String(pickAttrCI(d, ['it_assegnato_username']) || '').trim().toLowerCase()
       const assignedToOtherUser = !!currentUsername && !!assignedUsername && currentUsername !== assignedUsername
       if (openedInConsultation || assignedToOtherUser || technicalEditAvailability === false) return 'otherUser'
     }
 
-    if (currentRole === 'RI') {
+    if (currentRole === 'RIT') {
       if (openedInConsultation || technicalEditAvailability === false) return 'otherUser'
     }
 
@@ -10259,9 +10361,47 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
       <div style={{ flex: '1 1 auto', display: 'flex', flexDirection: 'row', minHeight: 0 }}>
         {/* Form */}
         <div style={{ flex: '1 1 100%', minHeight: 0, overflow: formTab === 'anteprima' ? 'visible' : 'hidden', display: 'flex', flexDirection: 'column', transition: 'flex 0.25s' }}>
-          {anyDs ? (
+          {inCreateMode && createAssignmentMissing ? (
+            <div style={{ flex: '1 1 auto', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24, boxSizing: 'border-box' }}>
+              <div style={{ width: 'min(92%, 620px)', background: '#f8fbff', border: '1px solid rgba(0,0,0,0.08)', borderRadius: 14, boxShadow: '0 12px 36px rgba(0,0,0,0.12)', padding: 20 }}>
+                <div style={{ fontSize: 19, fontWeight: 800, color: '#b42318', marginBottom: 8 }}>Nuova pratica non disponibile</div>
+                <div style={{ fontSize: 15, lineHeight: 1.55, color: '#374151' }}>
+                  Non risulta alcuna assegnazione attiva come Istruttore tecnico. La nuova pratica può essere inizializzata soltanto nell'ambito di un'assegnazione attiva come Istruttore tecnico.
+                </div>
+              </div>
+            </div>
+          ) : inCreateMode && createAssignmentRequired ? (
+            <div style={{ flex: '1 1 auto', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24, boxSizing: 'border-box' }}>
+              <div style={{ width: 'min(92%, 680px)', background: '#f8fbff', border: '1px solid rgba(0,0,0,0.08)', borderRadius: 14, boxShadow: '0 12px 36px rgba(0,0,0,0.12)', padding: 20 }}>
+                <div style={{ fontSize: 19, fontWeight: 800, color: '#0d3b66', marginBottom: 8 }}>Seleziona l'ambito della pratica</div>
+                <div style={{ fontSize: 15, lineHeight: 1.55, color: '#374151', marginBottom: 16 }}>
+                  Hai più ambiti di appartenenza disponibili. Seleziona quello nel quale deve essere inizializzata la nuova pratica. La scelta definirà il percorso tecnico anche per le successive trasmissioni.
+                </div>
+                <div style={{ display: 'grid', gap: 10 }}>
+                  {createItAssignments.map(item => (
+                    <button
+                      key={item.key}
+                      type='button'
+                      onClick={() => setSelectedCreateItAssignmentKey(item.key)}
+                      style={{
+                        width: '100%', textAlign: 'left', border: '1px solid #b8cbe0', borderRadius: 10,
+                        background: '#ffffff', color: '#0d3b66', padding: '12px 14px', cursor: 'pointer',
+                        display: 'grid', gap: 4, fontFamily: 'inherit'
+                      }}
+                    >
+                      <span style={{ fontSize: 16, fontWeight: 800 }}>{item.settoreFull || item.settore}</span>
+                      <span style={{ fontSize: 14, color: '#374151' }}>
+                        Area {item.areaFull || item.area} · Settore {item.settoreFull || item.settore}
+                        {item.ufficioLabel ? ` · Ufficio di ${item.ufficioLabel}` : ''}
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </div>
+          ) : anyDs ? (
             <NuovaPraticaForm
-              key={`${inCreateMode ? 'create' : `edit:${editOid ?? ''}`}|ctx:${practiceContextRevision}`}
+              key={`${inCreateMode ? `create:${selectedCreateItAssignment?.key || (createAsAdmin ? 'ADMIN' : 'single')}` : `edit:${editOid ?? ''}`}|ctx:${practiceContextRevision}`}
               ds={anyDs}
               cfg={cfg}
               showDatiGenerali={showDatiGenerali}

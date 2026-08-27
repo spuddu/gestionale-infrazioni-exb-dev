@@ -1,5 +1,5 @@
 // Default della mappa headless usata per generare l'elaborato cartografico del fascicolo —
-// un'unica fonte di verità condivisa da tutti i widget che la usano (gii-editing-ti,
+// un'unica fonte di verità condivisa da tutti i widget che la usano (gii-editing-tec,
 // gii-editing-amm, e in prospettiva qualunque altro), invece di richiedere che lo stesso
 // valore venga configurato separatamente nel setting di ciascun widget/ciascuna pagina.
 //

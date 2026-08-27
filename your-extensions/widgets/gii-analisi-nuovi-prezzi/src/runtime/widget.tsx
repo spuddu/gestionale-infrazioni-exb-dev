@@ -142,53 +142,34 @@ function normalizeGiiAccessCode(v: any): string {
   return String(v ?? '').trim().toUpperCase().replace(/-/g, '_')
 }
 
-function getGiiOperationalProfileCode(): string {
+function getGiiOperationalProfileCodes(): string[] {
   const u: any = (window as any).__giiUserRole || {}
+  const codes = new Set<string>()
 
   const direct = normalizeGiiAccessCode(u?.profiloCod ?? u?.profilo_cod ?? u?.profileCode ?? u?.profile_code)
-  if (direct) return direct
+  if (direct) codes.add(direct)
 
   const role = normalizeGiiAccessCode(u?.ruoloCod ?? u?.ruolo_cod ?? u?.roleCod ?? u?.roleCode ?? u?.role_code)
-  const area = normalizeGiiAccessCode(u?.areaCod ?? u?.area_cod ?? u?.areaCode ?? u?.area_code)
-  if (role === 'TI' && area === 'AMM') return 'TI_AMM'
-  if (role === 'RI' && area === 'AMM') return 'RI_AMM'
-  if (role) return role
+  if (role) codes.add(role)
+  if (u?.isAdmin === true) codes.add('ADMIN')
 
-  const roleNum = Number(u?.ruolo)
-  const areaNum = Number(u?.area)
-  if (roleNum === 7) return 'ADMIN'
-  if (roleNum === 4 && areaNum === 1) return 'RI_AMM'
-  if (roleNum === 2 && areaNum === 1) return 'TI_AMM'
-  if (roleNum === 1) return 'TR'
-  if (roleNum === 2) return 'TI'
-  if (roleNum === 3) return 'RZ'
-  if (roleNum === 4) return 'RI'
-  if (roleNum === 5) return 'DT'
-  if (roleNum === 6) return 'DA'
+  const assignments = Array.isArray(u?.assignments) ? u.assignments : []
+  assignments.forEach((assignment: any) => {
+    const assignmentCode = normalizeGiiAccessCode(
+      assignment?.profiloCod ?? assignment?.profilo_cod ??
+      assignment?.profileCode ?? assignment?.profile_code ??
+      assignment?.ruoloCod ?? assignment?.ruolo_cod ??
+      assignment?.roleCod ?? assignment?.roleCode ?? assignment?.role_code
+    )
+    if (assignmentCode) codes.add(assignmentCode)
+  })
 
-  const label = normalizeGiiAccessCode([
-    u?.profiloLabel,
-    u?.ruoloLabel,
-    u?.roleLabel,
-    u?.ruolo_nome,
-    u?.ruolo
-  ].filter(Boolean).join(' '))
-  if (!label) return ''
-  if (/ADMIN|AMMINISTRATORE/.test(label)) return 'ADMIN'
-  if (/RI_AMM|RESPONSABILE.*ISTRUTTORIA.*AMMINISTRATIV/.test(label)) return 'RI_AMM'
-  if (/TI_AMM|TECNICO.*ISTRUTTOR.*AMMINISTRATIV/.test(label)) return 'TI_AMM'
-  if (/^RI$|(^|[^A-Z])RI([^A-Z]|$)|RESPONSABILE.*ISTRUTTORIA/.test(label)) return 'RI'
-  if (/^TI$|(^|[^A-Z])TI([^A-Z]|$)|TECNICO.*ISTRUTTOR/.test(label)) return 'TI'
-  if (/^TR$|(^|[^A-Z])TR([^A-Z]|$)|TECNICO.*RILEVATORE/.test(label)) return 'TR'
-  if (/^RZ$|(^|[^A-Z])RZ([^A-Z]|$)|RESPONSABILE.*ZONA/.test(label)) return 'RZ'
-  if (/^DT$|(^|[^A-Z])DT([^A-Z]|$)|DIRETTORE.*TECNICO/.test(label)) return 'DT'
-  if (/^DA$|(^|[^A-Z])DA([^A-Z]|$)|DIRETTORE.*AMMINISTRATIVO/.test(label)) return 'DA'
-  return ''
+  return Array.from(codes)
 }
 
-function isRiOrAdminUser(): boolean {
-  const profiloCod = getGiiOperationalProfileCode()
-  return profiloCod === 'RI' || profiloCod === 'ADMIN'
+function isRitOrAdminUser(): boolean {
+  const profiloCodes = getGiiOperationalProfileCodes()
+  return profiloCodes.includes('RIT') || profiloCodes.includes('ADMIN')
 }
 
 const LAYER_CACHE: Record<string, any> = {}
@@ -698,7 +679,7 @@ export default function Widget(props: AllWidgetProps<IMConfig>) {
   const [parentPriceError, setParentPriceError] = React.useState('')
   const [parentUmError, setParentUmError] = React.useState('')
   const [umDropdownOpen, setUmDropdownOpen] = React.useState(false)
-  const [isRi, setIsRi] = React.useState(isRiOrAdminUser())
+  const [isRitOrAdmin, setIsRitOrAdmin] = React.useState(isRitOrAdminUser())
   const parentPanelRef = React.useRef<HTMLDivElement | null>(null)
   const linePanelRef = React.useRef<HTMLDivElement | null>(null)
   const rootRef = React.useRef<HTMLDivElement | null>(null)
@@ -835,7 +816,7 @@ export default function Widget(props: AllWidgetProps<IMConfig>) {
   }, [subchapterRecords, generalDataRows, parentForm.sottocapitolo, parentForm.famiglia, parentForm.capitolo])
 
   React.useEffect(() => {
-    const refresh = () => setIsRi(isRiOrAdminUser())
+    const refresh = () => setIsRitOrAdmin(isRitOrAdminUser())
     refresh()
     window.addEventListener('gii:userLoaded', refresh)
     return () => window.removeEventListener('gii:userLoaded', refresh)
@@ -1533,8 +1514,8 @@ ${r.codice_riferimento} — ${r.descrizione}`,
 
   const lineImportoPreview = React.useMemo(() => round(num(lineForm.quantita) * num(lineForm.prezzo_unitario), 4), [lineForm.quantita, lineForm.prezzo_unitario])
 
-  if (!isRi) {
-    return <div style={{ padding: 12, fontFamily: 'Arial, sans-serif', color: '#7a1c1c', background: '#fce4e4', border: '1px solid #f5b8b8', borderRadius: 6 }}>Widget riservato al Responsabile Istruttore (RI) o all'Amministratore (ADMIN).</div>
+  if (!isRitOrAdmin) {
+    return <div style={{ padding: 12, fontFamily: 'Arial, sans-serif', color: '#7a1c1c', background: '#fce4e4', border: '1px solid #f5b8b8', borderRadius: 6 }}>Funzione riservata al Responsabile dell’istruttoria tecnica o all’Amministratore.</div>
   }
 
   return (

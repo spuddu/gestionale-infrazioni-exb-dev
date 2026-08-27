@@ -469,7 +469,7 @@ function drawSignature (ctx: BuildCtx, m: Record<string, string>): void {
     "dell’Area Affari Generali",
     'e Programmazione Finanziaria'
   ]
-  // Per l’atto esterno non si usa mai come fallback il RI_AMM/TI_AMM: se il nome
+  // Per l’atto esterno non si usa mai come fallback il RIA/IA: se il nome
   // del Direttore non è disponibile, si lascia la sola qualifica istituzionale.
   const name = v(m, 'amm_direttore_nome')
   if (name) lines.push(`(${name})`)

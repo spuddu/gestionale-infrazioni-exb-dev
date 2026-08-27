@@ -29,7 +29,7 @@ export interface Config {
   msgFontSize: number
   amountFontSize: number
 
-  // Stile form/card, allineato alla scheda Nota spese del gii-editing-ti.
+  // Stile form/card, allineato alla scheda Nota spese del gii-editing-tec.
   maskBg: string
   maskBorderColor: string
   maskBorderWidth: number
@@ -165,9 +165,9 @@ export const defaultSummaryFields: SummaryFieldConfig[] = [
   { name: 'data_rilevazione', label: 'Data rilevazione' },
   { name: 'area_cod', label: 'Area' },
   { name: 'settore_cod', label: 'Settore' },
-  { name: 'ti_amm_assegnato_username', label: 'TI_AMM assegnato' },
-  { name: 'stato_TI_AMM', label: 'Stato TI_AMM' },
-  { name: 'stato_RI_AMM', label: 'Stato RI_AMM' },
+  { name: 'ia_assegnato_username', label: 'Istruttore amministrativo assegnato' },
+  { name: 'stato_IA', label: 'Stato Istruttore amministrativo' },
+  { name: 'stato_RIA', label: 'Stato RIA' },
   { name: 'determinazione_stato', label: 'Stato determinazione' }
 ]
 

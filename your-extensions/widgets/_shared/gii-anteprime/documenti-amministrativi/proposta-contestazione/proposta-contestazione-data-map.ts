@@ -210,7 +210,7 @@ function getFallbackDomainOptions (fieldName: string): Array<{ code: any, name: 
       { code: 'DS', name: 'Manutenzione opere di dreno e di scolo' }
     ]
   }
-  if (/^stato_(TI_AMM|RI_AMM|DA)$/i.test(fieldName)) {
+  if (/^stato_(IA|RIA|DA)$/i.test(fieldName)) {
     return [
       { code: 0, name: 'Non attivo' },
       { code: 1, name: 'Da prendere in carico' },
@@ -220,7 +220,7 @@ function getFallbackDomainOptions (fieldName: string): Array<{ code: any, name: 
       { code: 5, name: 'Respinto' }
     ]
   }
-  if (/^esito_(TI_AMM|RI_AMM|DA|DT)$/i.test(fieldName)) {
+  if (/^esito_(IA|RIA|DA|DT)$/i.test(fieldName)) {
     return [
       { code: 1, name: 'Integrazione richiesta' },
       { code: 2, name: 'Approvata' },
@@ -305,17 +305,17 @@ function normalizeRilevazioneCodeForAmm (data: any, oid: number | null): string 
   const stored = cleanReportCodeText(pickAttrCI(d, ['numero_rilevazione', 'Numero_rilevazione', 'NUMERO_RILEVAZIONE', 'cod_pratica', 'Cod_pratica', 'COD_PRATICA', 'numero_rapporto', 'Numero_rapporto', 'NUMERO_RAPPORTO']))
   const raw = stored.toUpperCase().replace(/_/g, '-').replace(/\s+/g, '-')
   const op = pickAttrCI(d, ['origine_pratica', 'Origine_pratica', 'ORIGINE_PRATICA'])
-  let prefix = (op === 2 || op === '2' || String(op || '').toUpperCase() === 'TI') ? 'TI' : 'TR'
+  let prefix = (op === 2 || op === '2' || String(op || '').toUpperCase() === 'IT') ? 'IT' : 'TR'
   let oidPart = oid != null && Number.isFinite(Number(oid)) ? String(Number(oid)) : ''
   let settore = normalizeSectorCodeForAmm(pickAttrCI(d, ['settore_cod', 'Settore_cod', 'SETTORE_COD', 'settore', 'Settore', 'SETTORE'])) || settoreCodeFromUfficioAmm(pickAttrCI(d, ['ufficio_zona', 'Ufficio_zona', 'UFFICIO_ZONA']))
 
-  let m = raw.match(/^(TR|TI)-?(\d+)(?:-([A-Z0-9]+))?$/i)
+  let m = raw.match(/^(TR|IT)-?(\d+)(?:-([A-Z0-9]+))?$/i)
   if (m) {
     prefix = m[1].toUpperCase()
     oidPart = m[2]
     if (!settore && m[3]) settore = normalizeSectorCodeForAmm(m[3]) || m[3].toUpperCase()
   } else {
-    m = raw.match(/^(\d+)-?(TR|TI)(?:-([A-Z0-9]+))?$/i)
+    m = raw.match(/^(\d+)-?(TR|IT)(?:-([A-Z0-9]+))?$/i)
     if (m) {
       oidPart = m[1]
       prefix = m[2].toUpperCase()
@@ -334,7 +334,7 @@ function normalizeReportCode (raw: any, oid: number | null): string {
   const code = cleanReportCodeText(raw)
   if (code) {
     const normalized = code.toUpperCase().replace(/_/g, '-').replace(/\s+/g, '-')
-    if (/^(TR|TI)-?\d+(?:-[A-Z0-9]+)?$/.test(normalized) || /^\d+-?(TR|TI)(?:-[A-Z0-9]+)?$/.test(normalized)) return ''
+    if (/^(TR|IT)-?\d+(?:-[A-Z0-9]+)?$/.test(normalized) || /^\d+-?(TR|IT)(?:-[A-Z0-9]+)?$/.test(normalized)) return ''
     return /^\d+$/.test(code) ? `R-${code}` : code
   }
   return ''
@@ -751,14 +751,13 @@ export function buildVerbalePdfMap (data: any, fields: LayerFieldInfo[], profile
   const settore = pdfDomainValue(d, fields, ['settore_cod', 'Settore_cod', 'SETTORE_COD', 'settore', 'Settore'], 'settore_cod') || String(pickAttrCI(d, ['settore_label']) || '')
   const rawTipoAtto = String(pickAttrCI(d, ['tipo_atto_amm']) || '').trim()
   const tipoAttoLabel = pdfFieldValue(d, fields, 'tipo_atto_amm') || rawTipoAtto
-  const tiAmmNome = firstTextAttr(d, ['ti_amm_assegnato_nome', 'ti_amm_assegnato_username'])
+  const iaNome = firstTextAttr(d, ['ia_assegnato_nome', 'ia_assegnato_username'])
   const approvatoDa = isDeterminazioneAdottata(d)
-  const giiDaActor = firstTextAttr(d, ['GII_da', 'gii_da'])
-  const riAmmNome = firstTextAttr(d, [
-    'ri_amm_nome', 'ri_amm_username',
+  const riaNome = firstTextAttr(d, [
+    'ria_nome', 'ria_username',
     'responsabile_istruttoria_amm_nome', 'responsabile_istruttoria_amm_username',
     'istruttoria_amm_chiusa_da'
-  ]) || (!approvatoDa && pdfFieldValue(d, fields, 'dt_esito_RI_AMM') ? giiDaActor : '')
+  ])
   const direttoreNomeUfficiale = firstTextAttr(d, [
     'da_nome',
     'direttore_area_nome',
@@ -771,14 +770,14 @@ export function buildVerbalePdfMap (data: any, fields: LayerFieldInfo[], profile
     'direttore_amm_nome', 'direttore_amm_username',
     'dt_amm_nome', 'dt_amm_username',
     'atto_approvato_da', 'approvato_da', 'istruttoria_amm_approvata_da'
-  ]) || (approvatoDa ? giiDaActor : '')
-  const esitoTiAmmNum = parseNumberInput(pickAttrCI(d, ['esito_TI_AMM']))
-  const esitoRiAmmNum = parseNumberInput(pickAttrCI(d, ['esito_RI_AMM']))
-  // L'esito RI_AMM è il riferimento autorevole per la versione corrente della
-  // Proposta. A ogni nuova trasmissione TI_AMM → RI_AMM questo esito viene
+  ])
+  const esitoIaNum = parseNumberInput(pickAttrCI(d, ['esito_IA']))
+  const esitoRiaNum = parseNumberInput(pickAttrCI(d, ['esito_RIA']))
+  // L'esito RIA è il riferimento autorevole per la versione corrente della
+  // Proposta. A ogni nuova trasmissione IA → RIA questo esito viene
   // azzerato, quindi un valore 2 identifica necessariamente l'approvazione
-  // dell'ultimo ciclo e non deve dipendere da una copia locale di esito_TI_AMM.
-  const propostaApprovata = esitoRiAmmNum === 2
+  // dell'ultimo ciclo e non deve dipendere da una copia locale di esito_IA.
+  const propostaApprovata = esitoRiaNum === 2
   return {
     objectid: oid != null ? String(oid) : '',
     pratica: '',
@@ -790,7 +789,7 @@ export function buildVerbalePdfMap (data: any, fields: LayerFieldInfo[], profile
     settore,
     ufficio_zona: ammOfficeLabelForPdf(pdfFieldValue(d, fields, 'ufficio_zona')),
     tecnico_rilevatore: String(pickAttrCI(d, ['tecnico_rilevatore']) || ''),
-    ti_amm: String(pickAttrCI(d, ['ti_amm_assegnato_nome', 'ti_amm_assegnato_username']) || ''),
+    ia: String(pickAttrCI(d, ['ia_assegnato_nome', 'ia_assegnato_username']) || ''),
     trasgressore_tipo: isPg ? 'PG' : 'PF',
     trasgressore,
     cf_piva: cfPiva,
@@ -812,8 +811,8 @@ export function buildVerbalePdfMap (data: any, fields: LayerFieldInfo[], profile
     protocollo_istanza_data: pdfFieldValue(d, fields, 'protocollo_istanza_data'),
     oggetto_atto_amm: String(pickAttrCI(d, ['oggetto_atto_amm']) || ''),
     note_atto_amm: String(pickAttrCI(d, ['note_atto_amm']) || ''),
-    esito_ti_amm: esitoTiAmmNum === 1 ? 'Da integrare/rettificare' : esitoTiAmmNum === 2 ? 'Conforme' : esitoTiAmmNum === 3 ? 'Respinta' : '',
-    note_ti_amm: String(pickAttrCI(d, ['note_TI_AMM', 'note_atto_amm']) || ''),
+    esito_ia: esitoIaNum === 1 ? 'Da integrare/rettificare' : esitoIaNum === 2 ? 'Conforme' : esitoIaNum === 3 ? 'Respinta' : '',
+    note_ia: String(pickAttrCI(d, ['note_IA', 'note_atto_amm']) || ''),
     determinazione_numero: String(pickAttrCI(d, ['determinazione_numero']) || ''),
     determinazione_data: pdfFieldValue(d, fields, 'determinazione_data'),
     accertamento_numero: verbaleNumberValue(d, oid),
@@ -853,12 +852,12 @@ export function buildVerbalePdfMap (data: any, fields: LayerFieldInfo[], profile
     sanzione_calcolata_da: String(pickAttrCI(d, ['sanzione_calcolata_da']) || ''),
     istruttoria_amm_chiusa_il: pdfFieldValue(d, fields, 'istruttoria_amm_chiusa_il'),
     istruttoria_amm_chiusa_da: String(pickAttrCI(d, ['istruttoria_amm_chiusa_da']) || ''),
-    amm_iter_compilazione_nome: tiAmmNome,
-    amm_iter_compilazione_presa: pdfFieldValue(d, fields, 'dt_presa_in_carico_TI_AMM'),
-    amm_iter_compilazione_data: pdfFieldValue(d, fields, 'dt_esito_TI_AMM') || pdfFieldValue(d, fields, 'sanzione_calcolata_il'),
-    amm_iter_supervisione_nome: riAmmNome,
-    amm_iter_supervisione_presa: pdfFieldValue(d, fields, 'dt_presa_in_carico_RI_AMM'),
-    amm_iter_supervisione_data: pdfFieldValue(d, fields, 'dt_esito_RI_AMM') || pdfFieldValue(d, fields, 'istruttoria_amm_chiusa_il'),
+    amm_iter_compilazione_nome: iaNome,
+    amm_iter_compilazione_presa: pdfFieldValue(d, fields, 'dt_presa_in_carico_IA'),
+    amm_iter_compilazione_data: pdfFieldValue(d, fields, 'dt_esito_IA') || pdfFieldValue(d, fields, 'sanzione_calcolata_il'),
+    amm_iter_supervisione_nome: riaNome,
+    amm_iter_supervisione_presa: pdfFieldValue(d, fields, 'dt_presa_in_carico_RIA'),
+    amm_iter_supervisione_data: pdfFieldValue(d, fields, 'dt_esito_RIA') || pdfFieldValue(d, fields, 'istruttoria_amm_chiusa_il'),
     amm_iter_approvazione_nome: daNome,
     amm_direttore_nome: direttoreNomeUfficiale,
     amm_iter_approvazione_presa: pdfFieldValue(d, fields, 'determinazione_trasmessa_firma_il'),

@@ -171,13 +171,11 @@ export interface Config {
   detailTitleFontWeight: number
   detailTitleColor: string
 
-  // --- Pulsanti editing TI
+  // --- Pulsanti editing IT
   showEditButtons: boolean
   editOverlayColor: string
   editPageColor: string
   editPageId: string
-  fieldStatoTI: string
-  fieldPresaTI: string
   editMinStato: number
   editMaxStato: number
   editPresaRequiredVal: number
@@ -365,8 +363,6 @@ export const defaultConfig: Config = {
   editOverlayColor: '#7c3aed',
   editPageColor: '#5b21b6',
   editPageId: 'page_45',
-  fieldStatoTI: 'stato_TI',
-  fieldPresaTI: 'presa_in_carico_TI',
   editMinStato: 2,
   editMaxStato: 2,
   editPresaRequiredVal: 2,
@@ -394,7 +390,7 @@ export const DEFAULT_FIELD_LAYOUTS: Record<string, LayoutRow[]> = {
   dati_generali: [
     { type: 'fields', columns: '1fr 1fr 1fr', cells: [{ field: 'area_cod', label: 'Area' }, { field: 'settore_cod', label: 'Settore' }, { field: 'ufficio_zona', label: 'Ufficio di zona' }] },
     { type: 'fields', columns: '1fr 1fr', cells: [{ field: 'tecnico_rilevatore', label: 'Tecnico rilevatore' }, { field: 'data_rilevazione', label: 'Data rilevazione' }] },
-    { type: 'fields', columns: '1fr 1fr', cells: [{ field: 'ti_assegnato_nome', label: 'Tecnico istruttore' }, { field: 'dt_trasmissione_capo_settore', label: 'Data trasmissione al Capo Settore' }] }
+    { type: 'fields', columns: '1fr 1fr', cells: [{ field: 'it_assegnato_nome', label: 'Istruttore tecnico' }, { field: 'dt_trasmissione_capo_settore', label: 'Data trasmissione al Capo Settore' }] }
   ],
   trasgressore: [
     { type: 'header', label: 'Trasgressore' },

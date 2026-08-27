@@ -69,7 +69,7 @@ export default function Setting(props: AllWidgetSettingProps<IMConfig>) {
       </div>
 
 
-      <div style={hint}>Questo widget permette al RI di rivedere le voci del prezzario ufficiale importato, correggere categoria e decidere se renderle selezionabili nella nota spese.</div>
+      <div style={hint}>Questo widget permette al Responsabile istruttoria tecnica di rivedere le voci del prezzario ufficiale importato, correggere categoria e decidere se renderle selezionabili nella nota spese.</div>
 
     </div>
   )
