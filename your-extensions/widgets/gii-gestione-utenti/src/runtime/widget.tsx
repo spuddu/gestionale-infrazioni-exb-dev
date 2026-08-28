@@ -957,8 +957,8 @@ type AgolSortField = 'fullName' | 'username' | 'email'
 interface AgolSortRule { field: AgolSortField; dir: SortDirection }
 
 const SORTABLE_COLUMNS: Array<{ field: SortField; label: string }> = [
-  { field: 'username', label: 'Username' },
   { field: 'full_name', label: 'Nome completo' },
+  { field: 'username', label: 'Username' },
   { field: 'email', label: 'E-mail' },
   { field: 'ruolo_cod', label: 'Ruolo' },
   { field: 'area', label: 'Area' },
@@ -1303,7 +1303,7 @@ function compareText(a: string, b: string): number {
 
 // ── CSS ────────────────────────────────────────────────────────────────────
 const styles = `
-  .ggu { font-family: Arial, sans-serif; font-size: 13px; padding: 12px; height: 100%; display: flex; flex-direction: column; gap: 10px; box-sizing: border-box; }
+  .ggu { font-size: 13px; padding: 12px; height: 100%; display: flex; flex-direction: column; gap: 10px; box-sizing: border-box; }
   .ggu-title { font-size: var(--ggu-title-font-size, 15px); font-weight: bold; color: var(--ggu-title-color, #93c5fd); border-bottom: 2px solid var(--ggu-title-color, #93c5fd); padding-bottom: 6px; margin: 0; }
   .ggu-form { background: var(--ggu-detail-card-background, #f5f9ff); border: 1px solid #c5d9f1; border-radius: 6px; padding: 14px; display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
   .ggu-form-users {
@@ -1425,14 +1425,38 @@ const styles = `
   .ggu-btn-reset-sort:disabled { background: #e5e7eb; color: #94a3b8; border-color: #cbd5e1; opacity: 1; }
   .ggu-toolbar { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; width: 100%; }
   .ggu-toolbar-left { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  .ggu-toolbar-right { margin-left: auto; display: flex; gap: 8px; align-items: center; }
   .ggu-toolbar-reset-right { margin-left: auto; }
+  .ggu-filter-toolbar-btn { height: 32px; min-height: 32px; padding: 0 11px; box-sizing: border-box; border-radius: 7px; border: 1px solid #6fa3d3; background: #fff; color: #0d3b66; display: inline-flex; align-items: center; justify-content: center; gap: 6px; font-size: 12px; font-weight: 700; line-height: 1; cursor: pointer; white-space: nowrap; }
+  .ggu-filter-toolbar-btn:hover { background: #f5f9ff; border-color: #3d77c9; }
+  .ggu-filter-toolbar-btn.ggu-filter-toolbar-btn-open { background: #1F4E79; color: #fff; border-color: #1F4E79; }
+  .ggu-filter-toolbar-btn.ggu-filter-toolbar-btn-open:hover { background: #16375a; }
+  .ggu-filter-toolbar-btn.ggu-filter-toolbar-btn-active:not(.ggu-filter-toolbar-btn-open) { box-shadow: inset 0 -3px 0 #3d77c9; }
+  .ggu-filter-panel { width: 100%; flex: 0 0 auto; margin-top: -5px; margin-bottom: -5px; padding: 4px 0; box-sizing: border-box; border: 1px solid #eef4fb; border-radius: 10px; background: #eef4fb; }
+  .ggu-filter-grid { display: grid; grid-template-columns: minmax(190px, 1.45fr) repeat(4, minmax(120px, 0.8fr)) minmax(180px, 1.15fr) auto; gap: 6px; align-items: end; padding: 0; }
+  .ggu-filter-field { min-width: 0; }
+  .ggu-filter-field .ggu-label { display: block; font-size: 13px; font-weight: 800; color: #374151; margin-bottom: 3px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .ggu-filter-field .ggu-input, .ggu-filter-field .ggu-select { width: 100%; min-width: 0; height: 30px; min-height: 30px; padding: 0 8px; border: 1px solid rgba(0,0,0,0.16); border-radius: 8px; background: #fff; color: #111827; font-size: 14px; font-style: normal; line-height: 30px; box-sizing: border-box; outline: none; }
+  .ggu-filter-select-wrap { position: relative; width: 100%; min-width: 0; }
+  .ggu-filter-select-wrap .ggu-select { appearance: none; -webkit-appearance: none; padding-right: 28px; cursor: pointer; }
+  .ggu-filter-select-chevron { position: absolute; right: 7px; top: 50%; transform: translateY(-50%); color: rgba(0,0,0,0.55); font-size: 18px; pointer-events: none; line-height: 1; }
+  .ggu-filter-field .ggu-input:focus, .ggu-filter-field .ggu-select:focus { border-color: rgba(0,0,0,0.30); outline: none; }
+  .ggu-filter-actions { display: flex; align-items: end; gap: 6px; }
+  .ggu-filter-actions .ggu-filter-action-btn { height: 30px; min-height: 30px; border: 1px solid rgba(0,0,0,0.16); border-radius: 8px; padding: 0 12px; background: rgba(0,0,0,0.06); color: #1f2937; font-size: 12px; font-weight: 600; line-height: 1; cursor: pointer; white-space: nowrap; box-sizing: border-box; }
+  .ggu-filter-actions .ggu-filter-action-btn:hover:not(:disabled) { background: rgba(0,0,0,0.10); }
+  .ggu-filter-actions .ggu-filter-action-btn:disabled { opacity: 0.45; cursor: default; }
+  .ggu-filter-count { margin-top: 7px; padding: 0 8px; font-size: 11px; color: #526579; font-weight: 600; }
+  @media (max-width: 1250px) {
+    .ggu-filter-grid { grid-template-columns: repeat(3, minmax(150px, 1fr)); }
+    .ggu-filter-actions { justify-content: flex-start; }
+  }
   .ggu-table-wrap { flex: 1; overflow-y: auto; border: 1px solid #c5d9f1; border-radius: 6px; min-height: 0; background: var(--ggu-records-card-background, #f5f9ff); }
   .ggu-table { width: 100%; border-collapse: collapse; font-size: var(--ggu-table-font-size, 12px); }
   .ggu-table th { background: var(--ggu-table-header-background, #1F4E79); color: var(--ggu-table-header-text, #fff); padding: 7px 8px; text-align: left; position: sticky; top: 0; z-index: 1; white-space: nowrap; }
   .ggu-table th.ggu-sortable { cursor: pointer; user-select: none; }
   .ggu-table th.ggu-sortable:hover { filter: brightness(0.9); }
   .ggu-actions-col { width: 1%; white-space: nowrap; text-align: right !important; }
-  .ggu-users-fullname-col { width: 15%; min-width: 160px; }
+  .ggu-users-identity-col { width: 10.5528%; }
   .ggu-users-role-col { white-space: nowrap; min-width: 125px; }
   .ggu-actions-head { text-align: left !important; }
   .ggu-sort-ind { display: inline-flex; align-items: center; gap: 2px; margin-left: 6px; font-size: 10px; opacity: 0.95; }
@@ -2175,6 +2199,13 @@ function UtentiWidget(props: AllWidgetProps<IMConfig>) {
   const [assignmentSourceObjectId, setAssignmentSourceObjectId] = useState<number | null>(null)
   const [agolSyncPreview, setAgolSyncPreview] = useState<{ member: AgolOrganizationMember; changes: Array<{ field: string; current: string; agol: string }> } | null>(null)
   const [agolSyncLoading, setAgolSyncLoading] = useState(false)
+  const [filtersOpen, setFiltersOpen] = useState(false)
+  const [filterSearch, setFilterSearch] = useState('')
+  const [filterRole, setFilterRole] = useState('')
+  const [filterArea, setFilterArea] = useState('')
+  const [filterSettore, setFilterSettore] = useState('')
+  const [filterUfficio, setFilterUfficio] = useState('')
+  const [filterGruppo, setFilterGruppo] = useState('')
 
   const originalEditedUser = useMemo(() => (
     form.objectid != null ? utenti.find(u => u.objectid === form.objectid) ?? null : null
@@ -2353,9 +2384,87 @@ function UtentiWidget(props: AllWidgetProps<IMConfig>) {
     setTimeout(() => setMsg(null), 4000)
   }
 
+  const normalizeFilterText = (value: any) => String(value ?? '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .trim()
+    .toLocaleLowerCase('it-IT')
+    .replace(/\s+/g, ' ')
+
+  const searchMatchesUser = (u: UtenteRecord) => {
+    const needle = normalizeFilterText(filterSearch)
+    if (!needle) return true
+
+    // Cerca sugli stessi dati che concorrono al nominativo mostrato in tabella,
+    // oltre a username ed e-mail. I singoli termini possono comparire in punti
+    // diversi del nominativo e il confronto non distingue gli accenti.
+    const displayName = composeFullName(u.nome, u.cognome) || u.full_name || ''
+    const haystack = normalizeFilterText([
+      u.username,
+      displayName,
+      u.full_name,
+      u.nome,
+      u.cognome,
+      u.email
+    ].filter(Boolean).join(' '))
+    const terms = needle.split(' ').filter(Boolean)
+    return terms.every(term => haystack.includes(term))
+  }
+
+  const roleFilterOptions = useMemo(() => {
+    const available = new Set(utenti.filter(searchMatchesUser).map(u => String(u.ruolo_cod || '').trim()).filter(Boolean))
+    return RUOLI.filter(r => available.has(r.code))
+  }, [utenti, filterSearch])
+
+  const areaFilterOptions = useMemo(() => {
+    const vals = new Set(utenti.filter(u => searchMatchesUser(u) && (!filterRole || u.ruolo_cod === filterRole)).map(u => u.area).filter((v): v is number => v != null))
+    return AREE.filter(a => vals.has(a.value))
+  }, [utenti, filterSearch, filterRole])
+
+  const settoreFilterOptions = useMemo(() => {
+    const areaValue = filterArea ? Number(filterArea) : null
+    const vals = new Set(utenti.filter(u => searchMatchesUser(u) && (!filterRole || u.ruolo_cod === filterRole) && (areaValue == null || u.area === areaValue)).map(u => u.settore).filter((v): v is number => v != null))
+    return SETTORI.filter(item => vals.has(item.value))
+  }, [utenti, filterSearch, filterRole, filterArea])
+
+  const ufficioFilterOptions = useMemo(() => {
+    const areaValue = filterArea ? Number(filterArea) : null
+    const settoreValue = filterSettore ? Number(filterSettore) : null
+    const vals = new Set(utenti.filter(u => searchMatchesUser(u) && (!filterRole || u.ruolo_cod === filterRole) && (areaValue == null || u.area === areaValue) && (settoreValue == null || u.settore === settoreValue)).map(u => u.ufficio).filter((v): v is number => v != null))
+    return UFFICI.filter(item => vals.has(item.value))
+  }, [utenti, filterSearch, filterRole, filterArea, filterSettore])
+
+  const gruppoFilterOptions = useMemo(() => {
+    const areaValue = filterArea ? Number(filterArea) : null
+    const settoreValue = filterSettore ? Number(filterSettore) : null
+    const ufficioValue = filterUfficio ? Number(filterUfficio) : null
+    const vals = new Set(utenti.filter(u => searchMatchesUser(u) && (!filterRole || u.ruolo_cod === filterRole) && (areaValue == null || u.area === areaValue) && (settoreValue == null || u.settore === settoreValue) && (ufficioValue == null || u.ufficio === ufficioValue)).map(u => String(u.gruppo || '').trim()).filter(Boolean))
+    return Array.from(vals).sort((a, b) => a.localeCompare(b, 'it', { sensitivity: 'base' }))
+  }, [utenti, filterSearch, filterRole, filterArea, filterSettore, filterUfficio])
+
+  const filteredUtenti = useMemo(() => {
+    const areaValue = filterArea ? Number(filterArea) : null
+    const settoreValue = filterSettore ? Number(filterSettore) : null
+    const ufficioValue = filterUfficio ? Number(filterUfficio) : null
+    return utenti.filter(u =>
+      searchMatchesUser(u) &&
+      (!filterRole || u.ruolo_cod === filterRole) &&
+      (areaValue == null || u.area === areaValue) &&
+      (settoreValue == null || u.settore === settoreValue) &&
+      (ufficioValue == null || u.ufficio === ufficioValue) &&
+      (!filterGruppo || u.gruppo === filterGruppo)
+    )
+  }, [utenti, filterSearch, filterRole, filterArea, filterSettore, filterUfficio, filterGruppo])
+
+  useEffect(() => {
+    if (selectedObjectId != null && !filteredUtenti.some(u => u.objectid === selectedObjectId)) {
+      setSelectedObjectId(null)
+    }
+  }, [filteredUtenti, selectedObjectId])
+
   const sortedUtenti = useMemo(() => {
-    if (sortRules.length === 0) return utenti
-    const arr = [...utenti]
+    if (sortRules.length === 0) return filteredUtenti
+    const arr = [...filteredUtenti]
     arr.sort((a, b) => {
       for (const rule of sortRules) {
         const cmp = compareText(sortValue(a, rule.field, domainLabels), sortValue(b, rule.field, domainLabels))
@@ -2364,7 +2473,17 @@ function UtentiWidget(props: AllWidgetProps<IMConfig>) {
       return a.objectid - b.objectid
     })
     return arr
-  }, [utenti, sortRules, domainLabels])
+  }, [filteredUtenti, sortRules, domainLabels])
+
+  const filtersActive = !!(filterSearch.trim() || filterRole || filterArea || filterSettore || filterUfficio || filterGruppo)
+  const resetFilters = () => {
+    setFilterSearch('')
+    setFilterRole('')
+    setFilterArea('')
+    setFilterSettore('')
+    setFilterUfficio('')
+    setFilterGruppo('')
+  }
 
   const toggleSort = (field: SortField) => {
     setSortRules(prev => {
@@ -3120,14 +3239,102 @@ function UtentiWidget(props: AllWidgetProps<IMConfig>) {
         {msg && <div className={`ggu-msg ${msg.ok ? 'ggu-msg-ok' : 'ggu-msg-err'}`}>{msg.text}</div>}
 
         {!editing && (
-          <div className="ggu-toolbar">
-            <div className="ggu-toolbar-left">
-              <NewRecordButton onClick={onNew} title='Nuovo utente' />
-              <button type='button' onClick={() => exportCSV(sortedUtenti, domainLabels)} disabled={utenti.length === 0} title='Esporta utenti.csv' aria-label='Esporta utenti.csv' style={transferActionButtonStyle(utenti.length === 0)}><TransferActionIcon name='export' /></button>
+          <Fragment>
+            <div className="ggu-toolbar">
+              <div className="ggu-toolbar-left">
+                <NewRecordButton onClick={onNew} title='Nuovo utente' />
+                <button type='button' onClick={() => exportCSV(sortedUtenti, domainLabels)} disabled={sortedUtenti.length === 0} title='Esporta utenti.csv' aria-label='Esporta utenti.csv' style={transferActionButtonStyle(sortedUtenti.length === 0)}><TransferActionIcon name='export' /></button>
+              </div>
+              <div className="ggu-toolbar-right">
+                <button
+                  type="button"
+                  className={`ggu-filter-toolbar-btn${filtersOpen ? ' ggu-filter-toolbar-btn-open' : ''}${filtersActive ? ' ggu-filter-toolbar-btn-active' : ''}`}
+                  onClick={() => setFiltersOpen(v => !v)}
+                  title={filtersOpen ? 'Chiudi filtri' : 'Apri filtri'}
+                  aria-label={filtersOpen ? 'Chiudi filtri' : 'Apri filtri'}
+                  aria-expanded={filtersOpen}
+                >
+                  <span>Filtri</span>
+                  <span
+                    aria-hidden="true"
+                    style={{
+                      display: 'inline-block',
+                      transformOrigin: '50% 50%',
+                      transform: filtersOpen ? 'rotate(180deg)' : 'rotate(0deg)',
+                      transition: 'transform 0.18s ease'
+                    }}
+                  >▾</span>
+                </button>
+                <button className="ggu-btn ggu-btn-reset-sort" onClick={resetSort}
+                  disabled={sortRules.length === 0} title="Reset ordinamento" aria-label="Reset ordinamento">↺</button>
+              </div>
             </div>
-            <button className="ggu-btn ggu-btn-reset-sort ggu-toolbar-reset-right" onClick={resetSort}
-              disabled={sortRules.length === 0} title="Reset ordinamento" aria-label="Reset ordinamento">↺</button>
-          </div>
+
+            {filtersOpen && (
+              <div className="ggu-filter-panel">
+                <div className="ggu-filter-grid">
+                  <div className="ggu-filter-field ggu-filter-search">
+                    <div className="ggu-label">Cerca utente</div>
+                    <input className="ggu-input" value={filterSearch} placeholder="Nome, username o e-mail" onChange={e => setFilterSearch(e.target.value)} />
+                  </div>
+                  <div className="ggu-filter-field">
+                    <div className="ggu-label">Ruolo</div>
+                    <div className="ggu-filter-select-wrap">
+                      <select className="ggu-select" value={filterRole} onChange={e => { setFilterRole(e.target.value); setFilterArea(''); setFilterSettore(''); setFilterUfficio(''); setFilterGruppo('') }}>
+                        <option value="">Tutti</option>
+                        {roleFilterOptions.map(r => <option key={r.code} value={r.code}>{labelRuolo(r.code)}</option>)}
+                      </select>
+                      <span className="ggu-filter-select-chevron">▾</span>
+                    </div>
+                  </div>
+                  <div className="ggu-filter-field">
+                    <div className="ggu-label">Area</div>
+                    <div className="ggu-filter-select-wrap">
+                      <select className="ggu-select" value={filterArea} onChange={e => { setFilterArea(e.target.value); setFilterSettore(''); setFilterUfficio(''); setFilterGruppo('') }}>
+                        <option value="">Tutte</option>
+                        {areaFilterOptions.map(a => <option key={a.value} value={a.value}>{labelArea(a.value)}</option>)}
+                      </select>
+                      <span className="ggu-filter-select-chevron">▾</span>
+                    </div>
+                  </div>
+                  <div className="ggu-filter-field">
+                    <div className="ggu-label">Settore</div>
+                    <div className="ggu-filter-select-wrap">
+                      <select className="ggu-select" value={filterSettore} onChange={e => { setFilterSettore(e.target.value); setFilterUfficio(''); setFilterGruppo('') }}>
+                        <option value="">Tutti</option>
+                        {settoreFilterOptions.map(item => <option key={item.value} value={item.value}>{labelSettore(item.value)}</option>)}
+                      </select>
+                      <span className="ggu-filter-select-chevron">▾</span>
+                    </div>
+                  </div>
+                  <div className="ggu-filter-field">
+                    <div className="ggu-label">Ufficio</div>
+                    <div className="ggu-filter-select-wrap">
+                      <select className="ggu-select" value={filterUfficio} onChange={e => { setFilterUfficio(e.target.value); setFilterGruppo('') }}>
+                        <option value="">Tutti</option>
+                        {ufficioFilterOptions.map(item => <option key={item.value} value={item.value}>{labelUfficio(item.value)}</option>)}
+                      </select>
+                      <span className="ggu-filter-select-chevron">▾</span>
+                    </div>
+                  </div>
+                  <div className="ggu-filter-field ggu-filter-group">
+                    <div className="ggu-label">Gruppo</div>
+                    <div className="ggu-filter-select-wrap">
+                      <select className="ggu-select" value={filterGruppo} onChange={e => setFilterGruppo(e.target.value)}>
+                        <option value="">Tutti</option>
+                        {gruppoFilterOptions.map(group => <option key={group} value={group}>{group}</option>)}
+                      </select>
+                      <span className="ggu-filter-select-chevron">▾</span>
+                    </div>
+                  </div>
+                  <div className="ggu-filter-actions">
+                    <button className="ggu-filter-action-btn" onClick={resetFilters} disabled={!filtersActive}>Azzera filtri</button>
+                  </div>
+                </div>
+                <div className="ggu-filter-count">{`${sortedUtenti.length} assegnazioni mostrate su ${utenti.length}`}</div>
+              </div>
+            )}
+          </Fragment>
         )}
 
         {editing && (
@@ -3245,7 +3452,7 @@ function UtentiWidget(props: AllWidgetProps<IMConfig>) {
                 <thead>
                   <tr>
                     {SORTABLE_COLUMNS.map(col => (
-                      <th key={col.field} className={`ggu-sortable${col.field === 'full_name' ? ' ggu-users-fullname-col' : ''}${col.field === 'ruolo_cod' ? ' ggu-users-role-col' : ''}`} onClick={() => toggleSort(col.field)}
+                      <th key={col.field} className={`ggu-sortable${['full_name', 'username', 'email'].includes(col.field) ? ' ggu-users-identity-col' : ''}${col.field === 'ruolo_cod' ? ' ggu-users-role-col' : ''}`} onClick={() => toggleSort(col.field)}
                         title="Clic: aggiungi/inverti/rimuovi ordinamento">
                         {col.label}{sortBadge(col.field)}
                       </th>
@@ -3254,17 +3461,17 @@ function UtentiWidget(props: AllWidgetProps<IMConfig>) {
                   </tr>
                 </thead>
                 <tbody>
-                  {utenti.length === 0 && (
-                    <tr><td colSpan={9} className="ggu-empty">Nessun utente presente</td></tr>
+                  {sortedUtenti.length === 0 && (
+                    <tr><td colSpan={9} className="ggu-empty">{utenti.length === 0 ? 'Nessun utente presente' : 'Nessuna assegnazione corrisponde ai filtri impostati'}</td></tr>
                   )}
                   {sortedUtenti.map(u => (
                     <tr key={u.objectid}
                       className={selectedObjectId === u.objectid || form.objectid === u.objectid ? 'ggu-sel' : ''}
                       onClick={() => setSelectedObjectId(u.objectid)}
                       onDoubleClick={() => onEdit(u)}>
-                      <td>{u.username}</td>
-                      <td className="ggu-users-fullname-col">{directoryDisplayLabel(({...u, uso_email:'', firmatario:0, tipo_record:'UTENTE'} as any), people)}</td>
-                      <td>{u.email || '—'}</td>
+                      <td className="ggu-users-identity-col">{directoryDisplayLabel(({...u, uso_email:'', firmatario:0, tipo_record:'UTENTE'} as any), people)}</td>
+                      <td className="ggu-users-identity-col">{u.username}</td>
+                      <td className="ggu-users-identity-col">{u.email || '—'}</td>
                       <td className="ggu-users-role-col">{dash(labelRuolo(u.ruolo_cod))}</td>
                       <td>{dash(labelArea(u.area))}</td>
                       <td>{dash(labelSettore(u.settore))}</td>

@@ -218,6 +218,16 @@ interface GiiUserAssignment {
   isWorkflowAdmin: boolean
 }
 
+interface GiiActorAssignmentMeta {
+  usernameKey: string
+  fullName: string
+  ruoloCod: string
+  areaCod: string
+  settoreCod: string
+  ufficio: number | null
+  ufficioLabel: string
+}
+
 interface GiiUserRole {
   username: string
   fullName: string
@@ -595,7 +605,7 @@ function switchAccountWithoutRevokingCurrentSession(
   // la Promise. Per poter smontare Mappa/Tabella soltanto quando l'utente ha
   // davvero scelto un account differente, intercettiamo temporaneamente
   // addOrReplaceSession(): se lo username in arrivo cambia, eseguiamo prima il
-  // callback (navigazione alla Home + attesa smontaggio) e soltanto dopo
+  // callback (navigazione ad Accesso + attesa smontaggio) e soltanto dopo
   // permettiamo a SessionManager di installare la nuova sessione.
   const originalAddOrReplaceSession = typeof sm?.addOrReplaceSession === 'function'
     ? sm.addOrReplaceSession
@@ -1225,6 +1235,16 @@ function alertPracticeRawValue (alert: GiiAlertItem | null | undefined, names: s
 }
 
 function officeLabelFromAlert (alert: GiiAlertItem | null | undefined): string {
+  const actorLabel = String(firstNonEmptyAlertRawValue(alert, ['__gii_actor_ufficio_label']) || '').trim()
+  if (actorLabel) return actorLabel
+
+  const actorOfficeRaw = firstNonEmptyAlertRawValue(alert, ['__gii_actor_ufficio_id'])
+  const actorOffice = Number(actorOfficeRaw)
+  if (Number.isFinite(actorOffice)) {
+    const resolved = String(UFFICIO_LABEL[actorOffice] || '').trim()
+    if (resolved) return resolved
+  }
+
   const label = String(alertPracticeRawValue(alert, ['ufficio_zona', 'ufficioZona', 'ufficio_di_zona', 'destinatario_ufficio_zona']) ?? '').trim()
   if (label && !/^\d+$/.test(label)) return label
 
@@ -1263,26 +1283,29 @@ function parseSectorCodeCandidate (value: any): string {
 }
 
 function sectorCodeFromAlert (alert: GiiAlertItem | null | undefined): string {
-  const actorValues = alertRawValuesPracticeFirst(alert, ['GII_da', 'gii_da', 'chiave_attivita'])
+  // Fonte primaria: l'assegnazione organizzativa del MITTENTE risolta da GII_utenti.
+  // GII_da serve a scegliere il record corretto quando lo stesso username è multi-ruolo.
+  const actorAssignmentSector = parseSectorCodeCandidate(firstNonEmptyAlertRawValue(alert, ['__gii_actor_settore_cod']))
+  if (actorAssignmentSector) return actorAssignmentSector
+
+  // Fallback solo se l'assegnazione non è risolvibile: dati strutturati del mittente/pratica.
+  // La riga organizzativa descrive il MITTENTE dell'allarme.
+  // GII_da e i campi della pratica sono fonti valide; chiave_attivita,
+  // destinatario_settore e il settore dell'utente corrente descrivono invece
+  // il routing/destinatario e non devono mai contaminare il mittente.
+  const actorValues = alertRawValuesPracticeFirst(alert, ['GII_da', 'gii_da'])
 
   const actorCodes = actorValues
     .map(value => parseSectorCodeCandidate(value))
     .filter(Boolean)
 
-  // Nei messaggi di workflow il settore deve riferirsi alla pratica/mittente reale.
-  // Alcune attività correnti possono avere campi diretti valorizzati con GI
-  // (Gestione irrigua), che è una categoria organizzativa generica e non il
-  // distretto della pratica. Un distretto ricavato da un valore strutturato
-  // di workflow può prevalere su GI; mai da uno username.
   const actorDistrict = actorCodes.find(code => /^D[1-6]$/.test(code) || code === 'DS' || code === 'CR') || ''
 
   const directValues = alertRawValuesPracticeFirst(alert, [
     'settore_cod',
     'settoreCod',
     'settore',
-    'cod_settore',
-    'destinatario_settore',
-    '__gii_current_user_settore_cod'
+    'cod_settore'
   ])
 
   for (const value of directValues) {
@@ -1316,7 +1339,13 @@ function parseAreaCodeCandidate (value: any): string {
 }
 
 function areaCodeFromAlert (alert: GiiAlertItem | null | undefined): string {
-  const actorValues = alertRawValuesPracticeFirst(alert, ['GII_da', 'gii_da', 'chiave_attivita'])
+  const actorAssignmentArea = parseAreaCodeCandidate(firstNonEmptyAlertRawValue(alert, ['__gii_actor_area_cod']))
+  if (actorAssignmentArea) return actorAssignmentArea
+
+  // Fallback solo se l'assegnazione non è risolvibile. Come per il settore,
+  // l'area mostrata è quella del mittente/pratica, non
+  // quella del destinatario dell'attività né quella dell'account che la legge.
+  const actorValues = alertRawValuesPracticeFirst(alert, ['GII_da', 'gii_da'])
 
   const actorArea = actorValues
     .map(value => parseAreaCodeCandidate(value))
@@ -1324,7 +1353,7 @@ function areaCodeFromAlert (alert: GiiAlertItem | null | undefined): string {
 
   if (actorArea) return actorArea
 
-  const raw = alertPracticeRawValue(alert, ['area_cod', 'areaCod', 'area', 'cod_area', 'destinatario_area', '__gii_current_user_area_cod'])
+  const raw = alertPracticeRawValue(alert, ['area_cod', 'areaCod', 'area', 'cod_area'])
   return parseAreaCodeCandidate(raw)
 }
 
@@ -1649,20 +1678,15 @@ function alertSenderOrgLine (alert: GiiAlertItem): string {
     if (office) return `Ufficio: ${office}`
   }
 
-  if (role === 'CS') {
+  // CS, RIT e ruoli amministrativi mostrano il settore della specifica
+  // assegnazione organizzativa del mittente risolta in GII_utenti.
+  if (role === 'CS' || role === 'RIT' || role === 'IA' || role === 'RIA') {
     return sector ? `Settore: ${sector}` : ''
   }
 
-  if (role === 'RIT' || role === 'DT') {
+  // Solo i ruoli direttoriali mostrano l'Area, anch'essa presa dall'assegnazione.
+  if (role === 'DT' || role === 'DA') {
     return area ? `Area: ${area}` : ''
-  }
-
-  if (role === 'IA' || role === 'RIA') {
-    return 'Settore: Catasto, Ruoli e Servizi Territoriali'
-  }
-
-  if (role === 'DA') {
-    return 'Area: AA. GG. e P.F.'
   }
 
   return ''
@@ -1814,6 +1838,81 @@ async function loadPortalUserFullNameMap (values: string[], signal?: AbortSignal
 }
 
 const __giiUserFullNameCache = new Map<string, string | null>()
+const __giiActorAssignmentsByUsername = new Map<string, GiiActorAssignmentMeta[]>()
+
+function rememberGiiActorAssignment (attrs: Record<string, any>, fullName: string): void {
+  const username = String(attrValueCi(attrs, ['username', 'USERNAME', 'user_name', 'agol_username']) ?? '').trim()
+  const usernameKey = normalizeUsernameLookupKey(username)
+  if (!usernameKey) return
+
+  const ruoloCod = roleCodeFromGiiUserAttrs(attrs)
+  if (!ruoloCod) return
+  const areaCod = codeFromGiiUserAttrs(attrs, ['area_cod', 'areaCod'], ['area'], AREA_LABEL)
+  const settoreCod = codeFromGiiUserAttrs(attrs, ['settore_cod', 'settoreCod'], ['settore'], SETTORE_LABEL)
+  const ufficioRaw = attrValueCi(attrs, ['id_ufficio', 'ufficio_id', 'ufficio'])
+  const ufficioNum = Number(ufficioRaw)
+  const ufficio = Number.isFinite(ufficioNum) ? ufficioNum : null
+  const ufficioLabelRaw = String(attrValueCi(attrs, ['ufficio_label', 'ufficioLabel', 'ufficio_zona', 'ufficioZona']) ?? '').trim()
+  const ufficioLabel = ufficioLabelRaw || (ufficio != null ? String(UFFICIO_LABEL[ufficio] || '').trim() : '')
+
+  const meta: GiiActorAssignmentMeta = { usernameKey, fullName, ruoloCod, areaCod, settoreCod, ufficio, ufficioLabel }
+  const existing = __giiActorAssignmentsByUsername.get(usernameKey) || []
+  const signature = `${ruoloCod}|${areaCod}|${settoreCod}|${ufficio ?? ''}`
+  if (!existing.some(item => `${item.ruoloCod}|${item.areaCod}|${item.settoreCod}|${item.ufficio ?? ''}` === signature)) {
+    existing.push(meta)
+    __giiActorAssignmentsByUsername.set(usernameKey, existing)
+  }
+}
+
+function alertSenderRoutingTag (alert: GiiAlertItem | null | undefined): string {
+  return String(firstNonEmptyAlertRawValue(alert, ['GII_da', 'gii_da']) || '').trim()
+}
+
+function actorAssignmentMetaForAlert (alert: GiiAlertItem | null | undefined): GiiActorAssignmentMeta | null {
+  if (!alert) return null
+  const role = alertSenderRoleCode(alert)
+  if (!role) return null
+
+  const tag = alertSenderRoutingTag(alert)
+  const explicitArea = parseAreaCodeCandidate(tag)
+  const explicitSector = parseSectorCodeCandidate(tag)
+  const practiceArea = parseAreaCodeCandidate(alertPracticeRawValue(alert, ['area_cod', 'areaCod', 'area', 'cod_area']))
+  const practiceSector = parseSectorCodeCandidate(alertPracticeRawValue(alert, ['settore_cod', 'settoreCod', 'settore', 'cod_settore']))
+  const practiceOfficeRaw = alertPracticeRawValue(alert, ['id_ufficio', 'ufficio_id', 'id_ufficio_zona', 'ufficio'])
+  const practiceOfficeNum = Number(practiceOfficeRaw)
+  const practiceOffice = Number.isFinite(practiceOfficeNum) ? practiceOfficeNum : null
+
+  for (const candidate of alertSenderUserCandidates(alert)) {
+    const usernameKey = normalizeUsernameLookupKey(candidate)
+    let matches = (__giiActorAssignmentsByUsername.get(usernameKey) || []).filter(item => item.ruoloCod === role)
+    if (!matches.length) continue
+
+    const narrow = (predicate: (item: GiiActorAssignmentMeta) => boolean) => {
+      const filtered = matches.filter(predicate)
+      if (filtered.length) matches = filtered
+    }
+
+    // Il tag strutturato GII_da è il discriminante principale del ruolo che ha
+    // realmente generato l'evento (es. RIT-AGR vs RIT-TEC, IT-D1 vs IT-D2).
+    if (explicitArea) narrow(item => item.areaCod === explicitArea)
+    if (explicitSector) narrow(item => item.settoreCod === explicitSector)
+
+    // I dati della pratica servono solo a disambiguare assegnazioni ancora equivalenti,
+    // ad esempio lo stesso IT sullo stesso settore ma su uffici differenti.
+    if (matches.length > 1 && practiceArea) narrow(item => item.areaCod === practiceArea)
+    if (matches.length > 1 && practiceSector) narrow(item => item.settoreCod === practiceSector)
+    if (matches.length > 1 && practiceOffice != null) narrow(item => item.ufficio === practiceOffice)
+
+    if (matches.length === 1) return matches[0]
+
+    // Se restano più record ma descrivono la stessa identica assegnazione organizzativa,
+    // il risultato è comunque univoco ai fini del messaggio. Altrimenti non indoviniamo.
+    const signatures = new Set(matches.map(item => `${item.ruoloCod}|${item.areaCod}|${item.settoreCod}|${item.ufficio ?? ''}`))
+    if (signatures.size === 1 && matches.length) return matches[0]
+  }
+
+  return null
+}
 
 async function loadGiiUserFullNameMap (values: string[], signal?: AbortSignal): Promise<Map<string, string>> {
   const candidates = Array.from(new Set(
@@ -1857,7 +1956,8 @@ async function loadGiiUserFullNameMap (values: string[], signal?: AbortSignal): 
     const pickFields = [
       'username', 'user_name', 'agol_username',
       'full_name', 'nome', 'cognome', 'fullName', 'nome_cognome', 'nomeCompleto', 'nominativo', 'display_name', 'displayName', 'name',
-      'ruolo_cod', 'ruoloCod', 'area', 'area_cod', 'areaCod', 'settore', 'settore_cod', 'settoreCod', 'ufficio', 'id_ufficio'
+      'ruolo_cod', 'ruoloCod', 'area', 'area_cod', 'areaCod', 'settore', 'settore_cod', 'settoreCod',
+      'ufficio', 'id_ufficio', 'ufficio_id', 'ufficio_label', 'ufficioLabel', 'ufficio_zona', 'ufficioZona'
     ]
       .map(f => fieldNameByLower.get(f.toLowerCase()))
       .filter((f): f is string => !!f)
@@ -1879,6 +1979,7 @@ async function loadGiiUserFullNameMap (values: string[], signal?: AbortSignal): 
         const attrs = f?.attributes || {}
         const username = String(attrValueCi(attrs, ['username', 'USERNAME', 'user_name', 'agol_username']) ?? '').trim()
         const fullName = fullNameFromGiiUserAttrs(attrs)
+        rememberGiiActorAssignment(attrs, fullName)
         if (!fullName) return
         addGiiUserLookupAliases(out, stillWanted, attrs, username, fullName)
       })
@@ -1954,24 +2055,31 @@ async function enrichAlertsWithActorFullNames (alerts: GiiAlertItem[], signal?: 
   })
 
   const fullNameByUsername = await loadGiiUserFullNameMap(allCandidates, signal)
-  if (!fullNameByUsername.size) return list
 
   return list.map(alert => {
     const isIt = alertIsItOrigin(alert)
+    const actorAssignment = actorAssignmentMetaForAlert(alert)
     const actorResolved = alertSenderUserCandidates(alert)
       .map(v => fullNameByUsername.get(normalizeUsernameLookupKey(v)))
-      .find(v => !!String(v || '').trim())
+      .find(v => !!String(v || '').trim()) || actorAssignment?.fullName || ''
     const technicianResolved = technicianUserCandidates(alert, isIt)
       .map(v => fullNameByUsername.get(normalizeUsernameLookupKey(v)))
       .find(v => !!String(v || '').trim())
 
-    if (!actorResolved && !technicianResolved) return alert
+    if (!actorResolved && !technicianResolved && !actorAssignment) return alert
 
     return {
       ...alert,
       raw: {
         ...(alert.raw || {}),
         ...(actorResolved ? { __gii_actor_full_name: actorResolved } : {}),
+        ...(actorAssignment ? {
+          __gii_actor_role_cod: actorAssignment.ruoloCod,
+          __gii_actor_area_cod: actorAssignment.areaCod,
+          __gii_actor_settore_cod: actorAssignment.settoreCod,
+          __gii_actor_ufficio_id: actorAssignment.ufficio,
+          __gii_actor_ufficio_label: actorAssignment.ufficioLabel
+        } : {}),
         ...(technicianResolved ? { [isIt ? '__gii_istruttore_tecnico_full_name' : '__gii_tecnico_rilevatore_full_name']: technicianResolved } : {})
       }
     }
@@ -2554,15 +2662,19 @@ function storeAlertEditIntent (alert: GiiAlertItem, layerUrl: string): void {
 function AlertBellButton (props: { counts: GiiAlertQueryResult['counts'], loading: boolean, error: string, onClick: () => void }) {
   const tone = getGiiAlertBellTone(props.counts)
   const total = props.counts?.total || 0
-  // Durante il cambio account la campanella deve restare nascosta finché gli
-  // allarmi del nuovo profilo non sono stati caricati. In caso contrario React
-  // continuerebbe a mostrare per qualche istante il conteggio dell'utente precedente.
-  if (props.loading || (total <= 0 && !props.error)) return null
+  // Se il caricamento iniziale ha già confermato attività correnti reali, la
+  // campanella può comparire prima del popup. Se invece non è ancora noto alcun
+  // allarme, resta nascosta: niente icone vuote o destinate poi a sparire.
+  if (total <= 0 && !props.error) return null
   const color = props.error ? '#dc2626' : alertToneColor(tone)
   return (
     <button
       type='button'
-      title={props.error ? `Errore allarmi: ${props.error}` : `${total} allarmi attivi`}
+      title={props.error
+        ? `Errore allarmi: ${props.error}`
+        : props.loading
+          ? `${total} allarmi attivi · dettagli in caricamento`
+          : `${total} allarmi attivi`}
       onClick={props.onClick}
       style={{
         position: 'relative',
@@ -2622,6 +2734,7 @@ function HeaderAlertsPopup (props: {
   error: string
   archivingKey: string
   right: number
+  open: boolean
   homeMode?: boolean
   onClose: () => void
   onOpenPractice: (alert: GiiAlertItem) => void
@@ -2632,20 +2745,35 @@ function HeaderAlertsPopup (props: {
   const popup = (
     <div
       data-gii-global-alert-popup='1'
-      style={{ position: 'fixed', inset: 0, zIndex: 2147483646, pointerEvents: 'none' }}
+      aria-hidden={!props.open}
+      style={{
+        position: 'fixed',
+        inset: 0,
+        zIndex: 2147483646,
+        pointerEvents: 'none',
+        visibility: props.open ? 'visible' : 'hidden'
+      }}
     >
-      <div style={{ position: 'absolute', right: props.right, top: 82, width: 430, maxWidth: 'calc(100vw - 28px)', maxHeight: 'calc(100vh - 110px)', overflow: 'hidden', borderRadius: 16, background: 'rgba(15,23,42,0.97)', border: '1px solid rgba(255,255,255,0.14)', boxShadow: '0 24px 70px rgba(0,0,0,0.45)', color: '#e5e7eb', backdropFilter: 'blur(14px)', pointerEvents: 'auto' }}>
+      <div style={{ position: 'absolute', right: props.right, top: 82, width: 430, maxWidth: 'calc(100vw - 28px)', maxHeight: 'calc(100vh - 110px)', overflow: 'hidden', borderRadius: 16, background: 'rgba(15,23,42,0.97)', border: '1px solid rgba(255,255,255,0.14)', boxShadow: '0 24px 70px rgba(0,0,0,0.45)', color: '#e5e7eb', backdropFilter: 'blur(14px)', pointerEvents: props.open ? 'auto' : 'none' }}>
         <div style={{ padding: '14px 16px', borderBottom: '1px solid rgba(255,255,255,0.10)', display: 'flex', justifyContent: 'space-between', gap: 10, alignItems: 'center' }}>
           <div>
             <div style={{ fontWeight: 900, fontSize: 18 }}>Allarmi e scadenze</div>
             <div style={{ color: 'rgba(203,213,225,0.75)', fontSize: 14, marginTop: 2 }}>
-              {props.counts.total} attivi · {props.counts.scaduti + props.counts.critici} scaduti/critici · {props.counts.inScadenza} in scadenza
+              {props.loading
+                ? `${props.counts.total} attivi · dettagli in caricamento`
+                : `${props.counts.total} attivi · ${props.counts.scaduti + props.counts.critici} scaduti/critici · ${props.counts.inScadenza} in scadenza`}
             </div>
           </div>
           <button type='button' onClick={props.onClose} style={{ border: '1px solid rgba(255,255,255,0.12)', background: 'rgba(255,255,255,0.06)', color: '#e5e7eb', borderRadius: 9, padding: '6px 9px', cursor: 'pointer', fontWeight: 800, fontSize: 14 }}>Chiudi</button>
         </div>
         <div style={{ padding: 12, overflowY: 'auto', maxHeight: 'calc(100vh - 190px)', display: 'grid', gap: 10 }}>
           {props.error && <div style={{ border: '1px solid rgba(248,113,113,0.35)', background: 'rgba(127,29,29,0.35)', color: '#fecaca', borderRadius: 10, padding: 10, fontSize: 14 }}>{props.error}</div>}
+          {props.loading && !props.error && (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, color: '#cbd5e1', fontSize: 14, padding: 10 }}>
+              <span aria-hidden='true' style={{ width: 15, height: 15, borderRadius: '50%', border: '2px solid rgba(147,197,253,0.25)', borderTopColor: '#93c5fd', animationName: 'spin', animationDuration: '0.8s', animationIterationCount: 'infinite', animationTimingFunction: 'linear', flex: '0 0 auto' }} />
+              <span>Caricamento dettagli allarmi…</span>
+            </div>
+          )}
           {!props.loading && !props.error && props.alerts.length === 0 && props.counts.total <= 0 && (
             <div style={{ color: '#cbd5e1', fontSize: 15, padding: 10 }}>Nessun allarme attivo.</div>
           )}
@@ -2804,6 +2932,11 @@ export default function Widget(props: Props) {
   const [urlTick, setUrlTick] = React.useState(0)
   const [alerts, setAlerts] = React.useState<GiiAlertItem[]>([])
   const alertCounts = React.useMemo(() => summarizeGiiAlerts(alerts), [alerts])
+  // Durante il solo caricamento iniziale possiamo conoscere l'esistenza e il
+  // conteggio delle attività correnti prima di aver completato l'arricchimento
+  // del popup. Questi conteggi provengono da attività reali già filtrate per
+  // assegnazione e archiviazione: non rappresentano una campanella provvisoria.
+  const [alertsInitialCurrentCounts, setAlertsInitialCurrentCounts] = React.useState<GiiAlertQueryResult['counts'] | null>(null)
   const [alertsLoading, setAlertsLoading] = React.useState(false)
   const [alertsError, setAlertsError] = React.useState('')
   const [profileSyncError, setProfileSyncError] = React.useState('')
@@ -2825,6 +2958,20 @@ export default function Widget(props: Props) {
   const alertsAuthTransitionRef = React.useRef(false)
   const profileSyncRetryTimerRef = React.useRef<number | null>(null)
   const accountSwitchInProgressRef = React.useRef(false)
+  // Durante un cambio account REALE usiamo la pagina Accesso come superficie
+  // neutra. Il flag sospende esclusivamente il redirect automatico Accesso→Home
+  // finché la nuova sessione non è stata installata e stabilizzata.
+  const accountSwitchNeutralAccessRef = React.useRef(false)
+  const setAccountSwitchNeutralAccess = (active: boolean) => {
+    accountSwitchNeutralAccessRef.current = active
+    try {
+      if (active) (window as any).__giiAccountSwitchNeutralAccess = true
+      else delete (window as any).__giiAccountSwitchNeutralAccess
+    } catch { }
+  }
+  const isAccountSwitchNeutralAccess = () => {
+    try { return accountSwitchNeutralAccessRef.current || !!(window as any).__giiAccountSwitchNeutralAccess } catch { return accountSwitchNeutralAccessRef.current }
+  }
   const userRef = React.useRef<GiiUserRole | null>(null)
 
   React.useEffect(() => {
@@ -3017,6 +3164,7 @@ export default function Widget(props: Props) {
     locallyArchivedAlertKeysRef.current.clear()
     alertsRef.current = []
     setAlerts([])
+    setAlertsInitialCurrentCounts(null)
     setAlertsError('')
     setAlertsOpen(false)
     setAlertsLoading(shouldLoadAlerts)
@@ -3058,6 +3206,9 @@ export default function Widget(props: Props) {
   const isAlertsHomePage = !!configuredHomePage && currentPageId === configuredHomePage
   const canReadGiiAlerts = canUseGiiAlerts(user)
   const showHeaderAlertBell = (cfg.alertsEnabled ?? true) && !!user && canReadGiiAlerts
+  const alertBellCounts = alertsLoading && alertsInitialCurrentCounts
+    ? alertsInitialCurrentCounts
+    : alertCounts
 
   const filterAlertsWithLocalGuards = React.useCallback((
     items: GiiAlertItem[],
@@ -3293,9 +3444,12 @@ export default function Widget(props: Props) {
     }
 
     if (!isCurrentLightRequest()) return
-    // La campanella viene nascosta solo durante il primo caricamento del profilo
-    // corrente. I refresh periodici mantengono visibile l'ultimo risultato valido.
-    if (alertsLoadedGenerationRef.current !== generationAtStart) {
+    // Il primo caricamento resta distinto dai polling successivi: solo in questa
+    // fase anticipiamo il conteggio reale delle attività correnti per far apparire
+    // prima la campanella, senza pubblicare messaggi non ancora arricchiti.
+    const isInitialAlertsLoad = alertsLoadedGenerationRef.current !== generationAtStart
+    if (isInitialAlertsLoad) {
+      setAlertsInitialCurrentCounts(null)
       setAlertsLoading(true)
     }
 
@@ -3376,27 +3530,48 @@ export default function Widget(props: Props) {
       return sortAlertsForPopup(dedupeAlerts(enrichedGroups.flat()))
     }
 
+    const readCurrentActivitiesForPopup = async (): Promise<{
+      source: GiiAlertItem[]
+      popup: GiiAlertItem[]
+    }> => {
+      const raw = await readCurrentActivities()
+      throwIfHeaderAborted(signal)
+      const source = filterAlertsWithLocalGuards(raw, 'current')
+
+      // Qui sappiamo già con certezza quante attività correnti non archiviate
+      // appartengono alle assegnazioni dell'utente. Sul primo caricamento rendiamo
+      // disponibile questo solo conteggio alla campanella mentre pratica/mittente
+      // vengono risolti in parallelo per il popup. Nessun testo grezzo entra nello stato.
+      if (isInitialAlertsLoad && isCurrentLightRequest()) {
+        setAlertsInitialCurrentCounts(summarizeGiiAlerts(source))
+      }
+
+      const popup = await enrichAlertsForPopup(source)
+      return { source, popup }
+    }
+
     let popupCurrentActivities: GiiAlertItem[] = []
 
     try {
-      // Mostriamo subito le attività correnti: la campanella deve comparire
-      // rapidamente. Le righe organizzative principali sono ricavate anche dai
-      // campi destinatario_* dell'attività corrente, senza attendere il recupero
-      // completo della pratica. L'arricchimento successivo può integrare dati,
-      // ma non deve ritardare l'allarme.
-      const rawCurrentActivities = await readCurrentActivities()
+      // Un solo percorso di costruzione: l'attività corrente non entra mai nello
+      // stato React in forma grezza o provvisoria. Prima risolviamo pratica,
+      // mittente e metadati organizzativi; solo il risultato definitivo viene
+      // consegnato al popup.
+      const currentSnapshot = await readCurrentActivitiesForPopup()
       if (!isCurrentLightRequest()) return
-      currentActivities = filterAlertsWithLocalGuards(rawCurrentActivities, 'current')
-      popupCurrentActivities = sortAlertsForPopup(currentActivities)
+      currentActivities = currentSnapshot.source
+      popupCurrentActivities = currentSnapshot.popup
       alertsCurrentActivitiesSignatureRef.current = alertPopupKeysSignature(popupCurrentActivities)
       alertsLoadedGenerationRef.current = generationAtStart
       setAlerts(popupCurrentActivities)
+      setAlertsInitialCurrentCounts(null)
       setAlertsError('')
       setAlertsLoading(false)
     } catch (e: any) {
       if (isGiiAbortError(e) || !isCurrentLightRequest()) return
       alertsLoadedGenerationRef.current = generationAtStart
       setAlerts([])
+      setAlertsInitialCurrentCounts(null)
       setAlertsError(e?.message || String(e))
       setAlertsLoading(false)
       return
@@ -3472,11 +3647,9 @@ export default function Widget(props: Props) {
         const hasMaterializedChanges = materializedCount > 0 || normalizedCount > 0
         let refreshedActivities = enrichedCurrentActivities
         if (hasMaterializedChanges) {
-          const rawRefreshedActivities = await readCurrentActivities()
+          const refreshedSnapshot = await readCurrentActivitiesForPopup()
           if (!isCurrentBackgroundRequest()) return
-          refreshedActivities = await enrichAlertsForPopup(
-            filterAlertsWithLocalGuards(rawRefreshedActivities, 'current')
-          )
+          refreshedActivities = refreshedSnapshot.popup
         }
         if (!isCurrentBackgroundRequest()) return
 
@@ -3740,8 +3913,12 @@ export default function Widget(props: Props) {
       return
     }
 
-    // 2) Autenticato: se sei su Accesso (pagina post-logout), vai alla home operativa
+    // 2) Autenticato: se sei su Accesso (pagina post-logout), vai alla home operativa.
+    // Eccezione strettissima: durante un cambio account REALE Accesso è la pagina
+    // neutra su cui smontare il vecchio contesto PRIMA di installare la nuova
+    // identità. In quella finestra non dobbiamo rimbalzare prematuramente a Home.
     if (user && outTok && inTok && outId && curId && curId === outId) {
+      if (isAccountSwitchNeutralAccess()) return
       safeGoto(inTok)
     }
   }, [user, uLoad, urlTick])
@@ -3796,20 +3973,28 @@ export default function Widget(props: Props) {
     // quindi mai la pagina corrente.
     const switchOriginPageToken = getRuntimeCurrentPageId() || getCurrentPageToken() || ''
     const switchOriginPageId = switchOriginPageToken ? resolvePageId(switchOriginPageToken) : null
-    const neutralPageToken = String(afterInRef.current || cfg.alertsHomePage || '').trim()
+    // Pagina neutra del cambio reale: Accesso (redirectAfterSignOut), non Home.
+    // Home viene montata soltanto dopo l'installazione/convergenza del nuovo account.
+    const neutralPageToken = String(afterOutRef.current || '').trim()
     const neutralPageId = neutralPageToken ? resolvePageId(neutralPageToken) : null
+    const homePageToken = String(afterInRef.current || cfg.alertsHomePage || '').trim()
+    const homePageId = homePageToken ? resolvePageId(homePageToken) : null
     let movedToNeutralPage = false
 
     const moveToNeutralPageBeforeCredentialInstall = async () => {
       if (movedToNeutralPage) return
       if (!neutralPageToken || !neutralPageId || !switchOriginPageId || switchOriginPageId === neutralPageId) return
 
+      // Il cambio è già stato riconosciuto come realmente diverso dentro
+      // addOrReplaceSession(): da questo momento possiamo sospendere il normale
+      // redirect Accesso→Home e usare Accesso come superficie neutra.
+      setAccountSwitchNeutralAccess(true)
       gotoPage(neutralPageToken)
       movedToNeutralPage = true
 
       // Non basta che cambi l'URL: sulle pagine con restriction nativa ExB
       // continua a proteggere la pagina finché appRuntimeInfo.currentPageId non
-      // è realmente passato alla Home. Installare la nuova sessione prima di
+      // è realmente passato ad Accesso. Installare la nuova sessione prima di
       // quel momento fa scattare il guard org_admin di Gestione utenti.
       // Attendiamo quindi due conferme runtime consecutive della pagina neutra.
       let runtimeConfirmations = 0
@@ -3825,7 +4010,7 @@ export default function Widget(props: Props) {
       }
 
       if (runtimeConfirmations < 2) {
-        throw new Error('Pagina Home non confermata prima del cambio account.')
+        throw new Error('Pagina Accesso non confermata prima del cambio account.')
       }
 
       // Un ultimo ciclo lascia terminare lo smontaggio dei widget della pagina
@@ -3834,6 +4019,7 @@ export default function Widget(props: Props) {
     }
 
     const restoreOriginPageAfterFailedSwitch = () => {
+      setAccountSwitchNeutralAccess(false)
       if (!movedToNeutralPage || !switchOriginPageToken) return
       try { gotoPage(switchOriginPageToken) } catch { }
     }
@@ -3869,9 +4055,39 @@ export default function Widget(props: Props) {
         await new Promise(resolve => window.setTimeout(resolve, 50))
       }
 
-      if (!converged) return
+      if (!converged) {
+        setAccountSwitchNeutralAccess(false)
+        return
+      }
 
       clearGiiUserRoleCache()
+
+      // La nuova identità è ora stabile: montiamo Home per la PRIMA volta con il
+      // nuovo account. Solo dopo la conferma runtime togliamo il bypass e ricarichiamo.
+      if (!homePageToken || !homePageId) {
+        setAccountSwitchNeutralAccess(false)
+        throw new Error('Pagina Home non configurata dopo il cambio account.')
+      }
+
+      gotoPage(homePageToken)
+      let homeConfirmations = 0
+      for (let i = 0; i < 60; i++) {
+        await new Promise(resolve => window.setTimeout(resolve, 25))
+        const runtimePageId = getRuntimeCurrentPageId()
+        if (runtimePageId === homePageId) {
+          homeConfirmations += 1
+          if (homeConfirmations >= 2) break
+        } else {
+          homeConfirmations = 0
+        }
+      }
+
+      if (homeConfirmations < 2) {
+        setAccountSwitchNeutralAccess(false)
+        throw new Error('Pagina Home non confermata dopo il cambio account.')
+      }
+
+      setAccountSwitchNeutralAccess(false)
       await new Promise(resolve => window.setTimeout(resolve, 100))
       window.location.reload()
     }
@@ -4062,14 +4278,15 @@ export default function Widget(props: Props) {
         }
       `}</style>
 
-      {alertsOpen && showHeaderAlertBell && (
+      {showHeaderAlertBell && (alertBellCounts.total > 0 || alerts.length > 0 || !!alertsError || alertsOpen) && (
         <HeaderAlertsPopup
           alerts={alerts}
-          counts={alertCounts}
+          counts={alertBellCounts}
           loading={alertsLoading}
           error={alertsError}
           archivingKey={archivingAlertKey}
           right={alertsPanelRight}
+          open={alertsOpen}
           homeMode={isAlertsHomePage}
           onClose={() => setAlertsOpen(false)}
           onOpenPractice={openAlertPractice}
@@ -4108,9 +4325,13 @@ export default function Widget(props: Props) {
       <div style={{ display:'flex', alignItems:'center', gap:12 }}>
         {showHeaderAlertBell && (
           <div style={{ ...off('offsetAlertBell') }}>
-            <AlertBellButton counts={alertCounts} loading={alertsLoading} error={alertsError} onClick={() => {
+            <AlertBellButton counts={alertBellCounts} loading={alertsLoading} error={alertsError} onClick={() => {
               if (!showHeaderAlertBell) return
               setAlertsPanelRight(getUserBannerRightOffset())
+              // Il popup è apribile subito: durante il solo arricchimento dei
+              // dettagli mostra uno stato di caricamento, senza esporre messaggi
+              // grezzi o parziali. Il contenuto definitivo sostituisce lo stato
+              // di caricamento nello stesso popup appena pronto.
               setAlertsOpen(true)
             }} />
           </div>
@@ -4170,7 +4391,7 @@ export default function Widget(props: Props) {
                     <>
                       <span aria-hidden='true' style={{ flex:'1 1 auto',minWidth:14 }} />
                       <span aria-hidden='true' style={{ width:12,height:16,display:'inline-flex',alignItems:'center',justifyContent:'center',color:cfg.signInColor,opacity:0.8,fontSize:12,fontWeight:700,letterSpacing:0.2,flex:'0 0 auto' }}>
-                        <span style={{ display:'inline-block',transformOrigin:'50% 50%',transform:menuOpen ? 'rotate(180deg)' : 'rotate(0deg)',transition:'transform 0.18s ease' }}>▾</span>
+                        <span style={{ display:'inline-block',fontFamily:'Arial, sans-serif',fontSize:12,fontWeight:700,lineHeight:1,letterSpacing:'normal',transformOrigin:'50% 50%',transform:menuOpen ? 'rotate(180deg)' : 'rotate(0deg)',transition:'transform 0.18s ease' }}>▾</span>
                       </span>
                     </>
                   )}

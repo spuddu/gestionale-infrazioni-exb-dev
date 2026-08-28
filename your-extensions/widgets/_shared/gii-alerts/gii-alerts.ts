@@ -1159,7 +1159,9 @@ export async function loadArchivedGiiAlertKeys (archiveTableUrl: string, usernam
   if (!archiveTableUrl || !String(username || '').trim()) return keys
   const rows = await queryAllRowsRest(archiveTableUrl, {
     where: `username='${escapeSqlString(username)}'`,
-    outFields: '*',
+    // Per filtrare le attività correnti serve soltanto la chiave: evitare '*'
+    // riduce payload e tempo della verifica iniziale della campanella.
+    outFields: ['alert_key'],
     returnGeometry: false
   }, 1000, signal)
   rows.forEach(r => {
@@ -1459,28 +1461,34 @@ export async function queryGiiCurrentActivities (options: GiiCurrentActivityQuer
     String(options.user?.username || '').trim().toLowerCase(),
     String(options.user?.roleCod || options.user?.role || '').trim().toUpperCase(),
     String(options.user?.areaCod || '').trim().toUpperCase(),
-    String(options.user?.settoreCod || '').trim().toUpperCase()
+    String(options.user?.settoreCod || '').trim().toUpperCase(),
+    String((options.user as any)?.ufficio ?? '').trim().toUpperCase()
   ])
 
   return await runLatestGiiQuery(giiCurrentActivityQuerySlots, scope, async () => {
     await ensureAttivitaCorrentiJsonOnlyQueryFormat()
     const pageSize = Number.isFinite(Number(options.pageSize)) && Number(options.pageSize) > 0 ? Number(options.pageSize) : 100
-    const rows = await queryAllRowsRest(options.activityLayerUrl, {
-      where: buildCurrentActivityWhere(options.user, options.where),
-      // Usiamo * intenzionalmente: le viste per area non devono essere rese
-      // fragili da differenze marginali di schema tra AGR/TEC/AMM.
-      outFields: '*',
-      orderByFields: ['data_attivazione DESC', 'OBJECTID DESC'],
-      returnGeometry: false
-    }, pageSize, options.signal)
+    // Attività correnti e archivio sono indipendenti: eseguirli in parallelo
+    // elimina un round-trip seriale dal percorso critico della campanella.
+    const archivedKeysPromise = options.archiveTableUrl
+      ? loadArchivedGiiAlertKeys(options.archiveTableUrl, options.user?.username, options.signal)
+      : Promise.resolve(new Set<string>())
+
+    const [rows, archivedKeys] = await Promise.all([
+      queryAllRowsRest(options.activityLayerUrl, {
+        where: buildCurrentActivityWhere(options.user, options.where),
+        // Usiamo * intenzionalmente: le viste per area non devono essere rese
+        // fragili da differenze marginali di schema tra AGR/TEC/AMM.
+        outFields: '*',
+        orderByFields: ['data_attivazione DESC', 'OBJECTID DESC'],
+        returnGeometry: false
+      }, pageSize, options.signal),
+      archivedKeysPromise
+    ])
 
     const computed = rows
       .map(row => currentActivityToAlert(row))
       .filter((a): a is GiiAlertItem => !!a)
-
-    const archivedKeys = options.archiveTableUrl
-      ? await loadArchivedGiiAlertKeys(options.archiveTableUrl, options.user?.username, options.signal)
-      : new Set<string>()
     const alerts = filterArchivedGiiAlerts(computed, archivedKeys, options.includeArchived)
 
     return {
