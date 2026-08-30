@@ -497,10 +497,10 @@ function buttonStyle (opts?: { danger?: boolean, disabled?: boolean }): React.CS
     height: 36,
     padding: 0,
     boxSizing: 'border-box',
-    color: disabled ? '#9ca3af' : (danger ? '#b91c1c' : '#2563eb'),
+    color: disabled ? '#9ca3af' : (danger ? '#b91c1c' : '#0d3b66'),
     whiteSpace: 'nowrap',
     background: disabled ? '#e5e7eb' : '#ffffff',
-    border: disabled ? '2px solid #e5e7eb' : (danger ? '2px solid rgba(185,28,28,0.72)' : '2px solid rgba(37,99,235,0.72)'),
+    border: disabled ? '2px solid #e5e7eb' : (danger ? '2px solid rgba(185,28,28,0.72)' : '2px solid #0d3b66'),
     borderRadius: 8,
     cursor: disabled ? 'not-allowed' : 'pointer',
     opacity: disabled ? 0.6 : 1,
@@ -670,7 +670,7 @@ export default function GiiAttachmentViewer<T extends GiiAttachmentViewerItem = 
             <div style={{ flex: '0 0 auto', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, flexWrap: 'wrap' }}>
               <div style={{ fontWeight: 800, fontSize: Math.max(13, labelFontSize), color: props.innerHeaderColor || '#0f4c81' }}>Elenco allegati</div>
               {props.onUpload && (
-                <label title={uploadTitle} aria-label={uploadTitle} style={{ width: 38, height: 36, minHeight: 36, boxSizing: 'border-box', padding: 0, borderRadius: 8, border: disabledEdit ? '2px solid #e5e7eb' : '2px solid rgba(37,99,235,0.72)', background: disabledEdit ? '#e5e7eb' : '#ffffff', color: disabledEdit ? '#9ca3af' : '#2563eb', fontSize: labelFontSize, fontWeight: 600, cursor: disabledEdit ? 'not-allowed' : 'pointer', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', lineHeight: 1, whiteSpace: 'nowrap', flex: '0 0 auto', opacity: disabledEdit ? 0.6 : 1 }}>
+                <label title={uploadTitle} aria-label={uploadTitle} style={{ width: 38, height: 36, minHeight: 36, boxSizing: 'border-box', padding: 0, borderRadius: 8, border: disabledEdit ? '2px solid #e5e7eb' : '2px solid #0d3b66', background: disabledEdit ? '#e5e7eb' : '#ffffff', color: disabledEdit ? '#9ca3af' : '#0d3b66', fontSize: labelFontSize, fontWeight: 600, cursor: disabledEdit ? 'not-allowed' : 'pointer', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', lineHeight: 1, whiteSpace: 'nowrap', flex: '0 0 auto', opacity: disabledEdit ? 0.6 : 1 }}>
                   <AttachmentActionIcon name='upload' />
                   <input
                     key={props.uploadInputKey}

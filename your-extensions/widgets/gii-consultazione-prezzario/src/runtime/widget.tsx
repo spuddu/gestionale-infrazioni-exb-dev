@@ -617,7 +617,7 @@ function uniqueSorted(items: Array<{ key: string, label: string, count: number }
 
 
 const styles = `
-.gcp { font-family: Arial, sans-serif; font-size: 13px; padding: 12px; height: 100%; display:flex; flex-direction:column; gap:10px; box-sizing:border-box; }
+.gcp { font-size: 13px; padding: 12px; height: 100%; display:flex; flex-direction:column; gap:10px; box-sizing:border-box; }
 .gcp-title { font-size:15px; font-weight:700; color:#1F4E79; border-bottom:2px solid #1F4E79; padding-bottom:6px; }
 .gcp-toolbar { display:grid; grid-template-columns: minmax(0, var(--gcp-left-col, 25%)) var(--gcp-split-col, 12px) minmax(0, var(--gcp-center-col, 45%)) var(--gcp-split-col, 12px) minmax(0, var(--gcp-right-col, 30%)); gap:0; align-items:end; column-gap:0; }
 .gcp-grid-left { grid-column:1; min-width:0; }

@@ -580,7 +580,7 @@ async function setOnlyOneActiveForType(importUrl: string, allRows: ImportRow[], 
 }
 
 const styles = `
-.gpw { font-family: Arial, sans-serif; font-size: 13px; padding: 12px; height: 100%; display:flex; flex-direction:column; gap:10px; box-sizing:border-box; }
+.gpw { font-size: 13px; padding: 12px; height: 100%; display:flex; flex-direction:column; gap:10px; box-sizing:border-box; }
 .gpw-title { font-size:15px; font-weight:700; color:#1F4E79; border-bottom:2px solid #1F4E79; padding-bottom:6px; }
 .gpw-card { background:var(--gpw-detail-card-background, #f5f9ff); border:1px solid #c5d9f1; border-radius:6px; padding:12px; }
 .gpw-grid { display:grid; grid-template-columns:minmax(280px,1.35fr) 170px 120px minmax(260px,1.2fr); gap:10px; }
@@ -792,7 +792,7 @@ export default function Widget(props: AllWidgetProps<IMConfig>) {
     }
   }
 
-  if (!isRitOrAdmin) return <div style={{ padding: 12, fontFamily: 'Arial, sans-serif', color: '#7a1c1c', background: '#fce4e4', border: '1px solid #f5b8b8', borderRadius: 6 }}>Funzione riservata al Responsabile dell’istruttoria tecnica o all’Amministratore.</div>
+  if (!isRitOrAdmin) return <div style={{ padding: 12, color: '#7a1c1c', background: '#fce4e4', border: '1px solid #f5b8b8', borderRadius: 6 }}>Funzione riservata al Responsabile dell’istruttoria tecnica o all’Amministratore.</div>
 
   return (
     <Fragment>

@@ -131,7 +131,7 @@ function RecordEditButton (props: RecordActionButtonProps) {
   const title = props.title || 'Modifica'
   const ariaLabel = props.ariaLabel || title
   return (
-    <button type='button' disabled={disabled} onClick={props.onClick} title={title} aria-label={ariaLabel} style={recordActionStyle('#1F4E79', disabled, props.marginRight ?? 4)}>
+    <button type='button' disabled={disabled} onClick={props.onClick} title={title} aria-label={ariaLabel} style={recordActionStyle('#0d3b66', disabled, props.marginRight ?? 4)}>
       <svg width={18} height={18} viewBox='0 0 24 24' fill='none' stroke='currentColor' strokeWidth='2' strokeLinecap='round' strokeLinejoin='round' aria-hidden='true' focusable='false'>
         <path d='M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7'/>
         <path d='M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z'/>
@@ -145,7 +145,7 @@ function RecordDuplicateButton (props: RecordActionButtonProps) {
   const title = props.title || 'Nuova assegnazione'
   const ariaLabel = props.ariaLabel || title
   return (
-    <button type='button' disabled={disabled} onClick={props.onClick} title={title} aria-label={ariaLabel} style={recordActionStyle('#1F4E79', disabled, props.marginRight ?? 4)}>
+    <button type='button' disabled={disabled} onClick={props.onClick} title={title} aria-label={ariaLabel} style={recordActionStyle('#0d3b66', disabled, props.marginRight ?? 4)}>
       <svg width={18} height={18} viewBox='0 0 24 24' fill='none' stroke='currentColor' strokeWidth='2' strokeLinecap='round' strokeLinejoin='round' aria-hidden='true' focusable='false'>
         <rect x='9' y='9' width='11' height='11' rx='2'/>
         <path d='M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1'/>
@@ -1252,6 +1252,28 @@ async function deleteUtente(objectid: number, token: string, serviceUrl: string)
 
 // ── Export CSV ────────────────────────────────────────────────────────────
 function exportCSV(utenti: UtenteRecord[], domainLabels?: DomainLabelMap): void {
+  // Per Survey123: se un utente ha un solo ufficio assegnato come TR,
+  // esporta il relativo nome su tutte le sue righe. Se gli uffici TR sono
+  // più di uno, lascia vuoto: il Survey richiederà la scelta all'operatore.
+  const trOfficesByUsername = new Map<string, Set<number>>()
+  utenti.forEach(u => {
+    const username = String(u.username ?? '').trim()
+    if (!username || normalizeRuoloCod(u.ruolo_cod) !== 'TR' || u.ufficio == null) return
+    const offices = trOfficesByUsername.get(username) ?? new Set<number>()
+    offices.add(Number(u.ufficio))
+    trOfficesByUsername.set(username, offices)
+  })
+
+  const trUfficioAutoByUsername = new Map<string, string>()
+  trOfficesByUsername.forEach((offices, username) => {
+    if (offices.size !== 1) {
+      trUfficioAutoByUsername.set(username, '')
+      return
+    }
+    const officeId = Array.from(offices)[0]
+    trUfficioAutoByUsername.set(username, labelForUfficio(officeId, domainLabels))
+  })
+
   const rows = utenti.map(u => {
     const area    = u.area_cod    ?? codeOf(AREE, u.area) ?? labelForDomainItem(AREE, u.area, domainLabels, 'area_cod', 'area')
     const settore = u.settore_cod ?? codeOf(SETTORI, u.settore) ?? labelForDomainItem(SETTORI, u.settore, domainLabels, 'settore_cod', 'settore')
@@ -1260,17 +1282,18 @@ function exportCSV(utenti: UtenteRecord[], domainLabels?: DomainLabelMap): void 
     // id_ufficio: valore numerico (codice ufficio)
     const id_uff  = u.ufficio ?? ''
     const gruppo  = u.gruppo ?? ''
+    const ufficioTrAuto = trUfficioAutoByUsername.get(String(u.username ?? '').trim()) ?? ''
     // Escaping celle con virgole
     const esc = (v: any) => {
       const s = String(v ?? '')
       return s.includes(',') || s.includes('"') || s.includes('\n')
         ? `"${s.replace(/"/g, '""')}"` : s
     }
-    return [u.username, u.nome, u.cognome, u.titolo, u.email, formatBirthDate(u.data_nascita), u.full_name, area, settore, ufficio, ruolo, id_uff, gruppo]
+    return [u.username, u.nome, u.cognome, u.titolo, u.email, formatBirthDate(u.data_nascita), u.full_name, area, settore, ufficio, ruolo, id_uff, gruppo, ufficioTrAuto]
       .map(esc).join(',')
   })
 
-  const csv = ['username,nome,cognome,titolo,email,data_nascita,full_name,area_cod,settore_cod,ufficio,ruolo_cod,id_ufficio,gruppo', ...rows].join('\n')
+  const csv = ['username,nome,cognome,titolo,email,data_nascita,full_name,area_cod,settore_cod,ufficio,ruolo_cod,id_ufficio,gruppo,ufficio_tr_auto', ...rows].join('\n')
   const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' })
   const url  = URL.createObjectURL(blob)
   const a    = document.createElement('a')

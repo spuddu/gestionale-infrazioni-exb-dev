@@ -134,9 +134,9 @@ function NewRecordButton (props: NewRecordButtonProps) {
         boxSizing: 'border-box',
         padding: 0,
         borderRadius: 7,
-        border: disabled ? '1.5px solid #e5e7eb' : '1.5px solid rgba(37,99,235,0.72)',
+        border: disabled ? '1.5px solid #e5e7eb' : '1.5px solid #0d3b66',
         background: disabled ? '#e5e7eb' : '#ffffff',
-        color: disabled ? '#9ca3af' : '#2563eb',
+        color: disabled ? '#9ca3af' : '#0d3b66',
         cursor: disabled ? 'not-allowed' : 'pointer',
         display: 'inline-flex',
         alignItems: 'center',
@@ -189,7 +189,7 @@ function RecordEditButton (props: RecordActionButtonProps) {
   const title = props.title || 'Modifica'
   const ariaLabel = props.ariaLabel || title
   return (
-    <button type='button' disabled={disabled} onClick={props.onClick} title={title} aria-label={ariaLabel} style={recordActionStyle('#1F4E79', disabled, props.marginRight ?? 4)}>
+    <button type='button' disabled={disabled} onClick={props.onClick} title={title} aria-label={ariaLabel} style={recordActionStyle('#0d3b66', disabled, props.marginRight ?? 4)}>
       <svg width={18} height={18} viewBox='0 0 24 24' fill='none' stroke='currentColor' strokeWidth='2' strokeLinecap='round' strokeLinejoin='round' aria-hidden='true' focusable='false'>
         <path d='M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7'/>
         <path d='M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z'/>
@@ -274,7 +274,7 @@ const ATTREZZATURA_TYPES = [
 
 
 const styles = `
-  .gns { font-family: Arial, sans-serif; font-size: 13px; padding: 12px; height: 100%; display: flex; flex-direction: column; gap: 10px; box-sizing: border-box; }
+  .gns { font-size: 13px; padding: 12px; height: 100%; display: flex; flex-direction: column; gap: 10px; box-sizing: border-box; }
   .gns-title { font-size: 15px; font-weight: bold; color: #1F4E79; border-bottom: 2px solid #1F4E79; padding-bottom: 6px; margin: 0; }
   .gns-datasets { display: flex; gap: 7px; flex-wrap: wrap; }
   .gns-dataset { padding: 6px 13px; border: 1px solid #8fb2d4; border-radius: 5px; background: #fff; color: #1F4E79; font-size: 12px; font-weight: bold; cursor: pointer; }
@@ -938,7 +938,7 @@ export default function Widget(props: AllWidgetProps<IMConfig>) {
   }
 
   if (access.allowedDatasets.length === 0) {
-    return <div style={{ padding: 12, fontFamily: 'Arial, sans-serif', color: '#7a1c1c', background: '#fce4e4', border: '1px solid #f5b8b8', borderRadius: 6 }}>Funzione riservata ai ruoli Responsabile istruttoria tecnica, Responsabile istruttoria amministrativa o Amministratore.</div>
+    return <div style={{ padding: 12, color: '#7a1c1c', background: '#fce4e4', border: '1px solid #f5b8b8', borderRadius: 6 }}>Funzione riservata ai ruoli Responsabile istruttoria tecnica, Responsabile istruttoria amministrativa o Amministratore.</div>
   }
 
   if (!definition) return null

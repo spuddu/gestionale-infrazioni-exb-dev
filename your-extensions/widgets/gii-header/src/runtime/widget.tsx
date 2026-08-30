@@ -4253,8 +4253,7 @@ export default function Widget(props: Props) {
       backdropFilter: 'blur(12px)',
       display:'flex', alignItems:'center', justifyContent:'space-between',
       padding:`${cfg.headerPaddingV}px ${cfg.headerPaddingH}px`,
-      boxSizing:'border-box',
-      fontFamily:"'Source Sans 3','Segoe UI',sans-serif"
+      boxSizing:'border-box'
     }}>
       <style>{`
         @import url('https://fonts.googleapis.com/css2?family=Crimson+Pro:wght@400;600;700&family=Source+Sans+3:wght@300;400;600;700&display=swap');

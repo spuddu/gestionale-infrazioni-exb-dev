@@ -3848,7 +3848,7 @@ function NoteSpeseManager (props: NsManagerProps) {
                   <td style={{ ...tdS(displayIdx), whiteSpace: 'nowrap', textAlign: 'right' }}>
                     {!props.readonly ? (
                       <>
-                        <button type='button' onClick={() => startEdit(idx)} title='Modifica riga' aria-label='Modifica riga' style={{ border: 'none', background: 'transparent', color: '#1F4E79', cursor: 'pointer', padding: 4, marginRight: 4, display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>
+                        <button type='button' onClick={() => startEdit(idx)} title='Modifica riga' aria-label='Modifica riga' style={{ border: 'none', background: 'transparent', color: '#0d3b66', cursor: 'pointer', padding: 4, marginRight: 4, display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>
                           <svg width={18} height={18} viewBox='0 0 24 24' fill='none' stroke='currentColor' strokeWidth='2' strokeLinecap='round' strokeLinejoin='round' aria-hidden='true' focusable='false'>
                             <path d='M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7'/>
                             <path d='M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z'/>
@@ -8372,18 +8372,33 @@ ${e?.message || String(e)}`
                   try { const pg = resolvePageId('browser-nota-spese'); if (pg) { if (noteSpeseDraftStorageKey) nsWriteDraftSnapshot(noteSpeseDraftStorageKey, noteSpeseRowsDraft, activeNotaSpeseCasistica); try { if (isArt30NotaSpeseCasistica && art30RecuperoMode === 'non_recuperabile') { sessionStorage.setItem('GII_NS_FORCE_SOURCE', 'ATTREZZATURE'); sessionStorage.removeItem('GII_NS_EXCLUDE_SOURCE') } else { sessionStorage.removeItem('GII_NS_FORCE_SOURCE'); sessionStorage.setItem('GII_NS_EXCLUDE_SOURCE', 'ATTREZZATURE') } window.dispatchEvent(new CustomEvent('gii:ns-source-flags-changed')) } catch {} try { const curPage = getAppStore()?.getState()?.appRuntimeInfo?.currentPageId || ''; sessionStorage.setItem('GII_NS_RETURN_PAGE', curPage) } catch {} UrlManager.getInstance().changePage(pg) } else { setNoteSpeseMsg({ ok: false, text: 'Pagina "browser-nota-spese" non trovata. Configura una pagina ExB con il widget consultazione prezzario e il widget gii-ns-carrello.' }) } } catch (e: any) { setNoteSpeseMsg({ ok: false, text: e?.message || String(e) }) }
                 }}
                 disabled={noteSpeseBrowseDisabled}
-                title={!activeNotaSpeseCasistica || noteSpeseCasistiche.length === 0 ? 'Seleziona prima una violazione collegabile alla nota spese.' : undefined}
+                title={!activeNotaSpeseCasistica || noteSpeseCasistiche.length === 0 ? 'Seleziona prima una violazione collegabile alla nota spese.' : 'Sfoglia prezzario'}
+                aria-label='Sfoglia prezzario'
                 style={{
-                  ...btnBase,
+                  width: 40,
+                  height: 40,
+                  padding: 0,
+                  boxSizing: 'border-box',
                   marginRight: 12,
-                  border: '1px solid rgba(15,115,117,0.75)',
-                  background: noteSpeseBrowseDisabled ? '#e5e7eb' : '#0f7375',
-                  color: noteSpeseBrowseDisabled ? '#9ca3af' : '#fff',
+                  borderRadius: 8,
+                  border: `2px solid ${noteSpeseBrowseDisabled ? '#e5e7eb' : '#0d3b66'}`,
+                  background: '#fff',
+                  color: noteSpeseBrowseDisabled ? '#9ca3af' : '#0d3b66',
                   cursor: noteSpeseBrowseDisabled ? 'not-allowed' : 'pointer',
-                  opacity: noteSpeseBrowseDisabled ? 0.75 : 1,
-                  whiteSpace: 'nowrap'
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center'
                 }}
-              >📋 Sfoglia prezzario</button>
+              >
+                <svg width='24' height='24' viewBox='0 0 24 24' fill='none' aria-hidden='true'>
+                  <circle cx='5.5' cy='6' r='1.5' fill='currentColor'/>
+                  <line x1='10' y1='6' x2='19' y2='6' stroke='currentColor' strokeWidth='2' strokeLinecap='round'/>
+                  <circle cx='5.5' cy='12' r='1.5' fill='currentColor'/>
+                  <line x1='10' y1='12' x2='19' y2='12' stroke='currentColor' strokeWidth='2' strokeLinecap='round'/>
+                  <circle cx='5.5' cy='18' r='1.5' fill='currentColor'/>
+                  <line x1='10' y1='18' x2='19' y2='18' stroke='currentColor' strokeWidth='2' strokeLinecap='round'/>
+                </svg>
+              </button>
             )}
             <button type='button' disabled={isReadOnly || saving || !isDirty} onClick={handleSave}
               style={{
@@ -8681,9 +8696,16 @@ ${e?.message || String(e)}`
                           <button
                             type='button'
                             onClick={() => setAttrezzatureNuovoPickerOpen(v => !v)}
-                            style={{ height: 38, padding: '0 12px', borderRadius: 6, border: '1px solid #0f7375', background: '#fff', color: '#0f7375', fontWeight: 800, fontSize: 12, cursor: 'pointer', whiteSpace: 'nowrap' }}
+                            title='Aggiungi attrezzatura'
+                            aria-label='Aggiungi attrezzatura'
+                            style={{ width: 38, height: 38, minHeight: 38, boxSizing: 'border-box', padding: 0, borderRadius: 8, border: '2px solid #0d3b66', background: '#ffffff', color: '#0d3b66', cursor: 'pointer', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', lineHeight: 1, whiteSpace: 'nowrap', flex: '0 0 auto' }}
                           >
-                            + Aggiungi attrezzatura
+                            <svg width={22} height={22} viewBox='0 0 24 24' fill='none' stroke='currentColor' strokeWidth='2' strokeLinecap='round' strokeLinejoin='round' aria-hidden='true' focusable='false'>
+                              <path d='M21 13.1v5.9c0 1.1-.9 2-2 2H5c-1.1 0-2-.9-2-2v-4'/>
+                              <path d='M3 15V5c0-1.1.9-2 2-2h5.9'/>
+                              <path d='M16.5 3v9'/>
+                              <path d='M12 7.5h9'/>
+                            </svg>
                           </button>
                           {attrezzatureNuovoPickerOpen && (
                             <div style={{ position: 'absolute', top: 42, right: 0, zIndex: 20, background: '#fff', border: '1px solid #cbd5e1', borderRadius: 8, boxShadow: '0 6px 20px rgba(0,0,0,0.18)', minWidth: 240, overflow: 'hidden' }}>

@@ -31,9 +31,9 @@ function NewRecordButton (props: NewRecordButtonProps) {
         boxSizing: 'border-box',
         padding: 0,
         borderRadius: 7,
-        border: disabled ? '1.5px solid #e5e7eb' : '1.5px solid rgba(37,99,235,0.72)',
+        border: disabled ? '1.5px solid #e5e7eb' : '1.5px solid #0d3b66',
         background: disabled ? '#e5e7eb' : '#ffffff',
-        color: disabled ? '#9ca3af' : '#2563eb',
+        color: disabled ? '#9ca3af' : '#0d3b66',
         cursor: disabled ? 'not-allowed' : 'pointer',
         display: 'inline-flex',
         alignItems: 'center',
@@ -90,7 +90,7 @@ function RecordEditButton (props: RecordActionButtonProps) {
   const title = props.title || 'Modifica'
   const ariaLabel = props.ariaLabel || title
   return (
-    <button type='button' disabled={disabled} onClick={props.onClick} title={title} aria-label={ariaLabel} style={recordActionStyle('#1F4E79', disabled, props.marginRight ?? 4)}>
+    <button type='button' disabled={disabled} onClick={props.onClick} title={title} aria-label={ariaLabel} style={recordActionStyle('#0d3b66', disabled, props.marginRight ?? 4)}>
       <svg width={19} height={19} viewBox='0 0 24 24' fill='none' stroke='currentColor' strokeWidth='2' strokeLinecap='round' strokeLinejoin='round' aria-hidden='true' focusable='false'>
         <path d='M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7'/>
         <path d='M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z'/>
@@ -516,7 +516,7 @@ async function countInternalReferences(detailUrl: string, sourceObjectId: number
 }
 
 const styles = `
-.gap { font-family: Arial, sans-serif; font-size: 13px; padding: 12px; height: 100%; display:flex; flex-direction:column; gap:10px; box-sizing:border-box; }
+.gap { font-size: 13px; padding: 12px; height: 100%; display:flex; flex-direction:column; gap:10px; box-sizing:border-box; }
 .gap-title { font-size:15px; font-weight:700; color:#1F4E79; border-bottom:2px solid #1F4E79; padding-bottom:6px; }
 .gap-toolbar, .gap-subtoolbar { display:flex; gap:10px; flex-wrap:wrap; align-items:end; }
 .gap-panel { background:#f5f9ff; border:1px solid #c5d9f1; border-radius:6px; padding:12px; }
@@ -527,6 +527,7 @@ const styles = `
 .gap-label { font-size:11px; font-weight:700; color:#1F4E79; }
 .gap-input, .gap-select, .gap-textarea { width:100%; padding:6px 8px; border:1px solid #aac4e0; border-radius:4px; font-size:13px; box-sizing:border-box; background:#fff; }
 .gap-input, .gap-select { height:32px; line-height:18px; }
+.gap-select { padding-top:4px; padding-bottom:8px; }
 .gap-combo-wrap { position:relative; }
 .gap-combo-wrap .gap-input { padding-right:28px; }
 .gap-combo-toggle { position:absolute; right:6px; top:50%; transform:translateY(-50%); border:0; background:transparent; color:#1F4E79; cursor:pointer; font-size:12px; line-height:1; padding:0 2px; height:20px; }
@@ -1515,7 +1516,7 @@ ${r.codice_riferimento} — ${r.descrizione}`,
   const lineImportoPreview = React.useMemo(() => round(num(lineForm.quantita) * num(lineForm.prezzo_unitario), 4), [lineForm.quantita, lineForm.prezzo_unitario])
 
   if (!isRitOrAdmin) {
-    return <div style={{ padding: 12, fontFamily: 'Arial, sans-serif', color: '#7a1c1c', background: '#fce4e4', border: '1px solid #f5b8b8', borderRadius: 6 }}>Funzione riservata al Responsabile dell’istruttoria tecnica o all’Amministratore.</div>
+    return <div style={{ padding: 12, color: '#7a1c1c', background: '#fce4e4', border: '1px solid #f5b8b8', borderRadius: 6 }}>Funzione riservata al Responsabile dell’istruttoria tecnica o all’Amministratore.</div>
   }
 
   return (

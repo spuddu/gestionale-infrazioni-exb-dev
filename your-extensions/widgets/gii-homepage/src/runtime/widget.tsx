@@ -538,7 +538,7 @@ export default function Widget(props: Props) {
   return (
     <div style={{ width:'100%',height:'100%',minHeight:500,
       background:`linear-gradient(${cfg.bgGradAngle}deg,${cfg.bgGradStart} 0%,${cfg.bgGradMid} 40%,${cfg.bgGradEnd} 100%)`,
-      position:'relative',overflow:'hidden',fontFamily:"'Source Sans 3','Segoe UI',sans-serif",boxSizing:'border-box' }}>
+      position:'relative',overflow:'hidden',boxSizing:'border-box' }}>
       <style>{`
         @import url('https://fonts.googleapis.com/css2?family=Crimson+Pro:wght@400;600;700&family=Source+Sans+3:wght@300;400;600;700&display=swap');
         @keyframes fadeInUp { from{opacity:0;transform:translateY(24px)} to{opacity:1;transform:translateY(0)} }
