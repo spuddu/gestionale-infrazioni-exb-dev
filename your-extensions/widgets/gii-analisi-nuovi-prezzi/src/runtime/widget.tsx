@@ -1661,7 +1661,7 @@ ${r.codice_riferimento} — ${r.descrizione}`,
               </div>
             </div>
             <div style={{ display: 'flex', gap: 8, marginTop: 10 }}>
-              <button className='gap-btn gap-primary' disabled={saving || confirmBusy || (parentForm.objectid == null && !hasConfiguredStructure)} onClick={() => void onSaveParent()}>{parentForm.objectid != null ? 'Aggiorna testata' : 'Crea Nuovo Prezzo'}</button>
+              <button className='gap-btn gap-primary' disabled={saving || confirmBusy || (parentForm.objectid == null && !hasConfiguredStructure)} onClick={() => void onSaveParent()}>{parentForm.objectid != null ? 'Aggiorna testata' : 'Salva'}</button>
               <button className='gap-btn gap-neutral' disabled={saving || confirmBusy} onClick={onCancelParent}>Annulla</button>
               {normalizeModality(parentForm.modalita_voce) === 2 ? <div className='gap-muted' style={{ alignSelf: 'center' }}>Per le voci ANALIZZATE il prezzo sarà ricalcolato dalle righe.</div> : null}
             </div>

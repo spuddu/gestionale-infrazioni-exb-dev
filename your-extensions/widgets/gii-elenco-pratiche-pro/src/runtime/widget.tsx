@@ -3214,6 +3214,7 @@ export default function Widget(props: Props) {
   }, [showOperationalRole, defaultSort]);
 
   // ── Filtri integrati nell'elenco ─────────────────────────────────────────────
+  const [filtersOpen, setFiltersOpen] = React.useState(false);
   const [searchFilter, setSearchFilter] = React.useState("");
   const [areaFilter, setAreaFilter] = React.useState("tutte");
   const [settoreFilter, setSettoreFilter] = React.useState("tutte");
@@ -5576,6 +5577,30 @@ export default function Widget(props: Props) {
       color: #1d4ed8;
     }
 
+    .integratedFiltersCollapse {
+      display: grid;
+      grid-template-rows: 0fr;
+      flex: 0 0 auto;
+      overflow: hidden;
+      transition: grid-template-rows 220ms ease;
+    }
+    .integratedFiltersCollapse.open {
+      grid-template-rows: 1fr;
+    }
+    .integratedFiltersCollapseInner {
+      min-height: 0;
+      overflow: hidden;
+      transform: translateY(-8px);
+      opacity: 0;
+      transition:
+        transform 220ms ease,
+        opacity 160ms ease;
+    }
+    .integratedFiltersCollapse.open .integratedFiltersCollapseInner {
+      transform: translateY(0);
+      opacity: 1;
+    }
+
     .integratedFilters {
       display: grid;
       grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
@@ -5583,7 +5608,7 @@ export default function Widget(props: Props) {
       align-items: end;
       padding: 10px 12px;
       border-bottom: 1px solid rgba(0, 0, 0, 0.08);
-      background: rgba(0, 0, 0, 0.015);
+      background: #eaf2ff;
     }
     .filterLabel {
       display: block;
@@ -5629,7 +5654,7 @@ export default function Widget(props: Props) {
       border-bottom: 1px solid rgba(0, 0, 0, 0.06);
       font-size: 11px;
       color: rgba(0, 0, 0, 0.56);
-      background: rgba(0, 0, 0, 0.015);
+      background: #eaf2ff;
     }
 
     .viewport {
@@ -6254,117 +6279,6 @@ export default function Widget(props: Props) {
             </div>
           )}
 
-          {/* Filtri integrati: sostituiscono il vecchio CW ricerca-e-filtri */}
-          {!userLoading && !notLogged && (
-            <>
-              <div className="integratedFilters">
-                <div>
-                  <label className="filterLabel">Cerca</label>
-                  <input
-                    className="filterInput"
-                    value={searchFilter}
-                    onChange={(e: any) =>
-                      setSearchFilter(e?.target?.value || "")
-                    }
-                    placeholder="Cerca n. pratica…"
-                  />
-                </div>
-                <div>
-                  <label className="filterLabel">Area</label>
-                  <select
-                    className="filterSelect"
-                    value={areaFilter}
-                    onChange={(e: any) => {
-                      setAreaFilter(e?.target?.value || "tutte");
-                      setSettoreFilter("tutte");
-                    }}
-                  >
-                    <option value="tutte">Tutte</option>
-                    {areeDisponibili.map(([code, label]) => (
-                      <option key={code} value={code}>
-                        {label}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-                <div>
-                  <label className="filterLabel">Settore</label>
-                  <select
-                    className="filterSelect"
-                    value={settoreFilter}
-                    onChange={(e: any) =>
-                      setSettoreFilter(e?.target?.value || "tutte")
-                    }
-                  >
-                    <option value="tutte">Tutti</option>
-                    {settoriDisponibili.map(([code, label]) => (
-                      <option key={code} value={code}>
-                        {label}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-                <div>
-                  <label className="filterLabel">Dal</label>
-                  <input
-                    className="filterInput"
-                    type="date"
-                    value={fromDateFilter}
-                    onChange={(e: any) =>
-                      setFromDateFilter(e?.target?.value || "")
-                    }
-                  />
-                </div>
-                <div>
-                  <label className="filterLabel">Al</label>
-                  <input
-                    className="filterInput"
-                    type="date"
-                    value={toDateFilter}
-                    onChange={(e: any) =>
-                      setToDateFilter(e?.target?.value || "")
-                    }
-                  />
-                </div>
-                <div>
-                  <label className="filterLabel">Stato</label>
-                  <select
-                    className="filterSelect"
-                    value={statoFilter}
-                    onChange={(e: any) =>
-                      setStatoFilter(e?.target?.value || "tutte")
-                    }
-                  >
-                    <option value="tutte">Tutti</option>
-                    {statiDisponibili.map((label) => (
-                      <option key={label} value={label}>
-                        {label}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-                <div>
-                  <label className="filterLabel">&nbsp;</label>
-                  <button
-                    type="button"
-                    className="clearFiltersBtn"
-                    disabled={!hasIntegratedFilters}
-                    onClick={() => {
-                      if (!hasIntegratedFilters) return;
-                      resetIntegratedFilters();
-                    }}
-                  >
-                    Pulisci filtri
-                  </button>
-                </div>
-              </div>
-              <div className="filtersSummary">
-                Mostrate {mergedRecs.length} pratiche su {roleTabRecs.length}{" "}
-                della scheda corrente.
-              </div>
-            </>
-          )}
-
           {/* ── Tab ruolo: In attesa mia / In attesa di altri / Tutte ── */}
           {!userLoading && statoRuoloField && (
             <div
@@ -6471,6 +6385,47 @@ export default function Widget(props: Props) {
               </div>
               <button
                 type="button"
+                css={css`
+                  height: 34px;
+                  min-height: 34px;
+                  padding: 0 12px;
+                  box-sizing: border-box;
+                  border-radius: 10px;
+                  border: 1px solid #2f6fed;
+                  background: ${filtersOpen ? "#2f6fed" : "#fff"};
+                  color: ${filtersOpen ? "#fff" : "#1d4ed8"};
+                  display: inline-flex;
+                  align-items: center;
+                  justify-content: center;
+                  gap: 6px;
+                  font-size: 12px;
+                  font-weight: 700;
+                  line-height: 1;
+                  cursor: pointer;
+                  white-space: nowrap;
+                  box-shadow: ${hasIntegratedFilters && !filtersOpen ? "inset 0 -3px 0 #3d77c9" : "none"};
+                  flex: 0 0 auto;
+                `}
+                onClick={() => setFiltersOpen((v) => !v)}
+                title={filtersOpen ? "Chiudi filtri" : "Apri filtri"}
+                aria-label={filtersOpen ? "Chiudi filtri" : "Apri filtri"}
+                aria-expanded={filtersOpen}
+              >
+                <span>Filtri</span>
+                <span
+                  aria-hidden="true"
+                  style={{
+                    display: "inline-block",
+                    transformOrigin: "50% 50%",
+                    transform: filtersOpen ? "rotate(180deg)" : "rotate(0deg)",
+                    transition: "transform 0.18s ease",
+                  }}
+                >
+                  ▾
+                </span>
+              </button>
+              <button
+                type="button"
                 className="resetSortTabBtn"
                 onClick={() => {
                   if (isCustomSort) setSortState(defaultSort);
@@ -6497,11 +6452,127 @@ export default function Widget(props: Props) {
                   pointerEvents: isCustomSort ? "auto" : "none",
                   boxShadow: "none",
                   flex: "0 0 auto",
-                  marginLeft: "auto",
+                  marginLeft: 0,
                 }}
               >
                 ↺
               </button>
+            </div>
+          )}
+
+          {/* Filtri integrati: sotto le tab, apertura/chiusura a saracinesca */}
+          {!userLoading && !notLogged && (
+            <div
+              className={`integratedFiltersCollapse${filtersOpen ? " open" : ""}`}
+              aria-hidden={!filtersOpen}
+            >
+              <div className="integratedFiltersCollapseInner">
+                <div className="integratedFilters">
+                  <div>
+                    <label className="filterLabel">Cerca</label>
+                    <input
+                      className="filterInput"
+                      value={searchFilter}
+                      onChange={(e: any) =>
+                        setSearchFilter(e?.target?.value || "")
+                      }
+                      placeholder="Cerca n. pratica…"
+                    />
+                  </div>
+                  <div>
+                    <label className="filterLabel">Area</label>
+                    <select
+                      className="filterSelect"
+                      value={areaFilter}
+                      onChange={(e: any) => {
+                        setAreaFilter(e?.target?.value || "tutte");
+                        setSettoreFilter("tutte");
+                      }}
+                    >
+                      <option value="tutte">Tutte</option>
+                      {areeDisponibili.map(([code, label]) => (
+                        <option key={code} value={code}>
+                          {label}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="filterLabel">Settore</label>
+                    <select
+                      className="filterSelect"
+                      value={settoreFilter}
+                      onChange={(e: any) =>
+                        setSettoreFilter(e?.target?.value || "tutte")
+                      }
+                    >
+                      <option value="tutte">Tutti</option>
+                      {settoriDisponibili.map(([code, label]) => (
+                        <option key={code} value={code}>
+                          {label}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="filterLabel">Dal</label>
+                    <input
+                      className="filterInput"
+                      type="date"
+                      value={fromDateFilter}
+                      onChange={(e: any) =>
+                        setFromDateFilter(e?.target?.value || "")
+                      }
+                    />
+                  </div>
+                  <div>
+                    <label className="filterLabel">Al</label>
+                    <input
+                      className="filterInput"
+                      type="date"
+                      value={toDateFilter}
+                      onChange={(e: any) =>
+                        setToDateFilter(e?.target?.value || "")
+                      }
+                    />
+                  </div>
+                  <div>
+                    <label className="filterLabel">Stato</label>
+                    <select
+                      className="filterSelect"
+                      value={statoFilter}
+                      onChange={(e: any) =>
+                        setStatoFilter(e?.target?.value || "tutte")
+                      }
+                    >
+                      <option value="tutte">Tutti</option>
+                      {statiDisponibili.map((label) => (
+                        <option key={label} value={label}>
+                          {label}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="filterLabel">&nbsp;</label>
+                    <button
+                      type="button"
+                      className="clearFiltersBtn"
+                      disabled={!hasIntegratedFilters}
+                      onClick={() => {
+                        if (!hasIntegratedFilters) return;
+                        resetIntegratedFilters();
+                      }}
+                    >
+                      Pulisci filtri
+                    </button>
+                  </div>
+                </div>
+                <div className="filtersSummary">
+                  Mostrate {mergedRecs.length} pratiche su {roleTabRecs.length}{" "}
+                  della scheda corrente.
+                </div>
+              </div>
             </div>
           )}
 

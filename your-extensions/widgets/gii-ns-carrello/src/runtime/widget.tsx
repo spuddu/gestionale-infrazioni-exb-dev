@@ -65,6 +65,53 @@ function RecordDeleteButton (props: RecordActionButtonProps) {
   )
 }
 
+
+function AggiungiIcon () {
+  return (
+    <svg width={34} height={34} viewBox='2 2 20 20' aria-hidden='true' focusable='false'>
+      <path d='M21 13.1V19c0 1.1-.9 2-2 2H5c-1.1 0-2-.9-2-2v-4' fill='none' stroke='#fff' strokeWidth='1.1' strokeLinecap='round' strokeLinejoin='round'/>
+      <path d='M3 15V5c0-1.1.9-2 2-2h5.9' fill='none' stroke='#fff' strokeWidth='1.1' strokeLinecap='round' strokeLinejoin='round'/>
+      <path d='M16.5 3v9' fill='none' stroke='#fff' strokeWidth='1.1' strokeLinecap='round' strokeLinejoin='round'/>
+      <path d='M12 7.5h9' fill='none' stroke='#fff' strokeWidth='1.1' strokeLinecap='round' strokeLinejoin='round'/>
+    </svg>
+  )
+}
+
+function SvuotaElencoIcon () {
+  return (
+    <svg width={34} height={34} viewBox='2 2 20 20' aria-hidden='true' focusable='false'>
+      <path d='M3 8.7v-4c0-1.1.9-2 2-2h14c1.1 0 2 .9 2 2v5' fill='none' stroke='#0d3b66' strokeWidth='1.1' strokeLinecap='round' strokeLinejoin='round'/>
+      <path d='M10.9 20.7H5c-1.1 0-2-.9-2-2v-10' fill='none' stroke='#0d3b66' strokeWidth='1.1' strokeLinecap='round' strokeLinejoin='round'/>
+      <circle cx='6.8' cy='6.9' r='0.76' fill='#0d3b66'/>
+      <circle cx='6.8' cy='11.7' r='0.76' fill='#0d3b66'/>
+      <circle cx='6.8' cy='16.5' r='0.76' fill='#0d3b66'/>
+      <line x1='10' y1='6.9' x2='16.8' y2='6.9' stroke='#0d3b66' strokeWidth='0.93' strokeLinecap='round'/>
+      <line x1='10' y1='11.7' x2='12.6' y2='11.7' stroke='#0d3b66' strokeWidth='0.93' strokeLinecap='round'/>
+      <line x1='10' y1='16.5' x2='10.6' y2='16.5' stroke='#0d3b66' strokeWidth='0.93' strokeLinecap='round'/>
+      <path d='M12.9 13.8h8.1' fill='none' stroke='#b42318' strokeWidth='0.82' strokeLinecap='round' strokeLinejoin='round'/>
+      <path d='M15.1 13.8v-.9c0-.5.4-.9.9-.9h1.8c.5 0 .9.4.9.9v.9' fill='none' stroke='#b42318' strokeWidth='0.82' strokeLinecap='round' strokeLinejoin='round'/>
+      <path d='M20.1 13.8l-.5 6.3c0 .5-.4.9-.9.9h-3.6c-.5 0-.9-.4-.9-.9l-.5-6.3' fill='none' stroke='#b42318' strokeWidth='0.82' strokeLinecap='round' strokeLinejoin='round'/>
+      <path d='M16 16.1v2.7' fill='none' stroke='#b42318' strokeWidth='0.82' strokeLinecap='round' strokeLinejoin='round'/>
+      <path d='M17.8 16.1v2.7' fill='none' stroke='#b42318' strokeWidth='0.82' strokeLinecap='round' strokeLinejoin='round'/>
+    </svg>
+  )
+}
+
+const cartIconButtonStyle: React.CSSProperties = {
+  width: 34,
+  height: 34,
+  minWidth: 34,
+  minHeight: 34,
+  padding: 0,
+  border: 'none',
+  background: 'transparent',
+  display: 'inline-flex',
+  alignItems: 'center',
+  justifyContent: 'center',
+  boxSizing: 'border-box',
+  cursor: 'pointer'
+}
+
 const GII_NS_CART_KEY = 'GII_NS_CART'
 const GII_NS_RETURN_KEY = 'GII_NS_RETURN_PAGE'
 
@@ -133,7 +180,7 @@ const BAR_STYLE = `
 .gnc-btn-cancel:hover:not(:disabled) { background:#b42318; border-color:#b42318; }
 .gnc-btn-remove { background:#c00; color:#fff; padding:2px 7px; border:none; border-radius:3px; font-size:13px; font-weight:700; cursor:pointer; }
 .gnc-dd-table { width:100%; border-collapse:collapse; font-size:14px; table-layout:fixed; }
-.gnc-dd-table th { background:#f5f9ff; color:#1F4E79; padding:4px 8px; text-align:left; position:sticky; top:0; z-index:1; font-weight:700; white-space:nowrap; font-size:14px; }
+.gnc-dd-table th { background:#eaf2ff; color:#1F4E79; padding:4px 8px; text-align:left; position:sticky; top:0; z-index:1; font-weight:700; white-space:nowrap; font-size:14px; }
 .gnc-dd-table td { padding:4px 8px; border-bottom:1px solid #e6eef7; vertical-align:middle; }
 .gnc-dd-table tbody tr:nth-child(odd) td { background:#f9fbff; }
 .gnc-msg { padding:5px 12px; border-radius:4px; font-size:12px; font-weight:700; }
@@ -173,7 +220,7 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
   }, [cartCodes])
 
   React.useEffect(() => {
-    if (!listOpen || cart.length === 0) return
+    if (cart.length === 0) return
     const bar = barRef.current
     if (!bar) return
     setDropdownTop(bar.getBoundingClientRect().bottom)
@@ -274,8 +321,33 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
     if (doNavigateBack()) clearCartState()
   }, [doNavigateBack, clearCartState])
 
-  const dropdownPortal = listOpen && cart.length > 0 && dropdownTop > 0 ? createPortal(
-    <div ref={dropdownRef} style={{ position: 'fixed', top: dropdownTop, left: 10, right: 10, zIndex: 99999, background: '#fff', borderTop: `2px solid ${barBorderColor}`, boxShadow: '0 6px 20px rgba(0,0,0,0.15)', maxHeight: 260, overflow: 'auto', borderRadius: '0 0 6px 6px', padding: '0 8px 0 0' }}>
+  const dropdownPortal = cart.length > 0 && dropdownTop > 0 ? createPortal(
+    <div
+      ref={dropdownRef}
+      aria-hidden={!listOpen}
+      style={{
+        position: 'fixed',
+        top: dropdownTop,
+        left: 10,
+        right: 10,
+        zIndex: 99999,
+        background: '#fff',
+        borderTop: `2px solid ${barBorderColor}`,
+        boxShadow: '0 6px 20px rgba(0,0,0,0.15)',
+        maxHeight: 780,
+        overflow: 'auto',
+        borderRadius: '0 0 6px 6px',
+        padding: '0 8px 0 0',
+        clipPath: listOpen ? 'inset(0 0 0 0)' : 'inset(0 0 100% 0)',
+        transition: 'clip-path 0.2s ease',
+        pointerEvents: listOpen ? 'auto' : 'none'
+      }}
+    >
+      <div style={{ display: 'flex', justifyContent: 'flex-end', padding: '6px 14px 6px 8px', background: '#fff' }}>
+        <div style={{ width: 44, display: 'flex', alignItems: 'center', justifyContent: 'flex-end' }}>
+          <button type='button' onClick={onClearAll} title='Svuota elenco' aria-label='Svuota elenco' style={{ ...cartIconButtonStyle, marginRight: 5.4 }}><SvuotaElencoIcon /></button>
+        </div>
+      </div>
       <table className='gnc-dd-table'>
         <colgroup>
           <col style={{ width: 70 }} />
@@ -284,7 +356,7 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
           <col style={{ width: 100 }} />
           <col style={{ width: 50 }} />
           <col style={{ width: 80 }} />
-          <col style={{ width: 32 }} />
+          <col style={{ width: 44 }} />
         </colgroup>
         <thead>
           <tr>
@@ -294,7 +366,7 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
             <th>Famiglia</th>
             <th>UM</th>
             <th style={{ textAlign: 'right' }}>Prezzo</th>
-            <th></th>
+            <th style={{ padding: '0 14px 0 0' }}></th>
           </tr>
         </thead>
         <tbody>
@@ -308,7 +380,7 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
                 <td><span style={{ fontSize: 13 }}>{FAMIGLIA_SHORT[item.famiglia] || item.famiglia}</span></td>
                 <td>{item.unita_misura || '—'}</td>
                 <td style={{ whiteSpace: 'nowrap', textAlign: 'right' }}>{money(item.prezzo_unitario, 4)}</td>
-                <td><RecordDeleteButton onClick={() => onRemoveByKey(key)} title='Rimuovi voce' ariaLabel='Rimuovi voce' /></td>
+                <td style={{ padding: '0 14px 0 0', textAlign: 'right' }}><RecordDeleteButton onClick={() => onRemoveByKey(key)} title='Rimuovi voce' ariaLabel='Rimuovi voce' /></td>
               </tr>
             )
           })}
@@ -338,8 +410,7 @@ export default function Widget (props: AllWidgetProps<IMConfig>) {
       <div ref={barRef} className='gnc-bar' style={{ background: barBg, border: `1px solid ${barBorderColor}`, borderRadius: 6, margin: 10 }}>
         <div className='gnc-header'>
           {msg && <span className={`gnc-msg ${msg.ok ? 'gnc-msg-ok' : 'gnc-msg-err'}`} style={{ marginRight: 'auto' }}>{msg.text}</span>}
-          <button className='gnc-btn gnc-btn-add' onClick={onAdd}>+ Aggiungi</button>
-          <button className='gnc-btn gnc-btn-clear' onClick={onClearAll} disabled={cart.length === 0}>Svuota elenco</button>
+          <button type='button' onClick={onAdd} title='Aggiungi' aria-label='Aggiungi' style={cartIconButtonStyle}><AggiungiIcon /></button>
           <span className='gnc-badge' onClick={() => { if (cart.length > 0) setListOpen((p) => !p) }} style={{ cursor: cart.length > 0 ? 'pointer' : 'default' }} title={cart.length > 0 ? (listOpen ? 'Chiudi elenco' : 'Mostra voci aggiunte') : ''}>Voci aggiunte: {cart.length} {cart.length > 0 ? (listOpen ? '▲' : '▼') : ''}</span>
           <button className='gnc-btn gnc-btn-confirm' onClick={onConfirm} disabled={cart.length === 0}>Conferma ({cart.length})</button>
           <button className='gnc-btn gnc-btn-cancel' onClick={onCancel}>Annulla</button>

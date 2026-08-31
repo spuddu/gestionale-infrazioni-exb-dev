@@ -1455,6 +1455,9 @@ const styles = `
   .ggu-filter-toolbar-btn.ggu-filter-toolbar-btn-open { background: #1F4E79; color: #fff; border-color: #1F4E79; }
   .ggu-filter-toolbar-btn.ggu-filter-toolbar-btn-open:hover { background: #16375a; }
   .ggu-filter-toolbar-btn.ggu-filter-toolbar-btn-active:not(.ggu-filter-toolbar-btn-open) { box-shadow: inset 0 -3px 0 #3d77c9; }
+  .ggu-filter-collapse { width: 100%; flex: 0 0 auto; display: grid; grid-template-rows: 0fr; opacity: 0; transform: translateY(-5px); visibility: hidden; pointer-events: none; transition: grid-template-rows 0.22s ease, opacity 0.18s ease, transform 0.22s ease, visibility 0s linear 0.22s; }
+  .ggu-filter-collapse.ggu-filter-collapse-open { grid-template-rows: 1fr; opacity: 1; transform: translateY(0); visibility: visible; pointer-events: auto; transition-delay: 0s; }
+  .ggu-filter-collapse-inner { min-height: 0; overflow: hidden; }
   .ggu-filter-panel { width: 100%; flex: 0 0 auto; margin-top: -5px; margin-bottom: -5px; padding: 4px 0; box-sizing: border-box; border: 1px solid #eef4fb; border-radius: 10px; background: #eef4fb; }
   .ggu-filter-grid { display: grid; grid-template-columns: minmax(190px, 1.45fr) repeat(4, minmax(120px, 0.8fr)) minmax(180px, 1.15fr) auto; gap: 6px; align-items: end; padding: 0; }
   .ggu-filter-field { min-width: 0; }
@@ -3293,9 +3296,10 @@ function UtentiWidget(props: AllWidgetProps<IMConfig>) {
               </div>
             </div>
 
-            {filtersOpen && (
-              <div className="ggu-filter-panel">
-                <div className="ggu-filter-grid">
+            <div className={`ggu-filter-collapse${filtersOpen ? ' ggu-filter-collapse-open' : ''}`} aria-hidden={!filtersOpen}>
+              <div className="ggu-filter-collapse-inner">
+                <div className="ggu-filter-panel">
+                  <div className="ggu-filter-grid">
                   <div className="ggu-filter-field ggu-filter-search">
                     <div className="ggu-label">Cerca utente</div>
                     <input className="ggu-input" value={filterSearch} placeholder="Nome, username o e-mail" onChange={e => setFilterSearch(e.target.value)} />
@@ -3354,9 +3358,10 @@ function UtentiWidget(props: AllWidgetProps<IMConfig>) {
                     <button className="ggu-filter-action-btn" onClick={resetFilters} disabled={!filtersActive}>Azzera filtri</button>
                   </div>
                 </div>
-                <div className="ggu-filter-count">{`${sortedUtenti.length} assegnazioni mostrate su ${utenti.length}`}</div>
+                  <div className="ggu-filter-count">{`${sortedUtenti.length} assegnazioni mostrate su ${utenti.length}`}</div>
+                </div>
               </div>
-            )}
+            </div>
           </Fragment>
         )}
 
