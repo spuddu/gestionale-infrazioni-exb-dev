@@ -7,6 +7,7 @@ export interface Config {
   internoAnalisiUrl?: string
   nuoviPrezziUrl?: string
   nuoviPrezziAnalisiUrl?: string
+  datiGeneraliUrl?: string
   attrezzatureParametriUrl?: string
   title?: string
   titleColor?: string

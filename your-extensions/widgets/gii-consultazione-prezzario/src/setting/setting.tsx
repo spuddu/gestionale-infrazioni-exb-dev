@@ -144,6 +144,9 @@ export default function Setting(props: AllWidgetSettingProps<IMConfig>) {
         <label style={lbl}>URL tabella analisi nuovi prezzi</label>
         <input style={inp} value={cfg.nuoviPrezziAnalisiUrl || ''} onChange={(e) => set('nuoviPrezziAnalisiUrl', e.target.value)} placeholder='https://services2.arcgis.com/.../FeatureServer/0' />
 
+        <label style={lbl}>URL dati generali per struttura nuovi prezzi</label>
+        <input style={inp} value={cfg.datiGeneraliUrl || ''} onChange={(e) => set('datiGeneraliUrl', e.target.value)} placeholder='https://services2.arcgis.com/.../FeatureServer/0' />
+
         <label style={lbl}>URL parametri attrezzature (risarcimento Art.30)</label>
         <input style={inp} value={cfg.attrezzatureParametriUrl || ''} onChange={(e) => set('attrezzatureParametriUrl', e.target.value)} placeholder='https://services2.arcgis.com/.../GII_VIEW_EB_PARAMETRI_ART30/FeatureServer' />
       </div>

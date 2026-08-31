@@ -5,7 +5,6 @@ import type { IMConfig } from '../config'
 
 const { Fragment } = React
 const LIST_STEP = 250
-const DATI_GENERALI_URL = 'https://services2.arcgis.com/vH5RykSdaAwiEGOJ/arcgis/rest/services/GII_DATI_GENERALI/FeatureServer/0'
 
 type SourceCode = 'REGIONALE' | 'INTERNO' | 'NUOVI_PREZZI' | 'ATTREZZATURE'
 type SourceKind = 'UFFICIALE' | 'NP' | 'PARAMETRO'
@@ -227,8 +226,8 @@ function subKey(famiglia: any, supercapitolo: any, capitolo: any, sottocapitolo:
   return [normalizeCodePart(famiglia), normalizeCodePart(supercapitolo), normalizeCodePart(capitolo), normalizeCodePart(sottocapitolo)].join('|')
 }
 
-async function queryDatiGeneraliMaps(): Promise<DatiGeneraliMaps> {
-  const rows = await queryAllRows(DATI_GENERALI_URL, 'tipo_record IN (4,5)', 'codice_famiglia ASC, numero_capitolo ASC, numero_subcapitolo ASC', ['tipo_record', 'codice_famiglia', 'numero_supercapitolo', 'numero_capitolo', 'numero_subcapitolo', 'descrizione_item'])
+async function queryDatiGeneraliMaps(datiGeneraliUrl: any): Promise<DatiGeneraliMaps> {
+  const rows = await queryAllRows(datiGeneraliUrl, 'tipo_record IN (4,5)', 'codice_famiglia ASC, numero_capitolo ASC, numero_subcapitolo ASC', ['tipo_record', 'codice_famiglia', 'numero_supercapitolo', 'numero_capitolo', 'numero_subcapitolo', 'descrizione_item'])
   const capitoli: Record<string, string> = {}
   const sottocapitoli: Record<string, string> = {}
   rows.forEach((r: any) => {
@@ -945,7 +944,7 @@ export default function Widget(props: AllWidgetProps<IMConfig>) {
     const run = async () => {
       if (selectedCode !== 'NUOVI_PREZZI') { setDgMaps({ capitoli: {}, sottocapitoli: {} }); return }
       try {
-        const maps = await queryDatiGeneraliMaps()
+        const maps = await queryDatiGeneraliMaps(cfg.datiGeneraliUrl)
         if (!cancel) setDgMaps(maps)
       } catch {
         if (!cancel) setDgMaps({ capitoli: {}, sottocapitoli: {} })
@@ -953,7 +952,7 @@ export default function Widget(props: AllWidgetProps<IMConfig>) {
     }
     void run()
     return () => { cancel = true }
-  }, [selectedCode])
+  }, [selectedCode, cfg.datiGeneraliUrl])
 
   React.useEffect(() => {
     let cancel = false
